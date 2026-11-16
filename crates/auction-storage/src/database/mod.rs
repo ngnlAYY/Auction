@@ -89,6 +89,8 @@ mod lot_watch;
 pub use delivery::legacy_self_proof::{
     trusted_delivery_predicate_sql, trusted_obligation_equality_sql,
 };
+#[cfg(feature = "test-db")]
+pub use public::bid_log::benchmark_sql as bid_log_benchmark_sql;
 pub use public::lots::DatabasePublicLotReader;
 #[cfg(feature = "test-db")]
 pub use public::price_history::benchmark_sql;

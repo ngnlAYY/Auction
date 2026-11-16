@@ -59,57 +59,16 @@ macro_rules! bid_log_filters {
     };
 }
 
-pub(super) async fn list_postgres(
-    store: &DatabaseStore,
-    request: PublicBidLogListRequest,
-) -> Result<Option<PublicBidLogPage>, ApplicationError> {
-    let use_boundary = matches!(request.cursor.as_ref(), Some(PublicBidLogCursor::Boundary { .. }));
-    let (
-        boundary_created_at,
-        boundary_lot_id,
-        boundary_state_version,
-        boundary_fact_index,
-        boundary_id,
-    ) = cursor_values(&request);
-    // 仅额外探测行采用饱和加法；i64::MAX 已覆盖可表示行数，不改变请求及响应数量。
-    let query_limit =
-        if request.cursor.is_some() { request.limit.saturating_add(1) } else { request.limit };
-
-    let mut transaction = store
-        .pool()
-        .begin_read_snapshot()
-        .await
-        .map_err(|error| storage_error_from(error, "开启公开竞价日志读取事务失败"))?;
-
-    let projection = sqlx::query(
-        "SELECT a.id, a.status
-         FROM public.auctions AS a
-         JOIN public.worlds AS w ON w.id = a.world_id AND (w.enabled OR a.status = 'settled')
-         WHERE a.id = $1
-           AND a.status IN ('live', 'final', 'settled')
-           AND ($2::text IS NULL OR a.world_id = $2)",
-    )
-    .bind(request.auction_id)
-    .bind(request.world_id.as_deref())
-    .fetch_optional(&mut *transaction)
-    .await
-    .map_err(|error| storage_error_from(error, "读取公开竞价日志拍卖 projection 失败"))?;
-    let Some(projection) = projection else {
-        transaction
-            .commit()
-            .await
-            .map_err(|error| storage_error_from(error, "提交公开竞价日志读取事务失败"))?;
-        return Ok(None);
-    };
-    let auction_status: String = projection
-        .try_get("status")
-        .map_err(|error| storage_error_from(error, "读取公开竞价日志拍卖状态失败"))?;
-
-    // 保留每条已接受事实；普通出价及同事务代理回应都公开，避免隐藏触发报价后造成自抬价错觉。
-    // 代理对代理竞争只给胜者写一条事实，落败授权（不分快慢）随该命令的第 1 条事实带出。
-    // 先在子查询内排序分页，再对本页逐行查落败授权；聚合恒返回一行，不会因关联而重复或丢行，
-    // 不唯一时由映射失败关闭。
-    let rows = sqlx::query(concat!(
+/// 竞价日志分页的生产查询原文，按 $1 拍卖、$2 世界、$3 lot、$4 lot 代码、$5 是否用游标边界、
+/// $6..$10 边界值、$11 limit、$12 offset 绑定；`test-db` 的 EXPLAIN 夹具读同一份文本。
+///
+/// 保留每条已接受事实；普通出价及同事务代理回应都公开，避免隐藏触发报价后造成自抬价错觉。
+/// 代理对代理竞争只给胜者写一条事实，落败授权（不分快慢）随该命令的第 1 条事实带出：先在子查询
+/// 内排序分页，再对本页逐行经部分索引 `bid_proxy_transitions_ranked_below_origin_idx`（迁移
+/// `000109`）按命令查落败转换，代价只随页大小增长；聚合恒返回一行，不会因关联而重复或丢行，
+/// 不唯一时由映射失败关闭。
+pub fn page_query_sql() -> &'static str {
+    concat!(
         "SELECT page.*,
             defeated.defeated_count,
             defeated.defeated_bidder_name,
@@ -167,34 +126,83 @@ pub(super) async fn list_postgres(
                 count(*) AS defeated_count,
                 min(defeated_user.username) AS defeated_bidder_name,
                 min(transition.new_maximum_amount) AS defeated_maximum_amount
-            FROM public.bid_proxy_authorizations AS proxy
-            JOIN public.bid_proxy_authorization_transitions AS transition
-              ON transition.authorization_id = proxy.authorization_id
+            FROM public.bid_proxy_authorization_transitions AS transition
+            JOIN public.bid_proxy_authorizations AS proxy
+              ON proxy.authorization_id = transition.authorization_id
             JOIN public.users AS defeated_user ON defeated_user.id = proxy.user_id
             WHERE page.fact_index = 1
-              AND proxy.lot_id = page.lot_id
               AND transition.origin_command_id = page.command_id
               AND transition.transition_kind = 'exhausted'
               AND transition.reason = 'ranked_below'
+              AND proxy.lot_id = page.lot_id
          ) AS defeated ON true
          ORDER BY page.created_at DESC, page.lot_id DESC,
                   page.accepted_state_version DESC, page.fact_index DESC, page.id DESC"
-    ))
+    )
+}
+
+pub(super) async fn list_postgres(
+    store: &DatabaseStore,
+    request: PublicBidLogListRequest,
+) -> Result<Option<PublicBidLogPage>, ApplicationError> {
+    let use_boundary = matches!(request.cursor.as_ref(), Some(PublicBidLogCursor::Boundary { .. }));
+    let (
+        boundary_created_at,
+        boundary_lot_id,
+        boundary_state_version,
+        boundary_fact_index,
+        boundary_id,
+    ) = cursor_values(&request);
+    // 仅额外探测行采用饱和加法；i64::MAX 已覆盖可表示行数，不改变请求及响应数量。
+    let query_limit =
+        if request.cursor.is_some() { request.limit.saturating_add(1) } else { request.limit };
+
+    let mut transaction = store
+        .pool()
+        .begin_read_snapshot()
+        .await
+        .map_err(|error| storage_error_from(error, "开启公开竞价日志读取事务失败"))?;
+
+    let projection = sqlx::query(
+        "SELECT a.id, a.status
+         FROM public.auctions AS a
+         JOIN public.worlds AS w ON w.id = a.world_id AND (w.enabled OR a.status = 'settled')
+         WHERE a.id = $1
+           AND a.status IN ('live', 'final', 'settled')
+           AND ($2::text IS NULL OR a.world_id = $2)",
+    )
     .bind(request.auction_id)
     .bind(request.world_id.as_deref())
-    .bind(request.lot_id)
-    .bind(request.lot_code.as_deref())
-    .bind(use_boundary)
-    .bind(boundary_created_at)
-    .bind(boundary_lot_id)
-    .bind(boundary_state_version)
-    .bind(boundary_fact_index)
-    .bind(boundary_id)
-    .bind(query_limit)
-    .bind(if request.cursor.is_some() { 0 } else { request.offset })
-    .fetch_all(&mut *transaction)
+    .fetch_optional(&mut *transaction)
     .await
-    .map_err(|error| storage_error_from(error, "读取 PostgreSQL 公开竞价日志失败"))?;
+    .map_err(|error| storage_error_from(error, "读取公开竞价日志拍卖 projection 失败"))?;
+    let Some(projection) = projection else {
+        transaction
+            .commit()
+            .await
+            .map_err(|error| storage_error_from(error, "提交公开竞价日志读取事务失败"))?;
+        return Ok(None);
+    };
+    let auction_status: String = projection
+        .try_get("status")
+        .map_err(|error| storage_error_from(error, "读取公开竞价日志拍卖状态失败"))?;
+
+    let rows = sqlx::query(page_query_sql())
+        .bind(request.auction_id)
+        .bind(request.world_id.as_deref())
+        .bind(request.lot_id)
+        .bind(request.lot_code.as_deref())
+        .bind(use_boundary)
+        .bind(boundary_created_at)
+        .bind(boundary_lot_id)
+        .bind(boundary_state_version)
+        .bind(boundary_fact_index)
+        .bind(boundary_id)
+        .bind(query_limit)
+        .bind(if request.cursor.is_some() { 0 } else { request.offset })
+        .fetch_all(&mut *transaction)
+        .await
+        .map_err(|error| storage_error_from(error, "读取 PostgreSQL 公开竞价日志失败"))?;
 
     let mut entries = rows.into_iter().map(map_postgres_entry).collect::<Result<Vec<_>, _>>()?;
     validate_entries(&entries, &request)?;

@@ -161,3 +161,4 @@ VALUES (76, 'breaking');
 | 000106 | 站点文档：`rules_documents` 增加 `kind`（rules/about），文档身份由 locale 改为（kind，locale），新增“关于”文档种类；`rules_admin_commands` 增加 `document_kind` 并以（document_kind，locale）外键指向文档；既有行原样归入 rules，不改写版本与正文；旧程序按 locale 单列读写不再成立，登记 breaking |
 | 000107 | 预置规则：把 2026-11-13 线上发布的五种语言规则文档（en、zh-CN、zh-TW、ja、ko）作为初始内容写入 `rules_documents`（kind=rules，版本 1，发布者 system）；只在该语言还没有规则时写入，已有规则的库不改任何行；实际写入的语言记入迁移审计；不预置“关于”；登记 compatible |
 | 000108 | 出站通知模板迁入数据库：新增只追加的 `mail_template_events`（修订事实兼命令账本，每个模板键以最高 `revision` 为准，`reset` 表示使用内置默认正文），运行账号只授 `INSERT`；模板不再从 runtime 文件或 Worker 配置读取 |
+| 000109 | Public 竞价日志按新建代理命令查被排位击败的授权：`bid_proxy_authorization_transitions` 新增部分索引 `bid_proxy_transitions_ranked_below_origin_idx`（`origin_command_id`，仅 `exhausted`/`ranked_below`），逐行查找由顺序扫描变为索引探测；不改结构、约束与数据，登记 compatible |

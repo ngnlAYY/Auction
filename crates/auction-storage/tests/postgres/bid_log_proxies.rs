@@ -6,6 +6,8 @@
 //! 上限而耗尽的代理不公开上限。落败授权不是出价事实，不改变总数与游标。
 //!
 //! 夹具只用 SQL 写入场次、装备、lot 与用户；竞价全部走生产端口 `DatabaseCompetitionCommands`。
+//! 逐行落败查找经 `auction_storage::bid_log_benchmark_sql` 读生产查询原文做 EXPLAIN，确认它能走
+//! 迁移 `000109` 的部分索引，而不是对只追加的转换表逐行顺序扫描。
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::sync::Arc;
@@ -17,6 +19,8 @@ use auction_application::auction::{
 use auction_domain::{BidAmount, CommandId, LotId, ProxyMode, UserId};
 use auction_storage::{DatabaseCompetitionCommands, DatabaseStore};
 use chrono::{Duration, Utc};
+use serde_json::Value;
+use sqlx::{AssertSqlSafe, PgPool, Row};
 use uuid::Uuid;
 
 use crate::support;
@@ -175,6 +179,26 @@ fn shape(entries: &[PublicBidLogEntry]) -> Vec<Shape> {
         .collect()
 }
 
+/// 用生产查询原文取第一页的 JSON 计划；禁用顺序扫描只为暴露可用索引，不改变查询文本。
+async fn first_page_plan(pool: &PgPool, auction_id: Uuid) -> String {
+    let sql = auction_storage::bid_log_benchmark_sql::page_query_sql();
+    let script = format!(
+        "BEGIN;
+         SET LOCAL enable_seqscan = off;
+         PREPARE bid_log_probe AS {sql};
+         EXPLAIN (FORMAT JSON) EXECUTE bid_log_probe(
+             '{auction_id}', NULL, NULL, NULL, false, NULL, NULL, NULL, NULL, NULL, 20, 0
+         );
+         DEALLOCATE bid_log_probe;
+         COMMIT;"
+    );
+    let rows = sqlx::raw_sql(AssertSqlSafe(script)).fetch_all(pool).await.expect("EXPLAIN");
+    rows.iter()
+        .find_map(|row| row.try_get::<sqlx::types::Json<Value>, _>(0).ok())
+        .map(|plan| plan.0.to_string())
+        .expect("EXPLAIN 返回 JSON 计划")
+}
+
 #[tokio::test]
 async fn postgres_bid_log_shows_proxies_defeated_by_proxies_including_slow_ones() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
@@ -266,6 +290,13 @@ async fn postgres_bid_log_shows_proxies_defeated_by_proxies_including_slow_ones(
         cursor = page.next_cursor;
     }
     assert_eq!(walked, expected);
+
+    // 匿名路由的页大小不设上限：逐行落败查找必须是索引探测，代价才只随页大小增长。
+    let plan = first_page_plan(service.postgres_pool(), auction_id).await;
+    assert!(
+        plan.contains("bid_proxy_transitions_ranked_below_origin_idx"),
+        "落败查找没有走部分索引：{plan}"
+    );
 
     service.postgres_pool().close().await;
     admin.postgres_pool().close().await;

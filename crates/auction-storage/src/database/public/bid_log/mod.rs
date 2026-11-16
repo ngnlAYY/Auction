@@ -11,6 +11,13 @@ mod postgres;
 use cursor::storage_error;
 use postgres::list_postgres;
 
+/// 只在 `test-db` 下暴露生产查询原文给 EXPLAIN 夹具，保证测量的是同一份 SQL；默认构建与发布
+/// 制品不包含该出口。
+#[cfg(feature = "test-db")]
+pub mod benchmark_sql {
+    pub use super::postgres::page_query_sql;
+}
+
 impl PublicBidLogReader for DatabaseStore {
     fn list_public_bid_log(
         &self,

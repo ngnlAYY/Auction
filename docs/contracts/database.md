@@ -313,6 +313,20 @@ COMMIT 报告的 SSI 冲突不推测为序号热点。
 方案在带名称或卖家过滤时反而更慢，同样不采用，保留原连接顺序与共享的
 `price_history_scope_sql!` 定义，两条分页路径继续使用同一份可见集合条件。
 
+## 竞价日志读路径
+
+`crates/auction-storage/src/database/public/bid_log/` 是 Public 竞价日志 SQL 的唯一 owner；应用端口为
+`PublicBidLogReader`，HTTP 只映射 DTO。查询先在子查询内按
+`created_at DESC, lot_id DESC, accepted_state_version DESC, fact_index DESC, id DESC` 排序分页，再对本页
+每条新建代理命令的第 1 条事实聚合同一命令里 `exhausted`/`ranked_below` 的转换，得到代理对代理竞争中
+落败的授权（出价人与落败时上限）；聚合恒返回一行，多于一份时失败关闭。总数与游标只数出价事实。
+
+迁移 `000109` 只新增部分索引 `bid_proxy_transitions_ranked_below_origin_idx`
+（`bid_proxy_authorization_transitions (origin_command_id)`，谓词
+`transition_kind = 'exhausted' AND reason = 'ranked_below'`），登记 `compatible`：逐行查找由顺序扫描
+只追加的转换表变为一次索引探测，请求代价只随页大小增长；不改变可见集合、排序、分页、金额、
+转换写入、锁序、审计或事件。
+
 迁移 `000087` 只新增四个投递 Admin 检索候选索引，登记 `compatible`：
 `deliveries_admin_recipient_idx`（`lower(recipient)` 前导）、
 `deliveries_admin_template_idx`（模板前导，部分索引）、
