@@ -1761,6 +1761,7 @@ alert-console-acknowledged = 已确认
 alert-console-silenced-until = 静默至
 alert-console-acknowledge = 确认
 alert-console-silence = 静默
+alert-console-silence-duration = 静默时长
 alert-console-reason = 备注（可选，写入操作记录）
 alert-console-empty = 没有符合条件的告警
 alert-console-action-ok = 操作已记录

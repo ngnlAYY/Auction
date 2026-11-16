@@ -1760,6 +1760,7 @@ alert-console-acknowledged = 確認済み
 alert-console-silenced-until = ミュート期限
 alert-console-acknowledge = 確認
 alert-console-silence = ミュート
+alert-console-silence-duration = ミュート期間
 alert-console-reason = メモ（任意、操作記録に保存）
 alert-console-empty = 条件に一致するアラートはありません
 alert-console-action-ok = 操作を記録しました
