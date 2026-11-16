@@ -302,6 +302,70 @@ mod tests {
         Ok(())
     }
 
+    /// 限额计的是组：limit=1 只取回排序最前的完整组，排除下一个待汇总组与已有汇总的组；
+    /// limit=2 再纳入第二组的全部 lot，已汇总的组始终不返回。
+    #[tokio::test]
+    #[ignore = "需要 AUCTION_TEST_DATABASE_URL 指向隔离的 PostgreSQL 18"]
+    async fn postgres_seller_summary_limit_counts_groups_not_rows()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let url = std::env::var("AUCTION_TEST_DATABASE_URL")?;
+        let mut connection = sqlx::PgConnection::connect(&url).await?;
+        let mut tx = connection.begin().await?;
+        tx.execute(
+            "CREATE TEMP TABLE auctions (
+                id uuid, status text, settled_at timestamptz, world_id text, sequence bigint
+             );
+             CREATE TEMP TABLE auction_submissions (id uuid, seller text);
+             CREATE TEMP TABLE lots (
+                auction_id uuid, submission_id uuid, lot_number integer,
+                category_number integer, status text, current_price bigint, equipment_id uuid
+             );
+             CREATE TEMP TABLE equipment (id uuid, category text, name text);
+             CREATE TEMP TABLE deliveries (origin_kind text, origin_id text);
+             INSERT INTO pg_temp.auctions
+                VALUES ('00000000-0000-0000-0000-000000000001', 'settled', now(), 'isekai', 1);
+             INSERT INTO pg_temp.auction_submissions VALUES
+                ('00000000-0000-0000-0000-0000000000a1', 'alice'),
+                ('00000000-0000-0000-0000-0000000000b1', 'bob'),
+                ('00000000-0000-0000-0000-0000000000c1', 'carol');
+             INSERT INTO pg_temp.equipment
+                VALUES ('00000000-0000-0000-0000-000000000003', 'Claw', 'Item');
+             INSERT INTO pg_temp.lots
+                SELECT '00000000-0000-0000-0000-000000000001',
+                       CASE WHEN number <= 3 THEN '00000000-0000-0000-0000-0000000000a1'::uuid
+                            WHEN number <= 5 THEN '00000000-0000-0000-0000-0000000000b1'::uuid
+                            ELSE '00000000-0000-0000-0000-0000000000c1'::uuid END,
+                       number, number, 'sold', 1000, '00000000-0000-0000-0000-000000000003'
+                FROM generate_series(1, 7) AS number;
+             INSERT INTO pg_temp.deliveries VALUES
+                ('seller_summary',
+                 'seller_summary:00000000-0000-0000-0000-000000000001:carol');",
+        )
+        .await?;
+        let query = SELLER_SUMMARY_FACTS_SQL.replace("public.", "pg_temp.");
+        let sellers = |rows: &[sqlx::postgres::PgRow]| {
+            rows.iter().map(|row| row.get::<String, _>("seller")).collect::<Vec<_>>()
+        };
+        let rows = sqlx::query(sqlx::AssertSqlSafe(query.clone()))
+            .bind(Utc::now() - Duration::days(1))
+            .bind(1_i64)
+            .fetch_all(&mut *tx)
+            .await?;
+        assert_eq!(sellers(&rows), ["alice", "alice", "alice"], "只取回第一组的全部 lot");
+        let rows = sqlx::query(sqlx::AssertSqlSafe(query))
+            .bind(Utc::now() - Duration::days(1))
+            .bind(2_i64)
+            .fetch_all(&mut *tx)
+            .await?;
+        assert_eq!(
+            sellers(&rows),
+            ["alice", "alice", "alice", "bob", "bob"],
+            "第二组整组纳入，已汇总的组不返回"
+        );
+        tx.rollback().await?;
+        Ok(())
+    }
+
     /// 换季扫描与卖方汇总共用的最小来源表；义务由各用例显式插入。
     const SEASON_TABLES: &str = r#"
         CREATE TEMP TABLE auctions (
@@ -369,6 +433,54 @@ mod tests {
         let rows = season_rows(&mut tx, Utc::now(), 1).await?;
         assert_eq!(rows.len(), 4_001, "选中组的全部义务必须一次返回");
         assert!(rows.iter().all(|row| row.get::<String, _>("recipient") == "alice"));
+        tx.rollback().await?;
+        Ok(())
+    }
+
+    /// 限额计的是组：limit=1 只取回排序最前收件人的全部义务，排除下一个收件人与同一边界
+    /// 已有提醒的收件人；limit=2 再纳入第二组的全部义务。
+    #[tokio::test]
+    #[ignore = "需要 AUCTION_TEST_DATABASE_URL 指向隔离的 PostgreSQL 18"]
+    async fn postgres_season_reminder_limit_counts_groups_not_rows()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let url = std::env::var("AUCTION_TEST_DATABASE_URL")?;
+        let mut connection = sqlx::PgConnection::connect(&url).await?;
+        let mut tx = connection.begin().await?;
+        tx.execute(SEASON_TABLES).await?;
+        tx.execute(
+            "INSERT INTO pg_temp.lots
+                SELECT ('00000000-0000-0000-0000-' || lpad(number::text, 12, '0'))::uuid,
+                       number, number
+                FROM generate_series(1, 7) AS number;
+             INSERT INTO pg_temp.settlement_obligations
+                SELECT lot.id, '00000000-0000-0000-0000-0000000000a1', lot.id,
+                       '00000000-0000-0000-0000-0000000000b1', 'seller_payout', 1000, 'ready',
+                       CASE WHEN lot.lot_number <= 3 THEN 'alice'
+                            WHEN lot.lot_number <= 5 THEN 'bob'
+                            ELSE 'carol' END,
+                       NULL
+                FROM pg_temp.lots AS lot;
+             INSERT INTO pg_temp.settlement_obligation_fulfillments
+                SELECT obligation.id, 'pending'
+                FROM pg_temp.settlement_obligations AS obligation;
+             INSERT INTO pg_temp.deliveries
+                SELECT 'season_reminder',
+                       'season_reminder:' || (extract(epoch FROM auction.intake_opens_at))::bigint
+                           || ':carol'
+                FROM pg_temp.auctions AS auction;",
+        )
+        .await?;
+        let recipients = |rows: &[sqlx::postgres::PgRow]| {
+            rows.iter().map(|row| row.get::<String, _>("recipient")).collect::<Vec<_>>()
+        };
+        let rows = season_rows(&mut tx, Utc::now(), 1).await?;
+        assert_eq!(recipients(&rows), ["alice", "alice", "alice"], "只取回第一组的全部义务");
+        let rows = season_rows(&mut tx, Utc::now(), 2).await?;
+        assert_eq!(
+            recipients(&rows),
+            ["alice", "alice", "alice", "bob", "bob"],
+            "第二组整组纳入，已有提醒的组不返回"
+        );
         tx.rollback().await?;
         Ok(())
     }
