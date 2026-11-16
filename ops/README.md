@@ -174,6 +174,8 @@ auction-cli --config-dir /etc/auction service stop       # 时段门禁 → 按 
 
 迁移 `000108` 起出站通知模板保存在数据库（见[ops/config/README.md#出站通知模板数据库](config/README.md#出站通知模板数据库)）。升级含该迁移的版本时注意：升级后所有模板先使用内置默认正文，runtime 文件里固化的旧正文不再生效（区块原样保留，只为回退时旧程序仍能加载）；需要沿用的定制正文在升级后到 Admin 参数页的“MoogleMail 模板”重新保存。`worker.toml` 若带有 `[worker.mooglemail.mail_templates]` 须先删除，否则 `config check` 与 Worker 启动失败。该迁移登记为 `compatible`，回退到旧程序后旧程序重新使用自身配置里的模板。
 
+Admin 的邮件 Cookie 在线校验（`POST /api/v1/admin/credentials/{credential_id}/check`）自迁移 `000112` 所在的版本起改由 Worker 经 Worker control 代为执行，与邮件循环共用同账号的请求门、在途锁与账号忙熔断；Admin 不再直连 HentaiVerse，也不解密邮件 Cookie（论坛 Cookie 仍在 Admin 本进程检查）。升级前确认三项依赖：Worker 在运行且 `[worker.control]` 已启用，Admin 运行账号在 `allowed_peer_uids`/`allowed_peer_gids` 中（与手工装备读取相同）；Worker 启用了 MoogleMail；Worker 配置了 `credential_data_key`。任一不满足或 Worker 主动暂停外部访问时，邮件 Cookie 校验返回 `503 credential_check_unavailable`（“Cookie 校验暂不可用”），不回退到 Admin 直连；错误码与预算见[docs/contracts/routes.md#worker-controlunix-socket](../docs/contracts/routes.md#worker-controlunix-socket)。该变化不涉及迁移，回退到旧程序即恢复旧的 Admin 直连检查。
+
 **回退**：迁移只向前。分体部署用安装目录中的 `auction-cli rollback --receipt-id <deploy_receipt_id>` 把三个运行角色换回 `deploy` 保留的旧程序，安装目录中的 `auction-cli` 保持不变（不执行迁移；保留的 CLI 必须与数据库同版本，跨迁移时三角色须先显式设 `migration_compatibility_mode = "compatible"`，门禁与回执见[apps/auction-cli/README.md#回退](../apps/auction-cli/README.md#回退)）。安装旧角色程序中途失败时与 `deploy` 相同，命令把已替换的程序从刚保留的反向回滚记录换回并复核：错误含“已复核为回退前的程序”时按错误给出的指引处置，含“自动换回未完成”时按[安装中途失败的手工换回](deploy/RECOVERY.md#安装中途失败的手工换回)处理。合并部署没有 CLI 回退，只能换回旧的 `auction-server` 程序。迁移区间判定、含 `breaking` 时恢复升级前备份，以及手工回退须显式设置 compatible 并保留新版 CLI 的要求，见[程序回退](deploy/RECOVERY.md#程序回退)。
 
 ## 反向代理
