@@ -100,11 +100,15 @@ pub struct AdminAlertCommandResponse {
     pub alert: AdminAlertCommandResultResponse,
 }
 
-/// 导航待办计数：人工对账、待确认恢复、活动告警。
+/// 导航待办计数：人工对账、待确认恢复、活动告警，以及按需输出的未结案结算退件。
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminPendingCountsResponse {
     pub delivery_manual_reconcile: i64,
     pub recovery_confirmation: i64,
     pub active_alerts: i64,
+    /// 未结案的结算退件案件数；只在请求带 `include=settlement_returns` 时输出，缺省响应保持
+    /// 已发布的三字段闭集，按闭集解码的旧页面照常读取。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settlement_returns: Option<i64>,
 }

@@ -362,6 +362,7 @@ pub(super) async fn configure_state(
     .with_auction_schedule(auction_schedule)
     .with_admin_worlds(admin_worlds)
     .with_settlement_catalog(settlement_catalog)
+    .with_settlement_returns(store.clone())
     .with_dashboard_worlds(config::configured_dashboard_worlds(config))
     .with_dashboard_mailbox_keys(config::configured_dashboard_mailbox_keys(config))
     .with_runtime_switches(store.clone(), switches.clone())

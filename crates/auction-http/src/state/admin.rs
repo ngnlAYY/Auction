@@ -19,7 +19,7 @@ use auction_application::operations::{
 use auction_application::public::AdminSessionPort;
 use auction_application::realtime::RealtimeAdminPort;
 use auction_application::recovery::{RecoveryCommandPort, RecoveryReportReader};
-use auction_application::settlement::SettlementReportReader;
+use auction_application::settlement::{SettlementReportReader, SettlementReturnAdminPort};
 use auction_observability::{HealthReader, ProcessMetrics};
 
 use crate::middleware::HttpBoundary;
@@ -53,6 +53,7 @@ pub struct AdminApiState {
     recovery_commands: Option<Arc<dyn RecoveryCommandPort>>,
     settlement_report: Option<Arc<dyn SettlementReportReader>>,
     settlement_catalog: Option<Arc<dyn SettlementCatalogReader>>,
+    settlement_returns: Option<Arc<dyn SettlementReturnAdminPort>>,
     recovery_report: Option<Arc<dyn RecoveryReportReader>>,
     admin_auctions: Option<Arc<dyn AdminAuctionReader>>,
     admin_lots: Option<Arc<dyn AdminLotReader>>,
@@ -164,6 +165,7 @@ impl AdminApiState {
             recovery_commands,
             settlement_report,
             settlement_catalog: None,
+            settlement_returns: None,
             recovery_report,
             admin_auctions,
             admin_lots,
@@ -248,6 +250,12 @@ impl AdminApiState {
     /// 注入结算报表专用的已结算拍卖目录。
     pub fn with_settlement_catalog(mut self, catalog: Arc<dyn SettlementCatalogReader>) -> Self {
         self.settlement_catalog = Some(catalog);
+        self
+    }
+
+    /// 注入结算退件案件的列表、详情与处理命令端口；未注入时路由明确返回能力不可用。
+    pub fn with_settlement_returns(mut self, port: Arc<dyn SettlementReturnAdminPort>) -> Self {
+        self.settlement_returns = Some(port);
         self
     }
 
@@ -351,6 +359,10 @@ impl AdminApiState {
 
     pub(crate) fn settlement_catalog(&self) -> Option<&dyn SettlementCatalogReader> {
         self.settlement_catalog.as_deref()
+    }
+
+    pub(crate) fn settlement_returns(&self) -> Option<&dyn SettlementReturnAdminPort> {
+        self.settlement_returns.as_deref()
     }
 
     pub(crate) fn recovery_report(&self) -> Option<&dyn RecoveryReportReader> {

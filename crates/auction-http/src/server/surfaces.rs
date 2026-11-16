@@ -428,6 +428,29 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
                 middleware::from_fn_with_state(strict_json::post(4 << 10), strict_json::enforce),
             ),
         )
+        .route("/api/v1/admin/settlement-returns", get(admin_handlers::settlement_returns::list))
+        .route(
+            "/api/v1/admin/settlement-returns/{return_id}",
+            get(admin_handlers::settlement_returns::detail),
+        )
+        .route(
+            "/api/v1/admin/settlement-returns/{return_id}/recheck",
+            post(admin_handlers::settlement_returns::recheck)
+                .layer(DefaultBodyLimit::max(4 << 10))
+                .layer(middleware::from_fn_with_state(
+                    strict_json::post(4 << 10),
+                    strict_json::enforce,
+                )),
+        )
+        .route(
+            "/api/v1/admin/settlement-returns/{return_id}/handle",
+            post(admin_handlers::settlement_returns::handle)
+                .layer(DefaultBodyLimit::max(4 << 10))
+                .layer(middleware::from_fn_with_state(
+                    strict_json::post(4 << 10),
+                    strict_json::enforce,
+                )),
+        )
         .route("/api/v1/admin/deliveries", get(admin_handlers::delivery::list))
         .route("/api/v1/admin/player-support", get(admin_handlers::delivery::player_support))
         .route("/api/v1/admin/deliveries/{delivery_id}", get(admin_handlers::delivery::detail))

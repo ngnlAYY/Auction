@@ -21,6 +21,7 @@ use crate::recovery_returns::{
 };
 use crate::support;
 
+mod alerts;
 mod cases;
 mod flows;
 

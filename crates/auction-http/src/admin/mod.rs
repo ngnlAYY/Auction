@@ -28,6 +28,7 @@ pub(crate) mod rules;
 pub(crate) mod runtime_config;
 pub(crate) mod runtime_switches;
 pub(crate) mod settlement_catalog;
+pub(crate) mod settlement_returns;
 pub(crate) mod users;
 pub(crate) mod worlds;
 

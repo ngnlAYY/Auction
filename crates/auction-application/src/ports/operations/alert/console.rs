@@ -190,12 +190,14 @@ impl OperationsAlertConsolePage {
     }
 }
 
-/// 导航待办计数：人工对账、待确认恢复、活动告警。
+/// 导航待办计数：人工对账、待确认恢复、活动告警与未结案结算退件。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct AdminPendingCounts {
     pub delivery_manual_reconcile: i64,
     pub recovery_confirmation: i64,
     pub active_alerts: i64,
+    /// 未结案（`closed_at` 为空）的结算退件案件数；含隔离与 Take 结果未知的案件。
+    pub settlement_returns: i64,
 }
 
 impl AdminPendingCounts {
@@ -203,6 +205,7 @@ impl AdminPendingCounts {
         if self.delivery_manual_reconcile < 0
             || self.recovery_confirmation < 0
             || self.active_alerts < 0
+            || self.settlement_returns < 0
         {
             return Err(OperationsAlertError::StoredResultCorrupt);
         }

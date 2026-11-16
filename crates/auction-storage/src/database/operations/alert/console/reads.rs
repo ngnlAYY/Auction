@@ -232,7 +232,8 @@ pub(super) fn entry_from_row(
     Ok(entry)
 }
 
-/// 导航待办计数：投递人工对账、待确认恢复与活动告警。
+/// 导航待办计数：投递人工对账、待确认恢复、活动告警与未结案结算退件。退件按案件计数，与退件
+/// 告警同一口径（`closed_at` 为空，含隔离与 Take 结果未知），不要求存在义务。
 pub(super) async fn pending_counts_postgres(
     pool: &TrackedPool<sqlx::Postgres>,
 ) -> Result<AdminPendingCounts, ApplicationError> {
@@ -242,7 +243,9 @@ pub(super) async fn pending_counts_postgres(
              WHERE origin_kind <> 'operations_alert' AND status = 'manual_reconcile')
                 AS delivery_manual_reconcile,
             (SELECT COUNT(*) FROM public.operations_alert_signals WHERE active)
-                AS active_alerts",
+                AS active_alerts,
+            (SELECT COUNT(*) FROM public.settlement_return_cases WHERE closed_at IS NULL)
+                AS settlement_returns",
     )
     .fetch_one(pool)
     .await
@@ -253,9 +256,16 @@ pub(super) async fn pending_counts_postgres(
     let active_alerts: i64 = row
         .try_get("active_alerts")
         .map_err(|error| storage_error_from(error, "读取活动告警计数失败"))?;
+    let settlement_returns: i64 = row
+        .try_get("settlement_returns")
+        .map_err(|error| storage_error_from(error, "读取结算退件待办计数失败"))?;
     let recovery_confirmation = recovery_confirmation_count(pool).await?;
-    let counts =
-        AdminPendingCounts { delivery_manual_reconcile, recovery_confirmation, active_alerts };
+    let counts = AdminPendingCounts {
+        delivery_manual_reconcile,
+        recovery_confirmation,
+        active_alerts,
+        settlement_returns,
+    };
     counts.validate().map_err(ApplicationError::from)?;
     Ok(counts)
 }

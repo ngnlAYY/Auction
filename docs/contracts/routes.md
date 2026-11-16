@@ -227,7 +227,7 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | GET | `/api/v1/admin/alerts/webhooks` | 最近 webhook 投递安全投影（`limit` 1–100，默认 50）；返回状态、kind/source/scope、尝试次数、下次尝试/发送/完成时间与失败码，不含冻结 JSON、收件人或凭据；只读 |
 | POST | `/api/v1/admin/alerts/{alert_id}/acknowledge` | 确认告警；`alert_id` 为 64 位十六进制 fingerprint。只追加操作者事实（`command_id` 幂等），不改变 signal 状态、计数、阈值或恢复判定 |
 | POST | `/api/v1/admin/alerts/{alert_id}/silence` | 静默告警到 `silence_seconds`（60–604800）之后；只抑制重复通知，到期后仍活动的 signal 按原阈值继续通知，不改变阈值评估 |
-| GET | `/api/v1/admin/pending-counts` | 导航待办数：`delivery_manual_reconcile`、`recovery_confirmation`（reclaiming 且证据齐全、恰好一个候选结果；需要拉黑的确认须已完成拉黑——main `reclaimed` 始终需要，isekai `cancelled` 只在退回次数达到冻结上限时需要）、`active_alerts` |
+| GET | `/api/v1/admin/pending-counts` | 导航待办数：`delivery_manual_reconcile`、`recovery_confirmation`（reclaiming 且证据齐全、恰好一个候选结果；需要拉黑的确认须已完成拉黑——main `reclaimed` 始终需要，isekai `cancelled` 只在退回次数达到冻结上限时需要）、`active_alerts`。查询参数只有可选的 `include`，且只接受 `settlement_returns`：带它时追加未结案结算退件案件数 `settlement_returns`（`closed_at` 为空的案件，含隔离、待重新核验与 Take 结果未知，与两类退件告警合计同一口径，不要求存在义务），Admin 页面始终携带；不带时保持已发布的三字段集合，已打开的旧页面照常解码。其他取值（含空值、大小写不同与逗号列表）为 400 `invalid_query`（附加字段无效），重复出现或其他查询键为 400 `invalid_query`（告警查询参数无效）；回滚到不认识该参数的服务端后，新页面的导航待办数这次读取失败、不显示徽标，按构建号提示刷新后恢复 |
 | GET | `/api/v1/admin/worlds` | 业务世界及启用状态 |
 | PATCH | `/api/v1/admin/worlds/{world_id}` | 启用/停用业务世界（即时生效） |
 | GET / POST | `/api/v1/admin/auctions` | 场次列表（`world_id`、`status`、`page`、`page_size`）/ 新建场次 |
@@ -247,6 +247,10 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | GET | `/api/v1/admin/auctions/{auction_id}/recovery-report` | 恢复报告，含 `payment_deadline_at`、`blocking_code` 与 `allowed_commands`（与确认事务共用同一准入：isekai `cancelled` 在退回次数未达冻结上限时不要求拉黑）；旧赛季装备的永久重列阻断对外映射为 `recovery_relist_unavailable` |
 | GET | `/api/v1/admin/settlement-catalog` | 已结算场次目录（`world_id`、`sequence`、`page`、`page_size`） |
 | POST | `/api/v1/admin/recoveries/{recovery_id}/confirm` | 人工确认恢复动作（带期望版本与原因） |
+| GET | `/api/v1/admin/settlement-returns` | 结算退件案件分页列表（`page`、`page_size` ≤200 缺省 50、行偏移 ≤10000；精确筛选 `status`、`match_state`、`obligation_kind`、`world`、`open_only=true\|false`、`received_from`/`received_to`（RFC 3339，含端点）与 `reference`（案件、义务或原派发投递的规范 UUID））。以案件为主表，`untrusted`/`unbound` 隔离记录与未知义务照常列出，按收件时刻倒序；任一参数为空、不在闭集、越界、重复或未登记时整页 400 `invalid_query`。每行是安全摘要：案件 ID `return_id`（即退件入站邮件 ID）与 `case_version`、状态、证据分类 `match_state` 与原因码 `reason_code`、世界与远端 MID、可空的义务/种类/场次/lot/原派发投递与派发编号、原派发冻结收件人、Credits/COD/附件数、处理计划 `plan`、建案时冻结的补寄上限 `resend_limit` 与该义务已用补寄次数 `resends_used`、资产位置 `asset_location`、建立/更新/结案时刻；不含正文、发件人原文或装备 key |
+| GET | `/api/v1/admin/settlement-returns/{return_id}` | 案件详情：摘要、只追加的处理事件（版本、种类、时刻、操作者与命令 ID，以及只含分类、原因码、派发编号、投递 ID、失败码等的安全细节对象）、原义务的派发链（编号、投递、投递状态、寄出/完成时刻、授权补寄的案件）、本案持久 Take（执行状态、Take 投递与状态、失败码、领回证明时刻）、本案授权的补寄派发编号、代管责任（原权利人、Credits 与装备 EID，只在代管时出现）、`allowed_actions` 与 `blockers`（每个动作恰好出现在其中一处；阻断原因闭集为 `untrusted`、`unbound`、`assets_mismatch`、`state_conflict`、`resend_limit`、`obligation_ineligible`、`proof_required`）。只读快照不授予动作，命令事务仍锁内复核。路径 ID 不是规范小写 UUID 为 400 `invalid_settlement_return_id`，不存在为 404 `settlement_return_not_found` |
+| POST | `/api/v1/admin/settlement-returns/{return_id}/recheck` | 未绑定（`unbound`）隔离案件提交只读重新核验：请求 `command_id`、`expected_version`；案件转 `recheck_pending`，由 Worker 只读读取 Bot 收件箱中的原退件，重新满足系统来源、资产与唯一原派发绑定时改绑为待决定，否则保持隔离；Admin 进程不直连游戏 |
+| POST | `/api/v1/admin/settlement-returns/{return_id}/handle` | 处理动作：请求 `command_id`、`expected_version` 与 `action`——`reclaim_and_resend`（领回并补寄）、`reclaim_and_hold`（领回后代管）、`resend_from_custody`（从代管补寄）、`close_inbox`（留箱结案）、`acknowledge`（隔离记录标记已核对）；`recheck` 只走上一条路由。资产、金额与收件人只取服务端冻结事实，补寄只寄原冻结收件人；领回只在本地提交持久 Take，外部 Take 由 Worker 执行。成功返回 `command_id`、`return_id`、`action`、提交后的 `case_version` 与 `status` |
 | GET | `/api/v1/admin/mail` | 邮箱轮询状态（`mailbox_key`、`include_diagnostics`） |
 | GET | `/api/v1/admin/mail/intake` | 入站邮件处理记录（`mailbox_key`、`world_id`、`kind`、`status`、`decision`、`from`、`to`、`page`、`page_size`） |
 | GET | `/api/v1/admin/mail/intake/{intake_id}` | 单封入站邮件详情 |
@@ -280,6 +284,8 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | GET / POST / PATCH / DELETE | `/api/v1/admin/credentials` | 凭据列表（`kind`、`world`、`status`、`page`、`page_size`）/ 录入 Cookie 或以论坛账号密码获取并提取游戏 CK / 改名或启停 / 删除 |
 | POST | `/api/v1/admin/credentials/{credential_id}/check` | 在线校验凭据；邮件 Cookie 经 Worker control 由 Worker 执行，Worker 不可用时返回 `503 credential_check_unavailable` |
 | GET | `/api/v1/admin/audit` | 审计记录（`actor`、`actor_type`、`action`、`entity`、`source`、`result`、`request_id`、`occurred_from`、`occurred_to`、`page`、`page_size`、`cursor`、`before_time`、`before_id`） |
+
+结算退件两条命令路由按[写命令](#写命令)外壳幂等：同一 `command_id` 原样重试返回首次结果，参数不同为 409 `command_conflict`。其余错误：400 `invalid_json`、`invalid_query`（命令不接受查询参数）、`invalid_settlement_return_id`、`invalid_settlement_return_command`（命令 ID 为零、版本不为正或动作不在该路由的闭集）；404 `settlement_return_not_found`；409 `stale_settlement_return_state`（案件版本已变化，重读后再决定）、`settlement_return_untrusted`、`settlement_return_unbound`、`settlement_return_assets_mismatch`、`settlement_return_action_conflict`（当前状态不允许该动作，或同一邮件已有其他领取/退回意图）、`settlement_return_proof_required`、`settlement_return_resend_limit`（补寄次数已达建案时冻结的上限 3，不含首寄，只能代管）、`settlement_return_obligation_ineligible`（原义务已不可补寄：成交撤销、已满足或终结、退回的已不是当前派发、种类归恢复流程，或历史现金没有原资金分配）。这些拒绝都不改任何状态，也不会映射为 503；503 `temporarily_unavailable` 只表示依赖暂不可用或持久化结果损坏，结果未知时用同一 `command_id` 与同一请求体重试。Take 结果未知（`take_unknown`）的案件没有人工声明入口：只认系统可验证的领取证明，投递台也拒绝对该 Take 投递人工释放、重试或对账。
 
 请求体大小上限按路由冻结：多数命令 4–16 KiB，realtime 重放 64 KiB，凭据 128 KiB（在线校验 4 KiB），装备录入 72 KiB，出站通知模板 96 KiB，规则与关于 1 MiB，runtime 配置 4 MiB。
 
