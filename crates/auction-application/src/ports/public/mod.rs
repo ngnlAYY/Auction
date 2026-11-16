@@ -3,6 +3,7 @@
 pub(crate) mod blacklist;
 pub(crate) mod compensation;
 pub(crate) mod equipment_link;
+pub(crate) mod fulfillment;
 pub(crate) mod rules;
 pub(crate) mod session_preference;
 pub(crate) mod sessions;
@@ -24,6 +25,13 @@ pub use compensation::{
 pub use equipment_link::{
     PublicEquipmentGameLink, PublicEquipmentLinkResolver, PublicEquipmentLinkSecret,
     PublicEquipmentLinkSecretReader, PublicEquipmentLinkTarget,
+};
+pub use fulfillment::{
+    DEFAULT_PUBLIC_FULFILLMENT_PAGE_SIZE, MAX_PUBLIC_FULFILLMENT_OFFSET,
+    MAX_PUBLIC_FULFILLMENT_PAGE_SIZE, PublicFulfillmentAuction, PublicFulfillmentCodReturns,
+    PublicFulfillmentLot, PublicFulfillmentObligation, PublicFulfillmentPage,
+    PublicFulfillmentReader, PublicFulfillmentRecovery, PublicFulfillmentRequest,
+    PublicFulfillmentSale, PublicFulfillmentStatus, PublicFulfillmentView,
 };
 pub use rules::{
     PUBLIC_RULES_DEFAULT_LOCALE, PUBLIC_RULES_LOCALES, PublicRulesDocument, PublicRulesReader,
