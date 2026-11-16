@@ -29,7 +29,7 @@ pub(crate) use realtime::{
     PublicRealtimeOwner, PublicRealtimePageKey, PublicRealtimeTarget, TickerCountdown,
     public_connection_state, ticker_auction, ticker_countdown,
 };
-pub(crate) use refresh::{PublicBidRefresh, use_bid_refresh};
+pub(crate) use refresh::{PublicBidRefresh, refresh_public_reads, use_bid_refresh};
 pub(crate) use world::{WorldPicker, supported_worlds, world_label};
 
 #[component]
@@ -59,7 +59,7 @@ pub(crate) fn AuctionPage() -> Element {
 #[component]
 pub(crate) fn AuctionBoard() -> Element {
     let selected_world = use_context::<Signal<String>>();
-    let mut refresh_generation = use_context::<Signal<u64>>();
+    let refresh_generation = use_context::<Signal<u64>>();
     let query_state = use_public_query_state().state;
     let readiness = use_context::<PublicReadinessResource>();
     let session = use_context::<PublicSessionResource>();
@@ -148,6 +148,12 @@ pub(crate) fn AuctionBoard() -> Element {
             .filter(|(loaded_world, _)| loaded_world == &selected_world)
             .map(|(_, result)| result)
     };
+    // 目录对齐重读要等展示中的场次本轮读取也返回才判定用尽；以订阅方式读状态，读取结束即重渲染。
+    let auction_reading = if historical {
+        *historical_current.state().read() == UseResourceState::Pending
+    } else {
+        *current_auction.state().read() == UseResourceState::Pending
+    };
     let boot_prerequisites_ready =
         readiness.read().is_some() && session.read().is_some() && current_auction.read().is_some();
     let terminal_without_auction = matches!(current, Some(Err(_)) | Some(Ok(None)));
@@ -164,9 +170,8 @@ pub(crate) fn AuctionBoard() -> Element {
                 title: t!("page-auctions-title"),
                 detail: t!("data-error"),
                 retry_label: t!("data-retry"),
-                on_retry: move |_| {
-                    refresh_generation.set(refresh_generation().saturating_add(1));
-                },
+                // 与对齐重读、恢复可见共用刷新入口：先失效公开读缓存，重试才真正回到服务端。
+                on_retry: move |_| refresh_public_reads(refresh_generation),
             }
         },
         Some(Ok(None)) => rsx! {
@@ -182,6 +187,7 @@ pub(crate) fn AuctionBoard() -> Element {
                 AuctionData {
                     auction: auction.clone(),
                     historical,
+                    auction_reading,
                     boot_prerequisites_ready,
                 }
                 // 详情抽屉挂在标记作用域内（底部标记按钮需要它），并与目录共存亡：

@@ -1,4 +1,5 @@
-//! Public 竞价资源失效与有界合并读取；不修改事件游标或推导竞价结果。
+//! Public 竞价资源失效与有界合并读取，以及权威读取的统一刷新入口；不修改事件游标或推导竞价
+//! 结果。
 //!
 //! 实时事件只是“竞价发生变化”的通知：这里只递增本地修订号，由各页面资源在 100–250 毫秒的
 //! 随机窗口后重读自己的权威接口。事件负载中的价格、领先者或版本都不参与页面结果，因此取消
@@ -24,6 +25,15 @@ fn coalesce_window_millis(sample: f64) -> u32 {
     // 样本已截到 [0, 1]：乘积落在 [0, 150]，转换不会溢出；1.0 再收进上界之内。
     let jitter = (sample * f64::from(BID_REFRESH_JITTER_MILLIS)) as u32;
     BID_REFRESH_COALESCE_MILLIS + jitter.min(BID_REFRESH_JITTER_MILLIS - 1)
+}
+
+/// 外壳权威轮询、恢复可见、开场迁移、看板对齐重读与错误重试共用的刷新入口：先使公开读缓存
+/// 过期，再推进外壳的全局刷新代号。只推进代号时，TTL 内的重读直接命中新鲜条目，等于没有重读；
+/// 失效后的重读带旧 ETag 条件请求，正文未变时 304 复用，同一 URL 的在途读取仍单飞合并。
+pub(crate) fn refresh_public_reads(mut refresh_generation: Signal<u64>) {
+    crate::api::invalidate_all();
+    let next_generation = refresh_generation.peek().saturating_add(1);
+    refresh_generation.set(next_generation);
 }
 
 /// Public 外壳持有的竞价失效修订号，与生命周期和人工刷新的全局修订号分离。

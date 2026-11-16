@@ -19,8 +19,9 @@
 //! 本层是这些读取唯一的客户端新鲜度来源：未命中（或旧条目没有 ETag）时的请求要求浏览器向服务端
 //! 再验证，不接受 HTTP 缓存按 `max-age`/`stale-while-revalidate` 给出的旧副本，否则旧正文会
 //! 被当作新快照保留到 TTL 结束；带 `If-None-Match` 的条件请求按 Fetch 规范同样绕过 HTTP 缓存。
-//! 失效时机是实时事件、开场迁移、外壳权威轮询（非 Live 每 60 秒，Live 约每 5 分钟兜底）、会话
-//! 变化，以及竞价与代理命令得到服务端答复（成功或被拒绝）。命令答复后的失效另把回退下限推进到
+//! 失效时机是实时事件、开场迁移、外壳权威轮询（非 Live 每 60 秒，Live 约每 5 分钟兜底）、页面
+//! 恢复可见、看板对齐重读与错误重试、会话变化，以及竞价与代理命令得到服务端答复（成功或被拒绝）；
+//! 只推进页面刷新代号而不失效时，TTL 内的读取直接命中新鲜条目，不会回到服务端。命令答复后的失效另把回退下限推进到
 //! 新修订号：用户刚提交的命令之后，读视图只显示权威结果或错误，不退回命令之前的价格与领先者；
 //! 他人竞价等事件触发的普通失效仍允许繁忙时先显示最后已知快照。
 
@@ -914,6 +915,103 @@ mod tests {
         assert!(!present(0), "最早写入的条目应被淘汰");
         assert!(present(1));
         assert!(present(MAX_ENTRIES));
+    }
+
+    /// 看板对齐重读、错误重试与恢复可见补读的缓存前提：TTL 内只推进刷新代号的重读命中新鲜条目，
+    /// 当前场次与目录原样返回同一对不一致的快照、不发请求；经共用刷新入口先失效后，两侧都带各自
+    /// ETag 回到服务端，滞后的一侧追上权威值，未变的一侧 304 复用。
+    #[test]
+    fn misaligned_current_and_lots_reach_the_server_only_after_invalidation() {
+        let current = "/api/v1/auctions/current?world=main&include=proxy_default_mode";
+        let lots = "/api/v1/auctions/00000000-0000-0000-0000-000000000010/lots?page=1&page_size=20";
+        // 旧场次配新目录（开场前后各持一边），以及相反的旧目录配新场次。
+        for (lagging_url, lagging_etag, fresh_url) in
+            [(current, "etag-current", lots), (lots, "etag-lots", current)]
+        {
+            reset();
+            let now = Cell::new(100_000);
+            let calls = Cell::new(0);
+            let (lagging_value, fresh_value) = ("preview", "live");
+            assert_eq!(
+                call(lagging_url, &now, LIVE_TTL_MILLIS, &calls, |_| {
+                    changed(lagging_value, Some(lagging_etag))
+                }),
+                Ok(lagging_value)
+            );
+            assert_eq!(
+                call(fresh_url, &now, LIVE_TTL_MILLIS, &calls, |_| {
+                    changed(fresh_value, Some("etag-fresh"))
+                }),
+                Ok(fresh_value)
+            );
+            // 只推进代号的重读（旧的对齐重读与恢复可见补读）：两侧都命中新鲜条目，不发请求。
+            now.set(100_000 + 1_000);
+            assert_eq!(
+                call(lagging_url, &now, LIVE_TTL_MILLIS, &calls, |_| changed("live", None)),
+                Ok(lagging_value)
+            );
+            assert_eq!(
+                call(fresh_url, &now, LIVE_TTL_MILLIS, &calls, |_| changed("other", None)),
+                Ok(fresh_value)
+            );
+            assert_eq!(calls.get(), 2);
+            // 先失效再重读：滞后的一侧带 ETag 取得新快照，另一侧 304 确认，两侧重新对齐。
+            invalidate_all();
+            assert_eq!(
+                call(lagging_url, &now, LIVE_TTL_MILLIS, &calls, |etag| {
+                    assert_eq!(etag.as_deref(), Some(lagging_etag));
+                    changed("live", Some("etag-new"))
+                }),
+                Ok("live")
+            );
+            assert_eq!(
+                call(fresh_url, &now, LIVE_TTL_MILLIS, &calls, |etag| {
+                    assert_eq!(etag.as_deref(), Some("etag-fresh"));
+                    FetchOutcome::NotModified
+                }),
+                Ok(fresh_value)
+            );
+            assert_eq!(calls.get(), 4);
+        }
+    }
+
+    /// 回退标记取默认值即权威读取；只判断是否为暂时性失败后的回退。
+    fn is_fallback<M: Default + PartialEq>(marker: M) -> bool {
+        marker != M::default()
+    }
+
+    /// 历史深链由 lot 外壳与往期目录拼出场次：两者同样只在失效后重新验证；重读遇到 503 时回退
+    /// 并标明旧快照，看板据此仍判不对齐，有界用尽后显示可重试的错误。
+    #[test]
+    fn historical_deep_link_rereads_revalidate_and_busy_falls_back_marked_stale() {
+        reset();
+        let directory = "/api/v1/auctions?page=1&page_size=200&status=settled";
+        let lots = "/api/v1/auctions/00000000-0000-0000-0000-000000000011/lots?page=1&page_size=20";
+        let read = |url: &str, ttl: u64, outcome: FetchOutcome<&'static str, &'static str>| {
+            block_on(read_or_fetch(url, ttl, || 200_000, |_| std::future::ready(outcome)))
+                .map(|cached| (cached.value, is_fallback(cached.stale_fallback)))
+        };
+        assert_eq!(
+            read(directory, CATALOG_TTL_MILLIS, changed("final", Some("d1"))),
+            Ok(("final", false))
+        );
+        assert_eq!(read(lots, LIVE_TTL_MILLIS, changed("final", Some("l1"))), Ok(("final", false)));
+        // TTL 内未失效：新鲜命中，不会调用 fetch（这里给出的拒绝不会被使用）。
+        assert_eq!(
+            read(directory, CATALOG_TTL_MILLIS, FetchOutcome::Rejected("unused")),
+            Ok(("final", false))
+        );
+        invalidate_all();
+        // 失效后真实再验证：结算后的目录返回新快照。
+        assert_eq!(
+            read(directory, CATALOG_TTL_MILLIS, changed("settled", Some("d2"))),
+            Ok(("settled", false))
+        );
+        // lot 外壳重读遇到 503：回退并标明旧快照，不当作已对齐的权威值。
+        assert_eq!(
+            read(lots, LIVE_TTL_MILLIS, FetchOutcome::Busy("read_busy")),
+            Ok(("final", true))
+        );
     }
 
     #[test]
