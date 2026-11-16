@@ -261,7 +261,8 @@ pub(super) async fn pending_counts_postgres(
 }
 
 /// 与 `allowed_recovery_commands` 同一准入的计数：reclaiming、证据齐全、恰好一个候选结果、
-/// 需要黑名单的动作已满足。只改变展示计数，不构成确认授权。
+/// 需要黑名单的动作已满足（main 收回始终需要；isekai 取消只在退回次数达到冻结上限时需要）。
+/// 只改变展示计数，不构成确认授权。
 pub(super) async fn recovery_confirmation_count(
     pool: &TrackedPool<sqlx::Postgres>,
 ) -> Result<i64, ApplicationError> {
@@ -300,7 +301,9 @@ pub(super) async fn recovery_confirmation_count(
                    SELECT 1 FROM public.settlement_recovery_actions AS action
                    WHERE action.recovery_id = recovery.id
                      AND action.execution_state = 'satisfied'
-                     AND action.kind IN ('reclaim_equipment_take', 'cancel_carrier_take')
+                     AND (action.kind = 'reclaim_equipment_take'
+                          OR (action.kind = 'cancel_carrier_take'
+                              AND recovery.cod_return_count >= recovery.cod_return_limit))
                )
                OR EXISTS (
                    SELECT 1 FROM public.settlement_recovery_actions AS action

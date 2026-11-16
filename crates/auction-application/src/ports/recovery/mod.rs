@@ -25,7 +25,7 @@ pub use health::{
 };
 pub use report::{
     RecoveryActionReport, RecoveryReport, RecoveryReportEntry, RecoveryReportReader,
-    allowed_recovery_commands,
+    allowed_recovery_commands, recovery_confirmation_requires_blacklist,
 };
 pub use scheduler::{
     RecoveryActionClaim, RecoveryActionOutcome, RecoveryCaseAdvance, RecoveryResolutionAdvance,
