@@ -12,6 +12,7 @@ use auction_application::settlement::{
 use auction_application::settlement::{
     SettlementFulfillmentBalanceEvidence, SettlementFulfillmentCustodyReader,
     SettlementFulfillmentEvidenceReader, SettlementFulfillmentSentEvidence,
+    SettlementReturnMailReader, SettlementReturnRecheckOutcome,
 };
 use auction_domain::SettlementWorld;
 use auction_integrations::mooglemail::{
@@ -108,6 +109,36 @@ impl SettlementFulfillmentEvidenceReader for MoogleMailFulfillmentEvidenceReader
                 credits: snapshot.credits,
                 observed_at: snapshot.observed_at,
             })
+        })
+    }
+}
+
+/// 结算退件只读重新核验：复用同一 gateway 与凭据集合读取 Bot 收件箱中的原退件。
+pub(super) struct MoogleMailReturnMailReader {
+    pub(super) gateways: HashMap<MoogleMailWorld, Arc<MoogleMailGateway>>,
+}
+
+impl SettlementReturnMailReader for MoogleMailReturnMailReader {
+    fn read_returned_mail(
+        &self,
+        world_id: String,
+        external_mail_id: String,
+    ) -> ApplicationFuture<'_, SettlementReturnRecheckOutcome> {
+        let Some(world) = MoogleMailWorld::parse(&world_id) else {
+            return Box::pin(async {
+                Err(ApplicationError::CapabilityUnavailable("MoogleMail return world unknown"))
+            });
+        };
+        let Some(gateway) = self.gateways.get(&world).cloned() else {
+            return Box::pin(async {
+                Err(ApplicationError::CapabilityUnavailable("MoogleMail return world unavailable"))
+            });
+        };
+        Box::pin(async move {
+            gateway
+                .read_returned_mail(world, &external_mail_id, Utc::now())
+                .await
+                .map_err(mooglemail_evidence_error)
         })
     }
 }

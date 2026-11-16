@@ -24,6 +24,7 @@ mod error;
 mod gateway;
 mod inbox;
 mod recovery_scan;
+mod returned;
 mod scan;
 mod sent;
 mod sent_hints;

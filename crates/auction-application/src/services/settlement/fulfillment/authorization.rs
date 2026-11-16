@@ -117,10 +117,10 @@ pub(super) async fn authorize_pending_or_prepared(
         };
         let operation_id = match claim.state {
             SettlementFulfillmentState::Pending => {
-                super::intent::stable_prepare_command_id(claim.obligation_id)
+                super::intent::dispatch_prepare_command_id(&claim)?
             }
             SettlementFulfillmentState::Prepared => {
-                super::intent::stable_activate_command_id(claim.obligation_id)
+                super::intent::dispatch_activate_command_id(&claim)?
             }
             _ => return Err(repository_error("退款 custody 读取阶段无效")),
         }

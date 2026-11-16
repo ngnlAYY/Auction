@@ -162,6 +162,8 @@ pub async fn reserve_funded_delivery(
     if changed.rows_affected() != 1 {
         return Err(FundingError::Unavailable);
     }
+    // 分配指针在退件返还后会换代到补寄投递；先只追加登记本投递的历史绑定，旧派发始终受保护。
+    super::returns::record_delivery_binding(tx, account, delivery_id, allocation_id).await?;
     entry(
         tx,
         account.uid(),
@@ -308,9 +310,31 @@ pub async fn finish_funded_delivery(
     )
     .bind(account.uid())
     .bind(delivery_id)
-    .fetch_one(&mut **tx)
+    .fetch_optional(&mut **tx)
     .await
     .map_err(storage)?;
+    let Some(row) = row else {
+        // 分配已由退件返还换代：旧派发的迟到回调只能重放原“已寄出”结论，不能改动新一轮资金。
+        let returned: bool = sqlx::query_scalar(
+            r#"SELECT EXISTS(
+                   SELECT 1
+                   FROM public.settlement_funding_delivery_bindings binding
+                   JOIN public.settlement_funding_returns returned
+                     ON returned.delivery_id=binding.delivery_id
+                   WHERE binding.delivery_id=$1 AND binding.uid=$2
+               )"#,
+        )
+        .bind(delivery_id)
+        .bind(account.uid())
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(storage)?;
+        return if returned && outcome == FundingDeliveryOutcome::Sent {
+            Ok(())
+        } else {
+            Err(FundingError::Conflict)
+        };
+    };
     let previous: String = row.try_get("state").map_err(storage)?;
     if previous == state {
         return Ok(());

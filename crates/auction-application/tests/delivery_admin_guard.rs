@@ -243,3 +243,30 @@ fn status_mismatch_is_stale_and_blocks_every_action() {
     assert_eq!(decision.blockers.first(), Some(&DeliveryAdminGuardBlocker::StatusMismatch));
     assert_eq!(DeliveryAdminGuardBlocker::StatusMismatch.error(), DeliveryAdminError::Stale);
 }
+
+/// 结算退件 Take 由退件案件推进：任何投递台动作都被拒绝，结果未知不能人工重试或声明结果。
+#[test]
+fn settlement_return_take_rejects_every_admin_action() {
+    for action in [
+        DeliveryAdminAction::Release,
+        DeliveryAdminAction::RetryFailed,
+        DeliveryAdminAction::ReconcileRetry,
+        DeliveryAdminAction::ReconcileSucceeded,
+        DeliveryAdminAction::ReconcileFailed,
+    ] {
+        let mut guard = snapshot(action);
+        guard.origin_kind = "settlement_return_action".to_owned();
+        guard.payload_operation = Some("take".to_owned());
+        guard.settlement_eligible = None;
+        let decision = guard.evaluate();
+        assert_eq!(
+            decision.blockers.first(),
+            Some(&DeliveryAdminGuardBlocker::SettlementReturnActionOwned),
+            "{action:?}"
+        );
+    }
+    assert_eq!(
+        DeliveryAdminGuardBlocker::SettlementReturnActionOwned.error(),
+        DeliveryAdminError::Invalid
+    );
+}

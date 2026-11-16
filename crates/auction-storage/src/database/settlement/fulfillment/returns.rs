@@ -1,22 +1,26 @@
-//! 恢复流程不处理的结算退件的唯一消费方：只追加退件证据与消费事实，对应未终结履约同事务转
-//! 人工对账；不领取、不退回、不重发，也不写 `settlement_funding_returns` 或改变资金。
+//! 恢复流程不处理的结算退件的唯一消费方：只追加退件证据与消费事实、同事务建立退件案件，对应
+//! 未终结履约转人工对账；消费本身不领取、不退回、不重发，也不写 `settlement_funding_returns` 或
+//! 改变资金——这些只由案件经 Admin 处理后的持久动作执行。
 //!
 //! 退件来源的 SQL 判定 `system_settlement_return_source!` 与应用层
 //! `system_returned_settlement_obligation_id` 同一口径。恢复流程只消费满足它且绑定恢复记录付款或
-//! 交付义务的退件，这里消费其余全部退件，两边分区互斥，同一封邮件只消费一次。
+//! 交付义务的退件，这里消费其余全部退件，两边分区互斥，同一封邮件只消费一次。退件按证据请求的
+//! 派发（首寄或正文派发引用指向的补寄）绑定派发历史中的原投递，不默认绑定最新投递。
 
 use auction_application::settlement::{
     SettlementReturnConsumption, SettlementReturnDecision, SettlementReturnDelivery,
-    SettlementReturnFacts, SettlementReturnMatch, SettlementReturnObligation,
+    SettlementReturnDispatchLookup, SettlementReturnDispatchRequest, SettlementReturnFacts,
+    SettlementReturnMatch, SettlementReturnObligation, settlement_return_dispatch_request,
 };
+use auction_domain::FIRST_DISPATCH_NO;
 use chrono::{DateTime, Utc};
-use sqlx::postgres::PgRow;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
 use super::mapping::{map_storage_error, repository_error};
 use crate::database::TrackedTransaction as Transaction;
 use crate::database::operations::audit_health::AuditWriteResult as _;
+use crate::database::settlement::returns::open_case;
 
 /// 退件转人工对账写入履约的稳定原因码。
 const RETURNED_FAILURE_CODE: &str = "settlement_mail_returned";
@@ -98,8 +102,11 @@ pub(crate) async fn consume_return_postgres(
         .try_get::<Option<String>, _>("evidence_obligation_id")
         .map_err(map_storage_error)?
         .and_then(|value| Uuid::parse_str(&value).ok());
+    let metadata: serde_json::Value =
+        candidate.try_get("return_metadata").map_err(map_storage_error)?;
+    let request = settlement_return_dispatch_request(&metadata);
     let locked = match evidence_obligation {
-        Some(obligation_id) => lock_obligation(&mut transaction, obligation_id).await?,
+        Some(obligation_id) => lock_obligation(&mut transaction, obligation_id, request).await?,
         None => None,
     };
     let obligation_id = locked.as_ref().map(|locked| locked.facts.id);
@@ -108,7 +115,7 @@ pub(crate) async fn consume_return_postgres(
         subject: candidate.try_get("return_subject").map_err(map_storage_error)?,
         return_world: candidate.try_get("return_world_id").map_err(map_storage_error)?,
         received_at: candidate.try_get("return_received_at").map_err(map_storage_error)?,
-        metadata: candidate.try_get("return_metadata").map_err(map_storage_error)?,
+        metadata,
         obligation: locked.as_ref().map(|locked| locked.facts.clone()),
     };
     let decision = facts.classify();
@@ -116,11 +123,12 @@ pub(crate) async fn consume_return_postgres(
         decision.matched,
         SettlementReturnMatch::FulfillmentTerminal | SettlementReturnMatch::ManualReconcile
     );
-    let delivery_id = locked
+    let bound_delivery = locked
         .as_ref()
         .filter(|_| bound)
         .and_then(|locked| locked.facts.delivery.as_ref())
-        .map(|delivery| delivery.id);
+        .map(|delivery| (delivery.id, delivery.dispatch_no));
+    let delivery_id = bound_delivery.map(|(delivery_id, _)| delivery_id);
     let previous_state =
         locked.as_ref().filter(|_| bound).and_then(|locked| locked.facts.execution_state.clone());
     // 消费唯一事实先于任何状态迁移写入：主键冲突时整事务回滚，不会出现两次转人工。
@@ -140,6 +148,19 @@ pub(crate) async fn consume_return_postgres(
     .execute(&mut *transaction)
     .await
     .map_err(map_storage_error)?;
+    let world_id: String = candidate.try_get("return_world_id").map_err(map_storage_error)?;
+    // 案件以证据唯一：同事务建立，未绑定的记录同样建案隔离，等待核对或重新核验。
+    open_case(
+        &mut transaction,
+        return_mail_id,
+        &world_id,
+        obligation_id,
+        bound_delivery,
+        decision,
+        now,
+    )
+    .await
+    .map_err(map_storage_error)?;
     if decision.matched == SettlementReturnMatch::ManualReconcile {
         let locked = locked.as_ref().ok_or_else(|| repository_error("结算退件绑定的义务已失效"))?;
         hold_for_manual_reconcile(&mut transaction, locked, return_mail_id, decision, now).await?;
@@ -154,17 +175,18 @@ pub(crate) async fn consume_return_postgres(
     }))
 }
 
-/// 已锁定的义务、履约与原投递事实；`state_version` 只在履约行存在时有值。
-struct LockedObligation {
-    facts: SettlementReturnObligation,
-    state_version: Option<i64>,
+/// 已锁定的义务、履约与按证据请求解析的原派发；`state_version` 只在履约行存在时有值。
+pub(crate) struct LockedObligation {
+    pub(crate) facts: SettlementReturnObligation,
+    pub(crate) state_version: Option<i64>,
 }
 
-/// 按义务 → 履约的既有锁序锁定行，再读取原出站投递的发送事实。只认来源为该义务的结算投递；
-/// 义务不存在时返回 `None`。
-async fn lock_obligation(
+/// 按义务 → 履约的既有锁序锁定行，再按证据请求解析原派发的发送事实。只认来源为该义务的结算
+/// 投递；义务不存在时返回 `None`。
+pub(crate) async fn lock_obligation(
     transaction: &mut Transaction<'_, Postgres>,
     obligation_id: Uuid,
+    request: SettlementReturnDispatchRequest,
 ) -> Result<Option<LockedObligation>, auction_application::core::RepositoryError> {
     let Some(obligation) = sqlx::query(
         r#"SELECT obligation.obligation_kind, obligation.amount, obligation.carrier_credit,
@@ -183,13 +205,8 @@ async fn lock_obligation(
     };
     let fulfillment = sqlx::query(
         r#"SELECT fulfillment.execution_state, fulfillment.state_version,
-                  delivery.id AS delivery_id, delivery.payload_world, delivery.payload_operation,
-                  delivery.sending_at
+                  fulfillment.delivery_id, fulfillment.dispatch_no
            FROM public.settlement_obligation_fulfillments AS fulfillment
-           LEFT JOIN public.deliveries AS delivery
-               ON delivery.id = fulfillment.delivery_id
-              AND delivery.origin_kind = 'settlement'
-              AND delivery.origin_id = fulfillment.obligation_id::text
            WHERE fulfillment.obligation_id = $1
            FOR UPDATE OF fulfillment"#,
     )
@@ -197,7 +214,20 @@ async fn lock_obligation(
     .fetch_optional(&mut **transaction)
     .await
     .map_err(map_storage_error)?;
-    let delivery = fulfillment.as_ref().map(map_delivery).transpose()?.flatten();
+    let current_delivery: Option<Uuid> = fulfillment
+        .as_ref()
+        .map(|row| row.try_get::<Option<Uuid>, _>("delivery_id"))
+        .transpose()
+        .map_err(map_storage_error)?
+        .flatten();
+    let current_dispatch: Option<i32> = fulfillment
+        .as_ref()
+        .map(|row| row.try_get("dispatch_no"))
+        .transpose()
+        .map_err(map_storage_error)?;
+    let (delivery, dispatch_lookup) =
+        resolve_dispatch(transaction, obligation_id, request, current_delivery, current_dispatch)
+            .await?;
     Ok(Some(LockedObligation {
         facts: SettlementReturnObligation {
             id: obligation_id,
@@ -213,6 +243,7 @@ async fn lock_obligation(
                 .transpose()
                 .map_err(map_storage_error)?,
             delivery,
+            dispatch_lookup,
         },
         state_version: fulfillment
             .as_ref()
@@ -222,23 +253,113 @@ async fn lock_obligation(
     }))
 }
 
-fn map_delivery(
-    row: &PgRow,
-) -> Result<Option<SettlementReturnDelivery>, auction_application::core::RepositoryError> {
-    let Some(id) = row.try_get::<Option<Uuid>, _>("delivery_id").map_err(map_storage_error)? else {
-        return Ok(None);
+/// 按证据请求在只追加的派发历史中解析原派发：首寄查编号 1，补寄查引用的编号。迁移前已准备的
+/// 首寄已补登历史；从未登记任何派发、履约仍是首寄时，沿用履约当前投递作为唯一首寄候选。
+async fn resolve_dispatch(
+    transaction: &mut Transaction<'_, Postgres>,
+    obligation_id: Uuid,
+    request: SettlementReturnDispatchRequest,
+    current_delivery: Option<Uuid>,
+    current_dispatch: Option<i32>,
+) -> Result<
+    (Option<SettlementReturnDelivery>, SettlementReturnDispatchLookup),
+    auction_application::core::RepositoryError,
+> {
+    let dispatch_no = match request {
+        SettlementReturnDispatchRequest::First => FIRST_DISPATCH_NO,
+        SettlementReturnDispatchRequest::Resend(reference) => reference.dispatch_no,
+        SettlementReturnDispatchRequest::Invalid => {
+            return Ok((None, SettlementReturnDispatchLookup::Missing));
+        }
     };
-    Ok(Some(SettlementReturnDelivery {
-        id,
+    let dispatch_no = i32::try_from(dispatch_no)
+        .ok()
+        .ok_or_else(|| repository_error("结算退件派发编号超出范围"))?;
+    let recorded: Option<Uuid> = sqlx::query_scalar(
+        r#"SELECT delivery_id FROM public.settlement_fulfillment_dispatches
+           WHERE obligation_id = $1 AND dispatch_no = $2"#,
+    )
+    .bind(obligation_id)
+    .bind(dispatch_no)
+    .fetch_optional(&mut **transaction)
+    .await
+    .map_err(map_storage_error)?;
+    let candidate = match recorded {
+        Some(delivery_id) => Some(delivery_id),
+        None if dispatch_no == 1 => {
+            let any_recorded: bool = sqlx::query_scalar(
+                "SELECT EXISTS (SELECT 1 FROM public.settlement_fulfillment_dispatches
+                                WHERE obligation_id = $1)",
+            )
+            .bind(obligation_id)
+            .fetch_one(&mut **transaction)
+            .await
+            .map_err(map_storage_error)?;
+            // 只登记了后续派发却缺首寄历史：无引用的退件不能默认绑定任何一次派发。
+            if any_recorded {
+                return Ok((None, SettlementReturnDispatchLookup::Ambiguous));
+            }
+            current_delivery.filter(|_| current_dispatch == Some(1))
+        }
+        None => None,
+    };
+    let Some(delivery_id) = candidate else {
+        return Ok((None, SettlementReturnDispatchLookup::Missing));
+    };
+    let Some(row) = sqlx::query(
+        r#"SELECT delivery.payload_world, delivery.payload_operation, delivery.sending_at,
+                  delivery.recipient,
+                  EXISTS (
+                      SELECT 1 FROM public.settlement_return_cases AS bound
+                      WHERE bound.delivery_id = delivery.id
+                  ) AS already_returned,
+                  COALESCE((
+                      SELECT jsonb_agg(attempt.expectation -> 'body_digest'
+                                       ORDER BY attempt.fencing_version)
+                      FROM public.delivery_send_attempts AS attempt
+                      WHERE attempt.delivery_id = delivery.id
+                  ), '[]'::jsonb) AS body_digests
+           FROM public.deliveries AS delivery
+           WHERE delivery.id = $1
+             AND delivery.origin_kind = 'settlement'
+             AND delivery.origin_id = $2"#,
+    )
+    .bind(delivery_id)
+    .bind(obligation_id.to_string())
+    .fetch_optional(&mut **transaction)
+    .await
+    .map_err(map_storage_error)?
+    else {
+        return Ok((None, SettlementReturnDispatchLookup::Missing));
+    };
+    let body_digests: Vec<[u8; 32]> = serde_json::from_value(
+        row.try_get::<serde_json::Value, _>("body_digests").map_err(map_storage_error)?,
+    )
+    .ok()
+    .ok_or_else(|| repository_error("结算退件原派发的发送摘要无效"))?;
+    let delivery = SettlementReturnDelivery {
+        id: delivery_id,
         world: row.try_get("payload_world").map_err(map_storage_error)?,
         operation: row.try_get("payload_operation").map_err(map_storage_error)?,
         sending_at: row.try_get("sending_at").map_err(map_storage_error)?,
-    }))
+        dispatch_no: u32::try_from(dispatch_no)
+            .ok()
+            .ok_or_else(|| repository_error("结算退件派发编号超出范围"))?,
+        current: current_delivery == Some(delivery_id),
+        recipient: row.try_get("recipient").map_err(map_storage_error)?,
+        body_digests,
+    };
+    let lookup = if row.try_get::<bool, _>("already_returned").map_err(map_storage_error)? {
+        SettlementReturnDispatchLookup::AlreadyReturned
+    } else {
+        SettlementReturnDispatchLookup::Unique
+    };
+    Ok((Some(delivery), lookup))
 }
 
 /// 退件证明收件人没有收下原邮件：未终结履约转人工对账并清除领取，原投递、证明与资金都不改写
 /// （不变量 4、8）。版本与原状态不变才写入；持有旧 claim 的 Worker 随后按 fence 失败关闭。
-async fn hold_for_manual_reconcile(
+pub(crate) async fn hold_for_manual_reconcile(
     transaction: &mut Transaction<'_, Postgres>,
     locked: &LockedObligation,
     return_mail_id: Uuid,

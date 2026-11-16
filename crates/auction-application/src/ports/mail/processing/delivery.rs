@@ -41,6 +41,8 @@ closed_names! {
     pub enum MailDeliveryOrigin {
         MailIntake => "mail_intake",
         SettlementRecoveryAction => "settlement_recovery_action",
+        /// 结算退件案件的持久 Take：只领取 Bot 收件箱中的系统退件，由结算退件 owner 准备与激活。
+        SettlementReturnAction => "settlement_return_action",
         OperationsAlert => "operations_alert",
         LotWatch => "lot_watch",
         /// 卖方成交与流拍汇总；每场每卖方一封，正文在结算事实后冻结。

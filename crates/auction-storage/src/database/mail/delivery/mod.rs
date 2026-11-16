@@ -16,8 +16,9 @@ mod outbox;
 mod preparation;
 mod validation;
 
+pub(crate) use activation::activate_in_transaction;
 use activation::activate_postgres;
-pub(in crate::database) use disposition::has_return_intent;
+pub(in crate::database) use disposition::{has_return_intent, settlement_return_take_conflicts};
 pub(crate) use errors::MailDeliveryTransactionError;
 use outbox::enqueue_within_limit_postgres;
 use outbox::{enqueue_postgres, prepare_postgres};

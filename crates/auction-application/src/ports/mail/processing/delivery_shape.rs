@@ -25,13 +25,14 @@ const MAX_EXTERNAL_MAIL_ID_BYTES: usize = 256;
 
 impl MailDeliveryOrigin {
     /// 来源 × 操作组合闭集：入站邮件可寄出、退回与领取；恢复动作只寄付款提醒与领取退件；
-    /// 告警、出价被超提醒、卖方汇总与换季提醒只寄出。
+    /// 结算退件动作只领取；告警、出价被超提醒、卖方汇总与换季提醒只寄出。
     pub(crate) const fn admits_operation(self, operation: MailDeliveryOperation) -> bool {
         match self {
             Self::MailIntake => true,
             Self::SettlementRecoveryAction => {
                 matches!(operation, MailDeliveryOperation::Send | MailDeliveryOperation::Take)
             }
+            Self::SettlementReturnAction => matches!(operation, MailDeliveryOperation::Take),
             Self::OperationsAlert | Self::LotWatch | Self::SellerSummary | Self::SeasonReminder => {
                 matches!(operation, MailDeliveryOperation::Send)
             }
@@ -126,9 +127,11 @@ impl MailDeliveryShape<'_> {
                 self.credits == 0 && self.cod == 0 && self.attachment_ids.is_empty()
             }
             (MailDeliveryOrigin::MailIntake, _) => self.credits == 0 && self.cod == 0,
-            (MailDeliveryOrigin::SettlementRecoveryAction, MailDeliveryOperation::Take) => {
-                self.attachment_ids.windows(2).all(|pair| pair[0] < pair[1])
-            }
+            (
+                MailDeliveryOrigin::SettlementRecoveryAction
+                | MailDeliveryOrigin::SettlementReturnAction,
+                MailDeliveryOperation::Take,
+            ) => self.attachment_ids.windows(2).all(|pair| pair[0] < pair[1]),
             // 组合闭集之外的退回与领取已在 `check` 开头拒绝；这里同样失败关闭，不放行资产。
             _ => false,
         }
@@ -173,6 +176,10 @@ impl MailDeliveryShape<'_> {
             }
             MailDeliveryOrigin::SettlementRecoveryAction => {
                 self.origin_id.strip_prefix("recovery:").is_some_and(canonical_uuid)
+            }
+            // 来源标识是退件案件 ID（即退件入站邮件 ID）。
+            MailDeliveryOrigin::SettlementReturnAction => {
+                self.origin_id.strip_prefix("settlement_return:").is_some_and(canonical_uuid)
             }
             MailDeliveryOrigin::OperationsAlert => {
                 self.external_mail_id.strip_prefix("operations-alert:").is_some_and(|batch_id| {
@@ -263,6 +270,7 @@ mod tests {
                 (MailDeliveryOrigin::MailIntake, MailDeliveryOperation::Take),
                 (MailDeliveryOrigin::SettlementRecoveryAction, MailDeliveryOperation::Send),
                 (MailDeliveryOrigin::SettlementRecoveryAction, MailDeliveryOperation::Take),
+                (MailDeliveryOrigin::SettlementReturnAction, MailDeliveryOperation::Take),
                 (MailDeliveryOrigin::OperationsAlert, MailDeliveryOperation::Send),
                 (MailDeliveryOrigin::LotWatch, MailDeliveryOperation::Send),
                 (MailDeliveryOrigin::SellerSummary, MailDeliveryOperation::Send),

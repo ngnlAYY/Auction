@@ -129,8 +129,8 @@ pub(super) async fn exclude_conflicts(
                   d.payload
            FROM public.deliveries d
            WHERE d.origin_kind IN (
-               'mail_intake','settlement_recovery_action','operations_alert',
-               'lot_watch','seller_summary','season_reminder'
+               'mail_intake','settlement_recovery_action','settlement_return_action',
+               'operations_alert','lot_watch','seller_summary','season_reminder'
            )"#,
     )
     .fetch(&mut **tx);
@@ -224,8 +224,9 @@ pub(super) async fn exclude_conflicts(
                                THEN ARRAY['payment_deadline']
                            WHEN 'settlement_payment_carrier'
                                THEN ARRAY['item_name','payment_deadline']
-                           WHEN 'settlement_seller_payout' THEN ARRAY['item_name']
-                           WHEN 'settlement_buyer_refund' THEN ARRAY['item_name']
+                           WHEN 'settlement_seller_payout' THEN ARRAY['item_name','dispatch']
+                           WHEN 'settlement_buyer_refund' THEN ARRAY['item_name','dispatch']
+                           WHEN 'settlement_equipment_handoff' THEN ARRAY['dispatch']
                            ELSE ARRAY[]::text[] END
                          IS DISTINCT FROM CASE d.payload_template
                            WHEN 'settlement_winner_equipment_cod' THEN CASE
@@ -341,6 +342,12 @@ pub(super) async fn exclude_conflicts(
                    WHERE a.delivery_id=d.id
                      AND a.execution_state='satisfied'
                      AND a.proof_digest IS NOT NULL
+                 )
+                 AND NOT EXISTS(
+                   SELECT 1
+                   FROM public.settlement_return_takes returned
+                   WHERE returned.take_delivery_id=d.id
+                      OR returned.original_delivery_id=d.id
                  )
                  AND NOT EXISTS(
                    SELECT 1

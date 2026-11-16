@@ -2,11 +2,13 @@
 //! 义务种类；恢复流程之外的退件按绑定与履约状态给出闭集处置。只覆盖纯判定，不连接数据库。
 
 use auction_application::settlement::{
-    SYSTEM_RETURN_SENDER, SettlementReturnDelivery, SettlementReturnFacts, SettlementReturnMatch,
-    SettlementReturnObligation, SettlementReturnReason, system_return_matches_obligation,
+    SYSTEM_RETURN_SENDER, SettlementReturnDelivery, SettlementReturnDispatchLookup,
+    SettlementReturnFacts, SettlementReturnMatch, SettlementReturnObligation,
+    SettlementReturnReason, parse_returned_settlement_body, returned_mail_body_digest,
+    settlement_return_dispatch_request, system_return_matches_obligation,
     system_returned_settlement_obligation_id,
 };
-use auction_domain::SettlementObligationKind;
+use auction_domain::{SettlementDispatchReference, SettlementObligationKind};
 use chrono::{DateTime, Duration, TimeZone, Utc};
 use serde_json::json;
 use uuid::Uuid;
@@ -140,7 +142,12 @@ fn payout_facts() -> SettlementReturnFacts {
                 world: Some("main".to_owned()),
                 operation: Some("send".to_owned()),
                 sending_at: Some(at(10) + Duration::seconds(42)),
+                dispatch_no: 1,
+                current: true,
+                recipient: "SellerPlayer".to_owned(),
+                body_digests: Vec::new(),
             }),
+            dispatch_lookup: SettlementReturnDispatchLookup::Unique,
         }),
     }
 }
@@ -336,4 +343,151 @@ fn stable_labels_match_the_database_closed_sets() {
             "{label}"
         );
     }
+}
+
+fn hex(digest: &[u8; 32]) -> String {
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// 补寄派发的退件：原正文末行带派发引用，系统后缀写明原收件人。
+fn resend_facts() -> (SettlementReturnFacts, SettlementDispatchReference, [u8; 32]) {
+    let reference = SettlementDispatchReference::for_resend(obligation_id(), 2)
+        .unwrap_or_else(|| panic!("补寄派发引用必须存在"));
+    let original = format!(
+        "Your auction payout is attached.\n\nReference: {OBLIGATION_ID}\n\nDispatch reference: {}",
+        reference.encode()
+    );
+    let parsed = parse_returned_settlement_body(&format!(
+        "{original}\n\nThis message was returned from sellerplayer, kupo!"
+    ))
+    .unwrap_or_else(|| panic!("系统后缀必须完整"));
+    let digest = returned_mail_body_digest(&original);
+    assert_eq!(parsed.body_digest, digest);
+    let mut facts = payout_facts();
+    facts.metadata = json!({
+        "obligation_id": OBLIGATION_ID,
+        "credits": 250_000,
+        "cod": 0,
+        "attachment_ids": [],
+        "returned_from": parsed.returned_from,
+        "body_digest": hex(&parsed.body_digest),
+        "dispatch_reference": parsed.dispatch_reference,
+    });
+    if let Some(delivery) =
+        facts.obligation.as_mut().and_then(|obligation| obligation.delivery.as_mut())
+    {
+        delivery.id = reference.delivery_id;
+        delivery.dispatch_no = 2;
+        delivery.body_digests = vec![[0x11; 32], digest];
+    }
+    (facts, reference, digest)
+}
+
+/// 补寄退件只在派发引用属于该义务、解析到同一派发，且原正文摘要与原收件人都与派发冻结事实
+/// 一致时绑定；任一不符都隔离为 unbound，不能默认绑定最新投递。
+#[test]
+fn resend_returns_bind_only_with_dispatch_and_body_proof() {
+    let (facts, reference, _) = resend_facts();
+    assert_eq!(
+        settlement_return_dispatch_request(&facts.metadata),
+        auction_application::settlement::SettlementReturnDispatchRequest::Resend(reference)
+    );
+    assert_eq!(
+        decision(&facts),
+        (SettlementReturnMatch::ManualReconcile, SettlementReturnReason::ReturnedAssetsMatch)
+    );
+
+    let mut wrong_digest = resend_facts().0;
+    if let Some(delivery) =
+        wrong_digest.obligation.as_mut().and_then(|obligation| obligation.delivery.as_mut())
+    {
+        delivery.body_digests = vec![[0x11; 32]];
+    }
+    let mut wrong_recipient = resend_facts().0;
+    wrong_recipient.metadata["returned_from"] = json!("SomeoneElse");
+    let mut missing_digest = resend_facts().0;
+    if let Some(metadata) = missing_digest.metadata.as_object_mut() {
+        metadata.remove("body_digest");
+    }
+    for facts in [wrong_digest, wrong_recipient, missing_digest] {
+        assert_eq!(
+            decision(&facts),
+            (SettlementReturnMatch::Unbound, SettlementReturnReason::BodyUnproven)
+        );
+    }
+
+    let foreign = SettlementDispatchReference::for_resend(Uuid::from_u128(77), 2)
+        .expect("其他义务的补寄引用");
+    let mut foreign_reference = resend_facts().0;
+    foreign_reference.metadata["dispatch_reference"] = json!(foreign.encode());
+    let mut malformed = resend_facts().0;
+    malformed.metadata["dispatch_reference"] = json!("v1/2/not-a-uuid");
+    for facts in [foreign_reference, malformed] {
+        assert_eq!(
+            decision(&facts),
+            (SettlementReturnMatch::Unbound, SettlementReturnReason::EvidenceInvalid)
+        );
+    }
+
+    let mut other_delivery = resend_facts().0;
+    if let Some(delivery) =
+        other_delivery.obligation.as_mut().and_then(|obligation| obligation.delivery.as_mut())
+    {
+        delivery.id = Uuid::from_u128(10);
+    }
+    let mut missing_dispatch = resend_facts().0;
+    if let Some(obligation) = missing_dispatch.obligation.as_mut() {
+        obligation.delivery = None;
+        obligation.dispatch_lookup = SettlementReturnDispatchLookup::Missing;
+    }
+    for facts in [other_delivery, missing_dispatch] {
+        assert_eq!(
+            decision(&facts),
+            (SettlementReturnMatch::Unbound, SettlementReturnReason::DispatchUnknown)
+        );
+    }
+}
+
+/// 无派发引用的退件只能绑定唯一、仍为当前派发且未被其他退件绑定的首寄。
+#[test]
+fn first_send_returns_require_a_unique_current_dispatch() {
+    let mut ambiguous = payout_facts();
+    if let Some(obligation) = ambiguous.obligation.as_mut() {
+        obligation.delivery = None;
+        obligation.dispatch_lookup = SettlementReturnDispatchLookup::Ambiguous;
+    }
+    assert_eq!(
+        decision(&ambiguous),
+        (SettlementReturnMatch::Unbound, SettlementReturnReason::DispatchAmbiguous)
+    );
+    let mut already_returned = payout_facts();
+    if let Some(obligation) = already_returned.obligation.as_mut() {
+        obligation.dispatch_lookup = SettlementReturnDispatchLookup::AlreadyReturned;
+    }
+    assert_eq!(
+        decision(&already_returned),
+        (SettlementReturnMatch::Unbound, SettlementReturnReason::DispatchAlreadyReturned)
+    );
+    let mut superseded = payout_facts();
+    if let Some(delivery) =
+        superseded.obligation.as_mut().and_then(|obligation| obligation.delivery.as_mut())
+    {
+        delivery.current = false;
+    }
+    assert_eq!(
+        decision(&superseded),
+        (SettlementReturnMatch::Unbound, SettlementReturnReason::DispatchSuperseded)
+    );
+    let mut resend_without_reference = payout_facts();
+    if let Some(delivery) = resend_without_reference
+        .obligation
+        .as_mut()
+        .and_then(|obligation| obligation.delivery.as_mut())
+    {
+        delivery.dispatch_no = 2;
+    }
+    assert_eq!(
+        decision(&resend_without_reference),
+        (SettlementReturnMatch::Unbound, SettlementReturnReason::DispatchUnknown)
+    );
 }

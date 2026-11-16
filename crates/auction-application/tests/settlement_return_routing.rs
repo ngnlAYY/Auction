@@ -266,6 +266,37 @@ fn system_returned_payment_request_is_settlement_return_evidence() {
     assert!(service.deliveries.operations().is_empty());
 }
 
+/// 完整系统后缀的退件额外记录原收件人、原正文摘要与补寄派发引用原文；正文本身不进入证据。
+#[test]
+fn system_return_body_facts_are_recorded_without_the_body() {
+    let service = service();
+    let subject = format!("[RTS] Auction seller payout [{OBLIGATION_ID}]");
+    let original = format!(
+        "Your auction payout is attached.\n\nReference: {OBLIGATION_ID}\n\nDispatch reference: v1/2/0d6c1d0c-63c4-5d0b-9a4f-1d7d2f8e9a01"
+    );
+    let mut message = returned_mail("MoogleMail", &subject);
+    message.body = format!("{original}\n\nThis message was returned from SellerPlayer, kupo!");
+    let decision = process(&service, message).expect("退件证据");
+    let digest: String = auction_application::settlement::returned_mail_body_digest(&original)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    assert_eq!(
+        decision.metadata,
+        json!({
+            "obligation_id": OBLIGATION_ID,
+            "credits": 0,
+            "cod": 125_000,
+            "attachment_ids": [EQUIPMENT_ID],
+            "returned_from": "SellerPlayer",
+            "body_digest": digest,
+            "dispatch_reference": "v1/2/0d6c1d0c-63c4-5d0b-9a4f-1d7d2f8e9a01",
+        })
+    );
+    assert!(!decision.metadata.to_string().contains("Your auction payout"));
+    assert!(service.deliveries.operations().is_empty());
+}
+
 #[test]
 fn system_returned_equipment_delivery_matches_case_variants() {
     let service = service();

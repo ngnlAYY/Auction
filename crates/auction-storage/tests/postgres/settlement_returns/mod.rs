@@ -21,8 +21,11 @@ use crate::recovery_returns::{
 };
 use crate::support;
 
+mod cases;
+mod flows;
+
 /// 写入一封已接受的结算退件证据；发件人与主题缺失时模拟入站展示快照之前的历史行。
-async fn insert_inbound(
+pub(crate) async fn insert_inbound(
     pool: &PgPool,
     external_mail_id: &str,
     received_at: DateTime<Utc>,
@@ -53,7 +56,7 @@ async fn insert_inbound(
     mail_id
 }
 
-fn evidence(obligation: Uuid, credits: i64, attachments: &[&str]) -> Value {
+pub(crate) fn evidence(obligation: Uuid, credits: i64, attachments: &[&str]) -> Value {
     json!({
         "obligation_id": obligation.to_string(),
         "credits": credits,
@@ -63,7 +66,7 @@ fn evidence(obligation: Uuid, credits: i64, attachments: &[&str]) -> Value {
 }
 
 /// 为义务写入一条已寄出的结算 Send 投递与对应履约；`state` 为履约执行状态。
-async fn insert_sent_fulfillment(
+pub(crate) async fn insert_sent_fulfillment(
     pool: &PgPool,
     obligation: Uuid,
     template: &str,

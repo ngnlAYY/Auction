@@ -17,7 +17,9 @@ use crate::ports::mail::{
     MailUserPort, MailUserRebindCommand, MailUserRegisterCommand, MailUserRekeyCommand,
     MailUserResultCode,
 };
-use crate::ports::settlement::system_returned_settlement_obligation_id;
+use crate::ports::settlement::{
+    parse_returned_settlement_body, system_returned_settlement_obligation_id,
+};
 
 impl<E, A, D, U, C> MailProcessorService<E, A, D, U, C>
 where
@@ -72,22 +74,29 @@ where
     /// 和金额事实写入 `inbound_mail`，由 recovery Worker 在 Serializable 事务中复核来源并与义务
     /// 比对：恢复流程决定收回动作，其余结算退件只留证并转人工对账。来源已认证的退件即使资产
     /// 异常（例如不可领取）也照样记为证据，交给消费方隔离，不以错误让收件游标停在这封邮件上。
+    /// 正文只记录系统后缀写明的原收件人、原正文摘要与补寄派发引用原文，用于把退件绑定到具体
+    /// 派发；正文本身不进入证据。系统后缀不完整时不记录这三项，补寄退件随后按无法证明隔离。
     fn process_settlement_return(
         &self,
         message: MailMessage,
         obligation_id: Uuid,
     ) -> Result<MailProcessingDecision, ApplicationError> {
-        decision(
-            "delivery",
-            "accepted",
-            "settlement_recovery_returned",
-            json!({
-                "obligation_id": obligation_id.to_string(),
-                "credits": message.credits,
-                "cod": message.cod,
-                "attachment_ids": message.sorted_attachment_ids(),
-            }),
-        )
+        let mut evidence = json!({
+            "obligation_id": obligation_id.to_string(),
+            "credits": message.credits,
+            "cod": message.cod,
+            "attachment_ids": message.sorted_attachment_ids(),
+        });
+        if let Some(body) = parse_returned_settlement_body(&message.body) {
+            evidence["returned_from"] = json!(body.returned_from);
+            evidence["body_digest"] = json!(
+                body.body_digest.iter().map(|byte| format!("{byte:02x}")).collect::<String>()
+            );
+            if let Some(reference) = body.dispatch_reference {
+                evidence["dispatch_reference"] = json!(reference);
+            }
+        }
+        decision("delivery", "accepted", "settlement_recovery_returned", evidence)
     }
 
     async fn process_register(

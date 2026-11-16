@@ -158,6 +158,9 @@ pub struct SettlementFulfillmentClaim {
     /// 旧邮件的远端 ID，仅在邮件来源时使用；不保存正文或 Cookie。
     pub submission_external_mail_id: Option<String>,
     pub prerequisite_id: Option<SettlementId>,
+    /// 履约当前派发编号：首寄为 1，结算退件领回后经 Admin 授权的补寄逐次加 1。编号决定投递、
+    /// prepare 与 activate 的稳定身份及补寄正文的派发引用；首寄沿用旧单例身份与原载荷字节。
+    pub dispatch_no: u32,
     pub delivery_id: Option<Uuid>,
     pub prepare_command_id: Option<CommandId>,
     pub prepare_request_hash: Option<RequestHash>,

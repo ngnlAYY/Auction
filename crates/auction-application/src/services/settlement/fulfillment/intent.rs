@@ -3,7 +3,9 @@
 use std::collections::BTreeMap;
 
 use auction_domain::{
-    CommandId, SettlementId, SettlementMode, SettlementObligationKind, legacy_natural_key_uuid,
+    CommandId, FIRST_DISPATCH_NO, SettlementDispatchReference, SettlementId, SettlementMode,
+    SettlementObligationKind, legacy_natural_key_uuid, resend_activate_command_id,
+    resend_delivery_id, resend_prepare_command_id,
 };
 use serde::Serialize;
 use uuid::Uuid;
@@ -74,6 +76,7 @@ pub(super) fn build_delivery_intent(
             .and_then(|snapshot| snapshot.payload.get("variables"))
             .and_then(serde_json::Value::as_object)
             .map(|variables| variables.keys().cloned().collect()),
+        dispatch_reference: dispatch_reference(claim)?,
     };
 
     match claim.kind {
@@ -214,6 +217,10 @@ pub(super) fn build_canonical_delivery(
                 _ => return Err(repository_error("结算履约 payload 模板无效")),
             }
             apply_frozen_variable_shape(&mut variables, intent);
+            // 补寄正文末行写版本化派发引用，系统退件原样带回，据此绑定到这一次派发。
+            if let Some(reference) = &intent.dispatch_reference {
+                variables.insert("dispatch", reference.clone());
+            }
             let equipment_secret_refs = intent
                 .equipment_id
                 .map(|equipment_id| {
@@ -242,6 +249,61 @@ pub(super) fn build_canonical_delivery(
     let request_hash = RequestHash::from_canonical_bytes(&encoded);
     let payload = serde_json::from_slice(&encoded)?;
     Ok(CanonicalSettlementDelivery { payload, request_hash })
+}
+
+/// 补寄派发的版本化引用；首寄返回 `None`。编号非法时失败关闭，不退化为首寄身份。
+fn dispatch_reference(
+    claim: &SettlementFulfillmentClaim,
+) -> Result<Option<String>, ApplicationError> {
+    if claim.dispatch_no == FIRST_DISPATCH_NO {
+        return Ok(None);
+    }
+    SettlementDispatchReference::for_resend(claim.obligation_id.as_uuid(), claim.dispatch_no)
+        .map(|reference| Some(reference.encode()))
+        .ok_or_else(|| repository_error("结算履约派发编号无效"))
+}
+
+/// 当前派发的 delivery ID：首寄沿用旧单例算法，补寄按派发编号进入独立命名空间。
+pub(super) fn dispatch_delivery_id(
+    claim: &SettlementFulfillmentClaim,
+) -> Result<Uuid, ApplicationError> {
+    dispatch_identity(claim, stable_delivery_id, resend_delivery_id)
+}
+
+/// 当前派发的 prepare command ID；规则同 [`dispatch_delivery_id`]。
+pub(super) fn dispatch_prepare_command_id(
+    claim: &SettlementFulfillmentClaim,
+) -> Result<CommandId, ApplicationError> {
+    dispatch_identity(
+        claim,
+        |obligation_id| stable_prepare_command_id(obligation_id).as_uuid(),
+        resend_prepare_command_id,
+    )
+    .map(CommandId::from_uuid)
+}
+
+/// 当前派发的 activate command ID；规则同 [`dispatch_delivery_id`]。
+pub(super) fn dispatch_activate_command_id(
+    claim: &SettlementFulfillmentClaim,
+) -> Result<CommandId, ApplicationError> {
+    dispatch_identity(
+        claim,
+        |obligation_id| stable_activate_command_id(obligation_id).as_uuid(),
+        resend_activate_command_id,
+    )
+    .map(CommandId::from_uuid)
+}
+
+fn dispatch_identity(
+    claim: &SettlementFulfillmentClaim,
+    first: impl FnOnce(SettlementId) -> Uuid,
+    resend: impl FnOnce(Uuid, u32) -> Option<Uuid>,
+) -> Result<Uuid, ApplicationError> {
+    if claim.dispatch_no == FIRST_DISPATCH_NO {
+        return Ok(first(claim.obligation_id));
+    }
+    resend(claim.obligation_id.as_uuid(), claim.dispatch_no)
+        .ok_or_else(|| repository_error("结算履约派发编号无效"))
 }
 
 /// 从 canonical obligation singleton 派生旧版稳定 delivery ID。
@@ -403,6 +465,7 @@ mod tests {
             submission_source_kind: Some("mail".to_owned()),
             submission_external_mail_id: None,
             prerequisite_id: None,
+            dispatch_no: 1,
             delivery_id: None,
             prepare_command_id: None,
             prepare_request_hash: None,
@@ -426,6 +489,54 @@ mod tests {
     fn canonical_of(claim: &SettlementFulfillmentClaim) -> CanonicalSettlementDelivery {
         let intent = build_delivery_intent(claim).expect("intent 必须有效");
         build_canonical_delivery(&intent).expect("payload 必须有效")
+    }
+
+    /// 首寄沿用旧单例身份与原载荷字节（不带派发引用）；补寄换补寄命名空间的身份，载荷多出版本化
+    /// 派发引用，摘要随之不同；同一编号重放得到同一身份与摘要。
+    #[test]
+    fn resend_dispatch_uses_new_identities_and_carries_the_dispatch_reference() {
+        let mut first = claim(SettlementObligationKind::SellerPayout);
+        first.recipient_user_id = None;
+        first.recipient = "seller".to_owned();
+        let first_payload = canonical_of(&first);
+        assert_eq!(
+            super::dispatch_delivery_id(&first).unwrap(),
+            stable_delivery_id(first.obligation_id)
+        );
+        assert_eq!(
+            super::dispatch_prepare_command_id(&first).unwrap(),
+            stable_prepare_command_id(first.obligation_id)
+        );
+        assert_eq!(
+            super::dispatch_activate_command_id(&first).unwrap(),
+            stable_activate_command_id(first.obligation_id)
+        );
+        assert!(first_payload.payload["variables"].get("dispatch").is_none(), "首寄载荷字节不变");
+
+        let mut resend = first.clone();
+        resend.dispatch_no = 2;
+        let resend_payload = canonical_of(&resend);
+        let reference = auction_domain::SettlementDispatchReference::for_resend(
+            resend.obligation_id.as_uuid(),
+            2,
+        )
+        .unwrap();
+        assert_eq!(super::dispatch_delivery_id(&resend).unwrap(), reference.delivery_id);
+        assert_ne!(
+            super::dispatch_delivery_id(&resend).unwrap(),
+            stable_delivery_id(resend.obligation_id)
+        );
+        assert_ne!(
+            super::dispatch_prepare_command_id(&resend).unwrap(),
+            stable_prepare_command_id(resend.obligation_id)
+        );
+        assert_eq!(resend_payload.payload["variables"]["dispatch"], reference.encode());
+        assert_ne!(resend_payload.request_hash, first_payload.request_hash);
+        assert_eq!(canonical_of(&resend).request_hash, resend_payload.request_hash, "重放稳定");
+        let mut invalid = first;
+        invalid.dispatch_no = 0;
+        assert!(build_delivery_intent(&invalid).is_err(), "编号 0 失败关闭，不退化为首寄");
+        assert!(super::dispatch_delivery_id(&invalid).is_err(), "编号 0 不能派生身份");
     }
 
     /// COD 收回重寄只改写恢复记录的当前期限；正文与载荷按首寄期限 D0 重建，因此首寄与任意次

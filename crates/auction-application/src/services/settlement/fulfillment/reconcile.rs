@@ -547,6 +547,7 @@ mod tests {
             submission_source_kind: None,
             submission_external_mail_id: None,
             prerequisite_id: Some(SettlementId::from_uuid(Uuid::from_u128(0x1000))),
+            dispatch_no: 1,
             delivery_id: Some(stable_delivery_id(obligation_id)),
             prepare_command_id: Some(stable_prepare_command_id(obligation_id)),
             prepare_request_hash: None,

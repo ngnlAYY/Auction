@@ -17,7 +17,10 @@ mod collection;
 mod delivery;
 mod dependencies;
 mod eligibility;
-pub(crate) use eligibility::{SettlementDeliveryEligibility, lock_settlement_delivery_eligibility};
+pub(crate) use eligibility::{
+    SettlementDeliveryEligibility, lock_settlement_delivery_eligibility,
+    recovery_allows_execution_now,
+};
 mod internal;
 pub(crate) use collection::{
     sent_awaiting_collection_sql, sent_delivery_sql, sent_unsatisfied_sql,
@@ -33,7 +36,10 @@ pub(crate) use recovery_closure::{
     recovery_disposed_delivery_sql,
 };
 mod returns;
-pub(crate) use returns::{consume_return_postgres, system_settlement_return_source};
+pub(crate) use returns::{
+    consume_return_postgres, hold_for_manual_reconcile, lock_obligation,
+    system_settlement_return_source,
+};
 mod sent_lookup;
 
 use self::claims::claim_postgres;

@@ -67,6 +67,9 @@ pub struct DeliveryAdminGuardSnapshot {
 /// 阻断项闭集；顺序即判定优先级，调用方取第一项。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeliveryAdminGuardBlocker {
+    /// 结算退件 Take 由退件案件 owner 推进：结果未知只认系统可验证证明，不允许人工释放、
+    /// 重试或声明成功/失败。
+    SettlementReturnActionOwned,
     /// 结算义务已不可执行（成交已撤销）或投递已不是当前派发，禁止重新激活。
     SettlementIneligible,
     /// 已绑定资金责任，禁止人工释放/重试/对账改写。
@@ -94,7 +97,8 @@ impl DeliveryAdminGuardBlocker {
     pub const fn error(self) -> DeliveryAdminError {
         match self {
             Self::SettlementIneligible => DeliveryAdminError::SettlementIneligible,
-            Self::FundedDelivery
+            Self::SettlementReturnActionOwned
+            | Self::FundedDelivery
             | Self::RetiredDelivery
             | Self::ReconcileSucceededForSend
             | Self::QuarantinedMailActionNotAllowed
@@ -135,6 +139,9 @@ impl DeliveryAdminGuardSnapshot {
     pub fn evaluate(&self) -> DeliveryAdminGuardDecision {
         let transition = self.action.transition();
         let mut blockers = Vec::new();
+        if self.origin_kind == "settlement_return_action" {
+            blockers.push(DeliveryAdminGuardBlocker::SettlementReturnActionOwned);
+        }
         if checks_lot_eligibility(self.action) && self.settlement_eligible == Some(false) {
             blockers.push(DeliveryAdminGuardBlocker::SettlementIneligible);
         }

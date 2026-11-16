@@ -28,7 +28,7 @@ pub(super) use recovery_allows_execution;
 
 /// 最终事务内复核资格；调用方已按既有锁序锁定恢复记录与义务，不满足的义务失败关闭，
 /// 领取过滤与这里的复核共同保证撤销后的旧 claim 不能继续推进。
-pub(super) async fn recovery_allows_execution_now(
+pub(crate) async fn recovery_allows_execution_now(
     transaction: &mut Transaction<'_, Postgres>,
     obligation_id: Uuid,
 ) -> Result<bool, sqlx::Error> {

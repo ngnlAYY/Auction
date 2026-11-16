@@ -49,7 +49,7 @@ VALUES (76, 'breaking');
 
 ## 索引
 
-当前 head 为 `000113`，与 [ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json) 的 `database_schema_version` 一致；新增迁移必须同时推进这两处。下表按版本递增，只列主题，不是逐条字段说明。
+当前 head 为 `000115`，与 [ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json) 的 `database_schema_version` 一致；新增迁移必须同时推进这两处。下表按版本递增，只列主题，不是逐条字段说明。
 
 | 版本 | 主题 |
 | --- | --- |
@@ -166,3 +166,5 @@ VALUES (76, 'breaking');
 | 000111 | 结算退件证据：新增只追加的 `settlement_return_evidence`（以入站邮件 ID 为主键，记录处置 `untrusted`/`unbound`/`fulfillment_terminal`/`manual_reconcile`、原因码、原义务与原投递），与恢复流程的退件消费按“来源可证明且绑定恢复付款/交付义务”互斥分区；只留证与把未终结履约转人工对账，不领取、不退回、不重发、不改变资金；`inbound_mail` 增加结算退件部分索引；运行账号只授 `INSERT`；纯新增，登记 compatible |
 | 000112 | Admin 确认收回/取消的成交撤销的历史投影修复：只在命令账本有该确认、原付款履约未终结且无未过期领取、原付款投递已无未解决外部写入、依赖履约未开始时，把原付款履约改为 `failed`（`recovery_reclaimed`/`recovery_cancelled`）、未开始的卖方货款与 isekai 装备交付改为 `failed`（`recovery_sale_voided`），并在原付款投递当前 fence 追加 `cod_returned` 处置与审计；其余记录保持原样留给人工核对，不改投递、证明、资金或恢复记录；改写既有行并写入旧读侧不认识的失败码，登记 breaking |
 | 000113 | `delivery_dispositions` 的种类闭集新增 `recovery_equipment_recovered`（来源仍为 `settlement_recovery_id`，写入时固定解除告警）：isekai 已付款交付被退回、装备经精确 Take 证明收回后，Admin 确认 `equipment_recovered` 在同一事务内把从未开始的卖方货款（`recovery_sale_voided`）与已寄出的交付（`recovery_equipment_recovered`）收口为 `failed`，并在原交付投递当前 fence 上追加该处置；不改写既有行，不改变资金或资产；旧程序无法解析新种类，登记 breaking |
+| 000114 | 结算退件案件：新增可变投影 `settlement_return_cases`（每条退件证据一个案件，含 untrusted/unbound/fulfillment_terminal；冻结补寄上限 3、案件版本乐观并发；同一原派发只绑定一个案件）与持久 Take 投影 `settlement_return_actions`，只追加的 `settlement_return_commands`（command_id 幂等账本）、`settlement_return_events`（每个案件版本一条）与 `settlement_return_takes`（精确领回证明只消费一次，原派发、Take 投递与邮件各唯一）；`deliveries.origin_kind` 新增受限来源 `settlement_return_action`（只做 Take）；为已有证据补建案件与开案事件；运行账号对投影授读写、对事实只授 `INSERT`；旧程序不认识新来源与新互斥，登记 breaking |
+| 000115 | 结算退件补寄与资金返还：履约新增当前派发编号 `dispatch_no`（既有行为 1），只追加的派发历史 `settlement_fulfillment_dispatches`（`(义务, 派发编号)` 主键，补寄引用授权它的退件案件）与资金投递历史绑定 `settlement_funding_delivery_bindings`（分配指针换代后旧派发仍受资金保护）；`settlement_funding_returns` 增加入站/Take/来源唯一绑定（NOT VALID 只约束新行）并改为只追加、运行账号只授 `INSERT`；补登既有派发与绑定；旧程序按单指针定位资金，登记 breaking |

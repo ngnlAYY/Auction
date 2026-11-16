@@ -1,6 +1,6 @@
 //! 履约 claim 与 delivery 快照、意图的一致性判定。
 
-use super::intent::{build_canonical_delivery, stable_delivery_id, stable_prepare_command_id};
+use super::intent::{build_canonical_delivery, dispatch_delivery_id, dispatch_prepare_command_id};
 use super::model::SettlementDeliveryIntent;
 use crate::ports::settlement::SettlementFulfillmentClaim;
 
@@ -20,9 +20,9 @@ pub(super) fn delivery_snapshot_matches(
         return false;
     };
     snapshot.id == delivery_id
-        && delivery_id == stable_delivery_id(claim.obligation_id)
+        && dispatch_delivery_id(claim).is_ok_and(|expected| delivery_id == expected)
         && snapshot.prepare_command_id == prepare_command_id
-        && prepare_command_id == stable_prepare_command_id(claim.obligation_id)
+        && dispatch_prepare_command_id(claim).is_ok_and(|expected| prepare_command_id == expected)
         && snapshot.prepare_request_hash == prepare_request_hash
         && prepare_request_hash == expected.request_hash
         && snapshot.activate_command_id == claim.activate_command_id

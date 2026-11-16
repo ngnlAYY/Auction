@@ -2,4 +2,5 @@
 
 mod postgres;
 mod pricing;
+mod row;
 pub(super) use postgres::claim_postgres;

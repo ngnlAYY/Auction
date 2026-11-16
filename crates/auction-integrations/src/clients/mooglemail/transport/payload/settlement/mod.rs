@@ -5,7 +5,10 @@ use std::collections::BTreeMap;
 use auction_application::delivery::{DeliveryTransportError, DeliveryWorkClaim};
 use auction_application::public::format_credits;
 use auction_application::settlement::canonical_settlement_fulfillment_subject;
-use auction_domain::{SettlementId, SettlementObligationKind};
+use auction_domain::{
+    DISPATCH_REFERENCE_LINE_PREFIX, SettlementDispatchReference, SettlementId,
+    SettlementObligationKind,
+};
 use serde::Deserialize;
 use uuid::Uuid;
 
@@ -78,10 +81,16 @@ fn decode_send_payload(
         || payload.credits < 0
         || payload.cod < 0
         || !valid_settlement_template(&payload.template)
-        || !valid_settlement_variables(&payload.template, &payload.variables)
+        || !valid_settlement_variables(&payload.template, &without_dispatch(&payload.variables))
         || !canonical_secret_references(&mut payload.equipment_secret_refs)
         || !valid_send_semantics(&payload)
         || payload.variables.get("reference").map(String::as_str) != Some(claim.origin_id.as_str())
+    {
+        return Err(invalid_payload());
+    }
+    // 补寄派发引用不属于模板变量闭集：先单独核对，再按无引用的已发布形状校验其余变量。
+    if let Some(reference) = payload.variables.get("dispatch")
+        && !valid_dispatch_reference(&payload.template, &claim.origin_id, reference)
     {
         return Err(invalid_payload());
     }
@@ -186,7 +195,35 @@ pub(crate) fn render_settlement(
         )?,
         _ => return None,
     };
+    // 补寄正文末行固定写派发引用，不受模板正文修订影响；系统退件原样带回，据此绑定派发。
+    let body = match payload.variables.get("dispatch") {
+        Some(reference) => format!("{body}\n\n{DISPATCH_REFERENCE_LINE_PREFIX}{reference}"),
+        None => body,
+    };
     (valid_line(&subject, 512, false) && valid_body(&body)).then_some((subject, body))
+}
+
+/// 只有支持补寄的模板（货款、退款、装备寄回）可带派发引用，且引用必须属于本义务。
+fn valid_dispatch_reference(template: &str, obligation_id: &str, reference: &str) -> bool {
+    matches!(
+        template,
+        "settlement_seller_payout" | "settlement_buyer_refund" | "settlement_equipment_handoff"
+    ) && Uuid::parse_str(obligation_id).ok().is_some_and(|obligation_id| {
+        SettlementDispatchReference::parse(reference)
+            .is_some_and(|parsed| parsed.belongs_to(obligation_id) && parsed.encode() == reference)
+    })
+}
+
+/// 去掉派发引用后的变量；没有引用时借用原表。
+fn without_dispatch(
+    variables: &BTreeMap<String, String>,
+) -> std::borrow::Cow<'_, BTreeMap<String, String>> {
+    if !variables.contains_key("dispatch") {
+        return std::borrow::Cow::Borrowed(variables);
+    }
+    let mut filtered = variables.clone();
+    filtered.remove("dispatch");
+    std::borrow::Cow::Owned(filtered)
 }
 
 /// 升级前冻结的两变量金额邮件没有装备名，正文用中性文案替代而不改写已存载荷。
@@ -495,5 +532,49 @@ mod tests {
         let (_, body) = render_settlement(&refund, &templates).expect("新载荷必须可渲染");
         assert!(body.contains("Item: Radiant Phase Shoes"), "{body}");
         assert!(body.contains("Amount: 5,250,000 Credits"), "{body}");
+    }
+
+    /// 补寄载荷的派发引用固定写在正文末行，系统退回后可原样解析；首寄正文不含这一行。
+    #[test]
+    fn resend_body_ends_with_the_dispatch_reference() {
+        let templates = MoogleMailNotificationTemplates::default();
+        let obligation = Uuid::parse_str(REFERENCE).expect("固定义务 ID");
+        let reference =
+            SettlementDispatchReference::for_resend(obligation, 2).expect("补寄派发引用").encode();
+        let base = [("amount", "1000"), ("item_name", "Rapier"), ("reference", REFERENCE)];
+        let first = payload("settlement_seller_payout", &base, 1_000, 0);
+        let (_, first_body) = render_settlement(&first, &templates).expect("首寄可渲染");
+        assert!(!first_body.contains(DISPATCH_REFERENCE_LINE_PREFIX), "{first_body}");
+        let mut variables = base.to_vec();
+        variables.push(("dispatch", reference.as_str()));
+        let resend = payload("settlement_seller_payout", &variables, 1_000, 0);
+        let (_, body) = render_settlement(&resend, &templates).expect("补寄可渲染");
+        assert_eq!(body, format!("{first_body}\n\nDispatch reference: {reference}"));
+        let returned = format!("{body}\n\nThis message was returned from Seller, kupo!");
+        let parsed = auction_application::settlement::parse_returned_settlement_body(&returned)
+            .expect("系统退件正文可解析");
+        assert_eq!(parsed.dispatch_reference.as_deref(), Some(reference.as_str()));
+        assert_eq!(
+            parsed.body_digest,
+            crate::clients::mooglemail::parser::canonical_mail_body_digest(&body)
+        );
+    }
+
+    /// 派发引用只允许出现在支持补寄的模板上，且必须属于本义务的规范编码。
+    #[test]
+    fn dispatch_reference_is_bound_to_template_and_obligation() {
+        let obligation = Uuid::parse_str(REFERENCE).expect("固定义务 ID");
+        let own = SettlementDispatchReference::for_resend(obligation, 3).expect("补寄派发引用");
+        let foreign = SettlementDispatchReference::for_resend(Uuid::from_u128(5), 3)
+            .expect("其他义务的补寄引用");
+        assert!(valid_dispatch_reference("settlement_buyer_refund", REFERENCE, &own.encode()));
+        assert!(valid_dispatch_reference("settlement_equipment_handoff", REFERENCE, &own.encode()));
+        assert!(!valid_dispatch_reference(
+            "settlement_winner_equipment_cod",
+            REFERENCE,
+            &own.encode()
+        ));
+        assert!(!valid_dispatch_reference("settlement_buyer_refund", REFERENCE, &foreign.encode()));
+        assert!(!valid_dispatch_reference("settlement_buyer_refund", REFERENCE, "v1/3/x"));
     }
 }

@@ -219,6 +219,7 @@ impl SafeErrorKind {
     pub const SERIALIZATION_FAILED: Self = Self("serialization_failed");
     pub const SESSION_ERROR: Self = Self("session_error");
     pub const SETTLEMENT_NOT_FOUND: Self = Self("settlement_not_found");
+    pub const SETTLEMENT_RETURN_REJECTED: Self = Self("settlement_return_rejected");
     pub const TASK_JOIN: Self = Self("task_join");
     pub const TIMEOUT: Self = Self("timeout");
     pub const TRANSACTION_POLICY_INVALID: Self = Self("transaction_policy_invalid");

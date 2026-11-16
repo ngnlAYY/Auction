@@ -174,6 +174,9 @@ mod tests {
             MailDeliveryOrigin::SettlementRecoveryAction => {
                 (format!("recovery:{}", Uuid::new_v4()), "4243".to_owned())
             }
+            MailDeliveryOrigin::SettlementReturnAction => {
+                (format!("settlement_return:{}", Uuid::new_v4()), "4243".to_owned())
+            }
             MailDeliveryOrigin::OperationsAlert => {
                 let batch_id = Uuid::new_v4();
                 (format!("operations_alert:{batch_id}"), format!("operations-alert:{batch_id}"))

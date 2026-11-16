@@ -17,6 +17,7 @@ pub(crate) mod health_runtime;
 mod phase;
 mod resolutions;
 mod returns;
+mod settlement_returns;
 
 use actions::process_actions;
 use assets::reconcile_assets;
@@ -24,8 +25,10 @@ use cases::advance_cases;
 use health::refresh_health;
 use resolutions::{advance_cod_returns, advance_relists, complete_refunds};
 use returns::record_returns;
+use settlement_returns::advance_settlement_returns;
 
-/// 立即依次推进 health、资产对账、case、return、action、COD return、relist 与 refund，随后按旧版 cadence 重试。
+/// 立即依次推进 health、资产对账、case、return、结算退件案件、action、COD return、relist 与
+/// refund，随后按旧版 cadence 重试。
 pub(super) async fn run_loop<C>(
     worker: Arc<PersistentWorker<C>>,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
@@ -90,6 +93,7 @@ where
     reconcile_assets(worker, &mut batch_result).await;
     advance_cases(worker, &mut batch_result).await;
     record_returns(worker, &mut batch_result).await;
+    advance_settlement_returns(worker, &mut batch_result).await;
     process_actions(worker, &mut batch_result).await;
     advance_cod_returns(worker, &mut batch_result).await;
     advance_relists(worker, &mut batch_result).await;

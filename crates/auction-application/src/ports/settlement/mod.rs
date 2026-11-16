@@ -43,10 +43,5 @@ pub use report::{
     SettlementAdjustment, SettlementAuctionSnapshot, SettlementLotReport, SettlementReport,
     SettlementReportReader, SettlementSummary,
 };
-pub use returns::{
-    SYSTEM_RETURN_SENDER, SettlementReturnConsumption, SettlementReturnDecision,
-    SettlementReturnDelivery, SettlementReturnFacts, SettlementReturnMatch,
-    SettlementReturnObligation, SettlementReturnReason, system_return_matches_obligation,
-    system_returned_settlement_obligation_id,
-};
+pub use returns::*;
 pub use scheduler::{SettlementWorkClaim, SettlementWorkStore};
