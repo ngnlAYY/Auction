@@ -34,10 +34,14 @@ pub(crate) use queue::{DeliveryAction, DeliverySearchFilters, execute_delivery, 
 /// 与服务端 `MAX_PLAYER_SUPPORT_ROWS` 对齐；超过即视为损坏响应。
 const MAX_PLAYER_SUPPORT_ROWS: usize = 50;
 
-/// 详情的唯一 URL 构造点：本页面认识装备收回处置（`recovery_equipment_recovered`），显式请求含它的
-/// 投影；服务端缺省响应只输出升级前页面认识的处置闭集。
+/// 列表与详情请求的扩展投影（`include` 取值）。本页面的闭集认识结算退件 Take 来源
+/// （`settlement_return_action`）与装备收回处置（`recovery_equipment_recovered`），必须显式请求；
+/// 服务端缺省投影只输出升级前页面认识的值。
+const DELIVERY_PROJECTION_INCLUDE: &str = "settlement_returns";
+
+/// 详情的唯一 URL 构造点：总是请求扩展投影，否则结算退件 Take 投递的详情会被拒绝。
 fn delivery_detail_url(delivery_id: &str) -> String {
-    format!("/api/v1/admin/deliveries/{delivery_id}?include=recovery_equipment_recovered")
+    format!("/api/v1/admin/deliveries/{delivery_id}?include={DELIVERY_PROJECTION_INCLUDE}")
 }
 
 /// 读取单条投递的完整证据详情；响应必须精确对应请求的投递 ID。

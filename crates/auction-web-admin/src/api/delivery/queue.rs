@@ -8,6 +8,7 @@ use auction_contracts::{
 use gloo_net::http::Request;
 use uuid::Uuid;
 
+use super::DELIVERY_PROJECTION_INCLUDE;
 use super::decode::{
     StrictDeliveryEnvelope, decode_delivery_command, decode_delivery_list, parse_delivery_time,
 };
@@ -89,17 +90,14 @@ fn valid_filter_time(value: &str) -> bool {
     value.is_empty() || parse_delivery_time(value).is_some()
 }
 
-/// 读取指定状态、筛选与页码的 delivery 安全投影。
-pub(crate) async fn fetch_deliveries(
-    status: String,
-    filters: DeliverySearchFilters,
+/// 列表的唯一 URL 构造点：只提交显式筛选与分页，并总是请求扩展投影，本页面的队列才会列出
+/// 结算退件 Take 投递（缺省投影不含它们）。
+pub(super) fn delivery_list_url(
+    status: &str,
+    filters: &DeliverySearchFilters,
     page: i64,
     page_size: i64,
-) -> Result<DeliveryPage, String> {
-    pagination::validate(page, page_size, 100, i64::MAX)?;
-    if !filters.validate() {
-        return Err("invalid_delivery_filter".to_owned());
-    }
+) -> String {
     let mut query = url::form_urlencoded::Serializer::new(String::new());
     query
         .append_pair("page", &page.max(1).to_string())
@@ -120,7 +118,22 @@ pub(crate) async fn fetch_deliveries(
             query.append_pair(key, value);
         }
     }
-    let url = format!("/api/v1/admin/deliveries?{}", query.finish());
+    query.append_pair("include", DELIVERY_PROJECTION_INCLUDE);
+    format!("/api/v1/admin/deliveries?{}", query.finish())
+}
+
+/// 读取指定状态、筛选与页码的 delivery 安全投影。
+pub(crate) async fn fetch_deliveries(
+    status: String,
+    filters: DeliverySearchFilters,
+    page: i64,
+    page_size: i64,
+) -> Result<DeliveryPage, String> {
+    pagination::validate(page, page_size, 100, i64::MAX)?;
+    if !filters.validate() {
+        return Err("invalid_delivery_filter".to_owned());
+    }
+    let url = delivery_list_url(&status, &filters, page, page_size);
     let response = send_get(&url).await?;
     if !response.ok() {
         return Err(response_error(response).await);

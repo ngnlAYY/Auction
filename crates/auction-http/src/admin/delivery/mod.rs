@@ -1,13 +1,14 @@
 //! Admin delivery HTTP 适配器的模块装配。
-//! delivery 列表、人工命令、快照映射和共享能力/错误边界分别由子模块拥有；本模块只转出
-//! 路由可见的稳定处理器，以及子模块之间共用的能力/错误边界、过滤参数解析与快照映射。
-//! 会话守卫与状态由子模块从定义处导入。
+//! delivery 列表、人工命令、快照映射、列表与详情的响应投影和共享能力/错误边界分别由子模块
+//! 拥有；本模块只转出路由可见的稳定处理器，以及子模块之间共用的能力/错误边界、过滤参数解析与
+//! 快照映射。会话守卫与状态由子模块从定义处导入。
 
 mod boundary;
 mod commands;
 mod detail;
 mod list;
 mod mapping;
+mod projection;
 mod sent_proof;
 mod support;
 
