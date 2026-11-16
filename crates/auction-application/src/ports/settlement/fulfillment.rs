@@ -141,10 +141,14 @@ pub struct SettlementFulfillmentClaim {
     pub settlement_line: Option<SettlementLine>,
     /// 与明细同源的冻结模式；v2 账单必须明确名义比例与实分奖池优惠的区别。
     pub settlement_mode: Option<SettlementMode>,
-    /// recovery case 在结算事务内冻结的付款期限；只用于正文呈现与证据轮询聚焦，
-    /// 逾期判定仍由 recovery owner 负责。
+    /// recovery case 当前有效的付款期限：COD 收回重寄后从重寄时刻重新起算。只用于证据轮询
+    /// 聚焦（付款截止前后回到基础间隔），逾期判定仍由 recovery owner 负责；不得用来重建正文。
     /// 该值缺失只可能是没有 recovery 行的历史义务，因此不进入必填不变量。
     pub payment_deadline_at: Option<DateTime<Utc>>,
+    /// 结算建立 recovery 时冻结的首寄付款期限 D0（创建时刻加冻结策略版本的付款期限）。重寄沿用
+    /// 首次冻结的载荷，正文期限不随当前期限改变，因此付款邮件正文与载荷只按它重建；与
+    /// `payment_deadline_at` 同时缺失或同时存在。
+    pub initial_payment_deadline_at: Option<DateTime<Utc>>,
     pub submission_id: Option<SubmissionId>,
     /// 投稿来源闭集；流拍与撤拍均根据来源授权逐件发送原装备。
     pub submission_source_kind: Option<String>,

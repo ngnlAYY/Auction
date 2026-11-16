@@ -37,7 +37,7 @@ pub struct CodReceiptVariables {
     pub adjusted_price: Option<String>,
     #[serde(default)]
     pub pool_credit: Option<String>,
-    /// 正文展示的付款期限（UTC 秒精度）；载荷带该键时必须等于恢复记录冻结的期限。
+    /// 正文展示的付款期限（UTC 秒精度）；载荷带该键时必须等于恢复记录的首寄期限 D0。
     #[serde(default)]
     pub payment_deadline: Option<String>,
 }
@@ -93,8 +93,9 @@ pub struct CodReceiptSnapshot {
     pub frozen_sent_proven: bool,
     pub sending_at: Option<DateTime<Utc>>,
     pub funding_source_boundary: Option<DateTime<Utc>>,
-    /// 付款义务所在恢复记录冻结的付款期限，与生成方取同一来源；用于重建正文期限变量。
-    pub payment_deadline_at: Option<DateTime<Utc>>,
+    /// 付款义务所在恢复记录的首寄期限 D0（创建时刻加冻结策略版本的付款期限），与生成方取同一
+    /// 来源；用于重建正文期限变量。重寄会重新起算恢复记录的当前期限，但冻结正文不变，不能用它。
+    pub initial_payment_deadline_at: Option<DateTime<Utc>>,
 }
 
 /// 阻断项闭集；顺序即拒绝优先级，调用方取第一项。
@@ -133,47 +134,6 @@ pub enum CodReceiptBlocker {
     TemplateMismatch,
     ReferenceUnproven,
     SentProofUnproven,
-}
-
-impl CodReceiptBlocker {
-    /// 稳定标识；只用于测试与日志分类，改写前须同步既有 `funding_receipt_*` 字典。
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::SentMissing => "sent_missing",
-            Self::SnapshotInvalid => "snapshot_invalid",
-            Self::PaymentMismatch => "payment_mismatch",
-            Self::BuyerMismatch => "buyer_mismatch",
-            Self::SentUidMismatch => "sent_uid_mismatch",
-            Self::SentWorldMismatch => "sent_world_mismatch",
-            Self::CashUnexpected => "cash_unexpected",
-            Self::CashMissing => "cash_missing",
-            Self::CashWorldMismatch => "cash_world_mismatch",
-            Self::CashUidMismatch => "cash_uid_mismatch",
-            Self::MailIdInvalid => "mail_id_invalid",
-            Self::OpeningSourceMissing => "opening_source_missing",
-            Self::SendingTimeMissing => "sending_time_missing",
-            Self::SendBeforeFundingBoundary => "send_before_funding_boundary",
-            Self::KindInvalid => "kind_invalid",
-            Self::CarrierInvalid => "carrier_invalid",
-            Self::CodOverflow => "cod_overflow",
-            Self::AmountMismatch => "amount_mismatch",
-            Self::BuyerNonpositive => "buyer_nonpositive",
-            Self::RecipientMismatch => "recipient_mismatch",
-            Self::SubjectMismatch => "subject_mismatch",
-            Self::PricingEndPriceMissing => "pricing_end_price_missing",
-            Self::PricingLineInvalid => "pricing_line_invalid",
-            Self::PricingBuyerMismatch => "pricing_buyer_mismatch",
-            Self::PricingHoldInvalid => "pricing_hold_invalid",
-            Self::PricingModeInvalid => "pricing_mode_invalid",
-            Self::PricingPoolInvalid => "pricing_pool_invalid",
-            Self::PricingAdjustedOverflow => "pricing_adjusted_overflow",
-            Self::PayloadMismatch => "payload_mismatch",
-            Self::OperationMismatch => "operation_mismatch",
-            Self::TemplateMismatch => "template_mismatch",
-            Self::ReferenceUnproven => "reference_unproven",
-            Self::SentProofUnproven => "sent_proof_unproven",
-        }
-    }
 }
 
 /// 期望载荷；与冻结载荷逐字段比较，不做宽松归一化。
@@ -444,13 +404,14 @@ impl CodReceiptSnapshot {
         self.payload.get("variables").cloned().unwrap_or(serde_json::Value::Null)
     }
 
-    /// 付款期限只是正文展示：载荷带该键时，期望值用生成方同一格式化函数由冻结期限重建，恢复
-    /// 记录缺期限即失败关闭；不带该键的是期限写入正文之前生成的旧载荷，按原形状比较。
+    /// 付款期限只是正文展示：载荷带该键时，期望值用生成方同一格式化函数由首寄期限 D0 重建，
+    /// 恢复记录缺 D0 即失败关闭；不带该键的是期限写入正文之前生成的旧载荷，按原形状比较。
+    /// 重寄后的当前期限不参与：重寄沿用首次冻结的载荷，用当前期限会把已付款的重寄 COD 拒之门外。
     fn expected_payment_deadline(&self) -> Result<Option<String>, CodReceiptBlocker> {
         if !self.payload_has_variable("payment_deadline") {
             return Ok(None);
         }
-        self.payment_deadline_at
+        self.initial_payment_deadline_at
             .map(|deadline| Some(crate::services::public::format_deadline(deadline)))
             .ok_or(CodReceiptBlocker::PayloadMismatch)
     }
