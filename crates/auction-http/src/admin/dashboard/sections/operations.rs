@@ -42,8 +42,12 @@ pub(crate) fn map_fulfillment(
             "manual_reconcile": snapshot.manual_reconcile,
             "waiting_payment": snapshot.waiting_payment,
             "waiting_prerequisite": snapshot.waiting_prerequisite,
+            "awaiting_collection": snapshot.awaiting_collection,
+            "awaiting_collection_unreadable": snapshot.awaiting_collection_unreadable,
             "oldest_backlog_age_seconds": snapshot.oldest_backlog_age_seconds,
             "oldest_prerequisite_wait_age_seconds": snapshot.oldest_prerequisite_wait_age_seconds,
+            "oldest_awaiting_collection_age_seconds":
+                snapshot.oldest_awaiting_collection_age_seconds,
         })),
     }
 }
@@ -227,8 +231,11 @@ mod tests {
             manual_reconcile: 0,
             waiting_payment,
             waiting_prerequisite,
+            awaiting_collection: 0,
+            awaiting_collection_unreadable: 0,
             oldest_backlog_age_seconds: age,
             oldest_prerequisite_wait_age_seconds: prerequisite_age,
+            oldest_awaiting_collection_age_seconds: 0,
         }
     }
 
@@ -243,6 +250,27 @@ mod tests {
         assert_eq!(waiting_payment.status, "ok");
         let prerequisite = map_fulfillment(fulfillment(0, 0, 1, 0, 900), Some(&policy));
         assert_eq!(prerequisite.status, "degraded");
+    }
+
+    /// 等待领取单列为独立分组：不使履约分区降级，计数、读取失败数与最老等待年龄原样投影。
+    #[test]
+    fn awaiting_collection_is_projected_separately_without_backlog() {
+        let policy = policy();
+        let section = map_fulfillment(
+            OperationsAlertFulfillmentSnapshot {
+                awaiting_collection: 36,
+                awaiting_collection_unreadable: 12,
+                oldest_awaiting_collection_age_seconds: 691_200,
+                ..fulfillment(0, 0, 0, 0, 0)
+            },
+            Some(&policy),
+        );
+        assert_eq!(section.status, "ok");
+        let data = section.data.expect("履约数据");
+        assert_eq!(data["pending"], 0);
+        assert_eq!(data["awaiting_collection"], 36);
+        assert_eq!(data["awaiting_collection_unreadable"], 12);
+        assert_eq!(data["oldest_awaiting_collection_age_seconds"], 691_200);
     }
 
     #[test]

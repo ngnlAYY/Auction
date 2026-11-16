@@ -127,7 +127,7 @@ pub struct OperationsAlertDeliverySnapshot {
 /// Settlement fulfillment source 快照。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OperationsAlertFulfillmentSnapshot {
-    /// 真正可推进的 ready 履约项；正常等待付款/前置的项不计入。
+    /// 真正可推进的 ready 履约项；正常等待付款/前置、已寄出等待领取的项不计入。
     pub pending: i64,
     /// 非正常等待的可推进受阻项；失败、已满足及正常等待项不计入。
     pub blocked: i64,
@@ -137,8 +137,16 @@ pub struct OperationsAlertFulfillmentSnapshot {
     pub waiting_payment: i64,
     /// 等待前置义务完成的卖方货款等；超过策略年龄后才应视为积压。
     pub waiting_prerequisite: i64,
+    /// 已寄出、只等收件人在游戏内领取的 Send 义务（COD/载体付款仍按等待付款口径）；
+    /// 不计入积压，义务仍未满足。
+    pub awaiting_collection: i64,
+    /// 等待领取中最近一次 Sent 读取失败（`evidence_unavailable`）的数量；区分“读不到”与
+    /// “已读到但未领取”，不能据此推断收件人是否已领取。
+    pub awaiting_collection_unreadable: i64,
     pub oldest_backlog_age_seconds: i64,
     pub oldest_prerequisite_wait_age_seconds: i64,
+    /// 最早寄出的等待领取义务自投递完成（`deliveries.completed_at`）起的秒数；没有时为 0。
+    pub oldest_awaiting_collection_age_seconds: i64,
 }
 
 /// Recovery 每个 world 的余额和 evidence 安全状态。

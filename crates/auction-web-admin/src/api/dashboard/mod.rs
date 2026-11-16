@@ -301,9 +301,15 @@ pub(crate) struct AdminFulfillmentData {
     pub manual_reconcile: i64,
     pub waiting_payment: i64,
     pub waiting_prerequisite: i64,
+    /// 已寄出、只等收件人领取的义务；不计入 `pending`。
+    pub awaiting_collection: i64,
+    /// 等待领取中最近一次 Sent 读取失败的数量；是 `awaiting_collection` 的子集。
+    pub awaiting_collection_unreadable: i64,
     pub observed_at: String,
     pub oldest_backlog_age_seconds: i64,
     pub oldest_prerequisite_wait_age_seconds: i64,
+    /// 最早寄出的等待领取义务自寄出起的秒数；页面按天展示。
+    pub oldest_awaiting_collection_age_seconds: i64,
 }
 
 pub(crate) type AdminFulfillmentSection = AdminDashboardSection<AdminFulfillmentData>;
@@ -510,9 +516,12 @@ mod tests {
                     "manual_reconcile": 0,
                     "waiting_payment": 4,
                     "waiting_prerequisite": 3,
+                    "awaiting_collection": 5,
+                    "awaiting_collection_unreadable": 2,
                     "observed_at": "2026-01-01T00:00:00Z",
                     "oldest_backlog_age_seconds": 120,
-                    "oldest_prerequisite_wait_age_seconds": 60
+                    "oldest_prerequisite_wait_age_seconds": 60,
+                    "oldest_awaiting_collection_age_seconds": 691200
                 }
             },
             "alerting": {
@@ -581,6 +590,9 @@ mod tests {
         assert_eq!(fulfillment.waiting_payment, 4);
         assert_eq!(fulfillment.waiting_prerequisite, 3);
         assert_eq!(fulfillment.oldest_prerequisite_wait_age_seconds, 60);
+        assert_eq!(fulfillment.awaiting_collection, 5);
+        assert_eq!(fulfillment.awaiting_collection_unreadable, 2);
+        assert_eq!(fulfillment.oldest_awaiting_collection_age_seconds, 691_200);
         let alerting = snapshot.alerting.data.expect("告警数据");
         assert_eq!(alerting.webhook_pending_count, 2);
         assert_eq!(alerting.webhook_manual_reconcile_count, 1);
@@ -643,6 +655,27 @@ mod tests {
             let payload = with(complete_payload(), pointer, key, None);
             assert!(decode_dashboard_response(payload).is_err(), "缺少 {pointer}/{key} 必须拒绝");
         }
+    }
+
+    #[test]
+    fn awaiting_collection_counts_must_be_consistent() {
+        let fulfillment = "/fulfillment/data";
+        for (key, value) in [
+            ("awaiting_collection_unreadable", json!(6)),
+            ("awaiting_collection_unreadable", json!(-1)),
+            ("awaiting_collection", json!(-1)),
+            ("oldest_awaiting_collection_age_seconds", json!(-1)),
+        ] {
+            let payload = with(complete_payload(), fulfillment, key, Some(value));
+            assert!(decode_dashboard_response(payload).is_err(), "{key} 越界必须拒绝");
+        }
+        // 没有等待领取时不能带等待年龄；年龄同时归零才是安静水位。
+        let empty = with(complete_payload(), fulfillment, "awaiting_collection", Some(json!(0)));
+        let empty = with(empty, fulfillment, "awaiting_collection_unreadable", Some(json!(0)));
+        assert!(decode_dashboard_response(empty.clone()).is_err());
+        let quiet =
+            with(empty, fulfillment, "oldest_awaiting_collection_age_seconds", Some(json!(0)));
+        assert!(decode_dashboard_response(quiet).is_ok());
     }
 
     #[test]

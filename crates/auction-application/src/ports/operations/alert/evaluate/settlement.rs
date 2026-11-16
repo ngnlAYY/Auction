@@ -100,6 +100,13 @@ pub(super) fn evaluate_fulfillment(
         || (actionable == 0 && snapshot.oldest_backlog_age_seconds != 0)
         || (snapshot.waiting_prerequisite == 0
             && snapshot.oldest_prerequisite_wait_age_seconds != 0)
+        // 读取失败只是等待领取的子集；没有等待领取时也不能有等待年龄。
+        || snapshot.awaiting_collection < 0
+        || snapshot.awaiting_collection_unreadable < 0
+        || snapshot.awaiting_collection_unreadable > snapshot.awaiting_collection
+        || snapshot.oldest_awaiting_collection_age_seconds < 0
+        || (snapshot.awaiting_collection == 0
+            && snapshot.oldest_awaiting_collection_age_seconds != 0)
     {
         return Err(OperationsAlertError::Invalid);
     }

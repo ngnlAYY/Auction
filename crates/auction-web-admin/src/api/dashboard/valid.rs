@@ -6,14 +6,15 @@
 //! 后端从不输出这些 null。
 
 use super::{
-    AdminAlertingSection, AdminDashboardSnapshot, AdminExternalAccountsData, AdminMailData,
-    AdminRealtimeData, AdminReconciliationData,
+    AdminAlertingSection, AdminDashboardSnapshot, AdminExternalAccountsData, AdminFulfillmentData,
+    AdminMailData, AdminRealtimeData, AdminReconciliationData,
 };
 
 pub(super) fn valid_dashboard_semantics(snapshot: &AdminDashboardSnapshot) -> bool {
     snapshot.mail.data.as_ref().is_none_or(valid_mail)
         && snapshot.realtime.data.as_ref().is_none_or(valid_realtime)
         && snapshot.external_accounts.data.as_ref().is_none_or(valid_external_accounts)
+        && snapshot.fulfillment.data.as_ref().is_none_or(valid_fulfillment)
         && snapshot.reconciliation.data.as_ref().is_none_or(valid_reconciliation)
         && valid_alerting(&snapshot.alerting)
 }
@@ -25,6 +26,14 @@ fn valid_mail(data: &AdminMailData) -> bool {
 
 fn valid_realtime(data: &AdminRealtimeData) -> bool {
     data.total_lag >= 0
+}
+
+/// 等待领取的读取失败数只是其子集；没有等待领取时不能带等待年龄。
+fn valid_fulfillment(data: &AdminFulfillmentData) -> bool {
+    data.awaiting_collection >= 0
+        && (0..=data.awaiting_collection).contains(&data.awaiting_collection_unreadable)
+        && data.oldest_awaiting_collection_age_seconds >= 0
+        && (data.awaiting_collection > 0 || data.oldest_awaiting_collection_age_seconds == 0)
 }
 
 /// 对账报告按业务世界汇总，最多 main 与 isekai 两项。

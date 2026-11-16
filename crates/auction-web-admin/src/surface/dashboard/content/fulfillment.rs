@@ -1,4 +1,4 @@
-//! 履约健康面板：积压状态、分项计数与需要人工介入的提示。
+//! 履约健康面板：积压状态、分项计数、已寄出等待领取分组与需要人工介入的提示。
 
 use auction_web_shared::t;
 use dioxus::prelude::*;
@@ -7,6 +7,9 @@ use super::derived::DashboardDerived;
 use super::widgets::{badge, card, semantic_card, text};
 use crate::api::AdminDashboardSnapshot;
 use crate::surface::router::Route;
+
+/// 等待领取按整天展示寄出后的等待时长（向下取整）。
+const SECONDS_PER_DAY: i64 = 86_400;
 
 pub(super) fn fulfillment_panel(
     snapshot: &AdminDashboardSnapshot,
@@ -70,6 +73,29 @@ pub(super) fn fulfillment_panel(
                 )),
             )}
         }
+        // 已寄出、只等收件人领取的义务单列：不计入待处理，但“读不到”与“未领取”分开显示。
+        h3 { {t!("dashboard-fulfillment-awaiting-title")} }
+        div { class: "admin-dashboard-cards",
+            {card(
+                t!("dashboard-fulfillment-awaiting-count"),
+                text(fulfillment.awaiting_collection.to_string()),
+            )}
+            {card(
+                t!("dashboard-fulfillment-awaiting-oldest"),
+                text(t!(
+                    "dashboard-fulfillment-awaiting-days",
+                    days: fulfillment.oldest_awaiting_collection_age_seconds / SECONDS_PER_DAY
+                )),
+            )}
+            {card(
+                t!("dashboard-fulfillment-awaiting-unreadable"),
+                badge(
+                    if fulfillment.awaiting_collection_unreadable > 0 { "warn" } else { "ok" },
+                    fulfillment.awaiting_collection_unreadable.to_string(),
+                ),
+            )}
+        }
+        p { class: "admin-panel__note", {t!("dashboard-fulfillment-awaiting-note")} }
         if fulfillment_backlog {
             aside {
                 class: "admin-dashboard-attention",

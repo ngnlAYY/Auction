@@ -109,13 +109,25 @@ pub(super) async fn fulfillment_snapshot(
     pool: &crate::database::TrackedPool<sqlx::Postgres>,
     now: DateTime<Utc>,
 ) -> Result<OperationsAlertFulfillmentSnapshot, ApplicationError> {
-    let row = sqlx::query(
+    // “等待领取”只拆出已寄出的 Send 履约：COD/载体付款义务沿用“等待买家付款”的既有口径，
+    // 等待付款或前置的项保持原分类。拆出后它们不再计入积压，但仍是未满足义务，只换分组展示。
+    let row = sqlx::query(concat!(
         "WITH obligation_state AS (
             SELECT obligation.id, obligation.business_state, obligation.obligation_kind,
                    obligation.prerequisite_obligation_id,
                    COALESCE(fulfillment.execution_state, '') AS execution_state,
                    fulfillment.last_error_code,
                    COALESCE(fulfillment.created_at, obligation.created_at) AS backlog_at,
+                   delivery.completed_at AS sent_at,
+                   (obligation.obligation_kind NOT IN (
+                        'winner_equipment_cod', 'winner_payment_carrier_cod'
+                    )
+                    AND COALESCE(",
+        crate::database::settlement::fulfillment::sent_awaiting_collection_sql!(
+            "fulfillment",
+            "delivery"
+        ),
+        ", false)) AS sent_send,
                    (recovery.id IS NOT NULL
                     AND recovery.stage = 'awaiting_payment'
                     AND recovery.payment_deadline_at > $1
@@ -141,20 +153,28 @@ pub(super) async fn fulfillment_snapshot(
             FROM public.settlement_obligations AS obligation
             LEFT JOIN public.settlement_obligation_fulfillments AS fulfillment
               ON fulfillment.obligation_id = obligation.id
+            LEFT JOIN public.deliveries AS delivery
+              ON delivery.id = fulfillment.delivery_id
             LEFT JOIN public.settlement_recoveries AS recovery
               ON recovery.payment_obligation_id = obligation.id
+         ), classified AS (
+            SELECT obligation_state.*,
+                   (business_state = 'ready' AND sent_send
+                    AND NOT waiting_payment AND NOT waiting_prerequisite) AS awaiting_collection
+            FROM obligation_state
          )
          SELECT
             COUNT(*) FILTER (WHERE business_state = 'ready'
                 AND execution_state IN ('pending', 'prepared', 'enqueued')
-                AND NOT waiting_payment AND NOT waiting_prerequisite) AS pending,
+                AND NOT waiting_payment AND NOT waiting_prerequisite
+                AND NOT awaiting_collection) AS pending,
             COUNT(*) FILTER (WHERE business_state = 'blocked'
                 AND execution_state NOT IN ('failed', 'satisfied')
                 AND NOT waiting_payment AND NOT waiting_prerequisite) AS blocked,
             COUNT(*) FILTER (WHERE execution_state = 'failed'
                 AND NOT (last_error_code = 'operator_external_buyer_compensation'
                     AND EXISTS (SELECT 1 FROM public.settlement_equipment_losses loss
-                        WHERE loss.refund_obligation_id = obligation_state.id))) AS failed,
+                        WHERE loss.refund_obligation_id = classified.id))) AS failed,
             COUNT(*) FILTER (WHERE execution_state = 'manual_reconcile')
                 AS manual_reconcile,
             COUNT(*) FILTER (WHERE business_state = 'ready'
@@ -166,9 +186,14 @@ pub(super) async fn fulfillment_snapshot(
                      OR (business_state = 'blocked'
                          AND execution_state NOT IN ('failed', 'satisfied'))))
                 AS waiting_prerequisite,
+            COUNT(*) FILTER (WHERE awaiting_collection) AS awaiting_collection,
+            -- 最近一次 Sent 读取失败只说明“读不到”，不能据此判断收件人是否已领取。
+            COUNT(*) FILTER (WHERE awaiting_collection
+                AND last_error_code = 'evidence_unavailable') AS awaiting_collection_unreadable,
             MIN(backlog_at) FILTER (WHERE business_state = 'ready'
                 AND execution_state IN ('pending', 'prepared', 'enqueued')
                 AND NOT waiting_payment AND NOT waiting_prerequisite
+                AND NOT awaiting_collection
                 OR (business_state = 'blocked'
                     AND execution_state NOT IN ('failed', 'satisfied')
                     AND NOT waiting_payment AND NOT waiting_prerequisite)) AS oldest_backlog,
@@ -177,9 +202,10 @@ pub(super) async fn fulfillment_snapshot(
                       AND execution_state IN ('pending', 'prepared', 'enqueued'))
                      OR (business_state = 'blocked'
                          AND execution_state NOT IN ('failed', 'satisfied'))))
-                AS oldest_waiting_prerequisite
-         FROM obligation_state",
-    )
+                AS oldest_waiting_prerequisite,
+            MIN(sent_at) FILTER (WHERE awaiting_collection) AS oldest_awaiting_collection
+         FROM classified"
+    ))
     .bind(now)
     .fetch_one(pool)
     .await
@@ -203,6 +229,12 @@ pub(super) async fn fulfillment_snapshot(
         waiting_prerequisite: row
             .try_get("waiting_prerequisite")
             .map_err(|error| storage_error_from(error, "读取履约等待前置计数失败"))?,
+        awaiting_collection: row
+            .try_get("awaiting_collection")
+            .map_err(|error| storage_error_from(error, "读取履约等待领取计数失败"))?,
+        awaiting_collection_unreadable: row
+            .try_get("awaiting_collection_unreadable")
+            .map_err(|error| storage_error_from(error, "读取履约等待领取读取失败计数失败"))?,
         oldest_backlog_age_seconds: age_seconds(
             now,
             row.try_get("oldest_backlog")
@@ -212,6 +244,11 @@ pub(super) async fn fulfillment_snapshot(
             now,
             row.try_get("oldest_waiting_prerequisite")
                 .map_err(|error| storage_error_from(error, "读取履约等待前置时间失败"))?,
+        ),
+        oldest_awaiting_collection_age_seconds: age_seconds(
+            now,
+            row.try_get("oldest_awaiting_collection")
+                .map_err(|error| storage_error_from(error, "读取履约等待领取时间失败"))?,
         ),
     })
 }

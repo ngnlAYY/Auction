@@ -106,7 +106,9 @@ mod tests {
         OperationsAlertDeliverySnapshot, OperationsAlertFulfillmentSnapshot, OperationsAlertPolicy,
         OperationsAlertRecoverySnapshot, OperationsAlertRecoveryWorld,
     };
-    use crate::ports::operations::alert::signals::{OperationsAlertKind, OperationsAlertSource};
+    use crate::ports::operations::alert::signals::{
+        OperationsAlertError, OperationsAlertKind, OperationsAlertSource,
+    };
 
     fn policy() -> OperationsAlertPolicy {
         OperationsAlertPolicy {
@@ -155,8 +157,11 @@ mod tests {
                 manual_reconcile: 0,
                 waiting_payment: 0,
                 waiting_prerequisite: 0,
+                awaiting_collection: 0,
+                awaiting_collection_unreadable: 0,
                 oldest_backlog_age_seconds: 10,
                 oldest_prerequisite_wait_age_seconds: 0,
+                oldest_awaiting_collection_age_seconds: 0,
             },
             &policy,
         );
@@ -217,8 +222,11 @@ mod tests {
             manual_reconcile: 0,
             waiting_payment: 0,
             waiting_prerequisite: 0,
+            awaiting_collection: 0,
+            awaiting_collection_unreadable: 0,
             oldest_backlog_age_seconds: 10,
             oldest_prerequisite_wait_age_seconds: 0,
+            oldest_awaiting_collection_age_seconds: 0,
         };
         let recovery_world = |world: &str| OperationsAlertRecoveryWorld {
             world: world.to_owned(),
@@ -275,8 +283,11 @@ mod tests {
             manual_reconcile: 0,
             waiting_payment: 0,
             waiting_prerequisite: 5,
+            awaiting_collection: 0,
+            awaiting_collection_unreadable: 0,
             oldest_backlog_age_seconds: 0,
             oldest_prerequisite_wait_age_seconds: 10,
+            oldest_awaiting_collection_age_seconds: 0,
         };
         assert!(!assess_fulfillment(snapshot, &policy).backlog);
         let snapshot = OperationsAlertFulfillmentSnapshot {
@@ -284,5 +295,64 @@ mod tests {
             ..snapshot
         };
         assert!(assess_fulfillment(snapshot, &policy).backlog);
+    }
+
+    /// 已寄出、只等收件人领取的义务单列为等待领取：即使数量多、已等待数天也不触发积压；
+    /// 读取失败数只能是等待领取的子集，等待年龄只能随等待领取出现。
+    #[test]
+    fn awaiting_collection_is_not_backlog_and_must_be_consistent() {
+        let policy = policy();
+        let awaiting = OperationsAlertFulfillmentSnapshot {
+            pending: 0,
+            blocked: 0,
+            failed: 0,
+            manual_reconcile: 0,
+            waiting_payment: 0,
+            waiting_prerequisite: 0,
+            awaiting_collection: 36,
+            awaiting_collection_unreadable: 36,
+            oldest_backlog_age_seconds: 0,
+            oldest_prerequisite_wait_age_seconds: 0,
+            oldest_awaiting_collection_age_seconds: 8 * 86_400,
+        };
+        assert!(!assess_fulfillment(awaiting, &policy).backlog, "等待领取不是待处理积压");
+        let observations = evaluate_snapshot(
+            &OperationsAlertSnapshot {
+                fulfillment: Some(awaiting),
+                ..OperationsAlertSnapshot::default()
+            },
+            &policy,
+        )
+        .expect("一致的等待领取水位必须可评估");
+        let fulfillment = observations
+            .iter()
+            .find(|observation| observation.source == OperationsAlertSource::Fulfillment)
+            .expect("履约来源");
+        assert!(
+            !fulfillment
+                .signals
+                .iter()
+                .any(|signal| signal.kind == OperationsAlertKind::FulfillmentBacklog),
+            "等待领取不得产生积压告警"
+        );
+        for broken in [
+            OperationsAlertFulfillmentSnapshot { awaiting_collection_unreadable: 37, ..awaiting },
+            OperationsAlertFulfillmentSnapshot {
+                awaiting_collection: 0,
+                awaiting_collection_unreadable: 0,
+                ..awaiting
+            },
+            OperationsAlertFulfillmentSnapshot {
+                oldest_awaiting_collection_age_seconds: -1,
+                ..awaiting
+            },
+            OperationsAlertFulfillmentSnapshot { awaiting_collection_unreadable: -1, ..awaiting },
+        ] {
+            let snapshot = OperationsAlertSnapshot {
+                fulfillment: Some(broken),
+                ..OperationsAlertSnapshot::default()
+            };
+            assert_eq!(evaluate_snapshot(&snapshot, &policy), Err(OperationsAlertError::Invalid));
+        }
     }
 }
