@@ -24,6 +24,7 @@ use crate::support;
 mod alerts;
 mod cases;
 mod flows;
+mod races;
 
 /// 写入一封已接受的结算退件证据；发件人与主题缺失时模拟入站展示快照之前的历史行。
 pub(crate) async fn insert_inbound(

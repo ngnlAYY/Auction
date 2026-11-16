@@ -44,8 +44,13 @@ async fn insert_postgres(
     pool.observe_transaction(owner, async {
         // 入站录入在 Serializable 快照内读取相反意图，处置事务也必须参与 SSI：
         // 单独 SELECT FOR UPDATE 无法刷新等待方已建快照。40001 由邮件有界重试重跑整次事务。
-        let begin = if command.origin == MailDeliveryOrigin::MailIntake
-            && command.operation != MailDeliveryOperation::Send
+        // 恢复 Take 同理：结算退件 Take 的激活事务在取得 world 锁前已建快照，只有恢复 Take
+        // 也参与 SSI，先提交的恢复 Take 才会让后到的激活冲突重跑、看到同邮件意图而转人工；
+        // 恢复侧的 40001 按准备失败释放动作，稍后以同一命令重试（不变量 1、2）。
+        let begin = if matches!(
+            command.origin,
+            MailDeliveryOrigin::MailIntake | MailDeliveryOrigin::SettlementRecoveryAction
+        ) && command.operation != MailDeliveryOperation::Send
         {
             pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
         } else {

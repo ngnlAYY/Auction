@@ -36,16 +36,16 @@ use super::{evidence, insert_inbound, insert_sent_fulfillment};
 use crate::recovery_returns::{CodSale, insert_sale, settlement_minute};
 use crate::support;
 
-const PAYOUT: i64 = 90;
-const FUNDING_UID: &str = "7311";
+pub(super) const PAYOUT: i64 = 90;
+pub(super) const FUNDING_UID: &str = "7311";
 
-struct Returned {
-    sale: CodSale,
-    delivery: Uuid,
-    case: Uuid,
+pub(super) struct Returned {
+    pub(super) sale: CodSale,
+    pub(super) delivery: Uuid,
+    pub(super) case: Uuid,
 }
 
-async fn returned_payout(
+pub(super) async fn returned_payout(
     store: &auction_storage::DatabaseStore,
     sequence: i64,
     mid: &str,
@@ -74,7 +74,7 @@ async fn returned_payout(
     Returned { sale, delivery, case }
 }
 
-async fn seed_spent_payout(pool: &PgPool, returned: &Returned) -> Uuid {
+pub(super) async fn seed_spent_payout(pool: &PgPool, returned: &Returned) -> Uuid {
     sqlx::query(
         "INSERT INTO public.settlement_funding_accounts (uid, status, accounting_mode)
          VALUES ($1, 'ready', 'record_only') ON CONFLICT (uid) DO NOTHING",
@@ -111,7 +111,7 @@ async fn seed_spent_payout(pool: &PgPool, returned: &Returned) -> Uuid {
     allocation
 }
 
-async fn handle(
+pub(super) async fn handle(
     store: &auction_storage::DatabaseStore,
     case: Uuid,
     version: i64,
@@ -129,7 +129,11 @@ async fn handle(
     store.handle_settlement_return(command).await.expect("执行退件命令").status
 }
 
-async fn take_through(store: &auction_storage::DatabaseStore, case: Uuid, succeeded: bool) {
+pub(super) async fn take_through(
+    store: &auction_storage::DatabaseStore,
+    case: Uuid,
+    succeeded: bool,
+) {
     let pool = store.postgres_pool();
     store.activate_due_return_take(Utc::now()).await.expect("激活").expect("必须激活");
     let take: Uuid = sqlx::query_scalar(
@@ -163,7 +167,7 @@ async fn take_through(store: &auction_storage::DatabaseStore, case: Uuid, succee
     store.settle_due_return_take(Utc::now()).await.expect("收口 Take").expect("必须收口");
 }
 
-async fn count(pool: &PgPool, sql: &str, id: Uuid) -> i64 {
+pub(super) async fn count(pool: &PgPool, sql: &str, id: Uuid) -> i64 {
     sqlx::query_scalar(sqlx::AssertSqlSafe(sql.to_owned()))
         .bind(id)
         .fetch_one(pool)

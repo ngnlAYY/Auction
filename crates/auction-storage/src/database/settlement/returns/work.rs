@@ -154,6 +154,8 @@ async fn activate_once(
 }
 
 /// Take 失败或结果未知：动作转人工核对、案件停在 `take_unknown`；不自动重试，不释放互斥。
+/// 激活前即发现同邮件冲突时 Take 从未写入投递：动作保持没有投递身份的 pending（动作约束要求
+/// 人工核对必有投递），原因只记在案件事件里；案件离开 `take_pending` 后不会再被激活。
 async fn mark_take_unknown(
     tx: &mut Transaction<'_, Postgres>,
     case: &CaseRow,
@@ -161,23 +163,27 @@ async fn mark_take_unknown(
     failure_code: &'static str,
     now: DateTime<Utc>,
 ) -> Result<SettlementReturnProgress, ReturnTransactionError> {
-    let updated = sqlx::query(
-        r#"UPDATE public.settlement_return_actions
-           SET execution_state = 'manual_reconcile',
-               failure_code = $3,
-               completed_at = $4,
-               state_version = state_version + 1,
-               updated_at = $4
-           WHERE return_mail_id = $1 AND state_version = $2
-             AND execution_state IN ('pending', 'enqueued')"#,
-    )
-    .bind(action.return_mail_id)
-    .bind(action.state_version)
-    .bind(failure_code)
-    .bind(now)
-    .execute(&mut **tx)
-    .await?;
-    if updated.rows_affected() != 1 {
+    if action.delivery_id.is_some() {
+        let updated = sqlx::query(
+            r#"UPDATE public.settlement_return_actions
+               SET execution_state = 'manual_reconcile',
+                   failure_code = $3,
+                   completed_at = $4,
+                   state_version = state_version + 1,
+                   updated_at = $4
+               WHERE return_mail_id = $1 AND state_version = $2
+                 AND execution_state = 'enqueued'"#,
+        )
+        .bind(action.return_mail_id)
+        .bind(action.state_version)
+        .bind(failure_code)
+        .bind(now)
+        .execute(&mut **tx)
+        .await?;
+        if updated.rows_affected() != 1 {
+            return Err(crate::database::repository_error("结算退件 Take 动作状态已变化").into());
+        }
+    } else if action.execution_state != "pending" {
         return Err(crate::database::repository_error("结算退件 Take 动作状态已变化").into());
     }
     let next = CaseTransition::from_case(case, SettlementReturnCaseStatus::TakeUnknown);
