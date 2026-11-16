@@ -30,9 +30,10 @@ pub(super) fn stopped_before_install(
 }
 
 /// 安装旧角色程序中途失败：数据库未改变，本次已替换的程序已尝试从反向回滚记录换回。换回并
-/// 复核成功时安装目录仍是回退前的程序，恢复指引与停机后、安装前的失败相同；反向记录已带失败
-/// 回执，省略 `--receipt-id` 会选中它并在安装目录核对处拒绝，因此重试必须显式指定原记录。换回
-/// 未完成时安装目录可能新旧混合，只给出人工换回的入口，不给启动或重试命令。
+/// 复核成功时安装目录仍是回退前的程序，恢复指引与停机后、安装前的失败相同。反向记录已带失败
+/// 回执（实际摘要就是当前程序，安装目录核对会通过），保留的也正是当前程序：省略 `--receipt-id`
+/// 会选中它并因目标与当前程序相同而拒绝，因此重试必须显式指定原记录。换回未完成时安装目录可能
+/// 新旧混合，只给出人工换回的入口，不给启动或重试命令。
 pub(super) fn install_failed(
     failure: install::InstallArtifactFailure,
     install_dir: &Path,
@@ -44,7 +45,8 @@ pub(super) fn install_failed(
         return failure.error.context(format!(
             "安装旧角色程序失败：三角色已停止，{} 中的三个角色程序已复核为回退前的程序（换回明细\
              见下），auction-cli 未被替换，数据库未改变（版本 {database_version}）；{}。本次的反向\
-             回滚记录 {} 带失败回执，省略 --receipt-id 的 rollback 会选中它并在安装目录核对处拒绝",
+             回滚记录 {} 带失败回执、保留的就是当前程序，省略 --receipt-id 的 rollback 会选中它并\
+             因目标与当前程序相同而拒绝",
             install_dir.display(),
             pre_rollback_recovery(install_dir, record),
             reverse_directory.display()

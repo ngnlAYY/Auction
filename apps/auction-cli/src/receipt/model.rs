@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::deploy::DeploySection;
+use super::deploy::{CliIdentity, DeploySection, RoleIdentity};
 use crate::support::digest::is_lower_hex;
 use crate::support::text::single_line;
 
@@ -139,6 +139,16 @@ impl DeploymentReceipt {
             (Action::Start | Action::Restart, _, None) => {}
         }
         Ok(())
+    }
+
+    /// 本回执能证明的已安装组件身份。只有成功回执的部署目标经运行程序摘要核对等于实际安装的
+    /// 组件；失败回执的 deploy 段只是尝试安装的目标（安装中途失败并换回后实际仍是旧程序），
+    /// 不能作为任何组件的身份来源，返回 None。
+    pub(crate) fn proven_identity(&self) -> Option<(RoleIdentity, CliIdentity)> {
+        if self.outcome != Outcome::Succeeded {
+            return None;
+        }
+        self.deploy.as_ref()?.target_identity(self.action, self.migration.as_ref())
     }
 }
 

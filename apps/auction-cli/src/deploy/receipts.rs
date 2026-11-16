@@ -109,9 +109,10 @@ pub(super) fn artifact_projection(artifact: &artifact::Artifact) -> serde_json::
     })
 }
 
-/// 与保留副本实际摘要绑定的身份。只在“成功且含部署身份”的回执里查找（过滤先于限量，较新的
-/// `service start/restart` 回执不会把它挤出窗口），按完成时间倒序取第一条三角色程序摘要与
-/// `binaries` 完全一致、且身份可信的回执；v1 rollback 回执的身份混有被回退版本的证据，跳过并
+/// 与保留副本实际摘要绑定的身份；deploy 与 rollback 保留程序时共用。只在“成功且含部署身份”
+/// 的回执里查找（过滤先于限量，较新的 `service start/restart` 回执不会把它挤出窗口），按完成
+/// 时间倒序取第一条三角色程序摘要与 `binaries` 完全一致、且身份可信的回执；失败回执的 deploy 段
+/// 只是尝试安装的目标，从不作为来源，v1 rollback 回执的身份混有被回退版本的证据，同样跳过并
 /// 继续向前找。找不到时角色身份全部为 null，CLI 只记录实际摘要。回执目录读不出时同样记为未知
 /// 并在 stderr 说明：身份只服务追溯与回退判定，未知会让回退按观测版本假设并标明来源。
 pub(super) fn installed_identity(
@@ -132,9 +133,7 @@ pub(super) fn installed_identity(
         .iter()
         .filter(|receipt| roles_match(receipt, binaries))
         .find_map(|receipt| {
-            let section = receipt.deploy.as_ref()?;
-            let (roles, cli) =
-                section.installed_identity(receipt.action, receipt.migration.as_ref())?;
+            let (roles, cli) = receipt.proven_identity()?;
             Some(RetainedIdentity { roles, cli: Some(cli) })
         })
         .unwrap_or(unknown)

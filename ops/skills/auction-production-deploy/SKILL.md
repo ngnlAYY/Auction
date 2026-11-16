@@ -103,7 +103,7 @@ description: 更新 Auction 云端分体部署：取 GitHub Release 资产并校
 
 同一命令去掉 `--dry-run`。deploy 会按 Public→Admin→Worker 停机、创建停机备份并用新旧 CLI 双校验、保留回滚记录、逐个原子替换程序（root:root 0755；四个程序整体不是原子的，中途失败时把已替换的程序从回滚记录换回）、迁移，再按 Worker→Admin→Public 启动并等待 readiness，最后写入 `<部署状态目录>/receipts/<uuid>.json`。
 
-失败处理按 `ops/README.md#升级`：除安装中途失败时换回已替换的程序外，命令不会自动回滚或重启，先用 `service status` 和 journal 确认实际状态，再决定是 `service start --owner-secrets …`（它照常执行内嵌迁移，schema 已匹配时为空操作）、`rollback --receipt-id`，还是恢复停机备份。停机后、安装前失败（停机备份、双 CLI 校验、保留旧程序），以及安装中途失败且错误含“已复核为部署前的旧程序”时，只能用 `<程序目录>/auction-cli` 执行 `service start` 恢复旧版（沿用本次的 `--config-dir`、`--owner-secrets`、`--state-dir` 与 unit 参数），不要用 `$PKGDIR/bin/auction-cli`：它会先把 schema 迁到新版本，而安装目录仍是旧程序。错误含“自动换回未完成”时按 `ops/deploy/RECOVERY.md#安装中途失败的手工换回` 处理。
+失败处理按 `ops/README.md#升级`：除安装中途失败时换回已替换的程序外，命令不会自动回滚或重启，先用 `service status` 和 journal 确认实际状态，再决定是 `service start --owner-secrets …`（它照常执行内嵌迁移，schema 已匹配时为空操作）、`rollback --receipt-id`，还是恢复停机备份。停机后、安装前失败（停机备份、双 CLI 校验、保留旧程序），以及安装中途失败且错误含“已复核为部署前的旧程序”时，只能用 `<程序目录>/auction-cli` 执行 `service start` 恢复旧版（沿用本次的 `--config-dir`、`--owner-secrets`、`--state-dir` 与 unit 参数），不要用 `$PKGDIR/bin/auction-cli`：它会先把 schema 迁到新版本，而安装目录仍是旧程序。错误含“自动换回未完成”时按 `ops/deploy/RECOVERY.md#安装中途失败的手工换回` 处理。失败回执的 `deploy` 段只是尝试安装的制品，实际程序以回执 `artifacts` 的摘要为准；安装中途失败并已换回时本次回滚记录保留的就是当前程序，`rollback` 会因目标与当前程序相同而拒绝。
 
 `rollback` 只换回三个角色、保留当前 CLI，必须用 `<程序目录>/auction-cli rollback …` 执行；部署在迁移完成前失败时保留的 CLI 比数据库新，rollback 会在停机前拒绝，按错误提示处理。跨迁移回退前须由用户确认把三角色共用 common 的 `[readiness] migration_compatibility_mode` 显式设为 `compatible`（rollback 不改配置，未设置时在停机前拒绝），回到同版程序后再恢复 `shadow`。
 

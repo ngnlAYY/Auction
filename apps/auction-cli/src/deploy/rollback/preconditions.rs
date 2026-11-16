@@ -1,6 +1,7 @@
 //! rollback 特有的停机前门禁，dry-run 同样执行：
 //!
-//! - 安装目录中的三角色程序必须仍是回滚记录对应部署回执的版本；
+//! - 安装目录中的三角色程序必须仍是回滚记录对应部署回执的版本，且不能就是回滚记录保留的程序
+//!   （回退不会改变任何程序，常见于安装中途失败并已换回之后）；
 //! - rollback 不替换 auction-cli：被保留的 CLI 必须就是执行本命令的 CLI，且内嵌 schema 等于
 //!   数据库版本，否则回退后的 `service start/restart`（含开机的 auction-stack）会先执行回退要
 //!   避开的迁移，或无法管理超前的数据库；
@@ -14,7 +15,7 @@ use anyhow::Context;
 use auction_application::operations::MigrationCompatibilityMode;
 use auction_config::Role;
 
-use super::super::install::RetainedBinary;
+use super::super::install::{ROLE_BINARIES, RetainedBinary, RollbackRecord};
 use super::super::role_binary;
 use crate::receipt::DeploymentReceipt;
 use crate::service::ManagedRole;
@@ -47,6 +48,32 @@ pub(super) fn require_installed_matches(
         installed.push(RetainedBinary { name: name.to_owned(), sha256, bytes });
     }
     Ok(installed)
+}
+
+/// 回滚记录保留的三个角色程序与安装目录当前的程序逐个相同时，回退不会改变任何程序：常见于
+/// 安装中途失败、已从回滚记录换回之后（失败回执记录的是实际程序摘要，安装目录核对因此通过），
+/// 省略 `--receipt-id` 选中了这条带失败回执的记录。拒绝，不把原样重装同一组程序记成一次回退。
+pub(super) fn require_target_differs(
+    record: &RollbackRecord,
+    installed: &[RetainedBinary],
+) -> anyhow::Result<()> {
+    let unchanged = ROLE_BINARIES.into_iter().all(|name| {
+        let target = record.binary(name).map(|binary| (&binary.sha256, binary.bytes));
+        let current = installed
+            .iter()
+            .find(|binary| binary.name == name)
+            .map(|binary| (&binary.sha256, binary.bytes));
+        target.is_some() && target == current
+    });
+    if unchanged {
+        anyhow::bail!(
+            "回滚记录 {} 保留的三个角色程序就是安装目录当前的程序，回退不会改变任何程序（安装中途\
+             失败并已换回后，省略 --receipt-id 会选中这条带失败回执的记录）：恢复运行请用安装目录\
+             中的 auction-cli service start；要重试原来的回退，用 --receipt-id 显式指定原回滚记录",
+            record.record_id
+        );
+    }
+    Ok(())
 }
 
 /// 被保留的 auction-cli 必须就是正在执行本命令的程序：它的内嵌版本由本进程确定，回退后由它

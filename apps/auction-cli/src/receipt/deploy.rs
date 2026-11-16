@@ -5,6 +5,11 @@
 //! 来源可以不同。回退回执的身份只取自目标组件自己的事实，未知项显式为 null，不继承被回退版本的
 //! 制品证据。v1 平铺段只兼容读取、不再写出；v1 rollback 回执的平铺段混有被回退版本的制品证据，
 //! 不能当作已安装程序的身份。
+//!
+//! deploy 段描述本次操作要安装的目标组件；回执的 `artifacts` 才是实际安装或运行的程序摘要。
+//! 两者只在成功回执中一致（运行摘要已核对）：安装中途失败并换回后，失败回执的 deploy 段仍是
+//! 尝试安装的目标，实际程序却是换回的旧程序，因此身份只从成功回执取得（见
+//! `DeploymentReceipt::proven_identity`）。
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -199,12 +204,13 @@ impl DeploySection {
         }
     }
 
-    /// 本回执描述的已安装程序身份；不能可靠给出时为 None。
+    /// 本回执的操作要安装的目标组件身份；不能可靠给出时为 None。只有成功回执的目标才是实际
+    /// 安装的程序，调用方经 `DeploymentReceipt::proven_identity` 取用，不直接信任失败回执。
     ///
     /// v2 原样返回。v1 deploy 段描述的正是本次安装的制品：角色与 CLI 同属一个包，内嵌 schema
     /// 等于迁移记录的期望版本（没有迁移记录时未知）。v1 rollback 段混有被回退版本的证据，
     /// 角色身份不可信，返回 None，由调用方继续向前查找或记为未知。
-    pub(crate) fn installed_identity(
+    pub(crate) fn target_identity(
         &self,
         action: Action,
         migration: Option<&MigrationRecord>,
@@ -350,14 +356,14 @@ mod tests {
             applied: 2,
         };
         let (roles, cli) = section
-            .installed_identity(Action::Deploy, Some(&migration))
+            .target_identity(Action::Deploy, Some(&migration))
             .expect("v1 deploy 段可作为身份");
         assert_eq!(roles.package.as_deref(), Some("auction-rust-0.1.0-aaaaaaaaaaaa"));
         assert_eq!(roles.schema_version, Some(96));
         assert_eq!(cli.sha256, "c".repeat(64));
         assert_eq!(cli.schema_version, Some(96));
-        let (roles, _) = section.installed_identity(Action::Deploy, None).expect("缺迁移记录");
+        let (roles, _) = section.target_identity(Action::Deploy, None).expect("缺迁移记录");
         assert_eq!(roles.schema_version, None, "没有迁移记录时 schema 未知");
-        assert!(section.installed_identity(Action::Rollback, Some(&migration)).is_none());
+        assert!(section.target_identity(Action::Rollback, Some(&migration)).is_none());
     }
 }
