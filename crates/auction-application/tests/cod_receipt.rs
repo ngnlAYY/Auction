@@ -26,6 +26,15 @@ fn at(minute: u32) -> DateTime<Utc> {
 const BUYER: i64 = 1000;
 const PAYMENT: u64 = 50;
 const EQUIPMENT: u64 = 60;
+/// 生成方 `format_deadline` 对 [`deadline`] 的 UTC 秒精度输出。
+const DEADLINE_TEXT: &str = "2026-11-22T12:19:28Z";
+
+/// 恢复记录冻结的付款期限。
+fn deadline() -> DateTime<Utc> {
+    Utc.with_ymd_and_hms(2026, 11, 22, 12, 19, 28)
+        .single()
+        .unwrap_or_else(|| panic!("固定付款期限必须存在"))
+}
 
 fn line() -> SettlementLine {
     let amount =
@@ -97,6 +106,7 @@ fn snapshot() -> CodReceiptSnapshot {
         frozen_sent_proven: false,
         sending_at: Some(at(10)),
         funding_source_boundary: Some(at(0)),
+        payment_deadline_at: Some(deadline()),
     }
 }
 
@@ -284,6 +294,133 @@ fn new_pricing_payload_requires_the_frozen_line() {
     guard.settlement_line = Some(line());
     guard.settlement_mode = Some("unknown_mode".to_owned());
     assert_eq!(evaluate(&guard), Err(CodReceiptBlocker::PricingModeInvalid));
+}
+
+/// 线上 2026-11-15 起生成的竞得装备 COD 形状：价格明细八变量加正文付款期限。
+fn priced_payload_with_deadline() -> serde_json::Value {
+    serde_json::json!({
+        "schema_version": 1,
+        "operation": "send",
+        "world": "main",
+        "template": "settlement_winner_equipment_cod",
+        "variables": {
+            "reference": uuid(PAYMENT).to_string(),
+            "amount": BUYER.to_string(),
+            "item_name": "Legendary Sword",
+            "hold_ppm": "0",
+            "adjustment_ppm": "0",
+            "winning_bid": BUYER.to_string(),
+            "adjusted_price": BUYER.to_string(),
+            "pool_credit": "0",
+            "payment_deadline": DEADLINE_TEXT,
+        },
+        "credits": 0,
+        "cod": BUYER,
+        "equipment_secret_refs": [{
+            "kind": "auction_equipment_key",
+            "id": uuid(EQUIPMENT).to_string(),
+        }],
+    })
+}
+
+/// 回归：正文带付款期限的 COD 必须能资金化（线上曾因闭集不认 `payment_deadline` 整批拒绝，
+/// 卖方货款随之阻塞）；期限只按恢复记录冻结值精确比较，不放宽其余字段。
+#[test]
+fn payment_deadline_matches_the_frozen_recovery_deadline() {
+    let mut guard = snapshot();
+    guard.payload = priced_payload_with_deadline();
+    assert_eq!(evaluate(&guard), Ok(()));
+
+    // 期限写入正文之前的旧载荷不带该键，即使恢复记录有期限也按原形状通过（`snapshot()` 默认）。
+    assert_eq!(evaluate(&snapshot()), Ok(()));
+
+    for value in [
+        serde_json::json!("2026-11-22T12:19:29Z"),
+        serde_json::json!("2026-11-22T12:19:28+00:00"),
+        serde_json::json!("2026-11-22 12:19:28"),
+        serde_json::Value::Null,
+        serde_json::json!(1_795_000_000),
+    ] {
+        let mut guard = snapshot();
+        guard.payload = priced_payload_with_deadline();
+        guard.payload["variables"]["payment_deadline"] = value.clone();
+        assert_eq!(evaluate(&guard), Err(CodReceiptBlocker::PayloadMismatch), "{value}");
+    }
+
+    // 载荷带期限而恢复记录没有冻结期限：无法重建，失败关闭。
+    let mut guard = snapshot();
+    guard.payload = priced_payload_with_deadline();
+    guard.payment_deadline_at = None;
+    assert_eq!(evaluate(&guard), Err(CodReceiptBlocker::PayloadMismatch));
+
+    // 旧三变量形状早于正文期限：带期限的三变量载荷不是已发布形状。
+    let mut guard = snapshot();
+    guard.payload["variables"]["payment_deadline"] = serde_json::json!(DEADLINE_TEXT);
+    assert_eq!(evaluate(&guard), Err(CodReceiptBlocker::PayloadMismatch));
+}
+
+/// 载体付款正文后来加入装备名与付款期限；两者都按冻结事实精确比较，旧两变量载荷仍通过。
+#[test]
+fn carrier_payload_item_name_and_deadline_follow_the_frozen_facts() {
+    let buyer = BUYER;
+    let cod = buyer + 1;
+    let carrier = |variables: serde_json::Value| {
+        let mut guard = snapshot();
+        guard.obligation_kind = "winner_payment_carrier_cod".to_owned();
+        guard.carrier_credit = 1;
+        guard.result_metadata = CodReceiptResultMetadata {
+            template: Some("settlement_payment_carrier".to_owned()),
+            ..metadata()
+        };
+        guard.payload = serde_json::json!({
+            "schema_version": 1,
+            "operation": "send",
+            "world": "main",
+            "template": "settlement_payment_carrier",
+            "variables": variables,
+            "credits": 1,
+            "cod": cod,
+            "equipment_secret_refs": [],
+        });
+        guard
+    };
+    let carrier_subject = canonical_settlement_fulfillment_subject(
+        SettlementObligationKind::WinnerPaymentCarrierCod,
+        SettlementId::from_uuid(uuid(PAYMENT)),
+    )
+    .unwrap_or_else(|| panic!("载体 COD 主题必须存在"));
+    let evaluate_carrier = |guard: &CodReceiptSnapshot| {
+        guard.evaluate_row(uuid(PAYMENT), "Buyer", &carrier_subject, buyer)
+    };
+
+    let current = serde_json::json!({
+        "reference": uuid(PAYMENT).to_string(),
+        "amount": cod.to_string(),
+        "item_name": "Legendary Sword",
+        "payment_deadline": DEADLINE_TEXT,
+    });
+    assert_eq!(evaluate_carrier(&carrier(current.clone())), Ok(()));
+
+    let mut without_deadline = current.clone();
+    if let Some(variables) = without_deadline.as_object_mut() {
+        variables.remove("payment_deadline");
+    }
+    assert_eq!(evaluate_carrier(&carrier(without_deadline)), Ok(()));
+
+    let mut renamed = current.clone();
+    renamed["item_name"] = serde_json::json!("Another Sword");
+    assert_eq!(evaluate_carrier(&carrier(renamed)), Err(CodReceiptBlocker::PayloadMismatch));
+
+    let mut shifted = current.clone();
+    shifted["payment_deadline"] = serde_json::json!("2026-11-23T12:19:28Z");
+    assert_eq!(evaluate_carrier(&carrier(shifted)), Err(CodReceiptBlocker::PayloadMismatch));
+
+    // 生成方只会在写明装备名的同时写期限：只有期限没有装备名的组合不是已发布形状。
+    let mut deadline_only = current;
+    if let Some(variables) = deadline_only.as_object_mut() {
+        variables.remove("item_name");
+    }
+    assert_eq!(evaluate_carrier(&carrier(deadline_only)), Err(CodReceiptBlocker::PayloadMismatch));
 }
 
 fn binding() -> MailAccountEvidenceBinding {

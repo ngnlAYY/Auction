@@ -349,7 +349,10 @@ fn apply_frozen_variable_shape(
 mod tests {
     use std::collections::BTreeMap;
 
-    use auction_domain::{AuctionId, EquipmentId, LotId, SettlementWorld};
+    use auction_domain::{
+        AuctionId, EquipmentId, LotId, SettlementAmount, SettlementLine, SettlementMode,
+        SettlementWorld,
+    };
     use chrono::Utc;
     use uuid::Uuid;
 
@@ -361,6 +364,9 @@ mod tests {
     };
     use crate::core::RequestHash;
     use crate::ports::settlement::SettlementFulfillmentOperation;
+    use crate::ports::settlement::{
+        CodReceiptResultMetadata, CodReceiptSnapshot, canonical_settlement_fulfillment_subject,
+    };
     use crate::ports::settlement::{
         SettlementFulfillmentDeliverySnapshot, SettlementFulfillmentDeliveryStatus,
         SettlementFulfillmentState,
@@ -581,5 +587,73 @@ mod tests {
                 "251e49c17561f42bd471b0e78812fb18afc4932bc612a82e4f644b60262db119",
             ]
         );
+    }
+
+    /// 生成方与 COD 实收资金化准入的契约：同一冻结事实生成的竞得装备 COD 与载体付款载荷必须
+    /// 通过准入。线上曾因准入的变量闭集不认新增的正文变量（付款期限、载体装备名）而整批拒绝
+    /// 资金化，卖方货款随之阻塞；生成方再新增变量而准入未同步时，本用例先失败。
+    #[test]
+    fn produced_cod_payloads_pass_funding_receipt_admission() {
+        let amount = |value: i64| SettlementAmount::new(value).expect("测试金额必须非负");
+        for kind in [
+            SettlementObligationKind::WinnerEquipmentCod,
+            SettlementObligationKind::WinnerPaymentCarrierCod,
+        ] {
+            let mut claim = claim(kind);
+            let (obligation_kind, template) =
+                if kind == SettlementObligationKind::WinnerEquipmentCod {
+                    claim.carrier_credit = 0;
+                    claim.equipment_world = SettlementWorld::Main;
+                    claim.settlement_line = Some(SettlementLine {
+                        lot_id: claim.lot_id,
+                        end_price: amount(1_000),
+                        listed_price: amount(1_000),
+                        buyer_amount: amount(1_000),
+                        seller_amount: amount(1_000),
+                        tax_amount: amount(0),
+                        compensation_amount: amount(0),
+                        hold_ppm: 0,
+                        adjustment_ppm: 0,
+                    });
+                    claim.settlement_mode = Some(SettlementMode::HoldCurveV1);
+                    ("winner_equipment_cod", "settlement_winner_equipment_cod")
+                } else {
+                    ("winner_payment_carrier_cod", "settlement_payment_carrier")
+                };
+            let intent = build_delivery_intent(&claim).expect("COD intent 必须有效");
+            let canonical = build_canonical_delivery(&intent).expect("COD payload 必须有效");
+            assert!(variables_of(&canonical).contains_key("payment_deadline"), "{kind:?}");
+            let payment = claim.obligation_id.as_uuid();
+            let snapshot = CodReceiptSnapshot {
+                obligation_kind: obligation_kind.to_owned(),
+                obligation_amount: claim.amount,
+                carrier_credit: i64::from(claim.carrier_credit),
+                equipment_id: claim.equipment_id.as_uuid(),
+                equipment_name: claim.equipment_name.clone(),
+                payload: canonical.payload.clone(),
+                recipient: claim.recipient.clone(),
+                result_metadata: CodReceiptResultMetadata {
+                    proof: Some("sent_exact_payload_v1".to_owned()),
+                    sent_verified: Some(true),
+                    settlement_obligation_id: Some(payment.to_string()),
+                    operation: Some("send".to_owned()),
+                    template: Some(template.to_owned()),
+                    external_reference_proven: Some(true),
+                },
+                settlement_line: claim.settlement_line.clone(),
+                settlement_mode: claim.settlement_mode.map(|_| "hold_curve_v1".to_owned()),
+                frozen_sent_proven: false,
+                sending_at: Some(claim.claimed_at),
+                funding_source_boundary: Some(claim.claimed_at - chrono::Duration::hours(1)),
+                payment_deadline_at: claim.payment_deadline_at,
+            };
+            let subject = canonical_settlement_fulfillment_subject(kind, claim.obligation_id)
+                .expect("COD 主题必须存在");
+            assert_eq!(
+                snapshot.evaluate_row(payment, &claim.recipient, &subject, claim.amount),
+                Ok(()),
+                "{kind:?}"
+            );
+        }
     }
 }

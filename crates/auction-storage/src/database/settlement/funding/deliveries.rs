@@ -40,6 +40,13 @@ pub async fn reserve_funded_delivery(
                   f.delivery_operation,
                   (SELECT e.world_id FROM public.equipment e WHERE e.id=o.equipment_id)
                       AS equipment_world,
+                  (SELECT e.name FROM public.equipment e WHERE e.id=o.equipment_id)
+                      AS equipment_name,
+                  (
+                      SELECT r.payment_deadline_at
+                      FROM public.settlement_recoveries r
+                      WHERE r.payment_obligation_id=o.id
+                  ) AS payment_deadline_at,
                   EXISTS(
                       SELECT 1
                       FROM public.lots l
@@ -104,7 +111,7 @@ pub async fn reserve_funded_delivery(
                 "operation": "send",
                 "world": "main",
                 "template": "settlement_payment_carrier",
-                "variables": {"reference": obligation.to_string(), "amount": cod.to_string()},
+                "variables": carrier_variables(&row, &payload, obligation, cod)?,
                 "credits": 1,
                 "cod": cod,
                 "equipment_secret_refs": []
@@ -171,6 +178,41 @@ pub async fn reserve_funded_delivery(
     .await?;
     complete(tx, account, command, "reserve", delivery_id).await?;
     Ok(allocation_id)
+}
+
+/// 载体付款的期望正文变量。生成方后来在正文写明装备名与付款期限：载荷带这些键时必须等于
+/// 冻结装备名与恢复记录冻结期限（与生成方同一格式化函数），缺冻结值即失败关闭；旧两变量
+/// 载荷不带这些键，按原形状比较。
+fn carrier_variables(
+    row: &sqlx::postgres::PgRow,
+    payload: &serde_json::Value,
+    obligation: Uuid,
+    cod: i64,
+) -> Result<serde_json::Value, FundingError> {
+    let present = |key: &str| {
+        payload
+            .get("variables")
+            .and_then(serde_json::Value::as_object)
+            .is_some_and(|variables| variables.contains_key(key))
+    };
+    let mut variables =
+        serde_json::json!({"reference": obligation.to_string(), "amount": cod.to_string()});
+    if present("item_name") {
+        let name: Option<String> = row.try_get("equipment_name").map_err(storage)?;
+        variables["item_name"] = serde_json::Value::String(name.ok_or(FundingError::Unproven)?);
+    }
+    if present("payment_deadline") {
+        // 生成方只会在写明装备名的同时写期限；只有期限的组合不是已发布形状。
+        if !present("item_name") {
+            return Err(FundingError::Unproven);
+        }
+        let deadline: Option<chrono::DateTime<chrono::Utc>> =
+            row.try_get("payment_deadline_at").map_err(storage)?;
+        variables["payment_deadline"] = serde_json::Value::String(
+            auction_application::public::format_deadline(deadline.ok_or(FundingError::Unproven)?),
+        );
+    }
+    Ok(variables)
 }
 
 /// 与sending fence同事务；先核验新鲜真实cash且提交后续租成功，才可首次poll外部future。

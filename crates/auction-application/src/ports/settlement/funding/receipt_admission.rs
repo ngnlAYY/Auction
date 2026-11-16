@@ -37,6 +37,9 @@ pub struct CodReceiptVariables {
     pub adjusted_price: Option<String>,
     #[serde(default)]
     pub pool_credit: Option<String>,
+    /// 正文展示的付款期限（UTC 秒精度）；载荷带该键时必须等于恢复记录冻结的期限。
+    #[serde(default)]
+    pub payment_deadline: Option<String>,
 }
 
 /// 冻结载荷中的装备 secret 引用。
@@ -90,6 +93,8 @@ pub struct CodReceiptSnapshot {
     pub frozen_sent_proven: bool,
     pub sending_at: Option<DateTime<Utc>>,
     pub funding_source_boundary: Option<DateTime<Utc>>,
+    /// 付款义务所在恢复记录冻结的付款期限，与生成方取同一来源；用于重建正文期限变量。
+    pub payment_deadline_at: Option<DateTime<Utc>>,
 }
 
 /// 阻断项闭集；顺序即拒绝优先级，调用方取第一项。
@@ -343,6 +348,7 @@ impl CodReceiptSnapshot {
             winning_bid: None,
             adjusted_price: None,
             pool_credit: None,
+            payment_deadline: None,
         };
         let equipment_secret_refs = if self.carrier_credit == 0 {
             variables.item_name = Some(self.equipment_name.clone());
@@ -352,8 +358,16 @@ impl CodReceiptSnapshot {
                 id: self.equipment_id.to_string(),
             }]
         } else {
+            // 载体付款正文后来才写明装备名：带该键的载荷必须等于冻结装备名，旧两变量载荷不带。
+            // 生成方只会在写明装备名的同时写期限，只有期限没有装备名的组合不是已发布形状。
+            if self.payload_has_variable("item_name") {
+                variables.item_name = Some(self.equipment_name.clone());
+            } else if self.payload_has_variable("payment_deadline") {
+                return Err(CodReceiptBlocker::PayloadMismatch);
+            }
             Vec::new()
         };
+        variables.payment_deadline = self.expected_payment_deadline()?;
         Ok(ExpectedPayload {
             template,
             variables,
@@ -410,22 +424,41 @@ impl CodReceiptSnapshot {
         Ok(())
     }
 
-    /// 只有原三个变量键才允许省略新明细；完整载荷等值校验仍拒绝缺项、未知项与数值漂移。
+    /// 只有原三个变量键才允许省略新明细；完整载荷等值校验仍拒绝缺项、未知项与数值漂移。旧三
+    /// 变量形状早于正文期限，带期限的不算旧形状，按价格明细重建后判为不符。
     fn payload_variables_are_legacy(&self) -> bool {
-        serde_json::from_value::<CodReceiptVariables>(self.payload_variables_value()).is_ok_and(
-            |variables| {
-                variables.item_name.is_some()
-                    && variables.pricing_mode.is_none()
-                    && variables.hold_ppm.is_none()
-                    && variables.adjustment_ppm.is_none()
-                    && variables.winning_bid.is_none()
-                    && variables.adjusted_price.is_none()
-                    && variables.pool_credit.is_none()
-            },
-        )
+        !self.payload_has_variable("payment_deadline")
+            && serde_json::from_value::<CodReceiptVariables>(self.payload_variables_value())
+                .is_ok_and(|variables| {
+                    variables.item_name.is_some()
+                        && variables.pricing_mode.is_none()
+                        && variables.hold_ppm.is_none()
+                        && variables.adjustment_ppm.is_none()
+                        && variables.winning_bid.is_none()
+                        && variables.adjusted_price.is_none()
+                        && variables.pool_credit.is_none()
+                })
     }
 
     fn payload_variables_value(&self) -> serde_json::Value {
         self.payload.get("variables").cloned().unwrap_or(serde_json::Value::Null)
+    }
+
+    /// 付款期限只是正文展示：载荷带该键时，期望值用生成方同一格式化函数由冻结期限重建，恢复
+    /// 记录缺期限即失败关闭；不带该键的是期限写入正文之前生成的旧载荷，按原形状比较。
+    fn expected_payment_deadline(&self) -> Result<Option<String>, CodReceiptBlocker> {
+        if !self.payload_has_variable("payment_deadline") {
+            return Ok(None);
+        }
+        self.payment_deadline_at
+            .map(|deadline| Some(crate::services::public::format_deadline(deadline)))
+            .ok_or(CodReceiptBlocker::PayloadMismatch)
+    }
+
+    fn payload_has_variable(&self, key: &str) -> bool {
+        self.payload
+            .get("variables")
+            .and_then(serde_json::Value::as_object)
+            .is_some_and(|variables| variables.contains_key(key))
     }
 }

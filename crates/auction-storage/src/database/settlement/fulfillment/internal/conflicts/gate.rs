@@ -147,6 +147,10 @@ pub(super) async fn exclude_conflicts(
     // 成功delivery必须有对应的已满足fulfillment或recovery action；孤儿成功也不是清白。
     // 竞得装备正文只接受精确旧三/八变量或显式 v2 九变量；
     // 缺字段、未知模式/字段和非字符串值仍视为冲突。
+    // 正文展示变量不携带资产，按生成方出现规则先剔除再比较键集合：竞得装备 COD 与载体付款的
+    // payment_deadline，载体付款、卖方货款与买方退款的 item_name。曾因不认它们，库里一有新形状
+    // 投递，全部内部履约与装备损失都判冲突。生成方只给价格明细形状的 COD、已写装备名的载体写
+    // 期限，旧三变量 COD 或缺装备名的载体带期限仍判冲突。
     // 只缓存固定 SQL 文本，冲突事实仍在当前事务重新读取。
     static OUTGOING_QUERY: LazyLock<String> = LazyLock::new(|| {
         r#"SELECT EXISTS(
@@ -211,7 +215,15 @@ pub(super) async fn exclude_conflicts(
                            false
                        )
                        OR jsonb_typeof(d.payload->'variables') IS DISTINCT FROM 'object'
-                       OR d.payload->'variables' IS DISTINCT FROM CASE d.payload_template
+                       OR (d.payload->'variables') - CASE d.payload_template
+                           WHEN 'settlement_winner_equipment_cod'
+                               THEN ARRAY['payment_deadline']
+                           WHEN 'settlement_payment_carrier'
+                               THEN ARRAY['item_name','payment_deadline']
+                           WHEN 'settlement_seller_payout' THEN ARRAY['item_name']
+                           WHEN 'settlement_buyer_refund' THEN ARRAY['item_name']
+                           ELSE ARRAY[]::text[] END
+                         IS DISTINCT FROM CASE d.payload_template
                            WHEN 'settlement_winner_equipment_cod' THEN CASE
                                WHEN d.payload->'variables' ? 'pricing_mode' THEN CASE
                                    WHEN d.payload->'variables'->>'pricing_mode'='hold_curve_v2'
@@ -250,6 +262,15 @@ pub(super) async fn exclude_conflicts(
                                'amount',d.payload->'variables'->'amount',
                                'reference',d.payload->'variables'->'reference'
                            ) END
+                       OR (
+                           d.payload->'variables' ? 'payment_deadline'
+                           AND CASE d.payload_template
+                               WHEN 'settlement_winner_equipment_cod'
+                                   THEN NOT d.payload->'variables' ? 'hold_ppm'
+                               WHEN 'settlement_payment_carrier'
+                                   THEN NOT d.payload->'variables' ? 'item_name'
+                               ELSE false END
+                       )
                        OR d.payload->'variables'->>'reference' IS DISTINCT FROM d.origin_id
                        OR EXISTS(
                            SELECT 1
