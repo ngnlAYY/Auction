@@ -12,6 +12,7 @@ mod asset_reconciliation;
 mod auction_write_queue;
 mod bid_cross_lot;
 mod bid_log_proxies;
+mod collection_cod;
 mod collection_wait;
 mod delivery;
 mod disposition_reads;
