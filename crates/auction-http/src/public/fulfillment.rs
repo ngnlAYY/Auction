@@ -20,12 +20,12 @@ use chrono::SubsecRound;
 use crate::diagnostics;
 use crate::errors::{api_error, not_found_error, query_rejection};
 use crate::mapping::public_timestamp;
-use crate::middleware::response_cache::LOW_FREQUENCY_CACHE_CONTROL;
 use crate::query::{page_offset, parse_positive_i64, parse_public_uuid, parse_query};
 use crate::state::PublicApiState;
 
 /// 已结算场次逐件的履约进度。查询参数闭集为 `world`、`lot`、`page`、`page_size`；`page_size`
-/// 默认 50、上限 100。场次不存在、未结算或不可见为 404，端口未注入或返回无法判定的事实为 503。
+/// 默认 50、上限 100。场次不存在、未结算或不可见为 404。能解释但不足以判定的事实是合法的
+/// `unknown` 状态；端口未注入，或事实含闭集外原值、重复或自相矛盾时整页 503。
 pub(crate) async fn list(
     State(state): State<PublicApiState>,
     Path(auction_id): Path<String>,
@@ -100,8 +100,10 @@ pub(crate) async fn list(
     };
 
     let mut headers = HeaderMap::new();
-    // 履约状态在结算后仍会变化，不能用已结算档；与补偿池明细一致使用分钟级低频档。
-    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static(LOW_FREQUENCY_CACHE_CONTROL));
+    // 履约状态随寄出、领取、付款与退回持续变化，分钟级缓存会让玩家看到过时的付款或退件状态：
+    // 与补偿池汇总一致使用 `no-cache`，浏览器与 CDN 可以保存，但每次使用前都向源站再验证，
+    // 未变化时由内容 ETag 回 304，开销仍低。
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
     Ok((headers, Json(ApiResponse::ok("履约进度已加载", map_page(result, views, page)))))
 }
 
@@ -181,7 +183,6 @@ mod tests {
     use uuid::Uuid;
 
     use super::list;
-    use crate::middleware::response_cache::LOW_FREQUENCY_CACHE_CONTROL;
     use crate::state::PublicApiState;
 
     const AUCTION_ID: Uuid = Uuid::from_u128(0x0190_f2b4_1c2d_4e5f_8a6b_7c8d_9e0f_1a2b);
@@ -353,7 +354,8 @@ mod tests {
     async fn page_exposes_only_the_closed_field_set() {
         let (status, cache, body) = call(Some(FakeReader::new(Ok(Some(entries())))), "").await;
         assert_eq!(status, StatusCode::OK);
-        assert_eq!(cache.as_deref(), Some(LOW_FREQUENCY_CACHE_CONTROL));
+        // 状态会随履约推进变化：每次使用前都必须再验证，不得是分钟级的可直接复用缓存档。
+        assert_eq!(cache.as_deref(), Some("no-cache"));
         let data = &body["data"];
         assert_eq!(keys(data), ["auction", "lots", "page", "page_size", "total"]);
         assert_eq!(

@@ -5,6 +5,7 @@
 //! 映射为 wire 字符串，浏览器只把字符串映射为文案。邮件、投递、履约与命令标识、诊断码、
 //! Bot 身份与代理模式都不进入本端口的公开输出。
 
+use auction_domain::SettlementWorld;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
@@ -91,7 +92,8 @@ pub struct PublicFulfillmentPage {
 
 impl PublicFulfillmentPage {
     /// 校验场次、分页范围与逐件事实，并确认每件都能映射为闭集状态：任一未知原值都让整页
-    /// 失败关闭，不把无法判定的事实显示成某个正常阶段。
+    /// 失败关闭，不把无法判定的事实显示成某个正常阶段。场次世界在页级按闭集校验：空页（筛选
+    /// 无匹配或越过末页）不经过逐件判定，世界不在闭集内时同样失败关闭。
     pub fn validate(&self) -> Result<(), &'static str> {
         let entry_count = i64::try_from(self.entries.len()).map_err(|error| {
             record_error(
@@ -104,7 +106,7 @@ impl PublicFulfillmentPage {
             "公开履约进度页大小溢出"
         })?;
         if self.auction.auction_id.is_nil()
-            || !auction_domain::valid_text(&self.auction.world_id, 64)
+            || SettlementWorld::from_name(&self.auction.world_id).is_none()
             || self.auction.sequence <= 0
             || self.read_at.timestamp_micros() == 0
             || !(1..=MAX_PUBLIC_FULFILLMENT_PAGE_SIZE).contains(&self.limit)
@@ -267,6 +269,15 @@ mod tests {
         let mut unknown_world = page(vec![unsold_lot(1)], 1);
         unknown_world.auction.world_id = "persistent".to_owned();
         assert!(unknown_world.validate().is_err(), "场次世界不在闭集内");
+        // 空页不经过逐件判定，世界闭集仍在页级失败关闭。
+        for (total, offset) in [(0, 0), (1, 50)] {
+            let mut empty = page(Vec::new(), total);
+            empty.offset = offset;
+            empty.auction.world_id = "persistent".to_owned();
+            assert!(empty.validate().is_err(), "未知世界的空页 total={total}");
+            empty.auction.world_id = "isekai".to_owned();
+            assert_eq!(empty.validate(), Ok(()), "闭集内世界的空页 total={total}");
+        }
         let mut too_many = page(vec![unsold_lot(1), unsold_lot(2)], 2);
         too_many.limit = 1;
         assert!(too_many.validate().is_err(), "本页超过页大小");

@@ -375,8 +375,8 @@ COMMIT 报告的 SSI 冲突不推测为序号热点。
 `settlement_obligations.business_state`、履约 `execution_state` 与关联投递 `status` 原值。不读取投递、履约、
 命令与邮件标识、失败码、证明与资金字段，也不连接代理授权表。未知原值由应用层让整页失败关闭。
 
-只读页面不新增迁移：lot 走 `lots_auction_status_idx`，义务走 `(auction_id, lot_id, obligation_kind)` 唯一约束
-索引，其余连接都按主键或唯一键；运行账号对 public schema 已有 SELECT（迁移 `000081`）。
+只读页面不新增迁移：lot 读取可利用 `lots_auction_status_idx`，义务读取可利用 `(auction_id, lot_id, obligation_kind)`
+唯一约束索引，其余连接都按主键或唯一键（未做生产规模的 EXPLAIN）；运行账号对 public schema 已有 SELECT（迁移 `000081`）。
 
 ## 并发形状与唤醒
 

@@ -46,13 +46,13 @@
 
 ### 缓存头
 
-公开目录类读取（拍卖列表、当前拍卖、批次列表、批次详情、竞价日志）在场次进行中成功时返回 `Cache-Control: private, max-age=2, stale-while-revalidate=5`：只有浏览器自己可以保存 2 秒（过期后 5 秒内允许先用旧副本再后台再验证），共享缓存与 CDN 不得保存。这些内容与身份无关，`private` 表达的是新鲜度：竞价事件之后客户端立即带 `If-None-Match` 再验证，共享缓存里哪怕 2 秒的旧副本也会把它答成 304，页面停在事件之前的价格与领先者上。补偿池汇总带共用补偿池的当前余额，为 `no-cache`（可保存，每次使用前必须再验证）；世界目录、规则、关于、黑名单与注册说明属于低频变化内容，使用下文的低频档。成功正文（上限 2 MiB）附带由 SHA-256 内容摘要生成的强 `ETag`；请求 `If-None-Match` 精确匹配、弱比较匹配或为 `*` 时返回 304，保留 `Cache-Control` 与 `ETag`，不带正文与 `Content-Length`。`no-store` 响应绝不缓冲、绝不附加 ETag，缓存中间件也不放宽处理器已有的禁止存储策略；错误响应保持 `no-store`。倒计时 SVG 在仍倒数或尚未排期时为 `Cache-Control: public, max-age=5`，计时目标已过去（图片固定为结束态）时改用低频档；含会话或命令结果的响应以及全部 Admin 接口返回 `no-store`。批次列表与详情响应中的完整游戏装备 URL 含公开访问 key，进行中场次按上述目录短缓存策略只由浏览器保存最多 2 秒（`stale-while-revalidate` 另至多 5 秒），该 URL 不进入日志或调试输出。
+公开目录类读取（拍卖列表、当前拍卖、批次列表、批次详情、竞价日志）在场次进行中成功时返回 `Cache-Control: private, max-age=2, stale-while-revalidate=5`：只有浏览器自己可以保存 2 秒（过期后 5 秒内允许先用旧副本再后台再验证），共享缓存与 CDN 不得保存。这些内容与身份无关，`private` 表达的是新鲜度：竞价事件之后客户端立即带 `If-None-Match` 再验证，共享缓存里哪怕 2 秒的旧副本也会把它答成 304，页面停在事件之前的价格与领先者上。补偿池汇总带共用补偿池的当前余额，履约进度随寄出、领取、付款、退回与撤销持续变化，两者都为 `no-cache`（可保存，每次使用前必须再验证）；世界目录、规则、关于、黑名单与注册说明属于低频变化内容，使用下文的低频档。成功正文（上限 2 MiB）附带由 SHA-256 内容摘要生成的强 `ETag`；请求 `If-None-Match` 精确匹配、弱比较匹配或为 `*` 时返回 304，保留 `Cache-Control` 与 `ETag`，不带正文与 `Content-Length`。`no-store` 响应绝不缓冲、绝不附加 ETag，缓存中间件也不放宽处理器已有的禁止存储策略；错误响应保持 `no-store`。倒计时 SVG 在仍倒数或尚未排期时为 `Cache-Control: public, max-age=5`，计时目标已过去（图片固定为结束态）时改用低频档；含会话或命令结果的响应以及全部 Admin 接口返回 `no-store`。批次列表与详情响应中的完整游戏装备 URL 含公开访问 key，进行中场次按上述目录短缓存策略只由浏览器保存最多 2 秒（`stale-while-revalidate` 另至多 5 秒），该 URL 不进入日志或调试输出。
 
 已结算与低频变化的内容使用更长缓存，并允许共享缓存与 CDN 保存，按内容多久变一次分两档：
 
 | 档位 | `Cache-Control` | 内容 | 何时变化 |
 | --- | --- | --- | --- |
-| 低频 | `public, max-age=300, s-maxage=300, stale-while-revalidate=3600` | 世界目录、规则、关于、黑名单、注册说明；已结算拍卖列表、价格历史、补偿池流水与逐件明细、履约进度 | 运营在管理端修改或重启生效；场次结算、成交撤销冲正时追加；履约进度随寄出、领取、付款、退回与撤销变化 |
+| 低频 | `public, max-age=300, s-maxage=300, stale-while-revalidate=3600` | 世界目录、规则、关于、黑名单、注册说明；已结算拍卖列表、价格历史、补偿池流水与逐件明细 | 运营在管理端修改或重启生效；场次结算、成交撤销冲正时追加 |
 | 已结算 | `public, max-age=86400, s-maxage=86400, stale-while-revalidate=604800` | 已结算批次的 lots、lot 详情与竞价日志 | 状态、金额与来源事实不再变化；领先者与出价人显示账号当前用户名，随改名更新 |
 
 低频档 5 分钟内直接使用缓存；之后一小时内缓存先回旧副本并在后台刷新，下一次请求拿到新内容；超过一小时无人访问则同步回源。运营修改或新结算最迟在“5 分钟后的第二次访问”可见，单次访问看到的内容最多旧约 65 分钟；需要立即生效时清除对应 URL 的 CDN 缓存（见[ops/README.md#cdncloudflare](../../ops/README.md#cdncloudflare)）。已结算档 1 天内直接使用缓存，之后 7 天内先回旧副本并在后台刷新：账号改名（管理端改名或回滚、`rebind` 换绑、论坛身份同步）后，这三类响应最迟在“1 天后的第二次访问”显示新名字，单次访问看到的名字最多旧约 8 天；需要立即生效时按前缀清除 `/api/v1/auctions/` 与 `/api/v1/lots/` 的 CDN 缓存，浏览器已保存的副本不受清除影响，仍按 1 天到期。准入与金额从不读取这些缓存：世界停用、黑名单与规则的效力都由服务端在命令事务内即时判定。论坛同步开关取自 Worker 的最新观测，心跳缺失时要立刻反映，保持 `no-store`。两档响应都附带内容 ETag；进行中场次继续使用 2 秒目录缓存。
@@ -117,7 +117,7 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | GET | `/api/v1/auctions/{auction_id}/lots` | — | `category`、`equipment_group`（rare/fusion）、`max_level`、`include_unleveled`、`page`、`page_size`、`fields`。`fields` 可选且只接受 `summary`：正式（live）行省略 `equipment.stats` 与 `equipment.info_summary`，`primary_attribute_initials`、`avg_roll` 与完整游戏链接照常返回，属性明细由 lot 详情提供；预览行不变。不带 `fields` 时保持原字段集合；其他取值或重复出现为 400 `invalid_query`。两种投影的 URL 不同，ETag 与缓存条目各自独立 |
 | GET | `/api/v1/lots/{lot_id}` | — | lot 详情（装备、价格、截止与领先状态；完整竞价历史另读 bid-log） |
 | GET | `/api/v1/auctions/{auction_id}/bid-log` | — | `world`、`lot`、`page`、`page_size`、`cursor`、`include`。`include` 可选且只接受 `defeated_proxy`：代理对代理竞争中胜者的那条代理出价追加 `defeated_proxy`（`bidder_name`、`maximum_amount`），即被它排位击败的授权，快慢模式一样且不公开模式；Public 页面把它按一次代理出价排在该出价之前，不计入 `total` 与分页。被普通出价击败的代理没有此字段。不带 `include` 时保持原字段集合，已打开的旧页面照常解码；其他取值或重复出现为 400 `invalid_query` |
-| GET | `/api/v1/auctions/{auction_id}/fulfillment` | — | `world`、`lot`、`page`、`page_size`：已结算场次逐件的履约进度，见下文[履约进度](#履约进度)。`lot` 与竞价日志同口径（规范 UUID 精确匹配，或不超过 32 位字母数字的 lot 代码大小写不敏感包含匹配）；`page_size` 默认 50、上限 100，超出与未知或重复参数为 400 `invalid_query`；场次不存在、未结算、不可见或与 `world` 不符为 404；读端口未注入或返回无法判定的事实为 503 `storage_unavailable`。成功响应使用低频档 |
+| GET | `/api/v1/auctions/{auction_id}/fulfillment` | — | `world`、`lot`、`page`、`page_size`：已结算场次逐件的履约进度，见下文[履约进度](#履约进度)。`lot` 与竞价日志同口径（规范 UUID 精确匹配，或不超过 32 位字母数字的 lot 代码大小写不敏感包含匹配）；`page_size` 默认 50、上限 100，超出与未知或重复参数为 400 `invalid_query`；场次不存在、未结算、不可见或与 `world` 不符为 404；能解释但不足以判定的事实返回合法状态 `unknown`；读端口未注入，或事实含闭集外原值、重复或自相矛盾时为 503 `storage_unavailable`。成功响应为 `no-cache` |
 | GET | `/api/v1/price-history` | — | `name`、`world`、`from`、`to`、`min_price`、`max_price`、`buyer`、`seller`、`sort`、`page`、`page_size`、`cursor` |
 | GET | `/api/v1/registration-info` | — | 登录页注册说明用的 Bot 名单（`bot_players` 投影） |
 | GET | `/api/v1/forum/sync-status` | — | 论坛同步开关与摘要 |
@@ -126,18 +126,18 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 
 ### 履约进度
 
-`GET /api/v1/auctions/{auction_id}/fulfillment` 返回 `{auction: {id, world, number}, lots: [...], page, page_size, total}`，字段闭集首发锁定。只覆盖已结算场次（可见性与竞价日志一致，停用世界的已结算场次仍可读），只列成交与流拍 lot，撤拍 lot 不出现；按 lot 顺序排列。每件 lot 固定给出 `lot_id`、`lot_number`（类别内编号）、`equipment_name`、`equipment_category`、`seller_name`（投稿卖家名，没有投稿记录为 `—`）与 `status`；`buyer_name`（买家当前用户名）与 `final_price` 只在成交 lot 成对出现；`payment_deadline_at`（当前付款期限，RFC 3339 UTC 秒精度，COD 重寄时重新起算）只随 `awaiting_payment`、`payment_overdue`、`cod_resent_awaiting_payment` 出现；`cod_return_count` 与 `cod_return_limit`（该成交冻结的 COD 退回上限）只在发生过 COD 退回时成对出现。响应不含邮件、投递、履约或命令标识，不含阻断码、失败码、Bot 身份与代理模式。
+`GET /api/v1/auctions/{auction_id}/fulfillment` 返回 `{auction: {id, world, number}, lots: [...], page, page_size, total}`，字段闭集首发锁定。只覆盖已结算场次（可见性与竞价日志一致，停用世界的已结算场次仍可读），只列成交与流拍 lot，撤拍 lot 不出现；按 lot 顺序排列。每件 lot 固定给出 `lot_id`、`lot_number`（类别内编号）、`equipment_name`、`equipment_category`、`seller_name`（投稿卖家名，没有投稿记录为 `—`）与 `status`；`buyer_name`（买家当前用户名）与 `final_price` 只在成交 lot 成对出现；`payment_deadline_at`（当前付款期限，RFC 3339 UTC 秒精度，COD 重寄时重新起算）只随 `awaiting_payment`、`payment_overdue`、`cod_resent_awaiting_payment` 出现；`cod_return_count` 与 `cod_return_limit`（该成交冻结的 COD 退回上限）只在发生过 COD 退回时成对出现。响应不含邮件、投递、履约或命令标识，不含阻断码、失败码、Bot 身份与代理模式。成功响应为 `no-cache`：浏览器与 CDN 可以保存，但每次使用前都向源站再验证，未变化时只回 304；Public 页面正常情况下最多沿用约 15 秒的本地缓存，读取失败而展示旧结果时会标明显示的是哪个时间点的结果。
 
-`status` 闭集如下，判定在应用层按固定顺序进行，首个命中生效：缺结算明细 → 流拍寄回 → 装备损失 → 成交撤销 → 退件 → 付款 → 异世界交付 → 卖家货款。每项义务先归为待寄出、已寄出待领取、已完成或处理中（失败或待人工核对）；付款是否完成只看付款义务的履约，逾期只看付款期限（恰好等于读取时刻即逾期，没有恢复记录的历史成交不判逾期）；恢复记录的阻断只在成交撤销与退件阶段显示为处理中，付款提醒失败不影响付款状态。任何闭集外的原值都让整页 503，不猜成相邻的正常阶段。业务流程见[docs/guide/settlement.md](../guide/settlement.md)。
+`status` 闭集如下，判定在应用层按固定顺序进行，首个命中生效：缺结算明细 → 流拍寄回 → 装备损失 → 成交撤销 → 退件 → 付款 → 异世界交付 → 卖家货款。每项义务先归为待寄出、已寄出待领取、已完成或处理中（失败或待人工核对）；付款是否完成只看付款义务的履约，逾期只看付款期限（恰好等于读取时刻即逾期，没有恢复记录的历史成交不判逾期）；恢复记录的阻断只在成交撤销与退件阶段显示为处理中，付款提醒失败不影响付款状态。付款相关状态只表达系统是否已确认收款（付款义务是否收口），不断言买家是否付款。两类无法正常判定的情况分开处理：缺结算明细、缺必需的义务或重挂/退款阶段缺撤销结论等能解释但不足以判定的事实，给出合法状态 `unknown`，整页照常 200；义务种类、业务状态、履约或投递状态、恢复阶段或撤销结论、lot 状态、场次世界等原值不在闭集内，同种义务重复，或成交事实自相矛盾时，整页 503，不猜成相邻的正常阶段。业务流程见[docs/guide/settlement.md](../guide/settlement.md)。
 
 | `status` | 含义 |
 | --- | --- |
 | `unsold_return_pending` / `unsold_return_sent` / `unsold_returned` / `unsold_return_on_hold` | 流拍：待寄回卖家 / 已寄回待卖家领取 / 卖家已取回 / 寄回处理中 |
 | `payment_mail_pending` | 已成交，付款邮件（COD）尚未寄出 |
-| `awaiting_payment` / `payment_overdue` | COD 已寄出等待付款 / 已过付款期限仍未付款 |
+| `awaiting_payment` / `payment_overdue` | COD 已寄出、尚未确认收款 / 付款期限已过、仍未确认收款 |
 | `payment_on_hold` | 付款邮件处理中：投递失败或待人工核对，或期限已过仍没有寄出证明 |
-| `returned_by_buyer` / `returned_on_hold` | COD 被买家退回、正在收回装备 / 退件核对中 |
-| `cod_resend_pending` / `cod_resent_awaiting_payment` | COD 被退回后待重新寄出 / 已重新寄出等待付款 |
+| `returned_by_buyer` / `returned_on_hold` | COD 被买家退回、退件处理中（主世界回收装备，异世界的载体只含 Credits）/ 退件核对中 |
+| `cod_resend_pending` / `cod_resent_awaiting_payment` | COD 被退回后待重新寄出 / 已重新寄出、尚未确认收款 |
 | `cod_return_limit_reached` | 主世界 COD 退回次数达到上限，成交即将撤销 |
 | `handoff_pending` / `handoff_sent` / `handoff_on_hold` / `handoff_returned_by_buyer` | 异世界已付款：装备待交付 / 已寄出待买家领取 / 交付处理中 / 交付的装备被买家退回 |
 | `payout_pending` / `payout_sent` / `payout_on_hold` | 货款待发给卖家 / 已寄出待卖家领取 / 发放处理中 |

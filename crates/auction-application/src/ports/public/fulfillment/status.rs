@@ -27,19 +27,19 @@ pub enum PublicFulfillmentStatus {
     UnsoldReturnOnHold,
     /// 已成交，付款邮件（COD）尚未寄出。
     PaymentMailPending,
-    /// COD 已寄出，等待买家付款。
+    /// COD 已寄出，系统尚未确认收款。
     AwaitingPayment,
-    /// 已过付款期限，买家尚未付款。
+    /// 已过付款期限，系统仍未确认收款；只表示付款义务尚未收口，不断言买家没有付款。
     PaymentOverdue,
     /// 付款邮件处理中：投递失败、待人工核对，或期限已过仍无寄出证明。
     PaymentOnHold,
-    /// COD 被买家退回，正在收回装备。
+    /// COD 被买家退回，退件处理中；不指明资产：异世界的载体 COD 只有 Credits，没有装备。
     ReturnedByBuyer,
     /// 退件核对中。
     ReturnedOnHold,
     /// COD 被退回后待重新寄出。
     CodResendPending,
-    /// COD 已重新寄出，等待买家付款。
+    /// COD 已重新寄出，系统尚未确认收款。
     CodResentAwaitingPayment,
     /// COD 退回次数已达上限，成交即将撤销。
     CodReturnLimitReached,
@@ -686,48 +686,54 @@ mod tests {
         lot
     }
 
+    /// 已发布的 wire 字符串逐一写死：交换两个变体的返回值、改名或漏改都会在这里失败，
+    /// 不依赖实现本身生成期望值。
+    const PUBLISHED_WIRE_STRINGS: [(PublicFulfillmentStatus, &str); 31] = [
+        (PublicFulfillmentStatus::UnsoldReturnPending, "unsold_return_pending"),
+        (PublicFulfillmentStatus::UnsoldReturnSent, "unsold_return_sent"),
+        (PublicFulfillmentStatus::UnsoldReturned, "unsold_returned"),
+        (PublicFulfillmentStatus::UnsoldReturnOnHold, "unsold_return_on_hold"),
+        (PublicFulfillmentStatus::PaymentMailPending, "payment_mail_pending"),
+        (PublicFulfillmentStatus::AwaitingPayment, "awaiting_payment"),
+        (PublicFulfillmentStatus::PaymentOverdue, "payment_overdue"),
+        (PublicFulfillmentStatus::PaymentOnHold, "payment_on_hold"),
+        (PublicFulfillmentStatus::ReturnedByBuyer, "returned_by_buyer"),
+        (PublicFulfillmentStatus::ReturnedOnHold, "returned_on_hold"),
+        (PublicFulfillmentStatus::CodResendPending, "cod_resend_pending"),
+        (PublicFulfillmentStatus::CodResentAwaitingPayment, "cod_resent_awaiting_payment"),
+        (PublicFulfillmentStatus::CodReturnLimitReached, "cod_return_limit_reached"),
+        (PublicFulfillmentStatus::HandoffPending, "handoff_pending"),
+        (PublicFulfillmentStatus::HandoffSent, "handoff_sent"),
+        (PublicFulfillmentStatus::HandoffOnHold, "handoff_on_hold"),
+        (PublicFulfillmentStatus::HandoffReturnedByBuyer, "handoff_returned_by_buyer"),
+        (PublicFulfillmentStatus::PayoutPending, "payout_pending"),
+        (PublicFulfillmentStatus::PayoutSent, "payout_sent"),
+        (PublicFulfillmentStatus::PayoutOnHold, "payout_on_hold"),
+        (PublicFulfillmentStatus::Completed, "completed"),
+        (PublicFulfillmentStatus::EquipmentLost, "equipment_lost"),
+        (PublicFulfillmentStatus::VoidedReturnPending, "voided_return_pending"),
+        (PublicFulfillmentStatus::VoidedReturnSent, "voided_return_sent"),
+        (PublicFulfillmentStatus::VoidedReturned, "voided_returned"),
+        (PublicFulfillmentStatus::VoidedOnHold, "voided_on_hold"),
+        (PublicFulfillmentStatus::VoidedRefundPending, "voided_refund_pending"),
+        (PublicFulfillmentStatus::VoidedRelisted, "voided_relisted"),
+        (PublicFulfillmentStatus::VoidedRelistPending, "voided_relist_pending"),
+        (PublicFulfillmentStatus::VoidedRelistUnavailable, "voided_relist_unavailable"),
+        (PublicFulfillmentStatus::Unknown, "unknown"),
+    ];
+
     #[test]
-    fn wire_strings_are_distinct_snake_case() {
-        let statuses = [
-            PublicFulfillmentStatus::UnsoldReturnPending,
-            PublicFulfillmentStatus::UnsoldReturnSent,
-            PublicFulfillmentStatus::UnsoldReturned,
-            PublicFulfillmentStatus::UnsoldReturnOnHold,
-            PublicFulfillmentStatus::PaymentMailPending,
-            PublicFulfillmentStatus::AwaitingPayment,
-            PublicFulfillmentStatus::PaymentOverdue,
-            PublicFulfillmentStatus::PaymentOnHold,
-            PublicFulfillmentStatus::ReturnedByBuyer,
-            PublicFulfillmentStatus::ReturnedOnHold,
-            PublicFulfillmentStatus::CodResendPending,
-            PublicFulfillmentStatus::CodResentAwaitingPayment,
-            PublicFulfillmentStatus::CodReturnLimitReached,
-            PublicFulfillmentStatus::HandoffPending,
-            PublicFulfillmentStatus::HandoffSent,
-            PublicFulfillmentStatus::HandoffOnHold,
-            PublicFulfillmentStatus::HandoffReturnedByBuyer,
-            PublicFulfillmentStatus::PayoutPending,
-            PublicFulfillmentStatus::PayoutSent,
-            PublicFulfillmentStatus::PayoutOnHold,
-            PublicFulfillmentStatus::Completed,
-            PublicFulfillmentStatus::EquipmentLost,
-            PublicFulfillmentStatus::VoidedReturnPending,
-            PublicFulfillmentStatus::VoidedReturnSent,
-            PublicFulfillmentStatus::VoidedReturned,
-            PublicFulfillmentStatus::VoidedOnHold,
-            PublicFulfillmentStatus::VoidedRefundPending,
-            PublicFulfillmentStatus::VoidedRelisted,
-            PublicFulfillmentStatus::VoidedRelistPending,
-            PublicFulfillmentStatus::VoidedRelistUnavailable,
-            PublicFulfillmentStatus::Unknown,
-        ];
-        let mut wires = statuses.map(PublicFulfillmentStatus::as_str).to_vec();
-        assert!(wires.iter().all(|wire| {
-            !wire.is_empty() && wire.bytes().all(|byte| byte.is_ascii_lowercase() || byte == b'_')
-        }));
-        wires.sort_unstable();
-        wires.dedup();
-        assert_eq!(wires.len(), 31, "闭集共 31 个互不相同的状态");
+    fn wire_strings_match_the_published_table() {
+        for (index, (status, wire)) in PUBLISHED_WIRE_STRINGS.into_iter().enumerate() {
+            assert_eq!(status.as_str(), wire, "{status:?}");
+            // 对照表里每个变体与字符串都只出现一次，31 行即覆盖整个闭集。
+            assert!(
+                PUBLISHED_WIRE_STRINGS[..index]
+                    .iter()
+                    .all(|(other, other_wire)| *other != status && *other_wire != wire),
+                "{wire} 重复"
+            );
+        }
     }
 
     #[test]
