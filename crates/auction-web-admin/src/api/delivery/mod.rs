@@ -34,6 +34,12 @@ pub(crate) use queue::{DeliveryAction, DeliverySearchFilters, execute_delivery, 
 /// 与服务端 `MAX_PLAYER_SUPPORT_ROWS` 对齐；超过即视为损坏响应。
 const MAX_PLAYER_SUPPORT_ROWS: usize = 50;
 
+/// 详情的唯一 URL 构造点：本页面认识装备收回处置（`recovery_equipment_recovered`），显式请求含它的
+/// 投影；服务端缺省响应只输出升级前页面认识的处置闭集。
+fn delivery_detail_url(delivery_id: &str) -> String {
+    format!("/api/v1/admin/deliveries/{delivery_id}?include=recovery_equipment_recovered")
+}
+
 /// 读取单条投递的完整证据详情；响应必须精确对应请求的投递 ID。
 pub(crate) async fn fetch_delivery_detail(
     delivery_id: String,
@@ -41,7 +47,7 @@ pub(crate) async fn fetch_delivery_detail(
     if !valid_uuid(&delivery_id) {
         return Err("invalid_delivery_id".to_owned());
     }
-    let response = send_get(&format!("/api/v1/admin/deliveries/{delivery_id}")).await?;
+    let response = send_get(&delivery_detail_url(&delivery_id)).await?;
     if !response.ok() {
         return Err(response_error(response).await);
     }

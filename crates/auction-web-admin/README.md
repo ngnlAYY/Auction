@@ -29,7 +29,7 @@
 | `/users` | 用户与 Key | 创建用户、签发/重新签发/吊销登录 key、绑定论坛账号 ID、拉黑与解除 |
 | `/renames` | 改名回滚 | 改名历史与回滚 |
 | `/deliveries` | 投递队列 | 邮件 outbox：释放、重试、对结果未知投递的人工对账（成功/失败/重试），以及按投递 ID 定位详情 |
-| `/deliveries/{delivery_id}` | 投递详情 | 只读证据：冻结 Send/Take 尝试、可引用 Sent 证据、领取状态、追加式处置、来源义务与恢复；可从已采集证据发起与 CLI 同一命令的人工 Sent 证明（预览无副作用）。结算退件 Take（来源 `settlement_return_action`）链接到所属退件案件，投递队列对它不提供人工动作 |
+| `/deliveries/{delivery_id}` | 投递详情 | 只读证据：冻结 Send/Take 尝试、可引用 Sent 证据、领取状态、追加式处置、来源义务与恢复（读取带 `include=recovery_equipment_recovered`，含装备收回处置）；可从已采集证据发起与 CLI 同一命令的人工 Sent 证明（预览无副作用）。结算退件 Take（来源 `settlement_return_action`）链接到所属退件案件，投递队列对它不提供人工动作 |
 | `/player-support` | 玩家支持 | 按用户名/用户 ID 或参考编号只读汇总出价、成交、义务、投递与通知；入口与结果同步到 `user`/`reference` query |
 | `/outbox` | 实时事件 | realtime 事件页、消费 lag、失败记录与重放 |
 | `/settlement` | 结算报表 | 选择世界与期号后查看结算与恢复报告，确认恢复动作 |

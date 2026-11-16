@@ -215,6 +215,8 @@ pub struct AdminDeliveryCustodyResponse {
 #[serde(deny_unknown_fields)]
 pub struct AdminDeliveryDispositionResponse {
     pub command_id: String,
+    /// 处置种类。缺省详情响应只输出已发布的闭集；`recovery_equipment_recovered` 只在请求带
+    /// `include=recovery_equipment_recovered` 时输出，升级前的页面不会读到它不认识的值。
     pub kind: String,
     pub occurred_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]

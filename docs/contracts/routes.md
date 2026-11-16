@@ -258,7 +258,7 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | POST | `/api/v1/admin/mail/polls:trigger` | 经 Worker control 立即触发一次轮询 |
 | GET | `/api/v1/admin/deliveries` | 投递 outbox（`page`、`page_size`、`status`、`recipient`、`reference`、`template`、`category`、`world`、`created_from`、`created_to`）；`reference` 接受投递、结算义务或玩家通知的规范 UUID；筛选都是精确匹配且失败关闭；列表附带 `template`、`category`、`world`、`retirement_reason` 与 `suppression_reason` |
 | GET | `/api/v1/admin/player-support` | 玩家支持只读汇总；`user`（用户名或用户 UUID）与 `reference`（规范 UUID）必须恰好提供一个，返回出价、成交、义务、投递与通知各最多 50 行，`truncated` 表示达到上限 |
-| GET | `/api/v1/admin/deliveries/{delivery_id}` | 投递详情：冻结 Send/Take 尝试、Sent 观察/目击与可引用证据、领取状态、追加式处置、来源义务与恢复；不含 payload、正文、Cookie、登录 key |
+| GET | `/api/v1/admin/deliveries/{delivery_id}` | 投递详情：冻结 Send/Take 尝试、Sent 观察/目击与可引用证据、领取状态、追加式处置、来源义务与恢复；不含 payload、正文、Cookie、登录 key。缺省响应的处置只含已发布的种类闭集，装备收回处置 `recovery_equipment_recovered` 只在 `include=recovery_equipment_recovered` 时输出（现行页面总是显式请求）；`include` 的其他取值或未登记的查询参数为 `400 invalid_query` |
 | POST | `/api/v1/admin/deliveries/{delivery_id}/sent-proof/preview` | 人工 Sent 证明预览；必须选择该投递已写入的维护证据 `evidence_reference`，只返回闭集 blockers，不写事实 |
 | POST | `/api/v1/admin/deliveries/{delivery_id}/sent-proof/confirm` | 人工 Sent 证明确认；复用 CLI 的稳定命令 ID 与幂等摘要，`command_id` 同参重放返回原结果；证据引用不进入摘要 |
 | POST | `/api/v1/admin/deliveries/{delivery_id}/release` | 释放投递；结算投递的来源义务已不可执行（成交已撤销）、该投递已不是义务的当前派发，或恢复流程已接管该义务被退回的邮件（已消费退件、持有收回证明或系统退件已到达待消费，重寄只归恢复流程）时返回 `409 settlement_obligation_ineligible`，不改任何状态 |

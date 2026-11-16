@@ -8,7 +8,10 @@ use auction_contracts::{
 use chrono::{TimeZone, Utc};
 use uuid::Uuid;
 
-use super::{decode::StrictDeliveryEnvelope, decode_confirmation, decode_detail, decode_preview};
+use super::{
+    decode::StrictDeliveryEnvelope, decode_confirmation, decode_detail, decode_preview,
+    delivery_detail_url,
+};
 
 fn time(offset: u32) -> String {
     Utc.with_ymd_and_hms(2026, 11, 2, 1, offset, 0).single().expect("timestamp").to_rfc3339()
@@ -260,4 +263,13 @@ fn confirmation_must_echo_command_and_delivery() {
     assert!(decode_confirmation(envelope(), command_id, DELIVERY_ID).is_ok());
     assert!(decode_confirmation(envelope(), Uuid::from_bytes([8; 16]), DELIVERY_ID).is_err());
     assert!(decode_confirmation(envelope(), command_id, OTHER_ID).is_err());
+}
+
+/// 本页面认识装备收回处置，必须显式请求含它的详情投影；缺省响应留给升级前的页面。
+#[test]
+fn detail_url_requests_the_recovered_disposition_projection() {
+    assert_eq!(
+        delivery_detail_url(DELIVERY_ID),
+        format!("/api/v1/admin/deliveries/{DELIVERY_ID}?include=recovery_equipment_recovered")
+    );
 }
