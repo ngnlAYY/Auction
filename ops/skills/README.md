@@ -16,7 +16,7 @@
 | 占位符 | 含义 |
 | --- | --- |
 | `<生产 SSH 入口>` | 登录生产主机的 SSH 地址与账号 |
-| `<程序目录>` | 程序安装目录（`/opt/auction/bin`）；目录与四个程序 root:root 0755，各级父目录也归 root 且禁止他人写入 |
+| `<程序目录>` | 程序安装目录（`/opt/auction/bin`）；目录与四个程序 root:root 0755，各级父目录也归 root 且禁止他人写入，三角色运行账号要能逐级进入并执行各自的程序 |
 | `<配置目录>` | 三角色配置目录（`/etc/auction`）：`common/public/admin/worker.toml`、敏感文件 `secrets.toml`、`runtime/admin.toml`、迁移 owner 凭据 `owner/postgres.toml` |
 | `<部署状态目录>` | `--state-dir`（`/var/lib/auction/deployment`）：部署锁、`receipts/` 与 `rollback/`，root 0700；各级父目录也归 root 且禁止他人写入（`/var/lib/auction` 为 root:root 0755，运行账号的数据放在其下自有子目录） |
 | `<停机备份目录>` | `--backup-dir`（`/var/backups/auction`），root 0700 |

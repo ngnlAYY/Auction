@@ -26,6 +26,7 @@ pub(crate) use receipts::{receipt_summary, record_failure};
 
 pub(crate) use guard::acquire as acquire_maintenance;
 pub(crate) use guard::deployment_lock;
+pub(crate) use migration::run_uid;
 pub(crate) use shutdown::check as shutdown_gate;
 pub(crate) use systemd::{ManagedRole, Systemctl, UnitState};
 

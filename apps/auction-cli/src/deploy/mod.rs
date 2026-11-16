@@ -33,7 +33,9 @@ mod verification;
 use self::execution::{DeployPlan, deploy_locked};
 use self::install::RetainedBinary;
 use self::receipts::{artifact_projection, installed_identity, settle};
-use self::verification::{install_dir_artifacts, require_artifact_cli, require_backup_dir};
+use self::verification::{
+    install_dir_artifacts, require_artifact_cli, require_backup_dir, run_accounts,
+};
 pub(crate) use verification::{role_binary, running_roles, unit_states};
 
 pub(crate) use rollback::run as run_rollback;
@@ -66,7 +68,7 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: DeployArgs) -> anyhow::Res
     let states = unit_states(&systemctl).await?;
     let running = running_roles(&states);
     let install_dir = gates::resolve_install_dir(explicit_install_dir.as_deref(), &running)?;
-    install::require_install_dir(&install_dir)?;
+    install::require_install_dir(&install_dir, &run_accounts(&states)?)?;
 
     let gate =
         service::shutdown_gate(config_dir, Some(&deployment.worker), "deploy", &shutdown).await?;

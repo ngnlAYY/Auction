@@ -19,7 +19,7 @@
 
 | 路径 | 内容 | 建议属主与权限 |
 | --- | --- | --- |
-| `/opt/auction/bin/` | 程序（root 与 postgres 都会执行其中的 `auction-cli`） | 目录与程序 root:root 0755，`/opt`、`/opt/auction` 等各级父目录同样归 root 且禁止他人写入；`deploy`/`rollback` 停机前核对，不符即拒绝、不自动修补 |
+| `/opt/auction/bin/` | 程序（root 与 postgres 都会执行其中的 `auction-cli`） | 目录与程序 root:root 0755，`/opt`、`/opt/auction` 等各级父目录同样归 root 且禁止他人写入；三角色 unit 的运行账号还须能逐级进入安装目录并执行各自的程序（0700 的目录或缺执行位的程序会让替换后的启动失败）；`deploy`/`rollback` 停机前核对，不符即拒绝、不自动修补 |
 | `/etc/auction/` | 配置目录：`public.toml`、`admin.toml`、`worker.toml`、`common.toml` | 目录 root:auction 0750；文件 root:auction 0640 |
 | `/etc/auction/secrets.toml` | 敏感配置 | auction:auction 0600 |
 | `/etc/auction/runtime/admin.toml` | runtime 配置（Admin 写入） | 目录 auction:auction 0750；文件 auction:auction **0640** |
@@ -160,7 +160,7 @@ auction-cli --config-dir /etc/auction service stop       # 时段门禁 → 按 
 
 **失败与未知结果**（各步骤的系统状态见[apps/auction-cli/README.md#制品部署与回退](../apps/auction-cli/README.md#制品部署与回退)）：
 
-- 停机前失败（含磁盘空间不足）只输出错误，不停止、不安装、不写回执。安装目录、祖先或程序不归 root 或允许他人写入时同样在停机前拒绝：按[重建安装目录信任](deploy/RECOVERY.md#重建安装目录信任)从已验证的 Release 重装，不要只改属主。部署状态目录或它的任一级父目录不归 root、允许他人写入，或在持锁期间被改名替换时，在取锁时或停机前拒绝，按[目录与账号](#目录与账号)处理。
+- 停机前失败（含磁盘空间不足）只输出错误，不停止、不安装、不写回执。安装目录、祖先或程序不归 root 或允许他人写入时同样在停机前拒绝：按[重建安装目录信任](deploy/RECOVERY.md#重建安装目录信任)从已验证的 Release 重装，不要只改属主；属主与写权限可信、只是运行账号无法进入目录或执行程序（如目录被收紧为 0700）时，按错误点名的路径补回标准 0755 即可。部署状态目录或它的任一级父目录不归 root、允许他人写入，或在持锁期间被改名替换时，在取锁时或停机前拒绝，按[目录与账号](#目录与账号)处理。
 - 停机后失败每次调用最多追加一条 `action=deploy`、`outcome=failed` 回执并退出非零；除安装中途失败时换回已替换的程序外，命令不自动回滚或重启，用 `service status` 确认实际状态。保留旧程序之后的失败回执与回滚记录同一标识、带 `rollback_record_id`，`rollback --receipt-id` 能读到它；回执写不进去时错误末尾注明“部署回执也未写入”。
 - 停机备份、双 CLI 校验或保留旧程序失败：程序与数据库都未改变。恢复旧版只用安装目录中的 CLI 执行 `service start`（如 `/opt/auction/bin/auction-cli … service start --owner-secrets …`，沿用本次的 `--config-dir`、`--state-dir` 与 unit 参数）；**不要用制品 CLI**，它会先把 schema 迁到新版本，而安装目录仍是旧程序。
 - 安装中途失败：服务保持停止、迁移尚未执行。失败回执的 `artifacts` 是安装目录的实际摘要，`deploy` 段只是尝试安装的制品，不作为任何组件的身份来源。命令已把本次替换的程序从回滚记录换回并复核四个程序的摘要：错误含“已复核为部署前的旧程序”时安装目录就是旧程序，按上一条用安装目录中的 CLI `service start` 恢复（本次回滚记录保留的就是当前程序，`rollback` 会因目标与当前程序相同而拒绝）。错误含“自动换回未完成”时安装目录可能新旧混合（错误列出各程序当前摘要），旧程序与摘要保留在 `<state-dir>/rollback/<id>/`；按[安装中途失败的手工换回](deploy/RECOVERY.md#安装中途失败的手工换回)逐个换回并核对摘要后再启动，不要用制品 CLI 启动；安装目录恢复为一致的旧程序之前不要重跑 `deploy`，否则新的回滚记录会把混合程序当作旧版本保留。

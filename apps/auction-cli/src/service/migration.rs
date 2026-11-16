@@ -47,6 +47,14 @@ pub(super) fn require_runtime_owner(path: &Path, state: &UnitState) -> anyhow::R
     Ok(())
 }
 
+/// unit 运行账号的 UID；`DynamicUser=yes` 时 UID 由 systemd 动态分配，返回 None。
+pub(crate) fn run_uid(state: &UnitState) -> anyhow::Result<Option<u32>> {
+    if state.dynamic_user {
+        return Ok(None);
+    }
+    service_uid(&state.user).map(Some)
+}
+
 /// systemd 的空 User 表示 root；用户名通过 NSS 解析，不用调用者 UID 推断。
 fn service_uid(user: &str) -> anyhow::Result<u32> {
     if user.is_empty() {
