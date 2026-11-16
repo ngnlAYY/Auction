@@ -265,10 +265,12 @@ df -h /var/lib/auction/wal-staging
 - 先取得部署锁：部署状态目录与各级父目录须归 root 且禁止他人写入，回滚记录、部署回执与保留程序都经持锁时固定的目录描述符读取（见[apps/auction-cli/README.md#部署状态目录](../../apps/auction-cli/README.md#部署状态目录)）；
 - 必须由安装目录中的 `auction-cli` 执行，且它的内嵌 schema 等于数据库版本（部署在迁移完成前失败时较高，回退后的 `service start` 会执行被回退的迁移，因此拒绝）；
 - 要求安装目录先过[重建安装目录信任](#重建安装目录信任)所述的属主与权限门禁，三个角色程序仍是该部署回执的版本，不一致时拒绝；记录保留的三个角色程序就是当前程序时同样拒绝（回退不会改变任何程序，常见于安装中途失败并已换回之后）；
-- 以记录登记的目标角色 schema `E`（未知时按创建记录时观测到的数据库版本假设）读取数据库版本 `D`，要求 `(E, D]` 的迁移连续、成功且登记为 `compatible`；任一 `breaking` 或缺登记即拒绝，只能恢复升级前备份并做外部历史核对。`D > E` 时还要求三角色有效配置的 `[readiness] migration_compatibility_mode` 都已显式设为 `compatible`、目标程序不早于迁移 075，否则拒绝；rollback 不修改配置；
+- 以记录登记的目标角色 schema `E`（未知时按创建记录时观测到的数据库版本假设，此时只允许 `D = E`）读取数据库版本 `D`，要求 `(E, D]` 的迁移连续、成功且登记为 `compatible`；任一 `breaking` 或缺登记即拒绝，只能恢复升级前备份并做外部历史核对。`D > E` 时还要求三角色有效配置的 `[readiness] migration_compatibility_mode` 都已显式设为 `compatible`、目标程序不早于迁移 075，否则拒绝；rollback 不修改配置；
 - 先过停机时段、磁盘空间（反向回滚记录与安装临时文件，只计三个角色；余量为实际写入/替换字节之外再留 64 MiB，不套定时备份的 1 GiB/10%）与在途发送门禁，再按 Public → Admin → Worker 停止；安装前把当前三个角色程序保留为新的回滚记录，因此回退可再前进；
 - 安装旧角色程序中途失败时，把本次已替换的程序从该反向回滚记录换回并复核三个角色（不启动服务）；换回也失败时按[安装中途失败的手工换回](#安装中途失败的手工换回)处理；
 - 启动前核对 `auction-cli` 摘要未变，启动后核对三个程序摘要，成功追加 `action=rollback` 回执（角色身份取自回滚记录、CLI 身份是保留的实际程序）。上述门禁全部在停机前完成，`--dry-run` 同样执行。
+
+就绪判定是最后一道门，但不证明旧程序没有执行业务：CLI 先启动 Worker 再等待就绪，Worker 标记 serving 后立即开始投递轮次，PM 任务也独立启动，旧 Worker 在就绪失败、被停止之前可能已经领取或处理了任务。因此目标 schema 未知（输出 `gates.versions.target_role_schema_source` 为 `assumed_observed_database_version`）时只允许 `D = E`，跨迁移的回退一律恢复升级前备份；schema 已记录的跨迁移回退依赖兼容登记与 compatible 判定的正确性，仍有同样的残余风险，没有把握时同样恢复备份。
 
 手工换回旧程序同样只换三个角色：显式设置 `[readiness] migration_compatibility_mode = "compatible"` 并保留能识别当前数据库的新版 CLI；默认 shadow 不放宽。
 

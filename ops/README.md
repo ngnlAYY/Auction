@@ -187,7 +187,7 @@ Admin 的邮件 Cookie 在线校验（`POST /api/v1/admin/credentials/{credentia
 
 同一版本起 `service`、`deploy`、`rollback` 与停机维护命令在取部署锁前核对部署状态目录（`--state-dir`）：目录本身归 root 且 0700，各级父目录归 root 且禁止 group/other 写入（非 root 的隔离环境为当前账号），之后的锁、回执、回滚记录与保留程序都经同一个固定的目录描述符读写并核对属主与权限，详见[apps/auction-cli/README.md#部署状态目录](../apps/auction-cli/README.md#部署状态目录)。线上 `/var/lib/auction` 已只读核实为 root:root 0755，不需要处理；按旧版首次部署说明把它建为 `auction` 所有的主机，升级前先改为 root:root 0755（运行账号的数据保留在其下自有子目录），否则包括开机 `auction-stack` 在内的 `service start` 都会拒绝。`deployment/` 及其中的回执与回滚记录若出现非 root 的条目，说明运行账号曾改动过它，不要只改属主，先人工核对来源。
 
-**回退**：迁移只向前。分体部署用安装目录中的 `auction-cli rollback --receipt-id <deploy_receipt_id>` 把三个运行角色换回 `deploy` 保留的旧程序，安装目录中的 `auction-cli` 保持不变（不执行迁移；保留的 CLI 必须与数据库同版本，跨迁移时三角色须先显式设 `migration_compatibility_mode = "compatible"`，门禁与回执见[apps/auction-cli/README.md#回退](../apps/auction-cli/README.md#回退)）。安装旧角色程序中途失败时与 `deploy` 相同，命令把已替换的程序从刚保留的反向回滚记录换回并复核：错误含“已复核为回退前的程序”时按错误给出的指引处置，含“自动换回未完成”时按[安装中途失败的手工换回](deploy/RECOVERY.md#安装中途失败的手工换回)处理。合并部署没有 CLI 回退，只能换回旧的 `auction-server` 程序。迁移区间判定、含 `breaking` 时恢复升级前备份，以及手工回退须显式设置 compatible 并保留新版 CLI 的要求，见[程序回退](deploy/RECOVERY.md#程序回退)。
+**回退**：迁移只向前。分体部署用安装目录中的 `auction-cli rollback --receipt-id <deploy_receipt_id>` 把三个运行角色换回 `deploy` 保留的旧程序，安装目录中的 `auction-cli` 保持不变（不执行迁移；保留的 CLI 必须与数据库同版本，跨迁移时目标角色的 schema 必须已记录、三角色须先显式设 `migration_compatibility_mode = "compatible"`，门禁与回执见[apps/auction-cli/README.md#回退](../apps/auction-cli/README.md#回退)）。安装旧角色程序中途失败时与 `deploy` 相同，命令把已替换的程序从刚保留的反向回滚记录换回并复核：错误含“已复核为回退前的程序”时按错误给出的指引处置，含“自动换回未完成”时按[安装中途失败的手工换回](deploy/RECOVERY.md#安装中途失败的手工换回)处理。合并部署没有 CLI 回退，只能换回旧的 `auction-server` 程序。迁移区间判定、含 `breaking` 时恢复升级前备份，以及手工回退须显式设置 compatible 并保留新版 CLI 的要求，见[程序回退](deploy/RECOVERY.md#程序回退)。
 
 ## 反向代理
 

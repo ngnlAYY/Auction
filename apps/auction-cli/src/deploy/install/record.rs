@@ -179,11 +179,30 @@ impl RollbackRecord {
     }
 
     /// 回退目标角色的内嵌 schema 与来源：已记录时用记录值；未知（v1 记录或无法与已知制品绑定）
-    /// 时沿用旧口径，以创建记录时观测到的数据库版本作为假设。
-    pub(crate) fn target_schema(&self) -> (i64, &'static str) {
+    /// 时沿用旧口径，以创建记录时观测到的数据库版本作为假设，rollback 据此只允许同版本回退。
+    pub(crate) fn target_schema(&self) -> (i64, SchemaSource) {
         match self.retained_roles.schema_version {
-            Some(version) => (version, "recorded"),
-            None => (self.observed_database_version, "assumed_observed_database_version"),
+            Some(version) => (version, SchemaSource::Recorded),
+            None => (self.observed_database_version, SchemaSource::AssumedObservedDatabaseVersion),
+        }
+    }
+}
+
+/// 回退目标角色内嵌 schema 的来源；`as_str` 是输出 `gates.versions.target_role_schema_source`
+/// 的固定值。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SchemaSource {
+    /// 保留时按程序摘要从成功回执绑定到了已知制品。
+    Recorded,
+    /// 身份未知，按创建记录时观测到的数据库版本假设。
+    AssumedObservedDatabaseVersion,
+}
+
+impl SchemaSource {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Recorded => "recorded",
+            Self::AssumedObservedDatabaseVersion => "assumed_observed_database_version",
         }
     }
 }

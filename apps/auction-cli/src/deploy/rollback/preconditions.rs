@@ -5,6 +5,7 @@
 //! - rollback 不替换 auction-cli：被保留的 CLI 必须就是执行本命令的 CLI，且内嵌 schema 等于
 //!   数据库版本，否则回退后的 `service start/restart`（含开机的 auction-stack）会先执行回退要
 //!   避开的迁移，或无法管理超前的数据库；
+//! - 目标角色程序的内嵌 schema 未知（按观测数据库版本假设）时，只允许数据库仍为该版本的回退；
 //! - 数据库超前于目标角色程序时，三角色有效配置必须显式为 `compatible`，且目标程序支持该判定。
 //!
 //! 任一不满足都在停机前拒绝，不自动修改配置。
@@ -15,7 +16,7 @@ use anyhow::Context;
 use auction_application::operations::MigrationCompatibilityMode;
 use auction_config::Role;
 
-use super::super::install::{ROLE_BINARIES, RetainedBinary, RollbackRecord};
+use super::super::install::{ROLE_BINARIES, RetainedBinary, RollbackRecord, SchemaSource};
 use super::super::role_binary;
 use crate::receipt::DeploymentReceipt;
 use crate::service::ManagedRole;
@@ -111,6 +112,26 @@ pub(super) fn require_cli_matches_database(
         anyhow::bail!(
             "保留的 auction-cli 期望 schema {cli_schema} 低于数据库 {database_version}，回退后无法\
              管理数据库；先用与数据库同版本的 auction-cli 重建安装目录"
+        );
+    }
+    Ok(())
+}
+
+/// 目标角色程序的内嵌 schema 未知（v1 记录，或保留时找不到摘要一致的成功回执）时只允许数据库
+/// 仍为假设版本的回退（`D = E`）。假设可能与旧程序的真实 schema 不同，而 readiness 只是最后一道
+/// 门、不证明没有副作用：Worker 标记 serving 后立即开始投递轮次、PM 任务也独立启动，就绪判定
+/// 失败之前可能已经领取或处理了任务。跨迁移回退因此只在 schema 已按摘要绑定时允许。
+pub(super) fn require_known_schema_across_migrations(
+    target_schema: i64,
+    source: SchemaSource,
+    database_version: i64,
+) -> anyhow::Result<()> {
+    if source == SchemaSource::AssumedObservedDatabaseVersion && database_version != target_schema {
+        anyhow::bail!(
+            "回退目标角色程序的内嵌 schema 未知（按创建记录时观测到的数据库版本 {target_schema} \
+             假设），只允许数据库仍为该版本时回退，当前数据库为 {database_version}：旧 Worker \
+             进入服务后会立即领取任务，就绪失败不能证明它没有执行业务，因此不跨迁移换回。请按 \
+             ops/deploy/RECOVERY.md 恢复升级前备份"
         );
     }
     Ok(())
