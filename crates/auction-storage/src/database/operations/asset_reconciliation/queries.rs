@@ -212,9 +212,11 @@ ORDER BY review, reason
 
 /// 偿付查询共用的现金义务分类；`$1` 是 world。
 ///
-/// 金额与计数来自义务投影；`failed`/`manual_reconcile` 义务仍然欠款，只有 `satisfied` 才从应付
-/// 合计中移除。现金义务按履约记录的 `dispatch_world` 归属实际支付世界：异世界场次的卖方货款与
-/// 买方退款固定由 main 派发，必须计入 main 的应付合计。`business_state = 'contingent'` 的买方
+/// 金额与计数来自义务投影；`satisfied` 不再计入，其余未满足义务默认仍然欠款（含尚未寄出
+/// 或寄出结果未知的 `failed`/`manual_reconcile`），只有下文按持久寄出事实与余额观察时点
+/// 判定为已支出的现金才从应付移出，计为在途或在途待核对。现金义务按履约记录的
+/// `dispatch_world` 归属实际支付世界：异世界场次的卖方货款与买方退款固定由 main 派发，
+/// 必须计入 main 的应付合计。`business_state = 'contingent'` 的买方
 /// 退款只有 recovery 显式激活为 `ready` 后才可能执行，未激活不计入应付负债。
 ///
 /// 在途只认持久事实：投递已成功寄出、资金分配与同一投递和义务绑定且已 `spent`，并且寄出时刻

@@ -447,7 +447,8 @@ async fn postgres_collection_wait_snapshot_separates_awaiting_from_backlog() {
 }
 
 /// 已寄出且资金已支出的货款进在途、不进待付与缺口；已寄出等待领取的装备进在途、不进缺失；
-/// 人工核对的流拍退回仍按应持核对。报告追加后经最近报告投影与告警快照原样读回。
+/// 寄出后转人工核对的流拍退回按寄出事实计在途待核对，不再计入应持或缺失。报告追加后经最近
+/// 报告投影与告警快照原样读回。
 #[tokio::test]
 async fn postgres_collection_wait_reports_sent_assets_in_transit() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
