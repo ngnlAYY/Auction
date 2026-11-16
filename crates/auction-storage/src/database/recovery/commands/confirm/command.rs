@@ -7,6 +7,7 @@ use auction_application::recovery::{
 use sqlx::Postgres;
 use uuid::Uuid;
 
+use crate::database::recovery::commands::confirm::closure::close_voided_fulfillments;
 use crate::database::recovery::commands::mapping::is_conflict;
 use crate::database::recovery::commands::mapping::map_reversal_error;
 use crate::database::recovery::commands::mapping::map_sql_error;
@@ -97,6 +98,9 @@ pub(in crate::database::recovery::commands) async fn confirm_postgres_once(
     if command.action == RecoveryConfirmationAction::EquipmentRecovered {
         activate_buyer_refund(&mut transaction, &recovery, now).await?;
     }
+    // 成交撤销与原付款及依赖履约的收口同事务提交：确认之后不能再有旧付款被领取、准备或满足
+    // （不变量 2、4、6、8）。
+    close_voided_fulfillments(&mut transaction, &recovery, &command, now).await?;
 
     let relist = relist_recovery(
         &mut transaction,

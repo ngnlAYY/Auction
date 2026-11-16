@@ -49,7 +49,7 @@ VALUES (76, 'breaking');
 
 ## 索引
 
-当前 head 为 `000111`，与 [ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json) 的 `database_schema_version` 一致；新增迁移必须同时推进这两处。下表按版本递增，只列主题，不是逐条字段说明。
+当前 head 为 `000112`，与 [ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json) 的 `database_schema_version` 一致；新增迁移必须同时推进这两处。下表按版本递增，只列主题，不是逐条字段说明。
 
 | 版本 | 主题 |
 | --- | --- |
@@ -163,3 +163,4 @@ VALUES (76, 'breaking');
 | 000108 | 出站通知模板迁入数据库：新增只追加的 `mail_template_events`（修订事实兼命令账本，每个模板键以最高 `revision` 为准，`reset` 表示使用内置默认正文），运行账号只授 `INSERT`；模板不再从 runtime 文件或 Worker 配置读取 |
 | 000109 | Public 竞价日志按新建代理命令查被排位击败的授权：`bid_proxy_authorization_transitions` 新增部分索引 `bid_proxy_transitions_ranked_below_origin_idx`（`origin_command_id`，仅 `exhausted`/`ranked_below`），逐行查找由顺序扫描变为索引探测；不改结构、约束与数据，登记 compatible |
 | 000111 | 结算退件证据：新增只追加的 `settlement_return_evidence`（以入站邮件 ID 为主键，记录处置 `untrusted`/`unbound`/`fulfillment_terminal`/`manual_reconcile`、原因码、原义务与原投递），与恢复流程的退件消费按“来源可证明且绑定恢复付款/交付义务”互斥分区；只留证与把未终结履约转人工对账，不领取、不退回、不重发、不改变资金；`inbound_mail` 增加结算退件部分索引；运行账号只授 `INSERT`；纯新增，登记 compatible |
+| 000112 | Admin 确认收回/取消的成交撤销的历史投影修复：只在命令账本有该确认、原付款履约未终结且无未过期领取、原付款投递已无未解决外部写入、依赖履约未开始时，把原付款履约改为 `failed`（`recovery_reclaimed`/`recovery_cancelled`）、未开始的卖方货款与 isekai 装备交付改为 `failed`（`recovery_sale_voided`），并在原付款投递当前 fence 追加 `cod_returned` 处置与审计；其余记录保持原样留给人工核对，不改投递、证明、资金或恢复记录；改写既有行并写入旧读侧不认识的失败码，登记 breaking |

@@ -11,6 +11,7 @@ use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
 use super::pricing;
+use crate::database::settlement::fulfillment::eligibility::recovery_allows_execution;
 use crate::database::settlement::fulfillment::mapping::{
     ClaimMappingError, fulfillment_delivery_status, map_claim_execution_identity,
     map_storage_error, obligation_kind, repository_error, request_hash_from_optional,
@@ -29,7 +30,9 @@ pub(crate) async fn claim_postgres(
     let mut transaction = pool.begin().await.map_err(map_storage_error)?;
     // 先按到期顺序截取有界候选，再按 UUID 锁义务；未锁到的候选留待下一批，
     // 不扫描并锁住全部 ready。先义务后 execution，与满足事务保持相同锁序。
-    let obligation_ids = sqlx::query_scalar::<_, Uuid>(
+    // 成交撤销后恢复记录的付款、交付与货款义务不再领取，只有 equipment_recovered 后的买方退款
+    // 例外（不变量 2、6）；最终事务再以同一谓词复核。
+    let obligation_ids = sqlx::query_scalar::<_, Uuid>(concat!(
         r#"WITH candidates AS MATERIALIZED (
                SELECT o.id
                FROM public.settlement_obligations o
@@ -45,14 +48,17 @@ pub(crate) async fn claim_postgres(
                  AND (o.prerequisite_obligation_id IS NULL
                       OR prerequisite.execution_state='satisfied'
                       OR prerequisite.obligation_id IS NULL)
+                 AND "#,
+        recovery_allows_execution!(),
+        r#"
                ORDER BY o.created_at,o.auction_id,o.lot_id,o.obligation_kind,o.id
                LIMIT $2
            )
            SELECT o.id FROM public.settlement_obligations o
            JOIN candidates ON candidates.id=o.id
            WHERE o.business_state='ready'
-           ORDER BY o.id FOR UPDATE OF o SKIP LOCKED"#,
-    )
+           ORDER BY o.id FOR UPDATE OF o SKIP LOCKED"#
+    ))
     .bind(now)
     .bind(i64::from(limit))
     .fetch_all(&mut *transaction)
@@ -98,7 +104,7 @@ pub(crate) async fn claim_postgres(
 
     // 上下文关系故意用 LEFT JOIN 暴露损坏事实；只有非空的 obligation/fulfillment owner 参与锁定，
     // nullable 关系留给后续校验并在同批次隔离。既避免 outer-join 锁错误，又保持父子锁保护。
-    let rows = sqlx::query(
+    let rows = sqlx::query(concat!(
         r#"SELECT f.obligation_id, f.execution_state, f.state_version,
                   f.claim_fencing, f.retry_count, f.dispatch_world,
                   f.delivery_operation,
@@ -180,10 +186,13 @@ pub(crate) async fn claim_postgres(
                  OR prerequisite.execution_state = 'satisfied'
                  OR prerequisite.obligation_id IS NULL
              )
+             AND "#,
+        recovery_allows_execution!(),
+        r#"
            ORDER BY f.obligation_id
            LIMIT $2
-           FOR UPDATE OF f SKIP LOCKED"#,
-    )
+           FOR UPDATE OF f SKIP LOCKED"#
+    ))
     .bind(now)
     .bind(i64::from(limit))
     .bind(&obligation_ids)

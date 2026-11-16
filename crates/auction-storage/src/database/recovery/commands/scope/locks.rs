@@ -75,7 +75,7 @@ pub(in crate::database::recovery::commands) async fn lock_recovery(
                   stage, resolution, state_version, blocking_code,
                   manual_reconcile_delivery_id, relisted_auction_id, relisted_lot_id,
                   custody_proof_kind, custody_proof_reference, custody_proof_digest,
-                  custody_proof_observed_at, created_at
+                  custody_proof_observed_at, cod_return_count, cod_return_limit, created_at
            FROM public.settlement_recoveries
            WHERE id = $1
            FOR UPDATE"#,
@@ -114,6 +114,8 @@ pub(in crate::database::recovery::commands) async fn lock_recovery(
         custody_proof_observed_at: row
             .try_get("custody_proof_observed_at")
             .map_err(map_sql_error)?,
+        cod_return_count: row.try_get("cod_return_count").map_err(map_sql_error)?,
+        cod_return_limit: row.try_get("cod_return_limit").map_err(map_sql_error)?,
         created_at: row.try_get("created_at").map_err(map_sql_error)?,
     })
 }

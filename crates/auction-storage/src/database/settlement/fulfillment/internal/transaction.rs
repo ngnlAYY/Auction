@@ -173,6 +173,21 @@ async fn apply(
     locks::after_credentials(tx, &command.claim)
         .await
         .map_err(|error| rejected("collected_delivery_lock_failed", "delivery_lock", error))?;
+    // 成交撤销后不再可执行的义务在最终事务失败关闭；equipment_recovered 后的退款不受影响。
+    if !super::super::eligibility::recovery_allows_execution_now(
+        tx,
+        command.claim.obligation_id.as_uuid(),
+    )
+    .await
+    .map_err(sql_error)
+    .map_err(|error| rejected("collected_recovery_lookup_failed", "recovery_resolution", error))?
+    {
+        return Err(rejected(
+            "collected_recovery_resolved",
+            "recovery_resolution",
+            FundingError::Conflict,
+        ));
+    }
     validation::validate(tx, command, evidence, proof.is_some(), external_refund)
         .await
         .map_err(|error| rejected("collected_claim_validation_failed", "claim_validate", error))?;

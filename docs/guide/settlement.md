@@ -125,6 +125,7 @@ prepared → pending → claimed → sending → succeeded
 - isekai 载体 COD 退回时先收回载体；已经付款但交付装备被退回时先取得装备收回证明。Admin 分别通过 `cancelled` 或 `equipment_recovered` 确认后重列到该世界的草稿接收场次，后者还激活买方退款；没有草稿目标时保持 `relist_pending`。main 的 `reclaimed` 也只在对应收回证明与义务状态允许时可确认。
 - 赛季换季限制（参与早鸟期的世界）：赛季开始前的新赛季草稿不接收重列，保持 `relist_pending` 并按持久化退避重试；原始投稿收件或成交场次开拍后已经历赛季开始的旧赛季装备永不重列，记录阻断码 `relist_season_closed`（报表显示为 `recovery_relist_unavailable`），停在 `relist_pending` 且不再自动重试，由 Admin 人工处理。判断沿用不可变的原始投稿收件事实，修改场次排期不会把旧装备变为新赛季资产；只使用已冻结且非 NULL 的赛季边界，不回填历史场次。
 - 上述任一路径首次落定 `resolution`（成交撤销）时，同事务按[成交撤销冲正](#成交撤销冲正规则-v1)回滚补偿池。
+- Admin 确认 `reclaimed` 或 `cancelled` 时，同一事务把原付款履约收口为 `failed`（`recovery_reclaimed` / `recovery_cancelled`），把依赖它且从未开始的卖方货款与 isekai 装备交付收口为 `failed`（`recovery_sale_voided`），并在原付款投递当前 fence 上追加 `cod_returned` 统一处置事实与审计；原投递与发送证明不改写，买方退款保持 `contingent`。原付款已满足、原付款投递仍在准备/排队/发送，或依赖履约已开始执行时拒绝确认，交给人工核对。成交撤销后，恢复记录的付款、交付与卖方货款义务在履约领取和 prepare/activate/满足的最终事务中都不再执行，确认前领取的旧 claim 随版本变化失败关闭；只有 `equipment_recovered` 之后的买方退款照常执行。迁移 `000112` 按同一规则只修复有确凿证据的历史记录（命令账本有确认、原付款未终结且无未解决外部写入、依赖未开始），其余保持原样留给人工核对。
 - 恢复并非单一路径：未付时为 `awaiting_payment`，到期转 `payment_overdue` 并创建一次提醒；main 收款后可完成，isekai 收款后先进入 `delivering_equipment`，交付满足后完成。退件可转 `reclaiming`，经收回、确认后进入 `relist_pending`、`refunding` 或 `completed`。Admin 确认必须携带原因、稳定命令 ID 与当前状态版本，所有动作写入审计。
 
 ### Sent 人工证据确认

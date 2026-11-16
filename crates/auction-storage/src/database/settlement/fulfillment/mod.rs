@@ -15,6 +15,7 @@ use crate::database::storage_error;
 mod claims;
 mod delivery;
 mod dependencies;
+mod eligibility;
 mod internal;
 #[cfg(feature = "test-db")]
 pub use internal::asset_conflict_gate_passes;
