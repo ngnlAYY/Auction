@@ -10,6 +10,7 @@
 //! - 履约领取把投递完成时刻带进 delivery 快照，供等待领取的 Sent 轮询按寄出时长分档。
 //! - 长期未领取按达到阈值的件数计数，Admin 清单与计数出自同一只读快照；告警在有超期件时
 //!   写入活动信号，收口回落到阈值以下后由下一轮扫描关闭；迁移 000110 的闭集接受该种类。
+//!   清单的拍品编号是分类内编号，混合类别的场次里不随全场编号错号。
 //!
 //! 入口见 `just test-db`。
 
@@ -95,6 +96,26 @@ async fn seed_lot(
     sold: bool,
     external_equipment_id: &str,
 ) -> Lot {
+    seed_categorized_lot(
+        pool,
+        auction,
+        (lot_number, "weapon", lot_number),
+        sold,
+        external_equipment_id,
+    )
+    .await
+}
+
+/// 写入一个 lot；`numbering` 是（全场编号、装备大类、该大类内的分类编号），混合类别的场次里
+/// 全场编号与分类编号不同。
+async fn seed_categorized_lot(
+    pool: &PgPool,
+    auction: &Auction,
+    numbering: (i32, &str, i32),
+    sold: bool,
+    external_equipment_id: &str,
+) -> Lot {
+    let (lot_number, category, category_number) = numbering;
     let lot = Lot {
         id: stable_id(SEED, &format!("lot-{lot_number}")),
         equipment_id: stable_id(SEED, &format!("equipment-{lot_number}")),
@@ -102,11 +123,12 @@ async fn seed_lot(
     sqlx::query(
         "INSERT INTO public.equipment
             (id, world_id, external_equipment_id, name, category, attributes, collected_at)
-         VALUES ($1, 'main', $2, $3, 'weapon', '{}'::jsonb, now() - interval '20 days')",
+         VALUES ($1, 'main', $2, $3, $4, '{}'::jsonb, now() - interval '20 days')",
     )
     .bind(lot.equipment_id)
     .bind(external_equipment_id)
     .bind(format!("Collection wait equipment {lot_number}"))
+    .bind(category)
     .execute(pool)
     .await
     .expect("写入测试装备");
@@ -114,7 +136,7 @@ async fn seed_lot(
         "INSERT INTO public.lots
             (id, auction_id, equipment_id, lot_number, status, start_price, current_price,
              effective_end_at, category_key, category_number)
-         VALUES ($1, $2, $3, $4, $5, 1000, $6, now() - interval '10 days', 'weapon', $4)",
+         VALUES ($1, $2, $3, $4, $5, 1000, $6, now() - interval '10 days', $7, $8)",
     )
     .bind(lot.id)
     .bind(auction.id)
@@ -122,6 +144,8 @@ async fn seed_lot(
     .bind(lot_number)
     .bind(if sold { "sold" } else { "unsold" })
     .bind(sold.then_some(1_000_i64))
+    .bind(category)
+    .bind(category_number)
     .execute(pool)
     .await
     .expect("写入测试 lot");
@@ -444,6 +468,49 @@ async fn postgres_collection_wait_snapshot_separates_awaiting_from_backlog() {
     assert_eq!(backlog.count, 2);
 
     store.postgres_pool().close().await;
+}
+
+/// 长期未领取清单的拍品编号取分类内编号：混合类别的场次里，全场第 100 件、盾牌分类第 2 件的
+/// 货款已寄出 8 天，清单给出（`Shield`, 2），页面据此显示 `Shd02`，而不是按全场编号显示
+/// `Shd100`；全场第 7 件、单手分类第 1 件的流拍退回寄出 9 天，按寄出最早排在前面。
+#[tokio::test]
+async fn postgres_collection_wait_overdue_list_uses_category_lot_number() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("以运行账号连接");
+    let pool = store.postgres_pool();
+    let now = Utc::now();
+    let auction = seed_auction(pool, now).await;
+    let shield = seed_categorized_lot(pool, &auction, (100, "Shield", 2), true, "9400100").await;
+    let cod = seed_obligation(pool, &auction, &shield, "winner_equipment_cod", 1_000, None).await;
+    seed_fulfillment(pool, cod, "satisfied", None, None).await;
+    let payout = seed_obligation(pool, &auction, &shield, "seller_payout", 900, Some(cod)).await;
+    let delivery = seed_delivery(pool, payout, 900, Some(now - Duration::days(8)), 700_100).await;
+    seed_fulfillment(pool, payout, "enqueued", Some(delivery), Some("evidence_not_observed")).await;
+    let one_handed =
+        seed_categorized_lot(pool, &auction, (7, "One-Handed", 1), false, "9400107").await;
+    let unsold = seed_obligation(pool, &auction, &one_handed, "unsold_return", 0, None).await;
+    let delivery = seed_delivery(pool, unsold, 0, Some(now - Duration::days(9)), 700_107).await;
+    seed_fulfillment(pool, unsold, "enqueued", Some(delivery), Some("evidence_not_observed")).await;
+
+    let threshold = policy().fulfillment_collection_overdue_age_threshold;
+    let snapshot = store.snapshot(now, Some(threshold)).await.expect("读取告警快照");
+    assert_eq!(snapshot.fulfillment.map(|value| value.collection_overdue), Some(2));
+    let numbering = snapshot
+        .collection_overdue_items
+        .iter()
+        .map(|item| (item.obligation_id, item.equipment_category.as_str(), item.lot_number))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        numbering,
+        [(unsold, "One-Handed", 1), (payout, "Shield", 2)],
+        "拍品编号是分类内编号，页面据此显示 One01 与 Shd02"
+    );
+    assert!(
+        snapshot.collection_overdue_items.iter().all(|item| !item.last_read_failed),
+        "evidence_not_observed 不是读取失败"
+    );
+
+    pool.close().await;
 }
 
 /// 已寄出且资金已支出的货款进在途、不进待付与缺口；已寄出等待领取的装备进在途、不进缺失；

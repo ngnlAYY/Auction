@@ -332,13 +332,14 @@ pub(crate) struct AdminCollectionOverdueItem {
     pub obligation_kind: String,
     pub world: String,
     pub auction_sequence: i64,
+    /// 分类内编号；与 `equipment_category` 组成拍品代码（如 `Shd02`），不是全场编号。
     pub lot_number: i32,
     pub equipment_category: String,
     pub equipment_name: String,
     pub recipient: String,
     pub sent_at: String,
     pub age_seconds: i64,
-    /// 最近一次 Sent 读取失败；只说明读不到，不代表是否已领取。
+    /// 最近一次 Sent 读取失败；`false` 只表示没有记录读取失败，不代表已读到或已确认未领取。
     pub last_read_failed: bool,
 }
 

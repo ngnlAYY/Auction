@@ -222,13 +222,15 @@ const FULFILLMENT_COUNTS: &str = concat!(
 );
 
 /// 长期未领取清单：只列寄出时刻不晚于 `$2` 的等待领取义务，寄出最早优先，最多 `$3` 条。
-/// 只取 Admin 可见的业务标识与展示字段，不读投递载荷、凭据或外部错误原文。
+/// 只取 Admin 可见的业务标识与展示字段，不读投递载荷、凭据或外部错误原文。拍品代码按分类
+/// 前缀加分类内编号生成，`lot_number` 取 `category_number`，与 Admin lot 页和结算报表一致；
+/// 全场编号会在混合类别的场次里错号。
 const COLLECTION_OVERDUE_ITEMS: &str = concat!(
     fulfillment_classified_cte!(),
     "
          SELECT classified.id AS obligation_id, classified.obligation_kind,
                 auction.world_id AS auction_world, auction.sequence AS auction_sequence,
-                lot.lot_number, equipment.category AS equipment_category,
+                lot.category_number AS lot_number, equipment.category AS equipment_category,
                 equipment.name AS equipment_name, classified.recipient, classified.sent_at,
                 COALESCE(classified.last_error_code = 'evidence_unavailable', false)
                     AS last_read_failed

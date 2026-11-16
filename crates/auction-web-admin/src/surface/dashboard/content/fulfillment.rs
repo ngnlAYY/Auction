@@ -174,7 +174,7 @@ fn overdue_list(items: &[AdminCollectionOverdueItem], overdue_count: i64) -> Ele
                                     number: item.auction_sequence
                                 )}
                                 " "
-                                {admin_lot_code_for(&item.equipment_category, item.lot_number)}
+                                {overdue_lot_code(item)}
                             }
                             td { "{item.equipment_name}" }
                             td { {overdue_kind_label(&item.obligation_kind)} }
@@ -187,10 +187,12 @@ fn overdue_list(items: &[AdminCollectionOverdueItem], overdue_count: i64) -> Ele
                                 )}
                             }
                             td {
+                                // 没有读取失败记录只说明最近一次读取没有失败，不是“已读到、
+                                // 确认未领取”的证据。
                                 if item.last_read_failed {
                                     {badge("warn", t!("dashboard-fulfillment-overdue-read-failed"))}
                                 } else {
-                                    {t!("dashboard-fulfillment-overdue-read-ok")}
+                                    {t!("dashboard-fulfillment-overdue-read-no-failure")}
                                 }
                             }
                         }
@@ -199,6 +201,12 @@ fn overdue_list(items: &[AdminCollectionOverdueItem], overdue_count: i64) -> Ele
             }
         }
     }
+}
+
+/// 清单项的拍品代码：分类前缀加分类内编号（服务端 `lot_number` 即 `lots.category_number`），
+/// 与 Admin lot 页、结算报表一致。
+fn overdue_lot_code(item: &AdminCollectionOverdueItem) -> String {
+    admin_lot_code_for(&item.equipment_category, item.lot_number)
 }
 
 /// 等待领取义务类别的当前语言名称；解码已拒绝闭集外的值，这里只兜底原样显示。
@@ -218,5 +226,29 @@ fn fulfillment_status(state: &str) -> String {
         "ok" => t!("dashboard-legacy-fulfillment-status-ok"),
         "error" => t!("dashboard-legacy-fulfillment-status-degraded"),
         _ => t!("dashboard-legacy-fulfillment-status-unavailable"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AdminCollectionOverdueItem, overdue_lot_code};
+
+    /// 混合类别的场次里全场第 100 件、盾牌分类第 2 件：服务端给出分类内编号 2，代码是 `Shd02`。
+    #[test]
+    fn overdue_lot_code_uses_the_category_number() {
+        let item = AdminCollectionOverdueItem {
+            obligation_id: "00000000-0000-0000-0000-000000000010".to_owned(),
+            obligation_kind: "seller_payout".to_owned(),
+            world: "main".to_owned(),
+            auction_sequence: 4,
+            lot_number: 2,
+            equipment_category: "Shield".to_owned(),
+            equipment_name: "Radiant Buckler".to_owned(),
+            recipient: "collection-seller".to_owned(),
+            sent_at: "2026-01-01T00:00:00.000000Z".to_owned(),
+            age_seconds: 691_200,
+            last_read_failed: false,
+        };
+        assert_eq!(overdue_lot_code(&item), "Shd02");
     }
 }

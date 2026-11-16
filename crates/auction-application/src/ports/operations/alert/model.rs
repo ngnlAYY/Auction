@@ -163,6 +163,8 @@ pub struct OperationsAlertCollectionOverdueItem {
     /// 场次所属世界与届次；与 lot 编号、装备分类一起定位拍品。
     pub auction_world: String,
     pub auction_sequence: i64,
+    /// 分类内编号（`lots.category_number`）：拍品代码是分类前缀加该编号，与 Admin lot 页一致；
+    /// 不是全场编号。
     pub lot_number: i32,
     pub equipment_category: String,
     pub equipment_name: String,
@@ -173,6 +175,7 @@ pub struct OperationsAlertCollectionOverdueItem {
     /// 自寄出起已等待的秒数。
     pub age_seconds: i64,
     /// 最近一次 Sent 读取失败（`evidence_unavailable`）；只说明读不到，不代表是否已领取。
+    /// `false` 只表示没有记录读取失败（含 Sent 找不到与尚未读取），不是“已确认未领取”。
     pub last_read_failed: bool,
 }
 
