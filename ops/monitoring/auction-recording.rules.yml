@@ -88,17 +88,20 @@ groups:
       - record: auction:websocket_connections_peak:7d
         expr: max_over_time(auction:websocket_connections[7d])
 
-      # 该指标尚未在本基线；缺该指标时本规则无样本，不补零。
+      # 样本计数 auction_forum_reply_delay_samples_total{world,phase,method,outcome}（Counter）
+      # 已由启用 metrics 的 Worker 注册；Final 阶段尚无回帖导入样本时本规则无输出，不补零。
       - record: auction:sli_final_forum_reply_delay_samples:5m
         expr: |
           sum by (world,method,outcome) (increase(auction_forum_reply_delay_samples_total{
             phase="final"
           }[5m]))
 
-      # 边界草案的权威源为：
-      # auction_forum_reply_import_delay_estimate_seconds{
+      # 边界估计的权威源已实现为 Histogram：
+      # auction_forum_reply_delay_estimate_seconds{
       #   world,phase="final",method,bound="lower|midpoint|upper"
       # }
-      # 等指标类型和 outcome 闭集合入后再固定边界与覆盖率表达式。
+      # outcome 闭集在样本计数上（observed/missing_baseline/coverage_unknown/
+      # state_evicted/timestamp_unavailable/clock_invalid），口径见
+      # crates/auction-observability/README.md；SLO 阈值经用户确认后再固定边界与覆盖率表达式。
       # upper 约束延迟；upper-lower 约束同一估计的宽度；有效估计/全部候选约束覆盖率。
-      # 若为 Histogram，分位边界差只表示分位估计区间，不能冒充逐样本宽度分位。
+      # 不同 bound 的分位数之差只表示分位估计区间，不能冒充逐样本区间宽度的分位。
