@@ -1,4 +1,6 @@
-//! 邮件语料的有状态 HTTP 回放；故障标记是人工注入，不冒充真实页面。
+//! 邮件语料的有状态 HTTP 回放；故障标记是人工注入，不冒充真实页面。测试另可登记一封由调用方
+//! 提供页面（由真实语料派生）的待领取邮件，替身只按领取前/后两份页面有状态回放，并可让一次
+//! 领取 POST 迟到完成，用于复现外部 Take 的时序。
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -19,6 +21,7 @@ use tokio::{net::TcpListener, task::JoinHandle};
 use url::Url;
 
 mod fixtures;
+mod scripted;
 
 /// 真实发送成功页；仅替换玩家/世界/收件人显示名并移除扩展 DOM。
 const WRITE_SUCCESS: &[u8] =
@@ -56,6 +59,7 @@ pub enum Fault {
 #[derive(Default)]
 struct MailState {
     fault: Option<Fault>,
+    scripted: Option<scripted::ScriptedTake>,
     unread: BTreeSet<String>,
     removed_sent: BTreeSet<String>,
     reads: usize,
@@ -236,6 +240,11 @@ async fn handle(
             return Html("<div>injected protocol drift</div>").into_response();
         }
         _ => {}
+    }
+    if let Some(response) =
+        scripted::respond(&state, &method, query.get("mid").map(String::as_str)).await
+    {
+        return response;
     }
     if method == Method::POST {
         return match fault {

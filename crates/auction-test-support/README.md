@@ -9,8 +9,8 @@
 | 接口 | 说明 |
 | --- | --- |
 | `mooglemail::MailDouble` | `start()` 绑定 `127.0.0.1:0`；`endpoint()` 交给真实客户端配置，路径与查询仍由客户端自己生成。只回放 main（`/`）与 isekai（`/isekai/`）下 `s=Bazaar&ss=mm` 的列表、详情与写信页；装备页（`/equip/`、`/isekai/equip/`）没有语料，只回放注入的账号状态故障 |
-| `MailDouble` 状态操作 | `set_fault`；`set_return_receipt_unread` 让唯一同时有 Inbox/Read 详情的 MID 3125357 在两个列表间移动；`remove_sent`/`restore_sent` 让一封邮件从 Sent 列表与详情中消失或在 POST 之后才出现；`set_captured_pages_complete` 把已采集的最后一页按真实末页结构回放，供需要完整枚举的测试显式开启 |
-| `MailDouble` 观测 | `read_requests()`、`write_requests()` 分别统计 GET 与 POST（结果未知的写入也计一次）；`requests()` 按到达顺序返回方法与路径查询，包括不支持的路由；`max_concurrent_requests()` 返回同时处理中的最大请求数，用于证明同一账号的物理请求没有重叠 |
+| `MailDouble` 状态操作 | `set_fault`；`set_return_receipt_unread` 让唯一同时有 Inbox/Read 详情的 MID 3125357 在两个列表间移动；`remove_sent`/`restore_sent` 让一封邮件从 Sent 列表与详情中消失或在 POST 之后才出现；`set_captured_pages_complete` 把已采集的最后一页按真实末页结构回放，供需要完整枚举的测试显式开启；`script_take_mail(mid, 领取前页, 领取后页)` 登记一封由调用方提供页面的待领取邮件，`delay_next_take(d)` 让下一次领取 POST 迟到完成（到达只登记、延迟响应，领取在下一次读取该邮件的响应生成之后才生效），`complete_deferred_take()` 让已登记的迟到领取立即生效 |
+| `MailDouble` 观测 | `read_requests()`、`write_requests()` 分别统计 GET 与 POST（结果未知的写入也计一次）；`requests()` 按到达顺序返回方法与路径查询，包括不支持的路由；`max_concurrent_requests()` 返回同时处理中的最大请求数，用于证明同一账号的物理请求没有重叠；`take_counts()` 返回登记邮件被真正取走附件的次数与收到的领取 POST 数 |
 | `mooglemail::Fault` | `AccountBusy`、`SlowAccountBusy(d)`（延迟后返回同一账号忙标记，模拟慢请求在途期间才打开熔断窗口）、`CookieInvalid`（登录跳转）、`Timeout(d)`、`ProtocolDrift`、`WriteResultUnknown`、`InsufficientPostage`、`MissingRecipient`、`WriteSucceeded`（脱敏的真实发送成功页）、`SlowWriteSucceeded(d)`（只延迟写入，模拟停机时仍在途的发送）、`StateLockLimited`（读写都只返回客户端已识别的 HV 状态锁限流正文）、`StateLockLimitedTooManyRequests`（同一限流正文配 429 状态码） |
 | `forum::ForumDouble` | 同样只绑定回环。回放主题 302133（默认只挂第 0 页，其余分页须用 `set_topic_page` 显式提供）、PM 已发送列表（默认只挂第 0 页，`set_pm_sent_page` 可覆盖第 0 页或显式提供 `st>0` 分页）与详情 1558026、登录页与主世界战斗页；`set_pm_payload` 在真实 PM 结构中替换标题与正文；`write_requests()`、`requests()` 同上 |
 | `forum::Fault` | `CookieInvalid`（返回真实登录页）、`ProtocolDrift`、`Timeout(d)`、`DeletedPost`（移除帖子正文）、`WriteResultUnknown`（只对已知的回帖与 PM 写入路径生效）、`Battle`（返回真实主世界战斗页；`ForumDouble` 收到 MoogleMail 列表请求时只回放这一种故障，正常邮件内容归 `MailDouble`） |
@@ -21,6 +21,7 @@
 - 未采集的页面、分页、详情与写入成功页返回 `501 Not Implemented`，不复制或编造内容；页码或偏移量无法解析、论坛查询参数重复时返回 400。
 - 装备页 GET 计入 `read_requests()`，只对 `AccountBusy`、`SlowAccountBusy(d)`、`StateLockLimited`、`StateLockLimitedTooManyRequests`、`CookieInvalid` 返回与邮件路由相同的注入响应；`Timeout(d)` 延迟后仍返回 501，其余情况一律 501。
 - 只有 MoogleMail 有真实发送成功页。论坛回帖与 PM 的写入成功页没有语料，除注入的未知结果外，论坛 POST 一律返回 501。
+- 登记的待领取邮件只回放调用方提供的两份页面，不属于替身自带的回放类别：页面由调用测试从已脱敏的真实语料派生并在测试里写明派生方式（目前只有 `returned_take_timing.rs`：领取后页取自 `taken-3125358.html`，领取前页另按 `sentdetail-3125364.html` 的附件列表结构写入现金附件与领取按钮），替身只按远端状态切换页面并保证附件至多被取走一次。
 - 替身 drop 时中止监听任务，测试不会遗留后台服务。内部状态锁中毒或常量 selector 解析失败时直接 panic：本 crate 只进测试进程，`lib.rs` 因此放宽了 `clippy::expect_used`。
 
 ## 语料
@@ -39,6 +40,7 @@
 - `crates/auction-integrations/tests/mooglemail_double.rs`
 - `crates/auction-integrations/tests/forum_double.rs`
 - `crates/auction-integrations/tests/mooglemail_maintenance_contention.rs`
+- `crates/auction-integrations/tests/returned_take_timing.rs`
 - `crates/auction-integrations/src/clients/mooglemail/sender/baseline/tests.rs`
 - `crates/auction-integrations/src/clients/mooglemail/client/reads/lists/sent.rs`
 - `crates/auction-integrations/src/clients/mooglemail/gateway/internal/compose.rs`

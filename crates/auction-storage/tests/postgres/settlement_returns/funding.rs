@@ -7,7 +7,8 @@
 //!   （`postgres_return_cash_resend_conserves_funding`；退款的 prepare/activate 附同 session 的
 //!   装备在库证据）；
 //! - 换代后旧派发的迟到成功/失败回调、人工 Sent 准入与投递台对账、以及旧派发的迟到退件都不能
-//!   扣减或恢复新一轮资金（`postgres_old_dispatch_cannot_mutate_new_funding`）；
+//!   扣减或恢复新一轮资金（`postgres_old_dispatch_cannot_mutate_new_funding`）：首寄原样保存的
+//!   成功结果重放是幂等成功（资金、来源与审计都不增加），拼接了其他派发冻结身份的结果被拒绝；
 //! - 补寄派发写出结果未知时，经人工 Sent 准入确认后 spent，并按冻结证明结束本案
 //!   （`postgres_return_resend_manual_sent_admission`）。
 
@@ -103,6 +104,8 @@ struct Resending {
     original: Uuid,
     /// 首寄的投递 claim；换代后用于重放迟到回调。
     original_claim: DeliveryWorkClaim,
+    /// 首寄原样保存的成功结果；换代后按原字节重放。
+    original_result: DeliverySendResult,
     case: Uuid,
     resend: Uuid,
     resend_claim: DeliveryWorkClaim,
@@ -456,12 +459,9 @@ async fn resending(
     .await;
     let (original_claim, expectation) =
         send_through_cash_gate(store, &session, original, [0x51; 32], strict, kind).await;
+    let original_result = sent_result(&original_claim, &expectation, "781001");
     store
-        .succeed(
-            original_claim.clone(),
-            sent_result(&original_claim, &expectation, "781001"),
-            Utc::now(),
-        )
+        .succeed(original_claim.clone(), original_result.clone(), Utc::now())
         .await
         .expect("首寄 Sent 证明收口");
     assert_eq!(
@@ -557,6 +557,7 @@ async fn resending(
         allocation,
         original,
         original_claim,
+        original_result,
         case,
         resend,
         resend_claim,
@@ -689,9 +690,20 @@ async fn postgres_old_dispatch_cannot_mutate_new_funding() {
     let in_flight = ("in_flight".to_owned(), AMOUNT, Some(resending.resend));
     let before = ledger(pool).await;
 
-    // 旧派发的迟到成功与失败回调：原 claim 已失效，拒绝且不触碰资金。
-    let late = sent_result(&resending.original_claim, &resending.resend_expectation, "781001");
-    assert!(store.succeed(resending.original_claim.clone(), late, Utc::now()).await.is_err());
+    // 旧派发的迟到成功回调：按原字节重放首寄保存的成功结果是幂等成功，不再扣减或恢复资金、
+    // 不新增来源，也不追加投递审计。
+    let audits_before = delivery_audits(pool, resending.original).await;
+    store
+        .succeed(resending.original_claim.clone(), resending.original_result.clone(), Utc::now())
+        .await
+        .expect("首寄原成功结果重放幂等");
+    assert_eq!(ledger(pool).await, before, "重放不扣减或恢复资金、不新增来源");
+    assert_eq!(delivery_audits(pool, resending.original).await, audits_before, "重放不追加审计");
+    assert_eq!(allocation_state(pool, resending.allocation).await, in_flight, "新一轮资金不变");
+    // 拼接了补寄冻结身份的结果不是首寄的原结果：在冻结证明比较处拒绝。
+    let spliced = sent_result(&resending.original_claim, &resending.resend_expectation, "781001");
+    assert!(store.succeed(resending.original_claim.clone(), spliced, Utc::now()).await.is_err());
+    // 迟到的失败回调：原 claim 已失效，拒绝且不触碰资金。
     assert!(
         DeliveryWorkStore::fail(
             &store,
@@ -795,6 +807,17 @@ async fn postgres_old_dispatch_cannot_mutate_new_funding() {
     assert_eq!(spent - returned, AMOUNT, "净流出恰为 M");
 
     pool.close().await;
+}
+
+async fn delivery_audits(pool: &PgPool, delivery: Uuid) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM public.audit_records
+         WHERE entity_type = 'delivery' AND entity_id = $1",
+    )
+    .bind(delivery.to_string())
+    .fetch_one(pool)
+    .await
+    .expect("读取投递审计")
 }
 
 /// 人工 Sent 证据：不领取的原额仍在，正文未变；时间取当前尝试的 sending 分钟与终态时刻。
