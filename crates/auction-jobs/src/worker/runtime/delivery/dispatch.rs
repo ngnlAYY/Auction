@@ -14,7 +14,9 @@ use auction_application::delivery::{
 use auction_application::operations::ExternalWriteActivity;
 use auction_observability::WorkerResult;
 
-use super::handoff::{confirm_delivery_handoff, prepare_delivery, release_unstarted_delivery};
+use super::handoff::{
+    DeliveryHandoff, confirm_delivery_handoff, prepare_delivery, release_unstarted_delivery,
+};
 use super::lease::DeliveryLease;
 use super::notification;
 use super::report::DeliveryTaskResult;
@@ -147,7 +149,7 @@ where
     };
     // prepare 可能恰在续租前完成；先补足 TTL，再有界提交 fence，最后确认 sending 租约。
     // 任一步骤不明确成功都丢弃未 poll 的句柄。fence 提交未知不能释放成 pending。
-    if !confirm_delivery_handoff(
+    let handoff = confirm_delivery_handoff(
         delivery_store.as_ref(),
         clock.as_ref(),
         config,
@@ -156,19 +158,32 @@ where
         &mut prepared,
         activity,
     )
-    .await
-    {
+    .await;
+    if !matches!(handoff, DeliveryHandoff::Sending) {
         drop(prepared);
         if activity.is_cancelled() || (activity.enabled() && control.is_draining()) {
             return DeliveryTaskResult::completed(WorkerResult::Canceled);
         }
+        let (worker_result, unpersisted_cause) = if matches!(handoff, DeliveryHandoff::Deferred) {
+            // 围栏确定结束而未进入 sending：竞价警告在交接期间失效（取消关注、重新领先、lot 到期）、
+            // 发送节奏未到期或资金门冻结都走这里，原因由围栏事务一侧决定，仅凭来源种类无法推断。
+            // 尚未外部写入，也没有未落库的结果，释放 claim 后正常结束本项。
+            tracing::info!(
+                delivery_id = %claim.delivery_id,
+                origin_kind = %claim.origin_kind,
+                "发送围栏确定未进入 sending，尚未外部写入，释放本次领取"
+            );
+            (WorkerResult::Success, None)
+        } else {
+            (WorkerResult::Error, Some(SafeErrorKind::DEPENDENCY_UNAVAILABLE))
+        };
         return release_unstarted_delivery(
             delivery_store.as_ref(),
             clock.as_ref(),
             config,
             &claim,
-            WorkerResult::Error,
-            Some(SafeErrorKind::DEPENDENCY_UNAVAILABLE),
+            worker_result,
+            unpersisted_cause,
         )
         .await;
     }
