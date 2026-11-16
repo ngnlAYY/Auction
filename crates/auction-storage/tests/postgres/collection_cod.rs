@@ -9,6 +9,9 @@
 //! - 资金化正向路径：两类付款都直接调用真实 `SettlementInternalFulfillmentStore::satisfy_collected`，
 //!   以合成凭据、匹配的运行代际、record_only 账户与早于发送的开户来源执行实收证明与资金入账
 //!   校验；同一证明重放不重复入账；错 MID、失效代际与晚于发送的开户来源都整体回滚；
+//! - 全部场景都是当前生产形状：场次快照冻结默认结算策略 v2（hold_curve_v2），义务版本、结算
+//!   明细的 policy 标签与竞得装备 COD 载荷的 `pricing_mode` 按生产写入口径与之一致，资金准入
+//!   走 v2 价格变量校验，而不是缺标签时的 v1 兼容读路径；
 //! - 反例：付款投递已成功但没有冻结发送证明时不计为等待付款。
 //!
 //! 入口见 `just test-db`。
@@ -35,7 +38,7 @@ use auction_application::settlement::{
     SettlementInternalFulfillmentStore, VerifiedMailSentCollectionObservation,
     canonical_settlement_fulfillment_subject,
 };
-use auction_domain::{SettlementId, SettlementObligationKind, SettlementWorld};
+use auction_domain::{SettlementId, SettlementMode, SettlementObligationKind, SettlementWorld};
 use auction_storage::DatabaseStore;
 use chrono::{DateTime, Duration, DurationRound, Utc};
 use serde_json::json;
@@ -49,7 +52,12 @@ const SEED: &str = "collection-cod";
 const WINNER: &str = "collection-cod-winner";
 const SELLER: &str = "collection-cod-seller";
 const EQUIPMENT_NAME: &str = "Collection cod equipment";
-/// 冻结结算明细（旧曲线 hold_curve_v1，hold 0 对应 +8% 调整）：成交价 1000，税费
+/// 场次快照冻结的当前默认结算策略（`SettlementPolicy::default()`）：version 2 / hold_curve_v2。
+/// 夹具按生产结算的写入口径取用：各义务记冻结版本，结算明细的 `adjustment_metadata` 只记
+/// `{"policy": 冻结模式}`，竞得装备 COD 载荷因此带 v2 的 `pricing_mode` 变量。
+const SETTLEMENT_POLICY_VERSION: i32 = 2;
+const SETTLEMENT_MODE: SettlementMode = SettlementMode::HoldCurveV2;
+/// 冻结结算明细（v2 曲线首锚点：hold 0 对应 +8% 调整）：成交价 1000，税费
 /// floor(1000 × 8%) = 80，买方付 1080，卖方得成交价；付款、退款与货款义务金额都取自这条明细。
 const END_PRICE: i64 = 1_000;
 const HOLD_PPM: i64 = 0;
@@ -129,6 +137,19 @@ async fn seed_case(pool: &PgPool, payment: Payment, payment_deadline: DateTime<U
     let ended = Utc::now() - Duration::days(1);
     let auction = id("auction");
     let command = id("command");
+    let policy = policy_snapshot(ended, END_PRICE, 100);
+    // 下面的义务版本、明细标签与载荷变量都按这份快照冻结的策略写；快照的版本、模式或 hold 0
+    // 锚点变了就先在这里失败，夹具不会悄悄退回历史 v1 兼容读路径。
+    let frozen = &policy["settlement"];
+    assert_eq!(
+        (&frozen["version"], &frozen["mode"], &frozen["anchors"][0]),
+        (
+            &json!(SETTLEMENT_POLICY_VERSION),
+            &json!(SETTLEMENT_MODE.as_str()),
+            &json!({"hold_ppm": HOLD_PPM, "adjustment_ppm": ADJUSTMENT_PPM}),
+        ),
+        "场次快照冻结当前默认结算策略 v2，hold 0 落在 +8% 首锚点"
+    );
     sqlx::query(
         "INSERT INTO public.auctions
             (id, world_id, sequence, title, status, scheduled_open_at, preview_scheduled_at,
@@ -138,7 +159,7 @@ async fn seed_case(pool: &PgPool, payment: Payment, payment_deadline: DateTime<U
     .bind(auction)
     .bind(world)
     .bind(ended)
-    .bind(policy_snapshot(ended, END_PRICE, 100))
+    .bind(&policy)
     .execute(pool)
     .await
     .expect("写入已结算场次");
@@ -184,11 +205,12 @@ async fn seed_case(pool: &PgPool, payment: Payment, payment_deadline: DateTime<U
     .execute(pool)
     .await
     .expect("写入测试 lot");
+    // 与生产结算写入（`settlement/facts.rs`）一致：metadata 只含冻结模式的 policy 标签。
     sqlx::query(
         "INSERT INTO public.lot_settlements
             (lot_id, end_price, listed_price, buyer_amount, seller_amount, tax_amount,
-             compensation_amount, hold_ppm, adjustment_ppm)
-         VALUES ($1, $2, $2, $3, $4, $5, 0, $6, $7)",
+             compensation_amount, hold_ppm, adjustment_ppm, adjustment_metadata)
+         VALUES ($1, $2, $2, $3, $4, $5, 0, $6, $7, $8)",
     )
     .bind(lot)
     .bind(END_PRICE)
@@ -197,10 +219,12 @@ async fn seed_case(pool: &PgPool, payment: Payment, payment_deadline: DateTime<U
     .bind(TAX_CREDITS)
     .bind(HOLD_PPM)
     .bind(ADJUSTMENT_PPM)
+    .bind(json!({ "policy": SETTLEMENT_MODE.as_str() }))
     .execute(pool)
     .await
     .expect("写入冻结结算明细");
 
+    // 与生产结算写入一致：同一 lot 的全部义务都记场次冻结的结算策略版本。
     let obligation =
         |kind: SettlementObligationKind, state: &str, buyer: bool, amount: i64, prerequisite| {
             let obligation_id = id(kind.as_str());
@@ -212,13 +236,14 @@ async fn seed_case(pool: &PgPool, payment: Payment, payment_deadline: DateTime<U
                          obligation_kind, business_state, recipient_user_id,
                          recipient_game_identity, amount, carrier_credit, equipment_id,
                          prerequisite_obligation_id)
-                     VALUES ($1, $2, $3, $4, $5, 1, $6, $7, $8, $9, $10, $11, $12, $13)",
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
                 )
                 .bind(obligation_id)
                 .bind(auction)
                 .bind(lot)
                 .bind(world)
                 .bind(command)
+                .bind(SETTLEMENT_POLICY_VERSION)
                 .bind(kind.as_str())
                 .bind(&state)
                 .bind(buyer.then_some(winner))
@@ -266,7 +291,8 @@ async fn seed_case(pool: &PgPool, payment: Payment, payment_deadline: DateTime<U
     .await;
 
     // 付款投递：与结算生成方当前写出的形状逐字段一致——正文带付款期限，竞得装备 COD 另带由
-    // 冻结结算明细重建的价格变量；激活后排队等待投递 Worker 领取。
+    // 冻结结算明细重建的价格变量，冻结模式为 v2 时含 `pricing_mode`（`fulfillment/intent.rs`）；
+    // 激活后排队等待投递 Worker 领取。
     let delivery = id("delivery");
     let cod = BUYER_CREDITS + payment.carrier_credit();
     let deadline = format_deadline(payment_deadline);
@@ -284,6 +310,7 @@ async fn seed_case(pool: &PgPool, payment: Payment, payment_deadline: DateTime<U
                 "hold_ppm": HOLD_PPM.to_string(),
                 "adjustment_ppm": ADJUSTMENT_PPM.to_string(),
                 "winning_bid": END_PRICE.to_string(),
+                "pricing_mode": "hold_curve_v2",
                 "adjusted_price": BUYER_CREDITS.to_string(),
                 "pool_credit": "0"
             },
