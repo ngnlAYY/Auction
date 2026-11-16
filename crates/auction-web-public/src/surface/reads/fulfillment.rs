@@ -2,7 +2,8 @@
 //! 交付、卖家货款与成交撤销）。
 //!
 //! 状态由服务端闭集给出，本页只把状态映射为文案与语气样式，不重建判定；付款期限与 COD 退回
-//! 次数只在服务端给出时显示。世界/场次选择、目录门禁与请求身份绑定沿用竞价日志页。
+//! 次数只在服务端给出时显示。世界/场次选择、目录门禁与请求身份绑定沿用竞价日志页。重读失败时
+//! 缓存层回退的旧快照会连同其确认时刻一起提示，不把旧状态当作当前结果静默显示。
 
 use auction_web_shared::timer::TimeoutFuture;
 use auction_web_shared::{QueryWriteMode, TruncatedText, format_credit_amount, t};
@@ -10,8 +11,8 @@ use dioxus::prelude::*;
 
 use super::bid_log::{apply_lot_filter, reset_lot_draft, valid_lot_filter};
 use crate::api::{
-    FulfillmentLot, FulfillmentPage, MAX_FULFILLMENT_PAGE_SIZE, fetch_fulfillment_auctions,
-    fetch_fulfillment_page, fetch_worlds, lot_code_for,
+    FulfillmentLot, FulfillmentPage, FulfillmentRead, MAX_FULFILLMENT_PAGE_SIZE,
+    fetch_fulfillment_auctions, fetch_fulfillment_page, fetch_worlds, lot_code_for,
 };
 use crate::surface::{
     LotDetailLookupButton, LotDetailLookupHost, PublicPager, current_public_pathname,
@@ -196,10 +197,16 @@ pub(crate) fn fulfillment() -> Element {
         },
         // 已应用的筛选非法（来自地址栏）时没有发出请求：正文留空且不提示加载。
         (Some(Ok(_)), _) if !valid_lot_filter(current_lot_filter.trim()) => rsx! {},
-        (Some(Ok(_)), Some(Ok(Some(page))))
+        (Some(Ok(_)), Some(Ok(Some(FulfillmentRead { page, stale_since }))))
             if public_page_matches(page.page, page.page_size, current_page, page_size()) =>
         {
             rsx! {
+                // 重读遇到网络失败或服务暂时繁忙时，缓存层回退旧快照：标明它的确认时刻。
+                if let Some(stale_since) = stale_since.as_deref() {
+                    p { class: "public-fulfillment__stale", role: "status",
+                        {t!("fulfillment-stale", time: format_auction_time(stale_since))}
+                    }
+                }
                 FulfillmentTable {
                     page: page.clone(),
                     current_page,
@@ -420,6 +427,7 @@ fn FulfillmentTable(
                 page: current_page,
                 page_size: page.page_size,
                 total: Some(page.total),
+                max_page_size: Some(MAX_FULFILLMENT_PAGE_SIZE),
                 label: t!("page-fulfillment-title"),
                 on_page_change,
                 on_page_clamp,

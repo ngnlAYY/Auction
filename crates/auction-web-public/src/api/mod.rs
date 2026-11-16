@@ -49,8 +49,8 @@ pub(crate) use compensation::{
 };
 pub(crate) use forum::{ForumThread, fetch_forum_sync_enabled, fetch_forum_thread};
 pub(crate) use fulfillment::{
-    FulfillmentLot, FulfillmentPage, MAX_FULFILLMENT_PAGE_SIZE, fetch_fulfillment_auctions,
-    fetch_fulfillment_page,
+    FulfillmentLot, FulfillmentPage, FulfillmentRead, MAX_FULFILLMENT_PAGE_SIZE,
+    fetch_fulfillment_auctions, fetch_fulfillment_page,
 };
 // 状态闭集归解码器所有；页面只在测试里用它核对状态到文案的穷尽映射。
 #[cfg(test)]

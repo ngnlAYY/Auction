@@ -67,6 +67,10 @@ pub(crate) fn PublicPager(
     /// 覆盖跳页输入文案；默认使用 Public 通用 `pagination-jump`。
     #[props(default)]
     jump_label: Option<String>,
+    /// 接口自带每页数量上限时注入（如履约进度为 100）：超出的预设禁用，自定义输入就地提示
+    /// “1–上限”的整数范围。默认 `None` 保持其他列表只要求正整数。
+    #[props(default)]
+    max_page_size: Option<i64>,
     label: String,
     on_page_change: EventHandler<i64>,
     #[props(default)] on_page_clamp: Option<EventHandler<i64>>,
@@ -99,14 +103,19 @@ pub(crate) fn PublicPager(
             page_size_label: t!("pagination-size"),
             // 数量用字符串插值，避免 Fluent 浮点格式化舍入较大的合法 i64。
             page_size_option_label: Callback::new(move |count: i64| t!("pagination-size-option", count: count.to_string())),
+            max_page_size,
             allow_custom_page_size: true,
             page_size_custom_label: t!("pagination-custom"),
             page_size_apply_label: t!("pagination-apply"),
-            page_size_invalid_label: t!("pagination-positive-integer"),
+            page_size_invalid_label: max_page_size.map_or_else(
+                || t!("pagination-positive-integer"),
+                |maximum| t!("pagination-size-limit", maximum: maximum.to_string()),
+            ),
             on_page_change,
             on_page_clamp,
             on_page_size_change: move |size| {
-                if size <= 0 {
+                // 共享分页器已拒绝超出上限的数量；这里再守一次，不把它写进地址栏与偏好。
+                if size <= 0 || max_page_size.is_some_and(|maximum| size > maximum) {
                     return;
                 }
                 // 先冻结离开条目的数量（含 10），再更新 URL 和偏好；返回时不读到新偏好。

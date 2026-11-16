@@ -2352,8 +2352,22 @@
 /* 状态按语气分组着色：完成、进行中、需关注、已撤销、未知；颜色只作辅助，徽标文字始终给出
    完整状态。付款期限与 COD 退回次数作为说明行排在徽标下方。 */
 
-.public-fulfillment__state {
+/* 重读失败时展示的是旧快照：提示条标明快照的确认时刻，与论坛同步延迟提示同款警示样式。 */
+.public-fulfillment__stale {
+  margin: 0 0 var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-inline-start: calc(3 * var(--border-width)) solid var(--color-warning);
+  color: var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 8%, transparent);
+  font-size: var(--text-sm);
+}
+
+/* 状态列完整折行，不截断：同层的 `.public-fulfillment__table td` 写了 nowrap，这里用更高的
+   特异度覆盖；基础表格规则（foundation 层）对单元格及其直接子 span 设了不折行与省略号，
+   徽标与说明行各自显式恢复折行。 */
+.public-fulfillment__table td.public-fulfillment__state {
   white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .public-fulfillment__status {
@@ -2361,9 +2375,12 @@
   max-inline-size: 100%;
   padding: calc(var(--space-1) / 2) var(--space-2);
   border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-full);
+  /* 单行时与胶囊形一致；折成多行时圆角不压住文字。 */
+  border-radius: var(--radius-lg);
   color: var(--color-text-muted);
   font-size: var(--text-sm);
+  white-space: normal;
+  text-overflow: clip;
   overflow-wrap: anywhere;
 }
 
@@ -2397,6 +2414,8 @@
   color: var(--color-text-muted);
   font-size: var(--text-xs);
   font-variant-numeric: tabular-nums;
+  white-space: normal;
+  text-overflow: clip;
   overflow-wrap: anywhere;
 }
 

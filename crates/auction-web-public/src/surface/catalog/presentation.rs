@@ -139,6 +139,16 @@ pub(crate) fn historical_bid_log_href(auction_id: &str, world_id: &str) -> Strin
     public_href("/bidlog", &query)
 }
 
+/// 已结算场次的履约进度入口：与出价记录入口同一查询口径，带场次与世界（主世界使用缺省 URL）。
+pub(crate) fn historical_fulfillment_href(auction_id: &str, world_id: &str) -> String {
+    let query = PublicBoardQuery {
+        auction_id: Some(auction_id.to_owned()),
+        world: (world_id != "main").then(|| world_id.to_owned()),
+        ..PublicBoardQuery::default()
+    };
+    public_href("/fulfillment", &query)
+}
+
 pub(crate) fn format_auction_time(value: &str) -> String {
     format_localized_time_for_language(value, &current_language().to_string())
 }
@@ -252,7 +262,27 @@ pub(crate) fn is_activation_key(key: &Key) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::catalog_category_key;
+    use url::form_urlencoded;
+
+    use super::{catalog_category_key, historical_fulfillment_href};
+
+    #[test]
+    fn fulfillment_entry_opens_the_round_in_its_world() {
+        let auction_id = "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b";
+        for (world, expected_world) in [("isekai", Some("isekai")), ("main", None)] {
+            let href = historical_fulfillment_href(auction_id, world);
+            let (path, search) = href.split_once('?').expect("入口带查询");
+            assert_eq!(path, "/fulfillment");
+            let value = |key: &str| {
+                form_urlencoded::parse(search.as_bytes())
+                    .find(|(name, _)| name == key)
+                    .map(|(_, value)| value.into_owned())
+            };
+            assert_eq!(value("auction").as_deref(), Some(auction_id), "{href}");
+            // 主世界是页面缺省世界，与出价记录入口一样不写 `world`。
+            assert_eq!(value("world").as_deref(), expected_world, "{href}");
+        }
+    }
 
     #[test]
     fn category_keys_accept_public_keys_canonical_names_and_lowercase_names() {

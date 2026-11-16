@@ -79,9 +79,9 @@ where
     cached_public_read(url, ttl_millis, decode).await.map(|read| read.value)
 }
 
-/// 与 [`cached_public_get`] 相同，但保留“暂时性失败后回退旧快照”的标记，供需要稍后再读的
-/// 目录读取使用。
-async fn cached_public_read<T, D, Fut>(
+/// 与 [`cached_public_get`] 相同，但保留“暂时性失败后回退旧快照”的标记与确认时刻，供需要
+/// 稍后再读的目录读取与须标明数据时点的页面使用。
+pub(super) async fn cached_public_read<T, D, Fut>(
     url: &str,
     ttl_millis: u64,
     decode: D,
@@ -489,7 +489,7 @@ where
     W: FnOnce() -> WF,
     WF: Future<Output = ()>,
 {
-    if let Ok(CacheRead { value, stale_fallback: false }) = read().await {
+    if let Ok(CacheRead { value, stale_fallback: None }) = read().await {
         return Ok(value);
     }
     wait().await;
@@ -615,11 +615,11 @@ mod tests {
     type CatalogRead = Result<CacheRead<&'static str>, &'static str>;
 
     fn authoritative(value: &'static str) -> CatalogRead {
-        Ok(CacheRead { value, stale_fallback: false })
+        Ok(CacheRead { value, stale_fallback: None })
     }
 
     fn stale(value: &'static str) -> CatalogRead {
-        Ok(CacheRead { value, stale_fallback: true })
+        Ok(CacheRead { value, stale_fallback: Some(1_000) })
     }
 
     /// 依次给出每次读取的结果，返回最终结果、读取次数与等待次数；读取与等待都立即就绪。

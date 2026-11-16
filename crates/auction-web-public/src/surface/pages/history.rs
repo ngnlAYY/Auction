@@ -10,8 +10,8 @@ use crate::api::{HistoricalAuctionWithForum, fetch_auction_history_page};
 use crate::surface::loading::use_content_loading;
 use crate::surface::{
     PublicPager, auction_status_class, historical_auction_status_label, historical_bid_log_href,
-    historical_lots_href, public_page_matches, supported_worlds, update_public_page_size,
-    update_public_query_state, use_public_query_state, world_label,
+    historical_fulfillment_href, historical_lots_href, public_page_matches, supported_worlds,
+    update_public_page_size, update_public_query_state, use_public_query_state, world_label,
 };
 
 #[component]
@@ -231,6 +231,9 @@ pub(crate) fn AuctionHistoryTable(rows: Vec<HistoricalAuctionWithForum>) -> Elem
                                 .unwrap_or_else(|| auction.scheduled_open_at.clone());
                             let lots_href = historical_lots_href(&auction.id, &auction.world_id);
                             let bid_log_href = historical_bid_log_href(&auction.id, &auction.world_id);
+                            // 只有已结算场次有履约进度；进行中的场次不给入口。
+                            let fulfillment_href = (auction.status == "settled")
+                                .then(|| historical_fulfillment_href(&auction.id, &auction.world_id));
                             let status_class = auction_status_class(&auction.status);
                             let status_label = historical_auction_status_label(&auction.status);
                             rsx! {
@@ -254,6 +257,9 @@ pub(crate) fn AuctionHistoryTable(rows: Vec<HistoricalAuctionWithForum>) -> Elem
                                         div { class: "public-auction-rounds__links",
                                             Link { to: lots_href, {t!("auction-history-link-lots")} }
                                             Link { to: bid_log_href, {t!("auction-history-link-bidlog")} }
+                                            if let Some(fulfillment_href) = fulfillment_href {
+                                                Link { to: fulfillment_href, {t!("auction-history-link-fulfillment")} }
+                                            }
                                             if let Some(forum_thread_url) = forum_thread_url {
                                                 a {
                                                     href: forum_thread_url,

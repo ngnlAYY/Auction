@@ -7,8 +7,8 @@
 //!
 //! 语义：TTL 内且未被失效的条目直接返回；过期或被失效后携带 ETag 条件请求，304 刷新写入时间
 //! 并恢复新鲜。传输失败（网络/超时）与服务端暂时拒绝（429 读闸繁忙或来源超额、503 依赖暂不
-//! 可用、源站不可达时的网关 502/504 与 CDN 520–524）在已有条目时回退旧值（stale-while-revalidate）并标明这是回退，没有条目时照常返回
-//! 错误；其他 4xx/5xx 与正文校验失败失败关闭，既不写入也不回退。旧快照只用于读视图展示：命令
+//! 可用、源站不可达时的网关 502/504 与 CDN 520–524）在已有条目时回退旧值（stale-while-revalidate）并标明这是回退及该快照最近一次被
+//! 服务端确认的时刻，没有条目时照常返回错误；其他 4xx/5xx 与正文校验失败失败关闭，既不写入也不回退。旧快照只用于读视图展示：命令
 //! 仍由服务端权威校验，过期的下一口价只会被服务端拒绝。失效只把全部条目标为过期（保留正文与
 //! ETag）并推进修订号。
 //! 同一 URL 的读取经在途登记串行：已有请求在途时，后到的读取等它结束再按上述规则查缓存，不并发
@@ -62,9 +62,11 @@ pub(crate) enum FetchOutcome<T, E> {
 /// 一次缓存读取得到的值及其来源。
 pub(crate) struct CacheRead<T> {
     pub(crate) value: T,
-    /// 重读遇到传输失败或服务端暂时拒绝，返回的是已有的过期或已被失效快照；需要尽快追上权威值
-    /// 的调用方可据此稍后再读。新鲜命中、304 确认与新响应都为 false。
-    pub(crate) stale_fallback: bool,
+    /// 重读遇到传输失败或服务端暂时拒绝，返回的是已有的过期或已被失效快照时，给出该快照最近
+    /// 一次被服务端确认（写入或 304）的时刻，取自注入的 `now_millis`（浏览器中是墙钟毫秒）；
+    /// 需要尽快追上权威值的调用方可据此稍后再读，须向用户标明数据时点的页面据此提示。新鲜命中、
+    /// 304 确认与新响应都为 `None`。
+    pub(crate) stale_fallback: Option<u64>,
 }
 
 struct Entry {
@@ -244,7 +246,7 @@ where
     F: FnOnce(Option<String>) -> Fut,
     Fut: Future<Output = FetchOutcome<T, E>>,
 {
-    let current = |value| CacheRead { value, stale_fallback: false };
+    let current = |value| CacheRead { value, stale_fallback: None };
     // 非白名单 URL 一律直连：不读取、不写入，也不改变失效修订号。
     if !is_cacheable_url(url) {
         return match fetch(None).await {
@@ -285,12 +287,15 @@ where
                 touch(url, now_millis(), revision);
                 Ok(current(entry.value))
             }
-            // 传输失败或服务端暂时拒绝时，旧值仍是最近一次已验证投影：继续展示并标明是回退，
-            // 由调用方决定是否稍后再读；不刷新写入时间，也不把条目标回新鲜。条目早于最近一次
-            // 命令答复时不回退，按失败返回，避免命令之后显示命令之前的快照。
+            // 传输失败或服务端暂时拒绝时，旧值仍是最近一次已验证投影：继续展示并标明是回退及其
+            // 确认时刻，由调用方决定是否稍后再读或提示；不刷新写入时间，也不把条目标回新鲜。
+            // 条目早于最近一次命令答复时不回退，按失败返回，避免命令之后显示命令之前的快照。
             FetchOutcome::Transport(error) | FetchOutcome::Busy(error) => {
                 if entry.fallback_allowed {
-                    Ok(CacheRead { value: entry.value, stale_fallback: true })
+                    Ok(CacheRead {
+                        value: entry.value,
+                        stale_fallback: Some(entry.stored_at_millis),
+                    })
                 } else {
                     Err(error)
                 }
@@ -804,24 +809,31 @@ mod tests {
     fn only_transient_failure_fallbacks_are_marked_stale() {
         reset();
         let url = "/api/v1/auctions/00000000-0000-0000-0000-00000000000f/lots?page=1&page_size=20";
+        let now = Cell::new(90_000);
         let read = |outcome: FetchOutcome<&'static str, &'static str>| {
             block_on(read_or_fetch(
                 url,
                 LIVE_TTL_MILLIS,
-                || 90_000,
+                || now.get(),
                 |_| std::future::ready(outcome),
             ))
             .map(|cached| (cached.value, cached.stale_fallback))
         };
         // 新响应与 TTL 内的新鲜命中（不会调用 fetch）都是权威值。
-        assert_eq!(read(changed("v1", Some("etag-1"))), Ok(("v1", false)));
-        assert_eq!(read(FetchOutcome::Rejected("unused")), Ok(("v1", false)));
+        assert_eq!(read(changed("v1", Some("etag-1"))), Ok(("v1", None)));
+        now.set(95_000);
+        assert_eq!(read(FetchOutcome::Rejected("unused")), Ok(("v1", None)));
         invalidate_all();
-        // 暂时拒绝与传输失败回退的旧快照带标记，调用方据此决定是否稍后再读。
-        assert_eq!(read(FetchOutcome::Busy("read_busy")), Ok(("v1", true)));
-        assert_eq!(read(FetchOutcome::Transport("network_error")), Ok(("v1", true)));
-        // 304 确认的正文同样是权威值。
-        assert_eq!(read(FetchOutcome::NotModified), Ok(("v1", false)));
+        now.set(120_000);
+        // 暂时拒绝与传输失败回退的旧快照带标记与最近一次确认时刻（写入时间，不是本次读取时间），
+        // 调用方据此决定是否稍后再读或提示数据时点。
+        assert_eq!(read(FetchOutcome::Busy("read_busy")), Ok(("v1", Some(90_000))));
+        assert_eq!(read(FetchOutcome::Transport("network_error")), Ok(("v1", Some(90_000))));
+        // 304 确认的正文同样是权威值，并把确认时刻前移。
+        assert_eq!(read(FetchOutcome::NotModified), Ok(("v1", None)));
+        invalidate_all();
+        now.set(150_000);
+        assert_eq!(read(FetchOutcome::Busy("read_busy")), Ok(("v1", Some(120_000))));
     }
 
     /// 命令答复后，命令之前的快照只能用于条件请求：暂时性失败按错误返回；304 确认后重新允许回退。
