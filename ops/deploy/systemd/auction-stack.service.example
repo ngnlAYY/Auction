@@ -14,7 +14,9 @@ UMask=0077
 # 部署控制锁目录；auction-cli 也会在缺失时以 0700 创建。
 StateDirectory=auction/deployment
 StateDirectoryMode=0700
-ExecStart=/opt/auction/bin/auction-cli --config-dir /etc/auction service start --startup-timeout-seconds 30
+# service start 必须带迁移 owner 凭据（root 0600，三个运行角色不得引用）；没有待执行迁移时
+# 迁移是空操作，但参数仍必填。
+ExecStart=/opt/auction/bin/auction-cli --config-dir /etc/auction service start --owner-secrets /etc/auction/owner/postgres.toml --startup-timeout-seconds 30
 ExecStop=/opt/auction/bin/auction-cli --config-dir /etc/auction service stop
 # 迁移加三个角色各 30 秒 readiness，另留 systemctl 往返余量。
 TimeoutStartSec=180

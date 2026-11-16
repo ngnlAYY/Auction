@@ -317,6 +317,49 @@ mod tests {
         assert_eq!(receipt.backup_id.as_deref(), Some("backup-1"));
     }
 
+    /// service start/restart 必须带 --owner-secrets（缺少是参数错误），status/stop 不需要；
+    /// 随包的 auction-stack unit 的 ExecStart/ExecStop 必须能按当前定义解析。
+    #[test]
+    fn service_start_and_restart_require_owner_secrets() {
+        let base = ["auction-cli", "--config-dir", "/etc/auction", "service"];
+        for action in ["start", "restart"] {
+            let mut arguments = base.to_vec();
+            arguments.push(action);
+            let error = Cli::try_parse_from(&arguments).expect_err("缺少 --owner-secrets 必须拒绝");
+            assert_eq!(error.kind(), clap::error::ErrorKind::MissingRequiredArgument, "{action}");
+            arguments.extend(["--owner-secrets", "/etc/auction/owner/postgres.toml"]);
+            Cli::try_parse_from(&arguments).expect("带 --owner-secrets 可以解析");
+        }
+        for action in ["status", "stop"] {
+            let mut arguments = base.to_vec();
+            arguments.push(action);
+            Cli::try_parse_from(&arguments).expect("status/stop 不需要 --owner-secrets");
+        }
+
+        let unit = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../ops/deploy/systemd/auction-stack.service.example"
+        ));
+        for key in ["ExecStart=", "ExecStop="] {
+            let line = unit
+                .lines()
+                .find_map(|line| line.strip_prefix(key))
+                .unwrap_or_else(|| panic!("示例 unit 缺少 {key}"));
+            let mut arguments = line.split_whitespace().collect::<Vec<_>>();
+            arguments[0] = "auction-cli";
+            let cli = Cli::try_parse_from(&arguments).expect("示例 unit 的命令可以解析");
+            let Command::Service(service) = cli.command else {
+                panic!("应解析为 service 命令")
+            };
+            if let ServiceAction::Start { owner, .. } = service.action {
+                assert_eq!(
+                    owner.owner_secrets,
+                    std::path::Path::new("/etc/auction/owner/postgres.toml")
+                );
+            }
+        }
+    }
+
     /// `switch set --help` 是参数的权威说明：期限参数必须带说明与二选一约束。
     #[test]
     fn switch_set_help_documents_expiry() {

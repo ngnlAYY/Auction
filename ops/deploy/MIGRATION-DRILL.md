@@ -143,7 +143,8 @@ date -u +%FT%TZ
 运维按 `ceil(3 × max(measured_seconds, estimated_seconds) / 60)` 得到窗口下限，通常保留默认 60 分钟或选更大的值，并在回执记录实际选择：
 
 ```bash
-auction-cli --config-dir /etc/auction service restart --protection-window-minutes 90
+auction-cli --config-dir /etc/auction service restart \
+  --owner-secrets /etc/auction/owner/postgres.toml --protection-window-minutes 90
 ```
 
 `auction-cli service stop/restart` 只验证 1–10080 分钟的范围，不读取演练回执，也不知道三倍下限；`auction-cli deploy` 会对照回执的 `minimum_window_minutes`，`rollback` 只重新执行时段门禁。若所需下限超过范围，先停止该发布方案并重估停机安排，不能靠截断窗口或把 force 当作常规发布流程。更新 systemd 包装命令时同样由运维显式传参；省略参数仍为 60 分钟。

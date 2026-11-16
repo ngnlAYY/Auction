@@ -85,20 +85,25 @@ auction-cli --config-dir /etc/auction config check --strict
 
 ```bash
 auction-cli --config-dir /etc/auction service status
-auction-cli --config-dir /etc/auction service start --startup-timeout-seconds 30
-auction-cli --config-dir /etc/auction service restart
+auction-cli --config-dir /etc/auction service start \
+  --owner-secrets /etc/auction/owner/postgres.toml --startup-timeout-seconds 30
+auction-cli --config-dir /etc/auction service restart --owner-secrets /etc/auction/owner/postgres.toml
 auction-cli --config-dir /etc/auction service stop
 # 按演练回执设置本次窗口；默认 60 分钟
-auction-cli --config-dir /etc/auction service restart --protection-window-minutes 90
+auction-cli --config-dir /etc/auction service restart \
+  --owner-secrets /etc/auction/owner/postgres.toml --protection-window-minutes 90
 # 人工例外，原因会进入输出/journal，不能填写秘密或玩家信息
 auction-cli --config-dir /etc/auction service stop --force --reason '紧急修复主机磁盘故障'
 ```
+
+`start/restart` 必须带 `--owner-secrets`：迁移以迁移 owner 执行，即使没有待执行的迁移也要提供（缺少即参数错误，退出码 2）。该文件只供 CLI 读取（root 0600），三个运行角色不得引用；`status/stop` 不需要它。
 
 | 参数 | 默认值 |
 | --- | --- |
 | `--systemctl` | `/usr/bin/systemctl` |
 | `--state-dir`（部署控制锁目录） | `/var/lib/auction/deployment` |
 | `--worker-unit` / `--admin-unit` / `--public-unit` | `auction-worker.service` / `auction-admin-api.service` / `auction-public-api.service` |
+| `start/restart --owner-secrets <FILE>` | 必填，无默认值；迁移 owner 凭据（`[database]` 指向应用库，账号须与 `[database_roles] owner` 一致） |
 | `start/restart --startup-timeout-seconds` | 每角色 readiness 的完整预算（状态查询、探测、进程身份复核及轮询等待），默认 30 秒，范围 1–300；`systemctl start` 本身另有 90 秒上限 |
 | `stop/restart --protection-window-minutes` | 本次调用的截止保护窗口，默认 60 分钟，范围 1–10080（7 天）；运维须依据[ops/deploy/MIGRATION-DRILL.md#停机时长与窗口](../../ops/deploy/MIGRATION-DRILL.md#停机时长与窗口)设为至少实测停机时长的 3 倍 |
 | `stop/restart --force --reason <文本>` | 默认不强制；两者必须配对，原因须为 1–1024 字节、首尾无空白且不含控制字符的单行文本 |
@@ -112,7 +117,7 @@ auction-cli --config-dir /etc/auction service stop --force --reason '紧急修�
 - **status**：不取锁、不要求严格权限；输出每个 unit 的 `load_state/active_state/sub_state/main_pid` 与 readiness，任一角色未就绪即以 4 退出。配置无法加载时仍报告 systemd 状态，并在 `config_error` 中给出原因。
 - systemctl 调用均有超时（查询 10 秒、启动 90 秒、停止为 unit 的有限 `TimeoutStopUSec` + 10 秒）；超时只终止 systemctl 客户端，已提交给 systemd 的 job 可能仍在执行，须重新查看状态。
 
-[ops/deploy/systemd/auction-stack.service.example](../../ops/deploy/systemd/auction-stack.service.example) 把 `service start/stop` 包装为 oneshot unit，用于开机按顺序拉起。
+[ops/deploy/systemd/auction-stack.service.example](../../ops/deploy/systemd/auction-stack.service.example) 把 `service start/stop` 包装为 oneshot unit，用于开机按顺序拉起；它的 `ExecStart` 同样带 `--owner-secrets /etc/auction/owner/postgres.toml`。
 
 ### 部署回执
 
