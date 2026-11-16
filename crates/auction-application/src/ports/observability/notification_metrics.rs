@@ -6,6 +6,8 @@
 
 use std::time::Duration;
 
+use crate::ports::delivery::DELIVERY_PREFLIGHT_TIMEOUT;
+
 /// 出站通知种类闭集；label 使用冻结的模板键或通知身份名。
 ///
 /// 每个变体都必须出现在 `docs/guide/mail-flows.md` 的“通知目录”表中，
@@ -238,7 +240,7 @@ impl NotificationFailure {
             "recipient_is_sender" => Self::RecipientIsSender,
             "write_unknown" => Self::WriteUnknown,
             "preflight_unproven" => Self::ProtocolDrift,
-            "preflight_timeout" | "preflight_blocked" => Self::PreflightBlocked,
+            DELIVERY_PREFLIGHT_TIMEOUT | "preflight_blocked" => Self::PreflightBlocked,
             "lease_expired" | "lease_expired_outcome_unknown" => Self::LeaseExpiredOutcomeUnknown,
             "invalid_payload" => Self::InvalidPayload,
             "protocol_drift" => Self::ProtocolDrift,
