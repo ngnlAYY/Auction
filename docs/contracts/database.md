@@ -354,6 +354,30 @@ COMMIT 报告的 SSI 冲突不推测为序号热点。
 使升级前写入的冻结快照继续成立。等级登记 `breaking`：新列会出现在整行 JSON 中，单独回退到
 旧程序会让这些证明失败关闭。
 
+## 履约进度读路径
+
+`crates/auction-storage/src/database/public/fulfillment/` 是 Public 履约进度 SQL 的唯一 owner；应用端口为
+`PublicFulfillmentReader`，闭集状态由应用层 `public_fulfillment_view`
+（`crates/auction-application/src/ports/public/fulfillment/status.rs`）判定，HTTP 只把状态映射为 wire 字符串
+（契约见[docs/contracts/routes.md#履约进度](routes.md#履约进度)）。存储只取事实，不做任何状态判定。
+
+一次读取在同一 `REPEATABLE READ, READ ONLY` 快照内依次取得：场次与快照读取时刻（`now()`，付款逾期按它
+判定）、可见 lot 总数、本页 lot 事实、本页 lot 的全部结算义务。可见集合固定为 `auctions.status = 'settled'`，
+可见性与竞价日志相同（`JOIN public.worlds AS w ON w.id = a.world_id AND (w.enabled OR a.status = 'settled')`），
+只含 `lots.status IN ('sold', 'unsold')`，撤拍 lot 不出现；排序 `lots.lot_number, lots.id`；lot 代码筛选与
+竞价日志共用 `public_lot_code_sql!`（`crates/auction-storage/src/database/public/lot_code.rs`），total 与本页复用
+同一条件。
+
+本页事实只选判定与展示需要的列：`lots`、`equipment`、`auction_submissions.seller`（卖家名）、`users.username`
+（买家当前用户名）、`lot_settlements.end_price`（缺行即无法判定）、`settlement_equipment_losses` 是否存在、
+`settlement_recoveries` 的阶段、撤销结论、付款期限、COD 退回计数与冻结上限、阻断码（只作判定输入），以及
+人工对账投递与重挂目标是否存在；义务按 `(auction_id, lot_id, obligation_kind)` 唯一键读取
+`settlement_obligations.business_state`、履约 `execution_state` 与关联投递 `status` 原值。不读取投递、履约、
+命令与邮件标识、失败码、证明与资金字段，也不连接代理授权表。未知原值由应用层让整页失败关闭。
+
+只读页面不新增迁移：lot 走 `lots_auction_status_idx`，义务走 `(auction_id, lot_id, obligation_kind)` 唯一约束
+索引，其余连接都按主键或唯一键；运行账号对 public schema 已有 SELECT（迁移 `000081`）。
+
 ## 并发形状与唤醒
 
 - **序号热点**：竞价事件不再在出价事务内递增共享的 `realtime_streams` 行，而是与事实同事务写入

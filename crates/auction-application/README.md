@@ -22,7 +22,7 @@
 | --- | --- |
 | [crates/auction-application/src/ports/core](src/ports/core) | `Clock`、`RequestHash`/`StoredCommand`（幂等账本）、事务策略与按场次写队列、仓储错误、稳定编码、有界分页窗口、CLI 操作者身份 |
 | [crates/auction-application/src/ports/auction](src/ports/auction) | 公开查询、竞价命令、生命周期、慢速代理到期、冻结的策略模板 |
-| [crates/auction-application/src/ports/public](src/ports/public) · [admin](src/ports/admin) | 公开端规则/黑名单/补偿池/会话；Admin 拍卖与 lot 管理、装备录入、邮件状态、规则、runtime 配置、凭据、用户、世界、审计 |
+| [crates/auction-application/src/ports/public](src/ports/public) · [admin](src/ports/admin) | 公开端规则/黑名单/补偿池/履约进度（`public/fulfillment/` 的事实模型与闭集状态判定 `public_fulfillment_view`）/会话；Admin 拍卖与 lot 管理、装备录入、邮件状态、规则、runtime 配置、凭据、用户、世界、审计 |
 | [crates/auction-application/src/ports/mail](src/ports/mail) · [delivery](src/ports/delivery) | 邮件轮询/处理/维护与诊断；投递 outbox、发送节奏、Admin 投递证据与动作守卫 |
 | [crates/auction-application/src/ports/settlement](src/ports/settlement) · [recovery](src/ports/recovery) · [forum](src/ports/forum) | 结算命令与履约、资金证据、报表；付款超时恢复；论坛同步、回帖导入、私信 |
 | [crates/auction-application/src/ports/observability](src/ports/observability) | SLI 快照、影子运行共享契约、Sent 发送基线、通知与外发指标闭集 |

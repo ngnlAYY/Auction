@@ -84,7 +84,7 @@ COD 实收路径的 `stage` 集合（`transaction_*`、`runtime_generation`、`w
 | --- | --- |
 | 基础 | [store.rs](src/database/store.rs)、[pool](src/database/pool)、[backend.rs](src/database/backend.rs)、[migrations](src/database/migrations)（含运维只读证据共用的迁移历史与 schema 身份读取 `evidence.rs`）、[profiles](src/database/profiles) |
 | 命令组合 | [commands](src/database/commands)（竞价、生命周期与 Admin 邮件/规则/runtime 命令组合器） |
-| 拍卖与公开读 | [auction](src/database/auction)（竞价事务、排期、慢速代理、录入目标、密钥信封；`snapshot.rs` 是 SettlementAuctionSnapshot 的唯一行投影）、[public](src/database/public)（拍卖/lot/历史/黑名单/补偿池/世界/规则） |
+| 拍卖与公开读 | [auction](src/database/auction)（竞价事务、排期、慢速代理、录入目标、密钥信封；`snapshot.rs` 是 SettlementAuctionSnapshot 的唯一行投影）、[public](src/database/public)（拍卖/lot/历史/黑名单/补偿池/履约进度/世界/规则；`lot_code.rs` 是竞价日志与履约进度共用的公开 lot 代码 SQL 片段） |
 | Admin 与账户 | [admin](src/database/admin)、[accounts](src/database/accounts)（外部凭据、用户与登录会话） |
 | 结算与资金 | [settlement](src/database/settlement)（现金账本、履约、调度、报表、策略、目录与补偿冲正） |
 | 投递与恢复 | [delivery](src/database/delivery)（outbox、发送围栏、处置事实、装备损失、人工 Sent）、[recovery](src/database/recovery) |
