@@ -23,7 +23,8 @@
 //! 恢复可见、看板对齐重读与错误重试、会话变化，以及竞价与代理命令得到服务端答复（成功或被拒绝）；
 //! 只推进页面刷新代号而不失效时，TTL 内的读取直接命中新鲜条目，不会回到服务端。命令答复后的失效另把回退下限推进到
 //! 新修订号：用户刚提交的命令之后，读视图只显示权威结果或错误，不退回命令之前的价格与领先者；
-//! 他人竞价等事件触发的普通失效仍允许繁忙时先显示最后已知快照。
+//! 回退资格在失败返回时按当时最新的下限判定，命令答复发生在重读在途期间同样生效。他人竞价等
+//! 事件触发的普通失效仍允许繁忙时先显示最后已知快照。
 
 use std::any::Any;
 use std::cell::{Cell, RefCell};
@@ -173,8 +174,8 @@ struct CachedEntry<T> {
     stored_at_millis: u64,
     /// 条目在当前修订号下写入或确认；失效后为 false。
     current: bool,
-    /// 条目不早于最近一次命令答复，暂时性失败时可作为回退值。
-    fallback_allowed: bool,
+    /// 条目写入或最近一次确认时的修订号；能否作为暂时性失败的回退值见 [`fallback_allowed`]。
+    revision: u64,
 }
 
 /// 判断完整 URL 是否属于允许缓存的公开只读 GET。
@@ -290,9 +291,10 @@ where
             }
             // 传输失败或服务端暂时拒绝时，旧值仍是最近一次已验证投影：继续展示并标明是回退及其
             // 确认时刻，由调用方决定是否稍后再读或提示；不刷新写入时间，也不把条目标回新鲜。
-            // 条目早于最近一次命令答复时不回退，按失败返回，避免命令之后显示命令之前的快照。
+            // 条目早于最近一次命令答复时不回退，按失败返回，避免命令之后显示命令之前的快照；
+            // 下限可能在本次请求在途期间被命令答复推进，必须在此刻重新判定，不能沿用请求前的结论。
             FetchOutcome::Transport(error) | FetchOutcome::Busy(error) => {
-                if entry.fallback_allowed {
+                if fallback_allowed(entry.revision) {
                     Ok(CacheRead {
                         value: entry.value,
                         stale_fallback: Some(entry.stored_at_millis),
@@ -341,6 +343,11 @@ fn current_revision() -> u64 {
     STORE.with(|store| store.borrow().revision)
 }
 
+/// 修订号为 `revision` 的条目此刻能否作为暂时性失败的回退值：不早于最近一次命令答复推进的下限。
+fn fallback_allowed(revision: u64) -> bool {
+    STORE.with(|store| revision >= store.borrow().fallback_floor)
+}
+
 fn lookup<T: Clone + 'static>(url: &str) -> Option<CachedEntry<T>> {
     STORE.with(|store| {
         let store = store.borrow();
@@ -351,7 +358,7 @@ fn lookup<T: Clone + 'static>(url: &str) -> Option<CachedEntry<T>> {
             etag: entry.etag.clone(),
             stored_at_millis: entry.stored_at_millis,
             current: entry.revision == store.revision,
-            fallback_allowed: entry.revision >= store.fallback_floor,
+            revision: entry.revision,
         })
     })
 }
@@ -871,6 +878,56 @@ mod tests {
             Ok("v1")
         );
         assert_eq!(calls.get(), 5);
+    }
+
+    /// 普通失效后重读在途期间，竞价/代理命令得到答复并推进回退下限：重读随后以暂时性失败结束时，
+    /// 必须按最新下限重新判定，不得回退到命令之前的快照；对照组在途期间只有普通失效，照常回退。
+    #[test]
+    fn command_reply_during_an_inflight_reread_forbids_the_pre_command_fallback() {
+        for (busy, command_reply) in [(true, true), (false, true), (true, false)] {
+            reset();
+            let url = "/api/v1/lots/00000000-0000-0000-0000-000000000012";
+            let now = Cell::new(110_000);
+            let calls = Cell::new(0);
+            assert_eq!(
+                call(url, &now, LIVE_TTL_MILLIS, &calls, |_| changed("v-before", Some("etag-1"))),
+                Ok("v-before")
+            );
+            // 他人竞价等普通失效：重读开始时这份快照仍允许作为回退值。
+            invalidate_all();
+            let gate = Rc::new(RefCell::new(None));
+            let fetch_gate = Rc::clone(&gate);
+            let mut reread = Box::pin(read_or_fetch(
+                url,
+                LIVE_TTL_MILLIS,
+                || now.get(),
+                |etag| {
+                    assert_eq!(etag.as_deref(), Some("etag-1"));
+                    Gate(fetch_gate)
+                },
+            ));
+            assert!(poll_once(reread.as_mut()).is_pending());
+            if command_reply {
+                // 重读在途期间用户命令得到答复。
+                invalidate_after_command();
+            } else {
+                invalidate_all();
+            }
+            *gate.borrow_mut() = Some(if busy {
+                FetchOutcome::Busy("read_busy")
+            } else {
+                FetchOutcome::Transport("network_error")
+            });
+            let read = match poll_once(reread.as_mut()) {
+                Poll::Ready(read) => read.map(|cached| (cached.value, cached.stale_fallback)),
+                Poll::Pending => panic!("放行后重读必须结束"),
+            };
+            if command_reply {
+                assert_eq!(read, Err(if busy { "read_busy" } else { "network_error" }));
+            } else {
+                assert_eq!(read, Ok(("v-before", Some(110_000))));
+            }
+        }
     }
 
     /// 命令前已在途、命令答复后才写回的响应早于回退下限：仍可条件请求，但不作为回退值。
