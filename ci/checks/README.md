@@ -2,7 +2,7 @@
 
 [ci/README.md](../README.md) · [docs/development.md](../../docs/development.md)
 
-[ci/checks/check.sh](check.sh) 是本地与 CI 的共同入口。`all` 包含仓库契约、公开仓库脱敏、目录布局、配置示例、systemd 模板、翻译键、装备诊断闭集、源码计数棘轮、审计写入失败分类、模块层级、Markdown 链接、迁移兼容登记与已发布迁移不可变检查；完整清单见 [ci/README.md#静态门禁cicheckschecksh](../README.md#静态门禁cicheckschecksh)。`just verify` 先运行 `all`，再执行格式、编译、feature、依赖版本与 Clippy/WASM 检查，不运行行为测试。
+[ci/checks/check.sh](check.sh) 是本地与 CI 的共同入口。`all` 包含仓库契约、公开仓库脱敏、目录布局、配置示例、systemd 模板、翻译键、装备诊断闭集、源码计数棘轮、审计写入失败分类、模块层级、Markdown 链接、迁移兼容登记与已发布迁移不可变检查；完整清单见 [ci/README.md#静态门禁cicheckschecksh](../README.md#静态门禁cicheckschecksh)。`just verify` 等价于 `bash ci/checks/check.sh all fmt check dependency-versions lint wasm rustdoc`：先运行 `all`，再依次执行格式、宿主默认 feature 编译、依赖版本、宿主全 feature Clippy、Public/Admin 两组 wasm32 Clippy 与 rustdoc 检查，不运行行为测试。
 
 ## 公开仓库脱敏
 
