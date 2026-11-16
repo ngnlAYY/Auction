@@ -20,19 +20,19 @@ use uuid::Uuid;
 use super::super::fixture::{Sale, SaleSpec, insert_reclaiming_sale};
 
 /// 资金账户与证据身份共用的认证 UID。
-pub(super) const FUNDING_UID: &str = "7003";
+pub(crate) const FUNDING_UID: &str = "7003";
 
 /// 改写后的成交与本轮收回身份。
-pub(super) struct Recovered {
-    pub(super) sale: Sale,
-    pub(super) handoff: Uuid,
-    pub(super) handoff_delivery: Uuid,
-    pub(super) take_delivery: Uuid,
-    pub(super) lot_id: Uuid,
+pub(crate) struct Recovered {
+    pub(crate) sale: Sale,
+    pub(crate) handoff: Uuid,
+    pub(crate) handoff_delivery: Uuid,
+    pub(crate) take_delivery: Uuid,
+    pub(crate) lot_id: Uuid,
 }
 
 /// 写入 isekai 已付款、交付被退回且装备已收回的成交；`sequence` 区分外部 ID。
-pub(super) async fn insert_recovered_sale(pool: &PgPool, sequence: i64) -> Recovered {
+pub(crate) async fn insert_recovered_sale(pool: &PgPool, sequence: i64) -> Recovered {
     let sale = insert_reclaiming_sale(
         pool,
         SaleSpec {
@@ -211,7 +211,7 @@ pub(super) async fn insert_recovered_sale(pool: &PgPool, sequence: i64) -> Recov
 }
 
 /// isekai 草稿接收场次（届次与成交场次错开）：确认后装备直接重列，恢复记录进入 `refunding`。
-pub(super) async fn insert_relist_target(pool: &PgPool, sequence: i64) {
+pub(crate) async fn insert_relist_target(pool: &PgPool, sequence: i64) {
     let auction = Uuid::new_v4();
     let at = Utc::now() - Duration::hours(1);
     let mut transaction = pool.begin().await.expect("开启草稿目标事务");
@@ -242,7 +242,7 @@ pub(super) async fn insert_relist_target(pool: &PgPool, sequence: i64) {
 
 /// 记账模式的资金账户与该成交的资金化事实（卖方用途 100、税 0），以及证据事务所需的邮件运行时
 /// generation 与 active 共享邮件凭据；返回凭据 ID。
-pub(super) async fn insert_funding(pool: &PgPool, recovered: &Recovered) -> Uuid {
+pub(crate) async fn insert_funding(pool: &PgPool, recovered: &Recovered) -> Uuid {
     sqlx::query(
         "INSERT INTO public.settlement_funding_accounts (uid, status, state_version, accounting_mode)
          VALUES ($1, 'ready', 1, 'record_only')",
@@ -304,7 +304,7 @@ pub(super) async fn insert_funding(pool: &PgPool, recovered: &Recovered) -> Uuid
 
 /// 绑定当前 claim 与指定操作身份的 opaque 证据：同一认证账号在 Main 的身份，加上同账号在 isekai
 /// 对该装备的 organize 正向观察；记账模式不观察余额。
-pub(super) fn evidence(
+pub(crate) fn evidence(
     operation_id: Uuid,
     claim: &SettlementFulfillmentClaim,
     credential_id: Uuid,

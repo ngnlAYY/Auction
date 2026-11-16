@@ -28,7 +28,10 @@ pub(crate) use internal::{assetless_mail_notification, exclude_equipment_loss_co
 mod mapping;
 mod reconcile;
 mod recovery_closure;
-pub(crate) use recovery_closure::equipment_recovered_closure_sql;
+pub(crate) use recovery_closure::{
+    equipment_recovered_closure_sql, recovery_closed_fulfillment_sql,
+    recovery_disposed_delivery_sql,
+};
 mod returns;
 pub(crate) use returns::{consume_return_postgres, system_settlement_return_source};
 mod sent_lookup;

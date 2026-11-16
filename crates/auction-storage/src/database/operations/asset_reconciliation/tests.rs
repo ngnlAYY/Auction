@@ -251,11 +251,19 @@ async fn postgres_solvency_query_decodes_numeric_sum_as_i64()
          );
          CREATE TEMP TABLE settlement_obligation_fulfillments (
             obligation_id uuid, execution_state text, dispatch_world text, delivery_id uuid,
-            delivery_operation text
+            delivery_operation text, last_error_code text
          );
          CREATE TEMP TABLE deliveries (
             id uuid, status text, payload_operation text, payload_world text,
-            completed_at timestamptz
+            completed_at timestamptz, fencing_version bigint
+         );
+         CREATE TEMP TABLE settlement_recoveries (
+            id uuid, equipment_id uuid, resolution text, stage text, relisted_lot_id uuid,
+            payment_obligation_id uuid, equipment_obligation_id uuid,
+            seller_payout_obligation_id uuid
+         );
+         CREATE TEMP TABLE delivery_dispositions (
+            delivery_id uuid, fencing_version bigint, kind text, settlement_recovery_id uuid
          );
          CREATE TEMP TABLE settlement_funding_allocations (
             delivery_id uuid, obligation_id uuid, state text
@@ -360,11 +368,19 @@ async fn postgres_solvency_in_transit_aligns_with_balance_observation()
          );
          CREATE TEMP TABLE settlement_obligation_fulfillments (
             obligation_id uuid, execution_state text, dispatch_world text, delivery_id uuid,
-            delivery_operation text
+            delivery_operation text, last_error_code text
          );
          CREATE TEMP TABLE deliveries (
             id uuid, status text, payload_operation text, payload_world text,
-            completed_at timestamptz
+            completed_at timestamptz, fencing_version bigint
+         );
+         CREATE TEMP TABLE settlement_recoveries (
+            id uuid, equipment_id uuid, resolution text, stage text, relisted_lot_id uuid,
+            payment_obligation_id uuid, equipment_obligation_id uuid,
+            seller_payout_obligation_id uuid
+         );
+         CREATE TEMP TABLE delivery_dispositions (
+            delivery_id uuid, fencing_version bigint, kind text, settlement_recovery_id uuid
          );
          CREATE TEMP TABLE settlement_funding_allocations (
             delivery_id uuid, obligation_id uuid, state text
@@ -509,12 +525,22 @@ async fn postgres_custody_counts_separate_expected_stock_and_unknown()
             id uuid, equipment_id uuid, obligation_kind text, submission_id uuid
          );
          CREATE TEMP TABLE settlement_obligation_fulfillments (
-            obligation_id uuid, execution_state text, delivery_id uuid, delivery_operation text
+            obligation_id uuid, execution_state text, delivery_id uuid, delivery_operation text,
+            last_error_code text
          );
          CREATE TEMP TABLE auctions (id uuid, status text, world_id text);
          CREATE TEMP TABLE auction_preview_items (auction_id uuid, equipment_id uuid);
          CREATE TEMP TABLE auction_submissions (id uuid, auction_id uuid, source_reference text);
-         CREATE TEMP TABLE deliveries (id uuid, status text, payload jsonb);
+         CREATE TEMP TABLE deliveries (id uuid, status text, payload jsonb, fencing_version bigint);
+         CREATE TEMP TABLE settlement_recoveries (
+            id uuid, equipment_id uuid, resolution text, stage text, relisted_lot_id uuid,
+            payment_obligation_id uuid, equipment_obligation_id uuid,
+            seller_payout_obligation_id uuid
+         );
+         CREATE TEMP TABLE delivery_dispositions (
+            delivery_id uuid, fencing_version bigint, kind text, settlement_recovery_id uuid
+         );
+         CREATE TEMP TABLE lots (id uuid, auction_id uuid, status text);
          INSERT INTO pg_temp.equipment VALUES
             ('00000000-0000-0000-0000-000000000001','main','100'),
             ('00000000-0000-0000-0000-000000000002','main','200');
@@ -555,12 +581,22 @@ async fn postgres_custody_scopes_preview_and_submission_samples_by_world()
             id uuid, equipment_id uuid, obligation_kind text, submission_id uuid
          );
          CREATE TEMP TABLE settlement_obligation_fulfillments (
-            obligation_id uuid, execution_state text, delivery_id uuid, delivery_operation text
+            obligation_id uuid, execution_state text, delivery_id uuid, delivery_operation text,
+            last_error_code text
          );
          CREATE TEMP TABLE auctions (id uuid, status text, world_id text);
          CREATE TEMP TABLE auction_preview_items (auction_id uuid, equipment_id uuid);
          CREATE TEMP TABLE auction_submissions (id uuid, auction_id uuid, source_reference text);
-         CREATE TEMP TABLE deliveries (id uuid, status text, payload jsonb);
+         CREATE TEMP TABLE deliveries (id uuid, status text, payload jsonb, fencing_version bigint);
+         CREATE TEMP TABLE settlement_recoveries (
+            id uuid, equipment_id uuid, resolution text, stage text, relisted_lot_id uuid,
+            payment_obligation_id uuid, equipment_obligation_id uuid,
+            seller_payout_obligation_id uuid
+         );
+         CREATE TEMP TABLE delivery_dispositions (
+            delivery_id uuid, fencing_version bigint, kind text, settlement_recovery_id uuid
+         );
+         CREATE TEMP TABLE lots (id uuid, auction_id uuid, status text);
          INSERT INTO pg_temp.equipment VALUES
             ('00000000-0000-0000-0000-000000000001','main','100'),
             ('00000000-0000-0000-0000-000000000002','main','200'),
@@ -630,12 +666,22 @@ async fn postgres_custody_excludes_withdrawn_submissions_after_return()
             id uuid, equipment_id uuid, obligation_kind text, submission_id uuid
          );
          CREATE TEMP TABLE settlement_obligation_fulfillments (
-            obligation_id uuid, execution_state text, delivery_id uuid, delivery_operation text
+            obligation_id uuid, execution_state text, delivery_id uuid, delivery_operation text,
+            last_error_code text
          );
          CREATE TEMP TABLE auctions (id uuid, status text, world_id text);
          CREATE TEMP TABLE auction_preview_items (auction_id uuid, equipment_id uuid);
          CREATE TEMP TABLE auction_submissions (id uuid, auction_id uuid, source_reference text);
-         CREATE TEMP TABLE deliveries (id uuid, status text, payload jsonb);
+         CREATE TEMP TABLE deliveries (id uuid, status text, payload jsonb, fencing_version bigint);
+         CREATE TEMP TABLE settlement_recoveries (
+            id uuid, equipment_id uuid, resolution text, stage text, relisted_lot_id uuid,
+            payment_obligation_id uuid, equipment_obligation_id uuid,
+            seller_payout_obligation_id uuid
+         );
+         CREATE TEMP TABLE delivery_dispositions (
+            delivery_id uuid, fencing_version bigint, kind text, settlement_recovery_id uuid
+         );
+         CREATE TEMP TABLE lots (id uuid, auction_id uuid, status text);
          INSERT INTO pg_temp.equipment VALUES
             ('00000000-0000-0000-0000-000000000001','main','900'),
             ('00000000-0000-0000-0000-000000000002','main','901');
@@ -701,12 +747,22 @@ async fn postgres_custody_delivery_branch_reads_canonical_attachment_kind()
             id uuid, equipment_id uuid, obligation_kind text, submission_id uuid
          );
          CREATE TEMP TABLE settlement_obligation_fulfillments (
-            obligation_id uuid, execution_state text, delivery_id uuid, delivery_operation text
+            obligation_id uuid, execution_state text, delivery_id uuid, delivery_operation text,
+            last_error_code text
          );
          CREATE TEMP TABLE auctions (id uuid, status text, world_id text);
          CREATE TEMP TABLE auction_preview_items (auction_id uuid, equipment_id uuid);
          CREATE TEMP TABLE auction_submissions (id uuid, auction_id uuid, source_reference text);
-         CREATE TEMP TABLE deliveries (id uuid, status text, payload jsonb);
+         CREATE TEMP TABLE deliveries (id uuid, status text, payload jsonb, fencing_version bigint);
+         CREATE TEMP TABLE settlement_recoveries (
+            id uuid, equipment_id uuid, resolution text, stage text, relisted_lot_id uuid,
+            payment_obligation_id uuid, equipment_obligation_id uuid,
+            seller_payout_obligation_id uuid
+         );
+         CREATE TEMP TABLE delivery_dispositions (
+            delivery_id uuid, fencing_version bigint, kind text, settlement_recovery_id uuid
+         );
+         CREATE TEMP TABLE lots (id uuid, auction_id uuid, status text);
          INSERT INTO pg_temp.equipment VALUES
             ('00000000-0000-0000-0000-000000000001','main','100'),
             ('00000000-0000-0000-0000-000000000002','main','200'),
@@ -789,12 +845,22 @@ async fn postgres_custody_moves_sent_equipment_to_in_transit()
             id uuid, equipment_id uuid, obligation_kind text, submission_id uuid
          );
          CREATE TEMP TABLE settlement_obligation_fulfillments (
-            obligation_id uuid, execution_state text, delivery_id uuid, delivery_operation text
+            obligation_id uuid, execution_state text, delivery_id uuid, delivery_operation text,
+            last_error_code text
          );
          CREATE TEMP TABLE auctions (id uuid, status text, world_id text);
          CREATE TEMP TABLE auction_preview_items (auction_id uuid, equipment_id uuid);
          CREATE TEMP TABLE auction_submissions (id uuid, auction_id uuid, source_reference text);
-         CREATE TEMP TABLE deliveries (id uuid, status text, payload jsonb);
+         CREATE TEMP TABLE deliveries (id uuid, status text, payload jsonb, fencing_version bigint);
+         CREATE TEMP TABLE settlement_recoveries (
+            id uuid, equipment_id uuid, resolution text, stage text, relisted_lot_id uuid,
+            payment_obligation_id uuid, equipment_obligation_id uuid,
+            seller_payout_obligation_id uuid
+         );
+         CREATE TEMP TABLE delivery_dispositions (
+            delivery_id uuid, fencing_version bigint, kind text, settlement_recovery_id uuid
+         );
+         CREATE TEMP TABLE lots (id uuid, auction_id uuid, status text);
          INSERT INTO pg_temp.equipment VALUES
             ('00000000-0000-0000-0000-000000000001','main','100'),
             ('00000000-0000-0000-0000-000000000002','main','200'),
@@ -909,6 +975,188 @@ async fn postgres_custody_moves_sent_equipment_to_in_transit()
     assert_eq!(samples.get("600").map(String::as_str), Some("obligation_unsold_return"));
     assert_eq!(samples.get("700").map(String::as_str), Some("obligation_unsold_return"));
     assert_eq!(samples.len(), 3, "在途与在途待核对装备不得出现在缺失样本中");
+    tx.rollback().await?;
+    Ok(())
+}
+
+/// 恢复收口：原投递**当前 fence** 上有恢复来源的权威处置、且义务是该恢复记录的付款或交付义务时，
+/// 装备已由恢复收回，不再列为在途或在途待核对；处置落在旧 fence、角色对不上或只是普通处置时
+/// 仍按寄出事实列为在途待核对。恢复记录的去向分支只计入收回待重列与重列到草稿场次的装备；
+/// 被恢复收口终结、从未寄出的原义务不再重复计入，退回卖家与已重列进入后续场次的不在此列。
+#[tokio::test]
+#[ignore = "需要 AUCTION_TEST_DATABASE_URL 指向隔离的 PostgreSQL 18"]
+async fn postgres_custody_counts_recovered_equipment_where_recovery_placed_it()
+-> Result<(), Box<dyn std::error::Error>> {
+    use sqlx::{Connection, Executor, Row};
+    let url = std::env::var("AUCTION_TEST_DATABASE_URL")?;
+    let mut connection = sqlx::PgConnection::connect(&url).await?;
+    let mut tx = connection.begin().await?;
+    tx.execute(
+        "CREATE TEMP TABLE equipment (id uuid, world_id text, external_equipment_id text);
+         CREATE TEMP TABLE settlement_obligations (
+            id uuid, equipment_id uuid, obligation_kind text, submission_id uuid
+         );
+         CREATE TEMP TABLE settlement_obligation_fulfillments (
+            obligation_id uuid, execution_state text, delivery_id uuid, delivery_operation text,
+            last_error_code text
+         );
+         CREATE TEMP TABLE auctions (id uuid, status text, world_id text);
+         CREATE TEMP TABLE auction_preview_items (auction_id uuid, equipment_id uuid);
+         CREATE TEMP TABLE auction_submissions (id uuid, auction_id uuid, source_reference text);
+         CREATE TEMP TABLE deliveries (id uuid, status text, payload jsonb, fencing_version bigint);
+         CREATE TEMP TABLE settlement_recoveries (
+            id uuid, equipment_id uuid, resolution text, stage text, relisted_lot_id uuid,
+            payment_obligation_id uuid, equipment_obligation_id uuid,
+            seller_payout_obligation_id uuid
+         );
+         CREATE TEMP TABLE delivery_dispositions (
+            delivery_id uuid, fencing_version bigint, kind text, settlement_recovery_id uuid
+         );
+         CREATE TEMP TABLE lots (id uuid, auction_id uuid, status text);
+         INSERT INTO pg_temp.equipment VALUES
+            ('00000000-0000-0000-0000-000000000001','main','101'),
+            ('00000000-0000-0000-0000-000000000002','main','102'),
+            ('00000000-0000-0000-0000-000000000003','main','103'),
+            ('00000000-0000-0000-0000-000000000004','main','104'),
+            ('00000000-0000-0000-0000-000000000005','main','105'),
+            ('00000000-0000-0000-0000-000000000006','main','106'),
+            ('00000000-0000-0000-0000-000000000007','main','107'),
+            ('00000000-0000-0000-0000-000000000008','main','108');
+         -- 101 三次退回已退回卖家并被领取；102 处置落在旧 fence；103 已付款交付被收回、重列
+         -- 到已结算场次；104 处置来源恢复记录的付款义务不是它；105 只有 Admin 判失败处置；
+         -- 106 收回后待重列；107 从未寄出、被取消收口且已重列到草稿场次；108 取消后待重列，
+         -- 原交付从未寄出。
+         INSERT INTO pg_temp.settlement_obligations VALUES
+            ('00000000-0000-0000-0000-000000000011','00000000-0000-0000-0000-000000000001','winner_equipment_cod',NULL),
+            ('00000000-0000-0000-0000-000000000012','00000000-0000-0000-0000-000000000002','winner_equipment_cod',NULL),
+            ('00000000-0000-0000-0000-000000000013','00000000-0000-0000-0000-000000000003','winner_equipment_handoff',NULL),
+            ('00000000-0000-0000-0000-000000000014','00000000-0000-0000-0000-000000000004','unsold_return',NULL),
+            ('00000000-0000-0000-0000-000000000015','00000000-0000-0000-0000-000000000005','winner_equipment_cod',NULL),
+            ('00000000-0000-0000-0000-000000000016','00000000-0000-0000-0000-000000000006','winner_equipment_cod',NULL),
+            ('00000000-0000-0000-0000-000000000017','00000000-0000-0000-0000-000000000007','winner_equipment_handoff',NULL),
+            ('00000000-0000-0000-0000-000000000018','00000000-0000-0000-0000-000000000008','winner_equipment_handoff',NULL);
+         INSERT INTO pg_temp.settlement_obligation_fulfillments VALUES
+            ('00000000-0000-0000-0000-000000000011','failed','00000000-0000-0000-0000-000000001001','send','cod_returned_three_times'),
+            ('00000000-0000-0000-0000-000000000012','failed','00000000-0000-0000-0000-000000001002','send','recovery_reclaimed'),
+            ('00000000-0000-0000-0000-000000000013','failed','00000000-0000-0000-0000-000000001003','send','recovery_equipment_recovered'),
+            ('00000000-0000-0000-0000-000000000014','failed','00000000-0000-0000-0000-000000001004','send','send_rejected'),
+            ('00000000-0000-0000-0000-000000000015','failed','00000000-0000-0000-0000-000000001005','send','verified_not_sent'),
+            ('00000000-0000-0000-0000-000000000016','failed','00000000-0000-0000-0000-000000001006','send','recovery_reclaimed'),
+            ('00000000-0000-0000-0000-000000000017','failed',NULL,'send','recovery_sale_voided'),
+            ('00000000-0000-0000-0000-000000000018','failed',NULL,'send','recovery_sale_voided');
+         INSERT INTO pg_temp.deliveries VALUES
+            ('00000000-0000-0000-0000-000000001001','succeeded','{}',2),
+            ('00000000-0000-0000-0000-000000001002','succeeded','{}',3),
+            ('00000000-0000-0000-0000-000000001003','succeeded','{}',1),
+            ('00000000-0000-0000-0000-000000001004','succeeded','{}',1),
+            ('00000000-0000-0000-0000-000000001005','succeeded','{}',1),
+            ('00000000-0000-0000-0000-000000001006','succeeded','{}',1),
+            ('00000000-0000-0000-0000-000000001007','succeeded','{}',1);
+         INSERT INTO pg_temp.auctions VALUES
+            ('00000000-0000-0000-0000-000000000031','settled','main'),
+            ('00000000-0000-0000-0000-000000000032','draft','main');
+         INSERT INTO pg_temp.lots VALUES
+            ('00000000-0000-0000-0000-000000000041','00000000-0000-0000-0000-000000000031','sold'),
+            ('00000000-0000-0000-0000-000000000042','00000000-0000-0000-0000-000000000032','pending');
+         INSERT INTO pg_temp.settlement_recoveries VALUES
+            ('00000000-0000-0000-0000-000000000021','00000000-0000-0000-0000-000000000001',
+             'returned_after_three_cod_returns','completed',NULL,
+             '00000000-0000-0000-0000-000000000011',NULL,'00000000-0000-0000-0000-000000000091'),
+            ('00000000-0000-0000-0000-000000000022','00000000-0000-0000-0000-000000000002',
+             'reclaimed','completed','00000000-0000-0000-0000-000000000041',
+             '00000000-0000-0000-0000-000000000012',NULL,'00000000-0000-0000-0000-000000000092'),
+            ('00000000-0000-0000-0000-000000000023','00000000-0000-0000-0000-000000000003',
+             'equipment_recovered','completed','00000000-0000-0000-0000-000000000041',
+             '00000000-0000-0000-0000-000000000083','00000000-0000-0000-0000-000000000013',
+             '00000000-0000-0000-0000-000000000093'),
+            ('00000000-0000-0000-0000-000000000024','00000000-0000-0000-0000-000000000004',
+             'reclaimed','completed','00000000-0000-0000-0000-000000000041',
+             '00000000-0000-0000-0000-000000000084',NULL,'00000000-0000-0000-0000-000000000094'),
+            ('00000000-0000-0000-0000-000000000026','00000000-0000-0000-0000-000000000006',
+             'reclaimed','relist_pending',NULL,
+             '00000000-0000-0000-0000-000000000016',NULL,'00000000-0000-0000-0000-000000000096'),
+            ('00000000-0000-0000-0000-000000000027','00000000-0000-0000-0000-000000000007',
+             'cancelled','completed','00000000-0000-0000-0000-000000000042',
+             '00000000-0000-0000-0000-000000000087','00000000-0000-0000-0000-000000000017',
+             '00000000-0000-0000-0000-000000000097'),
+            ('00000000-0000-0000-0000-000000000028','00000000-0000-0000-0000-000000000008',
+             'cancelled','relist_pending',NULL,
+             '00000000-0000-0000-0000-000000000088','00000000-0000-0000-0000-000000000018',
+             '00000000-0000-0000-0000-000000000098');
+         INSERT INTO pg_temp.deliveries VALUES
+            ('00000000-0000-0000-0000-000000001087','succeeded','{}',1),
+            ('00000000-0000-0000-0000-000000001088','succeeded','{}',1);
+         INSERT INTO pg_temp.delivery_dispositions VALUES
+            ('00000000-0000-0000-0000-000000001001',2,'cod_returned','00000000-0000-0000-0000-000000000021'),
+            ('00000000-0000-0000-0000-000000001002',2,'cod_returned','00000000-0000-0000-0000-000000000022'),
+            ('00000000-0000-0000-0000-000000001003',1,'recovery_equipment_recovered','00000000-0000-0000-0000-000000000023'),
+            ('00000000-0000-0000-0000-000000001004',1,'cod_returned','00000000-0000-0000-0000-000000000024'),
+            ('00000000-0000-0000-0000-000000001005',1,'admin_failed',NULL),
+            ('00000000-0000-0000-0000-000000001006',1,'cod_returned','00000000-0000-0000-0000-000000000026'),
+            ('00000000-0000-0000-0000-000000001087',1,'cod_returned','00000000-0000-0000-0000-000000000027'),
+            ('00000000-0000-0000-0000-000000001088',1,'cod_returned','00000000-0000-0000-0000-000000000028');",
+    )
+    .await?;
+    let query = |sql: &str| sqlx::AssertSqlSafe(sql.replace("public.", "pg_temp."));
+    let rows = sqlx::query(query(queries::CUSTODY_IN_TRANSIT))
+        .bind("main")
+        .bind(&[] as &[String])
+        .fetch_all(&mut *tx)
+        .await?;
+    let in_transit = rows
+        .into_iter()
+        .map(|row| {
+            Ok((
+                row.try_get::<bool, _>("review")?,
+                row.try_get::<String, _>("reason")?,
+                row.try_get::<i64, _>("item_count")?,
+            ))
+        })
+        .collect::<Result<Vec<_>, sqlx::Error>>()?;
+    // 只剩旧 fence 上的 102、角色不符的 104 与普通处置的 105。
+    assert_eq!(
+        in_transit,
+        [
+            (true, "obligation_unsold_return_failed".to_owned(), 1),
+            (true, "obligation_winner_equipment_cod_failed".to_owned(), 2),
+        ]
+    );
+
+    let rows = sqlx::query(query(queries::CUSTODY_SAMPLES))
+        .bind("main")
+        .bind(&[] as &[String])
+        .bind(100_i64)
+        .fetch_all(&mut *tx)
+        .await?;
+    let samples = rows
+        .into_iter()
+        .map(|row| {
+            Ok((
+                row.try_get::<String, _>("external_equipment_id")?,
+                row.try_get::<String, _>("reason")?,
+            ))
+        })
+        .collect::<Result<std::collections::BTreeMap<_, _>, sqlx::Error>>()?;
+    // 收回待重列与重列到草稿场次各按恢复去向计一次；从未寄出、被取消收口的原交付不再重复计入。
+    assert_eq!(
+        samples,
+        [
+            ("106".to_owned(), "recovery_relist_pending".to_owned()),
+            ("107".to_owned(), "relisted_draft".to_owned()),
+            ("108".to_owned(), "recovery_relist_pending".to_owned()),
+        ]
+        .into_iter()
+        .collect()
+    );
+    let row = sqlx::query(query(queries::CUSTODY_COUNTS))
+        .bind("main")
+        .bind(&["106".to_owned()][..])
+        .bind(100_i64)
+        .fetch_one(&mut *tx)
+        .await?;
+    assert_eq!(row.try_get::<i64, _>("expected_count")?, 3);
+    assert_eq!(row.try_get::<i64, _>("missing_count")?, 2);
+    assert_eq!(row.try_get::<i64, _>("stock_count")?, 0);
     tx.rollback().await?;
     Ok(())
 }
