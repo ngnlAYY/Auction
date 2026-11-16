@@ -10,7 +10,7 @@ use auction_application::forum::PublicForumReader;
 use auction_application::operations::ProcessReadinessPort;
 use auction_application::public::{
     PublicBlacklistReader, PublicCompensationReader, PublicEquipmentLinkResolver,
-    PublicRulesReader, PublicSessionPort,
+    PublicFulfillmentReader, PublicRulesReader, PublicSessionPort,
 };
 use auction_application::realtime::PublicRealtimeReader;
 use auction_contracts::PublicRegistrationInfoResponse;
@@ -30,6 +30,7 @@ pub struct PublicApiState {
     rules: Option<Arc<dyn PublicRulesReader>>,
     blacklist: Option<Arc<dyn PublicBlacklistReader>>,
     compensation: Option<Arc<dyn PublicCompensationReader>>,
+    fulfillment: Option<Arc<dyn PublicFulfillmentReader>>,
     forum: Option<Arc<dyn PublicForumReader>>,
     auctions: Option<Arc<dyn AuctionReader>>,
     lots: Option<Arc<dyn PublicLotReader>>,
@@ -58,6 +59,7 @@ impl Default for PublicApiState {
             rules: None,
             blacklist: None,
             compensation: None,
+            fulfillment: None,
             forum: None,
             auctions: None,
             lots: None,
@@ -107,6 +109,7 @@ impl PublicApiState {
             rules,
             blacklist,
             compensation,
+            fulfillment: None,
             forum,
             auctions,
             lots,
@@ -137,6 +140,12 @@ impl PublicApiState {
 
     pub(crate) fn registration_info(&self) -> Option<&PublicRegistrationInfoResponse> {
         self.registration_info.as_deref()
+    }
+
+    /// 注入已结算场次的履约进度只读端口；缺失时接口明确返回 503。
+    pub fn with_fulfillment(mut self, fulfillment: Arc<dyn PublicFulfillmentReader>) -> Self {
+        self.fulfillment = Some(fulfillment);
+        self
     }
 
     /// 注入当前用户的权威装备标记端口；缺失时明确返回 503。
@@ -242,6 +251,10 @@ impl PublicApiState {
 
     pub(crate) fn compensation(&self) -> Option<&dyn PublicCompensationReader> {
         self.compensation.as_deref()
+    }
+
+    pub(crate) fn fulfillment(&self) -> Option<&dyn PublicFulfillmentReader> {
+        self.fulfillment.as_deref()
     }
 
     pub(crate) fn forum(&self) -> Option<&dyn PublicForumReader> {

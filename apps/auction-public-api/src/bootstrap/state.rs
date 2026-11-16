@@ -18,8 +18,8 @@ use auction_application::forum::PublicForumReader;
 use auction_application::operations::ProcessReadinessPort;
 use auction_application::public::{
     PublicBlacklistReader, PublicCompensationReader, PublicEquipmentLinkResolver,
-    PublicEquipmentLinkSecretReader, PublicLoginAuthenticator, PublicRulesReader,
-    PublicSessionConfig, PublicSessionPort, PublicSessionStore,
+    PublicEquipmentLinkSecretReader, PublicFulfillmentReader, PublicLoginAuthenticator,
+    PublicRulesReader, PublicSessionConfig, PublicSessionPort, PublicSessionStore,
 };
 use auction_application::realtime::{
     PublicRealtimeReader, RealtimeConsumerStore, RealtimeEventSink, RealtimeRelay,
@@ -224,6 +224,7 @@ pub(super) async fn configure_state(
     let rules: Arc<dyn PublicRulesReader> = store.clone();
     let blacklist: Arc<dyn PublicBlacklistReader> = store.clone();
     let compensation: Arc<dyn PublicCompensationReader> = store.clone();
+    let fulfillment: Arc<dyn PublicFulfillmentReader> = store.clone();
     let forum: Arc<dyn PublicForumReader> = store.clone();
     let auctions: Arc<dyn AuctionReader> = store.clone();
     let lots: Arc<dyn PublicLotReader> =
@@ -304,6 +305,7 @@ pub(super) async fn configure_state(
         Some(session),
         security,
     )
+    .with_fulfillment(fulfillment)
     .with_lot_watches(store.clone())
     .with_lot_watch_preference(store.clone())
     .with_realtime_hub(hub)

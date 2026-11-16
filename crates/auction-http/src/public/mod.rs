@@ -16,6 +16,7 @@ pub(crate) mod browser_errors;
 pub(crate) mod compensation;
 pub(crate) mod countdown;
 pub(crate) mod forum;
+pub(crate) mod fulfillment;
 pub(crate) mod realtime;
 pub(crate) mod registration;
 pub(crate) mod rules;

@@ -109,6 +109,7 @@ fn public_feature_routes(
         .route("/api/v1/auctions/{auction_id}/lots", get(list_lots))
         .route("/api/v1/lots/{lot_id}", get(lot_detail))
         .route("/api/v1/auctions/{auction_id}/bid-log", get(list_bid_log))
+        .route("/api/v1/auctions/{auction_id}/fulfillment", get(public_handlers::fulfillment::list))
         .route("/api/v1/price-history", get(list_price_history))
         .route_layer(middleware::from_fn(response_cache::public_catalog))
         // 匿名读闸门独立于登录/mutation 限流；写路由不挂载该层。
@@ -512,7 +513,11 @@ mod tests {
     #[tokio::test]
     async fn lots_routes_are_in_the_public_catalog_cache_group() {
         let id = "018f4c8e-7b2a-7c3d-8e4f-0123456789ab";
-        for uri in [format!("/api/v1/auctions/{id}/lots"), format!("/api/v1/lots/{id}")] {
+        for uri in [
+            format!("/api/v1/auctions/{id}/lots"),
+            format!("/api/v1/lots/{id}"),
+            format!("/api/v1/auctions/{id}/fulfillment"),
+        ] {
             let response = response(&uri).await;
             // 未注入端口时返回依赖不可用；失败响应不由目录缓存层写头。
             assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE, "uri={uri}");
