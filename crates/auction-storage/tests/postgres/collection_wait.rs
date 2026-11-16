@@ -4,6 +4,8 @@
 //! - 资产对账把已寄出且资金已 `spent` 的货款列为在途、不计入应付；已寄出等待领取的装备
 //!   （含已寄出待付款的 COD 装备）列为在途、不计为缺失；人工核对的仍按应持核对。
 //! - 履约领取把投递完成时刻带进 delivery 快照，供等待领取的 Sent 轮询按寄出时长分档。
+//! - 长期未领取告警在最久寄出时长达到阈值时写入活动信号，收口回落到阈值以下后由下一轮
+//!   扫描关闭；迁移 000110 的闭集接受该种类。
 //!
 //! 入口见 `just test-db`。
 
@@ -12,8 +14,9 @@
 use std::time::Duration as StdDuration;
 
 use auction_application::operations::{
-    OperationsAlertKind, OperationsAlertPolicy, OperationsAlertSource, OperationsAlertSourceReader,
-    evaluate_snapshot,
+    OperationsAlertKind, OperationsAlertObserveCommand, OperationsAlertPolicy,
+    OperationsAlertRuntimeStatus, OperationsAlertSource, OperationsAlertSourceReader,
+    OperationsAlertStore, evaluate_snapshot,
 };
 use auction_application::reconciliation::{
     AssetArmoryObservation, AssetReconciliationStore, CustodyInTransitReason, CustodyMissingSample,
@@ -340,6 +343,7 @@ fn policy() -> OperationsAlertPolicy {
         delivery_manual_reconcile_count_threshold: 1,
         fulfillment_backlog_count_threshold: 1,
         fulfillment_backlog_age_threshold: StdDuration::from_secs(900),
+        fulfillment_collection_overdue_age_threshold: StdDuration::from_secs(259_200),
         recovery_overdue_count_threshold: 1,
         recovery_overdue_age_threshold: StdDuration::from_secs(900),
     }
@@ -510,6 +514,73 @@ async fn postgres_collection_wait_claim_carries_sent_time() {
     let snapshot = claim.delivery_snapshot.as_ref().expect("投递快照");
     assert_eq!(snapshot.status, SettlementFulfillmentDeliveryStatus::Succeeded);
     assert_eq!(snapshot.completed_at, Some(sent_at));
+
+    pool.close().await;
+}
+
+/// 长期未领取：最久一笔已寄出 8 天（阈值 72 小时）时产生活动信号，计数为全部等待领取；
+/// 该笔领取收口后剩下的只寄出 2 天，下一轮扫描关闭信号。告警不改变任何义务状态。
+#[tokio::test]
+async fn postgres_collection_wait_overdue_alert_triggers_and_resolves() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("以运行账号连接");
+    let pool = store.postgres_pool();
+    let now = Utc::now();
+    seed_collection_wait(pool, now).await;
+    store
+        .publish_runtime_status(OperationsAlertRuntimeStatus { enabled: true, updated_at: now })
+        .await
+        .expect("启用告警扫描");
+    let scan = |at: DateTime<Utc>| {
+        let store = &store;
+        async move {
+            let snapshot = store.snapshot(at).await.expect("读取告警快照");
+            let observations = evaluate_snapshot(&snapshot, &policy()).expect("扫描评估");
+            store
+                .observe(OperationsAlertObserveCommand {
+                    observations,
+                    now: at,
+                    batch_window: StdDuration::from_secs(120),
+                })
+                .await
+                .expect("写入扫描观察");
+        }
+    };
+    let overdue = || {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_as::<_, (bool, i64, i64)>(
+                "SELECT active, count_value, age_seconds FROM public.operations_alert_signals
+                 WHERE kind = 'fulfillment_collection_overdue'
+                   AND source = 'fulfillment' AND scope = 'auction'",
+            )
+            .fetch_optional(&pool)
+            .await
+            .expect("读取长期未领取信号")
+        }
+    };
+
+    scan(now).await;
+    let (active, count, age) = overdue().await.expect("超过阈值必须写入信号");
+    assert!(active);
+    assert_eq!(count, 2, "计数是全部等待领取");
+    assert!(age >= Duration::days(8).num_seconds(), "年龄是最久寄出时长：{age}");
+
+    // 8 天前寄出的货款被领取：只剩寄出 2 天的流拍退回，低于阈值，信号关闭。
+    let payout = stable_id(SEED, &format!("{}-seller_payout", stable_id(SEED, "lot-1")));
+    sqlx::query(
+        "UPDATE public.settlement_obligation_fulfillments
+         SET execution_state = 'satisfied', completed_at = now(), updated_at = now(),
+             last_error_code = NULL
+         WHERE obligation_id = $1",
+    )
+    .bind(payout)
+    .execute(pool)
+    .await
+    .expect("模拟货款已领取");
+    scan(Utc::now()).await;
+    let (active, _, _) = overdue().await.expect("信号行保留历史");
+    assert!(!active, "回落到阈值以下后告警解除");
 
     pool.close().await;
 }

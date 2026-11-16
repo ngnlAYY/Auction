@@ -136,3 +136,31 @@ fn resubmitted_projection_keeps_the_canonical_fingerprint() {
         assert_eq!(document(projected).fingerprint(), materialized.fingerprint());
     }
 }
+
+/// 告警区块新增的长期未领取阈值同样按默认值省略、在投影中补齐；显式值优先，
+/// 补齐不改变物理文档指纹（见上一用例的重提交校验）。
+#[test]
+fn alerts_projection_fills_collection_overdue_threshold() {
+    for source in [json!({}), json!({"operations": {"alerts": {"managed": true}}})] {
+        let (projected, _) = project(document(source));
+        assert_eq!(
+            projected["operations"]["alerts"]["fulfillment_collection_overdue_age_seconds"],
+            259_200
+        );
+    }
+    let (projected, _) = project(document(json!({
+        "operations": {"alerts": {
+            "managed": true,
+            "fulfillment_collection_overdue_age_seconds": 86_400
+        }}
+    })));
+    assert_eq!(
+        projected["operations"]["alerts"]["fulfillment_collection_overdue_age_seconds"],
+        86_400
+    );
+    let source = json!({"operations": {"alerts": {"managed": true}}});
+    let mut materialized = document(source.clone());
+    materialized.materialize_business_defaults();
+    let (projected, _) = project(document(source));
+    assert_eq!(document(projected).fingerprint(), materialized.fingerprint());
+}

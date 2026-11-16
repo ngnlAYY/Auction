@@ -35,6 +35,7 @@ fn policy() -> OperationsAlertPolicy {
         delivery_manual_reconcile_count_threshold: 1,
         fulfillment_backlog_count_threshold: 1,
         fulfillment_backlog_age_threshold: Duration::from_secs(900),
+        fulfillment_collection_overdue_age_threshold: Duration::from_secs(259_200),
         recovery_overdue_count_threshold: 1,
         recovery_overdue_age_threshold: Duration::from_secs(900),
     }
@@ -75,10 +76,10 @@ async fn postgres_operations_alert_sources_migration_registers_breaking_extensio
     // 085/091 之后的迁移各自追加登记；这里只要求内嵌最高版本已覆盖 091，避免每加一个
     // 迁移都要修改本断言，同时保留“放宽闭集的迁移必须登记 breaking”的原意。
     assert!(
-        postgres_expected_migration_version() >= 101,
-        "内嵌迁移必须已包含页数与换季告警扩展（101）"
+        postgres_expected_migration_version() >= 110,
+        "内嵌迁移必须已包含长期未领取告警扩展（110）"
     );
-    for version in [85, 91, 99, 101] {
+    for version in [85, 91, 99, 101, 104, 110] {
         let level: String = sqlx::query_scalar(
             "SELECT level FROM public.schema_migration_compatibility WHERE version = $1",
         )
@@ -110,7 +111,8 @@ async fn postgres_operations_alert_closed_sets_accept_new_kinds_and_reject_unkno
             | Kind::QueueLatency => ("delivery", "delivery"),
             Kind::FulfillmentBacklog
             | Kind::FulfillmentFailed
-            | Kind::FulfillmentManualReconcile => ("auction", "fulfillment"),
+            | Kind::FulfillmentManualReconcile
+            | Kind::FulfillmentCollectionOverdue => ("auction", "fulfillment"),
             Kind::RecoveryPaymentOverdue
             | Kind::RecoveryPaymentMailUnsent
             | Kind::RecoveryRelistPending
@@ -138,6 +140,15 @@ async fn postgres_operations_alert_closed_sets_accept_new_kinds_and_reject_unkno
         insert_signal(&store, &seed, kind.as_str(), scope, source)
             .await
             .unwrap_or_else(|error| panic!("{} 应被数据库闭集接受：{error}", kind.as_str()));
+    }
+
+    // 每个来源的 `source_unavailable` 都以来源名作 scope；对账报告缺失时该信号必须可写入，
+    // 否则整轮扫描事务回滚（迁移 000110 补上 `reconciliation`）。
+    for source in OperationsAlertSource::ALL {
+        let seed = format!("unavailable-{}", source.as_str());
+        insert_signal(&store, &seed, "source_unavailable", source.as_str(), source.as_str())
+            .await
+            .unwrap_or_else(|error| panic!("{source} 的来源不可用信号应被接受：{error}"));
     }
 
     // 未登记种类与来源在数据库层失败关闭。

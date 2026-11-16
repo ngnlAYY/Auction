@@ -311,6 +311,8 @@ delivery_manual_reconcile_count_threshold = 1
 fulfillment_backlog_count_threshold = 1
 # 可选：履约积压年龄阈值秒数，范围 1-2592000；省略时为 900。
 fulfillment_backlog_age_seconds = 900
+# 可选：长期未领取告警的最久寄出时长阈值秒数，范围 1-2592000；省略时为 259_200（72 小时）。
+fulfillment_collection_overdue_age_seconds = 259_200
 # 可选：恢复付款逾期数量阈值，范围 1-9007199254740991；省略时为 1。
 recovery_overdue_count_threshold = 1
 # 可选：恢复付款逾期年龄阈值秒数，范围 1-2592000；省略时为 900。

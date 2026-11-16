@@ -315,6 +315,8 @@ pub(crate) struct AdminFulfillmentData {
     pub oldest_prerequisite_wait_age_seconds: i64,
     /// 最早寄出的等待领取义务自寄出起的秒数；页面按天展示。
     pub oldest_awaiting_collection_age_seconds: i64,
+    /// 服务端按告警策略判定的长期未领取；页面不自建阈值。
+    pub collection_overdue: bool,
 }
 
 pub(crate) type AdminFulfillmentSection = AdminDashboardSection<AdminFulfillmentData>;
@@ -526,7 +528,8 @@ mod tests {
                     "observed_at": "2026-01-01T00:00:00Z",
                     "oldest_backlog_age_seconds": 120,
                     "oldest_prerequisite_wait_age_seconds": 60,
-                    "oldest_awaiting_collection_age_seconds": 691200
+                    "oldest_awaiting_collection_age_seconds": 691200,
+                    "collection_overdue": true
                 }
             },
             "alerting": {
@@ -598,6 +601,7 @@ mod tests {
         assert_eq!(fulfillment.awaiting_collection, 5);
         assert_eq!(fulfillment.awaiting_collection_unreadable, 2);
         assert_eq!(fulfillment.oldest_awaiting_collection_age_seconds, 691_200);
+        assert!(fulfillment.collection_overdue);
         let alerting = snapshot.alerting.data.expect("告警数据");
         assert_eq!(alerting.webhook_pending_count, 2);
         assert_eq!(alerting.webhook_manual_reconcile_count, 1);
@@ -674,10 +678,23 @@ mod tests {
             let payload = with(complete_payload(), fulfillment, key, Some(value));
             assert!(decode_dashboard_response(payload).is_err(), "{key} 越界必须拒绝");
         }
-        // 没有等待领取时不能带等待年龄；年龄同时归零才是安静水位。
+        // 没有等待领取时不能带等待年龄或超期标记；年龄归零、超期为 false 才是安静水位。
         let empty = with(complete_payload(), fulfillment, "awaiting_collection", Some(json!(0)));
         let empty = with(empty, fulfillment, "awaiting_collection_unreadable", Some(json!(0)));
+        let empty = with(empty, fulfillment, "collection_overdue", Some(json!(false)));
         assert!(decode_dashboard_response(empty.clone()).is_err());
+        let overdue_without_awaiting = with(
+            with(
+                empty.clone(),
+                fulfillment,
+                "oldest_awaiting_collection_age_seconds",
+                Some(json!(0)),
+            ),
+            fulfillment,
+            "collection_overdue",
+            Some(json!(true)),
+        );
+        assert!(decode_dashboard_response(overdue_without_awaiting).is_err());
         let quiet =
             with(empty, fulfillment, "oldest_awaiting_collection_age_seconds", Some(json!(0)));
         assert!(decode_dashboard_response(quiet).is_ok());

@@ -66,3 +66,35 @@ pub(crate) fn validate_operations_alert_worker(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::super::{ConfigError, MoogleMailWorkerConfig, OperationsAlertWorkerConfig};
+    use super::validate_operations_alert_worker;
+
+    /// 长期未领取阈值与其他年龄阈值同一范围：1 秒至 30 天，越界在加载期失败关闭。
+    #[test]
+    fn collection_overdue_threshold_is_bounded() {
+        let mooglemail = MoogleMailWorkerConfig::default();
+        for accepted in [1, 259_200, 2_592_000] {
+            let config = OperationsAlertWorkerConfig {
+                fulfillment_collection_overdue_age_seconds: accepted,
+                ..OperationsAlertWorkerConfig::default()
+            };
+            assert!(validate_operations_alert_worker(&config, &mooglemail).is_ok(), "{accepted}");
+        }
+        for rejected in [0, 2_592_001] {
+            let config = OperationsAlertWorkerConfig {
+                fulfillment_collection_overdue_age_seconds: rejected,
+                ..OperationsAlertWorkerConfig::default()
+            };
+            assert!(
+                matches!(
+                    validate_operations_alert_worker(&config, &mooglemail),
+                    Err(ConfigError::InvalidOperationsAlertConfig(_))
+                ),
+                "{rejected}"
+            );
+        }
+    }
+}

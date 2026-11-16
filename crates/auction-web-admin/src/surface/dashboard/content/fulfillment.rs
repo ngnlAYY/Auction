@@ -78,7 +78,14 @@ pub(super) fn fulfillment_panel(
         div { class: "admin-dashboard-cards",
             {card(
                 t!("dashboard-fulfillment-awaiting-count"),
-                text(fulfillment.awaiting_collection.to_string()),
+                if fulfillment.collection_overdue {
+                    badge("warn", t!(
+                        "dashboard-fulfillment-awaiting-overdue",
+                        count: fulfillment.awaiting_collection
+                    ))
+                } else {
+                    text(fulfillment.awaiting_collection.to_string())
+                },
             )}
             {card(
                 t!("dashboard-fulfillment-awaiting-oldest"),

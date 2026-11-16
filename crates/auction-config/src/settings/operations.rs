@@ -139,6 +139,8 @@ fn apply_alerts(worker: &mut WorkerConfig, operations: &AdminRuntimeOperationsCo
         candidate.fulfillment_backlog_count_threshold;
     worker.operations_alert.fulfillment_backlog_age_seconds =
         candidate.fulfillment_backlog_age_seconds;
+    worker.operations_alert.fulfillment_collection_overdue_age_seconds =
+        candidate.fulfillment_collection_overdue_age_seconds;
     worker.operations_alert.recovery_overdue_count_threshold =
         candidate.recovery_overdue_count_threshold;
     worker.operations_alert.recovery_overdue_age_seconds = candidate.recovery_overdue_age_seconds;

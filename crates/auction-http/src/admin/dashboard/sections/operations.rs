@@ -23,9 +23,13 @@ pub(crate) fn map_fulfillment(
         Some("fulfillment_failed")
     } else if assessment.is_some_and(|assessment| assessment.backlog) {
         Some("fulfillment_backlog")
+    } else if assessment.is_some_and(|assessment| assessment.collection_overdue) {
+        Some("fulfillment_collection_overdue")
     } else {
         None
     };
+    // 长期未领取与告警扫描同一阈值判定；没有告警策略时不声称超期。
+    let collection_overdue = assessment.is_some_and(|assessment| assessment.collection_overdue);
     AdminDashboardSectionResponse {
         status: if degraded_reason.is_some() {
             DashboardStatus::Degraded.as_str().to_owned()
@@ -48,6 +52,7 @@ pub(crate) fn map_fulfillment(
             "oldest_prerequisite_wait_age_seconds": snapshot.oldest_prerequisite_wait_age_seconds,
             "oldest_awaiting_collection_age_seconds":
                 snapshot.oldest_awaiting_collection_age_seconds,
+            "collection_overdue": collection_overdue,
         })),
     }
 }
@@ -219,6 +224,7 @@ mod tests {
             delivery_manual_reconcile_count_threshold: 1,
             fulfillment_backlog_count_threshold: 1,
             fulfillment_backlog_age_threshold: Duration::from_secs(900),
+            fulfillment_collection_overdue_age_threshold: Duration::from_secs(259_200),
             recovery_overdue_count_threshold: 1,
             recovery_overdue_age_threshold: Duration::from_secs(900),
         }
@@ -259,7 +265,8 @@ mod tests {
         assert_eq!(prerequisite.status, "degraded");
     }
 
-    /// 等待领取单列为独立分组：不使履约分区降级，计数、读取失败数与最老等待年龄原样投影。
+    /// 等待领取单列为独立分组，计数、读取失败数与最老等待年龄原样投影；只有最久寄出时长达到
+    /// 长期未领取阈值时才降级，与告警扫描同一判定。
     #[test]
     fn awaiting_collection_is_projected_separately_without_backlog() {
         let policy = policy();
@@ -272,12 +279,32 @@ mod tests {
             },
             Some(&policy),
         );
-        assert_eq!(section.status, "ok");
+        assert_eq!(section.status, "degraded", "最久已寄出 8 天，超过 72 小时阈值");
         let data = section.data.expect("履约数据");
         assert_eq!(data["pending"], 0);
         assert_eq!(data["awaiting_collection"], 36);
         assert_eq!(data["awaiting_collection_unreadable"], 12);
         assert_eq!(data["oldest_awaiting_collection_age_seconds"], 691_200);
+        assert_eq!(data["collection_overdue"], true);
+
+        // 阈值以内只单列，不降级；没有告警策略时不声称超期。
+        let fresh = OperationsAlertFulfillmentSnapshot {
+            awaiting_collection: 36,
+            oldest_awaiting_collection_age_seconds: 259_199,
+            ..fulfillment(0, 0, 0, 0, 0)
+        };
+        let section = map_fulfillment(fresh, Some(&policy));
+        assert_eq!(section.status, "ok");
+        assert_eq!(section.data.expect("履约数据")["collection_overdue"], false);
+        let without_policy = map_fulfillment(
+            OperationsAlertFulfillmentSnapshot {
+                oldest_awaiting_collection_age_seconds: 691_200,
+                ..fresh
+            },
+            None,
+        );
+        assert_eq!(without_policy.status, "ok");
+        assert_eq!(without_policy.data.expect("履约数据")["collection_overdue"], false);
     }
 
     #[test]

@@ -31,13 +31,13 @@ fn canonical_identity(kind: OperationsAlertKind) -> (OperationsAlertSource, &'st
         AccountBusy, AuctionPhaseOverdue, AuditFailure, BackupFailed, BalanceLow,
         CredentialInvalid, CustodyDrift, DeliveryManualReconcile, DeliveryPending,
         DeliveryReturnedMail, DiskCapacityLow, EvidenceStale, ForumMessageFailed, ForumSyncFailed,
-        ForumTopicPageLimitApproaching, FulfillmentBacklog, FulfillmentFailed,
-        FulfillmentManualReconcile, MailPollStalled, MailSentPageLimitApproaching,
-        NotificationDeliveryFailed, NotificationPostageInsufficient, ProxyExpiryOverdue,
-        QueueLatency, ReconciliationStale, RecoveryFailed, RecoveryManualReconcile,
-        RecoveryPaymentMailUnsent, RecoveryPaymentOverdue, RecoveryRelistPending,
-        RestoreDrillOverdue, SeasonObligationsPending, ServiceDegraded, ServiceMissing,
-        SolvencyShortfall, SourceUnavailable, WalUploadStalled,
+        ForumTopicPageLimitApproaching, FulfillmentBacklog, FulfillmentCollectionOverdue,
+        FulfillmentFailed, FulfillmentManualReconcile, MailPollStalled,
+        MailSentPageLimitApproaching, NotificationDeliveryFailed, NotificationPostageInsufficient,
+        ProxyExpiryOverdue, QueueLatency, ReconciliationStale, RecoveryFailed,
+        RecoveryManualReconcile, RecoveryPaymentMailUnsent, RecoveryPaymentOverdue,
+        RecoveryRelistPending, RestoreDrillOverdue, SeasonObligationsPending, ServiceDegraded,
+        ServiceMissing, SolvencyShortfall, SourceUnavailable, WalUploadStalled,
     };
     use OperationsAlertSource::{
         Backup, Credential, Delivery, Forum, Fulfillment, Lifecycle, Mail, Notification, Process,
@@ -50,9 +50,10 @@ fn canonical_identity(kind: OperationsAlertKind) -> (OperationsAlertSource, &'st
         DeliveryPending | DeliveryReturnedMail | DeliveryManualReconcile | QueueLatency => {
             (Delivery, "delivery")
         }
-        FulfillmentBacklog | FulfillmentFailed | FulfillmentManualReconcile => {
-            (Fulfillment, "auction")
-        }
+        FulfillmentBacklog
+        | FulfillmentFailed
+        | FulfillmentManualReconcile
+        | FulfillmentCollectionOverdue => (Fulfillment, "auction"),
         RecoveryPaymentOverdue
         | RecoveryPaymentMailUnsent
         | RecoveryRelistPending
@@ -96,6 +97,7 @@ fn severity_partitions_the_closed_kind_set() {
                             | OperationsAlertKind::QueueLatency
                             | OperationsAlertKind::ForumSyncFailed
                             | OperationsAlertKind::NotificationDeliveryFailed
+                            | OperationsAlertKind::FulfillmentCollectionOverdue
                             | OperationsAlertKind::RestoreDrillOverdue
                     ),
                     "{} 不应是紧急信号",
@@ -105,7 +107,7 @@ fn severity_partitions_the_closed_kind_set() {
         }
     }
     // 自动重试/自动推进的等待类信号并入每日摘要，人工才能修复的保持紧急；
-    // 演练逾期不影响当前服务，同样并入每日摘要。
+    // 演练逾期不影响当前服务、长期未领取只等收件人操作，同样并入每日摘要。
     assert_eq!(
         digest,
         BTreeSet::from([
@@ -114,6 +116,7 @@ fn severity_partitions_the_closed_kind_set() {
             "queue_latency",
             "forum_sync_failed",
             "notification_delivery_failed",
+            "fulfillment_collection_overdue",
             "restore_drill_overdue",
         ])
     );
@@ -218,6 +221,7 @@ fn policy() -> OperationsAlertPolicy {
         delivery_manual_reconcile_count_threshold: 1,
         fulfillment_backlog_count_threshold: 1,
         fulfillment_backlog_age_threshold: Duration::from_secs(900),
+        fulfillment_collection_overdue_age_threshold: Duration::from_secs(259_200),
         recovery_overdue_count_threshold: 1,
         recovery_overdue_age_threshold: Duration::from_secs(900),
     }

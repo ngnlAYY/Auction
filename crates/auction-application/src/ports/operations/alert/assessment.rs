@@ -21,6 +21,8 @@ pub struct FulfillmentAssessment {
     pub backlog: bool,
     pub failed: bool,
     pub manual_reconcile: bool,
+    /// 有等待领取，且最久一笔的寄出时长达到长期未领取阈值；回落或全部收口即为 false。
+    pub collection_overdue: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -73,6 +75,11 @@ pub fn assess_fulfillment(
             || oldest_backlog_age >= policy.fulfillment_backlog_age_threshold.as_secs() as i64,
         failed: snapshot.failed > 0,
         manual_reconcile: snapshot.manual_reconcile > 0,
+        collection_overdue: snapshot.awaiting_collection > 0
+            && reached(
+                snapshot.oldest_awaiting_collection_age_seconds,
+                policy.fulfillment_collection_overdue_age_threshold,
+            ),
     }
 }
 
@@ -125,6 +132,7 @@ mod tests {
             delivery_manual_reconcile_count_threshold: 1,
             fulfillment_backlog_count_threshold: 1,
             fulfillment_backlog_age_threshold: Duration::from_secs(900),
+            fulfillment_collection_overdue_age_threshold: Duration::from_secs(259_200),
             recovery_overdue_count_threshold: 1,
             recovery_overdue_age_threshold: Duration::from_secs(900),
         }
@@ -354,5 +362,52 @@ mod tests {
             };
             assert_eq!(evaluate_snapshot(&snapshot, &policy), Err(OperationsAlertError::Invalid));
         }
+    }
+
+    /// 长期未领取：最久寄出时长达到阈值才告警（阈值前 1 秒不告警），计数是全部等待领取、
+    /// 年龄是最久寄出时长；等待领取全部收口后不再告警。扫描结果与看板判定一致。
+    #[test]
+    fn collection_overdue_alerts_at_threshold_and_resolves_when_collected() {
+        let policy = policy();
+        let threshold = policy.fulfillment_collection_overdue_age_threshold.as_secs() as i64;
+        let awaiting = |count: i64, age: i64| OperationsAlertFulfillmentSnapshot {
+            pending: 0,
+            blocked: 0,
+            failed: 0,
+            manual_reconcile: 0,
+            waiting_payment: 0,
+            waiting_prerequisite: 0,
+            awaiting_collection: count,
+            awaiting_collection_unreadable: 0,
+            oldest_backlog_age_seconds: 0,
+            oldest_prerequisite_wait_age_seconds: 0,
+            oldest_awaiting_collection_age_seconds: age,
+        };
+        let overdue_signal = |snapshot: OperationsAlertFulfillmentSnapshot| {
+            let snapshot = OperationsAlertSnapshot {
+                fulfillment: Some(snapshot),
+                ..OperationsAlertSnapshot::default()
+            };
+            evaluate_snapshot(&snapshot, &policy)
+                .expect("等待领取水位必须可评估")
+                .into_iter()
+                .find(|observation| observation.source == OperationsAlertSource::Fulfillment)
+                .and_then(|observation| {
+                    observation.signals.into_iter().find(|signal| {
+                        signal.kind == OperationsAlertKind::FulfillmentCollectionOverdue
+                    })
+                })
+                .map(|signal| (signal.count, signal.age_seconds))
+        };
+        let before = awaiting(36, threshold - 1);
+        assert_eq!(overdue_signal(before), None);
+        assert!(!assess_fulfillment(before, &policy).collection_overdue);
+        let reached = awaiting(36, threshold);
+        assert_eq!(overdue_signal(reached), Some((36, threshold)));
+        assert!(assess_fulfillment(reached, &policy).collection_overdue);
+        assert!(!assess_fulfillment(reached, &policy).backlog, "长期未领取不是积压");
+        let collected = awaiting(0, 0);
+        assert_eq!(overdue_signal(collected), None, "全部收口后告警解除");
+        assert!(!assess_fulfillment(collected, &policy).collection_overdue);
     }
 }

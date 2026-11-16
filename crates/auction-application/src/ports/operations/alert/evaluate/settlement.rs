@@ -156,6 +156,17 @@ pub(super) fn evaluate_fulfillment(
             0,
         )?);
     }
+    // 长期未领取只提醒人工跟进：计数是全部等待领取，年龄是最久一笔的寄出时长；
+    // 告警不改变义务，也不触发重发或撤回。
+    if assessment.collection_overdue {
+        signals.push(OperationsAlertSignal::new(
+            OperationsAlertKind::FulfillmentCollectionOverdue,
+            "auction",
+            OperationsAlertSource::Fulfillment,
+            snapshot.awaiting_collection,
+            snapshot.oldest_awaiting_collection_age_seconds,
+        )?);
+    }
     OperationsAlertSourceObservation::available(OperationsAlertSource::Fulfillment, signals)
 }
 

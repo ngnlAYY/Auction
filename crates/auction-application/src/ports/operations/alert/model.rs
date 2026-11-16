@@ -285,6 +285,8 @@ pub struct OperationsAlertPolicy {
     pub delivery_manual_reconcile_count_threshold: i64,
     pub fulfillment_backlog_count_threshold: i64,
     pub fulfillment_backlog_age_threshold: Duration,
+    /// 已寄出等待领取的最久寄出时长达到该阈值即产生 `fulfillment_collection_overdue`。
+    pub fulfillment_collection_overdue_age_threshold: Duration,
     pub recovery_overdue_count_threshold: i64,
     pub recovery_overdue_age_threshold: Duration,
 }
@@ -314,6 +316,7 @@ impl OperationsAlertPolicy {
             || self.recovery_overdue_count_threshold < 1
             || !valid_age_threshold(self.delivery_pending_age_threshold)
             || !valid_age_threshold(self.fulfillment_backlog_age_threshold)
+            || !valid_age_threshold(self.fulfillment_collection_overdue_age_threshold)
             || !valid_age_threshold(self.recovery_overdue_age_threshold)
         {
             return Err(OperationsAlertError::Invalid);

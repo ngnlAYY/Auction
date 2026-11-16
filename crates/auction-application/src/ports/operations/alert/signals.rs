@@ -134,6 +134,8 @@ pub enum OperationsAlertKind {
     FulfillmentBacklog,
     FulfillmentFailed,
     FulfillmentManualReconcile,
+    /// 已寄出、只等收件人领取的履约，最久一笔的寄出时长超过配置阈值；只提醒人工跟进。
+    FulfillmentCollectionOverdue,
     RecoveryPaymentOverdue,
     /// 付款期限已过，但对应付款投递没有自动或人工发送证明；提醒已延后，需人工核对。
     RecoveryPaymentMailUnsent,
@@ -185,9 +187,9 @@ pub enum OperationsAlertKind {
 }
 
 impl OperationsAlertKind {
-    /// 持久化种类闭集；与迁移 005/020/085/091/095/099/101/104 的 `operations_alert_signals.kind`
-    /// CHECK 一致。
-    pub const ALL: [Self; 37] = [
+    /// 持久化种类闭集；与迁移 005/020/085/091/095/099/101/104/110 的
+    /// `operations_alert_signals.kind` CHECK 一致。
+    pub const ALL: [Self; 38] = [
         Self::ServiceMissing,
         Self::ServiceDegraded,
         Self::AuditFailure,
@@ -198,6 +200,7 @@ impl OperationsAlertKind {
         Self::FulfillmentBacklog,
         Self::FulfillmentFailed,
         Self::FulfillmentManualReconcile,
+        Self::FulfillmentCollectionOverdue,
         Self::RecoveryPaymentOverdue,
         Self::RecoveryPaymentMailUnsent,
         Self::RecoveryRelistPending,
@@ -245,6 +248,7 @@ impl OperationsAlertKind {
             Self::FulfillmentBacklog => "fulfillment_backlog",
             Self::FulfillmentFailed => "fulfillment_failed",
             Self::FulfillmentManualReconcile => "fulfillment_manual_reconcile",
+            Self::FulfillmentCollectionOverdue => "fulfillment_collection_overdue",
             Self::RecoveryPaymentOverdue => "recovery_payment_overdue",
             Self::RecoveryPaymentMailUnsent => "recovery_payment_mail_unsent",
             Self::RecoveryRelistPending => "recovery_relist_pending",
@@ -288,6 +292,9 @@ impl OperationsAlertKind {
             | Self::QueueLatency
             | Self::ForumSyncFailed
             | Self::NotificationDeliveryFailed
+            // 长期未领取是等收件人操作的等待类信号，持续数天；资产在邮件里、系统无故障，
+            // 按每日摘要提醒人工跟进，不按紧急冷却反复通知。
+            | Self::FulfillmentCollectionOverdue
             // 演练逾期不影响当前服务，按每日摘要提醒即可。
             | Self::RestoreDrillOverdue => OperationsAlertSeverity::Digest,
             _ => OperationsAlertSeverity::Urgent,
@@ -457,6 +464,12 @@ impl OperationsAlertSignal {
             OperationsAlertKind::FulfillmentManualReconcile => {
                 format!("结算履约人工对账 {}", self.count)
             }
+            OperationsAlertKind::FulfillmentCollectionOverdue => format!(
+                "长期未领取：等待领取共 {} 笔，最久已寄出 {} 天；只提醒，不会重发或撤回，\
+                 请在游戏内核对 Sent 并联系收件人",
+                self.count,
+                self.age_seconds / 86_400
+            ),
             OperationsAlertKind::RecoveryPaymentOverdue => {
                 format!("结算付款逾期 {}，最长 {} 秒", self.count, self.age_seconds)
             }

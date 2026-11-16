@@ -5,8 +5,9 @@
 use std::net::SocketAddr;
 
 use auction_application::admin::{
-    AdminRuntimeCommandError, AdminRuntimeConfigError, AdminRuntimeDocument, AdminRuntimeFileError,
-    AdminRuntimeMailConfig, AdminRuntimeSnapshot, AdminRuntimeUpdateCommand,
+    AdminRuntimeAlertsConfig, AdminRuntimeCommandError, AdminRuntimeConfigError,
+    AdminRuntimeDocument, AdminRuntimeFileError, AdminRuntimeMailConfig, AdminRuntimeSnapshot,
+    AdminRuntimeUpdateCommand,
 };
 use auction_application::core::ApplicationError;
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
@@ -245,6 +246,17 @@ fn map_snapshot(
         })?;
         for (key, value) in defaults {
             mail.entry(key).or_insert(value);
+        }
+    }
+    // 告警区块新增阈值同样按默认值省略；浏览器投影补齐，管理端按完整闭集校验。
+    if let Some(alerts) = document
+        .get_mut("operations")
+        .and_then(Value::as_object_mut)
+        .and_then(|operations| operations.get_mut("alerts"))
+        .and_then(Value::as_object_mut)
+    {
+        for (key, value) in AdminRuntimeAlertsConfig::omitted_defaults() {
+            alerts.entry(key).or_insert(value);
         }
     }
     Ok(AdminRuntimeConfigResponse {

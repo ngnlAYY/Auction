@@ -28,12 +28,13 @@ fn valid_realtime(data: &AdminRealtimeData) -> bool {
     data.total_lag >= 0
 }
 
-/// 等待领取的读取失败数只是其子集；没有等待领取时不能带等待年龄。
+/// 等待领取的读取失败数只是其子集；没有等待领取时不能带等待年龄，也不能标记长期未领取。
 fn valid_fulfillment(data: &AdminFulfillmentData) -> bool {
     data.awaiting_collection >= 0
         && (0..=data.awaiting_collection).contains(&data.awaiting_collection_unreadable)
         && data.oldest_awaiting_collection_age_seconds >= 0
-        && (data.awaiting_collection > 0 || data.oldest_awaiting_collection_age_seconds == 0)
+        && (data.awaiting_collection > 0
+            || (data.oldest_awaiting_collection_age_seconds == 0 && !data.collection_overdue))
 }
 
 /// 对账报告按业务世界汇总，最多 main 与 isekai 两项；在途件数、笔数与金额不得为负。

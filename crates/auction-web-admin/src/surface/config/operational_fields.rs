@@ -72,6 +72,7 @@ pub(super) const NUMBER_FIELDS: &[&str] = &[
     "operations.alerts.delivery_manual_reconcile_count_threshold",
     "operations.alerts.fulfillment_backlog_count_threshold",
     "operations.alerts.fulfillment_backlog_age_seconds",
+    "operations.alerts.fulfillment_collection_overdue_age_seconds",
     "operations.alerts.recovery_overdue_count_threshold",
     "operations.alerts.recovery_overdue_age_seconds",
     "operations.worker.concurrency",

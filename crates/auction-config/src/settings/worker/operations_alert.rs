@@ -53,6 +53,9 @@ pub struct OperationsAlertWorkerConfig {
     pub fulfillment_backlog_count_threshold: i64,
     /// settlement fulfillment backlog 最老记录年龄阈值秒数，省略时为 900 秒。
     pub fulfillment_backlog_age_seconds: u64,
+    /// 已寄出等待领取的最久寄出时长阈值秒数，范围 1-2592000；达到即产生长期未领取告警（只提醒，
+    /// 不触发任何动作），省略时为 259200 秒（72 小时）。
+    pub fulfillment_collection_overdue_age_seconds: u64,
     /// recovery payment overdue 数量阈值；达到后产生告警，省略时为 1。
     pub recovery_overdue_count_threshold: i64,
     /// recovery payment overdue 最老记录年龄阈值秒数，省略时为 900 秒。
@@ -86,6 +89,7 @@ impl Default for OperationsAlertWorkerConfig {
             delivery_manual_reconcile_count_threshold: 1,
             fulfillment_backlog_count_threshold: 1,
             fulfillment_backlog_age_seconds: 15 * 60,
+            fulfillment_collection_overdue_age_seconds: 72 * 3_600,
             recovery_overdue_count_threshold: 1,
             recovery_overdue_age_seconds: 15 * 60,
             world_id: "main".to_owned(),
@@ -139,6 +143,9 @@ impl OperationsAlertWorkerConfig {
             fulfillment_backlog_age_threshold: std::time::Duration::from_secs(
                 self.fulfillment_backlog_age_seconds,
             ),
+            fulfillment_collection_overdue_age_threshold: std::time::Duration::from_secs(
+                self.fulfillment_collection_overdue_age_seconds,
+            ),
             recovery_overdue_count_threshold: self.recovery_overdue_count_threshold,
             recovery_overdue_age_threshold: std::time::Duration::from_secs(
                 self.recovery_overdue_age_seconds,
@@ -161,6 +168,24 @@ mod tests {
         let config = OperationsAlertWorkerConfig::default();
         assert!(config.scan_enabled());
         assert!(!config.notify_enabled());
+    }
+
+    /// 长期未领取阈值省略时为 72 小时，可单独覆盖，并原样进入告警策略。
+    #[test]
+    fn collection_overdue_threshold_defaults_to_three_days() {
+        let config = OperationsAlertWorkerConfig::default();
+        assert_eq!(config.fulfillment_collection_overdue_age_seconds, 259_200);
+        assert_eq!(
+            config.policy().fulfillment_collection_overdue_age_threshold,
+            std::time::Duration::from_secs(259_200)
+        );
+        let custom: OperationsAlertWorkerConfig =
+            toml::from_str("fulfillment_collection_overdue_age_seconds = 86400")
+                .expect("阈值字段必须可解析");
+        assert_eq!(
+            custom.policy().fulfillment_collection_overdue_age_threshold,
+            std::time::Duration::from_secs(86_400)
+        );
     }
 
     #[test]

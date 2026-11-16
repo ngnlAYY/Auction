@@ -241,6 +241,7 @@ fn valid_alerts(value: &Value) -> bool {
             ("delivery_manual_reconcile_count_threshold", 1, 9007199254740991),
             ("fulfillment_backlog_count_threshold", 1, 9007199254740991),
             ("fulfillment_backlog_age_seconds", 1, 2592000),
+            ("fulfillment_collection_overdue_age_seconds", 1, 2592000),
             ("recovery_overdue_count_threshold", 1, 9007199254740991),
             ("recovery_overdue_age_seconds", 1, 2592000),
         ],
