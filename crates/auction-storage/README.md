@@ -86,7 +86,7 @@ COD 实收路径的 `stage` 集合（`transaction_*`、`runtime_generation`、`w
 | 命令组合 | [commands](src/database/commands)（竞价、生命周期与 Admin 邮件/规则/runtime 命令组合器） |
 | 拍卖与公开读 | [auction](src/database/auction)（竞价事务、排期、慢速代理、录入目标、密钥信封；`snapshot.rs` 是 SettlementAuctionSnapshot 的唯一行投影）、[public](src/database/public)（拍卖/lot/历史/黑名单/补偿池/履约进度/世界/规则；`lot_code.rs` 是竞价日志与履约进度共用的公开 lot 代码 SQL 片段） |
 | Admin 与账户 | [admin](src/database/admin)、[accounts](src/database/accounts)（外部凭据、用户与登录会话） |
-| 结算与资金 | [settlement](src/database/settlement)（现金账本、履约、调度、报表、策略、目录与补偿冲正） |
+| 结算与资金 | [settlement](src/database/settlement)（现金账本、履约、调度、报表、策略、目录、补偿冲正与结算退件案件：案件投影、命令/事件/领回事实、持久 Take、补寄授权与资金返还，见[docs/guide/mail-flows.md#结算退件](../../docs/guide/mail-flows.md#结算退件)） |
 | 投递与恢复 | [delivery](src/database/delivery)（outbox、发送围栏、处置事实、装备损失、人工 Sent）、[recovery](src/database/recovery) |
 | 邮件与论坛 | [mail](src/database/mail)（轮询、入站、检查点、邮箱维护与通知事实）、[forum](src/database/forum)、[lot_watch](src/database/lot_watch) |
 | 实时与运维 | [realtime](src/database/realtime)（公开回放、竞价事件提交后补号；非竞价事件的同事务取号、写入与共用负载只经 `append.rs`，Admin 重放副本除外）、[operations](src/database/operations)（告警、资产对账、一致性巡检、SLI、审计与进程健康、运行时开关、通知模板修订） |
