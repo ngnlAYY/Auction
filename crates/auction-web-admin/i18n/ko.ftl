@@ -1736,6 +1736,7 @@ alert-console-acknowledged = 확인됨
 alert-console-silenced-until = 음소거 만료
 alert-console-acknowledge = 확인
 alert-console-silence = 음소거
+alert-console-silence-duration = 음소거 기간
 alert-console-reason = 메모(선택, 작업 기록에 저장)
 alert-console-empty = 조건에 맞는 알림이 없습니다
 alert-console-action-ok = 작업이 기록되었습니다

@@ -1737,6 +1737,7 @@ alert-console-acknowledged = Acknowledged
 alert-console-silenced-until = Silenced until
 alert-console-acknowledge = Acknowledge
 alert-console-silence = Silence
+alert-console-silence-duration = Silence duration
 alert-console-reason = Note (optional, recorded with the action)
 alert-console-empty = No alerts match the current filter
 alert-console-action-ok = Action recorded
