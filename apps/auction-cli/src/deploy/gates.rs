@@ -1,5 +1,5 @@
-//! 部署前的数据库与外部程序门禁：在途发送、迁移版本、旧 CLI 版本与备份双 CLI 校验。
-//! 所有查询都是有界只读；外部程序以固定参数与超时调用，不经过 shell。
+//! 部署前的数据库与外部程序门禁：在途发送、迁移版本与兼容后缀、停机备份的新旧 CLI 双校验，
+//! 以及安装目录推导。所有查询都是有界只读；外部程序以固定参数与超时调用，不经过 shell。
 
 use std::{
     path::{Path, PathBuf},
@@ -16,7 +16,7 @@ use tokio::process::Command;
 
 use crate::database::{DatabaseTarget, preflight, with_store};
 
-/// 旧 CLI 单次调用的硬上限；`db status` 与 `backup verify` 都是短命令。
+/// 新旧 CLI 单次 `backup verify` 调用的硬上限；离线校验是短命令。
 const CLI_TIMEOUT: Duration = Duration::from_secs(300);
 /// 在途发送门禁的轮询间隔。
 const GATE_POLL: Duration = Duration::from_secs(1);
@@ -105,8 +105,9 @@ pub(crate) async fn verify_backup_with_cli(
     Ok(())
 }
 
-/// 回退门禁：高于旧程序的迁移必须连续、成功且逐条登记为 compatible；判定与 readiness 共用
-/// [`check_compatible_suffix`]。数据库版本等于旧程序版本时，残留的失败迁移记录同样拒绝。
+/// 回退门禁：高于目标角色程序内嵌 schema 的迁移必须连续、成功且逐条登记为 compatible；判定与
+/// readiness 共用 [`check_compatible_suffix`]。数据库版本等于目标版本时，残留的失败迁移记录同样
+/// 拒绝。
 pub(crate) async fn require_compatible_suffix(
     config: &AppConfig,
     from_version: i64,

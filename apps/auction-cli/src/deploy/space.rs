@@ -1,11 +1,13 @@
 //! 停机前的磁盘空间门禁：估算停机之后才写入的停机备份（只有 deploy）、旧程序保留与安装临时
-//! 文件，按文件系统合并后与非特权可用空间比较，并沿用 Worker 配置 `[backup]` 的余量阈值；不足
-//! 就在停机前拒绝。deploy 与 rollback 共用。
+//! 文件，按文件系统合并后与非特权可用空间比较；不足就在停机前拒绝。deploy 与 rollback 共用估算，
+//! 余量策略由调用方显式给出：deploy 的停机备份与定时备份同口径，沿用 Worker 配置 `[backup]` 的
+//! 字节与比例下限；rollback 只写反向回滚记录与安装临时文件，按实际写入/替换字节加固定 64 MiB
+//! 余量，不套定时备份的比例下限。
 //!
 //! 估算依据：停机备份取 `pg_database_size`（custom 格式经压缩且不含索引数据，是偏保守的上界）；
-//! 旧程序保留取安装目录当前四个程序的字节合计；安装取最大的单个新或旧程序（同目录临时文件，
-//! 安装中途失败换回时临时副本是旧程序）加各程序新旧大小的正增量合计（替换后旧文件即释放，正增量
-//! 是净占用）。估算只是检查时刻的快照，
+//! 旧程序保留取安装目录中将被替换的程序（deploy 四个，rollback 三个角色）的字节合计；安装取最大
+//! 的单个新或旧程序（同目录临时文件，安装中途失败换回时临时副本是旧程序）加各程序新旧大小的
+//! 正增量合计（替换后旧文件即释放，正增量是净占用）。估算只是检查时刻的快照，
 //! 不预留空间，也不替代停机后各步骤自身的失败处理。文件系统按设备号合并：btrfs 子卷等共享
 //! 存储池的布局各有设备号，合计需求会被低估。
 
@@ -19,8 +21,47 @@ use anyhow::Context;
 use auction_config::BackupConfig;
 use serde::Serialize;
 
-use super::artifact::REQUIRED_BINARIES;
 use crate::support::files::{DiskUsage, disk_usage};
+
+/// rollback 的独立余量：扣除实际写入后每个文件系统至少还留 64 MiB。
+pub(super) const ROLLBACK_MIN_FREE_BYTES: u64 = 64 * 1024 * 1024;
+
+/// 停机前空间门禁的余量策略。
+#[derive(Debug, Clone, Copy)]
+pub(super) enum SpacePolicy<'a> {
+    /// deploy：停机备份与定时备份同口径，沿用 Worker `[backup]` 的字节与比例下限。
+    Backup(&'a BackupConfig),
+    /// rollback：只按实际写入/替换字节加 [`ROLLBACK_MIN_FREE_BYTES`]，不设比例下限。
+    Rollback,
+}
+
+impl SpacePolicy<'_> {
+    fn margin(self) -> Margin {
+        match self {
+            Self::Backup(config) => Margin {
+                min_free_bytes: config.min_free_bytes,
+                min_free_percent: config.min_free_percent,
+            },
+            Self::Rollback => {
+                Margin { min_free_bytes: ROLLBACK_MIN_FREE_BYTES, min_free_percent: 0 }
+            }
+        }
+    }
+
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Backup(_) => "backup_config",
+            Self::Rollback => "rollback_fixed_margin",
+        }
+    }
+
+    const fn source(self) -> &'static str {
+        match self {
+            Self::Backup(_) => "Worker 配置 [backup] 的 min_free_bytes/min_free_percent",
+            Self::Rollback => "rollback 固定余量 64 MiB，不使用 [backup] 的比例下限",
+        }
+    }
+}
 
 /// 停机后某一类写入落在 `path` 所在文件系统上的字节数。
 struct Demand {
@@ -49,16 +90,20 @@ struct Margin {
 
 /// 估算停机后写入所需空间并逐个文件系统判定；返回写入报告的估算与判定，任一文件系统不足即
 /// 失败（错误同样给出所需与可用字节），调用方必须在停机前调用。`backup` 是停机备份的目录与
-/// 库大小上界（rollback 不备份时为 None），`incoming` 是待安装程序按名称的字节数。
+/// 库大小上界（rollback 不备份时为 None），`programs` 是本次将被替换（也即被保留）的程序及其
+/// 待安装字节数。
 pub(super) fn require_space(
     backup: Option<(&Path, u64)>,
     state_dir: &Path,
     install_dir: &Path,
-    incoming: &[(&str, u64)],
-    config: &BackupConfig,
+    programs: &[(&str, u64)],
+    policy: SpacePolicy<'_>,
 ) -> anyhow::Result<serde_json::Value> {
-    let mut sizes = Vec::with_capacity(REQUIRED_BINARIES.len());
-    for name in REQUIRED_BINARIES {
+    if programs.is_empty() {
+        anyhow::bail!("待安装程序为空");
+    }
+    let mut sizes = Vec::with_capacity(programs.len());
+    for (name, new) in programs {
         let path = install_dir.join(name);
         // 与保留旧程序的要求一致：必须是非符号链接、非空的普通文件，否则停机后保留必然失败。
         let metadata = fs::symlink_metadata(&path)
@@ -66,12 +111,7 @@ pub(super) fn require_space(
         if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() == 0 {
             anyhow::bail!("当前安装程序不是可保留的普通文件：{}", path.display());
         }
-        let new = incoming
-            .iter()
-            .find(|(incoming, _)| *incoming == name)
-            .map(|(_, bytes)| *bytes)
-            .with_context(|| format!("待安装程序缺少 {name}"))?;
-        sizes.push((new, metadata.len()));
+        sizes.push((*new, metadata.len()));
     }
     let retain_bytes = sizes.iter().fold(0_u64, |total, (_, old)| total.saturating_add(*old));
     let install_bytes = install_bytes(&sizes);
@@ -107,8 +147,7 @@ pub(super) fn require_space(
         }
         located.push((device, demand));
     }
-    let margin =
-        Margin { min_free_bytes: config.min_free_bytes, min_free_percent: config.min_free_percent };
+    let margin = policy.margin();
     let filesystems = evaluate(located, &usage, margin);
     let shortages = filesystems
         .iter()
@@ -131,11 +170,11 @@ pub(super) fn require_space(
     if !shortages.is_empty() {
         anyhow::bail!(
             "停机后写入所需磁盘空间不足：{}；扣除后还须保留至少 {} 字节且不少于总量的 {}%\
-             （Worker 配置 [backup] 的 min_free_bytes/min_free_percent）。清理或扩容后重试，\
-             尚未停止任何服务",
+             （{}）。清理或扩容后重试，尚未停止任何服务",
             shortages.join("；"),
             margin.min_free_bytes,
-            margin.min_free_percent
+            margin.min_free_percent,
+            policy.source()
         );
     }
     Ok(serde_json::json!({
@@ -145,10 +184,11 @@ pub(super) fn require_space(
             "install_temporary_bytes": install_bytes,
             "basis": {
                 "shutdown_backup": "pg_database_size，custom 格式备份的保守上界",
-                "retained_binaries": "安装目录当前四个程序的字节合计",
+                "retained_binaries": "安装目录中将被替换的程序（deploy 四个，rollback 三个角色）的字节合计",
                 "install_temporary": "最大单个新或旧程序（失败换回时临时文件是旧程序）加各程序新旧大小的正增量合计",
             },
         },
+        "policy": policy.name(),
         "min_free_bytes": margin.min_free_bytes,
         "min_free_percent": margin.min_free_percent,
         "filesystems": filesystems,
@@ -209,8 +249,12 @@ mod tests {
 
     use auction_config::BackupConfig;
 
-    use super::{Demand, Margin, evaluate, install_bytes, require_space};
+    use super::{
+        Demand, Margin, ROLLBACK_MIN_FREE_BYTES, SpacePolicy, evaluate, install_bytes,
+        require_space,
+    };
     use crate::deploy::artifact::REQUIRED_BINARIES;
+    use crate::deploy::install::ROLE_BINARIES;
     use crate::support::files::DiskUsage;
 
     struct TempRoot(PathBuf);
@@ -283,9 +327,10 @@ mod tests {
         let backup = root.directory("backups");
         let state = root.directory("state");
         let config = unbounded();
+        let policy = SpacePolicy::Backup(&config);
         let incoming = incoming();
 
-        let report = require_space(Some((&backup, 1)), &state, &install, &incoming, &config)
+        let report = require_space(Some((&backup, 1)), &state, &install, &incoming, policy)
             .expect("小需求通过");
         let filesystems = report["filesystems"].as_array().expect("文件系统列表");
         assert_eq!(filesystems.len(), 1, "同一文件系统的需求合并");
@@ -294,9 +339,10 @@ mod tests {
         assert_eq!(report["estimate"]["retained_binaries_bytes"], retained);
         assert_eq!(report["estimate"]["shutdown_backup_bytes"], 1);
         assert_eq!(filesystems[0]["purposes"].as_array().expect("用途").len(), 3);
+        assert_eq!(report["policy"], "backup_config");
 
         let error =
-            require_space(Some((&backup, u64::MAX / 4)), &state, &install, &incoming, &config)
+            require_space(Some((&backup, u64::MAX / 4)), &state, &install, &incoming, policy)
                 .expect_err("超大需求必须拒绝");
         let text = format!("{error:#}");
         assert!(
@@ -304,7 +350,7 @@ mod tests {
         );
 
         fs::remove_file(install.join("auction-cli")).expect("移除安装程序");
-        assert!(require_space(Some((&backup, 1)), &state, &install, &incoming, &config).is_err());
+        assert!(require_space(Some((&backup, 1)), &state, &install, &incoming, policy).is_err());
     }
 
     /// 与保留旧程序的要求一致：零字节的当前程序在停机前就拒绝，不等到停机后保留时才失败。
@@ -318,25 +364,64 @@ mod tests {
             &root.directory("state"),
             &install,
             &incoming(),
-            &unbounded(),
+            SpacePolicy::Backup(&unbounded()),
         )
         .expect_err("零字节程序必须拒绝");
         assert!(format!("{error:#}").contains("auction-worker"));
     }
 
-    /// rollback 不做停机备份：只有保留与安装两类需求；待安装程序缺项同样拒绝。
+    /// rollback 不做停机备份，只替换三个角色：只有保留与安装两类需求，保留字节只计三个角色，
+    /// 余量为固定 64 MiB、不设比例；安装目录缺少待替换的角色程序同样拒绝。
     #[test]
-    fn rollback_space_has_no_backup_demand() {
+    fn rollback_space_counts_only_the_three_roles() {
         let root = TempRoot::new();
         let install = root.install();
         let state = root.directory("state");
-        let report =
-            require_space(None, &state, &install, &incoming(), &unbounded()).expect("回退需求通过");
+        let roles = incoming()
+            .into_iter()
+            .filter(|(name, _)| ROLE_BINARIES.contains(name))
+            .collect::<Vec<_>>();
+        assert_eq!(roles.len(), 3);
+        let report = require_space(None, &state, &install, &roles, SpacePolicy::Rollback)
+            .expect("回退需求通过");
         assert!(report["estimate"]["shutdown_backup_bytes"].is_null());
+        let retained: u64 =
+            ROLE_BINARIES.iter().map(|name| format!("old-{name}").len() as u64).sum();
+        assert_eq!(report["estimate"]["retained_binaries_bytes"], retained);
+        assert_eq!(report["policy"], "rollback_fixed_margin");
+        assert_eq!(report["min_free_bytes"], ROLLBACK_MIN_FREE_BYTES);
+        assert_eq!(report["min_free_percent"], 0);
         let purposes = report["filesystems"][0]["purposes"].as_array().expect("用途").clone();
         assert_eq!(purposes, vec!["retained_binaries", "install_temporary"]);
-        let missing = &incoming()[..3];
-        assert!(require_space(None, &state, &install, missing, &unbounded()).is_err());
+        fs::remove_file(install.join("auction-worker")).expect("移除角色程序");
+        assert!(require_space(None, &state, &install, &roles, SpacePolicy::Rollback).is_err());
+    }
+
+    /// 够回退的实际需求时，即使低于定时备份的 1 GiB/10% 余量也按回退策略通过；不足实际需求加
+    /// 64 MiB 时两种策略都拒绝。
+    #[test]
+    fn rollback_policy_does_not_inherit_the_backup_margin() {
+        let backup = BackupConfig {
+            min_free_bytes: 1024 * 1024 * 1024,
+            min_free_percent: 10,
+            ..BackupConfig::default()
+        };
+        let gib = 1024 * 1024 * 1024_u64;
+        let check = |required, policy: SpacePolicy<'_>| {
+            evaluate(
+                vec![(3, demand("retained_binaries", "/var/lib/auction/deployment", required))],
+                &usage(&[(3, 100 * gib, 2 * gib)]),
+                policy.margin(),
+            )
+            .remove(0)
+            .passed
+        };
+        let rollback_need = 600 * 1024 * 1024;
+        assert!(check(rollback_need, SpacePolicy::Rollback), "剩余 1.4 GiB 远超 64 MiB");
+        assert!(!check(rollback_need, SpacePolicy::Backup(&backup)), "低于 10% 比例下限");
+        let tight = 2 * gib - ROLLBACK_MIN_FREE_BYTES + 1;
+        assert!(!check(tight, SpacePolicy::Rollback), "扣除后不足 64 MiB 拒绝");
+        assert!(!check(3 * gib, SpacePolicy::Rollback), "超过可用空间始终拒绝");
     }
 
     #[test]

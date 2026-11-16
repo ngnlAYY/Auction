@@ -1,25 +1,33 @@
-//! `auction-cli rollback`：换回 `deploy` 保留的旧程序。
+//! `auction-cli rollback`：把三个运行角色换回 `deploy` 保留的旧程序，安装目录中的 auction-cli
+//! 保持不变（它要继续管理可能已超前的数据库，见 `preconditions`）。
 //!
-//! 只允许数据库没有新增迁移、或新增迁移全部登记为 compatible 的区间；含 breaking 迁移的回退
-//! 必须按 `ops/deploy/RECOVERY.md` 恢复升级前备份并做外部历史核对。回退同样先过时段、磁盘
-//! 空间与在途发送门禁，并把当前程序保留成新的回滚记录，使回退本身可逆。
+//! 只允许数据库没有新增迁移、或新增迁移全部登记为 compatible 的区间；跨迁移回退还要求三角色
+//! 有效配置显式为 compatible 且目标程序支持该判定。含 breaking 迁移的回退必须按
+//! `ops/deploy/RECOVERY.md` 恢复升级前备份并做外部历史核对。回退同样先过安装目录信任、时段、
+//! 磁盘空间与在途发送门禁，并把当前三个角色程序保留成新的回滚记录，使回退本身可逆。
 
-use std::{cmp::Ordering, path::Path, time::Duration};
+use std::{path::Path, time::Duration};
 
 use anyhow::Context;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use super::install::{self, RollbackRecord};
-use super::receipts::{FailedReceipt, Failure, settle};
+use super::install::{self, ROLE_BINARIES, RetainRequest, RetainedIdentity, RollbackRecord};
+use super::receipts::{FailedReceipt, Failure, roles_match, settle};
 use super::verification::install_dir_artifacts;
-use super::{gates, role_binary, running_roles, shared_service_uid, space, unit_states};
+use super::{gates, role_binary, running_roles, space, unit_states};
 use crate::app::{print_json, progress};
 use crate::cli::{RollbackArgs, UnitArgs};
 use crate::config_dir::{ConfigDir, Deployment};
 use crate::receipt::{self, Action, DeployRecord, DeploymentReceipt, Outcome, ReceiptContext};
 use crate::service::{self, ManagedRole, Systemctl};
 use crate::support::digest::sha256_path;
+
+mod guidance;
+mod identity;
+mod preconditions;
+
+use self::guidance::{install_failed, stopped_before_install};
 
 pub(crate) async fn run(config_dir: &ConfigDir, args: RollbackArgs) -> anyhow::Result<()> {
     let RollbackArgs {
@@ -56,36 +64,43 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: RollbackArgs) -> anyhow::R
         );
     }
     install::require_install_dir(&install_dir)?;
-    let service_uid = shared_service_uid(&states)?;
     let deployed_receipt = receipt::read(&units.state_dir, record.deploy_receipt_id)
         .context("读取回滚记录对应的部署回执失败")?;
     // 启动失败也会发布同 ID 的失败部署回执：新程序已安装但未就绪，仍必须允许恢复旧程序。
-    if !matches!(deployed_receipt.outcome, Outcome::Succeeded | Outcome::Failed) {
-        anyhow::bail!("回滚记录对应的部署回执不是可回滚状态");
+    if !matches!(deployed_receipt.outcome, Outcome::Succeeded | Outcome::Failed)
+        || deployed_receipt.deploy.is_none()
+    {
+        anyhow::bail!("回滚记录对应的部署回执不是可回滚状态或缺少制品证据");
     }
-    let deployed = deployed_receipt.deploy.clone().context("回滚记录对应的部署回执缺少制品证据")?;
-    require_installed_matches(&deployed_receipt, &deployed.cli_sha256, &install_dir)?;
+    preconditions::require_installed_matches(&deployed_receipt, &install_dir)?;
+    let kept_cli_sha256 = preconditions::require_kept_cli(&install_dir)?;
 
     let gate =
         service::shutdown_gate(config_dir, Some(&deployment.worker), "rollback", &shutdown).await?;
     let current_version = gates::database_version(&deployment.worker).await?;
-    let suffix =
-        gates::require_compatible_suffix(&deployment.worker, record.previous_expected_version)
-            .await?;
-    // 停机后才写入的反向回滚记录与旧程序安装临时文件：空间不足必须在停机前发现。安装临时文件
-    // 按最大的单个待装或当前程序加各程序的正增量估算，已覆盖中途失败时从反向记录换回回退前
-    // 程序的临时副本。
-    let incoming = record
-        .binaries
-        .iter()
-        .map(|binary| (binary.name.as_str(), binary.bytes))
-        .collect::<Vec<_>>();
+    let cli_schema = auction_storage::postgres_expected_migration_version();
+    preconditions::require_cli_matches_database(cli_schema, current_version)?;
+    let (target_schema, target_schema_source) = record.target_schema();
+    let suffix = gates::require_compatible_suffix(&deployment.worker, target_schema).await?;
+    let readiness = preconditions::require_compatible_readiness(
+        &deployment.migration_compatibility_modes,
+        target_schema,
+        current_version,
+    )?;
+    // 停机后才写入的反向回滚记录（只保留三个角色）与角色程序安装临时文件：空间不足必须在停机
+    // 前发现。余量只按实际写入/替换字节加固定 64 MiB，不套定时备份的比例下限。
+    let incoming = ROLE_BINARIES
+        .into_iter()
+        .map(|name| {
+            record.binary(name).map(|binary| (name, binary.bytes)).context("回滚记录缺少角色程序")
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
     let disk_space = space::require_space(
         None,
         &units.state_dir,
         &install_dir,
         &incoming,
-        &deployment.worker.backup,
+        space::SpacePolicy::Rollback,
     )
     .context("磁盘空间门禁失败")?;
     let in_flight = gates::require_no_in_flight_sends(
@@ -101,9 +116,12 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: RollbackArgs) -> anyhow::R
             "shutdown": gate,
             "versions": {
                 "database": current_version,
-                "target_expected_version": record.previous_expected_version,
+                "target_role_schema_version": target_schema,
+                "target_role_schema_source": target_schema_source,
+                "kept_cli_schema_version": cli_schema,
                 "suffix": suffix,
             },
+            "readiness": readiness,
             "disk_space": disk_space,
             "in_flight_sends": in_flight,
         },
@@ -113,21 +131,27 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: RollbackArgs) -> anyhow::R
         report["dry_run"] = true.into();
         report["planned_steps"] = serde_json::json!([
             "按 Public → Admin → Worker 停止三角色",
-            "再次保留当前程序，使本次回退可逆",
-            "从回滚记录逐个原子替换为旧程序（四个程序整体不是原子的；中途失败时从反向回滚记录换回已替换的程序、不启动；不执行迁移）",
+            "把当前三个角色程序保留为新的回滚记录，使本次回退可逆",
+            "从回滚记录逐个原子替换三个角色程序（root:root 0755；整体不是原子的，中途失败时从反向回滚记录换回已替换的程序、不启动；不执行迁移），安装目录中的 auction-cli 保持不变",
             "按 Worker → Admin → Public 启动并等待 readiness",
-            "复核运行程序摘要与回滚记录一致",
+            "复核运行程序摘要与回滚记录一致、auction-cli 未变",
             "追加回退回执",
         ]);
         return print_json(&report);
     }
 
     let shutdown_gate = serde_json::to_value(&gate)?;
-    // 反向记录与其回退回执共享同一标识，和 deploy 一致，回退本身也能被再次读回；反向回执的
-    // 部署证据只由回滚记录推导，停机前构造，停机后的任何失败都能以同一标识发布。
+    // 反向记录与其回退回执共享同一标识，和 deploy 一致，回退本身也能被再次读回；回退回执的
+    // 部署证据只由目标组件的事实构造，停机前完成，停机后的任何失败都能以同一标识发布。
     let reverse_receipt_id = Uuid::new_v4();
-    let current_source_commit = deployed.source_commit.clone();
-    let reverse_deploy = reverse_deploy_record(&record, deployed, reverse_receipt_id)?;
+    let cli = identity::kept_cli_identity(&deployed_receipt, &kept_cli_sha256, cli_schema);
+    let reverse_deploy = identity::rollback_deploy_record(
+        &record,
+        &install_dir,
+        current_version,
+        cli,
+        reverse_receipt_id,
+    );
     let plan = RollbackPlan {
         units: &units,
         systemctl: &systemctl,
@@ -136,11 +160,11 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: RollbackArgs) -> anyhow::R
         record_directory: &record_directory,
         install_dir: &install_dir,
         database_version: current_version,
-        service_uid,
         startup_timeout: Duration::from_secs(startup_timeout_seconds),
         context: &context,
         started_at,
-        current_source_commit: &current_source_commit,
+        deployed_receipt: &deployed_receipt,
+        kept_cli_sha256: &kept_cli_sha256,
         reverse_receipt_id,
         deploy: &reverse_deploy,
     };
@@ -164,13 +188,15 @@ struct RollbackPlan<'a> {
     record: &'a RollbackRecord,
     record_directory: &'a Path,
     install_dir: &'a Path,
-    /// 停机前门禁读到的数据库迁移版本；回退不执行迁移，停机后的失败仍以它判断恢复路径。
+    /// 停机前门禁读到的数据库迁移版本；回退不执行迁移，停机后的失败仍以它描述恢复路径。
     database_version: i64,
-    service_uid: u32,
     startup_timeout: Duration,
     context: &'a ReceiptContext,
     started_at: DateTime<Utc>,
-    current_source_commit: &'a str,
+    /// 回滚记录对应的部署回执；它描述当前安装的三个角色程序。
+    deployed_receipt: &'a DeploymentReceipt,
+    /// 停机前读到的安装目录 auction-cli 摘要；回退前后必须不变。
+    kept_cli_sha256: &'a str,
     reverse_receipt_id: Uuid,
     deploy: &'a DeployRecord,
 }
@@ -184,15 +210,24 @@ async fn apply(
     let RollbackPlan { units, systemctl, record, install_dir, reverse_receipt_id, .. } = *plan;
     progress("停止三角色（Public → Admin → Worker）");
     service::stop_all(systemctl).await.map_err(Failure::unrecorded)?;
-    progress("保留当前程序以便再次前进");
-    let reverse = install::retain(
-        &units.state_dir,
-        reverse_receipt_id,
+    progress("保留当前三个角色程序以便再次前进");
+    let request = RetainRequest {
+        deploy_receipt_id: reverse_receipt_id,
         install_dir,
-        record.deployed_expected_version,
-        record.previous_expected_version,
-        Some(plan.current_source_commit),
-    )
+        programs: &ROLE_BINARIES,
+        observed_database_version: plan.database_version,
+        installed_role_schema_version: record.retained_roles.schema_version,
+    };
+    let reverse = install::retain(&units.state_dir, &request, |binaries| {
+        // 停机前已核对安装目录是部署回执的版本；保留副本必须仍是同一组程序，身份才属于它们。
+        if !roles_match(plan.deployed_receipt, binaries) {
+            anyhow::bail!("安装目录的角色程序在停机前后发生变化，拒绝把部署回执的身份记给它们");
+        }
+        Ok(RetainedIdentity {
+            roles: identity::replaced_roles_identity(plan.deployed_receipt, record),
+            cli: None,
+        })
+    })
     .context("保留当前程序失败")
     .map_err(|error| {
         let reverse_directory = install::record_dir(&units.state_dir, reverse_receipt_id);
@@ -212,13 +247,12 @@ async fn apply(
         context: plan.context,
         deploy: plan.deploy,
     };
-    progress("安装回滚记录中的旧程序");
+    progress("安装回滚记录中的三个角色程序（auction-cli 保持不变）");
     let reverse_directory = install::record_dir(&units.state_dir, reverse.record_id);
     if let Err(failure) = install::install_retained(
         record,
         plan.record_directory,
         install_dir,
-        plan.service_uid,
         &reverse,
         &reverse_directory,
     ) {
@@ -227,6 +261,18 @@ async fn apply(
         // 失败回执记录安装目录实际文件的摘要（已换回时是回退前的程序，否则可能新旧混合），
         // 不冒充回滚记录的摘要；本次调用只发布这一条。
         return Err(failed.publish(failure, None, Ok(install_dir_artifacts(install_dir))));
+    }
+    if let Err(error) = require_cli_unchanged(install_dir, plan.kept_cli_sha256) {
+        let failure = error.context(format!(
+            "三个角色程序已换回但安装目录的 auction-cli 在回退期间被改变，未启动服务；人工核对后可用 \
+             auction-cli rollback --receipt-id {} 重新前进，或按 ops/deploy/RECOVERY.md 恢复",
+            reverse.record_id
+        ));
+        return Err(failed.publish(
+            failure,
+            None,
+            installed_retained_artifacts(record, install_dir),
+        ));
     }
     let launch = match service::launch(
         systemctl,
@@ -240,7 +286,7 @@ async fn apply(
         Ok(launch) => launch,
         Err(error) => {
             let failure = error.context(format!(
-                "旧程序已安装但启动失败；服务当前停止。可用 auction-cli rollback \
+                "旧角色程序已安装但启动失败；服务当前停止。可用 auction-cli rollback \
                      --receipt-id {} 重新前进，或按 ops/deploy/RECOVERY.md 恢复",
                 reverse.record_id
             ));
@@ -253,7 +299,7 @@ async fn apply(
         Ok(artifacts) => artifacts,
         Err(error) => {
             let failure = error.context(format!(
-                "旧程序已启动但运行程序核对失败；可用 auction-cli rollback --receipt-id {} \
+                "旧角色程序已启动但运行程序核对失败；可用 auction-cli rollback --receipt-id {} \
                  重新前进，或按 ops/deploy/RECOVERY.md 恢复",
                 reverse.record_id
             ));
@@ -287,139 +333,12 @@ async fn apply(
     }))
 }
 
-/// 回退停机后、安装前的失败：安装目录仍是回退前的程序，数据库未改变，处置见
-/// [`pre_rollback_recovery`]。反向记录目录可能已部分写出：没有 `record.json` 时省略
-/// `--receipt-id` 的回退会跳过它，已写出时会选中它并因没有对应的部署回执而拒绝，因此一并点名
-/// 并指引显式重试。
-fn stopped_before_install(
-    error: anyhow::Error,
-    install_dir: &Path,
-    database_version: i64,
-    record: &RollbackRecord,
-    reverse_directory: &Path,
-) -> Failure {
-    Failure::unrecorded(error.context(format!(
-        "回退在停机后、安装前中止：三角色已停止，{} 中仍是回退前的程序，数据库未改变（版本 \
-         {database_version}）；{}。本次的反向回滚记录目录 {} 若已部分写出，它没有对应的\
-         部署回执，不能作为回退目标：重试时显式带 --receipt-id（省略时只会跳过缺少 record.json \
-         的残留目录），人工核对后整目录删除它",
-        install_dir.display(),
-        pre_rollback_recovery(install_dir, database_version, record),
-        reverse_directory.display()
-    )))
-}
-
-/// 安装旧程序中途失败：数据库未改变，本次已替换的程序已尝试从反向回滚记录换回。换回并复核
-/// 成功时安装目录仍是回退前的程序，恢复指引与停机后、安装前的失败相同；反向记录已带失败回执，
-/// 省略 `--receipt-id` 会选中它并在安装目录核对处拒绝，因此重试必须显式指定原记录。换回未完成
-/// 时安装目录可能新旧混合，只给出人工换回的入口，不给启动或重试命令。
-fn install_failed(
-    failure: install::InstallArtifactFailure,
-    install_dir: &Path,
-    database_version: i64,
-    record: &RollbackRecord,
-    reverse_directory: &Path,
-) -> anyhow::Error {
-    if failure.restored {
-        return failure.error.context(format!(
-            "安装旧程序失败：三角色已停止，{} 中的四个程序已复核为回退前的程序（换回明细见下），\
-             数据库未改变（版本 {database_version}）；{}。本次的反向回滚记录 {} 带失败回执，\
-             省略 --receipt-id 的 rollback 会选中它并在安装目录核对处拒绝",
-            install_dir.display(),
-            pre_rollback_recovery(install_dir, database_version, record),
-            reverse_directory.display()
-        ));
-    }
-    failure.error.context(format!(
-        "安装旧程序失败且自动换回未完成：三角色已停止，数据库未改变（版本 {database_version}）；{} \
-         中的程序可能新旧混合，回退前的程序完整保留在 {}（摘要见 {}）。按 ops/deploy/RECOVERY.md \
-         的“安装中途失败的手工换回”核对摘要并换回后再处置（原回滚记录 {}）；换回前不要启动服务",
-        install_dir.display(),
-        reverse_directory.join("bin").display(),
-        reverse_directory.join(install::RECORD_FILE).display(),
-        record.record_id
-    ))
-}
-
-/// 安装目录仍是回退前的程序、数据库未改变时的处置。`service start` 总以安装目录 CLI 执行迁移，
-/// 只有数据库版本等于该程序的期望版本（回滚记录的 `deployed_expected_version`）时迁移才是空
-/// 操作；原部署在迁移完成前失败时数据库较低，这条命令会执行本次回退要避开的新迁移（含
-/// breaking 时之后再也无法回退），较高时迁移会拒绝未知的迁移历史，这两种情况只给出以原记录
-/// 重试回退的指引。
-fn pre_rollback_recovery(
-    install_dir: &Path,
-    database_version: i64,
-    record: &RollbackRecord,
-) -> String {
-    let cli = install_dir.join("auction-cli");
-    let expected = record.deployed_expected_version;
-    let retry = format!("auction-cli rollback --receipt-id {}", record.record_id);
-    match database_version.cmp(&expected) {
-        Ordering::Equal => format!(
-            "恢复原状请用 {} service start --owner-secrets <迁移 owner 凭据>（沿用本次的 \
-             --config-dir、--state-dir 与 unit 参数；数据库已是该程序的版本，迁移为空操作），或修复\
-             原因后用 {retry} 重试回退",
-            cli.display()
-        ),
-        Ordering::Less => format!(
-            "数据库低于该程序的期望版本 {expected}（原部署在迁移完成前失败）：不要用 {} service \
-             start 恢复原状，它会执行本次回退要避开的新迁移；修复原因后用 {retry} 重试回退",
-            cli.display()
-        ),
-        Ordering::Greater => format!(
-            "数据库高于该程序的期望版本 {expected}：{} service start 的迁移会因该程序未知的迁移历史\
-             而失败；修复原因后用 {retry} 重试回退",
-            cli.display()
-        ),
-    }
-}
-
-/// 反向回执描述回滚后实际安装的版本：CLI 摘要与来源提交取自回滚记录；沿用回滚前版本的
-/// 摘要会让再次前进时的安装目录核对失败。恢复点与演练只属于原部署，不带入反向回执。
-fn reverse_deploy_record(
-    record: &RollbackRecord,
-    deployed: DeployRecord,
-    reverse_receipt_id: Uuid,
-) -> anyhow::Result<DeployRecord> {
-    let mut deploy = deployed;
-    deploy.cli_sha256 = restored_cli_sha256(record)?;
-    if let Some(commit) = &record.previous_source_commit {
-        deploy.source_commit = commit.clone();
-    }
-    deploy.rollback_record_id = Some(reverse_receipt_id);
-    deploy.migration_drill_id = None;
-    deploy.backup_archive = None;
-    deploy.backup_manifest = None;
-    Ok(deploy)
-}
-
-/// 安装目录中的程序必须仍是该回滚记录对应的部署版本；否则回退目标不明确。
-fn require_installed_matches(
-    deployed: &DeploymentReceipt,
-    cli_sha256: &str,
-    install_dir: &Path,
-) -> anyhow::Result<()> {
-    let cli = install_dir.join("auction-cli");
-    let (sha256, _) = sha256_path(&cli).context("读取安装目录的 auction-cli 失败")?;
-    if sha256 != cli_sha256 {
-        anyhow::bail!("安装目录的 auction-cli 不是该回滚记录对应的部署版本");
-    }
-    for (role, name) in [
-        (ManagedRole::Worker, "auction-worker"),
-        (ManagedRole::Admin, "auction-admin-api"),
-        (ManagedRole::Public, "auction-public-api"),
-    ] {
-        let recorded = deployed
-            .artifacts
-            .iter()
-            .find(|artifact| artifact.role == role.name())
-            .and_then(|artifact| artifact.sha256.as_deref())
-            .with_context(|| format!("部署回执缺少 {} 的程序摘要", role.name()))?;
-        let (sha256, _) = sha256_path(&install_dir.join(name))
-            .with_context(|| format!("读取安装目录的 {name} 失败"))?;
-        if sha256 != recorded {
-            anyhow::bail!("安装目录的 {name} 不是该回滚记录对应的部署版本");
-        }
+/// rollback 从不替换 auction-cli：换回角色程序之后它的摘要必须与停机前相同。
+fn require_cli_unchanged(install_dir: &Path, expected_sha256: &str) -> anyhow::Result<()> {
+    let (sha256, _) =
+        sha256_path(&install_dir.join("auction-cli")).context("读取安装目录的 auction-cli 失败")?;
+    if sha256 != expected_sha256 {
+        anyhow::bail!("安装目录的 auction-cli 摘要与停机前不一致");
     }
     Ok(())
 }
@@ -465,230 +384,5 @@ fn installed_retained_artifacts(
     Ok(artifacts)
 }
 
-/// 反向回执必须记录实际安装的 CLI 摘要，不能沿用回滚前版本的摘要。
-fn restored_cli_sha256(record: &RollbackRecord) -> anyhow::Result<String> {
-    record
-        .binaries
-        .iter()
-        .find(|binary| binary.name == "auction-cli")
-        .map(|binary| binary.sha256.clone())
-        .context("回滚记录缺少 auction-cli 摘要")
-}
-
 #[cfg(test)]
-mod tests {
-    use std::path::Path;
-
-    use chrono::Utc;
-    use uuid::Uuid;
-
-    use super::{
-        install_failed, installed_retained_artifacts, restored_cli_sha256, reverse_deploy_record,
-        stopped_before_install,
-    };
-    use crate::deploy::install::{FORMAT, InstallArtifactFailure, RetainedBinary, RollbackRecord};
-    use crate::receipt::DeployRecord;
-
-    fn deployed(rollback_record_id: Uuid) -> DeployRecord {
-        DeployRecord {
-            artifact_directory: "/srv/artifact".to_owned(),
-            package: "auction-rust-0.1.0-aaaaaaaaaaaa".to_owned(),
-            source_commit: "f".repeat(40),
-            source_fingerprint: "b".repeat(64),
-            cli_sha256: "c".repeat(64),
-            install_directory: "/opt/auction/bin".to_owned(),
-            public_payload_sha256: "d".repeat(64),
-            admin_payload_sha256: "e".repeat(64),
-            migration_drill_id: Some("drill-1".to_owned()),
-            backup_archive: Some("/var/backups/auction/a.dump".to_owned()),
-            backup_manifest: Some("/var/backups/auction/a.dump.manifest".to_owned()),
-            rollback_record_id: Some(rollback_record_id),
-        }
-    }
-
-    fn record(cli_sha256: Option<&str>) -> RollbackRecord {
-        let mut binaries = cli_sha256
-            .map(|sha256| RetainedBinary {
-                name: "auction-cli".to_owned(),
-                sha256: sha256.to_owned(),
-                bytes: 1,
-            })
-            .into_iter()
-            .collect::<Vec<_>>();
-        for name in ["auction-worker", "auction-admin-api", "auction-public-api"] {
-            binaries.push(RetainedBinary {
-                name: name.to_owned(),
-                sha256: "c".repeat(64),
-                bytes: 2,
-            });
-        }
-        RollbackRecord {
-            format: FORMAT.to_owned(),
-            record_id: Uuid::new_v4(),
-            deploy_receipt_id: Uuid::new_v4(),
-            created_at: Utc::now(),
-            install_directory: "/opt/auction/bin".to_owned(),
-            previous_expected_version: 1,
-            deployed_expected_version: 2,
-            previous_source_commit: Some("a".repeat(40)),
-            binaries,
-        }
-    }
-
-    #[test]
-    fn rollback_receipt_uses_retained_cli_digest() {
-        let digest = "b".repeat(64);
-        assert_eq!(restored_cli_sha256(&record(Some(&digest))).expect("CLI 摘要"), digest);
-        assert!(restored_cli_sha256(&record(None)).is_err());
-    }
-
-    /// 反向回执在停机前由回滚记录推导：指向反向记录、换成旧 CLI 摘要与来源提交，
-    /// 不沿用原部署的恢复点与演练；记录缺 CLI 摘要时在停机前失败。
-    #[test]
-    fn reverse_deploy_record_describes_the_restored_version() {
-        let retained = record(Some(&"b".repeat(64)));
-        let reverse_id = Uuid::new_v4();
-        let reverse = reverse_deploy_record(&retained, deployed(retained.record_id), reverse_id)
-            .expect("反向回执");
-        assert_eq!(reverse.rollback_record_id, Some(reverse_id));
-        assert_eq!(reverse.cli_sha256, "b".repeat(64));
-        assert_eq!(Some(reverse.source_commit), retained.previous_source_commit);
-        assert!(reverse.migration_drill_id.is_none());
-        assert!(reverse.backup_archive.is_none() && reverse.backup_manifest.is_none());
-        let incomplete = record(None);
-        assert!(
-            reverse_deploy_record(&incomplete, deployed(incomplete.record_id), reverse_id).is_err()
-        );
-    }
-
-    /// 回退停机后、安装前的失败交给入口写通用回执；数据库已是安装目录程序的版本时，错误说明
-    /// 安装目录仍是回退前的程序，并给出带 --owner-secrets 与 --state-dir 的恢复命令，同时点名
-    /// 可能残缺的反向记录目录；原始原因保留在错误链末尾。
-    #[test]
-    fn stopped_before_install_describes_the_pre_rollback_state() {
-        let retained = record(Some(&"b".repeat(64)));
-        let failure = stopped_before_install(
-            anyhow::anyhow!("磁盘已满").context("保留当前程序失败"),
-            Path::new("/opt/auction/bin"),
-            retained.deployed_expected_version,
-            &retained,
-            Path::new("/var/lib/auction/rollback/reverse"),
-        );
-        assert!(!failure.recorded);
-        let text = format!("{:#}", failure.error);
-        assert!(
-            text.contains("/opt/auction/bin/auction-cli service start --owner-secrets"),
-            "{text}"
-        );
-        assert!(text.contains("--state-dir") && text.contains("数据库未改变"), "{text}");
-        assert!(text.contains("迁移为空操作"), "{text}");
-        assert!(text.contains(&format!("rollback --receipt-id {}", retained.record_id)), "{text}");
-        assert!(text.contains("/var/lib/auction/rollback/reverse"), "{text}");
-        assert!(text.ends_with("保留当前程序失败: 磁盘已满"), "{text}");
-    }
-
-    /// 原部署在迁移完成前失败（数据库低于安装目录程序的期望版本）或数据库更高时，安装目录
-    /// CLI 的 service start 不是空操作：错误不得给出它作为恢复命令，只指引以原记录重试回退。
-    #[test]
-    fn stopped_before_install_without_matching_schema_only_offers_retry() {
-        let retained = record(Some(&"b".repeat(64)));
-        for database_version in
-            [retained.previous_expected_version, retained.deployed_expected_version + 1]
-        {
-            let failure = stopped_before_install(
-                anyhow::anyhow!("磁盘已满").context("保留当前程序失败"),
-                Path::new("/opt/auction/bin"),
-                database_version,
-                &retained,
-                Path::new("/var/lib/auction/rollback/reverse"),
-            );
-            assert!(!failure.recorded);
-            let text = format!("{:#}", failure.error);
-            assert!(!text.contains("迁移为空操作"), "{text}");
-            assert!(!text.contains("service start --owner-secrets"), "{text}");
-            assert!(
-                text.contains(&format!("rollback --receipt-id {}", retained.record_id)),
-                "{text}"
-            );
-            assert!(text.contains(&format!("期望版本 {}", retained.deployed_expected_version)));
-            assert!(text.ends_with("保留当前程序失败: 磁盘已满"), "{text}");
-        }
-        let behind = stopped_before_install(
-            anyhow::anyhow!("磁盘已满"),
-            Path::new("/opt/auction/bin"),
-            retained.previous_expected_version,
-            &retained,
-            Path::new("/var/lib/auction/rollback/reverse"),
-        );
-        let text = format!("{:#}", behind.error);
-        assert!(text.contains("不要用") && text.contains("新迁移"), "{text}");
-    }
-
-    /// 安装旧程序中途失败的指引取决于自动换回：已换回并复核时说明安装目录仍是回退前的程序，
-    /// 恢复命令与停机后、安装前的失败相同（数据库低于期望版本时不给 service start），并提醒
-    /// 重试须显式带原记录；未完成时只指向人工换回与反向记录，不给任何启动命令。
-    #[test]
-    fn install_failure_guidance_follows_the_swap_back_result() {
-        let retained = record(Some(&"b".repeat(64)));
-        let install_dir = Path::new("/opt/auction/bin");
-        let reverse_directory = Path::new("/var/lib/auction/deployment/rollback/reverse");
-        let failure = |restored| InstallArtifactFailure {
-            error: anyhow::anyhow!("原子替换程序失败"),
-            restored,
-        };
-
-        let swapped = install_failed(
-            failure(true),
-            install_dir,
-            retained.deployed_expected_version,
-            &retained,
-            reverse_directory,
-        );
-        let text = format!("{swapped:#}");
-        assert!(text.contains("已复核为回退前的程序") && text.contains("数据库未改变"), "{text}");
-        assert!(
-            text.contains("/opt/auction/bin/auction-cli service start --owner-secrets"),
-            "{text}"
-        );
-        assert!(text.contains(&format!("rollback --receipt-id {}", retained.record_id)), "{text}");
-        assert!(text.contains("/var/lib/auction/deployment/rollback/reverse"), "{text}");
-        assert!(text.ends_with("原子替换程序失败"), "{text}");
-
-        let behind = install_failed(
-            failure(true),
-            install_dir,
-            retained.previous_expected_version,
-            &retained,
-            reverse_directory,
-        );
-        let text = format!("{behind:#}");
-        assert!(text.contains("已复核为回退前的程序") && text.contains("不要用"), "{text}");
-        assert!(!text.contains("service start --owner-secrets"), "{text}");
-
-        let mixed = install_failed(
-            failure(false),
-            install_dir,
-            retained.deployed_expected_version,
-            &retained,
-            reverse_directory,
-        );
-        let text = format!("{mixed:#}");
-        assert!(text.contains("自动换回未完成") && text.contains("可能新旧混合"), "{text}");
-        assert!(text.contains("安装中途失败的手工换回"), "{text}");
-        assert!(text.contains("/var/lib/auction/deployment/rollback/reverse/bin"), "{text}");
-        assert!(text.contains(&retained.record_id.to_string()), "{text}");
-        assert!(!text.contains("已复核为回退前的程序"), "{text}");
-        assert!(!text.contains("service start"), "{text}");
-        assert!(text.ends_with("原子替换程序失败"), "{text}");
-    }
-
-    #[test]
-    fn failed_rollback_receipt_uses_installed_retained_artifacts() {
-        let artifacts =
-            installed_retained_artifacts(&record(Some(&"b".repeat(64))), Path::new("/opt/bin"))
-                .expect("静态回执");
-        assert_eq!(artifacts.len(), 3);
-        assert!(artifacts.iter().all(|artifact| artifact.sha256.is_some()));
-        assert!(artifacts.iter().all(|artifact| artifact.path.is_some()));
-    }
-}
+mod tests;

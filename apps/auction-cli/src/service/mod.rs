@@ -21,7 +21,6 @@ mod systemd;
 use self::lifecycle::{endpoint, observe};
 use self::receipts::publish_receipt;
 pub(crate) use lifecycle::{launch, prepare, stop_all};
-pub(crate) use migration::service_uid;
 pub(crate) use receipts::{receipt_summary, record_failure};
 
 pub(crate) use guard::acquire as acquire_maintenance;

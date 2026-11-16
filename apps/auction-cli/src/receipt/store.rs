@@ -39,6 +39,17 @@ pub(crate) fn append(state_dir: &Path, receipt: &DeploymentReceipt) -> anyhow::R
 
 /// 按完成时间倒序列出回执；目录不存在表示还没有部署回执，不是读取失败。
 pub(crate) fn list(state_dir: &Path, limit: usize) -> anyhow::Result<Vec<DeploymentReceipt>> {
+    list_matching(state_dir, limit, |_| true)
+}
+
+/// 先按 `matches` 过滤全部回执，再按完成时间倒序截取 `limit` 条：过滤发生在限量之前，较新的
+/// 其他回执（如大量 `service start/restart`）不会把要找的回执挤出窗口。读取与校验口径同 [`list`]，
+/// 任一回执损坏都失败关闭。
+pub(crate) fn list_matching(
+    state_dir: &Path,
+    limit: usize,
+    matches: impl Fn(&DeploymentReceipt) -> bool,
+) -> anyhow::Result<Vec<DeploymentReceipt>> {
     let directory = receipts_dir(state_dir);
     if !require_directory(&directory)? {
         return Ok(Vec::new());
@@ -71,7 +82,9 @@ pub(crate) fn list(state_dir: &Path, limit: usize) -> anyhow::Result<Vec<Deploym
         if !identifiers.insert(receipt.receipt_id) {
             anyhow::bail!("部署回执目录包含重复的 receipt_id：{name}");
         }
-        receipts.push(receipt);
+        if matches(&receipt) {
+            receipts.push(receipt);
+        }
     }
     receipts.sort_by(|left, right| {
         right
@@ -142,7 +155,7 @@ mod tests {
     use chrono::{Duration, TimeZone};
     use uuid::Uuid;
 
-    use super::{append, list, read, receipts_dir};
+    use super::{append, list, list_matching, read, receipts_dir};
     use crate::receipt::model::{
         Action, Artifact, DeploymentReceipt, FORMAT, MigrationRecord, Outcome,
     };
@@ -243,6 +256,25 @@ mod tests {
         let receipts = list(&fixture.root, 10).expect("列出回执");
         assert_eq!(receipts, vec![new, old]);
         assert_eq!(list(&fixture.root, 1).expect("限制条数").len(), 1);
+    }
+
+    /// 过滤先于限量：较新的大量其他回执不会把要找的回执挤出窗口。
+    #[test]
+    fn list_matching_filters_before_the_limit() {
+        let fixture = Fixture::new();
+        let mut wanted = fixture.receipt(0);
+        wanted.action = Action::Start;
+        append(&fixture.root, &wanted).expect("写入目标回执");
+        for minutes in 1..=25 {
+            append(&fixture.root, &fixture.receipt(minutes)).expect("写入较新的 restart 回执");
+        }
+        assert!(
+            !list(&fixture.root, 20).expect("列出回执").contains(&wanted),
+            "按完成时间限量时目标回执会被挤出"
+        );
+        let matched = list_matching(&fixture.root, 1, |receipt| receipt.action == Action::Start)
+            .expect("过滤后列出");
+        assert_eq!(matched, vec![wanted]);
     }
 
     #[test]

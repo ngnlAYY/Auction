@@ -81,7 +81,7 @@
 | `migration_compatibility_mode` | `"shadow"` | `strict`：完整历史必须恰好匹配；`shadow`：实际仍严格，同一快照计算兼容判定并记录差异；`compatible`：显式允许未来后缀均已登记兼容的数据库 |
 | `cache_enabled` | `true` | Public/Admin `/health/ready` 与 Worker control `/v1/health/ready` 的最终就绪布尔值正负均缓存 1 秒、并发共享一次 750ms 检查；`false` 逐次执行；在线开关 `readiness_cache_enabled` 只覆盖 Public/Admin |
 
-分类口径与粘滞判定由[crates/auction-storage/README.md#审计失败与就绪](../../crates/auction-storage/README.md#审计失败与就绪)拥有，迁移判定由[docs/contracts/database.md#迁移兼容登记与就绪](../../docs/contracts/database.md#迁移兼容登记与就绪)拥有。默认基线 shadow：差异只应出现在 transient，没有样本不能解释为通过，由用户审阅后才切换 classified；迁移模式平时保持 shadow，换回旧程序前须显式设 `compatible` 并按[ops/deploy/RECOVERY.md#程序回退](../deploy/RECOVERY.md#程序回退)核对。观察步骤见[ops/README.md#审计就绪影子观察](../README.md#审计就绪影子观察)。
+分类口径与粘滞判定由[crates/auction-storage/README.md#审计失败与就绪](../../crates/auction-storage/README.md#审计失败与就绪)拥有，迁移判定由[docs/contracts/database.md#迁移兼容登记与就绪](../../docs/contracts/database.md#迁移兼容登记与就绪)拥有。默认基线 shadow：差异只应出现在 transient，没有样本不能解释为通过，由用户审阅后才切换 classified；迁移模式平时保持 shadow，换回旧程序前须显式设 `compatible` 并按[ops/deploy/RECOVERY.md#程序回退](../deploy/RECOVERY.md#程序回退)核对：数据库超前于回退目标时，`auction-cli rollback`（含 `--dry-run`）在停机前核对三角色有效配置都为 `compatible`，否则拒绝，不会替你修改配置。观察步骤见[ops/README.md#审计就绪影子观察](../README.md#审计就绪影子观察)。
 
 ### 定时备份策略
 
@@ -90,14 +90,14 @@
 两个水位字段不只约束定时备份，还被另外两处复用：
 
 - `alert report` 用它判定备份输出目录的 `disk_capacity_low`，见[apps/auction-cli/README.md#主机侧运维告警报告](../../apps/auction-cli/README.md#主机侧运维告警报告)。
-- `deploy` 与 `rollback` 的停机前磁盘空间门禁把它作为余量：扣除停机备份（只有 `deploy`）、保留旧程序与安装临时文件需求之后，`--backup-dir`、`--state-dir` 与安装目录所在的每个文件系统仍须满足，任一不足即在停机前拒绝，见[apps/auction-cli/README.md#制品部署与回退](../../apps/auction-cli/README.md#制品部署与回退)第 5 步与[回退](../../apps/auction-cli/README.md#回退)。
+- `deploy` 的停机前磁盘空间门禁把它作为余量：扣除停机备份、保留旧程序与安装临时文件需求之后，`--backup-dir`、`--state-dir` 与安装目录所在的每个文件系统仍须满足，任一不足即在停机前拒绝，见[apps/auction-cli/README.md#制品部署与回退](../../apps/auction-cli/README.md#制品部署与回退)第 5 步。`rollback` 不使用这两个字段：它只写反向回滚记录与安装临时文件，扣除实际写入/替换字节后每个文件系统留 64 MiB 即可，见[回退](../../apps/auction-cli/README.md#回退)。
 
 因此为备份卷调高水位前，须确认状态目录与安装目录所在的文件系统（例如共用的根分区）同样留得出这份余量。
 
 | 字段 | 默认值 | 范围 |
 | --- | --- | --- |
 | `local_retention_count` | `7` | 1–365，本地已完成定时备份份数 |
-| `min_free_bytes` / `min_free_percent` | 1 GiB / 10 | 64 MiB–1 TiB；1–50，与字节水位同时满足；`alert report` 与 `deploy`/`rollback` 磁盘空间门禁复用（见上） |
+| `min_free_bytes` / `min_free_percent` | 1 GiB / 10 | 64 MiB–1 TiB；1–50，与字节水位同时满足；`alert report` 与 `deploy` 磁盘空间门禁复用，`rollback` 不使用（见上） |
 | `timeout_seconds` | `7200` | 60–7200，自本次启动起的任务预算 |
 
 打卡客户端一次 HTTPS GET（连接三秒、请求五秒，不重试、不用环境代理/重定向/Cookie），失败不改变备份结果，终态回执只保存 `heartbeat_configured`；外部打卡暂缓启用，地址保持未配置。细节见[ops/deploy/RECOVERY.md#定时备份](../deploy/RECOVERY.md#定时备份)。

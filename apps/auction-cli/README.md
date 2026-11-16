@@ -131,11 +131,11 @@ auction-cli service --state-dir /var/lib/auction/deployment receipt show <receip
 
 查询只读状态目录：不取部署锁、不连接数据库、不要求 systemctl。目录不存在表示还没有回执；损坏、未知格式、重复 `receipt_id`、符号链接或文件名与内容不符时失败关闭，不返回部分记录。
 
-格式 `auction-deployment-receipt.v1` 的闭集字段：
+新回执的格式为 `auction-deployment-receipt.v2`；此前写出的 `auction-deployment-receipt.v1` 回执原样兼容读取、不改写，两者的公共字段相同，区别只在 `deploy`/`rollback` 的 `deploy` 段（见[部署回执扩展](#部署回执扩展)）。闭集字段：
 
 | 字段 | 内容 |
 | --- | --- |
-| `format` | 固定 `auction-deployment-receipt.v1` |
+| `format` | `auction-deployment-receipt.v2`（只读兼容 `.v1`） |
 | `receipt_id` | UUID；文件名 `<receipt_id>.json` |
 | `action` | `start` / `restart` |
 | `outcome` | `succeeded` / `already_running` / `failed` |
@@ -183,19 +183,19 @@ auction-cli service --state-dir /var/lib/auction/deployment receipt show <receip
   --migration-drill-receipt /srv/auction-drill/receipts/<drill>.json
 ```
 
-`--backup-dir` 必须是已存在、非符号链接且禁止 group/other 写入的绝对目录，在第 1 步之后、任何锁、systemctl 与数据库访问之前检查，`--dry-run` 同样执行。`--actor <NAME>` 可选，写入回执的操作者，缺省规则与 `service start/restart` 相同；`--backup-id` 只属于 `service start/restart`，`deploy`/`rollback` 传入即参数错误（退出码 2）。
+`--backup-dir` 必须是已存在、非符号链接、禁止 group/other 写入且归当前账号或 root 所有（以 root 部署时只能归 root）的绝对目录，与停机后写停机备份时的检查同一口径；它在第 1 步之后、任何锁、systemctl 与数据库访问之前只读检查，不创建目录，`--dry-run` 同样执行。`--actor <NAME>` 可选，写入回执的操作者，缺省规则与 `service start/restart` 相同；`--backup-id` 只属于 `service start/restart`，`deploy`/`rollback` 传入即参数错误（退出码 2）。
 
 执行顺序：
 
 1. **制品静态校验**（离线）：`RELEASE-MANIFEST.v1`（schema、包名、来源提交/指纹、`files=` 白名单与权限）、`SHA256SUMS`（除自身外的全部成员摘要）、`docs/DEPENDENCIES.md`（来源提交与 `Source worktree: clean`）、`docs/WEB-{PUBLIC,ADMIN}-SHA256` 与 `docs/WEB-*-MANIFEST.v1`（`payload_sha256` 必须等于摘要清单文件的 SHA-256，双端不得相同），以及四个程序的 0755/非空/摘要。符号链接、特殊文件、白名单外的文件、`-dirty`/`-single` 包名一律拒绝。
-2. **严格预检**：与 `service restart` 相同（配置、unit 装载与 `AUCTION_CONFIG_FILE` 绑定、Admin runtime 属主、`[database_roles] owner` 声明）；合并部署 `owner.lock` 存在时拒绝。安装目录缺省由三个运行进程的 `/proc/<pid>/exe` 推导，三者必须同目录；都已停止时必须显式传 `--install-dir`。
+2. **严格预检与安装目录信任**：与 `service restart` 相同（配置、unit 装载与 `AUCTION_CONFIG_FILE` 绑定、Admin runtime 属主、`[database_roles] owner` 声明）；合并部署 `owner.lock` 存在时拒绝。安装目录缺省由三个运行进程的 `/proc/<pid>/exe` 推导，三者必须同目录；都已停止时必须显式传 `--install-dir`。随后只读核对[安装目录信任](#安装目录信任)，不满足即拒绝。
 3. **停机时段门禁**：与 `service stop/restart` 同一只读证据与 `--force --reason` 语义，`action=deploy`。
 4. **版本与迁移演练回执**：读取数据库版本。制品期望版本低于数据库时拒绝（回退请用 `rollback`）；高于数据库时必须提供 `--migration-drill-receipt`，并按[ops/deploy/MIGRATION-DRILL.md#回执结论与后续门禁](../../ops/deploy/MIGRATION-DRILL.md#回执结论与后续门禁)的准入条件逐项核对（含本次 `--protection-window-minutes` 不低于回执记录的窗口下限），任一不符即拒绝。
-5. **磁盘空间门禁**：估算停机后才写入的三类数据——停机备份按 `pg_database_size`（custom 格式经压缩且不含索引数据，是偏保守的上界）、保留旧程序按安装目录当前四个程序的字节合计、安装临时文件按最大的单个新或旧程序（安装中途失败时自动换回的临时副本是旧程序）加各程序新旧大小的正增量合计——分别落在 `--backup-dir`、`--state-dir` 与安装目录所在的文件系统；同一文件系统（设备号相同）的需求相加后，扣除需求的非特权可用空间仍须同时满足 Worker 配置 `[backup]` 的 `min_free_bytes` 与 `min_free_percent`（与定时备份共用，见[ops/config/README.md#定时备份策略](../../ops/config/README.md#定时备份策略)），任一文件系统不足即在停机前拒绝，错误列出所需与可用字节。估算依据与各文件系统的 `required_bytes/available_bytes/total_bytes/passed` 写入输出的 `gates.disk_space`。门禁是检查时刻的快照，不预留空间。按设备号判定同一文件系统：btrfs 子卷（以及 ZFS 数据集等共享存储池的布局）各有设备号，会被当作独立文件系统而低估合计需求；此类主机应把三个目录放在同一子卷，或相应调大 `[backup]` 余量。
+5. **磁盘空间门禁**（`deploy` 的余量策略；`rollback` 见[回退](#回退)）：估算停机后才写入的三类数据——停机备份按 `pg_database_size`（custom 格式经压缩且不含索引数据，是偏保守的上界）、保留旧程序按安装目录当前四个程序的字节合计、安装临时文件按最大的单个新或旧程序（安装中途失败时自动换回的临时副本是旧程序）加各程序新旧大小的正增量合计——分别落在 `--backup-dir`、`--state-dir` 与安装目录所在的文件系统；同一文件系统（设备号相同）的需求相加后，扣除需求的非特权可用空间仍须同时满足 Worker 配置 `[backup]` 的 `min_free_bytes` 与 `min_free_percent`（与定时备份共用，见[ops/config/README.md#定时备份策略](../../ops/config/README.md#定时备份策略)），任一文件系统不足即在停机前拒绝，错误列出所需与可用字节。估算依据与各文件系统的 `required_bytes/available_bytes/total_bytes/passed` 写入输出的 `gates.disk_space`。门禁是检查时刻的快照，不预留空间。按设备号判定同一文件系统：btrfs 子卷（以及 ZFS 数据集等共享存储池的布局）各有设备号，会被当作独立文件系统而低估合计需求；此类主机应把三个目录放在同一子卷，或相应调大 `[backup]` 余量。
 6. **在途发送门禁**：只读查询 `deliveries` 与 `lot_watch_pm_deliveries` 中状态为 `sending` 且租约未过期的记录，最多等待 `--send-gate-timeout-seconds`（默认 30，0 表示只查一次）；超时拒绝并列出内部标识。不能用停机打断已越过 sending 围栏的外部写入。
 7. **停机与恢复点**：按 Public → Admin → Worker 停止并逐个确认；然后用 Worker 配置创建停机备份（`<backup-dir>/auction-deploy-<UTC>.dump` 与配对 manifest），并分别用**安装目录中的旧 CLI**和**制品中的新 CLI**执行离线 `backup verify`，任一失败即停止流程。
-8. **保留旧程序**：把当前四个程序连同 SHA-256/字节数写入 `<state-dir>/rollback/<deploy_receipt_id>/`，版本区间记录部署前后的数据库版本；记录只追加，不覆盖。
-9. **安装与迁移**：按 Worker → Admin → Public → CLI 逐个以同目录临时文件 + `rename` 替换 `--install-dir` 中的程序（每个程序的替换是原子的，四个程序整体不是），属主设为 unit 的固定服务账号（`DynamicUser` 拒绝），每个程序替换后复核摘要。任一程序替换失败时，立即把本次已替换的程序从第 8 步的回滚记录换回，再按记录复核全部四个程序的摘要；换回发生在迁移之前，不启动服务，换回本身失败时不重试。全部替换成功后执行与 `service start` 相同的迁移与 Worker → Admin → Public 顺序启动/readiness。
+8. **保留旧程序**：把当前四个程序连同 SHA-256/字节数写入 `<state-dir>/rollback/<deploy_receipt_id>/`（记录格式 `auction-deploy-rollback.v2`），分开记录停机前观测到的数据库版本、本次制品的内嵌 schema，以及按保留副本的摘要从回执绑定的旧角色身份与旧 CLI 身份（找不到摘要一致的成功回执时为 `null`，不从数据库版本或新包推测）；记录只追加，不覆盖。
+9. **安装与迁移**：按 Worker → Admin → Public → CLI 逐个以同目录临时文件 + `rename` 替换 `--install-dir` 中的程序（每个程序的替换是原子的，四个程序整体不是）。临时文件经同一个以 `O_NOFOLLOW` 固定的目录描述符创建，属主 root:root、权限 0755（非 root 运行时为当前账号），替换前后都复核属主、权限与摘要。任一程序替换失败时，立即把本次已替换的程序从第 8 步的回滚记录换回，再按记录复核全部四个程序的摘要；换回发生在迁移之前，不启动服务，换回本身失败时不重试。全部替换成功后执行与 `service start` 相同的迁移与 Worker → Admin → Public 顺序启动/readiness。
 10. **运行时核对**：三角色 `/proc/<pid>/exe` 的 SHA-256 必须等于制品对应程序，这也是内嵌 Web payload 已生效的证明。
 11. **回执**：停机后每次调用最多追加一条回执，成功为 `action=deploy`、`outcome=succeeded`。第 8 步成功之后的失败（安装、启动、运行核对或成功回执写入）以回滚记录同一标识发布 `failed` 回执，带 `deploy` 段与 `rollback_record_id`；停机后、第 8 步完成前的失败追加一条不带 `deploy` 段的 `failed` 回执；回执本身写不进去时错误末尾注明“部署回执也未写入”。除第 9 步安装中途失败时换回本次已替换的程序外，命令不自动回滚、不重启；含迁移的版本回退必须经过下节（回退）的区间判定。
 
@@ -209,9 +209,19 @@ auction-cli service --state-dir /var/lib/auction/deployment receipt show <receip
   - 错误含“自动换回未完成”：换回本身失败，错误点名失败的程序并列出各程序的当前摘要，安装目录可能新旧混合。旧程序完整保留在 `<state-dir>/rollback/<deploy_receipt_id>/bin/`，摘要见同一记录目录下的 `record.json`；按[ops/deploy/RECOVERY.md#安装中途失败的手工换回](../../ops/deploy/RECOVERY.md#安装中途失败的手工换回)逐个换回并核对摘要后，用安装目录中的 CLI 启动，同样不要用制品 CLI 启动。安装目录恢复为一致的旧程序之前不要重跑 `deploy`：新的回滚记录会把混合程序当作旧版本保留。
 - **启动或运行核对失败**：新程序已安装、迁移可能已提交；按错误文本给出的 `rollback --receipt-id` 或[ops/README.md#升级](../../ops/README.md#升级)处理。
 
+### 安装目录信任
+
+root 与 postgres 都会执行安装目录中的 `auction-cli`（`auction-stack` 编排与 `archive_command`），能改写它的账号就能借 root 或 postgres 执行任意代码。`deploy` 与 `rollback` 在停机前（含 `--dry-run`）只读核对：
+
+- 安装目录本身：非符号链接目录，归运行 CLI 的账号所有（以 root 运行即 root），禁止 group/other 写入；
+- 它的每一级祖先：非符号链接目录，归 root 或当前账号所有，禁止 group/other 写入（root 拥有的 sticky 目录除外）；
+- 其中四个程序：非符号链接普通文件，归 root 所有（非 root 运行时也可归当前账号），禁止 group/other 写入。
+
+任一不满足即拒绝并点名路径。命令**不会**自动 `chown`/`chmod` 修补：旧版 `deploy` 曾把程序改归服务账号，这样的程序无法证明没被改写，须按[ops/deploy/RECOVERY.md#重建安装目录信任](../../ops/deploy/RECOVERY.md#重建安装目录信任)用已验证的 Release 重装后再部署。安装与换回写出的程序一律 root:root 0755，每个程序替换前后都在同一个固定的目录描述符上复核属主、权限与摘要。非 root 运行只用于不跨账号的隔离环境：可信属主放宽为当前账号，新程序归当前账号 0755，不对服务账号做任何属主变更。
+
 ### 回滚记录与停机备份的容量
 
-每次 `deploy` 与 `rollback` 都在 `<state-dir>/rollback/<id>/` 保留一份四个程序的副本（约等于安装目录四个程序之和，发布包为百 MB 量级），每次 `deploy` 还在 `--backup-dir` 留下一对 `auction-deploy-<UTC>.dump` 与 manifest（大小随数据库增长）。CLI 不自动删除两者，也没有清理命令；`deploy` 的磁盘空间门禁只保证本次写入有空间，长期占用须按部署频率与库大小规划，并纳入主机磁盘监控。
+每次 `deploy` 在 `<state-dir>/rollback/<id>/` 保留一份四个程序的副本、每次 `rollback` 保留三个角色程序的副本（约等于安装目录对应程序之和，发布包为百 MB 量级），每次 `deploy` 还在 `--backup-dir` 留下一对 `auction-deploy-<UTC>.dump` 与 manifest（大小随数据库增长）。CLI 不自动删除两者，也没有清理命令；`deploy` 的磁盘空间门禁只保证本次写入有空间，长期占用须按部署频率与库大小规划，并纳入主机磁盘监控。
 
 需要人工腾出空间时，只删除确定不再需要的旧记录与旧备份，并在删除前确认：
 
@@ -226,40 +236,37 @@ auction-cli --config-dir /etc/auction rollback --receipt-id <deploy_receipt_id> 
 auction-cli --config-dir /etc/auction rollback --receipt-id <deploy_receipt_id>
 ```
 
-`rollback` 只换回 `deploy` 保留的旧程序，**不执行迁移**：
+`rollback` 只把 Worker、Admin、Public 三个运行角色换回 `deploy` 保留的旧程序，**安装目录中的 `auction-cli` 保持不变**，也**不执行迁移**：回退后由当前 CLI 继续执行备份、预检、`service start/restart` 与再次前进，旧 CLI 无法管理已超前的数据库。
 
-- 回滚记录必须存在且保留程序摘要仍与记录一致；安装目录中的程序必须仍是该记录对应部署回执里的版本，否则拒绝（先核对安装目录与 unit `ExecStart`）。
+- 必须由安装目录中的 `auction-cli` 执行（运行程序摘要必须等于 `<install-dir>/auction-cli`），它的内嵌 schema 必须等于数据库版本：较高（部署在迁移完成前失败）时回退后的任何 `service start/restart`（含开机的 auction-stack）都会先执行回退要避开的迁移，较低时它无法管理数据库，两种情况都在停机前拒绝，前者按错误提示修复后完成升级或按[ops/deploy/RECOVERY.md#安装中途失败的手工换回](../../ops/deploy/RECOVERY.md#安装中途失败的手工换回)整体换回。
+- 回滚记录必须存在且保留程序摘要仍与记录一致；安装目录中的三个角色程序必须仍是该记录对应部署回执里的版本，否则拒绝（先核对安装目录与 unit `ExecStart`）。安装目录同样先过[安装目录信任](#安装目录信任)。
 - 省略 `--receipt-id` 时，先只读取每条记录的 `record.json` 并按 `created_at` 选出最新一条，再只散列它的保留程序；较旧记录缺少保留程序不影响默认选择。`record.json` 是保留旧程序的最后一步，缺少它的目录是保留中途失败的残留、从未成为回退目标，跳过并在 stderr 点名；`record.json` 存在但读不出、损坏或无效时点名该目录失败关闭（不静默跳过），创建时间并列时同样拒绝，此时用 `--receipt-id` 指定目标。
-- 时段门禁与在途发送门禁与 `deploy` 相同；磁盘空间门禁也与 `deploy` 相同，只是没有停机备份需求，只估算反向回滚记录（安装目录当前四个程序）与安装临时文件（口径同第 5 步：最大的单个待装或当前程序加各程序的正增量，覆盖中途失败从反向记录换回的临时副本），不足即在停机前拒绝，估算写入输出的 `gates.disk_space`。
-- 数据库高于回滚目标版本时，按[ops/deploy/RECOVERY.md#程序回退](../../ops/deploy/RECOVERY.md#程序回退)的区间规则核对 `previous_version → 当前版本`，不满足即拒绝并提示恢复升级前备份。
-- 安装前会把当前程序保留为**新的**回滚记录，因此回退本身可以再前进；回退成功后追加 `action=rollback` 回执，`deploy` 段指向被恢复版本的制品证据。回执口径与 `deploy` 相同：停机后每次调用最多一条（写不进去时错误注明），保留当前程序之后的失败以新回滚记录的标识发布。保留当前程序失败时三角色已停止、安装目录仍是回退前的程序、数据库未变，错误按数据库版本与安装目录程序的期望版本（回滚记录的 `deployed_expected_version`）给出指引：
-  - 两者相等（常见情形）：可用安装目录中的 CLI 执行 `service start --owner-secrets …`（沿用 `--config-dir`、`--state-dir` 与 unit 参数，迁移为空操作）恢复原状，或修复原因后重试回退。
-  - 数据库较低（原部署在迁移完成前失败，例如启动阶段的端口检查或迁移失败）：安装目录 CLI 的 `service start` 会执行本次回退要避开的新迁移（含 `breaking` 时之后就无法再回退），**不要用它**；数据库较高（链式回退后）时它的迁移会因未知的迁移历史失败。两种情况都修复原因后用 `rollback --receipt-id <原记录 ID>` 重试。
-  - 本次未写完的反向回滚记录目录（错误中点名）没有对应的部署回执，不能作为回退目标：缺少 `record.json` 时省略 `--receipt-id` 的 `rollback` 会跳过它；`record.json` 已写出时会选中它并因读不到部署回执而拒绝。重试时显式指定 `--receipt-id`，并在人工核对后按[回滚记录与停机备份的容量](#回滚记录与停机备份的容量)整目录删除它。
-- 安装旧程序与 `deploy` 第 9 步相同，逐个以同目录临时文件 + `rename` 替换（四个程序整体不是原子的）。任一程序替换失败时，立即把本次已替换的程序从刚保留的反向回滚记录逆序换回，再按反向记录复核全部四个程序的摘要；回退不执行迁移，换回发生在启动服务之前，换回本身失败时不重试。失败回执以反向记录的标识发布，`artifacts` 记录安装目录中实际文件的摘要。
-  - 错误含“已复核为回退前的程序”：安装目录仍是回退前的程序、数据库未变，按上一条的数据库版本分支处置（错误同样给出对应的命令）。反向记录已带失败回执，省略 `--receipt-id` 的 `rollback` 会选中它并在安装目录核对处拒绝，重试时显式指定原记录 ID。
-  - 错误含“自动换回未完成”：换回本身失败，错误点名失败的程序并列出各程序的当前摘要，安装目录可能新旧混合。回退前的程序完整保留在 `<state-dir>/rollback/<反向记录 ID>/bin/`，摘要见同一记录目录下的 `record.json`；按[ops/deploy/RECOVERY.md#安装中途失败的手工换回](../../ops/deploy/RECOVERY.md#安装中途失败的手工换回)换回并核对摘要后再处置，换回前不要启动服务。
+- 时段门禁与在途发送门禁与 `deploy` 相同。磁盘空间门禁没有停机备份需求，只估算反向回滚记录（安装目录当前三个角色程序）与安装临时文件（口径同第 5 步，只计三个角色），余量**不使用** `[backup]` 的 `min_free_bytes`/`min_free_percent`：扣除实际写入/替换字节后每个文件系统至少还留 64 MiB 即可（应急回退不被定时备份的 1 GiB/10% 拦住），不足即在停机前拒绝，估算与 `policy=rollback_fixed_margin` 写入输出的 `gates.disk_space`。
+- 回退目标角色的内嵌 schema（`E`）取自回滚记录；记录不知道时（v1 记录，或部署时找不到摘要一致的成功回执）按创建记录时观测到的数据库版本假设，`gates.versions.target_role_schema_source` 标明 `recorded` 或 `assumed_observed_database_version`。数据库版本 `D` 高于 `E` 时，按[ops/deploy/RECOVERY.md#程序回退](../../ops/deploy/RECOVERY.md#程序回退)的区间规则核对 `(E, D]`，不满足即拒绝并提示恢复升级前备份；区间成立时还要求三个角色的有效配置 `[readiness] migration_compatibility_mode` 都显式为 `compatible`、且目标程序不早于迁移 075（才有兼容判定），否则在停机前拒绝并点名不满足的角色——默认 `shadow` 下旧程序面对超前数据库必然无法就绪。rollback 不修改配置；`D = E` 时不要求任何模式。判定写入输出的 `gates.readiness`。
+- 安装前会把当前三个角色程序保留为**新的**回滚记录（不含 CLI），因此回退本身可以再前进；回退成功后追加 `action=rollback` 回执，`deploy` 段的角色身份取自目标回滚记录（未知项为 `null`），CLI 身份是被保留的实际程序，`database_version` 是当前数据库版本，不继承被回退版本的制品证据。回执口径与 `deploy` 相同：停机后每次调用最多一条（写不进去时错误注明），保留当前程序之后的失败以新回滚记录的标识发布。保留当前程序失败时三角色已停止、安装目录仍是回退前的程序、数据库未变；保留的 CLI 已在停机前核对为与数据库同版本，因此可用安装目录中的 CLI 执行 `service start --owner-secrets …`（沿用 `--config-dir`、`--state-dir` 与 unit 参数，迁移为空操作）恢复原状，或修复原因后用 `rollback --receipt-id <原记录 ID>` 重试。本次未写完的反向回滚记录目录（错误中点名）没有对应的部署回执，不能作为回退目标：缺少 `record.json` 时省略 `--receipt-id` 的 `rollback` 会跳过它；`record.json` 已写出时会选中它并因读不到部署回执而拒绝。重试时显式指定 `--receipt-id`，并在人工核对后按[回滚记录与停机备份的容量](#回滚记录与停机备份的容量)整目录删除它。
+- 安装旧角色程序与 `deploy` 第 9 步相同，逐个以同目录临时文件 + `rename` 替换三个角色（整体不是原子的）。任一程序替换失败时，立即把本次已替换的程序从刚保留的反向回滚记录逆序换回，再按反向记录复核三个角色的摘要；回退不执行迁移，换回发生在启动服务之前，换回本身失败时不重试。换回成功后启动前还会核对 `auction-cli` 的摘要与停机前相同。失败回执以反向记录的标识发布，`artifacts` 记录安装目录中实际文件的摘要。
+  - 错误含“已复核为回退前的程序”：安装目录仍是回退前的程序、数据库未变，按上一条处置（错误同样给出对应的命令）。反向记录已带失败回执，省略 `--receipt-id` 的 `rollback` 会选中它并在安装目录核对处拒绝，重试时显式指定原记录 ID。
+  - 错误含“自动换回未完成”：换回本身失败，错误点名失败的程序并列出各角色程序的当前摘要，安装目录可能新旧混合。回退前的角色程序完整保留在 `<state-dir>/rollback/<反向记录 ID>/bin/`，摘要见同一记录目录下的 `record.json`；按[ops/deploy/RECOVERY.md#安装中途失败的手工换回](../../ops/deploy/RECOVERY.md#安装中途失败的手工换回)换回并核对摘要后再处置，换回前不要启动服务。
 - `--actor` 与 `deploy` 相同；不接受 `--backup-id`，回退回执的 `backup_id` 为 `null`。
-- `--dry-run` 只做记录、安装目录、兼容区间、时段、磁盘空间与在途发送核对，输出 `planned_steps` 与 `gates.disk_space`。
+- `--dry-run` 只做记录、安装目录、保留 CLI、兼容区间与就绪模式、时段、磁盘空间与在途发送核对，输出 `planned_steps`、`gates.versions`、`gates.readiness` 与 `gates.disk_space`。
 
 ### 部署回执扩展
 
 `action` 增加 `deploy` / `rollback`。停机前失败不写回执；停机后每次调用最多追加一条回执：保留旧程序之后的失败回执与回滚记录同一标识、带 `deploy` 段，`rollback --receipt-id` 能读回它；停机后、保留之前的失败回执随机标识、没有 `deploy` 段。回执本身写不进去时（含同一标识已经发布），错误以“部署回执也未写入”接在原因之后，不会改用其他标识补写第二条。`backup_id` 在 `deploy` 回执中是本次停机备份的 archive 文件名（停机备份经新旧 CLI 校验通过前失败为 `null`），在 `rollback` 回执中为 `null`。
 
-成功或 `already_running` 的这两个动作必须有 `deploy` 段：
+成功或 `already_running` 的这两个动作必须有 `deploy` 段。v2 把三个运行角色的身份、安装目录中 CLI 的身份与观测到的数据库版本分开记录（rollback 只换角色、保留 CLI，两者可以来自不同版本）：
 
 | 字段 | 内容 |
 | --- | --- |
-| `artifact_directory` / `install_directory` | 制品目录与程序安装目录的绝对路径 |
-| `package` | `RELEASE-MANIFEST.v1` 的发布包名 |
-| `source_commit` / `source_fingerprint` | 制品来源提交与源码指纹 |
-| `cli_sha256` | 制品 `bin/auction-cli` 的 SHA-256 |
-| `public_payload_sha256` / `admin_payload_sha256` | 两端内嵌 Web payload 摘要 |
-| `migration_drill_id` | 本次核对过的演练回执编号；无迁移时为 `null` |
-| `backup_archive` / `backup_manifest` | 停机恢复点的绝对路径；失败回执可为 `null` |
-| `rollback_record_id` | 本次部署保留的旧程序记录；回退回执为“再次前进”的记录 |
+| `install_directory` | 程序安装目录的绝对路径 |
+| `roles` | 三个运行角色程序的身份：`artifact_directory`、`package`、`source_commit`、`source_fingerprint`、`public_payload_sha256`、`admin_payload_sha256` 与内嵌 schema `schema_version`。`deploy` 全部来自本次制品；`rollback` 取自目标回滚记录，未知项为 `null` |
+| `cli` | 安装目录中 `auction-cli` 的身份：`sha256`（实际文件）、`package`、`source_commit`、`schema_version`。`rollback` 保留当前 CLI，来源只在部署回执的 CLI 摘要相同时沿用，否则为 `null` |
+| `database_version` | 本次操作开始前观测到的数据库迁移版本（`deploy` 为迁移之前） |
+| `migration_drill_id` | 本次核对过的演练回执编号；无迁移或回退时为 `null` |
+| `backup_archive` / `backup_manifest` | 停机恢复点的绝对路径；回退与部分失败回执为 `null` |
+| `rollback_record_id` | 本次保留的旧程序记录；回退回执为“再次前进”的记录 |
 
-旧回执没有 `deploy` 字段，仍按原格式解析；`service start/restart` 回执不得出现该字段。
+v1 回执的 `deploy` 段是平铺字段（`artifact_directory`、`package`、`source_commit`、`source_fingerprint`、`cli_sha256`、`install_directory`、两个 payload 摘要与同名证据字段），原样兼容读取；其中 v1 `rollback` 回执的平铺段混有被回退版本的制品证据，不被当作已安装程序的身份。`deploy` 保留旧程序时按程序摘要在全部“成功且含部署身份”的回执中（先过滤再取最新，大量 `service start/restart` 回执不会把它挤出窗口）查找身份，跳过这类 v1 回执继续向前。`service start/restart` 回执不得出现 `deploy` 字段。
 
 ## 停机门禁
 
@@ -609,9 +616,9 @@ auction-cli --config-dir /etc/auction recovery external-reconcile   --cutoff <BA
 | `apps/auction-cli/src/cli/` | 命令、参数与默认值 |
 | `apps/auction-cli/src/app/` | 分派、退出码、JSON 输出 |
 | `apps/auction-cli/src/config_dir/` | 配置目录、单角色投影、三角色一致性检查、监听端点 |
-| `apps/auction-cli/src/receipt/` | 部署回执：只追加的 `service start/restart` 与 `deploy`/`rollback` 结果、查询与归档来源 |
+| `apps/auction-cli/src/receipt/` | 部署回执：只追加的 `service start/restart` 与 `deploy`/`rollback` 结果（v2 deploy 段分开记录角色、CLI 身份与观测数据库版本，v1 只读兼容）、查询与归档来源 |
 | `apps/auction-cli/src/service/` | systemctl 客户端、编排与停机门禁；readiness 探针由 `auction-process` 提供 |
-| `apps/auction-cli/src/deploy/` | 制品静态校验、迁移演练回执、在途发送与磁盘空间门禁、停机备份双 CLI 校验、旧程序保留/逐个原子替换、失败回执收口、`deploy`/`rollback` 编排 |
+| `apps/auction-cli/src/deploy/` | 制品静态校验、迁移演练回执、安装目录信任、在途发送与磁盘空间门禁、停机备份双 CLI 校验、旧程序保留/逐个原子替换（root:root 0755）、回滚记录与组件身份、失败回执收口、`deploy`/`rollback` 编排（rollback 只换三个角色、保留 CLI） |
 | `apps/auction-cli/src/database/` | 状态、迁移、建库、预检/盘点证据、重建、连接目标解析 |
 | `apps/auction-cli/src/backup/` | manifest、libpq 环境与 passfile、可复用 create、备份/校验/恢复 |
 | `apps/auction-cli/src/backup/scheduled/` | 定时编排、磁盘门禁、独占锁/回执、保留清理与打卡装配；私有目录句柄由 `support/files` 提供 |
