@@ -38,6 +38,10 @@ pub enum Fault {
     CookieInvalid,
     /// 在响应前延迟，供客户端自己的超时预算裁决。
     Timeout(Duration),
+    /// 远端收到请求后独立处理到延迟结束再按原路由回应：客户端断开或取消不会提前结束处理，在途
+    /// 计数一直保持到延迟结束。模拟不随连接断开停止处理的真实远端，用来证明客户端取消后紧接的
+    /// 请求不会与远端仍在处理的请求重叠。
+    DetachedDelay(Duration),
     /// HTML 类型正确但邮件结构缺失。
     ProtocolDrift,
     /// 收到 POST 后返回无法证明成功或失败的内容；不自动重发。
@@ -162,7 +166,8 @@ impl Drop for MailDouble {
     }
 }
 
-/// 请求处理期间计入在途数；Drop 覆盖提前返回与客户端断开时的取消。
+/// 请求处理期间计入在途数；Drop 覆盖提前返回与客户端断开时的取消（`DetachedDelay` 除外，
+/// 它把在途计数交给独立任务持有到延迟结束）。
 struct InFlight(Arc<Mutex<MailState>>);
 
 impl InFlight {
@@ -190,15 +195,32 @@ async fn handle(
     headers: HeaderMap,
     _body: Bytes,
 ) -> Response {
-    let _in_flight = InFlight::enter(&state);
+    let in_flight = InFlight::enter(&state);
     // 不支持的路由也记录，便于测试指出扫描请求了哪些未采集页面。
-    {
+    let detached = {
         let mut current = state.lock().expect("test state poisoned");
         current.requests.push(format!("{method} {uri}"));
         current.cookies.push(
             headers.get(header::COOKIE).and_then(|value| value.to_str().ok()).map(str::to_owned),
         );
-    }
+        match current.fault {
+            Some(Fault::DetachedDelay(delay)) => Some(delay),
+            _ => None,
+        }
+    };
+    // 不随断开停止的远端：在途计数交给独立任务持有到延迟结束；客户端断开只丢弃本 handler，
+    // 不提前结束远端处理。处理结束后按原路由回应。
+    let _in_flight = match detached {
+        Some(delay) => {
+            let processing = tokio::spawn(async move {
+                tokio::time::sleep(delay).await;
+                drop(in_flight);
+            });
+            let _ = processing.await;
+            None
+        }
+        None => Some(in_flight),
+    };
     if uri.path().starts_with("/equip/") || uri.path().starts_with("/isekai/equip/") {
         return equipment(&state, &method).await;
     }
