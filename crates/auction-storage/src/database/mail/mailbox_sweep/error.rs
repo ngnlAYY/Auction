@@ -1,5 +1,6 @@
 //! 恢复事务的错误分类：保留 SQLSTATE 与资金冲突到重试边界，不匹配错误文本。
 
+use crate::database::settlement::returns::ReturnTransactionError;
 use crate::database::storage_error;
 use crate::database::storage_error_from;
 
@@ -26,6 +27,20 @@ impl From<auction_application::settlement::FundingError> for RecoveryError {
 impl From<crate::MailEvidenceTransactionError> for RecoveryError {
     fn from(error: crate::MailEvidenceTransactionError) -> Self {
         Self::Evidence(error)
+    }
+}
+
+/// 结算退件案件推进的错误：序列化冲突与资金 owner 分类原样保留到重试边界，业务拒绝与仓储错误
+/// 一律按拒绝回滚，不暴露细节。
+impl From<ReturnTransactionError> for RecoveryError {
+    fn from(error: ReturnTransactionError) -> Self {
+        match error {
+            ReturnTransactionError::Sqlx(error) => Self::Sqlx(error),
+            ReturnTransactionError::Funding(error) => Self::Funding(error),
+            ReturnTransactionError::Business(_) | ReturnTransactionError::Repository(_) => {
+                Self::Rejected
+            }
+        }
     }
 }
 

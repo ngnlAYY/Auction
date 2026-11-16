@@ -331,6 +331,8 @@ pub trait MoogleMailboxEvidenceStore: Send + Sync {
     ) -> ApplicationFuture<'a, bool>;
 
     /// 把原 fencing 尝试已证明完成的 take 收口为成功；仅实际迁移并确认提交返回 true。
+    /// 结算退件 Take 只接受附件已全部取走的观察，并在同一事务按正常领回证明推进其退件案件
+    /// （领回事实与资金返还各一次）；案件不在结果未知或资产与冻结事实不符时整体不改写。
     fn bind_recovered_action<'a>(
         &'a self,
         delivery_id: Uuid,
@@ -342,6 +344,7 @@ pub trait MoogleMailboxEvidenceStore: Send + Sync {
     ) -> ApplicationFuture<'a, bool>;
 
     /// 仅将原 fencing 尝试已正向确认附件仍在的 take 重新排队；未知 Send 禁止走此入口。
+    /// 结算退件 Take 在同一事务把动作与案件收回 Take 待执行，并在 world 锁下复核同邮件互斥。
     fn requeue_unproven<'a>(
         &'a self,
         delivery_id: Uuid,

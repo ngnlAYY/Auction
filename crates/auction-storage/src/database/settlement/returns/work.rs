@@ -2,6 +2,8 @@
 //!
 //! 锁序沿用既有业务锁的完整前缀：激活为 world → 案件 → 动作 → 投递；收口为资金 scope/账户 →
 //! 恢复记录与义务 → 案件 → 动作 → 投递 → 履约，各集合只取单行，不反向取锁（不变量 2）。
+//! 领取证明成立后的记账（领回事实、资金返还、补寄或代管）只有 [`consume_take_proof`] 一处实现，
+//! 正常收口与邮箱巡检恢复共用。
 
 use auction_application::core::ApplicationError;
 use auction_application::mail::MailDeliveryOrigin;
@@ -30,8 +32,8 @@ use crate::database::settlement::fulfillment::{
     lock_settlement_delivery_eligibility, recovery_allows_execution_now,
 };
 use crate::database::settlement::funding::{
-    FundingReturnBinding, funded_delivery_spent, lock_funded_delivery_account,
-    return_funded_delivery,
+    FundingReturnBinding, LockedFundingAccount, funded_delivery_spent,
+    lock_funded_delivery_account, return_funded_delivery,
 };
 
 /// 激活一项到期的持久 Take；没有时返回 `None`。
@@ -284,55 +286,79 @@ async fn settle_once(
         TakeOutcome::Failed { failure_code } | TakeOutcome::Unknown { failure_code } => {
             mark_take_unknown(&mut tx, &case, &action, failure_code, now).await?
         }
-        TakeOutcome::Proven { proof_digest, .. } => {
-            record_take(
-                &mut tx,
-                &case,
-                &action,
+        TakeOutcome::Proven { proof_digest, proof, .. } => {
+            let proven = TakeProof {
                 obligation_id,
                 original_delivery,
-                &proof_digest,
-                now,
-            )
-            .await?;
-            // 现金退件且原派发绑定了已支出分配：同事务返还原用途，金额仍为原额（不是 2M）。
-            if let Some(account) = account.as_ref()
-                && funded_delivery_spent(&mut tx, account, original_delivery).await?
-            {
-                return_funded_delivery(
-                    &mut tx,
-                    account,
-                    &FundingMutation {
-                        command_id: take_funding_command_id(return_mail_id),
-                        request_digest: proof_digest,
-                    },
-                    original_delivery,
-                    FundingReturnBinding {
-                        return_mail_id,
-                        take_delivery_id: action
-                            .delivery_id
-                            .ok_or_else(|| crate::database::repository_error("Take 投递缺失"))?,
-                        credits: action.expected_credits,
-                        proof_digest: &proof_digest,
-                    },
-                )
-                .await?;
-            }
-            dispose_taken(&mut tx, &case, Some(executable), now).await?
+                account: account.as_ref(),
+                executable,
+                proof_digest: &proof_digest,
+                proof,
+            };
+            consume_take_proof(&mut tx, &case, &action, &proven, now).await?
         }
     };
     tx.commit().await?;
     Ok(Some(progress))
 }
 
+/// 已在锁内判定成立的一份领取证明及其记账范围。
+pub(super) struct TakeProof<'a> {
+    pub(super) obligation_id: Uuid,
+    /// 被退回的原派发投递。
+    pub(super) original_delivery: Uuid,
+    /// 现金退件时按锁序已锁定的原资金账户；装备退件或历史无资金分配时为空。
+    pub(super) account: Option<&'a LockedFundingAccount>,
+    /// 恢复谓词：原义务此刻仍可执行。
+    pub(super) executable: bool,
+    pub(super) proof_digest: &'a [u8; 32],
+    /// 证明形状（成功页回执或巡检恢复），写进 `take_proven` 事件。
+    pub(super) proof: &'static str,
+}
+
+/// 领取证明成立后的唯一记账路径：只追加领回事实（同案件、Take 投递、原派发与邮件各一次），现金
+/// 退件同事务把原分配 spent → available 返还一次（金额仍为原额，不是 2M），再按计划补寄或代管
+/// （不变量 1、3、8）。调用方已持有资金 → 恢复与义务 → 案件 → 动作 → 投递的锁。
+pub(super) async fn consume_take_proof(
+    tx: &mut Transaction<'_, Postgres>,
+    case: &CaseRow,
+    action: &ActionRow,
+    proven: &TakeProof<'_>,
+    now: DateTime<Utc>,
+) -> Result<SettlementReturnProgress, ReturnTransactionError> {
+    record_take(tx, case, action, proven, now).await?;
+    if let Some(account) = proven.account
+        && funded_delivery_spent(tx, account, proven.original_delivery).await?
+    {
+        return_funded_delivery(
+            tx,
+            account,
+            &FundingMutation {
+                command_id: take_funding_command_id(case.return_mail_id),
+                request_digest: *proven.proof_digest,
+            },
+            proven.original_delivery,
+            FundingReturnBinding {
+                return_mail_id: case.return_mail_id,
+                take_delivery_id: action
+                    .delivery_id
+                    .ok_or_else(|| crate::database::repository_error("Take 投递缺失"))?,
+                credits: action.expected_credits,
+                proof_digest: proven.proof_digest,
+            },
+        )
+        .await?;
+    }
+    dispose_taken(tx, case, Some(proven.executable), proven.proof, now).await
+}
+
 /// 只追加领回事实并把动作收为 satisfied；同一案件、Take 投递、原派发与邮件各只能领回一次。
+/// 动作可来自 enqueued（正常收口）或 manual_reconcile（巡检恢复），两者都以版本比较交换推进。
 async fn record_take(
     tx: &mut Transaction<'_, Postgres>,
     case: &CaseRow,
     action: &ActionRow,
-    obligation_id: Uuid,
-    original_delivery: Uuid,
-    proof_digest: &[u8; 32],
+    proven: &TakeProof<'_>,
     now: DateTime<Utc>,
 ) -> Result<(), ReturnTransactionError> {
     let take_delivery =
@@ -345,24 +371,26 @@ async fn record_take(
     )
     .bind(case.return_mail_id)
     .bind(take_delivery)
-    .bind(original_delivery)
-    .bind(obligation_id)
+    .bind(proven.original_delivery)
+    .bind(proven.obligation_id)
     .bind(&action.world_id)
     .bind(&action.source_external_mail_id)
     .bind(action.expected_credits)
     .bind(action.expected_cod)
     .bind(&action.expected_attachment_ids)
-    .bind(proof_digest.as_slice())
+    .bind(proven.proof_digest.as_slice())
     .bind(now)
     .execute(&mut **tx)
     .await?;
     let updated = sqlx::query(
         r#"UPDATE public.settlement_return_actions
            SET execution_state = 'satisfied',
+               failure_code = NULL,
                completed_at = $3,
                state_version = state_version + 1,
                updated_at = $3
-           WHERE return_mail_id = $1 AND state_version = $2 AND execution_state = 'enqueued'"#,
+           WHERE return_mail_id = $1 AND state_version = $2
+             AND execution_state IN ('enqueued', 'manual_reconcile')"#,
     )
     .bind(case.return_mail_id)
     .bind(action.state_version)
@@ -380,6 +408,7 @@ async fn dispose_taken(
     tx: &mut Transaction<'_, Postgres>,
     case: &CaseRow,
     executable: Option<bool>,
+    proof: &'static str,
     now: DateTime<Utc>,
 ) -> Result<SettlementReturnProgress, ReturnTransactionError> {
     let context = admission_facts(tx, case, executable, true).await?;
@@ -399,7 +428,7 @@ async fn dispose_taken(
                 CaseTransition::from_case(case, SettlementReturnCaseStatus::ResendPending);
             next.plan = Some(SettlementReturnPlan::Resend);
             next.resend_dispatch_no = Some(dispatch_no);
-            (next, json!({"next": "resend", "dispatch_no": dispatch_no}))
+            (next, json!({"next": "resend", "dispatch_no": dispatch_no, "proof": proof}))
         }
         Err(blocker) => {
             close_fulfillment(tx, case, context.fulfillment.as_ref(), HELD_FAILURE_CODE, now)
@@ -408,7 +437,11 @@ async fn dispose_taken(
             next.plan = Some(SettlementReturnPlan::Hold);
             (
                 next,
-                json!({"next": "hold", "resend_blocked": blocker.map(SettlementReturnBlocker::as_str)}),
+                json!({
+                    "next": "hold",
+                    "resend_blocked": blocker.map(SettlementReturnBlocker::as_str),
+                    "proof": proof,
+                }),
             )
         }
     };

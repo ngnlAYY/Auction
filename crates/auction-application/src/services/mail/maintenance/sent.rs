@@ -8,7 +8,7 @@ use super::MailboxMaintenanceService;
 use super::diagnostics::{check_deadline, record_unpersisted_error, repository_error};
 use super::matching::{
     frozen_entry_matches, frozen_state_matches, notice_subject_matches, recovered_state_matches,
-    same_send_content, sent_matches, take_assets_match,
+    return_take_assets_match, same_send_content, sent_matches, take_assets_match,
 };
 use crate::errors::ApplicationError;
 use crate::ports::delivery::{
@@ -332,6 +332,10 @@ impl MailboxMaintenanceService {
     }
 
     /// Take 只解释原账号下的明确缺失或完整资产观察；旧无绑定记录保留人工核对。
+    ///
+    /// 结算退件 Take（`settlement_return_action`）会把领回证明变成资金返还，口径更严：只有原 MID
+    /// 仍可读、系统发件人、附件已全部取走才是完成证明（附带预期资产，由存储锁内逐项比对）；原
+    /// 完整资产仍在才重新排队；邮件整体缺失可能是过期或删除，不能证明资产入账，保持结果未知。
     pub(super) async fn recover_take(
         &self,
         world_id: &str,
@@ -370,15 +374,22 @@ impl MailboxMaintenanceService {
         {
             return Ok(RecoveryStep::default());
         }
+        let settlement_return = candidate.origin_kind == "settlement_return_action";
         match observed.assets {
+            None if settlement_return => Ok(RecoveryStep::default()),
             None => self.bind_take(candidate, expectation, observation, "inbox_mail_absent").await,
             Some(present) => {
                 if !present.sender.eq_ignore_ascii_case(&candidate.recipient) {
                     return Ok(RecoveryStep::default());
                 }
+                let still_present = if settlement_return {
+                    return_take_assets_match(candidate, &present)
+                } else {
+                    take_assets_match(candidate, &present)
+                };
                 if present.equipment_ids.is_empty() && present.credits == 0 && present.cod == 0 {
                     self.bind_take(candidate, expectation, observation, "attachments_absent").await
-                } else if take_assets_match(candidate, &present) {
+                } else if still_present {
                     self.requeue(candidate, expectation, observation, "take_assets_still_present")
                         .await
                 } else {
@@ -395,21 +406,28 @@ impl MailboxMaintenanceService {
         observation: &DeliverySendCredentialBinding,
         reason: &str,
     ) -> Result<RecoveryStep, ApplicationError> {
+        let mut metadata = json!({
+            "observed_at": self.clock.now(),
+            "operation": "take",
+            "proof": "action_recovered_inbox_v1",
+            "external_reference_proven": true,
+            "recovered_mid": candidate.inbound_mail_id,
+            "reason": reason,
+            "attachment_count": candidate.attachment_ids.len(),
+        });
+        if candidate.origin_kind == "settlement_return_action" {
+            // 与成功页回执同一组预期资产字段；存储在锁内与动作冻结事实逐项比对后才记账。
+            metadata["expected_credits"] = candidate.credits.into();
+            metadata["expected_cod"] = candidate.cod.into();
+            metadata["expected_attachment_ids"] = candidate.attachment_ids.clone().into();
+        }
         let recovered = self
             .store
             .bind_recovered_action(
                 candidate.delivery_id,
                 candidate.fencing_version,
                 candidate.inbound_mail_id.clone(),
-                json!({
-                    "observed_at": self.clock.now(),
-                    "operation": "take",
-                    "proof": "action_recovered_inbox_v1",
-                    "external_reference_proven": true,
-                    "recovered_mid": candidate.inbound_mail_id,
-                    "reason": reason,
-                    "attachment_count": candidate.attachment_ids.len(),
-                }),
+                metadata,
                 expectation,
                 observation,
             )

@@ -6,9 +6,9 @@ use auction_application::settlement::{FundingError, SettlementReturnError};
 
 use crate::database::mail::delivery::MailDeliveryTransactionError;
 
-/// 结算退件单次事务内的错误。
+/// 结算退件单次事务内的错误；邮箱巡检事务借用本模块推进案件时经 `From` 转换为自己的错误分类。
 #[derive(Debug)]
-pub(super) enum ReturnTransactionError {
+pub(crate) enum ReturnTransactionError {
     Sqlx(sqlx::Error),
     Business(SettlementReturnError),
     Funding(FundingError),

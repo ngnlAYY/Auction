@@ -185,18 +185,22 @@ fn recoverable_send(world_id: &str, row: UnprovenSendRow) -> Option<MoogleMailbo
         }
         None => None,
     };
+    let valid_attachment_ids = attachment_ids
+        .iter()
+        .all(|id| !id.is_empty() && id.len() <= 32 && id.bytes().all(|byte| byte.is_ascii_digit()));
     let usable = send_expectation.is_some()
         || match (origin_kind.as_str(), operation.as_str()) {
             ("settlement", "send") => !reference.is_empty(),
             ("mail_intake", "send") => result_code.is_some() && !inbound_mail_id.is_empty(),
             ("mail_intake", "take") => {
-                !inbound_mail_id.is_empty()
-                    && !attachment_ids.is_empty()
-                    && attachment_ids.iter().all(|id| {
-                        !id.is_empty()
-                            && id.len() <= 32
-                            && id.bytes().all(|byte| byte.is_ascii_digit())
-                    })
+                !inbound_mail_id.is_empty() && !attachment_ids.is_empty() && valid_attachment_ids
+            }
+            // 结算退件 Take 只经原 Take 会话的冻结身份恢复；现金退件可以没有装备附件。
+            ("settlement_return_action", "take") => {
+                take_expectation.is_some()
+                    && !inbound_mail_id.is_empty()
+                    && (credits > 0 || !attachment_ids.is_empty())
+                    && valid_attachment_ids
             }
             _ => false,
         };

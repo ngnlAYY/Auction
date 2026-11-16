@@ -5,7 +5,8 @@
 //! 投递 Worker 在租约与发送围栏之后执行（本地先提交，不变量 4）。收口：Take 投递到终态后，只有
 //! 精确的领取证明（同世界/MID、动作移除或成功页、预期资产逐项一致、投递身份与载荷未变）才一次性
 //! 写入领回事实并同事务返还原资金用途；失败或未知一律转人工核对，不自动重试，也不接受操作者
-//! 声明（不变量 4、6）。
+//! 声明（不变量 4、6）。结果未知之后只有邮箱巡检在原 Take 会话里观察到的精确证明（原 MID 仍在、
+//! 系统发件人、附件全部取走、预期资产逐项一致）才算第二种证明形状，记账与成功页证明完全一致。
 
 use auction_application::core::RequestHash;
 use auction_application::mail::{
@@ -26,6 +27,16 @@ use crate::database::repository_error;
 const TAKE_PREPARE_LABEL: &str = "settlement-return-take-prepare";
 const TAKE_ACTIVATE_LABEL: &str = "settlement-return-take-activate";
 const TAKE_FUNDING_LABEL: &str = "settlement-return-funding";
+
+/// 投递 Worker 执行 Take 时验证回执得到的证明（动作移除或成功页）。
+pub(super) const TAKE_RECEIPT_PROOF: &str = "action_removed_or_success_page";
+
+/// 邮箱巡检在原 Take 会话里补采的证明；结算退件只认“附件已全部取走”这一观察。
+pub(super) const TAKE_SWEEP_PROOF: &str = "action_recovered_inbox_v1";
+
+/// 巡检证明中唯一能证明资产已入账的观察：原 MID 仍可读、附件全部取走。邮件整体缺失可能是过期
+/// 或被删除，不能证明资产进入 Bot 账号，不作为结算退件的领回证明。
+pub(super) const TAKE_SWEEP_REASON: &str = "attachments_absent";
 
 /// Take 投递的来源标识：案件 ID（即退件入站邮件 ID）。
 pub(super) fn take_origin_id(return_mail_id: Uuid) -> String {
@@ -228,8 +239,9 @@ pub(super) fn take_activation(
 /// 终态 Take 投递的可验证结论。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum TakeOutcome {
-    /// 精确领取证明成立；摘要绑定投递、世界、MID 与预期资产。
-    Proven { proof_digest: [u8; 32], external_reference: String },
+    /// 精确领取证明成立；摘要绑定证明形状、投递、世界、MID 与预期资产。`proof` 为
+    /// [`TAKE_RECEIPT_PROOF`] 或 [`TAKE_SWEEP_PROOF`]。
+    Proven { proof_digest: [u8; 32], external_reference: String, proof: &'static str },
     /// 投递确定失败（未开始写入或远端明确拒绝）：领取未发生或无法证明，转人工核对。
     Failed { failure_code: &'static str },
     /// 结果未知：转人工核对，只认系统可验证证明，不自动重试。
@@ -301,12 +313,33 @@ pub(super) async fn observe_take(
     let metadata: serde_json::Value = row.try_get("result_metadata")?;
     let expected_reference =
         format!("mooglemail:{}:take:{}", action.world_id, action.source_external_mail_id);
+    let mid = Some(action.source_external_mail_id.as_str());
+    // 两种证明形状各自的身份字段：成功页回执带 `external_mail_id`；巡检恢复带 `recovered_mid`，
+    // 且只认附件已全部取走的观察。
+    let proof = match metadata.get("proof").and_then(serde_json::Value::as_str) {
+        Some(TAKE_RECEIPT_PROOF)
+            if metadata.get("external_mail_id").and_then(serde_json::Value::as_str) == mid =>
+        {
+            Some((TAKE_RECEIPT_PROOF, "settlement_return_take_succeeded"))
+        }
+        Some(TAKE_SWEEP_PROOF)
+            if metadata.get("recovered_mid").and_then(serde_json::Value::as_str) == mid
+                && metadata.get("reason").and_then(serde_json::Value::as_str)
+                    == Some(TAKE_SWEEP_REASON)
+                && metadata
+                    .get("external_reference_proven")
+                    .and_then(serde_json::Value::as_bool)
+                    == Some(true) =>
+        {
+            Some((TAKE_SWEEP_PROOF, "settlement_return_take_recovered"))
+        }
+        _ => None,
+    };
+    let Some((proof, proof_kind)) = proof else {
+        return Ok(TakeOutcome::Unknown { failure_code: "settlement_return_take_unknown" });
+    };
     let proven = reference.as_deref() == Some(expected_reference.as_str())
         && metadata.get("operation").and_then(serde_json::Value::as_str) == Some("take")
-        && metadata.get("external_mail_id").and_then(serde_json::Value::as_str)
-            == Some(action.source_external_mail_id.as_str())
-        && metadata.get("proof").and_then(serde_json::Value::as_str)
-            == Some("action_removed_or_success_page")
         && metadata.get("expected_credits").and_then(serde_json::Value::as_i64)
             == Some(action.expected_credits)
         && metadata.get("expected_cod").and_then(serde_json::Value::as_i64)
@@ -326,7 +359,7 @@ pub(super) async fn observe_take(
     }
     let proof_digest = RequestHash::from_legacy_go_json(&TakeProofPayload {
         schema_version: 1,
-        kind: "settlement_return_take_succeeded",
+        kind: proof_kind,
         delivery_id: delivery_id.to_string(),
         return_mail_id: action.return_mail_id.to_string(),
         external_reference: &expected_reference,
@@ -339,5 +372,5 @@ pub(super) async fn observe_take(
     .ok()
     .ok_or_else(|| repository_error("结算退件领回证明摘要编码失败"))?
     .as_bytes();
-    Ok(TakeOutcome::Proven { proof_digest, external_reference: expected_reference })
+    Ok(TakeOutcome::Proven { proof_digest, external_reference: expected_reference, proof })
 }

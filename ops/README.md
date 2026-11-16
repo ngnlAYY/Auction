@@ -452,7 +452,7 @@ COD 实收资金化诊断使用独立 target `auction::settlement::funding_diagn
 
 命令带 `command_id` 与案件版本。页面提示结果未知（超时、断网、5xx）时，只在页面“未决命令”区按原命令重试，不要另起新命令；返回 409（版本已变、状态或资格不符等）表示案件已不同于页面所见，页面会重读，看过最新状态再决定。
 
-Take 结果未知（`take_unknown`）时案件停在人工核对：不要在游戏内手工领取，也不要在投递台对该 Take 投递重试或声明结果（投递台会拒绝）。系统只认可验证的领取证明，当前版本还没有为结算退件 Take 补采这类证明的路径，因此这类案件会保持打开，`settlement_return_quarantined` 告警持续活动（可在告警台静默重复通知），其 Take 投递也计入投递人工对账；在游戏内核对 Bot 收件箱中原退件是否仍在，记录结论后上报维护者，不要人工改库。
+Take 结果未知（`take_unknown`）时案件停在人工核对：不要在游戏内手工领取，也不要在投递台对该 Take 投递重试或声明结果（投递台会拒绝）。系统只认可验证的领取证明：邮箱维护在原 Take 会话里复核原退件，附件已全部取走即按领回证明收口（资金返还一次，再按计划补寄或代管），原资产完整仍在即重新排队执行 Take，两者都会在案件事件里留下记录（`take_proven` 的 `proof=action_recovered_inbox_v1`，或 `take_activated` 的 `requeued=true`）。邮件整体缺失、资产不全、Take 由配置 Cookie 执行或激活前就有同邮件冲突（事件 `take_unknown` 的 `failure_code=mail_disposition_conflict`，动作保持 pending）时案件保持打开，`settlement_return_quarantined` 告警持续活动（可在告警台静默重复通知），其 Take 投递也计入投递人工对账。仍无法收口的案件在游戏内核对 Bot 收件箱中原退件是否仍在，记录结论后上报维护者，不要人工改库。
 
 ### 结算退件代管查询
 

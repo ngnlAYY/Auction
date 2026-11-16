@@ -123,6 +123,24 @@ pub(super) fn reference_is_subject_projection(subject: &str, reference: &str) ->
     prefix.len() >= 6 && reference.starts_with(prefix)
 }
 
+/// 结算退件 Take 的重排同样只接受原完整资产，但现金退件可以只有 Credits、没有装备附件；空资产
+/// 永远不算“仍在未领”。
+pub(super) fn return_take_assets_match(
+    candidate: &MoogleMailboxUnprovenSend,
+    present: &MoogleMailboxInboxAssets,
+) -> bool {
+    if (candidate.attachment_ids.is_empty() && candidate.credits == 0)
+        || candidate.attachment_ids.len() != present.equipment_ids.len()
+        || candidate.credits != present.credits
+        || candidate.cod != present.cod
+    {
+        return false;
+    }
+    let mut expected = candidate.attachment_ids.iter().collect::<std::collections::HashSet<_>>();
+    expected.len() == candidate.attachment_ids.len()
+        && present.equipment_ids.iter().all(|id| expected.remove(id))
+}
+
 /// 重排只接受未发生部分领取的原完整资产；集合比较不依赖远端顺序，也不接受重复 ID。
 pub(super) fn take_assets_match(
     candidate: &MoogleMailboxUnprovenSend,

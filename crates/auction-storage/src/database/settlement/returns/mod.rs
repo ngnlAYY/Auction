@@ -2,7 +2,8 @@
 //!
 //! 案件与经济义务分开：案件终结只表示本次退件处理已交接或完成；原义务是否满足、资产归谁、是否
 //! 仍欠款由履约、资金与对账各自判断。Admin 命令与 Worker 步骤都是单个 Serializable 本地事务，
-//! 外部 Take 只经 delivery owner 在本地提交之后执行。
+//! 外部 Take 只经 delivery owner 在本地提交之后执行。Take 结果未知的唯一出口是邮箱巡检在原 Take
+//! 会话里观察到的精确事实（`swept`），不接受操作者声明。
 
 mod admission;
 mod cases;
@@ -11,10 +12,15 @@ mod errors;
 mod reads;
 mod recheck;
 mod resend;
+mod swept;
 mod take;
 mod work;
 
 pub(crate) use cases::open_case;
+pub(crate) use errors::ReturnTransactionError;
+pub(crate) use swept::{
+    SweptTakeOwner, lock_swept_take, requeue_swept_take, settle_swept_take, swept_take_owner,
+};
 
 use auction_application::settlement::{
     SettlementReturnAdminPort, SettlementReturnCommand, SettlementReturnCommandResult,
