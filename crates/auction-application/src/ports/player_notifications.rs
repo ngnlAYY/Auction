@@ -61,6 +61,10 @@ pub struct SeasonReminderFact {
 pub trait PlayerNotificationScanner: Send + Sync {
     /// 返回 `settled_since` 之后结算、且至少有一个卖方尚无汇总通知的 lot 事实。
     ///
+    /// `limit` 是（场次, 卖方）组数上限，不是行数上限：实现选出至多 `limit` 个尚无汇总的组，
+    /// 并返回这些组的全部 lot，返回行数可以超过 `limit`；已有汇总的组不返回。不得按行截断
+    /// 选中组：汇总正文按组冻结进稳定命令，缺失的 lot 在投递存在后不会再补寄。
+    ///
     /// 历史场次不回填：早于窗口的场次不产生新通知。
     fn seller_summary_facts(
         &self,
@@ -69,6 +73,10 @@ pub trait PlayerNotificationScanner: Send + Sync {
     ) -> ApplicationFuture<'_, Vec<SellerSummaryLotFact>>;
 
     /// 返回即将到来的冻结赛季边界之前、仍有未完成 isekai 义务的收件人事实。
+    ///
+    /// `limit` 是（冻结边界, 收件人）组数上限，不是行数上限：实现选出至多 `limit` 个尚无提醒的组，
+    /// 并返回这些组的全部义务，返回行数可以超过 `limit`；已有提醒的组不返回。不得按行截断
+    /// 选中组：提醒正文按组冻结进稳定命令，缺失的义务在投递存在后不会再补寄。
     ///
     /// 只使用已冻结且非 NULL 的 `auctions.intake_opens_at`；没有冻结边界时不产生提醒，
     /// 也不从当前配置推测边界。

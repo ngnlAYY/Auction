@@ -28,7 +28,9 @@ pub use seller_summary::{
 /// 只扫描最近结算场次，不回填历史；换季提醒最多提前一周创建。
 pub const SELLER_SUMMARY_LOOKBACK_SECONDS: i64 = 7 * 24 * 60 * 60;
 pub const SEASON_REMINDER_LEAD_SECONDS: i64 = 7 * 24 * 60 * 60;
-/// 每轮扫描的事实行上限；超出的部分下一轮继续。
+/// 每轮扫描选中的通知组上限，不是事实行上限：卖方汇总按（场次, 卖方）、换季提醒按
+/// （冻结边界, 收件人）计组。选中组的全部事实一次返回，返回行数可以超过该值；未选中的组
+/// 下一轮继续。每组正文只冻结一次，按行截断会把不完整的组冻结进稳定命令。
 pub const PLAYER_NOTIFICATION_SCAN_LIMIT: u32 = 512;
 
 /// 一轮扫描的入队结果；只用于日志与指标，不参与幂等判断。
