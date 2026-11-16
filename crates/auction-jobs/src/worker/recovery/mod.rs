@@ -53,9 +53,9 @@ pub(super) async fn run_loop<C>(
             let result = run_batch(worker.as_ref()).await;
             // 原因已由各阶段诊断记录；汇总只在状态转换时记录，持续失败不逐轮重复。
             match outcome_log.observe(result) {
-                Some(LoopOutcomeTransition::Degraded) => tracing::warn!(
-                    "recovery worker batch was not fully processed; retrying after poll delay"
-                ),
+                Some(LoopOutcomeTransition::Degraded) => {
+                    tracing::warn!("恢复批次未完整处理，轮询间隔后重试");
+                }
                 Some(LoopOutcomeTransition::Recovered) => {
                     tracing::info!("恢复批次已恢复完整处理");
                 }
