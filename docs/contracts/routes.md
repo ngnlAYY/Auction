@@ -227,7 +227,7 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | GET | `/api/v1/admin/alerts/webhooks` | 最近 webhook 投递安全投影（`limit` 1–100，默认 50）；返回状态、kind/source/scope、尝试次数、下次尝试/发送/完成时间与失败码，不含冻结 JSON、收件人或凭据；只读 |
 | POST | `/api/v1/admin/alerts/{alert_id}/acknowledge` | 确认告警；`alert_id` 为 64 位十六进制 fingerprint。只追加操作者事实（`command_id` 幂等），不改变 signal 状态、计数、阈值或恢复判定 |
 | POST | `/api/v1/admin/alerts/{alert_id}/silence` | 静默告警到 `silence_seconds`（60–604800）之后；只抑制重复通知，到期后仍活动的 signal 按原阈值继续通知，不改变阈值评估 |
-| GET | `/api/v1/admin/pending-counts` | 导航待办数：`delivery_manual_reconcile`、`recovery_confirmation`（reclaiming 且证据齐全、恰好一个候选结果）、`active_alerts` |
+| GET | `/api/v1/admin/pending-counts` | 导航待办数：`delivery_manual_reconcile`、`recovery_confirmation`（reclaiming 且证据齐全、恰好一个候选结果；需要拉黑的确认须已完成拉黑——main `reclaimed` 始终需要，isekai `cancelled` 只在退回次数达到冻结上限时需要）、`active_alerts` |
 | GET | `/api/v1/admin/worlds` | 业务世界及启用状态 |
 | PATCH | `/api/v1/admin/worlds/{world_id}` | 启用/停用业务世界（即时生效） |
 | GET / POST | `/api/v1/admin/auctions` | 场次列表（`world_id`、`status`、`page`、`page_size`）/ 新建场次 |
@@ -244,7 +244,7 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | GET | `/api/v1/admin/forum/sync-status` | 论坛同步状态 |
 | GET | `/api/v1/admin/auctions/{auction_id}/forum` | 该场论坛主题与诊断的本地安全投影；刷新不请求论坛，也不触发或授权重写 |
 | GET | `/api/v1/admin/auctions/{auction_id}/settlement-report` | 结算报告 |
-| GET | `/api/v1/admin/auctions/{auction_id}/recovery-report` | 恢复报告，含 `payment_deadline_at`、`blocking_code` 与 `allowed_commands`；旧赛季装备的永久重列阻断对外映射为 `recovery_relist_unavailable` |
+| GET | `/api/v1/admin/auctions/{auction_id}/recovery-report` | 恢复报告，含 `payment_deadline_at`、`blocking_code` 与 `allowed_commands`（与确认事务共用同一准入：isekai `cancelled` 在退回次数未达冻结上限时不要求拉黑）；旧赛季装备的永久重列阻断对外映射为 `recovery_relist_unavailable` |
 | GET | `/api/v1/admin/settlement-catalog` | 已结算场次目录（`world_id`、`sequence`、`page`、`page_size`） |
 | POST | `/api/v1/admin/recoveries/{recovery_id}/confirm` | 人工确认恢复动作（带期望版本与原因） |
 | GET | `/api/v1/admin/mail` | 邮箱轮询状态（`mailbox_key`、`include_diagnostics`） |
@@ -278,7 +278,7 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | GET | `/api/v1/admin/renames` | 改名历史（`user_id`、`name`、`page`、`page_size`） |
 | POST | `/api/v1/admin/renames/{rename_id}/revert` | 回滚改名 |
 | GET / POST / PATCH / DELETE | `/api/v1/admin/credentials` | 凭据列表（`kind`、`world`、`status`、`page`、`page_size`）/ 录入 Cookie 或以论坛账号密码获取并提取游戏 CK / 改名或启停 / 删除 |
-| POST | `/api/v1/admin/credentials/{credential_id}/check` | 在线校验凭据 |
+| POST | `/api/v1/admin/credentials/{credential_id}/check` | 在线校验凭据；邮件 Cookie 经 Worker control 由 Worker 执行，Worker 不可用时返回 `503 credential_check_unavailable` |
 | GET | `/api/v1/admin/audit` | 审计记录（`actor`、`actor_type`、`action`、`entity`、`source`、`result`、`request_id`、`occurred_from`、`occurred_to`、`page`、`page_size`、`cursor`、`before_time`、`before_id`） |
 
 请求体大小上限按路由冻结：多数命令 4–16 KiB，realtime 重放 64 KiB，凭据 128 KiB（在线校验 4 KiB），装备录入 72 KiB，出站通知模板 96 KiB，规则与关于 1 MiB，runtime 配置 4 MiB。
@@ -343,6 +343,7 @@ Public/Admin/Worker 可在业务 listener、control socket 之外启用独立出
 | POST | `/v1/equipment/reads` | Admin 手工装备 URL 读取代为执行；请求只含 `world_id` 与公开装备链接 |
 | POST | `/v1/mail/sent:lookup` | CLI `mail inspect-sent` 的 Sent 只读核查代为执行 |
 | POST | `/v1/recovery/external:scan` | 恢复后核对在全局暂停下只读扫描 Sent、Read Mail 与指定论坛主题；请求不含凭据，响应只含 MID、截断后的列表字段与论坛楼层身份 |
+| POST | `/v1/credentials/mail:check` | Admin 邮件 Cookie 在线校验代为执行；请求只含 `credential_id` 与 `expected_state_version`，响应只含回显的凭据 ID、状态版本与逐世界 `world`/`status`，不含 Cookie、余额或页面正文 |
 | GET | `/metrics` | Worker 指标 |
 
 装备与 Sent 核查路由在 Worker 未装配对应能力时返回 `501 capability_unavailable`，
@@ -350,6 +351,8 @@ Public/Admin/Worker 可在业务 listener、control socket 之外启用独立出
 自己的 fetch 预算约束，Admin/CLI 不得回退到本地直连。恢复核对是唯一在暂停下执行的读取：
 未暂停时返回 `409 not_paused`（请求不发往远端），暂停期间只读且不执行 Send/Take/Return，
 响应在扫描期间暂停被解除时标记 `status=partial` 与 `external_access_resumed`，调用方不得据此隔离。
+
+邮件凭据检查由 Worker 按 ID 打开数据库信封并前后复核版本，经与邮件循环共用请求门、在途锁与账号忙熔断的客户端读取余额页：账号忙窗口内不发网络，成功不清除忙碌；同时最多一个检查，总预算 12 秒。未装配执行器（未启用 MoogleMail 或未配置 `credential_data_key`）时返回 `501 capability_unavailable`；版本冲突 `409 version_conflict`（`data.current_version`）、凭据不存在 `404 not_found`、请求无效 `400 invalid_command_id`、已有检查在执行 `429 busy`；主动暂停与其他失败为 `503 capability_unavailable`，超时 `504`。Admin 只把业务拒绝映射回原错误，其余一律报暂不可用，不回退本地直连。
 
 ## 浏览器页面
 
