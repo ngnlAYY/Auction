@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 /// 夹具里的成交与恢复身份。
 pub(crate) struct Sale {
+    pub(crate) auction_id: Uuid,
     pub(crate) payment: Uuid,
     pub(crate) handoff: Option<Uuid>,
     pub(crate) seller: Uuid,
@@ -380,7 +381,16 @@ pub(crate) async fn insert_reclaiming_sale(pool: &PgPool, spec: SaleSpec) -> Sal
         .expect("写入已满足的拉黑动作");
     }
 
-    Sale { payment, handoff, seller, refund, recovery_id, payment_delivery, state_version }
+    Sale {
+        auction_id,
+        payment,
+        handoff,
+        seller,
+        refund,
+        recovery_id,
+        payment_delivery,
+        state_version,
+    }
 }
 
 /// 已寄出（Sent 证明成功）、随后被退回的原付款投递与 enqueued 履约，带完整 prepare/activate 身份。
