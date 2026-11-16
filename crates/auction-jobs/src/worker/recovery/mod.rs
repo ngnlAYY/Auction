@@ -57,7 +57,7 @@ pub(super) async fn run_loop<C>(
                     "recovery worker batch was not fully processed; retrying after poll delay"
                 ),
                 Some(LoopOutcomeTransition::Recovered) => {
-                    tracing::info!("recovery worker batch fully processed again");
+                    tracing::info!("恢复批次已恢复完整处理");
                 }
                 None => {}
             }
