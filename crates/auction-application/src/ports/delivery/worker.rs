@@ -75,6 +75,24 @@ pub struct DeliveryTransportError {
     pub result_metadata: Value,
 }
 
+/// 发送前只读准备耗尽 Worker 准备预算的失败码。Worker 调度与传输适配器共用这一个 owner：
+/// 调度据此归为超时诊断，通知指标归为准备阻断；改名须同时评估两处归类。
+pub const DELIVERY_PREFLIGHT_TIMEOUT: &str = "preflight_timeout";
+
+impl DeliveryTransportError {
+    /// 只读准备在预算内未完成：尚未开始远端写入，只能释放 claim 延后重试。超时不证明任何
+    /// 资金、凭据或远端状态，不得归为现金授权失败或写入未知。
+    pub fn preflight_timeout() -> Self {
+        Self {
+            failure_code: DELIVERY_PREFLIGHT_TIMEOUT.to_owned(),
+            safe_detail: "delivery 只读准备超出预算，尚未开始远端写入".to_owned(),
+            outcome_unknown: false,
+            external_reference: None,
+            result_metadata: serde_json::json!({"stage": "preflight", "write_started": false}),
+        }
+    }
+}
+
 /// 已完成只读前置、但尚未开始外部写入的消耗式发送句柄。
 /// 句柄持有适配器的凭据独占上下文；仅在持久 sending fence 成功且续租确认后 poll 一次。
 /// 丢弃句柄只释放上下文，不执行远端写入。
@@ -223,7 +241,11 @@ pub trait DeliveryTransport: Send + Sync {
     /// 无远端可变 compose 状态的适配器可直接返回发送句柄；非法负载在句柄执行时确定失败。
     fn prepare(&self, claim: DeliveryWorkClaim) -> DeliveryPreparation<'_>;
 
-    /// Worker 的发送前准备入口；deadline 包含独占 guard 排队与全部只读请求，不逐步重置。
+    /// Worker 的发送前准备入口。`deadline` 是 Worker 准备请求的原绝对截止，覆盖独占 guard 排队
+    /// 与全部只读请求，不逐步重置；它不是租约截止——租约由调用方在准备期间持续续租守住，续租
+    /// 失败时调用方直接丢弃本 future。整体越过 `deadline` 必须返回
+    /// [`DeliveryTransportError::preflight_timeout`]；只有资金证据确实未能证明时才可报现金授权失败，
+    /// 现金证据自身的寿命上限仍由适配器在读取证据时另行收紧。
     fn prepare_authorized(
         &self,
         claim: DeliveryWorkClaim,

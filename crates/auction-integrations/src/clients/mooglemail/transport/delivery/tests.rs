@@ -6,7 +6,9 @@ use std::{sync::Arc, time::Duration};
 use auction_application::admin::AdminCredentialRuntimeWriter;
 use auction_application::core::ApplicationFuture;
 use auction_application::core::{ApplicationError, RequestHash};
-use auction_application::delivery::{DeliveryTransport, DeliveryWorkClaim};
+use auction_application::delivery::{
+    DELIVERY_PREFLIGHT_TIMEOUT, DeliveryTransport, DeliveryWorkClaim,
+};
 use auction_application::mail::{
     EquipmentRejectionReason, MailDeliveryOrigin, MailLoginKey, MailLoginKeyReader,
     MailNotificationField, MailNotificationTemplate,
@@ -309,6 +311,31 @@ async fn gate_releases_every_notification_origin_while_account_is_busy() {
     assert!(transport.available(&settlement_return_claim()));
     // 闸门只读进程内熔断状态，不能消耗窗口内的只读探测。
     assert_eq!(server.read_requests(), requests);
+}
+
+/// 零 Credits 通知的准备卡在 compose 预检时，整体越过准备截止只能按准备超时延期：通知不读
+/// 资金证据，不得冒充现金授权失败，也不进入写入未知。
+#[tokio::test]
+async fn notification_preparation_overrun_is_a_preflight_timeout() {
+    let server = MailDouble::start().await.expect("loopback server");
+    // compose 预检 2 秒后才回应，晚于 300 毫秒的准备截止，早于客户端自身 5 秒请求超时。
+    server.set_fault(Some(Fault::Timeout(Duration::from_secs(2))));
+    let transport = MoogleMailDeliveryTransport::new(
+        client(server.endpoint()),
+        MoogleMailCredentialSet::new(COOKIE).expect("fixture cookie"),
+        Arc::new(FixtureLoginKeys),
+    );
+    let claim = notification_claims().remove(0);
+    assert_eq!(claim.payload["credits"], json!(0), "用例必须是零 Credits 通知");
+
+    let deadline = std::time::Instant::now() + Duration::from_millis(300);
+    let Err(error) = transport.prepare_authorized(claim, deadline).await else {
+        panic!("compose 预检未回应时准备不能成功");
+    };
+    assert_eq!(error.failure_code, DELIVERY_PREFLIGHT_TIMEOUT);
+    assert!(!error.outcome_unknown, "准备期没有外部写入，不能转人工对账");
+    assert_eq!(error.result_metadata["write_started"], json!(false));
+    assert_eq!(server.write_requests(), 0);
 }
 
 /// 渲染登录 key 回信用的固定 canonical key；只存在于本测试进程。

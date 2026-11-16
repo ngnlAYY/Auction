@@ -41,8 +41,8 @@ pub use support::{
     PlayerSupportRequest, PlayerSupportSelector, PlayerSupportUser,
 };
 pub use worker::{
-    AuthorizedDeliveryPreparation, AuthorizedDeliverySend, DeliveryClaimExclusions,
-    DeliveryFenceOutcome, DeliveryPreparation, DeliveryPreparedSend, DeliveryRecipientExclusion,
-    DeliverySendResult, DeliveryTransport, DeliveryTransportError, DeliveryWorkClaim,
-    DeliveryWorkStore,
+    AuthorizedDeliveryPreparation, AuthorizedDeliverySend, DELIVERY_PREFLIGHT_TIMEOUT,
+    DeliveryClaimExclusions, DeliveryFenceOutcome, DeliveryPreparation, DeliveryPreparedSend,
+    DeliveryRecipientExclusion, DeliverySendResult, DeliveryTransport, DeliveryTransportError,
+    DeliveryWorkClaim, DeliveryWorkStore,
 };

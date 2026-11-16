@@ -8,15 +8,13 @@ use auction_application::core::diagnostics::{
     DiagnosticContext, DiagnosticDisposition, DiagnosticError, SafeErrorKind, diagnostic_id,
 };
 use auction_application::delivery::{
-    DeliverySendResult, DeliveryTransport, DeliveryTransportError, DeliveryWorkClaim,
-    DeliveryWorkStore,
+    DELIVERY_PREFLIGHT_TIMEOUT, DeliverySendResult, DeliveryTransport, DeliveryTransportError,
+    DeliveryWorkClaim, DeliveryWorkStore,
 };
 use auction_application::operations::ExternalWriteActivity;
 use auction_observability::WorkerResult;
 
-use super::handoff::{
-    PREFLIGHT_TIMEOUT, confirm_delivery_handoff, prepare_delivery, release_unstarted_delivery,
-};
+use super::handoff::{confirm_delivery_handoff, prepare_delivery, release_unstarted_delivery};
 use super::lease::DeliveryLease;
 use super::notification;
 use super::report::DeliveryTaskResult;
@@ -122,12 +120,12 @@ where
         preparation => {
             let failure_code = match preparation {
                 Ok(Err(error)) => error.failure_code,
-                _ => PREFLIGHT_TIMEOUT.to_owned(),
+                _ => DELIVERY_PREFLIGHT_TIMEOUT.to_owned(),
             };
             // 预算耗尽时 prepare 内部 biased select 与外层 timeout_at 同刻到期，内部通常先返回
             // preflight_timeout，外层只兜底卡在续租等待中的情形；两者都按超时归类。类别只进入
             // 未持久化诊断，不参与释放与延期决策。
-            let preflight_kind = if failure_code == PREFLIGHT_TIMEOUT {
+            let preflight_kind = if failure_code == DELIVERY_PREFLIGHT_TIMEOUT {
                 SafeErrorKind::TIMEOUT
             } else {
                 SafeErrorKind::DEPENDENCY_UNAVAILABLE

@@ -42,7 +42,8 @@ impl MoogleMailDeliveryTransport {
         claim: DeliveryWorkClaim,
         deadline: Instant,
     ) -> Result<AuthorizedDeliverySend<'_>, DeliveryTransportError> {
-        // 原 Worker 绝对预算覆盖渲染、排队、compose、完整 Sent 基线和证据准备。
+        // 原 Worker 绝对预算覆盖渲染、排队、compose、完整 Sent 基线和证据准备。租约由 Worker
+        // 续租守住，这里不再按租约截止收紧；现金证据读取另按自身寿命上限收紧。
         tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), async {
             let Some(rendered) = self.render_send(&claim).await? else {
                 let take = self.prepare_take(&claim).await?;
@@ -111,10 +112,13 @@ impl MoogleMailDeliveryTransport {
                 .with_send_expectation(expectation))
         })
         .await
+        // 整体超时只说明准备没有在预算内完成：可能卡在独占凭据排队、compose 预检或 Sent 基线，
+        // 零 Credits 的通知根本不读资金证据。统一按准备超时延期，不冒充现金授权失败；
+        // 资金证据确实未能证明时仍在 prepare_cash_evidence 内返回 cash_authorization_unproven。
         .map_err(safe_diagnostics::warn_map(
             "mooglemail_send",
             "authorize_send_timeout",
-            cash_unproven,
+            DeliveryTransportError::preflight_timeout,
         ))?
     }
 
