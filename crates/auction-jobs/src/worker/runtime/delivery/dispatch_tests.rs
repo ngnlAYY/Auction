@@ -1,8 +1,8 @@
 //! 回归：投递工作项从领取、只读准备、sending 围栏到发送与终态收口的状态机。
 //!
 //! 守护外部写入的安全边界：发送期间失去租约或请求超时一律按远端结果未知落库、绝不重发；
-//! 尚未 poll 外部写入的失败（准备未完成、围栏 Deferred 或提交未知、租约已不可用）只释放
-//! claim，不伪造发送失败；排空时已领取但未开始的工作项按生命周期协议释放或保留原租约，
+//! 尚未 poll 外部写入的失败（准备未完成、围栏提交未知、租约已不可用）只释放 claim，不伪造
+//! 发送失败；围栏确定 Deferred（如竞价警告在交接期间失效）是正常延期，释放后不记 Worker 错误；排空时已领取但未开始的工作项按生命周期协议释放或保留原租约，
 //! 已越过围栏的发送继续完成并落库，终态提交确认后才释放排空活动。
 //!
 //! 内存替身只实现应用端口：存储按发生顺序记录续租、围栏、释放与终态，排空替身把活动的登记
@@ -641,11 +641,31 @@ async fn preparation_outliving_lease_ttl_completes_within_request_budget() {
     assert_eq!(transport.send_polls(), 1);
 }
 
+/// 围栏确定 Deferred（例如竞价警告在交接期间被取消关注、收件人重新领先或 lot 到期）：确定没有
+/// 进入 sending，释放 claim 并正常结束本项；不 poll 外部写入、不撤销原会话、不计未持久化错误。
+#[tokio::test(start_paused = true)]
+async fn deferred_fence_is_a_normal_deferral_without_worker_error() {
+    let store = OutboxStore::new(&["main"], Renewal::Healthy, Fence::Deferred);
+    let transport = ScriptedTransport::new(Preparation::Ready, Some(Duration::ZERO));
+    let (worker, metrics) = delivery_worker(&store, &transport, ExternalWriteLifecycle::default());
+
+    run_delivery_cycle(&worker).await.unwrap();
+
+    assert_eq!(
+        store.calls(),
+        vec![(0, Call::Renew), (0, Call::Renew), (0, Call::Fence), (0, Call::Release)]
+    );
+    assert_eq!(transport.send_polls(), 0, "确定延期绝不 poll 外部写入");
+    assert_eq!(transport.revocations(), 0, "确定结束的围栏不撤销原会话");
+    // 本轮仍暂缓该世界的 Send，避免同一 claim 紧密重领。
+    assert_eq!(store.deferred_send_worlds(), vec![Vec::new(), vec!["main".to_owned()]]);
+    assert_eq!(metrics.iterations(), vec![(WorkerLoop::Delivery, WorkerResult::Success)]);
+    assert!(metrics.unpersisted().is_empty(), "确定延期没有未落库的结果");
+}
+
 #[tokio::test(start_paused = true)]
 async fn unconfirmed_fence_never_polls_send_and_revokes_owner_when_commit_unknown() {
     for (fence, released_at, revocations) in [
-        // Deferred 已确定提交冻结或回滚：确认围栏结束，不撤销原会话。
-        (Fence::Deferred, 0, 0),
         // 提交结果未知：丢弃句柄同步撤销原会话，不能当作已回滚继续使用。
         (Fence::Unknown, 0, 1),
         // 围栏预算是终态超时 5 秒；超时同样按提交未知处理。
@@ -670,7 +690,12 @@ async fn unconfirmed_fence_never_polls_send_and_revokes_owner_when_commit_unknow
         assert_eq!(transport.send_polls(), 0, "围栏未确认 Sending 前绝不 poll 外部写入");
         assert_eq!(transport.revocations(), revocations);
         assert_eq!(store.deferred_send_worlds(), vec![Vec::new(), vec!["main".to_owned()]]);
+        // 提交结果未知仍是 Worker 错误，不能混同确定延期而被隐藏。
         assert_eq!(metrics.iterations(), vec![(WorkerLoop::Delivery, WorkerResult::Error)]);
+        assert_eq!(
+            metrics.unpersisted(),
+            vec![(WorkerLoop::Delivery, SafeErrorKind::DEPENDENCY_UNAVAILABLE)]
+        );
     }
 }
 

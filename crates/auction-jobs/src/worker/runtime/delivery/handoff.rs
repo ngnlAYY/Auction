@@ -67,6 +67,25 @@ pub(super) fn delivery_preparation_error(stage: &str) -> DeliveryTransportError 
     }
 }
 
+/// 发送围栏交接的结论；只有 [`DeliveryHandoff::Sending`] 授权 poll 外部写入。
+pub(super) enum DeliveryHandoff {
+    /// Sending 已确定提交且提交后续租已确认，可以 poll 一次外部写入。
+    Sending,
+    /// 围栏事务在截止前确定结束但没有进入 sending（确定回滚或已提交冻结），例如竞价警告在交接
+    /// 期间失效；尚未外部写入，按正常延期释放 claim，不是 Worker 错误。
+    Deferred,
+    /// 续租、证据、关闭登记或提交结果未得到确认；沿用原有错误隔离与 owner 撤销语义。
+    Unconfirmed,
+}
+
+/// 围栏调用的确定终点；提交结果未知用外层 `None` 表示。
+enum FenceEnd {
+    Sending,
+    Deferred,
+    /// 现金证据未能开始提交，围栏根本没有发起。
+    NotStarted,
+}
+
 /// fence 前后均续租，避免 prepare 尾部或 fence 提交等待吃掉首次发送的 TTL。
 pub(super) async fn confirm_delivery_handoff<C: Clock>(
     store: &dyn DeliveryWorkStore,
@@ -76,7 +95,7 @@ pub(super) async fn confirm_delivery_handoff<C: Clock>(
     lease: &mut DeliveryLease,
     prepared: &mut auction_application::delivery::AuthorizedDeliverySend<'_>,
     activity: &ExternalWriteActivity,
-) -> bool {
+) -> DeliveryHandoff {
     // 现金证据只授权 Send；Take 的原账号期待随普通 fence 冻结，不能进入现金授权路径。
     if prepared.evidence_mut().is_some()
         && (claim.payload.get("operation").and_then(serde_json::Value::as_str) != Some("send")
@@ -85,7 +104,7 @@ pub(super) async fn confirm_delivery_handoff<C: Clock>(
                 Some(auction_application::delivery::DeliveryPreparedExpectation::Send(_))
             ))
     {
-        return false;
+        return DeliveryHandoff::Unconfirmed;
     }
     let renewed = if let Some(evidence) = prepared.evidence_mut() {
         let deadline = lease
@@ -100,7 +119,7 @@ pub(super) async fn confirm_delivery_handoff<C: Clock>(
         lease.renew(store, claim, clock, config).await.is_ok()
     };
     if !renewed {
-        return false;
+        return DeliveryHandoff::Unconfirmed;
     }
     let deadline = lease.operation_deadline(config.finalize_timeout);
     // 只读准备的原单调截止覆盖检查、全部事务重试及 COMMIT，不在交接时重建寿命。
@@ -113,17 +132,17 @@ pub(super) async fn confirm_delivery_handoff<C: Clock>(
             Ok(Ok(()))
         ) || tokio::time::Instant::now() >= deadline)
     {
-        return false;
+        return DeliveryHandoff::Unconfirmed;
     }
     // Send 摘要或 Take 原账号期待与 Sending 同事务落库；只复制枚举内的 Arc，不复制内容。
     let expectation = prepared.expectation().cloned();
     // 围栏调用前登记交接，与关闭入口同步竞争；已关闭时不发起围栏，保留原 claim。
     // 已登记的围栏往返也计入排空活动；登记本身不授权外写，仍须确认 Sending 提交。
     if !activity.enter_critical() {
-        return false;
+        return DeliveryHandoff::Unconfirmed;
     }
     prepared.begin_fence();
-    let confirmed = if let Some(evidence) = prepared.evidence_mut() {
+    let fence = if let Some(evidence) = prepared.evidence_mut() {
         match evidence.begin_commit() {
             Ok(guard) => {
                 // future借用guard，取消或提交未知同步撤销原owner；不detach、不重建session。
@@ -142,10 +161,7 @@ pub(super) async fn confirm_delivery_handoff<C: Clock>(
                     Ok(Ok(outcome)) if tokio::time::Instant::now() < deadline => {
                         // 两种结果均在截止前确定结束；Deferred只允许确定回滚或已提交冻结。
                         guard.confirm_committed();
-                        Some(matches!(
-                            outcome,
-                            auction_application::delivery::DeliveryFenceOutcome::Sending
-                        ))
+                        Some(fence_end(outcome))
                     }
                     _ => None,
                 }
@@ -160,7 +176,7 @@ pub(super) async fn confirm_delivery_handoff<C: Clock>(
                         ..Default::default()
                     },
                 );
-                Some(false)
+                Some(FenceEnd::NotStarted)
             }
         }
     } else {
@@ -170,26 +186,39 @@ pub(super) async fn confirm_delivery_handoff<C: Clock>(
         )
         .await
         {
-            Ok(Ok(outcome)) => Some(matches!(
-                outcome,
-                auction_application::delivery::DeliveryFenceOutcome::Sending
-            )),
+            Ok(Ok(outcome)) => Some(fence_end(outcome)),
             _ => None,
         }
     };
     // timeout_at 的内部 future 可能一次 poll 越过截止；回执过晚仍保留撤销状态。
     if tokio::time::Instant::now() >= deadline {
-        return false;
+        return DeliveryHandoff::Unconfirmed;
     }
-    if confirmed.is_some() {
+    if fence.is_some() {
         prepared.confirm_fence();
     }
-    if confirmed != Some(true) {
-        tracing::error!(delivery_id = %claim.delivery_id, "delivery worker did not confirm sending fence");
-        return false;
+    match fence {
+        Some(FenceEnd::Sending) => {}
+        // 确定未进入 sending 不是 Worker 错误：由调用方按正常延期释放，不记 ERROR。
+        Some(FenceEnd::Deferred) => return DeliveryHandoff::Deferred,
+        Some(FenceEnd::NotStarted) | None => {
+            tracing::error!(delivery_id = %claim.delivery_id, "delivery worker did not confirm sending fence");
+            return DeliveryHandoff::Unconfirmed;
+        }
     }
     // Sending 已确定提交；沿用围栏前登记的活动，即使正在排空也继续续租及原发送。
-    lease.renew(store, claim, clock, config).await.is_ok()
+    if lease.renew(store, claim, clock, config).await.is_ok() {
+        DeliveryHandoff::Sending
+    } else {
+        DeliveryHandoff::Unconfirmed
+    }
+}
+
+fn fence_end(outcome: auction_application::delivery::DeliveryFenceOutcome) -> FenceEnd {
+    match outcome {
+        auction_application::delivery::DeliveryFenceOutcome::Sending => FenceEnd::Sending,
+        auction_application::delivery::DeliveryFenceOutcome::Deferred => FenceEnd::Deferred,
+    }
 }
 
 /// 尚未 poll 外部写入时尽力释放；SQL 仅允许有效 claimed，sending 提交未知仍保守隔离。
