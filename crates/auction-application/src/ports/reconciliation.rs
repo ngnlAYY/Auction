@@ -5,8 +5,9 @@
 //! 采用与发送前库存证明相同的七类 organize 页面；未观察到的装备只表示“本轮未在 Armory
 //! 看到”，不是装备丢失或可处置的结论。
 //!
-//! v2 报告把已寄出、等待收件人领取的资产单列为“在途”：装备不再计为缺失，已支出的货款与
-//! 退款不再计入应付。v1 报告没有这些字段，读取时按 0/空列表补齐，不重算历史报告。
+//! v2 报告把已成功寄出的资产按持久寄出事实单列为“在途”：装备不再计为缺失，已支出且寄出不晚于
+//! 余额观察的货款与退款不再计入应付；寄出后履约转人工核对或失败的另列为“在途待核对”，不重新
+//! 计入待付或应在 Armory。v1 报告没有这些字段，读取时按 0/空列表补齐，不重算历史报告。
 
 use auction_domain::SettlementWorld;
 use chrono::{DateTime, Utc};
@@ -55,11 +56,21 @@ pub struct CustodyMissingSample {
     pub reason: String,
 }
 
-/// 一类在途装备的件数；原因只来自固定前缀加义务种类（如 `obligation_unsold_return`）。
+/// 一类在途装备的件数；原因只来自固定前缀加义务种类（如 `obligation_unsold_return`），在途待核对
+/// 另加履约状态（如 `obligation_unsold_return_manual_reconcile`）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CustodyInTransitReason {
     pub reason: String,
     pub count: i64,
+}
+
+/// 一类在途待核对现金的笔数与金额；原因只来自固定前缀加义务种类与履约状态
+/// （如 `obligation_seller_payout_manual_reconcile`）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SolvencyInTransitReason {
+    pub reason: String,
+    pub count: i64,
+    pub credits: i64,
 }
 
 /// 单个 world 的装备持有核对结果。
@@ -68,7 +79,7 @@ pub struct CustodyWorldReport {
     pub world: String,
     /// `observed` 或 `unavailable`；不可用时计数保持 0 且不产生差异结论。
     pub observation: String,
-    /// 应在 Armory 的装备件数；已寄出等待领取的在途装备不计入。
+    /// 应在 Armory 的装备件数；已成功寄出的在途与在途待核对装备不计入。
     pub expected_count: i64,
     pub observed_count: i64,
     pub missing_count: i64,
@@ -78,6 +89,13 @@ pub struct CustodyWorldReport {
     /// 在途装备按原因类别的件数（v2），按原因排序；合计等于 `in_transit_count`。
     #[serde(default)]
     pub in_transit_reasons: Vec<CustodyInTransitReason>,
+    /// 已成功寄出、但履约转 `manual_reconcile`/`failed` 待核对，且本轮未在 Armory 观察到的
+    /// 装备件数（v2）：按寄出事实不计入缺失或应持，对应义务仍在履约人工核对中可见。
+    #[serde(default)]
+    pub in_transit_review_count: i64,
+    /// 在途待核对装备按原因的件数（v2），按原因排序；合计等于 `in_transit_review_count`。
+    #[serde(default)]
+    pub in_transit_review_reasons: Vec<CustodyInTransitReason>,
     /// 数据库已知、但不属于当前拍卖相关应持集合的普通库存。
     pub stock_count: i64,
     /// 数据库未知、已确认属于个人装备的观察项；不参与拍卖对账差异。
@@ -109,13 +127,15 @@ pub struct CustodyReconciliationReport {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SolvencyWorldReport {
     pub world: String,
-    /// 仍需由余额支付的卖方货款；v2 起不含下方的在途货款。
+    /// 仍需由余额支付的卖方货款；v2 起不含下方的在途与在途待核对货款。已寄出、但寄出晚于余额
+    /// 观察（或时刻缺失）的仍计入：观察到的余额可能还含这笔钱。
     pub pending_seller_payout_count: i64,
     pub pending_seller_payout_credits: i64,
-    /// 仍需由余额支付的买方退款；v2 起不含下方的在途退款。
+    /// 仍需由余额支付的买方退款；口径同上。
     pub pending_refund_count: i64,
     pub pending_refund_credits: i64,
-    /// 已寄出等待领取、资金分配已 `spent` 的卖方货款（v2）：Credits 已离开余额，不计入应付。
+    /// 已寄出等待领取、资金分配已 `spent` 且寄出不晚于余额观察的卖方货款（v2）：观察到的余额
+    /// 已扣除这笔 Credits，不计入应付。
     #[serde(default)]
     pub in_transit_seller_payout_count: i64,
     #[serde(default)]
@@ -125,6 +145,15 @@ pub struct SolvencyWorldReport {
     pub in_transit_refund_count: i64,
     #[serde(default)]
     pub in_transit_refund_credits: i64,
+    /// 同样已寄出、已支出且寄出不晚于余额观察，但履约转 `manual_reconcile`/`failed` 待核对的
+    /// 货款与退款（v2）：按寄出事实不计入应付，对应义务仍在履约人工核对中可见。
+    #[serde(default)]
+    pub in_transit_review_count: i64,
+    #[serde(default)]
+    pub in_transit_review_credits: i64,
+    /// 在途待核对现金按原因的笔数与金额（v2），按原因排序；合计等于上面两项。
+    #[serde(default)]
+    pub in_transit_review_reasons: Vec<SolvencyInTransitReason>,
     pub pending_outbound_mail_count: i64,
     pub postage_estimate_credits: i64,
     pub required_credits: i64,

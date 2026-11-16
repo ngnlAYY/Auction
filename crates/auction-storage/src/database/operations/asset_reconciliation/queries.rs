@@ -9,8 +9,10 @@ macro_rules! equipment_obligation_kinds {
 
 /// 应持装备集合的查询共用同一 CTE；`$1` 是 world、`$2` 是观察到的外部装备 ID。
 /// 预览分支的世界口径由调用方传入：计数按装备所属世界，样本按场次世界（保持既有行为）。
-/// 已寄出、等待收件人领取的装备义务（含已寄出待付款的 COD）已离开 Armory，义务分支与
-/// 投稿分支都不再把它算作应持，由 `CUSTODY_IN_TRANSIT` 单列为在途。
+/// 装备义务一经成功寄出（投递 `succeeded`），装备就随邮件离开了 Armory：不论履约仍在等待
+/// 领取（含已寄出待付款的 COD），还是寄出后因领取证据不符等转为 `manual_reconcile`/`failed`，
+/// 义务分支与投稿分支都不再把它算作应持，由 `CUSTODY_IN_TRANSIT` 单列为在途或在途待核对。
+/// 资产位置只看这条持久寄出事实，不随可变的执行态重新计入应持。
 macro_rules! expected_equipment_cte {
     ($preview_world:literal) => {
         concat!(
@@ -28,7 +30,7 @@ WITH expected AS (
             r#")
       AND COALESCE(f.execution_state, 'pending') <> 'satisfied'
       AND NOT COALESCE("#,
-            crate::database::settlement::fulfillment::sent_awaiting_collection_sql!("f", "d"),
+            crate::database::settlement::fulfillment::sent_unsatisfied_sql!("f", "d"),
             r#", false)
     UNION ALL
     SELECT e.external_equipment_id,
@@ -70,7 +72,7 @@ WITH expected AS (
     WHERE a.world_id = $1
       AND a.status IN ('preview', 'live', 'final')
       AND s.source_reference ~ '^hentaiverse-equipment-v1:[0-9]+$'
-      -- 与义务分支同一判定：satisfied 或已寄出等待领取的退回都表示装备已离开库房。
+      -- 与义务分支同一判定：satisfied 或已成功寄出的退回都表示装备已离开库房。
       AND NOT EXISTS (
           SELECT 1
           FROM public.settlement_obligations returned
@@ -82,7 +84,7 @@ WITH expected AS (
             AND returned.obligation_kind IN ('withdrawn_return', 'unsold_return')
             AND (returned_fulfillment.execution_state = 'satisfied'
                  OR COALESCE("#,
-            crate::database::settlement::fulfillment::sent_awaiting_collection_sql!(
+            crate::database::settlement::fulfillment::sent_unsatisfied_sql!(
                 "returned_fulfillment",
                 "returned_delivery"
             ),
@@ -94,9 +96,9 @@ WITH expected AS (
 }
 
 /// 应持装备：未满足且尚未寄出的装备类义务，以及尚未结束且携带装备附件的出站投递。
-/// 义务 `execution_state = 'satisfied'` 表示外部证明已成立，不再计入应持集合；已寄出等待
-/// 领取的义务装备在邮件里，改由在途查询单列；`failed`/`manual_reconcile` 仍可能持有实物，
-/// 因此继续计入并要求人工解释。
+/// 义务 `execution_state = 'satisfied'` 表示外部证明已成立，不再计入应持集合；已成功寄出的
+/// 义务装备在邮件里，改由在途查询单列；尚未寄出（或寄出结果未知）的 `failed`/
+/// `manual_reconcile` 仍可能持有实物，因此继续计入并要求人工解释。
 /// 投稿分支同样排除已满足或已寄出的 `withdrawn_return`/`unsold_return`：投稿行与来源引用在
 /// 装备退回后仍然存在，拍卖重新进入 preview 时不能把已退回的装备重新算作应持。
 pub(super) const CUSTODY_COUNTS: &str = concat!(
@@ -157,9 +159,12 @@ ORDER BY external_equipment_id LIMIT $3
 "#,
 );
 
-/// 在途装备按原因类别计数：已寄出、等待收件人领取的装备义务，排除仍因其他来源应持的装备
-/// （仍按应持核对）与本轮已在 Armory 观察到的装备（不在途）。一件装备只按最小原因计一次；
-/// 按装备所属世界归属，与计数口径一致。
+/// 在途装备按类别与原因计数：已成功寄出、义务尚未满足的装备义务，排除仍因其他来源应持的
+/// 装备（仍按应持核对）与本轮已在 Armory 观察到的装备（不在途）。履约仍在等待领取的是在途
+/// （`review = false`，原因 `obligation_<义务种类>`）；寄出后转 `manual_reconcile`/`failed` 的是
+/// 在途待核对（`review = true`，原因 `obligation_<义务种类>_<履约状态>`）。一件装备只计一次：
+/// 同时有两类义务时按待核对计（需要人工解释），同一类别内取最小原因；按装备所属世界归属，与
+/// 计数口径一致。
 pub(super) const CUSTODY_IN_TRANSIT: &str = concat!(
     expected_equipment_cte!("e.world_id"),
     r#", expected_ids AS (
@@ -168,7 +173,12 @@ pub(super) const CUSTODY_IN_TRANSIT: &str = concat!(
     SELECT unnest($2::text[]) AS external_equipment_id
 ), in_transit AS (
     SELECT e.external_equipment_id,
-           'obligation_' || o.obligation_kind AS reason
+           NOT "#,
+    crate::database::settlement::fulfillment::sent_awaiting_collection_sql!("f", "d"),
+    r#" AS review,
+           'obligation_' || o.obligation_kind || CASE WHEN "#,
+    crate::database::settlement::fulfillment::sent_awaiting_collection_sql!("f", "d"),
+    r#" THEN '' ELSE '_' || f.execution_state END AS reason
     FROM public.settlement_obligations o
     JOIN public.equipment e ON e.id = o.equipment_id
     JOIN public.settlement_obligation_fulfillments f ON f.obligation_id = o.id
@@ -178,10 +188,10 @@ pub(super) const CUSTODY_IN_TRANSIT: &str = concat!(
     equipment_obligation_kinds!(),
     r#")
       AND "#,
-    crate::database::settlement::fulfillment::sent_awaiting_collection_sql!("f", "d"),
+    crate::database::settlement::fulfillment::sent_unsatisfied_sql!("f", "d"),
     r#"
 ), in_transit_ids AS (
-    SELECT t.external_equipment_id, min(t.reason) AS reason
+    SELECT DISTINCT ON (t.external_equipment_id) t.external_equipment_id, t.review, t.reason
     FROM in_transit t
     WHERE NOT EXISTS (
         SELECT 1 FROM expected_ids ids
@@ -191,31 +201,50 @@ pub(super) const CUSTODY_IN_TRANSIT: &str = concat!(
         SELECT 1 FROM observed o
         WHERE o.external_equipment_id = t.external_equipment_id
     )
-    GROUP BY t.external_equipment_id
+    ORDER BY t.external_equipment_id, t.review DESC, t.reason
 )
-SELECT reason, count(*)::bigint AS item_count
+SELECT review, reason, count(*)::bigint AS item_count
 FROM in_transit_ids
-GROUP BY reason
-ORDER BY reason
+GROUP BY review, reason
+ORDER BY review, reason
 "#,
 );
 
-/// 待付卖方货款、待执行退款、在途现金、待发出站邮件与最后成功余额观察。
-/// 金额与计数来自义务投影；`failed`/`manual_reconcile` 义务仍然欠款，只有 `satisfied`
-/// 才从应付合计中移除。已寄出等待领取、且资金分配已 `spent` 的货款与退款，Credits 已随
-/// 邮件离开余额，单列为在途、不再计入待付（否则会与余额重复扣减）；资金分配须与同一投递和
-/// 义务绑定，缺失或未支出时仍按待付计。现金义务按履约记录的 `dispatch_world` 归属实际支付
-/// 世界：异世界场次的卖方货款与买方退款固定由 main 派发，必须计入 main 的应付合计，
-/// 不能继续挂在异世界账上。`business_state = 'contingent'` 的买方退款只有 recovery
-/// 显式激活为 `ready` 后才可能执行，未激活不计入应付负债。
-/// `balance_age_seconds` 用数据库时钟给出余额证据年龄，供报告追加时重新判定是否过期。
-pub(super) const SOLVENCY_WORLD: &str = concat!(
-    r#"
-WITH outstanding AS (
+/// 偿付查询共用的现金义务分类；`$1` 是 world。
+///
+/// 金额与计数来自义务投影；`failed`/`manual_reconcile` 义务仍然欠款，只有 `satisfied` 才从应付
+/// 合计中移除。现金义务按履约记录的 `dispatch_world` 归属实际支付世界：异世界场次的卖方货款与
+/// 买方退款固定由 main 派发，必须计入 main 的应付合计。`business_state = 'contingent'` 的买方
+/// 退款只有 recovery 显式激活为 `ready` 后才可能执行，未激活不计入应付负债。
+///
+/// 在途只认持久事实：投递已成功寄出、资金分配与同一投递和义务绑定且已 `spent`，并且寄出时刻
+/// （投递完成的持久时刻 `deliveries.completed_at`）不晚于余额观察时刻（`balance_observed_at`）。
+/// 只有这样，观察到的余额才已扣除这笔钱，才能从应付移出，否则会与余额重复扣减；寄出晚于观察
+/// 时，观察到的余额仍含这笔钱，继续计入应付。分配缺失、未支出、绑定其他投递或义务，以及任一
+/// 时刻缺失（比较为 NULL）时，一律按应付计（保守）。寄出后履约仍在等待领取的是在途；已转
+/// `manual_reconcile`/`failed` 的同样按寄出事实计在途、不重新计入应付，单列为在途待核对，
+/// 原因为 `obligation_<义务种类>_<履约状态>`。
+macro_rules! solvency_cash_cte {
+    () => {
+        concat!(
+            r#"
+WITH health AS (
+    SELECT balance_credits, balance_observed_at, balance_status, evidence_status
+    FROM public.settlement_recovery_health
+    WHERE world_id = $1
+), outstanding AS (
     SELECT o.obligation_kind, o.amount,
            COALESCE("#,
-    crate::database::settlement::fulfillment::sent_awaiting_collection_sql!("f", "d"),
-    r#" AND allocation.state = 'spent', false) AS in_transit
+            crate::database::settlement::fulfillment::sent_unsatisfied_sql!("f", "d"),
+            r#"
+               AND allocation.state = 'spent'
+               AND d.completed_at <= (SELECT balance_observed_at FROM health), false)
+               AS spent_before_balance,
+           COALESCE("#,
+            crate::database::settlement::fulfillment::sent_awaiting_collection_sql!("f", "d"),
+            r#", false) AS awaiting_collection,
+           'obligation_' || o.obligation_kind || '_' || COALESCE(f.execution_state, 'pending')
+               AS review_reason
     FROM public.settlement_obligations o
     LEFT JOIN public.settlement_obligation_fulfillments f ON f.obligation_id = o.id
     LEFT JOIN public.deliveries d ON d.id = f.delivery_id
@@ -225,30 +254,46 @@ WITH outstanding AS (
       AND COALESCE(f.dispatch_world, o.world_id) = $1
       AND NOT (o.obligation_kind = 'buyer_refund' AND o.business_state = 'contingent')
       AND COALESCE(f.execution_state, 'pending') <> 'satisfied'
-)
+), classified AS (
+    SELECT obligation_kind, amount, review_reason,
+           NOT spent_before_balance AS pending,
+           spent_before_balance AND awaiting_collection AS in_transit,
+           spent_before_balance AND NOT awaiting_collection AS in_transit_review
+    FROM outstanding
+)"#
+        )
+    };
+}
+
+/// 待付卖方货款、待执行退款、在途现金、待发出站邮件与最后成功余额观察；分类见
+/// `solvency_cash_cte!`。在途待核对的笔数与金额由 `SOLVENCY_IN_TRANSIT_REVIEW` 按原因读取。
+/// `balance_age_seconds` 用数据库时钟给出余额证据年龄，供报告追加时重新判定是否过期。
+pub(super) const SOLVENCY_WORLD: &str = concat!(
+    solvency_cash_cte!(),
+    r#"
 SELECT
-    (SELECT count(*) FROM outstanding
-        WHERE obligation_kind = 'seller_payout' AND NOT in_transit)
+    (SELECT count(*) FROM classified
+        WHERE obligation_kind = 'seller_payout' AND pending)
         AS pending_seller_payout_count,
-    (SELECT COALESCE(sum(amount), 0)::bigint FROM outstanding
-        WHERE obligation_kind = 'seller_payout' AND NOT in_transit)
+    (SELECT COALESCE(sum(amount), 0)::bigint FROM classified
+        WHERE obligation_kind = 'seller_payout' AND pending)
         AS pending_seller_payout_credits,
-    (SELECT count(*) FROM outstanding
-        WHERE obligation_kind = 'buyer_refund' AND NOT in_transit)
+    (SELECT count(*) FROM classified
+        WHERE obligation_kind = 'buyer_refund' AND pending)
         AS pending_refund_count,
-    (SELECT COALESCE(sum(amount), 0)::bigint FROM outstanding
-        WHERE obligation_kind = 'buyer_refund' AND NOT in_transit)
+    (SELECT COALESCE(sum(amount), 0)::bigint FROM classified
+        WHERE obligation_kind = 'buyer_refund' AND pending)
         AS pending_refund_credits,
-    (SELECT count(*) FROM outstanding
+    (SELECT count(*) FROM classified
         WHERE obligation_kind = 'seller_payout' AND in_transit)
         AS in_transit_seller_payout_count,
-    (SELECT COALESCE(sum(amount), 0)::bigint FROM outstanding
+    (SELECT COALESCE(sum(amount), 0)::bigint FROM classified
         WHERE obligation_kind = 'seller_payout' AND in_transit)
         AS in_transit_seller_payout_credits,
-    (SELECT count(*) FROM outstanding
+    (SELECT count(*) FROM classified
         WHERE obligation_kind = 'buyer_refund' AND in_transit)
         AS in_transit_refund_count,
-    (SELECT COALESCE(sum(amount), 0)::bigint FROM outstanding
+    (SELECT COALESCE(sum(amount), 0)::bigint FROM classified
         WHERE obligation_kind = 'buyer_refund' AND in_transit)
         AS in_transit_refund_credits,
     (SELECT count(*) FROM public.deliveries d
@@ -262,7 +307,22 @@ SELECT
     EXTRACT(EPOCH FROM (clock_timestamp() - health.balance_observed_at))::bigint
         AS balance_age_seconds
 FROM (SELECT 1) AS one
-LEFT JOIN public.settlement_recovery_health health ON health.world_id = $1
+LEFT JOIN health ON true
+"#,
+);
+
+/// 在途待核对现金按原因的笔数与金额，按原因排序；与 `SOLVENCY_WORLD` 共用同一分类，并在同一
+/// 只读快照事务内读取。
+pub(super) const SOLVENCY_IN_TRANSIT_REVIEW: &str = concat!(
+    solvency_cash_cte!(),
+    r#"
+SELECT review_reason AS reason,
+       count(*)::bigint AS item_count,
+       COALESCE(sum(amount), 0)::bigint AS credits
+FROM classified
+WHERE in_transit_review
+GROUP BY review_reason
+ORDER BY review_reason
 "#,
 );
 

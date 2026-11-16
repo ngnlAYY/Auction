@@ -1,8 +1,10 @@
 //! “已寄出、等待领取”在真实 PostgreSQL 18 schema 上的读侧口径，全部以运行账号执行：
 //! - 告警/看板履约水位把已寄出的 Send 义务从积压拆到等待领取，单列最近一次读取失败；
 //!   COD 仍按既有口径留在原分类，人工核对与尚未寄出的义务不变。
-//! - 资产对账把已寄出且资金已 `spent` 的货款列为在途、不计入应付；已寄出等待领取的装备
-//!   （含已寄出待付款的 COD 装备）列为在途、不计为缺失；人工核对的仍按应持核对。
+//! - 资产对账按持久寄出事实划分在途：已寄出且资金已 `spent` 的货款只有寄出不晚于余额观察才
+//!   列为在途、不计入应付（观察早于寄出时仍计入应付，恰好相等按已扣除）；已寄出的装备（含已
+//!   寄出待付款的 COD 装备）列为在途、不计为缺失；寄出后转人工核对的装备与现金单列为在途
+//!   待核对，不重新计入应持或应付；资金分配缺失的已寄出货款仍按应付计。
 //! - 托管投递分支按 canonical 附件 kind 识别真实结算载荷；仍在投递队列里的装备按应持核对，
 //!   不因同一装备的另一义务已寄出而算作在途。
 //! - 履约领取把投递完成时刻带进 delivery 快照，供等待领取的 Sent 轮询按寄出时长分档。
@@ -22,6 +24,7 @@ use auction_application::operations::{
 };
 use auction_application::reconciliation::{
     AssetArmoryObservation, AssetReconciliationStore, CustodyInTransitReason, CustodyMissingSample,
+    SolvencyInTransitReason,
 };
 use auction_application::settlement::{
     SettlementFulfillmentDeliveryStatus, SettlementFulfillmentState, SettlementFulfillmentStore,
@@ -477,14 +480,9 @@ async fn postgres_collection_wait_reports_sent_assets_in_transit() {
     assert_eq!(custody.format, "auction-custody-reconciliation.v2");
     assert_eq!(custody.failure_code, None);
     let main = custody.worlds.iter().find(|world| world.world == "main").expect("main 报告");
-    assert_eq!((main.expected_count, main.missing_count), (1, 1), "只有人工核对的退回仍应持");
-    assert_eq!(
-        main.missing_samples,
-        [CustodyMissingSample {
-            external_equipment_id: "9400005".to_owned(),
-            reason: "obligation_unsold_return".to_owned(),
-        }]
-    );
+    assert_eq!((main.expected_count, main.missing_count), (0, 0), "已寄出的装备都不再应持");
+    assert!(main.missing_samples.is_empty());
+    assert!(custody.consistent, "在途与在途待核对都不是缺失");
     assert_eq!(main.in_transit_count, 2);
     assert_eq!(
         main.in_transit_reasons,
@@ -495,6 +493,15 @@ async fn postgres_collection_wait_reports_sent_assets_in_transit() {
                 count: 1,
             },
         ]
+    );
+    // 寄出后证据不符转人工核对的流拍退回：按寄出事实计在途待核对，不再算“应在 Armory”。
+    assert_eq!(main.in_transit_review_count, 1);
+    assert_eq!(
+        main.in_transit_review_reasons,
+        [CustodyInTransitReason {
+            reason: "obligation_unsold_return_manual_reconcile".to_owned(),
+            count: 1,
+        }]
     );
     assert!(!custody.asset_actions_authorized && !solvency.asset_actions_authorized);
 
@@ -512,8 +519,165 @@ async fn postgres_collection_wait_reports_sent_assets_in_transit() {
             main.solvency_in_transit_count,
             main.solvency_in_transit_credits,
         ),
-        (1, 2, 0, 1, 900)
+        (0, 2, 0, 1, 900)
     );
+
+    pool.close().await;
+}
+
+/// 写入 main 世界的余额观察；`observed_at` 为 None 时取投递 `delivery_id` 的完成时刻（与寄出
+/// 时刻逐值相等）。
+async fn observe_balance(
+    pool: &PgPool,
+    credits: i64,
+    observed_at: Option<DateTime<Utc>>,
+    delivery_id: Uuid,
+) {
+    sqlx::query(
+        "UPDATE public.settlement_recovery_health
+         SET balance_credits = $1,
+             balance_observed_at = COALESCE($2,
+                 (SELECT completed_at FROM public.deliveries WHERE id = $3)),
+             balance_status = 'ok', evidence_status = 'fresh', updated_at = now(),
+             evidence_last_success_at = COALESCE($2,
+                 (SELECT completed_at FROM public.deliveries WHERE id = $3))
+         WHERE world_id = 'main'",
+    )
+    .bind(credits)
+    .bind(observed_at)
+    .bind(delivery_id)
+    .execute(pool)
+    .await
+    .expect("写入余额观察");
+}
+
+/// 一笔已支出的卖方货款：结算 COD 已满足，货款按 `sent_at` 寄出（None 时仍在队列）。
+async fn seed_payout(
+    pool: &PgPool,
+    auction: &Auction,
+    lot_number: i32,
+    amount: i64,
+    sent_at: Option<DateTime<Utc>>,
+    execution_state: &str,
+    spent: bool,
+) -> Uuid {
+    let lot = seed_lot(pool, auction, lot_number, true, &format!("94001{lot_number:02}")).await;
+    let cod = seed_obligation(pool, auction, &lot, "winner_equipment_cod", 1_000, None).await;
+    seed_fulfillment(pool, cod, "satisfied", None, None).await;
+    let payout = seed_obligation(pool, auction, &lot, "seller_payout", amount, Some(cod)).await;
+    let mail_id = 710_000 + u32::try_from(lot_number).expect("lot 编号");
+    let delivery = seed_delivery(pool, payout, amount, sent_at, mail_id).await;
+    let error_code = if execution_state == "manual_reconcile" {
+        "evidence_mismatch"
+    } else {
+        "evidence_not_observed"
+    };
+    seed_fulfillment(pool, payout, execution_state, Some(delivery), Some(error_code)).await;
+    if spent {
+        seed_spent_allocation(pool, &lot, payout, delivery, amount).await;
+    }
+    delivery
+}
+
+/// 偿付的在途排除与余额观察时点对齐（处理决定第 1 条的例子）：观察到余额 1000 之后才寄出 900、
+/// 另有待付 500 时，观察到的余额仍含这 900，必须判为不足 400；寄出后的新观察（余额 100）与恰好
+/// 等于寄出时刻的观察都已扣除这笔钱，900 计在途，同样不足 400。错把寄出晚于观察的支出算作在途
+/// 会误判充足，错把观察时刻已扣除的支出算作应付会误报 1300 的缺口。
+#[tokio::test]
+async fn postgres_collection_wait_solvency_aligns_in_transit_with_balance_observation() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("以运行账号连接");
+    let pool = store.postgres_pool();
+    let now = Utc::now();
+    let auction = seed_auction(pool, now).await;
+    let sent =
+        seed_payout(pool, &auction, 1, 900, Some(now - Duration::hours(1)), "enqueued", true).await;
+    seed_payout(pool, &auction, 2, 500, None, "enqueued", false).await;
+    let report = || {
+        let store = &store;
+        async move {
+            let solvency = store.report_solvency(86_400).await.expect("生成偿付报告");
+            let main =
+                solvency.worlds.into_iter().find(|world| world.world == "main").expect("main 报告");
+            (
+                main.pending_seller_payout_credits,
+                main.in_transit_seller_payout_credits,
+                main.required_credits,
+                main.verdict,
+                main.shortfall_credits,
+            )
+        }
+    };
+
+    observe_balance(pool, 1_000, Some(now - Duration::hours(2)), sent).await;
+    assert_eq!(
+        report().await,
+        (1_400, 0, 1_400, "shortfall".to_owned(), 400),
+        "余额观察早于寄出：观察到的余额仍含这笔货款"
+    );
+
+    observe_balance(pool, 100, Some(Utc::now()), sent).await;
+    assert_eq!(
+        report().await,
+        (500, 900, 500, "shortfall".to_owned(), 400),
+        "余额观察晚于寄出：货款已离开余额，计在途"
+    );
+
+    observe_balance(pool, 100, None, sent).await;
+    assert_eq!(
+        report().await,
+        (500, 900, 500, "shortfall".to_owned(), 400),
+        "观察时刻恰好等于寄出时刻：按已扣除计在途"
+    );
+
+    pool.close().await;
+}
+
+/// 已寄出、已支出的货款在寄出后转人工核对：按寄出事实计在途待核对（笔数、金额与原因），不重新
+/// 计入应付；资金分配缺失的已寄出货款不能证明已支出，仍按应付计。
+#[tokio::test]
+async fn postgres_collection_wait_sent_cash_in_manual_review_stays_in_transit() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("以运行账号连接");
+    let pool = store.postgres_pool();
+    let now = Utc::now();
+    let auction = seed_auction(pool, now).await;
+    let reviewed = seed_payout(
+        pool,
+        &auction,
+        1,
+        700,
+        Some(now - Duration::hours(3)),
+        "manual_reconcile",
+        true,
+    )
+    .await;
+    seed_payout(pool, &auction, 2, 300, Some(now - Duration::hours(3)), "enqueued", false).await;
+    observe_balance(pool, 1_000, Some(now), reviewed).await;
+
+    let solvency = store.report_solvency(86_400).await.expect("生成偿付报告");
+    let main = solvency.worlds.iter().find(|world| world.world == "main").expect("main 报告");
+    assert_eq!(
+        (main.pending_seller_payout_count, main.pending_seller_payout_credits),
+        (1, 300),
+        "没有资金分配的已寄出货款仍按应付计"
+    );
+    assert_eq!(
+        (main.in_transit_seller_payout_count, main.in_transit_seller_payout_credits),
+        (0, 0)
+    );
+    assert_eq!((main.in_transit_review_count, main.in_transit_review_credits), (1, 700));
+    assert_eq!(
+        main.in_transit_review_reasons,
+        [SolvencyInTransitReason {
+            reason: "obligation_seller_payout_manual_reconcile".to_owned(),
+            count: 1,
+            credits: 700,
+        }]
+    );
+    assert_eq!(main.required_credits, 300, "转人工核对的已寄出货款不重新计入应付");
+    assert_eq!((main.verdict.as_str(), main.shortfall_credits), ("sufficient", 0));
+    assert!(!solvency.asset_actions_authorized);
 
     pool.close().await;
 }
