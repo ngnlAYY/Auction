@@ -57,6 +57,8 @@ const EQUIPMENT_NAME: &str = "Collection cod equipment";
 /// `{"policy": 冻结模式}`，竞得装备 COD 载荷因此带 v2 的 `pricing_mode` 变量。
 const SETTLEMENT_POLICY_VERSION: i32 = 2;
 const SETTLEMENT_MODE: SettlementMode = SettlementMode::HoldCurveV2;
+/// 同一快照冻结的恢复策略版本（`RecoveryPolicy::default()`）；恢复记录按生产口径记这个版本。
+const RECOVERY_POLICY_VERSION: i32 = 1;
 /// 冻结结算明细（v2 曲线首锚点：hold 0 对应 +8% 调整）：成交价 1000，税费
 /// floor(1000 × 8%) = 80，买方付 1080，卖方得成交价；付款、退款与货款义务金额都取自这条明细。
 const END_PRICE: i64 = 1_000;
@@ -149,6 +151,11 @@ async fn seed_case(pool: &PgPool, payment: Payment, payment_deadline: DateTime<U
             &json!({"hold_ppm": HOLD_PPM, "adjustment_ppm": ADJUSTMENT_PPM}),
         ),
         "场次快照冻结当前默认结算策略 v2，hold 0 落在 +8% 首锚点"
+    );
+    assert_eq!(
+        policy["recovery"]["version"],
+        json!(RECOVERY_POLICY_VERSION),
+        "场次快照冻结当前默认恢复策略 v1"
     );
     sqlx::query(
         "INSERT INTO public.auctions
@@ -390,7 +397,7 @@ async fn seed_case(pool: &PgPool, payment: Payment, payment_deadline: DateTime<U
             (id, auction_id, lot_id, world_id, equipment_id, winner_user_id,
              payment_obligation_id, equipment_obligation_id, seller_payout_obligation_id,
              buyer_refund_obligation_id, policy_version, payment_deadline_at, stage)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 2, $11, 'awaiting_payment')",
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'awaiting_payment')",
     )
     .bind(id("recovery"))
     .bind(auction)
@@ -402,6 +409,7 @@ async fn seed_case(pool: &PgPool, payment: Payment, payment_deadline: DateTime<U
     .bind(handoff)
     .bind(payout)
     .bind(refund)
+    .bind(RECOVERY_POLICY_VERSION)
     .bind(payment_deadline)
     .execute(pool)
     .await
