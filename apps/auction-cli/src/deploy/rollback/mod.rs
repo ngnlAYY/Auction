@@ -5,6 +5,9 @@
 //! 有效配置显式为 compatible 且目标程序支持该判定。含 breaking 迁移的回退必须按
 //! `ops/deploy/RECOVERY.md` 恢复升级前备份并做外部历史核对。回退同样先过安装目录信任、时段、
 //! 磁盘空间与在途发送门禁，并把当前三个角色程序保留成新的回滚记录，使回退本身可逆。
+//!
+//! 先取得部署锁并固定状态目录，再经同一个描述符读取回滚记录、部署回执与保留程序：持锁之前或
+//! 之后按路径读取，都可能读到被改名替换的另一棵树。
 
 use std::{path::Path, time::Duration};
 
@@ -12,7 +15,9 @@ use anyhow::Context;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use super::install::{self, ROLE_BINARIES, RetainRequest, RetainedIdentity, RollbackRecord};
+use super::install::{
+    self, ROLE_BINARIES, RecordDirectory, RetainRequest, RetainedIdentity, RollbackRecord,
+};
 use super::receipts::{FailedReceipt, Failure, roles_match, settle};
 use super::verification::install_dir_artifacts;
 use super::{gates, role_binary, running_roles, space, unit_states};
@@ -22,6 +27,7 @@ use crate::config_dir::{ConfigDir, Deployment};
 use crate::receipt::{self, Action, DeployRecord, DeploymentReceipt, Outcome, ReceiptContext};
 use crate::service::{self, ManagedRole, Systemctl};
 use crate::support::digest::sha256_path;
+use crate::support::files::PrivateDirectory;
 
 mod guidance;
 mod identity;
@@ -40,18 +46,19 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: RollbackArgs) -> anyhow::R
         startup_timeout_seconds,
         dry_run,
     } = args;
-    // latest 已对选中的记录完成同样的摘要复核，不再重复散列保留程序。
-    let (record, record_directory) = match receipt_id {
-        Some(value) => install::load(
-            &units.state_dir,
-            Uuid::parse_str(&value).context("--receipt-id 必须是回滚记录的 UUID")?,
-        )?,
-        None => install::latest(&units.state_dir)?,
-    };
+    let receipt_id = receipt_id
+        .map(|value| Uuid::parse_str(&value).context("--receipt-id 必须是回滚记录的 UUID"))
+        .transpose()?;
     let context = ReceiptContext::resolve(None, actor.actor.as_deref())?;
     let started_at = Utc::now();
     let systemctl = Systemctl::new(&units)?;
-    let _lock = service::deployment_lock(&units)?;
+    let lock = service::deployment_lock(&units)?;
+    let state = lock.directory();
+    // latest 已对选中的记录完成同样的摘要复核，不再重复散列保留程序。
+    let (record, record_directory) = match receipt_id {
+        Some(value) => install::load(state, value)?,
+        None => install::latest(state)?,
+    };
     let deployment = service::prepare(config_dir, &systemctl).await?;
     let states = unit_states(&systemctl).await?;
     let install_dir =
@@ -64,8 +71,8 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: RollbackArgs) -> anyhow::R
         );
     }
     install::require_install_dir(&install_dir)?;
-    let deployed_receipt = receipt::read(&units.state_dir, record.deploy_receipt_id)
-        .context("读取回滚记录对应的部署回执失败")?;
+    let deployed_receipt =
+        receipt::read(state, record.deploy_receipt_id).context("读取回滚记录对应的部署回执失败")?;
     // 启动失败也会发布同 ID 的失败部署回执：新程序已安装但未就绪，仍必须允许恢复旧程序。
     if !matches!(deployed_receipt.outcome, Outcome::Succeeded | Outcome::Failed)
         || deployed_receipt.deploy.is_none()
@@ -140,6 +147,8 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: RollbackArgs) -> anyhow::R
         return print_json(&report);
     }
 
+    // 停机前最后一道门：锁、回执与回滚记录必须仍属于持锁时固定的状态目录。
+    lock.verify_unchanged()?;
     let shutdown_gate = serde_json::to_value(&gate)?;
     // 反向记录与其回退回执共享同一标识，和 deploy 一致，回退本身也能被再次读回；回退回执的
     // 部署证据只由目标组件的事实构造，停机前完成，停机后的任何失败都能以同一标识发布。
@@ -154,6 +163,7 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: RollbackArgs) -> anyhow::R
     );
     let plan = RollbackPlan {
         units: &units,
+        state,
         systemctl: &systemctl,
         deployment: &deployment,
         record: &record,
@@ -175,7 +185,7 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: RollbackArgs) -> anyhow::R
             print_json(&report)
         }
         Err(failure) => {
-            Err(settle(&units, &systemctl, Action::Rollback, started_at, &context, failure).await)
+            Err(settle(state, &systemctl, Action::Rollback, started_at, &context, failure).await)
         }
     }
 }
@@ -183,10 +193,12 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: RollbackArgs) -> anyhow::R
 /// 停机前已核对完毕的回退输入；停机后的步骤只读取它，不再做新的门禁判定。
 struct RollbackPlan<'a> {
     units: &'a UnitArgs,
+    /// 持锁时固定的部署状态目录；反向记录与回执都写在它的描述符下。
+    state: &'a PrivateDirectory,
     systemctl: &'a Systemctl,
     deployment: &'a Deployment,
     record: &'a RollbackRecord,
-    record_directory: &'a Path,
+    record_directory: &'a RecordDirectory,
     install_dir: &'a Path,
     /// 停机前门禁读到的数据库迁移版本；回退不执行迁移，停机后的失败仍以它描述恢复路径。
     database_version: i64,
@@ -207,7 +219,8 @@ async fn apply(
     plan: &RollbackPlan<'_>,
     shutdown_gate: serde_json::Value,
 ) -> Result<serde_json::Value, Failure> {
-    let RollbackPlan { units, systemctl, record, install_dir, reverse_receipt_id, .. } = *plan;
+    let RollbackPlan { units, state, systemctl, record, install_dir, reverse_receipt_id, .. } =
+        *plan;
     progress("停止三角色（Public → Admin → Worker）");
     service::stop_all(systemctl).await.map_err(Failure::unrecorded)?;
     progress("保留当前三个角色程序以便再次前进");
@@ -218,7 +231,7 @@ async fn apply(
         observed_database_version: plan.database_version,
         installed_role_schema_version: record.retained_roles.schema_version,
     };
-    let reverse = install::retain(&units.state_dir, &request, |binaries| {
+    let (reverse, reverse_directory) = install::retain(state, &request, |binaries| {
         // 停机前已核对安装目录是部署回执的版本；保留副本必须仍是同一组程序，身份才属于它们。
         if !roles_match(plan.deployed_receipt, binaries) {
             anyhow::bail!("安装目录的角色程序在停机前后发生变化，拒绝把部署回执的身份记给它们");
@@ -230,7 +243,7 @@ async fn apply(
     })
     .context("保留当前程序失败")
     .map_err(|error| {
-        let reverse_directory = install::record_dir(&units.state_dir, reverse_receipt_id);
+        let reverse_directory = install::record_dir(&state.path, reverse_receipt_id);
         stopped_before_install(
             error,
             install_dir,
@@ -240,7 +253,7 @@ async fn apply(
         )
     })?;
     let failed = FailedReceipt {
-        state_dir: &units.state_dir,
+        state,
         receipt_id: reverse_receipt_id,
         action: Action::Rollback,
         started_at: plan.started_at,
@@ -248,7 +261,6 @@ async fn apply(
         deploy: plan.deploy,
     };
     progress("安装回滚记录中的三个角色程序（auction-cli 保持不变）");
-    let reverse_directory = install::record_dir(&units.state_dir, reverse.record_id);
     if let Err(failure) = install::install_retained(
         record,
         plan.record_directory,
@@ -256,8 +268,13 @@ async fn apply(
         &reverse,
         &reverse_directory,
     ) {
-        let failure =
-            install_failed(failure, install_dir, plan.database_version, record, &reverse_directory);
+        let failure = install_failed(
+            failure,
+            install_dir,
+            plan.database_version,
+            record,
+            reverse_directory.path(),
+        );
         // 失败回执记录安装目录实际文件的摘要（已换回时是回退前的程序，否则可能新旧混合），
         // 不冒充回滚记录的摘要；本次调用只发布这一条。
         return Err(failed.publish(failure, None, Ok(install_dir_artifacts(install_dir))));
@@ -308,7 +325,7 @@ async fn apply(
         }
     };
     let published = match receipt::record_deploy(
-        &units.state_dir,
+        state,
         reverse_receipt_id,
         Action::Rollback,
         Outcome::Succeeded,

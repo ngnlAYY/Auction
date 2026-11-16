@@ -5,6 +5,10 @@
 //! 身份（只有 deploy 保留 CLI），以及创建记录的操作开始前观测到的数据库版本。身份由调用方按
 //! 保留副本的实际摘要判定，不能从其他版本推测。v1 记录只兼容读取：按其原口径（部署前的数据库
 //! 版本即旧程序版本）换算为内存形态，文件不改写。
+//!
+//! 记录目录、`record.json` 与保留程序都相对持锁时固定的部署状态目录描述符新建与读取，并核对
+//! 属主与权限（目录 owner-only，`record.json` 0600，保留程序禁止 group/other 写入）；读取记录、
+//! 复核摘要与安装之间路径被改名或替换，也不会换成另一份记录或另一组程序。
 
 use std::{
     fs::{self, File, OpenOptions},
@@ -22,8 +26,8 @@ use super::super::artifact::REQUIRED_BINARIES;
 use super::trust::PROGRAM_MODE;
 use crate::app::progress;
 use crate::receipt::{CliIdentity, RoleIdentity};
-use crate::support::digest::{is_lower_hex, sha256_path};
-use crate::support::files;
+use crate::support::digest::{is_lower_hex, sha256_path, sha256_reader};
+use crate::support::files::PrivateDirectory;
 
 pub(crate) const FORMAT: &str = "auction-deploy-rollback.v2";
 /// 只读兼容的旧格式：四个程序整体保留，版本字段记录部署前后的数据库版本。
@@ -184,13 +188,28 @@ impl RollbackRecord {
     }
 }
 
-fn rollback_root(state_dir: &Path) -> PathBuf {
-    state_dir.join(DIRECTORY)
+/// 单条回滚记录的目录：`<state-dir>/rollback/<record_id>/`，保留程序在其 `bin/` 下。只用于输出
+/// 与提示；读写一律经部署状态目录的描述符。
+pub(crate) fn record_dir(state_dir: &Path, record_id: Uuid) -> PathBuf {
+    state_dir.join(DIRECTORY).join(record_id.to_string())
 }
 
-/// 单条回滚记录的目录：`<state-dir>/rollback/<record_id>/`，保留程序在其 `bin/` 下。
-pub(crate) fn record_dir(state_dir: &Path, record_id: Uuid) -> PathBuf {
-    rollback_root(state_dir).join(record_id.to_string())
+/// 以描述符固定的单条回滚记录目录与其 `bin/`：记录与保留程序只经它们读取，读取记录、复核摘要
+/// 与安装之间路径被改名或替换，也不会换成另一份记录或另一组程序。
+pub(crate) struct RecordDirectory {
+    directory: PrivateDirectory,
+    binaries: PrivateDirectory,
+}
+
+impl RecordDirectory {
+    pub(crate) fn path(&self) -> &Path {
+        &self.directory.path
+    }
+
+    /// 打开保留程序：当前账号所有、单链接、禁止 group/other 写入的普通文件。
+    pub(crate) fn open_program(&self, name: &str) -> anyhow::Result<File> {
+        self.binaries.open_owned(name).context("打开保留程序失败")
+    }
 }
 
 /// 一次保留的输入；`programs` 是本次将被替换的程序（deploy 四个，rollback 只有三个角色）。
@@ -210,22 +229,27 @@ pub(crate) struct RetainedIdentity {
 
 /// 把安装目录中将被替换的程序复制到回滚记录，再由 `identify` 按副本摘要给出身份，最后写
 /// `record.json`；任何一步不完整都整体失败，缺少 `record.json` 的目录不会成为回退目标。
+/// `state` 是持锁时固定的部署状态目录，记录目录与保留副本都相对它的描述符新建。
 pub(crate) fn retain(
-    state_dir: &Path,
+    state: &PrivateDirectory,
     request: &RetainRequest<'_>,
     identify: impl FnOnce(&[RetainedBinary]) -> anyhow::Result<RetainedIdentity>,
-) -> anyhow::Result<RollbackRecord> {
+) -> anyhow::Result<(RollbackRecord, RecordDirectory)> {
     if request.deploy_receipt_id.is_nil() {
         anyhow::bail!("回滚记录需要非 nil 的部署回执标识");
     }
-    let directory = record_dir(state_dir, request.deploy_receipt_id);
-    files::ensure_private_dir(&rollback_root(state_dir)).context("准备回滚记录目录失败")?;
-    if directory.exists() {
-        anyhow::bail!("回滚记录已存在，拒绝覆盖：{}", directory.display());
-    }
-    files::ensure_private_dir(&directory).context("创建回滚记录目录失败")?;
-    let binaries_dir = directory.join("bin");
-    files::ensure_private_dir(&binaries_dir).context("创建回滚程序目录失败")?;
+    let root = state
+        .open_child(DIRECTORY, true)
+        .context("准备回滚记录目录失败")?
+        .context("准备回滚记录目录失败")?;
+    // 新建即独占：同一标识的记录已存在时拒绝，不覆盖任何保留副本。
+    let directory = root
+        .create_child(&request.deploy_receipt_id.to_string())
+        .context("创建回滚记录目录失败")?;
+    let binaries_dir = directory
+        .open_child("bin", true)
+        .context("创建回滚程序目录失败")?
+        .context("创建回滚程序目录失败")?;
     let mut binaries = Vec::with_capacity(request.programs.len());
     for name in request.programs {
         let source = request.install_dir.join(name);
@@ -234,16 +258,16 @@ pub(crate) fn retain(
         if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() == 0 {
             anyhow::bail!("当前安装程序不是可保留的普通文件：{}", source.display());
         }
-        let target = binaries_dir.join(name);
-        copy_executable(&source, &target)?;
-        let (sha256, bytes) = sha256_path(&target)?;
+        copy_executable(&source, &binaries_dir, name)?;
+        let (sha256, bytes) = sha256_reader(binaries_dir.open_owned(name)?)
+            .with_context(|| format!("读取保留程序失败：{name}"))?;
         let (source_sha256, _) = sha256_path(&source)?;
         if sha256 != source_sha256 {
             anyhow::bail!("保留的旧程序摘要与安装目录不一致：{name}");
         }
         binaries.push(RetainedBinary { name: (*name).to_owned(), sha256, bytes });
     }
-    files::sync_directory(&binaries_dir, "回滚记录程序目录")?;
+    binaries_dir.sync()?;
     let identity = identify(&binaries)?;
     let retained_cli =
         binaries.iter().find(|binary| binary.name == CLI_BINARY).map(|binary| match identity.cli {
@@ -264,17 +288,22 @@ pub(crate) fn retain(
     };
     record.validate()?;
     let bytes = serde_json::to_vec_pretty(&record).context("序列化回滚记录失败")?;
-    files::write_private(&directory.join(RECORD_FILE), &bytes)?;
-    Ok(record)
+    directory.write(RECORD_FILE, &bytes, false).context("写入回滚记录失败")?;
+    Ok((record, RecordDirectory { directory, binaries: binaries_dir }))
 }
 
 /// 读取单条回滚记录并复核保留程序仍与记录摘要一致。
-pub(crate) fn load(state_dir: &Path, record_id: Uuid) -> anyhow::Result<(RollbackRecord, PathBuf)> {
+pub(crate) fn load(
+    state: &PrivateDirectory,
+    record_id: Uuid,
+) -> anyhow::Result<(RollbackRecord, RecordDirectory)> {
     if record_id.is_nil() {
         anyhow::bail!("回滚记录标识不能是 nil UUID");
     }
-    let directory = record_dir(state_dir, record_id);
-    load_from(&directory, record_id)
+    let missing = || format!("回滚记录不存在：{}", record_dir(&state.path, record_id).display());
+    let root = state.open_child(DIRECTORY, false)?.with_context(missing)?;
+    let directory = root.open_child(&record_id.to_string(), false)?.with_context(missing)?;
+    load_from(directory, record_id)
 }
 
 /// 选择最新回滚记录；没有记录时失败，由调用方给出明确指引。
@@ -284,37 +313,36 @@ pub(crate) fn load(state_dir: &Path, record_id: Uuid) -> anyhow::Result<(Rollbac
 /// 它的目录是保留中途失败留下的残留，从未成为任何回执的回退目标，跳过并在 stderr 点名；
 /// `record.json` 存在但读不出、损坏或无效时点名失败关闭，不静默跳过，否则回退目标可能不是
 /// 运维预期的版本。选中记录之后 `rollback` 还会核对安装目录必须是它对应的部署版本。
-pub(crate) fn latest(state_dir: &Path) -> anyhow::Result<(RollbackRecord, PathBuf)> {
-    let root = rollback_root(state_dir);
-    let entries = match fs::read_dir(&root) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            anyhow::bail!("状态目录中没有回滚记录；先执行 auction-cli deploy")
-        }
-        Err(error) => return Err(error).context("读取回滚记录目录失败"),
-    };
+pub(crate) fn latest(
+    state: &PrivateDirectory,
+) -> anyhow::Result<(RollbackRecord, RecordDirectory)> {
+    let root = state
+        .open_child(DIRECTORY, false)
+        .context("读取回滚记录目录失败")?
+        .context("状态目录中没有回滚记录；先执行 auction-cli deploy")?;
     let mut latest: Option<RollbackRecord> = None;
     let mut tied = false;
-    for entry in entries {
-        let entry = entry.context("读取回滚记录目录项失败")?;
-        let name = entry.file_name();
-        let Some(name) = name.to_str() else { continue };
-        let Ok(record_id) = Uuid::parse_str(name) else { continue };
-        let directory = record_dir(state_dir, record_id);
-        if is_unfinished(&directory)? {
+    for name in root.names()? {
+        let Ok(record_id) = Uuid::parse_str(&name) else { continue };
+        let invalid = || {
+            format!(
+                "回滚记录无效：{}；用 --receipt-id 指定目标记录，或人工核对该目录",
+                root.path.join(&name).display()
+            )
+        };
+        // 记录目录必须是当前账号的 owner-only 真实目录；符号链接、其他账号的目录与普通文件一律
+        // 点名失败，不当作残留跳过。
+        let directory =
+            root.open_child(&name, false).with_context(invalid)?.with_context(invalid)?;
+        if !directory.contains(RECORD_FILE).with_context(invalid)? {
             progress(format_args!(
                 "跳过缺少 {RECORD_FILE} 的未完成回滚记录目录（保留中途失败的残留，可人工核对后\
                  整目录删除）：{}",
-                directory.display()
+                directory.path.display()
             ));
             continue;
         }
-        let candidate = read_record(&directory, record_id).with_context(|| {
-            format!(
-                "回滚记录无效：{}；用 --receipt-id 指定目标记录，或人工核对该目录",
-                directory.display()
-            )
-        })?;
+        let candidate = read_record(&directory, record_id).with_context(invalid)?;
         match &latest {
             Some(current) if current.created_at > candidate.created_at => {}
             Some(current) if current.created_at == candidate.created_at => tied = true,
@@ -328,51 +356,43 @@ pub(crate) fn latest(state_dir: &Path) -> anyhow::Result<(RollbackRecord, PathBu
     if tied {
         anyhow::bail!("多条回滚记录的创建时间相同，无法确定最新一条；请用 --receipt-id 指定");
     }
-    load_from(&record_dir(state_dir, record.record_id), record.record_id)
+    let directory = root
+        .open_child(&record.record_id.to_string(), false)?
+        .context("选中的回滚记录目录已不存在")?;
+    load_from(directory, record.record_id)
 }
 
-fn load_from(directory: &Path, record_id: Uuid) -> anyhow::Result<(RollbackRecord, PathBuf)> {
-    let record = read_record(directory, record_id)?;
+/// 读取记录并经同一组描述符复核每个保留程序的摘要与字节数。
+fn load_from(
+    directory: PrivateDirectory,
+    record_id: Uuid,
+) -> anyhow::Result<(RollbackRecord, RecordDirectory)> {
+    let record = read_record(&directory, record_id)?;
+    let binaries = directory
+        .open_child("bin", false)
+        .context("读取回滚程序目录失败")?
+        .with_context(|| format!("回滚记录缺少 bin/：{}", directory.path.display()))?;
+    let record_directory = RecordDirectory { directory, binaries };
     for binary in &record.binaries {
-        let path = directory.join("bin").join(&binary.name);
-        let metadata = fs::symlink_metadata(&path)
-            .with_context(|| format!("读取保留程序失败：{}", path.display()))?;
-        if !metadata.is_file() || metadata.file_type().is_symlink() {
-            anyhow::bail!("保留程序不是普通文件：{}", path.display());
-        }
-        let (sha256, bytes) = sha256_path(&path)?;
+        let file = record_directory
+            .open_program(&binary.name)
+            .with_context(|| format!("读取保留程序失败：{}", binary.name))?;
+        let (sha256, bytes) =
+            sha256_reader(file).with_context(|| format!("读取保留程序失败：{}", binary.name))?;
         if sha256 != binary.sha256 || bytes != binary.bytes {
             anyhow::bail!("保留程序摘要与回滚记录不一致：{}", binary.name);
         }
     }
-    Ok((record, directory.to_path_buf()))
+    Ok((record, record_directory))
 }
 
-/// 记录目录是非符号链接目录但没有 `record.json`：保留在写出记录文件之前中止。其他形态交给
-/// [`read_record`] 点名失败；`record.json` 无法判断是否存在时同样失败关闭。
-fn is_unfinished(directory: &Path) -> anyhow::Result<bool> {
-    let metadata = fs::symlink_metadata(directory)
-        .with_context(|| format!("读取回滚记录目录失败：{}", directory.display()))?;
-    if !metadata.is_dir() || metadata.file_type().is_symlink() {
-        return Ok(false);
+/// 只读取并校验 `record.json`（当前账号所有的 owner-only 单链接普通文件），不散列保留程序；按
+/// `format` 分派 v2 或 v1 兼容读取。
+fn read_record(directory: &PrivateDirectory, record_id: Uuid) -> anyhow::Result<RollbackRecord> {
+    let bytes = directory.read(RECORD_FILE).context("读取回滚记录失败")?;
+    if bytes.len() as u64 > MAX_RECORD_BYTES {
+        anyhow::bail!("回滚记录超过 {MAX_RECORD_BYTES} 字节上限");
     }
-    let record = directory.join(RECORD_FILE);
-    match fs::symlink_metadata(&record) {
-        Ok(_) => Ok(false),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(true),
-        Err(error) => Err(error).with_context(|| format!("读取回滚记录失败：{}", record.display())),
-    }
-}
-
-/// 只读取并校验 `record.json`，不散列保留程序；按 `format` 分派 v2 或 v1 兼容读取。
-fn read_record(directory: &Path, record_id: Uuid) -> anyhow::Result<RollbackRecord> {
-    let metadata = fs::symlink_metadata(directory)
-        .with_context(|| format!("读取回滚记录目录失败：{}", directory.display()))?;
-    if !metadata.is_dir() || metadata.file_type().is_symlink() {
-        anyhow::bail!("回滚记录必须是非符号链接目录：{}", directory.display());
-    }
-    let bytes = files::read_bounded(&directory.join(RECORD_FILE), MAX_RECORD_BYTES)
-        .context("读取回滚记录失败")?;
     let record = parse_record(&bytes)?;
     if record.record_id != record_id {
         anyhow::bail!("回滚记录标识与目录名不一致");
@@ -397,20 +417,15 @@ fn parse_record(bytes: &[u8]) -> anyhow::Result<RollbackRecord> {
     }
 }
 
-/// 以 O_NOFOLLOW 打开源程序，复制为 create_new 的 0755 新文件并同步；不跟随任何符号链接。
-pub(super) fn copy_executable(source: &Path, target: &Path) -> anyhow::Result<()> {
+/// 以 O_NOFOLLOW 打开源程序，在固定的目录中复制为 create_new 的 0755 新文件并同步；不跟随任何
+/// 符号链接。
+fn copy_executable(source: &Path, directory: &PrivateDirectory, name: &str) -> anyhow::Result<()> {
     let mut input = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
         .open(source)
         .with_context(|| format!("打开源程序失败：{}", source.display()))?;
-    let mut output = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(PROGRAM_MODE)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(target)
-        .with_context(|| format!("创建目标程序失败：{}", target.display()))?;
+    let mut output = directory.create_file(name, PROGRAM_MODE).context("创建保留程序失败")?;
     copy_contents(&mut input, &mut output)?;
     output.set_permissions(fs::Permissions::from_mode(PROGRAM_MODE)).context("设置程序权限失败")?;
     output.sync_all().context("同步目标程序失败")?;

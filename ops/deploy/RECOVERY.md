@@ -262,6 +262,7 @@ df -h /var/lib/auction/wal-staging
 
 `deploy` 在安装前把当前四个程序保留到 `<state-dir>/rollback/<deploy_receipt_id>/`（`record.json` 为 `auction-deploy-rollback.v2`：安装目录、四个 SHA-256、停机前观测到的数据库版本、本次制品的内嵌 schema，以及按摘要从回执绑定的旧角色与旧 CLI 身份；`.v1` 记录原样可读）。`auction-cli rollback --receipt-id <deploy_receipt_id>`（省略取最新）只把 Worker、Admin、Public 三个角色换回该记录的程序，**保留安装目录中的 `auction-cli`**，并：
 
+- 先取得部署锁：部署状态目录与各级父目录须归 root 且禁止他人写入，回滚记录、部署回执与保留程序都经持锁时固定的目录描述符读取（见[apps/auction-cli/README.md#部署状态目录](../../apps/auction-cli/README.md#部署状态目录)）；
 - 必须由安装目录中的 `auction-cli` 执行，且它的内嵌 schema 等于数据库版本（部署在迁移完成前失败时较高，回退后的 `service start` 会执行被回退的迁移，因此拒绝）；
 - 要求安装目录先过[重建安装目录信任](#重建安装目录信任)所述的属主与权限门禁，三个角色程序仍是该部署回执的版本，不一致时拒绝；
 - 以记录登记的目标角色 schema `E`（未知时按创建记录时观测到的数据库版本假设）读取数据库版本 `D`，要求 `(E, D]` 的迁移连续、成功且登记为 `compatible`；任一 `breaking` 或缺登记即拒绝，只能恢复升级前备份并做外部历史核对。`D > E` 时还要求三角色有效配置的 `[readiness] migration_compatibility_mode` 都已显式设为 `compatible`、目标程序不早于迁移 075，否则拒绝；rollback 不修改配置；

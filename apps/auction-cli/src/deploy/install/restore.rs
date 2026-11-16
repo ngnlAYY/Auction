@@ -1,19 +1,18 @@
 //! 安装中途失败后的自动换回：只把本次已替换的程序从刚保留的回滚记录（deploy 是部署前的四个
 //! 程序，rollback 是回退前三个角色的反向记录）装回，再按该记录复核它覆盖的全部程序；rollback
-//! 从不替换 auction-cli，也不把它列入复核。换回经同一个固定的安装目录描述符完成，发生在迁移与
-//! 启动服务之前；换回失败时不重试，错误列出各程序的当前摘要，交由人工按 RECOVERY 核对。
-
-use std::path::Path;
+//! 从不替换 auction-cli，也不把它列入复核。换回经同一个固定的安装目录描述符完成，保留程序经
+//! 回滚记录目录的固定描述符读取，发生在迁移与启动服务之前；换回失败时不重试，错误列出各程序的
+//! 当前摘要，交由人工按 RECOVERY 核对。
 
 use anyhow::Context;
 
 use super::trust::PinnedInstallDir;
-use super::{InstallArtifactFailure, RollbackRecord, install_one};
+use super::{InstallArtifactFailure, RecordDirectory, RollbackRecord, Source, install_one};
 
 /// 换回所需的回滚记录与固定的安装目录。
 pub(super) struct Swap<'a> {
     pub(super) retained: &'a RollbackRecord,
-    pub(super) record_directory: &'a Path,
+    pub(super) record_directory: &'a RecordDirectory,
     pub(super) directory: &'a PinnedInstallDir,
 }
 
@@ -81,7 +80,7 @@ impl Swap<'_> {
         let binary = self.retained.binary(name).with_context(|| format!("回滚记录缺少 {name}"))?;
         install_one(
             self.directory,
-            &self.record_directory.join("bin").join(name),
+            &Source::Retained(self.record_directory),
             name,
             &binary.sha256,
             binary.bytes,

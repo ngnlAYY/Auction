@@ -22,12 +22,15 @@ use crate::cli::UnitArgs;
 use crate::config_dir::{ConfigDir, Deployment};
 use crate::receipt::{Action, CliIdentity, DeployRecord, Outcome, ReceiptContext, RoleIdentity};
 use crate::service::Systemctl;
+use crate::support::files::PrivateDirectory;
 use crate::{receipt, service};
 
 /// 停机前已核对完毕的部署输入；停机后的步骤只读取它，不再做新的门禁判定。
 pub(super) struct DeployPlan<'a> {
     pub(super) config_dir: &'a ConfigDir,
     pub(super) units: &'a UnitArgs,
+    /// 持锁时固定的部署状态目录；回滚记录与回执都写在它的描述符下。
+    pub(super) state: &'a PrivateDirectory,
     pub(super) systemctl: &'a Systemctl,
     pub(super) deployment: &'a Deployment,
     pub(super) owner: &'a PostgresOwnerSecrets,
@@ -49,7 +52,7 @@ pub(super) async fn deploy_locked(
     context: &mut ReceiptContext,
     shutdown_gate: serde_json::Value,
 ) -> Result<serde_json::Value, Failure> {
-    let DeployPlan { units, systemctl, artifact, install_dir, database, .. } = *plan;
+    let DeployPlan { units, state, systemctl, artifact, install_dir, database, .. } = *plan;
     progress("停止三角色（Public → Admin → Worker）");
     service::stop_all(systemctl).await.map_err(Failure::unrecorded)?;
 
@@ -94,17 +97,16 @@ pub(super) async fn deploy_locked(
         observed_database_version: plan.current_version,
         installed_role_schema_version: Some(plan.expected_version),
     };
-    let retained = install::retain(&units.state_dir, &request, |binaries| {
-        Ok(installed_identity(&units.state_dir, binaries))
-    })
-    .context("保留当前程序失败")
-    .map_err(|error| stopped_before_install(error, install_dir))?;
+    let (retained, record_directory) =
+        install::retain(state, &request, |binaries| Ok(installed_identity(state, binaries)))
+            .context("保留当前程序失败")
+            .map_err(|error| stopped_before_install(error, install_dir))?;
 
     // 回滚记录已指向 deploy_receipt_id：此后的任何失败都必须用同一标识发布带回滚证据的失败
     // 回执，rollback 才能读回已安装制品与保留记录；入口不再追加第二条回执。
     let deploy = deploy_record(plan, &archive, &manifest_path, retained.record_id);
     let failed = FailedReceipt {
-        state_dir: &units.state_dir,
+        state,
         receipt_id: deploy_receipt_id,
         action: Action::Deploy,
         started_at: plan.started_at,
@@ -112,9 +114,10 @@ pub(super) async fn deploy_locked(
         deploy: &deploy,
     };
     progress(format_args!("安装制品程序到 {}", install_dir.display()));
-    let record_dir = install::record_dir(&units.state_dir, retained.record_id);
-    if let Err(failure) = install::install_artifact(artifact, install_dir, &retained, &record_dir) {
-        let failure = install_failed(failure, install_dir, &record_dir);
+    if let Err(failure) =
+        install::install_artifact(artifact, install_dir, &retained, &record_directory)
+    {
+        let failure = install_failed(failure, install_dir, record_directory.path());
         // 失败回执记录安装目录实际文件的摘要（已换回时是旧程序），不冒充制品摘要；
         // 之后 rollback 会在安装目录核对处失败关闭。
         return Err(failed.publish(failure, None, Ok(install_dir_artifacts(install_dir))));
@@ -156,7 +159,7 @@ pub(super) async fn deploy_locked(
         }
     };
     let published = match receipt::record_deploy(
-        &units.state_dir,
+        state,
         deploy_receipt_id,
         Action::Deploy,
         Outcome::Succeeded,
