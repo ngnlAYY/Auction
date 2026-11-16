@@ -1,11 +1,12 @@
 //! 履约证据轮询的年龄退避、付款截止聚焦与等待领取的寄出时长分档。
 
+use auction_domain::SettlementObligationKind;
 use chrono::{DateTime, Duration, Utc};
 
 use crate::errors::ApplicationError;
 
-/// 证据退避上限；晚付款的确认与卖方货款最多因此延后 10 分钟（寄出满 24 小时后的等待领取
-/// 另按下文的寄出时长分档放宽）。
+/// 证据退避上限；晚付款的确认最多因此延后 10 分钟。货款、退款、寄回与交付寄出满 24 小时后
+/// 另按下文的寄出时长分档放宽，COD 与载体付款不参与分档。
 pub(super) const EVIDENCE_BACKOFF_MAXIMUM: Duration = Duration::minutes(10);
 
 /// 付款截止前后恢复基础间隔的聚焦窗口；与退避上限同宽，覆盖截止前后的迟到付款。
@@ -21,7 +22,9 @@ const EVIDENCE_BACKOFF_MAXIMUM_DOUBLINGS: u32 = 32;
 // 列表页与详情页（邮件越旧、所在页越深，加载越多），并与发信、收件共用同一请求门；收件人
 // 数天不领取时仍按 5 分钟窗口或 10 分钟退避读取，只会持续消耗账号的页面预算。寄出后的头
 // 24 小时保持既有节奏，覆盖绝大多数正常领取；之后逐档放宽。长期未领取由运维告警提示人工
-// 跟进，轮询只负责发现领取，放宽不影响正确性。
+// 跟进，轮询只负责发现领取，放宽不影响正确性。分档只作用于货款、退款、流拍/撤拍寄回与
+// 异世界交付：COD 与载体付款等的是买家付款，确认后才资金化并解锁后续履约，付款期限内的正常
+// 付款不能因分档推迟确认，保持既有节奏。
 
 /// 寄出满该时长后改为每小时读取一次。
 const COLLECTION_WAIT_HOURLY_AFTER: Duration = Duration::hours(24);
@@ -103,17 +106,32 @@ pub(super) fn payment_deadline_focus(
     (observed_at - deadline).num_seconds().unsigned_abs() <= focus
 }
 
+/// 义务种类是否参与等待领取分档：货款、退款、流拍/撤拍寄回与异世界交付参与；COD 与载体付款
+/// 等的是买家付款，不参与。逐项列出，新增种类时必须显式决定。
+fn collection_wait_tiered(kind: SettlementObligationKind) -> bool {
+    match kind {
+        SettlementObligationKind::SellerPayout
+        | SettlementObligationKind::BuyerRefund
+        | SettlementObligationKind::UnsoldReturn
+        | SettlementObligationKind::WithdrawnReturn
+        | SettlementObligationKind::WinnerEquipmentHandoff => true,
+        SettlementObligationKind::WinnerEquipmentCod
+        | SettlementObligationKind::WinnerPaymentCarrierCod => false,
+    }
+}
+
 /// 已寄出、等待领取的义务下次 Sent 读取的最小间隔；`None` 表示保持既有节奏。
 ///
-/// 寄出时长取投递完成的数据库时刻（`deliveries.completed_at`），不另取时钟来源。寄出不足
-/// 24 小时、寄出时刻未知（不放宽，失败关闭到既有的较密节奏）、或观察时刻落在付款截止聚焦
-/// 窗口内时返回 `None`；24 小时至 7 天为 1 小时，7 天以上为 6 小时。
+/// 寄出时长取投递完成的数据库时刻（`deliveries.completed_at`），不另取时钟来源。COD 与载体
+/// 付款、寄出不足 24 小时、寄出时刻未知（不放宽，失败关闭到既有的较密节奏）、或观察时刻落在
+/// 付款截止聚焦窗口内时返回 `None`；24 小时至 7 天为 1 小时，7 天以上为 6 小时。
 pub(super) fn collection_wait_interval(
+    kind: SettlementObligationKind,
     sent_at: Option<DateTime<Utc>>,
     observed_at: DateTime<Utc>,
     payment_deadline_at: Option<DateTime<Utc>>,
 ) -> Option<Duration> {
-    if payment_deadline_focus(payment_deadline_at, observed_at) {
+    if !collection_wait_tiered(kind) || payment_deadline_focus(payment_deadline_at, observed_at) {
         return None;
     }
     let waited = observed_at - sent_at?;
@@ -126,10 +144,13 @@ pub(super) fn collection_wait_interval(
     }
 }
 
-/// 把既有轮询间隔放宽到等待领取分档：只放宽、不收紧（配置的追踪窗口更宽时保持窗口）。
+/// 把既有轮询间隔放宽到等待领取分档：分档只给出最小间隔，只放宽、不收紧；配置的追踪窗口
+/// 更宽时保持原窗口。
 ///
-/// 付款截止尚未进入聚焦窗口时，放宽后的读取最迟落在窗口起点，聚焦期内迟到付款仍按基础
-/// 间隔确认；付款期限、逾期判定与恢复策略都不变。
+/// 防御性收口：若义务带付款期限且尚未进入聚焦窗口，分档放宽的部分最迟落在窗口起点，但不会
+/// 把既有间隔缩短（原窗口本身更宽时可能越过聚焦窗口，这是既有窗口的行为，不由分档引入）。
+/// 付款期限只属于 COD 与载体付款，它们不参与分档，因此正常运行不会走到这一分支；付款期限、
+/// 逾期判定与恢复策略都不变。
 pub(super) fn widen_for_collection_wait(
     delay: Duration,
     interval: Option<Duration>,
@@ -176,6 +197,7 @@ pub(super) fn collection_poll_delay(
 
 #[cfg(test)]
 mod tests {
+    use auction_domain::SettlementObligationKind;
     use chrono::{TimeZone, Utc};
 
     use super::{
@@ -344,10 +366,58 @@ mod tests {
             (chrono::Duration::days(7), Some(six_hours)),
             (chrono::Duration::days(30), Some(six_hours)),
         ] {
-            assert_eq!(collection_wait_interval(sent(ago), now, None), expected, "寄出 {ago}");
+            assert_eq!(
+                collection_wait_interval(
+                    SettlementObligationKind::SellerPayout,
+                    sent(ago),
+                    now,
+                    None
+                ),
+                expected,
+                "寄出 {ago}"
+            );
         }
-        assert_eq!(collection_wait_interval(None, now, None), None);
-        assert_eq!(collection_wait_interval(sent(chrono::Duration::hours(-1)), now, None), None);
+        let payout = SettlementObligationKind::SellerPayout;
+        assert_eq!(collection_wait_interval(payout, None, now, None), None);
+        assert_eq!(
+            collection_wait_interval(payout, sent(chrono::Duration::hours(-1)), now, None),
+            None
+        );
+    }
+
+    /// 分档只作用于货款、退款、流拍/撤拍寄回与异世界交付；COD 与载体付款等的是买家付款，
+    /// 不论寄出多久、期限在前还是早已过去都不放宽。
+    #[test]
+    fn collection_wait_excludes_cod_and_carrier_payments() {
+        let now = at(1_700_000_000);
+        let sent = Some(now - chrono::Duration::days(8));
+        for kind in [
+            SettlementObligationKind::SellerPayout,
+            SettlementObligationKind::BuyerRefund,
+            SettlementObligationKind::UnsoldReturn,
+            SettlementObligationKind::WithdrawnReturn,
+            SettlementObligationKind::WinnerEquipmentHandoff,
+        ] {
+            assert_eq!(
+                collection_wait_interval(kind, sent, now, None),
+                Some(chrono::Duration::hours(6)),
+                "{kind:?} 参与分档"
+            );
+        }
+        for kind in [
+            SettlementObligationKind::WinnerEquipmentCod,
+            SettlementObligationKind::WinnerPaymentCarrierCod,
+        ] {
+            for deadline in
+                [None, Some(now - chrono::Duration::days(5)), Some(now + chrono::Duration::days(1))]
+            {
+                assert_eq!(
+                    collection_wait_interval(kind, sent, now, deadline),
+                    None,
+                    "{kind:?} 不参与分档（期限 {deadline:?}）"
+                );
+            }
+        }
     }
 
     /// 分档只放宽既有间隔：5 分钟窗口与 10 分钟退避被放宽到分档，配置得更宽的追踪窗口保持原值。
@@ -366,24 +436,27 @@ mod tests {
         assert_eq!(widen_for_collection_wait(window, None, now, None), window);
     }
 
-    /// COD 付款截止聚焦保持不变：聚焦窗口内不放宽；窗口之前放宽的读取最迟落在窗口起点；
-    /// 截止早已过去时按寄出时长放宽。
+    /// 带付款期限时的防御性收口（期限只属于不参与分档的 COD，这里用参与分档的种类直接验证
+    /// 函数行为）：聚焦窗口内不放宽；窗口之前分档放宽的部分最迟落在窗口起点；期限早已过去时
+    /// 按寄出时长放宽。分档只给出最小间隔：配置的追踪窗口本身更宽时保持原窗口，即使因此越过
+    /// 聚焦窗口也不缩短。
     #[test]
-    fn collection_wait_keeps_payment_deadline_focus() {
+    fn collection_wait_widening_is_bounded_by_payment_deadline_focus() {
+        let kind = SettlementObligationKind::SellerPayout;
         let now = at(1_700_000_000);
         let sent = Some(now - chrono::Duration::days(3));
         let window_next = Some(at(1_700_000_300));
 
-        // 截止前 5 分钟：处于聚焦窗口，按基础间隔确认迟到付款。
+        // 截止前 5 分钟：处于聚焦窗口，按基础间隔读取。
         let deadline = Some(now + chrono::Duration::minutes(5));
-        assert_eq!(collection_wait_interval(sent, now, deadline), None);
+        assert_eq!(collection_wait_interval(kind, sent, now, deadline), None);
         let evidence_delay = evidence_poll_delay(base(), 6, deadline, now);
         let delay = collection_poll_delay(window_next, now, evidence_delay, deadline);
         assert_eq!(widen_for_collection_wait(delay, None, now, deadline), base());
 
-        // 截止前 30 分钟：分档为 1 小时，但下次读取最迟在截止前 10 分钟（聚焦窗口起点）。
+        // 截止前 30 分钟：分档为 1 小时，但放宽后的读取最迟在截止前 10 分钟（聚焦窗口起点）。
         let deadline = Some(now + chrono::Duration::minutes(30));
-        let interval = collection_wait_interval(sent, now, deadline);
+        let interval = collection_wait_interval(kind, sent, now, deadline);
         assert_eq!(interval, Some(chrono::Duration::hours(1)));
         let window = chrono::Duration::seconds(300);
         assert_eq!(
@@ -391,15 +464,18 @@ mod tests {
             chrono::Duration::minutes(20)
         );
         assert!(payment_deadline_focus(deadline, now + chrono::Duration::minutes(20)));
+        // 配置的追踪窗口（2 小时）本身更宽：保持原窗口，不因分档或截止而缩短。
+        let wide_window = chrono::Duration::hours(2);
+        assert_eq!(widen_for_collection_wait(wide_window, interval, now, deadline), wide_window);
         // 距聚焦窗口起点比既有间隔还近时保持既有间隔，不因截止而缩短。
         let deadline = Some(now + chrono::Duration::minutes(12));
-        let interval = collection_wait_interval(sent, now, deadline);
+        let interval = collection_wait_interval(kind, sent, now, deadline);
         assert_eq!(widen_for_collection_wait(window, interval, now, deadline), window);
 
         // 截止已过去一天：不在聚焦窗口，按寄出 8 天放宽到 6 小时。
         let deadline = Some(now - chrono::Duration::days(1));
         let interval =
-            collection_wait_interval(Some(now - chrono::Duration::days(8)), now, deadline);
+            collection_wait_interval(kind, Some(now - chrono::Duration::days(8)), now, deadline);
         assert_eq!(interval, Some(chrono::Duration::hours(6)));
         assert_eq!(
             widen_for_collection_wait(window, interval, now, deadline),

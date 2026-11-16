@@ -23,8 +23,9 @@ pub struct FulfillmentWorkerConfig {
     /// 付款截止前后回到该基础间隔。MoogleMail Sent 远端读取失败也走该退避。
     pub retry_delay_seconds: u64,
     /// 等待买家/卖家在 MM 领取资产的共享追踪窗口秒数；范围 1-86400，默认 300。
-    /// 付款截止前后按 `retry_delay_seconds` 收窄，避免迟到付款被窗口拖长；邮件寄出满 24 小时后
-    /// 由应用层按寄出时长固定分档放宽（只放宽、不收紧），不由本字段配置。
+    /// 付款截止前后按 `retry_delay_seconds` 收窄，避免迟到付款被窗口拖长；货款、退款、寄回与交付
+    /// 邮件寄出满 24 小时后由应用层按寄出时长固定分档放宽（分档只给出最小间隔，本窗口更宽时保持
+    /// 本窗口；COD 与载体付款不参与），不由本字段配置。
     pub evidence_poll_seconds: u64,
 }
 

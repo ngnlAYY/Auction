@@ -191,10 +191,11 @@ impl SettlementFulfillmentService {
                 .await;
         }
 
-        // 邮件已寄出，只等收件人领取：按寄出时长放宽下一次 Sent 读取（只放宽、不收紧），
-        // 付款截止聚焦与本地依赖错误的快速重试保持不变；领取证明与状态判定不受影响。
+        // 货款、退款、寄回与交付已寄出、只等收件人领取：按寄出时长放宽下一次 Sent 读取（分档只
+        // 给出最小间隔，只放宽、不收紧）；COD 与载体付款等的是买家付款，不参与分档。本地依赖
+        // 错误的快速重试保持不变；领取证明与状态判定不受影响。
         let collection_wait =
-            collection_wait_interval(sent_at, observed_at, claim.payment_deadline_at);
+            collection_wait_interval(claim.kind, sent_at, observed_at, claim.payment_deadline_at);
         let awaiting_delay = widen_for_collection_wait(
             evidence_delay,
             collection_wait,
@@ -259,7 +260,7 @@ impl SettlementFulfillmentService {
                 },
             );
             // 买家支付 COD、卖家领取货款都只能等对方在游戏内操作，统一对到下一个追踪窗口；
-            // 寄出满 24 小时后再按寄出时长分档放宽。
+            // 货款等非付款义务寄出满 24 小时后再按寄出时长分档放宽，COD 与载体付款保持窗口。
             let poll_delay = widen_for_collection_wait(
                 collection_poll_delay(
                     self.collection_next_poll(&claim, observed_at),
@@ -343,10 +344,11 @@ mod tests {
         Box::pin(async { Err(ApplicationError::Repository(RepositoryError::Unavailable)) })
     }
 
-    /// 只记录延期写入；本组用例不应触发其他写入。
+    /// 只记录延期与满足写入；本组用例不应触发其他写入。
     #[derive(Default)]
     struct DeferStore {
         deferred: Mutex<Vec<(Duration, String)>>,
+        satisfied: Mutex<Vec<SettlementFulfillmentProof>>,
     }
 
     impl SettlementFulfillmentStore for DeferStore {
@@ -383,10 +385,18 @@ mod tests {
 
         fn satisfy(
             &self,
-            _claim: SettlementFulfillmentClaim,
-            _proof: SettlementFulfillmentProof,
+            claim: SettlementFulfillmentClaim,
+            proof: SettlementFulfillmentProof,
         ) -> ApplicationFuture<'_, SettlementFulfillmentReconcileResult> {
-            unavailable()
+            if let Ok(mut satisfied) = self.satisfied.lock() {
+                satisfied.push(proof);
+            }
+            let result = SettlementFulfillmentReconcileResult {
+                obligation_id: claim.obligation_id,
+                delivery_id: claim.delivery_id.unwrap_or_else(Uuid::nil),
+                status: SettlementFulfillmentReconcileStatus::Satisfied,
+            };
+            Box::pin(async move { Ok(result) })
         }
 
         fn manual_reconcile(
@@ -426,6 +436,25 @@ mod tests {
             _user_id: Uuid,
         ) -> ApplicationFuture<'_, SettlementFulfillmentRecipientSnapshot> {
             unavailable()
+        }
+    }
+
+    /// 买家身份读取：返回与 claim 相同的用户；enqueued 阶段只核对身份，不要求当前资格。
+    struct BuyerRecipient;
+
+    impl SettlementFulfillmentRecipientReader for BuyerRecipient {
+        fn read_recipient(
+            &self,
+            user_id: Uuid,
+        ) -> ApplicationFuture<'_, SettlementFulfillmentRecipientSnapshot> {
+            Box::pin(async move {
+                Ok(SettlementFulfillmentRecipientSnapshot {
+                    user_id,
+                    game_identity: "collection-buyer".to_owned(),
+                    eligible: true,
+                    state_version: 1,
+                })
+            })
         }
     }
 
@@ -639,5 +668,150 @@ mod tests {
             defer_after(SentRead::Remote, Some(observed_at() - Duration::hours(2))),
             (Duration::minutes(10), "evidence_unavailable".to_owned())
         );
+    }
+
+    /// 把 claim 的投递快照改为由当前意图重新规范化的载荷，并同步 prepare 摘要与收件人。
+    fn with_canonical_snapshot(
+        mut claim: SettlementFulfillmentClaim,
+    ) -> SettlementFulfillmentClaim {
+        let canonical = build_delivery_intent(&claim)
+            .and_then(|intent| build_canonical_delivery(&intent))
+            .expect("付款意图必须可规范化");
+        claim.prepare_request_hash = Some(canonical.request_hash);
+        let recipient = claim.recipient.clone();
+        let snapshot = claim.delivery_snapshot.as_mut().expect("投递快照");
+        snapshot.prepare_request_hash = canonical.request_hash;
+        snapshot.recipient = recipient;
+        snapshot.payload = canonical.payload;
+        claim
+    }
+
+    /// 已寄出、等待买家付款的 COD 或载体付款 claim：投递已成功、Sent 引用已证明（发送证明），
+    /// 带冻结付款期限。COD 沿用三变量旧载荷，免去冻结结算明细；载体付款带 1 Credit 载体。
+    fn sent_payment(
+        kind: SettlementObligationKind,
+        sent_at: DateTime<Utc>,
+        payment_deadline_at: DateTime<Utc>,
+    ) -> SettlementFulfillmentClaim {
+        let mut claim = sent_payout(Some(sent_at));
+        claim.kind = kind;
+        claim.recipient_user_id = Some(Uuid::from_u128(0x3001));
+        claim.recipient = "collection-buyer".to_owned();
+        claim.amount = 1_000;
+        claim.prerequisite_id = None;
+        claim.payment_deadline_at = Some(payment_deadline_at);
+        if kind == SettlementObligationKind::WinnerPaymentCarrierCod {
+            claim.carrier_credit = 1;
+        } else if let Some(snapshot) = claim.delivery_snapshot.as_mut() {
+            snapshot.payload = serde_json::json!({
+                "variables": {"amount": "", "item_name": "", "reference": ""}
+            });
+        }
+        with_canonical_snapshot(claim)
+    }
+
+    /// 执行一次 enqueued 对账，返回结果状态、持久化延期与满足证明；`collected` 决定 Sent 记录是否
+    /// 已被收件人领取（买家已付款）。
+    fn reconcile_payment(
+        claim: SettlementFulfillmentClaim,
+        read: SentRead,
+        collected: bool,
+    ) -> (
+        SettlementFulfillmentReconcileStatus,
+        Vec<(Duration, String)>,
+        Vec<SettlementFulfillmentProof>,
+    ) {
+        let (remaining_credits, cod_pending, remaining_equipment_ids) = match claim.kind {
+            _ if collected => (0, 0, Vec::new()),
+            SettlementObligationKind::WinnerPaymentCarrierCod => (
+                i64::from(claim.carrier_credit),
+                claim.amount + i64::from(claim.carrier_credit),
+                Vec::new(),
+            ),
+            _ => (0, claim.amount, vec![claim.external_equipment_id.clone()]),
+        };
+        let evidence = SettlementFulfillmentSentEvidence {
+            external_mail_id: MAIL_ID.to_owned(),
+            world: SettlementWorld::Main,
+            recipient: claim.recipient.clone(),
+            subject: canonical_settlement_fulfillment_subject(claim.kind, claim.obligation_id)
+                .expect("付款主题"),
+            remaining_credits,
+            cod_pending,
+            remaining_equipment_ids,
+            collected,
+            observed_at: observed_at(),
+        };
+        let store = Arc::new(DeferStore::default());
+        let service = SettlementFulfillmentService::new(
+            store.clone(),
+            Arc::new(BuyerRecipient),
+            Arc::new(NoCustody),
+            Arc::new(ScriptedSent { read, evidence }),
+            Arc::new(FixedClock(observed_at())),
+        );
+        let result = block_on(service.reconcile_now(
+            claim,
+            observed_at(),
+            observed_at() + Duration::seconds(60),
+        ))
+        .expect("对账必须写入结果");
+        let deferred = store.deferred.lock().expect("延期记录").clone();
+        let satisfied = store.satisfied.lock().expect("满足记录").clone();
+        (result.status, deferred, satisfied)
+    }
+
+    /// 正常 COD 等待付款与载体付款的完整对账路径：投递已寄出且带发送证明，买家未付款时按既有的
+    /// 5 分钟追踪窗口或证据退避读取，寄出多久都不按分档放宽（付款期限内与期限早已过去都一样）；
+    /// 买家付款后由领取证明满足义务。
+    #[test]
+    fn cod_and_carrier_payments_keep_existing_cadence_through_reconcile() {
+        let window = Duration::seconds(300);
+        let backoff = Duration::minutes(10);
+        for (kind, sent_at, deadline) in [
+            (
+                SettlementObligationKind::WinnerEquipmentCod,
+                observed_at() - Duration::days(2),
+                observed_at() + Duration::days(1),
+            ),
+            (
+                SettlementObligationKind::WinnerPaymentCarrierCod,
+                observed_at() - Duration::days(2),
+                observed_at() + Duration::days(1),
+            ),
+            (
+                SettlementObligationKind::WinnerEquipmentCod,
+                observed_at() - Duration::days(8),
+                observed_at() - Duration::days(5),
+            ),
+            (
+                SettlementObligationKind::WinnerPaymentCarrierCod,
+                observed_at() - Duration::days(8),
+                observed_at() - Duration::days(5),
+            ),
+        ] {
+            let claim = || sent_payment(kind, sent_at, deadline);
+            for (read, expected) in [
+                (SentRead::Uncollected, (window, "evidence_not_observed")),
+                (SentRead::NotObserved, (backoff, "evidence_not_observed")),
+                (SentRead::Remote, (backoff, "evidence_unavailable")),
+            ] {
+                let (status, deferred, satisfied) = reconcile_payment(claim(), read, false);
+                assert_eq!(status, SettlementFulfillmentReconcileStatus::Deferred);
+                assert_eq!(
+                    deferred,
+                    [(expected.0, expected.1.to_owned())],
+                    "{kind:?} 寄出于 {sent_at} 不按分档放宽"
+                );
+                assert!(satisfied.is_empty());
+            }
+            let (status, deferred, satisfied) =
+                reconcile_payment(claim(), SentRead::Uncollected, true);
+            assert_eq!(status, SettlementFulfillmentReconcileStatus::Satisfied);
+            assert!(deferred.is_empty());
+            assert_eq!(satisfied.len(), 1, "{kind:?} 买家付款后由领取证明满足");
+            assert_eq!(satisfied[0].kind, "mooglemail_sent_collected");
+            assert_eq!(satisfied[0].reference, MAIL_ID);
+        }
     }
 }
