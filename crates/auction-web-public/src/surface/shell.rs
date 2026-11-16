@@ -14,8 +14,8 @@ use super::{
     PublicReadinessState, PublicRealtimeOwner, PublicRealtimePageKey, PublicRealtimeTarget,
     PublicSessionView, TickerCountdown, WorldPicker, auction_status_label, prefetch_board_lots,
     presentation, public_auction_home_href, public_auction_home_query, public_connection_state,
-    read_public_query, realtime, remember_current_auction, session, set_public_query,
-    ticker_auction, ticker_countdown, use_public_query_state, world_label,
+    read_public_query, realtime, refresh_public_reads, remember_current_auction, session,
+    set_public_query, ticker_auction, ticker_countdown, use_public_query_state, world_label,
 };
 use crate::api::{
     CurrentAuction, PublicSession, SessionRefreshReason, estimated_now, fetch_current_auction,
@@ -55,7 +55,7 @@ pub(crate) fn PublicShell() -> Element {
     let mut location_generation = use_signal(|| 0_u64);
     let mut navigation_open = use_signal(|| false);
     let mut sidebar_collapsed = use_signal(load_sidebar_collapsed);
-    let mut refresh_generation = use_signal(|| 0_u64);
+    let refresh_generation = use_signal(|| 0_u64);
     let mut manual_refresh_busy = use_signal(|| false);
     let mut manual_refresh_error = use_signal(|| false);
     let bid_refresh = PublicBidRefresh(use_signal(|| 0_u64));
@@ -146,8 +146,7 @@ pub(crate) fn PublicShell() -> Element {
                 }
                 skipped_while_live = 0;
                 // 权威轮询与客户端短缓存对齐：先失效再刷新，避免轮询命中旧 TTL。
-                crate::api::invalidate_all();
-                refresh_generation.set(refresh_generation().saturating_add(1));
+                refresh_public_reads(refresh_generation);
             }
         }
     });
@@ -155,10 +154,11 @@ pub(crate) fn PublicShell() -> Element {
     use_effect({
         let page_visibility = page_visibility.clone();
         move || {
-            // 恢复可见时立即补偿一次 readiness 与权威 current 重读，快速回到同步。
+            // 恢复可见时立即补偿一次 readiness 与权威 current 重读，快速回到同步。隐藏期间读到
+            // 的条目可能仍在 TTL 内：补读与轮询一样先失效公开读缓存，否则只会原样返回旧快照。
             page_visibility.install(move || {
                 readiness_generation.set(readiness_generation().saturating_add(1));
-                refresh_generation.set(refresh_generation().saturating_add(1));
+                refresh_public_reads(refresh_generation);
                 check_session.call(SessionRefreshReason::Refresh);
             });
         }
@@ -436,8 +436,8 @@ pub(crate) fn PublicShell() -> Element {
                                     if !reloaded {
                                         manual_refresh_busy.set(false);
                                         manual_refresh_error.set(true);
-                                        let next_refresh = refresh_generation.peek().saturating_add(1);
-                                        refresh_generation.set(next_refresh);
+                                        // 重新加载被拒时补读权威数据：同样先失效缓存，才是真正的重读。
+                                        refresh_public_reads(refresh_generation);
                                     }
                                 });
                             },
