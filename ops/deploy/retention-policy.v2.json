@@ -296,6 +296,7 @@
         "settlement_return_events",
         "settlement_return_actions",
         "settlement_return_takes",
+        "settlement_return_verifications",
         "settlement_fulfillment_dispatches",
         "settlement_recovery_commands",
         "settlement_recovery_health",

@@ -16,7 +16,7 @@ mod swept;
 mod take;
 mod work;
 
-pub(crate) use cases::{open_case, return_case_bound};
+pub(crate) use cases::{current_return_evidence_sql, open_case, return_case_bound};
 pub(crate) use errors::ReturnTransactionError;
 pub(crate) use swept::{
     SweptTakeOwner, lock_swept_take, requeue_swept_take, settle_swept_take, swept_take_owner,

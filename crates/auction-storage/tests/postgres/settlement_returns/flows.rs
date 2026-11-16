@@ -755,6 +755,127 @@ async fn postgres_return_recheck_rebinds_only_with_proof() {
     pool.close().await;
 }
 
+/// 入站证据损坏（缺附件字段）的退件经重新核验改绑后，Take 预期、领回事实、资金返还与详情金额
+/// 都取自追加的核验事实；入站证据原文保持不变。
+#[tokio::test]
+async fn postgres_return_recheck_verified_assets_drive_take_and_detail() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("以运行账号连接");
+    let pool = store.postgres_pool();
+    let (minute, settled_at) = settlement_minute();
+    let sale = insert_sale(pool, 7_600_061, settled_at, 1).await;
+    let delivery = insert_sent_fulfillment(
+        pool,
+        sale.seller_obligation,
+        "settlement_seller_payout",
+        PAYOUT,
+        minute + Duration::minutes(10),
+        "enqueued",
+    )
+    .await;
+    let subject = format!("[RTS] Auction seller payout [{}]", sale.seller_obligation);
+    let corrupted =
+        json!({"obligation_id": sale.seller_obligation.to_string(), "credits": PAYOUT, "cod": 0});
+    let case = insert_inbound(
+        pool,
+        "993061",
+        minute + Duration::minutes(40),
+        Some(("MoogleMail", subject.clone())),
+        corrupted.clone(),
+    )
+    .await;
+    let consumed =
+        store.consume_due_settlement_return(Utc::now()).await.expect("消费").expect("必须消费");
+    assert_eq!(consumed.decision.matched, SettlementReturnMatch::Unbound);
+    handle(&store, case, 1, SettlementReturnAction::Recheck).await;
+    let claim = store
+        .claim_due_return_recheck(Utc::now(), Utc::now() + Duration::minutes(5))
+        .await
+        .expect("领取核验")
+        .expect("必须领取");
+    let progress = store
+        .record_return_recheck(
+            claim,
+            SettlementReturnRecheckOutcome::Observed(SettlementReturnMailObservation {
+                sender: "MoogleMail".to_owned(),
+                subject,
+                body: None,
+                credits: PAYOUT,
+                cod: 0,
+                attachment_ids: Vec::new(),
+                observed_at: Utc::now(),
+            }),
+        )
+        .await
+        .expect("写回核验");
+    assert_eq!(progress.event_kind, "recheck_rebound");
+    let (verified_version, verification): (Option<i64>, serde_json::Value) = sqlx::query_as(
+        "SELECT c.verified_version, v.evidence
+         FROM public.settlement_return_cases c
+         JOIN public.settlement_return_verifications v
+           ON v.return_mail_id = c.return_mail_id AND v.case_version = c.verified_version
+         WHERE c.return_mail_id = $1",
+    )
+    .bind(case)
+    .fetch_one(pool)
+    .await
+    .expect("改绑引用核验事实");
+    assert_eq!(verified_version, Some(progress.case_version));
+    assert_eq!(verification["attachment_ids"], json!([]));
+    let inbound: serde_json::Value =
+        sqlx::query_scalar("SELECT decision_metadata FROM public.inbound_mail WHERE id = $1")
+            .bind(case)
+            .fetch_one(pool)
+            .await
+            .expect("读取入站证据");
+    assert_eq!(inbound, corrupted, "入站证据原文不改写");
+    for statement in [
+        "UPDATE public.settlement_return_verifications SET evidence = evidence WHERE return_mail_id = $1",
+        "DELETE FROM public.settlement_return_verifications WHERE return_mail_id = $1",
+    ] {
+        assert!(
+            sqlx::query(statement).bind(case).execute(pool).await.is_err(),
+            "核验事实只追加：{statement}"
+        );
+    }
+    let detail = store.settlement_return_detail(case).await.expect("改绑后详情");
+    assert_eq!(detail.summary.credits, PAYOUT, "详情金额取自核验事实");
+    assert!(detail.allowed_actions.contains(&SettlementReturnAction::ReclaimAndHold));
+
+    let returned = Returned { sale, delivery, case };
+    let allocation = seed_spent_payout(pool, &returned).await;
+    assert_eq!(
+        handle(&store, case, progress.case_version, SettlementReturnAction::ReclaimAndHold).await,
+        SettlementReturnCaseStatus::TakePending,
+        "领回按核验资产建立 Take，而不是因损坏的入站证据判资产不符"
+    );
+    let (credits, attachments): (i64, Vec<String>) = sqlx::query_as(
+        "SELECT expected_credits, expected_attachment_ids FROM public.settlement_return_actions
+         WHERE return_mail_id = $1",
+    )
+    .bind(case)
+    .fetch_one(pool)
+    .await
+    .expect("读取 Take 预期");
+    assert_eq!((credits, attachments), (PAYOUT, Vec::new()));
+    take_through(&store, case, true).await;
+    let detail = store.settlement_return_detail(case).await.expect("代管后详情");
+    assert_eq!(detail.summary.status, SettlementReturnCaseStatus::Held);
+    assert_eq!(detail.summary.credits, PAYOUT);
+    let custody = detail.custody.expect("代管责任");
+    assert_eq!((custody.credits, custody.equipment_ids.len()), (PAYOUT, 0));
+    let (state, amount): (String, i64) = sqlx::query_as(
+        "SELECT state, amount FROM public.settlement_funding_allocations WHERE id = $1",
+    )
+    .bind(allocation)
+    .fetch_one(pool)
+    .await
+    .expect("读取分配");
+    assert_eq!((state.as_str(), amount), ("available", PAYOUT), "资金返还一次、金额为 M");
+
+    pool.close().await;
+}
+
 /// 新事实表只追加：运行账号能插入，但改写或删除命令、事件、领回、派发历史、资金绑定与资金返还
 /// 都被拒绝。
 #[tokio::test]

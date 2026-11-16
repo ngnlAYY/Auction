@@ -1,11 +1,13 @@
 //! 未绑定退件的只读重新核验：领取待核验案件交给 Worker 读取 Bot 收件箱中的原退件，再以读到的
 //! 发件人、主题、正文事实与资产重新判定。只有重新满足系统来源、资产与唯一原派发绑定时才改绑为
-//! 待决定；否则保持隔离。人工填写的义务或投递不构成证明，证据原文不改写（不变量 6、8）。
+//! 待决定；否则保持隔离。人工填写的义务或投递不构成证明（不变量 6）。读到的完整证据只追加为
+//! 核验事实，入站证据原文不改写；改绑时案件引用这条核验事实，此后 Take 预期、详情金额与巡检
+//! 身份都以它为当前有效证据，不会回落到损坏的入站证据（不变量 8）。
 
 use auction_application::core::ApplicationError;
 use auction_application::settlement::{
-    SettlementReturnFacts, SettlementReturnMatch, SettlementReturnProgress,
-    SettlementReturnRecheckClaim, SettlementReturnRecheckOutcome,
+    SettlementReturnDecision, SettlementReturnFacts, SettlementReturnMatch,
+    SettlementReturnProgress, SettlementReturnRecheckClaim, SettlementReturnRecheckOutcome,
     settlement_return_dispatch_request, system_returned_settlement_obligation_id,
 };
 use auction_domain::SettlementReturnCaseStatus;
@@ -144,10 +146,10 @@ async fn record_once(
                 subject: Some(observation.subject.clone()),
                 return_world: snapshot.world_id.clone(),
                 received_at,
-                metadata,
+                metadata: metadata.clone(),
                 obligation: locked.as_ref().map(|locked| locked.facts.clone()),
             };
-            Some((facts.classify(), locked))
+            Some((facts.classify(), locked, metadata))
         }
         SettlementReturnRecheckOutcome::NotFound { .. } => None,
     };
@@ -168,8 +170,11 @@ async fn record_once(
     {
         return Err(repository_error("结算退件核验领取已失效").into());
     }
+    // 核验事实以本次推进后的案件版本为键，先于案件推进写入：改绑引用它时外键已能成立。
+    let verified_version =
+        case.case_version.checked_add(1).ok_or_else(|| repository_error("结算退件案件版本溢出"))?;
     let (next, kind, details) = match fresh {
-        Some((decision, Some(locked))) if decision.matched.bound() => {
+        Some((decision, Some(locked), metadata)) if decision.matched.bound() => {
             let delivery = locked
                 .facts
                 .delivery
@@ -185,11 +190,22 @@ async fn record_once(
                 )
                 .await?;
             }
+            record_verification(
+                &mut tx,
+                claim.return_mail_id,
+                verified_version,
+                &metadata,
+                decision,
+                Some(delivery.id),
+                observed_at,
+            )
+            .await?;
             let mut next =
                 CaseTransition::from_case(&case, SettlementReturnCaseStatus::AwaitingDecision);
             next.delivery_id = Some(delivery.id);
             next.dispatch_no = i32::try_from(delivery.dispatch_no).ok();
             next.reason_code = decision.reason.as_str().to_owned();
+            next.verified_version = Some(verified_version);
             next.recheck_completed = true;
             (
                 next,
@@ -199,10 +215,21 @@ async fn record_once(
                     "reason_code": decision.reason.as_str(),
                     "delivery_id": delivery.id,
                     "dispatch_no": delivery.dispatch_no,
+                    "verified_version": verified_version,
                 }),
             )
         }
-        Some((decision, _)) => {
+        Some((decision, _, metadata)) => {
+            record_verification(
+                &mut tx,
+                claim.return_mail_id,
+                verified_version,
+                &metadata,
+                decision,
+                None,
+                observed_at,
+            )
+            .await?;
             let mut next =
                 CaseTransition::from_case(&case, SettlementReturnCaseStatus::Quarantined);
             next.recheck_completed = true;
@@ -233,4 +260,32 @@ async fn record_once(
         case_version: version,
         event_kind: kind,
     })
+}
+
+/// 只追加一条核验事实：读到的完整证据与判定；绑定时带唯一原派发。
+async fn record_verification(
+    tx: &mut crate::database::TrackedTransaction<'_, Postgres>,
+    return_mail_id: Uuid,
+    case_version: i64,
+    evidence: &serde_json::Value,
+    decision: SettlementReturnDecision,
+    delivery_id: Option<Uuid>,
+    observed_at: DateTime<Utc>,
+) -> Result<(), ReturnTransactionError> {
+    sqlx::query(
+        r#"INSERT INTO public.settlement_return_verifications
+               (return_mail_id, case_version, evidence, match_state, reason_code, delivery_id,
+                observed_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)"#,
+    )
+    .bind(return_mail_id)
+    .bind(case_version)
+    .bind(evidence)
+    .bind(decision.matched.as_str())
+    .bind(decision.reason.as_str())
+    .bind(delivery_id)
+    .bind(observed_at)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
 }

@@ -15,6 +15,9 @@
 --   4. 补寄上限在建案时冻结进案件行（`resend_limit`，领域常量 3，不含首寄）。
 --   5. 新 delivery 来源 `settlement_return_action` 只做 Take；本地先提交动作与审计，外部 Take 由
 --      投递 Worker 在租约与发送围栏后执行；结果未知不自动重试。
+--   6. 入站证据不改写：未绑定退件经只读重新核验读到的完整证据只追加进
+--      `settlement_return_verifications`（以产生它的案件版本为键）；改绑时案件以 `verified_version`
+--      引用这条核验事实，此后资产与身份都以它为当前有效证据。
 --
 -- 兼容等级 breaking：旧程序不认识新来源 `settlement_return_action`，领取到这类 Take 投递会按未知
 --   来源失败关闭；旧 Worker 也不参与新的同邮件互斥与案件准入。回退旧程序前须先确认没有未终结的
@@ -64,6 +67,8 @@ CREATE TABLE public.settlement_return_cases (
     recheck_claim_token uuid,
     recheck_claim_expires_at timestamptz,
     recheck_count integer NOT NULL DEFAULT 0 CHECK (recheck_count >= 0),
+    -- 改绑所依据的核验事实（其案件版本）；未经核验改绑时为空，当前有效证据即入站证据原文。
+    verified_version bigint CHECK (verified_version IS NULL OR verified_version > 1),
     created_at timestamptz NOT NULL CHECK (isfinite(created_at)),
     updated_at timestamptz NOT NULL CHECK (isfinite(updated_at)),
     closed_at timestamptz,
@@ -85,7 +90,8 @@ CREATE TABLE public.settlement_return_cases (
     ),
     CHECK ((status IN ('resend_pending', 'resent')) = (resend_dispatch_no IS NOT NULL)),
     CHECK ((recheck_claim_token IS NULL) = (recheck_claim_expires_at IS NULL)),
-    CHECK (recheck_claim_token IS NULL OR status = 'recheck_pending')
+    CHECK (recheck_claim_token IS NULL OR status = 'recheck_pending'),
+    CHECK (verified_version IS NULL OR (delivery_id IS NOT NULL AND verified_version <= case_version))
 );
 
 COMMENT ON TABLE public.settlement_return_cases IS
@@ -159,6 +165,33 @@ CREATE TABLE public.settlement_return_events (
     PRIMARY KEY (return_mail_id, case_version),
     CHECK ((command_id IS NULL) = (actor_id IS NULL))
 );
+
+-- 只读重新核验读到的完整证据（只追加）：与入站证据同一严格模型（义务、资产与系统后缀事实），
+-- 以写入它的案件推进版本为键；读不到原退件时不写。入站证据原文保持不变。
+CREATE TABLE public.settlement_return_verifications (
+    return_mail_id uuid NOT NULL
+        REFERENCES public.settlement_return_cases(return_mail_id) ON DELETE RESTRICT,
+    case_version bigint NOT NULL CHECK (case_version > 1),
+    evidence jsonb NOT NULL CHECK (jsonb_typeof(evidence) = 'object'),
+    match_state text NOT NULL CHECK (
+        match_state IN ('untrusted', 'unbound', 'fulfillment_terminal', 'manual_reconcile')
+    ),
+    reason_code text NOT NULL CHECK (reason_code ~ '^[a-z][a-z0-9_]{0,63}$'),
+    -- 核验唯一绑定的原派发；未绑定时为空。
+    delivery_id uuid REFERENCES public.deliveries(id) ON DELETE RESTRICT,
+    observed_at timestamptz NOT NULL CHECK (isfinite(observed_at)),
+    PRIMARY KEY (return_mail_id, case_version),
+    CHECK ((delivery_id IS NOT NULL) = (match_state IN ('fulfillment_terminal', 'manual_reconcile')))
+);
+
+COMMENT ON TABLE public.settlement_return_verifications IS
+    '结算退件只读重新核验读到的完整证据（只追加）；改绑后案件以它为当前有效证据，入站证据原文不变';
+
+ALTER TABLE public.settlement_return_cases
+    ADD CONSTRAINT settlement_return_cases_verified_version_fkey
+    FOREIGN KEY (return_mail_id, verified_version)
+    REFERENCES public.settlement_return_verifications(return_mail_id, case_version)
+    ON DELETE RESTRICT;
 
 CREATE TABLE public.settlement_return_actions (
     return_mail_id uuid PRIMARY KEY
@@ -247,6 +280,13 @@ CREATE TRIGGER settlement_return_events_no_truncate
 BEFORE TRUNCATE ON public.settlement_return_events
 FOR EACH STATEMENT EXECUTE FUNCTION public.reject_settlement_return_fact_mutation();
 
+CREATE TRIGGER settlement_return_verifications_append_only
+BEFORE UPDATE OR DELETE ON public.settlement_return_verifications
+FOR EACH ROW EXECUTE FUNCTION public.reject_settlement_return_fact_mutation();
+CREATE TRIGGER settlement_return_verifications_no_truncate
+BEFORE TRUNCATE ON public.settlement_return_verifications
+FOR EACH STATEMENT EXECUTE FUNCTION public.reject_settlement_return_fact_mutation();
+
 CREATE TRIGGER settlement_return_takes_append_only
 BEFORE UPDATE OR DELETE ON public.settlement_return_takes
 FOR EACH ROW EXECUTE FUNCTION public.reject_settlement_return_fact_mutation();
@@ -288,7 +328,8 @@ SELECT return_mail_id, 1, 'opened', status, jsonb_build_object('backfilled', tru
 FROM public.settlement_return_cases;
 
 -- 运行账号授权：可变投影加入 settlement_return_cases、settlement_return_actions，只追加事实加入
--- settlement_return_commands、settlement_return_events、settlement_return_takes；其余与 000111 的定义逐字一致。
+-- settlement_return_commands、settlement_return_events、settlement_return_takes、
+-- settlement_return_verifications；其余与 000111 的定义逐字一致。
 CREATE OR REPLACE FUNCTION public.apply_auction_runtime_privileges() RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -411,6 +452,7 @@ BEGIN
         settlement_legacy_bot_seller_claims, settlement_legacy_self_reconciliations,
         settlement_recovery_return_consumptions, settlement_return_commands,
         settlement_return_events, settlement_return_evidence, settlement_return_takes,
+        settlement_return_verifications,
         user_blacklist_history
     TO auction_runtime;
 
@@ -441,7 +483,8 @@ VALUES (
         'summary', 'settlement return cases, append-only facts and the settlement_return_action origin',
         'tables', jsonb_build_array(
             'settlement_return_cases', 'settlement_return_commands', 'settlement_return_events',
-            'settlement_return_actions', 'settlement_return_takes'
+            'settlement_return_actions', 'settlement_return_takes',
+            'settlement_return_verifications'
         ),
         'compatibility', 'breaking'
     )

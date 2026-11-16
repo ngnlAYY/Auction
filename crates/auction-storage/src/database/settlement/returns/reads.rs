@@ -18,19 +18,22 @@ use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
 use super::admission::admission_facts;
-use super::cases::load_case;
+use super::cases::{current_return_evidence_sql, load_case};
 use super::errors::ReturnTransactionError;
 use crate::database::TrackedTransaction as Transaction;
 use crate::database::repository_error;
 use crate::database::settlement::fulfillment::recovery_allows_execution_now;
 
-/// 列表与详情共用的摘要投影（别名见 FROM）。
+/// 列表与详情共用的摘要投影（别名见 FROM）；资产取案件当前有效证据（核验改绑后为核验事实）。
 macro_rules! summary_select {
     () => {
-        r#"SELECT c.return_mail_id, c.case_version, c.status, e.match_state, c.reason_code,
+        concat!(
+            r#"SELECT c.return_mail_id, c.case_version, c.status, e.match_state, c.reason_code,
                   c.world_id, i.external_mail_id, i.received_at, c.obligation_id,
                   o.obligation_kind, o.auction_id, o.lot_id, c.delivery_id, c.dispatch_no,
-                  d.recipient, i.decision_metadata, c.plan, c.resend_limit,
+                  d.recipient, "#,
+            current_return_evidence_sql!("c", "i"),
+            r#" AS decision_metadata, c.plan, c.resend_limit,
                   f.dispatch_no AS current_dispatch_no, c.created_at, c.updated_at, c.closed_at
            FROM public.settlement_return_cases AS c
            JOIN public.settlement_return_evidence AS e ON e.return_mail_id = c.return_mail_id
@@ -39,6 +42,7 @@ macro_rules! summary_select {
            LEFT JOIN public.deliveries AS d ON d.id = c.delivery_id
            LEFT JOIN public.settlement_obligation_fulfillments AS f
              ON f.obligation_id = c.obligation_id"#
+        )
     };
 }
 

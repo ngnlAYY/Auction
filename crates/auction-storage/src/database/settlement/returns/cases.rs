@@ -31,11 +31,14 @@ pub(super) struct CaseRow {
     pub(super) resend_limit: i16,
     pub(super) resend_dispatch_no: Option<i32>,
     pub(super) case_version: i64,
+    /// 改绑所依据的核验事实版本；未经核验改绑时为空。
+    pub(super) verified_version: Option<i64>,
     /// 证据的原分类；`untrusted` 永远不能经核验改绑。
     pub(super) match_state: SettlementReturnMatch,
     /// 退件在收件箱中的 MID。
     pub(super) external_mail_id: String,
-    /// 证据原文（`inbound_mail.decision_metadata`）。
+    /// 当前有效证据：经重新核验改绑的案件为其引用的核验事实，否则为入站证据原文
+    /// （`inbound_mail.decision_metadata`，永不改写）。
     pub(super) metadata: Value,
 }
 
@@ -105,16 +108,38 @@ pub(crate) async fn return_case_bound(
     .await
 }
 
+/// 案件当前有效证据的 SQL 表达式（`$case`、`$inbound` 分别为 `settlement_return_cases` 与
+/// `inbound_mail` 的别名）：经重新核验改绑的案件取它引用的核验事实，否则取入站证据原文。资产、
+/// 身份与 Take 预期都只读这一处，核验成功后不会再回落到损坏的入站证据。
+macro_rules! current_return_evidence_sql {
+    ($case:literal, $inbound:literal) => {
+        concat!(
+            "COALESCE((SELECT verified.evidence FROM public.settlement_return_verifications AS verified
+                       WHERE verified.return_mail_id = ",
+            $case,
+            ".return_mail_id AND verified.case_version = ",
+            $case,
+            ".verified_version), ",
+            $inbound,
+            ".decision_metadata)"
+        )
+    };
+}
+pub(crate) use current_return_evidence_sql;
+
 /// 案件投影的 SELECT 片段（别名 `c`、`e`、`i`）。
 macro_rules! case_select {
     () => {
-        r#"SELECT c.return_mail_id, c.world_id, c.obligation_id, c.delivery_id, c.dispatch_no,
+        concat!(
+            r#"SELECT c.return_mail_id, c.world_id, c.obligation_id, c.delivery_id, c.dispatch_no,
                   c.status, c.reason_code, c.plan, c.resend_limit, c.resend_dispatch_no,
-                  c.case_version, e.match_state, i.external_mail_id,
-                  i.decision_metadata
+                  c.case_version, c.verified_version, e.match_state, i.external_mail_id, "#,
+            current_return_evidence_sql!("c", "i"),
+            r#" AS decision_metadata
            FROM public.settlement_return_cases AS c
            JOIN public.settlement_return_evidence AS e ON e.return_mail_id = c.return_mail_id
            JOIN public.inbound_mail AS i ON i.id = c.return_mail_id"#
+        )
     };
 }
 
@@ -155,6 +180,7 @@ fn map_case(row: &sqlx::postgres::PgRow) -> Result<CaseRow, ReturnTransactionErr
         resend_limit: row.try_get("resend_limit")?,
         resend_dispatch_no: row.try_get("resend_dispatch_no")?,
         case_version: row.try_get("case_version")?,
+        verified_version: row.try_get("verified_version")?,
         match_state: SettlementReturnMatch::from_name(&match_state)
             .ok_or_else(|| repository_error("结算退件证据分类无效"))?,
         external_mail_id: row.try_get("external_mail_id")?,
@@ -171,6 +197,8 @@ pub(super) struct CaseTransition {
     pub(super) delivery_id: Option<Uuid>,
     pub(super) dispatch_no: Option<i32>,
     pub(super) reason_code: String,
+    /// 改绑所依据的核验事实版本。
+    pub(super) verified_version: Option<i64>,
     /// 完成一次只读重新核验时计数加一。
     pub(super) recheck_completed: bool,
 }
@@ -185,6 +213,7 @@ impl CaseTransition {
             delivery_id: case.delivery_id,
             dispatch_no: case.dispatch_no,
             reason_code: case.reason_code.clone(),
+            verified_version: case.verified_version,
             recheck_completed: false,
         }
     }
@@ -210,6 +239,7 @@ pub(super) async fn advance_case(
                recheck_claim_token = NULL,
                recheck_claim_expires_at = NULL,
                closed_at = CASE WHEN $10 THEN $11 ELSE NULL END,
+               verified_version = $12,
                case_version = case_version + 1,
                updated_at = $11
            WHERE return_mail_id = $1 AND case_version = $2
@@ -226,6 +256,7 @@ pub(super) async fn advance_case(
     .bind(next.recheck_completed)
     .bind(closed)
     .bind(now)
+    .bind(next.verified_version)
     .fetch_optional(&mut **tx)
     .await?;
     version.ok_or(ReturnTransactionError::Business(SettlementReturnError::Stale))

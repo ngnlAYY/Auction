@@ -52,7 +52,8 @@ pub(super) async fn unproven_sends(
     // 仅旧结算解析既有装备引用；正文和登录 key 不进入维护投影。
     // 先物化轮转前缀，再解析冻结尝试和旧装备引用，避免为本批未处理的后缀执行关联查询。
     let rows: Vec<UnprovenSendRow> = sqlx::query_as(
-        "WITH candidates AS MATERIALIZED (
+        concat!(
+            "WITH candidates AS MATERIALIZED (
             SELECT d.id, d.created_at,
                    CASE WHEN sweep.last_created_at IS NULL
                               OR (d.created_at, d.id) > (sweep.last_created_at, sweep.last_delivery_id)
@@ -113,14 +114,19 @@ pub(super) async fn unproven_sends(
          JOIN public.deliveries d ON d.id = candidates.id
          LEFT JOIN LATERAL public.delivery_current_send_attempt(d.id) attempt ON true
          LEFT JOIN LATERAL public.delivery_current_take_attempt(d.id) take_attempt ON true
-         -- 结算退件 Take 按动作的唯一 Take 投递找回原退件：入站快照的发件人与主题、证据原文。
+         -- 结算退件 Take 按动作的唯一 Take 投递找回原退件：入站快照的发件人与主题、案件当前
+         -- 有效证据（核验改绑后为核验事实）。
          LEFT JOIN LATERAL (
-             SELECT inbound.sender, inbound.subject, inbound.decision_metadata AS evidence
+             SELECT inbound.sender, inbound.subject, ",
+            crate::database::settlement::returns::current_return_evidence_sql!("c", "inbound"),
+            " AS evidence
              FROM public.settlement_return_actions AS action
+             JOIN public.settlement_return_cases AS c ON c.return_mail_id = action.return_mail_id
              JOIN public.inbound_mail AS inbound ON inbound.id = action.return_mail_id
              WHERE d.origin_kind = 'settlement_return_action' AND action.delivery_id = d.id
          ) AS returned ON true
          ORDER BY candidates.sweep_order, candidates.created_at, candidates.id",
+        ),
     )
     .bind(world_id)
     .bind(limit)

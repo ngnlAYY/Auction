@@ -238,6 +238,7 @@ BEGIN
         settlement_legacy_bot_seller_claims, settlement_legacy_self_reconciliations,
         settlement_recovery_return_consumptions, settlement_return_commands,
         settlement_return_events, settlement_return_evidence, settlement_return_takes,
+        settlement_return_verifications,
         user_blacklist_history
     TO auction_runtime;
 
