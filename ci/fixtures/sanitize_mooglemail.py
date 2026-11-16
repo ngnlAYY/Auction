@@ -245,7 +245,7 @@ def manifest(outputs):
     for filename, kind, world, parser, page in SAMPLES:
         source = outputs[filename]
         mids = sorted(set(re.findall(r"mid=(\d+)", html.unescape(source))), key=int)
-        own_mid = re.search(r"-(\d+)(?:-nostate)?\.html$", filename)
+        own_mid = re.search(r"-(\d+)\.html$", filename)
         pairs = []
         if kind.startswith("sent_") and own_mid:
             pairs = ["sent-main.html"]
@@ -254,7 +254,7 @@ def manifest(outputs):
             if "3125357" in filename:
                 pairs.append("readdetail-inbox-3125357.html" if "-read-" in filename else "readdetail-read-3125357.html")
         elif kind in {"read_list", "sent_list"} and world == "main":
-            pairs = [name for name, _, _, _, _ in SAMPLES if any(re.search(r"-" + mid + r"(?:-nostate)?\.html$", name) for mid in mids)]
+            pairs = [name for name, _, _, _, _ in SAMPLES if any(re.search(r"-" + mid + r"\.html$", name) for mid in mids)]
         lines += ["[[fixtures]]", f"file = {quote(filename)}", f"source_file = {quote(filename)}",
                   f"class = {quote(kind)}", f"world = {quote(world)}",
                   f"parser_entry_point = {quote(parser)}", 'sanitization = "见顶层 sanitization；未复制原始页面。"',
@@ -267,12 +267,7 @@ def manifest(outputs):
             lines.append(f"mid = {quote(own_mid.group(1))}")
         if filename == "sentdetail-3125298.html":
             lines.append('pairing_note = "MID3125298：Sent 列表玩家名 13 字符/15 字节，详情完整名 14 字符/16 字节；替身保持前缀关系。"')
-        if "nostate" in filename:
-            lines.append('source_note = "来源目录已有的去状态脚本诊断变体；非独立远端响应，不能当作真实无状态响应证据。"')
         lines.append("")
-    for kind in []:
-        lines += ["[[missing]]", f"class = {quote(kind)}",
-                  'reason = "本地授权来源没有该类别的真实样本；未创建合成替代页。"', ""]
     return "\n".join(lines)
 
 
