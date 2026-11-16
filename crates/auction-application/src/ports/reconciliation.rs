@@ -154,6 +154,16 @@ pub struct SolvencyWorldReport {
     /// 在途待核对现金按原因的笔数与金额（v2），按原因排序；合计等于上面两项。
     #[serde(default)]
     pub in_transit_review_reasons: Vec<SolvencyInTransitReason>,
+    /// 结算退件领回后替原权利人代管的货款与退款（v3）：原权利人的应收不消失，按代管负债计入
+    /// 所需余额，且不再计入上面的待付（二选一计数），也不归为 Bot 自有资金。
+    #[serde(default)]
+    pub custody_count: i64,
+    #[serde(default)]
+    pub custody_credits: i64,
+    /// 余额观察早于本世界最近一次现金领回证明（v3）：观察到的余额尚不含领回的 Credits，结论
+    /// 只能是 `unknown`，等下一次余额观察对齐后再判定。
+    #[serde(default)]
+    pub balance_before_take: bool,
     pub pending_outbound_mail_count: i64,
     pub postage_estimate_credits: i64,
     pub required_credits: i64,

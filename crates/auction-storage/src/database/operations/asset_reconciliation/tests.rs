@@ -8,6 +8,9 @@ use super::*;
 
 fn world(verdict: &str) -> SolvencyWorldReport {
     SolvencyWorldReport {
+        custody_count: 0,
+        custody_credits: 0,
+        balance_before_take: false,
         world: "main".to_owned(),
         pending_seller_payout_count: 0,
         pending_seller_payout_credits: 0,

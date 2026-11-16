@@ -10,6 +10,7 @@
 
 use auction_application::core::RequestHash;
 use auction_application::delivery::{DeliveryAdminAction, DeliveryAdminCommand, DeliveryAdminPort};
+use auction_application::reconciliation::{AssetArmoryObservation, AssetReconciliationStore};
 use auction_application::recovery::RecoveryWorkStore;
 use auction_application::settlement::{
     SettlementDeliveryPreparation, SettlementFulfillmentStore, SettlementReturnAdminPort,
@@ -19,7 +20,7 @@ use auction_application::settlement::{
 };
 use auction_domain::{
     CommandId, SettlementDispatchReference, SettlementReturnAction, SettlementReturnCaseStatus,
-    resend_delivery_id, resend_prepare_command_id,
+    SettlementWorld, resend_delivery_id, resend_prepare_command_id,
 };
 use chrono::{Duration, Utc};
 use serde_json::json;
@@ -683,6 +684,86 @@ async fn postgres_return_facts_are_append_only_and_runtime_accessible() {
         .await,
         4
     );
+
+    pool.close().await;
+}
+
+/// 装备退件的资产位置互斥：退回收件箱时不再计在途，而按待核对原因 `returned_in_inbox_*` 单列；
+/// 领回代管后重新计入应持（`custody_*`），Armory 观察到即不缺失；位置只计一次。
+#[tokio::test]
+async fn postgres_return_reconciliation_tracks_asset_location() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("以运行账号连接");
+    let pool = store.postgres_pool();
+    let (minute, settled_at) = settlement_minute();
+    let sale = insert_sale(pool, 7_600_051, settled_at, 1).await;
+    insert_sent_fulfillment(
+        pool,
+        sale.payment_obligation,
+        "settlement_winner_equipment_cod",
+        0,
+        minute + Duration::minutes(10),
+        "enqueued",
+    )
+    .await;
+    let case = insert_inbound(
+        pool,
+        "993051",
+        minute + Duration::minutes(40),
+        Some((
+            "MoogleMail",
+            format!("[RTS] Auction equipment delivery [{}]", sale.payment_obligation),
+        )),
+        evidence(sale.payment_obligation, 0, &[sale.external_equipment_id.as_str()]),
+    )
+    .await;
+    store.consume_due_settlement_return(Utc::now()).await.expect("消费").expect("必须消费");
+    let observe = |ids: Vec<String>| {
+        vec![
+            AssetArmoryObservation {
+                world: SettlementWorld::Main,
+                observed_at: Utc::now(),
+                equipment_ids: ids,
+                complete: true,
+                failure_code: None,
+            },
+            AssetArmoryObservation {
+                world: SettlementWorld::Isekai,
+                observed_at: Utc::now(),
+                equipment_ids: Vec::new(),
+                complete: true,
+                failure_code: None,
+            },
+        ]
+    };
+    let report = store.reconcile_custody(observe(Vec::new())).await.expect("对账");
+    let main = report.worlds.iter().find(|world| world.world == "main").expect("main");
+    assert_eq!(main.in_transit_count, 0, "退回收件箱不是外发在途");
+    assert!(
+        main.in_transit_review_reasons
+            .iter()
+            .any(|reason| reason.reason == "returned_in_inbox_winner_equipment_cod"),
+        "{:?}",
+        main.in_transit_review_reasons
+    );
+    assert_eq!(main.missing_count, 0, "收件箱中的装备不要求在 Armory");
+
+    assert_eq!(
+        handle(&store, case, 1, SettlementReturnAction::ReclaimAndHold).await,
+        SettlementReturnCaseStatus::TakePending
+    );
+    take_through(&store, case, true).await;
+    let report = store.reconcile_custody(observe(Vec::new())).await.expect("对账");
+    let main = report.worlds.iter().find(|world| world.world == "main").expect("main");
+    assert_eq!((main.in_transit_count, main.in_transit_review_count), (0, 0), "领回后不再在途");
+    assert_eq!(main.missing_count, 1, "代管装备应在 Armory");
+    assert_eq!(main.missing_samples[0].reason, "custody_winner_equipment_cod");
+    let report = store
+        .reconcile_custody(observe(vec![sale.external_equipment_id.clone()]))
+        .await
+        .expect("对账");
+    let main = report.worlds.iter().find(|world| world.world == "main").expect("main");
+    assert_eq!((main.missing_count, main.expected_count), (0, 1), "观察到即按应持计一次");
 
     pool.close().await;
 }

@@ -44,11 +44,16 @@ pub(super) async fn solvency_snapshot(
             row.try_get("pending_outbound_mail_count").map_err(query_failed)?;
         let (in_transit_review_count, in_transit_review_credits, in_transit_review_reasons) =
             review_reasons(&row)?;
+        let custody_count: i64 = row.try_get("custody_count").map_err(query_failed)?;
+        let custody_credits: i64 = row.try_get("custody_credits").map_err(query_failed)?;
+        let balance_before_take: bool = row.try_get("balance_before_take").map_err(query_failed)?;
         let postage_estimate_credits = pending_outbound_mail_count
             .checked_mul(report.postage_rate_credits)
             .ok_or("reconciliation_query_failed")?;
+        // 代管负债与待付二选一计数：领回代管的 Credits 仍属原权利人，必须由余额覆盖。
         let required_credits = pending_seller_payout_credits
             .checked_add(pending_refund_credits)
+            .and_then(|total| total.checked_add(custody_credits))
             .and_then(|total| total.checked_add(postage_estimate_credits))
             .ok_or("reconciliation_query_failed")?;
         let balance_credits: Option<i64> = row.try_get("balance_credits").map_err(query_failed)?;
@@ -69,14 +74,19 @@ pub(super) async fn solvency_snapshot(
             balance_status = "stale".to_owned();
             evidence_status = "stale".to_owned();
         }
-        let (verdict, shortfall_credits) = solvency_verdict(
-            required_credits,
-            balance_credits,
-            &balance_status,
-            &evidence_status,
-            balance_age_seconds,
-            max_age_seconds,
-        );
+        // 余额观察早于最近一次现金领回证明时，观察到的余额尚不含领回的 Credits，不能据此判定。
+        let (verdict, shortfall_credits) = if balance_before_take {
+            ("unknown", 0)
+        } else {
+            solvency_verdict(
+                required_credits,
+                balance_credits,
+                &balance_status,
+                &evidence_status,
+                balance_age_seconds,
+                max_age_seconds,
+            )
+        };
         report.worlds.push(SolvencyWorldReport {
             world: world.to_owned(),
             pending_seller_payout_count,
@@ -90,6 +100,9 @@ pub(super) async fn solvency_snapshot(
             in_transit_review_count,
             in_transit_review_credits,
             in_transit_review_reasons,
+            custody_count,
+            custody_credits,
+            balance_before_take,
             pending_outbound_mail_count,
             postage_estimate_credits,
             required_credits,
