@@ -303,6 +303,33 @@ pub struct OperationsAlertSnapshot {
     pub reconciliation: Option<OperationsAlertReconciliationSnapshot>,
 }
 
+/// 一份来源快照里长期未领取的读取范围。阈值必须取自评估这份快照的同一告警策略；计数与清单
+/// 在同一只读快照、同一次履约分类里得出，不会互相矛盾。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OperationsAlertCollectionOverdueRead {
+    /// 不评估长期未领取：超期件数为 0，不读清单。
+    Skip,
+    /// 只计超期件数（最久寄出时长已在水位里），不读展示清单；Worker 告警评估只需要这些。
+    Count(Duration),
+    /// 计数并读出长期未领取清单，供 Admin 看板展示。
+    CountWithItems(Duration),
+}
+
+impl OperationsAlertCollectionOverdueRead {
+    /// 评估所用的阈值；`Skip` 时没有阈值。
+    pub fn threshold(self) -> Option<Duration> {
+        match self {
+            Self::Skip => None,
+            Self::Count(threshold) | Self::CountWithItems(threshold) => Some(threshold),
+        }
+    }
+
+    /// 是否读出长期未领取清单。
+    pub fn with_items(self) -> bool {
+        matches!(self, Self::CountWithItems(_))
+    }
+}
+
 /// 告警阈值与批次边界。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OperationsAlertPolicy {

@@ -267,12 +267,21 @@ WITH health AS (
     };
 }
 
-/// 待付卖方货款、待执行退款、在途现金、待发出站邮件与最后成功余额观察；分类见
-/// `solvency_cash_cte!`。在途待核对的笔数与金额由 `SOLVENCY_IN_TRANSIT_REVIEW` 按原因读取。
+/// 待付卖方货款、待执行退款、在途现金、在途待核对、待发出站邮件与最后成功余额观察；分类见
+/// `solvency_cash_cte!`。一个世界只展开一次分类：合计与在途待核对的按原因明细读同一份
+/// `classified`，明细以按原因排序的并列数组返回。待发出站邮件按两段状态分别计数再相加，
+/// 各自走投递领取与租约部分索引，不随历史顺序扫描投递表；两段状态互不重叠。
 /// `balance_age_seconds` 用数据库时钟给出余额证据年龄，供报告追加时重新判定是否过期。
 pub(super) const SOLVENCY_WORLD: &str = concat!(
     solvency_cash_cte!(),
-    r#"
+    r#", review AS (
+    SELECT review_reason AS reason,
+           count(*)::bigint AS item_count,
+           COALESCE(sum(amount), 0)::bigint AS credits
+    FROM classified
+    WHERE in_transit_review
+    GROUP BY review_reason
+)
 SELECT
     (SELECT count(*) FROM classified
         WHERE obligation_kind = 'seller_payout' AND pending)
@@ -298,8 +307,18 @@ SELECT
     (SELECT COALESCE(sum(amount), 0)::bigint FROM classified
         WHERE obligation_kind = 'buyer_refund' AND in_transit)
         AS in_transit_refund_credits,
+    (SELECT COALESCE(array_agg(reason ORDER BY reason), '{}') FROM review)
+        AS in_transit_review_reasons,
+    (SELECT COALESCE(array_agg(item_count ORDER BY reason), '{}') FROM review)
+        AS in_transit_review_counts,
+    (SELECT COALESCE(array_agg(credits ORDER BY reason), '{}') FROM review)
+        AS in_transit_review_credits,
     (SELECT count(*) FROM public.deliveries d
-        WHERE d.status IN ('prepared', 'pending', 'claimed', 'sending')
+        WHERE d.status IN ('prepared', 'pending', 'claimed')
+          AND d.payload_operation = 'send'
+          AND COALESCE(d.payload_world, 'main') = $1)
+    + (SELECT count(*) FROM public.deliveries d
+        WHERE d.status = 'sending'
           AND d.payload_operation = 'send'
           AND COALESCE(d.payload_world, 'main') = $1) AS pending_outbound_mail_count,
     health.balance_credits,
@@ -310,21 +329,6 @@ SELECT
         AS balance_age_seconds
 FROM (SELECT 1) AS one
 LEFT JOIN health ON true
-"#,
-);
-
-/// 在途待核对现金按原因的笔数与金额，按原因排序；与 `SOLVENCY_WORLD` 共用同一分类，并在同一
-/// 只读快照事务内读取。
-pub(super) const SOLVENCY_IN_TRANSIT_REVIEW: &str = concat!(
-    solvency_cash_cte!(),
-    r#"
-SELECT review_reason AS reason,
-       count(*)::bigint AS item_count,
-       COALESCE(sum(amount), 0)::bigint AS credits
-FROM classified
-WHERE in_transit_review
-GROUP BY review_reason
-ORDER BY review_reason
 "#,
 );
 

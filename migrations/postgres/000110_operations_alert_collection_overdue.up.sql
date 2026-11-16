@@ -11,6 +11,9 @@
 --   4. 同时补上 000095 漏登记的 scope `reconciliation`：`source_unavailable` 要求 scope 等于
 --      来源名，资产对账报告缺失或读取失败时该信号此前违反 scope CHECK，使整轮 Worker 扫描事务
 --      回滚、所有告警停止更新。只放宽 scope 闭集，identity 规则不变。
+--   5. 新增部分索引 settlement_obligation_fulfillments_open_idx（谓词
+--      execution_state <> 'satisfied'）：告警扫描与 Admin 看板的履约水位只读尚未满足的履约，
+--      已满足的历史不再参与扫描。只提供候选入口，不改变计数口径、金额、状态迁移、锁序或审计。
 --
 -- 等级：breaking。旧程序无法解析新增 kind，读取该行时闭集解析失败；回退须按
 -- RECOVERY.md 处理含 breaking 迁移的版本。
@@ -89,6 +92,11 @@ ALTER TABLE public.operations_alert_signals
         OR (kind = 'reconciliation_stale'
             AND source = 'reconciliation' AND scope IN ('custody', 'solvency'))
     );
+
+-- 履约水位的候选入口：只含尚未满足的履约；履约以义务为主键，索引只存义务标识。
+CREATE INDEX settlement_obligation_fulfillments_open_idx
+    ON public.settlement_obligation_fulfillments (obligation_id)
+    WHERE execution_state <> 'satisfied';
 
 INSERT INTO public.audit_records
     (id, actor_type, actor_id, action, entity_type, entity_id, result, source, metadata)

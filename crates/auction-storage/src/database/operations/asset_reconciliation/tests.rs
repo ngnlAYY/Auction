@@ -465,25 +465,22 @@ async fn postgres_solvency_in_transit_aligns_with_balance_observation()
     assert_eq!(main.try_get::<i64, _>("pending_refund_count")?, 0);
     assert_eq!(main.try_get::<i64, _>("pending_refund_credits")?, 0);
 
-    let review = sqlx::query(query(queries::SOLVENCY_IN_TRANSIT_REVIEW))
-        .bind("main")
-        .fetch_all(&mut *tx)
-        .await?
-        .into_iter()
-        .map(|row| {
-            Ok((
-                row.try_get::<String, _>("reason")?,
-                row.try_get::<i64, _>("item_count")?,
-                row.try_get::<i64, _>("credits")?,
-            ))
-        })
-        .collect::<Result<Vec<_>, sqlx::Error>>()?;
+    // 在途待核对的按原因明细与合计读同一份分类，按原因排序的并列数组返回。
+    let review = (
+        main.try_get::<Vec<String>, _>("in_transit_review_reasons")?,
+        main.try_get::<Vec<i64>, _>("in_transit_review_counts")?,
+        main.try_get::<Vec<i64>, _>("in_transit_review_credits")?,
+    );
     assert_eq!(
         review,
-        [
-            ("obligation_buyer_refund_failed".to_owned(), 1, 500),
-            ("obligation_seller_payout_manual_reconcile".to_owned(), 1, 4_000),
-        ]
+        (
+            vec![
+                "obligation_buyer_refund_failed".to_owned(),
+                "obligation_seller_payout_manual_reconcile".to_owned(),
+            ],
+            vec![1, 1],
+            vec![500, 4_000],
+        )
     );
 
     // 异世界从未观察到余额：已寄出且已支出的 121 也只能按应付计，不能凭空移出。
@@ -492,11 +489,7 @@ async fn postgres_solvency_in_transit_aligns_with_balance_observation()
     assert_eq!(isekai.try_get::<i64, _>("pending_seller_payout_credits")?, 50);
     assert_eq!(isekai.try_get::<i64, _>("in_transit_seller_payout_count")?, 0);
     assert!(isekai.try_get::<Option<i64>, _>("balance_credits")?.is_none());
-    let isekai_review = sqlx::query(query(queries::SOLVENCY_IN_TRANSIT_REVIEW))
-        .bind("isekai")
-        .fetch_all(&mut *tx)
-        .await?;
-    assert!(isekai_review.is_empty());
+    assert!(isekai.try_get::<Vec<String>, _>("in_transit_review_reasons")?.is_empty());
     tx.rollback().await?;
     Ok(())
 }

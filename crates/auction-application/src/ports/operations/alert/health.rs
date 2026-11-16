@@ -11,7 +11,7 @@ use super::delivery::{
     OperationsAlertDispatchErrorCode, OperationsAlertEnqueuedBatch, OperationsAlertObserveCommand,
 };
 use super::digest::valid_health_error_code;
-use super::model::OperationsAlertSnapshot;
+use super::model::{OperationsAlertCollectionOverdueRead, OperationsAlertSnapshot};
 use super::signals::OperationsAlertError;
 use super::webhook::{
     OperationsAlertWebhookClaimRequest, OperationsAlertWebhookDispatch,
@@ -133,13 +133,13 @@ impl OperationsAlertHealth {
 
 /// 从数据库/observability owner 读取告警来源的窄端口。
 pub trait OperationsAlertSourceReader: Send + Sync {
-    /// `collection_overdue_after` 是长期未领取阈值，调用方必须取自它评估这份快照所用的同一告警
-    /// 策略；履约快照的超期件数与长期未领取清单都按它在同一只读快照内计算。`None` 表示不评估
-    /// 长期未领取：超期件数为 0、清单为空。
+    /// `collection` 是长期未领取的读取范围，阈值必须取自调用方评估这份快照所用的同一告警策略；
+    /// 超期件数与清单都按它在同一只读快照内计算。只有 Admin 看板需要清单，Worker 告警评估只读
+    /// 计数。
     fn snapshot(
         &self,
         now: DateTime<Utc>,
-        collection_overdue_after: Option<Duration>,
+        collection: OperationsAlertCollectionOverdueRead,
     ) -> ApplicationFuture<'_, OperationsAlertSnapshot>;
 }
 

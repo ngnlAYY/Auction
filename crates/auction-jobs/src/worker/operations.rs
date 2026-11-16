@@ -13,11 +13,12 @@ use auction_application::mail::{
     MailNotificationTemplate,
 };
 use auction_application::operations::{
-    MAX_OPERATIONS_ALERT_WEBHOOK_ATTEMPTS, OperationsAlertDispatchErrorCode, OperationsAlertError,
-    OperationsAlertObserveCommand, OperationsAlertPolicy, OperationsAlertSource,
-    OperationsAlertSourceReader, OperationsAlertStore, OperationsAlertTarget,
-    OperationsAlertWebhookClaimRequest, OperationsAlertWebhookFinish,
-    OperationsAlertWebhookOutcome, OperationsAlertWebhookSender, evaluate_snapshot, request_hash,
+    MAX_OPERATIONS_ALERT_WEBHOOK_ATTEMPTS, OperationsAlertCollectionOverdueRead,
+    OperationsAlertDispatchErrorCode, OperationsAlertError, OperationsAlertObserveCommand,
+    OperationsAlertPolicy, OperationsAlertSource, OperationsAlertSourceReader,
+    OperationsAlertStore, OperationsAlertTarget, OperationsAlertWebhookClaimRequest,
+    OperationsAlertWebhookFinish, OperationsAlertWebhookOutcome, OperationsAlertWebhookSender,
+    evaluate_snapshot, request_hash,
 };
 use auction_domain::CommandId;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
@@ -123,14 +124,14 @@ impl OperationsAlertRuntime {
         &self,
         now: DateTime<Utc>,
     ) -> Vec<auction_application::operations::OperationsAlertSourceObservation> {
-        // 长期未领取的超期件数与评估使用同一策略阈值。
-        let collection_overdue_after =
-            Some(self.policy.fulfillment_collection_overdue_age_threshold);
-        let source_result = tokio::time::timeout(
-            self.policy.source_timeout,
-            self.source.snapshot(now, collection_overdue_after),
-        )
-        .await;
+        // 长期未领取的超期件数与评估使用同一策略阈值；告警只需计数与最久寄出时长，不读
+        // Admin 展示清单。
+        let collection = OperationsAlertCollectionOverdueRead::Count(
+            self.policy.fulfillment_collection_overdue_age_threshold,
+        );
+        let source_result =
+            tokio::time::timeout(self.policy.source_timeout, self.source.snapshot(now, collection))
+                .await;
         let snapshot = match source_result {
             Ok(Ok(snapshot)) => snapshot,
             Ok(Err(error)) => {

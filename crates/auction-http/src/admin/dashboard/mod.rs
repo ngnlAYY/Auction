@@ -9,7 +9,8 @@ use std::net::SocketAddr;
 
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError, SafeErrorKind};
 use auction_application::operations::{
-    WorkerControlCondition, WorkerControlExternalAccounts, WorkerControlStatus,
+    OperationsAlertCollectionOverdueRead, WorkerControlCondition, WorkerControlExternalAccounts,
+    WorkerControlStatus,
 };
 use auction_contracts::{AdminDashboardSectionResponse, ApiResponse};
 use auction_observability::HealthError;
@@ -117,13 +118,17 @@ pub(crate) async fn get(
         }
     };
     // 长期未领取按 Admin 生效的告警策略阈值读取，与分区降级判定同一策略；没有策略时不评估。
+    // 清单只给看板展示，与计数在同一只读快照里读出。
     let alert_policy = state.operations_alert_policy();
-    let collection_overdue_after =
-        alert_policy.map(|policy| policy.fulfillment_collection_overdue_age_threshold);
+    let collection = alert_policy.map_or(OperationsAlertCollectionOverdueRead::Skip, |policy| {
+        OperationsAlertCollectionOverdueRead::CountWithItems(
+            policy.fulfillment_collection_overdue_age_threshold,
+        )
+    });
     let owner_snapshot = async {
         match state.operations_alert_source() {
             Some(port) => port
-                .snapshot(chrono::Utc::now(), collection_overdue_after)
+                .snapshot(chrono::Utc::now(), collection)
                 .await
                 .inspect_err(|cause| {
                     diagnostics::warn(

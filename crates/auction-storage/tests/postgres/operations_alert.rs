@@ -10,8 +10,8 @@ use std::time::Duration;
 use auction_application::admin::AdminMailReader;
 use auction_application::forum::ForumReplyStore;
 use auction_application::operations::{
-    OperationsAlertClaimRequest, OperationsAlertConsole, OperationsAlertKind,
-    OperationsAlertPolicy, OperationsAlertSource, OperationsAlertSourceReader,
+    OperationsAlertClaimRequest, OperationsAlertCollectionOverdueRead, OperationsAlertConsole,
+    OperationsAlertKind, OperationsAlertPolicy, OperationsAlertSource, OperationsAlertSourceReader,
     OperationsAlertStore, OperationsAlertTarget, evaluate_snapshot,
 };
 use auction_storage::postgres_expected_migration_version;
@@ -179,7 +179,10 @@ async fn postgres_operations_alert_new_sources_read_quiet_watermarks() {
     let store = database.store().await.expect("连接克隆测试数据库");
 
     // 空库上新增来源的读取查询必须真实执行，并返回零水位而不是来源不可用。
-    let snapshot = store.snapshot(Utc::now(), None).await.expect("读取告警来源快照");
+    let snapshot = store
+        .snapshot(Utc::now(), OperationsAlertCollectionOverdueRead::Skip)
+        .await
+        .expect("读取告警来源快照");
     let mail = snapshot.mail.expect("收件轮询水位必须可读");
     assert_eq!(mail.last_poll_age_seconds, 0);
     assert_eq!(mail.consecutive_failures, 0);
@@ -463,7 +466,10 @@ async fn postgres_payment_mail_unsent_counts_awaiting_payment_after_deadline() {
     .await
     .expect("写入测试恢复");
 
-    let snapshot = store.snapshot(now, None).await.expect("读取告警快照");
+    let snapshot = store
+        .snapshot(now, OperationsAlertCollectionOverdueRead::Skip)
+        .await
+        .expect("读取告警快照");
     let recovery = snapshot.recovery.expect("恢复水位");
     assert_eq!(recovery.payment_overdue_count, 0);
     assert_eq!(recovery.payment_mail_unsent_count, 1);
@@ -640,7 +646,10 @@ async fn postgres_season_alert_counts_old_outstanding_obligations_before_future_
     .await
     .expect("写入换季测试义务");
 
-    let snapshot = store.snapshot(now, None).await.expect("读取换季告警快照");
+    let snapshot = store
+        .snapshot(now, OperationsAlertCollectionOverdueRead::Skip)
+        .await
+        .expect("读取换季告警快照");
     let forum = snapshot.forum.expect("论坛快照");
     assert_eq!(forum.remote_page_count, Some(9), "论坛页数只能读取可扫描场次");
     assert_eq!(forum.remote_page_limit, Some(10), "论坛页数必须携带有效上限");
@@ -663,7 +672,10 @@ async fn postgres_season_alert_counts_old_outstanding_obligations_before_future_
     .await
     .expect("读取论坛业务更新时间");
     assert_eq!(updated_before, updated_after, "页数观察不能重置论坛业务失败年龄");
-    let snapshot = store.snapshot(now, None).await.expect("读取告警快照");
+    let snapshot = store
+        .snapshot(now, OperationsAlertCollectionOverdueRead::Skip)
+        .await
+        .expect("读取告警快照");
     let forum = snapshot.forum.expect("论坛快照");
     assert_eq!(forum.remote_page_count, Some(10));
     assert_eq!(forum.remote_page_limit, Some(10));
@@ -673,7 +685,10 @@ async fn postgres_season_alert_counts_old_outstanding_obligations_before_future_
         .record_topic_page_count(auction_domain::AuctionId::from_uuid(live_auction), 12, 10)
         .await
         .expect("记录超限论坛页数");
-    let snapshot = store.snapshot(now, None).await.expect("读取告警快照");
+    let snapshot = store
+        .snapshot(now, OperationsAlertCollectionOverdueRead::Skip)
+        .await
+        .expect("读取告警快照");
     let forum = snapshot.forum.expect("论坛快照");
     assert_eq!(forum.remote_page_count, Some(12));
     assert_eq!(forum.remote_page_limit, Some(10));
@@ -689,7 +704,10 @@ async fn postgres_season_alert_counts_old_outstanding_obligations_before_future_
     .execute(pool)
     .await
     .expect("设置过期论坛页数观察");
-    let snapshot = store.snapshot(now, None).await.expect("读取告警快照");
+    let snapshot = store
+        .snapshot(now, OperationsAlertCollectionOverdueRead::Skip)
+        .await
+        .expect("读取告警快照");
     assert_eq!(
         snapshot.forum.expect("论坛快照").remote_page_count,
         None,
@@ -730,7 +748,10 @@ async fn postgres_season_alert_counts_old_outstanding_obligations_before_future_
     .execute(pool)
     .await
     .expect("写入换季 contingent 退款");
-    let snapshot = store.snapshot(now, None).await.expect("读取换季告警快照");
+    let snapshot = store
+        .snapshot(now, OperationsAlertCollectionOverdueRead::Skip)
+        .await
+        .expect("读取换季告警快照");
     assert_eq!(
         snapshot.lifecycle.expect("生命周期水位").season_obligations_pending,
         1,
@@ -766,7 +787,10 @@ async fn postgres_season_alert_counts_old_outstanding_obligations_before_future_
     .execute(pool)
     .await
     .expect("写入换季人工对账 fulfillment");
-    let snapshot = store.snapshot(now, None).await.expect("读取换季告警快照");
+    let snapshot = store
+        .snapshot(now, OperationsAlertCollectionOverdueRead::Skip)
+        .await
+        .expect("读取换季告警快照");
     assert_eq!(
         snapshot.lifecycle.expect("生命周期水位").season_obligations_pending,
         2,
@@ -801,7 +825,10 @@ async fn postgres_season_alert_counts_old_outstanding_obligations_before_future_
     .execute(pool)
     .await
     .expect("写入换季 failed fulfillment");
-    let snapshot = store.snapshot(now, None).await.expect("读取换季告警快照");
+    let snapshot = store
+        .snapshot(now, OperationsAlertCollectionOverdueRead::Skip)
+        .await
+        .expect("读取换季告警快照");
     assert_eq!(
         snapshot.lifecycle.expect("生命周期水位").season_obligations_pending,
         3,
@@ -876,7 +903,10 @@ async fn postgres_sent_page_count_is_scoped_to_current_credential_and_recent_sca
     .await
     .expect("写入邮件轮询状态");
 
-    let snapshot = store.snapshot(now, None).await.expect("读取告警快照");
+    let snapshot = store
+        .snapshot(now, OperationsAlertCollectionOverdueRead::Skip)
+        .await
+        .expect("读取告警快照");
     let mail = snapshot.mail.as_ref().expect("邮件快照");
     assert_eq!(mail.sent_pages_scanned, Some(16), "只能读取当前 active 凭据的完整枚举页数");
     assert_eq!(mail.sent_page_limit, Some(20), "Sent 页数必须携带有效上限");
@@ -892,7 +922,10 @@ async fn postgres_sent_page_count_is_scoped_to_current_credential_and_recent_sca
     .execute(pool)
     .await
     .expect("设置过期页数观察");
-    let snapshot = store.snapshot(now, None).await.expect("读取告警快照");
+    let snapshot = store
+        .snapshot(now, OperationsAlertCollectionOverdueRead::Skip)
+        .await
+        .expect("读取告警快照");
     assert_eq!(
         snapshot.mail.as_ref().expect("邮件快照").sent_pages_scanned,
         None,
@@ -911,14 +944,20 @@ async fn postgres_sent_page_count_is_scoped_to_current_credential_and_recent_sca
     };
     use auction_application::mail::MoogleMailboxEvidenceStore;
     store.record_sent_pages(&observation).await.expect("记录页数观察");
-    let snapshot = store.snapshot(now, None).await.expect("读取告警快照");
+    let snapshot = store
+        .snapshot(now, OperationsAlertCollectionOverdueRead::Skip)
+        .await
+        .expect("读取告警快照");
     assert_eq!(snapshot.mail.as_ref().expect("邮件快照").sent_pages_scanned, Some(17));
 
     let mut stale = observation.clone();
     stale.pages_scanned = 3;
     stale.observed_at = now - chrono::Duration::days(1);
     store.record_sent_pages(&stale).await.expect("记录过期页数观察");
-    let snapshot = store.snapshot(now, None).await.expect("读取告警快照");
+    let snapshot = store
+        .snapshot(now, OperationsAlertCollectionOverdueRead::Skip)
+        .await
+        .expect("读取告警快照");
     assert_eq!(
         snapshot.mail.as_ref().expect("邮件快照").sent_pages_scanned,
         Some(17),
@@ -940,7 +979,10 @@ async fn postgres_sent_page_count_is_scoped_to_current_credential_and_recent_sca
         .save(&key, &MailScanCheckpoint { watermark: None, last_full_scan_at: Some(now) })
         .await
         .expect("推进检查点作用域");
-    let snapshot = store.snapshot(now, None).await.expect("读取告警快照");
+    let snapshot = store
+        .snapshot(now, OperationsAlertCollectionOverdueRead::Skip)
+        .await
+        .expect("读取告警快照");
     assert_eq!(
         snapshot.mail.as_ref().expect("邮件快照").sent_pages_scanned,
         None,

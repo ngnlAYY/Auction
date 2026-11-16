@@ -42,28 +42,8 @@ pub(super) async fn solvency_snapshot(
             row.try_get("in_transit_refund_credits").map_err(query_failed)?;
         let pending_outbound_mail_count: i64 =
             row.try_get("pending_outbound_mail_count").map_err(query_failed)?;
-        let review_rows = sqlx::query(queries::SOLVENCY_IN_TRANSIT_REVIEW)
-            .bind(world)
-            .fetch_all(&mut *transaction)
-            .await
-            .map_err(query_failed)?;
-        let mut in_transit_review_count = 0_i64;
-        let mut in_transit_review_credits = 0_i64;
-        let mut in_transit_review_reasons = Vec::with_capacity(review_rows.len());
-        for review in review_rows {
-            let reason = SolvencyInTransitReason {
-                reason: review.try_get("reason").map_err(query_failed)?,
-                count: review.try_get("item_count").map_err(query_failed)?,
-                credits: review.try_get("credits").map_err(query_failed)?,
-            };
-            in_transit_review_count = in_transit_review_count
-                .checked_add(reason.count)
-                .ok_or("reconciliation_query_failed")?;
-            in_transit_review_credits = in_transit_review_credits
-                .checked_add(reason.credits)
-                .ok_or("reconciliation_query_failed")?;
-            in_transit_review_reasons.push(reason);
-        }
+        let (in_transit_review_count, in_transit_review_credits, in_transit_review_reasons) =
+            review_reasons(&row)?;
         let postage_estimate_credits = pending_outbound_mail_count
             .checked_mul(report.postage_rate_credits)
             .ok_or("reconciliation_query_failed")?;
@@ -122,6 +102,28 @@ pub(super) async fn solvency_snapshot(
         });
     }
     transaction.commit().await.map_err(snapshot_unavailable)
+}
+
+/// 在途待核对的按原因明细：同一行里按原因排序的并列数组，逐项拼回并累计笔数与金额；数组长度
+/// 不一致或累计溢出时失败关闭。
+fn review_reasons(
+    row: &sqlx::postgres::PgRow,
+) -> Result<(i64, i64, Vec<SolvencyInTransitReason>), &'static str> {
+    let reasons: Vec<String> = row.try_get("in_transit_review_reasons").map_err(query_failed)?;
+    let counts: Vec<i64> = row.try_get("in_transit_review_counts").map_err(query_failed)?;
+    let credits: Vec<i64> = row.try_get("in_transit_review_credits").map_err(query_failed)?;
+    if counts.len() != reasons.len() || credits.len() != reasons.len() {
+        return Err("reconciliation_query_failed");
+    }
+    let mut total_count = 0_i64;
+    let mut total_credits = 0_i64;
+    let mut details = Vec::with_capacity(reasons.len());
+    for ((reason, count), credits) in reasons.into_iter().zip(counts).zip(credits) {
+        total_count = total_count.checked_add(count).ok_or("reconciliation_query_failed")?;
+        total_credits = total_credits.checked_add(credits).ok_or("reconciliation_query_failed")?;
+        details.push(SolvencyInTransitReason { reason, count, credits });
+    }
+    Ok((total_count, total_credits, details))
 }
 
 /// 余额已被成功观察且未过期时才允许判定；其余情况一律 `unknown`，不以缺失值当作足够。

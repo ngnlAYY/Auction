@@ -7,11 +7,11 @@ use std::time::Duration;
 use auction_application::core::ApplicationError;
 use auction_application::core::ApplicationFuture;
 use auction_application::operations::{
-    OperationsAlertBatchClaim, OperationsAlertClaimRequest, OperationsAlertDeliveryStatus,
-    OperationsAlertDispatchErrorCode, OperationsAlertEnqueuedBatch, OperationsAlertError,
-    OperationsAlertHealth, OperationsAlertObserveCommand, OperationsAlertRuntimeStatus,
-    OperationsAlertSnapshot, OperationsAlertSourceReader, OperationsAlertStore,
-    OperationsAlertWebhookClaimRequest, OperationsAlertWebhookDispatch,
+    OperationsAlertBatchClaim, OperationsAlertClaimRequest, OperationsAlertCollectionOverdueRead,
+    OperationsAlertDeliveryStatus, OperationsAlertDispatchErrorCode, OperationsAlertEnqueuedBatch,
+    OperationsAlertError, OperationsAlertHealth, OperationsAlertObserveCommand,
+    OperationsAlertRuntimeStatus, OperationsAlertSnapshot, OperationsAlertSourceReader,
+    OperationsAlertStore, OperationsAlertWebhookClaimRequest, OperationsAlertWebhookDispatch,
     OperationsAlertWebhookFinish,
 };
 use chrono::{DateTime, Utc};
@@ -49,13 +49,13 @@ impl OperationsAlertSourceReader for DatabaseStore {
     fn snapshot(
         &self,
         now: DateTime<Utc>,
-        collection_overdue_after: Option<Duration>,
+        collection: OperationsAlertCollectionOverdueRead,
     ) -> ApplicationFuture<'_, OperationsAlertSnapshot> {
         Box::pin(async move {
             if now.timestamp_nanos_opt().is_none() {
                 return Err(storage_error("operations alert 观察时间无效"));
             }
-            let snapshot = snapshot_postgres(self, now, collection_overdue_after).await?;
+            let snapshot = snapshot_postgres(self, now, collection).await?;
             apply_read_mode(self, now, snapshot).await
         })
     }

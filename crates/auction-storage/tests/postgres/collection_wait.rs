@@ -19,9 +19,9 @@
 use std::time::Duration as StdDuration;
 
 use auction_application::operations::{
-    OperationsAlertKind, OperationsAlertObserveCommand, OperationsAlertPolicy,
-    OperationsAlertRuntimeStatus, OperationsAlertSource, OperationsAlertSourceReader,
-    OperationsAlertStore, evaluate_snapshot,
+    OperationsAlertCollectionOverdueRead, OperationsAlertKind, OperationsAlertObserveCommand,
+    OperationsAlertPolicy, OperationsAlertRuntimeStatus, OperationsAlertSource,
+    OperationsAlertSourceReader, OperationsAlertStore, evaluate_snapshot,
 };
 use auction_application::reconciliation::{
     AssetArmoryObservation, AssetReconciliationStore, CustodyInTransitReason, CustodyMissingSample,
@@ -161,6 +161,19 @@ async fn seed_obligation(
     amount: i64,
     prerequisite: Option<Uuid>,
 ) -> Uuid {
+    seed_obligation_in_state(pool, auction, lot, (kind, "ready"), amount, prerequisite).await
+}
+
+/// 按指定业务状态写入义务；`identity` 是（义务种类、业务状态）。
+async fn seed_obligation_in_state(
+    pool: &PgPool,
+    auction: &Auction,
+    lot: &Lot,
+    identity: (&str, &str),
+    amount: i64,
+    prerequisite: Option<Uuid>,
+) -> Uuid {
+    let (kind, business_state) = identity;
     let id = stable_id(SEED, &format!("{}-{kind}", lot.id));
     let buyer = matches!(kind, "winner_equipment_cod" | "buyer_refund");
     sqlx::query(
@@ -169,7 +182,7 @@ async fn seed_obligation(
              obligation_kind, business_state, recipient_user_id, recipient_game_identity,
              amount, carrier_credit, equipment_id, prerequisite_obligation_id, created_at,
              updated_at)
-         VALUES ($1, $2, $3, 'main', $4, 1, $5, 'ready', $6, $7, $8, 0, $9, $10,
+         VALUES ($1, $2, $3, 'main', $4, 1, $5, $11, $6, $7, $8, 0, $9, $10,
                  now() - interval '10 days', now() - interval '10 days')",
     )
     .bind(id)
@@ -182,6 +195,7 @@ async fn seed_obligation(
     .bind(amount)
     .bind(lot.equipment_id)
     .bind(prerequisite)
+    .bind(business_state)
     .execute(pool)
     .await
     .expect("写入测试义务");
@@ -423,7 +437,10 @@ async fn postgres_collection_wait_snapshot_separates_awaiting_from_backlog() {
     seed_collection_wait(store.postgres_pool(), now).await;
 
     let threshold = policy().fulfillment_collection_overdue_age_threshold;
-    let snapshot = store.snapshot(now, Some(threshold)).await.expect("读取告警快照");
+    let snapshot = store
+        .snapshot(now, OperationsAlertCollectionOverdueRead::CountWithItems(threshold))
+        .await
+        .expect("读取告警快照");
     let fulfillment = snapshot.fulfillment.expect("履约水位");
     assert_eq!(fulfillment.collection_overdue, 1, "只有寄出 8 天的货款达到 72 小时阈值");
     let payout = stable_id(SEED, &format!("{}-seller_payout", stable_id(SEED, "lot-1")));
@@ -439,7 +456,17 @@ async fn postgres_collection_wait_snapshot_separates_awaiting_from_backlog() {
     assert!(item.last_read_failed, "货款最近一次读取失败");
     assert_eq!(item.age_seconds, fulfillment.oldest_awaiting_collection_age_seconds);
     assert!(item.sent_at <= now - Duration::days(8));
-    let unevaluated = store.snapshot(now, None).await.expect("读取告警快照");
+    // Worker 告警评估只读计数：水位与带清单的读取逐字段相同，但不读展示清单。
+    let counted = store
+        .snapshot(now, OperationsAlertCollectionOverdueRead::Count(threshold))
+        .await
+        .expect("读取告警快照");
+    assert_eq!(counted.fulfillment, Some(fulfillment), "只读计数不改变水位");
+    assert!(counted.collection_overdue_items.is_empty(), "Worker 不读长期未领取清单");
+    let unevaluated = store
+        .snapshot(now, OperationsAlertCollectionOverdueRead::Skip)
+        .await
+        .expect("读取告警快照");
     assert_eq!(unevaluated.fulfillment.map(|value| value.collection_overdue), Some(0));
     assert!(unevaluated.collection_overdue_items.is_empty());
     assert_eq!(fulfillment.pending, 2, "未寄出货款与 COD 仍是待处理");
@@ -470,6 +497,100 @@ async fn postgres_collection_wait_snapshot_separates_awaiting_from_backlog() {
     store.postgres_pool().close().await;
 }
 
+/// 履约水位只读活动义务：已满足的历史与从未激活的或有退款不计入任何分组；缺少履约行的受阻
+/// 货款（前置已满足）计为受阻；前置义务缺少履约行时货款按等待前置计；或有退款的履约失败仍计入
+/// 失败。口径与改写前逐字段相同，只是扫描范围不再覆盖全部历史。
+#[tokio::test]
+async fn postgres_collection_wait_snapshot_reads_only_live_obligations() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("以运行账号连接");
+    let pool = store.postgres_pool();
+    let now = Utc::now();
+    let auction = seed_auction(pool, now).await;
+    // 历史：COD 与货款都已满足，或有退款从未激活。
+    let history = seed_lot(pool, &auction, 1, true, "9400201").await;
+    let cod = seed_obligation(pool, &auction, &history, "winner_equipment_cod", 1_000, None).await;
+    seed_fulfillment(pool, cod, "satisfied", None, None).await;
+    let payout = seed_obligation(pool, &auction, &history, "seller_payout", 900, Some(cod)).await;
+    let delivery = seed_delivery(pool, payout, 900, Some(now - Duration::days(9)), 700_201).await;
+    seed_fulfillment(pool, payout, "satisfied", Some(delivery), None).await;
+    let refund = seed_obligation_in_state(
+        pool,
+        &auction,
+        &history,
+        ("buyer_refund", "contingent"),
+        1_000,
+        Some(cod),
+    )
+    .await;
+    seed_fulfillment(pool, refund, "pending", None, None).await;
+    // 受阻货款缺少履约行，前置已满足：计为受阻。
+    let blocked = seed_lot(pool, &auction, 2, true, "9400202").await;
+    let cod = seed_obligation(pool, &auction, &blocked, "winner_equipment_cod", 1_000, None).await;
+    seed_fulfillment(pool, cod, "satisfied", None, None).await;
+    seed_obligation_in_state(
+        pool,
+        &auction,
+        &blocked,
+        ("seller_payout", "blocked"),
+        900,
+        Some(cod),
+    )
+    .await;
+    // 前置 COD 缺少履约行：货款按等待前置计，不是积压。
+    let waiting = seed_lot(pool, &auction, 3, true, "9400203").await;
+    let cod = seed_obligation(pool, &auction, &waiting, "winner_equipment_cod", 1_000, None).await;
+    let payout = seed_obligation(pool, &auction, &waiting, "seller_payout", 900, Some(cod)).await;
+    seed_fulfillment(pool, payout, "pending", None, None).await;
+    // 或有退款的履约失败：仍计入失败。
+    let failed = seed_lot(pool, &auction, 4, true, "9400204").await;
+    let cod = seed_obligation(pool, &auction, &failed, "winner_equipment_cod", 1_000, None).await;
+    seed_fulfillment(pool, cod, "satisfied", None, None).await;
+    let refund = seed_obligation_in_state(
+        pool,
+        &auction,
+        &failed,
+        ("buyer_refund", "contingent"),
+        1_000,
+        Some(cod),
+    )
+    .await;
+    seed_fulfillment(pool, refund, "failed", None, Some("evidence_mismatch")).await;
+
+    let snapshot = store
+        .snapshot(now, OperationsAlertCollectionOverdueRead::Skip)
+        .await
+        .expect("读取告警快照");
+    let fulfillment = snapshot.fulfillment.expect("履约水位");
+    assert_eq!(
+        (
+            fulfillment.pending,
+            fulfillment.blocked,
+            fulfillment.failed,
+            fulfillment.manual_reconcile,
+            fulfillment.waiting_payment,
+            fulfillment.waiting_prerequisite,
+            fulfillment.awaiting_collection,
+        ),
+        (0, 1, 1, 0, 0, 1, 0)
+    );
+    let ten_days = Duration::days(10).num_seconds();
+    assert!(
+        (ten_days - 120..ten_days + 120).contains(&fulfillment.oldest_backlog_age_seconds),
+        "缺少履约行的受阻货款按义务创建时刻计积压年龄：{}",
+        fulfillment.oldest_backlog_age_seconds
+    );
+    let nine_days = Duration::days(9).num_seconds();
+    assert!(
+        (nine_days - 120..nine_days + 120)
+            .contains(&fulfillment.oldest_prerequisite_wait_age_seconds),
+        "等待前置按履约创建时刻计年龄：{}",
+        fulfillment.oldest_prerequisite_wait_age_seconds
+    );
+
+    pool.close().await;
+}
+
 /// 长期未领取清单的拍品编号取分类内编号：混合类别的场次里，全场第 100 件、盾牌分类第 2 件的
 /// 货款已寄出 8 天，清单给出（`Shield`, 2），页面据此显示 `Shd02`，而不是按全场编号显示
 /// `Shd100`；全场第 7 件、单手分类第 1 件的流拍退回寄出 9 天，按寄出最早排在前面。
@@ -493,7 +614,10 @@ async fn postgres_collection_wait_overdue_list_uses_category_lot_number() {
     seed_fulfillment(pool, unsold, "enqueued", Some(delivery), Some("evidence_not_observed")).await;
 
     let threshold = policy().fulfillment_collection_overdue_age_threshold;
-    let snapshot = store.snapshot(now, Some(threshold)).await.expect("读取告警快照");
+    let snapshot = store
+        .snapshot(now, OperationsAlertCollectionOverdueRead::CountWithItems(threshold))
+        .await
+        .expect("读取告警快照");
     assert_eq!(snapshot.fulfillment.map(|value| value.collection_overdue), Some(2));
     let numbering = snapshot
         .collection_overdue_items
@@ -596,7 +720,10 @@ async fn postgres_collection_wait_reports_sent_assets_in_transit() {
     let latest = store.latest_asset_reports().await.expect("读取最近报告");
     assert_eq!(latest.custody.as_ref(), Some(&custody));
     assert_eq!(latest.solvency.as_ref(), Some(&solvency));
-    let snapshot = store.snapshot(Utc::now(), None).await.expect("读取告警快照");
+    let snapshot = store
+        .snapshot(Utc::now(), OperationsAlertCollectionOverdueRead::Skip)
+        .await
+        .expect("读取告警快照");
     let reconciliation = snapshot.reconciliation.expect("对账水位");
     let main = reconciliation.worlds.iter().find(|world| world.world == "main").expect("main");
     assert_eq!(
@@ -877,7 +1004,10 @@ async fn postgres_collection_wait_overdue_alert_triggers_and_resolves() {
         let store = &store;
         async move {
             let threshold = policy().fulfillment_collection_overdue_age_threshold;
-            let snapshot = store.snapshot(at, Some(threshold)).await.expect("读取告警快照");
+            let snapshot = store
+                .snapshot(at, OperationsAlertCollectionOverdueRead::CountWithItems(threshold))
+                .await
+                .expect("读取告警快照");
             let observations = evaluate_snapshot(&snapshot, &policy()).expect("扫描评估");
             store
                 .observe(OperationsAlertObserveCommand {

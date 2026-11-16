@@ -8,7 +8,8 @@
 use std::sync::{Arc, Mutex};
 
 use auction_application::operations::{
-    AuditFailureMode, DispositionReadMode, OperationsAlertSnapshot, OperationsAlertSourceReader,
+    AuditFailureMode, DispositionReadMode, OperationsAlertCollectionOverdueRead,
+    OperationsAlertSnapshot, OperationsAlertSourceReader,
 };
 use auction_application::recovery::RecoveryResolutionStore;
 use auction_application::runtime_switches::{RuntimeSwitchRole, RuntimeSwitches};
@@ -46,7 +47,10 @@ fn store_with_mode(store: &DatabaseStore, mode: DispositionReadMode) -> Database
 }
 
 async fn snapshot(store: &DatabaseStore) -> OperationsAlertSnapshot {
-    store.snapshot(Utc::now(), None).await.expect("读取告警快照")
+    store
+        .snapshot(Utc::now(), OperationsAlertCollectionOverdueRead::Skip)
+        .await
+        .expect("读取告警快照")
 }
 
 /// 插入一条 `origin_kind = 'mail_intake'` 的通知投递；`shape` 决定失败形态与处置。

@@ -327,6 +327,15 @@ COMMIT 报告的 SSI 冲突不推测为序号热点。
 只追加的转换表变为一次索引探测，请求代价只随页大小增长；不改变可见集合、排序、分页、金额、
 转换写入、锁序、审计或事件。
 
+迁移 `000110`（整体登记 `breaking`，原因是告警闭集扩展）另新增部分索引
+`settlement_obligation_fulfillments_open_idx`（`settlement_obligation_fulfillments (obligation_id)`，
+谓词 `execution_state <> 'satisfied'`）。告警扫描与 Admin 看板的履约水位
+（`crates/auction-storage/src/database/operations/alert/snapshot/reads/fulfillment.rs`）只读尚未满足、
+义务为 `ready`/`blocked` 或履约停在 `failed`/`manual_reconcile` 的行，以及缺少履约行的 `blocked`
+义务；已满足的历史与从未激活的或有退款不进入分类。活动集合收成数组后按主键联表，分类只算一次，
+计数与长期未领取清单读同一份结果，不再顺序扫描投递表。索引只提供候选入口，不改变计数口径、
+金额、状态迁移、锁序、审计或事件。
+
 迁移 `000087` 只新增四个投递 Admin 检索候选索引，登记 `compatible`：
 `deliveries_admin_recipient_idx`（`lower(recipient)` 前导）、
 `deliveries_admin_template_idx`（模板前导，部分索引）、
