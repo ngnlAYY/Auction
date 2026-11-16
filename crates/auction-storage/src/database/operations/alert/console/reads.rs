@@ -233,14 +233,16 @@ pub(super) fn entry_from_row(
 }
 
 /// 导航待办计数：投递人工对账、待确认恢复、活动告警与未结案结算退件。退件按案件计数，与退件
-/// 告警同一口径（`closed_at` 为空，含隔离与 Take 结果未知），不要求存在义务。
+/// 告警同一口径（`closed_at` 为空，含隔离与 Take 结果未知），不要求存在义务。结算退件 Take 投递
+/// （`settlement_return_action`）归所属案件，不计入投递人工对账，避免同一事项在两处待办重复。
 pub(super) async fn pending_counts_postgres(
     pool: &TrackedPool<sqlx::Postgres>,
 ) -> Result<AdminPendingCounts, ApplicationError> {
     let row = sqlx::query(
         "SELECT
             (SELECT COUNT(*) FROM public.deliveries
-             WHERE origin_kind <> 'operations_alert' AND status = 'manual_reconcile')
+             WHERE origin_kind NOT IN ('operations_alert', 'settlement_return_action')
+               AND status = 'manual_reconcile')
                 AS delivery_manual_reconcile,
             (SELECT COUNT(*) FROM public.operations_alert_signals WHERE active)
                 AS active_alerts,

@@ -23,6 +23,7 @@ use crate::support;
 
 mod alerts;
 mod cases;
+mod counts;
 mod flows;
 mod races;
 mod sweep;

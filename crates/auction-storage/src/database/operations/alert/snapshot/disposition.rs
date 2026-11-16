@@ -58,14 +58,16 @@ const LEGACY_EQUIPMENT_LOSS: &str = r#"NOT EXISTS (
 const LEGACY_POSTAGE: &str = "d.failure_code IN ('send_rejected', 'send_rejected_after_stage')
                     AND d.result_metadata->>'reason_code' = 'insufficient_postage'";
 
-/// 通知来源的固定范围；结算类投递由其它来源负责。
-const NOTIFICATION_SCOPE: &str =
-    "d.origin_kind NOT IN ('settlement', 'settlement_recovery_action', 'operations_alert')";
+/// 通知来源的固定范围；结算类投递（含结算退件 Take）由其它来源负责。
+const NOTIFICATION_SCOPE: &str = "d.origin_kind NOT IN ('settlement', 'settlement_recovery_action', \
+     'settlement_return_action', 'operations_alert')";
 
 /// 投递与通知来源的配对口径；一条语句让两个口径共享同一语句级快照。
 static PAIRED_DELIVERY_COUNTS: LazyLock<String> = LazyLock::new(|| {
+    // 结算退件 Take 投递归所属案件，失败由退件告警承担，两种口径都不计入投递失败。
     let legacy_delivery = format!(
-        r#"d.origin_kind <> 'operations_alert' AND d.status = 'failed'
+        r#"d.origin_kind NOT IN ('operations_alert', 'settlement_return_action')
+             AND d.status = 'failed'
              AND NOT EXISTS (
                  SELECT 1 FROM public.settlement_legacy_self_reconciliations r
                  WHERE {}
@@ -76,7 +78,8 @@ static PAIRED_DELIVERY_COUNTS: LazyLock<String> = LazyLock::new(|| {
         crate::database::delivery::legacy_self_proof::TRUSTED_DELIVERY_PREDICATE,
     );
     let classified_delivery = format!(
-        "d.origin_kind <> 'operations_alert' AND d.status = 'failed' AND {CLASSIFIED_UNDISPOSED}"
+        "d.origin_kind NOT IN ('operations_alert', 'settlement_return_action') \
+         AND d.status = 'failed' AND {CLASSIFIED_UNDISPOSED}"
     );
     let legacy_notification = format!(
         "{NOTIFICATION_SCOPE} AND d.status = 'failed'
