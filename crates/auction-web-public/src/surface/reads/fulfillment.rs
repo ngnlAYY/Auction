@@ -16,9 +16,9 @@ use crate::api::{
 };
 use crate::surface::{
     LotDetailLookupButton, LotDetailLookupHost, PublicPager, current_public_pathname,
-    format_auction_time, normalize_public_page_size, public_page_matches, supported_worlds,
-    update_public_query_state, use_content_loading, use_lot_detail_lookup, use_public_query_state,
-    world_label, write_public_query,
+    format_auction_time, normalize_public_page_size, public_page_matches, refresh_public_reads,
+    supported_worlds, update_public_query_state, use_content_loading, use_lot_detail_lookup,
+    use_public_query_state, world_label, write_public_query,
 };
 
 /// lot 筛选生效的防抖窗口：输入停顿后才应用筛选并无历史记录地写回地址栏。
@@ -27,7 +27,7 @@ const LOT_FILTER_WRITE_DEBOUNCE_MILLIS: u32 = 300;
 const LOT_FILTER_ERROR_ID: &str = "public-fulfillment-filter-error";
 
 pub(crate) fn fulfillment() -> Element {
-    let mut refresh_generation = use_context::<Signal<u64>>();
+    let refresh_generation = use_context::<Signal<u64>>();
     // 世界/场次/页码/lot 筛选与地址栏双向同步，键与竞价日志共用。
     let query_state = use_public_query_state();
     let mut query_state_signal = query_state.state;
@@ -185,7 +185,8 @@ pub(crate) fn fulfillment() -> Element {
                 button {
                     class: "public-auction-empty__retry",
                     r#type: "button",
-                    onclick: move |_| refresh_generation.set(refresh_generation().saturating_add(1)),
+                    // 与看板错误重试同一入口：先使读缓存过期再推进代号，TTL 内的条目也会回到服务端。
+                    onclick: move |_| refresh_public_reads(refresh_generation),
                     {t!("data-retry")}
                 }
             }
