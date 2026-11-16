@@ -120,7 +120,8 @@ Public/Admin unit 保持 `TimeoutStopSec=45s`，Worker 为 `120s`，stack 为 `3
 
 ```bash
 auction-cli --config-dir /etc/auction service status     # 状态与 readiness（未全部就绪时退出码 4）
-auction-cli --config-dir /etc/auction service restart    # 预检 → 时段门禁 → 反序停止 → 迁移 → 顺序启动
+auction-cli --config-dir /etc/auction service restart \
+  --owner-secrets /etc/auction/owner/postgres.toml        # 预检 → 时段门禁 → 反序停止 → 迁移 → 顺序启动
 auction-cli --config-dir /etc/auction service stop       # 时段门禁 → 按 Public → Admin → Worker 停止
 ```
 
@@ -158,7 +159,7 @@ auction-cli --config-dir /etc/auction service stop       # 时段门禁 → 按 
 - 停机后失败每次调用最多追加一条 `action=deploy`、`outcome=failed` 回执并退出非零；除安装中途失败时换回已替换的程序外，命令不自动回滚或重启，用 `service status` 确认实际状态。保留旧程序之后的失败回执与回滚记录同一标识、带 `rollback_record_id`，`rollback --receipt-id` 能读到它；回执写不进去时错误末尾注明“部署回执也未写入”。
 - 停机备份、双 CLI 校验或保留旧程序失败：程序与数据库都未改变。恢复旧版只用安装目录中的 CLI 执行 `service start`（如 `/opt/auction/bin/auction-cli … service start --owner-secrets …`，沿用本次的 `--config-dir`、`--state-dir` 与 unit 参数）；**不要用制品 CLI**，它会先把 schema 迁到新版本，而安装目录仍是旧程序。
 - 安装中途失败：服务保持停止、迁移尚未执行，`rollback` 会拒绝。命令已把本次替换的程序从回滚记录换回并复核四个程序的摘要：错误含“已复核为部署前的旧程序”时安装目录就是旧程序，按上一条用安装目录中的 CLI `service start` 恢复。错误含“自动换回未完成”时安装目录可能新旧混合（错误列出各程序当前摘要），旧程序与摘要保留在 `<state-dir>/rollback/<id>/`；按[安装中途失败的手工换回](deploy/RECOVERY.md#安装中途失败的手工换回)逐个换回并核对摘要后再启动，不要用制品 CLI 启动；安装目录恢复为一致的旧程序之前不要重跑 `deploy`，否则新的回滚记录会把混合程序当作旧版本保留。
-- 迁移已提交但角色未就绪：先看 `service status` 与 journal 修配置，再用 `service start`（不重复迁移）；回到旧程序只能走 `rollback`（区间全为 `compatible`）或恢复停机备份。
+- 迁移已提交但角色未就绪：先看 `service status` 与 journal 修配置，再用 `service start --owner-secrets …`（它照常执行内嵌迁移，数据库已是该版本时为空操作）；回到旧程序只能走 `rollback`（区间全为 `compatible`）或恢复停机备份。
 - 回执未写入（错误含“部署回执也未写入”）时没有可信的部署记录，用 `service status`、`/proc/<pid>/exe` 摘要与 `db status` 确认实际状态，按[RECOVERY](deploy/RECOVERY.md)核对 catalog 与程序摘要后再决定。任何情况下都不要在未逐个核对摘要时手工覆盖 `/opt/auction/bin/` 并直接启动；`deploy` 失败后的手工换回只在自动换回未完成时走[安装中途失败的手工换回](deploy/RECOVERY.md#安装中途失败的手工换回)。
 
 **容量**：每次 `deploy`/`rollback` 在 `<state-dir>/rollback/` 保留一份四个程序的副本，每次 `deploy` 在 `--backup-dir` 留下一份停机备份；CLI 不自动清理，按部署频率与库大小规划容量并纳入磁盘监控。人工清理时保留最新成功 `deploy`/`rollback` 回执引用的回滚记录与最近 N 条，整目录删除旧记录、成对删除旧备份，步骤见[回滚记录与停机备份的容量](../apps/auction-cli/README.md#回滚记录与停机备份的容量)。
