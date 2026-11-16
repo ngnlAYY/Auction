@@ -184,7 +184,8 @@ pub trait RecoveryWorkStore: Send + Sync {
 }
 
 /// `relist_pending` 的目标拍卖可能暂时不存在，因此重挂事务必须支持持久化退避；`refunding`
-/// 只能依据 buyer refund fulfillment 的已提交完成事实闭合。两项操作都不能由内存计时器代替。
+/// 只能依据已提交的完成事实闭合：buyer refund fulfillment 已满足，或退款邮件被退回、经退件案件
+/// 精确领回后代管结案。两项操作都不能由内存计时器代替。
 pub trait RecoveryResolutionStore: Send + Sync {
     /// 推进一个到期的 guarded relist；没有 due 工作时返回 `None`。
     fn advance_due_relist(
@@ -193,7 +194,8 @@ pub trait RecoveryResolutionStore: Send + Sync {
         retry_after: Duration,
     ) -> ApplicationFuture<'_, Option<RecoveryResolutionAdvance>>;
 
-    /// 在 buyer refund fulfillment 已满足后闭合一个 refunding case。
+    /// 闭合一个 refunding case：buyer refund fulfillment 已满足，或退款权益已转为退件案件的代管
+    /// （各自追加独立的完成事实，代管不冒充退款已完成）。
     fn complete_due_refund(
         &self,
         now: DateTime<Utc>,

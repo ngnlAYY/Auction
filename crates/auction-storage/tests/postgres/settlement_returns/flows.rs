@@ -111,7 +111,7 @@ pub(super) async fn seed_spent_payout(pool: &PgPool, returned: &Returned) -> Uui
     allocation
 }
 
-pub(super) async fn handle(
+pub(crate) async fn handle(
     store: &auction_storage::DatabaseStore,
     case: Uuid,
     version: i64,
@@ -129,7 +129,7 @@ pub(super) async fn handle(
     store.handle_settlement_return(command).await.expect("执行退件命令").status
 }
 
-pub(super) async fn take_through(
+pub(crate) async fn take_through(
     store: &auction_storage::DatabaseStore,
     case: Uuid,
     succeeded: bool,

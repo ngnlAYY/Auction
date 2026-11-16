@@ -9,6 +9,7 @@
 //! - 告警分类口径与长期未领取的计数、清单都按同一收口事实排除这两条终态，legacy 与 shadow
 //!   仍按迁移前口径计入。
 
+mod custody;
 pub(crate) mod fixture;
 
 use std::time::Duration as StdDuration;

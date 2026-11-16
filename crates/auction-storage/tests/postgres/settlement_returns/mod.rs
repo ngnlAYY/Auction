@@ -24,7 +24,7 @@ use crate::support;
 mod alerts;
 mod cases;
 mod counts;
-mod flows;
+pub(crate) mod flows;
 mod funding;
 mod races;
 mod receipt;
