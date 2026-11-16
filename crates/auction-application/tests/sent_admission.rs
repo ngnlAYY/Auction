@@ -21,6 +21,7 @@ fn at(minute: u32) -> DateTime<Utc> {
 
 const CREDITS: i64 = 300_000;
 const DIGEST: [u8; 32] = [7; 32];
+const EQUIPMENT_NAME: &str = "Legendary Ethereal Shortsword of Slaughter";
 
 fn delivery() -> SentDelivery {
     SentDelivery {
@@ -167,8 +168,10 @@ fn snapshot() -> SentAdmissionSnapshot {
         }),
         lot: Some(SentLot { auction_id: uuid(21), equipment_id: uuid(22) }),
         equipment: Some(SentEquipment {
+            id: uuid(22),
             world_id: "main".to_owned(),
             external_equipment_id: "300753957".to_owned(),
+            name: EQUIPMENT_NAME.to_owned(),
         }),
         settlement: Some(SentSettlement { buyer_amount: CREDITS, seller_amount: CREDITS }),
         credential: Some(SentCredential {
@@ -300,4 +303,113 @@ fn non_settlement_payload_shape_is_rejected_with_scope_blocker() {
     assert!(
         admission.blockers.contains(&SentAdmissionBlocker::FrozenIdentityBodyMoneyOrAssetsMismatch)
     );
+}
+
+/// 货款正文写明装备名后的载荷：名称取自该义务对应的装备行。
+fn named_payout_snapshot() -> SentAdmissionSnapshot {
+    let mut snapshot = snapshot();
+    payload_of(&mut snapshot).variables.item_name = Some(EQUIPMENT_NAME.to_owned());
+    snapshot
+}
+
+fn payload_of(snapshot: &mut SentAdmissionSnapshot) -> &mut SentPayload {
+    snapshot.delivery.payload.as_mut().unwrap_or_else(|| panic!("货款载荷夹具必须存在"))
+}
+
+/// 附件现金已被卖家领取后的原生 Sent 观察：剩余为零、正文带领取回执。
+fn collected_evidence() -> ManualSentEvidence {
+    ManualSentEvidence {
+        remaining_credits: 0,
+        observed_body_digest: [8; 32],
+        collected: true,
+        receipt: "Removed attachment: 300,000 Credits".to_owned(),
+        ..evidence()
+    }
+}
+
+/// 带装备名的新货款与旧货款一样可人工确认寄出，已领取与未领取两种证据都准入。
+#[test]
+fn named_seller_payout_admits_collected_and_uncollected_evidence() {
+    for evidence in [evidence(), collected_evidence()] {
+        let admission = named_payout_snapshot().evaluate(&evidence, at(7));
+        assert_eq!(admission.blockers, Vec::new(), "collected={}", evidence.collected);
+        assert!(admission.eligible);
+    }
+    // 旧货款（不带装备名）在已领取证据下同样准入，形状判定互不影响。
+    let admission = snapshot().evaluate(&collected_evidence(), at(7));
+    assert_eq!(admission.blockers, Vec::new());
+}
+
+/// 反例：期望名称只来自义务对应的装备行，载荷自报的名称不能成为期望值；错误名称、换绑装备、
+/// 金额、正文摘要、UID、资金分配或缺失发送 fence 均拒绝。
+#[test]
+fn named_seller_payout_rejects_any_mismatched_fact() {
+    let identity_mismatch = SentAdmissionBlocker::FrozenIdentityBodyMoneyOrAssetsMismatch;
+    let mut wrong_name = named_payout_snapshot();
+    payload_of(&mut wrong_name).variables.item_name =
+        Some("Peerless Ethereal Shortsword of Slaughter".to_owned());
+    let mut empty_name = named_payout_snapshot();
+    payload_of(&mut empty_name).variables.item_name = Some(String::new());
+    let mut foreign_equipment = named_payout_snapshot();
+    if let Some(equipment) = foreign_equipment.equipment.as_mut() {
+        equipment.id = uuid(23);
+    }
+    let mut wrong_amount = named_payout_snapshot();
+    payload_of(&mut wrong_amount).variables.amount = Some((CREDITS - 1).to_string());
+    for (label, snapshot) in [
+        ("wrong_name", wrong_name),
+        ("empty_name", empty_name),
+        ("foreign_equipment", foreign_equipment),
+        ("wrong_amount", wrong_amount),
+    ] {
+        let admission = snapshot.evaluate(&evidence(), at(7));
+        assert!(!admission.eligible, "{label}");
+        assert!(
+            admission.blockers.contains(&identity_mismatch),
+            "{label}: {:?}",
+            admission.blockers
+        );
+    }
+
+    let mut wrong_digest = evidence();
+    wrong_digest.original_body_digest = [9; 32];
+    let admission = named_payout_snapshot().evaluate(&wrong_digest, at(7));
+    assert!(admission.blockers.contains(&identity_mismatch));
+
+    let mut wrong_uid = evidence();
+    wrong_uid.sender_uid = "9002".to_owned();
+    let admission = named_payout_snapshot().evaluate(&wrong_uid, at(7));
+    assert!(
+        admission.blockers.contains(&SentAdmissionBlocker::RequiresUniqueReadySenderFundingAccount)
+    );
+    assert!(
+        admission.blockers.contains(&SentAdmissionBlocker::RequiresExactUnknownSellerReservation)
+    );
+
+    let mut wrong_allocation = named_payout_snapshot();
+    if let Some(allocation) = wrong_allocation.funding_allocation.as_mut() {
+        allocation.amount = CREDITS + 1;
+    }
+    let admission = wrong_allocation.evaluate(&evidence(), at(7));
+    assert!(
+        admission.blockers.contains(&SentAdmissionBlocker::RequiresExactUnknownSellerReservation)
+    );
+
+    let mut no_fence = named_payout_snapshot();
+    no_fence.sending_fencing_version = 0;
+    let admission = no_fence.evaluate(&evidence(), at(7));
+    assert!(admission.blockers.contains(&identity_mismatch));
+}
+
+/// 修复不扩大人工确认的义务范围：带装备名的买方退款仍按范围外拒绝。
+#[test]
+fn named_buyer_refund_stays_outside_the_manual_scope() {
+    let mut snapshot = named_payout_snapshot();
+    if let Some(obligation) = snapshot.obligation.as_mut() {
+        obligation.obligation_kind = "buyer_refund".to_owned();
+    }
+    payload_of(&mut snapshot).template = "settlement_buyer_refund".to_owned();
+    let admission = snapshot.evaluate(&evidence(), at(7));
+    assert!(!admission.eligible);
+    assert!(admission.blockers.contains(&SentAdmissionBlocker::UnsupportedDeliveryScope));
 }
