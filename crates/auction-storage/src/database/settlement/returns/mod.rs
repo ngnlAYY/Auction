@@ -12,6 +12,7 @@ mod errors;
 mod reads;
 mod recheck;
 mod resend;
+mod restart;
 mod swept;
 mod take;
 mod work;

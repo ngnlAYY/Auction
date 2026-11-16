@@ -3,7 +3,7 @@
 //! 锁序沿用既有业务锁的完整前缀：激活为 world → 案件 → 动作 → 投递；收口为资金 scope/账户 →
 //! 恢复记录与义务 → 案件 → 动作 → 投递 → 履约，各集合只取单行，不反向取锁（不变量 2）。
 //! 领取证明成立后的记账（领回事实、资金返还、补寄或代管）只有 [`consume_take_proof`] 一处实现，
-//! 正常收口与邮箱巡检恢复共用。
+//! 正常收口与邮箱巡检恢复共用。确定未外写的 Take 重启与激活前冲突的交接见 `restart`。
 
 use auction_application::core::ApplicationError;
 use auction_application::mail::MailDeliveryOrigin;
@@ -20,13 +20,15 @@ use super::admission::{HELD_FAILURE_CODE, admission_facts, obligation_kind};
 use super::cases::{CaseEvent, CaseRow, CaseTransition, load_case, transition};
 use super::errors::ReturnTransactionError;
 use super::resend::{authorize_resend, close_fulfillment};
+use super::restart::{hand_over_conflicted_take, restart_unstarted_take};
 use super::take::{
     ActionRow, TakeOutcome, load_action, observe_take, take_activation, take_command,
     take_funding_command_id,
 };
 use crate::database::TrackedTransaction as Transaction;
 use crate::database::mail::delivery::{
-    activate_in_transaction, enqueue_in_transaction, settlement_return_take_conflicts,
+    activate_in_transaction, enqueue_in_transaction, return_take_blocked_sql,
+    settlement_return_take_conflicts,
 };
 use crate::database::settlement::fulfillment::{
     lock_settlement_delivery_eligibility, recovery_allows_execution_now,
@@ -36,7 +38,8 @@ use crate::database::settlement::funding::{
     lock_funded_delivery_account, return_funded_delivery,
 };
 
-/// 激活一项到期的持久 Take；没有时返回 `None`。
+/// 激活一项到期的持久 Take，或把已没有阻断意图的激活前冲突案件交接回 Take 待执行；没有时返回
+/// `None`。仍被阻断的冲突案件不进入候选，不会挡住其后的激活。
 pub(super) async fn activate_due_take_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     now: DateTime<Utc>,
@@ -57,14 +60,18 @@ async fn activate_once(
     now: DateTime<Utc>,
 ) -> Result<Option<SettlementReturnProgress>, ReturnTransactionError> {
     let mut tx = pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await?;
-    let candidate: Option<(Uuid, String)> = sqlx::query_as(
+    let candidate: Option<(Uuid, String)> = sqlx::query_as(concat!(
         r#"SELECT action.return_mail_id, action.world_id
            FROM public.settlement_return_actions AS action
            JOIN public.settlement_return_cases AS c ON c.return_mail_id = action.return_mail_id
-           WHERE action.execution_state = 'pending' AND c.status = 'take_pending'
+           WHERE action.execution_state = 'pending'
+             AND (c.status = 'take_pending'
+                  OR (c.status = 'take_unknown' AND NOT "#,
+        return_take_blocked_sql!("action.world_id", "action.source_external_mail_id"),
+        r#"))
            ORDER BY action.created_at, action.return_mail_id
-           LIMIT 1"#,
-    )
+           LIMIT 1"#
+    ))
     .fetch_optional(&mut *tx)
     .await?;
     let Some((return_mail_id, world_id)) = candidate else {
@@ -82,6 +89,11 @@ async fn activate_once(
         tx.commit().await?;
         return Ok(None);
     };
+    if case.status == SettlementReturnCaseStatus::TakeUnknown {
+        let progress = hand_over_conflicted_take(&mut tx, &case, &action, now).await?;
+        tx.commit().await?;
+        return Ok(progress);
+    }
     if case.status != SettlementReturnCaseStatus::TakePending || action.execution_state != "pending"
     {
         tx.commit().await?;
@@ -155,7 +167,8 @@ async fn activate_once(
     }))
 }
 
-/// Take 失败或结果未知：动作转人工核对、案件停在 `take_unknown`；不自动重试，不释放互斥。
+/// Take 失败或结果未知（含确定未外写但重启次数已用满）：动作转人工核对、案件停在
+/// `take_unknown`；不自动重试，不释放互斥。
 /// 激活前即发现同邮件冲突时 Take 从未写入投递：动作保持没有投递身份的 pending（动作约束要求
 /// 人工核对必有投递），原因只记在案件事件里；案件离开 `take_pending` 后不会再被激活。
 async fn mark_take_unknown(
@@ -282,6 +295,12 @@ async fn settle_once(
         TakeOutcome::Pending => {
             tx.commit().await?;
             return Ok(None);
+        }
+        TakeOutcome::NotStarted { failure_code } => {
+            match restart_unstarted_take(&mut tx, &case, &action, now).await? {
+                Some(progress) => progress,
+                None => mark_take_unknown(&mut tx, &case, &action, failure_code, now).await?,
+            }
         }
         TakeOutcome::Failed { failure_code } | TakeOutcome::Unknown { failure_code } => {
             mark_take_unknown(&mut tx, &case, &action, failure_code, now).await?

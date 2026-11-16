@@ -29,6 +29,7 @@ mod funding;
 mod races;
 mod receipt;
 mod recheck;
+mod restart;
 mod sweep;
 mod unresolved;
 

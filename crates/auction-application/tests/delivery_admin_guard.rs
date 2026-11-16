@@ -21,6 +21,7 @@ fn snapshot(action: DeliveryAdminAction) -> DeliveryAdminGuardSnapshot {
         lot_eligible: Some(true),
         settlement_eligible: Some(true),
         has_reconcile_reference: true,
+        mail_handed_over: false,
     }
 }
 
@@ -269,4 +270,32 @@ fn settlement_return_take_rejects_every_admin_action() {
         DeliveryAdminGuardBlocker::SettlementReturnActionOwned.error(),
         DeliveryAdminError::Invalid
     );
+}
+
+/// 同一邮件已交接给结算退件 Take：原领取或退回意图的释放、重试与对账重试都被拒绝（普通重试不能
+/// 绕过互斥），对账判成功或判失败等终结动作不受影响。
+#[test]
+fn handed_over_mail_intent_cannot_be_reactivated() {
+    for action in [
+        DeliveryAdminAction::Release,
+        DeliveryAdminAction::RetryFailed,
+        DeliveryAdminAction::ReconcileRetry,
+    ] {
+        let mut guard = snapshot(action);
+        guard.origin_kind = "mail_intake".to_owned();
+        guard.payload_operation = Some("take".to_owned());
+        guard.settlement_eligible = None;
+        guard.mail_handed_over = true;
+        assert_eq!(
+            guard.evaluate().blockers.first(),
+            Some(&DeliveryAdminGuardBlocker::SettlementReturnActionOwned),
+            "{action:?}"
+        );
+    }
+    let mut failed = snapshot(DeliveryAdminAction::ReconcileFailed);
+    failed.origin_kind = "mail_intake".to_owned();
+    failed.payload_operation = Some("take".to_owned());
+    failed.settlement_eligible = None;
+    failed.mail_handed_over = true;
+    assert!(failed.evaluate().blockers.is_empty(), "终结动作不复活意图");
 }

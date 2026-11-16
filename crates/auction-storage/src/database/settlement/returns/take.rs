@@ -245,7 +245,10 @@ pub(super) enum TakeOutcome {
     /// 精确领取证明成立；摘要绑定证明形状、投递、世界、MID 与预期资产。`proof` 为
     /// [`TAKE_RECEIPT_PROOF`] 或 [`TAKE_SWEEP_PROOF`]。
     Proven { proof_digest: [u8; 32], external_reference: String, proof: &'static str },
-    /// 投递确定失败（未开始写入或远端明确拒绝）：领取未发生或无法证明，转人工核对。
+    /// 投递终态 failed，且持久事实证明确定未外写：结果明确记录未开始写出、不是未知、从未因结果
+    /// 未知被巡检重排、没有远端引用。邮件未被触碰，案件 owner 可在锁内复核后重新排队同一 Take。
+    NotStarted { failure_code: &'static str },
+    /// 投递失败但不能证明未外写：领取未发生或无法证明，转人工核对。
     Failed { failure_code: &'static str },
     /// 结果未知：转人工核对，只认系统可验证证明，不自动重试。
     Unknown { failure_code: &'static str },
@@ -304,16 +307,28 @@ pub(super) async fn observe_take(
     if !identity_matches {
         return Ok(TakeOutcome::Unknown { failure_code: "settlement_return_take_conflict" });
     }
+    let reference: Option<String> = row.try_get("external_reference")?;
+    let metadata: serde_json::Value = row.try_get("result_metadata")?;
     match status.as_str() {
         "pending" | "claimed" | "sending" => return Ok(TakeOutcome::Pending),
         "failed" => {
-            return Ok(TakeOutcome::Failed { failure_code: "settlement_return_take_failed" });
+            // 持久发送围栏与尝试历史：只有明确未开始写出、非未知、从未因未知结果被巡检重排、
+            // 没有远端引用才算确定未外写；其余失败与未知同样只认领取证明。
+            let not_started = reference.is_none()
+                && metadata.get("write_started").and_then(serde_json::Value::as_bool)
+                    == Some(false)
+                && metadata.get("outcome_unknown").and_then(serde_json::Value::as_bool)
+                    != Some(true)
+                && metadata.get("sweep_retries").is_none();
+            return Ok(if not_started {
+                TakeOutcome::NotStarted { failure_code: "settlement_return_take_not_started" }
+            } else {
+                TakeOutcome::Failed { failure_code: "settlement_return_take_failed" }
+            });
         }
         "succeeded" => {}
         _ => return Ok(TakeOutcome::Unknown { failure_code: "settlement_return_take_unknown" }),
     }
-    let reference: Option<String> = row.try_get("external_reference")?;
-    let metadata: serde_json::Value = row.try_get("result_metadata")?;
     let expected_reference =
         format!("mooglemail:{}:take:{}", action.world_id, action.source_external_mail_id);
     let mid = Some(action.source_external_mail_id.as_str());

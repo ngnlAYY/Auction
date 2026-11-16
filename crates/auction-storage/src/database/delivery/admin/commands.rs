@@ -200,6 +200,13 @@ async fn execute_transaction(
     } else {
         None
     };
+    let mail_handed_over = reactivates
+        && crate::database::mail::delivery::mail_handed_over(
+            transaction.transaction_mut()?,
+            command.delivery_id,
+        )
+        .await
+        .map_err(DeliveryAdminTransactionError::Sqlx)?;
     let payload: serde_json::Value =
         row.try_get("payload").map_err(DeliveryAdminTransactionError::Sqlx)?;
     let guard = DeliveryAdminGuardSnapshot {
@@ -219,6 +226,7 @@ async fn execute_transaction(
         lot_eligible,
         settlement_eligible,
         has_reconcile_reference: command.external_reference.is_some(),
+        mail_handed_over,
     };
     let decision = guard.evaluate();
     if let Some(blocker) = decision.blockers.first() {

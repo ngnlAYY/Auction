@@ -11,6 +11,8 @@
 //!   其余阻断，给出明确业务错误；
 //! - Worker 已在完整 Sent 中目击同一义务时，重试或判失败都会重复付款或误判，必须失败关闭；
 //! - 已被装备损失或历史自寄核对永久退役的投递不接受任何新动作；
+//! - 同一邮件已由结算退件 Take 接手（另一 owner 的意图被确定为从未执行后交接）时，原领取或退回
+//!   意图不能被普通重试或释放复活，否则两个 owner 会对同一封邮件各执行一次；
 //! - 每个动作只有一组允许的起止状态，账本回放复用同一映射。
 
 use crate::ports::delivery::admin::{DeliveryAdminAction, DeliveryAdminError};
@@ -62,13 +64,15 @@ pub struct DeliveryAdminGuardSnapshot {
     pub settlement_eligible: Option<bool>,
     /// `ReconcileSucceeded` 是否提供了外部引用（`Some`，空串与旧版一致仍交给后续校验）。
     pub has_reconcile_reference: bool,
+    /// 本投递是入站或恢复对某封邮件的领取/退回意图，而同一邮件已有结算退件 Take（交接之后）。
+    pub mail_handed_over: bool,
 }
 
 /// 阻断项闭集；顺序即判定优先级，调用方取第一项。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeliveryAdminGuardBlocker {
     /// 结算退件 Take 由退件案件 owner 推进：结果未知只认系统可验证证明，不允许人工释放、
-    /// 重试或声明成功/失败。
+    /// 重试或声明成功/失败；同一邮件已交接给结算退件 Take 后，原领取或退回意图也不能被重新激活。
     SettlementReturnActionOwned,
     /// 结算义务已不可执行（成交已撤销）、投递已不是当前派发，或恢复流程已接管该义务被退回的
     /// 邮件，禁止重新激活。
@@ -140,7 +144,9 @@ impl DeliveryAdminGuardSnapshot {
     pub fn evaluate(&self) -> DeliveryAdminGuardDecision {
         let transition = self.action.transition();
         let mut blockers = Vec::new();
-        if self.origin_kind == "settlement_return_action" {
+        if self.origin_kind == "settlement_return_action"
+            || (checks_lot_eligibility(self.action) && self.mail_handed_over)
+        {
             blockers.push(DeliveryAdminGuardBlocker::SettlementReturnActionOwned);
         }
         if checks_lot_eligibility(self.action) && self.settlement_eligible == Some(false) {

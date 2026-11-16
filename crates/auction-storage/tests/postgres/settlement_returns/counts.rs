@@ -100,15 +100,17 @@ async fn postgres_return_take_deliveries_count_only_under_their_case() {
         credential: Some(session.binding()),
     };
     let claim = take_into_sending(&store, take_delivery, &expectation).await;
+    // 确定失败但已开始写出（不能证明未外写）：不重启，案件转结果未知。确定未外写的失败由案件
+    // owner 重新排队，见 `restart` 用例。
     DeliveryWorkStore::fail(
         &store,
         claim,
         DeliveryTransportError {
-            failure_code: "take_preflight_unproven".to_owned(),
-            safe_detail: "Take 预检不成立".to_owned(),
+            failure_code: "take_remote_rejected".to_owned(),
+            safe_detail: "Take 远端明确拒绝".to_owned(),
             outcome_unknown: false,
             external_reference: None,
-            result_metadata: json!({"operation": "take", "write_started": false}),
+            result_metadata: json!({"operation": "take", "write_started": true}),
         },
         Utc::now(),
     )
