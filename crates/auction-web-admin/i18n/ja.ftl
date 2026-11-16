@@ -1762,6 +1762,10 @@ dashboard-reconciliation-worlds = ワールド
 dashboard-reconciliation-custody = 未確認装備
 dashboard-reconciliation-solvency = 支払不足
 dashboard-reconciliation-credits = { $credits } credits
+dashboard-reconciliation-custody-in-transit = 輸送中の装備
+dashboard-reconciliation-solvency-in-transit = 輸送中の支払いと返金
+dashboard-reconciliation-in-transit-credits = { $count } 件、{ $credits } credits
+dashboard-reconciliation-in-transit-note = 輸送中とは、メールで送付済みで受取人の受け取りを待っている状態です。未確認装備や支払不足には数えません。レポートは読み取り専用で、資金や装備の操作を許可しません。
 dashboard-reconciliation-status-unavailable = 照合レポートは利用できません
 
 delivery-detail-acknowledge-title = 処理済みの過去失敗を確認

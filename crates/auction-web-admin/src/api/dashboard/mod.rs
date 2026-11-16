@@ -278,7 +278,12 @@ pub(crate) type AdminDeliverySection = AdminDashboardSection<AdminDeliveryData>;
 pub(crate) struct AdminReconciliationWorld {
     pub world: String,
     pub custody_missing_count: i64,
+    /// 已寄出、等待收件人领取的在途装备件数；只展示，不是差异。
+    pub custody_in_transit_count: i64,
     pub solvency_shortfall_credits: i64,
+    /// 已寄出且资金已支出的在途货款与退款笔数及金额；不计入缺口。
+    pub solvency_in_transit_count: i64,
+    pub solvency_in_transit_credits: i64,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -764,7 +769,10 @@ mod tests {
         let world = json!({
             "world": "main",
             "custody_missing_count": 0,
-            "solvency_shortfall_credits": 0
+            "custody_in_transit_count": 5,
+            "solvency_shortfall_credits": 0,
+            "solvency_in_transit_count": 31,
+            "solvency_in_transit_credits": 38_668_000
         });
         json!({
             "status": "ok",
@@ -776,6 +784,23 @@ mod tests {
                 "worlds": vec![world; world_count]
             }
         })
+    }
+
+    #[test]
+    fn reconciliation_in_transit_must_be_non_negative() {
+        let payload =
+            with(complete_payload(), "", "reconciliation", Some(reconciliation_section(1)));
+        let snapshot = decode_dashboard_response(payload.clone()).expect("在途字段必须可解码");
+        let world = &snapshot.reconciliation.data.expect("对账数据").worlds[0];
+        assert_eq!(world.custody_in_transit_count, 5);
+        assert_eq!(world.solvency_in_transit_credits, 38_668_000);
+        for key in
+            ["custody_in_transit_count", "solvency_in_transit_count", "solvency_in_transit_credits"]
+        {
+            let rejected =
+                with(payload.clone(), "/reconciliation/data/worlds/0", key, Some(json!(-1)));
+            assert!(decode_dashboard_response(rejected).is_err(), "{key} 为负必须拒绝");
+        }
     }
 
     fn realtime_section(total_lag: i64) -> Value {

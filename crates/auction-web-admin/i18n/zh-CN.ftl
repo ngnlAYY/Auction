@@ -1763,6 +1763,10 @@ dashboard-reconciliation-worlds = 世界
 dashboard-reconciliation-custody = 缺失装备
 dashboard-reconciliation-solvency = 待付缺口
 dashboard-reconciliation-credits = { $credits } credits
+dashboard-reconciliation-custody-in-transit = 在途装备
+dashboard-reconciliation-solvency-in-transit = 在途货款与退款
+dashboard-reconciliation-in-transit-credits = { $count } 笔，{ $credits } credits
+dashboard-reconciliation-in-transit-note = 在途：已随邮件寄出、等待收件人领取，不计入缺失装备或待付缺口；报告只读，不授权任何资金或装备动作。
 dashboard-reconciliation-status-unavailable = 对账报告不可用
 
 delivery-detail-acknowledge-title = 确认历史失败已处置

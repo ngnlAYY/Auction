@@ -1763,6 +1763,10 @@ dashboard-reconciliation-worlds = Worlds
 dashboard-reconciliation-custody = Missing equipment
 dashboard-reconciliation-solvency = Payout shortfall
 dashboard-reconciliation-credits = { $credits } credits
+dashboard-reconciliation-custody-in-transit = Equipment in transit
+dashboard-reconciliation-solvency-in-transit = Payouts and refunds in transit
+dashboard-reconciliation-in-transit-credits = { $count } items, { $credits } credits
+dashboard-reconciliation-in-transit-note = In transit means already mailed and waiting for the recipient to collect it; it is neither missing equipment nor a payout shortfall. Reports are read-only and never authorize any credits or equipment action.
 dashboard-reconciliation-status-unavailable = Reconciliation report unavailable
 
 delivery-detail-acknowledge-title = Acknowledge disposed failure

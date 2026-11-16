@@ -1,6 +1,8 @@
 //! “已寄出、等待领取”在真实 PostgreSQL 18 schema 上的读侧口径，全部以运行账号执行：
 //! - 告警/看板履约水位把已寄出的 Send 义务从积压拆到等待领取，单列最近一次读取失败；
 //!   COD 仍按既有口径留在原分类，人工核对与尚未寄出的义务不变。
+//! - 资产对账把已寄出且资金已 `spent` 的货款列为在途、不计入应付；已寄出等待领取的装备
+//!   （含已寄出待付款的 COD 装备）列为在途、不计为缺失；人工核对的仍按应持核对。
 //!
 //! 入口见 `just test-db`。
 
@@ -12,6 +14,10 @@ use auction_application::operations::{
     OperationsAlertKind, OperationsAlertPolicy, OperationsAlertSource, OperationsAlertSourceReader,
     evaluate_snapshot,
 };
+use auction_application::reconciliation::{
+    AssetArmoryObservation, AssetReconciliationStore, CustodyInTransitReason, CustodyMissingSample,
+};
+use auction_domain::SettlementWorld;
 use chrono::{DateTime, Duration, Utc};
 use serde_json::json;
 use sqlx::PgPool;
@@ -215,6 +221,36 @@ async fn seed_fulfillment(
     .expect("写入测试履约");
 }
 
+/// 货款寄出时资金分配记为 `spent`（与发送事务同一 owner 写入），这里直接写入终态事实。
+async fn seed_spent_allocation(
+    pool: &PgPool,
+    lot: &Lot,
+    obligation_id: Uuid,
+    delivery_id: Uuid,
+    amount: i64,
+) {
+    sqlx::query(
+        "INSERT INTO public.settlement_funding_accounts (uid, status) VALUES ('7001', 'ready')
+         ON CONFLICT (uid) DO NOTHING",
+    )
+    .execute(pool)
+    .await
+    .expect("写入资金账户");
+    sqlx::query(
+        "INSERT INTO public.settlement_funding_allocations
+            (id, uid, purpose, lot_id, obligation_id, amount, state, delivery_id)
+         VALUES ($1, '7001', 'seller', $2, $3, $4, 'spent', $5)",
+    )
+    .bind(stable_id(SEED, &format!("allocation-{obligation_id}")))
+    .bind(lot.id)
+    .bind(obligation_id)
+    .bind(amount)
+    .bind(delivery_id)
+    .execute(pool)
+    .await
+    .expect("写入已支出的资金分配");
+}
+
 /// 已结算场次里的各类履约：
 /// - lot 1：货款已寄出 8 天、资金已支出，最近一次 Sent 读取失败；
 /// - lot 2：流拍退回已寄出 2 天，已读到但未领取；
@@ -229,6 +265,7 @@ async fn seed_collection_wait(pool: &PgPool, now: DateTime<Utc>) -> Auction {
     let payout = seed_obligation(pool, &auction, &paid, "seller_payout", 900, Some(cod)).await;
     let delivery = seed_delivery(pool, payout, 900, Some(now - Duration::days(8)), 700_001).await;
     seed_fulfillment(pool, payout, "enqueued", Some(delivery), Some("evidence_unavailable")).await;
+    seed_spent_allocation(pool, &paid, payout, delivery, 900).await;
 
     let unsold = seed_lot(pool, &auction, 2, false, "9400002").await;
     let unsold_return = seed_obligation(pool, &auction, &unsold, "unsold_return", 0, None).await;
@@ -330,4 +367,99 @@ async fn postgres_collection_wait_snapshot_separates_awaiting_from_backlog() {
     assert_eq!(backlog.count, 2);
 
     store.postgres_pool().close().await;
+}
+
+/// 已寄出且资金已支出的货款进在途、不进待付与缺口；已寄出等待领取的装备进在途、不进缺失；
+/// 人工核对的流拍退回仍按应持核对。报告追加后经最近报告投影与告警快照原样读回。
+#[tokio::test]
+async fn postgres_collection_wait_reports_sent_assets_in_transit() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("以运行账号连接");
+    let pool = store.postgres_pool();
+    let now = Utc::now();
+    seed_collection_wait(pool, now).await;
+    // 余额 600 足以支付尚未寄出的 500；若把已寄出的 900 再算一次，会误报 800 的缺口。
+    sqlx::query(
+        "UPDATE public.settlement_recovery_health
+         SET balance_credits = 600, balance_observed_at = now(), balance_status = 'ok',
+             evidence_last_success_at = now(), evidence_status = 'fresh', updated_at = now()
+         WHERE world_id = 'main'",
+    )
+    .execute(pool)
+    .await
+    .expect("写入新鲜余额");
+
+    let solvency = store.report_solvency(3_600).await.expect("生成偿付报告");
+    assert_eq!(solvency.format, "auction-solvency-report.v2");
+    let main = solvency.worlds.iter().find(|world| world.world == "main").expect("main 报告");
+    assert_eq!(
+        (main.pending_seller_payout_count, main.pending_seller_payout_credits),
+        (1, 500),
+        "只有尚未寄出的货款仍待付"
+    );
+    assert_eq!(
+        (main.in_transit_seller_payout_count, main.in_transit_seller_payout_credits),
+        (1, 900),
+        "已寄出且已支出的货款单列为在途"
+    );
+    assert_eq!((main.in_transit_refund_count, main.in_transit_refund_credits), (0, 0));
+    assert_eq!(main.required_credits, 500);
+    assert_eq!((main.verdict.as_str(), main.shortfall_credits), ("sufficient", 0));
+
+    let observation = |world| AssetArmoryObservation {
+        world,
+        observed_at: Utc::now(),
+        equipment_ids: Vec::new(),
+        complete: true,
+        failure_code: None,
+    };
+    let custody = store
+        .reconcile_custody(vec![
+            observation(SettlementWorld::Isekai),
+            observation(SettlementWorld::Main),
+        ])
+        .await
+        .expect("生成装备持有报告");
+    assert_eq!(custody.format, "auction-custody-reconciliation.v2");
+    assert_eq!(custody.failure_code, None);
+    let main = custody.worlds.iter().find(|world| world.world == "main").expect("main 报告");
+    assert_eq!((main.expected_count, main.missing_count), (1, 1), "只有人工核对的退回仍应持");
+    assert_eq!(
+        main.missing_samples,
+        [CustodyMissingSample {
+            external_equipment_id: "9400005".to_owned(),
+            reason: "obligation_unsold_return".to_owned(),
+        }]
+    );
+    assert_eq!(main.in_transit_count, 2);
+    assert_eq!(
+        main.in_transit_reasons,
+        [
+            CustodyInTransitReason { reason: "obligation_unsold_return".to_owned(), count: 1 },
+            CustodyInTransitReason {
+                reason: "obligation_winner_equipment_cod".to_owned(),
+                count: 1,
+            },
+        ]
+    );
+    assert!(!custody.asset_actions_authorized && !solvency.asset_actions_authorized);
+
+    let latest = store.latest_asset_reports().await.expect("读取最近报告");
+    assert_eq!(latest.custody.as_ref(), Some(&custody));
+    assert_eq!(latest.solvency.as_ref(), Some(&solvency));
+    let snapshot = store.snapshot(Utc::now()).await.expect("读取告警快照");
+    let reconciliation = snapshot.reconciliation.expect("对账水位");
+    let main = reconciliation.worlds.iter().find(|world| world.world == "main").expect("main");
+    assert_eq!(
+        (
+            main.custody_missing_count,
+            main.custody_in_transit_count,
+            main.solvency_shortfall_credits,
+            main.solvency_in_transit_count,
+            main.solvency_in_transit_credits,
+        ),
+        (1, 2, 0, 1, 900)
+    );
+
+    pool.close().await;
 }

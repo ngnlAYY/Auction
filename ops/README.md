@@ -360,7 +360,7 @@ Final 耗尽原始累计非零即提前评估同场热点改造。WS 峰值是�
 
 ### 告警台与 Admin 仪表盘
 
-告警台在 `scan_enabled = true` 时始终可用，列出活动与历史告警（`active`/`resolved`/`all`），表头锚点对应上文处置表。确认只追加操作者事实；静默只把重复通知推到到期时间，不关闭告警也不延长截止；恢复后再出现属于新周期。告警台只显示安全分类（kind/source/scope/计数）。仪表盘展示进程与 Worker 状态、邮箱轮询、realtime 滞后、凭据健康、投递/履约/恢复积压（区分等待付款与等待前置；已寄出、只等收件人在游戏内领取的义务单列为“等待领取”，显示数量、寄出后最久等待天数与最近一次 Sent 读取失败数，不计入积压）、告警状态与资产对账。资产对账报告缺失时显示不可用，不用空数据冒充无差异；外部账号仅在 Worker control 快照整体不可用时标为不可用。
+告警台在 `scan_enabled = true` 时始终可用，列出活动与历史告警（`active`/`resolved`/`all`），表头锚点对应上文处置表。确认只追加操作者事实；静默只把重复通知推到到期时间，不关闭告警也不延长截止；恢复后再出现属于新周期。告警台只显示安全分类（kind/source/scope/计数）。仪表盘展示进程与 Worker 状态、邮箱轮询、realtime 滞后、凭据健康、投递/履约/恢复积压（区分等待付款与等待前置；已寄出、只等收件人在游戏内领取的义务单列为“等待领取”，显示数量、寄出后最久等待天数与最近一次 Sent 读取失败数，不计入积压）、告警状态与资产对账（缺失装备、待付缺口与只展示的在途装备、在途货款）。资产对账报告缺失时显示不可用，不用空数据冒充无差异；外部账号仅在 Worker control 快照整体不可用时标为不可用。
 
 ### 日志
 
@@ -406,7 +406,7 @@ COD 实收资金化诊断使用独立 target `auction::settlement::funding_diagn
 | notification | `notification_delivery_failed`、`notification_postage_insufficient`：邮资不足时补充 Bot Credits 后在“投递队列”重试，补足前不要反复重试。 | 失败与最老年龄归零，新通知可寄出 |
 | backup | `disk_capacity_low`、`backup_failed`、`restore_drill_overdue`、`source_unavailable`：`df -h /var/backups/auction`；终态与失败阶段见 `<state-dir>/receipts/<run_id>.json`，回执只有阶段与固定错误码；具体原因看 `journalctl -u auction-backup` 中同一 `run_id` 的 `detail=` 行（单行、已脱敏、最多 512 字符，另有 pg_dump/pg_restore 自身输出），见[定时备份](../apps/auction-cli/README.md#定时备份)；演练逾期按[从 R2 取回并演练恢复](deploy/RECOVERY.md#从-r2-取回并演练恢复)完成并把回执复制到演练目录。 | 一次 `completed` 且空间满足字节与比例下限 |
 | wal | `wal_upload_stalled`、`source_unavailable`、`wal_offsite_disabled`：核对 `journalctl -u auction-wal-upload` 与 `wal upload` JSON，检查 R2 凭据、bucket lock 与网络；积压会阻塞 PostgreSQL 回收，优先处理。`wal_offsite_disabled` 只是报告跳过项。 | `wal upload` 为 `completed` 且暂存无超阈段 |
-| reconciliation | `custody_drift`、`solvency_shortfall`、`reconciliation_stale`、`source_unavailable`：`db asset-reports` 读取最近报告并按 `missing_samples.reason` 核对 Armory 与 delivery；`db report-solvency` 重算并核对余额状态。报告只读，不授权转账、退款、重发或转移；Armory 只扫描七个 organize 分类，未命中不代表装备不存在。 | 下次报告无差异且年龄在阈值内 |
+| reconciliation | `custody_drift`、`solvency_shortfall`、`reconciliation_stale`、`source_unavailable`：`db asset-reports` 读取最近报告并按 `missing_samples.reason` 核对 Armory 与 delivery；`db report-solvency` 重算并核对余额状态。已寄出、等待收件人领取的装备与已支出的货款/退款在 v2 报告中单列为在途（`in_transit_*`），不计为缺失或待付；在途长期不收口按 fulfillment 行的等待领取处理。报告只读，不授权转账、退款、重发或转移；Armory 只扫描七个 organize 分类，未命中不代表装备不存在。 | 下次报告无差异且年龄在阈值内 |
 
 ### 游戏页面结构变化与账号风险
 

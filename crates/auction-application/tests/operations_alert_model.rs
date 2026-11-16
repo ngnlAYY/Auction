@@ -758,12 +758,18 @@ fn reconciliation_reports_drive_drift_shortfall_and_staleness_signals() {
                 OperationsAlertReconciliationWorld {
                     world: "main",
                     custody_missing_count: 2,
+                    custody_in_transit_count: 5,
                     solvency_shortfall_credits: 0,
+                    solvency_in_transit_count: 31,
+                    solvency_in_transit_credits: 38_668_000,
                 },
                 OperationsAlertReconciliationWorld {
                     world: "isekai",
                     custody_missing_count: 0,
+                    custody_in_transit_count: 0,
                     solvency_shortfall_credits: 500,
+                    solvency_in_transit_count: 0,
+                    solvency_in_transit_credits: 0,
                 },
             ],
         }),
@@ -787,6 +793,21 @@ fn reconciliation_reports_drive_drift_shortfall_and_staleness_signals() {
     assert!(!kinds.iter().any(|(kind, scope, _)| {
         *kind == OperationsAlertKind::ReconciliationStale && *scope == "custody"
     }));
+    // 在途装备与在途货款只展示：main 没有缺口，不因在途金额产生偿付缺口信号。
+    assert!(!kinds.iter().any(|(kind, scope, _)| {
+        *kind == OperationsAlertKind::SolvencyShortfall && *scope == "main"
+    }));
+    assert_eq!(
+        kinds.iter().filter(|(kind, _, _)| *kind == OperationsAlertKind::CustodyDrift).count(),
+        1
+    );
+
+    // 负数在途说明报告事实损坏，整个评估失败关闭。
+    let mut broken = snapshot;
+    if let Some(reconciliation) = broken.reconciliation.as_mut() {
+        reconciliation.worlds[0].solvency_in_transit_credits = -1;
+    }
+    assert_eq!(evaluate_snapshot(&broken, &policy), Err(OperationsAlertError::Invalid));
 }
 
 #[test]

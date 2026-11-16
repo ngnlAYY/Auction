@@ -152,20 +152,35 @@ pub(super) async fn reconciliation_snapshot(
         reports.solvency.as_ref().map(|report| age_seconds(now, Some(report.completed_at)));
     let mut worlds = Vec::with_capacity(2);
     for world in ["isekai", "main"] {
-        let custody_missing_count = reports
+        let custody = reports
             .custody
             .as_ref()
-            .and_then(|report| report.worlds.iter().find(|entry| entry.world == world))
-            .map_or(0, |entry| entry.missing_count);
-        let solvency_shortfall_credits = reports
+            .and_then(|report| report.worlds.iter().find(|entry| entry.world == world));
+        let solvency = reports
             .solvency
             .as_ref()
-            .and_then(|report| report.worlds.iter().find(|entry| entry.world == world))
-            .map_or(0, |entry| entry.shortfall_credits);
+            .and_then(|report| report.worlds.iter().find(|entry| entry.world == world));
+        // 在途只展示：笔数与金额溢出说明报告事实损坏，整个来源失败关闭而不是截断。
+        let (solvency_in_transit_count, solvency_in_transit_credits) = match solvency {
+            Some(entry) => (
+                entry
+                    .in_transit_seller_payout_count
+                    .checked_add(entry.in_transit_refund_count)
+                    .ok_or_else(|| storage_error("资产报告在途笔数溢出"))?,
+                entry
+                    .in_transit_seller_payout_credits
+                    .checked_add(entry.in_transit_refund_credits)
+                    .ok_or_else(|| storage_error("资产报告在途金额溢出"))?,
+            ),
+            None => (0, 0),
+        };
         worlds.push(auction_application::operations::OperationsAlertReconciliationWorld {
             world,
-            custody_missing_count,
-            solvency_shortfall_credits,
+            custody_missing_count: custody.map_or(0, |entry| entry.missing_count),
+            custody_in_transit_count: custody.map_or(0, |entry| entry.in_transit_count),
+            solvency_shortfall_credits: solvency.map_or(0, |entry| entry.shortfall_credits),
+            solvency_in_transit_count,
+            solvency_in_transit_credits,
         });
     }
     Ok(auction_application::operations::OperationsAlertReconciliationSnapshot {

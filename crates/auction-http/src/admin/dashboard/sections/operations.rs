@@ -147,6 +147,7 @@ pub(crate) fn map_recovery(
 }
 
 /// 资产对账与偿付能力 section；报告缺失时明确 unknown，不用空数据冒充无差异。
+/// 在途装备与在途货款只展示，不参与降级判定：它们已随邮件离开 Bot，等待收件人领取。
 pub(crate) fn map_reconciliation(
     snapshot: OperationsAlertReconciliationSnapshot,
 ) -> AdminDashboardSectionResponse {
@@ -180,7 +181,10 @@ pub(crate) fn map_reconciliation(
             "worlds": snapshot.worlds.iter().map(|world| json!({
                 "world": world.world,
                 "custody_missing_count": world.custody_missing_count,
+                "custody_in_transit_count": world.custody_in_transit_count,
                 "solvency_shortfall_credits": world.solvency_shortfall_credits,
+                "solvency_in_transit_count": world.solvency_in_transit_count,
+                "solvency_in_transit_credits": world.solvency_in_transit_credits,
             })).collect::<Vec<_>>(),
         })),
     }
@@ -190,11 +194,14 @@ pub(crate) fn map_reconciliation(
 mod tests {
     use std::time::Duration;
 
-    use auction_application::operations::OperationsAlertRecoverySnapshot;
+    use auction_application::operations::{
+        OperationsAlertReconciliationWorld, OperationsAlertRecoverySnapshot,
+    };
 
     use super::{
         OperationsAlertDeliverySnapshot, OperationsAlertFulfillmentSnapshot, OperationsAlertPolicy,
-        map_delivery, map_fulfillment, map_recovery,
+        OperationsAlertReconciliationSnapshot, map_delivery, map_fulfillment, map_reconciliation,
+        map_recovery,
     };
 
     fn policy() -> OperationsAlertPolicy {
@@ -336,5 +343,35 @@ mod tests {
             Some(&policy),
         );
         assert_eq!(relist_only.status, "degraded");
+    }
+
+    /// 在途装备与在途货款原样投影但不使对账分区降级；缺失与缺口仍按差异降级。
+    #[test]
+    fn reconciliation_in_transit_is_projected_without_degrading() {
+        let world = |world, custody_in_transit_count, solvency_in_transit_credits| {
+            OperationsAlertReconciliationWorld {
+                world,
+                custody_missing_count: 0,
+                custody_in_transit_count,
+                solvency_shortfall_credits: 0,
+                solvency_in_transit_count: i64::from(solvency_in_transit_credits > 0),
+                solvency_in_transit_credits,
+            }
+        };
+        let snapshot = OperationsAlertReconciliationSnapshot {
+            custody_report_age_seconds: Some(60),
+            solvency_report_age_seconds: Some(60),
+            worlds: vec![world("isekai", 0, 0), world("main", 5, 38_668_000)],
+        };
+        let section = map_reconciliation(snapshot.clone());
+        assert_eq!(section.status, "ok", "在途不是差异");
+        let data = section.data.expect("对账数据");
+        assert_eq!(data["worlds"][1]["custody_in_transit_count"], 5);
+        assert_eq!(data["worlds"][1]["solvency_in_transit_count"], 1);
+        assert_eq!(data["worlds"][1]["solvency_in_transit_credits"], 38_668_000);
+
+        let mut drifted = snapshot;
+        drifted.worlds[1].custody_missing_count = 1;
+        assert_eq!(map_reconciliation(drifted).status, "degraded");
     }
 }

@@ -1,15 +1,17 @@
 //! 资产对账与偿付能力报告：有界只读快照与只追加报告事实。
 //!
 //! 报告不授权任何资金或资产动作；Armory 观察与余额读取只来自既有只读端口。未观察到
-//! 的装备只表示本轮 Armory 七类 organize 页面没有命中，不等于丢失或可处置。
+//! 的装备只表示本轮 Armory 七类 organize 页面没有命中，不等于丢失或可处置。已寄出、
+//! 等待收件人领取的装备与已支出的货款单列为在途：它们已随邮件离开 Bot，不是缺失或待付。
 
 use std::time::Duration;
 
 use auction_application::core::ApplicationFuture;
 use auction_application::core::{ApplicationError, RepositoryError};
 use auction_application::reconciliation::{
-    AssetArmoryObservation, AssetReconciliationStore, AssetReportSummary, CustodyMissingSample,
-    CustodyReconciliationReport, CustodyWorldReport, SolvencyReport, SolvencyWorldReport,
+    AssetArmoryObservation, AssetReconciliationStore, AssetReportSummary, CustodyInTransitReason,
+    CustodyMissingSample, CustodyReconciliationReport, CustodyWorldReport, SolvencyReport,
+    SolvencyWorldReport,
 };
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -35,8 +37,10 @@ const WORLDS: [&str; 2] = ["isekai", "main"];
 /// 快照超出 [`REPORT_TIMEOUT_SECONDS`] 时写入报告的稳定失败码。
 const DEADLINE_EXCEEDED: &str = "reconciliation_deadline_exceeded";
 
-pub const CUSTODY_REPORT_FORMAT: &str = "auction-custody-reconciliation.v1";
-pub const SOLVENCY_REPORT_FORMAT: &str = "auction-solvency-report.v1";
+/// v2 增加在途装备（`in_transit_count`/`in_transit_reasons`）；v1 报告读取时补 0/空列表。
+pub const CUSTODY_REPORT_FORMAT: &str = "auction-custody-reconciliation.v2";
+/// v2 增加在途货款与退款（`in_transit_*`），待付不再含在途；v1 报告读取时补 0。
+pub const SOLVENCY_REPORT_FORMAT: &str = "auction-solvency-report.v2";
 pub const CUSTODY_REPORT_ACTION: &str = "auction.custody.reconcile";
 pub const SOLVENCY_REPORT_ACTION: &str = "auction.solvency.report";
 /// 每条待发出站邮件的估算邮资。
@@ -235,6 +239,8 @@ async fn custody_snapshot(
             expected_count: 0,
             observed_count: 0,
             missing_count: 0,
+            in_transit_count: 0,
+            in_transit_reasons: Vec::new(),
             stock_count: 0,
             personal_count: 0,
             unexpected_count: 0,
@@ -297,6 +303,23 @@ async fn custody_snapshot(
             > i64::try_from(world_report.missing_samples.len()).unwrap_or(0)
             || world_report.unexpected_count
                 > i64::try_from(world_report.unexpected_samples.len()).unwrap_or(0);
+        let in_transit = sqlx::query(queries::CUSTODY_IN_TRANSIT)
+            .bind(world)
+            .bind(ids)
+            .fetch_all(&mut *transaction)
+            .await
+            .map_err(query_failed)?;
+        for row in in_transit {
+            let count: i64 = row.try_get("item_count").map_err(query_failed)?;
+            world_report.in_transit_count = world_report
+                .in_transit_count
+                .checked_add(count)
+                .ok_or("reconciliation_query_failed")?;
+            world_report.in_transit_reasons.push(CustodyInTransitReason {
+                reason: row.try_get("reason").map_err(query_failed)?,
+                count,
+            });
+        }
         report.worlds.push(world_report);
     }
     transaction.commit().await.map_err(snapshot_unavailable)
@@ -323,6 +346,14 @@ async fn solvency_snapshot(
             row.try_get("pending_refund_count").map_err(query_failed)?;
         let pending_refund_credits: i64 =
             row.try_get("pending_refund_credits").map_err(query_failed)?;
+        let in_transit_seller_payout_count: i64 =
+            row.try_get("in_transit_seller_payout_count").map_err(query_failed)?;
+        let in_transit_seller_payout_credits: i64 =
+            row.try_get("in_transit_seller_payout_credits").map_err(query_failed)?;
+        let in_transit_refund_count: i64 =
+            row.try_get("in_transit_refund_count").map_err(query_failed)?;
+        let in_transit_refund_credits: i64 =
+            row.try_get("in_transit_refund_credits").map_err(query_failed)?;
         let pending_outbound_mail_count: i64 =
             row.try_get("pending_outbound_mail_count").map_err(query_failed)?;
         let postage_estimate_credits = pending_outbound_mail_count
@@ -364,6 +395,10 @@ async fn solvency_snapshot(
             pending_seller_payout_credits,
             pending_refund_count,
             pending_refund_credits,
+            in_transit_seller_payout_count,
+            in_transit_seller_payout_credits,
+            in_transit_refund_count,
+            in_transit_refund_credits,
             pending_outbound_mail_count,
             postage_estimate_credits,
             required_credits,

@@ -36,9 +36,14 @@ fn valid_fulfillment(data: &AdminFulfillmentData) -> bool {
         && (data.awaiting_collection > 0 || data.oldest_awaiting_collection_age_seconds == 0)
 }
 
-/// 对账报告按业务世界汇总，最多 main 与 isekai 两项。
+/// 对账报告按业务世界汇总，最多 main 与 isekai 两项；在途件数、笔数与金额不得为负。
 fn valid_reconciliation(data: &AdminReconciliationData) -> bool {
     data.worlds.len() <= 2
+        && data.worlds.iter().all(|world| {
+            world.custody_in_transit_count >= 0
+                && world.solvency_in_transit_count >= 0
+                && world.solvency_in_transit_credits >= 0
+        })
 }
 
 fn valid_external_accounts(data: &AdminExternalAccountsData) -> bool {

@@ -236,8 +236,14 @@ pub struct OperationsAlertReconciliationWorld {
     pub world: &'static str,
     /// 最近一份 custody 报告的缺失装备数量；报告缺失时为 0，由报告年龄表达缺失。
     pub custody_missing_count: i64,
+    /// 最近一份 custody 报告中已寄出、等待领取的在途装备件数；只展示，不产生差异信号。
+    pub custody_in_transit_count: i64,
     /// 最近一份 solvency 报告的缺口 credits；报告缺失或余额未知时为 0。
     pub solvency_shortfall_credits: i64,
+    /// 最近一份 solvency 报告中已寄出且已支出的在途货款与退款笔数；只展示，不计入缺口。
+    pub solvency_in_transit_count: i64,
+    /// 上述在途货款与退款的 credits 合计。
+    pub solvency_in_transit_credits: i64,
 }
 
 /// 资产对账报告投影；`None` 表示该类报告从未追加，不能当作“无差异”。

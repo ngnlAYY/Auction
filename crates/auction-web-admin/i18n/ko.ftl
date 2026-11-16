@@ -1762,6 +1762,10 @@ dashboard-reconciliation-worlds = 월드
 dashboard-reconciliation-custody = 누락 장비
 dashboard-reconciliation-solvency = 지급 부족
 dashboard-reconciliation-credits = { $credits } credits
+dashboard-reconciliation-custody-in-transit = 배송 중 장비
+dashboard-reconciliation-solvency-in-transit = 배송 중 지급·환불
+dashboard-reconciliation-in-transit-credits = { $count }건, { $credits } credits
+dashboard-reconciliation-in-transit-note = 배송 중은 이미 메일로 보내져 수령인이 받기를 기다리는 상태로, 누락 장비나 지급 부족에 포함하지 않습니다. 보고서는 읽기 전용이며 어떤 자금·장비 조치도 승인하지 않습니다.
 dashboard-reconciliation-status-unavailable = 조정 보고서를 사용할 수 없습니다
 
 delivery-detail-acknowledge-title = 처리된 과거 실패 확인

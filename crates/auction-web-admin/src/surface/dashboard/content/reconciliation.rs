@@ -1,4 +1,4 @@
-//! 资产对账面板：托管缺失与偿付缺口的逐世界状态。
+//! 资产对账面板：托管缺失、偿付缺口与在途资产的逐世界状态。
 
 use auction_web_shared::t;
 use dioxus::prelude::*;
@@ -67,11 +67,30 @@ pub(super) fn reconciliation_panel(
                                 ),
                             )}
                         }
+                        // 在途只展示：已寄出、等待收件人领取，不计入缺失与缺口。
+                        span { class: "admin-dashboard-label",
+                            {t!("dashboard-reconciliation-custody-in-transit")}
+                            " "
+                            {badge("neutral", world.custody_in_transit_count.to_string())}
+                        }
+                        span { class: "admin-dashboard-label",
+                            {t!("dashboard-reconciliation-solvency-in-transit")}
+                            " "
+                            {badge(
+                                "neutral",
+                                t!(
+                                    "dashboard-reconciliation-in-transit-credits",
+                                    count: world.solvency_in_transit_count,
+                                    credits: world.solvency_in_transit_credits
+                                ),
+                            )}
+                        }
                     }
                     div { class: "admin-dashboard-label", {admin_world_label(&world.world)} }
                 }
             }
         }
+        p { class: "admin-panel__note", {t!("dashboard-reconciliation-in-transit-note")} }
     } else {
         p { class: "admin-dashboard-status",
             {t!("dashboard-reconciliation-status-unavailable")}

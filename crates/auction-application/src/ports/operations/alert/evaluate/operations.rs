@@ -139,7 +139,10 @@ pub(super) fn evaluate_reconciliation(
         || snapshot.worlds.iter().any(|world| {
             !matches!(world.world, "main" | "isekai")
                 || world.custody_missing_count < 0
+                || world.custody_in_transit_count < 0
                 || world.solvency_shortfall_credits < 0
+                || world.solvency_in_transit_count < 0
+                || world.solvency_in_transit_credits < 0
         })
         || snapshot.worlds.iter().filter(|world| world.world == "main").count() != 1
         || snapshot.worlds.iter().filter(|world| world.world == "isekai").count() != 1
