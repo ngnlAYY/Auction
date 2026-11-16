@@ -2,7 +2,8 @@
 //!
 //! - 从真实回收夹具执行确认：载体付款证明保留，从未开始的卖方货款与已寄出的交付收口为
 //!   `failed`，原交付当前 fence 上恰好一条 `recovery_equipment_recovered` 处置；随后买方退款经
-//!   真实资金转换、prepare 与 activate 进入发送队列，命令重放不重复收口；
+//!   真实资金转换、prepare 与 activate 进入发送队列，命令重放不重复收口；原交付只有旧格式引用
+//!   恢复证明（`sent_recovered_reference_v1`）时，确认、资金转换、资产冲突门与预览同样放行；
 //! - 原交付与本轮 Take 链路不符、卖方货款已开始或已有支出、交付已满足、存在更新派发或原交付没有
 //!   可信 Sent 证明时拒绝确认，什么都不改；
 //! - 告警分类口径与长期未领取的计数、清单都按同一收口事实排除这两条终态，legacy 与 shadow
@@ -85,63 +86,17 @@ async fn business_state(pool: &PgPool, obligation: Uuid) -> String {
         .expect("读取义务业务状态")
 }
 
-/// 从真实回收夹具确认 `equipment_recovered`，再走退款的资金转换、prepare 与 activate。
-#[tokio::test]
-async fn postgres_equipment_recovered_closes_dependents_and_funds_refund() {
-    let database = support::TestDatabase::create().await.expect("克隆模板库");
-    let store = database.store().await.expect("以运行账号连接");
+/// 确认之后的买方退款：真实资金转换把卖方用途改为退款用途（不新增收入），再经同一 claim 的
+/// prepare 与 activate 进入发送队列；返回退款投递 ID。
+async fn fund_and_activate_refund(
+    store: &DatabaseStore,
+    recovered: &Recovered,
+    credential: Uuid,
+) -> Uuid {
     let pool = store.postgres_pool();
-    let recovered = insert_recovered_sale(pool, 7_800_001).await;
-    insert_relist_target(pool, 7_800_001).await;
-    let credential = insert_funding(pool, &recovered).await;
     let sale = &recovered.sale;
-    let payment_before = fulfillment(pool, sale.payment).await;
-
-    let command = confirmation(sale, RecoveryConfirmationAction::EquipmentRecovered);
-    let result = store.confirm_recovery(command.clone()).await.expect("确认 equipment_recovered");
-    assert_eq!(
-        (result.stage.as_str(), result.resolution.as_str()),
-        ("refunding", "equipment_recovered")
-    );
-
-    // 载体付款与其证明保留；卖方货款与原交付收口，原交付投递与 Take 证明不改写。
-    assert_eq!(fulfillment(pool, sale.payment).await, payment_before);
-    assert_eq!(
-        fulfillment(pool, sale.seller).await,
-        ("failed".to_owned(), Some("recovery_sale_voided".to_owned()))
-    );
-    assert_eq!(
-        fulfillment(pool, recovered.handoff).await,
-        ("failed".to_owned(), Some("recovery_equipment_recovered".to_owned()))
-    );
-    assert_eq!(
-        dispositions(pool, recovered.handoff_delivery).await,
-        vec![(
-            "recovery_equipment_recovered".to_owned(),
-            Some("recovery_equipment_recovered".to_owned()),
-            "admin".to_owned()
-        )]
-    );
-    assert_eq!(closure_audits(pool, sale).await, 2);
-    for delivery in [recovered.handoff_delivery, recovered.take_delivery] {
-        let status: String =
-            sqlx::query_scalar("SELECT status FROM public.deliveries WHERE id = $1")
-                .bind(delivery)
-                .fetch_one(pool)
-                .await
-                .expect("读取投递");
-        assert_eq!(status, "succeeded", "原交付与 Take 投递不改写");
-    }
-    assert_eq!(business_state(pool, sale.refund).await, "ready");
-
-    // 同一命令重放返回原结果，不重复收口、处置或审计。
-    let replayed = store.confirm_recovery(command).await.expect("重放确认");
-    assert_eq!(replayed.state_version, result.state_version);
-    assert_eq!(dispositions(pool, recovered.handoff_delivery).await.len(), 1);
-    assert_eq!(closure_audits(pool, sale).await, 2);
-
     // 买方退款：真实资金转换把卖方用途改为退款用途，不新增收入。
-    let claim = claim_refund(&store, sale.refund).await;
+    let claim = claim_refund(store, sale.refund).await;
     let version = recipient_version(pool, &claim).await;
     let funding =
         SettlementInternalCommand::external_refund(claim.clone(), version).expect("退款资金命令");
@@ -217,6 +172,65 @@ async fn postgres_equipment_recovered_closes_dependents_and_funds_refund() {
         .await
         .expect("读取退款投递");
     assert_eq!(status, "pending");
+    prepared.delivery_id
+}
+
+/// 从真实回收夹具确认 `equipment_recovered`，再走退款的资金转换、prepare 与 activate。
+#[tokio::test]
+async fn postgres_equipment_recovered_closes_dependents_and_funds_refund() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("以运行账号连接");
+    let pool = store.postgres_pool();
+    let recovered = insert_recovered_sale(pool, 7_800_001).await;
+    insert_relist_target(pool, 7_800_001).await;
+    let credential = insert_funding(pool, &recovered).await;
+    let sale = &recovered.sale;
+    let payment_before = fulfillment(pool, sale.payment).await;
+
+    let command = confirmation(sale, RecoveryConfirmationAction::EquipmentRecovered);
+    let result = store.confirm_recovery(command.clone()).await.expect("确认 equipment_recovered");
+    assert_eq!(
+        (result.stage.as_str(), result.resolution.as_str()),
+        ("refunding", "equipment_recovered")
+    );
+
+    // 载体付款与其证明保留；卖方货款与原交付收口，原交付投递与 Take 证明不改写。
+    assert_eq!(fulfillment(pool, sale.payment).await, payment_before);
+    assert_eq!(
+        fulfillment(pool, sale.seller).await,
+        ("failed".to_owned(), Some("recovery_sale_voided".to_owned()))
+    );
+    assert_eq!(
+        fulfillment(pool, recovered.handoff).await,
+        ("failed".to_owned(), Some("recovery_equipment_recovered".to_owned()))
+    );
+    assert_eq!(
+        dispositions(pool, recovered.handoff_delivery).await,
+        vec![(
+            "recovery_equipment_recovered".to_owned(),
+            Some("recovery_equipment_recovered".to_owned()),
+            "admin".to_owned()
+        )]
+    );
+    assert_eq!(closure_audits(pool, sale).await, 2);
+    for delivery in [recovered.handoff_delivery, recovered.take_delivery] {
+        let status: String =
+            sqlx::query_scalar("SELECT status FROM public.deliveries WHERE id = $1")
+                .bind(delivery)
+                .fetch_one(pool)
+                .await
+                .expect("读取投递");
+        assert_eq!(status, "succeeded", "原交付与 Take 投递不改写");
+    }
+    assert_eq!(business_state(pool, sale.refund).await, "ready");
+
+    // 同一命令重放返回原结果，不重复收口、处置或审计。
+    let replayed = store.confirm_recovery(command).await.expect("重放确认");
+    assert_eq!(replayed.state_version, result.state_version);
+    assert_eq!(dispositions(pool, recovered.handoff_delivery).await.len(), 1);
+    assert_eq!(closure_audits(pool, sale).await, 2);
+
+    fund_and_activate_refund(&store, &recovered, credential).await;
 
     // funding 预览只认精确收口：两条收口的 failed 不再是不明责任；失败码不符即恢复阻断。
     let lot = recovered.lot_id.to_string();
@@ -242,6 +256,53 @@ async fn postgres_equipment_recovered_closes_dependents_and_funds_refund() {
     .expect("改为普通失败");
     let preview = store.preview_funding(FUNDING_UID.to_owned()).await.expect("funding 预览");
     assert_eq!(unproven(&preview.blockers), 2, "{:?}", preview.blockers);
+
+    store.postgres_pool().close().await;
+}
+
+/// 原交付的 Sent 证明是旧格式引用恢复（只为缺冻结发送尝试的旧投递生成）：确认收回链、内部退款
+/// 校验与资产冲突门共用同一可信证明谓词，确认之后退款照常完成资金转换、prepare 与 activate，
+/// funding 预览也不再把这两条精确收口当成不明责任。
+#[tokio::test]
+async fn postgres_equipment_recovered_with_legacy_reference_proof_funds_refund() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("以运行账号连接");
+    let pool = store.postgres_pool();
+    let recovered = insert_recovered_sale(pool, 7_800_301).await;
+    insert_relist_target(pool, 7_800_301).await;
+    let credential = insert_funding(pool, &recovered).await;
+    sqlx::query(
+        "UPDATE public.deliveries
+         SET result_metadata = jsonb_build_object(
+                 'operation', 'send', 'proof', 'sent_recovered_reference_v1',
+                 'external_reference_proven', true, 'sent_recovered', true,
+                 'recovered_mid', split_part(external_reference, ':', 4))
+         WHERE id = $1",
+    )
+    .bind(recovered.handoff_delivery)
+    .execute(pool)
+    .await
+    .expect("原交付只有旧格式引用恢复证明");
+
+    let result = store
+        .confirm_recovery(confirmation(
+            &recovered.sale,
+            RecoveryConfirmationAction::EquipmentRecovered,
+        ))
+        .await
+        .expect("旧格式引用恢复证明照常确认 equipment_recovered");
+    assert_eq!(result.stage, "refunding");
+    fund_and_activate_refund(&store, &recovered, credential).await;
+
+    let lot = recovered.lot_id.to_string();
+    let preview = store.preview_funding(FUNDING_UID.to_owned()).await.expect("funding 预览");
+    assert!(
+        !preview.blockers.iter().any(|blocker| blocker.contains(&lot)
+            && (blocker.ends_with(":handoff_unproven")
+                || blocker.ends_with(":seller_state:unproven"))),
+        "{:?}",
+        preview.blockers
+    );
 
     store.postgres_pool().close().await;
 }

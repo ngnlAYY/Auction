@@ -32,8 +32,8 @@ mod mapping;
 mod reconcile;
 mod recovery_closure;
 pub(crate) use recovery_closure::{
-    equipment_recovered_closure_sql, recovery_closed_fulfillment_sql,
-    recovery_disposed_delivery_sql,
+    equipment_recovered_closure_sql, recovered_handoff_sent_proof_sql,
+    recovery_closed_fulfillment_sql, recovery_disposed_delivery_sql,
 };
 mod returns;
 pub(crate) use returns::{

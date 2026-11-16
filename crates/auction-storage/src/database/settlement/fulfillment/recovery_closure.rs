@@ -38,6 +38,33 @@ macro_rules! equipment_recovered_closure_sql {
 }
 pub(crate) use equipment_recovered_closure_sql;
 
+/// 被收回的 isekai 交付投递 `$delivery` 有可信 Sent 证明：已成功、远端引用已证明，证明是精确载荷
+/// （`sent_exact_payload_v1`）、旧格式引用恢复（`sent_recovered_reference_v1`，只为缺冻结发送尝试的
+/// 旧投递生成）或冻结尝试绑定的自动/人工证明。确认 `equipment_recovered` 的收回链、内部退款校验与
+/// 资产冲突门共用这一谓词；funding 预览只认确认事务据它写下的精确收口事实。各门曾各写一份证明
+/// 集合，旧格式证明能确认却在资产冲突门被拒，合法确认后退款仍无法执行。
+macro_rules! recovered_handoff_sent_proof_sql {
+    ($delivery:literal) => {
+        concat!(
+            "(",
+            $delivery,
+            ".status = 'succeeded' AND ",
+            $delivery,
+            ".result_metadata->>'external_reference_proven' = 'true' AND (",
+            $delivery,
+            ".result_metadata->>'proof' IN ('sent_exact_payload_v1', 'sent_recovered_reference_v1')
+              OR public.delivery_has_frozen_sent_proof(",
+            $delivery,
+            ".id, ",
+            $delivery,
+            ".result_metadata, ",
+            $delivery,
+            ".external_reference)))"
+        )
+    };
+}
+pub(crate) use recovered_handoff_sent_proof_sql;
+
 /// 义务 `$obligation` 的履约 `$fulfillment` 已被恢复收口精确终结：履约为 `failed`，失败码与处置
 /// 种类、义务角色对应，处置来源为同一恢复记录且落在被处置投递的当前 fence 上。
 ///

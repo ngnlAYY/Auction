@@ -22,6 +22,7 @@ pub(super) async fn exclude_conflicts(
     // handoff 须仍为确认前的 enqueued，或已由确认事务以精确收口事实（failed/
     // recovery_equipment_recovered 与当前 fence 上的恢复来源处置）终结；只排除这一条原投递，
     // prepared/sending/manual_reconcile、任意其他 failed 及未知结果不在此例外内，也不改写旧义务。
+    // 可信 Sent 证明与确认收回链、内部退款校验同一谓词，旧格式引用恢复证明同样放行。
     let recovered_handoff: Option<uuid::Uuid> =
         if target.kind == auction_domain::SettlementObligationKind::BuyerRefund {
             sqlx::query_scalar(concat!(
@@ -41,14 +42,8 @@ pub(super) async fn exclude_conflicts(
                      AND (h.execution_state='enqueued' OR "#,
                 crate::database::settlement::fulfillment::equipment_recovered_closure_sql!("r"),
                 r#")
-                     AND d.status='succeeded'
-                     AND (
-                         d.result_metadata->>'proof'='sent_exact_payload_v1'
-                         OR public.delivery_has_frozen_sent_proof(
-                             d.id,d.result_metadata,d.external_reference
-                         )
-                     )
-                     AND d.result_metadata->>'external_reference_proven'='true'"#
+                     AND "#,
+                crate::database::settlement::fulfillment::recovered_handoff_sent_proof_sql!("d")
             ))
             .bind(target.obligation_id.as_uuid())
             .fetch_optional(&mut **tx)

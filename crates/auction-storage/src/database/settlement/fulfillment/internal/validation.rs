@@ -245,7 +245,7 @@ pub(super) async fn validate(
         }
         if action == InternalSettlementAction::Refund {
             // 原交付须仍为确认前的 enqueued，或已由确认事务以精确收口事实终结；任意其他 failed
-            // 不能放行退款。
+            // 不能放行退款。可信 Sent 证明与确认收回链、资产冲突门同一谓词。
             let recovered: bool = sqlx::query_scalar(concat!(
                 r#"SELECT EXISTS(
                        SELECT 1
@@ -267,16 +267,9 @@ pub(super) async fn validate(
                          AND (h.execution_state='enqueued' OR "#,
                 crate::database::settlement::fulfillment::equipment_recovered_closure_sql!("r"),
                 r#")
-                         AND hd.status='succeeded'
-                         AND (
-                             hd.result_metadata->>'proof' IN (
-                                 'sent_exact_payload_v1','sent_recovered_reference_v1'
-                             )
-                             OR public.delivery_has_frozen_sent_proof(
-                                 hd.id,hd.result_metadata,hd.external_reference
-                             )
-                         )
-                         AND hd.result_metadata->>'external_reference_proven'='true'
+                         AND "#,
+                crate::database::settlement::fulfillment::recovered_handoff_sent_proof_sql!("hd"),
+                r#"
                          AND p.execution_state='satisfied'
                          AND p.proof_digest IS NOT NULL
                    )"#

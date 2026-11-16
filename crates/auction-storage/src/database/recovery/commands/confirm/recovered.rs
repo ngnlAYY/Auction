@@ -19,6 +19,7 @@ use crate::database::TrackedTransaction as Transaction;
 use crate::database::delivery::disposition::{DeliveryDispositionFact, append};
 use crate::database::recovery::commands::mapping::map_sql_error;
 use crate::database::recovery::commands::scope::{ActionRow, RecoveryRow};
+use crate::database::settlement::fulfillment::recovered_handoff_sent_proof_sql;
 
 /// 已寄出又被收回的 isekai 装备交付的失败码，也是处置事实的原因码。
 const EQUIPMENT_RECOVERED_CODE: &str = "recovery_equipment_recovered";
@@ -47,11 +48,13 @@ const SELLER_UNTOUCHED: &str = r#"SELECT EXISTS (
 /// 原交付与本轮 Take 的精确链路：`$1` 原交付投递、`$2` 交付义务、`$3` 选中的 Take 动作、`$4`
 /// 恢复记录、`$5` 恢复记录的装备。
 ///
-/// - 原交付是该义务唯一的派发，是已在 isekai 成功寄出的 Send，并有可信 Sent 证明；
+/// - 原交付是该义务唯一的派发，是已在 isekai 成功寄出的 Send，并有可信 Sent 证明（与内部退款
+///   校验、资产冲突门共用同一谓词）；
 /// - 系统退件绑定该交付义务、属于 isekai，且已被本恢复记录消费，正是恢复记录当前的退件；
 /// - Take 的来源邮件就是这封退件，证明种类、引用（退件 MID）与恢复记录的 custody 摘要一致，预期
 ///   只取回这件装备（零 Credits、零 COD），Take 投递按同一 MID 在 isekai 成功。
-const RECOVERED_HANDOFF_CHAIN: &str = r#"SELECT EXISTS (
+const RECOVERED_HANDOFF_CHAIN: &str = concat!(
+    r#"SELECT EXISTS (
     SELECT 1
     FROM public.deliveries AS handoff
     JOIN public.settlement_recoveries AS recovery ON recovery.id = $4
@@ -63,16 +66,11 @@ const RECOVERED_HANDOFF_CHAIN: &str = r#"SELECT EXISTS (
     WHERE handoff.id = $1
       AND handoff.origin_kind = 'settlement'
       AND handoff.origin_id = $2::text
-      AND handoff.status = 'succeeded'
       AND handoff.payload_operation = 'send'
       AND handoff.payload_world = 'isekai'
-      AND (handoff.result_metadata->>'proof' IN (
-               'sent_exact_payload_v1', 'sent_recovered_reference_v1'
-           )
-           OR public.delivery_has_frozen_sent_proof(
-               handoff.id, handoff.result_metadata, handoff.external_reference
-           ))
-      AND handoff.result_metadata->>'external_reference_proven' = 'true'
+      AND "#,
+    recovered_handoff_sent_proof_sql!("handoff"),
+    r#"
       AND NOT EXISTS (
           SELECT 1 FROM public.deliveries AS other
           WHERE other.origin_kind = 'settlement' AND other.origin_id = $2::text
@@ -103,7 +101,8 @@ const RECOVERED_HANDOFF_CHAIN: &str = r#"SELECT EXISTS (
       AND take_delivery.payload_operation = 'take'
       AND take_delivery.payload_world = 'isekai'
       AND take_delivery.external_reference = 'mooglemail:isekai:take:' || returned.external_mail_id
-)"#;
+)"#
+);
 
 /// 收口 `equipment_recovered` 的依赖履约；调用方已按既有锁序锁定恢复记录、义务、动作与全部
 /// 履约行，并已复核付款满足、交付就绪与 custody 证明。
