@@ -20,19 +20,19 @@ use uuid::Uuid;
 use crate::support;
 
 /// 一笔主世界 COD 成交：买家、装备、已结算场次、lot 与三条结算义务。
-struct CodSale {
-    winner_user_id: Uuid,
-    auction_id: Uuid,
-    lot_id: Uuid,
-    equipment_id: Uuid,
-    external_equipment_id: String,
-    payment_obligation: Uuid,
-    seller_obligation: Uuid,
-    refund_obligation: Uuid,
+pub(crate) struct CodSale {
+    pub(crate) winner_user_id: Uuid,
+    pub(crate) auction_id: Uuid,
+    pub(crate) lot_id: Uuid,
+    pub(crate) equipment_id: Uuid,
+    pub(crate) external_equipment_id: String,
+    pub(crate) payment_obligation: Uuid,
+    pub(crate) seller_obligation: Uuid,
+    pub(crate) refund_obligation: Uuid,
 }
 
 /// `recovery_version` 写入场次冻结快照，与 recovery 行的 `policy_version` 保持一致。
-async fn insert_sale(
+pub(crate) async fn insert_sale(
     pool: &PgPool,
     sequence: i64,
     at: DateTime<Utc>,
@@ -185,7 +185,8 @@ async fn insert_sale(
     sale
 }
 
-/// 已接受的 COD 退件；收件箱时间按调用方给出的分钟精度写入。
+/// 已接受的系统 COD 退件；收件箱时间按调用方给出的分钟精度写入。入站展示快照记录系统发件人
+/// 与 `[RTS] ` + canonical 主题，恢复流程据此证明来源。
 async fn insert_return_mail(
     pool: &PgPool,
     sale: &CodSale,
@@ -196,9 +197,11 @@ async fn insert_return_mail(
     sqlx::query(
         "INSERT INTO public.inbound_mail
             (id, mailbox_key, external_mail_id, world_id, mail_kind, content_digest,
-             received_at, status, decision_code, decision_metadata, processed_at)
+             received_at, status, decision_code, decision_metadata, processed_at,
+             sender, subject)
          VALUES ($1, 'recovery-returns', $2, 'main', 'delivery', $3, $4, 'accepted',
-                 'settlement_recovery_returned', $5, $4 + interval '1 minute')",
+                 'settlement_recovery_returned', $5, $4 + interval '1 minute',
+                 'MoogleMail', $6)",
     )
     .bind(mail_id)
     .bind(external_mail_id)
@@ -210,6 +213,7 @@ async fn insert_return_mail(
         "cod": 0,
         "attachment_ids": [sale.external_equipment_id],
     }))
+    .bind(format!("[RTS] Auction equipment delivery [{}]", sale.payment_obligation))
     .execute(pool)
     .await
     .expect("写入退件");
@@ -217,7 +221,7 @@ async fn insert_return_mail(
 }
 
 /// 尚未收到退件的付款等待中 recovery；`created_at` 即结算发生时刻。
-async fn insert_awaiting_recovery(
+pub(crate) async fn insert_awaiting_recovery(
     pool: &PgPool,
     sale: &CodSale,
     created_at: DateTime<Utc>,
@@ -248,13 +252,13 @@ async fn insert_awaiting_recovery(
 }
 
 /// 结算时刻取在某分钟的第 37.5 秒，模拟亚秒级 `due_at`；返回该分钟起点与结算时刻。
-fn settlement_minute() -> (DateTime<Utc>, DateTime<Utc>) {
+pub(crate) fn settlement_minute() -> (DateTime<Utc>, DateTime<Utc>) {
     let minute =
         (Utc::now() - Duration::hours(2)).duration_trunc(Duration::minutes(1)).expect("按分钟取整");
     (minute, minute + Duration::milliseconds(37_500))
 }
 
-async fn consumed_returns(pool: &PgPool, recovery_id: Uuid) -> i64 {
+pub(crate) async fn consumed_returns(pool: &PgPool, recovery_id: Uuid) -> i64 {
     sqlx::query_scalar(
         "SELECT count(*) FROM public.settlement_recovery_return_consumptions WHERE recovery_id = $1",
     )

@@ -85,7 +85,7 @@ Worker 的“结算履约”循环领取可执行义务，按 `pending → prepa
 
 证据未观察时不空转：等待 delivery 终态、Sent 回执或买家/卖家在 MoogleMail 领取资产的延期，按该义务已持久化的延期次数指数放宽（`worker.fulfillment.retry_delay_seconds` 起每档翻倍），最多 10 分钟；COD/货款仍按共享追踪窗口（`evidence_poll_seconds`）对齐读取。付款截止（`payment_deadline_at`）前后一个上限周期回到基础间隔，因此迟到付款的确认与卖方货款最多延后 10 分钟。退避只决定轮询时刻：付款期限、逾期判定与恢复策略都不变；依赖或身份错误仍按配置的基础间隔重试。
 
-结算相关邮件主题带义务 ID，例如 `auction equipment delivery [<义务 UUID>]`、`auction payment request [<义务 UUID>]`。买方拒收或 COD 过期被退回时，退件由系统发件人 `MoogleMail` 以 `[RTS] ` + 原主题寄回 Bot 收件箱，邮件处理器只在发件人为系统时据去掉前缀后的主题识别为对应义务的退件证据（无前缀的原主题仍按兼容路径识别）（见[docs/guide/mail-flows.md#结算退件](mail-flows.md#结算退件)）。
+结算相关邮件主题带义务 ID，例如 `auction equipment delivery [<义务 UUID>]`、`auction payment request [<义务 UUID>]`、`auction seller payout [<义务 UUID>]`、`auction buyer refund [<义务 UUID>]`。收件人拒收或 COD 过期被退回时，退件由系统发件人 `MoogleMail` 以 `[RTS] ` + 原主题寄回 Bot 收件箱，邮件处理器只在发件人为系统时据去掉前缀后的主题识别为对应义务的退件证据；无前缀的原主题不再识别（义务 ID 可由公开 ID 推出，不能证明来源）。恢复记录付款或交付义务的退件由恢复流程消费；货款、退款与流拍/撤拍寄回的退件只留证，对应未终结履约转人工对账（`settlement_mail_returned`），不自动领取、退回或重发，也不改变资金（见[docs/guide/mail-flows.md#结算退件](mail-flows.md#结算退件)）。
 
 新建的 main 装备 COD 邮件正文包含装备名、价格明细（成交价、附加费或补偿、应付金额）与冻结付款期限；isekai 载体付款邮件展示装备名、含载体 Credit 的 COD 面额与同一冻结期限；卖方货款与买方退款邮件写明对应装备名与金额。正文里的付款期限是恢复记录的**首寄期限 D0** = 恢复记录建立时刻（`created_at`）+ 冻结恢复策略版本的付款期限（v1 七天、v2 24 小时），只用于正文呈现，不改变逾期判定。COD 实收资金化与载体付款记账按生成方的同一规则核对这两个展示变量：载荷带装备名或付款期限时，必须等于冻结装备名与 D0 的 UTC 秒精度文本；不带的是加入前生成的旧载荷，按原形状比较；生成方不会产生的组合失败关闭；内部履约的资产冲突门只认这两个变量的已发布形状。各类邮件正文模板保存在数据库，可在 Admin 参数页的“MoogleMail 模板”中定制，已冻结的旧投递保留原载荷，正文缺项时按中性文案呈现。
 
@@ -121,7 +121,7 @@ prepared → pending → claimed → sending → succeeded
 付款期限到达只创建提醒并进入 `payment_overdue`，不会仅凭逾期自动取消成交、退回装备或拉黑买家。实际截止以恢复报告的 `payment_deadline_at` 为准；赛季前场次的配置时序校验使用计划结束时间，软截止或延迟结算后仍从实际建立恢复记录起算完整 24 小时。
 
 - main 装备 COD 在付款前退回：第 1 至 `limit − 1` 次退回时，系统取得收回装备的动作证明后重新寄出原 COD（金额与装备不变）；第 `limit` 次退回时，为卖家建立撤拍退回义务，原 COD 与卖方货款按失败收口，并拉黑买家。每封退件只计数一次。
-- 退件证据须与冻结预期一致：Credits、COD 与附件相符，且收件时间不早于结算所在分钟再减 2 分钟时钟余量（收件箱时间只到分钟）、不晚于记录时刻。不符的退件照样消费并计数，恢复记录进入 `reclaiming` 并以阻断码 `evidence_mismatch`（报表显示为 `recovery_evidence_mismatch`）等待人工核对，不建立自动动作；同事务追加审计 `recovery.return_blocked`，`reason` 区分内容不符（`content_mismatch`）与时间越界（`received_outside_window`）。其后的退件照常处理。
+- 恢复流程只消费来源可证明的系统退件：持久化的发件人恰为 `MoogleMail`，主题是 `[RTS] ` + 该义务种类的 canonical 主题；来源无法证明的历史记录由结算退件消费方隔离，不计次数。退件证据须与冻结预期一致：Credits、COD 与附件相符，且收件时间不早于结算所在分钟再减 2 分钟时钟余量（收件箱时间只到分钟）、不晚于记录时刻。不符的退件照样消费并计数，恢复记录进入 `reclaiming` 并以阻断码 `evidence_mismatch`（报表显示为 `recovery_evidence_mismatch`）等待人工核对，不建立自动动作；同事务追加审计 `recovery.return_blocked`，`reason` 区分内容不符（`content_mismatch`）与时间越界（`received_outside_window`）。其后的退件照常处理。
 - isekai 载体 COD 退回时先收回载体；已经付款但交付装备被退回时先取得装备收回证明。Admin 分别通过 `cancelled` 或 `equipment_recovered` 确认后重列到该世界的草稿接收场次，后者还激活买方退款；没有草稿目标时保持 `relist_pending`。main 的 `reclaimed` 也只在对应收回证明与义务状态允许时可确认。
 - 赛季换季限制（参与早鸟期的世界）：赛季开始前的新赛季草稿不接收重列，保持 `relist_pending` 并按持久化退避重试；原始投稿收件或成交场次开拍后已经历赛季开始的旧赛季装备永不重列，记录阻断码 `relist_season_closed`（报表显示为 `recovery_relist_unavailable`），停在 `relist_pending` 且不再自动重试，由 Admin 人工处理。判断沿用不可变的原始投稿收件事实，修改场次排期不会把旧装备变为新赛季资产；只使用已冻结且非 NULL 的赛季边界，不回填历史场次。
 - 上述任一路径首次落定 `resolution`（成交撤销）时，同事务按[成交撤销冲正](#成交撤销冲正规则-v1)回滚补偿池。

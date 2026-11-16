@@ -1,6 +1,8 @@
 //! 记录 Recovery 退回并建立下一步 action 的事务入口。
 
 use auction_application::recovery::RecoveryReturnAdvance;
+use auction_application::settlement::system_return_matches_obligation;
+use auction_domain::SettlementObligationKind;
 use chrono::{DateTime, TimeDelta, Timelike, Utc};
 use serde::Deserialize;
 use sqlx::{Postgres, Row};
@@ -18,6 +20,7 @@ use crate::database::recovery::scheduler::returns::model::{
 use crate::database::recovery::scheduler::returns::validation::{
     expected_recovery_return, validate_recovery_return_metadata,
 };
+use crate::database::settlement::fulfillment::system_settlement_return_source;
 
 /// 退件收件时间下界在结算所在分钟之前再留出的远端时钟余量。
 const RETURN_CLOCK_SLACK: TimeDelta = TimeDelta::minutes(2);
@@ -29,13 +32,17 @@ pub(crate) async fn record_return_postgres(
     let mut transaction =
         pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await.map_err(map_storage_error)?;
 
-    let Some(row) = sqlx::query(
+    // 只消费来源可证明为系统 `[RTS]` 的退件：义务 ID 可由公开 ID 推出，旧的无前缀兼容入口留下
+    // 的记录由结算退件消费方隔离，不计次数、不改变恢复状态（不变量 6）。两边分区互斥。
+    let Some(row) = sqlx::query(concat!(
         r#"SELECT recovery.id AS recovery_id,
                   inbound.id AS return_mail_id,
                   inbound.external_mail_id AS return_external_mail_id,
                   inbound.world_id AS return_world_id,
                   inbound.decision_metadata AS return_metadata,
                   inbound.received_at AS return_received_at,
+                  inbound.sender AS return_sender,
+                  inbound.subject AS return_subject,
                   obligation.id AS returned_obligation_id,
                   obligation.obligation_kind AS returned_obligation_kind,
                   obligation.carrier_credit AS returned_carrier_credit,
@@ -68,10 +75,13 @@ pub(crate) async fn record_return_postgres(
                  FROM public.settlement_recovery_return_consumptions AS consumed
                  WHERE consumed.return_mail_id = inbound.id
              )
+             AND "#,
+        system_settlement_return_source!(),
+        r#"
            ORDER BY inbound.received_at, inbound.id, recovery.id
            LIMIT 1
-           FOR UPDATE OF recovery SKIP LOCKED"#,
-    )
+           FOR UPDATE OF recovery SKIP LOCKED"#
+    ))
     .bind(now)
     .fetch_optional(&mut *transaction)
     .await
@@ -112,12 +122,21 @@ pub(crate) async fn record_return_postgres(
         return Err(repository_error("recovery 退回邮件 obligation 引用冲突"));
     }
 
+    // 查询已证明发件人与 `[RTS]` 主题；这里再把主题绑定到义务种类的 canonical 主题，主题与种类
+    // 不符同样按证据不符隔离。
+    let subject_matches = matches!(
+        (row.return_sender.as_deref(), row.return_subject.as_deref(),
+         SettlementObligationKind::from_name(&row.returned_obligation_kind)),
+        (Some(sender), Some(subject), Some(kind))
+            if system_return_matches_obligation(sender, subject, kind, row.returned_obligation_id)
+    );
     let expected = expected_recovery_return(&row);
-    let content_matches = expected.as_ref().is_some_and(|expected| {
-        metadata.credits == expected.expected_credits
-            && metadata.cod == expected.expected_cod
-            && metadata.attachment_ids == expected.expected_attachment_ids
-    });
+    let content_matches = subject_matches
+        && expected.as_ref().is_some_and(|expected| {
+            metadata.credits == expected.expected_credits
+                && metadata.cod == expected.expected_cod
+                && metadata.attachment_ids == expected.expected_attachment_ids
+        });
     let blocking_code =
         (!received_in_window || !content_matches).then(|| "evidence_mismatch".to_owned());
 

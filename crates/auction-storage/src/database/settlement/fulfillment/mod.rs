@@ -21,6 +21,8 @@ pub use internal::asset_conflict_gate_passes;
 pub(crate) use internal::{assetless_mail_notification, exclude_equipment_loss_conflicts};
 mod mapping;
 mod reconcile;
+mod returns;
+pub(crate) use returns::{consume_return_postgres, system_settlement_return_source};
 mod sent_lookup;
 
 use self::claims::claim_postgres;

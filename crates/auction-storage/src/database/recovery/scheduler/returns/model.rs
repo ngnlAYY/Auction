@@ -22,6 +22,9 @@ pub(super) struct RecoveryReturnRow {
     pub(super) return_world_id: String,
     pub(super) return_metadata: Value,
     pub(super) return_received_at: DateTime<Utc>,
+    /// 入站展示快照中的发件人与主题；来源已由查询谓词证明，这里只用于绑定义务种类。
+    pub(super) return_sender: Option<String>,
+    pub(super) return_subject: Option<String>,
     pub(super) returned_obligation_id: Uuid,
     pub(super) returned_obligation_kind: String,
     pub(super) returned_carrier_credit: i64,

@@ -102,11 +102,22 @@ pub enum RecoveryActionOutcome {
 /// PostgreSQL 在同一 Serializable 事务中锁定 due case、检查结算履约事实、推进阶段并
 /// 创建 payment reminder action，不以内存定时器替代持久事实。
 pub trait RecoveryWorkStore: Send + Sync {
-    /// 记录一封尚未消费的结算退回邮件，并在同一事务中创建后续 recovery action。
+    /// 记录一封尚未消费、来源可证明为系统 `[RTS]` 的退件（只认恢复记录的付款或交付义务），
+    /// 并在同一事务中创建后续 recovery action。
     fn record_due_return(
         &self,
         now: DateTime<Utc>,
     ) -> ApplicationFuture<'_, Option<RecoveryReturnAdvance>>;
+
+    /// 消费一封恢复流程不处理的结算退件：货款、退款、流拍/撤拍寄回、无恢复记录的付款，以及
+    /// 来源无法证明的历史退件。按 [`crate::settlement::SettlementReturnFacts::classify`] 追加
+    /// 唯一证据与消费事实，对应未终结履约同事务转人工对账；不领取、不退回、不重发，也不改变
+    /// 资金。与 [`Self::record_due_return`] 的分区互斥，同一封退件只消费一次；没有待消费退件时
+    /// 返回 `None`。复用 recovery 循环的退件阶段与存储句柄，不新增 Worker 装配。
+    fn consume_due_settlement_return(
+        &self,
+        now: DateTime<Utc>,
+    ) -> ApplicationFuture<'_, Option<crate::ports::settlement::SettlementReturnConsumption>>;
 
     /// 推进一个当前可处理的 case；没有 due 工作时返回 `None`。
     fn advance_due_case(

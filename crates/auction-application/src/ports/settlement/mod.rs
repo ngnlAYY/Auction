@@ -8,6 +8,7 @@ pub(crate) mod fulfillment;
 pub(crate) mod funding;
 pub(crate) mod internal;
 pub(crate) mod report;
+pub(crate) mod returns;
 pub(crate) mod scheduler;
 
 pub use claim_validation::{
@@ -41,5 +42,11 @@ pub use internal::*;
 pub use report::{
     SettlementAdjustment, SettlementAuctionSnapshot, SettlementLotReport, SettlementReport,
     SettlementReportReader, SettlementSummary,
+};
+pub use returns::{
+    SYSTEM_RETURN_SENDER, SettlementReturnConsumption, SettlementReturnDecision,
+    SettlementReturnDelivery, SettlementReturnFacts, SettlementReturnMatch,
+    SettlementReturnObligation, SettlementReturnReason, system_return_matches_obligation,
+    system_returned_settlement_obligation_id,
 };
 pub use scheduler::{SettlementWorkClaim, SettlementWorkStore};
