@@ -244,7 +244,9 @@ pub(super) async fn validate(
             }
         }
         if action == InternalSettlementAction::Refund {
-            let recovered: bool = sqlx::query_scalar(
+            // 原交付须仍为确认前的 enqueued，或已由确认事务以精确收口事实终结；任意其他 failed
+            // 不能放行退款。
+            let recovered: bool = sqlx::query_scalar(concat!(
                 r#"SELECT EXISTS(
                        SELECT 1
                        FROM public.settlement_recoveries r
@@ -262,7 +264,9 @@ pub(super) async fn validate(
                          AND r.blocking_code IS NULL
                          AND a.execution_state='satisfied'
                          AND a.proof_digest=r.custody_proof_digest
-                         AND h.execution_state='enqueued'
+                         AND (h.execution_state='enqueued' OR "#,
+                crate::database::settlement::fulfillment::equipment_recovered_closure_sql!("r"),
+                r#")
                          AND hd.status='succeeded'
                          AND (
                              hd.result_metadata->>'proof' IN (
@@ -275,8 +279,8 @@ pub(super) async fn validate(
                          AND hd.result_metadata->>'external_reference_proven'='true'
                          AND p.execution_state='satisfied'
                          AND p.proof_digest IS NOT NULL
-                   )"#,
-            )
+                   )"#
+            ))
             .bind(claim.obligation_id.as_uuid())
             .fetch_one(&mut **tx)
             .await

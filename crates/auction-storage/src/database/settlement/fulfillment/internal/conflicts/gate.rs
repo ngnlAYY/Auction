@@ -19,10 +19,12 @@ pub(super) async fn exclude_conflicts(
     ignored_delivery: Option<Uuid>,
 ) -> Result<(), FundingError> {
     // 仅原equipment_recovered门已闭合且原handoff有明确Sent成功时排除该旧出站。
-    // prepared/sending/manual_reconcile及未知结果不在此例外内，也不改写旧义务。
+    // handoff 须仍为确认前的 enqueued，或已由确认事务以精确收口事实（failed/
+    // recovery_equipment_recovered 与当前 fence 上的恢复来源处置）终结；只排除这一条原投递，
+    // prepared/sending/manual_reconcile、任意其他 failed 及未知结果不在此例外内，也不改写旧义务。
     let recovered_handoff: Option<uuid::Uuid> =
         if target.kind == auction_domain::SettlementObligationKind::BuyerRefund {
-            sqlx::query_scalar(
+            sqlx::query_scalar(concat!(
                 r#"SELECT d.id
                    FROM public.settlement_recoveries r
                    JOIN public.settlement_obligation_fulfillments h
@@ -36,7 +38,9 @@ pub(super) async fn exclude_conflicts(
                      AND r.custody_proof_digest=a.proof_digest
                      AND a.execution_state='satisfied'
                      AND a.proof_digest IS NOT NULL
-                     AND h.execution_state='enqueued'
+                     AND (h.execution_state='enqueued' OR "#,
+                crate::database::settlement::fulfillment::equipment_recovered_closure_sql!("r"),
+                r#")
                      AND d.status='succeeded'
                      AND (
                          d.result_metadata->>'proof'='sent_exact_payload_v1'
@@ -44,8 +48,8 @@ pub(super) async fn exclude_conflicts(
                              d.id,d.result_metadata,d.external_reference
                          )
                      )
-                     AND d.result_metadata->>'external_reference_proven'='true'"#,
-            )
+                     AND d.result_metadata->>'external_reference_proven'='true'"#
+            ))
             .bind(target.obligation_id.as_uuid())
             .fetch_optional(&mut **tx)
             .await

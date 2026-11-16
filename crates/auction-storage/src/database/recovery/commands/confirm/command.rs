@@ -8,6 +8,7 @@ use sqlx::Postgres;
 use uuid::Uuid;
 
 use crate::database::recovery::commands::confirm::closure::close_voided_fulfillments;
+use crate::database::recovery::commands::confirm::recovered::close_recovered_dependents;
 use crate::database::recovery::commands::mapping::is_conflict;
 use crate::database::recovery::commands::mapping::map_reversal_error;
 use crate::database::recovery::commands::mapping::map_sql_error;
@@ -97,6 +98,10 @@ pub(in crate::database::recovery::commands) async fn confirm_postgres_once(
     let now = database_now(&mut transaction).await?;
     if command.action == RecoveryConfirmationAction::EquipmentRecovered {
         activate_buyer_refund(&mut transaction, &recovery, now).await?;
+        // 已付款交付被收回：卖方货款与原交付不再可执行，与退款激活同事务收口；原交付与本轮
+        // Take 的链路不精确相符时整个确认回滚（不变量 2、4、6、8）。
+        close_recovered_dependents(&mut transaction, &recovery, selected_action, &command, now)
+            .await?;
     }
     // 成交撤销与原付款及依赖履约的收口同事务提交：确认之后不能再有旧付款被领取、准备或满足
     // （不变量 2、4、6、8）。

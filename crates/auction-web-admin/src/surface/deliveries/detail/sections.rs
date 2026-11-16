@@ -415,6 +415,9 @@ fn disposition_kind_label(kind: &str) -> String {
         "admin_failed" => t!("delivery-detail-disposition-kind-admin-failed"),
         "equipment_loss" => t!("delivery-detail-disposition-kind-equipment-loss"),
         "cod_returned" => t!("delivery-detail-disposition-kind-cod-returned"),
+        "recovery_equipment_recovered" => {
+            t!("delivery-detail-disposition-kind-recovery-equipment-recovered")
+        }
         "legacy_self" => t!("delivery-detail-disposition-kind-legacy-self"),
         "preflight_retired" => t!("delivery-detail-disposition-kind-preflight-retired"),
         other => other.to_owned(),

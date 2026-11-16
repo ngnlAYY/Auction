@@ -1558,6 +1558,7 @@ delivery-detail-disposition-kind-operator-sent-confirmation = 統一人工 Sent 
 delivery-detail-disposition-kind-admin-failed = 管理員判失敗
 delivery-detail-disposition-kind-equipment-loss = 裝備損失
 delivery-detail-disposition-kind-cod-returned = COD 三次退回賣家
+delivery-detail-disposition-kind-recovery-equipment-recovered = 交付被退回，裝備已收回
 delivery-detail-disposition-kind-legacy-self = 歷史自寄
 delivery-detail-disposition-kind-preflight-retired = 預檢退役
 delivery-detail-disposition-status = 狀態 / fence

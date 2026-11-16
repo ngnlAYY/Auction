@@ -42,7 +42,7 @@ fn kind_names_are_unique_and_round_trip() {
         DeliveryDispositionKind::parse("operator_acknowledgement"),
         Err(DeliveryDispositionError::UnknownKind)
     );
-    assert_eq!(seen.len(), 8);
+    assert_eq!(seen.len(), 9);
 }
 
 #[test]
@@ -80,6 +80,7 @@ fn only_lot_watch_invalidated_preflight_retirement_resolves_failures() {
         DeliveryDispositionKind::AdminFailed,
         DeliveryDispositionKind::EquipmentLoss,
         DeliveryDispositionKind::CodReturned,
+        DeliveryDispositionKind::RecoveryEquipmentRecovered,
         DeliveryDispositionKind::LegacySelf,
         DeliveryDispositionKind::OperatorAcknowledged,
     ] {
@@ -96,6 +97,12 @@ fn source_requires_exactly_one_reference_matching_the_kind() {
         ..Default::default()
     };
     assert_eq!(recovery.validate(DeliveryDispositionKind::CodReturned), Ok(()));
+    // 已付款交付被收回的收口同样只以恢复记录为来源，其它来源一律拒绝。
+    assert_eq!(recovery.validate(DeliveryDispositionKind::RecoveryEquipmentRecovered), Ok(()));
+    assert_eq!(
+        source_with_admin().validate(DeliveryDispositionKind::RecoveryEquipmentRecovered),
+        Err(DeliveryDispositionError::InvalidSource)
+    );
 
     let mismatched = source_with_admin();
     assert_eq!(

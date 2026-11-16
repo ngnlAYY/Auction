@@ -152,6 +152,29 @@ const UNIFIED_COD_RETURN_TERMINAL: &str = r#"NOT (
                     )
                 )"#;
 
+/// isekai 已付款交付被收回、Admin 确认 `equipment_recovered` 时，以原交付投递上的
+/// `recovery_equipment_recovered` 处置收口从未开始的卖方货款（`recovery_sale_voided`）与原交付
+/// （`recovery_equipment_recovered`）。只认同一恢复记录的这两个义务；买方退款照常执行、不在此列；
+/// 处置缺失时继续计入失败。
+const UNIFIED_EQUIPMENT_RECOVERED_TERMINAL: &str = r#"NOT (
+                    fulfillment.last_error_code IN (
+                        'recovery_equipment_recovered', 'recovery_sale_voided'
+                    )
+                    AND EXISTS (
+                        SELECT 1
+                        FROM public.settlement_recoveries recovery
+                        JOIN public.delivery_dispositions disposition
+                          ON disposition.settlement_recovery_id = recovery.id
+                         AND disposition.kind = 'recovery_equipment_recovered'
+                         AND disposition.resolves_alert
+                        WHERE recovery.resolution = 'equipment_recovered'
+                          AND fulfillment.obligation_id IN (
+                              recovery.equipment_obligation_id,
+                              recovery.seller_payout_obligation_id
+                          )
+                    )
+                )"#;
+
 /// 迁移前的履约终态排除：只看不可变损失事实。
 const LEGACY_EQUIPMENT_LOSS_TERMINAL: &str = r#"NOT (fulfillment.last_error_code = 'operator_external_buyer_compensation'
                     AND EXISTS (SELECT 1 FROM public.settlement_equipment_losses loss
@@ -165,7 +188,8 @@ static PAIRED_FULFILLMENT_COUNTS: LazyLock<String> = LazyLock::new(|| {
                    AND {LEGACY_EQUIPMENT_LOSS_TERMINAL})::bigint AS legacy_failed,
                COUNT(*) FILTER (WHERE fulfillment.execution_state = 'failed'
                    AND {UNIFIED_EQUIPMENT_LOSS_TERMINAL}
-                   AND {UNIFIED_COD_RETURN_TERMINAL})::bigint AS classified_failed
+                   AND {UNIFIED_COD_RETURN_TERMINAL}
+                   AND {UNIFIED_EQUIPMENT_RECOVERED_TERMINAL})::bigint AS classified_failed
            FROM public.settlement_obligations AS obligation
            LEFT JOIN public.settlement_obligation_fulfillments AS fulfillment
              ON fulfillment.obligation_id = obligation.id"#

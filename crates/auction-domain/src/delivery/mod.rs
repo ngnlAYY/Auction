@@ -1,8 +1,9 @@
 //! 投递终态处置事实的纯领域模型。
 //!
 //! 处置事实只描述“非正常成功路径的终态如何收口”：自动 Sent 恢复、人工 Sent 证明、
-//! Admin 判失败、装备损失退役、历史自寄核对、发送围栏前的预检退役，以及操作者确认
-//! 无资金与资产影响的历史失败已处置。普通成功发送不写处置行，不与正常成功路径重复计数。
+//! Admin 判失败、装备损失退役、COD 退回与成交撤销的收口、已付款交付被收回后的收口、历史自寄
+//! 核对、发送围栏前的预检退役，以及操作者确认无资金与资产影响的历史失败已处置。普通成功发送
+//! 不写处置行，不与正常成功路径重复计数。
 //!
 //! 每类准入事实恰好一个来源引用（`DeliveryDispositionSource`）；`PreflightRetired` 以投递行
 //! 自身（投递 id、fence 与失败码）为证。是否解除失败计数在写入时由
@@ -37,6 +38,10 @@ pub enum DeliveryDispositionKind {
     /// COD 被退回后成交撤销（达到冻结退回上限退回卖家，或 Admin 确认收回/取消），原付款与
     /// 不再可执行的依赖义务终结。
     CodReturned,
+    /// isekai 已付款但交付被退回、装备经精确 Take 证明收回后，Admin 确认 `equipment_recovered`：
+    /// 原交付与从未开始的卖方货款终结，买方退款照常执行。绑定原交付投递的当前 fence，来源为
+    /// 恢复记录；不是 COD 退回，不能借用 `CodReturned`。
+    RecoveryEquipmentRecovered,
     /// 历史自寄结算核对认定原投递无需再发送（只追加修复表）。
     LegacySelf,
     /// 发送围栏前失去资格而退役；从未开始外部写入。
@@ -47,12 +52,13 @@ pub enum DeliveryDispositionKind {
 
 impl DeliveryDispositionKind {
     /// 全部种类；持久化闭集、应用层与迁移必须逐项对应。
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::AutoSentProof,
         Self::OperatorSentConfirmation,
         Self::AdminFailed,
         Self::EquipmentLoss,
         Self::CodReturned,
+        Self::RecoveryEquipmentRecovered,
         Self::LegacySelf,
         Self::PreflightRetired,
         Self::OperatorAcknowledged,
@@ -66,6 +72,7 @@ impl DeliveryDispositionKind {
             Self::AdminFailed => "admin_failed",
             Self::EquipmentLoss => "equipment_loss",
             Self::CodReturned => "cod_returned",
+            Self::RecoveryEquipmentRecovered => "recovery_equipment_recovered",
             Self::LegacySelf => "legacy_self",
             Self::PreflightRetired => "preflight_retired",
             Self::OperatorAcknowledged => "operator_acknowledged",
@@ -101,6 +108,7 @@ impl DeliveryDispositionKind {
             | Self::AdminFailed
             | Self::EquipmentLoss
             | Self::CodReturned
+            | Self::RecoveryEquipmentRecovered
             | Self::LegacySelf
             | Self::OperatorAcknowledged => true,
         }
@@ -171,7 +179,7 @@ pub struct DeliveryDispositionSource {
     pub legacy_self_reconciliation_id: Option<Uuid>,
     /// 自动恢复的远端绑定 `(world_id, external_mail_id)`。
     pub sent_binding: Option<(String, String)>,
-    /// COD 三次退回的恢复记录 ID（`settlement_recoveries.id`）。
+    /// COD 退回收口或已付款交付收回收口的恢复记录 ID（`settlement_recoveries.id`）。
     pub settlement_recovery_id: Option<Uuid>,
     /// 操作者确认写入的同事务审计 ID（`audit_records.id`）。
     pub audit_id: Option<Uuid>,
@@ -208,7 +216,10 @@ impl DeliveryDispositionSource {
             }
             DeliveryDispositionKind::AdminFailed => self.admin_command_id.is_some(),
             DeliveryDispositionKind::EquipmentLoss => self.equipment_loss_id.is_some(),
-            DeliveryDispositionKind::CodReturned => self.settlement_recovery_id.is_some(),
+            DeliveryDispositionKind::CodReturned
+            | DeliveryDispositionKind::RecoveryEquipmentRecovered => {
+                self.settlement_recovery_id.is_some()
+            }
             DeliveryDispositionKind::LegacySelf => self.legacy_self_reconciliation_id.is_some(),
             DeliveryDispositionKind::OperatorAcknowledged => self.audit_id.is_some(),
             DeliveryDispositionKind::PreflightRetired => true,

@@ -1558,6 +1558,7 @@ delivery-detail-disposition-kind-operator-sent-confirmation = 統合手動 Sent 
 delivery-detail-disposition-kind-admin-failed = 管理者による失敗判定
 delivery-detail-disposition-kind-equipment-loss = 装備損失
 delivery-detail-disposition-kind-cod-returned = COD 3回返却で売却取消
+delivery-detail-disposition-kind-recovery-equipment-recovered = 引き渡しが返送され、装備を回収済み
 delivery-detail-disposition-kind-legacy-self = 旧自己宛メール
 delivery-detail-disposition-kind-preflight-retired = 事前検査による退役
 delivery-detail-disposition-status = 状態 / フェンス

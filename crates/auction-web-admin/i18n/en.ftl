@@ -1559,6 +1559,7 @@ delivery-detail-disposition-kind-operator-sent-confirmation = Operator Sent proo
 delivery-detail-disposition-kind-admin-failed = Admin marked failed
 delivery-detail-disposition-kind-equipment-loss = Equipment loss
 delivery-detail-disposition-kind-cod-returned = COD returned to seller
+delivery-detail-disposition-kind-recovery-equipment-recovered = Handoff returned, equipment recovered
 delivery-detail-disposition-kind-legacy-self = Legacy self-mail
 delivery-detail-disposition-kind-preflight-retired = Preflight retired
 delivery-detail-disposition-status = Status / fence

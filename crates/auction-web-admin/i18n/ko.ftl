@@ -1558,6 +1558,7 @@ delivery-detail-disposition-kind-operator-sent-confirmation = 통합 수동 Sent
 delivery-detail-disposition-kind-admin-failed = 관리자 실패 판정
 delivery-detail-disposition-kind-equipment-loss = 장비 손실
 delivery-detail-disposition-kind-cod-returned = COD 3회 반송으로 판매 취소
+delivery-detail-disposition-kind-recovery-equipment-recovered = 인도 반송, 장비 회수 완료
 delivery-detail-disposition-kind-legacy-self = 레거시 자기 발송
 delivery-detail-disposition-kind-preflight-retired = 사전 검사退役
 delivery-detail-disposition-status = 상태 / 펜스

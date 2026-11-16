@@ -3,6 +3,7 @@
 mod closure;
 mod command;
 mod fence;
+mod recovered;
 mod refund;
 mod relist;
 

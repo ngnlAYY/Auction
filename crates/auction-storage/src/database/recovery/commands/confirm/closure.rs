@@ -18,9 +18,10 @@ use crate::database::recovery::commands::mapping::map_sql_error;
 use crate::database::recovery::commands::scope::RecoveryRow;
 
 /// 依赖原付款、随成交撤销一起终结的卖方货款与 isekai 装备交付履约的失败码。
-const SALE_VOIDED_CODE: &str = "recovery_sale_voided";
+pub(super) const SALE_VOIDED_CODE: &str = "recovery_sale_voided";
 
-/// 收口原付款与依赖履约；`equipment_recovered` 不撤销付款（买方已付款，退款继续执行），不处理。
+/// 收口原付款与依赖履约；`equipment_recovered` 不撤销付款（买方已付款，退款继续执行），其依赖
+/// 履约的收口见 `recovered`。
 pub(in crate::database::recovery::commands) async fn close_voided_fulfillments(
     transaction: &mut Transaction<'_, Postgres>,
     recovery: &RecoveryRow,
@@ -171,7 +172,7 @@ pub(in crate::database::recovery::commands) async fn close_voided_fulfillments(
 
 /// 把一条未终结履约按业务取消收口为 `failed`，清除领取与重试时间；持有旧 claim 的 Worker
 /// 随后按版本与 fence 失败关闭。
-async fn fail_fulfillment(
+pub(super) async fn fail_fulfillment(
     transaction: &mut Transaction<'_, Postgres>,
     obligation_id: Uuid,
     failure_code: &str,
@@ -208,15 +209,15 @@ async fn fail_fulfillment(
 }
 
 /// 一条被收口履约的审计要素。
-struct ClosureAudit<'a> {
-    obligation_id: Uuid,
-    recovery_id: Uuid,
-    previous_state: &'a str,
-    failure_code: &'a str,
+pub(super) struct ClosureAudit<'a> {
+    pub(super) obligation_id: Uuid,
+    pub(super) recovery_id: Uuid,
+    pub(super) previous_state: &'a str,
+    pub(super) failure_code: &'a str,
 }
 
 /// 与收口同事务追加履约终态审计，操作者为确认命令的 Admin（不变量 8）。
-async fn append_closure_audit(
+pub(super) async fn append_closure_audit(
     transaction: &mut Transaction<'_, Postgres>,
     audit: ClosureAudit<'_>,
     command: &RecoveryConfirmationCommand,
