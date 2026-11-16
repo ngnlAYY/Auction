@@ -12,16 +12,12 @@ use auction_config::{AppConfig, load_mooglemail_keyenv};
 use auction_integrations::mooglemail::{
     MoogleMailCookie, MoogleMailCredentialSet, MoogleMailWorld,
 };
-use auction_integrations::{CredentialSealer, build_keyring};
+use auction_integrations::{CredentialSealer, Keyring, build_keyring};
 use auction_storage::DatabaseStore;
 
-pub(super) async fn load_credentials(
-    config: &AppConfig,
-    mail_config: &auction_config::MoogleMailWorkerConfig,
-    world_configs: &[auction_config::MoogleMailWorldConfig],
-    store: Arc<DatabaseStore>,
-) -> anyhow::Result<(MoogleMailCredentialSet, Option<Arc<dyn AdminCredentialRuntimeOwnership>>)> {
-    let credential_keyring = build_keyring(
+/// 凭据域密钥环；未配置 `credential_data_key` 时为 `None`。运行凭据加载与在线检查共用。
+fn credential_keyring(config: &AppConfig) -> anyhow::Result<Option<Arc<Keyring>>> {
+    build_keyring(
         auction_config::DataKeyDomain::Credential,
         config.data_key_current(auction_config::DataKeyDomain::Credential),
         config
@@ -29,8 +25,25 @@ pub(super) async fn load_credentials(
             .iter()
             .map(|key| (key.id(), key.material())),
     )
-    .map_err(|error| anyhow::Error::msg(error.to_string()))?;
-    let (credentials, ownership) = if let Some(keyring) = credential_keyring {
+    .map_err(|error| anyhow::Error::msg(error.to_string()))
+}
+
+/// Admin 邮件凭据在线检查在 Worker 侧按 ID 打开数据库信封所用的开启器；未配置凭据数据密钥时
+/// 为 `None`。只用于检查，不改变运行凭据集合或所有权。
+pub(super) fn check_opener(
+    config: &AppConfig,
+) -> anyhow::Result<Option<Arc<dyn AdminCredentialOpener>>> {
+    Ok(credential_keyring(config)?
+        .map(|keyring| Arc::new(CredentialSealer::new(keyring)) as Arc<dyn AdminCredentialOpener>))
+}
+
+pub(super) async fn load_credentials(
+    config: &AppConfig,
+    mail_config: &auction_config::MoogleMailWorkerConfig,
+    world_configs: &[auction_config::MoogleMailWorldConfig],
+    store: Arc<DatabaseStore>,
+) -> anyhow::Result<(MoogleMailCredentialSet, Option<Arc<dyn AdminCredentialRuntimeOwnership>>)> {
+    let (credentials, ownership) = if let Some(keyring) = credential_keyring(config)? {
         let opener = CredentialSealer::new(keyring);
         let reader: Arc<dyn AdminCredentialRuntimeReader> = store.clone();
         let mut records = Vec::new();

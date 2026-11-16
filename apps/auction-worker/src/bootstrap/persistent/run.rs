@@ -264,6 +264,9 @@ pub(crate) async fn run_worker(
     // MoogleMail 或论坛任一可用即装配远端只读能力；缺失的能力单独返回不可用。
     // 论坛读取器与回帖循环共用同一适配器与限速，不建立第二套请求门。
     let forum_reader = forum_reply.as_ref().map(auction_jobs::ForumReplyRuntime::topic_reader);
+    // Admin 邮件凭据在线检查与远端只读同在 control socket，由邮件装配提供执行器。
+    let mail_credential_check =
+        mail_control_reads.as_ref().and_then(|reads| reads.credential_check.clone());
     let remote_reads = (mail_control_reads.is_some() || forum_reader.is_some())
         .then(|| WorkerRemoteReads::build(mail_control_reads, forum_reader, switches.clone()));
     let mut control_task = if config.worker.control.enabled {
@@ -271,6 +274,10 @@ pub(crate) async fn run_worker(
             bind_worker_control_server(config, control.clone(), Arc::clone(&metrics)).await?;
         let server = match remote_reads {
             Some(remote_reads) => server.with_remote_reads(remote_reads),
+            None => server,
+        };
+        let server = match mail_credential_check {
+            Some(checks) => server.with_mail_credential_checks(checks),
             None => server,
         };
         let shutdown = Arc::clone(&control_shutdown);

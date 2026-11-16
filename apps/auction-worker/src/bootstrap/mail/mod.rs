@@ -5,17 +5,19 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Context;
-use auction_application::admin::AdminCredentialRuntimeOwnership;
+use auction_application::admin::{
+    AdminCredentialCheckPort, AdminCredentialCheckService, AdminCredentialRuntimeOwnership,
+};
 use auction_application::delivery::DeliveryTransport;
 use auction_application::scheduling::RecurringSchedule;
 use auction_application::settlement::{
     SettlementFulfillmentCustodyReader, SettlementFulfillmentEvidenceReader,
 };
 use auction_config::{AppConfig, StandardCronSchedule};
-use auction_integrations::EquipmentSourceAdapter;
 use auction_integrations::mooglemail::{
     MoogleMailClient, MoogleMailClientConfig, MoogleMailGateway, MoogleMailWorld,
 };
+use auction_integrations::{EquipmentSourceAdapter, WorkerMailCredentialVerifier};
 use auction_jobs::MailPollRuntime;
 use auction_storage::DatabaseStore;
 use url::Url;
@@ -36,6 +38,8 @@ pub(super) struct MailControlRemoteReads {
     pub(super) gateways: HashMap<MoogleMailWorld, Arc<MoogleMailGateway>>,
     pub(super) maximum_pages: usize,
     pub(super) fetch_timeout: std::time::Duration,
+    /// Admin 邮件凭据在线检查的执行器；没有凭据数据密钥时为 `None`，control 路由报告能力不可用。
+    pub(super) credential_check: Option<Arc<dyn AdminCredentialCheckPort>>,
 }
 
 /// 根据 Worker 配置装配 MoogleMail 轮询、业务处理、delivery 和履约证据读取端口。
@@ -133,7 +137,7 @@ pub(super) async fn configure_mail_poll(
             maintenance_schedule,
             progress_observer,
             mail_scan: Arc::clone(&mail_scan_observer),
-            switches,
+            switches: switches.clone(),
             external_metrics: Arc::clone(&external_metrics),
         },
     )
@@ -159,11 +163,21 @@ pub(super) async fn configure_mail_poll(
             .with_cash_evidence_gateway(gateway.clone())
             .with_funding_policy_reader(store.clone()),
     );
+    // Admin 邮件凭据在线检查只在本进程执行：经同一 gateway 与邮件循环共用请求门、在途锁、账号忙
+    // 熔断与运行 owner，Admin 不再直连 HV。没有凭据数据密钥时无法打开数据库信封，不装配。
+    let credential_check = credentials::check_opener(config)?.map(|opener| {
+        Arc::new(AdminCredentialCheckService::new(
+            Arc::clone(&store),
+            Arc::new(WorkerMailCredentialVerifier::new(opener, Arc::clone(&gateway), switches)),
+            Arc::new(SystemClock),
+        )) as Arc<dyn AdminCredentialCheckPort>
+    });
     let control_reads = MailControlRemoteReads {
         equipment: equipment_source,
         gateways: gateways.clone(),
         maximum_pages: mail_config.maximum_pages,
         fetch_timeout: std::time::Duration::from_secs(mail_config.fetch_timeout_seconds),
+        credential_check,
     };
     let inventory_reader: Arc<dyn auction_application::reconciliation::AssetInventoryReader> =
         Arc::new(super::fulfillment::MoogleMailAssetInventoryReader { gateways: gateways.clone() });

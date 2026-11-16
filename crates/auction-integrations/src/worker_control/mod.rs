@@ -3,6 +3,7 @@
 //! 都由 Worker 进程裁决，调用方不得回退到本地直连。
 
 mod control_client;
+mod credential_check;
 
 pub use control_client::{
     WorkerControlClient, WorkerControlClientBuildError, WorkerControlClientError,
@@ -78,6 +79,32 @@ impl WorkerRemoteReadClient {
         I: Serialize,
         T: for<'de> Deserialize<'de>,
     {
+        let (status, envelope) = self.exchange::<I, T>(path, input).await?;
+        match (status.is_success(), envelope.code.as_str()) {
+            (true, "ok") => envelope.data.ok_or(WorkerRemoteReadError::Incompatible),
+            (_, "paused") => Err(WorkerRemoteReadError::Paused),
+            (_, "not_paused") => Err(WorkerRemoteReadError::NotPaused),
+            (_, "capability_unavailable") => Err(WorkerRemoteReadError::Unavailable),
+            (_, "invalid_command_id") => Err(WorkerRemoteReadError::Invalid),
+            _ => Err(match status.as_u16() {
+                501 | 503 => WorkerRemoteReadError::Unavailable,
+                504 => WorkerRemoteReadError::Timeout,
+                _ => WorkerRemoteReadError::Incompatible,
+            }),
+        }
+    }
+
+    /// 发送一次 control 请求并按协议校验回执：版本与请求标识回显、响应上限与外壳形状。业务码
+    /// 由调用方按路由映射；传输与协议失败只给稳定分类。
+    async fn exchange<I, T>(
+        &self,
+        path: &str,
+        input: &I,
+    ) -> Result<(reqwest::StatusCode, Envelope<T>), WorkerRemoteReadError>
+    where
+        I: Serialize,
+        T: for<'de> Deserialize<'de>,
+    {
         let request_id = uuid::Uuid::new_v4().to_string();
         let body = serde_json::to_vec(input)
             .map_err(|_: serde_json::Error| WorkerRemoteReadError::Invalid)?;
@@ -122,18 +149,7 @@ impl WorkerRemoteReadClient {
         if envelope.message.is_empty() {
             return Err(WorkerRemoteReadError::Incompatible);
         }
-        match (status.is_success(), envelope.code.as_str()) {
-            (true, "ok") => envelope.data.ok_or(WorkerRemoteReadError::Incompatible),
-            (_, "paused") => Err(WorkerRemoteReadError::Paused),
-            (_, "not_paused") => Err(WorkerRemoteReadError::NotPaused),
-            (_, "capability_unavailable") => Err(WorkerRemoteReadError::Unavailable),
-            (_, "invalid_command_id") => Err(WorkerRemoteReadError::Invalid),
-            _ => Err(match status.as_u16() {
-                501 | 503 => WorkerRemoteReadError::Unavailable,
-                504 => WorkerRemoteReadError::Timeout,
-                _ => WorkerRemoteReadError::Incompatible,
-            }),
-        }
+        Ok((status, envelope))
     }
 }
 

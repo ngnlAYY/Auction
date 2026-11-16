@@ -25,7 +25,7 @@ MoogleMail 默认 `poll_isolation_enabled = true`：每个世界独立运行收�
 
 ## Worker control 与指标
 
-`[worker.control]` 默认关闭；启用后 Worker 在 Unix socket（默认 `/run/hv-auction/worker/control.sock`，组 `auction-worker-control`）上提供 HTTP/JSON 控制面，连接按 `SO_PEERCRED` 检查 `allowed_peer_uids`/`allowed_peer_gids`。路径、方法与就绪判定见[docs/contracts/routes.md#worker-controlunix-socket](../../docs/contracts/routes.md#worker-controlunix-socket)，socket 与授权实现见[crates/auction-jobs/README.md#worker-control](../../crates/auction-jobs/README.md#worker-control)。Admin、`auction-cli` 与 `auction-server` 都经该 socket 判断 Worker 状态；Admin 与 CLI 需要的外部只读读取也经它交给 Worker 执行，不在本地直连。
+`[worker.control]` 默认关闭；启用后 Worker 在 Unix socket（默认 `/run/hv-auction/worker/control.sock`，组 `auction-worker-control`）上提供 HTTP/JSON 控制面，连接按 `SO_PEERCRED` 检查 `allowed_peer_uids`/`allowed_peer_gids`。路径、方法与就绪判定见[docs/contracts/routes.md#worker-controlunix-socket](../../docs/contracts/routes.md#worker-controlunix-socket)，socket 与授权实现见[crates/auction-jobs/README.md#worker-control](../../crates/auction-jobs/README.md#worker-control)。Admin、`auction-cli` 与 `auction-server` 都经该 socket 判断 Worker 状态；Admin 与 CLI 需要的外部只读读取（含 Admin 邮件 Cookie 在线检查）也经它交给 Worker 执行，不在本地直连；邮件凭据检查需要 Worker 启用 MoogleMail 并配置 `credential_data_key`，否则该路由报告能力不可用。
 
 附加指标出口由 `metrics.worker_loopback_listen_address` 选择（示例 `127.0.0.1:19102`），独立于 control socket 上的 `/metrics`；行为见[docs/contracts/routes.md#三角色附加指标出口loopback-tcp](../../docs/contracts/routes.md#三角色附加指标出口loopback-tcp)，字段校验见[ops/config/README.md#commontoml](../../ops/config/README.md#commontoml)。
 

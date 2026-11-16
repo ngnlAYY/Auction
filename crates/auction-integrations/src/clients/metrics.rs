@@ -42,6 +42,7 @@ pub(crate) fn mail_operation(operation: MoogleMailOperation) -> MailOperation {
         MoogleMailOperation::ReturnMessage => MailOperation::ReturnMessage,
         MoogleMailOperation::Take => MailOperation::AttachRemove,
         MoogleMailOperation::Discard => MailOperation::Discard,
+        MoogleMailOperation::CredentialCheck => MailOperation::CredentialCheck,
     }
 }
 

@@ -174,8 +174,12 @@ impl TrackerState {
                     MailRequestCategory::Ok => {
                         self.mail_last_success_at = Some(now);
                         // 成功请求是账号恢复的最强本地证据；清除此前 account_busy 投影。
-                        // 装备页成功不能证明已退出战斗，与熔断器同口径，不清除忙碌。
-                        if operation != MailOperation::Equipment {
+                        // 装备页成功不能证明已退出战斗；候选凭据检查未证明属于当前账号。两者与
+                        // 熔断器同口径，不清除忙碌。
+                        if !matches!(
+                            operation,
+                            MailOperation::Equipment | MailOperation::CredentialCheck
+                        ) {
                             self.mail_account_busy_since = None;
                         }
                     }
@@ -356,6 +360,26 @@ mod tests {
         });
         let status = tracker.snapshot().expect("邮件请求成功后的快照");
         assert!(!status.mail.busy, "邮件请求成功仍是恢复证据");
+    }
+
+    /// 候选凭据检查未证明属于当前账号：成功不清除忙碌，但仍是本进程的一次成功请求。
+    #[test]
+    fn credential_check_success_keeps_the_busy_projection() {
+        let tracker = ExternalAccountTracker::default();
+        let observer: &dyn ExternalMetricsObserver = &tracker;
+        observer.observe(ExternalMetricsEvent::MailRequestSignal {
+            world: MailWorld::Main,
+            operation: MailOperation::Inbox,
+            signal: MailSignal::AccountBusy,
+        });
+        observer.observe(ExternalMetricsEvent::MailRequestFinished {
+            world: MailWorld::Main,
+            operation: MailOperation::CredentialCheck,
+            category: MailRequestCategory::Ok,
+        });
+        let status = tracker.snapshot().expect("候选凭据检查成功后的快照");
+        assert!(status.mail.busy, "候选凭据检查成功不得清除账号忙碌");
+        assert!(status.mail.last_success_at.is_some());
     }
 
     #[test]

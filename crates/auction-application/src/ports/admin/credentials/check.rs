@@ -25,6 +25,16 @@ impl AdminCredentialCheckStatus {
             Self::Inconclusive => "inconclusive",
         }
     }
+
+    /// 解析 [`Self::as_str`] 的稳定状态码；其他取值返回 `None`，不猜测近似状态。
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "valid" => Some(Self::Valid),
+            "invalid" => Some(Self::Invalid),
+            "inconclusive" => Some(Self::Inconclusive),
+            _ => None,
+        }
+    }
 }
 
 /// 一个明确世界/论坛登录范围的观测，不包含账号、余额、Cookie 或响应正文。
@@ -58,6 +68,8 @@ pub trait AdminCredentialCheckStore: Send + Sync {
 }
 
 /// 外部只读认证探测；只接受数据库信封，禁止浏览器指定 URL 或提供任意 Cookie。
+/// 邮件 Cookie 的探测只在 Worker 进程内执行（与邮件循环共用请求门、在途锁和账号忙熔断）；
+/// Admin 侧实现只能把它转交 Worker control，不得在 Admin 进程直连外部站点。
 pub trait AdminCredentialVerifier: Send + Sync {
     fn verify(
         &self,

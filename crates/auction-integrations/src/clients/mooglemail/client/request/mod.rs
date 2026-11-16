@@ -77,8 +77,16 @@ impl MoogleMailClient {
         if target.origin != self.builder.origin {
             return Err(self.configuration(target));
         }
+        // 不能充当账号探测的读取（候选凭据检查）与装备页同口径：窗口内一律不发网络，也不
+        // 占用窗口唯一的探测额度；常规读取照旧可作探测。
+        let probes_account = target.operation.probes_account();
         // 已知的熔断拒绝先于占用限速令牌；预检不占用探测额度，额度在取得在途锁后才占用。
-        if !self.account_busy.may_queue_read(target.world, std::time::Instant::now()) {
+        let may_queue = if probes_account {
+            self.account_busy.may_queue_read(target.world, std::time::Instant::now())
+        } else {
+            self.account_busy.permits_unprobed_read(target.world, std::time::Instant::now())
+        };
+        if !may_queue {
             return Err(self.account_busy_error(target.operation, target.world));
         }
         let gate_wait = MailGateWaitGuard::start(
@@ -120,7 +128,12 @@ impl MoogleMailClient {
         // 前台读取插到已排队的后台读取之前；owner 复核在取得锁之后，贴近真实发出时刻。
         let in_flight = self.in_flight.lock(class).await;
         // 排队期间前一请求可能已打开账号忙窗口：发出网络前复核，并在此才占用唯一的探测额度。
-        if !self.account_busy.permits_read(target.world, std::time::Instant::now()) {
+        let permitted = if probes_account {
+            self.account_busy.permits_read(target.world, std::time::Instant::now())
+        } else {
+            self.account_busy.permits_unprobed_read(target.world, std::time::Instant::now())
+        };
+        if !permitted {
             return Err(self.account_busy_error(target.operation, target.world));
         }
 
@@ -332,7 +345,11 @@ impl MoogleMailClient {
                     false,
                 ));
             }
-            self.account_busy.record_success(target.world);
+            // 只有能代表当前账号的读取才结束忙碌期；候选凭据可能属于另一账号，成功不能证明
+            // 当前账号已退出战斗。
+            if probes_account {
+                self.account_busy.record_success(target.world);
+            }
             diagnostic.body.take().ok_or_else(|| self.protocol(target))
         }
         .await;

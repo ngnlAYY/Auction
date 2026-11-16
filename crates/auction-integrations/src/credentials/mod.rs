@@ -18,8 +18,10 @@ use crate::keyring::Keyring;
 
 mod acquire;
 mod check;
+mod mail_check;
 pub use acquire::CredentialAcquirer;
 pub use check::CredentialVerifier;
+pub use mail_check::WorkerMailCredentialVerifier;
 
 const MAIL_AAD_PREFIX: &str = "auction/credential/mail/v1/";
 const FORUM_AAD_PREFIX: &str = "auction/credential/forum/v1/";
@@ -174,6 +176,15 @@ fn opening_error(failure: OpenError) -> ApplicationError {
 
 fn crypto_error() -> ApplicationError {
     ApplicationError::AdminCredential(AdminCredentialError::CryptoUnavailable)
+}
+
+/// 在线检查期间解密出的 Cookie 明文；取消或错误退出也清空缓冲，不实现 Debug/Serialize。
+struct DecryptedCookie(Vec<u8>);
+
+impl Drop for DecryptedCookie {
+    fn drop(&mut self) {
+        self.0.fill(0);
+    }
 }
 
 #[cfg(test)]

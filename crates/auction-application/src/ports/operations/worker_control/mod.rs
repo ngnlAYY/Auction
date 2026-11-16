@@ -4,6 +4,7 @@
 //! 游标或入站事务。
 
 pub(crate) mod binding;
+pub(crate) mod credential_check;
 pub(crate) mod protocol;
 pub(crate) mod remote_read;
 
