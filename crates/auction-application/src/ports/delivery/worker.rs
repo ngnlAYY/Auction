@@ -6,6 +6,7 @@ use chrono::{DateTime, Utc};
 use serde_json::Value;
 use uuid::Uuid;
 
+use crate::errors::diagnostics::SafeErrorKind;
 use crate::ports::core::ApplicationFuture;
 use crate::ports::core::RequestHash;
 
@@ -218,10 +219,19 @@ pub type AuthorizedDeliveryPreparation<'a> = std::pin::Pin<
     >,
 >;
 
-/// 只有 Sending 允许 poll；Deferred 已确定提交冻结或确定回滚，不是发送成功。
+/// sending fence 的确定结论，含义由存储层按失败原因精确产出；只有 `Sending` 允许 poll。
+/// 提交结果未知不在此列，由端口返回 `Err` 表示。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeliveryFenceOutcome {
+    /// sending 已确定提交。
     Sending,
+    /// 业务门确定未满足（竞价警告失效、发送节奏未到期、claim 已失效、资金或证据 owner 拒绝），
+    /// 事务确定回滚或只提交了冻结事实：正常延期，不是发送成功，也不是错误。
     Deferred,
+    /// 内部故障（SQL 错误、冲突重试耗尽、提交预算耗尽、请求与冻结身份或持久不变量不符）后事务
+    /// 已确定回滚或从未开始：没有写入 sending，可以安全释放 claim，但调用方必须按所带安全分类
+    /// 保留错误信号与计数，不能当作正常延期。
+    Faulted(SafeErrorKind),
 }
 
 /// 持久化 delivery outbox 的传输端口。
@@ -293,8 +303,8 @@ pub trait DeliveryWorkStore: Send + Sync {
     ) -> ApplicationFuture<'_, ()>;
 
     /// 证据借自原prepared/commit guard。Err表示未确定提交状态，调用方必须撤销owner。
-    /// 确定拒绝或冻结用Deferred；None仍须经过数据库legacy保护门。
-    /// 实现不得忽略冻结身份而沿用未证明的 Send 或 Take 授权。
+    /// 业务门确定拒绝或冻结用Deferred，内部故障确定回滚用Faulted；None仍须经过数据库legacy
+    /// 保护门。实现不得忽略冻结身份而沿用未证明的 Send 或 Take 授权。
     fn start_sending_authorized<'a>(
         &'a self,
         claim: DeliveryWorkClaim,
@@ -304,7 +314,7 @@ pub trait DeliveryWorkStore: Send + Sync {
     ) -> ApplicationFuture<'a, DeliveryFenceOutcome>;
 
     /// 现金 fence 沿用原 prepared 单调截止，并收紧至本次租约/提交预算。
-    /// 仅期限前确定 Sending 才允许外发；Err/超时须撤销 owner，Deferred 表示确定结束。
+    /// 仅期限前确定 Sending 才允许外发；Err/超时须撤销 owner，Deferred 与 Faulted 表示确定结束。
     /// 仅 Send 可进入现金授权；实现不得忽略提交期限或接受 Take。
     fn start_sending_authorized_until<'a>(
         &'a self,

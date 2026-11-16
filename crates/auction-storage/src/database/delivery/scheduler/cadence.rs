@@ -1,5 +1,6 @@
 //! 七类 Send 的持久起点；仅在 sending fence 同事务消费间隔，准备失败不占用节奏。
 
+use auction_application::core::diagnostics::SafeErrorKind;
 use auction_application::delivery::{DeliverySendIntervals, DeliveryWorkClaim};
 use sqlx::Postgres;
 
@@ -16,6 +17,8 @@ pub(super) async fn lock_due(
     if claim.payload.get("operation").and_then(serde_json::Value::as_str) != Some("send") {
         return Ok(None);
     }
+    // 七类分组行由迁移预置、分类函数对任何 Send 都有结果：缺行是持久不变量损坏，配置缺少该类
+    // 间隔是配置无效，都不是节奏未到期。
     let category = sqlx::query_scalar::<_, String>(
         "SELECT category FROM public.delivery_send_cadence
          WHERE category = public.delivery_send_category($1, $2) FOR UPDATE",
@@ -24,14 +27,14 @@ pub(super) async fn lock_due(
     .bind(&claim.payload)
     .fetch_optional(&mut **tx)
     .await?
-    .ok_or(FenceError::Rejected)?;
+    .ok_or(FenceError::Fault(SafeErrorKind::REPOSITORY_FAILED))?;
     let seconds = intervals
         .values()
         .into_iter()
         .find_map(|(key, seconds)| (key == category).then_some(seconds))
         .filter(|seconds| *seconds <= 86_400)
         .and_then(|seconds| i64::try_from(seconds).ok())
-        .ok_or(FenceError::Rejected)?;
+        .ok_or(FenceError::Fault(SafeErrorKind::CONFIGURATION_INVALID))?;
     let due: bool = sqlx::query_scalar(
         "SELECT last_started_at IS NULL
              OR last_started_at + $2::bigint * interval '1 second' <= clock_timestamp()
@@ -61,7 +64,8 @@ pub(super) async fn record_started(
     .execute(&mut **tx)
     .await?;
     if changed.rows_affected() != 1 {
-        return Err(FenceError::Rejected);
+        // 同一事务已锁住该分组行，更新不到即持久不变量损坏。
+        return Err(FenceError::Fault(SafeErrorKind::REPOSITORY_FAILED));
     }
     Ok(())
 }

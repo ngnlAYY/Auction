@@ -1,5 +1,6 @@
 //! Credits Send资金授权；所有远端观察已在持同session的业务事务外完成。
 
+use auction_application::core::diagnostics::SafeErrorKind;
 use auction_application::delivery::{
     DeliveryFenceOutcome, DeliveryPreparedExpectation, DeliveryWorkClaim,
 };
@@ -125,7 +126,9 @@ pub(super) async fn authorize(
     crate::lock_mail_evidence_credentials(tx, evidence).await?;
     // 只锁实际使用的义务/履约事实，不反锁不需要的auction/recovery；冻结金额不可改写。
     let obligation = if claim.origin_kind == "settlement" {
-        let id = Uuid::parse_str(&claim.origin_id).map_err(|_| FenceError::Rejected)?;
+        // 结算来源的 origin_id 由 owner 以 UUID 写入；解析失败是持久数据损坏，不是业务门。
+        let id = Uuid::parse_str(&claim.origin_id)
+            .map_err(|_| FenceError::Fault(SafeErrorKind::REPOSITORY_FAILED))?;
         let exists = sqlx::query_scalar::<_, Uuid>(
             "SELECT id FROM public.settlement_obligations WHERE id=$1 AND business_state='ready' FOR UPDATE",
         ).bind(id).fetch_optional(&mut **tx).await?;
@@ -174,7 +177,7 @@ pub(super) async fn authorize(
                 &claim.payload,
             ),
         )
-        .map_err(|_| FenceError::Rejected)?;
+        .map_err(|_| FenceError::Fault(SafeErrorKind::SERIALIZATION_FAILED))?;
         let mutation =
             FundingMutation { command_id: claim.delivery_id, request_digest: digest.as_bytes() };
         funding::reserve_funded_delivery(tx, &account, &mutation, claim.delivery_id).await?;

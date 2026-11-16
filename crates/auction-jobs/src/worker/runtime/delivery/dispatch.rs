@@ -164,18 +164,37 @@ where
         if activity.is_cancelled() || (activity.enabled() && control.is_draining()) {
             return DeliveryTaskResult::completed(WorkerResult::Canceled);
         }
-        let (worker_result, unpersisted_cause) = if matches!(handoff, DeliveryHandoff::Deferred) {
-            // 围栏确定结束而未进入 sending：竞价警告在交接期间失效（取消关注、重新领先、lot 到期）、
-            // 发送节奏未到期或资金门冻结都走这里，原因由围栏事务一侧决定，仅凭来源种类无法推断。
-            // 尚未外部写入，也没有未落库的结果，释放 claim 后正常结束本项。
-            tracing::info!(
-                delivery_id = %claim.delivery_id,
-                origin_kind = %claim.origin_kind,
-                "发送围栏确定未进入 sending，尚未外部写入，释放本次领取"
-            );
-            (WorkerResult::Success, None)
-        } else {
-            (WorkerResult::Error, Some(SafeErrorKind::DEPENDENCY_UNAVAILABLE))
+        let (worker_result, unpersisted_cause) = match handoff {
+            DeliveryHandoff::Deferred => {
+                // 围栏按业务门确定结束而未进入 sending：竞价警告在交接期间失效（取消关注、重新领先、
+                // lot 到期）、发送节奏未到期或资金门冻结都走这里，原因由围栏事务一侧决定，仅凭来源
+                // 种类无法推断。尚未外部写入，也没有未落库的结果，释放 claim 后正常结束本项。
+                tracing::info!(
+                    delivery_id = %claim.delivery_id,
+                    origin_kind = %claim.origin_kind,
+                    "发送围栏确定未进入 sending，尚未外部写入，释放本次领取"
+                );
+                (WorkerResult::Success, None)
+            }
+            DeliveryHandoff::Faulted(kind) => {
+                // 围栏事务因内部故障（SQL 错误、冲突重试耗尽等）确定回滚：同样尚未外部写入、可以
+                // 安全释放 claim，但这是真实故障，按存储层给出的分类保留 Worker 错误与未持久化计数，
+                // 不能混同正常延期；SQLSTATE 等原因已由存储层脱敏记录。
+                diagnostics::error(
+                    "delivery",
+                    "sending_fence_rolled_back",
+                    kind,
+                    DiagnosticContext {
+                        delivery_id: diagnostic_id(&claim.delivery_id),
+                        write_started: Some(false),
+                        ..Default::default()
+                    },
+                );
+                (WorkerResult::Error, Some(kind))
+            }
+            DeliveryHandoff::Sending | DeliveryHandoff::Unconfirmed => {
+                (WorkerResult::Error, Some(SafeErrorKind::DEPENDENCY_UNAVAILABLE))
+            }
         };
         return release_unstarted_delivery(
             delivery_store.as_ref(),

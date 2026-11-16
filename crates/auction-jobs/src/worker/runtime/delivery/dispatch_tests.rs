@@ -2,8 +2,10 @@
 //!
 //! 守护外部写入的安全边界：发送期间失去租约或请求超时一律按远端结果未知落库、绝不重发；
 //! 尚未 poll 外部写入的失败（准备未完成、围栏提交未知、租约已不可用）只释放 claim，不伪造
-//! 发送失败；围栏确定 Deferred（如竞价警告在交接期间失效）是正常延期，释放后不记 Worker 错误；排空时已领取但未开始的工作项按生命周期协议释放或保留原租约，
-//! 已越过围栏的发送继续完成并落库，终态提交确认后才释放排空活动。
+//! 发送失败；围栏确定 Deferred（如竞价警告在交接期间失效）是正常延期，释放后不记 Worker 错误；
+//! 围栏内部故障确定回滚（Faulted）同样只释放 claim，但保留 Worker 错误与未持久化计数；排空时
+//! 已领取但未开始的工作项按生命周期协议释放或保留原租约，已越过围栏的发送继续完成并落库，终态
+//! 提交确认后才释放排空活动。
 //!
 //! 内存替身只实现应用端口：存储按发生顺序记录续租、围栏、释放与终态，排空替身把活动的登记
 //! 与释放记入同一条时间线，传输记录准备次数与发送 future 的 poll。业务时钟跟随 Tokio 暂停
@@ -90,6 +92,8 @@ enum Renewal {
 enum Fence {
     Sending,
     Deferred,
+    /// 内部故障后确定回滚，例如事务内 SQL 权限错误或锁超时；携带存储层的安全分类。
+    Faulted(SafeErrorKind),
     /// 提交结果未知，例如 COMMIT 回执前连接断开。
     Unknown,
     Hangs,
@@ -206,6 +210,7 @@ impl DeliveryWorkStore for OutboxStore {
             match fence {
                 Fence::Sending => Ok(DeliveryFenceOutcome::Sending),
                 Fence::Deferred => Ok(DeliveryFenceOutcome::Deferred),
+                Fence::Faulted(kind) => Ok(DeliveryFenceOutcome::Faulted(kind)),
                 Fence::Unknown => Err(repository_failure("围栏提交回执丢失")),
                 Fence::Hangs => std::future::pending().await,
             }
@@ -661,6 +666,37 @@ async fn deferred_fence_is_a_normal_deferral_without_worker_error() {
     assert_eq!(store.deferred_send_worlds(), vec![Vec::new(), vec!["main".to_owned()]]);
     assert_eq!(metrics.iterations(), vec![(WorkerLoop::Delivery, WorkerResult::Success)]);
     assert!(metrics.unpersisted().is_empty(), "确定延期没有未落库的结果");
+}
+
+/// 围栏事务内 SQL 失败（如 42501 权限错误、55P03 锁超时）且回滚成功：存储层返回带分类的
+/// Faulted（PostgreSQL 用例 `postgres_fence_sql_error_rolls_back_as_fault_not_deferral` 证明这一
+/// 转换）。确定没有进入 sending，释放 claim、不 poll、不撤销原会话；但这是真实故障，必须保留
+/// Worker 错误与按原分类的未持久化计数，不能像业务延期那样记成功（A4）。
+#[tokio::test(start_paused = true)]
+async fn rolled_back_fence_fault_releases_claim_but_keeps_the_worker_error() {
+    for kind in [SafeErrorKind::REPOSITORY_FAILED, SafeErrorKind::REPOSITORY_SERIALIZATION_CONFLICT]
+    {
+        let store = OutboxStore::new(&["main"], Renewal::Healthy, Fence::Faulted(kind));
+        let transport = ScriptedTransport::new(Preparation::Ready, Some(Duration::ZERO));
+        let (worker, metrics) =
+            delivery_worker(&store, &transport, ExternalWriteLifecycle::default());
+
+        run_delivery_cycle(&worker).await.unwrap();
+
+        assert_eq!(
+            store.calls(),
+            vec![(0, Call::Renew), (0, Call::Renew), (0, Call::Fence), (0, Call::Release)]
+        );
+        assert_eq!(transport.send_polls(), 0, "确定回滚绝不 poll 外部写入");
+        assert_eq!(transport.revocations(), 0, "确定结束的围栏不撤销原会话");
+        assert_eq!(store.deferred_send_worlds(), vec![Vec::new(), vec!["main".to_owned()]]);
+        assert_eq!(
+            metrics.iterations(),
+            vec![(WorkerLoop::Delivery, WorkerResult::Error)],
+            "内部故障不得记成正常延期"
+        );
+        assert_eq!(metrics.unpersisted(), vec![(WorkerLoop::Delivery, kind)]);
+    }
 }
 
 #[tokio::test(start_paused = true)]
