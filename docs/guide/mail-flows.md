@@ -22,9 +22,8 @@ Bot 通过 HentaiVerse 的 MoogleMail 与玩家交互：玩家寄来投稿、注
 | `register` | 注册或找回登录 key |
 | `rebind` | 改名后换绑账号 |
 | `rekey` | 轮换登录 key 并注销全部会话 |
-| 发件人恰为系统 `MoogleMail`，主题为 `[RTS] ` + `auction equipment delivery [<UUID>]` 或 `auction payment request [<UUID>]` | 结算邮件被退回（退件），见[结算退件](#结算退件) |
-| `auction equipment delivery [<UUID>]`、`auction payment request [<UUID>]`（无前缀） | 按结算退件处理（兼容路径，不检查发件人） |
-| 其他 | 不含附件/Credits/COD：归档；含资产：整封退回 |
+| 发件人恰为系统 `MoogleMail`，主题为 `[RTS] ` + `auction equipment delivery [<UUID>]`、`auction payment request [<UUID>]`、`auction seller payout [<UUID>]` 或 `auction buyer refund [<UUID>]` | 结算邮件被退回（退件），见[结算退件](#结算退件) |
+| 其他（含无前缀的结算主题与玩家自拟的 `[RTS] …` 主题） | 不含附件/Credits/COD：归档；含资产：整封退回 |
 
 ## 拍卖投稿
 
@@ -70,7 +69,13 @@ Bot 通过 HentaiVerse 的 MoogleMail 与玩家交互：玩家寄来投稿、注
 
 ## 结算退件
 
-结算寄出的 COD 或装备邮件被收件人拒收（或过期）退回时，由系统发件人 `MoogleMail` 寄回 Bot 收件箱：主题为 `[RTS] ` + 原主题（仍带原义务 ID），正文为原正文加一行 `This message was returned from <玩家>, kupo!`。退信携带的附件、Credits 与 COD 原样记作证据，处理器不推断退信是否保留原 COD。处理器只在发件人恰为 `MoogleMail`（精确匹配，与集成层退信回执的判定一致）且去掉前缀后是上表的结算主题时识别为退件；玩家自拟的同名 `[RTS] …` 主题和其他系统退信（例如 `[RTS] Auction payment overdue`）仍按未知邮件处理。识别后处理器只把它记录为退件证据（义务 ID、Credits、COD、附件），邮件不可领取时失败关闭（入站游标停在该封、不越过）；由恢复流程在后续 Serializable 事务中与义务的预期退件（原装备或原载体 Credits，COD 为 0）严格比对，不符即隔离转人工，相符才决定收回装备、重寄 COD 或寄回卖家，见[docs/guide/settlement.md#4-恢复付款超时与拒收](settlement.md#4-恢复付款超时与拒收)。
+结算寄出的 COD、装备、货款或退款邮件被收件人拒收（或过期）退回时，由系统发件人 `MoogleMail` 寄回 Bot 收件箱：主题为 `[RTS] ` + 原主题（仍带原义务 ID），正文为原正文加一行 `This message was returned from <玩家>, kupo!`。退信携带的附件、Credits 与 COD 原样记作证据，处理器不推断退信是否保留原 COD。处理器只在发件人恰为 `MoogleMail`（精确匹配，与集成层退信回执的判定一致）且去掉前缀后是上表四种结算主题之一时识别为退件。义务 ID 可由公开的场次与 lot ID 推出，不能证明来源，因此无前缀的结算主题、玩家自拟的同名 `[RTS] …` 主题和其他系统退信（例如 `[RTS] Auction payment overdue`）都按未知邮件处理。识别后处理器只把它记录为退件证据（义务 ID、Credits、COD、附件），不领取、不退回、不回信；来源已认证的退件即使资产异常（例如不可领取）也照样记为证据，交给后续消费方隔离，不让入站游标停在这封邮件上。
+
+退件证据由 recovery Worker 在 Serializable 事务内按持久化的发件人与主题再次核对来源，并按义务分成互斥的两路消费，每封只消费一次：
+
+- 恢复记录的付款或交付义务（main 装备 COD、isekai 载体 COD、isekai 装备交付）的退件由恢复流程与义务的预期退件（原装备或原载体 Credits，COD 为 0）严格比对，不符即隔离转人工，相符才决定收回装备、重寄 COD 或寄回卖家，见[docs/guide/settlement.md#4-恢复付款超时与拒收](settlement.md#4-恢复付款超时与拒收)。
+- 其余退件（卖方货款、买方退款、流拍/撤拍寄回，以及没有恢复记录的付款）只追加 `settlement_return_evidence` 证据：能唯一绑定原出站投递且履约尚未终结时，同事务把履约转为人工对账（`manual_reconcile`，失败码 `settlement_mail_returned`）；履约已终结时只留证；无法绑定（未知义务、主题与义务种类不符、原投递未发送或世界不符）时只隔离。退回的 Credits 与装备留在 Bot 收件箱等待人工处理：不自动领取、不退回、不重发，也不改变资金。
+- 来源无法证明的历史记录（撤掉的无前缀兼容入口留下的）只隔离为 `untrusted`，不计入恢复退回次数，也不改变恢复状态。
 
 ## 出站邮件
 

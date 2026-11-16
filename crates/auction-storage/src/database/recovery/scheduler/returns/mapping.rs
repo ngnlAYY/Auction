@@ -17,6 +17,8 @@ pub(super) fn map_recovery_return_row(
         return_world_id: row.try_get("return_world_id").map_err(map_storage_error)?,
         return_metadata: row.try_get("return_metadata").map_err(map_storage_error)?,
         return_received_at: row.try_get("return_received_at").map_err(map_storage_error)?,
+        return_sender: row.try_get("return_sender").map_err(map_storage_error)?,
+        return_subject: row.try_get("return_subject").map_err(map_storage_error)?,
         returned_obligation_id: row.try_get("returned_obligation_id").map_err(map_storage_error)?,
         returned_obligation_kind: row
             .try_get("returned_obligation_kind")

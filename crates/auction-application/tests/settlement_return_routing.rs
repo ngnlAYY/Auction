@@ -1,6 +1,7 @@
-//! 结算退件邮件的路由边界：买方退回的结算邮件由系统发件人 `MoogleMail` 以 `[RTS] ` + 原
+//! 结算退件邮件的路由边界：被拒收的结算邮件由系统发件人 `MoogleMail` 以 `[RTS] ` + 原
 //! canonical 主题送回，处理器只把它记成退件证据（`settlement_recovery_returned`），不触发外部
-//! 动作；玩家自拟的同名主题与其他系统退信仍按未知邮件处理，不可领取时失败关闭。
+//! 动作；来源已认证的退件即使不可领取也只记证据、不阻塞收件游标。无前缀的结算主题、玩家自拟的
+//! 同名主题与其他系统退信都按未知邮件处理。
 //!
 //! 只使用窄端口替身：不连接数据库、不访问 MoogleMail。
 
@@ -18,10 +19,9 @@ use auction_application::mail::{
     MailAuctionIntakePort, MailAuctionIntakeResult, MailDeliveryActivation, MailDeliveryCommand,
     MailDeliveryEnqueuer, MailDeliveryOperation, MailDeliveryResult, MailEquipmentAttachment,
     MailEquipmentFilter, MailEquipmentReader, MailMessage, MailNoticeEnqueue, MailNoticeLimit,
-    MailProcessingDecision, MailProcessingError, MailProcessor, MailProcessorConfig,
-    MailProcessorService, MailReplyPolicy, MailReplyPolicySource, MailUserPort,
-    MailUserRebindCommand, MailUserRegisterCommand, MailUserRekeyCommand, MailUserResult,
-    SubmissionReceiptFacts,
+    MailProcessingDecision, MailProcessor, MailProcessorConfig, MailProcessorService,
+    MailReplyPolicy, MailReplyPolicySource, MailUserPort, MailUserRebindCommand,
+    MailUserRegisterCommand, MailUserRekeyCommand, MailUserResult, SubmissionReceiptFacts,
 };
 use auction_domain::EquipmentKey;
 use chrono::{DateTime, Utc};
@@ -308,16 +308,84 @@ fn other_system_returns_keep_the_unknown_path() {
     assert!(service.deliveries.operations().is_empty());
 }
 
+/// 来源已认证的退件即使不可领取（例如没有资产）也只记证据，由消费方隔离；不能以
+/// `UnsafeDisposition` 让收件游标停在这封邮件上。
 #[test]
-fn unclaimable_system_return_fails_closed() {
+fn unclaimable_system_return_is_recorded_without_blocking() {
     let service = service();
     let subject = format!("[RTS] Auction payment request [{OBLIGATION_ID}]");
     let mut message = returned_mail("MoogleMail", &subject);
     message.claimable = false;
-    let error = process(&service, message).expect_err("不可领取的退件不能形成证据");
-    assert!(matches!(
-        error,
-        ApplicationError::MailProcessing(MailProcessingError::UnsafeDisposition)
-    ));
+    message.returnable = false;
+    message.cod = 0;
+    message.attachments.clear();
+    let decision = process(&service, message).expect("已认证的退件不能阻塞游标");
+    assert_eq!(
+        (decision.mail_kind.as_str(), decision.status.as_str(), decision.decision_code.as_str()),
+        ("delivery", "accepted", "settlement_recovery_returned")
+    );
+    assert_eq!(
+        decision.metadata,
+        json!({"obligation_id": OBLIGATION_ID, "credits": 0, "cod": 0, "attachment_ids": []})
+    );
     assert!(service.deliveries.operations().is_empty());
+}
+
+/// 系统退回的卖方货款与买方退款同样只记为退件证据，带 Credits 也不会被当作未知邮件退回。
+#[test]
+fn system_returned_payout_and_refund_are_settlement_return_evidence() {
+    let service = service();
+    for base in ["Auction seller payout", "Auction buyer refund"] {
+        let mut message = returned_mail("MoogleMail", &format!("[RTS] {base} [{OBLIGATION_ID}]"));
+        message.credits = 250_000;
+        message.cod = 0;
+        message.attachments.clear();
+        let decision = process(&service, message).expect("货款或退款退件证据");
+        assert_eq!(
+            (decision.mail_kind.as_str(), decision.decision_code.as_str()),
+            ("delivery", "settlement_recovery_returned"),
+            "{base}"
+        );
+        assert_eq!(
+            decision.metadata,
+            json!({
+                "obligation_id": OBLIGATION_ID,
+                "credits": 250_000,
+                "cod": 0,
+                "attachment_ids": [],
+            })
+        );
+    }
+    assert!(service.deliveries.operations().is_empty());
+}
+
+/// 无前缀兼容入口已撤掉。任何发件人寄来的 canonical 结算主题都按未知邮件处理：带资产
+/// 整封退回、不带资产归档，绝不形成退件证据（义务 ID 可由公开 ID 推出，不能证明来源）。
+#[test]
+fn prefixless_settlement_subject_is_never_return_evidence() {
+    let service = service();
+    for sender in ["BuyerPlayer", "MoogleMail"] {
+        let subject = format!("Auction equipment delivery [{OBLIGATION_ID}]");
+        let decision =
+            process(&service, returned_mail(sender, &subject)).expect("未知邮件按原路径收口");
+        assert_eq!(
+            (decision.mail_kind.as_str(), decision.decision_code.as_str()),
+            ("unknown", "unknown_assets_rejected"),
+            "{sender}"
+        );
+        let mut assetless =
+            returned_mail(sender, &format!("auction payment request [{OBLIGATION_ID}]"));
+        assetless.cod = 0;
+        assetless.attachments.clear();
+        let decision = process(&service, assetless).expect("无资产未知邮件归档");
+        assert_eq!(
+            (decision.mail_kind.as_str(), decision.decision_code.as_str()),
+            ("unknown", "archived"),
+            "{sender}"
+        );
+    }
+    assert_eq!(
+        service.deliveries.operations(),
+        [MailDeliveryOperation::Return, MailDeliveryOperation::Return]
+    );
 }

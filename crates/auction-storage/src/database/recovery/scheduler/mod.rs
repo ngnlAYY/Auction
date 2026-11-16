@@ -38,6 +38,22 @@ impl RecoveryWorkStore for DatabaseStore {
         })
     }
 
+    fn consume_due_settlement_return(
+        &self,
+        now: DateTime<Utc>,
+    ) -> ApplicationFuture<'_, Option<auction_application::settlement::SettlementReturnConsumption>>
+    {
+        Box::pin(async move {
+            if now.timestamp_nanos_opt().is_none() {
+                return Err(repository_error("结算退件消费时间无效").into());
+            }
+            // 退件证据表的唯一 owner 在 settlement 履约模块；recovery 循环只复用存储句柄调度它。
+            crate::database::settlement::fulfillment::consume_return_postgres(self.pool(), now)
+                .await
+                .map_err(ApplicationError::from)
+        })
+    }
+
     fn advance_due_case(
         &self,
         now: DateTime<Utc>,

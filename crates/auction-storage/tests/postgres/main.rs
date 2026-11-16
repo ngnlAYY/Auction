@@ -33,6 +33,7 @@ mod retention_dry_run;
 mod retention_purge;
 mod runtime_privileges;
 mod settlement;
+mod settlement_returns;
 mod shutdown_window;
 mod site_documents;
 mod snapshot_timezone;
