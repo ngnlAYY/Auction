@@ -10,10 +10,10 @@
 | --- | --- |
 | [crates/auction-integrations/src/clients/mooglemail](src/clients/mooglemail) | 协议模型与 URL 构造、受限 HTTP 客户端、HTML 解析（收件/Sent/余额/库存/身份）、分步写入与发送后 Sent 证明、投递 transport、周期维护、单 Cookie 会话互斥、联合远端证据、加密诊断归档 |
 | [crates/auction-integrations/src/clients/ehentai](src/clients/ehentai) | 论坛客户端：主题分页读取、精确标题查找、发帖与编辑、登录态只读证明、目标资料读取、私信 |
-| [crates/auction-integrations/src/credentials](src/credentials) · [cryptobox](src/cryptobox) · [keyring](src/keyring) · [login_key](src/login_key) | 凭据规范化与登录换取 Cookie；`DataKey` 与装备 key、外部 Cookie、登录 key 共用的 AES-256-GCM 信封原语（随机 nonce、按用途分域的明文指纹、恒定时间比较与清零），各适配器只拼 AAD 与映射错误；单域密钥环（未知 key ID 失败关闭）；登录 key 签发与解密 |
+| [crates/auction-integrations/src/credentials](src/credentials) · [cryptobox](src/cryptobox) · [keyring](src/keyring) · [login_key](src/login_key) | 凭据规范化与登录换取 Cookie；在线检查分两侧：Admin 侧 `CredentialVerifier` 只在本进程检查论坛 Cookie，邮件 Cookie 只按 ID 与版本转交 Worker control；Worker 侧 `WorkerMailCredentialVerifier` 打开指定信封后经邮件循环同一 gateway 以候选身份读余额页（共享请求门与在途锁，不清除账号忙碌）；`DataKey` 与装备 key、外部 Cookie、登录 key 共用的 AES-256-GCM 信封原语（随机 nonce、按用途分域的明文指纹、恒定时间比较与清零），各适配器只拼 AAD 与映射错误；单域密钥环（未知 key ID 失败关闭）；登录 key 签发与解密 |
 | [crates/auction-integrations/src/equipment](src/equipment) · [forum](src/forum) | 装备来源读取（host/path allowlist、可交易判定、canonical 事实）与 Public URL 解析；BBCode 渲染与快照预览解析 |
 | [crates/auction-integrations/src/outbound](src/outbound) · [heartbeat](src/heartbeat) · [operations_alert](src/operations_alert) | 受限出站 HTTPS 的唯一 owner（只收绝对 HTTPS 地址，禁 userinfo/fragment；客户端禁重定向/代理/重试，3 秒连接、5 秒总超时）；备份打卡（一次 HTTPS GET，结果脱敏；Worker 存活检查长期持有同一客户端）；告警 Webhook（只发送冻结 JSON） |
-| [crates/auction-integrations/src/worker_control](src/worker_control) | Admin/CLI 经 Worker control 的 client 适配器（装备读取、Sent 查询、恢复扫描、状态/进度/外部账号快照/触发）；只拥有 Unix socket 传输与错误分类。协议常量与线上 DTO 由 `auction-application` 拥有 |
+| [crates/auction-integrations/src/worker_control](src/worker_control) | Admin/CLI 经 Worker control 的 client 适配器（装备读取、Sent 查询、恢复扫描、邮件 Cookie 在线检查、状态/进度/外部账号快照/触发）；只拥有 Unix socket 传输与错误分类。协议常量与线上 DTO 由 `auction-application` 拥有 |
 | [crates/auction-integrations/src/safe_diagnostics](src/safe_diagnostics) · [html](src/html) · [backup](src/backup) | 集成错误的同步安全投影与默认上下文的 `map_err` 映射（`warn_map`/`error_map`/`debug_map`）；常量 CSS selector 在调用点只解析一次（`static_selector!`）；可选 `backup` feature 的 R2 适配器（参数由 CLI 显式传入） |
 
 ## 关键行为

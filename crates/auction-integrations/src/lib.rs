@@ -19,7 +19,9 @@ mod worker_control;
 #[cfg(feature = "backup")]
 pub use backup::{BackupObject, BackupObjectStatus, BackupStoreError, R2BackupStore};
 pub use clients::{ehentai, mooglemail};
-pub use credentials::{CredentialAcquirer, CredentialSealer, CredentialVerifier};
+pub use credentials::{
+    CredentialAcquirer, CredentialSealer, CredentialVerifier, WorkerMailCredentialVerifier,
+};
 pub use cryptobox::{
     DataKey, EquipmentKeyOpener, EquipmentKeyOpenerError, EquipmentKeySealer,
     EquipmentKeySealerError,

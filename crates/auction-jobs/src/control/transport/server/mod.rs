@@ -4,10 +4,12 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 
+use auction_application::admin::AdminCredentialCheckPort;
 use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::operations::{
     WORKER_CONTROL_EQUIPMENT_READ_PATH, WORKER_CONTROL_EXTERNAL_ACCOUNTS_PATH,
-    WORKER_CONTROL_LIVE_PATH, WORKER_CONTROL_MAIL_PROGRESS_PATH, WORKER_CONTROL_READY_PATH,
+    WORKER_CONTROL_LIVE_PATH, WORKER_CONTROL_MAIL_CREDENTIAL_CHECK_PATH,
+    WORKER_CONTROL_MAIL_PROGRESS_PATH, WORKER_CONTROL_READY_PATH,
     WORKER_CONTROL_RECOVERY_SCAN_PATH, WORKER_CONTROL_SENT_LOOKUP_PATH, WORKER_CONTROL_STATUS_PATH,
     WORKER_CONTROL_TRIGGER_POLL_PATH, WorkerRemoteReadPort,
 };
@@ -22,6 +24,7 @@ use uuid::Uuid;
 use super::handlers::equipment_read;
 use super::handlers::external_accounts;
 use super::handlers::live;
+use super::handlers::mail_credential_check;
 use super::handlers::mail_progress;
 use super::handlers::metrics;
 use super::handlers::not_found;
@@ -33,8 +36,9 @@ use super::handlers::trigger_poll;
 use super::protocol::ResponseCode;
 use super::protocol::response;
 use super::{
-    RECOVERY_SCAN_REQUEST_TIMEOUT, REMOTE_READ_REQUEST_TIMEOUT, WORKER_CONTROL_METRICS_PATH,
-    WorkerControlHandle, WorkerControlServerConfig, WorkerControlServerError,
+    MAIL_CREDENTIAL_CHECK_REQUEST_TIMEOUT, RECOVERY_SCAN_REQUEST_TIMEOUT,
+    REMOTE_READ_REQUEST_TIMEOUT, WORKER_CONTROL_METRICS_PATH, WorkerControlHandle,
+    WorkerControlServerConfig, WorkerControlServerError,
 };
 use crate::worker::diagnostics;
 
@@ -50,6 +54,8 @@ pub struct WorkerControlServer<L> {
     metrics: Option<Arc<ProcessMetrics>>,
     /// 远端只读执行器；未装配时对应路由明确返回能力不可用。
     remote_reads: Option<Arc<dyn WorkerRemoteReadPort>>,
+    /// Admin 邮件凭据在线检查的执行器；未装配时路由明确返回能力不可用。
+    mail_credential_checks: Option<Arc<dyn AdminCredentialCheckPort>>,
 }
 
 impl<L> WorkerControlServer<L>
@@ -75,6 +81,7 @@ where
             config,
             metrics,
             remote_reads: None,
+            mail_credential_checks: None,
         }
     }
 
@@ -85,13 +92,30 @@ where
         self
     }
 
+    /// 注入 Admin 邮件凭据在线检查的执行器；它必须使用与本进程邮件循环共用请求门、在途锁与
+    /// 账号忙熔断的客户端，Admin 不再从自身进程直连外部站点。
+    pub fn with_mail_credential_checks(
+        mut self,
+        checks: Arc<dyn AdminCredentialCheckPort>,
+    ) -> Self {
+        self.mail_credential_checks = Some(checks);
+        self
+    }
+
     /// 运行控制 server，收到 shutdown future 后优雅收口。axum 在停止接受连接时就丢弃 listener，
     /// 因此进入关闭即按身份删除 socket、释放实例锁，在途请求随后继续排空；与 Public/Admin 一致。
     pub async fn run(
         self,
         shutdown: impl std::future::Future<Output = ()> + Send + 'static,
     ) -> Result<(), WorkerControlServerError> {
-        let Self { listener, handle, config, metrics: process_metrics, remote_reads } = self;
+        let Self {
+            listener,
+            handle,
+            config,
+            metrics: process_metrics,
+            remote_reads,
+            mail_credential_checks,
+        } = self;
         let request_timeout = config.request_timeout;
         let metrics_state = process_metrics;
         let app = Router::new()
@@ -104,6 +128,7 @@ where
             .route(WORKER_CONTROL_EQUIPMENT_READ_PATH, post(equipment_read))
             .route(WORKER_CONTROL_SENT_LOOKUP_PATH, post(sent_lookup))
             .route(WORKER_CONTROL_RECOVERY_SCAN_PATH, post(recovery_scan))
+            .route(WORKER_CONTROL_MAIL_CREDENTIAL_CHECK_PATH, post(mail_credential_check))
             .route(WORKER_CONTROL_METRICS_PATH, get(metrics))
             .fallback(not_found)
             .layer(DefaultBodyLimit::max(config.body_limit))
@@ -117,6 +142,8 @@ where
                         || path == WORKER_CONTROL_SENT_LOOKUP_PATH
                     {
                         REMOTE_READ_REQUEST_TIMEOUT
+                    } else if path == WORKER_CONTROL_MAIL_CREDENTIAL_CHECK_PATH {
+                        MAIL_CREDENTIAL_CHECK_REQUEST_TIMEOUT
                     } else {
                         request_timeout
                     };
@@ -142,6 +169,7 @@ where
             ))
             .layer(Extension(metrics_state))
             .layer(Extension(remote_reads))
+            .layer(Extension(mail_credential_checks))
             .with_state(handle);
         axum::serve(listener, app)
             .with_graceful_shutdown(shutdown)
