@@ -75,7 +75,7 @@ pub enum PublicBidLogCursor {
     },
 }
 
-/// 公开竞价日志条目；不包含代理上限、Cookie 或其他私有竞价状态。
+/// 公开竞价日志条目；不包含代理模式、生效中代理的上限、Cookie 或其他私有竞价状态。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicBidLogEntry {
     pub id: Uuid,
@@ -99,6 +99,19 @@ pub struct PublicBidLogEntry {
     pub fact_index: i32,
     pub mechanism: String,
     pub created_at: DateTime<Utc>,
+    /// 本条出价所在的新建代理命令里被排位击败（`ranked_below`）的代理；只挂在该命令的
+    /// 第 1 条事实上。
+    pub defeated_proxy: Option<PublicDefeatedProxy>,
+}
+
+/// 代理对代理竞争中落败、已耗尽的授权。胜者出价按它的上限计算，所以以代理出价的形式随该
+/// 出价公开：不公开就会出现同一人连续抬价、价格无故跳升的假象。快慢模式一视同仁且不公开——
+/// 慢速代理（含正在等待反击的）与新代理竞争时同样当场决出。仍生效的代理不在此列。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PublicDefeatedProxy {
+    pub bidder_name: String,
+    /// 落败时的授权上限。
+    pub maximum_amount: i64,
 }
 
 /// 公开竞价日志分页结果；cursor 页不计算全量 total。

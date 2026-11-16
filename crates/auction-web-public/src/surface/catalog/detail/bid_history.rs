@@ -5,7 +5,7 @@ use auction_web_shared::{Dialog, Time, format_credit_amount, t};
 use dioxus::prelude::*;
 
 use crate::api::fetch_lot_bid_log;
-use crate::surface::{BidHistoryParticipant, PublicPager, use_bid_refresh};
+use crate::surface::{BidHistoryParticipant, PublicPager, bid_history_rows, use_bid_refresh};
 
 /// 抽屉内直接展示的最近出价条数。
 const LATEST_BIDS: i64 = 4;
@@ -69,7 +69,7 @@ pub(super) fn DetailLatestBids(
                 },
                 Some(Ok(page)) => rsx! {
                     ol { class: "public-catalog-detail__bids",
-                        for bid in page.bids.iter().cloned() {
+                        for bid in bid_history_rows(page.bids.clone()) {
                             li {
                                 key: "{bid.id}",
                                 class: if bid.valid {
@@ -180,7 +180,7 @@ fn BidHistoryTable(page: crate::api::BidLogPage) -> Element {
                     }
                 }
                 tbody {
-                    for bid in page.bids {
+                    for bid in bid_history_rows(page.bids) {
                         tr {
                             class: if bid.valid { "public-auction-lot__leading" } else { "" },
                             "aria-description": if bid.valid { t!("bidlog-valid") } else { t!("bidlog-invalid") },

@@ -2,6 +2,7 @@
 
 use auction_application::auction::{
     PublicBidLogCursor, PublicBidLogEntry, PublicBidLogListRequest, PublicBidLogPage,
+    PublicDefeatedProxy,
 };
 use auction_application::core::ApplicationError;
 use sqlx::Row;
@@ -105,9 +106,17 @@ pub(super) async fn list_postgres(
         .map_err(|error| storage_error_from(error, "读取公开竞价日志拍卖状态失败"))?;
 
     // 保留每条已接受事实；普通出价及同事务代理回应都公开，避免隐藏触发报价后造成自抬价错觉。
+    // 代理对代理竞争只给胜者写一条事实，落败授权（不分快慢）随该命令的第 1 条事实带出。
+    // 先在子查询内排序分页，再对本页逐行查落败授权；聚合恒返回一行，不会因关联而重复或丢行，
+    // 不唯一时由映射失败关闭。
     let rows = sqlx::query(concat!(
-        "SELECT
+        "SELECT page.*,
+            defeated.defeated_count,
+            defeated.defeated_bidder_name,
+            defeated.defeated_maximum_amount
+         FROM (SELECT
             b.id,
+            b.command_id,
             l.auction_id,
             b.lot_id,
             l.category_number AS lot_number,
@@ -151,7 +160,25 @@ pub(super) async fn list_postgres(
            )
          ORDER BY b.created_at DESC, b.lot_id DESC,
                   b.accepted_state_version DESC, b.fact_index DESC, b.id DESC
-         LIMIT $11 OFFSET $12"
+         LIMIT $11 OFFSET $12
+         ) AS page
+         LEFT JOIN LATERAL (
+            SELECT
+                count(*) AS defeated_count,
+                min(defeated_user.username) AS defeated_bidder_name,
+                min(transition.new_maximum_amount) AS defeated_maximum_amount
+            FROM public.bid_proxy_authorizations AS proxy
+            JOIN public.bid_proxy_authorization_transitions AS transition
+              ON transition.authorization_id = proxy.authorization_id
+            JOIN public.users AS defeated_user ON defeated_user.id = proxy.user_id
+            WHERE page.fact_index = 1
+              AND proxy.lot_id = page.lot_id
+              AND transition.origin_command_id = page.command_id
+              AND transition.transition_kind = 'exhausted'
+              AND transition.reason = 'ranked_below'
+         ) AS defeated ON true
+         ORDER BY page.created_at DESC, page.lot_id DESC,
+                  page.accepted_state_version DESC, page.fact_index DESC, page.id DESC"
     ))
     .bind(request.auction_id)
     .bind(request.world_id.as_deref())
@@ -267,5 +294,27 @@ fn map_postgres_entry(row: sqlx::postgres::PgRow) -> Result<PublicBidLogEntry, A
         created_at: row
             .try_get("created_at")
             .map_err(|error| storage_error_from(error, "读取 PostgreSQL 竞价创建时间失败"))?,
+        defeated_proxy: map_defeated_proxy(&row)?,
     })
+}
+
+/// 一次新建代理命令只排位击败一份授权；多于一份说明事实已损坏，失败关闭而不是任取其一。
+fn map_defeated_proxy(
+    row: &sqlx::postgres::PgRow,
+) -> Result<Option<PublicDefeatedProxy>, ApplicationError> {
+    let count: i64 = row
+        .try_get("defeated_count")
+        .map_err(|error| storage_error_from(error, "读取 PostgreSQL 落败代理数量失败"))?;
+    match count {
+        0 => Ok(None),
+        1 => Ok(Some(PublicDefeatedProxy {
+            bidder_name: row.try_get("defeated_bidder_name").map_err(|error| {
+                storage_error_from(error, "读取 PostgreSQL 落败代理用户名称失败")
+            })?,
+            maximum_amount: row
+                .try_get("defeated_maximum_amount")
+                .map_err(|error| storage_error_from(error, "读取 PostgreSQL 落败代理上限失败"))?,
+        })),
+        _ => Err(storage_error("公开竞价日志的同一出价关联了多份落败代理")),
+    }
 }

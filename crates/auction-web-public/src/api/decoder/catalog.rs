@@ -284,7 +284,7 @@ fn valid_bid_log_entry(value: &Value) -> bool {
             "mechanism",
             "created_at",
         ],
-        &["source", "source_post_number", "source_post_url"],
+        &["source", "source_post_number", "source_post_url", "defeated_proxy"],
     ) && valid_uuid(string(value.get("id")).unwrap_or_default())
         && valid_uuid(string(value.get("auction_id")).unwrap_or_default())
         && valid_uuid(string(value.get("lot_id")).unwrap_or_default())
@@ -298,7 +298,20 @@ fn valid_bid_log_entry(value: &Value) -> bool {
         && positive(value.get("fact_index"))
         && matches!(string(value.get("mechanism")), Some("ordinary" | "proxy"))
         && valid_bid_log_source(value)
+        && valid_bid_log_defeated_proxy(value)
         && time(value.get("created_at"))
+}
+
+/// 落败代理只随代理竞争的那一条胜者代理事实下发，且不会是胜者本人。
+fn valid_bid_log_defeated_proxy(value: &Map<String, Value>) -> bool {
+    let Some(defeated) = value.get("defeated_proxy") else { return true };
+    let Some(defeated) = object(defeated) else { return false };
+    json_keys_only(defeated, &["bidder_name", "maximum_amount"], &[])
+        && nonempty(defeated.get("bidder_name"))
+        && positive(defeated.get("maximum_amount"))
+        && string(value.get("mechanism")) == Some("proxy")
+        && int(value.get("fact_index")) == Some(1)
+        && string(defeated.get("bidder_name")) != string(value.get("bidder_name"))
 }
 
 fn valid_bid_log_source(value: &Map<String, Value>) -> bool {
@@ -519,7 +532,7 @@ fn valid_numbered_page(value: &Map<String, Value>) -> bool {
 mod tests {
     use serde_json::{Value, json};
 
-    use super::valid_current_auction_response;
+    use super::{valid_bid_log_entry, valid_current_auction_response};
 
     fn current(proxy_default_mode: Option<Value>) -> Value {
         let mut auction = json!({
@@ -558,5 +571,56 @@ mod tests {
             assert!(!valid_current_auction_response(&rejected, "main"), "{invalid:?}");
         }
         assert!(valid_current_auction_response(&json!({ "auction": null }), "main"));
+    }
+
+    fn proxy_bid(defeated_proxy: Option<Value>) -> Value {
+        let mut bid = json!({
+            "id": "6f1c2a5e-1b2c-4d3e-8f4a-000000000010",
+            "auction_id": "6f1c2a5e-1b2c-4d3e-8f4a-000000000002",
+            "lot_id": "6f1c2a5e-1b2c-4d3e-8f4a-000000000003",
+            "lot_number": 1,
+            "amount": 15_750_000,
+            "equipment_name": "Legendary Staff",
+            "equipment_category": "Staff",
+            "bidder_name": "winner",
+            "source": "proxy",
+            "valid": true,
+            "accepted_state_version": 11,
+            "fact_index": 1,
+            "mechanism": "proxy",
+            "created_at": "2026-11-14T12:57:20Z",
+        });
+        if let Some(defeated) = defeated_proxy {
+            bid["defeated_proxy"] = defeated;
+        }
+        bid
+    }
+
+    /// 落败代理只有出价人与正的上限两个键，不带模式；只能挂在新建代理命令的第 1 条代理事实上，
+    /// 且不是胜者本人。任一不符整条拒绝。
+    #[test]
+    fn bid_log_entry_accepts_a_defeated_proxy_only_on_the_winning_proxy_fact() {
+        let defeated = json!({ "bidder_name": "challenger", "maximum_amount": 15_000_000 });
+        assert!(valid_bid_log_entry(&proxy_bid(None)));
+        assert!(valid_bid_log_entry(&proxy_bid(Some(defeated.clone()))));
+        for invalid in [
+            Value::Null,
+            json!({ "bidder_name": "challenger" }),
+            json!({ "bidder_name": "", "maximum_amount": 15_000_000 }),
+            json!({ "bidder_name": "challenger", "maximum_amount": 0 }),
+            json!({ "bidder_name": "challenger", "maximum_amount": 15_000_000, "mode": "slow" }),
+            json!({ "bidder_name": "winner", "maximum_amount": 15_000_000 }),
+        ] {
+            assert!(!valid_bid_log_entry(&proxy_bid(Some(invalid.clone()))), "{invalid}");
+        }
+        let mut second_fact = proxy_bid(Some(defeated.clone()));
+        second_fact["fact_index"] = json!(2);
+        assert!(!valid_bid_log_entry(&second_fact), "只随第 1 条事实返回");
+        let mut ordinary = proxy_bid(Some(defeated));
+        ordinary["mechanism"] = json!("ordinary");
+        if let Some(fields) = ordinary.as_object_mut() {
+            fields.remove("source");
+        }
+        assert!(!valid_bid_log_entry(&ordinary), "普通出价不带落败代理");
     }
 }

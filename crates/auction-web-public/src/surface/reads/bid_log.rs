@@ -11,9 +11,9 @@ use crate::api::{
     BidLogEntry, BidLogPage, fetch_bid_log_auctions, fetch_bid_log_page, fetch_worlds, lot_code_for,
 };
 use crate::surface::{
-    BidHistoryParticipant, PublicBoardQuery, PublicPager, current_public_pathname,
-    public_page_matches, supported_worlds, update_public_query_state, use_content_loading,
-    use_public_query_state, world_label, write_public_query,
+    BidHistoryParticipant, PublicBoardQuery, PublicPager, bid_history_rows,
+    current_public_pathname, public_page_matches, supported_worlds, update_public_query_state,
+    use_content_loading, use_public_query_state, world_label, write_public_query,
 };
 use crate::surface::{
     LotDetailLookupButton, LotDetailLookupHost, use_bid_refresh, use_lot_detail_lookup,
@@ -387,7 +387,7 @@ pub(crate) fn BidLogTable(
     on_page_size_change: EventHandler<i64>,
 ) -> Element {
     let has_more = page.has_more.unwrap_or(false);
-    let bids = page.bids;
+    let bids = bid_history_rows(page.bids);
     rsx! {
         div {
             if bids.is_empty() {

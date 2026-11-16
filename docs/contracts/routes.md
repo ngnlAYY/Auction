@@ -116,7 +116,7 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | GET | `/api/v1/auctions/current` | — | `world`、`include`：当前（预览/进行中）场次。`include` 可选且只接受 `proxy_default_mode`：条目追加 `proxy_default_mode`（`fast`\|`slow`），即该场冻结策略的代理默认模式，Public 代理新建表单以它为初始选项（Final 阶段不能新建 Slow 时为 Fast），代理授权接口仍要求显式 `mode`。不带 `include` 时保持原字段集合，已打开的旧页面照常解码（兼容规则见[crates/auction-contracts/README.md#变更规则](../../crates/auction-contracts/README.md#变更规则)）；其他取值或重复出现为 400 `invalid_query`。无论是否带 `include`，冻结策略缺少该值或取值不在闭集内时整条读取失败关闭 |
 | GET | `/api/v1/auctions/{auction_id}/lots` | — | `category`、`equipment_group`（rare/fusion）、`max_level`、`include_unleveled`、`page`、`page_size`、`fields`。`fields` 可选且只接受 `summary`：正式（live）行省略 `equipment.stats` 与 `equipment.info_summary`，`primary_attribute_initials`、`avg_roll` 与完整游戏链接照常返回，属性明细由 lot 详情提供；预览行不变。不带 `fields` 时保持原字段集合；其他取值或重复出现为 400 `invalid_query`。两种投影的 URL 不同，ETag 与缓存条目各自独立 |
 | GET | `/api/v1/lots/{lot_id}` | — | lot 详情（装备、价格、截止与领先状态；完整竞价历史另读 bid-log） |
-| GET | `/api/v1/auctions/{auction_id}/bid-log` | — | `world`、`lot`、`page`、`page_size`、`cursor` |
+| GET | `/api/v1/auctions/{auction_id}/bid-log` | — | `world`、`lot`、`page`、`page_size`、`cursor`、`include`。`include` 可选且只接受 `defeated_proxy`：代理对代理竞争中胜者的那条代理出价追加 `defeated_proxy`（`bidder_name`、`maximum_amount`），即被它排位击败的授权，快慢模式一样且不公开模式；Public 页面把它按一次代理出价排在该出价之前，不计入 `total` 与分页。被普通出价击败的代理没有此字段。不带 `include` 时保持原字段集合，已打开的旧页面照常解码；其他取值或重复出现为 400 `invalid_query` |
 | GET | `/api/v1/price-history` | — | `name`、`world`、`from`、`to`、`min_price`、`max_price`、`buyer`、`seller`、`sort`、`page`、`page_size`、`cursor` |
 | GET | `/api/v1/registration-info` | — | 登录页注册说明用的 Bot 名单（`bot_players` 投影） |
 | GET | `/api/v1/forum/sync-status` | — | 论坛同步开关与摘要 |

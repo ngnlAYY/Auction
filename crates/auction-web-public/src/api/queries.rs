@@ -234,6 +234,9 @@ fn is_target_current(auction: &CurrentAuction, auction_id: &str, expected_status
             ))
 }
 
+/// 竞价日志的附加字段：代理竞争中落败的授权。缺省响应不含它，旧页面按原字段闭集解码。
+const BID_LOG_INCLUDE: &str = "defeated_proxy";
+
 pub(crate) async fn fetch_bid_log_page(
     auction_id: String,
     page: i64,
@@ -244,7 +247,8 @@ pub(crate) async fn fetch_bid_log_page(
     let mut query = form_urlencoded::Serializer::new(String::new());
     query
         .append_pair("page", &page.max(1).to_string())
-        .append_pair("page_size", &page_size.to_string());
+        .append_pair("page_size", &page_size.to_string())
+        .append_pair("include", BID_LOG_INCLUDE);
     if !world_id.is_empty() {
         query.append_pair("world", &world_id);
     }
@@ -316,6 +320,7 @@ pub(crate) async fn fetch_lot_bid_log(
         .append_pair("lot", &lot_id)
         .append_pair("page", &page.max(1).to_string())
         .append_pair("page_size", &page_size.to_string())
+        .append_pair("include", BID_LOG_INCLUDE)
         .finish();
     let url = format!("/api/v1/auctions/{auction_id}/bid-log?{query}");
     cached_public_get(&url, swr_cache::LIVE_TTL_MILLIS, |response| async move {

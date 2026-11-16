@@ -60,11 +60,23 @@ pub(super) fn validate_entries(
             || !matches!(entry.mechanism.as_str(), "ordinary" | "proxy")
             || !valid_source(entry)
             || entry.created_at.timestamp_micros() == 0
+            || !valid_defeated_proxy(entry)
         {
             return Err(storage_error("公开竞价日志包含无效条目"));
         }
     }
     Ok(())
+}
+
+/// 代理竞争只产生一条胜者代理事实；落败者只能挂在它上面，且不会是胜者本人。
+fn valid_defeated_proxy(entry: &PublicBidLogEntry) -> bool {
+    entry.defeated_proxy.as_ref().is_none_or(|defeated| {
+        entry.mechanism == "proxy"
+            && entry.fact_index == 1
+            && !defeated.bidder_name.is_empty()
+            && defeated.bidder_name != entry.bidder_name
+            && defeated.maximum_amount > 0
+    })
 }
 
 fn valid_source(entry: &PublicBidLogEntry) -> bool {

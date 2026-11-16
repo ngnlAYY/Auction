@@ -25,6 +25,17 @@ pub struct PublicBidLogEntryResponse {
     pub fact_index: i64,
     pub mechanism: String,
     pub created_at: String,
+    /// 本条代理出价在代理对代理竞争中击败的授权；只在 `include=defeated_proxy` 时输出，页面在
+    /// 本条之前按一次代理出价展示。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub defeated_proxy: Option<PublicDefeatedProxyResponse>,
+}
+
+/// 竞价日志中落败代理的公开投影：只有出价人与落败时的上限，不含模式。
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+pub struct PublicDefeatedProxyResponse {
+    pub bidder_name: String,
+    pub maximum_amount: i64,
 }
 
 /// Public 竞价日志列表响应；编号页与 cursor 页使用已发布的互斥字段形状。

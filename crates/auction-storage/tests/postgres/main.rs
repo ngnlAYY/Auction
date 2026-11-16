@@ -11,6 +11,7 @@ mod admin_runtime_commands;
 mod asset_reconciliation;
 mod auction_write_queue;
 mod bid_cross_lot;
+mod bid_log_proxies;
 mod delivery;
 mod disposition_reads;
 mod forum_reply_targets;

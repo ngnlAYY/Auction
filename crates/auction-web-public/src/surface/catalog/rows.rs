@@ -1,4 +1,4 @@
-//! Public 拍卖目录的实时、预览和参与者行。
+//! Public 拍卖目录的实时、预览和参与者行，以及竞价历史的展示行。
 
 use auction_web_shared::{TruncatedText, format_credit_amount, t};
 use dioxus::prelude::*;
@@ -6,7 +6,31 @@ use dioxus::prelude::*;
 use super::columns::{CatalogColumn, CatalogVisibility};
 use super::detail::{CatalogViewButton, use_catalog_detail_entry};
 use super::{equipment_group_label, lot_status_class, lot_status_label};
-use crate::api::CatalogRow;
+use crate::api::{BidLogEntry, CatalogRow};
+
+/// 把一页竞价记录展开成展示行：代理对代理竞争中落败的授权按一次代理出价（金额为其上限）
+/// 紧跟在胜者出价之后——降序列表里即在其下方、时间上先于它——说明胜者为何以该价出价。
+/// 落败行不领先，也不计入分页总数；键在出价 ID 后加后缀，与真实出价互不冲突。
+pub(crate) fn bid_history_rows(bids: Vec<BidLogEntry>) -> Vec<BidLogEntry> {
+    let defeated_count = bids.iter().filter(|bid| bid.defeated_proxy.is_some()).count();
+    let mut rows = Vec::with_capacity(bids.len() + defeated_count);
+    for mut bid in bids {
+        let defeated = bid.defeated_proxy.take().map(|defeated| BidLogEntry {
+            id: format!("{}-defeated", bid.id),
+            bidder_name: defeated.bidder_name,
+            amount: defeated.maximum_amount,
+            source: Some("proxy".to_owned()),
+            source_post_number: None,
+            source_post_url: None,
+            valid: false,
+            mechanism: "proxy".to_owned(),
+            ..bid.clone()
+        });
+        rows.push(bid);
+        rows.extend(defeated);
+    }
+    rows
+}
 
 /// 公开拍卖参与者标识；长名称保持可读的省略样式，并保留旧版的代理/当前用户标记。
 #[component]
@@ -234,5 +258,53 @@ pub(crate) fn PreviewCatalogRow(row: CatalogRow, visibility: CatalogVisibility) 
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use auction_contracts::PublicDefeatedProxyResponse;
+
+    use super::bid_history_rows;
+    use crate::api::BidLogEntry;
+
+    fn proxy_bid(id: &str, bidder_name: &str, amount: i64, valid: bool) -> BidLogEntry {
+        BidLogEntry {
+            id: id.to_owned(),
+            auction_id: "auction".to_owned(),
+            lot_id: "lot".to_owned(),
+            lot_number: 1,
+            amount,
+            equipment_name: "Legendary Staff".to_owned(),
+            equipment_category: "Staff".to_owned(),
+            bidder_name: bidder_name.to_owned(),
+            source: Some("proxy".to_owned()),
+            source_post_number: None,
+            source_post_url: None,
+            valid,
+            accepted_state_version: 1,
+            fact_index: 1,
+            mechanism: "proxy".to_owned(),
+            created_at: "2026-11-14T12:57:20Z".to_owned(),
+            defeated_proxy: None,
+        }
+    }
+
+    /// 落败代理展开成紧跟胜者出价的一行未领先代理出价，金额为其上限、时间同胜者；其余行原样保留。
+    #[test]
+    fn defeated_proxy_follows_the_winning_bid_as_a_proxy_row() {
+        let mut winner = proxy_bid("bid-2", "winner", 15_750_000, true);
+        winner.defeated_proxy = Some(PublicDefeatedProxyResponse {
+            bidder_name: "challenger".to_owned(),
+            maximum_amount: 15_000_000,
+        });
+        let earlier = proxy_bid("bid-1", "winner", 10_500_000, false);
+
+        let rows = bid_history_rows(vec![winner, earlier.clone()]);
+
+        let mut expected_winner = proxy_bid("bid-2", "winner", 15_750_000, true);
+        expected_winner.defeated_proxy = None;
+        let expected_defeated = proxy_bid("bid-2-defeated", "challenger", 15_000_000, false);
+        assert_eq!(rows, [expected_winner, expected_defeated, earlier]);
     }
 }

@@ -13,11 +13,11 @@ use auction_application::public::PublicEquipmentLinkTarget;
 use auction_contracts::{
     AuctionListResponse, AuctionSummaryResponse, AuctionSummaryV2Response,
     CurrentAuctionItemResponse, PublicBidLogEntryResponse, PublicBidLogListResponse,
-    PublicEquipmentResponse, PublicEquipmentStatResponse, PublicFinalRestrictionResponse,
-    PublicLiveLotResponse, PublicLotDetailItemResponse, PublicLotEnvelopeResponse,
-    PublicLotListItemsResponse, PublicPreviewEquipmentResponse, PublicPreviewLotDetailResponse,
-    PublicPreviewLotResponse, PublicPriceHistoryEntryResponse, PublicPriceHistoryListResponse,
-    PublicPriceHistoryStatsResponse,
+    PublicDefeatedProxyResponse, PublicEquipmentResponse, PublicEquipmentStatResponse,
+    PublicFinalRestrictionResponse, PublicLiveLotResponse, PublicLotDetailItemResponse,
+    PublicLotEnvelopeResponse, PublicLotListItemsResponse, PublicPreviewEquipmentResponse,
+    PublicPreviewLotDetailResponse, PublicPreviewLotResponse, PublicPriceHistoryEntryResponse,
+    PublicPriceHistoryListResponse, PublicPriceHistoryStatsResponse,
 };
 use uuid::Uuid;
 
@@ -381,15 +381,21 @@ pub(super) fn map_auction_page<T>(
     }
 }
 
+/// `include_defeated_proxy` 为假时条目保持原字段闭集，落败授权一律不输出。
 pub(super) fn map_bid_log_page(
     page: PublicBidLogPage,
     page_number: i64,
     cursor: Option<String>,
+    include_defeated_proxy: bool,
 ) -> PublicBidLogListResponse {
     let cursor_requested = cursor.is_some();
     let next_cursor = page.next_cursor.as_ref().map(encode_public_bid_log_cursor);
     PublicBidLogListResponse {
-        bids: page.entries.into_iter().map(map_bid_log_entry).collect(),
+        bids: page
+            .entries
+            .into_iter()
+            .map(|entry| map_bid_log_entry(entry, include_defeated_proxy))
+            .collect(),
         page: (!cursor_requested).then_some(page_number),
         page_size: page.limit,
         total: page.total,
@@ -399,7 +405,10 @@ pub(super) fn map_bid_log_page(
     }
 }
 
-fn map_bid_log_entry(entry: PublicBidLogEntry) -> PublicBidLogEntryResponse {
+fn map_bid_log_entry(
+    entry: PublicBidLogEntry,
+    include_defeated_proxy: bool,
+) -> PublicBidLogEntryResponse {
     let source_post_url = forum_post_url(&entry);
     PublicBidLogEntryResponse {
         id: entry.id.to_string(),
@@ -418,6 +427,12 @@ fn map_bid_log_entry(entry: PublicBidLogEntry) -> PublicBidLogEntryResponse {
         fact_index: i64::from(entry.fact_index),
         mechanism: entry.mechanism,
         created_at: public_timestamp(entry.created_at),
+        defeated_proxy: entry.defeated_proxy.filter(|_| include_defeated_proxy).map(|defeated| {
+            PublicDefeatedProxyResponse {
+                bidder_name: defeated.bidder_name,
+                maximum_amount: defeated.maximum_amount,
+            }
+        }),
     }
 }
 
