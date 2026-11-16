@@ -33,6 +33,7 @@ fn NavigationLinks(
             {t!("nav-auctions")}
         }
         Link { to: Route::BidLog {}, {t!("page-bidlog-title")} }
+        Link { to: Route::Fulfillment {}, {t!("page-fulfillment-title")} }
         Link { to: Route::AuctionList {}, {t!("nav-auction-history")} }
         Link { to: Route::History {}, {t!("nav-price-history")} }
         Link { to: Route::Rules {}, {t!("page-rules-title")} }

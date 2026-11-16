@@ -41,6 +41,7 @@ fn ConsoleIcon(kind: &'static str) -> Element {
         "info" => "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM12 16v-4M12 8h.01",
         "login" => "M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3",
         "gavel" => "m14 13-7.5 7.5a2.12 2.12 0 0 1-3-3L11 10M16 16l6-6M8 8l6-6M9 7l8 8M21 11l-8-8",
+        "package" => "M21 8 12 3 3 8v8l9 5 9-5zM3 8l9 5 9-5M12 13v8",
         "chevron" => "m15 18-6-6 6-6",
         _ => "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z",
     };
@@ -115,6 +116,13 @@ pub(crate) fn ConsoleSidebar(
                         icon: "list",
                         label: t!("page-bidlog-title"),
                         active: is(&Route::BidLog {}),
+                        on_navigate,
+                    }
+                    ConsoleNavLink {
+                        to: Route::Fulfillment {},
+                        icon: "package",
+                        label: t!("page-fulfillment-title"),
+                        active: is(&Route::Fulfillment {}),
                         on_navigate,
                     }
                 }

@@ -15,7 +15,7 @@ use super::session::initial_login_return_location;
 use super::shell::PublicShell;
 use super::{
     About, Account, AuctionIndex, AuctionList, AuctionPage, BidLog, Blacklist, Compensation,
-    CompensationPool, Forum, Login, LotDetail, Me, NotFound, Rules, Status,
+    CompensationPool, Forum, Fulfillment, Login, LotDetail, Me, NotFound, Rules, Status,
     initial_public_location,
 };
 
@@ -63,6 +63,9 @@ pub(crate) enum Route {
 
         #[route("/bidlog")]
         BidLog {},
+
+        #[route("/fulfillment")]
+        Fulfillment {},
 
         #[route("/history")]
         History {},

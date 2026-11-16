@@ -13,6 +13,7 @@ const PUBLIC_EXACT_ROUTES: &[&str] = &[
     "/compensation",
     "/compensation-pool",
     "/forum",
+    "/fulfillment",
     "/history",
     "/login",
     "/me",

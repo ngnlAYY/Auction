@@ -15,8 +15,10 @@ use crate::surface::{
 #[component]
 pub(crate) fn WorldPicker(mut selected_world: Signal<String>) -> Element {
     let route = use_route::<Route>();
-    let history_owns_world_filter =
-        matches!(&route, Route::AuctionList {} | Route::BidLog {} | Route::History {});
+    let history_owns_world_filter = matches!(
+        &route,
+        Route::AuctionList {} | Route::BidLog {} | Route::Fulfillment {} | Route::History {}
+    );
     let board_route = matches!(&route, Route::AuctionIndex {} | Route::AuctionPage {});
     let shell_query_state = use_context::<Signal<PublicBoardQuery>>();
     let mut location_revision = use_context::<PublicLocationRevision>().0;

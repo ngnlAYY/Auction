@@ -106,8 +106,9 @@
     align-items: stretch;
   }
 
-  /* 出价记录的拍品筛选与页内其他筛选控件同高。 */
-  .public-auction-bid-log-toolbar :is(input, button) {
+  /* 出价记录与履约进度的拍品筛选与页内其他筛选控件同高。 */
+  .public-auction-bid-log-toolbar :is(input, button),
+  .public-fulfillment__toolbar :is(input, button) {
     min-block-size: var(--size-control-compact);
     padding-block: 0;
     font-size: var(--text-sm);
@@ -119,6 +120,7 @@
   :is(
     .public-history-table,
     .public-auction-bid-log-table,
+    .public-fulfillment__table,
     .public-auction-rounds__table table,
     .public-blacklist-table,
     .public-account-table,
@@ -132,6 +134,7 @@
   :is(
     .public-history-table,
     .public-auction-bid-log-table,
+    .public-fulfillment__table,
     .public-auction-rounds__table table,
     .public-blacklist-table,
     .public-account-table,
@@ -147,6 +150,7 @@
   :is(
     .public-history-table,
     .public-auction-bid-log-table,
+    .public-fulfillment__table,
     .public-auction-rounds__table table,
     .public-blacklist-table,
     .public-account-table,

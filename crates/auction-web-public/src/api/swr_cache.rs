@@ -1,6 +1,6 @@
 //! Public 只读公开 GET 的内存 SWR/TTL 缓存。
-//! 只有 `auctions/current`、拍卖目录、当前 lots、lot 详情、竞价日志、价格历史与历史场次
-//! 可以进入缓存；会话、账号、watches、偏好、代理私有读取和命令响应永不缓存。条目保存的是
+//! 只有 `auctions/current`、拍卖目录、当前 lots、lot 详情、竞价日志、履约进度、价格历史与历史
+//! 场次可以进入缓存；会话、账号、watches、偏好、代理私有读取和命令响应永不缓存。条目保存的是
 //! 经严格 decoder 校验后的成功正文投影、响应 ETag（若有）与写入时间；缓存不参与金额、资格、
 //! 幂等、锁、会话或审计，命中只表示“同一完整 URL 的最近一次已验证成功投影”，清空或丢失
 //! 缓存只会多读一次权威接口。
@@ -37,7 +37,8 @@ use std::task::{Context, Poll, Waker};
 /// 避免返回时因短 TTL 过期而重新显示加载态。外壳权威轮询（非 Live 每 60 秒，Live 约每 5 分钟
 /// 兜底）会使全部条目过期（保留正文与 ETag，随后的读取带 `If-None-Match` 再验证）。
 pub(crate) const LIVE_TTL_MILLIS: u64 = 60_000;
-/// 目录视图的缓存有效期：拍卖列表、价格历史与历史场次；变化频率低，失效仍由事件触发。
+/// 目录视图的缓存有效期：拍卖列表、价格历史、历史场次与履约进度；变化频率低，失效仍由事件
+/// 与外壳轮询触发。
 pub(crate) const CATALOG_TTL_MILLIS: u64 = 15_000;
 /// 单线程内存缓存条目上限；筛选与分页组合可能很多，失效只标记过期、不删除条目，超出上限时
 /// 淘汰最早写入的条目。
@@ -186,6 +187,7 @@ pub(crate) fn is_cacheable_url(url: &str) -> bool {
             | ["", "api", "v1", "price-history"]
             | ["", "api", "v1", "auctions", _, "lots"]
             | ["", "api", "v1", "auctions", _, "bid-log"]
+            | ["", "api", "v1", "auctions", _, "fulfillment"]
             | ["", "api", "v1", "lots", _]
     )
 }
@@ -910,6 +912,7 @@ mod tests {
             "/api/v2/auctions?page=1&page_size=50&status=settled",
             "/api/v1/auctions/00000000-0000-0000-0000-000000000005/lots?page=1",
             "/api/v1/auctions/00000000-0000-0000-0000-000000000005/bid-log?page=1",
+            "/api/v1/auctions/00000000-0000-0000-0000-000000000005/fulfillment?page=1",
             "/api/v1/lots/00000000-0000-0000-0000-000000000006",
             "/api/v1/price-history?page=1",
         ] {
@@ -924,6 +927,7 @@ mod tests {
             "/api/v1/lots/00000000-0000-0000-0000-000000000008/bids",
             "/api/v1/lots/00000000-0000-0000-0000-000000000008/proxy-authorizations",
             "/api/v1/auctions/00000000-0000-0000-0000-000000000009/lots/extra",
+            "/api/v1/auctions/00000000-0000-0000-0000-000000000009/fulfillment/extra",
         ] {
             assert!(!is_cacheable_url(url), "{url} 不得进入缓存");
         }

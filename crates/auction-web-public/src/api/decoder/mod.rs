@@ -3,8 +3,8 @@
 //! 原始 JSON，再反序列化为 contracts DTO，避免 `serde` 的默认宽松行为把缺字段、未知字段或
 //! 自相矛盾的投影送进组件。
 //! 按路由分组的 decoder 位于子模块：`realtime`（实时事件流）、`catalog`（公开目录）、
-//! `lot`（lot 目录/详情与竞价命令）、`account`（我的竞价与代理授权）；本文件只保留共享
-//! envelope 解码与基础谓词原语。
+//! `fulfillment`（履约进度）、`lot`（lot 目录/详情与竞价命令）、`account`（我的竞价与代理
+//! 授权）；本文件只保留共享 envelope 解码与基础谓词原语。
 
 use auction_web_shared::wire::{JSON_MAX_SAFE_INTEGER, JSON_MAX_SAFE_INTEGER_F64};
 use auction_web_shared::{BrowserErrorClass, report_browser_error};
@@ -21,6 +21,7 @@ use chrono::DateTime;
 mod account;
 mod build_hello;
 mod catalog;
+mod fulfillment;
 mod lot;
 #[cfg(target_arch = "wasm32")]
 mod realtime;
@@ -33,6 +34,9 @@ pub(crate) use catalog::{
     decode_compensation_lots, decode_compensation_pool, decode_current_auction,
     decode_price_history_page, decode_rules, decode_worlds,
 };
+#[cfg(test)]
+pub(crate) use fulfillment::FULFILLMENT_STATUSES;
+pub(crate) use fulfillment::decode_fulfillment_page;
 pub(crate) use lot::{
     decode_bid_command, decode_create_proxy_command, decode_lot_detail, decode_lot_list,
     decode_lower_proxy_command,

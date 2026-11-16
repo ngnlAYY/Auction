@@ -2133,16 +2133,21 @@
 }
 
 /* ===== 出价日志 ===== */
+/* 履约进度页沿用出价日志的筛选面板、拍品筛选与表格骨架，在下列共享规则中并列；它自己的状态
+   徽标与说明行见“履约进度”一节。 */
 
 .public-auction-bid-log-controls,
-.public-auction-bid-log-toolbar {
+.public-auction-bid-log-toolbar,
+.public-fulfillment__controls,
+.public-fulfillment__toolbar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-3);
 }
 
-.public-auction-bid-log-controls label {
+.public-auction-bid-log-controls label,
+.public-fulfillment__controls label {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
@@ -2150,7 +2155,8 @@
   font-size: var(--text-sm);
 }
 
-.public-auction-bid-log-controls select {
+.public-auction-bid-log-controls select,
+.public-fulfillment__controls select {
   padding: var(--space-1) var(--space-2);
   border: var(--border-width) solid var(--color-border-control);
   border-radius: var(--radius-sm);
@@ -2158,14 +2164,16 @@
   background: var(--color-surface-raised);
 }
 
-.public-auction-bid-log-heading {
+.public-auction-bid-log-heading,
+.public-fulfillment__heading {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-3);
 }
 
-.public-auction-bid-log-round-header {
+.public-auction-bid-log-round-header,
+.public-fulfillment__round {
   display: flex;
   flex: 1 1 12rem;
   flex-wrap: wrap;
@@ -2175,20 +2183,23 @@
   overflow-wrap: anywhere;
 }
 
-.public-auction-bid-log-toolbar {
+.public-auction-bid-log-toolbar,
+.public-fulfillment__toolbar {
   gap: var(--space-2);
   min-inline-size: 0;
   max-inline-size: 100%;
   margin-inline-start: auto;
 }
 
-.public-auction-bid-log-toolbar label {
+.public-auction-bid-log-toolbar label,
+.public-fulfillment__toolbar label {
   color: var(--color-text-muted);
   font-size: var(--text-sm);
   overflow-wrap: anywhere;
 }
 
-.public-auction-bid-log-toolbar :is(input, button) {
+.public-auction-bid-log-toolbar :is(input, button),
+.public-fulfillment__toolbar :is(input, button) {
   min-inline-size: 0;
   min-block-size: var(--size-target);
   max-inline-size: 100%;
@@ -2199,19 +2210,22 @@
   background: var(--color-surface-raised);
 }
 
-.public-auction-bid-log-toolbar input {
+.public-auction-bid-log-toolbar input,
+.public-fulfillment__toolbar input {
   flex: 0 1 12rem;
   inline-size: 12rem;
 }
 
-.public-auction-bid-log-toolbar button {
+.public-auction-bid-log-toolbar button,
+.public-fulfillment__toolbar button {
   min-inline-size: var(--size-target);
   cursor: pointer;
   overflow-wrap: anywhere;
 }
 
 /* 筛选格式提示独占工具条的下一行，不挤占输入框与清除按钮。 */
-.public-auction-bid-log-toolbar__error {
+.public-auction-bid-log-toolbar__error,
+.public-fulfillment__toolbar-error {
   flex-basis: 100%;
   margin: 0;
   color: var(--color-danger);
@@ -2219,11 +2233,13 @@
   overflow-wrap: anywhere;
 }
 
-.public-auction-bid-log-round-number {
+.public-auction-bid-log-round-number,
+.public-fulfillment__round-number {
   font-weight: 600;
 }
 
-.public-auction-bid-log-round-world {
+.public-auction-bid-log-round-world,
+.public-fulfillment__round-detail {
   color: var(--color-text-muted);
 }
 
@@ -2241,7 +2257,8 @@
   border-color: var(--color-live);
 }
 
-.public-auction-bid-log-empty {
+.public-auction-bid-log-empty,
+.public-fulfillment__empty {
   padding-block: var(--space-4);
   color: var(--color-text-muted);
 }
@@ -2256,43 +2273,51 @@
 
 @media (hover: hover) {
   .public-auction-bid-log-empty button:hover,
-  .public-auction-bid-log-toolbar button:hover:not(:disabled) {
+  .public-auction-bid-log-toolbar button:hover:not(:disabled),
+  .public-fulfillment__toolbar button:hover:not(:disabled) {
     color: var(--color-accent);
     border-color: var(--color-accent);
   }
 }
 
-.public-auction-bid-log-table-wrap {
+.public-auction-bid-log-table-wrap,
+.public-fulfillment__table-wrap {
   overflow-x: clip;
   border: var(--border-width) solid var(--color-border);
   background: var(--color-surface);
 }
 
-.public-auction-bid-log-table {
+.public-auction-bid-log-table,
+.public-fulfillment__table {
   inline-size: 100%;
   border-collapse: collapse;
   font-size: var(--text-base);
 }
 
 .public-auction-bid-log-table th,
-.public-auction-bid-log-table td {
+.public-auction-bid-log-table td,
+.public-fulfillment__table th,
+.public-fulfillment__table td {
   padding: var(--space-2) var(--space-3);
   text-align: left;
   white-space: nowrap;
 }
 
-.public-auction-bid-log-table thead th {
+.public-auction-bid-log-table thead th,
+.public-fulfillment__table thead th {
   color: var(--color-text-muted);
   border-block-end: var(--border-width) solid var(--color-border);
   font-size: var(--text-sm);
   font-weight: 600;
 }
 
-.public-auction-bid-log-table tbody tr {
+.public-auction-bid-log-table tbody tr,
+.public-fulfillment__table tbody tr {
   border-block-end: var(--border-width) solid var(--color-border);
 }
 
-.public-auction-bid-log-table tbody tr:last-child {
+.public-auction-bid-log-table tbody tr:last-child,
+.public-fulfillment__table tbody tr:last-child {
   border-block-end: 0;
 }
 
@@ -2302,7 +2327,8 @@
 
 /* 金额与目录一致：正文字体的等宽数字、右对齐；拍品编号仍用等宽字体区分代码。 */
 .public-auction-bid-log-table .public-auction-bid-log-number,
-.public-auction-bid-log-table .public-auction-bid-log-amount {
+.public-auction-bid-log-table .public-auction-bid-log-amount,
+.public-fulfillment__table .public-fulfillment__number {
   text-align: end;
   font-variant-numeric: tabular-nums;
 }
@@ -2311,7 +2337,8 @@
   font-weight: 600;
 }
 
-.public-auction-bid-log-code {
+.public-auction-bid-log-code,
+.public-fulfillment__code {
   font-family: var(--font-mono);
   font-weight: 600;
 }
@@ -2319,6 +2346,58 @@
 .public-auction-bid-log-participant {
   min-inline-size: 0;
   max-inline-size: 18rem;
+}
+
+/* ===== 履约进度 ===== */
+/* 状态按语气分组着色：完成、进行中、需关注、已撤销、未知；颜色只作辅助，徽标文字始终给出
+   完整状态。付款期限与 COD 退回次数作为说明行排在徽标下方。 */
+
+.public-fulfillment__state {
+  white-space: normal;
+}
+
+.public-fulfillment__status {
+  display: inline-block;
+  max-inline-size: 100%;
+  padding: calc(var(--space-1) / 2) var(--space-2);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-full);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+.public-fulfillment__status--done {
+  color: var(--color-success);
+  border-color: var(--color-success);
+}
+
+.public-fulfillment__status--progress {
+  color: var(--color-link);
+  border-color: color-mix(in srgb, var(--color-link) 60%, var(--color-border));
+}
+
+.public-fulfillment__status--attention {
+  color: var(--color-warning);
+  border-color: var(--color-warning);
+}
+
+.public-fulfillment__status--voided {
+  color: var(--color-danger);
+  border-color: color-mix(in srgb, var(--color-danger) 60%, var(--color-border));
+}
+
+.public-fulfillment__status--unknown {
+  border-style: dashed;
+}
+
+.public-fulfillment__detail {
+  display: block;
+  margin-block-start: calc(var(--space-1) / 2);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 
 /* ===== 目录操作 / 内联表单 / 对话框 ===== */
@@ -4345,6 +4424,7 @@ body:has(.public-catalog-detail) .public-toast-region {
 .public-compensation-balance,
 .public-compensation-rules,
 .public-auction-bid-log-table-wrap,
+.public-fulfillment__table-wrap,
 .public-auction-rounds__table,
 .public-blacklist-table-wrap,
 .public-forum-card,
@@ -4374,7 +4454,7 @@ body:has(.public-catalog-detail) .public-toast-region {
 }
 
 /* 表头底色带：只用于铺满卡片的列表；账户卡片内的表格保留下划线表头，只对齐字号。 */
-:is(.public-history-table, .public-auction-bid-log-table, .public-compensation-table, .public-blacklist-table) thead th,
+:is(.public-history-table, .public-auction-bid-log-table, .public-fulfillment__table, .public-compensation-table, .public-blacklist-table) thead th,
 .public-auction-rounds__table thead th {
   color: var(--color-text-muted);
   background: var(--color-surface-raised);
@@ -4387,7 +4467,7 @@ body:has(.public-catalog-detail) .public-toast-region {
 }
 
 @media (hover: hover) {
-  :is(.public-history-table, .public-auction-bid-log-table, .public-blacklist-table, .public-account-table) > tbody > tr:hover,
+  :is(.public-history-table, .public-auction-bid-log-table, .public-fulfillment__table, .public-blacklist-table, .public-account-table) > tbody > tr:hover,
   .public-auction-rounds__table tbody tr:hover {
     background: var(--color-surface-raised);
   }
@@ -4402,9 +4482,12 @@ body:has(.public-catalog-detail) .public-toast-region {
   background: color-mix(in srgb, var(--color-live) 14%, var(--color-surface));
 }
 
-/* 出价记录的世界/场次选择与本场摘要、拍品筛选合并为一张筛选面板，与拍卖页的工具条一致。 */
+/* 出价记录与履约进度的世界/场次选择与本场摘要、拍品筛选合并为一张筛选面板，与拍卖页的工具条
+   一致。 */
 .public-auction-bid-log-controls,
-.public-auction-bid-log-heading {
+.public-auction-bid-log-heading,
+.public-fulfillment__controls,
+.public-fulfillment__heading {
   padding: 0.375rem 0.625rem;
   border: var(--border-width) solid var(--color-border);
   border-radius: 0.5rem;
@@ -4412,14 +4495,16 @@ body:has(.public-catalog-detail) .public-toast-region {
   box-shadow: var(--shadow-1);
 }
 
-.public-auction-bid-log-controls {
+.public-auction-bid-log-controls,
+.public-fulfillment__controls {
   margin-block-end: 0;
   border-end-start-radius: 0;
   border-end-end-radius: 0;
   border-block-end: 0;
 }
 
-.public-auction-bid-log-heading {
+.public-auction-bid-log-heading,
+.public-fulfillment__heading {
   margin-block-end: 0.625rem;
   border-start-start-radius: 0;
   border-start-end-radius: 0;

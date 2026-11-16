@@ -13,6 +13,11 @@ pub(crate) fn BidLog() -> Element {
 }
 
 #[component]
+pub(crate) fn Fulfillment() -> Element {
+    reads::fulfillment()
+}
+
+#[component]
 pub(crate) fn History() -> Element {
     reads::history()
 }

@@ -500,8 +500,9 @@ pub(crate) fn bid_log_status_class(status: &str) -> &'static str {
 }
 
 /// 去空白后的 lot 筛选能否被公开竞价日志接口接受：空（不筛选）、不超过 32 个 ASCII 字母数字
-/// 的编号，或规范小写连字符形式的非 nil UUID。口径与服务端一致，其余取值只会得到 400。
-fn valid_lot_filter(value: &str) -> bool {
+/// 的编号，或规范小写连字符形式的非 nil UUID。口径与服务端一致，其余取值只会得到 400；
+/// 履约进度接口沿用同一口径。
+pub(super) fn valid_lot_filter(value: &str) -> bool {
     if value.len() <= 32 && value.bytes().all(|byte| byte.is_ascii_alphanumeric()) {
         return true;
     }
@@ -513,7 +514,11 @@ fn valid_lot_filter(value: &str) -> bool {
 }
 
 /// 把输入草稿换成新值，并作废在途的防抖写入。
-fn reset_lot_draft(mut draft: Signal<String>, mut generation: Signal<u64>, value: String) {
+pub(super) fn reset_lot_draft(
+    mut draft: Signal<String>,
+    mut generation: Signal<u64>,
+    value: String,
+) {
     let next = generation.peek().saturating_add(1);
     generation.set(next);
     draft.set(value);
@@ -521,7 +526,7 @@ fn reset_lot_draft(mut draft: Signal<String>, mut generation: Signal<u64>, value
 
 /// 把合法的 lot 筛选同时写入已应用状态与地址栏（无历史记录）并回到第一页；筛选未变时
 /// 不改动，保留当前页码。
-fn apply_lot_filter(mut query_state: Signal<PublicBoardQuery>, lot: String) {
+pub(super) fn apply_lot_filter(mut query_state: Signal<PublicBoardQuery>, lot: String) {
     let lot = (!lot.is_empty()).then_some(lot);
     if query_state.peek().bid_log_lot == lot {
         return;

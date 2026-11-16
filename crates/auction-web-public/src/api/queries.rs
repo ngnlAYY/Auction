@@ -66,7 +66,11 @@ fn failure_outcome<T, E>(status: u16, error: E) -> FetchOutcome<T, E> {
 /// `decode` 必须完成全部跨字段校验（含响应与请求身份的绑定）；只有它返回 Ok 的正文才写入
 /// 缓存，4xx/5xx 或校验失败不会留下条目。传输错误与暂时性拒绝（见 [`failure_outcome`]）由缓存层
 /// 决定是否回退旧值。
-async fn cached_public_get<T, D, Fut>(url: &str, ttl_millis: u64, decode: D) -> Result<T, String>
+pub(super) async fn cached_public_get<T, D, Fut>(
+    url: &str,
+    ttl_millis: u64,
+    decode: D,
+) -> Result<T, String>
 where
     T: Clone + 'static,
     D: FnOnce(Response) -> Fut,
@@ -281,7 +285,8 @@ pub(crate) async fn fetch_bid_log_auctions(
     Ok(auctions)
 }
 
-async fn fetch_bid_log_auction_status(
+/// 按编号顺序逐页读完单一状态的公开拍卖目录；竞价日志与履约进度的场次选择共用。
+pub(super) async fn fetch_bid_log_auction_status(
     world_id: &str,
     status: &str,
 ) -> Result<Vec<super::HistoricalAuction>, String> {
