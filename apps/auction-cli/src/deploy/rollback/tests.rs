@@ -14,12 +14,12 @@ use super::identity::{kept_cli_identity, reverse_identity, rollback_deploy_recor
 use super::installed_retained_artifacts;
 use super::preconditions::{
     COMPATIBLE_READINESS_SINCE, require_cli_matches_database, require_compatible_readiness,
-    require_installed_matches, require_target_differs,
+    require_installed_matches, require_known_schema_across_migrations, require_target_differs,
 };
 use crate::deploy::artifact::{Artifact, ArtifactBinary, REQUIRED_BINARIES};
 use crate::deploy::install::{
     FORMAT, InstallArtifactFailure, ROLE_BINARIES, RetainRequest, RetainedBinary, RollbackRecord,
-    install_artifact, install_retained, latest, load, retain,
+    SchemaSource, install_artifact, install_retained, latest, load, retain,
 };
 use crate::deploy::receipts::installed_identity;
 use crate::deploy::role_binary;
@@ -272,6 +272,27 @@ fn compatible_readiness_is_required_only_when_the_database_is_ahead() {
     let error = require_compatible_readiness(&modes(Compatible, Compatible, Compatible), old, 98)
         .expect_err("目标程序不支持兼容判定");
     assert!(format!("{error:#}").contains("恢复升级前备份"));
+}
+
+/// 目标 schema 未知（按创建记录时观测到的数据库版本假设）时只允许 `D = E`：数据库已迁移到更高
+/// 版本时，即使区间都登记 compatible 也在停机前拒绝（旧 Worker 进入服务后立即领取任务，就绪
+/// 失败不能证明没有副作用）；数据库落后同样拒绝；已按摘要绑定的 schema 交给区间与就绪门禁。
+#[test]
+fn assumed_schema_allows_only_the_same_database_version() {
+    let unknown = record(RoleIdentity::default());
+    let (target, source) = unknown.target_schema();
+    assert_eq!((target, source), (1, SchemaSource::AssumedObservedDatabaseVersion));
+    require_known_schema_across_migrations(target, source, 1).expect("同版本允许");
+    let error = require_known_schema_across_migrations(target, source, 3).expect_err("跨迁移");
+    let text = format!("{error:#}");
+    assert!(text.contains("schema 未知") && text.contains("恢复升级前备份"), "{text}");
+    assert!(require_known_schema_across_migrations(target, source, 0).is_err(), "数据库落后");
+
+    let known = record(role_identity('a', 1));
+    let (target, source) = known.target_schema();
+    assert_eq!(source, SchemaSource::Recorded);
+    require_known_schema_across_migrations(target, source, 3)
+        .expect("已记录的 schema 不受这道门影响");
 }
 
 /// 保留的 CLI 必须与数据库同版本：较高（部署在迁移前失败）时回退后的 service start 会执行

@@ -25,7 +25,7 @@ mod trust;
 pub(crate) use record::{FORMAT, LEGACY_FORMAT};
 pub(crate) use record::{
     RECORD_FILE, ROLE_BINARIES, RecordDirectory, RetainRequest, RetainedBinary, RetainedIdentity,
-    RollbackRecord, latest, load, record_dir, record_projection, retain,
+    RollbackRecord, SchemaSource, latest, load, record_dir, record_projection, retain,
 };
 pub(crate) use trust::{RunAccount, require_install_dir};
 

@@ -10,8 +10,8 @@ use super::restore::Swap;
 use super::trust::PinnedInstallDir;
 use super::{
     FORMAT, InstallArtifactFailure, LEGACY_FORMAT, ROLE_BINARIES, RecordDirectory, RetainRequest,
-    RetainedIdentity, RollbackRecord, install_artifact, install_retained, latest, load, record_dir,
-    retain,
+    RetainedIdentity, RollbackRecord, SchemaSource, install_artifact, install_retained, latest,
+    load, record_dir, retain,
 };
 use crate::deploy::artifact::{Artifact, ArtifactBinary, REQUIRED_BINARIES};
 use crate::receipt::{CliIdentity, DeployRecord, RoleIdentity};
@@ -258,7 +258,7 @@ fn record_validation_binds_identity_to_the_retained_copies() {
         "摘要不符不采用来源"
     );
     assert_eq!(record.retained_roles, roles);
-    assert_eq!(record.target_schema(), (94, "recorded"));
+    assert_eq!(record.target_schema(), (94, SchemaSource::Recorded));
 
     let mut invalid = record.clone();
     invalid.retained_cli = Some(CliIdentity::digest_only(&"e".repeat(64)));
@@ -320,7 +320,7 @@ fn legacy_records_are_read_without_rewriting() {
         loaded.retained_cli,
         Some(CliIdentity::digest_only(&sha256_bytes(b"old-auction-cli")))
     );
-    assert_eq!(loaded.target_schema(), (94, "assumed_observed_database_version"));
+    assert_eq!(loaded.target_schema(), (94, SchemaSource::AssumedObservedDatabaseVersion));
     assert_eq!(fs::read(&record_json).expect("记录文件"), bytes, "不改写 v1 文件");
 
     let mut three = legacy;

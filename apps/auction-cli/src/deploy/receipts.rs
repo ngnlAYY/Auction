@@ -114,7 +114,7 @@ pub(super) fn artifact_projection(artifact: &artifact::Artifact) -> serde_json::
 /// 时间倒序取第一条三角色程序摘要与 `binaries` 完全一致、且身份可信的回执；失败回执的 deploy 段
 /// 只是尝试安装的目标，从不作为来源，v1 rollback 回执的身份混有被回退版本的证据，同样跳过并
 /// 继续向前找。找不到时角色身份全部为 null，CLI 只记录实际摘要。回执目录读不出时同样记为未知
-/// 并在 stderr 说明：身份只服务追溯与回退判定，未知会让回退按观测版本假设并标明来源。
+/// 并在 stderr 说明：身份只服务追溯与回退判定，未知时回退按观测版本假设、只允许同版本并标明来源。
 pub(super) fn installed_identity(
     state: &PrivateDirectory,
     binaries: &[RetainedBinary],

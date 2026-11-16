@@ -1,8 +1,9 @@
 //! `auction-cli rollback`：把三个运行角色换回 `deploy` 保留的旧程序，安装目录中的 auction-cli
 //! 保持不变（它要继续管理可能已超前的数据库，见 `preconditions`）。
 //!
-//! 只允许数据库没有新增迁移、或新增迁移全部登记为 compatible 的区间；跨迁移回退还要求三角色
-//! 有效配置显式为 compatible 且目标程序支持该判定。含 breaking 迁移的回退必须按
+//! 只允许数据库没有新增迁移、或新增迁移全部登记为 compatible 的区间；跨迁移回退还要求目标角色
+//! 的内嵌 schema 已按摘要绑定（未知时只允许同版本）、三角色有效配置显式为 compatible 且目标程序
+//! 支持该判定。含 breaking 迁移的回退必须按
 //! `ops/deploy/RECOVERY.md` 恢复升级前备份并做外部历史核对。回退同样先过安装目录信任、时段、
 //! 磁盘空间与在途发送门禁，并把当前三个角色程序保留成新的回滚记录，使回退本身可逆。
 //!
@@ -87,6 +88,11 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: RollbackArgs) -> anyhow::R
     let cli_schema = auction_storage::postgres_expected_migration_version();
     preconditions::require_cli_matches_database(cli_schema, current_version)?;
     let (target_schema, target_schema_source) = record.target_schema();
+    preconditions::require_known_schema_across_migrations(
+        target_schema,
+        target_schema_source,
+        current_version,
+    )?;
     let suffix = gates::require_compatible_suffix(&deployment.worker, target_schema).await?;
     let readiness = preconditions::require_compatible_readiness(
         &deployment.migration_compatibility_modes,
@@ -123,7 +129,7 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: RollbackArgs) -> anyhow::R
             "versions": {
                 "database": current_version,
                 "target_role_schema_version": target_schema,
-                "target_role_schema_source": target_schema_source,
+                "target_role_schema_source": target_schema_source.as_str(),
                 "kept_cli_schema_version": cli_schema,
                 "suffix": suffix,
             },

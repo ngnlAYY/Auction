@@ -97,7 +97,7 @@ description: 更新 Auction 云端分体部署：取 GitHub Release 资产并校
   --actor <name> --startup-timeout-seconds 60 --dry-run
 ```
 
-逐项核对：`outcome=planned`；`shutdown.outcome=allowed`（final 场次或窗口内有在拍 lot 会阻挡，只有用户明确同意才加 `--force --reason`）；`in_flight_sends` 为空；`versions` 与 `migration_drill` 均被识别，`versions.installed_roles` 是线上程序的身份（为 null 说明找不到摘要一致的成功回执，回退时会按观测版本假设）。安装目录信任（属主、写权限、运行账号的穿越与执行）、部署状态目录或 `--backup-dir` 属主不符时 dry-run 就会失败，按上文处理后重跑。
+逐项核对：`outcome=planned`；`shutdown.outcome=allowed`（final 场次或窗口内有在拍 lot 会阻挡，只有用户明确同意才加 `--force --reason`）；`in_flight_sends` 为空；`versions` 与 `migration_drill` 均被识别，`versions.installed_roles` 是线上程序的身份（为 null 说明找不到摘要一致的成功回执，按这次部署的回滚记录回退时只允许数据库仍为部署前的版本，不能跨迁移）。安装目录信任（属主、写权限、运行账号的穿越与执行）、部署状态目录或 `--backup-dir` 属主不符时 dry-run 就会失败，按上文处理后重跑。
 
 ## 6. 正式部署
 
