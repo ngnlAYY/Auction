@@ -1,14 +1,18 @@
-//! 入站邮件当前资产快照与只读探查；take 恢复据此判断动作是否已生效。
+//! 入站邮件当前资产快照与只读探查；take 恢复据此判断动作是否已生效。结算退件 Take 的完成
+//! 证明（原身份、原正文前缀与领取回执）也在这里按同一次详情读取判定，不把“附件为空”交给上层
+//! 自行推断。
 
 use std::fmt;
 
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
+use auction_application::mail::{MoogleMailboxReturnTake, MoogleMailboxReturnTakeIdentity};
 use tokio::time::{Instant, timeout_at};
 
 use super::super::{MoogleMailSender, proof};
 use crate::clients::mooglemail::{
     MoogleMailCookie, MoogleMailError, MoogleMailOperation, MoogleMailWorld,
-    client::MoogleMailReadRound, parser::MoogleMailSummary,
+    client::MoogleMailReadRound,
+    parser::{MoogleMailActionState, MoogleMailSummary, returned_take_state},
 };
 use crate::safe_diagnostics;
 
@@ -45,6 +49,37 @@ impl MoogleMailSender {
         world: MoogleMailWorld,
         external_mail_id: &str,
     ) -> Result<Option<MoogleMailInboxAssets>, MoogleMailError> {
+        Ok(self.inspect_inbox_state(cookie, world, external_mail_id).await?.map(|state| {
+            let sender = state.sender().to_owned();
+            let mut equipment_ids = state.equipment_ids;
+            equipment_ids.sort_unstable();
+            MoogleMailInboxAssets { sender, equipment_ids, credits: state.credits, cod: state.cod }
+        }))
+    }
+
+    /// 只读复核结算退件 Take 的原退件，定位与读取口径同 [`Self::inspect_inbox_attachments`]：
+    /// 远端明确不存在为 `Missing`；仍挂资产为 `Present`；附件已空时只有原身份、原正文前缀与
+    /// 逐条领取回执都成立才是 `Taken`，否则 `Unproven`。
+    pub async fn inspect_returned_take(
+        &self,
+        cookie: &MoogleMailCookie,
+        world: MoogleMailWorld,
+        external_mail_id: &str,
+        identity: &MoogleMailboxReturnTakeIdentity,
+    ) -> Result<MoogleMailboxReturnTake, MoogleMailError> {
+        Ok(match self.inspect_inbox_state(cookie, world, external_mail_id).await? {
+            None => MoogleMailboxReturnTake::Missing,
+            Some(state) => returned_take_state(&state, identity),
+        })
+    }
+
+    /// 在完整 Inbox/Read Mail 观测中定位原 MID 并读取详情；明确不存在时返回 `None`。
+    async fn inspect_inbox_state(
+        &self,
+        cookie: &MoogleMailCookie,
+        world: MoogleMailWorld,
+        external_mail_id: &str,
+    ) -> Result<Option<MoogleMailActionState>, MoogleMailError> {
         let deadline = Instant::now()
             .checked_add(self.verification_budget)
             .ok_or_else(|| proof::scan_timeout(world))?;
@@ -67,7 +102,7 @@ impl MoogleMailSender {
                 inbox.summaries.iter().find(|summary| summary.external_mail_id == external_mail_id);
             if let Some(summary) = summary {
                 return self
-                    .inspect_inbox_attachments_in_round(
+                    .inspect_inbox_state_in_round(
                         cookie,
                         world,
                         external_mail_id,
@@ -91,14 +126,8 @@ impl MoogleMailSender {
             }
             let summary =
                 read.summaries.iter().find(|summary| summary.external_mail_id == external_mail_id);
-            self.inspect_inbox_attachments_in_round(
-                cookie,
-                world,
-                external_mail_id,
-                &round,
-                summary,
-            )
-            .await
+            self.inspect_inbox_state_in_round(cookie, world, external_mail_id, &round, summary)
+                .await
         })
         .await
         .map_err(|diagnostic_cause| {
@@ -126,14 +155,14 @@ impl MoogleMailSender {
         result
     }
 
-    async fn inspect_inbox_attachments_in_round(
+    async fn inspect_inbox_state_in_round(
         &self,
         cookie: &MoogleMailCookie,
         world: MoogleMailWorld,
         external_mail_id: &str,
         round: &MoogleMailReadRound,
         summary: Option<&MoogleMailSummary>,
-    ) -> Result<Option<MoogleMailInboxAssets>, MoogleMailError> {
+    ) -> Result<Option<MoogleMailActionState>, MoogleMailError> {
         let target = self.client.detail(world, external_mail_id)?;
         let document = self.client.get_in_round(&target, cookie, round).await?;
         let state = self
@@ -156,15 +185,7 @@ impl MoogleMailSender {
                 .await?;
             message.clear_secrets();
         }
-        let sender = state.sender().to_owned();
-        let mut equipment_ids = state.equipment_ids;
-        equipment_ids.sort_unstable();
         self.client.check_read_round(cookie, round).await?;
-        Ok(Some(MoogleMailInboxAssets {
-            sender,
-            equipment_ids,
-            credits: state.credits,
-            cod: state.cod,
-        }))
+        Ok(Some(state))
     }
 }

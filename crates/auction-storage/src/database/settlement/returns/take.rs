@@ -5,8 +5,9 @@
 //! 投递 Worker 在租约与发送围栏之后执行（本地先提交，不变量 4）。收口：Take 投递到终态后，只有
 //! 精确的领取证明（同世界/MID、动作移除或成功页、预期资产逐项一致、投递身份与载荷未变）才一次性
 //! 写入领回事实并同事务返还原资金用途；失败或未知一律转人工核对，不自动重试，也不接受操作者
-//! 声明（不变量 4、6）。结果未知之后只有邮箱巡检在原 Take 会话里观察到的精确证明（原 MID 仍在、
-//! 系统发件人、附件全部取走、预期资产逐项一致）才算第二种证明形状，记账与成功页证明完全一致。
+//! 声明（不变量 4、6）。结果未知之后只有邮箱巡检在原 Take 会话里观察到的精确证明（integrations
+//! 核对过原身份、原正文前缀与逐条领取回执，预期资产逐项一致）才算第二种证明形状，记账与成功页
+//! 证明完全一致；“附件为空”本身不是证明。
 
 use auction_application::core::RequestHash;
 use auction_application::mail::{
@@ -31,12 +32,14 @@ const TAKE_FUNDING_LABEL: &str = "settlement-return-funding";
 /// 投递 Worker 执行 Take 时验证回执得到的证明（动作移除或成功页）。
 pub(super) const TAKE_RECEIPT_PROOF: &str = "action_removed_or_success_page";
 
-/// 邮箱巡检在原 Take 会话里补采的证明；结算退件只认“附件已全部取走”这一观察。
+/// 邮箱巡检在原 Take 会话里补采的证明；结算退件只认带领取回执的完成观察。
 pub(super) const TAKE_SWEEP_PROOF: &str = "action_recovered_inbox_v1";
 
-/// 巡检证明中唯一能证明资产已入账的观察：原 MID 仍可读、附件全部取走。邮件整体缺失可能是过期
-/// 或被删除，不能证明资产进入 Bot 账号，不作为结算退件的领回证明。
-pub(super) const TAKE_SWEEP_REASON: &str = "attachments_absent";
+/// 巡检证明中唯一能证明资产已入账的观察：integrations 在原 MID 详情页上核对了原发件人与主题、
+/// 原退件正文前缀，以及与领取前附件条目数相同的 `Removed attachment:` 回执（与正常 Take 成功证明
+/// 同等强度）。仅“附件已为空”可能来自过期、他人处置或页面漂移，邮件整体缺失也不能证明资产进入
+/// Bot 账号，都不作为结算退件的领回证明。
+pub(crate) const TAKE_SWEEP_REASON: &str = "take_receipt_proven";
 
 /// Take 投递的来源标识：案件 ID（即退件入站邮件 ID）。
 pub(super) fn take_origin_id(return_mail_id: Uuid) -> String {
@@ -315,7 +318,7 @@ pub(super) async fn observe_take(
         format!("mooglemail:{}:take:{}", action.world_id, action.source_external_mail_id);
     let mid = Some(action.source_external_mail_id.as_str());
     // 两种证明形状各自的身份字段：成功页回执带 `external_mail_id`；巡检恢复带 `recovered_mid`，
-    // 且只认附件已全部取走的观察。
+    // 且只认 integrations 核对过领取回执的完成观察。
     let proof = match metadata.get("proof").and_then(serde_json::Value::as_str) {
         Some(TAKE_RECEIPT_PROOF)
             if metadata.get("external_mail_id").and_then(serde_json::Value::as_str) == mid =>

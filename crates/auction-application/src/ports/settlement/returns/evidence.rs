@@ -124,6 +124,15 @@ pub fn settlement_return_assets(metadata: &serde_json::Value) -> Option<Settleme
     })
 }
 
+/// 证据记录的系统后缀事实：原收件人与退件原正文的规范摘要。邮箱巡检据此核对 Take 之后的详情
+/// 页正文仍以原退件正文开头；证据损坏或缺这两项（系统后缀不完整的退件）时返回 `None`。
+pub fn settlement_return_original_body(metadata: &serde_json::Value) -> Option<(String, [u8; 32])> {
+    let evidence = SettlementReturnEvidence::parse(metadata)?;
+    evidence.obligation()?;
+    let digest = decode_digest(evidence.body_digest.as_deref()?)?;
+    Some((evidence.returned_from?, digest))
+}
+
 /// 恢复流程比对一封系统退件所需的证据投影。与结算退件消费方共用同一严格模型：未知键、缺键、
 /// 越界或附件未排序都视为损坏；邮件处理器按系统后缀追加的正文事实（原收件人、原正文摘要）
 /// 只校验形状，派发引用按规范编码解析。两个消费方各自维护一份字段集合时，处理器新增的证据键

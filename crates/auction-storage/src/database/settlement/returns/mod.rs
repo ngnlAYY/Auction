@@ -21,6 +21,7 @@ pub(crate) use errors::ReturnTransactionError;
 pub(crate) use swept::{
     SweptTakeOwner, lock_swept_take, requeue_swept_take, settle_swept_take, swept_take_owner,
 };
+pub(crate) use take::TAKE_SWEEP_REASON;
 
 use auction_application::settlement::{
     SettlementReturnAdminPort, SettlementReturnCommand, SettlementReturnCommandResult,

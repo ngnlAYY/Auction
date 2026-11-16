@@ -20,7 +20,8 @@ use crate::database::delivery::audit::{
 use crate::database::delivery::scheduler::{attempts, take_attempts};
 use crate::database::settlement::funding;
 use crate::database::settlement::returns::{
-    SweptTakeOwner, lock_swept_take, requeue_swept_take, settle_swept_take, swept_take_owner,
+    SweptTakeOwner, TAKE_SWEEP_REASON, lock_swept_take, requeue_swept_take, settle_swept_take,
+    swept_take_owner,
 };
 
 pub(super) enum RecoveryUpdate<'a> {
@@ -205,10 +206,11 @@ async fn persist_transition_once(
             {
                 return Err(RecoveryError::Rejected);
             }
-            // 结算退件只认附件已全部取走的观察；邮件整体缺失不能证明资产进入 Bot 账号，保持结果
-            // 未知。预期资产与动作冻结事实的逐项比对由案件推进在同一事务内完成。
+            // 结算退件只认 integrations 核对过原身份、原正文前缀与领取回执的完成观察；“附件为空”
+            // 或邮件整体缺失都不能证明资产进入 Bot 账号，保持结果未知。预期资产与动作冻结事实的
+            // 逐项比对由案件推进在同一事务内完成。
             if returned.is_some()
-                && metadata.get("reason").and_then(Value::as_str) != Some("attachments_absent")
+                && metadata.get("reason").and_then(Value::as_str) != Some(TAKE_SWEEP_REASON)
             {
                 tx.rollback().await?;
                 return Ok(false);

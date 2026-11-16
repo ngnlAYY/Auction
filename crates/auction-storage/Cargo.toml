@@ -27,6 +27,9 @@ uuid = { workspace = true, features = ["v5"] }
 url.workspace = true
 
 [dev-dependencies]
+# 可选：结算退件巡检的贯通用例用真实 MoogleMail 解析器把详情页 HTML 变成领取证明，再经应用服务与
+# 本 crate 入账；不进入运行时制品，不连接外部账号。
+auction-integrations.workspace = true
 # 可选：只给测试开启 tokio 暂停时间，确定性验证连接配额等待的 acquire 时限；不进入运行时制品。
 tokio = { workspace = true, features = ["test-util"] }
 

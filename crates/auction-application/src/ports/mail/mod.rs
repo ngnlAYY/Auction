@@ -20,7 +20,8 @@ pub use equipment_diagnostics::*;
 pub use maintenance::{
     MailScanPageObservation, MoogleMailboxComposeState, MoogleMailboxDiscard,
     MoogleMailboxEvidenceStore, MoogleMailboxInboxAssets, MoogleMailboxInboxObservation,
-    MoogleMailboxMaintenance, MoogleMailboxNoticeExpectation, MoogleMailboxSentEntries,
+    MoogleMailboxMaintenance, MoogleMailboxNoticeExpectation, MoogleMailboxReturnTake,
+    MoogleMailboxReturnTakeIdentity, MoogleMailboxReturnTakeObservation, MoogleMailboxSentEntries,
     MoogleMailboxSentEntry, MoogleMailboxSentState, MoogleMailboxSweepCandidate,
     MoogleMailboxUnprovenSend, mail_recipient_is_list_projection, sent_list_minute_start,
 };

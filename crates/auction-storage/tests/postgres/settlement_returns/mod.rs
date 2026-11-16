@@ -27,6 +27,7 @@ mod counts;
 mod flows;
 mod funding;
 mod races;
+mod receipt;
 mod recheck;
 mod sweep;
 mod unresolved;

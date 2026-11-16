@@ -1,8 +1,9 @@
 //! 结算退件 Take 结果未知（`take_unknown`）的机器可验证出口，PostgreSQL 18 用例，以运行账号执行：
 //! - Take 投递经投递端口按 Worker 的真实顺序推进（领取 → 以原会话冻结 Take 身份进入 sending →
 //!   结果未知收口为人工核对），案件经正常收口停在 `take_unknown`；
-//! - 完成证明：邮箱巡检在原 Take 会话里观察到附件已全部取走，同一事务按正常领回证明记账：领回
-//!   事实与资金返还各一次（金额仍为 M），再按计划授权补寄；重放不再改写；
+//! - 完成证明：邮箱巡检在原 Take 会话里由 integrations 核对过领取回执（`take_receipt_proven`），
+//!   同一事务按正常领回证明记账：领回事实与资金返还各一次（金额仍为 M），再按计划授权补寄；
+//!   重放不再改写；只凭“附件已为空”（旧口径 `attachments_absent`）不再收口；
 //! - 仍在未领：投递重新排队、动作与案件回到 Take 待执行，由投递端口再执行一次 Take 后正常收口，
 //!   领回与返还仍各一次；
 //! - 无法判定：邮件整体缺失、预期资产不符、换凭据版本、同邮件存在其他处置意图，以及正常收口
@@ -131,8 +132,20 @@ pub(super) async fn unknown_take(
     action: SettlementReturnAction,
     settle: bool,
 ) -> UnknownTake {
-    let pool = store.postgres_pool();
     let returned = returned_payout(store, sequence, mid).await;
+    unknown_take_of(store, session, returned, mid, action, settle).await
+}
+
+/// 同 [`unknown_take`]，退件案件由调用方建立（例如证据带系统后缀事实）。
+pub(super) async fn unknown_take_of(
+    store: &DatabaseStore,
+    session: &MailSession,
+    returned: Returned,
+    mid: &str,
+    action: SettlementReturnAction,
+    settle: bool,
+) -> UnknownTake {
+    let pool = store.postgres_pool();
     let allocation = seed_spent_payout(pool, &returned).await;
     // 货款的前置付款已满足：补寄的履约才可被领取。
     sqlx::query(
@@ -214,15 +227,15 @@ pub(super) fn completed_observation(mid: &str, reason: &str, credits: i64) -> Va
 /// 案件、动作、Take 投递与资金的一组可比较快照。
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct Facts {
-    case_status: String,
-    case_version: i64,
-    action_state: String,
-    delivery_status: String,
-    takes: i64,
-    funding_returns: i64,
-    allocation_state: String,
-    allocation_amount: i64,
-    return_entries: i64,
+    pub(super) case_status: String,
+    pub(super) case_version: i64,
+    pub(super) action_state: String,
+    pub(super) delivery_status: String,
+    pub(super) takes: i64,
+    pub(super) funding_returns: i64,
+    pub(super) allocation_state: String,
+    pub(super) allocation_amount: i64,
+    pub(super) return_entries: i64,
 }
 
 pub(super) async fn facts(pool: &PgPool, take: &UnknownTake) -> Facts {
@@ -341,7 +354,7 @@ async fn postgres_return_take_unknown_completed_observation_settles_like_take_pr
             take.take_delivery,
             take.fencing_version,
             take.mid.clone(),
-            completed_observation(&take.mid, "attachments_absent", PAYOUT),
+            completed_observation(&take.mid, "take_receipt_proven", PAYOUT),
             &take.expectation,
             &session.binding(),
         )
@@ -380,7 +393,7 @@ async fn postgres_return_take_unknown_completed_observation_settles_like_take_pr
                 take.take_delivery,
                 take.fencing_version,
                 take.mid.clone(),
-                completed_observation(&take.mid, "attachments_absent", PAYOUT),
+                completed_observation(&take.mid, "take_receipt_proven", PAYOUT),
                 &take.expectation,
                 &session.binding(),
             )
@@ -535,7 +548,7 @@ async fn postgres_return_take_unknown_undecidable_observations_change_nothing() 
     let pending = facts(pool, &take).await;
     assert_eq!(pending.case_status, "take_pending");
     assert!(
-        !bind(completed_observation(&take.mid, "attachments_absent", PAYOUT), session.binding())
+        !bind(completed_observation(&take.mid, "take_receipt_proven", PAYOUT), session.binding())
             .await
             .expect("不报错")
     );
@@ -544,16 +557,20 @@ async fn postgres_return_take_unknown_undecidable_observations_change_nothing() 
     let unknown = facts(pool, &take).await;
     assert_eq!(unknown.case_status, "take_unknown");
 
-    // 邮件整体缺失不能证明资产入账。
-    assert!(
-        !bind(completed_observation(&take.mid, "inbox_mail_absent", PAYOUT), session.binding())
-            .await
-            .expect("不报错")
-    );
+    // 邮件整体缺失不能证明资产入账；只凭“附件已为空”（没有 integrations 的领取回执核对）同样
+    // 不再是结算退件的完成证明。
+    for weak in ["inbox_mail_absent", "attachments_absent"] {
+        assert!(
+            !bind(completed_observation(&take.mid, weak, PAYOUT), session.binding())
+                .await
+                .expect("不报错"),
+            "{weak}"
+        );
+    }
     // 预期资产与动作冻结事实不符：锁内比对失败，整事务回滚（投递也不收口）。
     assert!(
         !bind(
-            completed_observation(&take.mid, "attachments_absent", PAYOUT + 1),
+            completed_observation(&take.mid, "take_receipt_proven", PAYOUT + 1),
             session.binding()
         )
         .await
@@ -563,7 +580,7 @@ async fn postgres_return_take_unknown_undecidable_observations_change_nothing() 
     let mut other_version = session.binding();
     other_version.credential_version = 2;
     assert!(
-        bind(completed_observation(&take.mid, "attachments_absent", PAYOUT), other_version)
+        bind(completed_observation(&take.mid, "take_receipt_proven", PAYOUT), other_version)
             .await
             .is_err()
     );

@@ -404,6 +404,7 @@ dependencies = [
  "async-stream",
  "auction-application",
  "auction-domain",
+ "auction-integrations",
  "auction-observability",
  "chrono",
  "futures-util",

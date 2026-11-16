@@ -15,16 +15,21 @@ use crate::ports::delivery::{
     DeliverySendCredentialBinding, DeliverySendExpectation, DeliveryTakeExpectation,
 };
 use crate::ports::mail::{
-    MoogleMailboxSentEntry, MoogleMailboxSentState, MoogleMailboxSweepCandidate,
-    MoogleMailboxUnprovenSend, mail_recipient_is_list_projection,
+    MoogleMailboxReturnTake, MoogleMailboxSentEntry, MoogleMailboxSentState,
+    MoogleMailboxSweepCandidate, MoogleMailboxUnprovenSend, mail_recipient_is_list_projection,
 };
 
 /// 相同列表投影过多时保留未知，不读取无界详情或只选择前几个结果冒充唯一性。
 const EXACT_MATCH_CANDIDATES: usize = 32;
 /// 单条结算投递在完整 Sent 中按同主题前缀最多读取的详情数；超出即保守放弃目击。
 const SIGHTING_CANDIDATES: usize = 4;
-/// 单条投递允许的维护重排队次数；达到上限后保留人工核对，防止无限重试。
+/// 单条投递允许的维护重排队次数；达到上限后完整资产仍在时不再自动重排、保留人工核对，防止
+/// 无限重试。上限只约束重排：其后观察到领取完成证明仍可收口。
 const MAX_SWEEP_RETRIES: i64 = 2;
+
+/// 结算退件 Take 的巡检完成原因：integrations 已核对原身份、原正文前缀与领取回执。存储只接受
+/// 这一原因，“附件为空”本身不再是结算退件的完成证明。
+const RETURN_TAKE_RECEIPT_REASON: &str = "take_receipt_proven";
 
 impl MailboxMaintenanceService {
     /// Read Mail 独立预算观察；Worker 与 Sent/compose 维护及 Inbox intake 分别驱动。
@@ -333,9 +338,10 @@ impl MailboxMaintenanceService {
 
     /// Take 只解释原账号下的明确缺失或完整资产观察；旧无绑定记录保留人工核对。
     ///
-    /// 结算退件 Take（`settlement_return_action`）会把领回证明变成资金返还，口径更严：只有原 MID
-    /// 仍可读、系统发件人、附件已全部取走才是完成证明（附带预期资产，由存储锁内逐项比对）；原
-    /// 完整资产仍在才重新排队；邮件整体缺失可能是过期或删除，不能证明资产入账，保持结果未知。
+    /// 结算退件 Take（`settlement_return_action`）会把领回证明变成资金返还，口径更严：完成证明
+    /// 只认 integrations 在原 Take 会话里核对过原身份、原正文前缀与逐条领取回执的结论（附带预期
+    /// 资产，由存储锁内逐项比对），附件为空而回执不成立仍是未知；原完整资产仍在才重新排队；邮件
+    /// 整体缺失可能是过期或删除，不能证明资产入账，保持结果未知。
     pub(super) async fn recover_take(
         &self,
         world_id: &str,
@@ -356,6 +362,11 @@ impl MailboxMaintenanceService {
         let Some(expected_credential) = expectation.credential.as_ref() else {
             return Ok(RecoveryStep::default());
         };
+        if candidate.origin_kind == "settlement_return_action" {
+            return self
+                .recover_return_take(world_id, candidate, expectation, expected_credential)
+                .await;
+        }
         let observed =
             match self.maintenance.inbox_assets(world_id, &candidate.inbound_mail_id).await {
                 Ok(value) => value,
@@ -374,28 +385,70 @@ impl MailboxMaintenanceService {
         {
             return Ok(RecoveryStep::default());
         }
-        let settlement_return = candidate.origin_kind == "settlement_return_action";
         match observed.assets {
-            None if settlement_return => Ok(RecoveryStep::default()),
             None => self.bind_take(candidate, expectation, observation, "inbox_mail_absent").await,
             Some(present) => {
                 if !present.sender.eq_ignore_ascii_case(&candidate.recipient) {
                     return Ok(RecoveryStep::default());
                 }
-                let still_present = if settlement_return {
-                    return_take_assets_match(candidate, &present)
-                } else {
-                    take_assets_match(candidate, &present)
-                };
                 if present.equipment_ids.is_empty() && present.credits == 0 && present.cod == 0 {
                     self.bind_take(candidate, expectation, observation, "attachments_absent").await
-                } else if still_present {
+                } else if take_assets_match(candidate, &present) {
                     self.requeue(candidate, expectation, observation, "take_assets_still_present")
                         .await
                 } else {
                     Ok(RecoveryStep::default())
                 }
             }
+        }
+    }
+
+    /// 结算退件 Take：只有 integrations 给出的领取完成结论才绑定证明；原完整资产仍在则重新排队；
+    /// 缺失、回执不成立或部分取走都保持未知。证据缺少系统后缀事实时没有可核对的原身份，不读远端。
+    async fn recover_return_take(
+        &self,
+        world_id: &str,
+        candidate: &MoogleMailboxUnprovenSend,
+        expectation: &DeliveryTakeExpectation,
+        expected_credential: &DeliverySendCredentialBinding,
+    ) -> Result<RecoveryStep, ApplicationError> {
+        let Some(identity) = candidate.return_take.as_ref() else {
+            return Ok(RecoveryStep::default());
+        };
+        let observed = match self
+            .maintenance
+            .return_take_receipt(world_id, &candidate.inbound_mail_id, identity)
+            .await
+        {
+            Ok(value) => value,
+            Err(error) => {
+                record_unpersisted_error("read_return_take_receipt", world_id, &error);
+                return Ok(RecoveryStep { failed: true, ..RecoveryStep::default() });
+            }
+        };
+        let Some(observation) = observed.observation_credential.as_ref() else {
+            return Ok(RecoveryStep::default());
+        };
+        if !observation.validate()
+            || observation.credential_id != expected_credential.credential_id
+            || observation.credential_version != expected_credential.credential_version
+        {
+            return Ok(RecoveryStep::default());
+        }
+        match observed.outcome {
+            MoogleMailboxReturnTake::Taken => {
+                self.bind_take(candidate, expectation, observation, RETURN_TAKE_RECEIPT_REASON)
+                    .await
+            }
+            MoogleMailboxReturnTake::Present(present)
+                if present.sender.eq_ignore_ascii_case(&candidate.recipient)
+                    && return_take_assets_match(candidate, &present) =>
+            {
+                self.requeue(candidate, expectation, observation, "take_assets_still_present").await
+            }
+            MoogleMailboxReturnTake::Present(_)
+            | MoogleMailboxReturnTake::Missing
+            | MoogleMailboxReturnTake::Unproven => Ok(RecoveryStep::default()),
         }
     }
 
@@ -420,6 +473,9 @@ impl MailboxMaintenanceService {
             metadata["expected_credits"] = candidate.credits.into();
             metadata["expected_cod"] = candidate.cod.into();
             metadata["expected_attachment_ids"] = candidate.attachment_ids.clone().into();
+            if let Some(identity) = candidate.return_take.as_ref() {
+                metadata["receipt_attachment_count"] = identity.attachment_count.into();
+            }
         }
         let recovered = self
             .store
