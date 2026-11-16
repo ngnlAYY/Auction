@@ -485,15 +485,26 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use auction_application::auction::PublicAuctionCursor;
+    use auction_application::core::{ApplicationError, ApplicationFuture};
+    use auction_application::public::{
+        PublicLoginResult, PublicSessionIdentity, PublicSessionPort, PublicSessionPreferenceResult,
+        SetPublicSessionPreferenceCommand,
+    };
     use auction_contracts::ApiErrorResponse;
     use axum::{
         Router,
         body::{Body, to_bytes},
         http::{Request, StatusCode, header},
     };
+    use chrono::{DateTime, Utc};
     use tower::ServiceExt;
+    use uuid::Uuid;
 
     use super::public_feature_routes;
+    use crate::mapping::encode_public_cursor;
     use crate::middleware::security::PublicHttpSecurity;
     use crate::state::PublicApiState;
 
@@ -593,5 +604,179 @@ mod tests {
         // 对照：合法单拍卖目标通过参数校验，未装配实时端口时才返回依赖不可用。
         let accepted = response(&format!("/api/v1/events?auction_id={auction_id}")).await;
         assert_eq!(accepted.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    /// 只认证任意 Cookie 的会话替身，让 `/api/v1/me/bids` 走到查询解析；其余方法不会被调用。
+    struct AnyCookieSession;
+
+    fn unused_session_call<T: Send + 'static>() -> ApplicationFuture<'static, T> {
+        Box::pin(async {
+            Err(ApplicationError::CapabilityUnavailable("测试会话替身不支持该操作"))
+        })
+    }
+
+    impl PublicSessionPort for AnyCookieSession {
+        fn inspect(
+            &self,
+            _raw_token: String,
+            _now: DateTime<Utc>,
+        ) -> ApplicationFuture<'_, PublicSessionIdentity> {
+            unused_session_call()
+        }
+
+        fn login(
+            &self,
+            _key: Vec<u8>,
+            _now: DateTime<Utc>,
+        ) -> ApplicationFuture<'_, PublicLoginResult> {
+            unused_session_call()
+        }
+
+        fn current(
+            &self,
+            _raw_token: String,
+            _now: DateTime<Utc>,
+        ) -> ApplicationFuture<'_, PublicSessionIdentity> {
+            Box::pin(async {
+                Ok(PublicSessionIdentity {
+                    user_id: Uuid::from_u128(0x0190_f2b4_1c2d_4e5f_8a6b_7c8d_9e0f_1a2b),
+                    username: "page-size-reader".to_owned(),
+                    expires_at: None,
+                    absolute_expires_at: None,
+                })
+            })
+        }
+
+        fn logout(&self, _raw_token: String, _now: DateTime<Utc>) -> ApplicationFuture<'_, ()> {
+            unused_session_call()
+        }
+
+        fn get_preference(
+            &self,
+            _raw_token: String,
+            _now: DateTime<Utc>,
+        ) -> ApplicationFuture<'_, PublicSessionPreferenceResult> {
+            unused_session_call()
+        }
+
+        fn set_preference(
+            &self,
+            _raw_token: String,
+            _command: SetPublicSessionPreferenceCommand,
+            _now: DateTime<Utc>,
+        ) -> ApplicationFuture<'_, PublicSessionPreferenceResult> {
+            unused_session_call()
+        }
+    }
+
+    /// 只装配会话、不装配任何读取端口：通过参数校验的列表请求返回 503，被参数校验拒绝的返回
+    /// 400，因此 400 同时证明拒绝发生在读取端口之前。
+    async fn page_size_response(uri: &str) -> (StatusCode, Option<String>) {
+        let state = PublicApiState::new(
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(Arc::new(AnyCookieSession)),
+            PublicHttpSecurity::default(),
+        );
+        let gate = PublicHttpSecurity::default().anonymous_read_gate();
+        let response = public_feature_routes(Router::<PublicApiState>::new(), gate)
+            .with_state(state)
+            .oneshot(
+                Request::builder()
+                    .uri(uri)
+                    .header(header::COOKIE, "auction_public_session=page-size-token")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        let status = response.status();
+        let body = to_bytes(response.into_body(), 4096).await.expect("body");
+        let code = serde_json::from_slice::<ApiErrorResponse>(&body).ok().map(|error| error.code);
+        (status, code)
+    }
+
+    #[tokio::test]
+    async fn every_public_list_route_caps_page_size_before_reading() {
+        const AUCTION_ID: &str = "018f4c8e-7b2a-7c3d-8e4f-0123456789ab";
+        // 页长取值错误：黑名单沿用其已发布的 `invalid_pagination`，其余路由为 `invalid_query`。
+        // 重复键在解析查询白名单时就被拒绝，所有路由都是 `invalid_query`。
+        let routes = [
+            ("/api/v1/auctions".to_owned(), "invalid_query"),
+            ("/api/v2/auctions".to_owned(), "invalid_query"),
+            (format!("/api/v1/auctions/{AUCTION_ID}/lots"), "invalid_query"),
+            (format!("/api/v1/auctions/{AUCTION_ID}/bid-log"), "invalid_query"),
+            ("/api/v1/price-history".to_owned(), "invalid_query"),
+            ("/api/v1/compensation-pool".to_owned(), "invalid_query"),
+            (format!("/api/v1/compensation-pool/{AUCTION_ID}/movements"), "invalid_query"),
+            (format!("/api/v1/compensation-pool/{AUCTION_ID}/lots"), "invalid_query"),
+            ("/api/v1/blacklist".to_owned(), "invalid_pagination"),
+            ("/api/v1/me/bids".to_owned(), "invalid_query"),
+            (format!("/api/v1/events?auction_id={AUCTION_ID}"), "invalid_query"),
+        ];
+        for (route, rejection_code) in routes {
+            let separator = if route.contains('?') { '&' } else { '?' };
+            // 省略（各路由默认值）、下界与统一上界都放行到读取端口检查。
+            for query in ["", "page_size=1", "page_size=200"] {
+                let uri = if query.is_empty() {
+                    route.clone()
+                } else {
+                    format!("{route}{separator}{query}")
+                };
+                let (status, code) = page_size_response(&uri).await;
+                assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "uri={uri} code={code:?}");
+            }
+            for query in [
+                "page_size=201",
+                "page_size=0",
+                "page_size=-1",
+                "page_size=",
+                "page_size=9223372036854775807",
+                "page_size=9223372036854775808",
+            ] {
+                let uri = format!("{route}{separator}{query}");
+                let (status, code) = page_size_response(&uri).await;
+                assert_eq!(status, StatusCode::BAD_REQUEST, "uri={uri}");
+                assert_eq!(code.as_deref(), Some(rejection_code), "uri={uri}");
+            }
+            let uri = format!("{route}{separator}page_size=1&page_size=1");
+            let (status, code) = page_size_response(&uri).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "uri={uri}");
+            assert_eq!(code.as_deref(), Some("invalid_query"), "uri={uri}");
+        }
+    }
+
+    #[tokio::test]
+    async fn cursor_pages_share_the_public_page_size_cap() {
+        // 游标页 offset 恒为 0，不受 offset 上限保护；页长上限必须同样生效。
+        let boundary = encode_public_cursor(&PublicAuctionCursor::Boundary {
+            sequence: 3,
+            id: Uuid::from_u128(0x018f_4c8e_7b2a_7c3d_8e4f_0123_4567_89ab),
+        });
+        let routes = [
+            format!("/api/v1/auctions?cursor={boundary}"),
+            format!("/api/v2/auctions?cursor={boundary}"),
+            "/api/v1/auctions/018f4c8e-7b2a-7c3d-8e4f-0123456789ab/bid-log?cursor=start".to_owned(),
+            "/api/v1/price-history?cursor=start".to_owned(),
+            "/api/v1/compensation-pool?cursor=start".to_owned(),
+        ];
+        for route in routes {
+            let (status, code) = page_size_response(&format!("{route}&page_size=200")).await;
+            assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "route={route} code={code:?}");
+            let (status, code) = page_size_response(&format!("{route}&page_size=201")).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "route={route}");
+            assert_eq!(code.as_deref(), Some("invalid_query"), "route={route}");
+        }
     }
 }

@@ -9,6 +9,9 @@ use crate::query::parse_public_uuid;
 
 pub(super) const DEFAULT_PUBLIC_EVENT_PAGE_SIZE: i64 = 100;
 
+// 事件回放沿用旧版规范十进制解析与应用端口的上限；该上限必须等于 Public 列表统一上限。
+const _: () = assert!(MAX_PUBLIC_EVENT_PAGE_SIZE == auction_contracts::MAX_PUBLIC_PAGE_SIZE);
+
 /// `GET /api/v1/events` 的查询参数白名单；其余键（含 `scope`）按未知参数拒绝。
 pub(super) const LIST_QUERY_KEYS: &[&str] = &["auction_id", "after", "page_size"];
 

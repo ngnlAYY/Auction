@@ -12,7 +12,7 @@
 | `/auctions` | 历史拍卖列表：每场附拍品与出价记录入口，已结算场次另有履约进度入口（带场次与世界） |
 | `/lots/{lot_code}` | 拍品直达链接：独立的拍品页已移除，拍品详情统一在各列表的页内抽屉里展示。参数是拍品 UUID 时（被超提醒里的链接）跳到看板上该拍品所在的目录页并打开详情抽屉；其余取值（旧书签、早期提醒里的 lot 代码）跳回拍卖看板，保留原地址中的世界与场次查询 |
 | `/bidlog` | 出价日志：按世界、场次与拍品筛选，列出时间、编号、装备、竞价者与金额；操作列的查看按钮在页内打开只读的拍品详情抽屉。拍品筛选接受完整拍品 UUID 或不超过 32 位的字母数字编号，输入停顿后才生效，格式不符时就地提示、不发请求 |
-| `/fulfillment` | 履约进度：按世界与已结算场次逐件列出编号、装备、卖家、买家、成交价与当前流程状态（流拍寄回、COD 付款与退回重寄、异世界交付、卖家货款与成交撤销），状态按语气分组着色并始终配文字；等待付款时附付款期限，发生过 COD 退回时附退回次数与上限。拍品筛选与出价日志同口径，每页最多 100 件（偏好或地址栏里更大的每页数量按 100 请求，自定义输入超过 100 时就地提示 1–100 的整数范围）；操作列的查看按钮在页内打开只读的拍品详情抽屉。重读失败而展示旧快照时，表格上方提示该快照的确认时刻。状态与附带字段只来自服务端闭集，页面不推导流程 |
+| `/fulfillment` | 履约进度：按世界与已结算场次逐件列出编号、装备、卖家、买家、成交价与当前流程状态（流拍寄回、COD 付款与退回重寄、异世界交付、卖家货款与成交撤销），状态按语气分组着色并始终配文字；等待付款时附付款期限，发生过 COD 退回时附退回次数与上限。拍品筛选与出价日志同口径，每页最多 100 件（偏好或地址栏里 101–200 的每页数量按 100 请求（超过 200 的旧值回退默认数量），自定义输入超过 100 时就地提示 1–100 的整数范围）；操作列的查看按钮在页内打开只读的拍品详情抽屉。重读失败而展示旧快照时，表格上方提示该快照的确认时刻。状态与附带字段只来自服务端闭集，页面不推导流程 |
 | `/history` | 成交价格历史：名称/日期/金额筛选、分组与中位数；装备名称不跳转，操作列的查看按钮在页内打开只读的拍品详情抽屉 |
 | `/login` | 用登录 key 登录（支持 `return_to`） |
 | `/me`、`/account` | 我的：当前标记、出价与代理，登录时长设置，竞价提醒渠道；标记、出价历史与代理三张列表都带查看按钮（页内打开只读的拍品详情抽屉），编号与名称不跳转；竞价提醒的 MM 与 PM 是两个独立开关，可都开或都关 |
@@ -48,7 +48,7 @@
 | 路径 | 内容 |
 | --- | --- |
 | `crates/auction-web-public/src/api/` | 同源 HTTP 访问与响应解码；每个文件对应一个 API 领域（`account`、`blacklist`、`clock`、`commands`、`compensation`、`forum`、`fulfillment`、`model`、`queries`、`realtime/`、`registration`、`rules`、`session/`、`session_preference`、`status`、`watch_preference`、`watches`），`decoder/` 保存 wire DTO 解码 |
-| `crates/auction-web-public/src/surface/` | 路由与页面外壳、看板、目录、分页（`pagination/` 的 `PublicPager` 注入 Public 文案与 10/20/50/100 预设，包装共享 `Pager`）、设备专属展示（`presentation/` 的桌面/手机），以及按领域分组的页面实现：`account/`、`commands/`、`reads/`、`compensation/`、`watches/`、`session_preference/`、`rules`、`forum`、`blacklist`、`realtime`、`pages/`、`board/`、`catalog/` |
+| `crates/auction-web-public/src/surface/` | 路由与页面外壳、看板、目录、分页（`pagination/` 的 `PublicPager` 注入 Public 文案、10/20/50/100 预设与契约页长上限 200，包装共享 `Pager`）、设备专属展示（`presentation/` 的桌面/手机），以及按领域分组的页面实现：`account/`、`commands/`、`reads/`、`compensation/`、`watches/`、`session_preference/`、`rules`、`forum`、`blacklist`、`realtime`、`pages/`、`board/`、`catalog/` |
 | `crates/auction-web-public/assets/` | `crates/auction-web-public/assets/public.css`（组件与布局）、`crates/auction-web-public/assets/desktop.css`、`crates/auction-web-public/assets/mobile.css` |
 | `crates/auction-web-public/i18n/` | Fluent 译文：`en`（默认，编译期内嵌）、`zh-CN`、`zh-TW`、`ja`、`ko`（作为带指纹的 `/assets/<lang>-dxh<hash>.ftl` 按需取回，失败保持当前语言） |
 

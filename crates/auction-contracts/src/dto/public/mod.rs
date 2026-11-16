@@ -3,10 +3,12 @@
 mod account;
 mod catalog;
 mod commands;
+mod pagination;
 
 pub use account::*;
 pub use catalog::*;
 pub use commands::*;
+pub use pagination::*;
 
 mod watch;
 pub use watch::*;

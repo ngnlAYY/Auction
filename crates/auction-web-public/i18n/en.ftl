@@ -126,7 +126,6 @@ pagination-size-option = { $count } / page
 pagination-jump = Go to
 pagination-custom = Custom
 pagination-apply = Apply
-pagination-positive-integer = Enter a positive integer.
 pagination-size-limit = Enter a whole number from 1 to { $maximum }.
 catalog-empty-all = No lots in this auction.
 catalog-empty-category = No lots of this type in this auction.
