@@ -28,7 +28,8 @@ pub(super) struct SettlementDeliveryIntent {
     pub(super) settlement_line: Option<SettlementLine>,
     /// 与结算明细成对冻结，决定价格变量的闭集和含义。
     pub(super) settlement_mode: Option<SettlementMode>,
-    /// recovery case 冻结的付款期限；只在存在时写入正文变量，历史义务保持原载荷。
+    /// 正文展示的首寄付款期限 D0（不是重寄后重新起算的当前期限）；只在存在时写入正文变量，
+    /// 历史义务保持原载荷。
     pub(super) payment_deadline_at: Option<DateTime<Utc>>,
     /// 已存在投递的冻结变量键集合；重放时只允许按历史已知形状原样重建。
     pub(super) frozen_variables: Option<BTreeSet<String>>,

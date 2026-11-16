@@ -38,7 +38,9 @@ use auction_application::settlement::{
     SettlementInternalFulfillmentStore, VerifiedMailSentCollectionObservation,
     canonical_settlement_fulfillment_subject,
 };
-use auction_domain::{SettlementId, SettlementMode, SettlementObligationKind, SettlementWorld};
+use auction_domain::{
+    RecoveryPolicy, SettlementId, SettlementMode, SettlementObligationKind, SettlementWorld,
+};
 use auction_storage::DatabaseStore;
 use chrono::{DateTime, Duration, DurationRound, Utc};
 use serde_json::json;
@@ -130,7 +132,9 @@ struct CodCase {
 
 /// 写入已结算场次、lot 与冻结结算明细、付款义务及其依赖（卖方货款受阻于付款或交付、买方退款
 /// 为或有）、付款投递（尚在队列）、各履约行与付款期内的恢复记录。`payment_deadline` 是恢复记录
-/// 冻结的期限，同时按生成方格式写进付款邮件正文变量。
+/// 当前的付款期限（`payment_deadline_at`）；付款邮件正文按生成方格式写首寄期限 D0，即恢复记录
+/// `created_at` + 冻结恢复策略（`RECOVERY_POLICY_VERSION`）的付款期限，与资金化准入重建期望载荷
+/// 的口径一致。
 async fn seed_case(pool: &PgPool, payment: Payment, payment_deadline: DateTime<Utc>) -> CodCase {
     let world = payment.world();
     let id = |suffix: &str| stable_id(SEED, &format!("{world}-{suffix}"));
@@ -302,7 +306,16 @@ async fn seed_case(pool: &PgPool, payment: Payment, payment_deadline: DateTime<U
     // 激活后排队等待投递 Worker 领取。
     let delivery = id("delivery");
     let cod = BUYER_CREDITS + payment.carrier_credit();
-    let deadline = format_deadline(payment_deadline);
+    // 恢复记录显式写入建立时刻，正文期限取由它与冻结恢复策略版本推出的 D0（生产同一函数）；
+    // 当前期限由各用例给出，只决定轮询与等待付款口径，不参与正文与载荷重建。
+    let recovery_created_at = Utc::now();
+    let deadline = format_deadline(
+        RecoveryPolicy::initial_payment_deadline(
+            recovery_created_at,
+            u32::try_from(RECOVERY_POLICY_VERSION).expect("恢复策略版本为正"),
+        )
+        .expect("冻结恢复策略版本的首寄期限"),
+    );
     let payload = match payment {
         Payment::EquipmentCod => json!({
             "schema_version": 1,
@@ -396,8 +409,9 @@ async fn seed_case(pool: &PgPool, payment: Payment, payment_deadline: DateTime<U
         "INSERT INTO public.settlement_recoveries
             (id, auction_id, lot_id, world_id, equipment_id, winner_user_id,
              payment_obligation_id, equipment_obligation_id, seller_payout_obligation_id,
-             buyer_refund_obligation_id, policy_version, payment_deadline_at, stage)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'awaiting_payment')",
+             buyer_refund_obligation_id, policy_version, payment_deadline_at, stage,
+             created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'awaiting_payment', $13, $13)",
     )
     .bind(id("recovery"))
     .bind(auction)
@@ -411,6 +425,7 @@ async fn seed_case(pool: &PgPool, payment: Payment, payment_deadline: DateTime<U
     .bind(refund)
     .bind(RECOVERY_POLICY_VERSION)
     .bind(payment_deadline)
+    .bind(recovery_created_at)
     .execute(pool)
     .await
     .expect("写入付款期内的恢复记录");

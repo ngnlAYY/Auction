@@ -17,6 +17,7 @@ use crate::database::settlement::fulfillment::mapping::{
     settlement_world, string_column, uuid_column, validate_claim_context,
 };
 use crate::database::settlement::fulfillment::reconcile::manual_reconcile_in_transaction;
+use crate::database::settlement::policy::initial_payment_deadline;
 
 pub(crate) async fn claim_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
@@ -139,6 +140,8 @@ pub(crate) async fn claim_postgres(
                   settlement.hold_ppm, settlement.adjustment_ppm,
                   settlement.adjustment_metadata ->> 'policy' AS settlement_policy_mode,
                   recovery.payment_deadline_at AS recovery_payment_deadline_at,
+                  recovery.created_at AS recovery_created_at,
+                  recovery.policy_version AS recovery_policy_version,
                   o.submission_id, submission.source_kind AS submission_source_kind,
                   submission.source_reference AS submission_source_reference,
                   submission.mailbox_key AS submission_mailbox_key,
@@ -520,11 +523,20 @@ pub(crate) fn map_claim(
         equipment_name: string_column(row, "equipment_name").map_err(ClaimMappingError::Context)?,
         settlement_line: pricing::map_settlement_line(row).map_err(ClaimMappingError::Context)?,
         settlement_mode: pricing::map_settlement_mode(row).map_err(ClaimMappingError::Context)?,
-        // 只有 recovery case 覆盖的付款义务才有冻结期限；历史义务缺列时保持 None。
+        // 只有 recovery case 覆盖的付款义务才有期限；历史义务缺列时两者都保持 None。
         payment_deadline_at: row
             .try_get("recovery_payment_deadline_at")
             .map_err(map_storage_error)
             .map_err(ClaimMappingError::Context)?,
+        initial_payment_deadline_at: initial_payment_deadline(
+            row.try_get("recovery_created_at")
+                .map_err(map_storage_error)
+                .map_err(ClaimMappingError::Context)?,
+            row.try_get("recovery_policy_version")
+                .map_err(map_storage_error)
+                .map_err(ClaimMappingError::Context)?,
+        )
+        .map_err(|message| ClaimMappingError::Context(repository_error(message)))?,
         submission_id: submission_id.map(SubmissionId::from_uuid),
         submission_source_kind: row
             .try_get("submission_source_kind")

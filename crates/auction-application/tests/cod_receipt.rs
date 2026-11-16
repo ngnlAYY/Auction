@@ -29,7 +29,7 @@ const EQUIPMENT: u64 = 60;
 /// 生成方 `format_deadline` 对 [`deadline`] 的 UTC 秒精度输出。
 const DEADLINE_TEXT: &str = "2026-11-22T12:19:28Z";
 
-/// 恢复记录冻结的付款期限。
+/// 恢复记录的首寄付款期限 D0（创建时刻加冻结策略版本的付款期限）。
 fn deadline() -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2026, 11, 22, 12, 19, 28)
         .single()
@@ -106,7 +106,7 @@ fn snapshot() -> CodReceiptSnapshot {
         frozen_sent_proven: false,
         sending_at: Some(at(10)),
         funding_source_boundary: Some(at(0)),
-        payment_deadline_at: Some(deadline()),
+        initial_payment_deadline_at: Some(deadline()),
     }
 }
 
@@ -324,7 +324,8 @@ fn priced_payload_with_deadline() -> serde_json::Value {
 }
 
 /// 回归：正文带付款期限的 COD 必须能资金化（线上曾因闭集不认 `payment_deadline` 整批拒绝，
-/// 卖方货款随之阻塞）；期限只按恢复记录冻结值精确比较，不放宽其余字段。
+/// 卖方货款随之阻塞）；期限只按恢复记录的首寄期限 D0 精确比较，不放宽其余字段。COD 收回重寄后
+/// 当前期限重新起算，但冻结正文仍是 D0，快照只携带 D0，因此重寄后实收的 COD 照样资金化。
 #[test]
 fn payment_deadline_matches_the_frozen_recovery_deadline() {
     let mut guard = snapshot();
@@ -350,7 +351,7 @@ fn payment_deadline_matches_the_frozen_recovery_deadline() {
     // 载荷带期限而恢复记录没有冻结期限：无法重建，失败关闭。
     let mut guard = snapshot();
     guard.payload = priced_payload_with_deadline();
-    guard.payment_deadline_at = None;
+    guard.initial_payment_deadline_at = None;
     assert_eq!(evaluate(&guard), Err(CodReceiptBlocker::PayloadMismatch));
 
     // 旧三变量形状早于正文期限：带期限的三变量载荷不是已发布形状。

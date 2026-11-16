@@ -64,7 +64,9 @@ pub(super) fn build_delivery_intent(
         equipment_id: None,
         settlement_line: None,
         settlement_mode: None,
-        payment_deadline_at: claim.payment_deadline_at,
+        // 正文只写首寄期限 D0：COD 收回重寄沿用首次冻结的载荷，当前期限重新起算后不能用来
+        // 重建期望载荷，否则重寄后的对账必然判冲突（不变量 1、10）。
+        payment_deadline_at: claim.initial_payment_deadline_at,
         // 已存在投递只允许按原冻结键集合重放，新增正文变量不得改变在途载荷摘要。
         frozen_variables: claim
             .delivery_snapshot
@@ -395,11 +397,8 @@ mod tests {
             equipment_name: "Radiant Phase Shoes".to_owned(),
             settlement_line: None,
             settlement_mode: None,
-            payment_deadline_at: Some(
-                chrono::DateTime::parse_from_rfc3339("2026-11-10T12:00:00Z")
-                    .unwrap()
-                    .with_timezone(&Utc),
-            ),
+            payment_deadline_at: Some(deadline("2026-11-10T12:00:00Z")),
+            initial_payment_deadline_at: Some(deadline("2026-11-10T12:00:00Z")),
             submission_id: None,
             submission_source_kind: Some("mail".to_owned()),
             submission_external_mail_id: None,
@@ -418,6 +417,76 @@ mod tests {
             lease_until: now + chrono::Duration::seconds(60),
             retry_count: 0,
         }
+    }
+
+    fn deadline(value: &str) -> chrono::DateTime<Utc> {
+        chrono::DateTime::parse_from_rfc3339(value).unwrap().with_timezone(&Utc)
+    }
+
+    fn canonical_of(claim: &SettlementFulfillmentClaim) -> CanonicalSettlementDelivery {
+        let intent = build_delivery_intent(claim).expect("intent 必须有效");
+        build_canonical_delivery(&intent).expect("payload 必须有效")
+    }
+
+    /// COD 收回重寄只改写恢复记录的当前期限；正文与载荷按首寄期限 D0 重建，因此首寄与任意次
+    /// 重寄后的 canonical 载荷与摘要逐字不变，对账不会把重寄判为 delivery_conflict。
+    #[test]
+    fn resent_payment_rebuilds_the_first_send_deadline_not_the_current_one() {
+        for kind in [
+            SettlementObligationKind::WinnerPaymentCarrierCod,
+            SettlementObligationKind::WinnerEquipmentCod,
+        ] {
+            let mut first_send = claim(kind);
+            if kind == SettlementObligationKind::WinnerEquipmentCod {
+                first_send.carrier_credit = 0;
+                first_send.equipment_world = SettlementWorld::Main;
+                first_send.settlement_line = Some(SettlementLine {
+                    lot_id: first_send.lot_id,
+                    end_price: SettlementAmount::new(1_000).unwrap(),
+                    listed_price: SettlementAmount::new(1_000).unwrap(),
+                    buyer_amount: SettlementAmount::new(1_000).unwrap(),
+                    seller_amount: SettlementAmount::new(1_000).unwrap(),
+                    tax_amount: SettlementAmount::new(0).unwrap(),
+                    compensation_amount: SettlementAmount::new(0).unwrap(),
+                    hold_ppm: 0,
+                    adjustment_ppm: 0,
+                });
+                first_send.settlement_mode = Some(SettlementMode::HoldCurveV1);
+            }
+            let original = canonical_of(&first_send);
+            for current in ["2026-11-17T12:00:00Z", "2026-11-24T08:30:00Z"] {
+                let mut resent = first_send.clone();
+                resent.payment_deadline_at = Some(deadline(current));
+                // 重寄后领取到的是同一冻结投递：按原快照键集合重放也必须得到原摘要。
+                resent.delivery_snapshot =
+                    Some(snapshot_with_variables(&resent, original.payload["variables"].clone()));
+                let rebuilt = canonical_of(&resent);
+                assert_eq!(rebuilt.request_hash, original.request_hash, "{kind:?} {current}");
+                assert_eq!(
+                    variables_of(&rebuilt).get("payment_deadline").map(String::as_str),
+                    Some("2026-11-10T12:00:00Z"),
+                    "{kind:?} 正文只能展示首寄期限"
+                );
+            }
+        }
+    }
+
+    /// 反例：错误的 D0（例如误用重寄后的当前期限）重建出的载荷与冻结快照不同，摘要比较失败关闭；
+    /// 只有当前期限而没有 D0 时也不会把当前期限写进正文。
+    #[test]
+    fn wrong_or_missing_initial_deadline_never_reproduces_the_frozen_payload() {
+        let first_send = claim(SettlementObligationKind::WinnerPaymentCarrierCod);
+        let original = canonical_of(&first_send);
+        let mut wrong = first_send.clone();
+        wrong.initial_payment_deadline_at = Some(deadline("2026-11-17T12:00:00Z"));
+        wrong.delivery_snapshot =
+            Some(snapshot_with_variables(&wrong, original.payload["variables"].clone()));
+        assert_ne!(canonical_of(&wrong).request_hash, original.request_hash);
+
+        let mut missing = first_send;
+        missing.initial_payment_deadline_at = None;
+        missing.payment_deadline_at = Some(deadline("2026-11-17T12:00:00Z"));
+        assert!(!variables_of(&canonical_of(&missing)).contains_key("payment_deadline"));
     }
 
     fn snapshot_with_variables(
@@ -646,7 +715,7 @@ mod tests {
                 frozen_sent_proven: false,
                 sending_at: Some(claim.claimed_at),
                 funding_source_boundary: Some(claim.claimed_at - chrono::Duration::hours(1)),
-                payment_deadline_at: claim.payment_deadline_at,
+                initial_payment_deadline_at: claim.initial_payment_deadline_at,
             };
             let subject = canonical_settlement_fulfillment_subject(kind, claim.obligation_id)
                 .expect("COD 主题必须存在");
