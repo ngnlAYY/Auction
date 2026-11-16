@@ -143,7 +143,7 @@ pub(in crate::database::recovery::commands) async fn close_recovered_dependents(
     if !matches!(handoff_state.as_str(), "enqueued" | "manual_reconcile") {
         return Err(RecoveryCommandError::NotConfirmable);
     }
-    // 原交付投递在履约行之后单独锁定（与收回/取消的原付款投递同序），处置绑定它的当前 fence。
+    // 原交付投递已在履约行之前按规范锁序锁定（与收回/取消的原付款投递同序），处置绑定它的当前 fence。
     let fencing_version: i64 = sqlx::query_scalar(
         "SELECT fencing_version FROM public.deliveries WHERE id = $1 FOR UPDATE",
     )

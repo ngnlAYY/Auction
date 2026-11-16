@@ -1,4 +1,4 @@
-//! Recovery 事务中的范围、拍卖、义务和 action 锁定。
+//! Recovery 事务中的范围、拍卖、义务、action 与原投递锁定。
 
 use std::collections::BTreeMap;
 
@@ -246,6 +246,34 @@ pub(in crate::database::recovery::commands) async fn lock_actions(
             })
         })
         .collect()
+}
+
+/// 按规范锁序（恢复动作之后、履约之前）锁定恢复记录各义务履约当前指向的投递，按投递 UUID 序。
+/// Admin 投递命令（含判失败）先锁投递行、再改写履约；确认若先锁履约、后锁原投递，两者可能各持
+/// 一把并等待另一把。履约指针在本事务快照内读取，随后对履约行加锁时若指针已被并发改写，
+/// Serializable 冲突使整个确认重试，不会按旧指针继续。
+pub(in crate::database::recovery::commands) async fn lock_obligation_deliveries(
+    transaction: &mut Transaction<'_, Postgres>,
+    obligations: &BTreeMap<Uuid, ObligationRow>,
+) -> Result<(), RecoveryCommandError> {
+    let ids: Vec<Uuid> = obligations.keys().copied().collect();
+    sqlx::query(
+        r#"SELECT delivery.id
+           FROM public.deliveries AS delivery
+           WHERE delivery.id IN (
+               SELECT fulfillment.delivery_id
+               FROM public.settlement_obligation_fulfillments AS fulfillment
+               WHERE fulfillment.obligation_id = ANY($1)
+                 AND fulfillment.delivery_id IS NOT NULL
+           )
+           ORDER BY delivery.id
+           FOR UPDATE OF delivery"#,
+    )
+    .bind(ids)
+    .execute(&mut **transaction)
+    .await
+    .map_err(map_sql_error)?;
+    Ok(())
 }
 
 pub(in crate::database::recovery::commands) async fn lock_fulfillment_state(

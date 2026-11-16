@@ -35,7 +35,8 @@ pub(in crate::database::recovery::commands) async fn close_voided_fulfillments(
         RecoveryConfirmationAction::Cancelled => "recovery_cancelled",
         RecoveryConfirmationAction::EquipmentRecovered => return Ok(()),
     };
-    // 履约行已由 validate_obligations 按 UUID 序锁定；原付款投递在其后单独锁定，只读状态与 fence。
+    // 原付款投递已在履约行之前按规范锁序锁定，履约行随后由 validate_obligations 按 UUID 序锁定；
+    // 这里只读状态与 fence。
     let payment = sqlx::query(
         r#"SELECT execution_state, delivery_id
            FROM public.settlement_obligation_fulfillments

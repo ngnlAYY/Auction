@@ -22,6 +22,7 @@ use crate::database::recovery::commands::scope::load_recovery_scope;
 use crate::database::recovery::commands::scope::load_replayed_command;
 use crate::database::recovery::commands::scope::lock_actions;
 use crate::database::recovery::commands::scope::lock_auction;
+use crate::database::recovery::commands::scope::lock_obligation_deliveries;
 use crate::database::recovery::commands::scope::lock_obligations;
 use crate::database::recovery::commands::scope::lock_original_lot;
 use crate::database::recovery::commands::scope::lock_recovery;
@@ -91,6 +92,9 @@ pub(in crate::database::recovery::commands) async fn confirm_postgres_once(
 
     let obligations = lock_obligations(&mut transaction, &recovery).await?;
     let actions = lock_actions(&mut transaction, recovery.id).await?;
+    // 规范锁序：恢复动作 → 投递 → 履约。原付款与交付投递在履约行之前锁定，与 Admin 投递命令
+    // （先锁投递、再改写履约）在投递行上串行，不形成锁环（不变量 2）。
+    lock_obligation_deliveries(&mut transaction, &obligations).await?;
     let selected_action = validate_actions(&recovery, &actions, command.action)?;
     validate_custody_evidence(&recovery, selected_action)?;
     validate_obligations(&mut transaction, &recovery, &obligations, command.action).await?;
