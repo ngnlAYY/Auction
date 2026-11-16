@@ -35,6 +35,22 @@ use uuid::Uuid;
 
 use crate::database::DatabaseStore;
 
+/// 只在 `test-db` 下暴露 Admin 列表查询原文给基准/EXPLAIN 夹具，保证测量的是同一份 SQL；默认
+/// 构建与发布制品不包含该出口。
+#[cfg(feature = "test-db")]
+pub mod benchmark_sql {
+    /// 列表总数（`$1` 世界、`$2` 证据分类、`$3` 状态、`$4` 义务种类、`$5` 只看未结案、
+    /// `$6/$7` 收件时间范围、`$8` 引用）。
+    pub fn list_count_sql() -> &'static str {
+        super::reads::LIST_COUNT_SQL
+    }
+
+    /// 列表当前页：参数同总数，另加 `$9` 页长、`$10` 偏移。
+    pub fn list_page_sql() -> &'static str {
+        super::reads::LIST_PAGE_SQL
+    }
+}
+
 impl SettlementReturnAdminPort for DatabaseStore {
     fn list_settlement_returns(
         &self,

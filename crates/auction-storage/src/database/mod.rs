@@ -31,6 +31,8 @@ pub use maintenance::key_rotation::{
     scan_admin_command_key_envelopes, scan_key_envelopes, stored_key_ids,
 };
 pub use maintenance::least_privilege::{apply_runtime_privileges, runtime_privileges_present};
+#[cfg(feature = "test-db")]
+pub use operations::asset_reconciliation::benchmark_sql as solvency_benchmark_sql;
 pub use operations::asset_reconciliation::{
     CUSTODY_REPORT_ACTION, CUSTODY_REPORT_ENTITY, CUSTODY_REPORT_FORMAT, POSTAGE_RATE_CREDITS,
     POSTAGE_RATE_VERIFIED, SOLVENCY_REPORT_ACTION, SOLVENCY_REPORT_ENTITY, SOLVENCY_REPORT_FORMAT,
@@ -73,6 +75,8 @@ pub use maintenance::shutdown_window::{
 };
 #[cfg(feature = "test-db")]
 pub use settlement::fulfillment::asset_conflict_gate_passes;
+#[cfg(feature = "test-db")]
+pub use settlement::returns::benchmark_sql as settlement_return_benchmark_sql;
 mod commands;
 pub use accounts::credentials::{CredentialRuntimeOwnership, CredentialRuntimeOwnershipError};
 pub use accounts::credentials::{

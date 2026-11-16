@@ -61,6 +61,23 @@ macro_rules! list_filter {
     };
 }
 
+/// 列表总数（参数 $1..$8 见 `list_filter!`）。
+pub(super) const LIST_COUNT_SQL: &str = concat!(
+    r#"SELECT count(*)
+           FROM public.settlement_return_cases AS c
+           JOIN public.settlement_return_evidence AS e ON e.return_mail_id = c.return_mail_id
+           JOIN public.inbound_mail AS i ON i.id = c.return_mail_id
+           LEFT JOIN public.settlement_obligations AS o ON o.id = c.obligation_id"#,
+    list_filter!()
+);
+
+/// 列表当前页：筛选同 `LIST_COUNT_SQL`，`$9` 页长、`$10` 偏移，按收件时间倒序。
+pub(super) const LIST_PAGE_SQL: &str = concat!(
+    summary_select!(),
+    list_filter!(),
+    " ORDER BY i.received_at DESC, c.return_mail_id DESC LIMIT $9 OFFSET $10"
+);
+
 async fn begin_read(
     pool: &crate::database::TrackedPool<Postgres>,
 ) -> Result<Transaction<'static, Postgres>, ReturnTransactionError> {
@@ -86,41 +103,30 @@ async fn list_once(
     let match_state = request.match_state.map(SettlementReturnMatch::as_str);
     let status = request.status.map(SettlementReturnCaseStatus::as_str);
     let kind = request.obligation_kind.map(SettlementObligationKind::as_str);
-    let total: i64 = sqlx::query_scalar(concat!(
-        r#"SELECT count(*)
-           FROM public.settlement_return_cases AS c
-           JOIN public.settlement_return_evidence AS e ON e.return_mail_id = c.return_mail_id
-           JOIN public.inbound_mail AS i ON i.id = c.return_mail_id
-           LEFT JOIN public.settlement_obligations AS o ON o.id = c.obligation_id"#,
-        list_filter!()
-    ))
-    .bind(request.world.as_deref())
-    .bind(match_state)
-    .bind(status)
-    .bind(kind)
-    .bind(request.open_only)
-    .bind(request.received_from)
-    .bind(request.received_to)
-    .bind(request.reference)
-    .fetch_one(&mut *tx)
-    .await?;
-    let rows = sqlx::query(concat!(
-        summary_select!(),
-        list_filter!(),
-        " ORDER BY i.received_at DESC, c.return_mail_id DESC LIMIT $9 OFFSET $10"
-    ))
-    .bind(request.world.as_deref())
-    .bind(match_state)
-    .bind(status)
-    .bind(kind)
-    .bind(request.open_only)
-    .bind(request.received_from)
-    .bind(request.received_to)
-    .bind(request.reference)
-    .bind(request.limit)
-    .bind(request.offset)
-    .fetch_all(&mut *tx)
-    .await?;
+    let total: i64 = sqlx::query_scalar(LIST_COUNT_SQL)
+        .bind(request.world.as_deref())
+        .bind(match_state)
+        .bind(status)
+        .bind(kind)
+        .bind(request.open_only)
+        .bind(request.received_from)
+        .bind(request.received_to)
+        .bind(request.reference)
+        .fetch_one(&mut *tx)
+        .await?;
+    let rows = sqlx::query(LIST_PAGE_SQL)
+        .bind(request.world.as_deref())
+        .bind(match_state)
+        .bind(status)
+        .bind(kind)
+        .bind(request.open_only)
+        .bind(request.received_from)
+        .bind(request.received_to)
+        .bind(request.reference)
+        .bind(request.limit)
+        .bind(request.offset)
+        .fetch_all(&mut *tx)
+        .await?;
     let items = rows.iter().map(map_summary).collect::<Result<Vec<_>, _>>()?;
     tx.commit().await?;
     Ok(SettlementReturnPage { items, total })

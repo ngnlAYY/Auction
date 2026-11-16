@@ -403,6 +403,25 @@ COMMIT 报告的 SSI 冲突不推测为序号热点。
 只读页面不新增迁移：lot 读取可利用 `lots_auction_status_idx`，义务读取可利用 `(auction_id, lot_id, obligation_kind)`
 唯一约束索引，其余连接都按主键或唯一键（未做生产规模的 EXPLAIN）；运行账号对 public schema 已有 SELECT（迁移 `000081`）。
 
+## 结算退件与偿付读路径
+
+偿付分类查询（`crates/auction-storage/src/database/operations/asset_reconciliation/queries.rs` 的
+`SOLVENCY_WORLD`）与 Admin 退件列表的总数和当前页（`crates/auction-storage/src/database/settlement/returns/reads.rs`）
+不新增索引。依据是 `--ignored` 基准 `perf_settlement_return_solvency_and_list_plans`
+（`crates/auction-storage/tests/postgres/settlement_returns/plans.rs`，经 `test-db` 出口读取生产 SQL 原文）：
+在 1 万条成交 lot 的合成历史上补齐义务 3.5 万、投递约 5.6 万、入站邮件约 5 万、退件案件 2,200（未结案 592）、
+领回 1,068 与恢复 200，统计信息由表 owner 收集，每条查询同时测自定义计划与强制通用计划（sqlx 复用预备语句后
+可能切换到通用计划）。本机实测：
+
+- 偿付（main）约 91ms、2.8 万块缓冲。主体是对全部现金义务的扫描与恢复收口子计划；退件新增的案件关联按
+  `settlement_return_cases_delivery_once`、领回按主键逐行探测，只随未满足的现金义务增长（本语料约 7 千块、10ms）。
+  `balance_before_take` 每次查询只执行一次：稳态（余额观察晚于全部领回证明）只顺序读领回表（27 块、0.15ms）；
+  领回证明晚于余额观察的窗口内另顺序读一次履约表（约 500 块、5ms）。为 `proven_at` 加 `credits > 0` 部分索引
+  只把稳态的 27 块降为 4 块；比较值是运行期参数，规划器按默认选择率估计，窗口内的连接方式不变，因此不采用。
+- Admin 列表默认首页（只看未结案）4ms，全部案件首页 2ms，第 41 页（偏移 2000）51ms，总数 3–11ms；通用计划
+  退化为“扫描案件 + 主键探测 + top-N 排序”，最慢 29ms。排序键在入站邮件上，案件表的索引提供不了这个顺序；
+  代价只随案件数增长，而案件数受退件邮件数约束。
+
 ## 并发形状与唤醒
 
 - **序号热点**：竞价事件不再在出价事务内递增共享的 `realtime_streams` 行，而是与事实同事务写入

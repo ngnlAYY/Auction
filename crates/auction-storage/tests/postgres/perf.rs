@@ -14,7 +14,8 @@
 //!
 //! 报告写入 `AUCTION_PERF_REPORT_DIR`（默认 `target/perf/<unix 秒>`），包含每个场景的
 //! EXPLAIN 摘要、缓冲区、执行时间与并发延迟分位。夹具只写合成数据到一次性克隆库，
-//! 不接触真实数据、不启动应用服务、不访问外部网络。
+//! 不接触真实数据、不启动应用服务、不访问外部网络。结算退件的偿付与 Admin 列表计划基准在
+//! `settlement_returns::plans`，复用这里的合成历史、EXPLAIN 摘要与报告出口。
 
 use std::{
     collections::BTreeMap,
@@ -97,11 +98,11 @@ impl NumberedScenario {
 
 /// 一次 `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` 的摘要；只保留可比较的数字与节点名。
 #[derive(Debug, Clone)]
-struct PlanSummary {
-    execution_ms: f64,
+pub(crate) struct PlanSummary {
+    pub(crate) execution_ms: f64,
     planning_ms: f64,
-    shared_hit_blocks: i64,
-    shared_read_blocks: i64,
+    pub(crate) shared_hit_blocks: i64,
+    pub(crate) shared_read_blocks: i64,
     rows_returned: i64,
     node_types: Vec<String>,
 }
@@ -111,7 +112,7 @@ impl PlanSummary {
         self.node_types.iter().any(|node| node.contains(index))
     }
 
-    fn to_json(&self) -> Value {
+    pub(crate) fn to_json(&self) -> Value {
         json!({
             "execution_ms": self.execution_ms,
             "planning_ms": self.planning_ms,
@@ -209,7 +210,7 @@ fn report_dir() -> PathBuf {
     )
 }
 
-fn write_report(name: &str, report: &Value) -> PathBuf {
+pub(crate) fn write_report(name: &str, report: &Value) -> PathBuf {
     let directory = report_dir();
     if let Err(error) = std::fs::create_dir_all(&directory) {
         println!("无法创建报告目录 {}：{error}", directory.display());
@@ -228,7 +229,7 @@ fn write_report(name: &str, report: &Value) -> PathBuf {
 }
 
 /// 写入合成历史：只有已结算场次、已成交 lot、买家与逐 lot 结算，形状与真实投影一致。
-async fn seed(pool: &PgPool, owner: &PgPool) -> Result<(), String> {
+pub(crate) async fn seed(pool: &PgPool, owner: &PgPool) -> Result<(), String> {
     let statements: Vec<(&str, Vec<i64>)> = vec![
         (
             "INSERT INTO public.users (id, username, public_key_hash)
@@ -348,15 +349,42 @@ async fn seed(pool: &PgPool, owner: &PgPool) -> Result<(), String> {
 }
 
 /// 用 `PREPARE` + `EXPLAIN` 测量生产查询原文；参数只用受控的合成字面量，避免另写一份 SQL。
-async fn explain(pool: &PgPool, sql: &str, arguments: &str) -> Result<PlanSummary, String> {
-    let script = format!(
-        "PREPARE perf_probe AS {sql};\nEXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) EXECUTE perf_probe({arguments});\nDEALLOCATE perf_probe;"
-    );
+pub(crate) async fn explain(
+    pool: &PgPool,
+    sql: &str,
+    arguments: &str,
+) -> Result<PlanSummary, String> {
+    explain_script(
+        pool,
+        format!(
+            "PREPARE perf_probe AS {sql};\nEXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) EXECUTE perf_probe({arguments});\nDEALLOCATE perf_probe;"
+        ),
+    )
+    .await
+}
+
+/// 同 [`explain`]，但在同一连接上强制通用计划：sqlx 复用预备语句，第 6 次执行起 PostgreSQL 可能
+/// 改用不看参数值的通用计划，`$n IS NULL OR …` 形式的可选筛选此时不能按实参化简。
+pub(crate) async fn explain_generic(
+    pool: &PgPool,
+    sql: &str,
+    arguments: &str,
+) -> Result<PlanSummary, String> {
+    explain_script(
+        pool,
+        format!(
+            "SET plan_cache_mode = force_generic_plan;\nPREPARE perf_probe AS {sql};\nEXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) EXECUTE perf_probe({arguments});\nDEALLOCATE perf_probe;\nRESET plan_cache_mode;"
+        ),
+    )
+    .await
+}
+
+async fn explain_script(pool: &PgPool, script: String) -> Result<PlanSummary, String> {
     let rows = sqlx::raw_sql(AssertSqlSafe(script))
         .fetch_all(pool)
         .await
         .map_err(|error| format!("EXPLAIN 失败：{error}"))?;
-    // 多语句脚本按顺序返回三个结果集的最后一行（EXPLAIN 的 JSON 列）。
+    // 多语句脚本里只有 EXPLAIN 返回行（JSON 计划列），其余语句不返回行。
     let mut plan: Option<Value> = None;
     for row in &rows {
         if let Ok(sqlx::types::Json(value)) = row.try_get::<sqlx::types::Json<Value>, _>(0) {
@@ -391,11 +419,16 @@ fn collect_plan(node: &Value, summary: &mut PlanSummary, is_root: bool) {
             None => node_type.to_owned(),
         });
     }
-    summary.shared_hit_blocks += node.get("Shared Hit Blocks").and_then(Value::as_i64).unwrap_or(0);
-    summary.shared_read_blocks +=
-        node.get("Shared Read Blocks").and_then(Value::as_i64).unwrap_or(0);
+    // 节点的缓冲区计数已包含全部子节点（含 InitPlan/SubPlan 与 CTE），逐节点相加会重复计数，只取
+    // 根节点才是整条语句的总量；PostgreSQL 18 起 `Actual Rows` 是保留两位小数的每次循环平均值，
+    // 根节点只执行一次，四舍五入即行数。
     if is_root {
-        summary.rows_returned = node.get("Actual Rows").and_then(Value::as_i64).unwrap_or(0);
+        summary.shared_hit_blocks =
+            node.get("Shared Hit Blocks").and_then(Value::as_i64).unwrap_or(0);
+        summary.shared_read_blocks =
+            node.get("Shared Read Blocks").and_then(Value::as_i64).unwrap_or(0);
+        summary.rows_returned =
+            node.get("Actual Rows").and_then(Value::as_f64).map_or(0, |rows| rows.round() as i64);
     }
     if let Some(children) = node.get("Plans").and_then(Value::as_array) {
         for child in children {
