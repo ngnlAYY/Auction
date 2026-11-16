@@ -27,7 +27,7 @@ pub(crate) use record::{
     RECORD_FILE, ROLE_BINARIES, RecordDirectory, RetainRequest, RetainedBinary, RetainedIdentity,
     RollbackRecord, latest, load, record_dir, record_projection, retain,
 };
-pub(crate) use trust::require_install_dir;
+pub(crate) use trust::{RunAccount, require_install_dir};
 
 use self::record::copy_contents;
 use self::trust::PinnedInstallDir;

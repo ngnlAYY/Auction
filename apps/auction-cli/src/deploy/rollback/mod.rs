@@ -17,7 +17,7 @@ use uuid::Uuid;
 
 use super::install::{self, ROLE_BINARIES, RecordDirectory, RetainRequest, RollbackRecord};
 use super::receipts::{FailedReceipt, Failure, settle};
-use super::verification::install_dir_artifacts;
+use super::verification::{install_dir_artifacts, run_accounts};
 use super::{gates, role_binary, running_roles, space, unit_states};
 use crate::app::{print_json, progress};
 use crate::cli::{RollbackArgs, UnitArgs};
@@ -68,7 +68,7 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: RollbackArgs) -> anyhow::R
             install_dir.display()
         );
     }
-    install::require_install_dir(&install_dir)?;
+    install::require_install_dir(&install_dir, &run_accounts(&states)?)?;
     let deployed_receipt =
         receipt::read(state, record.deploy_receipt_id).context("读取回滚记录对应的部署回执失败")?;
     // 启动失败也会发布同 ID 的失败部署回执：新程序已安装但未就绪，仍必须允许恢复旧程序。

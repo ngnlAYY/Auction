@@ -5,8 +5,9 @@ use std::path::Path;
 use anyhow::Context;
 
 use super::artifact;
+use super::install::RunAccount;
 use crate::receipt;
-use crate::service::{ManagedRole, Systemctl, UnitState};
+use crate::service::{self, ManagedRole, Systemctl, UnitState};
 use crate::support::digest::sha256_path;
 use crate::support::files;
 
@@ -87,6 +88,20 @@ pub(crate) async fn unit_states(systemctl: &Systemctl) -> anyhow::Result<[UnitSt
         states.push(systemctl.show(role).await?);
     }
     states.try_into().ok().context("三角色状态数量不一致")
+}
+
+/// 三角色 unit 的运行账号（`User=`，空为 root，名称经 NSS 解析；`DynamicUser=yes` 时 UID 不固定），
+/// 供安装目录门禁核对它们能否穿越目录并执行各自的程序。
+pub(super) fn run_accounts(states: &[UnitState; 3]) -> anyhow::Result<Vec<RunAccount>> {
+    ManagedRole::START_ORDER
+        .into_iter()
+        .zip(states)
+        .map(|(role, state)| {
+            let uid = service::run_uid(state)
+                .with_context(|| format!("解析 {} unit 的运行账号失败", role.name()))?;
+            Ok(RunAccount { role: role.name(), program: role_binary(role), uid })
+        })
+        .collect()
 }
 
 pub(crate) fn running_roles(states: &[UnitState; 3]) -> Vec<(&'static str, u32)> {
