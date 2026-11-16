@@ -254,7 +254,7 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | POST | `/api/v1/admin/realtime/failures/{failure_id}/replay` | 重放失败事件（追加新事件并解决原失败） |
 | GET / POST / PUT | `/api/v1/admin/rules` | 读取（`lang`，缺省 en）/ 校验 / 发布规则文档。读取不做语言回退：所选语言尚未建立时为 404，编辑器据此从版本 0 新建 |
 | GET / POST / PUT | `/api/v1/admin/about` | 读取（`lang`）/ 校验 / 发布“关于”文档；请求、响应、错误码、版本 CAS 与幂等语义同规则文档，两种文档按（种类，语言）各自独立 |
-| GET / PUT | `/api/v1/admin/config` | 读取 / 更新 runtime 配置（带 fingerprint 与 `command_id`）。可选查询参数：`include_equipment_taxonomy=true` 附带装备分类词典；`include=fulfillment_collection_overdue_age_seconds` 让 `operations.alerts` 附带长期未领取阈值的生效值（文件省略时为默认 259200）。两者之外的键、其他取值或重复出现为 400 `invalid_query`。不带 `include` 时告警区块保持已发布的字段集合，不输出该阈值（文件里写了非默认值也不输出），已打开的旧页面照常解码。更新请求的 `operations.alerts` 可以省略该阈值：省略表示保持当前文件的值（在指纹 fence 内补回），旧页面保存不会失败也不会把它重置为默认；显式写出的默认值按省略写入文件。命令摘要与新指纹按补回后落成的候选计算，同一 `command_id` 重试按同一规则比较 |
+| GET / PUT | `/api/v1/admin/config` | 读取 / 更新 runtime 配置（带 fingerprint 与 `command_id`）。可选查询参数：`include_equipment_taxonomy=true` 附带装备分类词典；`include=fulfillment_collection_overdue_age_seconds` 让 `operations.alerts` 附带长期未领取阈值的生效值（文件省略时为默认 259200）。两者之外的键、其他取值或重复出现为 400 `invalid_query`。不带 `include` 时告警区块保持已发布的字段集合，不输出该阈值（文件里写了非默认值也不输出），已打开的旧页面照常解码。更新请求的 `operations.alerts` 可以省略该阈值：省略表示保持当前文件的值（在指纹 fence 内补回），旧页面保存不会失败也不会把它重置为默认；显式写出的默认值按省略写入文件。命令身份按原始请求计算：省略该阈值与显式写出（含显式写出默认值）是不同请求，同一 `command_id` 只有原样重试才返回原结果（已应用的不再写文件），请求不同返回 409 `state_conflict`；新指纹按补回后落成的候选计算。升级前记下的命令仍按原口径（以已存候选补回省略的字段后比较）重放 |
 | GET | `/api/v1/admin/runtime-switches` | 认证只读数据库意图与 Admin 自身实际快照，不依赖 runtime 文件 |
 | POST | `/api/v1/admin/runtime-switches/external-access-paused` | 暂停或恢复全部外部访问（唯一开放给 Admin 写入的开关） |
 | GET | `/api/v1/admin/mail-templates` | 全部出站通知模板的当前正文、内置默认正文、版本与占位符规则 |

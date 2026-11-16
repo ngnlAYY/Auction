@@ -28,8 +28,14 @@ use crate::ports::operations::valid_control_socket_path;
 /// runtime 文件和命令账本允许的最大候选字节数。
 pub const MAX_ADMIN_RUNTIME_DOCUMENT_BYTES: usize = 4 << 20;
 
-/// runtime 配置的摘要编码版本；升级编码时必须追加迁移策略，不能静默改变旧命令含义。
-pub const ADMIN_RUNTIME_DIGEST_VERSION: u16 = 1;
+/// runtime 命令请求摘要的当前版本（2）：摘要按原始请求计算，请求省略兼容字段与显式写出该字段
+/// （含显式写出默认值）是不同请求；落成的候选只经账本的 `new_fingerprint` 绑定。改变编码或摘要
+/// 对象都要升级版本并追加迁移，旧版本的账本行继续按原口径校验与重放，不能静默改变旧命令含义。
+pub const ADMIN_RUNTIME_DIGEST_VERSION: u16 = 2;
+
+/// 升级前账本行的摘要版本（1）：摘要按落成的候选计算（升级前的候选就是原始请求），可由账本里
+/// 的候选重算核对。只用于校验与重放这些旧行，新命令不再写入。
+pub const ADMIN_RUNTIME_LEGACY_DIGEST_VERSION: u16 = 1;
 
 /// Admin runtime 监听器模式。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -400,9 +406,27 @@ impl AdminRuntimeDocument {
         format!("sha256:{}", crate::ports::core::lower_hex(&digest))
     }
 
-    /// 计算版本化的 durable 命令请求摘要。
+    /// 计算当前版本的 durable 命令请求摘要，作为命令身份；只对解码得到的原始请求调用，不对
+    /// 补回兼容字段后落成的候选调用。
     pub fn request_hash(
         &self,
+        expected_fingerprint: &str,
+    ) -> Result<RequestHash, AdminRuntimeConfigError> {
+        self.versioned_request_hash(ADMIN_RUNTIME_DIGEST_VERSION, expected_fingerprint)
+    }
+
+    /// 升级前（版本 1）的命令请求摘要；只用于核对与重放旧账本行，新命令不使用。
+    pub fn legacy_request_hash(
+        &self,
+        expected_fingerprint: &str,
+    ) -> Result<RequestHash, AdminRuntimeConfigError> {
+        self.versioned_request_hash(ADMIN_RUNTIME_LEGACY_DIGEST_VERSION, expected_fingerprint)
+    }
+
+    /// 两个版本的编码相同，只有前缀的版本号不同；版本号进入摘要，不同版本的摘要不会相等。
+    fn versioned_request_hash(
+        &self,
+        version: u16,
         expected_fingerprint: &str,
     ) -> Result<RequestHash, AdminRuntimeConfigError> {
         let encoded = serde_json::to_vec(self).map_err(|error| {
@@ -416,7 +440,7 @@ impl AdminRuntimeDocument {
             AdminRuntimeConfigError::InvalidCommand("runtime 文档编码失败".to_owned())
         })?;
         let mut hasher = Sha256::new();
-        hasher.update(ADMIN_RUNTIME_DIGEST_VERSION.to_be_bytes());
+        hasher.update(version.to_be_bytes());
         hasher.update(expected_fingerprint.as_bytes());
         hasher.update([0]);
         hasher.update(encoded);

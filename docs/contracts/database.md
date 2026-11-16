@@ -52,7 +52,7 @@
 | `schema_migration_compatibility` | 迁移兼容声明，只追加、永久保留；缺行失败关闭 |
 | `worlds` | 业务世界（`main`、`isekai`）及启用状态 |
 | `rules_documents`、`rules_admin_commands` | 站点文档（`kind`：`rules` 规则、`about` 关于）与发布命令账本；表名是历史名称。文档身份为（`kind`，`locale`），每篇独立做版本 CAS；账本记录带 `document_kind`，同一 `command_id` 不能跨文档种类重放。迁移 `000107` 为还没有规则的语言预置五种语言的规则文档（版本 1，发布者 `system`） |
-| `runtime_config_admin_commands` | runtime 配置更新命令账本（文件写入的恢复依据） |
+| `runtime_config_admin_commands` | runtime 配置更新命令账本（文件写入的恢复依据）。`digest_version` 为 2 的行，`request_digest` 是原始请求的摘要：请求省略兼容字段与显式写出该字段（含显式写出默认值）是不同请求，落成的候选只经 `new_fingerprint` 绑定，同一 `command_id` 只有原样重试才返回原结果。升级前写入的 1 版行摘要按落成候选计算，不改写、不回填，同 ID 重试仍以该行候选补回请求省略的字段后比较。迁移 `000110` 把版本闭集放宽为 1、2 |
 | `runtime_switch_events` | 行为开关的只追加事实兼命令账本；最新事实解析、期限与重放见下文 |
 | `mail_template_events` | 出站通知模板的只追加修订事实兼命令账本；生效规则与重放见[出站通知模板](#出站通知模板) |
 

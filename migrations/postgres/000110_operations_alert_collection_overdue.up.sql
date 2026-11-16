@@ -1,6 +1,7 @@
 -- 长期未领取告警：已寄出、只等收件人在游戏内领取的 Send 履约，寄出时长超过运行配置阈值时
--- 产生运维告警。
--- owner: auction-application（告警种类、阈值与评估）、auction-storage（只读水位查询）
+-- 产生运维告警；阈值经 Admin 运行配置保存，命令账本随之按原始请求记录命令身份。
+-- owner: auction-application（告警种类、阈值与评估，运行配置命令摘要）、auction-storage（只读
+-- 水位查询，运行配置命令账本）
 --
 -- 不变量：
 --   1. 只扩展 operations_alert_signals 的 kind 与 identity 闭集；不新增表、来源或 scope，
@@ -14,9 +15,13 @@
 --   5. 新增部分索引 settlement_obligation_fulfillments_open_idx（谓词
 --      execution_state <> 'satisfied'）：告警扫描与 Admin 看板的履约水位只读尚未满足的履约，
 --      已满足的历史不再参与扫描。只提供候选入口，不改变计数口径、金额、状态迁移、锁序或审计。
+--   6. runtime_config_admin_commands 的 digest_version 闭集放宽为 1、2。版本 2 的 request_digest
+--      是原始请求的摘要：运行配置新阈值省略与显式写出（含显式写出默认值）是不同请求，落成候选
+--      只经 new_fingerprint 绑定，同一 command_id 只有原样重试才返回原结果（命令幂等）。升级前
+--      写入的版本 1 行不改写、不回填，摘要仍按落成候选计算，同 ID 重试按原口径判定。
 --
--- 等级：breaking。旧程序无法解析新增 kind，读取该行时闭集解析失败；回退须按
--- RECOVERY.md 处理含 breaking 迁移的版本。
+-- 等级：breaking。旧程序无法解析新增 kind，读取该行时闭集解析失败；版本 2 的运行配置命令行
+-- 在旧程序里同样校验失败。回退须按 RECOVERY.md 处理含 breaking 迁移的版本。
 LOCK TABLE public.operations_alert_signals IN SHARE ROW EXCLUSIVE MODE;
 
 ALTER TABLE public.operations_alert_signals
@@ -98,13 +103,19 @@ CREATE INDEX settlement_obligation_fulfillments_open_idx
     ON public.settlement_obligation_fulfillments (obligation_id)
     WHERE execution_state <> 'satisfied';
 
+-- 运行配置命令账本：新命令以版本 2 记录原始请求摘要；既有版本 1 行原样保留并继续通过约束。
+ALTER TABLE public.runtime_config_admin_commands
+    DROP CONSTRAINT runtime_config_admin_commands_digest_version_check,
+    ADD CONSTRAINT runtime_config_admin_commands_digest_version_check
+        CHECK (digest_version IN (1, 2));
+
 INSERT INTO public.audit_records
     (id, actor_type, actor_id, action, entity_type, entity_id, result, source, metadata)
 VALUES (
     gen_random_uuid(), 'system', 'migration-000110', 'system.migration', 'migration',
     '000110', 'success', 'system',
     jsonb_build_object(
-        'summary', 'operations alert fulfillment collection overdue kind',
+        'summary', 'operations alert fulfillment collection overdue kind; runtime command digest v2',
         'compatibility', 'breaking')
 );
 

@@ -77,10 +77,10 @@ where
 
         if let Some(stored) = self.commands.find(command.command_id).await? {
             stored.validate().map_err(ApplicationError::from)?;
-            // 同 ID 重试按落成规则比较：请求省略的兼容字段以已存候选补回后，摘要必须等于落成时
-            // 的摘要。升级前写入的命令没有这些字段，补回后摘要不变。
-            let replayed = command.document.clone().resolve_update(&stored.candidate_document);
-            if !stored.matches_request(replayed.request_hash(&command.expected_fingerprint)?) {
+            // 同 ID 重试只认原始请求（不变量 1）：不用已存候选补回请求省略的字段，省略与显式写出
+            // （含默认值）判为不同请求；升级前的旧行沿用原有口径。相同则按账本状态收口，
+            // 已应用的直接返回原结果，不再写文件。
+            if !stored.replays(&command)? {
                 return Err(AdminRuntimeConfigError::CommandConflict.into());
             }
             return self.finish_existing(&guard, stored).await;
@@ -94,10 +94,11 @@ where
             return Err(AdminRuntimeConfigError::StaleFingerprint.into());
         }
         // 请求省略的兼容字段（升级前的页面不认识）在指纹 fence 内按当前文件补回，保存不重置
-        // 它们；命令摘要与新指纹都按落成的候选计算，账本行据此可校验、可重放。
+        // 它们。命令身份是原始请求的摘要，落成候选的指纹另算、另存为 new_fingerprint；补回后的
+        // 候选不充当请求身份，否则同 ID 的省略请求会被已存候选补成显式请求而误判为重放。
+        let request_hash = command.request_hash;
         let candidate = command.document.resolve_update(&current.document);
         candidate.validate().map_err(ApplicationError::from)?;
-        let request_hash = candidate.request_hash(&command.expected_fingerprint)?;
 
         let now = self.clock.now();
         let stored = self
@@ -354,6 +355,7 @@ where
 mod tests {
     use std::sync::Arc;
     use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use auction_domain::CommandId;
     use chrono::{DateTime, TimeZone, Utc};
@@ -362,10 +364,10 @@ mod tests {
     use super::AdminRuntimeConfigService;
     use crate::errors::ApplicationError;
     use crate::ports::admin::{
-        AdminRuntimeAuditRecord, AdminRuntimeCommandState, AdminRuntimeCommandStore,
-        AdminRuntimeConfigError, AdminRuntimeDocument, AdminRuntimeFileStore,
-        AdminRuntimeReplacement, AdminRuntimeSnapshot, AdminRuntimeStoredCommand,
-        AdminRuntimeUpdateCommand,
+        ADMIN_RUNTIME_LEGACY_DIGEST_VERSION, AdminRuntimeAuditRecord, AdminRuntimeCommandState,
+        AdminRuntimeCommandStore, AdminRuntimeConfigError, AdminRuntimeDocument,
+        AdminRuntimeFileStore, AdminRuntimeReplacement, AdminRuntimeSnapshot,
+        AdminRuntimeStoredCommand, AdminRuntimeUpdateCommand,
     };
     use crate::ports::core::{ApplicationFuture, Clock, RequestHash};
 
@@ -377,17 +379,24 @@ mod tests {
         }
     }
 
-    /// 内存中的 runtime 文件；替换按指纹 fence 校验。
-    struct MemoryFiles(Mutex<AdminRuntimeDocument>);
+    /// 内存中的 runtime 文件；替换按指纹 fence 校验，并计数替换次数，供断言重放不回写文件。
+    struct MemoryFiles {
+        document: Mutex<AdminRuntimeDocument>,
+        writes: AtomicUsize,
+    }
 
     impl MemoryFiles {
         fn snapshot(&self) -> AdminRuntimeSnapshot {
-            let document = self.0.lock().expect("文件锁").clone();
+            let document = self.document.lock().expect("文件锁").clone();
             AdminRuntimeSnapshot {
                 fingerprint: document.fingerprint(),
                 document,
                 restart_required: false,
             }
+        }
+
+        fn writes(&self) -> usize {
+            self.writes.load(Ordering::SeqCst)
         }
     }
 
@@ -424,11 +433,12 @@ mod tests {
             document: AdminRuntimeDocument,
         ) -> ApplicationFuture<'a, AdminRuntimeReplacement> {
             Box::pin(async move {
-                let mut current = self.0.lock().expect("文件锁");
+                let mut current = self.document.lock().expect("文件锁");
                 let old_fingerprint = current.fingerprint();
                 assert_eq!(old_fingerprint, expected_fingerprint, "替换必须按指纹 fence");
                 let new_fingerprint = document.fingerprint();
                 *current = document;
+                self.writes.fetch_add(1, Ordering::SeqCst);
                 Ok(AdminRuntimeReplacement { old_fingerprint, new_fingerprint })
             })
         }
@@ -449,6 +459,11 @@ mod tests {
                 rows.iter_mut().find(|row| row.command_id == command_id).expect("账本行必须存在");
             change(row);
             row.clone()
+        }
+
+        /// 直接放入一行，模拟升级前的程序已写下的账本。
+        fn seed(&self, row: AdminRuntimeStoredCommand) {
+            self.0.lock().expect("账本锁").push(row);
         }
     }
 
@@ -549,6 +564,15 @@ mod tests {
             .and_then(|operations| operations.alerts.fulfillment_collection_overdue_age_seconds)
     }
 
+    /// 另有一处编辑（扫描间隔 120 秒）的请求，阈值按参数省略或显式写出。
+    fn edited_request(seconds: Option<u64>) -> AdminRuntimeDocument {
+        let mut request = document_with_threshold(seconds);
+        if let Some(operations) = &mut request.operations {
+            operations.alerts.scan_interval_seconds = 120;
+        }
+        request
+    }
+
     fn command(
         command_id: CommandId,
         expected_fingerprint: &str,
@@ -565,18 +589,54 @@ mod tests {
         }
     }
 
+    /// 升级前的程序写下的已应用账本行（摘要版本 1）：摘要按候选计算。
+    fn legacy_row(
+        command_id: CommandId,
+        expected_fingerprint: &str,
+        candidate: AdminRuntimeDocument,
+    ) -> AdminRuntimeStoredCommand {
+        let at = Utc.with_ymd_and_hms(2026, 11, 1, 0, 0, 0).single().expect("固定时刻");
+        AdminRuntimeStoredCommand {
+            command_id,
+            audit_id: Uuid::new_v4(),
+            digest_version: ADMIN_RUNTIME_LEGACY_DIGEST_VERSION,
+            request_hash: candidate.legacy_request_hash(expected_fingerprint).expect("旧版摘要"),
+            expected_fingerprint: expected_fingerprint.to_owned(),
+            old_fingerprint: expected_fingerprint.to_owned(),
+            new_fingerprint: candidate.fingerprint(),
+            result_document: Some(candidate.clone()),
+            candidate_document: candidate,
+            restart_required: true,
+            actor_id: "admin".to_owned(),
+            request_id: None,
+            occurred_at: at,
+            state: AdminRuntimeCommandState::Applied,
+            unknown_category: None,
+            created_at: at,
+            updated_at: at,
+            applied_at: Some(at),
+        }
+    }
+
+    type MemoryService = AdminRuntimeConfigService<MemoryCommands, MemoryFiles, FixedClock>;
+
     fn service(
         current: AdminRuntimeDocument,
-    ) -> (AdminRuntimeConfigService<MemoryCommands, MemoryFiles, FixedClock>, Arc<MemoryFiles>)
-    {
-        let files = Arc::new(MemoryFiles(Mutex::new(current)));
+    ) -> (MemoryService, Arc<MemoryFiles>, Arc<MemoryCommands>) {
+        let files =
+            Arc::new(MemoryFiles { document: Mutex::new(current), writes: AtomicUsize::new(0) });
+        let commands = Arc::new(MemoryCommands::default());
         let clock = Utc.with_ymd_and_hms(2026, 11, 16, 0, 0, 0).single().expect("固定时刻");
         let service = AdminRuntimeConfigService::new(
-            Arc::new(MemoryCommands::default()),
+            Arc::clone(&commands),
             Arc::clone(&files),
             Arc::new(FixedClock(clock)),
         );
-        (service, files)
+        (service, files, commands)
+    }
+
+    fn is_conflict(error: &ApplicationError) -> bool {
+        matches!(error, ApplicationError::AdminRuntime(AdminRuntimeConfigError::CommandConflict))
     }
 
     /// 只轮询立即就绪的内存端口，不引入额外异步运行时依赖。
@@ -593,15 +653,12 @@ mod tests {
     }
 
     /// 升级前的页面不认识长期未领取阈值：它保存的旧形状文档省略该键，保存不失败，也不把文件里
-    /// 的 86400 重置为默认值；同一命令重试按原结果重放，不判为冲突。
+    /// 的 86400 重置为默认值；同一命令重试按原结果重放，不判为冲突，也不再写文件。
     #[test]
     fn old_shape_update_keeps_the_current_collection_threshold() {
-        let (service, files) = service(document_with_threshold(Some(86_400)));
+        let (service, files, _) = service(document_with_threshold(Some(86_400)));
         let expected = files.snapshot().fingerprint;
-        let mut request = document_with_threshold(None);
-        if let Some(operations) = &mut request.operations {
-            operations.alerts.scan_interval_seconds = 120;
-        }
+        let request = edited_request(None);
         let command_id = CommandId::from_uuid(Uuid::from_u128(1));
         let saved = block_on(service.update(command(command_id, &expected, request.clone())))
             .expect("旧形状保存必须成功");
@@ -617,18 +674,19 @@ mod tests {
         );
         assert_eq!(files.snapshot().document, saved.document, "文件即落成的候选");
         assert_eq!(files.snapshot().fingerprint, saved.fingerprint);
+        assert_eq!(files.writes(), 1);
 
         let replayed = block_on(service.update(command(command_id, &expected, request)))
             .expect("同一命令重试按原结果重放");
-        assert_eq!(replayed.fingerprint, saved.fingerprint);
-        assert_eq!(threshold(&replayed.document), Some(86_400));
+        assert_eq!(replayed, saved);
+        assert_eq!(files.writes(), 1, "重放不回写文件");
     }
 
     /// 新页面显式写出默认值按省略保存（回退的旧程序仍能加载）；显式非默认值原样保存；同一命令
     /// ID 换成不同请求判为冲突。
     #[test]
     fn explicit_thresholds_are_saved_and_default_is_omitted() {
-        let (service, files) = service(document_with_threshold(Some(86_400)));
+        let (service, files, _) = service(document_with_threshold(Some(86_400)));
         let expected = files.snapshot().fingerprint;
         let command_id = CommandId::from_uuid(Uuid::from_u128(2));
         let saved = block_on(service.update(command(
@@ -646,10 +704,7 @@ mod tests {
             document_with_threshold(Some(3_600)),
         )))
         .expect_err("同 ID 不同请求必须冲突");
-        assert!(matches!(
-            conflict,
-            ApplicationError::AdminRuntime(AdminRuntimeConfigError::CommandConflict)
-        ));
+        assert!(is_conflict(&conflict));
 
         let current = files.snapshot().fingerprint;
         let saved = block_on(service.update(command(
@@ -659,5 +714,116 @@ mod tests {
         )))
         .expect("显式非默认值保存");
         assert_eq!(threshold(&saved.document), Some(3_600));
+    }
+
+    /// 不变量 1：同一命令 ID 下，省略阈值与显式写出阈值是不同请求，显式写出默认值或与当前文件
+    /// 相同的值也一样，先后顺序无关；不能用已存候选把省略补成显式值后当作重放。冲突不写文件。
+    #[test]
+    fn omitted_and_explicit_thresholds_are_different_requests() {
+        for (id, first, second) in [
+            (10, Some(3_600), None),
+            (11, Some(259_200), None),
+            (12, None, Some(259_200)),
+            (13, None, Some(86_400)),
+        ] {
+            let (service, files, _) = service(document_with_threshold(Some(86_400)));
+            let expected = files.snapshot().fingerprint;
+            let command_id = CommandId::from_uuid(Uuid::from_u128(id));
+            let saved = block_on(service.update(command(
+                command_id,
+                &expected,
+                document_with_threshold(first),
+            )))
+            .expect("首个请求保存");
+            // 省略阈值时候选与当前文件相同，首次保存不必替换文件；只断言冲突前后没有新写入。
+            let writes = files.writes();
+            let conflict = block_on(service.update(command(
+                command_id,
+                &expected,
+                document_with_threshold(second),
+            )))
+            .expect_err("同 ID 不同请求必须冲突");
+            assert!(is_conflict(&conflict), "{first:?} → {second:?}：{conflict:?}");
+            assert_eq!(files.writes(), writes, "{first:?} → {second:?}：冲突不写文件");
+            assert_eq!(files.snapshot().document, saved.document, "文件保持首个请求的结果");
+        }
+    }
+
+    /// 完全相同的请求（省略或显式）同 ID 重放返回原结果且不回写；其他命令改过文件后，旧命令同 ID
+    /// 重放仍返回它当时的结果，不回写文件，也不覆盖后来的修改。
+    #[test]
+    fn identical_replays_return_the_original_result_without_rewriting() {
+        let (service, files, _) = service(document_with_threshold(Some(86_400)));
+        let initial = files.snapshot().fingerprint;
+        let omitted = CommandId::from_uuid(Uuid::from_u128(20));
+        let first = block_on(service.update(command(omitted, &initial, edited_request(None))))
+            .expect("省略阈值保存");
+        assert_eq!(threshold(&first.document), Some(86_400));
+
+        let explicit = CommandId::from_uuid(Uuid::from_u128(21));
+        let second = block_on(service.update(command(
+            explicit,
+            &first.fingerprint,
+            document_with_threshold(Some(3_600)),
+        )))
+        .expect("显式阈值保存");
+        assert_eq!(threshold(&files.snapshot().document), Some(3_600));
+        assert_eq!(files.writes(), 2);
+
+        for (command_id, expected, request, original) in [
+            (omitted, &initial, edited_request(None), &first),
+            (explicit, &first.fingerprint, document_with_threshold(Some(3_600)), &second),
+        ] {
+            let replayed = block_on(service.update(command(command_id, expected, request)))
+                .expect("原样重试返回原结果");
+            assert_eq!(&replayed, original);
+        }
+        assert_eq!(files.writes(), 2, "重放不回写文件");
+        assert_eq!(files.snapshot().document, second.document, "后来的修改保持不变");
+    }
+
+    /// 升级前写下的账本行（摘要版本 1）按写入时的口径重放：原样重试返回原结果、不回写文件，
+    /// 显式写出不同阈值仍冲突。覆盖两种旧行：升级前程序写的（候选即请求，不含阈值）与按补回后
+    /// 候选计算摘要的（请求省略阈值，候选含当时文件的 86400）。
+    #[test]
+    fn legacy_ledger_rows_replay_by_their_original_rule() {
+        let (service, files, commands) = service(document_with_threshold(Some(3_600)));
+        let request = edited_request(None);
+
+        let pre_upgrade_file = document_with_threshold(None).fingerprint();
+        let pre_upgrade = CommandId::from_uuid(Uuid::from_u128(30));
+        commands.seed(legacy_row(pre_upgrade, &pre_upgrade_file, request.clone()));
+        let replayed =
+            block_on(service.update(command(pre_upgrade, &pre_upgrade_file, request.clone())))
+                .expect("旧命令原样重试返回原结果");
+        assert_eq!(replayed.document, request);
+        assert_eq!(replayed.fingerprint, request.fingerprint());
+        // 旧口径不变：显式写出的默认值按省略落成，与旧候选相同，仍判为同一请求。
+        block_on(service.update(command(
+            pre_upgrade,
+            &pre_upgrade_file,
+            edited_request(Some(259_200)),
+        )))
+        .expect("旧口径下显式默认值与省略落成相同");
+        let conflict = block_on(service.update(command(
+            pre_upgrade,
+            &pre_upgrade_file,
+            edited_request(Some(3_600)),
+        )))
+        .expect_err("显式非默认值不同于旧请求");
+        assert!(is_conflict(&conflict));
+
+        let resolved_from = document_with_threshold(Some(86_400));
+        let candidate = request.clone().resolve_update(&resolved_from);
+        let resolved = CommandId::from_uuid(Uuid::from_u128(31));
+        commands.seed(legacy_row(resolved, &resolved_from.fingerprint(), candidate.clone()));
+        let replayed =
+            block_on(service.update(command(resolved, &resolved_from.fingerprint(), request)))
+                .expect("省略阈值的原样重试按旧口径补回后相同");
+        assert_eq!(replayed.document, candidate);
+        assert_eq!(threshold(&replayed.document), Some(86_400));
+
+        assert_eq!(files.writes(), 0, "旧命令重放不回写文件");
+        assert_eq!(threshold(&files.snapshot().document), Some(3_600), "当前文件保持不变");
     }
 }

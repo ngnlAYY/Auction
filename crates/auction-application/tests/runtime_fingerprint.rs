@@ -1,7 +1,8 @@
 //! 追加字段必须保持父提交的 runtime canonical 摘要。
 //!
 //! 夹具由父提交 `7c5fe86d` 对 `{"operations":{"mail":{"managed":true}}}` 生成；
-//! 这里固定 canonical bytes、fingerprint 与 request_hash，防止仅由新代码自证。
+//! 这里固定 canonical bytes、fingerprint 与旧账本行使用的版本 1 请求摘要，防止仅由新代码自证。
+//! 版本 2 请求摘要按同一编码规则在仓库外独立计算后固定，编码漂移会让跨升级的同 ID 重试误判冲突。
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
@@ -12,6 +13,8 @@ const OLD_CANONICAL: &str = include_str!("fixtures/runtime_v1_mail.json");
 const OLD_FINGERPRINT: &str =
     "sha256:8edc3e29dbd91d612816b629dbcfa8c40fe429db446642c3fc1890b5b5c34ee7";
 const OLD_REQUEST_HASH: &str = "41f27ceb0ddd83475e1a06e24437fa6b5a1a407be9668c325af6e6f472c10f00";
+const REQUEST_IDENTITY_HASH: &str =
+    "763d488a8c647886ae1a1be3e563c4229e40e3ca4e8991bba3bf458ce653a7fb";
 
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
@@ -23,8 +26,12 @@ fn old_mail_document_keeps_parent_canonical_bytes_fingerprint_and_hash() {
     assert_eq!(serde_json::to_string(&document).expect("canonical JSON"), OLD_CANONICAL);
     assert_eq!(document.fingerprint(), OLD_FINGERPRINT);
     assert_eq!(
-        hex(&document.request_hash(OLD_FINGERPRINT).expect("request hash").as_bytes()),
+        hex(&document.legacy_request_hash(OLD_FINGERPRINT).expect("request hash").as_bytes()),
         OLD_REQUEST_HASH
+    );
+    assert_eq!(
+        hex(&document.request_hash(OLD_FINGERPRINT).expect("request hash").as_bytes()),
+        REQUEST_IDENTITY_HASH
     );
 }
 

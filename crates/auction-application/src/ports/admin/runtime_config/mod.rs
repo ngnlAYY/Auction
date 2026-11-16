@@ -19,11 +19,11 @@ pub use commands::{
     AdminRuntimeStoredCommand, AdminRuntimeUpdateCommand,
 };
 pub use document::{
-    ADMIN_RUNTIME_DIGEST_VERSION, AdminRuntimeDashboardMailbox, AdminRuntimeDocument,
-    AdminRuntimeEquipmentSourceConfig, AdminRuntimeListenMode, AdminRuntimeListenerConfig,
-    AdminRuntimeMetricsConfig, AdminRuntimeSecurityConfig, AdminRuntimeSessionConfig,
-    AdminRuntimeSnapshot, AdminRuntimeTracingConfig, AdminRuntimeWorkerControlConfig,
-    MAX_ADMIN_RUNTIME_DOCUMENT_BYTES,
+    ADMIN_RUNTIME_DIGEST_VERSION, ADMIN_RUNTIME_LEGACY_DIGEST_VERSION,
+    AdminRuntimeDashboardMailbox, AdminRuntimeDocument, AdminRuntimeEquipmentSourceConfig,
+    AdminRuntimeListenMode, AdminRuntimeListenerConfig, AdminRuntimeMetricsConfig,
+    AdminRuntimeSecurityConfig, AdminRuntimeSessionConfig, AdminRuntimeSnapshot,
+    AdminRuntimeTracingConfig, AdminRuntimeWorkerControlConfig, MAX_ADMIN_RUNTIME_DOCUMENT_BYTES,
 };
 pub use errors::{AdminRuntimeCommandError, AdminRuntimeConfigError, AdminRuntimeFileError};
 pub use hot::{
