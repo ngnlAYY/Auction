@@ -242,6 +242,13 @@ pub(crate) async fn run_worker(
     let database_health: Arc<dyn HeartbeatHealthReader> = store.clone();
     let heartbeat_health = worker_heartbeat_health(database_health, control.clone());
     let worker_heartbeat_url = config.worker_heartbeat_url().map(str::to_owned);
+    // 结算退件只读重新核验可读的世界（与核验读取器同一 gateway 集合）；未启用 MoogleMail 时为
+    // 空，Admin 详情据此说明待重新核验的案件为何不前进。
+    let mut settlement_return_recheck_worlds =
+        mail_control_reads.as_ref().map_or_else(Vec::new, |reads| {
+            reads.gateways.keys().map(|world| world.as_str()).collect::<Vec<_>>()
+        });
+    settlement_return_recheck_worlds.sort_unstable();
     let heartbeat = Arc::new(
         HeartbeatPublisher::new(
             heartbeat_store,
@@ -256,7 +263,10 @@ pub(crate) async fn run_worker(
             Arc::clone(&heartbeat_health),
             tracing_health,
         )
-        .with_details(serde_json::json!({ "forum_sync_enabled": config.worker.forum.enabled }))
+        .with_details(serde_json::json!({
+            "forum_sync_enabled": config.worker.forum.enabled,
+            "settlement_return_recheck_worlds": settlement_return_recheck_worlds,
+        }))
         .context("配置 Worker 心跳详情失败")?,
     );
     if let Err(error) = heartbeat.publish_starting().await {

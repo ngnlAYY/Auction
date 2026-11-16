@@ -88,6 +88,12 @@ fn ReturnDetailPage(return_id: String) -> Element {
                     }
                 },
                 Some(Ok(detail)) => rsx! {
+                    // 待重新核验但没有能读取该世界 MoogleMail 的在线 Worker：说明案件为何不前进。
+                    if detail.recheck_unavailable {
+                        p { class: "action-feedback action-feedback--error", role: "note",
+                            {t!("settlement-return-recheck-unavailable")}
+                        }
+                    }
                     SummarySection { summary: detail.summary.clone() }
                     ActionSection { detail: detail.clone(), notice, refresh }
                     TakeSection {

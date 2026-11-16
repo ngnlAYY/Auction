@@ -1888,6 +1888,7 @@ settlement-return-field-closed = 完了日時
 settlement-return-resends-value = 使用 { $used } / 上限 { $limit }（初回送付を除く）
 settlement-return-take-title = 回収（Take）
 settlement-return-take-unknown-warning = Take の結果が不明です。ゲーム内で手動受取をせず、配送画面で再試行や結果の申告もしないでください。メール保守が元の Take セッションで元メールを再確認します。添付がすべて受け取られていれば受取証明として確定し、メールがそのまま残っていれば Take を再度キューに入れ、それ以外（メールが消えた場合を含む）は不明のままアラートが続きます。
+settlement-return-recheck-unavailable = 再検証できません。この世界の MoogleMail を読めるオンラインの Worker がありません（メール無効、世界未設定、または Worker 停止中）。案件は再検証待ちのまま、機能が戻ると自動で続行します。
 settlement-return-take-state = 実行状態
 settlement-return-take-delivery = Take の配送
 settlement-return-take-delivery-status = 配送状態

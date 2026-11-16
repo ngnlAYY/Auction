@@ -1889,6 +1889,7 @@ settlement-return-field-closed = 结案时间
 settlement-return-resends-value = 已用 { $used } / 上限 { $limit }（不含首寄）
 settlement-return-take-title = 领回（Take）
 settlement-return-take-unknown-warning = Take 结果未知：不要在游戏内手工领取，也不要在投递台重试或声明结果。邮箱维护会在原 Take 会话里复核原邮件：附件已全部取走即按领回证明收口，邮件原样仍在即重新排队执行 Take，其他情况（包括邮件已消失）保持未知并持续告警。
+settlement-return-recheck-unavailable = 核验能力不可用：没有在线 Worker 能读取该世界的 MoogleMail（未启用邮件、该世界未配置或 Worker 不在线）。案件保持待重新核验，能力恢复后自动继续。
 settlement-return-take-state = 执行状态
 settlement-return-take-delivery = Take 投递
 settlement-return-take-delivery-status = 投递状态

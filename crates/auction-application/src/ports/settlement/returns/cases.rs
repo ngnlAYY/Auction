@@ -212,6 +212,9 @@ pub struct SettlementReturnDetail {
     pub allowed_actions: Vec<SettlementReturnAction>,
     /// 不允许的动作及其类型化原因，按动作闭集顺序。
     pub blockers: Vec<(SettlementReturnAction, SettlementReturnBlocker)>,
+    /// 案件等待只读重新核验，但没有在线 Worker 声明能读取该世界的 MoogleMail（未启用邮件、该世界
+    /// 未配置或 Worker 不在线）：核验能力不可用，案件保持待核验，能力恢复后由 Worker 自动继续。
+    pub recheck_unavailable: bool,
 }
 
 /// Admin 处理命令。

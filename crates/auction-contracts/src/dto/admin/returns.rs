@@ -269,6 +269,9 @@ pub struct AdminSettlementReturnDetailResponse {
     pub custody: Option<AdminSettlementReturnCustodyResponse>,
     pub allowed_actions: Vec<String>,
     pub blockers: Vec<AdminSettlementReturnBlockerResponse>,
+    /// 案件待重新核验（`recheck_pending`），但没有在线 Worker 能只读读取该世界的 MoogleMail：
+    /// 核验能力不可用，案件保持待核验，能力恢复后自动继续。其他状态恒为 `false`。
+    pub recheck_unavailable: bool,
 }
 
 /// `POST …/{return_id}/handle` 请求；动作只取 [`ADMIN_SETTLEMENT_RETURN_HANDLE_ACTIONS`]。

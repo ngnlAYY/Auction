@@ -271,6 +271,7 @@ pub(crate) fn valid_detail(detail: &SettlementReturnDetail, requested: &str) -> 
         && detail.take.as_ref().is_none_or(valid_take)
         && detail.resend_dispatch_no.is_none_or(|value| value >= 2)
         && detail.custody.as_ref().is_none_or(valid_custody)
+        && (!detail.recheck_unavailable || detail.summary.status == "recheck_pending")
 }
 
 /// 命令结果必须对应本次命令身份、案件与动作，版本只会前进。
@@ -403,7 +404,8 @@ mod tests {
                 {"action": "resend_from_custody", "blocker": "state_conflict"},
                 {"action": "acknowledge", "blocker": "state_conflict"},
                 {"action": "recheck", "blocker": "state_conflict"}
-            ]
+            ],
+            "recheck_unavailable": false
         })
     }
 
@@ -530,6 +532,15 @@ mod tests {
                 json!({"beneficiary": "Seller", "credits": 12000, "equipment_ids": ["12a"]});
         });
         assert!(!valid_detail(&custody, CASE), "装备 EID 只能是十进制数字");
+        let unavailable = detail_with(|value| {
+            value["recheck_unavailable"] = json!(true);
+        });
+        assert!(!valid_detail(&unavailable, CASE), "核验能力不可用只随待重新核验的案件");
+        let waiting = detail_with(|value| {
+            value["summary"]["status"] = json!("recheck_pending");
+            value["recheck_unavailable"] = json!(true);
+        });
+        assert!(valid_detail(&waiting, CASE), "待重新核验的案件可以说明核验能力不可用");
     }
 
     /// 命令结果必须对应本次命令身份、案件与动作，版本只会前进。

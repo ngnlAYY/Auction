@@ -172,6 +172,8 @@ async fn detail_once(
     } else {
         None
     };
+    let recheck_unavailable = case.status == SettlementReturnCaseStatus::RecheckPending
+        && !recheck_available(&mut tx, &case.world_id).await?;
     tx.commit().await?;
     Ok(SettlementReturnDetail {
         summary,
@@ -182,7 +184,31 @@ async fn detail_once(
         custody,
         allowed_actions,
         blockers,
+        recheck_unavailable,
     })
+}
+
+/// 是否有在线 Worker 声明能只读核验该世界的退件：Worker 心跳详情的
+/// `settlement_return_recheck_worlds` 列出与核验读取器同一 gateway 集合的世界；过期、正在停止或
+/// 未声明该键的实例不算可用（失败关闭：显示“核验能力不可用”，不改变案件）。
+async fn recheck_available(
+    tx: &mut Transaction<'_, Postgres>,
+    world_id: &str,
+) -> Result<bool, ReturnTransactionError> {
+    let available: bool = sqlx::query_scalar(
+        r#"SELECT EXISTS(
+               SELECT 1 FROM public.service_heartbeats
+               WHERE service_name = 'auction-worker' AND process_role = 'worker'
+                 AND status IN ('starting', 'ready', 'degraded')
+                 AND expires_at > clock_timestamp()
+                 AND jsonb_typeof(details -> 'settlement_return_recheck_worlds') = 'array'
+                 AND details -> 'settlement_return_recheck_worlds' ? $1
+           )"#,
+    )
+    .bind(world_id)
+    .fetch_one(&mut **tx)
+    .await?;
+    Ok(available)
 }
 
 /// 仍需处理的案件数（导航待办）。

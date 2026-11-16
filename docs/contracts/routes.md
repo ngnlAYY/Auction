@@ -248,7 +248,7 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | GET | `/api/v1/admin/settlement-catalog` | 已结算场次目录（`world_id`、`sequence`、`page`、`page_size`） |
 | POST | `/api/v1/admin/recoveries/{recovery_id}/confirm` | 人工确认恢复动作（带期望版本与原因） |
 | GET | `/api/v1/admin/settlement-returns` | 结算退件案件分页列表（`page`、`page_size` ≤200 缺省 50、行偏移 ≤10000；精确筛选 `status`、`match_state`、`obligation_kind`、`world`、`open_only=true\|false`、`received_from`/`received_to`（RFC 3339，含端点）与 `reference`（案件、义务或原派发投递的规范 UUID））。以案件为主表，`untrusted`/`unbound` 隔离记录与未知义务照常列出，按收件时刻倒序；任一参数为空、不在闭集、越界、重复或未登记时整页 400 `invalid_query`。每行是安全摘要：案件 ID `return_id`（即退件入站邮件 ID）与 `case_version`、状态、证据分类 `match_state` 与原因码 `reason_code`、世界与远端 MID、可空的义务/种类/场次/lot/原派发投递与派发编号、原派发冻结收件人、Credits/COD/附件数、处理计划 `plan`、建案时冻结的补寄上限 `resend_limit` 与该义务已用补寄次数 `resends_used`、资产位置 `asset_location`、建立/更新/结案时刻；不含正文、发件人原文或装备 key |
-| GET | `/api/v1/admin/settlement-returns/{return_id}` | 案件详情：摘要、只追加的处理事件（版本、种类、时刻、操作者与命令 ID，以及只含分类、原因码、派发编号、投递 ID、失败码等的安全细节对象）、原义务的派发链（编号、投递、投递状态、寄出/完成时刻、授权补寄的案件）、本案持久 Take（执行状态、Take 投递与状态、失败码、领回证明时刻）、本案授权的补寄派发编号、代管责任（原权利人、Credits 与装备 EID，只在代管时出现）、`allowed_actions` 与 `blockers`（每个动作恰好出现在其中一处；阻断原因闭集为 `untrusted`、`unbound`、`assets_mismatch`、`state_conflict`、`resend_limit`、`obligation_ineligible`、`proof_required`）。只读快照不授予动作，命令事务仍锁内复核。路径 ID 不是规范小写 UUID 为 400 `invalid_settlement_return_id`，不存在为 404 `settlement_return_not_found` |
+| GET | `/api/v1/admin/settlement-returns/{return_id}` | 案件详情：摘要、只追加的处理事件（版本、种类、时刻、操作者与命令 ID，以及只含分类、原因码、派发编号、投递 ID、失败码等的安全细节对象）、原义务的派发链（编号、投递、投递状态、寄出/完成时刻、授权补寄的案件）、本案持久 Take（执行状态、Take 投递与状态、失败码、领回证明时刻）、本案授权的补寄派发编号、代管责任（原权利人、Credits 与装备 EID，只在代管时出现）、`allowed_actions` 与 `blockers`（每个动作恰好出现在其中一处；阻断原因闭集为 `untrusted`、`unbound`、`assets_mismatch`、`state_conflict`、`resend_limit`、`obligation_ineligible`、`proof_required`），以及 `recheck_unavailable`（案件待重新核验、但没有在线 Worker 声明能只读读取该世界的 MoogleMail 时为 `true`，表示核验能力不可用、案件保持待核验；其他状态恒为 `false`）。只读快照不授予动作，命令事务仍锁内复核。路径 ID 不是规范小写 UUID 为 400 `invalid_settlement_return_id`，不存在为 404 `settlement_return_not_found` |
 | POST | `/api/v1/admin/settlement-returns/{return_id}/recheck` | 未绑定（`unbound`）隔离案件提交只读重新核验：请求 `command_id`、`expected_version`；案件转 `recheck_pending`，由 Worker 只读读取 Bot 收件箱中的原退件，重新满足系统来源、资产与唯一原派发绑定时改绑为待决定，否则保持隔离；Admin 进程不直连游戏 |
 | POST | `/api/v1/admin/settlement-returns/{return_id}/handle` | 处理动作：请求 `command_id`、`expected_version` 与 `action`——`reclaim_and_resend`（领回并补寄）、`reclaim_and_hold`（领回后代管）、`resend_from_custody`（从代管补寄）、`close_inbox`（留箱结案）、`acknowledge`（隔离记录标记已核对）；`recheck` 只走上一条路由。资产、金额与收件人只取服务端冻结事实，补寄只寄原冻结收件人；领回只在本地提交持久 Take，外部 Take 由 Worker 执行。成功返回 `command_id`、`return_id`、`action`、提交后的 `case_version` 与 `status` |
 | GET | `/api/v1/admin/mail` | 邮箱轮询状态（`mailbox_key`、`include_diagnostics`） |
@@ -396,7 +396,7 @@ Public/Admin/Worker 可在业务 listener、control socket 之外启用独立出
 | `/outbox` | 实时事件 |
 | `/settlement` | 结算报表 |
 | `/settlement-returns` | 结算退件：按案件列出被拒收或过期退回的货款、退款与流拍/撤拍寄回（含隔离记录），筛选与页码同步到 `scope`/`status`/`match_state`/`obligation_kind`/`world`/`page` query；侧栏显示未结案退件待办数 |
-| `/settlement-returns/{return_id}` | 结算退件详情：资产位置、事件、派发链、领回（Take）、代管、允许动作与阻断原因，以及确认后提交的处理命令 |
+| `/settlement-returns/{return_id}` | 结算退件详情：资产位置、事件、派发链、领回（Take）、代管、允许动作与阻断原因（待重新核验而核验能力不可用时另有说明），以及确认后提交的处理命令 |
 | `/config` | 参数配置 |
 | `/rules-content`（别名 `/rules`） | 规则内容 |
 | `/about-content` | 关于内容 |

@@ -1888,6 +1888,7 @@ settlement-return-field-closed = 종결 시각
 settlement-return-resends-value = 사용 { $used } / 상한 { $limit }(첫 발송 제외)
 settlement-return-take-title = 회수(Take)
 settlement-return-take-unknown-warning = Take 결과를 알 수 없습니다. 게임에서 직접 수령하지 말고, 배송 화면에서 재시도하거나 결과를 신고하지도 마세요. 메일 유지보수가 원래 Take 세션에서 원래 메일을 다시 확인합니다. 첨부가 모두 수령되었으면 수령 증명으로 확정하고, 메일이 그대로 남아 있으면 Take를 다시 대기열에 넣으며, 그 밖의 경우(메일이 사라진 경우 포함)는 알 수 없음으로 남고 경보가 계속됩니다.
+settlement-return-recheck-unavailable = 재검증할 수 없습니다. 이 월드의 MoogleMail을 읽을 수 있는 온라인 Worker가 없습니다(메일 비활성, 월드 미설정 또는 Worker 중지). 건은 재검증 대기 상태로 유지되며 기능이 돌아오면 자동으로 계속됩니다.
 settlement-return-take-state = 실행 상태
 settlement-return-take-delivery = Take 배송
 settlement-return-take-delivery-status = 배송 상태

@@ -17,7 +17,7 @@ use auction_contracts::{
     AdminSettlementReturnListResponse, AdminSettlementReturnSummaryResponse,
     AdminSettlementReturnTakeResponse, AdminStrictPaginationResponse,
 };
-use auction_domain::SettlementReturnAction;
+use auction_domain::{SettlementReturnAction, SettlementReturnCaseStatus};
 use uuid::Uuid;
 
 use crate::mapping::timestamp;
@@ -97,6 +97,9 @@ pub(super) fn map_detail(
             detail.dispatches.iter().map(|dispatch| i64::from(dispatch.dispatch_no)),
         )
         || detail.events.iter().any(|event| !event.details.is_object())
+        // 核验能力不可用只说明待重新核验的案件为何不前进，其他状态出现即投影不一致。
+        || (detail.recheck_unavailable
+            && detail.summary.status != SettlementReturnCaseStatus::RecheckPending)
     {
         return None;
     }
@@ -130,6 +133,7 @@ pub(super) fn map_detail(
                 blocker: blocker.as_str().to_owned(),
             })
             .collect(),
+        recheck_unavailable: detail.recheck_unavailable,
     })
 }
 
@@ -286,6 +290,7 @@ mod tests {
                 (SettlementReturnAction::Acknowledge, SettlementReturnBlocker::StateConflict),
                 (SettlementReturnAction::Recheck, SettlementReturnBlocker::StateConflict),
             ],
+            recheck_unavailable: false,
         }
     }
 
@@ -414,5 +419,18 @@ mod tests {
         let mut details = detail();
         details.events[0].details = json!("text");
         assert!(map_detail(details, CASE).is_none(), "事件细节必须是对象");
+    }
+
+    /// 核验能力不可用只随待重新核验的案件输出；其他状态带这个标记是投影不一致，失败关闭。
+    #[test]
+    fn recheck_unavailable_only_maps_for_recheck_pending() {
+        assert!(!map_detail(detail(), CASE).expect("合法详情").recheck_unavailable);
+        let mut waiting = detail();
+        waiting.summary.status = SettlementReturnCaseStatus::RecheckPending;
+        waiting.recheck_unavailable = true;
+        assert!(map_detail(waiting, CASE).expect("待核验详情").recheck_unavailable);
+        let mut inconsistent = detail();
+        inconsistent.recheck_unavailable = true;
+        assert!(map_detail(inconsistent, CASE).is_none(), "待决定案件不能带核验能力不可用");
     }
 }
