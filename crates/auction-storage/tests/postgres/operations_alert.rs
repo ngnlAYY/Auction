@@ -112,7 +112,9 @@ async fn postgres_operations_alert_closed_sets_accept_new_kinds_and_reject_unkno
             Kind::FulfillmentBacklog
             | Kind::FulfillmentFailed
             | Kind::FulfillmentManualReconcile
-            | Kind::FulfillmentCollectionOverdue => ("auction", "fulfillment"),
+            | Kind::FulfillmentCollectionOverdue
+            | Kind::SettlementReturnPending
+            | Kind::SettlementReturnQuarantined => ("auction", "fulfillment"),
             Kind::RecoveryPaymentOverdue
             | Kind::RecoveryPaymentMailUnsent
             | Kind::RecoveryRelistPending

@@ -49,7 +49,7 @@ VALUES (76, 'breaking');
 
 ## 索引
 
-当前 head 为 `000115`，与 [ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json) 的 `database_schema_version` 一致；新增迁移必须同时推进这两处。下表按版本递增，只列主题，不是逐条字段说明。
+当前 head 为 `000116`，与 [ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json) 的 `database_schema_version` 一致；新增迁移必须同时推进这两处。下表按版本递增，只列主题，不是逐条字段说明。
 
 | 版本 | 主题 |
 | --- | --- |
@@ -168,3 +168,4 @@ VALUES (76, 'breaking');
 | 000113 | `delivery_dispositions` 的种类闭集新增 `recovery_equipment_recovered`（来源仍为 `settlement_recovery_id`，写入时固定解除告警）：isekai 已付款交付被退回、装备经精确 Take 证明收回后，Admin 确认 `equipment_recovered` 在同一事务内把从未开始的卖方货款（`recovery_sale_voided`）与已寄出的交付（`recovery_equipment_recovered`）收口为 `failed`，并在原交付投递当前 fence 上追加该处置；不改写既有行，不改变资金或资产；旧程序无法解析新种类，登记 breaking |
 | 000114 | 结算退件案件：新增可变投影 `settlement_return_cases`（每条退件证据一个案件，含 untrusted/unbound/fulfillment_terminal；冻结补寄上限 3、案件版本乐观并发；同一原派发只绑定一个案件）与持久 Take 投影 `settlement_return_actions`，只追加的 `settlement_return_commands`（command_id 幂等账本）、`settlement_return_events`（每个案件版本一条）与 `settlement_return_takes`（精确领回证明只消费一次，原派发、Take 投递与邮件各唯一）；`deliveries.origin_kind` 新增受限来源 `settlement_return_action`（只做 Take）；为已有证据补建案件与开案事件；运行账号对投影授读写、对事实只授 `INSERT`；旧程序不认识新来源与新互斥，登记 breaking |
 | 000115 | 结算退件补寄与资金返还：履约新增当前派发编号 `dispatch_no`（既有行为 1），只追加的派发历史 `settlement_fulfillment_dispatches`（`(义务, 派发编号)` 主键，补寄引用授权它的退件案件）与资金投递历史绑定 `settlement_funding_delivery_bindings`（分配指针换代后旧派发仍受资金保护）；`settlement_funding_returns` 增加入站/Take/来源唯一绑定（NOT VALID 只约束新行）并改为只追加、运行账号只授 `INSERT`；补登既有派发与绑定；旧程序按单指针定位资金，登记 breaking |
+| 000116 | `operations_alert_signals` 的 kind/identity 闭集新增 `settlement_return_pending`（已绑定待处理的退件案件）与 `settlement_return_quarantined`（隔离、待重新核验或 Take 结果未知的退件案件），沿用 `fulfillment` 来源与 `auction` scope；按未结案案件计数，不改变案件、义务、投递或资金；旧程序无法解析新 kind，登记 breaking |

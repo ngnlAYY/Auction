@@ -136,6 +136,12 @@ pub enum OperationsAlertKind {
     FulfillmentManualReconcile,
     /// 已寄出、只等收件人领取的履约有寄出时长达到配置阈值的（计数为超期件数）；只提醒人工跟进。
     FulfillmentCollectionOverdue,
+    /// 已绑定原派发、尚未处理完的结算退件案件（待决定、领回中、待补寄）；按未结案案件计数，
+    /// 不要求存在义务。告警确认或静音不改变案件，案件结案后由扫描关闭。
+    SettlementReturnPending,
+    /// 来源、绑定或领回证明存在问题的结算退件案件（untrusted/unbound 隔离、待重新核验、Take
+    /// 结果未知）；只能经核对、只读核验或系统可验证证明收口。
+    SettlementReturnQuarantined,
     RecoveryPaymentOverdue,
     /// 付款期限已过，但对应付款投递没有自动或人工发送证明；提醒已延后，需人工核对。
     RecoveryPaymentMailUnsent,
@@ -189,7 +195,7 @@ pub enum OperationsAlertKind {
 impl OperationsAlertKind {
     /// 持久化种类闭集；与迁移 005/020/085/091/095/099/101/104/110 的
     /// `operations_alert_signals.kind` CHECK 一致。
-    pub const ALL: [Self; 38] = [
+    pub const ALL: [Self; 40] = [
         Self::ServiceMissing,
         Self::ServiceDegraded,
         Self::AuditFailure,
@@ -201,6 +207,8 @@ impl OperationsAlertKind {
         Self::FulfillmentFailed,
         Self::FulfillmentManualReconcile,
         Self::FulfillmentCollectionOverdue,
+        Self::SettlementReturnPending,
+        Self::SettlementReturnQuarantined,
         Self::RecoveryPaymentOverdue,
         Self::RecoveryPaymentMailUnsent,
         Self::RecoveryRelistPending,
@@ -249,6 +257,8 @@ impl OperationsAlertKind {
             Self::FulfillmentFailed => "fulfillment_failed",
             Self::FulfillmentManualReconcile => "fulfillment_manual_reconcile",
             Self::FulfillmentCollectionOverdue => "fulfillment_collection_overdue",
+            Self::SettlementReturnPending => "settlement_return_pending",
+            Self::SettlementReturnQuarantined => "settlement_return_quarantined",
             Self::RecoveryPaymentOverdue => "recovery_payment_overdue",
             Self::RecoveryPaymentMailUnsent => "recovery_payment_mail_unsent",
             Self::RecoveryRelistPending => "recovery_relist_pending",
@@ -469,6 +479,14 @@ impl OperationsAlertSignal {
                  只提醒，不会重发或撤回，请在游戏内核对 Sent 并联系收件人",
                 self.count,
                 self.age_seconds / 86_400
+            ),
+            OperationsAlertKind::SettlementReturnPending => format!(
+                "结算退件待处理 {} 件，最长 {} 秒；请在 Admin 退件页决定领回补寄、领回代管或留箱",
+                self.count, self.age_seconds
+            ),
+            OperationsAlertKind::SettlementReturnQuarantined => format!(
+                "结算退件隔离或结果未知 {} 件，最长 {} 秒；只能核对、只读核验或凭系统证明收口",
+                self.count, self.age_seconds
             ),
             OperationsAlertKind::RecoveryPaymentOverdue => {
                 format!("结算付款逾期 {}，最长 {} 秒", self.count, self.age_seconds)

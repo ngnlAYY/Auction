@@ -169,6 +169,10 @@ mod tests {
                 oldest_awaiting_collection_age_seconds: 0,
                 oldest_awaiting_collection_backlog_age_seconds: 0,
                 collection_overdue: 0,
+                settlement_return_pending: 0,
+                oldest_settlement_return_pending_age_seconds: 0,
+                settlement_return_quarantined: 0,
+                oldest_settlement_return_quarantined_age_seconds: 0,
             },
             &policy,
         );
@@ -236,6 +240,10 @@ mod tests {
             oldest_awaiting_collection_age_seconds: 0,
             oldest_awaiting_collection_backlog_age_seconds: 0,
             collection_overdue: 0,
+            settlement_return_pending: 0,
+            oldest_settlement_return_pending_age_seconds: 0,
+            settlement_return_quarantined: 0,
+            oldest_settlement_return_quarantined_age_seconds: 0,
         };
         let recovery_world = |world: &str| OperationsAlertRecoveryWorld {
             world: world.to_owned(),
@@ -299,6 +307,10 @@ mod tests {
             oldest_awaiting_collection_age_seconds: 0,
             oldest_awaiting_collection_backlog_age_seconds: 0,
             collection_overdue: 0,
+            settlement_return_pending: 0,
+            oldest_settlement_return_pending_age_seconds: 0,
+            settlement_return_quarantined: 0,
+            oldest_settlement_return_quarantined_age_seconds: 0,
         };
         assert!(!assess_fulfillment(snapshot, &policy).backlog);
         let snapshot = OperationsAlertFulfillmentSnapshot {
@@ -327,6 +339,10 @@ mod tests {
             oldest_awaiting_collection_age_seconds: 8 * 86_400,
             oldest_awaiting_collection_backlog_age_seconds: 0,
             collection_overdue: 0,
+            settlement_return_pending: 0,
+            oldest_settlement_return_pending_age_seconds: 0,
+            settlement_return_quarantined: 0,
+            oldest_settlement_return_quarantined_age_seconds: 0,
         };
         assert!(!assess_fulfillment(awaiting, &policy).backlog, "等待领取不是待处理积压");
         let observations = evaluate_snapshot(
@@ -404,6 +420,10 @@ mod tests {
             oldest_awaiting_collection_age_seconds: age,
             oldest_awaiting_collection_backlog_age_seconds: 0,
             collection_overdue: overdue,
+            settlement_return_pending: 0,
+            oldest_settlement_return_pending_age_seconds: 0,
+            settlement_return_quarantined: 0,
+            oldest_settlement_return_quarantined_age_seconds: 0,
         };
         let evaluate = |snapshot: OperationsAlertFulfillmentSnapshot| {
             let snapshot = OperationsAlertSnapshot {

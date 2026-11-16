@@ -163,7 +163,9 @@ pub(super) fn valid_signal_identity(
         OperationsAlertKind::FulfillmentBacklog
         | OperationsAlertKind::FulfillmentFailed
         | OperationsAlertKind::FulfillmentManualReconcile
-        | OperationsAlertKind::FulfillmentCollectionOverdue => {
+        | OperationsAlertKind::FulfillmentCollectionOverdue
+        | OperationsAlertKind::SettlementReturnPending
+        | OperationsAlertKind::SettlementReturnQuarantined => {
             source == OperationsAlertSource::Fulfillment && scope == "auction"
         }
         OperationsAlertKind::RecoveryPaymentOverdue

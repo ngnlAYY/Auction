@@ -117,6 +117,14 @@ pub(super) fn evaluate_fulfillment(
         || (snapshot.collection_overdue > 0
             && snapshot.oldest_awaiting_collection_age_seconds
                 < policy.fulfillment_collection_overdue_age_threshold.as_secs() as i64)
+        || snapshot.settlement_return_pending < 0
+        || snapshot.oldest_settlement_return_pending_age_seconds < 0
+        || (snapshot.settlement_return_pending == 0
+            && snapshot.oldest_settlement_return_pending_age_seconds != 0)
+        || snapshot.settlement_return_quarantined < 0
+        || snapshot.oldest_settlement_return_quarantined_age_seconds < 0
+        || (snapshot.settlement_return_quarantined == 0
+            && snapshot.oldest_settlement_return_quarantined_age_seconds != 0)
     {
         return Err(OperationsAlertError::Invalid);
     }
@@ -175,6 +183,25 @@ pub(super) fn evaluate_fulfillment(
             OperationsAlertSource::Fulfillment,
             snapshot.collection_overdue,
             snapshot.oldest_awaiting_collection_age_seconds,
+        )?);
+    }
+    // 结算退件按未结案案件计数，不设阈值：每件都需要 Admin 决定或核对；结案后由扫描关闭。
+    if snapshot.settlement_return_pending > 0 {
+        signals.push(OperationsAlertSignal::new(
+            OperationsAlertKind::SettlementReturnPending,
+            "auction",
+            OperationsAlertSource::Fulfillment,
+            snapshot.settlement_return_pending,
+            snapshot.oldest_settlement_return_pending_age_seconds,
+        )?);
+    }
+    if snapshot.settlement_return_quarantined > 0 {
+        signals.push(OperationsAlertSignal::new(
+            OperationsAlertKind::SettlementReturnQuarantined,
+            "auction",
+            OperationsAlertSource::Fulfillment,
+            snapshot.settlement_return_quarantined,
+            snapshot.oldest_settlement_return_quarantined_age_seconds,
         )?);
     }
     OperationsAlertSourceObservation::available(OperationsAlertSource::Fulfillment, signals)

@@ -1,8 +1,10 @@
-//! 结算退件案件的资金、补寄、结案与对账 PostgreSQL 18 用例（迁移 000114–000115），以运行账号执行：
+//! 结算退件案件的资金、补寄、结案与对账 PostgreSQL 18 用例（迁移 000114–000116），以运行账号执行：
 //! - 现金领回证明只消费一次：原分配 spent → available（金额仍为 M），返还事实唯一绑定入站、Take
 //!   与 `returned_delivery` 来源；补寄换新派发编号与新身份，派发历史引用授权案件；新派发寄出证明
 //!   成立后本案结束；旧派发不能被投递台重新激活；
 //! - 补寄派发再被退回时，按正文派发引用与原正文摘要绑定到第 2 次派发，没有引用的同类退件不绑定；
+//! - 领回代管与留箱结案保留原权利人责任：偿付只计一次代管负债，余额观察早于领回证明时结论未知；
+//!   告警按未结案案件单列，不再计入履约人工对账；
 //! - 未绑定退件经只读核验（读到的系统来源、资产与唯一派发）改绑，读不到时保持隔离；
 //! - 新事实表只追加，运行账号对它们只有 INSERT。
 
@@ -10,6 +12,9 @@
 
 use auction_application::core::RequestHash;
 use auction_application::delivery::{DeliveryAdminAction, DeliveryAdminCommand, DeliveryAdminPort};
+use auction_application::operations::{
+    OperationsAlertCollectionOverdueRead, OperationsAlertSourceReader,
+};
 use auction_application::reconciliation::{AssetArmoryObservation, AssetReconciliationStore};
 use auction_application::recovery::RecoveryWorkStore;
 use auction_application::settlement::{
@@ -520,6 +525,113 @@ async fn postgres_resend_return_binds_by_dispatch_reference() {
         (SettlementReturnMatch::Unbound, SettlementReturnReason::DispatchAlreadyReturned),
         "没有引用只认首寄，首寄已由第一案绑定"
     );
+
+    pool.close().await;
+}
+
+/// 领回代管：原履约以明确原因终结、原分配恢复原用途；偿付把它计为一次代管负债（不再计待付，
+/// 也不计自有），余额观察早于领回证明时结论未知。留箱结案：资产记退回待领取，不写领回事实。
+/// 告警按未结案案件单列，转人工对账的退件不再计入履约人工对账。
+#[tokio::test]
+async fn postgres_return_close_preserves_beneficiary_liability() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("以运行账号连接");
+    let pool = store.postgres_pool();
+    let held = returned_payout(&store, 7_600_021, "993021").await;
+    seed_spent_payout(pool, &held).await;
+    let inbox = returned_payout(&store, 7_600_022, "993022").await;
+    seed_spent_payout(pool, &inbox).await;
+
+    let snapshot = store
+        .snapshot(Utc::now(), OperationsAlertCollectionOverdueRead::Skip)
+        .await
+        .expect("告警快照");
+    let fulfillment = snapshot.fulfillment.expect("履约水位");
+    assert_eq!(
+        (fulfillment.settlement_return_pending, fulfillment.manual_reconcile),
+        (2, 0),
+        "退件单列，不计入履约人工对账"
+    );
+
+    sqlx::query(
+        "UPDATE public.settlement_recovery_health
+         SET balance_credits = 1000, balance_observed_at = now() - interval '1 hour',
+             balance_status = 'ok', evidence_status = 'fresh', updated_at = now(),
+             evidence_last_success_at = now() - interval '1 hour'
+         WHERE world_id = 'main'",
+    )
+    .execute(pool)
+    .await
+    .expect("写入早于领回的余额观察");
+    handle(&store, held.case, 1, SettlementReturnAction::ReclaimAndHold).await;
+    take_through(&store, held.case, true).await;
+    let (status, error): (String, Option<String>) = sqlx::query_as(
+        "SELECT execution_state, last_error_code FROM public.settlement_obligation_fulfillments
+         WHERE obligation_id = $1",
+    )
+    .bind(held.sale.seller_obligation)
+    .fetch_one(pool)
+    .await
+    .expect("读取履约");
+    assert_eq!((status.as_str(), error.as_deref()), ("failed", Some("settlement_return_held")));
+    let detail = store.settlement_return_detail(held.case).await.expect("代管详情");
+    assert_eq!(detail.summary.status, SettlementReturnCaseStatus::Held);
+    let custody = detail.custody.expect("代管责任");
+    assert_eq!((custody.beneficiary.as_str(), custody.credits), ("Recovery seller", PAYOUT));
+    assert_eq!(detail.allowed_actions, [SettlementReturnAction::ResendFromCustody], "代管后可再寄");
+
+    assert_eq!(
+        handle(&store, inbox.case, 1, SettlementReturnAction::CloseInbox).await,
+        SettlementReturnCaseStatus::InboxClosed
+    );
+    assert_eq!(
+        count(
+            pool,
+            "SELECT count(*) FROM public.settlement_return_takes WHERE return_mail_id = $1",
+            inbox.case
+        )
+        .await,
+        0
+    );
+
+    let solvency = store.report_solvency(86_400).await.expect("偿付报告");
+    let main = solvency.worlds.iter().find(|world| world.world == "main").expect("main");
+    assert_eq!((main.custody_count, main.custody_credits), (1, PAYOUT), "代管负债只计一次");
+    assert_eq!(main.pending_seller_payout_count, 0, "代管不再计入待付");
+    assert!(main.balance_before_take, "余额观察早于领回证明");
+    assert_eq!(main.verdict, "unknown", "时点未对齐不判定");
+    assert!(
+        main.in_transit_review_reasons
+            .iter()
+            .any(|reason| reason.reason == "returned_in_inbox_seller_payout"),
+        "{:?}",
+        main.in_transit_review_reasons
+    );
+    assert_eq!(main.required_credits, PAYOUT, "所需余额含代管负债");
+
+    sqlx::query(
+        "UPDATE public.settlement_recovery_health
+         SET balance_observed_at = now(), evidence_last_success_at = now(), updated_at = now()
+         WHERE world_id = 'main'",
+    )
+    .execute(pool)
+    .await
+    .expect("领回后重新观察余额");
+    let aligned = store.report_solvency(86_400).await.expect("偿付报告");
+    let main = aligned.worlds.iter().find(|world| world.world == "main").expect("main");
+    assert_eq!((main.balance_before_take, main.verdict.as_str()), (false, "sufficient"));
+
+    let snapshot = store
+        .snapshot(Utc::now(), OperationsAlertCollectionOverdueRead::Skip)
+        .await
+        .expect("告警快照");
+    let fulfillment = snapshot.fulfillment.expect("履约水位");
+    assert_eq!(
+        (fulfillment.settlement_return_pending, fulfillment.failed),
+        (0, 0),
+        "代管与留箱结案不再计待处理退件或履约失败"
+    );
+    assert_eq!(store.open_settlement_return_count().await.expect("待办"), 0);
 
     pool.close().await;
 }

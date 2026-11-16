@@ -175,6 +175,21 @@ const UNIFIED_EQUIPMENT_RECOVERED_TERMINAL: &str = r#"NOT (
                     )
                 )"#;
 
+/// 结算退件代管或留箱结案时以明确原因终结的履约：原权利人的责任改由退件案件（代管负债或退回
+/// 待领取）承接，按退件告警与对账单列，不再计入履约失败。只认同一原派发上已结案的案件；案件
+/// 缺失或未结案时继续计入失败。两种读取口径都适用，因为这类终结只由退件案件写入。
+const RETURN_CLOSED_TERMINAL: &str = r#"NOT (
+                    fulfillment.last_error_code IN (
+                        'settlement_return_held', 'settlement_return_inbox'
+                    )
+                    AND EXISTS (
+                        SELECT 1
+                        FROM public.settlement_return_cases returned
+                        WHERE returned.delivery_id = fulfillment.delivery_id
+                          AND returned.status IN ('held', 'inbox_closed')
+                    )
+                )"#;
+
 /// 迁移前的履约终态排除：只看不可变损失事实。
 const LEGACY_EQUIPMENT_LOSS_TERMINAL: &str = r#"NOT (fulfillment.last_error_code = 'operator_external_buyer_compensation'
                     AND EXISTS (SELECT 1 FROM public.settlement_equipment_losses loss
@@ -185,11 +200,13 @@ static PAIRED_FULFILLMENT_COUNTS: LazyLock<String> = LazyLock::new(|| {
     format!(
         r#"SELECT
                COUNT(*) FILTER (WHERE fulfillment.execution_state = 'failed'
-                   AND {LEGACY_EQUIPMENT_LOSS_TERMINAL})::bigint AS legacy_failed,
+                   AND {LEGACY_EQUIPMENT_LOSS_TERMINAL}
+                   AND {RETURN_CLOSED_TERMINAL})::bigint AS legacy_failed,
                COUNT(*) FILTER (WHERE fulfillment.execution_state = 'failed'
                    AND {UNIFIED_EQUIPMENT_LOSS_TERMINAL}
                    AND {UNIFIED_COD_RETURN_TERMINAL}
-                   AND {UNIFIED_EQUIPMENT_RECOVERED_TERMINAL})::bigint AS classified_failed
+                   AND {UNIFIED_EQUIPMENT_RECOVERED_TERMINAL}
+                   AND {RETURN_CLOSED_TERMINAL})::bigint AS classified_failed
            FROM public.settlement_obligations AS obligation
            LEFT JOIN public.settlement_obligation_fulfillments AS fulfillment
              ON fulfillment.obligation_id = obligation.id"#
@@ -400,6 +417,10 @@ mod tests {
             oldest_awaiting_collection_age_seconds: 0,
             oldest_awaiting_collection_backlog_age_seconds: 0,
             collection_overdue: 0,
+            settlement_return_pending: 0,
+            oldest_settlement_return_pending_age_seconds: 0,
+            settlement_return_quarantined: 0,
+            oldest_settlement_return_quarantined_age_seconds: 0,
         }
     }
 
