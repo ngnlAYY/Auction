@@ -25,6 +25,7 @@ mod alerts;
 mod cases;
 mod counts;
 mod flows;
+mod funding;
 mod races;
 mod recheck;
 mod sweep;
