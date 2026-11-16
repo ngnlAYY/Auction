@@ -91,6 +91,7 @@ pub(super) fn blocker_key(value: &str) -> Option<&'static str> {
         "resend_limit" => "settlement-return-blocker-resend-limit",
         "obligation_ineligible" => "settlement-return-blocker-obligation-ineligible",
         "proof_required" => "settlement-return-blocker-proof-required",
+        "send_unresolved" => "settlement-return-blocker-send-unresolved",
         _ => return None,
     })
 }

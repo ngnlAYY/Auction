@@ -91,6 +91,20 @@ pub(crate) async fn open_case(
     .await
 }
 
+/// 原派发投递是否已被某个退件案件绑定（任何状态）。Sent 证明据此判断履约是否已由案件接管；
+/// 只读，依赖调用方的 Serializable 事务与案件命令互斥。
+pub(crate) async fn return_case_bound(
+    tx: &mut Transaction<'_, Postgres>,
+    delivery_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM public.settlement_return_cases WHERE delivery_id = $1)",
+    )
+    .bind(delivery_id)
+    .fetch_one(&mut **tx)
+    .await
+}
+
 /// 案件投影的 SELECT 片段（别名 `c`、`e`、`i`）。
 macro_rules! case_select {
     () => {

@@ -99,6 +99,11 @@ fn business_error(error: SettlementReturnError) -> Response {
             "settlement_return_obligation_ineligible",
             "原结算义务已不可补寄",
         ),
+        SettlementReturnError::SendUnresolved => (
+            StatusCode::CONFLICT,
+            "settlement_return_send_unresolved",
+            "原派发的发送结果未核实，须先经 Sent 证明收口原发送",
+        ),
         SettlementReturnError::StoredResultCorrupt | SettlementReturnError::Unavailable => {
             (StatusCode::SERVICE_UNAVAILABLE, "temporarily_unavailable", "服务暂时不可用")
         }
@@ -161,6 +166,11 @@ mod tests {
                 SettlementReturnError::ObligationIneligible,
                 StatusCode::CONFLICT,
                 "settlement_return_obligation_ineligible",
+            ),
+            (
+                SettlementReturnError::SendUnresolved,
+                StatusCode::CONFLICT,
+                "settlement_return_send_unresolved",
             ),
             (
                 SettlementReturnError::StoredResultCorrupt,

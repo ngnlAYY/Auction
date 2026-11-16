@@ -281,12 +281,19 @@ async fn ambiguous_attempt(
 
 /// 自动恢复和人工 Sent 证明共用原履约复位；仅恢复正常对账，不满足付款或重发资产。
 /// `from_state` 由调用方按准入固定：结果未知恢复为 `manual_reconcile`，Admin 失败更正为 `failed`。
+///
+/// 原派发已被系统退件绑定时，邮件已经退回、收件人不会再领取：履约归退件案件所有（转人工对账、
+/// 领回后代管或补寄），Sent 证明只收口投递与资金占用（unknown → spent），不再把履约改回等待
+/// 领取，也不因履约已被案件推进而整体回滚——否则案件接管后原发送的未知占用再也无法收口。
 pub(in crate::database) async fn resume_settlement_send(
     tx: &mut Transaction<'_, Postgres>,
     obligation_id: Uuid,
     delivery_id: Uuid,
     from_state: &'static str,
 ) -> Result<(), sqlx::Error> {
+    if crate::database::settlement::returns::return_case_bound(tx, delivery_id).await? {
+        return Ok(());
+    }
     let enqueued = sqlx::query(
         "UPDATE public.settlement_obligation_fulfillments
          SET execution_state='enqueued',state_version=state_version+1,delivery_id=$2,

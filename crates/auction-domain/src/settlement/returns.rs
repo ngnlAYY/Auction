@@ -215,6 +215,10 @@ closed_names! {
         ObligationIneligible => "obligation_ineligible",
         /// 需要已持久化的领回证明。
         ProofRequired => "proof_required",
+        /// 原派发已占用资金分配，但发送结果仍未核实（分配不是 spent）：须先经 Sent 恢复或人工
+        /// Sent 证明收口原发送，才能领回、留箱或补寄；否则结案会关闭原发送的 Sent 恢复入口，
+        /// 留下永远无法收口的未知占用。
+        SendUnresolved => "send_unresolved",
     }
 }
 
@@ -248,6 +252,9 @@ pub enum SettlementReturnFunding {
     Funded,
     /// 历史现金退件没有原资金分配：只能代管结案，不支持补寄。
     Unfunded,
+    /// 原派发占用过资金分配（当前指针或只追加的历史绑定），但既没有 spent 支出也没有本案返还：
+    /// 原发送结果未知。与“历史没有分配”不同，必须先由 Sent 证明收口原发送。
+    Unresolved,
 }
 
 /// 动作准入所需的已锁定事实。
@@ -269,8 +276,8 @@ pub struct SettlementReturnAdmission {
 }
 
 impl SettlementReturnAdmission {
-    /// 判定单个动作；拒绝时返回唯一的类型化原因。顺序固定：先来源与绑定，再状态，再资产，
-    /// 最后义务资格与次数，使同一事实总得到同一错误码。
+    /// 判定单个动作；拒绝时返回唯一的类型化原因。顺序固定：先来源与绑定，再状态，再原发送的资金
+    /// 是否已核实，再资产，最后义务资格与次数，使同一事实总得到同一错误码。
     pub fn check(&self, action: SettlementReturnAction) -> Result<(), SettlementReturnBlocker> {
         use SettlementReturnAction as A;
         use SettlementReturnBlocker as B;
@@ -297,6 +304,10 @@ impl SettlementReturnAdmission {
                 self.require_bound()?;
                 if self.status != S::AwaitingDecision {
                     return Err(B::StateConflict);
+                }
+                // 原发送未知时任何处置都会终结履约、关闭原发送的 Sent 恢复入口；留箱同样拒绝。
+                if self.funding == SettlementReturnFunding::Unresolved {
+                    return Err(B::SendUnresolved);
                 }
                 if action == A::CloseInbox {
                     return Ok(());
@@ -331,8 +342,12 @@ impl SettlementReturnAdmission {
             .collect()
     }
 
-    /// 补寄资格：义务种类支持、仍是当前派发且可执行、现金有原资金分配、次数未达冻结上限。
+    /// 补寄资格：原发送资金已核实、义务种类支持、仍是当前派发且可执行、现金有原资金分配、次数
+    /// 未达冻结上限。
     pub fn resend_allowed(&self) -> Result<(), SettlementReturnBlocker> {
+        if self.funding == SettlementReturnFunding::Unresolved {
+            return Err(SettlementReturnBlocker::SendUnresolved);
+        }
         let supported = self.obligation_kind.is_some_and(resend_supported);
         if !supported
             || self.position != SettlementReturnObligationPosition::Current
@@ -530,6 +545,50 @@ mod tests {
         );
         exhausted.resends_used -= 1;
         assert_eq!(exhausted.check(SettlementReturnAction::ReclaimAndResend), Ok(()));
+    }
+
+    /// 原派发占用过资金但发送结果未知：领回补寄、领回代管与留箱都拒绝，原因固定为
+    /// `send_unresolved`，与“历史没有分配”（只允许代管）区分；状态冲突仍优先。
+    #[test]
+    fn unresolved_original_send_blocks_every_disposal() {
+        for kind in [SettlementObligationKind::SellerPayout, SettlementObligationKind::BuyerRefund]
+        {
+            let mut unresolved = bound(kind);
+            unresolved.funding = SettlementReturnFunding::Unresolved;
+            for action in [
+                SettlementReturnAction::ReclaimAndResend,
+                SettlementReturnAction::ReclaimAndHold,
+                SettlementReturnAction::CloseInbox,
+            ] {
+                assert_eq!(
+                    unresolved.check(action),
+                    Err(SettlementReturnBlocker::SendUnresolved),
+                    "{kind:?} {action:?}"
+                );
+            }
+            assert!(unresolved.allowed_actions().is_empty(), "{kind:?}");
+            let mut taking = unresolved;
+            taking.status = SettlementReturnCaseStatus::TakePending;
+            assert_eq!(
+                taking.check(SettlementReturnAction::ReclaimAndHold),
+                Err(SettlementReturnBlocker::StateConflict)
+            );
+            let mut held = unresolved;
+            held.status = SettlementReturnCaseStatus::Held;
+            held.take_proven = true;
+            assert_eq!(
+                held.check(SettlementReturnAction::ResendFromCustody),
+                Err(SettlementReturnBlocker::SendUnresolved)
+            );
+            assert_eq!(unresolved.resend_allowed(), Err(SettlementReturnBlocker::SendUnresolved));
+        }
+        let mut unfunded = bound(SettlementObligationKind::SellerPayout);
+        unfunded.funding = SettlementReturnFunding::Unfunded;
+        assert_eq!(
+            unfunded.allowed_actions(),
+            [SettlementReturnAction::ReclaimAndHold, SettlementReturnAction::CloseInbox],
+            "历史没有分配仍可代管或留箱"
+        );
     }
 
     /// 代管后可再寄，但必须已有领回证明，且仍受资格与上限约束。

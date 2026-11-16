@@ -320,6 +320,8 @@ pub enum SettlementReturnError {
     ResendLimit,
     #[error("原结算义务已不可补寄")]
     ObligationIneligible,
+    #[error("原派发的发送结果未核实，须先经 Sent 证明收口原发送")]
+    SendUnresolved,
     #[error("结算退件持久化结果损坏")]
     StoredResultCorrupt,
     #[error("结算退件依赖暂不可用")]
@@ -336,6 +338,7 @@ impl From<SettlementReturnBlocker> for SettlementReturnError {
             SettlementReturnBlocker::ResendLimit => Self::ResendLimit,
             SettlementReturnBlocker::ObligationIneligible => Self::ObligationIneligible,
             SettlementReturnBlocker::ProofRequired => Self::ProofRequired,
+            SettlementReturnBlocker::SendUnresolved => Self::SendUnresolved,
         }
     }
 }

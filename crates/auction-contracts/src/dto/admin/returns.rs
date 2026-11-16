@@ -73,7 +73,7 @@ pub const ADMIN_SETTLEMENT_RETURN_HANDLE_ACTIONS: [&str; 5] =
     ["reclaim_and_resend", "reclaim_and_hold", "resend_from_custody", "close_inbox", "acknowledge"];
 
 /// 动作被拒绝的类型化原因闭集。
-pub const ADMIN_SETTLEMENT_RETURN_BLOCKERS: [&str; 7] = [
+pub const ADMIN_SETTLEMENT_RETURN_BLOCKERS: [&str; 8] = [
     "untrusted",
     "unbound",
     "assets_mismatch",
@@ -81,6 +81,7 @@ pub const ADMIN_SETTLEMENT_RETURN_BLOCKERS: [&str; 7] = [
     "resend_limit",
     "obligation_ineligible",
     "proof_required",
+    "send_unresolved",
 ];
 
 /// 资产当前位置闭集；与资产对账使用同一组名称，互斥且不重复计数。

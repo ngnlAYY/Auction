@@ -77,21 +77,7 @@ pub(super) async fn admission_facts(
     let position = position(case, fulfillment.as_ref(), executable);
     let funding = match (obligation_kind, case.delivery_id) {
         (Some(kind), Some(delivery_id)) if cash_return(kind) => {
-            let funded: bool = sqlx::query_scalar(
-                r#"SELECT EXISTS(
-                       SELECT 1 FROM public.settlement_funding_allocations
-                       WHERE delivery_id = $1 AND state = 'spent'
-                         AND purpose IN ('seller', 'refund')
-                   ) OR EXISTS(
-                       SELECT 1 FROM public.settlement_funding_returns
-                       WHERE delivery_id = $1 AND return_mail_id = $2
-                   )"#,
-            )
-            .bind(delivery_id)
-            .bind(case.return_mail_id)
-            .fetch_one(&mut **tx)
-            .await?;
-            if funded { SettlementReturnFunding::Funded } else { SettlementReturnFunding::Unfunded }
+            cash_funding(tx, delivery_id, case.return_mail_id).await?
         }
         _ => SettlementReturnFunding::NotCash,
     };
@@ -120,6 +106,42 @@ pub(super) async fn admission_facts(
             take_proven,
         },
         fulfillment,
+    })
+}
+
+/// 现金退件原派发的资金关联：已支出（spent）或本案已返还为 `Funded`；占用过分配（当前指针或
+/// 只追加的历史绑定）却既未支出也未返还为 `Unresolved`——原发送结果未知，必须先由 Sent 证明收口，
+/// 不能当作“历史没有分配”直接代管（否则留下的 unknown 占用再也无法收口，strict_cash 下还会持续
+/// 阻断同账户发送）；从未占用分配才是 `Unfunded`。
+async fn cash_funding(
+    tx: &mut Transaction<'_, Postgres>,
+    delivery_id: Uuid,
+    return_mail_id: Uuid,
+) -> Result<SettlementReturnFunding, ReturnTransactionError> {
+    let (funded, allocated): (bool, bool) = sqlx::query_as(
+        r#"SELECT EXISTS(
+                      SELECT 1 FROM public.settlement_funding_allocations
+                      WHERE delivery_id = $1 AND state = 'spent'
+                        AND purpose IN ('seller', 'refund')
+                  ) OR EXISTS(
+                      SELECT 1 FROM public.settlement_funding_returns
+                      WHERE delivery_id = $1 AND return_mail_id = $2
+                  ),
+                  EXISTS(
+                      SELECT 1 FROM public.settlement_funding_allocations WHERE delivery_id = $1
+                  ) OR EXISTS(
+                      SELECT 1 FROM public.settlement_funding_delivery_bindings
+                      WHERE delivery_id = $1
+                  )"#,
+    )
+    .bind(delivery_id)
+    .bind(return_mail_id)
+    .fetch_one(&mut **tx)
+    .await?;
+    Ok(match (funded, allocated) {
+        (true, _) => SettlementReturnFunding::Funded,
+        (false, true) => SettlementReturnFunding::Unresolved,
+        (false, false) => SettlementReturnFunding::Unfunded,
     })
 }
 

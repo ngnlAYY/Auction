@@ -47,27 +47,27 @@ use crate::recovery_returns::{CodSale, insert_sale, settlement_minute};
 use crate::support;
 
 /// insert_sale 写入的卖方货款金额 M。
-const AMOUNT: i64 = 90;
-const UID: &str = "7321";
-const BOT: &str = "Returns Bot";
-const SELLER: &str = "Recovery seller";
+pub(super) const AMOUNT: i64 = 90;
+pub(super) const UID: &str = "7321";
+pub(super) const BOT: &str = "Returns Bot";
+pub(super) const SELLER: &str = "Recovery seller";
 
 /// 现金退件的两种义务：卖方货款（M = 90）与买方退款（M = 100）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Kind {
+pub(super) enum Kind {
     Payout,
     Refund,
 }
 
 impl Kind {
-    fn obligation(self, sale: &CodSale) -> Uuid {
+    pub(super) fn obligation(self, sale: &CodSale) -> Uuid {
         match self {
             Self::Payout => sale.seller_obligation,
             Self::Refund => sale.refund_obligation,
         }
     }
 
-    fn amount(self) -> i64 {
+    pub(super) fn amount(self) -> i64 {
         match self {
             Self::Payout => AMOUNT,
             Self::Refund => 100,
@@ -88,7 +88,7 @@ impl Kind {
         }
     }
 
-    fn subject(self) -> &'static str {
+    pub(super) fn subject(self) -> &'static str {
         match self {
             Self::Payout => "Auction seller payout",
             Self::Refund => "Auction buyer refund",
@@ -111,7 +111,7 @@ struct Resending {
     resend_fulfillment: SettlementFulfillmentClaim,
 }
 
-async fn seed_funded_sale(
+pub(super) async fn seed_funded_sale(
     pool: &PgPool,
     sequence: i64,
     strict: bool,
@@ -291,7 +291,7 @@ fn custody_evidence(
 }
 
 /// 现金载荷；补寄另带版本化派发引用。
-fn cash_payload(kind: Kind, obligation: Uuid, dispatch: Option<String>) -> Value {
+pub(super) fn cash_payload(kind: Kind, obligation: Uuid, dispatch: Option<String>) -> Value {
     let mut variables =
         json!({"reference": obligation.to_string(), "amount": kind.amount().to_string()});
     if let Some(dispatch) = dispatch {
@@ -305,7 +305,7 @@ fn cash_payload(kind: Kind, obligation: Uuid, dispatch: Option<String>) -> Value
 }
 
 /// 领取原义务的到期履约并以给定身份 prepare/activate 一次派发；返回激活后沿用的对账 claim。
-async fn dispatch(
+pub(super) async fn dispatch(
     store: &DatabaseStore,
     obligation: Uuid,
     preparation: impl FnOnce(String) -> SettlementDeliveryPreparation,
@@ -353,7 +353,7 @@ async fn dispatch(
 }
 
 /// 投递 Worker 领取指定投递，以冻结 Send 身份经现金门进入 sending。
-async fn send_through_cash_gate(
+pub(super) async fn send_through_cash_gate(
     store: &DatabaseStore,
     session: &MailSession,
     delivery: Uuid,
@@ -403,7 +403,7 @@ async fn send_through_cash_gate(
     (claim, expectation)
 }
 
-fn sent_result(
+pub(super) fn sent_result(
     claim: &DeliveryWorkClaim,
     expectation: &DeliverySendExpectation,
     mid: &str,
@@ -565,7 +565,10 @@ async fn resending(
     }
 }
 
-async fn allocation_state(pool: &PgPool, allocation: Uuid) -> (String, i64, Option<Uuid>) {
+pub(super) async fn allocation_state(
+    pool: &PgPool,
+    allocation: Uuid,
+) -> (String, i64, Option<Uuid>) {
     sqlx::query_as(
         "SELECT state, amount, delivery_id FROM public.settlement_funding_allocations WHERE id = $1",
     )
@@ -576,7 +579,7 @@ async fn allocation_state(pool: &PgPool, allocation: Uuid) -> (String, i64, Opti
 }
 
 /// 账户的资金分录与来源汇总：(spent 合计, return 合计, transfer 条数, 来源条数, 返还事实条数)。
-async fn ledger(pool: &PgPool) -> (i64, i64, i64, i64, i64) {
+pub(super) async fn ledger(pool: &PgPool) -> (i64, i64, i64, i64, i64) {
     sqlx::query_as(
         "SELECT
             COALESCE((SELECT sum(amount) FROM public.settlement_funding_entries
