@@ -33,6 +33,9 @@ pub(in crate::database::recovery::commands) struct RecoveryRow {
     pub(in crate::database::recovery::commands) custody_proof_reference: Option<String>,
     pub(in crate::database::recovery::commands) custody_proof_digest: Option<Vec<u8>>,
     pub(in crate::database::recovery::commands) custody_proof_observed_at: Option<DateTime<Utc>>,
+    /// 已计入的 COD 退回次数与冻结上限；决定确认是否须先完成拉黑。
+    pub(in crate::database::recovery::commands) cod_return_count: i32,
+    pub(in crate::database::recovery::commands) cod_return_limit: i32,
     pub(in crate::database::recovery::commands) created_at: DateTime<Utc>,
 }
 

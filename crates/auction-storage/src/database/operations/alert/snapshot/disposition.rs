@@ -128,11 +128,13 @@ pub(super) const UNIFIED_EQUIPMENT_LOSS_TERMINAL: &str = r#"NOT (fulfillment.las
                          AND disposition.resolves_alert
                         WHERE loss.refund_obligation_id = obligation.id))"#;
 
-/// COD 退回达到 recovery 冻结上限时，以原 COD 投递上的 `cod_returned` 处置收口。
-/// 两个失败义务都属于同一恢复记录；处置缺失时继续计入失败，不凭损失/恢复行猜测。
+/// COD 退回后成交撤销（达到 recovery 冻结上限退回卖家，或 Admin 确认收回/取消）时，以原 COD
+/// 投递上的 `cod_returned` 处置收口。失败义务都属于同一恢复记录；处置缺失时继续计入失败，不凭
+/// 损失/恢复行猜测。
 const UNIFIED_COD_RETURN_TERMINAL: &str = r#"NOT (
                     fulfillment.last_error_code IN (
-                        'cod_returned_three_times', 'equipment_returned_to_seller'
+                        'cod_returned_three_times', 'equipment_returned_to_seller',
+                        'recovery_reclaimed', 'recovery_cancelled', 'recovery_sale_voided'
                     )
                     AND EXISTS (
                         SELECT 1
@@ -143,6 +145,7 @@ const UNIFIED_COD_RETURN_TERMINAL: &str = r#"NOT (
                          AND disposition.resolves_alert
                         WHERE fulfillment.obligation_id IN (
                             recovery.payment_obligation_id,
+                            recovery.equipment_obligation_id,
                             recovery.seller_payout_obligation_id,
                             recovery.buyer_refund_obligation_id
                         )

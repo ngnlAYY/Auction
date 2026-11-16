@@ -150,6 +150,14 @@ pub(super) async fn lock_legacy(
         crate::lock_mail_evidence_credentials(tx, evidence).await.map_err(evidence_error)?;
     }
     locks::after_credentials(tx, claim).await?;
+    // 领取之后成交可能已被 Admin 确认撤销：恢复记录与义务已锁定，旧 claim 不能再准备、激活或
+    // 满足不再可执行的义务（不变量 2、6）。
+    if !super::eligibility::recovery_allows_execution_now(tx, claim.obligation_id.as_uuid())
+        .await
+        .map_err(sql_error)?
+    {
+        return Err(FundingError::Conflict);
+    }
     if let Some(user_id) = claim.recipient_user_id {
         let current: bool = sqlx::query_scalar(
             r#"SELECT EXISTS(

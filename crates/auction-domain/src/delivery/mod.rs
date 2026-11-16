@@ -34,7 +34,8 @@ pub enum DeliveryDispositionKind {
     AdminFailed,
     /// 装备损失把原投递永久退役。
     EquipmentLoss,
-    /// COD 第三次退回后成交撤销，原 COD 与卖家收款义务终结。
+    /// COD 被退回后成交撤销（达到冻结退回上限退回卖家，或 Admin 确认收回/取消），原付款与
+    /// 不再可执行的依赖义务终结。
     CodReturned,
     /// 历史自寄结算核对认定原投递无需再发送（只追加修复表）。
     LegacySelf,

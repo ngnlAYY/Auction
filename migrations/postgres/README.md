@@ -49,7 +49,7 @@ VALUES (76, 'breaking');
 
 ## 索引
 
-当前 head 为 `000111`，与 [ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json) 的 `database_schema_version` 一致；新增迁移必须同时推进这两处。下表按版本递增，只列主题，不是逐条字段说明。
+当前 head 为 `000112`，与 [ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json) 的 `database_schema_version` 一致；新增迁移必须同时推进这两处。下表按版本递增，只列主题，不是逐条字段说明。
 
 | 版本 | 主题 |
 | --- | --- |
@@ -164,3 +164,4 @@ VALUES (76, 'breaking');
 | 000109 | Public 竞价日志按新建代理命令查被排位击败的授权：`bid_proxy_authorization_transitions` 新增部分索引 `bid_proxy_transitions_ranked_below_origin_idx`（`origin_command_id`，仅 `exhausted`/`ranked_below`），逐行查找由顺序扫描变为索引探测；不改结构、约束与数据，登记 compatible |
 | 000110 | `operations_alert_signals` 的 kind/identity 闭集新增 `fulfillment_collection_overdue`（`fulfillment` 来源、`auction` scope）：已寄出、只等收件人领取的 Send 履约寄出时长超过运行配置阈值时告警，只提示人工跟进，不改变义务、投递、资金或资产，也不触发任何自动动作；同时补上 000095 漏登记的 scope `reconciliation`（对账报告缺失时的 `source_unavailable` 此前违反 scope CHECK，整轮扫描回滚）；新增部分索引 `settlement_obligation_fulfillments_open_idx`（尚未满足的履约），供告警扫描与看板只读活动履约；`runtime_config_admin_commands.digest_version` 闭集放宽为 1、2（新命令以版本 2 记录原始请求摘要，升级前的版本 1 行原样保留）；旧程序无法解析新 kind，也不认版本 2 的命令行，登记 breaking |
 | 000111 | 结算退件证据：新增只追加的 `settlement_return_evidence`（以入站邮件 ID 为主键，记录处置 `untrusted`/`unbound`/`fulfillment_terminal`/`manual_reconcile`、原因码、原义务与原投递），与恢复流程的退件消费按“来源可证明且绑定恢复付款/交付义务”互斥分区；只留证与把未终结履约转人工对账，不领取、不退回、不重发、不改变资金；`inbound_mail` 增加结算退件部分索引；运行账号只授 `INSERT`；纯新增，登记 compatible |
+| 000112 | Admin 确认收回/取消的成交撤销的历史投影修复：只在命令账本有该确认、原付款履约未终结且无未过期领取、原付款投递已无未解决外部写入、依赖履约未开始时，把原付款履约改为 `failed`（`recovery_reclaimed`/`recovery_cancelled`）、未开始的卖方货款与 isekai 装备交付改为 `failed`（`recovery_sale_voided`），并在原付款投递当前 fence 追加 `cod_returned` 处置与审计；其余记录保持原样留给人工核对，不改投递、证明、资金或恢复记录；改写既有行并写入旧读侧不认识的失败码，登记 breaking |
