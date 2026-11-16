@@ -118,8 +118,9 @@ pub(super) async fn deploy_locked(
         install::install_artifact(artifact, install_dir, &retained, &record_directory)
     {
         let failure = install_failed(failure, install_dir, record_directory.path());
-        // 失败回执记录安装目录实际文件的摘要（已换回时是旧程序），不冒充制品摘要；
-        // 之后 rollback 会在安装目录核对处失败关闭。
+        // 失败回执的 artifacts 记录安装目录实际文件的摘要（已换回时是旧程序），不冒充制品摘要；
+        // deploy 段仍是尝试安装的制品，失败回执从不作为组件身份来源。已换回时本次回滚记录保留的
+        // 就是当前程序，rollback 会因目标与当前程序相同而在停机前拒绝。
         return Err(failed.publish(failure, None, Ok(install_dir_artifacts(install_dir))));
     }
 

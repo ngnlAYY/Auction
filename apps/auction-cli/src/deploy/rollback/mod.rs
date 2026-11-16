@@ -15,10 +15,8 @@ use anyhow::Context;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use super::install::{
-    self, ROLE_BINARIES, RecordDirectory, RetainRequest, RetainedIdentity, RollbackRecord,
-};
-use super::receipts::{FailedReceipt, Failure, roles_match, settle};
+use super::install::{self, ROLE_BINARIES, RecordDirectory, RetainRequest, RollbackRecord};
+use super::receipts::{FailedReceipt, Failure, settle};
 use super::verification::install_dir_artifacts;
 use super::{gates, role_binary, running_roles, space, unit_states};
 use crate::app::{print_json, progress};
@@ -79,7 +77,8 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: RollbackArgs) -> anyhow::R
     {
         anyhow::bail!("回滚记录对应的部署回执不是可回滚状态或缺少制品证据");
     }
-    preconditions::require_installed_matches(&deployed_receipt, &install_dir)?;
+    let installed = preconditions::require_installed_matches(&deployed_receipt, &install_dir)?;
+    preconditions::require_target_differs(&record, &installed)?;
     let kept_cli_sha256 = preconditions::require_kept_cli(&install_dir)?;
 
     let gate =
@@ -231,15 +230,9 @@ async fn apply(
         observed_database_version: plan.database_version,
         installed_role_schema_version: record.retained_roles.schema_version,
     };
+    // 反向记录的身份按保留副本的摘要从成功回执重新绑定；部署回执失败时它只描述尝试安装的目标。
     let (reverse, reverse_directory) = install::retain(state, &request, |binaries| {
-        // 停机前已核对安装目录是部署回执的版本；保留副本必须仍是同一组程序，身份才属于它们。
-        if !roles_match(plan.deployed_receipt, binaries) {
-            anyhow::bail!("安装目录的角色程序在停机前后发生变化，拒绝把部署回执的身份记给它们");
-        }
-        Ok(RetainedIdentity {
-            roles: identity::replaced_roles_identity(plan.deployed_receipt, record),
-            cli: None,
-        })
+        identity::reverse_identity(state, plan.deployed_receipt, record, binaries)
     })
     .context("保留当前程序失败")
     .map_err(|error| {

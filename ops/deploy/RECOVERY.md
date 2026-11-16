@@ -264,7 +264,7 @@ df -h /var/lib/auction/wal-staging
 
 - 先取得部署锁：部署状态目录与各级父目录须归 root 且禁止他人写入，回滚记录、部署回执与保留程序都经持锁时固定的目录描述符读取（见[apps/auction-cli/README.md#部署状态目录](../../apps/auction-cli/README.md#部署状态目录)）；
 - 必须由安装目录中的 `auction-cli` 执行，且它的内嵌 schema 等于数据库版本（部署在迁移完成前失败时较高，回退后的 `service start` 会执行被回退的迁移，因此拒绝）；
-- 要求安装目录先过[重建安装目录信任](#重建安装目录信任)所述的属主与权限门禁，三个角色程序仍是该部署回执的版本，不一致时拒绝；
+- 要求安装目录先过[重建安装目录信任](#重建安装目录信任)所述的属主与权限门禁，三个角色程序仍是该部署回执的版本，不一致时拒绝；记录保留的三个角色程序就是当前程序时同样拒绝（回退不会改变任何程序，常见于安装中途失败并已换回之后）；
 - 以记录登记的目标角色 schema `E`（未知时按创建记录时观测到的数据库版本假设）读取数据库版本 `D`，要求 `(E, D]` 的迁移连续、成功且登记为 `compatible`；任一 `breaking` 或缺登记即拒绝，只能恢复升级前备份并做外部历史核对。`D > E` 时还要求三角色有效配置的 `[readiness] migration_compatibility_mode` 都已显式设为 `compatible`、目标程序不早于迁移 075，否则拒绝；rollback 不修改配置；
 - 先过停机时段、磁盘空间（反向回滚记录与安装临时文件，只计三个角色；余量为实际写入/替换字节之外再留 64 MiB，不套定时备份的 1 GiB/10%）与在途发送门禁，再按 Public → Admin → Worker 停止；安装前把当前三个角色程序保留为新的回滚记录，因此回退可再前进；
 - 安装旧角色程序中途失败时，把本次已替换的程序从该反向回滚记录换回并复核三个角色（不启动服务）；换回也失败时按[安装中途失败的手工换回](#安装中途失败的手工换回)处理；
@@ -307,7 +307,7 @@ ROLLBACK;
 
 本节适用于两种情形，下文 `<记录 ID>` 是换回来源的回滚记录：
 
-- 自动换回也失败：错误列出各程序的当前摘要，安装目录可能新旧混合，省略 `--receipt-id` 的 `rollback` 通常因安装目录核对不通过而拒绝（例外：安装目录恰好与失败回执记录的摘要一致时会通过核对，改为从换回来源记录重装并启动）。
+- 自动换回也失败：错误列出各程序的当前摘要，安装目录可能新旧混合。失败回执的 `artifacts` 记录的正是这些实际摘要（读不出的程序为 `null`），`deploy` 段只是尝试安装的目标；省略 `--receipt-id` 的 `rollback` 只在有程序读不出、或之后安装目录又被改动时因安装目录核对不通过而拒绝，否则会从换回来源记录重装三个角色并启动（新的反向记录保留混合程序，身份为 `null`）。要确定结果时按本节手工换回。
 - `deploy` 已装好新程序但在迁移完成前失败（启动阶段的端口检查或迁移失败），`rollback` 因“保留的 auction-cli 期望 schema 高于数据库”在停机前拒绝：数据库仍是部署前的版本，不想修复后继续升级时，按下文 `deploy` 一条用本次回滚记录把四个程序（含旧 CLI）整体换回。
 
 
@@ -329,7 +329,7 @@ ROLLBACK;
 3. 记录中的程序都换回后，再对 `<install-dir>/` 下这些程序逐个 `sha256sum`，必须全部等于 `record.json`；任一不符就停在停止状态排查，不要启动。
 4. 按换回来源处置：
    - `deploy`：用**安装目录中的** CLI 启动：`<install-dir>/auction-cli --config-dir … service start --owner-secrets …`，沿用本次部署的 `--state-dir` 与 unit 参数。不要用制品 CLI，它会先把 schema 迁到新版本。启动后按[升级](../README.md#升级)的部署后核对确认 `/proc/<MainPID>/exe` 摘要等于旧程序。
-   - `rollback`：安装目录已恢复为回退前的程序，处置与回退在停机后、安装前中止相同（见[apps/auction-cli/README.md#回退](../../apps/auction-cli/README.md#回退)）。`auction-cli` 从未被替换，且回退前已核对它与数据库同版本，因此可用安装目录中的 CLI 执行 `service start --owner-secrets …`（沿用 `--config-dir`、`--state-dir` 与 unit 参数，迁移为空操作）恢复原状，或修复原因后用 `rollback --receipt-id <原记录 ID>` 重试回退。省略 `--receipt-id` 的 `rollback` 会选中带失败回执的反向记录并在安装目录核对处拒绝。
+   - `rollback`：安装目录已恢复为回退前的程序，处置与回退在停机后、安装前中止相同（见[apps/auction-cli/README.md#回退](../../apps/auction-cli/README.md#回退)）。`auction-cli` 从未被替换，且回退前已核对它与数据库同版本，因此可用安装目录中的 CLI 执行 `service start --owner-secrets …`（沿用 `--config-dir`、`--state-dir` 与 unit 参数，迁移为空操作）恢复原状，或修复原因后用 `rollback --receipt-id <原记录 ID>` 重试回退。省略 `--receipt-id` 的 `rollback` 会选中带失败回执的反向记录并在停机前拒绝：手工换回后的安装目录已不是失败回执记录的混合程序，而且正是该记录保留的程序。
 5. 自动或手工换回本身都不另写回执；`service start` 会追加一条 `action=start` 回执，重试成功的 `rollback` 追加 `action=rollback` 回执，安装中途失败的那条 `failed` 回执（`action=deploy` 或 `action=rollback`）保留为历史证据。
 
 ### 重建安装目录信任
