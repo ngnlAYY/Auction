@@ -134,7 +134,7 @@ pub enum OperationsAlertKind {
     FulfillmentBacklog,
     FulfillmentFailed,
     FulfillmentManualReconcile,
-    /// 已寄出、只等收件人领取的履约，最久一笔的寄出时长超过配置阈值；只提醒人工跟进。
+    /// 已寄出、只等收件人领取的履约有寄出时长达到配置阈值的（计数为超期件数）；只提醒人工跟进。
     FulfillmentCollectionOverdue,
     RecoveryPaymentOverdue,
     /// 付款期限已过，但对应付款投递没有自动或人工发送证明；提醒已延后，需人工核对。
@@ -465,8 +465,8 @@ impl OperationsAlertSignal {
                 format!("结算履约人工对账 {}", self.count)
             }
             OperationsAlertKind::FulfillmentCollectionOverdue => format!(
-                "长期未领取：等待领取共 {} 笔，最久已寄出 {} 天；只提醒，不会重发或撤回，\
-                 请在游戏内核对 Sent 并联系收件人",
+                "长期未领取：{} 笔寄出时长已达阈值仍未领取，最久已寄出 {} 天；\
+                 只提醒，不会重发或撤回，请在游戏内核对 Sent 并联系收件人",
                 self.count,
                 self.age_seconds / 86_400
             ),

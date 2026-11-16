@@ -8,8 +8,8 @@
 //! - 托管投递分支按 canonical 附件 kind 识别真实结算载荷；仍在投递队列里的装备按应持核对，
 //!   不因同一装备的另一义务已寄出而算作在途。
 //! - 履约领取把投递完成时刻带进 delivery 快照，供等待领取的 Sent 轮询按寄出时长分档。
-//! - 长期未领取告警在最久寄出时长达到阈值时写入活动信号，收口回落到阈值以下后由下一轮
-//!   扫描关闭；迁移 000110 的闭集接受该种类。
+//! - 长期未领取按达到阈值的件数计数，Admin 清单与计数出自同一只读快照；告警在有超期件时
+//!   写入活动信号，收口回落到阈值以下后由下一轮扫描关闭；迁移 000110 的闭集接受该种类。
 //!
 //! 入口见 `just test-db`。
 
@@ -29,7 +29,7 @@ use auction_application::reconciliation::{
 use auction_application::settlement::{
     SettlementFulfillmentDeliveryStatus, SettlementFulfillmentState, SettlementFulfillmentStore,
 };
-use auction_domain::SettlementWorld;
+use auction_domain::{SettlementObligationKind, SettlementWorld};
 use chrono::{DateTime, Duration, Utc};
 use serde_json::json;
 use sqlx::PgPool;
@@ -388,7 +388,9 @@ fn policy() -> OperationsAlertPolicy {
 }
 
 /// 等待领取不进积压：只有尚未寄出的货款与没有冻结发送证明的 COD 仍是待处理；
-/// 等待领取单列计数、最近一次读取失败数与按寄出时刻计的最老等待年龄。
+/// 等待领取单列计数、最近一次读取失败数与按寄出时刻计的最老等待年龄。长期未领取只计寄出
+/// 时长达到阈值的件数，清单与计数出自同一只读快照：寄出 8 天的货款超期，寄出 2 天的退回不超期；
+/// 不给阈值时不评估长期未领取。
 #[tokio::test]
 async fn postgres_collection_wait_snapshot_separates_awaiting_from_backlog() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
@@ -396,8 +398,26 @@ async fn postgres_collection_wait_snapshot_separates_awaiting_from_backlog() {
     let now = Utc::now();
     seed_collection_wait(store.postgres_pool(), now).await;
 
-    let snapshot = store.snapshot(now).await.expect("读取告警快照");
+    let threshold = policy().fulfillment_collection_overdue_age_threshold;
+    let snapshot = store.snapshot(now, Some(threshold)).await.expect("读取告警快照");
     let fulfillment = snapshot.fulfillment.expect("履约水位");
+    assert_eq!(fulfillment.collection_overdue, 1, "只有寄出 8 天的货款达到 72 小时阈值");
+    let payout = stable_id(SEED, &format!("{}-seller_payout", stable_id(SEED, "lot-1")));
+    let [item] = snapshot.collection_overdue_items.as_slice() else {
+        panic!("长期未领取清单只应有一项：{:?}", snapshot.collection_overdue_items);
+    };
+    assert_eq!(item.obligation_id, payout);
+    assert_eq!(item.obligation_kind, SettlementObligationKind::SellerPayout);
+    assert_eq!((item.auction_world.as_str(), item.auction_sequence), ("main", 4));
+    assert_eq!((item.lot_number, item.equipment_category.as_str()), (1, "weapon"));
+    assert_eq!(item.equipment_name, "Collection wait equipment 1");
+    assert_eq!(item.recipient, "collection-recipient");
+    assert!(item.last_read_failed, "货款最近一次读取失败");
+    assert_eq!(item.age_seconds, fulfillment.oldest_awaiting_collection_age_seconds);
+    assert!(item.sent_at <= now - Duration::days(8));
+    let unevaluated = store.snapshot(now, None).await.expect("读取告警快照");
+    assert_eq!(unevaluated.fulfillment.map(|value| value.collection_overdue), Some(0));
+    assert!(unevaluated.collection_overdue_items.is_empty());
     assert_eq!(fulfillment.pending, 2, "未寄出货款与 COD 仍是待处理");
     assert_eq!(fulfillment.awaiting_collection, 2, "已寄出的货款与流拍退回进入等待领取");
     assert_eq!(fulfillment.awaiting_collection_unreadable, 1, "只有货款最近一次读取失败");
@@ -508,7 +528,7 @@ async fn postgres_collection_wait_reports_sent_assets_in_transit() {
     let latest = store.latest_asset_reports().await.expect("读取最近报告");
     assert_eq!(latest.custody.as_ref(), Some(&custody));
     assert_eq!(latest.solvency.as_ref(), Some(&solvency));
-    let snapshot = store.snapshot(Utc::now()).await.expect("读取告警快照");
+    let snapshot = store.snapshot(Utc::now(), None).await.expect("读取告警快照");
     let reconciliation = snapshot.reconciliation.expect("对账水位");
     let main = reconciliation.worlds.iter().find(|world| world.world == "main").expect("main");
     assert_eq!(
@@ -771,8 +791,9 @@ async fn postgres_collection_wait_claim_carries_sent_time() {
     pool.close().await;
 }
 
-/// 长期未领取：最久一笔已寄出 8 天（阈值 72 小时）时产生活动信号，计数为全部等待领取；
-/// 该笔领取收口后剩下的只寄出 2 天，下一轮扫描关闭信号。告警不改变任何义务状态。
+/// 长期未领取：最久一笔已寄出 8 天（阈值 72 小时）时产生活动信号，计数是达到阈值的件数
+/// （另一笔寄出 2 天的退回只是背景，不计入）；该笔领取收口后剩下的只寄出 2 天，下一轮扫描
+/// 关闭信号。告警不改变任何义务状态。
 #[tokio::test]
 async fn postgres_collection_wait_overdue_alert_triggers_and_resolves() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
@@ -787,7 +808,8 @@ async fn postgres_collection_wait_overdue_alert_triggers_and_resolves() {
     let scan = |at: DateTime<Utc>| {
         let store = &store;
         async move {
-            let snapshot = store.snapshot(at).await.expect("读取告警快照");
+            let threshold = policy().fulfillment_collection_overdue_age_threshold;
+            let snapshot = store.snapshot(at, Some(threshold)).await.expect("读取告警快照");
             let observations = evaluate_snapshot(&snapshot, &policy()).expect("扫描评估");
             store
                 .observe(OperationsAlertObserveCommand {
@@ -816,7 +838,7 @@ async fn postgres_collection_wait_overdue_alert_triggers_and_resolves() {
     scan(now).await;
     let (active, count, age) = overdue().await.expect("超过阈值必须写入信号");
     assert!(active);
-    assert_eq!(count, 2, "计数是全部等待领取");
+    assert_eq!(count, 1, "计数是达到阈值的件数，不是全部等待领取");
     assert!(age >= Duration::days(8).num_seconds(), "年龄是最久寄出时长：{age}");
 
     // 8 天前寄出的货款被领取：只剩寄出 2 天的流拍退回，低于阈值，信号关闭。

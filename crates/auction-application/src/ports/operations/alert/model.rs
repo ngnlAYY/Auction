@@ -3,7 +3,9 @@
 use std::collections::HashSet;
 use std::time::Duration;
 
+use auction_domain::SettlementObligationKind;
 use chrono::{DateTime, Utc};
+use uuid::Uuid;
 
 use super::digest::valid_age_threshold;
 use super::signals::OperationsAlertError;
@@ -147,6 +149,31 @@ pub struct OperationsAlertFulfillmentSnapshot {
     pub oldest_prerequisite_wait_age_seconds: i64,
     /// 最早寄出的等待领取义务自投递完成（`deliveries.completed_at`）起的秒数；没有时为 0。
     pub oldest_awaiting_collection_age_seconds: i64,
+    /// 等待领取中寄出时长已达到长期未领取阈值的件数（超期件数），是 `awaiting_collection` 的
+    /// 子集；阈值随快照读取给出，未给出时为 0。
+    pub collection_overdue: i64,
+}
+
+/// 长期未领取清单的一项：已寄出、寄出时长达到阈值仍未领取的 Send 义务。只含 Admin 可见的业务
+/// 标识与展示字段，不含投递载荷、凭据或外部错误原文；只读展示，不授权任何动作。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OperationsAlertCollectionOverdueItem {
+    pub obligation_id: Uuid,
+    pub obligation_kind: SettlementObligationKind,
+    /// 场次所属世界与届次；与 lot 编号、装备分类一起定位拍品。
+    pub auction_world: String,
+    pub auction_sequence: i64,
+    pub lot_number: i32,
+    pub equipment_category: String,
+    pub equipment_name: String,
+    /// 投递冻结的收件人游戏名。
+    pub recipient: String,
+    /// 寄出时刻（投递完成的数据库时刻 `deliveries.completed_at`）。
+    pub sent_at: DateTime<Utc>,
+    /// 自寄出起已等待的秒数。
+    pub age_seconds: i64,
+    /// 最近一次 Sent 读取失败（`evidence_unavailable`）；只说明读不到，不代表是否已领取。
+    pub last_read_failed: bool,
 }
 
 /// Recovery 每个 world 的余额和 evidence 安全状态。
@@ -260,6 +287,10 @@ pub struct OperationsAlertSnapshot {
     pub process: Option<OperationsAlertProcessSnapshot>,
     pub delivery: Option<OperationsAlertDeliverySnapshot>,
     pub fulfillment: Option<OperationsAlertFulfillmentSnapshot>,
+    /// 与 `fulfillment` 同一只读快照读出的长期未领取清单：只列寄出时长达到阈值的等待领取义务，
+    /// 寄出最早优先，最多 `MAX_OPERATIONS_ALERT_COLLECTION_OVERDUE_ITEMS` 条，总数见
+    /// `fulfillment.collection_overdue`；`fulfillment` 缺失或未给出阈值时为空。
+    pub collection_overdue_items: Vec<OperationsAlertCollectionOverdueItem>,
     pub recovery: Option<OperationsAlertRecoverySnapshot>,
     pub mail: Option<OperationsAlertMailSnapshot>,
     pub credential: Option<OperationsAlertCredentialSnapshot>,
@@ -285,7 +316,8 @@ pub struct OperationsAlertPolicy {
     pub delivery_manual_reconcile_count_threshold: i64,
     pub fulfillment_backlog_count_threshold: i64,
     pub fulfillment_backlog_age_threshold: Duration,
-    /// 已寄出等待领取的最久寄出时长达到该阈值即产生 `fulfillment_collection_overdue`。
+    /// 已寄出等待领取的寄出时长达到该阈值即计为超期，有超期件即产生
+    /// `fulfillment_collection_overdue`；读取快照时传给来源端口。
     pub fulfillment_collection_overdue_age_threshold: Duration,
     pub recovery_overdue_count_threshold: i64,
     pub recovery_overdue_age_threshold: Duration,

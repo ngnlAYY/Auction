@@ -116,10 +116,14 @@ pub(crate) async fn get(
             None => sections::unknown_section(),
         }
     };
+    // 长期未领取按 Admin 生效的告警策略阈值读取，与分区降级判定同一策略；没有策略时不评估。
+    let alert_policy = state.operations_alert_policy();
+    let collection_overdue_after =
+        alert_policy.map(|policy| policy.fulfillment_collection_overdue_age_threshold);
     let owner_snapshot = async {
         match state.operations_alert_source() {
             Some(port) => port
-                .snapshot(chrono::Utc::now())
+                .snapshot(chrono::Utc::now(), collection_overdue_after)
                 .await
                 .inspect_err(|cause| {
                     diagnostics::warn(
@@ -196,11 +200,12 @@ pub(crate) async fn get(
         credentials.as_ref(),
         state.dashboard_worlds(),
     );
-    let alert_policy = state.operations_alert_policy();
     let fulfillment = owner_snapshot
         .as_ref()
         .and_then(|snapshot| {
-            snapshot.fulfillment.map(|value| sections::map_fulfillment(value, alert_policy))
+            snapshot.fulfillment.map(|value| {
+                sections::map_fulfillment(value, &snapshot.collection_overdue_items, alert_policy)
+            })
         })
         .unwrap_or_else(sections::unknown_section);
     let delivery = owner_snapshot

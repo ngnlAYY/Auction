@@ -1,11 +1,13 @@
-//! 履约健康面板：积压状态、分项计数、已寄出等待领取分组与需要人工介入的提示。
+//! 履约健康面板：积压状态、分项计数、已寄出等待领取分组、长期未领取清单与需要人工介入的提示。
 
-use auction_web_shared::t;
+use auction_web_shared::{Time, t};
 use dioxus::prelude::*;
 
 use super::derived::DashboardDerived;
 use super::widgets::{badge, card, semantic_card, text};
-use crate::api::AdminDashboardSnapshot;
+use crate::api::{AdminCollectionOverdueItem, AdminDashboardSnapshot};
+use crate::surface::admin_world_label;
+use crate::surface::lots::admin_lot_code_for;
 use crate::surface::router::Route;
 
 /// 等待领取按整天展示寄出后的等待时长（向下取整）。
@@ -74,18 +76,19 @@ pub(super) fn fulfillment_panel(
             )}
         }
         // 已寄出、只等收件人领取的义务单列：不计入待处理，但“读不到”与“未领取”分开显示。
+        // 主计数是寄出时长达到长期未领取阈值的件数，总等待数只作背景。
         h3 { {t!("dashboard-fulfillment-awaiting-title")} }
         div { class: "admin-dashboard-cards",
             {card(
-                t!("dashboard-fulfillment-awaiting-count"),
-                if fulfillment.collection_overdue {
-                    badge("warn", t!(
-                        "dashboard-fulfillment-awaiting-overdue",
-                        count: fulfillment.awaiting_collection
-                    ))
-                } else {
-                    text(fulfillment.awaiting_collection.to_string())
-                },
+                t!("dashboard-fulfillment-awaiting-overdue"),
+                badge(
+                    if fulfillment.collection_overdue_count > 0 { "warn" } else { "ok" },
+                    fulfillment.collection_overdue_count.to_string(),
+                ),
+            )}
+            {card(
+                t!("dashboard-fulfillment-awaiting-total"),
+                text(fulfillment.awaiting_collection.to_string()),
             )}
             {card(
                 t!("dashboard-fulfillment-awaiting-oldest"),
@@ -103,6 +106,9 @@ pub(super) fn fulfillment_panel(
             )}
         }
         p { class: "admin-panel__note", {t!("dashboard-fulfillment-awaiting-note")} }
+        if !fulfillment.collection_overdue_items.is_empty() {
+            {overdue_list(&fulfillment.collection_overdue_items, fulfillment.collection_overdue_count)}
+        }
         if fulfillment_backlog {
             aside {
                 class: "admin-dashboard-attention",
@@ -133,6 +139,77 @@ pub(super) fn fulfillment_panel(
     }
 
     }
+    }
+}
+
+/// 长期未领取清单：只列寄出时长达到阈值的等待领取，寄出最早优先；条数有上限，总超期件数在
+/// 说明里给出。只读展示，不提供重发或撤回入口。
+fn overdue_list(items: &[AdminCollectionOverdueItem], overdue_count: i64) -> Element {
+    rsx! {
+        h3 { id: "dashboard-fulfillment-overdue-title", {t!("dashboard-fulfillment-overdue-title")} }
+        p { class: "admin-panel__note",
+            {t!("dashboard-fulfillment-overdue-summary", count: overdue_count, shown: items.len())}
+        }
+        div { class: "admin-shell__table-wrap",
+            table { class: "admin-shell__table",
+                aria_labelledby: "dashboard-fulfillment-overdue-title",
+                thead {
+                    tr {
+                        th { scope: "col", {t!("dashboard-fulfillment-overdue-lot")} }
+                        th { scope: "col", {t!("dashboard-fulfillment-overdue-equipment")} }
+                        th { scope: "col", {t!("dashboard-fulfillment-overdue-kind")} }
+                        th { scope: "col", {t!("dashboard-fulfillment-overdue-recipient")} }
+                        th { scope: "col", {t!("dashboard-fulfillment-overdue-sent-at")} }
+                        th { scope: "col", {t!("dashboard-fulfillment-overdue-waited")} }
+                        th { scope: "col", {t!("dashboard-fulfillment-overdue-read")} }
+                    }
+                }
+                tbody {
+                    for item in items.iter() {
+                        tr { key: "{item.obligation_id}",
+                            td {
+                                {t!(
+                                    "admin-auctions-row-heading",
+                                    world: admin_world_label(&item.world),
+                                    number: item.auction_sequence
+                                )}
+                                " "
+                                {admin_lot_code_for(&item.equipment_category, item.lot_number)}
+                            }
+                            td { "{item.equipment_name}" }
+                            td { {overdue_kind_label(&item.obligation_kind)} }
+                            td { "{item.recipient}" }
+                            td { Time { value: item.sent_at.clone() } }
+                            td {
+                                {t!(
+                                    "dashboard-fulfillment-awaiting-days",
+                                    days: item.age_seconds / SECONDS_PER_DAY
+                                )}
+                            }
+                            td {
+                                if item.last_read_failed {
+                                    {badge("warn", t!("dashboard-fulfillment-overdue-read-failed"))}
+                                } else {
+                                    {t!("dashboard-fulfillment-overdue-read-ok")}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// 等待领取义务类别的当前语言名称；解码已拒绝闭集外的值，这里只兜底原样显示。
+fn overdue_kind_label(kind: &str) -> String {
+    match kind {
+        "seller_payout" => t!("dashboard-fulfillment-overdue-kind-seller-payout"),
+        "buyer_refund" => t!("dashboard-fulfillment-overdue-kind-buyer-refund"),
+        "unsold_return" => t!("dashboard-fulfillment-overdue-kind-unsold-return"),
+        "withdrawn_return" => t!("dashboard-fulfillment-overdue-kind-withdrawn-return"),
+        "winner_equipment_handoff" => t!("dashboard-fulfillment-overdue-kind-handoff"),
+        _ => kind.to_owned(),
     }
 }
 

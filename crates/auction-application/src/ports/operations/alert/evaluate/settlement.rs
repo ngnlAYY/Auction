@@ -107,6 +107,13 @@ pub(super) fn evaluate_fulfillment(
         || snapshot.oldest_awaiting_collection_age_seconds < 0
         || (snapshot.awaiting_collection == 0
             && snapshot.oldest_awaiting_collection_age_seconds != 0)
+        // 超期件数是等待领取的子集；有超期件时最久一笔必然达到本策略阈值，否则说明快照按
+        // 别的阈值读取，失败关闭。
+        || snapshot.collection_overdue < 0
+        || snapshot.collection_overdue > snapshot.awaiting_collection
+        || (snapshot.collection_overdue > 0
+            && snapshot.oldest_awaiting_collection_age_seconds
+                < policy.fulfillment_collection_overdue_age_threshold.as_secs() as i64)
     {
         return Err(OperationsAlertError::Invalid);
     }
@@ -156,14 +163,14 @@ pub(super) fn evaluate_fulfillment(
             0,
         )?);
     }
-    // 长期未领取只提醒人工跟进：计数是全部等待领取，年龄是最久一笔的寄出时长；
+    // 长期未领取只提醒人工跟进：计数是达到阈值的件数（超期件数），年龄是最久一笔的寄出时长；
     // 告警不改变义务，也不触发重发或撤回。
     if assessment.collection_overdue {
         signals.push(OperationsAlertSignal::new(
             OperationsAlertKind::FulfillmentCollectionOverdue,
             "auction",
             OperationsAlertSource::Fulfillment,
-            snapshot.awaiting_collection,
+            snapshot.collection_overdue,
             snapshot.oldest_awaiting_collection_age_seconds,
         )?);
     }

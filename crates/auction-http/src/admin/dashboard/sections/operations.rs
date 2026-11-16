@@ -1,7 +1,8 @@
 //! Admin dashboard 履约、投递和 recovery 水位 section。
 
 use auction_application::operations::{
-    OperationsAlertDeliverySnapshot, OperationsAlertFulfillmentSnapshot, OperationsAlertPolicy,
+    OperationsAlertCollectionOverdueItem, OperationsAlertDeliverySnapshot,
+    OperationsAlertFulfillmentSnapshot, OperationsAlertPolicy,
     OperationsAlertReconciliationSnapshot, OperationsAlertRecoverySnapshot, assess_delivery,
     assess_fulfillment, assess_recovery,
 };
@@ -11,8 +12,11 @@ use serde_json::json;
 
 use crate::mapping::timestamp;
 
+/// 履约分区。长期未领取的超期件数与清单出自同一只读快照，阈值即 Admin 生效的告警策略；
+/// 没有告警策略时不声称超期：计数为 0、清单为空。清单只含业务标识与展示字段。
 pub(crate) fn map_fulfillment(
     snapshot: OperationsAlertFulfillmentSnapshot,
+    collection_overdue_items: &[OperationsAlertCollectionOverdueItem],
     policy: Option<&OperationsAlertPolicy>,
 ) -> AdminDashboardSectionResponse {
     let observed_at = timestamp(chrono::Utc::now());
@@ -29,7 +33,11 @@ pub(crate) fn map_fulfillment(
         None
     };
     // 长期未领取与告警扫描同一阈值判定；没有告警策略时不声称超期。
-    let collection_overdue = assessment.is_some_and(|assessment| assessment.collection_overdue);
+    let (collection_overdue_count, collection_overdue_items) = if policy.is_some() {
+        (snapshot.collection_overdue, collection_overdue_items)
+    } else {
+        (0, &[][..])
+    };
     AdminDashboardSectionResponse {
         status: if degraded_reason.is_some() {
             DashboardStatus::Degraded.as_str().to_owned()
@@ -52,7 +60,23 @@ pub(crate) fn map_fulfillment(
             "oldest_prerequisite_wait_age_seconds": snapshot.oldest_prerequisite_wait_age_seconds,
             "oldest_awaiting_collection_age_seconds":
                 snapshot.oldest_awaiting_collection_age_seconds,
-            "collection_overdue": collection_overdue,
+            "collection_overdue_count": collection_overdue_count,
+            "collection_overdue_items": collection_overdue_items
+                .iter()
+                .map(|item| json!({
+                    "obligation_id": item.obligation_id,
+                    "obligation_kind": item.obligation_kind.as_str(),
+                    "world": item.auction_world,
+                    "auction_sequence": item.auction_sequence,
+                    "lot_number": item.lot_number,
+                    "equipment_category": item.equipment_category,
+                    "equipment_name": item.equipment_name,
+                    "recipient": item.recipient,
+                    "sent_at": timestamp(item.sent_at),
+                    "age_seconds": item.age_seconds,
+                    "last_read_failed": item.last_read_failed,
+                }))
+                .collect::<Vec<_>>(),
         })),
     }
 }
@@ -202,9 +226,13 @@ mod tests {
     use auction_application::operations::{
         OperationsAlertReconciliationWorld, OperationsAlertRecoverySnapshot,
     };
+    use auction_domain::SettlementObligationKind;
+    use chrono::TimeZone;
+    use uuid::Uuid;
 
     use super::{
-        OperationsAlertDeliverySnapshot, OperationsAlertFulfillmentSnapshot, OperationsAlertPolicy,
+        OperationsAlertCollectionOverdueItem, OperationsAlertDeliverySnapshot,
+        OperationsAlertFulfillmentSnapshot, OperationsAlertPolicy,
         OperationsAlertReconciliationSnapshot, map_delivery, map_fulfillment, map_reconciliation,
         map_recovery,
     };
@@ -249,62 +277,91 @@ mod tests {
             oldest_backlog_age_seconds: age,
             oldest_prerequisite_wait_age_seconds: prerequisite_age,
             oldest_awaiting_collection_age_seconds: 0,
+            collection_overdue: 0,
         }
     }
 
     #[test]
     fn fulfillment_uses_shared_scanner_thresholds_and_ignores_payment_waiting() {
         let policy = policy();
-        let count_reached = map_fulfillment(fulfillment(4, 4, 0, 10, 0), Some(&policy));
+        let count_reached = map_fulfillment(fulfillment(4, 4, 0, 10, 0), &[], Some(&policy));
         assert_eq!(count_reached.status, "degraded");
-        let age_reached = map_fulfillment(fulfillment(0, 0, 0, 900, 0), Some(&policy));
+        let age_reached = map_fulfillment(fulfillment(0, 0, 0, 900, 0), &[], Some(&policy));
         assert_eq!(age_reached.status, "degraded");
-        let waiting_payment = map_fulfillment(fulfillment(0, 100, 0, 0, 0), Some(&policy));
+        let waiting_payment = map_fulfillment(fulfillment(0, 100, 0, 0, 0), &[], Some(&policy));
         assert_eq!(waiting_payment.status, "ok");
-        let prerequisite = map_fulfillment(fulfillment(0, 0, 1, 0, 900), Some(&policy));
+        let prerequisite = map_fulfillment(fulfillment(0, 0, 1, 0, 900), &[], Some(&policy));
         assert_eq!(prerequisite.status, "degraded");
     }
 
-    /// 等待领取单列为独立分组，计数、读取失败数与最老等待年龄原样投影；只有最久寄出时长达到
-    /// 长期未领取阈值时才降级，与告警扫描同一判定。
+    /// 等待领取单列为独立分组，计数、读取失败数与最老等待年龄原样投影；主计数是达到长期未领取
+    /// 阈值的件数（超期件数），总等待数只作背景。有超期件时降级，并原样投影同一快照里的清单；
+    /// 没有超期件不降级；没有告警策略时不声称超期。
     #[test]
     fn awaiting_collection_is_projected_separately_without_backlog() {
         let policy = policy();
-        let section = map_fulfillment(
-            OperationsAlertFulfillmentSnapshot {
-                awaiting_collection: 36,
-                awaiting_collection_unreadable: 12,
-                oldest_awaiting_collection_age_seconds: 691_200,
-                ..fulfillment(0, 0, 0, 0, 0)
-            },
-            Some(&policy),
-        );
-        assert_eq!(section.status, "degraded", "最久已寄出 8 天，超过 72 小时阈值");
+        let sent_at = chrono::Utc.timestamp_opt(1_700_000_000, 0).single().expect("寄出时刻");
+        let item = OperationsAlertCollectionOverdueItem {
+            obligation_id: Uuid::from_u128(0x10),
+            obligation_kind: SettlementObligationKind::SellerPayout,
+            auction_world: "main".to_owned(),
+            auction_sequence: 4,
+            lot_number: 12,
+            equipment_category: "Shield".to_owned(),
+            equipment_name: "Radiant Buckler".to_owned(),
+            recipient: "collection-seller".to_owned(),
+            sent_at,
+            age_seconds: 691_200,
+            last_read_failed: true,
+        };
+        let overdue = OperationsAlertFulfillmentSnapshot {
+            awaiting_collection: 36,
+            awaiting_collection_unreadable: 12,
+            oldest_awaiting_collection_age_seconds: 691_200,
+            collection_overdue: 1,
+            ..fulfillment(0, 0, 0, 0, 0)
+        };
+        let section = map_fulfillment(overdue, std::slice::from_ref(&item), Some(&policy));
+        assert_eq!(section.status, "degraded", "有寄出时长达到 72 小时阈值的等待领取");
         let data = section.data.expect("履约数据");
         assert_eq!(data["pending"], 0);
         assert_eq!(data["awaiting_collection"], 36);
         assert_eq!(data["awaiting_collection_unreadable"], 12);
         assert_eq!(data["oldest_awaiting_collection_age_seconds"], 691_200);
-        assert_eq!(data["collection_overdue"], true);
-
-        // 阈值以内只单列，不降级；没有告警策略时不声称超期。
-        let fresh = OperationsAlertFulfillmentSnapshot {
-            awaiting_collection: 36,
-            oldest_awaiting_collection_age_seconds: 259_199,
-            ..fulfillment(0, 0, 0, 0, 0)
-        };
-        let section = map_fulfillment(fresh, Some(&policy));
-        assert_eq!(section.status, "ok");
-        assert_eq!(section.data.expect("履约数据")["collection_overdue"], false);
-        let without_policy = map_fulfillment(
-            OperationsAlertFulfillmentSnapshot {
-                oldest_awaiting_collection_age_seconds: 691_200,
-                ..fresh
-            },
-            None,
+        assert_eq!(data["collection_overdue_count"], 1, "主计数是超期件数，不是 36");
+        assert_eq!(
+            data["collection_overdue_items"],
+            serde_json::json!([{
+                "obligation_id": "00000000-0000-0000-0000-000000000010",
+                "obligation_kind": "seller_payout",
+                "world": "main",
+                "auction_sequence": 4,
+                "lot_number": 12,
+                "equipment_category": "Shield",
+                "equipment_name": "Radiant Buckler",
+                "recipient": "collection-seller",
+                "sent_at": "2023-11-14T22:13:20.000000Z",
+                "age_seconds": 691_200,
+                "last_read_failed": true
+            }])
         );
+
+        // 没有超期件只单列，不降级；没有告警策略时不声称超期，也不透出清单。
+        let fresh = OperationsAlertFulfillmentSnapshot {
+            oldest_awaiting_collection_age_seconds: 259_199,
+            collection_overdue: 0,
+            ..overdue
+        };
+        let section = map_fulfillment(fresh, &[], Some(&policy));
+        assert_eq!(section.status, "ok");
+        let data = section.data.expect("履约数据");
+        assert_eq!(data["collection_overdue_count"], 0);
+        assert_eq!(data["collection_overdue_items"], serde_json::json!([]));
+        let without_policy = map_fulfillment(overdue, std::slice::from_ref(&item), None);
         assert_eq!(without_policy.status, "ok");
-        assert_eq!(without_policy.data.expect("履约数据")["collection_overdue"], false);
+        let data = without_policy.data.expect("履约数据");
+        assert_eq!(data["collection_overdue_count"], 0);
+        assert_eq!(data["collection_overdue_items"], serde_json::json!([]));
     }
 
     #[test]

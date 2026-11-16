@@ -123,8 +123,14 @@ impl OperationsAlertRuntime {
         &self,
         now: DateTime<Utc>,
     ) -> Vec<auction_application::operations::OperationsAlertSourceObservation> {
-        let source_result =
-            tokio::time::timeout(self.policy.source_timeout, self.source.snapshot(now)).await;
+        // 长期未领取的超期件数与评估使用同一策略阈值。
+        let collection_overdue_after =
+            Some(self.policy.fulfillment_collection_overdue_age_threshold);
+        let source_result = tokio::time::timeout(
+            self.policy.source_timeout,
+            self.source.snapshot(now, collection_overdue_after),
+        )
+        .await;
         let snapshot = match source_result {
             Ok(Ok(snapshot)) => snapshot,
             Ok(Err(error)) => {

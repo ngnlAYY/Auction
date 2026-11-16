@@ -1,5 +1,7 @@
 //! Operations alert 各 owner 水位的安全读取。
 
+use std::time::Duration;
+
 use auction_application::core::ApplicationError;
 use auction_application::operations::OperationsAlertSnapshot;
 use chrono::{DateTime, Utc};
@@ -17,13 +19,19 @@ use self::settlement::{delivery_snapshot, fulfillment_snapshot, recovery_snapsho
 pub(crate) async fn snapshot_postgres(
     store: &DatabaseStore,
     now: DateTime<Utc>,
+    collection_overdue_after: Option<Duration>,
 ) -> Result<OperationsAlertSnapshot, ApplicationError> {
     // 每个 source 独立读取；单个 owner 的查询失败只生成该 source 的 unavailable signal，
     // 不让一个损坏的履约/恢复投影掩盖 process 或 delivery 的告警。
     let heartbeat_store = store.clone();
     let process = process_snapshot(&heartbeat_store).await.ok();
     let delivery = delivery_snapshot(store.pool(), now).await.ok();
-    let fulfillment = fulfillment_snapshot(store.pool(), now).await.ok();
+    // 长期未领取清单只随履约水位存在：履约读取失败时两者一起缺席。
+    let (fulfillment, collection_overdue_items) =
+        fulfillment_snapshot(store.pool(), now, collection_overdue_after)
+            .await
+            .ok()
+            .map_or((None, Vec::new()), |(fulfillment, items)| (Some(fulfillment), items));
     let recovery = recovery_snapshot(store.pool(), now).await.ok();
     let mail = mail_snapshot(store.pool(), now).await.ok();
     let credential = credential_snapshot(store.pool()).await.ok();
@@ -35,6 +43,7 @@ pub(crate) async fn snapshot_postgres(
         process,
         delivery,
         fulfillment,
+        collection_overdue_items,
         recovery,
         mail,
         credential,

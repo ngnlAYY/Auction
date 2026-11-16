@@ -53,8 +53,8 @@ pub struct OperationsAlertWorkerConfig {
     pub fulfillment_backlog_count_threshold: i64,
     /// settlement fulfillment backlog 最老记录年龄阈值秒数，省略时为 900 秒。
     pub fulfillment_backlog_age_seconds: u64,
-    /// 已寄出等待领取的最久寄出时长阈值秒数，范围 1-2592000；达到即产生长期未领取告警（只提醒，
-    /// 不触发任何动作），省略时为 259200 秒（72 小时）。
+    /// 已寄出等待领取的寄出时长阈值秒数，范围 1-2592000；寄出时长达到阈值的件数即超期件数，有超期
+    /// 件即产生长期未领取告警（只提醒，不触发任何动作），省略时为 259200 秒（72 小时）。
     pub fulfillment_collection_overdue_age_seconds: u64,
     /// recovery payment overdue 数量阈值；达到后产生告警，省略时为 1。
     pub recovery_overdue_count_threshold: i64,

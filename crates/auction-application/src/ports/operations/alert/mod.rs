@@ -9,6 +9,8 @@ pub const MAX_OPERATIONS_ALERT_SIGNALS: usize = 64;
 pub const MAX_OPERATIONS_ALERT_BATCH_ITEMS: usize = 64;
 /// 告警批次正文的最大字节数。
 pub const MAX_OPERATIONS_ALERT_BODY_BYTES: usize = 16 << 10;
+/// Admin 看板长期未领取清单的最多条数；总超期件数另由履约快照给出。
+pub const MAX_OPERATIONS_ALERT_COLLECTION_OVERDUE_ITEMS: usize = 20;
 
 mod assessment;
 mod console;
@@ -56,14 +58,14 @@ pub use host::{
     evaluate_host_backup, evaluate_host_wal,
 };
 pub use model::{
-    OperationsAlertCredentialSnapshot, OperationsAlertDeliverySnapshot,
-    OperationsAlertForumSnapshot, OperationsAlertFulfillmentSnapshot,
-    OperationsAlertLifecycleSnapshot, OperationsAlertMailSnapshot,
-    OperationsAlertNotificationSnapshot, OperationsAlertPolicy, OperationsAlertProcessSnapshot,
-    OperationsAlertProcessState, OperationsAlertReconciliationSnapshot,
-    OperationsAlertReconciliationWorld, OperationsAlertRecoverySnapshot,
-    OperationsAlertRecoveryWorld, OperationsAlertSnapshot, OperationsAlertSourceObservation,
-    OperationsAlertTarget,
+    OperationsAlertCollectionOverdueItem, OperationsAlertCredentialSnapshot,
+    OperationsAlertDeliverySnapshot, OperationsAlertForumSnapshot,
+    OperationsAlertFulfillmentSnapshot, OperationsAlertLifecycleSnapshot,
+    OperationsAlertMailSnapshot, OperationsAlertNotificationSnapshot, OperationsAlertPolicy,
+    OperationsAlertProcessSnapshot, OperationsAlertProcessState,
+    OperationsAlertReconciliationSnapshot, OperationsAlertReconciliationWorld,
+    OperationsAlertRecoverySnapshot, OperationsAlertRecoveryWorld, OperationsAlertSnapshot,
+    OperationsAlertSourceObservation, OperationsAlertTarget,
 };
 pub use signals::{
     OPERATIONS_ALERT_ACCOUNT_BUSY_AGE, OPERATIONS_ALERT_DIGEST_INTERVAL,

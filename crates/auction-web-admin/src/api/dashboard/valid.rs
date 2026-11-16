@@ -6,8 +6,9 @@
 //! 后端从不输出这些 null。
 
 use super::{
-    AdminAlertingSection, AdminDashboardSnapshot, AdminExternalAccountsData, AdminFulfillmentData,
-    AdminMailData, AdminRealtimeData, AdminReconciliationData,
+    AdminAlertingSection, AdminCollectionOverdueItem, AdminDashboardSnapshot,
+    AdminExternalAccountsData, AdminFulfillmentData, AdminMailData, AdminRealtimeData,
+    AdminReconciliationData,
 };
 
 pub(super) fn valid_dashboard_semantics(snapshot: &AdminDashboardSnapshot) -> bool {
@@ -28,13 +29,38 @@ fn valid_realtime(data: &AdminRealtimeData) -> bool {
     data.total_lag >= 0
 }
 
-/// 等待领取的读取失败数只是其子集；没有等待领取时不能带等待年龄，也不能标记长期未领取。
+/// 等待领取的读取失败数与超期件数都是其子集，长期未领取清单不多于超期件数；没有等待领取时
+/// 不能带等待年龄。
 fn valid_fulfillment(data: &AdminFulfillmentData) -> bool {
     data.awaiting_collection >= 0
         && (0..=data.awaiting_collection).contains(&data.awaiting_collection_unreadable)
+        && (0..=data.awaiting_collection).contains(&data.collection_overdue_count)
+        && i64::try_from(data.collection_overdue_items.len())
+            .is_ok_and(|items| items <= data.collection_overdue_count)
+        && data.collection_overdue_items.iter().all(valid_collection_overdue_item)
         && data.oldest_awaiting_collection_age_seconds >= 0
-        && (data.awaiting_collection > 0
-            || (data.oldest_awaiting_collection_age_seconds == 0 && !data.collection_overdue))
+        && (data.awaiting_collection > 0 || data.oldest_awaiting_collection_age_seconds == 0)
+}
+
+/// 清单只会出现等待领取的五类义务（COD 与载体付款按等待付款口径，不在其中）。
+fn valid_collection_overdue_item(item: &AdminCollectionOverdueItem) -> bool {
+    let text = |value: &str| !value.is_empty() && value == value.trim();
+    matches!(
+        item.obligation_kind.as_str(),
+        "seller_payout"
+            | "buyer_refund"
+            | "unsold_return"
+            | "withdrawn_return"
+            | "winner_equipment_handoff"
+    ) && matches!(item.world.as_str(), "main" | "isekai")
+        && item.auction_sequence > 0
+        && item.lot_number > 0
+        && item.age_seconds >= 0
+        && text(&item.obligation_id)
+        && text(&item.equipment_category)
+        && text(&item.equipment_name)
+        && text(&item.recipient)
+        && text(&item.sent_at)
 }
 
 /// 对账报告按业务世界汇总，最多 main 与 isekai 两项；在途件数、笔数与金额不得为负。

@@ -261,6 +261,8 @@ pub(crate) async fn apply_read_mode(
             snapshot.delivery = None;
             snapshot.notification = None;
             snapshot.fulfillment = None;
+            // 长期未领取清单只随履约水位存在，履约来源不可用时一并清空。
+            snapshot.collection_overdue_items.clear();
             if mode == DispositionReadMode::Shadow {
                 // 不可比较分支必须可见；否则“没有差异样本”会被误读成“差异为零”。
                 let recorder = store.shadow_recorder();
@@ -369,6 +371,7 @@ mod tests {
             oldest_backlog_age_seconds: 0,
             oldest_prerequisite_wait_age_seconds: 0,
             oldest_awaiting_collection_age_seconds: 0,
+            collection_overdue: 0,
         }
     }
 
@@ -381,6 +384,7 @@ mod tests {
             process: None,
             delivery: delivery_failed.map(delivery),
             fulfillment: fulfillment_failed.map(fulfillment),
+            collection_overdue_items: Vec::new(),
             recovery: None,
             mail: None,
             credential: None,

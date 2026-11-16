@@ -2,9 +2,11 @@
 
 use auction_application::core::ApplicationError;
 use auction_application::operations::{
+    MAX_OPERATIONS_ALERT_COLLECTION_OVERDUE_ITEMS, OperationsAlertCollectionOverdueItem,
     OperationsAlertDeliverySnapshot, OperationsAlertFulfillmentSnapshot,
     OperationsAlertRecoverySnapshot, OperationsAlertRecoveryWorld,
 };
+use auction_domain::SettlementObligationKind;
 use chrono::{DateTime, Utc};
 use sqlx::Row;
 
@@ -105,16 +107,17 @@ pub(super) async fn delivery_snapshot(
     })
 }
 
-pub(super) async fn fulfillment_snapshot(
-    pool: &crate::database::TrackedPool<sqlx::Postgres>,
-    now: DateTime<Utc>,
-) -> Result<OperationsAlertFulfillmentSnapshot, ApplicationError> {
-    // “等待领取”只拆出已寄出的 Send 履约：COD/载体付款义务沿用“等待买家付款”的既有口径，
-    // 等待付款或前置的项保持原分类。拆出后它们不再计入积压，但仍是未满足义务，只换分组展示。
-    let row = sqlx::query(concat!(
-        "WITH obligation_state AS (
+/// 履约分类 CTE，`$1` 是观察时刻；水位计数与长期未领取清单共用，保证同一口径。
+///
+/// “等待领取”只拆出已寄出的 Send 履约：COD/载体付款义务沿用“等待买家付款”的既有口径，
+/// 等待付款或前置的项保持原分类。拆出后它们不再计入积压，但仍是未满足义务，只换分组展示。
+macro_rules! fulfillment_classified_cte {
+    () => {
+        concat!(
+            "WITH obligation_state AS (
             SELECT obligation.id, obligation.business_state, obligation.obligation_kind,
-                   obligation.prerequisite_obligation_id,
+                   obligation.prerequisite_obligation_id, obligation.auction_id,
+                   obligation.lot_id, obligation.equipment_id, delivery.recipient,
                    COALESCE(fulfillment.execution_state, '') AS execution_state,
                    fulfillment.last_error_code,
                    COALESCE(fulfillment.created_at, obligation.created_at) AS backlog_at,
@@ -123,11 +126,11 @@ pub(super) async fn fulfillment_snapshot(
                         'winner_equipment_cod', 'winner_payment_carrier_cod'
                     )
                     AND COALESCE(",
-        crate::database::settlement::fulfillment::sent_awaiting_collection_sql!(
-            "fulfillment",
-            "delivery"
-        ),
-        ", false)) AS sent_send,
+            crate::database::settlement::fulfillment::sent_awaiting_collection_sql!(
+                "fulfillment",
+                "delivery"
+            ),
+            ", false)) AS sent_send,
                    (recovery.id IS NOT NULL
                     AND recovery.stage = 'awaiting_payment'
                     AND recovery.payment_deadline_at > $1
@@ -162,7 +165,15 @@ pub(super) async fn fulfillment_snapshot(
                    (business_state = 'ready' AND sent_send
                     AND NOT waiting_payment AND NOT waiting_prerequisite) AS awaiting_collection
             FROM obligation_state
-         )
+         )"
+        )
+    };
+}
+
+/// 履约水位计数；`$2` 是超期截止时刻（观察时刻减长期未领取阈值），可为 NULL。
+const FULFILLMENT_COUNTS: &str = concat!(
+    fulfillment_classified_cte!(),
+    "
          SELECT
             COUNT(*) FILTER (WHERE business_state = 'ready'
                 AND execution_state IN ('pending', 'prepared', 'enqueued')
@@ -203,14 +214,86 @@ pub(super) async fn fulfillment_snapshot(
                      OR (business_state = 'blocked'
                          AND execution_state NOT IN ('failed', 'satisfied'))))
                 AS oldest_waiting_prerequisite,
-            MIN(sent_at) FILTER (WHERE awaiting_collection) AS oldest_awaiting_collection
+            MIN(sent_at) FILTER (WHERE awaiting_collection) AS oldest_awaiting_collection,
+            -- 超期：寄出时刻不晚于观察时刻减阈值；未给出阈值（$2 为 NULL）时恒为 0。
+            COUNT(*) FILTER (WHERE awaiting_collection AND sent_at <= $2)
+                AS collection_overdue
          FROM classified"
-    ))
-    .bind(now)
-    .fetch_one(pool)
-    .await
-    .map_err(|error| storage_error_from(error, "读取 operations alert 履约水位失败"))?;
-    Ok(OperationsAlertFulfillmentSnapshot {
+);
+
+/// 长期未领取清单：只列寄出时刻不晚于 `$2` 的等待领取义务，寄出最早优先，最多 `$3` 条。
+/// 只取 Admin 可见的业务标识与展示字段，不读投递载荷、凭据或外部错误原文。
+const COLLECTION_OVERDUE_ITEMS: &str = concat!(
+    fulfillment_classified_cte!(),
+    "
+         SELECT classified.id AS obligation_id, classified.obligation_kind,
+                auction.world_id AS auction_world, auction.sequence AS auction_sequence,
+                lot.lot_number, equipment.category AS equipment_category,
+                equipment.name AS equipment_name, classified.recipient, classified.sent_at,
+                COALESCE(classified.last_error_code = 'evidence_unavailable', false)
+                    AS last_read_failed
+         FROM classified
+         JOIN public.auctions AS auction ON auction.id = classified.auction_id
+         JOIN public.lots AS lot ON lot.id = classified.lot_id
+         JOIN public.equipment AS equipment ON equipment.id = classified.equipment_id
+         WHERE classified.awaiting_collection AND classified.sent_at <= $2
+         ORDER BY classified.sent_at, classified.id
+         LIMIT $3"
+);
+
+/// SQL 绑定用的清单上限（`LIMIT` 取 bigint）；编译期确认可无损表示。
+const COLLECTION_OVERDUE_LIMIT_SQL: i64 = {
+    assert!(MAX_OPERATIONS_ALERT_COLLECTION_OVERDUE_ITEMS <= i64::MAX as usize);
+    MAX_OPERATIONS_ALERT_COLLECTION_OVERDUE_ITEMS as i64
+};
+
+/// 履约水位与长期未领取清单在同一只读快照内读取，超期件数与清单不会因并发收口而互相矛盾。
+/// 未给出阈值时不评估长期未领取：超期件数为 0、清单为空。
+pub(super) async fn fulfillment_snapshot(
+    pool: &crate::database::TrackedPool<sqlx::Postgres>,
+    now: DateTime<Utc>,
+    collection_overdue_after: Option<std::time::Duration>,
+) -> Result<
+    (OperationsAlertFulfillmentSnapshot, Vec<OperationsAlertCollectionOverdueItem>),
+    ApplicationError,
+> {
+    // 超期即寄出时刻不晚于观察时刻减阈值；阈值超出时间范围时失败关闭，不当作“没有超期”。
+    let overdue_cutoff = collection_overdue_after
+        .map(|threshold| {
+            chrono::Duration::from_std(threshold)
+                .ok()
+                .and_then(|threshold| now.checked_sub_signed(threshold))
+                .ok_or_else(|| storage_error("长期未领取阈值超出时间范围"))
+        })
+        .transpose()?;
+    let mut transaction = pool
+        .begin_read_snapshot()
+        .await
+        .map_err(|error| storage_error_from(error, "打开 operations alert 履约只读快照失败"))?;
+    let row = sqlx::query(FULFILLMENT_COUNTS)
+        .bind(now)
+        .bind(overdue_cutoff)
+        .fetch_one(&mut *transaction)
+        .await
+        .map_err(|error| storage_error_from(error, "读取 operations alert 履约水位失败"))?;
+    let mut items = Vec::new();
+    if overdue_cutoff.is_some() {
+        let rows = sqlx::query(COLLECTION_OVERDUE_ITEMS)
+            .bind(now)
+            .bind(overdue_cutoff)
+            .bind(COLLECTION_OVERDUE_LIMIT_SQL)
+            .fetch_all(&mut *transaction)
+            .await
+            .map_err(|error| storage_error_from(error, "读取长期未领取清单失败"))?;
+        for row in rows {
+            items.push(collection_overdue_item(&row, now)?);
+        }
+    }
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "关闭 operations alert 履约只读快照失败"))?;
+    let snapshot = OperationsAlertFulfillmentSnapshot {
         pending: row
             .try_get("pending")
             .map_err(|error| storage_error_from(error, "读取履约待处理计数失败"))?,
@@ -250,6 +333,34 @@ pub(super) async fn fulfillment_snapshot(
             row.try_get("oldest_awaiting_collection")
                 .map_err(|error| storage_error_from(error, "读取履约等待领取时间失败"))?,
         ),
+        collection_overdue: row
+            .try_get("collection_overdue")
+            .map_err(|error| storage_error_from(error, "读取履约长期未领取计数失败"))?,
+    };
+    Ok((snapshot, items))
+}
+
+/// 长期未领取清单的一行；义务种类按领域闭集解析，未知值失败关闭。
+fn collection_overdue_item(
+    row: &sqlx::postgres::PgRow,
+    now: DateTime<Utc>,
+) -> Result<OperationsAlertCollectionOverdueItem, ApplicationError> {
+    let column = |error| storage_error_from(error, "读取长期未领取清单失败");
+    let kind: String = row.try_get("obligation_kind").map_err(column)?;
+    let sent_at: DateTime<Utc> = row.try_get("sent_at").map_err(column)?;
+    Ok(OperationsAlertCollectionOverdueItem {
+        obligation_id: row.try_get("obligation_id").map_err(column)?,
+        obligation_kind: SettlementObligationKind::from_name(&kind)
+            .ok_or_else(|| storage_error("长期未领取清单的义务种类未知"))?,
+        auction_world: row.try_get("auction_world").map_err(column)?,
+        auction_sequence: row.try_get("auction_sequence").map_err(column)?,
+        lot_number: row.try_get("lot_number").map_err(column)?,
+        equipment_category: row.try_get("equipment_category").map_err(column)?,
+        equipment_name: row.try_get("equipment_name").map_err(column)?,
+        recipient: row.try_get("recipient").map_err(column)?,
+        sent_at,
+        age_seconds: age_seconds(now, Some(sent_at)),
+        last_read_failed: row.try_get("last_read_failed").map_err(column)?,
     })
 }
 

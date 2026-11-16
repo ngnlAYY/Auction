@@ -315,8 +315,31 @@ pub(crate) struct AdminFulfillmentData {
     pub oldest_prerequisite_wait_age_seconds: i64,
     /// 最早寄出的等待领取义务自寄出起的秒数；页面按天展示。
     pub oldest_awaiting_collection_age_seconds: i64,
-    /// 服务端按告警策略判定的长期未领取；页面不自建阈值。
-    pub collection_overdue: bool,
+    /// 服务端按告警策略阈值计的长期未领取件数（超期件数），是 `awaiting_collection` 的子集；
+    /// 页面不自建阈值。
+    pub collection_overdue_count: i64,
+    /// 与超期件数同一快照的长期未领取清单：寄出最早优先，条数有上限，不多于超期件数。
+    pub collection_overdue_items: Vec<AdminCollectionOverdueItem>,
+}
+
+/// 长期未领取清单的一项；只含业务标识与展示字段，不含投递载荷、凭据或外部错误原文。
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct AdminCollectionOverdueItem {
+    pub obligation_id: String,
+    /// `seller_payout`、`buyer_refund`、`unsold_return`、`withdrawn_return` 或
+    /// `winner_equipment_handoff`。
+    pub obligation_kind: String,
+    pub world: String,
+    pub auction_sequence: i64,
+    pub lot_number: i32,
+    pub equipment_category: String,
+    pub equipment_name: String,
+    pub recipient: String,
+    pub sent_at: String,
+    pub age_seconds: i64,
+    /// 最近一次 Sent 读取失败；只说明读不到，不代表是否已领取。
+    pub last_read_failed: bool,
 }
 
 pub(crate) type AdminFulfillmentSection = AdminDashboardSection<AdminFulfillmentData>;
@@ -529,7 +552,20 @@ mod tests {
                     "oldest_backlog_age_seconds": 120,
                     "oldest_prerequisite_wait_age_seconds": 60,
                     "oldest_awaiting_collection_age_seconds": 691200,
-                    "collection_overdue": true
+                    "collection_overdue_count": 3,
+                    "collection_overdue_items": [{
+                        "obligation_id": "00000000-0000-0000-0000-000000000010",
+                        "obligation_kind": "seller_payout",
+                        "world": "main",
+                        "auction_sequence": 4,
+                        "lot_number": 12,
+                        "equipment_category": "Shield",
+                        "equipment_name": "Radiant Buckler",
+                        "recipient": "collection-seller",
+                        "sent_at": "2026-01-01T00:00:00.000000Z",
+                        "age_seconds": 691200,
+                        "last_read_failed": true
+                    }]
                 }
             },
             "alerting": {
@@ -601,7 +637,10 @@ mod tests {
         assert_eq!(fulfillment.awaiting_collection, 5);
         assert_eq!(fulfillment.awaiting_collection_unreadable, 2);
         assert_eq!(fulfillment.oldest_awaiting_collection_age_seconds, 691_200);
-        assert!(fulfillment.collection_overdue);
+        assert_eq!(fulfillment.collection_overdue_count, 3);
+        assert_eq!(fulfillment.collection_overdue_items.len(), 1);
+        assert_eq!(fulfillment.collection_overdue_items[0].lot_number, 12);
+        assert!(fulfillment.collection_overdue_items[0].last_read_failed);
         let alerting = snapshot.alerting.data.expect("告警数据");
         assert_eq!(alerting.webhook_pending_count, 2);
         assert_eq!(alerting.webhook_manual_reconcile_count, 1);
@@ -674,30 +713,56 @@ mod tests {
             ("awaiting_collection_unreadable", json!(-1)),
             ("awaiting_collection", json!(-1)),
             ("oldest_awaiting_collection_age_seconds", json!(-1)),
+            ("collection_overdue_count", json!(6)),
+            ("collection_overdue_count", json!(-1)),
+            // 清单不能多于超期件数。
+            ("collection_overdue_count", json!(0)),
         ] {
             let payload = with(complete_payload(), fulfillment, key, Some(value));
             assert!(decode_dashboard_response(payload).is_err(), "{key} 越界必须拒绝");
         }
-        // 没有等待领取时不能带等待年龄或超期标记；年龄归零、超期为 false 才是安静水位。
+        // 没有等待领取时不能带等待年龄、超期件或清单；全部归零、清单为空才是安静水位。
         let empty = with(complete_payload(), fulfillment, "awaiting_collection", Some(json!(0)));
         let empty = with(empty, fulfillment, "awaiting_collection_unreadable", Some(json!(0)));
-        let empty = with(empty, fulfillment, "collection_overdue", Some(json!(false)));
+        let empty = with(empty, fulfillment, "collection_overdue_count", Some(json!(0)));
+        let empty = with(empty, fulfillment, "collection_overdue_items", Some(json!([])));
         assert!(decode_dashboard_response(empty.clone()).is_err());
-        let overdue_without_awaiting = with(
-            with(
-                empty.clone(),
-                fulfillment,
-                "oldest_awaiting_collection_age_seconds",
-                Some(json!(0)),
-            ),
-            fulfillment,
-            "collection_overdue",
-            Some(json!(true)),
-        );
-        assert!(decode_dashboard_response(overdue_without_awaiting).is_err());
         let quiet =
             with(empty, fulfillment, "oldest_awaiting_collection_age_seconds", Some(json!(0)));
-        assert!(decode_dashboard_response(quiet).is_ok());
+        assert!(decode_dashboard_response(quiet.clone()).is_ok());
+        let overdue_without_awaiting =
+            with(quiet, fulfillment, "collection_overdue_count", Some(json!(1)));
+        assert!(decode_dashboard_response(overdue_without_awaiting).is_err());
+    }
+
+    /// 清单项字段闭集与取值：义务类别只认等待领取会出现的五类，年龄与编号不得为负或为零，
+    /// 文本不得为空；未知字段同样拒绝。
+    #[test]
+    fn collection_overdue_items_fail_closed() {
+        let item = "/fulfillment/data/collection_overdue_items/0";
+        for (key, value) in [
+            ("obligation_kind", json!("winner_equipment_cod")),
+            ("obligation_kind", json!("seller")),
+            ("world", json!("moon")),
+            ("auction_sequence", json!(0)),
+            ("lot_number", json!(0)),
+            ("age_seconds", json!(-1)),
+            ("recipient", json!("")),
+            ("equipment_name", json!(" ")),
+            ("sent_at", json!("")),
+            ("obligation_id", json!("")),
+        ] {
+            let payload = with(complete_payload(), item, key, Some(value));
+            assert!(decode_dashboard_response(payload).is_err(), "{key} 非法必须拒绝");
+        }
+        let payload = with(complete_payload(), item, "unexpected", Some(json!(1)));
+        assert!(decode_dashboard_response(payload).is_err(), "清单项未知字段必须拒绝");
+        for kind in
+            ["buyer_refund", "unsold_return", "withdrawn_return", "winner_equipment_handoff"]
+        {
+            let payload = with(complete_payload(), item, "obligation_kind", Some(json!(kind)));
+            assert!(decode_dashboard_response(payload).is_ok(), "{kind} 是等待领取的义务类别");
+        }
     }
 
     #[test]

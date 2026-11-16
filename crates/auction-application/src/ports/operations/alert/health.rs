@@ -133,7 +133,14 @@ impl OperationsAlertHealth {
 
 /// 从数据库/observability owner 读取告警来源的窄端口。
 pub trait OperationsAlertSourceReader: Send + Sync {
-    fn snapshot(&self, now: DateTime<Utc>) -> ApplicationFuture<'_, OperationsAlertSnapshot>;
+    /// `collection_overdue_after` 是长期未领取阈值，调用方必须取自它评估这份快照所用的同一告警
+    /// 策略；履约快照的超期件数与长期未领取清单都按它在同一只读快照内计算。`None` 表示不评估
+    /// 长期未领取：超期件数为 0、清单为空。
+    fn snapshot(
+        &self,
+        now: DateTime<Utc>,
+        collection_overdue_after: Option<Duration>,
+    ) -> ApplicationFuture<'_, OperationsAlertSnapshot>;
 }
 
 /// 保存 signal、批次、lease 和终态的窄端口。
