@@ -358,7 +358,7 @@ Public/Admin/Worker 可在业务 listener、control socket 之外启用独立出
 未暂停时返回 `409 not_paused`（请求不发往远端），暂停期间只读且不执行 Send/Take/Return，
 响应在扫描期间暂停被解除时标记 `status=partial` 与 `external_access_resumed`，调用方不得据此隔离。
 
-邮件凭据检查由 Worker 按 ID 打开数据库信封并前后复核版本，经与邮件循环共用请求门、在途锁与账号忙熔断的客户端读取余额页：账号忙窗口内不发网络，成功不清除忙碌；同时最多一个检查，总预算 12 秒。未装配执行器（未启用 MoogleMail 或未配置 `credential_data_key`）时返回 `501 capability_unavailable`；版本冲突 `409 version_conflict`（`data.current_version`）、凭据不存在 `404 not_found`、请求无效 `400 invalid_command_id`、已有检查在执行 `429 busy`；主动暂停与其他失败为 `503 capability_unavailable`，超时 `504`。Admin 只把业务拒绝映射回原错误，其余一律报暂不可用，不回退本地直连。
+邮件凭据检查由 Worker 按 ID 打开数据库信封并前后复核版本，经与邮件循环共用请求门、在途锁与账号忙熔断的客户端读取余额页：账号忙窗口内不发网络，成功不清除忙碌；同时最多一个检查，总预算 12 秒。未装配执行器（未启用 MoogleMail 或未配置 `credential_data_key`）时返回 `501 capability_unavailable`；版本冲突 `409 version_conflict`（`data.current_version`）、凭据不存在 `404 not_found`、请求无效 `400 invalid_command_id`、已有检查在执行 `429 busy`；主动暂停（含检查进行中生效：排队中或尚未开始的世界不再发出探测）与其他失败为 `503 capability_unavailable`，超时 `504`。检查被取消或单个世界预算到期只放弃等待，已发出的探测在 Worker 内走完，之后才放行同账号的下一个物理请求。Admin 只把业务拒绝映射回原错误，其余一律报暂不可用，不回退本地直连。
 
 ## 浏览器页面
 
