@@ -1,5 +1,6 @@
 //! Public 列表的统一分页选项、译文和查询状态更新；不改变 Admin 分页策略。
 
+use auction_contracts::MAX_PUBLIC_PAGE_SIZE;
 use auction_web_shared::{Pager, QueryWriteMode, t};
 use dioxus::prelude::*;
 
@@ -14,9 +15,19 @@ pub(crate) use preferences::stored_public_page_size;
 pub(crate) const DEFAULT_PAGE_SIZE: i64 = 20;
 pub(crate) const PUBLIC_PAGE_SIZES: [i64; 4] = [10, 20, 50, 100];
 
-/// 只接受可表示的正整数；非法数量回退默认值，不静默截断合法的大数量。
+// 预设与默认值都必须是后端接受的页长，否则选择预设就会得到 400。
+const _: () = assert!(DEFAULT_PAGE_SIZE >= 1 && DEFAULT_PAGE_SIZE <= MAX_PUBLIC_PAGE_SIZE);
+const _: () = assert!(PUBLIC_PAGE_SIZES[3] <= MAX_PUBLIC_PAGE_SIZE);
+
+/// 每页数量只接受 1 到契约上限 [`MAX_PUBLIC_PAGE_SIZE`]：超出的页长后端一律拒绝，不能写进 URL、
+/// 偏好或请求。
+pub(crate) fn accepted_public_page_size(size: i64) -> Option<i64> {
+    (1..=MAX_PUBLIC_PAGE_SIZE).contains(&size).then_some(size)
+}
+
+/// 非法或超过上限的数量回退默认值，不截断成上限：截断会把用户没有选过的数量写进 URL。
 pub(crate) fn normalize_public_page_size(size: i64) -> i64 {
-    if size > 0 { size } else { DEFAULT_PAGE_SIZE }
+    accepted_public_page_size(size).unwrap_or(DEFAULT_PAGE_SIZE)
 }
 
 /// 切换数量与回到首页作为一次 URL 更新，保留世界、场次和筛选条件。
@@ -42,7 +53,7 @@ pub(crate) fn public_page_matches(
         && page_size.into().is_none_or(|size| size == requested_size)
 }
 
-/// 注入 Public 五语言文案、正整数数量与本地偏好，分页计算及键盘交互由共享组件负责。
+/// 注入 Public 五语言文案、1 到契约上限的数量与本地偏好，分页计算及键盘交互由共享组件负责。
 /// `hide_when_single` / `show_size_picker` 覆盖账号页与装备属性表的经典布局，默认仍是
 /// 目录的数字页码加每页数量选择器。
 #[component]
@@ -99,14 +110,16 @@ pub(crate) fn PublicPager(
             page_size_label: t!("pagination-size"),
             // 数量用字符串插值，避免 Fluent 浮点格式化舍入较大的合法 i64。
             page_size_option_label: Callback::new(move |count: i64| t!("pagination-size-option", count: count.to_string())),
+            // 自定义输入超过契约上限时由共享组件提示错误且不提交，不会发出必然 400 的请求。
+            max_page_size: Some(MAX_PUBLIC_PAGE_SIZE),
             allow_custom_page_size: true,
             page_size_custom_label: t!("pagination-custom"),
             page_size_apply_label: t!("pagination-apply"),
-            page_size_invalid_label: t!("pagination-positive-integer"),
+            page_size_invalid_label: t!("pagination-size-limit", maximum: MAX_PUBLIC_PAGE_SIZE.to_string()),
             on_page_change,
             on_page_clamp,
             on_page_size_change: move |size| {
-                if size <= 0 {
+                if accepted_public_page_size(size).is_none() {
                     return;
                 }
                 // 先冻结离开条目的数量（含 10），再更新 URL 和偏好；返回时不读到新偏好。
@@ -132,4 +145,42 @@ pub(crate) fn PublicPager(
         };
     }
     pager
+}
+
+#[cfg(test)]
+mod tests {
+    use auction_contracts::MAX_PUBLIC_PAGE_SIZE;
+
+    use super::{
+        DEFAULT_PAGE_SIZE, PUBLIC_PAGE_SIZES, accepted_public_page_size,
+        normalize_public_page_size, parse_public_page_size,
+    };
+
+    #[test]
+    fn page_size_choices_stop_at_the_contract_maximum() {
+        assert_eq!(MAX_PUBLIC_PAGE_SIZE, 200);
+        for size in [1, 37, 200].into_iter().chain(PUBLIC_PAGE_SIZES) {
+            assert_eq!(accepted_public_page_size(size), Some(size), "{size}");
+            assert_eq!(normalize_public_page_size(size), size, "{size}");
+        }
+        // 自定义输入 201 等越界数量不被接受：分页器不写 URL、不保存偏好，也就不会发出请求。
+        for size in [201, 1_000, i64::MAX, 0, -1, i64::MIN] {
+            assert_eq!(accepted_public_page_size(size), None, "{size}");
+            // 其他入口拿到越界值时回退默认值，不截断成上限。
+            assert_eq!(normalize_public_page_size(size), DEFAULT_PAGE_SIZE, "{size}");
+        }
+    }
+
+    #[test]
+    fn stored_and_linked_page_sizes_above_the_maximum_are_invalid() {
+        // URL 与本地偏好共用同一解析：超过上限的旧链接或旧偏好按非法值处理，由调用方恢复默认值。
+        assert_eq!(parse_public_page_size("200"), Some(200));
+        assert_eq!(parse_public_page_size("1"), Some(1));
+        for value in ["201", "500", "9223372036854775807", "99999999999999999999"] {
+            assert_eq!(parse_public_page_size(value), None, "{value}");
+        }
+        for value in ["", "0", "+20", "-20", "20.0", "2e1", " 20", "20 "] {
+            assert_eq!(parse_public_page_size(value), None, "{value}");
+        }
+    }
 }

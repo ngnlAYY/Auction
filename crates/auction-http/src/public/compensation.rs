@@ -30,7 +30,9 @@ use crate::mapping::{
     decode_public_compensation_cursor, encode_public_compensation_cursor, public_timestamp,
 };
 use crate::middleware::response_cache::LOW_FREQUENCY_CACHE_CONTROL;
-use crate::query::{page_offset, parse_positive_i64, parse_public_uuid, parse_query};
+use crate::query::{
+    page_offset, parse_positive_i64, parse_public_page_size, parse_public_uuid, parse_query,
+};
 use crate::state::PublicApiState;
 
 /// 读取已结算拍卖的补偿池批次。
@@ -46,8 +48,8 @@ pub(crate) async fn pool(
     let page = parse_positive_i64(query.get("page"), 1, None)
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "分页参数无效"))?;
     let page_size =
-        parse_positive_i64(query.get("page_size"), DEFAULT_PUBLIC_COMPENSATION_PAGE_SIZE, None)
-            .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "分页参数无效"))?;
+        parse_public_page_size(query.get("page_size"), DEFAULT_PUBLIC_COMPENSATION_PAGE_SIZE)
+            .map_err(|()| api_error(StatusCode::BAD_REQUEST, "invalid_query", "分页参数无效"))?;
 
     let raw_cursor = query.get("cursor").cloned();
     if raw_cursor.is_some() && page != 1 {
@@ -233,12 +235,11 @@ fn parse_round_page(
     let query = parse_query(uri, &["page", "page_size"]).map_err(|()| query_rejection())?;
     let page = parse_positive_i64(query.get("page"), 1, None)
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "分页参数无效"))?;
-    let page_size = parse_positive_i64(
+    let page_size = parse_public_page_size(
         query.get("page_size"),
         DEFAULT_PUBLIC_COMPENSATION_MOVEMENT_PAGE_SIZE,
-        None,
     )
-    .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "分页参数无效"))?;
+    .map_err(|()| api_error(StatusCode::BAD_REQUEST, "invalid_query", "分页参数无效"))?;
     let offset = page_offset(page, page_size, Some(MAX_PUBLIC_COMPENSATION_OFFSET))
         .ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "invalid_query", "分页参数无效"))?;
     Ok(RoundPage { auction_id, page, page_size, offset })

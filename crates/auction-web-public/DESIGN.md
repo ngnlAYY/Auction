@@ -85,7 +85,7 @@ Public 不导入 Admin 的页面、样式或 `admin-*` 选择器；共享层只�
 
 ## 分页
 
-所有主列表（目录、往期拍卖、出价日志、详情竞价历史、成交历史、黑名单、补偿池）共用共享分页器：前后按钮与有界页码窗口、总数、每页数量（预设 10/20/50/100 与自定义正整数）、跳页。页码与 `page_size` 写入 URL，URL 显式值优先；用户主动修改的每页数量保存到 `hv.public.page-size`。补偿池展开的逐件明细独立使用 `movement_page`、`movement_page_size` 与 `hv.public.movement-page-size`。没有权威总数时不伪造总数。`PublicPager` 的 `show_size_picker = false` 保留经典上一页/下一页布局（账号页与装备属性表），`hide_when_single` 在只有一页时隐藏控件但仍保留挂载，让页码与 URL 继续收敛；`max_offset` 覆盖端点 offset 上限（默认 10,000）。
+所有主列表（目录、往期拍卖、出价日志、详情竞价历史、成交历史、黑名单、补偿池）共用共享分页器：前后按钮与有界页码窗口、总数、每页数量（预设 10/20/50/100 与自定义 1–200 的整数）、跳页。每页数量的上限 200 与后端接口共用契约常量 `MAX_PUBLIC_PAGE_SIZE`（见[docs/contracts/routes.md#列表页长](../../docs/contracts/routes.md#列表页长)）：自定义输入超过上限时就地提示且不提交、不发请求；URL 或本地偏好里超过上限的旧值按非法值回退默认数量。页码与 `page_size` 写入 URL，URL 显式值优先；用户主动修改的每页数量保存到 `hv.public.page-size`。补偿池展开的逐件明细独立使用 `movement_page`、`movement_page_size` 与 `hv.public.movement-page-size`。没有权威总数时不伪造总数。`PublicPager` 的 `show_size_picker = false` 保留经典上一页/下一页布局（账号页与装备属性表），`hide_when_single` 在只有一页时隐藏控件但仍保留挂载，让页码与 URL 继续收敛；`max_offset` 覆盖端点 offset 上限（默认 10,000）。
 
 手机分页只保留当前页与相邻页、前后按钮、总数与每页数量选择；自定义数量与跳页表单由 CSS 隐藏。分页响应必须与当前请求身份匹配后才参与展示及页码纠偏，不能用旧查询的总数修改新 URL。同查询后台刷新可保留已完成快照；详情读取与命令宿主按 lot UUID 隔离，切换目标时销毁旧宿主。
 

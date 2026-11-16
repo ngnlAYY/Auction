@@ -100,6 +100,19 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 
 “会话”列：— 不需要；✓ 需要登录（Cookie `auction_public_session`）。
 
+### 列表页长
+
+下表各 Public 列表的 `page_size` 取值统一为 1–200，上限是 `auction-contracts` 的 `MAX_PUBLIC_PAGE_SIZE`，后端解析与 Public 页面的分页器、地址栏和本地偏好共用；省略时取各路由自己的默认值：
+
+| 默认 `page_size` | 路由 |
+| --- | --- |
+| 20 | `/api/v1/auctions`、`/api/v2/auctions`、`/api/v1/auctions/{auction_id}/lots`、`/api/v1/auctions/{auction_id}/bid-log`、`/api/v1/me/bids` |
+| 25 | `/api/v1/compensation-pool` |
+| 50 | `/api/v1/price-history`、`/api/v1/blacklist`、`/api/v1/compensation-pool/{auction_id}/movements`、`/api/v1/compensation-pool/{auction_id}/lots` |
+| 100 | `/api/v1/events` |
+
+超过 200、为 0 或负数、为空、不是整数或超出 64 位整数范围的取值，都在读取数据库之前以 400 拒绝：黑名单沿用其分页错误码 `invalid_pagination`，其余路由为 `invalid_query`；重复出现与其他未登记参数一样是 400 `invalid_query`。带 `cursor` 的游标页同样受该上限约束。`/api/v1/events` 另外只接受规范十进制（不接受 `+1`、`01`）。`page` 与 offset 上限不变。Public 页面的内置整目录遍历（标记页的 lot 目录、往期场次查找）按 200 逐页读取。
+
 ### 目录与内容
 
 | 方法 | 路径 | 会话 | 查询参数 / 说明 |

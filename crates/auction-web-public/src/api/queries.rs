@@ -168,8 +168,8 @@ pub(crate) async fn fetch_historical_auction(auction_id: String) -> Result<Curre
     })
 }
 
-/// 历史场次摘要的目录页大小；与并行预取的第一页使用同一 URL，命中同一缓存条目。
-const SUMMARY_PAGE_SIZE: i64 = 200;
+/// 场次摘要目录的内置读取页长（Public 页长上限）；与并行预取的第一页同 URL，命中同一缓存条目。
+const SUMMARY_PAGE_SIZE: i64 = auction_contracts::MAX_PUBLIC_PAGE_SIZE;
 
 /// 在指定状态的场次目录中查找摘要；`first_page` 是调用方已并行取得的第一页。
 async fn fetch_auction_summary(
@@ -288,9 +288,9 @@ async fn fetch_bid_log_auction_status(
     let mut auctions = Vec::new();
     let mut page_number = 1_i64;
     loop {
+        let world = Some(world_id.to_owned());
         let page =
-            fetch_auction_page(Some(world_id.to_owned()), status.to_owned(), page_number, 200)
-                .await?;
+            fetch_auction_page(world, status.to_owned(), page_number, SUMMARY_PAGE_SIZE).await?;
         let row_count =
             i64::try_from(page.auctions.len()).map_err(|_| "拍卖目录页过大".to_owned())?;
         let page_size = page.page_size;
@@ -299,7 +299,7 @@ async fn fetch_bid_log_auction_status(
         }
         let total = page.total;
         auctions.extend(page.auctions);
-        // 满页且缺 total 时继续读取，避免选择器静默截断到前 200 条。
+        // 满页且缺 total 时继续读取，避免选择器静默截断到第一页。
         if row_count < page_size
             || total.is_some_and(|total| page_number.saturating_mul(page_size) >= total)
         {
@@ -392,11 +392,12 @@ fn auction_page_url(
     format!("{endpoint}?{}", query.finish())
 }
 
-/// 预览切换只消费同一世界的近期结算场次，避免被其他世界的前 200 条挤出目录。
+/// 预览切换只消费同一世界的近期结算场次，避免被其他世界的场次挤出第一页目录。
 pub(crate) async fn fetch_auction_list(
     world_id: String,
 ) -> Result<Vec<super::HistoricalAuction>, String> {
-    Ok(fetch_auction_page(Some(world_id), "settled".to_owned(), 1, 200).await?.auctions)
+    let page = fetch_auction_page(Some(world_id), "settled".to_owned(), 1, SUMMARY_PAGE_SIZE);
+    Ok(page.await?.auctions)
 }
 
 pub(crate) async fn fetch_price_history(
@@ -596,16 +597,24 @@ pub(crate) async fn fetch_lot_detail(lot_id: String) -> Result<LotEnvelope, LotD
 mod tests {
     use std::cell::{Cell, RefCell};
 
+    use auction_contracts::MAX_PUBLIC_PAGE_SIZE;
     use futures_util::FutureExt;
 
     use super::super::swr_cache::{CacheRead, FetchOutcome};
     use super::{
-        current_auction_url, current_lots_url, failure_outcome, is_target_current,
-        retry_once_unless_authoritative,
+        SUMMARY_PAGE_SIZE, current_auction_url, current_lots_url, failure_outcome,
+        is_target_current, retry_once_unless_authoritative,
     };
     use crate::api::{CatalogLevelFilter, CurrentAuction};
 
     const AUCTION_ID: &str = "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b";
+
+    /// 内置场次目录遍历按 Public 页长上限逐页读取，后端接受这个页长（见 HTTP 路由测试）。
+    #[test]
+    fn summary_directory_reads_use_the_public_page_size_maximum() {
+        assert_eq!(SUMMARY_PAGE_SIZE, MAX_PUBLIC_PAGE_SIZE);
+        assert_eq!(SUMMARY_PAGE_SIZE, 200);
+    }
 
     type CatalogRead = Result<CacheRead<&'static str>, &'static str>;
 

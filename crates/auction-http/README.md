@@ -56,7 +56,7 @@ Public 与 Admin 两个 HTTP 表面的适配器：路由表、请求边界、会
 | `crates/auction-http/src/server/` | 监听与连接服务、Unix listener、健康、readiness、构建号、指标出口与路由表（`surfaces.rs`） |
 | `crates/auction-http/src/middleware/` | 请求边界：origin/限流/安全头（`security/`）、转发来源拒绝、严格 JSON、方法严格性、读闸与响应缓存 |
 | `crates/auction-http/src/admin/` · `public/` | 两个 surface 的 handler、路由装配与只有单一调用方的 DTO 映射（如 `admin/reports/` 的结算与 recovery 报告校验、`public/account.rs` 的账户页投影、`public/competition/mapping.rs` 的代理命令结果）；`lifecycle`、`recovery`、`reports`、`session`、`alerts`、`runtime_switches`、`mail_templates`、`account`、`competition`、`watch` 等为各 surface 路由装配 |
-| `crates/auction-http/src/errors/` · `query/` · `mapping/` | 跨 handler 共用的稳定错误外壳（`api_error`、`query_rejection`、`feature_unavailable` 等）；查询白名单、正整数、页码偏移与规范 UUID 解析；Admin/Public 时间戳格式，以及 Public 与 Admin 共用 v1 定长帧（`[版本][类型][正文]` 无填充 base64url）的五种 keyset 游标编解码与金标测试。handler 从定义处导入；`admin/`、`public/` 的模块门面不转出这些 helper，也不替子模块转出 `session/`、`state/` 的守卫与状态 |
+| `crates/auction-http/src/errors/` · `query/` · `mapping/` | 跨 handler 共用的稳定错误外壳（`api_error`、`query_rejection`、`feature_unavailable` 等）；查询白名单、正整数（含 Public 列表共用的 `page_size` 上限解析）、页码偏移与规范 UUID 解析；Admin/Public 时间戳格式，以及 Public 与 Admin 共用 v1 定长帧（`[版本][类型][正文]` 无填充 base64url）的五种 keyset 游标编解码与金标测试。handler 从定义处导入；`admin/`、`public/` 的模块门面不转出这些 helper，也不替子模块转出 `session/`、`state/` 的守卫与状态 |
 | `crates/auction-http/src/session/` · `state/` · `reads/` · `realtime_hub/` | Cookie/CSRF/守卫；API state；Public 只读处理器及其 DTO 映射（`reads/mapping.rs`）；WebSocket Hub |
 | `crates/auction-http/src/assets/` · `diagnostics/` | 内嵌资源与浏览器路由清单；诊断上下文与安全投影 |
 

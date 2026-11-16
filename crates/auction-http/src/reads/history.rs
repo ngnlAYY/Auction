@@ -17,7 +17,9 @@ use crate::diagnostics;
 use crate::errors::{api_error, not_found_error, query_rejection};
 use crate::mapping::{decode_public_bid_log_cursor, decode_public_price_history_cursor};
 use crate::middleware::response_cache::{LOW_FREQUENCY_CACHE_CONTROL, SETTLED_CACHE_CONTROL};
-use crate::query::{page_offset, parse_positive_i64, parse_public_uuid, parse_query};
+use crate::query::{
+    page_offset, parse_positive_i64, parse_public_page_size, parse_public_uuid, parse_query,
+};
 use crate::state::PublicApiState;
 
 /// 公开竞价日志。编号页与 keyset cursor 页使用已发布的互斥分页字段。
@@ -61,7 +63,7 @@ pub(crate) async fn list_bid_log(
     };
     let page = parse_positive_i64(query.get("page"), 1, None).map_err(|()| query_rejection())?;
     let page_size =
-        parse_positive_i64(query.get("page_size"), 20, None).map_err(|()| query_rejection())?;
+        parse_public_page_size(query.get("page_size"), 20).map_err(|()| query_rejection())?;
     let cursor_raw = query.remove("cursor");
     let cursor = cursor_raw
         .as_deref()
@@ -181,7 +183,7 @@ pub(crate) async fn list_price_history(
     };
     let page = parse_positive_i64(query.get("page"), 1, None).map_err(|()| query_rejection())?;
     let page_size =
-        parse_positive_i64(query.get("page_size"), 50, None).map_err(|()| query_rejection())?;
+        parse_public_page_size(query.get("page_size"), 50).map_err(|()| query_rejection())?;
     let cursor_raw = query.remove("cursor");
     let cursor = cursor_raw
         .as_deref()
