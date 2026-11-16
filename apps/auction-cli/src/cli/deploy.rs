@@ -44,7 +44,8 @@ pub(crate) struct DeployArgs {
     pub(crate) dry_run: bool,
 }
 
-/// 回退到某次 deploy 保留的旧程序；只允许不含迁移或全部登记为 compatible 的区间。
+/// 把三个运行角色回退到某次 deploy 保留的旧程序，安装目录中的 auction-cli 保持不变（须由它执行）；
+/// 只允许不含迁移或全部登记为 compatible 的区间，跨迁移时三角色有效配置须显式为 compatible。
 #[derive(Debug, Args)]
 pub(crate) struct RollbackArgs {
     /// 目标回滚记录的 deploy 回执 UUID；缺省使用最新一条。
@@ -65,8 +66,8 @@ pub(crate) struct RollbackArgs {
     /// 每个角色启动后等待 readiness 的秒数。
     #[arg(long, default_value_t = 30, value_parser = clap::value_parser!(u64).range(1..=300))]
     pub(crate) startup_timeout_seconds: u64,
-    /// 只执行回滚记录、安装目录、兼容区间、时段、磁盘空间与在途发送门禁核对，输出计划与
-    /// `gates.disk_space`；不停机、不安装、不写回执。
+    /// 只执行回滚记录、安装目录、保留 CLI、兼容区间与就绪模式、时段、磁盘空间与在途发送门禁
+    /// 核对，输出计划与 `gates.disk_space`；不停机、不安装、不写回执。
     #[arg(long)]
     pub(crate) dry_run: bool,
 }

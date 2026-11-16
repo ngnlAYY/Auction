@@ -19,7 +19,7 @@
 
 | 路径 | 内容 | 建议属主与权限 |
 | --- | --- | --- |
-| `/opt/auction/bin/` | 程序 | root，0755 |
+| `/opt/auction/bin/` | 程序（root 与 postgres 都会执行其中的 `auction-cli`） | 目录与程序 root:root 0755，`/opt`、`/opt/auction` 等各级父目录同样归 root 且禁止他人写入；`deploy`/`rollback` 停机前核对，不符即拒绝、不自动修补 |
 | `/etc/auction/` | 配置目录：`public.toml`、`admin.toml`、`worker.toml`、`common.toml` | 目录 root:auction 0750；文件 root:auction 0640 |
 | `/etc/auction/secrets.toml` | 敏感配置 | auction:auction 0600 |
 | `/etc/auction/runtime/admin.toml` | runtime 配置（Admin 写入） | 目录 auction:auction 0750；文件 auction:auction **0640** |
@@ -43,7 +43,7 @@ usermod -aG auction-worker-control auction
 
 ### 分体部署
 
-1. **安装程序**：解压发布包，把 `bin/*` 安装到 `/opt/auction/bin/`；按上文建立 `auction` 账号与 `auction-worker-control` 组。
+1. **安装程序**：以 root 解压发布包，用 `install -o root -g root -m 0755` 把 `bin/*` 安装到 `/opt/auction/bin/`（不要改归服务账号）；按上文建立 `auction` 账号与 `auction-worker-control` 组。
 2. **准备数据库账号与数据库**（PostgreSQL 18）：迁移 owner 与服务运行账号必须分离，数据库 owner 是迁移 owner。
 
    ```sql
@@ -155,14 +155,14 @@ auction-cli --config-dir /etc/auction service stop       # 时段门禁 → 按 
 
 **失败与未知结果**（各步骤的系统状态见[apps/auction-cli/README.md#制品部署与回退](../apps/auction-cli/README.md#制品部署与回退)）：
 
-- 停机前失败（含磁盘空间不足）只输出错误，不停止、不安装、不写回执。
+- 停机前失败（含磁盘空间不足）只输出错误，不停止、不安装、不写回执。安装目录、祖先或程序不归 root 或允许他人写入时同样在停机前拒绝：按[重建安装目录信任](deploy/RECOVERY.md#重建安装目录信任)从已验证的 Release 重装，不要只改属主。
 - 停机后失败每次调用最多追加一条 `action=deploy`、`outcome=failed` 回执并退出非零；除安装中途失败时换回已替换的程序外，命令不自动回滚或重启，用 `service status` 确认实际状态。保留旧程序之后的失败回执与回滚记录同一标识、带 `rollback_record_id`，`rollback --receipt-id` 能读到它；回执写不进去时错误末尾注明“部署回执也未写入”。
 - 停机备份、双 CLI 校验或保留旧程序失败：程序与数据库都未改变。恢复旧版只用安装目录中的 CLI 执行 `service start`（如 `/opt/auction/bin/auction-cli … service start --owner-secrets …`，沿用本次的 `--config-dir`、`--state-dir` 与 unit 参数）；**不要用制品 CLI**，它会先把 schema 迁到新版本，而安装目录仍是旧程序。
 - 安装中途失败：服务保持停止、迁移尚未执行，`rollback` 会拒绝。命令已把本次替换的程序从回滚记录换回并复核四个程序的摘要：错误含“已复核为部署前的旧程序”时安装目录就是旧程序，按上一条用安装目录中的 CLI `service start` 恢复。错误含“自动换回未完成”时安装目录可能新旧混合（错误列出各程序当前摘要），旧程序与摘要保留在 `<state-dir>/rollback/<id>/`；按[安装中途失败的手工换回](deploy/RECOVERY.md#安装中途失败的手工换回)逐个换回并核对摘要后再启动，不要用制品 CLI 启动；安装目录恢复为一致的旧程序之前不要重跑 `deploy`，否则新的回滚记录会把混合程序当作旧版本保留。
 - 迁移已提交但角色未就绪：先看 `service status` 与 journal 修配置，再用 `service start --owner-secrets …`（它照常执行内嵌迁移，数据库已是该版本时为空操作）；回到旧程序只能走 `rollback`（区间全为 `compatible`）或恢复停机备份。
 - 回执未写入（错误含“部署回执也未写入”）时没有可信的部署记录，用 `service status`、`/proc/<pid>/exe` 摘要与 `db status` 确认实际状态，按[RECOVERY](deploy/RECOVERY.md)核对 catalog 与程序摘要后再决定。任何情况下都不要在未逐个核对摘要时手工覆盖 `/opt/auction/bin/` 并直接启动；`deploy` 失败后的手工换回只在自动换回未完成时走[安装中途失败的手工换回](deploy/RECOVERY.md#安装中途失败的手工换回)。
 
-**容量**：每次 `deploy`/`rollback` 在 `<state-dir>/rollback/` 保留一份四个程序的副本，每次 `deploy` 在 `--backup-dir` 留下一份停机备份；CLI 不自动清理，按部署频率与库大小规划容量并纳入磁盘监控。人工清理时保留最新成功 `deploy`/`rollback` 回执引用的回滚记录与最近 N 条，整目录删除旧记录、成对删除旧备份，步骤见[回滚记录与停机备份的容量](../apps/auction-cli/README.md#回滚记录与停机备份的容量)。
+**容量**：每次 `deploy` 在 `<state-dir>/rollback/` 保留一份四个程序的副本（`rollback` 保留三个角色程序），每次 `deploy` 在 `--backup-dir` 留下一份停机备份；CLI 不自动清理，按部署频率与库大小规划容量并纳入磁盘监控。人工清理时保留最新成功 `deploy`/`rollback` 回执引用的回滚记录与最近 N 条，整目录删除旧记录、成对删除旧备份，步骤见[回滚记录与停机备份的容量](../apps/auction-cli/README.md#回滚记录与停机备份的容量)。
 
 部署后核对（任一项不符按失败处理）：`service status` 三个 unit 的 `MainPID`/`InvocationID` 与 readiness 均为 ready；`service receipt show <id>` 的 `outcome=succeeded`、四个程序摘要与发布包一致、迁移版本等于期望、备份指向本次停机备份、演练回执已审核；`db status` 与服务内嵌版本一致且无待执行迁移；`/proc/<MainPID>/exe` 摘要与回执一致。
 
@@ -174,7 +174,7 @@ auction-cli --config-dir /etc/auction service stop       # 时段门禁 → 按 
 
 迁移 `000108` 起出站通知模板保存在数据库（见[ops/config/README.md#出站通知模板数据库](config/README.md#出站通知模板数据库)）。升级含该迁移的版本时注意：升级后所有模板先使用内置默认正文，runtime 文件里固化的旧正文不再生效（区块原样保留，只为回退时旧程序仍能加载）；需要沿用的定制正文在升级后到 Admin 参数页的“MoogleMail 模板”重新保存。`worker.toml` 若带有 `[worker.mooglemail.mail_templates]` 须先删除，否则 `config check` 与 Worker 启动失败。该迁移登记为 `compatible`，回退到旧程序后旧程序重新使用自身配置里的模板。
 
-**回退**：迁移只向前。分体部署用 `auction-cli rollback --receipt-id <deploy_receipt_id>` 换回 `deploy` 保留的旧程序（不执行迁移，门禁与回执见[apps/auction-cli/README.md#回退](../apps/auction-cli/README.md#回退)）。安装旧程序中途失败时与 `deploy` 相同，命令把已替换的程序从刚保留的反向回滚记录换回并复核：错误含“已复核为回退前的程序”时按错误给出的指引处置，含“自动换回未完成”时按[安装中途失败的手工换回](deploy/RECOVERY.md#安装中途失败的手工换回)处理。合并部署没有 CLI 回退，只能换回旧的 `auction-server` 程序。迁移区间判定、含 `breaking` 时恢复升级前备份，以及手工回退须显式设置 compatible 并保留新版 CLI 的要求，见[程序回退](deploy/RECOVERY.md#程序回退)。
+**回退**：迁移只向前。分体部署用安装目录中的 `auction-cli rollback --receipt-id <deploy_receipt_id>` 把三个运行角色换回 `deploy` 保留的旧程序，安装目录中的 `auction-cli` 保持不变（不执行迁移；保留的 CLI 必须与数据库同版本，跨迁移时三角色须先显式设 `migration_compatibility_mode = "compatible"`，门禁与回执见[apps/auction-cli/README.md#回退](../apps/auction-cli/README.md#回退)）。安装旧角色程序中途失败时与 `deploy` 相同，命令把已替换的程序从刚保留的反向回滚记录换回并复核：错误含“已复核为回退前的程序”时按错误给出的指引处置，含“自动换回未完成”时按[安装中途失败的手工换回](deploy/RECOVERY.md#安装中途失败的手工换回)处理。合并部署没有 CLI 回退，只能换回旧的 `auction-server` 程序。迁移区间判定、含 `breaking` 时恢复升级前备份，以及手工回退须显式设置 compatible 并保留新版 CLI 的要求，见[程序回退](deploy/RECOVERY.md#程序回退)。
 
 ## 反向代理
 

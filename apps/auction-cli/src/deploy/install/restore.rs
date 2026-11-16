@@ -1,25 +1,25 @@
-//! 安装中途失败后的自动换回：只把本次已替换的程序从刚保留的回滚记录（deploy 是部署前的程序，
-//! rollback 是回退前程序的反向记录）装回，再按该记录复核安装目录中的全部四个程序。换回发生在
-//! 迁移与启动服务之前；换回失败时不重试，错误列出各程序的当前摘要，交由人工按 RECOVERY 核对。
+//! 安装中途失败后的自动换回：只把本次已替换的程序从刚保留的回滚记录（deploy 是部署前的四个
+//! 程序，rollback 是回退前三个角色的反向记录）装回，再按该记录复核它覆盖的全部程序；rollback
+//! 从不替换 auction-cli，也不把它列入复核。换回经同一个固定的安装目录描述符完成，发生在迁移与
+//! 启动服务之前；换回失败时不重试，错误列出各程序的当前摘要，交由人工按 RECOVERY 核对。
 
-use std::{fs, path::Path};
+use std::path::Path;
 
 use anyhow::Context;
 
+use super::trust::PinnedInstallDir;
 use super::{InstallArtifactFailure, RollbackRecord, install_one};
-use crate::support::digest::sha256_path;
 
-/// 换回所需的回滚记录与安装目标。
+/// 换回所需的回滚记录与固定的安装目录。
 pub(super) struct Swap<'a> {
     pub(super) retained: &'a RollbackRecord,
     pub(super) record_directory: &'a Path,
-    pub(super) install_dir: &'a Path,
-    pub(super) owner_uid: u32,
+    pub(super) directory: &'a PinnedInstallDir,
 }
 
 impl Swap<'_> {
-    /// 逆序换回 `replaced` 中的程序，再复核四个程序；原始安装错误保留在错误链末尾。只有四个
-    /// 程序都与回滚记录一致时才报告已恢复，否则不声称安装目录一致。
+    /// 逆序换回 `replaced` 中的程序，再复核记录覆盖的全部程序（摘要，以及换回过的程序的属主与
+    /// 权限）；原始安装错误保留在错误链末尾。只有这些程序都与回滚记录一致时才报告已恢复。
     pub(super) fn back(&self, error: anyhow::Error, replaced: &[&str]) -> InstallArtifactFailure {
         let mut failures = Vec::new();
         for name in replaced.iter().rev() {
@@ -30,17 +30,20 @@ impl Swap<'_> {
         let mut mismatched = Vec::new();
         let mut digests = Vec::with_capacity(self.retained.binaries.len());
         for binary in &self.retained.binaries {
-            let current = current_digest(&self.install_dir.join(&binary.name));
-            let matches = current
-                .as_ref()
-                .is_some_and(|(sha256, bytes)| *sha256 == binary.sha256 && *bytes == binary.bytes);
-            if !matches {
+            let current = self.directory.inspect(&binary.name).ok();
+            let matches = current.as_ref().is_some_and(|current| {
+                current.sha256 == binary.sha256 && current.bytes == binary.bytes
+            });
+            // 换回过的程序还必须恢复为可信属主与 0755；未替换的程序保持原样。
+            let sealed = !replaced.contains(&binary.name.as_str())
+                || current.as_ref().is_some_and(|current| current.sealed);
+            if !matches || !sealed {
                 mismatched.push(binary.name.as_str());
             }
             digests.push(format!(
                 "{}={}",
                 binary.name,
-                current.map_or_else(|| "不可读".to_owned(), |(sha256, _)| sha256)
+                current.map_or_else(|| "不可读".to_owned(), |current| current.sha256)
             ));
         }
         if failures.is_empty() && mismatched.is_empty() {
@@ -50,7 +53,10 @@ impl Swap<'_> {
                 format!("已把本次替换的 {} 从回滚记录换回", replaced.join("、"))
             };
             return InstallArtifactFailure {
-                error: error.context(format!("{swapped}，安装目录四个程序与回滚记录的摘要一致")),
+                error: error.context(format!(
+                    "{swapped}，安装目录中回滚记录覆盖的 {} 个程序摘要一致",
+                    self.retained.binaries.len()
+                )),
                 restored: true,
             };
         }
@@ -74,21 +80,12 @@ impl Swap<'_> {
     fn restore(&self, name: &str) -> anyhow::Result<()> {
         let binary = self.retained.binary(name).with_context(|| format!("回滚记录缺少 {name}"))?;
         install_one(
+            self.directory,
             &self.record_directory.join("bin").join(name),
-            &self.install_dir.join(name),
+            name,
             &binary.sha256,
             binary.bytes,
-            self.owner_uid,
         )
         .map_err(|failure| failure.error)
     }
-}
-
-/// 安装目录中程序的当前摘要；不是非符号链接普通文件或读不到时为 `None`，不伪造身份。
-fn current_digest(path: &Path) -> Option<(String, u64)> {
-    let metadata = fs::symlink_metadata(path).ok()?;
-    if !metadata.is_file() {
-        return None;
-    }
-    sha256_path(path).ok()
 }

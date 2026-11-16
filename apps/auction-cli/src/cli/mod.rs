@@ -60,7 +60,8 @@ pub(crate) enum Command {
     /// 从解压后的 CI 发布包制品部署：制品校验、时段门禁、演练回执、磁盘空间与在途发送门禁、
     /// 停机备份、新旧 CLI 校验、保留旧程序、安装、迁移、顺序启动与回执。只支持分体部署。
     Deploy(DeployArgs),
-    /// 回退到 `deploy` 保留的旧程序；只用于不含迁移或全部登记为 compatible 的区间。
+    /// 把三个运行角色回退到 `deploy` 保留的旧程序并保留当前 auction-cli；只用于不含迁移或全部
+    /// 登记为 compatible 的区间。
     Rollback(RollbackArgs),
     /// 数据库状态、迁移、建库、恢复预检、保留盘点与破坏性重建。
     #[command(subcommand)]

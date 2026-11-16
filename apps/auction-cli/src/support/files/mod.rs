@@ -17,7 +17,9 @@ mod evidence;
 
 pub(crate) use directory::{FileIdentity, MAX_READ_BYTES, PrivateDirectory};
 pub(crate) use disk::{DiskUsage, disk_usage};
-pub(crate) use evidence::{require_private_target, sync_parent, write_private};
+pub(crate) use evidence::{
+    require_private_directory, require_private_target, sync_parent, write_private,
+};
 
 /// 当前进程的有效 UID。
 pub(crate) fn effective_uid() -> u32 {

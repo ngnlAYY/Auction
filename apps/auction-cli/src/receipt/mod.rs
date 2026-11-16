@@ -11,15 +11,20 @@ use chrono::{DateTime, Utc};
 use crate::cli::{ReceiptArgs, ReceiptCommand};
 use crate::support::{digest, files, text};
 
+mod deploy;
 mod model;
 mod store;
 
-pub(crate) use model::DeployRecord;
+#[cfg(test)]
+pub(crate) use deploy::LegacyDeployRecord;
+pub(crate) use deploy::{CliIdentity, DeployRecord, DeploySection, RoleIdentity};
 pub(crate) use model::{
     Action, Artifact, DeploymentReceipt, MAX_FAILURE_CHARS, MigrationRecord, Outcome,
     validate_actor, validate_backup_id,
 };
-pub(crate) use store::{append, list, read, receipts_dir};
+#[cfg(test)]
+pub(crate) use model::{FORMAT, LEGACY_FORMAT};
+pub(crate) use store::{append, list, list_matching, read, receipts_dir};
 
 /// 一次部署调用的回执上下文；显式参数优先于进程环境。
 pub(crate) struct ReceiptContext {
@@ -100,7 +105,8 @@ pub(crate) fn record(
     Ok(receipt)
 }
 
-/// `deploy`/`rollback` 回执：追加同一格式，额外记录制品、演练、备份与回滚证据。
+/// `deploy`/`rollback` 回执：追加同一格式，额外以 v2 deploy 段分开记录角色制品身份、安装目录
+/// CLI 身份、观测数据库版本与演练、备份、回滚证据。
 ///
 /// `receipt_id` 由调用方在保留旧程序前分配，并与 `RollbackRecord::deploy_receipt_id`
 /// 保持同一标识；`rollback` 依赖该字段按原标识读回部署回执。
@@ -136,7 +142,7 @@ pub(crate) fn record_deploy(
         migration,
         artifacts,
         failure,
-        deploy: Some(deploy),
+        deploy: Some(DeploySection::Current(deploy)),
     };
     append(state_dir, &receipt)?;
     Ok(receipt)

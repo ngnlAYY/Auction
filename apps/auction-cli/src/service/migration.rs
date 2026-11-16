@@ -48,7 +48,7 @@ pub(super) fn require_runtime_owner(path: &Path, state: &UnitState) -> anyhow::R
 }
 
 /// systemd 的空 User 表示 root；用户名通过 NSS 解析，不用调用者 UID 推断。
-pub(crate) fn service_uid(user: &str) -> anyhow::Result<u32> {
+fn service_uid(user: &str) -> anyhow::Result<u32> {
     if user.is_empty() {
         return Ok(0);
     }
