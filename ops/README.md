@@ -178,6 +178,8 @@ Admin 的邮件 Cookie 在线校验（`POST /api/v1/admin/credentials/{credentia
 
 结算退件处理（迁移 `000114`–`000116`，均为 breaking）：升级时为已有的结算退件证据补建案件与开案事件、补登首寄派发历史与资金投递历史绑定，并把 `settlement_funding_returns` 收紧为只追加；不改写任何证据、投递或资金金额。升级后已转人工对账的退件改按退件案件计数（`settlement_return_pending`/`settlement_return_quarantined`），不再计入履约人工对账；偿付报告新增代管负债与“余额早于领回证明”标记（`balance_before_take` 为真时结论为 `unknown`，等下一次余额观察）。回退旧程序前须先确认没有未终结的 `settlement_return_action` Take 投递、补寄派发与资金返还事实，否则旧程序会把它们判为未知来源或无资金关联。
 
+同一版本的 Admin 新增“结算退件”页（`/settlement-returns`）与 `GET/POST /api/v1/admin/settlement-returns…` 接口，侧栏的导航待办读取改带 `include=settlement_returns`（见[docs/contracts/routes.md#admin-api](../docs/contracts/routes.md#admin-api)）。页面与服务端随同一制品发布：回退到旧服务端后，新页面的退件页读取为 404、导航待办读取为 400 `invalid_query` 而不显示徽标，按构建号提示刷新后恢复。`auction-cli funds preview` 的 `preview_digest` 自本版本起改变（预览事实新增成交撤销收口的识别字段）：升级前生成的摘要与确认短语在新版本上不再匹配，开户或现金对账前在新版本上重新执行 `funds preview`，使用新的摘要与确认短语。
+
 **回退**：迁移只向前。分体部署用安装目录中的 `auction-cli rollback --receipt-id <deploy_receipt_id>` 把三个运行角色换回 `deploy` 保留的旧程序，安装目录中的 `auction-cli` 保持不变（不执行迁移；保留的 CLI 必须与数据库同版本，跨迁移时三角色须先显式设 `migration_compatibility_mode = "compatible"`，门禁与回执见[apps/auction-cli/README.md#回退](../apps/auction-cli/README.md#回退)）。安装旧角色程序中途失败时与 `deploy` 相同，命令把已替换的程序从刚保留的反向回滚记录换回并复核：错误含“已复核为回退前的程序”时按错误给出的指引处置，含“自动换回未完成”时按[安装中途失败的手工换回](deploy/RECOVERY.md#安装中途失败的手工换回)处理。合并部署没有 CLI 回退，只能换回旧的 `auction-server` 程序。迁移区间判定、含 `breaking` 时恢复升级前备份，以及手工回退须显式设置 compatible 并保留新版 CLI 的要求，见[程序回退](deploy/RECOVERY.md#程序回退)。
 
 ## 反向代理
@@ -427,7 +429,7 @@ COD 实收资金化诊断使用独立 target `auction::settlement::funding_diagn
 | 暂停/恢复收件 | Admin 仪表盘或“收件审核”页；恢复轮询不绕过场次冻结的赛季收件门禁，见[docs/business-rules.md#赛季早鸟期auctionscheduleearly_bird](../docs/business-rules.md#赛季早鸟期auctionscheduleearly_bird) |
 | 结果未知的投递 | Admin “投递队列”按动作与证据人工对账；主动 Send 禁止仅凭外部引用人工确认成功，须由冻结的精确 Sent 证明恢复。未找到 Sent 不证明未发送 |
 | 恢复确认 | Admin “结算报表”中确认 `reclaimed` / `cancelled` / `equipment_recovered`；付款截止与跨赛季重列限制见[4 恢复付款超时与拒收](../docs/guide/settlement.md#4-恢复付款超时与拒收) |
-| 结算退件 | Admin 结算退件页：领回动作只在本地提交持久 Take，由 Worker 激活、投递 Worker 执行；补寄只寄原冻结收件人，每案最多 3 次（不含首寄）；Take 结果未知时案件停在 `take_unknown`，不要在游戏内手工领取或在投递台重试，按[docs/guide/mail-flows.md#结算退件](../docs/guide/mail-flows.md#结算退件)核对。代管资产与负债见 `db asset-reports` 的 `custody_*` 原因与偿付报告的代管负债 |
+| 结算退件 | Admin “结算退件”页（`/settlement-returns`，侧栏显示未结案待办数）按案件处理，动作只在详情页按服务端给出的允许动作确认后提交，处理流程见[结算退件处理](#结算退件处理)；代管与留箱结案的资产用[结算退件代管查询](#结算退件代管查询)只读核对，偿付报告单列代管负债 |
 | 论坛写入未知与私信对账 | `auction-cli forum recovery` 查看，必要时 `forum authorize-retry`；私信用 `pm list` / `pm reconcile` |
 | 规则与“关于”发布 | Admin “规则内容”“关于内容”页（内容直接写入数据库，没有文件导入） |
 | 查看部署历史 | `auction-cli service receipt list` / `service receipt show <receipt_id>`；回执由 `service start/restart` 与 `deploy`/`rollback` 追加，含程序摘要、迁移版本、恢复点、操作者与时间 |
@@ -435,6 +437,52 @@ COD 实收资金化诊断使用独立 target `auction::settlement::funding_diagn
 | Bot 资金账户 | `auction-cli funds preview` 可在线只读执行；开户或现金对账写入前须先停止 Worker，见[docs/guide/settlement.md#bot-内部履约与资金账户](../docs/guide/settlement.md#bot-内部履约与资金账户) |
 | 导出邮件诊断证据 | `auction-cli mail export-evidence <evidence-id> --output <文件>` |
 | 数据保留与清理 | `auction-cli db inventory` 只统计不授权删除；`db retention-dry-run` 按政策 v2 写 run id 回执；执行用 `db retention-purge --dry-run-receipt <回执> --approve <family>=<token> --execute --confirm 'PURGE <库名>' --receipt <回执>`，只删运行态族、逐族令牌绑定演练计数并追加 `auction.retention.purge` 审计，审计/资金/业务事实与有效会话永不删除 |
+
+### 结算退件处理
+
+被拒收或过期退回的卖方货款、买家退款与流拍/撤拍寄回，每封系统退件一个案件，规则见[docs/guide/mail-flows.md#结算退件](../docs/guide/mail-flows.md#结算退件)。在 Admin “结算退件”页列表中缺省只看未结案案件，进入详情先看“资产位置”：已寄出不等于已领取，退件停在 Bot 收件箱时资产尚未领回，领回证明成立后才算已领回；代管是替原权利人保管，权益保留，不是 Bot 自有资金。
+
+| 案件 | 做法 |
+| --- | --- |
+| 已绑定、待决定，退回资产与原派发一致 | 原收件人仍应收到时选“领回并补寄”（补寄只寄原冻结收件人，金额与附件不变，每案最多 3 次、不含首寄，次数由建案时冻结）；暂不寄出时选“领回后代管”（以后可从代管补寄）。两者都只在本地提交持久 Take，由 Worker 激活、投递 Worker 执行，案件先进入“领回中” |
+| 已绑定、资产不一致或义务已不可补寄 | 详情的阻断原因会写明；只能“领回后代管”（资产一致时）或“留箱结案”。留箱是明确例外：资产留在 Bot 收件箱记为退回待领取，原权利人的权益保留 |
+| `untrusted` 隔离 | 来源未证明，只能“标记已核对”结案，不授予领取、补寄或资金动作 |
+| `unbound` 隔离 | “重新核验”交给 Worker 只读读取收件箱中的原退件，能证明系统来源、资产与唯一原派发时改为待决定；读不到或仍不成立时保持隔离，可“标记已核对”结案。不要人工指定义务或在游戏内领取 |
+| 已代管 | 需要再寄时选“从代管补寄”，同样只寄原冻结收件人并受冻结上限约束 |
+
+命令带 `command_id` 与案件版本。页面提示结果未知（超时、断网、5xx）时，只在页面“未决命令”区按原命令重试，不要另起新命令；返回 409（版本已变、状态或资格不符等）表示案件已不同于页面所见，页面会重读，看过最新状态再决定。
+
+Take 结果未知（`take_unknown`）时案件停在人工核对：不要在游戏内手工领取，也不要在投递台对该 Take 投递重试或声明结果（投递台会拒绝）。系统只认可验证的领取证明，当前版本还没有为结算退件 Take 补采这类证明的路径，因此这类案件会保持打开，`settlement_return_quarantined` 告警持续活动（可在告警台静默重复通知），其 Take 投递也计入投递人工对账；在游戏内核对 Bot 收件箱中原退件是否仍在，记录结论后上报维护者，不要人工改库。
+
+### 结算退件代管查询
+
+只读核对代管与留箱结案的资产（在只读事务中执行，不修改任何行）：
+
+```sql
+BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY;
+-- 代管中：原权利人、代管 Credits 与装备 EID、领回证明时刻
+SELECT c.return_mail_id, c.world_id, o.obligation_kind, d.recipient AS beneficiary,
+       t.credits, t.attachment_ids, t.proven_at
+FROM public.settlement_return_cases AS c
+JOIN public.settlement_return_takes AS t ON t.return_mail_id = c.return_mail_id
+JOIN public.deliveries AS d ON d.id = t.original_delivery_id
+LEFT JOIN public.settlement_obligations AS o ON o.id = c.obligation_id
+WHERE c.status = 'held'
+ORDER BY t.proven_at;
+-- 留箱结案：资产仍在 Bot 收件箱（退回待领取），按退件 MID 在游戏内核对
+SELECT c.return_mail_id, c.world_id, i.external_mail_id, d.recipient AS beneficiary, c.closed_at
+FROM public.settlement_return_cases AS c
+JOIN public.inbound_mail AS i ON i.id = c.return_mail_id
+LEFT JOIN public.deliveries AS d ON d.id = c.delivery_id
+WHERE c.status = 'inbox_closed'
+ORDER BY c.closed_at;
+-- 未结案案件按状态计数（与导航待办和两类退件告警同一口径）
+SELECT status, count(*) FROM public.settlement_return_cases
+WHERE closed_at IS NULL GROUP BY status ORDER BY status;
+ROLLBACK;
+```
+
+代管现金在偿付报告中计为代管负债、与待付二选一只计一次；装备按 `custody_<义务种类>` 原因计入应持，留箱的按 `returned_in_inbox_<义务种类>` 计为待核对。余额观察早于最近一次现金领回证明时偿付结论为 `unknown`，等下一次余额观察。
 
 ## 备份与恢复
 

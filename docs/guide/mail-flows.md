@@ -92,6 +92,8 @@ Bot 通过 HentaiVerse 的 MoogleMail 与玩家交互：玩家寄来投稿、注
 
 补寄只寄原冻结收件人，沿用原义务换新派发：履约派发编号加一并重置为 pending，由履约 Worker 按补寄命名空间的投递/prepare/activate 身份准备，冻结正文末行写派发引用；新派发的可信寄出证明成立后本案结束（`resent`），原义务仍等待收件人领取，再次退回形成下一案件。每个案件在建立时冻结补寄上限 3（不含首寄，按派发编号计），达到上限后只能代管。补寄限于卖方货款、买方退款与流拍/撤拍寄回；付款 COD 与异世界交付归恢复流程，普通退件不重寄、不取消成交、不拉黑；原派发没有资金分配的历史现金退件只能代管或留箱。
 
+Admin “结算退件”页（`/settlement-returns`）按案件列出全部退件（含隔离记录），详情给出资产位置、派发链、领回与代管、处理事件，以及服务端判定的允许动作与阻断原因；页面只提交 `command_id`、案件版本与动作名，接口见[docs/contracts/routes.md#admin-api](../contracts/routes.md#admin-api)。Take 结果未知的案件没有人工声明入口，当前版本也还没有为结算退件 Take 补采可验证证明的路径，案件会保持打开并持续计入隔离告警，处置见[ops/README.md#结算退件处理](../../ops/README.md#结算退件处理)。
+
 ## 出站邮件
 
 所有出站邮件先写入 outbox，由投递循环发送（详见[docs/guide/settlement.md#3-投递outbox](settlement.md#3-投递outbox)）。常见类型：
