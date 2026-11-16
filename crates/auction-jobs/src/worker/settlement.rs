@@ -49,7 +49,7 @@ pub(super) async fn run_loop<C>(
                     "fulfillment worker batch was not fully processed; retrying after poll delay"
                 ),
                 Some(LoopOutcomeTransition::Recovered) => {
-                    tracing::info!("fulfillment worker batch fully processed again");
+                    tracing::info!("结算履约批次已恢复完整处理");
                 }
                 None => {}
             }

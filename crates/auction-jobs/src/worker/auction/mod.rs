@@ -63,7 +63,7 @@ pub(super) async fn run_loop<C>(
                     "auction worker batch was not fully processed; retrying after poll delay"
                 ),
                 Some(LoopOutcomeTransition::Recovered) => {
-                    tracing::info!("auction worker batch fully processed again");
+                    tracing::info!("拍卖主循环批次已恢复完整处理");
                 }
                 None => {}
             }
@@ -109,7 +109,7 @@ pub(super) async fn run_settlement_loop<C>(
                     "settlement batch was not fully processed; retrying after poll delay"
                 ),
                 Some(LoopOutcomeTransition::Recovered) => {
-                    tracing::info!("settlement batch fully processed again");
+                    tracing::info!("结算批次已恢复完整处理");
                 }
                 None => {}
             }
