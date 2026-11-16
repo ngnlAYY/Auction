@@ -1,5 +1,6 @@
-//! 迁移 000112 的历史投影修复：只收口有确凿证据（命令账本确认、原付款未终结且无外部写入、
-//! 依赖未开始）的成交撤销，复杂或缺证据的记录保持原样。
+//! 迁移 000112 的历史投影修复：只收口能证明确认、退件、Take 与被处置发送尝试彼此一致的成交
+//! 撤销（命令账本确认、原付款已寄出等待领取且是唯一派发、系统退件已被消费并由对应 Take 取回、
+//! 发送早于退件且确认后没有新 fence、依赖未开始），复杂或缺证据的记录保持原样。
 
 use auction_storage::postgres_migrate_to;
 use sqlx::PgPool;
@@ -91,6 +92,8 @@ async fn postgres_migration_112_repairs_only_provable_voided_payments() {
     .await
     .expect("模拟依赖履约已有结论");
 
+    let inconsistent = inconsistent_cases(pool).await;
+
     postgres_migrate_to(pool, 112).await.expect("执行 000112");
 
     assert_eq!(
@@ -130,6 +133,13 @@ async fn postgres_migration_112_repairs_only_provable_voided_payments() {
     assert_eq!(fulfillment(pool, unproven.seller).await.0, "pending");
     assert_eq!(fulfillment(pool, started.seller).await.0, "manual_reconcile");
 
+    // 无法证明确认、退件、Take 与被处置发送一致的记录同样保持原样（反例见 inconsistent_cases）。
+    for (label, kept, payment_state) in &inconsistent {
+        assert_eq!(fulfillment(pool, kept.payment).await.0, *payment_state, "{label}");
+        assert!(dispositions(pool, kept.payment_delivery).await.is_empty(), "{label}");
+        assert_eq!(fulfillment(pool, kept.seller).await.0, "pending", "{label}");
+    }
+
     let summary: serde_json::Value = sqlx::query_scalar(
         "SELECT metadata FROM public.audit_records
          WHERE action = 'system.migration' AND entity_id = '000112'",
@@ -144,4 +154,133 @@ async fn postgres_migration_112_repairs_only_provable_voided_payments() {
     assert_eq!(summary["closure_audits"], 5);
 
     store.postgres_pool().close().await;
+}
+
+/// 夹具语句绑定的成交身份。
+#[derive(Clone, Copy)]
+enum Bind {
+    /// 原付款投递。
+    Delivery,
+    /// 原付款义务。
+    Payment,
+}
+
+/// 一条夹具语句及其按顺序绑定的成交身份。
+type Statement = (&'static str, &'static [Bind]);
+
+/// 旧筛选条件会修复、新条件必须保持原样的历史状态：命令账本有确认、原付款仍未终结、依赖未开始，
+/// 但确认、退件、Take 与被处置的发送尝试无法证明一致。返回（说明、成交、迁移后应保持的付款履约
+/// 状态）。
+async fn inconsistent_cases(pool: &PgPool) -> Vec<(&'static str, Sale, &'static str)> {
+    let cases: [(&str, &[Statement], &str); 6] = [
+        (
+            "原付款投递写入未知、履约转人工核对",
+            &[
+                (
+                    "UPDATE public.deliveries
+                     SET status = 'manual_reconcile', failure_code = 'write_unknown',
+                         external_reference = NULL,
+                         result_metadata = '{\"operation\":\"send\",\"write_started\":true}'::jsonb
+                     WHERE id = $1",
+                    &[Bind::Delivery],
+                ),
+                (
+                    "UPDATE public.settlement_obligation_fulfillments
+                     SET execution_state = 'manual_reconcile', completed_at = clock_timestamp()
+                     WHERE obligation_id = $1",
+                    &[Bind::Payment],
+                ),
+            ],
+            "manual_reconcile",
+        ),
+        (
+            "确认之后原投递又有 Admin 命令（新 fence）",
+            &[
+                (
+                    "INSERT INTO public.delivery_admin_commands
+                        (command_id, command_kind, request_digest, delivery_id, result_payload)
+                     VALUES (gen_random_uuid(), 'reconcile', decode(repeat('d3', 32), 'hex'), $1,
+                             '{}'::jsonb)",
+                    &[Bind::Delivery],
+                ),
+                (
+                    "UPDATE public.deliveries SET fencing_version = fencing_version + 1
+                     WHERE id = $1",
+                    &[Bind::Delivery],
+                ),
+            ],
+            "enqueued",
+        ),
+        (
+            "退件之后原投递又有冻结发送尝试",
+            &[(
+                "INSERT INTO public.delivery_send_attempts
+                    (delivery_id, fencing_version, command_id, request_digest, world_id,
+                     sending_at, expectation)
+                 SELECT id, fencing_version + 1, gen_random_uuid(),
+                        decode(repeat('d4', 32), 'hex'), payload_world, clock_timestamp(),
+                        jsonb_build_object('world_id', payload_world, 'recipient', recipient,
+                            'subject', 'Recovery migration', 'body_digest',
+                            to_jsonb(array_fill(7, ARRAY[32])), 'credits', 0, 'cod', 0,
+                            'equipment_ids', '[]'::jsonb, 'credential', 'null'::jsonb)
+                 FROM public.deliveries WHERE id = $1",
+                &[Bind::Delivery],
+            )],
+            "enqueued",
+        ),
+        (
+            "原付款义务另有派发",
+            &[(
+                "INSERT INTO public.deliveries
+                    (id, command_id, request_digest, origin_kind, origin_id, recipient, payload,
+                     status, failure_code, completed_at)
+                 VALUES (gen_random_uuid(), gen_random_uuid(), decode(repeat('d5', 32), 'hex'),
+                         'settlement', $1::text, 'Recovery buyer',
+                         '{\"schema_version\":1,\"operation\":\"send\",\"world\":\"main\"}'::jsonb,
+                         'failed', 'send_rejected', clock_timestamp())",
+                &[Bind::Payment],
+            )],
+            "enqueued",
+        ),
+        (
+            "退件来源不可证明",
+            &[(
+                "UPDATE public.inbound_mail SET sender = NULL, subject = NULL
+                 WHERE id = (SELECT return_mail_id FROM public.settlement_recoveries
+                             WHERE payment_obligation_id = $1)",
+                &[Bind::Payment],
+            )],
+            "enqueued",
+        ),
+        (
+            "Take 证明与恢复记录的收回证明不符",
+            &[(
+                "UPDATE public.settlement_recovery_actions
+                 SET proof_digest = decode(repeat('d6', 32), 'hex')
+                 WHERE kind = 'reclaim_equipment_take'
+                   AND recovery_id = (SELECT id FROM public.settlement_recoveries
+                                      WHERE payment_obligation_id = $1)",
+                &[Bind::Payment],
+            )],
+            "enqueued",
+        ),
+    ];
+    let mut kept = Vec::with_capacity(cases.len());
+    for (index, (label, statements, payment_state)) in cases.into_iter().enumerate() {
+        let sequence = 7_600_101 + i64::try_from(index).expect("用例序号");
+        let sale = sale(pool, "main", sequence).await;
+        void_without_closure(pool, &sale, "reclaimed", true).await;
+        for (statement, binds) in statements {
+            let mut query = sqlx::query(sqlx::AssertSqlSafe(*statement));
+            for bind in *binds {
+                query = query.bind(match bind {
+                    Bind::Delivery => sale.payment_delivery,
+                    Bind::Payment => sale.payment,
+                });
+            }
+            query.execute(pool).await.expect(label);
+        }
+        kept.push((label, sale, payment_state));
+    }
+    kept
 }

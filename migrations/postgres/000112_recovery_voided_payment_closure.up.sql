@@ -7,12 +7,21 @@
 --   resolution 过滤，Worker 可能继续领取已撤销的付款。运行期已改为在确认事务内收口，并在领取与
 --   最终事务复核 resolution。
 --
--- 只修复全部条件同时成立、有确凿证据的记录：
---   1. 恢复记录 resolution 为 reclaimed/cancelled，且命令账本 settlement_recovery_commands 有同一
---      恢复记录、同一 action、result_code = 'ok' 的确认命令（Admin 确认的不可变证据）；
---   2. 原付款履约处于 pending/prepared/enqueued/manual_reconcile，且没有未过期的领取；
---   3. 原付款投递（若有）已不在 prepared/pending/claimed/sending，不存在未解决的外部写入；
---   4. 依赖履约（卖方货款；isekai 另有装备交付）要么已是 failed，要么是从未准备、没有未过期领取
+-- 只修复能证明“确认、退件、Take 与被处置的发送尝试”彼此一致的记录，全部条件同时成立：
+--   1. 确认：恢复记录 resolution 为 reclaimed/cancelled，且命令账本 settlement_recovery_commands 有
+--      同一恢复记录、同一 action、result_code = 'ok' 的确认命令（Admin 确认的不可变证据）；
+--   2. 原付款：履约为 enqueued（已寄出、等待领取证据）且没有未过期的领取；原付款投递是该义务唯一
+--      的结算派发，已成功寄出（status = succeeded）。结果未知（manual_reconcile、写入未知）、失败
+--      或仍在队列的投递，以及履约已转人工核对的记录都不修；
+--   3. 退件：恢复记录当前退件来源可证明（系统发件人 MoogleMail，主题为 `[RTS] ` + 付款义务的
+--      canonical 主题），证据绑定原付款义务，并已被该恢复记录消费；
+--   4. Take：确认种类对应的收回动作（reclaimed 为 reclaim_equipment_take，cancelled 为
+--      cancel_carrier_take）已满足，来源邮件、证明引用与恢复记录的 custody 证明都指向这封退件，
+--      Take 投递按同一 MID 在退件所在世界成功领取；
+--   5. 被处置的发送尝试就是被收回的那次：原付款投递的冻结发送尝试与当前发送围栏都早于退件截止
+--      时刻（恢复记录消费该退件的时刻，与退件收件时刻加 3 分钟取早），确认之后原投递也没有新的
+--      Admin 命令（新 fence）；
+--   6. 依赖履约（卖方货款；isekai 另有装备交付）要么已是 failed，要么是从未准备、没有未过期领取
 --      的 pending。
 --   任一条件不满足的记录保持原样，留给人工核对。不改写投递、发送证明、资金或恢复记录，不把
 --   任何投递改成“未发送”；已是终态的履约（含 satisfied）一律不动。
@@ -41,20 +50,84 @@ WITH eligible AS (
            delivery.id AS delivery_id,
            delivery.fencing_version AS delivery_fence
     FROM public.settlement_recoveries AS recovery
+    JOIN public.settlement_recovery_commands AS confirmation
+      ON confirmation.recovery_id = recovery.id
+     AND confirmation.action = recovery.resolution
+     AND confirmation.result_code = 'ok'
     JOIN public.settlement_obligation_fulfillments AS payment
       ON payment.obligation_id = recovery.payment_obligation_id
-    LEFT JOIN public.deliveries AS delivery ON delivery.id = payment.delivery_id
+    JOIN public.deliveries AS delivery ON delivery.id = payment.delivery_id
+    JOIN public.inbound_mail AS returned ON returned.id = recovery.return_mail_id
+    JOIN public.settlement_recovery_return_consumptions AS consumed
+      ON consumed.return_mail_id = returned.id
+     AND consumed.recovery_id = recovery.id
+    JOIN public.settlement_recovery_actions AS take
+      ON take.recovery_id = recovery.id
+     AND take.kind = CASE recovery.resolution
+         WHEN 'reclaimed' THEN 'reclaim_equipment_take'
+         ELSE 'cancel_carrier_take'
+     END
+    JOIN public.deliveries AS take_delivery ON take_delivery.id = take.delivery_id
+    CROSS JOIN LATERAL (
+        SELECT LEAST(consumed.recorded_at, returned.received_at + interval '3 minutes') AS cutoff
+    ) AS bound
     WHERE recovery.resolution IN ('reclaimed', 'cancelled')
-      AND EXISTS (
-          SELECT 1
-          FROM public.settlement_recovery_commands AS command
-          WHERE command.recovery_id = recovery.id
-            AND command.action = recovery.resolution
-            AND command.result_code = 'ok'
-      )
-      AND payment.execution_state IN ('pending', 'prepared', 'enqueued', 'manual_reconcile')
+      -- 2. 原付款已寄出、等待领取证据，原投递是唯一派发且已成功。
+      AND payment.execution_state = 'enqueued'
       AND (payment.claim_token IS NULL OR payment.claim_expires_at <= statement_timestamp())
-      AND (delivery.id IS NULL OR delivery.status IN ('succeeded', 'failed', 'manual_reconcile'))
+      AND delivery.origin_kind = 'settlement'
+      AND delivery.origin_id = recovery.payment_obligation_id::text
+      AND delivery.payload_operation = 'send'
+      AND delivery.status = 'succeeded'
+      AND NOT EXISTS (
+          SELECT 1
+          FROM public.deliveries AS other
+          WHERE other.origin_kind = 'settlement'
+            AND other.origin_id = recovery.payment_obligation_id::text
+            AND other.id <> delivery.id
+      )
+      -- 3. 当前退件来源可证明、绑定原付款义务，并已被本恢复记录消费。
+      AND returned.mail_kind = 'delivery'
+      AND returned.status = 'accepted'
+      AND returned.decision_code = 'settlement_recovery_returned'
+      AND returned.decision_metadata ->> 'obligation_id' = recovery.payment_obligation_id::text
+      AND COALESCE(
+          returned.sender = 'MoogleMail'
+          AND translate(returned.subject, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+                        'abcdefghijklmnopqrstuvwxyz') COLLATE "C" IN (
+              '[rts] auction equipment delivery [' || recovery.payment_obligation_id::text || ']',
+              '[rts] auction payment request [' || recovery.payment_obligation_id::text || ']'),
+          false)
+      -- 4. 确认种类对应的 Take 取回了这封退件，证明与 custody 一致。
+      AND take.execution_state = 'satisfied'
+      AND take.source_mail_id = returned.id
+      AND take.proof_kind = 'delivery_recovery_take_succeeded'
+      AND take.proof_reference = returned.external_mail_id
+      AND take.proof_digest = recovery.custody_proof_digest
+      AND recovery.custody_proof_kind = 'delivery_recovery_take_succeeded'
+      AND recovery.custody_proof_reference = returned.external_mail_id
+      AND take_delivery.origin_kind = 'settlement_recovery_action'
+      AND take_delivery.origin_id = 'recovery:' || recovery.id::text
+      AND take_delivery.status = 'succeeded'
+      AND take_delivery.payload_operation = 'take'
+      AND take_delivery.external_reference
+          = 'mooglemail:' || returned.world_id || ':take:' || returned.external_mail_id
+      -- 5. 被处置的发送早于退件截止，确认之后原投递没有新的 Admin 命令。
+      AND delivery.sending_at IS NOT NULL
+      AND delivery.sending_at < bound.cutoff
+      AND NOT EXISTS (
+          SELECT 1
+          FROM public.delivery_send_attempts AS attempt
+          WHERE attempt.delivery_id = delivery.id
+            AND attempt.sending_at >= bound.cutoff
+      )
+      AND NOT EXISTS (
+          SELECT 1
+          FROM public.delivery_admin_commands AS admin
+          WHERE admin.delivery_id = delivery.id
+            AND admin.created_at >= confirmation.created_at
+      )
+      -- 6. 依赖履约已失败或从未开始。
       AND NOT EXISTS (
           SELECT 1
           FROM public.settlement_obligation_fulfillments AS dependent
@@ -140,8 +213,7 @@ dispositions AS (
                'migration', '000112'
            )
     FROM eligible
-    WHERE eligible.delivery_id IS NOT NULL
-      AND eligible.delivery_fence >= 1
+    WHERE eligible.delivery_fence >= 1
     ON CONFLICT (delivery_id, kind, fencing_version) DO NOTHING
     RETURNING id
 ),
