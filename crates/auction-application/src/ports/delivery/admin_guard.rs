@@ -1,11 +1,14 @@
-//! Admin 投递动作的准入规则：动作—状态迁移、发送目击、永久退役与冻结资金绑定。
+//! Admin 投递动作的准入规则：动作—状态迁移、发送目击、永久退役、冻结资金绑定与结算义务资格。
 //!
-//! 存储层按既有锁序读取投递行、资金绑定、退役事实与 lot 发送资格，把结果投影成本结构；
+//! 存储层按既有锁序读取投递行、资金绑定、退役事实、lot 发送资格与结算义务资格，把结果投影成
+//! 本结构；
 //! 本模块只做纯判定，不读数据库、不写日志，也不回写任何命令账本。阻断项是闭集：提交事务
 //! 取第一个阻断项映射回既有 `DeliveryAdminError`，因此判定顺序与旧内联分支保持一致。
 //!
 //! 受保护的不变量：
 //! - 已提交命令的重放/冲突先于业务判定，人工动作不得改写已绑定资金的出站责任；
+//! - 成交已撤销（或投递已不是义务当前派发）的结算投递不能被释放或重试重新激活，该阻断优先于
+//!   其余阻断，给出明确业务错误；
 //! - Worker 已在完整 Sent 中目击同一义务时，重试或判失败都会重复付款或误判，必须失败关闭；
 //! - 已被装备损失或历史自寄核对永久退役的投递不接受任何新动作；
 //! - 每个动作只有一组允许的起止状态，账本回放复用同一映射。
@@ -54,6 +57,9 @@ pub struct DeliveryAdminGuardSnapshot {
     pub retired: bool,
     /// 只有 `Release`/`RetryFailed`/`ReconcileRetry` 读取 lot 发送资格；其余动作为 `None`。
     pub lot_eligible: Option<bool>,
+    /// 同样只有这三个动作读取：结算来源投递的义务是否仍可执行且本投递是其当前派发；非结算来源
+    /// 或其余动作为 `None`。
+    pub settlement_eligible: Option<bool>,
     /// `ReconcileSucceeded` 是否提供了外部引用（`Some`，空串与旧版一致仍交给后续校验）。
     pub has_reconcile_reference: bool,
 }
@@ -61,6 +67,8 @@ pub struct DeliveryAdminGuardSnapshot {
 /// 阻断项闭集；顺序即判定优先级，调用方取第一项。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeliveryAdminGuardBlocker {
+    /// 结算义务已不可执行（成交已撤销）或投递已不是当前派发，禁止重新激活。
+    SettlementIneligible,
     /// 已绑定资金责任，禁止人工释放/重试/对账改写。
     FundedDelivery,
     /// 已被永久退役事实收口。
@@ -82,9 +90,10 @@ pub enum DeliveryAdminGuardBlocker {
 }
 
 impl DeliveryAdminGuardBlocker {
-    /// 映射回既有 `DeliveryAdminError`；不引入新的外部错误类别。
+    /// 映射回 `DeliveryAdminError`；只有结算资格阻断有专属错误，其余沿用既有类别。
     pub const fn error(self) -> DeliveryAdminError {
         match self {
+            Self::SettlementIneligible => DeliveryAdminError::SettlementIneligible,
             Self::FundedDelivery
             | Self::RetiredDelivery
             | Self::ReconcileSucceededForSend
@@ -106,7 +115,7 @@ pub struct DeliveryAdminGuardDecision {
     pub result_metadata: serde_json::Value,
 }
 
-/// 是否需要对 lot 读取发送资格的动作。
+/// 会重新激活投递的动作：需要读取 lot 发送资格与结算义务资格。
 const fn checks_lot_eligibility(action: DeliveryAdminAction) -> bool {
     matches!(
         action,
@@ -126,6 +135,9 @@ impl DeliveryAdminGuardSnapshot {
     pub fn evaluate(&self) -> DeliveryAdminGuardDecision {
         let transition = self.action.transition();
         let mut blockers = Vec::new();
+        if checks_lot_eligibility(self.action) && self.settlement_eligible == Some(false) {
+            blockers.push(DeliveryAdminGuardBlocker::SettlementIneligible);
+        }
         if self.funded_delivery {
             blockers.push(DeliveryAdminGuardBlocker::FundedDelivery);
         }

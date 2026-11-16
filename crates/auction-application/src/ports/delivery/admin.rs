@@ -60,6 +60,10 @@ pub enum DeliveryAdminError {
     /// Worker 已在 Sent 中目击同一结算义务的邮件；重试或判失败可能重复付款或误判，须走人工 Sent 证明。
     #[error("Sent 已出现该结算义务的邮件")]
     SentSighted,
+    /// 投递所属结算义务已不可执行（成交已撤销，或该投递已不是义务的当前派发）；重新激活会
+    /// 重复付款或寄出已收回的装备。
+    #[error("投递所属结算义务已不可执行")]
+    SettlementIneligible,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

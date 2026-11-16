@@ -22,6 +22,7 @@ use crate::database::delivery::audit::{
     ADMIN_RECONCILE, ADMIN_RELEASE, ADMIN_RETRY_FAILED, DeliveryAudit,
     append as append_delivery_audit,
 };
+use crate::database::settlement::fulfillment::SettlementDeliveryEligibility;
 
 pub(crate) async fn execute(
     pool: &TrackedPool<Postgres>,
@@ -76,6 +77,32 @@ async fn execute_transaction(
     )
     .await
     .map_err(DeliveryAdminTransactionError::Funding)?;
+    let reactivates = matches!(
+        command.action,
+        DeliveryAdminAction::Release
+            | DeliveryAdminAction::RetryFailed
+            | DeliveryAdminAction::ReconcileRetry
+    );
+    // 会把投递改回 pending 的动作，先在资金锁前缀之后、投递行锁之前由结算 owner 按来源义务锁定
+    // 恢复记录与义务，用唯一资格谓词复核：成交已撤销或已不是当前派发时不写任何状态，并优先于
+    // 资金绑定给出明确业务错误（不变量 2、4、6）。
+    let settlement_eligible = if reactivates {
+        match crate::database::settlement::fulfillment::lock_settlement_delivery_eligibility(
+            transaction.transaction_mut()?,
+            command.delivery_id,
+        )
+        .await
+        .map_err(DeliveryAdminTransactionError::Sqlx)?
+        {
+            SettlementDeliveryEligibility::NotSettlement => None,
+            SettlementDeliveryEligibility::Eligible => Some(true),
+            SettlementDeliveryEligibility::Ineligible => {
+                return Err(DeliveryAdminError::SettlementIneligible.into());
+            }
+        }
+    } else {
+        None
+    };
     if funded.is_some() {
         return Err(DeliveryAdminError::Invalid.into());
     }
@@ -161,13 +188,7 @@ async fn execute_transaction(
     } else {
         false
     };
-    let checks_lot_eligibility = matches!(
-        command.action,
-        DeliveryAdminAction::Release
-            | DeliveryAdminAction::RetryFailed
-            | DeliveryAdminAction::ReconcileRetry
-    );
-    let lot_eligible = if checks_lot_eligibility {
+    let lot_eligible = if reactivates {
         Some(
             crate::database::lot_watch::delivery_eligible(
                 transaction.transaction_mut()?,
@@ -196,6 +217,7 @@ async fn execute_transaction(
         funded_delivery: funded.is_some(),
         retired,
         lot_eligible,
+        settlement_eligible,
         has_reconcile_reference: command.external_reference.is_some(),
     };
     let decision = guard.evaluate();

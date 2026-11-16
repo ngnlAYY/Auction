@@ -71,6 +71,9 @@ pub fn admin_api_error_message(code: &str) -> String {
         "invalid_delivery_command" => return t!("admin-error-invalid-delivery-command"),
         "stale_delivery_state" => return t!("admin-error-stale-delivery-state"),
         "delivery_sent_sighted" => return t!("admin-error-delivery-sent-sighted"),
+        "settlement_obligation_ineligible" => {
+            return t!("admin-error-settlement-obligation-ineligible");
+        }
         "delivery_failed" => return t!("admin-error-delivery-failed"),
         "delivery_backlog" => return t!("admin-error-delivery-backlog"),
         "compose_not_clean" => return t!("admin-error-compose-not-clean"),

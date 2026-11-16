@@ -280,6 +280,7 @@ pub(crate) fn definite_rejection(code: &str) -> bool {
             | "invalid_user_command"
             | "invalid_delivery_command"
             | "delivery_sent_sighted"
+            | "settlement_obligation_ineligible"
             | "invalid_mail_request"
             | "poll_rejected"
             | "invalid_locale"

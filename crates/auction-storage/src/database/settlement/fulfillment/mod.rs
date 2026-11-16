@@ -17,6 +17,7 @@ mod collection;
 mod delivery;
 mod dependencies;
 mod eligibility;
+pub(crate) use eligibility::{SettlementDeliveryEligibility, lock_settlement_delivery_eligibility};
 mod internal;
 pub(crate) use collection::{
     sent_awaiting_collection_sql, sent_delivery_sql, sent_unsatisfied_sql,

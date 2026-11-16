@@ -19,6 +19,7 @@ fn snapshot(action: DeliveryAdminAction) -> DeliveryAdminGuardSnapshot {
         funded_delivery: false,
         retired: false,
         lot_eligible: Some(true),
+        settlement_eligible: Some(true),
         has_reconcile_reference: true,
     }
 }
@@ -164,6 +165,42 @@ fn lot_eligibility_precedes_status_mismatch() {
     // 对账动作不读取 lot 资格；缺失值不构成阻断。
     let mut guard = snapshot(DeliveryAdminAction::ReconcileFailed);
     guard.lot_eligible = None;
+    assert!(guard.evaluate().blockers.is_empty());
+}
+
+/// 成交已撤销（或已不是当前派发）的结算投递不能被释放或重试重新激活：阻断优先于资金绑定与
+/// 其余阻断，映射到专属错误；对账成功/失败不重新激活投递，不读取该资格。
+#[test]
+fn settlement_ineligibility_blocks_reactivation_first() {
+    for action in [
+        DeliveryAdminAction::Release,
+        DeliveryAdminAction::RetryFailed,
+        DeliveryAdminAction::ReconcileRetry,
+    ] {
+        let mut guard = snapshot(action);
+        guard.settlement_eligible = Some(false);
+        guard.funded_delivery = true;
+        guard.fencing_version = 8;
+        let decision = guard.evaluate();
+        assert_eq!(
+            decision.blockers.first(),
+            Some(&DeliveryAdminGuardBlocker::SettlementIneligible),
+            "{action:?}"
+        );
+        assert_eq!(decision.result_metadata, serde_json::json!({}));
+    }
+    assert_eq!(
+        DeliveryAdminGuardBlocker::SettlementIneligible.error(),
+        DeliveryAdminError::SettlementIneligible
+    );
+
+    // 非结算来源不读取该资格；缺失值不构成阻断。
+    let mut guard = snapshot(DeliveryAdminAction::RetryFailed);
+    guard.settlement_eligible = None;
+    assert!(guard.evaluate().blockers.is_empty());
+
+    let mut guard = snapshot(DeliveryAdminAction::ReconcileFailed);
+    guard.settlement_eligible = Some(false);
     assert!(guard.evaluate().blockers.is_empty());
 }
 

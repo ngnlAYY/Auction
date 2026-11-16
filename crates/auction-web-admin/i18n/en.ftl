@@ -177,6 +177,7 @@ admin-error-invalid-delivery-id = Delivery ID is invalid.
 admin-error-invalid-delivery-command = This delivery command is not allowed in its current state; reload and try again.
 admin-error-stale-delivery-state = Delivery state changed; reload before retrying.
 admin-error-delivery-sent-sighted = Sent already contains mail for this settlement obligation; retry and mark-failed are blocked. Verify in game and close it with auction-cli settlement confirm-sent.
+admin-error-settlement-obligation-ineligible = The settlement obligation for this delivery can no longer be executed (the sale was voided, or this is not its current dispatch); release and retry are blocked. Review it on the Settlement recovery page.
 admin-error-delivery-failed = Delivery failed; check its failure code before retrying.
 admin-error-delivery-backlog = Delivery backlog is too large for this action right now.
 admin-error-compose-not-clean = The game mailbox still has an unfinished draft; clear it before sending.

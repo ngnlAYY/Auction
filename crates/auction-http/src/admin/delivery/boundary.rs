@@ -38,6 +38,13 @@ pub(crate) fn map_delivery_error(error: ApplicationError) -> Response {
             "Sent 已出现该结算义务的邮件，须用人工 Sent 证明收口",
         )
         .into_response(),
+        // 业务资格拒绝：成交已撤销或已不是当前派发，不能归入参数错误或依赖不可用。
+        ApplicationError::DeliveryAdmin(DeliveryAdminError::SettlementIneligible) => api_error(
+            StatusCode::CONFLICT,
+            "settlement_obligation_ineligible",
+            "结算义务已不可执行，不能重新激活原投递",
+        )
+        .into_response(),
         ApplicationError::DeliveryAdmin(DeliveryAdminError::CommandConflict) => {
             api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
                 .into_response()
@@ -106,10 +113,42 @@ pub(crate) fn parse_optional_timestamp(
 mod tests {
     use std::collections::BTreeMap;
 
+    use axum::body::to_bytes;
+
     use super::*;
 
     fn query(pairs: &[(&'static str, &str)]) -> BTreeMap<&'static str, String> {
         pairs.iter().map(|(key, value)| (*key, (*value).to_owned())).collect()
+    }
+
+    async fn mapped(error: DeliveryAdminError) -> (StatusCode, serde_json::Value) {
+        let response = map_delivery_error(ApplicationError::DeliveryAdmin(error));
+        let status = response.status();
+        let body = to_bytes(response.into_body(), usize::MAX).await.expect("读取错误响应体");
+        (status, serde_json::from_slice(&body).expect("错误响应是 JSON"))
+    }
+
+    /// 成交撤销后拒绝重新激活是类型化业务冲突：精确 409 与稳定错误码，不退化为 400 参数错误或
+    /// 503 依赖不可用；既有映射保持不变。
+    #[tokio::test]
+    async fn settlement_ineligibility_maps_to_a_precise_conflict() {
+        let (status, body) = mapped(DeliveryAdminError::SettlementIneligible).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(body["code"], "settlement_obligation_ineligible");
+
+        for (error, status, code) in [
+            (DeliveryAdminError::Invalid, StatusCode::BAD_REQUEST, "invalid_delivery_command"),
+            (DeliveryAdminError::Stale, StatusCode::CONFLICT, "stale_delivery_state"),
+            (DeliveryAdminError::SentSighted, StatusCode::CONFLICT, "delivery_sent_sighted"),
+            (
+                DeliveryAdminError::Unavailable,
+                StatusCode::SERVICE_UNAVAILABLE,
+                "temporarily_unavailable",
+            ),
+        ] {
+            let (actual_status, body) = mapped(error).await;
+            assert_eq!((actual_status, body["code"].as_str()), (status, Some(code)), "{error:?}");
+        }
     }
 
     #[test]

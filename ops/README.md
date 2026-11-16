@@ -453,7 +453,7 @@ WAL：`archive_command` 调用 `wal archive` 压缩、age 加密并 fsync 到本
 | 浏览器写请求返回 `origin_forbidden` | `allowed_origins` 与浏览器访问的 origin 不完全一致（协议、主机、端口） |
 | 所有客户端被同一地址限流 | 反向代理地址未加入 `trusted_proxy_cidrs`，服务端把代理当作客户端 |
 | 页面返回 503 | 程序不是 `web-embed` 构建，或内嵌资源缺失 |
-| 投递长时间停在 `manual_reconcile` | 结果未知，需在“投递队列”人工对账；不要直接改数据库。对账返回 `delivery_sent_sighted` 时说明 Sent 已有该结算义务的邮件，改用 `auction-cli settlement confirm-sent` |
+| 投递长时间停在 `manual_reconcile` | 结果未知，需在“投递队列”人工对账；不要直接改数据库。对账返回 `delivery_sent_sighted` 时说明 Sent 已有该结算义务的邮件，改用 `auction-cli settlement confirm-sent`；重试或释放返回 `settlement_obligation_ineligible` 时说明成交已撤销或该投递已不是义务的当前派发，不要再尝试重新激活，按“结算恢复”页的结论核对 |
 | `deploy` 报“仍有 N 笔已越过 sending 围栏的投递在途” | 门禁只拒绝部署，不改队列或租约。等待这些 delivery/PM 完成（或在 Admin 核对后处置），必要时调大 `--send-gate-timeout-seconds`；不得用停机打断外部写入 |
 | `deploy` 报“制品内嵌 schema 版本低于数据库” | 这是回退方向：不要用 `deploy` 覆盖新版库；按[程序回退](deploy/RECOVERY.md#程序回退)核对 `(E,D]` 区间，含 `breaking` 时恢复升级前备份 |
 | `deploy` 报“迁移演练回执核对失败” | 逐项核对回执：7 天内、提交/包名/CLI 摘要与本次制品一致、备份 schema 等于当前库、迁移区间恰好为当前→候选、readiness 全 200 且 `consistency_check.work_item=W11.4`、`conclusion=passed`、无 `anomalies`、窗口不低于三倍实测；不符就重做演练，不改回执 |
