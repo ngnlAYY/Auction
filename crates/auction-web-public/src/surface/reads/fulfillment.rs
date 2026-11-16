@@ -201,10 +201,17 @@ pub(crate) fn fulfillment() -> Element {
             if public_page_matches(page.page, page.page_size, current_page, page_size()) =>
         {
             rsx! {
-                // 重读遇到网络失败或服务暂时繁忙时，缓存层回退旧快照：标明它的确认时刻。
-                if let Some(stale_since) = stale_since.as_deref() {
-                    p { class: "public-fulfillment__stale", role: "status",
-                        {t!("fulfillment-stale", time: format_auction_time(stale_since))}
+                // 重读遇到网络失败或服务暂时繁忙时，缓存层回退旧快照：标明它的确认时刻。播报区域
+                // 随表格常驻、只更新内容，读屏才会可靠朗读首次出现的提示。
+                div {
+                    class: "public-fulfillment__stale-region",
+                    role: "status",
+                    aria_live: "polite",
+                    aria_atomic: "true",
+                    if let Some(stale_since) = stale_since.as_deref() {
+                        p { class: "public-fulfillment__stale",
+                            {t!("fulfillment-stale", time: format_auction_time(stale_since))}
+                        }
                     }
                 }
                 FulfillmentTable {
