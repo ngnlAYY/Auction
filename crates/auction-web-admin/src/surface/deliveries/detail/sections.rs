@@ -9,6 +9,8 @@ use crate::api::{
     DeliveryAttempt, DeliveryCustody, DeliveryDetail, DeliveryDisposition, DeliveryEvidence,
     DeliveryObligation, DeliveryRecovery,
 };
+use crate::surface::returns::settlement_return_case;
+use crate::surface::router::Route;
 use crate::surface::{admin_world_label, format_admin_time};
 
 #[component]
@@ -25,6 +27,15 @@ pub(super) fn DeliverySummary(detail: DeliveryDetail) -> Element {
                 dd { "{delivery_display_type(&delivery.origin_kind)}" }
                 dt { {t!("delivery-origin-id")} }
                 dd { TruncatedText { value: delivery.origin_id.clone(), portal: true } }
+                // 结算退件 Take 由退件案件推进；投递台不提供人工动作，处理入口在案件页。
+                if let Some(case) = settlement_return_case(&delivery.origin_kind, &delivery.origin_id) {
+                    dt { {t!("delivery-detail-settlement-return")} }
+                    dd {
+                        Link { to: Route::SettlementReturnDetail { return_id: case },
+                            {t!("delivery-detail-settlement-return-open")}
+                        }
+                    }
+                }
                 dt { {t!("delivery-to")} }
                 dd { "{delivery.recipient}" }
                 dt { {t!("delivery-cod")} }

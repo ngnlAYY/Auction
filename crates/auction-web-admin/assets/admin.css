@@ -1943,6 +1943,91 @@
   font-size: var(--admin-text-small);
 }
 
+/* 结算退件：列表筛选与按案件 ID 打开、详情头部、处理动作与阻断原因。 */
+.admin-settlement-returns > h1 {
+  margin: 0 0 var(--space-3);
+  font-size: var(--admin-text-title);
+}
+
+.admin-settlement-returns__lookup {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-2);
+  margin-block: var(--space-3);
+}
+
+.admin-settlement-returns__lookup label,
+.admin-settlement-returns__filters label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--admin-space-label);
+  color: var(--color-text-muted);
+  font-size: var(--admin-text-label);
+}
+
+.admin-settlement-returns__lookup input {
+  inline-size: min(28rem, 100%);
+  padding: var(--admin-space-compact) var(--space-2);
+  border: var(--border-width) solid var(--color-input-border);
+  border-radius: var(--admin-radius-input);
+  color: var(--color-text);
+  background: var(--color-input-bg);
+  font-family: var(--font-mono, monospace);
+}
+
+.admin-settlement-returns__filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+  margin-block-end: var(--space-4);
+}
+
+.admin-settlement-returns__filters select {
+  min-inline-size: 8.875rem;
+  padding: var(--admin-space-compact) var(--space-2);
+  border: var(--border-width) solid var(--color-input-border);
+  border-radius: var(--admin-radius-input);
+  color: var(--color-text);
+  background: var(--color-input-bg);
+}
+
+.admin-settlement-returns__table td {
+  vertical-align: top;
+}
+
+.admin-settlement-return-detail {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.admin-settlement-return-detail__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.admin-settlement-return-detail__head > h1 {
+  margin: 0;
+  font-size: var(--admin-text-title);
+}
+
+.admin-settlement-return-actions__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.admin-settlement-return-actions__blockers {
+  margin: 0;
+  padding-inline-start: var(--space-4);
+  color: var(--color-text-muted);
+  font-size: var(--admin-text-small);
+}
+
 .admin-delivery-detail__receipt {
   margin: 0;
   padding: var(--admin-space-compact);

@@ -10,7 +10,7 @@ use dioxus::prelude::*;
 use super::auth::AdminShell;
 use super::{
     alerts, auctions, audit, config, credentials, dashboard, deliveries, lots, mail, realtime,
-    renames, rules, settlement, status, support, users,
+    renames, returns, rules, settlement, status, support, users,
 };
 
 /// 仅在冷启动含 query 时保存一次原始相对地址，不持久化或记录查询值。
@@ -130,6 +130,14 @@ pub(super) enum Route {
 
         #[route("/settlement")]
         Settlement {},
+
+        /// 结算退件：被拒收或过期退回的货款、退款与流拍/撤拍寄回，按案件处理。
+        #[route("/settlement-returns")]
+        SettlementReturns {},
+
+        /// 单个退件案件：资产位置、处理动作与阻断原因、领回、代管、派发链与事件。
+        #[route("/settlement-returns/:return_id")]
+        SettlementReturnDetail { return_id: String },
 
         #[route("/config")]
         Config {},
@@ -258,6 +266,16 @@ fn Outbox() -> Element {
 #[component]
 fn Settlement() -> Element {
     settlement::page()
+}
+
+#[component]
+fn SettlementReturns() -> Element {
+    returns::page()
+}
+
+#[component]
+fn SettlementReturnDetail(return_id: String) -> Element {
+    returns::detail_page(return_id)
 }
 
 #[component]

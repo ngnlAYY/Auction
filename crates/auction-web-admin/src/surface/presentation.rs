@@ -74,6 +74,31 @@ pub fn admin_api_error_message(code: &str) -> String {
         "settlement_obligation_ineligible" => {
             return t!("admin-error-settlement-obligation-ineligible");
         }
+        "invalid_settlement_return_command" => {
+            return t!("admin-error-invalid-settlement-return-command");
+        }
+        "invalid_settlement_return_id" => return t!("admin-error-invalid-settlement-return-id"),
+        "settlement_return_not_found" => return t!("admin-error-settlement-return-not-found"),
+        "stale_settlement_return_state" => {
+            return t!("admin-error-stale-settlement-return-state");
+        }
+        "settlement_return_untrusted" => return t!("admin-error-settlement-return-untrusted"),
+        "settlement_return_unbound" => return t!("admin-error-settlement-return-unbound"),
+        "settlement_return_assets_mismatch" => {
+            return t!("admin-error-settlement-return-assets-mismatch");
+        }
+        "settlement_return_action_conflict" => {
+            return t!("admin-error-settlement-return-action-conflict");
+        }
+        "settlement_return_proof_required" => {
+            return t!("admin-error-settlement-return-proof-required");
+        }
+        "settlement_return_resend_limit" => {
+            return t!("admin-error-settlement-return-resend-limit");
+        }
+        "settlement_return_obligation_ineligible" => {
+            return t!("admin-error-settlement-return-obligation-ineligible");
+        }
         "delivery_failed" => return t!("admin-error-delivery-failed"),
         "delivery_backlog" => return t!("admin-error-delivery-backlog"),
         "compose_not_clean" => return t!("admin-error-compose-not-clean"),

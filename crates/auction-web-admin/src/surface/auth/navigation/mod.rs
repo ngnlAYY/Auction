@@ -19,6 +19,7 @@ fn NavigationIcon(kind: &'static str) -> Element {
         "gavel" => "m14 13-7.5 7.5a2.12 2.12 0 0 1-3-3L11 10M16 16l6-6M8 8l6-6M9 7l8 8M21 11l-8-8",
         "send" => "m22 2-7 20-4-9-9-4ZM22 2 11 13",
         "check" => "M22 11.08V12a10 10 0 1 1-5.93-9.14M22 4 12 14.01l-3-3",
+        "return" => "M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11",
         "inbox" => {
             "M22 12h-6l-2 3h-4l-2-3H2M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"
         }
@@ -55,11 +56,13 @@ fn NavigationIcon(kind: &'static str) -> Element {
     }
 }
 
-/// 子页面归属的侧栏分区：lot 列表属于拍卖场次，投递详情属于投递队列，其余路由即自身。
+/// 子页面归属的侧栏分区：lot 列表属于拍卖场次，投递详情属于投递队列，退件案件属于结算退件，
+/// 其余路由即自身。
 fn nav_target(route: &Route) -> Route {
     match route {
         Route::AuctionLots { .. } => Route::Auctions {},
         Route::DeliveryDetail { .. } => Route::Deliveries {},
+        Route::SettlementReturnDetail { .. } => Route::SettlementReturns {},
         other => other.clone(),
     }
 }
@@ -103,6 +106,7 @@ pub(super) fn NavigationLinks(current_route: Route) -> Element {
         match route {
             Route::Deliveries {} => counts.delivery_manual_reconcile,
             Route::Settlement {} => counts.recovery_confirmation,
+            Route::SettlementReturns {} => counts.settlement_returns.unwrap_or_default(),
             Route::Alerts {} => counts.active_alerts,
             _ => 0,
         }
@@ -149,6 +153,13 @@ pub(super) fn NavigationLinks(current_route: Route) -> Element {
                     label: t!("nav-settlement"),
                     current_route: current_route.clone(),
                     count: pending(&Route::Settlement {}),
+                }
+                NavigationLink {
+                    to: Route::SettlementReturns {},
+                    icon: "return",
+                    label: t!("nav-settlement-returns"),
+                    current_route: current_route.clone(),
+                    count: pending(&Route::SettlementReturns {}),
                 }
                 NavigationLink {
                     to: Route::Mails {},
@@ -239,6 +250,8 @@ mod tests {
         assert_eq!(nav_target(&lots), Route::Auctions {});
         let delivery = Route::DeliveryDetail { delivery_id: "delivery".to_owned() };
         assert_eq!(nav_target(&delivery), Route::Deliveries {});
+        let case = Route::SettlementReturnDetail { return_id: "case".to_owned() };
+        assert_eq!(nav_target(&case), Route::SettlementReturns {});
     }
 
     #[test]

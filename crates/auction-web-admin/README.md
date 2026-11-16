@@ -29,10 +29,12 @@
 | `/users` | 用户与 Key | 创建用户、签发/重新签发/吊销登录 key、绑定论坛账号 ID、拉黑与解除 |
 | `/renames` | 改名回滚 | 改名历史与回滚 |
 | `/deliveries` | 投递队列 | 邮件 outbox：释放、重试、对结果未知投递的人工对账（成功/失败/重试），以及按投递 ID 定位详情 |
-| `/deliveries/{delivery_id}` | 投递详情 | 只读证据：冻结 Send/Take 尝试、可引用 Sent 证据、领取状态、追加式处置、来源义务与恢复；可从已采集证据发起与 CLI 同一命令的人工 Sent 证明（预览无副作用） |
+| `/deliveries/{delivery_id}` | 投递详情 | 只读证据：冻结 Send/Take 尝试、可引用 Sent 证据、领取状态、追加式处置、来源义务与恢复；可从已采集证据发起与 CLI 同一命令的人工 Sent 证明（预览无副作用）。结算退件 Take（来源 `settlement_return_action`）链接到所属退件案件，投递队列对它不提供人工动作 |
 | `/player-support` | 玩家支持 | 按用户名/用户 ID 或参考编号只读汇总出价、成交、义务、投递与通知；入口与结果同步到 `user`/`reference` query |
 | `/outbox` | 实时事件 | realtime 事件页、消费 lag、失败记录与重放 |
 | `/settlement` | 结算报表 | 选择世界与期号后查看结算与恢复报告，确认恢复动作 |
+| `/settlement-returns` | 结算退件 | 被拒收或过期退回的货款、退款与流拍/撤拍寄回，每封退件一个案件（含 `untrusted`/`unbound` 隔离记录）；范围（缺省只看未结案）、状态、证据分类、义务种类与世界同步到 `scope`/`status`/`match_state`/`obligation_kind`/`world`/`page` query，每页数量同步到 `page_size`；可按案件 ID 直接打开详情；侧栏显示未结案退件待办数（导航待办读取带 `include=settlement_returns`） |
+| `/settlement-returns/{return_id}` | 结算退件详情 | 资产位置（明确区分已寄出、退回仍在收件箱、已领回、代管）、证据分类与原因、原派发与补寄次数、领回（Take）、代管责任、派发链与处理事件；只显示服务端给出的允许动作与阻断原因，确认框只展示冻结的收件人、资产与版本。结果未知的命令留在未决区按原 `command_id` 原样重试，被明确拒绝时重读详情；Take 结果未知时提示不要在游戏内手工领取或在投递台重试 |
 | `/config` | 参数配置 | 业务世界即时开关；runtime 配置的类型化编辑（含六类 MoogleMail 发送开关）、服务端校验与原子写入 |
 | `/rules-content` | 规则内容 | 五种语言规则文档的编辑、校验、预览与发布 |
 | `/about-content` | 关于内容 | 公开端“关于”页面的五种语言文档；与规则共用同一套编辑器，草稿与未决发布各自独立 |
@@ -58,8 +60,8 @@
 
 | 路径 | 内容 |
 | --- | --- |
-| `crates/auction-web-admin/src/api/` | 同源 HTTP 访问、CSRF、DTO 解码与 wire 严格校验；每个文件对应一个 API 领域（`alerts`、`auctions`、`audit`、`credentials`、`dashboard`、`delivery/`、`failure`、`forum`、`intake`、`lifecycle`、`lots`、`mail`、`mail_diagnostics`、`pagination`、`proxy_events`、`realtime`、`recovery`、`renames`、`rules`、`runtime_config/`、`runtime_switches`、`notification_templates`、`session`、`settlement`、`settlement_catalog`、`setup`、`status`、`transport`、`users`、`validation`、`worlds`） |
-| `crates/auction-web-admin/src/surface/` | 路由、认证外壳与导航（桌面/手机）、分页（`pagination/` 仅展示请求身份匹配的结果）、未决命令宿主、表头排序（`sort.rs`：服务端列表无排序参数，排序只对当前页数据执行并写入 URL），以及按领域分组的页面实现：`auctions/`、`credentials/`、`dashboard/`、`deliveries/`、`mail/`、`config/`、`rules/`、`users/`、结算与恢复、审计、实时事件、服务说明与首次部署 |
+| `crates/auction-web-admin/src/api/` | 同源 HTTP 访问、CSRF、DTO 解码与 wire 严格校验；每个文件对应一个 API 领域（`alerts`、`auctions`、`audit`、`credentials`、`dashboard`、`delivery/`、`failure`、`forum`、`intake`、`lifecycle`、`lots`、`mail`、`mail_diagnostics`、`pagination`、`proxy_events`、`realtime`、`recovery`、`renames`、`returns`（结算退件）、`rules`、`runtime_config/`、`runtime_switches`、`notification_templates`、`session`、`settlement`、`settlement_catalog`、`setup`、`status`、`transport`、`users`、`validation`、`worlds`） |
+| `crates/auction-web-admin/src/surface/` | 路由、认证外壳与导航（桌面/手机）、分页（`pagination/` 仅展示请求身份匹配的结果）、未决命令宿主、表头排序（`sort.rs`：服务端列表无排序参数，排序只对当前页数据执行并写入 URL），以及按领域分组的页面实现：`auctions/`、`credentials/`、`dashboard/`、`deliveries/`、`mail/`、`config/`、`returns/`（结算退件）、`rules/`、`users/`、结算与恢复、审计、实时事件、服务说明与首次部署 |
 | `crates/auction-web-admin/assets/` | `crates/auction-web-admin/assets/admin.css`、`crates/auction-web-admin/assets/desktop.css`、`crates/auction-web-admin/assets/mobile.css` |
 | `crates/auction-web-admin/i18n/` | Fluent 译文：`zh-CN`（默认，编译期内嵌）、`en`、`zh-TW`、`ja`、`ko`（作为带指纹的 `/assets/<lang>-dxh<hash>.ftl` 按需取回，失败保持当前语言）；键集合与 `crates/auction-web-admin/i18n/en.ftl` 一致 |
 

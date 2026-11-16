@@ -395,6 +395,8 @@ Public/Admin/Worker 可在业务 listener、control socket 之外启用独立出
 | `/player-support` | 玩家支持：按用户名/用户 ID 或参考编号只读汇总出价、成交、义务、投递与通知（含退役与抑制原因），入口与结果同步到 `user`/`reference` query |
 | `/outbox` | 实时事件 |
 | `/settlement` | 结算报表 |
+| `/settlement-returns` | 结算退件：按案件列出被拒收或过期退回的货款、退款与流拍/撤拍寄回（含隔离记录），筛选与页码同步到 `scope`/`status`/`match_state`/`obligation_kind`/`world`/`page` query；侧栏显示未结案退件待办数 |
+| `/settlement-returns/{return_id}` | 结算退件详情：资产位置、事件、派发链、领回（Take）、代管、允许动作与阻断原因，以及确认后提交的处理命令 |
 | `/config` | 参数配置 |
 | `/rules-content`（别名 `/rules`） | 规则内容 |
 | `/about-content` | 关于内容 |

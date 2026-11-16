@@ -98,22 +98,27 @@ pub(crate) async fn fetch_admin_webhooks(limit: usize) -> Result<Vec<AdminAlertW
     Ok(page.entries)
 }
 
-/// 导航待办计数；失败时导航不显示徽标而不是猜测数量。
+/// 导航待办计数（显式请求未结案结算退件数）；失败时导航不显示徽标而不是猜测数量。
 pub(crate) async fn fetch_admin_pending_counts() -> Result<AdminPendingCounts, String> {
-    let response = send_get("/api/v1/admin/pending-counts").await?;
+    let response = send_get("/api/v1/admin/pending-counts?include=settlement_returns").await?;
     if !response.ok() {
         return Err(response_error(response).await);
     }
     let payload: ApiResponse<AdminPendingCounts> =
         response.json().await.map_err(invalid_response_error)?;
     let counts = payload.data;
-    if counts.delivery_manual_reconcile < 0
-        || counts.recovery_confirmation < 0
-        || counts.active_alerts < 0
-    {
+    if !valid_pending_counts(&counts) {
         return Err(invalid_response_error("pending counts"));
     }
     Ok(counts)
+}
+
+/// 请求了退件计数时它必须出现；全部计数是非负安全整数。
+fn valid_pending_counts(counts: &AdminPendingCounts) -> bool {
+    valid_count(counts.delivery_manual_reconcile)
+        && valid_count(counts.recovery_confirmation)
+        && valid_count(counts.active_alerts)
+        && counts.settlement_returns.is_some_and(valid_count)
 }
 
 /// 确认一条活动告警。
@@ -232,10 +237,27 @@ mod tests {
     use uuid::Uuid;
 
     use super::{
-        AdminAlert, AdminAlertPage, acknowledge_request, silence_request, valid_alert,
-        valid_alert_page,
+        AdminAlert, AdminAlertPage, AdminPendingCounts, acknowledge_request, silence_request,
+        valid_alert, valid_alert_page, valid_pending_counts,
     };
     use crate::api::MAX_JSON_SAFE_INTEGER;
+
+    /// 页面显式请求退件计数：缺失、负数或越界都失败关闭，导航不显示徽标而不是猜测数量。
+    #[test]
+    fn pending_counts_require_the_requested_settlement_returns_field() {
+        let counts = |settlement_returns| AdminPendingCounts {
+            delivery_manual_reconcile: 1,
+            recovery_confirmation: 0,
+            active_alerts: 2,
+            settlement_returns,
+        };
+        assert!(valid_pending_counts(&counts(Some(3))));
+        assert!(!valid_pending_counts(&counts(None)), "请求了退件计数却缺失");
+        assert!(!valid_pending_counts(&counts(Some(-1))));
+        assert!(!valid_pending_counts(&counts(Some(MAX_JSON_SAFE_INTEGER + 1))));
+        let negative = AdminPendingCounts { active_alerts: -1, ..counts(Some(0)) };
+        assert!(!valid_pending_counts(&negative));
+    }
 
     fn alert(source: &str) -> AdminAlert {
         AdminAlert {
