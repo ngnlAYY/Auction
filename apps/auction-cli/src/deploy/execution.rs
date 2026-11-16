@@ -132,9 +132,13 @@ pub(super) async fn deploy_locked(
     {
         Ok(launch) => launch,
         Err(error) => {
+            // 迁移可能尚未完成：rollback 保留新 CLI，会在停机前拒绝比数据库新的 CLI，因此同时
+            // 给出迁移前失败的处置入口。
             let failure = error.context(format!(
-                "新程序已安装但启动失败；已停止本次启动的 unit，回退指引见 \
-                 auction-cli rollback --receipt-id {deploy_receipt_id}"
+                "新程序已安装但启动失败；已停止本次启动的 unit。迁移已完成时用安装目录的 \
+                 auction-cli rollback --receipt-id {deploy_receipt_id} 回退；迁移未完成时 rollback \
+                 会拒绝，修复原因后用安装目录的 CLI 执行 service start 完成升级，或按 \
+                 ops/deploy/RECOVERY.md 的“安装中途失败的手工换回”用本次回滚记录整体换回"
             ));
             // 没有可核对的运行进程：失败回执的 artifacts 来自已安装制品摘要，不伪造运行进程。
             return Err(failed.publish(failure, None, installed_artifacts(artifact)));

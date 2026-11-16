@@ -207,7 +207,7 @@ auction-cli service --state-dir /var/lib/auction/deployment receipt show <receip
 - **第 9 步安装中途失败**：三角色已停止，迁移尚未执行，命令已尝试把本次替换的程序从回滚记录换回；失败回执的 `artifacts` 记录安装目录中实际文件的摘要，`rollback` 会在安装目录核对处拒绝（安装目录不是该部署的版本）。
   - 错误含“已复核为部署前的旧程序”：四个程序已复核为部署前的旧程序，处置与上一条相同，用安装目录中的 CLI 执行 `service start`，不要用制品 CLI。
   - 错误含“自动换回未完成”：换回本身失败，错误点名失败的程序并列出各程序的当前摘要，安装目录可能新旧混合。旧程序完整保留在 `<state-dir>/rollback/<deploy_receipt_id>/bin/`，摘要见同一记录目录下的 `record.json`；按[ops/deploy/RECOVERY.md#安装中途失败的手工换回](../../ops/deploy/RECOVERY.md#安装中途失败的手工换回)逐个换回并核对摘要后，用安装目录中的 CLI 启动，同样不要用制品 CLI 启动。安装目录恢复为一致的旧程序之前不要重跑 `deploy`：新的回滚记录会把混合程序当作旧版本保留。
-- **启动或运行核对失败**：新程序已安装、迁移可能已提交；按错误文本给出的 `rollback --receipt-id` 或[ops/README.md#升级](../../ops/README.md#升级)处理。
+- **启动或运行核对失败**：新程序已安装、迁移可能已提交；按错误文本给出的 `rollback --receipt-id` 或[ops/README.md#升级](../../ops/README.md#升级)处理。失败发生在迁移完成之前（启动阶段的端口检查或迁移失败）时，安装目录的新 CLI 比数据库新，`rollback` 会在停机前拒绝：修复原因后用安装目录的 CLI 执行 `service start --owner-secrets …` 完成升级，或按[ops/deploy/RECOVERY.md#安装中途失败的手工换回](../../ops/deploy/RECOVERY.md#安装中途失败的手工换回)用本次回滚记录把四个程序整体换回。
 
 ### 安装目录信任
 
@@ -232,8 +232,9 @@ root 与 postgres 都会执行安装目录中的 `auction-cli`（`auction-stack`
 ### 回退
 
 ```bash
-auction-cli --config-dir /etc/auction rollback --receipt-id <deploy_receipt_id> --dry-run
-auction-cli --config-dir /etc/auction rollback --receipt-id <deploy_receipt_id>
+# 必须用安装目录中的 CLI 执行：rollback 保留它，回退后由它继续管理数据库
+/opt/auction/bin/auction-cli --config-dir /etc/auction rollback --receipt-id <deploy_receipt_id> --dry-run
+/opt/auction/bin/auction-cli --config-dir /etc/auction rollback --receipt-id <deploy_receipt_id>
 ```
 
 `rollback` 只把 Worker、Admin、Public 三个运行角色换回 `deploy` 保留的旧程序，**安装目录中的 `auction-cli` 保持不变**，也**不执行迁移**：回退后由当前 CLI 继续执行备份、预检、`service start/restart` 与再次前进，旧 CLI 无法管理已超前的数据库。
