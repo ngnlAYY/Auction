@@ -35,9 +35,12 @@ pub struct AdminRuntimeAlertsConfig {
     pub delivery_manual_reconcile_count_threshold: i64,
     pub fulfillment_backlog_count_threshold: i64,
     pub fulfillment_backlog_age_seconds: u64,
-    /// 长期未领取阈值秒数，范围 1–2592000；默认 72 小时，默认值省略以保持旧文档指纹。
-    #[serde(skip_serializing_if = "is_default_collection_overdue_age")]
-    pub fulfillment_collection_overdue_age_seconds: u64,
+    /// 长期未领取阈值秒数，范围 1–2592000；省略即默认 72 小时，生效值见
+    /// `collection_overdue_age_seconds`。物理文档不写默认值，保持旧文档指纹、回退的旧程序仍能
+    /// 加载；写入请求省略该键表示保持当前值（升级前的页面不认识它），由更新用例在指纹 fence
+    /// 内按当前文件补回。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fulfillment_collection_overdue_age_seconds: Option<u64>,
     pub recovery_overdue_count_threshold: i64,
     pub recovery_overdue_age_seconds: u64,
     /// 通知使用的游戏世界，只允许 main 或 isekai。
@@ -46,12 +49,8 @@ pub struct AdminRuntimeAlertsConfig {
     pub recipient: String,
 }
 
-/// 长期未领取阈值的默认值；`skip_serializing_if` 判定与 `Default` 共用，避免两处漂移。
+/// 长期未领取阈值的默认值；省略与显式写出默认值等价，保存时按省略处理。
 const DEFAULT_COLLECTION_OVERDUE_AGE_SECONDS: u64 = 72 * 3_600;
-
-fn is_default_collection_overdue_age(value: &u64) -> bool {
-    *value == DEFAULT_COLLECTION_OVERDUE_AGE_SECONDS
-}
 
 impl Default for AdminRuntimeAlertsConfig {
     fn default() -> Self {
@@ -73,7 +72,7 @@ impl Default for AdminRuntimeAlertsConfig {
             delivery_manual_reconcile_count_threshold: 1,
             fulfillment_backlog_count_threshold: 1,
             fulfillment_backlog_age_seconds: 900,
-            fulfillment_collection_overdue_age_seconds: DEFAULT_COLLECTION_OVERDUE_AGE_SECONDS,
+            fulfillment_collection_overdue_age_seconds: None,
             recovery_overdue_count_threshold: 1,
             recovery_overdue_age_seconds: 900,
             world_id: "main".to_owned(),
@@ -83,15 +82,24 @@ impl Default for AdminRuntimeAlertsConfig {
 }
 
 impl AdminRuntimeAlertsConfig {
-    /// 物理文档按默认值省略的字段（JSON 键）及其默认值；Admin 浏览器投影据此补齐完整闭集。
-    pub fn omitted_defaults() -> serde_json::Map<String, serde_json::Value> {
-        let defaults = Self::default();
-        let mut omitted = serde_json::Map::new();
-        omitted.insert(
-            "fulfillment_collection_overdue_age_seconds".to_owned(),
-            defaults.fulfillment_collection_overdue_age_seconds.into(),
-        );
-        omitted
+    /// 生效的长期未领取阈值秒数；省略时为默认 72 小时。
+    pub fn collection_overdue_age_seconds(&self) -> u64 {
+        self.fulfillment_collection_overdue_age_seconds
+            .unwrap_or(DEFAULT_COLLECTION_OVERDUE_AGE_SECONDS)
+    }
+
+    /// 写入请求的兼容合并：省略的长期未领取阈值沿用 `current` 的值；显式写出的默认值按省略
+    /// 保存。结果只由请求与当前文件决定，可重复执行。
+    pub(crate) fn resolve_update(&mut self, current: Option<&Self>) {
+        if self.fulfillment_collection_overdue_age_seconds.is_none() {
+            self.fulfillment_collection_overdue_age_seconds =
+                current.and_then(|current| current.fulfillment_collection_overdue_age_seconds);
+        }
+        if self.fulfillment_collection_overdue_age_seconds
+            == Some(DEFAULT_COLLECTION_OVERDUE_AGE_SECONDS)
+        {
+            self.fulfillment_collection_overdue_age_seconds = None;
+        }
     }
 
     pub(super) fn validate(&self) -> Result<(), AdminRuntimeConfigError> {
@@ -127,7 +135,7 @@ impl AdminRuntimeAlertsConfig {
                 self.fulfillment_backlog_age_seconds,
             ),
             fulfillment_collection_overdue_age_threshold: Duration::from_secs(
-                self.fulfillment_collection_overdue_age_seconds,
+                self.collection_overdue_age_seconds(),
             ),
             recovery_overdue_count_threshold: self.recovery_overdue_count_threshold,
             recovery_overdue_age_threshold: Duration::from_secs(self.recovery_overdue_age_seconds),
@@ -149,63 +157,61 @@ impl AdminRuntimeAlertsConfig {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
-
-    use serde_json::Value;
-
     use super::AdminRuntimeAlertsConfig;
 
-    fn serialized_keys(config: &AdminRuntimeAlertsConfig) -> BTreeSet<String> {
-        match serde_json::to_value(config).expect("告警配置必须可序列化") {
-            Value::Object(object) => object.into_iter().map(|(key, _)| key).collect(),
-            other => panic!("告警配置必须序列化为对象: {other}"),
+    fn with_threshold(seconds: Option<u64>) -> AdminRuntimeAlertsConfig {
+        AdminRuntimeAlertsConfig {
+            fulfillment_collection_overdue_age_seconds: seconds,
+            ..AdminRuntimeAlertsConfig::default()
         }
     }
 
-    /// 新阈值默认省略：旧文档与显式写出默认值的文档规范化字节相同，保持 runtime 指纹；
-    /// 省略清单恰好是这一键，补齐后解析回默认值。
+    /// 新阈值省略即默认 72 小时，且不写入物理文档：旧文档的规范化字节不变，保持 runtime 指纹。
     #[test]
-    fn collection_overdue_default_is_omitted_and_restored() {
+    fn collection_overdue_threshold_is_omitted_by_default() {
         let old: AdminRuntimeAlertsConfig =
             serde_json::from_str("{\"managed\":true}").expect("旧告警文档");
-        assert_eq!(old.fulfillment_collection_overdue_age_seconds, 259_200);
-        let explicit: AdminRuntimeAlertsConfig = serde_json::from_str(
-            "{\"managed\":true,\"fulfillment_collection_overdue_age_seconds\":259200}",
-        )
-        .expect("显式默认值文档");
-        assert_eq!(
-            serde_json::to_vec(&old).expect("旧文档规范化"),
-            serde_json::to_vec(&explicit).expect("显式文档规范化")
-        );
-        let changed = AdminRuntimeAlertsConfig {
-            fulfillment_collection_overdue_age_seconds: 86_400,
-            ..AdminRuntimeAlertsConfig::default()
-        };
-        let omitted = AdminRuntimeAlertsConfig::omitted_defaults();
-        assert_eq!(
-            omitted.keys().cloned().collect::<BTreeSet<_>>(),
-            serialized_keys(&changed)
-                .difference(&serialized_keys(&AdminRuntimeAlertsConfig::default()))
-                .cloned()
-                .collect::<BTreeSet<_>>()
-        );
-        let mut merged = serde_json::to_value(AdminRuntimeAlertsConfig::default())
-            .expect("默认配置必须可序列化");
-        merged.as_object_mut().expect("默认配置必须是对象").extend(omitted);
-        let parsed: AdminRuntimeAlertsConfig =
-            serde_json::from_value(merged).expect("补齐后的默认文档必须可解析");
-        assert_eq!(parsed, AdminRuntimeAlertsConfig::default());
+        assert_eq!(old.fulfillment_collection_overdue_age_seconds, None);
+        assert_eq!(old.collection_overdue_age_seconds(), 259_200);
+        let encoded = serde_json::to_string(&old).expect("告警配置必须可序列化");
+        assert!(!encoded.contains("fulfillment_collection_overdue_age_seconds"), "{encoded}");
+        let custom = with_threshold(Some(86_400));
+        assert_eq!(custom.collection_overdue_age_seconds(), 86_400);
+        let encoded = serde_json::to_value(&custom).expect("告警配置必须可序列化");
+        assert_eq!(encoded["fulfillment_collection_overdue_age_seconds"], 86_400);
+    }
+
+    /// 写入合并：请求省略时沿用当前值（升级前的页面保存不得重置它），显式值优先；显式默认值
+    /// 按省略保存；结果可重复执行。
+    #[test]
+    fn update_keeps_the_current_threshold_when_the_request_omits_it() {
+        let current = with_threshold(Some(86_400));
+        for (request, current, expected) in [
+            (None, Some(&current), Some(86_400)),
+            (None, None, None),
+            (None, Some(&with_threshold(None)), None),
+            (Some(3_600), Some(&current), Some(3_600)),
+            (Some(259_200), Some(&current), None),
+            (None, Some(&with_threshold(Some(259_200))), None),
+        ] {
+            let mut resolved = with_threshold(request);
+            resolved.resolve_update(current);
+            assert_eq!(
+                resolved.fulfillment_collection_overdue_age_seconds, expected,
+                "{request:?} / {current:?}"
+            );
+            let mut again = resolved.clone();
+            again.resolve_update(Some(&resolved));
+            assert_eq!(again, resolved, "合并可重复执行");
+        }
     }
 
     /// 运行期阈值复用告警策略的 1 秒至 30 天边界。
     #[test]
     fn collection_overdue_threshold_is_validated_with_the_policy() {
         for (seconds, valid) in [(0, false), (1, true), (2_592_000, true), (2_592_001, false)] {
-            let config = AdminRuntimeAlertsConfig {
-                fulfillment_collection_overdue_age_seconds: seconds,
-                ..AdminRuntimeAlertsConfig::default()
-            };
-            assert_eq!(config.validate().is_ok(), valid, "{seconds}");
+            assert_eq!(with_threshold(Some(seconds)).validate().is_ok(), valid, "{seconds}");
         }
+        assert!(with_threshold(None).validate().is_ok());
     }
 }

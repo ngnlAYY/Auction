@@ -178,6 +178,9 @@ const FULFILLMENT_SNAPSHOT: &str = concat!(
                          AND execution_state NOT IN ('failed', 'satisfied'))))
                 AS oldest_waiting_prerequisite,
             MIN(sent_at) FILTER (WHERE awaiting_collection) AS oldest_awaiting_collection,
+            -- 等待领取按积压时刻口径的最老年龄；只供 Admin 看板缺省响应按已发布口径并回积压。
+            MIN(backlog_at) FILTER (WHERE awaiting_collection)
+                AS oldest_awaiting_collection_backlog,
             -- 超期：寄出时刻不晚于观察时刻减阈值；未给出阈值（$2 为 NULL）时恒为 0。
             COUNT(*) FILTER (WHERE awaiting_collection AND sent_at <= $2)
                 AS collection_overdue
@@ -259,6 +262,11 @@ pub(super) async fn fulfillment_snapshot(
             now,
             row.try_get("oldest_awaiting_collection")
                 .map_err(|error| storage_error_from(error, "读取履约等待领取时间失败"))?,
+        ),
+        oldest_awaiting_collection_backlog_age_seconds: age_seconds(
+            now,
+            row.try_get("oldest_awaiting_collection_backlog")
+                .map_err(|error| storage_error_from(error, "读取履约等待领取积压时间失败"))?,
         ),
         collection_overdue: row
             .try_get("collection_overdue")

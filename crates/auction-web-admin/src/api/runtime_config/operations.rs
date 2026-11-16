@@ -366,7 +366,53 @@ fn valid_scalars(
 mod tests {
     use serde_json::{Value, json};
 
-    use super::valid_mail;
+    use super::{valid_alerts, valid_mail};
+
+    /// 带 `include=fulfillment_collection_overdue_age_seconds` 时服务端给出的完整告警区块。
+    fn complete_alerts() -> Value {
+        json!({
+            "managed": false,
+            "enabled": false,
+            "scan_interval_seconds": 60,
+            "jitter_seconds": 5,
+            "source_timeout_seconds": 5,
+            "batch_window_seconds": 120,
+            "cooldown_seconds": 1800,
+            "claim_lease_seconds": 120,
+            "retry_delay_seconds": 300,
+            "max_signals_per_scan": 64,
+            "max_batch_items": 20,
+            "max_body_bytes": 4096,
+            "delivery_pending_count_threshold": 1,
+            "delivery_pending_age_seconds": 900,
+            "delivery_manual_reconcile_count_threshold": 1,
+            "fulfillment_backlog_count_threshold": 1,
+            "fulfillment_backlog_age_seconds": 900,
+            "fulfillment_collection_overdue_age_seconds": 259_200,
+            "recovery_overdue_count_threshold": 1,
+            "recovery_overdue_age_seconds": 900,
+            "world_id": "main",
+            "recipient": ""
+        })
+    }
+
+    /// 本页请求扩展投影，告警区块必须带长期未领取阈值且在 1–2592000 内；缺省投影（已发布闭集，
+    /// 没有该键）不是本页请求的形状，解码失败关闭，不自备默认值。
+    #[test]
+    fn alerts_block_requires_the_collection_threshold_projection() {
+        assert!(valid_alerts(&complete_alerts()));
+        let mut baseline = complete_alerts();
+        baseline
+            .as_object_mut()
+            .expect("告警区块")
+            .remove("fulfillment_collection_overdue_age_seconds");
+        assert!(!valid_alerts(&baseline), "缺省投影的告警区块必须拒绝");
+        for (seconds, valid) in [(0, false), (1, true), (2_592_000, true), (2_592_001, false)] {
+            let mut alerts = complete_alerts();
+            alerts["fulfillment_collection_overdue_age_seconds"] = json!(seconds);
+            assert_eq!(valid_alerts(&alerts), valid, "{seconds}");
+        }
+    }
 
     /// 服务端对旧文档补齐后的完整邮件区块（全部为默认值）。
     fn complete_mail() -> Value {

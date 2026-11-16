@@ -390,9 +390,13 @@ pub(crate) struct AdminDashboardSnapshot {
     pub reconciliation: AdminReconciliationSection,
 }
 
+/// 看板读取地址：始终显式请求等待领取扩展投影（等待领取分组、长期未领取清单与在途字段）；
+/// 缺省响应保持已发布闭集，只供升级前的页面解码。
+const DASHBOARD_URL: &str = "/api/v1/admin/dashboard?include=collection_wait";
+
 /// 读取 Admin dashboard 的完整安全快照。
 pub(crate) async fn fetch_dashboard() -> Result<AdminDashboardSnapshot, String> {
-    let response = send_get("/api/v1/admin/dashboard").await?;
+    let response = send_get(DASHBOARD_URL).await?;
     if !response.ok() {
         return Err(response_error(response).await);
     }
@@ -867,6 +871,42 @@ mod tests {
                 "worlds": vec![world; world_count]
             }
         })
+    }
+
+    /// 本页始终请求等待领取扩展投影。
+    #[test]
+    fn dashboard_url_requests_the_collection_wait_projection() {
+        assert_eq!(super::DASHBOARD_URL, "/api/v1/admin/dashboard?include=collection_wait");
+    }
+
+    /// 反例：缺省响应（已发布闭集，没有等待领取字段、清单与在途字段）不是本页请求的投影，
+    /// 解码失败关闭，不把缺失的扩展字段当作 0。
+    #[test]
+    fn baseline_shaped_sections_are_rejected() {
+        let fulfillment = "/fulfillment/data";
+        let mut baseline = complete_payload();
+        for key in [
+            "awaiting_collection",
+            "awaiting_collection_unreadable",
+            "oldest_awaiting_collection_age_seconds",
+            "collection_overdue_count",
+            "collection_overdue_items",
+        ] {
+            let single = with(complete_payload(), fulfillment, key, None);
+            assert!(decode_dashboard_response(single).is_err(), "缺少 {key} 必须拒绝");
+            baseline = with(baseline, fulfillment, key, None);
+        }
+        assert!(decode_dashboard_response(baseline).is_err(), "基线形状的履约分区必须拒绝");
+
+        let reconciliation =
+            with(complete_payload(), "", "reconciliation", Some(reconciliation_section(1)));
+        assert!(decode_dashboard_response(reconciliation.clone()).is_ok(), "扩展投影可解码");
+        for key in
+            ["custody_in_transit_count", "solvency_in_transit_count", "solvency_in_transit_credits"]
+        {
+            let missing = with(reconciliation.clone(), "/reconciliation/data/worlds/0", key, None);
+            assert!(decode_dashboard_response(missing).is_err(), "缺少 {key} 必须拒绝");
+        }
     }
 
     #[test]

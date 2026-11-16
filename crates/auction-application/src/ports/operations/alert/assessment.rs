@@ -167,6 +167,7 @@ mod tests {
                 oldest_backlog_age_seconds: 10,
                 oldest_prerequisite_wait_age_seconds: 0,
                 oldest_awaiting_collection_age_seconds: 0,
+                oldest_awaiting_collection_backlog_age_seconds: 0,
                 collection_overdue: 0,
             },
             &policy,
@@ -233,6 +234,7 @@ mod tests {
             oldest_backlog_age_seconds: 10,
             oldest_prerequisite_wait_age_seconds: 0,
             oldest_awaiting_collection_age_seconds: 0,
+            oldest_awaiting_collection_backlog_age_seconds: 0,
             collection_overdue: 0,
         };
         let recovery_world = |world: &str| OperationsAlertRecoveryWorld {
@@ -295,6 +297,7 @@ mod tests {
             oldest_backlog_age_seconds: 0,
             oldest_prerequisite_wait_age_seconds: 10,
             oldest_awaiting_collection_age_seconds: 0,
+            oldest_awaiting_collection_backlog_age_seconds: 0,
             collection_overdue: 0,
         };
         assert!(!assess_fulfillment(snapshot, &policy).backlog);
@@ -322,6 +325,7 @@ mod tests {
             oldest_backlog_age_seconds: 0,
             oldest_prerequisite_wait_age_seconds: 0,
             oldest_awaiting_collection_age_seconds: 8 * 86_400,
+            oldest_awaiting_collection_backlog_age_seconds: 0,
             collection_overdue: 0,
         };
         assert!(!assess_fulfillment(awaiting, &policy).backlog, "等待领取不是待处理积压");
@@ -353,9 +357,22 @@ mod tests {
             },
             OperationsAlertFulfillmentSnapshot {
                 oldest_awaiting_collection_age_seconds: -1,
+                oldest_awaiting_collection_backlog_age_seconds: 0,
                 ..awaiting
             },
             OperationsAlertFulfillmentSnapshot { awaiting_collection_unreadable: -1, ..awaiting },
+            // 积压时刻口径的等待领取年龄同样不得为负，没有等待领取时只能为 0。
+            OperationsAlertFulfillmentSnapshot {
+                oldest_awaiting_collection_backlog_age_seconds: -1,
+                ..awaiting
+            },
+            OperationsAlertFulfillmentSnapshot {
+                awaiting_collection: 0,
+                awaiting_collection_unreadable: 0,
+                oldest_awaiting_collection_age_seconds: 0,
+                oldest_awaiting_collection_backlog_age_seconds: 60,
+                ..awaiting
+            },
         ] {
             let snapshot = OperationsAlertSnapshot {
                 fulfillment: Some(broken),
@@ -385,6 +402,7 @@ mod tests {
             oldest_backlog_age_seconds: 0,
             oldest_prerequisite_wait_age_seconds: 0,
             oldest_awaiting_collection_age_seconds: age,
+            oldest_awaiting_collection_backlog_age_seconds: 0,
             collection_overdue: overdue,
         };
         let evaluate = |snapshot: OperationsAlertFulfillmentSnapshot| {

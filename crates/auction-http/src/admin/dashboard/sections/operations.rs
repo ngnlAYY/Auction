@@ -10,11 +10,78 @@ use auction_contracts::AdminDashboardSectionResponse;
 use auction_observability::DashboardStatus;
 use serde_json::json;
 
+use super::fallback::unknown_section;
+use crate::admin::dashboard::projection::DashboardProjection;
 use crate::mapping::timestamp;
 
-/// 履约分区。长期未领取的超期件数与清单出自同一只读快照，阈值即 Admin 生效的告警策略；
-/// 没有告警策略时不声称超期：计数为 0、清单为空。清单只含业务标识与展示字段。
+/// 履约分区：缺省响应保持已发布的字段闭集与口径；新页面显式请求的等待领取投影单列等待领取。
 pub(crate) fn map_fulfillment(
+    snapshot: OperationsAlertFulfillmentSnapshot,
+    collection_overdue_items: &[OperationsAlertCollectionOverdueItem],
+    policy: Option<&OperationsAlertPolicy>,
+    projection: DashboardProjection,
+) -> AdminDashboardSectionResponse {
+    match projection {
+        DashboardProjection::Baseline => map_fulfillment_baseline(snapshot, policy),
+        DashboardProjection::CollectionWait => {
+            map_fulfillment_collection_wait(snapshot, collection_overdue_items, policy)
+        }
+    }
+}
+
+/// 已发布的缺省口径：已寄出等待领取的义务仍计入 `pending`，积压年龄按积压时刻把它们并回，
+/// 分区状态按这一口径与告警阈值判定，不评估长期未领取；只输出基线字段闭集，已打开的旧页面
+/// 照常解码。计数合并溢出说明水位损坏，分区按 unknown 失败关闭。
+fn map_fulfillment_baseline(
+    snapshot: OperationsAlertFulfillmentSnapshot,
+    policy: Option<&OperationsAlertPolicy>,
+) -> AdminDashboardSectionResponse {
+    let Some(pending) = snapshot.pending.checked_add(snapshot.awaiting_collection) else {
+        return unknown_section();
+    };
+    let baseline = OperationsAlertFulfillmentSnapshot {
+        pending,
+        awaiting_collection: 0,
+        awaiting_collection_unreadable: 0,
+        oldest_backlog_age_seconds: snapshot
+            .oldest_backlog_age_seconds
+            .max(snapshot.oldest_awaiting_collection_backlog_age_seconds),
+        oldest_awaiting_collection_age_seconds: 0,
+        oldest_awaiting_collection_backlog_age_seconds: 0,
+        collection_overdue: 0,
+        ..snapshot
+    };
+    let observed_at = timestamp(chrono::Utc::now());
+    let degraded =
+        policy.map(|policy| assess_fulfillment(baseline, policy)).is_some_and(|assessment| {
+            assessment.manual_reconcile || assessment.failed || assessment.backlog
+        });
+    AdminDashboardSectionResponse {
+        status: if degraded {
+            DashboardStatus::Degraded.as_str().to_owned()
+        } else {
+            DashboardStatus::Ok.as_str().to_owned()
+        },
+        observed_at: Some(observed_at.clone()),
+        error_code: None,
+        data: Some(json!({
+            "observed_at": observed_at,
+            "pending": baseline.pending,
+            "blocked": baseline.blocked,
+            "failed": baseline.failed,
+            "manual_reconcile": baseline.manual_reconcile,
+            "waiting_payment": baseline.waiting_payment,
+            "waiting_prerequisite": baseline.waiting_prerequisite,
+            "oldest_backlog_age_seconds": baseline.oldest_backlog_age_seconds,
+            "oldest_prerequisite_wait_age_seconds": baseline.oldest_prerequisite_wait_age_seconds,
+        })),
+    }
+}
+
+/// 等待领取投影：已寄出等待领取的义务单列，不计入 `pending` 与积压；长期未领取的超期件数与
+/// 清单出自同一只读快照，阈值即 Admin 生效的告警策略，有超期件时分区降级；没有告警策略时不
+/// 声称超期：计数为 0、清单为空。清单只含业务标识与展示字段。
+fn map_fulfillment_collection_wait(
     snapshot: OperationsAlertFulfillmentSnapshot,
     collection_overdue_items: &[OperationsAlertCollectionOverdueItem],
     policy: Option<&OperationsAlertPolicy>,
@@ -175,10 +242,12 @@ pub(crate) fn map_recovery(
     }
 }
 
-/// 资产对账与偿付能力 section；报告缺失时明确 unknown，不用空数据冒充无差异。
-/// 在途装备与在途货款只展示，不参与降级判定：它们已随邮件离开 Bot，等待收件人领取。
+/// 资产对账与偿付能力 section；报告缺失时明确 unknown，不用空数据冒充无差异。缺省响应每个
+/// world 只给缺失件数与待付缺口（已发布闭集）；等待领取投影追加在途装备件数与在途货款笔数和
+/// 金额。在途只展示，不参与降级判定：它们已随邮件离开 Bot，等待收件人领取。
 pub(crate) fn map_reconciliation(
     snapshot: OperationsAlertReconciliationSnapshot,
+    projection: DashboardProjection,
 ) -> AdminDashboardSectionResponse {
     let observed_at = timestamp(chrono::Utc::now());
     let (Some(custody_report_age_seconds), Some(solvency_report_age_seconds)) =
@@ -207,14 +276,21 @@ pub(crate) fn map_reconciliation(
             "observed_at": observed_at,
             "custody_report_age_seconds": custody_report_age_seconds,
             "solvency_report_age_seconds": solvency_report_age_seconds,
-            "worlds": snapshot.worlds.iter().map(|world| json!({
-                "world": world.world,
-                "custody_missing_count": world.custody_missing_count,
-                "custody_in_transit_count": world.custody_in_transit_count,
-                "solvency_shortfall_credits": world.solvency_shortfall_credits,
-                "solvency_in_transit_count": world.solvency_in_transit_count,
-                "solvency_in_transit_credits": world.solvency_in_transit_credits,
-            })).collect::<Vec<_>>(),
+            "worlds": snapshot.worlds.iter().map(|world| match projection {
+                DashboardProjection::Baseline => json!({
+                    "world": world.world,
+                    "custody_missing_count": world.custody_missing_count,
+                    "solvency_shortfall_credits": world.solvency_shortfall_credits,
+                }),
+                DashboardProjection::CollectionWait => json!({
+                    "world": world.world,
+                    "custody_missing_count": world.custody_missing_count,
+                    "custody_in_transit_count": world.custody_in_transit_count,
+                    "solvency_shortfall_credits": world.solvency_shortfall_credits,
+                    "solvency_in_transit_count": world.solvency_in_transit_count,
+                    "solvency_in_transit_credits": world.solvency_in_transit_credits,
+                }),
+            }).collect::<Vec<_>>(),
         })),
     }
 }
@@ -228,14 +304,48 @@ mod tests {
     };
     use auction_domain::SettlementObligationKind;
     use chrono::TimeZone;
+    use serde::Deserialize;
     use uuid::Uuid;
 
     use super::{
-        OperationsAlertCollectionOverdueItem, OperationsAlertDeliverySnapshot,
+        DashboardProjection, OperationsAlertCollectionOverdueItem, OperationsAlertDeliverySnapshot,
         OperationsAlertFulfillmentSnapshot, OperationsAlertPolicy,
         OperationsAlertReconciliationSnapshot, map_delivery, map_fulfillment, map_reconciliation,
         map_recovery,
     };
+
+    /// 已发布页面（基线 b2300b46）的履约分区闭集；缺省响应必须能被它解码。
+    #[derive(Debug, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct BaselineFulfillmentData {
+        pending: i64,
+        blocked: i64,
+        failed: i64,
+        manual_reconcile: i64,
+        waiting_payment: i64,
+        waiting_prerequisite: i64,
+        observed_at: String,
+        oldest_backlog_age_seconds: i64,
+        oldest_prerequisite_wait_age_seconds: i64,
+    }
+
+    /// 已发布页面（基线 b2300b46）的对账分区闭集。
+    #[derive(Debug, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct BaselineReconciliationData {
+        observed_at: String,
+        custody_report_age_seconds: i64,
+        solvency_report_age_seconds: i64,
+        worlds: Vec<BaselineReconciliationWorld>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct BaselineReconciliationWorld {
+        world: String,
+        custody_missing_count: i64,
+        solvency_shortfall_credits: i64,
+    }
 
     fn policy() -> OperationsAlertPolicy {
         OperationsAlertPolicy {
@@ -277,21 +387,94 @@ mod tests {
             oldest_backlog_age_seconds: age,
             oldest_prerequisite_wait_age_seconds: prerequisite_age,
             oldest_awaiting_collection_age_seconds: 0,
+            oldest_awaiting_collection_backlog_age_seconds: 0,
             collection_overdue: 0,
         }
     }
 
+    /// 没有等待领取时两种投影的积压判定相同，都与告警扫描共用阈值。
     #[test]
     fn fulfillment_uses_shared_scanner_thresholds_and_ignores_payment_waiting() {
         let policy = policy();
-        let count_reached = map_fulfillment(fulfillment(4, 4, 0, 10, 0), &[], Some(&policy));
-        assert_eq!(count_reached.status, "degraded");
-        let age_reached = map_fulfillment(fulfillment(0, 0, 0, 900, 0), &[], Some(&policy));
-        assert_eq!(age_reached.status, "degraded");
-        let waiting_payment = map_fulfillment(fulfillment(0, 100, 0, 0, 0), &[], Some(&policy));
-        assert_eq!(waiting_payment.status, "ok");
-        let prerequisite = map_fulfillment(fulfillment(0, 0, 1, 0, 900), &[], Some(&policy));
-        assert_eq!(prerequisite.status, "degraded");
+        for projection in [DashboardProjection::Baseline, DashboardProjection::CollectionWait] {
+            let map = |snapshot| map_fulfillment(snapshot, &[], Some(&policy), projection);
+            assert_eq!(map(fulfillment(4, 4, 0, 10, 0)).status, "degraded", "{projection:?}");
+            assert_eq!(map(fulfillment(0, 0, 0, 900, 0)).status, "degraded", "{projection:?}");
+            assert_eq!(map(fulfillment(0, 100, 0, 0, 0)).status, "ok", "{projection:?}");
+            assert_eq!(map(fulfillment(0, 0, 1, 0, 900)).status, "degraded", "{projection:?}");
+        }
+    }
+
+    /// 缺省响应保持已发布的口径与字段闭集：已寄出等待领取的义务仍计入 `pending`，积压年龄按
+    /// 积压时刻并回，分区按这一口径降级，不输出等待领取字段与清单，基线页面的闭集 DTO 能解码；
+    /// 扩展投影单列等待领取，等待领取本身不降级，基线页面的闭集 DTO 解码它会失败。
+    #[test]
+    fn baseline_projection_keeps_the_published_fulfillment_contract() {
+        let policy = policy();
+        let snapshot = OperationsAlertFulfillmentSnapshot {
+            awaiting_collection: 3,
+            awaiting_collection_unreadable: 1,
+            oldest_awaiting_collection_age_seconds: 86_400,
+            oldest_awaiting_collection_backlog_age_seconds: 90_000,
+            ..fulfillment(0, 2, 1, 0, 300)
+        };
+        let baseline = map_fulfillment(snapshot, &[], Some(&policy), DashboardProjection::Baseline);
+        assert_eq!(baseline.status, "degraded", "缺省口径下等待领取仍是积压");
+        let value = baseline.data.expect("履约数据");
+        let mut keys =
+            value.as_object().expect("履约数据是对象").keys().cloned().collect::<Vec<_>>();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            [
+                "blocked",
+                "failed",
+                "manual_reconcile",
+                "observed_at",
+                "oldest_backlog_age_seconds",
+                "oldest_prerequisite_wait_age_seconds",
+                "pending",
+                "waiting_payment",
+                "waiting_prerequisite",
+            ],
+            "缺省响应的键集合等于基线"
+        );
+        let data: BaselineFulfillmentData =
+            serde_json::from_value(value).expect("基线页面的闭集 DTO 必须能解码缺省响应");
+        assert_eq!(
+            (
+                data.pending,
+                data.blocked,
+                data.failed,
+                data.manual_reconcile,
+                data.waiting_payment,
+                data.waiting_prerequisite,
+                data.oldest_backlog_age_seconds,
+                data.oldest_prerequisite_wait_age_seconds,
+            ),
+            (3, 0, 0, 0, 2, 1, 90_000, 300),
+            "等待领取并回 pending 与积压年龄"
+        );
+        assert_eq!(Some(data.observed_at), baseline.observed_at);
+        let without_policy = map_fulfillment(snapshot, &[], None, DashboardProjection::Baseline);
+        assert_eq!(without_policy.status, "ok", "没有告警策略时不评估");
+
+        let extended =
+            map_fulfillment(snapshot, &[], Some(&policy), DashboardProjection::CollectionWait);
+        assert_eq!(extended.status, "ok", "等待领取投影下等待领取不是积压");
+        let value = extended.data.expect("履约数据");
+        assert_eq!(value["pending"], 0);
+        assert_eq!(value["awaiting_collection"], 3);
+        assert_eq!(value["oldest_backlog_age_seconds"], 0);
+        assert!(
+            serde_json::from_value::<BaselineFulfillmentData>(value).is_err(),
+            "扩展字段只能经显式 include 输出，基线页面按闭集解码会失败"
+        );
+
+        // 合并计数溢出说明水位损坏：缺省分区按 unknown 失败关闭，不截断。
+        let corrupt = OperationsAlertFulfillmentSnapshot { pending: i64::MAX, ..snapshot };
+        let corrupt = map_fulfillment(corrupt, &[], Some(&policy), DashboardProjection::Baseline);
+        assert_eq!((corrupt.status.as_str(), corrupt.data), ("unknown", None));
     }
 
     /// 等待领取单列为独立分组，计数、读取失败数与最老等待年龄原样投影；主计数是达到长期未领取
@@ -318,10 +501,16 @@ mod tests {
             awaiting_collection: 36,
             awaiting_collection_unreadable: 12,
             oldest_awaiting_collection_age_seconds: 691_200,
+            oldest_awaiting_collection_backlog_age_seconds: 0,
             collection_overdue: 1,
             ..fulfillment(0, 0, 0, 0, 0)
         };
-        let section = map_fulfillment(overdue, std::slice::from_ref(&item), Some(&policy));
+        let section = map_fulfillment(
+            overdue,
+            std::slice::from_ref(&item),
+            Some(&policy),
+            DashboardProjection::CollectionWait,
+        );
         assert_eq!(section.status, "degraded", "有寄出时长达到 72 小时阈值的等待领取");
         let data = section.data.expect("履约数据");
         assert_eq!(data["pending"], 0);
@@ -349,15 +538,22 @@ mod tests {
         // 没有超期件只单列，不降级；没有告警策略时不声称超期，也不透出清单。
         let fresh = OperationsAlertFulfillmentSnapshot {
             oldest_awaiting_collection_age_seconds: 259_199,
+            oldest_awaiting_collection_backlog_age_seconds: 0,
             collection_overdue: 0,
             ..overdue
         };
-        let section = map_fulfillment(fresh, &[], Some(&policy));
+        let section =
+            map_fulfillment(fresh, &[], Some(&policy), DashboardProjection::CollectionWait);
         assert_eq!(section.status, "ok");
         let data = section.data.expect("履约数据");
         assert_eq!(data["collection_overdue_count"], 0);
         assert_eq!(data["collection_overdue_items"], serde_json::json!([]));
-        let without_policy = map_fulfillment(overdue, std::slice::from_ref(&item), None);
+        let without_policy = map_fulfillment(
+            overdue,
+            std::slice::from_ref(&item),
+            None,
+            DashboardProjection::CollectionWait,
+        );
         assert_eq!(without_policy.status, "ok");
         let data = without_policy.data.expect("履约数据");
         assert_eq!(data["collection_overdue_count"], 0);
@@ -447,15 +643,43 @@ mod tests {
             solvency_report_age_seconds: Some(60),
             worlds: vec![world("isekai", 0, 0), world("main", 5, 38_668_000)],
         };
-        let section = map_reconciliation(snapshot.clone());
+        let section = map_reconciliation(snapshot.clone(), DashboardProjection::CollectionWait);
         assert_eq!(section.status, "ok", "在途不是差异");
         let data = section.data.expect("对账数据");
         assert_eq!(data["worlds"][1]["custody_in_transit_count"], 5);
         assert_eq!(data["worlds"][1]["solvency_in_transit_count"], 1);
         assert_eq!(data["worlds"][1]["solvency_in_transit_credits"], 38_668_000);
+        assert!(
+            serde_json::from_value::<BaselineReconciliationData>(data).is_err(),
+            "在途字段只能经显式 include 输出"
+        );
+
+        // 缺省响应保持已发布闭集：每个 world 只有缺失件数与待付缺口，基线页面的 DTO 能解码。
+        let baseline = map_reconciliation(snapshot.clone(), DashboardProjection::Baseline);
+        assert_eq!(baseline.status, "ok");
+        let data: BaselineReconciliationData =
+            serde_json::from_value(baseline.data.expect("对账数据"))
+                .expect("基线页面的闭集 DTO 必须能解码缺省响应");
+        assert_eq!(Some(data.observed_at), baseline.observed_at);
+        assert_eq!((data.custody_report_age_seconds, data.solvency_report_age_seconds), (60, 60));
+        assert_eq!(
+            data.worlds
+                .iter()
+                .map(|world| {
+                    (
+                        world.world.as_str(),
+                        world.custody_missing_count,
+                        world.solvency_shortfall_credits,
+                    )
+                })
+                .collect::<Vec<_>>(),
+            [("isekai", 0, 0), ("main", 0, 0)]
+        );
 
         let mut drifted = snapshot;
         drifted.worlds[1].custody_missing_count = 1;
-        assert_eq!(map_reconciliation(drifted).status, "degraded");
+        for projection in [DashboardProjection::Baseline, DashboardProjection::CollectionWait] {
+            assert_eq!(map_reconciliation(drifted.clone(), projection).status, "degraded");
+        }
     }
 }

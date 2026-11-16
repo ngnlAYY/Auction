@@ -5,9 +5,8 @@
 use std::net::SocketAddr;
 
 use auction_application::admin::{
-    AdminRuntimeAlertsConfig, AdminRuntimeCommandError, AdminRuntimeConfigError,
-    AdminRuntimeDocument, AdminRuntimeFileError, AdminRuntimeMailConfig, AdminRuntimeSnapshot,
-    AdminRuntimeUpdateCommand,
+    AdminRuntimeCommandError, AdminRuntimeConfigError, AdminRuntimeDocument, AdminRuntimeFileError,
+    AdminRuntimeMailConfig, AdminRuntimeSnapshot, AdminRuntimeUpdateCommand,
 };
 use auction_application::core::ApplicationError;
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
@@ -52,7 +51,7 @@ pub(crate) async fn get(
     if let Err(response) = authenticated_admin_session(&state, &headers).await {
         return *response;
     }
-    let include_taxonomy = match taxonomy_projection(&uri) {
+    let projection = match runtime_projection(&uri) {
         Ok(value) => value,
         Err(response) => return *response,
     };
@@ -63,7 +62,7 @@ pub(crate) async fn get(
         Ok(snapshot) => snapshot,
         Err(error) => return map_error(error),
     };
-    let response = match map_snapshot(snapshot, include_taxonomy) {
+    let response = match map_snapshot(snapshot, projection) {
         Ok(response) => response,
         Err(response) => return *response,
     };
@@ -86,7 +85,7 @@ pub(crate) async fn validate(
     if let Err(response) = authenticated_admin_mutation(&state, &headers, address).await {
         return *response;
     }
-    let include_taxonomy = match taxonomy_projection(&uri) {
+    let projection = match runtime_projection(&uri) {
         Ok(value) => value,
         Err(response) => return *response,
     };
@@ -104,11 +103,21 @@ pub(crate) async fn validate(
     let Some(port) = state.admin_runtime() else {
         return feature_unavailable(RUNTIME_CONFIG_FILE_MISSING);
     };
+    // 扩展投影要给出保存后的生效阈值：候选按与保存相同的规则对当前文件落成（省略的兼容字段
+    // 沿用当前值），只读当前文件，不写文件或命令账本。缺省投影不显示该字段，保持原行为。
+    let document = if projection.collection_overdue_threshold {
+        match port.current().await {
+            Ok(current) => document.resolve_update(&current.document),
+            Err(error) => return map_error(error),
+        }
+    } else {
+        document
+    };
     let snapshot = match port.validate(document) {
         Ok(snapshot) => snapshot,
         Err(error) => return map_error(error),
     };
-    let response = match map_snapshot(snapshot, include_taxonomy) {
+    let response = match map_snapshot(snapshot, projection) {
         Ok(response) => response,
         Err(response) => return *response,
     };
@@ -132,7 +141,7 @@ pub(crate) async fn update(
         Ok(result) => result,
         Err(response) => return *response,
     };
-    let include_taxonomy = match taxonomy_projection(&uri) {
+    let projection = match runtime_projection(&uri) {
         Ok(value) => value,
         Err(response) => return *response,
     };
@@ -172,7 +181,7 @@ pub(crate) async fn update(
         Ok(snapshot) => snapshot,
         Err(error) => return map_error(error),
     };
-    let response = match map_snapshot(snapshot, include_taxonomy) {
+    let response = match map_snapshot(snapshot, projection) {
         Ok(response) => response,
         Err(response) => return *response,
     };
@@ -195,7 +204,7 @@ fn parse_document(value: Value) -> Result<AdminRuntimeDocument, Box<Response>> {
 
 fn map_snapshot(
     snapshot: AdminRuntimeSnapshot,
-    include_taxonomy: bool,
+    projection: RuntimeProjection,
 ) -> Result<AdminRuntimeConfigResponse, Box<Response>> {
     snapshot.validate().map_err(|diagnostic_cause| {
         diagnostics::error(
@@ -210,7 +219,12 @@ fn map_snapshot(
     // 升级前的 Rust runtime 文件没有旧版三组业务字段。HTTP 投影补齐旧版默认值，使管理端
     // 能立即编辑完整契约；物理文件在首次成功保存前仍保持原指纹，避免破坏 durable 重放。
     document.materialize_business_defaults();
-    let equipment_taxonomy = include_taxonomy.then(|| taxonomy::equipment_taxonomy(&document));
+    let equipment_taxonomy =
+        projection.equipment_taxonomy.then(|| taxonomy::equipment_taxonomy(&document));
+    let collection_overdue_age_seconds = document
+        .operations
+        .as_ref()
+        .map(|operations| operations.alerts.collection_overdue_age_seconds());
     let mut document = serde_json::to_value(document).map_err(|diagnostic_cause| {
         diagnostics::error(
             "admin_runtime",
@@ -248,15 +262,19 @@ fn map_snapshot(
             mail.entry(key).or_insert(value);
         }
     }
-    // 告警区块新增阈值同样按默认值省略；浏览器投影补齐，管理端按完整闭集校验。
+    // 长期未领取阈值不属于已发布的告警区块闭集：缺省投影一律不输出（即使文件里写了非默认值），
+    // 已打开的旧页面按字段数严格校验；新页面经 include 显式请求时给出生效值（省略即默认）。
     if let Some(alerts) = document
         .get_mut("operations")
         .and_then(Value::as_object_mut)
         .and_then(|operations| operations.get_mut("alerts"))
         .and_then(Value::as_object_mut)
     {
-        for (key, value) in AdminRuntimeAlertsConfig::omitted_defaults() {
-            alerts.entry(key).or_insert(value);
+        alerts.remove(COLLECTION_OVERDUE_AGE_KEY);
+        if projection.collection_overdue_threshold
+            && let Some(seconds) = collection_overdue_age_seconds
+        {
+            alerts.insert(COLLECTION_OVERDUE_AGE_KEY.to_owned(), Value::from(seconds));
         }
     }
     Ok(AdminRuntimeConfigResponse {
@@ -267,24 +285,45 @@ fn map_snapshot(
     })
 }
 
-// 词典仅扩展明确选择的响应投影；旧客户端仍收到原字段集合，查询不参与文档或命令摘要。
-fn taxonomy_projection(uri: &Uri) -> Result<bool, Box<Response>> {
+/// 告警区块里只经扩展投影输出的长期未领取阈值键；同时是 `include` 的唯一取值。
+const COLLECTION_OVERDUE_AGE_KEY: &str = "fulfillment_collection_overdue_age_seconds";
+
+/// runtime 配置响应投影；查询不参与文档或命令摘要。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RuntimeProjection {
+    /// `include_equipment_taxonomy=true`：附带装备分类词典。
+    equipment_taxonomy: bool,
+    /// `include=fulfillment_collection_overdue_age_seconds`：告警区块附带长期未领取阈值。
+    collection_overdue_threshold: bool,
+}
+
+// 只扩展明确选择的响应投影；旧客户端不带参数，仍收到原字段集合。未登记的键、重复出现或其他
+// 取值都为 400 invalid_query，不静默退回缺省投影。
+fn runtime_projection(uri: &Uri) -> Result<RuntimeProjection, Box<Response>> {
     let invalid = || {
         Box::new(
             api_error(
                 StatusCode::BAD_REQUEST,
                 "invalid_query",
-                "runtime 配置只接受 include_equipment_taxonomy=true",
+                "runtime 配置只接受 include_equipment_taxonomy=true 与 \
+                 include=fulfillment_collection_overdue_age_seconds",
             )
             .into_response(),
         )
     };
-    let query = parse_query(uri, &["include_equipment_taxonomy"]).map_err(|()| invalid())?;
-    match query.get("include_equipment_taxonomy").map(String::as_str) {
-        None => Ok(false),
-        Some("true") => Ok(true),
-        Some(_) => Err(invalid()),
-    }
+    let query =
+        parse_query(uri, &["include_equipment_taxonomy", "include"]).map_err(|()| invalid())?;
+    let equipment_taxonomy = match query.get("include_equipment_taxonomy").map(String::as_str) {
+        None => false,
+        Some("true") => true,
+        Some(_) => return Err(invalid()),
+    };
+    let collection_overdue_threshold = match query.get("include").map(String::as_str) {
+        None => false,
+        Some(COLLECTION_OVERDUE_AGE_KEY) => true,
+        Some(_) => return Err(invalid()),
+    };
+    Ok(RuntimeProjection { equipment_taxonomy, collection_overdue_threshold })
 }
 
 fn map_error(error: ApplicationError) -> Response {

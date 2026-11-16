@@ -481,6 +481,14 @@ async fn postgres_collection_wait_snapshot_separates_awaiting_from_backlog() {
         "等待年龄按投递完成时刻计：{}",
         fulfillment.oldest_awaiting_collection_age_seconds
     );
+    // 看板缺省响应把等待领取并回积压时用积压时刻口径（履约创建于 9 天前），不是寄出时刻。
+    let nine_days = Duration::days(9).num_seconds();
+    assert!(
+        (nine_days - 120..nine_days + 120)
+            .contains(&fulfillment.oldest_awaiting_collection_backlog_age_seconds),
+        "等待领取的积压年龄按履约创建时刻计：{}",
+        fulfillment.oldest_awaiting_collection_backlog_age_seconds
+    );
 
     // 告警积压只计两条待处理；等待领取不再让积压计数膨胀。
     let observations = evaluate_snapshot(&snapshot, &policy()).expect("扫描评估");

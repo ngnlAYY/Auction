@@ -3,6 +3,7 @@
 //! 分别由子模块拥有。owner 未装配或读取失败时明确返回 unknown，避免用缓存或占位数据误导运维。
 
 mod mapping;
+mod projection;
 mod sections;
 
 use std::net::SocketAddr;
@@ -21,8 +22,9 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
+use self::projection::DashboardProjection;
 use crate::diagnostics;
-use crate::errors::{api_error, storage_unavailable};
+use crate::errors::storage_unavailable;
 use crate::session::{
     admin_session_guard, authenticated_admin_session, internal_error, no_store_headers,
 };
@@ -53,10 +55,11 @@ pub(crate) async fn get(
     if let Err(response) = authenticated_admin_session(&state, &headers).await {
         return *response;
     }
-    if uri.query().is_some_and(|query| !query.is_empty()) {
-        return api_error(StatusCode::BAD_REQUEST, "invalid_query", "管理概览不接受查询参数")
-            .into_response();
-    }
+    // 缺省响应保持已发布的字段闭集与口径；等待领取扩展投影只在显式 include 时输出。
+    let projection = match projection::dashboard_projection(&uri) {
+        Ok(projection) => projection,
+        Err(response) => return *response,
+    };
     let Some(reader) = state.health() else {
         return storage_unavailable("健康 dashboard 需要已配置的数据库");
     };
@@ -117,14 +120,17 @@ pub(crate) async fn get(
             None => sections::unknown_section(),
         }
     };
-    // 长期未领取按 Admin 生效的告警策略阈值读取，与分区降级判定同一策略；没有策略时不评估。
-    // 清单只给看板展示，与计数在同一只读快照里读出。
+    // 长期未领取只在等待领取投影里评估：阈值取 Admin 生效的告警策略，与分区降级判定同一策略，
+    // 清单与计数在同一只读快照里读出；缺省投影与没有策略时不评估。
     let alert_policy = state.operations_alert_policy();
-    let collection = alert_policy.map_or(OperationsAlertCollectionOverdueRead::Skip, |policy| {
-        OperationsAlertCollectionOverdueRead::CountWithItems(
-            policy.fulfillment_collection_overdue_age_threshold,
-        )
-    });
+    let collection = match (projection, alert_policy) {
+        (DashboardProjection::CollectionWait, Some(policy)) => {
+            OperationsAlertCollectionOverdueRead::CountWithItems(
+                policy.fulfillment_collection_overdue_age_threshold,
+            )
+        }
+        _ => OperationsAlertCollectionOverdueRead::Skip,
+    };
     let owner_snapshot = async {
         match state.operations_alert_source() {
             Some(port) => port
@@ -209,7 +215,12 @@ pub(crate) async fn get(
         .as_ref()
         .and_then(|snapshot| {
             snapshot.fulfillment.map(|value| {
-                sections::map_fulfillment(value, &snapshot.collection_overdue_items, alert_policy)
+                sections::map_fulfillment(
+                    value,
+                    &snapshot.collection_overdue_items,
+                    alert_policy,
+                    projection,
+                )
             })
         })
         .unwrap_or_else(sections::unknown_section);
@@ -226,7 +237,9 @@ pub(crate) async fn get(
         })
         .unwrap_or_else(sections::unknown_section);
     let reconciliation = owner_snapshot
-        .and_then(|snapshot| snapshot.reconciliation.map(sections::map_reconciliation))
+        .and_then(|snapshot| {
+            snapshot.reconciliation.map(|value| sections::map_reconciliation(value, projection))
+        })
         .unwrap_or_else(sections::unknown_section);
     let response = mapping::map_dashboard(
         snapshot,

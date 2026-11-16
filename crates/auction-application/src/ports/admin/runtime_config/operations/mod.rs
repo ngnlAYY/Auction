@@ -59,6 +59,12 @@ impl AdminRuntimeOperationsConfig {
         Ok(())
     }
 
+    /// 写入请求的兼容合并：请求省略的兼容字段沿用 `current` 的值，见
+    /// `AdminRuntimeDocument::resolve_update`。
+    pub(crate) fn resolve_update(&mut self, current: Option<&Self>) {
+        self.alerts.resolve_update(current.map(|current| &current.alerts));
+    }
+
     /// 只校验新候选的有效预算，不改变既有命令结果或读取时的文档合法性。
     /// 未接管值来自真实 Worker 启动快照；缺失上下文时不能把编辑页候选当作部署基值。
     pub fn validate_mail_delivery_budget(

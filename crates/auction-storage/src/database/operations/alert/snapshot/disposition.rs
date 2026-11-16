@@ -371,6 +371,7 @@ mod tests {
             oldest_backlog_age_seconds: 0,
             oldest_prerequisite_wait_age_seconds: 0,
             oldest_awaiting_collection_age_seconds: 0,
+            oldest_awaiting_collection_backlog_age_seconds: 0,
             collection_overdue: 0,
         }
     }

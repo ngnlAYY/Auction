@@ -107,6 +107,9 @@ pub(super) fn evaluate_fulfillment(
         || snapshot.oldest_awaiting_collection_age_seconds < 0
         || (snapshot.awaiting_collection == 0
             && snapshot.oldest_awaiting_collection_age_seconds != 0)
+        || snapshot.oldest_awaiting_collection_backlog_age_seconds < 0
+        || (snapshot.awaiting_collection == 0
+            && snapshot.oldest_awaiting_collection_backlog_age_seconds != 0)
         // 超期件数是等待领取的子集；有超期件时最久一笔必然达到本策略阈值，否则说明快照按
         // 别的阈值读取，失败关闭。
         || snapshot.collection_overdue < 0

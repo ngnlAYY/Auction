@@ -149,6 +149,9 @@ pub struct OperationsAlertFulfillmentSnapshot {
     pub oldest_prerequisite_wait_age_seconds: i64,
     /// 最早寄出的等待领取义务自投递完成（`deliveries.completed_at`）起的秒数；没有时为 0。
     pub oldest_awaiting_collection_age_seconds: i64,
+    /// 等待领取义务中最早进入履约的年龄，与 `oldest_backlog_age_seconds` 同一时刻口径（履约创建，
+    /// 缺行时取义务创建）；没有时为 0。只供 Admin 看板缺省响应按已发布口径把等待领取并回积压。
+    pub oldest_awaiting_collection_backlog_age_seconds: i64,
     /// 等待领取中寄出时长已达到长期未领取阈值的件数（超期件数），是 `awaiting_collection` 的
     /// 子集；阈值随快照读取给出，未给出时为 0。
     pub collection_overdue: i64,

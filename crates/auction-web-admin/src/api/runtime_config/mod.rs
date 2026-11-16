@@ -26,9 +26,14 @@ use super::{
 /// Runtime 配置请求失败时保留 HTTP 状态，页面可区分 fingerprint 冲突和普通错误。
 pub(crate) type AdminRuntimeConfigApiError = AdminApiFailure;
 
+/// 读取、校验与保存都显式请求的扩展投影：装备分类词典与告警区块的长期未领取阈值。缺省响应
+/// 不含该阈值，只供升级前的页面；本页按含该键的闭集严格校验。
+const RUNTIME_CONFIG_QUERY: &str =
+    "include_equipment_taxonomy=true&include=fulfillment_collection_overdue_age_seconds";
+
 pub(crate) async fn fetch_admin_runtime_config()
 -> Result<AdminRuntimeConfig, AdminRuntimeConfigApiError> {
-    let response = send_get("/api/v1/admin/config?include_equipment_taxonomy=true")
+    let response = send_get(&format!("/api/v1/admin/config?{RUNTIME_CONFIG_QUERY}"))
         .await
         .map_err(AdminApiFailure::client)?;
     if !response.ok() {
@@ -48,7 +53,7 @@ pub(crate) async fn validate_admin_runtime_config(
         super::fetch_csrf_token().await.map_err(|code| AdminApiFailure { status: None, code })?;
     let command = AdminRuntimeConfigValidateRequest { document };
     let response = send_request(|abort_signal| {
-        Request::post("/api/v1/admin/config:validate?include_equipment_taxonomy=true")
+        Request::post(&format!("/api/v1/admin/config:validate?{RUNTIME_CONFIG_QUERY}"))
             .abort_signal(abort_signal)
             .header("x-csrf-token", &csrf_token)
             .json(&command)
@@ -75,7 +80,7 @@ pub(crate) async fn update_admin_runtime_config(
         super::fetch_csrf_token().await.map_err(|code| AdminApiFailure { status: None, code })?;
     let command = AdminRuntimeConfigUpdateRequest { command_id, expected_fingerprint, document };
     let response = send_request(|abort_signal| {
-        Request::put("/api/v1/admin/config?include_equipment_taxonomy=true")
+        Request::put(&format!("/api/v1/admin/config?{RUNTIME_CONFIG_QUERY}"))
             .abort_signal(abort_signal)
             .header("x-csrf-token", &csrf_token)
             .json(&command)
@@ -105,4 +110,18 @@ fn decode_runtime_config(
         return Err("runtime_config");
     }
     Ok(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RUNTIME_CONFIG_QUERY;
+
+    /// 读取、校验与保存都带两个扩展参数：装备分类词典与长期未领取阈值。
+    #[test]
+    fn runtime_requests_include_both_projections() {
+        assert_eq!(
+            RUNTIME_CONFIG_QUERY,
+            "include_equipment_taxonomy=true&include=fulfillment_collection_overdue_age_seconds"
+        );
+    }
 }

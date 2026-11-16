@@ -381,6 +381,18 @@ impl AdminRuntimeDocument {
         }
     }
 
+    /// 把写入请求落成要保存的候选：请求省略的兼容字段沿用 `current`（指纹 fence 内的当前文件）
+    /// 的值——升级前的页面不认识这些字段，保存不得失败也不得重置它们；显式写出的默认值按省略
+    /// 保存，保持旧文档指纹并让回退的旧程序仍能加载。结果只由请求与当前文件决定，可重复执行。
+    /// 请求省略整个 `operations` 区块时沿用既有语义，不补回。
+    #[must_use]
+    pub fn resolve_update(mut self, current: &AdminRuntimeDocument) -> Self {
+        if let Some(operations) = &mut self.operations {
+            operations.resolve_update(current.operations.as_ref());
+        }
+        self
+    }
+
     /// 计算不依赖 TOML 排版的稳定文档指纹。
     pub fn fingerprint(&self) -> String {
         let encoded = serde_json::to_vec(self).unwrap_or_default();
