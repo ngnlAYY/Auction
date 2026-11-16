@@ -71,9 +71,12 @@ pub(super) fn delivery_preparation_error(stage: &str) -> DeliveryTransportError 
 pub(super) enum DeliveryHandoff {
     /// Sending 已确定提交且提交后续租已确认，可以 poll 一次外部写入。
     Sending,
-    /// 围栏事务在截止前确定结束但没有进入 sending（确定回滚或已提交冻结），例如竞价警告在交接
-    /// 期间失效；尚未外部写入，按正常延期释放 claim，不是 Worker 错误。
+    /// 围栏事务在截止前按业务门确定结束但没有进入 sending（确定回滚或已提交冻结），例如竞价警告
+    /// 在交接期间失效；尚未外部写入，按正常延期释放 claim，不是 Worker 错误。
     Deferred,
+    /// 围栏事务在截止前因内部故障（SQL 错误、冲突重试耗尽等）确定回滚：尚未外部写入，可以安全
+    /// 释放 claim，但按存储层给出的安全分类保留 Worker 错误与未持久化计数，不能当作正常延期。
+    Faulted(SafeErrorKind),
     /// 续租、证据、关闭登记或提交结果未得到确认；沿用原有错误隔离与 owner 撤销语义。
     Unconfirmed,
 }
@@ -82,6 +85,8 @@ pub(super) enum DeliveryHandoff {
 enum FenceEnd {
     Sending,
     Deferred,
+    /// 内部故障后确定回滚，携带存储层的安全分类。
+    Faulted(SafeErrorKind),
     /// 现金证据未能开始提交，围栏根本没有发起。
     NotStarted,
 }
@@ -159,7 +164,8 @@ pub(super) async fn confirm_delivery_handoff<C: Clock>(
                 .await
                 {
                     Ok(Ok(outcome)) if tokio::time::Instant::now() < deadline => {
-                        // 两种结果均在截止前确定结束；Deferred只允许确定回滚或已提交冻结。
+                        // 三种结果均在截止前确定结束；Deferred只允许确定回滚或已提交冻结，Faulted
+                        // 只允许确定回滚。
                         guard.confirm_committed();
                         Some(fence_end(outcome))
                     }
@@ -199,8 +205,10 @@ pub(super) async fn confirm_delivery_handoff<C: Clock>(
     }
     match fence {
         Some(FenceEnd::Sending) => {}
-        // 确定未进入 sending 不是 Worker 错误：由调用方按正常延期释放，不记 ERROR。
+        // 业务门确定未进入 sending 不是 Worker 错误：由调用方按正常延期释放，不记 ERROR。
         Some(FenceEnd::Deferred) => return DeliveryHandoff::Deferred,
+        // 内部故障确定回滚：同样由调用方释放，但保留错误分类；不撤销原会话。
+        Some(FenceEnd::Faulted(kind)) => return DeliveryHandoff::Faulted(kind),
         Some(FenceEnd::NotStarted) | None => {
             tracing::error!(delivery_id = %claim.delivery_id, "delivery worker did not confirm sending fence");
             return DeliveryHandoff::Unconfirmed;
@@ -218,6 +226,9 @@ fn fence_end(outcome: auction_application::delivery::DeliveryFenceOutcome) -> Fe
     match outcome {
         auction_application::delivery::DeliveryFenceOutcome::Sending => FenceEnd::Sending,
         auction_application::delivery::DeliveryFenceOutcome::Deferred => FenceEnd::Deferred,
+        auction_application::delivery::DeliveryFenceOutcome::Faulted(kind) => {
+            FenceEnd::Faulted(kind)
+        }
     }
 }
 

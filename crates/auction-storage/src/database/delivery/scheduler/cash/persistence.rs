@@ -1,5 +1,6 @@
 //! 精确delivery锁验、持久sending与追加现金证据审计。
 
+use auction_application::core::diagnostics::SafeErrorKind;
 use auction_application::delivery::{DeliveryPreparedExpectation, DeliveryWorkClaim};
 use auction_application::settlement::SettlementInternalEvidenceSnapshot;
 use chrono::{DateTime, Utc};
@@ -99,12 +100,12 @@ pub(super) async fn persist_sending(
         Some(DeliveryPreparedExpectation::Send(expectation)) => {
             super::super::attempts::freeze(tx, claim, started_at, expectation).await?;
             metadata["send_expectation"] =
-                serde_json::to_value(expectation.as_ref()).map_err(|_| FenceError::Rejected)?;
+                serde_json::to_value(expectation.as_ref()).map_err(|_| encoding_fault())?;
         }
         Some(DeliveryPreparedExpectation::Take(expectation)) => {
             super::super::take_attempts::freeze(tx, claim, started_at, expectation).await?;
             metadata["take_expectation"] =
-                serde_json::to_value(expectation.as_ref()).map_err(|_| FenceError::Rejected)?;
+                serde_json::to_value(expectation.as_ref()).map_err(|_| encoding_fault())?;
         }
         None => {}
     }
@@ -137,6 +138,11 @@ pub(super) async fn persist_sending(
     )
     .await?;
     Ok(())
+}
+
+/// 冻结身份编码失败是内部故障而不是业务门，回滚后保留错误分类。
+fn encoding_fault() -> FenceError {
+    FenceError::Fault(SafeErrorKind::SERIALIZATION_FAILED)
 }
 
 /// 只保存规范化身份事实；Cookie、页面令牌和响应正文不进入审计。

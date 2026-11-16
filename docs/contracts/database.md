@@ -294,7 +294,7 @@ LISTEN 仅唤醒，持久任务、租约与游标仍是状态来源，不建立�
 观测窗口外按原顺序执行，不计入该操作的尝试，也不改写已归属的阶段；
 同一尝试的 `40001` 与 `40P01` 在映射前区分，重复映射不重复计数。
 只有实际进入下一次尝试才计 retry，只有 owner 确认预算耗尽才计 exhausted。
-现金 fence 的 `Deferred` 与资金的 `RolledBack(SerializationConflict)`
+现金 fence 冲突耗尽后返回的 `Faulted` 与资金的 `RolledBack(SerializationConflict)`
 即使以 Ok 返回，也在原终止分支计耗尽。单次 Read Committed 领取不新增重试。
 
 原最多三次尝试与全部错误返回保持不变；确认重跑前的等待改为带抖动退避
