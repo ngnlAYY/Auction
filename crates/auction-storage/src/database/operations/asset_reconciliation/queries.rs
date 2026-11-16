@@ -47,7 +47,10 @@ WITH expected AS (
             THEN (ref ->> 'id')::uuid
     END
     WHERE d.status IN ('prepared', 'pending', 'claimed', 'sending', 'manual_reconcile')
-      AND COALESCE(ref ->> 'kind', 'equipment') = 'equipment'
+      -- 结算生成方与 MoogleMail 传输只写入、只接受 canonical kind `auction_equipment_key`。
+      -- 兼容声明：早期载荷写 `equipment` 或省略 kind，仍按装备附件识别；只在读侧兼容，
+      -- 不改写任何已冻结的投递载荷与摘要。
+      AND COALESCE(ref ->> 'kind', 'equipment') IN ('auction_equipment_key', 'equipment')
       AND e.world_id = $1
     UNION ALL
     SELECT e.external_equipment_id,

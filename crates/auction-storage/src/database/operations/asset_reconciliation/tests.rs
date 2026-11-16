@@ -496,6 +496,93 @@ async fn postgres_custody_excludes_withdrawn_submissions_after_return()
     Ok(())
 }
 
+/// 投递分支按结算生成方的 canonical 载荷识别装备附件：kind 为 `auction_equipment_key`；
+/// 早期载荷的 `equipment` 与缺省 kind 兼容识别，其他 kind 不是装备附件，已结束的投递不再
+/// 应持。这里只有投递、没有义务，应持只能来自投递分支。
+#[tokio::test]
+#[ignore = "需要 AUCTION_TEST_DATABASE_URL 指向隔离的 PostgreSQL 18"]
+async fn postgres_custody_delivery_branch_reads_canonical_attachment_kind()
+-> Result<(), Box<dyn std::error::Error>> {
+    use sqlx::{Connection, Executor, Row};
+    let url = std::env::var("AUCTION_TEST_DATABASE_URL")?;
+    let mut connection = sqlx::PgConnection::connect(&url).await?;
+    let mut tx = connection.begin().await?;
+    tx.execute(
+        r#"CREATE TEMP TABLE equipment (id uuid, world_id text, external_equipment_id text);
+         CREATE TEMP TABLE settlement_obligations (
+            id uuid, equipment_id uuid, obligation_kind text, submission_id uuid
+         );
+         CREATE TEMP TABLE settlement_obligation_fulfillments (
+            obligation_id uuid, execution_state text, delivery_id uuid, delivery_operation text
+         );
+         CREATE TEMP TABLE auctions (id uuid, status text, world_id text);
+         CREATE TEMP TABLE auction_preview_items (auction_id uuid, equipment_id uuid);
+         CREATE TEMP TABLE auction_submissions (id uuid, auction_id uuid, source_reference text);
+         CREATE TEMP TABLE deliveries (id uuid, status text, payload jsonb);
+         INSERT INTO pg_temp.equipment VALUES
+            ('00000000-0000-0000-0000-000000000001','main','100'),
+            ('00000000-0000-0000-0000-000000000002','main','200'),
+            ('00000000-0000-0000-0000-000000000003','main','300'),
+            ('00000000-0000-0000-0000-000000000004','main','400'),
+            ('00000000-0000-0000-0000-000000000005','main','500');
+         -- 101 与结算生成方逐字段同形（异世界交付模板的 canonical 载荷）。
+         INSERT INTO pg_temp.deliveries VALUES
+            ('00000000-0000-0000-0000-000000000101','pending',
+             '{"schema_version":1,"operation":"send","world":"main",
+               "template":"settlement_equipment_handoff",
+               "variables":{"item_name":"Fixture Sword",
+                            "reference":"00000000-0000-0000-0000-000000000901"},
+               "credits":0,"cod":0,
+               "equipment_secret_refs":[{"kind":"auction_equipment_key",
+                                         "id":"00000000-0000-0000-0000-000000000001"}]}'),
+            ('00000000-0000-0000-0000-000000000102','claimed',
+             '{"equipment_secret_refs":[{"kind":"equipment",
+                                         "id":"00000000-0000-0000-0000-000000000002"}]}'),
+            ('00000000-0000-0000-0000-000000000103','sending',
+             '{"equipment_secret_refs":[{"id":"00000000-0000-0000-0000-000000000003"}]}'),
+            ('00000000-0000-0000-0000-000000000104','pending',
+             '{"equipment_secret_refs":[{"kind":"user_key",
+                                         "id":"00000000-0000-0000-0000-000000000004"}]}'),
+            ('00000000-0000-0000-0000-000000000105','succeeded',
+             '{"equipment_secret_refs":[{"kind":"auction_equipment_key",
+                                         "id":"00000000-0000-0000-0000-000000000005"}]}');"#,
+    )
+    .await?;
+    let row =
+        sqlx::query(sqlx::AssertSqlSafe(queries::CUSTODY_COUNTS.replace("public.", "pg_temp.")))
+            .bind("main")
+            .bind(&[] as &[String])
+            .bind(100_i64)
+            .fetch_one(&mut *tx)
+            .await?;
+    assert_eq!(row.try_get::<i64, _>("expected_count")?, 3);
+    assert_eq!(row.try_get::<i64, _>("missing_count")?, 3);
+
+    let rows =
+        sqlx::query(sqlx::AssertSqlSafe(queries::CUSTODY_SAMPLES.replace("public.", "pg_temp.")))
+            .bind("main")
+            .bind(&[] as &[String])
+            .bind(100_i64)
+            .fetch_all(&mut *tx)
+            .await?;
+    let samples = rows
+        .into_iter()
+        .map(|row| {
+            Ok((
+                row.try_get::<String, _>("external_equipment_id")?,
+                row.try_get::<String, _>("reason")?,
+            ))
+        })
+        .collect::<Result<std::collections::BTreeMap<_, _>, sqlx::Error>>()?;
+    assert_eq!(samples.get("100").map(String::as_str), Some("delivery_pending_equipment"));
+    assert_eq!(samples.get("200").map(String::as_str), Some("delivery_claimed_equipment"));
+    assert_eq!(samples.get("300").map(String::as_str), Some("delivery_sending_equipment"));
+    assert!(!samples.contains_key("400"), "非装备 kind 不是装备附件");
+    assert!(!samples.contains_key("500"), "已成功寄出的投递不再应持");
+    tx.rollback().await?;
+    Ok(())
+}
+
 /// 已寄出等待领取的装备离开应持集合并按原因单列为在途：本轮已在 Armory 观察到的不算在途，
 /// 人工核对与尚未寄出的义务仍按应持核对；撤拍退回已寄出时，投稿分支同样不再把它算作应持。
 #[tokio::test]

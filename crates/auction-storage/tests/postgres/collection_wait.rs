@@ -3,6 +3,8 @@
 //!   COD 仍按既有口径留在原分类，人工核对与尚未寄出的义务不变。
 //! - 资产对账把已寄出且资金已 `spent` 的货款列为在途、不计入应付；已寄出等待领取的装备
 //!   （含已寄出待付款的 COD 装备）列为在途、不计为缺失；人工核对的仍按应持核对。
+//! - 托管投递分支按 canonical 附件 kind 识别真实结算载荷；仍在投递队列里的装备按应持核对，
+//!   不因同一装备的另一义务已寄出而算作在途。
 //! - 履约领取把投递完成时刻带进 delivery 快照，供等待领取的 Sent 轮询按寄出时长分档。
 //! - 长期未领取告警在最久寄出时长达到阈值时写入活动信号，收口回落到阈值以下后由下一轮
 //!   扫描关闭；迁移 000110 的闭集接受该种类。
@@ -202,6 +204,39 @@ async fn seed_delivery(
     .execute(pool)
     .await
     .expect("写入测试投递");
+    id
+}
+
+/// 写入一封仍在投递队列里、携带装备的结算 Send；载荷与结算生成方的 canonical 形状逐字段一致
+/// （附件 kind 为 `auction_equipment_key`）。
+async fn seed_queued_equipment_delivery(pool: &PgPool, obligation_id: Uuid, lot: &Lot) -> Uuid {
+    let id = stable_id(SEED, &format!("queued-delivery-{obligation_id}"));
+    let payload = json!({
+        "schema_version": 1,
+        "operation": "send",
+        "world": "main",
+        "template": "settlement_equipment_handoff",
+        "variables": {"item_name": "Collection wait equipment", "reference": obligation_id},
+        "credits": 0,
+        "cod": 0,
+        "equipment_secret_refs": [{"kind": "auction_equipment_key", "id": lot.equipment_id}]
+    });
+    sqlx::query(
+        "INSERT INTO public.deliveries
+            (id, command_id, request_digest, origin_kind, origin_id, recipient, payload, status,
+             activation_command_id, activation_request_digest, activated_at)
+         VALUES ($1, $2, decode(repeat('79', 32), 'hex'), 'settlement', $3,
+                 'collection-recipient', $4, 'pending', $5, decode(repeat('7a', 32), 'hex'),
+                 now())",
+    )
+    .bind(id)
+    .bind(stable_id(SEED, &format!("queued-prepare-{obligation_id}")))
+    .bind(obligation_id.to_string())
+    .bind(payload)
+    .bind(stable_id(SEED, &format!("queued-activate-{obligation_id}")))
+    .execute(pool)
+    .await
+    .expect("写入队列中的装备投递");
     id
 }
 
@@ -479,6 +514,60 @@ async fn postgres_collection_wait_reports_sent_assets_in_transit() {
         ),
         (1, 2, 0, 1, 900)
     );
+
+    pool.close().await;
+}
+
+/// 托管投递分支识别真实 canonical 结算载荷：同一件装备的流拍退回已寄出（本可算在途），但另有
+/// 一封携带它的结算投递仍在队列里，装备必须按应持核对（原因 `delivery_pending_equipment`），
+/// 不得算作在途。
+#[tokio::test]
+async fn postgres_collection_wait_queued_canonical_delivery_keeps_equipment_expected() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("以运行账号连接");
+    let pool = store.postgres_pool();
+    let now = Utc::now();
+    let auction = seed_auction(pool, now).await;
+    let lot = seed_lot(pool, &auction, 1, false, "9400031").await;
+    let unsold_return = seed_obligation(pool, &auction, &lot, "unsold_return", 0, None).await;
+    let delivery =
+        seed_delivery(pool, unsold_return, 0, Some(now - Duration::days(2)), 700_031).await;
+    seed_fulfillment(
+        pool,
+        unsold_return,
+        "enqueued",
+        Some(delivery),
+        Some("evidence_not_observed"),
+    )
+    .await;
+    seed_queued_equipment_delivery(pool, unsold_return, &lot).await;
+
+    let observation = |world| AssetArmoryObservation {
+        world,
+        observed_at: Utc::now(),
+        equipment_ids: Vec::new(),
+        complete: true,
+        failure_code: None,
+    };
+    let custody = store
+        .reconcile_custody(vec![
+            observation(SettlementWorld::Isekai),
+            observation(SettlementWorld::Main),
+        ])
+        .await
+        .expect("生成装备持有报告");
+    assert_eq!(custody.failure_code, None);
+    let main = custody.worlds.iter().find(|world| world.world == "main").expect("main 报告");
+    assert_eq!((main.expected_count, main.missing_count), (1, 1));
+    assert_eq!(
+        main.missing_samples,
+        [CustodyMissingSample {
+            external_equipment_id: "9400031".to_owned(),
+            reason: "delivery_pending_equipment".to_owned(),
+        }]
+    );
+    assert_eq!(main.in_transit_count, 0, "仍有应持来源的装备不算在途");
+    assert!(main.in_transit_reasons.is_empty());
 
     pool.close().await;
 }
