@@ -1,11 +1,12 @@
 //! 恢复记录落定 resolution（成交撤销）之后结算义务是否仍可执行的唯一谓词：履约领取、
 //! prepare/activate/satisfy 的最终事务与 Admin 重新激活结算投递共用同一口径，按义务在恢复记录中
-//! 的角色与 resolution 判定。
+//! 的角色与 resolution 判定。Admin 重新激活另须确认恢复流程没有接管该义务被退回的邮件。
 
 use sqlx::Postgres;
 use uuid::Uuid;
 
 use crate::database::TrackedTransaction as Transaction;
+use crate::database::settlement::fulfillment::system_settlement_return_source;
 
 /// `o` 为 `public.settlement_obligations` 别名时义务仍可执行的 SQL 谓词。成交撤销后，恢复记录的
 /// 付款、交付与卖方货款义务都不再执行（装备已收回、重列或寄回卖家，绝不能再寄出或付款）；买方
@@ -25,6 +26,37 @@ macro_rules! recovery_allows_execution {
     };
 }
 pub(super) use recovery_allows_execution;
+
+/// 恢复流程已接管义务 `$1` 被退回的邮件：它是某条恢复记录的付款或交付义务，且该恢复记录已消费
+/// 退件或持有收回证明，或者来源可证明的系统退件已经到达、尚待恢复流程消费。
+const RECOVERY_OWNS_RETURN: &str = concat!(
+    r#"SELECT EXISTS (
+           SELECT 1
+           FROM public.settlement_recoveries AS recovery
+           WHERE $1 IN (recovery.payment_obligation_id, recovery.equipment_obligation_id)
+             AND (recovery.return_mail_id IS NOT NULL OR recovery.custody_proof_kind IS NOT NULL)
+       ) OR EXISTS (
+           SELECT 1
+           FROM public.inbound_mail AS inbound
+           WHERE inbound.mail_kind = 'delivery'
+             AND inbound.status = 'accepted'
+             AND inbound.decision_code = 'settlement_recovery_returned'
+             AND inbound.decision_metadata ->> 'obligation_id' = $1::text
+             AND "#,
+    system_settlement_return_source!(),
+    r#"
+             AND EXISTS (
+                 SELECT 1
+                 FROM public.settlement_recoveries AS owner
+                 WHERE $1 IN (owner.payment_obligation_id, owner.equipment_obligation_id)
+             )
+             AND NOT EXISTS (
+                 SELECT 1
+                 FROM public.settlement_recovery_return_consumptions AS consumed
+                 WHERE consumed.return_mail_id = inbound.id
+             )
+       )"#
+);
 
 /// 最终事务内复核资格；调用方已按既有锁序锁定恢复记录与义务，不满足的义务失败关闭，
 /// 领取过滤与这里的复核共同保证撤销后的旧 claim 不能继续推进。
@@ -50,7 +82,8 @@ pub(crate) enum SettlementDeliveryEligibility {
     NotSettlement,
     /// 来源义务仍可执行，且本投递就是义务履约的当前派发。
     Eligible,
-    /// 成交已撤销使义务不再可执行，或本投递已不是义务的当前派发，或来源义务无法解析。
+    /// 成交已撤销使义务不再可执行，或本投递已不是义务的当前派发，或来源义务无法解析，或恢复
+    /// 流程已接管该义务被退回的邮件（重寄只归恢复流程）。
     Ineligible,
 }
 
@@ -61,6 +94,10 @@ pub(crate) enum SettlementDeliveryEligibility {
 /// 投递行；这里按既有锁序先锁引用该义务的恢复记录（UUID 序），再锁义务，与恢复确认、结算履约同序，
 /// 因此与并发确认要么在恢复行上串行、要么由 Serializable 冲突重试，不会出现确认之后仍复活投递的
 /// 交错（不变量 2）。履约行只读，其行锁随后由调用方在投递行之后取得。
+///
+/// 恢复流程接管退件之后（已消费退件、持有收回证明，或系统退件已到达待消费），原投递的重寄只归
+/// 恢复 owner：main COD 未达上限由恢复流程自动重寄，其余经 Admin 确认收口。通用动作若把原投递改回
+/// 待发送，新发送会与旧退件及 Take 证明拼接成错误的收回确认与重列（不变量 4、6）。
 pub(crate) async fn lock_settlement_delivery_eligibility(
     transaction: &mut Transaction<'_, Postgres>,
     delivery_id: Uuid,
@@ -110,6 +147,15 @@ pub(crate) async fn lock_settlement_delivery_eligibility(
     .await?;
     // 履约行存在时，只有它当前指向的派发可以被重新激活；没有履约行的历史义务沿用旧判定。
     if current.is_some_and(|current| current != Some(delivery_id)) {
+        return Ok(SettlementDeliveryEligibility::Ineligible);
+    }
+    // 恢复记录已在上方锁定，退件消费与收回证明的写入方也锁同一行；同时到达的新退件由本
+    // Serializable 事务的读依赖覆盖，冲突时整事务重试。
+    let recovery_owns_return: bool = sqlx::query_scalar(RECOVERY_OWNS_RETURN)
+        .bind(obligation_id)
+        .fetch_one(&mut **transaction)
+        .await?;
+    if recovery_owns_return {
         return Ok(SettlementDeliveryEligibility::Ineligible);
     }
     Ok(SettlementDeliveryEligibility::Eligible)

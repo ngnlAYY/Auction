@@ -70,7 +70,8 @@ pub enum DeliveryAdminGuardBlocker {
     /// 结算退件 Take 由退件案件 owner 推进：结果未知只认系统可验证证明，不允许人工释放、
     /// 重试或声明成功/失败。
     SettlementReturnActionOwned,
-    /// 结算义务已不可执行（成交已撤销）或投递已不是当前派发，禁止重新激活。
+    /// 结算义务已不可执行（成交已撤销）、投递已不是当前派发，或恢复流程已接管该义务被退回的
+    /// 邮件，禁止重新激活。
     SettlementIneligible,
     /// 已绑定资金责任，禁止人工释放/重试/对账改写。
     FundedDelivery,

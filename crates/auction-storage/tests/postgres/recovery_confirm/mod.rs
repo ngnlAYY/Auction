@@ -1,6 +1,7 @@
 //! Admin 恢复确认收口原付款履约、isekai 取消规则（见 `isekai`）、成交撤销后 Admin 投递台的
-//! 重新激活门（见 `admin_retry`）、`equipment_recovered` 的依赖收口（见 `recovered`）与成交撤销
-//! 后资产对账按恢复去向计数（见 `reconciliation`）的 PostgreSQL 18 用例。
+//! 重新激活门（见 `admin_retry`）、确认端把退件绑定到被收回的那次发送（见 `binding`）、
+//! `equipment_recovered` 的依赖收口（见 `recovered`）与成交撤销后资产对账按恢复去向计数（见
+//! `reconciliation`）的 PostgreSQL 18 用例。
 //!
 //! - `reclaimed` 在确认事务内把原付款履约与不再可执行的依赖履约收口为 `failed`，追加
 //!   `cod_returned` 处置与审计；确认前领取的旧 claim 之后不能再推进，撤销后的义务不再被领取，
@@ -14,6 +15,7 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 mod admin_retry;
+mod binding;
 mod fixture;
 mod isekai;
 mod migration;

@@ -2,7 +2,8 @@
 //! 依赖履约，并在原付款投递上追加 `cod_returned` 统一处置事实。
 //!
 //! 只复用既有 `failed` 执行状态与明确失败码，不新增状态；原投递、发送证明与资金事实保持不变。
-//! 原付款已满足、原付款投递仍可能外发，或依赖履约已开始执行时拒绝确认，交给人工核对。
+//! 原付款已满足、原付款投递仍可能外发、原付款投递在当前退件之后又有发送，或依赖履约已开始执行
+//! 时拒绝确认，交给人工核对。
 
 use auction_application::recovery::{
     RecoveryCommandError, RecoveryConfirmationAction, RecoveryConfirmationCommand,
@@ -11,6 +12,7 @@ use chrono::{DateTime, Utc};
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
+use super::binding::sends_precede_current_return;
 use crate::database::TrackedTransaction as Transaction;
 use crate::database::delivery::disposition::{DeliveryDispositionFact, append};
 use crate::database::operations::audit_health::AuditWriteResult as _;
@@ -64,6 +66,11 @@ pub(in crate::database::recovery::commands) async fn close_voided_fulfillments(
             let status: String = delivery.try_get("status").map_err(map_sql_error)?;
             // 投递仍在准备、排队或发送中：外部写入尚未解决，不能自动收口。
             if matches!(status.as_str(), "prepared" | "pending" | "claimed" | "sending") {
+                return Err(RecoveryCommandError::NotConfirmable);
+            }
+            // 退件与 Take 只证明退件之前那次发送被收回；之后的新发送是另一封邮件，处置不能落在它
+            // 的 fence 上。
+            if !sends_precede_current_return(transaction, delivery_id, recovery.id).await? {
                 return Err(RecoveryCommandError::NotConfirmable);
             }
             let fencing: i64 = delivery.try_get("fencing_version").map_err(map_sql_error)?;

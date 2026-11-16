@@ -2,10 +2,12 @@
 //!
 //! - 三种 resolution（`reclaimed`/`cancelled`/`equipment_recovered`）下，原付款、交付与卖方货款投递
 //!   的释放、重试与对账重试都返回 `SettlementIneligible`，投递、履约与恢复记录一行不改；
-//! - 未撤销的同一类投递照常重试；撤销前已提交的同一重试命令在撤销后仍重放原结果，不产生新动作；
+//! - 恢复流程接管退件之后（已消费退件、持有收回证明，或系统退件已到达待消费），原付款与交付
+//!   投递的重寄只归恢复流程，三种动作同样拒绝；恢复流程按 owner 重寄过、当前没有退件时照常重试；
+//! - 撤销前已提交的同一重试命令在撤销后仍重放原结果，不产生新动作；
 //! - 履约指针已换代的旧派发同样拒绝；`equipment_recovered` 之后的买方退款投递照常重试；
-//! - 并发：重试与确认经两条真实连接在恢复行锁上排队，两种提交顺序都只有一边成功，确认撤销
-//!   之后不会再有被复活的待发送投递。
+//! - 并发：重试与确认经两条真实连接在恢复行锁上排队；恢复流程已消费退件，两种提交顺序下重试
+//!   都被拒绝、确认照常提交，确认撤销之后不会再有被复活的待发送投递。
 
 use std::time::Duration as StdDuration;
 
@@ -13,14 +15,13 @@ use auction_application::core::ApplicationError;
 use auction_application::delivery::{
     DeliveryAdminAction, DeliveryAdminCommand, DeliveryAdminError, DeliveryAdminPort,
 };
-use auction_application::recovery::{
-    RecoveryCommandError, RecoveryCommandRepository, RecoveryConfirmationAction,
-};
+use auction_application::recovery::{RecoveryCommandRepository, RecoveryConfirmationAction};
 use auction_storage::DatabaseStore;
 use sqlx::PgPool;
 use uuid::Uuid;
 
 use super::fixture::{Sale, SaleSpec, insert_reclaiming_sale};
+use super::recovered::fixture::insert_recovered_sale;
 use super::{confirmation, fulfillment};
 use crate::support;
 
@@ -165,6 +166,22 @@ async fn assert_reactivation_rejected(store: &DatabaseStore, delivery_id: Uuid, 
     }
 }
 
+/// 模拟恢复流程已按 owner 重寄原 COD：当前退件指针与收回证明清空、回到等待付款，旧退件只剩
+/// 追加的消费事实。
+async fn clear_current_return(pool: &PgPool, recovery_id: Uuid) {
+    sqlx::query(
+        "UPDATE public.settlement_recoveries
+         SET stage = 'awaiting_payment', return_mail_id = NULL, return_external_mail_id = NULL,
+             custody_proof_kind = NULL, custody_proof_reference = NULL,
+             custody_proof_digest = NULL, custody_proof_observed_at = NULL
+         WHERE id = $1",
+    )
+    .bind(recovery_id)
+    .execute(pool)
+    .await
+    .expect("清空当前退件指针");
+}
+
 async fn sale(store: &DatabaseStore, world: &'static str, sequence: i64) -> Sale {
     insert_reclaiming_sale(
         store.postgres_pool(),
@@ -223,8 +240,10 @@ async fn postgres_admin_retry_rejects_voided_settlement() {
     assert_eq!(retried.snapshot.status, "pending");
     assert_eq!(fulfillment(pool, recovered.refund).await.0, "enqueued");
 
-    // 未撤销正例：同一类原付款投递照常重试；撤销之后同一命令仍重放原结果，不产生新动作。
+    // 未撤销正例：恢复流程已按 owner 重寄过、当前没有退件时，同一类原付款投递照常重试；撤销之后
+    // 同一命令仍重放原结果，不产生新动作。
     let open = sale(&store, "main", 7_600_004).await;
+    clear_current_return(pool, open.recovery_id).await;
     sqlx::query(
         "UPDATE public.settlement_obligation_fulfillments
          SET execution_state = 'failed', completed_at = clock_timestamp()
@@ -299,8 +318,9 @@ async fn wait_for_lock_waiters(pool: &PgPool, expected: i64) {
     panic!("没有等到 {expected} 个锁等待会话");
 }
 
-/// 两种提交顺序：第三条连接先锁住恢复行，让重试与确认依次排队，再放行；先拿到锁的一边提交，
-/// 另一边按 Serializable 冲突重试后看到已提交的结果并拒绝不安全的动作。
+/// 两种提交顺序：第三条连接先锁住恢复行，让重试与确认依次排队，再放行。恢复流程已消费退件并
+/// 持有收回证明，原付款投递的重寄只归恢复流程：无论谁先拿到锁，重试都被拒绝、确认照常提交，
+/// 确认之后原投递保持人工核对状态与 fence，不会被复活。
 #[tokio::test]
 async fn postgres_admin_retry_races_recovery_confirmation() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
@@ -354,38 +374,68 @@ async fn postgres_admin_retry_races_recovery_confirmation() {
         let retried = retry_task.await.expect("重试任务结束");
         let confirmed = confirm_task.await.expect("确认任务结束");
 
-        if retry_first {
-            let retried = retried.expect("先拿到锁的重试提交");
-            assert_eq!(retried.snapshot.status, "pending");
-            let error = confirmed.expect_err("投递已重新排队，确认必须拒绝");
-            assert!(
-                matches!(
-                    error,
-                    ApplicationError::RecoveryCommand(RecoveryCommandError::NotConfirmable)
-                ),
-                "{error:?}"
-            );
-            assert_eq!(recovery_resolution(pool, sale.recovery_id).await, None);
-            assert_eq!(fulfillment(pool, sale.payment).await.0, "enqueued");
-        } else {
-            confirmed.expect("先拿到锁的确认提交");
-            let error = retried.expect_err("成交已撤销，重试必须拒绝");
-            assert!(ineligible(&error), "{error:?}");
-            assert_eq!(
-                recovery_resolution(pool, sale.recovery_id).await.as_deref(),
-                Some("reclaimed")
-            );
-            // 确认之后没有被复活的待发送投递：原投递保持人工核对状态与 fence。
-            assert_eq!(
-                delivery_state(pool, sale.payment_delivery).await,
-                ("manual_reconcile".to_owned(), fence)
-            );
-            assert_eq!(
-                fulfillment(pool, sale.payment).await,
-                ("failed".to_owned(), Some("recovery_reclaimed".to_owned()))
-            );
-        }
+        let error = retried.expect_err("恢复流程已接管退件，重试在两种顺序下都必须拒绝");
+        assert!(ineligible(&error), "retry_first={retry_first}: {error:?}");
+        confirmed.expect("确认照常提交");
+        assert_eq!(recovery_resolution(pool, sale.recovery_id).await.as_deref(), Some("reclaimed"));
+        // 确认之后没有被复活的待发送投递：原投递保持人工核对状态与 fence。
+        assert_eq!(
+            delivery_state(pool, sale.payment_delivery).await,
+            ("manual_reconcile".to_owned(), fence)
+        );
+        assert_eq!(
+            fulfillment(pool, sale.payment).await,
+            ("failed".to_owned(), Some("recovery_reclaimed".to_owned()))
+        );
     }
+
+    store.postgres_pool().close().await;
+}
+
+/// 恢复流程接管退件之后，原付款与交付投递的释放、重试与对账重试都拒绝：main COD 已消费退件并
+/// 持有收回证明（未达退回上限，重寄归恢复流程）；isekai 交付的退件已被消费并已收回装备；系统
+/// 退件已到达、尚待恢复流程消费。三者都不能把原投递改回待发送。
+#[tokio::test]
+async fn postgres_admin_retry_rejects_deliveries_whose_return_recovery_owns() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("以运行账号连接");
+    let pool = store.postgres_pool();
+
+    let reclaiming = insert_reclaiming_sale(
+        pool,
+        SaleSpec {
+            world: "main",
+            sequence: 7_600_201,
+            cod_return_count: 1,
+            cod_return_limit: 3,
+            blacklist_satisfied: false,
+        },
+    )
+    .await;
+    assert_reactivation_rejected(&store, reclaiming.payment_delivery, reclaiming.payment).await;
+
+    let recovered = insert_recovered_sale(pool, 7_600_202).await;
+    assert_reactivation_rejected(&store, recovered.handoff_delivery, recovered.handoff).await;
+
+    // 系统退件已到达但恢复流程尚未消费：同样归恢复流程处理。
+    let arriving = sale(&store, "main", 7_600_203).await;
+    clear_current_return(pool, arriving.recovery_id).await;
+    sqlx::query(
+        "INSERT INTO public.inbound_mail
+            (id, mailbox_key, external_mail_id, world_id, mail_kind, content_digest,
+             received_at, status, decision_code, decision_metadata, processed_at, sender, subject)
+         VALUES (gen_random_uuid(), 'recovery-confirm', '5560203', 'main', 'delivery',
+                 decode(repeat('c6', 32), 'hex'), clock_timestamp() - interval '5 minutes',
+                 'accepted', 'settlement_recovery_returned',
+                 jsonb_build_object('obligation_id', $1::text, 'credits', 0, 'cod', 0,
+                     'attachment_ids', '[]'::jsonb),
+                 clock_timestamp(), 'MoogleMail', '[RTS] Auction equipment delivery [' || $1::text || ']')",
+    )
+    .bind(arriving.payment)
+    .execute(pool)
+    .await
+    .expect("写入尚未消费的系统退件");
+    assert_reactivation_rejected(&store, arriving.payment_delivery, arriving.payment).await;
 
     store.postgres_pool().close().await;
 }

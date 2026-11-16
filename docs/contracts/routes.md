@@ -261,7 +261,7 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | GET | `/api/v1/admin/deliveries/{delivery_id}` | 投递详情：冻结 Send/Take 尝试、Sent 观察/目击与可引用证据、领取状态、追加式处置、来源义务与恢复；不含 payload、正文、Cookie、登录 key |
 | POST | `/api/v1/admin/deliveries/{delivery_id}/sent-proof/preview` | 人工 Sent 证明预览；必须选择该投递已写入的维护证据 `evidence_reference`，只返回闭集 blockers，不写事实 |
 | POST | `/api/v1/admin/deliveries/{delivery_id}/sent-proof/confirm` | 人工 Sent 证明确认；复用 CLI 的稳定命令 ID 与幂等摘要，`command_id` 同参重放返回原结果；证据引用不进入摘要 |
-| POST | `/api/v1/admin/deliveries/{delivery_id}/release` | 释放投递；结算投递的来源义务已不可执行（成交已撤销）或该投递已不是义务的当前派发时返回 `409 settlement_obligation_ineligible`，不改任何状态 |
+| POST | `/api/v1/admin/deliveries/{delivery_id}/release` | 释放投递；结算投递的来源义务已不可执行（成交已撤销）、该投递已不是义务的当前派发，或恢复流程已接管该义务被退回的邮件（已消费退件、持有收回证明或系统退件已到达待消费，重寄只归恢复流程）时返回 `409 settlement_obligation_ineligible`，不改任何状态 |
 | POST | `/api/v1/admin/deliveries/{delivery_id}/retry` | 重试失败投递；结算来源资格不满足时同样返回 `409 settlement_obligation_ineligible` |
 | POST | `/api/v1/admin/deliveries/{delivery_id}/reconcile` | 人工对账结果未知的投递（成功/失败/重试）；主动 Send 禁止仅凭手填外部引用确认成功。判失败的 `failure_code` 只接受 `verified_not_sent`、`recipient_invalid`、`no_longer_needed`；Worker 已在 Sent 目击同一结算义务主题时，重试与判失败返回 `409 delivery_sent_sighted`；对账重试在结算来源资格不满足时返回 `409 settlement_obligation_ineligible` |
 | POST | `/api/v1/admin/deliveries/{delivery_id}/acknowledge` | 操作者确认无资金/资产影响的历史失败已处置；请求 `command_id`、`expected_fencing_version`、必填 `reason`；只追加 `delivery_dispositions` 的 `operator_acknowledged` 事实并解除失败告警，不改投递状态、资金或资产；同命令 ID 同参重放返回原结果 |

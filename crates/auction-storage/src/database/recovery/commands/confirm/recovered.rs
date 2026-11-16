@@ -5,14 +5,15 @@
 //! 保持不变，买方退款由确认事务另行激活。
 //!
 //! 只复用既有 `failed` 执行状态与明确失败码；原交付投递、发送证明、Take 证明与资金事实不改写。
-//! 原交付与本轮 Take 的链路不精确相符、卖方货款已开始或已有支出、存在更新派发或未解决写入时
-//! 拒绝确认，整个确认事务回滚，交给人工核对。
+//! 原交付与本轮 Take 的链路不精确相符、卖方货款已开始或已有支出、存在更新派发或未解决写入、
+//! 原交付在本轮退件之后又有发送时拒绝确认，整个确认事务回滚，交给人工核对。
 
 use auction_application::recovery::{RecoveryCommandError, RecoveryConfirmationCommand};
 use chrono::{DateTime, Utc};
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
+use super::binding::sends_precede_current_return;
 use super::closure::{ClosureAudit, SALE_VOIDED_CODE, append_closure_audit, fail_fulfillment};
 use crate::database::TrackedTransaction as Transaction;
 use crate::database::delivery::disposition::{DeliveryDispositionFact, append};
@@ -160,6 +161,11 @@ pub(in crate::database::recovery::commands) async fn close_recovered_dependents(
         .await
         .map_err(map_sql_error)?;
     if !exact || fencing_version < 1 {
+        return Err(RecoveryCommandError::NotConfirmable);
+    }
+    // 当前成功发送与可信 Sent 证明必须就是退件之前被收回的那一次：退件之后又寄出的同一投递是另一
+    // 封邮件，装备可能正在买家手里，不能与旧退件和 Take 证明拼接成收回确认。
+    if !sends_precede_current_return(transaction, delivery_id, recovery.id).await? {
         return Err(RecoveryCommandError::NotConfirmable);
     }
 
