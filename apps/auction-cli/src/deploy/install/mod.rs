@@ -2,12 +2,13 @@
 //! 每个程序以同目录临时文件 + rename 替换，失败不留下半写程序。deploy 替换四个程序；rollback
 //! 只替换三个运行角色，安装目录中的 auction-cli 保持不变。多个程序整体不是原子的：安装中途
 //! 失败时，自动把本次已替换的程序从刚保留的回滚记录换回（见 `restore`），换回也失败时安装目录
-//! 才可能新旧混合。安装目录与程序的信任边界、root:root 0755 属主与描述符固定见 `trust`。
+//! 才可能新旧混合。安装目录与程序的信任边界、root:root 0755 属主与描述符固定见 `trust`；回滚
+//! 记录中的保留程序只经记录目录的固定描述符读取（[`RecordDirectory`]）。
 
 use std::{
-    fs::OpenOptions,
+    fs::{File, OpenOptions},
     os::unix::fs::OpenOptionsExt,
-    path::{Path, PathBuf},
+    path::Path,
 };
 
 use anyhow::Context;
@@ -23,8 +24,8 @@ mod trust;
 #[cfg(test)]
 pub(crate) use record::{FORMAT, LEGACY_FORMAT};
 pub(crate) use record::{
-    RECORD_FILE, ROLE_BINARIES, RetainRequest, RetainedBinary, RetainedIdentity, RollbackRecord,
-    latest, load, record_dir, record_projection, retain,
+    RECORD_FILE, ROLE_BINARIES, RecordDirectory, RetainRequest, RetainedBinary, RetainedIdentity,
+    RollbackRecord, latest, load, record_dir, record_projection, retain,
 };
 pub(crate) use trust::require_install_dir;
 
@@ -48,26 +49,27 @@ pub(crate) fn install_artifact(
     artifact: &Artifact,
     install_dir: &Path,
     retained: &RollbackRecord,
-    record_directory: &Path,
+    record_directory: &RecordDirectory,
 ) -> Result<(), InstallArtifactFailure> {
     let programs = artifact.binaries.iter().map(|binary| Program {
         name: binary.name,
-        source: binary.path.clone(),
+        source: Source::Artifact(&binary.path),
         sha256: &binary.sha256,
         bytes: binary.bytes,
     });
     install_programs(programs, install_dir, retained, record_directory)
 }
 
-/// 只把回滚记录保留的三个角色程序装回安装目录，auction-cli 保持不变；先复核记录摘要，再从
-/// 记录目录复制。不变量与 [`install_artifact`] 相同，只是换回来源是 `reverse`（rollback 停机后
-/// 刚保留的回退前角色程序）；回退不执行迁移，换回发生在启动服务之前，换回失败时不重试。
+/// 只把回滚记录保留的三个角色程序装回安装目录，auction-cli 保持不变；程序经记录目录的固定
+/// 描述符读取，安装时再按记录摘要复核。不变量与 [`install_artifact`] 相同，只是换回来源是
+/// `reverse`（rollback 停机后刚保留的回退前角色程序）；回退不执行迁移，换回发生在启动服务之前，
+/// 换回失败时不重试。
 pub(crate) fn install_retained(
     record: &RollbackRecord,
-    record_directory: &Path,
+    record_directory: &RecordDirectory,
     install_dir: &Path,
     reverse: &RollbackRecord,
-    reverse_directory: &Path,
+    reverse_directory: &RecordDirectory,
 ) -> Result<(), InstallArtifactFailure> {
     let mut programs = Vec::with_capacity(ROLE_BINARIES.len());
     for name in ROLE_BINARIES {
@@ -80,7 +82,7 @@ pub(crate) fn install_retained(
         };
         programs.push(Program {
             name,
-            source: record_directory.join("bin").join(name),
+            source: Source::Retained(record_directory),
             sha256: &binary.sha256,
             bytes: binary.bytes,
         });
@@ -88,10 +90,32 @@ pub(crate) fn install_retained(
     install_programs(programs.into_iter(), install_dir, reverse, reverse_directory)
 }
 
+/// 待安装程序的来源：制品中的文件按路径以 O_NOFOLLOW 打开（内容由制品摘要证明）；回滚记录中的
+/// 保留程序只经记录目录的固定描述符打开。
+enum Source<'a> {
+    Artifact(&'a Path),
+    Retained(&'a RecordDirectory),
+}
+
+impl Source<'_> {
+    fn open(&self, name: &str) -> anyhow::Result<File> {
+        match self {
+            Self::Artifact(path) => OpenOptions::new()
+                .read(true)
+                .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK)
+                .open(path)
+                .with_context(|| format!("读取待安装程序失败：{}", path.display())),
+            Self::Retained(directory) => directory.open_program(name).with_context(|| {
+                format!("读取待安装程序失败：{}", directory.path().join("bin").join(name).display())
+            }),
+        }
+    }
+}
+
 /// 待安装的单个程序与它的期望摘要。
 struct Program<'a> {
     name: &'a str,
-    source: PathBuf,
+    source: Source<'a>,
     sha256: &'a str,
     bytes: u64,
 }
@@ -102,7 +126,7 @@ fn install_programs<'a>(
     programs: impl Iterator<Item = Program<'a>>,
     install_dir: &Path,
     retained: &RollbackRecord,
-    record_directory: &Path,
+    record_directory: &RecordDirectory,
 ) -> Result<(), InstallArtifactFailure> {
     let directory = match PinnedInstallDir::open(install_dir) {
         Ok(directory) => directory,
@@ -148,7 +172,7 @@ struct InstallFailure {
 /// rename 覆盖目标，再重新打开目标复核属主、权限与摘要。
 fn install_one(
     directory: &PinnedInstallDir,
-    source: &Path,
+    source: &Source<'_>,
     name: &str,
     expected_sha256: &str,
     expected_bytes: u64,
@@ -156,14 +180,10 @@ fn install_one(
     let mut temporary = None;
     let mut replaced = false;
     let result = (|| -> anyhow::Result<()> {
-        let mut input = OpenOptions::new()
-            .read(true)
-            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK)
-            .open(source)
-            .with_context(|| format!("读取待安装程序失败：{}", source.display()))?;
+        let mut input = source.open(name)?;
         let metadata = input.metadata().context("读取待安装程序元数据失败")?;
         if !metadata.is_file() || metadata.len() != expected_bytes {
-            anyhow::bail!("待安装程序不是符合记录大小的普通文件：{}", source.display());
+            anyhow::bail!("待安装程序不是符合记录大小的普通文件：{name}");
         }
         let (staged, mut output) = directory.create_temporary(name)?;
         let staged: &str = temporary.insert(staged);

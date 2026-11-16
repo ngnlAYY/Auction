@@ -17,6 +17,7 @@ mod lifecycle;
 mod migration;
 mod receipts;
 mod shutdown;
+mod state;
 mod systemd;
 use self::lifecycle::{endpoint, observe};
 use self::receipts::publish_receipt;
@@ -51,8 +52,9 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: ServiceArgs) -> anyhow::Re
         ServiceAction::Status => status(config_dir, &systemctl).await,
         ServiceAction::Receipt(_) => unreachable!("已在上方处理"),
         ServiceAction::Stop { shutdown } => {
-            let _lock = guard::deployment_lock(&units)?;
+            let state = guard::deployment_lock(&units)?;
             let gate = shutdown::check(config_dir, None, "stop", &shutdown).await?;
+            state.verify_unchanged()?;
             stop_all(&systemctl).await?;
             print_json(&serde_json::json!({
                 "action": "stop", "stopped": true, "shutdown_gate": gate,
@@ -63,7 +65,7 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: ServiceArgs) -> anyhow::Re
                 ReceiptContext::resolve(receipt.backup_id.as_deref(), receipt.actor.as_deref())?;
             let owner = crate::database::load_owner_secrets(&owner.owner_secrets)?;
             let started_at = Utc::now();
-            let _lock = guard::deployment_lock(&units)?;
+            let state = guard::deployment_lock(&units)?;
             let deployment = prepare(config_dir, &systemctl).await?;
             let mut states = Vec::with_capacity(3);
             for role in ManagedRole::START_ORDER {
@@ -76,7 +78,7 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: ServiceArgs) -> anyhow::Re
                     Ok(roles) => roles,
                     Err(error) => {
                         record_failure(
-                            &units,
+                            state.directory(),
                             &systemctl,
                             Action::Start,
                             started_at,
@@ -88,7 +90,7 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: ServiceArgs) -> anyhow::Re
                     }
                 };
                 let published = publish_receipt(
-                    &units,
+                    state.directory(),
                     &systemctl,
                     Action::Start,
                     Outcome::AlreadyRunning,
@@ -106,10 +108,12 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: ServiceArgs) -> anyhow::Re
             if !states.iter().all(UnitState::stopped) {
                 anyhow::bail!("部分角色正在运行或处于转换状态；请先执行 auction-cli service stop");
             }
+            // 迁移不可撤销：执行前确认锁与回执仍属于同一个状态目录。
+            state.verify_unchanged()?;
             match launch(&systemctl, &deployment, Some(&owner), timeout, None).await {
                 Ok(report) => {
                     let published = publish_receipt(
-                        &units,
+                        state.directory(),
                         &systemctl,
                         Action::Start,
                         Outcome::Succeeded,
@@ -122,8 +126,15 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: ServiceArgs) -> anyhow::Re
                     print_json(&report.report_json(&units, &published))
                 }
                 Err(error) => {
-                    record_failure(&units, &systemctl, Action::Start, started_at, &context, &error)
-                        .await?;
+                    record_failure(
+                        state.directory(),
+                        &systemctl,
+                        Action::Start,
+                        started_at,
+                        &context,
+                        &error,
+                    )
+                    .await?;
                     Err(error)
                 }
             }
@@ -133,11 +144,12 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: ServiceArgs) -> anyhow::Re
                 ReceiptContext::resolve(receipt.backup_id.as_deref(), receipt.actor.as_deref())?;
             let owner = crate::database::load_owner_secrets(&owner.owner_secrets)?;
             let started_at = Utc::now();
-            let _lock = guard::deployment_lock(&units)?;
+            let state = guard::deployment_lock(&units)?;
             // 先证明新配置与 unit 绑定可用，再停止当前服务。
             let deployment = prepare(config_dir, &systemctl).await?;
             let gate =
                 shutdown::check(config_dir, Some(&deployment.worker), "restart", &shutdown).await?;
+            state.verify_unchanged()?;
             stop_all(&systemctl).await?;
             match launch(
                 &systemctl,
@@ -150,7 +162,7 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: ServiceArgs) -> anyhow::Re
             {
                 Ok(report) => {
                     let published = publish_receipt(
-                        &units,
+                        state.directory(),
                         &systemctl,
                         Action::Restart,
                         Outcome::Succeeded,
@@ -164,7 +176,7 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: ServiceArgs) -> anyhow::Re
                 }
                 Err(error) => {
                     record_failure(
-                        &units,
+                        state.directory(),
                         &systemctl,
                         Action::Restart,
                         started_at,

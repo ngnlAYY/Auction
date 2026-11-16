@@ -101,7 +101,7 @@ auction-cli --config-dir /etc/auction service stop --force --reason '紧急修�
 | 参数 | 默认值 |
 | --- | --- |
 | `--systemctl` | `/usr/bin/systemctl` |
-| `--state-dir`（部署控制锁目录） | `/var/lib/auction/deployment` |
+| `--state-dir`（部署状态目录：控制锁、回执与回滚记录，见[部署状态目录](#部署状态目录)） | `/var/lib/auction/deployment` |
 | `--worker-unit` / `--admin-unit` / `--public-unit` | `auction-worker.service` / `auction-admin-api.service` / `auction-public-api.service` |
 | `start/restart --owner-secrets <FILE>` | 必填，无默认值；迁移 owner 凭据（`[database]` 指向应用库，账号须与 `[database_roles] owner` 一致） |
 | `start/restart --startup-timeout-seconds` | 每角色 readiness 的完整预算（状态查询、探测、进程身份复核及轮询等待），默认 30 秒，范围 1–300；`systemctl start` 本身另有 90 秒上限 |
@@ -110,7 +110,7 @@ auction-cli --config-dir /etc/auction service stop --force --reason '紧急修�
 | `start/restart --backup-id <ID>` | 可选；本次部署核对过的恢复点标识，1–256 字节、首尾无空白且不含控制字符，仅写入回执 |
 | `start/restart --actor <NAME>` | 可选；写入回执的操作者，1–128 字节；缺省依次取 `SUDO_USER`、`USER`、`LOGNAME`，都不可用时记为 `uid:<euid>` |
 
-- **start**：取得部署锁（`<state-dir>/deployment-control.lock`，目录不存在时以 0700 创建）→ `config check --strict` → 核对三个 unit 均已装载、`Environment=AUCTION_CONFIG_FILE` 与 `--config-dir` 中的角色文件是同一文件、Admin runtime 文件与父目录归 Admin unit 的固定 `User` 所有（不接受 `DynamicUser`）→ 三角色全部运行时只按顺序复核 readiness 并返回 `already_running`；部分运行或处于转换状态则拒绝 → 检查 TCP 监听端口可绑定 → 执行迁移 → 按 Worker → Admin → Public 逐个 `systemctl start`，等待 unit 为 active 且应用 readiness 返回 HTTP 200，探测前后 `MainPID` 与 `InvocationID` 不变。任一角色失败时反序停止本次启动的全部 unit；已提交的迁移不会回退。成功、`already_running` 与失败都会追加部署回执。
+- **start**：取得部署锁（`<state-dir>/deployment-control.lock`，状态目录与祖先的核对见[部署状态目录](#部署状态目录)）→ `config check --strict` → 核对三个 unit 均已装载、`Environment=AUCTION_CONFIG_FILE` 与 `--config-dir` 中的角色文件是同一文件、Admin runtime 文件与父目录归 Admin unit 的固定 `User` 所有（不接受 `DynamicUser`）→ 三角色全部运行时只按顺序复核 readiness 并返回 `already_running`；部分运行或处于转换状态则拒绝 → 检查 TCP 监听端口可绑定 → 执行迁移 → 按 Worker → Admin → Public 逐个 `systemctl start`，等待 unit 为 active 且应用 readiness 返回 HTTP 200，探测前后 `MainPID` 与 `InvocationID` 不变。任一角色失败时反序停止本次启动的全部 unit；已提交的迁移不会回退。成功、`already_running` 与失败都会追加部署回执。
 - **readiness**：Public/Admin 探测 `GET /health/ready`（TCP 或 Unix socket），Worker 探测 control socket 的 `GET /v1/health/ready`。Worker control 只接受 `allowed_peer_uids/gids` 中的调用者，**以 root 运行 `service` 时须把 `0` 加入 `allowed_peer_uids`**，否则 Worker 永远无法判定就绪；因此 `service start` 也要求启用 `[worker.control]`。
 - **restart**：先完成与 start 相同的预检（新配置不可用时不停止现有服务），再读取只读时段证据；允许或已声明人工例外后，按 Public → Admin → Worker 停止，随后迁移并顺序启动，并追加与 start 相同的部署回执。
 - **stop**：取得部署锁，读取只读时段证据；允许或已声明人工例外后，按 Public → Admin → Worker 逐个停止，并确认每个 unit 已停止后才处理下一个。
@@ -118,6 +118,16 @@ auction-cli --config-dir /etc/auction service stop --force --reason '紧急修�
 - systemctl 调用均有超时（查询 10 秒、启动 90 秒、停止为 unit 的有限 `TimeoutStopUSec` + 10 秒）；超时只终止 systemctl 客户端，已提交给 systemd 的 job 可能仍在执行，须重新查看状态。
 
 [ops/deploy/systemd/auction-stack.service.example](../../ops/deploy/systemd/auction-stack.service.example) 把 `service start/stop` 包装为 oneshot unit，用于开机按顺序拉起；它的 `ExecStart` 同样带 `--owner-secrets /etc/auction/owner/postgres.toml`。
+
+### 部署状态目录
+
+`--state-dir`（标准布局 `/var/lib/auction/deployment`）存放部署控制锁、回执 `receipts/` 与回滚记录 `rollback/`。能改写它任一级父目录的账号就能把整个目录改名并换上另一棵树：已持有的锁留在旧目录，第二个部署进程会在新目录取得另一把锁，按路径读取的回执、回滚记录与保留程序也会落到另一棵树。因此 `service start/stop/restart`、`deploy`、`rollback` 与停机维护命令（见[停机门禁](#停机门禁)）取锁前只读核对：
+
+- 从根开始的每一级父目录：非符号链接的真实目录，归 root 或当前账号所有（以 root 运行即只能是 root；root 拥有的 sticky 目录除外），禁止 group/other 写入；
+- 状态目录本身：归当前账号、禁止 group/other 访问（0700）；不存在时只以 0700 创建这一级，父目录必须已存在，不替调用方建立祖先；
+- 锁文件、回执与 `record.json`：当前账号所有、单链接、owner-only 的普通文件；回滚记录目录与 `bin/` 同为 owner-only，保留程序禁止 group/other 写入。
+
+核对通过后以 `O_DIRECTORY | O_NOFOLLOW` 打开并固定状态目录，之后的锁、回执、回滚记录与保留程序都相对这个描述符打开，不再按路径解析；`rollback` 先取锁，再经它读取回滚记录、部署回执与保留程序，安装时也从固定的记录目录读取程序。`service` 的迁移或停机、`deploy`/`rollback` 的停机之前，再核对路径仍指向持锁时固定的目录、父目录仍然可信，被改名或替换时失败关闭。任一项不满足都在锁、停机与写入之前拒绝并点名路径，不自动 `chown`/`chmod`：按[ops/README.md#目录与账号](../../ops/README.md#目录与账号)把 `/var/lib/auction` 设为 root:root 0755、状态目录设为 root 0700，运行账号的数据放在其下各自的子目录。`service receipt list/show` 只读打开状态目录，按同一口径核对，不创建目录。
 
 ### 部署回执
 
@@ -129,7 +139,7 @@ auction-cli service --state-dir /var/lib/auction/deployment receipt list --limit
 auction-cli service --state-dir /var/lib/auction/deployment receipt show <receipt_id>
 ```
 
-查询只读状态目录：不取部署锁、不连接数据库、不要求 systemctl。目录不存在表示还没有回执；损坏、未知格式、重复 `receipt_id`、符号链接或文件名与内容不符时失败关闭，不返回部分记录。
+查询只读状态目录：不取部署锁、不连接数据库、不要求 systemctl，状态目录与祖先按[部署状态目录](#部署状态目录)的口径核对。目录不存在表示还没有回执；损坏、未知格式、重复 `receipt_id`、符号链接、属主或权限不符（回执须为 owner-only 普通文件）或文件名与内容不符时失败关闭，不返回部分记录。
 
 新回执的格式为 `auction-deployment-receipt.v2`；此前写出的 `auction-deployment-receipt.v1` 回执原样兼容读取、不改写，两者的公共字段相同，区别只在 `deploy`/`rollback` 的 `deploy` 段（见[部署回执扩展](#部署回执扩展)）。闭集字段：
 
@@ -146,7 +156,7 @@ auction-cli service --state-dir /var/lib/auction/deployment receipt show <receip
 | `artifacts` | 实际运行角色的 `/proc/<pid>/exe` 路径与 SHA-256/字节数；进程不可读时摘要与字节数为 `null`，不伪造已验证身份 |
 | `failure` | 失败摘要（≤1024 字符的单行文本）；成功时为 `null` |
 
-回执只追加：目录以 0700 创建，内容先写入 0600 临时文件并 fsync，再以 `RENAME_NOREPLACE` 发布；同一 `receipt_id` 不覆盖，更正只能形成新回执。写入与定时备份状态共用同一私有目录实现，但回执只在打开的目录描述符上核对目录本身（非符号链接、归当前账号、禁止 group/other 访问），不核对祖先：`/var/lib/auction` 按[ops/README.md](../../ops/README.md)的布局归服务账号所有，而部署由 root 执行。目录默认 `<state-dir>/receipts`；把 `common.toml [backup.scope].deployment_receipts_dir` 指向该目录即可随备份范围加密归档。回执不参与启停决策，也没有独立状态机；`service stop` 不写回执。
+回执只追加：目录以 0700 创建，内容先写入 0600 临时文件并 fsync，再以 `RENAME_NOREPLACE` 发布；同一 `receipt_id` 不覆盖，更正只能形成新回执。写入与定时备份状态共用同一私有目录实现，回执目录经持锁时固定的状态目录描述符打开，不重新解析路径。目录默认 `<state-dir>/receipts`；把 `common.toml [backup.scope].deployment_receipts_dir` 指向该目录即可随备份范围加密归档。回执不参与启停决策，也没有独立状态机；`service stop` 不写回执。
 
 ### 停机时段门禁
 
@@ -240,7 +250,7 @@ root 与 postgres 都会执行安装目录中的 `auction-cli`（`auction-stack`
 `rollback` 只把 Worker、Admin、Public 三个运行角色换回 `deploy` 保留的旧程序，**安装目录中的 `auction-cli` 保持不变**，也**不执行迁移**：回退后由当前 CLI 继续执行备份、预检、`service start/restart` 与再次前进，旧 CLI 无法管理已超前的数据库。
 
 - 必须由安装目录中的 `auction-cli` 执行（运行程序摘要必须等于 `<install-dir>/auction-cli`），它的内嵌 schema 必须等于数据库版本：较高（部署在迁移完成前失败）时回退后的任何 `service start/restart`（含开机的 auction-stack）都会先执行回退要避开的迁移，较低时它无法管理数据库，两种情况都在停机前拒绝，前者按错误提示修复后完成升级或按[ops/deploy/RECOVERY.md#安装中途失败的手工换回](../../ops/deploy/RECOVERY.md#安装中途失败的手工换回)整体换回。
-- 回滚记录必须存在且保留程序摘要仍与记录一致；安装目录中的三个角色程序必须仍是该记录对应部署回执里的版本，否则拒绝（先核对安装目录与 unit `ExecStart`）。安装目录同样先过[安装目录信任](#安装目录信任)。
+- 先取得部署锁并固定状态目录，再经它读取回滚记录、部署回执与保留程序（见[部署状态目录](#部署状态目录)）。回滚记录必须存在且保留程序摘要仍与记录一致；安装目录中的三个角色程序必须仍是该记录对应部署回执里的版本，否则拒绝（先核对安装目录与 unit `ExecStart`）。安装目录同样先过[安装目录信任](#安装目录信任)。
 - 省略 `--receipt-id` 时，先只读取每条记录的 `record.json` 并按 `created_at` 选出最新一条，再只散列它的保留程序；较旧记录缺少保留程序不影响默认选择。`record.json` 是保留旧程序的最后一步，缺少它的目录是保留中途失败的残留、从未成为回退目标，跳过并在 stderr 点名；`record.json` 存在但读不出、损坏或无效时点名该目录失败关闭（不静默跳过），创建时间并列时同样拒绝，此时用 `--receipt-id` 指定目标。
 - 时段门禁与在途发送门禁与 `deploy` 相同。磁盘空间门禁没有停机备份需求，只估算反向回滚记录（安装目录当前三个角色程序）与安装临时文件（口径同第 5 步，只计三个角色），余量**不使用** `[backup]` 的 `min_free_bytes`/`min_free_percent`：扣除实际写入/替换字节后每个文件系统至少还留 64 MiB 即可（应急回退不被定时备份的 1 GiB/10% 拦住），不足即在停机前拒绝，估算与 `policy=rollback_fixed_margin` 写入输出的 `gates.disk_space`。
 - 回退目标角色的内嵌 schema（`E`）取自回滚记录；记录不知道时（v1 记录，或部署时找不到摘要一致的成功回执）按创建记录时观测到的数据库版本假设，`gates.versions.target_role_schema_source` 标明 `recorded` 或 `assumed_observed_database_version`。数据库版本 `D` 高于 `E` 时，按[ops/deploy/RECOVERY.md#程序回退](../../ops/deploy/RECOVERY.md#程序回退)的区间规则核对 `(E, D]`，不满足即拒绝并提示恢复升级前备份；区间成立时还要求三个角色的有效配置 `[readiness] migration_compatibility_mode` 都显式为 `compatible`、且目标程序不早于迁移 075（才有兼容判定），否则在停机前拒绝并点名不满足的角色——默认 `shadow` 下旧程序面对超前数据库必然无法就绪。rollback 不修改配置；`D = E` 时不要求任何模式。判定写入输出的 `gates.readiness`。
@@ -274,7 +284,7 @@ v1 回执的 `deploy` 段是平铺字段（`artifact_directory`、`package`、`s
 `db migrate`、`db grants`、`db create`、`db rebuild` 与 `backup restore` 在写数据库前取得停机证明：
 
 1. 若 `<config-dir>` 的同级运行目录 `.<目录名>.server/owner.lock` 存在（合并部署），以非阻塞方式取得其独占锁；`auction-server` 或其子进程仍在运行时失败。合并部署必须用与 `auction-server` 相同的服务账号执行，锁文件须为该账号所有的单链接 owner-only 文件。
-2. 否则先取得部署控制锁（`--state-dir` 不存在时以 0700 创建），再查询三个 systemd unit，全部为 `inactive`、`failed` 或 `not-found` 才继续；目录首次创建期间也与 `service` 命令互斥，目录或锁无法安全创建时拒绝维护。
+2. 否则先取得部署控制锁（`--state-dir` 与祖先的核对见[部署状态目录](#部署状态目录)，不存在时只以 0700 创建最后一级），再查询三个 systemd unit，全部为 `inactive`、`failed` 或 `not-found` 才继续；目录首次创建期间也与 `service` 命令互斥，目录、祖先或锁不可信时拒绝维护。
 3. `--no-systemd` 显式声明本机不用 systemd 管理三角色（容器或开发环境），跳过第 2 步；合并部署锁检查仍然生效。
 
 这些参数与 `service` 相同（`--systemctl`、`--state-dir`、`--*-unit`）。门禁只能证明进程已停止，不能阻止外部客户端连接数据库；恢复与重建另有“零其他会话”检查。
@@ -618,7 +628,7 @@ auction-cli --config-dir /etc/auction recovery external-reconcile   --cutoff <BA
 | `apps/auction-cli/src/app/` | 分派、退出码、JSON 输出 |
 | `apps/auction-cli/src/config_dir/` | 配置目录、单角色投影、三角色一致性检查、监听端点 |
 | `apps/auction-cli/src/receipt/` | 部署回执：只追加的 `service start/restart` 与 `deploy`/`rollback` 结果（v2 deploy 段分开记录角色、CLI 身份与观测数据库版本，v1 只读兼容）、查询与归档来源 |
-| `apps/auction-cli/src/service/` | systemctl 客户端、编排与停机门禁；readiness 探针由 `auction-process` 提供 |
+| `apps/auction-cli/src/service/` | systemctl 客户端、编排与停机门禁，部署状态目录（祖先信任核对、以描述符固定、部署锁）；readiness 探针由 `auction-process` 提供 |
 | `apps/auction-cli/src/deploy/` | 制品静态校验、迁移演练回执、安装目录信任、在途发送与磁盘空间门禁、停机备份双 CLI 校验、旧程序保留/逐个原子替换（root:root 0755）、回滚记录与组件身份、失败回执收口、`deploy`/`rollback` 编排（rollback 只换三个角色、保留 CLI） |
 | `apps/auction-cli/src/database/` | 状态、迁移、建库、预检/盘点证据、重建、连接目标解析 |
 | `apps/auction-cli/src/backup/` | manifest、libpq 环境与 passfile、可复用 create、备份/校验/恢复 |
@@ -626,7 +636,7 @@ auction-cli --config-dir /etc/auction recovery external-reconcile   --cutoff <BA
 | `apps/auction-cli/src/backup/scheduled/offsite/` | age、同盘暂存、待上传检查点、日/月副本编排与追加完成事实 |
 | `apps/auction-cli/src/backup/wal/` | WAL 归档与每周 `pg_basebackup`（zstd+age+fsync 暂存）、暂存 manifest 与重复判定、R2 `wal/`+`base/` 上传器与本地保留 |
 | `apps/auction-cli/src/operations/` | 凭据、规则、论坛、PM、邮件、资金与结算异常 |
-| `apps/auction-cli/src/support/` | 命令共用的本地边界，不含业务规则：`files/` 负责私有目录（绝对路径、当前账号所有、禁止 group/other）、`O_NOFOLLOW` 锁文件、有界普通文件读取、`create_new`+`0600` 一次性证据，以及以目录描述符固定的 `PrivateDirectory`（定时备份状态与部署回执共用的无覆盖/可替换发布与按身份删除）与文件系统容量读取；`digest.rs` 负责 SHA-256 摘要与小写十六进制判定；`process.rs` 负责子进程有界 stderr 捕获、退出状态描述与暂存/临时文件清理；`text.rs` 负责单行文本、操作者、命令 ID、确认短语与摘要等输入校验 |
+| `apps/auction-cli/src/support/` | 命令共用的本地边界，不含业务规则：`files/` 负责私有目录（绝对路径、当前账号所有、禁止 group/other）、`O_NOFOLLOW` 锁文件、有界普通文件读取、`create_new`+`0600` 一次性证据，以及以目录描述符固定的 `PrivateDirectory`（定时备份状态与部署状态目录共用的无覆盖/可替换发布、按身份删除与相对描述符派生子目录）、祖先目录信任的纯判定与文件系统容量读取；`digest.rs` 负责 SHA-256 摘要与小写十六进制判定；`process.rs` 负责子进程有界 stderr 捕获、退出状态描述与暂存/临时文件清理；`text.rs` 负责单行文本、操作者、命令 ID、确认短语与摘要等输入校验 |
 
 排空配置和外层预算见[ops/config/README.md#排空与停止预算](../../ops/config/README.md#排空与停止预算)。systemctl 停止前只读取指定的 TimeoutStopUSec 属性，拒绝无限或无法解析的时长；不会把客户端超时视为 unit 已停止。
 

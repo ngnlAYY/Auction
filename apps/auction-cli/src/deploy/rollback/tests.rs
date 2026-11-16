@@ -19,7 +19,7 @@ use super::preconditions::{
 use crate::deploy::artifact::{Artifact, ArtifactBinary, REQUIRED_BINARIES};
 use crate::deploy::install::{
     FORMAT, InstallArtifactFailure, ROLE_BINARIES, RetainRequest, RetainedBinary, RetainedIdentity,
-    RollbackRecord, install_artifact, install_retained, record_dir, retain,
+    RollbackRecord, install_artifact, install_retained, load, retain,
 };
 use crate::deploy::receipts::{installed_identity, roles_match};
 use crate::receipt::{
@@ -28,6 +28,7 @@ use crate::receipt::{
     LegacyDeployRecord, Outcome, ReceiptContext, RoleIdentity, read as read_receipt, record_deploy,
 };
 use crate::support::digest::{sha256_bytes, sha256_path};
+use crate::support::files::PrivateDirectory;
 
 fn role_identity(tag: char, schema: i64) -> RoleIdentity {
     RoleIdentity {
@@ -274,18 +275,18 @@ fn failed_rollback_receipt_uses_installed_retained_artifacts() {
     assert!(artifacts.iter().all(|artifact| artifact.path.is_some()));
 }
 
-/// 一次 deploy/rollback 生命周期的本地现场：安装目录、状态目录与按版本命名的制品。
+/// 一次 deploy/rollback 生命周期的本地现场：安装目录、按生产口径固定的状态目录与按版本命名的
+/// 制品。
 struct Site {
     root: PathBuf,
     install: PathBuf,
-    state: PathBuf,
+    state: PrivateDirectory,
 }
 
 impl Site {
     fn new() -> Self {
         let root = std::env::temp_dir().join(format!("auction-rollback-{}", Uuid::new_v4()));
         let install = root.join("bin");
-        let state = root.join("state");
         for directory in [&root, &install] {
             fs::create_dir(directory).expect("建立目录");
             fs::set_permissions(directory, fs::Permissions::from_mode(0o755)).expect("设置权限");
@@ -293,6 +294,9 @@ impl Site {
         for name in REQUIRED_BINARIES {
             write_program(&install.join(name), &format!("a-{name}"));
         }
+        let state = PrivateDirectory::open_trusted(&root.join("state"), true)
+            .expect("固定状态目录")
+            .expect("状态目录存在");
         Self { root, install, state }
     }
 
@@ -343,11 +347,10 @@ impl Site {
             observed_database_version: database_version,
             installed_role_schema_version: Some(schema),
         };
-        let retained =
+        let (retained, directory) =
             retain(&self.state, &request, |binaries| Ok(installed_identity(&self.state, binaries)))
                 .expect("保留旧程序");
-        install_artifact(artifact, &self.install, &retained, &record_dir(&self.state, id))
-            .expect("安装制品");
+        install_artifact(artifact, &self.install, &retained, &directory).expect("安装制品");
         let roles = RoleIdentity {
             artifact_directory: Some(artifact.root.display().to_string()),
             package: Some(artifact.package.clone()),
@@ -380,6 +383,8 @@ impl Site {
     /// 模拟 `rollback`（不含 systemd 与数据库）：核对安装目录、保留三个角色为反向记录、换回
     /// 三个角色、核对 CLI 未变并发布 v2 回退回执。
     fn rollback(&self, record: &RollbackRecord, database_version: i64) -> RollbackRecord {
+        let (loaded, record_directory) = load(&self.state, record.record_id).expect("回滚记录");
+        assert_eq!(&loaded, record);
         let deployed = read_receipt(&self.state, record.deploy_receipt_id).expect("部署回执");
         require_installed_matches(&deployed, &self.install).expect("安装目录是部署版本");
         let (cli_before, _) = sha256_path(&self.install.join("auction-cli")).expect("CLI 摘要");
@@ -394,19 +399,13 @@ impl Site {
             observed_database_version: database_version,
             installed_role_schema_version: record.retained_roles.schema_version,
         };
-        let reverse = retain(&self.state, &request, |binaries| {
+        let (reverse, reverse_directory) = retain(&self.state, &request, |binaries| {
             assert!(roles_match(&deployed, binaries));
             Ok(RetainedIdentity { roles: replaced_roles_identity(&deployed, record), cli: None })
         })
         .expect("反向记录");
-        install_retained(
-            record,
-            &record_dir(&self.state, record.record_id),
-            &self.install,
-            &reverse,
-            &record_dir(&self.state, reverse_id),
-        )
-        .expect("换回三个角色");
+        install_retained(record, &record_directory, &self.install, &reverse, &reverse_directory)
+            .expect("换回三个角色");
         let (cli_after, _) = sha256_path(&self.install.join("auction-cli")).expect("CLI 摘要");
         assert_eq!(cli_after, cli_before, "rollback 不替换 auction-cli");
         self.publish(reverse_id, Action::Rollback, deploy);

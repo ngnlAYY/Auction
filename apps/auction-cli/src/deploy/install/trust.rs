@@ -11,7 +11,7 @@
 
 use std::{
     ffi::CString,
-    fs::{self, File, Metadata, OpenOptions},
+    fs::{self, File, OpenOptions},
     os::{
         fd::{AsRawFd, FromRawFd},
         unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
@@ -24,60 +24,13 @@ use uuid::Uuid;
 
 use super::super::artifact::REQUIRED_BINARIES;
 use crate::support::digest::sha256_reader;
-use crate::support::files;
+use crate::support::files::{self, Facts, Kind, ancestor_problem};
 
 /// 安装目录中程序的唯一权限。
 pub(crate) const PROGRAM_MODE: u32 = 0o755;
 /// 门禁拒绝时的处置：不自动修补，由维护者从已验证的 Release 重建信任。
 const REBUILD_TRUST: &str = "不会自动修补属主或权限：请按 ops/deploy/RECOVERY.md 的“重建安装目录信任”\
                              用已验证的 Release 重装为 root:root 0755 后重试";
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Kind {
-    Directory,
-    File,
-    Other,
-}
-
-/// 判定所需的元数据事实；与真实文件解耦，非 root 的测试也能覆盖 root 口径。
-#[derive(Debug, Clone, Copy)]
-struct Facts {
-    kind: Kind,
-    uid: u32,
-    mode: u32,
-}
-
-impl Facts {
-    fn of(metadata: &Metadata) -> Self {
-        let file_type = metadata.file_type();
-        let kind = if file_type.is_symlink() {
-            Kind::Other
-        } else if file_type.is_dir() {
-            Kind::Directory
-        } else if file_type.is_file() {
-            Kind::File
-        } else {
-            Kind::Other
-        };
-        Self { kind, uid: metadata.uid(), mode: metadata.mode() }
-    }
-}
-
-/// 祖先目录：真实目录、归 root 或当前账号、禁止 group/other 写入。root 拥有的 sticky 目录除外：
-/// 他人不能改名或删除其中不属于自己的目录项。
-fn ancestor_problem(facts: Facts, euid: u32) -> Option<&'static str> {
-    if facts.kind != Kind::Directory {
-        return Some("不是真实目录");
-    }
-    if facts.uid != 0 && facts.uid != euid {
-        return Some("属主不是 root 或当前账号");
-    }
-    let sticky_root = facts.uid == 0 && facts.mode & libc::S_ISVTX != 0;
-    if facts.mode & 0o022 != 0 && !sticky_root {
-        return Some("允许 group/other 写入");
-    }
-    None
-}
 
 /// 安装目录本身：真实目录、归当前账号（root 运行即 root）、禁止 group/other 写入。
 fn directory_problem(facts: Facts, euid: u32) -> Option<&'static str> {

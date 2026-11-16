@@ -20,6 +20,7 @@ description: 更新 Auction 云端分体部署：取 GitHub Release 资产并校
 - 入口：`<生产 SSH 入口>`。生产主机资源很小，**禁止在服务器上构建**。
 - 目录按 `ops/README.md#目录与账号` 的标准布局：程序 `<程序目录>`，配置 `<配置目录>`，部署状态 `<部署状态目录>`（`receipts/`、`rollback/`、锁），停机备份 `<停机备份目录>`（root 0700），计划备份 `/var/backups/auction/scheduled/`；发布包解包到 `<发布包暂存目录>/<package>/`。运行账号 `<运行账号>`；systemd unit：`<Worker unit>`、`<Admin unit>`、`<Public unit>`，由 `auction-stack.service` 编排。
 - `<程序目录>` 与其中四个程序必须是 root:root 0755，各级父目录也归 root 且禁止他人写入：root 与 postgres 都会执行其中的 `auction-cli`。deploy/rollback 在停机前核对，不符即拒绝、不自动修补；旧版 deploy 曾把程序改归 `<运行账号>`，遇到这种拒绝时按 `ops/deploy/RECOVERY.md#重建安装目录信任` 用已验证的 Release 重装，**不要**只 `chown`，重建属于生产写入，先征得用户同意。
+- `<部署状态目录>` 必须归 root 且 0700，各级父目录归 root 且禁止他人写入（`/var/lib/auction` 为 root:root 0755，已只读核实）：能改写父目录的账号就能把部署锁、回执与回滚记录整体换成另一棵树。service/deploy/rollback 取锁前核对，持锁期间被改名替换会在停机前失败关闭，不自动修补；遇到拒绝时先停下报告用户，改属主或权限属于生产写入。
 - 配置 `<配置目录>`：`common/public/admin/worker.toml`、`secrets.toml`（运行账号 0600）、`runtime/admin.toml`（0640）、`owner/postgres.toml`（root 0600，只给 CLI 用）。`worker.toml [worker.control] allowed_peer_uids` 必须同时包含 0（root 执行 service/deploy/rollback 时探测 Worker readiness）与 `<运行账号>` 的 UID（Admin 经 control socket 调用 Worker）。
 - 每次 deploy 在 `<部署状态目录>/rollback/` 增加一份四个程序的副本（rollback 增加三个角色程序的副本），每次 deploy 在 `<停机备份目录>` 增加一份停机备份，CLI 都不自动清理；部署前顺带看一眼两处占用，需要腾空间时按 `apps/auction-cli/README.md#回滚记录与停机备份的容量` 的步骤人工清理（保留最新成功回执引用的回滚记录与最近几条，整目录删除旧记录、成对删除旧备份），清理属于生产写入，先征得用户同意。
 - 站点：`<Public 站点>`、`<Admin 站点>`。当前部署记录在 `<部署说明>` 的“当前部署”段；部署历史以 `<部署状态目录>/receipts/` 的回执为准。
@@ -51,7 +52,7 @@ description: 更新 Auction 云端分体部署：取 GitHub Release 资产并校
 
 ## 2. 生产基线（只读）
 
-记录三个角色的 `MainPID`、`/proc/<pid>/exe` 摘要与 `NRestarts`，以及 `db status` 中的当前 schema、配置文件的摘要/属主/权限、`<程序目录>` 及其父目录与四个程序的属主/权限，和表行数。用候选包的 CLI 判断本次是否含迁移（当前 `latest_version` 与候选的 `expected_version` 是否不同）。
+记录三个角色的 `MainPID`、`/proc/<pid>/exe` 摘要与 `NRestarts`，以及 `db status` 中的当前 schema、配置文件的摘要/属主/权限、`<程序目录>` 及其父目录与四个程序的属主/权限、`<部署状态目录>` 及其父目录的属主/权限，和表行数。用候选包的 CLI 判断本次是否含迁移（当前 `latest_version` 与候选的 `expected_version` 是否不同）。
 
 旧程序（演练中的“旧角色”）就是线上正在运行的那个包：是 Release 时从 GitHub Release 下载，否则取上一轮演练目录里归档的 `candidate/`。两种情况都要与线上 `/proc/<pid>/exe` 摘要逐个核对。
 

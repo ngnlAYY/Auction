@@ -18,7 +18,7 @@
 | `<生产 SSH 入口>` | 登录生产主机的 SSH 地址与账号 |
 | `<程序目录>` | 程序安装目录（`/opt/auction/bin`）；目录与四个程序 root:root 0755，各级父目录也归 root 且禁止他人写入 |
 | `<配置目录>` | 三角色配置目录（`/etc/auction`）：`common/public/admin/worker.toml`、敏感文件 `secrets.toml`、`runtime/admin.toml`、迁移 owner 凭据 `owner/postgres.toml` |
-| `<部署状态目录>` | `--state-dir`（`/var/lib/auction/deployment`）：部署锁、`receipts/` 与 `rollback/`，root 0700 |
+| `<部署状态目录>` | `--state-dir`（`/var/lib/auction/deployment`）：部署锁、`receipts/` 与 `rollback/`，root 0700；各级父目录也归 root 且禁止他人写入（`/var/lib/auction` 为 root:root 0755，运行账号的数据放在其下自有子目录） |
 | `<停机备份目录>` | `--backup-dir`（`/var/backups/auction`），root 0700 |
 | `<发布包暂存目录>` | 生产主机上解包 Release 资产的 root 所有、禁止他人写入的目录 |
 | `<部署说明>` | 生产主机上人工维护的部署说明文件（“当前部署”段） |

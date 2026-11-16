@@ -9,13 +9,14 @@ use uuid::Uuid;
 use super::restore::Swap;
 use super::trust::PinnedInstallDir;
 use super::{
-    FORMAT, InstallArtifactFailure, LEGACY_FORMAT, ROLE_BINARIES, RetainRequest, RetainedIdentity,
-    RollbackRecord, install_artifact, install_retained, latest, load, record_dir, retain,
+    FORMAT, InstallArtifactFailure, LEGACY_FORMAT, ROLE_BINARIES, RecordDirectory, RetainRequest,
+    RetainedIdentity, RollbackRecord, install_artifact, install_retained, latest, load, record_dir,
+    retain,
 };
 use crate::deploy::artifact::{Artifact, ArtifactBinary, REQUIRED_BINARIES};
 use crate::receipt::{CliIdentity, DeployRecord, RoleIdentity};
 use crate::support::digest::{sha256_bytes, sha256_path};
-use crate::support::files::effective_uid;
+use crate::support::files::{PrivateDirectory, effective_uid};
 
 struct TempRoot(PathBuf);
 
@@ -29,6 +30,13 @@ impl TempRoot {
 
     fn path(&self) -> &Path {
         &self.0
+    }
+
+    /// 测试根目录下按生产口径核对并固定的部署状态目录。
+    fn state(&self) -> PrivateDirectory {
+        PrivateDirectory::open_trusted(&self.0.join("state"), true)
+            .expect("固定状态目录")
+            .expect("状态目录存在")
     }
 }
 
@@ -77,10 +85,10 @@ fn artifact(root: &Path) -> Artifact {
 
 /// 以未知身份保留 `programs`；deploy 传四个程序，rollback 只传三个角色。
 fn retain_programs(
-    state: &Path,
+    state: &PrivateDirectory,
     install: &Path,
     programs: &'static [&'static str],
-) -> RollbackRecord {
+) -> (RollbackRecord, RecordDirectory) {
     let request = RetainRequest {
         deploy_receipt_id: Uuid::new_v4(),
         install_dir: install,
@@ -92,7 +100,7 @@ fn retain_programs(
         .expect("保留旧程序")
 }
 
-fn retain_all(state: &Path, install: &Path) -> RollbackRecord {
+fn retain_all(state: &PrivateDirectory, install: &Path) -> (RollbackRecord, RecordDirectory) {
     retain_programs(state, install, &REQUIRED_BINARIES)
 }
 
@@ -108,13 +116,16 @@ fn assert_sealed(install: &Path, name: &str) {
 fn retain_install_and_load_round_trip() {
     let root = TempRoot::new();
     let install = install_dir(root.path());
-    let state = root.path().join("state");
-    let record = retain_all(&state, &install);
+    let state = root.state();
+    let (record, _) = retain_all(&state, &install);
     assert_eq!(record.format, FORMAT);
     assert_eq!(record.binaries.len(), 4);
     let (loaded, directory) = load(&state, record.record_id).expect("读取回滚记录");
     assert_eq!(loaded, record);
+    assert_eq!(directory.path(), record_dir(&state.path, record.record_id));
     assert_eq!(latest(&state).expect("最新记录").0, record);
+    let record_json = directory.path().join("record.json");
+    assert_eq!(fs::metadata(&record_json).expect("记录文件").mode() & 0o777, 0o600);
 
     let artifact = artifact(root.path());
     install_artifact(&artifact, &install, &record, &directory).expect("安装制品程序");
@@ -127,10 +138,9 @@ fn retain_install_and_load_round_trip() {
         assert_sealed(&install, binary.name);
     }
     // 回退只换回三个角色：先把当前三个角色保留为反向记录，auction-cli 保持制品版本。
-    let reverse = retain_programs(&state, &install, &ROLE_BINARIES);
+    let (reverse, reverse_directory) = retain_programs(&state, &install, &ROLE_BINARIES);
     assert_eq!(reverse.binaries.len(), 3);
     assert!(reverse.retained_cli.is_none());
-    let reverse_directory = record_dir(&state, reverse.record_id);
     install_retained(&record, &directory, &install, &reverse, &reverse_directory)
         .expect("恢复旧角色程序");
     for name in ROLE_BINARIES {
@@ -145,11 +155,75 @@ fn retain_install_and_load_round_trip() {
 fn tampered_retained_binary_is_rejected() {
     let root = TempRoot::new();
     let install = install_dir(root.path());
-    let state = root.path().join("state");
-    let record = retain_all(&state, &install);
-    let directory = record_dir(&state, record.record_id);
+    let state = root.state();
+    let (record, _) = retain_all(&state, &install);
+    let directory = record_dir(&state.path, record.record_id);
     fs::write(directory.join("bin/auction-cli"), b"tampered").expect("改写保留程序");
     assert!(load(&state, record.record_id).is_err());
+}
+
+/// 持锁之后状态目录的路径被改名、原路径换上一棵带自洽伪造记录的树：回滚记录仍从固定的状态目录
+/// 读取，按标识与默认选择都得到原记录（旧实现在取锁之前按路径读取记录）。
+#[test]
+fn records_are_read_from_the_pinned_state_directory() {
+    let root = TempRoot::new();
+    let install = install_dir(root.path());
+    let state = root.state();
+    let (record, _) = retain_all(&state, &install);
+    fs::rename(&state.path, root.path().join("state.moved")).expect("改名状态目录");
+
+    let forged_root = record_dir(&state.path, record.record_id);
+    fs::create_dir_all(forged_root.join("bin")).expect("伪造记录目录");
+    for directory in [&state.path, &state.path.join("rollback"), &forged_root] {
+        fs::set_permissions(directory, fs::Permissions::from_mode(0o700)).expect("设置权限");
+    }
+    fs::set_permissions(forged_root.join("bin"), fs::Permissions::from_mode(0o700))
+        .expect("设置权限");
+    let mut forged = record.clone();
+    for binary in &mut forged.binaries {
+        let content = format!("forged-{}", binary.name);
+        let path = forged_root.join("bin").join(&binary.name);
+        fs::write(&path, &content).expect("写入伪造程序");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).expect("设置权限");
+        binary.sha256 = sha256_bytes(content.as_bytes());
+        binary.bytes = content.len() as u64;
+    }
+    let record_json = forged_root.join("record.json");
+    fs::write(&record_json, serde_json::to_vec(&forged).expect("序列化")).expect("写入伪造记录");
+    fs::set_permissions(&record_json, fs::Permissions::from_mode(0o600)).expect("设置权限");
+
+    assert_eq!(load(&state, record.record_id).expect("读取固定目录中的记录").0, record);
+    assert_eq!(latest(&state).expect("默认选择").0, record);
+    assert!(state.verify_path().is_err(), "路径已不指向固定的状态目录");
+}
+
+/// 回滚记录目录、`record.json` 与保留程序都必须是当前账号的私有条目：记录文件对 group 开放、
+/// 保留程序或 `bin/` 允许 group 写入时读取失败关闭（旧实现按路径读取，不核对属主与权限）。
+#[test]
+fn load_rejects_record_entries_others_could_have_written() {
+    let root = TempRoot::new();
+    let install = install_dir(root.path());
+    let state = root.state();
+    let (record, _) = retain_all(&state, &install);
+    let directory = record_dir(&state.path, record.record_id);
+    let chmod = |path: PathBuf, mode: u32| {
+        fs::set_permissions(path, fs::Permissions::from_mode(mode)).expect("设置权限");
+    };
+    load(&state, record.record_id).expect("私有记录可读");
+
+    chmod(directory.join("record.json"), 0o644);
+    assert!(load(&state, record.record_id).is_err(), "record.json 必须 owner-only");
+    assert!(latest(&state).is_err(), "默认选择同样失败关闭");
+    chmod(directory.join("record.json"), 0o600);
+
+    chmod(directory.join("bin/auction-worker"), 0o775);
+    assert!(load(&state, record.record_id).is_err(), "保留程序禁止 group 写入");
+    chmod(directory.join("bin/auction-worker"), 0o755);
+
+    chmod(directory.join("bin"), 0o755);
+    assert!(load(&state, record.record_id).is_err(), "bin/ 必须 owner-only");
+    chmod(directory.join("bin"), 0o700);
+    load(&state, record.record_id).expect("恢复后可读");
 }
 
 /// v2 记录分开保存保留角色身份、保留 CLI 身份与观测版本；CLI 副本与身份摘要不一致、缺少角色
@@ -158,7 +232,7 @@ fn tampered_retained_binary_is_rejected() {
 fn record_validation_binds_identity_to_the_retained_copies() {
     let root = TempRoot::new();
     let install = install_dir(root.path());
-    let state = root.path().join("state");
+    let state = root.state();
     let request = RetainRequest {
         deploy_receipt_id: Uuid::new_v4(),
         install_dir: &install,
@@ -173,7 +247,7 @@ fn record_validation_binds_identity_to_the_retained_copies() {
         source_commit: Some("f".repeat(40)),
         schema_version: Some(94),
     };
-    let record = retain(&state, &request, |_| {
+    let (record, _) = retain(&state, &request, |_| {
         Ok(RetainedIdentity { roles: roles.clone(), cli: Some(foreign_cli.clone()) })
     })
     .expect("保留旧程序");
@@ -201,6 +275,14 @@ fn record_validation_binds_identity_to_the_retained_copies() {
     let mut invalid = record;
     invalid.retained_roles.source_commit = Some("A".repeat(40));
     assert!(invalid.validate().is_err(), "角色身份无效");
+
+    // 同一标识的记录已存在时拒绝，不覆盖任何保留副本。
+    let error = retain(&state, &request, |_| {
+        Ok(RetainedIdentity { roles: RoleIdentity::default(), cli: None })
+    })
+    .err()
+    .expect("同一标识必须拒绝");
+    assert!(format!("{error:#}").contains("拒绝覆盖"), "{error:#}");
 }
 
 /// v1 记录原样兼容读取：部署前的数据库版本只作观测值，角色 schema 记为未知（回退门禁按观测
@@ -209,9 +291,9 @@ fn record_validation_binds_identity_to_the_retained_copies() {
 fn legacy_records_are_read_without_rewriting() {
     let root = TempRoot::new();
     let install = install_dir(root.path());
-    let state = root.path().join("state");
-    let record = retain_all(&state, &install);
-    let directory = record_dir(&state, record.record_id);
+    let state = root.state();
+    let (record, _) = retain_all(&state, &install);
+    let directory = record_dir(&state.path, record.record_id);
     let legacy = serde_json::json!({
         "format": LEGACY_FORMAT,
         "record_id": record.record_id,
@@ -224,8 +306,10 @@ fn legacy_records_are_read_without_rewriting() {
         "binaries": record.binaries,
     });
     let bytes = serde_json::to_vec_pretty(&legacy).expect("序列化");
-    fs::remove_file(directory.join("record.json")).expect("移除 v2 记录");
-    fs::write(directory.join("record.json"), &bytes).expect("写入 v1 记录");
+    let record_json = directory.join("record.json");
+    fs::remove_file(&record_json).expect("移除 v2 记录");
+    fs::write(&record_json, &bytes).expect("写入 v1 记录");
+    fs::set_permissions(&record_json, fs::Permissions::from_mode(0o600)).expect("设置权限");
 
     let (loaded, _) = load(&state, record.record_id).expect("读取 v1 记录");
     assert_eq!(loaded.format, LEGACY_FORMAT);
@@ -237,12 +321,11 @@ fn legacy_records_are_read_without_rewriting() {
         Some(CliIdentity::digest_only(&sha256_bytes(b"old-auction-cli")))
     );
     assert_eq!(loaded.target_schema(), (94, "assumed_observed_database_version"));
-    assert_eq!(fs::read(directory.join("record.json")).expect("记录文件"), bytes, "不改写 v1 文件");
+    assert_eq!(fs::read(&record_json).expect("记录文件"), bytes, "不改写 v1 文件");
 
     let mut three = legacy;
     three["binaries"] = serde_json::to_value(&record.binaries[1..]).expect("三个程序");
-    fs::write(directory.join("record.json"), serde_json::to_vec(&three).expect("序列化"))
-        .expect("改写");
+    fs::write(&record_json, serde_json::to_vec(&three).expect("序列化")).expect("改写");
     assert!(load(&state, record.record_id).is_err(), "v1 记录必须有四个程序");
 }
 
@@ -254,8 +337,8 @@ fn deploy_receipt_is_readable_from_retained_record_id() {
 
     let root = TempRoot::new();
     let install = install_dir(root.path());
-    let state = root.path().join("state");
-    let record = retain_all(&state, &install);
+    let state = root.state();
+    let (record, _) = retain_all(&state, &install);
     let context = ReceiptContext::resolve(Some("backup-1"), Some("operator")).expect("上下文");
     record_deploy(
         &state,
@@ -318,10 +401,9 @@ fn read_install(install: &Path, name: &str) -> Vec<u8> {
 fn install_failure_swaps_back_the_replaced_programs() {
     let root = TempRoot::new();
     let install = install_dir(root.path());
-    let state = root.path().join("state");
+    let state = root.state();
     let artifact = artifact(root.path());
-    let record = retain_all(&state, &install);
-    let directory = record_dir(&state, record.record_id);
+    let (record, directory) = retain_all(&state, &install);
     // 等长改写使大小检查通过、摘要复核失败。
     fs::write(root.path().join("artifact/bin/auction-public-api"), b"NEW-auction-public-api")
         .expect("改写制品程序");
@@ -356,11 +438,10 @@ fn install_failure_swaps_back_the_replaced_programs() {
 fn failed_swap_back_reports_current_digests() {
     let root = TempRoot::new();
     let install = install_dir(root.path());
-    let state = root.path().join("state");
+    let state = root.state();
     let artifact = artifact(root.path());
-    let record = retain_all(&state, &install);
-    let directory = record_dir(&state, record.record_id);
-    fs::remove_file(directory.join("bin/auction-worker")).expect("删除保留的 Worker 程序");
+    let (record, directory) = retain_all(&state, &install);
+    fs::remove_file(directory.path().join("bin/auction-worker")).expect("删除保留的 Worker 程序");
     fs::write(root.path().join("artifact/bin/auction-public-api"), b"NEW-auction-public-api")
         .expect("改写制品程序");
 
@@ -382,9 +463,8 @@ fn failed_swap_back_reports_current_digests() {
 fn swap_back_restores_a_program_replaced_before_its_failure() {
     let root = TempRoot::new();
     let install = install_dir(root.path());
-    let state = root.path().join("state");
-    let record = retain_all(&state, &install);
-    let directory = record_dir(&state, record.record_id);
+    let state = root.state();
+    let (record, directory) = retain_all(&state, &install);
     // 模拟 Worker 已 rename 为新程序、随后的同步或复核失败。
     fs::write(install.join("auction-worker"), b"new-auction-worker").expect("写入新程序");
     let pinned = PinnedInstallDir::open(&install).expect("固定安装目录");
@@ -408,25 +488,24 @@ fn swap_back_restores_a_program_replaced_before_its_failure() {
 /// rollback 的安装现场：安装目录已部署为新程序，`record` 保留部署前的四个旧程序，`reverse` 是
 /// rollback 停机后刚保留的回退前三个角色程序。
 struct RollbackSite {
-    _root: TempRoot,
+    root: TempRoot,
+    state: PrivateDirectory,
     install: PathBuf,
     record: RollbackRecord,
-    record_directory: PathBuf,
+    record_directory: RecordDirectory,
     reverse: RollbackRecord,
-    reverse_directory: PathBuf,
+    reverse_directory: RecordDirectory,
 }
 
 fn rollback_site() -> RollbackSite {
     let root = TempRoot::new();
     let install = install_dir(root.path());
-    let state = root.path().join("state");
-    let record = retain_all(&state, &install);
-    let record_directory = record_dir(&state, record.record_id);
+    let state = root.state();
+    let (record, record_directory) = retain_all(&state, &install);
     install_artifact(&artifact(root.path()), &install, &record, &record_directory)
         .expect("部署新程序");
-    let reverse = retain_programs(&state, &install, &ROLE_BINARIES);
-    let reverse_directory = record_dir(&state, reverse.record_id);
-    RollbackSite { _root: root, install, record, record_directory, reverse, reverse_directory }
+    let (reverse, reverse_directory) = retain_programs(&state, &install, &ROLE_BINARIES);
+    RollbackSite { root, state, install, record, record_directory, reverse, reverse_directory }
 }
 
 impl RollbackSite {
@@ -447,8 +526,11 @@ impl RollbackSite {
 #[test]
 fn retained_install_failure_swaps_back_from_the_reverse_record() {
     let site = rollback_site();
-    fs::write(site.record_directory.join("bin/auction-public-api"), b"OLD-auction-public-api")
-        .expect("改写保留的旧程序");
+    fs::write(
+        site.record_directory.path().join("bin/auction-public-api"),
+        b"OLD-auction-public-api",
+    )
+    .expect("改写保留的旧程序");
 
     let InstallArtifactFailure { error, restored } =
         site.install_retained().expect_err("第三个程序摘要不符");
@@ -472,10 +554,13 @@ fn retained_install_failure_swaps_back_from_the_reverse_record() {
 #[test]
 fn failed_retained_swap_back_reports_current_digests() {
     let site = rollback_site();
-    fs::remove_file(site.reverse_directory.join("bin/auction-worker"))
+    fs::remove_file(site.reverse_directory.path().join("bin/auction-worker"))
         .expect("删除反向记录的 Worker 程序");
-    fs::write(site.record_directory.join("bin/auction-public-api"), b"OLD-auction-public-api")
-        .expect("改写保留的旧程序");
+    fs::write(
+        site.record_directory.path().join("bin/auction-public-api"),
+        b"OLD-auction-public-api",
+    )
+    .expect("改写保留的旧程序");
 
     let InstallArtifactFailure { error, restored } =
         site.install_retained().expect_err("第三个程序摘要不符");
@@ -491,21 +576,55 @@ fn failed_retained_swap_back_reports_current_digests() {
     assert_eq!(read_install(&site.install, "auction-cli"), b"new-auction-cli");
 }
 
+/// 来源替换：读取并复核回滚记录之后，记录目录的路径被改名、原路径换上一份自洽的伪造记录（自报
+/// 摘要的“旧程序”）。安装仍从读取时固定的记录目录描述符取程序，装回的是原记录保留的程序，伪造
+/// 程序不会进入安装目录（旧实现按路径重新打开 `<记录目录>/bin/<程序>`）。
+#[test]
+fn retained_sources_stay_pinned_when_the_record_path_is_replaced() {
+    let site = rollback_site();
+    let (record, record_directory) =
+        load(&site.state, site.record.record_id).expect("读取并复核回滚记录");
+    let path = record_dir(&site.state.path, record.record_id);
+    fs::rename(&path, site.root.path().join("moved-record")).expect("改名记录目录");
+    let forged = path.join("bin");
+    fs::create_dir_all(&forged).expect("伪造记录目录");
+    for directory in [&path, &forged] {
+        fs::set_permissions(directory, fs::Permissions::from_mode(0o700)).expect("设置权限");
+    }
+    let mut forged_record = record.clone();
+    for binary in &mut forged_record.binaries {
+        let content = format!("forged-{}", binary.name);
+        fs::write(forged.join(&binary.name), &content).expect("写入伪造程序");
+        binary.sha256 = sha256_bytes(content.as_bytes());
+        binary.bytes = content.len() as u64;
+    }
+    fs::write(path.join("record.json"), serde_json::to_vec(&forged_record).expect("序列化"))
+        .expect("写入伪造记录");
+
+    install_retained(
+        &record,
+        &record_directory,
+        &site.install,
+        &site.reverse,
+        &site.reverse_directory,
+    )
+    .expect("从固定的记录目录安装");
+    for name in ROLE_BINARIES {
+        assert_eq!(read_install(&site.install, name), format!("old-{name}").into_bytes(), "{name}");
+    }
+}
+
 /// 安装目录不可信（group 可写）时在替换任何程序之前失败，安装目录保持原状。
 #[test]
 fn untrusted_install_dir_is_rejected_before_any_replacement() {
     let root = TempRoot::new();
     let install = install_dir(root.path());
-    let state = root.path().join("state");
-    let record = retain_all(&state, &install);
+    let state = root.state();
+    let (record, directory) = retain_all(&state, &install);
     fs::set_permissions(&install, fs::Permissions::from_mode(0o775)).expect("放宽安装目录");
-    let InstallArtifactFailure { error, restored } = install_artifact(
-        &artifact(root.path()),
-        &install,
-        &record,
-        &record_dir(&state, record.record_id),
-    )
-    .expect_err("不可信安装目录");
+    let InstallArtifactFailure { error, restored } =
+        install_artifact(&artifact(root.path()), &install, &record, &directory)
+            .expect_err("不可信安装目录");
     let text = format!("{error:#}");
     assert!(restored && text.contains("没有替换任何程序"), "{text}");
     for name in REQUIRED_BINARIES {
@@ -524,16 +643,15 @@ fn install_failure_receipt_records_the_actual_install_dir() {
 
     let root = TempRoot::new();
     let install = install_dir(root.path());
-    let state = root.path().join("state");
+    let state = root.state();
     let artifact = artifact(root.path());
-    let record = retain_all(&state, &install);
+    let (record, directory) = retain_all(&state, &install);
     let blocked = install.join("auction-public-api");
     fs::remove_file(&blocked).expect("移除旧 Public 程序");
     fs::create_dir(&blocked).expect("以目录占住 Public 目标");
     fs::write(blocked.join("keep"), b"x").expect("目录非空");
     let InstallArtifactFailure { error, restored } =
-        install_artifact(&artifact, &install, &record, &record_dir(&state, record.record_id))
-            .expect_err("第三个程序无法替换");
+        install_artifact(&artifact, &install, &record, &directory).expect_err("第三个程序无法替换");
     let text = format!("{error:#}");
     assert!(!restored, "{text}");
     assert!(text.contains("原子替换程序失败"), "{text}");
@@ -543,7 +661,7 @@ fn install_failure_receipt_records_the_actual_install_dir() {
     let context = ReceiptContext::resolve(None, Some("operator")).expect("上下文");
     let deploy = complete_deploy_record(&install, record.record_id);
     let failed = FailedReceipt {
-        state_dir: &state,
+        state: &state,
         receipt_id: record.deploy_receipt_id,
         action: Action::Deploy,
         started_at: chrono::Utc::now(),
@@ -565,16 +683,20 @@ fn install_failure_receipt_records_the_actual_install_dir() {
     assert_eq!(digest("worker"), Some(sha256_bytes(b"old-auction-worker")), "Worker 已换回");
     assert_eq!(digest("admin"), Some(sha256_bytes(b"old-auction-admin-api")), "Admin 已换回");
     assert_eq!(digest("public"), None, "无法读取的程序不伪造摘要");
-    assert_eq!(fs::read_dir(state.join("receipts")).expect("回执目录").count(), 1);
+    assert_eq!(fs::read_dir(state.path.join("receipts")).expect("回执目录").count(), 1);
     assert_eq!(latest(&state).expect("最新回滚记录").0.record_id, record.record_id);
 }
 
 /// 按指定创建时间改写 record.json，使“最新”不依赖测试执行时的时钟分辨率。
-fn set_created_at(state: &Path, record: &RollbackRecord, minutes: i64) -> RollbackRecord {
+fn set_created_at(
+    state: &PrivateDirectory,
+    record: &RollbackRecord,
+    minutes: i64,
+) -> RollbackRecord {
     let mut updated = record.clone();
     updated.created_at = chrono::DateTime::from_timestamp(1_790_000_000, 0).expect("固定时间")
         + chrono::Duration::minutes(minutes);
-    let path = record_dir(state, record.record_id).join("record.json");
+    let path = record_dir(&state.path, record.record_id).join("record.json");
     fs::write(&path, serde_json::to_vec_pretty(&updated).expect("序列化")).expect("改写记录");
     updated
 }
@@ -586,29 +708,33 @@ fn set_created_at(state: &Path, record: &RollbackRecord, minutes: i64) -> Rollba
 fn latest_reads_records_first_and_hashes_only_the_selection() {
     let root = TempRoot::new();
     let install = install_dir(root.path());
-    let state = root.path().join("state");
+    let state = root.state();
     let mut records = Vec::new();
     for minutes in 0..3 {
-        let record = retain_all(&state, &install);
+        let (record, _) = retain_all(&state, &install);
         records.push(set_created_at(&state, &record, minutes));
     }
     // 最旧记录的保留程序被人工删除：不影响选择最新记录。
-    fs::remove_file(record_dir(&state, records[0].record_id).join("bin/auction-cli"))
+    fs::remove_file(record_dir(&state.path, records[0].record_id).join("bin/auction-cli"))
         .expect("删除旧记录的程序");
     let (selected, directory) = latest(&state).expect("最新记录");
     assert_eq!(selected, records[2]);
-    assert_eq!(directory, record_dir(&state, records[2].record_id));
+    assert_eq!(directory.path(), record_dir(&state.path, records[2].record_id));
     assert!(load(&state, records[0].record_id).is_err(), "显式读取残缺记录仍失败关闭");
 
-    // 保留中途失败留下的目录没有 record.json：从未成为回退目标，跳过后仍选出最新记录。
-    let partial = record_dir(&state, Uuid::new_v4());
+    // 保留中途失败留下的目录没有 record.json（与 retain 一样以 0700 创建）：从未成为回退目标，
+    // 跳过后仍选出最新记录。
+    let partial = record_dir(&state.path, Uuid::new_v4());
     fs::create_dir_all(partial.join("bin")).expect("残缺目录");
+    fs::set_permissions(&partial, fs::Permissions::from_mode(0o700)).expect("设置权限");
     fs::write(partial.join("bin/auction-worker"), b"partial").expect("残缺程序");
     assert_eq!(latest(&state).expect("跳过残缺目录").0, records[2]);
 
     // record.json 存在但损坏：不能确定它是否更新，点名该目录并提示改用 --receipt-id。
     fs::write(partial.join("record.json"), b"{").expect("损坏的记录");
-    let text = format!("{:#}", latest(&state).expect_err("损坏记录必须失败关闭"));
+    fs::set_permissions(partial.join("record.json"), fs::Permissions::from_mode(0o600))
+        .expect("设置权限");
+    let text = format!("{:#}", latest(&state).err().expect("损坏记录必须失败关闭"));
     assert!(
         text.contains(&partial.display().to_string()) && text.contains("--receipt-id"),
         "{text}"
@@ -616,14 +742,14 @@ fn latest_reads_records_first_and_hashes_only_the_selection() {
     fs::remove_dir_all(&partial).expect("移除残缺目录");
 
     // 两条记录的创建时间并列时无法确定最新一条。
-    let tied = retain_all(&state, &install);
+    let (tied, _) = retain_all(&state, &install);
     set_created_at(&state, &tied, 2);
-    let text = format!("{:#}", latest(&state).expect_err("并列必须拒绝"));
+    let text = format!("{:#}", latest(&state).err().expect("并列必须拒绝"));
     assert!(text.contains("创建时间相同"), "{text}");
-    fs::remove_dir_all(record_dir(&state, tied.record_id)).expect("移除并列记录");
+    fs::remove_dir_all(record_dir(&state.path, tied.record_id)).expect("移除并列记录");
 
     // 选中的最新记录被篡改时仍失败关闭。
-    fs::write(record_dir(&state, records[2].record_id).join("bin/auction-cli"), b"tampered")
+    fs::write(record_dir(&state.path, records[2].record_id).join("bin/auction-cli"), b"tampered")
         .expect("篡改最新记录");
     assert!(latest(&state).is_err());
 }
@@ -632,11 +758,11 @@ fn latest_reads_records_first_and_hashes_only_the_selection() {
 fn record_rejects_inconsistent_identifiers() {
     let root = TempRoot::new();
     let install = install_dir(root.path());
-    let state = root.path().join("state");
-    let mut record = retain_all(&state, &install);
+    let state = root.state();
+    let (mut record, _) = retain_all(&state, &install);
     record.deploy_receipt_id = Uuid::new_v4();
     assert!(record.validate().is_err());
-    let mut record = retain_all(&state, &install);
+    let (mut record, _) = retain_all(&state, &install);
     record.observed_database_version = -1;
     assert!(record.validate().is_err());
 }

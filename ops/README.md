@@ -27,17 +27,22 @@
 | `/etc/auction/owner/postgres.toml` | 迁移 owner 凭据（`db create/migrate/rebuild`、`backup restore`、`service start/restart`）；常驻角色不得引用 | root 0600 |
 | `/run/hv-auction/` | Public/Admin 的 Unix socket 与实例锁（tmpfiles 预建） | auction:auction 0750 |
 | `/run/hv-auction/worker/` | Worker control socket（Worker unit 的 `RuntimeDirectory`） | auction，0750 |
-| `/var/lib/auction/` | 部署控制锁、回执与回滚记录（`deployment/`、`deployment/receipts/`、`deployment/rollback/`，后者每次 deploy/rollback 增加一份程序副本，见[升级](#升级)的容量说明）、邮件诊断归档等可写数据 | auction / root |
+| `/var/lib/auction/` | 各账号可写数据的公共父目录 | root:root 0755；运行账号不得拥有或写入它，否则能把其下 root 的部署状态目录整体改名替换。各账号的数据放在下列自有子目录 |
+| `/var/lib/auction/deployment/` | 部署状态目录（`--state-dir`）：部署控制锁、回执 `receipts/` 与回滚记录 `rollback/`（后者每次 deploy/rollback 增加一份程序副本，见[升级](#升级)的容量说明） | root 0700（`auction-stack.service` 的 `StateDirectory=` 或 CLI 创建）；它与各级父目录都必须归 root 且禁止 group/other 写入，`service`、`deploy`、`rollback` 与停机维护命令取锁前核对，不符即拒绝、不自动修补 |
+| `/var/lib/auction/` 下运行账号的子目录 | 邮件诊断归档 `mail-diagnostics/`、定时备份状态 `backup/`、恢复演练回执 `restore-drills/` 等 | 预建为 auction:auction 0700；WAL 暂存 `wal-staging/` 为 postgres:auction 2770，见[启用顺序](deploy/RECOVERY.md#启用顺序) |
 
 ```bash
+install -d -o root -g root -m 0755 /var/lib/auction
 useradd --system --home-dir /var/lib/auction --shell /usr/sbin/nologin auction
 groupadd --system auction-worker-control
 usermod -aG auction-worker-control auction
 ```
 
+以上是分体部署的布局。合并部署的 `auction-server` 以运行账号在 `/var/lib/auction` 下自行建立配置目录与同级运行目录（见[合并部署](#合并部署)），该形态下 `/var/lib/auction` 归运行账号；它不使用 `auction-cli` 的部署状态目录，同一主机不要混用两种形态。
+
 `auction-cli config check --strict` 检查配置目录与普通配置文件不能被 group/other 写入、敏感文件只能 owner 访问；runtime 文件在 loader 阶段就必须恰好 0640 且父目录禁止他人写入。`service start/restart` 还会核对 runtime 文件与父目录归 Admin unit 的固定 `User` 所有。
 
-> 生产 `/etc` 对服务只读（`ProtectSystem=strict`），邮件诊断归档默认目录不可写。请在 `worker.toml` 把 `[worker.mooglemail.diagnostics] directory` 设为 `/var/lib/auction/mail-diagnostics` 这类可写的私有目录；runtime 配置不接管此路径。
+> 生产 `/etc` 对服务只读（`ProtectSystem=strict`），邮件诊断归档默认目录不可写。请在 `worker.toml` 把 `[worker.mooglemail.diagnostics] directory` 设为 `/var/lib/auction/mail-diagnostics` 这类可写的私有目录，并预建为 auction:auction 0700（`/var/lib/auction` 归 root，Worker 不能在其下新建目录）；runtime 配置不接管此路径。
 
 ## 首次部署
 
@@ -61,7 +66,7 @@ usermod -aG auction-worker-control auction
 
    三角色 `secrets.toml` 的 `[database].username` 填 `auction_runtime`，`common.toml` 的 `[database_roles] owner = "auction_owner"`。首次设置向导会试连数据库，须预先建好库与两个角色；向导写入的敏感文件只含运行账号，随后手工补 owner 凭据。合并部署初始化空库必须提供 `--owner-secrets`。模板见 [postgres-owner.toml](config/examples/secrets/postgres-owner.toml)。
 3. **生成配置**，二选一：
-   - 向导：先 `install -d -o auction -g auction -m 0750 /var/lib/auction`，再运行 `sudo -u auction /opt/auction/bin/auction-admin-api setup --output-dir /var/lib/auction/new-config --control-group auction-worker-control`（目录须尚不存在）。从 stderr 取得设置地址与一次性令牌，经 SSH 隧道（`ssh -L 8091:127.0.0.1:8091 <主机>`）完成表单，然后把目录内容移入 `/etc/auction/` 并调整属主与权限。
+   - 向导：先 `install -d -o auction -g auction -m 0700 /var/lib/auction/setup`（`/var/lib/auction` 本身保持 root:root 0755），再运行 `sudo -u auction /opt/auction/bin/auction-admin-api setup --output-dir /var/lib/auction/setup/new-config --control-group auction-worker-control`（目录须尚不存在）。从 stderr 取得设置地址与一次性令牌，经 SSH 隧道（`ssh -L 8091:127.0.0.1:8091 <主机>`）完成表单，然后把目录内容移入 `/etc/auction/` 并调整属主与权限。
    - 手工：以 [ops/config/examples](config/examples) 为模板编写，字段说明见[ops/config/README.md](config/README.md)。
 4. **补齐关键配置**：`secrets.toml` 的 `[database]`、`admin_actor`/`admin_secret`、三组独立数据密钥（`openssl rand -base64 32`）；`worker.toml [worker.control] enabled = true` 且 `allowed_peer_uids` 含 Admin UID 与 **0**；Public `[http_security]` 与 Admin runtime `[security]` 的 `allowed_origins`、`cookie_secure = true`，代理在本机时 `trusted_proxy_cidrs = ["127.0.0.1/32"]`；每个 Public 实例使用唯一的 `realtime.consumer_key`。
 5. **安装运行时目录与 unit**（在解压后的发布包根目录执行）：
@@ -106,7 +111,7 @@ usermod -aG auction-worker-control auction
 
 | unit | 说明 |
 | --- | --- |
-| `auction-worker.service` | `Restart=on-failure`；`RuntimeDirectory=hv-auction/worker` 管理 control socket 目录；可写 `/var/lib/auction` |
+| `auction-worker.service` | `Restart=on-failure`；`RuntimeDirectory=hv-auction/worker` 管理 control socket 目录；`ReadWritePaths` 含 `/var/lib/auction`，实际只能写其下归运行账号的子目录 |
 | `auction-admin-api.service` | `Wants=`/`After=` Worker；附加组 `auction-worker-control` 以访问 control socket；可写 `/etc/auction/runtime` |
 | `auction-public-api.service` | `Wants=`/`After=` Worker 与 Admin |
 | `auction-stack.service` | oneshot、`RemainAfterExit`，以 root 执行 `auction-cli service start/stop`；开机按序拉起 |
@@ -155,7 +160,7 @@ auction-cli --config-dir /etc/auction service stop       # 时段门禁 → 按 
 
 **失败与未知结果**（各步骤的系统状态见[apps/auction-cli/README.md#制品部署与回退](../apps/auction-cli/README.md#制品部署与回退)）：
 
-- 停机前失败（含磁盘空间不足）只输出错误，不停止、不安装、不写回执。安装目录、祖先或程序不归 root 或允许他人写入时同样在停机前拒绝：按[重建安装目录信任](deploy/RECOVERY.md#重建安装目录信任)从已验证的 Release 重装，不要只改属主。
+- 停机前失败（含磁盘空间不足）只输出错误，不停止、不安装、不写回执。安装目录、祖先或程序不归 root 或允许他人写入时同样在停机前拒绝：按[重建安装目录信任](deploy/RECOVERY.md#重建安装目录信任)从已验证的 Release 重装，不要只改属主。部署状态目录或它的任一级父目录不归 root、允许他人写入，或在持锁期间被改名替换时，在取锁时或停机前拒绝，按[目录与账号](#目录与账号)处理。
 - 停机后失败每次调用最多追加一条 `action=deploy`、`outcome=failed` 回执并退出非零；除安装中途失败时换回已替换的程序外，命令不自动回滚或重启，用 `service status` 确认实际状态。保留旧程序之后的失败回执与回滚记录同一标识、带 `rollback_record_id`，`rollback --receipt-id` 能读到它；回执写不进去时错误末尾注明“部署回执也未写入”。
 - 停机备份、双 CLI 校验或保留旧程序失败：程序与数据库都未改变。恢复旧版只用安装目录中的 CLI 执行 `service start`（如 `/opt/auction/bin/auction-cli … service start --owner-secrets …`，沿用本次的 `--config-dir`、`--state-dir` 与 unit 参数）；**不要用制品 CLI**，它会先把 schema 迁到新版本，而安装目录仍是旧程序。
 - 安装中途失败：服务保持停止、迁移尚未执行，`rollback` 会拒绝。命令已把本次替换的程序从回滚记录换回并复核四个程序的摘要：错误含“已复核为部署前的旧程序”时安装目录就是旧程序，按上一条用安装目录中的 CLI `service start` 恢复。错误含“自动换回未完成”时安装目录可能新旧混合（错误列出各程序当前摘要），旧程序与摘要保留在 `<state-dir>/rollback/<id>/`；按[安装中途失败的手工换回](deploy/RECOVERY.md#安装中途失败的手工换回)逐个换回并核对摘要后再启动，不要用制品 CLI 启动；安装目录恢复为一致的旧程序之前不要重跑 `deploy`，否则新的回滚记录会把混合程序当作旧版本保留。
@@ -179,6 +184,8 @@ Admin 的邮件 Cookie 在线校验（`POST /api/v1/admin/credentials/{credentia
 结算退件处理（迁移 `000114`–`000116`，均为 breaking）：升级时为已有的结算退件证据补建案件与开案事件、补登首寄派发历史与资金投递历史绑定，并把 `settlement_funding_returns` 收紧为只追加；不改写任何证据、投递或资金金额。升级后已转人工对账的退件改按退件案件计数（`settlement_return_pending`/`settlement_return_quarantined`），不再计入履约人工对账；偿付报告新增代管负债与“余额早于领回证明”标记（`balance_before_take` 为真时结论为 `unknown`，等下一次余额观察）。回退旧程序前须先确认没有未终结的 `settlement_return_action` Take 投递、补寄派发与资金返还事实，否则旧程序会把它们判为未知来源或无资金关联。
 
 同一版本的 Admin 新增“结算退件”页（`/settlement-returns`）与 `GET/POST /api/v1/admin/settlement-returns…` 接口，侧栏的导航待办读取改带 `include=settlement_returns`（见[docs/contracts/routes.md#admin-api](../docs/contracts/routes.md#admin-api)）。页面与服务端随同一制品发布：回退到旧服务端后，新页面的退件页读取为 404、导航待办读取为 400 `invalid_query` 而不显示徽标，按构建号提示刷新后恢复。`auction-cli funds preview` 的 `preview_digest` 自本版本起改变（预览事实新增成交撤销收口的识别字段）：升级前生成的摘要与确认短语在新版本上不再匹配，开户或现金对账前在新版本上重新执行 `funds preview`，使用新的摘要与确认短语。
+
+同一版本起 `service`、`deploy`、`rollback` 与停机维护命令在取部署锁前核对部署状态目录（`--state-dir`）：目录本身归 root 且 0700，各级父目录归 root 且禁止 group/other 写入（非 root 的隔离环境为当前账号），之后的锁、回执、回滚记录与保留程序都经同一个固定的目录描述符读写并核对属主与权限，详见[apps/auction-cli/README.md#部署状态目录](../apps/auction-cli/README.md#部署状态目录)。线上 `/var/lib/auction` 已只读核实为 root:root 0755，不需要处理；按旧版首次部署说明把它建为 `auction` 所有的主机，升级前先改为 root:root 0755（运行账号的数据保留在其下自有子目录），否则包括开机 `auction-stack` 在内的 `service start` 都会拒绝。`deployment/` 及其中的回执与回滚记录若出现非 root 的条目，说明运行账号曾改动过它，不要只改属主，先人工核对来源。
 
 **回退**：迁移只向前。分体部署用安装目录中的 `auction-cli rollback --receipt-id <deploy_receipt_id>` 把三个运行角色换回 `deploy` 保留的旧程序，安装目录中的 `auction-cli` 保持不变（不执行迁移；保留的 CLI 必须与数据库同版本，跨迁移时三角色须先显式设 `migration_compatibility_mode = "compatible"`，门禁与回执见[apps/auction-cli/README.md#回退](../apps/auction-cli/README.md#回退)）。安装旧角色程序中途失败时与 `deploy` 相同，命令把已替换的程序从刚保留的反向回滚记录换回并复核：错误含“已复核为回退前的程序”时按错误给出的指引处置，含“自动换回未完成”时按[安装中途失败的手工换回](deploy/RECOVERY.md#安装中途失败的手工换回)处理。合并部署没有 CLI 回退，只能换回旧的 `auction-server` 程序。迁移区间判定、含 `breaking` 时恢复升级前备份，以及手工回退须显式设置 compatible 并保留新版 CLI 的要求，见[程序回退](deploy/RECOVERY.md#程序回退)。
 

@@ -5,20 +5,18 @@
 //! 读回它；此前的失败没有回滚记录，由入口追加一条通用失败回执。回执写不进去时把写入错误接在
 //! 原错误之后返回，不掩盖失败原因，也不再改用随机标识补写第二条。
 
-use std::path::Path;
-
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use super::install::{RetainedBinary, RetainedIdentity};
 use super::{artifact, role_binary};
 use crate::app::progress;
-use crate::cli::UnitArgs;
 use crate::receipt;
 use crate::receipt::{
     Action, DeployRecord, DeploymentReceipt, MigrationRecord, Outcome, ReceiptContext, RoleIdentity,
 };
 use crate::service::{self, ManagedRole, Systemctl};
+use crate::support::files::PrivateDirectory;
 
 /// 停机后流程的失败；`recorded` 为真表示本次调用已用回滚记录的标识尝试发布失败回执。
 pub(super) struct Failure {
@@ -33,9 +31,10 @@ impl Failure {
     }
 }
 
-/// 保留旧程序之后的失败回执；标识与回滚记录相同，并携带制品与回滚证据。
+/// 保留旧程序之后的失败回执；标识与回滚记录相同，并携带制品与回滚证据。`state` 是持锁时固定的
+/// 部署状态目录。
 pub(super) struct FailedReceipt<'a> {
-    pub(super) state_dir: &'a Path,
+    pub(super) state: &'a PrivateDirectory,
     pub(super) receipt_id: Uuid,
     pub(super) action: Action,
     pub(super) started_at: DateTime<Utc>,
@@ -54,7 +53,7 @@ impl FailedReceipt<'_> {
     ) -> Failure {
         let published = artifacts.and_then(|artifacts| {
             receipt::record_deploy(
-                self.state_dir,
+                self.state,
                 self.receipt_id,
                 self.action,
                 Outcome::Failed,
@@ -77,7 +76,7 @@ impl FailedReceipt<'_> {
 /// 停机后失败的收口：已记录的直接返回原错误；否则追加一条通用失败回执，回执写入失败时
 /// 返回合并两段原因的错误。
 pub(super) async fn settle(
-    units: &UnitArgs,
+    state: &PrivateDirectory,
     systemctl: &Systemctl,
     action: Action,
     started_at: DateTime<Utc>,
@@ -88,7 +87,7 @@ pub(super) async fn settle(
     if recorded {
         return error;
     }
-    match service::record_failure(units, systemctl, action, started_at, context, &error).await {
+    match service::record_failure(state, systemctl, action, started_at, context, &error).await {
         Ok(()) => error,
         Err(combined) => combined,
     }
@@ -116,11 +115,11 @@ pub(super) fn artifact_projection(artifact: &artifact::Artifact) -> serde_json::
 /// 继续向前找。找不到时角色身份全部为 null，CLI 只记录实际摘要。回执目录读不出时同样记为未知
 /// 并在 stderr 说明：身份只服务追溯与回退判定，未知会让回退按观测版本假设并标明来源。
 pub(super) fn installed_identity(
-    state_dir: &Path,
+    state: &PrivateDirectory,
     binaries: &[RetainedBinary],
 ) -> RetainedIdentity {
     let unknown = RetainedIdentity { roles: RoleIdentity::default(), cli: None };
-    let receipts = match receipt::list_matching(state_dir, usize::MAX, |receipt| {
+    let receipts = match receipt::list_matching(state, usize::MAX, |receipt| {
         receipt.outcome == Outcome::Succeeded && receipt.deploy.is_some()
     }) {
         Ok(receipts) => receipts,
@@ -177,6 +176,7 @@ mod tests {
         append, list as list_receipts, read as read_receipt, receipts_dir, record_deploy,
     };
     use crate::service::Systemctl;
+    use crate::support::files::PrivateDirectory;
 
     struct TempRoot(PathBuf);
 
@@ -212,7 +212,15 @@ mod tests {
         }
     }
 
-    fn retain_unknown(state: &Path, install: &Path) -> crate::deploy::install::RollbackRecord {
+    /// 按生产口径核对并固定部署状态目录（不存在时以 0700 创建）。
+    fn pin(path: &Path) -> PrivateDirectory {
+        PrivateDirectory::open_trusted(path, true).expect("固定状态目录").expect("状态目录存在")
+    }
+
+    fn retain_unknown(
+        state: &PrivateDirectory,
+        install: &Path,
+    ) -> crate::deploy::install::RollbackRecord {
         let request = RetainRequest {
             deploy_receipt_id: Uuid::new_v4(),
             install_dir: install,
@@ -224,6 +232,7 @@ mod tests {
             Ok(RetainedIdentity { roles: RoleIdentity::default(), cli: None })
         })
         .expect("保留旧程序")
+        .0
     }
 
     fn identity(tag: char, schema: i64) -> (RoleIdentity, CliIdentity) {
@@ -289,12 +298,12 @@ mod tests {
     async fn failure_after_retain_publishes_exactly_one_receipt_with_record_id() {
         let root = TempRoot::new();
         let install = root.install_dir();
-        let state = root.path().join("state");
+        let state = pin(&root.path().join("state"));
         let record = retain_unknown(&state, &install);
         let context = ReceiptContext::resolve(None, Some("operator")).expect("上下文");
         let deploy = deploy_record(&install, record.record_id);
         let failed = FailedReceipt {
-            state_dir: &state,
+            state: &state,
             receipt_id: record.deploy_receipt_id,
             action: Action::Deploy,
             started_at: chrono::Utc::now(),
@@ -304,13 +313,13 @@ mod tests {
 
         let failure = failed.publish(anyhow::anyhow!("startup failed"), None, Ok(Vec::new()));
         assert!(failure.recorded);
-        let units = units(&state);
+        let units = units(&state.path);
         let systemctl = Systemctl::new(&units).expect("测试 systemctl");
         let error =
-            settle(&units, &systemctl, Action::Deploy, chrono::Utc::now(), &context, failure).await;
+            settle(&state, &systemctl, Action::Deploy, chrono::Utc::now(), &context, failure).await;
 
         assert_eq!(format!("{error:#}"), "startup failed");
-        assert_eq!(receipt_files(&state), 1, "已记录的失败不得再追加通用回执");
+        assert_eq!(receipt_files(&state.path), 1, "已记录的失败不得再追加通用回执");
         let published = read_receipt(&state, record.record_id).expect("按回滚记录读回失败回执");
         assert_eq!(published.outcome, Outcome::Failed);
         assert_eq!(published.failure.as_deref(), Some("startup failed"));
@@ -326,12 +335,12 @@ mod tests {
     fn republishing_the_same_id_keeps_the_original_error() {
         let root = TempRoot::new();
         let install = root.install_dir();
-        let state = root.path().join("state");
+        let state = pin(&root.path().join("state"));
         let record = retain_unknown(&state, &install);
         let context = ReceiptContext::resolve(None, Some("operator")).expect("上下文");
         let deploy = deploy_record(&install, record.record_id);
         let failed = FailedReceipt {
-            state_dir: &state,
+            state: &state,
             receipt_id: record.deploy_receipt_id,
             action: Action::Deploy,
             started_at: chrono::Utc::now(),
@@ -344,7 +353,7 @@ mod tests {
         assert!(failure.recorded);
         let text = format!("{:#}", failure.error);
         assert!(text.starts_with("receipt write failed；部署回执也未写入："), "{text}");
-        assert_eq!(receipt_files(&state), 1);
+        assert_eq!(receipt_files(&state.path), 1);
         assert_eq!(
             read_receipt(&state, record.record_id).expect("原回执").failure.as_deref(),
             Some("first")
@@ -357,20 +366,20 @@ mod tests {
         );
         assert!(failure.recorded);
         assert!(format!("{:#}", failure.error).starts_with("launch failed；部署回执也未写入："));
-        assert_eq!(receipt_files(&state), 1);
+        assert_eq!(receipt_files(&state.path), 1);
     }
 
     /// 保留旧程序之前的失败没有回滚记录：入口追加一条通用失败回执（无 deploy 段）。
     #[tokio::test]
     async fn unrecorded_failure_appends_one_generic_receipt() {
         let root = TempRoot::new();
-        let state = root.path().join("state");
-        let units = units(&state);
+        let state = pin(&root.path().join("state"));
+        let units = units(&state.path);
         let systemctl = Systemctl::new(&units).expect("测试 systemctl");
         let context = ReceiptContext::resolve(None, Some("operator")).expect("上下文");
 
         let error = settle(
-            &units,
+            &state,
             &systemctl,
             Action::Deploy,
             chrono::Utc::now(),
@@ -458,7 +467,7 @@ mod tests {
     #[test]
     fn identity_lookup_skips_service_and_failed_receipts() {
         let root = TempRoot::new();
-        let state = root.path().join("state");
+        let state = pin(&root.path().join("state"));
         append(&state, &receipt(0, Action::Deploy, Outcome::Succeeded, 'a')).expect("A 部署");
         for minutes in 1..=25 {
             let action = if minutes % 2 == 0 { Action::Start } else { Action::Restart };
@@ -480,7 +489,7 @@ mod tests {
     #[test]
     fn identity_lookup_skips_legacy_rollback_sections() {
         let root = TempRoot::new();
-        let state = root.path().join("state");
+        let state = pin(&root.path().join("state"));
         let legacy = |minutes: i64, action: Action, tag: char| {
             let mut value = receipt(minutes, action, Outcome::Succeeded, tag);
             value.format = LEGACY_FORMAT.to_owned();
@@ -523,7 +532,7 @@ mod tests {
     #[test]
     fn unreadable_receipts_leave_the_identity_unknown() {
         let root = TempRoot::new();
-        let state = root.path().join("state");
+        let state = pin(&root.path().join("state"));
         let context = ReceiptContext::resolve(None, Some("operator")).expect("上下文");
         record_deploy(
             &state,
@@ -538,7 +547,7 @@ mod tests {
             None,
         )
         .expect("写入回执");
-        fs::write(receipts_dir(&state).join("broken.json"), b"{").expect("损坏回执");
+        fs::write(receipts_dir(&state.path).join("broken.json"), b"{").expect("损坏回执");
         let found = installed_identity(&state, &binaries('a'));
         assert_eq!(found.roles, RoleIdentity::default());
     }

@@ -1,6 +1,7 @@
 //! 私有文件、锁文件与原子发布的唯一边界：拒绝符号链接与特殊文件，新文件只以 create_new
 //! 和 0600 发布，并在报告成功前同步文件与父目录。`directory` 提供以目录描述符固定的私有目录
-//! （无覆盖或可替换发布、按身份删除），`disk` 读取文件系统容量，`evidence` 写一次性证据文件。
+//! （无覆盖或可替换发布、按身份删除、相对描述符派生子目录），`disk` 读取文件系统容量，
+//! `evidence` 写一次性证据文件，`trust` 是祖先目录信任的纯判定。
 
 use std::{
     fs::{self, File, OpenOptions},
@@ -14,12 +15,14 @@ use anyhow::Context;
 mod directory;
 mod disk;
 mod evidence;
+mod trust;
 
 pub(crate) use directory::{FileIdentity, MAX_READ_BYTES, PrivateDirectory};
 pub(crate) use disk::{DiskUsage, disk_usage};
 pub(crate) use evidence::{
     require_private_directory, require_private_target, sync_parent, write_private,
 };
+pub(crate) use trust::{Facts, Kind, ancestor_problem};
 
 /// 当前进程的有效 UID。
 pub(crate) fn effective_uid() -> u32 {
