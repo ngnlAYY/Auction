@@ -23,6 +23,7 @@ mod scope;
 mod sent_boundary;
 mod sent_scope;
 use self::scope::{read_unavailable, unavailable};
+pub(super) use scope::WriteBarrier;
 pub(super) use scope::lock_incoming_segment;
 
 pub(crate) use lists::{
