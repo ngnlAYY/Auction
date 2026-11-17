@@ -26,3 +26,6 @@ __pycache__/
 # mise 的本机覆盖配置不入库。
 mise.local.toml
 mise.*.local.toml
+
+# 页面工作区的依赖目录由 bun install 按 web/bun.lock 还原。
+node_modules/

@@ -1,0 +1,198 @@
+# web — 浏览器应用工作区
+
+Public 与 Admin 两个浏览器应用的 TypeScript 源码、构建配置与编码规则。两个应用都是纯客户端渲染的单页应用，用 SolidJS 2.0 编写，由 Vite 打包，产物由后端以 `web-embed` 内嵌分发。
+
+本文是 `web/` 下全部代码的规则来源。业务规则、路由与数据契约仍以 [docs/contracts](../docs/contracts) 与 [docs/business-rules.md](../docs/business-rules.md) 为准。
+
+## 目录
+
+| 目录 | 导入名 | 职责 | 不得越过的边界 |
+| --- | --- | --- | --- |
+| `web/contracts` | `@auction/contracts/…` | 与后端 `auction-contracts` 一一对应的 DTO 类型与运行期 schema | 不依赖 Solid，不访问 DOM，不含页面逻辑 |
+| `web/shared` | `@auction/web-shared/…` | 两端通用、无业务偏向的浏览器能力：响应式内核、传输、存储、定时、路由、i18n 装配与通用组件 | 不出现业务键名、业务路由与业务文案 |
+| `web/public` | 相对路径 | Public 应用的入口、API 封装、页面、交互与译文装配 | 不导入 `web/admin` |
+| `web/admin` | 相对路径 | Admin 应用的入口、API 封装、页面、交互与译文装配 | 不导入 `web/public` |
+| `web/tooling` | 相对路径 | 构建配置与构建期类型声明 | 不进入浏览器产物 |
+
+- 包内用相对路径导入，跨包只用上表的导入名；`web/contracts` 与 `web/shared` 互不反向依赖页面包。
+- 每个包的源码都在自己的 `src/` 下。目录名按职责命名，不用 `common`、`helpers`、`shared`、`misc`、`utils`。
+- 运行期依赖只有 `solid-js`、`@solidjs/web`、`valibot` 与 `@fluent/bundle`。新增依赖要先得到维护者同意。
+
+## 命令
+
+工具版本由仓库根的 `mise.toml` 固定，依赖由 `web/bun.lock` 固定。以下命令在 `web/` 下执行：
+
+| 命令 | 作用 |
+| --- | --- |
+| `bun install --frozen-lockfile` | 按锁文件还原依赖 |
+| `bun run typecheck` | 四个包依次做类型检查；`typecheck:contracts`、`typecheck:shared`、`typecheck:public`、`typecheck:admin` 只查单个包 |
+| `bun run lint` | Biome 的格式与静态规则检查，不写文件 |
+| `bun run format` | 按 Biome 规则改写格式并应用安全修复 |
+| `bun run build:public`、`bun run build:admin` | 生产构建，产物写入 `target/web/<surface>/public` |
+
+## 文件与命名
+
+- 文件与目录一律小写连字符（`browser-lock.ts`）。有子模块的模块以 `name/index.ts` 为入口，叶子模块是单个 `name.ts`，两者不并存。含 JSX 的文件用 `.tsx`。
+- 导入不写扩展名与 `/index`：`import { sendGet } from "@auction/web-shared/net/transport";`。
+- 每个源码文件以 `//` 注释开头说明模块职责；导出的类型、函数与组件用 `/** … */` 说明。注释与文档用中文，只写本地的不变量与理由，不复述代码。
+- 类型、接口与组件用 `PascalCase`；函数、变量与非 DTO 字段用 `camelCase`；模块级常量用 `SCREAMING_SNAKE_CASE`。DTO 字段与线上 JSON 完全一致，保持 `snake_case`。
+- 单个文件不超过 600 行；超过时按职责拆成子模块。
+- 只用具名导出与具名导入，不写 `export default`（Vite 配置文件除外），不写 `export *`。类型导入用 `import type`。
+
+## TypeScript 规则
+
+- 不用 `any`、非空断言 `!`、`@ts-ignore` 与 `@ts-expect-error`。类型断言 `as` 只用于已经由运行期检查证明的收窄，并在同一处写明依据。
+- 不用 `enum` 与 `namespace`。闭集取值用字符串字面量联合：`type Theme = "dark" | "light";`。带数据的多种形态用带 `kind` 字段的可辨识联合。
+- `switch` 覆盖联合类型时，`default` 分支调用 `unreachable(value)`（`@auction/web-shared/result`），漏掉成员时编译失败。
+- “没有值”统一用 `null`。`undefined` 只表示“尚未加载”（`createTaskResource` 的结果）与组件的可选 props。
+- 预期内的失败作为值返回：`Result<T, E>`、`ok(value)`、`err(error)`（`@auction/web-shared/result`）。不用异常表达网络失败、解码失败或校验失败；`try`/`catch` 只包住会抛异常的浏览器接口，`catch` 分支必须处理或转成 `Result`，不留空。
+- 整数金额、版本与序号是 `number`，取值必须是安全整数，由解码器保证。UUID 是 `string`，新 `command_id` 用 `crypto.randomUUID()` 生成。
+- 文本长度上限若在后端按 UTF-8 字节计，这里也按字节计（`new TextEncoder().encode(text).length`），不用 `text.length` 代替。
+- 秘密值（登录 key、Cookie、口令、CSRF token、完整装备链接）不写入 `console`、错误信息、`localStorage` 与 URL。
+
+## 响应式内核
+
+`@auction/web-shared/reactive/*` 是全部状态代码的地基，页面代码不直接调用 `createSignal`。
+
+| 接口 | 用途 |
+| --- | --- |
+| `createCell(initial)` | 本地状态。`cell()` 响应式读取，`cell.peek()` 不订阅并立即看到最近一次写入，`cell.set(value)` 写入，`cell.update(fn)` 以当前值计算新值 |
+| `createValueMemo(compute)` | 按结构相等去重的派生值；结果与上次按值相等时不通知下游 |
+| `createTaskScope()` | 与组件同生命周期的任务集合；`scope.spawn(async (context) => …)` |
+| `createTaskResource(dependencies, task)` | 随依赖重跑的异步读取；`resource()` 取结果，`resource.state()` 取阶段，另有 `restart()`、`cancel()`、`clear()` |
+| `structuralEquals(a, b)` | 按值比较 JSON 形状的数据 |
+
+必须遵守的语义：
+
+1. **组件函数体只执行一次。** 函数体里读取 `cell()` 或 `props.x` 得到的是一次性的值，之后不会更新。凡是依赖状态或 props 的值，都写成 `createValueMemo(() => …)` 或箭头函数，并在 JSX、另一个 memo 或 effect 的 compute 里调用。
+2. **不解构 props。** 写 `props.lot.name`，不写 `const { lot } = props`。调用组件时传值不传访问器：`<LotRow lot={lot()} />`。
+3. **写入始终通知。** `cell.set` 即使新旧值相等也会让订阅者重跑；需要“相等则不传播”时，让下游读取一个 `createValueMemo`。
+4. **effect 分两段。** `createEffect(compute, apply)`：`compute` 只读取依赖并返回它们，`apply` 收到返回值后执行副作用（写状态、操作 DOM、发请求）。`apply` 里读取其他状态用 `peek()`。`apply` 可以返回清理函数。
+5. **await 之后先检查存活。** 任务体每次 `await` 之后、写状态之前执行 `if (!context.alive()) return;`。请求把 `context.signal` 传给传输层。`createTaskResource` 已经替被取代的任务丢弃结果，任务体本身仍不得在 `await` 之后直接写其他状态。
+6. **不使用 Solid 的异步派生与过渡机制。** 不写返回 Promise 的 `createMemo`，不用 `<Loading>`、`<Errored>`、`action`、`createOptimistic`、`isPending`、`refresh`。加载中、失败与结果未知都是显式状态。
+7. **状态对象不可变更新。** `cell.update((current) => ({ ...current, page: 2 }))`，不原地修改 `cell.peek()` 返回的对象或数组。
+8. **清理。** 组件卸载时要释放的资源（事件监听、定时器、观察器）在创建处用 `onCleanup` 登记；需要等首次渲染完成后再做的事（测量、聚焦）放进 `onSettled`，并从中返回清理函数。
+
+## 组件
+
+```tsx
+// 黑名单页面：分页读取并展示被封禁的用户。
+
+import type { JSX } from "@solidjs/web";
+import { createEffect, For, Match, Show, Switch } from "solid-js";
+import { createCell } from "@auction/web-shared/reactive/cell";
+import { createValueMemo } from "@auction/web-shared/reactive/memo";
+import { createTaskResource } from "@auction/web-shared/reactive/resource";
+
+/** 黑名单表格的一行。 */
+function BlacklistRow(props: {
+  entry: PublicBlacklistEntryResponse;
+  selected: boolean;
+  onSelect: (userName: string) => void;
+}): JSX.Element {
+  return (
+    <tr
+      class={["public-blacklist__row", { "public-blacklist__row--selected": props.selected }]}
+      onClick={() => props.onSelect(props.entry.user_name)}
+    >
+      <td>{props.entry.user_name}</td>
+      <td>{props.entry.reason}</td>
+    </tr>
+  );
+}
+
+/** 黑名单页面。 */
+export function Blacklist(): JSX.Element {
+  const pageNumber = createCell(1);
+  const selected = createCell<string | null>(null);
+  const blacklist = createTaskResource(
+    () => pageNumber(),
+    (requested, context) => fetchBlacklist(requested, context.signal),
+  );
+  const title = createValueMemo(() => t("blacklist-title", { page: pageNumber() }));
+
+  // 换页后清除选中行，避免沿用上一页的选择。
+  createEffect(
+    () => pageNumber(),
+    () => {
+      selected.set(null);
+    },
+  );
+
+  return (
+    <section class="public-blacklist" aria-busy={blacklist.state() === "pending" ? "true" : "false"}>
+      <h1>{title()}</h1>
+      <Switch fallback={<p role="status">{t("loading")}</p>}>
+        <Match when={blacklist()?.ok === false}>
+          <p role="alert">{t("load-failed")}</p>
+        </Match>
+        <Match when={blacklist()}>
+          {(loaded) => (
+            <table>
+              <tbody>
+                <For each={entriesOf(loaded())} keyed={(entry) => entry.user_name}>
+                  {(entry) => (
+                    <BlacklistRow
+                      entry={entry()}
+                      selected={selected() === entry().user_name}
+                      onSelect={(userName) => selected.set(userName)}
+                    />
+                  )}
+                </For>
+              </tbody>
+            </table>
+          )}
+        </Match>
+      </Switch>
+    </section>
+  );
+}
+```
+
+- 条件渲染用 `<Show>`、`<Switch>`/`<Match>`，列表用 `<For>`；不在组件函数体里用 `if` 提前返回不同的 JSX。`<Show>` 与 `<Match>` 的函数子节点收到的是访问器，要调用：`{(value) => <p>{value()}</p>}`。
+- 列表项有稳定标识时写 `keyed={(item) => item.id}`，回调收到的是访问器 `item()`；没有稳定标识时写 `keyed={false}`，按下标复用节点。不使用默认的按对象引用配对，否则每次重新取数都会重建整张表。
+- `class` 用字符串、数组或对象形式组合：`class={["a", { "a--active": active() }]}`。不拼接字符串。
+- 属性名用小写的 HTML 原名（`tabindex`、`for`、`maxlength`、`colspan`）。`disabled`、`hidden`、`checked` 等布尔属性传布尔值；`aria-*` 与 `data-*` 属性传字符串（`aria-busy={busy() ? "true" : "false"}`），不存在时传 `undefined`。
+- 事件处理器写成稳定的函数：`onClick={(event) => …}`。处理器表达式只在挂载时求值一次，需要按状态选择行为时把判断写进函数体。
+- 元素引用用 `ref`：`let input: HTMLInputElement | undefined;` 加 `<input ref={input} />`，或回调形式 `ref={(element) => …}`。`ref` 回调执行时元素尚未挂到文档，量尺寸与聚焦放进 `onSettled`。
+- 受控输入用 `value={draft()}` 加 `onInput={(event) => draft.set(event.currentTarget.value)}`。
+- 上下文用 `createContext<T>()` 定义并与类型放在同一模块；提供方直接把上下文当组件用：`<SessionContext value={session}>…</SessionContext>`，使用方 `useContext(SessionContext)`。
+- 浮层挂到 `document.body` 或所属弹窗时用 `Portal`（`@solidjs/web`）。
+- 界面文案全部走 `t("message-id", { name: value })`，不写字面量文案。
+
+## 契约
+
+`web/contracts/src` 的目录结构与 `crates/auction-contracts/src` 相同。两边的字段名、可空性、默认值与取值集合必须保持一致；后端 DTO 变化时在同一个提交里同步。
+
+- 浏览器接收的 DTO：导出 `XxxSchema`（valibot）与 `type Xxx = v.InferOutput<typeof XxxSchema>`。
+- 浏览器发出的 DTO：只导出 `interface`。后端带 `skip_serializing_if` 的字段写成可选属性并在值缺失时省略，其余可空字段写成 `T | null` 并原样发送 `null`。
+- 后端结构体带 `deny_unknown_fields` 时用 `v.strictObject`，否则用 `v.object`（未知键被忽略）。`flatten` 用展开 `...Inner.entries` 表达，`untagged` 枚举用 `v.union` 并保持声明顺序。
+
+字段原语在 `@auction/contracts/wire`，按后端属性选择：
+
+| 后端字段 | 原语 | 读到的类型 |
+| --- | --- | --- |
+| 整数（`i64`、`i32` 等） | `integer` | `number` |
+| 无符号整数 | `unsignedInteger` | `number` |
+| `f64` | `float` | `number` |
+| 普通 `Option<T>` | `optionalNullable(T)` | `T \| null` |
+| `deserialize_required_option`（键必须出现） | `requiredNullable(T)` | `T \| null` |
+| `default` + `deserialize_optional_field`（可缺省、不可为 `null`） | `optionalField(T)` | `T \| null` |
+| `default`（缺省取默认值） | `withDefault(T, value)` | `T` |
+| `deserialize_null_default` | `nullAsDefault(T, value)` | `T` |
+| `serde_json::Value` | `jsonValue` | `unknown` |
+
+解码统一经 `decode(schema, data)`：失败返回 `null`，调用方映射为 `invalid_response` 并上报 `dto_decode`。路由专属的闭集键与跨字段校验留在各应用的 `api/` 下，先校验原始 JSON，再用 schema 解码。
+
+## 样式与译文
+
+- 样式文件与类名沿用现有定义：共享设计变量与控制台外壳在 `auction-web-shared` 的 `style/`，各应用的规则在各自的 `assets/`。装配顺序固定为 base → surface → desktop → mobile → console。
+- 类名用小写连字符与 BEM，并带 `public-` 或 `admin-` 前缀；颜色、字号、间距只用共享变量。
+- 译文是各应用 `i18n/` 下的五个 `.ftl` 文件（en、zh-CN、zh-TW、ja、ko），键集合一致，键名用连字符。Public 默认 en，Admin 默认 zh-CN；偏好键 `hv.lang` 与 `hv.theme` 是固定契约。
+
+## 禁止事项
+
+- 不引入服务端渲染、hydration、虚拟 DOM 库或其他 UI 框架。
+- 不在浏览器重建业务状态机：金额、资格、幂等与状态迁移以服务端结果为准；改变状态的请求携带 `command_id`，结果未知时只允许原样重试。
+- 不用 `innerHTML`、`eval`、`new Function` 与内联脚本；内容安全策略只放行同源脚本。
+- 不直接调用 `fetch`、`localStorage`、`setTimeout`：分别经 `@auction/web-shared` 的传输、存储与定时模块。

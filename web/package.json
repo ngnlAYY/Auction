@@ -1,0 +1,31 @@
+{
+  "name": "auction-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "bun run typecheck:contracts && bun run typecheck:shared && bun run typecheck:public && bun run typecheck:admin",
+    "typecheck:contracts": "bun --bun x tsc --noEmit -p contracts",
+    "typecheck:shared": "bun --bun x tsc --noEmit -p shared",
+    "typecheck:public": "bun --bun x tsc --noEmit -p public",
+    "typecheck:admin": "bun --bun x tsc --noEmit -p admin",
+    "lint": "bun --bun x biome check .",
+    "format": "bun --bun x biome check --write .",
+    "build:public": "bun --bun x vite build --config public/vite.config.ts",
+    "build:admin": "bun --bun x vite build --config admin/vite.config.ts",
+    "dev:public": "bun --bun x vite --config public/vite.config.ts",
+    "dev:admin": "bun --bun x vite --config admin/vite.config.ts"
+  },
+  "dependencies": {
+    "@fluent/bundle": "0.19.1",
+    "@solidjs/web": "2.0.0",
+    "solid-js": "2.0.0",
+    "valibot": "1.5.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.8",
+    "@solidjs/vite-plugin": "3.0.0",
+    "@types/bun": "1.4.4",
+    "typescript": "7.0.2",
+    "vite": "8.3.8"
+  }
+}

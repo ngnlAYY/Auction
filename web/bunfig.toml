@@ -1,0 +1,5 @@
+# 必填：依赖一律取 npm 官方源，锁文件记录的下载地址不随本机镜像设置变化。
+[install]
+registry = "https://registry.npmjs.org"
+# 必填：新增依赖写入精确版本，升级只经显式修改 package.json 与 bun.lock。
+exact = true

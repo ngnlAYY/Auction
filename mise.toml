@@ -11,6 +11,8 @@ lockfile_platforms = ["linux-x64"]
 [tools]
 # 策略门禁的文本检索。
 ripgrep = "15.2.0"
+# web/ 工作区（TypeScript + SolidJS 页面）的依赖安装与脚本运行；依赖版本由 web/bun.lock 固定。
+bun = "1.4.4"
 # 发布构建的编译缓存；只有环境变量显式设置 RUSTC_WRAPPER=sccache 时才启用。
 sccache = "0.19.0"
 # 依赖审计（读取 RustSec 公告）与未使用依赖检查。
