@@ -21,7 +21,7 @@ Worker 的调度运行时与本地控制面：把应用层的持久化端口编�
 | 装备 PM | 超价提醒私信队列；由装配根监督，主停止信号一到即停止新领取，不等其他循环排空 |
 | 运维告警 | 扫描、分发、对账三个告警循环；未启用主动通知时不运行分发 |
 
-每个循环使用 `batch_limit`、`concurrency`、`poll_interval`、`jitter`、`lease_duration`、`item_timeout` 等边界（来自 `[worker.*]`，可由 runtime 接管）。停止信号后不再领取新任务，在途任务有界排空；常驻任务意外退出会把 control 标记为 draining 并触发非零退出，由进程管理器重启。维护日程与相位规则见[ops/config/README.md#mooglemail-收件与维护](../../ops/config/README.md#mooglemail-收件与维护)。
+每个循环使用 `batch_limit`、`concurrency`、`poll_interval`、`jitter`、`lease_duration`、`item_timeout` 等边界（来自 `[worker.*]`，可由 runtime 接管）。这些预算到期时，对 MoogleMail 读取（含装备页）只是放弃等待：已发出的由客户端交给独立任务走完，在途锁持有到远端回应或该次请求的 HTTP 预算结束，紧接的同账号请求不与之重叠；尚在排队的撤票退出，不再发出，见[crates/auction-integrations/README.md#关键行为](../auction-integrations/README.md#关键行为)。停止信号后不再领取新任务，在途任务有界排空；常驻任务意外退出会把 control 标记为 draining 并触发非零退出，由进程管理器重启。维护日程与相位规则见[ops/config/README.md#mooglemail-收件与维护](../../ops/config/README.md#mooglemail-收件与维护)。
 
 ## 外部账号观测
 

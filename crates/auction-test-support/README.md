@@ -43,6 +43,7 @@
 - `crates/auction-integrations/tests/returned_take_timing.rs`
 - `crates/auction-integrations/src/clients/mooglemail/sender/baseline/tests.rs`
 - `crates/auction-integrations/src/clients/mooglemail/client/reads/lists/sent.rs`
+- `crates/auction-integrations/src/clients/mooglemail/client/request/tests.rs`
 - `crates/auction-integrations/src/clients/mooglemail/gateway/internal/compose.rs`
 - `crates/auction-integrations/src/clients/mooglemail/transport/delivery/tests.rs`
 - `crates/auction-integrations/src/credentials/mail_check.rs`
