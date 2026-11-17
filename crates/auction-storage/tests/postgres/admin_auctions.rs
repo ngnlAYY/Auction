@@ -4,7 +4,7 @@
 //! 两条列表读取到的快照逐字段一致。结算报告的同一投影由 `settlement` 用例覆盖。创建与排期
 //! 写入的实时事件必须能经 Public 回放读出：流内序号连续、负载通过公开注册表。
 //!
-//! 仅在 `test-db` feature 下编译，入口见 `just test-db`。
+//! 仅在 `test-db` feature 下编译，入口见 `mise run test-db`。
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::sync::Arc;

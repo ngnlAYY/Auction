@@ -552,7 +552,7 @@ dormant`）与 `settlement_obligations_blocked_idx`（`settlement_obligations (i
 资源。若 Final 阶段 p99 超出 SLO，先用 SLI 快照采样确认是同场串行导致，再考虑按 lot 拆分队列
 或调整预算，而不是放宽隔离级别。
 
-回归测试（`just test-db` 覆盖除演练外的全部条目；演练为显式入口）：
+回归测试（`mise run test-db` 覆盖除演练外的全部条目；演练为显式入口）：
 
 - `postgres_bid_queue_serializes_cross_lot_across_instances`：两个独立连接池模拟两个 Public 实例，
   一个实例持锁时另一个实例的跨 lot 出价必须等待，放行后两笔都成功且会话锁归零。

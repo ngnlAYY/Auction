@@ -1,7 +1,7 @@
 //! 运维告警与 Admin 邮件轮询状态在真实 PostgreSQL 18 上的读写：迁移 000085/000091 的闭集
 //! 对新增取值放行且仍拒绝未登记取值；新增来源的水位读取在已迁移 schema 上返回“安静”水位；
 //! 告警确认的幂等重放与身份冲突；暂停邮箱的轮询状态读取。不发送通知。
-//! 入口见 `just test-db`。
+//! 入口见 `mise run test-db`。
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 

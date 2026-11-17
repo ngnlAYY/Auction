@@ -23,16 +23,26 @@ jobs:
     env:
       # 私有库 runner 的内存有限，限制并发；不放宽 Fat LTO 或 CPU 基线。
       CARGO_BUILD_JOBS: "2"
+      # 发布构建启用 Rust 与页面构建、编译缓存工具；审计与门禁工具不安装。
+      MISE_ENABLE_TOOLS: rust,sccache,cargo:dioxus-cli,github:wasm-bindgen/wasm-bindgen,github:WebAssembly/binaryen,http:esbuild
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Ensure patched rustup
         run: bash ci/tools/rustup.sh
-      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master 2026-11-15 (#190)
+      # dx 由 mise 按上游发布包自带的 Cargo.lock 从源码构建，需要本机编译依赖；brotli 用于页面预压缩。
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends cmake pkg-config libssl-dev build-essential brotli
+      # mise 按 mise.lock 安装发布工具；Rust 的版本、组件与目标取自 rust-toolchain.toml。
+      # 发布制品的作业不恢复 mise 缓存：下载的工具每次按锁文件校验和验证，dx 每次重新编译。
+      - name: Install tools with mise
+        uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
         with:
-          toolchain: 1.100.0
-          targets: wasm32-unknown-unknown
+          version: 2026.11.8
+          cache: false
       # rust-cache v2.9.3；递归清理 target，仅保留编译缓存，不复用发布结论。
       - name: Restore release build cache
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
@@ -43,31 +53,6 @@ jobs:
           cache-on-failure: "true"
           cache-bin: "false"
           save-if: ${{ github.event_name != 'pull_request' }}
-      # 独立源码锁图修复工具自身的证书库；缓存键只绑定配方，前缀回退后由安装回执逐字节校验。
-      - name: Restore patched release tools
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: target/build-tools
-          key: release-tools-linux-${{ hashFiles('ci/tools/bootstrap.sh', 'ci/release/build-identity.sh', 'ci/tools/locks/*.lock', 'ci/tools/patches/*.patch', 'rust-toolchain.toml') }}
-          restore-keys: |
-            release-tools-linux-
-      - name: Check release tool receipt
-        id: release-tools
-        run: |
-          if bash ci/tools/bootstrap.sh verify release; then
-            printf 'needs-build=false\n' >> "$GITHUB_OUTPUT"
-          else
-            printf 'needs-build=true\n' >> "$GITHUB_OUTPUT"
-          fi
-      - name: Install native tool build dependencies
-        if: steps.release-tools.outputs.needs-build == 'true'
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends cmake pkg-config libssl-dev build-essential patch brotli
-      - name: Build and verify release tools
-        run: |
-          bash ci/tools/bootstrap.sh install release
-          printf '%s\n' "$GITHUB_WORKSPACE/target/build-tools/bin" >> "$GITHUB_PATH"
       # 缓存服务凭据只注入能读 Actions cache 的 action 上下文，run: 步骤默认没有。
       # 这里只输出 step outputs，再由构建步骤显式赋值，避免 token 在整个 job 里长期驻留。
       - name: Read Actions cache credentials
@@ -113,11 +98,11 @@ jobs:
         run: |
           if [[ -n "$ACTIONS_RESULTS_URL" && -n "$ACTIONS_RUNTIME_TOKEN" &&
                 -n "$ACTIONS_CACHE_SERVICE_V2" ]]; then
-            export SCCACHE_GHA_ENABLED=true SCCACHE_GHA_VERSION=auction-tls-20261116
+            export SCCACHE_GHA_ENABLED=true SCCACHE_GHA_VERSION=auction-mise-20261117
           else
             unset SCCACHE_GHA_ENABLED SCCACHE_GHA_VERSION
           fi
-          # 复用发布入口的工具校验与 daemon 地址；缓存启动失败不能阻断真实编译。
+          # 复用发布入口的工具选择与 daemon 地址；缓存启动失败不能阻断真实编译。
           source ci/release/build-identity.sh
           configure_build_tools
           if ! sccache rustc -vV >/dev/null; then

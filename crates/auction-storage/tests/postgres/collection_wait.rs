@@ -12,7 +12,7 @@
 //!   写入活动信号，收口回落到阈值以下后由下一轮扫描关闭；迁移 000110 的闭集接受该种类。
 //!   清单的拍品编号是分类内编号，混合类别的场次里不随全场编号错号。
 //!
-//! 入口见 `just test-db`。
+//! 入口见 `mise run test-db`。
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 

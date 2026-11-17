@@ -2,56 +2,59 @@
 
 [docs/README.md](../../docs/README.md) · [ci/README.md](../README.md) · [docs/development.md](../../docs/development.md)
 
-发布与审计用到的工具（Dioxus CLI、sccache、wasm-bindgen、wasm-opt、cargo-audit）不使用机器上任意版本，而是由本目录的脚本从固定来源、固定版本、独立锁文件构建或下载，并写入安装回执；发布入口在每次运行前校验回执。
+开发、CI 与发布用到的工具由 [mise](https://mise.jdx.dev) 统一安装，全部取上游发布的原始版本：仓库不携带工具补丁，也不维护工具的独立依赖锁。
 
 | 文件 | 内容 |
 | --- | --- |
-| `ci/tools/bootstrap.sh` | 受控工具的安装、校验与身份 |
+| [mise.toml](../../mise.toml) | 工具版本、构建选项与命令入口（任务）；版本只在这里维护 |
+| [mise.lock](../../mise.lock) | 各工具在 Linux x86_64 上的下载地址与校验和，由 `mise lock` 生成，不手工编辑 |
+| [rust-toolchain.toml](../../rust-toolchain.toml) | Rust 的版本、组件与编译目标；mise 读取该文件，不在 `mise.toml` 重复 |
 | `ci/tools/rustup.sh` | 安装满足证书修复基线的 rustup |
-| `ci/tools/blaze.sh` | 本地 Blaze 编译试验入口（`just blaze`） |
-| `ci/tools/locks/*.Cargo.lock` | 各工具的独立依赖锁：`dioxus-cli`、`sccache`、`cargo-audit` |
-| `ci/tools/patches/*.patch` | 对工具源码的补丁：dioxus-cli 受控工具与禁止下载、sccache 的 zstd/缓存权限/object feature |
+| `ci/tools/blaze.sh` | 本地 Blaze 编译试验入口（`mise run blaze`） |
 
-## bootstrap.sh
+## 安装与使用
 
 ```bash
-bash ci/tools/bootstrap.sh install [release|audit]    # 安装（默认 release）
-bash ci/tools/bootstrap.sh verify  [release|audit]    # 只校验回执
-bash ci/tools/bootstrap.sh fingerprint [release|audit] # 输出配方指纹
-bash ci/tools/bootstrap.sh identity release           # 校验回执后输出工具身份（用于 sccache daemon 隔离）
+mise trust           # 首次：确认信任本仓库的 mise.toml
+mise install         # 按 mise.toml 与 mise.lock 安装或补齐全部工具
+mise tasks           # 列出命令入口
+mise run verify      # 运行某个入口
 ```
 
-| 档位 | 安装目录 | 工具 |
+- mise 的最低版本见 `mise.toml` 的 `min_version`。
+- `mise run <任务>` 总在这些工具的环境里执行，不要求 shell 先激活 mise。直接调用 `cargo`、`rg` 等命令时，先激活 mise（`mise activate`）或写成 `mise exec -- <命令>`。
+- 首次 `mise install` 会从源码编译三个 Cargo 工具（其中 `dx` 最慢），需要 C 编译器、CMake、`pkg-config` 与 OpenSSL 开发文件。
+- 只支持 Linux x86_64，锁文件只记录这一个平台。
+- PostgreSQL 18、Perl、brotli、bash 与 git 由系统包提供，不经 mise。
+
+## 工具清单
+
+| 工具 | 来源 | 用途 |
 | --- | --- | --- |
-| `release` | `target/build-tools/bin` | `dx`（dioxus-cli）、`sccache`、`wasm-bindgen`、`wasm-opt`（binaryen）、`esbuild` |
-| `audit` | `target/audit-tools/bin` | `cargo-audit` |
+| Rust | rustup，按 `rust-toolchain.toml` | 编译、Clippy、rustfmt 与 wasm32 目标 |
+| `rg`（ripgrep） | GitHub 发布包 | 策略门禁的文本检索 |
+| `sccache` | GitHub 发布包 | 发布构建的编译缓存 |
+| `cargo-audit` | crates.io 源码，按发布包自带的 `Cargo.lock` 构建 | `dependency-audit`（联网读取 RustSec） |
+| `cargo-machete` | 同上 | `dependency-unused` |
+| `dx`（dioxus-cli） | 同上；关闭默认 feature，启用 `disable-telemetry` 与 `no-downloads` | 页面构建 |
+| `wasm-bindgen` | GitHub 发布包 | `dx` 的配套工具；必须与工作区 `Cargo.toml` 的同名依赖同步升级 |
+| `wasm-opt`（binaryen） | GitHub 发布包 | `dx` 的配套工具 |
+| `esbuild` | npm 上的 `@esbuild/linux-x64` 原生二进制包 | `dx` 的配套工具，运行时不需要 Node |
 
-- 各工具的版本、下载来源与 SHA-256 只在 `ci/tools/bootstrap.sh` 中维护；`wasm-bindgen` 与工作区 `Cargo.toml` 的同名依赖同步升级。
-- crate 源码从 `static.crates.io` 下载，wasm-bindgen 与 binaryen 预构建二进制从 GitHub release 下载，esbuild 从 npm registry 下载，全部以固定 SHA-256 校验；构建使用仓库内的独立锁文件（`cmp` 确认未变化）并应用补丁。
-- TLS 依赖（rustls、rustls-webpki、webpki-roots/root-certs）必须达到已审阅的版本基线，否则拒绝构建。
-- 安装先写入临时目录，完成后原子替换；回执记录配方指纹（脚本、锁文件、补丁、工具链、Cargo 配置）与每个二进制的摘要。配方变化后旧安装校验失败，需要重新安装。
-- 首次从源码构建需要 C 编译器、CMake、pkg-config、OpenSSL 开发文件与 `patch`。
-- 只支持 Linux x86_64。
+升级工具：改 `mise.toml` 里的版本，运行 `mise install` 与 `mise lock`，把两个文件一并提交。`mise.lock` 也记录 Rust 的版本、组件与目标，所以改 `rust-toolchain.toml` 后同样要重新 `mise lock`；CI 以 `--locked` 安装，锁文件与请求不一致时直接失败。升级 mise 自身时，同步 `mise.toml` 的 `min_version` 与工作流里 `jdx/mise-action` 的 `version`。
 
-发布入口（`ci/release/release.sh`、`ci/release/web-bundle.sh`）会把 `target/build-tools/bin` 放到 `PATH` 前部并设置 `NO_DOWNLOADS=1`，dx 不会在构建时自行下载工具。
+## 发布构建如何取用工具
 
-## 工具锁已知公告
+发布入口（`ci/release/release.sh`、`ci/release/web-bundle.sh`）经 [ci/release/build-identity.sh](../release/build-identity.sh) 选择工具：
 
-CI 的 `security-audit` 只审计应用 `Cargo.lock`（默认分支与最近一个发布 tag），不审计 `ci/tools/locks/` 下的工具锁。手动复核：`bash ci/tools/bootstrap.sh install audit` 后把 `target/audit-tools/bin` 放到 `PATH` 前部，对每个锁文件执行 `cargo audit --file <锁文件> --deny warnings`。
+- 用 `mise which` 解析 `dx`、`wasm-bindgen`、`wasm-opt`、`esbuild` 与 `sccache` 的绝对路径，并要求结果位于该工具自己的 mise 安装目录下（`mise where`）；固定版本没有安装时直接失败，不接受 `PATH` 或 Cargo bin 目录里的同名程序。
+- 把这些路径放到 `PATH` 前部并设置 `NO_DOWNLOADS=1`，`dx` 不会在构建时自行下载工具；同时把 `DX_HOME` 指到 `target/dx-home`，`dx` 因此不会改用它在用户目录里缓存过的旧工具，也不读取用户级 `dx` 设置。
+- 这五个二进制的 SHA-256 构成工具身份，参与构建环境指纹；`mise.lock` 参与构建输入指纹。同版本工具重装后字节变化也会让已有制品失效。
+- `sccache` 只在环境变量显式设置 `RUSTC_WRAPPER=sccache` 时启用，并换成 mise 安装的版本；Cargo 配置文件里的包装器一律清空。
 
-下表是受控 cargo-audit 0.23.0 对公告库提交 `02e2517f457a359fc6d3440ea4560c8ea188fee8`（2026-11-15）的复核结果，按包版本计数，包含锁图中的可选及其他平台依赖，不代表每项都能由实际构建路径触发。
+## 依赖审计的范围
 
-| 锁文件 | 漏洞匹配 | 警告 | 结果 |
-| --- | --- | --- | --- |
-| `ci/tools/locks/cargo-audit.Cargo.lock` | 0 | 0 | 通过 |
-| `ci/tools/locks/dioxus-cli.Cargo.lock` | 15 | 11 | 未通过 |
-| `ci/tools/locks/sccache.Cargo.lock` | 5 | 10 | 未通过 |
-
-Dioxus CLI 的 `libz-sys` 已从 1.1.28 单项升级到 1.1.31，消除 [RUSTSEC-2026-0418](https://rustsec.org/advisories/RUSTSEC-2026-0418.html) 匹配；其他依赖版本不变。原锁中的 `cc 1.2.61` 未满足公告所述 `cc >= 1.6.0` 触发条件，该升级不能作为既有缓存已泄露环境变量的证据。
-
-三把锁的 `quinn-proto` 都单项升级到 0.11.19、`quinn-udp` 升级到 0.5.16，消除 [RUSTSEC-2026-0523](https://rustsec.org/advisories/RUSTSEC-2026-0523.html)、[RUSTSEC-2026-0524](https://rustsec.org/advisories/RUSTSEC-2026-0524.html) 与 [RUSTSEC-2026-0538](https://rustsec.org/advisories/RUSTSEC-2026-0538.html) 匹配；cargo-audit 与 Dioxus CLI 的锁另把 `rustix` 1.1.x 升级到 1.1.6，消除健全性警告 [RUSTSEC-2026-0486](https://rustsec.org/advisories/RUSTSEC-2026-0486.html)。这些升级都在原版本的 semver 兼容范围内；Dioxus CLI 锁中 `hyper-util`、`quinn`、`quinn-udp` 随之改用锁内已有的 `socket2 0.6.3`，不新增包版本。
-
-剩余漏洞涉及 Dioxus CLI 的 `gix-date`、两个版本的 `quick-xml`、`rkyv`、`ruzstd` 和两个版本的 `zip`，以及 sccache 的 `rsa` 与 `zip`；`zip` 的匹配含新公布的 [RUSTSEC-2026-0429](https://rustsec.org/advisories/RUSTSEC-2026-0429.html)。已公布修复版都跨越当前依赖的兼容范围（如 `zip` 9.0.0、`rsa` 0.10.0）；不为消除匹配而强行跨版本替换或忽略公告。警告另含未维护（sccache 锁新增 `pin-utils`，[RUSTSEC-2026-0441](https://rustsec.org/advisories/RUSTSEC-2026-0441.html)）、健全性问题，以及 sccache 锁中的已撤回 `scc 2.1.0`。工具安装回执通过只证明来源与配方一致，不表示上述安全审计通过。
+CI 的 `security-audit` 只审计应用 `Cargo.lock`（默认分支与最近一个发布 tag）。工具自身的依赖由各上游发布包的 `Cargo.lock` 或预编译包决定，仓库不再逐项处理其中的公告；需要时升级到上游修复后的版本。
 
 应用的直接依赖由 CI 的 `dependency-unused`（`cargo machete`）检查。上游分别要求不同版本的传递依赖时，不为减少锁文件条目而跨不兼容版本替换。
 
@@ -61,15 +64,15 @@ Dioxus CLI 的 `libz-sys` 已从 1.1.28 单项升级到 1.1.31，消除 [RUSTSEC
 bash ci/tools/rustup.sh
 ```
 
-已安装的 rustup 版本不低于 1.29.3 时直接退出；否则在排除已失信 CA 的临时信任集合下下载固定版本的 `rustup-init`，校验 SHA-256 后安装。不改变仓库固定的工具链（由 `rust-toolchain.toml` 决定）。
+已安装的 rustup 版本不低于 1.29.3 时直接退出；否则在排除已失信 CA 的临时信任集合下下载固定版本的 `rustup-init`，校验 SHA-256 后安装。不改变仓库固定的工具链（由 `rust-toolchain.toml` 决定）。mise 通过 rustup 安装 Rust，CI 在 mise 之前先执行本脚本。
 
 ## blaze.sh
 
 ```bash
-just blaze status
-just blaze build -p auction-cli
-just blaze test -p auction-domain --lib
-just blaze stop
+mise run blaze status
+mise run blaze build -p auction-cli
+mise run blaze test -p auction-domain --lib
+mise run blaze stop
 ```
 
-调用机器上已安装的 `blaze` 做本地原生编译试验：强制 `--locked`，拒绝 `--release`、`--profile`、`--target`、`--target-dir` 与 `--config` 覆盖；产物、缓存与 daemon 运行目录都在 `target/blaze/` 下。它不属于 `just verify`、Web 打包或发布流程，结果仍须以固定工具链的 Cargo 门禁为准。
+调用机器上已安装的 `blaze` 做本地原生编译试验：强制 `--locked`，拒绝 `--release`、`--profile`、`--target`、`--target-dir` 与 `--config` 覆盖；产物、缓存与 daemon 运行目录都在 `target/blaze/` 下。它不属于 `mise run verify`、Web 打包或发布流程，结果仍须以固定工具链的 Cargo 门禁为准。

@@ -1,7 +1,7 @@
 //! 入站邮件批次提交后的投递唤醒：批次决定里含已入队投递时，提交后发送
 //! `auction_delivery_ready` 提示；不含投递的批次不发。唤醒只是提示，不改变任何持久状态。
 //!
-//! 仅在 `test-db` feature 下编译，入口见 `just test-db`。
+//! 仅在 `test-db` feature 下编译，入口见 `mise run test-db`。
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 

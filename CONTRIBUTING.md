@@ -7,10 +7,10 @@
 3. 提交前运行：
 
    ```bash
-   just verify            # 策略门禁 + fmt + check + clippy + wasm + rustdoc
-   just test              # 行为变更：纯逻辑、单元与本地替身
-   just test-db           # 涉及数据库：本机 PG18 临时集群，可用 AUCTION_TEST_DATABASE_URL 复用已有服务器
-   just release-check     # 需要完整发布制品时（Fat LTO，较慢）
+   mise run verify            # 策略门禁 + fmt + check + clippy + wasm + rustdoc
+   mise run test              # 行为变更：纯逻辑、单元与本地替身
+   mise run test-db           # 涉及数据库：本机 PG18 临时集群，可用 AUCTION_TEST_DATABASE_URL 复用已有服务器
+   mise run release-check     # 需要完整发布制品时（Fat LTO，较慢）
    ```
 
 约定：
@@ -20,5 +20,5 @@
 - 迁移只追加，已发布的迁移文件不能修改。
 - 正式发布只在 `main` 上打 `v<workspace version>` tag 触发 CI；部署只接受该 tag 产生的 GitHub Release 资产，本地构建或分支候选 artifact 不可部署。
 - 不提交凭据、私有 TOML、`.keyenv`、机器专属路径或构建产物。
-- `just verify` 保持静态门禁；行为变更随功能维护并运行受影响范围的测试。已批准的测试类别、数据库隔离与尚未接入时的覆盖限制见[docs/development.md#测试](docs/development.md#测试)；其他行为验证先说明范围与环境并取得授权。
+- `mise run verify` 保持静态门禁；行为变更随功能维护并运行受影响范围的测试。已批准的测试类别、数据库隔离与尚未接入时的覆盖限制见[docs/development.md#测试](docs/development.md#测试)；其他行为验证先说明范围与环境并取得授权。
 - 安全问题不要开公开 issue，请直接联系维护者；修复发布前不公开复现细节。

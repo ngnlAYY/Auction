@@ -3,7 +3,7 @@
 //! 历史 legacy 自寄与装备损失快照由 `to_jsonb(行)` 在 `TimeZone=UTC` 会话下写入。旧整行
 //! 比较把时间戳渲染成会话时区的文本，因此只有 UTC 会话下相等；本测试固定同一批行，
 //! 切换会话 `TimeZone` 反复求值新的比较式，并同时证明旧式在非 UTC 会话下翻转。
-//! 仅在 `test-db` feature 下编译，入口见 `just test-db`。
+//! 仅在 `test-db` feature 下编译，入口见 `mise run test-db`。
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 

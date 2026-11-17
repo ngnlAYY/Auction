@@ -5,7 +5,7 @@
 //! 处理下一封。此前恢复侧只认四个字段，处理器一写正文事实，消费就在队头每轮报错。
 //!
 //! 处理器只接窄端口替身：退件路由不读装备页、不入队投递、不触达用户命令。仅在 `test-db`
-//! feature 下编译，入口见 `just test-db`。
+//! feature 下编译，入口见 `mise run test-db`。
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 

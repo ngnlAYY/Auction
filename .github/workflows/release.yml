@@ -79,6 +79,8 @@ jobs:
     env:
       # 仅静态检查与测试，不生成调试信息。
       CARGO_PROFILE_DEV_DEBUG: "0"
+      # 门禁与测试只启用 Rust 与 rg；mise run 不会顺带安装其余工具。
+      MISE_ENABLE_TOOLS: rust,ripgrep
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -87,15 +89,17 @@ jobs:
           persist-credentials: false
       - name: Ensure patched rustup
         run: bash ci/tools/rustup.sh
-      - name: Install check dependencies
+      - name: Install Perl
         run: |
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends ripgrep perl
-      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master 2026-11-15 (#190)
+          sudo apt-get install --yes --no-install-recommends perl
+      # mise 按 mise.lock 安装 MISE_ENABLE_TOOLS 列出的工具；Rust 的版本、组件与目标取自 rust-toolchain.toml。
+      # 发布流程不恢复 mise 缓存：工具每次按锁文件重新下载并校验。
+      - name: Install tools with mise
+        uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
         with:
-          toolchain: 1.100.0
-          components: rustfmt, clippy
-          targets: wasm32-unknown-unknown
+          version: 2026.11.8
+          cache: false
       - name: Restore Rust build cache
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
         with:
@@ -107,10 +111,8 @@ jobs:
       - name: Run repository, static and lint gates
         run: bash ci/checks/check.sh all fmt check dependency-versions lint wasm rustdoc
       # 与 ci.yml 的 test 作业保持同一组测试入口与 PostgreSQL 18 准备方式。
-      - name: Install just
-        run: cargo install just --locked --version 1.59.0
       - name: Run pure and double tests
-        run: just test
+        run: mise run test
       - name: Install PostgreSQL 18 for integration tests
         run: |
           sudo apt-get update
@@ -132,9 +134,9 @@ jobs:
           sudo -u postgres createdb -p "$port" -O auction_test auction_test
           echo "AUCTION_TEST_DATABASE_URL=postgresql://auction_test:auction_test@127.0.0.1:$port/auction_test" >> "$GITHUB_ENV"
       - name: Run PostgreSQL 18 integration tests
-        run: just test-db
+        run: mise run test-db
       - name: Verify migration compatibility declarations
-        run: just test-db-compat
+        run: mise run test-db-compat
 
   build:
     needs: [guard, verify]

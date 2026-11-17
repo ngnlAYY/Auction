@@ -11,8 +11,8 @@ description: 更新 Auction 云端分体部署：取 GitHub Release 资产并校
 
 # 制品来源：只部署 GitHub Release 资产
 
-- 只部署 `main` 上 `v<工作区版本>` tag 触发 release 工作流产生的 Release 资产：`auction-rust-<版本>-<短提交>.tar.gz`、`SHA256SUMS`、`DEPENDENCIES.md`。该工作流会重跑全部门禁、`just test`、`just test-db` 与迁移兼容验证，并附 GitHub 来源证明。
-- 本地 `just release-check` 产物、普通 CI 候选 artifact 与 `-dirty` 包一律不部署。早期曾用本地包上线，现已停止。
+- 只部署 `main` 上 `v<工作区版本>` tag 触发 release 工作流产生的 Release 资产：`auction-rust-<版本>-<短提交>.tar.gz`、`SHA256SUMS`、`DEPENDENCIES.md`。该工作流会重跑全部门禁、`mise run test`、`mise run test-db` 与迁移兼容验证，并附 GitHub 来源证明。
+- 本地 `mise run release-check` 产物、普通 CI 候选 artifact 与 `-dirty` 包一律不部署。早期曾用本地包上线，现已停止。
 - 打 tag 由维护者执行。目标提交还没有 Release 时，停下来请维护者处理：确认工作区版本（tag 必须等于 `Cargo.toml` 的 `workspace.package.version`，且同一版本不能发布两次），在 `main` 上打 tag 并推送，等 release 工作流完成。代理不打 tag，也不改版本号。
 
 # 线上事实

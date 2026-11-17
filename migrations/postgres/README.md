@@ -30,7 +30,7 @@
 
 069 放宽快照闭集但旧程序不认识新竞价策略，071 冻结旧补偿池写入，均属于 `breaking`。注释须说明 owner、保护的不变量、等级依据和必要停机顺序；兼容承诺要覆盖实际允许回退的旧程序范围，不能只考虑最新程序。
 
-`compatible` 不是只靠审阅：`just test-db-compat`（在 `just test-db` 与 CI 测试作业中运行）沿迁移链在 V-1 捕获旧程序依赖的契约、权限与旧版语句结果，执行 V 后要求不收缩；新增 NOT NULL 列、删除或改类型、改变既有约束/触发器语义、收回权限都会指出具体迁移。把迁移写成真正的纯新增是让该门禁通过的唯一正确方式，不要为通过而修改夹具的基线。
+`compatible` 不是只靠审阅：`mise run test-db-compat`（在 `mise run test-db` 与 CI 测试作业中运行）沿迁移链在 V-1 捕获旧程序依赖的契约、权限与旧版语句结果，执行 V 后要求不收缩；新增 NOT NULL 列、删除或改类型、改变既有约束/触发器语义、收回权限都会指出具体迁移。把迁移写成真正的纯新增是让该门禁通过的唯一正确方式，不要为通过而修改夹具的基线。
 
 每个新文件的最后一条顶层 SQL 固定为以下单行 VALUES 形式，版本使用文件编号对应的十进制整数，等级必须显式填写：
 
@@ -41,7 +41,7 @@ VALUES (76, 'breaking');
 
 不要手工 BEGIN/COMMIT/ROLLBACK，不使用 `-- no-transaction`；SQLx 将文件 SQL、登记与本版本迁移成功记录同事务提交。禁止 upsert、INSERT SELECT、多行或过程内登记；等级事实不能 UPDATE/DELETE/TRUNCATE。修正追加新迁移，不编辑已发布 SQL 或历史等级。
 
-`bash ci/checks/check.sh migration-compatibility` 已纳入 `all` / `just verify`，词法及正则约束见[ci/checks/README.md#迁移兼容登记](../../ci/checks/README.md#迁移兼容登记)。门禁只验证登记格式，兼容声明仍须审阅。readiness 判定由[docs/contracts/database.md#迁移兼容登记与就绪](../../docs/contracts/database.md#迁移兼容登记与就绪)定义，程序回退步骤见[ops/deploy/RECOVERY.md#程序回退](../../ops/deploy/RECOVERY.md#程序回退)。
+`bash ci/checks/check.sh migration-compatibility` 已纳入 `all` / `mise run verify`，词法及正则约束见[ci/checks/README.md#迁移兼容登记](../../ci/checks/README.md#迁移兼容登记)。门禁只验证登记格式，兼容声明仍须审阅。readiness 判定由[docs/contracts/database.md#迁移兼容登记与就绪](../../docs/contracts/database.md#迁移兼容登记与就绪)定义，程序回退步骤见[ops/deploy/RECOVERY.md#程序回退](../../ops/deploy/RECOVERY.md#程序回退)。
 
 ## 执行兼容层
 

@@ -10,7 +10,7 @@
 //! 观察；“未来观测”用观察时刻晚于数据库时钟的快照代替真实的应用与数据库时钟偏差，“已过期”用
 //! 早于数据库时钟的时窗代替事务等待越过证据寿命。
 //!
-//! 仅在 `test-db` feature 下编译，入口见 `just test-db`。
+//! 仅在 `test-db` feature 下编译，入口见 `mise run test-db`。
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 

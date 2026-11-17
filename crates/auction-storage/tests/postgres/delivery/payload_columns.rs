@@ -8,7 +8,7 @@
 //!      而不剔除三列的整行比较必然失败，证明剔除语句确实生效。
 //!   3. 维护扫描的部分索引在新的列形式上可被使用（`EXPLAIN` 断言），且两种写法给出同一集合。
 //!
-//! 仅在 `test-db` feature 下编译，入口见 `just test-db`。
+//! 仅在 `test-db` feature 下编译，入口见 `mise run test-db`。
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 

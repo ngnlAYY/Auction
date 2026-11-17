@@ -3,7 +3,7 @@
 //! 只经公开存储端口驱动：MoogleMail 走 `DeliveryWorkStore`（发送围栏经 Worker 实际使用的
 //! `start_sending_authorized` 与冻结 Send 身份），论坛 PM 走 `LotWatchPmWorkStore`。覆盖截止前
 //! 可发送、截止后退役、发送围栏拒绝与已经 sending 的结果不被改写。仅在 `test-db` feature 下
-//! 编译，入口见 `just test-db`。
+//! 编译，入口见 `mise run test-db`。
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 

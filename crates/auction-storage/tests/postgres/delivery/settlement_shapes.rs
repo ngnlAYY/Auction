@@ -5,7 +5,7 @@
 //! 载体付款、卖方货款与买方退款加入 `item_name` 后冲突门未同步，库里一有新形状投递，全部
 //! 内部履约与装备损失都判冲突。
 //!
-//! 仅在 `test-db` feature 下编译，入口见 `just test-db`。
+//! 仅在 `test-db` feature 下编译，入口见 `mise run test-db`。
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 

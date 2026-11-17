@@ -2,7 +2,7 @@
 
 [ci/README.md](../README.md) · [docs/development.md](../../docs/development.md)
 
-[ci/checks/check.sh](check.sh) 是本地与 CI 的共同入口。`all` 包含仓库契约、公开仓库脱敏、目录布局、配置示例、systemd 模板、翻译键、装备诊断闭集、源码计数棘轮、审计写入失败分类、模块层级、Markdown 链接、迁移兼容登记与已发布迁移不可变检查；完整清单见 [ci/README.md#静态门禁cicheckschecksh](../README.md#静态门禁cicheckschecksh)。`just verify` 等价于 `bash ci/checks/check.sh all fmt check dependency-versions lint wasm rustdoc`：先运行 `all`，再依次执行格式、宿主默认 feature 编译、依赖版本、宿主全 feature Clippy、Public/Admin 两组 wasm32 Clippy 与 rustdoc 检查，不运行行为测试。
+[ci/checks/check.sh](check.sh) 是本地与 CI 的共同入口。`all` 包含仓库契约、公开仓库脱敏、目录布局、配置示例、systemd 模板、翻译键、装备诊断闭集、源码计数棘轮、审计写入失败分类、模块层级、Markdown 链接、迁移兼容登记与已发布迁移不可变检查；完整清单见 [ci/README.md#静态门禁cicheckschecksh](../README.md#静态门禁cicheckschecksh)。`mise run verify` 等价于 `bash ci/checks/check.sh all fmt check dependency-versions lint wasm rustdoc`：先运行 `all`，再依次执行格式、宿主默认 feature 编译、依赖版本、宿主全 feature Clippy、Public/Admin 两组 wasm32 Clippy 与 rustdoc 检查，不运行行为测试。
 
 ## 公开仓库脱敏
 
@@ -28,7 +28,7 @@ bash ci/checks/check.sh migration-compatibility
 
 词法扫描区分行注释、嵌套块注释、单引号/转义字符串、双引号标识符及带标签的 dollar quote；只在顶层分号切分 SQL，函数与 DO 内的 INSERT 也计数但不能充当合法登记，EXECUTE 字符串中的登记表引用拒绝。普通字符串与非过程 dollar quote 中的示例不计为登记。每个新文件须恰好一次 `INSERT INTO public.schema_migration_compatibility (version, level) VALUES (十进制本版本, 'compatible' 或 'breaking');`，必须是最后一条无条件顶层 SQL。允许关键字大小写及空白变化，等级字面量保持小写；禁止 upsert、INSERT SELECT、多行 VALUES、过程内登记或用注释/字符串冒充登记。
 
-禁止 `-- no-transaction`，顶层 BEGIN/START TRANSACTION、COMMIT/END、ROLLBACK/ABORT、PREPARE/SET TRANSACTION，保持 SQLx 对迁移与登记的事务边界。失败输出文件与原因并退出 1。该门禁不执行 SQL、不连接数据库，因此不证明 compatible 的业务承诺；分类审阅规则由[migrations/postgres/README.md#兼容分级与登记](../../migrations/postgres/README.md#兼容分级与登记)拥有，`compatible` 的跨版本验证由 `just test-db-compat` 在真实 PostgreSQL 18 上执行，见[docs/development.md#测试](../../docs/development.md#测试)与`crates/auction-storage/tests/postgres/migration_compatibility.rs`。
+禁止 `-- no-transaction`，顶层 BEGIN/START TRANSACTION、COMMIT/END、ROLLBACK/ABORT、PREPARE/SET TRANSACTION，保持 SQLx 对迁移与登记的事务边界。失败输出文件与原因并退出 1。该门禁不执行 SQL、不连接数据库，因此不证明 compatible 的业务承诺；分类审阅规则由[migrations/postgres/README.md#兼容分级与登记](../../migrations/postgres/README.md#兼容分级与登记)拥有，`compatible` 的跨版本验证由 `mise run test-db-compat` 在真实 PostgreSQL 18 上执行，见[docs/development.md#测试](../../docs/development.md#测试)与`crates/auction-storage/tests/postgres/migration_compatibility.rs`。
 
 ## 已发布迁移不可变
 
@@ -85,7 +85,7 @@ bash ci/checks/check.sh ratchet-counts  # 仅输出当前计数，不修改基�
 
 基线在 [ci/checks/source-ratchet.baseline](source-ratchet.baseline)，每行一个 `层:模式 数量`，共 16 项。缺项、重复项、未知项与无效数量均失败关闭。当前计数高于基线时打印全部超出项并退出 1；低于基线时提示更新并继续通过。基线只能下调，须随清理改动一起审阅；不得为放行新增模式而上调。
 
-更新时先生成候选，核对差异仅下降，再用候选替换基线并运行 `ratchet` 与 `just verify`：
+更新时先生成候选，核对差异仅下降，再用候选替换基线并运行 `ratchet` 与 `mise run verify`：
 
 ```bash
 ratchet_snapshot=$(mktemp)
@@ -135,7 +135,7 @@ Markdown 同页与跨页锚点按 GitHub 标题规则生成：ATX（`#`）或 Se
 
 同一检查拒绝表格续行：以 `|` 开头的表格行之后紧跟的非空行，若不是另一表格行、也不另起块（ATX 标题、引用、HTML、列表项、分隔线），会被 GitHub 渲染成表格的一行，失败输出文件与行号，表格后须空一行。代码块、行内代码与 HTML 注释先掩为空白，不参与判断。
 
-## 存储端口覆盖率报告（不并入 `just verify`）
+## 存储端口覆盖率报告（不并入 `mise run verify`）
 
 ```bash
 bash ci/checks/check.sh port-coverage   # 输出覆盖率与未覆盖方法清单
@@ -145,7 +145,7 @@ bash ci/checks/check.sh port-coverage   # 输出覆盖率与未覆盖方法清�
 
 口径是近似上界：同名方法会被一并计为覆盖，且只说明方法至少被调用过一次，不说明分支或失败路径已被覆盖。报告只输出、不作门禁，不会让任何命令失败；用于观察扩展进度并挑选下一批待补的端口。
 
-## 依赖升级日历（不并入 `just verify`）
+## 依赖升级日历（不并入 `mise run verify`）
 
 ```bash
 perl ci/checks/dependency-cadence.pl [--today YYYY-MM-DD] [--file 日历路径]
@@ -153,10 +153,10 @@ perl ci/checks/dependency-cadence.pl [--today YYYY-MM-DD] [--file 日历路径]
 
 [dependency-cadence.pl](dependency-cadence.pl) 读取 [ops/dependencies/upgrade-windows.json](../../ops/dependencies/upgrade-windows.json)，离线校验季度窗口日历：`version`、`lead_days`、窗口 ID 与状态闭集、UTC 日期合法性、季度连续、默认“第二个周一至周五”形态（顺延须填 `shifted_reason`）、与冻结区间不重叠，并要求始终存在下一次 `scheduled` 窗口。窗口已逾期仍为 `scheduled`、日历结构损坏或缺少下一次窗口时退出 1；提前 14 天或窗口进行中只输出 warning。成功时输出窗口表与门禁提示，供 CI 作业摘要使用。
 
-本检查刻意不加入 `all` 与 `just verify`：日历逾期不应阻塞无关的 PR。它由[.github/workflows/dependency-cadence.yml](../../.github/workflows/dependency-cadence.yml)每周一 **05:07 UTC** 定时运行，规则见[ops/dependencies.md](../../ops/dependencies.md)。脚本只依赖 Perl 核心模块（`JSON::PP`、`Time::Local`），不联网、不修改文件、不创建 issue。
+本检查刻意不加入 `all` 与 `mise run verify`：日历逾期不应阻塞无关的 PR。它由[.github/workflows/dependency-cadence.yml](../../.github/workflows/dependency-cadence.yml)每周一 **05:07 UTC** 定时运行，规则见[ops/dependencies.md](../../ops/dependencies.md)。脚本只依赖 Perl 核心模块（`JSON::PP`、`Time::Local`），不联网、不修改文件、不创建 issue。
 
 ## 每周依赖审计
 
-[.github/workflows/ci.yml](../../.github/workflows/ci.yml) 每周一 **04:17 UTC** 调度现有 `security-audit` 作业，复用受控 cargo-audit、工具链与缓存。调度事件执行 `dependency-audit`，读取默认分支 `Cargo.lock` 并获取最新 RustSec 公告；漏洞及警告令作业失败，不修改依赖、不自动发布。push / PR / 手动事件继续保留原有门禁与未使用依赖检查。
+[.github/workflows/ci.yml](../../.github/workflows/ci.yml) 每周一 **04:17 UTC** 调度现有 `security-audit` 作业，复用 mise 安装的 cargo-audit、工具链与缓存。调度事件执行 `dependency-audit`，读取默认分支 `Cargo.lock` 并获取最新 RustSec 公告；漏洞及警告令作业失败，不修改依赖、不自动发布。push / PR / 手动事件继续保留原有门禁与未使用依赖检查。
 
 部署只使用发布 tag 产出的 Release 资产，默认分支已修复的公告不代表线上程序安全，因此定时与手动运行还执行 `release-dependency-audit`（[ci/checks/release-dependency-audit.sh](release-dependency-audit.sh)）：按发布守卫的 `v<semver>` 口径取最高版本 tag（`versionsort.suffix=-`，预发布排在同版本正式发布之前），把该提交的 `Cargo.lock` 读到临时目录，以 `cargo audit --deny warnings` 审计；没有发布 tag 时输出提示并通过，tag 无法解析或缺少 `Cargo.lock` 时失败。该步骤在默认分支审计失败后仍执行，两项结果分别可见；为取得 tag 的提交对象，这两类运行的 checkout 使用完整历史。push / PR 不运行此项，避免旧发布的新公告阻塞无关提交；发布工作流本身不替代周期审计。

@@ -14,7 +14,7 @@
 //! 因此能证明被测事务在生产运行账号的最小权限下可以提交。随机密码只存在于进程内存。迁移与
 //! DDL 夹具改用 `TestDatabase::maintenance_store`。
 //!
-//! 该模块只在 `test-db` feature 下编译，`just verify` 只做静态编译，不连接数据库。
+//! 该模块只在 `test-db` feature 下编译，`mise run verify` 只做静态编译，不连接数据库。
 //! 多个用例共用的种子与插行夹具在 `fixtures`、`retention` 子模块。
 
 pub mod fixtures;

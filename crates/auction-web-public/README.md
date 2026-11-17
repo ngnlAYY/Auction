@@ -58,7 +58,7 @@
 
 ```bash
 cargo check --locked -p auction-web-public --target wasm32-unknown-unknown   # 编译检查
-bash ci/release/web-bundle.sh public                               # 生成发布 payload（需要受控工具 dx）
+bash ci/release/web-bundle.sh public                               # 生成发布 payload（工具由 mise install 提供）
 ```
 
 `ci/release/web-bundle.sh` 先验证受控发布工具，再使用 `wasm-release` profile（体积优先、`panic = "abort"`）运行 `dx bundle`，输出到 `target/dx/build/auction-web-public/web/public` 并写入 payload 清单与哈希；源码、工具与构建环境指纹一致且已有 payload 通过门禁时才复用。随后构建 `auction-public-api` 的 `web-embed` 制品才能内嵌这份页面；单独编译 API 不生成 Web payload。前端只依赖契约 DTO 与共享浏览器机制，不启用 Dioxus fullstack/server。

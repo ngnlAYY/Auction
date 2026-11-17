@@ -8,7 +8,7 @@ PostgreSQL 18 适配器：实现应用层的仓储、事务与命令端口，拥
 
 | feature | 作用 |
 | --- | --- |
-| `test-db` | PostgreSQL 18 集成测试夹具（临时集群、已迁移模板库与逐测试克隆库）；只在 `just test-db` 启用 |
+| `test-db` | PostgreSQL 18 集成测试夹具（临时集群、已迁移模板库与逐测试克隆库）；只在 `mise run test-db` 启用 |
 
 ## 对外入口
 
@@ -74,7 +74,7 @@ COD 实收路径的 `stage` 集合（`transaction_*`、`runtime_generation`、`w
 
 ### 兼容声明验证
 
-`tests/postgres/migration_compatibility.rs`（`just test-db-compat`）沿真实迁移链证明每个 `compatible` 登记属实：在 V-1 捕获旧程序依赖的契约，执行 V 后重新捕获并比对，配合 `INSERT ... DEFAULT VALUES` 探针与回滚事务中的 `LEGACY_WORKLOAD` 重放；任何结果变化都算破坏。内嵌/提交迁移夹具只在 `test-db` 可用。
+`tests/postgres/migration_compatibility.rs`（`mise run test-db-compat`）沿真实迁移链证明每个 `compatible` 登记属实：在 V-1 捕获旧程序依赖的契约，执行 V 后重新捕获并比对，配合 `INSERT ... DEFAULT VALUES` 探针与回滚事务中的 `LEGACY_WORKLOAD` 重放；任何结果变化都算破坏。内嵌/提交迁移夹具只在 `test-db` 可用。
 
 ## 源码结构
 

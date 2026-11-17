@@ -18,7 +18,7 @@
 //! - 退回达到冻结上限：`cod_return_limit_reached` → 成交撤销后的 `voided_return_pending` →
 //!   `voided_return_sent` → `voided_returned`。
 //!
-//! 仅在 `test-db` feature 下编译，入口见 `just test-db`。
+//! 仅在 `test-db` feature 下编译，入口见 `mise run test-db`。
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::sync::Arc;

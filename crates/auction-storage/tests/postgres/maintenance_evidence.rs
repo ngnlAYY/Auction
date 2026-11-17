@@ -3,7 +3,7 @@
 //! 已迁移的模板库上两条入口都报告有效 schema 身份与完整的当前迁移历史；schema 身份损坏时
 //! 两者都按身份无效失败关闭；从未迁移的空库没有迁移历史标记，盘点拒绝、预检如实报告缺失。
 //!
-//! 仅在 `test-db` feature 下编译，入口见 `just test-db`。
+//! 仅在 `test-db` feature 下编译，入口见 `mise run test-db`。
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use auction_storage::{DatabaseStore, RecoveryPreflightError, RetentionInventoryError};

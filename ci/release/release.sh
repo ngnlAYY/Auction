@@ -7,9 +7,9 @@ set -euo pipefail
 repository_root=$(git rev-parse --show-toplevel)
 cd "$repository_root"
 
-# 工具选择与身份共用同一入口；回执校验失败时不进入任何发布操作。
+# 工具选择与身份共用同一入口；任一发布工具缺失时不进入任何发布操作。
 source ci/release/build-identity.sh
-# 只读的 payload 体积检查不需要 dx/rustc，也不读取受控工具；其余入口仍先校验工具回执。
+# 只读的 payload 体积检查不需要 dx/rustc，也不解析发布工具；其余入口仍先确认工具齐全。
 command_name=${1:-}
 if [[ "$command_name" != verify-web-size ]]; then
 	configure_build_tools
@@ -28,7 +28,7 @@ api_only_public_root="$repository_root/target/dist/api-only-assets/public"
 api_only_admin_root="$repository_root/target/dist/api-only-assets/admin"
 # 体积预算的基线是刻意维护的数据文件；发布门禁只读取，不写回。
 web_size_budget_file="$repository_root/ci/release/web-size-budget.v1"
-assets_missing_message="web assets are not included in this binary; run \`just build-release\`"
+assets_missing_message="web assets are not included in this binary; run \`mise run build-release\`"
 # 发布 feature 的唯一来源：PostgreSQL 无条件编译，变体之间只差是否内嵌页面。
 api_only_features=''
 embedded_features='auction-public-api/web-embed,auction-admin-api/web-embed'

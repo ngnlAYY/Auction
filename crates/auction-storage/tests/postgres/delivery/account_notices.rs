@@ -3,7 +3,7 @@
 //! 入队校验拒绝合法回信时，邮件处理器只能整封重试，游标停在该信之前，同一 world 的入站
 //! 邮箱随之停摆；因此必须经 `DatabaseStore` 的真实入队路径证明 rekey 回信可以落库。
 //!
-//! 仅在 `test-db` feature 下编译，入口见 `just test-db`。
+//! 仅在 `test-db` feature 下编译，入口见 `mise run test-db`。
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 

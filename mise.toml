@@ -1,0 +1,174 @@
+# 本仓库的工具与命令入口。工具版本只在本文件与 rust-toolchain.toml 维护，下载地址与校验和记录在
+# mise.lock；任务（`mise run <名字>`）总在这些工具的环境里执行。说明见 ci/tools/README.md。
+min_version = "2026.11.8"
+
+[settings]
+# 必填：Rust 的版本、组件与编译目标只写在 rust-toolchain.toml，mise 读取该文件而不另设版本。
+idiomatic_version_file_enable_tools = ["rust"]
+# 必填：原生程序只支持 Linux x86_64，锁文件只记录这一个平台。
+lockfile_platforms = ["linux-x64"]
+
+[tools]
+# 策略门禁的文本检索。
+ripgrep = "15.2.0"
+# 发布构建的编译缓存；只有环境变量显式设置 RUSTC_WRAPPER=sccache 时才启用。
+sccache = "0.19.0"
+# 依赖审计（读取 RustSec 公告）与未使用依赖检查。
+"cargo:cargo-audit" = "0.23.0"
+"cargo:cargo-machete" = "0.10.1"
+# 页面构建：Dioxus CLI 关闭遥测与自行下载，配套工具由下面三项按固定版本提供。
+"cargo:dioxus-cli" = { version = "0.7.10", default-features = false, features = ["disable-telemetry", "no-downloads"], bin = "dx" }
+# wasm-bindgen 必须与工作区 Cargo.toml 的同名依赖同步升级。
+"github:wasm-bindgen/wasm-bindgen" = "0.2.130"
+# binaryen 的发布 tag 形如 version_129，提供 wasm-opt。
+"github:WebAssembly/binaryen" = { version = "129", version_prefix = "version_" }
+# esbuild 直接取 npm 上的原生二进制包，运行时不需要 Node。
+"http:esbuild" = { version = "0.27.3", url = "https://registry.npmjs.org/@esbuild/linux-x64/-/linux-x64-{{ version }}.tgz", bin_path = "package/bin" }
+
+# ---- 验证 ----
+
+[tasks.verify]
+description = "唯一默认验证入口：策略（含源码棘轮与文档链接）→ 格式 → 编译/Clippy/WASM，不运行测试"
+run = "bash ci/checks/check.sh all fmt check dependency-versions lint wasm rustdoc"
+
+[tasks.fmt]
+description = "只检查 rustfmt 格式，不写文件"
+run = "bash ci/checks/check.sh fmt"
+
+[tasks.check]
+description = "编译工作区全部已有目标；只编译不运行测试"
+run = "bash ci/checks/check.sh check"
+
+[tasks.lint]
+description = "以 all-features 跑 Clippy，警告即失败"
+run = "bash ci/checks/check.sh lint"
+
+[tasks.wasm-check]
+description = "以 wasm32 Clippy 检查 Public/Admin 浏览器目标及共享层，警告即失败；不产出发布 payload"
+run = "bash ci/checks/check.sh wasm"
+
+# ---- 测试 ----
+
+[tasks.test]
+description = "纯逻辑、单元与本地替身测试；不连接数据库，数据库测试必须独立隔离"
+run = "cargo test --locked --workspace --all-targets"
+
+[tasks.test-db]
+description = "PostgreSQL 18 测试；设置 AUCTION_TEST_DATABASE_URL 时复用该服务器，否则用本机 PG18 二进制启动并清理临时集群"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+cargo test --locked -p auction-storage --features test-db --test postgres -- postgres_
+# 源码内的 postgres_ 用例只写连接私有临时表，需要现成的服务器；未提供 URL 时明确跳过。
+if [[ -n "${AUCTION_TEST_DATABASE_URL:-}" ]]; then
+  cargo test --locked -p auction-storage --lib -- --ignored postgres_
+else
+  printf '%s\n' '未设置 AUCTION_TEST_DATABASE_URL：跳过 auction-storage 源码内的 postgres_ 临时表用例'
+fi
+'''
+
+[tasks.test-db-compat]
+description = "只验证迁移兼容声明：沿迁移链对 compatible 登记重放上一版契约、写入探针与旧版语句"
+run = "cargo test --locked -p auction-storage --features test-db --test postgres -- postgres_compat"
+
+# ---- 构建与发布 ----
+
+[tasks.web-build]
+description = "构建双端页面并生成固定 payload；输入未变时复用已有产物"
+run = [
+  "bash ci/release/web-bundle.sh public",
+  "bash ci/release/web-bundle.sh admin",
+]
+
+[tasks.build-api]
+description = "不包含浏览器资源的 API-only 对照制品"
+run = "bash ci/release/release.sh build-api"
+
+[tasks.build-release]
+description = "双端 web-embed 完整制品；源码身份未变时复用已有制品"
+run = "bash ci/release/release.sh build-embedded"
+
+[tasks.build-single]
+description = "可选合并服务；先保留分体制品与资源隔离证明，再构建并核对 auction-server 与独立 auction-cli"
+# 两项前置构建共用 target，必须依次执行；depends 会并行启动它们。
+run = [
+  { task = "build-api" },
+  { task = "build-release" },
+  "bash ci/release/release.sh build-single",
+  "bash ci/release/release.sh verify-single",
+]
+
+[tasks.verify-artifacts]
+description = "核对 API-only/嵌入式制品、依赖边界与资源隔离"
+run = "bash ci/release/release.sh verify-artifacts"
+
+[tasks.web-size]
+description = "只核对两端 Web payload 体积预算，不构建、不读取原生制品"
+run = "bash ci/release/release.sh verify-web-size"
+
+[tasks.release-check]
+description = "完整构建、制品门禁与发布装配；不加参数不运行测试。额外参数原样转发"
+run = "bash ci/release/release.sh release-check"
+
+[tasks.package]
+description = "只装配已构建制品；正式发布要求干净工作树。额外参数原样转发"
+run = "bash ci/release/release.sh package"
+
+[tasks.verify-package]
+description = "核对 GitHub Release 部署制品：摘要、包内清单、发布 tag 可达性与来源证明。额外参数原样转发"
+run = "bash ci/release/verify-deployment-package.sh"
+
+# ---- 本地运行 ----
+
+[tasks.run-public]
+description = "本地启动 Public，内嵌页面走 PostgreSQL"
+run = "cargo run --locked -p auction-public-api --features web-embed"
+
+[tasks.run-admin]
+description = "本地启动 Admin，内嵌页面走 PostgreSQL"
+run = "cargo run --locked -p auction-admin-api --features web-embed"
+
+[tasks.run-worker]
+description = "本地启动 Worker，不内嵌页面"
+run = "cargo run --locked -p auction-worker"
+
+[tasks.db-migrate]
+description = "本地开发库以迁移 owner 执行内嵌迁移；普通启动不隐式迁移，本地不经 systemd 停机门禁"
+usage = '''
+arg "[config_dir]" help="配置目录" default="ops/config"
+arg "[owner_secrets]" help="迁移 owner 凭据文件" default="ops/config/owner/postgres.toml"
+'''
+run = 'cargo run --locked -p auction-cli -- --config-dir "${usage_config_dir?}" db migrate --owner-secrets "${usage_owner_secrets?}" --no-systemd'
+
+[tasks.db-grants]
+description = "本地开发库重放运行账号最小权限（迁移 000081 的授权函数）"
+usage = '''
+arg "[config_dir]" help="配置目录" default="ops/config"
+arg "[owner_secrets]" help="迁移 owner 凭据文件" default="ops/config/owner/postgres.toml"
+'''
+run = 'cargo run --locked -p auction-cli -- --config-dir "${usage_config_dir?}" db grants --owner-secrets "${usage_owner_secrets?}" --no-systemd'
+
+[tasks.config-show]
+description = "输出指定角色的有效配置安全投影，默认 public"
+usage = '''
+arg "[role]" help="角色：public、admin 或 worker" default="public"
+arg "[config_dir]" help="配置目录" default="ops/config"
+'''
+run = 'cargo run --locked -p auction-cli -- --config-dir "${usage_config_dir?}" config show "${usage_role?}"'
+
+[tasks.config-check]
+description = "联合检查三角色配置；生产门禁另加 --strict"
+usage = '''
+arg "[config_dir]" help="配置目录" default="ops/config"
+'''
+run = 'cargo run --locked -p auction-cli -- --config-dir "${usage_config_dir?}" config check'
+
+# ---- 其他 ----
+
+[tasks.blaze]
+description = "显式本地 Blaze 试验，参数逐项转发；不进入 verify 或发布依赖"
+run = "bash ci/tools/blaze.sh"
+
+[tasks.clean]
+description = "删除全部编译产物与本地缓存；target/ 由 cargo 与发布脚本共同拥有"
+run = "cargo clean"

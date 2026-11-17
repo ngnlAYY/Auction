@@ -7,9 +7,9 @@ cd "$repository_root"
 
 usage() {
   printf '%s\n' \
-    '用法：just blaze <build|test|status|stop> [Blaze 参数]' \
-    '示例：just blaze build -p auction-cli' \
-    '      just blaze test -p auction-domain --lib' \
+    '用法：mise run blaze <build|test|status|stop> [Blaze 参数]' \
+    '示例：mise run blaze build -p auction-cli' \
+    '      mise run blaze test -p auction-domain --lib' \
     '实验结果仍须由项目固定工具链检查；不用于 Web 或正式发布。'
 }
 

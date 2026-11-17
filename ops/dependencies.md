@@ -9,11 +9,11 @@
 - 每季度一个窗口：1、4、7、10 月的第二个周一至周五（UTC），共 5 个工作日。窗口内只做依赖与工具链升级，不夹带功能、路由、配置字段或契约变更。
 - 窗口开始前 14 天由[依赖升级窗口提醒](../.github/workflows/dependency-cadence.yml)输出 warning。
 - 覆盖范围与顺序：
-  1. Rust 工具链：[rust-toolchain.toml](../rust-toolchain.toml)、CI 的 `dtolnay/rust-toolchain` 固定版本与 MSRV 作业（1.94.1）；只提高工具链时 MSRV 基线保持不变。
+  1. Rust 工具链：[rust-toolchain.toml](../rust-toolchain.toml)（mise 与 CI 都读取它，改动后运行 `mise lock` 并提交 `mise.lock`）与 MSRV 作业（1.94.1）；只提高工具链时 MSRV 基线保持不变。
   2. 异步运行时：Tokio LTS 及其直接依赖。
   3. HTTP 栈：Axum 与 tungstenite 必须同批升级——`ci/checks/check.sh dependency-versions` 要求正常依赖图只有一个 tungstenite 版本，Axum 的 WebSocket 错误按版本 downcast。
   4. 数据库：sqlx 与 PostgreSQL 驱动。
-  5. 前端：Dioxus、`dx` 受控构建工具与 `wasm-bindgen`、`wasm-opt` 固定版本。
+  5. 前端：Dioxus，以及 [mise.toml](../mise.toml) 里固定版本的 `dx`、`wasm-bindgen`、`wasm-opt` 与 `esbuild`（改版本后运行 `mise lock` 并一并提交 `mise.lock`）。
   6. GitHub Actions 固定提交。
   7. PostgreSQL 18 小版本：不占用窗口，按[ops/hardening.md#postgresql-小版本升级](hardening.md#postgresql-小版本升级)另作停机安排。
 - 每个依赖族单独 PR（分支 `chore/deps-<窗口 ID>-<族>`），不混入无关修复；同一窗口内按上述顺序合入，前一族未通过门禁不开始下一族。工具链升级必须同时核对 `rust-toolchain.toml`、CI 工具链版本、MSRV 作业与 `Cargo.lock`。
@@ -35,9 +35,9 @@
 
 | 变更 | 必须运行 |
 | --- | --- |
-| 任意依赖或工具链升级 | `just verify`；`just test` |
-| 外部页面解析（MoogleMail、论坛） | 确认脱敏回放语料与本地替身覆盖本次变更路径，再运行 `just test` |
-| sqlx、PostgreSQL 驱动或数据库连接层 | 加 `just test-db`（隔离 PG18） |
+| 任意依赖或工具链升级 | `mise run verify`；`mise run test` |
+| 外部页面解析（MoogleMail、论坛） | 确认脱敏回放语料与本地替身覆盖本次变更路径，再运行 `mise run test` |
+| sqlx、PostgreSQL 驱动或数据库连接层 | 加 `mise run test-db`（隔离 PG18） |
 | 数据库或 HTTP 栈（Axum、tungstenite、hyper、Tokio 运行时、sqlx 连接层） | 加本地 PG18 负载演练：Final 阶段并发出价与匿名读突发，并与窗口前基线比较 |
 | 新增或改写迁移 | 按[ops/deploy/MIGRATION-DRILL.md](deploy/MIGRATION-DRILL.md)完成迁移演练并留存回执 |
 | 合并到 `main` 前 | 上述项目全部通过；不把未过门禁的依赖族留在窗口内 |
@@ -81,4 +81,4 @@ perl ci/checks/dependency-cadence.pl --file /path/to/calendar.json
 ## 延后
 
 - 本地 PG18 负载演练尚未建立；在此之前，数据库或 HTTP 栈升级只做评估，不在窗口内合入。
-- 存储端口覆盖与写表单成功路径的测试仍在推进；升级前按所属 owner 确认本次变更路径已有测试，不以 `just test` 全绿代替覆盖声明。
+- 存储端口覆盖与写表单成功路径的测试仍在推进；升级前按所属 owner 确认本次变更路径已有测试，不以 `mise run test` 全绿代替覆盖声明。

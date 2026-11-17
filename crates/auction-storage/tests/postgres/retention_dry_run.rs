@@ -6,7 +6,7 @@
 //!   3. 被失败记录或重放关系引用的事件计入 `blocked_rows`，不被假装可删；
 //!   4. 报告恒为 `mutation_executed=false`、`deletion_authorized=false`，且确实运行在只读事务。
 //!
-//! 仅在 `test-db` feature 下编译，入口见 `just test-db`。
+//! 仅在 `test-db` feature 下编译，入口见 `mise run test-db`。
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 

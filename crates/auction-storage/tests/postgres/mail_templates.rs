@@ -1,7 +1,7 @@
 //! 验收：出站通知模板的修订事实在真实 PostgreSQL 上只追加、可原样重放，并按版本 CAS。
 //!
 //! 被测连接是运行账号：证明最小权限下（只追加表只有 `INSERT`）修订、审计与读取都能完成。
-//! 入口见 `just test-db`。
+//! 入口见 `mise run test-db`。
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 

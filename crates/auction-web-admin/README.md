@@ -72,7 +72,7 @@ cargo check --locked -p auction-web-admin --target wasm32-unknown-unknown
 bash ci/release/web-bundle.sh admin
 ```
 
-页面标题固定为“Auction 管理站点”，发布门禁据此识别 payload。`ci/release/web-bundle.sh` 验证受控工具后用 `wasm-release` profile 生成 `target/dx/build/auction-web-admin/web/public`，并绑定源码、工具、环境指纹及 payload 清单；完整门禁通过才复用已有产物。随后构建 `auction-admin-api` 的 `web-embed` 制品才能内嵌页面，单独编译 API 不生成 Web payload。前端只依赖契约 DTO 与共享浏览器机制，不启用 Dioxus fullstack/server，也不建立 WebSocket 连接。
+页面标题固定为“Auction 管理站点”，发布门禁据此识别 payload。`ci/release/web-bundle.sh` 确认发布工具齐全后用 `wasm-release` profile 生成 `target/dx/build/auction-web-admin/web/public`，并绑定源码、工具、环境指纹及 payload 清单；完整门禁通过才复用已有产物。随后构建 `auction-admin-api` 的 `web-embed` 制品才能内嵌页面，单独编译 API 不生成 Web payload。前端只依赖契约 DTO 与共享浏览器机制，不启用 Dioxus fullstack/server，也不建立 WebSocket 连接。
 
 ## runtime 配置表单
 

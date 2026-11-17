@@ -6,7 +6,7 @@
 //! 页内事后过滤，否则总数、分页与截断对不上。旧页面的闭集是独立抄录的成员断言，不是旧 decoder 的
 //! 贯通执行。
 //!
-//! 仅在 `test-db` feature 下编译，入口见 `just test-db`。
+//! 仅在 `test-db` feature 下编译，入口见 `mise run test-db`。
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 

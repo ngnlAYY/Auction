@@ -21,7 +21,7 @@
 //! - 装备损失：运行账号按资金锁序取得 generation、world、资金账户与完整财务责任集合后，
 //!   不满足准入的命令失败关闭且不追加事实。
 //!
-//! 仅在 `test-db` feature 下编译，入口见 `just test-db`。
+//! 仅在 `test-db` feature 下编译，入口见 `mise run test-db`。
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::collections::BTreeSet;

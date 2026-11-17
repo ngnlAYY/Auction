@@ -3,7 +3,7 @@
 //! `collect_shutdown_window` 是 `auction-cli service stop/restart` 拒绝停机的唯一事实来源：
 //! 所有 Final 场次无条件保护；在拍 lot 只要有效截止不晚于保护窗口末端（含已过截止仍 live）
 //! 就保护；窗口外截止与非 live 的 lot 不阻挡。以运行账号读取，证明只读快照不需要写权限。
-//! 入口见 `just test-db`。
+//! 入口见 `mise run test-db`。
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 

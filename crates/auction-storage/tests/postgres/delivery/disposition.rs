@@ -1,6 +1,6 @@
 //! 确认已处置只追加 operator_acknowledged 事实，并在 Admin 详情中可见。
 //!
-//! 仅在 `test-db` feature 下编译，入口见 `just test-db`。
+//! 仅在 `test-db` feature 下编译，入口见 `mise run test-db`。
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 

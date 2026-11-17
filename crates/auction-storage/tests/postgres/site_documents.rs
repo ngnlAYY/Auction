@@ -1,7 +1,7 @@
 //! 站点文档（规则、关于）的发布与读取：两种文档按（种类，语言）各自独立。
 //!
 //! 只经公开端口驱动：发布走 `AdminRulesPort`，读取走 `PublicRulesReader` 与
-//! `AdminRulesReader`，全部以运行账号连接。仅在 `test-db` feature 下编译，入口见 `just test-db`。
+//! `AdminRulesReader`，全部以运行账号连接。仅在 `test-db` feature 下编译，入口见 `mise run test-db`。
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 

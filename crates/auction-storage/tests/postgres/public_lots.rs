@@ -5,7 +5,7 @@
 //! 件数，另外核对 SQL 中的分类统计、分类筛选与竞价日志 lot 代码搜索，与领域大类映射及 Rust
 //! 生成的 lot 代码逐项一致（含未知分类）。当前场次快照另核对冻结策略的代理默认模式与缺值时的
 //! 失败关闭。维护账号写入种子，运行账号经公开端口读取。仅在 `test-db` feature 下编译，入口见
-//! `just test-db`。
+//! `mise run test-db`。
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 

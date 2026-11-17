@@ -37,6 +37,9 @@ jobs:
       pull-requests: read
     outputs:
       run-checks: ${{ steps.scope.outputs.run-checks }}
+    env:
+      # 本作业只启用策略门禁与格式检查需要的工具；其余工具不安装。
+      MISE_ENABLE_TOOLS: rust,ripgrep
     steps:
       - name: Select checks without duplicate PR runs
         id: scope
@@ -72,17 +75,19 @@ jobs:
       - name: Ensure patched rustup
         if: steps.scope.outputs.run-checks == 'true'
         run: bash ci/tools/rustup.sh
-      # 布局、配置和五语言门禁依赖 rg/Perl，不依赖 runner 镜像预装。
-      - name: Install check dependencies
+      # 布局、配置和五语言门禁依赖 Perl，不依赖 runner 镜像预装；rg 与 Rust 由下一步的 mise 提供。
+      - name: Install Perl
         if: steps.scope.outputs.run-checks == 'true'
         run: |
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends ripgrep perl
-      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master 2026-11-15 (#190)
+          sudo apt-get install --yes --no-install-recommends perl
+      # mise 按 mise.lock 安装 MISE_ENABLE_TOOLS 列出的工具；Rust 的版本、组件与目标取自 rust-toolchain.toml。
+      - name: Install tools with mise
         if: steps.scope.outputs.run-checks == 'true'
+        uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
         with:
-          toolchain: 1.100.0
-          components: rustfmt
+          version: 2026.11.8
+          cache_key_prefix: mise-v1-checks
       # 廉价静态门禁先行，失败时不启动编译或安装审计工具。
       - name: Check repository policy and formatting
         if: steps.scope.outputs.run-checks == 'true'
@@ -96,17 +101,19 @@ jobs:
     env:
       # 仅静态检查，不生成调试信息；本地 dev 仍保留行号回溯。
       CARGO_PROFILE_DEV_DEBUG: "0"
+      # 与 docs 作业启用同一组工具，共用 mise 缓存。
+      MISE_ENABLE_TOOLS: rust,ripgrep
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Ensure patched rustup
         run: bash ci/tools/rustup.sh
-      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master 2026-11-15 (#190)
+      - name: Install tools with mise
+        uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
         with:
-          toolchain: 1.100.0
-          components: rustfmt, clippy
-          targets: wasm32-unknown-unknown
+          version: 2026.11.8
+          cache_key_prefix: mise-v1-checks
       # rust-cache v2.9.3；自动键隔离 job、平台、工具链和依赖图。
       # 非 PR 事件才写缓存：PR 缓存作用域与合并结果不同，全写会挤占同一仓库额度。
       # save-if 必须写成 ${{ }} 表达式；字面字符串不等于 "true"，会让缓存永远不保存。
@@ -130,15 +137,19 @@ jobs:
       # 测试构建不生成调试信息：target 与构建缓存更小，链接更快。panic 消息里的源码位置
       # 不依赖调试信息，失败时只有 backtrace 缺少行号。
       CARGO_PROFILE_DEV_DEBUG: "0"
+      # 测试入口是 mise 任务；只启用 Rust，mise run 不会顺带安装其余工具。
+      MISE_ENABLE_TOOLS: rust
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Ensure patched rustup
         run: bash ci/tools/rustup.sh
-      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master 2026-11-15 (#190)
+      - name: Install tools with mise
+        uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
         with:
-          toolchain: 1.100.0
+          version: 2026.11.8
+          cache_key_prefix: mise-v1-test
       - name: Restore Rust build cache
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
         with:
@@ -146,16 +157,6 @@ jobs:
           cache-workspace-crates: "true"
           cache-on-failure: "true"
           cache-bin: "false"
-      # just 仍按固定版本 --locked 从源码构建；二进制按版本单独缓存，命中时跳过约 1 分钟的编译。
-      - name: Restore just
-        id: just-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cargo/bin/just
-          key: just-1.59.0-ubuntu-24.04
-      - name: Install just
-        if: steps.just-cache.outputs.cache-hit != 'true'
-        run: cargo install just --locked --version 1.59.0
       - name: Install PostgreSQL 18 for integration tests
         run: |
           sudo apt-get update
@@ -177,13 +178,13 @@ jobs:
           sudo -u postgres createdb -p "$port" -O auction_test auction_test
           echo "AUCTION_TEST_DATABASE_URL=postgresql://auction_test:auction_test@127.0.0.1:$port/auction_test" >> "$GITHUB_ENV"
       - name: Run pure and double tests
-        run: just test
+        run: mise run test
       - name: Run PostgreSQL 18 integration tests
-        run: just test-db
+        run: mise run test-db
       # 迁移兼容声明单独成步：失败时直接指名被证伪的 compatible 迁移，
-      # 不与其它集成测试的失败混在一起。`just test-db` 已包含同一组测试。
+      # 不与其它集成测试的失败混在一起。`mise run test-db` 已包含同一组测试。
       - name: Verify migration compatibility declarations
-        run: just test-db-compat
+        run: mise run test-db-compat
 
   security-audit:
     needs: docs
@@ -194,6 +195,9 @@ jobs:
        (needs.docs.result == 'success' && needs.docs.outputs.run-checks == 'true'))
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env:
+      # 审计作业只启用 Rust 与两个 Cargo 子命令。
+      MISE_ENABLE_TOOLS: rust,cargo:cargo-audit,cargo:cargo-machete
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -205,52 +209,18 @@ jobs:
           persist-credentials: false
       - name: Ensure patched rustup
         run: bash ci/tools/rustup.sh
-      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master 2026-11-15 (#190)
-        with:
-          toolchain: 1.100.0
-      # rust-cache v2.9.3；审计失败也保留工具二进制及安装元数据。
-      - name: Restore audit tools cache
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
-        with:
-          key: cargo-audit-tls-20261116-machete-0.10.1
-          cache-bin: "true"
-          cache-on-failure: "true"
-      # 键只绑定 bootstrap 配方、锁图、补丁与工具链；文档或其他脚本变化不触发重建。
-      # 前缀回退恢复的旧工具仍须通过下一步回执校验，不一致时照常重建。
-      - name: Restore patched audit binary
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: target/audit-tools
-          key: audit-tools-linux-${{ hashFiles('ci/tools/bootstrap.sh', 'ci/release/build-identity.sh', 'ci/tools/locks/*.lock', 'ci/tools/patches/*.patch', 'rust-toolchain.toml') }}
-          restore-keys: |
-            audit-tools-linux-
-      - name: Check audit tool receipt
-        id: audit-tools
-        run: |
-          if bash ci/tools/bootstrap.sh verify audit; then
-            printf 'needs-build=false\n' >> "$GITHUB_OUTPUT"
-          else
-            printf 'needs-build=true\n' >> "$GITHUB_OUTPUT"
-          fi
-      - name: Install audit tool build dependencies
-        if: steps.audit-tools.outputs.needs-build == 'true'
+      # cargo-audit 与 cargo-machete 由 mise 按上游发布包自带的 Cargo.lock 从源码构建，需要本机编译依赖。
+      - name: Install tool build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends cmake pkg-config libssl-dev build-essential patch
-      # 同名旧二进制不满足安全基线；缓存命中也验证独立锁图和二进制回执。
-      - name: Install verified cargo-audit
+          sudo apt-get install --yes --no-install-recommends cmake pkg-config libssl-dev build-essential
+      # 构建结果随 mise 数据目录缓存，键含 mise.toml 与 mise.lock 的摘要；版本变化时重建。
+      - name: Install tools with mise
         id: install-audit
-        run: |
-          bash ci/tools/bootstrap.sh install audit
-          printf '%s\n' "$GITHUB_WORKSPACE/target/audit-tools/bin" >> "$GITHUB_PATH"
-      # cargo-machete 的 --version 只输出版本号；程序名前缀会使缓存命中也强制重装。
-      - name: Install cargo-machete when needed
-        if: github.event_name != 'schedule'
-        run: |
-          if ! version=$(cargo machete --version 2>/dev/null) ||
-            [[ "$version" != "0.10.1" ]]; then
-            cargo install cargo-machete --locked --version 0.10.1 --force
-          fi
+        uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
+        with:
+          version: 2026.11.8
+          cache_key_prefix: mise-v1-audit
       # 缓存命中也获取最新公告，漏洞和全部警告均失败，不自动修改锁定依赖。
       # 本步审计默认分支的当前 Cargo.lock；最近一个发布 tag 由下一步审计。
       - run: bash ci/checks/check.sh dependency-audit
@@ -278,9 +248,16 @@ jobs:
           persist-credentials: false
       - name: Ensure patched rustup
         run: bash ci/tools/rustup.sh
-      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master 2026-11-15 (#190)
+      # MSRV 工具链不在仓库默认工具清单里：只装 mise 本身，再按版本显式安装，不导出默认工具链环境。
+      - name: Install mise
+        uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
         with:
-          toolchain: 1.94.1
+          version: 2026.11.8
+          install: false
+          cache: false
+          env: false
+      - name: Install MSRV toolchain
+        run: mise install 'rust[profile=minimal]@1.94.1'
       # rust-cache v2.9.3；与 verify 隔离，不跨 Rust 工具链复用产物。
       - name: Restore MSRV build cache
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0

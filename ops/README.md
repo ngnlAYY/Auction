@@ -144,7 +144,7 @@ auction-cli --config-dir /etc/auction service stop       # 时段门禁 → 按 
 
 ## 升级
 
-**只部署 GitHub Release 资产。** 从 `main` 上 `v<版本>` tag 产生的 Release 下载 `*.tar.gz`、`SHA256SUMS` 与 `DEPENDENCIES.md`，部署前运行 `bash ci/release/verify-deployment-package.sh <归档> --tag <v版本>`（或 `just verify-package …`）核对摘要、包内清单、构建提交可从 tag 到达与来源证明。普通 CI 候选 artifact、本地 `just release-check` 产物与 `-dirty` 包均不可部署；未通过校验的包不得安装、停止服务或迁移。
+**只部署 GitHub Release 资产。** 从 `main` 上 `v<版本>` tag 产生的 Release 下载 `*.tar.gz`、`SHA256SUMS` 与 `DEPENDENCIES.md`，部署前运行 `bash ci/release/verify-deployment-package.sh <归档> --tag <v版本>`（或 `mise run verify-package …`）核对摘要、包内清单、构建提交可从 tag 到达与来源证明。普通 CI 候选 artifact、本地 `mise run release-check` 产物与 `-dirty` 包均不可部署；未通过校验的包不得安装、停止服务或迁移。
 
 分体部署用发布包内的 `auction-cli deploy` 完成严格预检、时段门禁、演练回执核对、磁盘空间与在途发送门禁、停机备份与新旧 CLI 校验、保留旧程序、逐个原子替换程序（中途失败时换回已替换的程序）、迁移与顺序启动、运行摘要复核并追加回执。含迁移的版本必须先用候选制品完成[迁移演练](deploy/MIGRATION-DRILL.md)并传入回执：
 

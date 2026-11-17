@@ -3,7 +3,7 @@
 //! 关闭某类时，匹配的 pending 投递必须保留在 outbox 且不被领取；重新开启后按正常
 //! 调度补发。只验证领取过滤，不发送任何外部请求。
 //!
-//! 仅在 `test-db` feature 下编译，入口见 `just test-db`。
+//! 仅在 `test-db` feature 下编译，入口见 `mise run test-db`。
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 

@@ -33,7 +33,7 @@ const OBSOLETE_HTTP_DATES: [&str; 2] = ["%A, %d-%b-%y %H:%M:%S GMT", "%a %b %e %
 /// SPA 入口文档；只有 routes 模块批准的浏览器路径可以回退到它。
 const INDEX_HTML: &str = "index.html";
 const ASSETS_MISSING_BODY: &str =
-    "web assets are not included in this binary; run `just build-release`";
+    "web assets are not included in this binary; run `mise run build-release`";
 const PUBLIC_NOT_FOUND_HTML: &str = "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>404</title></head><body><main><h1>404</h1></main></body></html>";
 const ADMIN_NOT_FOUND_HTML: &str = "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>404</title></head><body><main><h1>404</h1></main></body></html>";
 

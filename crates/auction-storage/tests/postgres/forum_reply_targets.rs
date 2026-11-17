@@ -2,7 +2,7 @@
 //!
 //! 论坛 `start` 命令按映射携带的权威起拍价计算首口出价：每件 live/sold lot 都要带出自己的起拍价
 //! （含不在信用网格上的历史值），lot 代码按分类编号生成；撤下的 lot 不在映射内。维护账号写入种子，
-//! 运行账号经端口读取。仅在 `test-db` feature 下编译，入口见 `just test-db`。
+//! 运行账号经端口读取。仅在 `test-db` feature 下编译，入口见 `mise run test-db`。
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 

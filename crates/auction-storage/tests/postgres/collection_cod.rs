@@ -14,7 +14,7 @@
 //!   走 v2 价格变量校验，而不是缺标签时的 v1 兼容读路径；
 //! - 反例：付款投递已成功但没有冻结发送证明时不计为等待付款。
 //!
-//! 入口见 `just test-db`。
+//! 入口见 `mise run test-db`。
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 

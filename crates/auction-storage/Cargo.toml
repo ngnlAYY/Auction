@@ -38,7 +38,7 @@ tokio = { workspace = true, features = ["test-util"] }
 
 [features]
 default = []
-# 可选：PostgreSQL 18 集成测试夹具；只在 `just test-db` 启用，默认构建与 `just test` 不连接数据库。
+# 可选：PostgreSQL 18 集成测试夹具；只在 `mise run test-db` 启用，默认构建与 `mise run test` 不连接数据库。
 test-db = []
 
 [lints]

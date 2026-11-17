@@ -148,7 +148,7 @@ check_layout() {
 check_repository_contracts() {
 	local file failures=""
 
-	for file in AGENTS.md .gitignore .editorconfig README.md Cargo.lock; do
+	for file in AGENTS.md .gitignore .editorconfig README.md Cargo.lock mise.toml mise.lock; do
 		if ! git ls-files --error-unmatch "$file" >/dev/null 2>&1; then
 			failures+="$file 未纳入版本控制"$'\n'
 		elif git check-ignore --no-index -q "$file"; then
@@ -561,7 +561,7 @@ check_work_item_ids() {
 	# 显式传入 `.`，避免 rg 在非终端环境改读标准输入；退出码 1 只表示没有匹配。
 	hits=$(rg --hidden --only-matching --line-number --with-filename \
 		-g '!.git' -g '!**/target/**' -g '!migrations/postgres/*.sql' -g '!Cargo.lock' \
-		-g '!ci/tools/locks/**' -g '!**/tests/fixtures/**' -g '!**/tests/assets-fixture/**' \
+		-g '!mise.lock' -g '!**/tests/fixtures/**' -g '!**/tests/assets-fixture/**' \
 		-e '\bW[0-9]+\.[0-9]+\b' -e '决策 ?[0-9]+' -e 'D-W[0-9]' -- .) || status=$?
 	if ((status > 1)); then
 		printf '%s\n' "工作项编号扫描失败（rg 退出码 $status）。" >&2
@@ -607,7 +607,7 @@ check_published_migrations() {
 	bash ci/checks/published-migrations.sh
 }
 
-# 本地 Justfile 与 CI 共用命令定义，避免编译参数在两处漂移。
+# 本地 mise 任务与 CI 共用命令定义，避免编译参数在两处漂移。
 run_checks() {
 	local check
 	for check in "$@"; do

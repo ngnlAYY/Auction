@@ -39,29 +39,31 @@ HentaiVerse 装备拍卖服务的全 Rust 实现：玩家在网站或 E-Hentai �
 | `migrations/postgres/` | 只追加的数据库迁移 |
 | `docs/` | 架构、业务规则、契约与指南 |
 | `ops/` | 部署手册、配置示例、systemd/tmpfiles/Caddy 模板、保留政策 |
-| `ci/` | 静态门禁、发布脚本与受控构建工具 |
-| `Justfile` | 常用命令入口 |
+| `ci/` | 静态门禁、发布脚本与工具说明 |
+| `mise.toml`、`mise.lock` | 工具版本与常用命令入口（[mise](https://mise.jdx.dev)） |
 | `rust-toolchain.toml` | 固定工具链（1.100.0，含 wasm32 目标）；MSRV 1.94.1 |
 
 ## 常用命令
 
 ```bash
-just verify            # 默认静态验证：策略门禁、fmt、check、clippy、wasm（不运行测试）
-just test              # 行为变更：默认 feature 下的纯逻辑、单元与本地替身测试
-just test-db           # 显式 PG18 集成测试（隔离数据库与角色，不并入 verify）
-just web-build         # 构建两端页面 payload（需要受控 dx，见 ci/tools/README.md）
-just web-size          # 只核对两端 Web payload 体积预算（不构建，见 ci/README.md）
-just run-public        # 以 web-embed 内嵌页面启动；run-admin 同理，run-worker 不内嵌页面
-just db-migrate <配置目录>
-just build-release     # 完整发布制品（Fat LTO，较慢）
-just release-check     # 构建、门禁与装包
+mise install                 # 按 mise.toml 与 mise.lock 安装全部工具（首次会从源码编译 dx，较慢）
+mise tasks                   # 列出全部命令入口
+mise run verify              # 默认静态验证：策略门禁、fmt、check、clippy、wasm（不运行测试）
+mise run test                # 行为变更：默认 feature 下的纯逻辑、单元与本地替身测试
+mise run test-db             # 显式 PG18 集成测试（隔离数据库与角色，不并入 verify）
+mise run web-build           # 构建两端页面 payload（工具见 ci/tools/README.md）
+mise run web-size            # 只核对两端 Web payload 体积预算（不构建，见 ci/README.md）
+mise run run-public          # 以 web-embed 内嵌页面启动；run-admin 同理，run-worker 不内嵌页面
+mise run db-migrate <配置目录>
+mise run build-release       # 完整发布制品（Fat LTO，较慢）
+mise run release-check       # 构建、门禁与装包
 ```
 
-应用 crate 不含页面资源：需要页面时先 `just web-build` 再以 `web-embed` 构建；PostgreSQL 驱动无条件编译。本地环境搭建见[docs/development.md#本地运行](docs/development.md#本地运行)。
+应用 crate 不含页面资源：需要页面时先 `mise run web-build` 再以 `web-embed` 构建；PostgreSQL 驱动无条件编译。本地环境搭建见[docs/development.md#本地运行](docs/development.md#本地运行)。
 
 ## 发布
 
-只在 `main` 上打 `v<版本>` tag（等于 `Cargo.toml` 的 workspace version）触发 CI 发布：tag 守卫、完整门禁、发布构建、SLSA 来源证明与 GitHub Release 资产在同一条流水线完成，Release 永久保留。正式部署只使用这些 Release 资产，部署前运行 `just verify-package` 核对提交可从发布 tag 到达；手动触发的 CI 候选 Actions artifact 不可部署。合并部署包（`auction-server` + `auction-cli`）用 `just release-check --single-binary` 构建。详见 [ci/README.md](ci/README.md)。
+只在 `main` 上打 `v<版本>` tag（等于 `Cargo.toml` 的 workspace version）触发 CI 发布：tag 守卫、完整门禁、发布构建、SLSA 来源证明与 GitHub Release 资产在同一条流水线完成，Release 永久保留。正式部署只使用这些 Release 资产，部署前运行 `mise run verify-package` 核对提交可从发布 tag 到达；手动触发的 CI 候选 Actions artifact 不可部署。合并部署包（`auction-server` + `auction-cli`）用 `mise run release-check --single-binary` 构建。详见 [ci/README.md](ci/README.md)。
 
 ## 许可
 

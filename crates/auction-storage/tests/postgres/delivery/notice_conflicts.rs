@@ -6,7 +6,7 @@
 //! `conflicting_asset_operation` 阻断。三类通知经真实入队校验落库后必须被排除；载荷被改成
 //! 非规范写法时无法证明无关，仍按冲突失败关闭。
 //!
-//! 仅在 `test-db` feature 下编译，入口见 `just test-db`。
+//! 仅在 `test-db` feature 下编译，入口见 `mise run test-db`。
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 

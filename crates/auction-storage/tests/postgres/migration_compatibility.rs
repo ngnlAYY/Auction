@@ -14,7 +14,7 @@
 //! 回退门禁与 readiness 共用的兼容后缀读取在真实登记表上的判定。
 //!
 //! 只使用既有隔离夹具（临时集群或 `AUCTION_TEST_DATABASE_URL` 的独立库）与回滚
-//! 事务，不写生产数据。入口：`just test-db-compat`（同属 `just test-db`，CI 测试作业逐项运行）。
+//! 事务，不写生产数据。入口：`mise run test-db-compat`（同属 `mise run test-db`，CI 测试作业逐项运行）。
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 

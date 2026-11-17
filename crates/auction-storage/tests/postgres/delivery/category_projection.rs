@@ -4,7 +4,7 @@
 //! rekey 模板（098 才补回），而 Rust 镜像只有手写期望测试，两边分叉无人发现。这里对全部通知
 //! 模板 × 来源 × 操作 × 资产形状逐一比较两边结果，任何一侧单独修改都会失败。
 //!
-//! 仅在 `test-db` feature 下编译，入口见 `just test-db`。
+//! 仅在 `test-db` feature 下编译，入口见 `mise run test-db`。
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 

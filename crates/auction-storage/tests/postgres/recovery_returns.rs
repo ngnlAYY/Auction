@@ -11,7 +11,7 @@
 //!
 //! 只用直接 SQL 构造事实，经 `RecoveryWorkStore`、`RecoveryResolutionStore` 与
 //! `DeliveryWorkStore` 端口驱动，不发外部请求。仅在 `test-db` feature 下编译，入口见
-//! `just test-db`。
+//! `mise run test-db`。
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 

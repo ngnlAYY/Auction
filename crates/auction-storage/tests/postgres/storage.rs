@@ -1,7 +1,7 @@
 //! PostgreSQL 18 集成测试骨架。
 //!
-//! 只有 `test-db` feature 才编译并运行本文件；`just verify` 的 all-targets 检查在这里
-//! 只会看到一个空 crate，不连接数据库。入口见 `just test-db`。
+//! 只有 `test-db` feature 才编译并运行本文件；`mise run verify` 的 all-targets 检查在这里
+//! 只会看到一个空 crate，不连接数据库。入口见 `mise run test-db`。
 //!
 //! `support` 负责临时集群、模板库迁移与逐测试克隆库；测试本身只使用公开的存储入口。
 

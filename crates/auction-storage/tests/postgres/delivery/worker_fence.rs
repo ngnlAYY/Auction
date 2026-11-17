@@ -16,7 +16,7 @@
 //! 证据，发送 future 被 poll 即记录）；拍卖周计划与生命周期端口是失败关闭的惰性替身。领取、续租、
 //! 围栏、释放、Worker 调度、诊断作用域与指标归属都是生产代码。不连接真实账号，不代表远端行为。
 //!
-//! 仅在 `test-db` feature 下编译，入口见 `just test-db`。
+//! 仅在 `test-db` feature 下编译，入口见 `mise run test-db`。
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 

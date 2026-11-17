@@ -8,7 +8,7 @@
 //! 同一成功事实重放不追加审计；结果未知只转人工核对；过期租约不复活；确定回滚的内部故障
 //! 不留任何写入、领取仍可安全释放，且不被当作正常延期掩盖。
 //!
-//! 仅在 `test-db` feature 下编译，入口见 `just test-db`。
+//! 仅在 `test-db` feature 下编译，入口见 `mise run test-db`。
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 

@@ -14,7 +14,7 @@
 //! - Admin 进入预览只向本拍卖流追加实时事件，迁移 000011 的历史发现流不再写入；
 //! - 六轮负载演练（`--ignored`）测量 `Direct`/`Queued` 两种模式下的延迟、冲突、超时与死锁数。
 //!
-//! 仅在 `test-db` feature 下编译，入口见 `just test-db`。
+//! 仅在 `test-db` feature 下编译，入口见 `mise run test-db`。
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::time::Duration as StdDuration;

@@ -40,7 +40,7 @@
 | [ops/deploy/RECOVERY.md](../ops/deploy/RECOVERY.md) | 备份、校验、恢复与破坏性重建流程 |
 | [apps/auction-cli/README.md](../apps/auction-cli/README.md) | 运维命令行完整说明 |
 | [ci/README.md](../ci/README.md) | 静态门禁、CI 作业、发布构建与制品 |
-| [ci/tools/README.md](../ci/tools/README.md) | 受控工具链与构建工具的安装与校验 |
+| [ci/tools/README.md](../ci/tools/README.md) | 工具清单、安装方式（mise）与发布构建的工具选择 |
 
 ## 程序与模块
 
@@ -60,4 +60,4 @@
 - Markdown 链接目标相对当前文档所在目录，必要时使用 `../`，同页链接使用 `#标题锚点`，确保 GitHub 与本地渲染可点击。正文及链接显示文字中的仓库路径仍以仓库根为起点（如 `docs/contracts/routes.md`、`crates/auction-http/src/assets/routes.rs`），显示文字不必与链接目标相同。
 - 代码块中的命令以仓库根目录为工作目录（运维手册中明确在发布包目录执行的安装命令除外）；部署相关的路径（如 `/etc/auction`、配置目录内的 `runtime/admin.toml`、发布包内的 `bin/`）描述的是目标机器或发布包中的位置，不是仓库路径。
 - 每项事实只在一个文档中详细描述（通常是最接近代码的模块 README 或契约文档），其他文档摘要并链接。
-- 修改代码时同步相关文档；`just verify` 包含 `markdown-links`，默认离线检查相对链接与同页、跨页锚点（口径见 [ci/checks/README.md](../ci/checks/README.md)），门禁通过不代表语义仍然正确，移动或重命名时仍须人工核对表述。
+- 修改代码时同步相关文档；`mise run verify` 包含 `markdown-links`，默认离线检查相对链接与同页、跨页锚点（口径见 [ci/checks/README.md](../ci/checks/README.md)），门禁通过不代表语义仍然正确，移动或重命名时仍须人工核对表述。

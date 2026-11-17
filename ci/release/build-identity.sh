@@ -2,13 +2,60 @@
 # release.sh 与 web-bundle.sh 共用的函数库，在仓库根目录 source：工具选择、构建身份指纹、
 # BUILD-INFO 读取及 Web payload 门禁。调用方自行决定何时冻结身份，两个入口对同一源码给出同一指纹。
 
+# 发布工具的闭集：二进制名与提供它的 mise 工具。全部由 mise 按 mise.toml 的固定版本安装，
+# 下载校验和记录在 mise.lock。
+build_tool_names=(dx esbuild sccache wasm-bindgen wasm-opt)
+declare -gA build_tool_providers=(
+	[dx]='cargo:dioxus-cli'
+	[esbuild]='http:esbuild'
+	[sccache]='sccache'
+	[wasm-bindgen]='github:wasm-bindgen/wasm-bindgen'
+	[wasm-opt]='github:WebAssembly/binaryen'
+)
+
+# 解析单个发布工具的绝对路径。mise 缺失、仓库配置未受信任或工具尚未安装时失败关闭。
+# `mise which` 在固定版本未安装时会回退到 Cargo 的 bin 目录等位置的同名程序，所以还要求
+# 结果位于该工具自己的安装目录之下，不接受别处的任意版本。
+build_tool_path() {
+	local name=$1 provider root path
+	provider=${build_tool_providers[$name]-}
+	if [[ -z "$provider" ]] || ! root=$(mise where "$provider" 2>/dev/null) ||
+		! path=$(mise which "$name" 2>/dev/null) ||
+		[[ "$path" != "$root"/* || ! -f "$path" || ! -x "$path" ]]; then
+		printf '发布工具 %s 不可用：请先在仓库根目录运行 mise install\n' "$name" >&2
+		return 1
+	fi
+	printf '%s\n' "$path"
+}
+
+# 发布工具的字节身份：闭集内每个二进制的 SHA-256。同版本工具重装后字节变化也会改变身份。
+build_tools_identity() {
+	local name path digest
+	{
+		printf 'auction-build-tools/2\0'
+		for name in "${build_tool_names[@]}"; do
+			path=$(build_tool_path "$name") || return 1
+			digest=$(sha256_file "$path") || return 1
+			printf '%s\0%s\0' "$name" "$digest"
+		done
+	} | sha256sum | awk '{print $1}'
+}
+
 # 发布与 Web 共用工具选择；按工具字节身份隔离 sccache daemon，避免新客户端连接旧进程。
 configure_build_tools() {
-	local tools_identity repository_identity name uses_sccache=false
-	tools_identity=$(bash ci/tools/bootstrap.sh identity release) || return 1
-	export PATH="$PWD/target/build-tools/bin:$PATH" NO_DOWNLOADS=1
-	# 发布只接受环境变量启用的 sccache 并换成受控版本；Cargo 文件中的两类包装器
-	# 未经回执校验，各自的环境入口均未指定时用空值显式覆盖。
+	local tools_identity repository_identity name path tools_path='' uses_sccache=false
+	tools_identity=$(build_tools_identity) || return 1
+	# dx 关闭自行下载；wasm-bindgen、wasm-opt 与 esbuild 只取这里放到 PATH 前部的固定版本。
+	for name in "${build_tool_names[@]}"; do
+		path=$(build_tool_path "$name") || return 1
+		tools_path+="${path%/*}:"
+	done
+	export PATH="$tools_path$PATH" NO_DOWNLOADS=1
+	# dx 会优先使用自己数据目录里缓存过的 wasm-opt 与 esbuild，也会读取那里的用户级设置；把数据目录
+	# 指到 target 下的专用目录，让它只能取上面的固定版本。
+	export DX_HOME="$PWD/target/dx-home"
+	# 发布只接受环境变量启用的 sccache 并换成 mise 安装的固定版本；Cargo 文件中的两类包装器
+	# 不在发布工具闭集内，各自的环境入口均未指定时用空值显式覆盖。
 	if [[ -z ${RUSTC_WRAPPER+set} && -z ${CARGO_BUILD_RUSTC_WRAPPER+set} ]]; then
 		export RUSTC_WRAPPER=
 	fi
@@ -17,7 +64,8 @@ configure_build_tools() {
 	fi
 	for name in RUSTC_WRAPPER RUSTC_WORKSPACE_WRAPPER CARGO_BUILD_RUSTC_WRAPPER CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER; do
 		if [[ ${!name-} == sccache || ${!name-} == */sccache ]]; then
-			printf -v "$name" '%s' "$PWD/target/build-tools/bin/sccache"
+			path=$(build_tool_path sccache) || return 1
+			printf -v "$name" '%s' "$path"
 			export "${name?}"
 			uses_sccache=true
 		fi
@@ -284,8 +332,8 @@ cargo_config_fingerprint() {
 # 名称和值用 NUL 分隔后只输出摘要，避免分隔符歧义，也不把环境原文写进制品元数据。
 build_env_fingerprint() {
 	local name tools_identity
-	# 同版本工具修复后字节也会改变；工具回执参与输入身份，避免复用旧工具生成的制品。
-	tools_identity=$(bash ci/tools/bootstrap.sh identity release) || return 1
+	# 同版本工具重装后字节也会改变；工具字节身份参与输入身份，避免复用旧工具生成的制品。
+	tools_identity=$(build_tools_identity) || return 1
 	{
 		printf 'auction-build-tools\0%s\0' "$tools_identity"
 		cargo_config_fingerprint || return 1
@@ -321,8 +369,9 @@ path_fingerprint() {
 	} | sha256sum | awk '{print $1}'
 }
 
-# 受控工具的配方文件；ci/tools 下的说明文档与本地试验入口不影响产物，不参与身份。
-tool_recipe_inputs=(ci/tools/bootstrap.sh ci/tools/rustup.sh ci/tools/locks ci/tools/patches)
+# 工具配方：mise 锁文件记录每个工具的版本、构建选项、下载地址与校验和。mise.toml 还承载任务入口，
+# 改任务不影响产物，因此不参与身份；ci/tools 下的说明文档与本地试验入口同理。
+tool_recipe_inputs=(ci/tools/rustup.sh mise.lock)
 
 # 应用发布与封存复用同一份输入范围；工具配方也属于产物身份。
 build_inputs_fingerprint() {

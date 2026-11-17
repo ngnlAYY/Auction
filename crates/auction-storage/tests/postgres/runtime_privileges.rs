@@ -3,7 +3,7 @@
 //! 运行账号权限由迁移 081/097 的 `apply_auction_runtime_privileges` 授予：全部表只读，写入面逐表
 //! 显式授权，只追加表只授予 `INSERT`。表 owner 天然拥有 DDL 与 `TRUNCATE`，无法靠 REVOKE 收口，
 //! 因此服务必须以非 owner 的运行账号连接。这里断言权限层（SQLSTATE `42501`）先于只追加触发器拒绝。
-//! 入口见 `just test-db`。
+//! 入口见 `mise run test-db`。
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 

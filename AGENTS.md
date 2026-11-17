@@ -18,7 +18,8 @@
 
 - HentaiVerse 装备拍卖系统：玩家经网站与论坛出价，经游戏内 MoogleMail 寄售装备、付款与收货。
 - `apps/` 下五个可部署程序：`auction-public-api`（Public 竞价站点）、`auction-admin-api`（Admin 后台与分体部署首次设置）、`auction-worker`（生命周期、结算履约、MoogleMail、论坛、告警等全部后台任务）、`auction-cli`（配置检查、部署编排、迁移、备份恢复与业务运维），以及可选的 `auction-server`（单主机上以子进程监管前三个角色）。
-- Rust 2024 工作区：工具链固定为 1.100.0（`rust-toolchain.toml`），MSRV 1.94.1 由 CI 单独检查。后端用 axum 与 sqlx；前端是两个 Dioxus 0.7 CSR 单页应用，编译到 `wasm32-unknown-unknown`，由后端以 `web-embed` 内嵌。
+- 工具与命令入口由 [mise](https://mise.jdx.dev) 管理：版本在 `mise.toml`、校验和在 `mise.lock`，一律取上游原始版本，不携带补丁；命令入口是 `mise run <任务>`。清单见[ci/tools/README.md](ci/tools/README.md)。
+- Rust 2024 工作区：工具链固定为 1.100.0（`rust-toolchain.toml`，mise 读取该文件），MSRV 1.94.1 由 CI 单独检查。后端用 axum 与 sqlx；前端是两个 Dioxus 0.7 CSR 单页应用，编译到 `wasm32-unknown-unknown`，由后端以 `web-embed` 内嵌。
 - 原生程序只支持 Linux x86_64，装配根在其他平台编译期报错；通用制品不使用 `target-cpu=native`。
 - PostgreSQL 18 是唯一数据库后端与唯一事实来源，没有独立缓存进程。未配置数据库时进程以运行期骨架模式启动，相关接口返回“能力不可用”；不存在“无数据库”的编译形态。
 - 普通启动从不隐式迁移。迁移只经 `auction-cli db migrate`、`auction-cli service start/restart`（停机门禁后）与合并部署首次初始化（网页明确确认后的专用空库）执行。
@@ -116,7 +117,7 @@
 ## Web
 
 - Public/Admin 是独立的 Dioxus CSR SPA，各自拥有路由、译文与资源。不启用 SSR、hydration 或 fullstack，不引入 JavaScript 框架、TypeScript 或 npm 运行时依赖；`dx` 构建时使用的 esbuild 是唯一例外。
-- `just web-build` 用 `dx bundle` 以 `wasm-release` profile 构建，复制到稳定目录后由后端 `web-embed` 内嵌。未构建时后端仍可编译，页面路由返回 503。只有显式 `web-embed` 才内嵌资源；Public 二进制不得包含 Admin 资源，反之亦然。
+- `mise run web-build` 用 `dx bundle` 以 `wasm-release` profile 构建，复制到稳定目录后由后端 `web-embed` 内嵌。未构建时后端仍可编译，页面路由返回 503。只有显式 `web-embed` 才内嵌资源；Public 二进制不得包含 Admin 资源，反之亦然。
 - 浏览器只消费 `auction-contracts` DTO；改变状态的动作携带 `command_id`，结果未知时只允许原样重试。不在浏览器重建业务状态机。
 - 所有界面文案走各自的 `i18n/*.ftl`：五种语言（en、zh-CN、zh-TW、ja、ko）键集合一致，键名用连字符、不含点号（`i18n` 门禁）。Public 默认 en，Admin 默认 zh-CN；偏好键 `hv.lang`、`hv.theme` 是固定契约。
 - 新增或删除页面时，同步前端 `Route` 枚举、[crates/auction-http/src/assets/routes.rs](crates/auction-http/src/assets/routes.rs) 与[docs/contracts/routes.md](docs/contracts/routes.md)。
@@ -126,7 +127,7 @@
 默认门禁只做格式、编译与静态分析，不运行测试，提交前必须通过：
 
 ```bash
-just verify     # bash ci/checks/check.sh all fmt check dependency-versions lint wasm rustdoc
+mise run verify     # bash ci/checks/check.sh all fmt check dependency-versions lint wasm rustdoc
 ```
 
 它覆盖四种编译配置：宿主默认 feature（`check`）、宿主全 feature（`lint`）、Public 与 Admin 两组 wasm32（`wasm`），外加 `rustdoc`。只跑单项时要注意：`cfg(target_arch = "wasm32")` 代码只会被 `wasm` 项检查。
@@ -135,9 +136,9 @@ just verify     # bash ci/checks/check.sh all fmt check dependency-versions lint
 
 | 入口 | 范围 |
 | --- | --- |
-| `just test` | 纯逻辑、单元与本地替身测试；不要求数据库，不连接真实外部账号 |
-| `just test-db` | 真实 PostgreSQL 18 上的锁、隔离级别、幂等与迁移语义；未设置 `AUCTION_TEST_DATABASE_URL` 时用本机 PG18 二进制启动临时集群 |
-| `just test-db-compat` | 只验证迁移兼容声明 |
+| `mise run test` | 纯逻辑、单元与本地替身测试；不要求数据库，不连接真实外部账号 |
+| `mise run test-db` | 真实 PostgreSQL 18 上的锁、隔离级别、幂等与迁移语义；未设置 `AUCTION_TEST_DATABASE_URL` 时用本机 PG18 二进制启动临时集群 |
+| `mise run test-db-compat` | 只验证迁移兼容声明 |
 | `cargo test --locked -p auction-storage --features test-db --test postgres -- --ignored perf` | 数据库热点基准；改动热路径查询、索引或通知提交路径时运行 |
 
 可按改动所属 owner 缩小范围（如 `cargo test --locked -p auction-domain --lib`），交付说明写出实际执行的命令与未覆盖范围；测试类别、环境要求与覆盖限制见[docs/development.md#测试](docs/development.md#测试)。默认测试不得要求数据库或连接真实外部账号，数据库测试只在显式入口运行。
@@ -147,7 +148,7 @@ just verify     # bash ci/checks/check.sh all fmt check dependency-versions lint
 ## Git 与交付
 
 - 修改前查看 `git status --short`，保留与任务无关的改动。未经授权不执行 `git reset --hard`、`git checkout --`、强制推送等破坏性操作。
-- `AGENTS.md`、`.gitignore`、`.editorconfig`、`README.md`、`Cargo.lock` 必须纳入版本控制且不被忽略（`repository` 门禁）。`CLAUDE.md` 只引用本文件。
+- `AGENTS.md`、`.gitignore`、`.editorconfig`、`README.md`、`Cargo.lock`、`mise.toml`、`mise.lock` 必须纳入版本控制且不被忽略（`repository` 门禁）。`CLAUDE.md` 只引用本文件。
 - 不提交凭据、带密码的 URL、私有 TOML、`.keyenv`、本地环境文件、`target/`、临时制品或机器专属绝对路径。
 - 提交标题使用 `type(scope): summary`，如 `fix(storage): …`、`perf(web-public): …`，summary 用中文；正文说明保护的不变量与验证范围。按交付批次提交，每个批次是一个可独立审阅的提交。
 - `main` 受保护，只经 PR 合并：要求线性历史、分支与 `main` 同步、必需检查 `docs`/`verify`/`security-audit`/`msrv` 通过，且全部讨论串已解决；`test` 作业不是必需检查，但同样必须通过。自动审查提出的问题逐条核实：成立的修复后回复提交号，不成立的回复理由，然后解决讨论串。
@@ -158,7 +159,7 @@ just verify     # bash ci/checks/check.sh all fmt check dependency-versions lint
 1. 明确路由、JSON、事件、配置、数据库与部署契约。
 2. 在领域定义规则，在应用层建立用例与端口；设计锁、幂等、审计与事件。
 3. 接入存储/外部适配、HTTP、前端与 Worker；不复制状态机，不绕过 owner。
-4. 同步契约、模块 README 与运维文档，执行 `just verify`。
+4. 同步契约、模块 README 与运维文档，执行 `mise run verify`。
 5. 行为变更运行受影响范围的测试，记录实际执行与覆盖限制。
 
 ## 代理操作边界
@@ -171,6 +172,6 @@ just verify     # bash ci/checks/check.sh all fmt check dependency-versions lint
 ## 已知陷阱
 
 - 批量改导入或模块名时，`cargo fix` 只看非测试构建，会删掉只被测试模块使用的父模块导入；完成后编译测试目标，并在测试模块补上显式导入。
-- `just web-build` 在构建前后各计算一次输入指纹，构建期间修改输入文件会以“Web 构建期间输入发生变化”失败；构建时不要并行编辑仓库。
-- 修改 `ci/release/build-identity.sh` 会让受控工具的配方指纹失效，需要重装 `dx` 与 `sccache`；构建后处理放在 `ci/release/web-bundle.sh`。
+- `mise run web-build` 在构建前后各计算一次输入指纹，构建期间修改输入文件会以“Web 构建期间输入发生变化”失败；构建时不要并行编辑仓库。
+- 改 `mise.toml` 里的工具版本、构建选项或 `rust-toolchain.toml` 后，运行 `mise install` 与 `mise lock`，把 `mise.lock` 一并提交：CI 按锁文件安装，`mise.lock` 还参与构建输入指纹，变化会让已有页面与发布制品失效。
 - 本机编译加速（sccache、mold 等）只配置在用户级 `~/.cargo/config.toml`，不改仓库 profile；发布脚本会清空 Cargo 配置中的 rustc 包装器，不影响发布构建身份。多个工作树并行构建时各用独立的 target 目录。
