@@ -18,7 +18,7 @@
 
 - HentaiVerse 装备拍卖系统：玩家经网站与论坛出价，经游戏内 MoogleMail 寄售装备、付款与收货。
 - `apps/` 下五个可部署程序：`auction-public-api`（Public 竞价站点）、`auction-admin-api`（Admin 后台与分体部署首次设置）、`auction-worker`（生命周期、结算履约、MoogleMail、论坛、告警等全部后台任务）、`auction-cli`（配置检查、部署编排、迁移、备份恢复与业务运维），以及可选的 `auction-server`（单主机上以子进程监管前三个角色）。
-- Rust 2024 工作区：工具链固定为 1.99.0（`rust-toolchain.toml`），MSRV 1.94.1 由 CI 单独检查。后端用 axum 与 sqlx；前端是两个 Dioxus 0.7 CSR 单页应用，编译到 `wasm32-unknown-unknown`，由后端以 `web-embed` 内嵌。
+- Rust 2024 工作区：工具链固定为 1.100.0（`rust-toolchain.toml`），MSRV 1.94.1 由 CI 单独检查。后端用 axum 与 sqlx；前端是两个 Dioxus 0.7 CSR 单页应用，编译到 `wasm32-unknown-unknown`，由后端以 `web-embed` 内嵌。
 - 原生程序只支持 Linux x86_64，装配根在其他平台编译期报错；通用制品不使用 `target-cpu=native`。
 - PostgreSQL 18 是唯一数据库后端与唯一事实来源，没有独立缓存进程。未配置数据库时进程以运行期骨架模式启动，相关接口返回“能力不可用”；不存在“无数据库”的编译形态。
 - 普通启动从不隐式迁移。迁移只经 `auction-cli db migrate`、`auction-cli service start/restart`（停机门禁后）与合并部署首次初始化（网页明确确认后的专用空库）执行。

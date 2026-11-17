@@ -81,7 +81,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
         if: steps.scope.outputs.run-checks == 'true'
         with:
-          toolchain: 1.99.0
+          toolchain: 1.100.0
           components: rustfmt
       # 廉价静态门禁先行，失败时不启动编译或安装审计工具。
       - name: Check repository policy and formatting
@@ -104,7 +104,7 @@ jobs:
         run: bash ci/tools/rustup.sh
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
         with:
-          toolchain: 1.99.0
+          toolchain: 1.100.0
           components: rustfmt, clippy
           targets: wasm32-unknown-unknown
       # rust-cache v2.9.3；自动键隔离 job、平台、工具链和依赖图。
@@ -138,7 +138,7 @@ jobs:
         run: bash ci/tools/rustup.sh
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
         with:
-          toolchain: 1.99.0
+          toolchain: 1.100.0
       - name: Restore Rust build cache
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
         with:
@@ -207,7 +207,7 @@ jobs:
         run: bash ci/tools/rustup.sh
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
         with:
-          toolchain: 1.99.0
+          toolchain: 1.100.0
       # rust-cache v2.9.3；审计失败也保留工具二进制及安装元数据。
       - name: Restore audit tools cache
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0

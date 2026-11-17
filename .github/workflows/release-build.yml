@@ -31,7 +31,7 @@ jobs:
         run: bash ci/tools/rustup.sh
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
         with:
-          toolchain: 1.99.0
+          toolchain: 1.100.0
           targets: wasm32-unknown-unknown
       # rust-cache v2.9.3；递归清理 target，仅保留编译缓存，不复用发布结论。
       - name: Restore release build cache
