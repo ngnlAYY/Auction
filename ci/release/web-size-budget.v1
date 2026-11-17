@@ -8,7 +8,9 @@ public_wasm_baseline_bytes=2837827
 public_wasm_max_bytes=3000000
 public_payload_baseline_bytes=3165077
 public_payload_max_bytes=3340000
-admin_wasm_baseline_bytes=4317803
-admin_wasm_max_bytes=4520000
-admin_payload_baseline_bytes=4987511
-admin_payload_max_bytes=5210000
+# 2026-11-17：v0.1.7 发布构建实测刷新 Admin 基线（结算退件页面等约 4,472 行前端新增）；
+# 上限保持在基线约 +5%，继续拦截进一步明显增长。
+admin_wasm_baseline_bytes=4520796
+admin_wasm_max_bytes=4750000
+admin_payload_baseline_bytes=5294901
+admin_payload_max_bytes=5560000
