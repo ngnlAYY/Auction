@@ -139,7 +139,7 @@ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
 name = "auction-admin-api"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "auction-application",
@@ -161,7 +161,7 @@ dependencies = [
 
 [[package]]
 name = "auction-application"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "auction-domain",
  "base64 0.23.1",
@@ -180,7 +180,7 @@ dependencies = [
 
 [[package]]
 name = "auction-cli"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "auction-application",
@@ -203,7 +203,7 @@ dependencies = [
 
 [[package]]
 name = "auction-config"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "auction-application",
  "auction-domain",
@@ -219,7 +219,7 @@ dependencies = [
 
 [[package]]
 name = "auction-contracts"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "chrono",
  "serde",
@@ -229,7 +229,7 @@ dependencies = [
 
 [[package]]
 name = "auction-domain"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "chrono",
  "chrono-tz",
@@ -241,7 +241,7 @@ dependencies = [
 
 [[package]]
 name = "auction-http"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "auction-application",
  "auction-contracts",
@@ -272,7 +272,7 @@ dependencies = [
 
 [[package]]
 name = "auction-integrations"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "auction-application",
  "auction-domain",
@@ -297,7 +297,7 @@ dependencies = [
 
 [[package]]
 name = "auction-jobs"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "auction-application",
  "auction-domain",
@@ -315,7 +315,7 @@ dependencies = [
 
 [[package]]
 name = "auction-observability"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "auction-application",
  "auction-process",
@@ -336,14 +336,14 @@ dependencies = [
 
 [[package]]
 name = "auction-process"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "tokio",
 ]
 
 [[package]]
 name = "auction-public-api"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "auction-application",
@@ -363,7 +363,7 @@ dependencies = [
 
 [[package]]
 name = "auction-server"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "auction-admin-api",
@@ -382,7 +382,7 @@ dependencies = [
 
 [[package]]
 name = "auction-setup"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "auction-config",
  "auction-contracts",
@@ -399,7 +399,7 @@ dependencies = [
 
 [[package]]
 name = "auction-storage"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "async-stream",
  "auction-application",
@@ -423,7 +423,7 @@ dependencies = [
 
 [[package]]
 name = "auction-test-support"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "axum",
  "scraper",
@@ -433,7 +433,7 @@ dependencies = [
 
 [[package]]
 name = "auction-web-admin"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "auction-contracts",
  "auction-web-shared",
@@ -454,7 +454,7 @@ dependencies = [
 
 [[package]]
 name = "auction-web-public"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "auction-contracts",
  "auction-web-shared",
@@ -476,7 +476,7 @@ dependencies = [
 
 [[package]]
 name = "auction-web-shared"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "chrono",
  "dioxus",
@@ -495,7 +495,7 @@ dependencies = [
 
 [[package]]
 name = "auction-worker"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "auction-application",
