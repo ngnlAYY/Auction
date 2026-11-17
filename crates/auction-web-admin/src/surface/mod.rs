@@ -1,5 +1,5 @@
 //! 管理端浏览器界面（Dioxus CSR）。
-//! 路由集合由 `router.rs` 定义，与 `crates/auction-http/src/assets/routes.rs` 的 Admin 清单及
+//! 路由集合由 `router/route.rs` 定义，与 `crates/auction-http/src/assets/routes.rs` 的 Admin 清单及
 //! `docs/contracts/routes.md` 逐条同步。管理端与公开端是不同 surface：本 crate 独立拥有
 //! 自己的组件树和路由树，不复用公开端组件，公开端也不得依赖本 crate。
 //! 界面文案取自 `i18n/*.ftl`，默认语言由 `auction_web_shared::i18n::DEFAULT_ADMIN_LOCALE`

@@ -42,7 +42,7 @@
 | `/status` | 服务说明 | 静态说明页 |
 | `/setup` | 首次部署 | 不经过登录外壳；部署码验证通过后填写初始配置（见 [crates/auction-setup/README.md](../auction-setup/README.md)） |
 
-兼容别名以 `replace` 跳转到正式地址并保留查询与片段：`/dashboard → /`、`/auction → /auctions`、`/mail → /mails`、`/credentials → /cookies`、`/delivery → /deliveries`、`/rules → /rules-content`；已登录访问 `/login` 按安全的 `return` 参数跳回站内目标，缺省回到仪表盘。其余路径显示 404 页面。新增页面须同步修改 `crates/auction-web-admin/src/surface/router.rs`、后端 [crates/auction-http/src/assets/routes.rs](../auction-http/src/assets/routes.rs) 与[docs/contracts/routes.md](../../docs/contracts/routes.md)。
+兼容别名以 `replace` 跳转到正式地址并保留查询与片段：`/dashboard → /`、`/auction → /auctions`、`/mail → /mails`、`/credentials → /cookies`、`/delivery → /deliveries`、`/rules → /rules-content`；已登录访问 `/login` 按安全的 `return` 参数跳回站内目标，缺省回到仪表盘。其余路径显示 404 页面。新增页面须同步修改 `crates/auction-web-admin/src/surface/router/route.rs` 的 `Route` 与同目录 `mod.rs` 的页面入口组件、后端 [crates/auction-http/src/assets/routes.rs](../auction-http/src/assets/routes.rs) 与[docs/contracts/routes.md](../../docs/contracts/routes.md)。
 
 ## 写命令约定
 

@@ -78,10 +78,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends ripgrep perl
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master 2026-11-15 (#190)
         if: steps.scope.outputs.run-checks == 'true'
         with:
-          toolchain: 1.99.0
+          toolchain: 1.100.0
           components: rustfmt
       # 廉价静态门禁先行，失败时不启动编译或安装审计工具。
       - name: Check repository policy and formatting
@@ -102,9 +102,9 @@ jobs:
           persist-credentials: false
       - name: Ensure patched rustup
         run: bash ci/tools/rustup.sh
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master 2026-11-15 (#190)
         with:
-          toolchain: 1.99.0
+          toolchain: 1.100.0
           components: rustfmt, clippy
           targets: wasm32-unknown-unknown
       # rust-cache v2.9.3；自动键隔离 job、平台、工具链和依赖图。
@@ -136,9 +136,9 @@ jobs:
           persist-credentials: false
       - name: Ensure patched rustup
         run: bash ci/tools/rustup.sh
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master 2026-11-15 (#190)
         with:
-          toolchain: 1.99.0
+          toolchain: 1.100.0
       - name: Restore Rust build cache
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
         with:
@@ -149,7 +149,7 @@ jobs:
       # just 仍按固定版本 --locked 从源码构建；二进制按版本单独缓存，命中时跳过约 1 分钟的编译。
       - name: Restore just
         id: just-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/bin/just
           key: just-1.59.0-ubuntu-24.04
@@ -205,20 +205,20 @@ jobs:
           persist-credentials: false
       - name: Ensure patched rustup
         run: bash ci/tools/rustup.sh
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master 2026-11-15 (#190)
         with:
-          toolchain: 1.99.0
+          toolchain: 1.100.0
       # rust-cache v2.9.3；审计失败也保留工具二进制及安装元数据。
       - name: Restore audit tools cache
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
         with:
-          key: cargo-audit-tls-20261022-machete-0.9.2
+          key: cargo-audit-tls-20261116-machete-0.10.1
           cache-bin: "true"
           cache-on-failure: "true"
       # 键只绑定 bootstrap 配方、锁图、补丁与工具链；文档或其他脚本变化不触发重建。
       # 前缀回退恢复的旧工具仍须通过下一步回执校验，不一致时照常重建。
       - name: Restore patched audit binary
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: target/audit-tools
           key: audit-tools-linux-${{ hashFiles('ci/tools/bootstrap.sh', 'ci/release/build-identity.sh', 'ci/tools/locks/*.lock', 'ci/tools/patches/*.patch', 'rust-toolchain.toml') }}
@@ -248,8 +248,8 @@ jobs:
         if: github.event_name != 'schedule'
         run: |
           if ! version=$(cargo machete --version 2>/dev/null) ||
-            [[ "$version" != "0.9.2" ]]; then
-            cargo install cargo-machete --locked --version 0.9.2 --force
+            [[ "$version" != "0.10.1" ]]; then
+            cargo install cargo-machete --locked --version 0.10.1 --force
           fi
       # 缓存命中也获取最新公告，漏洞和全部警告均失败，不自动修改锁定依赖。
       # 本步审计默认分支的当前 Cargo.lock；最近一个发布 tag 由下一步审计。
@@ -278,7 +278,7 @@ jobs:
           persist-credentials: false
       - name: Ensure patched rustup
         run: bash ci/tools/rustup.sh
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master 2026-11-15 (#190)
         with:
           toolchain: 1.94.1
       # rust-cache v2.9.3；与 verify 隔离，不跨 Rust 工具链复用产物。

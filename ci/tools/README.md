@@ -39,17 +39,19 @@ bash ci/tools/bootstrap.sh identity release           # 校验回执后输出工
 
 CI 的 `security-audit` 只审计应用 `Cargo.lock`（默认分支与最近一个发布 tag），不审计 `ci/tools/locks/` 下的工具锁。手动复核：`bash ci/tools/bootstrap.sh install audit` 后把 `target/audit-tools/bin` 放到 `PATH` 前部，对每个锁文件执行 `cargo audit --file <锁文件> --deny warnings`。
 
-下表是受控 cargo-audit 0.22.2 对公告库提交 `2295466c4e9df26647fd67d8fa1c705ac2fc7f81` 的复核结果，按包版本计数，包含锁图中的可选及其他平台依赖，不代表每项都能由实际构建路径触发。
+下表是受控 cargo-audit 0.23.0 对公告库提交 `02e2517f457a359fc6d3440ea4560c8ea188fee8`（2026-11-15）的复核结果，按包版本计数，包含锁图中的可选及其他平台依赖，不代表每项都能由实际构建路径触发。
 
 | 锁文件 | 漏洞匹配 | 警告 | 结果 |
 | --- | --- | --- | --- |
 | `ci/tools/locks/cargo-audit.Cargo.lock` | 0 | 0 | 通过 |
-| `ci/tools/locks/dioxus-cli.Cargo.lock` | 13 | 11 | 未通过 |
-| `ci/tools/locks/sccache.Cargo.lock` | 4 | 9 | 未通过 |
+| `ci/tools/locks/dioxus-cli.Cargo.lock` | 15 | 11 | 未通过 |
+| `ci/tools/locks/sccache.Cargo.lock` | 5 | 10 | 未通过 |
 
 Dioxus CLI 的 `libz-sys` 已从 1.1.28 单项升级到 1.1.31，消除 [RUSTSEC-2026-0418](https://rustsec.org/advisories/RUSTSEC-2026-0418.html) 匹配；其他依赖版本不变。原锁中的 `cc 1.2.61` 未满足公告所述 `cc >= 1.6.0` 触发条件，该升级不能作为既有缓存已泄露环境变量的证据。
 
-剩余漏洞涉及 Dioxus CLI 的 `gix-date`、两个版本的 `quick-xml`、`rkyv`、`ruzstd` 和两个版本的 `zip`，以及 sccache 的 `rsa` 与 `zip`。已公布修复版多数跨越当前依赖的兼容范围，RSA 公告尚无修复版；不为消除匹配而强行跨版本替换或忽略公告。警告另含未维护、健全性问题，以及 sccache 锁中的已撤回 `scc 2.1.0`。工具安装回执通过只证明来源与配方一致，不表示上述安全审计通过。
+三把锁的 `quinn-proto` 都单项升级到 0.11.19、`quinn-udp` 升级到 0.5.16，消除 [RUSTSEC-2026-0523](https://rustsec.org/advisories/RUSTSEC-2026-0523.html)、[RUSTSEC-2026-0524](https://rustsec.org/advisories/RUSTSEC-2026-0524.html) 与 [RUSTSEC-2026-0538](https://rustsec.org/advisories/RUSTSEC-2026-0538.html) 匹配；cargo-audit 与 Dioxus CLI 的锁另把 `rustix` 1.1.x 升级到 1.1.6，消除健全性警告 [RUSTSEC-2026-0486](https://rustsec.org/advisories/RUSTSEC-2026-0486.html)。这些升级都在原版本的 semver 兼容范围内；Dioxus CLI 锁中 `hyper-util`、`quinn`、`quinn-udp` 随之改用锁内已有的 `socket2 0.6.3`，不新增包版本。
+
+剩余漏洞涉及 Dioxus CLI 的 `gix-date`、两个版本的 `quick-xml`、`rkyv`、`ruzstd` 和两个版本的 `zip`，以及 sccache 的 `rsa` 与 `zip`；`zip` 的匹配含新公布的 [RUSTSEC-2026-0429](https://rustsec.org/advisories/RUSTSEC-2026-0429.html)。已公布修复版都跨越当前依赖的兼容范围（如 `zip` 9.0.0、`rsa` 0.10.0）；不为消除匹配而强行跨版本替换或忽略公告。警告另含未维护（sccache 锁新增 `pin-utils`，[RUSTSEC-2026-0441](https://rustsec.org/advisories/RUSTSEC-2026-0441.html)）、健全性问题，以及 sccache 锁中的已撤回 `scc 2.1.0`。工具安装回执通过只证明来源与配方一致，不表示上述安全审计通过。
 
 应用的直接依赖由 CI 的 `dependency-unused`（`cargo machete`）检查。上游分别要求不同版本的传递依赖时，不为减少锁文件条目而跨不兼容版本替换。
 
@@ -59,7 +61,7 @@ Dioxus CLI 的 `libz-sys` 已从 1.1.28 单项升级到 1.1.31，消除 [RUSTSEC
 bash ci/tools/rustup.sh
 ```
 
-已安装的 rustup 版本不低于 1.29.2 时直接退出；否则在排除已失信 CA 的临时信任集合下下载固定版本的 `rustup-init`，校验 SHA-256 后安装。不改变仓库固定的工具链（由 `rust-toolchain.toml` 决定）。
+已安装的 rustup 版本不低于 1.29.3 时直接退出；否则在排除已失信 CA 的临时信任集合下下载固定版本的 `rustup-init`，校验 SHA-256 后安装。不改变仓库固定的工具链（由 `rust-toolchain.toml` 决定）。
 
 ## blaze.sh
 

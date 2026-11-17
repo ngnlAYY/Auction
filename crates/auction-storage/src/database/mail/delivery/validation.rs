@@ -331,7 +331,7 @@ mod tests {
                 invalid.push(padded_body);
             }
             if let Some(world) = binding.world {
-                let mut other_world = valid.clone();
+                let mut other_world = valid;
                 other_world.world_id = if world == "main" { "isekai" } else { "main" }.to_owned();
                 invalid.push(other_world);
             }

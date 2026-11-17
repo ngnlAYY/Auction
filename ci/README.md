@@ -47,7 +47,7 @@ bash ci/checks/check.sh <检查项>...
 | `rust` | `fmt check dependency-versions lint wasm rustdoc` |
 | `dependency-audit` | [ci/checks/dependency-audit.sh](checks/dependency-audit.sh) 以 `cargo audit --deny warnings` 审计 `Cargo.lock`（需要受控 cargo-audit，联网读取 RustSec）；已核实不进入编译图的例外登记在 [ci/checks/dependency-audit.ignore](checks/dependency-audit.ignore)，每条写明原因与解除条件，逐条以 `--ignore` 传入，定时审计复查 |
 | `release-dependency-audit` | 取最高版本的发布 tag（`v<semver>`，口径同发布守卫），把其中的 `Cargo.lock` 读到临时目录后以同样参数审计；没有发布 tag 时提示并通过。需要该 tag 的提交对象，见[ci/checks/README.md#每周依赖审计](checks/README.md#每周依赖审计) |
-| `dependency-unused` | `cargo machete`（0.9.2） |
+| `dependency-unused` | `cargo machete`（0.10.1） |
 
 `just verify` = `all fmt check dependency-versions lint wasm rustdoc`。默认门禁不运行测试。
 
@@ -58,7 +58,7 @@ bash ci/checks/check.sh <检查项>...
 | 作业 | 触发 | 内容 |
 | --- | --- | --- |
 | `docs` | 所有分支 push / PR / 手动 | 策略门禁与格式（`ci/checks/check.sh all fmt`）；完整历史与 tag 用于 `published-migrations`；同一提交已有 PR 时跳过重复的分支 push。tag 推送只运行发布工作流，不重复普通 CI |
-| `verify` | push / PR / 手动，`docs` 通过后 | `ci/checks/check.sh check dependency-versions lint wasm rustdoc`（工具链 1.99.0） |
+| `verify` | push / PR / 手动，`docs` 通过后 | `ci/checks/check.sh check dependency-versions lint wasm rustdoc`（工具链 1.100.0） |
 | `test` | push / PR / 手动，`docs` 通过后 | 安装 PostgreSQL 18 后依次执行 `just test`、`just test-db`（PostgreSQL 18 集成测试）与 `just test-db-compat`（迁移兼容声明验证）；不并入默认 `just verify`。`just` 二进制按版本单独缓存；测试构建以 `CARGO_PROFILE_DEV_DEBUG=0` 关闭调试信息，缩小构建缓存 |
 | `security-audit` | push / PR / 手动中 `docs` 通过后；每周一 04:17 UTC 独立调度 | 受控 cargo-audit 的 `dependency-audit`；定时与手动运行另以完整历史执行 `release-dependency-audit`；非定时事件另执行 `dependency-unused`，见[ci/checks/README.md#每周依赖审计](checks/README.md#每周依赖审计) |
 | `msrv` | push / PR / 手动，`docs` 通过后 | `cargo +1.94.1 check --locked --workspace --all-targets --all-features` |
@@ -81,7 +81,7 @@ Release 资产永久保留；同一 tag 的发行一经创建不会覆盖（重�
 
 缓存：Rust 编译缓存按作业与工具链隔离，PR 不写缓存；发布产物与 `target/dx` 以源码身份指纹为键单独缓存；受控工具以配方（bootstrap 脚本、锁文件、补丁、工具链）为键缓存，命中后仍以安装回执逐字节校验。
 
-发布构建开始前，使用与发布入口相同的受控 sccache 和 daemon 地址执行 `sccache rustc -vV`。缓存服务启动失败（例如 GitHub 缓存存储返回 `503 ServerBusy`）时，步骤发出 warning 并清空 `RUSTC_WRAPPER`，由 rustc 直接完成后续构建；实际编译错误与发布门禁失败仍使作业失败。受控工具回执校验在探测前执行，校验失败直接终止。sccache 0.18.0 的 `SCCACHE_IGNORE_SERVER_IO_ERROR` 不覆盖启动失败，因此不能替代此探测。
+发布构建开始前，使用与发布入口相同的受控 sccache 和 daemon 地址执行 `sccache rustc -vV`。缓存服务启动失败（例如 GitHub 缓存存储返回 `503 ServerBusy`）时，步骤发出 warning 并清空 `RUSTC_WRAPPER`，由 rustc 直接完成后续构建；实际编译错误与发布门禁失败仍使作业失败。受控工具回执校验在探测前执行，校验失败直接终止。sccache 0.19.0 的 `SCCACHE_IGNORE_SERVER_IO_ERROR` 不覆盖启动失败，因此不能替代此探测。
 
 ## 发布：`ci/release/release.sh`
 
