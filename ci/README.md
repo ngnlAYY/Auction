@@ -45,7 +45,7 @@ bash ci/checks/check.sh <检查项>...
 | `wasm` | 以 `wasm32-unknown-unknown` 目标运行 `cargo clippy -D warnings`：Public（连同 `auction-web-shared`、`auction-contracts`）与 Admin 分开检查，各自保留独立 feature 图；`cfg(target_arch = "wasm32")` 代码只在此项被 lint |
 | `rustdoc` | `cargo doc` 全工作区（含私有项与全部 feature）以 `-D rustdoc::all` 构建：文档注释里的符号链接、HTML 标签与代码块属性必须可解析，失效链接即过期注释 |
 | `rust` | `fmt check dependency-versions lint wasm rustdoc` |
-| `dependency-audit` | [ci/checks/dependency-audit.sh](checks/dependency-audit.sh) 以 `cargo audit --deny warnings` 审计 `Cargo.lock`（需要 mise 安装的 cargo-audit，联网读取 RustSec）；已核实不进入编译图的例外登记在 [ci/checks/dependency-audit.ignore](checks/dependency-audit.ignore)，每条写明原因与解除条件，逐条以 `--ignore` 传入，定时审计复查 |
+| `dependency-audit` | [ci/checks/dependency-audit.sh](checks/dependency-audit.sh) 以 `cargo audit --deny warnings` 审计 `Cargo.lock`（需要 mise 安装的 cargo-audit，联网读取 RustSec）；例外登记在 [ci/checks/dependency-audit.ignore](checks/dependency-audit.ignore)，只收两类：已核实不进入编译图的公告，以及没有已知漏洞、本仓库不直接依赖、只经某个上游最新版本传递引入的“无人维护”类公告；每条写明原因、影响范围与解除条件，逐条以 `--ignore` 传入，定时审计复查 |
 | `release-dependency-audit` | 取最高版本的发布 tag（`v<semver>`，口径同发布守卫），把其中的 `Cargo.lock` 读到临时目录后以同样参数审计；没有发布 tag 时提示并通过。需要该 tag 的提交对象，见[ci/checks/README.md#每周依赖审计](checks/README.md#每周依赖审计) |
 | `dependency-unused` | `cargo machete`（0.10.1） |
 

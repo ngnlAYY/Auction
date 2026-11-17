@@ -1,4 +1,7 @@
-# cargo audit 的已核实例外：只登记确认不进入编译图的公告，每条写明原因与解除条件。
+# cargo audit 的已核实例外，每条写明原因与解除条件。只登记两类：
+#   1. 确认不进入编译图的公告；
+#   2. “无人维护”（unmaintained）类公告：没有已知漏洞，本仓库不直接依赖该 crate，只经某个上游
+#      的最新版本传递引入，且写明影响范围。带漏洞的公告不属于这一类，不能登记。
 # 每行一个 RUSTSEC 编号，# 开头为注释；由 ci/checks/dependency-audit.sh 以 --ignore 传入。
 
 # RUSTSEC-2026-0459（CVE-2026-119375，libsqlite3-sys 0.37.0）。
@@ -7,3 +10,14 @@
 # libsqlite3-sys` 无输出，SQLite 代码从不编译、不运行，漏洞不可达。
 # 解除条件：sqlx 上游把 libsqlite3-sys 依赖升到 >=0.39 时删除本行（每周定时审计会复查）。
 RUSTSEC-2026-0459
+
+# RUSTSEC-2026-0543（chrono 0.4.45，无人维护）与 RUSTSEC-2026-0542（humantime 2.4.0，无人维护）。
+# 两条都是维护状态公告，没有漏洞编号。本仓库自己的时间处理已迁到 jiff（crates/auction-time），
+# 不再直接依赖它们；它们只经 object_store 0.14.2（当前最新版）传递引入，而 object_store 只随
+# auction-integrations 的 backup feature 编入 auction-cli，用于备份异机副本上传 R2：
+# `cargo tree -e normal -p <包> -i object_store` 对 auction-public-api、auction-admin-api、
+# auction-worker、auction-server 均无输出，三个在线角色不含这两个 crate。
+# 解除条件：object_store 发布不再依赖 chrono、humantime 的版本并升级后删除对应行；任一 crate
+# 出现带漏洞的公告时是新的编号，不受本例外覆盖（每周定时审计会复查）。
+RUSTSEC-2026-0543
+RUSTSEC-2026-0542
