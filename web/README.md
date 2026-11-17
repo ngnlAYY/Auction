@@ -166,21 +166,26 @@ export function Blacklist(): JSX.Element {
 
 - 浏览器接收的 DTO：导出 `XxxSchema`（valibot）与 `type Xxx = v.InferOutput<typeof XxxSchema>`。
 - 浏览器发出的 DTO：只导出 `interface`。后端带 `skip_serializing_if` 的字段写成可选属性并在值缺失时省略，其余可空字段写成 `T | null` 并原样发送 `null`。
-- 后端结构体带 `deny_unknown_fields` 时用 `v.strictObject`，否则用 `v.object`（未知键被忽略）。`flatten` 用展开 `...Inner.entries` 表达，`untagged` 枚举用 `v.union` 并保持声明顺序。
+- 结构体用 `@auction/contracts/wire` 的 `struct({...})`；后端带 `deny_unknown_fields` 时用 `strictStruct({...})`。不直接用 `v.object`、`v.strictObject`：它们会把数组当成对象解码。
+- `flatten`：把被平铺结构体的字段表单独导出为 `XxxEntries`，在外层写 `struct({ ...XxxEntries, 其余字段 })`。`untagged` 枚举用 `v.union` 并保持声明顺序。
 
 字段原语在 `@auction/contracts/wire`，按后端属性选择：
 
 | 后端字段 | 原语 | 读到的类型 |
 | --- | --- | --- |
-| 整数（`i64`、`i32` 等） | `integer` | `number` |
-| 无符号整数 | `unsignedInteger` | `number` |
+| `i64`、`isize` | `integer` | `number` |
+| `u64`、`usize` | `unsignedInteger` | `number` |
+| `i32`、`u32`、`i16`、`u16`、`u8` | `int32`、`uint32`、`int16`、`uint16`、`uint8` | `number` |
 | `f64` | `float` | `number` |
 | 普通 `Option<T>` | `optionalNullable(T)` | `T \| null` |
 | `deserialize_required_option`（键必须出现） | `requiredNullable(T)` | `T \| null` |
 | `default` + `deserialize_optional_field`（可缺省、不可为 `null`） | `optionalField(T)` | `T \| null` |
 | `default`（缺省取默认值） | `withDefault(T, value)` | `T` |
 | `deserialize_null_default` | `nullAsDefault(T, value)` | `T` |
+| `BTreeMap<String, T>`、`HashMap<String, T>` | `stringMap(T)` | `Readonly<Record<string, T>>` |
 | `serde_json::Value` | `jsonValue` | `unknown` |
+
+映射字段不用 `v.record`：它会接受数组，并丢弃 `__proto__`、`constructor` 等键名。
 
 解码统一经 `decode(schema, data)`：失败返回 `null`，调用方映射为 `invalid_response` 并上报 `dto_decode`。路由专属的闭集键与跨字段校验留在各应用的 `api/` 下，先校验原始 JSON，再用 schema 解码。
 
