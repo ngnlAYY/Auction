@@ -8,6 +8,7 @@ use auction_application::recovery::{
 };
 use chrono::Duration as ChronoDuration;
 
+mod binding;
 mod cod_return;
 mod confirm;
 mod delivery_retry;

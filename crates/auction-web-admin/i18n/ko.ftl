@@ -177,6 +177,7 @@ admin-error-invalid-delivery-command = 현재 상태에서는 이 배송 명령�
 admin-error-stale-delivery-state = 배송 상태가 바뀌었습니다. 새로 고친 뒤 다시 시도하세요.
 admin-error-delivery-sent-sighted = Sent에 이 정산 의무의 메일이 이미 있어 재시도와 실패 처리가 차단됩니다. 게임에서 확인한 뒤 auction-cli settlement confirm-sent로 마무리하세요.
 admin-error-settlement-obligation-ineligible = 이 배송의 정산 의무는 더 이상 실행할 수 없습니다(거래가 취소되었거나 현재 발송이 아님). 또는 반송된 메일을 복구 절차가 인수했습니다(재발송은 복구 절차만 처리). 해제와 재시도가 차단됩니다. “정산 복구” 페이지에서 확인하세요.
+admin-error-recovery-send-unattributed = 반송을 원래 배송의 한 번의 발송으로 유일하게 귀속할 수 없습니다. 반송 전에 상대에게 도달했을 수 있는 발송이 여러 번 있거나 현재 반송 이후에도 발송이 있어, 메일 한 통이 아직 상대에게 있을 수 있습니다. 확인이 거부되었습니다. 원래 배송의 발송 기록과 Sent를 수동으로 확인하세요.
 admin-error-delivery-failed = 배송에 실패했습니다. 실패 사유를 확인한 뒤 재시도하세요.
 admin-error-delivery-backlog = 배송 적체가 많아 지금은 이 작업을 실행할 수 없습니다.
 admin-error-compose-not-clean = 게임 메일에 미완성 초안이 남아 있습니다. 비운 뒤 보내세요.

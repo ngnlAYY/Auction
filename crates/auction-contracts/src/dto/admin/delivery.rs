@@ -15,9 +15,9 @@ use super::pagination::AdminStrictPaginationResponse;
 #[serde(deny_unknown_fields)]
 pub struct AdminDeliveryResponse {
     pub id: String,
-    /// 来源闭集。结算退件 Take（`settlement_return_action`）只在列表与详情请求带
-    /// `include=settlement_returns` 时出现：缺省列表不列出这类投递，缺省详情拒绝读取，升级前的
-    /// 页面不会读到它不认识的来源。
+    /// 来源闭集。结算退件 Take（`settlement_return_action`）只在列表、详情与玩家支持请求带
+    /// `include=settlement_returns` 时出现：缺省列表与玩家支持投递分区不含这类投递，缺省详情拒绝
+    /// 读取，升级前的页面不会读到它不认识的来源。
     pub origin_kind: String,
     pub origin_id: String,
     pub recipient: String,

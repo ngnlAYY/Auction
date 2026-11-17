@@ -166,7 +166,7 @@ pub struct MoogleMailboxInboxObservation {
 
 /// 结算退件 Take 证明所需的原退件身份：系统发件人与 `[RTS]` 主题取自入站快照，退件原正文的规范
 /// 摘要与系统后缀写明的原收件人取自退件证据，领取前的 COD 与附件条目数取自 Take 冻结资产
-/// （现金占一条附件）。不含正文本身。
+/// （现金占一条附件），页面收件人的期望值取自执行 Take 的凭据所属账号的预期玩家名。不含正文本身。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MoogleMailboxReturnTakeIdentity {
     pub sender: String,
@@ -175,6 +175,10 @@ pub struct MoogleMailboxReturnTakeIdentity {
     pub returned_from: String,
     pub cod: i64,
     pub attachment_count: usize,
+    /// 退件寄回 Bot 收件箱，详情页收件人就是 Bot 账号：取 Take 冻结凭据的预期完整玩家名
+    /// （`credential_keys.player_name`，随凭据创建写入、不再改写）。凭据没有预期名称时为 `None`，
+    /// 收件人无法比较，领取完成不能成立，与正常 Take 要求前后收件人一致同等强度。
+    pub expected_recipient: Option<String>,
 }
 
 /// 原 Take 会话里对一封结算退件的观察结论。只有 [`Self::Taken`] 是领取完成证明：它由

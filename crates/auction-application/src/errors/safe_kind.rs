@@ -79,6 +79,7 @@ impl DiagnosticError for ApplicationError {
                 | RecoveryCommandError::StaleState
                 | RecoveryCommandError::NotConfirmable
                 | RecoveryCommandError::EvidenceUnresolved
+                | RecoveryCommandError::SendUnattributed
                 | RecoveryCommandError::InvalidStoredResult,
             ) => SafeErrorKind::RECOVERY_REJECTED,
             Self::RealtimeAdmin(_) => SafeErrorKind::REALTIME_ADMIN_ERROR,

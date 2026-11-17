@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use auction_application::settlement::SettlementTransactionError;
 use auction_domain::{
     AuctionId, CommandId, RecoveryPolicy, SettlementObligation, SettlementObligationKind,
-    SettlementPlan, SettlementWorld, deterministic_uuid,
+    SettlementObligationState, SettlementPlan, SettlementWorld, deterministic_uuid,
 };
 use chrono::{DateTime, Utc};
 use serde_json::json;
@@ -81,10 +81,12 @@ pub(super) async fn insert_obligations(
         execute_settlement_batch(transaction, query, rows.len()).await?;
 
         // 投稿装备已经由入库流程领取；流拍与撤拍均须逐件发送库存装备，不能 Return 原邮件。
+        // 或有义务（买方退款）的履约带 `dormant` 标记，激活前不进入履约活动入口；激活或直接收口
+        // 时由对应 owner 同事务清除（迁移 000110 的 CHECK 与延迟约束触发器兜底）。
         let mut query = sqlx::QueryBuilder::<sqlx::Postgres>::new(
             r#"INSERT INTO public.settlement_obligation_fulfillments
                    (obligation_id, execution_state, dispatch_world, delivery_operation,
-                    created_at, updated_at) "#,
+                    dormant, created_at, updated_at) "#,
         );
         query.push_values(rows, |mut values, row| {
             values
@@ -92,6 +94,7 @@ pub(super) async fn insert_obligations(
                 .push("'pending'")
                 .push_bind(dispatch_world(row.obligation).as_str())
                 .push("'send'")
+                .push_bind(row.obligation.state == SettlementObligationState::Contingent)
                 .push_bind(occurred_at)
                 .push_bind(occurred_at);
         });

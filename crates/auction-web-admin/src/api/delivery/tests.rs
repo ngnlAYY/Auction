@@ -8,6 +8,7 @@ use auction_contracts::{
 use chrono::{TimeZone, Utc};
 use uuid::Uuid;
 
+use super::player_support::player_support_url;
 use super::queue::{DeliverySearchFilters, delivery_list_url};
 use super::{
     decode::StrictDeliveryEnvelope, decode_confirmation, decode_detail, decode_preview,
@@ -294,5 +295,18 @@ fn list_url_requests_the_settlement_returns_projection() {
             "/api/v1/admin/deliveries?page=1&page_size=20&status=manual_reconcile\
              &reference={DELIVERY_ID}&world=isekai&include=settlement_returns"
         )
+    );
+}
+
+/// 玩家支持同样总是请求扩展投影（缺省投递分区不含结算退件 Take），检索值照旧经表单编码。
+#[test]
+fn player_support_url_requests_the_settlement_returns_projection() {
+    assert_eq!(
+        player_support_url("user", "Sample Name"),
+        "/api/v1/admin/player-support?user=Sample+Name&include=settlement_returns"
+    );
+    assert_eq!(
+        player_support_url("reference", DELIVERY_ID),
+        format!("/api/v1/admin/player-support?reference={DELIVERY_ID}&include=settlement_returns")
     );
 }

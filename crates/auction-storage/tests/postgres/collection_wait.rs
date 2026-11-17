@@ -595,6 +595,8 @@ async fn postgres_collection_wait_snapshot_reads_only_live_obligations() {
         "等待前置按履约创建时刻计年龄：{}",
         fulfillment.oldest_prerequisite_wait_age_seconds
     );
+    // 入口只读活动集合：读数与不限入口的全表读法、修复前的入口逐列相同。
+    crate::alert_entry_equivalence::assert_alert_reads_match_full_scan(pool).await;
 
     pool.close().await;
 }

@@ -170,6 +170,10 @@ pub enum RecoveryCommandError {
     NotConfirmable,
     #[error("恢复证据尚未解决")]
     EvidenceUnresolved,
+    /// 已消费的退件不能把原义务每一次可能已到达远端的发送逐一归属（退件之前有多次可能外达的
+    /// 发送，或当前退件之后又有发送）：收口可能与仍在对方手里的邮件冲突，交人工核对。
+    #[error("退件无法唯一归属到原投递的一次发送，需人工核对")]
+    SendUnattributed,
     #[error("命令 ID 与已有 recovery 请求冲突")]
     CommandConflict,
     #[error("恢复命令账本结果无效")]

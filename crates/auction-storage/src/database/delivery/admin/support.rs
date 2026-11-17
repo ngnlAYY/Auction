@@ -2,6 +2,10 @@
 //!
 //! 所有分区共享同一只读快照，各自 `LIMIT 上限 + 1` 以发现截断；不写任何事实、命令或审计。
 //! 参考编号只按规范 UUID 解析，且不把投递 payload、正文或凭据带出存储层。
+//!
+//! 缺省投影保持已发布页面能按闭集解码的来源：结算退件 Take（来源 `settlement_return_action`）
+//! 不进入投递分区、不按参考编号补入，也不作为参考编号的种类或推导关联用户的依据。四处查询都在
+//! SQL 里用同一个绑定参数排除，分区的上限与截断按排除后的行计算；只有请求明确包含时才输出。
 
 use auction_application::delivery::{
     DeliveryAdminError, MAX_PLAYER_SUPPORT_ROWS, PlayerSupportBid, PlayerSupportBundle,
@@ -20,17 +24,18 @@ pub(crate) async fn player_support(
     pool: &TrackedPool<Postgres>,
     request: &PlayerSupportRequest,
 ) -> Result<PlayerSupportBundle, DeliveryAdminError> {
+    let include = request.include_settlement_return_actions;
     let mut transaction = pool.begin_read_snapshot().await.map_err(map_storage_error)?;
     let references = match &request.selector {
         PlayerSupportSelector::User(_) => Vec::new(),
         PlayerSupportSelector::Reference(reference) => {
-            references(&mut transaction, *reference).await?
+            references(&mut transaction, *reference, include).await?
         }
     };
     let user_id = match &request.selector {
         PlayerSupportSelector::User(value) => user_id_for_selector(&mut transaction, value).await?,
         PlayerSupportSelector::Reference(reference) => {
-            user_id_for_reference(&mut transaction, *reference).await?
+            user_id_for_reference(&mut transaction, *reference, include).await?
         }
     };
     let Some(user_id) = user_id else {
@@ -45,11 +50,17 @@ pub(crate) async fn player_support(
     let deals = deals(&mut transaction, user_id, &mut truncated).await?;
     let obligations = obligations(&mut transaction, user_id, &mut truncated).await?;
     let mut deliveries =
-        deliveries(&mut transaction, user_id, game_player_id.as_deref(), &mut truncated).await?;
+        deliveries(&mut transaction, user_id, game_player_id.as_deref(), include, &mut truncated)
+            .await?;
     let mut notifications = notifications(&mut transaction, user_id, &mut truncated).await?;
-    // 参考编号必须能一次定位到它指向的记录，即使该记录尚未与用户分区关联。
+    // 参考编号必须能一次定位到它指向的记录，即使该记录尚未与用户分区关联或已在上限之外。
     if let PlayerSupportSelector::Reference(reference) = &request.selector {
-        attach_reference(&mut transaction, *reference, &mut deliveries, &mut notifications).await?;
+        let partitions = ReferencePartitions {
+            deliveries: &mut deliveries,
+            notifications: &mut notifications,
+            truncated: &mut truncated,
+        };
+        attach_reference(&mut transaction, *reference, include, partitions).await?;
     }
     transaction.commit().await.map_err(map_storage_error)?;
     Ok(PlayerSupportBundle {
@@ -87,6 +98,7 @@ async fn user_id_for_selector(
 async fn user_id_for_reference(
     transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
     reference: Uuid,
+    include_settlement_return_actions: bool,
 ) -> Result<Option<Uuid>, DeliveryAdminError> {
     sqlx::query_scalar(
         r#"WITH candidates AS (
@@ -118,6 +130,7 @@ async fn user_id_for_reference(
                JOIN public.users AS user_account
                  ON lower(user_account.game_player_id) = lower(delivery.recipient)
                WHERE delivery.id = $1
+                 AND ($2::boolean OR delivery.origin_kind <> 'settlement_return_action')
                UNION ALL
                SELECT lot.leader_user_id
                FROM public.lots AS lot
@@ -126,6 +139,7 @@ async fn user_id_for_reference(
            SELECT user_id FROM candidates WHERE user_id IS NOT NULL LIMIT 1"#,
     )
     .bind(reference)
+    .bind(include_settlement_return_actions)
     .fetch_optional(&mut **transaction)
     .await
     .map_err(map_storage_error)
@@ -134,9 +148,11 @@ async fn user_id_for_reference(
 async fn references(
     transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
     reference: Uuid,
+    include_settlement_return_actions: bool,
 ) -> Result<Vec<PlayerSupportReference>, DeliveryAdminError> {
     let rows = sqlx::query(
-        r#"SELECT 'delivery'::text AS kind FROM public.deliveries WHERE id = $1
+        r#"SELECT 'delivery'::text AS kind FROM public.deliveries
+           WHERE id = $1 AND ($2::boolean OR origin_kind <> 'settlement_return_action')
            UNION ALL
            SELECT 'obligation'::text FROM public.settlement_obligations WHERE id = $1
            UNION ALL
@@ -149,6 +165,7 @@ async fn references(
            SELECT 'auction'::text FROM public.auctions WHERE id = $1"#,
     )
     .bind(reference)
+    .bind(include_settlement_return_actions)
     .fetch_all(&mut **transaction)
     .await
     .map_err(map_storage_error)?;
@@ -309,6 +326,7 @@ async fn deliveries(
     transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
     user_id: Uuid,
     game_player_id: Option<&str>,
+    include_settlement_return_actions: bool,
     truncated: &mut bool,
 ) -> Result<Vec<auction_application::delivery::DeliveryAdminSnapshot>, DeliveryAdminError> {
     let rows = sqlx::query(
@@ -335,12 +353,14 @@ async fn deliveries(
                WHERE $2::text IS NOT NULL
                  AND lower(delivery.recipient) = lower($2::text)
            )
+             AND ($4::boolean OR origin_kind <> 'settlement_return_action')
            ORDER BY created_at DESC, id DESC
            LIMIT $3"#,
     )
     .bind(user_id)
     .bind(game_player_id)
     .bind(MAX_PLAYER_SUPPORT_ROWS + 1)
+    .bind(include_settlement_return_actions)
     .fetch_all(&mut **transaction)
     .await
     .map_err(map_storage_error)?;
@@ -425,27 +445,47 @@ async fn notifications(
     Ok(entries)
 }
 
-/// 把参考编号自身命中的投递或通知补进分区，已存在时不重复。
+/// 参考编号补入的目标分区与共享的截断标记。
+struct ReferencePartitions<'a> {
+    deliveries: &'a mut Vec<auction_application::delivery::DeliveryAdminSnapshot>,
+    notifications: &'a mut Vec<PlayerSupportNotification>,
+    truncated: &'a mut bool,
+}
+
+/// 把参考编号命中的记录放在分区最前。分区已到上限时让出最旧的一行并置截断：响应仍不超过上限，
+/// 与分区查询的截断同一口径。
+fn insert_reference<T>(entries: &mut Vec<T>, entry: T, truncated: &mut bool) {
+    if entries.len() as i64 >= MAX_PLAYER_SUPPORT_ROWS {
+        entries.pop();
+        *truncated = true;
+    }
+    entries.insert(0, entry);
+}
+
+/// 把参考编号自身命中的投递或通知补进分区，已存在时不重复；缺省投影下结算退件 Take 不补入。
 async fn attach_reference(
     transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
     reference: Uuid,
-    deliveries: &mut Vec<auction_application::delivery::DeliveryAdminSnapshot>,
-    notifications: &mut Vec<PlayerSupportNotification>,
+    include_settlement_return_actions: bool,
+    partitions: ReferencePartitions<'_>,
 ) -> Result<(), DeliveryAdminError> {
+    let ReferencePartitions { deliveries, notifications, truncated } = partitions;
     if !deliveries.iter().any(|delivery| delivery.id == reference) {
         let row = sqlx::query(
             r#"SELECT id, origin_kind, origin_id, recipient, payload, result_metadata, status,
                       lease_token, lease_expires_at, fencing_version, attempt_count, claimed_at,
                       sending_at, completed_at, external_reference, failure_code,
                       created_at, updated_at
-               FROM public.deliveries WHERE id = $1"#,
+               FROM public.deliveries
+               WHERE id = $1 AND ($2::boolean OR origin_kind <> 'settlement_return_action')"#,
         )
         .bind(reference)
+        .bind(include_settlement_return_actions)
         .fetch_optional(&mut **transaction)
         .await
         .map_err(map_storage_error)?;
         if let Some(row) = row {
-            deliveries.insert(0, snapshot(&row)?);
+            insert_reference(deliveries, snapshot(&row)?, truncated);
         }
     }
     if !notifications.iter().any(|item| item.notification_id == reference) {
@@ -475,8 +515,8 @@ async fn attach_reference(
         .await
         .map_err(map_storage_error)?;
         if let Some(row) = row {
-            notifications.insert(
-                0,
+            insert_reference(
+                notifications,
                 PlayerSupportNotification {
                     notification_id: row.get("notification_id"),
                     channel: row.get("channel"),
@@ -489,6 +529,7 @@ async fn attach_reference(
                     created_at: row.get("created_at"),
                     updated_at: row.get("updated_at"),
                 },
+                truncated,
             );
         }
     }

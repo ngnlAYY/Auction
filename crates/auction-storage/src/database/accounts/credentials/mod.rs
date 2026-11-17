@@ -19,8 +19,8 @@ mod errors;
 mod evidence;
 pub(crate) use evidence::lock_mail_runtime_generation_row;
 pub use evidence::{
-    MailEvidenceTransactionError, lock_mail_evidence_credentials, lock_mail_runtime_generation,
-    validate_mail_evidence_time,
+    MailEvidenceRejection, MailEvidenceTransactionError, lock_mail_evidence_credentials,
+    lock_mail_runtime_generation, validate_mail_evidence_time,
 };
 mod mapping;
 mod ownership;

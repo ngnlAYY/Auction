@@ -18,6 +18,9 @@ use self::fulfillment::fulfillment_snapshot;
 use self::operations::{lifecycle_snapshot, process_snapshot, reconciliation_snapshot};
 use self::settlement::{delivery_snapshot, recovery_snapshot};
 
+#[cfg(feature = "test-db")]
+pub(super) use self::fulfillment::FULFILLMENT_SNAPSHOT;
+
 pub(crate) async fn snapshot_postgres(
     store: &DatabaseStore,
     now: DateTime<Utc>,

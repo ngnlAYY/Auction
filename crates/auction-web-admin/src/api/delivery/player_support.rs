@@ -1,7 +1,7 @@
 //! 玩家支持查询的响应解码与参数编码。
 
-use super::MAX_PLAYER_SUPPORT_ROWS;
 use super::decode::{StrictDeliveryEnvelope, decode_delivery, parse_delivery_time};
+use super::{DELIVERY_PROJECTION_INCLUDE, MAX_PLAYER_SUPPORT_ROWS};
 use crate::api::{MAX_JSON_SAFE_INTEGER, PlayerSupportBundle, valid_safe_text, valid_uuid};
 
 /// 只放行页面实际展示的闭集与有界数值；任何未知种类或越界 ID 都让整页失败关闭。
@@ -102,7 +102,16 @@ pub(super) fn valid_world(world: &str) -> bool {
     matches!(world, "main" | "isekai")
 }
 
-pub(super) fn url_encode(value: &str) -> String {
+fn url_encode(value: &str) -> String {
     url::form_urlencoded::Serializer::new(String::new()).append_pair("v", value).finish()[2..]
         .to_owned()
+}
+
+/// 玩家支持的唯一 URL 构造点：总是请求扩展投影，投递分区才包含结算退件 Take（本页面的闭集认识
+/// 该来源）；缺省投影留给升级前的页面。
+pub(super) fn player_support_url(key: &str, value: &str) -> String {
+    format!(
+        "/api/v1/admin/player-support?{key}={}&include={DELIVERY_PROJECTION_INCLUDE}",
+        url_encode(value)
+    )
 }

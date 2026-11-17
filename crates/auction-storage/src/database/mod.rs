@@ -32,6 +32,8 @@ pub use maintenance::key_rotation::{
 };
 pub use maintenance::least_privilege::{apply_runtime_privileges, runtime_privileges_present};
 #[cfg(feature = "test-db")]
+pub use operations::alert::benchmark_sql as alert_benchmark_sql;
+#[cfg(feature = "test-db")]
 pub use operations::asset_reconciliation::benchmark_sql as solvency_benchmark_sql;
 pub use operations::asset_reconciliation::{
     CUSTODY_REPORT_ACTION, CUSTODY_REPORT_ENTITY, CUSTODY_REPORT_FORMAT, POSTAGE_RATE_CREDITS,
@@ -80,8 +82,8 @@ pub use settlement::returns::benchmark_sql as settlement_return_benchmark_sql;
 mod commands;
 pub use accounts::credentials::{CredentialRuntimeOwnership, CredentialRuntimeOwnershipError};
 pub use accounts::credentials::{
-    MailEvidenceTransactionError, lock_mail_evidence_credentials, lock_mail_runtime_generation,
-    validate_mail_evidence_time,
+    MailEvidenceRejection, MailEvidenceTransactionError, lock_mail_evidence_credentials,
+    lock_mail_runtime_generation, validate_mail_evidence_time,
 };
 pub use commands::{
     DatabaseAdminMailCommands, DatabaseAdminRulesCommands, DatabaseAdminRuntimeCommands,

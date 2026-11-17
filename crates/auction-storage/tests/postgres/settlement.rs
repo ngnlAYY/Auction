@@ -990,3 +990,234 @@ async fn postgres_equipment_loss_takes_funding_lock_order_then_rejects_inadmissi
     service.postgres_pool().close().await;
     admin.postgres_pool().close().await;
 }
+
+/// 本场次各义务种类的或有未激活标记。
+async fn dormant_flags(pool: &sqlx::PgPool, auction_id: Uuid) -> BTreeSet<(String, bool)> {
+    sqlx::query_as::<_, (String, bool)>(
+        "SELECT obligation.obligation_kind, fulfillment.dormant
+         FROM public.settlement_obligations AS obligation
+         JOIN public.settlement_obligation_fulfillments AS fulfillment
+           ON fulfillment.obligation_id = obligation.id
+         WHERE obligation.auction_id = $1",
+    )
+    .bind(auction_id)
+    .fetch_all(pool)
+    .await
+    .expect("读取或有未激活标记")
+    .into_iter()
+    .collect()
+}
+
+/// 本场次成交 lot 的或有退款义务。
+async fn contingent_refund(pool: &sqlx::PgPool, lot_id: Uuid) -> Uuid {
+    sqlx::query_scalar(
+        "SELECT id FROM public.settlement_obligations
+         WHERE lot_id = $1 AND obligation_kind = 'buyer_refund' AND business_state = 'contingent'",
+    )
+    .bind(lot_id)
+    .fetch_one(pool)
+    .await
+    .expect("读取或有退款")
+}
+
+/// 生产结算只给或有买方退款的履约打上或有未激活标记（迁移 000110），活动入口与履约水位因此不
+/// 读它；标记由数据库兜底：把带标记的履约推出初始 pending 的写入当即失败，义务离开 contingent
+/// 而不清标记的事务在提交时失败，两者都不留下任何改动。
+#[tokio::test]
+async fn postgres_settlement_marks_only_contingent_refund_dormant_and_guards_the_flag() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let admin = database.maintenance_store().await.expect("以维护账号连接");
+    let service = database.store().await.expect("以运行账号连接");
+    let seeded = seed(&admin).await;
+    let Settled { claim, now, .. } = settle_through_ports(&admin, &service, &seeded).await;
+    service.complete(claim, now).await.expect("完成结算 workflow");
+    let pool = service.postgres_pool();
+
+    assert_eq!(
+        dormant_flags(pool, seeded.auction_id).await,
+        BTreeSet::from([
+            ("buyer_refund".to_owned(), true),
+            ("seller_payout".to_owned(), false),
+            ("unsold_return".to_owned(), false),
+            ("winner_equipment_cod".to_owned(), false),
+        ]),
+        "只有或有退款带标记"
+    );
+    crate::alert_entry_equivalence::assert_alert_reads_match_full_scan(pool).await;
+
+    let refund = contingent_refund(pool, seeded.sold_lot).await;
+    let error = sqlx::query(
+        "UPDATE public.settlement_obligation_fulfillments
+         SET execution_state = 'failed', last_error_code = 'guard_probe', completed_at = now()
+         WHERE obligation_id = $1",
+    )
+    .bind(refund)
+    .execute(pool)
+    .await
+    .expect_err("带标记的履约不能直接离开初始 pending");
+    assert_eq!(
+        error.as_database_error().and_then(sqlx::error::DatabaseError::code).as_deref(),
+        Some("23514"),
+        "由 CHECK 拒绝：{error}"
+    );
+
+    let mut transaction = pool.begin().await.expect("开启激活事务");
+    sqlx::query("UPDATE public.settlement_obligations SET business_state = 'ready' WHERE id = $1")
+        .bind(refund)
+        .execute(&mut *transaction)
+        .await
+        .expect("约束触发器延迟到提交");
+    let error = transaction.commit().await.expect_err("激活而不清标记必须在提交时失败");
+    assert_eq!(
+        error.as_database_error().and_then(sqlx::error::DatabaseError::code).as_deref(),
+        Some("23514"),
+        "由延迟约束触发器拒绝：{error}"
+    );
+    let (state, dormant): (String, bool) = sqlx::query_as(
+        "SELECT obligation.business_state, fulfillment.dormant
+         FROM public.settlement_obligations AS obligation
+         JOIN public.settlement_obligation_fulfillments AS fulfillment
+           ON fulfillment.obligation_id = obligation.id
+         WHERE obligation.id = $1",
+    )
+    .bind(refund)
+    .fetch_one(pool)
+    .await
+    .expect("读取或有退款");
+    assert_eq!((state.as_str(), dormant), ("contingent", true), "失败关闭不留下改动");
+
+    service.postgres_pool().close().await;
+    admin.postgres_pool().close().await;
+}
+
+/// 把成交 lot 的主世界 COD 改写为装备损失可准入的形状：原投递只读过库存、尚未开始写入就转人工
+/// 核对（`not_observed`），付款履约随之停在人工核对；退款与卖方货款保持结算写入的初始状态。
+async fn make_equipment_loss_admissible(pool: &sqlx::PgPool, lot_id: Uuid) {
+    // 夹具在截止之后结算，结算时刻比真实时钟晚约两小时；平移到过去，使处置事务以真实时钟写入的
+    // 更新时间不早于创建时间。
+    for statement in [
+        "UPDATE public.settlement_obligations
+         SET created_at = created_at - interval '3 hours', updated_at = updated_at - interval '3 hours'
+         WHERE lot_id = $1",
+        "UPDATE public.settlement_obligation_fulfillments
+         SET created_at = created_at - interval '3 hours', updated_at = updated_at - interval '3 hours'
+         WHERE obligation_id IN (SELECT id FROM public.settlement_obligations WHERE lot_id = $1)",
+        "UPDATE public.settlement_recoveries
+         SET created_at = created_at - interval '3 hours', updated_at = updated_at - interval '3 hours',
+             payment_deadline_at = payment_deadline_at - interval '3 hours'
+         WHERE lot_id = $1",
+    ] {
+        sqlx::query(statement).bind(lot_id).execute(pool).await.expect("平移结算时刻");
+    }
+    let (payment, amount, equipment_id): (Uuid, i64, Uuid) = sqlx::query_as(
+        "SELECT id, amount, equipment_id FROM public.settlement_obligations
+         WHERE lot_id = $1 AND obligation_kind = 'winner_equipment_cod'",
+    )
+    .bind(lot_id)
+    .fetch_one(pool)
+    .await
+    .expect("读取 COD 义务");
+    let delivery = Uuid::new_v4();
+    let prepare = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO public.deliveries
+            (id, command_id, request_digest, origin_kind, origin_id, recipient, payload, status,
+             fencing_version, attempt_count, claimed_at, sending_at, completed_at, failure_code,
+             result_metadata, created_at, updated_at)
+         VALUES ($1, $2, decode(repeat('a7', 32), 'hex'), 'settlement', $3, 'settlement buyer',
+                 jsonb_build_object('schema_version', 1, 'operation', 'send', 'world', 'main',
+                     'template', 'settlement_winner_equipment_cod', 'credits', 0, 'cod', $4,
+                     'variables', jsonb_build_object('reference', $3),
+                     'equipment_secret_refs', jsonb_build_array(jsonb_build_object(
+                         'kind', 'auction_equipment_key', 'id', $5::text))),
+                 'manual_reconcile', 1, 1, now(), now(), now(), 'not_observed',
+                 '{\"operation\":\"inventory\",\"stage\":\"read\",\"write_started\":false}'::jsonb,
+                 now(), now())",
+    )
+    .bind(delivery)
+    .bind(prepare)
+    .bind(payment.to_string())
+    .bind(amount)
+    .bind(equipment_id)
+    .execute(pool)
+    .await
+    .expect("写入只读过库存的原 COD 投递");
+    sqlx::query(
+        "UPDATE public.settlement_obligation_fulfillments
+         SET execution_state = 'manual_reconcile', delivery_id = $2, prepare_command_id = $3,
+             prepare_request_digest = decode(repeat('a7', 32), 'hex'),
+             last_error_code = 'not_observed', completed_at = updated_at,
+             state_version = state_version + 1
+         WHERE obligation_id = $1",
+    )
+    .bind(payment)
+    .bind(delivery)
+    .bind(prepare)
+    .execute(pool)
+    .await
+    .expect("付款履约转人工核对");
+}
+
+/// 装备损失以线下补偿收口时，把仍是 contingent 的退款履约直接收口为 failed：同事务清除或有未激活
+/// 标记，退款回到活动入口，由损失处置事实证明已处置；水位读数与全表读法一致且不计失败。
+#[tokio::test]
+async fn postgres_equipment_loss_closes_dormant_refund_into_the_active_entry() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let admin = database.maintenance_store().await.expect("以维护账号连接");
+    let service = database.store().await.expect("以运行账号连接");
+    let seeded = seed(&admin).await;
+    let Settled { claim, now, .. } = settle_through_ports(&admin, &service, &seeded).await;
+    service.complete(claim, now).await.expect("完成结算 workflow");
+    let pool = service.postgres_pool();
+    sqlx::query(
+        "INSERT INTO public.settlement_funding_accounts (uid, status, state_version, accounting_mode)
+         VALUES ('1001', 'ready', 1, 'record_only')",
+    )
+    .execute(pool)
+    .await
+    .expect("写入只记账资金账户");
+    make_equipment_loss_admissible(pool, seeded.sold_lot).await;
+    let refund = contingent_refund(pool, seeded.sold_lot).await;
+
+    let preview = service.preview_equipment_loss(seeded.sold_lot).await.expect("预览装备损失");
+    assert!(preview.eligible, "夹具应满足装备损失准入：{:?}", preview.blockers);
+    service
+        .resolve_equipment_loss(EquipmentLossCommand {
+            command_id: Uuid::new_v4(),
+            lot_id: seeded.sold_lot,
+            actor: "settlement-test-operator".to_owned(),
+            operator_identity: None,
+            reason: "equipment destroyed before the COD left the inventory".to_owned(),
+            funding_uid: "1001".to_owned(),
+            expected_recovery_version: preview.expected_recovery_version,
+            expected_payment_version: preview.expected_payment_version,
+            expected_delivery_fencing_version: preview.expected_delivery_fencing_version,
+            expected_seller_amount: preview.seller_amount,
+            buyer_compensation_external: true,
+        })
+        .await
+        .expect("装备损失收口带标记的退款");
+
+    let (state, execution, error_code, dormant): (String, String, Option<String>, bool) =
+        sqlx::query_as(
+            "SELECT obligation.business_state, fulfillment.execution_state,
+                    fulfillment.last_error_code, fulfillment.dormant
+             FROM public.settlement_obligations AS obligation
+             JOIN public.settlement_obligation_fulfillments AS fulfillment
+               ON fulfillment.obligation_id = obligation.id
+             WHERE obligation.id = $1",
+        )
+        .bind(refund)
+        .fetch_one(pool)
+        .await
+        .expect("读取退款履约");
+    assert_eq!(
+        (state.as_str(), execution.as_str(), error_code.as_deref(), dormant),
+        ("contingent", "failed", Some("operator_external_buyer_compensation"), false),
+        "退款义务仍是 contingent，履约收口为 failed 并清除标记"
+    );
+    crate::alert_entry_equivalence::assert_alert_reads_match_full_scan(pool).await;
+
+    service.postgres_pool().close().await;
+    admin.postgres_pool().close().await;
+}

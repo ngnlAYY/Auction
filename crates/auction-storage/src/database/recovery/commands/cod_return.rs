@@ -4,6 +4,8 @@
 //! 付款窗口按冻结的恢复策略版本重新起算；
 //! 达到冻结上限：为卖家建立 withdrawn_return 义务把装备寄回，并把原 COD 与卖家收款按失败收口；
 //! 成交随之撤销，同事务冲正补偿池。
+//! 两条路径都以当前退件与 Take 为依据，先按与 Admin 确认同一谓词核对退件能否把原 COD 的每一次
+//! 可能外达发送逐一归属；不成立时以阻断码转人工，什么都不收口、不重寄。
 
 use auction_application::recovery::{RecoveryCommandError, RecoveryResolutionAdvance};
 use auction_domain::{RecoveryPolicy, legacy_natural_key_uuid};
@@ -12,6 +14,7 @@ use serde_json::Value;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
+use super::binding::{block_unattributed_recovery, return_attributable_to_sends};
 use super::mapping::is_conflict;
 use super::mapping::map_reversal_error;
 use super::mapping::map_sql_error;
@@ -103,6 +106,24 @@ async fn advance_cod_return_postgres_once(
     let auction_id: Uuid = candidate.try_get("auction_id").map_err(map_sql_error)?;
     let lot_id: Uuid = candidate.try_get("lot_id").map_err(map_sql_error)?;
     let equipment_id: Uuid = candidate.try_get("equipment_id").map_err(map_sql_error)?;
+
+    // 重寄与退回卖家都以当前退件与 Take 为依据：原 COD 每一次可能已到达远端的发送都必须由已消费的
+    // 系统退件逐一归属，且当前退件之后没有任何发送；与 Admin 确认同一谓词。不成立时不重寄、不撤销
+    // 成交，以阻断码转人工并提交（不变量 2、4、6）。
+    if !return_attributable_to_sends(&mut transaction, payment_obligation_id, recovery_id).await? {
+        let state_version =
+            block_unattributed_recovery(&mut transaction, recovery_id, state_version, now).await?;
+        transaction.commit().await.map_err(map_sql_error)?;
+        return Ok(Some(RecoveryResolutionAdvance {
+            recovery_id: recovery_id.into(),
+            stage: "reclaiming".to_owned(),
+            resolution: None,
+            relisted_auction_id: None,
+            relisted_lot_id: None,
+            state_version,
+            completed: false,
+        }));
+    }
 
     let (stage, resolution, next_state_version) = if cod_return_count < cod_return_limit {
         // 冻结版本未知或截止溢出是持久事实无效：在任何写入前失败关闭，不能退化为 StaleState。

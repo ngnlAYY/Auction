@@ -18,9 +18,14 @@
 --   4. Take：确认种类对应的收回动作（reclaimed 为 reclaim_equipment_take，cancelled 为
 --      cancel_carrier_take）已满足，来源邮件、证明引用与恢复记录的 custody 证明都指向这封退件，
 --      Take 投递按同一 MID 在退件所在世界成功领取；
---   5. 被处置的发送尝试就是被收回的那次：原付款投递的冻结发送尝试与当前发送围栏都早于退件截止
---      时刻（恢复记录消费该退件的时刻，与退件收件时刻加 3 分钟取早），确认之后原投递也没有新的
---      Admin 命令（新 fence）；
+--   5. 被处置的发送能唯一归属（与运行期确认同一规则）：原付款义务全部结算投递上每一次可能已到达
+--      远端的发送（冻结发送尝试、没有冻结尝试的旧发送围栏、恢复后外部核对隔离的发送、没有冻结
+--      尝试的旧 Sent 绑定）都对应一封本恢复记录已消费的系统退件，两者计数相等；只有投递当前发送
+--      能凭投递行证明确定没有外写（failed、无远端引用、结果明确记录 write_started=false 与
+--      outcome_unknown=false，当前 fence 无 Sent 绑定），其余一律按可能外达计数。任何发送都早于
+--      当前退件的截止时刻（恢复记录消费该退件的时刻，与退件收件时刻加 3 分钟取早），最早的发送
+--      早于第一封已消费退件的截止；确认之后原投递也没有新的 Admin 命令（新 fence）。截止之前的
+--      两次发送、同一分钟内的多次发送或时钟偏差下落在截止之前的重发都不能唯一归属，保持原样；
 --   6. 依赖履约（卖方货款；isekai 另有装备交付）要么已是 failed，要么是从未准备、没有未过期领取
 --      的 pending。
 --   任一条件不满足的记录保持原样，留给人工核对。不改写投递、发送证明、资金或恢复记录，不把
@@ -69,8 +74,96 @@ WITH eligible AS (
      END
     JOIN public.deliveries AS take_delivery ON take_delivery.id = take.delivery_id
     CROSS JOIN LATERAL (
-        SELECT LEAST(consumed.recorded_at, returned.received_at + interval '3 minutes') AS cutoff
-    ) AS bound
+        WITH obligation_deliveries AS (
+            SELECT candidate.id,
+                   candidate.status,
+                   candidate.sending_at,
+                   candidate.fencing_version,
+                   candidate.external_reference,
+                   candidate.result_metadata,
+                   current_attempt.sending_fencing_version AS current_fence
+            FROM public.deliveries AS candidate
+            LEFT JOIN LATERAL public.delivery_current_send_attempt(candidate.id)
+                AS current_attempt ON true
+            WHERE candidate.origin_kind = 'settlement'
+              AND candidate.origin_id = recovery.payment_obligation_id::text
+        ),
+        proven_unsent AS (
+            SELECT unsent.id
+            FROM obligation_deliveries AS unsent
+            WHERE unsent.status = 'failed'
+              AND unsent.external_reference IS NULL
+              AND COALESCE(unsent.result_metadata
+                      @> '{"write_started": false, "outcome_unknown": false}'::jsonb, false)
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM public.delivery_sent_bindings AS unsent_binding
+                  WHERE unsent_binding.delivery_id = unsent.id
+                    AND unsent_binding.fencing_version
+                        = COALESCE(unsent.current_fence, unsent.fencing_version)
+              )
+        ),
+        sends AS (
+            SELECT attempt.sending_at,
+                   COALESCE(attempt.fencing_version = sent.current_fence, false)
+                       AND sent.id IN (SELECT id FROM proven_unsent) AS unsent
+            FROM obligation_deliveries AS sent
+            JOIN public.delivery_send_attempts AS attempt ON attempt.delivery_id = sent.id
+            UNION ALL
+            SELECT sent.sending_at, sent.id IN (SELECT id FROM proven_unsent)
+            FROM obligation_deliveries AS sent
+            WHERE sent.sending_at IS NOT NULL AND sent.current_fence IS NULL
+            UNION ALL
+            SELECT quarantine.sent_at, false
+            FROM obligation_deliveries AS sent
+            JOIN public.delivery_external_quarantines AS quarantine
+              ON quarantine.delivery_id = sent.id
+            UNION ALL
+            SELECT NULL::timestamptz, false
+            FROM obligation_deliveries AS sent
+            JOIN public.delivery_sent_bindings AS legacy_binding
+              ON legacy_binding.delivery_id = sent.id
+            WHERE legacy_binding.expectation_fencing_version IS NULL
+              AND NOT (sent.sending_at IS NOT NULL AND sent.current_fence IS NULL
+                       AND legacy_binding.fencing_version = sent.fencing_version)
+        ),
+        returns AS (
+            SELECT LEAST(consumption.recorded_at,
+                         return_mail.received_at + interval '3 minutes') AS cutoff,
+                   return_mail.id = recovery.return_mail_id AS current_return
+            FROM public.settlement_recovery_return_consumptions AS consumption
+            JOIN public.inbound_mail AS return_mail ON return_mail.id = consumption.return_mail_id
+            WHERE consumption.recovery_id = recovery.id
+              AND return_mail.decision_metadata ->> 'obligation_id'
+                  = recovery.payment_obligation_id::text
+              AND COALESCE(
+                  return_mail.sender = 'MoogleMail'
+                  AND translate(return_mail.subject, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+                                'abcdefghijklmnopqrstuvwxyz') COLLATE "C" IN (
+                      '[rts] auction equipment delivery ['
+                          || (return_mail.decision_metadata ->> 'obligation_id') || ']',
+                      '[rts] auction payment request ['
+                          || (return_mail.decision_metadata ->> 'obligation_id') || ']',
+                      '[rts] auction seller payout ['
+                          || (return_mail.decision_metadata ->> 'obligation_id') || ']',
+                      '[rts] auction buyer refund ['
+                          || (return_mail.decision_metadata ->> 'obligation_id') || ']'),
+                  false)
+        )
+        SELECT COALESCE(
+            (SELECT count(*) FROM returns WHERE returns.current_return) = 1
+            AND NOT EXISTS (
+                SELECT 1
+                FROM sends
+                CROSS JOIN returns
+                WHERE returns.current_return AND sends.sending_at >= returns.cutoff
+            )
+            AND (SELECT count(*) FROM sends WHERE NOT sends.unsent)
+                = (SELECT count(*) FROM returns)
+            AND (SELECT min(sends.sending_at) FROM sends)
+                < (SELECT min(returns.cutoff) FROM returns),
+            false) AS attributable
+    ) AS attribution
     WHERE recovery.resolution IN ('reclaimed', 'cancelled')
       -- 2. 原付款已寄出、等待领取证据，原投递是唯一派发且已成功。
       AND payment.execution_state = 'enqueued'
@@ -112,15 +205,9 @@ WITH eligible AS (
       AND take_delivery.payload_operation = 'take'
       AND take_delivery.external_reference
           = 'mooglemail:' || returned.world_id || ':take:' || returned.external_mail_id
-      -- 5. 被处置的发送早于退件截止，确认之后原投递没有新的 Admin 命令。
+      -- 5. 被处置的发送能唯一归属，确认之后原投递没有新的 Admin 命令。
       AND delivery.sending_at IS NOT NULL
-      AND delivery.sending_at < bound.cutoff
-      AND NOT EXISTS (
-          SELECT 1
-          FROM public.delivery_send_attempts AS attempt
-          WHERE attempt.delivery_id = delivery.id
-            AND attempt.sending_at >= bound.cutoff
-      )
+      AND attribution.attributable
       AND NOT EXISTS (
           SELECT 1
           FROM public.delivery_admin_commands AS admin

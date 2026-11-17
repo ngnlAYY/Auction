@@ -395,36 +395,36 @@ mod tests {
 
     #[test]
     fn player_support_requires_exactly_one_bounded_selector() {
-        assert!(
-            PlayerSupportRequest { selector: PlayerSupportSelector::User("Sample".to_owned()) }
-                .validate()
-        );
-        assert!(
-            PlayerSupportRequest { selector: PlayerSupportSelector::Reference(Uuid::from_u128(1)) }
-                .validate()
-        );
-        assert!(
-            !PlayerSupportRequest { selector: PlayerSupportSelector::User(String::new()) }
-                .validate()
-        );
-        assert!(
-            !PlayerSupportRequest { selector: PlayerSupportSelector::User(" Sample".to_owned()) }
-                .validate()
-        );
-        assert!(
-            !PlayerSupportRequest {
-                selector: PlayerSupportSelector::User("x".repeat(MAX_PLAYER_SUPPORT_USER_LEN + 1))
-            }
-            .validate()
-        );
-        // 形似 UUID 但不是规范文本时不能当成用户名去扫描。
-        assert!(
-            !PlayerSupportRequest {
-                selector: PlayerSupportSelector::User(
-                    "0f8fad5b-d9cb-469f-a165-70867728950".to_owned()
+        // 扩展投影只决定是否输出结算退件 Take，不参与检索入口的校验。
+        let request = |selector, include_settlement_return_actions| PlayerSupportRequest {
+            selector,
+            include_settlement_return_actions,
+        };
+        for include in [false, true] {
+            assert!(request(PlayerSupportSelector::User("Sample".to_owned()), include).validate());
+            assert!(
+                request(PlayerSupportSelector::Reference(Uuid::from_u128(1)), include).validate()
+            );
+            assert!(!request(PlayerSupportSelector::User(String::new()), include).validate());
+            assert!(
+                !request(PlayerSupportSelector::User(" Sample".to_owned()), include).validate()
+            );
+            assert!(
+                !request(
+                    PlayerSupportSelector::User("x".repeat(MAX_PLAYER_SUPPORT_USER_LEN + 1)),
+                    include
                 )
-            }
-            .validate()
-        );
+                .validate()
+            );
+            // 形似 UUID 但不是规范文本时不能当成用户名去扫描。
+            assert!(
+                !request(
+                    PlayerSupportSelector::User("0f8fad5b-d9cb-469f-a165-70867728950".to_owned()),
+                    include
+                )
+                .validate()
+            );
+            assert!(!request(PlayerSupportSelector::Reference(Uuid::nil()), include).validate());
+        }
     }
 }

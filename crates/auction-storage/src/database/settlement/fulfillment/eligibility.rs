@@ -1,12 +1,12 @@
 //! 恢复记录落定 resolution（成交撤销）之后结算义务是否仍可执行的唯一谓词：履约领取、
 //! prepare/activate/satisfy 的最终事务与 Admin 重新激活结算投递共用同一口径，按义务在恢复记录中
-//! 的角色与 resolution 判定。Admin 重新激活另须确认恢复流程没有接管该义务被退回的邮件。
+//! 的角色与 resolution 判定。恢复流程是否已接管义务被退回的邮件也只有一个谓词：Admin 重新激活
+//! 与投递 Worker 的领取、发送围栏共用。
 
 use sqlx::Postgres;
 use uuid::Uuid;
 
 use crate::database::TrackedTransaction as Transaction;
-use crate::database::settlement::fulfillment::system_settlement_return_source;
 
 /// `o` 为 `public.settlement_obligations` 别名时义务仍可执行的 SQL 谓词。成交撤销后，恢复记录的
 /// 付款、交付与卖方货款义务都不再执行（装备已收回、重列或寄回卖家，绝不能再寄出或付款）；买方
@@ -27,36 +27,53 @@ macro_rules! recovery_allows_execution {
 }
 pub(super) use recovery_allows_execution;
 
-/// 恢复流程已接管义务 `$1` 被退回的邮件：它是某条恢复记录的付款或交付义务，且该恢复记录已消费
-/// 退件或持有收回证明，或者来源可证明的系统退件已经到达、尚待恢复流程消费。
-const RECOVERY_OWNS_RETURN: &str = concat!(
-    r#"SELECT EXISTS (
-           SELECT 1
-           FROM public.settlement_recoveries AS recovery
-           WHERE $1 IN (recovery.payment_obligation_id, recovery.equipment_obligation_id)
-             AND (recovery.return_mail_id IS NOT NULL OR recovery.custody_proof_kind IS NOT NULL)
-       ) OR EXISTS (
-           SELECT 1
-           FROM public.inbound_mail AS inbound
-           WHERE inbound.mail_kind = 'delivery'
-             AND inbound.status = 'accepted'
-             AND inbound.decision_code = 'settlement_recovery_returned'
-             AND inbound.decision_metadata ->> 'obligation_id' = $1::text
-             AND "#,
-    system_settlement_return_source!(),
-    r#"
-             AND EXISTS (
+/// 恢复流程已接管义务 `$obligation`（uuid 表达式，为 NULL 时整体为假）被退回的邮件：它是某条
+/// 恢复记录的付款或交付义务，且该恢复记录已消费退件或持有收回证明，或者来源可证明的系统退件已经
+/// 到达、尚待恢复流程消费。之后原投递的重寄只归恢复 owner（main COD 未达上限由其自动重寄，重寄时
+/// 清空当前退件与收回证明，谓词随之为假），其余经 Admin 确认收口。
+macro_rules! recovery_owns_return_sql {
+    ($obligation:literal) => {
+        concat!(
+            "(EXISTS (
                  SELECT 1
-                 FROM public.settlement_recoveries AS owner
-                 WHERE $1 IN (owner.payment_obligation_id, owner.equipment_obligation_id)
-             )
-             AND NOT EXISTS (
+                 FROM public.settlement_recoveries AS recovery
+                 WHERE ",
+            $obligation,
+            " IN (recovery.payment_obligation_id, recovery.equipment_obligation_id)
+                   AND (recovery.return_mail_id IS NOT NULL
+                        OR recovery.custody_proof_kind IS NOT NULL)
+             ) OR EXISTS (
                  SELECT 1
-                 FROM public.settlement_recovery_return_consumptions AS consumed
-                 WHERE consumed.return_mail_id = inbound.id
-             )
-       )"#
-);
+                 FROM public.inbound_mail AS inbound
+                 WHERE inbound.mail_kind = 'delivery'
+                   AND inbound.status = 'accepted'
+                   AND inbound.decision_code = 'settlement_recovery_returned'
+                   AND inbound.decision_metadata ->> 'obligation_id' = (",
+            $obligation,
+            ")::text
+                   AND ",
+            $crate::database::settlement::fulfillment::system_settlement_return_source!(),
+            "
+                   AND EXISTS (
+                       SELECT 1
+                       FROM public.settlement_recoveries AS owner
+                       WHERE ",
+            $obligation,
+            " IN (owner.payment_obligation_id, owner.equipment_obligation_id)
+                   )
+                   AND NOT EXISTS (
+                       SELECT 1
+                       FROM public.settlement_recovery_return_consumptions AS consumed
+                       WHERE consumed.return_mail_id = inbound.id
+                   )
+             ))"
+        )
+    };
+}
+pub(crate) use recovery_owns_return_sql;
+
+/// Admin 重新激活前按参数 `$1`（义务 UUID）求值的接管谓词。
+const RECOVERY_OWNS_RETURN: &str = concat!("SELECT ", recovery_owns_return_sql!("$1"));
 
 /// 最终事务内复核资格；调用方已按既有锁序锁定恢复记录与义务，不满足的义务失败关闭，
 /// 领取过滤与这里的复核共同保证撤销后的旧 claim 不能继续推进。

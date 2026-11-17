@@ -30,7 +30,7 @@
 | `/renames` | 改名回滚 | 改名历史与回滚 |
 | `/deliveries` | 投递队列 | 邮件 outbox：释放、重试、对结果未知投递的人工对账（成功/失败/重试），以及按投递 ID 定位详情（列表读取带 `include=settlement_returns`，含结算退件 Take） |
 | `/deliveries/{delivery_id}` | 投递详情 | 只读证据：冻结 Send/Take 尝试、可引用 Sent 证据、领取状态、追加式处置、来源义务与恢复（读取带 `include=settlement_returns`，含结算退件 Take 与装备收回处置）；可从已采集证据发起与 CLI 同一命令的人工 Sent 证明（预览无副作用）。结算退件 Take（来源 `settlement_return_action`）链接到所属退件案件，投递队列对它不提供人工动作 |
-| `/player-support` | 玩家支持 | 按用户名/用户 ID 或参考编号只读汇总出价、成交、义务、投递与通知；入口与结果同步到 `user`/`reference` query |
+| `/player-support` | 玩家支持 | 按用户名/用户 ID 或参考编号只读汇总出价、成交、义务、投递与通知；入口与结果同步到 `user`/`reference` query（读取带 `include=settlement_returns`，投递分区含结算退件 Take） |
 | `/outbox` | 实时事件 | realtime 事件页、消费 lag、失败记录与重放 |
 | `/settlement` | 结算报表 | 选择世界与期号后查看结算与恢复报告，确认恢复动作 |
 | `/settlement-returns` | 结算退件 | 被拒收或过期退回的货款、退款与流拍/撤拍寄回，每封退件一个案件（含 `untrusted`/`unbound` 隔离记录）；范围（缺省只看未结案）、状态、证据分类、义务种类与世界同步到 `scope`/`status`/`match_state`/`obligation_kind`/`world`/`page` query，每页数量同步到 `page_size`；可按案件 ID 直接打开详情；侧栏显示未结案退件待办数（导航待办读取带 `include=settlement_returns`） |

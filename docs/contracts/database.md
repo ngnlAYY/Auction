@@ -119,7 +119,7 @@
 | `settlement_return_evidence` | 恢复流程不处理的结算退件的消费事实（迁移 `000111`，只追加）：以入站邮件 ID 为主键，记录处置闭集 `untrusted`（来源无法证明）、`unbound`（无法唯一绑定原派发）、`fulfillment_terminal`（履约已终结，只留证）与 `manual_reconcile`（同事务把未终结履约转人工对账，失败码 `settlement_mail_returned`），以及原因码、原义务、原投递与消费前的履约状态；消费本身不领取、不退回、不重发，不写 `settlement_funding_returns`，不改变资金 |
 | `settlement_return_cases` | 结算退件案件投影（迁移 `000114`）：每条退件证据一个案件（含 untrusted/unbound/fulfillment_terminal），主键即退件邮件 ID；记录绑定的原派发（投递与派发编号，同一原派发至多被一个案件绑定）、状态闭集（`quarantined`、`recheck_pending`、`awaiting_decision`、`take_pending`、`take_unknown`、`resend_pending`、`held`、`resent`、`inbox_closed`、`reviewed`）、当前判定原因、领回后计划（`resend`/`hold`）、建案时冻结的补寄上限（领域常量 3，不含首寄）、本案授权的补寄编号与 `case_version`；经重新核验改绑的案件以 `verified_version` 引用改绑所依据的核验事实，此后资产、Take 预期与巡检身份都以该核验事实为当前有效证据，入站证据原文不改写。案件终结只表示本次退件处理完成，不消灭原权利人的权益。Admin 导航待办 `settlement_returns` 与两类退件告警都只按 `closed_at IS NULL` 计数（含隔离、待核验与 Take 结果未知），不要求存在义务 |
 | `settlement_return_commands`、`settlement_return_events` | 退件 Admin 命令账本与案件事件（迁移 `000114`，只追加）：命令按 `command_id` 幂等（同摘要返回原结果、不同摘要冲突），记录动作、摘要、actor、期望与结果版本；事件以 `(案件, 版本)` 为主键，每次案件推进恰好一条，Admin 事件引用命令 |
-| `settlement_return_actions` | 退件持久 Take 投影（迁移 `000114`）：每案至多一项，冻结来源世界/MID 与精确预期 Credits/COD/附件；`pending` 由 Worker 锁内复核同邮件互斥后经 delivery owner 以受限来源 `settlement_return_action` 准备并激活投递（`enqueued`），终态后凭精确领取证明转 `satisfied`，失败或未知转 `manual_reconcile`（不自动重试）；唯一例外是持久结果证明确定未外写（`write_started=false`、非未知、没有 `sweep_retries` 与远端引用）的失败，案件 owner 在收口时以新 fence 重新排队同一投递、动作保持 `enqueued`（每案最多两次，记在案件事件）。激活前即发现同邮件冲突时不写入投递，动作保持没有投递身份的 `pending`，原因记在案件事件；另一 owner 的意图确定从未执行后案件交接回 `take_pending` 再激活，之后投递台拒绝重新激活那条意图。结果未知之后只由邮箱维护凭原 Take 会话的观察推进：integrations 核对过原身份、原退件正文前缀与领取回执的完成证明（`action_recovered_inbox_v1`/`take_receipt_proven`，预期资产逐项一致；只凭附件已为空不接受）与投递收口同事务转 `satisfied` 并按领回证明记账，原资产完整仍在则投递重新排队、动作回到 `enqueued`、案件回到 `take_pending` |
+| `settlement_return_actions` | 退件持久 Take 投影（迁移 `000114`）：每案至多一项，冻结来源世界/MID 与精确预期 Credits/COD/附件；`pending` 由 Worker 锁内复核同邮件互斥后经 delivery owner 以受限来源 `settlement_return_action` 准备并激活投递（`enqueued`），终态后凭精确领取证明转 `satisfied`，失败或未知转 `manual_reconcile`（不自动重试）；唯一例外是持久结果证明确定未外写（`write_started` 与 `outcome_unknown` 都是明确的 JSON 布尔 `false`，缺键、null 或错误类型都不算；没有 `sweep_retries` 与远端引用）的失败，案件 owner 在收口时以新 fence 重新排队同一投递、动作保持 `enqueued`（每案最多两次，记在案件事件）。激活前即发现同邮件冲突时不写入投递，动作保持没有投递身份的 `pending`，原因记在案件事件；另一 owner 的意图确定从未执行后案件交接回 `take_pending` 再激活，之后投递台拒绝重新激活那条意图。结果未知之后只由邮箱维护凭原 Take 会话的观察推进：integrations 核对过收件人（执行 Take 的凭据所属账号的预期玩家名，缺失即不成立）、原身份、原退件正文前缀与领取回执的完成证明（`action_recovered_inbox_v1`/`take_receipt_proven`，预期资产逐项一致；只凭附件已为空不接受）与投递收口同事务转 `satisfied` 并按领回证明记账，原资产完整仍在则投递重新排队、动作回到 `enqueued`、案件回到 `take_pending` |
 | `settlement_return_verifications` | 未绑定退件只读重新核验读到的完整证据（迁移 `000114`，只追加）：以写入它的案件推进版本为键，记录与入站证据同一严格模型的证据对象、判定（分类与原因码）、唯一绑定的原派发与观察时刻；读不到原退件时不写。改绑时案件引用它，其余结论只留作核验历史 |
 | `settlement_return_takes` | 精确领回证明的消费事实（迁移 `000114`，只追加）：案件、Take 投递、原派发投递与（世界, MID）各唯一，记录领回的资产与证明摘要；资金返还、代管责任与对账位置都以它为准，只消费一次 |
 | `settlement_fulfillment_dispatches` | 结算义务派发历史（迁移 `000115`，只追加）：`(义务, 派发编号)` 主键、投递唯一；首寄 `authorized_by` 为空，补寄必须引用授权它的退件案件（每案至多一次）。履约准备事务登记本次派发；迁移补登既有的首寄 |
@@ -152,7 +152,7 @@
 
 读侧由运行时开关 `disposition_read_mode`（`legacy`/`shadow`/`classified`，见[ops/config/README.md#数据库运行时开关](../../ops/config/README.md#数据库运行时开关)）选择口径，Admin 与 Worker 都按该开关读取同一告警快照。`shadow` 为缺省：旧口径继续持有裁决权，分类口径只用影子样本（`auction_shadow_evaluations_total`/`auction_shadow_mismatch_total`，owner `disposition_reads`）记录逐项差异，不改变告警可见值；`classified` 只有在影子期差异经观察与批准后由操作者显式切换。两条口径必须来自同一语句级快照：存储层用一条语句同时返回旧口径与分类口径的配对计数，禁止先读一条路径、再用连接池补读另一条路径，否则并发投递推进会制造假差异。回退只切换开关，处置事实表只追加、不删除。
 
-履约终态的失败水位同属该口径：`settlement_obligation_fulfillments` 中装备损失的线下补偿（`failed` 且 `last_error_code=operator_external_buyer_compensation`）以 `equipment_loss` 统一处置事实解除计数，证明是该处置行与损失事实同时在原事务写入；处置事实缺失时该失败继续计入告警，绝不因为损失表存在而静默吞掉未处置终态。读取仍要求退款义务与损失事实配对，不新增种类、来源列或迁移。COD 退回达到 recovery 冻结上限后的履约终态（稳定码沿用 `cod_returned_three_times` / `equipment_returned_to_seller`，与实际上限无关）由迁移 `000100` 的 `cod_returned` 统一处置事实解除：处置绑定原 COD 投递与 fence，来源引用恢复记录 `settlement_recovery_id`，理由写明实际退回次数与冻结上限（已追加的历史理由不改写），并在 COD 退回终态的同一事务写入；读侧只对同一恢复记录的 payment、交付（isekai）、seller payout 与 buyer refund 义务解除失败计数，处置缺失时继续计入告警。Admin 确认 `reclaimed`/`cancelled` 的成交撤销复用同一处置种类：确认事务把原付款履约收口为 `failed`（`recovery_reclaimed`/`recovery_cancelled`）、把未开始的卖方货款与 isekai 装备交付收口为 `failed`（`recovery_sale_voided`），处置的 `reason_code` 同为付款失败码、操作者来源为 `admin`；迁移 `000112` 修复的历史记录以 `system`/`migration-000112` 写入。该处置不改变成交撤销、补偿池或退款事实。Admin 确认 `equipment_recovered`（isekai 已付款、交付被退回且装备经精确 Take 证明收回）使用迁移 `000113` 的 `recovery_equipment_recovered` 处置：确认事务保留已满足的载体付款，把从未开始、没有投递与支出的卖方货款收口为 `failed`（`recovery_sale_voided`），把原交付收口为 `failed`（`recovery_equipment_recovered`），处置绑定原交付投递当前 fence、来源为恢复记录、`reason_code` 为 `recovery_equipment_recovered`、操作者来源 `admin`，并同事务激活买方退款；读侧只对同一恢复记录的卖方货款与交付义务解除失败计数。原交付与本轮 Take 的链路（可信 Sent、已被该恢复消费的系统退件、Take 来源邮件/装备/世界/证明摘要）不精确相符、卖方货款已开始或已有支出，或存在更新派发与未解决写入时拒绝确认。收回、取消与装备收回的确认都要求原投递的 `delivery_send_attempts` 与当前 `sending_at` 早于当前退件的截止时刻（`settlement_recovery_return_consumptions.recorded_at` 与退件 `received_at` 加 3 分钟取早），退件之后的新发送不能与旧退件拼接。确认事务的锁序为补偿池 → worlds → auctions → recoveries → lots/equipment → obligations → recovery actions → 各义务履约当前指向的 deliveries（UUID 序）→ fulfillments（义务 UUID 序），与 Admin 投递命令（含判失败）“先投递、后履约”同向，不形成锁环。退款的资金转换、资产冲突门、内部履约校验与 funding 预览只认这一精确收口事实，不接受任意 `failed`；原交付的可信 Sent 证明（精确载荷、旧格式引用恢复 `sent_recovered_reference_v1` 或冻结尝试绑定证明）在确认收回链、内部退款校验与资产冲突门共用同一谓词。成交撤销后，履约领取与 prepare/activate/满足的最终事务按同一谓词复核：恢复记录的付款、交付与卖方货款义务不再执行，买方退款只在 `equipment_recovered` 之后执行；Admin 投递台的释放、重试与对账重试按投递来源义务复核同一谓词，不可执行时返回 `409 settlement_obligation_ineligible`；恢复记录已消费付款或交付义务的退件、持有收回证明，或该义务来源可证明的系统退件已到达而尚未消费时同样返回该 409，原投递的重寄只归恢复流程。
+履约终态的失败水位同属该口径：`settlement_obligation_fulfillments` 中装备损失的线下补偿（`failed` 且 `last_error_code=operator_external_buyer_compensation`）以 `equipment_loss` 统一处置事实解除计数，证明是该处置行与损失事实同时在原事务写入；处置事实缺失时该失败继续计入告警，绝不因为损失表存在而静默吞掉未处置终态。读取仍要求退款义务与损失事实配对，不新增种类、来源列或迁移。COD 退回达到 recovery 冻结上限后的履约终态（稳定码沿用 `cod_returned_three_times` / `equipment_returned_to_seller`，与实际上限无关）由迁移 `000100` 的 `cod_returned` 统一处置事实解除：处置绑定原 COD 投递与 fence，来源引用恢复记录 `settlement_recovery_id`，理由写明实际退回次数与冻结上限（已追加的历史理由不改写），并在 COD 退回终态的同一事务写入；读侧只对同一恢复记录的 payment、交付（isekai）、seller payout 与 buyer refund 义务解除失败计数，处置缺失时继续计入告警。Admin 确认 `reclaimed`/`cancelled` 的成交撤销复用同一处置种类：确认事务把原付款履约收口为 `failed`（`recovery_reclaimed`/`recovery_cancelled`）、把未开始的卖方货款与 isekai 装备交付收口为 `failed`（`recovery_sale_voided`），处置的 `reason_code` 同为付款失败码、操作者来源为 `admin`；迁移 `000112` 修复的历史记录以 `system`/`migration-000112` 写入。该处置不改变成交撤销、补偿池或退款事实。Admin 确认 `equipment_recovered`（isekai 已付款、交付被退回且装备经精确 Take 证明收回）使用迁移 `000113` 的 `recovery_equipment_recovered` 处置：确认事务保留已满足的载体付款，把从未开始、没有投递与支出的卖方货款收口为 `failed`（`recovery_sale_voided`），把原交付收口为 `failed`（`recovery_equipment_recovered`），处置绑定原交付投递当前 fence、来源为恢复记录、`reason_code` 为 `recovery_equipment_recovered`、操作者来源 `admin`，并同事务激活买方退款；读侧只对同一恢复记录的卖方货款与交付义务解除失败计数。原交付与本轮 Take 的链路（可信 Sent、已被该恢复消费的系统退件、Take 来源邮件/装备/世界/证明摘要）不精确相符、卖方货款已开始或已有支出，或存在更新派发与未解决写入时拒绝确认。收回、取消与装备收回的确认，以及 Worker 的 COD 自动重寄与达到上限后的自动退回卖家，都先按同一谓词把已消费的退件归属到原义务的发送：原付款（装备收回为原交付）义务全部结算投递上每一次可能已到达远端的发送——`delivery_send_attempts` 的冻结尝试、没有冻结尝试的旧发送围栏（投递当前 `sending_at`）、`delivery_external_quarantines` 的隔离发送、没有冻结尝试的旧 `delivery_sent_bindings`——都必须对应一封本恢复记录已消费的系统退件（计数相等）；只有投递当前这次发送能凭投递行证明确定没有外写（`failed`、无远端引用、`result_metadata` 明确为 `write_started=false` 与 `outcome_unknown=false`、当前 fence 无 Sent 绑定），历史尝试的结果已被后续派发覆盖，一律按可能外达计数；任何发送都早于当前退件的截止时刻（`settlement_recovery_return_consumptions.recorded_at` 与退件 `received_at` 加 3 分钟取早），最早的发送早于第一封已消费退件的截止（看不到第一轮发送说明发送记录不完整）；义务的结算投递仍在准备、排队或发送中（退件之后待发的发送意图，恢复接管后投递门禁会把它一直留在待发）同样不成立。截止之前另有可能外达的发送（同一分钟内的多次发送、时钟偏差下落在截止之前的重发）或退件之后又有发送时，Admin 确认返回 `409 recovery_send_unattributed` 并整体回滚；Worker 自动推进不重寄、不撤销成交，以阻断码 `send_unattributed`（报表显示为 `recovery_evidence_mismatch`）停在 `reclaiming` 并同事务追加审计 `recovery.send_attribution_blocked`，都交人工核对。多轮 COD 重寄每轮一次发送对应一封已消费的退件，照常收口。确认事务的锁序为补偿池 → worlds → auctions → recoveries → lots/equipment → obligations → recovery actions → 各义务履约当前指向的 deliveries（UUID 序）→ fulfillments（义务 UUID 序），与 Admin 投递命令（含判失败）“先投递、后履约”同向，不形成锁环。退款的资金转换、资产冲突门、内部履约校验与 funding 预览只认这一精确收口事实，不接受任意 `failed`；原交付的可信 Sent 证明（精确载荷、旧格式引用恢复 `sent_recovered_reference_v1` 或冻结尝试绑定证明）在确认收回链、内部退款校验与资产冲突门共用同一谓词。成交撤销后，履约领取与 prepare/activate/满足的最终事务按同一谓词复核：恢复记录的付款、交付与卖方货款义务不再执行，买方退款只在 `equipment_recovered` 之后执行；Admin 投递台的释放、重试与对账重试按投递来源义务复核同一谓词，不可执行时返回 `409 settlement_obligation_ineligible`；恢复记录已消费付款或交付义务的退件、持有收回证明，或该义务来源可证明的系统退件已到达而尚未消费时同样返回该 409，原投递的重寄只归恢复流程。同一接管谓词也是投递 Worker 领取与发送围栏（零 Credits 与现金发送同一道门）的门禁：恢复流程接管之后原付款与交付投递不再被领取，已领取的在发送围栏回滚、不冻结发送尝试；恢复流程自己的 COD 重寄清空当前退件与收回证明后照常领取与发送。
 
 结算退件以案件单列（迁移 `000116`）：`settlement_return_pending` 计已绑定、尚未处理完的案件（待决定、领回中、待补寄），`settlement_return_quarantined` 计隔离、待重新核验与 Take 结果未知的案件，都按未结案案件计数、不要求存在义务，告警确认或静音不改变案件。已由未结案退件案件接管的人工对账履约不再计入履约人工对账；代管或留箱结案以 `settlement_return_held`/`settlement_return_inbox` 终结的履约，只在同一原派发上的案件已结案（`held`/`inbox_closed`）时于两种读取口径都不计入履约失败，案件缺失或未结案时继续计入。Admin 投递台对受限来源 `settlement_return_action` 的 Take 投递拒绝全部动作：结果未知只认系统可验证证明，不能人工重试或声明结果。这类投递归所属案件，投递水位（积压、失败、人工对账）、通知失败与导航待办的 `delivery_manual_reconcile` 都不计入，由两类退件告警与 `settlement_returns` 待办承担。
 
@@ -341,16 +341,34 @@ COMMIT 报告的 SSI 冲突不推测为序号热点。
 只追加的转换表变为一次索引探测，请求代价只随页大小增长；不改变可见集合、排序、分页、金额、
 转换写入、锁序、审计或事件。
 
-迁移 `000110`（整体登记 `breaking`，原因是告警闭集扩展）另新增部分索引
-`settlement_obligation_fulfillments_open_idx`（`settlement_obligation_fulfillments (obligation_id)`，
-谓词 `execution_state <> 'satisfied'`）。告警扫描与 Admin 看板的履约水位
-（`crates/auction-storage/src/database/operations/alert/snapshot/reads/fulfillment.rs`）只读尚未满足、
-义务为 `ready`/`blocked` 或履约停在 `failed`/`manual_reconcile` 的行，以及缺少履约行的 `blocked`
-义务；已满足的历史与从未激活的或有退款不进入分类。活动集合收成数组后按主键联表，分类只算一次，
-计数与长期未领取清单读同一份结果，不再顺序扫描投递表。索引只提供候选入口，不改变计数口径、
-金额、状态迁移、锁序、审计或事件。维护成本：未满足履约的领取与延期会改写既有 claim/lease 索引
-列，属于非 HOT 更新，每次都要同时维护这棵索引（不只在进入或离开 `satisfied` 时），而或有买方
-退款长期停在 `pending`、持续占据索引，候选规模仍随成交 lot 数增长。
+迁移 `000110`（整体登记 `breaking`，原因是告警闭集扩展）另为履约水位建立活动入口：
+`settlement_obligation_fulfillments.dormant` 标记从未激活的或有义务（只有买方退款可以是
+`contingent`）的履约，部分索引 `settlement_obligation_fulfillments_open_idx`
+（`settlement_obligation_fulfillments (obligation_id)`，谓词 `execution_state <> 'satisfied' AND NOT
+dormant`）与 `settlement_obligations_blocked_idx`（`settlement_obligations (id)`，谓词
+`business_state = 'blocked'`）。告警扫描与 Admin 看板的履约水位
+（`crates/auction-storage/src/database/operations/alert/snapshot/reads/fulfillment.rs`）的入口只读这
+两个索引：活动履约，以及缺少履约行的 `blocked` 义务；入口条件与索引谓词逐字一致，不再联表义务预筛
+业务状态（分类时按义务状态判定，多收进来的 `contingent` 未终结履约不满足任何计数条件）。已满足的
+历史与从未激活的或有退款不进入入口，入口规模只随活动集合变化，不随成交 lot 增长。活动集合收成数组
+后按主键联表，分类只算一次，计数与长期未领取清单读同一份结果。告警读侧口径切换的履约终态配对计数
+（`crates/auction-storage/src/database/operations/alert/snapshot/disposition.rs`）同样只从
+`execution_state = 'failed'` 的活动履约出发、不联表义务，不再扫描全部义务。索引与标记只提供候选
+入口，不改变计数口径、金额、状态迁移、锁序、审计或事件；入口与全表读法的逐列等价由
+`crates/auction-storage/tests/postgres/alert_entry_equivalence.rs` 验证，执行计划基准见
+`crates/auction-storage/tests/postgres/alert_plans.rs`。
+
+`dormant` 的维护：结算写入义务时或有义务的履约置真；recovery 确认 `equipment_recovered` 激活买方
+退款、装备损失把仍是 `contingent` 的退款履约直接收口为 `failed`（线下补偿）时同事务置假。表约束
+`settlement_obligation_fulfillments_dormant_check` 只允许标记留在初始 `pending`（无投递、无领取）的
+行上；延迟约束触发器 `settlement_obligations_dormant_consistent` 与
+`settlement_obligation_fulfillments_dormant_consistent`（函数
+`validate_settlement_fulfillment_dormant()`）在提交时拒绝“义务已离开 `contingent` 而履约仍带标记”
+或“带标记的履约不属于 `contingent` 义务”，漏清标记的写入失败关闭，已激活的退款不会从入口与计数中
+消失。迁移按同一谓词回填既有行（`contingent` 义务的初始 `pending` 履约），只写标记、不改执行状态、
+状态版本或更新时间。维护成本：未满足履约的领取与延期会改写既有 claim/lease 索引列，属于非 HOT
+更新，每次都要同时维护活动入口索引；或有退款在激活前不在索引里，义务在 `blocked` 与 `ready` 之间
+迁移时同时维护 blocked 入口索引。
 
 迁移 `000087` 只新增四个投递 Admin 检索候选索引，登记 `compatible`：
 `deliveries_admin_recipient_idx`（`lower(recipient)` 前导）、

@@ -21,9 +21,13 @@ use crate::database::storage_error_from;
 ///
 /// 扫描范围：只有尚未满足的履约且义务为 `ready`/`blocked`、或履约停在 `failed`/
 /// `manual_reconcile` 的行，以及缺少履约行的 `blocked` 义务，才可能计入任何水位；已满足的历史
-/// 与从未激活的或有退款不进入分类。尚未满足的履约经迁移 000110 的部分索引
-/// `settlement_obligation_fulfillments_open_idx` 读取；活动集合先收成数组，后续联表按主键逐行
-/// 查找，不随历史顺序扫描投递表。
+/// 与从未激活的或有退款不进入分类。入口只读迁移 000110 的两个部分索引，条件与索引谓词逐字一致：
+/// 活动履约（`settlement_obligation_fulfillments_open_idx`，`execution_state <> 'satisfied' AND
+/// NOT dormant`）与缺少履约行的 `blocked` 义务（`settlement_obligations_blocked_idx`）。从未激活的
+/// 或有退款带 `dormant` 标记，不进入索引与入口；入口也不再联表义务预筛业务状态，分类时按义务
+/// 状态判定。被排除或多收进来的行都不满足任何计数条件（义务是 `contingent` 且履约未终结时，各
+/// 分类都要求 `ready`/`blocked` 或履约终态），计数口径不变；入口规模只随活动集合变化，不随成交
+/// lot、已满足历史或或有退款增长。活动集合先收成数组，后续联表按主键逐行查找。
 ///
 /// 分类只算一次（`classified` 物化），计数、各最老时刻与清单都读这一份结果。等待付款要求恢复
 /// 记录在付款期内，且本义务自身的投递有冻结发送证明（履约以义务为主键、投递以履约为唯一引用，
@@ -31,19 +35,18 @@ use crate::database::storage_error_from;
 /// 行）。两者都改为按主键联表，不再在每个计数里重复展开子查询。
 ///
 /// “等待领取”只拆出已寄出的 Send 履约：COD/载体付款义务沿用“等待买家付款”的既有口径，等待
-/// 付款或前置的项保持原分类。拆出后它们不再计入积压，但仍是未满足义务，只换分组展示。清单只取
+/// 付款或前置的项保持原分类。拆出后它们不再计入积压，但仍是未满足义务，只换分组展示。原投递本轮
+/// 的系统退件已被恢复流程消费（`recovery_consumed_return_sql!`，只有恢复记录的付款与交付义务）
+/// 时邮件已退回 Bot，确认前履约仍停在 `enqueued`：既不是等待领取、超期与清单，也不回落积压，由
+/// 恢复流程承担；计数与清单读同一份分类，口径一致。清单只取
 /// Admin 可见的业务标识与展示字段，不读投递载荷、凭据或外部错误原文；拍品代码按分类前缀加分类
 /// 内编号生成，`lot_number` 取 `category_number`，与 Admin lot 页和结算报表一致。
-const FULFILLMENT_SNAPSHOT: &str = concat!(
+pub(in crate::database::operations::alert::snapshot) const FULFILLMENT_SNAPSHOT: &str = concat!(
     "WITH live_ids AS (
         SELECT ARRAY(
             SELECT open.obligation_id
             FROM public.settlement_obligation_fulfillments AS open
-            JOIN public.settlement_obligations AS obligation
-              ON obligation.id = open.obligation_id
-            WHERE open.execution_state <> 'satisfied'
-              AND (obligation.business_state IN ('ready', 'blocked')
-                   OR open.execution_state IN ('failed', 'manual_reconcile'))
+            WHERE open.execution_state <> 'satisfied' AND NOT open.dormant
             UNION ALL
             SELECT obligation.id
             FROM public.settlement_obligations AS obligation
@@ -91,7 +94,15 @@ const FULFILLMENT_SNAPSHOT: &str = concat!(
                     )
                     AND returned.status IN ('held', 'inbox_closed'))) AS failure_disposed,
                -- 已由结算退件案件接管的人工对账：改按退件待办计数，不再计入履约人工对账。
-               (returned.return_mail_id IS NOT NULL AND returned.closed_at IS NULL) AS return_open
+               (returned.return_mail_id IS NOT NULL AND returned.closed_at IS NULL) AS return_open,
+               -- 原投递本轮的系统退件已被恢复流程消费：邮件已退回 Bot，由恢复流程承担。
+               (obligation.obligation_kind IN (
+                    'winner_equipment_cod', 'winner_payment_carrier_cod',
+                    'winner_equipment_handoff'
+                )
+                AND ",
+    crate::database::settlement::fulfillment::recovery_consumed_return_sql!("obligation"),
+    ") AS recovery_returned
         FROM public.settlement_obligations AS obligation
         LEFT JOIN public.settlement_obligation_fulfillments AS fulfillment
           ON fulfillment.obligation_id = obligation.id
@@ -108,7 +119,9 @@ const FULFILLMENT_SNAPSHOT: &str = concat!(
      ), grouped AS (
         SELECT classified.*,
                (business_state = 'ready' AND sent_send
-                AND NOT waiting_payment AND NOT waiting_prerequisite) AS awaiting_collection
+                AND NOT waiting_payment AND NOT waiting_prerequisite
+                AND NOT recovery_returned) AS awaiting_collection,
+               (business_state = 'ready' AND sent_send AND recovery_returned) AS recovery_owned
         FROM classified
      ), overdue AS (
         SELECT grouped.id, grouped.obligation_kind, grouped.auction_id, grouped.lot_id,
@@ -152,7 +165,7 @@ const FULFILLMENT_SNAPSHOT: &str = concat!(
             COUNT(*) FILTER (WHERE business_state = 'ready'
                 AND execution_state IN ('pending', 'prepared', 'enqueued')
                 AND NOT waiting_payment AND NOT waiting_prerequisite
-                AND NOT awaiting_collection) AS pending,
+                AND NOT awaiting_collection AND NOT recovery_owned) AS pending,
             COUNT(*) FILTER (WHERE business_state = 'blocked'
                 AND execution_state NOT IN ('failed', 'satisfied')
                 AND NOT waiting_payment AND NOT waiting_prerequisite) AS blocked,
@@ -176,7 +189,7 @@ const FULFILLMENT_SNAPSHOT: &str = concat!(
             MIN(backlog_at) FILTER (WHERE business_state = 'ready'
                 AND execution_state IN ('pending', 'prepared', 'enqueued')
                 AND NOT waiting_payment AND NOT waiting_prerequisite
-                AND NOT awaiting_collection
+                AND NOT awaiting_collection AND NOT recovery_owned
                 OR (business_state = 'blocked'
                     AND execution_state NOT IN ('failed', 'satisfied')
                     AND NOT waiting_payment AND NOT waiting_prerequisite)) AS oldest_backlog,

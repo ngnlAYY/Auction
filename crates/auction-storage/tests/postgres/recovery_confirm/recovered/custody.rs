@@ -1,11 +1,14 @@
 //! `equipment_recovered` 之后的买方退款被拒收退回、经退件案件领回代管时，恢复记录由恢复 owner
 //! 以独立的“退款权益转代管”完成事实结束（PostgreSQL 18，运行账号）。全链走真实端口：确认
 //! `equipment_recovered` → 退款资金转换与 prepare/activate → 投递经资金门寄出并以 Sent 证明收口 →
-//! 系统退回并建立退件案件 → 领回代管 → 恢复完成 → 从代管补寄不被恢复状态阻断。
+//! 系统退回并建立退件案件 → 领回代管 → 恢复完成 → 从代管补寄不被恢复状态阻断：第 2 次派发经
+//! 领取、prepare、activate 进入发送队列，经资金门寄出并以 Sent 证明收口，案件结案为已补寄。
+//! 外部 MoogleMail 不参与：发送围栏之后的结果由测试按生产形状写回，不代表真实远端行为。
 
 use std::sync::Arc;
 use std::time::{Duration as StdDuration, Instant};
 
+use auction_application::core::RequestHash;
 use auction_application::delivery::{
     DeliveryClaimExclusions, DeliveryFenceOutcome, DeliveryPreparedExpectation,
     DeliverySendCredentialBinding, DeliverySendExpectation, DeliverySendResult, DeliveryWorkStore,
@@ -16,17 +19,24 @@ use auction_application::recovery::{
 };
 use auction_application::settlement::{
     INTERNAL_EVIDENCE_PROTOCOL, InternalEvidencePurpose, MailAccountEvidenceBinding,
-    MailRuntimeBinding, SettlementInternalEvidenceSnapshot,
+    MailRuntimeBinding, SettlementDeliveryPreparation, SettlementFulfillmentState,
+    SettlementFulfillmentStore, SettlementInternalEvidenceSnapshot, SettlementReturnWorkStore,
 };
-use auction_domain::{SettlementReturnAction, SettlementReturnCaseStatus, SettlementWorld};
+use auction_domain::{
+    CommandId, SettlementDispatchReference, SettlementReturnAction, SettlementReturnCaseStatus,
+    SettlementWorld, resend_activate_command_id, resend_delivery_id, resend_prepare_command_id,
+};
 use auction_storage::DatabaseStore;
 use chrono::{Duration, DurationRound, Utc};
 use serde_json::json;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use super::fixture::{FUNDING_UID, insert_funding, insert_recovered_sale, insert_relist_target};
-use super::{claim_refund, fund_and_activate_refund, recovery_state};
+use super::fixture::{
+    FUNDING_UID, evidence as custody_evidence, insert_funding, insert_recovered_sale,
+    insert_relist_target,
+};
+use super::{claim_refund, deadline, fund_and_activate_refund, recovery_state};
 use crate::recovery_confirm::{confirmation, fulfillment};
 use crate::settlement_returns::flows::{handle, take_through};
 use crate::settlement_returns::{evidence, insert_inbound};
@@ -70,8 +80,9 @@ fn delivery_evidence(
     snapshot
 }
 
-/// 退款投递经资金门进入 sending 后以精确 Sent 证明收口：退款分配 reserve → in_flight → spent。
-async fn send_refund(store: &DatabaseStore, credential: Uuid, delivery: Uuid) {
+/// 退款投递经资金门进入 sending 后以精确 Sent 证明（Sent MID 为 `mid`）收口：退款分配
+/// reserve → in_flight → spent。
+async fn send_refund(store: &DatabaseStore, credential: Uuid, delivery: Uuid, mid: &str) {
     let now = Utc::now();
     let grace = StdDuration::from_secs(60);
     DeliveryWorkStore::begin_claim_cycle(store, now, grace).await.expect("领取前清理");
@@ -118,7 +129,7 @@ async fn send_refund(store: &DatabaseStore, credential: Uuid, delivery: Uuid) {
         .succeed(
             claim.clone(),
             DeliverySendResult {
-                external_reference: "mooglemail:main:send:782001".to_owned(),
+                external_reference: format!("mooglemail:main:send:{mid}"),
                 result_metadata: json!({
                     "operation": "send",
                     "template": claim.payload["template"],
@@ -176,7 +187,7 @@ async fn postgres_returned_refund_held_in_custody_completes_recovery_independent
         .expect("确认 equipment_recovered");
     assert_eq!(result.stage.as_str(), "refunding");
     let refund_delivery = fund_and_activate_refund(&store, &recovered, credential).await;
-    send_refund(&store, credential, refund_delivery).await;
+    send_refund(&store, credential, refund_delivery, "782001").await;
     assert_eq!(
         refund_allocation(pool, sale.refund).await,
         ("refund".to_owned(), "spent".to_owned(), 100)
@@ -271,6 +282,87 @@ async fn postgres_returned_refund_held_in_custody_completes_recovery_independent
     );
     let claim = claim_refund(&store, sale.refund).await;
     assert_eq!((claim.dispatch_no, claim.delivery_id), (2, None));
+
+    // 补寄继续走完 prepare/activate：第 2 次派发以确定性身份准备，正文带派发引用；准备与激活都
+    // 附同 session 的装备在库证据，与首寄同一组门禁，不被已完成的恢复记录阻断。
+    let resend = resend_delivery_id(sale.refund, 2).expect("补寄投递 ID");
+    let prepare_command =
+        CommandId::from_uuid(resend_prepare_command_id(sale.refund, 2).expect("补寄 prepare ID"));
+    let preparation = SettlementDeliveryPreparation {
+        delivery_id: resend,
+        prepare_command_id: prepare_command,
+        request_hash: RequestHash::from_canonical_bytes(b"recovered-refund-resend-prepare"),
+        recipient: claim.recipient.clone(),
+        payload: json!({
+            "schema_version": 1,
+            "operation": "send",
+            "world": "main",
+            "template": "settlement_buyer_refund",
+            "variables": {
+                "amount": "100",
+                "reference": sale.refund.to_string(),
+                "dispatch": SettlementDispatchReference::for_resend(sale.refund, 2)
+                    .expect("派发引用")
+                    .encode(),
+            },
+            "credits": 100,
+            "cod": 0,
+            "equipment_secret_refs": [],
+        }),
+    };
+    let prepare_evidence = custody_evidence(prepare_command.as_uuid(), &claim, credential);
+    let prepared = store
+        .prepare_delivery(claim, preparation, Utc::now(), Some((&prepare_evidence, deadline())))
+        .await
+        .expect("补寄 prepare");
+    assert_eq!(prepared.delivery_id, resend);
+    assert_eq!(prepared.next_claim.state, SettlementFulfillmentState::Prepared);
+    let activate =
+        CommandId::from_uuid(resend_activate_command_id(sale.refund, 2).expect("补寄 activate ID"));
+    let activate_evidence = custody_evidence(activate.as_uuid(), &prepared.next_claim, credential);
+    store
+        .activate_delivery(
+            prepared.next_claim,
+            activate,
+            RequestHash::from_canonical_bytes(b"recovered-refund-resend-activate"),
+            Utc::now(),
+            Some((&activate_evidence, deadline())),
+        )
+        .await
+        .expect("补寄 activate");
+    assert_eq!(fulfillment(pool, sale.refund).await, ("enqueued".to_owned(), None));
+    let (status, authorized_by): (String, Option<Uuid>) = sqlx::query_as(
+        "SELECT delivery.status, dispatch.authorized_by
+         FROM public.deliveries AS delivery
+         JOIN public.settlement_fulfillment_dispatches AS dispatch
+           ON dispatch.delivery_id = delivery.id
+         WHERE delivery.id = $1 AND dispatch.obligation_id = $2 AND dispatch.dispatch_no = 2",
+    )
+    .bind(resend)
+    .bind(sale.refund)
+    .fetch_one(pool)
+    .await
+    .expect("读取补寄投递与派发历史");
+    assert_eq!(
+        (status.as_str(), authorized_by),
+        ("pending", Some(case)),
+        "补寄派发由本案授权并进入发送队列"
+    );
+
+    // 补寄经资金门寄出并以 Sent 证明收口：原退款用途再次支出原额，案件结案为已补寄。
+    send_refund(&store, credential, resend, "782002").await;
+    assert_eq!(
+        refund_allocation(pool, sale.refund).await,
+        ("refund".to_owned(), "spent".to_owned(), 100)
+    );
+    let done =
+        store.complete_due_return_resend(Utc::now()).await.expect("收口补寄").expect("必须收口");
+    assert_eq!((done.return_mail_id, done.status), (case, SettlementReturnCaseStatus::Resent));
+    assert_eq!(
+        recovery_state(pool, sale.recovery_id).await,
+        ("completed".to_owned(), Some("equipment_recovered".to_owned())),
+        "补寄不改写已完成的恢复记录"
+    );
 
     store.postgres_pool().close().await;
 }

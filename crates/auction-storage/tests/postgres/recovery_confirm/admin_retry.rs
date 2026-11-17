@@ -107,7 +107,7 @@ async fn attach_delivery(pool: &PgPool, obligation: Uuid, state: &str) -> Uuid {
              prepare_request_digest = decode(repeat('c4', 32), 'hex'),
              completed_at = CASE WHEN $2 IN ('failed', 'manual_reconcile')
                                  THEN clock_timestamp() END,
-             updated_at = clock_timestamp()
+             dormant = false, updated_at = clock_timestamp()
          WHERE obligation_id = $1",
     )
     .bind(obligation)

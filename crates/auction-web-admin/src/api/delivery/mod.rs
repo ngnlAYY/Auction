@@ -25,7 +25,7 @@ mod queue;
 mod responses;
 
 use self::decode::StrictDeliveryEnvelope;
-use player_support::{decode_player_support, url_encode};
+use player_support::{decode_player_support, player_support_url};
 use responses::{decode_confirmation, decode_detail, decode_preview};
 
 pub(crate) use decode::valid_status;
@@ -34,7 +34,7 @@ pub(crate) use queue::{DeliveryAction, DeliverySearchFilters, execute_delivery, 
 /// 与服务端 `MAX_PLAYER_SUPPORT_ROWS` 对齐；超过即视为损坏响应。
 const MAX_PLAYER_SUPPORT_ROWS: usize = 50;
 
-/// 列表与详情请求的扩展投影（`include` 取值）。本页面的闭集认识结算退件 Take 来源
+/// 列表、详情与玩家支持请求的扩展投影（`include` 取值）。本页面的闭集认识结算退件 Take 来源
 /// （`settlement_return_action`）与装备收回处置（`recovery_equipment_recovered`），必须显式请求；
 /// 服务端缺省投影只输出升级前页面认识的值。
 const DELIVERY_PROJECTION_INCLUDE: &str = "settlement_returns";
@@ -219,8 +219,7 @@ pub(crate) async fn fetch_player_support(
     if key == "user" && value.chars().any(char::is_control) {
         return Err("invalid_player_support_query".to_owned());
     }
-    let url = format!("/api/v1/admin/player-support?{key}={}", url_encode(value));
-    let response = send_get(&url).await?;
+    let response = send_get(&player_support_url(key, value)).await?;
     if !response.ok() {
         return Err(response_error(response).await);
     }

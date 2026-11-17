@@ -49,12 +49,25 @@ impl FenceError {
         }
     }
 
-    /// 回滚已确认后的分类：业务门拒绝（含资金与证据 owner 的确定拒绝）返回 `None`，按正常延期
-    /// 收口；SQL 错误、冲突重试耗尽与其余确定故障返回安全分类，不能被延期掩盖。
+    /// 回滚已确认后的分类：业务门拒绝（含资金 owner 的确定拒绝，以及证据 owner 判定凭据或运行时
+    /// owner 在观察之后正常推进）返回 `None`，按正常延期收口；SQL 错误、冲突重试耗尽、证据结构、
+    /// generation、时效或绑定异常与其余确定故障返回安全分类，不能被延期掩盖。
     fn fault_kind(&self) -> Option<SafeErrorKind> {
         match self {
+            Self::Evidence(MailEvidenceTransactionError::Rejected(rejection)) => {
+                let kind = rejection.fault_kind();
+                if let Some(kind) = kind {
+                    // 证据 owner 的原因到此为止：同一分类下的 generation 与结构异常只靠原因标签
+                    // 区分；只记低基数标签，不记证据内容。
+                    tracing::warn!(
+                        reason = rejection.label(),
+                        safe_kind = kind.label(),
+                        "现金 sending fence 的邮件证据被拒绝，事务已回滚"
+                    );
+                }
+                kind
+            }
             Self::Rejected
-            | Self::Evidence(MailEvidenceTransactionError::Rejected(_))
             | Self::Funding(
                 FundingError::Invalid
                 | FundingError::Conflict
@@ -269,15 +282,49 @@ mod tests {
     use auction_application::settlement::FundingError;
 
     use super::FenceError;
-    use crate::MailEvidenceTransactionError;
+    use crate::{MailEvidenceRejection, MailEvidenceTransactionError};
+
+    /// 关心全部事件、但丢弃内容的作用域订阅者。分类在丢弃 SQL 错误前记 WARN：若本用例在没有订阅者
+    /// 的线程里首次触发该日志回调点，而此刻进程里恰好只登记了另一线程的作用域订阅者，tracing 会按本
+    /// 线程的缺省（无订阅者）把回调点兴趣缓存为 never，并行的
+    /// `discarded_sql_error_logs_safe_projection_only` 就收不到它要捕获的同一条日志。在本订阅者作用
+    /// 域内运行，回调点兴趣按“关心”计算，两者不再竞争。
+    struct Interested;
+
+    impl tracing::Subscriber for Interested {
+        fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {
+            true
+        }
+
+        fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+            tracing::span::Id::from_u64(1)
+        }
+
+        fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+
+        fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+
+        fn event(&self, _: &tracing::Event<'_>) {}
+
+        fn enter(&self, _: &tracing::span::Id) {}
+
+        fn exit(&self, _: &tracing::span::Id) {}
+    }
 
     /// 回滚后只有业务门拒绝按正常延期收口；SQL 错误、冲突耗尽与确定故障都必须带分类，
-    /// 否则 Worker 会把真实故障记成成功（A4）。
+    /// 否则 Worker 会把真实故障记成成功（A4）。证据 owner 的拒绝只有“观察之后正常失效”算业务门，
+    /// generation、结构、绑定与时效异常都是故障。
     #[test]
     fn only_business_gate_rejections_roll_back_as_deferrals() {
+        tracing::subscriber::with_default(Interested, assert_fault_classification);
+    }
+
+    fn assert_fault_classification() {
         let deferred = [
             FenceError::Rejected,
-            FenceError::Evidence(MailEvidenceTransactionError::Rejected("证据已失效")),
+            FenceError::Evidence(MailEvidenceTransactionError::Rejected(
+                MailEvidenceRejection::Stale,
+            )),
             FenceError::Funding(FundingError::Invalid),
             FenceError::Funding(FundingError::Conflict),
             FenceError::Funding(FundingError::Unavailable),
@@ -302,6 +349,30 @@ mod tests {
                 SafeErrorKind::FUNDING_SERIALIZATION_CONFLICT,
             ),
             (FenceError::Fault(SafeErrorKind::TIMEOUT), SafeErrorKind::TIMEOUT),
+            (
+                FenceError::Evidence(MailEvidenceTransactionError::Rejected(
+                    MailEvidenceRejection::GenerationInvalid,
+                )),
+                SafeErrorKind::EVIDENCE_REQUEST_INVALID,
+            ),
+            (
+                FenceError::Evidence(MailEvidenceTransactionError::Rejected(
+                    MailEvidenceRejection::StructureInvalid,
+                )),
+                SafeErrorKind::EVIDENCE_REQUEST_INVALID,
+            ),
+            (
+                FenceError::Evidence(MailEvidenceTransactionError::Rejected(
+                    MailEvidenceRejection::BindingMismatch,
+                )),
+                SafeErrorKind::DEPENDENCY_MISMATCH,
+            ),
+            (
+                FenceError::Evidence(MailEvidenceTransactionError::Rejected(
+                    MailEvidenceRejection::TimeInvalid,
+                )),
+                SafeErrorKind::EVIDENCE_EXPIRED,
+            ),
         ];
         for (error, kind) in &faults {
             assert_eq!(error.fault_kind(), Some(*kind));

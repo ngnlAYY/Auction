@@ -149,3 +149,40 @@ fn map_recovery_confirmation(
         relisted_lot_id: result.relisted_lot_id.map(|id| id.to_string()),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use auction_application::core::ApplicationError;
+    use auction_application::recovery::RecoveryCommandError;
+    use axum::body::to_bytes;
+    use axum::http::StatusCode;
+
+    use crate::session::map_recovery_command_error;
+
+    async fn mapped(error: RecoveryCommandError) -> (StatusCode, serde_json::Value) {
+        let response = map_recovery_command_error(ApplicationError::RecoveryCommand(error));
+        let status = response.status();
+        let body = to_bytes(response.into_body(), usize::MAX).await.expect("读取错误响应体");
+        (status, serde_json::from_slice(&body).expect("错误响应是 JSON"))
+    }
+
+    /// 退件不能唯一归属到一次发送是明确的业务阻断：精确 409 与独立错误码，交人工核对；既有
+    /// 恢复确认的冲突映射保持不变。
+    #[tokio::test]
+    async fn send_attribution_block_maps_to_an_explicit_conflict() {
+        for (error, code) in [
+            (RecoveryCommandError::SendUnattributed, "recovery_send_unattributed"),
+            (RecoveryCommandError::NotConfirmable, "recovery_not_confirmable"),
+            (RecoveryCommandError::EvidenceUnresolved, "recovery_evidence_unresolved"),
+            (RecoveryCommandError::StaleState, "stale_recovery_state"),
+        ] {
+            let label = format!("{error:?}");
+            let (status, body) = mapped(error).await;
+            assert_eq!(
+                (status, body["code"].as_str()),
+                (StatusCode::CONFLICT, Some(code)),
+                "{label}"
+            );
+        }
+    }
+}
