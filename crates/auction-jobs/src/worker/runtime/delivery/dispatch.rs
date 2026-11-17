@@ -266,6 +266,9 @@ where
             }
         }
     };
+    // 预算或租约落选时丢弃发送 future 只是放弃等待：transport 余下的步骤不再执行，已发出的那一次
+    // MoogleMail 请求由客户端走完并持有在途锁到远端回应或其 HTTP 预算结束；结果仍按未知落库，绝不
+    // 重发。
     drop(send);
     if !send_polled {
         // fence 后尚未 poll 也可能失去租约；不伪造外部 unknown，sending 本身仍保守隔离。

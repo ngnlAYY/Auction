@@ -1,5 +1,5 @@
-//! MoogleMail typed GET/POST 请求与远端结果分类。GET 分两段：排队在调用方 future 内，被放弃即
-//! 撤票；发出后被放弃时剩余部分交给独立任务走完，在途锁不随调用方提前释放。
+//! MoogleMail typed GET/POST 请求与远端结果分类。GET 与 POST 都分两段：排队在调用方 future 内，
+//! 被放弃即撤票；发出后被放弃时剩余部分交给独立任务走完，在途锁不随调用方提前释放。
 
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 use reqwest::{StatusCode, header};

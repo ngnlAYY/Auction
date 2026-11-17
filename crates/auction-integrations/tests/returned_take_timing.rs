@@ -4,7 +4,10 @@
 //! - 旧 POST 在新预检读取之后才生效：新预检看到附件仍在并发出第二次 POST，但远端附件只被取走
 //!   一次，第二次以领取后页面的回执证明完成——本地只会消费这一份证明（领回与返还各一次由存储
 //!   用例覆盖）；
-//! - 旧 POST 在新预检之前生效：新预检看到附件已取走、不可领取，失败关闭且不再发出 POST。
+//! - 旧 POST 在新预检之前生效：新预检看到附件已取走、不可领取，失败关闭且不再发出 POST；
+//! - 第一次执行在领取 POST 已发出、远端尚未回应时被投递 Worker 放弃（`request_timeout` 在 select
+//!   中落选）：被放弃的 POST 由客户端走完并持有在途锁，重排后的新预检等远端回应后才读取，看到附件
+//!   已取走即失败关闭，同样不发出第二次 POST。
 //!
 //! 页面取自已脱敏的真实已领取详情（taken-3125358），只替换发件人、主题与正文；领取前页面另按
 //! 已脱敏 Sent 详情（sentdetail-3125364）的附件列表结构写入 90 Credits 与领取按钮。
@@ -21,7 +24,7 @@ use auction_application::mail::{MailLoginKey, MailLoginKeyReader};
 use auction_integrations::mooglemail::{
     MoogleMailClient, MoogleMailClientConfig, MoogleMailCredentialSet, MoogleMailDeliveryTransport,
 };
-use auction_test_support::mooglemail::MailDouble;
+use auction_test_support::mooglemail::{Fault, MailDouble};
 use chrono::Utc;
 use serde_json::json;
 use uuid::Uuid;
@@ -78,12 +81,20 @@ fn taken_page() -> String {
 }
 
 fn transport(server: &MailDouble) -> MoogleMailDeliveryTransport {
+    // 第一次 POST 在客户端超时后才得到响应，结果对客户端未知。
+    transport_with_timeout(server, Duration::from_millis(400))
+}
+
+/// `request_timeout` 为单次请求的客户端 HTTP 预算。
+fn transport_with_timeout(
+    server: &MailDouble,
+    request_timeout: Duration,
+) -> MoogleMailDeliveryTransport {
     let client = MoogleMailClient::with_config(MoogleMailClientConfig {
         endpoint: server.endpoint(),
         maximum_response_bytes: 8 * 1024 * 1024,
         minimum_request_interval: Duration::from_millis(1),
-        // 第一次 POST 在客户端超时后才得到响应，结果对客户端未知。
-        request_timeout: Duration::from_millis(400),
+        request_timeout,
     })
     .expect("loopback client");
     let credentials = MoogleMailCredentialSet::new("ipb_member_id=fixture; ipb_pass_hash=fixture")
@@ -176,4 +187,50 @@ async fn late_take_completing_before_the_new_preflight_blocks_a_second_post() {
         execute(&transport, take_claim(case, 2)).await.expect_err("新预检看到附件已取走");
     assert_eq!(failure_code, "preflight_unproven", "预检失败关闭，不发出写入");
     assert_eq!(server.take_counts(), (1, 1), "没有第二次 POST，也没有第二次取走");
+}
+
+/// 远端已登记到领取 POST（按到达登记，不论远端是否处理完）；5 秒内不成立即失败。
+async fn wait_for_take_post(server: &MailDouble) {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !server.requests().iter().any(|request| request.starts_with("POST ")) {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("领取 POST 应在 5 秒内到达远端");
+}
+
+/// 投递 Worker 在领取 POST 已发出、远端尚未回应时放弃发送（`dispatch.rs` 的 `request_timeout` 或
+/// 租约失效在 select 中落选，丢弃发送 future）：被放弃的 POST 持有在途锁到远端回应，重排后的新预检
+/// 不与之重叠，读到附件已取走即失败关闭；远端只收到并执行一次领取。
+#[tokio::test]
+async fn take_abandoned_after_its_post_is_sent_keeps_the_rerun_preflight_waiting() {
+    let server = double().await;
+    // 客户端 HTTP 预算远长于远端处理时长：放弃由投递 Worker 裁决，不是客户端超时。
+    let transport = transport_with_timeout(&server, Duration::from_secs(5));
+    let case = Uuid::new_v4();
+    // 远端在独立任务里处理每个请求 600ms，客户端断开不提前结束处理。
+    server.set_fault(Some(Fault::DetachedDelay(Duration::from_millis(600))));
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    let prepared = transport
+        .prepare_authorized(take_claim(case, 1), deadline)
+        .await
+        .map_err(|error| error.failure_code)
+        .expect("第一次执行完成只读准备");
+    tokio::select! {
+        biased;
+        result = prepared.into_send() => {
+            panic!("领取应在远端回应前被放弃：{:?}", result.map(|_| ()).map_err(|error| error.failure_code));
+        }
+        () = wait_for_take_post(&server) => {}
+    }
+    // 只影响之后到达的请求：已发出的领取仍按原故障在远端处理。
+    server.set_fault(None);
+
+    let (_, failure_code) =
+        execute(&transport, take_claim(case, 2)).await.expect_err("新预检看到附件已取走");
+    assert_eq!(failure_code, "preflight_unproven", "预检失败关闭，不发出写入");
+    assert_eq!(server.take_counts(), (1, 1), "远端只收到并执行一次领取 POST");
+    assert_eq!(server.max_concurrent_requests(), 1, "新预检不得与远端仍在处理的领取重叠");
 }
