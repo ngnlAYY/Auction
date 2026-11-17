@@ -1,5 +1,6 @@
 //! PostgreSQL 持久化 Worker 的装配与退出收口。
 
+mod heartbeat;
 mod profile;
 mod recovery;
 mod run;

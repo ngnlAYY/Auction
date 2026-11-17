@@ -74,6 +74,9 @@ pub struct HeartbeatPublisherConfig {
     pub ttl: Duration,
 }
 
+/// 每次发布心跳时重新给出详情的读取函数。
+type LiveDetails = dyn Fn() -> Value + Send + Sync;
+
 /// 进程装配根使用的心跳发布器。
 /// 发布器只负责生成有界的安全命令并分配本进程内的递增 observation sequence；周期调度、
 /// 运行时和优雅关闭仍由各自的装配根负责，避免让可观测性 crate 反向拥有 Tokio 生命周期。
@@ -89,6 +92,8 @@ pub struct HeartbeatPublisher {
     tracing_health: Arc<dyn TracingHealthReader>,
     observation_sequence: AtomicI64,
     details: Value,
+    /// 每次发布时重新求值的详情；存在时取代冻结的 `details`。
+    live_details: Option<Box<LiveDetails>>,
     /// 本实例最近一次成功发布 Ready 心跳的本地时刻；失败、Degraded 或 Stopping 立即清空。
     last_ready_at: std::sync::RwLock<Option<Timestamp>>,
 }
@@ -113,6 +118,7 @@ impl HeartbeatPublisher {
             tracing_health,
             observation_sequence: AtomicI64::new(0),
             details: serde_json::json!({}),
+            live_details: None,
             last_ready_at: std::sync::RwLock::new(None),
         }
     }
@@ -124,6 +130,20 @@ impl HeartbeatPublisher {
         }
         self.details = details;
         Ok(self)
+    }
+
+    /// 每次发布心跳时重新求值的非敏感元数据，取代冻结的详情；用于会随运行状态变化的能力声明
+    /// （例如凭据在运行中失效后不再声明对应能力）。不得返回凭据或完整配置。
+    ///
+    /// 结果不是对象或超过大小上限时该次发布失败，不回退到上一次的值：读取方按最近一次心跳判断
+    /// 能力，继续发布旧值等于继续声明已经失去的能力。
+    #[must_use]
+    pub fn with_live_details(
+        mut self,
+        details: impl Fn() -> Value + Send + Sync + 'static,
+    ) -> Self {
+        self.live_details = Some(Box::new(details));
+        self
     }
 
     /// 发布指定状态的安全心跳；存储失败由调用方决定是否降级或继续运行。
@@ -141,23 +161,28 @@ impl HeartbeatPublisher {
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |value| value.checked_add(1))
             .map_err(|_| HealthError::InvalidCommand)?;
         let observation_sequence = previous.checked_add(1).ok_or(HealthError::InvalidCommand)?;
-        let result = self
-            .store
-            .publish(HeartbeatCommand {
-                service_name: self.service_name,
-                process_role: self.process_role,
-                instance_id: self.instance_id.clone(),
-                version: self.version.clone(),
-                started_at: self.started_at,
-                status,
-                readiness,
-                audit_failure_count,
-                tracing,
-                observation_sequence,
-                ttl: self.ttl,
-                details: self.details.clone(),
-            })
-            .await;
+        let details =
+            self.live_details.as_ref().map_or_else(|| self.details.clone(), |read| read());
+        let result = if valid_details(&details) {
+            self.store
+                .publish(HeartbeatCommand {
+                    service_name: self.service_name,
+                    process_role: self.process_role,
+                    instance_id: self.instance_id.clone(),
+                    version: self.version.clone(),
+                    started_at: self.started_at,
+                    status,
+                    readiness,
+                    audit_failure_count,
+                    tracing,
+                    observation_sequence,
+                    ttl: self.ttl,
+                    details,
+                })
+                .await
+        } else {
+            Err(HealthError::InvalidCommand)
+        };
         let mut last_ready =
             self.last_ready_at.write().unwrap_or_else(std::sync::PoisonError::into_inner);
         if result.is_ok()
@@ -396,5 +421,64 @@ mod tests {
             make_publisher(Arc::new(Store::new()), true, 1, TimeDelta::seconds(30));
         audit_publisher.publish_current().await.expect("degraded heartbeat publish succeeds");
         assert!(!audit_publisher.external_heartbeat_ready(), "audit failures must not report");
+    }
+
+    /// 能力声明随运行状态变化：每次发布都重新求值，后一次心跳不再带着已经失去的能力。
+    #[tokio::test]
+    async fn live_details_are_read_again_on_every_publish() {
+        let store = Arc::new(Store::new());
+        let capable = Arc::new(AtomicBool::new(true));
+        let source = Arc::clone(&capable);
+        let publisher = make_publisher(Arc::clone(&store), true, 0, TimeDelta::seconds(30))
+            .with_details(serde_json::json!({"frozen": true}))
+            .expect("frozen details are valid")
+            .with_live_details(move || {
+                let worlds: &[&str] = if source.load(Ordering::SeqCst) { &["main"] } else { &[] };
+                serde_json::json!({"worlds": worlds})
+            });
+
+        publisher.publish_current().await.expect("first heartbeat publishes");
+        capable.store(false, Ordering::SeqCst);
+        publisher.publish_current().await.expect("second heartbeat publishes");
+
+        let details = store
+            .commands
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|command| command.details.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            details,
+            [serde_json::json!({"worlds": ["main"]}), serde_json::json!({"worlds": []})],
+            "live details replace the frozen ones and follow the current state"
+        );
+    }
+
+    /// 无效的实时详情不能发布，也不能退回上一次的值；外部心跳随之停止上报。
+    #[tokio::test]
+    async fn invalid_live_details_fail_the_publish_without_reusing_old_values() {
+        let store = Arc::new(Store::new());
+        let valid = Arc::new(AtomicBool::new(true));
+        let source = Arc::clone(&valid);
+        let publisher = make_publisher(Arc::clone(&store), true, 0, TimeDelta::seconds(30))
+            .with_live_details(move || {
+                if source.load(Ordering::SeqCst) {
+                    serde_json::json!({"worlds": ["main"]})
+                } else {
+                    serde_json::json!(["not", "an", "object"])
+                }
+            });
+
+        publisher.publish_current().await.expect("valid heartbeat publishes");
+        assert!(publisher.external_heartbeat_ready());
+        valid.store(false, Ordering::SeqCst);
+        assert!(matches!(publisher.publish_current().await, Err(HealthError::InvalidCommand)));
+        assert_eq!(
+            store.commands.lock().unwrap().len(),
+            1,
+            "invalid details never reach the store"
+        );
+        assert!(!publisher.external_heartbeat_ready(), "a failed publish must not report");
     }
 }

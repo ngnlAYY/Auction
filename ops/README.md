@@ -464,7 +464,7 @@ Take 结果未知（`take_unknown`）时案件停在人工核对：不要在游�
 
 待重新核验（`recheck_pending`）的案件需要 Worker 能只读读取该世界的 MoogleMail：未启用邮件、该世界未配置、Worker 已停止（最近一次心跳为 `stopping`）或最近一次心跳过期超过一个 TTL（30 秒）时，详情显示“核验能力不可用”，案件保持待核验并继续计入隔离告警，恢复能力（启用 MoogleMail 并重启 Worker）后自动继续，不需要重新提交。
 
-结算退件 Take 只以数据库邮件凭据（持久凭据 ID 与版本）执行，结果未知时才能在原会话巡检收口。Worker 只配置了 Cookie（敏感 TOML 的 `mooglemail_cookie`，没有数据库凭据）或未启用邮件时，已提交的领回不激活、已激活的 Take 投递不被领取，案件停在待领回（`take_pending`），详情显示“领回能力不可用”（判定口径与核验能力相同，键为心跳详情的 `settlement_return_take_worlds`）；在 Admin“Cookie 池”页录入并启用该世界的邮件凭据、重启 Worker 后自动继续，不要在游戏内手工领取。
+结算退件 Take 只以数据库邮件凭据（持久凭据 ID 与版本）执行，结果未知时才能在原会话巡检收口。Worker 只配置了 Cookie（敏感 TOML 的 `mooglemail_cookie`，没有数据库凭据）、未启用邮件，或数据库凭据在运行中失效时，已提交的领回不激活、已激活的 Take 投递不被领取，案件停在待领回（`take_pending`），详情显示“领回能力不可用”（判定口径与核验能力相同，键为心跳详情的 `settlement_return_take_worlds`，Worker 每次发布心跳时按当前凭据重新声明）；在 Admin“Cookie 池”页录入并启用该世界的邮件凭据、重启 Worker 后自动继续，不要在游戏内手工领取。
 
 ### 结算退件代管查询
 
