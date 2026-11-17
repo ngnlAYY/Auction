@@ -16,7 +16,8 @@ use auction_application::scheduling::ScheduledRoundStore;
 use auction_application::settlement::{
     SettlementFulfillmentCommandPort, SettlementFulfillmentCustodyReader,
     SettlementFulfillmentEvidenceReader, SettlementFulfillmentRecipientReader,
-    SettlementFulfillmentService, SettlementFulfillmentStore,
+    SettlementFulfillmentService, SettlementFulfillmentStore, SettlementReturnMailReader,
+    SettlementReturnWorkStore,
 };
 use auction_config::AppConfig;
 use auction_jobs::WorkerControlHandle;
@@ -41,7 +42,8 @@ use crate::bootstrap::control::{
 };
 use crate::bootstrap::forum::configure_forum;
 use crate::bootstrap::fulfillment::{
-    UnavailableFulfillmentCustodyReader, UnavailableFulfillmentEvidenceReader,
+    MoogleMailReturnMailReader, UnavailableFulfillmentCustodyReader,
+    UnavailableFulfillmentEvidenceReader,
 };
 use crate::bootstrap::hot::spawn_hot_config_watch;
 use crate::bootstrap::mail::configure_mail_poll;
@@ -240,6 +242,13 @@ pub(crate) async fn run_worker(
     let database_health: Arc<dyn HeartbeatHealthReader> = store.clone();
     let heartbeat_health = worker_heartbeat_health(database_health, control.clone());
     let worker_heartbeat_url = config.worker_heartbeat_url().map(str::to_owned);
+    // 结算退件只读重新核验可读的世界（与核验读取器同一 gateway 集合）；未启用 MoogleMail 时为
+    // 空，Admin 详情据此说明待重新核验的案件为何不前进。
+    let mut settlement_return_recheck_worlds =
+        mail_control_reads.as_ref().map_or_else(Vec::new, |reads| {
+            reads.gateways.keys().map(|world| world.as_str()).collect::<Vec<_>>()
+        });
+    settlement_return_recheck_worlds.sort_unstable();
     let heartbeat = Arc::new(
         HeartbeatPublisher::new(
             heartbeat_store,
@@ -254,7 +263,10 @@ pub(crate) async fn run_worker(
             Arc::clone(&heartbeat_health),
             tracing_health,
         )
-        .with_details(serde_json::json!({ "forum_sync_enabled": config.worker.forum.enabled }))
+        .with_details(serde_json::json!({
+            "forum_sync_enabled": config.worker.forum.enabled,
+            "settlement_return_recheck_worlds": settlement_return_recheck_worlds,
+        }))
         .context("配置 Worker 心跳详情失败")?,
     );
     if let Err(error) = heartbeat.publish_starting().await {
@@ -264,6 +276,15 @@ pub(crate) async fn run_worker(
     // MoogleMail 或论坛任一可用即装配远端只读能力；缺失的能力单独返回不可用。
     // 论坛读取器与回帖循环共用同一适配器与限速，不建立第二套请求门。
     let forum_reader = forum_reply.as_ref().map(auction_jobs::ForumReplyRuntime::topic_reader);
+    // Admin 邮件凭据在线检查与远端只读同在 control socket，由邮件装配提供执行器。
+    let mail_credential_check =
+        mail_control_reads.as_ref().and_then(|reads| reads.credential_check.clone());
+    // 结算退件只读核验复用 MoogleMail 已装配的 gateway；未启用邮件时核验保持待办。
+    let settlement_return_reader: Option<Arc<dyn SettlementReturnMailReader>> =
+        mail_control_reads.as_ref().map(|reads| {
+            Arc::new(MoogleMailReturnMailReader { gateways: reads.gateways.clone() })
+                as Arc<dyn SettlementReturnMailReader>
+        });
     let remote_reads = (mail_control_reads.is_some() || forum_reader.is_some())
         .then(|| WorkerRemoteReads::build(mail_control_reads, forum_reader, switches.clone()));
     let mut control_task = if config.worker.control.enabled {
@@ -271,6 +292,10 @@ pub(crate) async fn run_worker(
             bind_worker_control_server(config, control.clone(), Arc::clone(&metrics)).await?;
         let server = match remote_reads {
             Some(remote_reads) => server.with_remote_reads(remote_reads),
+            None => server,
+        };
+        let server = match mail_credential_check {
+            Some(checks) => server.with_mail_credential_checks(checks),
             None => server,
         };
         let shutdown = Arc::clone(&control_shutdown);
@@ -287,6 +312,7 @@ pub(crate) async fn run_worker(
         None
     };
     let recovery_store: Option<Arc<dyn RecoveryWorkStore>> = Some(store.clone());
+    let settlement_returns: Option<Arc<dyn SettlementReturnWorkStore>> = Some(store.clone());
     let recovery_resolution: Option<Arc<dyn RecoveryResolutionStore>> = Some(store.clone());
     let recovery_delivery: Option<Arc<dyn MailDeliveryEnqueuer>> =
         if recovery_delivery_enabled { Some(store.clone()) } else { None };
@@ -420,6 +446,8 @@ pub(crate) async fn run_worker(
         recovery_health,
         asset_reconciliation,
         recovery_store,
+        settlement_returns,
+        settlement_return_reader,
         recovery_resolution,
         recovery_delivery,
         recovery_blacklister,

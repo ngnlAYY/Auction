@@ -42,6 +42,10 @@ const REMOTE_READ_REQUEST_TIMEOUT: Duration =
 /// 恢复核对会跨多个列表页与论坛主题；使用独立的更长上界，单页仍受 fetch 预算约束。
 const RECOVERY_SCAN_REQUEST_TIMEOUT: Duration =
     Duration::from_secs(auction_application::operations::WORKER_RECOVERY_SCAN_TIMEOUT_SECONDS);
+/// 邮件凭据在线检查与 Admin 侧 client 共用同一上界，须落在 Admin HTTP 请求预算之内。
+const MAIL_CREDENTIAL_CHECK_REQUEST_TIMEOUT: Duration = Duration::from_secs(
+    auction_application::operations::WORKER_MAIL_CREDENTIAL_CHECK_TIMEOUT_SECONDS,
+);
 const MAX_REMEMBERED_TRIGGER_COMMANDS: usize = 256;
 
 /// Worker control server 错误。

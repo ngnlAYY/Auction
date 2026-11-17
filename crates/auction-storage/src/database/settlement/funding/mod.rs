@@ -14,6 +14,7 @@ mod preview;
 mod receipt;
 mod reconciliation;
 mod record_only;
+mod returns;
 
 pub use account::{
     LockedFundingAccount, check_funding_evidence, funding_requires_authorization,
@@ -24,6 +25,7 @@ pub use obligations::{
     fund_collected_payment, fund_equipment_loss, fund_internal_purchase, refund_funded_purchase,
     retain_funded_seller,
 };
+pub use returns::{FundingReturnBinding, funded_delivery_spent, return_funded_delivery};
 
 use auction_application::settlement::{FundingError, SettlementInternalEvidenceSnapshot};
 use sqlx::Postgres;

@@ -7,6 +7,8 @@ use auction_application::recovery::{
 use sqlx::Postgres;
 use uuid::Uuid;
 
+use crate::database::recovery::commands::confirm::closure::close_voided_fulfillments;
+use crate::database::recovery::commands::confirm::recovered::close_recovered_dependents;
 use crate::database::recovery::commands::mapping::is_conflict;
 use crate::database::recovery::commands::mapping::map_reversal_error;
 use crate::database::recovery::commands::mapping::map_sql_error;
@@ -20,6 +22,7 @@ use crate::database::recovery::commands::scope::load_recovery_scope;
 use crate::database::recovery::commands::scope::load_replayed_command;
 use crate::database::recovery::commands::scope::lock_actions;
 use crate::database::recovery::commands::scope::lock_auction;
+use crate::database::recovery::commands::scope::lock_obligation_deliveries;
 use crate::database::recovery::commands::scope::lock_obligations;
 use crate::database::recovery::commands::scope::lock_original_lot;
 use crate::database::recovery::commands::scope::lock_recovery;
@@ -89,6 +92,9 @@ pub(in crate::database::recovery::commands) async fn confirm_postgres_once(
 
     let obligations = lock_obligations(&mut transaction, &recovery).await?;
     let actions = lock_actions(&mut transaction, recovery.id).await?;
+    // 规范锁序：恢复动作 → 投递 → 履约。原付款与交付投递在履约行之前锁定，与 Admin 投递命令
+    // （先锁投递、再改写履约）在投递行上串行，不形成锁环（不变量 2）。
+    lock_obligation_deliveries(&mut transaction, &obligations).await?;
     let selected_action = validate_actions(&recovery, &actions, command.action)?;
     validate_custody_evidence(&recovery, selected_action)?;
     validate_obligations(&mut transaction, &recovery, &obligations, command.action).await?;
@@ -96,7 +102,14 @@ pub(in crate::database::recovery::commands) async fn confirm_postgres_once(
     let now = database_now(&mut transaction).await?;
     if command.action == RecoveryConfirmationAction::EquipmentRecovered {
         activate_buyer_refund(&mut transaction, &recovery, now).await?;
+        // 已付款交付被收回：卖方货款与原交付不再可执行，与退款激活同事务收口；原交付与本轮
+        // Take 的链路不精确相符时整个确认回滚（不变量 2、4、6、8）。
+        close_recovered_dependents(&mut transaction, &recovery, selected_action, &command, now)
+            .await?;
     }
+    // 成交撤销与原付款及依赖履约的收口同事务提交：确认之后不能再有旧付款被领取、准备或满足
+    // （不变量 2、4、6、8）。
+    close_voided_fulfillments(&mut transaction, &recovery, &command, now).await?;
 
     let relist = relist_recovery(
         &mut transaction,

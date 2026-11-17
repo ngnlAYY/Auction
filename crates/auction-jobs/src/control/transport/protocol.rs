@@ -44,6 +44,12 @@ pub(super) enum ResponseCode {
     NotPaused,
     /// 当前 Worker 未装配该远端读取能力。
     CapabilityUnavailable,
+    /// 请求指定的资源不存在（例如凭据已删除）。
+    NotFound,
+    /// 资源状态版本已变化；data 回显当前版本。
+    VersionConflict,
+    /// 同类请求正在执行，立即拒绝重叠请求。
+    Busy,
 }
 
 impl ResponseCode {
@@ -57,6 +63,9 @@ impl ResponseCode {
             Self::Paused => "paused",
             Self::NotPaused => "not_paused",
             Self::CapabilityUnavailable => "capability_unavailable",
+            Self::NotFound => "not_found",
+            Self::VersionConflict => "version_conflict",
+            Self::Busy => "busy",
         }
     }
 }

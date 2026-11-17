@@ -18,11 +18,14 @@ description: 更新 Auction 云端分体部署：取 GitHub Release 资产并校
 # 线上事实
 
 - 入口：`<生产 SSH 入口>`。生产主机资源很小，**禁止在服务器上构建**。
-- 应用根 `<应用根>`，运行账号 `<运行账号>`；程序在 `bin/`，发布包解包到 `run/<package>/`。systemd unit：`<Worker unit>`、`<Admin unit>`、`<Public unit>`。
-- 配置 `config/`：`common/public/admin/worker.toml`、`secrets/`、`runtime/admin.toml`（0640）、`owner/postgres.toml`（root 0600）。部署状态 `state/`（`receipts/`、`rollback/`、lock）。停机备份 `backups/`（root 0700），计划备份 `/var/backups/auction/scheduled/`。每次 deploy/rollback 在 `state/rollback/` 增加一份四个程序的副本，每次 deploy 在 `backups/` 增加一份停机备份，CLI 都不自动清理；部署前顺带看一眼两处占用，需要腾空间时按 `apps/auction-cli/README.md#回滚记录与停机备份的容量` 的步骤人工清理（保留最新成功回执引用的回滚记录与最近几条，整目录删除旧记录、成对删除旧备份），清理属于生产写入，先征得用户同意。
-- 站点：`<Public 站点>`、`<Admin 站点>`。当前部署记录在 `<应用根>/README.md` 的“当前部署”段。
+- 目录按 `ops/README.md#目录与账号` 的标准布局：程序 `<程序目录>`，配置 `<配置目录>`，部署状态 `<部署状态目录>`（`receipts/`、`rollback/`、锁），停机备份 `<停机备份目录>`（root 0700），计划备份 `/var/backups/auction/scheduled/`；发布包解包到 `<发布包暂存目录>/<package>/`。运行账号 `<运行账号>`；systemd unit：`<Worker unit>`、`<Admin unit>`、`<Public unit>`，由 `auction-stack.service` 编排。
+- `<程序目录>` 与其中四个程序的标准是 root:root 0755，各级父目录也归 root 且禁止他人写入：root 与 postgres 都会执行其中的 `auction-cli`。deploy/rollback 在停机前只读核对两件事，不符即拒绝、不自动修补：属主与写权限（不归 root、允许 group/other 写入或是符号链接）；执行权限——三角色运行账号能否逐级进入安装目录并执行各自的程序（0700 的目录、缺执行位的程序都拒绝，错误点名角色、UID 与路径），以及执行部署的账号能否执行其中的 `auction-cli`（deploy 停机后用它校验停机备份；0644 等缺执行位的情况拒绝，错误点名 UID）。前者多见于旧版 deploy 把程序改归 `<运行账号>` 的主机，按 `ops/deploy/RECOVERY.md#重建安装目录信任` 用已验证的 Release 重装，**不要**只 `chown`；后者补回标准 0755 即可。两者都属于生产写入，先征得用户同意。
+- `<部署状态目录>` 必须归 root 且 0700，各级父目录归 root 且禁止他人写入（`/var/lib/auction` 为 root:root 0755，已只读核实）：能改写父目录的账号就能把部署锁、回执与回滚记录整体换成另一棵树。service/deploy/rollback 取锁前核对，持锁期间被改名替换会在停机前失败关闭，不自动修补；遇到拒绝时先停下报告用户，改属主或权限属于生产写入。
+- 配置 `<配置目录>`：`common/public/admin/worker.toml`、`secrets.toml`（运行账号 0600）、`runtime/admin.toml`（0640）、`owner/postgres.toml`（root 0600，只给 CLI 用）。`worker.toml [worker.control] allowed_peer_uids` 必须同时包含 0（root 执行 service/deploy/rollback 时探测 Worker readiness）与 `<运行账号>` 的 UID（Admin 经 control socket 调用 Worker）。
+- 每次 deploy 在 `<部署状态目录>/rollback/` 增加一份四个程序的副本（rollback 增加三个角色程序的副本），每次 deploy 在 `<停机备份目录>` 增加一份停机备份，CLI 都不自动清理；部署前顺带看一眼两处占用，需要腾空间时按 `apps/auction-cli/README.md#回滚记录与停机备份的容量` 的步骤人工清理（保留最新成功回执引用的回滚记录与最近几条，整目录删除旧记录、成对删除旧备份），清理属于生产写入，先征得用户同意。
+- 站点：`<Public 站点>`、`<Admin 站点>`。当前部署记录在 `<部署说明>` 的“当前部署”段；部署历史以 `<部署状态目录>/receipts/` 的回执为准。
 - 版本探测用 `/proc/<MainPID>/exe` 的 SHA-256。**绝不要**运行 `auction-worker --version/--help`，那会启动一个真实 Worker。
-- 不 `cat` 或复制 `secrets/`、`owner/` 下的文件；只读查询数据库时包在 `begin read only; … rollback;` 里。
+- 不 `cat` 或复制 `secrets.toml`、`owner/` 下的文件；只读查询数据库时包在 `begin read only; … rollback;` 里。
 
 # 可复用工具
 
@@ -49,7 +52,7 @@ description: 更新 Auction 云端分体部署：取 GitHub Release 资产并校
 
 ## 2. 生产基线（只读）
 
-记录三个角色的 `MainPID`、`/proc/<pid>/exe` 摘要与 `NRestarts`，以及 `db status` 中的当前 schema、配置文件的摘要/属主/权限，和表行数。用候选包的 CLI 判断本次是否含迁移（当前 `latest_version` 与候选的 `expected_version` 是否不同）。
+记录三个角色的 `MainPID`、`/proc/<pid>/exe` 摘要与 `NRestarts`，以及 `db status` 中的当前 schema、配置文件的摘要/属主/权限、`<程序目录>` 及其父目录与四个程序的属主/权限、`<部署状态目录>` 及其父目录的属主/权限，和表行数。用候选包的 CLI 判断本次是否含迁移（当前 `latest_version` 与候选的 `expected_version` 是否不同）。
 
 旧程序（演练中的“旧角色”）就是线上正在运行的那个包：是 Release 时从 GitHub Release 下载，否则取上一轮演练目录里归档的 `candidate/`。两种情况都要与线上 `/proc/<pid>/exe` 摘要逐个核对。
 
@@ -78,41 +81,43 @@ description: 更新 Auction 云端分体部署：取 GitHub Release 资产并校
 
 ## 4. 传输
 
-用 scp 把 Release 的 tar.gz、`SHA256SUMS` 与演练回执传到 `/root/<证据目录>/`（命名如 `auction-v<版本>-<短提交>-<时间戳>/`，下设 `package/`、`drill/`、`baseline/`），核对 SHA-256。在生产解包到 `<应用根>/run/<package>/`，执行 `chown -R <运行账号>:<运行账号>`，在包目录里跑 `sha256sum -c SHA256SUMS`。
+用 scp 把 Release 的 tar.gz、`SHA256SUMS` 与演练回执传到 `/root/<证据目录>/`（命名如 `auction-v<版本>-<短提交>-<时间戳>/`，下设 `package/`、`drill/`、`baseline/`），核对 SHA-256。在生产以 root 解包到 `<发布包暂存目录>/<package>/`，在包目录里跑 `sha256sum -c SHA256SUMS`。包目录保持 root 所有、禁止他人写入，**不要** `chown` 给 `<运行账号>`：deploy 从这里复制程序，执行 deploy 的也是这里的 CLI。
 
 ## 5. dry-run
 
 必须用制品内的 CLI 执行，否则会被拒绝：
 
 ```bash
-"$PKGDIR/bin/auction-cli" --config-dir <应用根>/config deploy "$PKGDIR" \
-  --owner-secrets <应用根>/config/owner/postgres.toml \
-  --state-dir <应用根>/state \
+"$PKGDIR/bin/auction-cli" --config-dir <配置目录> deploy "$PKGDIR" \
+  --owner-secrets <配置目录>/owner/postgres.toml \
+  --state-dir <部署状态目录> \
   --worker-unit <Worker unit> --admin-unit <Admin unit> --public-unit <Public unit> \
-  --backup-dir <应用根>/backups \
+  --backup-dir <停机备份目录> \
   --migration-drill-receipt <receipt.json> --protection-window-minutes 60 \
   --actor <name> --startup-timeout-seconds 60 --dry-run
 ```
 
-逐项核对：`outcome=planned`；`shutdown.outcome=allowed`（final 场次或窗口内有在拍 lot 会阻挡，只有用户明确同意才加 `--force --reason`）；`in_flight_sends` 为空；`versions` 与 `migration_drill` 均被识别。
+逐项核对：`outcome=planned`；`shutdown.outcome=allowed`（final 场次或窗口内有在拍 lot 会阻挡，只有用户明确同意才加 `--force --reason`）；`in_flight_sends` 为空；`versions` 与 `migration_drill` 均被识别，`versions.installed_roles` 是线上程序的身份（为 null 说明找不到摘要一致的成功回执，按这次部署的回滚记录回退时只允许数据库仍为部署前的版本，不能跨迁移）。安装目录信任（属主、写权限、运行账号的穿越与执行、部署账号对 `auction-cli` 的执行）、部署状态目录或 `--backup-dir` 属主不符时 dry-run 就会失败，按上文处理后重跑。
 
 ## 6. 正式部署
 
-同一命令去掉 `--dry-run`。deploy 会按 Public→Admin→Worker 停机、创建停机备份并用新旧 CLI 双校验、保留回滚记录、逐个原子替换程序（四个程序整体不是原子的；中途失败时把已替换的程序从回滚记录换回）、迁移，再按 Worker→Admin→Public 启动并等待 readiness，最后写入 `state/receipts/<uuid>.json`。
+同一命令去掉 `--dry-run`。deploy 会按 Public→Admin→Worker 停机、创建停机备份并用新旧 CLI 双校验、保留回滚记录、逐个原子替换程序（root:root 0755；四个程序整体不是原子的，中途失败时把已替换的程序从回滚记录换回）、迁移，再按 Worker→Admin→Public 启动并等待 readiness，最后写入 `<部署状态目录>/receipts/<uuid>.json`。
 
-失败处理按 `ops/README.md#升级`：除安装中途失败时换回已替换的程序外，命令不会自动回滚或重启，先用 `service status` 和 journal 确认实际状态，再决定是 `service start`（不重复迁移）、`rollback --receipt-id`，还是恢复停机备份。停机后、安装前失败（停机备份、双 CLI 校验、保留旧程序），以及安装中途失败且错误含“已复核为部署前的旧程序”时，只能用 `<应用根>/bin/auction-cli` 执行 `service start` 恢复旧版（沿用本次的 `--config-dir`、`--owner-secrets`、`--state-dir` 与 unit 参数），不要用 `$PKGDIR/bin/auction-cli`：它会先把 schema 迁到新版本，而安装目录仍是旧程序。错误含“自动换回未完成”时按 `ops/deploy/RECOVERY.md#安装中途失败的手工换回` 处理。
+失败处理按 `ops/README.md#升级`：除安装中途失败时换回已替换的程序外，命令不会自动回滚或重启，先用 `service status` 和 journal 确认实际状态，再决定是 `service start --owner-secrets …`（它照常执行内嵌迁移，schema 已匹配时为空操作）、`rollback --receipt-id`，还是恢复停机备份。停机后、安装前失败（停机备份、双 CLI 校验、保留旧程序），以及安装中途失败且错误含“已复核为部署前的旧程序”时，只能用 `<程序目录>/auction-cli` 执行 `service start` 恢复旧版（沿用本次的 `--config-dir`、`--owner-secrets`、`--state-dir` 与 unit 参数），不要用 `$PKGDIR/bin/auction-cli`：它会先把 schema 迁到新版本，而安装目录仍是旧程序。错误含“自动换回未完成”时按 `ops/deploy/RECOVERY.md#安装中途失败的手工换回` 处理。失败回执的 `deploy` 段只是尝试安装的制品，实际程序以回执 `artifacts` 的摘要为准；安装中途失败并已换回时本次回滚记录保留的就是当前程序，`rollback` 会因目标与当前程序相同而拒绝。
+
+`rollback` 只换回三个角色、保留当前 CLI，必须用 `<程序目录>/auction-cli rollback …` 执行；部署在迁移完成前失败时保留的 CLI 比数据库新，rollback 会在停机前拒绝，按错误提示处理。跨迁移回退前须由用户确认把三角色共用 common 的 `[readiness] migration_compatibility_mode` 显式设为 `compatible`（rollback 不改配置，未设置时在停机前拒绝），回到同版程序后再恢复 `shadow`。
 
 ## 7. 部署后核对（任一项不符即按失败处理）
 
-- 三个角色的 `/proc/<pid>/exe` 与制品摘要一致，`NRestarts=0`，`service … status` 返回 0 且三者 ready。
-- `service receipt show <id>`：`outcome=succeeded`，四个程序摘要、迁移版本、停机备份与演练回执都符合预期。
+- 三个角色的 `/proc/<pid>/exe` 与制品摘要一致，`NRestarts=0`，`service … status` 返回 0 且三者 ready；`<程序目录>` 中四个程序为 root:root 0755。
+- `service receipt show <id>`：`outcome=succeeded`，`deploy.roles`/`deploy.cli` 指向本次 Release、`deploy.database_version` 是部署前的版本，程序摘要、迁移版本、停机备份与演练回执都符合预期。
 - `db status` 为 schema_current，没有待执行迁移。
 - 两个站点外部返回 200；`verify-live-assets.py` 显示内容寻址资源与 payload 逐项一致（入口 `index.html` 由服务端渲染，不参与字节比对）。
 - 配置文件的内容、属主与权限不变；表行数只允许运行态差异（`_sqlx_migrations`、`schema_migration_compatibility`、迁移与巡检审计、心跳）；部署后 journal 没有 ERROR/WARN。
 
 ## 8. 记录
 
-- 用 `readme-section.template.md` 更新生产 `<应用根>/README.md` 的“当前部署”段：制品与 Release tag、迁移、演练回执、部署回执 ID、恢复点及其 SHA-256、核对结果和回退可行性。
+- 用 `readme-section.template.md` 更新 `<部署说明>` 的“当前部署”段：制品与 Release tag、迁移、演练回执、部署回执 ID、恢复点及其 SHA-256、核对结果和回退可行性。
 - 制品、演练、dry-run、部署与核对证据统一放在生产 `/root/<证据目录>/`，本机演练目录留一份副本。
 
 # 注意

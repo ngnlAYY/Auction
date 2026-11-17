@@ -42,10 +42,13 @@ pub enum MailOperation {
     ReturnMessage,
     AttachRemove,
     Discard,
+    /// Admin 在线检查候选 Cookie 时由 Worker 代读的余额页；不代表当前运行凭据，成功不结束
+    /// 账号忙碌期。
+    CredentialCheck,
 }
 
 impl MailOperation {
-    pub const ALL: [Self; 19] = [
+    pub const ALL: [Self; 20] = [
         Self::Inbox,
         Self::ReadMail,
         Self::Detail,
@@ -65,6 +68,7 @@ impl MailOperation {
         Self::ReturnMessage,
         Self::AttachRemove,
         Self::Discard,
+        Self::CredentialCheck,
     ];
 
     pub const fn label(self) -> &'static str {
@@ -88,6 +92,7 @@ impl MailOperation {
             Self::ReturnMessage => "return_message",
             Self::AttachRemove => "attach_remove",
             Self::Discard => "discard",
+            Self::CredentialCheck => "credential_check",
         }
     }
 }

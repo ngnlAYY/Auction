@@ -81,7 +81,7 @@
 | `migration_compatibility_mode` | `"shadow"` | `strict`：完整历史必须恰好匹配；`shadow`：实际仍严格，同一快照计算兼容判定并记录差异；`compatible`：显式允许未来后缀均已登记兼容的数据库 |
 | `cache_enabled` | `true` | Public/Admin `/health/ready` 与 Worker control `/v1/health/ready` 的最终就绪布尔值正负均缓存 1 秒、并发共享一次 750ms 检查；`false` 逐次执行；在线开关 `readiness_cache_enabled` 只覆盖 Public/Admin |
 
-分类口径与粘滞判定由[crates/auction-storage/README.md#审计失败与就绪](../../crates/auction-storage/README.md#审计失败与就绪)拥有，迁移判定由[docs/contracts/database.md#迁移兼容登记与就绪](../../docs/contracts/database.md#迁移兼容登记与就绪)拥有。默认基线 shadow：差异只应出现在 transient，没有样本不能解释为通过，由用户审阅后才切换 classified；迁移模式平时保持 shadow，换回旧程序前须显式设 `compatible` 并按[ops/deploy/RECOVERY.md#程序回退](../deploy/RECOVERY.md#程序回退)核对。观察步骤见[ops/README.md#审计就绪影子观察](../README.md#审计就绪影子观察)。
+分类口径与粘滞判定由[crates/auction-storage/README.md#审计失败与就绪](../../crates/auction-storage/README.md#审计失败与就绪)拥有，迁移判定由[docs/contracts/database.md#迁移兼容登记与就绪](../../docs/contracts/database.md#迁移兼容登记与就绪)拥有。默认基线 shadow：差异只应出现在 transient，没有样本不能解释为通过，由用户审阅后才切换 classified；迁移模式平时保持 shadow，换回旧程序前须显式设 `compatible` 并按[ops/deploy/RECOVERY.md#程序回退](../deploy/RECOVERY.md#程序回退)核对：数据库超前于回退目标时，`auction-cli rollback`（含 `--dry-run`）在停机前核对三角色有效配置都为 `compatible`，否则拒绝，不会替你修改配置。观察步骤见[ops/README.md#审计就绪影子观察](../README.md#审计就绪影子观察)。
 
 ### 定时备份策略
 
@@ -90,14 +90,14 @@
 两个水位字段不只约束定时备份，还被另外两处复用：
 
 - `alert report` 用它判定备份输出目录的 `disk_capacity_low`，见[apps/auction-cli/README.md#主机侧运维告警报告](../../apps/auction-cli/README.md#主机侧运维告警报告)。
-- `deploy` 与 `rollback` 的停机前磁盘空间门禁把它作为余量：扣除停机备份（只有 `deploy`）、保留旧程序与安装临时文件需求之后，`--backup-dir`、`--state-dir` 与安装目录所在的每个文件系统仍须满足，任一不足即在停机前拒绝，见[apps/auction-cli/README.md#制品部署与回退](../../apps/auction-cli/README.md#制品部署与回退)第 5 步与[回退](../../apps/auction-cli/README.md#回退)。
+- `deploy` 的停机前磁盘空间门禁把它作为余量：扣除停机备份、保留旧程序与安装临时文件需求之后，`--backup-dir`、`--state-dir` 与安装目录所在的每个文件系统仍须满足，任一不足即在停机前拒绝，见[apps/auction-cli/README.md#制品部署与回退](../../apps/auction-cli/README.md#制品部署与回退)第 5 步。`rollback` 不使用这两个字段：它只写反向回滚记录与安装临时文件，扣除实际写入/替换字节后每个文件系统留 64 MiB 即可，见[回退](../../apps/auction-cli/README.md#回退)。
 
 因此为备份卷调高水位前，须确认状态目录与安装目录所在的文件系统（例如共用的根分区）同样留得出这份余量。
 
 | 字段 | 默认值 | 范围 |
 | --- | --- | --- |
 | `local_retention_count` | `7` | 1–365，本地已完成定时备份份数 |
-| `min_free_bytes` / `min_free_percent` | 1 GiB / 10 | 64 MiB–1 TiB；1–50，与字节水位同时满足；`alert report` 与 `deploy`/`rollback` 磁盘空间门禁复用（见上） |
+| `min_free_bytes` / `min_free_percent` | 1 GiB / 10 | 64 MiB–1 TiB；1–50，与字节水位同时满足；`alert report` 与 `deploy` 磁盘空间门禁复用，`rollback` 不使用（见上） |
 | `timeout_seconds` | `7200` | 60–7200，自本次启动起的任务预算 |
 
 打卡客户端一次 HTTPS GET（连接三秒、请求五秒，不重试、不用环境代理/重定向/Cookie），失败不改变备份结果，终态回执只保存 `heartbeat_configured`；外部打卡暂缓启用，地址保持未配置。细节见[ops/deploy/RECOVERY.md#定时备份](../deploy/RECOVERY.md#定时备份)。
@@ -138,13 +138,13 @@ Admin 配置 runtime 时，listener、HTTP 安全、会话、`metrics.enabled` �
 | --- | --- |
 | `[worker]` | 拍卖主循环与独立结算循环共用的并发、轮询、批次上限、抖动与单项超时（被超提醒阶段同样适用）；恢复循环的重试间隔 |
 | `[worker.delivery]` · `[worker.fulfillment]` · `[worker.recovery]` | 投递 outbox（并发不可配置，MoogleMail 始终 1）；履约；恢复（低余额阈值、健康刷新与证据过期） |
-| `[worker.control]` | Worker control：开关、socket 组（组名或数字 GID）、`allowed_peer_uids`/`gids`（至少一项）、运行目录与路径 |
+| `[worker.control]` | Worker control：开关、socket 组（组名或数字 GID）、`allowed_peer_uids`/`gids`（至少一项）、运行目录与路径；Admin 的手工装备读取与邮件 Cookie 在线校验都经它交给 Worker 执行（邮件校验另需 Worker 启用 MoogleMail 并配置 `credential_data_key`），Worker 不可用时 Admin 只报暂不可用 |
 | `[worker.forum]` | 论坛同步：开关、凭据 scope、origin、板块、轮询、页数上限、间隔与租约 |
 | `[worker.mooglemail]` | 邮件：开关、邮箱与世界、默认起拍价、请求边界、收件与维护 cron、观察间隔、每日完整校验、白名单、回信预算、`keyenv_file`（本地联调） |
 | `[worker.mooglemail.send_intervals]` · `[send_classes]` · `[diagnostics]` · `[equipment_filter]` | 各类出站邮件最小间隔；六类通知开关（默认全 true，runtime `mail` 组接管后以 runtime 为准）；诊断归档；投稿过滤 |
 | `[worker.operations_alert]` | 告警：`scan_enabled`（true）、`notify_enabled`（false）、`webhook_enabled`（false）、收件人与世界、阈值（含长期未领取阈值 `fulfillment_collection_overdue_age_seconds`，默认 259200 秒即 72 小时，范围 1–2592000；Admin runtime `[operations.alerts]` 有同名字段）；旧 `enabled` 只是兼容别名 |
 
-各循环预算按其工作方式分别校验（fulfillment/recovery 单项超时 < 租约；delivery 依靠续租可跨初始租约；MoogleMail 另校验读取/处理/整批预算），不能统一按“请求超时 < 租约”配置。启用外部功能的依赖：MoogleMail 需凭据来源、`user_login_data_key` 与 `equipment_data_key`；论坛需 `ehentai_cookie` 或 `credential_data_key`，以及 `equipment_data_key`（装备密钥只在 Worker 启动时检查，`config check` 不拦截）；告警扫描只需数据库，通知/Webhook 各有开关与地址要求。webhook 模板须产生 JSON 对象（支持 `{kind}/{scope}/{source}/{count}/{age_seconds}`），创建时冻结并携带冻结的 `Idempotency-Key`；连接建立前的失败（DNS、TCP、TLS 握手）确定未发出，按重试间隔自动补发，请求写出后的失败结果未知，转人工核对、不自动重发。
+各循环预算按其工作方式分别校验（fulfillment/recovery 单项超时 < 租约；delivery 依靠续租可跨初始租约（只读准备与单次外部发送各用一份 `request_timeout_seconds`，交给 transport 的是准备请求截止而非租约截止）；MoogleMail 另校验读取/处理/整批预算），不能统一按“请求超时 < 租约”配置。启用外部功能的依赖：MoogleMail 需凭据来源、`user_login_data_key` 与 `equipment_data_key`；论坛需 `ehentai_cookie` 或 `credential_data_key`，以及 `equipment_data_key`（装备密钥只在 Worker 启动时检查，`config check` 不拦截）；告警扫描只需数据库，通知/Webhook 各有开关与地址要求。webhook 模板须产生 JSON 对象（支持 `{kind}/{scope}/{source}/{count}/{age_seconds}`），创建时冻结并携带冻结的 `Idempotency-Key`；连接建立前的失败（DNS、TCP、TLS 握手）确定未发出，按重试间隔自动补发，请求写出后的失败结果未知，转人工核对、不自动重发。
 
 #### MoogleMail 收件与维护
 

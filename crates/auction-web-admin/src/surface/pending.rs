@@ -280,6 +280,7 @@ pub(crate) fn definite_rejection(code: &str) -> bool {
             | "invalid_user_command"
             | "invalid_delivery_command"
             | "delivery_sent_sighted"
+            | "settlement_obligation_ineligible"
             | "invalid_mail_request"
             | "poll_rejected"
             | "invalid_locale"
@@ -300,6 +301,21 @@ pub(crate) fn definite_rejection(code: &str) -> bool {
             // 确认/静默事实。
             | "invalid_alert_command"
             | "alert_stale"
+            // 结算退件命令：参数、路径或案件不存在在进入命令账本前拒绝；版本、来源、绑定、资产、
+            // 状态、证明、补寄上限、义务资格与原发送未核实的冲突都在命令事务内回滚，没有写入任何
+            // 事实。
+            | "invalid_settlement_return_command"
+            | "invalid_settlement_return_id"
+            | "settlement_return_not_found"
+            | "stale_settlement_return_state"
+            | "settlement_return_untrusted"
+            | "settlement_return_unbound"
+            | "settlement_return_assets_mismatch"
+            | "settlement_return_action_conflict"
+            | "settlement_return_proof_required"
+            | "settlement_return_resend_limit"
+            | "settlement_return_obligation_ineligible"
+            | "settlement_return_send_unresolved"
     )
 }
 

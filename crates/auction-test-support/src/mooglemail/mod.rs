@@ -1,4 +1,6 @@
-//! 邮件语料的有状态 HTTP 回放；故障标记是人工注入，不冒充真实页面。
+//! 邮件语料的有状态 HTTP 回放；故障标记是人工注入，不冒充真实页面。测试另可登记一封由调用方
+//! 提供页面（由真实语料派生）的待领取邮件，替身只按领取前/后两份页面有状态回放，并可让一次
+//! 领取 POST 迟到完成，用于复现外部 Take 的时序。
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -10,7 +12,7 @@ use axum::{
     Router,
     body::Bytes,
     extract::State,
-    http::{Method, StatusCode, Uri},
+    http::{HeaderMap, Method, StatusCode, Uri, header},
     response::{Html, IntoResponse, Response},
     routing::any,
 };
@@ -19,6 +21,7 @@ use tokio::{net::TcpListener, task::JoinHandle};
 use url::Url;
 
 mod fixtures;
+mod scripted;
 
 /// 真实发送成功页；仅替换玩家/世界/收件人显示名并移除扩展 DOM。
 const WRITE_SUCCESS: &[u8] =
@@ -35,6 +38,10 @@ pub enum Fault {
     CookieInvalid,
     /// 在响应前延迟，供客户端自己的超时预算裁决。
     Timeout(Duration),
+    /// 远端收到请求后独立处理到延迟结束再按原路由回应：客户端断开或取消不会提前结束处理，在途
+    /// 计数一直保持到延迟结束。模拟不随连接断开停止处理的真实远端，用来证明客户端取消后紧接的
+    /// 请求不会与远端仍在处理的请求重叠。
+    DetachedDelay(Duration),
     /// HTML 类型正确但邮件结构缺失。
     ProtocolDrift,
     /// 收到 POST 后返回无法证明成功或失败的内容；不自动重发。
@@ -56,11 +63,14 @@ pub enum Fault {
 #[derive(Default)]
 struct MailState {
     fault: Option<Fault>,
+    scripted: Option<scripted::ScriptedTake>,
     unread: BTreeSet<String>,
     removed_sent: BTreeSet<String>,
     reads: usize,
     writes: usize,
     requests: Vec<String>,
+    /// 每个请求携带的 Cookie 头，按到达顺序；只保存测试夹具值。
+    cookies: Vec<Option<String>>,
     captured_pages_complete: bool,
     active: usize,
     max_active: usize,
@@ -143,6 +153,11 @@ impl MailDouble {
     pub fn max_concurrent_requests(&self) -> usize {
         self.state.lock().expect("test state poisoned").max_active
     }
+
+    /// 已抵达替身的请求携带的 Cookie 头，按到达顺序；用于证明请求用的是哪一份凭据。
+    pub fn request_cookies(&self) -> Vec<Option<String>> {
+        self.state.lock().expect("test state poisoned").cookies.clone()
+    }
 }
 
 impl Drop for MailDouble {
@@ -151,7 +166,8 @@ impl Drop for MailDouble {
     }
 }
 
-/// 请求处理期间计入在途数；Drop 覆盖提前返回与客户端断开时的取消。
+/// 请求处理期间计入在途数；Drop 覆盖提前返回与客户端断开时的取消（`DetachedDelay` 除外，
+/// 它把在途计数交给独立任务持有到延迟结束）。
 struct InFlight(Arc<Mutex<MailState>>);
 
 impl InFlight {
@@ -176,11 +192,35 @@ async fn handle(
     State(state): State<Arc<Mutex<MailState>>>,
     method: Method,
     uri: Uri,
+    headers: HeaderMap,
     _body: Bytes,
 ) -> Response {
-    let _in_flight = InFlight::enter(&state);
+    let in_flight = InFlight::enter(&state);
     // 不支持的路由也记录，便于测试指出扫描请求了哪些未采集页面。
-    state.lock().expect("test state poisoned").requests.push(format!("{method} {uri}"));
+    let detached = {
+        let mut current = state.lock().expect("test state poisoned");
+        current.requests.push(format!("{method} {uri}"));
+        current.cookies.push(
+            headers.get(header::COOKIE).and_then(|value| value.to_str().ok()).map(str::to_owned),
+        );
+        match current.fault {
+            Some(Fault::DetachedDelay(delay)) => Some(delay),
+            _ => None,
+        }
+    };
+    // 不随断开停止的远端：在途计数交给独立任务持有到延迟结束；客户端断开只丢弃本 handler，
+    // 不提前结束远端处理。处理结束后按原路由回应。
+    let _in_flight = match detached {
+        Some(delay) => {
+            let processing = tokio::spawn(async move {
+                tokio::time::sleep(delay).await;
+                drop(in_flight);
+            });
+            let _ = processing.await;
+            None
+        }
+        None => Some(in_flight),
+    };
     if uri.path().starts_with("/equip/") || uri.path().starts_with("/isekai/equip/") {
         return equipment(&state, &method).await;
     }
@@ -188,6 +228,12 @@ async fn handle(
         url::form_urlencoded::parse(uri.query().unwrap_or_default().as_bytes())
             .into_owned()
             .collect();
+    if matches!(uri.path(), "/" | "/isekai/")
+        && query.get("s").map(String::as_str) == Some("Bazaar")
+        && query.get("ss").map(String::as_str) == Some("is")
+    {
+        return item_shop(&state, &method).await;
+    }
     if !matches!(uri.path(), "/" | "/isekai/")
         || query.get("s").map(String::as_str) != Some("Bazaar")
         || query.get("ss").map(String::as_str) != Some("mm")
@@ -216,6 +262,11 @@ async fn handle(
             return Html("<div>injected protocol drift</div>").into_response();
         }
         _ => {}
+    }
+    if let Some(response) =
+        scripted::respond(&state, &method, query.get("mid").map(String::as_str)).await
+    {
+        return response;
     }
     if method == Method::POST {
         return match fault {
@@ -303,8 +354,28 @@ async fn equipment(state: &Arc<Mutex<MailState>>, method: &Method) -> Response {
     }
 }
 
-/// 账号状态故障的回放正文：战斗页、状态锁限流与登录失效。邮件路由与装备页共用同一份，
-/// 两边的语料口径不会各自漂移；其他故障返回 `None`，由调用方按路由处理。
+/// Item Shop 余额页同样没有获准的真实语料：与装备页同口径，只回放人工注入的账号状态故障
+/// （登录失效、战斗页、限流）与延迟，其余一律 501，不编造余额页。GET 计入 `read_requests`。
+async fn item_shop(state: &Arc<Mutex<MailState>>, method: &Method) -> Response {
+    if *method != Method::GET {
+        return StatusCode::METHOD_NOT_ALLOWED.into_response();
+    }
+    let fault = {
+        let mut state = state.lock().expect("test state poisoned");
+        state.reads += 1;
+        state.fault
+    };
+    if let Some(response) = account_state_fault(fault).await {
+        return response;
+    }
+    if let Some(Fault::Timeout(delay)) = fault {
+        tokio::time::sleep(delay).await;
+    }
+    (StatusCode::NOT_IMPLEMENTED, "item shop fixture unavailable").into_response()
+}
+
+/// 账号状态故障的回放正文：战斗页、状态锁限流与登录失效。邮件路由、装备页与 Item Shop 共用同一份，
+/// 各路由的语料口径不会各自漂移；其他故障返回 `None`，由调用方按路由处理。
 async fn account_state_fault(fault: Option<Fault>) -> Option<Response> {
     match fault {
         Some(Fault::AccountBusy) => Some(Html("<div id=\"battle_main\"></div>").into_response()),

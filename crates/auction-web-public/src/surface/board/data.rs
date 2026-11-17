@@ -10,8 +10,9 @@ use auction_web_shared::{
 use chrono::{DateTime, Utc};
 use dioxus::prelude::*;
 
+use super::alignment::use_alignment_reread;
 use super::navigation::preview_history_switch;
-use super::refresh::use_bid_refresh;
+use super::refresh::{refresh_public_reads, use_bid_refresh};
 use crate::api::CatalogLevelFilter;
 use crate::api::LotEnvelope;
 use crate::api::{
@@ -55,6 +56,8 @@ struct CatalogSnapshot {
 pub(crate) fn AuctionData(
     auction: CurrentAuction,
     historical: bool,
+    /// 提供 `auction` 的当前场次（或历史场次）读取仍在进行；对齐重读据此等待本轮读完再判定用尽。
+    auction_reading: bool,
     boot_prerequisites_ready: bool,
 ) -> Element {
     // 开场检查只在 effect 中读取共享秒针；倒计时由叶子组件订阅，目录不随每秒重渲染。
@@ -76,7 +79,7 @@ pub(crate) fn AuctionData(
     let page_number = use_memo(move || query_state_signal.read().page.max(1));
     let requested_page_size = use_memo(move || query_state_signal.read().page_size);
     let visibility = use_context::<PageVisibility>();
-    let mut refresh_generation = use_context::<Signal<u64>>();
+    let refresh_generation = use_context::<Signal<u64>>();
     let should_refresh_at_open = !historical && auction.presentation_mode != "live";
     let opening_at =
         DateTime::parse_from_rfc3339(&auction.opens_at).ok().map(|value| value.with_timezone(&Utc));
@@ -99,9 +102,7 @@ pub(crate) fn AuctionData(
             opening_refreshed.set(true);
             // 开场是一次已确认的生命周期迁移：TTL 内的预览快照可能仍标着 preview，
             // 必须先失效公开读缓存，否则开场补读会命中旧值并拖到下一次轮询才切换 live。
-            crate::api::invalidate_all();
-            let next_generation = refresh_generation.peek().saturating_add(1);
-            refresh_generation.set(next_generation);
+            refresh_public_reads(refresh_generation);
         }
     });
     let mut session = use_context::<PublicSessionResource>();
@@ -217,25 +218,22 @@ pub(crate) fn AuctionData(
         auction.bidding_open,
         auction.preview_revision
     );
-    // 同一上下文只自动对齐重读一次；记录上下文键与重读使用的目录刷新代号。
-    let mut alignment_attempt = use_signal(|| None::<(String, u64)>);
-    use_effect(use_reactive((&aligned, &alignment_key), move |(aligned, alignment_key)| {
-        if aligned {
-            if alignment_attempt().is_some() {
-                alignment_attempt.set(None);
-            }
-        } else if alignment_attempt().is_none_or(|(key, _)| key != alignment_key) {
-            let next_generation = lots_refresh_generation().saturating_add(1);
-            alignment_attempt.set(Some((alignment_key, next_generation)));
-            lots_refresh_generation.set(next_generation);
-        }
-    }));
-    let alignment_exhausted = alignment_retry_exhausted(
+    let loaded_generation =
+        current.and_then(|(generation, result)| result.is_ok().then_some(generation));
+    // 场次或目录仍有读取在途（轮询、实时刷新或上一轮对齐重读）：返回后可能就对齐。以订阅方式
+    // 读取目录资源状态，读取结束即重新判定。
+    let reading = auction_reading || *lots.state().read() == UseResourceState::Pending;
+    // 同一上下文只自动对齐重读一次，读取在途先等待；调度与用尽判定见 alignment 模块。
+    let alignment = use_alignment_reread(
         aligned,
-        &alignment_key,
-        alignment_attempt.read().as_ref(),
-        current.and_then(|(generation, result)| result.is_ok().then_some(generation)),
+        alignment_key,
+        loaded_generation,
+        reading,
+        lots_refresh_generation,
+        refresh_generation,
     );
+    let alignment_exhausted = alignment.exhausted;
+    let mut alignment_attempt = alignment.attempt;
     let is_live_presentation = auction.presentation_mode == "live";
     let preview_snapshot =
         use_hook(|| Rc::new(RefCell::new(None::<(CatalogScope, CatalogSnapshot)>)));
@@ -301,15 +299,18 @@ pub(crate) fn AuctionData(
                     title: t!("data-error"),
                     detail: lot_list_error_message(error),
                     retry_label: t!("data-retry"),
+                    // 手工重试同样经共用刷新入口：目录失败可能源于场次已经变化，场次与目录一起重读。
                     on_retry: move |_| {
                         lots_refresh_generation
                             .set(lots_refresh_generation().saturating_add(1));
+                        refresh_public_reads(refresh_generation);
                     },
                 }
             }
         }
-        // 快照与当前场次仍不对齐，且已来自那次对齐重读（例如读闸繁忙时保留的旧快照）：显示可重试
-        // 的错误而不是留空。重试只清掉尝试记录，由上面的 effect 重新发起一次对齐重读。
+        // 快照与当前场次仍不对齐，且场次与目录都已来自那次对齐重读（例如读闸繁忙时保留的旧快照）：
+        // 显示可重试的错误而不是留空。重试只清掉尝试记录，由上面的 effect 经共用刷新入口重新发起
+        // 一次失效后的对齐重读。
         (_, None) if alignment_exhausted => {
             rsx! {
                 AsyncState {
@@ -459,21 +460,6 @@ pub(crate) fn AuctionData(
 
 /// lot 目录读取失败的本地化文案：先处理本页特有的历史变体码，未命中走共享基础层
 /// （[`base_api_error_message`]），最后落到通用兜底。
-/// 目录快照与当前场次不对齐，且这份快照已经来自为同一上下文发起的那次对齐重读：自动重读已
-/// 用尽。只比较代号，重读刚排定、资源仍持有旧快照时不算用尽，避免错误面板一闪而过。
-fn alignment_retry_exhausted(
-    aligned: bool,
-    alignment_key: &str,
-    attempt: Option<&(String, u64)>,
-    loaded_generation: Option<u64>,
-) -> bool {
-    !aligned
-        && attempt.is_some_and(|(key, attempt_generation)| {
-            key == alignment_key
-                && loaded_generation.is_some_and(|generation| generation >= *attempt_generation)
-        })
-}
-
 fn lot_list_error_message(error: &str) -> String {
     match error {
         "invalid_level_filter" => return t!("filter-level-invalid"),
@@ -490,27 +476,4 @@ fn lot_list_error_message(error: &str) -> String {
         _ => t!("common-load-error"),
     })
     .unwrap_or_else(|| t!("common-load-error"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::alignment_retry_exhausted;
-
-    #[test]
-    fn alignment_is_exhausted_only_after_the_retry_snapshot_arrives() {
-        let attempt = ("auction:live".to_owned(), 3);
-        // 对齐时从不算用尽。
-        assert!(!alignment_retry_exhausted(true, "auction:live", Some(&attempt), Some(3)));
-        // 尚未发起对齐重读。
-        assert!(!alignment_retry_exhausted(false, "auction:live", None, Some(2)));
-        // 重读已排定，但资源仍持有排定前的旧快照：不闪错误面板。
-        assert!(!alignment_retry_exhausted(false, "auction:live", Some(&attempt), Some(2)));
-        // 读取失败由错误分支处理，这里没有已加载的代号。
-        assert!(!alignment_retry_exhausted(false, "auction:live", Some(&attempt), None));
-        // 上下文已切换：旧尝试不算数，等待 effect 为新上下文重读。
-        assert!(!alignment_retry_exhausted(false, "auction:final", Some(&attempt), Some(3)));
-        // 那次对齐重读的快照仍不对齐：用尽。
-        assert!(alignment_retry_exhausted(false, "auction:live", Some(&attempt), Some(3)));
-        assert!(alignment_retry_exhausted(false, "auction:live", Some(&attempt), Some(4)));
-    }
 }

@@ -16,6 +16,11 @@ mod claims;
 mod collection;
 mod delivery;
 mod dependencies;
+mod eligibility;
+pub(crate) use eligibility::{
+    SettlementDeliveryEligibility, lock_settlement_delivery_eligibility,
+    recovery_allows_execution_now,
+};
 mod internal;
 pub(crate) use collection::{
     sent_awaiting_collection_sql, sent_delivery_sql, sent_unsatisfied_sql,
@@ -25,6 +30,16 @@ pub use internal::asset_conflict_gate_passes;
 pub(crate) use internal::{assetless_mail_notification, exclude_equipment_loss_conflicts};
 mod mapping;
 mod reconcile;
+mod recovery_closure;
+pub(crate) use recovery_closure::{
+    equipment_recovered_closure_sql, recovered_handoff_sent_proof_sql,
+    recovery_closed_fulfillment_sql, recovery_disposed_delivery_sql,
+};
+mod returns;
+pub(crate) use returns::{
+    consume_return_postgres, hold_for_manual_reconcile, lock_obligation,
+    system_settlement_return_source,
+};
 mod sent_lookup;
 
 use self::claims::claim_postgres;

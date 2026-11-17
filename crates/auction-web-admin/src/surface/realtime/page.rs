@@ -10,6 +10,9 @@ use super::event::RealtimeEventTable;
 use super::failure::RealtimeFailureTable;
 use super::filters::{RealtimeEventFilters, RealtimeFailureFilters};
 use super::lag::RealtimeLagTable;
+use super::overview::{
+    activity_count_state, consumer_count_state, failure_count_state, metric_card, metric_value,
+};
 use crate::api::{
     RealtimeFailure, fetch_realtime_event_page, fetch_realtime_event_total,
     fetch_realtime_failure_page, fetch_realtime_lag_page, replay_realtime_failure,
@@ -545,42 +548,5 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
                 }
             }
         }
-    }
-}
-
-fn metric_card(label: String, value: String, state: &'static str) -> Element {
-    rsx! {
-        div { class: "admin-realtime-metric", "data-state": state,
-            strong { class: "admin-realtime-metric__value", "{value}" }
-            span { class: "admin-realtime-metric__label", "{label}" }
-        }
-    }
-}
-
-fn metric_value(value: Option<i64>) -> String {
-    value.map_or_else(|| t!("value-empty"), |value| value.to_string())
-}
-
-fn activity_count_state(value: Option<i64>) -> &'static str {
-    match value {
-        None => "unavailable",
-        Some(0) => "neutral",
-        Some(_) => "ok",
-    }
-}
-
-fn consumer_count_state(value: Option<i64>) -> &'static str {
-    match value {
-        None => "unavailable",
-        Some(0) => "warn",
-        Some(_) => "ok",
-    }
-}
-
-fn failure_count_state(value: Option<i64>) -> &'static str {
-    match value {
-        None => "unavailable",
-        Some(0) => "ok",
-        Some(_) => "error",
     }
 }

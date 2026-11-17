@@ -297,6 +297,15 @@ impl MoogleMailClient {
         self.builder.balance(world)
     }
 
+    /// 候选凭据在线检查的余额页目标；请求按 `credential_check` 归类，见
+    /// [`MoogleMailOperation::CredentialCheck`]。
+    pub(crate) fn credential_check(
+        &self,
+        world: MoogleMailWorld,
+    ) -> Result<MoogleMailTarget, MoogleMailError> {
+        self.builder.credential_check(world)
+    }
+
     /// 构造认证自身 UID 的只读固定目标。
     pub fn identity(&self, world: MoogleMailWorld) -> MoogleMailTarget {
         self.builder.identity(world)

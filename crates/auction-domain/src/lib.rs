@@ -58,4 +58,11 @@ pub use settlement::{
     SettlementWorld, equipment_loss_funding, floor_ppm, funding_reconciliation_capacity,
     next_recovery_advance, proportional_floor, validate_settlement_price_breakdown_for_mode,
 };
+pub use settlement::{
+    DISPATCH_REFERENCE_LINE_PREFIX, FIRST_DISPATCH_NO, SETTLEMENT_RETURN_RESEND_LIMIT,
+    SettlementDispatchReference, SettlementReturnAction, SettlementReturnAdmission,
+    SettlementReturnBinding, SettlementReturnBlocker, SettlementReturnCaseStatus,
+    SettlementReturnFunding, SettlementReturnObligationPosition, SettlementReturnPlan, cash_return,
+    resend_activate_command_id, resend_delivery_id, resend_prepare_command_id, resend_supported,
+};
 pub use text::{valid_optional_text, valid_positive_decimal, valid_text, valid_text_allow_empty};

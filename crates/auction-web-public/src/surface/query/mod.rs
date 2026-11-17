@@ -564,6 +564,17 @@ mod tests {
     }
 
     #[test]
+    fn linked_page_sizes_above_the_public_maximum_restore_the_default() {
+        // 旧链接里超过契约上限的数量按非法值恢复默认，不原样发给必然拒绝它的接口。
+        let query = parse_public_query("/", "?page_size=200&movement_page_size=200");
+        assert_eq!((query.page_size, query.movement_page_size), (200, 200));
+        let query = parse_public_query("/", "?page_size=201&movement_page_size=1000");
+        assert_eq!((query.page_size, query.movement_page_size), (20, 20));
+        let query = parse_public_query("/compensation", "?page_size=0&movement_page_size=-5");
+        assert_eq!((query.page_size, query.movement_page_size), (20, 20));
+    }
+
+    #[test]
     fn passthrough_parameters_survive_round_trip_encode() {
         let query = PublicBoardQuery {
             passthrough: vec![("ref".to_owned(), "a&b=c".to_owned())],

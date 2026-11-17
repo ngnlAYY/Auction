@@ -215,7 +215,7 @@ pub(super) async fn issue(
                       SELECT sum(e.amount)
                       FROM public.settlement_funding_entries e
                       WHERE e.source_id=s.id
-                        AND e.kind='issue'
+                        AND e.kind IN ('issue','return')
                   ),0)::bigint
            FROM public.settlement_funding_sources s
            WHERE s.id=$1

@@ -135,6 +135,18 @@ pub async fn lock_funded_delivery_account(
     .await
     .map_err(storage)?;
     let Some(row) = rows.first() else {
+        // 指针已换代（退件返还后补寄）：按只追加的历史绑定定位原账户，旧派发仍受资金保护。
+        let historical: Option<String> = sqlx::query_scalar(
+            "SELECT uid FROM public.settlement_funding_delivery_bindings WHERE delivery_id=$1",
+        )
+        .bind(delivery_id)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(storage)?;
+        if let Some(uid) = historical {
+            let account = lock_funding_account(tx, &uid).await?.ok_or(FundingError::Conflict)?;
+            return Ok(Some(account));
+        }
         // 返还证明必须仍有原allocation关联，不能因缺失而降级legacy。
         let orphan_return: bool = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM public.settlement_funding_returns WHERE delivery_id=$1)",

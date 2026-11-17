@@ -8,6 +8,7 @@ use std::{
 };
 
 use anyhow::Context;
+use auction_application::operations::MigrationCompatibilityMode;
 use auction_config::{AppConfig, Role};
 use auction_storage::{DatabaseBackend, strict_deployment_database_identity};
 use serde::Serialize;
@@ -21,6 +22,9 @@ pub(crate) struct Deployment {
     pub(crate) public_endpoint: Endpoint,
     pub(crate) admin_endpoint: Endpoint,
     pub(crate) worker_control: Option<Endpoint>,
+    /// 三角色各自加载到的迁移兼容就绪模式（Public、Admin、Worker）；rollback 停机前据此判定
+    /// 旧程序面对超前数据库能否就绪。
+    pub(crate) migration_compatibility_modes: [(Role, MigrationCompatibilityMode); 3],
     paths: [PathBuf; 3],
     strict: bool,
     warnings: Vec<String>,
@@ -156,12 +160,15 @@ pub(crate) fn check(config_dir: &ConfigDir, strict: bool) -> anyhow::Result<Depl
     for warning in &permissions.warnings {
         crate::app::progress(format_args!("警告：{warning}"));
     }
+    let migration_compatibility_modes = [&public, &admin, &worker]
+        .map(|config| (config.role, config.readiness.migration_compatibility_mode));
     Ok(Deployment {
         admin,
         worker,
         public_endpoint,
         admin_endpoint,
         worker_control,
+        migration_compatibility_modes,
         paths,
         strict,
         warnings: permissions.warnings,

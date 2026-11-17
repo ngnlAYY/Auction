@@ -111,6 +111,16 @@ impl MoogleMailUrlBuilder {
         })
     }
 
+    /// 候选凭据检查的余额页目标；URL 与 [`Self::balance`] 相同，只用独立的操作归类。
+    pub(crate) fn credential_check(
+        &self,
+        world: MoogleMailWorld,
+    ) -> Result<MoogleMailTarget, MoogleMailError> {
+        let mut target = self.balance(world)?;
+        target.operation = MoogleMailOperation::CredentialCheck;
+        Ok(target)
+    }
+
     pub(crate) fn identity(&self, world: MoogleMailWorld) -> MoogleMailTarget {
         let mut url = self.endpoint.clone();
         url.set_path(world.path());

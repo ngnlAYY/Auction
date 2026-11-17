@@ -8,7 +8,11 @@ use auction_contracts::{
 use chrono::{TimeZone, Utc};
 use uuid::Uuid;
 
-use super::{decode::StrictDeliveryEnvelope, decode_confirmation, decode_detail, decode_preview};
+use super::queue::{DeliverySearchFilters, delivery_list_url};
+use super::{
+    decode::StrictDeliveryEnvelope, decode_confirmation, decode_detail, decode_preview,
+    delivery_detail_url,
+};
 
 fn time(offset: u32) -> String {
     Utc.with_ymd_and_hms(2026, 11, 2, 1, offset, 0).single().expect("timestamp").to_rfc3339()
@@ -260,4 +264,35 @@ fn confirmation_must_echo_command_and_delivery() {
     assert!(decode_confirmation(envelope(), command_id, DELIVERY_ID).is_ok());
     assert!(decode_confirmation(envelope(), Uuid::from_bytes([8; 16]), DELIVERY_ID).is_err());
     assert!(decode_confirmation(envelope(), command_id, OTHER_ID).is_err());
+}
+
+/// 本页面认识结算退件 Take 来源与装备收回处置，详情必须显式请求扩展投影；缺省响应留给升级前的
+/// 页面。
+#[test]
+fn detail_url_requests_the_settlement_returns_projection() {
+    assert_eq!(
+        delivery_detail_url(DELIVERY_ID),
+        format!("/api/v1/admin/deliveries/{DELIVERY_ID}?include=settlement_returns")
+    );
+}
+
+/// 列表同样总是请求扩展投影（缺省列表不含结算退件 Take），并且只提交非空的筛选。
+#[test]
+fn list_url_requests_the_settlement_returns_projection() {
+    assert_eq!(
+        delivery_list_url("", &DeliverySearchFilters::default(), 1, 50),
+        "/api/v1/admin/deliveries?page=1&page_size=50&include=settlement_returns"
+    );
+    let filters = DeliverySearchFilters {
+        world: "isekai".to_owned(),
+        reference: DELIVERY_ID.to_owned(),
+        ..DeliverySearchFilters::default()
+    };
+    assert_eq!(
+        delivery_list_url("manual_reconcile", &filters, 0, 20),
+        format!(
+            "/api/v1/admin/deliveries?page=1&page_size=20&status=manual_reconcile\
+             &reference={DELIVERY_ID}&world=isekai&include=settlement_returns"
+        )
+    );
 }

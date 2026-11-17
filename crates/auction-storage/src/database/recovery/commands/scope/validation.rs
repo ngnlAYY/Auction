@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 
 use auction_application::recovery::{
     RecoveryCommandError, RecoveryConfirmationAction, RecoveryConfirmationCommand,
+    recovery_confirmation_requires_blacklist,
 };
 use chrono::{DateTime, Utc};
 use sqlx::Postgres;
@@ -85,9 +86,12 @@ pub(in crate::database::recovery::commands) fn validate_actions<'a>(
     {
         return Err(RecoveryCommandError::EvidenceUnresolved);
     }
-    if matches!(
+    // 与 Admin 确认按钮同一规则：isekai 取消在退回次数未达冻结上限时不要求拉黑，达到上限与
+    // main 收回仍要求既定拉黑已完成（冻结的处罚阈值不变，不变量 10）。
+    if recovery_confirmation_requires_blacklist(
         requested,
-        RecoveryConfirmationAction::Reclaimed | RecoveryConfirmationAction::Cancelled
+        recovery.cod_return_count,
+        recovery.cod_return_limit,
     ) && !blacklist_satisfied
     {
         return Err(RecoveryCommandError::NotConfirmable);

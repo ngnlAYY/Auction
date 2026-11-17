@@ -11,14 +11,19 @@
 
 ## 脱敏与本机副本
 
-仓库是公开的。这里的版本已把主机地址、SSH 入口、域名、本机绝对路径、端口、运行账号与 systemd unit 名替换成占位符：
+仓库是公开的。这里的版本已把主机地址、SSH 入口、域名、本机绝对路径、端口、运行账号与 systemd unit 名替换成占位符。生产路径占位符按[ops/README.md#目录与账号](../README.md#目录与账号)的标准布局定义，括号内是标准值；实际主机与标准不同时只在本机原版里写真实值：
 
 | 占位符 | 含义 |
 | --- | --- |
 | `<生产 SSH 入口>` | 登录生产主机的 SSH 地址与账号 |
-| `<应用根>` | 生产主机上的应用根目录（含 `bin/`、`config/`、`state/`、`backups/`、`run/`） |
-| `<运行账号>` | 三个角色的运行账号 |
-| `<Worker unit>`、`<Admin unit>`、`<Public unit>` | 三个角色的 systemd unit 名 |
+| `<程序目录>` | 程序安装目录（`/opt/auction/bin`）；目录与四个程序 root:root 0755，各级父目录也归 root 且禁止他人写入，三角色运行账号要能逐级进入并执行各自的程序 |
+| `<配置目录>` | 三角色配置目录（`/etc/auction`）：`common/public/admin/worker.toml`、敏感文件 `secrets.toml`、`runtime/admin.toml`、迁移 owner 凭据 `owner/postgres.toml` |
+| `<部署状态目录>` | `--state-dir`（`/var/lib/auction/deployment`）：部署锁、`receipts/` 与 `rollback/`，root 0700；各级父目录也归 root 且禁止他人写入（`/var/lib/auction` 为 root:root 0755，运行账号的数据放在其下自有子目录） |
+| `<停机备份目录>` | `--backup-dir`（`/var/backups/auction`），root 0700 |
+| `<发布包暂存目录>` | 生产主机上解包 Release 资产的 root 所有、禁止他人写入的目录 |
+| `<部署说明>` | 生产主机上人工维护的部署说明文件（“当前部署”段） |
+| `<运行账号>` | 三个角色的运行账号（标准布局为 `auction`） |
+| `<Worker unit>`、`<Admin unit>`、`<Public unit>` | 三个角色的 systemd unit 名（标准模板 `auction-worker.service`、`auction-admin-api.service`、`auction-public-api.service`，由 `auction-stack.service` 编排） |
 | `<Public 站点>`、`<Admin 站点>` | 两个对外 HTTPS 站点 |
 | `<本地环境根>` | 本地隔离环境目录（含 `bin/`、`config/`、`state/`、`backups/` 与环境 `README.md`） |
 | `<云端配置副本>` | 本机保存的线上配置副本，只供演练派生隔离配置 |

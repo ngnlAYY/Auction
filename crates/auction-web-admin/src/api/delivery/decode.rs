@@ -223,6 +223,7 @@ fn valid_origin_kind(value: &str) -> bool {
         value,
         "settlement"
             | "settlement_recovery_action"
+            | "settlement_return_action"
             | "user_key"
             | "manual"
             | "mail_intake"
@@ -405,12 +406,13 @@ fn valid_state_fields(
 mod origin_kind_tests {
     use super::valid_origin_kind;
 
-    /// 两种冻结正文通知也是合法来源；闭集缺项会使投递列表整页失败关闭。
+    /// 两种冻结正文通知与结算退件 Take 也是合法来源；闭集缺项会使投递列表整页失败关闭。
     #[test]
     fn delivery_origin_closed_set_covers_player_notifications() {
         for kind in [
             "settlement",
             "settlement_recovery_action",
+            "settlement_return_action",
             "user_key",
             "manual",
             "mail_intake",

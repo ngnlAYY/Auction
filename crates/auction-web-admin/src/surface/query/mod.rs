@@ -22,6 +22,7 @@ mod mail;
 mod primitives;
 mod realtime;
 mod renames;
+mod returns;
 mod support;
 mod users;
 
@@ -35,5 +36,6 @@ pub(super) use lots::use_lots_query_state;
 pub(super) use mail::{MailQuery, use_mail_query_state};
 pub(super) use realtime::use_realtime_query_state;
 pub(super) use renames::use_renames_query_state;
+pub(super) use returns::{ReturnsQuery, use_returns_query_state};
 pub(super) use support::{SupportQuery, use_support_query_state};
 pub(super) use users::use_users_query_state;

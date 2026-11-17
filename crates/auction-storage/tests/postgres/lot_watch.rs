@@ -570,6 +570,56 @@ async fn postgres_lot_watch_mail_reminder_fence_rejects_a_claim_that_outlived_th
     assert!(sending_at.is_none());
 }
 
+/// 领取后、发送围栏前提醒失效（收件人取消关注，或收件人重新成为权威领先者）：围栏确定拒绝并
+/// 整体回滚，返回 Deferred 而不是 Err；领取状态、Send 尝试与发送节奏都不变。Worker 据此按正常
+/// 延期释放 claim，不把它当作提交未知。
+#[tokio::test]
+async fn postgres_lot_watch_mail_reminder_fence_defers_when_watch_lapses_during_handoff() {
+    for case in ["unwatched", "watcher_leads"] {
+        let database = support::TestDatabase::create().await.expect("克隆模板库");
+        let store = database.store().await.expect("连接克隆测试数据库");
+        let seed = format!("mail-handoff-{case}");
+        let fixture =
+            seed_watch(&store, &seed, "main", "mm", Utc::now() + Duration::minutes(5)).await;
+        let delivery_id = fixture.delivery_id.expect("MoogleMail 提醒有投递");
+        let watcher = Uuid::new_v5(&Uuid::NAMESPACE_OID, format!("{seed}-watcher").as_bytes());
+        let claims = claim_mail(&store).await;
+        assert_eq!(claims.len(), 1, "{case}");
+        let cadence_before = outbid_cadence(&store).await;
+
+        if case == "unwatched" {
+            store
+                .set(SetLotWatchCommand {
+                    command_id: CommandId::new(),
+                    user_id: watcher,
+                    lot_id: fixture.lot_id,
+                    watched: false,
+                    channel: "mm".to_owned(),
+                    expected_version: 1,
+                })
+                .await
+                .expect("交接期间取消关注");
+        } else {
+            sqlx::query("UPDATE public.lots SET leader_user_id = $2 WHERE id = $1")
+                .bind(fixture.lot_id)
+                .bind(watcher)
+                .execute(store.postgres_pool())
+                .await
+                .expect("交接期间收件人重新领先");
+        }
+
+        let outcome = fence_mail(&store, &claims[0], Utc::now()).await;
+        assert!(matches!(outcome, DeliveryFenceOutcome::Deferred), "{case}: 围栏必须确定拒绝");
+        let (status, failure, sending_at, _) = mail_state(&store, delivery_id).await;
+        assert_eq!(status, "claimed", "{case}: 围栏拒绝不改写未发送的领取状态");
+        assert!(failure.is_none(), "{case}");
+        assert!(sending_at.is_none(), "{case}: 不得写入 sending 事实");
+        assert_eq!(send_attempts(&store, delivery_id).await, 0, "{case}: 不得冻结 Send 尝试");
+        assert_eq!(outbid_cadence(&store).await, cadence_before, "{case}: 不得消耗发送节奏");
+        store.postgres_pool().close().await;
+    }
+}
+
 #[tokio::test]
 async fn postgres_lot_watch_mail_reminder_keeps_an_already_fenced_send() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");

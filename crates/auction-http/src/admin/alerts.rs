@@ -145,7 +145,8 @@ pub(crate) async fn webhooks(
     }
 }
 
-/// 读取导航待办计数：人工对账、待确认恢复、活动告警。
+/// 读取导航待办计数：人工对账、待确认恢复、活动告警；带 `include=settlement_returns` 时追加
+/// 未结案结算退件数。
 pub(crate) async fn pending_counts(
     State(state): State<AdminApiState>,
     ConnectInfo(address): ConnectInfo<SocketAddr>,
@@ -158,9 +159,10 @@ pub(crate) async fn pending_counts(
     if let Err(response) = authenticated_admin_session(&state, &headers).await {
         return *response;
     }
-    if uri.query().is_some_and(|query| !query.is_empty()) {
-        return invalid_query("告警查询参数无效");
-    }
+    let include_returns = match pending_counts_projection(&uri) {
+        Ok(include_returns) => include_returns,
+        Err(response) => return *response,
+    };
     let Some(console) = state.operations_alert_console() else {
         return storage_unavailable("待办计数需要已配置的数据库");
     };
@@ -171,10 +173,24 @@ pub(crate) async fn pending_counts(
                 delivery_manual_reconcile: counts.delivery_manual_reconcile,
                 recovery_confirmation: counts.recovery_confirmation,
                 active_alerts: counts.active_alerts,
+                settlement_returns: include_returns.then_some(counts.settlement_returns),
             },
         ))
         .into_response(),
         Err(error) => map_error("read_pending_counts", error),
+    }
+}
+
+/// 待办计数的响应投影：缺省是已发布的三字段闭集；只接受可选的 `include=settlement_returns`
+/// 追加退件计数。未登记的键或重复出现为“告警查询参数无效”，`include` 的其他取值（含空值、
+/// 大小写不同与逗号列表）为“附加字段无效”，都不静默退回缺省投影。
+fn pending_counts_projection(uri: &Uri) -> Result<bool, Box<Response>> {
+    let mut query =
+        parse_query(uri, &["include"]).map_err(|()| Box::new(invalid_query("告警查询参数无效")))?;
+    match query.remove("include").as_deref() {
+        None => Ok(false),
+        Some("settlement_returns") => Ok(true),
+        Some(_) => Err(Box::new(invalid_query("附加字段无效"))),
     }
 }
 
@@ -347,4 +363,52 @@ fn invalid_alert() -> Response {
 
 fn invalid_json() -> Response {
     api_error(StatusCode::BAD_REQUEST, "invalid_json", "请求 JSON 无效").into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::body::to_bytes;
+    use axum::http::{StatusCode, Uri};
+    use serde_json::Value;
+
+    use super::pending_counts_projection;
+
+    async fn parse(query: &str) -> Result<bool, (StatusCode, Value)> {
+        let uri: Uri = format!("/api/v1/admin/pending-counts{query}").parse().expect("测试 URI");
+        match pending_counts_projection(&uri) {
+            Ok(include) => Ok(include),
+            Err(response) => {
+                let status = response.status();
+                let bytes =
+                    to_bytes(response.into_body(), usize::MAX).await.expect("读取错误响应体");
+                Err((status, serde_json::from_slice(&bytes).expect("错误响应是 JSON")))
+            }
+        }
+    }
+
+    /// 缺省响应保持已发布的三字段闭集；只有显式 `include=settlement_returns` 追加退件计数。
+    #[tokio::test]
+    async fn settlement_returns_count_is_opt_in() {
+        assert_eq!(parse("").await, Ok(false));
+        assert_eq!(parse("?").await, Ok(false));
+        assert_eq!(parse("?include=settlement_returns").await, Ok(true));
+    }
+
+    /// 未知取值、空值、大小写不同与逗号列表为“附加字段无效”；重复出现或未登记的键为“告警查询
+    /// 参数无效”，都不静默退回缺省投影。
+    #[tokio::test]
+    async fn unknown_or_repeated_include_fails_closed() {
+        for (query, message) in [
+            ("?include=", "附加字段无效"),
+            ("?include=SETTLEMENT_RETURNS", "附加字段无效"),
+            ("?include=settlement_returns,alerts", "附加字段无效"),
+            ("?include=settlement_returns&include=settlement_returns", "告警查询参数无效"),
+            ("?status=active", "告警查询参数无效"),
+        ] {
+            let (status, body) = parse(query).await.expect_err(query);
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{query}");
+            assert_eq!(body["code"], "invalid_query", "{query}");
+            assert_eq!(body["message"], message, "{query}");
+        }
+    }
 }

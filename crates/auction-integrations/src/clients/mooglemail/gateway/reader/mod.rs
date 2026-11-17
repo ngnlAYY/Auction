@@ -19,10 +19,12 @@ use crate::clients::mooglemail::client::MoogleMailClient;
 use crate::clients::mooglemail::parser::MoogleMailParser;
 use crate::clients::mooglemail::protocol::MoogleMailWorld;
 
+mod candidate;
 mod error;
 mod gateway;
 mod inbox;
 mod recovery_scan;
+mod returned;
 mod scan;
 mod sent;
 mod sent_hints;

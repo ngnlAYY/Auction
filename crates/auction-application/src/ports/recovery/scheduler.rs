@@ -102,11 +102,22 @@ pub enum RecoveryActionOutcome {
 /// PostgreSQL 在同一 Serializable 事务中锁定 due case、检查结算履约事实、推进阶段并
 /// 创建 payment reminder action，不以内存定时器替代持久事实。
 pub trait RecoveryWorkStore: Send + Sync {
-    /// 记录一封尚未消费的结算退回邮件，并在同一事务中创建后续 recovery action。
+    /// 记录一封尚未消费、来源可证明为系统 `[RTS]` 的退件（只认恢复记录的付款或交付义务），
+    /// 并在同一事务中创建后续 recovery action。
     fn record_due_return(
         &self,
         now: DateTime<Utc>,
     ) -> ApplicationFuture<'_, Option<RecoveryReturnAdvance>>;
+
+    /// 消费一封恢复流程不处理的结算退件：货款、退款、流拍/撤拍寄回、无恢复记录的付款，以及
+    /// 来源无法证明的历史退件。按 [`crate::settlement::SettlementReturnFacts::classify`] 追加
+    /// 唯一证据与消费事实，对应未终结履约同事务转人工对账；不领取、不退回、不重发，也不改变
+    /// 资金。与 [`Self::record_due_return`] 的分区互斥，同一封退件只消费一次；没有待消费退件时
+    /// 返回 `None`。复用 recovery 循环的退件阶段与存储句柄，不新增 Worker 装配。
+    fn consume_due_settlement_return(
+        &self,
+        now: DateTime<Utc>,
+    ) -> ApplicationFuture<'_, Option<crate::ports::settlement::SettlementReturnConsumption>>;
 
     /// 推进一个当前可处理的 case；没有 due 工作时返回 `None`。
     fn advance_due_case(
@@ -173,7 +184,8 @@ pub trait RecoveryWorkStore: Send + Sync {
 }
 
 /// `relist_pending` 的目标拍卖可能暂时不存在，因此重挂事务必须支持持久化退避；`refunding`
-/// 只能依据 buyer refund fulfillment 的已提交完成事实闭合。两项操作都不能由内存计时器代替。
+/// 只能依据已提交的完成事实闭合：buyer refund fulfillment 已满足，或退款邮件被退回、经退件案件
+/// 精确领回后代管结案。两项操作都不能由内存计时器代替。
 pub trait RecoveryResolutionStore: Send + Sync {
     /// 推进一个到期的 guarded relist；没有 due 工作时返回 `None`。
     fn advance_due_relist(
@@ -182,7 +194,8 @@ pub trait RecoveryResolutionStore: Send + Sync {
         retry_after: Duration,
     ) -> ApplicationFuture<'_, Option<RecoveryResolutionAdvance>>;
 
-    /// 在 buyer refund fulfillment 已满足后闭合一个 refunding case。
+    /// 闭合一个 refunding case：buyer refund fulfillment 已满足，或退款权益已转为退件案件的代管
+    /// （各自追加独立的完成事实，代管不冒充退款已完成）。
     fn complete_due_refund(
         &self,
         now: DateTime<Utc>,

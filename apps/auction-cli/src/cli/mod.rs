@@ -60,7 +60,8 @@ pub(crate) enum Command {
     /// 从解压后的 CI 发布包制品部署：制品校验、时段门禁、演练回执、磁盘空间与在途发送门禁、
     /// 停机备份、新旧 CLI 校验、保留旧程序、安装、迁移、顺序启动与回执。只支持分体部署。
     Deploy(DeployArgs),
-    /// 回退到 `deploy` 保留的旧程序；只用于不含迁移或全部登记为 compatible 的区间。
+    /// 把三个运行角色回退到 `deploy` 保留的旧程序并保留当前 auction-cli；只用于不含迁移或全部
+    /// 登记为 compatible 的区间。
     Rollback(RollbackArgs),
     /// 数据库状态、迁移、建库、恢复预检、保留盘点与破坏性重建。
     #[command(subcommand)]
@@ -315,6 +316,49 @@ mod tests {
         let Command::Service(service) = cli.command else { panic!("应解析为 service 命令") };
         let ServiceAction::Start { receipt, .. } = service.action else { panic!("应为 start") };
         assert_eq!(receipt.backup_id.as_deref(), Some("backup-1"));
+    }
+
+    /// service start/restart 必须带 --owner-secrets（缺少是参数错误），status/stop 不需要；
+    /// 随包的 auction-stack unit 的 ExecStart/ExecStop 必须能按当前定义解析。
+    #[test]
+    fn service_start_and_restart_require_owner_secrets() {
+        let base = ["auction-cli", "--config-dir", "/etc/auction", "service"];
+        for action in ["start", "restart"] {
+            let mut arguments = base.to_vec();
+            arguments.push(action);
+            let error = Cli::try_parse_from(&arguments).expect_err("缺少 --owner-secrets 必须拒绝");
+            assert_eq!(error.kind(), clap::error::ErrorKind::MissingRequiredArgument, "{action}");
+            arguments.extend(["--owner-secrets", "/etc/auction/owner/postgres.toml"]);
+            Cli::try_parse_from(&arguments).expect("带 --owner-secrets 可以解析");
+        }
+        for action in ["status", "stop"] {
+            let mut arguments = base.to_vec();
+            arguments.push(action);
+            Cli::try_parse_from(&arguments).expect("status/stop 不需要 --owner-secrets");
+        }
+
+        let unit = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../ops/deploy/systemd/auction-stack.service.example"
+        ));
+        for key in ["ExecStart=", "ExecStop="] {
+            let line = unit
+                .lines()
+                .find_map(|line| line.strip_prefix(key))
+                .unwrap_or_else(|| panic!("示例 unit 缺少 {key}"));
+            let mut arguments = line.split_whitespace().collect::<Vec<_>>();
+            arguments[0] = "auction-cli";
+            let cli = Cli::try_parse_from(&arguments).expect("示例 unit 的命令可以解析");
+            let Command::Service(service) = cli.command else {
+                panic!("应解析为 service 命令")
+            };
+            if let ServiceAction::Start { owner, .. } = service.action {
+                assert_eq!(
+                    owner.owner_secrets,
+                    std::path::Path::new("/etc/auction/owner/postgres.toml")
+                );
+            }
+        }
     }
 
     /// `switch set --help` 是参数的权威说明：期限参数必须带说明与二选一约束。

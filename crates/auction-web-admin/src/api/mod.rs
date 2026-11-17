@@ -22,6 +22,7 @@ mod proxy_events;
 mod realtime;
 mod recovery;
 mod renames;
+mod returns;
 mod rules;
 mod runtime_config;
 mod session;
@@ -84,6 +85,12 @@ pub(crate) use recovery::{
 pub(crate) use renames::{
     AdminRename, AdminRenamePage, AdminRenameRevertCommand, fetch_admin_renames,
     prepare_admin_rename_revert, revert_admin_rename,
+};
+pub(crate) use returns::{
+    SettlementReturnCustody, SettlementReturnDetail, SettlementReturnDispatch,
+    SettlementReturnEvent, SettlementReturnFilters, SettlementReturnPage, SettlementReturnSummary,
+    SettlementReturnTake, fetch_settlement_return, fetch_settlement_returns,
+    submit_settlement_return_action,
 };
 pub(crate) use rules::{
     AdminDocumentKind, AdminRules, AdminRulesCandidate, fetch_admin_rules, publish_admin_rules,

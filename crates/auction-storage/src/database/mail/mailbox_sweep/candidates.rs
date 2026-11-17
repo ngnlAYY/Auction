@@ -1,7 +1,10 @@
 //! 未证明 MoogleMail 发送的只读投影：冻结尝试身份优先，旧行只保留安全恢复所需字段。
 
 use auction_application::delivery::{DeliverySendExpectation, DeliveryTakeExpectation};
-use auction_application::mail::{MoogleMailboxSweepCandidate, MoogleMailboxUnprovenSend};
+use auction_application::mail::{
+    MoogleMailboxReturnTakeIdentity, MoogleMailboxSweepCandidate, MoogleMailboxUnprovenSend,
+};
+use auction_application::settlement::settlement_return_original_body;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use sqlx::Postgres;
@@ -34,6 +37,10 @@ pub(super) struct UnprovenSendRow {
     expectation: Option<Value>,
     has_take_attempt: bool,
     take_expectation: Option<Value>,
+    /// 结算退件 Take 的原退件入站快照与证据；其他来源为空。
+    return_sender: Option<String>,
+    return_subject: Option<String>,
+    return_evidence: Option<Value>,
 }
 
 pub(super) async fn unproven_sends(
@@ -45,7 +52,8 @@ pub(super) async fn unproven_sends(
     // 仅旧结算解析既有装备引用；正文和登录 key 不进入维护投影。
     // 先物化轮转前缀，再解析冻结尝试和旧装备引用，避免为本批未处理的后缀执行关联查询。
     let rows: Vec<UnprovenSendRow> = sqlx::query_as(
-        "WITH candidates AS MATERIALIZED (
+        concat!(
+            "WITH candidates AS MATERIALIZED (
             SELECT d.id, d.created_at,
                    CASE WHEN sweep.last_created_at IS NULL
                               OR (d.created_at, d.id) > (sweep.last_created_at, sweep.last_delivery_id)
@@ -98,12 +106,27 @@ pub(super) async fn unproven_sends(
                 attempt.expectation,
                 EXISTS (SELECT 1 FROM public.delivery_take_attempts history
                         WHERE history.delivery_id=d.id) AS has_take_attempt,
-                take_attempt.expectation AS take_expectation
+                take_attempt.expectation AS take_expectation,
+                returned.sender AS return_sender,
+                returned.subject AS return_subject,
+                returned.evidence AS return_evidence
          FROM candidates
          JOIN public.deliveries d ON d.id = candidates.id
          LEFT JOIN LATERAL public.delivery_current_send_attempt(d.id) attempt ON true
          LEFT JOIN LATERAL public.delivery_current_take_attempt(d.id) take_attempt ON true
+         -- 结算退件 Take 按动作的唯一 Take 投递找回原退件：入站快照的发件人与主题、案件当前
+         -- 有效证据（核验改绑后为核验事实）。
+         LEFT JOIN LATERAL (
+             SELECT inbound.sender, inbound.subject, ",
+            crate::database::settlement::returns::current_return_evidence_sql!("c", "inbound"),
+            " AS evidence
+             FROM public.settlement_return_actions AS action
+             JOIN public.settlement_return_cases AS c ON c.return_mail_id = action.return_mail_id
+             JOIN public.inbound_mail AS inbound ON inbound.id = action.return_mail_id
+             WHERE d.origin_kind = 'settlement_return_action' AND action.delivery_id = d.id
+         ) AS returned ON true
          ORDER BY candidates.sweep_order, candidates.created_at, candidates.id",
+        ),
     )
     .bind(world_id)
     .bind(limit)
@@ -143,6 +166,9 @@ fn recoverable_send(world_id: &str, row: UnprovenSendRow) -> Option<MoogleMailbo
         expectation,
         has_take_attempt,
         take_expectation,
+        return_sender,
+        return_subject,
+        return_evidence,
     } = row;
     if recipient.is_empty() || cod < 0 || credits < 0 || outcome_recorded_at < sending_at {
         return None;
@@ -185,24 +211,53 @@ fn recoverable_send(world_id: &str, row: UnprovenSendRow) -> Option<MoogleMailbo
         }
         None => None,
     };
+    let valid_attachment_ids = attachment_ids
+        .iter()
+        .all(|id| !id.is_empty() && id.len() <= 32 && id.bytes().all(|byte| byte.is_ascii_digit()));
     let usable = send_expectation.is_some()
         || match (origin_kind.as_str(), operation.as_str()) {
             ("settlement", "send") => !reference.is_empty(),
             ("mail_intake", "send") => result_code.is_some() && !inbound_mail_id.is_empty(),
             ("mail_intake", "take") => {
-                !inbound_mail_id.is_empty()
-                    && !attachment_ids.is_empty()
-                    && attachment_ids.iter().all(|id| {
-                        !id.is_empty()
-                            && id.len() <= 32
-                            && id.bytes().all(|byte| byte.is_ascii_digit())
-                    })
+                !inbound_mail_id.is_empty() && !attachment_ids.is_empty() && valid_attachment_ids
+            }
+            // 结算退件 Take 只经原 Take 会话的冻结身份恢复；现金退件可以没有装备附件。
+            ("settlement_return_action", "take") => {
+                take_expectation.is_some()
+                    && !inbound_mail_id.is_empty()
+                    && (credits > 0 || !attachment_ids.is_empty())
+                    && valid_attachment_ids
             }
             _ => false,
         };
     if !usable {
         return None;
     }
+    // 领取完成证明需要核对的原退件身份；缺任何一项都不能证明，候选仍参与轮转但不读取远端。
+    let return_take = match (
+        origin_kind.as_str(),
+        return_sender,
+        return_subject,
+        return_evidence.as_ref().and_then(settlement_return_original_body),
+    ) {
+        (
+            "settlement_return_action",
+            Some(sender),
+            Some(subject),
+            Some((returned_from, digest)),
+        ) => {
+            Some(MoogleMailboxReturnTakeIdentity {
+                sender,
+                subject,
+                original_body_digest: digest,
+                returned_from,
+                cod,
+                // 现金在附件列表里占一条，领取后各有一行 `Removed attachment:` 回执。
+                attachment_count: usize::from(credits > 0) + attachment_ids.len(),
+            })
+        }
+        _ => None,
+    };
     Some(MoogleMailboxUnprovenSend {
         delivery_id,
         origin_kind,
@@ -224,5 +279,6 @@ fn recoverable_send(world_id: &str, row: UnprovenSendRow) -> Option<MoogleMailbo
         sending_fencing_version,
         send_expectation,
         take_expectation,
+        return_take,
     })
 }

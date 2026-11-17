@@ -3,6 +3,8 @@
 
 use std::path::{Component, Path, PathBuf};
 
+use crate::ports::admin::valid_listener_group;
+
 /// socket 路径的字节上限；为 `sockaddr_un.sun_path` 保留余量。
 const MAX_SOCKET_PATH_BYTES: usize = 100;
 /// peer UID 与 GID allowlist 合计的项数上限。
@@ -17,7 +19,7 @@ pub enum WorkerControlBindingError {
     InvalidSocketPath,
     /// socket 不直接位于 runtime 目录。
     SocketOutsideRuntimeDirectory,
-    /// group 不是 1 至 64 位安全标识。
+    /// group 不符合 Unix 监听 socket 属组名规则（与 Admin 监听属组共用同一判定）。
     InvalidGroup,
     /// peer UID 与 GID allowlist 合计超过 64 项。
     AllowlistTooLarge,
@@ -46,7 +48,8 @@ pub fn validate_control_binding(
     if socket_path.parent() != Some(runtime_directory) {
         return Err(WorkerControlBindingError::SocketOutsideRuntimeDirectory);
     }
-    if !safe_identifier(group) {
+    // 属组名规则只有一个 owner：与 Admin/Public 监听 socket 的属组名共用同一判定，不另写一份。
+    if !valid_listener_group(group) {
         return Err(WorkerControlBindingError::InvalidGroup);
     }
     if allowed_peer_uids.len() + allowed_peer_gids.len() > MAX_PEER_ALLOWLIST_ENTRIES {
@@ -79,14 +82,6 @@ fn normalized_absolute_path(path: &Path) -> bool {
         && !path.to_string_lossy().chars().any(|character| character == '\0')
 }
 
-/// 1 至 64 字节，首字符为 ASCII 字母或数字，其余只允许字母、数字与 `.`、`_`、`-`。
-fn safe_identifier(value: &str) -> bool {
-    let mut bytes = value.bytes();
-    matches!(bytes.next(), Some(first) if first.is_ascii_alphanumeric())
-        && value.len() <= 64
-        && bytes.all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
-}
-
 fn has_duplicate(values: &[u32]) -> bool {
     let mut values = values.to_vec();
     values.sort_unstable();
@@ -98,6 +93,7 @@ mod tests {
     use std::path::Path;
 
     use super::{WorkerControlBindingError, valid_control_socket_path, validate_control_binding};
+    use crate::ports::admin::valid_listener_group;
 
     const RUNTIME: &str = "/run/hv-auction/worker";
     const SOCKET: &str = "/run/hv-auction/worker/control.sock";
@@ -198,17 +194,38 @@ mod tests {
         }
     }
 
+    /// 属组名只有一个规则 owner：同一张边界表同时驱动 control 绑定与 Admin/Public 监听属组校验，
+    /// 两者对每个取值的判定必须一致。
     #[test]
-    fn group_must_be_a_safe_identifier() {
+    fn group_rule_is_shared_with_listener_groups() {
+        let at_limit = "g".repeat(64);
         let too_long = "g".repeat(65);
-        for group in ["", "-hv", ".hv", "hv auction", "hv/auction", "组", too_long.as_str()] {
+        let cases = [
+            ("hv-auction", true),
+            ("a.b_c-1", true),
+            ("1000", true),
+            ("0hv", true),
+            (at_limit.as_str(), true),
+            ("", false),
+            (too_long.as_str(), false),
+            ("组", false),
+            ("hé", false),
+            ("hv auction", false),
+            ("hv/auction", false),
+            ("-hv", false),
+            (".hv", false),
+            ("_hv", false),
+        ];
+        for (group, accepted) in cases {
+            assert_eq!(valid_listener_group(group), accepted, "监听属组 {group:?}");
+            let expected =
+                if accepted { Ok(()) } else { Err(WorkerControlBindingError::InvalidGroup) };
             assert_eq!(
                 check(SOCKET, RUNTIME, group, &[1], &[], true),
-                Err(WorkerControlBindingError::InvalidGroup),
-                "{group:?}"
+                expected,
+                "control 属组 {group:?}"
             );
         }
-        assert_eq!(check(SOCKET, RUNTIME, &"g".repeat(64), &[1], &[], true), Ok(()));
     }
 
     #[test]

@@ -5,9 +5,11 @@ use std::path::Path;
 use anyhow::Context;
 
 use super::artifact;
-use crate::service::{ManagedRole, Systemctl, UnitState};
+use super::install::RunAccount;
+use crate::receipt;
+use crate::service::{self, ManagedRole, Systemctl, UnitState};
 use crate::support::digest::sha256_path;
-use crate::{receipt, service};
+use crate::support::files;
 
 /// 已安装制品的静态回执；启动失败时没有可核对的运行进程，只能用制品摘要证明回滚目标。
 pub(super) fn installed_artifacts(
@@ -88,6 +90,20 @@ pub(crate) async fn unit_states(systemctl: &Systemctl) -> anyhow::Result<[UnitSt
     states.try_into().ok().context("三角色状态数量不一致")
 }
 
+/// 三角色 unit 的运行账号（`User=`，空为 root，名称经 NSS 解析；`DynamicUser=yes` 时 UID 不固定），
+/// 供安装目录门禁核对它们能否穿越目录并执行各自的程序。
+pub(super) fn run_accounts(states: &[UnitState; 3]) -> anyhow::Result<Vec<RunAccount>> {
+    ManagedRole::START_ORDER
+        .into_iter()
+        .zip(states)
+        .map(|(role, state)| {
+            let uid = service::run_uid(state)
+                .with_context(|| format!("解析 {} unit 的运行账号失败", role.name()))?;
+            Ok(RunAccount { role: role.name(), program: role_binary(role), uid })
+        })
+        .collect()
+}
+
 pub(crate) fn running_roles(states: &[UnitState; 3]) -> Vec<(&'static str, u32)> {
     ManagedRole::START_ORDER
         .iter()
@@ -95,25 +111,6 @@ pub(crate) fn running_roles(states: &[UnitState; 3]) -> Vec<(&'static str, u32)>
         .filter(|(_, state)| state.running())
         .map(|(role, state)| (role.name(), state.main_pid))
         .collect()
-}
-
-/// 三个 unit 必须使用同一个固定服务账号；DynamicUser 或账号不一致都无法给替换的程序设置属主。
-pub(crate) fn shared_service_uid(states: &[UnitState; 3]) -> anyhow::Result<u32> {
-    let mut uid = None;
-    for (role, state) in ManagedRole::START_ORDER.iter().zip(states) {
-        if state.dynamic_user {
-            anyhow::bail!("{} unit 使用 DynamicUser，无法为程序设置稳定属主", role.name());
-        }
-        let current = service::service_uid(&state.user)?;
-        match uid {
-            Some(expected) if expected != current => {
-                anyhow::bail!("三角色 unit 必须使用同一个服务账号才能逐个原子替换程序");
-            }
-            Some(_) => {}
-            None => uid = Some(current),
-        }
-    }
-    uid.context("无法确定服务账号")
 }
 
 pub(super) fn require_artifact_cli(artifact: &artifact::Artifact) -> anyhow::Result<()> {
@@ -131,21 +128,14 @@ pub(super) fn require_artifact_cli(artifact: &artifact::Artifact) -> anyhow::Res
     Ok(())
 }
 
-/// 备份目录必须已存在、非符号链接，且不允许 group/other 写入。
+/// 停机前按停机备份写入时的同一口径只读核对 `--backup-dir`：已存在、非符号链接、禁止
+/// group/other 写入，且归当前账号或 root 所有（root 部署只能是 root）。不创建目录，dry-run
+/// 同样执行；否则属主不符要到停机后写停机备份时才被拒绝。
 pub(super) fn require_backup_dir(path: &Path) -> anyhow::Result<()> {
     if !path.is_absolute() {
         anyhow::bail!("--backup-dir 必须是绝对路径");
     }
-    let metadata = std::fs::symlink_metadata(path)
-        .with_context(|| format!("读取备份目录失败：{}", path.display()))?;
-    if !metadata.is_dir() || metadata.file_type().is_symlink() {
-        anyhow::bail!("备份目录必须是非符号链接目录：{}", path.display());
-    }
-    use std::os::unix::fs::MetadataExt;
-    if metadata.mode() & 0o022 != 0 {
-        anyhow::bail!("备份目录不得允许 group/other 写入：{}", path.display());
-    }
-    Ok(())
+    files::require_private_directory(path, "备份目录")
 }
 
 #[cfg(test)]
@@ -188,6 +178,10 @@ mod tests {
         fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).expect("设置权限");
         assert!(require_backup_dir(&root).is_ok());
         assert!(require_backup_dir(Path::new("relative")).is_err());
+        let link = root.with_extension("link");
+        std::os::unix::fs::symlink(&root, &link).expect("符号链接");
+        assert!(require_backup_dir(&link).is_err(), "符号链接必须拒绝");
+        fs::remove_file(&link).expect("清理符号链接");
         fs::remove_dir(&root).expect("清理临时目录");
     }
 }

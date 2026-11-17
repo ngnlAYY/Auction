@@ -153,7 +153,10 @@ pub(super) fn DeliveryRow(
     on_cancel: EventHandler<()>,
 ) -> Element {
     let commands = use_context::<PendingCommands>();
+    // 结算退件 Take 由退件案件推进：投递台不提供人工动作，服务端同样拒绝；处理入口在退件页。
+    let case_owned = delivery.origin_kind == "settlement_return_action";
     let kind = match delivery.status.as_str() {
+        _ if case_owned => None,
         "claimed" => Some(DeliveryDialogKind::Release),
         "failed"
             if !is_mail_disposition_conflict(&delivery)

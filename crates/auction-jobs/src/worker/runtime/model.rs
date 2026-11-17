@@ -12,7 +12,7 @@ use auction_application::recovery::{RecoveryResolutionStore, RecoveryWorkStore};
 use auction_application::scheduling::ScheduledRoundStore;
 use auction_application::settlement::{
     SettlementCommandPort, SettlementFulfillmentCommandPort, SettlementFulfillmentStore,
-    SettlementWorkStore,
+    SettlementReturnMailReader, SettlementReturnWorkStore, SettlementWorkStore,
 };
 use auction_observability::WorkerRecorder;
 
@@ -49,6 +49,10 @@ pub struct PersistentWorker<C> {
     /// 资产对账：只追加报告事实，不授权资金或资产动作。
     pub asset_reconciliation: Option<AssetReconciliationRuntime>,
     pub recovery_store: Option<Arc<dyn RecoveryWorkStore>>,
+    /// 结算退件案件：激活与收口持久 Take、收口补寄，在恢复循环中推进。
+    pub settlement_returns: Option<Arc<dyn SettlementReturnWorkStore>>,
+    /// 结算退件只读重新核验读取 Bot 收件箱的端口；未装配 MoogleMail 时为空，核验保持待办。
+    pub settlement_return_reader: Option<Arc<dyn SettlementReturnMailReader>>,
     pub recovery_resolution: Option<Arc<dyn RecoveryResolutionStore>>,
     pub recovery_delivery: Option<Arc<dyn MailDeliveryEnqueuer>>,
     pub recovery_blacklister: Option<Arc<dyn RecoveryBuyerBlacklister>>,

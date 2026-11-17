@@ -260,7 +260,9 @@ fn AlertRow(
                             },
                             {t!("alert-console-acknowledge")}
                         }
+                        // 行内没有可见标签：可访问名称说明它选的是静默时长，旁边的按钮不能代为命名。
                         select {
+                            aria_label: t!("alert-console-silence-duration"),
                             value: silence_hours().to_string(),
                             onchange: move |event| {
                                 if let Ok(hours) = event.value().parse::<i64>()

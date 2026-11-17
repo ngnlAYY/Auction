@@ -1,4 +1,7 @@
 //! 受证明恢复的状态迁移事务：同事务锁定观测、资金与动作，只重试明确冲突。
+//!
+//! 绑定原 Take 会话的恢复既服务入站邮件 Take，也服务结算退件 Take（`settlement_return_action`）：
+//! 后者的投递改写与案件推进（领回记账或重新排队）在同一事务提交，任何一步不成立都整体回滚。
 
 use auction_application::delivery::{
     DeliverySendCredentialBinding, DeliverySendExpectation, DeliveryTakeExpectation,
@@ -16,6 +19,10 @@ use crate::database::delivery::audit::{
 };
 use crate::database::delivery::scheduler::{attempts, take_attempts};
 use crate::database::settlement::funding;
+use crate::database::settlement::returns::{
+    SweptTakeOwner, TAKE_SWEEP_REASON, lock_swept_take, requeue_swept_take, settle_swept_take,
+    swept_take_owner,
+};
 
 pub(super) enum RecoveryUpdate<'a> {
     Send(&'a str, &'a Value, i64, Option<&'a DeliverySendExpectation>),
@@ -46,7 +53,8 @@ async fn persist_transition_once(
     update: &RecoveryUpdate<'_>,
 ) -> Result<bool, RecoveryError> {
     let mut tx = pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await?;
-    // 当前观测 generation→资金→recovery→credential→action→delivery；历史 generation 只作身份。
+    // 当前观测 generation→world→资金→recovery→credential→case→action→delivery；历史 generation
+    // 只作身份。world、案件与动作只在结算退件 Take 时锁定。
     match update {
         RecoveryUpdate::Send(_, metadata, _, Some(expectation)) => {
             recovery::lock_observation(&mut tx, expectation, metadata).await?;
@@ -57,6 +65,19 @@ async fn persist_transition_once(
         }
         RecoveryUpdate::Send(_, _, _, None) => {}
     }
+    let return_prefix = match update {
+        RecoveryUpdate::Action(..) | RecoveryUpdate::Requeue(..) => {
+            match swept_take_owner(&mut tx, delivery_id).await? {
+                SweptTakeOwner::Other => None,
+                SweptTakeOwner::Unprovable => {
+                    tx.rollback().await?;
+                    return Ok(false);
+                }
+                SweptTakeOwner::Return(prefix) => Some(prefix),
+            }
+        }
+        RecoveryUpdate::Send(..) => None,
+    };
     let account = funding::lock_funded_delivery_account(&mut tx, delivery_id).await?;
     let recovery_send = if matches!(update, RecoveryUpdate::Send(..)) {
         sqlx::query_scalar::<_, bool>(
@@ -98,6 +119,18 @@ async fn persist_transition_once(
         )
         .await?;
     }
+    // 结算退件只接受仍停在结果未知的案件；正常收口尚未接手的 take_pending 不由巡检改写。
+    let returned = match return_prefix {
+        Some(prefix) => match lock_swept_take(&mut tx, prefix).await? {
+            Some(returned) => Some(returned),
+            None => {
+                tx.rollback().await?;
+                return Ok(false);
+            }
+        },
+        None => None,
+    };
+    let take_origin = if returned.is_some() { "settlement_return_action" } else { "mail_intake" };
     sqlx::query("SELECT id FROM public.deliveries WHERE id=$1 FOR UPDATE")
         .bind(delivery_id)
         .fetch_optional(&mut *tx)
@@ -128,7 +161,7 @@ async fn persist_transition_once(
                      result_metadata=COALESCE(result_metadata, '{}'::jsonb)
                          || jsonb_build_object('sweep_retries',$2::bigint,
                              'sweep_requeued_at',clock_timestamp(),'sweep_requeue_reason',$3::text)
-                 WHERE id=$1 AND status='manual_reconcile' AND origin_kind='mail_intake'
+                 WHERE id=$1 AND status='manual_reconcile' AND origin_kind=$5
                    AND payload_operation='take' AND external_reference IS NULL
                    AND COALESCE((result_metadata->>'sweep_retries')::bigint,0)=$2-1
                    AND fencing_version=$4
@@ -138,13 +171,14 @@ async fn persist_transition_once(
             .bind(retries)
             .bind(reason)
             .bind(fencing_version)
+            .bind(take_origin)
             .fetch_optional(&mut *tx)
             .await?;
             let Some(row) = updated else {
                 tx.rollback().await?;
                 return Ok(false);
             };
-            ("mail_intake".to_owned(), row.0, row.1)
+            (take_origin.to_owned(), row.0, row.1)
         }
         RecoveryUpdate::Send(mid, metadata, fencing_version, expectation) => {
             let Some(row) = recovery::bind_send(
@@ -172,6 +206,15 @@ async fn persist_transition_once(
             {
                 return Err(RecoveryError::Rejected);
             }
+            // 结算退件只认 integrations 核对过原身份、原正文前缀与领取回执的完成观察；“附件为空”
+            // 或邮件整体缺失都不能证明资产进入 Bot 账号，保持结果未知。预期资产与动作冻结事实的
+            // 逐项比对由案件推进在同一事务内完成。
+            if returned.is_some()
+                && metadata.get("reason").and_then(Value::as_str) != Some(TAKE_SWEEP_REASON)
+            {
+                tx.rollback().await?;
+                return Ok(false);
+            }
             let world = &expectation.world_id;
             let reference = format!("mooglemail:{world}:take:{mid}");
             let updated: Option<(String, DateTime<Utc>)> = sqlx::query_as(
@@ -180,7 +223,7 @@ async fn persist_transition_once(
                      completed_at=clock_timestamp(),updated_at=clock_timestamp(),
                      lease_token=NULL,lease_expires_at=NULL,
                      result_metadata=COALESCE(result_metadata,'{}'::jsonb)||$3::jsonb
-                 WHERE id=$1 AND status='manual_reconcile' AND origin_kind='mail_intake'
+                 WHERE id=$1 AND status='manual_reconcile' AND origin_kind=$7
                    AND payload_operation='take' AND external_reference IS NULL
                    AND sending_at IS NOT NULL AND COALESCE(payload_world,'main')=$4
                    AND payload->>'external_mail_id'=$5
@@ -195,15 +238,31 @@ async fn persist_transition_once(
             .bind(world)
             .bind(*mid)
             .bind(fencing_version)
+            .bind(take_origin)
             .fetch_optional(&mut *tx)
             .await?;
             let Some(row) = updated else {
                 tx.rollback().await?;
                 return Ok(false);
             };
-            ("mail_intake".to_owned(), row.0, row.1)
+            (take_origin.to_owned(), row.0, row.1)
         }
     };
+    // 结算退件案件与投递改写同事务推进：完成证明按正常领回记账，仍在未领则回到 Take 待执行；
+    // 锁内复核不成立时整体回滚，投递保持人工核对。
+    let return_progress = match (returned.as_ref(), update) {
+        (Some(returned), RecoveryUpdate::Action(..)) => {
+            settle_swept_take(&mut tx, returned).await?
+        }
+        (Some(returned), RecoveryUpdate::Requeue(retries, reason, ..)) => {
+            requeue_swept_take(&mut tx, returned, *retries, reason).await?
+        }
+        _ => None,
+    };
+    if returned.is_some() && return_progress.is_none() {
+        tx.rollback().await?;
+        return Ok(false);
+    }
     if matches!(update, RecoveryUpdate::Send(..))
         && let Some(account) = account
     {
@@ -264,6 +323,11 @@ async fn persist_transition_once(
                     RecoveryUpdate::Send(mid, _, _, _) | RecoveryUpdate::Action(mid, _, _, _, _) => Some(*mid),
                     _ => None,
                 },
+                "settlement_return": return_progress.as_ref().map(|progress| serde_json::json!({
+                    "return_mail_id": progress.return_mail_id,
+                    "status": progress.status.as_str(),
+                    "case_version": progress.case_version,
+                })),
             }),
         },
     )

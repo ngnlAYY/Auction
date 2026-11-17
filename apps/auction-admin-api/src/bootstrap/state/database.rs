@@ -212,8 +212,23 @@ pub(super) async fn configure_state(
                     .context("初始化凭据获取客户端失败")?,
             );
             let opener: Arc<dyn AdminCredentialOpener> = sealer.clone();
+            // 邮件 Cookie 的在线检查经 Worker control 交给 Worker 执行，与邮件循环共用同账号在途锁和
+            // 账号忙熔断；socket 路径无效时装配明确不可用的端口，不回退为 Admin 直连。
+            let mail_check: Arc<
+                dyn auction_application::operations::WorkerMailCredentialCheckPort,
+            > = if let Ok(client) = auction_integrations::WorkerRemoteReadClient::new(
+                config.worker_control_socket_path(),
+                std::time::Duration::from_secs(
+                    auction_application::operations::WORKER_MAIL_CREDENTIAL_CHECK_TIMEOUT_SECONDS,
+                ),
+            ) {
+                Arc::new(client)
+            } else {
+                Arc::new(auction_application::operations::UnavailableWorkerMailCredentialCheck)
+            };
             let verifier = Arc::new(
-                CredentialVerifier::production(opener).context("初始化凭据检查客户端失败")?,
+                CredentialVerifier::production(opener, mail_check)
+                    .context("初始化凭据检查客户端失败")?,
             );
             credential_check = Some(Arc::new(AdminCredentialCheckService::new(
                 Arc::clone(&store),
@@ -347,6 +362,7 @@ pub(super) async fn configure_state(
     .with_auction_schedule(auction_schedule)
     .with_admin_worlds(admin_worlds)
     .with_settlement_catalog(settlement_catalog)
+    .with_settlement_returns(store.clone())
     .with_dashboard_worlds(config::configured_dashboard_worlds(config))
     .with_dashboard_mailbox_keys(config::configured_dashboard_mailbox_keys(config))
     .with_runtime_switches(store.clone(), switches.clone())

@@ -40,6 +40,10 @@ pub(in crate::database::settlement::fulfillment) async fn prepare_postgres(
         .state_version
         .checked_add(1)
         .ok_or_else(|| repository_error("结算履约状态版本溢出"))?;
+    let dispatch_no = i32::try_from(claim.dispatch_no)
+        .ok()
+        .filter(|value| *value >= 1)
+        .ok_or_else(|| repository_error("结算履约派发编号无效"))?;
     let claim_snapshot = claim.clone();
     let preparation_snapshot = preparation.clone();
     let request_id_snapshot = preparation.prepare_command_id.to_string();
@@ -133,7 +137,8 @@ pub(in crate::database::settlement::fulfillment) async fn prepare_postgres(
                          AND claim_token = $6
                          AND claim_fencing = $7
                          AND claim_expires_at > clock_timestamp()
-                         AND delivery_id IS NULL"#,
+                         AND delivery_id IS NULL
+                         AND dispatch_no = $8"#,
                 )
                 .bind(claim.obligation_id.as_uuid())
                 .bind(preparation.delivery_id)
@@ -142,9 +147,18 @@ pub(in crate::database::settlement::fulfillment) async fn prepare_postgres(
                 .bind(expected_state_version)
                 .bind(claim.claim_token)
                 .bind(claim.claim_fencing)
+                .bind(dispatch_no)
                 .execute(&mut **transaction)
                 .await
                 .map_err(DeliveryTransactionError::from)?;
+                record_dispatch(
+                    transaction,
+                    &claim,
+                    dispatch_no,
+                    preparation.delivery_id,
+                    prepared_at,
+                )
+                .await?;
 
                 if updated.rows_affected() == 0 {
                     let current = sqlx::query(
@@ -263,4 +277,67 @@ pub(in crate::database::settlement::fulfillment) async fn prepare_postgres(
         prepare_command_id: preparation.prepare_command_id,
         next_claim,
     })
+}
+
+/// 派发历史只追加：首寄与补寄都在准备事务内登记，补寄必须引用授权这一编号的退件案件（否则
+/// CHECK 失败关闭），且只寄给该案件绑定的被退回派发的冻结收件人：收件人改名后的补寄需要另行
+/// 准入，不在这里放行。同一派发重放时历史行必须指向同一投递。
+async fn record_dispatch(
+    transaction: &mut crate::database::TrackedTransaction<'static, Postgres>,
+    claim: &SettlementFulfillmentClaim,
+    dispatch_no: i32,
+    delivery_id: Uuid,
+    prepared_at: DateTime<Utc>,
+) -> Result<(), DeliveryTransactionError> {
+    if dispatch_no > 1 {
+        let original: Option<String> = sqlx::query_scalar(
+            r#"SELECT returned.recipient
+               FROM public.settlement_return_cases AS authorizing
+               JOIN public.deliveries AS returned ON returned.id = authorizing.delivery_id
+               WHERE authorizing.obligation_id = $1 AND authorizing.resend_dispatch_no = $2"#,
+        )
+        .bind(claim.obligation_id.as_uuid())
+        .bind(dispatch_no)
+        .fetch_optional(&mut **transaction)
+        .await
+        .map_err(DeliveryTransactionError::from)?;
+        if original.as_deref() != Some(claim.recipient.as_str()) {
+            return Err(DeliveryTransactionError::from(repository_error(
+                "补寄收件人与原冻结收件人不符",
+            )));
+        }
+    }
+    sqlx::query(
+        r#"INSERT INTO public.settlement_fulfillment_dispatches
+               (obligation_id, dispatch_no, delivery_id, authorized_by, recorded_at)
+           SELECT $1, $2, $3,
+                  CASE WHEN $2 = 1 THEN NULL ELSE (
+                      SELECT authorizing.return_mail_id
+                      FROM public.settlement_return_cases AS authorizing
+                      WHERE authorizing.obligation_id = $1
+                        AND authorizing.resend_dispatch_no = $2
+                  ) END,
+                  $4
+           ON CONFLICT (obligation_id, dispatch_no) DO NOTHING"#,
+    )
+    .bind(claim.obligation_id.as_uuid())
+    .bind(dispatch_no)
+    .bind(delivery_id)
+    .bind(prepared_at)
+    .execute(&mut **transaction)
+    .await
+    .map_err(DeliveryTransactionError::from)?;
+    let recorded: Option<Uuid> = sqlx::query_scalar(
+        r#"SELECT delivery_id FROM public.settlement_fulfillment_dispatches
+           WHERE obligation_id = $1 AND dispatch_no = $2"#,
+    )
+    .bind(claim.obligation_id.as_uuid())
+    .bind(dispatch_no)
+    .fetch_optional(&mut **transaction)
+    .await
+    .map_err(DeliveryTransactionError::from)?;
+    if recorded != Some(delivery_id) {
+        return Err(DeliveryTransactionError::from(repository_error("结算履约派发历史冲突")));
+    }
+    Ok(())
 }

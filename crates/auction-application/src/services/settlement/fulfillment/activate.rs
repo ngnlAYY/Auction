@@ -3,7 +3,7 @@
 use chrono::{DateTime, Duration, Utc};
 
 use super::authorization::authorize_pending_or_prepared;
-use super::intent::{activation_request_hash, stable_activate_command_id};
+use super::intent::{activation_request_hash, dispatch_activate_command_id};
 use super::snapshot::delivery_snapshot_matches;
 use super::validation::{claim_context, repository_error, validate_claim};
 use crate::errors::ApplicationError;
@@ -64,7 +64,7 @@ impl SettlementFulfillmentService {
                 failure_code: "delivery_conflict",
             });
         }
-        let activation_command_id = stable_activate_command_id(claim.obligation_id);
+        let activation_command_id = dispatch_activate_command_id(&claim)?;
         let activation_request_hash =
             activation_request_hash(claim.obligation_id, delivery_id, prepare_request_hash)?;
         // 激活继续复用当前 claim；持有租约时 next_attempt_at 必须为空。

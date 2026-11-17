@@ -155,6 +155,14 @@ pub struct OperationsAlertFulfillmentSnapshot {
     /// 等待领取中寄出时长已达到长期未领取阈值的件数（超期件数），是 `awaiting_collection` 的
     /// 子集；阈值随快照读取给出，未给出时为 0。
     pub collection_overdue: i64,
+    /// 已绑定原派发、尚未处理完的结算退件案件数；它们的履约不再计入人工对账与失败水位。
+    pub settlement_return_pending: i64,
+    /// 最早一件待处理退件案件自建案起的秒数；没有时为 0。
+    pub oldest_settlement_return_pending_age_seconds: i64,
+    /// 来源、绑定或领回证明存在问题、尚未结案的结算退件案件数。
+    pub settlement_return_quarantined: i64,
+    /// 最早一件隔离退件案件自建案起的秒数；没有时为 0。
+    pub oldest_settlement_return_quarantined_age_seconds: i64,
 }
 
 /// 长期未领取清单的一项：已寄出、寄出时长达到阈值仍未领取的 Send 义务。只含 Admin 可见的业务

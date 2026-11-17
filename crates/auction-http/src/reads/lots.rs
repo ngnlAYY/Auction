@@ -16,7 +16,9 @@ use super::mapping::{
 use crate::diagnostics;
 use crate::errors::{api_error, not_found_error, query_rejection};
 use crate::middleware::response_cache::SETTLED_CACHE_CONTROL;
-use crate::query::{page_offset, parse_positive_i64, parse_public_uuid, parse_query};
+use crate::query::{
+    page_offset, parse_positive_i64, parse_public_page_size, parse_public_uuid, parse_query,
+};
 use crate::state::PublicApiState;
 
 /// 公开 lot 列表。preview 与 live 使用互斥的数组形状，保持已发布的 JSON 契约。
@@ -42,7 +44,7 @@ pub(crate) async fn list_lots(
     .map_err(|()| query_rejection())?;
     let page = parse_positive_i64(query.get("page"), 1, None).map_err(|()| query_rejection())?;
     let page_size =
-        parse_positive_i64(query.get("page_size"), 20, None).map_err(|()| query_rejection())?;
+        parse_public_page_size(query.get("page_size"), 20).map_err(|()| query_rejection())?;
     let offset =
         page_offset(page, page_size, Some(MAX_PUBLIC_LOT_OFFSET)).ok_or_else(query_rejection)?;
     let category = query.get("category").cloned();

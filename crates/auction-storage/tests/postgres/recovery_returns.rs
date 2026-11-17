@@ -20,19 +20,19 @@ use uuid::Uuid;
 use crate::support;
 
 /// 一笔主世界 COD 成交：买家、装备、已结算场次、lot 与三条结算义务。
-struct CodSale {
-    winner_user_id: Uuid,
-    auction_id: Uuid,
-    lot_id: Uuid,
-    equipment_id: Uuid,
-    external_equipment_id: String,
-    payment_obligation: Uuid,
-    seller_obligation: Uuid,
-    refund_obligation: Uuid,
+pub(crate) struct CodSale {
+    pub(crate) winner_user_id: Uuid,
+    pub(crate) auction_id: Uuid,
+    pub(crate) lot_id: Uuid,
+    pub(crate) equipment_id: Uuid,
+    pub(crate) external_equipment_id: String,
+    pub(crate) payment_obligation: Uuid,
+    pub(crate) seller_obligation: Uuid,
+    pub(crate) refund_obligation: Uuid,
 }
 
 /// `recovery_version` 写入场次冻结快照，与 recovery 行的 `policy_version` 保持一致。
-async fn insert_sale(
+pub(crate) async fn insert_sale(
     pool: &PgPool,
     sequence: i64,
     at: DateTime<Utc>,
@@ -185,7 +185,8 @@ async fn insert_sale(
     sale
 }
 
-/// 已接受的 COD 退件；收件箱时间按调用方给出的分钟精度写入。
+/// 已接受的系统 COD 退件；收件箱时间按调用方给出的分钟精度写入。入站展示快照记录系统发件人
+/// 与 `[RTS] ` + canonical 主题，恢复流程据此证明来源。
 async fn insert_return_mail(
     pool: &PgPool,
     sale: &CodSale,
@@ -196,9 +197,11 @@ async fn insert_return_mail(
     sqlx::query(
         "INSERT INTO public.inbound_mail
             (id, mailbox_key, external_mail_id, world_id, mail_kind, content_digest,
-             received_at, status, decision_code, decision_metadata, processed_at)
+             received_at, status, decision_code, decision_metadata, processed_at,
+             sender, subject)
          VALUES ($1, 'recovery-returns', $2, 'main', 'delivery', $3, $4, 'accepted',
-                 'settlement_recovery_returned', $5, $4 + interval '1 minute')",
+                 'settlement_recovery_returned', $5, $4 + interval '1 minute',
+                 'MoogleMail', $6)",
     )
     .bind(mail_id)
     .bind(external_mail_id)
@@ -210,6 +213,7 @@ async fn insert_return_mail(
         "cod": 0,
         "attachment_ids": [sale.external_equipment_id],
     }))
+    .bind(format!("[RTS] Auction equipment delivery [{}]", sale.payment_obligation))
     .execute(pool)
     .await
     .expect("写入退件");
@@ -217,7 +221,7 @@ async fn insert_return_mail(
 }
 
 /// 尚未收到退件的付款等待中 recovery；`created_at` 即结算发生时刻。
-async fn insert_awaiting_recovery(
+pub(crate) async fn insert_awaiting_recovery(
     pool: &PgPool,
     sale: &CodSale,
     created_at: DateTime<Utc>,
@@ -248,13 +252,13 @@ async fn insert_awaiting_recovery(
 }
 
 /// 结算时刻取在某分钟的第 37.5 秒，模拟亚秒级 `due_at`；返回该分钟起点与结算时刻。
-fn settlement_minute() -> (DateTime<Utc>, DateTime<Utc>) {
+pub(crate) fn settlement_minute() -> (DateTime<Utc>, DateTime<Utc>) {
     let minute =
         (Utc::now() - Duration::hours(2)).duration_trunc(Duration::minutes(1)).expect("按分钟取整");
     (minute, minute + Duration::milliseconds(37_500))
 }
 
-async fn consumed_returns(pool: &PgPool, recovery_id: Uuid) -> i64 {
+pub(crate) async fn consumed_returns(pool: &PgPool, recovery_id: Uuid) -> i64 {
     sqlx::query_scalar(
         "SELECT count(*) FROM public.settlement_recovery_return_consumptions WHERE recovery_id = $1",
     )
@@ -474,32 +478,42 @@ async fn insert_reclaimed_cod(pool: &PgPool, sequence: i64, policy_version: i32)
     let delivery_id = Uuid::new_v4();
     let external_mail_id = format!("{}", 880_000 + sequence % 1_000);
     let digest = [6_u8; 32];
+    let prepare_command_id = Uuid::new_v4();
+    let activate_command_id = Uuid::new_v4();
+    // 投递与履约带完整 prepare/activate 身份：重寄后履约 Worker 能按生产路径重新领取它。
     sqlx::query(
         "INSERT INTO public.deliveries
             (id, command_id, request_digest, origin_kind, origin_id, recipient, payload,
              status, fencing_version, attempt_count, claimed_at, sending_at, completed_at,
-             external_reference, created_at, updated_at, result_metadata)
+             external_reference, created_at, updated_at, result_metadata,
+             activation_command_id, activation_request_digest, activated_at)
          VALUES ($1, $2, decode(repeat('99', 32), 'hex'), 'settlement', $3, $4,
                  '{\"schema_version\":1,\"operation\":\"send\",\"world\":\"main\",\"template\":\"settlement_winner_equipment_cod\",\"credits\":0,\"cod\":100,\"attachment_ids\":[]}'::jsonb,
-                 'succeeded', 2, 1, $5, $5, $5, $6, $5, $5, '{\"operation\":\"send\"}'::jsonb)",
+                 'succeeded', 2, 1, $5, $5, $5, $6, $5, $5, '{\"operation\":\"send\"}'::jsonb,
+                 $7, decode(repeat('98', 32), 'hex'), $5)",
     )
     .bind(delivery_id)
-    .bind(Uuid::new_v4())
+    .bind(prepare_command_id)
     .bind(sale.payment_obligation.to_string())
     .bind(format!("recovery-return-player-{delivery_id}"))
     .bind(at - Duration::minutes(50))
     .bind(format!("mooglemail:main:send:{}", 770_000 + sequence % 1_000))
+    .bind(activate_command_id)
     .execute(pool)
     .await
     .expect("写入已发送的 COD 投递");
     sqlx::query(
         "INSERT INTO public.settlement_obligation_fulfillments
             (obligation_id, execution_state, state_version, dispatch_world, delivery_operation,
-             delivery_id, created_at, updated_at)
-         VALUES ($1, 'enqueued', 2, 'main', 'send', $2, $3, $3)",
+             delivery_id, prepare_command_id, prepare_request_digest, activate_command_id,
+             activate_request_digest, created_at, updated_at)
+         VALUES ($1, 'enqueued', 2, 'main', 'send', $2, $3, decode(repeat('99', 32), 'hex'),
+                 $4, decode(repeat('98', 32), 'hex'), $5, $5)",
     )
     .bind(sale.payment_obligation)
     .bind(delivery_id)
+    .bind(prepare_command_id)
+    .bind(activate_command_id)
     .bind(at - Duration::minutes(50))
     .execute(pool)
     .await
@@ -628,6 +642,65 @@ async fn postgres_cod_resend_restarts_the_frozen_payment_window() {
             "重发必须清空当前退件指针与保管证明"
         );
         assert_eq!(count, 1, "重发不改写已记录的退回次数");
+    }
+
+    store.postgres_pool().close().await;
+}
+
+/// 重寄只改写恢复记录的当前期限。履约 Worker 重新领取重寄后的 COD 时，正文与载荷按首寄期限
+/// D0（恢复记录创建时刻 + 冻结策略版本的付款期限）重建，当前期限只用于轮询聚焦，两者分别投影。
+#[tokio::test]
+async fn postgres_resent_cod_claim_projects_the_first_send_deadline_separately() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接克隆测试数据库");
+    let pool = store.postgres_pool();
+    let seven_day = insert_reclaimed_cod(pool, 7_300_001, 1).await;
+    let pre_season = insert_reclaimed_cod(pool, 7_300_002, 2).await;
+    let mut current = std::collections::BTreeMap::new();
+    for _ in 0..2 {
+        let (recovery_id, now) = resend_due_cod(&store).await;
+        current.insert(recovery_id, now);
+    }
+
+    let now = Utc::now();
+    let claims = auction_application::settlement::SettlementFulfillmentStore::claim_due(
+        &store,
+        "a1-deadline-worker".to_owned(),
+        now,
+        now + Duration::minutes(5),
+        10,
+    )
+    .await
+    .expect("重寄后的 COD 履约必须可领取");
+    assert_eq!(claims.len(), 2, "两笔重寄 COD 都应被领取：{claims:?}");
+    for (recovery_id, window) in [(seven_day, Duration::days(7)), (pre_season, Duration::hours(24))]
+    {
+        let (payment_obligation, created_at, deadline): (Uuid, DateTime<Utc>, DateTime<Utc>) =
+            sqlx::query_as(
+                "SELECT payment_obligation_id, created_at, payment_deadline_at
+                 FROM public.settlement_recoveries WHERE id = $1",
+            )
+            .bind(recovery_id)
+            .fetch_one(pool)
+            .await
+            .expect("读取重寄后的 recovery");
+        let claim = claims
+            .iter()
+            .find(|claim| claim.obligation_id.as_uuid() == payment_obligation)
+            .expect("必须领取到该 recovery 的付款履约");
+        assert_eq!(
+            claim.initial_payment_deadline_at.map(|value| value.timestamp_micros()),
+            Some((created_at + window).timestamp_micros()),
+            "正文期限必须是首寄期限 D0"
+        );
+        assert_eq!(
+            claim.payment_deadline_at.map(|value| value.timestamp_micros()),
+            Some(deadline.timestamp_micros()),
+            "轮询聚焦仍用重寄后重新起算的当前期限"
+        );
+        let resent_at = current.get(&recovery_id).copied().expect("重寄时刻");
+        assert_eq!(deadline.timestamp_micros(), (resent_at + window).timestamp_micros());
+        assert_ne!(claim.initial_payment_deadline_at, claim.payment_deadline_at);
     }
 
     store.postgres_pool().close().await;

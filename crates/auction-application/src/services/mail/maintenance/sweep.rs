@@ -127,7 +127,13 @@ impl MailboxMaintenanceService {
                         }
                     }
                 }
-                "take" if candidate.origin_kind == "mail_intake" => {
+                // 入站 Take 与结算退件 Take 都只经原 Take 会话的冻结身份恢复。
+                "take"
+                    if matches!(
+                        candidate.origin_kind.as_str(),
+                        "mail_intake" | "settlement_return_action"
+                    ) =>
+                {
                     recovery_budget -= 1;
                     self.recover_take(world_id, candidate).await?
                 }
@@ -172,12 +178,16 @@ mod tests {
     use crate::errors::ApplicationError;
     use crate::ports::core::ApplicationFuture;
     use crate::ports::core::Clock;
-    use crate::ports::delivery::{DeliverySendExpectation, DeliveryTakeExpectation};
+    use crate::ports::delivery::{
+        DeliverySendCredentialBinding, DeliverySendExpectation, DeliveryTakeExpectation,
+    };
     use crate::ports::mail::{
         MailScanPageObservation, MoogleMailboxComposeState, MoogleMailboxDiscard,
-        MoogleMailboxEvidenceStore, MoogleMailboxInboxObservation, MoogleMailboxMaintenance,
-        MoogleMailboxNoticeExpectation, MoogleMailboxSentEntries, MoogleMailboxSentEntry,
-        MoogleMailboxSentState, MoogleMailboxSweepCandidate, MoogleMailboxUnprovenSend,
+        MoogleMailboxEvidenceStore, MoogleMailboxInboxAssets, MoogleMailboxInboxObservation,
+        MoogleMailboxMaintenance, MoogleMailboxNoticeExpectation, MoogleMailboxReturnTake,
+        MoogleMailboxReturnTakeIdentity, MoogleMailboxReturnTakeObservation,
+        MoogleMailboxSentEntries, MoogleMailboxSentEntry, MoogleMailboxSentState,
+        MoogleMailboxSweepCandidate, MoogleMailboxUnprovenSend,
     };
     use crate::ports::operations::ExternalWriteActivity;
 
@@ -207,10 +217,24 @@ mod tests {
         /// 未清空的草稿；`None` 表示 compose 已干净。
         dirty_compose: Option<MoogleMailboxComposeState>,
         discard_fails: bool,
+        /// 收件箱资产观察；缺省为“未返回观察会话”。
+        inbox: MoogleMailboxInboxObservation,
+        /// 结算退件 Take 的回执观察；缺省为“未返回观察会话”。
+        return_take: MoogleMailboxReturnTakeObservation,
     }
     impl FixtureMaintenance {
         fn new(coverage: MoogleMailboxSentEntries, reads_fail: bool) -> Self {
-            Self { coverage, reads_fail, dirty_compose: None, discard_fails: false }
+            Self {
+                coverage,
+                reads_fail,
+                dirty_compose: None,
+                discard_fails: false,
+                inbox: MoogleMailboxInboxObservation { assets: None, observation_credential: None },
+                return_take: MoogleMailboxReturnTakeObservation {
+                    outcome: MoogleMailboxReturnTake::Unproven,
+                    observation_credential: None,
+                },
+            }
         }
     }
     impl MoogleMailboxMaintenance for FixtureMaintenance {
@@ -300,16 +324,33 @@ mod tests {
             _world_id: &'a str,
             _external_mail_id: &'a str,
         ) -> ApplicationFuture<'a, MoogleMailboxInboxObservation> {
-            Box::pin(async {
-                Ok(MoogleMailboxInboxObservation { assets: None, observation_credential: None })
-            })
+            let inbox = self.inbox.clone();
+            Box::pin(async move { Ok(inbox) })
+        }
+        fn return_take_receipt<'a>(
+            &'a self,
+            _world_id: &'a str,
+            _external_mail_id: &'a str,
+            _identity: &'a MoogleMailboxReturnTakeIdentity,
+        ) -> ApplicationFuture<'a, MoogleMailboxReturnTakeObservation> {
+            let observation = self.return_take.clone();
+            Box::pin(async move { Ok(observation) })
         }
     }
+
+    /// Take 恢复调用：`("bind", 证明元数据)` 或 `("requeue", 原因)`。
+    type TakeCalls = Arc<std::sync::Mutex<Vec<(&'static str, Value)>>>;
 
     struct FixtureStore {
         bind_called: Arc<AtomicBool>,
         /// 一次性 discard 围栏是否授权。
         fence_granted: bool,
+        take_calls: TakeCalls,
+    }
+    impl FixtureStore {
+        fn new(bind_called: Arc<AtomicBool>, fence_granted: bool) -> Self {
+            Self { bind_called, fence_granted, take_calls: Arc::default() }
+        }
     }
     impl MoogleMailboxEvidenceStore for FixtureStore {
         fn unproven_sends<'a>(
@@ -382,10 +423,13 @@ mod tests {
             _delivery_id: Uuid,
             _fencing_version: i64,
             _external_mail_id: String,
-            _metadata: Value,
+            metadata: Value,
             _expectation: &'a DeliveryTakeExpectation,
-            _observation: &'a crate::ports::delivery::DeliverySendCredentialBinding,
+            _observation: &'a DeliverySendCredentialBinding,
         ) -> ApplicationFuture<'a, bool> {
+            if let Ok(mut calls) = self.take_calls.lock() {
+                calls.push(("bind", metadata));
+            }
             Box::pin(async { Ok(true) })
         }
         fn requeue_unproven<'a>(
@@ -393,10 +437,13 @@ mod tests {
             _delivery_id: Uuid,
             _fencing_version: i64,
             _retries: i64,
-            _reason: &'a str,
+            reason: &'a str,
             _expectation: &'a DeliveryTakeExpectation,
-            _observation: &'a crate::ports::delivery::DeliverySendCredentialBinding,
+            _observation: &'a DeliverySendCredentialBinding,
         ) -> ApplicationFuture<'a, bool> {
+            if let Ok(mut calls) = self.take_calls.lock() {
+                calls.push(("requeue", Value::from(reason)));
+            }
             Box::pin(async { Ok(true) })
         }
     }
@@ -408,6 +455,7 @@ mod tests {
             sending_fencing_version: 1,
             send_expectation: None,
             take_expectation: None,
+            return_take: None,
             origin_kind: "settlement".to_owned(),
             world_id: "main".to_owned(),
             recipient: "recipient".to_owned(),
@@ -430,7 +478,7 @@ mod tests {
         let bind_called = Arc::new(AtomicBool::new(false));
         let service = MailboxMaintenanceService::new(
             Arc::new(FixtureMaintenance::new(coverage, false)),
-            Arc::new(FixtureStore { bind_called: Arc::clone(&bind_called), fence_granted: false }),
+            Arc::new(FixtureStore::new(Arc::clone(&bind_called), false)),
             Arc::new(NoopClock),
         );
         let delivery_id = candidate.delivery_id;
@@ -482,10 +530,7 @@ mod tests {
         };
         let service = MailboxMaintenanceService::new(
             Arc::new(FixtureMaintenance::new(coverage, reads_fail)),
-            Arc::new(FixtureStore {
-                bind_called: Arc::new(AtomicBool::new(false)),
-                fence_granted: false,
-            }),
+            Arc::new(FixtureStore::new(Arc::new(AtomicBool::new(false)), false)),
             Arc::new(NoopClock),
         );
         block_on(service.sweep(
@@ -543,10 +588,7 @@ mod tests {
             maintenance.discard_fails = discard_fails;
             let service = MailboxMaintenanceService::new(
                 Arc::new(maintenance),
-                Arc::new(FixtureStore {
-                    bind_called: Arc::new(AtomicBool::new(false)),
-                    fence_granted,
-                }),
+                Arc::new(FixtureStore::new(Arc::new(AtomicBool::new(false)), fence_granted)),
                 Arc::new(NoopClock),
             );
             let delivery_id = send.delivery_id;
@@ -566,5 +608,215 @@ mod tests {
         };
         assert_eq!(cleanup(false, false), Some(ComposeCleanupFailure::FenceDenied));
         assert_eq!(cleanup(true, true), Some(ComposeCleanupFailure::DiscardCompose));
+    }
+
+    fn original_session() -> DeliverySendCredentialBinding {
+        DeliverySendCredentialBinding {
+            credential_id: Uuid::from_u128(0x5e7),
+            credential_version: 3,
+            runtime_generation: 9,
+        }
+    }
+
+    /// 结算退件 Take：原 Take 会话冻结了凭据，资产为 90 Credits 加一件装备；证据带系统后缀事实。
+    fn return_take() -> MoogleMailboxUnprovenSend {
+        let mut send = candidate(NoopClock.now(), "");
+        send.origin_kind = "settlement_return_action".to_owned();
+        send.operation = "take".to_owned();
+        send.recipient = "MoogleMail".to_owned();
+        send.credits = 90;
+        send.attachment_ids = vec!["4401".to_owned()];
+        send.inbound_mail_id = "993101".to_owned();
+        send.take_expectation = Some(DeliveryTakeExpectation {
+            world_id: "main".to_owned(),
+            external_mail_id: "993101".to_owned(),
+            credential: Some(original_session()),
+        });
+        send.return_take = Some(MoogleMailboxReturnTakeIdentity {
+            sender: "MoogleMail".to_owned(),
+            subject: "[RTS] Auction seller payout [ref]".to_owned(),
+            original_body_digest: [7; 32],
+            returned_from: "Seller".to_owned(),
+            cod: 0,
+            attachment_count: 2,
+        });
+        send
+    }
+
+    /// 以给定结算退件观察跑一次轮转，返回 Take 恢复调用。旧的收件箱资产观察同时给出“附件已空”，
+    /// 结算退件不得据此收口。
+    fn recover_return_take(
+        send: MoogleMailboxUnprovenSend,
+        outcome: MoogleMailboxReturnTake,
+        observation_credential: Option<DeliverySendCredentialBinding>,
+    ) -> Vec<(&'static str, Value)> {
+        let mut maintenance = FixtureMaintenance::new(
+            MoogleMailboxSentEntries {
+                entries: Vec::new(),
+                covered_from: None,
+                complete: true,
+                page_observation: None,
+            },
+            false,
+        );
+        maintenance.inbox = MoogleMailboxInboxObservation {
+            assets: inbox("MoogleMail", 0, &[]),
+            observation_credential: observation_credential.clone(),
+        };
+        maintenance.return_take =
+            MoogleMailboxReturnTakeObservation { outcome, observation_credential };
+        let store = FixtureStore::new(Arc::new(AtomicBool::new(false)), false);
+        let calls = Arc::clone(&store.take_calls);
+        let service = MailboxMaintenanceService::new(
+            Arc::new(maintenance),
+            Arc::new(store),
+            Arc::new(NoopClock),
+        );
+        let delivery_id = send.delivery_id;
+        let mut report = MailboxMaintenanceReport::default();
+        block_on(service.recover_sent(
+            "main",
+            &[MoogleMailboxSweepCandidate { delivery_id, send: Some(send) }],
+            Instant::now() + std::time::Duration::from_secs(60),
+            &mut report,
+        ))
+        .expect("维护不得失败");
+        calls.lock().map(|calls| calls.clone()).unwrap_or_default()
+    }
+
+    fn inbox(sender: &str, credits: i64, equipment: &[&str]) -> Option<MoogleMailboxInboxAssets> {
+        Some(MoogleMailboxInboxAssets {
+            sender: sender.to_owned(),
+            equipment_ids: equipment.iter().map(|id| (*id).to_owned()).collect(),
+            credits,
+            cod: 0,
+        })
+    }
+
+    fn present(sender: &str, credits: i64, equipment: &[&str]) -> MoogleMailboxReturnTake {
+        MoogleMailboxReturnTake::Present(inbox(sender, credits, equipment).expect("资产"))
+    }
+
+    /// 完成证明：integrations 已在原会话里核对原身份、原正文前缀与领取回执；证明携带预期资产，
+    /// 交给存储锁内与动作冻结事实逐项比对。
+    #[test]
+    fn return_take_with_receipt_proof_binds_exact_proof() {
+        let calls = recover_return_take(
+            return_take(),
+            MoogleMailboxReturnTake::Taken,
+            Some(original_session()),
+        );
+        assert_eq!(calls.len(), 1);
+        let (kind, metadata) = &calls[0];
+        assert_eq!(*kind, "bind");
+        assert_eq!(metadata["proof"], "action_recovered_inbox_v1");
+        assert_eq!(metadata["reason"], "take_receipt_proven");
+        assert_eq!(metadata["recovered_mid"], "993101");
+        assert_eq!(metadata["expected_credits"], 90);
+        assert_eq!(metadata["expected_cod"], 0);
+        assert_eq!(metadata["expected_attachment_ids"], serde_json::json!(["4401"]));
+        assert_eq!(metadata["receipt_attachment_count"], 2);
+    }
+
+    /// 附件已为空但领取回执不成立（integrations 判为 Unproven）：即使旧的资产观察显示附件已空，
+    /// 也不绑定任何证明，保持结果未知。
+    #[test]
+    fn return_take_with_empty_attachments_but_no_receipt_stays_unknown() {
+        assert!(
+            recover_return_take(
+                return_take(),
+                MoogleMailboxReturnTake::Unproven,
+                Some(original_session())
+            )
+            .is_empty()
+        );
+    }
+
+    /// 仍在未领：原完整资产（含现金）仍挂在原 MID 上，只重新排队，不绑定任何证明。
+    #[test]
+    fn return_take_with_assets_still_present_requeues() {
+        let calls = recover_return_take(
+            return_take(),
+            present("MoogleMail", 90, &["4401"]),
+            Some(original_session()),
+        );
+        assert_eq!(calls, vec![("requeue", Value::from("take_assets_still_present"))]);
+        // 现金退件没有装备附件也能确认“仍在未领”。
+        let mut cash = return_take();
+        cash.attachment_ids.clear();
+        let calls =
+            recover_return_take(cash, present("MoogleMail", 90, &[]), Some(original_session()));
+        assert_eq!(calls, vec![("requeue", Value::from("take_assets_still_present"))]);
+    }
+
+    /// 无法判定：邮件整体缺失、资产不全、发件人不符、换凭据版本、没有观察会话、原 Take 没有冻结
+    /// 凭据或证据缺少系统后缀事实都不改写任何事实；入站 Take 的缺失证明口径不变。
+    #[test]
+    fn return_take_undecidable_observations_leave_unknown() {
+        let session = Some(original_session());
+        let taken = || MoogleMailboxReturnTake::Taken;
+        assert!(
+            recover_return_take(return_take(), MoogleMailboxReturnTake::Missing, session.clone())
+                .is_empty(),
+            "缺失"
+        );
+        let partial = present("MoogleMail", 90, &[]);
+        assert!(
+            recover_return_take(return_take(), partial, session.clone()).is_empty(),
+            "部分资产"
+        );
+        let player = present("BuyerPlayer", 90, &["4401"]);
+        assert!(recover_return_take(return_take(), player, session.clone()).is_empty(), "发件人");
+        let mut other_version = original_session();
+        other_version.credential_version = 4;
+        assert!(recover_return_take(return_take(), taken(), Some(other_version)).is_empty());
+        assert!(recover_return_take(return_take(), taken(), None).is_empty(), "没有观察会话");
+        let mut unbound = return_take();
+        if let Some(expectation) = unbound.take_expectation.as_mut() {
+            expectation.credential = None;
+        }
+        assert!(recover_return_take(unbound, taken(), session.clone()).is_empty(), "配置 Cookie");
+        let mut no_identity = return_take();
+        no_identity.return_take = None;
+        assert!(
+            recover_return_take(no_identity, taken(), session.clone()).is_empty(),
+            "证据缺少系统后缀事实"
+        );
+        let mut intake = return_take();
+        intake.origin_kind = "mail_intake".to_owned();
+        intake.recipient = "SellerPlayer".to_owned();
+        let mut maintenance = FixtureMaintenance::new(
+            MoogleMailboxSentEntries {
+                entries: Vec::new(),
+                covered_from: None,
+                complete: true,
+                page_observation: None,
+            },
+            false,
+        );
+        maintenance.inbox =
+            MoogleMailboxInboxObservation { assets: None, observation_credential: session };
+        let store = FixtureStore::new(Arc::new(AtomicBool::new(false)), false);
+        let calls = Arc::clone(&store.take_calls);
+        let service = MailboxMaintenanceService::new(
+            Arc::new(maintenance),
+            Arc::new(store),
+            Arc::new(NoopClock),
+        );
+        let delivery_id = intake.delivery_id;
+        let mut report = MailboxMaintenanceReport::default();
+        block_on(service.recover_sent(
+            "main",
+            &[MoogleMailboxSweepCandidate { delivery_id, send: Some(intake) }],
+            Instant::now() + std::time::Duration::from_secs(60),
+            &mut report,
+        ))
+        .expect("维护不得失败");
+        let calls = calls.lock().map(|calls| calls.clone()).unwrap_or_default();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(
+            (calls[0].0, &calls[0].1["reason"]),
+            ("bind", &Value::from("inbox_mail_absent"))
+        );
     }
 }

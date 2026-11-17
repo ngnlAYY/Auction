@@ -3,7 +3,7 @@
 use chrono::{DateTime, Duration, Utc};
 
 use super::authorization::authorize_pending_or_prepared;
-use super::intent::{build_canonical_delivery, stable_delivery_id, stable_prepare_command_id};
+use super::intent::{build_canonical_delivery, dispatch_delivery_id, dispatch_prepare_command_id};
 use super::validation::{claim_context, repository_error, validate_claim};
 use crate::errors::ApplicationError;
 use crate::errors::diagnostics::{DiagnosticError, DiagnosticLevel, record_error};
@@ -60,8 +60,8 @@ impl SettlementFulfillmentService {
         }
         let canonical = build_canonical_delivery(&intent)?;
         let preparation = SettlementDeliveryPreparation {
-            delivery_id: stable_delivery_id(claim.obligation_id),
-            prepare_command_id: stable_prepare_command_id(claim.obligation_id),
+            delivery_id: dispatch_delivery_id(&claim)?,
+            prepare_command_id: dispatch_prepare_command_id(&claim)?,
             request_hash: canonical.request_hash,
             recipient: claim.recipient.clone(),
             payload: canonical.payload,

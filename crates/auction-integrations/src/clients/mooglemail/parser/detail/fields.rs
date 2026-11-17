@@ -310,6 +310,48 @@ pub(crate) fn prove_take_identity_and_receipts(
     Ok(())
 }
 
+/// 系统退回附加在原正文之后的后缀前缀与结尾（换行已规范为 LF）。
+const RETURNED_SUFFIX_PREFIX: &str = "\n\nThis message was returned from ";
+const RETURNED_SUFFIX_END: &str = ", kupo!";
+
+/// 结算退件 Take 之后的详情页是否证明附件已被领取：与正常 Take 成功证明同等强度——发件人与
+/// 主题等于入站快照，正文以原退件正文（原正文规范摘要 + 系统后缀写明的原收件人）开头，其后的
+/// 回执恰为领取前附件条目数的 `Removed attachment:` 行（领取前带 COD 时另有对应 `CoD Paid:`），
+/// 且页面不再挂任何资产。退件正文不入库，只凭证据里的摘要与原收件人重建前缀。
+pub(crate) fn prove_returned_take_receipts(
+    state: &MoogleMailActionState,
+    identity: &auction_application::mail::MoogleMailboxReturnTakeIdentity,
+) -> bool {
+    if state.recipient.is_empty()
+        || state.sender != identity.sender
+        || state.subject != identity.subject
+        || state.claimable
+        || !state.equipment_ids.is_empty()
+        || state.credits != 0
+        || state.cod != 0
+        || state.attachment_count != 0
+    {
+        return false;
+    }
+    let observed = canonical_mail_body(&state.body);
+    let suffix = format!("{RETURNED_SUFFIX_PREFIX}{}{RETURNED_SUFFIX_END}", identity.returned_from);
+    // 回执只追加在系统后缀之后；取最后一个后缀，原正文自身含同样文字时摘要比对仍会失败关闭。
+    let Some(position) = observed.rfind(&suffix) else {
+        return false;
+    };
+    let original = observed[..position].trim_end_matches([' ', '\t', '\n']);
+    let receipts = &observed[position + suffix.len()..];
+    !original.is_empty()
+        && canonical_mail_body_digest(original) == identity.original_body_digest
+        && (if identity.cod > 0 {
+            take_cod_receipt_amount(receipts) == Some(identity.cod)
+        } else {
+            !receipts.contains("CoD Paid:")
+        })
+        && identity.attachment_count > 0
+        && valid_removed_attachment_receipt(receipts, identity.attachment_count)
+}
+
 pub(crate) fn canonical_mail_body(body: &str) -> String {
     let mut canonical = body.replace("\r\n", "\n");
     // 只截短尾部空白，复用换行规范化的原分配，不留下第二份未清理的正文副本。

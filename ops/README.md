@@ -19,7 +19,7 @@
 
 | 路径 | 内容 | 建议属主与权限 |
 | --- | --- | --- |
-| `/opt/auction/bin/` | 程序 | root，0755 |
+| `/opt/auction/bin/` | 程序（root 与 postgres 都会执行其中的 `auction-cli`） | 目录与程序 root:root 0755，`/opt`、`/opt/auction` 等各级父目录同样归 root 且禁止他人写入；三角色 unit 的运行账号还须能逐级进入安装目录并执行各自的程序（0700 的目录或缺执行位的程序会让替换后的启动失败），执行部署的账号须能执行其中的 `auction-cli`（`deploy` 停机后用它校验停机备份）；`deploy`/`rollback` 停机前核对，不符即拒绝、不自动修补 |
 | `/etc/auction/` | 配置目录：`public.toml`、`admin.toml`、`worker.toml`、`common.toml` | 目录 root:auction 0750；文件 root:auction 0640 |
 | `/etc/auction/secrets.toml` | 敏感配置 | auction:auction 0600 |
 | `/etc/auction/runtime/admin.toml` | runtime 配置（Admin 写入） | 目录 auction:auction 0750；文件 auction:auction **0640** |
@@ -27,23 +27,28 @@
 | `/etc/auction/owner/postgres.toml` | 迁移 owner 凭据（`db create/migrate/rebuild`、`backup restore`、`service start/restart`）；常驻角色不得引用 | root 0600 |
 | `/run/hv-auction/` | Public/Admin 的 Unix socket 与实例锁（tmpfiles 预建） | auction:auction 0750 |
 | `/run/hv-auction/worker/` | Worker control socket（Worker unit 的 `RuntimeDirectory`） | auction，0750 |
-| `/var/lib/auction/` | 部署控制锁、回执与回滚记录（`deployment/`、`deployment/receipts/`、`deployment/rollback/`，后者每次 deploy/rollback 增加一份程序副本，见[升级](#升级)的容量说明）、邮件诊断归档等可写数据 | auction / root |
+| `/var/lib/auction/` | 各账号可写数据的公共父目录 | root:root 0755；运行账号不得拥有或写入它，否则能把其下 root 的部署状态目录整体改名替换。各账号的数据放在下列自有子目录 |
+| `/var/lib/auction/deployment/` | 部署状态目录（`--state-dir`）：部署控制锁、回执 `receipts/` 与回滚记录 `rollback/`（后者每次 deploy/rollback 增加一份程序副本，见[升级](#升级)的容量说明） | root 0700（`auction-stack.service` 的 `StateDirectory=` 或 CLI 创建）；它与各级父目录都必须归 root 且禁止 group/other 写入，`service`、`deploy`、`rollback` 与停机维护命令取锁前核对，不符即拒绝、不自动修补 |
+| `/var/lib/auction/` 下运行账号的子目录 | 邮件诊断归档 `mail-diagnostics/`、定时备份状态 `backup/`、恢复演练回执 `restore-drills/` 等 | 预建为 auction:auction 0700；WAL 暂存 `wal-staging/` 为 postgres:auction 2770，见[启用顺序](deploy/RECOVERY.md#启用顺序) |
 
 ```bash
+install -d -o root -g root -m 0755 /var/lib/auction
 useradd --system --home-dir /var/lib/auction --shell /usr/sbin/nologin auction
 groupadd --system auction-worker-control
 usermod -aG auction-worker-control auction
 ```
 
+以上是分体部署的布局。合并部署的 `auction-server` 以运行账号在 `/var/lib/auction` 下自行建立配置目录与同级运行目录（见[合并部署](#合并部署)），该形态下 `/var/lib/auction` 归运行账号；它不使用 `auction-cli` 的部署状态目录，同一主机不要混用两种形态。
+
 `auction-cli config check --strict` 检查配置目录与普通配置文件不能被 group/other 写入、敏感文件只能 owner 访问；runtime 文件在 loader 阶段就必须恰好 0640 且父目录禁止他人写入。`service start/restart` 还会核对 runtime 文件与父目录归 Admin unit 的固定 `User` 所有。
 
-> 生产 `/etc` 对服务只读（`ProtectSystem=strict`），邮件诊断归档默认目录不可写。请在 `worker.toml` 把 `[worker.mooglemail.diagnostics] directory` 设为 `/var/lib/auction/mail-diagnostics` 这类可写的私有目录；runtime 配置不接管此路径。
+> 生产 `/etc` 对服务只读（`ProtectSystem=strict`），邮件诊断归档默认目录不可写。请在 `worker.toml` 把 `[worker.mooglemail.diagnostics] directory` 设为 `/var/lib/auction/mail-diagnostics` 这类可写的私有目录，并预建为 auction:auction 0700（`/var/lib/auction` 归 root，Worker 不能在其下新建目录）；runtime 配置不接管此路径。
 
 ## 首次部署
 
 ### 分体部署
 
-1. **安装程序**：解压发布包，把 `bin/*` 安装到 `/opt/auction/bin/`；按上文建立 `auction` 账号与 `auction-worker-control` 组。
+1. **安装程序**：以 root 解压发布包，用 `install -o root -g root -m 0755` 把 `bin/*` 安装到 `/opt/auction/bin/`（不要改归服务账号）；按上文建立 `auction` 账号与 `auction-worker-control` 组。
 2. **准备数据库账号与数据库**（PostgreSQL 18）：迁移 owner 与服务运行账号必须分离，数据库 owner 是迁移 owner。
 
    ```sql
@@ -61,7 +66,7 @@ usermod -aG auction-worker-control auction
 
    三角色 `secrets.toml` 的 `[database].username` 填 `auction_runtime`，`common.toml` 的 `[database_roles] owner = "auction_owner"`。首次设置向导会试连数据库，须预先建好库与两个角色；向导写入的敏感文件只含运行账号，随后手工补 owner 凭据。合并部署初始化空库必须提供 `--owner-secrets`。模板见 [postgres-owner.toml](config/examples/secrets/postgres-owner.toml)。
 3. **生成配置**，二选一：
-   - 向导：先 `install -d -o auction -g auction -m 0750 /var/lib/auction`，再运行 `sudo -u auction /opt/auction/bin/auction-admin-api setup --output-dir /var/lib/auction/new-config --control-group auction-worker-control`（目录须尚不存在）。从 stderr 取得设置地址与一次性令牌，经 SSH 隧道（`ssh -L 8091:127.0.0.1:8091 <主机>`）完成表单，然后把目录内容移入 `/etc/auction/` 并调整属主与权限。
+   - 向导：先 `install -d -o auction -g auction -m 0700 /var/lib/auction/setup`（`/var/lib/auction` 本身保持 root:root 0755），再运行 `sudo -u auction /opt/auction/bin/auction-admin-api setup --output-dir /var/lib/auction/setup/new-config --control-group auction-worker-control`（目录须尚不存在）。从 stderr 取得设置地址与一次性令牌，经 SSH 隧道（`ssh -L 8091:127.0.0.1:8091 <主机>`）完成表单，然后把目录内容移入 `/etc/auction/` 并调整属主与权限。
    - 手工：以 [ops/config/examples](config/examples) 为模板编写，字段说明见[ops/config/README.md](config/README.md)。
 4. **补齐关键配置**：`secrets.toml` 的 `[database]`、`admin_actor`/`admin_secret`、三组独立数据密钥（`openssl rand -base64 32`）；`worker.toml [worker.control] enabled = true` 且 `allowed_peer_uids` 含 Admin UID 与 **0**；Public `[http_security]` 与 Admin runtime `[security]` 的 `allowed_origins`、`cookie_secure = true`，代理在本机时 `trusted_proxy_cidrs = ["127.0.0.1/32"]`；每个 Public 实例使用唯一的 `realtime.consumer_key`。
 5. **安装运行时目录与 unit**（在解压后的发布包根目录执行）：
@@ -106,7 +111,7 @@ usermod -aG auction-worker-control auction
 
 | unit | 说明 |
 | --- | --- |
-| `auction-worker.service` | `Restart=on-failure`；`RuntimeDirectory=hv-auction/worker` 管理 control socket 目录；可写 `/var/lib/auction` |
+| `auction-worker.service` | `Restart=on-failure`；`RuntimeDirectory=hv-auction/worker` 管理 control socket 目录；`ReadWritePaths` 含 `/var/lib/auction`，实际只能写其下归运行账号的子目录 |
 | `auction-admin-api.service` | `Wants=`/`After=` Worker；附加组 `auction-worker-control` 以访问 control socket；可写 `/etc/auction/runtime` |
 | `auction-public-api.service` | `Wants=`/`After=` Worker 与 Admin |
 | `auction-stack.service` | oneshot、`RemainAfterExit`，以 root 执行 `auction-cli service start/stop`；开机按序拉起 |
@@ -120,7 +125,8 @@ Public/Admin unit 保持 `TimeoutStopSec=45s`，Worker 为 `120s`，stack 为 `3
 
 ```bash
 auction-cli --config-dir /etc/auction service status     # 状态与 readiness（未全部就绪时退出码 4）
-auction-cli --config-dir /etc/auction service restart    # 预检 → 时段门禁 → 反序停止 → 迁移 → 顺序启动
+auction-cli --config-dir /etc/auction service restart \
+  --owner-secrets /etc/auction/owner/postgres.toml        # 预检 → 时段门禁 → 反序停止 → 迁移 → 顺序启动
 auction-cli --config-dir /etc/auction service stop       # 时段门禁 → 按 Public → Admin → Worker 停止
 ```
 
@@ -154,14 +160,14 @@ auction-cli --config-dir /etc/auction service stop       # 时段门禁 → 按 
 
 **失败与未知结果**（各步骤的系统状态见[apps/auction-cli/README.md#制品部署与回退](../apps/auction-cli/README.md#制品部署与回退)）：
 
-- 停机前失败（含磁盘空间不足）只输出错误，不停止、不安装、不写回执。
+- 停机前失败（含磁盘空间不足）只输出错误，不停止、不安装、不写回执。安装目录、祖先或程序不归 root 或允许他人写入时同样在停机前拒绝：按[重建安装目录信任](deploy/RECOVERY.md#重建安装目录信任)从已验证的 Release 重装，不要只改属主；属主与写权限可信、只是运行账号无法进入目录或执行程序（如目录被收紧为 0700），或执行部署的账号无法执行安装目录中的 `auction-cli`（如它被改为 0644）时，按错误点名的路径补回标准 0755 即可。部署状态目录或它的任一级父目录不归 root、允许他人写入，或在持锁期间被改名替换时，在取锁时或停机前拒绝，按[目录与账号](#目录与账号)处理。
 - 停机后失败每次调用最多追加一条 `action=deploy`、`outcome=failed` 回执并退出非零；除安装中途失败时换回已替换的程序外，命令不自动回滚或重启，用 `service status` 确认实际状态。保留旧程序之后的失败回执与回滚记录同一标识、带 `rollback_record_id`，`rollback --receipt-id` 能读到它；回执写不进去时错误末尾注明“部署回执也未写入”。
 - 停机备份、双 CLI 校验或保留旧程序失败：程序与数据库都未改变。恢复旧版只用安装目录中的 CLI 执行 `service start`（如 `/opt/auction/bin/auction-cli … service start --owner-secrets …`，沿用本次的 `--config-dir`、`--state-dir` 与 unit 参数）；**不要用制品 CLI**，它会先把 schema 迁到新版本，而安装目录仍是旧程序。
-- 安装中途失败：服务保持停止、迁移尚未执行，`rollback` 会拒绝。命令已把本次替换的程序从回滚记录换回并复核四个程序的摘要：错误含“已复核为部署前的旧程序”时安装目录就是旧程序，按上一条用安装目录中的 CLI `service start` 恢复。错误含“自动换回未完成”时安装目录可能新旧混合（错误列出各程序当前摘要），旧程序与摘要保留在 `<state-dir>/rollback/<id>/`；按[安装中途失败的手工换回](deploy/RECOVERY.md#安装中途失败的手工换回)逐个换回并核对摘要后再启动，不要用制品 CLI 启动；安装目录恢复为一致的旧程序之前不要重跑 `deploy`，否则新的回滚记录会把混合程序当作旧版本保留。
-- 迁移已提交但角色未就绪：先看 `service status` 与 journal 修配置，再用 `service start`（不重复迁移）；回到旧程序只能走 `rollback`（区间全为 `compatible`）或恢复停机备份。
+- 安装中途失败：服务保持停止、迁移尚未执行。失败回执的 `artifacts` 是安装目录的实际摘要，`deploy` 段只是尝试安装的制品，不作为任何组件的身份来源。命令已把本次替换的程序从回滚记录换回并复核四个程序的摘要：错误含“已复核为部署前的旧程序”时安装目录就是旧程序，按上一条用安装目录中的 CLI `service start` 恢复（本次回滚记录保留的就是当前程序，`rollback` 会因目标与当前程序相同而拒绝）。错误含“自动换回未完成”时安装目录可能新旧混合（错误列出各程序当前摘要），旧程序与摘要保留在 `<state-dir>/rollback/<id>/`；按[安装中途失败的手工换回](deploy/RECOVERY.md#安装中途失败的手工换回)逐个换回并核对摘要后再启动，不要用制品 CLI 启动；安装目录恢复为一致的旧程序之前不要重跑 `deploy`，否则新的回滚记录会把混合程序当作旧版本保留。
+- 迁移已提交但角色未就绪：先看 `service status` 与 journal 修配置，再用 `service start --owner-secrets …`（它照常执行内嵌迁移，数据库已是该版本时为空操作）；回到旧程序只能走 `rollback`（区间全为 `compatible`）或恢复停机备份。
 - 回执未写入（错误含“部署回执也未写入”）时没有可信的部署记录，用 `service status`、`/proc/<pid>/exe` 摘要与 `db status` 确认实际状态，按[RECOVERY](deploy/RECOVERY.md)核对 catalog 与程序摘要后再决定。任何情况下都不要在未逐个核对摘要时手工覆盖 `/opt/auction/bin/` 并直接启动；`deploy` 失败后的手工换回只在自动换回未完成时走[安装中途失败的手工换回](deploy/RECOVERY.md#安装中途失败的手工换回)。
 
-**容量**：每次 `deploy`/`rollback` 在 `<state-dir>/rollback/` 保留一份四个程序的副本，每次 `deploy` 在 `--backup-dir` 留下一份停机备份；CLI 不自动清理，按部署频率与库大小规划容量并纳入磁盘监控。人工清理时保留最新成功 `deploy`/`rollback` 回执引用的回滚记录与最近 N 条，整目录删除旧记录、成对删除旧备份，步骤见[回滚记录与停机备份的容量](../apps/auction-cli/README.md#回滚记录与停机备份的容量)。
+**容量**：每次 `deploy` 在 `<state-dir>/rollback/` 保留一份四个程序的副本（`rollback` 保留三个角色程序），每次 `deploy` 在 `--backup-dir` 留下一份停机备份；CLI 不自动清理，按部署频率与库大小规划容量并纳入磁盘监控。人工清理时保留最新成功 `deploy`/`rollback` 回执引用的回滚记录与最近 N 条，整目录删除旧记录、成对删除旧备份，步骤见[回滚记录与停机备份的容量](../apps/auction-cli/README.md#回滚记录与停机备份的容量)。
 
 部署后核对（任一项不符按失败处理）：`service status` 三个 unit 的 `MainPID`/`InvocationID` 与 readiness 均为 ready；`service receipt show <id>` 的 `outcome=succeeded`、四个程序摘要与发布包一致、迁移版本等于期望、备份指向本次停机备份、演练回执已审核；`db status` 与服务内嵌版本一致且无待执行迁移；`/proc/<MainPID>/exe` 摘要与回执一致。
 
@@ -173,7 +179,15 @@ auction-cli --config-dir /etc/auction service stop       # 时段门禁 → 按 
 
 迁移 `000108` 起出站通知模板保存在数据库（见[ops/config/README.md#出站通知模板数据库](config/README.md#出站通知模板数据库)）。升级含该迁移的版本时注意：升级后所有模板先使用内置默认正文，runtime 文件里固化的旧正文不再生效（区块原样保留，只为回退时旧程序仍能加载）；需要沿用的定制正文在升级后到 Admin 参数页的“MoogleMail 模板”重新保存。`worker.toml` 若带有 `[worker.mooglemail.mail_templates]` 须先删除，否则 `config check` 与 Worker 启动失败。该迁移登记为 `compatible`，回退到旧程序后旧程序重新使用自身配置里的模板。
 
-**回退**：迁移只向前。分体部署用 `auction-cli rollback --receipt-id <deploy_receipt_id>` 换回 `deploy` 保留的旧程序（不执行迁移，门禁与回执见[apps/auction-cli/README.md#回退](../apps/auction-cli/README.md#回退)）。安装旧程序中途失败时与 `deploy` 相同，命令把已替换的程序从刚保留的反向回滚记录换回并复核：错误含“已复核为回退前的程序”时按错误给出的指引处置，含“自动换回未完成”时按[安装中途失败的手工换回](deploy/RECOVERY.md#安装中途失败的手工换回)处理。合并部署没有 CLI 回退，只能换回旧的 `auction-server` 程序。迁移区间判定、含 `breaking` 时恢复升级前备份，以及手工回退须显式设置 compatible 并保留新版 CLI 的要求，见[程序回退](deploy/RECOVERY.md#程序回退)。
+Admin 的邮件 Cookie 在线校验（`POST /api/v1/admin/credentials/{credential_id}/check`）自迁移 `000112` 所在的版本起改由 Worker 经 Worker control 代为执行，与邮件循环共用同账号的请求门、在途锁与账号忙熔断；Admin 不再直连 HentaiVerse，也不解密邮件 Cookie（论坛 Cookie 仍在 Admin 本进程检查）。升级前确认三项依赖：Worker 在运行且 `[worker.control]` 已启用，Admin 运行账号在 `allowed_peer_uids`/`allowed_peer_gids` 中（与手工装备读取相同）；Worker 启用了 MoogleMail；Worker 配置了 `credential_data_key`。任一不满足或 Worker 主动暂停外部访问时，邮件 Cookie 校验返回 `503 credential_check_unavailable`（“Cookie 校验暂不可用”），不回退到 Admin 直连；错误码与预算见[docs/contracts/routes.md#worker-controlunix-socket](../docs/contracts/routes.md#worker-controlunix-socket)。该变化不涉及迁移，回退到旧程序即恢复旧的 Admin 直连检查。
+
+结算退件处理（迁移 `000114`–`000116`，均为 breaking）：升级时为已有的结算退件证据补建案件与开案事件、补登首寄派发历史与资金投递历史绑定，并把 `settlement_funding_returns` 收紧为只追加；不改写任何证据、投递或资金金额。升级后已转人工对账的退件改按退件案件计数（`settlement_return_pending`/`settlement_return_quarantined`），不再计入履约人工对账；偿付报告新增代管负债与“余额早于领回证明”标记（`balance_before_take` 为真时结论为 `unknown`，等下一次余额观察）。回退旧程序前须先确认没有未终结的 `settlement_return_action` Take 投递、补寄派发与资金返还事实，否则旧程序会把它们判为未知来源或无资金关联。
+
+同一版本的 Admin 新增“结算退件”页（`/settlement-returns`）与 `GET/POST /api/v1/admin/settlement-returns…` 接口，侧栏的导航待办读取与投递队列的列表、详情读取都改带 `include=settlement_returns`（见[docs/contracts/routes.md#admin-api](../docs/contracts/routes.md#admin-api)）：不带该参数的缺省投影保持已发布的闭集，升级窗口内仍打开的旧页面看不到结算退件 Take 投递（直接打开其详情为 404 `delivery_projection_excluded`），也读不到装备收回处置，刷新后即为新页面。页面与服务端随同一制品发布：回退到旧服务端后，新页面的退件页读取为 404、导航待办与投递列表读取为 400 `invalid_query`（不显示徽标、队列显示读取失败），按构建号提示刷新后恢复。`auction-cli funds preview` 的 `preview_digest` 自本版本起改变（预览事实新增成交撤销收口的识别字段）：升级前生成的摘要与确认短语在新版本上不再匹配，开户或现金对账前在新版本上重新执行 `funds preview`，使用新的摘要与确认短语。
+
+同一版本起 `service`、`deploy`、`rollback` 与停机维护命令在取部署锁前核对部署状态目录（`--state-dir`）：目录本身归 root 且 0700，各级父目录归 root 且禁止 group/other 写入（非 root 的隔离环境为当前账号），之后的锁、回执、回滚记录与保留程序都经同一个固定的目录描述符读写并核对属主与权限，详见[apps/auction-cli/README.md#部署状态目录](../apps/auction-cli/README.md#部署状态目录)。线上 `/var/lib/auction` 已只读核实为 root:root 0755，不需要处理；按旧版首次部署说明把它建为 `auction` 所有的主机，升级前先改为 root:root 0755（运行账号的数据保留在其下自有子目录），否则包括开机 `auction-stack` 在内的 `service start` 都会拒绝。`deployment/` 及其中的回执与回滚记录若出现非 root 的条目，说明运行账号曾改动过它，不要只改属主，先人工核对来源。
+
+**回退**：迁移只向前。分体部署用安装目录中的 `auction-cli rollback --receipt-id <deploy_receipt_id>` 把三个运行角色换回 `deploy` 保留的旧程序，安装目录中的 `auction-cli` 保持不变（不执行迁移；保留的 CLI 必须与数据库同版本，跨迁移时目标角色的 schema 必须已记录、三角色须先显式设 `migration_compatibility_mode = "compatible"`，门禁与回执见[apps/auction-cli/README.md#回退](../apps/auction-cli/README.md#回退)）。安装旧角色程序中途失败时与 `deploy` 相同，命令把已替换的程序从刚保留的反向回滚记录换回并复核：错误含“已复核为回退前的程序”时按错误给出的指引处置，含“自动换回未完成”时按[安装中途失败的手工换回](deploy/RECOVERY.md#安装中途失败的手工换回)处理。合并部署没有 CLI 回退，只能换回旧的 `auction-server` 程序。迁移区间判定、含 `breaking` 时恢复升级前备份，以及手工回退须显式设置 compatible 并保留新版 CLI 的要求，见[程序回退](deploy/RECOVERY.md#程序回退)。
 
 ## 反向代理
 
@@ -396,8 +410,8 @@ COD 实收资金化诊断使用独立 target `auction::settlement::funding_diagn
 | 来源 | 现象与处置 | 恢复判定 |
 | --- | --- | --- |
 | process | `service_missing`/`service_degraded`、`audit_failure` 增长：`systemctl status auction-{public-api,admin-api,worker}`，核对 `/health/ready` 与 `auction::*` 日志；Worker 反复退出先停 unit，按 [Panic](#panic-排障) 与[告警处置手册](#告警处置手册)的 recovery 行定位。三角色同时降级多为数据库问题：查 PostgreSQL、`statement_timeout` 与[连接预算](#数据库连接预算与启用顺序)。 | 连续两轮均 `ready`，`audit_failure` 不再增长 |
-| delivery | `delivery_pending`、`delivery_manual_reconcile`、`delivery_returned_mail`、`queue_latency`：在 Admin“投递队列”按状态过滤，人工对账/退信按[日常运维](#日常运维)处理，绝不自动重发；`queue_latency` 检查 Worker、账号忙与 `request_timeout_seconds` 是否超过停机预算。 | 积压与最老年龄低于阈值，已领取行终态 |
-| fulfillment | `fulfillment_backlog`、`fulfillment_failed`、`fulfillment_manual_reconcile`、`fulfillment_collection_overdue`：在结算报表看义务状态，失败项核对 `last_error_code`，人工对账与投递同源。积压只统计尚未寄出的工作；已寄出、只等收件人领取的义务在仪表盘“等待领取”分组，其中“最近一次读取 Sent 失败”（`last_error_code = evidence_unavailable`）只说明读不到、不代表未领取，日志按[安全错误与未持久化指标](#安全错误与未持久化指标)区分 `read_sent_receipt`（读取失败）与 `wait_asset_collection`（已读到、未领取）；已寄出的投递不得重试或重发。`fulfillment_collection_overdue`（每日摘要级）表示有等待领取的寄出时长达到 `fulfillment_collection_overdue_age_seconds`（默认 72 小时），计数是达到阈值的件数（超期件数），年龄是最久一笔的寄出时长，仪表盘“长期未领取清单”逐项列出（最多 20 条）：资产仍在已寄出的邮件里，只需在游戏内核对 Sent 的 Read 列与附件并联系收件人；系统不会自动重发、撤回或改写义务，手工重发等于重复付款。 | 义务 `satisfied` 或进入人工决定，年龄回落；长期未领取在超期件全部领取或离开等待领取（超期件数回落到 0）后解除 |
+| delivery | `delivery_pending`、`delivery_manual_reconcile`、`delivery_returned_mail`、`queue_latency`：在 Admin“投递队列”按状态过滤，人工对账/退信按[日常运维](#日常运维)处理，绝不自动重发；结算退件 Take 投递（来源 `settlement_return_action`）不计入投递积压、失败与人工对账，由结算退件告警承担，见[结算退件处理](#结算退件处理)；`queue_latency` 检查 Worker、账号忙与 `request_timeout_seconds` 是否超过停机预算。 | 积压与最老年龄低于阈值，已领取行终态 |
+| fulfillment | `fulfillment_backlog`、`fulfillment_failed`、`fulfillment_manual_reconcile`、`fulfillment_collection_overdue`：在结算报表看义务状态，失败项核对 `last_error_code`，人工对账与投递同源。积压只统计尚未寄出的工作；已寄出、只等收件人领取的义务在仪表盘“等待领取”分组，其中“最近一次读取 Sent 失败”（`last_error_code = evidence_unavailable`）只说明读不到、不代表未领取，日志按[安全错误与未持久化指标](#安全错误与未持久化指标)区分 `read_sent_receipt`（读取失败）与 `wait_asset_collection`（已读到、未领取）；已寄出的投递不得重试或重发。`fulfillment_collection_overdue`（每日摘要级）表示有等待领取的寄出时长达到 `fulfillment_collection_overdue_age_seconds`（默认 72 小时），计数是达到阈值的件数（超期件数），年龄是最久一笔的寄出时长，仪表盘“长期未领取清单”逐项列出（最多 20 条）：资产仍在已寄出的邮件里，只需在游戏内核对 Sent 的 Read 列与附件并联系收件人；系统不会自动重发、撤回或改写义务，手工重发等于重复付款。；`settlement_return_pending`、`settlement_return_quarantined`：在 Admin 结算退件页按案件处理——已绑定的选择领回补寄、领回代管或留箱结案，`untrusted` 只能标记已核对，`unbound` 可标记已核对或提交只读重新核验，`take_unknown` 只能等系统可验证的领取证明（投递台不能对 Take 人工重试或声明结果） | 义务 `satisfied` 或进入人工决定，年龄回落；长期未领取在超期件全部领取或离开等待领取（超期件数回落到 0）后解除；退件告警在案件全部结案后由扫描关闭，确认或静音不改变案件 |
 | recovery | `recovery_payment_overdue`、`recovery_payment_mail_unsent`、`recovery_relist_pending`、`recovery_failed`、`recovery_manual_reconcile`、`balance_low`、`evidence_stale`、`account_busy`：付款邮件未证明时先核对投递与 Sent，不能重发或改期限；账号忙停止人为触发并等待退避，超过 15 分钟查第二个 Worker/CLI；余额与 evidence 分别补 Credits 或恢复页面读取。 | 两世界余额与 evidence 为 `ok`，逾期/重挂归零 |
 | mail | `mail_poll_stalled`、`mail_sent_page_limit_approaching`：核对 `mail_poll_state` 的 `last_poll_at`、`consecutive_failures`、`paused`；页数告警在硬上限 100 内提高 `maximum_pages` 或清理旧 Sent，不能把前缀扫描当完整枚举；Cookie 失效按 credential 处理。 | 成功轮询后 `last_poll_at` 前进、失败数归零 |
 | credential | `credential_invalid`（`mail_cookie`/`external_api`）：Admin“Cookie 池”录入新值并停用旧值（每种 kind 只能一个 active）或 `credential import`，再 `service restart`；疑似账号被盗按[游戏页面变化与账号风险](#游戏页面结构变化与账号风险)处理。 | 当前行不再是 `invalid`，收件与论坛写入恢复 |
@@ -406,7 +420,7 @@ COD 实收资金化诊断使用独立 target `auction::settlement::funding_diagn
 | notification | `notification_delivery_failed`、`notification_postage_insufficient`：邮资不足时补充 Bot Credits 后在“投递队列”重试，补足前不要反复重试。 | 失败与最老年龄归零，新通知可寄出 |
 | backup | `disk_capacity_low`、`backup_failed`、`restore_drill_overdue`、`source_unavailable`：`df -h /var/backups/auction`；终态与失败阶段见 `<state-dir>/receipts/<run_id>.json`，回执只有阶段与固定错误码；具体原因看 `journalctl -u auction-backup` 中同一 `run_id` 的 `detail=` 行（单行、已脱敏、最多 512 字符，另有 pg_dump/pg_restore 自身输出），见[定时备份](../apps/auction-cli/README.md#定时备份)；演练逾期按[从 R2 取回并演练恢复](deploy/RECOVERY.md#从-r2-取回并演练恢复)完成并把回执复制到演练目录。 | 一次 `completed` 且空间满足字节与比例下限 |
 | wal | `wal_upload_stalled`、`source_unavailable`、`wal_offsite_disabled`：核对 `journalctl -u auction-wal-upload` 与 `wal upload` JSON，检查 R2 凭据、bucket lock 与网络；积压会阻塞 PostgreSQL 回收，优先处理。`wal_offsite_disabled` 只是报告跳过项。 | `wal upload` 为 `completed` 且暂存无超阈段 |
-| reconciliation | `custody_drift`、`solvency_shortfall`、`reconciliation_stale`、`source_unavailable`：`db asset-reports` 读取最近报告并按 `missing_samples.reason` 核对 Armory 与 delivery；`db report-solvency` 重算并核对余额状态。已成功寄出的装备与已支出、且寄出不晚于余额观察的货款/退款在 v2 报告中单列为在途（`in_transit_*`），不计为缺失或待付；寄出晚于余额观察的支出仍计入待付，等下一次余额观察后再移出。寄出后转人工核对或失败的单列为在途待核对（`in_transit_review_*`），按 fulfillment 行的人工核对处理，不得据此重寄或重付；在途长期不收口按 fulfillment 行的等待领取处理。报告只读，不授权转账、退款、重发或转移；Armory 只扫描七个 organize 分类，未命中不代表装备不存在。 | 下次报告无差异且年龄在阈值内 |
+| reconciliation | `custody_drift`、`solvency_shortfall`、`reconciliation_stale`、`source_unavailable`：`db asset-reports` 读取最近报告并按 `missing_samples.reason` 核对 Armory 与 delivery；`db report-solvency` 重算并核对余额状态。已成功寄出的装备与已支出、且寄出不晚于余额观察的货款/退款在 v2 报告中单列为在途（`in_transit_*`），不计为缺失或待付；寄出晚于余额观察的支出仍计入待付，等下一次余额观察后再移出。寄出后转人工核对或失败的单列为在途待核对（`in_transit_review_*`），按 fulfillment 行的人工核对处理，不得据此重寄或重付；成交撤销后已由恢复收回的装备不再列为在途，按恢复去向计入应持（缺失样本原因 `recovery_relist_pending`、`relisted_draft`），已撤销的卖方货款不计入待付；在途长期不收口按 fulfillment 行的等待领取处理。报告只读，不授权转账、退款、重发或转移；Armory 只扫描七个 organize 分类，未命中不代表装备不存在。 | 下次报告无差异且年龄在阈值内 |
 
 ### 游戏页面结构变化与账号风险
 
@@ -422,6 +436,7 @@ COD 实收资金化诊断使用独立 target `auction::settlement::funding_diagn
 | 暂停/恢复收件 | Admin 仪表盘或“收件审核”页；恢复轮询不绕过场次冻结的赛季收件门禁，见[docs/business-rules.md#赛季早鸟期auctionscheduleearly_bird](../docs/business-rules.md#赛季早鸟期auctionscheduleearly_bird) |
 | 结果未知的投递 | Admin “投递队列”按动作与证据人工对账；主动 Send 禁止仅凭外部引用人工确认成功，须由冻结的精确 Sent 证明恢复。未找到 Sent 不证明未发送 |
 | 恢复确认 | Admin “结算报表”中确认 `reclaimed` / `cancelled` / `equipment_recovered`；付款截止与跨赛季重列限制见[4 恢复付款超时与拒收](../docs/guide/settlement.md#4-恢复付款超时与拒收) |
+| 结算退件 | Admin “结算退件”页（`/settlement-returns`，侧栏显示未结案待办数）按案件处理，动作只在详情页按服务端给出的允许动作确认后提交，处理流程见[结算退件处理](#结算退件处理)；代管与留箱结案的资产用[结算退件代管查询](#结算退件代管查询)只读核对，偿付报告单列代管负债 |
 | 论坛写入未知与私信对账 | `auction-cli forum recovery` 查看，必要时 `forum authorize-retry`；私信用 `pm list` / `pm reconcile` |
 | 规则与“关于”发布 | Admin “规则内容”“关于内容”页（内容直接写入数据库，没有文件导入） |
 | 查看部署历史 | `auction-cli service receipt list` / `service receipt show <receipt_id>`；回执由 `service start/restart` 与 `deploy`/`rollback` 追加，含程序摘要、迁移版本、恢复点、操作者与时间 |
@@ -429,6 +444,55 @@ COD 实收资金化诊断使用独立 target `auction::settlement::funding_diagn
 | Bot 资金账户 | `auction-cli funds preview` 可在线只读执行；开户或现金对账写入前须先停止 Worker，见[docs/guide/settlement.md#bot-内部履约与资金账户](../docs/guide/settlement.md#bot-内部履约与资金账户) |
 | 导出邮件诊断证据 | `auction-cli mail export-evidence <evidence-id> --output <文件>` |
 | 数据保留与清理 | `auction-cli db inventory` 只统计不授权删除；`db retention-dry-run` 按政策 v2 写 run id 回执；执行用 `db retention-purge --dry-run-receipt <回执> --approve <family>=<token> --execute --confirm 'PURGE <库名>' --receipt <回执>`，只删运行态族、逐族令牌绑定演练计数并追加 `auction.retention.purge` 审计，审计/资金/业务事实与有效会话永不删除 |
+
+### 结算退件处理
+
+被拒收或过期退回的卖方货款、买家退款与流拍/撤拍寄回，每封系统退件一个案件，规则见[docs/guide/mail-flows.md#结算退件](../docs/guide/mail-flows.md#结算退件)。在 Admin “结算退件”页列表中缺省只看未结案案件，进入详情先看“资产位置”：已寄出不等于已领取，退件停在 Bot 收件箱时资产尚未领回，领回证明成立后才算已领回；代管是替原权利人保管，权益保留，不是 Bot 自有资金。
+
+| 案件 | 做法 |
+| --- | --- |
+| 已绑定、待决定，退回资产与原派发一致 | 原收件人仍应收到时选“领回并补寄”（补寄只寄原冻结收件人，金额与附件不变，每案最多 3 次、不含首寄，次数由建案时冻结）；暂不寄出时选“领回后代管”（以后可从代管补寄）。两者都只在本地提交持久 Take，由 Worker 激活、投递 Worker 执行，案件先进入“领回中” |
+| 已绑定、资产不一致或义务已不可补寄 | 详情的阻断原因会写明；只能“领回后代管”（资产一致时）或“留箱结案”。留箱是明确例外：资产留在 Bot 收件箱记为退回待领取，原权利人的权益保留 |
+| 已绑定、阻断原因“原发送未核实”（`send_unresolved`） | 原派发写出结果未知后被退回，资金占用仍是未知：先收口原发送再处理。货款可按“投递长时间停在 `manual_reconcile`”一行用 `auction-cli settlement confirm-sent` 提交人工 Sent 证明；退款不支持人工 Sent，等待邮箱维护自动 Sent 恢复。收口后案件自动变为可领回，履约仍归案件，不会被改回等待领取。不要“留箱”或在游戏内手工领取 |
+| `untrusted` 隔离 | 来源未证明，只能“标记已核对”结案，不授予领取、补寄或资金动作 |
+| `unbound` 隔离 | “重新核验”交给 Worker 只读读取收件箱中的原退件，能证明系统来源、资产与唯一原派发时改为待决定；读不到或仍不成立时保持隔离，可“标记已核对”结案。不要人工指定义务或在游戏内领取 |
+| 已代管 | 需要再寄时选“从代管补寄”，同样只寄原冻结收件人并受冻结上限约束 |
+
+命令带 `command_id` 与案件版本。页面提示结果未知（超时、断网、5xx）时，只在页面“未决命令”区按原命令重试，不要另起新命令；返回 409（版本已变、状态或资格不符等）表示案件已不同于页面所见，页面会重读，看过最新状态再决定。
+
+Take 结果未知（`take_unknown`）时案件停在人工核对：不要在游戏内手工领取，也不要在投递台对该 Take 投递重试或声明结果（投递台会拒绝）。系统只认可验证的领取证明：邮箱维护在原 Take 会话里复核原退件，详情页的发件人、主题、原退件正文与逐条 `Removed attachment:` 领取回执都与领取前一致时按领回证明收口（资金返还一次，再按计划补寄或代管），原资产完整仍在即重新排队执行 Take（每条最多 2 次），两者都会在案件事件里留下记录（`take_proven` 的 `proof=action_recovered_inbox_v1`，或 `take_activated` 的 `requeued=true`）。附件已为空但没有对应回执、Take 在准备期就被确定拒绝（结果记录未开始写出）时系统自动以新 fence 重新执行，最多两次（事件 `take_activated` 的 `reason=take_not_started`）；激活前的同邮件冲突在另一意图确定从未执行后自动交接（事件 `take_requested` 的 `handover=true`），此后投递台会拒绝重试那条原意图。邮件整体缺失、资产不全、Take 由配置 Cookie 执行、重启已用满或同邮件冲突仍未解除（事件 `take_unknown` 的 `failure_code=mail_disposition_conflict`，动作保持 pending）时案件保持打开，`settlement_return_quarantined` 告警持续活动（可在告警台静默重复通知）；结算退件 Take 投递归案件所有，不计入投递人工对账、积压与失败告警。仍无法收口的案件在游戏内核对 Bot 收件箱中原退件是否仍在，记录结论后上报维护者，不要人工改库。
+
+待重新核验（`recheck_pending`）的案件需要 Worker 能只读读取该世界的 MoogleMail：未启用邮件、该世界未配置或 Worker 不在线时，详情显示“核验能力不可用”，案件保持待核验并继续计入隔离告警，恢复能力（启用 MoogleMail 并重启 Worker）后自动继续，不需要重新提交。
+
+### 结算退件代管查询
+
+只读核对代管与留箱结案的资产（在只读事务中执行，不修改任何行）：
+
+```sql
+BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY;
+-- 代管中：原权利人、代管 Credits 与装备 EID、领回证明时刻
+SELECT c.return_mail_id, c.world_id, o.obligation_kind, d.recipient AS beneficiary,
+       t.credits, t.attachment_ids, t.proven_at
+FROM public.settlement_return_cases AS c
+JOIN public.settlement_return_takes AS t ON t.return_mail_id = c.return_mail_id
+JOIN public.deliveries AS d ON d.id = t.original_delivery_id
+LEFT JOIN public.settlement_obligations AS o ON o.id = c.obligation_id
+WHERE c.status = 'held'
+ORDER BY t.proven_at;
+-- 留箱结案：资产仍在 Bot 收件箱（退回待领取），按退件 MID 在游戏内核对
+SELECT c.return_mail_id, c.world_id, i.external_mail_id, d.recipient AS beneficiary, c.closed_at
+FROM public.settlement_return_cases AS c
+JOIN public.inbound_mail AS i ON i.id = c.return_mail_id
+LEFT JOIN public.deliveries AS d ON d.id = c.delivery_id
+WHERE c.status = 'inbox_closed'
+ORDER BY c.closed_at;
+-- 未结案案件按状态计数（与导航待办和两类退件告警同一口径）
+SELECT status, count(*) FROM public.settlement_return_cases
+WHERE closed_at IS NULL GROUP BY status ORDER BY status;
+ROLLBACK;
+```
+
+代管现金在偿付报告中计为代管负债、与待付二选一只计一次；装备按 `custody_<义务种类>` 原因计入应持，留箱的按 `returned_in_inbox_<义务种类>` 计为待核对。余额观察早于最近一次现金领回证明时偿付结论为 `unknown`，等下一次余额观察。
 
 ## 备份与恢复
 
@@ -450,7 +514,7 @@ WAL：`archive_command` 调用 `wal archive` 压缩、age 加密并 fsync 到本
 | 浏览器写请求返回 `origin_forbidden` | `allowed_origins` 与浏览器访问的 origin 不完全一致（协议、主机、端口） |
 | 所有客户端被同一地址限流 | 反向代理地址未加入 `trusted_proxy_cidrs`，服务端把代理当作客户端 |
 | 页面返回 503 | 程序不是 `web-embed` 构建，或内嵌资源缺失 |
-| 投递长时间停在 `manual_reconcile` | 结果未知，需在“投递队列”人工对账；不要直接改数据库。对账返回 `delivery_sent_sighted` 时说明 Sent 已有该结算义务的邮件，改用 `auction-cli settlement confirm-sent` |
+| 投递长时间停在 `manual_reconcile` | 结果未知，需在“投递队列”人工对账；不要直接改数据库。对账返回 `delivery_sent_sighted` 时说明 Sent 已有该结算义务的邮件，改用 `auction-cli settlement confirm-sent`；重试或释放返回 `settlement_obligation_ineligible` 时说明成交已撤销、该投递已不是义务的当前派发，或恢复流程已接管它被退回的邮件（重寄只归恢复流程），不要再尝试重新激活，按“结算恢复”页的结论核对 |
 | `deploy` 报“仍有 N 笔已越过 sending 围栏的投递在途” | 门禁只拒绝部署，不改队列或租约。等待这些 delivery/PM 完成（或在 Admin 核对后处置），必要时调大 `--send-gate-timeout-seconds`；不得用停机打断外部写入 |
 | `deploy` 报“制品内嵌 schema 版本低于数据库” | 这是回退方向：不要用 `deploy` 覆盖新版库；按[程序回退](deploy/RECOVERY.md#程序回退)核对 `(E,D]` 区间，含 `breaking` 时恢复升级前备份 |
 | `deploy` 报“迁移演练回执核对失败” | 逐项核对回执：7 天内、提交/包名/CLI 摘要与本次制品一致、备份 schema 等于当前库、迁移区间恰好为当前→候选、readiness 全 200 且 `consistency_check.work_item=W11.4`、`conclusion=passed`、无 `anomalies`、窗口不低于三倍实测；不符就重做演练，不改回执 |

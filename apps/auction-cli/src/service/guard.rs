@@ -3,19 +3,16 @@
 
 use std::fs::File;
 
-use anyhow::Context;
-
+use super::state::DeploymentState;
 use super::systemd::{ManagedRole, Systemctl};
-use crate::cli::MaintenanceArgs;
+use crate::cli::{MaintenanceArgs, UnitArgs};
 use crate::config_dir::ConfigDir;
 use crate::support::files;
 
-pub(super) const DEPLOYMENT_LOCK: &str = "deployment-control.lock";
-pub(super) const DEPLOYMENT_BUSY: &str = "另一个 auction-cli 部署操作正在进行";
-
 /// 持有期间阻止 supervisor 或另一个部署操作启动；Drop 时释放全部锁。
 pub(crate) struct MaintenanceGuard {
-    _locks: Vec<File>,
+    _managed: Option<File>,
+    _deployment: Option<DeploymentState>,
     pub(crate) mode: &'static str,
 }
 
@@ -35,14 +32,14 @@ pub(crate) async fn acquire(
 ) -> anyhow::Result<MaintenanceGuard> {
     if let Some(lock) = managed_lock(config_dir)? {
         crate::app::progress("检测到合并部署 owner.lock，已取得独占锁");
-        return Ok(MaintenanceGuard { _locks: vec![lock], mode: "managed" });
+        return Ok(MaintenanceGuard { _managed: Some(lock), _deployment: None, mode: "managed" });
     }
     if args.no_systemd {
         crate::app::progress("已声明 --no-systemd：跳过 unit 停止检查，请自行确保没有角色在运行");
-        return Ok(MaintenanceGuard { _locks: Vec::new(), mode: "unmanaged" });
+        return Ok(MaintenanceGuard { _managed: None, _deployment: None, mode: "unmanaged" });
     }
     let systemctl = Systemctl::new(&args.units)?;
-    let locks = vec![deployment_lock(&args.units)?];
+    let deployment = deployment_lock(&args.units)?;
     let mut running = Vec::new();
     for role in ManagedRole::START_ORDER {
         let state = systemctl.show(role).await?;
@@ -56,11 +53,11 @@ pub(crate) async fn acquire(
             running.join(", ")
         );
     }
-    Ok(MaintenanceGuard { _locks: locks, mode: "systemd" })
+    Ok(MaintenanceGuard { _managed: None, _deployment: Some(deployment), mode: "systemd" })
 }
 
-/// 分体部署启停共用的部署锁；状态目录不存在时以 0700 创建。
-pub(crate) fn deployment_lock(args: &crate::cli::UnitArgs) -> anyhow::Result<File> {
-    files::ensure_private_dir(&args.state_dir).context("准备部署状态目录失败")?;
-    files::lock_file(&args.state_dir.join(DEPLOYMENT_LOCK), DEPLOYMENT_BUSY)
+/// 分体部署启停、deploy/rollback 与维护命令共用的部署锁：核对状态目录与祖先的属主和权限后，
+/// 以描述符固定状态目录并在其中加锁，见 [`DeploymentState`]。
+pub(crate) fn deployment_lock(args: &UnitArgs) -> anyhow::Result<DeploymentState> {
+    DeploymentState::lock(&args.state_dir)
 }

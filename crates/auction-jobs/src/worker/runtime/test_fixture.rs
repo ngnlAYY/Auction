@@ -205,6 +205,8 @@ pub(crate) fn worker(clock: Arc<PausedClock>) -> PersistentWorker<PausedClock> {
         recovery_health: None,
         asset_reconciliation: None,
         recovery_store: None,
+        settlement_returns: None,
+        settlement_return_reader: None,
         recovery_resolution: None,
         recovery_delivery: None,
         recovery_blacklister: None,

@@ -58,14 +58,16 @@ const LEGACY_EQUIPMENT_LOSS: &str = r#"NOT EXISTS (
 const LEGACY_POSTAGE: &str = "d.failure_code IN ('send_rejected', 'send_rejected_after_stage')
                     AND d.result_metadata->>'reason_code' = 'insufficient_postage'";
 
-/// 通知来源的固定范围；结算类投递由其它来源负责。
-const NOTIFICATION_SCOPE: &str =
-    "d.origin_kind NOT IN ('settlement', 'settlement_recovery_action', 'operations_alert')";
+/// 通知来源的固定范围；结算类投递（含结算退件 Take）由其它来源负责。
+const NOTIFICATION_SCOPE: &str = "d.origin_kind NOT IN ('settlement', 'settlement_recovery_action', \
+     'settlement_return_action', 'operations_alert')";
 
 /// 投递与通知来源的配对口径；一条语句让两个口径共享同一语句级快照。
 static PAIRED_DELIVERY_COUNTS: LazyLock<String> = LazyLock::new(|| {
+    // 结算退件 Take 投递归所属案件，失败由退件告警承担，两种口径都不计入投递失败。
     let legacy_delivery = format!(
-        r#"d.origin_kind <> 'operations_alert' AND d.status = 'failed'
+        r#"d.origin_kind NOT IN ('operations_alert', 'settlement_return_action')
+             AND d.status = 'failed'
              AND NOT EXISTS (
                  SELECT 1 FROM public.settlement_legacy_self_reconciliations r
                  WHERE {}
@@ -76,7 +78,8 @@ static PAIRED_DELIVERY_COUNTS: LazyLock<String> = LazyLock::new(|| {
         crate::database::delivery::legacy_self_proof::TRUSTED_DELIVERY_PREDICATE,
     );
     let classified_delivery = format!(
-        "d.origin_kind <> 'operations_alert' AND d.status = 'failed' AND {CLASSIFIED_UNDISPOSED}"
+        "d.origin_kind NOT IN ('operations_alert', 'settlement_return_action') \
+         AND d.status = 'failed' AND {CLASSIFIED_UNDISPOSED}"
     );
     let legacy_notification = format!(
         "{NOTIFICATION_SCOPE} AND d.status = 'failed'
@@ -128,11 +131,13 @@ pub(super) const UNIFIED_EQUIPMENT_LOSS_TERMINAL: &str = r#"NOT (fulfillment.las
                          AND disposition.resolves_alert
                         WHERE loss.refund_obligation_id = obligation.id))"#;
 
-/// COD 退回达到 recovery 冻结上限时，以原 COD 投递上的 `cod_returned` 处置收口。
-/// 两个失败义务都属于同一恢复记录；处置缺失时继续计入失败，不凭损失/恢复行猜测。
+/// COD 退回后成交撤销（达到 recovery 冻结上限退回卖家，或 Admin 确认收回/取消）时，以原 COD
+/// 投递上的 `cod_returned` 处置收口。失败义务都属于同一恢复记录；处置缺失时继续计入失败，不凭
+/// 损失/恢复行猜测。
 const UNIFIED_COD_RETURN_TERMINAL: &str = r#"NOT (
                     fulfillment.last_error_code IN (
-                        'cod_returned_three_times', 'equipment_returned_to_seller'
+                        'cod_returned_three_times', 'equipment_returned_to_seller',
+                        'recovery_reclaimed', 'recovery_cancelled', 'recovery_sale_voided'
                     )
                     AND EXISTS (
                         SELECT 1
@@ -143,9 +148,48 @@ const UNIFIED_COD_RETURN_TERMINAL: &str = r#"NOT (
                          AND disposition.resolves_alert
                         WHERE fulfillment.obligation_id IN (
                             recovery.payment_obligation_id,
+                            recovery.equipment_obligation_id,
                             recovery.seller_payout_obligation_id,
                             recovery.buyer_refund_obligation_id
                         )
+                    )
+                )"#;
+
+/// isekai 已付款交付被收回、Admin 确认 `equipment_recovered` 时，以原交付投递上的
+/// `recovery_equipment_recovered` 处置收口从未开始的卖方货款（`recovery_sale_voided`）与原交付
+/// （`recovery_equipment_recovered`）。只认同一恢复记录的这两个义务；买方退款照常执行、不在此列；
+/// 处置缺失时继续计入失败。
+const UNIFIED_EQUIPMENT_RECOVERED_TERMINAL: &str = r#"NOT (
+                    fulfillment.last_error_code IN (
+                        'recovery_equipment_recovered', 'recovery_sale_voided'
+                    )
+                    AND EXISTS (
+                        SELECT 1
+                        FROM public.settlement_recoveries recovery
+                        JOIN public.delivery_dispositions disposition
+                          ON disposition.settlement_recovery_id = recovery.id
+                         AND disposition.kind = 'recovery_equipment_recovered'
+                         AND disposition.resolves_alert
+                        WHERE recovery.resolution = 'equipment_recovered'
+                          AND fulfillment.obligation_id IN (
+                              recovery.equipment_obligation_id,
+                              recovery.seller_payout_obligation_id
+                          )
+                    )
+                )"#;
+
+/// 结算退件代管或留箱结案时以明确原因终结的履约：原权利人的责任改由退件案件（代管负债或退回
+/// 待领取）承接，按退件告警与对账单列，不再计入履约失败。只认同一原派发上已结案的案件；案件
+/// 缺失或未结案时继续计入失败。两种读取口径都适用，因为这类终结只由退件案件写入。
+const RETURN_CLOSED_TERMINAL: &str = r#"NOT (
+                    fulfillment.last_error_code IN (
+                        'settlement_return_held', 'settlement_return_inbox'
+                    )
+                    AND EXISTS (
+                        SELECT 1
+                        FROM public.settlement_return_cases returned
+                        WHERE returned.delivery_id = fulfillment.delivery_id
+                          AND returned.status IN ('held', 'inbox_closed')
                     )
                 )"#;
 
@@ -159,10 +203,13 @@ static PAIRED_FULFILLMENT_COUNTS: LazyLock<String> = LazyLock::new(|| {
     format!(
         r#"SELECT
                COUNT(*) FILTER (WHERE fulfillment.execution_state = 'failed'
-                   AND {LEGACY_EQUIPMENT_LOSS_TERMINAL})::bigint AS legacy_failed,
+                   AND {LEGACY_EQUIPMENT_LOSS_TERMINAL}
+                   AND {RETURN_CLOSED_TERMINAL})::bigint AS legacy_failed,
                COUNT(*) FILTER (WHERE fulfillment.execution_state = 'failed'
                    AND {UNIFIED_EQUIPMENT_LOSS_TERMINAL}
-                   AND {UNIFIED_COD_RETURN_TERMINAL})::bigint AS classified_failed
+                   AND {UNIFIED_COD_RETURN_TERMINAL}
+                   AND {UNIFIED_EQUIPMENT_RECOVERED_TERMINAL}
+                   AND {RETURN_CLOSED_TERMINAL})::bigint AS classified_failed
            FROM public.settlement_obligations AS obligation
            LEFT JOIN public.settlement_obligation_fulfillments AS fulfillment
              ON fulfillment.obligation_id = obligation.id"#
@@ -373,6 +420,10 @@ mod tests {
             oldest_awaiting_collection_age_seconds: 0,
             oldest_awaiting_collection_backlog_age_seconds: 0,
             collection_overdue: 0,
+            settlement_return_pending: 0,
+            oldest_settlement_return_pending_age_seconds: 0,
+            settlement_return_quarantined: 0,
+            oldest_settlement_return_quarantined_age_seconds: 0,
         }
     }
 

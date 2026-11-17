@@ -1,11 +1,12 @@
 //! 状态目录下的部署回执存储：每条回执一个 0600 文件，经 [`PrivateDirectory`] 写满临时文件并
 //! 同步后以 `RENAME_NOREPLACE` 无覆盖发布；查询只读并拒绝损坏、重复或文件名不符的证据。
-//! 回执目录只核对目录本身（归当前账号、owner-only），不核对祖先：root 运行的部署把回执写在
-//! 状态目录下，按运维布局其祖先可以归服务账号所有。
+//!
+//! 读写都相对调用方固定的部署状态目录描述符派生 `receipts/`，不重新解析路径：持锁之后祖先被
+//! 改名也不会把回执写进或读自另一棵树。回执目录必须归当前账号且禁止 group/other 访问，每条
+//! 回执必须是当前账号所有、单链接、无 group/other 权限的普通文件，否则失败关闭。
 
 use std::{
     collections::BTreeSet,
-    fs,
     path::{Path, PathBuf},
 };
 
@@ -13,56 +14,62 @@ use anyhow::Context;
 use uuid::Uuid;
 
 use super::model::{DeploymentReceipt, MAX_RECEIPT_BYTES};
-use crate::support::files::{self, PrivateDirectory};
+use crate::support::files::PrivateDirectory;
 
 /// 状态目录中存放部署回执的子目录；备份范围把它作为 `deployment_receipts` 收集。
 pub(crate) const RECEIPTS_DIRECTORY: &str = "receipts";
 
+/// 回执目录的路径，只用于输出与提示；读写一律经状态目录的描述符。
 pub(crate) fn receipts_dir(state_dir: &Path) -> PathBuf {
     state_dir.join(RECEIPTS_DIRECTORY)
 }
 
 /// 追加一条回执；同 `receipt_id` 已存在时拒绝，不覆盖任何历史证据。
-pub(crate) fn append(state_dir: &Path, receipt: &DeploymentReceipt) -> anyhow::Result<PathBuf> {
+pub(crate) fn append(
+    state: &PrivateDirectory,
+    receipt: &DeploymentReceipt,
+) -> anyhow::Result<PathBuf> {
     receipt.validate()?;
     let name = file_name(receipt.receipt_id);
     let bytes = serde_json::to_vec_pretty(receipt).context("序列化部署回执失败")?;
     if bytes.len() as u64 > MAX_RECEIPT_BYTES {
         anyhow::bail!("部署回执超过 {MAX_RECEIPT_BYTES} 字节上限");
     }
-    let directory = receipts_dir(state_dir);
-    files::ensure_private_dir(&directory).context("准备部署回执目录失败")?;
-    let directory = PrivateDirectory::open_existing(&directory).context("准备部署回执目录失败")?;
+    let directory = state
+        .open_child(RECEIPTS_DIRECTORY, true)
+        .context("准备部署回执目录失败")?
+        .context("准备部署回执目录失败")?;
     directory.write(&name, &bytes, false).context("发布部署回执失败")?;
     Ok(directory.path.join(name))
 }
 
 /// 按完成时间倒序列出回执；目录不存在表示还没有部署回执，不是读取失败。
-pub(crate) fn list(state_dir: &Path, limit: usize) -> anyhow::Result<Vec<DeploymentReceipt>> {
-    let directory = receipts_dir(state_dir);
-    if !require_directory(&directory)? {
+pub(crate) fn list(
+    state: &PrivateDirectory,
+    limit: usize,
+) -> anyhow::Result<Vec<DeploymentReceipt>> {
+    list_matching(state, limit, |_| true)
+}
+
+/// 先按 `matches` 过滤全部回执，再按完成时间倒序截取 `limit` 条：过滤发生在限量之前，较新的
+/// 其他回执（如大量 `service start/restart`）不会把要找的回执挤出窗口。读取与校验口径同 [`list`]，
+/// 任一回执损坏都失败关闭。
+pub(crate) fn list_matching(
+    state: &PrivateDirectory,
+    limit: usize,
+    matches: impl Fn(&DeploymentReceipt) -> bool,
+) -> anyhow::Result<Vec<DeploymentReceipt>> {
+    let Some(directory) =
+        state.open_child(RECEIPTS_DIRECTORY, false).context("读取部署回执目录失败")?
+    else {
         return Ok(Vec::new());
-    }
-    let entries = match fs::read_dir(&directory) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => {
-            return Err(error)
-                .with_context(|| format!("读取部署回执目录失败：{}", directory.display()));
-        }
     };
-    let mut names = Vec::new();
-    for entry in entries {
-        let entry = entry.context("读取部署回执目录项失败")?;
-        let name = entry.file_name().into_string().map_err(|_: std::ffi::OsString| {
-            anyhow::anyhow!("部署回执目录包含非 UTF-8 文件名：{}", directory.display())
-        })?;
-        // 发布中的临时文件以 `.` 开头；其他扩展名不是回执证据。
-        if name.starts_with('.') || !name.ends_with(".json") {
-            continue;
-        }
-        names.push(name);
-    }
+    // 发布中的临时文件以 `.` 开头；其他扩展名（含无法按 UTF-8 解读的名称）不是回执证据。
+    let mut names = directory
+        .names()?
+        .into_iter()
+        .filter(|name| !name.starts_with('.') && name.ends_with(".json"))
+        .collect::<Vec<_>>();
     names.sort_unstable();
     let mut receipts = Vec::with_capacity(names.len());
     let mut identifiers = BTreeSet::new();
@@ -71,7 +78,9 @@ pub(crate) fn list(state_dir: &Path, limit: usize) -> anyhow::Result<Vec<Deploym
         if !identifiers.insert(receipt.receipt_id) {
             anyhow::bail!("部署回执目录包含重复的 receipt_id：{name}");
         }
-        receipts.push(receipt);
+        if matches(&receipt) {
+            receipts.push(receipt);
+        }
     }
     receipts.sort_by(|left, right| {
         right
@@ -84,14 +93,17 @@ pub(crate) fn list(state_dir: &Path, limit: usize) -> anyhow::Result<Vec<Deploym
 }
 
 /// 按回执标识读取单条证据；缺失或损坏都失败，不返回部分记录。
-pub(crate) fn read(state_dir: &Path, receipt_id: Uuid) -> anyhow::Result<DeploymentReceipt> {
+pub(crate) fn read(
+    state: &PrivateDirectory,
+    receipt_id: Uuid,
+) -> anyhow::Result<DeploymentReceipt> {
     if receipt_id.is_nil() {
         anyhow::bail!("receipt_id 不能是 nil UUID");
     }
-    let directory = receipts_dir(state_dir);
-    if !require_directory(&directory)? {
-        anyhow::bail!("没有部署回执目录：{}", directory.display());
-    }
+    let directory = state
+        .open_child(RECEIPTS_DIRECTORY, false)
+        .context("读取部署回执目录失败")?
+        .with_context(|| format!("没有部署回执目录：{}", receipts_dir(&state.path).display()))?;
     let name = file_name(receipt_id);
     let receipt = read_file(&directory, &name)?;
     if receipt.receipt_id != receipt_id {
@@ -104,26 +116,14 @@ fn file_name(receipt_id: Uuid) -> String {
     format!("{receipt_id}.json")
 }
 
-/// 返回 false 表示目录尚不存在；符号链接或非目录一律失败。
-fn require_directory(directory: &Path) -> anyhow::Result<bool> {
-    let metadata = match fs::symlink_metadata(directory) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(error) => {
-            return Err(error)
-                .with_context(|| format!("读取部署回执目录失败：{}", directory.display()));
-        }
-    };
-    if !metadata.is_dir() || metadata.file_type().is_symlink() {
-        anyhow::bail!("部署回执路径必须是非符号链接目录：{}", directory.display());
+/// 相对回执目录的描述符读取；文件必须是当前账号所有、单链接、无 group/other 权限的普通文件。
+fn read_file(directory: &PrivateDirectory, name: &str) -> anyhow::Result<DeploymentReceipt> {
+    let path = directory.path.join(name);
+    let bytes =
+        directory.read(name).with_context(|| format!("读取部署回执失败：{}", path.display()))?;
+    if bytes.len() as u64 > MAX_RECEIPT_BYTES {
+        anyhow::bail!("部署回执超过 {MAX_RECEIPT_BYTES} 字节上限：{}", path.display());
     }
-    Ok(true)
-}
-
-fn read_file(directory: &Path, name: &str) -> anyhow::Result<DeploymentReceipt> {
-    let path = directory.join(name);
-    let bytes = files::read_bounded(&path, MAX_RECEIPT_BYTES)
-        .with_context(|| format!("读取部署回执失败：{}", path.display()))?;
     let receipt: DeploymentReceipt = serde_json::from_slice(&bytes)
         .with_context(|| format!("解析部署回执失败：{}", path.display()))?;
     receipt.validate().with_context(|| format!("部署回执无效：{}", path.display()))?;
@@ -135,17 +135,18 @@ mod tests {
     use std::{
         fs,
         os::unix::fs::{MetadataExt, PermissionsExt, symlink},
-        path::PathBuf,
+        path::{Path, PathBuf},
         sync::atomic::{AtomicU32, Ordering},
     };
 
     use chrono::{Duration, TimeZone};
     use uuid::Uuid;
 
-    use super::{append, list, read, receipts_dir};
+    use super::{append, list, list_matching, read, receipts_dir};
     use crate::receipt::model::{
         Action, Artifact, DeploymentReceipt, FORMAT, MigrationRecord, Outcome,
     };
+    use crate::support::files::PrivateDirectory;
 
     static COUNTER: AtomicU32 = AtomicU32::new(0);
 
@@ -164,6 +165,11 @@ mod tests {
             fs::set_permissions(&root, fs::Permissions::from_mode(0o700))
                 .expect("设置测试根目录权限");
             Self { root }
+        }
+
+        /// 以测试根目录作为部署状态目录，按生产口径核对后固定。
+        fn state(&self) -> PrivateDirectory {
+            pin(&self.root)
         }
 
         fn receipt(&self, minutes: i64) -> DeploymentReceipt {
@@ -204,60 +210,100 @@ mod tests {
         }
     }
 
+    fn pin(path: &Path) -> PrivateDirectory {
+        PrivateDirectory::open_trusted(path, true).expect("固定状态目录").expect("状态目录存在")
+    }
+
+    /// 显式设定权限，不受测试进程 umask 影响。
+    fn make_directory(path: &Path, mode: u32) {
+        fs::create_dir_all(path).expect("建立目录");
+        fs::set_permissions(path, fs::Permissions::from_mode(mode)).expect("设置权限");
+    }
+
+    /// 绕过 `append` 直接写一条回执文件（0600，与正常发布的权限相同）。
+    fn write_raw_in(state: &Path, name: &str, bytes: &[u8]) {
+        let directory = receipts_dir(state);
+        make_directory(&directory, 0o700);
+        let path = directory.join(name);
+        fs::write(&path, bytes).expect("写入回执");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).expect("设置回执权限");
+    }
+
     fn write_raw(fixture: &Fixture, name: &str, bytes: &[u8]) {
-        let directory = receipts_dir(&fixture.root);
-        fs::create_dir_all(&directory).expect("创建回执目录");
-        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))
-            .expect("设置回执目录权限");
-        fs::write(directory.join(name), bytes).expect("写入回执");
+        write_raw_in(&fixture.root, name, bytes);
     }
 
     #[test]
     fn append_then_read_round_trips_and_is_owner_only() {
         let fixture = Fixture::new();
+        let state = fixture.state();
         let receipt = fixture.receipt(0);
-        let path = append(&fixture.root, &receipt).expect("写入回执");
+        let path = append(&state, &receipt).expect("写入回执");
         let metadata = fs::metadata(&path).expect("读取回执元数据");
         assert_eq!(metadata.mode() & 0o777, 0o600);
-        assert_eq!(read(&fixture.root, receipt.receipt_id).expect("读取回执"), receipt);
-        assert_eq!(list(&fixture.root, 10).expect("列出回执"), vec![receipt]);
+        assert_eq!(read(&state, receipt.receipt_id).expect("读取回执"), receipt);
+        assert_eq!(list(&state, 10).expect("列出回执"), vec![receipt]);
     }
 
     #[test]
     fn append_never_overwrites_an_existing_receipt() {
         let fixture = Fixture::new();
+        let state = fixture.state();
         let receipt = fixture.receipt(0);
-        let _path = append(&fixture.root, &receipt).expect("首次写入");
-        let error = append(&fixture.root, &receipt).expect_err("同 id 必须拒绝覆盖");
+        let _path = append(&state, &receipt).expect("首次写入");
+        let error = append(&state, &receipt).expect_err("同 id 必须拒绝覆盖");
         assert!(format!("{error:#}").contains("发布部署回执失败"));
-        assert_eq!(read(&fixture.root, receipt.receipt_id).expect("原回执仍可读"), receipt);
+        assert_eq!(read(&state, receipt.receipt_id).expect("原回执仍可读"), receipt);
     }
 
     #[test]
     fn list_orders_newest_first_and_honours_limit() {
         let fixture = Fixture::new();
+        let state = fixture.state();
         let old = fixture.receipt(0);
         let new = fixture.receipt(10);
-        append(&fixture.root, &old).expect("写入旧回执");
-        append(&fixture.root, &new).expect("写入新回执");
-        let receipts = list(&fixture.root, 10).expect("列出回执");
+        append(&state, &old).expect("写入旧回执");
+        append(&state, &new).expect("写入新回执");
+        let receipts = list(&state, 10).expect("列出回执");
         assert_eq!(receipts, vec![new, old]);
-        assert_eq!(list(&fixture.root, 1).expect("限制条数").len(), 1);
+        assert_eq!(list(&state, 1).expect("限制条数").len(), 1);
+    }
+
+    /// 过滤先于限量：较新的大量其他回执不会把要找的回执挤出窗口。
+    #[test]
+    fn list_matching_filters_before_the_limit() {
+        let fixture = Fixture::new();
+        let state = fixture.state();
+        let mut wanted = fixture.receipt(0);
+        wanted.action = Action::Start;
+        append(&state, &wanted).expect("写入目标回执");
+        for minutes in 1..=25 {
+            append(&state, &fixture.receipt(minutes)).expect("写入较新的 restart 回执");
+        }
+        assert!(
+            !list(&state, 20).expect("列出回执").contains(&wanted),
+            "按完成时间限量时目标回执会被挤出"
+        );
+        let matched = list_matching(&state, 1, |receipt| receipt.action == Action::Start)
+            .expect("过滤后列出");
+        assert_eq!(matched, vec![wanted]);
     }
 
     #[test]
     fn missing_directory_is_an_empty_list_but_read_fails() {
         let fixture = Fixture::new();
-        assert!(list(&fixture.root, 10).expect("没有回执目录").is_empty());
-        assert!(read(&fixture.root, Uuid::new_v4()).is_err());
+        let state = fixture.state();
+        assert!(list(&state, 10).expect("没有回执目录").is_empty());
+        assert!(read(&state, Uuid::new_v4()).is_err());
     }
 
     #[test]
     fn corrupt_receipts_fail_closed() {
         let fixture = Fixture::new();
+        let state = fixture.state();
         let receipt = fixture.receipt(0);
         write_raw(&fixture, "broken.json", b"not json");
-        assert!(list(&fixture.root, 10).is_err());
+        assert!(list(&state, 10).is_err());
 
         let mut wrong_format = receipt;
         wrong_format.format = "auction-deployment-receipt.v0".to_owned();
@@ -266,12 +312,13 @@ mod tests {
             &format!("{}.json", wrong_format.receipt_id),
             &serde_json::to_vec(&wrong_format).unwrap(),
         );
-        assert!(list(&fixture.root, 10).is_err());
+        assert!(list(&state, 10).is_err());
     }
 
     #[test]
     fn unknown_fields_and_nil_ids_are_rejected() {
         let fixture = Fixture::new();
+        let state = fixture.state();
         let receipt = fixture.receipt(0);
         let mut value = serde_json::to_value(&receipt).unwrap();
         value["extra"] = serde_json::json!(true);
@@ -280,7 +327,7 @@ mod tests {
             &format!("{}.json", receipt.receipt_id),
             &serde_json::to_vec(&value).unwrap(),
         );
-        assert!(list(&fixture.root, 10).is_err());
+        assert!(list(&state, 10).is_err());
 
         let mut value = serde_json::to_value(fixture.receipt(1)).unwrap();
         value["receipt_id"] = serde_json::json!("00000000-0000-0000-0000-000000000000");
@@ -289,22 +336,23 @@ mod tests {
             "00000000-0000-0000-0000-000000000000.json",
             &serde_json::to_vec(&value).unwrap(),
         );
-        assert!(list(&fixture.root, 10).is_err());
+        assert!(list(&state, 10).is_err());
     }
 
     #[test]
     fn filename_and_receipt_id_must_agree() {
         let fixture = Fixture::new();
+        let state = fixture.state();
         let receipt = fixture.receipt(0);
         write_raw(
             &fixture,
             &format!("{}.json", Uuid::new_v4()),
             &serde_json::to_vec(&receipt).unwrap(),
         );
-        let listed = list(&fixture.root, 10).expect("列表按内容标识去重");
+        let listed = list(&state, 10).expect("列表按内容标识去重");
         let receipt_id = receipt.receipt_id;
         assert_eq!(listed, vec![receipt]);
-        assert!(read(&fixture.root, receipt_id).is_err());
+        assert!(read(&state, receipt_id).is_err());
     }
 
     #[test]
@@ -314,46 +362,87 @@ mod tests {
         let bytes = serde_json::to_vec(&receipt).unwrap();
         write_raw(&fixture, &format!("{}.json", receipt.receipt_id), &bytes);
         write_raw(&fixture, &format!("{}.json", Uuid::new_v4()), &bytes);
-        assert!(list(&fixture.root, 10).is_err());
+        assert!(list(&fixture.state(), 10).is_err());
 
         let fixture = Fixture::new();
         let oversized = vec![b' '; (crate::receipt::model::MAX_RECEIPT_BYTES as usize) + 1];
         write_raw(&fixture, "oversized.json", &oversized);
-        assert!(list(&fixture.root, 10).is_err());
+        assert!(list(&fixture.state(), 10).is_err());
     }
 
     #[test]
     fn symlinked_receipts_are_rejected() {
         let fixture = Fixture::new();
+        let state = fixture.state();
         let receipt = fixture.receipt(0);
         let target = fixture.root.join("target.json");
         fs::write(&target, serde_json::to_vec(&receipt).unwrap()).expect("写入目标");
         let directory = receipts_dir(&fixture.root);
-        fs::create_dir_all(&directory).expect("创建回执目录");
-        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).expect("设置目录权限");
+        make_directory(&directory, 0o700);
         symlink(&target, directory.join(format!("{}.json", receipt.receipt_id)))
             .expect("创建符号链接");
-        assert!(list(&fixture.root, 10).is_err());
-        assert!(read(&fixture.root, receipt.receipt_id).is_err());
+        assert!(list(&state, 10).is_err());
+        assert!(read(&state, receipt.receipt_id).is_err());
     }
 
-    /// 回执目录本身必须 owner-only；祖先目录的属主与权限不在核对范围（运维布局里状态目录的
-    /// 祖先可以归服务账号所有），与改用共享私有目录实现之前的口径一致。
+    /// 状态目录的祖先允许 group 写入时不能固定为状态目录；回执目录或回执文件对 group 开放时
+    /// 失败关闭（旧实现只看回执目录本身，祖先可写与回执文件权限都不核对）。
     #[test]
-    fn append_checks_the_receipts_directory_but_not_its_ancestors() {
+    fn untrusted_ancestors_and_non_private_entries_are_rejected() {
         let fixture = Fixture::new();
-        let state = fixture.root.join("shared-parent").join("state");
-        fs::create_dir_all(&state).expect("创建状态目录");
-        fs::set_permissions(fixture.root.join("shared-parent"), fs::Permissions::from_mode(0o770))
-            .expect("设置权限");
-        let receipt = fixture.receipt(0);
-        append(&state, &receipt).expect("祖先 group 可写不影响追加");
-        assert_eq!(read(&state, receipt.receipt_id).expect("读回"), receipt);
+        let shared = fixture.root.join("shared-parent");
+        make_directory(&shared, 0o770);
+        let error = PrivateDirectory::open_trusted(&shared.join("state"), true)
+            .err()
+            .expect("祖先 group 可写必须拒绝");
+        assert!(format!("{error:#}").contains("祖先"), "{error:#}");
+        assert!(!shared.join("state").exists(), "拒绝前不创建状态目录");
 
-        fs::set_permissions(receipts_dir(&state), fs::Permissions::from_mode(0o750))
+        let state = fixture.state();
+        let receipt = fixture.receipt(0);
+        append(&state, &receipt).expect("写入回执");
+        let path = receipts_dir(&fixture.root).join(format!("{}.json", receipt.receipt_id));
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).expect("放宽回执文件");
+        assert!(list(&state, 10).is_err(), "回执文件必须 owner-only");
+        assert!(read(&state, receipt.receipt_id).is_err());
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).expect("恢复回执文件");
+
+        fs::set_permissions(receipts_dir(&fixture.root), fs::Permissions::from_mode(0o750))
             .expect("放宽回执目录");
         let error = append(&state, &fixture.receipt(1)).expect_err("回执目录必须 owner-only");
         assert!(format!("{error:#}").contains("准备部署回执目录失败"), "{error:#}");
+    }
+
+    /// 持锁期间祖先被改名、原路径换上另一棵带伪造回执的树：读写仍落在固定的状态目录，既不读到
+    /// 新树里的回执，也不把新回执写进新树。
+    #[test]
+    fn receipts_stay_with_the_pinned_state_directory() {
+        let fixture = Fixture::new();
+        let parent = fixture.root.join("lib");
+        make_directory(&parent, 0o755);
+        let state_path = parent.join("state");
+        let state = pin(&state_path);
+        let kept = fixture.receipt(0);
+        append(&state, &kept).expect("写入回执");
+
+        let moved = fixture.root.join("lib.moved");
+        fs::rename(&parent, &moved).expect("改名祖先");
+        make_directory(&state_path, 0o700);
+        let planted = fixture.receipt(5);
+        write_raw_in(
+            &state_path,
+            &format!("{}.json", planted.receipt_id),
+            &serde_json::to_vec(&planted).unwrap(),
+        );
+
+        assert_eq!(list(&state, 10).expect("列出回执"), vec![kept]);
+        assert!(read(&state, planted.receipt_id).is_err(), "不读另一棵树里的回执");
+        let later = fixture.receipt(10);
+        append(&state, &later).expect("写入回执");
+        let name = format!("{}.json", later.receipt_id);
+        assert!(receipts_dir(&moved.join("state")).join(&name).exists());
+        assert!(!receipts_dir(&state_path).join(&name).exists(), "不写进另一棵树");
+        assert!(state.verify_path().is_err(), "路径已不指向固定的状态目录");
     }
 
     #[test]
@@ -361,7 +450,7 @@ mod tests {
         let fixture = Fixture::new();
         let mut receipt = fixture.receipt(0);
         receipt.actor = "bad\nactor".to_owned();
-        assert!(append(&fixture.root, &receipt).is_err());
+        assert!(append(&fixture.state(), &receipt).is_err());
         assert!(!receipts_dir(&fixture.root).exists());
     }
 }

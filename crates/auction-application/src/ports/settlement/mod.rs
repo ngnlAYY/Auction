@@ -8,6 +8,7 @@ pub(crate) mod fulfillment;
 pub(crate) mod funding;
 pub(crate) mod internal;
 pub(crate) mod report;
+pub(crate) mod returns;
 pub(crate) mod scheduler;
 
 pub use claim_validation::{
@@ -42,4 +43,5 @@ pub use report::{
     SettlementAdjustment, SettlementAuctionSnapshot, SettlementLotReport, SettlementReport,
     SettlementReportReader, SettlementSummary,
 };
+pub use returns::*;
 pub use scheduler::{SettlementWorkClaim, SettlementWorkStore};

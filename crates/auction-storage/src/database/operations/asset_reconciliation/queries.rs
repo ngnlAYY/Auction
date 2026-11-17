@@ -13,25 +13,51 @@ macro_rules! equipment_obligation_kinds {
 /// 领取（含已寄出待付款的 COD），还是寄出后因领取证据不符等转为 `manual_reconcile`/`failed`，
 /// 义务分支与投稿分支都不再把它算作应持，由 `CUSTODY_IN_TRANSIT` 单列为在途或在途待核对。
 /// 资产位置只看这条持久寄出事实，不随可变的执行态重新计入应持。
+///
+/// 成交撤销后装备的去向由恢复记录决定：被恢复收口精确终结的原义务（见
+/// `recovery_closed_fulfillment_sql!`）不再计入，改由恢复分支按去向计入——已收回待重列
+/// （`recovery_relist_pending`）与已重列到尚未预展的草稿场次（`relisted_draft`）；重列场次进入
+/// 预展后由预览分支计入，退回卖家由新的 `withdrawn_return` 义务计入。同一外部装备只算一次。
+///
+/// 结算退件：原派发的装备经精确领回证明回到 Bot 后（`settlement_return_takes`），代管中的原义务
+/// 重新计入应持（原因 `custody_<义务种类>`）；授权补寄后履约换成新派发，按普通未寄出义务计入，
+/// 新派发寄出后才离开应持。
 macro_rules! expected_equipment_cte {
     ($preview_world:literal) => {
         concat!(
             r#"
 WITH expected AS (
     SELECT e.external_equipment_id,
-           'obligation_' || o.obligation_kind AS reason
+           CASE WHEN taken.return_mail_id IS NOT NULL THEN 'custody_' ELSE 'obligation_' END
+               || o.obligation_kind AS reason
     FROM public.settlement_obligations o
     JOIN public.equipment e ON e.id = o.equipment_id
     LEFT JOIN public.settlement_obligation_fulfillments f ON f.obligation_id = o.id
     LEFT JOIN public.deliveries d ON d.id = f.delivery_id
+    LEFT JOIN public.settlement_return_takes taken ON taken.original_delivery_id = d.id
     WHERE e.world_id = $1
       AND o.obligation_kind IN ("#,
             equipment_obligation_kinds!(),
             r#")
       AND COALESCE(f.execution_state, 'pending') <> 'satisfied'
-      AND NOT COALESCE("#,
+      AND (taken.return_mail_id IS NOT NULL OR NOT COALESCE("#,
             crate::database::settlement::fulfillment::sent_unsatisfied_sql!("f", "d"),
+            r#", false))
+      AND NOT COALESCE("#,
+            crate::database::settlement::fulfillment::recovery_closed_fulfillment_sql!("o", "f"),
             r#", false)
+    UNION ALL
+    SELECT e.external_equipment_id,
+           CASE WHEN r.relisted_lot_id IS NULL THEN 'recovery_' || r.stage
+                ELSE 'relisted_' || relisted_auction.status END AS reason
+    FROM public.settlement_recoveries r
+    JOIN public.equipment e ON e.id = r.equipment_id
+    LEFT JOIN public.lots relisted ON relisted.id = r.relisted_lot_id
+    LEFT JOIN public.auctions relisted_auction ON relisted_auction.id = relisted.auction_id
+    WHERE e.world_id = $1
+      AND r.resolution IN ('reclaimed', 'cancelled', 'equipment_recovered')
+      AND ((r.relisted_lot_id IS NULL AND r.stage = 'relist_pending')
+           OR (relisted.status = 'pending' AND relisted_auction.status = 'draft'))
     UNION ALL
     SELECT e.external_equipment_id,
            'delivery_' || d.status || '_equipment' AS reason
@@ -160,11 +186,15 @@ ORDER BY external_equipment_id LIMIT $3
 );
 
 /// 在途装备按类别与原因计数：已成功寄出、义务尚未满足的装备义务，排除仍因其他来源应持的
-/// 装备（仍按应持核对）与本轮已在 Armory 观察到的装备（不在途）。履约仍在等待领取的是在途
+/// 装备（仍按应持核对）、本轮已在 Armory 观察到的装备（不在途），以及原投递当前 fence 上已有
+/// 恢复来源权威处置的义务（装备已由恢复收回，按恢复去向计入应持，见
+/// `recovery_disposed_delivery_sql!`）。履约仍在等待领取的是在途
 /// （`review = false`，原因 `obligation_<义务种类>`）；寄出后转 `manual_reconcile`/`failed` 的是
 /// 在途待核对（`review = true`，原因 `obligation_<义务种类>_<履约状态>`）。一件装备只计一次：
 /// 同时有两类义务时按待核对计（需要人工解释），同一类别内取最小原因；按装备所属世界归属，与
-/// 计数口径一致。
+/// 计数口径一致。结算退件的位置与在途互斥：已领回的原派发不再在途（改按应持或新派发计）；
+/// 已绑定退件但尚未领回的，资产在 Bot 收件箱，原因记 `returned_in_inbox_<义务种类>`，Take 结果
+/// 未知的记 `location_unknown_<义务种类>`，都按待核对计。
 pub(super) const CUSTODY_IN_TRANSIT: &str = concat!(
     expected_equipment_cte!("e.world_id"),
     r#", expected_ids AS (
@@ -176,19 +206,32 @@ pub(super) const CUSTODY_IN_TRANSIT: &str = concat!(
            NOT "#,
     crate::database::settlement::fulfillment::sent_awaiting_collection_sql!("f", "d"),
     r#" AS review,
-           'obligation_' || o.obligation_kind || CASE WHEN "#,
+           CASE
+               WHEN returned.status IS NOT NULL THEN
+                   CASE WHEN returned.status = 'take_unknown' THEN 'location_unknown_'
+                        ELSE 'returned_in_inbox_' END || o.obligation_kind
+               ELSE 'obligation_' || o.obligation_kind || CASE WHEN "#,
     crate::database::settlement::fulfillment::sent_awaiting_collection_sql!("f", "d"),
-    r#" THEN '' ELSE '_' || f.execution_state END AS reason
+    r#" THEN '' ELSE '_' || f.execution_state END
+           END AS reason
     FROM public.settlement_obligations o
     JOIN public.equipment e ON e.id = o.equipment_id
     JOIN public.settlement_obligation_fulfillments f ON f.obligation_id = o.id
     JOIN public.deliveries d ON d.id = f.delivery_id
+    LEFT JOIN public.settlement_return_cases returned ON returned.delivery_id = d.id
     WHERE e.world_id = $1
+      AND NOT EXISTS (
+          SELECT 1 FROM public.settlement_return_takes taken
+          WHERE taken.original_delivery_id = d.id
+      )
       AND o.obligation_kind IN ("#,
     equipment_obligation_kinds!(),
     r#")
       AND "#,
     crate::database::settlement::fulfillment::sent_unsatisfied_sql!("f", "d"),
+    r#"
+      AND NOT "#,
+    crate::database::settlement::fulfillment::recovery_disposed_delivery_sql!("o", "d"),
     r#"
 ), in_transit_ids AS (
     SELECT DISTINCT ON (t.external_equipment_id) t.external_equipment_id, t.review, t.reason
@@ -217,7 +260,9 @@ ORDER BY review, reason
 /// 判定为已支出的现金才从应付移出，计为在途或在途待核对。现金义务按履约记录的
 /// `dispatch_world` 归属实际支付世界：异世界场次的卖方货款与买方退款固定由 main 派发，
 /// 必须计入 main 的应付合计。`business_state = 'contingent'` 的买方
-/// 退款只有 recovery 显式激活为 `ready` 后才可能执行，未激活不计入应付负债。
+/// 退款只有 recovery 显式激活为 `ready` 后才可能执行，未激活不计入应付负债。成交撤销后被恢复
+/// 收口精确终结的卖方货款（见 `recovery_closed_fulfillment_sql!`）不再是负债，从应付与在途中
+/// 移出；买方退款从不由这些收口终结，照常计入。
 ///
 /// 在途只认持久事实：投递已成功寄出、资金分配与同一投递和义务绑定且已 `spent`，并且寄出时刻
 /// （投递完成的持久时刻 `deliveries.completed_at`）不晚于余额观察时刻（`balance_observed_at`）。
@@ -226,6 +271,11 @@ ORDER BY review, reason
 /// 时刻缺失（比较为 NULL）时，一律按应付计（保守）。寄出后履约仍在等待领取的是在途；已转
 /// `manual_reconcile`/`failed` 的同样按寄出事实计在途、不重新计入应付，单列为在途待核对，
 /// 原因为 `obligation_<义务种类>_<履约状态>`。
+///
+/// 结算退件的现金位置互斥且只计一次：已绑定但尚未领回的退件，Credits 在 Bot 收件箱而不在余额
+/// 中，仍按在途待核对计，原因改记 `returned_in_inbox_<义务种类>`（Take 结果未知记
+/// `location_unknown_<义务种类>`）；领回后代管的原义务（案件 `held` 且有领回证明）计入代管负债，
+/// 不再计入待付；领回后授权补寄的，履约换成新派发，按普通待付计，新派发寄出后才转在途。
 macro_rules! solvency_cash_cte {
     () => {
         concat!(
@@ -245,22 +295,38 @@ WITH health AS (
            COALESCE("#,
             crate::database::settlement::fulfillment::sent_awaiting_collection_sql!("f", "d"),
             r#", false) AS awaiting_collection,
-           'obligation_' || o.obligation_kind || '_' || COALESCE(f.execution_state, 'pending')
-               AS review_reason
+           CASE
+               WHEN returned.status IS NOT NULL AND NOT returned.taken THEN
+                   CASE WHEN returned.status = 'take_unknown' THEN 'location_unknown_'
+                        ELSE 'returned_in_inbox_' END || o.obligation_kind
+               ELSE 'obligation_' || o.obligation_kind || '_'
+                   || COALESCE(f.execution_state, 'pending')
+           END AS review_reason,
+           COALESCE(returned.status = 'held' AND returned.taken, false) AS custody
     FROM public.settlement_obligations o
     LEFT JOIN public.settlement_obligation_fulfillments f ON f.obligation_id = o.id
     LEFT JOIN public.deliveries d ON d.id = f.delivery_id
     LEFT JOIN public.settlement_funding_allocations allocation
         ON allocation.delivery_id = f.delivery_id AND allocation.obligation_id = o.id
+    LEFT JOIN LATERAL (
+        SELECT c.status,
+               EXISTS (SELECT 1 FROM public.settlement_return_takes t
+                       WHERE t.return_mail_id = c.return_mail_id) AS taken
+        FROM public.settlement_return_cases c
+        WHERE c.delivery_id = f.delivery_id
+    ) AS returned ON true
     WHERE o.obligation_kind IN ('seller_payout', 'buyer_refund')
       AND COALESCE(f.dispatch_world, o.world_id) = $1
       AND NOT (o.obligation_kind = 'buyer_refund' AND o.business_state = 'contingent')
       AND COALESCE(f.execution_state, 'pending') <> 'satisfied'
+      AND NOT COALESCE("#,
+            crate::database::settlement::fulfillment::recovery_closed_fulfillment_sql!("o", "f"),
+            r#", false)
 ), classified AS (
-    SELECT obligation_kind, amount, review_reason,
-           NOT spent_before_balance AS pending,
+    SELECT obligation_kind, amount, review_reason, custody,
+           NOT spent_before_balance AND NOT custody AS pending,
            spent_before_balance AND awaiting_collection AS in_transit,
-           spent_before_balance AND NOT awaiting_collection AS in_transit_review
+           spent_before_balance AND NOT awaiting_collection AND NOT custody AS in_transit_review
     FROM outstanding
 )"#
         )
@@ -313,6 +379,18 @@ SELECT
         AS in_transit_review_counts,
     (SELECT COALESCE(array_agg(credits ORDER BY reason), '{}') FROM review)
         AS in_transit_review_credits,
+    (SELECT count(*) FROM classified WHERE custody) AS custody_count,
+    (SELECT COALESCE(sum(amount), 0)::bigint FROM classified WHERE custody) AS custody_credits,
+    EXISTS (
+        SELECT 1
+        FROM public.settlement_return_takes t
+        JOIN public.settlement_obligations take_obligation ON take_obligation.id = t.obligation_id
+        LEFT JOIN public.settlement_obligation_fulfillments take_fulfillment
+            ON take_fulfillment.obligation_id = t.obligation_id
+        WHERE t.credits > 0
+          AND COALESCE(take_fulfillment.dispatch_world, take_obligation.world_id) = $1
+          AND t.proven_at > COALESCE(health.balance_observed_at, '-infinity'::timestamptz)
+    ) AS balance_before_take,
     (SELECT count(*) FROM public.deliveries d
         WHERE d.status IN ('prepared', 'pending', 'claimed')
           AND d.payload_operation = 'send'

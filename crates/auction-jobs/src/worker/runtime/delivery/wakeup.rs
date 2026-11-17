@@ -32,7 +32,7 @@ pub(in crate::worker::runtime) async fn run(
         match subscription {
             Ok(mut subscription) => {
                 if reconnect.connected() {
-                    tracing::info!("delivery wakeup subscription restored");
+                    tracing::info!("投递唤醒订阅已恢复");
                 }
                 let connected_at = tokio::time::Instant::now();
                 // 订阅已生效后扫描一次，弥补初次启动/断线窗口中的通知丢失。
@@ -67,7 +67,7 @@ pub(in crate::worker::runtime) async fn run(
         }
         let (first_disconnect, delay) = reconnect.disconnected(stable);
         if first_disconnect {
-            tracing::warn!("delivery wakeup disconnected; polling remains active");
+            tracing::warn!("投递唤醒订阅已断开，轮询照常进行");
         }
         tokio::select! {
             biased;

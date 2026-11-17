@@ -125,7 +125,6 @@ pagination-size-option = { $count } 条/页
 pagination-jump = 前往
 pagination-custom = 自定义
 pagination-apply = 应用
-pagination-positive-integer = 请输入正整数。
 pagination-size-limit = 请输入 1–{ $maximum } 的整数。
 catalog-empty-all = 本届拍卖暂无拍品。
 catalog-empty-category = 本届拍卖暂无该类型拍品。

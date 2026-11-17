@@ -360,7 +360,8 @@ async fn mark_satisfied(pool: &PgPool, obligation_id: Uuid) {
     .expect("履约改为已满足");
 }
 
-/// 写入一封已接受的 COD 退件：附件是原装备，没有 Credits 与 COD。
+/// 写入一封已接受的系统 COD 退件：附件是原装备，没有 Credits 与 COD。入站展示快照记录系统
+/// 发件人与 `[RTS] ` + canonical 主题，恢复流程据此证明来源。
 async fn insert_return_mail(
     pool: &PgPool,
     payment_obligation_id: Uuid,
@@ -370,9 +371,11 @@ async fn insert_return_mail(
     sqlx::query(
         "INSERT INTO public.inbound_mail
             (id, mailbox_key, external_mail_id, world_id, mail_kind, content_digest,
-             received_at, status, decision_code, decision_metadata, processed_at)
+             received_at, status, decision_code, decision_metadata, processed_at,
+             sender, subject)
          VALUES ($1, 'fulfillment-returns', '880001', 'main', 'delivery', $2, $3, 'accepted',
-                 'settlement_recovery_returned', $4, $3 + interval '1 minute')",
+                 'settlement_recovery_returned', $4, $3 + interval '1 minute',
+                 'MoogleMail', $5)",
     )
     .bind(stable_id(SEED, "return-mail"))
     .bind([6_u8; 32].as_slice())
@@ -383,6 +386,7 @@ async fn insert_return_mail(
         "cod": 0,
         "attachment_ids": [external_equipment_id],
     }))
+    .bind(format!("[RTS] Auction equipment delivery [{payment_obligation_id}]"))
     .execute(pool)
     .await
     .expect("写入 COD 退件");

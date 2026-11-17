@@ -11,39 +11,44 @@ use super::{UNDISPOSED, age_seconds};
 use crate::database::storage_error;
 use crate::database::storage_error_from;
 
+/// 投递水位只统计投递台自己负责的投递：运维告警投递与结算退件 Take 投递各有 owner。
+const DELIVERY_OWNED: &str = "origin_kind NOT IN ('operations_alert', 'settlement_return_action')";
+
 pub(super) async fn delivery_snapshot(
     pool: &crate::database::TrackedPool<sqlx::Postgres>,
     now: DateTime<Utc>,
 ) -> Result<OperationsAlertDeliverySnapshot, ApplicationError> {
     // 仅完整匹配追加修复事实及原投递身份的 failed 才已解决；不能仅凭 metadata 消除告警。
     // 替换内容只有已审核的编译期 SQL 常量，不插入任何运行时业务值；仅缓存 SQL 文本，不缓存水位。
+    // 结算退件 Take 投递（`settlement_return_action`）归所属案件：积压、失败与人工对账都由退件
+    // 告警（`settlement_return_pending`/`settlement_return_quarantined`）承担，这里不重复计数。
     static QUERY: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
         r#"SELECT
-            COUNT(*) FILTER (WHERE origin_kind <> 'operations_alert'
+            COUNT(*) FILTER (WHERE /* owned */
                 AND status IN ('prepared', 'pending', 'claimed', 'sending')) AS pending,
-            COUNT(*) FILTER (WHERE origin_kind <> 'operations_alert'
+            COUNT(*) FILTER (WHERE /* owned */
                 AND status IN ('claimed', 'sending')) AS claimed,
-            COUNT(*) FILTER (WHERE origin_kind <> 'operations_alert'
+            COUNT(*) FILTER (WHERE /* owned */
                 AND status = 'failed'
                 -- 已处置终态不再计入，各自以不可变处置事实为证（历史自寄、Admin 判失败、
                 -- 装备损失、预检退役、操作者确认）。结算类人工判失败仍由履约水位的 failed 暴露。
                 AND /* undisposed */
                 ) AS failed,
-            COUNT(*) FILTER (WHERE origin_kind <> 'operations_alert'
+            COUNT(*) FILTER (WHERE /* owned */
                 AND status = 'manual_reconcile') AS manual_reconcile,
-            COUNT(*) FILTER (WHERE origin_kind <> 'operations_alert'
+            COUNT(*) FILTER (WHERE /* owned */
                 AND status = 'manual_reconcile'
                 AND failure_code = 'recipient_not_found'
                 AND result_metadata @>
                     '{"reason_code":"recipient_not_found","take_required":true}'::jsonb)
                 AS returned_mail_manual_reconcile,
-            MIN(created_at) FILTER (WHERE origin_kind <> 'operations_alert'
+            MIN(created_at) FILTER (WHERE /* owned */
                 AND status IN ('prepared', 'pending', 'claimed', 'sending')) AS oldest_pending,
-            MIN(claimed_at) FILTER (WHERE origin_kind <> 'operations_alert'
+            MIN(claimed_at) FILTER (WHERE /* owned */
                 AND status IN ('claimed', 'sending')) AS oldest_claimed,
-            MIN(created_at) FILTER (WHERE origin_kind <> 'operations_alert'
+            MIN(created_at) FILTER (WHERE /* owned */
                 AND status = 'manual_reconcile') AS oldest_manual,
-            MIN(created_at) FILTER (WHERE origin_kind <> 'operations_alert'
+            MIN(created_at) FILTER (WHERE /* owned */
                 AND status = 'manual_reconcile'
                 AND failure_code = 'recipient_not_found'
                 AND result_metadata @>
@@ -52,6 +57,7 @@ pub(super) async fn delivery_snapshot(
             MAX(updated_at) FILTER (WHERE origin_kind <> 'operations_alert') AS last_update
          FROM public.deliveries d"#
             .replace("/* undisposed */", UNDISPOSED)
+            .replace("/* owned */", DELIVERY_OWNED)
     });
     let row = sqlx::query(sqlx::AssertSqlSafe(QUERY.as_str()))
         .fetch_one(pool)

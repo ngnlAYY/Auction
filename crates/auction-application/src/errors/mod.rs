@@ -24,7 +24,9 @@ use crate::ports::mail::MailProcessingError;
 use crate::ports::operations::OperationsAlertError;
 use crate::ports::realtime::RealtimeAdminError;
 use crate::ports::recovery::RecoveryCommandError;
-use crate::ports::settlement::{SettlementTransactionError, SettlementTransactionFailure};
+use crate::ports::settlement::{
+    SettlementReturnError, SettlementTransactionError, SettlementTransactionFailure,
+};
 
 pub use sessions::SessionError;
 
@@ -161,6 +163,9 @@ pub enum ApplicationError {
 
     #[error(transparent)]
     DeliveryDisposition(#[from] DeliveryDispositionCommandError),
+
+    #[error(transparent)]
+    SettlementReturn(#[from] SettlementReturnError),
 }
 
 impl ApplicationError {

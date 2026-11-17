@@ -5,8 +5,7 @@ use serde_json::json;
 use uuid::Uuid;
 
 use super::super::commands::{
-    decision, extract_login_key, has_user_assets, settlement_return_obligation_id,
-    stable_command_id, system_returned_settlement_obligation_id, user_request_hash,
+    decision, extract_login_key, has_user_assets, stable_command_id, user_request_hash,
 };
 use super::MailProcessorService;
 use super::delivery::{REGISTER_REPLY_TEMPLATES, REKEY_REPLY_TEMPLATES};
@@ -17,6 +16,9 @@ use crate::ports::mail::{
     MailNotificationTemplate, MailProcessingDecision, MailProcessingError, MailUserCommandKind,
     MailUserPort, MailUserRebindCommand, MailUserRegisterCommand, MailUserRekeyCommand,
     MailUserResultCode,
+};
+use crate::ports::settlement::{
+    parse_returned_settlement_body, system_returned_settlement_obligation_id,
 };
 
 impl<E, A, D, U, C> MailProcessorService<E, A, D, U, C>
@@ -57,41 +59,44 @@ where
             "register" => self.process_register(message, now).await,
             "rebind" => self.process_rebind(message, now).await,
             "rekey" if self.rekey_enabled => self.process_rekey(message, now).await,
-            // 无前缀的 canonical 结算主题沿用原兼容路径；买方退回的结算邮件由系统发件人
-            // `MoogleMail` 以 `[RTS] ` + 原主题送回，只在发件人恰为系统时识别。其余 `[RTS]`
-            // 邮件（含玩家自拟的同名主题）仍按未知邮件处理。
-            subject => match settlement_return_obligation_id(subject)
-                .or_else(|| system_returned_settlement_obligation_id(&message.sender, subject))
-            {
+            // 被拒收或过期的结算邮件只由系统发件人 `MoogleMail` 以 `[RTS] ` + 原 canonical
+            // 主题退回。义务 ID 可由公开 ID 推出，不能证明来源：无前缀的结算主题与玩家自拟的
+            // 同名主题都按未知邮件处理（不变量 6）。
+            subject => match system_returned_settlement_obligation_id(&message.sender, subject) {
                 Some(obligation_id) => self.process_settlement_return(message, obligation_id),
                 None => self.process_unknown(message).await,
             },
         }
     }
 
-    /// 将结算退回邮件转换为严格的 recovery 证据。
-    /// 退回邮件本身不再创建第二个 delivery 动作；它只把 obligation、资产和金额事实写入
-    /// `inbound_mail`。后续 recovery Worker 会在 Serializable 事务中重新比对这份证据，并决定
-    /// 是否创建领取/取消 action，避免在邮件解析器里直接改变 recovery 状态。
+    /// 将系统退回的结算邮件转换为严格的退件证据。
+    /// 退回邮件本身不创建任何 delivery 动作（不领取、不退回、不回信）；它只把 obligation、资产
+    /// 和金额事实写入 `inbound_mail`，由 recovery Worker 在 Serializable 事务中复核来源并与义务
+    /// 比对：恢复流程决定收回动作，其余结算退件只留证并转人工对账。来源已认证的退件即使资产
+    /// 异常（例如不可领取）也照样记为证据，交给消费方隔离，不以错误让收件游标停在这封邮件上。
+    /// 正文只记录系统后缀写明的原收件人、原正文摘要与补寄派发引用原文，用于把退件绑定到具体
+    /// 派发；正文本身不进入证据。系统后缀不完整时不记录这三项，补寄退件随后按无法证明隔离。
     fn process_settlement_return(
         &self,
         message: MailMessage,
         obligation_id: Uuid,
     ) -> Result<MailProcessingDecision, ApplicationError> {
-        if !message.claimable {
-            return Err(MailProcessingError::UnsafeDisposition.into());
+        let mut evidence = json!({
+            "obligation_id": obligation_id.to_string(),
+            "credits": message.credits,
+            "cod": message.cod,
+            "attachment_ids": message.sorted_attachment_ids(),
+        });
+        if let Some(body) = parse_returned_settlement_body(&message.body) {
+            evidence["returned_from"] = json!(body.returned_from);
+            evidence["body_digest"] = json!(
+                body.body_digest.iter().map(|byte| format!("{byte:02x}")).collect::<String>()
+            );
+            if let Some(reference) = body.dispatch_reference {
+                evidence["dispatch_reference"] = json!(reference);
+            }
         }
-        decision(
-            "delivery",
-            "accepted",
-            "settlement_recovery_returned",
-            json!({
-                "obligation_id": obligation_id.to_string(),
-                "credits": message.credits,
-                "cod": message.cod,
-                "attachment_ids": message.sorted_attachment_ids(),
-            }),
-        )
+        decision("delivery", "accepted", "settlement_recovery_returned", evidence)
     }
 
     async fn process_register(

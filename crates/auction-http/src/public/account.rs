@@ -20,9 +20,15 @@ use uuid::Uuid;
 use crate::diagnostics;
 use crate::errors::{api_error, not_found_error, query_rejection};
 use crate::mapping::public_timestamp;
-use crate::query::{page_offset, parse_positive_i64, parse_public_uuid, parse_query};
+use crate::query::{
+    page_offset, parse_positive_i64, parse_public_page_size, parse_public_uuid, parse_query,
+};
 use crate::session::{authenticated_public_identity, check_public_expected_user, no_store_headers};
 use crate::state::PublicApiState;
+
+// 账户读取的应用端口另有自己的页长上限；它必须与 Public 统一上限一致，否则 HTTP 放行的页长
+// 会在端口校验处变成另一种拒绝。
+const _: () = assert!(MAX_PUBLIC_ACCOUNT_PAGE_SIZE == auction_contracts::MAX_PUBLIC_PAGE_SIZE);
 
 /// 读取当前用户自己的普通竞价和代理历史，保留旧接口的独立分页字段。
 pub(crate) async fn list_my_bids(
@@ -45,14 +51,11 @@ pub(crate) async fn list_my_bids(
     if independent && query.contains_key("page") {
         return query_rejection().into_response();
     }
-    let page_size = match parse_positive_i64(
-        query.get("page_size"),
-        DEFAULT_PUBLIC_ACCOUNT_PAGE_SIZE,
-        Some(MAX_PUBLIC_ACCOUNT_PAGE_SIZE),
-    ) {
-        Ok(page_size) => page_size,
-        Err(()) => return query_rejection().into_response(),
-    };
+    let page_size =
+        match parse_public_page_size(query.get("page_size"), DEFAULT_PUBLIC_ACCOUNT_PAGE_SIZE) {
+            Ok(page_size) => page_size,
+            Err(()) => return query_rejection().into_response(),
+        };
     let bid_page =
         match parse_positive_i64(query.get(if independent { "bid_page" } else { "page" }), 1, None)
         {

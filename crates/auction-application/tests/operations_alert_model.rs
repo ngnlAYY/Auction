@@ -37,7 +37,8 @@ fn canonical_identity(kind: OperationsAlertKind) -> (OperationsAlertSource, &'st
         ProxyExpiryOverdue, QueueLatency, ReconciliationStale, RecoveryFailed,
         RecoveryManualReconcile, RecoveryPaymentMailUnsent, RecoveryPaymentOverdue,
         RecoveryRelistPending, RestoreDrillOverdue, SeasonObligationsPending, ServiceDegraded,
-        ServiceMissing, SolvencyShortfall, SourceUnavailable, WalUploadStalled,
+        ServiceMissing, SettlementReturnPending, SettlementReturnQuarantined, SolvencyShortfall,
+        SourceUnavailable, WalUploadStalled,
     };
     use OperationsAlertSource::{
         Backup, Credential, Delivery, Forum, Fulfillment, Lifecycle, Mail, Notification, Process,
@@ -53,7 +54,9 @@ fn canonical_identity(kind: OperationsAlertKind) -> (OperationsAlertSource, &'st
         FulfillmentBacklog
         | FulfillmentFailed
         | FulfillmentManualReconcile
-        | FulfillmentCollectionOverdue => (Fulfillment, "auction"),
+        | FulfillmentCollectionOverdue
+        | SettlementReturnPending
+        | SettlementReturnQuarantined => (Fulfillment, "auction"),
         RecoveryPaymentOverdue
         | RecoveryPaymentMailUnsent
         | RecoveryRelistPending

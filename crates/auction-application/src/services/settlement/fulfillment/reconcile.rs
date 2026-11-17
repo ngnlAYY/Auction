@@ -542,10 +542,12 @@ mod tests {
             settlement_line: None,
             settlement_mode: None,
             payment_deadline_at: None,
+            initial_payment_deadline_at: None,
             submission_id: None,
             submission_source_kind: None,
             submission_external_mail_id: None,
             prerequisite_id: Some(SettlementId::from_uuid(Uuid::from_u128(0x1000))),
+            dispatch_no: 1,
             delivery_id: Some(stable_delivery_id(obligation_id)),
             prepare_command_id: Some(stable_prepare_command_id(obligation_id)),
             prepare_request_hash: None,
@@ -700,6 +702,8 @@ mod tests {
         claim.amount = 1_000;
         claim.prerequisite_id = None;
         claim.payment_deadline_at = Some(payment_deadline_at);
+        // 首寄未重寄：正文期限 D0 与当前期限相同。
+        claim.initial_payment_deadline_at = Some(payment_deadline_at);
         if kind == SettlementObligationKind::WinnerPaymentCarrierCod {
             claim.carrier_credit = 1;
         } else if let Some(snapshot) = claim.delivery_snapshot.as_mut() {

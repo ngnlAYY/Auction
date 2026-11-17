@@ -170,10 +170,14 @@ pub struct SentLot {
     pub equipment_id: Uuid,
 }
 
+/// 原义务装备行的投影；`id` 与义务的 `equipment_id` 绑定，`name` 是货款正文写明装备名时的
+/// 唯一期望来源。
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct SentEquipment {
+    pub id: Uuid,
     pub world_id: String,
     pub external_equipment_id: String,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -516,6 +520,10 @@ impl SentAdmissionSnapshot {
         };
         match obligation.obligation_kind.as_str() {
             "seller_payout" => {
+                // 货款正文后来写明装备名：带名称的载荷，期望值只取该义务对应装备行的名称，
+                // 绝不复制待验证载荷里的名称；不带名称的是加入前的旧形状（不变量 6）。
+                let item_name =
+                    payload.variables.item_name.as_ref().map(|_| equipment.name.clone());
                 expected.credits > 0
                     && expected.cod == 0
                     && expected.equipment_ids.is_empty()
@@ -525,6 +533,7 @@ impl SentAdmissionSnapshot {
                     && obligation.recipient_game_identity.as_ref() == Some(&expected.recipient)
                     && lot.auction_id == obligation.auction_id
                     && lot.equipment_id == obligation.equipment_id
+                    && equipment.id == obligation.equipment_id
                     && equipment.world_id == "main"
                     && settlement.seller_amount == obligation.amount
                     && *payload
@@ -536,7 +545,7 @@ impl SentAdmissionSnapshot {
                             variables: SentPayloadVariables {
                                 reference: Some(obligation.id),
                                 amount: Some(expected.credits.to_string()),
-                                item_name: None,
+                                item_name,
                             },
                             credits: expected.credits,
                             cod: 0,

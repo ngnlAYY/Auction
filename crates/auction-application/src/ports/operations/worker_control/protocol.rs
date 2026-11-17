@@ -29,6 +29,8 @@ pub const WORKER_CONTROL_EQUIPMENT_READ_PATH: &str = "/v1/equipment/reads";
 pub const WORKER_CONTROL_SENT_LOOKUP_PATH: &str = "/v1/mail/sent:lookup";
 /// 恢复后外部核对在全局暂停下扫描 Sent、Read Mail 与论坛新楼层。
 pub const WORKER_CONTROL_RECOVERY_SCAN_PATH: &str = "/v1/recovery/external:scan";
+/// Admin 邮件凭据在线检查经 Worker 执行；请求只含凭据 ID 与期望状态版本，不含 Cookie。
+pub const WORKER_CONTROL_MAIL_CREDENTIAL_CHECK_PATH: &str = "/v1/credentials/mail:check";
 
 /// 存活探针的线上结果。
 #[derive(Debug, Clone, Deserialize, Serialize)]

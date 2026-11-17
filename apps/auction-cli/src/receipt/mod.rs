@@ -1,7 +1,8 @@
 //! 部署回执：分体部署每次 `service start/restart` 与 `deploy`/`rollback` 的结果写入状态目录
 //! `<state-dir>/receipts/`，由 `auction-cli service receipt list/show` 查询，并作为
 //! `[backup.scope].deployment_receipts_dir` 的来源随备份归档。回执只追加，不参与启停决策，也
-//! 没有独立状态机。
+//! 没有独立状态机。读写都经调用方以描述符固定的部署状态目录（持锁时取得，查询时只读打开），
+//! 状态目录与祖先的信任口径见 `service::DeploymentState`。
 
 use std::path::Path;
 
@@ -9,17 +10,23 @@ use anyhow::Context;
 use chrono::{DateTime, Utc};
 
 use crate::cli::{ReceiptArgs, ReceiptCommand};
+use crate::support::files::PrivateDirectory;
 use crate::support::{digest, files, text};
 
+mod deploy;
 mod model;
 mod store;
 
-pub(crate) use model::DeployRecord;
+#[cfg(test)]
+pub(crate) use deploy::LegacyDeployRecord;
+pub(crate) use deploy::{CliIdentity, DeployRecord, DeploySection, RoleIdentity};
 pub(crate) use model::{
     Action, Artifact, DeploymentReceipt, MAX_FAILURE_CHARS, MigrationRecord, Outcome,
     validate_actor, validate_backup_id,
 };
-pub(crate) use store::{append, list, read, receipts_dir};
+#[cfg(test)]
+pub(crate) use model::{FORMAT, LEGACY_FORMAT};
+pub(crate) use store::{append, list, list_matching, read, receipts_dir};
 
 /// 一次部署调用的回执上下文；显式参数优先于进程环境。
 pub(crate) struct ReceiptContext {
@@ -72,7 +79,7 @@ fn environment_actor() -> String {
     reason = "回执字段逐项来自调用方，结构体包装只会复制同一组字段"
 )]
 pub(crate) fn record(
-    state_dir: &Path,
+    state: &PrivateDirectory,
     action: Action,
     outcome: Outcome,
     started_at: DateTime<Utc>,
@@ -96,11 +103,12 @@ pub(crate) fn record(
         failure,
         deploy: None,
     };
-    append(state_dir, &receipt)?;
+    append(state, &receipt)?;
     Ok(receipt)
 }
 
-/// `deploy`/`rollback` 回执：追加同一格式，额外记录制品、演练、备份与回滚证据。
+/// `deploy`/`rollback` 回执：追加同一格式，额外以 v2 deploy 段分开记录角色制品身份、安装目录
+/// CLI 身份、观测数据库版本与演练、备份、回滚证据。
 ///
 /// `receipt_id` 由调用方在保留旧程序前分配，并与 `RollbackRecord::deploy_receipt_id`
 /// 保持同一标识；`rollback` 依赖该字段按原标识读回部署回执。
@@ -109,7 +117,7 @@ pub(crate) fn record(
     reason = "回执字段逐项来自调用方，结构体包装只会复制同一组字段"
 )]
 pub(crate) fn record_deploy(
-    state_dir: &Path,
+    state: &PrivateDirectory,
     receipt_id: uuid::Uuid,
     action: Action,
     outcome: Outcome,
@@ -136,9 +144,9 @@ pub(crate) fn record_deploy(
         migration,
         artifacts,
         failure,
-        deploy: Some(deploy),
+        deploy: Some(DeploySection::Current(deploy)),
     };
-    append(state_dir, &receipt)?;
+    append(state, &receipt)?;
     Ok(receipt)
 }
 
@@ -170,11 +178,16 @@ pub(crate) fn artifact_from_process(role: &str, pid: u32) -> Artifact {
     artifact
 }
 
-/// 只读查询：不取部署锁、不连接数据库、不创建或修改回执目录。
+/// 只读查询：不取部署锁、不连接数据库、不创建或修改任何目录；状态目录与祖先按持锁时同一口径
+/// 核对，不可信时失败关闭，目录不存在表示还没有回执。
 pub(crate) fn query(state_dir: &Path, args: ReceiptArgs) -> anyhow::Result<()> {
+    let state = PrivateDirectory::open_trusted(state_dir, false).context("部署状态目录不可信")?;
     match args.command {
         ReceiptCommand::List { limit } => {
-            let receipts = list(state_dir, usize::try_from(limit)?)?;
+            let receipts = match &state {
+                Some(state) => list(state, usize::try_from(limit)?)?,
+                None => Vec::new(),
+            };
             crate::app::print_json(&serde_json::json!({
                 "directory": receipts_dir(state_dir),
                 "count": receipts.len(),
@@ -184,7 +197,9 @@ pub(crate) fn query(state_dir: &Path, args: ReceiptArgs) -> anyhow::Result<()> {
         ReceiptCommand::Show { receipt_id } => {
             let receipt_id =
                 uuid::Uuid::parse_str(&receipt_id).context("receipt_id 必须是 UUID 文本")?;
-            crate::app::print_json(&read(state_dir, receipt_id)?)
+            let state =
+                state.with_context(|| format!("没有部署状态目录：{}", state_dir.display()))?;
+            crate::app::print_json(&read(&state, receipt_id)?)
         }
     }
 }
@@ -201,6 +216,7 @@ mod tests {
         query, record,
     };
     use crate::cli::{ReceiptArgs, ReceiptCommand};
+    use crate::support::files::PrivateDirectory;
 
     static COUNTER: AtomicU32 = AtomicU32::new(0);
 
@@ -232,9 +248,18 @@ mod tests {
     #[test]
     fn record_then_query_round_trips() {
         let fixture = Fixture::new();
+        // 还没有状态目录时，查询只读、返回空列表，不创建目录。
+        let missing = fixture.root.join("missing");
+        query(&missing, ReceiptArgs { command: ReceiptCommand::List { limit: 10 } })
+            .expect("没有状态目录时列表为空");
+        assert!(!missing.exists());
+
+        let state = PrivateDirectory::open_trusted(&fixture.root, false)
+            .expect("固定状态目录")
+            .expect("状态目录存在");
         let context = ReceiptContext::resolve(Some("backup-1"), Some("operator")).expect("上下文");
         let receipt = record(
-            &fixture.root,
+            &state,
             Action::Restart,
             Outcome::Succeeded,
             Utc::now(),

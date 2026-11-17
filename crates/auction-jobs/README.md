@@ -13,9 +13,9 @@ Worker 的调度运行时与本地控制面：把应用层的持久化端口编�
 | 拍卖主循环 | 每轮依次执行：排期 bootstrap（按周排期与赛季早鸟建立后续草稿场次，早鸟期暂停/恢复对应世界收件）、预览/开拍/Final/结算到期的生命周期推进、到期 Slow 代理的幂等反超、出价后的标记/被超提醒（按 lot 版本顺序处理，失败退避、事件不删除）；按生命周期与慢速代理的下一个最早到期时刻提前唤醒，常规轮询为上限 |
 | 结算 | 独立任务，只领取并执行结算 claim；按最早结算到期提前唤醒，节奏不受拍卖主循环影响，两者只共享数据库租约与锁 |
 | 结算履约 | 领取义务，执行 prepare → activate → reconcile，生成投递 |
-| 投递 outbox | 在 sending fence 内调用 MoogleMail transport，续租并写回终态；结果未知转人工对账 |
-| 恢复 | 余额/证据健康刷新、资产对账，以及付款超时的提醒、退回、重新上架与退款；资产对账是本循环的一个阶段，每 6 小时一次、单轮预算 300 秒，只读外部观察并追加报告，占用该轮的批量许可 |
-| 邮件轮询 / 邮箱维护 | 每个世界一个收件循环与一个维护任务；维护先运行 Sent/Take 恢复与 compose 清理，再按最小间隔观察已读列表。两者用同一互斥串行化，并按“先批量许可、后维护锁”的固定顺序取得资源；日程按世界相位平移 |
+| 投递 outbox | 先做只读准备，再在 sending fence 内调用 MoogleMail transport，续租并写回终态；结果未知转人工对账。只读准备与单次外部发送各用一份 `request_timeout_seconds` 预算：准备期间按续租间隔续租，交给 transport 的是准备请求的原截止而不是租约截止，续租失败立即取消准备；准备未完成（含超时，失败码 `preflight_timeout`）只释放 claim，不记发送失败。sending 围栏的确定结论由存储层按原因产出：业务门未满足（竞价警告失效、发送节奏未到期、资金门冻结等）为 Deferred，释放 claim 并按正常延期结束；内部故障确定回滚（SQL 错误、冲突重试耗尽、提交预算耗尽等）为 Faulted，同样释放 claim，但记 Worker 错误并按其安全分类计未持久化错误；提交结果未知保持隔离并撤销原会话 |
+| 恢复 | 余额/证据健康刷新、资产对账，以及付款超时的提醒、退回、重新上架与退款；同一循环在消费退件之后推进结算退件案件：激活已提交的持久 Take、收口 Take 终态、收口补寄寄出证明，并对待核验的未绑定退件只读读取原邮件（未装配 MoogleMail 时核验保持待办，Worker 心跳以 `settlement_return_recheck_worlds` 声明可核验的世界，Admin 详情据此显示“核验能力不可用”）；结果未知的结算退件 Take 由邮箱维护在原 Take 会话里观察后收口或重新排队；资产对账是本循环的一个阶段，每 6 小时一次、单轮预算 300 秒，只读外部观察并追加报告，占用该轮的批量许可 |
+| 邮件轮询 / 邮箱维护 | 每个世界一个收件循环与一个维护任务；维护先运行 Sent/Take 恢复与 compose 清理，再按最小间隔观察已读列表。默认隔离模式（`poll_isolation_enabled = true`，运行期开关 `mooglemail_poll_isolation_enabled`）下两者互不等待：收件循环每轮只取批量许可、不取维护锁；维护任务按维护日程每轮先取批量许可、再取该世界维护锁，sweep 结束即归还许可，只读观察期间仍持锁；两者的物理请求只由共享 MoogleMail 客户端的请求门与在途锁错开。兼容非隔离模式下收件循环每轮先取批量许可、再取维护锁，同一轮内并行执行收件、维护与只读观察并等待最慢分支，维护任务只周期重读开关。两种模式共用“先批量许可、后维护锁”的固定顺序，维护任务取锁后复核开关，切换窗口内既不互相等待，也不会在同一世界重叠维护。维护日程与隔离模式的收件日程按世界相位平移 |
 | 论坛同步 / 回帖 | 发布与刷新拍卖主题、导入回帖命令；两阶段错误互相隔离。Final 阶段按最早有效截止收紧导入节奏（剩余时间 / 6，夹在 5 秒与常规轮询之间），成功扫描、失败重试与同轮重复领取都沿用该节奏；论坛循环跨轮记住各 Final 主题的最新排期并按最早者提前唤醒，单个主题失败（含失败处置写入失败）或离开 Final 不影响其他主题；只有领取成功但为空才丢弃已不可领取主题的排期，领取调用失败时保留排期、至少间隔 5 秒重试；未知写入（`write_unknown`）维持常规轮询 |
 | 玩家通知 | 赛季提醒与卖家小结扫描并幂等入队，单轮预算 60 秒；在本 crate 的任务组内监督并排空 |
 | 装备 PM | 超价提醒私信队列；由装配根监督，主停止信号一到即停止新领取，不等其他循环排空 |
@@ -31,7 +31,7 @@ Worker 经应用层 `ExternalMetricsObserver` 记录邮件与论坛的阶段预�
 
 `[worker.control]` 默认关闭。显式启用后 Worker 在 Unix socket 上提供 HTTP/JSON 控制面（协议 `v1`），路径与方法见[docs/contracts/routes.md#worker-controlunix-socket](../../docs/contracts/routes.md#worker-controlunix-socket)。
 
-socket 由 Worker 装配根经 `auction-http` 的 `UnixHttpListener` 在受信运行目录绑定：目录链校验、单实例锁 `<runtime_directory>/.worker-control.lock`、stale socket 清理、owner/group/0660 权限与退出时按身份删除都与 Public/Admin 的 Unix listener 共用同一实现，`group` 可写组名或数字 GID。本 crate 只在其上叠加 peer 过滤与路由：连接时用 `SO_PEERCRED` 检查 UID/GID 是否在 `allowed_peer_uids`/`allowed_peer_gids` 中，不在名单内直接断开。旧版本的实例锁是 `<socket_path>.lock`，新旧版本不锁同一文件；绑定前的连通探测仍会拒绝活动 socket，升级时由部署流程先停旧 Worker 再启动新版本，保证两者不会同时持有 control socket。Admin 经 `auction-integrations` 的 `WorkerControlClient`（5 秒超时）读取状态与触发轮询、经 `WorkerRemoteReadClient` 代读外部只读页面（协议常量与线上 DTO 由 `auction-application` 拥有）；`auction-cli service` 与 `auction-server` 直接向该 socket 发送 `GET /v1/health/ready` 判定就绪，其运行账号同样要在 allowlist 中。
+socket 由 Worker 装配根经 `auction-http` 的 `UnixHttpListener` 在受信运行目录绑定：目录链校验、单实例锁 `<runtime_directory>/.worker-control.lock`、stale socket 清理、owner/group/0660 权限与退出时按身份删除都与 Public/Admin 的 Unix listener 共用同一实现，`group` 可写组名或数字 GID。本 crate 只在其上叠加 peer 过滤与路由：连接时用 `SO_PEERCRED` 检查 UID/GID 是否在 `allowed_peer_uids`/`allowed_peer_gids` 中，不在名单内直接断开。旧版本的实例锁是 `<socket_path>.lock`，新旧版本不锁同一文件；绑定前的连通探测仍会拒绝活动 socket，升级时由部署流程先停旧 Worker 再启动新版本，保证两者不会同时持有 control socket。Admin 经 `auction-integrations` 的 `WorkerControlClient`（5 秒超时）读取状态与触发轮询、经 `WorkerRemoteReadClient` 代读外部只读页面并转交邮件 Cookie 在线检查（协议常量与线上 DTO 由 `auction-application` 拥有）。邮件 Cookie 在线检查只提交凭据 ID 与期望状态版本，Worker 按 ID 打开数据库信封、前后复核版本，用与邮件循环共用请求门、在途锁与账号忙熔断的客户端读取余额页：账号忙窗口内不发网络、成功不清除忙碌；主动暂停在入口、每个世界开始前与排队等待期间复核，生效后不再发出探测；检查被取消或单个世界 5 秒预算到期只放弃等待，已发出的探测在独立任务里走完才释放在途锁，紧接的 Worker 请求不与之重叠；同时最多一个检查（重叠返回 `busy`），总预算 12 秒；未装配执行器（未启用邮件或没有 `credential_data_key`）时返回 `501 capability_unavailable`，Admin 只报暂不可用、不回退直连。`auction-cli service` 与 `auction-server` 直接向该 socket 发送 `GET /v1/health/ready` 判定就绪，其运行账号同样要在 allowlist 中。
 
 ## 源码结构
 

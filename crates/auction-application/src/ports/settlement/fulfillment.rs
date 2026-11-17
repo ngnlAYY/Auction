@@ -144,16 +144,23 @@ pub struct SettlementFulfillmentClaim {
     pub settlement_line: Option<SettlementLine>,
     /// 与明细同源的冻结模式；v2 账单必须明确名义比例与实分奖池优惠的区别。
     pub settlement_mode: Option<SettlementMode>,
-    /// recovery case 在结算事务内冻结的付款期限；只用于正文呈现与证据轮询聚焦，
-    /// 逾期判定仍由 recovery owner 负责。
+    /// recovery case 当前有效的付款期限：COD 收回重寄后从重寄时刻重新起算。只用于证据轮询
+    /// 聚焦（付款截止前后回到基础间隔），逾期判定仍由 recovery owner 负责；不得用来重建正文。
     /// 该值缺失只可能是没有 recovery 行的历史义务，因此不进入必填不变量。
     pub payment_deadline_at: Option<DateTime<Utc>>,
+    /// 结算建立 recovery 时冻结的首寄付款期限 D0（创建时刻加冻结策略版本的付款期限）。重寄沿用
+    /// 首次冻结的载荷，正文期限不随当前期限改变，因此付款邮件正文与载荷只按它重建；与
+    /// `payment_deadline_at` 同时缺失或同时存在。
+    pub initial_payment_deadline_at: Option<DateTime<Utc>>,
     pub submission_id: Option<SubmissionId>,
     /// 投稿来源闭集；流拍与撤拍均根据来源授权逐件发送原装备。
     pub submission_source_kind: Option<String>,
     /// 旧邮件的远端 ID，仅在邮件来源时使用；不保存正文或 Cookie。
     pub submission_external_mail_id: Option<String>,
     pub prerequisite_id: Option<SettlementId>,
+    /// 履约当前派发编号：首寄为 1，结算退件领回后经 Admin 授权的补寄逐次加 1。编号决定投递、
+    /// prepare 与 activate 的稳定身份及补寄正文的派发引用；首寄沿用旧单例身份与原载荷字节。
+    pub dispatch_no: u32,
     pub delivery_id: Option<Uuid>,
     pub prepare_command_id: Option<CommandId>,
     pub prepare_request_hash: Option<RequestHash>,

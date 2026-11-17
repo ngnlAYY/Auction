@@ -17,6 +17,7 @@ use uuid::Uuid;
 use crate::database::TrackedTransaction as Transaction;
 use crate::database::settlement::funding::account::LockedFundingAccount;
 use crate::database::settlement::funding::{evidence_error, storage};
+use crate::database::settlement::policy::initial_payment_deadline;
 
 mod diagnostics;
 use diagnostics::{ReceiptRejection as Rejection, diagnose_relation, reject};
@@ -77,16 +78,14 @@ pub(super) async fn validate_receipt(
                   public.delivery_has_frozen_sent_proof(
                       d.id,d.result_metadata,d.external_reference
                   ) AS frozen_sent_proven,
-                  (
-                      SELECT r.payment_deadline_at
-                      FROM public.settlement_recoveries r
-                      WHERE r.payment_obligation_id=o.id
-                  ) AS payment_deadline_at
+                  r.created_at AS recovery_created_at,
+                  r.policy_version AS recovery_policy_version
            FROM public.settlement_obligations o
            JOIN public.equipment e ON e.id=o.equipment_id
            JOIN public.settlement_obligation_fulfillments f ON f.obligation_id=o.id
            JOIN public.deliveries d ON d.id=f.delivery_id
            LEFT JOIN public.lot_settlements s ON s.lot_id=o.lot_id
+           LEFT JOIN public.settlement_recoveries r ON r.payment_obligation_id=o.id
            WHERE o.id=$1
              AND d.id=$2
              AND f.execution_state='satisfied'
@@ -150,7 +149,13 @@ fn receipt_snapshot(row: &sqlx::postgres::PgRow) -> Result<CodReceiptSnapshot, F
         frozen_sent_proven: row.try_get("frozen_sent_proven").map_err(decode)?,
         sending_at: row.try_get("sending_at").map_err(decode)?,
         funding_source_boundary: row.try_get("funding_source_boundary").map_err(decode)?,
-        payment_deadline_at: row.try_get("payment_deadline_at").map_err(decode)?,
+        // 正文期限按首寄期限 D0 重建；恢复记录事实不完整或版本未知时按载荷不符失败关闭。
+        initial_payment_deadline_at: initial_payment_deadline(
+            row.try_get("recovery_created_at").map_err(decode)?,
+            row.try_get("recovery_policy_version").map_err(decode)?,
+        )
+        .ok()
+        .ok_or_else(|| reject(Rejection::PayloadMismatch, FundingError::Unproven))?,
     })
 }
 

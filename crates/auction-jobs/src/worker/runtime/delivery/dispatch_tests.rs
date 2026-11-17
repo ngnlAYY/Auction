@@ -1,9 +1,11 @@
 //! 回归：投递工作项从领取、只读准备、sending 围栏到发送与终态收口的状态机。
 //!
 //! 守护外部写入的安全边界：发送期间失去租约或请求超时一律按远端结果未知落库、绝不重发；
-//! 尚未 poll 外部写入的失败（准备未完成、围栏 Deferred 或提交未知、租约已不可用）只释放
-//! claim，不伪造发送失败；排空时已领取但未开始的工作项按生命周期协议释放或保留原租约，
-//! 已越过围栏的发送继续完成并落库，终态提交确认后才释放排空活动。
+//! 尚未 poll 外部写入的失败（准备未完成、围栏提交未知、租约已不可用）只释放 claim，不伪造
+//! 发送失败；围栏确定 Deferred（如竞价警告在交接期间失效）是正常延期，释放后不记 Worker 错误；
+//! 围栏内部故障确定回滚（Faulted）同样只释放 claim，但保留 Worker 错误与未持久化计数；排空时
+//! 已领取但未开始的工作项按生命周期协议释放或保留原租约，已越过围栏的发送继续完成并落库，终态
+//! 提交确认后才释放排空活动。
 //!
 //! 内存替身只实现应用端口：存储按发生顺序记录续租、围栏、释放与终态，排空替身把活动的登记
 //! 与释放记入同一条时间线，传输记录准备次数与发送 future 的 poll。业务时钟跟随 Tokio 暂停
@@ -90,6 +92,8 @@ enum Renewal {
 enum Fence {
     Sending,
     Deferred,
+    /// 内部故障后确定回滚，例如事务内 SQL 权限错误或锁超时；携带存储层的安全分类。
+    Faulted(SafeErrorKind),
     /// 提交结果未知，例如 COMMIT 回执前连接断开。
     Unknown,
     Hangs,
@@ -206,6 +210,7 @@ impl DeliveryWorkStore for OutboxStore {
             match fence {
                 Fence::Sending => Ok(DeliveryFenceOutcome::Sending),
                 Fence::Deferred => Ok(DeliveryFenceOutcome::Deferred),
+                Fence::Faulted(kind) => Ok(DeliveryFenceOutcome::Faulted(kind)),
                 Fence::Unknown => Err(repository_failure("围栏提交回执丢失")),
                 Fence::Hangs => std::future::pending().await,
             }
@@ -299,13 +304,18 @@ enum Preparation {
     /// 只读检查确定失败，尚未开始远端写入。
     Rejected,
     Hangs,
+    /// 准备耗时；与真实适配器同口径，整个准备受传入的绝对截止约束，越过即返回准备超时。
+    Takes(Duration),
 }
 
-/// 按脚本准备与发送的传输替身；记录发送 future 的 poll 与围栏后的会话撤销。
+/// 按脚本准备与发送的传输替身；记录收到的准备截止、发送 future 的 poll 与围栏后的会话撤销。
 struct ScriptedTransport {
+    /// 创建时刻；准备截止以相对它的时长记录。
+    origin: std::time::Instant,
     preparation: Preparation,
     /// 发送 future 首次 poll 后保持的时长；`None` 表示远端一直不回应。
     send_hold: Option<Duration>,
+    deadlines: Mutex<Vec<Duration>>,
     prepares: AtomicUsize,
     send_polls: AtomicUsize,
     sends_completed: AtomicUsize,
@@ -315,8 +325,10 @@ struct ScriptedTransport {
 impl ScriptedTransport {
     fn new(preparation: Preparation, send_hold: Option<Duration>) -> Arc<Self> {
         Arc::new(Self {
+            origin: Instant::now().into_std(),
             preparation,
             send_hold,
+            deadlines: Mutex::new(Vec::new()),
             prepares: AtomicUsize::new(0),
             send_polls: AtomicUsize::new(0),
             sends_completed: AtomicUsize::new(0),
@@ -326,6 +338,11 @@ impl ScriptedTransport {
 
     fn prepares(&self) -> usize {
         self.prepares.load(Ordering::SeqCst)
+    }
+
+    /// 每次授权准备收到的绝对截止，按相对创建时刻的时长记录。
+    fn deadlines(&self) -> Vec<Duration> {
+        self.deadlines.lock().unwrap().clone()
     }
 
     fn send_polls(&self) -> usize {
@@ -374,13 +391,23 @@ impl DeliveryTransport for ScriptedTransport {
     fn prepare_authorized(
         &self,
         claim: DeliveryWorkClaim,
-        _deadline: std::time::Instant,
+        deadline: std::time::Instant,
     ) -> AuthorizedDeliveryPreparation<'_> {
         self.prepares.fetch_add(1, Ordering::SeqCst);
+        self.deadlines.lock().unwrap().push(deadline.saturating_duration_since(self.origin));
         let preparation = self.preparation;
         Box::pin(async move {
             match preparation {
                 Preparation::Ready => {}
+                Preparation::Takes(duration) => {
+                    let deadline = Instant::from_std(deadline);
+                    if tokio::time::timeout_at(deadline, tokio::time::sleep(duration))
+                        .await
+                        .is_err()
+                    {
+                        return Err(DeliveryTransportError::preflight_timeout());
+                    }
+                }
                 Preparation::Rejected => {
                     return Err(DeliveryTransportError {
                         failure_code: "compose_unavailable".to_owned(),
@@ -529,21 +556,37 @@ async fn losing_lease_during_send_persists_outcome_unknown() {
 
 #[tokio::test(start_paused = true)]
 async fn unfinished_preparation_only_releases_claim_and_defers_world() {
-    for (preparation, expected, deferred_kind) in [
+    for (preparation, renewal, expected, deferred_kind) in [
         // 只读检查确定失败，按依赖不可用归类。
         (
             Preparation::Rejected,
+            Renewal::Healthy,
             vec![(0, Call::Renew), (0, Call::Release)],
             SafeErrorKind::DEPENDENCY_UNAVAILABLE,
         ),
         // 准备期照常续租；30 秒准备预算耗尽后释放，按超时归类。
         (
             Preparation::Hangs,
+            Renewal::Healthy,
             vec![(0, Call::Renew), (10, Call::Renew), (20, Call::Renew), (30, Call::Release)],
             SafeErrorKind::TIMEOUT,
         ),
+        // 适配器自己按同一截止收口时返回统一的准备超时，同样按超时归类。
+        (
+            Preparation::Takes(Duration::from_secs(45)),
+            Renewal::Healthy,
+            vec![(0, Call::Renew), (10, Call::Renew), (20, Call::Renew), (30, Call::Release)],
+            SafeErrorKind::TIMEOUT,
+        ),
+        // 准备期续租被拒：立即丢弃准备 future 并释放，不等请求预算，按依赖不可用归类。
+        (
+            Preparation::Hangs,
+            Renewal::RejectedAfter(1),
+            vec![(0, Call::Renew), (10, Call::Renew), (10, Call::Release)],
+            SafeErrorKind::DEPENDENCY_UNAVAILABLE,
+        ),
     ] {
-        let store = OutboxStore::new(&["main"], Renewal::Healthy, Fence::Sending);
+        let store = OutboxStore::new(&["main"], renewal, Fence::Sending);
         let transport = ScriptedTransport::new(preparation, Some(Duration::ZERO));
         let (worker, metrics) =
             delivery_worker(&store, &transport, ExternalWriteLifecycle::default());
@@ -564,11 +607,101 @@ async fn unfinished_preparation_only_releases_claim_and_defers_world() {
     }
 }
 
+/// 准备长于租约 TTL、仍在请求预算内且续租成功：适配器拿到准备请求的原截止，不被创建时的
+/// 租约截止截短；准备完成后照常交接并只发送一次。
+#[tokio::test(start_paused = true)]
+async fn preparation_outliving_lease_ttl_completes_within_request_budget() {
+    let config = DeliveryWorkerRuntimeConfig {
+        lease_duration: Duration::from_secs(20),
+        renew_interval: Duration::from_secs(5),
+        request_timeout: Duration::from_secs(60),
+        ..DeliveryWorkerRuntimeConfig::default()
+    };
+    let clock = Arc::new(PausedClock::new(base_time()));
+    let store = OutboxStore::new(&[], Renewal::Healthy, Fence::Sending);
+    // 准备 45 秒：长于 20 秒租约，短于 60 秒请求预算。
+    let transport =
+        ScriptedTransport::new(Preparation::Takes(Duration::from_secs(45)), Some(Duration::ZERO));
+    let now = clock.now();
+    let claimed = claim("main", "worker-test".to_owned(), now, now + chrono::Duration::seconds(20));
+
+    let result = process_delivery_claim(
+        store.clone(),
+        transport.clone(),
+        clock,
+        config,
+        WorkerControlHandle::new("test", 0),
+        noop_notification_recorder(),
+        claimed,
+        &ExternalWriteActivity::default(),
+    )
+    .await;
+
+    assert_eq!(result.worker_result, WorkerResult::Success);
+    assert_eq!(transport.deadlines(), vec![Duration::from_secs(60)], "准备截止必须是请求预算");
+    // 准备期间每 5 秒续租一次，租约始终有效；准备完成后交接、发送并落库。
+    let mut expected: Vec<(u64, Call)> = (0..9).map(|tick| (tick * 5, Call::Renew)).collect();
+    expected.extend([(45, Call::Renew), (45, Call::Fence), (45, Call::Renew), (45, Call::Succeed)]);
+    assert_eq!(store.calls(), expected);
+    assert_eq!(transport.send_polls(), 1);
+}
+
+/// 围栏确定 Deferred（例如竞价警告在交接期间被取消关注、收件人重新领先或 lot 到期）：确定没有
+/// 进入 sending，释放 claim 并正常结束本项；不 poll 外部写入、不撤销原会话、不计未持久化错误。
+#[tokio::test(start_paused = true)]
+async fn deferred_fence_is_a_normal_deferral_without_worker_error() {
+    let store = OutboxStore::new(&["main"], Renewal::Healthy, Fence::Deferred);
+    let transport = ScriptedTransport::new(Preparation::Ready, Some(Duration::ZERO));
+    let (worker, metrics) = delivery_worker(&store, &transport, ExternalWriteLifecycle::default());
+
+    run_delivery_cycle(&worker).await.unwrap();
+
+    assert_eq!(
+        store.calls(),
+        vec![(0, Call::Renew), (0, Call::Renew), (0, Call::Fence), (0, Call::Release)]
+    );
+    assert_eq!(transport.send_polls(), 0, "确定延期绝不 poll 外部写入");
+    assert_eq!(transport.revocations(), 0, "确定结束的围栏不撤销原会话");
+    // 本轮仍暂缓该世界的 Send，避免同一 claim 紧密重领。
+    assert_eq!(store.deferred_send_worlds(), vec![Vec::new(), vec!["main".to_owned()]]);
+    assert_eq!(metrics.iterations(), vec![(WorkerLoop::Delivery, WorkerResult::Success)]);
+    assert!(metrics.unpersisted().is_empty(), "确定延期没有未落库的结果");
+}
+
+/// 围栏事务内 SQL 失败（如 42501 权限错误、55P03 锁超时）且回滚成功：存储层返回带分类的
+/// Faulted（PostgreSQL 用例 `postgres_fence_sql_error_rolls_back_as_fault_not_deferral` 证明这一
+/// 转换）。确定没有进入 sending，释放 claim、不 poll、不撤销原会话；但这是真实故障，必须保留
+/// Worker 错误与按原分类的未持久化计数，不能像业务延期那样记成功（A4）。
+#[tokio::test(start_paused = true)]
+async fn rolled_back_fence_fault_releases_claim_but_keeps_the_worker_error() {
+    for kind in [SafeErrorKind::REPOSITORY_FAILED, SafeErrorKind::REPOSITORY_SERIALIZATION_CONFLICT]
+    {
+        let store = OutboxStore::new(&["main"], Renewal::Healthy, Fence::Faulted(kind));
+        let transport = ScriptedTransport::new(Preparation::Ready, Some(Duration::ZERO));
+        let (worker, metrics) =
+            delivery_worker(&store, &transport, ExternalWriteLifecycle::default());
+
+        run_delivery_cycle(&worker).await.unwrap();
+
+        assert_eq!(
+            store.calls(),
+            vec![(0, Call::Renew), (0, Call::Renew), (0, Call::Fence), (0, Call::Release)]
+        );
+        assert_eq!(transport.send_polls(), 0, "确定回滚绝不 poll 外部写入");
+        assert_eq!(transport.revocations(), 0, "确定结束的围栏不撤销原会话");
+        assert_eq!(store.deferred_send_worlds(), vec![Vec::new(), vec!["main".to_owned()]]);
+        assert_eq!(
+            metrics.iterations(),
+            vec![(WorkerLoop::Delivery, WorkerResult::Error)],
+            "内部故障不得记成正常延期"
+        );
+        assert_eq!(metrics.unpersisted(), vec![(WorkerLoop::Delivery, kind)]);
+    }
+}
+
 #[tokio::test(start_paused = true)]
 async fn unconfirmed_fence_never_polls_send_and_revokes_owner_when_commit_unknown() {
     for (fence, released_at, revocations) in [
-        // Deferred 已确定提交冻结或回滚：确认围栏结束，不撤销原会话。
-        (Fence::Deferred, 0, 0),
         // 提交结果未知：丢弃句柄同步撤销原会话，不能当作已回滚继续使用。
         (Fence::Unknown, 0, 1),
         // 围栏预算是终态超时 5 秒；超时同样按提交未知处理。
@@ -593,7 +726,12 @@ async fn unconfirmed_fence_never_polls_send_and_revokes_owner_when_commit_unknow
         assert_eq!(transport.send_polls(), 0, "围栏未确认 Sending 前绝不 poll 外部写入");
         assert_eq!(transport.revocations(), revocations);
         assert_eq!(store.deferred_send_worlds(), vec![Vec::new(), vec!["main".to_owned()]]);
+        // 提交结果未知仍是 Worker 错误，不能混同确定延期而被隐藏。
         assert_eq!(metrics.iterations(), vec![(WorkerLoop::Delivery, WorkerResult::Error)]);
+        assert_eq!(
+            metrics.unpersisted(),
+            vec![(WorkerLoop::Delivery, SafeErrorKind::DEPENDENCY_UNAVAILABLE)]
+        );
     }
 }
 

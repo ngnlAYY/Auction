@@ -164,6 +164,42 @@ pub struct MoogleMailboxInboxObservation {
     pub observation_credential: Option<crate::ports::delivery::DeliverySendCredentialBinding>,
 }
 
+/// 结算退件 Take 证明所需的原退件身份：系统发件人与 `[RTS]` 主题取自入站快照，退件原正文的规范
+/// 摘要与系统后缀写明的原收件人取自退件证据，领取前的 COD 与附件条目数取自 Take 冻结资产
+/// （现金占一条附件）。不含正文本身。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MoogleMailboxReturnTakeIdentity {
+    pub sender: String,
+    pub subject: String,
+    pub original_body_digest: [u8; 32],
+    pub returned_from: String,
+    pub cod: i64,
+    pub attachment_count: usize,
+}
+
+/// 原 Take 会话里对一封结算退件的观察结论。只有 [`Self::Taken`] 是领取完成证明：它由
+/// integrations 在详情页上核对过原身份、原正文前缀与逐条领取回执，与正常 Take 的成功证明同等
+/// 强度。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MoogleMailboxReturnTake {
+    /// 附件已全部取走，发件人与主题不变，正文以原退件正文开头，其后恰为与领取前附件条目数相同
+    /// 的 `Removed attachment:` 回执（领取前带 COD 时另有对应的 `CoD Paid:` 回执）。
+    Taken,
+    /// 原 MID 仍挂着资产；是否与冻结资产完整一致由调用方比对。
+    Present(MoogleMailboxInboxAssets),
+    /// 远端明确答复邮件不存在：可能已过期或被删除，不能证明资产进入 Bot 账号。
+    Missing,
+    /// 附件已为空但回执、原身份或原正文前缀不成立：保持未知。
+    Unproven,
+}
+
+/// 同一读取会话的结算退件观察；结论必须携带会话凭据，换账号或换版本的观察不能完成原 Take。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MoogleMailboxReturnTakeObservation {
+    pub outcome: MoogleMailboxReturnTake,
+    pub observation_credential: Option<crate::ports::delivery::DeliverySendCredentialBinding>,
+}
+
 /// 无登录 key 的历史通知保守重建摘要；带 key 的旧行不能用当前 key 冒充原发送内容。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MoogleMailboxNoticeExpectation {
@@ -184,6 +220,9 @@ pub struct MoogleMailboxUnprovenSend {
     pub send_expectation: Option<crate::ports::delivery::DeliverySendExpectation>,
     /// 原 Take 会话身份；旧行或配置 Cookie 缺少持久绑定时不得自动恢复或重排。
     pub take_expectation: Option<crate::ports::delivery::DeliveryTakeExpectation>,
+    /// 结算退件 Take 的原退件身份；证据没有系统后缀事实（原正文摘要与原收件人）或入站快照缺失
+    /// 时为空，此时没有可核对的原身份，不读取远端、保持结果未知。
+    pub return_take: Option<MoogleMailboxReturnTakeIdentity>,
     /// 投递业务 owner；冻结 Send 统一精确比对，旧行仍按历史规则隔离。
     pub origin_kind: String,
     pub world_id: String,
@@ -262,6 +301,15 @@ pub trait MoogleMailboxMaintenance: Send + Sync {
         world_id: &'a str,
         external_mail_id: &'a str,
     ) -> ApplicationFuture<'a, MoogleMailboxInboxObservation>;
+
+    /// 只读复核结算退件 Take 的原退件：领取完成证明（原身份、原正文前缀与领取回执）由
+    /// integrations 在详情页上判定，调用方只消费结论，不凭“附件为空”自行推断。
+    fn return_take_receipt<'a>(
+        &'a self,
+        world_id: &'a str,
+        external_mail_id: &'a str,
+        identity: &'a MoogleMailboxReturnTakeIdentity,
+    ) -> ApplicationFuture<'a, MoogleMailboxReturnTakeObservation>;
 }
 
 /// 本地观察与受证明恢复端口；状态变更必须与资金、履约及追加审计原子提交。
@@ -331,6 +379,9 @@ pub trait MoogleMailboxEvidenceStore: Send + Sync {
     ) -> ApplicationFuture<'a, bool>;
 
     /// 把原 fencing 尝试已证明完成的 take 收口为成功；仅实际迁移并确认提交返回 true。
+    /// 结算退件 Take 只接受 integrations 核对过原身份、原正文前缀与领取回执的完成证明（原因
+    /// `take_receipt_proven`），并在同一事务按正常领回证明推进其退件案件（领回事实与资金返还
+    /// 各一次）；案件不在结果未知或资产与冻结事实不符时整体不改写。
     fn bind_recovered_action<'a>(
         &'a self,
         delivery_id: Uuid,
@@ -342,6 +393,7 @@ pub trait MoogleMailboxEvidenceStore: Send + Sync {
     ) -> ApplicationFuture<'a, bool>;
 
     /// 仅将原 fencing 尝试已正向确认附件仍在的 take 重新排队；未知 Send 禁止走此入口。
+    /// 结算退件 Take 在同一事务把动作与案件收回 Take 待执行，并在 world 锁下复核同邮件互斥。
     fn requeue_unproven<'a>(
         &'a self,
         delivery_id: Uuid,

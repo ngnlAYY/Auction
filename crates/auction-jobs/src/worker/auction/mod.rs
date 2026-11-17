@@ -59,11 +59,11 @@ pub(super) async fn run_loop<C>(
             merge_worker_result(&mut result, reminders_result);
             // 原因已由各阶段诊断记录；汇总只在状态转换时记录，持续失败不逐轮重复。
             match outcome_log.observe(result) {
-                Some(LoopOutcomeTransition::Degraded) => tracing::warn!(
-                    "auction worker batch was not fully processed; retrying after poll delay"
-                ),
+                Some(LoopOutcomeTransition::Degraded) => {
+                    tracing::warn!("拍卖主循环批次未完整处理，轮询间隔后重试");
+                }
                 Some(LoopOutcomeTransition::Recovered) => {
-                    tracing::info!("auction worker batch fully processed again");
+                    tracing::info!("拍卖主循环批次已恢复完整处理");
                 }
                 None => {}
             }
@@ -105,11 +105,11 @@ pub(super) async fn run_settlement_loop<C>(
             let started = std::time::Instant::now();
             let result = run_settlement_phase(worker.as_ref()).await;
             match outcome_log.observe(result) {
-                Some(LoopOutcomeTransition::Degraded) => tracing::warn!(
-                    "settlement batch was not fully processed; retrying after poll delay"
-                ),
+                Some(LoopOutcomeTransition::Degraded) => {
+                    tracing::warn!("结算批次未完整处理，轮询间隔后重试");
+                }
                 Some(LoopOutcomeTransition::Recovered) => {
-                    tracing::info!("settlement batch fully processed again");
+                    tracing::info!("结算批次已恢复完整处理");
                 }
                 None => {}
             }

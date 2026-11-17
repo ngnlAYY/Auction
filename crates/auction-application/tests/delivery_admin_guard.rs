@@ -19,7 +19,9 @@ fn snapshot(action: DeliveryAdminAction) -> DeliveryAdminGuardSnapshot {
         funded_delivery: false,
         retired: false,
         lot_eligible: Some(true),
+        settlement_eligible: Some(true),
         has_reconcile_reference: true,
+        mail_handed_over: false,
     }
 }
 
@@ -167,6 +169,42 @@ fn lot_eligibility_precedes_status_mismatch() {
     assert!(guard.evaluate().blockers.is_empty());
 }
 
+/// 成交已撤销（或已不是当前派发）的结算投递不能被释放或重试重新激活：阻断优先于资金绑定与
+/// 其余阻断，映射到专属错误；对账成功/失败不重新激活投递，不读取该资格。
+#[test]
+fn settlement_ineligibility_blocks_reactivation_first() {
+    for action in [
+        DeliveryAdminAction::Release,
+        DeliveryAdminAction::RetryFailed,
+        DeliveryAdminAction::ReconcileRetry,
+    ] {
+        let mut guard = snapshot(action);
+        guard.settlement_eligible = Some(false);
+        guard.funded_delivery = true;
+        guard.fencing_version = 8;
+        let decision = guard.evaluate();
+        assert_eq!(
+            decision.blockers.first(),
+            Some(&DeliveryAdminGuardBlocker::SettlementIneligible),
+            "{action:?}"
+        );
+        assert_eq!(decision.result_metadata, serde_json::json!({}));
+    }
+    assert_eq!(
+        DeliveryAdminGuardBlocker::SettlementIneligible.error(),
+        DeliveryAdminError::SettlementIneligible
+    );
+
+    // 非结算来源不读取该资格；缺失值不构成阻断。
+    let mut guard = snapshot(DeliveryAdminAction::RetryFailed);
+    guard.settlement_eligible = None;
+    assert!(guard.evaluate().blockers.is_empty());
+
+    let mut guard = snapshot(DeliveryAdminAction::ReconcileFailed);
+    guard.settlement_eligible = Some(false);
+    assert!(guard.evaluate().blockers.is_empty());
+}
+
 #[test]
 fn quarantined_mail_can_only_be_terminated_as_failed() {
     let mut guard = snapshot(DeliveryAdminAction::Release);
@@ -205,4 +243,59 @@ fn status_mismatch_is_stale_and_blocks_every_action() {
     let decision = guard.evaluate();
     assert_eq!(decision.blockers.first(), Some(&DeliveryAdminGuardBlocker::StatusMismatch));
     assert_eq!(DeliveryAdminGuardBlocker::StatusMismatch.error(), DeliveryAdminError::Stale);
+}
+
+/// 结算退件 Take 由退件案件推进：任何投递台动作都被拒绝，结果未知不能人工重试或声明结果。
+#[test]
+fn settlement_return_take_rejects_every_admin_action() {
+    for action in [
+        DeliveryAdminAction::Release,
+        DeliveryAdminAction::RetryFailed,
+        DeliveryAdminAction::ReconcileRetry,
+        DeliveryAdminAction::ReconcileSucceeded,
+        DeliveryAdminAction::ReconcileFailed,
+    ] {
+        let mut guard = snapshot(action);
+        guard.origin_kind = "settlement_return_action".to_owned();
+        guard.payload_operation = Some("take".to_owned());
+        guard.settlement_eligible = None;
+        let decision = guard.evaluate();
+        assert_eq!(
+            decision.blockers.first(),
+            Some(&DeliveryAdminGuardBlocker::SettlementReturnActionOwned),
+            "{action:?}"
+        );
+    }
+    assert_eq!(
+        DeliveryAdminGuardBlocker::SettlementReturnActionOwned.error(),
+        DeliveryAdminError::Invalid
+    );
+}
+
+/// 同一邮件已交接给结算退件 Take：原领取或退回意图的释放、重试与对账重试都被拒绝（普通重试不能
+/// 绕过互斥），对账判成功或判失败等终结动作不受影响。
+#[test]
+fn handed_over_mail_intent_cannot_be_reactivated() {
+    for action in [
+        DeliveryAdminAction::Release,
+        DeliveryAdminAction::RetryFailed,
+        DeliveryAdminAction::ReconcileRetry,
+    ] {
+        let mut guard = snapshot(action);
+        guard.origin_kind = "mail_intake".to_owned();
+        guard.payload_operation = Some("take".to_owned());
+        guard.settlement_eligible = None;
+        guard.mail_handed_over = true;
+        assert_eq!(
+            guard.evaluate().blockers.first(),
+            Some(&DeliveryAdminGuardBlocker::SettlementReturnActionOwned),
+            "{action:?}"
+        );
+    }
+    let mut failed = snapshot(DeliveryAdminAction::ReconcileFailed);
+    failed.origin_kind = "mail_intake".to_owned();
+    failed.payload_operation = Some("take".to_owned());
+    failed.settlement_eligible = None;
+    failed.mail_handed_over = true;
+    assert!(failed.evaluate().blockers.is_empty(), "终结动作不复活意图");
 }

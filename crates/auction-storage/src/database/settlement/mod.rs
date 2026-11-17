@@ -8,6 +8,7 @@ pub(crate) mod funding;
 pub(crate) mod holding;
 pub(crate) mod policy;
 pub(crate) mod report;
+pub(crate) mod returns;
 pub(crate) mod scheduler;
 
 use std::future::Future;

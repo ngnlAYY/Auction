@@ -17,6 +17,7 @@ pub(crate) mod health_runtime;
 mod phase;
 mod resolutions;
 mod returns;
+mod settlement_returns;
 
 use actions::process_actions;
 use assets::reconcile_assets;
@@ -24,8 +25,10 @@ use cases::advance_cases;
 use health::refresh_health;
 use resolutions::{advance_cod_returns, advance_relists, complete_refunds};
 use returns::record_returns;
+use settlement_returns::advance_settlement_returns;
 
-/// 立即依次推进 health、资产对账、case、return、action、COD return、relist 与 refund，随后按旧版 cadence 重试。
+/// 立即依次推进 health、资产对账、case、return、结算退件案件、action、COD return、relist 与
+/// refund，随后按旧版 cadence 重试。
 pub(super) async fn run_loop<C>(
     worker: Arc<PersistentWorker<C>>,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
@@ -53,11 +56,11 @@ pub(super) async fn run_loop<C>(
             let result = run_batch(worker.as_ref()).await;
             // 原因已由各阶段诊断记录；汇总只在状态转换时记录，持续失败不逐轮重复。
             match outcome_log.observe(result) {
-                Some(LoopOutcomeTransition::Degraded) => tracing::warn!(
-                    "recovery worker batch was not fully processed; retrying after poll delay"
-                ),
+                Some(LoopOutcomeTransition::Degraded) => {
+                    tracing::warn!("恢复批次未完整处理，轮询间隔后重试");
+                }
                 Some(LoopOutcomeTransition::Recovered) => {
-                    tracing::info!("recovery worker batch fully processed again");
+                    tracing::info!("恢复批次已恢复完整处理");
                 }
                 None => {}
             }
@@ -90,6 +93,7 @@ where
     reconcile_assets(worker, &mut batch_result).await;
     advance_cases(worker, &mut batch_result).await;
     record_returns(worker, &mut batch_result).await;
+    advance_settlement_returns(worker, &mut batch_result).await;
     process_actions(worker, &mut batch_result).await;
     advance_cod_returns(worker, &mut batch_result).await;
     advance_relists(worker, &mut batch_result).await;

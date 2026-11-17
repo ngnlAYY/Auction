@@ -3,7 +3,9 @@
 use std::collections::BTreeMap;
 
 use auction_domain::{
-    CommandId, SettlementId, SettlementMode, SettlementObligationKind, legacy_natural_key_uuid,
+    CommandId, FIRST_DISPATCH_NO, SettlementDispatchReference, SettlementId, SettlementMode,
+    SettlementObligationKind, legacy_natural_key_uuid, resend_activate_command_id,
+    resend_delivery_id, resend_prepare_command_id,
 };
 use serde::Serialize;
 use uuid::Uuid;
@@ -64,7 +66,9 @@ pub(super) fn build_delivery_intent(
         equipment_id: None,
         settlement_line: None,
         settlement_mode: None,
-        payment_deadline_at: claim.payment_deadline_at,
+        // 正文只写首寄期限 D0：COD 收回重寄沿用首次冻结的载荷，当前期限重新起算后不能用来
+        // 重建期望载荷，否则重寄后的对账必然判冲突（不变量 1、10）。
+        payment_deadline_at: claim.initial_payment_deadline_at,
         // 已存在投递只允许按原冻结键集合重放，新增正文变量不得改变在途载荷摘要。
         frozen_variables: claim
             .delivery_snapshot
@@ -72,6 +76,7 @@ pub(super) fn build_delivery_intent(
             .and_then(|snapshot| snapshot.payload.get("variables"))
             .and_then(serde_json::Value::as_object)
             .map(|variables| variables.keys().cloned().collect()),
+        dispatch_reference: dispatch_reference(claim)?,
     };
 
     match claim.kind {
@@ -212,6 +217,10 @@ pub(super) fn build_canonical_delivery(
                 _ => return Err(repository_error("结算履约 payload 模板无效")),
             }
             apply_frozen_variable_shape(&mut variables, intent);
+            // 补寄正文末行写版本化派发引用，系统退件原样带回，据此绑定到这一次派发。
+            if let Some(reference) = &intent.dispatch_reference {
+                variables.insert("dispatch", reference.clone());
+            }
             let equipment_secret_refs = intent
                 .equipment_id
                 .map(|equipment_id| {
@@ -240,6 +249,61 @@ pub(super) fn build_canonical_delivery(
     let request_hash = RequestHash::from_canonical_bytes(&encoded);
     let payload = serde_json::from_slice(&encoded)?;
     Ok(CanonicalSettlementDelivery { payload, request_hash })
+}
+
+/// 补寄派发的版本化引用；首寄返回 `None`。编号非法时失败关闭，不退化为首寄身份。
+fn dispatch_reference(
+    claim: &SettlementFulfillmentClaim,
+) -> Result<Option<String>, ApplicationError> {
+    if claim.dispatch_no == FIRST_DISPATCH_NO {
+        return Ok(None);
+    }
+    SettlementDispatchReference::for_resend(claim.obligation_id.as_uuid(), claim.dispatch_no)
+        .map(|reference| Some(reference.encode()))
+        .ok_or_else(|| repository_error("结算履约派发编号无效"))
+}
+
+/// 当前派发的 delivery ID：首寄沿用旧单例算法，补寄按派发编号进入独立命名空间。
+pub(super) fn dispatch_delivery_id(
+    claim: &SettlementFulfillmentClaim,
+) -> Result<Uuid, ApplicationError> {
+    dispatch_identity(claim, stable_delivery_id, resend_delivery_id)
+}
+
+/// 当前派发的 prepare command ID；规则同 [`dispatch_delivery_id`]。
+pub(super) fn dispatch_prepare_command_id(
+    claim: &SettlementFulfillmentClaim,
+) -> Result<CommandId, ApplicationError> {
+    dispatch_identity(
+        claim,
+        |obligation_id| stable_prepare_command_id(obligation_id).as_uuid(),
+        resend_prepare_command_id,
+    )
+    .map(CommandId::from_uuid)
+}
+
+/// 当前派发的 activate command ID；规则同 [`dispatch_delivery_id`]。
+pub(super) fn dispatch_activate_command_id(
+    claim: &SettlementFulfillmentClaim,
+) -> Result<CommandId, ApplicationError> {
+    dispatch_identity(
+        claim,
+        |obligation_id| stable_activate_command_id(obligation_id).as_uuid(),
+        resend_activate_command_id,
+    )
+    .map(CommandId::from_uuid)
+}
+
+fn dispatch_identity(
+    claim: &SettlementFulfillmentClaim,
+    first: impl FnOnce(SettlementId) -> Uuid,
+    resend: impl FnOnce(Uuid, u32) -> Option<Uuid>,
+) -> Result<Uuid, ApplicationError> {
+    if claim.dispatch_no == FIRST_DISPATCH_NO {
+        return Ok(first(claim.obligation_id));
+    }
+    resend(claim.obligation_id.as_uuid(), claim.dispatch_no)
+        .ok_or_else(|| repository_error("结算履约派发编号无效"))
 }
 
 /// 从 canonical obligation singleton 派生旧版稳定 delivery ID。
@@ -395,15 +459,13 @@ mod tests {
             equipment_name: "Radiant Phase Shoes".to_owned(),
             settlement_line: None,
             settlement_mode: None,
-            payment_deadline_at: Some(
-                chrono::DateTime::parse_from_rfc3339("2026-11-10T12:00:00Z")
-                    .unwrap()
-                    .with_timezone(&Utc),
-            ),
+            payment_deadline_at: Some(deadline("2026-11-10T12:00:00Z")),
+            initial_payment_deadline_at: Some(deadline("2026-11-10T12:00:00Z")),
             submission_id: None,
             submission_source_kind: Some("mail".to_owned()),
             submission_external_mail_id: None,
             prerequisite_id: None,
+            dispatch_no: 1,
             delivery_id: None,
             prepare_command_id: None,
             prepare_request_hash: None,
@@ -418,6 +480,124 @@ mod tests {
             lease_until: now + chrono::Duration::seconds(60),
             retry_count: 0,
         }
+    }
+
+    fn deadline(value: &str) -> chrono::DateTime<Utc> {
+        chrono::DateTime::parse_from_rfc3339(value).unwrap().with_timezone(&Utc)
+    }
+
+    fn canonical_of(claim: &SettlementFulfillmentClaim) -> CanonicalSettlementDelivery {
+        let intent = build_delivery_intent(claim).expect("intent 必须有效");
+        build_canonical_delivery(&intent).expect("payload 必须有效")
+    }
+
+    /// 首寄沿用旧单例身份与原载荷字节（不带派发引用）；补寄换补寄命名空间的身份，载荷多出版本化
+    /// 派发引用，摘要随之不同；同一编号重放得到同一身份与摘要。
+    #[test]
+    fn resend_dispatch_uses_new_identities_and_carries_the_dispatch_reference() {
+        let mut first = claim(SettlementObligationKind::SellerPayout);
+        first.recipient_user_id = None;
+        first.recipient = "seller".to_owned();
+        let first_payload = canonical_of(&first);
+        assert_eq!(
+            super::dispatch_delivery_id(&first).unwrap(),
+            stable_delivery_id(first.obligation_id)
+        );
+        assert_eq!(
+            super::dispatch_prepare_command_id(&first).unwrap(),
+            stable_prepare_command_id(first.obligation_id)
+        );
+        assert_eq!(
+            super::dispatch_activate_command_id(&first).unwrap(),
+            stable_activate_command_id(first.obligation_id)
+        );
+        assert!(first_payload.payload["variables"].get("dispatch").is_none(), "首寄载荷字节不变");
+
+        let mut resend = first.clone();
+        resend.dispatch_no = 2;
+        let resend_payload = canonical_of(&resend);
+        let reference = auction_domain::SettlementDispatchReference::for_resend(
+            resend.obligation_id.as_uuid(),
+            2,
+        )
+        .unwrap();
+        assert_eq!(super::dispatch_delivery_id(&resend).unwrap(), reference.delivery_id);
+        assert_ne!(
+            super::dispatch_delivery_id(&resend).unwrap(),
+            stable_delivery_id(resend.obligation_id)
+        );
+        assert_ne!(
+            super::dispatch_prepare_command_id(&resend).unwrap(),
+            stable_prepare_command_id(resend.obligation_id)
+        );
+        assert_eq!(resend_payload.payload["variables"]["dispatch"], reference.encode());
+        assert_ne!(resend_payload.request_hash, first_payload.request_hash);
+        assert_eq!(canonical_of(&resend).request_hash, resend_payload.request_hash, "重放稳定");
+        let mut invalid = first;
+        invalid.dispatch_no = 0;
+        assert!(build_delivery_intent(&invalid).is_err(), "编号 0 失败关闭，不退化为首寄");
+        assert!(super::dispatch_delivery_id(&invalid).is_err(), "编号 0 不能派生身份");
+    }
+
+    /// COD 收回重寄只改写恢复记录的当前期限；正文与载荷按首寄期限 D0 重建，因此首寄与任意次
+    /// 重寄后的 canonical 载荷与摘要逐字不变，对账不会把重寄判为 delivery_conflict。
+    #[test]
+    fn resent_payment_rebuilds_the_first_send_deadline_not_the_current_one() {
+        for kind in [
+            SettlementObligationKind::WinnerPaymentCarrierCod,
+            SettlementObligationKind::WinnerEquipmentCod,
+        ] {
+            let mut first_send = claim(kind);
+            if kind == SettlementObligationKind::WinnerEquipmentCod {
+                first_send.carrier_credit = 0;
+                first_send.equipment_world = SettlementWorld::Main;
+                first_send.settlement_line = Some(SettlementLine {
+                    lot_id: first_send.lot_id,
+                    end_price: SettlementAmount::new(1_000).unwrap(),
+                    listed_price: SettlementAmount::new(1_000).unwrap(),
+                    buyer_amount: SettlementAmount::new(1_000).unwrap(),
+                    seller_amount: SettlementAmount::new(1_000).unwrap(),
+                    tax_amount: SettlementAmount::new(0).unwrap(),
+                    compensation_amount: SettlementAmount::new(0).unwrap(),
+                    hold_ppm: 0,
+                    adjustment_ppm: 0,
+                });
+                first_send.settlement_mode = Some(SettlementMode::HoldCurveV1);
+            }
+            let original = canonical_of(&first_send);
+            for current in ["2026-11-17T12:00:00Z", "2026-11-24T08:30:00Z"] {
+                let mut resent = first_send.clone();
+                resent.payment_deadline_at = Some(deadline(current));
+                // 重寄后领取到的是同一冻结投递：按原快照键集合重放也必须得到原摘要。
+                resent.delivery_snapshot =
+                    Some(snapshot_with_variables(&resent, original.payload["variables"].clone()));
+                let rebuilt = canonical_of(&resent);
+                assert_eq!(rebuilt.request_hash, original.request_hash, "{kind:?} {current}");
+                assert_eq!(
+                    variables_of(&rebuilt).get("payment_deadline").map(String::as_str),
+                    Some("2026-11-10T12:00:00Z"),
+                    "{kind:?} 正文只能展示首寄期限"
+                );
+            }
+        }
+    }
+
+    /// 反例：错误的 D0（例如误用重寄后的当前期限）重建出的载荷与冻结快照不同，摘要比较失败关闭；
+    /// 只有当前期限而没有 D0 时也不会把当前期限写进正文。
+    #[test]
+    fn wrong_or_missing_initial_deadline_never_reproduces_the_frozen_payload() {
+        let first_send = claim(SettlementObligationKind::WinnerPaymentCarrierCod);
+        let original = canonical_of(&first_send);
+        let mut wrong = first_send.clone();
+        wrong.initial_payment_deadline_at = Some(deadline("2026-11-17T12:00:00Z"));
+        wrong.delivery_snapshot =
+            Some(snapshot_with_variables(&wrong, original.payload["variables"].clone()));
+        assert_ne!(canonical_of(&wrong).request_hash, original.request_hash);
+
+        let mut missing = first_send;
+        missing.initial_payment_deadline_at = None;
+        missing.payment_deadline_at = Some(deadline("2026-11-17T12:00:00Z"));
+        assert!(!variables_of(&canonical_of(&missing)).contains_key("payment_deadline"));
     }
 
     fn snapshot_with_variables(
@@ -646,7 +826,7 @@ mod tests {
                 frozen_sent_proven: false,
                 sending_at: Some(claim.claimed_at),
                 funding_source_boundary: Some(claim.claimed_at - chrono::Duration::hours(1)),
-                payment_deadline_at: claim.payment_deadline_at,
+                initial_payment_deadline_at: claim.initial_payment_deadline_at,
             };
             let subject = canonical_settlement_fulfillment_subject(kind, claim.obligation_id)
                 .expect("COD 主题必须存在");

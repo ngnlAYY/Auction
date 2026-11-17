@@ -43,6 +43,7 @@ const ADMIN_EXACT_ROUTES: &[&str] = &[
     "/rules",
     "/rules-content",
     "/settlement",
+    "/settlement-returns",
     "/status",
     "/users",
 ];
@@ -66,6 +67,7 @@ pub(super) fn browser_route(surface: Surface, path: &str) -> bool {
                     .and_then(|value| value.strip_suffix("/lots"))
                     .is_some_and(valid_parameter)
                 || path.strip_prefix("/deliveries/").is_some_and(valid_parameter)
+                || path.strip_prefix("/settlement-returns/").is_some_and(valid_parameter)
         }
     }
 }
@@ -76,4 +78,27 @@ fn valid_parameter(value: &str) -> bool {
         && value
             .bytes()
             .all(|value| !value.is_ascii_control() && !matches!(value, b'/' | b'\\' | b'%'))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Surface, browser_route};
+
+    /// 结算退件列表与详情只给 Admin SPA 入口；参数段为空、含路径分隔或穿越时不给入口。
+    #[test]
+    fn settlement_return_pages_are_admin_only_browser_routes() {
+        let case = "/settlement-returns/0f8fad5b-d9cb-469f-a165-70867728950e";
+        assert!(browser_route(Surface::Admin, "/settlement-returns"));
+        assert!(browser_route(Surface::Admin, case));
+        assert!(!browser_route(Surface::Public, "/settlement-returns"));
+        assert!(!browser_route(Surface::Public, case));
+        for invalid in [
+            "/settlement-returns/",
+            "/settlement-returns/..",
+            "/settlement-returns/a/b",
+            "/settlement-returns/a%2Fb",
+        ] {
+            assert!(!browser_route(Surface::Admin, invalid), "{invalid}");
+        }
+    }
 }

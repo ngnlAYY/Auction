@@ -9,8 +9,8 @@ use auction_application::core::{ApplicationError, RepositoryError};
 use auction_application::mail::{
     MoogleMailboxComposeState, MoogleMailboxDiscard, MoogleMailboxInboxAssets,
     MoogleMailboxInboxObservation, MoogleMailboxMaintenance, MoogleMailboxNoticeExpectation,
-    MoogleMailboxSentEntries, MoogleMailboxSentEntry, MoogleMailboxSentState,
-    MoogleMailboxUnprovenSend,
+    MoogleMailboxReturnTakeIdentity, MoogleMailboxReturnTakeObservation, MoogleMailboxSentEntries,
+    MoogleMailboxSentEntry, MoogleMailboxSentState, MoogleMailboxUnprovenSend,
 };
 use chrono::{DateTime, Utc};
 
@@ -234,6 +234,38 @@ impl MoogleMailboxMaintenance for MoogleMailMaintenanceAdapter {
                         let _ = session.invalidate_current().await;
                     }
                     Err(maintenance_remote_error(error, "收件箱详情读取失败"))
+                }
+            }
+        })
+    }
+
+    fn return_take_receipt<'a>(
+        &'a self,
+        world_id: &'a str,
+        external_mail_id: &'a str,
+        identity: &'a MoogleMailboxReturnTakeIdentity,
+    ) -> ApplicationFuture<'a, MoogleMailboxReturnTakeObservation> {
+        Box::pin(async move {
+            let world = maintenance_world(world_id)?;
+            let mut session = self.read_session(world, MoogleMailOperation::Detail).await?;
+            match self
+                .sender
+                .inspect_returned_take(session.cookie(), world, external_mail_id, identity)
+                .await
+            {
+                Ok(outcome) => {
+                    check_observation_session(&session).await?;
+                    // 结论只在原凭据会话里成立：与资产观察同样携带本次读取的凭据身份。
+                    Ok(MoogleMailboxReturnTakeObservation {
+                        outcome,
+                        observation_credential: session.observation_credential_binding(),
+                    })
+                }
+                Err(error) => {
+                    if error.is_session_expired() {
+                        let _ = session.invalidate_current().await;
+                    }
+                    Err(maintenance_remote_error(error, "结算退件详情读取失败"))
                 }
             }
         })

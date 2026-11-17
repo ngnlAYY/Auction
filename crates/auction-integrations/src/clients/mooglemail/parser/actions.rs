@@ -1,14 +1,17 @@
 //! MoogleMail 详情页与动作结果的严格解析。
 
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
+use auction_application::mail::{
+    MoogleMailboxInboxAssets, MoogleMailboxReturnTake, MoogleMailboxReturnTakeIdentity,
+};
 use scraper::Html;
 
 use super::{
     MoogleMailActionState, MoogleMailMessage, MoogleMailParser, MoogleMailSummary,
     action_proof_error, detail_error, has_result_message, parse_detail_actions,
     parse_detail_asset_manifest, parse_detail_assets, parse_detail_fields,
-    parse_terminal_empty_detail, parse_token, prove_take_identity_and_receipts, read_selector,
-    unique_element, valid_message_body,
+    parse_terminal_empty_detail, parse_token, prove_returned_take_receipts,
+    prove_take_identity_and_receipts, read_selector, unique_element, valid_message_body,
 };
 use crate::clients::mooglemail::protocol::valid_opaque_id;
 use crate::clients::mooglemail::{
@@ -266,6 +269,47 @@ impl MoogleMailParser {
             }
         }
     }
+
+    /// 结算退件 Take 原 MID 详情页的只读结论：远端明确答复不存在为 `Missing`；仍挂资产为
+    /// `Present`；附件已空时只有原身份、原正文前缀与领取回执都成立才是 `Taken`，否则 `Unproven`。
+    pub fn returned_take_observation(
+        &self,
+        document: &[u8],
+        world: MoogleMailWorld,
+        identity: &MoogleMailboxReturnTakeIdentity,
+    ) -> Result<MoogleMailboxReturnTake, MoogleMailError> {
+        Ok(match self.parse_action_state_or_missing(document, world)? {
+            None => MoogleMailboxReturnTake::Missing,
+            Some(state) => returned_take_state(&state, identity),
+        })
+    }
+}
+
+/// 已解析详情页对结算退件 Take 的结论；仍可领取或仍有任何资产时交给调用方比对是否完整。
+pub(crate) fn returned_take_state(
+    state: &MoogleMailActionState,
+    identity: &MoogleMailboxReturnTakeIdentity,
+) -> MoogleMailboxReturnTake {
+    if state.claimable
+        || !state.equipment_ids.is_empty()
+        || state.credits != 0
+        || state.cod != 0
+        || state.attachment_count != 0
+    {
+        let mut equipment_ids = state.equipment_ids.clone();
+        equipment_ids.sort_unstable();
+        return MoogleMailboxReturnTake::Present(MoogleMailboxInboxAssets {
+            sender: state.sender.clone(),
+            equipment_ids,
+            credits: state.credits,
+            cod: state.cod,
+        });
+    }
+    if prove_returned_take_receipts(state, identity) {
+        MoogleMailboxReturnTake::Taken
+    } else {
+        MoogleMailboxReturnTake::Unproven
+    }
 }
 
 fn returned_receipt_matches(
@@ -326,4 +370,119 @@ fn returned_receipt_matches(
         && assets.cod == before.cod
         && assets.entry_count == before.attachment_count
         && actual_equipment_ids == expected_equipment_ids)
+}
+
+#[cfg(test)]
+mod tests {
+    use auction_application::mail::{MoogleMailboxReturnTake, MoogleMailboxReturnTakeIdentity};
+
+    use super::returned_take_state;
+    use crate::clients::mooglemail::MoogleMailWorld;
+    use crate::clients::mooglemail::parser::{MoogleMailParser, canonical_mail_body_digest};
+
+    /// 真实已领取详情页（taken-3125358）：只替换发件人、主题与正文，页面结构、资产脚本与按钮不变。
+    const TAKEN: &str = include_str!("../../../../tests/fixtures/mooglemail/taken-3125358.html");
+    const MISSING: &str =
+        include_str!("../../../../tests/fixtures/mooglemail/inboxdetail-missing.html");
+    const SUBJECT: &str = "[RTS] Auction seller payout [5b1c2a9e-1f0d-4c6b-9a7e-3d2f1e0c9b8a]";
+    const ORIGINAL: &str = "Your auction payout is attached.\n\nAmount: 90 Credits\n\nReference: 5b1c2a9e-1f0d-4c6b-9a7e-3d2f1e0c9b8a";
+    const SUFFIX: &str = "\n\nThis message was returned from Seller Name, kupo!";
+
+    fn identity() -> MoogleMailboxReturnTakeIdentity {
+        MoogleMailboxReturnTakeIdentity {
+            sender: "MoogleMail".to_owned(),
+            subject: SUBJECT.to_owned(),
+            original_body_digest: canonical_mail_body_digest(ORIGINAL),
+            returned_from: "Seller Name".to_owned(),
+            cod: 0,
+            attachment_count: 1,
+        }
+    }
+
+    fn page(sender: &str, subject: &str, body: &str) -> String {
+        let start = TAKEN.find("<textarea").expect("正文开始");
+        let open_end = start + TAKEN[start..].find('>').expect("正文标签结束") + 1;
+        let close = TAKEN.find("</textarea>").expect("正文结束");
+        let page = format!("{}{body}{}", &TAKEN[..open_end], &TAKEN[close..]);
+        page.replacen("value=\"Pnfcgarl\"", &format!("value=\"{sender}\""), 1).replacen(
+            "value=\"auction\"",
+            &format!("value=\"{subject}\""),
+            1,
+        )
+    }
+
+    fn observe(html: &str, identity: &MoogleMailboxReturnTakeIdentity) -> MoogleMailboxReturnTake {
+        MoogleMailParser
+            .returned_take_observation(html.as_bytes(), MoogleMailWorld::Main, identity)
+            .expect("真实页面结构可解析")
+    }
+
+    fn taken_body() -> String {
+        format!("{ORIGINAL}{SUFFIX}\n\nRemoved attachment: 90 Credits")
+    }
+
+    /// 原身份、原退件正文前缀与逐条领取回执都成立才是领取完成证明；CRLF 不改变结论。
+    #[test]
+    fn returned_take_receipt_proves_completion() {
+        let identity = identity();
+        assert_eq!(
+            observe(&page("MoogleMail", SUBJECT, &taken_body()), &identity),
+            MoogleMailboxReturnTake::Taken
+        );
+        let crlf = taken_body().replace('\n', "\r\n");
+        assert_eq!(
+            observe(&page("MoogleMail", SUBJECT, &crlf), &identity),
+            MoogleMailboxReturnTake::Taken
+        );
+        assert_eq!(observe(MISSING, &identity), MoogleMailboxReturnTake::Missing);
+    }
+
+    /// 附件已为空但回执不成立、回执行数或 COD 回执不符、原正文或原收件人不符、发件人或主题不符，
+    /// 都只是未证明，不能当作领取完成。
+    #[test]
+    fn empty_attachments_without_matching_receipt_stay_unproven() {
+        let identity = identity();
+        let unproven = |html: String, identity: &MoogleMailboxReturnTakeIdentity| {
+            assert_eq!(observe(&html, identity), MoogleMailboxReturnTake::Unproven, "{html:.0}");
+        };
+        unproven(page("MoogleMail", SUBJECT, &format!("{ORIGINAL}{SUFFIX}")), &identity);
+        unproven(page("MoogleMail", SUBJECT, ORIGINAL), &identity);
+        let mut two = identity.clone();
+        two.attachment_count = 2;
+        unproven(page("MoogleMail", SUBJECT, &taken_body()), &two);
+        unproven(
+            page("MoogleMail", SUBJECT, &format!("{}\nCoD Paid: 10 Credits", taken_body())),
+            &identity,
+        );
+        unproven(
+            page("MoogleMail", SUBJECT, &taken_body().replace("Amount: 90", "Amount: 91")),
+            &identity,
+        );
+        unproven(
+            page("MoogleMail", SUBJECT, &taken_body().replace("Seller Name", "Other Name")),
+            &identity,
+        );
+        unproven(page("BuyerPlayer", SUBJECT, &taken_body()), &identity);
+        unproven(page("MoogleMail", "[RTS] Auction buyer refund [x]", &taken_body()), &identity);
+    }
+
+    /// 仍可领取或仍挂资产时交给调用方比对完整性，不判领取完成。
+    #[test]
+    fn remaining_assets_are_reported_as_present() {
+        let mut state = MoogleMailParser
+            .parse_action_state(
+                page("MoogleMail", SUBJECT, &taken_body()).as_bytes(),
+                MoogleMailWorld::Main,
+            )
+            .expect("真实页面结构可解析");
+        state.credits = 90;
+        state.attachment_count = 1;
+        state.claimable = true;
+        let MoogleMailboxReturnTake::Present(assets) = returned_take_state(&state, &identity())
+        else {
+            panic!("仍挂资产必须是 Present");
+        };
+        assert_eq!((assets.sender.as_str(), assets.credits, assets.cod), ("MoogleMail", 90, 0));
+        assert!(assets.equipment_ids.is_empty());
+    }
 }

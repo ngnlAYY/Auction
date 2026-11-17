@@ -58,9 +58,11 @@ pub(super) async fn snapshot(
     uid: &str,
 ) -> Result<FundingPreview, FundingError> {
     // 明确投影安全财务字段，不导出payload正文、Cookie、secret_refs或整封邮件。
+    // `equipment_recovered_closed` 只在确认事务以精确收口事实终结卖方货款与交付时成立。
     let lots = array(
         tx,
-        r#"SELECT COALESCE(jsonb_agg(to_jsonb(x) ORDER BY x.lot_id),'[]')
+        concat!(
+            r#"SELECT COALESCE(jsonb_agg(to_jsonb(x) ORDER BY x.lot_id),'[]')
            FROM (
                SELECT l.*,
                       p.id payment_id,
@@ -71,6 +73,7 @@ pub(super) async fn snapshot(
                       s.id seller_id,
                       s.business_state seller_business,
                       sf.execution_state seller_state,
+                      sf.last_error_code seller_error,
                       sf.delivery_id seller_delivery,
                       b.id refund_id,
                       b.business_state refund_business,
@@ -78,12 +81,16 @@ pub(super) async fn snapshot(
                       bf.delivery_id refund_delivery,
                       h.id handoff_id,
                       hf.execution_state handoff_state,
+                      hf.last_error_code handoff_error,
                       r.id recovery_id,
                       r.stage recovery_stage,
                       r.resolution,
                       r.blocking_code,
                       r.custody_proof_kind,
                       r.custody_proof_digest,
+                      COALESCE("#,
+            crate::database::settlement::fulfillment::equipment_recovered_closure_sql!("r"),
+            r#", false) equipment_recovered_closed,
                       fl.uid funded_uid,
                       fl.disposition funded_disposition
                FROM public.lot_settlements l
@@ -101,7 +108,8 @@ pub(super) async fn snapshot(
                LEFT JOIN public.settlement_obligation_fulfillments hf ON hf.obligation_id=h.id
                LEFT JOIN public.settlement_recoveries r ON r.lot_id=l.lot_id
                LEFT JOIN public.settlement_funding_lots fl ON fl.lot_id=l.lot_id
-           ) x"#,
+           ) x"#
+        ),
     )
     .await?;
     let deliveries = array(
@@ -195,8 +203,19 @@ pub(super) async fn snapshot(
         if lot["buyer_amount"].as_i64() == Some(0) {
             continue;
         }
-        if matches!(lot["handoff_state"].as_str(), Some("failed" | "manual_reconcile"))
-            || (!lot["handoff_id"].is_null() && lot["handoff_state"].is_null())
+        // equipment_recovered 的精确收口终结了交付与卖方货款：这两条 failed 已有恢复来源的处置，
+        // 不是不明责任；其余失败与人工核对仍然阻断。
+        let recovered_closed = lot["equipment_recovered_closed"] == true;
+        let handoff_closed = recovered_closed
+            && lot["handoff_state"] == "failed"
+            && lot["handoff_error"] == "recovery_equipment_recovered";
+        let seller_closed = recovered_closed
+            && lot["seller_state"] == "failed"
+            && lot["seller_error"] == "recovery_sale_voided"
+            && lot["seller_delivery"].is_null();
+        if !handoff_closed
+            && (matches!(lot["handoff_state"].as_str(), Some("failed" | "manual_reconcile"))
+                || (!lot["handoff_id"].is_null() && lot["handoff_state"].is_null()))
         {
             blockers.push(format!("lot:{}:handoff_unproven", lot["lot_id"]));
         }
@@ -214,6 +233,9 @@ pub(super) async fn snapshot(
             if field == "refund_state"
                 && loss_lots.contains(lot["lot_id"].as_str().ok_or(FundingError::Storage)?)
             {
+                continue;
+            }
+            if field == "seller_state" && seller_closed {
                 continue;
             }
             if matches!(lot[field].as_str(), Some("failed" | "manual_reconcile"))

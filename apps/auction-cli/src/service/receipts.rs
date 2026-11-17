@@ -9,14 +9,16 @@ use crate::receipt;
 use crate::receipt::{
     Action, Artifact, DeploymentReceipt, MigrationRecord, Outcome, ReceiptContext,
 };
+use crate::support::files::PrivateDirectory;
 
-/// 成功（含 `already_running`）回执先于成功输出发布；写不进去就整体失败。
+/// 成功（含 `already_running`）回执先于成功输出发布；写不进去就整体失败。`state` 是持锁时固定的
+/// 部署状态目录，回执与锁属于同一棵树。
 #[expect(
     clippy::too_many_arguments,
     reason = "回执字段逐项来自调用方，结构体包装只会复制同一组字段"
 )]
 pub(super) async fn publish_receipt(
-    units: &UnitArgs,
+    state: &PrivateDirectory,
     systemctl: &Systemctl,
     action: Action,
     outcome: Outcome,
@@ -26,23 +28,14 @@ pub(super) async fn publish_receipt(
     failure: Option<String>,
 ) -> anyhow::Result<DeploymentReceipt> {
     let artifacts = collect_artifacts(systemctl).await;
-    receipt::record(
-        &units.state_dir,
-        action,
-        outcome,
-        started_at,
-        context,
-        migration,
-        artifacts,
-        failure,
-    )
-    .context("写入部署回执失败")
+    receipt::record(state, action, outcome, started_at, context, migration, artifacts, failure)
+        .context("写入部署回执失败")
 }
 
 /// 失败回执尽力追加；回执本身写不进去时把它附在原错误上，不掩盖部署失败原因。
 /// `deploy`/`rollback` 在保留旧程序之前的失败也经此追加，与 service 命令同一口径。
 pub(crate) async fn record_failure(
-    units: &UnitArgs,
+    state: &PrivateDirectory,
     systemctl: &Systemctl,
     action: Action,
     started_at: DateTime<Utc>,
@@ -51,7 +44,7 @@ pub(crate) async fn record_failure(
 ) -> anyhow::Result<()> {
     let failure = receipt::failure_text(error);
     if let Err(record_error) = publish_receipt(
-        units,
+        state,
         systemctl,
         action,
         Outcome::Failed,

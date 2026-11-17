@@ -70,6 +70,8 @@ async fn postgres_report(
                recovery.payment_deadline_at,
                recovery.reminder_count,
                recovery.reminder_limit,
+               recovery.cod_return_count,
+               recovery.cod_return_limit,
                recovery.custody_proof_kind,
                recovery.custody_proof_observed_at,
                recovery.blocking_code,
@@ -201,6 +203,12 @@ async fn postgres_report(
             reminder_limit: row
                 .try_get("reminder_limit")
                 .map_err(|error| storage_error_from(error, "读取 recovery 提醒上限失败"))?,
+            cod_return_count: row
+                .try_get("cod_return_count")
+                .map_err(|error| storage_error_from(error, "读取 recovery COD 退回次数失败"))?,
+            cod_return_limit: row
+                .try_get("cod_return_limit")
+                .map_err(|error| storage_error_from(error, "读取 recovery COD 退回上限失败"))?,
             custody_proof_kind: row
                 .try_get("custody_proof_kind")
                 .map_err(|error| storage_error_from(error, "读取 recovery custody 证明类型失败"))?,

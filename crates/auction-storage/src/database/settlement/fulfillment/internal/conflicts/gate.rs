@@ -19,10 +19,13 @@ pub(super) async fn exclude_conflicts(
     ignored_delivery: Option<Uuid>,
 ) -> Result<(), FundingError> {
     // 仅原equipment_recovered门已闭合且原handoff有明确Sent成功时排除该旧出站。
-    // prepared/sending/manual_reconcile及未知结果不在此例外内，也不改写旧义务。
+    // handoff 须仍为确认前的 enqueued，或已由确认事务以精确收口事实（failed/
+    // recovery_equipment_recovered 与当前 fence 上的恢复来源处置）终结；只排除这一条原投递，
+    // prepared/sending/manual_reconcile、任意其他 failed 及未知结果不在此例外内，也不改写旧义务。
+    // 可信 Sent 证明与确认收回链、内部退款校验同一谓词，旧格式引用恢复证明同样放行。
     let recovered_handoff: Option<uuid::Uuid> =
         if target.kind == auction_domain::SettlementObligationKind::BuyerRefund {
-            sqlx::query_scalar(
+            sqlx::query_scalar(concat!(
                 r#"SELECT d.id
                    FROM public.settlement_recoveries r
                    JOIN public.settlement_obligation_fulfillments h
@@ -36,16 +39,12 @@ pub(super) async fn exclude_conflicts(
                      AND r.custody_proof_digest=a.proof_digest
                      AND a.execution_state='satisfied'
                      AND a.proof_digest IS NOT NULL
-                     AND h.execution_state='enqueued'
-                     AND d.status='succeeded'
-                     AND (
-                         d.result_metadata->>'proof'='sent_exact_payload_v1'
-                         OR public.delivery_has_frozen_sent_proof(
-                             d.id,d.result_metadata,d.external_reference
-                         )
-                     )
-                     AND d.result_metadata->>'external_reference_proven'='true'"#,
-            )
+                     AND (h.execution_state='enqueued' OR "#,
+                crate::database::settlement::fulfillment::equipment_recovered_closure_sql!("r"),
+                r#")
+                     AND "#,
+                crate::database::settlement::fulfillment::recovered_handoff_sent_proof_sql!("d")
+            ))
             .bind(target.obligation_id.as_uuid())
             .fetch_optional(&mut **tx)
             .await
@@ -125,8 +124,8 @@ pub(super) async fn exclude_conflicts(
                   d.payload
            FROM public.deliveries d
            WHERE d.origin_kind IN (
-               'mail_intake','settlement_recovery_action','operations_alert',
-               'lot_watch','seller_summary','season_reminder'
+               'mail_intake','settlement_recovery_action','settlement_return_action',
+               'operations_alert','lot_watch','seller_summary','season_reminder'
            )"#,
     )
     .fetch(&mut **tx);
@@ -220,8 +219,9 @@ pub(super) async fn exclude_conflicts(
                                THEN ARRAY['payment_deadline']
                            WHEN 'settlement_payment_carrier'
                                THEN ARRAY['item_name','payment_deadline']
-                           WHEN 'settlement_seller_payout' THEN ARRAY['item_name']
-                           WHEN 'settlement_buyer_refund' THEN ARRAY['item_name']
+                           WHEN 'settlement_seller_payout' THEN ARRAY['item_name','dispatch']
+                           WHEN 'settlement_buyer_refund' THEN ARRAY['item_name','dispatch']
+                           WHEN 'settlement_equipment_handoff' THEN ARRAY['dispatch']
                            ELSE ARRAY[]::text[] END
                          IS DISTINCT FROM CASE d.payload_template
                            WHEN 'settlement_winner_equipment_cod' THEN CASE
@@ -337,6 +337,12 @@ pub(super) async fn exclude_conflicts(
                    WHERE a.delivery_id=d.id
                      AND a.execution_state='satisfied'
                      AND a.proof_digest IS NOT NULL
+                 )
+                 AND NOT EXISTS(
+                   SELECT 1
+                   FROM public.settlement_return_takes returned
+                   WHERE returned.take_delivery_id=d.id
+                      OR returned.original_delivery_id=d.id
                  )
                  AND NOT EXISTS(
                    SELECT 1

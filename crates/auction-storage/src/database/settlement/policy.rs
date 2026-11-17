@@ -1,6 +1,8 @@
-//! 生命周期继承与结算读取共用的冻结结算策略解码；不读取数据库或修改历史策略。
+//! 生命周期继承与结算读取共用的冻结结算策略解码，以及恢复记录首寄付款期限的换算；不读取
+//! 数据库或修改历史策略。
 
-use auction_domain::{AdjustmentAnchor, SettlementMode, SettlementPolicy};
+use auction_domain::{AdjustmentAnchor, RecoveryPolicy, SettlementMode, SettlementPolicy};
+use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -35,4 +37,54 @@ pub(in crate::database) fn decode(snapshot: &Value) -> Result<SettlementPolicy, 
     // 这里只验证历史结构。新建后继时才进一步应用新模板金额门禁。
     policy.validate().map_err(|_| "结算策略快照校验失败")?;
     Ok(policy)
+}
+
+/// 恢复记录行到首寄付款期限 D0 的唯一换算：履约领取、COD 实收准入与载体资金门都按它重建付款
+/// 邮件正文里的期限，不读重寄会改写的 `payment_deadline_at`。两列都缺失表示义务没有恢复记录
+/// （历史义务）；只缺一列、版本越界或时间溢出都失败关闭，版本表由领域持有。
+pub(in crate::database) fn initial_payment_deadline(
+    created_at: Option<DateTime<Utc>>,
+    policy_version: Option<i32>,
+) -> Result<Option<DateTime<Utc>>, &'static str> {
+    match (created_at, policy_version) {
+        (None, None) => Ok(None),
+        (Some(created_at), Some(version)) => u32::try_from(version)
+            .ok()
+            .and_then(|version| RecoveryPolicy::initial_payment_deadline(created_at, version))
+            .map(Some)
+            .ok_or("恢复记录的首寄付款期限无法按冻结策略换算"),
+        _ => Err("恢复记录的首寄付款期限事实不完整"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{DateTime, Duration, TimeZone, Utc};
+
+    use super::initial_payment_deadline;
+
+    #[test]
+    fn initial_payment_deadline_follows_the_frozen_recovery_row() {
+        let created_at =
+            Utc.with_ymd_and_hms(2026, 11, 3, 12, 19, 28).single().expect("固定测试时间必须存在");
+        assert_eq!(initial_payment_deadline(None, None), Ok(None));
+        assert_eq!(
+            initial_payment_deadline(Some(created_at), Some(1)),
+            Ok(Some(created_at + Duration::days(7)))
+        );
+        assert_eq!(
+            initial_payment_deadline(Some(created_at), Some(2)),
+            Ok(Some(created_at + Duration::hours(24)))
+        );
+        // 缺列、负数或未知版本与时间溢出都不能退化为“没有期限”的旧载荷。
+        for (created_at, version) in [
+            (Some(created_at), None),
+            (None, Some(1)),
+            (Some(created_at), Some(-1)),
+            (Some(created_at), Some(3)),
+            (Some(DateTime::<Utc>::MAX_UTC), Some(1)),
+        ] {
+            assert!(initial_payment_deadline(created_at, version).is_err(), "{version:?}");
+        }
+    }
 }

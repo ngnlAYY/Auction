@@ -15,6 +15,9 @@ use super::pagination::AdminStrictPaginationResponse;
 #[serde(deny_unknown_fields)]
 pub struct AdminDeliveryResponse {
     pub id: String,
+    /// 来源闭集。结算退件 Take（`settlement_return_action`）只在列表与详情请求带
+    /// `include=settlement_returns` 时出现：缺省列表不列出这类投递，缺省详情拒绝读取，升级前的
+    /// 页面不会读到它不认识的来源。
     pub origin_kind: String,
     pub origin_id: String,
     pub recipient: String,
@@ -215,6 +218,8 @@ pub struct AdminDeliveryCustodyResponse {
 #[serde(deny_unknown_fields)]
 pub struct AdminDeliveryDispositionResponse {
     pub command_id: String,
+    /// 处置种类。缺省详情响应只输出已发布的闭集；`recovery_equipment_recovered` 只在请求带
+    /// `include=settlement_returns` 时输出，升级前的页面不会读到它不认识的值。
     pub kind: String,
     pub occurred_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]

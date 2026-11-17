@@ -10,8 +10,11 @@ use super::mapping::snapshot;
 use crate::database::TrackedPool;
 
 /// 列表与计数共用同一组精确筛选；参数顺序固定为
-/// status、reference、recipient、template、category、world、created_from、created_to。
+/// status、reference、recipient、template、category、world、created_from、created_to、
+/// include_settlement_return_actions。
 /// reference 同时匹配投递 ID、结算义务 ID 与玩家通知 ID，其余筛选都是等值匹配。
+/// 结算退件 Take（`settlement_return_action`）只在请求扩展投影时列出：已发布页面按闭集解码来源，
+/// 把它放进缺省投影会让整页解码失败；它和计数在同一条件下排除，分页与总数保持一致。
 /// 用宏展开而不是动态拼接，让 SQLx 的静态字符串检查覆盖完整语句。
 macro_rules! delivery_filters {
     () => {
@@ -41,7 +44,8 @@ macro_rules! delivery_filters {
                  OR COALESCE(deliveries.payload_world, 'main') = $6::text
              )
              AND ($7::timestamptz IS NULL OR deliveries.created_at >= $7::timestamptz)
-             AND ($8::timestamptz IS NULL OR deliveries.created_at <= $8::timestamptz)"#
+             AND ($8::timestamptz IS NULL OR deliveries.created_at <= $8::timestamptz)
+             AND ($9::boolean OR deliveries.origin_kind <> 'settlement_return_action')"#
     };
 }
 
@@ -58,7 +62,7 @@ const PAGE_SQL: &str = concat!(
     delivery_filters!(),
     r#"
        ORDER BY created_at DESC, id DESC
-       LIMIT $9 OFFSET $10"#
+       LIMIT $10 OFFSET $11"#
 );
 
 pub(crate) async fn list(
@@ -77,6 +81,7 @@ pub(crate) async fn list(
     let status = request.status.as_deref();
     let created_from = request.created_from;
     let created_to = request.created_to;
+    let include_returns = request.include_settlement_return_actions;
     count = count
         .bind(status)
         .bind(reference)
@@ -85,7 +90,8 @@ pub(crate) async fn list(
         .bind(category)
         .bind(world)
         .bind(created_from)
-        .bind(created_to);
+        .bind(created_to)
+        .bind(include_returns);
     rows_query = rows_query
         .bind(status)
         .bind(reference)
@@ -95,6 +101,7 @@ pub(crate) async fn list(
         .bind(world)
         .bind(created_from)
         .bind(created_to)
+        .bind(include_returns)
         .bind(request.limit)
         .bind(request.offset);
     let total = count.fetch_one(&mut *transaction).await.map_err(map_storage_error)?;

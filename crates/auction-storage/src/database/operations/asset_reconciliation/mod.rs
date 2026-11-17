@@ -27,6 +27,16 @@ mod solvency;
 #[cfg(test)]
 mod tests;
 
+/// 只在 `test-db` 下暴露偿付查询原文给基准/EXPLAIN 夹具，保证测量的是同一份 SQL；默认构建与
+/// 发布制品不包含该出口。
+#[cfg(feature = "test-db")]
+pub mod benchmark_sql {
+    /// 单个世界的偿付分类查询（`$1` 是 world）。
+    pub fn solvency_world_sql() -> &'static str {
+        super::queries::SOLVENCY_WORLD
+    }
+}
+
 /// 每个 world 最多保存的差异样本；总数仍由完整查询计算。
 const SAMPLE_LIMIT: i64 = 100;
 // 单轮只读快照与追加事务的 tokio 总预算（秒）；单条语句超时由事务内

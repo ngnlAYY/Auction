@@ -15,6 +15,7 @@ mod types;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use actions::returned_take_state;
 pub(crate) use detail::*;
 pub(crate) use list_helpers::*;
 pub(crate) use primitives::*;

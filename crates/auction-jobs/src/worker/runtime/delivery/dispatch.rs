@@ -8,14 +8,14 @@ use auction_application::core::diagnostics::{
     DiagnosticContext, DiagnosticDisposition, DiagnosticError, SafeErrorKind, diagnostic_id,
 };
 use auction_application::delivery::{
-    DeliverySendResult, DeliveryTransport, DeliveryTransportError, DeliveryWorkClaim,
-    DeliveryWorkStore,
+    DELIVERY_PREFLIGHT_TIMEOUT, DeliverySendResult, DeliveryTransport, DeliveryTransportError,
+    DeliveryWorkClaim, DeliveryWorkStore,
 };
 use auction_application::operations::ExternalWriteActivity;
 use auction_observability::WorkerResult;
 
 use super::handoff::{
-    PREFLIGHT_TIMEOUT, confirm_delivery_handoff, prepare_delivery, release_unstarted_delivery,
+    DeliveryHandoff, confirm_delivery_handoff, prepare_delivery, release_unstarted_delivery,
 };
 use super::lease::DeliveryLease;
 use super::notification;
@@ -122,12 +122,12 @@ where
         preparation => {
             let failure_code = match preparation {
                 Ok(Err(error)) => error.failure_code,
-                _ => PREFLIGHT_TIMEOUT.to_owned(),
+                _ => DELIVERY_PREFLIGHT_TIMEOUT.to_owned(),
             };
             // 预算耗尽时 prepare 内部 biased select 与外层 timeout_at 同刻到期，内部通常先返回
             // preflight_timeout，外层只兜底卡在续租等待中的情形；两者都按超时归类。类别只进入
             // 未持久化诊断，不参与释放与延期决策。
-            let preflight_kind = if failure_code == PREFLIGHT_TIMEOUT {
+            let preflight_kind = if failure_code == DELIVERY_PREFLIGHT_TIMEOUT {
                 SafeErrorKind::TIMEOUT
             } else {
                 SafeErrorKind::DEPENDENCY_UNAVAILABLE
@@ -149,7 +149,7 @@ where
     };
     // prepare 可能恰在续租前完成；先补足 TTL，再有界提交 fence，最后确认 sending 租约。
     // 任一步骤不明确成功都丢弃未 poll 的句柄。fence 提交未知不能释放成 pending。
-    if !confirm_delivery_handoff(
+    let handoff = confirm_delivery_handoff(
         delivery_store.as_ref(),
         clock.as_ref(),
         config,
@@ -158,19 +158,51 @@ where
         &mut prepared,
         activity,
     )
-    .await
-    {
+    .await;
+    if !matches!(handoff, DeliveryHandoff::Sending) {
         drop(prepared);
         if activity.is_cancelled() || (activity.enabled() && control.is_draining()) {
             return DeliveryTaskResult::completed(WorkerResult::Canceled);
         }
+        let (worker_result, unpersisted_cause) = match handoff {
+            DeliveryHandoff::Deferred => {
+                // 围栏按业务门确定结束而未进入 sending：竞价警告在交接期间失效（取消关注、重新领先、
+                // lot 到期）、发送节奏未到期或资金门冻结都走这里，原因由围栏事务一侧决定，仅凭来源
+                // 种类无法推断。尚未外部写入，也没有未落库的结果，释放 claim 后正常结束本项。
+                tracing::info!(
+                    delivery_id = %claim.delivery_id,
+                    origin_kind = %claim.origin_kind,
+                    "发送围栏确定未进入 sending，尚未外部写入，释放本次领取"
+                );
+                (WorkerResult::Success, None)
+            }
+            DeliveryHandoff::Faulted(kind) => {
+                // 围栏事务因内部故障（SQL 错误、冲突重试耗尽等）确定回滚：同样尚未外部写入、可以
+                // 安全释放 claim，但这是真实故障，按存储层给出的分类保留 Worker 错误与未持久化计数，
+                // 不能混同正常延期；SQLSTATE 等原因已由存储层脱敏记录。
+                diagnostics::error(
+                    "delivery",
+                    "sending_fence_rolled_back",
+                    kind,
+                    DiagnosticContext {
+                        delivery_id: diagnostic_id(&claim.delivery_id),
+                        write_started: Some(false),
+                        ..Default::default()
+                    },
+                );
+                (WorkerResult::Error, Some(kind))
+            }
+            DeliveryHandoff::Sending | DeliveryHandoff::Unconfirmed => {
+                (WorkerResult::Error, Some(SafeErrorKind::DEPENDENCY_UNAVAILABLE))
+            }
+        };
         return release_unstarted_delivery(
             delivery_store.as_ref(),
             clock.as_ref(),
             config,
             &claim,
-            WorkerResult::Error,
-            Some(SafeErrorKind::DEPENDENCY_UNAVAILABLE),
+            worker_result,
+            unpersisted_cause,
         )
         .await;
     }

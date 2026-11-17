@@ -10,6 +10,7 @@ use crate::database::settlement::funding::ledger::{
     FundingEntry, allocation, complete, entry, issue, replay, source, transfer,
 };
 use crate::database::settlement::funding::{invalid, storage};
+use crate::database::settlement::policy::initial_payment_deadline;
 
 /// 精确可信origin映射，不从任意metadata授予资金权限；generic无映射明确延期。
 pub async fn reserve_funded_delivery(
@@ -42,11 +43,8 @@ pub async fn reserve_funded_delivery(
                       AS equipment_world,
                   (SELECT e.name FROM public.equipment e WHERE e.id=o.equipment_id)
                       AS equipment_name,
-                  (
-                      SELECT r.payment_deadline_at
-                      FROM public.settlement_recoveries r
-                      WHERE r.payment_obligation_id=o.id
-                  ) AS payment_deadline_at,
+                  r.created_at AS recovery_created_at,
+                  r.policy_version AS recovery_policy_version,
                   EXISTS(
                       SELECT 1
                       FROM public.lots l
@@ -61,6 +59,7 @@ pub async fn reserve_funded_delivery(
              AND d.origin_id=o.id::text
            JOIN public.settlement_obligation_fulfillments f ON f.obligation_id=o.id
              AND f.delivery_id=d.id
+           LEFT JOIN public.settlement_recoveries r ON r.payment_obligation_id=o.id
            WHERE d.id=$1
              AND d.status IN ('prepared','pending','claimed')
              AND o.business_state='ready'"#,
@@ -163,6 +162,8 @@ pub async fn reserve_funded_delivery(
     if changed.rows_affected() != 1 {
         return Err(FundingError::Unavailable);
     }
+    // 分配指针在退件返还后会换代到补寄投递；先只追加登记本投递的历史绑定，旧派发始终受保护。
+    super::returns::record_delivery_binding(tx, account, delivery_id, allocation_id).await?;
     entry(
         tx,
         account.uid(),
@@ -181,7 +182,7 @@ pub async fn reserve_funded_delivery(
 }
 
 /// 载体付款的期望正文变量。生成方后来在正文写明装备名与付款期限：载荷带这些键时必须等于
-/// 冻结装备名与恢复记录冻结期限（与生成方同一格式化函数），缺冻结值即失败关闭；旧两变量
+/// 冻结装备名与恢复记录的首寄期限 D0（与生成方同一格式化函数），缺冻结值即失败关闭；旧两变量
 /// 载荷不带这些键，按原形状比较。
 fn carrier_variables(
     row: &sqlx::postgres::PgRow,
@@ -206,11 +207,16 @@ fn carrier_variables(
         if !present("item_name") {
             return Err(FundingError::Unproven);
         }
-        let deadline: Option<chrono::DateTime<chrono::Utc>> =
-            row.try_get("payment_deadline_at").map_err(storage)?;
-        variables["payment_deadline"] = serde_json::Value::String(
-            auction_application::public::format_deadline(deadline.ok_or(FundingError::Unproven)?),
-        );
+        // 重寄会重新起算恢复记录的当前期限，但冻结正文不变：只按首寄期限 D0 重建。
+        let deadline = initial_payment_deadline(
+            row.try_get("recovery_created_at").map_err(storage)?,
+            row.try_get("recovery_policy_version").map_err(storage)?,
+        )
+        .ok()
+        .flatten()
+        .ok_or(FundingError::Unproven)?;
+        variables["payment_deadline"] =
+            serde_json::Value::String(auction_application::public::format_deadline(deadline));
     }
     Ok(variables)
 }
@@ -304,9 +310,31 @@ pub async fn finish_funded_delivery(
     )
     .bind(account.uid())
     .bind(delivery_id)
-    .fetch_one(&mut **tx)
+    .fetch_optional(&mut **tx)
     .await
     .map_err(storage)?;
+    let Some(row) = row else {
+        // 分配已由退件返还换代：旧派发的迟到回调只能重放原“已寄出”结论，不能改动新一轮资金。
+        let returned: bool = sqlx::query_scalar(
+            r#"SELECT EXISTS(
+                   SELECT 1
+                   FROM public.settlement_funding_delivery_bindings binding
+                   JOIN public.settlement_funding_returns returned
+                     ON returned.delivery_id=binding.delivery_id
+                   WHERE binding.delivery_id=$1 AND binding.uid=$2
+               )"#,
+        )
+        .bind(delivery_id)
+        .bind(account.uid())
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(storage)?;
+        return if returned && outcome == FundingDeliveryOutcome::Sent {
+            Ok(())
+        } else {
+            Err(FundingError::Conflict)
+        };
+    };
     let previous: String = row.try_get("state").map_err(storage)?;
     if previous == state {
         return Ok(());

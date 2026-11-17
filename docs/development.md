@@ -20,7 +20,7 @@
 
 ```bash
 just                 # 列出全部入口
-just verify          # 默认验证：策略门禁 → fmt → check → clippy → wasm → rustdoc（不运行测试）
+just verify          # 默认验证：策略门禁 → fmt → check → 依赖版本 → clippy → wasm → rustdoc（不运行测试）
 just test            # 默认 feature 下的纯逻辑、单元与本地替身测试
 just test-db         # 显式 PG18 集成测试；未设置 AUCTION_TEST_DATABASE_URL 时启动本机临时集群
 just test-db-compat  # 只验证迁移 compatible 声明（真实 PG18，沿迁移链）
@@ -127,7 +127,7 @@ just test-db     # 真实 PostgreSQL 18 集成测试，见下文
 
 夹具先在空库上执行全部内嵌迁移得到模板库，再按测试 `CREATE DATABASE ... TEMPLATE` 克隆；析构时 `DROP DATABASE ... WITH (FORCE)`，临时集群在最后一个测试释放句柄后停止并删除数据目录。`postgres_` 前缀是数据库测试的命名选择契约。夹具另建只属于 `auction_runtime` 的临时登录角色，`TestDatabase::store()` 默认以它连接，用于证明最小权限下事务可以提交；`maintenance_store()` 只用于迁移、DDL 夹具与必须越过运行账号权限的断言读取，以维护账号驱动被测端口会掩盖运行账号缺权。
 
-本地替身由 `crates/auction-test-support` 提供，只绑定 IPv4 回环、以脱敏语料回放，绝不连接真实账号；`crates/auction-integrations/tests/` 的邮件与论坛替身用真实客户端覆盖读取、账号忙、Cookie 失效、超时、协议漂移与写入结果分类，`mooglemail_maintenance_contention.rs` 复现“完整观察与 Sent 维护共用请求门导致维护超时”。`crates/auction-integrations/src/clients/mooglemail/sender/baseline/tests.rs` 把 Sent 页数上限设为 1，覆盖发送基线在 `full`/`shadow` 下的失败关闭、`watermark` 的边界取得与写后候选；`apps/auction-worker/src/bootstrap/shutdown/tests.rs` 在发送 POST 中途停止 Worker，验证结果落库后才退出、准备期工作立即放弃、预算耗尽只留 sending 围栏且不重发。`crates/auction-integrations/src/equipment/reader/tests.rs` 用注入的账号状态故障覆盖装备页读取与邮件请求共用同账号许可：战斗页与限流只延期不退件、熔断窗口内不发网络、物理请求不重叠（装备页本身没有语料）。替身未采集的远端页面、Worker 完整投递 runtime 与论坛写入成功页仍无替身驱动的用例；存储端口方法覆盖率用 `bash ci/checks/check.sh port-coverage` 统计，该报告不并入 `just verify`（口径见[ci/checks/README.md#存储端口覆盖率报告不并入-just-verify](../ci/checks/README.md#存储端口覆盖率报告不并入-just-verify)），不能据此声称数据库覆盖完整。
+本地替身由 `crates/auction-test-support` 提供，只绑定 IPv4 回环、以脱敏语料回放，绝不连接真实账号；`crates/auction-integrations/tests/` 的邮件与论坛替身用真实客户端覆盖读取、账号忙、Cookie 失效、超时、协议漂移与写入结果分类，`mooglemail_maintenance_contention.rs` 复现“完整观察与 Sent 维护共用请求门导致维护超时”，`returned_take_timing.rs` 用真实投递 transport 复现结算退件 Take 的旧 POST 迟到完成与重排后新预检的两种交错（远端附件至多取走一次，已取走时新预检失败关闭、不再发 POST）。`crates/auction-integrations/src/clients/mooglemail/sender/baseline/tests.rs` 把 Sent 页数上限设为 1，覆盖发送基线在 `full`/`shadow` 下的失败关闭、`watermark` 的边界取得与写后候选；`apps/auction-worker/src/bootstrap/shutdown/tests.rs` 在发送 POST 中途停止 Worker，验证结果落库后才退出、准备期工作立即放弃、预算耗尽只留 sending 围栏且不重发。`crates/auction-integrations/src/equipment/reader/tests.rs` 用注入的账号状态故障覆盖装备页读取与邮件请求共用同账号许可：战斗页与限流只延期不退件、熔断窗口内不发网络、物理请求不重叠（装备页本身没有语料）。替身未采集的远端页面、Worker 完整投递 runtime 与论坛写入成功页仍无替身驱动的用例；存储端口方法覆盖率用 `bash ci/checks/check.sh port-coverage` 统计，该报告不并入 `just verify`（口径见[ci/checks/README.md#存储端口覆盖率报告不并入-just-verify](../ci/checks/README.md#存储端口覆盖率报告不并入-just-verify)），不能据此声称数据库覆盖完整。
 
 迁移兼容声明验证在 `crates/auction-storage/tests/postgres/migration_compatibility.rs`，也可用 `just test-db-compat` 单独运行：沿真实迁移链逐级前进，在 V-1 捕获旧程序依赖的契约，执行 V 后要求 `compatible` 登记不收缩任何既有对象、权限或旧版语句结果；`breaking` 只重建基线，另有破坏用例证明比较与写入探针确实会失败。
 

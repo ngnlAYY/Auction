@@ -12,7 +12,7 @@
 | `/auctions` | 历史拍卖列表：每场附拍品与出价记录入口，已结算场次另有履约进度入口（带场次与世界） |
 | `/lots/{lot_code}` | 拍品直达链接：独立的拍品页已移除，拍品详情统一在各列表的页内抽屉里展示。参数是拍品 UUID 时（被超提醒里的链接）跳到看板上该拍品所在的目录页并打开详情抽屉；其余取值（旧书签、早期提醒里的 lot 代码）跳回拍卖看板，保留原地址中的世界与场次查询 |
 | `/bidlog` | 出价日志：按世界、场次与拍品筛选，列出时间、编号、装备、竞价者与金额；操作列的查看按钮在页内打开只读的拍品详情抽屉。拍品筛选接受完整拍品 UUID 或不超过 32 位的字母数字编号，输入停顿后才生效，格式不符时就地提示、不发请求 |
-| `/fulfillment` | 履约进度：按世界与已结算场次逐件列出编号、装备、卖家、买家、成交价与当前流程状态（流拍寄回、COD 付款与退回重寄、异世界交付、卖家货款与成交撤销），状态按语气分组着色并始终配文字；等待付款时附付款期限，发生过 COD 退回时附退回次数与上限。拍品筛选与出价日志同口径，每页最多 100 件（偏好或地址栏里更大的每页数量按 100 请求，自定义输入超过 100 时就地提示 1–100 的整数范围）；操作列的查看按钮在页内打开只读的拍品详情抽屉。重读失败而展示旧快照时，表格上方提示该快照的确认时刻。状态与附带字段只来自服务端闭集，页面不推导流程 |
+| `/fulfillment` | 履约进度：按世界与已结算场次逐件列出编号、装备、卖家、买家、成交价与当前流程状态（流拍寄回、COD 付款与退回重寄、异世界交付、卖家货款与成交撤销），状态按语气分组着色并始终配文字；等待付款时附付款期限，发生过 COD 退回时附退回次数与上限。拍品筛选与出价日志同口径，每页最多 100 件（偏好或地址栏里 101–200 的每页数量按 100 请求（超过 200 的旧值回退默认数量），自定义输入超过 100 时就地提示 1–100 的整数范围）；操作列的查看按钮在页内打开只读的拍品详情抽屉。重读失败而展示旧快照时，表格上方提示该快照的确认时刻。状态与附带字段只来自服务端闭集，页面不推导流程 |
 | `/history` | 成交价格历史：名称/日期/金额筛选、分组与中位数；装备名称不跳转，操作列的查看按钮在页内打开只读的拍品详情抽屉 |
 | `/login` | 用登录 key 登录（支持 `return_to`） |
 | `/me`、`/account` | 我的：当前标记、出价与代理，登录时长设置，竞价提醒渠道；标记、出价历史与代理三张列表都带查看按钮（页内打开只读的拍品详情抽屉），编号与名称不跳转；竞价提醒的 MM 与 PM 是两个独立开关，可都开或都关 |
@@ -36,8 +36,8 @@
 - lot 目录（看板、首屏预取、标记页与历史场次）始终请求 `fields=summary` 精简投影，不下载装备属性明细；属性只在打开详情抽屉时经 `/api/v1/lots/{lot_id}` 读取。
 - 整场标记集合按可读用户身份订阅会话变化：身份读取短暂失败后恢复时立即补读，同账号期限更新不重启集合请求；展示缓存不提供命令 CAS 版本，未知命令仍由页面宿主保留。
 - 首次恢复被 Router 规范化的查询参数时，同时保留 URL 片段与 `history.state`；历史价格的平铺展示直接接管当前页行缓冲，分组展示只索引本页，不读取其他分页。
-- 页头的人工刷新按钮常驻（不随连接状态或登录状态隐藏），点击后先展示忙碌状态再重新加载页面；自动轮询、恢复可见与实时失效只重读资源。浏览器拒绝重新加载时展示失败并补读权威目录。
-- 公开读缓存（`crates/auction-web-public/src/api/swr_cache.rs`）在实时事件、命令答复与轮询时只把条目标为过期、保留正文与 ETag，随后的重读带 `If-None-Match`，正文未变时 304 直接复用；请求期间又发生失效时，新响应照样替换旧条目，只是按过期处理。重读遇到传输失败或暂时性拒绝（429、503、网关 502/504 与 CDN 520–524）时继续展示已有快照：lot 目录在 1 秒后再读一次，仍失败才保留旧快照，其他读取等下一次失效或轮询再读；履约进度页展示旧快照时另在表格上方标明该快照最近一次被服务端确认的时刻；没有快照时照常显示错误。竞价与代理命令得到答复（成功或被拒绝）后，命令之前的快照不再用于回退，读视图只显示权威结果或错误；目录快照与当前场次两次读取仍不对齐时显示可重试的错误，不再留空。旧快照只用于展示，出价资格与金额仍由服务端在命令中判定。
+- 页头的人工刷新按钮常驻（不随连接状态或登录状态隐藏），点击后先展示忙碌状态再重新加载页面；自动轮询、恢复可见与实时失效只重读资源。外壳轮询、恢复可见、开场迁移、看板对齐重读、看板与履约进度页的错误重试，以及浏览器拒绝重新加载后的补读共用同一刷新入口（`crates/auction-web-public/src/surface/board/refresh.rs` 的 `refresh_public_reads`）：先使公开读缓存过期，再推进外壳刷新代号，TTL 内的条目也会带 ETag 回到服务端。浏览器拒绝重新加载时展示失败并补读权威目录。
+- 公开读缓存（`crates/auction-web-public/src/api/swr_cache.rs`）在实时事件、命令答复与轮询时只把条目标为过期、保留正文与 ETag，随后的重读带 `If-None-Match`，正文未变时 304 直接复用；请求期间又发生失效时，新响应照样替换旧条目，只是按过期处理。重读遇到传输失败或暂时性拒绝（429、503、网关 502/504 与 CDN 520–524）时继续展示已有快照：lot 目录在 1 秒后再读一次，仍失败才保留旧快照，其他读取等下一次失效或轮询再读；履约进度页展示旧快照时另在表格上方标明该快照最近一次被服务端确认的时刻；没有快照时照常显示错误。竞价与代理命令得到答复（成功或被拒绝）后，命令之前的快照不再用于回退（答复发生在重读在途期间也一样：重读失败时按最新的回退下限重新判定），读视图只显示权威结果或错误；目录快照与当前场次不对齐时，同一上下文（场次、阶段、开放状态与预览修订号）只自动对齐重读一次：经共用刷新入口同时重读当前（或历史）场次与目录，两侧都返回后仍不对齐才显示可重试的错误，不再留空；场次或目录仍有读取在途、或上一轮为另一上下文发起的重读尚未返回时先等待，不发起新的重读（调度与组件调度测试见 `crates/auction-web-public/src/surface/board/alignment.rs`）。旧快照只用于展示，出价资格与金额仍由服务端在命令中判定。
 
 ## 本地偏好
 
@@ -47,8 +47,8 @@
 
 | 路径 | 内容 |
 | --- | --- |
-| `crates/auction-web-public/src/api/` | 同源 HTTP 访问与响应解码；每个文件对应一个 API 领域（`account`、`blacklist`、`clock`、`commands`、`compensation`、`forum`、`fulfillment`、`model`、`queries`、`realtime/`、`registration`、`rules`、`session/`、`session_preference`、`status`、`watch_preference`、`watches`），`decoder/` 保存 wire DTO 解码 |
-| `crates/auction-web-public/src/surface/` | 路由与页面外壳、看板、目录、分页（`pagination/` 的 `PublicPager` 注入 Public 文案与 10/20/50/100 预设，包装共享 `Pager`）、设备专属展示（`presentation/` 的桌面/手机），以及按领域分组的页面实现：`account/`、`commands/`、`reads/`、`compensation/`、`watches/`、`session_preference/`、`rules`、`forum`、`blacklist`、`realtime`、`pages/`、`board/`、`catalog/` |
+| `crates/auction-web-public/src/api/` | 同源 HTTP 访问与响应解码；每个文件对应一个 API 领域（`account`、`blacklist`、`clock`、`commands`、`compensation`、`forum`、`fulfillment`、`model`、`queries/`、`realtime/`、`registration`、`rules`、`session/`、`session_preference`、`status`、`watch_preference`、`watches`），`decoder/` 保存 wire DTO 解码 |
+| `crates/auction-web-public/src/surface/` | 路由与页面外壳、看板、目录、分页（`pagination/` 的 `PublicPager` 注入 Public 文案、10/20/50/100 预设与契约页长上限 200，包装共享 `Pager`）、设备专属展示（`presentation/` 的桌面/手机），以及按领域分组的页面实现：`account/`、`commands/`、`reads/`、`compensation/`、`watches/`、`session_preference/`、`rules`、`forum`、`blacklist`、`realtime`、`pages/`、`board/`、`catalog/` |
 | `crates/auction-web-public/assets/` | `crates/auction-web-public/assets/public.css`（组件与布局）、`crates/auction-web-public/assets/desktop.css`、`crates/auction-web-public/assets/mobile.css` |
 | `crates/auction-web-public/i18n/` | Fluent 译文：`en`（默认，编译期内嵌）、`zh-CN`、`zh-TW`、`ja`、`ko`（作为带指纹的 `/assets/<lang>-dxh<hash>.ftl` 按需取回，失败保持当前语言） |
 

@@ -147,6 +147,7 @@ pub(super) fn valid_disposition(
                 | "admin_failed"
                 | "equipment_loss"
                 | "cod_returned"
+                | "recovery_equipment_recovered"
                 | "legacy_self"
                 | "preflight_retired"
         )

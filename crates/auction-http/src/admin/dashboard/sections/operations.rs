@@ -389,6 +389,10 @@ mod tests {
             oldest_awaiting_collection_age_seconds: 0,
             oldest_awaiting_collection_backlog_age_seconds: 0,
             collection_overdue: 0,
+            settlement_return_pending: 0,
+            oldest_settlement_return_pending_age_seconds: 0,
+            settlement_return_quarantined: 0,
+            oldest_settlement_return_quarantined_age_seconds: 0,
         }
     }
 

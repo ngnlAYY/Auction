@@ -100,6 +100,9 @@ pub enum MoogleMailOperation {
     Take,
     /// 丢弃 compose 页当前草稿；只允许由受控维护流程在精确匹配已知投递时使用。
     Discard,
+    /// Admin 在线检查候选 Cookie 时读取的 Item Shop 余额页；与 `Balance` 同页，但 Cookie
+    /// 未证明属于当前运行账号。
+    CredentialCheck,
 }
 
 impl MoogleMailOperation {
@@ -116,7 +119,15 @@ impl MoogleMailOperation {
                 | Self::Equipment
                 | Self::Identity
                 | Self::Inventory
+                | Self::CredentialCheck
         )
+    }
+
+    /// 读取能否作为当前账号的忙碌证据：窗口内可占用唯一探测，成功即结束忙碌期。装备页与
+    /// 候选凭据检查不能——前者未证实是否会被战斗页替换，后者未证明属于当前账号——它们在
+    /// 窗口内一律不发网络，成功也不清除忙碌。
+    pub(crate) const fn probes_account(self) -> bool {
+        !matches!(self, Self::Equipment | Self::CredentialCheck)
     }
 
     pub const fn as_str(self) -> &'static str {
@@ -140,6 +151,7 @@ impl MoogleMailOperation {
             Self::ReturnMessage => "return_message",
             Self::Take => "attach_remove",
             Self::Discard => "discard",
+            Self::CredentialCheck => "credential_check",
         }
     }
 }

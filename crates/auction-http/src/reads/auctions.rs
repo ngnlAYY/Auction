@@ -15,7 +15,7 @@ use crate::diagnostics;
 use crate::errors::{api_error, query_rejection};
 use crate::mapping::decode_public_cursor;
 use crate::middleware::response_cache::LOW_FREQUENCY_CACHE_CONTROL;
-use crate::query::{page_offset, parse_positive_i64, parse_query};
+use crate::query::{page_offset, parse_positive_i64, parse_public_page_size, parse_query};
 use crate::state::PublicApiState;
 
 /// 保留 v1 字段闭集，已打开的旧页面无需接受新的摘要字段。
@@ -61,7 +61,7 @@ where
 
     let page = parse_positive_i64(query.get("page"), 1, None).map_err(|()| query_rejection())?;
     let page_size =
-        parse_positive_i64(query.get("page_size"), 20, None).map_err(|()| query_rejection())?;
+        parse_public_page_size(query.get("page_size"), 20).map_err(|()| query_rejection())?;
     let raw_cursor = query.remove("cursor");
     let cursor = raw_cursor
         .as_deref()

@@ -81,10 +81,17 @@ const FULFILLMENT_SNAPSHOT: &str = concat!(
                 AND obligation.prerequisite_obligation_id IS NOT NULL
                 AND prerequisite.execution_state IS DISTINCT FROM 'satisfied')
                    AS waiting_prerequisite,
-               (fulfillment.execution_state = 'failed'
-                AND fulfillment.last_error_code = 'operator_external_buyer_compensation'
-                AND EXISTS (SELECT 1 FROM public.settlement_equipment_losses AS loss
-                    WHERE loss.refund_obligation_id = obligation.id)) AS failure_disposed
+               ((fulfillment.execution_state = 'failed'
+                 AND fulfillment.last_error_code = 'operator_external_buyer_compensation'
+                 AND EXISTS (SELECT 1 FROM public.settlement_equipment_losses AS loss
+                     WHERE loss.refund_obligation_id = obligation.id))
+                OR (fulfillment.execution_state = 'failed'
+                    AND fulfillment.last_error_code IN (
+                        'settlement_return_held', 'settlement_return_inbox'
+                    )
+                    AND returned.status IN ('held', 'inbox_closed'))) AS failure_disposed,
+               -- 已由结算退件案件接管的人工对账：改按退件待办计数，不再计入履约人工对账。
+               (returned.return_mail_id IS NOT NULL AND returned.closed_at IS NULL) AS return_open
         FROM public.settlement_obligations AS obligation
         LEFT JOIN public.settlement_obligation_fulfillments AS fulfillment
           ON fulfillment.obligation_id = obligation.id
@@ -94,6 +101,8 @@ const FULFILLMENT_SNAPSHOT: &str = concat!(
           ON recovery.payment_obligation_id = obligation.id
         LEFT JOIN public.settlement_obligation_fulfillments AS prerequisite
           ON prerequisite.obligation_id = obligation.prerequisite_obligation_id
+        LEFT JOIN public.settlement_return_cases AS returned
+          ON returned.delivery_id = fulfillment.delivery_id
         -- 转成数组表达式：`= ANY (子查询)` 会按集合比较，数组需显式标注类型。
         WHERE obligation.id = ANY ((SELECT ids FROM live_ids)::uuid[])
      ), grouped AS (
@@ -137,7 +146,7 @@ const FULFILLMENT_SNAPSHOT: &str = concat!(
         JOIN public.lots AS lot ON lot.id = overdue.lot_id
         JOIN public.equipment AS equipment ON equipment.id = overdue.equipment_id
      )
-     SELECT counts.*, items.*
+     SELECT counts.*, items.*, returns.*
      FROM (
         SELECT
             COUNT(*) FILTER (WHERE business_state = 'ready'
@@ -149,7 +158,7 @@ const FULFILLMENT_SNAPSHOT: &str = concat!(
                 AND NOT waiting_payment AND NOT waiting_prerequisite) AS blocked,
             COUNT(*) FILTER (WHERE execution_state = 'failed' AND NOT failure_disposed)
                 AS failed,
-            COUNT(*) FILTER (WHERE execution_state = 'manual_reconcile')
+            COUNT(*) FILTER (WHERE execution_state = 'manual_reconcile' AND NOT return_open)
                 AS manual_reconcile,
             COUNT(*) FILTER (WHERE business_state = 'ready'
                 AND execution_state IN ('pending', 'prepared', 'enqueued')
@@ -186,7 +195,23 @@ const FULFILLMENT_SNAPSHOT: &str = concat!(
                 AS collection_overdue
         FROM grouped
      ) AS counts
-     CROSS JOIN items"
+     CROSS JOIN items
+     CROSS JOIN (
+        -- 结算退件按未结案案件计数，不要求存在义务：已绑定待处理与隔离/结果未知分开。
+        SELECT
+            COUNT(*) FILTER (WHERE status IN ('awaiting_decision', 'take_pending', 'resend_pending'))
+                AS settlement_return_pending,
+            MIN(created_at) FILTER (WHERE status IN (
+                'awaiting_decision', 'take_pending', 'resend_pending'
+            )) AS oldest_settlement_return_pending,
+            COUNT(*) FILTER (WHERE status IN ('quarantined', 'recheck_pending', 'take_unknown'))
+                AS settlement_return_quarantined,
+            MIN(created_at) FILTER (WHERE status IN (
+                'quarantined', 'recheck_pending', 'take_unknown'
+            )) AS oldest_settlement_return_quarantined
+        FROM public.settlement_return_cases
+        WHERE closed_at IS NULL
+     ) AS returns"
 );
 
 /// SQL 绑定用的清单上限（`LIMIT` 取 bigint）；编译期确认可无损表示。
@@ -271,6 +296,22 @@ pub(super) async fn fulfillment_snapshot(
         collection_overdue: row
             .try_get("collection_overdue")
             .map_err(|error| storage_error_from(error, "读取履约长期未领取计数失败"))?,
+        settlement_return_pending: row
+            .try_get("settlement_return_pending")
+            .map_err(|error| storage_error_from(error, "读取结算退件待处理计数失败"))?,
+        oldest_settlement_return_pending_age_seconds: age_seconds(
+            now,
+            row.try_get("oldest_settlement_return_pending")
+                .map_err(|error| storage_error_from(error, "读取结算退件待处理时间失败"))?,
+        ),
+        settlement_return_quarantined: row
+            .try_get("settlement_return_quarantined")
+            .map_err(|error| storage_error_from(error, "读取结算退件隔离计数失败"))?,
+        oldest_settlement_return_quarantined_age_seconds: age_seconds(
+            now,
+            row.try_get("oldest_settlement_return_quarantined")
+                .map_err(|error| storage_error_from(error, "读取结算退件隔离时间失败"))?,
+        ),
     };
     Ok((snapshot, collection_overdue_items(&row, now)?))
 }

@@ -6,7 +6,7 @@ use crate::ports::admin::{AdminMailTransactionError, AdminRulesTransactionError}
 use crate::ports::core::{CommandLedgerError, CompetitionTransactionError, RepositoryError};
 use crate::ports::delivery::DeliveryDispositionCommandError;
 use crate::ports::recovery::RecoveryCommandError;
-use crate::ports::settlement::SettlementTransactionError;
+use crate::ports::settlement::{SettlementReturnError, SettlementTransactionError};
 
 impl ApplicationError {
     /// 返回不含秘密与正文的闭集安全分类标签，仅用于诊断；与诊断投影同源，不另建字符串表。
@@ -137,6 +137,13 @@ impl DiagnosticError for ApplicationError {
                 }
                 DeliveryDispositionCommandError::CommandConflict => SafeErrorKind::COMMAND_CONFLICT,
                 DeliveryDispositionCommandError::Unavailable => SafeErrorKind::REPOSITORY_FAILED,
+            },
+            Self::SettlementReturn(error) => match error {
+                SettlementReturnError::CommandConflict => SafeErrorKind::COMMAND_CONFLICT,
+                SettlementReturnError::StoredResultCorrupt | SettlementReturnError::Unavailable => {
+                    SafeErrorKind::REPOSITORY_FAILED
+                }
+                _ => SafeErrorKind::SETTLEMENT_RETURN_REJECTED,
             },
         }
     }

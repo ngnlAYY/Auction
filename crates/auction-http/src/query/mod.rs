@@ -3,6 +3,7 @@
 
 use std::collections::BTreeMap;
 
+use auction_contracts::MAX_PUBLIC_PAGE_SIZE;
 use axum::http::Uri;
 use url::form_urlencoded;
 use uuid::Uuid;
@@ -47,6 +48,13 @@ pub(crate) fn parse_positive_i64(
     Ok(parsed)
 }
 
+/// Public 列表共用的 `page_size` 解析：缺省取各路由自己的默认值，其余与
+/// [`parse_positive_i64`] 相同，另拒绝超过 [`MAX_PUBLIC_PAGE_SIZE`] 的值。上限与浏览器分页器
+/// 共用同一契约常量；超限在读取端口之前拒绝，游标页同样受限，错误外壳仍由各路由决定。
+pub(crate) fn parse_public_page_size(value: Option<&String>, default: i64) -> Result<i64, ()> {
+    parse_positive_i64(value, default, Some(MAX_PUBLIC_PAGE_SIZE))
+}
+
 /// 把从 1 开始的页码换算成行偏移；乘法溢出或超过 `max_offset` 时返回 `None`，
 /// `max_offset` 为 `None` 表示该列表不设偏移上限。页码下界由 [`parse_positive_i64`] 保证。
 pub(crate) fn page_offset(page: i64, page_size: i64, max_offset: Option<i64>) -> Option<i64> {
@@ -73,7 +81,25 @@ pub(crate) fn parse_canonical_uuid(value: &str) -> Option<Uuid> {
 
 #[cfg(test)]
 mod tests {
-    use super::page_offset;
+    use auction_contracts::MAX_PUBLIC_PAGE_SIZE;
+
+    use super::{page_offset, parse_public_page_size};
+
+    #[test]
+    fn public_page_size_keeps_route_defaults_and_caps_at_the_contract_maximum() {
+        assert_eq!(MAX_PUBLIC_PAGE_SIZE, 200);
+        // 缺省取各路由自己的默认值，不被统一上限替换。
+        assert_eq!(parse_public_page_size(None, 20), Ok(20));
+        assert_eq!(parse_public_page_size(None, 50), Ok(50));
+        for (raw, expected) in [("1", 1), ("200", 200), ("37", 37)] {
+            assert_eq!(parse_public_page_size(Some(&raw.to_owned()), 20), Ok(expected), "{raw}");
+        }
+        for raw in ["201", "0", "-1", "", "abc", "1.5", " 20", "9223372036854775807"] {
+            assert_eq!(parse_public_page_size(Some(&raw.to_owned()), 20), Err(()), "{raw}");
+        }
+        // 超出 i64 的十进制同样拒绝，不饱和成上限。
+        assert_eq!(parse_public_page_size(Some(&"9223372036854775808".to_owned()), 20), Err(()));
+    }
 
     #[test]
     fn page_offset_starts_at_zero_for_first_page() {

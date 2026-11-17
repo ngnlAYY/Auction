@@ -310,6 +310,7 @@ fn valid_origin_kind(value: &str) -> bool {
         value,
         "settlement"
             | "settlement_recovery_action"
+            | "settlement_return_action"
             | "user_key"
             | "manual"
             | "mail_intake"

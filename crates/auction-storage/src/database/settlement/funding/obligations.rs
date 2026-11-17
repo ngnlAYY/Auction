@@ -349,6 +349,9 @@ pub async fn retain_funded_seller(
 }
 
 /// 仅既有EquipmentRecovered退款门激活后转移；seller与refund严格互斥。
+///
+/// 卖方货款必须仍未外发：要么是确认前的合法 `pending`，要么是确认事务以精确收口事实终结的
+/// `failed/recovery_sale_voided`（交付收口与恢复来源处置都成立）；任意其他 `failed` 一律拒绝。
 pub async fn refund_funded_purchase(
     tx: &mut Transaction<'_, Postgres>,
     account: &LockedFundingAccount,
@@ -360,7 +363,7 @@ pub async fn refund_funded_purchase(
     if replay(tx, account, command, action, refund_obligation_id).await? {
         return Ok(());
     }
-    let row = sqlx::query(
+    let row = sqlx::query(concat!(
         r#"SELECT o.lot_id,
                   o.amount,
                   l.buyer_amount,
@@ -380,11 +383,18 @@ pub async fn refund_funded_purchase(
              AND r.resolution='equipment_recovered'
              AND r.custody_proof_digest IS NOT NULL
              AND s.business_state='blocked'
-             AND sf.execution_state='pending'
              AND sf.delivery_id IS NULL
+             AND (sf.execution_state='pending'
+                  OR (sf.execution_state='failed'
+                      AND sf.last_error_code='recovery_sale_voided'
+                      AND sf.prepare_command_id IS NULL
+                      AND sf.activate_command_id IS NULL
+                      AND "#,
+        crate::database::settlement::fulfillment::equipment_recovered_closure_sql!("r"),
+        r#"))
              AND f.uid=$2
-             AND f.disposition='seller'"#,
-    )
+             AND f.disposition='seller'"#
+    ))
     .bind(refund_obligation_id)
     .bind(account.uid())
     .fetch_one(&mut **tx)

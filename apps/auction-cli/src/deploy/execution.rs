@@ -12,20 +12,25 @@ use auction_config::PostgresOwnerSecrets;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use super::receipts::{FailedReceipt, Failure, previous_source_commit};
+use super::artifact::REQUIRED_BINARIES;
+use super::install::RetainRequest;
+use super::receipts::{FailedReceipt, Failure, installed_identity};
 use super::verification::{install_dir_artifacts, installed_artifacts, verify_running_artifacts};
 use super::{artifact, gates, install};
 use crate::app::progress;
 use crate::cli::UnitArgs;
 use crate::config_dir::{ConfigDir, Deployment};
-use crate::receipt::{Action, DeployRecord, Outcome, ReceiptContext};
+use crate::receipt::{Action, CliIdentity, DeployRecord, Outcome, ReceiptContext, RoleIdentity};
 use crate::service::Systemctl;
+use crate::support::files::PrivateDirectory;
 use crate::{receipt, service};
 
 /// 停机前已核对完毕的部署输入；停机后的步骤只读取它，不再做新的门禁判定。
 pub(super) struct DeployPlan<'a> {
     pub(super) config_dir: &'a ConfigDir,
     pub(super) units: &'a UnitArgs,
+    /// 持锁时固定的部署状态目录；回滚记录与回执都写在它的描述符下。
+    pub(super) state: &'a PrivateDirectory,
     pub(super) systemctl: &'a Systemctl,
     pub(super) deployment: &'a Deployment,
     pub(super) owner: &'a PostgresOwnerSecrets,
@@ -33,11 +38,12 @@ pub(super) struct DeployPlan<'a> {
     pub(super) install_dir: &'a Path,
     pub(super) backup_dir: &'a Path,
     pub(super) database: &'a str,
-    pub(super) previous_version: i64,
+    /// 停机前门禁观测到的数据库迁移版本（迁移之前）。
+    pub(super) current_version: i64,
+    /// 制品程序内嵌的期望迁移版本；四个程序同属一个制品。
     pub(super) expected_version: i64,
     pub(super) migration_drill_id: Option<&'a str>,
     pub(super) startup_timeout: Duration,
-    pub(super) service_uid: u32,
     pub(super) started_at: DateTime<Utc>,
 }
 
@@ -46,7 +52,7 @@ pub(super) async fn deploy_locked(
     context: &mut ReceiptContext,
     shutdown_gate: serde_json::Value,
 ) -> Result<serde_json::Value, Failure> {
-    let DeployPlan { units, systemctl, artifact, install_dir, database, .. } = *plan;
+    let DeployPlan { units, state, systemctl, artifact, install_dir, database, .. } = *plan;
     progress("停止三角色（Public → Admin → Worker）");
     service::stop_all(systemctl).await.map_err(Failure::unrecorded)?;
 
@@ -83,35 +89,24 @@ pub(super) async fn deploy_locked(
     // 因此在保留旧程序前先分配，成功或失败都用同一标识发布回执。
     let deploy_receipt_id = Uuid::new_v4();
     progress("保留当前程序");
-    let retained = install::retain(
-        &units.state_dir,
+    // 旧程序的身份按保留副本的实际摘要从回执绑定；数据库版本只作为观测值另行记录。
+    let request = RetainRequest {
         deploy_receipt_id,
         install_dir,
-        plan.previous_version,
-        plan.expected_version,
-        previous_source_commit(units).as_deref(),
-    )
-    .context("保留当前程序失败")
-    .map_err(|error| stopped_before_install(error, install_dir))?;
+        programs: &REQUIRED_BINARIES,
+        observed_database_version: plan.current_version,
+        installed_role_schema_version: Some(plan.expected_version),
+    };
+    let (retained, record_directory) =
+        install::retain(state, &request, |binaries| Ok(installed_identity(state, binaries)))
+            .context("保留当前程序失败")
+            .map_err(|error| stopped_before_install(error, install_dir))?;
 
     // 回滚记录已指向 deploy_receipt_id：此后的任何失败都必须用同一标识发布带回滚证据的失败
     // 回执，rollback 才能读回已安装制品与保留记录；入口不再追加第二条回执。
-    let deploy = DeployRecord {
-        artifact_directory: artifact.root.display().to_string(),
-        package: artifact.package.clone(),
-        source_commit: artifact.source_commit.clone(),
-        source_fingerprint: artifact.source_fingerprint.clone(),
-        cli_sha256: artifact.cli_sha256().to_owned(),
-        install_directory: install_dir.display().to_string(),
-        public_payload_sha256: artifact.public_payload_sha256.clone(),
-        admin_payload_sha256: artifact.admin_payload_sha256.clone(),
-        migration_drill_id: plan.migration_drill_id.map(str::to_owned),
-        backup_archive: Some(archive.display().to_string()),
-        backup_manifest: Some(manifest_path.display().to_string()),
-        rollback_record_id: Some(retained.record_id),
-    };
+    let deploy = deploy_record(plan, &archive, &manifest_path, retained.record_id);
     let failed = FailedReceipt {
-        state_dir: &units.state_dir,
+        state,
         receipt_id: deploy_receipt_id,
         action: Action::Deploy,
         started_at: plan.started_at,
@@ -119,13 +114,13 @@ pub(super) async fn deploy_locked(
         deploy: &deploy,
     };
     progress(format_args!("安装制品程序到 {}", install_dir.display()));
-    let record_dir = install::record_dir(&units.state_dir, retained.record_id);
     if let Err(failure) =
-        install::install_artifact(artifact, install_dir, plan.service_uid, &retained, &record_dir)
+        install::install_artifact(artifact, install_dir, &retained, &record_directory)
     {
-        let failure = install_failed(failure, install_dir, &record_dir);
-        // 失败回执记录安装目录实际文件的摘要（已换回时是旧程序），不冒充制品摘要；
-        // 之后 rollback 会在安装目录核对处失败关闭。
+        let failure = install_failed(failure, install_dir, record_directory.path());
+        // 失败回执的 artifacts 记录安装目录实际文件的摘要（已换回时是旧程序），不冒充制品摘要；
+        // deploy 段仍是尝试安装的制品，失败回执从不作为组件身份来源。已换回时本次回滚记录保留的
+        // 就是当前程序，rollback 会因目标与当前程序相同而在停机前拒绝。
         return Err(failed.publish(failure, None, Ok(install_dir_artifacts(install_dir))));
     }
 
@@ -141,9 +136,13 @@ pub(super) async fn deploy_locked(
     {
         Ok(launch) => launch,
         Err(error) => {
+            // 迁移可能尚未完成：rollback 保留新 CLI，会在停机前拒绝比数据库新的 CLI，因此同时
+            // 给出迁移前失败的处置入口。
             let failure = error.context(format!(
-                "新程序已安装但启动失败；已停止本次启动的 unit，回退指引见 \
-                 auction-cli rollback --receipt-id {deploy_receipt_id}"
+                "新程序已安装但启动失败；已停止本次启动的 unit。迁移已完成时用安装目录的 \
+                 auction-cli rollback --receipt-id {deploy_receipt_id} 回退；迁移未完成时 rollback \
+                 会拒绝，修复原因后用安装目录的 CLI 执行 service start 完成升级，或按 \
+                 ops/deploy/RECOVERY.md 的“安装中途失败的手工换回”用本次回滚记录整体换回"
             ));
             // 没有可核对的运行进程：失败回执的 artifacts 来自已安装制品摘要，不伪造运行进程。
             return Err(failed.publish(failure, None, installed_artifacts(artifact)));
@@ -161,7 +160,7 @@ pub(super) async fn deploy_locked(
         }
     };
     let published = match receipt::record_deploy(
-        &units.state_dir,
+        state,
         deploy_receipt_id,
         Action::Deploy,
         Outcome::Succeeded,
@@ -196,6 +195,40 @@ pub(super) async fn deploy_locked(
         "roles": launch.roles,
         "deployment_receipt": service::receipt_summary(units, &published),
     }))
+}
+
+/// deploy 回执的 v2 deploy 段：四个程序同属本次制品，角色与 CLI 的身份与内嵌 schema 都来自它；
+/// 数据库版本是迁移之前的观测值。
+fn deploy_record(
+    plan: &DeployPlan<'_>,
+    archive: &Path,
+    manifest: &Path,
+    rollback_record_id: Uuid,
+) -> DeployRecord {
+    let artifact = plan.artifact;
+    DeployRecord {
+        install_directory: plan.install_dir.display().to_string(),
+        roles: RoleIdentity {
+            artifact_directory: Some(artifact.root.display().to_string()),
+            package: Some(artifact.package.clone()),
+            source_commit: Some(artifact.source_commit.clone()),
+            source_fingerprint: Some(artifact.source_fingerprint.clone()),
+            public_payload_sha256: Some(artifact.public_payload_sha256.clone()),
+            admin_payload_sha256: Some(artifact.admin_payload_sha256.clone()),
+            schema_version: Some(plan.expected_version),
+        },
+        cli: CliIdentity {
+            sha256: artifact.cli_sha256().to_owned(),
+            package: Some(artifact.package.clone()),
+            source_commit: Some(artifact.source_commit.clone()),
+            schema_version: Some(plan.expected_version),
+        },
+        database_version: plan.current_version,
+        migration_drill_id: plan.migration_drill_id.map(str::to_owned),
+        backup_archive: Some(archive.display().to_string()),
+        backup_manifest: Some(manifest.display().to_string()),
+        rollback_record_id: Some(rollback_record_id),
+    }
 }
 
 /// 停机后、安装前的失败：安装目录与数据库都未改变，只差重新启动旧程序。制品 CLI 会先把 schema

@@ -1,16 +1,20 @@
 //! 部署回执闭集：只记录程序摘要、迁移版本、恢复点标识、操作者与时间，不含配置或秘密。
 //!
-//! 回执是只追加事实：同一 `receipt_id` 的文件一旦发布就不再改写；更正必须形成新回执。
+//! 回执是只追加事实：同一 `receipt_id` 的文件一旦发布就不再改写；更正必须形成新回执。新回执
+//! 写 v2；v1 回执原样兼容读取，deploy 段版本必须与回执格式一致。
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::deploy::{CliIdentity, DeploySection, RoleIdentity};
 use crate::support::digest::is_lower_hex;
 use crate::support::text::single_line;
 
-/// 回执格式标识；读取时严格匹配，未知版本一律拒绝。
-pub(crate) const FORMAT: &str = "auction-deployment-receipt.v1";
+/// 新回执的格式标识；读取时只接受它与 [`LEGACY_FORMAT`]，未知版本一律拒绝。
+pub(crate) const FORMAT: &str = "auction-deployment-receipt.v2";
+/// 只读兼容的旧格式：deploy 段为平铺字段，见 [`super::deploy::LegacyDeployRecord`]。
+pub(crate) const LEGACY_FORMAT: &str = "auction-deployment-receipt.v1";
 /// 失败摘要上限；只保留固定长度文本，避免把完整错误链写入长期证据。
 pub(crate) const MAX_FAILURE_CHARS: usize = 1024;
 /// 单条回执字节上限。
@@ -55,24 +59,6 @@ pub(crate) struct Artifact {
     pub bytes: Option<u64>,
 }
 
-/// `deploy`/`rollback` 的制品与回滚证据；`service start/restart` 回执没有本段。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct DeployRecord {
-    pub artifact_directory: String,
-    pub package: String,
-    pub source_commit: String,
-    pub source_fingerprint: String,
-    pub cli_sha256: String,
-    pub install_directory: String,
-    pub public_payload_sha256: String,
-    pub admin_payload_sha256: String,
-    pub migration_drill_id: Option<String>,
-    pub backup_archive: Option<String>,
-    pub backup_manifest: Option<String>,
-    pub rollback_record_id: Option<Uuid>,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct DeploymentReceipt {
@@ -88,17 +74,19 @@ pub(crate) struct DeploymentReceipt {
     pub migration: Option<MigrationRecord>,
     pub artifacts: Vec<Artifact>,
     pub failure: Option<String>,
-    /// 旧回执没有本段；只有 deploy/rollback 成功时必填。
+    /// `service start/restart` 回执没有本段；deploy/rollback 成功时必填。
     #[serde(default)]
-    pub deploy: Option<DeployRecord>,
+    pub deploy: Option<DeploySection>,
 }
 
 impl DeploymentReceipt {
     /// 解析后必须逐字段校验；损坏或未知版本的回执不能被当成有效证据。
     pub(crate) fn validate(&self) -> anyhow::Result<()> {
-        if self.format != FORMAT {
-            anyhow::bail!("部署回执格式不受支持：{}", self.format);
-        }
+        let legacy = match self.format.as_str() {
+            FORMAT => false,
+            LEGACY_FORMAT => true,
+            other => anyhow::bail!("部署回执格式不受支持：{other}"),
+        };
         if self.receipt_id.is_nil() {
             anyhow::bail!("部署回执缺少有效的 receipt_id");
         }
@@ -135,12 +123,13 @@ impl DeploymentReceipt {
             roles.push(artifact.role.as_str());
         }
         match (self.action, self.outcome, &self.deploy) {
-            (Action::Deploy | Action::Rollback, Outcome::Failed, _) => {}
-            (
-                Action::Deploy | Action::Rollback,
-                Outcome::Succeeded | Outcome::AlreadyRunning,
-                Some(deploy),
-            ) => validate_deploy(deploy)?,
+            (Action::Deploy | Action::Rollback, _, Some(section)) => {
+                if legacy != matches!(section, DeploySection::Legacy(_)) {
+                    anyhow::bail!("部署回执的 deploy 段版本与回执格式不一致");
+                }
+                section.validate(self.action)?;
+            }
+            (Action::Deploy | Action::Rollback, Outcome::Failed, None) => {}
             (Action::Deploy | Action::Rollback, _, None) => {
                 anyhow::bail!("deploy/rollback 成功回执必须记录制品与回滚证据");
             }
@@ -151,49 +140,16 @@ impl DeploymentReceipt {
         }
         Ok(())
     }
-}
 
-fn validate_deploy(deploy: &DeployRecord) -> anyhow::Result<()> {
-    if !is_absolute_path(&deploy.artifact_directory) || !is_absolute_path(&deploy.install_directory)
-    {
-        anyhow::bail!("部署回执的制品与安装目录必须是绝对路径");
-    }
-    if deploy.package.is_empty()
-        || deploy.package.len() > 256
-        || deploy.package.contains('/')
-        || deploy.package.chars().any(char::is_control)
-    {
-        anyhow::bail!("部署回执的制品名称无效");
-    }
-    if !is_lower_hex(&deploy.source_commit, 40)
-        || !is_lower_hex(&deploy.source_fingerprint, 64)
-        || !is_lower_hex(&deploy.cli_sha256, 64)
-        || !is_lower_hex(&deploy.public_payload_sha256, 64)
-        || !is_lower_hex(&deploy.admin_payload_sha256, 64)
-    {
-        anyhow::bail!("部署回执的源码或制品摘要无效");
-    }
-    if let Some(drill) = &deploy.migration_drill_id
-        && !single_line(drill, 128)
-    {
-        anyhow::bail!("部署回执的迁移演练标识无效");
-    }
-    for path in [&deploy.backup_archive, &deploy.backup_manifest].into_iter().flatten() {
-        if !is_absolute_path(path) {
-            anyhow::bail!("部署回执的备份路径必须是绝对路径");
+    /// 本回执能证明的已安装组件身份。只有成功回执的部署目标经运行程序摘要核对等于实际安装的
+    /// 组件；失败回执的 deploy 段只是尝试安装的目标（安装中途失败并换回后实际仍是旧程序），
+    /// 不能作为任何组件的身份来源，返回 None。
+    pub(crate) fn proven_identity(&self) -> Option<(RoleIdentity, CliIdentity)> {
+        if self.outcome != Outcome::Succeeded {
+            return None;
         }
+        self.deploy.as_ref()?.target_identity(self.action, self.migration.as_ref())
     }
-    if deploy.rollback_record_id.is_some_and(|id| id.is_nil()) {
-        anyhow::bail!("部署回执的回滚记录标识不能是 nil UUID");
-    }
-    Ok(())
-}
-
-fn is_absolute_path(value: &str) -> bool {
-    value.starts_with('/')
-        && value.len() <= 4096
-        && value.trim() == value
-        && !value.chars().any(char::is_control)
 }
 
 impl Artifact {
@@ -258,8 +214,11 @@ mod tests {
     use chrono::TimeZone;
 
     use super::{
-        Action, Artifact, DeployRecord, DeploymentReceipt, FORMAT, MigrationRecord, Outcome,
+        Action, Artifact, DeploymentReceipt, FORMAT, LEGACY_FORMAT, MigrationRecord, Outcome,
         validate_actor, validate_backup_id,
+    };
+    use crate::receipt::deploy::{
+        CliIdentity, DeployRecord, DeploySection, LegacyDeployRecord, RoleIdentity,
     };
 
     fn receipt() -> DeploymentReceipt {
@@ -298,8 +257,11 @@ mod tests {
     #[test]
     fn unknown_format_and_inconsistent_fields_are_rejected() {
         let mut value = receipt();
-        value.format = "auction-deployment-receipt.v2".to_owned();
+        value.format = "auction-deployment-receipt.v3".to_owned();
         assert!(value.validate().is_err());
+        let mut value = receipt();
+        value.format = LEGACY_FORMAT.to_owned();
+        value.validate().expect("v1 service 回执仍可读取");
 
         let mut value = receipt();
         value.finished_at = value.started_at - chrono::Duration::seconds(1);
@@ -346,7 +308,35 @@ mod tests {
     }
 
     fn deploy_record() -> DeployRecord {
+        let package = Some("auction-rust-0.1.0-aaaaaaaaaaaa".to_owned());
+        let source_commit = Some("a".repeat(40));
         DeployRecord {
+            install_directory: "/opt/auction/bin".to_owned(),
+            roles: RoleIdentity {
+                artifact_directory: Some("/srv/auction-release".to_owned()),
+                package: package.clone(),
+                source_commit: source_commit.clone(),
+                source_fingerprint: Some("b".repeat(64)),
+                public_payload_sha256: Some("d".repeat(64)),
+                admin_payload_sha256: Some("e".repeat(64)),
+                schema_version: Some(96),
+            },
+            cli: CliIdentity {
+                sha256: "c".repeat(64),
+                package,
+                source_commit,
+                schema_version: Some(96),
+            },
+            database_version: 95,
+            migration_drill_id: Some("drill-20261105".to_owned()),
+            backup_archive: Some("/var/backups/auction/a.dump".to_owned()),
+            backup_manifest: Some("/var/backups/auction/a.dump.manifest".to_owned()),
+            rollback_record_id: Some(uuid::Uuid::new_v4()),
+        }
+    }
+
+    fn legacy_record() -> LegacyDeployRecord {
+        LegacyDeployRecord {
             artifact_directory: "/srv/auction-release".to_owned(),
             package: "auction-rust-0.1.0-aaaaaaaaaaaa".to_owned(),
             source_commit: "a".repeat(40),
@@ -355,9 +345,9 @@ mod tests {
             install_directory: "/opt/auction/bin".to_owned(),
             public_payload_sha256: "d".repeat(64),
             admin_payload_sha256: "e".repeat(64),
-            migration_drill_id: Some("drill-20261105".to_owned()),
-            backup_archive: Some("/var/backups/auction/a.dump".to_owned()),
-            backup_manifest: Some("/var/backups/auction/a.dump.manifest".to_owned()),
+            migration_drill_id: None,
+            backup_archive: None,
+            backup_manifest: None,
             rollback_record_id: Some(uuid::Uuid::new_v4()),
         }
     }
@@ -368,25 +358,45 @@ mod tests {
         value.action = Action::Deploy;
         assert!(value.validate().is_err(), "成功 deploy 必须记录 deploy 段");
 
-        value.deploy = Some(deploy_record());
+        value.deploy = Some(DeploySection::Current(deploy_record()));
         value.validate().expect("deploy 回执必须通过");
 
         let mut value = receipt();
-        value.deploy = Some(deploy_record());
+        value.deploy = Some(DeploySection::Current(deploy_record()));
         assert!(value.validate().is_err(), "service 回执不能记录 deploy 段");
 
         let mut value = receipt();
         value.action = Action::Rollback;
         value.outcome = Outcome::Failed;
-        value.deploy = Some(deploy_record());
+        value.deploy = Some(DeploySection::Current(deploy_record()));
         value.failure = Some("启动失败".to_owned());
         value.validate().expect("失败回退允许保留已知制品证据");
 
         let mut value = receipt();
         value.action = Action::Deploy;
-        value.deploy = Some(deploy_record());
-        value.deploy.as_mut().expect("存在").cli_sha256 = "C".repeat(64);
+        let mut record = deploy_record();
+        record.cli.sha256 = "C".repeat(64);
+        value.deploy = Some(DeploySection::Current(record));
         assert!(value.validate().is_err());
+    }
+
+    /// deploy 段版本必须与回执格式一致：v1 回执只能带平铺段，v2 回执只能带分段身份。
+    #[test]
+    fn deploy_section_version_follows_the_receipt_format() {
+        let mut value = receipt();
+        value.action = Action::Deploy;
+        value.format = LEGACY_FORMAT.to_owned();
+        value.deploy = Some(DeploySection::Legacy(legacy_record()));
+        value.validate().expect("v1 deploy 回执原样可读");
+        let json = serde_json::to_vec(&value).expect("序列化");
+        let parsed: DeploymentReceipt = serde_json::from_slice(&json).expect("v1 回执可解析");
+        assert_eq!(parsed, value);
+
+        value.format = FORMAT.to_owned();
+        assert!(value.validate().is_err(), "v2 回执不能带 v1 平铺段");
+        value.format = LEGACY_FORMAT.to_owned();
+        value.deploy = Some(DeploySection::Current(deploy_record()));
+        assert!(value.validate().is_err(), "v1 回执不能带 v2 分段身份");
     }
 
     #[test]

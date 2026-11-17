@@ -15,7 +15,7 @@ use crate::diagnostics;
 use crate::errors::{api_error, query_rejection};
 use crate::mapping::public_timestamp;
 use crate::middleware::response_cache::LOW_FREQUENCY_CACHE_CONTROL;
-use crate::query::{page_offset, parse_positive_i64, parse_query};
+use crate::query::{page_offset, parse_positive_i64, parse_public_page_size, parse_query};
 use crate::state::PublicApiState;
 
 /// 读取当前公开黑名单，保留已发布的 `users`、页码和总数形状。
@@ -29,8 +29,9 @@ pub(crate) async fn list(
     let query = parse_query(&uri, &["page", "page_size"]).map_err(|()| query_rejection())?;
     let page = parse_positive_i64(query.get("page"), 1, None)
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_pagination", "分页参数无效"))?;
-    let page_size = parse_positive_i64(query.get("page_size"), 50, None)
-        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_pagination", "分页参数无效"))?;
+    // 超过统一上限与其他非法页长同属分页参数错误，沿用本路由已发布的 `invalid_pagination`。
+    let page_size = parse_public_page_size(query.get("page_size"), 50)
+        .map_err(|()| api_error(StatusCode::BAD_REQUEST, "invalid_pagination", "分页参数无效"))?;
     let offset = page_offset(page, page_size, Some(MAX_PUBLIC_BLACKLIST_OFFSET))
         .ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "invalid_pagination", "分页参数无效"))?;
 
