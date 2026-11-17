@@ -113,7 +113,7 @@ jobs:
         run: |
           if [[ -n "$ACTIONS_RESULTS_URL" && -n "$ACTIONS_RUNTIME_TOKEN" &&
                 -n "$ACTIONS_CACHE_SERVICE_V2" ]]; then
-            export SCCACHE_GHA_ENABLED=true SCCACHE_GHA_VERSION=auction-tls-20261022
+            export SCCACHE_GHA_ENABLED=true SCCACHE_GHA_VERSION=auction-tls-20261116
           else
             unset SCCACHE_GHA_ENABLED SCCACHE_GHA_VERSION
           fi

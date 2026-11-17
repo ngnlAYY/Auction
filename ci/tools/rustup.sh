@@ -2,9 +2,9 @@
 # 为本地与 CI 建立已修复证书校验的 rustup，不改变仓库固定工具链。
 set -euo pipefail
 
-readonly minimum_version=1.29.2
-readonly archive_sha256=5be191e8c70a5007074254cb74d78dbfdd25cd5a61c27de7b8e5410122ec24f4
-readonly archive_url=https://static.rust-lang.org/rustup/archive/1.29.2/x86_64-unknown-linux-gnu/rustup-init
+readonly minimum_version=1.29.3
+readonly archive_sha256=b1c8cb14e30889e7e2999e6b69e62d9e9b9ffc0f4df8180564d306d9680e6c55
+readonly archive_url=https://static.rust-lang.org/rustup/archive/1.29.3/x86_64-unknown-linux-gnu/rustup-init
 
 if [[ $(uname -s) != Linux || $(uname -m) != x86_64 ]]; then
   echo 'rustup 安全自举仅支持项目的 Linux x86_64 构建平台。' >&2

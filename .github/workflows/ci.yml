@@ -212,7 +212,7 @@ jobs:
       - name: Restore audit tools cache
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
         with:
-          key: cargo-audit-tls-20261022-machete-0.9.2
+          key: cargo-audit-tls-20261116-machete-0.10.1
           cache-bin: "true"
           cache-on-failure: "true"
       # 键只绑定 bootstrap 配方、锁图、补丁与工具链；文档或其他脚本变化不触发重建。
@@ -248,8 +248,8 @@ jobs:
         if: github.event_name != 'schedule'
         run: |
           if ! version=$(cargo machete --version 2>/dev/null) ||
-            [[ "$version" != "0.9.2" ]]; then
-            cargo install cargo-machete --locked --version 0.9.2 --force
+            [[ "$version" != "0.10.1" ]]; then
+            cargo install cargo-machete --locked --version 0.10.1 --force
           fi
       # 缓存命中也获取最新公告，漏洞和全部警告均失败，不自动修改锁定依赖。
       # 本步审计默认分支的当前 Cargo.lock；最近一个发布 tag 由下一步审计。

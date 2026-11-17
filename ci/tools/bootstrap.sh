@@ -36,9 +36,9 @@ check_tls_lock() {
       if (name == "rustls-webpki") { webpki++; if (version != "0.103.16") bad=1 }
       if (name == "webpki-roots") {
         roots++
-        if (version != "1.0.10" && version != "0.26.11") bad=1
+        if (version != "1.0.12" && version != "0.26.11") bad=1
       }
-      if (name == "webpki-root-certs") { roots++; if (version != "1.0.10") bad=1 }
+      if (name == "webpki-root-certs") { roots++; if (version != "1.0.12") bad=1 }
     }
     END { exit(bad || !rustls || !webpki || !roots) }
   ' "$lock" || fail "$lock 的 TLS 依赖未达到已审阅基线"
@@ -171,14 +171,14 @@ install_tools() {
 	mkdir -p "$next_root/bin" "$next_root/lib"
 
 	if [[ "$profile" == audit ]]; then
-		prepare_source cargo-audit 0.22.2 700c2b240f7fd330c24b675fe429f73a5b676531fcc6300400b2b67f155ba12a
+		prepare_source cargo-audit 0.23.0 956f85aedfb64db887ec38466f982fc2b1ae55de726d4a12f2fddd5b812c6446
 		# 只审计 Cargo.lock，不编译未使用的 ELF/PE/WASM 二进制扫描器。
-		build_tool cargo-audit 0.22.2 cargo-audit ''
+		build_tool cargo-audit 0.23.0 cargo-audit ''
 	else
 		prepare_source dioxus-cli 0.7.10 1fcb6578719380a2094f115bbbde340c59b65d2bf1987b8ddbbb9834db6716e6
 		build_tool dioxus-cli 0.7.10 dx disable-telemetry,no-downloads
-		prepare_source sccache 0.18.0 ea97b1561fe9f059860e1631e41feecfa81117bcc7bf91c895b19f24a3187538
-		build_tool sccache 0.18.0 sccache gha
+		prepare_source sccache 0.19.0 2c73f2a91ac28f4dd75250a693ae62eec64ab0f932df54c7c4a652853aa0dbe6
+		build_tool sccache 0.19.0 sccache gha
 
 		# dx 禁止自行下载；配套工具由同一入口固定来源和哈希后提供。
 		archive="$work_root/esbuild-0.27.3.tgz"
@@ -200,17 +200,17 @@ install_tools() {
 	# 编译期间配方变化不能把旧产物标成新锁图；保留增量缓存，拒绝签发混合身份回执。
 	[[ $(recipe_fingerprint) == "$expected_recipe" ]] || fail '编译期间工具配方已变化，请重新安装'
 	if [[ "$profile" == audit ]]; then
-		cmp ci/tools/locks/cargo-audit.Cargo.lock "$work_root/cargo-audit-0.22.2/Cargo.lock" || fail 'cargo-audit 构建锁发生变化'
+		cmp ci/tools/locks/cargo-audit.Cargo.lock "$work_root/cargo-audit-0.23.0/Cargo.lock" || fail 'cargo-audit 构建锁发生变化'
 	else
 		for package in dioxus-cli sccache; do
-			case "$package" in dioxus-cli) version=0.7.10 ;; sccache) version=0.18.0 ;; esac
+			case "$package" in dioxus-cli) version=0.7.10 ;; sccache) version=0.19.0 ;; esac
 			cmp "ci/tools/locks/$package.Cargo.lock" "$work_root/$package-$version/Cargo.lock" || fail "$package 构建锁发生变化"
 		done
 	fi
 	(cd "$next_root" && find bin lib -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum >SHA256SUMS)
 	printf '%s\n' 'schema=auction-build-tools/1' "recipe_sha256=$expected_recipe" \
 		"manifest_sha256=$(sha256sum "$next_root/SHA256SUMS" | awk '{print $1}')" \
-		"profile=$profile" 'repair=auction-tls-20261022' >"$next_root/BUILD-INFO"
+		"profile=$profile" 'repair=auction-tls-20261116' >"$next_root/BUILD-INFO"
 	verify_install "$next_root" || fail '候选工具回执验证失败'
 	backup="$tools_root.previous.$$"
 	if [[ -e "$tools_root" ]]; then mv "$tools_root" "$backup"; fi
