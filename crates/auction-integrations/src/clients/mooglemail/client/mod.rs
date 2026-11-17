@@ -32,7 +32,7 @@ pub(crate) use reads::{
     MoogleMailIncomingList, MoogleMailIncomingPrefix, MoogleMailReadRound, MoogleMailSentList,
     MoogleMailSentPrefix, MoogleMailSentScope, SentBoundary, SentBoundaryScan,
 };
-pub(crate) use request::{EquipmentReadPermit, equipment_read_hold};
+pub(crate) use request::{EquipmentReadPermit, PendingRead, equipment_read_hold};
 use security::build_mooglemail_http_client;
 pub(crate) use security::is_hentaiverse_login_response;
 
@@ -189,6 +189,12 @@ impl MoogleMailClient {
             })?;
         }
         Ok(())
+    }
+
+    /// 测试观察：请求门与在途锁上尚在排队的登记数，用来证明被放弃的请求没有留下失效登记。
+    #[cfg(test)]
+    pub(crate) fn queued_waiters(&self) -> (usize, usize) {
+        (self.gate.queued(), self.in_flight.queued())
     }
 
     /// 注入异常证据记录器；诊断失败不能改变远端结果分类或触发额外请求。

@@ -40,6 +40,12 @@ impl OperationLock {
         }
     }
 
+    /// 测试观察：排队等待的登记数，不含持有者。
+    #[cfg(test)]
+    pub(crate) fn queued(&self) -> usize {
+        self.with_state(|state| state.queue.len())
+    }
+
     fn with_state<T>(&self, run: impl FnOnce(&mut OperationLockState) -> T) -> T {
         let mut state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         run(&mut state)

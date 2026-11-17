@@ -85,6 +85,12 @@ impl PriorityGateState {
         self.queue.retain(|(queued, _)| *queued != ticket);
     }
 
+    /// 尚未获准的票据数；只供测试观察被放弃的等待者是否撤票。
+    #[cfg(test)]
+    pub(super) fn queued(&self) -> usize {
+        self.queue.len()
+    }
+
     /// 该票据当前是否仍有资格获得令牌。
     fn is_registered(&self, ticket: GateTicket) -> bool {
         self.queue.iter().any(|(queued, _)| *queued == ticket)
