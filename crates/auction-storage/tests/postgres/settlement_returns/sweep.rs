@@ -6,8 +6,9 @@
 //!   重放不再改写；只凭“附件已为空”（旧口径 `attachments_absent`）不再收口；
 //! - 仍在未领：投递重新排队、动作与案件回到 Take 待执行，由投递端口再执行一次 Take 后正常收口，
 //!   领回与返还仍各一次；
-//! - 无法判定：邮件整体缺失、预期资产不符、换凭据版本、同邮件存在其他处置意图，以及正常收口
-//!   尚未接手（`take_pending`）时，都不改写任何事实。
+//! - 无法判定的完成证明绑定：邮件整体缺失、预期资产不符、换凭据版本、同邮件存在其他处置意图，
+//!   以及正常收口尚未接手（`take_pending`）时，都不改写任何事实；邮箱维护在原 Take 会话内的观察
+//!   另以 `take_observed` 事件留证，换账号或换凭据不写入任何事实。
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
@@ -588,7 +589,7 @@ async fn postgres_return_take_unknown_undecidable_observations_change_nothing() 
             .await
             .is_err()
     );
-    assert_eq!(facts(pool, &take).await, unknown, "无法判定的观察不改写任何事实");
+    assert_eq!(facts(pool, &take).await, unknown, "无法判定的完成证明绑定不改写任何事实");
 
     // 同一邮件已有入站流程的处置意图（例如旧程序写入）：不重新执行 Take，保持结果未知。
     sqlx::query(

@@ -5,7 +5,7 @@
 //! - 正例：收件人、原身份、原退件正文前缀与 `Removed attachment:` 回执都成立 → 领回事实与资金返还
 //!   各一次；
 //! - 反例：附件已为空但没有领取回执，或只有收件人与执行 Take 的凭据账号不符 → 不绑定任何证明，
-//!   案件保持 `take_unknown`，资金不动。
+//!   只追加 `take_observed` 观察事件；案件保持 `take_unknown`，资金不动。
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
@@ -28,10 +28,13 @@ use auction_domain::SettlementReturnAction;
 use auction_integrations::mooglemail::{MoogleMailParser, MoogleMailWorld};
 use auction_storage::DatabaseStore;
 use chrono::{DateTime, Duration, Utc};
+use serde_json::Value;
 use serde_json::json;
+use sqlx::PgPool;
+use uuid::Uuid;
 
 use super::flows::{PAYOUT, Returned};
-use super::sweep::{facts, seed_mail_session, unknown_take_of};
+use super::sweep::{Facts, facts, seed_mail_session, unknown_take_of};
 use super::{insert_inbound, insert_sent_fulfillment};
 use crate::recovery_returns::{insert_sale, settlement_minute};
 use crate::support;
@@ -295,7 +298,32 @@ async fn postgres_return_take_receipt_html_settles_through_sweep() {
     pool.close().await;
 }
 
-/// 反例：附件已为空但正文没有领取回执——同一贯通路径不绑定任何证明，案件与资金都不变。
+/// 读取案件最新事件。
+async fn latest_event(pool: &PgPool, case: Uuid) -> (String, Value) {
+    sqlx::query_as(
+        "SELECT event_kind, details FROM public.settlement_return_events
+         WHERE return_mail_id = $1 ORDER BY case_version DESC LIMIT 1",
+    )
+    .bind(case)
+    .fetch_one(pool)
+    .await
+    .expect("读取最新事件")
+}
+
+/// 除案件版本外，观察事件不改写状态、动作、投递或资金。
+fn unchanged_except_case_version(before: &Facts, after: &Facts) -> bool {
+    after.case_status == before.case_status
+        && after.action_state == before.action_state
+        && after.delivery_status == before.delivery_status
+        && after.takes == before.takes
+        && after.funding_returns == before.funding_returns
+        && after.allocation_state == before.allocation_state
+        && after.allocation_amount == before.allocation_amount
+        && after.return_entries == before.return_entries
+}
+
+/// 反例：附件已为空但正文没有领取回执——同一贯通路径不绑定任何证明，只追加观察事件；案件状态
+/// 与资金都不变。
 #[tokio::test]
 async fn postgres_return_take_empty_page_without_receipt_stays_unknown() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
@@ -315,7 +343,15 @@ async fn postgres_return_take_empty_page_without_receipt_stays_unknown() {
     let before = facts(pool, &take).await;
     let body = format!("{ORIGINAL}\n\nThis message was returned from {RETURNED_FROM}, kupo!");
     assert_eq!(sweep_with(&store, returned_page(&subject, &body), session.binding()).await, 0);
-    assert_eq!(facts(pool, &take).await, before, "没有领取回执不改写任何事实");
+    let after = facts(pool, &take).await;
+    assert_eq!(after.case_version, before.case_version + 1, "只追加一次观察事件");
+    assert!(
+        unchanged_except_case_version(&before, &after),
+        "没有领取回执不绑定领回、不动投递或资金"
+    );
+    let (kind, details) = latest_event(pool, take.returned.case).await;
+    assert_eq!(kind, "take_observed");
+    assert_eq!(details["observation"], json!("receipt_unproven"));
     let takes: i64 = sqlx::query_scalar("SELECT count(*) FROM public.settlement_return_takes")
         .fetch_one(pool)
         .await
@@ -348,7 +384,15 @@ async fn postgres_return_take_receipt_for_another_recipient_stays_unknown() {
     );
     let page = returned_page_to("Other Bot", &subject, &body);
     assert_eq!(sweep_with(&store, page, session.binding()).await, 0);
-    assert_eq!(facts(pool, &take).await, before, "收件人不是 Take 账号时不改写任何事实");
+    let after = facts(pool, &take).await;
+    assert_eq!(after.case_version, before.case_version + 1, "只追加一次观察事件");
+    assert!(
+        unchanged_except_case_version(&before, &after),
+        "收件人不是 Take 账号时不绑定领回、不动投递或资金"
+    );
+    let (kind, details) = latest_event(pool, take.returned.case).await;
+    assert_eq!(kind, "take_observed");
+    assert_eq!(details["observation"], json!("receipt_unproven"));
     let takes: i64 = sqlx::query_scalar("SELECT count(*) FROM public.settlement_return_takes")
         .fetch_one(pool)
         .await
