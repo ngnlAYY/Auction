@@ -64,6 +64,13 @@ fn requires_cash_gate(claim: &DeliveryWorkClaim) -> bool {
         && claim.payload.get("credits").and_then(serde_json::Value::as_i64) != Some(0)
 }
 
+/// 现金证据、claim 与冻结 Send 身份的凭据绑定由可信适配器在同一次准备里按同一 claim 与会话
+/// 产出；三者互相矛盾是适配器或调用方的不变量损坏，按依赖不符的确定故障回滚，不能混同凭据或
+/// 运行时 owner 的正常失效（那由证据 owner 判定为业务延期）。
+fn evidence_binding_fault() -> FenceError {
+    FenceError::Fault(SafeErrorKind::DEPENDENCY_MISMATCH)
+}
+
 pub(super) async fn authorize(
     tx: &mut Transaction<'_, Postgres>,
     claim: &DeliveryWorkClaim,
@@ -81,25 +88,25 @@ pub(super) async fn authorize(
                 request_hash: claim.request_hash,
             })
     {
-        return Err(FenceError::Rejected);
+        return Err(evidence_binding_fault());
     }
     let binding = expectation
         .and_then(|expectation| match expectation {
             DeliveryPreparedExpectation::Send(expectation) => expectation.credential.as_ref(),
             DeliveryPreparedExpectation::Take(_) => None,
         })
-        .ok_or(FenceError::Rejected)?;
+        .ok_or_else(evidence_binding_fault)?;
     if binding.credential_id != evidence.identity.credential_id
         || binding.credential_version != evidence.identity.credential_version
         || binding.runtime_generation != evidence.identity.runtime.generation
     {
-        return Err(FenceError::Rejected);
+        return Err(evidence_binding_fault());
     }
     crate::lock_mail_runtime_generation(tx, &evidence.identity.runtime).await?;
     // 持久world code字典序；Main现金与Isekai身份只共享账号，不能搬用世界事实。
     let world = evidence.identity.world.as_str();
     if claim.payload.get("world").and_then(serde_json::Value::as_str) != Some(world) {
-        return Err(FenceError::Rejected);
+        return Err(evidence_binding_fault());
     }
     let worlds = sqlx::query_scalar::<_, String>(
         "SELECT id FROM public.worlds WHERE id IN ('main', $1) ORDER BY id FOR UPDATE",

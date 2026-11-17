@@ -49,12 +49,25 @@ impl FenceError {
         }
     }
 
-    /// 回滚已确认后的分类：业务门拒绝（含资金与证据 owner 的确定拒绝）返回 `None`，按正常延期
-    /// 收口；SQL 错误、冲突重试耗尽与其余确定故障返回安全分类，不能被延期掩盖。
+    /// 回滚已确认后的分类：业务门拒绝（含资金 owner 的确定拒绝，以及证据 owner 判定凭据或运行时
+    /// owner 在观察之后正常推进）返回 `None`，按正常延期收口；SQL 错误、冲突重试耗尽、证据结构、
+    /// generation、时效或绑定异常与其余确定故障返回安全分类，不能被延期掩盖。
     fn fault_kind(&self) -> Option<SafeErrorKind> {
         match self {
+            Self::Evidence(MailEvidenceTransactionError::Rejected(rejection)) => {
+                let kind = rejection.fault_kind();
+                if let Some(kind) = kind {
+                    // 证据 owner 的原因到此为止：同一分类下的 generation 与结构异常只靠原因标签
+                    // 区分；只记低基数标签，不记证据内容。
+                    tracing::warn!(
+                        reason = rejection.label(),
+                        safe_kind = kind.label(),
+                        "现金 sending fence 的邮件证据被拒绝，事务已回滚"
+                    );
+                }
+                kind
+            }
             Self::Rejected
-            | Self::Evidence(MailEvidenceTransactionError::Rejected(_))
             | Self::Funding(
                 FundingError::Invalid
                 | FundingError::Conflict
@@ -269,15 +282,18 @@ mod tests {
     use auction_application::settlement::FundingError;
 
     use super::FenceError;
-    use crate::MailEvidenceTransactionError;
+    use crate::{MailEvidenceRejection, MailEvidenceTransactionError};
 
     /// 回滚后只有业务门拒绝按正常延期收口；SQL 错误、冲突耗尽与确定故障都必须带分类，
-    /// 否则 Worker 会把真实故障记成成功（A4）。
+    /// 否则 Worker 会把真实故障记成成功（A4）。证据 owner 的拒绝只有“观察之后正常失效”算业务门，
+    /// generation、结构、绑定与时效异常都是故障。
     #[test]
     fn only_business_gate_rejections_roll_back_as_deferrals() {
         let deferred = [
             FenceError::Rejected,
-            FenceError::Evidence(MailEvidenceTransactionError::Rejected("证据已失效")),
+            FenceError::Evidence(MailEvidenceTransactionError::Rejected(
+                MailEvidenceRejection::Stale,
+            )),
             FenceError::Funding(FundingError::Invalid),
             FenceError::Funding(FundingError::Conflict),
             FenceError::Funding(FundingError::Unavailable),
@@ -302,6 +318,30 @@ mod tests {
                 SafeErrorKind::FUNDING_SERIALIZATION_CONFLICT,
             ),
             (FenceError::Fault(SafeErrorKind::TIMEOUT), SafeErrorKind::TIMEOUT),
+            (
+                FenceError::Evidence(MailEvidenceTransactionError::Rejected(
+                    MailEvidenceRejection::GenerationInvalid,
+                )),
+                SafeErrorKind::EVIDENCE_REQUEST_INVALID,
+            ),
+            (
+                FenceError::Evidence(MailEvidenceTransactionError::Rejected(
+                    MailEvidenceRejection::StructureInvalid,
+                )),
+                SafeErrorKind::EVIDENCE_REQUEST_INVALID,
+            ),
+            (
+                FenceError::Evidence(MailEvidenceTransactionError::Rejected(
+                    MailEvidenceRejection::BindingMismatch,
+                )),
+                SafeErrorKind::DEPENDENCY_MISMATCH,
+            ),
+            (
+                FenceError::Evidence(MailEvidenceTransactionError::Rejected(
+                    MailEvidenceRejection::TimeInvalid,
+                )),
+                SafeErrorKind::EVIDENCE_EXPIRED,
+            ),
         ];
         for (error, kind) in &faults {
             assert_eq!(error.fault_kind(), Some(*kind));
