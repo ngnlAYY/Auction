@@ -631,7 +631,7 @@ mod tests {
                 carrier_credit: i64::from(claim.carrier_credit),
                 equipment_id: claim.equipment_id.as_uuid(),
                 equipment_name: claim.equipment_name.clone(),
-                payload: canonical.payload.clone(),
+                payload: canonical.payload,
                 recipient: claim.recipient.clone(),
                 result_metadata: CodReceiptResultMetadata {
                     proof: Some("sent_exact_payload_v1".to_owned()),
