@@ -19,7 +19,7 @@ description: 更新 Auction 云端分体部署：取 GitHub Release 资产并校
 
 - 入口：`<生产 SSH 入口>`。生产主机资源很小，**禁止在服务器上构建**。
 - 目录按 `ops/README.md#目录与账号` 的标准布局：程序 `<程序目录>`，配置 `<配置目录>`，部署状态 `<部署状态目录>`（`receipts/`、`rollback/`、锁），停机备份 `<停机备份目录>`（root 0700），计划备份 `/var/backups/auction/scheduled/`；发布包解包到 `<发布包暂存目录>/<package>/`。运行账号 `<运行账号>`；systemd unit：`<Worker unit>`、`<Admin unit>`、`<Public unit>`，由 `auction-stack.service` 编排。
-- `<程序目录>` 与其中四个程序的标准是 root:root 0755，各级父目录也归 root 且禁止他人写入：root 与 postgres 都会执行其中的 `auction-cli`。deploy/rollback 在停机前只读核对两件事，不符即拒绝、不自动修补：属主与写权限（不归 root、允许 group/other 写入或是符号链接）；三角色运行账号能否逐级进入安装目录并执行各自的程序（0700 的目录、缺执行位的程序都拒绝，错误点名角色、UID 与路径）。前者多见于旧版 deploy 把程序改归 `<运行账号>` 的主机，按 `ops/deploy/RECOVERY.md#重建安装目录信任` 用已验证的 Release 重装，**不要**只 `chown`；后者补回标准 0755 即可。两者都属于生产写入，先征得用户同意。
+- `<程序目录>` 与其中四个程序的标准是 root:root 0755，各级父目录也归 root 且禁止他人写入：root 与 postgres 都会执行其中的 `auction-cli`。deploy/rollback 在停机前只读核对两件事，不符即拒绝、不自动修补：属主与写权限（不归 root、允许 group/other 写入或是符号链接）；执行权限——三角色运行账号能否逐级进入安装目录并执行各自的程序（0700 的目录、缺执行位的程序都拒绝，错误点名角色、UID 与路径），以及执行部署的账号能否执行其中的 `auction-cli`（deploy 停机后用它校验停机备份；0644 等缺执行位的情况拒绝，错误点名 UID）。前者多见于旧版 deploy 把程序改归 `<运行账号>` 的主机，按 `ops/deploy/RECOVERY.md#重建安装目录信任` 用已验证的 Release 重装，**不要**只 `chown`；后者补回标准 0755 即可。两者都属于生产写入，先征得用户同意。
 - `<部署状态目录>` 必须归 root 且 0700，各级父目录归 root 且禁止他人写入（`/var/lib/auction` 为 root:root 0755，已只读核实）：能改写父目录的账号就能把部署锁、回执与回滚记录整体换成另一棵树。service/deploy/rollback 取锁前核对，持锁期间被改名替换会在停机前失败关闭，不自动修补；遇到拒绝时先停下报告用户，改属主或权限属于生产写入。
 - 配置 `<配置目录>`：`common/public/admin/worker.toml`、`secrets.toml`（运行账号 0600）、`runtime/admin.toml`（0640）、`owner/postgres.toml`（root 0600，只给 CLI 用）。`worker.toml [worker.control] allowed_peer_uids` 必须同时包含 0（root 执行 service/deploy/rollback 时探测 Worker readiness）与 `<运行账号>` 的 UID（Admin 经 control socket 调用 Worker）。
 - 每次 deploy 在 `<部署状态目录>/rollback/` 增加一份四个程序的副本（rollback 增加三个角色程序的副本），每次 deploy 在 `<停机备份目录>` 增加一份停机备份，CLI 都不自动清理；部署前顺带看一眼两处占用，需要腾空间时按 `apps/auction-cli/README.md#回滚记录与停机备份的容量` 的步骤人工清理（保留最新成功回执引用的回滚记录与最近几条，整目录删除旧记录、成对删除旧备份），清理属于生产写入，先征得用户同意。
@@ -97,7 +97,7 @@ description: 更新 Auction 云端分体部署：取 GitHub Release 资产并校
   --actor <name> --startup-timeout-seconds 60 --dry-run
 ```
 
-逐项核对：`outcome=planned`；`shutdown.outcome=allowed`（final 场次或窗口内有在拍 lot 会阻挡，只有用户明确同意才加 `--force --reason`）；`in_flight_sends` 为空；`versions` 与 `migration_drill` 均被识别，`versions.installed_roles` 是线上程序的身份（为 null 说明找不到摘要一致的成功回执，按这次部署的回滚记录回退时只允许数据库仍为部署前的版本，不能跨迁移）。安装目录信任（属主、写权限、运行账号的穿越与执行）、部署状态目录或 `--backup-dir` 属主不符时 dry-run 就会失败，按上文处理后重跑。
+逐项核对：`outcome=planned`；`shutdown.outcome=allowed`（final 场次或窗口内有在拍 lot 会阻挡，只有用户明确同意才加 `--force --reason`）；`in_flight_sends` 为空；`versions` 与 `migration_drill` 均被识别，`versions.installed_roles` 是线上程序的身份（为 null 说明找不到摘要一致的成功回执，按这次部署的回滚记录回退时只允许数据库仍为部署前的版本，不能跨迁移）。安装目录信任（属主、写权限、运行账号的穿越与执行、部署账号对 `auction-cli` 的执行）、部署状态目录或 `--backup-dir` 属主不符时 dry-run 就会失败，按上文处理后重跑。
 
 ## 6. 正式部署
 

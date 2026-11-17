@@ -2,11 +2,11 @@
 //!
 //! 顺序：制品静态校验（文件白名单、权限、摘要、Web payload 标记）→ `--backup-dir` → 部署锁
 //! （状态目录与各级祖先的属主、权限核对后以描述符固定）→ 严格配置、unit 绑定预检 → 安装目录
-//! 信任门禁 → 时段门禁 → 迁移版本与演练回执 → 磁盘空间门禁 → 在途发送门禁 → 复核状态目录未被
-//! 替换 → 停机 → 停机备份并由新旧 CLI 各校验一次 → 保留旧程序 → 逐个原子替换程序（root:root
-//! 0755）→ 迁移与顺序启动 → 运行程序摘要复核 → 部署回执。任一门禁失败都在停机前拒绝；停机后
-//! 每次调用最多追加一条回执（写不进去时错误注明），安装后启动失败只停止本次启动的 unit，并把
-//! 回退指引写入回执。
+//! 信任与执行权限门禁（含部署执行账号能执行停机后要用的旧 CLI）→ 时段门禁 → 迁移版本与演练
+//! 回执 → 磁盘空间门禁 → 在途发送门禁 → 复核状态目录未被替换 → 停机 → 停机备份并由新旧 CLI
+//! 各校验一次 → 保留旧程序 → 逐个原子替换程序（root:root 0755）→ 迁移与顺序启动 → 运行程序摘要
+//! 复核 → 部署回执。任一门禁失败都在停机前拒绝；停机后每次调用最多追加一条回执（写不进去时
+//! 错误注明），安装后启动失败只停止本次启动的 unit，并把回退指引写入回执。
 
 use std::path::Path;
 use std::time::Duration;
@@ -41,8 +41,20 @@ pub(crate) use verification::{role_binary, running_roles, unit_states};
 pub(crate) use rollback::run as run_rollback;
 
 pub(crate) async fn run(config_dir: &ConfigDir, args: DeployArgs) -> anyhow::Result<()> {
+    let artifact = artifact::inspect(&args.artifact_dir).context("部署制品校验失败")?;
+    require_artifact_cli(&artifact)?;
+    run_inspected(config_dir, &artifact, args).await
+}
+
+/// 制品已通过静态校验、当前程序也已核对为制品内 CLI 之后的编排。停机只发生在末尾的
+/// [`deploy_locked`] 中，此前任一门禁失败都不停机、不安装、不写回执。
+async fn run_inspected(
+    config_dir: &ConfigDir,
+    artifact: &artifact::Artifact,
+    args: DeployArgs,
+) -> anyhow::Result<()> {
     let DeployArgs {
-        artifact_dir,
+        artifact_dir: _,
         units,
         owner,
         shutdown,
@@ -55,8 +67,6 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: DeployArgs) -> anyhow::Res
         startup_timeout_seconds,
         dry_run,
     } = args;
-    let artifact = artifact::inspect(&artifact_dir).context("部署制品校验失败")?;
-    require_artifact_cli(&artifact)?;
     // 本地参数门禁先于任何锁、systemctl 与数据库访问，dry-run 同样执行。
     require_backup_dir(&backup_dir)?;
     let mut context = ReceiptContext::resolve(None, actor.actor.as_deref())?;
@@ -96,7 +106,7 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: DeployArgs) -> anyhow::Res
             drill::inspect(
                 path,
                 &drill::Requirements {
-                    artifact: &artifact,
+                    artifact,
                     current_version,
                     expected_version,
                     protection_window_minutes: shutdown.protection_window_minutes,
@@ -145,7 +155,7 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: DeployArgs) -> anyhow::Res
     });
     let mut report = serde_json::json!({
         "action": "deploy",
-        "artifact": artifact_projection(&artifact),
+        "artifact": artifact_projection(artifact),
         "install_directory": install_dir,
         "backup_directory": backup_dir,
         "gates": {
@@ -182,7 +192,7 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: DeployArgs) -> anyhow::Res
         systemctl: &systemctl,
         deployment: &deployment,
         owner: &owner,
-        artifact: &artifact,
+        artifact,
         install_dir: &install_dir,
         backup_dir: &backup_dir,
         database: &database,
@@ -231,3 +241,6 @@ fn installed_roles_identity(
         .collect::<Vec<_>>();
     Ok(serde_json::to_value(installed_identity(state, &binaries).roles)?)
 }
+
+#[cfg(test)]
+mod tests;

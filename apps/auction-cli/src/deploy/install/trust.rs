@@ -10,6 +10,10 @@
 //! 能被对应账号执行。root 0700 的目录同样“可信”，却会让停机、替换之后的启动失败，因此一并在停机
 //! 前核对，同样不自动 chmod。
 //!
+//! 执行本命令的账号（部署执行账号）同样要执行安装目录中的旧 auction-cli：deploy 停机后用它校验
+//! 停机备份，停机后失败的恢复指引也用它执行 `service start`。这是当前进程自己的权限，交给内核按
+//! 有效身份判定，与停机后启动它时的检查同源；在停机前核对，同样不自动 chmod。
+//!
 //! 安装、换回与复核都相对同一个以 `O_DIRECTORY | O_NOFOLLOW` 打开的目录描述符完成：临时文件以
 //! `O_EXCL | O_NOFOLLOW` 新建，`renameat` 原子替换，替换后重新打开目标复核属主、权限与摘要。
 
@@ -18,7 +22,10 @@ use std::{
     fs::{self, File, OpenOptions},
     os::{
         fd::{AsRawFd, FromRawFd},
-        unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
+        unix::{
+            ffi::OsStrExt,
+            fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
+        },
     },
     path::{Component, Path, PathBuf},
 };
@@ -54,6 +61,21 @@ pub(crate) struct RunAccount {
 fn executable_by(facts: Facts, uid: Option<u32>) -> bool {
     let required = if uid == Some(facts.uid) { 0o100 } else { 0o011 };
     facts.mode & required == required
+}
+
+/// 部署执行账号（当前进程的有效 UID、GID 与附加组）能否执行 `program`。由内核按有效身份判定
+/// （`faccessat` 的 `X_OK` 与 `AT_EACCESS`），与随后以同一凭据启动该程序时的权限检查同源：组成员、
+/// ACL 与 noexec 挂载都已计入，root 对普通文件也要求至少一个执行位。只读，不修改文件。
+fn executable_by_caller(program: &Path) -> std::io::Result<()> {
+    let path = CString::new(program.as_os_str().as_bytes())
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?;
+    // SAFETY：path 以 NUL 结尾且在调用期间有效；faccessat 只读取路径与当前进程凭据。
+    let status =
+        unsafe { libc::faccessat(libc::AT_FDCWD, path.as_ptr(), libc::X_OK, libc::AT_EACCESS) };
+    if status != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
 }
 
 fn account_text(account: &RunAccount) -> String {
@@ -97,7 +119,8 @@ fn program_problem(facts: Facts, euid: u32) -> Option<&'static str> {
 }
 
 /// 停机前门禁（deploy 与 rollback，dry-run 同样执行）：只读核对安装目录、它的每一级祖先与其中
-/// 四个程序的信任，以及三角色运行账号对目录的穿越与对各自程序的执行；不创建、不修改任何文件。
+/// 四个程序的信任，三角色运行账号对目录的穿越与对各自程序的执行，以及部署执行账号对旧
+/// auction-cli 的执行；不创建、不修改任何文件。
 pub(crate) fn require_install_dir(path: &Path, accounts: &[RunAccount]) -> anyhow::Result<()> {
     for (prefix, facts) in require_trusted_directory(path)? {
         if let Some(account) = accounts.iter().find(|account| !executable_by(facts, account.uid)) {
@@ -123,6 +146,16 @@ pub(crate) fn require_install_dir(path: &Path, accounts: &[RunAccount]) -> anyho
             anyhow::bail!(
                 "安装目录中的 {name} 不能由 {} 执行（缺少执行位）；{STANDARD_ACCESS}",
                 account_text(account)
+            );
+        }
+        // 三角色停止之后才会启动旧 CLI（deploy 的停机备份校验、失败后的 service start）：
+        // 部署执行账号执行不了它时只能在这里拒绝，否则服务已停才失败。
+        if name == "auction-cli"
+            && let Err(error) = executable_by_caller(&program)
+        {
+            anyhow::bail!(
+                "安装目录中的 auction-cli 不能由部署执行账号（UID {euid}）执行（{error}）：deploy \
+                 停机后要用它校验停机备份，停机后失败的恢复也要用它执行 service start；{STANDARD_ACCESS}"
             );
         }
     }
@@ -298,6 +331,8 @@ mod tests {
         executable_by, program_problem, require_install_dir,
     };
     use crate::deploy::artifact::REQUIRED_BINARIES;
+    use crate::deploy::gates::verify_backup_with_cli;
+    use crate::support::files::effective_uid;
 
     const SERVICE_UID: u32 = 990;
 
@@ -456,7 +491,7 @@ mod tests {
         assert!(text.contains(&install.display().to_string()), "{text}");
         assert!(text.contains("不会自动修改权限"), "{text}");
         assert_eq!(mode(&install), 0o700, "门禁不修补权限");
-        let owner = accounts(Some(crate::support::files::effective_uid()));
+        let owner = accounts(Some(effective_uid()));
         require_install_dir(&install, &owner).expect("运行账号是属主时只看属主位");
         fs::set_permissions(&install, fs::Permissions::from_mode(0o755)).expect("恢复安装目录");
 
@@ -477,5 +512,46 @@ mod tests {
         assert!(require_install_dir(&install, &dynamic).is_err(), "DynamicUser 同样拒绝");
         fs::set_permissions(&admin, fs::Permissions::from_mode(0o755)).expect("恢复程序");
         require_install_dir(&install, &service).expect("恢复标准权限后通过");
+    }
+
+    /// 只有旧 auction-cli 缺执行位（0644）：目录、三个角色程序与各类运行账号都满足，部署执行账号
+    /// （当前进程）却执行不了停机后要用来校验停机备份的旧 CLI。门禁拒绝并点名，不修改权限；停机后
+    /// 的 `verify_backup_with_cli` 在同一权限下确实启动不了它。补回标准 0755 后门禁放行，同一调用
+    /// 也能执行它。旧门禁只核对三个角色程序的执行位，会把 0644 的 CLI 一路放行到停机之后。
+    #[tokio::test]
+    async fn installed_cli_must_be_executable_by_the_deploying_account() {
+        let root = TempRoot::new();
+        let install = root.install();
+        let cli = install.join("auction-cli");
+        // 停机备份校验以固定参数启动旧 CLI；用忽略参数、直接成功退出的脚本代替真实程序。
+        fs::write(&cli, "#!/bin/sh\nexit 0\n").expect("写入 CLI");
+        fs::set_permissions(&cli, fs::Permissions::from_mode(0o644)).expect("去掉执行位");
+        let manifest = root.0.join("auction-deploy.dump.manifest");
+
+        for run in [accounts(Some(SERVICE_UID)), accounts(Some(effective_uid())), accounts(None)] {
+            let text = format!(
+                "{:#}",
+                require_install_dir(&install, &run).expect_err("只有 CLI 缺执行位")
+            );
+            assert!(text.contains("auction-cli 不能由部署执行账号"), "{text}");
+            assert!(text.contains(&format!("UID {}", effective_uid())), "{text}");
+            assert!(text.contains("不会自动修改权限"), "{text}");
+        }
+        let mode = fs::metadata(&cli).expect("元数据").permissions().mode() & 0o777;
+        assert_eq!(mode, 0o644, "门禁不修补权限");
+        let spawn = verify_backup_with_cli(&cli, &root.0, &manifest, "auction")
+            .await
+            .expect_err("0644 的旧 CLI 无法启动");
+        let denied = spawn
+            .chain()
+            .filter_map(|cause| cause.downcast_ref::<std::io::Error>())
+            .any(|cause| cause.kind() == std::io::ErrorKind::PermissionDenied);
+        assert!(denied, "停机后启动旧 CLI 因权限失败：{spawn:#}");
+
+        fs::set_permissions(&cli, fs::Permissions::from_mode(0o755)).expect("恢复标准权限");
+        require_install_dir(&install, &accounts(Some(SERVICE_UID))).expect("补回 0755 后放行");
+        verify_backup_with_cli(&cli, &root.0, &manifest, "auction")
+            .await
+            .expect("门禁放行时停机后能执行旧 CLI");
     }
 }
