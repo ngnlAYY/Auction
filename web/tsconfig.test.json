@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["vite/client", "bun"]
+  },
+  "include": [
+    "contracts/src/**/*.test.ts",
+    "shared/src/**/*.test.ts",
+    "shared/src/**/*.test.tsx",
+    "public/src/**/*.test.ts",
+    "public/src/**/*.test.tsx",
+    "admin/src/**/*.test.ts",
+    "admin/src/**/*.test.tsx",
+    "tooling/env.d.ts"
+  ]
+}
