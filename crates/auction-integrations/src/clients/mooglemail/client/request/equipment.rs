@@ -1,15 +1,19 @@
 //! 装备页读取借用的同账号请求许可：与本客户端的邮件请求共用在途锁、账号忙熔断与外部账号
 //! 请求指标（`operation=equipment`），但不经请求门；装备页之间的节奏仍由装备来源适配器自身的
 //! 最小间隔决定。保护的不变量：同一 Cookie 的物理请求不重叠；只有来源明确无效才能退件，
-//! 战斗页与限流只能让读取暂时不可用。
+//! 战斗页与限流只能让读取暂时不可用。许可不借用客户端，装备页请求发出后被放弃时可随剩余部分
+//! 交给独立任务，在途锁不随调用方提前释放。
 
 use std::sync::Arc;
 use std::time::Instant;
 
-use auction_application::external_metrics::{MailRequestCategory, MailSignal};
+use auction_application::external_metrics::{
+    ExternalMetricsObserver, MailRequestCategory, MailSignal,
+};
 use reqwest::StatusCode;
 
 use super::super::MoogleMailClient;
+use super::super::account_busy::MoogleMailAccountBusy;
 use super::super::security::{is_hentaiverse_battle_response, is_state_lock_limited};
 use crate::clients::gate::GateClass;
 use crate::clients::metrics::{MailRequestGuard, mail_signal};
@@ -37,8 +41,9 @@ pub(crate) fn equipment_read_hold(status: StatusCode, body: &[u8]) -> Option<Equ
 }
 
 /// 持有期间占用同账号在途锁；Drop 释放锁，已开始而未收口的请求指标按 canceled 记录。
-pub(crate) struct EquipmentReadPermit<'a> {
-    client: &'a MoogleMailClient,
+pub(crate) struct EquipmentReadPermit {
+    account_busy: Arc<MoogleMailAccountBusy>,
+    external_metrics: Arc<dyn ExternalMetricsObserver>,
     world: MoogleMailWorld,
     request: Option<MailRequestGuard>,
     hold: Option<MailRequestCategory>,
@@ -54,7 +59,7 @@ impl MoogleMailClient {
     pub(crate) async fn equipment_read_permit(
         &self,
         world: MoogleMailWorld,
-    ) -> Option<EquipmentReadPermit<'_>> {
+    ) -> Option<EquipmentReadPermit> {
         // 已知的熔断拒绝先于排队，不在锁上空等。
         if !self.account_busy.permits_unprobed_read(world, Instant::now()) {
             return None;
@@ -65,7 +70,8 @@ impl MoogleMailClient {
             return None;
         }
         Some(EquipmentReadPermit {
-            client: self,
+            account_busy: Arc::clone(&self.account_busy),
+            external_metrics: Arc::clone(&self.external_metrics),
             world,
             request: None,
             hold: None,
@@ -74,11 +80,11 @@ impl MoogleMailClient {
     }
 }
 
-impl EquipmentReadPermit<'_> {
+impl EquipmentReadPermit {
     /// 网络请求即将发出：开始计入外部账号请求指标。
     pub(crate) fn start_request(&mut self) {
         self.request = Some(MailRequestGuard::start(
-            Arc::clone(&self.client.external_metrics),
+            Arc::clone(&self.external_metrics),
             self.world,
             MoogleMailOperation::Equipment,
         ));
@@ -89,7 +95,7 @@ impl EquipmentReadPermit<'_> {
     pub(crate) fn record_hold(&mut self, hold: EquipmentReadHold) {
         let (signal, category) = match hold {
             EquipmentReadHold::AccountBusy => {
-                self.client.account_busy.record_busy(self.world, Instant::now());
+                self.account_busy.record_busy(self.world, Instant::now());
                 (MailSignal::AccountBusy, MailRequestCategory::AccountBusy)
             }
             EquipmentReadHold::RateLimited => {
@@ -97,7 +103,7 @@ impl EquipmentReadPermit<'_> {
             }
         };
         mail_signal(
-            self.client.external_metrics.as_ref(),
+            self.external_metrics.as_ref(),
             self.world,
             MoogleMailOperation::Equipment,
             signal,

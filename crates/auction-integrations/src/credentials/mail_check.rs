@@ -2,10 +2,12 @@
 //! 经与邮件循环共用的 gateway 以候选身份读取余额页。被检查的可以是 disabled/invalid 凭据，绝不以
 //! 当前运行 Cookie 代替；不借用运行凭据会话、不改变凭据状态，成功也不结束当前账号的忙碌期。
 //!
-//! 每个世界的探测在独立任务中执行：检查超时或被取消只放弃等待，已发出的物理请求照常走完，在途锁
-//! 持有到远端回应或客户端超时，紧接着的 Worker 请求不会与远端仍在处理的探测重叠；尚未发出的探测
-//! 由候选 Cookie 的撤销标记拦下。主动暂停在入口、每个世界开始前以及排队等待期间复核，生效后不再
-//! 发出新的探测。
+//! 每个世界的探测分两段。发出前的排队（请求门、在途锁、账号忙与 owner 复核）在检查自己的 future
+//! 内执行，检查超时或被取消即撤销票据与锁登记退出，不在后台补发。取得在途锁、完成 owner 复核之后、
+//! 真正发出之前直接复核主动暂停；通过这道边界的探测交给独立任务走完，在途锁持有到远端回应或客户端
+//! 超时，检查名额也随它保留到结束，因此后台探测只属于当前唯一被接纳的检查，不随反复取消累积。客户端
+//! 超时只说明 Worker 放弃了这次请求，不能证明远端已停止处理。主动暂停另在入口、每个世界开始前与
+//! 等待期间复核。
 
 use std::{sync::Arc, time::Duration};
 
@@ -17,18 +19,19 @@ use auction_application::admin::{
 use auction_application::core::ApplicationFuture;
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 use auction_application::runtime_switches::RuntimeSwitches;
-use tokio::sync::Semaphore;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::MissedTickBehavior;
 
 use super::DecryptedCookie;
 use crate::mooglemail::{
-    MoogleMailCookie, MoogleMailErrorCategory, MoogleMailGateway, MoogleMailWorld,
+    MoogleMailCookie, MoogleMailError, MoogleMailErrorCategory, MoogleMailGateway, MoogleMailWorld,
 };
-use crate::safe_diagnostics;
+use crate::safe_diagnostics::{self, ErrorProjection};
 
 /// 单个世界的探测预算，含请求门与在途锁排队；shared 凭据最多两个世界，合计仍在转发预算内。
 const WORLD_CHECK_BUDGET: Duration = Duration::from_secs(5);
 /// 等待探测期间复核主动暂停的间隔；暂停快照按自身刷新周期更新，这里只缩短排队中的反应时间。
+/// 发出前另有一次不依赖轮询的直接复核。
 const PAUSE_RECHECK_INTERVAL: Duration = Duration::from_millis(100);
 
 /// Worker 进程内执行的邮件 Cookie 探测器；只接受数据库信封，只检查邮件 Cookie。
@@ -36,27 +39,19 @@ pub struct WorkerMailCredentialVerifier {
     opener: Arc<dyn AdminCredentialOpener>,
     gateway: Arc<MoogleMailGateway>,
     switches: RuntimeSwitches,
-    slots: Semaphore,
+    /// 唯一的检查名额：检查返回且其已发出的探测全部走完才归还。
+    slots: Arc<Semaphore>,
     world_budget: Duration,
+    pause_recheck: Duration,
 }
 
 /// 单个世界探测的结局。
 enum WorldProbe {
     /// 得到结论，含无法得出结论。
     Checked(AdminCredentialCheckStatus),
-    /// 等待期间主动暂停生效：尚未发出的探测已撤销，整次检查按暂不可用返回。
+    /// 等待期间或发出前主动暂停生效：尚未发出的探测不再发出（已发出的在后台走完），整次检查按
+    /// 暂不可用返回。
     Paused,
-}
-
-/// 候选 Cookie 的放行门：客户端在取得在途锁之后、真正发出请求之前复核撤销标记。检查得出结论、
-/// 预算到期、被取消或遇到暂停时随本值析构而撤销，排队中的探测不再发出；已发出的探测不受影响，
-/// 在独立任务中走完。
-struct ProbeAdmission(MoogleMailCookie);
-
-impl Drop for ProbeAdmission {
-    fn drop(&mut self) {
-        self.0.revoke();
-    }
 }
 
 impl WorkerMailCredentialVerifier {
@@ -71,8 +66,9 @@ impl WorkerMailCredentialVerifier {
             opener,
             gateway,
             switches,
-            slots: Semaphore::new(1),
+            slots: Arc::new(Semaphore::new(1)),
             world_budget: WORLD_CHECK_BUDGET,
+            pause_recheck: PAUSE_RECHECK_INTERVAL,
         }
     }
 
@@ -83,8 +79,20 @@ impl WorkerMailCredentialVerifier {
         self
     }
 
-    async fn check_world(&self, world: AdminCredentialWorld, secret: &[u8]) -> WorldProbe {
-        use AdminCredentialCheckStatus::{Inconclusive, Invalid, Valid};
+    /// 测试拉长暂停轮询间隔：等待期间不再轮询，暂停只能由发出边界的直接复核拦下。
+    #[cfg(test)]
+    fn with_pause_recheck(mut self, pause_recheck: Duration) -> Self {
+        self.pause_recheck = pause_recheck;
+        self
+    }
+
+    async fn check_world(
+        &self,
+        world: AdminCredentialWorld,
+        secret: &[u8],
+        slot: &Arc<OwnedSemaphorePermit>,
+    ) -> WorldProbe {
+        use AdminCredentialCheckStatus::Inconclusive;
         let world = match world {
             AdminCredentialWorld::Main => MoogleMailWorld::Main,
             AdminCredentialWorld::Isekai => MoogleMailWorld::Isekai,
@@ -106,42 +114,81 @@ impl WorkerMailCredentialVerifier {
             );
             return WorldProbe::Checked(Inconclusive);
         };
-        let _admission = ProbeAdmission(cookie.clone());
-        // Item Shop 只读余额页不触发邮件打开、取附件、compose、send 或战斗操作。Valid 只表示当次
-        // Cookie 可用；余额不是自身名称证据，账号身份只由内部组合证据端口联合证明。
-        // 在独立任务中探测：本 future 被取消或预算到期只放弃等待，已发出的请求持有在途锁直到走完。
-        let gateway = Arc::clone(&self.gateway);
-        let mut probe =
-            tokio::spawn(async move { gateway.probe_candidate_cookie(world, &cookie).await });
-        let mut pause_check = tokio::time::interval(PAUSE_RECHECK_INTERVAL);
+        let mut probe = std::pin::pin!(self.probe(world, &cookie, slot));
+        // 调用方刚在本世界开始前复核过暂停，首次轮询放在一个间隔之后，不立即重复。
+        let mut pause_check = tokio::time::interval_at(
+            tokio::time::Instant::now() + self.pause_recheck,
+            self.pause_recheck,
+        );
         pause_check.set_missed_tick_behavior(MissedTickBehavior::Delay);
-        let result = loop {
+        loop {
             tokio::select! {
-                result = &mut probe => break result,
+                outcome = &mut probe => return outcome,
                 _ = pause_check.tick() => {
-                    // 排队期间暂停生效：返回即撤销放行门，排队中的探测不再发出。
+                    // 等待期间暂停生效：丢弃探测 future 即撤销排队中的票据与锁登记；已发出的探测
+                    // 仍在后台走完。
                     if self.switches.external_access_paused() {
                         return WorldProbe::Paused;
                     }
                 }
             }
-        };
-        let diagnostic_cause = match result {
-            Ok(Ok(())) => return WorldProbe::Checked(Valid),
-            Ok(Err(error)) if error.category == MoogleMailErrorCategory::SessionExpired => {
-                return WorldProbe::Checked(Invalid);
-            }
-            Ok(Err(error)) => safe_diagnostics::project(&error),
-            Err(error) => safe_diagnostics::project(&error),
-        };
-        safe_diagnostics::warn(
-            "credential_check",
-            "verify_game_session",
-            diagnostic_cause,
-            DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
-        );
-        WorldProbe::Checked(Inconclusive)
+        }
     }
+
+    /// 单个世界的两段式探测：排队在本 future 内，发出交给带着检查名额的独立任务。
+    async fn probe(
+        &self,
+        world: MoogleMailWorld,
+        cookie: &MoogleMailCookie,
+        slot: &Arc<OwnedSemaphorePermit>,
+    ) -> WorldProbe {
+        // Item Shop 只读余额页不触发邮件打开、取附件、compose、send 或战斗操作。Valid 只表示当次
+        // Cookie 可用；余额不是自身名称证据，账号身份只由内部组合证据端口联合证明。
+        // 排队阶段被取消或预算到期即随本 future 撤票退出，不会在无人等待时补发。
+        let queued = match self.gateway.queue_candidate_probe(world, cookie).await {
+            Ok(queued) => queued,
+            Err(error) => return conclude(world, Err(error)),
+        };
+        // 发出边界：已持有在途锁并完成 owner 复核。轮询读到未暂停之后、在途锁释放之前生效的暂停只有
+        // 在这里才能拦下；复核与下面的 spawn 之间没有等待点，结论即发出决定。拦下时丢弃探测，在途锁
+        // 随之释放。
+        if self.switches.external_access_paused() {
+            return WorldProbe::Paused;
+        }
+        // 已发出的探测在独立任务中走完：本 future 被取消或预算到期只放弃等待，任务持有在途锁到远端
+        // 回应或客户端超时，并带着检查名额直到结束。
+        let slot = Arc::clone(slot);
+        let exchange = tokio::spawn(async move {
+            let _slot = slot;
+            queued.send().await
+        });
+        match exchange.await {
+            Ok(result) => conclude(world, result),
+            Err(error) => inconclusive(world, safe_diagnostics::project(&error)),
+        }
+    }
+}
+
+/// 把探测结果折算为单个世界的结论：成功为 Valid，登录失效为 Invalid，其余无法得出结论。
+fn conclude(world: MoogleMailWorld, result: Result<(), MoogleMailError>) -> WorldProbe {
+    match result {
+        Ok(()) => WorldProbe::Checked(AdminCredentialCheckStatus::Valid),
+        Err(error) if error.category == MoogleMailErrorCategory::SessionExpired => {
+            WorldProbe::Checked(AdminCredentialCheckStatus::Invalid)
+        }
+        Err(error) => inconclusive(world, safe_diagnostics::project(&error)),
+    }
+}
+
+/// 无法得出结论：只记一条脱敏诊断，不回显 Cookie 或页面。
+fn inconclusive(world: MoogleMailWorld, cause: ErrorProjection) -> WorldProbe {
+    safe_diagnostics::warn(
+        "credential_check",
+        "verify_game_session",
+        cause,
+        DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+    );
+    WorldProbe::Checked(AdminCredentialCheckStatus::Inconclusive)
 }
 
 impl AdminCredentialVerifier for WorkerMailCredentialVerifier {
@@ -158,8 +205,14 @@ impl AdminCredentialVerifier for WorkerMailCredentialVerifier {
             if self.switches.external_access_paused() {
                 return Err(AdminCredentialError::CheckUnavailable.into());
             }
-            // 立即拒绝重叠检查：同一账号的物理请求本就串行，排队只会挤占 Worker 自己的读写。
-            let _permit = self.slots.try_acquire().ok().ok_or(AdminCredentialError::CheckBusy)?;
+            // 立即拒绝重叠检查：同一账号的物理请求本就串行，排队只会挤占 Worker 自己的读写。已发出的
+            // 探测带着名额直到走完，上一次检查的探测仍在远端处理时同样拒绝。
+            let slot = Arc::new(
+                Arc::clone(&self.slots)
+                    .try_acquire_owned()
+                    .ok()
+                    .ok_or(AdminCredentialError::CheckBusy)?,
+            );
             let secret = DecryptedCookie(self.opener.open(
                 credential.kind,
                 credential.id,
@@ -173,10 +226,12 @@ impl AdminCredentialVerifier for WorkerMailCredentialVerifier {
                     return Err(AdminCredentialError::CheckUnavailable.into());
                 }
                 // 预算含排队；超时只说明这次没有结论，不重试。
-                let probe =
-                    tokio::time::timeout(self.world_budget, self.check_world(*world, &secret.0))
-                        .await
-                        .unwrap_or(WorldProbe::Checked(AdminCredentialCheckStatus::Inconclusive));
+                let probe = tokio::time::timeout(
+                    self.world_budget,
+                    self.check_world(*world, &secret.0, &slot),
+                )
+                .await
+                .unwrap_or(WorldProbe::Checked(AdminCredentialCheckStatus::Inconclusive));
                 let status = match probe {
                     WorldProbe::Checked(status) => status,
                     WorldProbe::Paused => return Err(AdminCredentialError::CheckUnavailable.into()),
@@ -228,28 +283,48 @@ mod tests {
         server: MailDouble,
         /// Worker 自己的读写所用客户端；与 gateway 共享请求门、在途锁与账号忙状态。
         client: Arc<MoogleMailClient>,
+        gateway: Arc<MoogleMailGateway>,
         sealer: Arc<CredentialSealer>,
         switches: RuntimeSwitches,
         verifier: WorkerMailCredentialVerifier,
     }
 
+    impl Fixture {
+        /// 与主检查器共用 gateway 与暂停开关、只缩短单个世界预算的另一检查器。
+        fn verifier_with_world_budget(&self, budget: Duration) -> WorkerMailCredentialVerifier {
+            WorkerMailCredentialVerifier::new(
+                self.sealer.clone(),
+                Arc::clone(&self.gateway),
+                self.switches.clone(),
+            )
+            .with_world_budget(budget)
+        }
+    }
+
     async fn fixture() -> Fixture {
+        fixture_with_interval(Duration::from_millis(1)).await
+    }
+
+    /// `interval` 为共享请求门的最小间隔。
+    async fn fixture_with_interval(interval: Duration) -> Fixture {
         let server = MailDouble::start().await.expect("loopback server");
         let client = Arc::new(
             MoogleMailClient::with_config(MoogleMailClientConfig {
                 endpoint: server.endpoint(),
                 maximum_response_bytes: 8 * 1024 * 1024,
-                minimum_request_interval: Duration::from_millis(1),
+                minimum_request_interval: interval,
                 request_timeout: Duration::from_secs(5),
             })
             .expect("loopback client"),
         );
-        let gateway = MoogleMailGateway::new(
-            Arc::clone(&client),
-            MoogleMailCredentialSet::new(ACTIVE_COOKIE).expect("active cookie"),
-            MoogleMailGatewayConfig::default(),
-        )
-        .expect("gateway");
+        let gateway = Arc::new(
+            MoogleMailGateway::new(
+                Arc::clone(&client),
+                MoogleMailCredentialSet::new(ACTIVE_COOKIE).expect("active cookie"),
+                MoogleMailGatewayConfig::default(),
+            )
+            .expect("gateway"),
+        );
         let data_key = crate::DataKey::from_base64("fixture-credential", &BASE64.encode([9; 32]))
             .expect("测试密钥有效");
         let sealer = Arc::new(CredentialSealer::new(Arc::new(Keyring::single(
@@ -257,9 +332,12 @@ mod tests {
             Arc::new(data_key),
         ))));
         let switches = RuntimeSwitches::default();
-        let verifier =
-            WorkerMailCredentialVerifier::new(sealer.clone(), Arc::new(gateway), switches.clone());
-        Fixture { server, client, sealer, switches, verifier }
+        let verifier = WorkerMailCredentialVerifier::new(
+            sealer.clone(),
+            Arc::clone(&gateway),
+            switches.clone(),
+        );
+        Fixture { server, client, gateway, sealer, switches, verifier }
     }
 
     /// Admin 指定的 disabled 候选凭据：信封用候选 Cookie 密封，与运行 Cookie 不同。
@@ -337,6 +415,50 @@ mod tests {
             result,
             Err(ApplicationError::AdminCredential(AdminCredentialError::CheckUnavailable))
         )
+    }
+
+    fn check_busy(result: &Result<Vec<AdminCredentialCheckObservation>, ApplicationError>) -> bool {
+        matches!(result, Err(ApplicationError::AdminCredential(AdminCredentialError::CheckBusy)))
+    }
+
+    /// 轮询等待测试观察到的状态成立；5 秒内不成立即失败。
+    async fn wait_until(condition: impl Fn() -> bool) {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !condition() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("观察条件应在 5 秒内成立");
+    }
+
+    /// 交替用调用方取消与单个世界预算到期，放弃四次仍在发出前排队的 main 检查。
+    async fn abandon_queued_checks(
+        fixture: &Fixture,
+        budget_limited: &WorkerMailCredentialVerifier,
+    ) {
+        for round in 0..4 {
+            if round % 2 == 0 {
+                let cancelled = tokio::time::timeout(
+                    Duration::from_millis(30),
+                    fixture.verifier.verify(record(fixture, AdminCredentialWorld::Main)),
+                )
+                .await;
+                assert!(cancelled.is_err(), "第 {round} 轮：检查在排队中被调用方取消");
+            } else {
+                assert_eq!(
+                    budget_limited
+                        .verify(record(fixture, AdminCredentialWorld::Main))
+                        .await
+                        .expect("检查完成"),
+                    vec![observation(
+                        AdminCredentialWorld::Main,
+                        AdminCredentialCheckStatus::Inconclusive
+                    )],
+                    "第 {round} 轮：排队中预算到期只说明这次没有结论"
+                );
+            }
+        }
     }
 
     #[tokio::test]
@@ -430,17 +552,6 @@ mod tests {
         );
         assert_eq!(fixture.server.read_requests(), 1);
 
-        // 取消在途检查后许可随之释放；已发出的探测在后台走完才释放在途锁，下一次检查随后照常执行。
-        let cancelled = tokio::time::timeout(
-            Duration::from_millis(50),
-            fixture.verifier.verify(record(&fixture, AdminCredentialWorld::Main)),
-        )
-        .await;
-        assert!(cancelled.is_err(), "检查在替身回应前被取消");
-        assert!(
-            fixture.verifier.verify(record(&fixture, AdminCredentialWorld::Main)).await.is_ok()
-        );
-
         let mut forum = record(&fixture, AdminCredentialWorld::Shared);
         forum.credential.kind = AdminCredentialKind::ForumCookie;
         assert!(matches!(
@@ -456,9 +567,151 @@ mod tests {
         assert_eq!(fixture.server.read_requests(), reads, "暂停期间不发起外部请求");
     }
 
+    /// 已发出的探测把检查名额带进后台：调用方取消后、远端回应前，新的检查立即返回 busy，不进入
+    /// 请求门或在途锁；探测走完才归还名额，此后的检查照常执行。后台候选探测因此只属于一个检查，
+    /// 不会随反复取消累积。
+    #[tokio::test]
+    async fn sent_probe_keeps_the_check_slot_until_it_finishes() {
+        let fixture = fixture().await;
+        fixture.server.set_fault(Some(Fault::DetachedDelay(Duration::from_millis(400))));
+        let cancelled = tokio::time::timeout(
+            Duration::from_millis(100),
+            fixture.verifier.verify(record(&fixture, AdminCredentialWorld::Main)),
+        )
+        .await;
+        assert!(cancelled.is_err(), "检查在远端回应前被调用方取消");
+        assert_eq!(fixture.server.request_cookies(), vec![Some(CANDIDATE_COOKIE.to_owned())]);
+
+        for attempt in 0..3 {
+            let refused =
+                fixture.verifier.verify(record(&fixture, AdminCredentialWorld::Main)).await;
+            assert!(
+                check_busy(&refused),
+                "第 {attempt} 次：已发出的探测未结束时立即拒绝：{refused:?}"
+            );
+        }
+        assert_eq!(fixture.client.queued_waiters(), (0, 0), "被拒绝的检查不排队");
+
+        // 远端处理完、后台探测结束后名额归还；此前只会得到 busy。
+        fixture.server.set_fault(None);
+        let admitted = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let result =
+                    fixture.verifier.verify(record(&fixture, AdminCredentialWorld::Main)).await;
+                if !check_busy(&result) {
+                    break result;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("后台探测走完后名额归还");
+        assert_eq!(
+            admitted.expect("检查完成"),
+            vec![observation(AdminCredentialWorld::Main, AdminCredentialCheckStatus::Inconclusive)]
+        );
+        assert_eq!(
+            fixture.server.request_cookies(),
+            vec![Some(CANDIDATE_COOKIE.to_owned()); 2],
+            "被拒绝的检查没有发出探测"
+        );
+        assert_eq!(fixture.server.max_concurrent_requests(), 1, "同一账号的物理请求不得重叠");
+    }
+
+    /// 发出前在请求门上排队的探测随调用方取消或单个世界预算到期撤票：反复超时/取消之后门上不留
+    /// 失效票据，Worker 紧接的读取按正常间隔放行，远端从未收到候选探测。
+    #[tokio::test]
+    async fn repeated_queued_timeouts_and_cancellations_leave_no_stale_gate_tickets() {
+        let interval = Duration::from_millis(400);
+        let fixture = fixture_with_interval(interval).await;
+        let budget_limited = fixture.verifier_with_world_budget(Duration::from_millis(30));
+        // Worker 刚用掉令牌：之后的候选探测都要在门上等下一个时间槽。
+        worker_read(&fixture.client).await.expect("Worker 读取成功");
+
+        abandon_queued_checks(&fixture, &budget_limited).await;
+
+        assert_eq!(fixture.client.queued_waiters(), (0, 0), "请求门与在途锁不得留下失效登记");
+        let started = std::time::Instant::now();
+        worker_read(&fixture.client).await.expect("Worker 仍能前进");
+        assert!(
+            started.elapsed() < interval * 2,
+            "Worker 读取被失效票据推迟：{:?}",
+            started.elapsed()
+        );
+        assert_eq!(
+            fixture.server.request_cookies(),
+            vec![Some(ACTIVE_COOKIE.to_owned()); 2],
+            "候选探测从未发出"
+        );
+    }
+
+    /// 发出前在在途锁上排队的探测同样随取消或预算到期退出：Worker 的请求挂在远端期间反复超时/
+    /// 取消，锁上不留失效登记；Worker 请求结束后紧接的读取直接取得锁，远端从未收到候选探测。
+    #[tokio::test]
+    async fn checks_abandoned_behind_a_worker_request_leave_no_stale_lock_waiters() {
+        let fixture = fixture().await;
+        let budget_limited = fixture.verifier_with_world_budget(Duration::from_millis(30));
+        let hold = fixture.server.hold_responses();
+        let worker = worker_read(&fixture.client);
+        let abandon = async {
+            // Worker 的请求已到达远端并挂起，在途锁由它持有。
+            wait_until(|| fixture.server.requests().len() == 1).await;
+            abandon_queued_checks(&fixture, &budget_limited).await;
+            let waiters = fixture.client.queued_waiters();
+            hold.release();
+            waiters
+        };
+
+        let (first, waiters) = tokio::join!(worker, abandon);
+
+        first.expect("Worker 读取成功");
+        assert_eq!(waiters, (0, 0), "请求门与在途锁不得留下失效登记");
+        worker_read(&fixture.client).await.expect("Worker 仍能前进");
+        assert_eq!(
+            fixture.server.request_cookies(),
+            vec![Some(ACTIVE_COOKIE.to_owned()); 2],
+            "候选探测从未发出"
+        );
+        assert_eq!(fixture.server.max_concurrent_requests(), 1);
+    }
+
+    /// 发出边界直接复核暂停：世界开始前的复核读到未暂停，候选探测在 Worker 的在途请求后排队；暂停
+    /// 随后生效，Worker 请求再结束释放在途锁。排队的探测取得锁并完成 owner 复核后，必须在发出前被
+    /// 拦下：整次检查暂不可用，远端只收到 Worker 自己的请求。轮询间隔拉长到一小时，等待期间没有
+    /// 轮询，结果不依赖轮询时机。
+    #[tokio::test]
+    async fn pause_after_the_last_poll_is_caught_at_the_send_boundary() {
+        let mut fixture = fixture().await;
+        fixture.verifier = fixture.verifier.with_pause_recheck(Duration::from_secs(3_600));
+        let hold = fixture.server.hold_responses();
+        let worker = worker_read(&fixture.client);
+        let check = async {
+            wait_until(|| fixture.server.requests().len() == 1).await;
+            fixture.verifier.verify(record(&fixture, AdminCredentialWorld::Main)).await
+        };
+        let pause_then_release = async {
+            // 候选探测已在在途锁上排队：世界开始前的复核早已读到未暂停。
+            wait_until(|| fixture.client.queued_waiters() == (0, 1)).await;
+            pause_external_access(&fixture.switches);
+            hold.release();
+        };
+
+        let (worker, checks, ()) = tokio::join!(worker, check, pause_then_release);
+
+        worker.expect("Worker 读取成功");
+        assert!(check_unavailable(&checks), "发出前复核到暂停，整次检查暂不可用：{checks:?}");
+        assert_eq!(
+            fixture.server.request_cookies(),
+            vec![Some(ACTIVE_COOKIE.to_owned())],
+            "暂停生效后不得发出候选探测"
+        );
+        assert_eq!(fixture.client.queued_waiters(), (0, 0));
+    }
+
     /// 检查被调用方取消或单个世界预算到期，都只放弃等待：已发出的探测在独立任务里走完，在途锁持有
     /// 到远端回应为止。替身不随客户端断开停止处理，紧接着的 Worker 请求必须排在它之后，远端看到的
-    /// 同一账号物理请求不重叠。
+    /// 同一账号物理请求不重叠。替身延迟（600ms）短于客户端超时（5 秒）；远端处理超过客户端超时后
+    /// Worker 放弃请求、释放在途锁，远端是否已停止无从证明，不在本测试范围。
     #[tokio::test]
     async fn cancelled_or_timed_out_probe_keeps_the_next_worker_request_serialized() {
         for budget_expires in [false, true] {

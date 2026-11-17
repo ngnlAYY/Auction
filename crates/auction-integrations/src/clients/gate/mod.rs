@@ -42,6 +42,12 @@ impl PriorityGate {
         self.interval
     }
 
+    /// 测试观察：尚未获准的票据数。
+    #[cfg(test)]
+    pub(crate) fn queued(&self) -> usize {
+        self.with_state(|state| state.queued())
+    }
+
     /// 等待一个令牌；返回 `Err` 只在票据被取消等内部不一致时出现，调用方必须放弃本次请求。
     pub(crate) async fn wait(&self, class: GateClass) -> Result<(), ()> {
         let ticket = self.with_state(|state| state.register(class));

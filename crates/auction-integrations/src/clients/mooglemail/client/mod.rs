@@ -32,7 +32,7 @@ pub(crate) use reads::{
     MoogleMailIncomingList, MoogleMailIncomingPrefix, MoogleMailReadRound, MoogleMailSentList,
     MoogleMailSentPrefix, MoogleMailSentScope, SentBoundary, SentBoundaryScan,
 };
-pub(crate) use request::{EquipmentReadPermit, equipment_read_hold};
+pub(crate) use request::{EquipmentReadPermit, PendingRead, equipment_read_hold};
 use security::build_mooglemail_http_client;
 pub(crate) use security::is_hentaiverse_login_response;
 
@@ -72,7 +72,8 @@ pub struct MoogleMailClient {
     gate: Arc<PriorityGate>,
     /// 单持有者在途锁：门只拉开请求起点的间隔，物理请求另由它串行到读完正文（读取还要完成
     /// 账号忙分类）为止。按与门令牌相同的档位排队，前台插到已排队的后台读取之前；
-    /// 克隆出的客户端共享同一把锁。
+    /// 克隆出的客户端共享同一把锁。已发出的读取被调用方放弃时，锁随剩余部分在独立任务里持有到
+    /// 远端回应或客户端超时，不提前释放。
     in_flight: Arc<OperationLock>,
     /// 账号忙熔断只限制请求节奏；克隆出的客户端共享同一份状态。
     account_busy: Arc<account_busy::MoogleMailAccountBusy>,
@@ -189,6 +190,12 @@ impl MoogleMailClient {
             })?;
         }
         Ok(())
+    }
+
+    /// 测试观察：请求门与在途锁上尚在排队的登记数，用来证明被放弃的请求没有留下失效登记。
+    #[cfg(test)]
+    pub(crate) fn queued_waiters(&self) -> (usize, usize) {
+        (self.gate.queued(), self.in_flight.queued())
     }
 
     /// 注入异常证据记录器；诊断失败不能改变远端结果分类或触发额外请求。
