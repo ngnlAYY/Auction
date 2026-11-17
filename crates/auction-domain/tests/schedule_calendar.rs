@@ -208,3 +208,29 @@ fn early_bird_slot_is_not_a_weekly_series() {
 
     assert!(matches!(slot.source.next_week(), Err(DomainError::InvalidSchedule(_))));
 }
+
+/// 排期日期限定在公元 1–9999 年：这之外的年份，日期与身份文本的写法与已持久化的格式不一致，
+/// 来源直接判为无效，不会被物化、改期或推进。
+#[test]
+fn schedule_source_rejects_years_outside_the_supported_range() {
+    let valid = source("UTC", naive(1, 1, 1, 0, 0), naive(1, 1, 1, 3, 0), naive(1, 1, 2, 3, 0));
+    assert!(valid.resolve().is_ok(), "公元 1 年在支持范围内");
+    let latest =
+        source("UTC", naive(9999, 6, 1, 0, 0), naive(9999, 6, 1, 3, 0), naive(9999, 6, 2, 3, 0));
+    assert!(latest.resolve().is_ok(), "公元 9999 年在支持范围内");
+
+    for (preview, open, end) in [
+        (naive(0, 12, 31, 20, 0), naive(1, 1, 1, 0, 0), naive(1, 1, 2, 0, 0)),
+        (naive(-1, 6, 1, 0, 0), naive(-1, 6, 1, 3, 0), naive(-1, 6, 2, 3, 0)),
+    ] {
+        let rejected = source("UTC", preview, open, end);
+        assert!(matches!(rejected.resolve(), Err(DomainError::InvalidSchedule(_))));
+    }
+    // 顺延的结果同样受限：从公元 1 年初往回推一周落到公元 0 年，被拒绝。
+    assert!(matches!(valid.shifted_local_days(-7), Err(DomainError::InvalidSchedule(_))));
+
+    let mut early_bird = valid;
+    early_bird.early_bird =
+        Some(AuctionEarlyBirdSlot { season: civil::date(-1, 11, 1), session: 1 });
+    assert!(matches!(early_bird.resolve(), Err(DomainError::InvalidSchedule(_))));
+}

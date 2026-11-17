@@ -2,6 +2,10 @@
 //!
 //! 构造与读取方法沿用全仓既有调用点的名字（`seconds`、`num_seconds` 等）；截断方向一律朝零，
 //! 与历史行为一致。`Display` 输出只含秒的 ISO 8601 时长，`Debug` 输出规范化后的秒与纳秒。
+//!
+//! 取值范围是正负 `i64::MAX` 毫秒，构造、运算与反序列化共用这一个范围：凡是能得到的值都能
+//! 序列化后读回。`try_*` 与 `checked_*` 在超出范围时返回 `None`；不带前缀的构造函数与运算符在
+//! 超出范围时 panic，只用于已经校验过或写死的取值。
 
 #[cfg(test)]
 mod tests;
@@ -40,37 +44,47 @@ impl std::error::Error for OutOfRangeError {}
 impl Duration {
     /// 零时长。
     pub const ZERO: Self = Self(SignedDuration::ZERO);
-    /// 历史取值范围的上限：`i64::MAX` 毫秒。
-    pub const MAX: Self = Self(SignedDuration::new(i64::MAX / 1_000, 807_000_000));
+    /// 取值范围的上限：`i64::MAX` 毫秒；下限是它的相反数。
+    pub const MAX: Self = Self(SignedDuration::new(MAX_SECONDS, MAX_SUBSEC_NANOSECONDS));
 
     /// 由整秒构造。
+    ///
+    /// # Panics
+    ///
+    /// 超出取值范围时 panic；输入未经校验时用 [`Self::try_seconds`]。
     pub const fn seconds(seconds: i64) -> Self {
-        Self(SignedDuration::from_secs(seconds))
+        match Self::in_range(SignedDuration::from_secs(seconds)) {
+            Some(duration) => duration,
+            None => out_of_range(),
+        }
     }
 
-    /// 由整分钟构造；超出范围时饱和。
+    /// 由整分钟构造；超出取值范围时 panic。
     pub const fn minutes(minutes: i64) -> Self {
-        Self::seconds(minutes.saturating_mul(60))
+        Self::seconds_times(minutes, 60)
     }
 
-    /// 由整小时构造；超出范围时饱和。
+    /// 由整小时构造；超出取值范围时 panic。
     pub const fn hours(hours: i64) -> Self {
-        Self::seconds(hours.saturating_mul(3_600))
+        Self::seconds_times(hours, 3_600)
     }
 
-    /// 由整天构造，一天固定为 86400 秒；超出范围时饱和。
+    /// 由整天构造，一天固定为 86400 秒；超出取值范围时 panic。
     pub const fn days(days: i64) -> Self {
-        Self::seconds(days.saturating_mul(86_400))
+        Self::seconds_times(days, 86_400)
     }
 
-    /// 由整周构造，一周固定为 7 天；超出范围时饱和。
+    /// 由整周构造，一周固定为 7 天；超出取值范围时 panic。
     pub const fn weeks(weeks: i64) -> Self {
-        Self::seconds(weeks.saturating_mul(604_800))
+        Self::seconds_times(weeks, 604_800)
     }
 
-    /// 由毫秒构造。
+    /// 由毫秒构造；`i64::MIN` 不在取值范围内，会 panic。
     pub const fn milliseconds(milliseconds: i64) -> Self {
-        Self(SignedDuration::from_millis(milliseconds))
+        match Self::in_range(SignedDuration::from_millis(milliseconds)) {
+            Some(duration) => duration,
+            None => out_of_range(),
+        }
     }
 
     /// 由微秒构造。
@@ -168,23 +182,24 @@ impl Duration {
         self.0.subsec_nanos()
     }
 
-    /// 绝对值；最小值取绝对值时饱和。
+    /// 绝对值；取值范围关于零对称，不会溢出。
     pub fn abs(&self) -> Self {
-        if self.0.is_negative() {
-            Self(self.0.checked_neg().unwrap_or(SignedDuration::MAX))
-        } else {
-            *self
-        }
+        if self.0.is_negative() { -*self } else { *self }
     }
 
-    /// 相加，溢出时返回 `None`。
+    /// 相加，超出取值范围时返回 `None`。
     pub fn checked_add(&self, other: &Self) -> Option<Self> {
-        self.0.checked_add(other.0).map(Self)
+        self.0.checked_add(other.0).and_then(Self::in_range)
     }
 
-    /// 相减，溢出时返回 `None`。
+    /// 相减，超出取值范围时返回 `None`。
     pub fn checked_sub(&self, other: &Self) -> Option<Self> {
-        self.0.checked_sub(other.0).map(Self)
+        self.0.checked_sub(other.0).and_then(Self::in_range)
+    }
+
+    /// 乘以整数，超出取值范围时返回 `None`。
+    pub fn checked_mul(&self, factor: i32) -> Option<Self> {
+        self.0.checked_mul(factor).and_then(Self::in_range)
     }
 
     /// 转成标准库时长；负值返回错误。
@@ -212,22 +227,40 @@ impl Duration {
         self.0
     }
 
-    /// 由“向下取整的秒 + 非负纳秒”构造，只接受历史取值范围：毫秒数的绝对值不超过 `i64::MAX`。
+    /// 两个时刻之差；时刻的可表示范围远小于时长的取值范围，结果总在范围内。
+    pub(crate) const fn between_timestamps(difference: SignedDuration) -> Self {
+        match Self::in_range(difference) {
+            Some(duration) => duration,
+            None => out_of_range(),
+        }
+    }
+
+    /// 取值范围内才成为 `Duration`。
+    const fn in_range(value: SignedDuration) -> Option<Self> {
+        let (seconds, nanoseconds) = (value.as_secs(), value.subsec_nanos());
+        let beyond = seconds > MAX_SECONDS
+            || seconds < -MAX_SECONDS
+            || (seconds == MAX_SECONDS && nanoseconds > MAX_SUBSEC_NANOSECONDS)
+            || (seconds == -MAX_SECONDS && nanoseconds < -MAX_SUBSEC_NANOSECONDS);
+        if beyond { None } else { Some(Self(value)) }
+    }
+
+    /// `count` 个 `unit` 秒；乘法溢出或超出取值范围时 panic。
+    const fn seconds_times(count: i64, unit: i64) -> Self {
+        match count.checked_mul(unit) {
+            Some(seconds) => Self::seconds(seconds),
+            None => out_of_range(),
+        }
+    }
+
+    /// 由“向下取整的秒 + 非负纳秒”构造；纳秒须小于一秒，超出取值范围时返回 `None`。
     fn from_floor_parts(seconds: i64, nanoseconds: i32) -> Option<Self> {
-        const MAX_SECONDS: i64 = i64::MAX / 1_000;
-        const MAX_NANOSECONDS: i32 = 807_000_000;
-        const MIN_SECONDS: i64 = -i64::MAX / 1_000 - 1;
-        const MIN_NANOSECONDS: i32 = 193_000_000;
-        let in_range = (0..1_000_000_000).contains(&nanoseconds)
-            && (MIN_SECONDS..=MAX_SECONDS).contains(&seconds)
-            && !(seconds == MAX_SECONDS && nanoseconds > MAX_NANOSECONDS)
-            && !(seconds == MIN_SECONDS && nanoseconds < MIN_NANOSECONDS);
-        in_range.then(|| {
-            Self(
-                SignedDuration::from_secs(seconds)
-                    + SignedDuration::from_nanos(i64::from(nanoseconds)),
-            )
-        })
+        if !(0..1_000_000_000).contains(&nanoseconds) {
+            return None;
+        }
+        SignedDuration::from_secs(seconds)
+            .checked_add(SignedDuration::from_nanos(i64::from(nanoseconds)))
+            .and_then(Self::in_range)
     }
 
     /// 规范化成“向下取整的秒 + 非负纳秒”，供序列化、`Debug` 与 `Display` 使用。
@@ -241,14 +274,18 @@ impl Duration {
     }
 }
 
-fn saturating_i64(value: i128) -> i64 {
-    i64::try_from(value).unwrap_or(if value < 0 { i64::MIN } else { i64::MAX })
+/// 取值范围上限的整秒部分与不足一秒的纳秒部分：合起来正好是 `i64::MAX` 毫秒。
+const MAX_SECONDS: i64 = i64::MAX / 1_000;
+const MAX_SUBSEC_NANOSECONDS: i32 = 807_000_000;
+
+/// 写死或已校验的取值超出范围属于调用方的缺陷，直接 panic。
+#[cold]
+const fn out_of_range() -> ! {
+    panic!("Duration 超出取值范围（正负 i64::MAX 毫秒）")
 }
 
-impl From<SignedDuration> for Duration {
-    fn from(duration: SignedDuration) -> Self {
-        Self(duration)
-    }
+fn saturating_i64(value: i128) -> i64 {
+    i64::try_from(value).unwrap_or(if value < 0 { i64::MIN } else { i64::MAX })
 }
 
 impl From<Duration> for SignedDuration {
@@ -260,28 +297,30 @@ impl From<Duration> for SignedDuration {
 impl Add for Duration {
     type Output = Self;
 
+    /// 超出取值范围时 panic；结果不确定在范围内时用 [`Duration::checked_add`]。
     fn add(self, other: Self) -> Self {
-        Self(self.0 + other.0)
+        self.checked_add(&other).unwrap_or_else(|| out_of_range())
     }
 }
 
 impl Sub for Duration {
     type Output = Self;
 
+    /// 超出取值范围时 panic；结果不确定在范围内时用 [`Duration::checked_sub`]。
     fn sub(self, other: Self) -> Self {
-        Self(self.0 - other.0)
+        self.checked_sub(&other).unwrap_or_else(|| out_of_range())
     }
 }
 
 impl AddAssign for Duration {
     fn add_assign(&mut self, other: Self) {
-        self.0 += other.0;
+        *self = *self + other;
     }
 }
 
 impl SubAssign for Duration {
     fn sub_assign(&mut self, other: Self) {
-        self.0 -= other.0;
+        *self = *self - other;
     }
 }
 
@@ -296,8 +335,9 @@ impl Neg for Duration {
 impl Mul<i32> for Duration {
     type Output = Self;
 
+    /// 超出取值范围时 panic；结果不确定在范围内时用 [`Duration::checked_mul`]。
     fn mul(self, factor: i32) -> Self {
-        Self(self.0 * factor)
+        self.checked_mul(factor).unwrap_or_else(|| out_of_range())
     }
 }
 
@@ -305,6 +345,8 @@ impl Div<i32> for Duration {
     type Output = Self;
 
     /// 秒与纳秒分别朝零整除、再合并，与历史实现逐纳秒一致（与精确除法最多相差 1 纳秒）。
+    ///
+    /// 取值范围关于零对称，除以 -1 不会溢出，商的绝对值不超过被除数。
     ///
     /// # Panics
     ///

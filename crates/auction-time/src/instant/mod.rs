@@ -138,7 +138,7 @@ impl Timestamp {
 
     /// 本时刻减去 `earlier` 的有符号时长。
     pub fn signed_duration_since(self, earlier: Self) -> Duration {
-        Duration::from(self.0.duration_since(earlier.0))
+        Duration::between_timestamps(self.0.duration_since(earlier.0))
     }
 
     /// 严格按 RFC 3339 解析：日期与时间各字段定宽，分隔符为 `T`、`t` 或空格，偏移为 `Z` 或 `±hh:mm`。

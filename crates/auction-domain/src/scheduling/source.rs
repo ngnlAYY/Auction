@@ -10,6 +10,9 @@ use super::wall_clock::parse_timezone;
 use crate::DomainError;
 use crate::settlement::RECOVERY_V2_PAYMENT_TIMEOUT;
 
+/// 排期来源接受的年份；本地周一最早落在上一年年末，仍不早于公元 0 年。
+const SUPPORTED_YEARS: std::ops::RangeInclusive<i16> = 1..=9999;
+
 /// 一轮排期冻结的本地计划；保留 DST 跳时归一化前的钟点，后继不从 UTC 反推配置。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -57,6 +60,15 @@ pub struct AuctionScheduleTimes {
 impl AuctionScheduleSource {
     /// 复用旧周计划的歧义时间取较早实例、跳时时间按后续 offset 归一化语义。
     pub fn resolve(&self) -> Result<AuctionScheduleTimes, DomainError> {
+        // 日期限定在公元 1–9999 年：这之外的年份，日期与身份文本的写法不再与已持久化的格式一致
+        // （负年份的位数不同），失败关闭而不是换一种写法继续。
+        let supported = SUPPORTED_YEARS.contains(&self.preview_local.year())
+            && SUPPORTED_YEARS.contains(&self.open_local.year())
+            && SUPPORTED_YEARS.contains(&self.end_local.year())
+            && self.early_bird.is_none_or(|slot| SUPPORTED_YEARS.contains(&slot.season.year()));
+        if !supported {
+            return Err(DomainError::InvalidSchedule("周排期日期超出支持范围"));
+        }
         let timezone = parse_timezone(&self.timezone)
             .ok_or(DomainError::InvalidSchedule("周排期时区来源无效"))?;
         let result = AuctionScheduleTimes {

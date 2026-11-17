@@ -9,7 +9,7 @@
 | 接口 | 说明 |
 | --- | --- |
 | `Timestamp` | UTC 时刻，纳秒精度。构造（`now`、`from_timestamp*`、`from_ymd_hms`、`from_utc_datetime`）、读取（`timestamp*`、`to_utc_datetime`）、运算（`+`/`-` 与 `checked_*`）、取整（`duration_trunc`、`trunc_subsecs`、`with_second`、`with_nanosecond`、`checked_add_months`）与文本（见下表） |
-| `Duration`（别名 `TimeDelta`） | 有符号时长。构造函数的取值范围限制在 `i64` 毫秒以内，超出时 `try_*` 返回 `None`；`/` 按秒与纳秒分别朝零整除 |
+| `Duration`（别名 `TimeDelta`） | 有符号时长，取值范围是正负 `i64::MAX` 毫秒。构造、运算与反序列化共用这一个范围：`try_*` 与 `checked_*` 超出时返回 `None`，不带前缀的构造函数与运算符超出时 panic，只用于已校验或写死的取值；`/` 按秒与纳秒分别朝零整除 |
 | `LocalTime::resolve(timezone, local)` | 本地墙上时间在某时区下对应的时刻：`Unique`、`Repeated { earlier, later }`（回拨）或 `Skipped { after }`（前跳） |
 | `parse_clock`、`parse_date`、`parse_minute_datetime` | `时:分`、`年-月-日`、`年-月-日 时:分` 的宽松解析：字段可不补零、之前可有空白，年份可带符号 |
 | `Timestamp::parse_from_imf_fixdate` | HTTP `Date` 头的定宽写法（`Sun, 06 Nov 1994 08:49:37 GMT`），星期须与日期相符 |
@@ -32,6 +32,8 @@
 | `parse_from_rfc3339` | `2026-11-17T10:00:00Z` | 严格的 RFC 3339：字段定宽，偏移为 `Z` 或 `±hh:mm` |
 
 可表示的时刻从 `-9999-01-02T01:59:59Z` 到 `9999-12-30T22:00:00.999999999Z`。闰秒（秒为 60）无法表示，解析时按超出范围拒绝。
+
+日历日期（`jiff::civil::Date`）的文本只在公元 0–9999 年与迁移前一致；负年份的位数不同。排期来源因此只接受公元 1–9999 年的日期（`auction-domain` 的 `AuctionScheduleSource::resolve`），本地钟点的 JSON 由 `auction-domain` 的 `scheduling/local_wire.rs` 按既有格式读写并拒绝闰秒。
 
 回归测试（`src/instant/tests.rs`、`src/duration/tests.rs`、`src/civil_text/tests.rs`、`src/local_time/tests.rs`）里的期望值取自迁移到 jiff 之前的实现；测试失败说明格式或接受范围变了，应修实现而不是改期望。
 

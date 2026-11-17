@@ -91,3 +91,64 @@ fn serde_form_is_a_floor_seconds_and_nanoseconds_pair() {
     assert!(Duration::try_days(i64::MAX).is_none());
     assert_eq!(Duration::try_days(2), Some(Duration::days(2)));
 }
+
+/// 取值范围是正负 `i64::MAX` 毫秒：构造、运算与反序列化共用同一个范围，凡是能得到的值都能读回。
+#[test]
+fn every_constructible_value_stays_inside_the_serializable_range() {
+    let max = Duration::MAX;
+    let min = -max;
+    for bound in [max, min] {
+        let text = serde_json::to_string(&bound).unwrap();
+        assert_eq!(serde_json::from_str::<Duration>(&text).unwrap(), bound, "{text}");
+    }
+    let step = Duration::nanoseconds(1);
+    assert_eq!(max.checked_add(&step), None);
+    assert_eq!(min.checked_sub(&step), None);
+    assert_eq!(max.checked_sub(&step).unwrap().checked_add(&step), Some(max));
+    assert_eq!(max.checked_mul(2), None);
+    assert_eq!(Duration::seconds(1).checked_mul(i32::MIN), Some(Duration::seconds(-2_147_483_648)));
+    assert_eq!(Duration::try_seconds(i64::MAX), None);
+    assert_eq!(Duration::try_seconds(i64::MIN), None);
+    assert_eq!(Duration::try_days(i64::MAX), None);
+    assert_eq!(Duration::try_milliseconds(i64::MIN), None);
+    assert_eq!(Duration::try_milliseconds(i64::MAX), Some(max));
+    assert_eq!(Duration::try_milliseconds(-i64::MAX), Some(min));
+    assert!(Duration::from_std(std::time::Duration::from_secs(u64::MAX)).is_err());
+}
+
+/// 除法在整个取值范围内都不会溢出：范围关于零对称，除以 -1 得到相反数；除数为零由
+/// `checked_div` 拒绝。
+#[test]
+fn division_never_overflows_inside_the_range() {
+    let max = Duration::MAX;
+    let min = -max;
+    assert_eq!(min.checked_div(-1), Some(max));
+    assert_eq!(max.checked_div(-1), Some(min));
+    assert_eq!(min / -1, max);
+    assert_eq!(max.checked_div(0), None);
+    assert_eq!(min.abs(), max);
+}
+
+#[test]
+#[should_panic(expected = "超出取值范围")]
+fn seconds_outside_the_range_panic() {
+    let _ = Duration::seconds(std::hint::black_box(i64::MAX));
+}
+
+#[test]
+#[should_panic(expected = "超出取值范围")]
+fn days_whose_seconds_overflow_panic() {
+    let _ = Duration::days(std::hint::black_box(i64::MAX));
+}
+
+#[test]
+#[should_panic(expected = "超出取值范围")]
+fn the_smallest_millisecond_count_panics() {
+    let _ = Duration::milliseconds(std::hint::black_box(i64::MIN));
+}
+
+#[test]
+#[should_panic(expected = "超出取值范围")]
+fn addition_beyond_the_range_panics() {
+    let _ = Duration::MAX + Duration::nanoseconds(std::hint::black_box(1));
+}
