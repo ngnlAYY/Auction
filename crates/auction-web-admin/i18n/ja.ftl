@@ -177,6 +177,7 @@ admin-error-invalid-delivery-command = 現在の状態ではこの配信コマ�
 admin-error-stale-delivery-state = 配信状態が変わりました。再読み込みしてから操作してください。
 admin-error-delivery-sent-sighted = Sent にこの精算義務のメールが既にあるため、再試行と失敗確定はできません。ゲーム内で確認し、auction-cli settlement confirm-sent で確定してください。
 admin-error-settlement-obligation-ineligible = この配送の精算義務はもう実行できません（成約が取り消されたか、現在の送付ではありません）。または返送されたメールを復旧処理が引き継いでいます（再送は復旧処理だけが行います）。解放と再試行はできません。「決済復旧」ページで確認してください。
+admin-error-recovery-send-unattributed = 返送を元の配送の一回の送信に一意に帰属できません。返送前に相手に届いた可能性のある送信が複数あるか、現在の返送の後にも送信があり、メールの一通がまだ相手の手元にある可能性があります。確認は拒否されました。元の配送の送信記録と Sent を手動で確認してください。
 admin-error-delivery-failed = 配信に失敗しました。失敗理由を確認してから再試行してください。
 admin-error-delivery-backlog = 配信の滞留が多いため、今はこの操作を実行できません。
 admin-error-compose-not-clean = ゲームのメールに未完了の下書きが残っています。消去してから送信してください。

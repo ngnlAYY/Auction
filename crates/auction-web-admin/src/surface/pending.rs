@@ -316,6 +316,8 @@ pub(crate) fn definite_rejection(code: &str) -> bool {
             | "settlement_return_resend_limit"
             | "settlement_return_obligation_ineligible"
             | "settlement_return_send_unresolved"
+            // 恢复确认的发送归属阻断：退件不能把原投递的发送逐一归属，确认事务整体回滚。
+            | "recovery_send_unattributed"
     )
 }
 
@@ -376,5 +378,17 @@ pub(crate) fn PendingCommandPanel(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::definite_rejection;
+
+    /// 恢复确认因退件不能唯一归属到一次发送而被拒绝时，确认事务整体回滚、没有写入任何事实：
+    /// 页面按确定拒绝展示明确原因，不把它当作结果未知而保留重试。
+    #[test]
+    fn recovery_send_attribution_block_is_a_definite_rejection() {
+        assert!(definite_rejection("recovery_send_unattributed"));
     }
 }

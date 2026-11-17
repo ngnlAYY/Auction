@@ -295,6 +295,12 @@ pub(crate) fn map_recovery_command_error(error: ApplicationError) -> Response {
             api_error(StatusCode::CONFLICT, "recovery_evidence_unresolved", "恢复证据尚未解决")
                 .into_response()
         }
+        ApplicationError::RecoveryCommand(RecoveryCommandError::SendUnattributed) => api_error(
+            StatusCode::CONFLICT,
+            "recovery_send_unattributed",
+            "退件无法唯一归属到原投递的一次发送，需人工核对",
+        )
+        .into_response(),
         ApplicationError::RecoveryCommand(RecoveryCommandError::CommandConflict) => {
             api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
                 .into_response()

@@ -74,6 +74,7 @@ pub fn admin_api_error_message(code: &str) -> String {
         "settlement_obligation_ineligible" => {
             return t!("admin-error-settlement-obligation-ineligible");
         }
+        "recovery_send_unattributed" => return t!("admin-error-recovery-send-unattributed"),
         "invalid_settlement_return_command" => {
             return t!("admin-error-invalid-settlement-return-command");
         }

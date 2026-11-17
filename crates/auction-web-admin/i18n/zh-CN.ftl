@@ -178,6 +178,7 @@ admin-error-invalid-delivery-command = 当前状态下不允许该投递命令�
 admin-error-stale-delivery-state = 投递状态已变化，请刷新后再操作。
 admin-error-delivery-sent-sighted = Sent 中已出现该结算义务的邮件，禁止重试或判失败；请在游戏中核对后用 auction-cli settlement confirm-sent 收口。
 admin-error-settlement-obligation-ineligible = 该投递所属的结算义务已不可执行（成交已撤销，或这不是它的当前派发），或恢复流程已接管它被退回的邮件（重寄只由恢复流程处理），禁止释放或重试；请到“结算恢复”页核对。
+admin-error-recovery-send-unattributed = 退件不能唯一归属到原投递的一次发送：退件之前有多次可能已寄达的发送，或当前退件之后又有发送，其中一封邮件可能仍在对方手里。确认已拒绝，请人工核对原投递的发送记录与 Sent。
 admin-error-delivery-failed = 投递失败，请先查看失败原因再重试。
 admin-error-delivery-backlog = 当前投递积压过多，暂不能执行该操作。
 admin-error-compose-not-clean = 游戏邮箱仍有未完成草稿，请先清空再发送。
