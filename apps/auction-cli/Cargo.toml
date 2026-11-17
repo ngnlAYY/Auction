@@ -26,8 +26,7 @@ sha2.workspace = true
 # 必填：systemctl/pg_dump 子进程的有界读写。
 tokio = { workspace = true, features = ["fs", "io-util", "process"] }
 url.workspace = true
-# 必填：部署与恢复回执使用确定性标识。
-uuid = { workspace = true, features = ["v5"] }
+uuid.workspace = true
 
 [lints]
 # 可选：继承工作区统一 lint 策略，不在单包放宽。
