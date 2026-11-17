@@ -1,5 +1,7 @@
 //! rollback 特有的停机前门禁，dry-run 同样执行：
 //!
+//! - 回滚记录对应的部署回执必须带部署证据，成功与失败回执都接受（安装完成、启动失败后仍要能
+//!   回退）；
 //! - 安装目录中的三角色程序必须仍是回滚记录对应部署回执的版本，且不能就是回滚记录保留的程序
 //!   （回退不会改变任何程序，常见于安装中途失败并已换回之后）；
 //! - rollback 不替换 auction-cli：被保留的 CLI 必须就是执行本命令的 CLI，且内嵌 schema 等于
@@ -18,13 +20,25 @@ use auction_config::Role;
 
 use super::super::install::{ROLE_BINARIES, RetainedBinary, RollbackRecord, SchemaSource};
 use super::super::role_binary;
-use crate::receipt::DeploymentReceipt;
+use crate::receipt::{DeploymentReceipt, Outcome};
 use crate::service::ManagedRole;
 use crate::support::digest::sha256_path;
 
 /// 迁移 075 与 `[readiness] migration_compatibility_mode` 同批引入：内嵌 schema 低于它的程序
 /// 既不认识该字段，也没有兼容后缀判定。
 pub(super) const COMPATIBLE_READINESS_SINCE: i64 = 75;
+
+/// 回滚记录对应的部署回执必须是 deploy/rollback 的最终结果并带部署证据。安装完成、启动失败时
+/// 也以同一标识发布失败回执：新程序已装上但未就绪，仍必须能换回旧程序，因此失败回执同样接受。
+/// 回退会不会改变程序只由 [`require_target_differs`] 按程序摘要判定，不按回执状态一刀切。
+pub(super) fn require_rollbackable_receipt(deployed: &DeploymentReceipt) -> anyhow::Result<()> {
+    if !matches!(deployed.outcome, Outcome::Succeeded | Outcome::Failed)
+        || deployed.deploy.is_none()
+    {
+        anyhow::bail!("回滚记录对应的部署回执不是可回滚状态或缺少制品证据");
+    }
+    Ok(())
+}
 
 /// 安装目录中的三角色程序必须仍是部署回执记录的版本，否则回退目标不明确；返回它们的摘要，
 /// 停机后保留反向记录时据此复核没有被替换。auction-cli 不参与比较：rollback 不替换它。
