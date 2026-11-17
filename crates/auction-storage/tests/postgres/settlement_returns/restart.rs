@@ -37,7 +37,11 @@ async fn activated_take(store: &DatabaseStore, sequence: i64, mid: &str) -> (Ret
         handle(store, returned.case, 1, SettlementReturnAction::ReclaimAndHold).await,
         SettlementReturnCaseStatus::TakePending
     );
-    store.activate_due_return_take(Utc::now()).await.expect("激活").expect("必须激活");
+    store
+        .activate_due_return_take(Utc::now(), super::take_worlds())
+        .await
+        .expect("激活")
+        .expect("必须激活");
     let take = take_delivery(pool, returned.case).await.expect("激活后有 Take 投递");
     (returned, take)
 }
@@ -263,11 +267,19 @@ async fn postgres_return_take_conflict_hands_over_after_unexecuted_failure() {
     );
     // 领回命令提交之后、激活之前出现的同邮件意图（命令时已复核互斥）。
     let intake = insert_intake_take(pool, "998131").await;
-    let progress = store.activate_due_return_take(Utc::now()).await.expect("激活").expect("推进");
+    let progress = store
+        .activate_due_return_take(Utc::now(), super::take_worlds())
+        .await
+        .expect("激活")
+        .expect("推进");
     assert_eq!(progress.status, SettlementReturnCaseStatus::TakeUnknown, "在途意图阻断激活");
     assert_eq!(take_delivery(pool, returned.case).await, None, "冲突时不写入投递");
     assert!(
-        store.activate_due_return_take(Utc::now()).await.expect("激活").is_none(),
+        store
+            .activate_due_return_take(Utc::now(), super::take_worlds())
+            .await
+            .expect("激活")
+            .is_none(),
         "仍被阻断时不推进"
     );
 
@@ -283,7 +295,13 @@ async fn postgres_return_take_conflict_hands_over_after_unexecuted_failure() {
     .execute(pool)
     .await
     .expect("意图失败（已进入发送围栏）");
-    assert!(store.activate_due_return_take(Utc::now()).await.expect("激活").is_none());
+    assert!(
+        store
+            .activate_due_return_take(Utc::now(), super::take_worlds())
+            .await
+            .expect("激活")
+            .is_none()
+    );
 
     // 以持久事实确定从未执行（与投递 Worker 准备期拒绝写入的形状一致）：从未进入发送围栏、
     // 没有尝试、记录未开始写出且非未知。
@@ -299,13 +317,21 @@ async fn postgres_return_take_conflict_hands_over_after_unexecuted_failure() {
     .execute(pool)
     .await
     .expect("意图确定从未执行");
-    let progress = store.activate_due_return_take(Utc::now()).await.expect("交接").expect("推进");
+    let progress = store
+        .activate_due_return_take(Utc::now(), super::take_worlds())
+        .await
+        .expect("交接")
+        .expect("推进");
     assert_eq!(
         (progress.status, progress.event_kind),
         (SettlementReturnCaseStatus::TakePending, "take_requested")
     );
     assert_eq!(last_event(pool, returned.case).await.1["handover"], json!(true));
-    let progress = store.activate_due_return_take(Utc::now()).await.expect("激活").expect("推进");
+    let progress = store
+        .activate_due_return_take(Utc::now(), super::take_worlds())
+        .await
+        .expect("激活")
+        .expect("推进");
     assert_eq!(progress.event_kind, "take_activated");
     assert!(take_delivery(pool, returned.case).await.is_some(), "交接后照常写入 Take 投递");
 
@@ -421,8 +447,11 @@ async fn postgres_return_take_handover_requires_explicit_boolean_flags() {
             SettlementReturnCaseStatus::TakePending
         );
         let intake = insert_intake_take(pool, &mid).await;
-        let progress =
-            store.activate_due_return_take(Utc::now()).await.expect("激活").expect("推进");
+        let progress = store
+            .activate_due_return_take(Utc::now(), super::take_worlds())
+            .await
+            .expect("激活")
+            .expect("推进");
         assert_eq!(progress.status, SettlementReturnCaseStatus::TakeUnknown, "在途意图阻断激活");
         // 意图终态失败、从未进入发送围栏，但结果元数据不能证明从未执行。
         sqlx::query(
@@ -437,7 +466,11 @@ async fn postgres_return_take_handover_requires_explicit_boolean_flags() {
         .await
         .expect("意图失败");
         assert!(
-            store.activate_due_return_take(Utc::now()).await.expect("激活").is_none(),
+            store
+                .activate_due_return_take(Utc::now(), super::take_worlds())
+                .await
+                .expect("激活")
+                .is_none(),
             "{metadata}：不能证明从未执行时不交接"
         );
         assert_eq!(take_delivery(pool, returned.case).await, None, "{metadata}");

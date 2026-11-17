@@ -272,6 +272,7 @@ pub(crate) fn valid_detail(detail: &SettlementReturnDetail, requested: &str) -> 
         && detail.resend_dispatch_no.is_none_or(|value| value >= 2)
         && detail.custody.as_ref().is_none_or(valid_custody)
         && (!detail.recheck_unavailable || detail.summary.status == "recheck_pending")
+        && (!detail.take_unavailable || detail.summary.status == "take_pending")
 }
 
 /// 命令结果必须对应本次命令身份、案件与动作，版本只会前进。
@@ -405,7 +406,8 @@ mod tests {
                 {"action": "acknowledge", "blocker": "state_conflict"},
                 {"action": "recheck", "blocker": "state_conflict"}
             ],
-            "recheck_unavailable": false
+            "recheck_unavailable": false,
+            "take_unavailable": false
         })
     }
 
@@ -541,6 +543,15 @@ mod tests {
             value["recheck_unavailable"] = json!(true);
         });
         assert!(valid_detail(&waiting, CASE), "待重新核验的案件可以说明核验能力不可用");
+        let take_unavailable = detail_with(|value| {
+            value["take_unavailable"] = json!(true);
+        });
+        assert!(!valid_detail(&take_unavailable, CASE), "领回能力不可用只随待领回的案件");
+        let take_waiting = detail_with(|value| {
+            value["summary"]["status"] = json!("take_pending");
+            value["take_unavailable"] = json!(true);
+        });
+        assert!(valid_detail(&take_waiting, CASE), "待领回的案件可以说明领回能力不可用");
     }
 
     /// 命令结果必须对应本次命令身份、案件与动作，版本只会前进。

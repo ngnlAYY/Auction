@@ -1897,6 +1897,7 @@ settlement-return-resends-value = { $used } used of { $limit } (first send exclu
 settlement-return-take-title = Take
 settlement-return-take-unknown-warning = Take outcome unknown: do not take the mail by hand in the game, and do not retry or declare it on the delivery desk. Mailbox maintenance re-checks the original mail in the original Take session: all attachments taken is settled as the take proof, the untouched mail is queued for the Take again, anything else (including the mail having disappeared) stays unknown and keeps alerting.
 settlement-return-recheck-unavailable = Recheck capability unavailable: no online Worker can read MoogleMail for this world (mail disabled, world not configured or Worker offline). The case stays pending recheck and continues automatically once the capability is back.
+settlement-return-take-unavailable = Take unavailable: no Worker can run Takes for this world with a database credential identity (only a configured Cookie, or mail disabled). The case stays waiting to be taken back and continues automatically once a database mail credential is active and the Worker restarts.
 settlement-return-take-state = Execution state
 settlement-return-take-delivery = Take delivery
 settlement-return-take-delivery-status = Delivery status

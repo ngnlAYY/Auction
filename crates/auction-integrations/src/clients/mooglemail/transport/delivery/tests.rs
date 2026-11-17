@@ -3,7 +3,7 @@
 
 use std::{sync::Arc, time::Duration};
 
-use auction_application::admin::AdminCredentialRuntimeWriter;
+use auction_application::admin::{AdminCredentialRuntimeOwnership, AdminCredentialRuntimeWriter};
 use auction_application::core::ApplicationFuture;
 use auction_application::core::{ApplicationError, RequestHash};
 use auction_application::delivery::{
@@ -21,8 +21,10 @@ use uuid::Uuid;
 use crate::clients::mooglemail::transport::{decode_payload, equipment_rejection_copy};
 use crate::clients::mooglemail::{
     MoogleMailClient, MoogleMailClientConfig, MoogleMailCookie, MoogleMailCredentialSet,
-    MoogleMailDeliveryTransport, MoogleMailErrorCategory, MoogleMailWorld,
+    MoogleMailDeliveryTransport, MoogleMailErrorCategory, MoogleMailRuntimeCredential,
+    MoogleMailWorld,
 };
+use crate::clients::owner_probe::fixture::GatedOwnership;
 
 const COOKIE: &str = "ipb_member_id=fixture; ipb_pass_hash=fixture";
 
@@ -660,4 +662,82 @@ async fn every_bound_notification_renders_for_send() {
             assert!(matches!(rendered, Ok(Some(_))), "{template:?}/{code}: {:?}", rendered.err());
         }
     }
+}
+
+/// 结算退件 Take 结果未知时只有原会话的巡检观察能收口，因此一律以持久凭据身份执行：配置 Cookie
+/// 不声明 Take 能力，准备在任何远端读取之前以凭据不可用拒绝（没有开始写出，投递 Worker 只释放
+/// claim）；数据库凭据在 owner 有效时声明能力，并只覆盖其作用域内的世界。入站 Take 仍可用配置
+/// Cookie 准备。
+#[tokio::test]
+async fn settlement_return_take_requires_a_frozen_credential_identity() {
+    let server = MailDouble::start().await.expect("loopback server");
+    let configured = transport(
+        client(server.endpoint()),
+        MoogleMailCredentialSet::new(COOKIE).expect("fixture cookie"),
+    );
+    assert!(!configured.frozen_take_identity_available("main"));
+    assert!(!configured.frozen_take_identity_available("isekai"));
+    let take_payload = |external_mail_id: &str| {
+        json!({
+            "schema_version": 1, "operation": "take", "world": "main",
+            "external_mail_id": external_mail_id, "template": null, "result_code": null,
+            "user_key_user_id": null, "credits": 90, "cod": 0, "attachment_ids": [],
+            "body": null,
+        })
+    };
+    let returned = claim(
+        "settlement_return_action",
+        format!("settlement_return:{}", Uuid::new_v4()),
+        Uuid::new_v4(),
+        take_payload("3127001"),
+    );
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    let Err(error) = configured.prepare_authorized(returned, deadline).await else {
+        panic!("配置 Cookie 不得准备结算退件 Take");
+    };
+    assert_eq!(error.failure_code, "credential_unavailable");
+    assert_eq!(error.result_metadata["write_started"], json!(false), "准备期拒绝，没有开始写出");
+    assert_eq!(server.read_requests(), 0, "拒绝发生在任何远端读取之前");
+    let mut intake_payload = take_payload("3127002");
+    intake_payload["credits"] = json!(0);
+    intake_payload["attachment_ids"] = json!(["7701"]);
+    let intake =
+        claim("mail_intake", "main:3127002:take".to_owned(), Uuid::new_v4(), intake_payload);
+    if let Err(error) = configured.prepare_authorized(intake, deadline).await {
+        panic!(
+            "入站 Take 的配置 Cookie 准备口径不变：{} {}",
+            error.failure_code, error.result_metadata
+        );
+    }
+
+    let owner: Arc<dyn AdminCredentialRuntimeOwnership> = Arc::new(GatedOwnership::open());
+    let runtime = |world: Option<MoogleMailWorld>,
+                   owner: Option<Arc<dyn AdminCredentialRuntimeOwnership>>| {
+        MoogleMailCredentialSet::from_runtime_credentials(
+            vec![MoogleMailRuntimeCredential {
+                credential_id: Uuid::new_v4(),
+                state_version: 1,
+                world,
+                player_name: None,
+                cookie: MoogleMailCookie::new(COOKIE).expect("fixture cookie"),
+            }],
+            Arc::new(NoInvalidation),
+            owner,
+        )
+        .expect("runtime credential set")
+    };
+    let shared = transport(offline_client(), runtime(None, Some(Arc::clone(&owner))));
+    assert!(shared.frozen_take_identity_available("main"));
+    assert!(shared.frozen_take_identity_available("isekai"));
+    assert!(!shared.frozen_take_identity_available("elsewhere"));
+    let scoped = transport(
+        offline_client(),
+        runtime(Some(MoogleMailWorld::Isekai), Some(Arc::clone(&owner))),
+    );
+    assert!(!scoped.frozen_take_identity_available("main"), "作用域外的世界不声明");
+    assert!(scoped.frozen_take_identity_available("isekai"));
+    let unowned = transport(offline_client(), runtime(None, None));
+    assert!(!unowned.frozen_take_identity_available("main"), "没有运行 owner 时不能冻结身份");
+    owner.revoke_internal_use();
+    assert!(!shared.frozen_take_identity_available("main"), "owner 撤销后不再声明");
 }

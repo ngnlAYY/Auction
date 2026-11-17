@@ -100,6 +100,9 @@ pub(super) fn map_detail(
         // 核验能力不可用只说明待重新核验的案件为何不前进，其他状态出现即投影不一致。
         || (detail.recheck_unavailable
             && detail.summary.status != SettlementReturnCaseStatus::RecheckPending)
+        // 领回能力不可用同理只说明待领回的案件为何不前进。
+        || (detail.take_unavailable
+            && detail.summary.status != SettlementReturnCaseStatus::TakePending)
     {
         return None;
     }
@@ -134,6 +137,7 @@ pub(super) fn map_detail(
             })
             .collect(),
         recheck_unavailable: detail.recheck_unavailable,
+        take_unavailable: detail.take_unavailable,
     })
 }
 
@@ -291,6 +295,7 @@ mod tests {
                 (SettlementReturnAction::Recheck, SettlementReturnBlocker::StateConflict),
             ],
             recheck_unavailable: false,
+            take_unavailable: false,
         }
     }
 
@@ -432,5 +437,18 @@ mod tests {
         let mut inconsistent = detail();
         inconsistent.recheck_unavailable = true;
         assert!(map_detail(inconsistent, CASE).is_none(), "待决定案件不能带核验能力不可用");
+    }
+
+    /// 领回能力不可用只随待领回的案件输出；其他状态带这个标记是投影不一致，失败关闭。
+    #[test]
+    fn take_unavailable_only_maps_for_take_pending() {
+        assert!(!map_detail(detail(), CASE).expect("合法详情").take_unavailable);
+        let mut waiting = detail();
+        waiting.summary.status = SettlementReturnCaseStatus::TakePending;
+        waiting.take_unavailable = true;
+        assert!(map_detail(waiting, CASE).expect("待领回详情").take_unavailable);
+        let mut inconsistent = detail();
+        inconsistent.take_unavailable = true;
+        assert!(map_detail(inconsistent, CASE).is_none(), "待决定案件不能带领回能力不可用");
     }
 }

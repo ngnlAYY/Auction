@@ -39,17 +39,23 @@ use crate::database::settlement::funding::{
 };
 
 /// 激活一项到期的持久 Take，或把已没有阻断意图的激活前冲突案件交接回 Take 待执行；没有时返回
-/// `None`。仍被阻断的冲突案件不进入候选，不会挡住其后的激活。
+/// `None`。仍被阻断的冲突案件不进入候选，不会挡住其后的激活。只考虑 `take_worlds`（本进程能以
+/// 持久凭据身份执行 Take 的世界）里的案件：其他世界的 Take 不激活，案件停在待领回，详情显示
+/// “领回能力不可用”。
 pub(super) async fn activate_due_take_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     now: DateTime<Utc>,
+    take_worlds: &[String],
 ) -> Result<Option<SettlementReturnProgress>, ApplicationError> {
+    if take_worlds.iter().any(|world| !matches!(world.as_str(), "main" | "isekai")) {
+        return Err(crate::database::repository_error("结算退件 Take 世界参数无效").into());
+    }
     crate::database::retry_conflicts(
         pool,
         auction_observability::DatabaseTransactionOwner::Fulfillment,
         crate::database::SERIALIZABLE_ATTEMPTS,
         ReturnTransactionError::retryable,
-        || activate_once(pool, now),
+        || activate_once(pool, now, take_worlds),
     )
     .await
     .map_err(ReturnTransactionError::into_application)
@@ -58,6 +64,7 @@ pub(super) async fn activate_due_take_postgres(
 async fn activate_once(
     pool: &crate::database::TrackedPool<Postgres>,
     now: DateTime<Utc>,
+    take_worlds: &[String],
 ) -> Result<Option<SettlementReturnProgress>, ReturnTransactionError> {
     let mut tx = pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await?;
     let candidate: Option<(Uuid, String)> = sqlx::query_as(concat!(
@@ -65,6 +72,7 @@ async fn activate_once(
            FROM public.settlement_return_actions AS action
            JOIN public.settlement_return_cases AS c ON c.return_mail_id = action.return_mail_id
            WHERE action.execution_state = 'pending'
+             AND action.world_id = ANY($1::text[])
              AND (c.status = 'take_pending'
                   OR (c.status = 'take_unknown' AND NOT "#,
         return_take_blocked_sql!("action.world_id", "action.source_external_mail_id"),
@@ -72,6 +80,7 @@ async fn activate_once(
            ORDER BY action.created_at, action.return_mail_id
            LIMIT 1"#
     ))
+    .bind(take_worlds)
     .fetch_optional(&mut *tx)
     .await?;
     let Some((return_mail_id, world_id)) = candidate else {

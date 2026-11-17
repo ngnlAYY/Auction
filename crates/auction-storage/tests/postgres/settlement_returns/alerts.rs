@@ -273,7 +273,11 @@ async fn postgres_take_unknown_moves_case_to_quarantined_alert() {
     assert_eq!(signal(pool, "settlement_return_pending", "auction").await, Some((true, 1)));
     assert_eq!(signal(pool, "settlement_return_quarantined", "auction").await, None);
 
-    store.activate_due_return_take(Utc::now()).await.expect("激活").expect("必须激活");
+    store
+        .activate_due_return_take(Utc::now(), super::take_worlds())
+        .await
+        .expect("激活")
+        .expect("必须激活");
     let take: Uuid = sqlx::query_scalar(
         "SELECT delivery_id FROM public.settlement_return_actions WHERE return_mail_id = $1",
     )

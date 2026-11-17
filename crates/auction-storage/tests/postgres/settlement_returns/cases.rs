@@ -536,8 +536,11 @@ async fn postgres_return_take_conflicts_with_intake_and_recovery() {
     handle(&store, Uuid::new_v4(), other.case, 1, SettlementReturnAction::ReclaimAndHold)
         .await
         .expect("领回代管");
-    let progress =
-        store.activate_due_return_take(Utc::now()).await.expect("激活 Take").expect("必须激活");
+    let progress = store
+        .activate_due_return_take(Utc::now(), super::take_worlds())
+        .await
+        .expect("激活 Take")
+        .expect("必须激活");
     assert_eq!(progress.return_mail_id, other.case);
     let take = take_delivery(pool, other.case).await;
     let (origin, status, recipient): (String, String, String) = sqlx::query_as(
@@ -590,7 +593,11 @@ async fn postgres_return_take_unknown_never_restores_funds() {
     handle(&store, Uuid::new_v4(), returned.case, 1, SettlementReturnAction::ReclaimAndResend)
         .await
         .expect("领回补寄");
-    store.activate_due_return_take(Utc::now()).await.expect("激活").expect("必须激活");
+    store
+        .activate_due_return_take(Utc::now(), super::take_worlds())
+        .await
+        .expect("激活")
+        .expect("必须激活");
     // 投递未到终态前不收口。
     assert!(store.settle_due_return_take(Utc::now()).await.expect("收口").is_none());
     let take = take_delivery(pool, returned.case).await;

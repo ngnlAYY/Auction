@@ -276,6 +276,11 @@ impl DeliveryWorkStore for DatabaseStore {
                     .unavailable_send_worlds
                     .iter()
                     .any(|world| !matches!(world.as_str(), "main" | "isekai"))
+                || exclusions.unidentified_take_worlds.len() > 2
+                || exclusions
+                    .unidentified_take_worlds
+                    .iter()
+                    .any(|world| !matches!(world.as_str(), "main" | "isekai"))
                 || exclusions.recipients.len() > usize::from(u16::MAX)
                 || exclusions.recipients.iter().any(|excluded| {
                     excluded.world.is_empty()

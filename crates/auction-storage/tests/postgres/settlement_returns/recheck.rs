@@ -21,7 +21,13 @@ use crate::support;
 
 /// 写入一条 Worker 心跳：与 Worker 发布同一 TTL（30 秒），`ttl` 为距过期的剩余秒数，为负时已
 /// 过期；观察时刻为过期时刻减 30 秒。
-async fn worker_heartbeat(pool: &PgPool, instance: &str, status: &str, ttl: i64, details: Value) {
+pub(super) async fn worker_heartbeat(
+    pool: &PgPool,
+    instance: &str,
+    status: &str,
+    ttl: i64,
+    details: Value,
+) {
     sqlx::query(
         "INSERT INTO public.service_heartbeats
             (service_name, process_role, instance_id, version, started_at, status, readiness,

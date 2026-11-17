@@ -63,6 +63,13 @@ where
         let mut skipped_recipients = HashSet::new();
         let mut unavailable_worlds = HashSet::new();
         let mut unavailable_send_worlds = HashSet::new();
+        // 本进程不能以持久凭据身份执行 Take 的世界：结算退件 Take 本轮不领取，留在待执行；同世界
+        // 其他投递照常领取。
+        let unidentified_take_worlds = ["main", "isekai"]
+            .into_iter()
+            .filter(|world| !delivery_transport.frozen_take_identity_available(world))
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
 
         // 过期回收与退役扫描每轮只做一次；逐条领取只执行 claim，避免积压时按条重复扫描。
         // 与 claim 使用同一写生命周期守卫与租约预算：drain 可在进入关键段前取消整轮清理，
@@ -144,6 +151,7 @@ where
                                 .collect(),
                             // 关闭类只暂停领取；投递保留在 outbox，重新开启后补发。
                             suppressed_classes: worker.hot.snapshot().mail.send_classes,
+                            unidentified_take_worlds: unidentified_take_worlds.clone(),
                         },
                         1,
                     ),

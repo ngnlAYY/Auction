@@ -94,6 +94,12 @@ fn ReturnDetailPage(return_id: String) -> Element {
                             {t!("settlement-return-recheck-unavailable")}
                         }
                     }
+                    // 待领回但没有 Worker 能以数据库凭据身份执行该世界的 Take：说明案件为何不前进。
+                    if detail.take_unavailable {
+                        p { class: "action-feedback action-feedback--error", role: "note",
+                            {t!("settlement-return-take-unavailable")}
+                        }
+                    }
                     SummarySection { summary: detail.summary.clone() }
                     ActionSection { detail: detail.clone(), notice, refresh }
                     TakeSection {

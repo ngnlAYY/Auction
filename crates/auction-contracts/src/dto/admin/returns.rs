@@ -273,6 +273,10 @@ pub struct AdminSettlementReturnDetailResponse {
     /// 案件待重新核验（`recheck_pending`），但没有在线 Worker 能只读读取该世界的 MoogleMail：
     /// 核验能力不可用，案件保持待核验，能力恢复后自动继续。其他状态恒为 `false`。
     pub recheck_unavailable: bool,
+    /// 案件待领回（`take_pending`）、Take 尚未执行，但没有 Worker 能以持久凭据身份执行该世界的
+    /// Take（只配置 Cookie 或未启用邮件）：领回能力不可用，案件停在待领回，能力恢复后自动继续。
+    /// 其他状态恒为 `false`。
+    pub take_unavailable: bool,
 }
 
 /// `POST …/{return_id}/handle` 请求；动作只取 [`ADMIN_SETTLEMENT_RETURN_HANDLE_ACTIONS`]。

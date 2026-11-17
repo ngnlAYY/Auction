@@ -83,7 +83,11 @@ async fn postgres_return_take_deliveries_count_only_under_their_case() {
     let third = super::flows::returned_payout(&store, 7_620_003, "996003").await;
     super::flows::seed_spent_payout(pool, &third).await;
     super::flows::handle(&store, third.case, 1, SettlementReturnAction::ReclaimAndHold).await;
-    store.activate_due_return_take(Utc::now()).await.expect("激活").expect("必须激活");
+    store
+        .activate_due_return_take(Utc::now(), super::take_worlds())
+        .await
+        .expect("激活")
+        .expect("必须激活");
     let observed = snapshot(&store).await;
     assert_eq!(delivery_counts(&observed), (0, 0, 0, 0), "待执行的 Take 不算投递积压");
     assert_eq!(return_counts(&observed), (1, 2));

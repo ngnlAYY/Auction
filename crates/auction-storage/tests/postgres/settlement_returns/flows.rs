@@ -135,7 +135,11 @@ pub(crate) async fn take_through(
     succeeded: bool,
 ) {
     let pool = store.postgres_pool();
-    store.activate_due_return_take(Utc::now()).await.expect("激活").expect("必须激活");
+    store
+        .activate_due_return_take(Utc::now(), super::take_worlds())
+        .await
+        .expect("激活")
+        .expect("必须激活");
     let take: Uuid = sqlx::query_scalar(
         "SELECT delivery_id FROM public.settlement_return_actions WHERE return_mail_id = $1",
     )

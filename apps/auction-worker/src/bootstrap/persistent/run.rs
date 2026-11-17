@@ -249,6 +249,14 @@ pub(crate) async fn run_worker(
             reads.gateways.keys().map(|world| world.as_str()).collect::<Vec<_>>()
         });
     settlement_return_recheck_worlds.sort_unstable();
+    // 能以持久凭据身份执行结算退件 Take 的世界（与投递领取、Take 激活同一判定）；只配置 Cookie
+    // 或未启用 MoogleMail 时为空，Admin 详情据此说明待领回的案件为何不前进。
+    let settlement_return_take_worlds = delivery_transport.as_ref().map_or_else(Vec::new, |t| {
+        ["isekai", "main"]
+            .into_iter()
+            .filter(|world| t.frozen_take_identity_available(world))
+            .collect::<Vec<_>>()
+    });
     let heartbeat = Arc::new(
         HeartbeatPublisher::new(
             heartbeat_store,
@@ -266,6 +274,7 @@ pub(crate) async fn run_worker(
         .with_details(serde_json::json!({
             "forum_sync_enabled": config.worker.forum.enabled,
             "settlement_return_recheck_worlds": settlement_return_recheck_worlds,
+            "settlement_return_take_worlds": settlement_return_take_worlds,
         }))
         .context("配置 Worker 心跳详情失败")?,
     );

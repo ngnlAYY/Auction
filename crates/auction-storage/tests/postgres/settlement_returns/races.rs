@@ -139,7 +139,11 @@ async fn race(
 
     let activate = {
         let store = Arc::clone(store);
-        move || tokio::spawn(async move { store.activate_due_return_take(Utc::now()).await })
+        move || {
+            tokio::spawn(async move {
+                store.activate_due_return_take(Utc::now(), super::take_worlds()).await
+            })
+        }
     };
     let compete = {
         let store = Arc::clone(store);

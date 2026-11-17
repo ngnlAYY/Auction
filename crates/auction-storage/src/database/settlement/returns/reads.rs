@@ -183,7 +183,15 @@ async fn detail_once(
         None
     };
     let recheck_unavailable = case.status == SettlementReturnCaseStatus::RecheckPending
-        && !recheck_available(&mut tx, &case.world_id).await?;
+        && !worker_capability(&mut tx, &case.world_id, RECHECK_CAPABILITY).await?;
+    // 待领回的 Take 尚未执行（动作未激活，或已激活但投递仍待领取），而没有 Worker 能以持久凭据
+    // 身份执行该世界的 Take：说明案件为何停在待领回。
+    let take_waiting = take.as_ref().is_none_or(|take| {
+        take.execution_state == "pending" || take.delivery_status.as_deref() == Some("pending")
+    });
+    let take_unavailable = case.status == SettlementReturnCaseStatus::TakePending
+        && take_waiting
+        && !worker_capability(&mut tx, &case.world_id, TAKE_CAPABILITY).await?;
     tx.commit().await?;
     Ok(SettlementReturnDetail {
         summary,
@@ -195,11 +203,13 @@ async fn detail_once(
         allowed_actions,
         blockers,
         recheck_unavailable,
+        take_unavailable,
     })
 }
 
-/// 核验能力判定（参数 `$1` 为世界）。Worker 心跳详情的 `settlement_return_recheck_worlds` 列出与
-/// 核验读取器同一 gateway 集合的世界；满足任一条件即可用：
+/// Worker 能力判定（参数 `$1` 为世界，`$2` 为心跳详情里声明能力的键：只读核验为
+/// `settlement_return_recheck_worlds`，以持久凭据身份执行 Take 为 `settlement_return_take_worlds`）。
+/// 满足任一条件即可用：
 ///
 /// - 有效期内（`expires_at` 未到）的非停止心跳声明了该世界；
 /// - 宽限窗口：最近一次 Worker 心跳（全部实例按观察时刻取最新）未处于停止中、声明了该世界，且
@@ -208,11 +218,11 @@ async fn detail_once(
 ///   不会短暂显示不可用。
 ///
 /// 最近一次心跳处于停止中（正常停止或重启时旧实例最后发布 `stopping`）、未声明该世界或该键，或
-/// 已超出宽限窗口时都不可用（失败关闭：显示“核验能力不可用”，不改变案件）。
-const RECHECK_AVAILABLE_SQL: &str = r#"WITH workers AS (
+/// 已超出宽限窗口时都不可用（失败关闭：显示能力不可用，不改变案件）。
+const WORKER_CAPABILITY_SQL: &str = r#"WITH workers AS (
     SELECT instance_id, status, observed_at, expires_at,
-           COALESCE(jsonb_typeof(details -> 'settlement_return_recheck_worlds') = 'array'
-                    AND details -> 'settlement_return_recheck_worlds' ? $1, false) AS declares
+           COALESCE(jsonb_typeof(details -> $2::text) = 'array'
+                    AND details -> $2::text ? $1, false) AS declares
     FROM public.service_heartbeats
     WHERE service_name = 'auction-worker' AND process_role = 'worker'
       AND clock_timestamp() < expires_at + (expires_at - observed_at)
@@ -229,13 +239,22 @@ SELECT EXISTS (
            LIMIT 1
        ), false)"#;
 
-/// 是否有 Worker 能只读核验该世界的退件；口径见 [`RECHECK_AVAILABLE_SQL`]。
-async fn recheck_available(
+/// 心跳详情声明只读核验能力的键。
+const RECHECK_CAPABILITY: &str = "settlement_return_recheck_worlds";
+/// 心跳详情声明能以持久凭据身份执行结算退件 Take 的键。
+const TAKE_CAPABILITY: &str = "settlement_return_take_worlds";
+
+/// 是否有 Worker 声明了该世界的能力；口径见 [`WORKER_CAPABILITY_SQL`]。
+async fn worker_capability(
     tx: &mut Transaction<'_, Postgres>,
     world_id: &str,
+    capability: &str,
 ) -> Result<bool, ReturnTransactionError> {
-    let available: bool =
-        sqlx::query_scalar(RECHECK_AVAILABLE_SQL).bind(world_id).fetch_one(&mut **tx).await?;
+    let available: bool = sqlx::query_scalar(WORKER_CAPABILITY_SQL)
+        .bind(world_id)
+        .bind(capability)
+        .fetch_one(&mut **tx)
+        .await?;
     Ok(available)
 }
 

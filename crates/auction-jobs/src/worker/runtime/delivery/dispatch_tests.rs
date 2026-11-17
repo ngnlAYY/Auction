@@ -145,6 +145,12 @@ impl OutboxStore {
         let exclusions = self.exclusions.lock().unwrap();
         exclusions.iter().map(|exclusion| exclusion.unavailable_send_worlds.clone()).collect()
     }
+
+    /// 每次领取请求携带的不能冻结 Take 凭据身份的世界。
+    fn unidentified_take_worlds(&self) -> Vec<Vec<String>> {
+        let exclusions = self.exclusions.lock().unwrap();
+        exclusions.iter().map(|exclusion| exclusion.unidentified_take_worlds.clone()).collect()
+    }
 }
 
 fn repository_failure(detail: &str) -> ApplicationError {
@@ -320,6 +326,8 @@ struct ScriptedTransport {
     send_polls: AtomicUsize,
     sends_completed: AtomicUsize,
     revocations: Arc<AtomicUsize>,
+    /// 不能以持久凭据身份执行 Take 的世界（只配置 Cookie）。
+    unidentified_take_worlds: Mutex<Vec<&'static str>>,
 }
 
 impl ScriptedTransport {
@@ -333,6 +341,7 @@ impl ScriptedTransport {
             send_polls: AtomicUsize::new(0),
             sends_completed: AtomicUsize::new(0),
             revocations: Arc::new(AtomicUsize::new(0)),
+            unidentified_take_worlds: Mutex::new(Vec::new()),
         })
     }
 
@@ -382,6 +391,10 @@ impl DeliveryTransport for ScriptedTransport {
 
     fn available(&self, _claim: &DeliveryWorkClaim) -> bool {
         true
+    }
+
+    fn frozen_take_identity_available(&self, world: &str) -> bool {
+        !self.unidentified_take_worlds.lock().unwrap().contains(&world)
     }
 
     fn prepare(&self, claim: DeliveryWorkClaim) -> DeliveryPreparation<'_> {
@@ -644,6 +657,23 @@ async fn preparation_outliving_lease_ttl_completes_within_request_budget() {
     expected.extend([(45, Call::Renew), (45, Call::Fence), (45, Call::Renew), (45, Call::Succeed)]);
     assert_eq!(store.calls(), expected);
     assert_eq!(transport.send_polls(), 1);
+}
+
+/// 不能以持久凭据身份执行 Take 的世界随每次领取请求排除（只影响结算退件 Take，由存储按来源
+/// 过滤）；同世界的其他投递照常领取与发送。
+#[tokio::test(start_paused = true)]
+async fn claims_exclude_settlement_return_takes_without_a_frozen_identity() {
+    let store = OutboxStore::new(&["isekai"], Renewal::Healthy, Fence::Sending);
+    let transport = ScriptedTransport::new(Preparation::Ready, Some(Duration::ZERO));
+    transport.unidentified_take_worlds.lock().unwrap().push("isekai");
+    let (worker, _metrics) = delivery_worker(&store, &transport, ExternalWriteLifecycle::default());
+
+    run_delivery_cycle(&worker).await.unwrap();
+
+    let requested = store.unidentified_take_worlds();
+    assert!(!requested.is_empty());
+    assert!(requested.iter().all(|worlds| worlds == &vec!["isekai".to_owned()]), "{requested:?}");
+    assert_eq!(transport.send_polls(), 1, "同世界的其他投递照常发送");
 }
 
 /// 围栏确定 Deferred（例如竞价警告在交接期间被取消关注、收件人重新领先或 lot 到期）：确定没有

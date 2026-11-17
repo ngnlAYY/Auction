@@ -281,6 +281,10 @@ impl DeliveryTransport for ScriptedTransport {
         true
     }
 
+    fn frozen_take_identity_available(&self, _world: &str) -> bool {
+        true
+    }
+
     fn prepare(&self, _claim: DeliveryWorkClaim) -> DeliveryPreparation<'_> {
         Box::pin(async { Err(not_sent()) })
     }

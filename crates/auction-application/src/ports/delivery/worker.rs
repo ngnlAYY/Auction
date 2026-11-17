@@ -52,6 +52,9 @@ pub struct DeliveryClaimExclusions {
     /// 已被 runtime 关闭的出站通知分类；匹配的投递保留在 outbox 中，重新开启后补发。
     /// 关闭只暂停通知，不改变已提交的命令、履约义务或审计事实。
     pub suppressed_classes: crate::ports::mail::MailSendClasses,
+    /// 本进程不能以持久凭据身份执行 Take 的世界：这些世界的结算退件 Take（来源
+    /// `settlement_return_action`）本轮不领取，留在待执行，不影响同世界的其他投递。
+    pub unidentified_take_worlds: Vec<String>,
 }
 
 /// 外部传输成功后允许写入 delivery 的最小结果。
@@ -248,6 +251,11 @@ pub trait DeliveryTransport: Send + Sync {
     /// 无效 payload 必须返回 true，让正式发送路径把它收口为确定失败；false 只表示当前外部
     /// 能力暂不可用，Worker 应释放 claim 而不是消耗交付。
     fn available(&self, claim: &DeliveryWorkClaim) -> bool;
+
+    /// 本进程能否在 `world` 以持久凭据身份（数据库凭据 ID、owner 版本与运行 owner generation）
+    /// 执行 Take。结算退件 Take 只在能冻结凭据身份时激活、领取与执行：结果未知时只有原会话的
+    /// 巡检观察能收口，配置 Cookie 没有持久身份，执行后永远无法巡检。
+    fn frozen_take_identity_available(&self, world: &str) -> bool;
 
     /// 在 sending fence 前执行只读前置，成功句柄必须保留与后续写入相同的互斥上下文。
     /// 无远端可变 compose 状态的适配器可直接返回发送句柄；非法负载在句柄执行时确定失败。

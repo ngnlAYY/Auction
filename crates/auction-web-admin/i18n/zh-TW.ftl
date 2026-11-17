@@ -1896,6 +1896,7 @@ settlement-return-resends-value = 已用 { $used } / 上限 { $limit }（不含�
 settlement-return-take-title = 領回（Take）
 settlement-return-take-unknown-warning = Take 結果未知：不要在遊戲內手動領取，也不要在投遞台重試或聲明結果。郵箱維護會在原 Take 會話裡複核原郵件：附件已全部取走即按領回證明收口，郵件原樣仍在即重新排隊執行 Take，其他情況（包括郵件已消失）保持未知並持續告警。
 settlement-return-recheck-unavailable = 核驗能力不可用：沒有在線 Worker 能讀取該世界的 MoogleMail（未啟用郵件、該世界未設定或 Worker 不在線）。案件保持待重新核驗，能力恢復後自動繼續。
+settlement-return-take-unavailable = 領回能力不可用：沒有 Worker 能以資料庫憑據身分執行該世界的領取（只設定了 Cookie，或未啟用郵件），案件停在待領回；啟用資料庫郵件憑據並重新啟動 Worker 後自動繼續。
 settlement-return-take-state = 執行狀態
 settlement-return-take-delivery = Take 投遞
 settlement-return-take-delivery-status = 投遞狀態

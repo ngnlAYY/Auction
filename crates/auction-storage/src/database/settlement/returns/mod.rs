@@ -84,8 +84,11 @@ impl SettlementReturnWorkStore for DatabaseStore {
     fn activate_due_return_take(
         &self,
         now: DateTime<Utc>,
+        take_worlds: Vec<String>,
     ) -> auction_application::core::ApplicationFuture<'_, Option<SettlementReturnProgress>> {
-        Box::pin(async move { work::activate_due_take_postgres(self.pool(), now).await })
+        Box::pin(
+            async move { work::activate_due_take_postgres(self.pool(), now, &take_worlds).await },
+        )
     }
 
     fn settle_due_return_take(
