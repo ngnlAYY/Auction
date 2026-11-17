@@ -91,16 +91,12 @@ pub(super) struct UnknownTake {
     pub(super) expectation: DeliveryTakeExpectation,
 }
 
-/// 以投递端口领取唯一到期的 Take 投递，并以原会话冻结的 Take 身份进入 sending。
-pub(super) async fn take_into_sending(
-    store: &DatabaseStore,
-    take_delivery: Uuid,
-    expectation: &DeliveryTakeExpectation,
-) -> DeliveryWorkClaim {
+/// 以投递端口领取唯一到期的 Take 投递；尚未经过发送围栏。
+pub(super) async fn claim_take(store: &DatabaseStore, take_delivery: Uuid) -> DeliveryWorkClaim {
     let now = Timestamp::now();
     let grace = StdDuration::from_secs(60);
     DeliveryWorkStore::begin_claim_cycle(store, now, grace).await.expect("领取前清理");
-    let claim = DeliveryWorkStore::claim_due(
+    DeliveryWorkStore::claim_due(
         store,
         "returns-sweep-delivery".to_owned(),
         now,
@@ -113,7 +109,16 @@ pub(super) async fn take_into_sending(
     .expect("领取投递")
     .into_iter()
     .find(|claim| claim.delivery_id == take_delivery)
-    .expect("领取到 Take 投递");
+    .expect("领取到 Take 投递")
+}
+
+/// 以投递端口领取唯一到期的 Take 投递，并以原会话冻结的 Take 身份进入 sending。
+pub(super) async fn take_into_sending(
+    store: &DatabaseStore,
+    take_delivery: Uuid,
+    expectation: &DeliveryTakeExpectation,
+) -> DeliveryWorkClaim {
+    let claim = claim_take(store, take_delivery).await;
     let prepared = DeliveryPreparedExpectation::Take(Arc::new(expectation.clone()));
     let outcome = store
         .start_sending_authorized(claim.clone(), Timestamp::now(), None, Some(&prepared))

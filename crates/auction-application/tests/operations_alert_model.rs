@@ -489,6 +489,25 @@ fn new_kind_summaries_are_single_line_and_bounded() {
     }
 }
 
+/// 原 Take 凭据换了版本后巡检不再复核：凭据版本只增不减，摘要不能再承诺“恢复原凭据后自动
+/// 复核”，要直接给出核对后上报的做法；计数与时长取到上限时摘要仍在长度上限内。
+#[test]
+fn take_unknown_session_changed_summary_does_not_promise_automatic_recovery() {
+    let summary = OperationsAlertSignal::new(
+        OperationsAlertKind::SettlementReturnTakeUnknown,
+        auction_domain::SettlementReturnTakeUnknownReason::SessionChanged.as_str(),
+        OperationsAlertSource::Fulfillment,
+        i64::MAX,
+        i64::MAX,
+    )
+    .expect("原因作用域必须有效")
+    .render_summary()
+    .expect("上限取值的摘要仍须可生成");
+    assert!(summary.contains("不会自动恢复"), "{summary}");
+    assert!(summary.contains("上报"), "{summary}");
+    assert!(!summary.contains("恢复原凭据"), "{summary}");
+}
+
 /// Take 结果未知的告警作用域就是原因闭集：每个原因都是合法身份，通知摘要带出原因名称与
 /// 处置指引且有界；原因闭集外的作用域（含旧的 `auction`）失败关闭。
 #[test]

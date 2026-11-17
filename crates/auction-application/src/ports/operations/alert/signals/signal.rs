@@ -236,7 +236,9 @@ fn take_unknown_guidance(scope: &str) -> &'static str {
         Some(Reason::ReceiptUnproven) => {
             "附件已空但领取回执不成立：核对资产对账报告后上报，不要人工声明"
         }
-        Some(Reason::SessionChanged) => "原 Take 凭据已停用或换版本：恢复原凭据后巡检自动复核",
+        Some(Reason::SessionChanged) => {
+            "原 Take 凭据已停用、失效或换版本，巡检无法再以原会话复核、不会自动恢复：在游戏内核对原退件与资产对账报告后上报，不要手工领取或声明结果"
+        }
         Some(Reason::TakeUnverifiable) => {
             "Take 投递以失败或回执不符终结、巡检不复核：在游戏内核对原退件后上报"
         }

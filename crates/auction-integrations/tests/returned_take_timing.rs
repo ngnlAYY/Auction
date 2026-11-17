@@ -9,6 +9,9 @@
 //!   中落选）：被放弃的 POST 由客户端走完并持有在途锁，重排后的新预检等远端回应后才读取，看到附件
 //!   已取走即失败关闭，同样不发出第二次 POST。
 //!
+//! 另有一条不涉及时序的用例：执行会话里同一 MID 不是原退件（再次领回前凭据换成了另一个账号）时，
+//! 预检失败关闭，不发出领取 POST。
+//!
 //! 页面取自已脱敏的真实已领取详情（taken-3125358），只替换发件人、主题与正文；领取前页面另按
 //! 已脱敏 Sent 详情（sentdetail-3125364）的附件列表结构写入 90 Credits 与领取按钮。结算退件 Take
 //! 只以持久凭据身份执行，凭据集合按数据库来源（持久 ID、版本与运行 owner）建立。
@@ -274,4 +277,24 @@ async fn take_abandoned_after_its_post_is_sent_keeps_the_rerun_preflight_waiting
     assert_eq!(failure_code, "preflight_unproven", "预检失败关闭，不发出写入");
     assert_eq!(server.take_counts(), (1, 1), "远端只收到并执行一次领取 POST");
     assert_eq!(server.max_concurrent_requests(), 1, "新预检不得与远端仍在处理的领取重叠");
+}
+
+/// Admin 再次领回的准入不比较凭据版本，新一轮执行用的是当时的会话；若凭据已换成另一个账号，同一
+/// MID 在那个会话里不是原退件（这里是发件人不同）。预检按发件人、可领取与冻结资产逐项核对，
+/// 对不上即失败关闭：不发出任何领取 POST，也没有附件被取走；失败按结果未知归类，案件回到 Take
+/// 结果未知，只能由新会话的观察再推进，不会被当成确定失败或自动重试。
+#[tokio::test]
+async fn take_in_a_session_showing_another_mail_fails_closed_without_a_post() {
+    let server = MailDouble::start().await.expect("loopback server");
+    let foreign = claimable_page().replacen("value=\"MoogleMail\"", "value=\"Another Player\"", 1);
+    assert_ne!(foreign, claimable_page(), "夹具必须真的换了发件人");
+    server.script_take_mail(MID, foreign, taken_page());
+    let transport = transport(&server);
+
+    let (unknown, failure_code) = execute(&transport, take_claim(Uuid::new_v4(), 1))
+        .await
+        .expect_err("不是原退件的页面不能通过预检");
+    assert_eq!(failure_code, "preflight_unproven");
+    assert!(unknown, "预检不成立按结果未知收口，不当作确定失败");
+    assert_eq!(server.take_counts(), (0, 0), "没有领取 POST，也没有附件被取走");
 }
