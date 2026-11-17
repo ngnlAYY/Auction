@@ -198,7 +198,7 @@ fn valid_early_bird(value: &Value) -> bool {
 }
 
 fn valid_forum(value: &Value) -> bool {
-    if !valid_scalars(
+    valid_scalars(
         value,
         &["managed", "enabled"],
         &[],
@@ -214,10 +214,7 @@ fn valid_forum(value: &Value) -> bool {
             ("lease_duration_seconds", 1, 86400),
         ],
         &[],
-    ) {
-        return false;
-    }
-    true
+    )
 }
 
 fn valid_alerts(value: &Value) -> bool {
@@ -275,7 +272,7 @@ fn valid_worker(value: &Value) -> bool {
 }
 
 fn valid_worker_delivery(value: &Value) -> bool {
-    if !valid_scalars(
+    valid_scalars(
         value,
         &[],
         &[],
@@ -291,14 +288,11 @@ fn valid_worker_delivery(value: &Value) -> bool {
             ("finalize_timeout_seconds", 1, 300),
         ],
         &[],
-    ) {
-        return false;
-    }
-    true
+    )
 }
 
 fn valid_worker_fulfillment(value: &Value) -> bool {
-    if !valid_scalars(
+    valid_scalars(
         value,
         &[],
         &[],
@@ -312,14 +306,11 @@ fn valid_worker_fulfillment(value: &Value) -> bool {
             ("retry_delay_seconds", 1, 86400),
         ],
         &[],
-    ) {
-        return false;
-    }
-    true
+    )
 }
 
 fn valid_worker_recovery(value: &Value) -> bool {
-    if !valid_scalars(
+    valid_scalars(
         value,
         &[],
         &[],
@@ -335,10 +326,7 @@ fn valid_worker_recovery(value: &Value) -> bool {
             ("evidence_stale_after_seconds", 1, 86400),
         ],
         &[],
-    ) {
-        return false;
-    }
-    true
+    )
 }
 
 fn valid_scalars(
