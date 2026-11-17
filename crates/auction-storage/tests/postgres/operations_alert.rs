@@ -115,6 +115,7 @@ async fn postgres_operations_alert_closed_sets_accept_new_kinds_and_reject_unkno
             | Kind::FulfillmentCollectionOverdue
             | Kind::SettlementReturnPending
             | Kind::SettlementReturnQuarantined => ("auction", "fulfillment"),
+            Kind::SettlementReturnTakeUnknown => ("mail_missing", "fulfillment"),
             Kind::RecoveryPaymentOverdue
             | Kind::RecoveryPaymentMailUnsent
             | Kind::RecoveryRelistPending
@@ -143,6 +144,29 @@ async fn postgres_operations_alert_closed_sets_accept_new_kinds_and_reject_unkno
             .await
             .unwrap_or_else(|error| panic!("{} 应被数据库闭集接受：{error}", kind.as_str()));
     }
+
+    // Take 结果未知的告警作用域是原因闭集：应用层每个原因都能写入，`auction` 等其他作用域拒绝。
+    for reason in auction_domain::SettlementReturnTakeUnknownReason::ALL {
+        let seed = format!("take-unknown-{}", reason.as_str());
+        insert_signal(
+            &store,
+            &seed,
+            "settlement_return_take_unknown",
+            reason.as_str(),
+            "fulfillment",
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{} 应被数据库作用域闭集接受：{error}", reason.as_str()));
+    }
+    let take_unknown_auction = insert_signal(
+        &store,
+        "take-unknown-auction",
+        "settlement_return_take_unknown",
+        "auction",
+        "fulfillment",
+    )
+    .await;
+    assert!(take_unknown_auction.is_err(), "结果未知告警的作用域只能是原因闭集");
 
     // 每个来源的 `source_unavailable` 都以来源名作 scope；对账报告缺失时该信号必须可写入，
     // 否则整轮扫描事务回滚（迁移 000110 补上 `reconciliation`）。

@@ -9,6 +9,7 @@ use auction_application::recovery::{
 use chrono::Duration as ChronoDuration;
 
 mod binding;
+pub(crate) use binding::send_attribution_blocker;
 mod cod_return;
 mod confirm;
 mod delivery_retry;
@@ -19,6 +20,7 @@ pub(crate) use delivery_retry::{
 mod mapping;
 mod relist;
 mod scope;
+mod superseded;
 
 use self::cod_return::advance_cod_return_postgres;
 use self::confirm::{advance_relist_postgres, complete_refund_postgres, confirm_postgres};

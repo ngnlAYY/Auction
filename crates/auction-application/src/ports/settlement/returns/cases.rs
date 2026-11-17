@@ -6,7 +6,7 @@
 
 use auction_domain::{
     CommandId, SettlementObligationKind, SettlementReturnAction, SettlementReturnBlocker,
-    SettlementReturnCaseStatus, SettlementReturnPlan,
+    SettlementReturnCaseStatus, SettlementReturnPlan, SettlementReturnTakeUnknownReason,
 };
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -215,6 +215,12 @@ pub struct SettlementReturnDetail {
     /// 案件等待只读重新核验，但没有在线 Worker 声明能读取该世界的 MoogleMail（未启用邮件、该世界
     /// 未配置或 Worker 不在线）：核验能力不可用，案件保持待核验，能力恢复后由 Worker 自动继续。
     pub recheck_unavailable: bool,
+    /// 案件待领回、Take 尚未执行，但没有 Worker 能以持久凭据身份执行该世界的 Take（只配置 Cookie
+    /// 或未启用邮件）：领回能力不可用，案件停在待领回，能力恢复后由 Worker 自动继续。
+    pub take_unavailable: bool,
+    /// Take 结果未知（`take_unknown`）时的具体原因：最近一次原会话观察，没有观察时由持久事实
+    /// 推出；其他状态为空。只读说明，再次领回的资格仍由命令事务锁内复核。
+    pub take_unknown_reason: Option<SettlementReturnTakeUnknownReason>,
 }
 
 /// Admin 处理命令。
@@ -322,6 +328,8 @@ pub enum SettlementReturnError {
     ObligationIneligible,
     #[error("原派发的发送结果未核实，须先经 Sent 证明收口原发送")]
     SendUnresolved,
+    #[error("再次领回需要最近一次观察证明原资产完整仍在且可领取")]
+    ObservationRequired,
     #[error("结算退件持久化结果损坏")]
     StoredResultCorrupt,
     #[error("结算退件依赖暂不可用")]
@@ -339,6 +347,7 @@ impl From<SettlementReturnBlocker> for SettlementReturnError {
             SettlementReturnBlocker::ObligationIneligible => Self::ObligationIneligible,
             SettlementReturnBlocker::ProofRequired => Self::ProofRequired,
             SettlementReturnBlocker::SendUnresolved => Self::SendUnresolved,
+            SettlementReturnBlocker::ObservationRequired => Self::ObservationRequired,
         }
     }
 }

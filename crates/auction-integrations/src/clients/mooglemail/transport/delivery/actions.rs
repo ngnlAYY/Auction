@@ -61,6 +61,22 @@ impl MoogleMailDeliveryTransport {
                     runtime_generation: runtime.generation,
                 })
             }
+            // 结算退件 Take 结果未知时只有原会话的巡检观察能收口，必须冻结持久凭据身份；配置
+            // Cookie 没有持久身份，在任何远端读取或写入之前拒绝（准备失败只释放 claim，投递留在
+            // 待执行），不以无法巡检的身份执行。
+            Err(InternalEvidenceError::Unsupported)
+                if claim.origin_kind == "settlement_return_action" =>
+            {
+                return Err(transport_error(
+                    MoogleMailError::new(
+                        MoogleMailOperation::Take,
+                        world,
+                        MoogleMailErrorCategory::CredentialUnavailable,
+                        false,
+                    ),
+                    false,
+                ));
+            }
             // 配置 Cookie 可即时 Take，但不能用未来当前账号的缺失页恢复这次动作。
             Err(InternalEvidenceError::Unsupported) => None,
             Err(diagnostic_cause) => {

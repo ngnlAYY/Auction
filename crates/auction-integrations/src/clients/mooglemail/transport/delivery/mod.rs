@@ -19,7 +19,7 @@ use super::{
 use crate::EquipmentKeyOpener;
 use crate::clients::mooglemail::{
     MoogleMailClient, MoogleMailCredentialSet, MoogleMailError, MoogleMailOperation,
-    MoogleMailParser, MoogleMailSender,
+    MoogleMailParser, MoogleMailSender, MoogleMailWorld,
 };
 use crate::safe_diagnostics;
 
@@ -208,6 +208,11 @@ impl DeliveryTransport for MoogleMailDeliveryTransport {
         world.map_or(true, |world| {
             self.credentials.available(world) && self.client.permits_write(world)
         })
+    }
+
+    fn frozen_take_identity_available(&self, world: &str) -> bool {
+        MoogleMailWorld::parse(world)
+            .is_some_and(|world| self.credentials.persistent_identity_available(world))
     }
 
     fn prepare(&self, claim: DeliveryWorkClaim) -> DeliveryPreparation<'_> {

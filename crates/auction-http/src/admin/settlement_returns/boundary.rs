@@ -104,6 +104,11 @@ fn business_error(error: SettlementReturnError) -> Response {
             "settlement_return_send_unresolved",
             "原派发的发送结果未核实，须先经 Sent 证明收口原发送",
         ),
+        SettlementReturnError::ObservationRequired => (
+            StatusCode::CONFLICT,
+            "settlement_return_observation_required",
+            "再次领回需要最近一次观察证明原资产完整仍在且可领取",
+        ),
         SettlementReturnError::StoredResultCorrupt | SettlementReturnError::Unavailable => {
             (StatusCode::SERVICE_UNAVAILABLE, "temporarily_unavailable", "服务暂时不可用")
         }
@@ -171,6 +176,11 @@ mod tests {
                 SettlementReturnError::SendUnresolved,
                 StatusCode::CONFLICT,
                 "settlement_return_send_unresolved",
+            ),
+            (
+                SettlementReturnError::ObservationRequired,
+                StatusCode::CONFLICT,
+                "settlement_return_observation_required",
             ),
             (
                 SettlementReturnError::StoredResultCorrupt,

@@ -103,6 +103,9 @@ pub fn admin_api_error_message(code: &str) -> String {
         "settlement_return_send_unresolved" => {
             return t!("admin-error-settlement-return-send-unresolved");
         }
+        "settlement_return_observation_required" => {
+            return t!("admin-error-settlement-return-observation-required");
+        }
         "delivery_failed" => return t!("admin-error-delivery-failed"),
         "delivery_backlog" => return t!("admin-error-delivery-backlog"),
         "compose_not_clean" => return t!("admin-error-compose-not-clean"),

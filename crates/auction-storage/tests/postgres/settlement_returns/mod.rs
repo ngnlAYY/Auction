@@ -26,6 +26,8 @@ mod cases;
 mod counts;
 pub(crate) mod flows;
 mod funding;
+mod identity;
+mod observation;
 pub(crate) mod plans;
 mod races;
 mod receipt;
@@ -139,6 +141,11 @@ pub(crate) async fn insert_sent_fulfillment(
     .await
     .expect("写入结算履约");
     delivery_id
+}
+
+/// Worker 能以持久凭据身份执行 Take 的世界（两个世界都已装配数据库邮件凭据）。
+pub(crate) fn take_worlds() -> Vec<String> {
+    vec!["main".to_owned(), "isekai".to_owned()]
 }
 
 async fn evidence_row(

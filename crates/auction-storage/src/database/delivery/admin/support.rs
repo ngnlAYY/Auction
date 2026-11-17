@@ -3,9 +3,10 @@
 //! 所有分区共享同一只读快照，各自 `LIMIT 上限 + 1` 以发现截断；不写任何事实、命令或审计。
 //! 参考编号只按规范 UUID 解析，且不把投递 payload、正文或凭据带出存储层。
 //!
-//! 缺省投影保持已发布页面能按闭集解码的来源：结算退件 Take（来源 `settlement_return_action`）
-//! 不进入投递分区、不按参考编号补入，也不作为参考编号的种类或推导关联用户的依据。四处查询都在
-//! SQL 里用同一个绑定参数排除，分区的上限与截断按排除后的行计算；只有请求明确包含时才输出。
+//! 缺省投影保持已发布页面能按闭集解码的投递：结算退件 Take（来源 `settlement_return_action`）与
+//! 被恢复终结的原结算投递（见 `extended_projection_delivery_sql!`）不进入投递分区、不按参考编号
+//! 补入，也不作为参考编号的种类或推导关联用户的依据。四处查询都在 SQL 里用同一个绑定参数排除，
+//! 分区的上限与截断按排除后的行计算；只有请求明确包含时才输出。
 
 use auction_application::delivery::{
     DeliveryAdminError, MAX_PLAYER_SUPPORT_ROWS, PlayerSupportBid, PlayerSupportBundle,
@@ -100,7 +101,7 @@ async fn user_id_for_reference(
     reference: Uuid,
     include_settlement_return_actions: bool,
 ) -> Result<Option<Uuid>, DeliveryAdminError> {
-    sqlx::query_scalar(
+    sqlx::query_scalar(concat!(
         r#"WITH candidates AS (
                SELECT obligation.recipient_user_id AS user_id
                FROM public.settlement_obligations AS obligation
@@ -130,14 +131,16 @@ async fn user_id_for_reference(
                JOIN public.users AS user_account
                  ON lower(user_account.game_player_id) = lower(delivery.recipient)
                WHERE delivery.id = $1
-                 AND ($2::boolean OR delivery.origin_kind <> 'settlement_return_action')
+                 AND ($2::boolean OR NOT "#,
+        extended_projection_delivery_sql!("delivery"),
+        r#")
                UNION ALL
                SELECT lot.leader_user_id
                FROM public.lots AS lot
                WHERE lot.id = $1
            )
-           SELECT user_id FROM candidates WHERE user_id IS NOT NULL LIMIT 1"#,
-    )
+           SELECT user_id FROM candidates WHERE user_id IS NOT NULL LIMIT 1"#
+    ))
     .bind(reference)
     .bind(include_settlement_return_actions)
     .fetch_optional(&mut **transaction)
@@ -150,9 +153,11 @@ async fn references(
     reference: Uuid,
     include_settlement_return_actions: bool,
 ) -> Result<Vec<PlayerSupportReference>, DeliveryAdminError> {
-    let rows = sqlx::query(
+    let rows = sqlx::query(concat!(
         r#"SELECT 'delivery'::text AS kind FROM public.deliveries
-           WHERE id = $1 AND ($2::boolean OR origin_kind <> 'settlement_return_action')
+           WHERE id = $1 AND ($2::boolean OR NOT "#,
+        extended_projection_delivery_sql!("deliveries"),
+        r#")
            UNION ALL
            SELECT 'obligation'::text FROM public.settlement_obligations WHERE id = $1
            UNION ALL
@@ -162,8 +167,8 @@ async fn references(
            UNION ALL
            SELECT 'lot'::text FROM public.lots WHERE id = $1
            UNION ALL
-           SELECT 'auction'::text FROM public.auctions WHERE id = $1"#,
-    )
+           SELECT 'auction'::text FROM public.auctions WHERE id = $1"#
+    ))
     .bind(reference)
     .bind(include_settlement_return_actions)
     .fetch_all(&mut **transaction)
@@ -329,7 +334,7 @@ async fn deliveries(
     include_settlement_return_actions: bool,
     truncated: &mut bool,
 ) -> Result<Vec<auction_application::delivery::DeliveryAdminSnapshot>, DeliveryAdminError> {
-    let rows = sqlx::query(
+    let rows = sqlx::query(concat!(
         r#"SELECT id, origin_kind, origin_id, recipient, payload, result_metadata, status,
                   lease_token, lease_expires_at, fencing_version, attempt_count, claimed_at,
                   sending_at, completed_at, external_reference, failure_code,
@@ -353,10 +358,12 @@ async fn deliveries(
                WHERE $2::text IS NOT NULL
                  AND lower(delivery.recipient) = lower($2::text)
            )
-             AND ($4::boolean OR origin_kind <> 'settlement_return_action')
+             AND ($4::boolean OR NOT "#,
+        extended_projection_delivery_sql!("deliveries"),
+        r#")
            ORDER BY created_at DESC, id DESC
-           LIMIT $3"#,
-    )
+           LIMIT $3"#
+    ))
     .bind(user_id)
     .bind(game_player_id)
     .bind(MAX_PLAYER_SUPPORT_ROWS + 1)
@@ -471,14 +478,16 @@ async fn attach_reference(
 ) -> Result<(), DeliveryAdminError> {
     let ReferencePartitions { deliveries, notifications, truncated } = partitions;
     if !deliveries.iter().any(|delivery| delivery.id == reference) {
-        let row = sqlx::query(
+        let row = sqlx::query(concat!(
             r#"SELECT id, origin_kind, origin_id, recipient, payload, result_metadata, status,
                       lease_token, lease_expires_at, fencing_version, attempt_count, claimed_at,
                       sending_at, completed_at, external_reference, failure_code,
                       created_at, updated_at
                FROM public.deliveries
-               WHERE id = $1 AND ($2::boolean OR origin_kind <> 'settlement_return_action')"#,
-        )
+               WHERE id = $1 AND ($2::boolean OR NOT "#,
+            extended_projection_delivery_sql!("deliveries"),
+            r#")"#
+        ))
         .bind(reference)
         .bind(include_settlement_return_actions)
         .fetch_optional(&mut **transaction)

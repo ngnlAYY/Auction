@@ -135,6 +135,17 @@ impl MoogleMailboxEvidenceStore for EmptyEvidence {
     ) -> ApplicationFuture<'a, bool> {
         Box::pin(async { unreachable!("no sweep candidates") })
     }
+    fn record_return_take_observation<'a>(
+        &'a self,
+        _delivery_id: Uuid,
+        _fencing_version: i64,
+        _reason: auction_domain::SettlementReturnTakeUnknownReason,
+        _sweep_retries: i64,
+        _expectation: &'a DeliveryTakeExpectation,
+        _observation: &'a DeliverySendCredentialBinding,
+    ) -> ApplicationFuture<'a, bool> {
+        Box::pin(async { unreachable!("no sweep candidates") })
+    }
     fn requeue_unproven<'a>(
         &'a self,
         _delivery_id: Uuid,

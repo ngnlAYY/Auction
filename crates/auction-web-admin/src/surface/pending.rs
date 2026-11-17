@@ -302,8 +302,8 @@ pub(crate) fn definite_rejection(code: &str) -> bool {
             | "invalid_alert_command"
             | "alert_stale"
             // 结算退件命令：参数、路径或案件不存在在进入命令账本前拒绝；版本、来源、绑定、资产、
-            // 状态、证明、补寄上限、义务资格与原发送未核实的冲突都在命令事务内回滚，没有写入任何
-            // 事实。
+            // 状态、证明、补寄上限、义务资格、原发送未核实与再次领回缺少观察证明的冲突都在命令事务
+            // 内回滚，没有写入任何事实。
             | "invalid_settlement_return_command"
             | "invalid_settlement_return_id"
             | "settlement_return_not_found"
@@ -316,6 +316,7 @@ pub(crate) fn definite_rejection(code: &str) -> bool {
             | "settlement_return_resend_limit"
             | "settlement_return_obligation_ineligible"
             | "settlement_return_send_unresolved"
+            | "settlement_return_observation_required"
             // 恢复确认的发送归属阻断：退件不能把原投递的发送逐一归属，确认事务整体回滚。
             | "recovery_send_unattributed"
     )

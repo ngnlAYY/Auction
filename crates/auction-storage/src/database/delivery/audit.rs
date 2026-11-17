@@ -26,6 +26,8 @@ pub(in crate::database) const QUARANTINE_MAIL_DISPOSITION: &str =
 pub(in crate::database) const RECONCILE_EXPIRED_SENDING: &str =
     "delivery.reconcile_expired_sending";
 pub(in crate::database) const RELEASE: &str = "delivery.release";
+/// Admin 凭最近一次原会话观察（完整资产仍在且可领取）把结果未知的结算退件 Take 重新排队。
+pub(in crate::database) const SETTLEMENT_RETURN_RETAKE: &str = "delivery.settlement_return_retake";
 pub(in crate::database) const START_SENDING: &str = "delivery.start_sending";
 pub(in crate::database) const SUCCEED: &str = "delivery.succeed";
 

@@ -170,6 +170,7 @@ fn action_message(action: SettlementReturnAction) -> &'static str {
         SettlementReturnAction::CloseInbox => "已留箱结案",
         SettlementReturnAction::Acknowledge => "已标记已核对",
         SettlementReturnAction::Recheck => "已提交只读重新核验",
+        SettlementReturnAction::RetryTake => "已提交再次领回",
     }
 }
 
@@ -181,7 +182,7 @@ mod tests {
 
     use super::{CommandInput, handle_action, valid_input};
 
-    /// handle 只接受契约列出的五个动作；重新核验、未知名称与大小写变体都拒绝。
+    /// handle 只接受契约列出的六个动作；重新核验、未知名称与大小写变体都拒绝。
     #[test]
     fn handle_accepts_only_the_contract_action_set() {
         for name in ADMIN_SETTLEMENT_RETURN_HANDLE_ACTIONS {

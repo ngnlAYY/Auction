@@ -9,7 +9,7 @@ use dioxus::prelude::*;
 use super::actions::ActionSection;
 use super::labels::{
     event_details_text, event_key, kind_key, label, location_key, match_key, plan_key, reason_key,
-    status_key, take_state_key,
+    status_key, take_state_key, take_unknown_guidance_key, take_unknown_reason_key,
 };
 use super::list::assets_text;
 use crate::api::{
@@ -94,11 +94,18 @@ fn ReturnDetailPage(return_id: String) -> Element {
                             {t!("settlement-return-recheck-unavailable")}
                         }
                     }
+                    // 待领回但没有 Worker 能以数据库凭据身份执行该世界的 Take：说明案件为何不前进。
+                    if detail.take_unavailable {
+                        p { class: "action-feedback action-feedback--error", role: "note",
+                            {t!("settlement-return-take-unavailable")}
+                        }
+                    }
                     SummarySection { summary: detail.summary.clone() }
                     ActionSection { detail: detail.clone(), notice, refresh }
                     TakeSection {
                         take: detail.take.clone(),
                         status: detail.summary.status.clone(),
+                        unknown_reason: detail.take_unknown_reason.clone(),
                     }
                     if let Some(custody) = detail.custody.clone() {
                         CustodySection { custody }
@@ -189,7 +196,11 @@ fn SummarySection(summary: SettlementReturnSummary) -> Element {
 }
 
 #[component]
-fn TakeSection(take: Option<SettlementReturnTake>, status: String) -> Element {
+fn TakeSection(
+    take: Option<SettlementReturnTake>,
+    status: String,
+    unknown_reason: Option<String>,
+) -> Element {
     let empty = || t!("value-empty");
     rsx! {
         section { class: "admin-panel", aria_labelledby: "settlement-return-take-title",
@@ -197,6 +208,14 @@ fn TakeSection(take: Option<SettlementReturnTake>, status: String) -> Element {
             if status == "take_unknown" {
                 p { class: "action-feedback action-feedback--error", role: "note",
                     {t!("settlement-return-take-unknown-warning")}
+                }
+            }
+            // 结果未知的具体原因（最近一次原会话观察或由持久事实推出）与对应处置指引。
+            if let Some(reason) = unknown_reason {
+                p { class: "admin-panel__note", role: "note",
+                    {t!("settlement-return-take-unknown-reason", reason: label(take_unknown_reason_key, &reason))}
+                    " "
+                    {label(take_unknown_guidance_key, &reason)}
                 }
             }
             if let Some(take) = take {

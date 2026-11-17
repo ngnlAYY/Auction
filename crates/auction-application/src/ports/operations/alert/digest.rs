@@ -168,6 +168,11 @@ pub(super) fn valid_signal_identity(
         | OperationsAlertKind::SettlementReturnQuarantined => {
             source == OperationsAlertSource::Fulfillment && scope == "auction"
         }
+        // 作用域即 Take 结果未知的原因，通知据此带出原因类别。
+        OperationsAlertKind::SettlementReturnTakeUnknown => {
+            source == OperationsAlertSource::Fulfillment
+                && auction_domain::SettlementReturnTakeUnknownReason::from_name(scope).is_some()
+        }
         OperationsAlertKind::RecoveryPaymentOverdue
         | OperationsAlertKind::RecoveryPaymentMailUnsent
         | OperationsAlertKind::RecoveryRelistPending

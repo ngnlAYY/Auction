@@ -102,8 +102,15 @@ impl OperationsAlertSignal {
                 self.count, self.age_seconds
             ),
             OperationsAlertKind::SettlementReturnQuarantined => format!(
-                "结算退件隔离或结果未知 {} 件，最长 {} 秒；只能核对、只读核验或凭系统证明收口",
+                "结算退件隔离待核对 {} 件，最长 {} 秒；只能标记已核对或提交只读核验",
                 self.count, self.age_seconds
+            ),
+            OperationsAlertKind::SettlementReturnTakeUnknown => format!(
+                "结算退件 Take 结果未知 {} 件（原因 {}），最长 {} 秒；{}",
+                self.count,
+                self.scope,
+                self.age_seconds,
+                take_unknown_guidance(&self.scope)
             ),
             OperationsAlertKind::RecoveryPaymentOverdue => {
                 format!("结算付款逾期 {}，最长 {} 秒", self.count, self.age_seconds)
@@ -205,5 +212,35 @@ impl OperationsAlertSignal {
             return Err(OperationsAlertError::Invalid);
         }
         Ok(summary)
+    }
+}
+
+/// Take 结果未知各原因的单行处置指引；与 Admin 退件详情的说明同一口径。作用域已由身份校验限定
+/// 在原因闭集内，未知名称不会到达这里。
+fn take_unknown_guidance(scope: &str) -> &'static str {
+    use auction_domain::SettlementReturnTakeUnknownReason as Reason;
+
+    match Reason::from_name(scope) {
+        Some(Reason::AssetsClaimable) => {
+            "原资产完整仍在且可领取，自动重排已用满：在退件详情“再次领回”"
+        }
+        Some(Reason::AssetsUnclaimable) => {
+            "原资产仍在但当前不可领取：等待巡检再次观察，不要手工领取"
+        }
+        Some(Reason::AssetsChanged) => {
+            "邮件资产与冻结资产不符：在游戏内核对原退件与资产对账报告后上报，不要人工改库"
+        }
+        Some(Reason::MailMissing) => {
+            "原退件已不在收件箱：无法证明资产入账，核对资产对账报告后上报，不要人工声明"
+        }
+        Some(Reason::ReceiptUnproven) => {
+            "附件已空但领取回执不成立：核对资产对账报告后上报，不要人工声明"
+        }
+        Some(Reason::SessionChanged) => "原 Take 凭据已停用或换版本：恢复原凭据后巡检自动复核",
+        Some(Reason::TakeUnverifiable) => {
+            "Take 投递以失败或回执不符终结、巡检不复核：在游戏内核对原退件后上报"
+        }
+        Some(Reason::DispositionConflict) => "同邮件有其他处置意图：等其确定从未执行后自动交接",
+        Some(Reason::AwaitingObservation) | None => "等待邮箱维护在原 Take 会话复核",
     }
 }

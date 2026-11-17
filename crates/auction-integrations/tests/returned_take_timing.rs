@@ -7,7 +7,8 @@
 //! - 旧 POST 在新预检之前生效：新预检看到附件已取走、不可领取，失败关闭且不再发出 POST。
 //!
 //! 页面取自已脱敏的真实已领取详情（taken-3125358），只替换发件人、主题与正文；领取前页面另按
-//! 已脱敏 Sent 详情（sentdetail-3125364）的附件列表结构写入 90 Credits 与领取按钮。
+//! 已脱敏 Sent 详情（sentdetail-3125364）的附件列表结构写入 90 Credits 与领取按钮。结算退件 Take
+//! 只以持久凭据身份执行，凭据集合按数据库来源（持久 ID、版本与运行 owner）建立。
 
 // 测试夹具的固定值失败即测试失败；不对测试装配伪造回退。
 #![allow(clippy::expect_used)]
@@ -15,14 +16,17 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use auction_application::admin::{AdminCredentialRuntimeOwnership, AdminCredentialRuntimeWriter};
 use auction_application::core::{ApplicationError, ApplicationFuture, RequestHash};
 use auction_application::delivery::{DeliveryTransport, DeliveryWorkClaim};
 use auction_application::mail::{MailLoginKey, MailLoginKeyReader};
+use auction_application::settlement::MailRuntimeBinding;
 use auction_integrations::mooglemail::{
-    MoogleMailClient, MoogleMailClientConfig, MoogleMailCredentialSet, MoogleMailDeliveryTransport,
+    MoogleMailClient, MoogleMailClientConfig, MoogleMailCookie, MoogleMailCredentialSet,
+    MoogleMailDeliveryTransport, MoogleMailRuntimeCredential,
 };
 use auction_test_support::mooglemail::MailDouble;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use serde_json::json;
 use uuid::Uuid;
 
@@ -36,6 +40,32 @@ impl MailLoginKeyReader for NoLoginKeys {
     fn read(&self, _user_id: Uuid) -> ApplicationFuture<'_, MailLoginKey> {
         Box::pin(async { Err(ApplicationError::CapabilityUnavailable("login key")) })
     }
+}
+
+/// 本用例不触发远端登录失效；回写只为满足数据库来源集合的构造前提。
+struct NoInvalidation;
+impl AdminCredentialRuntimeWriter for NoInvalidation {
+    fn mark_invalid(&self, _credential_id: Uuid, _now: DateTime<Utc>) -> ApplicationFuture<'_, ()> {
+        Box::pin(async { Ok(()) })
+    }
+}
+
+/// 始终有效的邮件运行 owner（持久 generation 1），满足冻结 Take 凭据身份的前提。
+struct ValidOwner;
+impl AdminCredentialRuntimeOwnership for ValidOwner {
+    fn check(&self) -> ApplicationFuture<'_, ()> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn is_valid(&self) -> bool {
+        true
+    }
+
+    fn mail_runtime_binding(&self) -> Option<MailRuntimeBinding> {
+        Some(MailRuntimeBinding { generation: 1 })
+    }
+
+    fn revoke_internal_use(&self) {}
 }
 
 fn subject() -> String {
@@ -86,8 +116,19 @@ fn transport(server: &MailDouble) -> MoogleMailDeliveryTransport {
         request_timeout: Duration::from_millis(400),
     })
     .expect("loopback client");
-    let credentials = MoogleMailCredentialSet::new("ipb_member_id=fixture; ipb_pass_hash=fixture")
-        .expect("fixture cookie");
+    let credentials = MoogleMailCredentialSet::from_runtime_credentials(
+        vec![MoogleMailRuntimeCredential {
+            credential_id: Uuid::from_u128(0x7e7),
+            state_version: 1,
+            world: None,
+            player_name: None,
+            cookie: MoogleMailCookie::new("ipb_member_id=fixture; ipb_pass_hash=fixture")
+                .expect("fixture cookie"),
+        }],
+        Arc::new(NoInvalidation),
+        Some(Arc::new(ValidOwner)),
+    )
+    .expect("数据库来源凭据集合");
     MoogleMailDeliveryTransport::new(client, credentials, Arc::new(NoLoginKeys))
 }
 

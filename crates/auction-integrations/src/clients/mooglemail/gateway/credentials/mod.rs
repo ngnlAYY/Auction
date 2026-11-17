@@ -357,6 +357,24 @@ impl MoogleMailCredentialSet {
             })
     }
 
+    /// 目标 world 当前是否有能冻结持久凭据身份（数据库凭据 ID、owner 版本与运行 owner
+    /// generation）的可用凭据。配置 Cookie 没有持久 ID，不满足；与
+    /// [`MoogleMailCredentialSession::internal_credential_binding`] 同一组前提。
+    pub(crate) fn persistent_identity_available(&self, world: MoogleMailWorld) -> bool {
+        self.ownership_valid()
+            && self.ownership.as_ref().is_some_and(|owner| {
+                owner.mail_runtime_binding().is_some_and(|binding| binding.generation > 0)
+            })
+            && self.candidates.lock().is_ok_and(|candidates| {
+                candidates.iter().any(|candidate| {
+                    candidate.cookie.is_active()
+                        && candidate.persistent_id.is_some()
+                        && candidate.state_version.is_some_and(|version| version > 0)
+                        && candidate.world.is_none_or(|scope| scope == world)
+                })
+            })
+    }
+
     /// 返回当前进程中是否至少有一个能够服务目标 world 的凭据。
     pub(crate) fn available(&self, world: MoogleMailWorld) -> bool {
         self.ownership_valid()

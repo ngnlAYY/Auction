@@ -9,16 +9,19 @@ mod admission;
 mod cases;
 mod command;
 mod errors;
+mod observed;
 mod reads;
 mod recheck;
 mod resend;
 mod restart;
+mod retry;
 mod swept;
 mod take;
 mod work;
 
 pub(crate) use cases::{current_return_evidence_sql, open_case, return_case_bound};
 pub(crate) use errors::ReturnTransactionError;
+pub(crate) use observed::{TakeObservation, record_take_observation, take_unknown_reason_sql};
 pub(crate) use swept::{
     SweptTakeOwner, lock_swept_take, requeue_swept_take, settle_swept_take, swept_take_owner,
 };
@@ -84,8 +87,11 @@ impl SettlementReturnWorkStore for DatabaseStore {
     fn activate_due_return_take(
         &self,
         now: DateTime<Utc>,
+        take_worlds: Vec<String>,
     ) -> auction_application::core::ApplicationFuture<'_, Option<SettlementReturnProgress>> {
-        Box::pin(async move { work::activate_due_take_postgres(self.pool(), now).await })
+        Box::pin(
+            async move { work::activate_due_take_postgres(self.pool(), now, &take_worlds).await },
+        )
     }
 
     fn settle_due_return_take(

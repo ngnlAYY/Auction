@@ -161,7 +161,11 @@ pub(super) async fn unknown_take_of(
         handle(store, returned.case, 1, action).await,
         SettlementReturnCaseStatus::TakePending
     );
-    store.activate_due_return_take(Utc::now()).await.expect("激活").expect("必须激活");
+    store
+        .activate_due_return_take(Utc::now(), super::take_worlds())
+        .await
+        .expect("激活")
+        .expect("必须激活");
     let take_delivery: Uuid = sqlx::query_scalar(
         "SELECT delivery_id FROM public.settlement_return_actions WHERE return_mail_id = $1",
     )

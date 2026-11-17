@@ -114,6 +114,37 @@ fn accepts_complete_detail() {
     assert_eq!(decoded.attempts.len(), 1);
 }
 
+/// 被恢复终结的原结算投递（`failed/recovery_superseded`）没有发送时间，只在扩展投影里出现：
+/// 解码接受这一确定未发送的终态，来源不是结算或带发送时间时拒绝。
+#[test]
+fn accepts_recovery_superseded_settlement_delivery_only_without_send_facts() {
+    let decode = |delivery: AdminDeliveryResponse| {
+        let mut data = detail();
+        data.delivery = delivery;
+        data.attempts.clear();
+        decode_detail(StrictDeliveryEnvelope {
+            code: "ok".to_owned(),
+            message: "loaded".to_owned(),
+            data,
+        })
+    };
+    let mut superseded = delivery();
+    superseded.status = "failed".to_owned();
+    superseded.failure_code = Some("recovery_superseded".to_owned());
+    superseded.claimed_at = None;
+    superseded.sending_at = None;
+    superseded.attempt_count = 0;
+    assert!(decode(superseded.clone()).is_ok());
+    let mut sent = superseded.clone();
+    sent.claimed_at = Some(time(0));
+    sent.sending_at = Some(time(0));
+    sent.attempt_count = 1;
+    assert!(decode(sent).is_err());
+    let mut other_origin = superseded;
+    other_origin.origin_kind = "lot_watch".to_owned();
+    assert!(decode(other_origin).is_err());
+}
+
 #[test]
 fn accepts_operator_acknowledged_disposition_in_detail() {
     let mut data = detail();

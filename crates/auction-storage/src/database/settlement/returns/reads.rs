@@ -20,6 +20,7 @@ use uuid::Uuid;
 use super::admission::admission_facts;
 use super::cases::{current_return_evidence_sql, load_case};
 use super::errors::ReturnTransactionError;
+use super::observed::take_unknown_reason;
 use crate::database::TrackedTransaction as Transaction;
 use crate::database::repository_error;
 use crate::database::settlement::fulfillment::recovery_allows_execution_now;
@@ -183,7 +184,21 @@ async fn detail_once(
         None
     };
     let recheck_unavailable = case.status == SettlementReturnCaseStatus::RecheckPending
-        && !recheck_available(&mut tx, &case.world_id).await?;
+        && !worker_capability(&mut tx, &case.world_id, RECHECK_CAPABILITY).await?;
+    // 待领回的 Take 尚未执行（动作未激活，或已激活但投递仍待领取），而没有 Worker 能以持久凭据
+    // 身份执行该世界的 Take：说明案件为何停在待领回。
+    let take_waiting = take.as_ref().is_none_or(|take| {
+        take.execution_state == "pending" || take.delivery_status.as_deref() == Some("pending")
+    });
+    let take_unavailable = case.status == SettlementReturnCaseStatus::TakePending
+        && take_waiting
+        && !worker_capability(&mut tx, &case.world_id, TAKE_CAPABILITY).await?;
+    // 结果未知时说明具体原因：最近一次原会话观察，没有观察时由持久事实推出。
+    let take_unknown_reason = if case.status == SettlementReturnCaseStatus::TakeUnknown {
+        take_unknown_reason(&mut tx, return_mail_id).await?
+    } else {
+        None
+    };
     tx.commit().await?;
     Ok(SettlementReturnDetail {
         summary,
@@ -195,29 +210,59 @@ async fn detail_once(
         allowed_actions,
         blockers,
         recheck_unavailable,
+        take_unavailable,
+        take_unknown_reason,
     })
 }
 
-/// 是否有在线 Worker 声明能只读核验该世界的退件：Worker 心跳详情的
-/// `settlement_return_recheck_worlds` 列出与核验读取器同一 gateway 集合的世界；过期、正在停止或
-/// 未声明该键的实例不算可用（失败关闭：显示“核验能力不可用”，不改变案件）。
-async fn recheck_available(
+/// Worker 能力判定（参数 `$1` 为世界，`$2` 为心跳详情里声明能力的键：只读核验为
+/// `settlement_return_recheck_worlds`，以持久凭据身份执行 Take 为 `settlement_return_take_worlds`）。
+/// 满足任一条件即可用：
+///
+/// - 有效期内（`expires_at` 未到）的非停止心跳声明了该世界；
+/// - 宽限窗口：最近一次 Worker 心跳（全部实例按观察时刻取最新）未处于停止中、声明了该世界，且
+///   距过期不超过该心跳自身的一个 TTL（`expires_at - observed_at`，Worker 为 30 秒，每 10 秒
+///   发布）。进程崩溃或被强制结束后重启、发布偶发失败时，旧心跳过期到新实例发布 `starting` 之间
+///   不会短暂显示不可用。
+///
+/// 最近一次心跳处于停止中（正常停止或重启时旧实例最后发布 `stopping`）、未声明该世界或该键，或
+/// 已超出宽限窗口时都不可用（失败关闭：显示能力不可用，不改变案件）。
+const WORKER_CAPABILITY_SQL: &str = r#"WITH workers AS (
+    SELECT instance_id, status, observed_at, expires_at,
+           COALESCE(jsonb_typeof(details -> $2::text) = 'array'
+                    AND details -> $2::text ? $1, false) AS declares
+    FROM public.service_heartbeats
+    WHERE service_name = 'auction-worker' AND process_role = 'worker'
+      AND clock_timestamp() < expires_at + (expires_at - observed_at)
+)
+SELECT EXISTS (
+           SELECT 1 FROM workers
+           WHERE declares AND status IN ('starting', 'ready', 'degraded')
+             AND expires_at > clock_timestamp()
+       )
+       OR COALESCE((
+           SELECT declares AND status IN ('starting', 'ready', 'degraded')
+           FROM workers
+           ORDER BY observed_at DESC, instance_id DESC
+           LIMIT 1
+       ), false)"#;
+
+/// 心跳详情声明只读核验能力的键。
+const RECHECK_CAPABILITY: &str = "settlement_return_recheck_worlds";
+/// 心跳详情声明能以持久凭据身份执行结算退件 Take 的键。
+const TAKE_CAPABILITY: &str = "settlement_return_take_worlds";
+
+/// 是否有 Worker 声明了该世界的能力；口径见 [`WORKER_CAPABILITY_SQL`]。
+async fn worker_capability(
     tx: &mut Transaction<'_, Postgres>,
     world_id: &str,
+    capability: &str,
 ) -> Result<bool, ReturnTransactionError> {
-    let available: bool = sqlx::query_scalar(
-        r#"SELECT EXISTS(
-               SELECT 1 FROM public.service_heartbeats
-               WHERE service_name = 'auction-worker' AND process_role = 'worker'
-                 AND status IN ('starting', 'ready', 'degraded')
-                 AND expires_at > clock_timestamp()
-                 AND jsonb_typeof(details -> 'settlement_return_recheck_worlds') = 'array'
-                 AND details -> 'settlement_return_recheck_worlds' ? $1
-           )"#,
-    )
-    .bind(world_id)
-    .fetch_one(&mut **tx)
-    .await?;
+    let available: bool = sqlx::query_scalar(WORKER_CAPABILITY_SQL)
+        .bind(world_id)
+        .bind(capability)
+        .fetch_one(&mut **tx)
+        .await?;
     Ok(available)
 }
 

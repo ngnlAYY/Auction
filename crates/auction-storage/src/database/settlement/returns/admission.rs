@@ -4,13 +4,15 @@
 use auction_application::settlement::SettlementReturnMatch;
 use auction_domain::{
     SettlementObligationKind, SettlementReturnAdmission, SettlementReturnBinding,
-    SettlementReturnFunding, SettlementReturnObligationPosition, cash_return,
+    SettlementReturnCaseStatus, SettlementReturnFunding, SettlementReturnObligationPosition,
+    cash_return,
 };
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
 use super::cases::CaseRow;
 use super::errors::ReturnTransactionError;
+use super::observed::take_retry_proven;
 use crate::database::TrackedTransaction as Transaction;
 use crate::database::repository_error;
 
@@ -87,6 +89,9 @@ pub(super) async fn admission_facts(
     .bind(case.return_mail_id)
     .fetch_one(&mut **tx)
     .await?;
+    // 再次领回的机器证明只对结果未知的案件有意义；其他状态不读事件历史。
+    let take_retry_proven = case.status == SettlementReturnCaseStatus::TakeUnknown
+        && take_retry_proven(tx, case.return_mail_id).await?;
     let resends_used = fulfillment
         .as_ref()
         .map_or(0, |fulfillment| u32::try_from(fulfillment.dispatch_no - 1).unwrap_or(0));
@@ -104,6 +109,7 @@ pub(super) async fn admission_facts(
             resends_used,
             resend_limit,
             take_proven,
+            take_retry_proven,
         },
         fulfillment,
     })

@@ -1,6 +1,6 @@
 //! 结算退件 Take 投递（`settlement_return_action`）归所属案件计数的 PostgreSQL 18 用例，以运行账号
 //! 执行：投递积压、人工对账、失败与通知失败水位，以及导航待办的投递人工对账都不计入这类投递，
-//! 由退件告警（`settlement_return_pending`/`settlement_return_quarantined`）与案件待办承担；其他
+//! 由退件告警（`settlement_return_pending`/`settlement_return_take_unknown`）与案件待办承担；其他
 //! 来源的同状态投递照常计数。
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
@@ -33,10 +33,25 @@ fn delivery_counts(snapshot: &OperationsAlertSnapshot) -> (i64, i64, i64, i64) {
     (delivery.pending, delivery.manual_reconcile, delivery.failed, notification)
 }
 
-/// （已绑定待处理, 隔离或结果未知）两类退件告警计数。
-fn return_counts(snapshot: &OperationsAlertSnapshot) -> (i64, i64) {
+/// （已绑定待处理, 隔离待核对, Take 结果未知合计）三类退件告警计数。
+fn return_counts(snapshot: &OperationsAlertSnapshot) -> (i64, i64, i64) {
     let fulfillment = snapshot.fulfillment.as_ref().expect("履约水位");
-    (fulfillment.settlement_return_pending, fulfillment.settlement_return_quarantined)
+    (
+        fulfillment.settlement_return_pending,
+        fulfillment.settlement_return_quarantined,
+        fulfillment.settlement_return_take_unknown.iter().map(|reason| reason.count).sum(),
+    )
+}
+
+/// Take 结果未知按原因的计数（只列非零原因）。
+fn take_unknown_reasons(snapshot: &OperationsAlertSnapshot) -> Vec<(&'static str, i64)> {
+    let fulfillment = snapshot.fulfillment.as_ref().expect("履约水位");
+    auction_domain::SettlementReturnTakeUnknownReason::ALL
+        .iter()
+        .zip(fulfillment.settlement_return_take_unknown)
+        .filter(|(_, watermark)| watermark.count > 0)
+        .map(|(reason, watermark)| (reason.as_str(), watermark.count))
+        .collect()
 }
 
 /// Take 投递在积压、结果未知与确定失败三种状态下都只按案件计数；导航待办的投递人工对账不含它，
@@ -62,11 +77,11 @@ async fn postgres_return_take_deliveries_count_only_under_their_case() {
     assert_eq!((counts.delivery_manual_reconcile, counts.settlement_returns), (0, 1));
     let observed = snapshot(&store).await;
     assert_eq!(delivery_counts(&observed), (0, 0, 0, 0), "Take 投递不进投递水位");
-    assert_eq!(return_counts(&observed), (1, 0), "由退件待处理告警承担");
+    assert_eq!(return_counts(&observed), (1, 0, 0), "由退件待处理告警承担");
     store.settle_due_return_take(Utc::now()).await.expect("收口").expect("必须收口");
     let observed = snapshot(&store).await;
     assert_eq!(delivery_counts(&observed), (0, 0, 0, 0));
-    assert_eq!(return_counts(&observed), (0, 1), "结果未知由隔离告警承担");
+    assert_eq!(return_counts(&observed), (0, 0, 1), "结果未知由结果未知告警承担");
     assert_eq!(store.pending_counts().await.expect("导航待办").delivery_manual_reconcile, 0);
 
     // 第二件：Take 已激活待执行（积压），再确定失败；两种状态都不计入投递积压、失败或通知失败。
@@ -79,14 +94,18 @@ async fn postgres_return_take_deliveries_count_only_under_their_case() {
         true,
     )
     .await;
-    assert_eq!(return_counts(&snapshot(&store).await), (0, 2));
+    assert_eq!(return_counts(&snapshot(&store).await), (0, 0, 2));
     let third = super::flows::returned_payout(&store, 7_620_003, "996003").await;
     super::flows::seed_spent_payout(pool, &third).await;
     super::flows::handle(&store, third.case, 1, SettlementReturnAction::ReclaimAndHold).await;
-    store.activate_due_return_take(Utc::now()).await.expect("激活").expect("必须激活");
+    store
+        .activate_due_return_take(Utc::now(), super::take_worlds())
+        .await
+        .expect("激活")
+        .expect("必须激活");
     let observed = snapshot(&store).await;
     assert_eq!(delivery_counts(&observed), (0, 0, 0, 0), "待执行的 Take 不算投递积压");
-    assert_eq!(return_counts(&observed), (1, 2));
+    assert_eq!(return_counts(&observed), (1, 0, 2));
     let take_delivery: Uuid = sqlx::query_scalar(
         "SELECT delivery_id FROM public.settlement_return_actions WHERE return_mail_id = $1",
     )
@@ -119,7 +138,12 @@ async fn postgres_return_take_deliveries_count_only_under_their_case() {
     store.settle_due_return_take(Utc::now()).await.expect("收口").expect("必须收口");
     let observed = snapshot(&store).await;
     assert_eq!(delivery_counts(&observed), (0, 0, 0, 0), "失败的 Take 不算投递或通知失败");
-    assert_eq!(return_counts(&observed), (0, 3));
+    assert_eq!(return_counts(&observed), (0, 0, 3));
+    // 原会话还没有观察的两件等待邮箱维护复核；以失败终结的 Take 巡检不复核，原因单列。
+    assert_eq!(
+        take_unknown_reasons(&observed),
+        vec![("take_unverifiable", 1), ("awaiting_observation", 2)]
+    );
     assert_eq!(store.pending_counts().await.expect("导航待办").settlement_returns, 3);
 
     // 对照：入站流程同状态的 Take 投递照常计入投递人工对账与导航待办。

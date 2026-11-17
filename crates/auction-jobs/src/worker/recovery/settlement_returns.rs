@@ -21,11 +21,14 @@ pub(super) async fn advance_settlement_returns<C>(
     let Some(store) = &worker.settlement_returns else {
         return;
     };
+    // 只激活本进程能以持久凭据身份执行 Take 的世界；没有投递传输或只配置 Cookie 的世界不激活，
+    // 案件停在待领回（结果未知后无法巡检的身份不执行结算退件 Take）。
+    let take_worlds = frozen_take_worlds(worker);
     run_phase(
         worker,
         batch_result,
         ("activate_settlement_return_take", "activate_settlement_return_take_timeout"),
-        |now| store.activate_due_return_take(now),
+        |now| store.activate_due_return_take(now, take_worlds.clone()),
         log_progress,
     )
     .await;
@@ -46,6 +49,20 @@ pub(super) async fn advance_settlement_returns<C>(
     )
     .await;
     recheck_returns(worker, batch_result).await;
+}
+
+/// 本进程投递传输能以持久凭据身份执行 Take 的世界。
+fn frozen_take_worlds<C>(worker: &PersistentWorker<C>) -> Vec<String>
+where
+    C: Clock + 'static,
+{
+    worker.delivery_transport.as_ref().map_or_else(Vec::new, |transport| {
+        ["main", "isekai"]
+            .into_iter()
+            .filter(|world| transport.frozen_take_identity_available(world))
+            .map(str::to_owned)
+            .collect()
+    })
 }
 
 fn log_progress(progress: &SettlementReturnProgress) {

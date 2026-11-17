@@ -59,21 +59,28 @@ pub const ADMIN_SETTLEMENT_RETURN_REASONS: [&str; 14] = [
 ];
 
 /// 动作闭集；`allowed_actions`、阻断原因与命令结果共用。
-pub const ADMIN_SETTLEMENT_RETURN_ACTIONS: [&str; 6] = [
+pub const ADMIN_SETTLEMENT_RETURN_ACTIONS: [&str; 7] = [
     "reclaim_and_resend",
     "reclaim_and_hold",
     "resend_from_custody",
     "close_inbox",
     "acknowledge",
     "recheck",
+    "retry_take",
 ];
 
 /// `POST …/handle` 接受的动作：除重新核验外的全部动作；重新核验只走 `POST …/recheck`。
-pub const ADMIN_SETTLEMENT_RETURN_HANDLE_ACTIONS: [&str; 5] =
-    ["reclaim_and_resend", "reclaim_and_hold", "resend_from_custody", "close_inbox", "acknowledge"];
+pub const ADMIN_SETTLEMENT_RETURN_HANDLE_ACTIONS: [&str; 6] = [
+    "reclaim_and_resend",
+    "reclaim_and_hold",
+    "resend_from_custody",
+    "close_inbox",
+    "acknowledge",
+    "retry_take",
+];
 
 /// 动作被拒绝的类型化原因闭集。
-pub const ADMIN_SETTLEMENT_RETURN_BLOCKERS: [&str; 8] = [
+pub const ADMIN_SETTLEMENT_RETURN_BLOCKERS: [&str; 9] = [
     "untrusted",
     "unbound",
     "assets_mismatch",
@@ -82,6 +89,21 @@ pub const ADMIN_SETTLEMENT_RETURN_BLOCKERS: [&str; 8] = [
     "obligation_ineligible",
     "proof_required",
     "send_unresolved",
+    "observation_required",
+];
+
+/// Take 结果未知的原因闭集（详情 `take_unknown_reason`）：前五项是邮箱维护在原 Take 会话里的
+/// 观察，后四项由持久事实推出；只有 `assets_claimable` 允许再次领回。
+pub const ADMIN_SETTLEMENT_RETURN_TAKE_UNKNOWN_REASONS: [&str; 9] = [
+    "assets_claimable",
+    "assets_unclaimable",
+    "assets_changed",
+    "mail_missing",
+    "receipt_unproven",
+    "session_changed",
+    "take_unverifiable",
+    "disposition_conflict",
+    "awaiting_observation",
 ];
 
 /// 资产当前位置闭集；与资产对账使用同一组名称，互斥且不重复计数。
@@ -99,7 +121,7 @@ pub const ADMIN_SETTLEMENT_RETURN_ASSET_LOCATIONS: [&str; 7] = [
 pub const ADMIN_SETTLEMENT_RETURN_PLANS: [&str; 2] = ["resend", "hold"];
 
 /// 案件事件闭集（`settlement_return_events.event_kind`）。
-pub const ADMIN_SETTLEMENT_RETURN_EVENT_KINDS: [&str; 13] = [
+pub const ADMIN_SETTLEMENT_RETURN_EVENT_KINDS: [&str; 15] = [
     "opened",
     "acknowledged",
     "recheck_requested",
@@ -109,6 +131,8 @@ pub const ADMIN_SETTLEMENT_RETURN_EVENT_KINDS: [&str; 13] = [
     "take_activated",
     "take_proven",
     "take_unknown",
+    "take_observed",
+    "take_retry_requested",
     "held",
     "resend_authorized",
     "resent",
@@ -273,6 +297,15 @@ pub struct AdminSettlementReturnDetailResponse {
     /// 案件待重新核验（`recheck_pending`），但没有在线 Worker 能只读读取该世界的 MoogleMail：
     /// 核验能力不可用，案件保持待核验，能力恢复后自动继续。其他状态恒为 `false`。
     pub recheck_unavailable: bool,
+    /// 案件待领回（`take_pending`）、Take 尚未执行，但没有 Worker 能以持久凭据身份执行该世界的
+    /// Take（只配置 Cookie 或未启用邮件）：领回能力不可用，案件停在待领回，能力恢复后自动继续。
+    /// 其他状态恒为 `false`。
+    pub take_unavailable: bool,
+    /// 案件 Take 结果未知（`take_unknown`）时的具体原因，取
+    /// [`ADMIN_SETTLEMENT_RETURN_TAKE_UNKNOWN_REASONS`]；其他状态为 `null`。只读说明，再次领回的
+    /// 资格以 `allowed_actions` 为准。
+    #[serde(deserialize_with = "deserialize_required_option")]
+    pub take_unknown_reason: Option<String>,
 }
 
 /// `POST …/{return_id}/handle` 请求；动作只取 [`ADMIN_SETTLEMENT_RETURN_HANDLE_ACTIONS`]。

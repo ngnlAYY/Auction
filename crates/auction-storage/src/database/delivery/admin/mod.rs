@@ -9,6 +9,24 @@ use uuid::Uuid;
 
 use crate::database::DatabaseStore;
 
+/// 只在扩展投影（`include=settlement_returns`）中出现的投递（参数为 `public.deliveries` 的别名）：
+/// 结算退件 Take（来源 `settlement_return_action`），以及恢复接管退件后由恢复 owner 在收口时终结的
+/// 原结算投递（`failed/recovery_superseded`，从未进入发送围栏、没有发送时间，已发布页面按旧时间链
+/// 校验会整页解码失败）。列表、计数、详情与玩家支持在同一条件下排除，分页与总数一致。
+macro_rules! extended_projection_delivery_sql {
+    ($delivery:literal) => {
+        concat!(
+            "(",
+            $delivery,
+            ".origin_kind = 'settlement_return_action' OR (",
+            $delivery,
+            ".status = 'failed' AND ",
+            $delivery,
+            ".failure_code = 'recovery_superseded'))"
+        )
+    };
+}
+
 mod commands;
 mod detail;
 mod mapping;

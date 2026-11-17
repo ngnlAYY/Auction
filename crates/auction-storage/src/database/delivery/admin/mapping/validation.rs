@@ -7,6 +7,9 @@ use chrono::{DateTime, Utc};
 
 use super::evidence::{preparation_rejected, valid_returned_reference};
 
+/// 恢复 owner 终结被接管原结算投递的失败码（见 `recovery::commands::superseded`）。
+const RECOVERY_SUPERSEDED_CODE: &str = "recovery_superseded";
+
 pub(super) fn valid_live_lease(
     status: &str,
     lease_token: Option<&uuid::Uuid>,
@@ -201,6 +204,30 @@ pub(crate) fn valid_snapshot(snapshot: &DeliveryAdminSnapshot) -> bool {
             && snapshot.fencing_version > 0
             && snapshot.retirement_reason.is_none()
             && snapshot.suppression_reason.is_none();
+    }
+
+    // 恢复接管退件后由恢复 owner 在收口时终结的原结算投递：当前 fence 从未进入发送围栏，只有
+    // created（可选 claimed）与 completed 事实，不能套用已发送投递的时间链。
+    if snapshot.status == "failed"
+        && snapshot.failure_code.as_deref() == Some(RECOVERY_SUPERSEDED_CODE)
+    {
+        return snapshot.origin_kind == "settlement"
+            && snapshot.reason_code.is_none()
+            && snapshot.lease_expires_at.is_none()
+            && snapshot.sending_at.is_none()
+            && snapshot.external_reference.is_none()
+            && !snapshot.take_required
+            && snapshot.returned_mail_id.is_none()
+            && snapshot.fencing_version > 0
+            && snapshot
+                .claimed_at
+                .is_none_or(|claimed| !is_zero_time(claimed) && claimed >= snapshot.created_at)
+            && snapshot.completed_at.is_some_and(|completed| {
+                !is_zero_time(completed)
+                    && completed >= snapshot.created_at
+                    && snapshot.claimed_at.is_none_or(|claimed| completed >= claimed)
+                    && completed <= snapshot.updated_at
+            });
     }
 
     if snapshot.lease_expires_at.is_some_and(is_zero_time)

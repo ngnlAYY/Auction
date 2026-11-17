@@ -5,8 +5,9 @@ use auction_application::core::ApplicationError;
 use auction_application::operations::{
     MAX_OPERATIONS_ALERT_COLLECTION_OVERDUE_ITEMS, OperationsAlertCollectionOverdueItem,
     OperationsAlertCollectionOverdueRead, OperationsAlertFulfillmentSnapshot,
+    OperationsAlertReturnTakeUnknown, SETTLEMENT_RETURN_TAKE_UNKNOWN_REASONS,
 };
-use auction_domain::SettlementObligationKind;
+use auction_domain::{SettlementObligationKind, SettlementReturnTakeUnknownReason};
 use chrono::{DateTime, Utc};
 use sqlx::Row;
 use uuid::Uuid;
@@ -159,7 +160,7 @@ pub(in crate::database::operations::alert::snapshot) const FULFILLMENT_SNAPSHOT:
         JOIN public.lots AS lot ON lot.id = overdue.lot_id
         JOIN public.equipment AS equipment ON equipment.id = overdue.equipment_id
      )
-     SELECT counts.*, items.*, returns.*
+     SELECT counts.*, items.*, returns.*, take_unknown.*
      FROM (
         SELECT
             COUNT(*) FILTER (WHERE business_state = 'ready'
@@ -210,21 +211,42 @@ pub(in crate::database::operations::alert::snapshot) const FULFILLMENT_SNAPSHOT:
      ) AS counts
      CROSS JOIN items
      CROSS JOIN (
-        -- 结算退件按未结案案件计数，不要求存在义务：已绑定待处理与隔离/结果未知分开。
+        -- 结算退件按未结案案件计数，不要求存在义务：已绑定待处理、隔离待核对与 Take 结果未知
+        -- 三者分开。
         SELECT
             COUNT(*) FILTER (WHERE status IN ('awaiting_decision', 'take_pending', 'resend_pending'))
                 AS settlement_return_pending,
             MIN(created_at) FILTER (WHERE status IN (
                 'awaiting_decision', 'take_pending', 'resend_pending'
             )) AS oldest_settlement_return_pending,
-            COUNT(*) FILTER (WHERE status IN ('quarantined', 'recheck_pending', 'take_unknown'))
+            COUNT(*) FILTER (WHERE status IN ('quarantined', 'recheck_pending'))
                 AS settlement_return_quarantined,
-            MIN(created_at) FILTER (WHERE status IN (
-                'quarantined', 'recheck_pending', 'take_unknown'
-            )) AS oldest_settlement_return_quarantined
+            MIN(created_at) FILTER (WHERE status IN ('quarantined', 'recheck_pending'))
+                AS oldest_settlement_return_quarantined
         FROM public.settlement_return_cases
         WHERE closed_at IS NULL
-     ) AS returns"
+     ) AS returns
+     CROSS JOIN (
+        -- Take 结果未知按原因分组（口径与 Admin 详情同一 `take_unknown_reason_sql!`），并列数组
+        -- 按原因名排序；只扫描未结案的结果未知案件。
+        SELECT COALESCE(array_agg(reason ORDER BY reason), ARRAY[]::text[])
+                   AS take_unknown_reasons,
+               COALESCE(array_agg(cases ORDER BY reason), ARRAY[]::bigint[])
+                   AS take_unknown_counts,
+               COALESCE(array_agg(oldest ORDER BY reason), ARRAY[]::timestamptz[])
+                   AS take_unknown_oldest
+        FROM (
+            SELECT reason, COUNT(*)::bigint AS cases, MIN(created_at) AS oldest
+            FROM (
+                SELECT c.created_at, ",
+    crate::database::settlement::returns::take_unknown_reason_sql!("c"),
+    " AS reason
+                FROM public.settlement_return_cases AS c
+                WHERE c.closed_at IS NULL AND c.status = 'take_unknown'
+            ) AS unknown
+            GROUP BY reason
+        ) AS by_reason
+     ) AS take_unknown"
 );
 
 /// SQL 绑定用的清单上限（`LIMIT` 取 bigint）；编译期确认可无损表示。
@@ -325,8 +347,44 @@ pub(super) async fn fulfillment_snapshot(
             row.try_get("oldest_settlement_return_quarantined")
                 .map_err(|error| storage_error_from(error, "读取结算退件隔离时间失败"))?,
         ),
+        settlement_return_take_unknown: take_unknown_watermarks(&row, now)?,
     };
     Ok((snapshot, collection_overdue_items(&row, now)?))
+}
+
+/// Take 结果未知按原因分组的水位：同一行的并列数组逐项落到原因闭集下标；数组长度不一致、原因
+/// 不在闭集内或重复时失败关闭。
+fn take_unknown_watermarks(
+    row: &sqlx::postgres::PgRow,
+    now: DateTime<Utc>,
+) -> Result<
+    [OperationsAlertReturnTakeUnknown; SETTLEMENT_RETURN_TAKE_UNKNOWN_REASONS],
+    ApplicationError,
+> {
+    let column = |error| storage_error_from(error, "读取结算退件结果未知原因失败");
+    let reasons: Vec<String> = row.try_get("take_unknown_reasons").map_err(column)?;
+    let counts: Vec<i64> = row.try_get("take_unknown_counts").map_err(column)?;
+    let oldest: Vec<DateTime<Utc>> = row.try_get("take_unknown_oldest").map_err(column)?;
+    if reasons.len() != counts.len() || reasons.len() != oldest.len() {
+        return Err(storage_error("结算退件结果未知原因水位不一致"));
+    }
+    let mut watermarks =
+        [OperationsAlertReturnTakeUnknown::default(); SETTLEMENT_RETURN_TAKE_UNKNOWN_REASONS];
+    for ((reason, count), oldest) in reasons.iter().zip(counts).zip(oldest) {
+        let index = SettlementReturnTakeUnknownReason::ALL
+            .iter()
+            .position(|known| known.as_str() == reason)
+            .ok_or_else(|| storage_error("结算退件结果未知原因不在闭集内"))?;
+        let slot = &mut watermarks[index];
+        if slot.count != 0 {
+            return Err(storage_error("结算退件结果未知原因重复"));
+        }
+        *slot = OperationsAlertReturnTakeUnknown {
+            count,
+            oldest_age_seconds: age_seconds(now, Some(oldest)),
+        };
+    }
+    Ok(watermarks)
 }
 
 /// 长期未领取清单：同一行里按寄出最早优先排好的并列数组，逐项拼回；数组长度不一致或义务种类

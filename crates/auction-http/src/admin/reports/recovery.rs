@@ -1,7 +1,9 @@
 //! Admin recovery 安全报告的结果校验与契约映射。
 //! 内部失败码只在这个防腐边界归并为旧 v1 公开码；未知值映射失败，不回显原文。
 
-use auction_application::recovery::{RecoveryReport, allowed_recovery_commands};
+use auction_application::recovery::{
+    RECOVERY_SEND_ATTRIBUTION_BLOCKERS, RecoveryReport, allowed_recovery_commands,
+};
 use auction_contracts::{
     AdminRecoveryActionResponse, AdminRecoveryReportResponse, AdminRecoveryResponse,
 };
@@ -128,8 +130,10 @@ fn map_optional_recovery_error_code(
         .map(|value| value.map(PublicRecoveryErrorCode::as_str).map(ToOwned::to_owned))
 }
 
+/// `include_send_attribution` 来自显式 `include=send_attribution`；缺省投影不输出发送归属原因。
 pub(super) fn map_recovery_report(
     report: RecoveryReport,
+    include_send_attribution: bool,
 ) -> Result<AdminRecoveryReportResponse, RecoveryReportMappingError> {
     let recoveries = report
         .recoveries
@@ -168,6 +172,9 @@ pub(super) fn map_recovery_report(
                 custody_proof_kind: recovery.custody_proof_kind,
                 custody_proof_observed_at: recovery.custody_proof_observed_at.map(timestamp),
                 blocking_code: map_optional_recovery_error_code(recovery.blocking_code)?,
+                send_attribution_blocker: recovery
+                    .send_attribution_blocker
+                    .filter(|_| include_send_attribution),
                 manual_reconcile_delivery_id: recovery
                     .manual_reconcile_delivery_id
                     .map(|id| id.to_string()),
@@ -222,6 +229,10 @@ pub(super) fn valid_recovery_report(report: &RecoveryReport, auction_id: Uuid) -
             || recovery.reminder_count > recovery.reminder_limit
             || recovery.updated_at.timestamp() <= 0
             || recovery.blocking_code.as_ref().is_some_and(std::string::String::is_empty)
+            || recovery.send_attribution_blocker.as_deref().is_some_and(|blocker| {
+                recovery.stage != "reclaiming"
+                    || !RECOVERY_SEND_ATTRIBUTION_BLOCKERS.contains(&blocker)
+            })
             || recovery.manual_reconcile_delivery_id.is_some_and(SettlementId::is_nil)
             || recovery.relisted_auction_id.is_some_and(auction_domain::AuctionId::is_nil)
             || recovery.relisted_lot_id.is_some_and(auction_domain::LotId::is_nil)
@@ -274,7 +285,69 @@ pub(super) fn valid_recovery_report(report: &RecoveryReport, auction_id: Uuid) -
 
 #[cfg(test)]
 mod tests {
-    use super::map_optional_recovery_error_code;
+    use auction_application::recovery::{RecoveryReport, RecoveryReportEntry};
+    use auction_domain::{AuctionId, LotId, SettlementId};
+    use chrono::Utc;
+    use uuid::Uuid;
+
+    use super::{map_optional_recovery_error_code, map_recovery_report, valid_recovery_report};
+
+    fn report(blocker: Option<&str>) -> RecoveryReport {
+        let at = Utc::now();
+        let auction_id = AuctionId::from_uuid(Uuid::from_u128(2));
+        RecoveryReport {
+            auction_id,
+            recoveries: vec![RecoveryReportEntry {
+                id: SettlementId::from_uuid(Uuid::from_u128(1)),
+                auction_id,
+                lot_id: LotId::from_uuid(Uuid::from_u128(3)),
+                lot_number: 1,
+                world_id: "main".to_owned(),
+                equipment_name: "Fixture".to_owned(),
+                equipment_category: "weapon".to_owned(),
+                stage: "reclaiming".to_owned(),
+                resolution: None,
+                state_version: 4,
+                payment_deadline_at: at,
+                reminder_count: 0,
+                reminder_limit: 1,
+                cod_return_count: 3,
+                cod_return_limit: 3,
+                custody_proof_kind: None,
+                custody_proof_observed_at: None,
+                blocking_code: Some("send_unattributed".to_owned()),
+                send_attribution_blocker: blocker.map(ToOwned::to_owned),
+                manual_reconcile_delivery_id: None,
+                relisted_auction_id: None,
+                relisted_lot_id: None,
+                actions: Vec::new(),
+                allowed_commands: Vec::new(),
+                updated_at: at,
+            }],
+        }
+    }
+
+    /// 发送归属原因只在显式 `include=send_attribution` 时输出；缺省响应的 JSON 不带该键，旧页面
+    /// 的闭集解码照常通过。闭集之外的原因让报告校验失败关闭。
+    #[test]
+    fn send_attribution_blocker_is_projected_only_when_requested() {
+        let source = report(Some("send_without_sent_mid"));
+        assert!(valid_recovery_report(&source, Uuid::from_u128(2)));
+        let default = map_recovery_report(source.clone(), false).expect("缺省投影");
+        assert_eq!(default.recoveries[0].send_attribution_blocker, None);
+        let wire = serde_json::to_value(&default).expect("序列化缺省投影");
+        assert!(wire["recoveries"][0].get("send_attribution_blocker").is_none());
+        let extended = map_recovery_report(source, true).expect("扩展投影");
+        assert_eq!(
+            extended.recoveries[0].send_attribution_blocker.as_deref(),
+            Some("send_without_sent_mid")
+        );
+
+        assert!(!valid_recovery_report(&report(Some("operator_declared")), Uuid::from_u128(2)));
+        let mut completed = report(Some("send_in_flight"));
+        completed.recoveries[0].stage = "completed".to_owned();
+        assert!(!valid_recovery_report(&completed, Uuid::from_u128(2)));
+    }
 
     /// Worker 自动推进因退件不能唯一归属而写下的内部阻断码，在防腐边界归并为已发布的
     /// `recovery_evidence_mismatch`，旧页面按闭集照常解码。

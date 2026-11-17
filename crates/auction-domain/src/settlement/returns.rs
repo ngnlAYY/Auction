@@ -187,6 +187,9 @@ closed_names! {
         Acknowledge => "acknowledge",
         /// 未绑定记录提交 Worker 只读重新核验。
         Recheck => "recheck",
+        /// Take 结果未知、自动重排已用满，而最近一次持久观察证明原完整资产仍在且可领取时，以新命令
+        /// 再次执行同一 Take（机器证明为前提，不接受人工声明）。
+        RetryTake => "retry_take",
     }
 }
 
@@ -219,6 +222,49 @@ closed_names! {
         /// Sent 证明收口原发送，才能领回、留箱或补寄；否则结案会关闭原发送的 Sent 恢复入口，
         /// 留下永远无法收口的未知占用。
         SendUnresolved => "send_unresolved",
+        /// 再次领回需要最近一次持久观察（当前 Take fence 上的 `assets_claimable`）证明原完整资产
+        /// 仍在且可领取。
+        ObservationRequired => "observation_required",
+    }
+}
+
+closed_names! {
+    /// Take 结果未知（`take_unknown`）的具体原因闭集：前五项是邮箱维护在原 Take 会话里观察到、
+    /// 以案件事件 `take_observed` 持久化的事实；后四项没有新观察，由持久事实推出。详情与告警
+    /// 共用同一组名称（告警作用域）。只有 [`Self::AssetsClaimable`] 是机器证明，其余都保持未知。
+    pub enum SettlementReturnTakeUnknownReason {
+        /// 原退件的完整冻结资产仍挂在原邮件上、可以领取，自动重排已用满。
+        AssetsClaimable => "assets_claimable",
+        /// 完整冻结资产仍在，但页面当前不可领取。
+        AssetsUnclaimable => "assets_unclaimable",
+        /// 邮件仍挂着资产，但与冻结资产或系统发件人不符（可能已部分领取或被他人处置）。
+        AssetsChanged => "assets_changed",
+        /// 远端明确答复原邮件不存在（可能已过期或被删除），不能证明资产进入 Bot 账号。
+        MailMissing => "mail_missing",
+        /// 附件已为空，但领取回执、收件人、原身份或原正文前缀不成立。
+        ReceiptUnproven => "receipt_unproven",
+        /// 执行 Take 的原凭据已停用或换版本（或 Take 没有冻结凭据），巡检无法在原会话复核。
+        SessionChanged => "session_changed",
+        /// Take 投递以失败或回执不符的终态结束，邮箱维护不复核这类投递。
+        TakeUnverifiable => "take_unverifiable",
+        /// 激活前同一邮件已有其他处置意图，等待其以持久事实确定从未执行。
+        DispositionConflict => "disposition_conflict",
+        /// 还没有原会话观察，等待邮箱维护复核。
+        AwaitingObservation => "awaiting_observation",
+    }
+}
+
+impl SettlementReturnTakeUnknownReason {
+    /// 是否是邮箱维护在原 Take 会话里观察到、可以持久化为 `take_observed` 事件的原因。
+    pub const fn observed(self) -> bool {
+        matches!(
+            self,
+            Self::AssetsClaimable
+                | Self::AssetsUnclaimable
+                | Self::AssetsChanged
+                | Self::MailMissing
+                | Self::ReceiptUnproven
+        )
     }
 }
 
@@ -273,6 +319,9 @@ pub struct SettlementReturnAdmission {
     pub resend_limit: u8,
     /// 本案领回证明已持久化。
     pub take_proven: bool,
+    /// Take 结果未知后，最近一次持久观察正是当前 Take fence 上的 `assets_claimable`：原完整冻结
+    /// 资产仍在且可领取，上一次 Take 没有取走它。
+    pub take_retry_proven: bool,
 }
 
 impl SettlementReturnAdmission {
@@ -330,6 +379,23 @@ impl SettlementReturnAdmission {
                 }
                 self.resend_allowed()
             }
+            // 再次领回沿用领回时的准入（已绑定、原发送已核实、资产一致），另要求机器观察证明。
+            A::RetryTake => {
+                self.require_bound()?;
+                if self.status != S::TakeUnknown {
+                    return Err(B::StateConflict);
+                }
+                if self.funding == SettlementReturnFunding::Unresolved {
+                    return Err(B::SendUnresolved);
+                }
+                if !self.assets_match {
+                    return Err(B::AssetsMismatch);
+                }
+                if !self.take_retry_proven {
+                    return Err(B::ObservationRequired);
+                }
+                Ok(())
+            }
         }
     }
 
@@ -380,8 +446,8 @@ mod tests {
         FIRST_DISPATCH_NO, SETTLEMENT_RETURN_RESEND_LIMIT, SettlementDispatchReference,
         SettlementReturnAction, SettlementReturnAdmission, SettlementReturnBinding,
         SettlementReturnBlocker, SettlementReturnCaseStatus, SettlementReturnFunding,
-        SettlementReturnObligationPosition, resend_activate_command_id, resend_delivery_id,
-        resend_prepare_command_id,
+        SettlementReturnObligationPosition, SettlementReturnTakeUnknownReason,
+        resend_activate_command_id, resend_delivery_id, resend_prepare_command_id,
     };
     use crate::SettlementObligationKind;
 
@@ -402,6 +468,7 @@ mod tests {
             resends_used: 0,
             resend_limit: SETTLEMENT_RETURN_RESEND_LIMIT,
             take_proven: false,
+            take_retry_proven: false,
         }
     }
 
@@ -609,6 +676,46 @@ mod tests {
         );
     }
 
+    /// 再次领回只在 Take 结果未知且最近一次持久观察证明完整资产仍在、可领取时允许；沿用领回
+    /// 准入（绑定、资产一致），缺少观察证明给出确定原因，其他状态一律状态冲突。
+    #[test]
+    fn retry_take_requires_unknown_take_and_claimable_observation() {
+        let mut unknown = bound(SettlementObligationKind::SellerPayout);
+        unknown.status = SettlementReturnCaseStatus::TakeUnknown;
+        assert_eq!(
+            unknown.check(SettlementReturnAction::RetryTake),
+            Err(SettlementReturnBlocker::ObservationRequired)
+        );
+        assert!(unknown.allowed_actions().is_empty(), "结果未知没有其他动作");
+        unknown.take_retry_proven = true;
+        assert_eq!(unknown.allowed_actions(), [SettlementReturnAction::RetryTake]);
+        let mut mismatch = unknown;
+        mismatch.assets_match = false;
+        assert_eq!(
+            mismatch.check(SettlementReturnAction::RetryTake),
+            Err(SettlementReturnBlocker::AssetsMismatch)
+        );
+        let mut unbound = unknown;
+        unbound.binding = SettlementReturnBinding::Unbound;
+        assert_eq!(
+            unbound.check(SettlementReturnAction::RetryTake),
+            Err(SettlementReturnBlocker::Unbound)
+        );
+        for status in [
+            SettlementReturnCaseStatus::AwaitingDecision,
+            SettlementReturnCaseStatus::TakePending,
+            SettlementReturnCaseStatus::Held,
+        ] {
+            let mut other = unknown;
+            other.status = status;
+            assert_eq!(
+                other.check(SettlementReturnAction::RetryTake),
+                Err(SettlementReturnBlocker::StateConflict),
+                "{status:?}"
+            );
+        }
+    }
+
     /// 闭集名称往返；未知名称失败关闭。
     #[test]
     fn closed_names_round_trip() {
@@ -619,6 +726,27 @@ mod tests {
             assert_eq!(SettlementReturnAction::from_name(action.as_str()), Some(*action));
         }
         assert_eq!(SettlementReturnAction::from_name("force_bind"), None);
+        for reason in SettlementReturnTakeUnknownReason::ALL {
+            assert_eq!(
+                SettlementReturnTakeUnknownReason::from_name(reason.as_str()),
+                Some(*reason)
+            );
+        }
+        let observed = SettlementReturnTakeUnknownReason::ALL
+            .iter()
+            .filter(|reason| reason.observed())
+            .map(|reason| reason.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            observed,
+            [
+                "assets_claimable",
+                "assets_unclaimable",
+                "assets_changed",
+                "mail_missing",
+                "receipt_unproven"
+            ]
+        );
         assert!(SettlementReturnCaseStatus::TakeUnknown.open());
         assert!(!SettlementReturnCaseStatus::Held.open());
     }

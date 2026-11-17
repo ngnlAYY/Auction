@@ -37,8 +37,8 @@ fn canonical_identity(kind: OperationsAlertKind) -> (OperationsAlertSource, &'st
         ProxyExpiryOverdue, QueueLatency, ReconciliationStale, RecoveryFailed,
         RecoveryManualReconcile, RecoveryPaymentMailUnsent, RecoveryPaymentOverdue,
         RecoveryRelistPending, RestoreDrillOverdue, SeasonObligationsPending, ServiceDegraded,
-        ServiceMissing, SettlementReturnPending, SettlementReturnQuarantined, SolvencyShortfall,
-        SourceUnavailable, WalUploadStalled,
+        ServiceMissing, SettlementReturnPending, SettlementReturnQuarantined,
+        SettlementReturnTakeUnknown, SolvencyShortfall, SourceUnavailable, WalUploadStalled,
     };
     use OperationsAlertSource::{
         Backup, Credential, Delivery, Forum, Fulfillment, Lifecycle, Mail, Notification, Process,
@@ -57,6 +57,7 @@ fn canonical_identity(kind: OperationsAlertKind) -> (OperationsAlertSource, &'st
         | FulfillmentCollectionOverdue
         | SettlementReturnPending
         | SettlementReturnQuarantined => (Fulfillment, "auction"),
+        SettlementReturnTakeUnknown => (Fulfillment, "mail_missing"),
         RecoveryPaymentOverdue
         | RecoveryPaymentMailUnsent
         | RecoveryRelistPending
@@ -485,6 +486,39 @@ fn new_kind_summaries_are_single_line_and_bounded() {
             assert!(!summary.contains('\n') && !summary.contains('\r'));
             assert!(summary.len() <= 512);
         }
+    }
+}
+
+/// Take 结果未知的告警作用域就是原因闭集：每个原因都是合法身份，通知摘要带出原因名称与
+/// 处置指引且有界；原因闭集外的作用域（含旧的 `auction`）失败关闭。
+#[test]
+fn take_unknown_alert_scope_is_the_reason_closed_set() {
+    for reason in auction_domain::SettlementReturnTakeUnknownReason::ALL {
+        let summary = OperationsAlertSignal::new(
+            OperationsAlertKind::SettlementReturnTakeUnknown,
+            reason.as_str(),
+            OperationsAlertSource::Fulfillment,
+            2,
+            600,
+        )
+        .expect("原因作用域必须有效")
+        .render_summary()
+        .expect("摘要必须可生成");
+        assert!(summary.contains(reason.as_str()), "{summary}");
+        assert!(!summary.contains('\n') && summary.len() <= 512, "{summary}");
+    }
+    for scope in ["auction", "main", "unknown_reason"] {
+        assert_eq!(
+            OperationsAlertSignal::new(
+                OperationsAlertKind::SettlementReturnTakeUnknown,
+                scope,
+                OperationsAlertSource::Fulfillment,
+                1,
+                0,
+            ),
+            Err(OperationsAlertError::Invalid),
+            "{scope}"
+        );
     }
 }
 

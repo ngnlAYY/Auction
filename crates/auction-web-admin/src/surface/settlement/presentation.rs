@@ -74,6 +74,19 @@ pub(super) fn recovery_action_state_label(state: &str) -> String {
     }
 }
 
+/// 发送归属不成立的具体原因说明；未知值原样显示（报告校验已按闭集拒绝）。
+pub(super) fn send_attribution_blocker_label(blocker: &str) -> String {
+    match blocker {
+        "return_not_current" => t!("admin-recovery-attribution-return-not-current"),
+        "send_in_flight" => t!("admin-recovery-attribution-send-in-flight"),
+        "sends_exceed_returns" => t!("admin-recovery-attribution-sends-exceed-returns"),
+        "send_without_sent_mid" => t!("admin-recovery-attribution-send-without-sent-mid"),
+        "send_records_incomplete" => t!("admin-recovery-attribution-send-records-incomplete"),
+        "send_after_return" => t!("admin-recovery-attribution-send-after-return"),
+        _ => blocker.to_owned(),
+    }
+}
+
 pub(super) fn recovery_command_label(action: &str) -> String {
     match action {
         "reclaimed" => t!("admin-recovery-command-reclaimed"),

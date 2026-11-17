@@ -131,6 +131,12 @@ pub(super) async fn claim_postgres(
              )
              AND NOT EXISTS (
                  SELECT 1
+                 FROM unnest($10::text[]) AS excluded(world)
+                 WHERE deliveries.origin_kind = 'settlement_return_action'
+                   AND lower(deliveries.payload_world) = excluded.world
+             )
+             AND NOT EXISTS (
+                 SELECT 1
                  FROM unnest($8::text[], $9::text[]) AS suppressed(origin_kind, template)
                  WHERE suppressed.origin_kind = deliveries.origin_kind
                    AND deliveries.payload_operation = 'send'
@@ -172,6 +178,8 @@ pub(super) async fn claim_postgres(
     .bind(intervals)
     .bind(suppressed_origins)
     .bind(suppressed_templates)
+    // 不能冻结持久凭据身份的世界：结算退件 Take 留在待执行（见 `DeliveryClaimExclusions`）。
+    .bind(&exclusions.unidentified_take_worlds)
     .fetch_all(&mut *transaction)
     .await
     .map_err(map_storage_error)?;

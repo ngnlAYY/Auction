@@ -57,10 +57,13 @@ pub enum SettlementReturnRecheckOutcome {
 /// 结算退件 Worker 的存储端口；无到期项时返回 `None`。
 pub trait SettlementReturnWorkStore: Send + Sync {
     /// 激活一项已提交的持久 Take：锁内复核案件、世界级同邮件互斥与资产后，以受限来源
-    /// `settlement_return_action` 准备并激活 Take 投递。
+    /// `settlement_return_action` 准备并激活 Take 投递。`take_worlds` 是本进程能以持久凭据身份
+    /// 执行 Take 的世界；其他世界的 Take 不激活，案件停在待领回（只配置 Cookie 时没有持久身份，
+    /// 结果未知后无法巡检）。
     fn activate_due_return_take(
         &self,
         now: DateTime<Utc>,
+        take_worlds: Vec<String>,
     ) -> ApplicationFuture<'_, Option<SettlementReturnProgress>>;
 
     /// 收口一项 Take 投递已到终态的动作：精确领取证明成立时一次性记录领回事实（现金同事务返还

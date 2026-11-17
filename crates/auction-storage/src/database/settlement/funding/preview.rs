@@ -58,7 +58,10 @@ pub(super) async fn snapshot(
     uid: &str,
 ) -> Result<FundingPreview, FundingError> {
     // 明确投影安全财务字段，不导出payload正文、Cookie、secret_refs或整封邮件。
-    // `equipment_recovered_closed` 只在确认事务以精确收口事实终结卖方货款与交付时成立。
+    // `equipment_recovered_closed` 只在确认事务以精确收口事实终结卖方货款与交付时成立；三个
+    // `*_recovery_closed` 与退款资金转换、资产冲突门、资产对账共用同一收口谓词：履约 failed、失败码
+    // 与处置种类和义务角色对应、处置来源为同一恢复记录且落在被处置投递的当前 fence 上（main 收回、
+    // isekai 取消、三次退回与装备收回），任意其他 failed 都不成立。
     let lots = array(
         tx,
         concat!(
@@ -91,6 +94,15 @@ pub(super) async fn snapshot(
                       COALESCE("#,
             crate::database::settlement::fulfillment::equipment_recovered_closure_sql!("r"),
             r#", false) equipment_recovered_closed,
+                      COALESCE("#,
+            crate::database::settlement::fulfillment::recovery_closed_fulfillment_sql!("p", "pf"),
+            r#", false) payment_recovery_closed,
+                      COALESCE("#,
+            crate::database::settlement::fulfillment::recovery_closed_fulfillment_sql!("s", "sf"),
+            r#", false) seller_recovery_closed,
+                      COALESCE("#,
+            crate::database::settlement::fulfillment::recovery_closed_fulfillment_sql!("h", "hf"),
+            r#", false) handoff_recovery_closed,
                       fl.uid funded_uid,
                       fl.disposition funded_disposition
                FROM public.lot_settlements l
@@ -203,16 +215,22 @@ pub(super) async fn snapshot(
         if lot["buyer_amount"].as_i64() == Some(0) {
             continue;
         }
-        // equipment_recovered 的精确收口终结了交付与卖方货款：这两条 failed 已有恢复来源的处置，
-        // 不是不明责任；其余失败与人工核对仍然阻断。
+        // 恢复收口精确终结的履约已有恢复来源的处置，不是不明责任：equipment_recovered 终结交付与
+        // 卖方货款；main 收回、isekai 取消与三次退回撤销成交，终结原付款（收回/取消/三次退回）、
+        // 卖方货款（成交作废或装备退回卖家）与 isekai 交付。其余失败与人工核对仍然阻断。
         let recovered_closed = lot["equipment_recovered_closed"] == true;
-        let handoff_closed = recovered_closed
-            && lot["handoff_state"] == "failed"
-            && lot["handoff_error"] == "recovery_equipment_recovered";
-        let seller_closed = recovered_closed
-            && lot["seller_state"] == "failed"
-            && lot["seller_error"] == "recovery_sale_voided"
-            && lot["seller_delivery"].is_null();
+        let handoff_closed = lot["handoff_recovery_closed"] == true
+            || (recovered_closed
+                && lot["handoff_state"] == "failed"
+                && lot["handoff_error"] == "recovery_equipment_recovered");
+        let seller_closed = lot["seller_recovery_closed"] == true
+            || (recovered_closed
+                && lot["seller_state"] == "failed"
+                && lot["seller_error"] == "recovery_sale_voided"
+                && lot["seller_delivery"].is_null());
+        // 原付款被撤销成交收口：COD 已被退回并由恢复收回，从未收款，原付款投递的外发不再是
+        // 未收口的收款。
+        let payment_closed = lot["payment_recovery_closed"] == true;
         if !handoff_closed
             && (matches!(lot["handoff_state"].as_str(), Some("failed" | "manual_reconcile"))
                 || (!lot["handoff_id"].is_null() && lot["handoff_state"].is_null()))
@@ -235,7 +253,9 @@ pub(super) async fn snapshot(
             {
                 continue;
             }
-            if field == "seller_state" && seller_closed {
+            if (field == "seller_state" && seller_closed)
+                || (field == "payment_state" && payment_closed)
+            {
                 continue;
             }
             if matches!(lot[field].as_str(), Some("failed" | "manual_reconcile"))
@@ -269,7 +289,7 @@ pub(super) async fn snapshot(
                 blockers.push(format!("lot:{}:refund_alternative_unproven", lot["lot_id"]));
             }
         } else {
-            if !lot["payment_delivery"].is_null() {
+            if !lot["payment_delivery"].is_null() && !payment_closed {
                 // SQL 已按 UUID 排序；规范 UUID 文本顺序一致，无需另建索引或每个 lot 全表扫描。
                 let payment_delivery = delivery_rows
                     .binary_search_by_key(&lot["payment_delivery"].as_str(), |delivery| {
@@ -313,7 +333,11 @@ pub(super) async fn snapshot(
             blockers.push(format!("delivery:{}:assets_unbounded", delivery["id"]));
             continue;
         }
-        if state == "failed" && (credits != Some(0) || cod != Some(0)) {
+        // 恢复接管退件后被终结的原结算投递从未进入发送围栏，资产没有离开 Bot（由同事务的恢复
+        // 收口处置说明去向），不是失败但资产不明的投递。
+        let superseded =
+            delivery["failure_code"] == "recovery_superseded" && delivery["sending_at"].is_null();
+        if state == "failed" && !superseded && (credits != Some(0) || cod != Some(0)) {
             blockers.push(format!("delivery:{}:failed_assets_unproven", delivery["id"]));
         }
         if matches!(state, "prepared" | "pending" | "claimed") && credits.is_some_and(|n| n > 0) {

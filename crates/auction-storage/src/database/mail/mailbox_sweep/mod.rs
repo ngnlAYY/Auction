@@ -1,7 +1,7 @@
 //! MoogleMail 维护的本地证据与受证明恢复；状态、资金、履约及追加审计同事务提交。
 //!
-//! `candidates` 拥有未证明发送的只读投影，`transition` 拥有受证明迁移事务，
-//! `error` 持有重试分类；本模块只保留端口实现与证据写入入口。
+//! `candidates` 拥有未证明发送的只读投影，`transition` 拥有受证明迁移事务，`observation` 拥有
+//! 结算退件 Take 原会话观察的留证事务，`error` 持有重试分类；本模块只保留端口实现与证据写入入口。
 //! 全部 SQL 经受观测池的执行器与事务，占用普通业务配额，不借用 readiness 与长期 owner 的保留连接。
 
 use auction_application::core::ApplicationFuture;
@@ -11,6 +11,7 @@ use auction_application::delivery::{
 use auction_application::mail::{
     MailScanPageObservation, MoogleMailboxEvidenceStore, MoogleMailboxSweepCandidate,
 };
+use auction_domain::SettlementReturnTakeUnknownReason;
 use serde_json::Value;
 use sqlx::Postgres;
 use uuid::Uuid;
@@ -21,6 +22,7 @@ use crate::database::{DatabaseStore, TrackedPool};
 
 mod candidates;
 mod error;
+mod observation;
 mod recovery;
 mod transition;
 
@@ -233,6 +235,36 @@ impl MoogleMailboxEvidenceStore for DatabaseStore {
                 observation,
             )
             .await
+        })
+    }
+
+    fn record_return_take_observation<'a>(
+        &'a self,
+        delivery_id: Uuid,
+        fencing_version: i64,
+        reason: SettlementReturnTakeUnknownReason,
+        sweep_retries: i64,
+        expectation: &'a DeliveryTakeExpectation,
+        observation: &'a DeliverySendCredentialBinding,
+    ) -> ApplicationFuture<'a, bool> {
+        Box::pin(async move {
+            if !observation::valid_observation(
+                delivery_id,
+                fencing_version,
+                reason,
+                sweep_retries,
+                expectation,
+            ) {
+                return Err(storage_error("结算退件 Take 观察参数无效"));
+            }
+            let observed = crate::database::settlement::returns::TakeObservation {
+                take_delivery_id: delivery_id,
+                fencing_version,
+                reason,
+                sweep_retries,
+                expectation,
+            };
+            observation::record_return_take_observation(self.pool(), &observed, observation).await
         })
     }
 

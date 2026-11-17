@@ -393,6 +393,7 @@ mod tests {
             oldest_settlement_return_pending_age_seconds: 0,
             settlement_return_quarantined: 0,
             oldest_settlement_return_quarantined_age_seconds: 0,
+            settlement_return_take_unknown: Default::default(),
         }
     }
 

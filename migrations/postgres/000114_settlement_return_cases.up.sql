@@ -18,6 +18,10 @@
 --   6. 入站证据不改写：未绑定退件经只读重新核验读到的完整证据只追加进
 --      `settlement_return_verifications`（以产生它的案件版本为键）；改绑时案件以 `verified_version`
 --      引用这条核验事实，此后资产与身份都以它为当前有效证据。
+--   7. Take 结果未知后，邮箱维护在原 Take 会话里的观察原因以事件 `take_observed` 只追加（与最近
+--      一次事件同原因、同 fence 时不重复写）；Admin 再次领回（`retry_take`，事件
+--      `take_retry_requested`）只在案件最近一次事件正是当前 Take fence 上的 `assets_claimable`
+--      观察时成立，不接受操作者声明。
 --
 -- 兼容等级 breaking：旧程序不认识新来源 `settlement_return_action`，领取到这类 Take 投递会按未知
 --   来源失败关闭；旧 Worker 也不参与新的同邮件互斥与案件准入。回退旧程序前须先确认没有未终结的
@@ -119,7 +123,7 @@ CREATE TABLE public.settlement_return_commands (
     action text NOT NULL CHECK (
         action IN (
             'reclaim_and_resend', 'reclaim_and_hold', 'resend_from_custody', 'close_inbox',
-            'acknowledge', 'recheck'
+            'acknowledge', 'recheck', 'retry_take'
         )
     ),
     request_digest bytea NOT NULL CHECK (octet_length(request_digest) = 32),
@@ -145,7 +149,8 @@ CREATE TABLE public.settlement_return_events (
         event_kind IN (
             'opened', 'acknowledged', 'recheck_requested', 'recheck_rebound',
             'recheck_unchanged', 'take_requested', 'take_activated', 'take_proven',
-            'take_unknown', 'held', 'resend_authorized', 'resent', 'inbox_closed'
+            'take_unknown', 'take_observed', 'take_retry_requested', 'held',
+            'resend_authorized', 'resent', 'inbox_closed'
         )
     ),
     -- 事件之后的案件状态。

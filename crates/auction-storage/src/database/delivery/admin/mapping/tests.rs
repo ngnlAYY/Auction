@@ -227,3 +227,34 @@ fn recovery_quarantine_from_pending_delivery_validates() {
     missing_completed.completed_at = None;
     assert!(!valid_snapshot(&missing_completed));
 }
+
+/// 被恢复终结的原结算投递（`failed/recovery_superseded`）从未进入发送围栏：只有 created（可选
+/// claimed）与 completed 事实；来源不是结算、出现发送时间或远端引用、缺 completed 都失败关闭。
+#[test]
+fn recovery_superseded_settlement_delivery_validates_without_send_facts() {
+    let mut superseded =
+        retired_player_notification("settlement", "recovery_superseded", "recovery_superseded");
+    superseded.origin_id = Uuid::from_u128(9).to_string();
+    superseded.cod = Some(100);
+    superseded.retirement_reason = None;
+    superseded.reason_code = None;
+    superseded.fencing_version = 4;
+    assert!(valid_snapshot(&superseded));
+    let mut claimed = superseded.clone();
+    claimed.claimed_at = Some(claimed.created_at + chrono::TimeDelta::seconds(1));
+    claimed.attempt_count = 1;
+    assert!(valid_snapshot(&claimed));
+
+    let mut wrong_origin = superseded.clone();
+    wrong_origin.origin_kind = "lot_watch".to_owned();
+    assert!(!valid_snapshot(&wrong_origin));
+    let mut sent = superseded.clone();
+    sent.sending_at = Some(sent.created_at + chrono::TimeDelta::seconds(2));
+    assert!(!valid_snapshot(&sent));
+    let mut referenced = superseded.clone();
+    referenced.external_reference = Some("3120869".to_owned());
+    assert!(!valid_snapshot(&referenced));
+    let mut open = superseded;
+    open.completed_at = None;
+    assert!(!valid_snapshot(&open));
+}

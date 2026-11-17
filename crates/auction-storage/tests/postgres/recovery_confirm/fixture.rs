@@ -10,6 +10,7 @@ use uuid::Uuid;
 /// 夹具里的成交与恢复身份。
 pub(crate) struct Sale {
     pub(crate) auction_id: Uuid,
+    pub(crate) lot_id: Uuid,
     pub(crate) payment: Uuid,
     pub(crate) handoff: Option<Uuid>,
     pub(crate) seller: Uuid,
@@ -385,6 +386,7 @@ pub(crate) async fn insert_reclaiming_sale(pool: &PgPool, spec: SaleSpec) -> Sal
 
     Sale {
         auction_id,
+        lot_id,
         payment,
         handoff,
         seller,

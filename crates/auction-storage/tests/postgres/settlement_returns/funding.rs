@@ -487,7 +487,11 @@ async fn resending(
         handle(store, case, 1, SettlementReturnAction::ReclaimAndResend).await,
         SettlementReturnCaseStatus::TakePending
     );
-    store.activate_due_return_take(Utc::now()).await.expect("激活").expect("必须激活");
+    store
+        .activate_due_return_take(Utc::now(), super::take_worlds())
+        .await
+        .expect("激活")
+        .expect("必须激活");
     let take: Uuid = sqlx::query_scalar(
         "SELECT delivery_id FROM public.settlement_return_actions WHERE return_mail_id = $1",
     )

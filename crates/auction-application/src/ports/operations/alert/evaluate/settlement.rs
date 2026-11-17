@@ -1,5 +1,7 @@
 //! 结算面的投递、履约与恢复阈值评估。
 
+use auction_domain::SettlementReturnTakeUnknownReason;
+
 use super::super::OperationsAlertError;
 use super::super::assessment::{assess_delivery, assess_fulfillment, assess_recovery};
 use super::super::model::{
@@ -125,6 +127,11 @@ pub(super) fn evaluate_fulfillment(
         || snapshot.oldest_settlement_return_quarantined_age_seconds < 0
         || (snapshot.settlement_return_quarantined == 0
             && snapshot.oldest_settlement_return_quarantined_age_seconds != 0)
+        || snapshot.settlement_return_take_unknown.iter().any(|reason| {
+            reason.count < 0
+                || reason.oldest_age_seconds < 0
+                || (reason.count == 0 && reason.oldest_age_seconds != 0)
+        })
     {
         return Err(OperationsAlertError::Invalid);
     }
@@ -203,6 +210,20 @@ pub(super) fn evaluate_fulfillment(
             snapshot.settlement_return_quarantined,
             snapshot.oldest_settlement_return_quarantined_age_seconds,
         )?);
+    }
+    // Take 结果未知按原因各一个信号，作用域即原因名称，通知带出原因类别与处置指引。
+    for (reason, watermark) in
+        SettlementReturnTakeUnknownReason::ALL.iter().zip(snapshot.settlement_return_take_unknown)
+    {
+        if watermark.count > 0 {
+            signals.push(OperationsAlertSignal::new(
+                OperationsAlertKind::SettlementReturnTakeUnknown,
+                reason.as_str(),
+                OperationsAlertSource::Fulfillment,
+                watermark.count,
+                watermark.oldest_age_seconds,
+            )?);
+        }
     }
     OperationsAlertSourceObservation::available(OperationsAlertSource::Fulfillment, signals)
 }

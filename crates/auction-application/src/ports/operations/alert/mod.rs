@@ -65,8 +65,9 @@ pub use model::{
     OperationsAlertNotificationSnapshot, OperationsAlertPolicy, OperationsAlertProcessSnapshot,
     OperationsAlertProcessState, OperationsAlertReconciliationSnapshot,
     OperationsAlertReconciliationWorld, OperationsAlertRecoverySnapshot,
-    OperationsAlertRecoveryWorld, OperationsAlertSnapshot, OperationsAlertSourceObservation,
-    OperationsAlertTarget,
+    OperationsAlertRecoveryWorld, OperationsAlertReturnTakeUnknown, OperationsAlertSnapshot,
+    OperationsAlertSourceObservation, OperationsAlertTarget,
+    SETTLEMENT_RETURN_TAKE_UNKNOWN_REASONS,
 };
 pub use signals::{
     OPERATIONS_ALERT_ACCOUNT_BUSY_AGE, OPERATIONS_ALERT_DIGEST_INTERVAL,
