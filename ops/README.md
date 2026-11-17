@@ -488,7 +488,7 @@ JOIN public.inbound_mail AS i ON i.id = c.return_mail_id
 LEFT JOIN public.deliveries AS d ON d.id = c.delivery_id
 WHERE c.status = 'inbox_closed'
 ORDER BY c.closed_at;
--- 未结案案件按状态计数（与导航待办和两类退件告警同一口径）
+-- 未结案案件按状态计数（与导航待办和三类退件告警同一口径）
 SELECT status, count(*) FROM public.settlement_return_cases
 WHERE closed_at IS NULL GROUP BY status ORDER BY status;
 ROLLBACK;
