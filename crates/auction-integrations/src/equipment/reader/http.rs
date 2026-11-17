@@ -2,6 +2,8 @@
 //!
 //! 注入共享的 MoogleMail 客户端后，每次请求先取得同账号许可：与邮件请求不重叠、账号忙窗口内
 //! 不发网络，战斗页打开同一账号忙窗口。战斗页与限流只表示暂时不可用，绝不归为来源无效。
+//! 许可上的排队随调用方放弃撤销登记；请求发出后被放弃时，剩余部分连同许可交给独立任务，借用的
+//! 在途锁持有到远端回应或本次读取预算结束。
 
 use std::{
     sync::{
@@ -21,6 +23,7 @@ use url::Url;
 use super::super::config::DEFAULT_USER_AGENT;
 use super::{EquipmentFetchError, EquipmentSourceAdapter};
 use crate::clients::owner_probe::probe_owner;
+use crate::clients::sent_request::SentRequest;
 use crate::{
     mooglemail::{
         EquipmentReadPermit, MoogleMailCookie, MoogleMailWorld, equipment_read_hold,
@@ -111,6 +114,10 @@ pub(super) async fn document_once(
     status_slot: Option<Arc<AtomicU16>>,
 ) -> Result<EquipmentFetchSuccess, EquipmentFetchError> {
     let started = StdInstant::now();
+    // 与调用方的外层预算同为本次读取的 request_timeout、同样从排队开始计时；只约束被放弃后分离的
+    // 发出阶段，调用方等待期间仍由外层预算裁决。溢出时退回立即丢弃。
+    let detached_deadline =
+        Instant::now().checked_add(adapter.policy.request_timeout).unwrap_or_else(Instant::now);
     let mut request =
         adapter.client.get(target).header(reqwest::header::USER_AGENT, DEFAULT_USER_AGENT);
     if let Some(cookie) = cookie {
@@ -176,18 +183,38 @@ pub(super) async fn document_once(
     if let Some(permit) = permit.as_mut() {
         permit.start_request();
     }
-    let result = exchange(adapter, request, permit.as_mut(), status_slot, started).await;
-    if let Some(permit) = permit {
-        permit.finish(request_category(&result));
-    }
-    result
+    let endpoint = adapter.endpoint.clone();
+    let maximum_response_bytes = adapter.policy.maximum_response_bytes;
+    // 发出阶段：调用方等待时就在本任务内走完；被放弃（Worker item timeout、control 路由预算、连接
+    // 断开）时连同许可交给独立任务，在途锁持有到远端回应或分离截止，紧接的同账号请求不与之重叠。
+    SentRequest::with_detached_deadline(
+        async move {
+            let mut permit = permit;
+            let result = exchange(
+                &endpoint,
+                maximum_response_bytes,
+                request,
+                permit.as_mut(),
+                status_slot,
+                started,
+            )
+            .await;
+            if let Some(permit) = permit {
+                permit.finish(request_category(&result));
+            }
+            result
+        },
+        detached_deadline,
+    )
+    .await
 }
 
 /// 发出请求并有界读取完整正文，再按登录、账号临时状态与 HTTP 结果分类。
 async fn exchange(
-    adapter: &EquipmentSourceAdapter,
+    endpoint: &Url,
+    maximum_response_bytes: usize,
     request: RequestBuilder,
-    permit: Option<&mut EquipmentReadPermit<'_>>,
+    permit: Option<&mut EquipmentReadPermit>,
     status_slot: Option<Arc<AtomicU16>>,
     started: StdInstant,
 ) -> Result<EquipmentFetchSuccess, EquipmentFetchError> {
@@ -207,9 +234,9 @@ async fn exchange(
         slot.store(response.status().as_u16(), Ordering::Relaxed);
     }
     let status = response.status();
-    if response.url().scheme() != adapter.endpoint.scheme()
-        || response.url().host_str() != adapter.endpoint.host_str()
-        || response.url().port_or_known_default() != adapter.endpoint.port_or_known_default()
+    if response.url().scheme() != endpoint.scheme()
+        || response.url().host_str() != endpoint.host_str()
+        || response.url().port_or_known_default() != endpoint.port_or_known_default()
     {
         return Err(observed_failure(
             MailEquipmentDiagnosticCategory::Redirect,
@@ -218,10 +245,7 @@ async fn exchange(
             None,
         ));
     }
-    if response
-        .content_length()
-        .is_some_and(|length| length > adapter.policy.maximum_response_bytes as u64)
-    {
+    if response.content_length().is_some_and(|length| length > maximum_response_bytes as u64) {
         return Err(observed_failure(
             MailEquipmentDiagnosticCategory::ResponseTooLarge,
             Some(status.as_u16()),
@@ -254,7 +278,7 @@ async fn exchange(
         .content_length()
         .and_then(|length| usize::try_from(length).ok())
         .unwrap_or_default()
-        .min(adapter.policy.maximum_response_bytes);
+        .min(maximum_response_bytes);
     let mut body = SensitiveResponseBody(Vec::with_capacity(capacity));
     while let Some(chunk) = response.chunk().await.map_err(safe_diagnostics::warn_map(
         "equipment_fetch",
@@ -276,7 +300,7 @@ async fn exchange(
                 None,
             )
         })?;
-        if next > adapter.policy.maximum_response_bytes {
+        if next > maximum_response_bytes {
             return Err(observed_failure(
                 MailEquipmentDiagnosticCategory::ResponseTooLarge,
                 Some(status.as_u16()),

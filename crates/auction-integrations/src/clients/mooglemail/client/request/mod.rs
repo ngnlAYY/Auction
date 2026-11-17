@@ -1,4 +1,5 @@
-//! MoogleMail typed GET/POST 请求与远端结果分类。
+//! MoogleMail typed GET/POST 请求与远端结果分类。GET 分两段：排队在调用方 future 内，被放弃即
+//! 撤票；发出后被放弃时剩余部分交给独立任务走完，在途锁不随调用方提前释放。
 
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 use reqwest::{StatusCode, header};
@@ -16,12 +17,15 @@ use crate::clients::mooglemail::{
     MoogleMailWorld,
 };
 use crate::clients::operation_lock::OperationLockGuard;
+use crate::clients::sent_request::SentRequest;
 use crate::safe_diagnostics;
 
 mod body;
 mod equipment;
 mod pending;
 mod post;
+#[cfg(test)]
+mod tests;
 
 use body::DiagnosticResponse;
 pub(super) use body::SensitiveBytes;
@@ -40,21 +44,30 @@ impl MoogleMailClient {
     /// 对 typed target 执行一次受限 GET。
     /// 正文不进入错误对象或普通日志；异常响应只允许交给独立加密证据记录器。
     /// Cookie 仅在建立请求时短暂复制到 HTTP header，不参与响应留证。
+    ///
+    /// 排队在调用方 future 内，被放弃即撤票、不补发。发出后调用方放弃等待（外层读取预算、item
+    /// timeout、任务取消）只丢弃结果：剩余部分交给独立任务走完，在途锁持有到远端回应或客户端超时，
+    /// 紧接的同账号请求不与远端仍在处理的请求重叠。客户端超时不能证明远端已停止处理。
     pub async fn get(
         &self,
         target: &MoogleMailTarget,
         cookie: &MoogleMailCookie,
     ) -> Result<Vec<u8>, MoogleMailError> {
-        let _membership = if target.operation == MoogleMailOperation::Detail {
+        // 详情 GET 会改变 Inbox/Read Mail 成员关系：写锁随发出阶段持有到物理请求结束。
+        let membership = if target.operation == MoogleMailOperation::Detail {
             Some(self.incoming_detail_guard(cookie, target.world).await?)
         } else {
             None
         };
-        let mut response = DiagnosticResponse::default();
-        match self.get_inner(target, cookie, &mut response).await {
-            Ok(body) => Ok(body),
-            Err(error) => Err(self.report_read_failure(target, &response, error).await),
-        }
+        let pending = self.queue_pending(target.clone(), cookie).await?;
+        // 排队结束与发出之间没有等待点，放弃只会发生在越过发出边界之后。被放弃的正文无人接收，
+        // 以敏感缓冲交接，随 Drop 清零。
+        SentRequest::new(async move {
+            let _membership = membership;
+            pending.send().await.map(SensitiveBytes)
+        })
+        .await
+        .map(|mut body| std::mem::take(&mut body.0))
     }
 
     /// 读取失败的统一收尾：按需留存加密证据，再记一条脱敏诊断。
@@ -67,33 +80,18 @@ impl MoogleMailClient {
         let error =
             self.diagnose_http(target, response.status, response.body.as_deref(), error).await;
         let projection = safe_diagnostics::project(&error);
+        // 被放弃后在独立任务里收尾时没有调用方的诊断上下文，世界显式带上。
+        let context = DiagnosticContext {
+            world: diagnostic_world(target.world.as_str()),
+            ..Default::default()
+        };
         // 账号忙是正常的退避信号，不应在运维告警中表现为 WARN；其他分类仍保留 WARN。
         if error.category.as_str() == "account_busy" {
-            safe_diagnostics::info(
-                "mooglemail_read",
-                "read_transaction",
-                projection,
-                DiagnosticContext::default(),
-            );
+            safe_diagnostics::info("mooglemail_read", "read_transaction", projection, context);
         } else {
-            safe_diagnostics::warn(
-                "mooglemail_read",
-                "read_transaction",
-                projection,
-                DiagnosticContext::default(),
-            );
+            safe_diagnostics::warn("mooglemail_read", "read_transaction", projection, context);
         }
         error
-    }
-
-    async fn get_inner(
-        &self,
-        target: &MoogleMailTarget,
-        cookie: &MoogleMailCookie,
-        diagnostic: &mut DiagnosticResponse,
-    ) -> Result<Vec<u8>, MoogleMailError> {
-        let queued = self.queue_read(target, cookie).await?;
-        self.send_read(queued, target, cookie, diagnostic).await
     }
 
     /// 发出前的排队阶段：账号忙预检、请求门、在途锁、账号忙复核与 owner 复核，止于发出边界。
@@ -230,7 +228,8 @@ impl MoogleMailClient {
         Ok(QueuedRead { request, in_flight, probes_account })
     }
 
-    /// 发出请求、读完正文并分类结果；在途锁持有到正文读完（或客户端超时）且账号忙分类完成。
+    /// 发出请求、读完正文并分类结果；在途锁持有到正文读完（或客户端超时）且账号忙分类完成。调用方
+    /// 放弃等待时由独立任务走完，见 [`SentRequest`]。
     async fn send_read(
         &self,
         queued: QueuedRead,
