@@ -1,8 +1,13 @@
-//! Public Dioxus 路由表、语言目录与启动入口；页面外壳见 `shell` 模块。
+//! Public 语言目录与启动入口；路由表见子模块 `route`，页面外壳见 `shell` 模块。
+
 // dioxus-router-macro 0.7.10 的 `Routable` 派生把 `String`/`Vec<String>` 段的解析错误包进
 // `map_err` 闭包；Rust 1.100 起 `Infallible` 即 `!`，该闭包被判为不可达调用。派生代码在 `const _`
-// 块中与 `Route` 并列，lint 属性无法只挂到派生项上，只能在本模块放行；上游修正派生后删除。
-#![allow(unreachable_code, reason = "Routable 派生的段解析错误映射在 Infallible 即 ! 后不可达")]
+// 块中与 `Route` 并列，枚举上的 lint 属性覆盖不到，因此路由表单独成子模块，只对该子模块放行，
+// 本模块其余代码照常受 lint 约束；上游修正派生后删除。
+#[allow(unreachable_code, reason = "Routable 派生的段解析错误映射在 Infallible 即 ! 后不可达")]
+mod route;
+
+pub(crate) use route::Route;
 
 use auction_web_shared::i18n::{
     DEFAULT_PUBLIC_LOCALE, LocaleCatalog, LocaleSession, LocaleSource, build_bundle,
@@ -14,14 +19,8 @@ use dioxus::prelude::*;
 use dioxus_i18n::prelude::try_use_init_i18n_from_bundle;
 use unic_langid::langid;
 
-use super::pages::History;
+use super::initial_public_location;
 use super::session::initial_login_return_location;
-use super::shell::PublicShell;
-use super::{
-    About, Account, AuctionIndex, AuctionList, AuctionPage, BidLog, Blacklist, Compensation,
-    CompensationPool, Forum, Fulfillment, Login, LotDetail, Me, NotFound, Rules, Status,
-    initial_public_location,
-};
 
 /// 公开端 surface 样式。设计变量由 `auction-web-shared` 提供。
 const PUBLIC_CSS: Asset = asset!("/assets/public.css", AssetOptions::css().with_static_head(true));
@@ -32,7 +31,7 @@ const MOBILE_CSS: Asset = asset!("/assets/mobile.css", AssetOptions::css().with_
 /// Public 语言目录：默认英文编译期内嵌，其余四种从带指纹的静态资源按需取回。
 pub(crate) static PUBLIC_LOCALE_CATALOG: LocaleCatalog = LocaleCatalog {
     default_locale: DEFAULT_PUBLIC_LOCALE,
-    default_ftl: include_str!("../../i18n/en.ftl"),
+    default_ftl: include_str!("../../../i18n/en.ftl"),
     sources: &[
         LocaleSource { id: langid!("zh-CN"), asset: asset!("/i18n/zh-CN.ftl") },
         LocaleSource { id: langid!("zh-TW"), asset: asset!("/i18n/zh-TW.ftl") },
@@ -43,70 +42,6 @@ pub(crate) static PUBLIC_LOCALE_CATALOG: LocaleCatalog = LocaleCatalog {
 
 pub fn run() {
     dioxus::launch(App);
-}
-
-/// 公开端路由表。
-/// 路径逐条登记已发布的公开端 route（保持 URL 兼容）与经评审的 Public 扩展；增删路径时同步
-/// `docs/contracts/routes.md`。
-#[derive(Clone, Debug, PartialEq, Routable)]
-#[rustfmt::skip]
-// 路径字面量必须与 auction-http/src/assets/routes.rs 的 Public 清单同步，未知路径不能获得 SPA 入口。
-pub(crate) enum Route {
-    #[layout(PublicShell)]
-        #[route("/")]
-        AuctionIndex {},
-
-        #[route("/auction")]
-        AuctionPage {},
-
-        #[route("/auctions")]
-        AuctionList {},
-
-        #[route("/lots/:lot_code")]
-        LotDetail { lot_code: String },
-
-        #[route("/bidlog")]
-        BidLog {},
-
-        #[route("/fulfillment")]
-        Fulfillment {},
-
-        #[route("/history")]
-        History {},
-
-        #[route("/login?:return_to")]
-        Login { return_to: Option<String> },
-
-        #[route("/me")]
-        Me {},
-
-        #[route("/account")]
-        Account {},
-
-        #[route("/rules")]
-        Rules {},
-
-        #[route("/about")]
-        About {},
-
-        #[route("/blacklist")]
-        Blacklist {},
-
-        #[route("/compensation-pool")]
-        CompensationPool {},
-
-        #[route("/compensation")]
-        Compensation {},
-
-        #[route("/forum")]
-        Forum {},
-
-        #[route("/status")]
-        Status {},
-    #[end_layout]
-
-    #[route("/:..segments")]
-    NotFound { segments: Vec<String> },
 }
 
 #[component]

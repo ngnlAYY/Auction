@@ -23,7 +23,7 @@
 | `/forum` | 论坛同步摘要 |
 | `/status` | 服务说明 |
 
-其他路径显示 404 页面。新增页面须同步修改 `crates/auction-web-public/src/surface/router.rs` 的 `Route`、后端 [crates/auction-http/src/assets/routes.rs](../auction-http/src/assets/routes.rs) 与 [docs/contracts/routes.md](../../docs/contracts/routes.md)。
+其他路径显示 404 页面。新增页面须同步修改 `crates/auction-web-public/src/surface/router/route.rs` 的 `Route`、后端 [crates/auction-http/src/assets/routes.rs](../auction-http/src/assets/routes.rs) 与 [docs/contracts/routes.md](../../docs/contracts/routes.md)。
 
 ## 数据与实时
 

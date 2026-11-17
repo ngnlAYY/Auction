@@ -1,5 +1,5 @@
 //! 公开端浏览器界面（Dioxus CSR）。
-//! 路由集合由 `router.rs` 定义，与 `crates/auction-http/src/assets/routes.rs` 的 Public 清单及
+//! 路由集合由 `router/route.rs` 定义，与 `crates/auction-http/src/assets/routes.rs` 的 Public 清单及
 //! `docs/contracts/routes.md` 逐条同步；已发布的路径保持 URL 兼容，经评审的 Public 扩展页面也
 //! 逐条登记，保持 URL 契约可审计。
 //! 界面文案全部经由 `dioxus-i18n` 取自 `i18n/*.ftl`，默认英文；受支持语言与持久化行为

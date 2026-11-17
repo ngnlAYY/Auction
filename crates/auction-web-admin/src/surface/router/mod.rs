@@ -1,9 +1,14 @@
-//! 管理端路由表、页面入口组件和旧版别名跳转。
+//! 管理端路由、页面入口组件和旧版别名跳转；路由表见子模块 `route`。
 //! 路由路径与页面组件在同一 owner 内维护，避免 surface 装配文件再次聚合所有页面入口。
+
 // dioxus-router-macro 0.7.10 的 `Routable` 派生把 `String`/`Vec<String>` 段的解析错误包进
 // `map_err` 闭包；Rust 1.100 起 `Infallible` 即 `!`，该闭包被判为不可达调用。派生代码在 `const _`
-// 块中与 `Route` 并列，lint 属性无法只挂到派生项上，只能在本模块放行；上游修正派生后删除。
-#![allow(unreachable_code, reason = "Routable 派生的段解析错误映射在 Infallible 即 ! 后不可达")]
+// 块中与 `Route` 并列，枚举上的 lint 属性覆盖不到，因此路由表单独成子模块，只对该子模块放行，
+// 本模块的页面入口与别名跳转照常受 lint 约束；上游修正派生后删除。
+#[allow(unreachable_code, reason = "Routable 派生的段解析错误映射在 Infallible 即 ! 后不可达")]
+mod route;
+
+pub(super) use route::Route;
 
 #[cfg(target_arch = "wasm32")]
 use std::{cell::RefCell, rc::Rc};
@@ -11,7 +16,6 @@ use std::{cell::RefCell, rc::Rc};
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
-use super::auth::AdminShell;
 use super::{
     alerts, auctions, audit, config, credentials, dashboard, deliveries, lots, mail, realtime,
     renames, rules, settlement, status, support, users,
@@ -66,100 +70,6 @@ pub(super) fn restore_initial_admin_location() {
             let _ = history.replace_state_with_url(&state, "", Some(&url));
         }
     }
-}
-
-/// 管理端路由表。
-/// 路径契约见 `docs/contracts/routes.md`。管理命令的实现必须走版本化 REST 契约，
-/// 不在浏览器端重建状态机。
-#[derive(Clone, Debug, PartialEq, Routable)]
-#[rustfmt::skip]
-// 路径字面量必须与 auction-http/src/assets/routes.rs 的 Admin 清单同步，未知路径不能获得 SPA 入口。
-pub(super) enum Route {
-    #[route("/setup")]
-    Setup {},
-
-    #[layout(AdminShell)]
-        #[route("/")]
-        Dashboard {},
-
-        #[route("/dashboard")]
-        DashboardAlias {},
-
-        #[route("/login")]
-        Login {},
-
-        #[route("/auctions")]
-        Auctions {},
-
-        #[route("/auctions/:auction_id/lots")]
-        AuctionLots { auction_id: String },
-
-        #[route("/auction")]
-        AuctionOverview {},
-
-        #[route("/mails")]
-        Mails {},
-
-        #[route("/mail")]
-        MailOverview {},
-
-        #[route("/cookies")]
-        Cookies {},
-
-        #[route("/credentials")]
-        Credentials {},
-
-        #[route("/users")]
-        Users {},
-
-        #[route("/renames")]
-        Renames {},
-
-        #[route("/deliveries")]
-        Deliveries {},
-
-        /// 单条投递的只读证据详情；玩家报出的投递 Reference 可直接定位。
-        #[route("/deliveries/:delivery_id")]
-        DeliveryDetail { delivery_id: String },
-
-        #[route("/delivery")]
-        DeliveryOverview {},
-
-        /// 玩家支持：按用户或参考编号只读汇总，一次检索定位相关记录。
-        #[route("/player-support")]
-        PlayerSupport {},
-
-        #[route("/outbox")]
-        Outbox {},
-
-        #[route("/settlement")]
-        Settlement {},
-
-        #[route("/config")]
-        Config {},
-
-        #[route("/rules-content")]
-        RulesContent {},
-
-        #[route("/rules")]
-        Rules {},
-
-        /// “关于”文档：公开端“关于”页面的多语言内容，与规则共用同一套编辑与发布流程。
-        #[route("/about-content")]
-        AboutContent {},
-
-        /// 告警台：活动/历史告警、确认、静默与处置手册锚点。
-        #[route("/alerts")]
-        Alerts {},
-
-        #[route("/audit")]
-        Audit {},
-
-        #[route("/status")]
-        Status {},
-
-        #[route("/:..segments")]
-        NotFound { segments: Vec<String> },
 }
 
 #[component]
