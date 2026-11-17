@@ -7,7 +7,8 @@
 //! - 原交付与本轮 Take 链路不符、卖方货款已开始或已有支出、交付已满足、存在更新派发或原交付没有
 //!   可信 Sent 证明时拒绝确认，什么都不改；
 //! - 告警分类口径与长期未领取的计数、清单都按同一收口事实排除这两条终态，legacy 与 shadow
-//!   仍按迁移前口径计入。
+//!   仍按迁移前口径计入；确认之前，恢复流程已消费本轮系统退件的交付已不计入等待领取、长期未领取
+//!   与积压，恢复记录当前退件不是该交付自己的退件时照常计入。
 
 mod custody;
 pub(crate) mod fixture;
@@ -435,8 +436,9 @@ async fn snapshot_at(
         .expect("读取告警快照")
 }
 
-/// 确认前，已寄出两小时的交付是长期未领取；确认后交付与卖方货款按精确收口事实退出长期未领取
-/// 的计数与清单，分类口径不计失败，legacy 与 shadow 仍按迁移前口径计入两条失败。
+/// 交付被退回、恢复流程已消费本轮系统退件并取回装备、Admin 尚未确认时，交付已不在收件人邮箱：
+/// 不计入等待领取、长期未领取（计数与清单）或积压，由恢复流程承担；确认后交付与卖方货款按精确
+/// 收口事实收口，分类口径不计失败，legacy 与 shadow 仍按迁移前口径计入两条失败。
 #[tokio::test]
 async fn postgres_equipment_recovered_leaves_failure_alerts_and_collection_lists() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
@@ -447,12 +449,18 @@ async fn postgres_equipment_recovered_leaves_failure_alerts_and_collection_lists
 
     let before = snapshot_at(&store, DispositionReadMode::Classified).await;
     let fulfillment_before = before.fulfillment.expect("履约水位");
-    assert_eq!(fulfillment_before.collection_overdue, 1);
-    assert_eq!(fulfillment_before.failed, 0);
     assert_eq!(
-        before.collection_overdue_items.iter().map(|item| item.obligation_id).collect::<Vec<_>>(),
-        vec![recovered.handoff]
+        (
+            fulfillment_before.awaiting_collection,
+            fulfillment_before.collection_overdue,
+            fulfillment_before.pending,
+            fulfillment_before.failed,
+        ),
+        (0, 0, 0, 0),
+        "恢复流程已消费退件的交付不计入等待领取、超期或积压"
     );
+    assert!(before.collection_overdue_items.is_empty(), "长期未领取清单与计数同口径");
+    crate::alert_entry_equivalence::assert_alert_reads_match_full_scan(pool).await;
 
     store
         .confirm_recovery(confirmation(
@@ -474,6 +482,86 @@ async fn postgres_equipment_recovered_leaves_failure_alerts_and_collection_lists
         assert_eq!(fulfillment_after.awaiting_collection, 0, "{mode:?}");
         assert!(after.collection_overdue_items.is_empty(), "{mode:?}");
     }
+    crate::alert_entry_equivalence::assert_alert_reads_match_full_scan(pool).await;
+
+    store.postgres_pool().close().await;
+}
+
+/// 恢复记录当前退件指针决定“已由恢复流程承担”：同一交付在恢复记录尚无当前退件（未消费，或重寄
+/// 后的新一轮）时照常按寄出两小时计入等待领取、长期未领取与清单；指针指向已消费的本义务退件时
+/// 三者一起退出，也不回落积压。只指向其他义务的退件（isekai 载体付款被退回）时交付照常计入。
+#[tokio::test]
+async fn postgres_recovery_consumed_return_moves_delivery_out_of_collection_wait() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("以运行账号连接");
+    let pool = store.postgres_pool();
+    let recovered: Recovered = insert_recovered_sale(pool, 7_800_301).await;
+    let (return_mail, return_mid): (Uuid, String) = sqlx::query_as(
+        "SELECT return_mail_id, return_external_mail_id FROM public.settlement_recoveries
+         WHERE id = $1",
+    )
+    .bind(recovered.sale.recovery_id)
+    .fetch_one(pool)
+    .await
+    .expect("读取当前退件");
+    let point = |mail: Option<Uuid>, mid: Option<String>, stage: &'static str| {
+        sqlx::query(
+            "UPDATE public.settlement_recoveries
+             SET return_mail_id = $2, return_external_mail_id = $3, stage = $4
+             WHERE id = $1",
+        )
+        .bind(recovered.sale.recovery_id)
+        .bind(mail)
+        .bind(mid)
+        .bind(stage)
+        .execute(pool)
+    };
+    let collection = |snapshot: auction_application::operations::OperationsAlertSnapshot| {
+        let fulfillment = snapshot.fulfillment.expect("履约水位");
+        (
+            fulfillment.awaiting_collection,
+            fulfillment.collection_overdue,
+            fulfillment.pending,
+            snapshot
+                .collection_overdue_items
+                .iter()
+                .map(|item| item.obligation_id)
+                .collect::<Vec<_>>(),
+        )
+    };
+
+    point(None, None, "delivering_equipment").await.expect("恢复记录尚无当前退件");
+    assert_eq!(
+        collection(snapshot_at(&store, DispositionReadMode::Classified).await),
+        (1, 1, 0, vec![recovered.handoff]),
+        "尚未消费退件时交付照常是长期未领取"
+    );
+    crate::alert_entry_equivalence::assert_alert_reads_match_full_scan(pool).await;
+
+    point(Some(return_mail), Some(return_mid.clone()), "reclaiming").await.expect("指向本义务退件");
+    assert_eq!(
+        collection(snapshot_at(&store, DispositionReadMode::Classified).await),
+        (0, 0, 0, Vec::new()),
+        "恢复流程消费本轮退件后，计数与清单一起退出"
+    );
+    crate::alert_entry_equivalence::assert_alert_reads_match_full_scan(pool).await;
+
+    // 当前退件来源改为载体付款义务：不是交付自己的退件，交付照常计入。
+    sqlx::query(
+        "UPDATE public.inbound_mail
+         SET decision_metadata = jsonb_set(decision_metadata, '{obligation_id}', to_jsonb($2::text))
+         WHERE id = $1",
+    )
+    .bind(return_mail)
+    .bind(recovered.sale.payment.to_string())
+    .execute(pool)
+    .await
+    .expect("退件改为载体付款来源");
+    assert_eq!(
+        collection(snapshot_at(&store, DispositionReadMode::Classified).await),
+        (1, 1, 0, vec![recovered.handoff]),
+        "其他义务的退件不能让交付退出等待领取"
+    );
 
     store.postgres_pool().close().await;
 }

@@ -23,7 +23,8 @@ pub(crate) use eligibility::{
 };
 mod internal;
 pub(crate) use collection::{
-    sent_awaiting_collection_sql, sent_delivery_sql, sent_unsatisfied_sql,
+    recovery_consumed_return_sql, sent_awaiting_collection_sql, sent_delivery_sql,
+    sent_unsatisfied_sql,
 };
 #[cfg(feature = "test-db")]
 pub use internal::asset_conflict_gate_passes;

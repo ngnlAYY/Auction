@@ -35,7 +35,10 @@ use crate::database::storage_error_from;
 /// 行）。两者都改为按主键联表，不再在每个计数里重复展开子查询。
 ///
 /// “等待领取”只拆出已寄出的 Send 履约：COD/载体付款义务沿用“等待买家付款”的既有口径，等待
-/// 付款或前置的项保持原分类。拆出后它们不再计入积压，但仍是未满足义务，只换分组展示。清单只取
+/// 付款或前置的项保持原分类。拆出后它们不再计入积压，但仍是未满足义务，只换分组展示。原投递本轮
+/// 的系统退件已被恢复流程消费（`recovery_consumed_return_sql!`，只有恢复记录的付款与交付义务）
+/// 时邮件已退回 Bot，确认前履约仍停在 `enqueued`：既不是等待领取、超期与清单，也不回落积压，由
+/// 恢复流程承担；计数与清单读同一份分类，口径一致。清单只取
 /// Admin 可见的业务标识与展示字段，不读投递载荷、凭据或外部错误原文；拍品代码按分类前缀加分类
 /// 内编号生成，`lot_number` 取 `category_number`，与 Admin lot 页和结算报表一致。
 pub(in crate::database::operations::alert::snapshot) const FULFILLMENT_SNAPSHOT: &str = concat!(
@@ -91,7 +94,15 @@ pub(in crate::database::operations::alert::snapshot) const FULFILLMENT_SNAPSHOT:
                     )
                     AND returned.status IN ('held', 'inbox_closed'))) AS failure_disposed,
                -- 已由结算退件案件接管的人工对账：改按退件待办计数，不再计入履约人工对账。
-               (returned.return_mail_id IS NOT NULL AND returned.closed_at IS NULL) AS return_open
+               (returned.return_mail_id IS NOT NULL AND returned.closed_at IS NULL) AS return_open,
+               -- 原投递本轮的系统退件已被恢复流程消费：邮件已退回 Bot，由恢复流程承担。
+               (obligation.obligation_kind IN (
+                    'winner_equipment_cod', 'winner_payment_carrier_cod',
+                    'winner_equipment_handoff'
+                )
+                AND ",
+    crate::database::settlement::fulfillment::recovery_consumed_return_sql!("obligation"),
+    ") AS recovery_returned
         FROM public.settlement_obligations AS obligation
         LEFT JOIN public.settlement_obligation_fulfillments AS fulfillment
           ON fulfillment.obligation_id = obligation.id
@@ -108,7 +119,9 @@ pub(in crate::database::operations::alert::snapshot) const FULFILLMENT_SNAPSHOT:
      ), grouped AS (
         SELECT classified.*,
                (business_state = 'ready' AND sent_send
-                AND NOT waiting_payment AND NOT waiting_prerequisite) AS awaiting_collection
+                AND NOT waiting_payment AND NOT waiting_prerequisite
+                AND NOT recovery_returned) AS awaiting_collection,
+               (business_state = 'ready' AND sent_send AND recovery_returned) AS recovery_owned
         FROM classified
      ), overdue AS (
         SELECT grouped.id, grouped.obligation_kind, grouped.auction_id, grouped.lot_id,
@@ -152,7 +165,7 @@ pub(in crate::database::operations::alert::snapshot) const FULFILLMENT_SNAPSHOT:
             COUNT(*) FILTER (WHERE business_state = 'ready'
                 AND execution_state IN ('pending', 'prepared', 'enqueued')
                 AND NOT waiting_payment AND NOT waiting_prerequisite
-                AND NOT awaiting_collection) AS pending,
+                AND NOT awaiting_collection AND NOT recovery_owned) AS pending,
             COUNT(*) FILTER (WHERE business_state = 'blocked'
                 AND execution_state NOT IN ('failed', 'satisfied')
                 AND NOT waiting_payment AND NOT waiting_prerequisite) AS blocked,
@@ -176,7 +189,7 @@ pub(in crate::database::operations::alert::snapshot) const FULFILLMENT_SNAPSHOT:
             MIN(backlog_at) FILTER (WHERE business_state = 'ready'
                 AND execution_state IN ('pending', 'prepared', 'enqueued')
                 AND NOT waiting_payment AND NOT waiting_prerequisite
-                AND NOT awaiting_collection
+                AND NOT awaiting_collection AND NOT recovery_owned
                 OR (business_state = 'blocked'
                     AND execution_state NOT IN ('failed', 'satisfied')
                     AND NOT waiting_payment AND NOT waiting_prerequisite)) AS oldest_backlog,
