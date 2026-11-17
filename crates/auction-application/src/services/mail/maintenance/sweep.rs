@@ -639,6 +639,7 @@ mod tests {
             returned_from: "Seller".to_owned(),
             cod: 0,
             attachment_count: 2,
+            expected_recipient: Some("Returns Bot".to_owned()),
         });
         send
     }

@@ -388,6 +388,9 @@ mod tests {
     const ORIGINAL: &str = "Your auction payout is attached.\n\nAmount: 90 Credits\n\nReference: 5b1c2a9e-1f0d-4c6b-9a7e-3d2f1e0c9b8a";
     const SUFFIX: &str = "\n\nThis message was returned from Seller Name, kupo!";
 
+    /// 脱敏页面里 Bot 账号（退件收件人）的名称。
+    const BOT: &str = "Ujlhovl";
+
     fn identity() -> MoogleMailboxReturnTakeIdentity {
         MoogleMailboxReturnTakeIdentity {
             sender: "MoogleMail".to_owned(),
@@ -396,6 +399,7 @@ mod tests {
             returned_from: "Seller Name".to_owned(),
             cod: 0,
             attachment_count: 1,
+            expected_recipient: Some(BOT.to_owned()),
         }
     }
 
@@ -464,6 +468,23 @@ mod tests {
         );
         unproven(page("BuyerPlayer", SUBJECT, &taken_body()), &identity);
         unproven(page("MoogleMail", "[RTS] Auction buyer refund [x]", &taken_body()), &identity);
+    }
+
+    /// 只有页面收件人改变（发件人、主题、原正文前缀与领取回执全都成立）也不是领取完成：收件人必须
+    /// 等于执行 Take 的凭据所属账号的预期玩家名；凭据没有预期名称时无法比较，同样只是未证明。
+    #[test]
+    fn returned_take_receipt_requires_the_take_account_as_recipient() {
+        let taken = page("MoogleMail", SUBJECT, &taken_body());
+        assert_eq!(observe(&taken, &identity()), MoogleMailboxReturnTake::Taken);
+        let other_recipient = taken.replacen(&format!("value=\"{BOT}\""), "value=\"Other Bot\"", 1);
+        assert_ne!(other_recipient, taken, "页面里必须有可替换的收件人字段");
+        assert_eq!(observe(&other_recipient, &identity()), MoogleMailboxReturnTake::Unproven);
+        let mut expected_other = identity();
+        expected_other.expected_recipient = Some("Other Bot".to_owned());
+        assert_eq!(observe(&taken, &expected_other), MoogleMailboxReturnTake::Unproven);
+        let mut incomparable = identity();
+        incomparable.expected_recipient = None;
+        assert_eq!(observe(&taken, &incomparable), MoogleMailboxReturnTake::Unproven);
     }
 
     /// 仍可领取或仍挂资产时交给调用方比对完整性，不判领取完成。

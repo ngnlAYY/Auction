@@ -1,8 +1,11 @@
 //! 结算退件 Take 结果未知后的巡检贯通用例（PostgreSQL 18，运行账号）：详情页 HTML → integrations
 //! 真实解析器的领取证明 → 应用层邮箱维护 → 存储入账。远端读取换成回放同一份 HTML 的本地替身，
-//! 页面取自已脱敏的真实已领取详情（taken-3125358），只替换发件人、主题与正文。
-//! - 正例：原身份、原退件正文前缀与 `Removed attachment:` 回执都成立 → 领回事实与资金返还各一次；
-//! - 反例：附件已为空但没有领取回执 → 不绑定任何证明，案件保持 `take_unknown`，资金不动。
+//! 页面取自已脱敏的真实已领取详情（taken-3125358），只替换收件人、发件人、主题与正文；收件人取
+//! 合成凭据的预期玩家名（Bot 收件箱里的退件寄给 Bot 自己）。替身只回放页面，不代表真实远端行为。
+//! - 正例：收件人、原身份、原退件正文前缀与 `Removed attachment:` 回执都成立 → 领回事实与资金返还
+//!   各一次；
+//! - 反例：附件已为空但没有领取回执，或只有收件人与执行 Take 的凭据账号不符 → 不绑定任何证明，
+//!   案件保持 `take_unknown`，资金不动。
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
@@ -43,14 +46,25 @@ const ORIGINAL: &str = "Your auction payout is attached.\n\nAmount: 90 Credits";
 /// 系统后缀写明的原收件人，与原派发冻结收件人一致。
 const RETURNED_FROM: &str = "Recovery seller";
 
-/// 把真实页面的发件人、主题与正文换成这封退件的值，其余结构原样保留。
-fn returned_page(subject: &str, body: &str) -> String {
+/// 合成邮件凭据的预期玩家名（见 `sweep::seed_mail_session`），即退件详情页上的收件人。
+const BOT: &str = "Returns Bot";
+
+/// 把真实页面的收件人、发件人、主题与正文换成这封退件的值，其余结构原样保留。
+fn returned_page_to(recipient: &str, subject: &str, body: &str) -> String {
     let start = TAKEN.find("<textarea").expect("正文开始");
     let open_end = start + TAKEN[start..].find('>').expect("正文标签结束") + 1;
     let close = TAKEN.find("</textarea>").expect("正文结束");
-    format!("{}{body}{}", &TAKEN[..open_end], &TAKEN[close..])
+    let page = format!("{}{body}{}", &TAKEN[..open_end], &TAKEN[close..])
+        .replacen("value=\"Ujlhovl\"", &format!("value=\"{recipient}\""), 1)
         .replacen("value=\"Pnfcgarl\"", "value=\"MoogleMail\"", 1)
-        .replacen("value=\"auction\"", &format!("value=\"{subject}\""), 1)
+        .replacen("value=\"auction\"", &format!("value=\"{subject}\""), 1);
+    assert!(page.contains(&format!("value=\"{recipient}\"")), "页面里必须有收件人字段");
+    page
+}
+
+/// 寄给 Bot 账号的退件详情页。
+fn returned_page(subject: &str, body: &str) -> String {
+    returned_page_to(BOT, subject, body)
 }
 
 struct SystemClock;
@@ -247,8 +261,9 @@ async fn postgres_return_take_receipt_html_settles_through_sweep() {
             returned_from: RETURNED_FROM.to_owned(),
             cod: 0,
             attachment_count: 1,
+            expected_recipient: Some(BOT.to_owned()),
         }),
-        "候选携带证据与入站快照重建的原退件身份"
+        "候选携带证据、入站快照与 Take 冻结凭据重建的原退件身份"
     );
 
     let body = format!(
@@ -301,6 +316,39 @@ async fn postgres_return_take_empty_page_without_receipt_stays_unknown() {
     let body = format!("{ORIGINAL}\n\nThis message was returned from {RETURNED_FROM}, kupo!");
     assert_eq!(sweep_with(&store, returned_page(&subject, &body), session.binding()).await, 0);
     assert_eq!(facts(pool, &take).await, before, "没有领取回执不改写任何事实");
+    let takes: i64 = sqlx::query_scalar("SELECT count(*) FROM public.settlement_return_takes")
+        .fetch_one(pool)
+        .await
+        .expect("计数");
+    assert_eq!(takes, 0);
+    pool.close().await;
+}
+
+/// 反例：只有收件人改变——发件人、主题、原退件正文前缀与领取回执全都成立，但收件人不是执行 Take
+/// 的凭据所属账号。同一贯通路径不绑定任何证明，案件与资金都不变。
+#[tokio::test]
+async fn postgres_return_take_receipt_for_another_recipient_stays_unknown() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("以运行账号连接");
+    let pool = store.postgres_pool();
+    let session = seed_mail_session(pool).await;
+    let (returned, subject) = returned_with_body(&store, 7_650_021, "997021").await;
+    let take = unknown_take_of(
+        &store,
+        &session,
+        returned,
+        "997021",
+        SettlementReturnAction::ReclaimAndHold,
+        true,
+    )
+    .await;
+    let before = facts(pool, &take).await;
+    let body = format!(
+        "{ORIGINAL}\n\nThis message was returned from {RETURNED_FROM}, kupo!\n\nRemoved attachment: 90 Credits"
+    );
+    let page = returned_page_to("Other Bot", &subject, &body);
+    assert_eq!(sweep_with(&store, page, session.binding()).await, 0);
+    assert_eq!(facts(pool, &take).await, before, "收件人不是 Take 账号时不改写任何事实");
     let takes: i64 = sqlx::query_scalar("SELECT count(*) FROM public.settlement_return_takes")
         .fetch_one(pool)
         .await

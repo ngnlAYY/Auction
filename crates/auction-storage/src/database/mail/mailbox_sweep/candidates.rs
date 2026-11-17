@@ -41,6 +41,8 @@ pub(super) struct UnprovenSendRow {
     return_sender: Option<String>,
     return_subject: Option<String>,
     return_evidence: Option<Value>,
+    /// 结算退件 Take 冻结凭据的预期完整玩家名；凭据没有预期名称或不是结算退件时为空。
+    take_player_name: Option<String>,
 }
 
 pub(super) async fn unproven_sends(
@@ -109,7 +111,16 @@ pub(super) async fn unproven_sends(
                 take_attempt.expectation AS take_expectation,
                 returned.sender AS return_sender,
                 returned.subject AS return_subject,
-                returned.evidence AS return_evidence
+                returned.evidence AS return_evidence,
+                -- 退件在 Bot 收件箱里，领取完成证明要求详情页收件人等于执行 Take 的凭据所属账号的
+                -- 预期玩家名；只按冻结 Take 身份里的凭据 ID 找，不按当前活动凭据猜。
+                CASE WHEN d.origin_kind = 'settlement_return_action' THEN (
+                    SELECT take_credential.player_name
+                    FROM public.credential_keys AS take_credential
+                    WHERE take_credential.id::text
+                              = take_attempt.expectation->'credential'->>'credential_id'
+                      AND take_credential.credential_kind = 'mail_cookie'
+                ) END AS take_player_name
          FROM candidates
          JOIN public.deliveries d ON d.id = candidates.id
          LEFT JOIN LATERAL public.delivery_current_send_attempt(d.id) attempt ON true
@@ -169,6 +180,7 @@ fn recoverable_send(world_id: &str, row: UnprovenSendRow) -> Option<MoogleMailbo
         return_sender,
         return_subject,
         return_evidence,
+        take_player_name,
     } = row;
     if recipient.is_empty() || cod < 0 || credits < 0 || outcome_recorded_at < sending_at {
         return None;
@@ -254,6 +266,7 @@ fn recoverable_send(world_id: &str, row: UnprovenSendRow) -> Option<MoogleMailbo
                 cod,
                 // 现金在附件列表里占一条，领取后各有一行 `Removed attachment:` 回执。
                 attachment_count: usize::from(credits > 0) + attachment_ids.len(),
+                expected_recipient: take_player_name,
             })
         }
         _ => None,

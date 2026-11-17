@@ -314,15 +314,18 @@ pub(crate) fn prove_take_identity_and_receipts(
 const RETURNED_SUFFIX_PREFIX: &str = "\n\nThis message was returned from ";
 const RETURNED_SUFFIX_END: &str = ", kupo!";
 
-/// 结算退件 Take 之后的详情页是否证明附件已被领取：与正常 Take 成功证明同等强度——发件人与
-/// 主题等于入站快照，正文以原退件正文（原正文规范摘要 + 系统后缀写明的原收件人）开头，其后的
-/// 回执恰为领取前附件条目数的 `Removed attachment:` 行（领取前带 COD 时另有对应 `CoD Paid:`），
-/// 且页面不再挂任何资产。退件正文不入库，只凭证据里的摘要与原收件人重建前缀。
+/// 结算退件 Take 之后的详情页是否证明附件已被领取：与正常 Take 成功证明同等强度——收件人等于
+/// 执行 Take 的凭据所属账号的预期玩家名（正常 Take 要求前后收件人一致；巡检没有领取前页面，以持久
+/// 的凭据身份代替，缺失即无法比较、不成立），发件人与主题等于入站快照，正文以原退件正文（原正文
+/// 规范摘要 + 系统后缀写明的原收件人）开头，其后的回执恰为领取前附件条目数的
+/// `Removed attachment:` 行（领取前带 COD 时另有对应 `CoD Paid:`），且页面不再挂任何资产。退件
+/// 正文不入库，只凭证据里的摘要与原收件人重建前缀。
 pub(crate) fn prove_returned_take_receipts(
     state: &MoogleMailActionState,
     identity: &auction_application::mail::MoogleMailboxReturnTakeIdentity,
 ) -> bool {
     if state.recipient.is_empty()
+        || identity.expected_recipient.as_deref() != Some(state.recipient.as_str())
         || state.sender != identity.sender
         || state.subject != identity.subject
         || state.claimable
