@@ -1,5 +1,8 @@
 //! 排期日历的纯逻辑回归：IANA 时区 DST 解析、跨 DST 后继、早鸟窗口与赛季前场次、冻结来源校验。
 
+// 集成测试目标只含测试代码，断言直接解包。
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use auction_domain::{
     AuctionEarlyBirdConfig, AuctionEarlyBirdSlot, AuctionScheduleSource, AuctionScheduleTimes,
     DomainError,

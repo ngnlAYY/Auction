@@ -1,5 +1,8 @@
 //! 结算履约 claim 一致性的正反例；只覆盖纯判定，不连接数据库。
 
+// 集成测试目标只含测试代码，断言直接解包。
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use auction_application::settlement::{
     SettlementClaimContextBlocker, SettlementClaimContextSnapshot, SettlementClaimExecutionBlocker,
     SettlementClaimExecutionSnapshot,

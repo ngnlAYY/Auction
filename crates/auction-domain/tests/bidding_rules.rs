@@ -3,6 +3,9 @@
 //! 规划器不访问数据库或网络；测试直接构造锁内快照和代理授权，验证公开事实金额、
 //! 代理终态与最终 lot 投影。所有金额保持信用网格；历史非整千当前价只经显式入口进入。
 
+// 集成测试目标只含测试代码，断言直接解包。
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use auction_domain::{
     AuctionRules, BidAmount, BidId, BidMechanism, CommandId, CompetitionPlan, CompetitionTrigger,
     DEFAULT_START_PRICE, DomainError, LotBidState, LotId, MAX_BID_AMOUNT, PROXY_LAST_INCREMENT,

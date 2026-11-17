@@ -3,6 +3,9 @@
 //! 只使用公开领域 API，不接触数据库或应用服务；金额全部按下述冻结规则计算：
 //! PPM 向下取整、比例分配每件向下取整且尾差留池、v2 卖方始终全额收款。
 
+// 集成测试目标只含测试代码，断言直接解包。
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use auction_domain::{
     AdjustmentAnchor, COMPENSATION_REVERSAL_RULE_VERSION, CompensationReversal, DomainError,
     EquipmentId, LotId, SETTLEMENT_PPM, SettlementAmount, SettlementFact, SettlementMode,

@@ -1,5 +1,8 @@
 //! 统一处置事实的领域规则回归：闭集、来源唯一性、解除失败计数口径与确认准入。
 
+// 集成测试目标只含测试代码，断言直接解包。
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use std::collections::BTreeSet;
 
 use auction_domain::{

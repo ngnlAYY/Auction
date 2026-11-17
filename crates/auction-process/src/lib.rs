@@ -1,5 +1,8 @@
 //! 原生程序与首次设置服务共用的生命周期原语与本机 readiness 探针。
 
+// 测试里的断言直接解包；该豁免只在测试构建生效，生产构建仍按 workspace lint 拒绝 unwrap/expect。
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 mod lifecycle;
 mod readiness;
 

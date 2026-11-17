@@ -6,6 +6,9 @@
 //! 请求摘要写入命令账本，同一命令 ID 重放时据此区分“同请求”与“冲突”；其向量由与 v0.1.4
 //! 发布版逐字相同的实现生成。
 
+// 集成测试目标只含测试代码，断言直接解包。
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use auction_application::auction::{
     CreateProxyCommand, LowerProxyCommand, PlaceBidCommand, SlowProxyDue,
 };

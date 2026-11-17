@@ -44,7 +44,7 @@ bash ci/checks/check.sh published-migrations
 
 根 [Cargo.toml](../../Cargo.toml) 的 workspace Clippy 将 `unwrap_used`、`expect_used` 设为 `deny`；所有成员继承统一策略。`lint` 检查 native 全工作区、全部 target 与 feature，`wasm` 分别检查 Public/Admin 浏览器及共享依赖，覆盖只在 `wasm32` 编译的分支。构建脚本随所属成员检查；Clippy 会跳过部分宏展开，因此新增或修改本仓库宏时仍须核对定义中的 `unwrap`/`expect`，不能只依靠调用点的 Clippy 结果。
 
-根 [clippy.toml](../../clippy.toml) 使用 `allow-unwrap-in-tests = true`、`allow-expect-in-tests = true` 豁免测试上下文（包括 `#[test]` 与 `#[cfg(test)]` 模块），不在整个测试构建中放宽生产函数。生产代码须显式传播错误或处理 `None`；不可恢复的启动不变量也应给出可行动的错误。必要例外只允许最小范围的 `#[expect(clippy::unwrap_used, reason = "中文原因")]` 或对应 `expect_used`，不得 crate 级关闭。
+测试豁免不放在 `clippy.toml`（Clippy 文档注明该配置文件不稳定、将来可能废弃，仓库不使用它），而是标准的 lint 属性：每个 crate 根写 `#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]`，每个集成测试目标的根文件写 `#![allow(...)]`。该属性只在测试构建生效；`lint` 以 `--all-targets` 同时检查非测试构建，所以生产函数里的 `unwrap`/`expect` 仍会被拒绝。新增 crate 或集成测试目标时须带上同样的属性。生产代码须显式传播错误或处理 `None`；不可恢复的启动不变量也应给出可行动的错误。必要例外只允许最小范围的 `#[expect(clippy::unwrap_used, reason = "中文原因")]` 或对应 `expect_used`，不得在非测试构建里 crate 级关闭。
 
 ## 分配与写法统一
 

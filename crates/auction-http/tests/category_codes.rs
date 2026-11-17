@@ -3,6 +3,9 @@
 //! 前端不能依赖领域 crate，只能读取 `auction-contracts` 的常量表；本测试把该表与领域
 //! 的规范名、公开键和 lot 代码前缀逐项比对，任何一侧漂移都会让网站代码与论坛可竞价代码分叉。
 
+// 集成测试目标只含测试代码，断言直接解包。
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use auction_application::auction::PUBLIC_LOT_CATEGORIES;
 use auction_contracts::EQUIPMENT_CATEGORY_CODES;
 use auction_domain::equipment::taxonomy::EquipmentCategory;

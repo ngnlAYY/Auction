@@ -4,6 +4,9 @@
 //! 数据库；任何实现改动都必须让下列向量逐字不变。向量由各调用方合并到领域共享实现之前的
 //! 代码生成。
 
+// 集成测试目标只含测试代码，断言直接解包。
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use auction_domain::{legacy_natural_key_uuid, legacy_worker_uuid};
 use uuid::{Uuid, Variant};
 

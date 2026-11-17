@@ -1,6 +1,9 @@
 //! 结算退件的来源认证与消费判定：只认系统 `[RTS]` + canonical 结算主题，主题绑定
 //! 义务种类；恢复流程之外的退件按绑定与履约状态给出闭集处置。只覆盖纯判定，不连接数据库。
 
+// 集成测试目标只含测试代码，断言直接解包。
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use auction_application::settlement::{
     SYSTEM_RETURN_SENDER, SettlementReturnAssets, SettlementReturnDelivery,
     SettlementReturnDispatchLookup, SettlementReturnDispatchRequest, SettlementReturnFacts,

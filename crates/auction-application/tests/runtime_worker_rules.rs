@@ -2,6 +2,9 @@
 //! control socket 路径与 Worker 绑定同一规则；不合规的值在保存时就拒绝，不能留到 Worker
 //! 下次启动或请求时才失败。
 
+// 集成测试目标只含测试代码，断言直接解包。
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use auction_application::admin::{
     AdminRuntimeDocument, AdminRuntimeEquipmentFilterConfig, AdminRuntimeWorkerControlConfig,
     AdminRuntimeWorldsConfig,

@@ -5,6 +5,9 @@
 //! 代理反击与代理竞争固定 +1,000；软截止窗口与延长均为 15 分钟，慢速代理等待 10 分钟。
 //! 测试只构造锁内快照、活动授权与触发器，不访问数据库或网络。
 
+// 集成测试目标只含测试代码，断言直接解包。
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use auction_domain::{
     AuctionRules, AuctionStatus, BidAmount, BidId, BidMechanism, CommandId, CompetitionPlan,
     CompetitionTrigger, DEFAULT_START_PRICE, DomainError, LotBidState, LotId, ProxyAuthorization,

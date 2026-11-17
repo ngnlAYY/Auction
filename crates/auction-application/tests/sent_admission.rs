@@ -1,5 +1,8 @@
 //! 人工 Sent 准入的两种准入与阻断项回归；只覆盖纯判定，不连接数据库或外部邮件。
 
+// 集成测试目标只含测试代码，断言直接解包。
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use auction_application::delivery::{
     DeliverySendCredentialBinding, DeliverySendExpectation, ManualSentEvidence, SentAdminFailure,
     SentAdmissionBlocker, SentAdmissionSnapshot, SentCredential, SentDelivery, SentEquipment,

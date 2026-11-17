@@ -1,5 +1,8 @@
 //! COD 实收资金化的正反例；纯判定，不连接数据库。
 
+// 集成测试目标只含测试代码，断言直接解包。
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use auction_application::settlement::{
     CodReceiptBlocker, CodReceiptResultMetadata, CodReceiptSnapshot, FundingCollectedReceipt,
     INTERNAL_EVIDENCE_PROTOCOL, InternalEvidencePurpose, MailAccountEvidenceBinding,

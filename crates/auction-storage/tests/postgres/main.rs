@@ -1,5 +1,8 @@
 //! PostgreSQL 18 集成测试入口；由 `test-db` feature 控制。
 //! 这里的 crate 级 `cfg` 已覆盖全部子模块，子模块不再重复声明。
+
+// 集成测试目标只含测试代码，断言直接解包。
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 #![cfg(feature = "test-db")]
 
 mod perf;

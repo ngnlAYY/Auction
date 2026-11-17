@@ -1,7 +1,7 @@
 //! 用真实 HTTP 客户端对回环替身执行受限邮件读取。
 
 // 测试夹具的固定值失败即测试失败；不对测试装配伪造回退。
-#![allow(clippy::expect_used)]
+#![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::{collections::HashSet, time::Duration};
 

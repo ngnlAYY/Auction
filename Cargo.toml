@@ -188,7 +188,7 @@ unsafe_op_in_unsafe_fn = "deny"
 dbg_macro = "deny"
 todo = "deny"
 unimplemented = "deny"
-# 可选：生产路径不得因 unwrap/expect panic；测试豁免集中在 clippy.toml。
+# 可选：生产路径不得因 unwrap/expect panic；测试豁免写在各 crate 根的 cfg_attr(test, allow(...)) 与集成测试根。
 unwrap_used = "deny"
 expect_used = "deny"
 # 可选：多余的克隆、转换与字符串拼接只制造分配，统一拒绝。

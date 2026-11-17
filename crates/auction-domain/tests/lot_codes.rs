@@ -3,6 +3,9 @@
 //! 论坛回帖按 lot 代码定位竞价目标，网站、邮件与竞价日志显示同一代码；公开分类键是已发布
 //! 的 JSON 键。任一映射漂移都会让玩家看到的代码与论坛可竞价代码不一致，因此逐项冻结。
 
+// 集成测试目标只含测试代码，断言直接解包。
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use auction_domain::equipment::taxonomy::EquipmentCategory;
 
 const FROZEN: [(EquipmentCategory, &str, &str, &str); 7] = [

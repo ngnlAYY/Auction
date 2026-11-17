@@ -2,7 +2,8 @@
 //! relay 轮次失败（否则会把 Public 就绪翻成不可用）。
 //!
 //! `auction-application` 不依赖异步运行时，因此这组测试放在已使用 Tokio 的 jobs crate；
-#![allow(clippy::expect_used)]
+
+#![allow(clippy::expect_used, clippy::unwrap_used)]
 //! 被测对象仍是 `auction_application::realtime::RealtimeRelay` 的公开编排。
 
 use std::sync::{Arc, Mutex};

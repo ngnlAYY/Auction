@@ -5,6 +5,9 @@
 //! 面向公开竞价或管理命令的组件必须留在各自 surface crate，避免 Admin 专属代码进入
 //! 公开端 WASM 产物。本 crate 不得依赖 `auction-storage`、`auction-config` 或任何凭据访问路径。
 
+// 测试里的断言直接解包；该豁免只在测试构建生效，生产构建仍按 workspace lint 拒绝 unwrap/expect。
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 mod net;
 mod platform;
 mod ui;

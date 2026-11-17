@@ -3,6 +3,9 @@
 //! 九个分页名字共用两种信封：原本带 `deny_unknown_fields` 的五个仍拒绝未知字段，其余四个
 //! 仍忽略未知字段；字段形状与序列化结果不变。
 
+// 集成测试目标只含测试代码，断言直接解包。
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use auction_contracts::{
     AdminAuctionPaginationResponse, AdminCredentialPaginationResponse,
     AdminDeliveryPaginationResponse, AdminLotPaginationResponse, AdminMailPaginationResponse,

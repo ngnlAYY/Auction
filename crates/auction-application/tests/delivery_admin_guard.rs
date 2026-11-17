@@ -1,5 +1,8 @@
 //! Admin 投递动作守卫的动作迁移表与阻断项回归；只覆盖纯判定，不连接数据库。
 
+// 集成测试目标只含测试代码，断言直接解包。
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use auction_application::delivery::{
     DeliveryAdminAction, DeliveryAdminError, DeliveryAdminGuardBlocker, DeliveryAdminGuardSnapshot,
     DeliveryAdminTransition,

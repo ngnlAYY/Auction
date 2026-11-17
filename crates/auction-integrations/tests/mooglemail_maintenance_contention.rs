@@ -11,7 +11,7 @@
 //! `set_captured_pages_complete`，让 main 世界三页 Read Mail 与一页 Sent 成为完整枚举。
 
 // 测试夹具的固定值失败即测试失败；不对测试装配伪造回退。
-#![allow(clippy::expect_used)]
+#![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::sync::Arc;
 use std::time::Duration;

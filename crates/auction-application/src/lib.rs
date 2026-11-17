@@ -3,6 +3,9 @@
 //! 公开 API 按限界上下文导出：公开面由 `ports`、`services` 中各上下文 `mod.rs` 的
 //! `pub use` 清单决定，这里只做合并，不再维护第二份名单。
 
+// 测试里的断言直接解包；该豁免只在测试构建生效，生产构建仍按 workspace lint 拒绝 unwrap/expect。
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 mod errors;
 mod ports;
 mod services;

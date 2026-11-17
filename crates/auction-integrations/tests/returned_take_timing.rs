@@ -11,7 +11,7 @@
 //! 只以持久凭据身份执行，凭据集合按数据库来源（持久 ID、版本与运行 owner）建立。
 
 // 测试夹具的固定值失败即测试失败；不对测试装配伪造回退。
-#![allow(clippy::expect_used)]
+#![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::sync::Arc;
 use std::time::Duration;
