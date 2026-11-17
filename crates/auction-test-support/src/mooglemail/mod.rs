@@ -17,7 +17,7 @@ use axum::{
     routing::any,
 };
 use scraper::{Html as Document, Selector};
-use tokio::{net::TcpListener, task::JoinHandle};
+use tokio::{net::TcpListener, sync::watch, task::JoinHandle};
 use url::Url;
 
 mod fixtures;
@@ -74,6 +74,8 @@ struct MailState {
     captured_pages_complete: bool,
     active: usize,
     max_active: usize,
+    /// 响应闸门：发送端（[`ResponseHold`]）存活期间，新到达的请求登记后挂起。
+    hold: Option<watch::Receiver<()>>,
 }
 
 /// 服务与状态的 owner；Drop 中止监听，测试不会遗留后台服务。
@@ -158,6 +160,25 @@ impl MailDouble {
     pub fn request_cookies(&self) -> Vec<Option<String>> {
         self.state.lock().expect("test state poisoned").cookies.clone()
     }
+
+    /// 此后到达的请求照常登记（计入 `requests`、`request_cookies` 与在途数）后挂起，直到返回的闸门
+    /// 释放；用来确定性地让一个物理请求停在远端处理中，不依赖延迟长短。
+    pub fn hold_responses(&self) -> ResponseHold {
+        let (release, held) = watch::channel(());
+        self.state.lock().expect("test state poisoned").hold = Some(held);
+        ResponseHold { _release: release }
+    }
+}
+
+/// [`MailDouble::hold_responses`] 的闸门；`release` 或 Drop 后，挂起中与之后到达的请求都照常回应。
+pub struct ResponseHold {
+    /// 只靠存活期表示挂起：Drop 即关闭通道、放行全部等待者。
+    _release: watch::Sender<()>,
+}
+
+impl ResponseHold {
+    /// 放行全部挂起的请求。
+    pub fn release(self) {}
 }
 
 impl Drop for MailDouble {
@@ -197,17 +218,22 @@ async fn handle(
 ) -> Response {
     let in_flight = InFlight::enter(&state);
     // 不支持的路由也记录，便于测试指出扫描请求了哪些未采集页面。
-    let detached = {
+    let (detached, hold) = {
         let mut current = state.lock().expect("test state poisoned");
         current.requests.push(format!("{method} {uri}"));
         current.cookies.push(
             headers.get(header::COOKIE).and_then(|value| value.to_str().ok()).map(str::to_owned),
         );
-        match current.fault {
+        let detached = match current.fault {
             Some(Fault::DetachedDelay(delay)) => Some(delay),
             _ => None,
-        }
+        };
+        (detached, current.hold.clone())
     };
+    // 闸门从不发送新值：`changed` 只在发送端释放时返回错误，此前一直挂起；释放后到达的请求立即通过。
+    if let Some(mut held) = hold {
+        while held.changed().await.is_ok() {}
+    }
     // 不随断开停止的远端：在途计数交给独立任务持有到延迟结束；客户端断开只丢弃本 handler，
     // 不提前结束远端处理。处理结束后按原路由回应。
     let _in_flight = match detached {

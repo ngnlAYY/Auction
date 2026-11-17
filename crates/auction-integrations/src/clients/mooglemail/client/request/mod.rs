@@ -15,15 +15,26 @@ use crate::clients::mooglemail::{
     MoogleMailError, MoogleMailErrorCategory, MoogleMailOperation, MoogleMailTarget,
     MoogleMailWorld,
 };
+use crate::clients::operation_lock::OperationLockGuard;
 use crate::safe_diagnostics;
 
 mod body;
 mod equipment;
+mod pending;
 mod post;
 
 use body::DiagnosticResponse;
 pub(super) use body::SensitiveBytes;
 pub(crate) use equipment::{EquipmentReadPermit, equipment_read_hold};
+pub(crate) use pending::PendingRead;
+
+/// 排到发出边界的读取：已取得请求门令牌与在途锁，账号忙与 owner 已复核，请求已构造但尚未发出。
+/// 丢弃即放弃发出并释放在途锁。
+struct QueuedRead {
+    request: reqwest::Request,
+    in_flight: OperationLockGuard,
+    probes_account: bool,
+}
 
 impl MoogleMailClient {
     /// 对 typed target 执行一次受限 GET。
@@ -42,30 +53,37 @@ impl MoogleMailClient {
         let mut response = DiagnosticResponse::default();
         match self.get_inner(target, cookie, &mut response).await {
             Ok(body) => Ok(body),
-            Err(error) => {
-                let error = self
-                    .diagnose_http(target, response.status, response.body.as_deref(), error)
-                    .await;
-                let projection = safe_diagnostics::project(&error);
-                // 账号忙是正常的退避信号，不应在运维告警中表现为 WARN；其他分类仍保留 WARN。
-                if error.category.as_str() == "account_busy" {
-                    safe_diagnostics::info(
-                        "mooglemail_read",
-                        "read_transaction",
-                        projection,
-                        DiagnosticContext::default(),
-                    );
-                } else {
-                    safe_diagnostics::warn(
-                        "mooglemail_read",
-                        "read_transaction",
-                        projection,
-                        DiagnosticContext::default(),
-                    );
-                }
-                Err(error)
-            }
+            Err(error) => Err(self.report_read_failure(target, &response, error).await),
         }
+    }
+
+    /// 读取失败的统一收尾：按需留存加密证据，再记一条脱敏诊断。
+    async fn report_read_failure(
+        &self,
+        target: &MoogleMailTarget,
+        response: &DiagnosticResponse,
+        error: MoogleMailError,
+    ) -> MoogleMailError {
+        let error =
+            self.diagnose_http(target, response.status, response.body.as_deref(), error).await;
+        let projection = safe_diagnostics::project(&error);
+        // 账号忙是正常的退避信号，不应在运维告警中表现为 WARN；其他分类仍保留 WARN。
+        if error.category.as_str() == "account_busy" {
+            safe_diagnostics::info(
+                "mooglemail_read",
+                "read_transaction",
+                projection,
+                DiagnosticContext::default(),
+            );
+        } else {
+            safe_diagnostics::warn(
+                "mooglemail_read",
+                "read_transaction",
+                projection,
+                DiagnosticContext::default(),
+            );
+        }
+        error
     }
 
     async fn get_inner(
@@ -74,6 +92,18 @@ impl MoogleMailClient {
         cookie: &MoogleMailCookie,
         diagnostic: &mut DiagnosticResponse,
     ) -> Result<Vec<u8>, MoogleMailError> {
+        let queued = self.queue_read(target, cookie).await?;
+        self.send_read(queued, target, cookie, diagnostic).await
+    }
+
+    /// 发出前的排队阶段：账号忙预检、请求门、在途锁、账号忙复核与 owner 复核，止于发出边界。
+    /// 全程在调用方 future 内：被丢弃时请求门票据与在途锁登记同步撤销，已取得的在途锁随之释放，
+    /// 不会在无人等待时补发。owner 探测按自身设计在独立任务中有界完成，不发出邮件请求。
+    async fn queue_read(
+        &self,
+        target: &MoogleMailTarget,
+        cookie: &MoogleMailCookie,
+    ) -> Result<QueuedRead, MoogleMailError> {
         if target.origin != self.builder.origin {
             return Err(self.configuration(target));
         }
@@ -197,6 +227,18 @@ impl MoogleMailClient {
                 false,
             ));
         }
+        Ok(QueuedRead { request, in_flight, probes_account })
+    }
+
+    /// 发出请求、读完正文并分类结果；在途锁持有到正文读完（或客户端超时）且账号忙分类完成。
+    async fn send_read(
+        &self,
+        queued: QueuedRead,
+        target: &MoogleMailTarget,
+        cookie: &MoogleMailCookie,
+        diagnostic: &mut DiagnosticResponse,
+    ) -> Result<Vec<u8>, MoogleMailError> {
+        let QueuedRead { request, in_flight, probes_account } = queued;
         let request_metrics = MailRequestGuard::start(
             std::sync::Arc::clone(&self.external_metrics),
             target.world,
