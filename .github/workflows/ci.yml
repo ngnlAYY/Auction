@@ -78,7 +78,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends ripgrep perl
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master 2026-11-15 (#190)
         if: steps.scope.outputs.run-checks == 'true'
         with:
           toolchain: 1.100.0
@@ -102,7 +102,7 @@ jobs:
           persist-credentials: false
       - name: Ensure patched rustup
         run: bash ci/tools/rustup.sh
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master 2026-11-15 (#190)
         with:
           toolchain: 1.100.0
           components: rustfmt, clippy
@@ -136,7 +136,7 @@ jobs:
           persist-credentials: false
       - name: Ensure patched rustup
         run: bash ci/tools/rustup.sh
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master 2026-11-15 (#190)
         with:
           toolchain: 1.100.0
       - name: Restore Rust build cache
@@ -149,7 +149,7 @@ jobs:
       # just 仍按固定版本 --locked 从源码构建；二进制按版本单独缓存，命中时跳过约 1 分钟的编译。
       - name: Restore just
         id: just-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/bin/just
           key: just-1.59.0-ubuntu-24.04
@@ -205,7 +205,7 @@ jobs:
           persist-credentials: false
       - name: Ensure patched rustup
         run: bash ci/tools/rustup.sh
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master 2026-11-15 (#190)
         with:
           toolchain: 1.100.0
       # rust-cache v2.9.3；审计失败也保留工具二进制及安装元数据。
@@ -218,7 +218,7 @@ jobs:
       # 键只绑定 bootstrap 配方、锁图、补丁与工具链；文档或其他脚本变化不触发重建。
       # 前缀回退恢复的旧工具仍须通过下一步回执校验，不一致时照常重建。
       - name: Restore patched audit binary
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: target/audit-tools
           key: audit-tools-linux-${{ hashFiles('ci/tools/bootstrap.sh', 'ci/release/build-identity.sh', 'ci/tools/locks/*.lock', 'ci/tools/patches/*.patch', 'rust-toolchain.toml') }}
@@ -278,7 +278,7 @@ jobs:
           persist-credentials: false
       - name: Ensure patched rustup
         run: bash ci/tools/rustup.sh
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master 2026-11-15 (#190)
         with:
           toolchain: 1.94.1
       # rust-cache v2.9.3；与 verify 隔离，不跨 Rust 工具链复用产物。

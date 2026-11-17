@@ -29,7 +29,7 @@ jobs:
           persist-credentials: false
       - name: Ensure patched rustup
         run: bash ci/tools/rustup.sh
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master 2026-11-15 (#190)
         with:
           toolchain: 1.100.0
           targets: wasm32-unknown-unknown
@@ -45,7 +45,7 @@ jobs:
           save-if: ${{ github.event_name != 'pull_request' }}
       # 独立源码锁图修复工具自身的证书库；缓存键只绑定配方，前缀回退后由安装回执逐字节校验。
       - name: Restore patched release tools
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: target/build-tools
           key: release-tools-linux-${{ hashFiles('ci/tools/bootstrap.sh', 'ci/release/build-identity.sh', 'ci/tools/locks/*.lock', 'ci/tools/patches/*.patch', 'rust-toolchain.toml') }}
@@ -72,7 +72,7 @@ jobs:
       # 这里只输出 step outputs，再由构建步骤显式赋值，避免 token 在整个 job 里长期驻留。
       - name: Read Actions cache credentials
         id: cache-credentials
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             core.setOutput('url',
@@ -92,7 +92,7 @@ jobs:
           fingerprint=$(bash ci/release/release.sh source-fingerprint)
           printf 'fingerprint=%s\n' "$fingerprint" >> "$GITHUB_OUTPUT"
       - name: Restore release artifacts
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             target/dist/artifacts
