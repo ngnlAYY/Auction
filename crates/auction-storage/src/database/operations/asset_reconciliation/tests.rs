@@ -6,6 +6,17 @@ use auction_application::reconciliation::{SolvencyInTransitReason, SolvencyWorld
 use super::solvency::{balance_evidence_is_current, solvency_verdict};
 use super::*;
 
+/// 资产查询引用的结算退件影子表；用例不关注退件时保持为空，不改变既有预期。
+const RETURN_TEMP_TABLES: &str = "
+    CREATE TEMP TABLE settlement_return_cases (
+        return_mail_id uuid, delivery_id uuid, status text
+    );
+    CREATE TEMP TABLE settlement_return_takes (
+        return_mail_id uuid, original_delivery_id uuid, obligation_id uuid,
+        credits bigint, proven_at timestamptz
+    );
+";
+
 fn world(verdict: &str) -> SolvencyWorldReport {
     SolvencyWorldReport {
         custody_count: 0,
@@ -315,6 +326,7 @@ async fn postgres_solvency_query_decodes_numeric_sum_as_i64()
             ('isekai', 900, now() - interval '600 seconds', 'ok', 'fresh');",
     )
     .await?;
+    tx.execute(RETURN_TEMP_TABLES).await?;
     let main =
         sqlx::query(sqlx::AssertSqlSafe(queries::SOLVENCY_WORLD.replace("public.", "pg_temp.")))
             .bind("main")
@@ -471,6 +483,7 @@ async fn postgres_solvency_in_transit_aligns_with_balance_observation()
             ('main', 10000, now() - interval '1 hour', 'ok', 'fresh');",
     )
     .await?;
+    tx.execute(RETURN_TEMP_TABLES).await?;
     let query = |sql: &str| sqlx::AssertSqlSafe(sql.replace("public.", "pg_temp."));
     let main = sqlx::query(query(queries::SOLVENCY_WORLD)).bind("main").fetch_one(&mut *tx).await?;
     // 在途：寄出早于观察的 101 与恰好等于观察时刻的 103。
@@ -552,6 +565,7 @@ async fn postgres_custody_counts_separate_expected_stock_and_unknown()
          INSERT INTO pg_temp.settlement_obligation_fulfillments (obligation_id, execution_state) VALUES
             ('00000000-0000-0000-0000-000000000010','pending');",
     ).await?;
+    tx.execute(RETURN_TEMP_TABLES).await?;
     let row =
         sqlx::query(sqlx::AssertSqlSafe(queries::CUSTODY_COUNTS.replace("public.", "pg_temp.")))
             .bind("main")
@@ -619,6 +633,7 @@ async fn postgres_custody_scopes_preview_and_submission_samples_by_world()
             ('00000000-0000-0000-0000-000000000042','00000000-0000-0000-0000-000000000030','hentaiverse-equipment-v1:500');",
     )
     .await?;
+    tx.execute(RETURN_TEMP_TABLES).await?;
     let row =
         sqlx::query(sqlx::AssertSqlSafe(queries::CUSTODY_COUNTS.replace("public.", "pg_temp.")))
             .bind("main")
@@ -701,6 +716,7 @@ async fn postgres_custody_excludes_withdrawn_submissions_after_return()
             ('00000000-0000-0000-0000-000000000011','pending');",
     )
     .await?;
+    tx.execute(RETURN_TEMP_TABLES).await?;
     let row =
         sqlx::query(sqlx::AssertSqlSafe(queries::CUSTODY_COUNTS.replace("public.", "pg_temp.")))
             .bind("main")
@@ -795,6 +811,7 @@ async fn postgres_custody_delivery_branch_reads_canonical_attachment_kind()
                                          "id":"00000000-0000-0000-0000-000000000005"}]}');"#,
     )
     .await?;
+    tx.execute(RETURN_TEMP_TABLES).await?;
     let row =
         sqlx::query(sqlx::AssertSqlSafe(queries::CUSTODY_COUNTS.replace("public.", "pg_temp.")))
             .bind("main")
@@ -915,6 +932,7 @@ async fn postgres_custody_moves_sent_equipment_to_in_transit()
             ('00000000-0000-0000-0000-000000001010','succeeded','{}');",
     )
     .await?;
+    tx.execute(RETURN_TEMP_TABLES).await?;
     let observed = ["200".to_owned()];
     let row =
         sqlx::query(sqlx::AssertSqlSafe(queries::CUSTODY_COUNTS.replace("public.", "pg_temp.")))
@@ -1100,6 +1118,7 @@ async fn postgres_custody_counts_recovered_equipment_where_recovery_placed_it()
             ('00000000-0000-0000-0000-000000001088',1,'cod_returned','00000000-0000-0000-0000-000000000028');",
     )
     .await?;
+    tx.execute(RETURN_TEMP_TABLES).await?;
     let query = |sql: &str| sqlx::AssertSqlSafe(sql.replace("public.", "pg_temp."));
     let rows = sqlx::query(query(queries::CUSTODY_IN_TRANSIT))
         .bind("main")
