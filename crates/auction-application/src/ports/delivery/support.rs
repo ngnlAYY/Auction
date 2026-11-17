@@ -26,6 +26,11 @@ pub enum PlayerSupportSelector {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlayerSupportRequest {
     pub selector: PlayerSupportSelector,
+    /// 是否让结算退件 Take 投递（来源 `settlement_return_action`）出现在汇总里。缺省不出现：已发布
+    /// 的 Admin 页面按闭集解码来源，读到不认识的来源整份汇总失败，所以只有显式请求扩展投影的页面
+    /// 才看到它们。缺省时这类投递不进入投递分区（行数上限与截断按同一口径计算）、不按参考编号补入，
+    /// 也不作为参考编号的种类或推导关联用户的依据；被省略的投递在库中不变。
+    pub include_settlement_return_actions: bool,
 }
 
 impl PlayerSupportRequest {
