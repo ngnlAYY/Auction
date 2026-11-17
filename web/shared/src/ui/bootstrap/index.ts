@@ -98,8 +98,16 @@ function reportBrowserErrorWithBuildId(errorClass: BrowserErrorClass, value: str
   void fetch(url, { method: "POST" }).catch(() => undefined);
 }
 
+/**
+ * 应用主动上报不可恢复的失败（例如页面分块加载失败）。
+ * 与未捕获异常走同一条路径：控制台输出、显示入口文档的错误横幅、只上报一次信标。
+ */
+export function reportAppFailure(value: unknown): void {
+  handleBrowserFailure(value);
+}
+
 function handleBrowserFailure(value: unknown): void {
-  console.error(`WASM panic: ${failureText(value)}`);
+  console.error(`页面出现未处理的错误：${failureText(value)}`);
   showFailureBanner();
   if (!panicReported) {
     panicReported = true;

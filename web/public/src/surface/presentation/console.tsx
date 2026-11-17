@@ -1,0 +1,201 @@
+//! 公开端控制台外壳：顶部 ticker、可收起分组侧栏与倒计时叶子。
+//! 页面内容、查询与实时状态仍由既有页面组件拥有；本模块只做展示与导航。
+
+import type { RouteMatch } from "@auction/web-shared/router";
+import { Link } from "@auction/web-shared/router";
+import { t } from "@auction/web-shared/ui/i18n";
+import type { JSX } from "@solidjs/web";
+
+import { useCountdownDisplay } from "../catalog/presentation";
+
+/** 顶部 ticker 的倒计时；秒级节拍只订阅在这个叶子组件。
+ * 到点后的文案由调用方按倒计时含义给出（截止是“落锤中…”，开拍是“即将开拍…”）。
+ */
+export function ConsoleCountdown(props: { targetAt: string; expiredLabel: string }): JSX.Element {
+  const countdown = useCountdownDisplay(() => props.targetAt);
+  const label = () => (countdown().expired ? props.expiredLabel : countdown().label);
+  return (
+    // biome-ignore lint/a11y/useAriaPropsSupportedByRole: 源码在无 role 的 span 上使用 aria-label 表示倒计时
+    <span class="console-ticker__countdown" aria-label={t("auction-countdown")}>
+      {label()}
+    </span>
+  );
+}
+
+const ICON_PATHS: Readonly<Record<string, string>> = {
+  grid: "M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z",
+  list: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01",
+  clock: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM12 7v5l4 2",
+  activity: "M3 12h4l2-7 4 14 2-7h6",
+  shield: "M12 22s8-3 8-10V5l-8-3-8 3v7c0 7 8 10 8 10z",
+  message: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z",
+  file: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M16 13H8M16 17H8M10 9H8",
+  user: "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75",
+  ban: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM4.93 4.93l14.14 14.14",
+  info: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM12 16v-4M12 8h.01",
+  login: "M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3",
+  gavel: "m14 13-7.5 7.5a2.12 2.12 0 0 1-3-3L11 10M16 16l6-6M8 8l6-6M9 7l8 8M21 11l-8-8",
+  package: "M21 8 12 3 3 8v8l9 5 9-5zM3 8l9 5 9-5M12 13v8",
+  chevron: "m15 18-6-6 6-6",
+};
+
+const DEFAULT_ICON_PATH = "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z";
+
+/** 侧栏图标；统一 18px、1.5 stroke，只表达导航语义。 */
+function ConsoleIcon(props: { kind: string }): JSX.Element {
+  return (
+    <svg
+      class="console-nav__icon"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.5"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <path d={ICON_PATHS[props.kind] ?? DEFAULT_ICON_PATH} />
+    </svg>
+  );
+}
+
+function ConsoleNavLink(props: {
+  href: string;
+  label: string;
+  icon: string;
+  active: boolean;
+  onNavigate: () => void;
+}): JSX.Element {
+  return (
+    <Link
+      class="console-nav__link"
+      href={props.href}
+      aria-current={props.active ? "page" : "false"}
+      title={props.label}
+      onClick={() => props.onNavigate()}
+    >
+      <ConsoleIcon kind={props.icon} />
+      <span class="console-nav__label">{props.label}</span>
+    </Link>
+  );
+}
+
+/** 公开端分组侧栏；当前路由只从外壳传入，不复制任何查询或命令状态。 */
+export function ConsoleSidebar(props: {
+  currentRoute: RouteMatch;
+  collapsed: boolean;
+  onToggle: () => void;
+  onNavigate: () => void;
+}): JSX.Element {
+  const homeActive = () => {
+    const route = props.currentRoute;
+    return (
+      route.kind === "matched" && (route.name === "AuctionIndex" || route.name === "AuctionPage")
+    );
+  };
+  const is = (name: string) => {
+    const route = props.currentRoute;
+    return route.kind === "matched" && route.name === name;
+  };
+  const collapseLabel = () => (props.collapsed ? t("console-expand") : t("console-collapse"));
+  return (
+    <aside
+      class={props.collapsed ? "console-sidebar is-collapsed" : "console-sidebar"}
+      aria-label={t("nav-label")}
+    >
+      <nav class="console-nav">
+        <div class="console-nav__group">
+          <div class="console-nav__head">{t("console-nav-overview")}</div>
+          <ConsoleNavLink
+            href="/"
+            icon="grid"
+            label={t("nav-auctions")}
+            active={homeActive()}
+            onNavigate={() => props.onNavigate()}
+          />
+          <ConsoleNavLink
+            href="/bidlog"
+            icon="list"
+            label={t("page-bidlog-title")}
+            active={is("BidLog")}
+            onNavigate={() => props.onNavigate()}
+          />
+          <ConsoleNavLink
+            href="/fulfillment"
+            icon="package"
+            label={t("page-fulfillment-title")}
+            active={is("Fulfillment")}
+            onNavigate={() => props.onNavigate()}
+          />
+        </div>
+        <div class="console-nav__group">
+          <div class="console-nav__head">{t("console-nav-market")}</div>
+          <ConsoleNavLink
+            href="/auctions"
+            icon="clock"
+            label={t("nav-auction-history")}
+            active={is("AuctionList")}
+            onNavigate={() => props.onNavigate()}
+          />
+          <ConsoleNavLink
+            href="/history"
+            icon="activity"
+            label={t("nav-price-history")}
+            active={is("History")}
+            onNavigate={() => props.onNavigate()}
+          />
+          <ConsoleNavLink
+            href="/compensation-pool"
+            icon="shield"
+            label={t("page-compensation-pool-title")}
+            active={is("CompensationPool")}
+            onNavigate={() => props.onNavigate()}
+          />
+        </div>
+        <div class="console-nav__group">
+          <div class="console-nav__head">{t("console-nav-community")}</div>
+          <ConsoleNavLink
+            href="/forum"
+            icon="message"
+            label={t("nav-forum")}
+            active={is("Forum")}
+            onNavigate={() => props.onNavigate()}
+          />
+          <ConsoleNavLink
+            href="/rules"
+            icon="file"
+            label={t("page-rules-title")}
+            active={is("Rules")}
+            onNavigate={() => props.onNavigate()}
+          />
+          <ConsoleNavLink
+            href="/blacklist"
+            icon="ban"
+            label={t("nav-blacklist")}
+            active={is("Blacklist")}
+            onNavigate={() => props.onNavigate()}
+          />
+          <ConsoleNavLink
+            href="/about"
+            icon="info"
+            label={t("page-about-title")}
+            active={is("About")}
+            onNavigate={() => props.onNavigate()}
+          />
+        </div>
+      </nav>
+      <div class="console-sidebar__foot">
+        <button
+          class="console-collapse"
+          type="button"
+          aria-expanded={props.collapsed ? "false" : "true"}
+          title={collapseLabel()}
+          onClick={() => props.onToggle()}
+        >
+          <ConsoleIcon kind="chevron" />
+          <span>{collapseLabel()}</span>
+        </button>
+      </div>
+    </aside>
+  );
+}
