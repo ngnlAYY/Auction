@@ -1,0 +1,30 @@
+// Public 地址栏查询解析：保留待页面校验的 lot，并严格恢复非法页长。
+
+import { expect, test } from "bun:test";
+
+const { parsePublicQuery } = await import("./parse");
+
+test("invalid_lot_in_the_address_bar_is_kept_instead_of_widening_the_bid_log：地址栏非法 lot 保留而不放宽竞价日志", () => {
+  // 超长或含控制字符的 lot 原样保留，竞价日志页据此报字段错误且不发请求。
+  const longLot = "a".repeat(129);
+  const query = parsePublicQuery("/bidlog", `?lot=${longLot}`);
+  expect(query.bidLogLot).toBe(longLot);
+  const control = parsePublicQuery("/bidlog", "?lot=One%0712");
+  expect(control.bidLogLot).toBe("One\u000712");
+  // 只去两端空白，空值仍表示不筛选；历史名称沿用同一口径。
+  const padded = parsePublicQuery("/bidlog", "?lot=%20One12%20");
+  expect(padded.bidLogLot).toBe("One12");
+  expect(parsePublicQuery("/bidlog", "?lot=%20%09").bidLogLot).toBeNull();
+  const history = parsePublicQuery("/history", "?name=+Phase+Robe+");
+  expect(history.historyName).toBe("Phase Robe");
+});
+
+test("linked_page_sizes_above_the_public_maximum_restore_the_default：超过 Public 上限的链接页长恢复默认", () => {
+  // 旧链接里超过契约上限的数量按非法值恢复默认，不原样发给必然拒绝它的接口。
+  const atLimit = parsePublicQuery("/", "?page_size=200&movement_page_size=200");
+  expect([atLimit.pageSize, atLimit.movementPageSize]).toEqual([200, 200]);
+  const overLimit = parsePublicQuery("/", "?page_size=201&movement_page_size=1000");
+  expect([overLimit.pageSize, overLimit.movementPageSize]).toEqual([20, 20]);
+  const invalid = parsePublicQuery("/compensation", "?page_size=0&movement_page_size=-5");
+  expect([invalid.pageSize, invalid.movementPageSize]).toEqual([20, 20]);
+});

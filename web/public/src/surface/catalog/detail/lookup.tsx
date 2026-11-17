@@ -20,15 +20,15 @@ import { catalogDetailBidDefault } from ".";
 import { CatalogDetailDrawer } from "./drawer";
 
 /** 一次查看请求指向的拍品。`auctionId` 用于抽屉内的竞价历史读取；`world` 是入口已知的
- * 拍品所在世界，未知时价格历史按拍卖读取。 */
-interface LotDetailTarget {
+ * 拍品所在世界，未知时价格历史按拍卖读取。仅供测试使用。 */
+export interface LotDetailTarget {
   readonly auctionId: string;
   readonly lotId: string;
   readonly world: string | null;
 }
 
-/** 查看状态；只有加载中或已展示时才渲染抽屉。 */
-type LookupState =
+/** 查看状态；只有加载中或已展示时才渲染抽屉。仅供测试使用。 */
+export type LookupState =
   | { readonly kind: "closed" }
   /** 首次读取中：抽屉尚未渲染，行内按钮显示忙碌。 */
   | { readonly kind: "loading"; readonly target: LotDetailTarget }
@@ -42,8 +42,9 @@ function targetsEqual(left: LotDetailTarget, right: LotDetailTarget): boolean {
   );
 }
 
-/** 新的查看请求。同一拍品读取中或已展示时返回 `null`，重复点击不重启读取。 */
-function requested(state: LookupState, target: LotDetailTarget): LookupState | null {
+/** 新的查看请求。同一拍品读取中或已展示时返回 `null`，重复点击不重启读取。
+ * 仅供测试使用。 */
+export function requested(state: LookupState, target: LotDetailTarget): LookupState | null {
   if ((state.kind === "loading" || state.kind === "open") && targetsEqual(state.target, target)) {
     return null;
   }
@@ -51,8 +52,8 @@ function requested(state: LookupState, target: LotDetailTarget): LookupState | n
 }
 
 /** 读取完成后的迁移。结果只对仍在等待的同一拍品生效：已展示时的后台重读失败保留
- * 上一次快照，已关闭或已改看其他拍品的迟到结果直接丢弃。 */
-function resolved(state: LookupState, lotId: string, loaded: boolean): LookupState | null {
+ * 上一次快照，已关闭或已改看其他拍品的迟到结果直接丢弃。仅供测试使用。 */
+export function resolved(state: LookupState, lotId: string, loaded: boolean): LookupState | null {
   if (state.kind !== "loading" || state.target.lotId !== lotId) {
     return null;
   }

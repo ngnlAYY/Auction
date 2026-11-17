@@ -40,7 +40,8 @@ function validOrderedBidLog(values: readonly unknown[]): boolean {
   });
 }
 
-function validBidLogEntry(value: unknown): boolean {
+/** 仅供测试使用：直接校验单条竞价事实及其落败代理附加字段。 */
+export function validBidLogEntry(value: unknown): boolean {
   const bid = object(value);
   if (bid === null) return false;
   return (

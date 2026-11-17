@@ -107,8 +107,9 @@ export async function fetchFulfillmentPage(
   return ok({ page: read.value.value, staleSince });
 }
 
-/** 把缓存层记录的确认时刻（浏览器墙钟毫秒）写成 RFC 3339 UTC，交给页面统一的时间格式显示。 */
-function confirmationTime(millis: number): string | null {
+/** 把缓存层记录的确认时刻（浏览器墙钟毫秒）写成 RFC 3339 UTC，交给页面统一的时间格式显示。
+ * 仅供测试使用。 */
+export function confirmationTime(millis: number): string | null {
   if (!Number.isSafeInteger(millis) || millis < 0) {
     return null;
   }

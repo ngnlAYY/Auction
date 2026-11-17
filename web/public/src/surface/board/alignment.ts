@@ -93,8 +93,9 @@ export function useAlignmentReread(
  * 纯判定函数：同一上下文（场次、阶段、开放状态与预览修订号）只自动重读一次。场次或目录仍有
  * 读取在途时先等待：返回后可能就对齐，此时重读只会取消在途读取。上一轮为另一上下文发起的重读
  * 还没返回（目录快照早于那次代号）时同样等待，避免场次读取在一轮之内改变上下文而反复刷新。
+ * 仅供测试使用：验证自动对齐重读的纯调度判定。
  */
-function planAlignmentReread(
+export function planAlignmentReread(
   aligned: boolean,
   alignmentKey: string,
   attempt: readonly [string, number] | null,
@@ -123,8 +124,9 @@ function planAlignmentReread(
  * 目录快照与当前场次不对齐，且场次与目录都已来自为同一上下文发起的那次对齐重读：自动重读已
  * 用尽。重读刚排定、目录资源仍持有旧快照，或场次、目录仍有读取在途时都不算用尽：任一侧返回
  * 后都可能对齐，避免错误面板一闪而过。
+ * 仅供测试使用：验证对齐重读是否已用尽。
  */
-function alignmentRetryExhausted(
+export function alignmentRetryExhausted(
   aligned: boolean,
   alignmentKey: string,
   attempt: readonly [string, number] | null,

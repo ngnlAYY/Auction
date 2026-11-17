@@ -18,8 +18,9 @@ export function statRows(stats: Record<string, PublicEquipmentStatResponse>): St
 }
 /** 属性值后附带括号里的 roll：游戏给出的 0–200 基础值与对应的百分比，如 `+109.1(195/97.5%)`。
  * 没有 roll 的属性（元素伤害、元素减伤等）只显示数值；只有其中一项时括号里只放那一项。
- * 两个数都来自服务端投影，这里不互相换算；百分比保留一位小数，整数不带小数位。 */
-function statValueLabel(
+ * 两个数都来自服务端投影，这里不互相换算；百分比保留一位小数，整数不带小数位。
+ * 仅供测试使用。 */
+export function statValueLabel(
   value: string,
   base: number | null | undefined,
   roll: number | null | undefined,

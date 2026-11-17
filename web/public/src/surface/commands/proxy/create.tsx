@@ -322,8 +322,12 @@ export function ProxyCreateForm(props: {
 }
 
 /** 代理新建表单的初始模式：取该场冻结策略的默认模式；慢速当前不可新建（终阶段）时退为快速，
- * 玩家仍可切换，提交照常显式携带模式。策略未知或不在闭集内时返回 `null`，由表单失败关闭。 */
-function initialProxyMode(defaultMode: string | null, allowSlow: boolean): "slow" | "fast" | null {
+ * 玩家仍可切换，提交照常显式携带模式。策略未知或不在闭集内时返回 `null`，由表单失败关闭。
+ * 仅供测试使用。 */
+export function initialProxyMode(
+  defaultMode: string | null,
+  allowSlow: boolean,
+): "slow" | "fast" | null {
   if (defaultMode === null) {
     return null;
   }

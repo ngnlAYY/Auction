@@ -273,8 +273,9 @@ export function LiveCatalogActions(props: {
  *
  * 抽屉是目录里管理代理授权的唯一去处。普通出价可用时进
  * 直接出价（代理由弹窗页签切换）。领先者不能再出价，但可能持有需要降低的代理授权：目录行
- * 不预取授权，无法在这里判断，入口改进代理页签，由弹窗读取后给出降低表单或受阻说明。 */
-function detailEntryAction(
+ * 不预取授权，无法在这里判断，入口改进代理页签，由弹窗读取后给出降低表单或受阻说明。
+ * 仅供测试使用。 */
+export function detailEntryAction(
   ordinaryDisabled: boolean,
   canBid: boolean,
   leading: boolean,
@@ -292,8 +293,8 @@ function detailEntryAction(
  *
  * 读取完成（ready）的结果总是可用。刷新进行中只沿用上一次真实读取成功的结果，且代理
  * 视图必须仍然打开：闭合状态的占位值与读取失败的结果不沿用，首次读取完成前保持加载，
- * 不把未确认的“没有授权”当成事实，也不让旧错误盖住正在进行的重试。 */
-function proxySnapshotUsable(
+ * 不把未确认的“没有授权”当成事实，也不让旧错误盖住正在进行的重试。仅供测试使用。 */
+export function proxySnapshotUsable(
   ready: boolean,
   fetched: boolean,
   viewActive: boolean,

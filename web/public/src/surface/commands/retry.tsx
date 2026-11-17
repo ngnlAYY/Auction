@@ -121,8 +121,9 @@ export function BidRetry(props: {
 
 /** 原样重试被拒绝时的文案。重试按服务端当时的价格重新判定，`bid_too_low` 只说明价格已变化：
  * 本次提交的金额不是最低价，不能代入“至少为”文案，改为提示取消后按当前价格重新操作。
- * 其余错误码沿用新命令的映射（`commandMessage` 的金额参数只影响 `bid_too_low`）。 */
-function retryErrorMessage(
+ * 其余错误码沿用新命令的映射（`commandMessage` 的金额参数只影响 `bid_too_low`）。
+ * 仅供测试使用。 */
+export function retryErrorMessage(
   error: CommandError,
   commandMessage: (error: CommandError) => string,
 ): string {

@@ -45,7 +45,8 @@ export async function fetchCurrentLots(
  * 拒绝后回退的旧快照时，等待后重读一次：等待期间 Resource 保留已展示的目录，拥塞通常已过，
  * 能及时追上价格与领先者。第二次结果原样返回：再次回退时接受旧快照，失败关闭的拒绝照常报错。
  * wait 在首次读取结束后才构造，浏览器定时器从那一刻起计时。 */
-async function retryOnceUnlessAuthoritative<T, E>(
+/** 仅供测试使用：以注入的读取与等待函数核对首次回退后的单次重读。 */
+export async function retryOnceUnlessAuthoritative<T, E>(
   read: () => Promise<Result<CacheRead<T>, E>>,
   wait: () => Promise<boolean>,
   abortError: E,
@@ -104,7 +105,8 @@ async function fetchCurrentLotsOnce(
 /** lot 目录 URL 的唯一构造点：读取、首屏预取、标记页与历史场次都经这里，同一组参数得到逐字
  * 相同的 URL，缓存层才能按 URL 合并在途请求。目录行不展示装备属性，始终请求精简投影
  * （fields=summary）；属性明细只在打开详情抽屉时经 lot 详情读取。 */
-function currentLotsUrl(
+/** 仅供测试使用：核对目录读取唯一 URL 构造点。 */
+export function currentLotsUrl(
   auctionId: string,
   category: string | null,
   equipmentGroup: string | null,

@@ -23,7 +23,11 @@ import {
 import { type ProxyFormInput, proxyForm } from "../commands/proxy";
 import { BidRetry } from "../commands/retry";
 import { PublicCommandOwnerContext, PublicSessionResourceContext } from "../index";
-import { useWatchCommandOwner } from "../watches/commands";
+import {
+  useWatchCommandOwner,
+  WatchCommandOwnerContext,
+  WatchCommandStatus,
+} from "../watches/commands";
 import type { CatalogDetailInput } from "./detail";
 import { CatalogDetailDialogContext } from "./detail";
 import { CatalogToastContext, CatalogToastHost, useCatalogToastProvider } from "./toast";
@@ -86,20 +90,22 @@ function IdentityCommandScope(props: {
   const input = () => dialog();
 
   return (
-    <CommandDialogContext value={dialog}>
-      <CatalogDetailDialogContext value={detail}>
-        <CatalogToastContext value={toast.context}>
-          <PublicCommandIdentityContext value={identity}>
-            {props.children}
-            {pendingWatches}
-            <Show when={input()}>
-              {(current) => <CatalogCommandDialog input={current()} dialog={dialog} />}
-            </Show>
-            <CatalogToastHost toast={toast.toast} />
-          </PublicCommandIdentityContext>
-        </CatalogToastContext>
-      </CatalogDetailDialogContext>
-    </CommandDialogContext>
+    <WatchCommandOwnerContext value={pendingWatches}>
+      <CommandDialogContext value={dialog}>
+        <CatalogDetailDialogContext value={detail}>
+          <CatalogToastContext value={toast.context}>
+            <PublicCommandIdentityContext value={identity}>
+              {props.children}
+              <WatchCommandStatus owner={pendingWatches} />
+              <Show when={input()}>
+                {(current) => <CatalogCommandDialog input={current()} dialog={dialog} />}
+              </Show>
+              <CatalogToastHost toast={toast.toast} />
+            </PublicCommandIdentityContext>
+          </CatalogToastContext>
+        </CatalogDetailDialogContext>
+      </CommandDialogContext>
+    </WatchCommandOwnerContext>
   );
 }
 

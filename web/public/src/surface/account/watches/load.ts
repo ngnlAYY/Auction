@@ -21,14 +21,18 @@ export interface WatchedAuction {
   readonly rows: readonly CatalogRow[];
 }
 
-/** 按 Public 页长上限逐页读取整份目录。 */
-const PAGE_SIZE = MAX_PUBLIC_PAGE_SIZE;
-/** 既有目录 API 允许 offset <= 10000；末页从 10000 起，仍以一页为界。 */
-const MAX_CATALOG_ROWS = 10_000 + PAGE_SIZE;
+/** 按 Public 页长上限逐页读取整份目录。仅供测试使用。 */
+export const PAGE_SIZE = MAX_PUBLIC_PAGE_SIZE;
+/** 既有目录 API 允许 offset <= 10000；末页从 10000 起，仍以一页为界。仅供测试使用。 */
+export const MAX_CATALOG_ROWS = 10_000 + PAGE_SIZE;
 
 /** 按 [`PAGE_SIZE`] 逐页读取时，`total` 行目录第 `pageNumber` 页应有的行数，以及读完本页后是否
- * 已读完整份目录；页码非正、总数为负或超出 offset 上限可达的行数时为 `null`。 */
-function catalogPageShape(pageNumber: number, total: number): readonly [number, boolean] | null {
+ * 已读完整份目录；页码非正、总数为负或超出 offset 上限可达的行数时为 `null`。
+ * 仅供测试使用。 */
+export function catalogPageShape(
+  pageNumber: number,
+  total: number,
+): readonly [number, boolean] | null {
   if (
     !Number.isSafeInteger(pageNumber) ||
     pageNumber < 1 ||

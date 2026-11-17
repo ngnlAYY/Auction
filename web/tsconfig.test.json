@@ -11,6 +11,7 @@
     "public/src/**/*.test.tsx",
     "admin/src/**/*.test.ts",
     "admin/src/**/*.test.tsx",
-    "tooling/env.d.ts"
+    "tooling/env.d.ts",
+    "tooling/test-runtime.ts"
   ]
 }

@@ -3,3 +3,7 @@
 registry = "https://registry.npmjs.org"
 # 必填：新增依赖写入精确版本，升级只经显式修改 package.json 与 bun.lock。
 exact = true
+
+# 必填：测试启动前先装配构建期常量与 .tsx 的测试转译，见 tooling/test-runtime.ts。
+[test]
+preload = ["./tooling/test-runtime.ts"]

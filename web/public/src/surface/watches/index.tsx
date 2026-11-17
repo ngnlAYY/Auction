@@ -228,8 +228,9 @@ function ScopedLotWatches(props: {
 }
 
 /** 本场可以解锁的成功命令：等待的标记修订号不大于已读集合发起时的修订号，说明该集合是在
- * 命令成功之后读取的，已包含本次结果。忙碌、结果未知或失败的条目没有等待值，保持原样。 */
-function settledLots(
+ * 命令成功之后读取的，已包含本次结果。忙碌、结果未知或失败的条目没有等待值，保持原样。
+ * 仅供测试使用。 */
+export function settledLots(
   commands: ReadonlyMap<string, WatchCommand>,
   auctionId: string,
   loadedWatchRevision: number,

@@ -10,9 +10,8 @@ import { createTaskScope } from "@auction/web-shared/reactive/tasks";
 import type { Result } from "@auction/web-shared/result";
 import { compareText } from "@auction/web-shared/text";
 import { t } from "@auction/web-shared/ui/i18n";
-import { setContext } from "@solidjs/signals";
 import type { JSX } from "@solidjs/web";
-import { createContext, createEffect, For, Show, useContext } from "solid-js";
+import { createContext, For, Show, untrack, useContext } from "solid-js";
 import type { CommandError } from "../../api/commands";
 import { commandErrorOutcomeUncertain } from "../../api/commands";
 import { setLotWatch } from "../../api/watches";
@@ -52,7 +51,8 @@ export interface WatchCommandStore {
 
 export interface WatchCommandOwner extends WatchCommandStore {
   readonly userId: string | null;
-  readonly identity: Cell<string | null>;
+  /** 外壳提供的只读当前身份；命令处理里直接取当前值，不复制到异步更新的镜像。 */
+  readonly identity: () => string | null;
   readonly session: PublicSessionResource;
   readonly tasks: TaskScope;
 }
@@ -66,7 +66,7 @@ const detachedStore: WatchCommandStore = {
 };
 
 /** 稳定身份宿主渲染的子树与状态条读取同一份命令状态；缺省允许只读行按无宿主处理。 */
-const WatchCommandOwnerContext = createContext<WatchCommandOwner | null>(null);
+export const WatchCommandOwnerContext = createContext<WatchCommandOwner | null>(null);
 
 /** 标记作用域读取的宿主；没有命令宿主时使用空操作，避免破坏只读渲染。 */
 export function watchCommandStore(): WatchCommandStore {
@@ -83,23 +83,15 @@ export function requireWatchCommandOwner(): WatchCommandOwner {
 }
 
 /** 由已按用户 keyed 的页面宿主无条件调用；集合只有一个 Cell，不为每次命令分配 Cell。 */
-export function useWatchCommandOwner(userId: string | null): JSX.Element {
+export function useWatchCommandOwner(userId: string | null): WatchCommandOwner {
   const revision = createCell(0);
   const identitySource = useContext(PublicCommandOwnerContext);
-  // 上下文只暴露访问器；事件处理器需要 peek 读取身份，因此在本宿主保存一份可读值。
-  const identity = createCell(identitySource());
-  createEffect(
-    () => identitySource(),
-    (current) => {
-      identity.set(current);
-    },
-  );
   const session = useContext(PublicSessionResourceContext);
   const commands = createCell<ReadonlyMap<string, WatchCommand>>(new Map());
   const tasks = createTaskScope();
   const owner: WatchCommandOwner = {
     userId,
-    identity,
+    identity: identitySource,
     session,
     revision,
     commands,
@@ -107,12 +99,12 @@ export function useWatchCommandOwner(userId: string | null): JSX.Element {
     submit: (auctionId, lotId, lotCode, payload) =>
       submitCommand(owner, auctionId, lotId, lotCode, payload),
   };
-  // 宿主把子树与状态条作为兄弟渲染，调用方无法再把二者一起包进 Provider；在调用组件
-  // 自己的 owner 上写入上下文，既保留子树隔离，也让新增子树无需经过模块级登记。
-  setContext(WatchCommandOwnerContext, owner);
+  return owner;
+}
 
-  // 忙碌反馈由行内按钮承担；页面级状态条只列结果未知、需要原样重试的命令（含重试中的），
-  // 即使所在行已卸载也能找到。
+/** 页面级状态条只列结果未知、需要原样重试的命令（含重试中的），即使所在行已卸载也能找到。 */
+export function WatchCommandStatus(props: { readonly owner: WatchCommandOwner }): JSX.Element {
+  const commands = props.owner.commands;
   const pending = createValueMemo(() => {
     const entries: { readonly lotId: string; readonly command: WatchCommand }[] = [];
     for (const [lotId, command] of commands()) {
@@ -125,41 +117,39 @@ export function useWatchCommandOwner(userId: string | null): JSX.Element {
   });
 
   return (
-    <WatchCommandOwnerContext value={owner}>
-      <For each={pending()} keyed={(entry) => entry.lotId}>
-        {(entry) => {
-          const command = () => entry().command;
-          return (
-            <div class="public-lot-watches__sync" role="status">
-              <p>{command().lotCode}</p>
-              <Show
-                when={command().busy}
-                fallback={
-                  <>
-                    <p>{t("watch-unknown")}</p>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        owner.submit(
-                          command().auctionId,
-                          entry().lotId,
-                          command().lotCode,
-                          command().payload,
-                        )
-                      }
-                    >
-                      {t("watch-retry-command")}
-                    </button>
-                  </>
-                }
-              >
-                <p>{t("watch-saving")}</p>
-              </Show>
-            </div>
-          );
-        }}
-      </For>
-    </WatchCommandOwnerContext>
+    <For each={pending()} keyed={(entry) => entry.lotId}>
+      {(entry) => {
+        const command = () => entry().command;
+        return (
+          <div class="public-lot-watches__sync" role="status">
+            <p>{command().lotCode}</p>
+            <Show
+              when={command().busy}
+              fallback={
+                <>
+                  <p>{t("watch-unknown")}</p>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      props.owner.submit(
+                        command().auctionId,
+                        entry().lotId,
+                        command().lotCode,
+                        command().payload,
+                      )
+                    }
+                  >
+                    {t("watch-retry-command")}
+                  </button>
+                </>
+              }
+            >
+              <p>{t("watch-saving")}</p>
+            </Show>
+          </div>
+        );
+      }}
+    </For>
   );
 }
 
@@ -255,7 +245,7 @@ function submitCommand(
 }
 
 function ownerIdentityMatches(owner: WatchCommandOwner): boolean {
-  return owner.userId !== null && owner.identity.peek() === owner.userId;
+  return owner.userId !== null && untrack(owner.identity) === owner.userId;
 }
 
 export function currentUser(

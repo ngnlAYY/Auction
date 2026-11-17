@@ -89,7 +89,8 @@ export function installErrorHook(): void {
   });
 }
 
-function reportBrowserErrorWithBuildId(errorClass: BrowserErrorClass, value: string): void {
+/** 以显式构建标识发送信标；非法值降级为 `unknown`。导出仅供测试使用。 */
+export function reportBrowserErrorWithBuildId(errorClass: BrowserErrorClass, value: string): void {
   if (typeof window === "undefined") {
     return;
   }

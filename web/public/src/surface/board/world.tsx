@@ -166,8 +166,8 @@ function routeOwnsHistoryWorldFilter(route: RouteMatch): boolean {
 
 /** 页头切换世界后的查询。看板正在展示往期场次时回到目标世界的首页（清除场次、筛选与页码，
  * 每页条数取本地偏好），与顶栏首页入口一致，避免页头世界与正文、顶栏的场次不一致；
- * 其余情况只改世界。 */
-function worldSwitchQuery(
+ * 其余情况只改世界。仅供测试使用：验证页头切换世界时对查询状态的保留与清除。 */
+export function worldSwitchQuery(
   current: PublicBoardQuery,
   world: string,
   historicalBoard: boolean,

@@ -33,8 +33,9 @@ import { err, ok, type Result, unreachable } from "@auction/web-shared/result";
 export const LIVE_TTL_MILLIS = 60_000;
 /** 目录视图的缓存有效期：拍卖列表、价格历史、历史场次与履约进度。 */
 export const CATALOG_TTL_MILLIS = 15_000;
-/** 单线程内存缓存条目上限；失效只标记过期、不删除条目，超出上限时淘汰最早写入的条目。 */
-const MAX_ENTRIES = 128;
+/** 单线程内存缓存条目上限；失效只标记过期、不删除条目，超出上限时淘汰最早写入的条目。
+ * 导出仅供测试使用。 */
+export const MAX_ENTRIES = 128;
 
 /** 单次缓存读取的请求结果分类；由调用方的 fetch 闭包在完整校验后构造。 */
 export type FetchOutcome<T, E> =
@@ -99,6 +100,24 @@ const STORE: Store = {
   pending: new Map(),
   fallbackFloor: 0,
 };
+
+/** 仅供测试使用：把缓存恢复为初始状态，使每个用例从干净缓存开始。 */
+export function resetStoreForTest(): void {
+  STORE.entries.clear();
+  STORE.revision = 0;
+  STORE.pending.clear();
+  STORE.fallbackFloor = 0;
+}
+
+/** 仅供测试使用：当前缓存条目数。 */
+export function entryCountForTest(): number {
+  return STORE.entries.size;
+}
+
+/** 仅供测试使用：判断完整 URL 是否有缓存条目。 */
+export function hasEntryForTest(url: string): boolean {
+  return STORE.entries.has(url);
+}
 
 /** 在途请求的完成通知；只表示“该请求已结束”，不携带结果。 */
 class Pending {

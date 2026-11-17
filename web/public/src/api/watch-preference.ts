@@ -17,8 +17,9 @@ import { decodeErrorCode, decodeSuccess, int, object } from "./decoder";
 import { observePublicSessionFailure } from "./session";
 
 const PATH = "/api/v1/me/lot-watch-preference";
-/** 权威响应必须恰好包含契约字段；漏掉 `pm_available` 会让整页退化为“无法读取偏好”。 */
-const RESPONSE_KEYS = ["user_id", "channel", "version", "pm_available"];
+/** 权威响应必须恰好包含契约字段；漏掉 `pm_available` 会让整页退化为“无法读取偏好”。
+ * 仅供测试使用，直接核对该闭集。 */
+export const RESPONSE_KEYS = ["user_id", "channel", "version", "pm_available"];
 
 /**
  * 渠道偏好的 wire 闭集（`none`/`mm`/`pm`/`both`）与两个独立开关的互换；闭集之外返回 `None`。

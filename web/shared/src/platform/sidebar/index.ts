@@ -10,8 +10,8 @@ const SIDEBAR_STORAGE_KEY = "hv.sidebar";
 const COLLAPSED = "collapsed";
 const EXPANDED = "expanded";
 
-/** 严格解析存储值；未知值按展开处理，避免损坏的偏好把导航藏起来。 */
-function parse(value: string | null): boolean {
+/** 严格解析存储值；未知值按展开处理，避免损坏的偏好把导航藏起来。导出仅供测试使用。 */
+export function parse(value: string | null): boolean {
   return value === COLLAPSED;
 }
 

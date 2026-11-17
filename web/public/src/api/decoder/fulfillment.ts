@@ -65,7 +65,8 @@ export function decodeFulfillmentPage(
   );
 }
 
-function validFulfillmentPage(
+/** 仅供测试使用：直接校验履约页的字段闭集、身份绑定与跨字段约束。 */
+export function validFulfillmentPage(
   value: unknown,
   auctionId: string,
   world: string,
@@ -140,7 +141,8 @@ function validAuction(value: unknown, auctionId: string, world: string): boolean
   );
 }
 
-function validLot(value: unknown): boolean {
+/** 仅供测试使用：直接校验单条履约 lot 的状态与可选字段组合。 */
+export function validLot(value: unknown): boolean {
   const decoded = object(value);
   if (decoded === null) {
     return false;
@@ -198,7 +200,8 @@ function validPaymentDeadline(lot: JsonObject, status: string): boolean {
  * 服务端只输出 `YYYY-MM-DDTHH:MM:SSZ`（UTC、秒精度）：逐字节核对形状，再校验日历日期与时分秒
  * 范围。不经浏览器 `Date.parse` 或 RFC 3339 的宽松写法（小数秒、时区偏移），宿主与 wasm 结果一致。
  */
-function utcSecondTimestamp(value: string): boolean {
+/** 仅供测试使用：核对付款期限的严格 UTC 秒格式。 */
+export function utcSecondTimestamp(value: string): boolean {
   const byteLength = utf8ByteLength(value);
   if (byteLength !== 20) {
     return false;

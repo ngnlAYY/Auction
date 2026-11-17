@@ -57,7 +57,8 @@ export async function fetchCurrentAuction(
 
 /** 当前场次的唯一 URL 构造点：始终用 include=proxy_default_mode 显式请求冻结策略的代理
  * 默认模式，解码器据此要求该键。服务端只对显式请求追加该键，旧页面的缺省请求仍得到原字段集合。 */
-function currentAuctionUrl(worldId: string): string {
+/** 仅供测试使用：核对当前场次读取的唯一 URL 构造点。 */
+export function currentAuctionUrl(worldId: string): string {
   const query = new URLSearchParams();
   query.append("world", worldId);
   query.append("include", "proxy_default_mode");
@@ -215,7 +216,8 @@ async function fetchMatchingCurrentAuction(
 
 /** 当前场次条目是否就是按 ID 打开的目标场次。lot 外壳与当前场次各有缓存 TTL，live→final
  * 切换前后两者可能短暂各持一边；同属可出价阶段时以当前场次条目为准，其余状态必须一致。 */
-function isTargetCurrent(
+/** 仅供测试使用：核对按场次 ID 打开时容忍的 live/final 切换。 */
+export function isTargetCurrent(
   auction: CurrentAuctionItemResponse,
   auctionId: string,
   expectedStatus: string,

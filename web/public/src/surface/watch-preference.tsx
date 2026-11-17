@@ -12,7 +12,7 @@ import type { TaskScope } from "@auction/web-shared/reactive/tasks";
 import { createTaskScope } from "@auction/web-shared/reactive/tasks";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
-import { createEffect, Show, useContext } from "solid-js";
+import { createEffect, Show, untrack, useContext } from "solid-js";
 
 import type { CommandError } from "../api/commands";
 import { commandErrorOutcomeUncertain } from "../api/commands";
@@ -41,7 +41,8 @@ interface PreferenceState {
 
 interface PreferenceOwner {
   userId: string;
-  identity: Cell<string | null>;
+  /** 外壳提供的只读当前身份；命令处理里直接取当前值，不复制到异步更新的镜像。 */
+  identity: () => string | null;
   session: PublicSessionResource;
   state: Cell<PreferenceState>;
   /** 组件宿主创建的任务集合；事件处理器不直接取上下文。 */
@@ -63,7 +64,7 @@ function preferenceStateDefault(): PreferenceState {
 }
 
 function preferenceOwnerIdentityMatches(owner: PreferenceOwner): boolean {
-  return owner.identity.peek() === owner.userId;
+  return untrack(owner.identity) === owner.userId;
 }
 
 /** 会话暂时失败不能清除已提交意图，但也不能授权新的渠道变更。 */
@@ -177,19 +178,11 @@ function preferenceOwnerSubmit(owner: PreferenceOwner): void {
 export function OutbidNotifications(props: { readonly userId: string }): JSX.Element {
   const session = useContext(PublicSessionResourceContext);
   const identitySource = useContext(PublicCommandOwnerContext);
-  // 上下文只暴露访问器；命令前置检查需要 peek 读取身份，因此在本组件保存一份可读值。
-  const identity = createCell(identitySource());
-  createEffect(
-    () => identitySource(),
-    (current) => {
-      identity.set(current);
-    },
-  );
   const state = createCell<PreferenceState>(preferenceStateDefault());
   const tasks = createTaskScope();
   const owner: PreferenceOwner = {
     userId: props.userId,
-    identity,
+    identity: identitySource,
     session,
     state,
     tasks,

@@ -148,8 +148,8 @@ async function resolve(
 }
 
 /** 拍品所在场次是哪个世界的当前场次。读取失败的世界不参与判定；都不命中（含读取失败）时
- * 返回 `null`，由调用方按往期场次查找。 */
-function currentWorld(
+ * 返回 `null`，由调用方按往期场次查找。仅供测试使用。 */
+export function currentWorld(
   auctionId: string,
   currents: Iterable<Result<CurrentAuctionItemResponse | null, string>>,
 ): string | null {
@@ -162,8 +162,8 @@ function currentWorld(
 }
 
 /** 拍品在目录里的位置：所在世界、（往期）场次、分类筛选与页码。其余筛选保持默认，
- * 每页条数沿用 `base` 里的本地偏好。 */
-function catalogPosition(
+ * 每页条数沿用 `base` 里的本地偏好。仅供测试使用。 */
+export function catalogPosition(
   row: CatalogRow,
   world: string,
   historicalAuctionId: string | null,
@@ -185,8 +185,9 @@ function catalogPosition(
 }
 
 /** 按分类筛选后拍品所在的页码。编号末尾的数字是分类内序号，目录按同一顺序排列，第 n 件在
- * 第 ⌈n / 每页条数⌉ 页。撤拍留下的空号会让实际位置靠前，那时看板找不到这一行，退回只读抽屉。 */
-function catalogPage(code: string, pageSize: number): number | null {
+ * 第 ⌈n / 每页条数⌉ 页。撤拍留下的空号会让实际位置靠前，那时看板找不到这一行，退回只读抽屉。
+ * 仅供测试使用。 */
+export function catalogPage(code: string, pageSize: number): number | null {
   let index = 0;
   while (index < code.length && !isAsciiDigit(code.charCodeAt(index))) {
     index += 1;

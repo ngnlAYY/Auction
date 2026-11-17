@@ -20,19 +20,22 @@ import { invalidateAll } from "../../api/swr-cache";
  * “每次出价的页面重读量”即由该窗口约束：窗口内的 N 条竞价通知对同一资源只产生一次重读，
  * 窗口外的通知各自产生一次。HTTP 路由计数用于在 Final 阶段实测该比值，口径见
  * `crates/auction-observability/README.md`。
+ * 导出仅供测试核对合并窗口的边界。
  */
-const BID_REFRESH_COALESCE_MILLIS = 100;
+export const BID_REFRESH_COALESCE_MILLIS = 100;
 /**
  * 每个窗口另加的均匀抖动上界（不含）：同一事件推给全部连接，固定窗口会让所有客户端在同一时刻
  * 重读并一起撞上匿名读闸门的并发许可上限；抖动把重读打散到 100–250 毫秒。
+ * 导出仅供测试核对合并窗口的边界。
  */
-const BID_REFRESH_JITTER_MILLIS = 150;
+export const BID_REFRESH_JITTER_MILLIS = 150;
 
 /**
  * 由 `[0, 1)` 的均匀随机样本计算本次合并窗口，结果总在 `[100, 250)` 毫秒内。
  * 随机源由调用方注入（浏览器为 `Math.random`）；越界或非有限样本按边界处理，不会越出窗口。
+ * 仅供测试使用：验证合并窗口的边界与抖动取值。
  */
-function coalesceWindowMillis(sample: number): number {
+export function coalesceWindowMillis(sample: number): number {
   const bounded = Number.isFinite(sample) ? Math.min(Math.max(sample, 0), 1) : 0;
   // 样本已截到 [0, 1]：乘积落在 [0, 150]，截断不会溢出；1.0 再收进上界之内。
   const jitter = Math.trunc(bounded * BID_REFRESH_JITTER_MILLIS);

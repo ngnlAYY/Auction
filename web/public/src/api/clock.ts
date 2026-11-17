@@ -46,8 +46,9 @@ const TIMESTAMP_MAX_MILLIS = utcBoundMillis(9999, 12, 30, 22, 0, 0, 999);
  * 可缓存的响应会连同生成时的 `Date` 一起被重放，历史类读取最长保存 5 分钟、已结算内容保存
  * 一天；把它当作当前时间会让时钟偏移整体后退，倒计时与开拍刷新随之变慢，首个样本还会被直接
  * 采用。`no-store` 的响应任何缓存都不得保存（与构建号采信同一条规则）。`private` 的响应共享
- * 缓存不得保存，但浏览器自己可以重放，因此只在请求已绕过浏览器 HTTP 缓存时采信。 */
-function responseDateIsCurrent(
+ * 缓存不得保存，但浏览器自己可以重放，因此只在请求已绕过浏览器 HTTP 缓存时采信。
+ * 仅供测试使用。 */
+export function responseDateIsCurrent(
   cacheControl: string | null,
   bypassedBrowserCache: boolean,
 ): boolean {
