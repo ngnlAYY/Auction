@@ -36,7 +36,7 @@ Public 与 Admin 两个浏览器应用的 TypeScript 源码、构建配置与编
 - 导入不写扩展名与 `/index`：`import { sendGet } from "@auction/web-shared/net/transport";`。
 - 每个源码文件以 `//` 注释开头说明模块职责；导出的类型、函数与组件用 `/** … */` 说明。注释与文档用中文，只写本地的不变量与理由，不复述代码。
 - 类型、接口与组件用 `PascalCase`；函数、变量与非 DTO 字段用 `camelCase`；模块级常量用 `SCREAMING_SNAKE_CASE`。DTO 字段与线上 JSON 完全一致，保持 `snake_case`。
-- 单个文件不超过 600 行；超过时按职责拆成子模块。
+- 单个文件不超过 600 行；超过时按职责拆成子模块（`name.ts` 变成 `name/index.ts` 加若干子模块，对外导入路径不变）。不靠删除空行、合并语句或压缩注释来凑行数；接近上限就应当拆分。
 - 只用具名导出与具名导入，不写 `export default`（Vite 配置文件除外），不写 `export *`。类型导入用 `import type`。
 
 ## TypeScript 规则
@@ -45,9 +45,11 @@ Public 与 Admin 两个浏览器应用的 TypeScript 源码、构建配置与编
 - 不用 `enum` 与 `namespace`。闭集取值用字符串字面量联合：`type Theme = "dark" | "light";`。带数据的多种形态用带 `kind` 字段的可辨识联合。
 - `switch` 覆盖联合类型时，`default` 分支调用 `unreachable(value)`（`@auction/web-shared/result`），漏掉成员时编译失败。
 - “没有值”统一用 `null`。`undefined` 只表示“尚未加载”（`createTaskResource` 的结果）与组件的可选 props。
-- 预期内的失败作为值返回：`Result<T, E>`、`ok(value)`、`err(error)`（`@auction/web-shared/result`）。不用异常表达网络失败、解码失败或校验失败；`try`/`catch` 只包住会抛异常的浏览器接口，`catch` 分支必须处理或转成 `Result`，不留空。
+- 预期内的失败作为值返回：`Result<T, E>`、`ok(value)`、`err(error)`（`@auction/web-shared/result`）。不用异常表达网络失败、解码失败或校验失败；`try`/`catch` 只包住会抛异常的浏览器接口，`catch` 分支要么处理、要么转成 `Result`；确实可以忽略的失败（例如移除监听、释放观察器）在分支里用注释写明忽略的理由，不留没有说明的空分支。
 - 整数金额、版本与序号是 `number`，取值必须是安全整数，由解码器保证。UUID 是 `string`，新 `command_id` 用 `crypto.randomUUID()` 生成。
-- 文本长度上限若在后端按 UTF-8 字节计，这里也按字节计（`new TextEncoder().encode(text).length`），不用 `text.length` 代替。
+- 文本长度上限若在后端按 UTF-8 字节计，这里也按字节计：`utf8ByteLength(text)`（`@auction/web-shared/text`），不用 `text.length` 代替。
+- 字符串的大小比较与排序用 `compareText(a, b)`（同一模块，按 Unicode 码点）。JS 的 `<`、`>` 与默认 `sort()` 按 UTF-16 码元比较，对 U+10000 以上的字符与后端顺序相反；相等判断仍用 `===`。
+- 解析 JSON 文本统一用 `parseJson(text)`（`@auction/web-shared/net/wire`），不直接调用 `JSON.parse`：后者会接受超出范围的数与孤立代理项，后端的解析器会拒绝。
 - 秘密值（登录 key、Cookie、口令、CSRF token、完整装备链接）不写入 `console`、错误信息、`localStorage` 与 URL。
 
 ## 响应式内核
@@ -157,7 +159,7 @@ export function Blacklist(): JSX.Element {
 - 元素引用用 `ref`：`let input: HTMLInputElement | undefined;` 加 `<input ref={input} />`，或回调形式 `ref={(element) => …}`。`ref` 回调执行时元素尚未挂到文档，量尺寸与聚焦放进 `onSettled`。
 - 受控输入用 `value={draft()}` 加 `onInput={(event) => draft.set(event.currentTarget.value)}`。
 - 上下文用 `createContext<T>()` 定义并与类型放在同一模块；提供方直接把上下文当组件用：`<SessionContext value={session}>…</SessionContext>`，使用方 `useContext(SessionContext)`。
-- 浮层挂到 `document.body` 或所属弹窗时用 `Portal`（`@solidjs/web`）。
+- 新写的浮层挂到 `document.body` 或所属弹窗时用 `Portal`（`@solidjs/web`）。从现有实现迁移来的、靠移动已渲染节点实现的浮层保持原来的命令式做法，不改用 `Portal`，以免多出一层容器改变 DOM 结构。
 - 界面文案全部走 `t("message-id", { name: value })`，不写字面量文案。
 
 ## 契约
@@ -193,11 +195,11 @@ export function Blacklist(): JSX.Element {
 
 - 样式文件与类名沿用现有定义：共享设计变量与控制台外壳在 `auction-web-shared` 的 `style/`，各应用的规则在各自的 `assets/`。装配顺序固定为 base → surface → desktop → mobile → console。
 - 类名用小写连字符与 BEM，并带 `public-` 或 `admin-` 前缀；颜色、字号、间距只用共享变量。
-- 译文是各应用 `i18n/` 下的五个 `.ftl` 文件（en、zh-CN、zh-TW、ja、ko），键集合一致，键名用连字符。Public 默认 en，Admin 默认 zh-CN；偏好键 `hv.lang` 与 `hv.theme` 是固定契约。
+- 译文是各应用 `i18n/` 下的五个 `.ftl` 文件（en、zh-CN、zh-TW、ja、ko），键集合一致，键名用连字符。译文只使用 Fluent 的平铺子集：每条消息占一行，写成 `键 = 文本`，文本里的占位只有 `{ $变量 }` 与字符串字面量 `{"…"}` 两种；加载器遇到子集之外的写法会拒绝整份译文。Public 默认 en，Admin 默认 zh-CN；偏好键 `hv.lang` 与 `hv.theme` 是固定契约。
 
 ## 禁止事项
 
 - 不引入服务端渲染、hydration、虚拟 DOM 库或其他 UI 框架。
 - 不在浏览器重建业务状态机：金额、资格、幂等与状态迁移以服务端结果为准；改变状态的请求携带 `command_id`，结果未知时只允许原样重试。
 - 不用 `innerHTML`、`eval`、`new Function` 与内联脚本；内容安全策略只放行同源脚本。
-- 不直接调用 `fetch`、`localStorage`、`setTimeout`：分别经 `@auction/web-shared` 的传输、存储与定时模块。
+- 不直接调用 `fetch`、`localStorage`、`setTimeout`：分别经 `@auction/web-shared` 的传输、存储与定时模块。共享层内部有两处按原实现直接 `fetch` 的例外：译文文件的按需加载（3 秒竞速）与浏览器错误信标。
