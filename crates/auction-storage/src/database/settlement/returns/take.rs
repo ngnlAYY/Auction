@@ -312,13 +312,12 @@ pub(super) async fn observe_take(
     match status.as_str() {
         "pending" | "claimed" | "sending" => return Ok(TakeOutcome::Pending),
         "failed" => {
-            // 持久发送围栏与尝试历史：只有明确未开始写出、非未知、从未因未知结果被巡检重排、
-            // 没有远端引用才算确定未外写；其余失败与未知同样只认领取证明。
+            // 持久发送围栏与尝试历史：只有 `write_started` 与 `outcome_unknown` 都是明确的布尔
+            // false、从未因未知结果被巡检重排、没有远端引用才算确定未外写；缺键、null 或错误类型
+            // 都按可能已执行，与重启 SQL 和交接谓词同一口径。其余失败与未知同样只认领取证明。
             let not_started = reference.is_none()
-                && metadata.get("write_started").and_then(serde_json::Value::as_bool)
-                    == Some(false)
-                && metadata.get("outcome_unknown").and_then(serde_json::Value::as_bool)
-                    != Some(true)
+                && metadata.get("write_started") == Some(&serde_json::Value::Bool(false))
+                && metadata.get("outcome_unknown") == Some(&serde_json::Value::Bool(false))
                 && metadata.get("sweep_retries").is_none();
             return Ok(if not_started {
                 TakeOutcome::NotStarted { failure_code: "settlement_return_take_not_started" }

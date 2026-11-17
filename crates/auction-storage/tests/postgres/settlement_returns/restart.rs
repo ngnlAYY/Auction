@@ -3,7 +3,9 @@
 //!   新 fence 重新排队同一 Take、案件留在 Take 待执行，再执行成功后照常领回入账；每案最多重启两次，
 //!   用满后转结果未知；开始写出或结果未知的失败不重启；
 //! - 激活前冲突：同一邮件另一 owner 的意图尚在进行或曾进入发送围栏时保持结果未知；该意图以持久
-//!   事实确定从未执行后案件交接回 Take 待执行并照常激活，此后投递台不能再重试复活那条意图。
+//!   事实确定从未执行后案件交接回 Take 待执行并照常激活，此后投递台不能再重试复活那条意图；
+//! - 重启与交接共用同一准入：`write_started` 与 `outcome_unknown` 都必须是明确的 JSON 布尔 `false`，
+//!   缺键、null 或错误类型（如字符串 `"false"`）一律按可能已执行处理，不重启、不交接。
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
@@ -345,6 +347,109 @@ async fn postgres_return_take_conflict_hands_over_after_unexecuted_failure() {
         .await
         .expect("读取意图");
     assert_eq!(status, "failed");
+
+    pool.close().await;
+}
+
+/// 结果元数据不能证明未执行的形状：缺 `outcome_unknown`、为 null、为字符串，或 `write_started`
+/// 为字符串。其余字段与投递 Worker 准备期拒绝写入的形状一致。
+fn unproven_unexecuted_metadata() -> [Value; 4] {
+    [
+        json!({"stage": "preflight_blocked", "write_started": false,
+               "failure_code": "invalid_payload"}),
+        json!({"stage": "preflight_blocked", "write_started": false, "outcome_unknown": null,
+               "failure_code": "invalid_payload"}),
+        json!({"stage": "preflight_blocked", "write_started": false, "outcome_unknown": "false",
+               "failure_code": "invalid_payload"}),
+        json!({"stage": "preflight_blocked", "write_started": "false", "outcome_unknown": false,
+               "failure_code": "invalid_payload"}),
+    ]
+}
+
+/// 改写投递的结果元数据（只改元数据，状态与 fence 不变）。
+async fn overwrite_metadata(pool: &PgPool, delivery: Uuid, metadata: &Value) {
+    sqlx::query("UPDATE public.deliveries SET result_metadata = $2 WHERE id = $1")
+        .bind(delivery)
+        .bind(metadata)
+        .execute(pool)
+        .await
+        .expect("改写结果元数据");
+}
+
+/// 案件 owner 的重启只认明确的布尔 `false`：准备期拒绝之后结果元数据缺键、为 null 或类型错误时，
+/// 收口转结果未知，不以新 fence 重新排队（投递保持 failed、fence 不变）。
+#[tokio::test]
+async fn postgres_return_take_restart_requires_explicit_boolean_flags() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("以运行账号连接");
+    let pool = store.postgres_pool();
+    for (index, metadata) in unproven_unexecuted_metadata().iter().enumerate() {
+        let offset = i64::try_from(index).expect("用例序号");
+        let mid = format!("{}", 998_141 + offset);
+        let (returned, take) = activated_take(&store, 7_660_041 + offset, &mid).await;
+        reject_before_write(&store, take).await;
+        overwrite_metadata(pool, take, metadata).await;
+        let (_, _, _, fence_before) = case_state(pool, returned.case).await;
+        let progress =
+            store.settle_due_return_take(Utc::now()).await.expect("收口").expect("必须推进");
+        assert_eq!(
+            (progress.return_mail_id, progress.status),
+            (returned.case, SettlementReturnCaseStatus::TakeUnknown),
+            "{metadata}"
+        );
+        let (_, _, delivery, fence) = case_state(pool, returned.case).await;
+        assert_eq!((delivery.as_str(), fence), ("failed", fence_before), "{metadata}：不重启");
+    }
+
+    pool.close().await;
+}
+
+/// 交接同样只认明确的布尔 `false`：另一 owner 的失败意图从未进入发送围栏，但结果元数据缺键、
+/// 为 null 或类型错误时，不能证明从未执行，案件保持结果未知、不交接、不写入 Take 投递。
+#[tokio::test]
+async fn postgres_return_take_handover_requires_explicit_boolean_flags() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("以运行账号连接");
+    let pool = store.postgres_pool();
+    for (index, metadata) in unproven_unexecuted_metadata().iter().enumerate() {
+        let offset = i64::try_from(index).expect("用例序号");
+        let mid = format!("{}", 998_151 + offset);
+        let returned = returned_payout(&store, 7_660_051 + offset, &mid).await;
+        seed_spent_payout(pool, &returned).await;
+        assert_eq!(
+            handle(&store, returned.case, 1, SettlementReturnAction::ReclaimAndHold).await,
+            SettlementReturnCaseStatus::TakePending
+        );
+        let intake = insert_intake_take(pool, &mid).await;
+        let progress =
+            store.activate_due_return_take(Utc::now()).await.expect("激活").expect("推进");
+        assert_eq!(progress.status, SettlementReturnCaseStatus::TakeUnknown, "在途意图阻断激活");
+        // 意图终态失败、从未进入发送围栏，但结果元数据不能证明从未执行。
+        sqlx::query(
+            "UPDATE public.deliveries
+             SET status = 'failed', failure_code = 'invalid_payload', completed_at = now(),
+                 claimed_at = now(), attempt_count = 1, updated_at = now(), result_metadata = $2
+             WHERE id = $1",
+        )
+        .bind(intake)
+        .bind(metadata)
+        .execute(pool)
+        .await
+        .expect("意图失败");
+        assert!(
+            store.activate_due_return_take(Utc::now()).await.expect("激活").is_none(),
+            "{metadata}：不能证明从未执行时不交接"
+        );
+        assert_eq!(take_delivery(pool, returned.case).await, None, "{metadata}");
+        let status: String = sqlx::query_scalar(
+            "SELECT status FROM public.settlement_return_cases WHERE return_mail_id = $1",
+        )
+        .bind(returned.case)
+        .fetch_one(pool)
+        .await
+        .expect("读取案件");
+        assert_eq!(status, "take_unknown", "{metadata}");
+    }
 
     pool.close().await;
 }

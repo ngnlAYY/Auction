@@ -1,6 +1,7 @@
 //! 结算退件 Take 投递的“确定未外写”重启：由案件 owner 在锁内复核持久发送围栏与尝试历史后，把
-//! 终态 failed 的 Take 投递重新排队。只接受结果明确记录未开始写出、不是未知、从未被巡检因结果
-//! 未知重排过（`sweep_retries`）且没有远端引用的投递；其余失败或未知一律不动，仍只认领取证明。
+//! 终态 failed 的 Take 投递重新排队。只接受结果元数据中 `write_started` 与 `outcome_unknown` 都是
+//! 明确的 JSON 布尔 `false`（缺键、null 或错误类型都按可能已执行）、从未被巡检因结果未知重排过
+//! （`sweep_retries`）且没有远端引用的投递；其余失败或未知一律不动，仍只认领取证明。
 
 use serde_json::json;
 use uuid::Uuid;
@@ -27,8 +28,8 @@ pub(in crate::database) async fn restart_unstarted_take_in_transaction(
          WHERE id = $1 AND status = 'failed'
            AND origin_kind = 'settlement_return_action' AND payload_operation = 'take'
            AND external_reference IS NULL
-           AND COALESCE(result_metadata ->> 'write_started', '') = 'false'
-           AND COALESCE(result_metadata ->> 'outcome_unknown', 'false') <> 'true'
+           AND COALESCE(result_metadata
+                   @> '{\"write_started\": false, \"outcome_unknown\": false}'::jsonb, false)
            AND NOT (result_metadata ? 'sweep_retries')
          RETURNING updated_at, fencing_version",
     )

@@ -3,9 +3,9 @@
 //! 入站邮件、恢复动作与结算退件动作都可能对 Bot 收件箱里的同一封邮件做资产处置；三者在同一
 //! world 行锁下读取相反或并行的处置意图，失败、未知的旧意图也不解除互斥（远端结果可能未知，
 //! 必须先人工收口）。唯一的交接例外只用于结算退件 Take：另一 owner 的意图已以持久事实确定从未
-//! 执行（终态 failed、从未进入发送围栏、没有任何发送或领取尝试、记录未开始写出且非未知），此时
-//! 邮件未被触碰，结算退件 Take 可以接手；该意图之后也不能再被投递台的普通重试复活（见
-//! `delivery/admin`）。
+//! 执行（终态 failed、从未进入发送围栏、没有任何发送或领取尝试、结果元数据明确记录
+//! `write_started` 与 `outcome_unknown` 都是布尔 `false`），此时邮件未被触碰，结算退件 Take 可以
+//! 接手；该意图之后也不能再被投递台的普通重试复活（见 `delivery/admin`）。
 
 use auction_application::mail::{MailDeliveryCommand, MailDeliveryOperation, MailDeliveryOrigin};
 
@@ -23,8 +23,10 @@ const RETURN_TAKE_EXCLUSIVE_ORIGINS: &[&str] =
 const RECOVERY_TAKE_EXCLUSIVE_ORIGINS: &[&str] = &["settlement_return_action"];
 
 /// 投递 `$alias` 以持久事实确定从未执行：终态 failed、从未进入发送围栏、没有发送或领取尝试、
-/// 结果明确记录未开始写出且不是未知。结算退件 Take 据此接手另一 owner 失败的同邮件意图。缺少
-/// `write_started` 记录必须判为“可能已执行”：每一项都写成非空布尔，避免 NULL 让外层 `NOT` 失效。
+/// 结果元数据中 `write_started` 与 `outcome_unknown` 都是明确的 JSON 布尔 `false`。结算退件 Take
+/// 据此接手另一 owner 失败的同邮件意图。缺键、null 或错误类型（如字符串 `"false"`）都判为
+/// “可能已执行”，与案件 owner 的重启准入同一口径；每一项都写成非空布尔，避免 NULL 让外层 `NOT`
+/// 失效。
 macro_rules! unexecuted_intent_sql {
     ($alias:literal) => {
         concat!(
@@ -36,9 +38,8 @@ macro_rules! unexecuted_intent_sql {
             $alias,
             ".external_reference IS NULL AND COALESCE(",
             $alias,
-            ".result_metadata ->> 'write_started', '') = 'false' AND COALESCE(",
-            $alias,
-            ".result_metadata ->> 'outcome_unknown', 'false') <> 'true'
+            ".result_metadata @> '{\"write_started\": false, \"outcome_unknown\": false}'::jsonb,
+                       false)
               AND NOT EXISTS (SELECT 1 FROM public.delivery_take_attempts AS take_history
                               WHERE take_history.delivery_id = ",
             $alias,
