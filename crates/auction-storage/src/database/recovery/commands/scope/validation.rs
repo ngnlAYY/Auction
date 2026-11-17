@@ -215,5 +215,17 @@ pub(in crate::database::recovery::commands) async fn activate_buyer_refund(
     if updated.is_none() {
         return Err(RecoveryCommandError::NotConfirmable);
     }
+    // 激活后退款回到履约活动入口：同事务清除或有未激活标记（行已在 `validate_obligations`
+    // 按 UUID 序锁定）。只写标记，不改执行状态与状态版本；迁移 000110 的延迟约束触发器在提交时
+    // 拒绝漏清标记的激活。
+    sqlx::query(
+        r#"UPDATE public.settlement_obligation_fulfillments
+           SET dormant = false
+           WHERE obligation_id = $1 AND dormant"#,
+    )
+    .bind(recovery.buyer_refund_obligation_id)
+    .execute(&mut **transaction)
+    .await
+    .map_err(map_sql_error)?;
     Ok(())
 }

@@ -79,6 +79,16 @@ async fn recovery_state(pool: &PgPool, recovery_id: Uuid) -> (String, Option<Str
         .expect("读取恢复记录")
 }
 
+async fn dormant(pool: &PgPool, obligation: Uuid) -> bool {
+    sqlx::query_scalar(
+        "SELECT dormant FROM public.settlement_obligation_fulfillments WHERE obligation_id = $1",
+    )
+    .bind(obligation)
+    .fetch_one(pool)
+    .await
+    .expect("读取或有未激活标记")
+}
+
 async fn business_state(pool: &PgPool, obligation: Uuid) -> String {
     sqlx::query_scalar("SELECT business_state FROM public.settlement_obligations WHERE id = $1")
         .bind(obligation)
@@ -187,6 +197,7 @@ async fn postgres_equipment_recovered_closes_dependents_and_funds_refund() {
     let credential = insert_funding(pool, &recovered).await;
     let sale = &recovered.sale;
     let payment_before = fulfillment(pool, sale.payment).await;
+    assert!(dormant(pool, sale.refund).await, "或有退款激活前带或有未激活标记");
 
     let command = confirmation(sale, RecoveryConfirmationAction::EquipmentRecovered);
     let result = store.confirm_recovery(command.clone()).await.expect("确认 equipment_recovered");
@@ -194,6 +205,9 @@ async fn postgres_equipment_recovered_closes_dependents_and_funds_refund() {
         (result.stage.as_str(), result.resolution.as_str()),
         ("refunding", "equipment_recovered")
     );
+    // 激活与清除标记同事务：退款回到履约活动入口，领取写入 claim 时不再触发标记 CHECK。
+    assert!(!dormant(pool, sale.refund).await, "激活后退款不再带或有未激活标记");
+    crate::alert_entry_equivalence::assert_alert_reads_match_full_scan(pool).await;
 
     // 载体付款与其证明保留；卖方货款与原交付收口，原交付投递与 Take 证明不改写。
     assert_eq!(fulfillment(pool, sale.payment).await, payment_before);

@@ -231,15 +231,17 @@ pub(crate) async fn insert_reclaiming_sale(pool: &PgPool, spec: SaleSpec) -> Sal
         pending.push((handoff, "isekai"));
     }
     for (obligation, dispatch_world) in pending {
+        // 与生产结算写入同形：或有退款的履约带或有未激活标记，激活时由确认事务清除。
         sqlx::query(
             "INSERT INTO public.settlement_obligation_fulfillments
-                (obligation_id, execution_state, dispatch_world, delivery_operation,
+                (obligation_id, execution_state, dispatch_world, delivery_operation, dormant,
                  created_at, updated_at)
-             VALUES ($1, 'pending', $2, 'send', $3, $3)",
+             VALUES ($1, 'pending', $2, 'send', $4, $3, $3)",
         )
         .bind(obligation)
         .bind(dispatch_world)
         .bind(at)
+        .bind(obligation == refund)
         .execute(pool)
         .await
         .expect("写入尚未开始的履约");

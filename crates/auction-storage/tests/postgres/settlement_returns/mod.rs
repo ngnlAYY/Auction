@@ -26,7 +26,7 @@ mod cases;
 mod counts;
 pub(crate) mod flows;
 mod funding;
-mod plans;
+pub(crate) mod plans;
 mod races;
 mod receipt;
 mod recheck;

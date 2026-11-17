@@ -334,8 +334,14 @@ async fn postgres_resolution_gates_claims_but_keeps_recovered_refunds() {
     .execute(pool)
     .await
     .expect("构造载体已付款");
+    // 退款激活与清除或有未激活标记同事务，与恢复确认的激活写法一致。
     sqlx::query(
-        "UPDATE public.settlement_obligations SET business_state = 'ready' WHERE id = ANY($1)",
+        "WITH activated AS (
+             UPDATE public.settlement_obligations SET business_state = 'ready'
+             WHERE id = ANY($1) RETURNING id
+         )
+         UPDATE public.settlement_obligation_fulfillments SET dormant = false
+         WHERE obligation_id IN (SELECT id FROM activated)",
     )
     .bind(vec![handoff, recovered.refund])
     .execute(pool)

@@ -552,6 +552,8 @@ async fn postgres_fulfillment_terminal_is_resolved_only_by_its_disposition() {
     insert_terminal(pool, "90000002", TerminalKind::LossWithoutDisposition).await;
     insert_terminal(pool, "90000004", TerminalKind::CodReturnedWithDisposition).await;
     insert_terminal(pool, "90000005", TerminalKind::CodReturnedWithDisposition).await;
+    // 配对口径只从活动履约出发：读数与修复前全部义务 LEFT JOIN 履约的全表读法逐列相同。
+    crate::alert_entry_equivalence::assert_alert_reads_match_full_scan(pool).await;
 
     let classified = snapshot(&store_with_mode(&store, DispositionReadMode::Classified)).await;
     // 有统一处置事实的装备损失与两笔 COD 退回均已解除；只有缺处置的装备损失继续计入。

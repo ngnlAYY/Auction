@@ -105,11 +105,22 @@ pub(crate) struct PlanSummary {
     pub(crate) shared_read_blocks: i64,
     rows_returned: i64,
     node_types: Vec<String>,
+    /// 每个索引节点实际读出的行数（含被节点过滤掉的行，乘以循环次数；同名索引累加）。
+    index_rows: BTreeMap<String, i64>,
 }
 
 impl PlanSummary {
-    fn uses_index(&self, index: &str) -> bool {
+    pub(crate) fn uses_index(&self, index: &str) -> bool {
         self.node_types.iter().any(|node| node.contains(index))
+    }
+
+    /// 计划中经该索引读出的行数；计划没有用到该索引时为 `None`。
+    pub(crate) fn index_rows(&self, index: &str) -> Option<i64> {
+        self.index_rows.get(index).copied()
+    }
+
+    pub(crate) fn node_types(&self) -> &[String] {
+        &self.node_types
     }
 
     pub(crate) fn to_json(&self) -> Value {
@@ -120,6 +131,7 @@ impl PlanSummary {
             "shared_read_blocks": self.shared_read_blocks,
             "rows_returned": self.rows_returned,
             "node_types": self.node_types,
+            "index_rows": self.index_rows,
         })
     }
 }
@@ -354,13 +366,23 @@ pub(crate) async fn explain(
     sql: &str,
     arguments: &str,
 ) -> Result<PlanSummary, String> {
+    let execute = execute_probe(arguments);
     explain_script(
         pool,
         format!(
-            "PREPARE perf_probe AS {sql};\nEXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) EXECUTE perf_probe({arguments});\nDEALLOCATE perf_probe;"
+            "PREPARE perf_probe AS {sql};\nEXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) {execute};\nDEALLOCATE perf_probe;"
         ),
     )
     .await
+}
+
+/// `EXECUTE` 子句；无参数的语句不能写空括号。
+fn execute_probe(arguments: &str) -> String {
+    if arguments.is_empty() {
+        "EXECUTE perf_probe".to_owned()
+    } else {
+        format!("EXECUTE perf_probe({arguments})")
+    }
 }
 
 /// 同 [`explain`]，但在同一连接上强制通用计划：sqlx 复用预备语句，第 6 次执行起 PostgreSQL 可能
@@ -370,10 +392,11 @@ pub(crate) async fn explain_generic(
     sql: &str,
     arguments: &str,
 ) -> Result<PlanSummary, String> {
+    let execute = execute_probe(arguments);
     explain_script(
         pool,
         format!(
-            "SET plan_cache_mode = force_generic_plan;\nPREPARE perf_probe AS {sql};\nEXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) EXECUTE perf_probe({arguments});\nDEALLOCATE perf_probe;\nRESET plan_cache_mode;"
+            "SET plan_cache_mode = force_generic_plan;\nPREPARE perf_probe AS {sql};\nEXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) {execute};\nDEALLOCATE perf_probe;\nRESET plan_cache_mode;"
         ),
     )
     .await
@@ -404,6 +427,7 @@ async fn explain_script(pool: &PgPool, script: String) -> Result<PlanSummary, St
         shared_read_blocks: 0,
         rows_returned: 0,
         node_types: Vec::new(),
+        index_rows: BTreeMap::new(),
     };
     if let Some(root) = entry.get("Plan") {
         collect_plan(root, &mut summary, true);
@@ -414,10 +438,19 @@ async fn explain_script(pool: &PgPool, script: String) -> Result<PlanSummary, St
 fn collect_plan(node: &Value, summary: &mut PlanSummary, is_root: bool) {
     if let Some(node_type) = node.get("Node Type").and_then(Value::as_str) {
         let relation = node.get("Index Name").and_then(Value::as_str);
-        summary.node_types.push(match relation {
-            Some(index) => format!("{node_type}({index})"),
-            None => node_type.to_owned(),
+        let table = node.get("Relation Name").and_then(Value::as_str);
+        summary.node_types.push(match (relation, table) {
+            (Some(index), _) => format!("{node_type}({index})"),
+            (None, Some(table)) => format!("{node_type}[{table}]"),
+            (None, None) => node_type.to_owned(),
         });
+        if let Some(index) = relation {
+            let rows = node.get("Actual Rows").and_then(Value::as_f64).unwrap_or(0.0)
+                + node.get("Rows Removed by Filter").and_then(Value::as_f64).unwrap_or(0.0);
+            let loops = node.get("Actual Loops").and_then(Value::as_f64).unwrap_or(1.0);
+            *summary.index_rows.entry(index.to_owned()).or_default() +=
+                (rows * loops).round() as i64;
+        }
     }
     // 节点的缓冲区计数已包含全部子节点（含 InitPlan/SubPlan 与 CTE），逐节点相加会重复计数，只取
     // 根节点才是整条语句的总量；PostgreSQL 18 起 `Actual Rows` 是保留两位小数的每次循环平均值，

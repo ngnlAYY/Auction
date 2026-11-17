@@ -341,16 +341,34 @@ COMMIT 报告的 SSI 冲突不推测为序号热点。
 只追加的转换表变为一次索引探测，请求代价只随页大小增长；不改变可见集合、排序、分页、金额、
 转换写入、锁序、审计或事件。
 
-迁移 `000110`（整体登记 `breaking`，原因是告警闭集扩展）另新增部分索引
-`settlement_obligation_fulfillments_open_idx`（`settlement_obligation_fulfillments (obligation_id)`，
-谓词 `execution_state <> 'satisfied'`）。告警扫描与 Admin 看板的履约水位
-（`crates/auction-storage/src/database/operations/alert/snapshot/reads/fulfillment.rs`）只读尚未满足、
-义务为 `ready`/`blocked` 或履约停在 `failed`/`manual_reconcile` 的行，以及缺少履约行的 `blocked`
-义务；已满足的历史与从未激活的或有退款不进入分类。活动集合收成数组后按主键联表，分类只算一次，
-计数与长期未领取清单读同一份结果，不再顺序扫描投递表。索引只提供候选入口，不改变计数口径、
-金额、状态迁移、锁序、审计或事件。维护成本：未满足履约的领取与延期会改写既有 claim/lease 索引
-列，属于非 HOT 更新，每次都要同时维护这棵索引（不只在进入或离开 `satisfied` 时），而或有买方
-退款长期停在 `pending`、持续占据索引，候选规模仍随成交 lot 数增长。
+迁移 `000110`（整体登记 `breaking`，原因是告警闭集扩展）另为履约水位建立活动入口：
+`settlement_obligation_fulfillments.dormant` 标记从未激活的或有义务（只有买方退款可以是
+`contingent`）的履约，部分索引 `settlement_obligation_fulfillments_open_idx`
+（`settlement_obligation_fulfillments (obligation_id)`，谓词 `execution_state <> 'satisfied' AND NOT
+dormant`）与 `settlement_obligations_blocked_idx`（`settlement_obligations (id)`，谓词
+`business_state = 'blocked'`）。告警扫描与 Admin 看板的履约水位
+（`crates/auction-storage/src/database/operations/alert/snapshot/reads/fulfillment.rs`）的入口只读这
+两个索引：活动履约，以及缺少履约行的 `blocked` 义务；入口条件与索引谓词逐字一致，不再联表义务预筛
+业务状态（分类时按义务状态判定，多收进来的 `contingent` 未终结履约不满足任何计数条件）。已满足的
+历史与从未激活的或有退款不进入入口，入口规模只随活动集合变化，不随成交 lot 增长。活动集合收成数组
+后按主键联表，分类只算一次，计数与长期未领取清单读同一份结果。告警读侧口径切换的履约终态配对计数
+（`crates/auction-storage/src/database/operations/alert/snapshot/disposition.rs`）同样只从
+`execution_state = 'failed'` 的活动履约出发、不联表义务，不再扫描全部义务。索引与标记只提供候选
+入口，不改变计数口径、金额、状态迁移、锁序、审计或事件；入口与全表读法的逐列等价由
+`crates/auction-storage/tests/postgres/alert_entry_equivalence.rs` 验证，执行计划基准见
+`crates/auction-storage/tests/postgres/alert_plans.rs`。
+
+`dormant` 的维护：结算写入义务时或有义务的履约置真；recovery 确认 `equipment_recovered` 激活买方
+退款、装备损失把仍是 `contingent` 的退款履约直接收口为 `failed`（线下补偿）时同事务置假。表约束
+`settlement_obligation_fulfillments_dormant_check` 只允许标记留在初始 `pending`（无投递、无领取）的
+行上；延迟约束触发器 `settlement_obligations_dormant_consistent` 与
+`settlement_obligation_fulfillments_dormant_consistent`（函数
+`validate_settlement_fulfillment_dormant()`）在提交时拒绝“义务已离开 `contingent` 而履约仍带标记”
+或“带标记的履约不属于 `contingent` 义务”，漏清标记的写入失败关闭，已激活的退款不会从入口与计数中
+消失。迁移按同一谓词回填既有行（`contingent` 义务的初始 `pending` 履约），只写标记、不改执行状态、
+状态版本或更新时间。维护成本：未满足履约的领取与延期会改写既有 claim/lease 索引列，属于非 HOT
+更新，每次都要同时维护活动入口索引；或有退款在激活前不在索引里，义务在 `blocked` 与 `ready` 之间
+迁移时同时维护 blocked 入口索引。
 
 迁移 `000087` 只新增四个投递 Admin 检索候选索引，登记 `compatible`：
 `deliveries_admin_recipient_idx`（`lower(recipient)` 前导）、

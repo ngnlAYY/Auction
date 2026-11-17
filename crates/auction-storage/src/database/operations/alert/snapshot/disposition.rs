@@ -129,7 +129,7 @@ pub(super) const UNIFIED_EQUIPMENT_LOSS_TERMINAL: &str = r#"NOT (fulfillment.las
                           ON disposition.equipment_loss_id = loss.command_id
                          AND disposition.kind = 'equipment_loss'
                          AND disposition.resolves_alert
-                        WHERE loss.refund_obligation_id = obligation.id))"#;
+                        WHERE loss.refund_obligation_id = fulfillment.obligation_id))"#;
 
 /// COD 退回后成交撤销（达到 recovery 冻结上限退回卖家，或 Admin 确认收回/取消）时，以原 COD
 /// 投递上的 `cod_returned` 处置收口。失败义务都属于同一恢复记录；处置缺失时继续计入失败，不凭
@@ -196,10 +196,21 @@ const RETURN_CLOSED_TERMINAL: &str = r#"NOT (
 /// 迁移前的履约终态排除：只看不可变损失事实。
 const LEGACY_EQUIPMENT_LOSS_TERMINAL: &str = r#"NOT (fulfillment.last_error_code = 'operator_external_buyer_compensation'
                     AND EXISTS (SELECT 1 FROM public.settlement_equipment_losses loss
-                        WHERE loss.refund_obligation_id = obligation.id))"#;
+                        WHERE loss.refund_obligation_id = fulfillment.obligation_id))"#;
+
+/// 履约终态配对口径的扫描入口：两个口径都只数 `failed`，因此只从失败履约出发，不再从全部义务
+/// 历史出发，也不联表义务（各判据只用履约主键即义务标识）。入口同时写出迁移 000110 活动部分
+/// 索引 `settlement_obligation_fulfillments_open_idx` 的谓词（`execution_state <> 'satisfied' AND
+/// NOT dormant`），规划器即可只扫活动与终态待处置的履约。或有未激活标记只能留在初始 `pending`
+/// 履约上（同一迁移的 CHECK），追加的谓词不排除任何失败行；履约以义务为主键并外键引用义务，与原
+/// “义务 LEFT JOIN 履约、再按履约状态过滤”得到同一行集，计数口径不变。
+const PAIRED_FULFILLMENT_SOURCE: &str =
+    "FROM public.settlement_obligation_fulfillments AS fulfillment
+           WHERE fulfillment.execution_state = 'failed'
+             AND fulfillment.execution_state <> 'satisfied' AND NOT fulfillment.dormant";
 
 /// 履约来源的配对口径；同样只用一条语句读取两个口径。
-static PAIRED_FULFILLMENT_COUNTS: LazyLock<String> = LazyLock::new(|| {
+pub(super) static PAIRED_FULFILLMENT_COUNTS: LazyLock<String> = LazyLock::new(|| {
     format!(
         r#"SELECT
                COUNT(*) FILTER (WHERE fulfillment.execution_state = 'failed'
@@ -210,9 +221,7 @@ static PAIRED_FULFILLMENT_COUNTS: LazyLock<String> = LazyLock::new(|| {
                    AND {UNIFIED_COD_RETURN_TERMINAL}
                    AND {UNIFIED_EQUIPMENT_RECOVERED_TERMINAL}
                    AND {RETURN_CLOSED_TERMINAL})::bigint AS classified_failed
-           FROM public.settlement_obligations AS obligation
-           LEFT JOIN public.settlement_obligation_fulfillments AS fulfillment
-             ON fulfillment.obligation_id = obligation.id"#
+           {PAIRED_FULFILLMENT_SOURCE}"#
     )
 });
 

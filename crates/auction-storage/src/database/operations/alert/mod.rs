@@ -36,6 +36,9 @@ use health::{health_postgres, publish_runtime_status_postgres};
 use snapshot::{apply_read_mode, observe_host_postgres, observe_postgres, snapshot_postgres};
 use webhook::{claim_due_webhook_postgres, finish_webhook_postgres};
 
+#[cfg(feature = "test-db")]
+pub use snapshot::benchmark_sql;
+
 const MAX_ATTEMPTS: u32 = 3;
 
 /// SQL 绑定用的同一重试上限（`attempt_count` 列为 integer）；过期收口、重新领取与失败退避都

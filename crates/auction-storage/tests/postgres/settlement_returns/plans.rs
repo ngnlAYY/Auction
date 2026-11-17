@@ -333,7 +333,7 @@ DROP TABLE public.perf_return_seed;
 "#;
 
 /// 写入退件合成历史并以表 owner 收集统计信息（运行账号执行 ANALYZE 只会跳过）。
-async fn seed_returns(owner: &PgPool) -> Result<(), String> {
+pub(crate) async fn seed_returns(owner: &PgPool) -> Result<(), String> {
     sqlx::raw_sql(RETURN_HISTORY_SQL)
         .execute(owner)
         .await

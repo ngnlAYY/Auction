@@ -109,9 +109,10 @@ pub(super) async fn apply(
         .bind(payment_id).bind(i64::try_from(command.expected_payment_version).map_err(|_|Error::Rejected)?)
         .bind(&reference).bind(digest.as_slice()).execute(&mut **tx).await?;
     require_one(changed.rows_affected())?;
-    // 外部补偿是操作者承担的责任，不能把 refund 标记为已发送或已付款。
+    // 外部补偿是操作者承担的责任，不能把 refund 标记为已发送或已付款。退款义务仍是 contingent，
+    // 但履约已收口为 failed、须由处置事实证明已处置，因此清除或有未激活标记、回到活动入口。
     let changed=sqlx::query("UPDATE public.settlement_obligation_fulfillments SET execution_state='failed',
-        state_version=state_version+1,last_error_code='operator_external_buyer_compensation',
+        dormant=false,state_version=state_version+1,last_error_code='operator_external_buyer_compensation',
         proof_kind='operator_equipment_loss_v1',proof_reference=$2,proof_digest=$3,
         proof_observed_at=clock_timestamp(),next_attempt_at=NULL,completed_at=clock_timestamp(),updated_at=clock_timestamp()
         WHERE obligation_id=$1 AND execution_state='pending' AND state_version=1 AND delivery_id IS NULL AND claim_token IS NULL")

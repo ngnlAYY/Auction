@@ -32,6 +32,8 @@ pub use maintenance::key_rotation::{
 };
 pub use maintenance::least_privilege::{apply_runtime_privileges, runtime_privileges_present};
 #[cfg(feature = "test-db")]
+pub use operations::alert::benchmark_sql as alert_benchmark_sql;
+#[cfg(feature = "test-db")]
 pub use operations::asset_reconciliation::benchmark_sql as solvency_benchmark_sql;
 pub use operations::asset_reconciliation::{
     CUSTODY_REPORT_ACTION, CUSTODY_REPORT_ENTITY, CUSTODY_REPORT_FORMAT, POSTAGE_RATE_CREDITS,

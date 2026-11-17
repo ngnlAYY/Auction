@@ -8,6 +8,8 @@ mod support;
 
 mod admin_auctions;
 mod admin_runtime_commands;
+mod alert_entry_equivalence;
+mod alert_plans;
 mod asset_reconciliation;
 mod auction_write_queue;
 mod bid_cross_lot;
