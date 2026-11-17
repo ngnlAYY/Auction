@@ -72,12 +72,7 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: RollbackArgs) -> anyhow::R
     install::require_install_dir(&install_dir, &run_accounts(&states)?)?;
     let deployed_receipt =
         receipt::read(state, record.deploy_receipt_id).context("读取回滚记录对应的部署回执失败")?;
-    // 启动失败也会发布同 ID 的失败部署回执：新程序已安装但未就绪，仍必须允许恢复旧程序。
-    if !matches!(deployed_receipt.outcome, Outcome::Succeeded | Outcome::Failed)
-        || deployed_receipt.deploy.is_none()
-    {
-        anyhow::bail!("回滚记录对应的部署回执不是可回滚状态或缺少制品证据");
-    }
+    preconditions::require_rollbackable_receipt(&deployed_receipt)?;
     let installed = preconditions::require_installed_matches(&deployed_receipt, &install_dir)?;
     preconditions::require_target_differs(&record, &installed)?;
     let kept_cli_sha256 = preconditions::require_kept_cli(&install_dir)?;

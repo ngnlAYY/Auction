@@ -14,15 +14,17 @@ use super::identity::{kept_cli_identity, reverse_identity, rollback_deploy_recor
 use super::installed_retained_artifacts;
 use super::preconditions::{
     COMPATIBLE_READINESS_SINCE, require_cli_matches_database, require_compatible_readiness,
-    require_installed_matches, require_known_schema_across_migrations, require_target_differs,
+    require_installed_matches, require_known_schema_across_migrations,
+    require_rollbackable_receipt, require_target_differs,
 };
 use crate::deploy::artifact::{Artifact, ArtifactBinary, REQUIRED_BINARIES};
 use crate::deploy::install::{
     FORMAT, InstallArtifactFailure, ROLE_BINARIES, RetainRequest, RetainedBinary, RollbackRecord,
     SchemaSource, install_artifact, install_retained, latest, load, retain,
 };
-use crate::deploy::receipts::installed_identity;
+use crate::deploy::receipts::{FailedReceipt, installed_identity};
 use crate::deploy::role_binary;
+use crate::deploy::verification::installed_artifacts;
 use crate::receipt::{
     Action, Artifact as ReceiptArtifact, CliIdentity, DeployRecord, DeploySection,
     DeploymentReceipt, FORMAT as RECEIPT_FORMAT, LEGACY_FORMAT as LEGACY_RECEIPT_FORMAT,
@@ -438,17 +440,19 @@ impl Site {
 
     /// 模拟 `deploy`：保留四个程序（身份按摘要从回执绑定）、安装制品并发布 v2 deploy 回执。
     fn deploy(&self, artifact: &Artifact, schema: i64, database_version: i64) -> RollbackRecord {
-        self.deploy_with(artifact, schema, database_version, false)
+        self.deploy_with(artifact, schema, database_version, DeployFault::None)
     }
 
-    /// `fail_third` 为真时在安装前把制品的第三个程序等长改写（安装后复原），模拟安装第三个程序
-    /// 失败：与 `deploy_locked` 一样自动换回，并以安装目录的实际摘要发布失败回执。
+    /// 按 `fault` 模拟 `deploy_locked` 的结局。`InstallThird` 在安装前把制品的第三个程序等长改写
+    /// （安装后复原），安装第三个程序失败后与 `deploy_locked` 一样自动换回，并以安装目录的实际
+    /// 摘要发布失败回执；`Startup` 让四个程序都安装成功，再走 `deploy_locked` 启动失败分支的同一
+    /// 发布路径（`FailedReceipt` 与已安装制品的摘要）。
     fn deploy_with(
         &self,
         artifact: &Artifact,
         schema: i64,
         database_version: i64,
-        fail_third: bool,
+        fault: DeployFault,
     ) -> RollbackRecord {
         let id = Uuid::new_v4();
         let request = RetainRequest {
@@ -462,16 +466,9 @@ impl Site {
             retain(&self.state, &request, |binaries| Ok(installed_identity(&self.state, binaries)))
                 .expect("保留旧程序");
         let third = artifact.binary("auction-public-api").expect("制品程序").path.clone();
-        let restore = corrupt_if(&third, fail_third);
+        let restore = corrupt_if(&third, fault == DeployFault::InstallThird);
         let installed = install_artifact(artifact, &self.install, &retained, &directory);
         restore();
-        let outcome = match installed {
-            Ok(()) => Outcome::Succeeded,
-            Err(failure) => {
-                assert!(fail_third && failure.restored, "{:#}", failure.error);
-                Outcome::Failed
-            }
-        };
         let roles = RoleIdentity {
             artifact_directory: Some(artifact.root.display().to_string()),
             package: Some(artifact.package.clone()),
@@ -497,15 +494,43 @@ impl Site {
             backup_manifest: None,
             rollback_record_id: Some(id),
         };
-        self.publish(id, Action::Deploy, outcome, deploy);
+        match (installed, fault) {
+            (Ok(()), DeployFault::None) => {
+                self.publish(id, Action::Deploy, Outcome::Succeeded, deploy);
+            }
+            (Ok(()), DeployFault::Startup) => {
+                let context = ReceiptContext::resolve(None, Some("operator")).expect("上下文");
+                let failed = FailedReceipt {
+                    state: &self.state,
+                    receipt_id: id,
+                    action: Action::Deploy,
+                    started_at: Utc::now(),
+                    context: &context,
+                    deploy: &deploy,
+                };
+                let failure = failed.publish(
+                    anyhow::anyhow!("新程序已安装但启动失败"),
+                    None,
+                    installed_artifacts(artifact),
+                );
+                let text = format!("{:#}", failure.error);
+                assert!(!text.contains("部署回执也未写入"), "{text}");
+            }
+            (Err(failure), DeployFault::InstallThird) => {
+                assert!(failure.restored, "{:#}", failure.error);
+                self.publish(id, Action::Deploy, Outcome::Failed, deploy);
+            }
+            (Ok(()), DeployFault::InstallThird) => panic!("第三个程序必须安装失败"),
+            (Err(failure), _) => panic!("安装不应失败：{:#}", failure.error),
+        }
         retained
     }
 
     /// 模拟 `rollback`（不含 systemd 与数据库），停机前门禁与停机后的保留、安装都使用 `run` 与
-    /// `apply` 的同一组判定：省略 `record_id` 时取最新记录；核对安装目录与目标；反向记录身份按
-    /// 摘要重新绑定；安装失败时自动换回，并像 `apply` 一样以安装目录的实际摘要发布失败回执。
-    /// `fail_third` 为真时在安装前把目标记录的第三个程序等长改写（安装后复原），模拟安装第三个
-    /// 程序失败。
+    /// `apply` 的同一组判定：省略 `record_id` 时取最新记录；核对部署回执可回滚、安装目录与目标；
+    /// 反向记录身份按摘要重新绑定；安装失败时自动换回，并像 `apply` 一样以安装目录的实际摘要
+    /// 发布失败回执。`fail_third` 为真时在安装前把目标记录的第三个程序等长改写（安装后复原），
+    /// 模拟安装第三个程序失败。
     fn attempt(
         &self,
         record_id: Option<Uuid>,
@@ -517,6 +542,7 @@ impl Site {
             None => latest(&self.state)?,
         };
         let deployed = read_receipt(&self.state, record.deploy_receipt_id)?;
+        require_rollbackable_receipt(&deployed)?;
         let installed = require_installed_matches(&deployed, &self.install)?;
         require_target_differs(&record, &installed)?;
         let (cli_before, _) = sha256_path(&self.install.join("auction-cli"))?;
@@ -660,6 +686,17 @@ fn write_program(path: &Path, content: &str) {
 enum Attempt {
     Succeeded(RollbackRecord),
     Failed(RollbackRecord),
+}
+
+/// `Site::deploy_with` 模拟的 `deploy_locked` 结局。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DeployFault {
+    /// 安装与启动都成功，发布成功回执。
+    None,
+    /// 安装第三个程序失败并自动换回，失败回执的 `artifacts` 是换回后的实际程序。
+    InstallThird,
+    /// 四个程序都已安装、启动失败，失败回执的 `artifacts` 是已安装的制品程序。
+    Startup,
 }
 
 /// `corrupt` 为真时就地等长改写 `path`（同一 inode，大小不变、摘要不同），返回复原函数。
@@ -809,7 +846,7 @@ fn restored_deploy_failure_is_not_a_rollback_target() {
     let a = site.artifact("a");
     let b = site.artifact("b");
     site.deploy(&a, 96, 96);
-    let attempted = site.deploy_with(&b, 96, 96, true);
+    let attempted = site.deploy_with(&b, 96, 96, DeployFault::InstallThird);
     for name in ROLE_BINARIES {
         assert_eq!(site.installed(name), format!("a-{name}"), "自动换回后仍是 A");
     }
@@ -823,4 +860,44 @@ fn restored_deploy_failure_is_not_a_rollback_target() {
     let redeploy = site.deploy(&b, 96, 96);
     assert_eq!(redeploy.retained_roles.package.as_deref(), Some(a.package.as_str()));
     site.assert_identities_match_bytes();
+}
+
+/// 安装完成、启动失败之后回退到不同的目标仍被放行（A、B 同 schema，迁移已完成或没有迁移）：
+/// B 的四个程序都已装上，部署回执按 `deploy_locked` 启动失败分支发布为失败回执（deploy 段与
+/// `artifacts` 都是 B），本次回滚记录保留的是 A。入口接受失败回执，“目标就是当前程序”只比较
+/// 程序摘要，因此省略 `--receipt-id` 与显式指定这条记录都回到 A，CLI 仍是 B。失败回执不证明
+/// B 的身份，反向记录的角色身份为 null；每条成功回执与回滚记录的身份仍与字节一致。
+#[test]
+fn startup_failure_after_install_still_rolls_back_to_a_different_target() {
+    for explicit in [false, true] {
+        let site = Site::new();
+        let a = site.artifact("a");
+        let b = site.artifact("b");
+        site.deploy(&a, 96, 96);
+        let to_b = site.deploy_with(&b, 96, 96, DeployFault::Startup);
+        for name in REQUIRED_BINARIES {
+            assert_eq!(site.installed(name), format!("b-{name}"), "B 已完整安装");
+        }
+        assert_eq!(to_b.retained_roles.package.as_deref(), Some(a.package.as_str()));
+        let failed = read_receipt(&site.state, to_b.record_id).expect("失败回执");
+        assert_eq!(failed.outcome, Outcome::Failed);
+        assert!(failed.proven_identity().is_none(), "失败回执不证明任何组件的身份");
+        assert_eq!(site.current(to_b.record_id).roles.package.as_deref(), Some(b.package.as_str()));
+
+        let selected = explicit.then_some(to_b.record_id);
+        let attempt = site.attempt(selected, 96, false);
+        let Attempt::Succeeded(back) = attempt.expect("启动失败后回退到不同目标必须放行")
+        else {
+            panic!("回退不应失败");
+        };
+        for name in ROLE_BINARIES {
+            assert_eq!(site.installed(name), format!("a-{name}"), "三个角色回到 A");
+        }
+        assert_eq!(site.installed("auction-cli"), "b-auction-cli", "rollback 保留 B 的 CLI");
+        let receipt = site.current(back.record_id);
+        assert_eq!(receipt.roles.package.as_deref(), Some(a.package.as_str()));
+        assert_eq!(receipt.cli.package.as_deref(), None, "B 的 CLI 只有失败回执，来源未知");
+        assert_eq!(back.retained_roles, RoleIdentity::default(), "B 的角色身份未经证明");
+        site.assert_identities_match_bytes();
+    }
 }
