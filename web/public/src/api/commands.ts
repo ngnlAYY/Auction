@@ -17,13 +17,10 @@ import {
 } from "@auction/contracts/dto/public/commands";
 import { type ApiErrorResponse, ApiErrorResponseSchema } from "@auction/contracts/dto/response";
 import { decode } from "@auction/contracts/wire";
-import {
-  sendRequest,
-  type TransportResponse,
-  transportErrorCode,
-} from "@auction/web-shared/net/transport";
+import { type TransportResponse, transportErrorCode } from "@auction/web-shared/net/transport";
 import { err, ok, type Result } from "@auction/web-shared/result";
 import { utf8ByteLength } from "@auction/web-shared/text";
+import { sendRequest } from "./clock";
 import { decodeBidCommand, decodeCreateProxyCommand, decodeLowerProxyCommand } from "./decoder/lot";
 import { observePublicSessionFailure } from "./session";
 import { invalidateAfterCommand } from "./swr-cache";

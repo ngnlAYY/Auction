@@ -10,12 +10,7 @@ import {
 } from "@auction/contracts/dto/public/account";
 import { PUBLIC_EXPECTED_USER_ID_HEADER } from "@auction/contracts/dto/public/commands";
 import { jsonValue } from "@auction/contracts/wire";
-import {
-  sendGet,
-  sendRequest,
-  type TransportResponse,
-  transportErrorCode,
-} from "@auction/web-shared/net/transport";
+import { type TransportResponse, transportErrorCode } from "@auction/web-shared/net/transport";
 import { jsonHasExactKeys } from "@auction/web-shared/net/wire";
 import { setItem } from "@auction/web-shared/platform/storage";
 import type { Result } from "@auction/web-shared/result";
@@ -23,6 +18,7 @@ import { err, ok } from "@auction/web-shared/result";
 import { utf8ByteLength } from "@auction/web-shared/text";
 import { validUuid } from "@auction/web-shared/ui/validation";
 import * as v from "valibot";
+import { sendGet, sendRequest } from "../clock";
 import { decodeError, decodeErrorCode, decodeSuccess, object, string } from "../decoder";
 import { invalidateAll } from "../swr-cache";
 import { invalidate, lock as lockCookie, needsSync, record } from "./cookie";

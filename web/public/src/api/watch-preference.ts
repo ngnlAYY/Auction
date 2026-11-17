@@ -6,15 +6,11 @@ import {
   type PublicLotWatchPreferenceResponse,
   PublicLotWatchPreferenceResponseSchema,
 } from "@auction/contracts/dto/public/watch-preference";
-import {
-  sendGet,
-  sendRequest,
-  type TransportResponse,
-  transportErrorCode,
-} from "@auction/web-shared/net/transport";
+import { type TransportResponse, transportErrorCode } from "@auction/web-shared/net/transport";
 import { jsonHasExactKeys } from "@auction/web-shared/net/wire";
 import { err, ok, type Result } from "@auction/web-shared/result";
 import { validUuid } from "@auction/web-shared/ui/validation";
+import { sendGet, sendRequest } from "./clock";
 
 import type { CommandError } from "./commands";
 import { decodeErrorCode, decodeSuccess, int, object } from "./decoder";

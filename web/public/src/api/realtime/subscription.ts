@@ -2,11 +2,12 @@
 // 连接建立只受握手超时约束；业务消息空闲不能证明断线，协议 Ping/Pong 不暴露给浏览器 API。
 // 每帧先解码，序列跳号时回到 HTTP 补发，缺口仍存在才降级重连。
 
-import { sendGet, transportErrorCode } from "@auction/web-shared/net/transport";
+import { transportErrorCode } from "@auction/web-shared/net/transport";
 import { createTimeoutFuture } from "@auction/web-shared/platform/timer";
 import { err, ok, type Result } from "@auction/web-shared/result";
 import { reportBrowserError } from "@auction/web-shared/ui/bootstrap";
 import { observeServerBuildId } from "@auction/web-shared/ui/build-notice";
+import { sendGet } from "../clock";
 
 import { decodeBuildHello } from "../decoder/build-hello";
 import { decodeAuctionRealtimePage, decodeRealtimeEvent } from "../decoder/realtime";
