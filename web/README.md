@@ -189,7 +189,7 @@ export function Blacklist(): JSX.Element {
 
 映射字段不用 `v.record`：它会接受数组，并丢弃 `__proto__`、`constructor` 等键名。
 
-解码统一经 `decode(schema, data)`：失败返回 `null`，调用方映射为 `invalid_response` 并上报 `dto_decode`。路由专属的闭集键与跨字段校验留在各应用的 `api/` 下，先校验原始 JSON，再用 schema 解码。
+解码统一经 `decode(schema, data)`：返回 `{ ok: true, value }` 或 `{ ok: false }`，调用方把失败映射为 `invalid_response` 并上报 `dto_decode`。不用 `null` 表示失败，因为 `data: null` 对可空 schema 是合法的成功值。路由专属的闭集键与跨字段校验留在各应用的 `api/` 下，先校验原始 JSON，再用 schema 解码。
 
 ## 样式与译文
 

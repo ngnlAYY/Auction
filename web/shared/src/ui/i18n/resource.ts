@@ -112,17 +112,21 @@ async function fetchLocaleTextDirect(url: string): Promise<Result<string, string
 }
 
 function parseFluentResource(text: string): Result<FluentResource, string> {
-  if (!fluentTextFitsSubset(text)) {
+  const messages = fluentSubsetMessages(text);
+  if (messages === null) {
     return err("invalid fluent resource");
   }
   try {
-    return ok(new FluentResource(text));
+    // 只把通过校验的消息行交给解析器：注释里的内容（包括解析器可能当作换行的字符）不参与解析。
+    return ok(new FluentResource(messages.join("\n")));
   } catch (failure) {
     return err(errorText(failure));
   }
 }
 
-function fluentTextFitsSubset(text: string): boolean {
+/** 按平铺子集逐行校验；全部合法时返回消息行（不含空行与注释），否则返回 null。 */
+function fluentSubsetMessages(text: string): readonly string[] | null {
+  const messages: string[] = [];
   for (const line of text.split(/\r\n|\n|\r/)) {
     if (line.length === 0 || line.startsWith("#")) {
       continue;
@@ -130,10 +134,11 @@ function fluentTextFitsSubset(text: string): boolean {
     const message = MESSAGE_LINE.exec(line);
     const body = message?.[4];
     if (body === undefined || body.trim().length === 0 || !fluentBodyFitsSubset(body)) {
-      return false;
+      return null;
     }
+    messages.push(line);
   }
-  return true;
+  return messages;
 }
 
 function fluentBodyFitsSubset(text: string): boolean {

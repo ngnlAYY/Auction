@@ -121,11 +121,17 @@ export function stringMap<TSchema extends v.GenericSchema>(schema: TSchema) {
 /** 任意 JSON 值（serde_json::Value）；结构由消费它的模块另行校验。 */
 export const jsonValue = v.unknown();
 
-/** 用 schema 解码一份未知数据；失败返回 null，由调用方映射为 invalid_response。 */
+/** 解码结果：成功时带值（值本身可以是 null），失败时只有标记。 */
+export type Decoded<T> = { readonly ok: true; readonly value: T } | { readonly ok: false };
+
+/**
+ * 用 schema 解码一份未知数据；失败由调用方映射为 invalid_response。
+ * 结果用 ok 区分成败，不用 null 表示失败：`data: null` 对可空 schema 是合法的成功值。
+ */
 export function decode<TSchema extends v.GenericSchema>(
   schema: TSchema,
   data: unknown,
-): v.InferOutput<TSchema> | null {
+): Decoded<v.InferOutput<TSchema>> {
   const parsed = v.safeParse(schema, data);
-  return parsed.success ? parsed.output : null;
+  return parsed.success ? { ok: true, value: parsed.output } : { ok: false };
 }
