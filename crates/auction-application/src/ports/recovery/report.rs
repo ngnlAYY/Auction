@@ -43,6 +43,10 @@ pub struct RecoveryReportEntry {
     pub custody_proof_kind: Option<String>,
     pub custody_proof_observed_at: Option<DateTime<Utc>>,
     pub blocking_code: Option<String>,
+    /// 退件不能把原义务每一次可能外达的发送逐一归属的具体原因（闭集见
+    /// [`RECOVERY_SEND_ATTRIBUTION_BLOCKERS`]）；只对等待确认或自动推进的 `reclaiming` 记录按
+    /// 同一判定求值，归属成立或不适用时为空。
+    pub send_attribution_blocker: Option<String>,
     pub manual_reconcile_delivery_id: Option<SettlementId>,
     pub relisted_auction_id: Option<AuctionId>,
     pub relisted_lot_id: Option<LotId>,
@@ -50,6 +54,16 @@ pub struct RecoveryReportEntry {
     pub allowed_commands: Vec<String>,
     pub updated_at: DateTime<Utc>,
 }
+
+/// 发送归属不成立的具体原因闭集；报告读取与 HTTP 投影按同一集合校验。
+pub const RECOVERY_SEND_ATTRIBUTION_BLOCKERS: [&str; 6] = [
+    "return_not_current",
+    "send_in_flight",
+    "sends_exceed_returns",
+    "send_without_sent_mid",
+    "send_records_incomplete",
+    "send_after_return",
+];
 
 /// 一个原拍卖的一致 recovery 报告。
 #[derive(Debug, Clone)]
@@ -189,6 +203,7 @@ mod tests {
             custody_proof_kind: Some("delivery_recovery_take_succeeded".to_owned()),
             custody_proof_observed_at: Some(at),
             blocking_code: None,
+            send_attribution_blocker: None,
             manual_reconcile_delivery_id: None,
             relisted_auction_id: None,
             relisted_lot_id: None,

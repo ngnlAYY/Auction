@@ -867,54 +867,97 @@ async fn postgres_cod_advance_blocks_returns_that_cannot_be_attributed() {
     store.postgres_pool().close().await;
 }
 
-/// 原 COD 在退件之后仍排队待发（退件到达前经 Admin 重试改回 pending，恢复接管后投递门禁把它一直
-/// 留在待发；被退回的那次发送留作冻结尝试）：发送计数与退件相符，但退件之后还有待发的发送意图，
-/// 自动推进同样以 `send_unattributed` 阻断并提交，不以重寄失败的错误占住推进队头，其后到期的恢复
-/// 记录照常重寄。
+/// 原 COD 在退件到达前经 Admin 重试改回 pending（被退回的那次发送留作冻结尝试），恢复接管后投递
+/// 门禁把它一直留在待发：它当前 fence 从未进入发送围栏，是确定未外写的意图，不再阻断归属，自动
+/// 重寄以新 fence 接替它（审计 `superseded_queued_intent=true`），不以重寄失败的错误占住队头。
+/// 反例：原 COD 已进入发送围栏（`sending`）时外部写入未解决，仍以 `send_unattributed` 阻断（原因
+/// `send_in_flight`）并提交，其后到期的恢复记录照常重寄。
 #[tokio::test]
-async fn postgres_cod_advance_blocks_a_queued_original_instead_of_failing() {
+async fn postgres_cod_resend_supersedes_a_queued_original_but_not_a_sending_one() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
     let pool = store.postgres_pool();
     let queued = insert_reclaimed_cod(pool, 7_400_201, 1).await;
+    let in_flight = insert_reclaimed_cod(pool, 7_400_203, 1).await;
     let next = insert_reclaimed_cod(pool, 7_400_202, 1).await;
-    let (_, delivery) = payment_of(pool, queued).await;
-    sqlx::query(
-        "INSERT INTO public.delivery_send_attempts
-            (delivery_id, fencing_version, command_id, request_digest, world_id, sending_at,
-             expectation)
-         SELECT id, fencing_version, command_id, request_digest, payload_world, sending_at,
-                jsonb_build_object('world_id', payload_world, 'recipient', recipient,
-                    'subject', 'Auction equipment delivery',
-                    'body_digest', to_jsonb(array_fill(9, ARRAY[32])), 'credits', 0, 'cod', 100,
-                    'equipment_ids', '[]'::jsonb, 'credential', 'null'::jsonb)
-         FROM public.deliveries WHERE id = $1",
-    )
-    .bind(delivery)
-    .execute(pool)
-    .await
-    .expect("被退回的那次发送留作冻结尝试");
+    for recovery_id in [queued, in_flight] {
+        let (_, delivery) = payment_of(pool, recovery_id).await;
+        sqlx::query(
+            "INSERT INTO public.delivery_send_attempts
+                (delivery_id, fencing_version, command_id, request_digest, world_id, sending_at,
+                 expectation)
+             SELECT id, fencing_version, command_id, request_digest, payload_world, sending_at,
+                    jsonb_build_object('world_id', payload_world, 'recipient', recipient,
+                        'subject', 'Auction equipment delivery',
+                        'body_digest', to_jsonb(array_fill(9, ARRAY[32])), 'credits', 0,
+                        'cod', 100, 'equipment_ids', '[]'::jsonb, 'credential', 'null'::jsonb)
+             FROM public.deliveries WHERE id = $1",
+        )
+        .bind(delivery)
+        .execute(pool)
+        .await
+        .expect("被退回的那次发送留作冻结尝试");
+        sqlx::query(
+            "UPDATE public.deliveries
+             SET status = 'pending', sending_at = NULL, claimed_at = NULL, completed_at = NULL,
+                 external_reference = NULL, fencing_version = fencing_version + 1
+             WHERE id = $1",
+        )
+        .bind(delivery)
+        .execute(pool)
+        .await
+        .expect("原 COD 改回待发");
+    }
+    let (_, sending_delivery) = payment_of(pool, in_flight).await;
     sqlx::query(
         "UPDATE public.deliveries
-         SET status = 'pending', sending_at = NULL, claimed_at = NULL, completed_at = NULL,
-             external_reference = NULL, fencing_version = fencing_version + 1
+         SET status = 'sending', claimed_at = now(), sending_at = now(),
+             lease_token = gen_random_uuid(), lease_expires_at = now() + interval '5 minutes'
          WHERE id = $1",
     )
-    .bind(delivery)
+    .bind(sending_delivery)
     .execute(pool)
     .await
-    .expect("原 COD 改回待发");
+    .expect("原 COD 已进入发送围栏");
 
-    let blocked = advance(&store).await;
-    assert_eq!(blocked.recovery_id.as_uuid(), queued, "更早到期的恢复记录先推进");
-    assert_eq!((blocked.stage.as_str(), blocked.resolution), ("reclaiming", None));
-    let blocking_code: Option<String> =
-        sqlx::query_scalar("SELECT blocking_code FROM public.settlement_recoveries WHERE id = $1")
-            .bind(queued)
+    let resent = advance(&store).await;
+    assert_eq!(resent.recovery_id.as_uuid(), queued, "更早到期的恢复记录先推进");
+    assert_eq!((resent.stage.as_str(), resent.resolution), ("awaiting_payment", None));
+    let (_, queued_delivery) = payment_of(pool, queued).await;
+    let (status, fence): (String, i64) =
+        sqlx::query_as("SELECT status, fencing_version FROM public.deliveries WHERE id = $1")
+            .bind(queued_delivery)
             .fetch_one(pool)
             .await
-            .expect("读取阻断码");
+            .expect("读取原 COD 投递");
+    assert_eq!((status.as_str(), fence), ("pending", 4), "重寄以新 fence 接替待发意图");
+    let superseded: bool = sqlx::query_scalar(
+        "SELECT (metadata->>'superseded_queued_intent')::boolean FROM public.audit_records
+         WHERE entity_type = 'delivery' AND entity_id = $1 AND action = 'delivery.cod_return_resend'",
+    )
+    .bind(queued_delivery.to_string())
+    .fetch_one(pool)
+    .await
+    .expect("读取重寄审计");
+    assert!(superseded);
+
+    let blocked = advance(&store).await;
+    assert_eq!(blocked.recovery_id.as_uuid(), in_flight);
+    assert_eq!((blocked.stage.as_str(), blocked.resolution), ("reclaiming", None));
+    let (blocking_code, reason): (Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT recovery.blocking_code,
+                (SELECT audit.metadata->>'reason' FROM public.audit_records AS audit
+                 WHERE audit.entity_type = 'settlement_recovery'
+                   AND audit.entity_id = recovery.id::text
+                   AND audit.action = 'recovery.send_attribution_blocked')
+         FROM public.settlement_recoveries AS recovery WHERE recovery.id = $1",
+    )
+    .bind(in_flight)
+    .fetch_one(pool)
+    .await
+    .expect("读取阻断码与原因");
     assert_eq!(blocking_code.as_deref(), Some("send_unattributed"));
+    assert_eq!(reason.as_deref(), Some("send_in_flight"));
     let resent = advance(&store).await;
     assert_eq!(
         (resent.recovery_id.as_uuid(), resent.stage.as_str()),

@@ -435,7 +435,7 @@ COD 实收资金化诊断使用独立 target `auction::settlement::funding_diagn
 | 更换外部 Cookie | Admin “Cookie 池”录入新凭据并停用旧凭据（每种 kind 同时只能一个 active），或 `auction-cli credential import`；然后重启 Worker（分体部署用 `service restart`） |
 | 暂停/恢复收件 | Admin 仪表盘或“收件审核”页；恢复轮询不绕过场次冻结的赛季收件门禁，见[docs/business-rules.md#赛季早鸟期auctionscheduleearly_bird](../docs/business-rules.md#赛季早鸟期auctionscheduleearly_bird) |
 | 结果未知的投递 | Admin “投递队列”按动作与证据人工对账；主动 Send 禁止仅凭外部引用人工确认成功，须由冻结的精确 Sent 证明恢复。未找到 Sent 不证明未发送 |
-| 恢复确认 | Admin “结算报表”中确认 `reclaimed` / `cancelled` / `equipment_recovered`；付款截止与跨赛季重列限制见[4 恢复付款超时与拒收](../docs/guide/settlement.md#4-恢复付款超时与拒收)。确认返回 `recovery_send_unattributed`，或 Worker 自动重寄/退回卖家以报表阻断码 `recovery_evidence_mismatch` 停下且有审计 `recovery.send_attribution_blocked`，表示退件不能唯一归属到原投递的一次发送（可能有另一封邮件仍在对方手里）：按投递详情的冻结发送尝试与 Sent 人工核对，系统不提供绕过的确认入口 |
+| 恢复确认 | Admin “结算报表”中确认 `reclaimed` / `cancelled` / `equipment_recovered`；付款截止与跨赛季重列限制见[4 恢复付款超时与拒收](../docs/guide/settlement.md#4-恢复付款超时与拒收)。确认返回 `recovery_send_unattributed`，或 Worker 自动重寄/退回卖家以报表阻断码 `recovery_evidence_mismatch` 停下且有审计 `recovery.send_attribution_blocked`，表示退件不能唯一归属到原投递的一次发送（可能有另一封邮件仍在对方手里）：报表的证据列显示具体原因（`send_attribution_blocker`）。Worker 每 10 分钟按持久事实复核一次，Sent 恢复为每一次可能外达的发送补上远端 MID、且与已消费的退件一一对应时自动解除（审计 `recovery.send_attribution_released`，`rule=sent_mid`）并继续推进；仍不成立时按投递详情的冻结发送尝试与 Sent 人工核对，系统不提供绕过的确认入口。原付款投递在退件之前被重新排队而停在待发时不再阻断，收口时由恢复流程终结为 `failed/recovery_superseded`（投递台只在扩展投影中列出）或由自动重寄接替 |
 | 结算退件 | Admin “结算退件”页（`/settlement-returns`，侧栏显示未结案待办数）按案件处理，动作只在详情页按服务端给出的允许动作确认后提交，处理流程见[结算退件处理](#结算退件处理)；代管与留箱结案的资产用[结算退件代管查询](#结算退件代管查询)只读核对，偿付报告单列代管负债 |
 | 论坛写入未知与私信对账 | `auction-cli forum recovery` 查看，必要时 `forum authorize-retry`；私信用 `pm list` / `pm reconcile` |
 | 规则与“关于”发布 | Admin “规则内容”“关于内容”页（内容直接写入数据库，没有文件导入） |

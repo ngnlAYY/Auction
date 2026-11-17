@@ -1,9 +1,11 @@
 //! Admin 确认成交撤销（`reclaimed`/`cancelled`）时，在确认事务内收口原付款履约与不再可执行的
 //! 依赖履约，并在原付款投递上追加 `cod_returned` 统一处置事实。
 //!
-//! 只复用既有 `failed` 执行状态与明确失败码，不新增状态；原投递、发送证明与资金事实保持不变。
+//! 只复用既有 `failed` 执行状态与明确失败码，不新增状态；原投递的发送证明与资金事实保持不变。
 //! 原付款已满足、原付款投递仍可能外发、已消费的退件不能把原付款每一次可能外达的发送逐一归属
-//! （含当前退件之后又有发送），或依赖履约已开始执行时拒绝确认，交给人工核对。
+//! （含当前退件之后又有发送），或依赖履约已开始执行时拒绝确认，交给人工核对。原付款投递被重新
+//! 排队、因恢复接管而停在待发且当前 fence 从未进入发送围栏时，同事务终结为
+//! `failed/recovery_superseded`（见 `superseded`），处置落在终结后的 fence 上。
 
 use auction_application::recovery::{
     RecoveryCommandError, RecoveryConfirmationAction, RecoveryConfirmationCommand,
@@ -18,6 +20,9 @@ use crate::database::operations::audit_health::AuditWriteResult as _;
 use crate::database::recovery::commands::binding::return_attributable_to_sends;
 use crate::database::recovery::commands::mapping::map_sql_error;
 use crate::database::recovery::commands::scope::RecoveryRow;
+use crate::database::recovery::commands::superseded::{
+    SupersedingActor, retire_superseded_dispatch,
+};
 
 /// 依赖原付款、随成交撤销一起终结的卖方货款与 isekai 装备交付履约的失败码。
 pub(super) const SALE_VOIDED_CODE: &str = "recovery_sale_voided";
@@ -48,6 +53,7 @@ pub(in crate::database::recovery::commands) async fn close_voided_fulfillments(
     .map_err(map_sql_error)?;
     let mut payment_delivery = None;
     let mut payment_state = None;
+    let mut superseded = false;
     if let Some(row) = payment {
         let state: String = row.try_get("execution_state").map_err(map_sql_error)?;
         // 已满足说明买方已付款，成交不能再撤销。
@@ -58,15 +64,21 @@ pub(in crate::database::recovery::commands) async fn close_voided_fulfillments(
             row.try_get::<Option<Uuid>, _>("delivery_id").map_err(map_sql_error)?
         {
             let delivery = sqlx::query(
-                "SELECT status, fencing_version FROM public.deliveries WHERE id = $1 FOR UPDATE",
+                r#"SELECT status, fencing_version, sending_at IS NULL AS never_sent
+                   FROM public.deliveries WHERE id = $1 FOR UPDATE"#,
             )
             .bind(delivery_id)
             .fetch_one(&mut **transaction)
             .await
             .map_err(map_sql_error)?;
             let status: String = delivery.try_get("status").map_err(map_sql_error)?;
-            // 投递仍在准备、排队或发送中：外部写入尚未解决，不能自动收口。
-            if matches!(status.as_str(), "prepared" | "pending" | "claimed" | "sending") {
+            let never_sent: bool = delivery.try_get("never_sent").map_err(map_sql_error)?;
+            // 当前 fence 从未进入发送围栏的待发意图由收口终结；仍在准备、已进入发送或发送中的
+            // 投递外部写入尚未解决，不能自动收口。
+            superseded = matches!(status.as_str(), "pending" | "claimed") && never_sent;
+            if !superseded
+                && matches!(status.as_str(), "prepared" | "pending" | "claimed" | "sending")
+            {
                 return Err(RecoveryCommandError::NotConfirmable);
             }
             let fencing: i64 = delivery.try_get("fencing_version").map_err(map_sql_error)?;
@@ -81,6 +93,24 @@ pub(in crate::database::recovery::commands) async fn close_voided_fulfillments(
         .await?
     {
         return Err(RecoveryCommandError::SendUnattributed);
+    }
+    if superseded {
+        let actor = SupersedingActor {
+            actor_type: command.actor.actor_type.database_name(),
+            actor_id: &command.actor.actor_id,
+            source: "admin",
+        };
+        retire_superseded_dispatch(
+            transaction,
+            recovery.payment_obligation_id,
+            recovery.id,
+            &actor,
+            now,
+        )
+        .await?
+        .ok_or(RecoveryCommandError::StaleState)?;
+        // 终结推进了 fence；收口处置落在终结后的当前 fence 上。
+        payment_delivery = payment_delivery.map(|(delivery_id, fence)| (delivery_id, fence + 1));
     }
 
     let mut dependents = vec![recovery.seller_payout_obligation_id];

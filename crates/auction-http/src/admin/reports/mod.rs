@@ -19,6 +19,7 @@ use crate::errors::{
     CAPABILITY_NOT_PROVIDED, DATABASE_NOT_CONFIGURED, api_error, feature_unavailable,
     not_found_error,
 };
+use crate::query::parse_query;
 use crate::session::{
     admin_session_guard, authenticated_admin_session, internal_error, no_store_headers,
 };
@@ -111,10 +112,10 @@ pub(crate) async fn admin_recovery_report(
     if let Err(response) = authenticated_admin_session(&state, &headers).await {
         return *response;
     }
-    if uri.query().is_some_and(|query| !query.is_empty()) {
-        return api_error(StatusCode::BAD_REQUEST, "invalid_query", "恢复报告不接受查询参数")
-            .into_response();
-    }
+    let include_send_attribution = match recovery_report_projection(&uri) {
+        Ok(include) => include,
+        Err(response) => return *response,
+    };
     let Ok(auction_uuid) = Uuid::parse_str(&auction_id) else {
         return api_error(StatusCode::BAD_REQUEST, "invalid_auction_id", "拍卖 ID 无效")
             .into_response();
@@ -152,7 +153,7 @@ pub(crate) async fn admin_recovery_report(
     if !valid_recovery_report(&report, auction_uuid) {
         return internal_error();
     }
-    let report = match map_recovery_report(report) {
+    let report = match map_recovery_report(report, include_send_attribution) {
         Ok(report) => report,
         Err(diagnostic_cause) => {
             diagnostics::error(
@@ -173,4 +174,48 @@ pub(crate) async fn admin_recovery_report(
     };
     (StatusCode::OK, no_store_headers(), Json(ApiResponse::ok("恢复报告已加载", report)))
         .into_response()
+}
+
+/// 恢复报告的响应投影：缺省是已发布的字段集合；只接受可选的 `include=send_attribution` 追加
+/// 发送归属原因。未登记的键、重复出现或其他取值都是 400 `invalid_query`，不静默退回缺省投影。
+fn recovery_report_projection(uri: &Uri) -> Result<bool, Box<Response>> {
+    let invalid = || {
+        Box::new(
+            api_error(StatusCode::BAD_REQUEST, "invalid_query", "恢复报告查询参数无效")
+                .into_response(),
+        )
+    };
+    let mut query = parse_query(uri, &["include"]).map_err(|()| invalid())?;
+    match query.remove("include").as_deref() {
+        None => Ok(false),
+        Some("send_attribution") => Ok(true),
+        Some(_) => Err(invalid()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::http::Uri;
+
+    use super::recovery_report_projection;
+
+    /// 缺省（含空查询）是已发布投影；只有精确的 `include=send_attribution` 追加发送归属原因，其他
+    /// 键、重复或取值都拒绝。
+    #[test]
+    fn recovery_report_accepts_only_the_send_attribution_include() {
+        let parse =
+            |query: &str| recovery_report_projection(&query.parse::<Uri>().expect("合法 URI")).ok();
+        assert_eq!(parse("/report"), Some(false));
+        assert_eq!(parse("/report?"), Some(false));
+        assert_eq!(parse("/report?include=send_attribution"), Some(true));
+        for rejected in [
+            "/report?include=",
+            "/report?include=Send_Attribution",
+            "/report?include=send_attribution,actions",
+            "/report?include=send_attribution&include=send_attribution",
+            "/report?page=1",
+        ] {
+            assert_eq!(parse(rejected), None, "{rejected}");
+        }
+    }
 }

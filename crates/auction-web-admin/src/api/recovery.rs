@@ -21,11 +21,11 @@ use super::{
     valid_uuid,
 };
 
-/// 读取指定原拍卖的 recovery 报告。
+/// 读取指定原拍卖的 recovery 报告；始终请求发送归属原因的扩展投影。
 pub(crate) async fn fetch_admin_recovery(
     auction_id: String,
 ) -> Result<AdminRecoveryReport, String> {
-    let url = format!("/api/v1/admin/auctions/{auction_id}/recovery-report");
+    let url = recovery_report_url(&auction_id);
     let response = send_get(&url).await?;
     if !response.ok() {
         return Err(response_error(response).await);
@@ -36,6 +36,10 @@ pub(crate) async fn fetch_admin_recovery(
     validate_recovery_report(&report, &auction_id)
         .then_some(report)
         .ok_or_else(|| invalid_response_error("recovery report wire 无效"))
+}
+
+fn recovery_report_url(auction_id: &str) -> String {
+    format!("/api/v1/admin/auctions/{auction_id}/recovery-report?include=send_attribution")
 }
 
 /// 提交带版本 fence 的 recovery 确认命令。
@@ -124,6 +128,9 @@ fn validate_recovery(recovery: &AdminRecovery) -> bool {
         && recovery.resolution.as_deref().is_none_or(valid_recovery_command)
         && custody_proof_valid
         && recovery.blocking_code.as_deref().is_none_or(valid_recovery_error)
+        && recovery.send_attribution_blocker.as_deref().is_none_or(|blocker| {
+            recovery.stage == "reclaiming" && valid_send_attribution_blocker(blocker)
+        })
         && recovery.manual_reconcile_delivery_id.as_deref().is_none_or(valid_uuid)
         && relisted_valid
         && recovery
@@ -226,6 +233,19 @@ fn valid_recovery_action_state(value: &str) -> bool {
     )
 }
 
+/// 发送归属不成立的具体原因闭集；与服务端恢复报告同一集合。
+fn valid_send_attribution_blocker(value: &str) -> bool {
+    matches!(
+        value,
+        "return_not_current"
+            | "send_in_flight"
+            | "sends_exceed_returns"
+            | "send_without_sent_mid"
+            | "send_records_incomplete"
+            | "send_after_return"
+    )
+}
+
 fn valid_recovery_error(value: &str) -> bool {
     matches!(
         value,
@@ -241,4 +261,21 @@ fn valid_recovery_error(value: &str) -> bool {
             | "recovery_outcome_unknown"
             | "recovery_relist_unavailable"
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{recovery_report_url, valid_send_attribution_blocker};
+
+    /// 新页面总是请求发送归属原因；闭集之外的原因让报告校验失败关闭。
+    #[test]
+    fn recovery_report_requests_send_attribution_and_checks_the_closed_set() {
+        assert_eq!(
+            recovery_report_url("00000000-0000-0000-0000-000000000002"),
+            "/api/v1/admin/auctions/00000000-0000-0000-0000-000000000002/recovery-report\
+             ?include=send_attribution"
+        );
+        assert!(valid_send_attribution_blocker("send_without_sent_mid"));
+        assert!(!valid_send_attribution_blocker("operator_declared"));
+    }
 }

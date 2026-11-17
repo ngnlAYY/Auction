@@ -24,7 +24,7 @@ use crate::support;
 
 /// 夹具里恢复记录的创建时刻；夹具的发送、退件与消费时刻都相对它偏移（原付款 +5 分钟发送，
 /// 当前退件 +30 分钟收到、+31 分钟被消费，截止为 +31 分钟）。
-async fn created_at(pool: &PgPool, recovery_id: Uuid) -> DateTime<Utc> {
+pub(super) async fn created_at(pool: &PgPool, recovery_id: Uuid) -> DateTime<Utc> {
     sqlx::query_scalar("SELECT created_at FROM public.settlement_recoveries WHERE id = $1")
         .bind(recovery_id)
         .fetch_one(pool)
@@ -34,7 +34,12 @@ async fn created_at(pool: &PgPool, recovery_id: Uuid) -> DateTime<Utc> {
 
 /// 给投递追加一条冻结发送尝试（指定 fence，命令身份与投递当前发送不同，因此不是当前尝试）；
 /// 不改投递行。
-async fn insert_attempt(pool: &PgPool, delivery_id: Uuid, fence: i64, sending_at: DateTime<Utc>) {
+pub(super) async fn insert_attempt(
+    pool: &PgPool,
+    delivery_id: Uuid,
+    fence: i64,
+    sending_at: DateTime<Utc>,
+) {
     sqlx::query(
         "INSERT INTO public.delivery_send_attempts
             (delivery_id, fencing_version, command_id, request_digest, world_id, sending_at,
@@ -57,7 +62,7 @@ async fn insert_attempt(pool: &PgPool, delivery_id: Uuid, fence: i64, sending_at
 
 /// 把投递当前发送移到 `sending_at`、fence 改为 `fence`，并按投递自身的命令、摘要、世界与收件人
 /// 冻结同一次发送，使它成为 `delivery_current_send_attempt` 解析出的当前尝试。
-async fn freeze_current_attempt(
+pub(super) async fn freeze_current_attempt(
     pool: &PgPool,
     delivery_id: Uuid,
     fence: i64,

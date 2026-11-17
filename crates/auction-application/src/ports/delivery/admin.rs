@@ -83,9 +83,10 @@ pub struct DeliveryAdminListRequest {
     pub created_from: Option<DateTime<Utc>>,
     /// 创建时间上界（含）。
     pub created_to: Option<DateTime<Utc>>,
-    /// 是否列出结算退件 Take 投递（来源 `settlement_return_action`）。缺省不列出：已发布的 Admin
-    /// 页面按闭集解码来源，读到不认识的来源整页失败，所以只有显式请求扩展投影的页面才列出它们；
-    /// 总数与分页按同一口径计算，被省略的投递在库中不变。
+    /// 是否列出结算退件 Take 投递（来源 `settlement_return_action`）与被恢复终结的原结算投递
+    /// （`failed/recovery_superseded`，没有发送时间）。缺省不列出：已发布的 Admin 页面按闭集解码，
+    /// 读到不认识的来源或时间链整页失败，所以只有显式请求扩展投影的页面才列出它们；总数与分页按
+    /// 同一口径计算，被省略的投递在库中不变。
     pub include_settlement_return_actions: bool,
     pub limit: i64,
     pub offset: i64,

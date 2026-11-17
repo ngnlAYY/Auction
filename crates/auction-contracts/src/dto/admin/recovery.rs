@@ -83,6 +83,12 @@ pub struct AdminRecoveryResponse {
     pub custody_proof_observed_at: Option<String>,
     #[serde(deserialize_with = "deserialize_required_option")]
     pub blocking_code: Option<String>,
+    /// 退件不能把原义务每一次可能外达的发送逐一归属的具体原因（`return_not_current`、
+    /// `send_in_flight`、`sends_exceed_returns`、`send_without_sent_mid`、`send_records_incomplete`、
+    /// `send_after_return`）。只在请求带 `include=send_attribution` 且原因存在时输出；缺省响应
+    /// 保持已发布的字段集合。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub send_attribution_blocker: Option<String>,
     #[serde(deserialize_with = "deserialize_required_option")]
     pub manual_reconcile_delivery_id: Option<String>,
     #[serde(deserialize_with = "deserialize_required_option")]

@@ -5,7 +5,10 @@ use auction_web_shared::{Dialog, t};
 use dioxus::prelude::*;
 
 use super::page::RecoveryConfirmationDraft;
-use super::presentation::{recovery_action_summary, recovery_command_label, recovery_stage_label};
+use super::presentation::{
+    recovery_action_summary, recovery_command_label, recovery_stage_label,
+    send_attribution_blocker_label,
+};
 use super::report::AdminSettlementPager;
 use crate::api::{AdminRecovery, AdminRecoveryReport, confirm_admin_recovery};
 use crate::surface::AdminActionFeedback;
@@ -95,9 +98,13 @@ fn AdminRecoveryRow(
     let display_equipment_identity = format!("{display_equipment_name}({})", recovery.world_id);
     let lot_code =
         super::super::lots::admin_lot_code_for(&recovery.equipment_category, recovery.lot_number);
+    // 发送归属不成立时显示具体原因（Worker 阻断与 Admin 确认共用同一判定），否则沿用阻断码或
+    // 收回证明。
     let evidence = recovery
-        .blocking_code
-        .clone()
+        .send_attribution_blocker
+        .as_deref()
+        .map(send_attribution_blocker_label)
+        .or_else(|| recovery.blocking_code.clone())
         .or_else(|| recovery.custody_proof_kind.clone())
         .unwrap_or_else(|| t!("value-empty"));
     let actions = recovery_action_summary(&recovery.actions);

@@ -11,6 +11,7 @@ use auction_domain::AuctionId;
 use auction_domain::{LotId, SettlementId};
 
 use crate::database::DatabaseStore;
+use crate::database::recovery::commands::send_attribution_blocker;
 use crate::database::storage_error;
 use crate::database::storage_error_from;
 
@@ -75,6 +76,7 @@ async fn postgres_report(
                recovery.custody_proof_kind,
                recovery.custody_proof_observed_at,
                recovery.blocking_code,
+               return_evidence.decision_metadata ->> 'obligation_id' AS return_obligation_id,
                recovery.manual_reconcile_delivery_id,
                recovery.relisted_auction_id,
                recovery.relisted_lot_id,
@@ -86,6 +88,8 @@ async fn postgres_report(
            INNER JOIN public.lots AS lot
                ON lot.id = recovery.lot_id AND lot.auction_id = recovery.auction_id
            INNER JOIN public.equipment AS equipment ON equipment.id = lot.equipment_id
+           LEFT JOIN public.inbound_mail AS return_evidence
+               ON return_evidence.id = recovery.return_mail_id
            WHERE recovery.auction_id = $1
            ORDER BY lot.lot_number, recovery.id"#,
     )
@@ -168,6 +172,8 @@ async fn postgres_report(
         }
 
         let actions = actions_by_recovery.remove(&recovery_id).unwrap_or_default();
+        let send_attribution_blocker =
+            attribution_blocker(&mut transaction, &row, recovery_id).await?;
 
         let mut entry = RecoveryReportEntry {
             id: SettlementId::from_uuid(recovery_id),
@@ -218,6 +224,7 @@ async fn postgres_report(
             blocking_code: row
                 .try_get("blocking_code")
                 .map_err(|error| storage_error_from(error, "读取 recovery 阻塞码失败"))?,
+            send_attribution_blocker,
             manual_reconcile_delivery_id: row
                 .try_get::<Option<Uuid>, _>("manual_reconcile_delivery_id")
                 .map_err(|error| storage_error_from(error, "读取 recovery 人工对账投递标识失败"))?
@@ -245,4 +252,35 @@ async fn postgres_report(
         .await
         .map_err(|error| storage_error_from(error, "提交 recovery 报告快照失败"))?;
     Ok(Some(RecoveryReport { auction_id, recoveries }))
+}
+
+/// 等待确认或自动推进的 `reclaiming` 记录（持有收回证明与当前退件）按确认与 Worker 推进同一判定
+/// 求出发送归属不成立的具体原因；当前退件没有可解析的义务时不求值（确认事务同样会拒绝）。
+async fn attribution_blocker(
+    transaction: &mut crate::database::TrackedTransaction<'static, sqlx::Postgres>,
+    row: &sqlx::postgres::PgRow,
+    recovery_id: uuid::Uuid,
+) -> Result<Option<String>, ApplicationError> {
+    use sqlx::Row;
+
+    let stage: String = row
+        .try_get("stage")
+        .map_err(|error| storage_error_from(error, "读取 recovery 阶段失败"))?;
+    let custody: Option<String> = row
+        .try_get("custody_proof_kind")
+        .map_err(|error| storage_error_from(error, "读取 recovery custody 证明类型失败"))?;
+    let obligation: Option<String> = row
+        .try_get("return_obligation_id")
+        .map_err(|error| storage_error_from(error, "读取 recovery 当前退件义务失败"))?;
+    let Some(obligation_id) = obligation.and_then(|value| uuid::Uuid::parse_str(&value).ok())
+    else {
+        return Ok(None);
+    };
+    if stage != "reclaiming" || custody.is_none() {
+        return Ok(None);
+    }
+    let blocker = send_attribution_blocker(transaction, obligation_id, recovery_id)
+        .await
+        .map_err(|error| storage_error_from(error, "读取 recovery 发送归属失败"))?;
+    Ok(blocker.map(|blocker| blocker.as_str().to_owned()))
 }

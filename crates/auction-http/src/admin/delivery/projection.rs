@@ -2,8 +2,9 @@
 //!
 //! 投递来源与处置种类是浏览器按闭集解码的值。部署窗口内升级前打开的页面仍会读取新服务端，缺省
 //! 响应多出一个它不认识的值，整页列表或详情就解码失败，直到刷新。因此缺省投影只输出已发布页面
-//! 认识的值：列表不列出结算退件 Take（来源 `settlement_return_action`），详情拒绝读取这类投递，
-//! 处置只保留已发布的种类闭集。本版本的页面以 `include=settlement_returns` 显式请求扩展投影（见
+//! 认识的值：列表不列出结算退件 Take（来源 `settlement_return_action`）与被恢复终结的原结算投递
+//! （`failed/recovery_superseded`，没有发送时间），详情拒绝读取这两类投递，处置只保留已发布的
+//! 种类闭集。本版本的页面以 `include=settlement_returns` 显式请求扩展投影（见
 //! `crates/auction-contracts/README.md` 的变更规则）。与其他路由一致，`include` 每次只接受一个
 //! 取值，所以列表与详情共用这一个取值，覆盖本版本新增的来源与处置种类。
 
@@ -38,6 +39,15 @@ const PUBLISHED_DISPOSITION_KINDS: [&str; 12] = [
     "preflight_retired",
 ];
 
+/// 恢复接管退件后由恢复 owner 终结的原结算投递的失败码：从未进入发送时间链，已发布页面的
+/// 解码不认，缺省投影不输出（与存储的列表排除同一口径）。
+const RECOVERY_SUPERSEDED_CODE: &str = "recovery_superseded";
+
+fn recovery_superseded(detail: &AdminDeliveryDetailResponse) -> bool {
+    detail.delivery.status == "failed"
+        && detail.delivery.failure_code.as_deref() == Some(RECOVERY_SUPERSEDED_CODE)
+}
+
 /// 投递列表与详情的响应投影。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DeliveryProjection {
@@ -65,21 +75,22 @@ impl DeliveryProjection {
         matches!(self, Self::SettlementReturns)
     }
 
-    /// 按投影输出详情。缺省投影下结算退件 Take 投递返回 404 `delivery_projection_excluded`，与列表
-    /// 不列出它们同一口径，不把来源改写成旧页面认识的值；处置只保留投影允许的种类，被省略的事实
-    /// 仍只追加在库中，新页面显式请求即可看到。
+    /// 按投影输出详情。缺省投影下结算退件 Take 与被恢复终结的原结算投递返回 404
+    /// `delivery_projection_excluded`，与列表不列出它们同一口径，不把来源或状态改写成旧页面认识的
+    /// 值；处置只保留投影允许的种类，被省略的事实仍只追加在库中，新页面显式请求即可看到。
     pub(crate) fn project_detail(
         self,
         mut detail: AdminDeliveryDetailResponse,
     ) -> Result<AdminDeliveryDetailResponse, Box<Response>> {
         if !self.includes_settlement_return_actions()
-            && detail.delivery.origin_kind == SETTLEMENT_RETURN_ACTION_ORIGIN
+            && (detail.delivery.origin_kind == SETTLEMENT_RETURN_ACTION_ORIGIN
+                || recovery_superseded(&detail))
         {
             return Err(Box::new(
                 api_error(
                     StatusCode::NOT_FOUND,
                     "delivery_projection_excluded",
-                    "结算退件 Take 投递不在缺省投影内，须带 include=settlement_returns 读取",
+                    "该投递不在缺省投影内，须带 include=settlement_returns 读取",
                 )
                 .into_response(),
             ));
@@ -273,6 +284,24 @@ mod tests {
         }
         assert!(DeliveryProjection::SettlementReturns.includes_settlement_return_actions());
         assert!(!DeliveryProjection::Published.includes_settlement_return_actions());
+    }
+
+    /// 被恢复终结的原结算投递（`failed/recovery_superseded`，没有发送时间）不进入缺省详情，扩展
+    /// 投影照常输出；同来源的普通失败不受影响。
+    #[tokio::test]
+    async fn recovery_superseded_settlement_delivery_is_extended_only() {
+        let mut superseded = detail("settlement");
+        superseded.delivery.status = "failed".to_owned();
+        superseded.delivery.failure_code = Some("recovery_superseded".to_owned());
+        let response = DeliveryProjection::Published
+            .project_detail(superseded.clone())
+            .expect_err("缺省投影不输出被恢复终结的投递");
+        let (status, body) = error_body(*response).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(body["code"], "delivery_projection_excluded");
+        assert!(DeliveryProjection::SettlementReturns.project_detail(superseded.clone()).is_ok());
+        superseded.delivery.failure_code = Some("send_rejected".to_owned());
+        assert!(DeliveryProjection::Published.project_detail(superseded).is_ok());
     }
 
     /// 只有精确的 `settlement_returns` 是扩展投影；空值、大小写不同、逗号列表与旧的单项取值都以

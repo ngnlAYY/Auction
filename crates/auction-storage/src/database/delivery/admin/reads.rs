@@ -13,12 +13,14 @@ use crate::database::TrackedPool;
 /// status、reference、recipient、template、category、world、created_from、created_to、
 /// include_settlement_return_actions。
 /// reference 同时匹配投递 ID、结算义务 ID 与玩家通知 ID，其余筛选都是等值匹配。
-/// 结算退件 Take（`settlement_return_action`）只在请求扩展投影时列出：已发布页面按闭集解码来源，
-/// 把它放进缺省投影会让整页解码失败；它和计数在同一条件下排除，分页与总数保持一致。
+/// 结算退件 Take 与被恢复终结的原结算投递只在请求扩展投影时列出（见
+/// `extended_projection_delivery_sql!`）：已发布页面按闭集解码，把它们放进缺省投影会让整页解码
+/// 失败；它们和计数在同一条件下排除，分页与总数保持一致。
 /// 用宏展开而不是动态拼接，让 SQLx 的静态字符串检查覆盖完整语句。
 macro_rules! delivery_filters {
     () => {
-        r#"
+        concat!(
+            r#"
            WHERE ($1::text IS NULL OR deliveries.status = $1::text)
              AND (
                  $2::uuid IS NULL
@@ -45,7 +47,10 @@ macro_rules! delivery_filters {
              )
              AND ($7::timestamptz IS NULL OR deliveries.created_at >= $7::timestamptz)
              AND ($8::timestamptz IS NULL OR deliveries.created_at <= $8::timestamptz)
-             AND ($9::boolean OR deliveries.origin_kind <> 'settlement_return_action')"#
+             AND ($9::boolean OR NOT "#,
+            extended_projection_delivery_sql!("deliveries"),
+            ")"
+        )
     };
 }
 

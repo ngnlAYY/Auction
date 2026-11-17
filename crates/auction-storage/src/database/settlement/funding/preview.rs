@@ -333,7 +333,11 @@ pub(super) async fn snapshot(
             blockers.push(format!("delivery:{}:assets_unbounded", delivery["id"]));
             continue;
         }
-        if state == "failed" && (credits != Some(0) || cod != Some(0)) {
+        // 恢复接管退件后被终结的原结算投递从未进入发送围栏，资产没有离开 Bot（由同事务的恢复
+        // 收口处置说明去向），不是失败但资产不明的投递。
+        let superseded =
+            delivery["failure_code"] == "recovery_superseded" && delivery["sending_at"].is_null();
+        if state == "failed" && !superseded && (credits != Some(0) || cod != Some(0)) {
             blockers.push(format!("delivery:{}:failed_assets_unproven", delivery["id"]));
         }
         if matches!(state, "prepared" | "pending" | "claimed") && credits.is_some_and(|n| n > 0) {
