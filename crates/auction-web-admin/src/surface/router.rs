@@ -1,5 +1,9 @@
 //! 管理端路由表、页面入口组件和旧版别名跳转。
 //! 路由路径与页面组件在同一 owner 内维护，避免 surface 装配文件再次聚合所有页面入口。
+// dioxus-router-macro 0.7.10 的 `Routable` 派生把 `String`/`Vec<String>` 段的解析错误包进
+// `map_err` 闭包；Rust 1.100 起 `Infallible` 即 `!`，该闭包被判为不可达调用。派生代码在 `const _`
+// 块中与 `Route` 并列，lint 属性无法只挂到派生项上，只能在本模块放行；上游修正派生后删除。
+#![allow(unreachable_code, reason = "Routable 派生的段解析错误映射在 Infallible 即 ! 后不可达")]
 
 #[cfg(target_arch = "wasm32")]
 use std::{cell::RefCell, rc::Rc};

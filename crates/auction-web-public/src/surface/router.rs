@@ -1,4 +1,8 @@
 //! Public Dioxus 路由表、语言目录与启动入口；页面外壳见 `shell` 模块。
+// dioxus-router-macro 0.7.10 的 `Routable` 派生把 `String`/`Vec<String>` 段的解析错误包进
+// `map_err` 闭包；Rust 1.100 起 `Infallible` 即 `!`，该闭包被判为不可达调用。派生代码在 `const _`
+// 块中与 `Route` 并列，lint 属性无法只挂到派生项上，只能在本模块放行；上游修正派生后删除。
+#![allow(unreachable_code, reason = "Routable 派生的段解析错误映射在 Infallible 即 ! 后不可达")]
 
 use auction_web_shared::i18n::{
     DEFAULT_PUBLIC_LOCALE, LocaleCatalog, LocaleSession, LocaleSource, build_bundle,
