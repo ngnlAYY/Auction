@@ -405,6 +405,7 @@ dependencies = [
  "auction-application",
  "auction-domain",
  "auction-integrations",
+ "auction-jobs",
  "auction-observability",
  "chrono",
  "futures-util",
