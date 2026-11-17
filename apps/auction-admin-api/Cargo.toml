@@ -16,7 +16,7 @@ auction-jobs.workspace = true
 auction-storage.workspace = true
 auction-observability.workspace = true
 auction-process.workspace = true
-auction-setup.workspace = true
+auction-setup = { workspace = true, optional = true }
 rust-embed.workspace = true
 chrono.workspace = true
 tokio.workspace = true
@@ -26,7 +26,8 @@ libc.workspace = true
 
 [features]
 default = []
-web-embed = []
+# 可选：内嵌 Admin 页面；首次设置入口只在此构建中可用，auction-setup 随之启用。
+web-embed = ["dep:auction-setup"]
 
 [lints]
 # 可选：继承工作区统一 lint 策略，不在单包放宽。
