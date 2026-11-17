@@ -60,15 +60,7 @@ pub struct AuctionScheduleTimes {
 impl AuctionScheduleSource {
     /// 复用旧周计划的歧义时间取较早实例、跳时时间按后续 offset 归一化语义。
     pub fn resolve(&self) -> Result<AuctionScheduleTimes, DomainError> {
-        // 日期限定在公元 1–9999 年：这之外的年份，日期与身份文本的写法不再与已持久化的格式一致
-        // （负年份的位数不同），失败关闭而不是换一种写法继续。
-        let supported = SUPPORTED_YEARS.contains(&self.preview_local.year())
-            && SUPPORTED_YEARS.contains(&self.open_local.year())
-            && SUPPORTED_YEARS.contains(&self.end_local.year())
-            && self.early_bird.is_none_or(|slot| SUPPORTED_YEARS.contains(&slot.season.year()));
-        if !supported {
-            return Err(DomainError::InvalidSchedule("周排期日期超出支持范围"));
-        }
+        self.ensure_supported_years()?;
         let timezone = parse_timezone(&self.timezone)
             .ok_or(DomainError::InvalidSchedule("周排期时区来源无效"))?;
         let result = AuctionScheduleTimes {
@@ -95,6 +87,8 @@ impl AuctionScheduleSource {
 
     /// 保留原时区与本地钟点整体顺延若干天，并去除早鸟身份；仅用于没有日历时的兜底后继。
     pub fn shifted_local_days(&self, days: i64) -> Result<Self, DomainError> {
+        // 越界的来源不能靠顺延回到支持范围里继续使用；其余合法性仍只校验顺延后的结果。
+        self.ensure_supported_years()?;
         let shift = Duration::try_days(days)
             .ok_or(DomainError::InvalidSchedule("下一期本地时间超出范围"))?;
         let next = |value: civil::DateTime| {
@@ -112,6 +106,20 @@ impl AuctionScheduleSource {
         };
         source.resolve()?;
         Ok(source)
+    }
+
+    /// 日期限定在公元 1–9999 年：这之外的年份，日期与身份文本的写法不再与已持久化的格式一致
+    /// （负年份的位数不同），失败关闭而不是换一种写法继续。
+    fn ensure_supported_years(&self) -> Result<(), DomainError> {
+        let supported = SUPPORTED_YEARS.contains(&self.preview_local.year())
+            && SUPPORTED_YEARS.contains(&self.open_local.year())
+            && SUPPORTED_YEARS.contains(&self.end_local.year())
+            && self.early_bird.is_none_or(|slot| SUPPORTED_YEARS.contains(&slot.season.year()));
+        if supported {
+            Ok(())
+        } else {
+            Err(DomainError::InvalidSchedule("周排期日期超出支持范围"))
+        }
     }
 
     /// Admin 改期只更新实际改变的钟点；不把未改的跳时原始钟点替换成归一化后的时间。

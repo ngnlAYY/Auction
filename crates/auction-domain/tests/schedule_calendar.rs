@@ -228,6 +228,11 @@ fn schedule_source_rejects_years_outside_the_supported_range() {
     }
     // 顺延的结果同样受限：从公元 1 年初往回推一周落到公元 0 年，被拒绝。
     assert!(matches!(valid.shifted_local_days(-7), Err(DomainError::InvalidSchedule(_))));
+    // 越界的来源也不能靠顺延回到支持范围：公元 0 年末的来源推进一周会落进公元 1 年，仍被拒绝。
+    let before_range =
+        source("UTC", naive(0, 12, 25, 0, 0), naive(0, 12, 26, 0, 0), naive(0, 12, 27, 0, 0));
+    assert!(matches!(before_range.next_week(), Err(DomainError::InvalidSchedule(_))));
+    assert!(matches!(before_range.shifted_local_days(7), Err(DomainError::InvalidSchedule(_))));
 
     let mut early_bird = valid;
     early_bird.early_bird =
