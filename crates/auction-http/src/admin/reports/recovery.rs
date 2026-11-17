@@ -67,6 +67,8 @@ fn map_recovery_error_code(
         // 旧赛季装备已随 isekai 换季清空，属于永久不能重挂。
         "relist_season_closed" => Ok(PublicRecoveryErrorCode::RelistUnavailable),
         "evidence_mismatch" => Ok(PublicRecoveryErrorCode::EvidenceMismatch),
+        // 退件不能把原投递每一次可能外达的发送逐一归属：同属证据不符，不新增公开码。
+        "send_unattributed" => Ok(PublicRecoveryErrorCode::EvidenceMismatch),
         // 成功页但远端引用不能证明的旧语义是 outcome_unknown，不能伪装成已观察到的证据缺失。
         "delivery_reference_mismatch"
         | "delivery_reference_missing"
@@ -268,4 +270,19 @@ pub(super) fn valid_recovery_report(report: &RecoveryReport, auction_id: Uuid) -
         }
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::map_optional_recovery_error_code;
+
+    /// Worker 自动推进因退件不能唯一归属而写下的内部阻断码，在防腐边界归并为已发布的
+    /// `recovery_evidence_mismatch`，旧页面按闭集照常解码。
+    #[test]
+    fn send_attribution_block_maps_to_the_published_evidence_mismatch() {
+        assert_eq!(
+            map_optional_recovery_error_code(Some("send_unattributed".to_owned())),
+            Ok(Some("recovery_evidence_mismatch".to_owned()))
+        );
+    }
 }

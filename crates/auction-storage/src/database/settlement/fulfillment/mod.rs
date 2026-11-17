@@ -19,7 +19,7 @@ mod dependencies;
 mod eligibility;
 pub(crate) use eligibility::{
     SettlementDeliveryEligibility, lock_settlement_delivery_eligibility,
-    recovery_allows_execution_now,
+    recovery_allows_execution_now, recovery_owns_return_sql,
 };
 mod internal;
 pub(crate) use collection::{

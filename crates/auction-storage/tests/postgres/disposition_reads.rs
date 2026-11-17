@@ -627,7 +627,8 @@ async fn postgres_disposition_reads_paired_failure_never_shows_classified_author
 }
 
 /// 构造 COD 退回次数达到冻结上限（`limit` 次）时可领取的恢复事实，供 `advance_due_cod_return`
-/// 入口使用。
+/// 入口使用。原 COD 投递在 50 分钟前进入过发送围栏（结果没有证明未外写，按可能已寄达计），
+/// 恢复记录当前退件是已被它消费的系统 `[RTS]` 退件：退回卖家前的发送归属判定据此成立。
 async fn insert_cod_reclaim(pool: &PgPool, limit: i32) -> (Uuid, Uuid, Uuid, Uuid) {
     let now = Utc::now() - chrono::Duration::hours(1);
     let user_id = Uuid::new_v4();
@@ -775,17 +776,18 @@ async fn insert_cod_reclaim(pool: &PgPool, limit: i32) -> (Uuid, Uuid, Uuid, Uui
     sqlx::query(
         "INSERT INTO public.deliveries
             (id, command_id, request_digest, origin_kind, origin_id, recipient, payload,
-             status, fencing_version, attempt_count, claimed_at, completed_at, created_at,
-             updated_at, failure_code, result_metadata)
+             status, fencing_version, attempt_count, claimed_at, sending_at, completed_at,
+             created_at, updated_at, failure_code, result_metadata)
          VALUES ($1, $2, decode(repeat('99', 32), 'hex'), 'settlement', $3, $4,
                  '{\"schema_version\":1,\"operation\":\"send\",\"template\":\"settlement_winner_equipment_cod\",\"credits\":0,\"cod\":0,\"attachment_ids\":[]}'::jsonb,
-                 'failed', 2, 1, $5, $5, $5, $5, 'cod_returned_three_times', '{}'::jsonb)",
+                 'failed', 2, 1, $5, $6, $5, $5, $5, 'cod_returned_three_times', '{}'::jsonb)",
     )
     .bind(delivery_id)
     .bind(Uuid::new_v4())
     .bind(payment_obligation.to_string())
     .bind(format!("cod-reclaim-player-{delivery_id}"))
     .bind(now)
+    .bind(now - chrono::Duration::minutes(50))
     .execute(pool)
     .await
     .expect("写入 COD 投递");
@@ -833,14 +835,18 @@ async fn insert_cod_reclaim(pool: &PgPool, limit: i32) -> (Uuid, Uuid, Uuid, Uui
     sqlx::query(
         "INSERT INTO public.inbound_mail
             (id, mailbox_key, external_mail_id, world_id, mail_kind, content_digest,
-             received_at, status, decision_code, processed_at)
+             received_at, status, decision_code, decision_metadata, processed_at, sender,
+             subject)
          VALUES ($1, 'cod-reclaim', $2, 'main', 'delivery', $3, $4, 'accepted',
-                 'accepted', $4)",
+                 'settlement_recovery_returned', jsonb_build_object('obligation_id', $5::text),
+                 $4, 'MoogleMail', $6)",
     )
     .bind(return_mail_id)
     .bind(format!("cod-reclaim-mid-{return_mail_id}"))
     .bind([4_u8; 32].as_slice())
     .bind(now)
+    .bind(payment_obligation.to_string())
+    .bind(format!("[RTS] Auction equipment delivery [{payment_obligation}]"))
     .execute(pool)
     .await
     .expect("写入 COD 退回邮件");
@@ -873,6 +879,16 @@ async fn insert_cod_reclaim(pool: &PgPool, limit: i32) -> (Uuid, Uuid, Uuid, Uui
     .execute(pool)
     .await
     .expect("写入 COD 恢复");
+    sqlx::query(
+        "INSERT INTO public.settlement_recovery_return_consumptions
+            (return_mail_id, recovery_id, recorded_at) VALUES ($1, $2, $3)",
+    )
+    .bind(return_mail_id)
+    .bind(recovery_id)
+    .bind(now)
+    .execute(pool)
+    .await
+    .expect("写入 COD 退件消费事实");
     for (index, kind) in ["reclaim_equipment_take", "buyer_blacklist"].into_iter().enumerate() {
         sqlx::query(
             "INSERT INTO public.settlement_recovery_actions

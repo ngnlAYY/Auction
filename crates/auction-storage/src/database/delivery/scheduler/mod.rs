@@ -148,11 +148,31 @@ AND (
     };
 }
 
+/// 恢复流程接管结算义务被退回的邮件之后（已消费退件、持有收回证明，或系统退件已到达待消费），
+/// 通用投递路径不得再领取或发送该义务的投递：重寄只归恢复 owner（它重寄时清空当前退件与收回证明），
+/// 其余经 Admin 确认收口。与 Admin 重新激活共用同一接管谓词；发送围栏复核领取之后才到达或被消费
+/// 的退件，零 Credits 与现金发送同样经过这里（不变量 2、4、6）。非结算来源的 `origin_id` 不按 UUID
+/// 解析。
+macro_rules! delivery_recovery_return_gate {
+    () => {
+        concat!(
+            "(deliveries.origin_kind <> 'settlement' OR NOT ",
+            crate::database::settlement::fulfillment::recovery_owns_return_sql!(
+                "(CASE WHEN deliveries.origin_kind = 'settlement'
+                            AND pg_input_is_valid(deliveries.origin_id, 'uuid')
+                       THEN deliveries.origin_id::uuid END)"
+            ),
+            ")"
+        )
+    };
+}
+
 /// MailIntake delivery 必须等待入站邮件及其命令账本完成，并由决定元数据明确授权当前
 /// delivery；没有入站账本授权的行（含已删除的论坛回执历史行）永不领取。
 /// 已录入拍卖的邮件不能退回，相反资产意图也不能同时发送；该门禁覆盖升级前已 pending/claimed 的
 /// 冲突记录，保留原账本供人工核对，不能靠重放命令重新获得发送授权。
-/// 通知类资格（换季提醒边界/未完成义务、投稿回执原场次状态）同样在此复核，领取与发送共用。
+/// 通知类资格（换季提醒边界/未完成义务、投稿回执原场次状态）与结算义务的恢复接管同样在此复核，
+/// 领取与发送共用。
 macro_rules! delivery_completion_gate {
     () => {
         concat!(
@@ -184,7 +204,9 @@ macro_rules! delivery_completion_gate {
             " AND ",
             crate::database::lot_watch::delivery_watch_gate!(),
             " AND ",
-            delivery_notice_eligibility_gate!()
+            delivery_notice_eligibility_gate!(),
+            " AND ",
+            delivery_recovery_return_gate!()
         )
     };
 }
@@ -449,7 +471,16 @@ mod notice_gate_tests {
         );
         CREATE TEMP TABLE inbound_mail (
             id uuid, world_id text, external_mail_id text, status text, decision_code text,
-            decision_metadata jsonb, content_digest bytea
+            decision_metadata jsonb, content_digest bytea, mail_kind text, sender text,
+            subject text
+        );
+        -- 恢复接管门只对结算来源求值；本用例没有结算投递，两张表保持为空。
+        CREATE TEMP TABLE settlement_recoveries (
+            id uuid, payment_obligation_id uuid, equipment_obligation_id uuid,
+            return_mail_id uuid, custody_proof_kind text
+        );
+        CREATE TEMP TABLE settlement_recovery_return_consumptions (
+            return_mail_id uuid, recovery_id uuid
         );
         CREATE TEMP TABLE mail_commands (mail_id uuid, request_digest bytea, result_payload jsonb);
         CREATE TEMP TABLE lot_watch_notifications (
