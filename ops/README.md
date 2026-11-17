@@ -462,7 +462,7 @@ COD 实收资金化诊断使用独立 target `auction::settlement::funding_diagn
 
 Take 结果未知（`take_unknown`）时案件停在人工核对：不要在游戏内手工领取，也不要在投递台对该 Take 投递重试或声明结果（投递台会拒绝）。系统只认可验证的领取证明：邮箱维护在原 Take 会话里复核原退件，详情页的收件人等于执行 Take 的凭据所属账号的预期玩家名（凭据未登记预期名称时不能自动收口），发件人、主题、原退件正文与逐条 `Removed attachment:` 领取回执都与领取前一致时按领回证明收口（资金返还一次，再按计划补寄或代管），原资产完整仍在即重新排队执行 Take（每条最多 2 次），两者都会在案件事件里留下记录（`take_proven` 的 `proof=action_recovered_inbox_v1`，或 `take_activated` 的 `requeued=true`）。附件已为空但没有对应回执、Take 在准备期就被确定拒绝（结果记录未开始写出）时系统自动以新 fence 重新执行，最多两次（事件 `take_activated` 的 `reason=take_not_started`）；激活前的同邮件冲突在另一意图确定从未执行后自动交接（事件 `take_requested` 的 `handover=true`），此后投递台会拒绝重试那条原意图。邮件整体缺失、资产不全、Take 由配置 Cookie 执行、重启已用满或同邮件冲突仍未解除（事件 `take_unknown` 的 `failure_code=mail_disposition_conflict`，动作保持 pending）时案件保持打开，`settlement_return_quarantined` 告警持续活动（可在告警台静默重复通知）；结算退件 Take 投递归案件所有，不计入投递人工对账、积压与失败告警。仍无法收口的案件在游戏内核对 Bot 收件箱中原退件是否仍在，记录结论后上报维护者，不要人工改库。
 
-待重新核验（`recheck_pending`）的案件需要 Worker 能只读读取该世界的 MoogleMail：未启用邮件、该世界未配置或 Worker 不在线时，详情显示“核验能力不可用”，案件保持待核验并继续计入隔离告警，恢复能力（启用 MoogleMail 并重启 Worker）后自动继续，不需要重新提交。
+待重新核验（`recheck_pending`）的案件需要 Worker 能只读读取该世界的 MoogleMail：未启用邮件、该世界未配置、Worker 已停止（最近一次心跳为 `stopping`）或最近一次心跳过期超过一个 TTL（30 秒）时，详情显示“核验能力不可用”，案件保持待核验并继续计入隔离告警，恢复能力（启用 MoogleMail 并重启 Worker）后自动继续，不需要重新提交。
 
 ### 结算退件代管查询
 
