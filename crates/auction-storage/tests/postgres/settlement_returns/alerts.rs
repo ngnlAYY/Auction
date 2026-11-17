@@ -2,8 +2,9 @@
 //! 账号执行：
 //! - 导航待办 `settlement_returns` 按未结案案件计数（含隔离、待核验与 Take 结果未知），不要求存在
 //!   义务，结案后回落；
-//! - `settlement_return_pending`（已绑定待处理）与 `settlement_return_quarantined`（隔离或 Take 结果
-//!   未知）由扫描按未结案案件写入；告警确认不改变案件，案件全部结案后由下一轮扫描关闭；
+//! - `settlement_return_pending`（已绑定待处理）、`settlement_return_quarantined`（隔离或待核验）与
+//!   `settlement_return_take_unknown`（Take 结果未知，作用域为具体原因）由扫描按未结案案件写入；
+//!   告警确认不改变案件，案件全部结案后由下一轮扫描关闭；
 //! - 案件读取失败时履约来源不可用：已有退件告警保持活动，不当作零件关闭，待办计数读取直接失败。
 //!
 //! Worker 一轮扫描以 `snapshot` → `evaluate_snapshot` → `observe` 模拟；Take 的外部执行以直接 SQL
@@ -126,7 +127,7 @@ async fn handle(
 }
 
 /// 模拟 Worker 一轮告警扫描：读取快照、评估并写入观察。
-async fn scan(store: &auction_storage::DatabaseStore) {
+pub(super) async fn scan(store: &auction_storage::DatabaseStore) {
     let now = Utc::now();
     let snapshot = store
         .snapshot(now, OperationsAlertCollectionOverdueRead::Skip)
@@ -144,7 +145,7 @@ async fn scan(store: &auction_storage::DatabaseStore) {
 }
 
 /// 履约来源下某种 signal 的（是否活动，计数）；没有行时为 `None`。
-async fn signal(pool: &PgPool, kind: &str, scope: &str) -> Option<(bool, i64)> {
+pub(super) async fn signal(pool: &PgPool, kind: &str, scope: &str) -> Option<(bool, i64)> {
     sqlx::query_as(
         "SELECT active, count_value FROM public.operations_alert_signals
          WHERE kind = $1 AND source = 'fulfillment' AND scope = $2",
@@ -156,7 +157,7 @@ async fn signal(pool: &PgPool, kind: &str, scope: &str) -> Option<(bool, i64)> {
     .expect("读取告警信号")
 }
 
-async fn enable_alerts(store: &auction_storage::DatabaseStore) {
+pub(super) async fn enable_alerts(store: &auction_storage::DatabaseStore) {
     store
         .publish_runtime_status(OperationsAlertRuntimeStatus {
             enabled: true,
@@ -255,10 +256,11 @@ async fn postgres_settlement_return_alerts_follow_open_cases_and_close_on_closur
     pool.close().await;
 }
 
-/// 领回中的案件仍是待处理；Take 结果未知后转入隔离告警并继续计入待办，只认系统可验证证明，
-/// 不会被扫描当作已结案关闭。
+/// 领回中的案件仍是待处理；Take 结果未知后转入按原因分作用域的结果未知告警（这件 Take 没有冻结
+/// 凭据身份的尝试记录，原因是 `session_changed`）并继续计入待办，不计入隔离告警；只认系统可验证
+/// 证明，不会被扫描当作已结案关闭。
 #[tokio::test]
-async fn postgres_take_unknown_moves_case_to_quarantined_alert() {
+async fn postgres_take_unknown_moves_case_to_take_unknown_alert() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("以运行账号连接");
     let pool = store.postgres_pool();
@@ -301,8 +303,18 @@ async fn postgres_take_unknown_moves_case_to_quarantined_alert() {
     assert_eq!(detail.summary.status, SettlementReturnCaseStatus::TakeUnknown);
     assert!(detail.allowed_actions.is_empty(), "结果未知没有人工声明或重试入口");
 
+    assert_eq!(
+        detail.take_unknown_reason,
+        Some(auction_domain::SettlementReturnTakeUnknownReason::SessionChanged),
+        "没有冻结凭据的 Take 无法在原会话复核"
+    );
+
     scan(&store).await;
-    assert_eq!(signal(pool, "settlement_return_quarantined", "auction").await, Some((true, 1)));
+    assert_eq!(
+        signal(pool, "settlement_return_take_unknown", "session_changed").await,
+        Some((true, 1))
+    );
+    assert_eq!(signal(pool, "settlement_return_quarantined", "auction").await, None);
     assert_eq!(
         signal(pool, "settlement_return_pending", "auction").await.map(|row| row.0),
         Some(false)

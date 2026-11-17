@@ -64,6 +64,7 @@ pub(super) fn action_key(value: &str) -> Option<&'static str> {
         "close_inbox" => "settlement-return-action-close-inbox",
         "acknowledge" => "settlement-return-action-acknowledge",
         "recheck" => "settlement-return-action-recheck",
+        "retry_take" => "settlement-return-action-retry-take",
         _ => return None,
     })
 }
@@ -77,6 +78,7 @@ pub(super) fn action_effect_key(value: &str) -> Option<&'static str> {
         "close_inbox" => "settlement-return-effect-close-inbox",
         "acknowledge" => "settlement-return-effect-acknowledge",
         "recheck" => "settlement-return-effect-recheck",
+        "retry_take" => "settlement-return-effect-retry-take",
         _ => return None,
     })
 }
@@ -92,6 +94,7 @@ pub(super) fn blocker_key(value: &str) -> Option<&'static str> {
         "obligation_ineligible" => "settlement-return-blocker-obligation-ineligible",
         "proof_required" => "settlement-return-blocker-proof-required",
         "send_unresolved" => "settlement-return-blocker-send-unresolved",
+        "observation_required" => "settlement-return-blocker-observation-required",
         _ => return None,
     })
 }
@@ -131,6 +134,8 @@ pub(super) fn event_key(value: &str) -> Option<&'static str> {
         "take_activated" => "settlement-return-event-take-activated",
         "take_proven" => "settlement-return-event-take-proven",
         "take_unknown" => "settlement-return-event-take-unknown",
+        "take_observed" => "settlement-return-event-take-observed",
+        "take_retry_requested" => "settlement-return-event-take-retry-requested",
         "held" => "settlement-return-event-held",
         "resend_authorized" => "settlement-return-event-resend-authorized",
         "resent" => "settlement-return-event-resent",
@@ -149,6 +154,38 @@ pub(super) fn kind_key(value: &str) -> Option<&'static str> {
         "buyer_refund" => "settlement-return-kind-buyer-refund",
         "unsold_return" => "settlement-return-kind-unsold-return",
         "withdrawn_return" => "settlement-return-kind-withdrawn-return",
+        _ => return None,
+    })
+}
+
+/// Take 结果未知原因的译文键（原因名称）。
+pub(super) fn take_unknown_reason_key(value: &str) -> Option<&'static str> {
+    Some(match value {
+        "assets_claimable" => "settlement-return-take-unknown-reason-assets-claimable",
+        "assets_unclaimable" => "settlement-return-take-unknown-reason-assets-unclaimable",
+        "assets_changed" => "settlement-return-take-unknown-reason-assets-changed",
+        "mail_missing" => "settlement-return-take-unknown-reason-mail-missing",
+        "receipt_unproven" => "settlement-return-take-unknown-reason-receipt-unproven",
+        "session_changed" => "settlement-return-take-unknown-reason-session-changed",
+        "take_unverifiable" => "settlement-return-take-unknown-reason-take-unverifiable",
+        "disposition_conflict" => "settlement-return-take-unknown-reason-disposition-conflict",
+        "awaiting_observation" => "settlement-return-take-unknown-reason-awaiting-observation",
+        _ => return None,
+    })
+}
+
+/// Take 结果未知原因的运维指引译文键；与告警通知的指引同一口径。
+pub(super) fn take_unknown_guidance_key(value: &str) -> Option<&'static str> {
+    Some(match value {
+        "assets_claimable" => "settlement-return-take-unknown-guidance-assets-claimable",
+        "assets_unclaimable" => "settlement-return-take-unknown-guidance-assets-unclaimable",
+        "assets_changed" => "settlement-return-take-unknown-guidance-assets-changed",
+        "mail_missing" => "settlement-return-take-unknown-guidance-mail-missing",
+        "receipt_unproven" => "settlement-return-take-unknown-guidance-receipt-unproven",
+        "session_changed" => "settlement-return-take-unknown-guidance-session-changed",
+        "take_unverifiable" => "settlement-return-take-unknown-guidance-take-unverifiable",
+        "disposition_conflict" => "settlement-return-take-unknown-guidance-disposition-conflict",
+        "awaiting_observation" => "settlement-return-take-unknown-guidance-awaiting-observation",
         _ => return None,
     })
 }
@@ -213,13 +250,14 @@ mod tests {
         ADMIN_SETTLEMENT_RETURN_MATCH_STATES, ADMIN_SETTLEMENT_RETURN_OBLIGATION_KINDS,
         ADMIN_SETTLEMENT_RETURN_PLANS, ADMIN_SETTLEMENT_RETURN_REASONS,
         ADMIN_SETTLEMENT_RETURN_STATUSES, ADMIN_SETTLEMENT_RETURN_TAKE_STATES,
+        ADMIN_SETTLEMENT_RETURN_TAKE_UNKNOWN_REASONS,
     };
     use serde_json::json;
 
     use super::{
         action_effect_key, action_key, blocker_key, event_details_text, event_key, kind_key,
         location_key, match_key, plan_key, reason_key, settlement_return_case, status_key,
-        take_state_key,
+        take_state_key, take_unknown_guidance_key, take_unknown_reason_key,
     };
 
     /// 闭集取值到译文键的映射函数。
@@ -248,7 +286,7 @@ mod tests {
     /// 不会让页面显示内部名称。
     #[test]
     fn every_closed_value_has_a_translated_label_in_all_locales() {
-        let sets: [(&[&str], KeyFn); 11] = [
+        let sets: [(&[&str], KeyFn); 13] = [
             (&ADMIN_SETTLEMENT_RETURN_STATUSES, status_key),
             (&ADMIN_SETTLEMENT_RETURN_MATCH_STATES, match_key),
             (&ADMIN_SETTLEMENT_RETURN_REASONS, reason_key),
@@ -260,6 +298,8 @@ mod tests {
             (&ADMIN_SETTLEMENT_RETURN_EVENT_KINDS, event_key),
             (&ADMIN_SETTLEMENT_RETURN_OBLIGATION_KINDS, kind_key),
             (&ADMIN_SETTLEMENT_RETURN_TAKE_STATES, take_state_key),
+            (&ADMIN_SETTLEMENT_RETURN_TAKE_UNKNOWN_REASONS, take_unknown_reason_key),
+            (&ADMIN_SETTLEMENT_RETURN_TAKE_UNKNOWN_REASONS, take_unknown_guidance_key),
         ];
         let locales: Vec<(&str, BTreeSet<&str>)> =
             LOCALES.iter().map(|(name, source)| (*name, ftl_keys(source))).collect();

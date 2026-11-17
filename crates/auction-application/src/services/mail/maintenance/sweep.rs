@@ -338,7 +338,7 @@ mod tests {
         }
     }
 
-    /// Take 恢复调用：`("bind", 证明元数据)` 或 `("requeue", 原因)`。
+    /// Take 恢复调用：`("bind", 证明元数据)`、`("requeue", 原因)` 或结算退件的 `("observe", 原因)`。
     type TakeCalls = Arc<std::sync::Mutex<Vec<(&'static str, Value)>>>;
 
     struct FixtureStore {
@@ -429,6 +429,20 @@ mod tests {
         ) -> ApplicationFuture<'a, bool> {
             if let Ok(mut calls) = self.take_calls.lock() {
                 calls.push(("bind", metadata));
+            }
+            Box::pin(async { Ok(true) })
+        }
+        fn record_return_take_observation<'a>(
+            &'a self,
+            _delivery_id: Uuid,
+            _fencing_version: i64,
+            reason: auction_domain::SettlementReturnTakeUnknownReason,
+            _sweep_retries: i64,
+            _expectation: &'a DeliveryTakeExpectation,
+            _observation: &'a DeliverySendCredentialBinding,
+        ) -> ApplicationFuture<'a, bool> {
+            if let Ok(mut calls) = self.take_calls.lock() {
+                calls.push(("observe", Value::from(reason.as_str())));
             }
             Box::pin(async { Ok(true) })
         }
@@ -695,7 +709,10 @@ mod tests {
     }
 
     fn present(sender: &str, credits: i64, equipment: &[&str]) -> MoogleMailboxReturnTake {
-        MoogleMailboxReturnTake::Present(inbox(sender, credits, equipment).expect("资产"))
+        MoogleMailboxReturnTake::Present {
+            assets: inbox(sender, credits, equipment).expect("资产"),
+            claimable: true,
+        }
     }
 
     /// 完成证明：integrations 已在原会话里核对原身份、原正文前缀与领取回执；证明携带预期资产，
@@ -720,16 +737,50 @@ mod tests {
     }
 
     /// 附件已为空但领取回执不成立（integrations 判为 Unproven）：即使旧的资产观察显示附件已空，
-    /// 也不绑定任何证明，保持结果未知。
+    /// 也不绑定任何证明，保持结果未知，只把原因留证。
     #[test]
     fn return_take_with_empty_attachments_but_no_receipt_stays_unknown() {
-        assert!(
+        assert_eq!(
             recover_return_take(
                 return_take(),
                 MoogleMailboxReturnTake::Unproven,
                 Some(original_session())
-            )
-            .is_empty()
+            ),
+            vec![("observe", Value::from("receipt_unproven"))]
+        );
+    }
+
+    /// 自动重排用满后完整资产仍在：不再重排，只把“可领取 / 不可领取”的观察留证（前者是 Admin
+    /// 再次领回的机器证明）；重排未用满时照常重排、不留证。
+    #[test]
+    fn return_take_with_exhausted_requeues_records_present_observation() {
+        let mut exhausted = return_take();
+        exhausted.sweep_retries = 2;
+        assert_eq!(
+            recover_return_take(
+                exhausted.clone(),
+                present("MoogleMail", 90, &["4401"]),
+                Some(original_session())
+            ),
+            vec![("observe", Value::from("assets_claimable"))]
+        );
+        let unclaimable = MoogleMailboxReturnTake::Present {
+            assets: inbox("MoogleMail", 90, &["4401"]).expect("资产"),
+            claimable: false,
+        };
+        assert_eq!(
+            recover_return_take(exhausted, unclaimable, Some(original_session())),
+            vec![("observe", Value::from("assets_unclaimable"))]
+        );
+        let mut once = return_take();
+        once.sweep_retries = 1;
+        assert_eq!(
+            recover_return_take(
+                once,
+                present("MoogleMail", 90, &["4401"]),
+                Some(original_session())
+            ),
+            vec![("requeue", Value::from("take_assets_still_present"))]
         );
     }
 
@@ -750,24 +801,31 @@ mod tests {
         assert_eq!(calls, vec![("requeue", Value::from("take_assets_still_present"))]);
     }
 
-    /// 无法判定：邮件整体缺失、资产不全、发件人不符、换凭据版本、没有观察会话、原 Take 没有冻结
-    /// 凭据或证据缺少系统后缀事实都不改写任何事实；入站 Take 的缺失证明口径不变。
+    /// 无法判定：邮件整体缺失、资产不全、发件人不符只把原因留证、不绑定或重排；换凭据版本、没有
+    /// 观察会话、原 Take 没有冻结凭据或证据缺少系统后缀事实不是原会话的观察，什么都不写；入站
+    /// Take 的缺失证明口径不变。
     #[test]
     fn return_take_undecidable_observations_leave_unknown() {
         let session = Some(original_session());
         let taken = || MoogleMailboxReturnTake::Taken;
-        assert!(
-            recover_return_take(return_take(), MoogleMailboxReturnTake::Missing, session.clone())
-                .is_empty(),
+        let observed = |reason: &str| vec![("observe", Value::from(reason))];
+        assert_eq!(
+            recover_return_take(return_take(), MoogleMailboxReturnTake::Missing, session.clone()),
+            observed("mail_missing"),
             "缺失"
         );
         let partial = present("MoogleMail", 90, &[]);
-        assert!(
-            recover_return_take(return_take(), partial, session.clone()).is_empty(),
+        assert_eq!(
+            recover_return_take(return_take(), partial, session.clone()),
+            observed("assets_changed"),
             "部分资产"
         );
         let player = present("BuyerPlayer", 90, &["4401"]);
-        assert!(recover_return_take(return_take(), player, session.clone()).is_empty(), "发件人");
+        assert_eq!(
+            recover_return_take(return_take(), player, session.clone()),
+            observed("assets_changed"),
+            "发件人"
+        );
         let mut other_version = original_session();
         other_version.credential_version = 4;
         assert!(recover_return_take(return_take(), taken(), Some(other_version)).is_empty());

@@ -13,8 +13,8 @@ use auction_contracts::{
     ADMIN_SETTLEMENT_RETURN_MAX_OFFSET, ADMIN_SETTLEMENT_RETURN_MAX_PAGE_SIZE,
     ADMIN_SETTLEMENT_RETURN_OBLIGATION_KINDS, ADMIN_SETTLEMENT_RETURN_PLANS,
     ADMIN_SETTLEMENT_RETURN_REASONS, ADMIN_SETTLEMENT_RETURN_STATUSES,
-    ADMIN_SETTLEMENT_RETURN_TAKE_STATES, AdminSettlementReturnHandleRequest,
-    AdminSettlementReturnRecheckRequest, ApiResponse,
+    ADMIN_SETTLEMENT_RETURN_TAKE_STATES, ADMIN_SETTLEMENT_RETURN_TAKE_UNKNOWN_REASONS,
+    AdminSettlementReturnHandleRequest, AdminSettlementReturnRecheckRequest, ApiResponse,
 };
 pub(crate) use auction_contracts::{
     AdminSettlementReturnCommandResponse as SettlementReturnCommandResult,
@@ -273,6 +273,12 @@ pub(crate) fn valid_detail(detail: &SettlementReturnDetail, requested: &str) -> 
         && detail.custody.as_ref().is_none_or(valid_custody)
         && (!detail.recheck_unavailable || detail.summary.status == "recheck_pending")
         && (!detail.take_unavailable || detail.summary.status == "take_pending")
+        // 结果未知必有闭集内的原因，其他状态没有。
+        && detail.take_unknown_reason.is_some() == (detail.summary.status == "take_unknown")
+        && detail
+            .take_unknown_reason
+            .as_deref()
+            .is_none_or(|reason| ADMIN_SETTLEMENT_RETURN_TAKE_UNKNOWN_REASONS.contains(&reason))
 }
 
 /// 命令结果必须对应本次命令身份、案件与动作，版本只会前进。
@@ -404,10 +410,12 @@ mod tests {
             "blockers": [
                 {"action": "resend_from_custody", "blocker": "state_conflict"},
                 {"action": "acknowledge", "blocker": "state_conflict"},
-                {"action": "recheck", "blocker": "state_conflict"}
+                {"action": "recheck", "blocker": "state_conflict"},
+                {"action": "retry_take", "blocker": "state_conflict"}
             ],
             "recheck_unavailable": false,
-            "take_unavailable": false
+            "take_unavailable": false,
+            "take_unknown_reason": null
         })
     }
 
@@ -552,6 +560,27 @@ mod tests {
             value["take_unavailable"] = json!(true);
         });
         assert!(valid_detail(&take_waiting, CASE), "待领回的案件可以说明领回能力不可用");
+        let unknown = detail_with(|value| {
+            value["summary"]["status"] = json!("take_unknown");
+            value["summary"]["plan"] = json!("hold");
+            value["take_unknown_reason"] = json!("assets_claimable");
+        });
+        assert!(valid_detail(&unknown, CASE), "结果未知的案件说明原因");
+        let unexplained = detail_with(|value| {
+            value["summary"]["status"] = json!("take_unknown");
+            value["summary"]["plan"] = json!("hold");
+        });
+        assert!(!valid_detail(&unexplained, CASE), "结果未知必须带原因");
+        let unknown_reason = detail_with(|value| {
+            value["summary"]["status"] = json!("take_unknown");
+            value["summary"]["plan"] = json!("hold");
+            value["take_unknown_reason"] = json!("operator_declared");
+        });
+        assert!(!valid_detail(&unknown_reason, CASE), "原因必须在闭集内");
+        let stray = detail_with(|value| {
+            value["take_unknown_reason"] = json!("mail_missing");
+        });
+        assert!(!valid_detail(&stray, CASE), "其他状态不带结果未知原因");
     }
 
     /// 命令结果必须对应本次命令身份、案件与动作，版本只会前进。

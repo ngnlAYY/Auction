@@ -233,6 +233,7 @@ mod tests {
             "settlement_return_resend_limit",
             "settlement_return_obligation_ineligible",
             "settlement_return_send_unresolved",
+            "settlement_return_observation_required",
         ] {
             assert!(definite_rejection(code), "{code} 应是确定拒绝");
         }

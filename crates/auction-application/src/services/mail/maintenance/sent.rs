@@ -2,6 +2,7 @@
 
 use std::time::Instant;
 
+use auction_domain::SettlementReturnTakeUnknownReason;
 use serde_json::json;
 
 use super::MailboxMaintenanceService;
@@ -24,7 +25,8 @@ const EXACT_MATCH_CANDIDATES: usize = 32;
 /// 单条结算投递在完整 Sent 中按同主题前缀最多读取的详情数；超出即保守放弃目击。
 const SIGHTING_CANDIDATES: usize = 4;
 /// 单条投递允许的维护重排队次数；达到上限后完整资产仍在时不再自动重排、保留人工核对，防止
-/// 无限重试。上限只约束重排：其后观察到领取完成证明仍可收口。
+/// 无限重试。上限只约束重排：其后观察到领取完成证明仍可收口；结算退件 Take 另把“完整仍在且
+/// 可领取”的观察持久化，供 Admin 以新命令再次领回。
 const MAX_SWEEP_RETRIES: i64 = 2;
 
 /// 结算退件 Take 的巡检完成原因：integrations 已核对原身份、原正文前缀与领取回执。存储只接受
@@ -405,6 +407,8 @@ impl MailboxMaintenanceService {
 
     /// 结算退件 Take：只有 integrations 给出的领取完成结论才绑定证明；原完整资产仍在则重新排队；
     /// 缺失、回执不成立或部分取走都保持未知。证据缺少系统后缀事实时没有可核对的原身份，不读远端。
+    /// 不推进案件的观察（重排已用满、资产不符、邮件缺失、回执不成立）以原因闭集持久化到案件
+    /// 事件，详情与告警据此说明；换账号或换凭据版本的观察不是原会话，不留证。
     async fn recover_return_take(
         &self,
         world_id: &str,
@@ -435,21 +439,45 @@ impl MailboxMaintenanceService {
         {
             return Ok(RecoveryStep::default());
         }
-        match observed.outcome {
+        let reason = match observed.outcome {
             MoogleMailboxReturnTake::Taken => {
-                self.bind_take(candidate, expectation, observation, RETURN_TAKE_RECEIPT_REASON)
-                    .await
+                return self
+                    .bind_take(candidate, expectation, observation, RETURN_TAKE_RECEIPT_REASON)
+                    .await;
             }
-            MoogleMailboxReturnTake::Present(present)
-                if present.sender.eq_ignore_ascii_case(&candidate.recipient)
-                    && return_take_assets_match(candidate, &present) =>
+            MoogleMailboxReturnTake::Present { assets, claimable }
+                if assets.sender.eq_ignore_ascii_case(&candidate.recipient)
+                    && return_take_assets_match(candidate, &assets) =>
             {
-                self.requeue(candidate, expectation, observation, "take_assets_still_present").await
+                if candidate.sweep_retries < MAX_SWEEP_RETRIES {
+                    return self
+                        .requeue(candidate, expectation, observation, "take_assets_still_present")
+                        .await;
+                }
+                // 自动重排已用满：完整资产仍在且可领取是 Admin 再次领回的机器证明，否则只说明。
+                if claimable {
+                    SettlementReturnTakeUnknownReason::AssetsClaimable
+                } else {
+                    SettlementReturnTakeUnknownReason::AssetsUnclaimable
+                }
             }
-            MoogleMailboxReturnTake::Present(_)
-            | MoogleMailboxReturnTake::Missing
-            | MoogleMailboxReturnTake::Unproven => Ok(RecoveryStep::default()),
-        }
+            MoogleMailboxReturnTake::Present { .. } => {
+                SettlementReturnTakeUnknownReason::AssetsChanged
+            }
+            MoogleMailboxReturnTake::Missing => SettlementReturnTakeUnknownReason::MailMissing,
+            MoogleMailboxReturnTake::Unproven => SettlementReturnTakeUnknownReason::ReceiptUnproven,
+        };
+        self.store
+            .record_return_take_observation(
+                candidate.delivery_id,
+                candidate.fencing_version,
+                reason,
+                candidate.sweep_retries,
+                expectation,
+                observation,
+            )
+            .await?;
+        Ok(RecoveryStep::default())
     }
 
     async fn bind_take(

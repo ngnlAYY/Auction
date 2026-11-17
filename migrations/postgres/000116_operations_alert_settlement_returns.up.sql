@@ -1,9 +1,12 @@
--- 结算退件告警：已绑定待处理的退件案件与隔离/结果未知的退件案件各自产生运维告警。
+-- 结算退件告警：已绑定待处理的退件案件、隔离待核对的退件案件与 Take 结果未知的退件案件各自产生
+-- 运维告警；结果未知按具体原因分作用域，通知据此带出原因类别。
 -- owner: auction-application（告警种类与评估）、auction-storage（只读案件水位查询）
 --
 -- 不变量：
---   1. 只扩展 operations_alert_signals 的 kind 与 identity 闭集；不新增表、来源或 scope，新种类沿用
---      履约告警身份：source = 'fulfillment'、scope = 'auction'。
+--   1. 只扩展 operations_alert_signals 的 kind、scope 与 identity 闭集，不新增表或来源；新种类沿用
+--      履约告警来源 source = 'fulfillment'。待处理与隔离两种的 scope 为 'auction'；
+--      `settlement_return_take_unknown` 的 scope 是 Take 结果未知的原因闭集（与领域
+--      `SettlementReturnTakeUnknownReason` 逐项一致），同一原因一个信号。
 --   2. 数量按未结案案件计，不要求存在义务（隔离记录也计入）；告警确认或静音不改变案件，案件结案
 --      后由下一轮扫描关闭；读取失败产生来源不可用，不当作零件自动关闭。
 --   3. 已由退件案件接管的履约（退件转人工对账、代管或留箱终结）改按退件待办计数，不再重复计入
@@ -24,6 +27,7 @@ ALTER TABLE public.operations_alert_signals
             'fulfillment_backlog', 'fulfillment_failed', 'fulfillment_manual_reconcile',
             'fulfillment_collection_overdue',
             'settlement_return_pending', 'settlement_return_quarantined',
+            'settlement_return_take_unknown',
             'recovery_payment_overdue', 'recovery_payment_mail_unsent',
             'recovery_relist_pending', 'recovery_failed', 'recovery_manual_reconcile',
             'balance_low', 'evidence_stale',
@@ -43,7 +47,10 @@ ALTER TABLE public.operations_alert_signals
             'auction', 'fulfillment', 'recovery', 'main', 'isekai',
             'mail', 'credential', 'lifecycle', 'forum', 'notification',
             'mail_cookie', 'external_api', 'backup', 'wal',
-            'custody', 'solvency', 'reconciliation'
+            'custody', 'solvency', 'reconciliation',
+            'assets_claimable', 'assets_unclaimable', 'assets_changed', 'mail_missing',
+            'receipt_unproven', 'session_changed', 'take_unverifiable', 'disposition_conflict',
+            'awaiting_observation'
         )
     ),
     ADD CONSTRAINT operations_alert_signals_identity_check CHECK (
@@ -60,6 +67,12 @@ ALTER TABLE public.operations_alert_signals
                 'fulfillment_manual_reconcile', 'fulfillment_collection_overdue',
                 'settlement_return_pending', 'settlement_return_quarantined'
             ) AND source = 'fulfillment' AND scope = 'auction')
+        OR (kind = 'settlement_return_take_unknown' AND source = 'fulfillment'
+            AND scope IN (
+                'assets_claimable', 'assets_unclaimable', 'assets_changed', 'mail_missing',
+                'receipt_unproven', 'session_changed', 'take_unverifiable',
+                'disposition_conflict', 'awaiting_observation'
+            ))
         OR (kind IN (
                 'recovery_payment_overdue', 'recovery_payment_mail_unsent',
                 'recovery_relist_pending', 'recovery_failed', 'recovery_manual_reconcile'

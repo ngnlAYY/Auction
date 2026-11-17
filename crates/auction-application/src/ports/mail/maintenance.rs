@@ -189,8 +189,9 @@ pub enum MoogleMailboxReturnTake {
     /// 附件已全部取走，发件人与主题不变，正文以原退件正文开头，其后恰为与领取前附件条目数相同
     /// 的 `Removed attachment:` 回执（领取前带 COD 时另有对应的 `CoD Paid:` 回执）。
     Taken,
-    /// 原 MID 仍挂着资产；是否与冻结资产完整一致由调用方比对。
-    Present(MoogleMailboxInboxAssets),
+    /// 原 MID 仍挂着资产；是否与冻结资产完整一致由调用方比对。`claimable` 表示详情页仍给出领取
+    /// 入口：自动重排用满后，只有完整一致且可领取的观察才能作为 Admin 再次领回的证明。
+    Present { assets: MoogleMailboxInboxAssets, claimable: bool },
     /// 远端明确答复邮件不存在：可能已过期或被删除，不能证明资产进入 Bot 账号。
     Missing,
     /// 附件已为空但回执、原身份或原正文前缀不成立：保持未知。
@@ -392,6 +393,21 @@ pub trait MoogleMailboxEvidenceStore: Send + Sync {
         fencing_version: i64,
         external_mail_id: String,
         metadata: Value,
+        expectation: &'a crate::ports::delivery::DeliveryTakeExpectation,
+        observation: &'a crate::ports::delivery::DeliverySendCredentialBinding,
+    ) -> ApplicationFuture<'a, bool>;
+
+    /// 结算退件 Take 结果未知后，记录一次原 Take 会话里的观察原因：只追加案件事件
+    /// `take_observed`（与案件最近一次事件是同一原因、同一 fence 时不重复写），不改写投递、
+    /// 动作、资金或证据。只接受 [`auction_domain::SettlementReturnTakeUnknownReason::observed`]
+    /// 的原因；原冻结尝试、当前 fence、观察凭据与运行代际都在锁内复核。返回 true 表示本次实际
+    /// 追加了事件。
+    fn record_return_take_observation<'a>(
+        &'a self,
+        delivery_id: Uuid,
+        fencing_version: i64,
+        reason: auction_domain::SettlementReturnTakeUnknownReason,
+        sweep_retries: i64,
         expectation: &'a crate::ports::delivery::DeliveryTakeExpectation,
         observation: &'a crate::ports::delivery::DeliverySendCredentialBinding,
     ) -> ApplicationFuture<'a, bool>;

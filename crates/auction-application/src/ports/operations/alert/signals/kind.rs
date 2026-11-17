@@ -25,9 +25,13 @@ pub enum OperationsAlertKind {
     /// 已绑定原派发、尚未处理完的结算退件案件（待决定、领回中、待补寄）；按未结案案件计数，
     /// 不要求存在义务。告警确认或静音不改变案件，案件结案后由扫描关闭。
     SettlementReturnPending,
-    /// 来源、绑定或领回证明存在问题的结算退件案件（untrusted/unbound 隔离、待重新核验、Take
-    /// 结果未知）；只能经核对、只读核验或系统可验证证明收口。
+    /// 来源或绑定未证明的结算退件案件（untrusted/unbound 隔离、待重新核验）；只能经核对或只读
+    /// 核验收口。
     SettlementReturnQuarantined,
+    /// Take 结果未知的结算退件案件，作用域是具体原因
+    /// （[`auction_domain::SettlementReturnTakeUnknownReason`] 的名称），通知据此带出原因类别与
+    /// 处置指引；只认系统可验证证明收口，案件结案或原因改变后由扫描关闭旧作用域。
+    SettlementReturnTakeUnknown,
     RecoveryPaymentOverdue,
     /// 付款期限已过，但对应付款投递没有自动或人工发送证明；提醒已延后，需人工核对。
     RecoveryPaymentMailUnsent,
@@ -79,9 +83,9 @@ pub enum OperationsAlertKind {
 }
 
 impl OperationsAlertKind {
-    /// 持久化种类闭集；与迁移 005/020/085/091/095/099/101/104/110 的
+    /// 持久化种类闭集；与迁移 005/020/085/091/095/099/101/104/110/116 的
     /// `operations_alert_signals.kind` CHECK 一致。
-    pub const ALL: [Self; 40] = [
+    pub const ALL: [Self; 41] = [
         Self::ServiceMissing,
         Self::ServiceDegraded,
         Self::AuditFailure,
@@ -95,6 +99,7 @@ impl OperationsAlertKind {
         Self::FulfillmentCollectionOverdue,
         Self::SettlementReturnPending,
         Self::SettlementReturnQuarantined,
+        Self::SettlementReturnTakeUnknown,
         Self::RecoveryPaymentOverdue,
         Self::RecoveryPaymentMailUnsent,
         Self::RecoveryRelistPending,
@@ -145,6 +150,7 @@ impl OperationsAlertKind {
             Self::FulfillmentCollectionOverdue => "fulfillment_collection_overdue",
             Self::SettlementReturnPending => "settlement_return_pending",
             Self::SettlementReturnQuarantined => "settlement_return_quarantined",
+            Self::SettlementReturnTakeUnknown => "settlement_return_take_unknown",
             Self::RecoveryPaymentOverdue => "recovery_payment_overdue",
             Self::RecoveryPaymentMailUnsent => "recovery_payment_mail_unsent",
             Self::RecoveryRelistPending => "recovery_relist_pending",

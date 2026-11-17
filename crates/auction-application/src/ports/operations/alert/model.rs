@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 use std::time::Duration;
 
-use auction_domain::SettlementObligationKind;
+use auction_domain::{SettlementObligationKind, SettlementReturnTakeUnknownReason};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
@@ -159,10 +159,27 @@ pub struct OperationsAlertFulfillmentSnapshot {
     pub settlement_return_pending: i64,
     /// 最早一件待处理退件案件自建案起的秒数；没有时为 0。
     pub oldest_settlement_return_pending_age_seconds: i64,
-    /// 来源、绑定或领回证明存在问题、尚未结案的结算退件案件数。
+    /// 来源或绑定未证明（隔离、待重新核验）、尚未结案的结算退件案件数；Take 结果未知的案件
+    /// 按原因单列在 `settlement_return_take_unknown`。
     pub settlement_return_quarantined: i64,
     /// 最早一件隔离退件案件自建案起的秒数；没有时为 0。
     pub oldest_settlement_return_quarantined_age_seconds: i64,
+    /// Take 结果未知的结算退件按原因分组的水位；下标与
+    /// [`SettlementReturnTakeUnknownReason::ALL`] 同序。
+    pub settlement_return_take_unknown:
+        [OperationsAlertReturnTakeUnknown; SETTLEMENT_RETURN_TAKE_UNKNOWN_REASONS],
+}
+
+/// [`SettlementReturnTakeUnknownReason`] 闭集的大小，即按原因分组水位的固定长度。
+pub const SETTLEMENT_RETURN_TAKE_UNKNOWN_REASONS: usize =
+    SettlementReturnTakeUnknownReason::ALL.len();
+
+/// 一个原因下 Take 结果未知的结算退件水位。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct OperationsAlertReturnTakeUnknown {
+    pub count: i64,
+    /// 最早一件自建案起的秒数；没有时为 0。
+    pub oldest_age_seconds: i64,
 }
 
 /// 长期未领取清单的一项：已寄出、寄出时长达到阈值仍未领取的 Send 义务。只含 Admin 可见的业务

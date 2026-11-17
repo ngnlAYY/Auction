@@ -16,8 +16,10 @@ use auction_application::delivery::{
     DeliverySendResult, DeliveryTakeExpectation, DeliveryTransportError, DeliveryWorkClaim,
     DeliveryWorkStore,
 };
-use auction_application::settlement::SettlementReturnWorkStore;
-use auction_domain::{SettlementReturnAction, SettlementReturnCaseStatus};
+use auction_application::settlement::{SettlementReturnAdminPort, SettlementReturnWorkStore};
+use auction_domain::{
+    SettlementReturnAction, SettlementReturnCaseStatus, SettlementReturnTakeUnknownReason,
+};
 use auction_storage::DatabaseStore;
 use chrono::{Duration, Utc};
 use serde_json::{Value, json};
@@ -273,6 +275,11 @@ async fn postgres_return_take_conflict_hands_over_after_unexecuted_failure() {
         .expect("激活")
         .expect("推进");
     assert_eq!(progress.status, SettlementReturnCaseStatus::TakeUnknown, "在途意图阻断激活");
+    assert_eq!(
+        store.settlement_return_detail(returned.case).await.expect("详情").take_unknown_reason,
+        Some(SettlementReturnTakeUnknownReason::DispositionConflict),
+        "没有 Take 投递的结果未知说明为同邮件冲突"
+    );
     assert_eq!(take_delivery(pool, returned.case).await, None, "冲突时不写入投递");
     assert!(
         store

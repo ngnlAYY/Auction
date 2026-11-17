@@ -109,6 +109,7 @@ mod tests {
     use crate::ports::operations::alert::model::{
         OperationsAlertDeliverySnapshot, OperationsAlertFulfillmentSnapshot, OperationsAlertPolicy,
         OperationsAlertRecoverySnapshot, OperationsAlertRecoveryWorld,
+        OperationsAlertReturnTakeUnknown,
     };
     use crate::ports::operations::alert::signals::{
         OperationsAlertError, OperationsAlertKind, OperationsAlertSource,
@@ -173,6 +174,7 @@ mod tests {
                 oldest_settlement_return_pending_age_seconds: 0,
                 settlement_return_quarantined: 0,
                 oldest_settlement_return_quarantined_age_seconds: 0,
+                settlement_return_take_unknown: Default::default(),
             },
             &policy,
         );
@@ -244,6 +246,7 @@ mod tests {
             oldest_settlement_return_pending_age_seconds: 0,
             settlement_return_quarantined: 0,
             oldest_settlement_return_quarantined_age_seconds: 0,
+            settlement_return_take_unknown: Default::default(),
         };
         let recovery_world = |world: &str| OperationsAlertRecoveryWorld {
             world: world.to_owned(),
@@ -311,6 +314,7 @@ mod tests {
             oldest_settlement_return_pending_age_seconds: 0,
             settlement_return_quarantined: 0,
             oldest_settlement_return_quarantined_age_seconds: 0,
+            settlement_return_take_unknown: Default::default(),
         };
         assert!(!assess_fulfillment(snapshot, &policy).backlog);
         let snapshot = OperationsAlertFulfillmentSnapshot {
@@ -343,6 +347,7 @@ mod tests {
             oldest_settlement_return_pending_age_seconds: 0,
             settlement_return_quarantined: 0,
             oldest_settlement_return_quarantined_age_seconds: 0,
+            settlement_return_take_unknown: Default::default(),
         };
         assert!(!assess_fulfillment(awaiting, &policy).backlog, "等待领取不是待处理积压");
         let observations = evaluate_snapshot(
@@ -424,6 +429,7 @@ mod tests {
             oldest_settlement_return_pending_age_seconds: 0,
             settlement_return_quarantined: 0,
             oldest_settlement_return_quarantined_age_seconds: 0,
+            settlement_return_take_unknown: Default::default(),
         };
         let evaluate = |snapshot: OperationsAlertFulfillmentSnapshot| {
             let snapshot = OperationsAlertSnapshot {
@@ -465,5 +471,83 @@ mod tests {
         ] {
             assert_eq!(evaluate(broken), Err(OperationsAlertError::Invalid), "{broken:?}");
         }
+    }
+
+    /// Take 结果未知的退件按原因各出一个信号（作用域即原因），只计未知案件；隔离信号不再包含
+    /// 结果未知。原因水位为负、或没有案件却有年龄时失败关闭。
+    #[test]
+    fn take_unknown_returns_signal_per_reason() {
+        let policy = policy();
+        let mut snapshot = OperationsAlertFulfillmentSnapshot {
+            pending: 0,
+            blocked: 0,
+            failed: 0,
+            manual_reconcile: 0,
+            waiting_payment: 0,
+            waiting_prerequisite: 0,
+            awaiting_collection: 0,
+            awaiting_collection_unreadable: 0,
+            oldest_backlog_age_seconds: 0,
+            oldest_prerequisite_wait_age_seconds: 0,
+            oldest_awaiting_collection_age_seconds: 0,
+            oldest_awaiting_collection_backlog_age_seconds: 0,
+            collection_overdue: 0,
+            settlement_return_pending: 0,
+            oldest_settlement_return_pending_age_seconds: 0,
+            settlement_return_quarantined: 1,
+            oldest_settlement_return_quarantined_age_seconds: 60,
+            settlement_return_take_unknown: Default::default(),
+        };
+        let mail_missing = auction_domain::SettlementReturnTakeUnknownReason::ALL
+            .iter()
+            .position(|reason| reason.as_str() == "mail_missing")
+            .expect("原因闭集包含 mail_missing");
+        snapshot.settlement_return_take_unknown[0] =
+            OperationsAlertReturnTakeUnknown { count: 1, oldest_age_seconds: 30 };
+        snapshot.settlement_return_take_unknown[mail_missing] =
+            OperationsAlertReturnTakeUnknown { count: 2, oldest_age_seconds: 900 };
+        let evaluate = |snapshot: OperationsAlertFulfillmentSnapshot| {
+            evaluate_snapshot(
+                &OperationsAlertSnapshot {
+                    fulfillment: Some(snapshot),
+                    ..OperationsAlertSnapshot::default()
+                },
+                &policy,
+            )
+        };
+        let signals = evaluate(snapshot)
+            .expect("退件水位必须可评估")
+            .into_iter()
+            .find(|observation| observation.source == OperationsAlertSource::Fulfillment)
+            .map(|observation| observation.signals)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|signal| (signal.kind, signal.scope, signal.count, signal.age_seconds))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            signals,
+            vec![
+                (OperationsAlertKind::SettlementReturnQuarantined, "auction".to_owned(), 1, 60),
+                (
+                    OperationsAlertKind::SettlementReturnTakeUnknown,
+                    "assets_claimable".to_owned(),
+                    1,
+                    30
+                ),
+                (
+                    OperationsAlertKind::SettlementReturnTakeUnknown,
+                    "mail_missing".to_owned(),
+                    2,
+                    900
+                ),
+            ]
+        );
+        let mut broken = snapshot;
+        broken.settlement_return_take_unknown[mail_missing].count = -1;
+        assert_eq!(evaluate(broken), Err(OperationsAlertError::Invalid));
+        let mut aged = snapshot;
+        aged.settlement_return_take_unknown[mail_missing] =
+            OperationsAlertReturnTakeUnknown { count: 0, oldest_age_seconds: 5 };
+        assert_eq!(evaluate(aged), Err(OperationsAlertError::Invalid));
     }
 }

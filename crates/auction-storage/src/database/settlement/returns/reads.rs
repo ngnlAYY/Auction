@@ -20,6 +20,7 @@ use uuid::Uuid;
 use super::admission::admission_facts;
 use super::cases::{current_return_evidence_sql, load_case};
 use super::errors::ReturnTransactionError;
+use super::observed::take_unknown_reason;
 use crate::database::TrackedTransaction as Transaction;
 use crate::database::repository_error;
 use crate::database::settlement::fulfillment::recovery_allows_execution_now;
@@ -192,6 +193,12 @@ async fn detail_once(
     let take_unavailable = case.status == SettlementReturnCaseStatus::TakePending
         && take_waiting
         && !worker_capability(&mut tx, &case.world_id, TAKE_CAPABILITY).await?;
+    // 结果未知时说明具体原因：最近一次原会话观察，没有观察时由持久事实推出。
+    let take_unknown_reason = if case.status == SettlementReturnCaseStatus::TakeUnknown {
+        take_unknown_reason(&mut tx, return_mail_id).await?
+    } else {
+        None
+    };
     tx.commit().await?;
     Ok(SettlementReturnDetail {
         summary,
@@ -204,6 +211,7 @@ async fn detail_once(
         blockers,
         recheck_unavailable,
         take_unavailable,
+        take_unknown_reason,
     })
 }
 

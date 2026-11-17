@@ -27,6 +27,7 @@ mod counts;
 pub(crate) mod flows;
 mod funding;
 mod identity;
+mod observation;
 mod plans;
 mod races;
 mod receipt;

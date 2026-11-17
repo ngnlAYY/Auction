@@ -285,7 +285,8 @@ impl MoogleMailParser {
     }
 }
 
-/// 已解析详情页对结算退件 Take 的结论；仍可领取或仍有任何资产时交给调用方比对是否完整。
+/// 已解析详情页对结算退件 Take 的结论；仍可领取或仍有任何资产时交给调用方比对是否完整，并带出
+/// 页面是否仍给出领取入口。
 pub(crate) fn returned_take_state(
     state: &MoogleMailActionState,
     identity: &MoogleMailboxReturnTakeIdentity,
@@ -298,12 +299,15 @@ pub(crate) fn returned_take_state(
     {
         let mut equipment_ids = state.equipment_ids.clone();
         equipment_ids.sort_unstable();
-        return MoogleMailboxReturnTake::Present(MoogleMailboxInboxAssets {
-            sender: state.sender.clone(),
-            equipment_ids,
-            credits: state.credits,
-            cod: state.cod,
-        });
+        return MoogleMailboxReturnTake::Present {
+            assets: MoogleMailboxInboxAssets {
+                sender: state.sender.clone(),
+                equipment_ids,
+                credits: state.credits,
+                cod: state.cod,
+            },
+            claimable: state.claimable,
+        };
     }
     if prove_returned_take_receipts(state, identity) {
         MoogleMailboxReturnTake::Taken
@@ -487,7 +491,8 @@ mod tests {
         assert_eq!(observe(&taken, &incomparable), MoogleMailboxReturnTake::Unproven);
     }
 
-    /// 仍可领取或仍挂资产时交给调用方比对完整性，不判领取完成。
+    /// 仍可领取或仍挂资产时交给调用方比对完整性，不判领取完成；同时带出页面是否仍给出领取入口
+    /// （再次领回的证明只认可领取的完整资产）。
     #[test]
     fn remaining_assets_are_reported_as_present() {
         let mut state = MoogleMailParser
@@ -499,11 +504,21 @@ mod tests {
         state.credits = 90;
         state.attachment_count = 1;
         state.claimable = true;
-        let MoogleMailboxReturnTake::Present(assets) = returned_take_state(&state, &identity())
+        let MoogleMailboxReturnTake::Present { assets, claimable } =
+            returned_take_state(&state, &identity())
         else {
             panic!("仍挂资产必须是 Present");
         };
+        assert!(claimable);
         assert_eq!((assets.sender.as_str(), assets.credits, assets.cod), ("MoogleMail", 90, 0));
         assert!(assets.equipment_ids.is_empty());
+        state.claimable = false;
+        assert!(
+            matches!(
+                returned_take_state(&state, &identity()),
+                MoogleMailboxReturnTake::Present { claimable: false, .. }
+            ),
+            "仍挂资产但没有领取入口时如实报告不可领取"
+        );
     }
 }

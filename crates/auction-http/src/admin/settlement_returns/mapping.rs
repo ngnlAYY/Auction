@@ -103,6 +103,9 @@ pub(super) fn map_detail(
         // 领回能力不可用同理只说明待领回的案件为何不前进。
         || (detail.take_unavailable
             && detail.summary.status != SettlementReturnCaseStatus::TakePending)
+        // 结果未知的案件必有原因，其他状态没有。
+        || detail.take_unknown_reason.is_some()
+            != (detail.summary.status == SettlementReturnCaseStatus::TakeUnknown)
     {
         return None;
     }
@@ -138,6 +141,7 @@ pub(super) fn map_detail(
             .collect(),
         recheck_unavailable: detail.recheck_unavailable,
         take_unavailable: detail.take_unavailable,
+        take_unknown_reason: detail.take_unknown_reason.map(|reason| reason.as_str().to_owned()),
     })
 }
 
@@ -214,10 +218,11 @@ mod tests {
         ADMIN_SETTLEMENT_RETURN_BLOCKERS, ADMIN_SETTLEMENT_RETURN_MATCH_STATES,
         ADMIN_SETTLEMENT_RETURN_OBLIGATION_KINDS, ADMIN_SETTLEMENT_RETURN_PLANS,
         ADMIN_SETTLEMENT_RETURN_REASONS, ADMIN_SETTLEMENT_RETURN_STATUSES,
+        ADMIN_SETTLEMENT_RETURN_TAKE_UNKNOWN_REASONS,
     };
     use auction_domain::{
         SettlementObligationKind, SettlementReturnAction, SettlementReturnBlocker,
-        SettlementReturnCaseStatus, SettlementReturnPlan,
+        SettlementReturnCaseStatus, SettlementReturnPlan, SettlementReturnTakeUnknownReason,
     };
     use chrono::{TimeZone, Utc};
     use serde_json::json;
@@ -293,9 +298,11 @@ mod tests {
                 (SettlementReturnAction::ResendFromCustody, SettlementReturnBlocker::StateConflict),
                 (SettlementReturnAction::Acknowledge, SettlementReturnBlocker::StateConflict),
                 (SettlementReturnAction::Recheck, SettlementReturnBlocker::StateConflict),
+                (SettlementReturnAction::RetryTake, SettlementReturnBlocker::StateConflict),
             ],
             recheck_unavailable: false,
             take_unavailable: false,
+            take_unknown_reason: None,
         }
     }
 
@@ -338,6 +345,13 @@ mod tests {
                 .map(|value| value.as_str().to_owned())
                 .collect::<Vec<_>>(),
             names(&ADMIN_SETTLEMENT_RETURN_REASONS)
+        );
+        assert_eq!(
+            SettlementReturnTakeUnknownReason::ALL
+                .iter()
+                .map(|value| value.as_str().to_owned())
+                .collect::<Vec<_>>(),
+            names(&ADMIN_SETTLEMENT_RETURN_TAKE_UNKNOWN_REASONS)
         );
         for name in ADMIN_SETTLEMENT_RETURN_MATCH_STATES {
             assert_eq!(
@@ -406,7 +420,7 @@ mod tests {
             mapped.allowed_actions,
             ["reclaim_and_resend", "reclaim_and_hold", "close_inbox"]
         );
-        assert_eq!(mapped.blockers.len(), 3);
+        assert_eq!(mapped.blockers.len(), 4);
         assert_eq!(mapped.blockers[0].action, "resend_from_custody");
         assert_eq!(mapped.blockers[0].blocker, "state_conflict");
         assert_eq!(mapped.events.len(), 2);
@@ -450,5 +464,24 @@ mod tests {
         let mut inconsistent = detail();
         inconsistent.take_unavailable = true;
         assert!(map_detail(inconsistent, CASE).is_none(), "待决定案件不能带领回能力不可用");
+    }
+
+    /// 结果未知的原因只随 `take_unknown` 输出且必须存在；其他状态带原因或结果未知缺原因都是
+    /// 投影不一致，失败关闭。
+    #[test]
+    fn take_unknown_reason_maps_only_for_take_unknown() {
+        assert_eq!(map_detail(detail(), CASE).expect("合法详情").take_unknown_reason, None);
+        let mut unknown = detail();
+        unknown.summary.status = SettlementReturnCaseStatus::TakeUnknown;
+        unknown.take_unknown_reason = Some(SettlementReturnTakeUnknownReason::MailMissing);
+        assert_eq!(
+            map_detail(unknown.clone(), CASE).expect("结果未知详情").take_unknown_reason.as_deref(),
+            Some("mail_missing")
+        );
+        unknown.take_unknown_reason = None;
+        assert!(map_detail(unknown, CASE).is_none(), "结果未知必须说明原因");
+        let mut inconsistent = detail();
+        inconsistent.take_unknown_reason = Some(SettlementReturnTakeUnknownReason::AssetsClaimable);
+        assert!(map_detail(inconsistent, CASE).is_none(), "待决定案件不能带结果未知原因");
     }
 }

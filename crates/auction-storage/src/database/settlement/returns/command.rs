@@ -1,6 +1,7 @@
 //! Admin 处理命令的单一 Serializable 事务：先按命令 ID 串行化并重放，再按既有业务锁序取锁、
-//! 复核案件版本与领域准入，最后同事务写入案件投影、事件、命令账本与（领回时）持久 Take。命令
-//! 只做本地写入；外部 Take 由 Worker 激活后经投递 Worker 执行（不变量 1、2、4）。
+//! 复核案件版本与领域准入，最后同事务写入案件投影、事件、命令账本与（领回时）持久 Take，或
+//! （再次领回时）把结果未知的 Take 投递重新排队。命令只做本地写入；外部 Take 由 Worker 激活后经
+//! 投递 Worker 执行（不变量 1、2、4）。
 
 use auction_application::core::ApplicationError;
 use auction_application::settlement::{
@@ -14,11 +15,13 @@ use auction_domain::{
 use chrono::{DateTime, Utc};
 use serde_json::json;
 use sqlx::{Postgres, Row};
+use uuid::Uuid;
 
 use super::admission::{INBOX_FAILURE_CODE, admission_facts, obligation_kind};
 use super::cases::{CaseEvent, CaseTransition, advance_case, append_event, load_case};
 use super::errors::ReturnTransactionError;
 use super::resend::{authorize_resend, close_fulfillment};
+use super::retry::requeue_retried_take;
 use super::take::{insert_action, take_command_id};
 use crate::database::TrackedTransaction as Transaction;
 use crate::database::mail::delivery::settlement_return_take_conflicts;
@@ -57,12 +60,15 @@ async fn handle_once(
     let snapshot = load_case(&mut tx, command.return_mail_id, false)
         .await?
         .ok_or(SettlementReturnError::NotFound)?;
-    let reclaims = matches!(
+    let takes_mail = matches!(
         command.action,
-        SettlementReturnAction::ReclaimAndResend | SettlementReturnAction::ReclaimAndHold
+        SettlementReturnAction::ReclaimAndResend
+            | SettlementReturnAction::ReclaimAndHold
+            | SettlementReturnAction::RetryTake
     );
-    // 锁序前缀：world（同邮件处置互斥）→ 资金 scope/账户 → 恢复记录与义务 → 案件 → 动作 → 履约。
-    if reclaims {
+    // 锁序前缀：world（同邮件处置互斥）→ 资金 scope/账户 → 恢复记录与义务 → 案件 → 动作 →
+    // （再次领回时）Take 投递 → 履约。
+    if takes_mail {
         sqlx::query("SELECT id FROM public.worlds WHERE id = $1 FOR UPDATE")
             .bind(&snapshot.world_id)
             .execute(&mut *tx)
@@ -85,13 +91,21 @@ async fn handle_once(
     if case.case_version != command.expected_version {
         return Err(SettlementReturnError::Stale.into());
     }
-    let existing_action: Option<String> = sqlx::query_scalar(
-        "SELECT execution_state FROM public.settlement_return_actions
+    let existing_action: Option<(String, Option<Uuid>)> = sqlx::query_as(
+        "SELECT execution_state, delivery_id FROM public.settlement_return_actions
          WHERE return_mail_id = $1 FOR UPDATE",
     )
     .bind(case.return_mail_id)
     .fetch_optional(&mut *tx)
     .await?;
+    if command.action == SettlementReturnAction::RetryTake
+        && let Some((_, Some(take_delivery))) = existing_action.as_ref()
+    {
+        sqlx::query("SELECT id FROM public.deliveries WHERE id = $1 FOR UPDATE")
+            .bind(take_delivery)
+            .execute(&mut *tx)
+            .await?;
+    }
     let context = admission_facts(&mut tx, &case, executable, true).await?;
     context.admission.check(command.action).map_err(SettlementReturnError::from)?;
     let now = command.requested_at;
@@ -148,6 +162,14 @@ async fn handle_once(
                 CaseTransition::from_case(&case, SettlementReturnCaseStatus::TakePending);
             next.plan = Some(plan);
             (next, "take_requested", json!({"plan": plan.as_str()}))
+        }
+        SettlementReturnAction::RetryTake => {
+            let details = requeue_retried_take(&mut tx, &case, command).await?;
+            (
+                CaseTransition::from_case(&case, SettlementReturnCaseStatus::TakePending),
+                "take_retry_requested",
+                details,
+            )
         }
         SettlementReturnAction::ResendFromCustody => {
             let fulfillment =
