@@ -1,7 +1,9 @@
 //! 每周拍卖轮次与赛季早鸟轮次的数据库时间、幂等 bootstrap 和安全投影。
 
 use auction_application::scheduling::{ScheduledRoundBootstrap, ScheduledRoundSnapshot};
-use chrono::{DateTime, Datelike, Utc};
+use auction_time::Timestamp;
+use jiff::civil::Weekday;
+use jiff_sqlx::ToSqlx;
 use serde_json::json;
 use sqlx::Postgres;
 use sqlx::Row;
@@ -14,7 +16,7 @@ use crate::database::repository_error;
 
 pub(super) async fn database_now_postgres(
     pool: &TrackedPool<Postgres>,
-) -> Result<DateTime<Utc>, auction_application::core::RepositoryError> {
+) -> Result<Timestamp, auction_application::core::RepositoryError> {
     sqlx::query_scalar("SELECT CURRENT_TIMESTAMP").fetch_one(pool).await.map_err(map_storage_error)
 }
 
@@ -71,7 +73,7 @@ async fn ensure_postgres_once(
         Some(true) => {}
     }
     // world 行锁等待可能跨过整周窗口；事务起始时间不能据此创建已经过期的 Draft。
-    let db_now: DateTime<Utc> = sqlx::query_scalar("SELECT clock_timestamp()")
+    let db_now: Timestamp = sqlx::query_scalar("SELECT clock_timestamp()")
         .fetch_one(&mut *transaction)
         .await
         .map_err(PostgresBootstrapError::Storage)?;
@@ -97,7 +99,7 @@ async fn ensure_postgres_once(
              FOR UPDATE",
         )
         .bind(&request.world_id)
-        .bind(request.local_week)
+        .bind(request.local_week.to_sqlx())
     };
     if let Some(row) =
         existing.fetch_optional(&mut *transaction).await.map_err(PostgresBootstrapError::Storage)?
@@ -193,7 +195,7 @@ async fn ensure_postgres_once(
     )
     .bind(request.round_id)
     .bind(&request.world_id)
-    .bind(request.local_week)
+    .bind(request.local_week.to_sqlx())
     .bind((!missed).then_some(request.auction_id.as_uuid()))
     .bind(if missed { "missed" } else { "active" })
     .bind(request.preview_due_at)
@@ -231,7 +233,7 @@ async fn insert_command_postgres(
     transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
     request: &ScheduledRoundBootstrap,
     missed: bool,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<(), PostgresBootstrapError> {
     sqlx::query(
         "INSERT INTO public.auction_commands
@@ -262,7 +264,7 @@ async fn append_audit_postgres(
     transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
     request: &ScheduledRoundBootstrap,
     missed: bool,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<(), PostgresBootstrapError> {
     sqlx::query(
         "INSERT INTO public.audit_records
@@ -291,7 +293,7 @@ fn validate_request(
         || request.auction_id.is_nil()
         || request.create_command_id.is_nil()
         || !matches!(request.world_id.as_str(), "main" | "isekai")
-        || request.local_week.weekday().num_days_from_monday() != 0
+        || request.local_week.weekday() != Weekday::Monday
         || request.preview_due_at >= request.open_due_at
         || request.open_due_at >= request.scheduled_end_at
         || request.request_hash.as_bytes() == [0; 32]
@@ -343,7 +345,10 @@ pub(super) fn snapshot_postgres(
             .map(auction_domain::AuctionId::from_uuid),
         active,
         world_id: row.try_get("world_id").map_err(map_storage_error)?,
-        local_week: row.try_get("local_week").map_err(map_storage_error)?,
+        local_week: row
+            .try_get::<jiff_sqlx::Date, _>("local_week")
+            .map_err(map_storage_error)?
+            .to_jiff(),
         slot_key: row.try_get("slot_key").map_err(map_storage_error)?,
         preview_due_at: row.try_get("preview_due_at").map_err(map_storage_error)?,
         open_due_at: row.try_get("open_due_at").map_err(map_storage_error)?,
@@ -362,7 +367,7 @@ pub(super) fn valid_slot_key(value: &str) -> bool {
     let Some((date, session)) = rest.split_once(':') else {
         return false;
     };
-    chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").is_ok()
+    auction_time::parse_date(date).is_some()
         && date.len() == 10
         && (session == "0" || auction_domain::valid_positive_decimal(session, 2))
 }

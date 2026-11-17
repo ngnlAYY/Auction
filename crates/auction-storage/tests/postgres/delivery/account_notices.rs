@@ -13,7 +13,7 @@ use auction_application::mail::{
     MailNoticeEnqueue, MailNoticeLimit, MailNotificationTemplate,
 };
 use auction_domain::CommandId;
-use chrono::{Duration, Utc};
+use auction_time::{Duration, Timestamp};
 use uuid::Uuid;
 
 use crate::support;
@@ -45,7 +45,7 @@ fn rekey_command(
 fn rekey_limit() -> MailNoticeLimit {
     MailNoticeLimit {
         templates: &["rekey_key", "rekey_result"],
-        since: Utc::now() - Duration::hours(24),
+        since: Timestamp::now() - Duration::hours(24),
         maximum: 3,
     }
 }

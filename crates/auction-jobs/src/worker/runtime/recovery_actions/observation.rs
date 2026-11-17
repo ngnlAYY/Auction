@@ -6,7 +6,7 @@ use auction_application::core::Clock;
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_application::recovery::{RecoveryActionOutcome, RecoveryWorkStore};
 use auction_observability::WorkerResult;
-use chrono::Duration as ChronoDuration;
+use auction_time::TimeDelta;
 
 use super::release_recovery_action;
 use crate::worker::diagnostics;
@@ -14,7 +14,7 @@ use crate::worker::diagnostics;
 pub(in crate::worker::runtime) async fn observe_recovery_action<C>(
     store: Arc<dyn RecoveryWorkStore>,
     clock: Arc<C>,
-    retry_delay: ChronoDuration,
+    retry_delay: TimeDelta,
     claim: auction_application::recovery::RecoveryActionClaim,
 ) -> WorkerResult
 where

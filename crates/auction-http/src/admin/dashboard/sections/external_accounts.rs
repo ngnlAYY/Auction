@@ -126,7 +126,7 @@ fn map_credentials(
     })
 }
 
-fn optional_timestamp(value: Option<chrono::DateTime<chrono::Utc>>) -> Option<String> {
+fn optional_timestamp(value: Option<auction_time::Timestamp>) -> Option<String> {
     value.map(timestamp)
 }
 
@@ -141,12 +141,12 @@ mod tests {
         ExternalMaintenanceState, ExternalMaintenanceStatus,
     };
     use auction_application::operations::{WorkerControlCondition, WorkerControlExternalAccounts};
-    use chrono::{TimeZone, Utc};
+    use auction_time::Timestamp;
 
     use super::map_external_accounts;
 
     fn status(state: ExternalMaintenanceState) -> ExternalAccountStatus {
-        let observed_at = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        let observed_at = Timestamp::from_ymd_hms(2026, 1, 1, 0, 0, 0).unwrap();
         let (last_success_at, last_failure_at, last_canceled_at, running_age_seconds) = match state
         {
             ExternalMaintenanceState::Idle => (None, None, None, None),
@@ -218,7 +218,7 @@ mod tests {
 
     #[test]
     fn shared_credentials_survive_configured_world_filter() {
-        let observed_at = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        let observed_at = Timestamp::from_ymd_hms(2026, 1, 1, 0, 0, 0).unwrap();
         let credentials = AdminCredentialHealthSnapshot {
             observed_at,
             last_admin_change_at: None,

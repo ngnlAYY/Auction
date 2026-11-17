@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 
 use auction_domain::{CommandId, valid_text};
-use chrono::{DateTime, SecondsFormat, Utc};
+use auction_time::{SecondsFormat, Timestamp};
 use uuid::Uuid;
 
 use crate::errors::diagnostics::{
@@ -47,7 +47,7 @@ pub struct SeasonReminderItem {
 /// 一个收件人在一个冻结赛季边界前的未完成义务集合。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SeasonReminder {
-    pub season_boundary: DateTime<Utc>,
+    pub season_boundary: Timestamp,
     pub recipient: String,
     pub items: Vec<SeasonReminderItem>,
 }
@@ -56,7 +56,7 @@ pub struct SeasonReminder {
 pub fn group_season_reminders(
     facts: Vec<SeasonReminderFact>,
 ) -> Result<Vec<SeasonReminder>, PlayerNotificationError> {
-    let mut grouped: BTreeMap<(DateTime<Utc>, String), SeasonReminder> = BTreeMap::new();
+    let mut grouped: BTreeMap<(Timestamp, String), SeasonReminder> = BTreeMap::new();
     for fact in facts {
         if fact.season_boundary.timestamp_nanos_opt().is_none()
             || !valid_text(&fact.recipient, 256)
@@ -187,8 +187,8 @@ pub fn season_reminder_command(
 
 /// 发送围栏前的失效判定：边界已过或已无未完成义务时退役，不进入发送或人工对账。
 pub fn season_reminder_invalid_reason(
-    now: DateTime<Utc>,
-    season_boundary: DateTime<Utc>,
+    now: Timestamp,
+    season_boundary: Timestamp,
     outstanding: usize,
 ) -> Option<&'static str> {
     if now >= season_boundary {
@@ -215,12 +215,11 @@ fn obligation_label(kind: &str) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use chrono::TimeZone;
 
     use super::*;
 
-    fn boundary() -> DateTime<Utc> {
-        Utc.with_ymd_and_hms(2026, 11, 1, 9, 0, 0).single().expect("合法时间")
+    fn boundary() -> Timestamp {
+        Timestamp::from_ymd_hms(2026, 11, 1, 9, 0, 0).expect("合法时间")
     }
 
     fn fact(recipient: &str, lot_number: u32, kind: &str) -> SeasonReminderFact {
@@ -325,7 +324,7 @@ mod tests {
 
     #[test]
     fn reminder_retires_after_the_frozen_boundary_or_when_resolved() {
-        let before = boundary() - chrono::Duration::seconds(1);
+        let before = boundary() - auction_time::Duration::seconds(1);
         assert_eq!(season_reminder_invalid_reason(before, boundary(), 2), None);
         assert_eq!(
             season_reminder_invalid_reason(boundary(), boundary(), 2),

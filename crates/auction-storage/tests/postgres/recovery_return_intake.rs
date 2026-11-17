@@ -26,7 +26,7 @@ use auction_application::mail::{
 use auction_application::recovery::RecoveryWorkStore;
 use auction_domain::EquipmentKey;
 use auction_storage::DatabaseStore;
-use chrono::{DateTime, Duration, Utc};
+use auction_time::{Duration, Timestamp};
 use uuid::Uuid;
 
 use super::recovery_returns::{
@@ -37,10 +37,10 @@ use crate::support;
 const MAILBOX: &str = "mooglemail:main";
 
 /// 退件路由不读时钟以外的任何依赖；固定时刻只用于其它路由。
-struct FixedClock(DateTime<Utc>);
+struct FixedClock(Timestamp);
 
 impl Clock for FixedClock {
-    fn now(&self) -> DateTime<Utc> {
+    fn now(&self) -> Timestamp {
         self.0
     }
 }
@@ -148,7 +148,7 @@ impl MailUserPort for Untouched {
 
 type Processor = MailProcessorService<Untouched, Untouched, Untouched, Untouched, FixedClock>;
 
-fn processor(now: DateTime<Utc>) -> Processor {
+fn processor(now: Timestamp) -> Processor {
     MailProcessorService::new(
         vec!["main".to_owned()],
         MailProcessorConfig {
@@ -177,7 +177,7 @@ fn processor(now: DateTime<Utc>) -> Processor {
 }
 
 /// 系统退回的装备 COD：原正文原样带回并追加系统后缀；退件只带回装备，不保留 COD。
-fn returned_cod(sale: &CodSale, external_mail_id: &str, received_at: DateTime<Utc>) -> MailMessage {
+fn returned_cod(sale: &CodSale, external_mail_id: &str, received_at: Timestamp) -> MailMessage {
     let original = format!(
         "Your auction item is attached as COD.\n\nAmount: 100 Credits\n\nReference: {}",
         sale.payment_obligation
@@ -203,7 +203,7 @@ fn returned_cod(sale: &CodSale, external_mail_id: &str, received_at: DateTime<Ut
 }
 
 /// 按 Worker 的映射把处理器决定转成入站事实：身份、头部与决定原样写入。
-async fn intake(message: MailMessage, processor: &Processor, now: DateTime<Utc>) -> MailPollIntake {
+async fn intake(message: MailMessage, processor: &Processor, now: Timestamp) -> MailPollIntake {
     let id = Uuid::new_v5(
         &Uuid::NAMESPACE_URL,
         format!(
@@ -245,7 +245,7 @@ async fn intake(message: MailMessage, processor: &Processor, now: DateTime<Utc>)
 }
 
 /// 经生产端口领取邮箱租约并原子提交整批入站事实。
-async fn commit(store: &DatabaseStore, items: Vec<MailPollIntake>, now: DateTime<Utc>) {
+async fn commit(store: &DatabaseStore, items: Vec<MailPollIntake>, now: Timestamp) {
     store
         .ensure_state(
             MAILBOX.to_owned(),
@@ -291,7 +291,7 @@ async fn postgres_processor_return_evidence_is_consumed_by_recovery() {
     let second_sale = insert_sale(pool, 7_400_002, settled_at, 1).await;
     let second_recovery = insert_awaiting_recovery(pool, &second_sale, settled_at).await;
 
-    let now = Utc::now();
+    let now = Timestamp::now();
     let processor = processor(now);
     let first = returned_cod(&first_sale, "990101", minute + Duration::minutes(30));
     let second = returned_cod(&second_sale, "990102", minute + Duration::minutes(31));
@@ -305,7 +305,7 @@ async fn postgres_processor_return_evidence_is_consumed_by_recovery() {
         [(first_recovery, first_mail, &first_sale), (second_recovery, second_mail, &second_sale)]
     {
         let advance = store
-            .record_due_return(Utc::now())
+            .record_due_return(Timestamp::now())
             .await
             .expect("带正文事实的系统退件必须被恢复流程消费")
             .expect("必须领取到排在队头的退件");
@@ -326,7 +326,7 @@ async fn postgres_processor_return_evidence_is_consumed_by_recovery() {
         assert_eq!(attachments, vec![sale.external_equipment_id.clone()]);
     }
     assert!(
-        store.record_due_return(Utc::now()).await.expect("队列排空不报错").is_none(),
+        store.record_due_return(Timestamp::now()).await.expect("队列排空不报错").is_none(),
         "两封退件都已消费"
     );
 
@@ -344,7 +344,7 @@ async fn postgres_recovery_return_with_dispatch_reference_is_isolated() {
     let sale = insert_sale(pool, 7_400_101, settled_at, 1).await;
     let recovery_id = insert_awaiting_recovery(pool, &sale, settled_at).await;
 
-    let now = Utc::now();
+    let now = Timestamp::now();
     let processor = processor(now);
     let mut message = returned_cod(&sale, "990201", minute + Duration::minutes(30));
     let reference =
@@ -359,7 +359,7 @@ async fn postgres_recovery_return_with_dispatch_reference_is_isolated() {
     commit(&store, vec![item], now).await;
 
     let advance = store
-        .record_due_return(Utc::now())
+        .record_due_return(Timestamp::now())
         .await
         .expect("带派发引用的退件必须隔离而不是报错")
         .expect("必须领取到该退件");

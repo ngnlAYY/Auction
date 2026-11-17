@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use auction_domain::{SettlementObligationKind, SettlementPlan};
-use chrono::{DateTime, SecondsFormat, Utc};
+use auction_time::{SecondsFormat, Timestamp};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -68,7 +68,7 @@ pub(super) struct LegacySettlementResult {
     obligation_count: i64,
     obligation_kind_counts: BTreeMap<String, i64>,
     state_version: i64,
-    settled_at: DateTime<Utc>,
+    settled_at: Timestamp,
 }
 
 /// 先识别并校验命令账本，再读取或锁定拍卖；这与旧版冲突优先级一致。
@@ -331,7 +331,7 @@ fn failed(message: &str) -> ApplicationError {
 #[cfg(test)]
 mod tests {
     use auction_domain::{AuctionId, CommandId};
-    use chrono::{DateTime, Utc};
+    use auction_time::Timestamp;
     use uuid::Uuid;
 
     use super::legacy_complete_hash;
@@ -342,8 +342,8 @@ mod tests {
         Uuid::parse_str(value).expect("测试 UUID 必须合法")
     }
 
-    fn at(value: &str) -> DateTime<Utc> {
-        DateTime::parse_from_rfc3339(value).expect("测试时间必须合法").with_timezone(&Utc)
+    fn at(value: &str) -> Timestamp {
+        Timestamp::parse_from_rfc3339(value).expect("测试时间必须合法")
     }
 
     /// 旧账本 `settlement_complete` 摘要只能逐字复现；向量由改用共享摘要入口前的实现生成。

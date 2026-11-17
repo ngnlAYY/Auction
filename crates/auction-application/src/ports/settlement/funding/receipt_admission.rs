@@ -11,7 +11,7 @@ use auction_domain::{
     SETTLEMENT_PPM, SettlementId, SettlementLine, SettlementMode, SettlementObligationKind,
     SettlementWorld,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::Deserialize;
 use uuid::Uuid;
 
@@ -91,11 +91,11 @@ pub struct CodReceiptSnapshot {
     pub settlement_line: Option<SettlementLine>,
     pub settlement_mode: Option<String>,
     pub frozen_sent_proven: bool,
-    pub sending_at: Option<DateTime<Utc>>,
-    pub funding_source_boundary: Option<DateTime<Utc>>,
+    pub sending_at: Option<Timestamp>,
+    pub funding_source_boundary: Option<Timestamp>,
     /// 付款义务所在恢复记录的首寄期限 D0（创建时刻加冻结策略版本的付款期限），与生成方取同一
     /// 来源；用于重建正文期限变量。重寄会重新起算恢复记录的当前期限，但冻结正文不变，不能用它。
-    pub initial_payment_deadline_at: Option<DateTime<Utc>>,
+    pub initial_payment_deadline_at: Option<Timestamp>,
 }
 
 /// 阻断项闭集；顺序即拒绝优先级，调用方取第一项。

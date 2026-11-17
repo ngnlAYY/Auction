@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use auction_domain::SettlementWorld;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use crate::ports::core::ApplicationFuture;
 
@@ -66,11 +66,11 @@ impl RecoveryEvidenceStatus {
 pub struct RecoveryHealthUpdate {
     pub world: SettlementWorld,
     pub balance_credits: Option<i64>,
-    pub balance_observed_at: Option<DateTime<Utc>>,
+    pub balance_observed_at: Option<Timestamp>,
     pub balance_status: RecoveryBalanceStatus,
-    pub evidence_last_success_at: Option<DateTime<Utc>>,
+    pub evidence_last_success_at: Option<Timestamp>,
     pub evidence_status: RecoveryEvidenceStatus,
-    pub updated_at: DateTime<Utc>,
+    pub updated_at: Timestamp,
 }
 
 impl RecoveryHealthUpdate {
@@ -143,7 +143,7 @@ pub trait RecoveryHealthStore: Send + Sync {
 
 pub trait RecoveryHealthRefreshPort: Send + Sync {
     /// 按持久资金策略与 world 集合刷新安全投影；记账模式仅刷新非现金计数。
-    fn refresh(&self, now: DateTime<Utc>) -> ApplicationFuture<'_, ()>;
+    fn refresh(&self, now: Timestamp) -> ApplicationFuture<'_, ()>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

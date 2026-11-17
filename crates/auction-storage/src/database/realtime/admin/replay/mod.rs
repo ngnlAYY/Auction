@@ -2,7 +2,7 @@
 
 use auction_application::core::ApplicationError;
 use auction_application::realtime::RealtimeReplayResult;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
@@ -24,7 +24,7 @@ pub(super) struct ReplayLedgerPayload {
     stream_sequence: i64,
     kind: String,
     schema_version: i32,
-    created_at: DateTime<Utc>,
+    created_at: Timestamp,
 }
 
 pub(super) fn replay_result_to_payload(result: &RealtimeReplayResult) -> ReplayLedgerPayload {

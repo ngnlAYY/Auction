@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use auction_application::core::CompetitionTransactionError;
 use auction_application::mail::{MailAuctionIntakeResult, MailAuctionIntakeWrite};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -68,7 +68,7 @@ pub(super) async fn add_mail_auction_intake_inner(
     }
     let auction_id = target.auction_id;
     // 外部读取后可能已切换到新 Draft；聚合时间必须在 world/target/auction 锁取得后生成。
-    let now: DateTime<Utc> = sqlx::query_scalar("SELECT clock_timestamp()")
+    let now: Timestamp = sqlx::query_scalar("SELECT clock_timestamp()")
         .fetch_one(&mut **transaction)
         .await
         .map_err(map_sql_error)?;

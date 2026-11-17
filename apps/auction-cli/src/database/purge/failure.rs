@@ -6,7 +6,7 @@ use anyhow::Context;
 use auction_storage::{
     RETENTION_PURGE_RECEIPT_FORMAT, RetentionPurgeError, RetentionPurgeFilesystemResult,
 };
-use chrono::Utc;
+use auction_time::Timestamp;
 
 use super::dry_run::DryRunReceipt;
 use crate::support::files;
@@ -29,7 +29,7 @@ pub(super) fn execution_failed(
     let deleted_files = filesystem.deleted_files;
     let document = serde_json::json!({
         "format": RETENTION_PURGE_RECEIPT_FORMAT,
-        "created_at": Utc::now(),
+        "created_at": Timestamp::now(),
         "outcome": "failed",
         "failure_code": failure_code,
         "dry_run_receipt": dry_run_receipt,

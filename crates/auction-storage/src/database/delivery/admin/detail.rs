@@ -11,7 +11,7 @@ use auction_application::delivery::{
     DeliveryAdminError, DeliveryAdminObligation, DeliveryAdminRecovery, DeliveryAdminSentEvidence,
     DeliverySendExpectation, DeliveryTakeExpectation,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::Value;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
@@ -182,7 +182,7 @@ struct ConfirmationRow {
     command_id: Uuid,
     actor: String,
     reason: String,
-    confirmed_at: DateTime<Utc>,
+    confirmed_at: Timestamp,
     external_mail_id: String,
     receipt: String,
     collected: bool,
@@ -371,11 +371,8 @@ fn observations(metadata: &Value) -> Vec<DeliveryAdminSentEvidence> {
     items
 }
 
-fn timestamp(value: Option<&Value>) -> Option<DateTime<Utc>> {
-    value
-        .and_then(Value::as_str)
-        .and_then(|text| DateTime::parse_from_rfc3339(text).ok())
-        .map(|time| time.with_timezone(&Utc))
+fn timestamp(value: Option<&Value>) -> Option<Timestamp> {
+    value.and_then(Value::as_str).and_then(|text| Timestamp::parse_from_rfc3339(text).ok())
 }
 
 fn text(value: Option<&Value>) -> Option<String> {

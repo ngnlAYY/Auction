@@ -3,7 +3,7 @@
 use std::{fmt, future::Future};
 
 use auction_domain::{CommandId, EquipmentId, EquipmentKey, EquipmentKeyEnvelope};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -23,7 +23,7 @@ pub struct MailAuctionItem {
     pub level: Option<i32>,
     pub attributes: serde_json::Value,
     pub source_fingerprint: [u8; 32],
-    pub collected_at: DateTime<Utc>,
+    pub collected_at: Timestamp,
     pub start_price: i64,
     pub key: EquipmentKey,
 }
@@ -60,10 +60,10 @@ pub struct MailAuctionIntakeCommand {
     pub mailbox_key: String,
     pub external_mail_id: String,
     pub seller: String,
-    pub received_at: DateTime<Utc>,
+    pub received_at: Timestamp,
     pub content_digest: [u8; 32],
     pub items: Vec<MailAuctionItem>,
-    pub now: DateTime<Utc>,
+    pub now: Timestamp,
 }
 
 /// 进入拍卖事务前已经完成密钥封装的单件写入。
@@ -76,7 +76,7 @@ pub struct MailAuctionItemWrite {
     pub category: String,
     pub level: Option<i32>,
     pub attributes: serde_json::Value,
-    pub collected_at: DateTime<Utc>,
+    pub collected_at: Timestamp,
     pub start_price: i64,
     pub key_envelope: EquipmentKeyEnvelope,
 }
@@ -90,8 +90,8 @@ pub struct MailAuctionIntakeWrite {
     pub mailbox_key: String,
     pub external_mail_id: String,
     pub seller: String,
-    pub received_at: DateTime<Utc>,
-    pub now: DateTime<Utc>,
+    pub received_at: Timestamp,
+    pub now: Timestamp,
     pub submission_id: Uuid,
     pub items: Vec<MailAuctionItemWrite>,
     pub request_hash: RequestHash,

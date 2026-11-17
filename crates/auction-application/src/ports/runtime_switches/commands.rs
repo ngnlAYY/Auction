@@ -1,7 +1,7 @@
 //! 稳定命令、摘要、版本 CAS 与到期收口规则。
 
 use auction_domain::valid_text;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
@@ -45,7 +45,7 @@ pub struct RuntimeSwitchEvent {
     /// set 的类型化值；其他动作无值。
     pub value: Option<Value>,
     /// set 的数据库期限。
-    pub expires_at: Option<DateTime<Utc>>,
+    pub expires_at: Option<Timestamp>,
     /// expire 对应的设置命令。
     pub expired_command_id: Option<Uuid>,
     /// 操作者声明；Admin 使用会话身份。
@@ -55,7 +55,7 @@ pub struct RuntimeSwitchEvent {
     /// 单行非敏感原因。
     pub reason: String,
     /// 数据库接收时间。
-    pub recorded_at: DateTime<Utc>,
+    pub recorded_at: Timestamp,
 }
 
 impl RuntimeSwitchEvent {
@@ -103,7 +103,7 @@ pub struct RuntimeSwitchCommand {
     /// set 值。
     pub value: Option<Value>,
     /// 绝对期限，不在重试时重新计算。
-    pub expires_at: Option<DateTime<Utc>>,
+    pub expires_at: Option<Timestamp>,
     /// 系统到期命令引用的原设置。
     pub expired_command_id: Option<Uuid>,
     pub actor_id: String,
@@ -132,7 +132,7 @@ impl RuntimeSwitchCommand {
         }) {
             return Err(RuntimeSwitchError::Invalid);
         }
-        let event = self.event(Utc::now())?;
+        let event = self.event(Timestamp::now())?;
         // 期限只对新命令在数据库锁内核对；此处允许已到期请求先查账本。
         let mut historical = event;
         historical.expires_at = None;
@@ -182,7 +182,7 @@ impl RuntimeSwitchCommand {
     pub fn accept(
         &self,
         previous: Option<&RuntimeSwitchEvent>,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> Result<RuntimeSwitchEvent, RuntimeSwitchError> {
         if let Some(previous) = previous {
             previous.validate()?;
@@ -209,7 +209,7 @@ impl RuntimeSwitchCommand {
         Ok(event)
     }
 
-    fn event(&self, recorded_at: DateTime<Utc>) -> Result<RuntimeSwitchEvent, RuntimeSwitchError> {
+    fn event(&self, recorded_at: Timestamp) -> Result<RuntimeSwitchEvent, RuntimeSwitchError> {
         let revision = self
             .expected_revision
             .checked_add(1)

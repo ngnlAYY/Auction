@@ -11,6 +11,7 @@ use auction_contracts::{
     AdminCredentialCreateRequest, AdminCredentialDeleteRequest, AdminCredentialDeleteResponse,
     AdminCredentialMutationRequest, AdminCredentialMutationResponse, ApiResponse,
 };
+use auction_time::Timestamp;
 use axum::{
     Json,
     body::Bytes,
@@ -18,7 +19,6 @@ use axum::{
     http::{HeaderMap, StatusCode, Uri},
     response::{IntoResponse, Response},
 };
-use chrono::Utc;
 
 use super::{
     feature_unavailable, invalid_json, invalid_request, map_credential, map_error,
@@ -103,7 +103,7 @@ pub(crate) async fn create(
             actor_id: identity.actor,
             operator_identity: None,
             request_id: request_id(&headers),
-            now: Utc::now(),
+            now: Timestamp::now(),
         })
         .await
     {
@@ -165,7 +165,7 @@ pub(crate) async fn mutate(
                     label,
                     actor_id: identity.actor,
                     request_id: request_id(&headers),
-                    now: Utc::now(),
+                    now: Timestamp::now(),
                 })
                 .await
             {
@@ -189,7 +189,7 @@ pub(crate) async fn mutate(
                     status,
                     actor_id: identity.actor,
                     request_id: request_id(&headers),
-                    now: Utc::now(),
+                    now: Timestamp::now(),
                 })
                 .await
             {
@@ -245,7 +245,7 @@ pub(crate) async fn delete(
             expected_state_version: input.expected_state_version,
             actor_id: identity.actor,
             request_id: request_id(&headers),
-            now: Utc::now(),
+            now: Timestamp::now(),
         })
         .await
     {

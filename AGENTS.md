@@ -42,13 +42,14 @@
 | `auction-observability` | 日志、指标、tracing、心跳；敏感值不得进入日志 |
 | `auction-process` | 信号、有界排空、任务守卫、本机 readiness 探针；不读配置、不监听 |
 | `auction-test-support` | 只进 `dev-dependencies` 的回环外部服务替身与脱敏语料；不连接真实账号 |
+| `auction-time` | 各层与前端共用的 UTC 时刻、时长、文本格式与本地墙上时间换算；不含业务规则、不依赖内部 crate；已持久化的文本格式不得改动 |
 | `auction-web-public` / `auction-web-admin` | 各自的页面、路由、交互与译文；互不依赖，不导入任何后端 crate |
 | `auction-web-shared` | 两端通用、无业务偏向的浏览器能力与设计 token |
 | `apps/*` | 参数与配置加载、依赖注入、监听绑定、优雅关闭与退出码 |
 
 - 功能按“领域 → 用例/端口 → 存储/外部适配 → HTTP/Web/Worker”的顺序落地。
 - 每个表、迁移、查询、事件、路由与配置字段只有一个 owner；历史格式经映射层兼容，不把旧命名传播到新领域。
-- 跨装配根的共享机制各有唯一 owner：HTTP listener 与连接服务、附加指标出口、tracing 收口、本机 readiness 探针、CLI 私有文件与子进程边界，以及浏览器的 `wire`/`storage`/`timer`。归属与调用顺序见[docs/architecture.md#共享-helper-归属](docs/architecture.md#共享-helper-归属)。`apps/*` 不复制第二份实现。
+- 跨装配根的共享机制各有唯一 owner：HTTP listener 与连接服务、附加指标出口、tracing 收口、本机 readiness 探针、CLI 私有文件与子进程边界、时间类型与其文本格式（`auction-time`），以及浏览器的 `wire`/`storage`/`timer`。归属与调用顺序见[docs/architecture.md#共享-helper-归属](docs/architecture.md#共享-helper-归属)。`apps/*` 不复制第二份实现。
 
 ## 领域不变量
 

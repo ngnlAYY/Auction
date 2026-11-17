@@ -107,7 +107,7 @@ pub(super) async fn retention_dry_run(
     let receipt = serde_json::json!({
         "format": "auction-retention-dry-run-receipt.v1",
         "run_id": run_id,
-        "created_at": chrono::Utc::now(),
+        "created_at": auction_time::Timestamp::now(),
         "database_retention": &report,
         "filesystem_retention": filesystem,
         "totals": {

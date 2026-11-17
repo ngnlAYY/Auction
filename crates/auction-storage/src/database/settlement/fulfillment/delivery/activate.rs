@@ -2,7 +2,7 @@
 
 use auction_application::settlement::{SettlementFulfillmentClaim, SettlementFulfillmentState};
 use auction_domain::CommandId;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
@@ -17,7 +17,7 @@ pub(in crate::database::settlement::fulfillment) async fn activate_postgres(
     claim: &SettlementFulfillmentClaim,
     activate_command_id: CommandId,
     activate_request_hash: auction_application::core::RequestHash,
-    activated_at: DateTime<Utc>,
+    activated_at: Timestamp,
     custody: Option<(
         &auction_application::settlement::SettlementInternalEvidenceSnapshot,
         std::time::Instant,

@@ -8,7 +8,7 @@ use std::{
 };
 
 use auction_config::DataKeyDomain;
-use chrono::Utc;
+use auction_time::Timestamp;
 use clap::Parser;
 use uuid::Uuid;
 
@@ -135,7 +135,7 @@ fn partial_receipt_records_committed_rewrites_and_failure_stage() {
     let document = receipt_document(
         Uuid::new_v4(),
         true,
-        Utc::now(),
+        Timestamp::now(),
         &items,
         Some((DataKeyDomain::UserLogin, FailureStage::Conflict)),
     );
@@ -150,7 +150,7 @@ fn partial_receipt_records_committed_rewrites_and_failure_stage() {
     assert_eq!(document["from_key_ids"]["old-2025-11"], 8);
     assert!(document["domains"].get("credential").is_none(), "未进入的域不出现在回执里");
 
-    let completed = receipt_document(Uuid::new_v4(), true, Utc::now(), &items[..1], None);
+    let completed = receipt_document(Uuid::new_v4(), true, Timestamp::now(), &items[..1], None);
     assert_eq!(completed["outcome"], "completed");
     assert!(completed["failure"].is_null());
 }

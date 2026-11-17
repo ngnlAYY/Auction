@@ -7,7 +7,7 @@
 
 use auction_application::auction::{PublicPriceHistoryReader, WorldReader};
 use auction_storage::postgres_expected_migration_version;
-use chrono::Utc;
+use auction_time::Timestamp;
 
 use crate::support;
 
@@ -94,8 +94,8 @@ async fn postgres_public_login_keeps_sessions_below_the_limit() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
     let user_id = seed_public_user(&store, "session-below-limit").await;
-    let first = seed_public_session(&store, user_id, "below", 0, Utc::now()).await;
-    let second = seed_public_session(&store, user_id, "below", 1, Utc::now()).await;
+    let first = seed_public_session(&store, user_id, "below", 0, Timestamp::now()).await;
+    let second = seed_public_session(&store, user_id, "below", 1, Timestamp::now()).await;
 
     let identity = store
         .create_public(
@@ -103,7 +103,7 @@ async fn postgres_public_login_keeps_sessions_below_the_limit() {
                 token_hash: session_token_hash("below-new"),
                 user_id,
                 authenticated_user_version: 1,
-                created_at: Utc::now(),
+                created_at: Timestamp::now(),
             },
             10,
         )
@@ -140,13 +140,13 @@ async fn postgres_public_login_evicts_least_recently_active_session_at_the_limit
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
     let user_id = seed_public_user(&store, "session-at-limit").await;
-    let base = Utc::now();
+    let base = Timestamp::now();
 
     // 创建顺序与活动顺序相反：最早创建的会话最近仍在活动，最晚创建的最久未活动。
     let mut tokens = Vec::new();
     for index in 0..10_u32 {
-        let created_at = base - chrono::Duration::minutes(i64::from(20 - index));
-        let last_activity_at = base - chrono::Duration::minutes(i64::from(index + 1));
+        let created_at = base - auction_time::Duration::minutes(i64::from(20 - index));
+        let last_activity_at = base - auction_time::Duration::minutes(i64::from(index + 1));
         tokens.push(seed_public_session(&store, user_id, "limit", index, created_at).await);
         sqlx::query(
             "UPDATE public.public_sessions SET last_activity_at = $2 WHERE token_hash = $1",
@@ -190,14 +190,17 @@ async fn postgres_public_login_evicts_least_recently_active_session_at_the_limit
             .expect("统计会话总数");
     assert_eq!(total, 11, "注销只写 revoked_at，不删除历史记录");
 
-    let stored_activity: chrono::DateTime<Utc> = sqlx::query_scalar(
+    let stored_activity: auction_time::Timestamp = sqlx::query_scalar(
         "SELECT last_activity_at FROM public.public_sessions WHERE token_hash = $1",
     )
     .bind(stale_token.as_slice())
     .fetch_one(store.postgres_pool())
     .await
     .expect("读取被注销会话的活动时间");
-    assert!(stored_activity < base - chrono::Duration::minutes(5), "被注销会话的活动时间不被改写");
+    assert!(
+        stored_activity < base - auction_time::Duration::minutes(5),
+        "被注销会话的活动时间不被改写"
+    );
 
     // 再登录一次继续按同一顺序腾位，而不是只认最早创建的行。
     store
@@ -206,7 +209,7 @@ async fn postgres_public_login_evicts_least_recently_active_session_at_the_limit
                 token_hash: session_token_hash("limit-newer"),
                 user_id,
                 authenticated_user_version: 1,
-                created_at: base + chrono::Duration::minutes(1),
+                created_at: base + auction_time::Duration::minutes(1),
             },
             10,
         )
@@ -253,7 +256,7 @@ async fn seed_public_session(
     user_id: uuid::Uuid,
     seed: &str,
     index: u32,
-    created_at: chrono::DateTime<Utc>,
+    created_at: auction_time::Timestamp,
 ) -> Vec<u8> {
     let token_hash = session_token_hash(&format!("{seed}-{index}"));
     sqlx::query(
@@ -290,7 +293,7 @@ async fn postgres_rekey_revokes_old_key_and_sessions_as_runtime_account() {
     let new_key = b"rekey-user-new-key".to_vec();
     let mut sessions = Vec::new();
     for index in 0..2 {
-        let token = seed_public_session(&store, user_id, "rekey", index, Utc::now()).await;
+        let token = seed_public_session(&store, user_id, "rekey", index, Timestamp::now()).await;
         sessions.push(<[u8; 32]>::try_from(token.as_slice()).expect("32 字节会话摘要"));
     }
     assert_eq!(
@@ -298,11 +301,11 @@ async fn postgres_rekey_revokes_old_key_and_sessions_as_runtime_account() {
         user_id
     );
     for token in &sessions {
-        store.inspect_public(*token, Utc::now()).await.expect("轮换前会话有效");
+        store.inspect_public(*token, Timestamp::now()).await.expect("轮换前会话有效");
     }
 
     let command_id = CommandId::new();
-    let now = Utc::now();
+    let now = Timestamp::now();
     let write = || MailUserRekeyWrite {
         command: MailUserRekeyCommand {
             command_id,
@@ -328,7 +331,7 @@ async fn postgres_rekey_revokes_old_key_and_sessions_as_runtime_account() {
     assert!(matches!(rejected, ApplicationError::Session(SessionError::InvalidCredentials)));
     assert_eq!(store.authenticate(new_key.clone()).await.expect("新 key 可登录").user_id, user_id);
     for token in sessions {
-        assert!(store.inspect_public(token, Utc::now()).await.is_err(), "旧会话必须全部失效");
+        assert!(store.inspect_public(token, Timestamp::now()).await.is_err(), "旧会话必须全部失效");
     }
 
     // 同一命令重放只返回原结果：新 key 仍然有效，旧 key 仍被拒绝。
@@ -348,7 +351,7 @@ async fn postgres_public_login_serializes_concurrent_evictions_under_user_lock()
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
     let user_id = seed_public_user(&store, "session-concurrent").await;
-    let base = Utc::now();
+    let base = Timestamp::now();
     for index in 0..10_u32 {
         seed_public_session(&store, user_id, "concurrent", index, base).await;
     }
@@ -362,7 +365,7 @@ async fn postgres_public_login_serializes_concurrent_evictions_under_user_lock()
                         token_hash: session_token_hash(seed),
                         user_id,
                         authenticated_user_version: 1,
-                        created_at: Utc::now(),
+                        created_at: Timestamp::now(),
                     },
                     10,
                 )

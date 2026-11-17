@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::sent_baseline::SentBaselineReason;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use tokio::sync::OwnedSemaphorePermit;
 
 use crate::clients::mooglemail::parser::MoogleMailSentSummary;
@@ -15,11 +15,11 @@ mod scan;
 /// 每次发送前 fresh 取得；Empty 必须来自空列表和末页证明。
 pub(crate) enum SentBoundary {
     Empty,
-    Mail { mail_id: String, numeric_mid: u128, sent_at: DateTime<Utc> },
+    Mail { mail_id: String, numeric_mid: u128, sent_at: Timestamp },
 }
 
 impl SentBoundary {
-    pub(crate) fn sent_at(&self) -> Option<DateTime<Utc>> {
+    pub(crate) fn sent_at(&self) -> Option<Timestamp> {
         match self {
             Self::Empty => None,
             Self::Mail { sent_at, .. } => Some(*sent_at),
@@ -142,8 +142,8 @@ pub(crate) fn numeric_mid(value: &str) -> Option<u128> {
 
 #[derive(Default)]
 struct SentOrder {
-    seen: HashMap<String, DateTime<Utc>>,
-    minute: Option<DateTime<Utc>>,
+    seen: HashMap<String, Timestamp>,
+    minute: Option<Timestamp>,
     minute_minimum: u128,
     newer_minimum: Option<u128>,
 }

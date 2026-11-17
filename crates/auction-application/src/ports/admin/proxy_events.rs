@@ -3,7 +3,7 @@
 //! HTTP。PostgreSQL 适配器从同一 Serializable 快照读取命令账本、代理结果和用户投影。
 
 use auction_domain::{LotId, valid_text};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use crate::ports::core::ApplicationFuture;
@@ -24,7 +24,7 @@ pub enum AdminProxyEventCursor {
     /// 从最新一页开始读取。
     Start,
     /// 从指定的历史位置之后继续读取。
-    Boundary { created_at: DateTime<Utc>, command_id: Uuid },
+    Boundary { created_at: Timestamp, command_id: Uuid },
 }
 
 impl AdminProxyEventCursor {
@@ -76,7 +76,7 @@ pub struct AdminProxyEvent {
     pub maximum_amount: i64,
     pub status: String,
     pub state_version: i64,
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
 }
 
 impl AdminProxyEvent {

@@ -1,7 +1,7 @@
 //! PostgreSQL 恢复前只读预检；只做同一只读事务中的编排，证据查询和结果模型位于子模块，
 //! 预检不执行恢复、不建删数据库、不改变任何数据。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Row;
 
 use crate::database::DatabaseStore;
@@ -63,7 +63,7 @@ impl DatabaseStore {
         let server_version: String = identity
             .try_get("server_version")
             .map_err(|source| query_error("database_state", source))?;
-        let collected_at: DateTime<Utc> = identity
+        let collected_at: Timestamp = identity
             .try_get("collected_at")
             .map_err(|source| query_error("database_state", source))?;
         let in_recovery: bool = identity

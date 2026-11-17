@@ -11,6 +11,7 @@ use auction_contracts::{
     AdminSettlementReturnHandleRequest, AdminSettlementReturnRecheckRequest, ApiResponse,
 };
 use auction_domain::{CommandId, SettlementReturnAction};
+use auction_time::Timestamp;
 use axum::{
     Json,
     body::Bytes,
@@ -18,7 +19,6 @@ use axum::{
     http::{HeaderMap, StatusCode, Uri},
     response::{IntoResponse, Response},
 };
-use chrono::Utc;
 use uuid::Uuid;
 
 use super::boundary::{
@@ -126,7 +126,7 @@ async fn execute(
         input.expected_version,
         input.action,
         actor,
-        Utc::now(),
+        Timestamp::now(),
     ) {
         Ok(command) => command,
         Err(error) => return map_settlement_return_error("build_command", error),

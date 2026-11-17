@@ -10,7 +10,7 @@ use auction_application::core::ApplicationFuture;
 use auction_application::core::CompetitionTransactionError;
 use auction_application::lot_watch_reminders::{LotWatchReminderBatch, LotWatchReminderStore};
 use auction_domain::{AcceptedBid, BidAmount, BidId, BidMechanism, CommandId, LotId, UserId};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Postgres;
 use sqlx::Row;
 use uuid::Uuid;
@@ -54,7 +54,7 @@ pub(crate) async fn insert_bid_event(
     transaction: &mut Transaction<'_, Postgres>,
     event_id: Uuid,
     bid: &AcceptedBid,
-    occurred_at: DateTime<Utc>,
+    occurred_at: Timestamp,
 ) -> Result<(), CompetitionTransactionError> {
     sqlx::query(
         "INSERT INTO public.lot_watch_events
@@ -83,7 +83,7 @@ pub(crate) async fn insert_proxy_event(
     user_id: Uuid,
     lot_id: Uuid,
     state_version: u64,
-    occurred_at: DateTime<Utc>,
+    occurred_at: Timestamp,
 ) -> Result<(), CompetitionTransactionError> {
     sqlx::query(
         "INSERT INTO public.lot_watch_events
@@ -168,7 +168,7 @@ struct ClaimedEvent {
     lot_id: Uuid,
     user_id: Uuid,
     bid_id: Option<Uuid>,
-    occurred_at: DateTime<Utc>,
+    occurred_at: Timestamp,
 }
 
 async fn process_batch(

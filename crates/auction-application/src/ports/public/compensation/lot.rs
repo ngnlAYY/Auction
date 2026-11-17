@@ -3,7 +3,7 @@
 //! 每个已售 lot 公开成交价、持有/调整比例与结算金额，玩家可据此复算附加费与补偿；
 //! 冲正事实只追加，存在时说明该件成交已撤销且池余额已按冻结规则回滚。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use super::movement::PublicCompensationMovementRequest;
@@ -23,7 +23,7 @@ pub struct PublicCompensationLotReversal {
     /// 余额不足、未能冲回的附加费。
     pub tax_shortfall: i64,
     pub balance_after: i64,
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
 }
 
 /// 单个已售 lot 的公开结算明细。

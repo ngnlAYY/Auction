@@ -17,8 +17,8 @@ use crate::database::storage_error_from;
 pub(super) async fn claim_published_topics_postgres(
     store: &DatabaseStore,
     worker_id: &str,
-    now: chrono::DateTime<chrono::Utc>,
-    lease_until: chrono::DateTime<chrono::Utc>,
+    now: auction_time::Timestamp,
+    lease_until: auction_time::Timestamp,
     available_worlds: &[auction_domain::SettlementWorld],
     limit: u16,
 ) -> Result<Vec<ForumReplyTopic>, ApplicationError> {
@@ -241,8 +241,8 @@ pub(super) async fn reply_cursor_postgres(
 pub(super) async fn earliest_live_lot_deadline_postgres(
     store: &DatabaseStore,
     auction_id: AuctionId,
-) -> Result<Option<chrono::DateTime<chrono::Utc>>, ApplicationError> {
-    sqlx::query_scalar::<_, Option<chrono::DateTime<chrono::Utc>>>(
+) -> Result<Option<auction_time::Timestamp>, ApplicationError> {
+    sqlx::query_scalar::<_, Option<auction_time::Timestamp>>(
         "SELECT MIN(lot.effective_end_at)
          FROM public.lots AS lot
          WHERE lot.auction_id = $1 AND lot.status = 'live'",

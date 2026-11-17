@@ -3,7 +3,7 @@
 
 use auction_application::recovery::RecoveryCommandError;
 use auction_domain::legacy_natural_key_uuid;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Postgres;
 use uuid::Uuid;
 
@@ -29,7 +29,7 @@ pub(super) struct SellerReturnContext {
 /// 退回达到冻结上限：装备寄回卖家；原 COD 与卖家收款义务按失败收口并记录理由。
 pub(super) async fn return_to_seller(
     transaction: &mut Transaction<'_, Postgres>,
-    now: DateTime<Utc>,
+    now: Timestamp,
     context: SellerReturnContext,
 ) -> Result<(String, Option<String>, i64), RecoveryCommandError> {
     let SellerReturnContext {

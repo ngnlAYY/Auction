@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use auction_application::core::Clock;
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use tokio::time::Instant;
 
 use crate::worker::diagnostics;
@@ -91,9 +91,9 @@ where
 }
 
 fn hint(
-    result: Result<Option<DateTime<Utc>>, auction_application::core::ApplicationError>,
+    result: Result<Option<Timestamp>, auction_application::core::ApplicationError>,
     phase: &'static str,
-) -> Option<DateTime<Utc>> {
+) -> Option<Timestamp> {
     result.unwrap_or_else(|error| {
         diagnostics::debug(
             "auction_wakeup",
@@ -106,7 +106,7 @@ fn hint(
 }
 
 /// 只接受严格晚于参考时刻的到期；无法表示为标准时长的值按无提示处理。
-fn until(now: DateTime<Utc>, observed_at: Instant, due: Option<DateTime<Utc>>) -> Option<Instant> {
+fn until(now: Timestamp, observed_at: Instant, due: Option<Timestamp>) -> Option<Instant> {
     let delay = due.filter(|due| *due > now).and_then(|due| (due - now).to_std().ok())?;
     observed_at.checked_add(delay)
 }

@@ -12,7 +12,7 @@ use auction_application::operations::{
 };
 use auction_application::settlement::SettlementReturnWorkStore;
 use auction_domain::SettlementReturnAction;
-use chrono::Utc;
+use auction_time::Timestamp;
 use serde_json::json;
 use uuid::Uuid;
 
@@ -21,7 +21,7 @@ use crate::support;
 
 async fn snapshot(store: &auction_storage::DatabaseStore) -> OperationsAlertSnapshot {
     store
-        .snapshot(Utc::now(), OperationsAlertCollectionOverdueRead::Skip)
+        .snapshot(Timestamp::now(), OperationsAlertCollectionOverdueRead::Skip)
         .await
         .expect("读取告警快照")
 }
@@ -78,7 +78,7 @@ async fn postgres_return_take_deliveries_count_only_under_their_case() {
     let observed = snapshot(&store).await;
     assert_eq!(delivery_counts(&observed), (0, 0, 0, 0), "Take 投递不进投递水位");
     assert_eq!(return_counts(&observed), (1, 0, 0), "由退件待处理告警承担");
-    store.settle_due_return_take(Utc::now()).await.expect("收口").expect("必须收口");
+    store.settle_due_return_take(Timestamp::now()).await.expect("收口").expect("必须收口");
     let observed = snapshot(&store).await;
     assert_eq!(delivery_counts(&observed), (0, 0, 0, 0));
     assert_eq!(return_counts(&observed), (0, 0, 1), "结果未知由结果未知告警承担");
@@ -99,7 +99,7 @@ async fn postgres_return_take_deliveries_count_only_under_their_case() {
     super::flows::seed_spent_payout(pool, &third).await;
     super::flows::handle(&store, third.case, 1, SettlementReturnAction::ReclaimAndHold).await;
     store
-        .activate_due_return_take(Utc::now(), super::take_worlds())
+        .activate_due_return_take(Timestamp::now(), super::take_worlds())
         .await
         .expect("激活")
         .expect("必须激活");
@@ -131,11 +131,11 @@ async fn postgres_return_take_deliveries_count_only_under_their_case() {
             external_reference: None,
             result_metadata: json!({"operation": "take", "write_started": true}),
         },
-        Utc::now(),
+        Timestamp::now(),
     )
     .await
     .expect("确定失败收口");
-    store.settle_due_return_take(Utc::now()).await.expect("收口").expect("必须收口");
+    store.settle_due_return_take(Timestamp::now()).await.expect("收口").expect("必须收口");
     let observed = snapshot(&store).await;
     assert_eq!(delivery_counts(&observed), (0, 0, 0, 0), "失败的 Take 不算投递或通知失败");
     assert_eq!(return_counts(&observed), (0, 0, 3));

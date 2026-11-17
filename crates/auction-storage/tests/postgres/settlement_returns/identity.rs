@@ -13,7 +13,7 @@ use auction_application::delivery::{DeliveryClaimExclusions, DeliveryWorkStore};
 use auction_application::settlement::{SettlementReturnAdminPort, SettlementReturnWorkStore};
 use auction_domain::{SettlementReturnAction, SettlementReturnCaseStatus};
 use auction_storage::DatabaseStore;
-use chrono::{Duration, Utc};
+use auction_time::{Duration, Timestamp};
 use serde_json::json;
 use uuid::Uuid;
 
@@ -38,7 +38,7 @@ async fn action_state(store: &DatabaseStore, case: Uuid) -> (String, Option<Uuid
 
 /// 领取一轮到期投递，返回领取到的投递 ID。
 async fn claim_round(store: &DatabaseStore, exclusions: DeliveryClaimExclusions) -> Vec<Uuid> {
-    let now = Utc::now();
+    let now = Timestamp::now();
     let grace = StdDuration::from_secs(60);
     DeliveryWorkStore::begin_claim_cycle(store, now, grace).await.expect("领取前清理");
     DeliveryWorkStore::claim_due(
@@ -75,7 +75,7 @@ async fn postgres_return_take_runs_only_with_a_frozen_credential_identity() {
     for worlds in [Vec::new(), vec!["isekai".to_owned()]] {
         assert!(
             store
-                .activate_due_return_take(Utc::now(), worlds.clone())
+                .activate_due_return_take(Timestamp::now(), worlds.clone())
                 .await
                 .expect("激活")
                 .is_none(),
@@ -83,7 +83,8 @@ async fn postgres_return_take_runs_only_with_a_frozen_credential_identity() {
         );
     }
     assert_eq!(action_state(&store, returned.case).await, ("pending".to_owned(), None));
-    let invalid = store.activate_due_return_take(Utc::now(), vec!["elsewhere".to_owned()]).await;
+    let invalid =
+        store.activate_due_return_take(Timestamp::now(), vec!["elsewhere".to_owned()]).await;
     assert!(invalid.is_err(), "世界参数越出闭集时失败关闭");
 
     // 详情：没有在线 Worker、或在线 Worker 只声明核验能力，都说明领回能力不可用；不改变案件。
@@ -133,7 +134,7 @@ async fn postgres_return_take_runs_only_with_a_frozen_credential_identity() {
 
     // 能冻结身份的世界：照常激活为待领取的 Take 投递。
     let progress = store
-        .activate_due_return_take(Utc::now(), vec!["main".to_owned()])
+        .activate_due_return_take(Timestamp::now(), vec!["main".to_owned()])
         .await
         .expect("激活")
         .expect("必须激活");
@@ -190,8 +191,8 @@ async fn postgres_return_take_runs_only_with_a_frozen_credential_identity() {
     let invalid = DeliveryWorkStore::claim_due(
         &store,
         "returns-identity-delivery".to_owned(),
-        Utc::now(),
-        Utc::now() + Duration::minutes(2),
+        Timestamp::now(),
+        Timestamp::now() + Duration::minutes(2),
         StdDuration::from_secs(60),
         DeliveryClaimExclusions {
             unidentified_take_worlds: vec!["elsewhere".to_owned()],

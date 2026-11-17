@@ -11,7 +11,7 @@
 
 use auction_application::settlement::SettlementReturnProgress;
 use auction_domain::SettlementReturnCaseStatus;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::json;
 use sqlx::Postgres;
 
@@ -36,7 +36,7 @@ pub(super) async fn restart_unstarted_take(
     tx: &mut Transaction<'_, Postgres>,
     case: &CaseRow,
     action: &ActionRow,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<Option<SettlementReturnProgress>, ReturnTransactionError> {
     let Some(delivery_id) = action.delivery_id else {
         return Ok(None);
@@ -88,7 +88,7 @@ pub(super) async fn hand_over_conflicted_take(
     tx: &mut Transaction<'_, Postgres>,
     case: &CaseRow,
     action: &ActionRow,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<Option<SettlementReturnProgress>, ReturnTransactionError> {
     if action.delivery_id.is_some()
         || action.execution_state != "pending"

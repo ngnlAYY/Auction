@@ -9,7 +9,7 @@
 use auction_domain::{
     FIRST_DISPATCH_NO, SettlementDispatchReference, SettlementObligationKind, valid_text,
 };
-use chrono::{DateTime, TimeDelta, Timelike, Utc};
+use auction_time::{TimeDelta, Timestamp};
 use serde::Deserialize;
 use uuid::Uuid;
 
@@ -169,7 +169,7 @@ pub struct SettlementReturnFacts {
     pub sender: Option<String>,
     pub subject: Option<String>,
     pub return_world: String,
-    pub received_at: DateTime<Utc>,
+    pub received_at: Timestamp,
     /// `inbound_mail.decision_metadata` 原文。
     pub metadata: serde_json::Value,
     /// 证据义务 ID 对应的结算义务；不存在时为空。
@@ -214,7 +214,7 @@ pub struct SettlementReturnDelivery {
     /// 冻结载荷的操作（`payload_operation`）。
     pub operation: Option<String>,
     /// 进入发送围栏的时刻；从未发送时为空。
-    pub sending_at: Option<DateTime<Utc>>,
+    pub sending_at: Option<Timestamp>,
     /// 派发编号：首寄为 1。
     pub dispatch_no: u32,
     /// 是否为履约当前派发。
@@ -516,5 +516,5 @@ pub struct SettlementReturnConsumption {
     pub obligation_id: Option<Uuid>,
     pub delivery_id: Option<Uuid>,
     pub decision: SettlementReturnDecision,
-    pub recorded_at: DateTime<Utc>,
+    pub recorded_at: Timestamp,
 }

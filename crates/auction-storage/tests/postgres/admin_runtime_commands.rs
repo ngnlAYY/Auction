@@ -23,13 +23,13 @@ use auction_application::admin::{
 use auction_application::core::{ApplicationError, ApplicationFuture, Clock, RequestHash};
 use auction_domain::CommandId;
 use auction_storage::DatabaseAdminRuntimeCommands;
-use chrono::{DateTime, Duration, DurationRound, Utc};
+use auction_time::{Duration, Timestamp};
 use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::support;
 
-fn pending_command(now: DateTime<Utc>) -> AdminRuntimeStoredCommand {
+fn pending_command(now: Timestamp) -> AdminRuntimeStoredCommand {
     let mut document = AdminRuntimeDocument::default();
     document.materialize_business_defaults();
     let expected_fingerprint = format!("sha256:{}", "0".repeat(64));
@@ -65,7 +65,7 @@ async fn postgres_admin_runtime_command_ledger_walks_the_full_lifecycle() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = Arc::new(database.store().await.expect("以运行账号连接"));
     let ledger = DatabaseAdminRuntimeCommands::new(Arc::clone(&store));
-    let now = Utc::now().duration_trunc(Duration::seconds(1)).expect("截断到秒");
+    let now = Timestamp::now().duration_trunc(Duration::seconds(1)).expect("截断到秒");
     let command = pending_command(now);
     let command_id = command.command_id;
     let request_hash = command.request_hash;
@@ -179,7 +179,7 @@ impl AdminRuntimeFileStore for MemoryFiles {
     fn validate_candidate(
         &self,
         _document: &AdminRuntimeDocument,
-        _now: DateTime<Utc>,
+        _now: Timestamp,
     ) -> Result<(), ApplicationError> {
         Ok(())
     }
@@ -213,8 +213,8 @@ impl AdminRuntimeFileStore for MemoryFiles {
 struct WallClock;
 
 impl Clock for WallClock {
-    fn now(&self) -> DateTime<Utc> {
-        Utc::now()
+    fn now(&self) -> Timestamp {
+        Timestamp::now()
     }
 }
 
@@ -264,7 +264,8 @@ async fn insert_legacy_row(
     candidate: &AdminRuntimeDocument,
 ) -> Result<(), sqlx::Error> {
     let audit_id = Uuid::new_v4();
-    let at = Utc::now().duration_trunc(Duration::seconds(1)).expect("截断到秒") - Duration::days(1);
+    let at = Timestamp::now().duration_trunc(Duration::seconds(1)).expect("截断到秒")
+        - Duration::days(1);
     sqlx::query(
         "INSERT INTO public.audit_records
             (id, occurred_at, actor_type, actor_id, action, entity_type, entity_id, result,

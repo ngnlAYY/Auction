@@ -4,7 +4,7 @@
 use auction_application::recovery::{RecoveryReportReader, RecoveryResolutionStore};
 use auction_domain::AuctionId;
 use auction_storage::DatabaseStore;
-use chrono::{Duration, Utc};
+use auction_time::{Duration, Timestamp};
 
 use super::binding::{created_at, freeze_current_attempt, insert_attempt};
 use super::fixture::{Sale, SaleSpec, insert_reclaiming_sale};
@@ -60,7 +60,7 @@ async fn postgres_recovery_report_explains_send_attribution_blockers() {
     .await
     .expect("退件之后确定未外写的一次尝试");
     assert_eq!(blocker(&store, &sale).await.as_deref(), Some("send_after_return"));
-    store.advance_due_cod_return(Utc::now()).await.expect("推进").expect("阻断");
+    store.advance_due_cod_return(Timestamp::now()).await.expect("推进").expect("阻断");
     assert_eq!(blocker(&store, &sale).await.as_deref(), Some("send_after_return"));
 
     sqlx::query(

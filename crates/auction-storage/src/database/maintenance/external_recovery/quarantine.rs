@@ -6,7 +6,7 @@ use auction_application::recovery::{
     ExternalRecoveryQuarantineMatch, ExternalRecoveryQuarantineOutcome,
     ExternalRecoverySendEvidence, ExternalRecoveryUnresolvedBlock,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
@@ -23,7 +23,7 @@ pub(super) async fn quarantine_one(
     scan_id: Uuid,
     actor_id: &str,
     candidate: &ExternalRecoveryQuarantineMatch,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<ExternalRecoveryQuarantineOutcome, ApplicationError> {
     let row = sqlx::query(
         "SELECT status, fencing_version FROM public.deliveries WHERE id = $1 FOR UPDATE",
@@ -217,7 +217,7 @@ pub(super) async fn block_unresolved_one(
     scan_id: Uuid,
     actor_id: &str,
     block: &ExternalRecoveryUnresolvedBlock,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<ExternalRecoveryQuarantineOutcome, ApplicationError> {
     let row = sqlx::query(
         "SELECT status, fencing_version FROM public.deliveries WHERE id = $1 FOR UPDATE",

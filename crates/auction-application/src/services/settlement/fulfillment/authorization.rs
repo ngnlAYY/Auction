@@ -3,7 +3,7 @@
 use std::time::Instant;
 
 use auction_domain::SettlementObligationKind;
-use chrono::Duration;
+use auction_time::Duration;
 
 use super::evidence::validate_balance_evidence;
 use super::intent::build_delivery_intent;

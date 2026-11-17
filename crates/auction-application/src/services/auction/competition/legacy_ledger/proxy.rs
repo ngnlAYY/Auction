@@ -4,7 +4,7 @@ use auction_domain::{
     BidAmount, CommandId, ProxyAuthorizationId, ProxyMode, ProxyStatus, ProxyTerminalReason,
     ProxyTransition, ProxyTransitionKind,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -226,7 +226,7 @@ impl LegacyProxyTransitionRecord {
     /// 版本号写入持久账本前须能表示为 `i64`；溢出与读回方向一样失败关闭，不饱和成伪造版本。
     pub(super) fn from_domain(
         value: &ProxyTransition,
-        created_at: DateTime<Utc>,
+        created_at: Timestamp,
     ) -> Result<Self, ApplicationError> {
         let state_version = i64::try_from(value.state_version)
             .map_err(ledger_error("encode_transition_state_version"))?;

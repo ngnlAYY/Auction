@@ -5,7 +5,7 @@ use auction_application::auction::{
     PublicPriceHistoryPage,
 };
 use auction_application::core::ApplicationError;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::Value;
 use sqlx::Row;
 
@@ -192,7 +192,7 @@ fn map_postgres_entry(
             .try_get("price")
             .map_err(|error| storage_error_from(error, "读取 PostgreSQL 历史成交价失败"))?,
         closed_at: row
-            .try_get::<DateTime<Utc>, _>("closed_at")
+            .try_get::<Timestamp, _>("closed_at")
             .map_err(|error| storage_error_from(error, "读取 PostgreSQL 历史结束时间失败"))?,
     })
 }

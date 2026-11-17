@@ -15,7 +15,7 @@ use auction_application::realtime::{
     RealtimeEventSink, RealtimeRelay, RealtimeRelayConfig, RealtimeSequenceAllocator,
     RealtimeSinkError, RealtimeStreamStore,
 };
-use chrono::{TimeZone, Utc};
+use auction_time::Timestamp;
 
 /// 记录调用顺序的共享日志；只用于断言编排顺序，不参与业务判定。
 #[derive(Default)]
@@ -77,9 +77,7 @@ impl RealtimeConsumerStore for Consumers {
                         "state_version": 1,
                         "preview_revision": 1,
                     }),
-                    created_at: Utc
-                        .with_ymd_and_hms(2026, 11, 4, 0, 0, 0)
-                        .single()
+                    created_at: Timestamp::from_ymd_hms(2026, 11, 4, 0, 0, 0)
                         .expect("固定时间为合法时刻"),
                 }],
                 sequence_gap: false,
@@ -104,7 +102,7 @@ impl RealtimeConsumerStore for Consumers {
         _event_id: uuid::Uuid,
         _failure_code: String,
         _safe_detail: String,
-        _failed_at: chrono::DateTime<Utc>,
+        _failed_at: auction_time::Timestamp,
     ) -> ApplicationFuture<'_, ()> {
         Box::pin(async move { Ok(()) })
     }
@@ -169,7 +167,7 @@ async fn relay_allocates_pending_sequences_before_scanning() {
         false,
         vec!["auction:1f0c0000-0000-4000-8000-000000000002".to_owned()],
     );
-    let batch = relay.run_once(Utc::now()).await.expect("relay 轮次成功");
+    let batch = relay.run_once(Timestamp::now()).await.expect("relay 轮次成功");
     assert_eq!(batch.streams, 1, "relay 应扫描到一个待转发 stream：{batch:?}");
     assert_eq!(batch.delivered, 1, "relay 应交付一条事件：{batch:?}");
     assert_eq!(
@@ -187,7 +185,7 @@ async fn relay_keeps_delivering_when_allocation_fails() {
         true,
         vec!["auction:1f0c0000-0000-4000-8000-000000000002".to_owned()],
     );
-    let batch = relay.run_once(Utc::now()).await.expect("补号失败不得让 relay 轮次失败");
+    let batch = relay.run_once(Timestamp::now()).await.expect("补号失败不得让 relay 轮次失败");
     assert_eq!(batch.delivered, 1);
     assert_eq!(batch.failures, 0);
     assert_eq!(trace.entries(), vec!["allocate", "scan", "publish"]);

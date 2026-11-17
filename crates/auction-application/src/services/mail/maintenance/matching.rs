@@ -10,7 +10,7 @@ pub(super) fn frozen_entry_matches(
     candidate: &MoogleMailboxUnprovenSend,
     expectation: &DeliverySendExpectation,
     entry: &MoogleMailboxSentEntry,
-    now: chrono::DateTime<chrono::Utc>,
+    now: auction_time::Timestamp,
 ) -> bool {
     candidate.world_id == expectation.world_id
         && mail_recipient_is_list_projection(&entry.recipient, &expectation.recipient)

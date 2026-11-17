@@ -1,6 +1,6 @@
 //! Webhook 告警通道的独立持久账本边界；与 MoogleMail 通知互不消费冷却或投递状态。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -41,8 +41,8 @@ pub enum OperationsAlertWebhookOutcome {
 /// 创建 webhook 投递时的不可变请求；模板由非敏感配置提供。
 #[derive(Debug, Clone)]
 pub struct OperationsAlertWebhookClaimRequest {
-    pub now: DateTime<Utc>,
-    pub lease_until: DateTime<Utc>,
+    pub now: Timestamp,
+    pub lease_until: Timestamp,
     pub template: String,
 }
 
@@ -92,7 +92,7 @@ pub trait OperationsAlertWebhookSender: Send + Sync {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OperationsAlertWebhookFinish {
     pub outcome: OperationsAlertWebhookOutcome,
-    pub next_webhook_at: Option<DateTime<Utc>>,
+    pub next_webhook_at: Option<Timestamp>,
 }
 
 impl OperationsAlertWebhookFinish {
@@ -146,9 +146,9 @@ mod tests {
     #[test]
     fn finish_requires_cooldown_for_retryable_and_none_for_terminal_unknown() {
         use super::{OperationsAlertWebhookFinish, OperationsAlertWebhookOutcome};
-        use chrono::Utc;
+        use auction_time::Timestamp;
 
-        let now = Utc::now();
+        let now = Timestamp::now();
         assert!(
             OperationsAlertWebhookFinish {
                 outcome: OperationsAlertWebhookOutcome::Retryable,

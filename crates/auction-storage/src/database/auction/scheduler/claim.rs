@@ -2,7 +2,7 @@
 
 use auction_application::scheduling::ScheduledRoundClaim;
 use auction_domain::AuctionId;
-use chrono::{DateTime, NaiveDate, Utc};
+use auction_time::Timestamp;
 use sqlx::Postgres;
 use sqlx::Row;
 use uuid::Uuid;
@@ -14,8 +14,8 @@ use crate::database::repository_error;
 pub(super) async fn postgres(
     pool: &TrackedPool<Postgres>,
     worker_id: &str,
-    now: DateTime<Utc>,
-    lease_until: DateTime<Utc>,
+    now: Timestamp,
+    lease_until: Timestamp,
     limit: u16,
 ) -> Result<Vec<ScheduledRoundClaim>, auction_application::core::RepositoryError> {
     let mut transaction = pool.begin().await.map_err(map_storage_error)?;
@@ -77,11 +77,12 @@ pub(super) async fn postgres(
         let create_command_id: Uuid =
             row.try_get("create_command_id").map_err(map_storage_error)?;
         let world_id: String = row.try_get("world_id").map_err(map_storage_error)?;
-        let local_week: NaiveDate = row.try_get("local_week").map_err(map_storage_error)?;
+        let local_week =
+            row.try_get::<jiff_sqlx::Date, _>("local_week").map_err(map_storage_error)?.to_jiff();
         let slot_key: Option<String> = row.try_get("slot_key").map_err(map_storage_error)?;
-        let preview_completed_at: Option<DateTime<Utc>> =
+        let preview_completed_at: Option<Timestamp> =
             row.try_get("preview_completed_at").map_err(map_storage_error)?;
-        let open_completed_at: Option<DateTime<Utc>> =
+        let open_completed_at: Option<Timestamp> =
             row.try_get("open_completed_at").map_err(map_storage_error)?;
         let phase =
             phase_from_completion(preview_completed_at.is_some(), open_completed_at.is_some());

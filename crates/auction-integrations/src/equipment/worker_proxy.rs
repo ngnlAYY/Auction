@@ -64,7 +64,7 @@ mod tests {
         WorkerEquipmentReadRequest, WorkerEquipmentReadResponse, WorkerRemoteReadError,
         WorkerRemoteReadFuture, WorkerSentLookupRequest, WorkerSentLookupResponse,
     };
-    use chrono::Utc;
+    use auction_time::Timestamp;
     use serde_json::json;
 
     use super::*;
@@ -97,7 +97,7 @@ mod tests {
                         level: Some(500),
                         tradeable: true,
                         attributes: json!({"Primary Attributes / Strength": {"value": "+1.00"}}),
-                        collected_at: Utc::now(),
+                        collected_at: Timestamp::now(),
                         key: "0123456789".to_owned(),
                     }),
                 }

@@ -1,7 +1,7 @@
 //! 清理执行只允许的代码内闭集表与固定 SQL。表名、谓词和排序都在编译期写死，
 //! 政策只能引用规则与期限，不能扩展删除范围；审计、资金、业务历史与身份表不在集合内。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Row;
 
 use super::model::RetentionPurgeError;
@@ -171,7 +171,7 @@ pub(super) struct RemainingCandidates {
 pub(super) async fn count_remaining(
     pool: &TrackedPool<sqlx::Postgres>,
     table: &str,
-    cutoff: DateTime<Utc>,
+    cutoff: Timestamp,
 ) -> Result<RemainingCandidates, RetentionPurgeError> {
     let statement = remaining_statement(table).ok_or(RetentionPurgeError::TableNotPurgeable)?;
     let row = sqlx::query(sqlx::AssertSqlSafe(statement))

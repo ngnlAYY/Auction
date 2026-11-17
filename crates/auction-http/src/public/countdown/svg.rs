@@ -3,7 +3,7 @@
 use std::fmt::{self, Write};
 
 use auction_application::auction::PublicAuctionCountdown;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use super::animation::write_running;
 
@@ -24,7 +24,7 @@ impl TimerKind {
     }
 
     /// 本计时器数到的时刻；清单计时器数到收件截止，拍卖计时器数到计划截止（预览期可能未排期）。
-    pub(super) fn deadline(self, snapshot: &PublicAuctionCountdown) -> Option<DateTime<Utc>> {
+    pub(super) fn deadline(self, snapshot: &PublicAuctionCountdown) -> Option<Timestamp> {
         match self {
             Self::List => Some(snapshot.intake_closes_at),
             Self::Auction => snapshot.scheduled_end_at,
@@ -55,7 +55,7 @@ pub(super) fn render(
     let title = kind.title();
     let deadline_text = deadline.map_or_else(
         || "Not scheduled".to_owned(),
-        |time| time.format("%Y-%m-%d %H:%M:%S UTC").to_string(),
+        |time| time.strftime("%Y-%m-%d %H:%M:%S UTC").to_string(),
     );
     let mut body = String::with_capacity(16_384);
     write!(
@@ -69,7 +69,7 @@ pub(super) fn render(
     write!(body, "<text class=\"countdown-title\" x=\"160\" y=\"25\">{title}</text>")?;
     let remaining_ms = deadline.map(|time| {
         let remaining = time.signed_duration_since(snapshot.observed_at);
-        if remaining <= chrono::Duration::zero() {
+        if remaining <= auction_time::Duration::zero() {
             return 0;
         }
         // 正差先向上取毫秒，避免 1000.5ms 提前变成 1s 或 0.5ms 被误判结束。

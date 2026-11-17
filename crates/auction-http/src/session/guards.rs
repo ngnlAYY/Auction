@@ -6,10 +6,10 @@ use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError}
 use auction_application::public::{AdminSessionIdentity, PublicSessionIdentity};
 use auction_contracts::ApiErrorResponse;
 use auction_observability::HttpRateLimitKind;
+use auction_time::Timestamp;
 use axum::Json;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use chrono::Utc;
 use uuid::Uuid;
 
 use super::{
@@ -150,7 +150,7 @@ async fn authenticated_admin_session_with_csrf(
     let Some(raw_csrf) = raw_csrf.or_else(|| read_admin_cookie(headers, ADMIN_CSRF_COOKIE)) else {
         return Err(Box::new(authentication_error()));
     };
-    match session.current(raw_token, raw_csrf.clone(), Utc::now()).await {
+    match session.current(raw_token, raw_csrf.clone(), Timestamp::now()).await {
         Ok(identity) => Ok((raw_csrf, identity)),
         Err(error) if is_unauthenticated(&error) => Err(Box::new(authentication_error())),
         Err(diagnostic_cause) => {
@@ -197,7 +197,7 @@ pub(crate) async fn authenticated_public_identity(
     let Some(raw_token) = read_public_session_cookie(headers) else {
         return Err(Box::new(authentication_error()));
     };
-    match session.current(raw_token, Utc::now()).await {
+    match session.current(raw_token, Timestamp::now()).await {
         Ok(identity) => Ok(identity),
         Err(error) if is_unauthenticated(&error) => Err(Box::new(authentication_error())),
         Err(diagnostic_cause) => {
@@ -233,7 +233,7 @@ pub(crate) async fn authenticated_public_competition_identity(
     let Some(raw_token) = read_public_session_cookie(headers) else {
         return Err(Box::new(authentication_error()));
     };
-    match session.current(raw_token, Utc::now()).await {
+    match session.current(raw_token, Timestamp::now()).await {
         Ok(identity) => {
             check_public_expected_user(headers, identity.user_id)?;
             Ok(identity)

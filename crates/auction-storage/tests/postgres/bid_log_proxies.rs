@@ -18,7 +18,7 @@ use auction_application::auction::{
 };
 use auction_domain::{BidAmount, CommandId, LotId, ProxyMode, UserId};
 use auction_storage::{DatabaseCompetitionCommands, DatabaseStore};
-use chrono::{Duration, Utc};
+use auction_time::{Duration, Timestamp};
 use serde_json::Value;
 use sqlx::{AssertSqlSafe, PgPool, Row};
 use uuid::Uuid;
@@ -41,7 +41,7 @@ struct Seeded {
 /// 写入一场 live 场次与一件 lot；只写夹具，不经过被测端口。
 async fn seed(admin: &DatabaseStore) -> Seeded {
     let pool = admin.postgres_pool();
-    let deadline = Utc::now() + Duration::hours(2);
+    let deadline = Timestamp::now() + Duration::hours(2);
     let opened = deadline - Duration::hours(4);
     let auction_id = stable_id(SEED, "auction");
     sqlx::query(

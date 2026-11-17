@@ -14,7 +14,7 @@ use auction_application::mail::{
 use auction_application::recovery::RecoveryWorkStore;
 use auction_domain::{CommandId, deterministic_uuid};
 use auction_observability::WorkerResult;
-use chrono::Duration as ChronoDuration;
+use auction_time::TimeDelta;
 use serde::Serialize;
 
 use super::{
@@ -28,7 +28,7 @@ pub(crate) async fn process_recovery_action<C: Clock + 'static>(
     delivery: Option<Arc<dyn MailDeliveryEnqueuer>>,
     blacklister: Option<Arc<dyn RecoveryBuyerBlacklister>>,
     clock: Arc<C>,
-    retry_delay: ChronoDuration,
+    retry_delay: TimeDelta,
     claim: auction_application::recovery::RecoveryActionClaim,
 ) -> WorkerResult {
     match diagnostics::catch_item_panic(
@@ -71,7 +71,7 @@ async fn process_recovery_action_inner<C>(
     delivery: Option<Arc<dyn MailDeliveryEnqueuer>>,
     blacklister: Option<Arc<dyn RecoveryBuyerBlacklister>>,
     clock: Arc<C>,
-    retry_delay: ChronoDuration,
+    retry_delay: TimeDelta,
     claim: auction_application::recovery::RecoveryActionClaim,
 ) -> WorkerResult
 where
@@ -403,7 +403,7 @@ mod tests {
     use auction_application::core::RequestHash;
     use auction_application::recovery::RecoveryActionClaim;
     use auction_domain::{CommandId, SettlementId};
-    use chrono::Utc;
+    use auction_time::Timestamp;
     use uuid::Uuid;
 
     use super::recovery_delivery_command;
@@ -437,12 +437,12 @@ mod tests {
             activate_request_hash: None,
             state_version: 1,
             claim_token: Uuid::new_v4(),
-            lease_until: Utc::now(),
+            lease_until: Timestamp::now(),
             fencing_version: 1,
             retry_count: 0,
             worker_id: "fixture-worker".to_owned(),
-            claimed_at: Utc::now(),
-            created_at: Utc::now(),
+            claimed_at: Timestamp::now(),
+            created_at: Timestamp::now(),
         }
     }
 

@@ -3,11 +3,11 @@
 use std::sync::Arc;
 
 use auction_application::scheduling::RecurringSchedule;
-use chrono::{DateTime, Duration, Utc};
+use auction_time::{Duration, Timestamp};
 
 /// 启动时只计算一次异世界相位；调用方只在隔离开启且同时配置两个世界时调用。
 /// 无法计算两个严格递增的未来触发时刻时返回 `None`，由装配根决定启动错误。
-pub fn mail_world_phase(schedule: &dyn RecurringSchedule, now: DateTime<Utc>) -> Option<Duration> {
+pub fn mail_world_phase(schedule: &dyn RecurringSchedule, now: Timestamp) -> Option<Duration> {
     let first = schedule.next_after(now).filter(|next| *next > now)?;
     let second = schedule.next_after(first).filter(|next| *next > first)?;
     Some((second.signed_duration_since(first) / 2).min(Duration::seconds(150)))
@@ -27,7 +27,7 @@ impl PhasedMailSchedule {
 }
 
 impl RecurringSchedule for PhasedMailSchedule {
-    fn next_after(&self, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
+    fn next_after(&self, now: Timestamp) -> Option<Timestamp> {
         // 先平移查询时刻再平移结果，保留尚未到来的偏移触发点；不能直接给 next(now) 加偏移。
         // @every 的相对间隔在该公式中自然抵消相位，不另改原解析器的节奏语义。
         let next = self

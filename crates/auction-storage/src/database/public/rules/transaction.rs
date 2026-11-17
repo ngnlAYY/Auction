@@ -7,7 +7,7 @@ use auction_application::admin::{
 };
 use auction_application::core::{RequestHash, TransactionFuture, TransactionPolicy};
 use auction_application::public::SiteDocumentKind;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::{Value, json};
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
@@ -194,7 +194,7 @@ impl AdminRulesTransaction for PostgresRulesTransaction {
     fn publish_document(
         &mut self,
         command: AdminRulesPublishCommand,
-        published_at: DateTime<Utc>,
+        published_at: Timestamp,
     ) -> impl Future<Output = Result<AdminRulesDocument, AdminRulesTransactionError>> + Send {
         async move {
             let next_revision = command

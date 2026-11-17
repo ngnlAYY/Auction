@@ -1,7 +1,7 @@
 //! PostgreSQL 只读保留盘点；只在同一 `REPEATABLE READ` 只读事务中读取数据库身份、迁移/schema
 //! 状态与关系规模，不判断归档或删除资格，不提供任何 mutation 能力，结果仅供人工政策评审。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Row;
 
 use crate::database::DatabaseStore;
@@ -124,7 +124,7 @@ impl DatabaseStore {
         if transaction_read_only != "on" {
             return Err(RetentionInventoryError::ReadOnlyTransactionInvalid);
         }
-        let statistics_reset_at: Option<DateTime<Utc>> = identity
+        let statistics_reset_at: Option<Timestamp> = identity
             .try_get("statistics_reset_at")
             .map_err(|source| query_error("database_identity", source))?;
         let collected_at = identity

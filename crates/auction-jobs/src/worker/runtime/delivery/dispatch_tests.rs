@@ -34,7 +34,7 @@ use auction_application::settlement::{
     InternalEvidenceFuture, InternalEvidenceLease, SettlementInternalEvidenceSnapshot,
 };
 use auction_observability::{WorkerLoop, WorkerResult};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use tokio::time::Instant;
 use uuid::Uuid;
 
@@ -164,7 +164,7 @@ impl DeliveryWorkStore for OutboxStore {
 
     fn begin_claim_cycle(
         &self,
-        _now: DateTime<Utc>,
+        _now: Timestamp,
         _sending_grace: Duration,
     ) -> ApplicationFuture<'_, ()> {
         Box::pin(async { Ok(()) })
@@ -173,8 +173,8 @@ impl DeliveryWorkStore for OutboxStore {
     fn claim_due(
         &self,
         worker_id: String,
-        now: DateTime<Utc>,
-        lease_until: DateTime<Utc>,
+        now: Timestamp,
+        lease_until: Timestamp,
         _sending_grace: Duration,
         exclusions: DeliveryClaimExclusions,
         _limit: u16,
@@ -206,7 +206,7 @@ impl DeliveryWorkStore for OutboxStore {
     fn start_sending_authorized<'a>(
         &'a self,
         _claim: DeliveryWorkClaim,
-        _started_at: DateTime<Utc>,
+        _started_at: Timestamp,
         _evidence: Option<&'a SettlementInternalEvidenceSnapshot>,
         _expectation: Option<&'a DeliveryPreparedExpectation>,
     ) -> ApplicationFuture<'a, DeliveryFenceOutcome> {
@@ -226,7 +226,7 @@ impl DeliveryWorkStore for OutboxStore {
     fn start_sending_authorized_until<'a>(
         &'a self,
         _claim: DeliveryWorkClaim,
-        _started_at: DateTime<Utc>,
+        _started_at: Timestamp,
         _evidence: &'a SettlementInternalEvidenceSnapshot,
         _deadline: std::time::Instant,
         _expectation: Option<&'a DeliveryPreparedExpectation>,
@@ -237,7 +237,7 @@ impl DeliveryWorkStore for OutboxStore {
     fn reject_preparation(
         &self,
         _claim: DeliveryWorkClaim,
-        _completed_at: DateTime<Utc>,
+        _completed_at: Timestamp,
     ) -> ApplicationFuture<'_, ()> {
         unavailable()
     }
@@ -245,7 +245,7 @@ impl DeliveryWorkStore for OutboxStore {
     fn release(
         &self,
         _claim: DeliveryWorkClaim,
-        _released_at: DateTime<Utc>,
+        _released_at: Timestamp,
     ) -> ApplicationFuture<'_, ()> {
         self.record(Call::Release);
         Box::pin(async { Ok(()) })
@@ -254,8 +254,8 @@ impl DeliveryWorkStore for OutboxStore {
     fn renew(
         &self,
         _claim: DeliveryWorkClaim,
-        _renewed_at: DateTime<Utc>,
-        _lease_until: DateTime<Utc>,
+        _renewed_at: Timestamp,
+        _lease_until: Timestamp,
     ) -> ApplicationFuture<'_, ()> {
         self.record(Call::Renew);
         let attempt = self.renewals.fetch_add(1, Ordering::SeqCst);
@@ -275,7 +275,7 @@ impl DeliveryWorkStore for OutboxStore {
         &self,
         _claim: DeliveryWorkClaim,
         _result: DeliverySendResult,
-        _completed_at: DateTime<Utc>,
+        _completed_at: Timestamp,
     ) -> ApplicationFuture<'_, ()> {
         // 终态在 future 就绪即提交确认时记录；只创建未等待的调用不算落库。
         Box::pin(async move {
@@ -288,7 +288,7 @@ impl DeliveryWorkStore for OutboxStore {
         &self,
         _claim: DeliveryWorkClaim,
         error: DeliveryTransportError,
-        _completed_at: DateTime<Utc>,
+        _completed_at: Timestamp,
     ) -> ApplicationFuture<'_, ()> {
         let stage = error.result_metadata.get("stage").and_then(serde_json::Value::as_str);
         let call = Call::Fail {
@@ -462,8 +462,8 @@ impl DeliveryTransport for ScriptedTransport {
 fn claim(
     world: &str,
     worker_id: String,
-    claimed_at: DateTime<Utc>,
-    lease_until: DateTime<Utc>,
+    claimed_at: Timestamp,
+    lease_until: Timestamp,
 ) -> DeliveryWorkClaim {
     DeliveryWorkClaim {
         delivery_id: Uuid::new_v4(),
@@ -636,7 +636,8 @@ async fn preparation_outliving_lease_ttl_completes_within_request_budget() {
     let transport =
         ScriptedTransport::new(Preparation::Takes(Duration::from_secs(45)), Some(Duration::ZERO));
     let now = clock.now();
-    let claimed = claim("main", "worker-test".to_owned(), now, now + chrono::Duration::seconds(20));
+    let claimed =
+        claim("main", "worker-test".to_owned(), now, now + auction_time::Duration::seconds(20));
 
     let result = process_delivery_claim(
         store.clone(),
@@ -776,8 +777,8 @@ async fn claim_without_usable_lease_is_released_before_preparation() {
     let expired = claim(
         "main",
         "worker-test".to_owned(),
-        now - chrono::Duration::seconds(61),
-        now - chrono::Duration::seconds(1),
+        now - auction_time::Duration::seconds(61),
+        now - auction_time::Duration::seconds(1),
     );
 
     let result = diagnostics::scope(
@@ -856,7 +857,7 @@ async fn task_seeing_drain_before_first_poll_releases_only_on_legacy_path() {
         let transport = ScriptedTransport::new(Preparation::Ready, Some(Duration::ZERO));
         let now = clock.now();
         let claimed =
-            claim("main", "worker-test".to_owned(), now, now + chrono::Duration::seconds(60));
+            claim("main", "worker-test".to_owned(), now, now + auction_time::Duration::seconds(60));
 
         let result = process_delivery_claim(
             store.clone(),

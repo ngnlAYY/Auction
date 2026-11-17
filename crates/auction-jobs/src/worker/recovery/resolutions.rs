@@ -3,7 +3,7 @@
 use auction_application::core::Clock;
 use auction_application::recovery::RecoveryResolutionAdvance;
 use auction_observability::WorkerResult;
-use chrono::Duration as ChronoDuration;
+use auction_time::TimeDelta;
 
 use super::phase::run_phase;
 use crate::worker::runtime::{PersistentWorker, merge_worker_result};
@@ -17,7 +17,7 @@ pub(super) async fn advance_relists<C>(
     let Some(store) = &worker.recovery_resolution else {
         return;
     };
-    let Ok(retry_delay) = ChronoDuration::from_std(worker.recovery.retry_delay) else {
+    let Ok(retry_delay) = TimeDelta::from_std(worker.recovery.retry_delay) else {
         tracing::error!("recovery relist retry delay is invalid");
         merge_worker_result(batch_result, WorkerResult::Error);
         return;

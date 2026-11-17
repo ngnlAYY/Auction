@@ -10,7 +10,7 @@ use auction_domain::{
     COMPENSATION_REVERSAL_RULE_VERSION, CompensationReversal, SettlementAmount,
     legacy_natural_key_uuid,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::json;
 use sqlx::{PgConnection, Row};
 use uuid::Uuid;
@@ -47,7 +47,7 @@ pub(crate) async fn lock_pool(
 pub(crate) async fn reverse_voided_sale(
     connection: &mut PgConnection,
     recovery_id: Uuid,
-    occurred_at: DateTime<Utc>,
+    occurred_at: Timestamp,
 ) -> Result<(), CompensationReversalError> {
     let sale = sqlx::query(
         r#"SELECT recovery.world_id,

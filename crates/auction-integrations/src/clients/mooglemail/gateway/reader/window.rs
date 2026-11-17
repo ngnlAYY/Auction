@@ -73,7 +73,7 @@ pub(super) fn new_mail_ids(rows: &[MoogleMailSummary], cursor: Option<&str>) -> 
 
 #[cfg(test)]
 mod tests {
-    use chrono::{TimeZone, Utc};
+    use auction_time::Timestamp;
 
     use super::*;
     use crate::clients::mooglemail::MoogleMailWorld;
@@ -84,7 +84,7 @@ mod tests {
             world: MoogleMailWorld::Main,
             sender: "sender".to_owned(),
             subject: format!("subject-{id}"),
-            received_at: Utc.with_ymd_and_hms(2026, 11, 4, 12, minute, 0).unwrap(),
+            received_at: Timestamp::from_ymd_hms(2026, 11, 4, 12, minute, 0).unwrap(),
         }
     }
 
@@ -161,11 +161,11 @@ mod tests {
             MailScanAnchor::from_cursor("101").unwrap(),
         );
         assert_eq!(
-            scan.observe("105", Utc.with_ymd_and_hms(2026, 11, 4, 12, 9, 0).unwrap()),
+            scan.observe("105", Timestamp::from_ymd_hms(2026, 11, 4, 12, 9, 0).unwrap()),
             Ok(auction_application::mail::MailPrefixPage::Continue)
         );
         assert_eq!(
-            scan.observe("100", Utc.with_ymd_and_hms(2026, 11, 4, 12, 6, 0).unwrap()),
+            scan.observe("100", Timestamp::from_ymd_hms(2026, 11, 4, 12, 6, 0).unwrap()),
             Err(auction_application::mail::MailScanReason::AnchorMissing),
             "跨过锚点却未见到锚点行时必须回退完整扫描"
         );

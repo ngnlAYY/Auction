@@ -7,7 +7,9 @@ use auction_application::auction::AuctionPolicyTemplate;
 use auction_application::core::CompetitionTransactionError;
 use auction_application::settlement::SettlementAuctionSnapshot;
 use auction_domain::deterministic_uuid;
-use chrono::{DateTime, Datelike, Duration, Utc};
+use auction_time::Timestamp;
+use jiff::ToSpan;
+use jiff_sqlx::ToSqlx;
 use serde_json::json;
 use sqlx::Row;
 use uuid::Uuid;
@@ -61,7 +63,7 @@ impl AdminAuctionCreateTransaction for PostgresCompetitionTransaction {
         command: AdminCreateAuctionCommand,
         title: String,
         policy: AuctionPolicyTemplate,
-        created_at: DateTime<Utc>,
+        created_at: Timestamp,
     ) -> impl Future<Output = Result<AdminAuctionSummary, CompetitionTransactionError>> + Send {
         async move { create_admin_auction_inner(self, &command, &title, &policy, created_at).await }
     }
@@ -80,7 +82,7 @@ async fn create_admin_auction_inner(
     command: &AdminCreateAuctionCommand,
     title: &str,
     policy: &AuctionPolicyTemplate,
-    created_at: DateTime<Utc>,
+    created_at: Timestamp,
 ) -> Result<AdminAuctionSummary, CompetitionTransactionError> {
     let rules = policy
         .auction_rules()
@@ -118,8 +120,8 @@ async fn create_admin_auction_inner(
     if state_version <= 0 {
         return Err(invalid_state("后台拍卖创建返回的状态版本无效"));
     }
-    let created_at: DateTime<Utc> = row.try_get("created_at").map_err(map_sql_error)?;
-    let updated_at: DateTime<Utc> = row.try_get("updated_at").map_err(map_sql_error)?;
+    let created_at: Timestamp = row.try_get("created_at").map_err(map_sql_error)?;
+    let updated_at: Timestamp = row.try_get("updated_at").map_err(map_sql_error)?;
 
     {
         let transaction = transaction.transaction_mut()?;
@@ -135,10 +137,9 @@ async fn create_admin_auction_inner(
         .execute(&mut **transaction)
         .await
         .map_err(map_sql_error)?;
-        let local_week = command.preview_scheduled_at.date_naive()
-            - Duration::days(i64::from(
-                command.preview_scheduled_at.weekday().num_days_from_monday(),
-            ));
+        let preview_date = command.preview_scheduled_at.to_utc_datetime().date();
+        let local_week =
+            preview_date - i64::from(preview_date.weekday().to_monday_zero_offset()).days();
         let round_id = deterministic_uuid(command.command_id, "scheduled-round", 1);
         sqlx::query(
             "INSERT INTO public.scheduled_rounds
@@ -148,7 +149,7 @@ async fn create_admin_auction_inner(
         )
         .bind(round_id)
         .bind(&command.world_id)
-        .bind(local_week)
+        .bind(local_week.to_sqlx())
         .bind(command.auction_id.as_uuid())
         .bind(command.preview_scheduled_at)
         .bind(command.scheduled_open_at)

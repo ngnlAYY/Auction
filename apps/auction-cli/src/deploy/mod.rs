@@ -12,7 +12,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use anyhow::Context;
-use chrono::Utc;
+use auction_time::Timestamp;
 
 use crate::app::{print_json, progress};
 use crate::cli::DeployArgs;
@@ -70,7 +70,7 @@ async fn run_inspected(
     // 本地参数门禁先于任何锁、systemctl 与数据库访问，dry-run 同样执行。
     require_backup_dir(&backup_dir)?;
     let mut context = ReceiptContext::resolve(None, actor.actor.as_deref())?;
-    let started_at = Utc::now();
+    let started_at = Timestamp::now();
     let owner = crate::database::load_owner_secrets(&owner.owner_secrets)?;
     let systemctl = Systemctl::new(&units)?;
     let state = crate::service::deployment_lock(&units)?;
@@ -111,7 +111,7 @@ async fn run_inspected(
                     expected_version,
                     protection_window_minutes: shutdown.protection_window_minutes,
                     max_age_days: drill_max_age_days,
-                    now: Utc::now(),
+                    now: Timestamp::now(),
                 },
             )
             .await

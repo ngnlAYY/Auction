@@ -7,7 +7,7 @@ use std::collections::HashSet;
 
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 use auction_application::mail::mail_recipient_is_list_projection;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use super::super::super::client::MoogleMailReadRound;
 use super::super::super::protocol::valid_opaque_id;
@@ -32,7 +32,7 @@ impl MoogleMailGateway {
         &self,
         world: MoogleMailWorld,
         external_mail_id: &str,
-        observed_at: DateTime<Utc>,
+        observed_at: Timestamp,
     ) -> Result<MoogleMailSentSnapshot, MoogleMailError> {
         if !valid_opaque_id(external_mail_id) || observed_at.timestamp_nanos_opt().is_none() {
             return Err(operation_error(
@@ -298,7 +298,7 @@ impl MoogleMailGateway {
         &self,
         world: MoogleMailWorld,
         external_mail_id: &str,
-        observed_at: DateTime<Utc>,
+        observed_at: Timestamp,
         cookie: &MoogleMailCookie,
         fresh: bool,
     ) -> Result<MoogleMailSentSnapshot, MoogleMailError> {

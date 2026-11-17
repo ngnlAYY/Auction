@@ -31,7 +31,7 @@ use auction_application::settlement::{
     SettlementFulfillmentDeliveryStatus, SettlementFulfillmentState, SettlementFulfillmentStore,
 };
 use auction_domain::{SettlementObligationKind, SettlementWorld};
-use chrono::{DateTime, Duration, Utc};
+use auction_time::{Duration, Timestamp};
 use serde_json::json;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -55,7 +55,7 @@ struct Lot {
     equipment_id: Uuid,
 }
 
-async fn seed_auction(pool: &PgPool, now: DateTime<Utc>) -> Auction {
+async fn seed_auction(pool: &PgPool, now: Timestamp) -> Auction {
     let auction = Auction {
         id: stable_id(SEED, "auction"),
         command_id: stable_id(SEED, "command"),
@@ -207,11 +207,11 @@ async fn seed_delivery(
     pool: &PgPool,
     obligation_id: Uuid,
     credits: i64,
-    sent_at: Option<DateTime<Utc>>,
+    sent_at: Option<Timestamp>,
     external_mail_id: u32,
 ) -> Uuid {
     let id = stable_id(SEED, &format!("delivery-{obligation_id}"));
-    let created_at = sent_at.unwrap_or_else(Utc::now) - Duration::minutes(5);
+    let created_at = sent_at.unwrap_or_else(Timestamp::now) - Duration::minutes(5);
     let payload = json!({
         "schema_version": 1,
         "operation": "send",
@@ -307,7 +307,7 @@ async fn seed_fulfillment(
     .bind(execution_state)
     .bind(delivery_id)
     .bind(last_error_code)
-    .bind(terminal.then(|| Utc::now() - Duration::days(9)))
+    .bind(terminal.then(|| Timestamp::now() - Duration::days(9)))
     .bind(delivery_id.map(|_| stable_id(SEED, &format!("prepare-{obligation_id}"))))
     .bind(delivery_id.map(|_| stable_id(SEED, &format!("activate-{obligation_id}"))))
     .execute(pool)
@@ -351,7 +351,7 @@ async fn seed_spent_allocation(
 /// - lot 3：货款尚在投递队列，未寄出；
 /// - lot 4：COD 已寄出待付款，但没有冻结发送证明，不进入等待付款，仍按既有口径计积压；
 /// - lot 5：流拍退回已寄出但证据不符，停在人工核对。
-async fn seed_collection_wait(pool: &PgPool, now: DateTime<Utc>) -> Auction {
+async fn seed_collection_wait(pool: &PgPool, now: Timestamp) -> Auction {
     let auction = seed_auction(pool, now).await;
     let paid = seed_lot(pool, &auction, 1, true, "9400001").await;
     let cod = seed_obligation(pool, &auction, &paid, "winner_equipment_cod", 1_000, None).await;
@@ -433,7 +433,7 @@ fn policy() -> OperationsAlertPolicy {
 async fn postgres_collection_wait_snapshot_separates_awaiting_from_backlog() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("以运行账号连接");
-    let now = Utc::now();
+    let now = Timestamp::now();
     seed_collection_wait(store.postgres_pool(), now).await;
 
     let threshold = policy().fulfillment_collection_overdue_age_threshold;
@@ -513,7 +513,7 @@ async fn postgres_collection_wait_snapshot_reads_only_live_obligations() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("以运行账号连接");
     let pool = store.postgres_pool();
-    let now = Utc::now();
+    let now = Timestamp::now();
     let auction = seed_auction(pool, now).await;
     // 历史：COD 与货款都已满足，或有退款从未激活。
     let history = seed_lot(pool, &auction, 1, true, "9400201").await;
@@ -609,7 +609,7 @@ async fn postgres_collection_wait_overdue_list_uses_category_lot_number() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("以运行账号连接");
     let pool = store.postgres_pool();
-    let now = Utc::now();
+    let now = Timestamp::now();
     let auction = seed_auction(pool, now).await;
     let shield = seed_categorized_lot(pool, &auction, (100, "Shield", 2), true, "9400100").await;
     let cod = seed_obligation(pool, &auction, &shield, "winner_equipment_cod", 1_000, None).await;
@@ -655,7 +655,7 @@ async fn postgres_collection_wait_reports_sent_assets_in_transit() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("以运行账号连接");
     let pool = store.postgres_pool();
-    let now = Utc::now();
+    let now = Timestamp::now();
     seed_collection_wait(pool, now).await;
     // 余额 600 足以支付尚未寄出的 500；若把已寄出的 900 再算一次，会误报 800 的缺口。
     sqlx::query(
@@ -687,7 +687,7 @@ async fn postgres_collection_wait_reports_sent_assets_in_transit() {
 
     let observation = |world| AssetArmoryObservation {
         world,
-        observed_at: Utc::now(),
+        observed_at: Timestamp::now(),
         equipment_ids: Vec::new(),
         complete: true,
         failure_code: None,
@@ -731,7 +731,7 @@ async fn postgres_collection_wait_reports_sent_assets_in_transit() {
     assert_eq!(latest.custody.as_ref(), Some(&custody));
     assert_eq!(latest.solvency.as_ref(), Some(&solvency));
     let snapshot = store
-        .snapshot(Utc::now(), OperationsAlertCollectionOverdueRead::Skip)
+        .snapshot(Timestamp::now(), OperationsAlertCollectionOverdueRead::Skip)
         .await
         .expect("读取告警快照");
     let reconciliation = snapshot.reconciliation.expect("对账水位");
@@ -755,7 +755,7 @@ async fn postgres_collection_wait_reports_sent_assets_in_transit() {
 async fn observe_balance(
     pool: &PgPool,
     credits: i64,
-    observed_at: Option<DateTime<Utc>>,
+    observed_at: Option<Timestamp>,
     delivery_id: Uuid,
 ) {
     sqlx::query(
@@ -782,7 +782,7 @@ async fn seed_payout(
     auction: &Auction,
     lot_number: i32,
     amount: i64,
-    sent_at: Option<DateTime<Utc>>,
+    sent_at: Option<Timestamp>,
     execution_state: &str,
     spent: bool,
 ) -> Uuid {
@@ -813,7 +813,7 @@ async fn postgres_collection_wait_solvency_aligns_in_transit_with_balance_observ
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("以运行账号连接");
     let pool = store.postgres_pool();
-    let now = Utc::now();
+    let now = Timestamp::now();
     let auction = seed_auction(pool, now).await;
     let sent =
         seed_payout(pool, &auction, 1, 900, Some(now - Duration::hours(1)), "enqueued", true).await;
@@ -841,7 +841,7 @@ async fn postgres_collection_wait_solvency_aligns_in_transit_with_balance_observ
         "余额观察早于寄出：观察到的余额仍含这笔货款"
     );
 
-    observe_balance(pool, 100, Some(Utc::now()), sent).await;
+    observe_balance(pool, 100, Some(Timestamp::now()), sent).await;
     assert_eq!(
         report().await,
         (500, 900, 500, "shortfall".to_owned(), 400),
@@ -865,7 +865,7 @@ async fn postgres_collection_wait_sent_cash_in_manual_review_stays_in_transit() 
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("以运行账号连接");
     let pool = store.postgres_pool();
-    let now = Utc::now();
+    let now = Timestamp::now();
     let auction = seed_auction(pool, now).await;
     let reviewed = seed_payout(
         pool,
@@ -915,7 +915,7 @@ async fn postgres_collection_wait_queued_canonical_delivery_keeps_equipment_expe
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("以运行账号连接");
     let pool = store.postgres_pool();
-    let now = Utc::now();
+    let now = Timestamp::now();
     let auction = seed_auction(pool, now).await;
     let lot = seed_lot(pool, &auction, 1, false, "9400031").await;
     let unsold_return = seed_obligation(pool, &auction, &lot, "unsold_return", 0, None).await;
@@ -933,7 +933,7 @@ async fn postgres_collection_wait_queued_canonical_delivery_keeps_equipment_expe
 
     let observation = |world| AssetArmoryObservation {
         world,
-        observed_at: Utc::now(),
+        observed_at: Timestamp::now(),
         equipment_ids: Vec::new(),
         complete: true,
         failure_code: None,
@@ -968,9 +968,9 @@ async fn postgres_collection_wait_claim_carries_sent_time() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("以运行账号连接");
     let pool = store.postgres_pool();
-    let now = Utc::now();
+    let now = Timestamp::now();
     // 数据库时间只到微秒；用微秒精度的寄出时刻才能逐值比较。
-    let sent_at = DateTime::from_timestamp_micros((now - Duration::days(8)).timestamp_micros())
+    let sent_at = Timestamp::from_timestamp_micros((now - Duration::days(8)).timestamp_micros())
         .expect("寄出时刻");
     let auction = seed_auction(pool, now).await;
     let lot = seed_lot(pool, &auction, 1, true, "9400011").await;
@@ -1004,13 +1004,13 @@ async fn postgres_collection_wait_overdue_alert_triggers_and_resolves() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("以运行账号连接");
     let pool = store.postgres_pool();
-    let now = Utc::now();
+    let now = Timestamp::now();
     seed_collection_wait(pool, now).await;
     store
         .publish_runtime_status(OperationsAlertRuntimeStatus { enabled: true, updated_at: now })
         .await
         .expect("启用告警扫描");
-    let scan = |at: DateTime<Utc>| {
+    let scan = |at: Timestamp| {
         let store = &store;
         async move {
             let threshold = policy().fulfillment_collection_overdue_age_threshold;
@@ -1061,7 +1061,7 @@ async fn postgres_collection_wait_overdue_alert_triggers_and_resolves() {
     .execute(pool)
     .await
     .expect("模拟货款已领取");
-    scan(Utc::now()).await;
+    scan(Timestamp::now()).await;
     let (active, _, _) = overdue().await.expect("信号行保留历史");
     assert!(!active, "回落到阈值以下后告警解除");
 

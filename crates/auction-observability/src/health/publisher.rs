@@ -5,7 +5,7 @@ use std::sync::{
     atomic::{AtomicI64, Ordering},
 };
 
-use chrono::{DateTime, Duration, Utc};
+use auction_time::{Duration, Timestamp};
 use serde_json::Value;
 
 use super::model::{
@@ -36,7 +36,7 @@ pub struct HeartbeatCommand {
     pub process_role: ProcessRole,
     pub instance_id: String,
     pub version: String,
-    pub started_at: DateTime<Utc>,
+    pub started_at: Timestamp,
     pub status: HeartbeatStatus,
     pub readiness: bool,
     /// legacy/shadow 为全部失败累计；classified 为阻断就绪的失败累计。
@@ -70,7 +70,7 @@ pub struct HeartbeatPublisherConfig {
     pub process_role: ProcessRole,
     pub instance_id: String,
     pub version: String,
-    pub started_at: DateTime<Utc>,
+    pub started_at: Timestamp,
     pub ttl: Duration,
 }
 
@@ -83,14 +83,14 @@ pub struct HeartbeatPublisher {
     process_role: ProcessRole,
     instance_id: String,
     version: String,
-    started_at: DateTime<Utc>,
+    started_at: Timestamp,
     ttl: Duration,
     process_health: Arc<dyn HeartbeatHealthReader>,
     tracing_health: Arc<dyn TracingHealthReader>,
     observation_sequence: AtomicI64,
     details: Value,
     /// 本实例最近一次成功发布 Ready 心跳的本地时刻；失败、Degraded 或 Stopping 立即清空。
-    last_ready_at: std::sync::RwLock<Option<DateTime<Utc>>>,
+    last_ready_at: std::sync::RwLock<Option<Timestamp>>,
 }
 
 impl HeartbeatPublisher {
@@ -165,7 +165,7 @@ impl HeartbeatPublisher {
             && readiness
             && audit_failure_count == 0
         {
-            *last_ready = Some(Utc::now());
+            *last_ready = Some(Timestamp::now());
         } else {
             *last_ready = None;
         }
@@ -180,7 +180,7 @@ impl HeartbeatPublisher {
         last_ready.is_some_and(|observed_at| {
             observed_at
                 .checked_add_signed(self.ttl)
-                .is_some_and(|expires_at| Utc::now() < expires_at)
+                .is_some_and(|expires_at| Timestamp::now() < expires_at)
         })
     }
 
@@ -231,15 +231,15 @@ pub struct Heartbeat {
     pub process_role: ProcessRole,
     pub instance_id: String,
     pub version: String,
-    pub started_at: DateTime<Utc>,
+    pub started_at: Timestamp,
     pub status: HeartbeatStatus,
     pub readiness: bool,
     /// 按发布进程的审计模式投影；classified 仅计 permanent + unknown。
     pub audit_failure_count: i64,
     pub tracing: TracingHealth,
     pub observation_sequence: i64,
-    pub observed_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
+    pub observed_at: Timestamp,
+    pub expires_at: Timestamp,
 }
 
 impl Heartbeat {
@@ -273,8 +273,8 @@ mod tests {
         atomic::{AtomicBool, Ordering},
     };
 
-    use chrono::Duration as ChronoDuration;
-    use chrono::Utc;
+    use auction_time::TimeDelta;
+    use auction_time::Timestamp;
 
     use super::{
         Heartbeat, HeartbeatCommand, HeartbeatHealthReader, HeartbeatPublisher,
@@ -346,7 +346,7 @@ mod tests {
         store: Arc<Store>,
         ready: bool,
         audit: i64,
-        ttl: ChronoDuration,
+        ttl: TimeDelta,
     ) -> HeartbeatPublisher {
         HeartbeatPublisher::new(
             store,
@@ -355,7 +355,7 @@ mod tests {
                 process_role: ProcessRole::Worker,
                 instance_id: "instance".to_owned(),
                 version: "version".to_owned(),
-                started_at: Utc::now() - ChronoDuration::seconds(1),
+                started_at: Timestamp::now() - TimeDelta::seconds(1),
                 ttl,
             },
             Arc::new(Health { ready, audit_failure_count: audit }),
@@ -366,8 +366,7 @@ mod tests {
     #[tokio::test]
     async fn external_heartbeat_requires_a_recent_successful_ready_publish() {
         let store = Arc::new(Store::new());
-        let publisher =
-            make_publisher(Arc::clone(&store), true, 0, ChronoDuration::milliseconds(50));
+        let publisher = make_publisher(Arc::clone(&store), true, 0, TimeDelta::milliseconds(50));
         assert!(!publisher.external_heartbeat_ready());
         publisher.publish_current().await.expect("ready heartbeat publish succeeds");
         assert!(publisher.external_heartbeat_ready());
@@ -378,7 +377,7 @@ mod tests {
     #[tokio::test]
     async fn publish_failure_and_degraded_clear_external_readiness() {
         let store = Arc::new(Store::new());
-        let publisher = make_publisher(Arc::clone(&store), true, 0, ChronoDuration::seconds(30));
+        let publisher = make_publisher(Arc::clone(&store), true, 0, TimeDelta::seconds(30));
         publisher.publish_current().await.expect("ready heartbeat publish succeeds");
         assert!(publisher.external_heartbeat_ready());
 
@@ -394,7 +393,7 @@ mod tests {
         assert!(!publisher.external_heartbeat_ready(), "degraded must not report");
 
         let audit_publisher =
-            make_publisher(Arc::new(Store::new()), true, 1, ChronoDuration::seconds(30));
+            make_publisher(Arc::new(Store::new()), true, 1, TimeDelta::seconds(30));
         audit_publisher.publish_current().await.expect("degraded heartbeat publish succeeds");
         assert!(!audit_publisher.external_heartbeat_ready(), "audit failures must not report");
     }

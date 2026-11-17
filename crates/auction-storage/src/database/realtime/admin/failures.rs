@@ -4,7 +4,7 @@ use auction_application::core::ApplicationError;
 use auction_application::realtime::{
     RealtimeFailureListRequest, RealtimeFailurePage, RealtimeFailureSnapshot,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Row;
 use sqlx::postgres::PgRow;
 use uuid::Uuid;
@@ -107,7 +107,7 @@ fn validate_failure_page(
     if total < 0 || entry_count > request.limit {
         return Err(storage_error("realtime failure 返回页越界"));
     }
-    let mut previous: Option<(&DateTime<Utc>, Uuid)> = None;
+    let mut previous: Option<(&Timestamp, Uuid)> = None;
     for entry in entries {
         if entry.id.is_nil()
             || entry.event_id.is_nil()

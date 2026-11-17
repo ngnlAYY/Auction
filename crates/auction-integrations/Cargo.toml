@@ -11,7 +11,7 @@ tracing.workspace = true
 auction-application.workspace = true
 auction-domain.workspace = true
 base64.workspace = true
-chrono.workspace = true
+auction-time.workspace = true
 reqwest = { workspace = true, features = ["json"] }
 ring.workspace = true
 scraper.workspace = true

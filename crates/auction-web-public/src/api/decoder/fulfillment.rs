@@ -8,7 +8,6 @@
 use auction_contracts::PublicFulfillmentPageResponse;
 use auction_web_shared::valid_uuid;
 use auction_web_shared::wire::json_keys_only;
-use chrono::NaiveDate;
 use gloo_net::http::Response;
 use serde_json::{Map, Value};
 
@@ -175,10 +174,7 @@ fn utc_second_timestamp(value: &str) -> bool {
     let number = |start: usize, end: usize| {
         bytes[start..end].iter().fold(0_u32, |number, digit| number * 10 + u32::from(digit - b'0'))
     };
-    i32::try_from(number(0, 4))
-        .ok()
-        .and_then(|year| NaiveDate::from_ymd_opt(year, number(5, 7), number(8, 10)))
-        .is_some()
+    value.get(..10).and_then(auction_time::parse_date).is_some()
         && number(11, 13) < 24
         && number(14, 16) < 60
         && number(17, 19) < 60

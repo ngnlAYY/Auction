@@ -14,7 +14,7 @@ use std::{
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_application::realtime::{PublicRealtimeEvent, RealtimeEventSink, RealtimeSinkError};
 use auction_observability::RealtimeRecorder;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use uuid::Uuid;
 
@@ -162,7 +162,7 @@ pub(crate) struct RealtimeSubscription {
 }
 
 impl RealtimeSubscription {
-    pub(crate) fn observe_push(&self, created_at: DateTime<Utc>) {
+    pub(crate) fn observe_push(&self, created_at: Timestamp) {
         self.hub.metrics.push(created_at);
     }
 

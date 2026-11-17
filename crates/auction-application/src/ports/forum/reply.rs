@@ -5,7 +5,7 @@
 use std::fmt;
 
 use auction_domain::{AuctionId, BidAmount, LotId, SettlementWorld, UserId};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use crate::ports::admin::{AdminForumPreviewError, AdminForumPreviewResult};
@@ -153,7 +153,7 @@ pub struct ForumReplyTopic {
     pub content_claim_token: Uuid,
     pub content_claim_owner: String,
     pub content_claim_fencing: i64,
-    pub content_lease_until: DateTime<Utc>,
+    pub content_lease_until: Timestamp,
     /// 上一轮未恢复的安全错误码；`write_unknown` 只能先只读对账，正文是否逐字核对由运行策略决定。
     pub content_last_error_code: Option<String>,
 }
@@ -298,8 +298,8 @@ pub trait ForumReplyStore: Send + Sync {
     fn claim_published_topics(
         &self,
         worker_id: String,
-        now: DateTime<Utc>,
-        lease_until: DateTime<Utc>,
+        now: Timestamp,
+        lease_until: Timestamp,
         available_worlds: Vec<SettlementWorld>,
         limit: u16,
     ) -> ApplicationFuture<'_, Vec<ForumReplyTopic>>;
@@ -361,7 +361,7 @@ pub trait ForumReplyStore: Send + Sync {
     fn earliest_live_lot_deadline(
         &self,
         auction_id: AuctionId,
-    ) -> ApplicationFuture<'_, Option<DateTime<Utc>>>;
+    ) -> ApplicationFuture<'_, Option<Timestamp>>;
 
     /// 读取当前权威拍卖快照，用于竞价命令提交后刷新所有目录页。
     fn load_current_snapshot(
@@ -376,8 +376,8 @@ pub trait ForumReplyStore: Send + Sync {
         catalog: ForumRenderedThread,
         system_log: ForumRenderedPost,
         processed_through_post_number: i32,
-        updated_at: DateTime<Utc>,
-        next_scan_at: DateTime<Utc>,
+        updated_at: Timestamp,
+        next_scan_at: Timestamp,
     ) -> ApplicationFuture<'_, ()>;
 
     /// 暂时失败时只记录已取得 exact proof 的固定楼层正文，保留当前 claim 与到期后的重试水位。
@@ -387,7 +387,7 @@ pub trait ForumReplyStore: Send + Sync {
         catalog: ForumRenderedThread,
         system_log: ForumRenderedPost,
         processed_through_post_number: i32,
-        updated_at: DateTime<Utc>,
+        updated_at: Timestamp,
     ) -> ApplicationFuture<'_, ()>;
 
     /// 记录远端主题 HTTP 分页总数；失败只影响告警观察，不回滚已完成的扫描。
@@ -403,16 +403,16 @@ pub trait ForumReplyStore: Send + Sync {
         &self,
         topic: ForumReplyTopic,
         processed_through_post_number: i32,
-        scanned_at: DateTime<Utc>,
-        next_scan_at: DateTime<Utc>,
+        scanned_at: Timestamp,
+        next_scan_at: Timestamp,
     ) -> ApplicationFuture<'_, ()>;
 
     /// 失败时释放当前 claim、记录有界错误码并推进单主题重试水位。
     fn fail_topic_scan(
         &self,
         topic: ForumReplyTopic,
-        failed_at: DateTime<Utc>,
-        retry_at: DateTime<Utc>,
+        failed_at: Timestamp,
+        retry_at: Timestamp,
         failure_code: String,
     ) -> ApplicationFuture<'_, ()>;
 }

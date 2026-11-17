@@ -1,7 +1,7 @@
 //! runtime 更新命令、命令账本状态与审计记录。
 
 use auction_domain::CommandId;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -80,12 +80,12 @@ pub struct AdminRuntimeStoredCommand {
     pub restart_required: bool,
     pub actor_id: String,
     pub request_id: Option<String>,
-    pub occurred_at: DateTime<Utc>,
+    pub occurred_at: Timestamp,
     pub state: AdminRuntimeCommandState,
     pub unknown_category: Option<String>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-    pub applied_at: Option<DateTime<Utc>>,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+    pub applied_at: Option<Timestamp>,
 }
 
 impl AdminRuntimeStoredCommand {
@@ -196,7 +196,7 @@ impl AdminRuntimeStoredCommand {
 #[derive(Debug, Clone)]
 pub struct AdminRuntimeAuditRecord {
     pub id: Uuid,
-    pub occurred_at: DateTime<Utc>,
+    pub occurred_at: Timestamp,
     pub actor_id: String,
     pub request_id: Option<String>,
     pub command_id: CommandId,
@@ -207,7 +207,7 @@ pub struct AdminRuntimeAuditRecord {
 #[cfg(test)]
 mod tests {
     use auction_domain::CommandId;
-    use chrono::{TimeZone, Utc};
+    use auction_time::Timestamp;
     use uuid::Uuid;
 
     use super::{AdminRuntimeCommandState, AdminRuntimeStoredCommand};
@@ -221,7 +221,7 @@ mod tests {
         let mut candidate = AdminRuntimeDocument::default();
         candidate.materialize_business_defaults();
         let expected = format!("sha256:{}", "0".repeat(64));
-        let at = Utc.with_ymd_and_hms(2026, 11, 1, 0, 0, 0).single().expect("固定时刻");
+        let at = Timestamp::from_ymd_hms(2026, 11, 1, 0, 0, 0).expect("固定时刻");
         AdminRuntimeStoredCommand {
             command_id: CommandId::from_uuid(Uuid::from_u128(1)),
             audit_id: Uuid::from_u128(2),

@@ -3,7 +3,7 @@
 use std::fmt;
 
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use tokio::time::{Instant, timeout_at};
 
 use super::super::{MoogleMailSender, proof};
@@ -17,7 +17,7 @@ use crate::safe_diagnostics;
 pub struct ScannedSentSummaries {
     pub summaries: Vec<MoogleMailSentListEntry>,
     /// `None` 表示完整列表；`Some(at)` 表示所有 `sent_at >= at` 的条目已覆盖。
-    pub covered_from: Option<DateTime<Utc>>,
+    pub covered_from: Option<Timestamp>,
     pub complete: bool,
     pub page_observation: Option<auction_application::mail::MailScanPageObservation>,
 }
@@ -28,7 +28,7 @@ pub struct MoogleMailSentListEntry {
     pub external_mail_id: String,
     pub recipient: String,
     pub subject: String,
-    pub sent_at: DateTime<Utc>,
+    pub sent_at: Timestamp,
 }
 
 impl fmt::Debug for MoogleMailSentListEntry {
@@ -93,7 +93,7 @@ impl MoogleMailSender {
         let checkpoint = self.sent_scan_checkpoint(cookie, world);
         let plan = auction_application::mail::plan_mail_scan(
             checkpoint.as_ref(),
-            Utc::now(),
+            Timestamp::now(),
             self.client.mail_scan_daily_full_interval(),
         );
         self.observe_scan(
@@ -402,7 +402,7 @@ impl MoogleMailSender {
                 endpoint_scope: self.client.endpoint_scope().to_owned(),
                 pages_scanned,
                 page_limit,
-                observed_at: Utc::now(),
+                observed_at: Timestamp::now(),
             }
         })
     }
@@ -413,7 +413,7 @@ impl MoogleMailSender {
         cookie: &MoogleMailCookie,
         world: MoogleMailWorld,
         summary: &MoogleMailSentListEntry,
-        _observed_at: DateTime<Utc>,
+        _observed_at: Timestamp,
     ) -> Result<MoogleMailSentObservation, MoogleMailError> {
         let deadline = Instant::now()
             .checked_add(self.verification_budget)

@@ -4,7 +4,7 @@ use auction_application::core::ApplicationError;
 use auction_application::realtime::{
     RealtimeEventListRequest, RealtimeEventPage, RealtimeEventSnapshot,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Row;
 use sqlx::postgres::PgRow;
 use uuid::Uuid;
@@ -76,7 +76,7 @@ fn event_from_postgres_page_row(
     let schema_version: Option<i32> = row
         .try_get("schema_version")
         .map_err(|error| storage_error_from(error, "读取 PostgreSQL realtime schema 版本失败"))?;
-    let created_at: Option<DateTime<Utc>> = row
+    let created_at: Option<Timestamp> = row
         .try_get("created_at")
         .map_err(|error| storage_error_from(error, "读取 PostgreSQL realtime 事件时间失败"))?;
     match (event_id, stream_key, stream_sequence, kind, schema_version, created_at) {
@@ -111,7 +111,7 @@ fn validate_event_page(
     if total < 0 || entry_count != expected_count {
         return Err(storage_error("realtime 事件返回页越界"));
     }
-    let mut previous: Option<(&DateTime<Utc>, Uuid)> = None;
+    let mut previous: Option<(&Timestamp, Uuid)> = None;
     for entry in entries {
         if entry.event_id.is_nil()
             || !auction_domain::valid_text(&entry.stream_key, 256)

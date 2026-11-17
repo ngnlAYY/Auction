@@ -58,7 +58,7 @@ async fn forum_postgres(
     store: &super::DatabaseStore,
     auction_id: Uuid,
 ) -> Result<Option<PublicForumThread>, ApplicationError> {
-    use chrono::{DateTime, Utc};
+    use auction_time::Timestamp;
     use sqlx::Row;
 
     let row = sqlx::query(
@@ -115,7 +115,7 @@ async fn forum_postgres(
             .try_get("content_last_error_code")
             .map_err(|error| storage_error_from(error, "读取公开论坛最近错误码失败"))?,
         updated_at: row
-            .try_get::<DateTime<Utc>, _>("updated_at")
+            .try_get::<Timestamp, _>("updated_at")
             .map_err(|error| storage_error_from(error, "读取公开论坛更新时间失败"))?,
     };
     if thread.auction_id != auction_id {

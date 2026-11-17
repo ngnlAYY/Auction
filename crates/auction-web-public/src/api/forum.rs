@@ -1,6 +1,6 @@
 //! Public 论坛镜像 HTTP DTO 与请求。
 
-use chrono::DateTime;
+use auction_time::Timestamp;
 use url::Url;
 
 pub(crate) use auction_contracts::PublicForumResponse as ForumThread;
@@ -48,7 +48,7 @@ fn valid_forum_thread(thread: &ForumThread, auction_id: &str) -> bool {
         && thread.source_revision >= 0
         && thread.content_revision >= 0
         && thread.processed_through_post_number >= 2
-        && DateTime::parse_from_rfc3339(&thread.updated_at).is_ok()
+        && Timestamp::parse_from_rfc3339(&thread.updated_at).is_ok()
         && valid_optional_timestamp(thread.content_synced_at.as_deref())
         && valid_optional_timestamp(thread.content_last_success_at.as_deref())
         && valid_optional_timestamp(thread.content_last_error_at.as_deref())
@@ -65,7 +65,7 @@ fn valid_forum_thread(thread: &ForumThread, auction_id: &str) -> bool {
 }
 
 fn valid_optional_timestamp(value: Option<&str>) -> bool {
-    value.is_none_or(|value| DateTime::parse_from_rfc3339(value).is_ok())
+    value.is_none_or(|value| Timestamp::parse_from_rfc3339(value).is_ok())
 }
 
 fn valid_error_code(value: &str) -> bool {

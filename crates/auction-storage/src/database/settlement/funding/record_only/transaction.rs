@@ -59,7 +59,8 @@ pub(super) async fn run(
                 if let Some(result) = replay(&mut tx, command).await? {
                     return Ok(result);
                 }
-                let budget = (evidence.expires_at - chrono::Utc::now()).num_milliseconds();
+                let budget =
+                    (evidence.expires_at - auction_time::Timestamp::now()).num_milliseconds();
                 if budget <= 0 {
                     return Err(FundingError::Unproven);
                 }
@@ -114,7 +115,7 @@ async fn apply(
     command: &FundingRecordOnlyCommand,
     evidence: &SettlementInternalEvidenceSnapshot,
 ) -> Result<FundingReconciliationResult, FundingError> {
-    if !evidence.valid_at(chrono::Utc::now())
+    if !evidence.valid_at(auction_time::Timestamp::now())
         || evidence.operation_id != command.command_id
         || evidence.identity.authenticated_uid != command.expected_uid
         || evidence.identity.world != SettlementWorld::Main

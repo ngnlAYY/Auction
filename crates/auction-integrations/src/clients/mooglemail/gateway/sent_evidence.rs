@@ -7,7 +7,7 @@ use auction_application::settlement::{
     MailAccountEvidenceBinding, PreparedSettlementInternalEvidence,
     VerifiedMailSentCollectionObservation,
 };
-use chrono::Utc;
+use auction_time::Timestamp;
 
 use super::credentials::MoogleMailCredentialSession;
 use super::internal::{CleanComposeWorlds, map_read_error};
@@ -83,10 +83,10 @@ impl MoogleMailGateway {
         if !target.validate() || !identity.validate() || !self.credentials.owns_session(session) {
             return Err(Error::InvalidRequest);
         }
-        let now = Utc::now();
+        let now = Timestamp::now();
         if identity.observed_at > now
             || now - identity.observed_at
-                > chrono::Duration::seconds(
+                > auction_time::Duration::seconds(
                     auction_application::settlement::INTERNAL_EVIDENCE_MAX_AGE_SECONDS,
                 )
         {
@@ -120,7 +120,7 @@ impl MoogleMailGateway {
                 .read_sent_with_cookie(
                     world,
                     &target.external_mail_id,
-                    Utc::now(),
+                    Timestamp::now(),
                     session.cookie(),
                     true,
                 )
@@ -145,10 +145,10 @@ impl MoogleMailGateway {
                 return Err(Error::Unproven);
             }
             session.check_internal_current(read_deadline).await?;
-            let observed_at = Utc::now();
+            let observed_at = Timestamp::now();
             if identity.observed_at > observed_at
                 || observed_at - identity.observed_at
-                    > chrono::Duration::seconds(
+                    > auction_time::Duration::seconds(
                         auction_application::settlement::INTERNAL_EVIDENCE_MAX_AGE_SECONDS,
                     )
             {

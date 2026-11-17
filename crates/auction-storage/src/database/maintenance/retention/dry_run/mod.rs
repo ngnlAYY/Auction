@@ -4,7 +4,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -89,7 +89,7 @@ impl DatabaseStore {
         if transaction_read_only != "on" {
             return Err(RetentionDryRunError::ReadOnlyTransactionInvalid);
         }
-        let collected_at: DateTime<Utc> = identity
+        let collected_at: Timestamp = identity
             .try_get("collected_at")
             .map_err(|source| query_error("database_identity", source))?;
 
@@ -150,7 +150,7 @@ impl DatabaseStore {
 async fn collect_families(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     policy: &RetentionPolicy,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<Vec<RetentionFamilyDryRun>, RetentionDryRunError> {
     let mut families = Vec::with_capacity(policy.families.len());
     for family in &policy.families {
@@ -194,7 +194,7 @@ async fn collect_families(
 
 fn family_rules(
     family: &RetentionPolicyFamily,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<Vec<RetentionRuleDryRun>, RetentionDryRunError> {
     let retention = family.retention.as_ref().ok_or(RetentionDryRunError::PolicyInvalid)?;
     retention
@@ -216,8 +216,8 @@ fn family_rules(
 async fn count_family_tables(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     family: &RetentionPolicyFamily,
-    cutoffs: &BTreeMap<String, DateTime<Utc>>,
-    now: DateTime<Utc>,
+    cutoffs: &BTreeMap<String, Timestamp>,
+    now: Timestamp,
 ) -> Result<Vec<RetentionTableDryRun>, RetentionDryRunError> {
     let retention = family.retention.as_ref().ok_or(RetentionDryRunError::PolicyInvalid)?;
     let mut seen = BTreeSet::new();
@@ -315,9 +315,9 @@ async fn count_family_tables(
 }
 
 fn cutoff(
-    cutoffs: &BTreeMap<String, DateTime<Utc>>,
+    cutoffs: &BTreeMap<String, Timestamp>,
     rule_id: &str,
-) -> Result<DateTime<Utc>, RetentionDryRunError> {
+) -> Result<Timestamp, RetentionDryRunError> {
     cutoffs.get(rule_id).copied().ok_or(RetentionDryRunError::PolicyInvalid)
 }
 
@@ -330,7 +330,7 @@ pub(in crate::database) fn query_error(
 
 #[cfg(test)]
 mod tests {
-    use chrono::{DateTime, Days};
+    use auction_time::{Duration, Timestamp};
 
     use super::{family_rules, load_embedded_retention_policy};
 
@@ -409,9 +409,9 @@ mod tests {
             .iter()
             .find(|family| family.dataset_family == "service_heartbeat")
             .expect("heartbeat family");
-        let now = DateTime::from_timestamp(1_000_000_000, 0).expect("timestamp");
+        let now = Timestamp::from_timestamp(1_000_000_000, 0).expect("timestamp");
         let rules = family_rules(family, now).expect("rules");
         assert_eq!(rules.len(), 1);
-        assert_eq!(rules[0].cutoff, now - Days::new(30));
+        assert_eq!(rules[0].cutoff, now - Duration::days(30));
     }
 }

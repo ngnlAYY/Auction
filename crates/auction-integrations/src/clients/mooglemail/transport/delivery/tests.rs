@@ -14,7 +14,7 @@ use auction_application::mail::{
     MailNotificationField, MailNotificationTemplate,
 };
 use auction_test_support::mooglemail::{Fault, MailDouble};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
@@ -41,7 +41,7 @@ impl MailLoginKeyReader for NoLoginKeys {
 struct NoInvalidation;
 
 impl AdminCredentialRuntimeWriter for NoInvalidation {
-    fn mark_invalid(&self, _credential_id: Uuid, _now: DateTime<Utc>) -> ApplicationFuture<'_, ()> {
+    fn mark_invalid(&self, _credential_id: Uuid, _now: Timestamp) -> ApplicationFuture<'_, ()> {
         Box::pin(async { Ok(()) })
     }
 }
@@ -74,7 +74,7 @@ fn claim(
     command_id: Uuid,
     payload: Value,
 ) -> DeliveryWorkClaim {
-    let now = Utc::now();
+    let now = Timestamp::now();
     DeliveryWorkClaim {
         delivery_id: Uuid::new_v4(),
         command_id,

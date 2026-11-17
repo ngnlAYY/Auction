@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use super::MAX_SUMMARY_SUBJECT_BYTES;
 use crate::clients::mooglemail::MoogleMailWorld;
@@ -18,7 +18,7 @@ pub struct MoogleMailSentSummary {
     pub recipient: String,
     pub subject: String,
     /// 远端页面按 UTC 展示的时间。
-    pub sent_at: DateTime<Utc>,
+    pub sent_at: Timestamp,
 }
 
 impl fmt::Debug for MoogleMailSentSummary {
@@ -98,14 +98,14 @@ pub struct MoogleMailSentSnapshot {
     pub world: MoogleMailWorld,
     pub recipient: String,
     pub subject: String,
-    pub sent_at: DateTime<Utc>,
+    pub sent_at: Timestamp,
     pub remaining_credits: i64,
     pub cod_pending: i64,
     /// 当前仍附在邮件中的装备 ID，必须按字典序排列且无重复。
     pub remaining_equipment_ids: Vec<String>,
     /// 页面是否明确证明邮件已领取完毕。
     pub collected: bool,
-    pub observed_at: DateTime<Utc>,
+    pub observed_at: Timestamp,
 }
 
 impl fmt::Debug for MoogleMailSentSnapshot {

@@ -11,7 +11,7 @@ use auction_domain::{
     EquipmentId, LotId, SETTLEMENT_PPM, SettlementAmount, SettlementFact, SettlementMode,
     SettlementPlan, SettlementPolicy, SettlementWorld, UserId, floor_ppm, proportional_floor,
 };
-use chrono::{DateTime, TimeZone, Utc};
+use auction_time::Timestamp;
 
 fn must<T, E: std::fmt::Debug>(result: Result<T, E>) -> T {
     result.unwrap_or_else(|error| panic!("测试夹具必须合法: {error:?}"))
@@ -21,15 +21,15 @@ fn required<T>(value: Option<T>) -> T {
     value.unwrap_or_else(|| panic!("测试夹具必须存在"))
 }
 
-fn at(year: i32, month: u32, day: u32, hour: u32, minute: u32, second: u32) -> DateTime<Utc> {
-    required(Utc.with_ymd_and_hms(year, month, day, hour, minute, second).single())
+fn at(year: i32, month: u32, day: u32, hour: u32, minute: u32, second: u32) -> Timestamp {
+    required(Timestamp::from_ymd_hms(year, month, day, hour, minute, second))
 }
 
-fn window_open() -> DateTime<Utc> {
+fn window_open() -> Timestamp {
     at(2026, 1, 1, 0, 0, 0)
 }
 
-fn window_end() -> DateTime<Utc> {
+fn window_end() -> Timestamp {
     at(2026, 1, 11, 0, 0, 0)
 }
 

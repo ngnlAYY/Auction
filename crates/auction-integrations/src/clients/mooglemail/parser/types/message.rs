@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 use std::fmt;
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sha2::{Digest, Sha256};
 
 use super::MAX_SUMMARY_SUBJECT_BYTES;
@@ -23,7 +23,7 @@ pub struct MoogleMailSummary {
     pub sender: String,
     pub subject: String,
     /// 远端页面按 UTC 展示的时间。
-    pub received_at: DateTime<Utc>,
+    pub received_at: Timestamp,
 }
 
 impl fmt::Debug for MoogleMailSummary {
@@ -63,7 +63,7 @@ pub struct MoogleMailAttachment {
 pub struct MoogleMailMessage {
     pub external_mail_id: String,
     pub world: MoogleMailWorld,
-    pub received_at: DateTime<Utc>,
+    pub received_at: Timestamp,
     pub sender: String,
     pub subject: String,
     pub body: String,

@@ -295,8 +295,8 @@ fn valid_session_deadlines(expires_at: Option<&str>, absolute_expires_at: Option
         (None, None) => true,
         (Some(expires_at), Some(absolute_expires_at)) => {
             match (
-                chrono::DateTime::parse_from_rfc3339(expires_at),
-                chrono::DateTime::parse_from_rfc3339(absolute_expires_at),
+                auction_time::Timestamp::parse_from_rfc3339(expires_at),
+                auction_time::Timestamp::parse_from_rfc3339(absolute_expires_at),
             ) {
                 (Ok(expires_at), Ok(absolute_expires_at)) => expires_at <= absolute_expires_at,
                 _ => false,

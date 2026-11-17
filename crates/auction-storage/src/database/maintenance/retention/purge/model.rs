@@ -1,7 +1,7 @@
 //! 保留清理执行的请求、批准绑定与回执模型。执行只覆盖政策 v2 的代码内闭集运行态表；
 //! 批准只能来自一次新鲜的只读演练，并按数据族绑定候选行/字节与表级计数。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -66,8 +66,8 @@ pub struct RetentionPurgeFilesystemResult {
 pub struct RetentionPurgeRequest {
     pub database_name: String,
     pub dry_run_run_id: Uuid,
-    pub dry_run_collected_at: DateTime<Utc>,
-    pub dry_run_created_at: DateTime<Utc>,
+    pub dry_run_collected_at: Timestamp,
+    pub dry_run_created_at: Timestamp,
     pub policy_sha256: String,
     pub batch_size: u32,
     pub approvals: Vec<RetentionPurgeApproval>,
@@ -124,8 +124,8 @@ pub struct RetentionPurgeReport {
     pub policy_version: i64,
     pub policy_sha256: String,
     pub batch_size: u32,
-    pub started_at: DateTime<Utc>,
-    pub finished_at: DateTime<Utc>,
+    pub started_at: Timestamp,
+    pub finished_at: Timestamp,
     pub outcome: RetentionPurgeOutcome,
     pub failure_code: Option<&'static str>,
     pub families: Vec<RetentionPurgeFamilyResult>,

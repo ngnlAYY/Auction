@@ -3,7 +3,7 @@
 use auction_application::recovery::RecoveryActionClaim;
 use auction_domain::CommandId;
 use auction_domain::valid_text as valid_recovery_text;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
@@ -18,8 +18,8 @@ use crate::database::recovery::scheduler::repository_error;
 pub(crate) async fn claim_action_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     worker_id: &str,
-    now: DateTime<Utc>,
-    lease_until: DateTime<Utc>,
+    now: Timestamp,
+    lease_until: Timestamp,
 ) -> Result<Option<RecoveryActionClaim>, auction_application::core::RepositoryError> {
     let lease_microseconds = (lease_until - now)
         .num_microseconds()
@@ -141,7 +141,7 @@ async fn claim_action_in_transaction(
     let expected_attachment_ids: Vec<String> =
         row.try_get("expected_attachment_ids").map_err(map_storage_error)?;
     let reason: Option<String> = row.try_get("reason").map_err(map_storage_error)?;
-    let created_at: DateTime<Utc> = row.try_get("created_at").map_err(map_storage_error)?;
+    let created_at: Timestamp = row.try_get("created_at").map_err(map_storage_error)?;
     if action_id.is_nil()
         || recovery_id.is_nil()
         || buyer_user_id.is_nil()
@@ -274,8 +274,8 @@ async fn claim_action_in_transaction(
     .map_err(RecoveryActionTransactionError::from)?
     .ok_or_else(|| repository_error("recovery action 领取 fence 已失效"))?;
     let stored_state_version: i64 = updated.try_get("state_version").map_err(map_storage_error)?;
-    let claimed_at: DateTime<Utc> = updated.try_get("claimed_at").map_err(map_storage_error)?;
-    let stored_lease_until: DateTime<Utc> =
+    let claimed_at: Timestamp = updated.try_get("claimed_at").map_err(map_storage_error)?;
+    let stored_lease_until: Timestamp =
         updated.try_get("claim_expires_at").map_err(map_storage_error)?;
     if stored_state_version != claimed_state_version
         || claimed_at < created_at

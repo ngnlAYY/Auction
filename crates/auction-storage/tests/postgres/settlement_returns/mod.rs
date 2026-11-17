@@ -11,7 +11,7 @@
 
 use auction_application::recovery::RecoveryWorkStore;
 use auction_application::settlement::{SettlementReturnMatch, SettlementReturnReason};
-use chrono::{DateTime, Duration, Utc};
+use auction_time::{Duration, Timestamp};
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -40,7 +40,7 @@ mod unresolved;
 pub(crate) async fn insert_inbound(
     pool: &PgPool,
     external_mail_id: &str,
-    received_at: DateTime<Utc>,
+    received_at: Timestamp,
     header: Option<(&str, String)>,
     metadata: Value,
 ) -> Uuid {
@@ -83,7 +83,7 @@ pub(crate) async fn insert_sent_fulfillment(
     obligation: Uuid,
     template: &str,
     credits: i64,
-    sending_at: DateTime<Utc>,
+    sending_at: Timestamp,
     state: &str,
 ) -> Uuid {
     let delivery_id = Uuid::new_v4();
@@ -207,12 +207,12 @@ async fn postgres_unproven_returns_are_isolated_without_touching_recovery() {
     .await;
 
     assert!(
-        store.record_due_return(Utc::now()).await.expect("恢复流程不报错").is_none(),
+        store.record_due_return(Timestamp::now()).await.expect("恢复流程不报错").is_none(),
         "来源无法证明的退件不能进入恢复流程"
     );
     for expected in [prefixless, legacy] {
         let consumed = store
-            .consume_due_settlement_return(Utc::now())
+            .consume_due_settlement_return(Timestamp::now())
             .await
             .expect("隔离不报错")
             .expect("必须消费到不可信退件");
@@ -230,7 +230,7 @@ async fn postgres_unproven_returns_are_isolated_without_touching_recovery() {
             )
         );
     }
-    assert!(store.consume_due_settlement_return(Utc::now()).await.expect("排空").is_none());
+    assert!(store.consume_due_settlement_return(Timestamp::now()).await.expect("排空").is_none());
     let (stage, count_value): (String, i32) = sqlx::query_as(
         "SELECT stage, cod_return_count FROM public.settlement_recoveries WHERE id = $1",
     )
@@ -253,9 +253,9 @@ async fn postgres_unproven_returns_are_isolated_without_touching_recovery() {
         evidence(sale.payment_obligation, 0, &assets),
     )
     .await;
-    assert!(store.consume_due_settlement_return(Utc::now()).await.expect("不报错").is_none());
+    assert!(store.consume_due_settlement_return(Timestamp::now()).await.expect("不报错").is_none());
     let recorded = store
-        .record_due_return(Utc::now())
+        .record_due_return(Timestamp::now())
         .await
         .expect("系统退件必须被恢复流程记录")
         .expect("必须领取到系统退件");
@@ -294,9 +294,9 @@ async fn postgres_returned_payout_is_held_for_manual_reconcile_without_money_mov
     )
     .await;
 
-    assert!(store.record_due_return(Utc::now()).await.expect("恢复流程不报错").is_none());
+    assert!(store.record_due_return(Timestamp::now()).await.expect("恢复流程不报错").is_none());
     let consumed = store
-        .consume_due_settlement_return(Utc::now())
+        .consume_due_settlement_return(Timestamp::now())
         .await
         .expect("货款退件必须被消费")
         .expect("必须领取到货款退件");
@@ -340,7 +340,7 @@ async fn postgres_returned_payout_is_held_for_manual_reconcile_without_money_mov
     .await
     .expect("读取转人工审计");
     assert_eq!(audits, 1);
-    assert!(store.consume_due_settlement_return(Utc::now()).await.expect("排空").is_none());
+    assert!(store.consume_due_settlement_return(Timestamp::now()).await.expect("排空").is_none());
 
     store.postgres_pool().close().await;
 }
@@ -442,7 +442,7 @@ async fn postgres_terminal_and_unbindable_returns_are_recorded_in_order() {
     ];
     for (mail_id, (state, reason, obligation, previous)) in mails.iter().zip(expected) {
         let consumed = store
-            .consume_due_settlement_return(Utc::now())
+            .consume_due_settlement_return(Timestamp::now())
             .await
             .expect("消费不报错")
             .expect("必须按收件顺序领取");
@@ -456,7 +456,7 @@ async fn postgres_terminal_and_unbindable_returns_are_recorded_in_order() {
         assert_eq!(stored_previous.as_deref(), previous);
         assert_eq!(delivery.is_some(), previous.is_some());
     }
-    assert!(store.consume_due_settlement_return(Utc::now()).await.expect("排空").is_none());
+    assert!(store.consume_due_settlement_return(Timestamp::now()).await.expect("排空").is_none());
     let (returned_state, _, _) = fulfillment_state(pool, returned_id).await;
     assert_eq!(returned_state, "satisfied", "已满足事实不改写");
     assert_eq!(fulfillment_state(pool, sale.seller_obligation).await.0, "manual_reconcile");

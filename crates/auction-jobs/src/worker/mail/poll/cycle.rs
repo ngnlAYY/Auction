@@ -9,7 +9,7 @@ use auction_application::core::diagnostics::{
 use auction_application::mail::{MailDiagnosticRecorder, MailPollStore, MailProcessor};
 use auction_application::scheduling::RecurringSchedule;
 use auction_observability::{WorkerLoop, WorkerRecorder, WorkerResult};
-use chrono::{DateTime, Duration as ChronoDuration, Utc};
+use auction_time::{TimeDelta, Timestamp};
 
 use super::super::maintenance::{run_maintenance, run_read_observation};
 use super::processing::process_claim;
@@ -193,7 +193,7 @@ where
     }
     let claim_started = tokio::time::Instant::now();
     let now = worker.clock.now();
-    let lease_duration = ChronoDuration::from_std(runtime.config.lease_duration)
+    let lease_duration = TimeDelta::from_std(runtime.config.lease_duration)
         .map_err(|_| WorkerError::InvalidMailPollConfiguration)?;
     let lease_until =
         now.checked_add_signed(lease_duration).ok_or(WorkerError::InvalidMailPollConfiguration)?;
@@ -274,7 +274,7 @@ fn poll_schedule(runtime: &MailPollRuntime, isolated: bool) -> Arc<dyn Recurring
 fn next_poll_wake(
     runtime: &MailPollRuntime,
     schedule: &dyn RecurringSchedule,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Option<tokio::time::Instant> {
     let next_wake_at = schedule.next_after(now)?;
     let schedule_delay =

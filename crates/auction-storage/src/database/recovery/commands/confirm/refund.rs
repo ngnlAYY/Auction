@@ -7,7 +7,7 @@
 //!   补寄照常经退件案件执行，不受恢复记录已完成影响。
 
 use auction_application::recovery::{RecoveryCommandError, RecoveryResolutionAdvance};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::json;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
@@ -19,7 +19,7 @@ use crate::database::recovery::commands::scope::lock_recovery;
 
 pub(in crate::database::recovery::commands) async fn complete_refund_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<Option<RecoveryResolutionAdvance>, RecoveryCommandError> {
     let satisfied = crate::database::retry_conflicts(
         pool,
@@ -44,7 +44,7 @@ pub(in crate::database::recovery::commands) async fn complete_refund_postgres(
 
 pub(in crate::database::recovery::commands) async fn complete_refund_postgres_once(
     pool: &crate::database::TrackedPool<Postgres>,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<Option<RecoveryResolutionAdvance>, RecoveryCommandError> {
     let mut transaction =
         pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await.map_err(map_sql_error)?;
@@ -78,7 +78,7 @@ pub(in crate::database::recovery::commands) async fn complete_refund_postgres_on
     };
 
     let recovery_id: Uuid = candidate.try_get("id").map_err(map_sql_error)?;
-    let candidate_completed_at: Option<DateTime<Utc>> =
+    let candidate_completed_at: Option<Timestamp> =
         candidate.try_get("refund_completed_at").map_err(map_sql_error)?;
     let completed_at = candidate_completed_at.ok_or(RecoveryCommandError::InvalidStoredResult)?;
     let recovery = lock_recovery(&mut transaction, recovery_id).await?;
@@ -106,7 +106,7 @@ pub(in crate::database::recovery::commands) async fn complete_refund_postgres_on
     .map_err(map_sql_error)?
     .ok_or(RecoveryCommandError::InvalidStoredResult)?;
     let execution_state: String = fulfillment.try_get("execution_state").map_err(map_sql_error)?;
-    let stored_completed_at: Option<DateTime<Utc>> =
+    let stored_completed_at: Option<Timestamp> =
         fulfillment.try_get("completed_at").map_err(map_sql_error)?;
     if execution_state != "satisfied" || stored_completed_at != Some(completed_at) {
         return Err(RecoveryCommandError::InvalidStoredResult);
@@ -148,7 +148,7 @@ pub(in crate::database::recovery::commands) async fn complete_refund_postgres_on
     let stage: String = updated.try_get("stage").map_err(map_sql_error)?;
     let resolution: Option<String> = updated.try_get("resolution").map_err(map_sql_error)?;
     let state_version: i64 = updated.try_get("state_version").map_err(map_sql_error)?;
-    let updated_completed_at: Option<DateTime<Utc>> =
+    let updated_completed_at: Option<Timestamp> =
         updated.try_get("completed_at").map_err(map_sql_error)?;
     if stage != "completed"
         || resolution.as_deref() != Some("equipment_recovered")
@@ -190,7 +190,7 @@ pub(in crate::database::recovery::commands) async fn complete_refund_postgres_on
 /// 退款权益由代管负债承接（不变量 8、10）。锁序：恢复记录 → 履约（与满足路径相同）。
 async fn complete_refund_custody_once(
     pool: &crate::database::TrackedPool<Postgres>,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<Option<RecoveryResolutionAdvance>, RecoveryCommandError> {
     let mut transaction =
         pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await.map_err(map_sql_error)?;
@@ -233,7 +233,7 @@ async fn complete_refund_custody_once(
     let take_delivery_id: Uuid = candidate.try_get("take_delivery_id").map_err(map_sql_error)?;
     let returned_delivery: Uuid =
         candidate.try_get("original_delivery_id").map_err(map_sql_error)?;
-    let proven_at: DateTime<Utc> = candidate.try_get("proven_at").map_err(map_sql_error)?;
+    let proven_at: Timestamp = candidate.try_get("proven_at").map_err(map_sql_error)?;
     let recovery = lock_recovery(&mut transaction, recovery_id).await?;
     if recovery.stage != "refunding"
         || recovery.resolution.as_deref() != Some("equipment_recovered")

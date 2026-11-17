@@ -9,15 +9,15 @@ use auction_application::forum::{
 use auction_application::public::{PublicEquipmentGameLink, PublicEquipmentLinkTarget};
 use auction_domain::equipment::taxonomy::EquipmentCategory;
 use auction_domain::{AuctionId, AuctionStatus, EquipmentId, SettlementWorld};
-use chrono::{DateTime, TimeZone, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use super::text::{category_label, category_order};
 use super::{FORUM_SEPARATOR, ForumThreadRenderer};
 use crate::clients::ehentai::MAXIMUM_FORUM_BODY_BYTES;
 
-fn at(hour: u32) -> DateTime<Utc> {
-    Utc.with_ymd_and_hms(2026, 11, 7, hour, 0, 0).single().expect("fixture time")
+fn at(hour: u32) -> Timestamp {
+    Timestamp::from_ymd_hms(2026, 11, 7, hour, 0, 0).expect("fixture time")
 }
 
 fn auction_id() -> AuctionId {

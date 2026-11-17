@@ -12,7 +12,7 @@ use auction_application::mail::{
 use auction_application::runtime_switches::RuntimeSwitches;
 use auction_application::scheduling::RecurringSchedule;
 use auction_observability::WorkerLoop;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use tokio::sync::Notify;
 
 use crate::worker::runtime::WorkerError;
@@ -33,7 +33,7 @@ pub struct MailPollFetchRequest {
 pub struct MailPollFetchedMessage {
     pub external_mail_id: String,
     pub world_id: String,
-    pub received_at: DateTime<Utc>,
+    pub received_at: Timestamp,
     pub sender: Option<String>,
     pub subject: String,
     pub message_display: Option<auction_application::mail::MailDisplaySnapshot>,
@@ -307,7 +307,7 @@ impl MailPollRuntime {
     }
 
     pub(in crate::worker) fn validate(&self) -> bool {
-        let now = Utc::now();
+        let now = Timestamp::now();
         matches!(self.world_id.as_str(), "main" | "isekai")
             && auction_domain::valid_text(&self.mailbox_key, 256)
             && self.schedule.next_after(now).is_some_and(|next| next > now)

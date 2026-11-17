@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_application::core::{ApplicationError, RepositoryError};
 use auction_application::recovery::RecoveryHealthRefreshPort;
-use chrono::{DateTime, Duration as ChronoDuration, Utc};
+use auction_time::{TimeDelta, Timestamp};
 
 use crate::worker::diagnostics;
 
@@ -15,7 +15,7 @@ use crate::worker::diagnostics;
 pub struct RecoveryHealthRuntime {
     refresher: Arc<dyn RecoveryHealthRefreshPort>,
     refresh_interval: std::time::Duration,
-    next_refresh_at: Mutex<Option<DateTime<Utc>>>,
+    next_refresh_at: Mutex<Option<Timestamp>>,
 }
 
 impl RecoveryHealthRuntime {
@@ -31,8 +31,8 @@ impl RecoveryHealthRuntime {
     }
 
     /// 到期时执行一次刷新；首次调用立即执行。
-    pub async fn run_once(&self, now: DateTime<Utc>) -> Result<bool, ApplicationError> {
-        let interval = ChronoDuration::from_std(self.refresh_interval).map_err(|_| {
+    pub async fn run_once(&self, now: Timestamp) -> Result<bool, ApplicationError> {
+        let interval = TimeDelta::from_std(self.refresh_interval).map_err(|_| {
             ApplicationError::Repository(RepositoryError::Failed(
                 "recovery health 刷新周期超出时间范围".to_owned(),
             ))

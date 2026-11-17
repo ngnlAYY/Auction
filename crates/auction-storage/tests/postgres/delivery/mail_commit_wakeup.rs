@@ -10,7 +10,7 @@ use std::time::Duration;
 use auction_application::delivery::DeliveryWorkStore;
 use auction_application::mail::{MailPollBatch, MailPollClaim, MailPollIntake, MailPollStore};
 use auction_storage::DatabaseStore;
-use chrono::Utc;
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use crate::support;
@@ -18,13 +18,13 @@ use crate::support;
 const MAILBOX: &str = "wakeup-mailbox";
 
 async fn claim(store: &DatabaseStore) -> MailPollClaim {
-    let now = Utc::now();
+    let now = Timestamp::now();
     MailPollStore::claim_due(
         store,
         MAILBOX.to_owned(),
         "wakeup-worker".to_owned(),
         now,
-        now + chrono::Duration::minutes(2),
+        now + auction_time::Duration::minutes(2),
         1,
         true,
     )
@@ -39,13 +39,13 @@ fn batch(
     external_mail_id: &str,
     decision_metadata: serde_json::Value,
 ) -> MailPollBatch {
-    let now = Utc::now();
+    let now = Timestamp::now();
     MailPollBatch {
         mailbox_key: claim.mailbox_key.clone(),
         claim_token: claim.claim_token,
         next_cursor: Some(external_mail_id.to_owned()),
         polled_at: now,
-        next_poll_at: now + chrono::Duration::minutes(1),
+        next_poll_at: now + auction_time::Duration::minutes(1),
         items: vec![MailPollIntake {
             id: Uuid::new_v4(),
             external_mail_id: external_mail_id.to_owned(),
@@ -70,12 +70,12 @@ async fn postgres_mail_batch_commit_wakes_delivery_only_with_deliveries() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
     let mut wakeup = store.subscribe_wakeups().await.expect("订阅投递唤醒");
-    let now = Utc::now();
+    let now = Timestamp::now();
     store
         .ensure_state(
             MAILBOX.to_owned(),
             now,
-            now + chrono::Duration::minutes(1),
+            now + auction_time::Duration::minutes(1),
             Duration::from_secs(3600),
         )
         .await

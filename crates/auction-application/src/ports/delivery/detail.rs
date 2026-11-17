@@ -4,7 +4,7 @@
 //! 不携带正文、Cookie、登录 key、页面令牌或投递 payload 原文。`credential` 只保留
 //! owner 身份版本，`body_digest` 只保留规范摘要，避免管理端成为第二份秘密存储。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use crate::ports::delivery::DeliveryAdminSnapshot;
@@ -19,7 +19,7 @@ pub struct DeliveryAdminAttempt {
     pub operation: String,
     pub fencing_version: i64,
     pub world_id: String,
-    pub sending_at: DateTime<Utc>,
+    pub sending_at: Timestamp,
     pub recipient: Option<String>,
     pub subject: Option<String>,
     pub body_digest: Option<[u8; 32]>,
@@ -43,8 +43,8 @@ pub struct DeliveryAdminSentEvidence {
     /// `mailbox_sweep`、`sent_reference_sighting` 或 `compose_discard`。
     pub kind: String,
     pub external_mail_id: Option<String>,
-    pub observed_at: Option<DateTime<Utc>>,
-    pub sent_at: Option<DateTime<Utc>>,
+    pub observed_at: Option<Timestamp>,
+    pub sent_at: Option<Timestamp>,
     pub recipient: Option<String>,
     pub subject: Option<String>,
     pub body_digest: Option<[u8; 32]>,
@@ -63,7 +63,7 @@ pub struct DeliveryAdminCustody {
     pub cod_pending: Option<i64>,
     pub remaining_credits: Option<i64>,
     pub receipt: Option<String>,
-    pub observed_at: Option<DateTime<Utc>>,
+    pub observed_at: Option<Timestamp>,
     /// 已有 append-only 人工确认显式接受过领取（`accept_collected_assets`）。
     pub operator_confirmed_collected: bool,
 }
@@ -76,7 +76,7 @@ pub struct DeliveryAdminDisposition {
     /// 旧 Admin 命令/人工证明种类，或统一处置表的闭集种类（自动 Sent、装备损失、
     /// 历史自寄、预检退役、操作者确认等）。
     pub kind: String,
-    pub occurred_at: DateTime<Utc>,
+    pub occurred_at: Timestamp,
     pub status: Option<String>,
     pub fencing_version: Option<i64>,
     pub failure_code: Option<String>,
@@ -106,7 +106,7 @@ pub struct DeliveryAdminRecovery {
     pub recovery_id: Uuid,
     pub stage: String,
     pub resolution: Option<String>,
-    pub payment_deadline_at: DateTime<Utc>,
+    pub payment_deadline_at: Timestamp,
     pub payment_obligation_id: Uuid,
     pub blocking_code: Option<String>,
     pub manual_reconcile_delivery_id: Option<Uuid>,

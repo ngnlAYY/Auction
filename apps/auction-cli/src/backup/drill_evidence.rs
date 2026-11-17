@@ -12,7 +12,7 @@
 use std::{fs, path::Path};
 
 use anyhow::Context;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 /// 单份回执的读取上限；正常回执远小于该值。
 const MAX_RECEIPT_BYTES: u64 = 1 << 20;
@@ -20,9 +20,9 @@ const RESTORE_FORMAT: &str = "auction-postgres-restore.v1";
 const MIGRATION_DRILL_FORMAT: &str = "auction-migration-drill.v1";
 
 /// 返回目录中最新一次成功恢复演练的完成时刻；没有任何成功回执时为 `None`。
-pub(crate) fn latest_restore_drill(directory: &Path) -> anyhow::Result<Option<DateTime<Utc>>> {
+pub(crate) fn latest_restore_drill(directory: &Path) -> anyhow::Result<Option<Timestamp>> {
     let entries = fs::read_dir(directory).context("读取恢复演练回执目录失败")?;
-    let mut latest: Option<DateTime<Utc>> = None;
+    let mut latest: Option<Timestamp> = None;
     for entry in entries {
         let entry = entry.context("枚举恢复演练回执失败")?;
         let file_name = entry.file_name();
@@ -45,13 +45,9 @@ pub(crate) fn latest_restore_drill(directory: &Path) -> anyhow::Result<Option<Da
 }
 
 /// 只从两类成功回执取完成时刻；其他格式、失败结论或缺少时间的回执都不是演练证据。
-fn successful_drill_time(receipt: &serde_json::Value) -> Option<DateTime<Utc>> {
+fn successful_drill_time(receipt: &serde_json::Value) -> Option<Timestamp> {
     let time = |field: &str| {
-        receipt
-            .get(field)?
-            .as_str()
-            .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
-            .map(|value| value.with_timezone(&Utc))
+        receipt.get(field)?.as_str().and_then(|value| Timestamp::parse_from_rfc3339(value).ok())
     };
     match receipt.get("format")?.as_str()? {
         RESTORE_FORMAT => time("restored_at"),
@@ -74,7 +70,7 @@ mod tests {
         sync::atomic::{AtomicU32, Ordering},
     };
 
-    use chrono::{DateTime, Utc};
+    use auction_time::Timestamp;
     use serde_json::json;
 
     use super::latest_restore_drill;
@@ -110,8 +106,8 @@ mod tests {
         }
     }
 
-    fn at(value: &str) -> DateTime<Utc> {
-        DateTime::parse_from_rfc3339(value).expect("时间").with_timezone(&Utc)
+    fn at(value: &str) -> Timestamp {
+        Timestamp::parse_from_rfc3339(value).expect("时间")
     }
 
     #[test]

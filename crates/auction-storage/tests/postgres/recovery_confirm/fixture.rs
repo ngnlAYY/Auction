@@ -2,7 +2,7 @@
 //! 履约、系统退件、已满足的收回动作与（可选的）拉黑动作，以及停在 `reclaiming` 的恢复记录。
 //! 只用直接 SQL 写事实，被测路径全部走生产端口。
 
-use chrono::{DateTime, Duration, Utc};
+use auction_time::{Duration, Timestamp};
 use serde_json::json;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -34,7 +34,7 @@ fn digest(seed: u8) -> [u8; 32] {
 }
 
 pub(crate) async fn insert_reclaiming_sale(pool: &PgPool, spec: SaleSpec) -> Sale {
-    let at = Utc::now() - Duration::hours(2);
+    let at = Timestamp::now() - Duration::hours(2);
     let world = spec.world;
     let isekai = world == "isekai";
     let winner = Uuid::new_v4();
@@ -402,7 +402,7 @@ async fn insert_payment_delivery(
     pool: &PgPool,
     payment: Uuid,
     isekai: bool,
-    at: DateTime<Utc>,
+    at: Timestamp,
 ) -> Uuid {
     let delivery_id = Uuid::new_v4();
     let prepare_command_id = Uuid::new_v4();

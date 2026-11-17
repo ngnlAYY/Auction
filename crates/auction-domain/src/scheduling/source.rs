@@ -1,9 +1,12 @@
 //! 持久化周排期的 IANA 时区与原始本地钟点来源。
 
-use chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, NaiveTime, Offset, TimeZone, Utc};
-use chrono_tz::Tz;
+use auction_time::{Duration, LocalTime, Timestamp};
+use jiff::civil;
+use jiff::tz::TimeZone;
 use serde::{Deserialize, Serialize};
 
+use super::local_wire;
+use super::wall_clock::parse_timezone;
 use crate::DomainError;
 use crate::settlement::RECOVERY_V2_PAYMENT_TIMEOUT;
 
@@ -12,9 +15,12 @@ use crate::settlement::RECOVERY_V2_PAYMENT_TIMEOUT;
 #[serde(deny_unknown_fields)]
 pub struct AuctionScheduleSource {
     pub timezone: String,
-    pub preview_local: NaiveDateTime,
-    pub open_local: NaiveDateTime,
-    pub end_local: NaiveDateTime,
+    #[serde(with = "local_wire")]
+    pub preview_local: civil::DateTime,
+    #[serde(with = "local_wire")]
+    pub open_local: civil::DateTime,
+    #[serde(with = "local_wire")]
+    pub end_local: civil::DateTime,
     /// 赛季早鸟场次的稳定身份；常规周轮次省略，保持升级前快照与请求摘要的序列化不变。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub early_bird: Option<AuctionEarlyBirdSlot>,
@@ -24,7 +30,7 @@ pub struct AuctionScheduleSource {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AuctionEarlyBirdSlot {
-    pub season: NaiveDate,
+    pub season: civil::Date,
     pub session: u32,
 }
 
@@ -36,29 +42,27 @@ impl AuctionEarlyBirdSlot {
 
     /// 轮次唯一键与稳定 UUID 的身份片段，格式 `early-bird:YYYY-MM-DD:N`。
     pub fn key(&self) -> String {
-        format!("early-bird:{}:{}", self.season.format("%Y-%m-%d"), self.session)
+        format!("early-bird:{}:{}", self.season.strftime("%Y-%m-%d"), self.session)
     }
 }
 
 /// 排期来源解析出的三个 UTC 时间；仅供首次物化和后继生成，不覆盖已冻结轮次。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AuctionScheduleTimes {
-    pub preview_due_at: DateTime<Utc>,
-    pub open_due_at: DateTime<Utc>,
-    pub scheduled_end_at: DateTime<Utc>,
+    pub preview_due_at: Timestamp,
+    pub open_due_at: Timestamp,
+    pub scheduled_end_at: Timestamp,
 }
 
 impl AuctionScheduleSource {
     /// 复用旧周计划的歧义时间取较早实例、跳时时间按后续 offset 归一化语义。
     pub fn resolve(&self) -> Result<AuctionScheduleTimes, DomainError> {
-        let timezone: Tz = self
-            .timezone
-            .parse()
-            .map_err(|_| DomainError::InvalidSchedule("周排期时区来源无效"))?;
+        let timezone = parse_timezone(&self.timezone)
+            .ok_or(DomainError::InvalidSchedule("周排期时区来源无效"))?;
         let result = AuctionScheduleTimes {
-            preview_due_at: resolve_local(timezone, self.preview_local)?,
-            open_due_at: resolve_local(timezone, self.open_local)?,
-            scheduled_end_at: resolve_local(timezone, self.end_local)?,
+            preview_due_at: resolve_local(&timezone, self.preview_local)?,
+            open_due_at: resolve_local(&timezone, self.open_local)?,
+            scheduled_end_at: resolve_local(&timezone, self.end_local)?,
         };
         if result.preview_due_at >= result.open_due_at
             || result.open_due_at >= result.scheduled_end_at
@@ -81,9 +85,10 @@ impl AuctionScheduleSource {
     pub fn shifted_local_days(&self, days: i64) -> Result<Self, DomainError> {
         let shift = Duration::try_days(days)
             .ok_or(DomainError::InvalidSchedule("下一期本地时间超出范围"))?;
-        let next = |value: NaiveDateTime| {
+        let next = |value: civil::DateTime| {
             value
-                .checked_add_signed(shift)
+                .checked_add(shift.to_jiff())
+                .ok()
                 .ok_or(DomainError::InvalidSchedule("下一期本地时间超出范围"))
         };
         let source = Self {
@@ -104,24 +109,22 @@ impl AuctionScheduleSource {
         updated: AuctionScheduleTimes,
     ) -> Result<Self, DomainError> {
         self.resolve()?;
-        let timezone: Tz = self
-            .timezone
-            .parse()
-            .map_err(|_| DomainError::InvalidSchedule("周排期时区来源无效"))?;
+        let timezone = parse_timezone(&self.timezone)
+            .ok_or(DomainError::InvalidSchedule("周排期时区来源无效"))?;
         let mut source = self.clone();
         if previous.preview_due_at != updated.preview_due_at {
-            source.preview_local = updated.preview_due_at.with_timezone(&timezone).naive_local();
+            source.preview_local = timezone.to_datetime(updated.preview_due_at.to_jiff());
         }
         if previous.open_due_at != updated.open_due_at {
-            source.open_local = updated.open_due_at.with_timezone(&timezone).naive_local();
+            source.open_local = timezone.to_datetime(updated.open_due_at.to_jiff());
         }
         if previous.scheduled_end_at != updated.scheduled_end_at {
-            source.end_local = updated.scheduled_end_at.with_timezone(&timezone).naive_local();
+            source.end_local = timezone.to_datetime(updated.scheduled_end_at.to_jiff());
         }
         source.resolve()?;
         // 改期不得保留旧赛季身份却把付款窗口推过换季；使用命令的实际 UTC 截止。
         validate_pre_season_payment_deadline(
-            timezone,
+            &timezone,
             source.early_bird,
             updated.scheduled_end_at,
         )?;
@@ -131,9 +134,9 @@ impl AuctionScheduleSource {
 
 /// 新场次物化和 Admin 改期共用付款边界；读取冻结来源本身不改变其历史解释。
 pub(super) fn validate_pre_season_payment_deadline(
-    timezone: Tz,
+    timezone: &TimeZone,
     early_bird: Option<AuctionEarlyBirdSlot>,
-    scheduled_end_at: DateTime<Utc>,
+    scheduled_end_at: Timestamp,
 ) -> Result<(), DomainError> {
     let Some(slot) = early_bird.filter(AuctionEarlyBirdSlot::is_pre_season) else {
         return Ok(());
@@ -142,7 +145,7 @@ pub(super) fn validate_pre_season_payment_deadline(
     let payment_due_at = scheduled_end_at
         .checked_add_signed(RECOVERY_V2_PAYMENT_TIMEOUT)
         .ok_or(DomainError::InvalidSchedule("赛季前付款截止时间超出范围"))?;
-    let reset_at = resolve_local(timezone, slot.season.and_time(NaiveTime::MIN))?;
+    let reset_at = resolve_local(timezone, slot.season.to_datetime(civil::Time::midnight()))?;
     if payment_due_at >= reset_at {
         return Err(DomainError::InvalidSchedule("赛季前付款截止不得到达换季日"));
     }
@@ -150,27 +153,19 @@ pub(super) fn validate_pre_season_payment_deadline(
 }
 
 /// 本地墙上时间转 UTC；排期日历与冻结来源共用同一 DST 规则。
+///
+/// 重复出现的墙上时间取较早的一次；不存在的墙上时间沿用 Go `time.Date` 的既有兼容规则，
+/// 按跳时之后的 offset 归一化。
 pub(super) fn resolve_local(
-    timezone: Tz,
-    local: NaiveDateTime,
-) -> Result<DateTime<Utc>, DomainError> {
-    if let Some(value) = timezone.from_local_datetime(&local).earliest() {
-        return Ok(value.with_timezone(&Utc));
+    timezone: &TimeZone,
+    local: civil::DateTime,
+) -> Result<Timestamp, DomainError> {
+    match LocalTime::resolve(timezone, local) {
+        LocalTime::Unique(instant) | LocalTime::Repeated { earlier: instant, .. } => Ok(instant),
+        LocalTime::Skipped { after } => after
+            .to_timestamp(local)
+            .map(Timestamp::from)
+            .ok()
+            .ok_or(DomainError::InvalidSchedule("周排期 UTC 时间超出范围")),
     }
-    // Go time.Date 的既有兼容规则：不存在的墙上时间使用跳时后的 offset 归一化。
-    let offset = (1_i64..=48 * 60).find_map(|minutes| {
-        local
-            .checked_add_signed(Duration::minutes(minutes))
-            .and_then(|candidate| timezone.offset_from_local_datetime(&candidate).earliest())
-    });
-    let offset_seconds = i64::from(
-        offset
-            .ok_or(DomainError::InvalidSchedule("周排期本地时间无法解析"))?
-            .fix()
-            .local_minus_utc(),
-    );
-    let utc = local
-        .checked_sub_signed(Duration::seconds(offset_seconds))
-        .ok_or(DomainError::InvalidSchedule("周排期 UTC 时间超出范围"))?;
-    Ok(DateTime::from_naive_utc_and_offset(utc, Utc))
 }

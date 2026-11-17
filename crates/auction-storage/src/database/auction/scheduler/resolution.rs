@@ -1,7 +1,7 @@
 //! Worker 调度完成/失败的租约 fence 收口。
 
 use auction_application::scheduling::{ScheduledRoundClaim, ScheduledRoundPhase};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Postgres;
 
 use super::mapping::map_storage_error;
@@ -11,7 +11,7 @@ use crate::database::repository_error;
 pub(super) async fn complete_postgres(
     pool: &TrackedPool<Postgres>,
     claim: &ScheduledRoundClaim,
-    completed_at: DateTime<Utc>,
+    completed_at: Timestamp,
 ) -> Result<(), auction_application::core::RepositoryError> {
     let (sql, phase) = match claim.phase {
         ScheduledRoundPhase::Preview => (
@@ -87,7 +87,7 @@ pub(super) async fn complete_postgres(
 pub(super) async fn fail_postgres(
     pool: &TrackedPool<Postgres>,
     claim: &ScheduledRoundClaim,
-    retry_at: DateTime<Utc>,
+    retry_at: Timestamp,
     failure_code: &str,
     safe_detail: &str,
 ) -> Result<(), auction_application::core::RepositoryError> {

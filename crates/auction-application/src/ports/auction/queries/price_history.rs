@@ -1,6 +1,6 @@
 //! Public 成交价格历史查询端口。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use crate::ports::core::ApplicationFuture;
@@ -39,8 +39,8 @@ pub struct PublicPriceHistoryListRequest {
     /// 按空白或英文逗号拆分后的名称词条；全部按忽略大小写的字面包含条件匹配。
     pub name_terms: Vec<String>,
     pub world_id: Option<String>,
-    pub closed_from: Option<DateTime<Utc>>,
-    pub closed_before: Option<DateTime<Utc>>,
+    pub closed_from: Option<Timestamp>,
+    pub closed_before: Option<Timestamp>,
     pub minimum_price: Option<i64>,
     pub maximum_price: Option<i64>,
     pub buyer: Option<String>,
@@ -109,7 +109,7 @@ impl PublicPriceHistoryListRequest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PublicPriceHistoryCursor {
     Start,
-    Boundary { closed_at: DateTime<Utc>, auction_sequence: i64, lot_number: i64, lot_id: Uuid },
+    Boundary { closed_at: Timestamp, auction_sequence: i64, lot_number: i64, lot_id: Uuid },
 }
 
 /// 已结算 sold lot 的公开成交事实。
@@ -128,7 +128,7 @@ pub struct PublicPriceHistoryEntry {
     pub buyer_name: String,
     pub seller_name: String,
     pub price: i64,
-    pub closed_at: DateTime<Utc>,
+    pub closed_at: Timestamp,
 }
 
 /// 编号页返回的完整过滤集价格统计。

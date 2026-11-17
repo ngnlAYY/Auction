@@ -7,7 +7,7 @@ use auction_application::delivery::{
 use auction_application::settlement::{
     FundingMutation, InternalEvidencePurpose, SettlementInternalEvidenceSnapshot,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Postgres;
 use uuid::Uuid;
 
@@ -22,7 +22,7 @@ use crate::database::settlement::funding;
 pub(super) async fn authorize_legacy(
     tx: &mut Transaction<'_, Postgres>,
     claim: &DeliveryWorkClaim,
-    started_at: DateTime<Utc>,
+    started_at: Timestamp,
     expectation: Option<&DeliveryPreparedExpectation>,
 ) -> Result<DeliveryFenceOutcome, FenceError> {
     let credential = expectation.map(|expectation| match expectation {
@@ -74,7 +74,7 @@ fn evidence_binding_fault() -> FenceError {
 pub(super) async fn authorize(
     tx: &mut Transaction<'_, Postgres>,
     claim: &DeliveryWorkClaim,
-    started_at: DateTime<Utc>,
+    started_at: Timestamp,
     evidence: &SettlementInternalEvidenceSnapshot,
     expectation: Option<&DeliveryPreparedExpectation>,
 ) -> Result<DeliveryFenceOutcome, FenceError> {

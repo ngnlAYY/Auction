@@ -11,7 +11,7 @@ use auction_application::delivery::{
     DeliveryTransportError, DeliveryWakeup, DeliveryWorkClaim, DeliveryWorkStore,
 };
 use auction_application::settlement::SettlementInternalEvidenceSnapshot;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use tokio::sync::{Notify, watch};
 use tokio::time::Instant;
 use tracing::field::{Field, Visit};
@@ -84,8 +84,8 @@ impl DeliveryWorkStore for ScriptedStore {
     fn claim_due(
         &self,
         _worker_id: String,
-        _now: DateTime<Utc>,
-        _lease_until: DateTime<Utc>,
+        _now: Timestamp,
+        _lease_until: Timestamp,
         _sending_grace: Duration,
         _exclusions: DeliveryClaimExclusions,
         _limit: u16,
@@ -95,7 +95,7 @@ impl DeliveryWorkStore for ScriptedStore {
 
     fn begin_claim_cycle(
         &self,
-        _now: DateTime<Utc>,
+        _now: Timestamp,
         _sending_grace: Duration,
     ) -> ApplicationFuture<'_, ()> {
         unavailable()
@@ -104,7 +104,7 @@ impl DeliveryWorkStore for ScriptedStore {
     fn start_sending_authorized<'a>(
         &'a self,
         _claim: DeliveryWorkClaim,
-        _started_at: DateTime<Utc>,
+        _started_at: Timestamp,
         _evidence: Option<&'a SettlementInternalEvidenceSnapshot>,
         _expectation: Option<&'a DeliveryPreparedExpectation>,
     ) -> ApplicationFuture<'a, DeliveryFenceOutcome> {
@@ -114,7 +114,7 @@ impl DeliveryWorkStore for ScriptedStore {
     fn start_sending_authorized_until<'a>(
         &'a self,
         _claim: DeliveryWorkClaim,
-        _started_at: DateTime<Utc>,
+        _started_at: Timestamp,
         _evidence: &'a SettlementInternalEvidenceSnapshot,
         _deadline: std::time::Instant,
         _expectation: Option<&'a DeliveryPreparedExpectation>,
@@ -125,7 +125,7 @@ impl DeliveryWorkStore for ScriptedStore {
     fn reject_preparation(
         &self,
         _claim: DeliveryWorkClaim,
-        _completed_at: DateTime<Utc>,
+        _completed_at: Timestamp,
     ) -> ApplicationFuture<'_, ()> {
         unavailable()
     }
@@ -133,7 +133,7 @@ impl DeliveryWorkStore for ScriptedStore {
     fn release(
         &self,
         _claim: DeliveryWorkClaim,
-        _released_at: DateTime<Utc>,
+        _released_at: Timestamp,
     ) -> ApplicationFuture<'_, ()> {
         unavailable()
     }
@@ -141,8 +141,8 @@ impl DeliveryWorkStore for ScriptedStore {
     fn renew(
         &self,
         _claim: DeliveryWorkClaim,
-        _renewed_at: DateTime<Utc>,
-        _lease_until: DateTime<Utc>,
+        _renewed_at: Timestamp,
+        _lease_until: Timestamp,
     ) -> ApplicationFuture<'_, ()> {
         unavailable()
     }
@@ -151,7 +151,7 @@ impl DeliveryWorkStore for ScriptedStore {
         &self,
         _claim: DeliveryWorkClaim,
         _result: DeliverySendResult,
-        _completed_at: DateTime<Utc>,
+        _completed_at: Timestamp,
     ) -> ApplicationFuture<'_, ()> {
         unavailable()
     }
@@ -160,7 +160,7 @@ impl DeliveryWorkStore for ScriptedStore {
         &self,
         _claim: DeliveryWorkClaim,
         _error: DeliveryTransportError,
-        _completed_at: DateTime<Utc>,
+        _completed_at: Timestamp,
     ) -> ApplicationFuture<'_, ()> {
         unavailable()
     }

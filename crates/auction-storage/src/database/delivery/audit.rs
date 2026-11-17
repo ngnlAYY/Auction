@@ -1,7 +1,7 @@
 //! PostgreSQL Delivery owner 的同事务追加式审计写入；只接受已校验的低基数状态元数据，
 //! payload、远端原文、Cookie 和密钥永不入审计，写入失败必须回滚调用方事务。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::Value;
 use sqlx::Postgres;
 use uuid::Uuid;
@@ -32,7 +32,7 @@ pub(in crate::database) const START_SENDING: &str = "delivery.start_sending";
 pub(in crate::database) const SUCCEED: &str = "delivery.succeed";
 
 pub(in crate::database) struct DeliveryAudit<'a> {
-    pub occurred_at: DateTime<Utc>,
+    pub occurred_at: Timestamp,
     pub actor_type: &'static str,
     pub actor_id: &'a str,
     pub action: &'static str,

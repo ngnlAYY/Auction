@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex as StdMutex};
 
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use tokio::sync::OnceCell;
 use tokio::sync::OwnedSemaphorePermit;
 
@@ -43,7 +43,7 @@ pub(crate) struct MoogleMailSentPrefix {
     pub(crate) summaries: Vec<MoogleMailSentSummary>,
     pub(crate) bounded: bool,
     /// 当前列表中实际命中的基线 MID 时间；None 表示未找到基线行。
-    pub(crate) anchor_sent_at: Option<DateTime<Utc>>,
+    pub(crate) anchor_sent_at: Option<Timestamp>,
     _bytes: OwnedSemaphorePermit,
 }
 

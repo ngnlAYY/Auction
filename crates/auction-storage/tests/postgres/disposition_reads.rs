@@ -15,7 +15,7 @@ use auction_application::recovery::RecoveryResolutionStore;
 use auction_application::runtime_switches::{RuntimeSwitchRole, RuntimeSwitches};
 use auction_application::shadow_run::{ShadowOutcome, ShadowOwner, ShadowRecorder, ShadowSample};
 use auction_storage::DatabaseStore;
-use chrono::Utc;
+use auction_time::Timestamp;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -48,7 +48,7 @@ fn store_with_mode(store: &DatabaseStore, mode: DispositionReadMode) -> Database
 
 async fn snapshot(store: &DatabaseStore) -> OperationsAlertSnapshot {
     store
-        .snapshot(Utc::now(), OperationsAlertCollectionOverdueRead::Skip)
+        .snapshot(Timestamp::now(), OperationsAlertCollectionOverdueRead::Skip)
         .await
         .expect("读取告警快照")
 }
@@ -66,7 +66,7 @@ enum DeliveryShape {
 async fn insert_delivery(pool: &PgPool, shape: DeliveryShape) -> (Uuid, i64) {
     let id = Uuid::new_v4();
     let fencing_version = 1_i64;
-    let now = Utc::now() - chrono::Duration::minutes(5);
+    let now = Timestamp::now() - auction_time::Duration::minutes(5);
     let (origin_kind, origin_id, failure_code, result_metadata, sending_at) = match shape {
         DeliveryShape::Plain => (
             "mail_intake",
@@ -228,7 +228,7 @@ enum TerminalKind {
 
 /// 构造退款义务失败的履约终态；装备损失分支同时写入损失事实与（可选的）统一处置事实。
 async fn insert_terminal(pool: &PgPool, uid: &str, kind: TerminalKind) {
-    let now = Utc::now() - chrono::Duration::hours(1);
+    let now = Timestamp::now() - auction_time::Duration::hours(1);
     let user_id = Uuid::new_v4();
     let auction_id = Uuid::new_v4();
     let lot_id = Uuid::new_v4();
@@ -632,7 +632,7 @@ async fn postgres_disposition_reads_paired_failure_never_shows_classified_author
 /// 入口使用。原 COD 投递在 50 分钟前进入过发送围栏（结果没有证明未外写，按可能已寄达计），
 /// 恢复记录当前退件是已被它消费的系统 `[RTS]` 退件：退回卖家前的发送归属判定据此成立。
 async fn insert_cod_reclaim(pool: &PgPool, limit: i32) -> (Uuid, Uuid, Uuid, Uuid) {
-    let now = Utc::now() - chrono::Duration::hours(1);
+    let now = Timestamp::now() - auction_time::Duration::hours(1);
     let user_id = Uuid::new_v4();
     let auction_id = Uuid::new_v4();
     let lot_id = Uuid::new_v4();
@@ -789,7 +789,7 @@ async fn insert_cod_reclaim(pool: &PgPool, limit: i32) -> (Uuid, Uuid, Uuid, Uui
     .bind(payment_obligation.to_string())
     .bind(format!("cod-reclaim-player-{delivery_id}"))
     .bind(now)
-    .bind(now - chrono::Duration::minutes(50))
+    .bind(now - auction_time::Duration::minutes(50))
     .execute(pool)
     .await
     .expect("写入 COD 投递");
@@ -875,8 +875,8 @@ async fn insert_cod_reclaim(pool: &PgPool, limit: i32) -> (Uuid, Uuid, Uuid, Uui
     .bind(now)
     .bind(return_mail_id)
     .bind(format!("cod-reclaim-return-{recovery_id}"))
-    .bind(now - chrono::Duration::minutes(30))
-    .bind(now - chrono::Duration::hours(2))
+    .bind(now - auction_time::Duration::minutes(30))
+    .bind(now - auction_time::Duration::hours(2))
     .bind(limit)
     .execute(pool)
     .await
@@ -922,7 +922,7 @@ async fn postgres_real_cod_return_writes_one_terminal_disposition_and_retry_is_i
         insert_cod_reclaim(pool, 3).await;
 
     let advance = store
-        .advance_due_cod_return(Utc::now())
+        .advance_due_cod_return(Timestamp::now())
         .await
         .expect("COD 第三次退回必须成功")
         .expect("必须领取到 COD 恢复");
@@ -966,7 +966,9 @@ async fn postgres_real_cod_return_writes_one_terminal_disposition_and_retry_is_i
     assert_eq!(classified.fulfillment.expect("履约水位").failed, 0);
 
     // 已完成恢复不再被领取；重复调度不能追加第二条终态事实。
-    assert!(store.advance_due_cod_return(Utc::now()).await.expect("重复调度不报错").is_none());
+    assert!(
+        store.advance_due_cod_return(Timestamp::now()).await.expect("重复调度不报错").is_none()
+    );
     let dispositions_after: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM public.delivery_dispositions
          WHERE delivery_id = $1 AND kind = 'cod_returned'",
@@ -1007,7 +1009,7 @@ async fn postgres_cod_return_reason_records_the_frozen_limit() {
     let (recovery_id, _, _, delivery_id) = insert_cod_reclaim(pool, 2).await;
 
     let advance = store
-        .advance_due_cod_return(Utc::now())
+        .advance_due_cod_return(Timestamp::now())
         .await
         .expect("达到冻结上限的 COD 退回必须收口")
         .expect("必须领取到 COD 恢复");

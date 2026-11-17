@@ -10,7 +10,7 @@
 //! 分配器一次只允许一个执行者：以事务级 advisory 锁独占，取不到立即返回 0，由当前持锁者或
 //! 下一轮 relay 补齐。序号只来自 `next_sequence` 的单向推进，因此任何并发形状都不会产生缺口。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 /// 单次分配器最多补号的事件数；其余留到下一轮，避免一轮占据过长的行锁等待。
 pub(crate) const DEFERRED_SEQUENCE_BATCH: u16 = 256;
@@ -76,7 +76,7 @@ pub mod benchmark_sql {
 pub(super) async fn allocate_stream_sequence(
     connection: &mut sqlx::PgConnection,
     stream_key: &str,
-    updated_at: Option<DateTime<Utc>>,
+    updated_at: Option<Timestamp>,
 ) -> Result<i64, sqlx::Error> {
     sqlx::query_scalar(STREAM_SEQUENCE_UPSERT_SQL)
         .bind(stream_key)

@@ -1,6 +1,6 @@
 //! Public 站点文档（规则、关于）读取端口。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use crate::ports::core::ApplicationFuture;
@@ -69,7 +69,7 @@ pub struct PublicRulesDocument {
     pub title: String,
     pub markdown: String,
     pub revision: i64,
-    pub published_at: DateTime<Utc>,
+    pub published_at: Timestamp,
 }
 
 impl PublicRulesDocument {

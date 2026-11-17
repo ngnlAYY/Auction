@@ -139,7 +139,7 @@ mod tests {
         sync::atomic::{AtomicU32, Ordering},
     };
 
-    use chrono::{Duration, TimeZone};
+    use auction_time::Duration;
     use uuid::Uuid;
 
     use super::{append, list, list_matching, read, receipts_dir};
@@ -174,7 +174,7 @@ mod tests {
 
         fn receipt(&self, minutes: i64) -> DeploymentReceipt {
             let failed = minutes < 0;
-            let started = chrono::Utc.with_ymd_and_hms(2026, 11, 5, 3, 0, 0).unwrap()
+            let started = auction_time::Timestamp::from_ymd_hms(2026, 11, 5, 3, 0, 0).unwrap()
                 + Duration::minutes(minutes);
             DeploymentReceipt {
                 format: FORMAT.to_owned(),

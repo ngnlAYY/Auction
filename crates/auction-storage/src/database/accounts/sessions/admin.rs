@@ -2,7 +2,7 @@
 
 use auction_application::core::{ApplicationError, SessionError};
 use auction_application::public::{AdminSessionIdentity, AdminSessionRecord};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Row;
 
 use crate::database::DatabaseStore;
@@ -11,7 +11,7 @@ use crate::database::storage_error_from;
 /// 启动时的单语句原子撤销不依赖 actor；更换账号、口令或回退配置都不能复活旧会话。
 pub(super) async fn revoke_all_postgres(
     store: &DatabaseStore,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<(), ApplicationError> {
     sqlx::query(
         "UPDATE public.admin_sessions
@@ -90,8 +90,8 @@ pub(super) async fn touch_postgres(
     store: &DatabaseStore,
     token_hash: [u8; 32],
     csrf_hash: [u8; 32],
-    now: DateTime<Utc>,
-    next_expires_at: DateTime<Utc>,
+    now: Timestamp,
+    next_expires_at: Timestamp,
 ) -> Result<AdminSessionIdentity, ApplicationError> {
     // 物化锁定行后再判断截止；只在 UPDATE 谓词换用实时钟，仍可能先判断再等待行锁。
     let row = sqlx::query(
@@ -135,7 +135,7 @@ pub(super) async fn touch_postgres(
 pub(super) async fn revoke_postgres(
     store: &DatabaseStore,
     token_hash: [u8; 32],
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<(), ApplicationError> {
     sqlx::query(
         "UPDATE public.admin_sessions

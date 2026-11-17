@@ -5,7 +5,7 @@
 //! 读回它；此前的失败没有回滚记录，由入口追加一条通用失败回执。回执写不进去时把写入错误接在
 //! 原错误之后返回，不掩盖失败原因，也不再改用随机标识补写第二条。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use super::install::{RetainedBinary, RetainedIdentity};
@@ -37,7 +37,7 @@ pub(super) struct FailedReceipt<'a> {
     pub(super) state: &'a PrivateDirectory,
     pub(super) receipt_id: Uuid,
     pub(super) action: Action,
-    pub(super) started_at: DateTime<Utc>,
+    pub(super) started_at: Timestamp,
     pub(super) context: &'a ReceiptContext,
     pub(super) deploy: &'a DeployRecord,
 }
@@ -79,7 +79,7 @@ pub(super) async fn settle(
     state: &PrivateDirectory,
     systemctl: &Systemctl,
     action: Action,
-    started_at: DateTime<Utc>,
+    started_at: Timestamp,
     context: &ReceiptContext,
     failure: Failure,
 ) -> anyhow::Error {
@@ -163,7 +163,7 @@ mod tests {
         path::{Path, PathBuf},
     };
 
-    use chrono::Utc;
+    use auction_time::Timestamp;
     use uuid::Uuid;
 
     use super::{FailedReceipt, Failure, installed_identity, settle};
@@ -305,7 +305,7 @@ mod tests {
             state: &state,
             receipt_id: record.deploy_receipt_id,
             action: Action::Deploy,
-            started_at: chrono::Utc::now(),
+            started_at: auction_time::Timestamp::now(),
             context: &context,
             deploy: &deploy,
         };
@@ -314,8 +314,15 @@ mod tests {
         assert!(failure.recorded);
         let units = units(&state.path);
         let systemctl = Systemctl::new(&units).expect("测试 systemctl");
-        let error =
-            settle(&state, &systemctl, Action::Deploy, chrono::Utc::now(), &context, failure).await;
+        let error = settle(
+            &state,
+            &systemctl,
+            Action::Deploy,
+            auction_time::Timestamp::now(),
+            &context,
+            failure,
+        )
+        .await;
 
         assert_eq!(format!("{error:#}"), "startup failed");
         assert_eq!(receipt_files(&state.path), 1, "已记录的失败不得再追加通用回执");
@@ -342,7 +349,7 @@ mod tests {
             state: &state,
             receipt_id: record.deploy_receipt_id,
             action: Action::Deploy,
-            started_at: chrono::Utc::now(),
+            started_at: auction_time::Timestamp::now(),
             context: &context,
             deploy: &deploy,
         };
@@ -381,7 +388,7 @@ mod tests {
             &state,
             &systemctl,
             Action::Deploy,
-            chrono::Utc::now(),
+            auction_time::Timestamp::now(),
             &context,
             Failure::unrecorded(anyhow::anyhow!("backup failed")),
         )
@@ -429,8 +436,8 @@ mod tests {
     }
 
     fn receipt(minutes: i64, action: Action, outcome: Outcome, tag: char) -> DeploymentReceipt {
-        let started = chrono::DateTime::from_timestamp(1_790_000_000, 0).expect("固定时间")
-            + chrono::Duration::minutes(minutes);
+        let started = auction_time::Timestamp::from_timestamp(1_790_000_000, 0).expect("固定时间")
+            + auction_time::Duration::minutes(minutes);
         let deploy = matches!(action, Action::Deploy | Action::Rollback).then(|| {
             let (roles, cli) = identity(tag, 90 + minutes);
             DeploySection::Current(DeployRecord {
@@ -450,7 +457,7 @@ mod tests {
             action,
             outcome,
             started_at: started,
-            finished_at: started + chrono::Duration::seconds(30),
+            finished_at: started + auction_time::Duration::seconds(30),
             actor: "operator".to_owned(),
             actor_uid: 0,
             backup_id: None,
@@ -538,7 +545,7 @@ mod tests {
             Uuid::new_v4(),
             Action::Deploy,
             Outcome::Succeeded,
-            Utc::now(),
+            Timestamp::now(),
             &context,
             None,
             artifacts('a'),

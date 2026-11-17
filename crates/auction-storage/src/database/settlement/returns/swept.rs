@@ -17,7 +17,7 @@
 use auction_application::mail::MailDeliveryOrigin;
 use auction_application::settlement::SettlementReturnProgress;
 use auction_domain::{SettlementReturnCaseStatus, cash_return};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::json;
 use sqlx::Postgres;
 use uuid::Uuid;
@@ -235,6 +235,6 @@ pub(crate) async fn requeue_swept_take(
 }
 
 /// 与投递改写同一时钟（`clock_timestamp()`），案件与事件时刻不早于投递终态。
-async fn database_now(tx: &mut Transaction<'_, Postgres>) -> Result<DateTime<Utc>, sqlx::Error> {
+async fn database_now(tx: &mut Transaction<'_, Postgres>) -> Result<Timestamp, sqlx::Error> {
     sqlx::query_scalar("SELECT clock_timestamp()").fetch_one(&mut **tx).await
 }

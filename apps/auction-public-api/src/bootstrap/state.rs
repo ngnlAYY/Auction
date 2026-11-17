@@ -36,7 +36,7 @@ use auction_observability::{
     HeartbeatStore, ProcessRole, ServiceName,
 };
 use auction_storage::{DatabaseCompetitionCommands, DatabaseStore};
-use chrono::Utc;
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use super::config;
@@ -211,8 +211,8 @@ pub(super) async fn configure_state(
             process_role: ProcessRole::Public,
             instance_id: Uuid::new_v4().to_string(),
             version: env!("CARGO_PKG_VERSION").to_owned(),
-            started_at: Utc::now(),
-            ttl: chrono::Duration::seconds(30),
+            started_at: Timestamp::now(),
+            ttl: auction_time::Duration::seconds(30),
         },
         heartbeat_health,
         tracing_health,
@@ -333,7 +333,7 @@ pub(super) fn spawn_realtime_relay(
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             interval.tick().await;
-            match configured.relay.run_once(Utc::now()).await {
+            match configured.relay.run_once(Timestamp::now()).await {
                 Ok(batch) if batch.delivered > 0 || batch.failures > 0 => {
                     if batch.failures == 0 {
                         configured.health.mark_success();

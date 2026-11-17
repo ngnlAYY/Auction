@@ -5,7 +5,7 @@ use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world
 use auction_application::settlement::{
     SettlementReturnMailObservation, SettlementReturnRecheckOutcome, parse_returned_settlement_body,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use super::MoogleMailGateway;
 use super::error::fetch_budget_exhausted;
@@ -21,7 +21,7 @@ impl MoogleMailGateway {
         &self,
         world: MoogleMailWorld,
         external_mail_id: &str,
-        observed_at: DateTime<Utc>,
+        observed_at: Timestamp,
     ) -> Result<SettlementReturnRecheckOutcome, MoogleMailError> {
         if !valid_opaque_id(external_mail_id) || observed_at.timestamp_nanos_opt().is_none() {
             return Err(operation_error(

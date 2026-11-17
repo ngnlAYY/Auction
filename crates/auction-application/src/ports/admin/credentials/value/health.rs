@@ -1,6 +1,6 @@
 //! Admin dashboard 的凭据安全聚合值对象。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use super::model::{AdminCredentialKind, AdminCredentialWorld};
@@ -14,7 +14,7 @@ pub struct AdminCredentialHealthScope {
     pub disabled_count: i64,
     pub invalid_count: i64,
     /// 该范围内最近一次凭据记录变化时间；没有记录时为空。
-    pub updated_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<Timestamp>,
 }
 
 impl AdminCredentialHealthScope {
@@ -40,9 +40,9 @@ impl AdminCredentialHealthScope {
 /// Dashboard 的凭据安全聚合快照。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AdminCredentialHealthSnapshot {
-    pub observed_at: DateTime<Utc>,
+    pub observed_at: Timestamp,
     /// 凭据管理命令账本中最近一次变更时间，用于判断 Worker 是否需要重启。
-    pub last_admin_change_at: Option<DateTime<Utc>>,
+    pub last_admin_change_at: Option<Timestamp>,
     pub scopes: Vec<AdminCredentialHealthScope>,
 }
 

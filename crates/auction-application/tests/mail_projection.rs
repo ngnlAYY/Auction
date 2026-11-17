@@ -7,12 +7,11 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use auction_application::mail::{mail_recipient_is_list_projection, sent_list_minute_start};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
-fn at(value: &str) -> DateTime<Utc> {
-    DateTime::parse_from_rfc3339(value)
+fn at(value: &str) -> Timestamp {
+    Timestamp::parse_from_rfc3339(value)
         .unwrap_or_else(|error| panic!("测试时间必须合法: {error:?}"))
-        .with_timezone(&Utc)
 }
 
 #[test]

@@ -3,7 +3,7 @@
 use auction_application::admin::AdminRuntimeMailTemplatesConfig;
 use auction_application::core::CompetitionTransactionError;
 use auction_domain::LotWatchChannel;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Postgres;
 use sqlx::Row;
 use uuid::Uuid;
@@ -17,7 +17,7 @@ use crate::database::lot_watch::persistence::{audit, sql_error};
 pub(crate) async fn resolve_pending(
     transaction: &mut Transaction<'_, Postgres>,
     lot_id: Uuid,
-    occurred_at: DateTime<Utc>,
+    occurred_at: Timestamp,
     notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
     public_base_url: Option<&str>,
     mail_templates: &AdminRuntimeMailTemplatesConfig,
@@ -54,7 +54,7 @@ pub(crate) async fn resolve_pending(
         let watch_version: i64 = row.try_get("watch_version").map_err(sql_error)?;
         let preference_version: i64 = row.try_get("preference_version").map_err(sql_error)?;
         let leader: Option<Uuid> = row.try_get("leader_user_id").map_err(sql_error)?;
-        let deadline: Option<DateTime<Utc>> = row.try_get("effective_end_at").map_err(sql_error)?;
+        let deadline: Option<Timestamp> = row.try_get("effective_end_at").map_err(sql_error)?;
         let auction_status: String = row.try_get("auction_status").map_err(sql_error)?;
         let slow_active: bool = row.try_get("slow_active").map_err(sql_error)?;
 
@@ -155,7 +155,7 @@ pub(super) async fn resolve(
     cycle: u64,
     status: &str,
     reason: &str,
-    occurred_at: DateTime<Utc>,
+    occurred_at: Timestamp,
 ) -> Result<(), CompetitionTransactionError> {
     let updated = sqlx::query(
         "UPDATE public.lot_watch_pending_notifications

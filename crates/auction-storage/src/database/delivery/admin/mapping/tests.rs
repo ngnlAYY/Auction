@@ -1,5 +1,5 @@
 use auction_application::delivery::{DELIVERY_ADMIN_RETIREMENT_REASONS, DeliveryAdminSnapshot};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::json;
 use uuid::Uuid;
 
@@ -93,7 +93,7 @@ fn retired_player_notification(
     reason_code: &str,
     failure_code: &str,
 ) -> DeliveryAdminSnapshot {
-    let created_at = "2026-11-06T10:00:00Z".parse::<DateTime<Utc>>().expect("valid timestamp");
+    let created_at = "2026-11-06T10:00:00Z".parse::<Timestamp>().expect("valid timestamp");
     DeliveryAdminSnapshot {
         // 退役只推进 fencing version；进门时 pending 的行保留 attempt_count 0 且没有 claimed 事实。
         id: Uuid::from_u128(1),
@@ -112,14 +112,14 @@ fn retired_player_notification(
         attempt_count: 0,
         claimed_at: None,
         sending_at: None,
-        completed_at: Some(created_at + chrono::TimeDelta::seconds(5)),
+        completed_at: Some(created_at + auction_time::TimeDelta::seconds(5)),
         external_reference: None,
         failure_code: Some(failure_code.to_owned()),
         reason_code: Some(reason_code.to_owned()),
         take_required: false,
         returned_mail_id: None,
         created_at,
-        updated_at: created_at + chrono::TimeDelta::seconds(5),
+        updated_at: created_at + auction_time::TimeDelta::seconds(5),
     }
 }
 
@@ -141,7 +141,7 @@ fn player_notification_preflight_retirements_validate() {
         "season_boundary_passed",
         "season_notice_invalidated",
     );
-    claimed.claimed_at = Some(claimed.created_at + chrono::TimeDelta::seconds(1));
+    claimed.claimed_at = Some(claimed.created_at + auction_time::TimeDelta::seconds(1));
     claimed.attempt_count = 1;
     claimed.fencing_version = 2;
     assert!(valid_snapshot(&claimed));
@@ -171,7 +171,7 @@ fn player_notification_retirements_still_reject_malformed_rows() {
         "season_boundary_passed",
         "season_notice_invalidated",
     );
-    sent.sending_at = Some(sent.created_at + chrono::TimeDelta::seconds(2));
+    sent.sending_at = Some(sent.created_at + auction_time::TimeDelta::seconds(2));
     assert!(!valid_snapshot(&sent));
     let mut referenced =
         retired_player_notification("seller_summary", "recipient_renamed", "recipient_renamed");
@@ -218,7 +218,7 @@ fn recovery_quarantine_from_pending_delivery_validates() {
 
     // 外部写入事实、未知失败码或缺失 completed 仍必须拒绝。
     let mut sent = snapshot.clone();
-    sent.sending_at = Some(sent.created_at + chrono::TimeDelta::seconds(2));
+    sent.sending_at = Some(sent.created_at + auction_time::TimeDelta::seconds(2));
     assert!(!valid_snapshot(&sent));
     let mut unknown = snapshot.clone();
     unknown.failure_code = Some("other_failure".to_owned());
@@ -241,7 +241,7 @@ fn recovery_superseded_settlement_delivery_validates_without_send_facts() {
     superseded.fencing_version = 4;
     assert!(valid_snapshot(&superseded));
     let mut claimed = superseded.clone();
-    claimed.claimed_at = Some(claimed.created_at + chrono::TimeDelta::seconds(1));
+    claimed.claimed_at = Some(claimed.created_at + auction_time::TimeDelta::seconds(1));
     claimed.attempt_count = 1;
     assert!(valid_snapshot(&claimed));
 
@@ -249,7 +249,7 @@ fn recovery_superseded_settlement_delivery_validates_without_send_facts() {
     wrong_origin.origin_kind = "lot_watch".to_owned();
     assert!(!valid_snapshot(&wrong_origin));
     let mut sent = superseded.clone();
-    sent.sending_at = Some(sent.created_at + chrono::TimeDelta::seconds(2));
+    sent.sending_at = Some(sent.created_at + auction_time::TimeDelta::seconds(2));
     assert!(!valid_snapshot(&sent));
     let mut referenced = superseded.clone();
     referenced.external_reference = Some("3120869".to_owned());

@@ -3,7 +3,7 @@
 
 use auction_application::core::ApplicationError;
 use auction_application::scheduling::{ScheduledRoundClaim, ScheduledRoundStore};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use crate::database::DatabaseStore;
 use crate::database::storage_error;
@@ -16,7 +16,7 @@ mod resolution;
 mod wakeup;
 
 impl ScheduledRoundStore for DatabaseStore {
-    fn database_now(&self) -> auction_application::core::ApplicationFuture<'_, DateTime<Utc>> {
+    fn database_now(&self) -> auction_application::core::ApplicationFuture<'_, Timestamp> {
         Box::pin(async move {
             bootstrap::database_now_postgres(self.pool()).await.map_err(ApplicationError::from)
         })
@@ -25,7 +25,7 @@ impl ScheduledRoundStore for DatabaseStore {
     fn find_current_round(
         &self,
         world_id: String,
-        local_week: chrono::NaiveDate,
+        local_week: jiff::civil::Date,
     ) -> auction_application::core::ApplicationFuture<
         '_,
         Option<auction_application::scheduling::ScheduledRoundSnapshot>,
@@ -67,8 +67,8 @@ impl ScheduledRoundStore for DatabaseStore {
     fn claim_due(
         &self,
         worker_id: String,
-        now: DateTime<Utc>,
-        lease_until: DateTime<Utc>,
+        now: Timestamp,
+        lease_until: Timestamp,
         limit: u16,
     ) -> auction_application::core::ApplicationFuture<'_, Vec<ScheduledRoundClaim>> {
         Box::pin(async move {
@@ -83,8 +83,8 @@ impl ScheduledRoundStore for DatabaseStore {
 
     fn next_claimable_at(
         &self,
-        now: DateTime<Utc>,
-    ) -> auction_application::core::ApplicationFuture<'_, Option<DateTime<Utc>>> {
+        now: Timestamp,
+    ) -> auction_application::core::ApplicationFuture<'_, Option<Timestamp>> {
         Box::pin(async move {
             wakeup::next_claimable_postgres(self.pool(), now).await.map_err(ApplicationError::from)
         })
@@ -93,7 +93,7 @@ impl ScheduledRoundStore for DatabaseStore {
     fn complete(
         &self,
         claim: ScheduledRoundClaim,
-        completed_at: DateTime<Utc>,
+        completed_at: Timestamp,
     ) -> auction_application::core::ApplicationFuture<'_, ()> {
         Box::pin(async move {
             resolution::complete_postgres(self.pool(), &claim, completed_at)
@@ -105,7 +105,7 @@ impl ScheduledRoundStore for DatabaseStore {
     fn fail(
         &self,
         claim: ScheduledRoundClaim,
-        retry_at: DateTime<Utc>,
+        retry_at: Timestamp,
         failure_code: String,
         safe_detail: String,
     ) -> auction_application::core::ApplicationFuture<'_, ()> {

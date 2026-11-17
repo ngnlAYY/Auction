@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use auction_domain::SettlementWorld;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use crate::errors::ApplicationError;
 use crate::errors::diagnostics::{
@@ -47,7 +47,7 @@ impl RecoveryHealthService {
 }
 
 impl RecoveryHealthRefreshPort for RecoveryHealthService {
-    fn refresh(&self, now: DateTime<Utc>) -> ApplicationFuture<'_, ()> {
+    fn refresh(&self, now: Timestamp) -> ApplicationFuture<'_, ()> {
         Box::pin(async move {
             if now.timestamp_nanos_opt().is_none() {
                 return Err(ApplicationError::Repository(RepositoryError::Failed(

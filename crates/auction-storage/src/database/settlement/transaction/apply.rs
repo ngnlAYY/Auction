@@ -6,7 +6,7 @@ use auction_application::settlement::SettlementTransactionError;
 use auction_domain::{
     AuctionId, CommandId, CompetitionPlan, ProxyStatus, RecoveryPolicy, SettlementPlan,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Row;
 
 use crate::database::PostgresCompetitionTransaction;
@@ -31,7 +31,7 @@ impl PostgresCompetitionTransaction {
         plan: &SettlementPlan,
         proxy_closure_plans: Vec<CompetitionPlan>,
         recovery_policy: RecoveryPolicy,
-        occurred_at: DateTime<Utc>,
+        occurred_at: Timestamp,
     ) -> Result<(), SettlementTransactionError> {
         recovery_policy.validate().map_err(|_| invalid("恢复策略快照校验失败"))?;
         for line in &plan.lines {

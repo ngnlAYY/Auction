@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use prometheus::{HistogramOpts, HistogramVec, IntCounterVec, Opts};
 
 use super::{MetricsError, ProcessMetrics};
@@ -48,12 +48,12 @@ impl RealtimeRecorder {
     }
 
     /// 成功交给本地 Hub，不代表任何连接或客户端已收到。
-    pub fn relay(&self, created_at: DateTime<Utc>) {
+    pub fn relay(&self, created_at: Timestamp) {
         self.observe(self.0.relay.as_ref(), "relay", created_at);
     }
 
     /// 一个事件副本成功完成 WS 写出；不记录失败、Ping 或 HTTP 补读。
-    pub fn push(&self, created_at: DateTime<Utc>) {
+    pub fn push(&self, created_at: Timestamp) {
         self.observe(self.0.push.as_ref(), "push", created_at);
     }
 
@@ -61,11 +61,11 @@ impl RealtimeRecorder {
         &self,
         histogram: Option<&HistogramVec>,
         stage: &'static str,
-        created_at: DateTime<Utc>,
+        created_at: Timestamp,
     ) {
         let Some(histogram) = histogram else { return };
         // 负时差表示时钟或证据异常，不以零延迟掩盖。
-        let Ok(duration) = (Utc::now() - created_at).to_std() else {
+        let Ok(duration) = (Timestamp::now() - created_at).to_std() else {
             if let Some(skipped) = &self.0.skipped {
                 skipped.with_label_values(&[AUCTION_SCOPE, stage]).inc();
             }
@@ -83,7 +83,7 @@ fn histogram(name: &str) -> Result<HistogramVec, MetricsError> {
 
 #[cfg(test)]
 mod tests {
-    use chrono::{Duration, Utc};
+    use auction_time::{Duration, Timestamp};
 
     use super::RealtimeRecorder;
     use crate::metrics::ProcessMetrics;
@@ -93,9 +93,9 @@ mod tests {
         let process =
             ProcessMetrics::new(true, "auction-test", "public", "0.0.0").expect("启用进程指标");
         let recorder = RealtimeRecorder::register(&process).expect("注册实时延迟指标");
-        recorder.relay(Utc::now() - Duration::seconds(1));
+        recorder.relay(Timestamp::now() - Duration::seconds(1));
         // 未来的创建时间是证据异常：不记零延迟，只累加 skipped。
-        recorder.push(Utc::now() + Duration::hours(1));
+        recorder.push(Timestamp::now() + Duration::hours(1));
         let text = String::from_utf8(process.encode().expect("编码指标")).expect("UTF-8 指标文本");
         for expected in [
             r#"auction_realtime_relay_duration_seconds_count{scope="auction"} 1"#,

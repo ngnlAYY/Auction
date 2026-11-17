@@ -5,7 +5,7 @@ use std::{collections::HashSet, mem::size_of};
 
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 use auction_application::mail::{MailScanAnchor, MailScanReason};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use super::super::MoogleMailReadRound;
 use super::super::scope::read_unavailable;
@@ -21,12 +21,12 @@ use crate::safe_diagnostics;
 /// Sent 前缀的严格顺序状态：分钟降序，同分钟 MID 可任意排列；锚点必须唯一且时间一致。
 struct SentPrefixState {
     anchor_mail_id: String,
-    anchor_at: DateTime<Utc>,
+    anchor_at: Timestamp,
     seen: HashSet<String>,
-    previous_at: Option<DateTime<Utc>>,
+    previous_at: Option<Timestamp>,
     anchor_found: bool,
     older_seen: bool,
-    anchor_sent_at: Option<DateTime<Utc>>,
+    anchor_sent_at: Option<Timestamp>,
 }
 
 impl SentPrefixState {
@@ -43,7 +43,7 @@ impl SentPrefixState {
         })
     }
 
-    fn observe(&mut self, mail_id: &str, sent_at: DateTime<Utc>) -> Result<(), MailScanReason> {
+    fn observe(&mut self, mail_id: &str, sent_at: Timestamp) -> Result<(), MailScanReason> {
         if sent_at.timestamp_nanos_opt().is_none() {
             return Err(MailScanReason::InvalidMid);
         }
@@ -367,7 +367,7 @@ mod sent_prefix_tests {
 
     use auction_application::mail::{MailScanAnchor, MailScanReason};
     use auction_test_support::mooglemail::MailDouble;
-    use chrono::{TimeZone, Utc};
+    use auction_time::Timestamp;
 
     use super::{SentPrefixFailure, SentPrefixState};
     use crate::clients::mooglemail::{
@@ -377,7 +377,7 @@ mod sent_prefix_tests {
 
     #[test]
     fn same_minute_lower_mid_is_allowed_but_time_reversal_is_not() {
-        let at = Utc.with_ymd_and_hms(2026, 11, 7, 6, 10, 0).single().expect("time");
+        let at = Timestamp::from_ymd_hms(2026, 11, 7, 6, 10, 0).expect("time");
         let mut state = SentPrefixState::new(&MailScanAnchor {
             mail_id: "100".to_owned(),
             observed_at: Some(at),
@@ -385,43 +385,43 @@ mod sent_prefix_tests {
         .expect("anchor time");
         assert!(state.observe("99", at).is_ok(), "同分钟更小 MID 可以出现在锚点前");
         assert!(state.observe("100", at).is_ok());
-        assert!(state.observe("98", at - chrono::Duration::minutes(10)).is_ok());
+        assert!(state.observe("98", at - auction_time::Duration::minutes(10)).is_ok());
         assert!(state.older_seen);
         assert!(state.observe("101", at).is_err(), "时间上升必须回退");
     }
 
     #[test]
     fn older_minute_before_anchor_is_anchor_missing() {
-        let at = Utc.with_ymd_and_hms(2026, 11, 7, 6, 10, 0).single().expect("time");
+        let at = Timestamp::from_ymd_hms(2026, 11, 7, 6, 10, 0).expect("time");
         let mut state = SentPrefixState::new(&MailScanAnchor {
             mail_id: "100".to_owned(),
             observed_at: Some(at),
         })
         .expect("anchor time");
-        assert!(state.observe("99", at - chrono::Duration::minutes(10)).is_err());
+        assert!(state.observe("99", at - auction_time::Duration::minutes(10)).is_err());
     }
 
-    fn anchor(mail_id: &str, at: chrono::DateTime<Utc>) -> MailScanAnchor {
+    fn anchor(mail_id: &str, at: auction_time::Timestamp) -> MailScanAnchor {
         MailScanAnchor { mail_id: mail_id.to_owned(), observed_at: Some(at) }
     }
 
     #[test]
     fn cross_page_duplicate_and_anchor_time_change_keep_their_reasons() {
-        let at = Utc.with_ymd_and_hms(2026, 11, 7, 6, 10, 0).single().expect("time");
+        let at = Timestamp::from_ymd_hms(2026, 11, 7, 6, 10, 0).expect("time");
         let mut state = SentPrefixState::new(&anchor("100", at)).expect("anchor time");
         assert!(state.observe("101", at).is_ok());
         assert_eq!(state.observe("101", at), Err(MailScanReason::PageDiscontinuity));
 
         let mut state = SentPrefixState::new(&anchor("100", at)).expect("anchor time");
         assert_eq!(
-            state.observe("100", at - chrono::Duration::minutes(1)),
+            state.observe("100", at - auction_time::Duration::minutes(1)),
             Err(MailScanReason::AnchorChanged)
         );
     }
 
     #[test]
     fn page_limit_is_decided_before_anchor_missing() {
-        let at = Utc.with_ymd_and_hms(2026, 11, 7, 6, 10, 0).single().expect("time");
+        let at = Timestamp::from_ymd_hms(2026, 11, 7, 6, 10, 0).expect("time");
         let state = SentPrefixState::new(&anchor("100", at)).expect("anchor time");
         // 上限内没读到锚点：缺失与否无从判定，记为超限；读到真实末页才是锚点缺失。
         assert_eq!(state.finish(true), Err(MailScanReason::PageLimit));
@@ -431,7 +431,7 @@ mod sent_prefix_tests {
         assert!(state.observe("100", at).is_ok());
         assert_eq!(state.finish(true), Err(MailScanReason::PageLimit));
         assert_eq!(state.finish(false), Ok(()));
-        assert!(state.observe("99", at - chrono::Duration::minutes(1)).is_ok());
+        assert!(state.observe("99", at - auction_time::Duration::minutes(1)).is_ok());
         assert_eq!(state.finish(true), Ok(()));
     }
 
@@ -468,7 +468,7 @@ mod sent_prefix_tests {
         let cookie = MoogleMailCookie::new("ipb_member_id=fixture; ipb_pass_hash=fixture")
             .expect("fixture cookie");
         // 比所有采集行都旧的锚点：第 0 页全部是锚点之前的新邮件。
-        let old = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).single().expect("time");
+        let old = Timestamp::from_ymd_hms(2020, 1, 1, 0, 0, 0).expect("time");
         let anchor = anchor("1", old);
 
         let round = client.read_round(&cookie, MoogleMailWorld::Main, true).expect("read round");

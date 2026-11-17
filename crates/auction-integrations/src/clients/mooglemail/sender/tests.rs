@@ -12,7 +12,7 @@ use auction_application::mail::{
     MailScanCheckpointStore, MailScanMode, MailScanPlan, MailScanReason, MailScanStream,
     MailScanWatermark, plan_mail_scan,
 };
-use chrono::{TimeZone, Utc};
+use auction_time::Timestamp;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
@@ -116,7 +116,7 @@ fn cookie(credential: u128, version: i64) -> MoogleMailCookie {
 fn watermark(mid: &str) -> MailScanWatermark {
     MailScanWatermark {
         mail_id: mid.to_owned(),
-        observed_at: Utc.with_ymd_and_hms(2026, 11, 4, 1, 0, 0).unwrap(),
+        observed_at: Timestamp::from_ymd_hms(2026, 11, 4, 1, 0, 0).unwrap(),
     }
 }
 
@@ -156,7 +156,7 @@ async fn sent_checkpoint_survives_restart_and_keeps_incremental_plan() {
     second.ensure_sent_scan_checkpoint(&second_cookie, MoogleMailWorld::Main).await;
     let checkpoint = second.sent_scan_checkpoint(&second_cookie, MoogleMailWorld::Main).unwrap();
     assert_eq!(checkpoint.watermark.as_ref().unwrap().mail_id, "700");
-    let plan = plan_mail_scan(Some(&checkpoint), Utc::now(), MAIL_SCAN_DAILY_FULL_INTERVAL);
+    let plan = plan_mail_scan(Some(&checkpoint), Timestamp::now(), MAIL_SCAN_DAILY_FULL_INTERVAL);
     assert_eq!(plan.mode, MailScanMode::Incremental);
     assert_eq!(plan.reason, MailScanReason::Incremental);
 }
@@ -185,7 +185,7 @@ async fn checkpoint_is_isolated_by_credential_version_world_and_endpoint() {
     let valid = key(9, 2, MailScanStream::Sent, "https://hentaiverse.org");
     let checkpoint = MailScanCheckpoint {
         watermark: Some(watermark("700")),
-        last_full_scan_at: Some(Utc.with_ymd_and_hms(2026, 11, 4, 0, 0, 0).unwrap()),
+        last_full_scan_at: Some(Timestamp::from_ymd_hms(2026, 11, 4, 0, 0, 0).unwrap()),
     };
     let store = Arc::new(FakeStore::with_checkpoint(valid.clone(), checkpoint));
 
@@ -223,16 +223,16 @@ async fn invalid_persisted_checkpoint_falls_back_to_full_scan() {
             // 前导零不是规范 MID；损坏行不能驱动增量前缀。
             watermark: Some(MailScanWatermark {
                 mail_id: "007".to_owned(),
-                observed_at: Utc.with_ymd_and_hms(2026, 11, 4, 1, 0, 0).unwrap(),
+                observed_at: Timestamp::from_ymd_hms(2026, 11, 4, 1, 0, 0).unwrap(),
             }),
-            last_full_scan_at: Some(Utc.with_ymd_and_hms(2026, 11, 4, 0, 0, 0).unwrap()),
+            last_full_scan_at: Some(Timestamp::from_ymd_hms(2026, 11, 4, 0, 0, 0).unwrap()),
         },
     ));
     let sender = make_sender(store, "https://hentaiverse.org");
     let cookie = cookie(9, 2);
     sender.ensure_sent_scan_checkpoint(&cookie, MoogleMailWorld::Main).await;
     assert!(sender.sent_scan_checkpoint(&cookie, MoogleMailWorld::Main).is_none());
-    let plan = plan_mail_scan(None, Utc::now(), MAIL_SCAN_DAILY_FULL_INTERVAL);
+    let plan = plan_mail_scan(None, Timestamp::now(), MAIL_SCAN_DAILY_FULL_INTERVAL);
     assert_eq!(plan, MailScanPlan::full(MailScanReason::NoCheckpoint));
 }
 
@@ -316,7 +316,7 @@ async fn sent_incremental_prefix_stops_at_watermark_anchor_without_full_list()
                 mail_id: anchor.external_mail_id.clone(),
                 observed_at: anchor.sent_at,
             }),
-            last_full_scan_at: Some(Utc::now()),
+            last_full_scan_at: Some(Timestamp::now()),
         },
     ));
     let sender = make_sender(store, &endpoint);
@@ -378,9 +378,9 @@ fn sent_prefix_with_changed_anchor_time_falls_back_to_full_scan()
             MailScanCheckpoint {
                 watermark: Some(MailScanWatermark {
                     mail_id: anchor.external_mail_id.clone(),
-                    observed_at: anchor.sent_at + chrono::Duration::minutes(1),
+                    observed_at: anchor.sent_at + auction_time::Duration::minutes(1),
                 }),
-                last_full_scan_at: Some(Utc::now()),
+                last_full_scan_at: Some(Timestamp::now()),
             },
         ));
         let sender = make_sender(store, &endpoint);
@@ -452,7 +452,7 @@ fn sent_prefix_carries_same_minute_rows_across_page_boundary()
                     mail_id: anchor.external_mail_id.clone(),
                     observed_at: anchor.sent_at,
                 }),
-                last_full_scan_at: Some(Utc::now()),
+                last_full_scan_at: Some(Timestamp::now()),
             },
         ));
         let sender = make_sender(store, &endpoint);
@@ -524,7 +524,7 @@ fn sent_prefix_accepts_lower_mid_before_anchor_in_same_minute()
                     mail_id: anchor.external_mail_id.clone(),
                     observed_at: anchor.sent_at,
                 }),
-                last_full_scan_at: Some(Utc::now()),
+                last_full_scan_at: Some(Timestamp::now()),
             },
         ));
         let sender = make_sender(store, &endpoint);
@@ -541,7 +541,7 @@ fn sent_prefix_accepts_lower_mid_before_anchor_in_same_minute()
 
 #[test]
 fn checkpoint_advance_never_regresses_and_only_full_scans_move_the_full_time() {
-    let full_at = Utc.with_ymd_and_hms(2026, 11, 7, 6, 0, 0).single().unwrap();
+    let full_at = Timestamp::from_ymd_hms(2026, 11, 7, 6, 0, 0).unwrap();
     let previous =
         MailScanCheckpoint { watermark: Some(watermark("200")), last_full_scan_at: Some(full_at) };
 
@@ -551,7 +551,7 @@ fn checkpoint_advance_never_regresses_and_only_full_scans_move_the_full_time() {
     assert_eq!(advanced.last_full_scan_at, Some(full_at));
 
     // 本轮没有新水位时沿用旧值；完整扫描才推进完整校验时间。
-    let later = full_at + chrono::Duration::hours(24);
+    let later = full_at + auction_time::Duration::hours(24);
     let advanced = advance_scan_checkpoint(Some(&previous), None, Some(later));
     assert_eq!(advanced.watermark, Some(watermark("200")));
     assert_eq!(advanced.last_full_scan_at, Some(later));

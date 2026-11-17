@@ -1,6 +1,6 @@
 //! Public 补偿账本逐笔流水模型与一致性校验。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use super::{
@@ -61,7 +61,7 @@ pub struct PublicCompensationMovement {
     pub kind: PublicCompensationMovementKind,
     pub amount: i64,
     pub balance_after: i64,
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
 }
 
 impl PublicCompensationMovement {

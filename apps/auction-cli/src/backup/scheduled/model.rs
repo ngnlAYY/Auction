@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use auction_config::BackupConfig;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -103,7 +103,7 @@ pub(super) struct ArchiveRecord {
     pub archive_sha256: String,
     pub manifest_sha256: String,
     pub schema_version: i64,
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
     pub archive_identity: FileIdentity,
     pub manifest_identity: FileIdentity,
     pub verified: bool,
@@ -172,8 +172,8 @@ impl CleanupRecord {
 pub(super) struct RunReceipt {
     pub format: String,
     pub run_id: Uuid,
-    pub started_at: DateTime<Utc>,
-    pub finished_at: Option<DateTime<Utc>>,
+    pub started_at: Timestamp,
+    pub finished_at: Option<Timestamp>,
     pub elapsed_millis: u64,
     pub stage_timings: Vec<StageTiming>,
     pub outcome: Outcome,
@@ -203,7 +203,7 @@ impl RunReceipt {
         Self {
             format: FORMAT.to_owned(),
             run_id: Uuid::new_v4(),
-            started_at: Utc::now(),
+            started_at: Timestamp::now(),
             finished_at: None,
             elapsed_millis: 0,
             stage_timings: Vec::new(),
@@ -226,7 +226,7 @@ impl RunReceipt {
     }
 
     pub(super) fn archive_name(&self) -> String {
-        format!("scheduled-{}-{}.dump", self.started_at.format("%Y%m%dT%H%M%SZ"), self.run_id)
+        format!("scheduled-{}-{}.dump", self.started_at.strftime("%Y%m%dT%H%M%SZ"), self.run_id)
     }
 
     pub(super) fn receipt_name(&self) -> String {

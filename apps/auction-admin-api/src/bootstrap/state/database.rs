@@ -39,8 +39,8 @@ use auction_storage::{
     DatabaseAdminMailCommands, DatabaseAdminRulesCommands, DatabaseAdminRuntimeCommands,
     DatabaseAuctionLifecycleCommands, DatabaseStore,
 };
-use chrono::Duration as ChronoDuration;
-use chrono::{DateTime, Utc};
+use auction_time::TimeDelta;
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use super::super::config;
@@ -49,8 +49,8 @@ use super::super::config;
 struct SystemClock;
 
 impl auction_application::core::Clock for SystemClock {
-    fn now(&self) -> DateTime<Utc> {
-        Utc::now()
+    fn now(&self) -> Timestamp {
+        Timestamp::now()
     }
 }
 
@@ -250,8 +250,8 @@ pub(super) async fn configure_state(
             process_role: ProcessRole::Admin,
             instance_id: Uuid::new_v4().to_string(),
             version: env!("CARGO_PKG_VERSION").to_owned(),
-            started_at: Utc::now(),
-            ttl: ChronoDuration::seconds(30),
+            started_at: Timestamp::now(),
+            ttl: TimeDelta::seconds(30),
         },
         heartbeat_health,
         tracing_health,
@@ -290,8 +290,8 @@ pub(super) async fn configure_state(
         anyhow::bail!("Admin 会话配置不可用");
     };
     let session_config = AdminSessionConfig {
-        idle_ttl: ChronoDuration::seconds(session_settings.idle_ttl_seconds as i64),
-        absolute_ttl: ChronoDuration::seconds(session_settings.absolute_ttl_seconds as i64),
+        idle_ttl: TimeDelta::seconds(session_settings.idle_ttl_seconds as i64),
+        absolute_ttl: TimeDelta::seconds(session_settings.absolute_ttl_seconds as i64),
     };
     let session: Arc<dyn AdminSessionPort> = Arc::new(
         AdminSessionService::new(
@@ -299,7 +299,7 @@ pub(super) async fn configure_state(
             actor.to_owned(),
             secret.as_bytes().to_vec(),
             session_config,
-            Utc::now(),
+            Timestamp::now(),
         )
         .await
         .context("初始化 Admin 会话授权失败")?,

@@ -8,7 +8,7 @@ mod seller_summary;
 
 use std::sync::Arc;
 
-use chrono::Duration;
+use auction_time::Duration;
 
 use crate::errors::ApplicationError;
 use crate::ports::core::Clock;

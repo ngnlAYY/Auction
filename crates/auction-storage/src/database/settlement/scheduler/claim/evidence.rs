@@ -1,7 +1,7 @@
 //! 结算领取的审计和实时事件证据。
 
 use auction_domain::{CommandId, deterministic_uuid};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::json;
 use sqlx::Postgres;
 use uuid::Uuid;
@@ -16,7 +16,7 @@ pub(super) async fn insert_settlement_claim_audit(
     auction_id: Uuid,
     command_id: CommandId,
     state_version: i64,
-    occurred_at: DateTime<Utc>,
+    occurred_at: Timestamp,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         r#"INSERT INTO public.audit_records
@@ -40,7 +40,7 @@ pub(super) async fn insert_settlement_claim_event(
     auction_id: Uuid,
     command_id: CommandId,
     state_version: i64,
-    occurred_at: DateTime<Utc>,
+    occurred_at: Timestamp,
 ) -> Result<(), sqlx::Error> {
     let stream_key = format!("auction:{auction_id}");
     append_sequenced_event(

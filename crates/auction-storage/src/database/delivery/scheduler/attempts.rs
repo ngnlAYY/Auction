@@ -3,7 +3,7 @@
 use auction_application::delivery::{
     DeliverySendCredentialBinding, DeliverySendExpectation, DeliveryWorkClaim,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::Value;
 use sqlx::Postgres;
 use uuid::Uuid;
@@ -74,7 +74,7 @@ pub(in crate::database) async fn lock_credential_binding(
 pub(super) async fn freeze(
     tx: &mut Transaction<'_, Postgres>,
     claim: &DeliveryWorkClaim,
-    started_at: DateTime<Utc>,
+    started_at: Timestamp,
     expectation: &DeliverySendExpectation,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(

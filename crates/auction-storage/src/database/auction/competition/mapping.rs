@@ -7,7 +7,7 @@ use auction_domain::{
     AuctionRules, AuctionStatus, BidAmount, CompetitionPlan, LotId, ProxyAuthorization,
     ProxyAuthorizationId, ProxyMode, ProxyStatus,
 };
-use chrono::Duration;
+use auction_time::Duration;
 use sqlx::Row;
 use sqlx::postgres::PgRow;
 

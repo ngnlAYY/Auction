@@ -2,7 +2,7 @@
 //! 只决定下一步动作、提醒计数与完成时间；时钟、租约、行锁、审计和外部副作用由调用方
 //! 在同一事务内完成，本模块不读取数据库也不写日志。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use crate::SettlementWorld;
 
@@ -22,22 +22,22 @@ pub struct RecoveryAdvanceFacts {
     pub world: SettlementWorld,
     pub stage: RecoveryStage,
     pub payment_satisfied: bool,
-    pub payment_completed_at: Option<DateTime<Utc>>,
+    pub payment_completed_at: Option<Timestamp>,
     pub equipment_satisfied: bool,
-    pub equipment_completed_at: Option<DateTime<Utc>>,
+    pub equipment_completed_at: Option<Timestamp>,
     pub reminder_count: i32,
     pub reminder_limit: i32,
     /// 付款投递已有自动或人工发送证明；缺失时逾期提醒只延后，不提前提醒。
     pub payment_sent_proven: bool,
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
     /// 本次事务的读取时刻，用作完成时间的上界。
-    pub observed_at: DateTime<Utc>,
+    pub observed_at: Timestamp,
 }
 
 /// 推进结果；调用方据此选择唯一的 UPDATE/审计分支。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecoveryAdvance {
-    Completed { completed_at: DateTime<Utc> },
+    Completed { completed_at: Timestamp },
     DeliverEquipment,
     RemindPayment { reminder_count: i32 },
     DeferPaymentReminder,
@@ -66,7 +66,7 @@ pub enum RecoveryAdvanceError {
 pub fn next_recovery_advance(
     facts: &RecoveryAdvanceFacts,
 ) -> Result<RecoveryAdvance, RecoveryAdvanceError> {
-    let completed = |at: Option<DateTime<Utc>>| {
+    let completed = |at: Option<Timestamp>| {
         let completed_at = at.ok_or(RecoveryAdvanceError::MissingCompletionTime)?;
         if completed_at < facts.created_at || completed_at > facts.observed_at {
             return Err(RecoveryAdvanceError::CompletionTimeOutOfRange);
@@ -102,10 +102,9 @@ pub fn next_recovery_advance(
 mod tests {
     use super::*;
 
-    fn at(minute: u32) -> DateTime<Utc> {
-        chrono::DateTime::parse_from_rfc3339(&format!("2026-11-02T00:{minute:02}:00Z"))
+    fn at(minute: u32) -> Timestamp {
+        auction_time::Timestamp::parse_from_rfc3339(&format!("2026-11-02T00:{minute:02}:00Z"))
             .expect("固定测试时间")
-            .with_timezone(&Utc)
     }
 
     fn facts() -> RecoveryAdvanceFacts {
@@ -186,7 +185,7 @@ mod tests {
             Err(RecoveryAdvanceError::MissingCompletionTime)
         );
         let early = RecoveryAdvanceFacts {
-            payment_completed_at: Some(at(0) - chrono::Duration::minutes(1)),
+            payment_completed_at: Some(at(0) - auction_time::Duration::minutes(1)),
             ..missing
         };
         assert_eq!(

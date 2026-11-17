@@ -236,11 +236,11 @@ mod tests {
         PublicEquipmentGameLink, PublicEquipmentLinkResolver, PublicEquipmentLinkTarget,
     };
     use auction_domain::EquipmentId;
+    use auction_time::{Duration, Timestamp};
     use axum::Router;
     use axum::body::{Body, to_bytes};
     use axum::http::{Request, StatusCode};
     use axum::routing::get;
-    use chrono::{DateTime, Duration, Utc};
     use serde_json::{Value, json};
     use tower::ServiceExt;
     use uuid::Uuid;
@@ -295,8 +295,8 @@ mod tests {
         }
     }
 
-    fn opens_at() -> DateTime<Utc> {
-        DateTime::from_timestamp(1_763_200_000, 0).expect("fixture time")
+    fn opens_at() -> Timestamp {
+        Timestamp::from_timestamp(1_763_200_000, 0).expect("fixture time")
     }
 
     fn page(projection: PublicAuctionProjection) -> PublicLotPage {

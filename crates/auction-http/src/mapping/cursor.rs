@@ -7,9 +7,9 @@ use auction_application::auction::{
     PublicAuctionCursor, PublicBidLogCursor, PublicPriceHistoryCursor,
 };
 use auction_application::public::PublicCompensationCursor;
+use auction_time::Timestamp;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use chrono::DateTime;
 use uuid::Uuid;
 
 /// 表示从第一条开始的哨兵游标。
@@ -128,7 +128,7 @@ pub(crate) fn decode_public_bid_log_cursor(raw: &str) -> Result<PublicBidLogCurs
     decode_cursor(raw, PublicBidLogCursor::Start, |raw| {
         let frame = decode_frame::<54>(raw, CursorKind::PublicBidLog)?;
         let timestamp_micros = be_i64(&frame, 2)?;
-        let created_at = DateTime::from_timestamp_micros(timestamp_micros)?;
+        let created_at = Timestamp::from_timestamp_micros(timestamp_micros)?;
         let lot_id = uuid_at(&frame, 10)?;
         let accepted_state_version = be_i64(&frame, 26)?;
         let fact_index = be_i32(&frame, 34)?;
@@ -175,7 +175,7 @@ pub(crate) fn decode_public_price_history_cursor(
     decode_cursor(raw, PublicPriceHistoryCursor::Start, |raw| {
         let frame = decode_frame::<38>(raw, CursorKind::PublicPriceHistory)?;
         let timestamp_micros = be_i64(&frame, 2)?;
-        let closed_at = DateTime::from_timestamp_micros(timestamp_micros)?;
+        let closed_at = Timestamp::from_timestamp_micros(timestamp_micros)?;
         let auction_sequence = be_i64(&frame, 10)?;
         let lot_number = i64::from(be_i32(&frame, 18)?);
         let lot_id = uuid_at(&frame, 22)?;
@@ -229,7 +229,7 @@ pub(crate) fn encode_admin_proxy_event_cursor(cursor: AdminProxyEventCursor) -> 
 pub(crate) fn decode_admin_proxy_event_cursor(raw: &str) -> Result<AdminProxyEventCursor, ()> {
     decode_cursor(raw, AdminProxyEventCursor::Start, |raw| {
         let frame = decode_frame::<26>(raw, CursorKind::AdminProxyEvent)?;
-        let created_at = DateTime::from_timestamp_micros(be_i64(&frame, 2)?)?;
+        let created_at = Timestamp::from_timestamp_micros(be_i64(&frame, 2)?)?;
         let command_id = uuid_at(&frame, 10)?;
         let cursor = AdminProxyEventCursor::Boundary { created_at, command_id };
         cursor.validate().then_some(cursor)
@@ -243,9 +243,9 @@ mod tests {
         PublicAuctionCursor, PublicBidLogCursor, PublicPriceHistoryCursor,
     };
     use auction_application::public::PublicCompensationCursor;
+    use auction_time::Timestamp;
     use base64::Engine;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-    use chrono::{DateTime, Utc};
     use uuid::Uuid;
 
     use super::{
@@ -322,8 +322,8 @@ mod tests {
         Uuid::from_u128(0x0123_4567_89ab_cdef_fedc_ba98_7654_3210)
     }
 
-    fn at_micros(micros: i64) -> DateTime<Utc> {
-        DateTime::from_timestamp_micros(micros).expect("测试时间在 chrono 范围内")
+    fn at_micros(micros: i64) -> Timestamp {
+        Timestamp::from_timestamp_micros(micros).expect("测试时间在 chrono 范围内")
     }
 
     /// 把金标帧 `at` 起的字节改写为 `bytes` 后重新规范编码，构造长度合法但字段非法的游标。

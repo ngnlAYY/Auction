@@ -2,7 +2,7 @@
 
 use auction_application::recovery::RecoveryCommandError;
 use auction_domain::{CommandId, legacy_natural_key_uuid};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::Value;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
@@ -27,8 +27,8 @@ pub(in crate::database::recovery::commands) async fn defer_recovery_relist(
     transaction: &mut Transaction<'_, Postgres>,
     recovery: &RecoveryRow,
     resolution: &str,
-    retry_at: DateTime<Utc>,
-    now: DateTime<Utc>,
+    retry_at: Timestamp,
+    now: Timestamp,
 ) -> Result<i64, RecoveryCommandError> {
     let state_version = sqlx::query(
         r#"UPDATE public.settlement_recoveries
@@ -64,7 +64,7 @@ pub(in crate::database::recovery::commands) async fn block_recovery_relist(
     recovery: &RecoveryRow,
     resolution: &str,
     blocking_code: &str,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<i64, RecoveryCommandError> {
     let state_version = sqlx::query(
         r#"UPDATE public.settlement_recoveries
@@ -102,7 +102,7 @@ pub(in crate::database::recovery::commands) async fn complete_recovery_relist(
     relisted_auction_id: Uuid,
     relisted_lot_id: Uuid,
     next_state_version: i64,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<i64, RecoveryCommandError> {
     if !matches!(relist.stage, "refunding" | "completed") {
         return Err(RecoveryCommandError::InvalidStoredResult);
@@ -148,7 +148,7 @@ pub(in crate::database::recovery::commands) async fn insert_worker_recovery_audi
     transaction: &mut Transaction<'_, Postgres>,
     recovery_id: Uuid,
     action: &str,
-    occurred_at: DateTime<Utc>,
+    occurred_at: Timestamp,
     metadata: Value,
 ) -> Result<(), RecoveryCommandError> {
     sqlx::query(

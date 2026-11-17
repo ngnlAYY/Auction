@@ -6,7 +6,7 @@ use auction_application::operations::{
 use auction_application::recovery::{
     ExternalRecoveryDeliveryExpectation, ExternalRecoverySendEvidence,
 };
-use chrono::{TimeDelta, Utc};
+use auction_time::{TimeDelta, Timestamp};
 use uuid::Uuid;
 
 use super::*;
@@ -46,7 +46,7 @@ fn entry(mid: &str, subject: &str) -> WorkerRecoverySentEntry {
         external_mail_id: mid.to_owned(),
         recipient: "Sample".to_owned(),
         subject: subject.to_owned(),
-        sent_at: Utc::now() - TimeDelta::minutes(10),
+        sent_at: Timestamp::now() - TimeDelta::minutes(10),
     }
 }
 
@@ -55,16 +55,16 @@ fn detail(mid: &str, subject: &str, collected: bool) -> WorkerSentLookupCandidat
         external_mail_id: mid.to_owned(),
         recipient: "Sample﹒Fixture".to_owned(),
         subject: subject.to_owned(),
-        sent_at: Some(Utc::now() - TimeDelta::minutes(10)),
+        sent_at: Some(Timestamp::now() - TimeDelta::minutes(10)),
         remaining_credits: 0,
         cod_pending: 0,
         remaining_equipment_ids: if collected { Vec::new() } else { vec!["317632875".to_owned()] },
         collected,
-        observed_at: Utc::now(),
+        observed_at: Timestamp::now(),
     }
 }
 
-fn inbound(world: &str, mid: &str, received_at: DateTime<Utc>) -> WorkerRecoveryInboundEntry {
+fn inbound(world: &str, mid: &str, received_at: Timestamp) -> WorkerRecoveryInboundEntry {
     WorkerRecoveryInboundEntry {
         world: world.to_owned(),
         external_mail_id: mid.to_owned(),
@@ -101,22 +101,18 @@ fn apply_requires_complete_sent_scan_and_details() {
 
 #[test]
 fn sent_cutoff_keeps_overlapping_minute() {
-    let cutoff = chrono::DateTime::parse_from_rfc3339("2026-01-01T12:00:30Z")
-        .expect("cutoff")
-        .with_timezone(&Utc);
+    let cutoff =
+        auction_time::Timestamp::parse_from_rfc3339("2026-01-01T12:00:30Z").expect("cutoff");
     let mut sent = entry("100", "[Auction] settlement payment 11111111");
-    sent.sent_at = chrono::DateTime::parse_from_rfc3339("2026-01-01T12:00:00Z")
-        .expect("sent")
-        .with_timezone(&Utc);
+    sent.sent_at =
+        auction_time::Timestamp::parse_from_rfc3339("2026-01-01T12:00:00Z").expect("sent");
     let expectation = expectation(7, "[Auction] settlement payment 11111111");
     let mut plan = SentMatchPlan::new(&[expectation], cutoff);
     plan.scan_entries(&[sent]);
     assert_eq!(plan.detail_refs.len(), 1, "同一分钟的 Sent 不能被含秒 cutoff 丢弃");
     let mut detail = detail("100", "[Auction] settlement payment 11111111", false);
     detail.sent_at = Some(
-        chrono::DateTime::parse_from_rfc3339("2026-01-01T12:00:00Z")
-            .expect("detail sent")
-            .with_timezone(&Utc),
+        auction_time::Timestamp::parse_from_rfc3339("2026-01-01T12:00:00Z").expect("detail sent"),
     );
     plan.apply_details(&[detail]);
     assert!(plan.quarantine_matches().is_empty(), "重叠分钟不能宣称精确匹配");
@@ -125,22 +121,18 @@ fn sent_cutoff_keeps_overlapping_minute() {
 
 #[test]
 fn overlapping_unrelated_detail_does_not_block() {
-    let cutoff = chrono::DateTime::parse_from_rfc3339("2026-01-01T12:00:30Z")
-        .expect("cutoff")
-        .with_timezone(&Utc);
+    let cutoff =
+        auction_time::Timestamp::parse_from_rfc3339("2026-01-01T12:00:30Z").expect("cutoff");
     let mut sent = entry("100", "[Auction] settlement payment 11111111");
-    sent.sent_at = chrono::DateTime::parse_from_rfc3339("2026-01-01T12:00:00Z")
-        .expect("sent")
-        .with_timezone(&Utc);
+    sent.sent_at =
+        auction_time::Timestamp::parse_from_rfc3339("2026-01-01T12:00:00Z").expect("sent");
     let expectation = expectation(7, "[Auction] settlement payment 11111111");
     let mut plan = SentMatchPlan::new(&[expectation], cutoff);
     plan.scan_entries(&[sent]);
     let mut detail = detail("100", "[Auction] settlement payment 11111111", false);
     detail.recipient = "Other".to_owned();
     detail.sent_at = Some(
-        chrono::DateTime::parse_from_rfc3339("2026-01-01T12:00:00Z")
-            .expect("detail sent")
-            .with_timezone(&Utc),
+        auction_time::Timestamp::parse_from_rfc3339("2026-01-01T12:00:00Z").expect("detail sent"),
     );
     plan.apply_details(&[detail]);
     assert!(plan.unresolved_blocks().is_empty(), "明确不匹配的消息不能阻塞投递");
@@ -149,21 +141,17 @@ fn overlapping_unrelated_detail_does_not_block() {
 
 #[test]
 fn sent_cutoff_next_minute_is_exact() {
-    let cutoff = chrono::DateTime::parse_from_rfc3339("2026-01-01T12:00:30Z")
-        .expect("cutoff")
-        .with_timezone(&Utc);
+    let cutoff =
+        auction_time::Timestamp::parse_from_rfc3339("2026-01-01T12:00:30Z").expect("cutoff");
     let mut sent = entry("100", "[Auction] settlement payment 11111111");
-    sent.sent_at = chrono::DateTime::parse_from_rfc3339("2026-01-01T12:01:00Z")
-        .expect("sent")
-        .with_timezone(&Utc);
+    sent.sent_at =
+        auction_time::Timestamp::parse_from_rfc3339("2026-01-01T12:01:00Z").expect("sent");
     let expectation = expectation(7, "[Auction] settlement payment 11111111");
     let mut plan = SentMatchPlan::new(&[expectation], cutoff);
     plan.scan_entries(&[sent]);
     let mut detail = detail("100", "[Auction] settlement payment 11111111", false);
     detail.sent_at = Some(
-        chrono::DateTime::parse_from_rfc3339("2026-01-01T12:01:00Z")
-            .expect("detail sent")
-            .with_timezone(&Utc),
+        auction_time::Timestamp::parse_from_rfc3339("2026-01-01T12:01:00Z").expect("detail sent"),
     );
     plan.apply_details(&[detail]);
     assert_eq!(plan.quarantine_matches().len(), 1);
@@ -172,7 +160,7 @@ fn sent_cutoff_next_minute_is_exact() {
 
 #[test]
 fn plan_requires_unique_list_candidate_and_exact_detail() {
-    let cutoff = Utc::now() - TimeDelta::hours(1);
+    let cutoff = Timestamp::now() - TimeDelta::hours(1);
     let expectation = expectation(7, "[Auction] settlement payment 11111111");
     let mut plan = SentMatchPlan::new(std::slice::from_ref(&expectation), cutoff);
     plan.scan_entries(&[entry("100", "[Auction] settlement payment 11111111")]);
@@ -184,7 +172,7 @@ fn plan_requires_unique_list_candidate_and_exact_detail() {
 
 #[test]
 fn duplicate_list_candidates_are_blocked_not_quarantined() {
-    let cutoff = Utc::now() - TimeDelta::hours(1);
+    let cutoff = Timestamp::now() - TimeDelta::hours(1);
     let expectation = expectation(7, "[Auction] settlement payment 11111111");
     let mut plan = SentMatchPlan::new(std::slice::from_ref(&expectation), cutoff);
     plan.scan_entries(&[
@@ -203,7 +191,7 @@ fn duplicate_list_candidates_are_blocked_not_quarantined() {
 
 #[test]
 fn missing_detail_is_unconfirmed_not_exact() {
-    let cutoff = Utc::now() - TimeDelta::hours(1);
+    let cutoff = Timestamp::now() - TimeDelta::hours(1);
     let expectation = expectation(7, "[Auction] settlement payment 11111111");
     let mut plan = SentMatchPlan::new(std::slice::from_ref(&expectation), cutoff);
     plan.scan_entries(&[entry("100", "[Auction] settlement payment 11111111")]);
@@ -218,7 +206,7 @@ fn missing_detail_is_unconfirmed_not_exact() {
 /// 恢复库没有冻结尝试时仍然必须进入核对；否则备份后已寄出的投递会再次领取。
 #[test]
 fn restored_payload_delivery_is_matched_without_frozen_attempt() {
-    let cutoff = Utc::now() - TimeDelta::hours(1);
+    let cutoff = Timestamp::now() - TimeDelta::hours(1);
     let expectation = payload_expectation(8);
     let mut plan = SentMatchPlan::new(std::slice::from_ref(&expectation), cutoff);
     assert_eq!(plan.restored_payload_count, 1);
@@ -236,7 +224,7 @@ fn restored_payload_delivery_is_matched_without_frozen_attempt() {
 /// pending 默认 fence=0；隔离证据表要求 fence>=1，因此精确匹配也必须走未决阻塞。
 #[test]
 fn pending_fence_zero_exact_match_is_blocked_not_quarantined() {
-    let cutoff = Utc::now() - TimeDelta::hours(1);
+    let cutoff = Timestamp::now() - TimeDelta::hours(1);
     let mut expectation = payload_expectation(10);
     expectation.fencing_version = 0;
     let mut plan = SentMatchPlan::new(std::slice::from_ref(&expectation), cutoff);
@@ -256,7 +244,7 @@ fn pending_fence_zero_exact_match_is_blocked_not_quarantined() {
 /// payload 重建没有标题；已领取详情无法归因，必须进入未决阻塞而不是留在 pending。
 #[test]
 fn collected_restored_payload_detail_is_blocked() {
-    let cutoff = Utc::now() - TimeDelta::hours(1);
+    let cutoff = Timestamp::now() - TimeDelta::hours(1);
     let expectation = payload_expectation(11);
     let mut plan = SentMatchPlan::new(std::slice::from_ref(&expectation), cutoff);
     plan.scan_entries(&[entry("200", "[Auction] settlement seller payout")]);
@@ -271,7 +259,7 @@ fn collected_restored_payload_detail_is_blocked() {
 /// 同一 Sent MID 不能证明两条投递；两者都进入未决阻塞而不是隔离。
 #[test]
 fn shared_sent_mid_blocks_both_deliveries() {
-    let cutoff = Utc::now() - TimeDelta::hours(1);
+    let cutoff = Timestamp::now() - TimeDelta::hours(1);
     let first = payload_expectation(8);
     let second = payload_expectation(9);
     let mut plan = SentMatchPlan::new(&[first, second], cutoff);
@@ -290,7 +278,7 @@ fn shared_sent_mid_blocks_both_deliveries() {
 /// Read Mail 没有持久读取时间：备份前到达、备份后才读取的邮件也必须报告缺失。
 #[test]
 fn read_mail_reconciliation_ignores_arrival_time() {
-    let cutoff = Utc::now() - TimeDelta::hours(1);
+    let cutoff = Timestamp::now() - TimeDelta::hours(1);
     let entries = vec![
         inbound("main", "300", cutoff - TimeDelta::hours(5)),
         inbound("main", "301", cutoff + TimeDelta::minutes(1)),
@@ -331,7 +319,7 @@ fn not_paused_hint_is_a_complete_switch_command() {
 fn scan_response() -> WorkerRecoveryScanResponse {
     WorkerRecoveryScanResponse {
         status: "complete".to_owned(),
-        observed_at: Utc::now(),
+        observed_at: Timestamp::now(),
         paused: true,
         sent_complete: true,
         read_mail_complete: true,
@@ -346,7 +334,7 @@ fn scan_response() -> WorkerRecoveryScanResponse {
 
 fn reconcile_options(actor: Option<&str>) -> ReconcileOptions<'_> {
     ReconcileOptions {
-        cutoff_at: Utc::now() - TimeDelta::hours(1),
+        cutoff_at: Timestamp::now() - TimeDelta::hours(1),
         receipt_path: Path::new("/secure/recovery.json"),
         maximum_pages: 1,
         maximum_forum_threads: 1,
@@ -364,7 +352,10 @@ fn partial_apply_receipt_marks_blocking_incomplete() {
         forum_threads: 0,
         first: scan_response(),
         second: None,
-        plan: SentMatchPlan::new(&[expectation(1, "subject")], Utc::now() - TimeDelta::hours(1)),
+        plan: SentMatchPlan::new(
+            &[expectation(1, "subject")],
+            Timestamp::now() - TimeDelta::hours(1),
+        ),
         missing_inbound: Vec::new(),
         paused: true,
     };

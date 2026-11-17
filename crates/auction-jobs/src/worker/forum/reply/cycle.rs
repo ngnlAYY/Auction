@@ -7,7 +7,7 @@ use auction_application::core::diagnostics::{
 };
 use auction_application::forum::{ForumReplyPhase, ForumWriteProgress};
 use auction_domain::AuctionId;
-use chrono::{DateTime, Duration, Utc};
+use auction_time::{Duration, Timestamp};
 
 use super::ForumReplyRuntime;
 use super::failure::{record_topic_failure, record_topic_failure_code};
@@ -35,7 +35,7 @@ enum LastClaim {
     /// 已到期主题都可能只是还没轮到。
     Topic,
     /// 领取成功但为空：在该时刻已到期的主题都不可领取。
-    Empty(DateTime<Utc>),
+    Empty(Timestamp),
     /// 领取调用失败、超时或被排空取消：无法判断主题是否仍可领取。
     Failed,
 }
@@ -48,14 +48,14 @@ enum LastClaim {
 /// 唤醒成空轮。
 #[derive(Default)]
 pub(crate) struct FinalScanSchedule {
-    next_scans: HashMap<AuctionId, DateTime<Utc>>,
+    next_scans: HashMap<AuctionId, Timestamp>,
     /// 本轮最后一次领取的结果；`None` 表示本轮没有发起领取（例如凭据不可用）。
     last_claim: Option<LastClaim>,
 }
 
 impl FinalScanSchedule {
     /// 记录主题的最新 Final 排期；`None` 表示该主题已回到常规节奏，移除旧提示。
-    fn record(&mut self, auction_id: AuctionId, next_scan_at: Option<DateTime<Utc>>) {
+    fn record(&mut self, auction_id: AuctionId, next_scan_at: Option<Timestamp>) {
         match next_scan_at {
             Some(next_scan_at) => {
                 self.next_scans.insert(auction_id, next_scan_at);
@@ -73,7 +73,7 @@ impl FinalScanSchedule {
     /// 时刻为界。最后一次领取领到了主题时，其他已到期主题可能只是没轮到，即使本轮随后出错
     /// 退出也全部保留，已过期的排期返回零，由论坛循环的下限尽快开始下一轮。领取调用失败时
     /// 同样保留，但至少等待 Final 最短间隔，数据库故障期间不按下限空转。
-    fn finish_cycle(&mut self, now: DateTime<Utc>) -> Option<std::time::Duration> {
+    fn finish_cycle(&mut self, now: Timestamp) -> Option<std::time::Duration> {
         let minimum_wait = match self.last_claim.take() {
             Some(LastClaim::Topic) => std::time::Duration::ZERO,
             Some(LastClaim::Failed) => CLAIM_FAILURE_RETRY,
@@ -435,13 +435,13 @@ mod tests {
     use std::time::Duration;
 
     use auction_domain::AuctionId;
-    use chrono::{DateTime, Utc};
+    use auction_time::Timestamp;
 
     use super::{CLAIM_FAILURE_RETRY, FinalScanSchedule, LastClaim};
     use crate::worker::runtime::test_fixture::base_time;
 
-    fn at(seconds: i64) -> DateTime<Utc> {
-        base_time() + chrono::Duration::seconds(seconds)
+    fn at(seconds: i64) -> Timestamp {
+        base_time() + auction_time::Duration::seconds(seconds)
     }
 
     #[test]

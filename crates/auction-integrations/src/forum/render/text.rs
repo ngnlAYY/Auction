@@ -59,8 +59,8 @@ pub(super) fn push_bbcode_segment(output: &mut String, value: &str) {
     }
 }
 
-pub(super) fn format_forum_time(value: chrono::DateTime<chrono::Utc>) -> String {
-    value.format("%Y-%m-%d %H:%M:%S UTC").to_string()
+pub(super) fn format_forum_time(value: auction_time::Timestamp) -> String {
+    value.strftime("%Y-%m-%d %H:%M:%S UTC").to_string()
 }
 
 pub(super) fn format_credits(value: i64) -> String {

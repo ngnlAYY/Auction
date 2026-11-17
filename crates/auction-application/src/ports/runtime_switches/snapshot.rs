@@ -6,7 +6,7 @@ use std::sync::{
 };
 use std::time::Instant;
 
-use chrono::Utc;
+use auction_time::Timestamp;
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -105,7 +105,7 @@ impl RuntimeSwitches {
             metrics_reject_baseline: true,
             disposition_read_baseline: DispositionReadMode::DEFAULT,
             state: Arc::new(RwLock::new(Arc::new(Snapshot {
-                read: RuntimeSwitchRead { database_time: Utc::now(), events: Vec::new() },
+                read: RuntimeSwitchRead { database_time: Timestamp::now(), events: Vec::new() },
                 loaded_at: None,
             }))),
             successes: Arc::new(AtomicU64::new(0)),
@@ -306,7 +306,7 @@ impl RuntimeSwitches {
     fn view(
         &self,
         snapshot: &Snapshot,
-        now: Option<chrono::DateTime<Utc>>,
+        now: Option<auction_time::Timestamp>,
         name: RuntimeSwitchName,
     ) -> RuntimeSwitchView {
         let latest = snapshot.read.events.iter().find(|event| event.name == name).cloned();
@@ -356,8 +356,8 @@ impl RuntimeSwitches {
 fn database_now(
     snapshot: &Snapshot,
     age: Option<std::time::Duration>,
-) -> Option<chrono::DateTime<Utc>> {
-    age.and_then(|age| chrono::Duration::from_std(age).ok())
+) -> Option<auction_time::Timestamp> {
+    age.and_then(|age| auction_time::Duration::from_std(age).ok())
         .and_then(|age| snapshot.read.database_time.checked_add_signed(age))
 }
 
@@ -381,7 +381,7 @@ pub const fn audit_label(mode: AuditFailureMode) -> &'static str {
 mod tests {
     use std::time::Duration;
 
-    use chrono::TimeDelta;
+    use auction_time::TimeDelta;
     use serde_json::json;
     use uuid::Uuid;
 
@@ -391,8 +391,8 @@ mod tests {
     fn set_event(
         name: RuntimeSwitchName,
         value: Value,
-        expires_at: Option<chrono::DateTime<Utc>>,
-        recorded_at: chrono::DateTime<Utc>,
+        expires_at: Option<auction_time::Timestamp>,
+        recorded_at: auction_time::Timestamp,
     ) -> RuntimeSwitchEvent {
         RuntimeSwitchEvent {
             command_id: Uuid::new_v4(),
@@ -415,7 +415,7 @@ mod tests {
 
     fn install(
         switches: &RuntimeSwitches,
-        database_time: chrono::DateTime<Utc>,
+        database_time: auction_time::Timestamp,
         events: Vec<RuntimeSwitchEvent>,
         age: Duration,
     ) {
@@ -447,7 +447,7 @@ mod tests {
         for role in [RuntimeSwitchRole::Public, RuntimeSwitchRole::Admin, RuntimeSwitchRole::Worker]
         {
             let switches = switches(role);
-            let now = Utc::now();
+            let now = Timestamp::now();
             install(
                 &switches,
                 now,
@@ -466,7 +466,7 @@ mod tests {
     #[test]
     fn expired_pause_falls_back_to_running_state() {
         let switches = switches(RuntimeSwitchRole::Worker);
-        let now = Utc::now();
+        let now = Timestamp::now();
         // 已到期的 set 仍是最新事实，但视图必须回落到基线 false。
         install(
             &switches,
@@ -494,7 +494,7 @@ mod tests {
     #[test]
     fn expiry_uses_database_time_plus_snapshot_age() {
         let switches = switches(RuntimeSwitchRole::Worker);
-        let database_time = Utc::now() - TimeDelta::seconds(10);
+        let database_time = Timestamp::now() - TimeDelta::seconds(10);
         // 数据库读取时刻尚未到期，但快照已存在 11 秒，进程内判定必须按时到期。
         install(
             &switches,
@@ -513,7 +513,7 @@ mod tests {
     #[test]
     fn pause_does_not_change_readiness_policy_identity() {
         let switches = switches(RuntimeSwitchRole::Admin);
-        let now = Utc::now();
+        let now = Timestamp::now();
         let baseline = switches.readiness_policy();
         install(
             &switches,
@@ -540,7 +540,7 @@ mod tests {
     #[test]
     fn pause_clear_restores_running_state() {
         let switches = switches(RuntimeSwitchRole::Worker);
-        let now = Utc::now();
+        let now = Timestamp::now();
         let mut clear = set_event(RuntimeSwitchName::ExternalAccessPaused, json!(true), None, now);
         clear.operation = RuntimeSwitchOperation::Clear;
         clear.value = None;

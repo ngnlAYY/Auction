@@ -5,7 +5,7 @@
 //! 拒绝该事件（回放置 refetch_required）。
 //! 竞价事实走提交后补号（见 `sequence` 模块），Admin 重放写的是引用原事件的副本，都不经过这里。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
@@ -28,7 +28,7 @@ pub(crate) struct SequencedEvent<'a> {
     pub(crate) origin_command_id: Uuid,
     /// 同时作为流计数行的 `updated_at` 与事件的 `created_at`；`None` 取事务时间，结算路径
     /// 传入业务发生时间。
-    pub(crate) created_at: Option<DateTime<Utc>>,
+    pub(crate) created_at: Option<Timestamp>,
 }
 
 /// 在调用方事务内为事件分配流内下一个序号并写入事件行。
@@ -87,7 +87,7 @@ pub(crate) fn auction_created_payload(
 #[cfg(test)]
 mod tests {
     use auction_application::realtime::PublicRealtimeEvent;
-    use chrono::Utc;
+    use auction_time::Timestamp;
     use serde_json::Value;
     use uuid::Uuid;
 
@@ -102,7 +102,7 @@ mod tests {
             kind: kind.to_owned(),
             schema_version: 1,
             payload,
-            created_at: Utc::now(),
+            created_at: Timestamp::now(),
         }
     }
 

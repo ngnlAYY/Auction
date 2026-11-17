@@ -17,7 +17,7 @@ use auction_storage::{
     RetentionPurgeError, RetentionPurgeFilesystemResult, RetentionPurgeOutcome,
     RetentionPurgeRequest, RetentionPurgeTableApproval, retention_purge_approval_token,
 };
-use chrono::{TimeDelta, Utc};
+use auction_time::{TimeDelta, Timestamp};
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -91,7 +91,7 @@ fn request(
         database_name: database.to_owned(),
         dry_run_run_id: report.run_id,
         dry_run_collected_at: report.collected_at,
-        dry_run_created_at: Utc::now(),
+        dry_run_created_at: Timestamp::now(),
         policy_sha256: report.policy_sha256.clone(),
         batch_size: 2,
         approvals,
@@ -134,7 +134,7 @@ async fn postgres_retention_purge_deletes_only_candidates_and_is_idempotent() {
     let postgres = &store;
     let pool = store.postgres_pool();
 
-    let now = Utc::now();
+    let now = Timestamp::now();
     let old = |days: i64| now - TimeDelta::days(days);
 
     // 心跳：31 天前到期（候选）、1 天前到期（保留）、未来到期（保留）。
@@ -317,7 +317,7 @@ async fn postgres_retention_purge_caps_deletes_at_the_approved_count() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
     let postgres = &store;
-    let now = Utc::now();
+    let now = Timestamp::now();
 
     insert_heartbeat(store.postgres_pool(), "first", now - TimeDelta::days(31)).await;
     let database_name = database_name(&store).await;
@@ -372,7 +372,7 @@ async fn postgres_retention_purge_counts_rows_exactly_at_the_cutoff() {
     let store = database.store().await.expect("连接克隆测试数据库");
     let postgres = &store;
 
-    insert_heartbeat(store.postgres_pool(), "older", Utc::now() - TimeDelta::days(31)).await;
+    insert_heartbeat(store.postgres_pool(), "older", Timestamp::now() - TimeDelta::days(31)).await;
     let database_name = database_name(&store).await;
     let report = collect_report(postgres, &database_name).await;
     assert_eq!(heartbeat_family(&report).candidate_rows, 1);
@@ -403,7 +403,7 @@ async fn postgres_retention_purge_keeps_committed_batches_when_a_later_batch_fai
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
     let postgres = &store;
-    let now = Utc::now();
+    let now = Timestamp::now();
 
     insert_heartbeat(store.postgres_pool(), "a-oldest", now - TimeDelta::days(50)).await;
     insert_heartbeat(store.postgres_pool(), "poison", now - TimeDelta::days(40)).await;
@@ -480,7 +480,7 @@ async fn postgres_retention_purge_rejects_invalid_approvals_before_mutation() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
     let postgres = &store;
-    let now = Utc::now();
+    let now = Timestamp::now();
     insert_heartbeat(store.postgres_pool(), "old", now - TimeDelta::days(31)).await;
 
     let database_name = database_name(&store).await;
@@ -557,7 +557,7 @@ async fn postgres_retention_purge_unblocks_referenced_events_in_the_same_run() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
     let postgres = &store;
-    let now = Utc::now();
+    let now = Timestamp::now();
 
     sqlx::query("INSERT INTO public.realtime_streams (stream_key) VALUES ('events:main')")
         .execute(store.postgres_pool())
@@ -703,7 +703,7 @@ async fn postgres_retention_purge_keeps_consistency_inspection_passing() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
     let maintenance = database.maintenance_store().await.expect("以维护账号连接");
-    let now = Utc::now();
+    let now = Timestamp::now();
     let pool = store.postgres_pool();
 
     // 序号 1..5 为 40 天前的旧事件（5 被未解决失败引用而保留），6..8 在保留窗口内；
@@ -807,7 +807,7 @@ async fn postgres_retention_purge_keeps_consistency_inspection_passing() {
 async fn postgres_retention_purge_keeps_first_failure_when_remaining_count_fails() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
-    let now = Utc::now();
+    let now = Timestamp::now();
     sqlx::query(
         "INSERT INTO public.realtime_streams (stream_key, next_sequence) VALUES ('events:main', 2)",
     )

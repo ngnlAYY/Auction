@@ -6,13 +6,13 @@ use auction_application::auction::{
     PublicPriceHistoryStats,
 };
 use auction_application::core::ApplicationError;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::Value;
 use uuid::Uuid;
 
 pub(crate) fn cursor_values(
     request: &PublicPriceHistoryListRequest,
-) -> (DateTime<Utc>, i64, i64, Uuid) {
+) -> (Timestamp, i64, i64, Uuid) {
     match request.cursor.as_ref() {
         Some(PublicPriceHistoryCursor::Boundary {
             closed_at,
@@ -20,7 +20,7 @@ pub(crate) fn cursor_values(
             lot_number,
             lot_id,
         }) => (*closed_at, *auction_sequence, *lot_number, *lot_id),
-        Some(PublicPriceHistoryCursor::Start) | None => (Utc::now(), 0, 0, Uuid::nil()),
+        Some(PublicPriceHistoryCursor::Start) | None => (Timestamp::now(), 0, 0, Uuid::nil()),
     }
 }
 

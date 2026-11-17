@@ -35,7 +35,7 @@ pub struct ForumSyncRuntime {
     pub(crate) item_timeout: std::time::Duration,
     pub(crate) public_base_url: Option<String>,
     pub(crate) verify_post_body: bool,
-    pub(crate) startup_recovery_before: OnceLock<chrono::DateTime<chrono::Utc>>,
+    pub(crate) startup_recovery_before: OnceLock<auction_time::Timestamp>,
 }
 
 impl ForumSyncRuntime {

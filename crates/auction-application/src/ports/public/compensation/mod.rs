@@ -4,7 +4,7 @@
 //! 直接暴露给 HTTP。
 
 use auction_domain::SettlementMode;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use crate::errors::diagnostics::{
@@ -86,7 +86,7 @@ pub struct PublicCompensationRound {
     pub reversal_count: i64,
     /// 本场冲正对池余额的带符号净变化（退回补偿减去冲回附加费）。
     pub reversal_amount: i64,
-    pub settled_at: DateTime<Utc>,
+    pub settled_at: Timestamp,
 }
 
 impl PublicCompensationRound {
@@ -127,7 +127,7 @@ pub struct PublicCompensationPage {
     /// 两个世界共用的补偿池（main Credits）当前余额，与批次页及分页范围无关。
     pub balance: i64,
     /// 补偿池最近一次已提交更新时间；补偿池单行始终存在。
-    pub updated_at: DateTime<Utc>,
+    pub updated_at: Timestamp,
     pub total: Option<i64>,
     pub limit: i64,
     pub offset: i64,

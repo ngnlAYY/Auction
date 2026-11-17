@@ -27,7 +27,7 @@ use auction_application::scheduling::{
 use auction_observability::{
     WorkerLoop, WorkerPanicOwner, WorkerRecorder, WorkerResult, WorkerRetryKind,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use super::{
     AuctionWorkerRuntimeConfig, DeliveryWorkerRuntimeConfig, ForumWorkerRuntimeConfig,
@@ -39,27 +39,26 @@ use crate::WorkerControlHandle;
 /// 让持久 `next_scan_at` 等时刻与进程内唤醒使用同一条时间线。
 pub(crate) struct PausedClock {
     origin: tokio::time::Instant,
-    base: DateTime<Utc>,
+    base: Timestamp,
 }
 
 impl PausedClock {
-    pub(crate) fn new(base: DateTime<Utc>) -> Self {
+    pub(crate) fn new(base: Timestamp) -> Self {
         Self { origin: tokio::time::Instant::now(), base }
     }
 }
 
 impl Clock for PausedClock {
-    fn now(&self) -> DateTime<Utc> {
+    fn now(&self) -> Timestamp {
         let elapsed = tokio::time::Instant::now().saturating_duration_since(self.origin);
-        self.base + chrono::Duration::from_std(elapsed).unwrap_or(chrono::Duration::MAX)
+        self.base + auction_time::Duration::from_std(elapsed).unwrap_or(auction_time::Duration::MAX)
     }
 }
 
 /// 测试统一使用的固定起点；只作为时间线原点，不代表任何业务日程。
-pub(crate) fn base_time() -> DateTime<Utc> {
-    DateTime::parse_from_rfc3339("2026-11-14T10:00:00Z")
+pub(crate) fn base_time() -> Timestamp {
+    Timestamp::parse_from_rfc3339("2026-11-14T10:00:00Z")
         .unwrap_or_else(|error| panic!("固定测试时间应合法: {error:?}"))
-        .with_timezone(&Utc)
 }
 
 /// 被调用即说明测试走进了未模拟的分支；统一以“能力不可用”失败关闭。
@@ -71,14 +70,14 @@ pub(crate) fn unavailable<'a, T: Send + 'a>() -> ApplicationFuture<'a, T> {
 struct InertAuctionPorts;
 
 impl ScheduledRoundStore for InertAuctionPorts {
-    fn database_now(&self) -> ApplicationFuture<'_, DateTime<Utc>> {
+    fn database_now(&self) -> ApplicationFuture<'_, Timestamp> {
         unavailable()
     }
 
     fn find_current_round(
         &self,
         _world_id: String,
-        _local_week: chrono::NaiveDate,
+        _local_week: jiff::civil::Date,
     ) -> ApplicationFuture<'_, Option<ScheduledRoundSnapshot>> {
         unavailable()
     }
@@ -101,24 +100,21 @@ impl ScheduledRoundStore for InertAuctionPorts {
     fn claim_due(
         &self,
         _worker_id: String,
-        _now: DateTime<Utc>,
-        _lease_until: DateTime<Utc>,
+        _now: Timestamp,
+        _lease_until: Timestamp,
         _limit: u16,
     ) -> ApplicationFuture<'_, Vec<ScheduledRoundClaim>> {
         unavailable()
     }
 
-    fn next_claimable_at(
-        &self,
-        _now: DateTime<Utc>,
-    ) -> ApplicationFuture<'_, Option<DateTime<Utc>>> {
+    fn next_claimable_at(&self, _now: Timestamp) -> ApplicationFuture<'_, Option<Timestamp>> {
         unavailable()
     }
 
     fn complete(
         &self,
         _claim: ScheduledRoundClaim,
-        _completed_at: DateTime<Utc>,
+        _completed_at: Timestamp,
     ) -> ApplicationFuture<'_, ()> {
         unavailable()
     }
@@ -126,7 +122,7 @@ impl ScheduledRoundStore for InertAuctionPorts {
     fn fail(
         &self,
         _claim: ScheduledRoundClaim,
-        _retry_at: DateTime<Utc>,
+        _retry_at: Timestamp,
         _failure_code: String,
         _safe_detail: String,
     ) -> ApplicationFuture<'_, ()> {

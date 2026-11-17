@@ -3,7 +3,7 @@
 //! 回执是只追加事实：同一 `receipt_id` 的文件一旦发布就不再改写；更正必须形成新回执。新回执
 //! 写 v2；v1 回执原样兼容读取，deploy 段版本必须与回执格式一致。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -66,8 +66,8 @@ pub(crate) struct DeploymentReceipt {
     pub receipt_id: Uuid,
     pub action: Action,
     pub outcome: Outcome,
-    pub started_at: DateTime<Utc>,
-    pub finished_at: DateTime<Utc>,
+    pub started_at: Timestamp,
+    pub finished_at: Timestamp,
     pub actor: String,
     pub actor_uid: u32,
     pub backup_id: Option<String>,
@@ -211,7 +211,6 @@ fn validate_failure(value: &str) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use chrono::TimeZone;
 
     use super::{
         Action, Artifact, DeploymentReceipt, FORMAT, LEGACY_FORMAT, MigrationRecord, Outcome,
@@ -227,8 +226,8 @@ mod tests {
             receipt_id: uuid::Uuid::new_v4(),
             action: Action::Start,
             outcome: Outcome::Succeeded,
-            started_at: chrono::Utc.with_ymd_and_hms(2026, 11, 5, 3, 0, 0).unwrap(),
-            finished_at: chrono::Utc.with_ymd_and_hms(2026, 11, 5, 3, 5, 0).unwrap(),
+            started_at: auction_time::Timestamp::from_ymd_hms(2026, 11, 5, 3, 0, 0).unwrap(),
+            finished_at: auction_time::Timestamp::from_ymd_hms(2026, 11, 5, 3, 5, 0).unwrap(),
             actor: "root".to_owned(),
             actor_uid: 0,
             backup_id: Some("backup-20261105".to_owned()),
@@ -264,7 +263,7 @@ mod tests {
         value.validate().expect("v1 service 回执仍可读取");
 
         let mut value = receipt();
-        value.finished_at = value.started_at - chrono::Duration::seconds(1);
+        value.finished_at = value.started_at - auction_time::Duration::seconds(1);
         assert!(value.validate().is_err());
 
         let mut value = receipt();

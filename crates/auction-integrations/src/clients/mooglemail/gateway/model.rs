@@ -5,7 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use super::MAX_HARD_PAGES;
 use crate::clients::mooglemail::parser::{
@@ -45,7 +45,7 @@ pub struct MoogleMailSentLookupRequest {
     pub external_equipment_id: String,
     pub maximum_pages: usize,
     pub deadline: Instant,
-    pub observed_at: DateTime<Utc>,
+    pub observed_at: Timestamp,
 }
 
 impl fmt::Debug for MoogleMailSentLookupRequest {
@@ -94,7 +94,7 @@ pub struct MoogleMailSentLookupReport {
     pub candidates: Vec<MoogleMailSentSnapshot>,
     pub pages_scanned: usize,
     pub scan_complete: bool,
-    pub observed_at: DateTime<Utc>,
+    pub observed_at: Timestamp,
 }
 
 impl MoogleMailSentLookupStatus {
@@ -127,7 +127,7 @@ pub struct MoogleMailSentRecoveryScan {
     /// 扫描到的页是否已经覆盖 `cutoff_at` 之后的全部条目。
     pub covers_cutoff: bool,
     pub pages_scanned: usize,
-    pub observed_at: DateTime<Utc>,
+    pub observed_at: Timestamp,
 }
 
 /// 恢复核对：Read Mail 全量列表摘要；不含正文。
@@ -138,5 +138,5 @@ pub struct MoogleMailInboundRecoveryScan {
     pub entries: Vec<MoogleMailSummary>,
     /// 是否枚举到列表末页；只有为 true 才能声称 Read Mail 覆盖完整。
     pub covers_cutoff: bool,
-    pub observed_at: DateTime<Utc>,
+    pub observed_at: Timestamp,
 }

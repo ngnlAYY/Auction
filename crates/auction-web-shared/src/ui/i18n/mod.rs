@@ -101,12 +101,26 @@ pub fn format_localized_time_for_language(value: &str, _language: &str) -> Strin
     }
 
     value
-        .parse::<chrono::DateTime<chrono::FixedOffset>>()
+        .parse::<auction_time::Timestamp>()
         .ok()
-        .and_then(|instant| {
-            chrono::FixedOffset::east_opt(8 * 60 * 60).map(|offset| instant.with_timezone(&offset))
-        })
-        .map_or_else(|| "—".to_owned(), |instant| instant.format("%d %b %Y, %H:%M:%S").to_string())
+        .and_then(shanghai_fallback_text)
+        .unwrap_or_else(|| "—".to_owned())
+}
+
+/// 兜底格式 `DD Mon YYYY, HH:MM:SS`：Asia/Shanghai 全年固定 UTC+8，平移八小时后直接取 UTC 字段。
+fn shanghai_fallback_text(instant: auction_time::Timestamp) -> Option<String> {
+    const MONTHS: [&str; 12] =
+        ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    let local = instant.checked_add_signed(auction_time::Duration::hours(8))?.to_utc_datetime();
+    let month = MONTHS.get(usize::from(local.month().unsigned_abs()).checked_sub(1)?)?;
+    Some(format!(
+        "{:02} {month} {:04}, {:02}:{:02}:{:02}",
+        local.day(),
+        local.year(),
+        local.hour(),
+        local.minute(),
+        local.second()
+    ))
 }
 
 #[cfg(target_arch = "wasm32")]

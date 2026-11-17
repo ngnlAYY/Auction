@@ -1,6 +1,6 @@
 //! PostgreSQL 恢复前预检的结果模型与错误分类。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::Serialize;
 use thiserror::Error;
 
@@ -12,7 +12,7 @@ pub const RECOVERY_PREFLIGHT_FORMAT: &str = "auction-postgres-recovery-preflight
 #[derive(Debug, Serialize)]
 pub struct PostgresRecoveryPreflight {
     pub format: &'static str,
-    pub collected_at: DateTime<Utc>,
+    pub collected_at: Timestamp,
     pub database_name: String,
     pub server_version: String,
     pub in_recovery: bool,

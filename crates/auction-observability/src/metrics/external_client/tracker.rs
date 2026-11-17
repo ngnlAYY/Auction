@@ -13,7 +13,7 @@ use auction_application::external_metrics::{
     ExternalMetricsEvent, ExternalMetricsObserver, ForumRequestCategory, MailMaintenanceOutcome,
     MailOperation, MailRequestCategory, MailSignal, MailWorld,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 /// 进程内外部账号快照 owner；克隆共享同一份状态。
 #[derive(Clone, Default)]
@@ -26,13 +26,13 @@ struct TrackerState {
     mail_gate_wait_count: u64,
     mail_gate_wait_millis: u64,
     mail_request_count: u64,
-    mail_last_request_at: Option<DateTime<Utc>>,
-    mail_last_success_at: Option<DateTime<Utc>>,
-    mail_last_failure_at: Option<DateTime<Utc>>,
-    mail_account_busy_since: Option<DateTime<Utc>>,
-    forum_last_request_at: Option<DateTime<Utc>>,
-    forum_last_success_at: Option<DateTime<Utc>>,
-    forum_last_failure_at: Option<DateTime<Utc>>,
+    mail_last_request_at: Option<Timestamp>,
+    mail_last_success_at: Option<Timestamp>,
+    mail_last_failure_at: Option<Timestamp>,
+    mail_account_busy_since: Option<Timestamp>,
+    forum_last_request_at: Option<Timestamp>,
+    forum_last_success_at: Option<Timestamp>,
+    forum_last_failure_at: Option<Timestamp>,
     forum_write_unknown_count: u64,
     maintenance_worlds: Vec<MaintenanceWorldObservation>,
 }
@@ -42,12 +42,12 @@ struct MaintenanceWorldObservation {
     world: MailWorld,
     state: ExternalMaintenanceState,
     failed: bool,
-    running_since: Option<DateTime<Utc>>,
-    last_event_at: Option<DateTime<Utc>>,
-    last_started_at: Option<DateTime<Utc>>,
-    last_success_at: Option<DateTime<Utc>>,
-    last_failure_at: Option<DateTime<Utc>>,
-    last_canceled_at: Option<DateTime<Utc>>,
+    running_since: Option<Timestamp>,
+    last_event_at: Option<Timestamp>,
+    last_started_at: Option<Timestamp>,
+    last_success_at: Option<Timestamp>,
+    last_failure_at: Option<Timestamp>,
+    last_canceled_at: Option<Timestamp>,
 }
 
 impl MaintenanceWorldObservation {
@@ -69,7 +69,7 @@ impl MaintenanceWorldObservation {
 impl ExternalAccountTracker {
     /// 读取当前快照；未观察到任何事实时仍返回合法的 Idle 投影。
     pub fn snapshot_status(&self) -> Option<ExternalAccountStatus> {
-        let observed_at = Utc::now();
+        let observed_at = Timestamp::now();
         let state = self.inner.lock().ok()?;
         let failed =
             state.maintenance_worlds.iter().filter(|world| world.failed).collect::<Vec<_>>();
@@ -146,7 +146,7 @@ impl std::fmt::Debug for ExternalAccountTracker {
 
 impl ExternalMetricsObserver for ExternalAccountTracker {
     fn observe(&self, event: ExternalMetricsEvent) {
-        let now = Utc::now();
+        let now = Timestamp::now();
         let Ok(mut state) = self.inner.lock() else { return };
         state.apply(event, now);
     }
@@ -162,7 +162,7 @@ impl TrackerState {
         &mut self.maintenance_worlds[index]
     }
 
-    fn apply(&mut self, event: ExternalMetricsEvent, now: DateTime<Utc>) {
+    fn apply(&mut self, event: ExternalMetricsEvent, now: Timestamp) {
         match event {
             ExternalMetricsEvent::MailRequestStarted { .. } => {
                 self.mail_request_count = self.mail_request_count.saturating_add(1);
@@ -256,7 +256,7 @@ impl TrackerState {
     }
 }
 
-fn age_seconds(since: DateTime<Utc>, observed_at: DateTime<Utc>) -> i64 {
+fn age_seconds(since: Timestamp, observed_at: Timestamp) -> i64 {
     (observed_at - since).num_seconds().max(0)
 }
 

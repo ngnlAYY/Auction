@@ -24,20 +24,20 @@ use auction_application::mail::{
     MailUserRegisterCommand, MailUserRekeyCommand, MailUserResult,
 };
 use auction_domain::EquipmentKey;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::json;
 use uuid::Uuid;
 
 const NOW: &str = "2026-11-04T12:00:00Z";
 
-fn at(value: &str) -> DateTime<Utc> {
-    DateTime::parse_from_rfc3339(value).unwrap().with_timezone(&Utc)
+fn at(value: &str) -> Timestamp {
+    Timestamp::parse_from_rfc3339(value).unwrap()
 }
 
 struct FixedClock;
 
 impl Clock for FixedClock {
-    fn now(&self) -> DateTime<Utc> {
+    fn now(&self) -> Timestamp {
         at(NOW)
     }
 }

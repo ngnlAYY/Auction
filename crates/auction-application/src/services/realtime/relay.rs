@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use crate::errors::ApplicationError;
 use crate::ports::core::RepositoryError;
@@ -75,7 +75,7 @@ impl RealtimeRelay {
     /// 按有界分页扫描仍有待转发事件的 stream；失败事件会留在当前游标前等待重试，不会跳过历史。
     pub fn run_once(
         &self,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> crate::ports::core::ApplicationFuture<'_, RealtimeRelayBatch> {
         Box::pin(async move {
             if now.timestamp_micros() == 0 {
@@ -136,7 +136,7 @@ impl RealtimeRelay {
     async fn consume_stream(
         &self,
         stream_key: &str,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> Result<(usize, usize), ApplicationError> {
         let request = RealtimeConsumerRequest {
             consumer_key: self.config.consumer_key.clone(),
@@ -242,7 +242,7 @@ impl RealtimeRelay {
         event_id: uuid::Uuid,
         failure_code: &str,
         safe_detail: &str,
-        failed_at: DateTime<Utc>,
+        failed_at: Timestamp,
     ) -> Result<(), ApplicationError> {
         self.consumer_store
             .record_failure(

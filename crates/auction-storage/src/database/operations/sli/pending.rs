@@ -1,14 +1,14 @@
 //! 使用 lots_due_slow_idx 读取当前到期调度，保留过期尚未清除的条目。
 
 use auction_application::sli::{SLI_CANDIDATE_LIMIT, SliPending, SliSnapshotError, SliWorld};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::{PgConnection, Row};
 
 use super::{candidate_limit, storage, world_index};
 
 pub(super) async fn read(
     connection: &mut PgConnection,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<[SliPending; SliWorld::ALL.len()], SliSnapshotError> {
     let rows = sqlx::query(
         "WITH due AS MATERIALIZED (
@@ -32,7 +32,7 @@ pub(super) async fn read(
     let mut pending = [SliPending::default(); SliWorld::ALL.len()];
     for row in rows {
         let index = world_index(&row)?;
-        let due: DateTime<Utc> = row.try_get("slow_due_at").map_err(storage)?;
+        let due: Timestamp = row.try_get("slow_due_at").map_err(storage)?;
         let age = (now - due).to_std().map_err(invalid_time)?.as_secs_f64();
         pending[index].count = pending[index].count.saturating_add(1);
         pending[index].oldest_seconds = pending[index].oldest_seconds.max(age);
@@ -40,6 +40,6 @@ pub(super) async fn read(
     Ok(pending)
 }
 
-fn invalid_time(_: chrono::OutOfRangeError) -> SliSnapshotError {
+fn invalid_time(_: auction_time::OutOfRangeError) -> SliSnapshotError {
     SliSnapshotError::InvalidData
 }

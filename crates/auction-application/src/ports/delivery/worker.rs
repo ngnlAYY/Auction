@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -22,13 +22,13 @@ pub struct DeliveryWorkClaim {
     pub recipient: String,
     pub payload: Value,
     pub lease_token: Uuid,
-    pub lease_until: DateTime<Utc>,
+    pub lease_until: Timestamp,
     pub fencing_version: i64,
     pub attempt_count: u32,
     pub worker_id: String,
-    pub claimed_at: DateTime<Utc>,
+    pub claimed_at: Timestamp,
     /// outbox 创建时间；用于按通知种类记录送达延迟，不参与发送判定。
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
 }
 
 /// 当前 delivery 领取轮次中暂不再领取的 MoogleMail 收件人。
@@ -297,8 +297,8 @@ pub trait DeliveryWorkStore: Send + Sync {
     fn claim_due(
         &self,
         worker_id: String,
-        now: DateTime<Utc>,
-        lease_until: DateTime<Utc>,
+        now: Timestamp,
+        lease_until: Timestamp,
         sending_grace: std::time::Duration,
         exclusions: DeliveryClaimExclusions,
         limit: u16,
@@ -308,7 +308,7 @@ pub trait DeliveryWorkStore: Send + Sync {
     /// 清理不改变领取资格，只把已经失效的工作从待发送状态移出。
     fn begin_claim_cycle(
         &self,
-        now: DateTime<Utc>,
+        now: Timestamp,
         sending_grace: std::time::Duration,
     ) -> ApplicationFuture<'_, ()>;
 
@@ -318,7 +318,7 @@ pub trait DeliveryWorkStore: Send + Sync {
     fn start_sending_authorized<'a>(
         &'a self,
         claim: DeliveryWorkClaim,
-        started_at: DateTime<Utc>,
+        started_at: Timestamp,
         evidence: Option<&'a crate::ports::settlement::SettlementInternalEvidenceSnapshot>,
         expectation: Option<&'a crate::ports::delivery::DeliveryPreparedExpectation>,
     ) -> ApplicationFuture<'a, DeliveryFenceOutcome>;
@@ -329,7 +329,7 @@ pub trait DeliveryWorkStore: Send + Sync {
     fn start_sending_authorized_until<'a>(
         &'a self,
         claim: DeliveryWorkClaim,
-        started_at: DateTime<Utc>,
+        started_at: Timestamp,
         evidence: &'a crate::ports::settlement::SettlementInternalEvidenceSnapshot,
         deadline: std::time::Instant,
         expectation: Option<&'a crate::ports::delivery::DeliveryPreparedExpectation>,
@@ -339,14 +339,14 @@ pub trait DeliveryWorkStore: Send + Sync {
     fn reject_preparation(
         &self,
         claim: DeliveryWorkClaim,
-        completed_at: DateTime<Utc>,
+        completed_at: Timestamp,
     ) -> ApplicationFuture<'_, ()>;
 
     /// 在尚未开始外部写入时把有效 claim 释放回 pending，并撤销本次领取的尝试计数。
     fn release(
         &self,
         claim: DeliveryWorkClaim,
-        released_at: DateTime<Utc>,
+        released_at: Timestamp,
     ) -> ApplicationFuture<'_, ()>;
 
     /// 为只读准备中的 claimed 或尚未完成的 sending 续租，不改变状态。
@@ -356,21 +356,21 @@ pub trait DeliveryWorkStore: Send + Sync {
     fn renew(
         &self,
         claim: DeliveryWorkClaim,
-        renewed_at: DateTime<Utc>,
-        lease_until: DateTime<Utc>,
+        renewed_at: Timestamp,
+        lease_until: Timestamp,
     ) -> ApplicationFuture<'_, ()>;
 
     fn succeed(
         &self,
         claim: DeliveryWorkClaim,
         result: DeliverySendResult,
-        completed_at: DateTime<Utc>,
+        completed_at: Timestamp,
     ) -> ApplicationFuture<'_, ()>;
 
     fn fail(
         &self,
         claim: DeliveryWorkClaim,
         error: DeliveryTransportError,
-        completed_at: DateTime<Utc>,
+        completed_at: Timestamp,
     ) -> ApplicationFuture<'_, ()>;
 }

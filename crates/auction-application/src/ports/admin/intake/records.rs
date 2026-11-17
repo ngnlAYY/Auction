@@ -1,7 +1,7 @@
 //! 进入事务的脱敏录入载荷、结果和审计记录。
 
 use auction_domain::{CommandId, EquipmentId, EquipmentKeyEnvelope, valid_text};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
@@ -31,7 +31,7 @@ pub struct AdminIntakeWrite {
     pub equipment_category: String,
     pub equipment_level: Option<i32>,
     pub equipment_attributes: Value,
-    pub collected_at: DateTime<Utc>,
+    pub collected_at: Timestamp,
     pub key_envelope: EquipmentKeyEnvelope,
     pub request_hash: RequestHash,
 }

@@ -3,7 +3,7 @@
 use auction_application::core::RequestHash;
 use auction_application::recovery::{RecoveryActionClaim, RecoveryActionOutcome};
 use auction_domain::CommandId;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::Serialize;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
@@ -19,7 +19,7 @@ use crate::database::recovery::scheduler::repository_error;
 pub(crate) async fn observe_action_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     claim: &RecoveryActionClaim,
-    observed_at: DateTime<Utc>,
+    observed_at: Timestamp,
 ) -> Result<RecoveryActionOutcome, auction_application::core::RepositoryError> {
     let delivery_id =
         claim.delivery_id.ok_or_else(|| repository_error("recovery action 缺少 delivery 标识"))?;
@@ -40,7 +40,7 @@ async fn observe_action_in_transaction(
     transaction: &mut sqlx::Transaction<'_, Postgres>,
     claim: &RecoveryActionClaim,
     delivery_id: Uuid,
-    observed_at: DateTime<Utc>,
+    observed_at: Timestamp,
     audit_id: Uuid,
 ) -> Result<RecoveryActionOutcome, RecoveryActionTransactionError> {
     let row = sqlx::query(
@@ -96,7 +96,7 @@ async fn observe_action_in_transaction(
 fn succeeded_outcome(
     claim: &RecoveryActionClaim,
     delivery_id: Uuid,
-    observed_at: DateTime<Utc>,
+    observed_at: Timestamp,
     external_reference: Option<String>,
     result_metadata: &serde_json::Value,
     frozen_sent_proven: bool,

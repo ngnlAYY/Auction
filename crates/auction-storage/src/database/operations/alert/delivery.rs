@@ -10,7 +10,7 @@ use auction_application::operations::{
     OperationsAlertDispatchErrorCode, OperationsAlertEnqueuedBatch, OperationsAlertError,
     OperationsAlertKind, OperationsAlertSeverity,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::json;
 use sqlx::Row;
 
@@ -26,7 +26,7 @@ use crate::database::storage_error_from;
 pub(super) async fn terminalize_prepared_delivery(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     delivery_id: uuid::Uuid,
-    now: chrono::DateTime<chrono::Utc>,
+    now: auction_time::Timestamp,
     failure_code: &str,
 ) -> Result<(), ApplicationError> {
     if !matches!(failure_code, "dependency_mismatch" | "retry_exhausted") {
@@ -93,7 +93,7 @@ pub(super) async fn mark_enqueued_postgres(
     claim: &OperationsAlertBatchClaim,
     cooldown: Duration,
 ) -> Result<(), ApplicationError> {
-    let updated_at = Utc::now();
+    let updated_at = Timestamp::now();
     let next_notify_at = updated_at
         .checked_add_signed(chrono_duration(cooldown)?)
         .ok_or_else(|| storage_error("operations alert 冷却时间溢出"))?;
@@ -200,7 +200,7 @@ pub(super) async fn mark_claim_failed_postgres(
     error_code: OperationsAlertDispatchErrorCode,
     retry_delay: Duration,
 ) -> Result<(), ApplicationError> {
-    let updated_at = Utc::now();
+    let updated_at = Timestamp::now();
     let terminal = error_code == OperationsAlertDispatchErrorCode::DependencyMismatch
         || claim.attempt_count >= MAX_ATTEMPTS;
     let retry_at = if terminal {
@@ -350,7 +350,7 @@ pub(super) async fn mark_terminal_postgres(
     pool: &TrackedPool<sqlx::Postgres>,
     batch: &OperationsAlertEnqueuedBatch,
     status: OperationsAlertDeliveryStatus,
-    completed_at: DateTime<Utc>,
+    completed_at: Timestamp,
 ) -> Result<(), ApplicationError> {
     if batch.delivery_status != status {
         return Err(ApplicationError::OperationsAlert(OperationsAlertError::IdentityConflict));

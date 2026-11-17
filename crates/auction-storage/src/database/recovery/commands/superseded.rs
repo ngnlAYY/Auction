@@ -9,7 +9,7 @@
 //! 记录）就是它的终结事实。既有发送尝试、Sent 绑定与审计都不改写（不变量 2、4、8）。
 
 use auction_application::recovery::RecoveryCommandError;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
@@ -34,7 +34,7 @@ pub(super) async fn retire_superseded_dispatch(
     obligation_id: Uuid,
     recovery_id: Uuid,
     actor: &SupersedingActor<'_>,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<Option<Uuid>, RecoveryCommandError> {
     let Some(row) = sqlx::query(
         r#"UPDATE public.deliveries AS delivery

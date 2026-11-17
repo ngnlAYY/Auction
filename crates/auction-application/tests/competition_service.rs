@@ -28,14 +28,14 @@ use auction_domain::{
     DEFAULT_START_PRICE, LotBidState, LotId, ProxyAuthorization, ProxyAuthorizationId, ProxyMode,
     ProxyTerminalReason, ProxyTransitionKind, UserId,
 };
-use chrono::{DateTime, TimeZone, Utc};
+use auction_time::Timestamp;
 
 #[derive(Clone)]
 struct World {
     ledger: HashMap<CommandId, StoredCommand>,
     snapshot: CompetitionSnapshot,
     ineligible: Vec<UserId>,
-    now: DateTime<Utc>,
+    now: Timestamp,
     history: Vec<CompetitionProxyTransitionRecord>,
     /// 已提交的主计划写入及其审计上下文，按调用顺序记录。
     applied: Vec<(CompetitionPlan, Option<CompetitionCommandAuditContext>)>,
@@ -106,7 +106,7 @@ impl CompetitionTransaction for FakeTransaction {
 
     fn current_time(
         &mut self,
-    ) -> impl Future<Output = Result<DateTime<Utc>, CompetitionTransactionError>> + Send {
+    ) -> impl Future<Output = Result<Timestamp, CompetitionTransactionError>> + Send {
         ready(Ok(self.staged.now))
     }
 
@@ -161,7 +161,7 @@ impl CompetitionTransaction for FakeTransaction {
         &mut self,
         plan: &CompetitionPlan,
         audit: Option<CompetitionCommandAuditContext>,
-        _occurred_at: DateTime<Utc>,
+        _occurred_at: Timestamp,
     ) -> impl Future<Output = Result<(), CompetitionTransactionError>> + Send {
         self.staged.applied.push((plan.clone(), audit));
         ready(Ok(()))
@@ -189,8 +189,8 @@ fn block_on<F: Future>(future: F) -> F::Output {
     }
 }
 
-fn at(hour: u32, minute: u32) -> DateTime<Utc> {
-    Utc.with_ymd_and_hms(2026, 1, 1, hour, minute, 0).single().unwrap()
+fn at(hour: u32, minute: u32) -> Timestamp {
+    Timestamp::from_ymd_hms(2026, 1, 1, hour, minute, 0).unwrap()
 }
 
 fn amount(value: i64) -> BidAmount {
@@ -279,7 +279,7 @@ fn slow_command(
     lot_id: LotId,
     authorization_id: ProxyAuthorizationId,
     generation: u64,
-    due_at: DateTime<Utc>,
+    due_at: Timestamp,
 ) -> ExecuteSlowProxyCommand {
     SlowProxyDue { lot_id, authorization_id, generation, due_at }.into_command().unwrap()
 }

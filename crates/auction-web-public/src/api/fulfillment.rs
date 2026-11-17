@@ -4,7 +4,7 @@ pub(crate) use auction_contracts::{
     PublicFulfillmentLotResponse as FulfillmentLot,
     PublicFulfillmentPageResponse as FulfillmentPage,
 };
-use chrono::{DateTime, SecondsFormat};
+use auction_time::{SecondsFormat, Timestamp};
 use url::form_urlencoded;
 
 use super::queries::{cached_public_read, fetch_bid_log_auction_status};
@@ -72,7 +72,7 @@ pub(crate) async fn fetch_fulfillment_page(
 /// 把缓存层记录的确认时刻（浏览器墙钟毫秒）写成 RFC 3339 UTC，交给页面统一的时间格式显示。
 fn confirmation_time(millis: u64) -> Option<String> {
     let millis = i64::try_from(millis).ok()?;
-    DateTime::from_timestamp_millis(millis)
+    Timestamp::from_timestamp_millis(millis)
         .map(|time| time.to_rfc3339_opts(SecondsFormat::Secs, true))
 }
 

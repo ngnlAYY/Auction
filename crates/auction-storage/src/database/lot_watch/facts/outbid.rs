@@ -3,7 +3,7 @@
 use auction_application::admin::AdminRuntimeMailTemplatesConfig;
 use auction_application::core::CompetitionTransactionError;
 use auction_domain::{AcceptedBid, LotWatchChannel, LotWatchChannels};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Postgres;
 use sqlx::Row;
 use uuid::Uuid;
@@ -24,7 +24,7 @@ pub(super) struct OutbidTarget {
     pub(super) forum_account_id: Option<String>,
     pub(super) lot_code: String,
     pub(super) item_name: String,
-    pub(super) deadline: Option<DateTime<Utc>>,
+    pub(super) deadline: Option<Timestamp>,
     pub(super) auction_status: String,
     pub(super) slow_active: bool,
 }
@@ -88,7 +88,7 @@ pub(super) async fn notify(
     bid: &AcceptedBid,
     user_id: Uuid,
     cycle: u64,
-    occurred_at: DateTime<Utc>,
+    occurred_at: Timestamp,
     notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
     public_base_url: Option<&str>,
     mail_templates: &AdminRuntimeMailTemplatesConfig,
@@ -127,7 +127,7 @@ pub(super) async fn notify(
     Ok(wakeup)
 }
 
-pub(super) fn slow_proxy_can_act(target: &OutbidTarget, occurred_at: DateTime<Utc>) -> bool {
+pub(super) fn slow_proxy_can_act(target: &OutbidTarget, occurred_at: Timestamp) -> bool {
     target.slow_active
         && target.auction_status == "live"
         && target.deadline.is_some_and(|deadline| deadline > occurred_at)
@@ -155,7 +155,7 @@ pub(super) async fn defer(
     amount: i64,
     target: &OutbidTarget,
     channel: LotWatchChannel,
-    occurred_at: DateTime<Utc>,
+    occurred_at: Timestamp,
 ) -> Result<(), CompetitionTransactionError> {
     let lot_id = bid.lot_id.as_uuid();
     let preference_channel = channel.as_str();
@@ -213,7 +213,7 @@ pub(super) async fn enqueue(
     amount: i64,
     target: &OutbidTarget,
     channel: LotWatchChannel,
-    occurred_at: DateTime<Utc>,
+    occurred_at: Timestamp,
     notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
     public_base_url: Option<&str>,
     mail_templates: &AdminRuntimeMailTemplatesConfig,

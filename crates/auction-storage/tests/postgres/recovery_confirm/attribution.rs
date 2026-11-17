@@ -20,7 +20,7 @@ use auction_application::recovery::{
 use auction_application::runtime_switches::{RuntimeSwitchRole, RuntimeSwitches};
 use auction_application::settlement::FundingReconciliationReader;
 use auction_storage::DatabaseStore;
-use chrono::{DateTime, Duration, Utc};
+use auction_time::{Duration, Timestamp};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -70,7 +70,7 @@ async fn recovery_audits(pool: &PgPool, recovery_id: Uuid, action: &str) -> Vec<
 
 /// 被退回的那次发送（fence 1，+5 分钟）留作冻结尝试；退件之后（+40 分钟）投递又以 fence 2 准备
 /// 发送，但在写出前确定失败（明确记录 `write_started=false`、`outcome_unknown=false`）。
-async fn retried_after_return(pool: &PgPool, sale: &Sale, at: DateTime<Utc>) {
+async fn retried_after_return(pool: &PgPool, sale: &Sale, at: Timestamp) {
     insert_attempt(pool, sale.payment_delivery, 1, at + Duration::minutes(5)).await;
     freeze_current_attempt(pool, sale.payment_delivery, 2, at + Duration::minutes(40)).await;
     sqlx::query(
@@ -89,7 +89,7 @@ async fn retried_after_return(pool: &PgPool, sale: &Sale, at: DateTime<Utc>) {
 
 /// 退件到达之前原付款投递被重新排队：被退回的那次发送留作冻结尝试（fence 2，+5 分钟），投递
 /// 回到 pending（fence 3、从未进入发送围栏）。
-pub(super) async fn requeued_before_return(pool: &PgPool, sale: &Sale, at: DateTime<Utc>) {
+pub(super) async fn requeued_before_return(pool: &PgPool, sale: &Sale, at: Timestamp) {
     freeze_current_attempt(pool, sale.payment_delivery, 2, at + Duration::minutes(5)).await;
     sqlx::query(
         "UPDATE public.deliveries
@@ -139,7 +139,7 @@ async fn postgres_sent_mid_attribution_releases_a_blocked_auto_return() {
     retried_after_return(pool, &sale, at).await;
 
     let blocked = store
-        .advance_due_cod_return(Utc::now())
+        .advance_due_cod_return(Timestamp::now())
         .await
         .expect("推进 COD 退回")
         .expect("到期记录必须被处理");
@@ -162,7 +162,7 @@ async fn postgres_sent_mid_attribution_releases_a_blocked_auto_return() {
     .await
     .expect("补上 Sent 绑定");
     assert!(
-        store.advance_due_cod_return(Utc::now()).await.expect("推进 COD 退回").is_none(),
+        store.advance_due_cod_return(Timestamp::now()).await.expect("推进 COD 退回").is_none(),
         "复核时间未到，不重复复核"
     );
     assert_eq!(recovery_state(pool, sale.recovery_id).await.2, blocked_version);
@@ -176,7 +176,7 @@ async fn postgres_sent_mid_attribution_releases_a_blocked_auto_return() {
     .await
     .expect("复核时间到达");
     let released = store
-        .advance_due_cod_return(Utc::now())
+        .advance_due_cod_return(Timestamp::now())
         .await
         .expect("推进 COD 退回")
         .expect("复核成立后继续推进");
@@ -218,7 +218,7 @@ async fn postgres_unprovable_send_keeps_the_attribution_block() {
     .await
     .expect("被退回那次发送的 Sent 绑定");
 
-    store.advance_due_cod_return(Utc::now()).await.expect("推进").expect("阻断");
+    store.advance_due_cod_return(Timestamp::now()).await.expect("推进").expect("阻断");
     let (_, code, version) = recovery_state(pool, sale.recovery_id).await;
     assert_eq!(code.as_deref(), Some("send_unattributed"));
     let reasons =
@@ -233,18 +233,18 @@ async fn postgres_unprovable_send_keeps_the_attribution_block() {
     .await
     .expect("复核时间到达");
     let rechecked =
-        store.advance_due_cod_return(Utc::now()).await.expect("推进").expect("复核仍阻断");
+        store.advance_due_cod_return(Timestamp::now()).await.expect("推进").expect("复核仍阻断");
     assert_eq!((rechecked.stage.as_str(), rechecked.state_version), ("reclaiming", version));
     let (_, code, after) = recovery_state(pool, sale.recovery_id).await;
     assert_eq!((code.as_deref(), after), (Some("send_unattributed"), version));
-    let next_attempt: Option<DateTime<Utc>> = sqlx::query_scalar(
+    let next_attempt: Option<Timestamp> = sqlx::query_scalar(
         "SELECT next_attempt_at FROM public.settlement_recoveries WHERE id = $1",
     )
     .bind(sale.recovery_id)
     .fetch_one(pool)
     .await
     .expect("读取复核时间");
-    assert!(next_attempt.is_some_and(|next| next > Utc::now()), "下一次复核推迟");
+    assert!(next_attempt.is_some_and(|next| next > Timestamp::now()), "下一次复核推迟");
     assert!(
         recovery_audits(pool, sale.recovery_id, "recovery.send_attribution_released")
             .await
@@ -297,7 +297,7 @@ async fn postgres_reclaim_confirmation_retires_the_requeued_original() {
             RuntimeSwitches::new(RuntimeSwitchRole::Worker, AuditFailureMode::Shadow, true)
                 .with_disposition_read_mode_baseline(DispositionReadMode::Classified),
         )
-        .snapshot(Utc::now(), OperationsAlertCollectionOverdueRead::Skip)
+        .snapshot(Timestamp::now(), OperationsAlertCollectionOverdueRead::Skip)
         .await
         .expect("读取告警快照");
     assert_eq!(snapshot.delivery.expect("投递水位").failed, 0);
@@ -328,7 +328,7 @@ async fn postgres_auto_return_to_seller_retires_the_requeued_original() {
     requeued_before_return(pool, &sale, at).await;
 
     let advance = store
-        .advance_due_cod_return(Utc::now())
+        .advance_due_cod_return(Timestamp::now())
         .await
         .expect("推进 COD 退回")
         .expect("到期记录必须推进");

@@ -100,13 +100,13 @@ pub(crate) fn parse_optional_reference(
 pub(crate) fn parse_optional_timestamp(
     query: &std::collections::BTreeMap<&str, String>,
     key: &str,
-) -> Result<Option<chrono::DateTime<chrono::Utc>>, ()> {
+) -> Result<Option<auction_time::Timestamp>, ()> {
     let Some(value) = query.get(key) else { return Ok(None) };
     if value.is_empty() {
         return Ok(None);
     }
-    let parsed = chrono::DateTime::parse_from_rfc3339(value).map_err(drop)?;
-    Ok(Some(parsed.with_timezone(&chrono::Utc)))
+    let parsed = auction_time::Timestamp::parse_from_rfc3339(value).map_err(drop)?;
+    Ok(Some(parsed))
 }
 
 #[cfg(test)]

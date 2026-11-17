@@ -52,7 +52,7 @@ fn admission() -> EquipmentLossAdmission {
             id: uuid(21),
             world_id: "main".to_owned(),
             status: "settled".to_owned(),
-            settled_at: Some(chrono::Utc::now()),
+            settled_at: Some(auction_time::Timestamp::now()),
         },
         lot: EquipmentLossLot {
             id: uuid(20),

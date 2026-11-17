@@ -5,7 +5,7 @@ use std::path::Path;
 
 use anyhow::Context;
 use auction_storage::PostgresRecoveryPreflight;
-use chrono::Utc;
+use auction_time::Timestamp;
 
 use super::{libpq::Libpq, verify_pair};
 use crate::app::{print_json, progress};
@@ -115,7 +115,7 @@ pub(super) async fn run(options: Options<'_>) -> anyhow::Result<()> {
     store.postgres_pool().close().await;
     let payload = serde_json::json!({
         "format": RECEIPT_FORMAT,
-        "restored_at": Utc::now(),
+        "restored_at": Timestamp::now(),
         "database": options.database,
         "archive_file_name": current.manifest.archive_file_name,
         "archive_sha256": current.manifest.archive_sha256,

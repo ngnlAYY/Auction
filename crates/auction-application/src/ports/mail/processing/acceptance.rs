@@ -1,7 +1,7 @@
 //! 邮件拍卖已接受决定的恢复身份和无密钥资产投影。
 
 use auction_domain::{CommandId, valid_text};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use super::{auction::MailAuctionIntakeResult, errors::MailProcessingError};
 use crate::ports::core::decimal_identity;
@@ -16,7 +16,7 @@ pub struct MailAuctionIntakeLookup {
     pub mailbox_key: String,
     pub external_mail_id: String,
     pub seller: String,
-    pub received_at: DateTime<Utc>,
+    pub received_at: Timestamp,
 }
 
 impl MailAuctionIntakeLookup {

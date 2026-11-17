@@ -4,7 +4,7 @@ use auction_contracts::{
     AdminExternalAccessPauseRequest, AdminExternalAccessPauseResponse, ApiResponse,
     RuntimeSwitchIntentDto, RuntimeSwitchListResponse,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use gloo_net::http::Request;
 use uuid::Uuid;
 
@@ -55,7 +55,7 @@ pub(crate) struct ExternalAccessPauseAttempt {
     pub(crate) command_id: Uuid,
     pub(crate) expected_revision: i64,
     pub(crate) paused: bool,
-    pub(crate) expires_at: Option<DateTime<Utc>>,
+    pub(crate) expires_at: Option<Timestamp>,
     pub(crate) reason: String,
 }
 

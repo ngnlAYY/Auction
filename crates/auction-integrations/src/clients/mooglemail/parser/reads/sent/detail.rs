@@ -2,7 +2,7 @@
 
 use auction_application::core::diagnostics::{DiagnosticContext, SafeErrorKind, diagnostic_world};
 use auction_application::mail::mail_recipient_is_list_projection;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use scraper::Html;
 
 use crate::clients::mooglemail::parser::{
@@ -201,7 +201,7 @@ impl MoogleMailParser {
         &self,
         document: &[u8],
         summary: &MoogleMailSentSummary,
-        observed_at: DateTime<Utc>,
+        observed_at: Timestamp,
     ) -> Result<MoogleMailSentSnapshot, MoogleMailError> {
         // 列表时间按页面 UTC 文本解析，只剩分钟级取整误差；发送先后仍由
         // claim.claimed_at 与 observed_at 把关，出现偏差异常时保留证据但不拒绝整封邮件。

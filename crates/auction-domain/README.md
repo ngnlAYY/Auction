@@ -2,7 +2,7 @@
 
 [docs/README.md](../../docs/README.md) · [docs/business-rules.md](../../docs/business-rules.md) · [docs/architecture.md](../../docs/architecture.md)
 
-纯领域模型：拍卖聚合、竞价与代理规划、结算计算、义务与资金规则、装备词典与跨层文本不变量。不做任何 I/O，不依赖数据库、HTTP、配置或时钟（时间由调用方传入），所有金额与版本运算溢出即失败。依赖只有 `chrono`、`chrono-tz`、`serde`、`sha2`、`thiserror`、`uuid`，浏览器端不直接依赖本 crate。
+纯领域模型：拍卖聚合、竞价与代理规划、结算计算、义务与资金规则、装备词典与跨层文本不变量。不做任何 I/O，不依赖数据库、HTTP、配置或时钟（时间由调用方传入），所有金额与版本运算溢出即失败。依赖只有 `auction-time`、`jiff`（内嵌 IANA 时区数据）、`serde`、`sha2`、`thiserror`、`uuid`，浏览器端不直接依赖本 crate。
 
 ## 模块地图
 

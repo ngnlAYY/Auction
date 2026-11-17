@@ -3,7 +3,7 @@
 use std::{fs::File, path::Path};
 
 use anyhow::Context;
-use chrono::Utc;
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use super::model::{FORMAT, Failure, Outcome, RunReceipt};
@@ -81,7 +81,7 @@ impl Journal {
             }
             Err(error) if is_missing(&error) => {
                 previous.outcome = Outcome::Interrupted;
-                previous.finished_at = Some(Utc::now());
+                previous.finished_at = Some(Timestamp::now());
                 // 保留最后 checkpoint 的已知耗时，不把停机时长当作执行耗时，也不补发打卡。
                 previous.failure =
                     Some(Failure { stage: previous.stage, error_code: "interrupted".to_owned() });
@@ -102,7 +102,7 @@ impl Journal {
     ) -> anyhow::Result<bool> {
         let name = format!(
             "running.invalid-{}-{}.json",
-            Utc::now().format("%Y%m%dT%H%M%SZ"),
+            Timestamp::now().strftime("%Y%m%dT%H%M%SZ"),
             current.run_id
         );
         self.state.publish_file(RUNNING_FILE, &name)?;

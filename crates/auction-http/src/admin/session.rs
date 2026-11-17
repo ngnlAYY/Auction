@@ -3,11 +3,11 @@
 use std::net::SocketAddr;
 
 use auction_contracts::{AdminSessionResponse, ApiResponse};
+use auction_time::Timestamp;
 use axum::Json;
 use axum::extract::{ConnectInfo, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use chrono::Utc;
 
 use super::{ADMIN_CSRF_COOKIE, ADMIN_SESSION_COOKIE};
 use crate::errors::api_error;
@@ -36,7 +36,7 @@ pub(crate) async fn login_admin_session(
         return api_error(StatusCode::UNAUTHORIZED, "invalid_credentials", "登录凭据无效")
             .into_response();
     };
-    let now = Utc::now();
+    let now = Timestamp::now();
     match session.login(actor, secret, now).await {
         Ok(result) => {
             state.security().login_succeeded();
@@ -119,7 +119,7 @@ pub(crate) async fn logout_admin_session(
     let Some(raw_token) = read_admin_cookie(&headers, ADMIN_SESSION_COOKIE) else {
         return authentication_error();
     };
-    let now = Utc::now();
+    let now = Timestamp::now();
     if let Err(error) = session.logout(raw_token, now).await {
         if is_unauthenticated(&error) {
             return authentication_error();

@@ -58,7 +58,7 @@ use auction_observability::{
     WorkerLoop, WorkerPanicOwner, WorkerRecorder, WorkerResult, WorkerRetryKind,
 };
 use auction_storage::DatabaseStore;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::PgPool;
 use tokio::sync::Notify;
 use uuid::Uuid;
@@ -78,14 +78,14 @@ fn inert<'a, T: Send + 'a>() -> ApplicationFuture<'a, T> {
 struct InertAuctionPorts;
 
 impl ScheduledRoundStore for InertAuctionPorts {
-    fn database_now(&self) -> ApplicationFuture<'_, DateTime<Utc>> {
+    fn database_now(&self) -> ApplicationFuture<'_, Timestamp> {
         inert()
     }
 
     fn find_current_round(
         &self,
         _world_id: String,
-        _local_week: chrono::NaiveDate,
+        _local_week: jiff::civil::Date,
     ) -> ApplicationFuture<'_, Option<ScheduledRoundSnapshot>> {
         inert()
     }
@@ -108,24 +108,21 @@ impl ScheduledRoundStore for InertAuctionPorts {
     fn claim_due(
         &self,
         _worker_id: String,
-        _now: DateTime<Utc>,
-        _lease_until: DateTime<Utc>,
+        _now: Timestamp,
+        _lease_until: Timestamp,
         _limit: u16,
     ) -> ApplicationFuture<'_, Vec<ScheduledRoundClaim>> {
         inert()
     }
 
-    fn next_claimable_at(
-        &self,
-        _now: DateTime<Utc>,
-    ) -> ApplicationFuture<'_, Option<DateTime<Utc>>> {
+    fn next_claimable_at(&self, _now: Timestamp) -> ApplicationFuture<'_, Option<Timestamp>> {
         inert()
     }
 
     fn complete(
         &self,
         _claim: ScheduledRoundClaim,
-        _completed_at: DateTime<Utc>,
+        _completed_at: Timestamp,
     ) -> ApplicationFuture<'_, ()> {
         inert()
     }
@@ -133,7 +130,7 @@ impl ScheduledRoundStore for InertAuctionPorts {
     fn fail(
         &self,
         _claim: ScheduledRoundClaim,
-        _retry_at: DateTime<Utc>,
+        _retry_at: Timestamp,
         _failure_code: String,
         _safe_detail: String,
     ) -> ApplicationFuture<'_, ()> {
@@ -329,8 +326,8 @@ impl DeliveryTransport for ScriptedTransport {
 struct WallClock;
 
 impl Clock for WallClock {
-    fn now(&self) -> DateTime<Utc> {
-        Utc::now()
+    fn now(&self) -> Timestamp {
+        Timestamp::now()
     }
 }
 

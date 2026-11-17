@@ -8,7 +8,7 @@ use auction_application::core::ApplicationFuture;
 use auction_application::player_notifications::{
     PlayerNotificationScanner, SeasonReminderFact, SellerSummaryLotFact,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use crate::database::DatabaseStore;
 use crate::database::storage_error;
@@ -17,7 +17,7 @@ use crate::database::storage_error_from;
 impl PlayerNotificationScanner for DatabaseStore {
     fn seller_summary_facts(
         &self,
-        settled_since: chrono::DateTime<chrono::Utc>,
+        settled_since: auction_time::Timestamp,
         limit: u32,
     ) -> ApplicationFuture<'_, Vec<SellerSummaryLotFact>> {
         Box::pin(async move {
@@ -30,7 +30,7 @@ impl PlayerNotificationScanner for DatabaseStore {
 
     fn season_reminder_facts(
         &self,
-        now: chrono::DateTime<chrono::Utc>,
+        now: auction_time::Timestamp,
         lead_seconds: i64,
         limit: u32,
     ) -> ApplicationFuture<'_, Vec<SeasonReminderFact>> {
@@ -100,7 +100,7 @@ const SELLER_SUMMARY_FACTS_SQL: &str = r#"WITH due AS (
 
 async fn seller_summary_facts_postgres(
     store: &crate::database::DatabaseStore,
-    settled_since: DateTime<Utc>,
+    settled_since: Timestamp,
     limit: u32,
 ) -> Result<Vec<SellerSummaryLotFact>, ApplicationError> {
     use sqlx::Row;
@@ -206,7 +206,7 @@ const SEASON_REMINDER_FACTS_SQL: &str = r#"WITH boundary AS (
 /// 不从当前排期配置推测。边界本身随每行返回，正文与身份据此冻结。
 async fn season_reminder_facts_postgres(
     store: &crate::database::DatabaseStore,
-    now: DateTime<Utc>,
+    now: Timestamp,
     lead_seconds: i64,
     limit: u32,
 ) -> Result<Vec<SeasonReminderFact>, ApplicationError> {
@@ -252,7 +252,7 @@ fn map_row_error(error: sqlx::Error) -> ApplicationError {
 
 #[cfg(test)]
 mod tests {
-    use chrono::{Duration, Utc};
+    use auction_time::{Duration, Timestamp};
     use sqlx::{Connection, Executor, Row};
 
     use super::{SEASON_REMINDER_FACTS_SQL, SELLER_SUMMARY_FACTS_SQL};
@@ -292,7 +292,7 @@ mod tests {
         let rows = sqlx::query(sqlx::AssertSqlSafe(
             SELLER_SUMMARY_FACTS_SQL.replace("public.", "pg_temp."),
         ))
-        .bind(Utc::now() - Duration::days(1))
+        .bind(Timestamp::now() - Duration::days(1))
         .bind(1_i64)
         .fetch_all(&mut *tx)
         .await?;
@@ -347,13 +347,13 @@ mod tests {
             rows.iter().map(|row| row.get::<String, _>("seller")).collect::<Vec<_>>()
         };
         let rows = sqlx::query(sqlx::AssertSqlSafe(query.clone()))
-            .bind(Utc::now() - Duration::days(1))
+            .bind(Timestamp::now() - Duration::days(1))
             .bind(1_i64)
             .fetch_all(&mut *tx)
             .await?;
         assert_eq!(sellers(&rows), ["alice", "alice", "alice"], "只取回第一组的全部 lot");
         let rows = sqlx::query(sqlx::AssertSqlSafe(query))
-            .bind(Utc::now() - Duration::days(1))
+            .bind(Timestamp::now() - Duration::days(1))
             .bind(2_i64)
             .fetch_all(&mut *tx)
             .await?;
@@ -392,7 +392,7 @@ mod tests {
 
     async fn season_rows(
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        now: chrono::DateTime<Utc>,
+        now: auction_time::Timestamp,
         limit: i64,
     ) -> Result<Vec<sqlx::postgres::PgRow>, sqlx::Error> {
         sqlx::query(sqlx::AssertSqlSafe(SEASON_REMINDER_FACTS_SQL.replace("public.", "pg_temp.")))
@@ -430,7 +430,7 @@ mod tests {
                 FROM pg_temp.settlement_obligations AS obligation;",
         )
         .await?;
-        let rows = season_rows(&mut tx, Utc::now(), 1).await?;
+        let rows = season_rows(&mut tx, Timestamp::now(), 1).await?;
         assert_eq!(rows.len(), 4_001, "选中组的全部义务必须一次返回");
         assert!(rows.iter().all(|row| row.get::<String, _>("recipient") == "alice"));
         tx.rollback().await?;
@@ -473,9 +473,9 @@ mod tests {
         let recipients = |rows: &[sqlx::postgres::PgRow]| {
             rows.iter().map(|row| row.get::<String, _>("recipient")).collect::<Vec<_>>()
         };
-        let rows = season_rows(&mut tx, Utc::now(), 1).await?;
+        let rows = season_rows(&mut tx, Timestamp::now(), 1).await?;
         assert_eq!(recipients(&rows), ["alice", "alice", "alice"], "只取回第一组的全部义务");
-        let rows = season_rows(&mut tx, Utc::now(), 2).await?;
+        let rows = season_rows(&mut tx, Timestamp::now(), 2).await?;
         assert_eq!(
             recipients(&rows),
             ["alice", "alice", "alice", "bob", "bob"],
@@ -514,7 +514,7 @@ mod tests {
                 ('00000000-0000-0000-0000-0000000000d2', 'pending');",
         )
         .await?;
-        let rows = season_rows(&mut tx, Utc::now(), 512).await?;
+        let rows = season_rows(&mut tx, Timestamp::now(), 512).await?;
         assert_eq!(rows.len(), 1, "只有已激活义务构成提醒");
         assert_eq!(rows[0].get::<String, _>("obligation_kind"), "seller_payout");
         tx.rollback().await?;

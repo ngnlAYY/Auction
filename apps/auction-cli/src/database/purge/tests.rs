@@ -5,7 +5,7 @@ use std::{fs, os::unix::fs::PermissionsExt, path::Path, path::PathBuf, time::Dur
 use auction_storage::{
     RETENTION_PURGE_RECEIPT_MAX_AGE_SECONDS, RetentionPurgeError, RetentionPurgeFilesystemResult,
 };
-use chrono::{DateTime, TimeDelta, Utc};
+use auction_time::{TimeDelta, Timestamp};
 use uuid::Uuid;
 
 use super::dry_run::{DryRunReceipt, require_receipt_headroom};
@@ -30,7 +30,7 @@ impl Drop for TempDirectory {
     }
 }
 
-fn dry_run_receipt(created_at: DateTime<Utc>) -> DryRunReceipt {
+fn dry_run_receipt(created_at: Timestamp) -> DryRunReceipt {
     let run_id = Uuid::new_v4();
     serde_json::from_value(serde_json::json!({
         "format": "auction-retention-dry-run-receipt.v1",
@@ -70,7 +70,7 @@ fn deleted(files: u64) -> RetentionPurgeFilesystemResult {
 /// 剩余有效期按 `created_at + 最大年龄 - now` 计算，恰好 60 秒放行，少一秒就拒绝。
 #[test]
 fn headroom_requires_sixty_seconds_before_expiry() {
-    let now = Utc::now();
+    let now = Timestamp::now();
     let created = |remaining: i64| {
         now - TimeDelta::seconds(RETENTION_PURGE_RECEIPT_MAX_AGE_SECONDS)
             + TimeDelta::seconds(remaining)
@@ -100,7 +100,7 @@ fn diagnostic_windows_come_from_the_embedded_policy() {
 fn failed_receipt_is_written_when_files_were_deleted() {
     let directory = TempDirectory::new();
     let receipt_path = directory.0.join("purge.json");
-    let receipt = dry_run_receipt(Utc::now());
+    let receipt = dry_run_receipt(Timestamp::now());
     let error = execution_failed(
         Path::new("/var/backups/auction/dry-run.json"),
         &receipt,
@@ -128,7 +128,7 @@ fn failed_receipt_is_written_when_files_were_deleted() {
 fn no_receipt_without_deleted_files() {
     let directory = TempDirectory::new();
     let receipt_path = directory.0.join("purge.json");
-    let receipt = dry_run_receipt(Utc::now());
+    let receipt = dry_run_receipt(Timestamp::now());
     for filesystem in [None, Some(deleted(0))] {
         let error = execution_failed(
             Path::new("/var/backups/auction/dry-run.json"),
@@ -150,7 +150,7 @@ fn receipt_write_failure_is_reported_with_the_original_error() {
     fs::write(&receipt_path, b"existing").expect("预置文件");
     let error = execution_failed(
         Path::new("/var/backups/auction/dry-run.json"),
-        &dry_run_receipt(Utc::now()),
+        &dry_run_receipt(Timestamp::now()),
         &receipt_path,
         Some(deleted(1)),
         RetentionPurgeError::ReceiptStale,

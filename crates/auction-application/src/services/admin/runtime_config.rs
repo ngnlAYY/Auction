@@ -358,7 +358,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use auction_domain::CommandId;
-    use chrono::{DateTime, TimeZone, Utc};
+    use auction_time::Timestamp;
     use uuid::Uuid;
 
     use super::AdminRuntimeConfigService;
@@ -371,10 +371,10 @@ mod tests {
     };
     use crate::ports::core::{ApplicationFuture, Clock, RequestHash};
 
-    struct FixedClock(DateTime<Utc>);
+    struct FixedClock(Timestamp);
 
     impl Clock for FixedClock {
-        fn now(&self) -> DateTime<Utc> {
+        fn now(&self) -> Timestamp {
             self.0
         }
     }
@@ -410,7 +410,7 @@ mod tests {
         fn validate_candidate(
             &self,
             _document: &AdminRuntimeDocument,
-            _now: DateTime<Utc>,
+            _now: Timestamp,
         ) -> Result<(), ApplicationError> {
             Ok(())
         }
@@ -507,7 +507,7 @@ mod tests {
             command_id: CommandId,
             _request_hash: RequestHash,
             _audit: AdminRuntimeAuditRecord,
-            applied_at: DateTime<Utc>,
+            applied_at: Timestamp,
         ) -> ApplicationFuture<'_, AdminRuntimeStoredCommand> {
             let row = self.update(command_id, |row| {
                 row.state = AdminRuntimeCommandState::Applied;
@@ -523,7 +523,7 @@ mod tests {
             command_id: CommandId,
             _request_hash: RequestHash,
             category: String,
-            updated_at: DateTime<Utc>,
+            updated_at: Timestamp,
         ) -> ApplicationFuture<'_, AdminRuntimeStoredCommand> {
             let row = self.update(command_id, |row| {
                 row.state = AdminRuntimeCommandState::Unknown;
@@ -537,7 +537,7 @@ mod tests {
             &self,
             command_id: CommandId,
             _request_hash: RequestHash,
-            updated_at: DateTime<Utc>,
+            updated_at: Timestamp,
         ) -> ApplicationFuture<'_, AdminRuntimeStoredCommand> {
             let row = self.update(command_id, |row| {
                 row.state = AdminRuntimeCommandState::Pending;
@@ -595,7 +595,7 @@ mod tests {
         expected_fingerprint: &str,
         candidate: AdminRuntimeDocument,
     ) -> AdminRuntimeStoredCommand {
-        let at = Utc.with_ymd_and_hms(2026, 11, 1, 0, 0, 0).single().expect("固定时刻");
+        let at = Timestamp::from_ymd_hms(2026, 11, 1, 0, 0, 0).expect("固定时刻");
         AdminRuntimeStoredCommand {
             command_id,
             audit_id: Uuid::new_v4(),
@@ -626,7 +626,7 @@ mod tests {
         let files =
             Arc::new(MemoryFiles { document: Mutex::new(current), writes: AtomicUsize::new(0) });
         let commands = Arc::new(MemoryCommands::default());
-        let clock = Utc.with_ymd_and_hms(2026, 11, 16, 0, 0, 0).single().expect("固定时刻");
+        let clock = Timestamp::from_ymd_hms(2026, 11, 16, 0, 0, 0).expect("固定时刻");
         let service = AdminRuntimeConfigService::new(
             Arc::clone(&commands),
             Arc::clone(&files),

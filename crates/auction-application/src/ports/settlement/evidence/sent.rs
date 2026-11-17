@@ -1,7 +1,7 @@
 //! 同认证会话的精确 Sent 领取观察；原 COD 金额只能由持久成功 payload/义务证明。
 
 use auction_domain::{SettlementWorld, valid_text};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use super::model::facts_digest;
 use crate::ports::core::lower_hex;
@@ -15,7 +15,7 @@ pub struct InternalSentCollectionTarget {
     pub world: SettlementWorld,
     pub recipient: String,
     pub subject: String,
-    pub expected_sent_at: Option<DateTime<Utc>>,
+    pub expected_sent_at: Option<Timestamp>,
 }
 
 impl InternalSentCollectionTarget {
@@ -35,8 +35,8 @@ pub struct VerifiedMailSentCollectionObservation {
     pub external_mail_id: String,
     pub recipient: String,
     pub subject: String,
-    pub sent_at: DateTime<Utc>,
-    pub observed_at: DateTime<Utc>,
+    pub sent_at: Timestamp,
+    pub observed_at: Timestamp,
     pub remaining_credits: i64,
     pub cod_pending: i64,
     pub remaining_equipment_ids: Vec<String>,

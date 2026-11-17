@@ -2,7 +2,7 @@
 
 use std::{future::Future, pin::Pin};
 
-use chrono::{DateTime, Duration, Utc};
+use auction_time::{Duration, Timestamp};
 use serde_json::Value;
 use thiserror::Error;
 
@@ -158,8 +158,8 @@ pub struct TracingHealth {
     pub status: TracingStatus,
     pub dropped_span_count: i64,
     pub export_failure_count: i64,
-    pub last_success_at: Option<DateTime<Utc>>,
-    pub last_failure_at: Option<DateTime<Utc>>,
+    pub last_success_at: Option<Timestamp>,
+    pub last_failure_at: Option<Timestamp>,
     pub last_error_code: String,
 }
 

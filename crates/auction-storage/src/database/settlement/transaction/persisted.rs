@@ -4,7 +4,7 @@ use auction_application::settlement::{
     PersistedSettlement, PersistedSettlementObligationCount, SettlementTransactionError,
 };
 use auction_domain::{AuctionId, CommandId, SettlementLine};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -21,7 +21,7 @@ impl PostgresCompetitionTransaction {
         &mut self,
         auction_id: AuctionId,
         auction_state_version: u64,
-        auction_settled_at: Option<DateTime<Utc>>,
+        auction_settled_at: Option<Timestamp>,
         workflow_complete_command_id: Option<CommandId>,
     ) -> Result<PersistedSettlement, SettlementTransactionError> {
         // 已结算事实只追加（触发器拒绝 UPDATE/DELETE，运行账号也只有 INSERT），且本事务已在
@@ -46,7 +46,7 @@ impl PostgresCompetitionTransaction {
             .try_get::<Uuid, _>("command_id")
             .map(CommandId::from_uuid)
             .map_err(map_sql_error)?;
-        let settled_at: DateTime<Utc> = summary.try_get("settled_at").map_err(map_sql_error)?;
+        let settled_at: Timestamp = summary.try_get("settled_at").map_err(map_sql_error)?;
         if auction_settled_at != Some(settled_at) {
             return Err(invalid("拍卖终态时间与结算摘要不一致"));
         }

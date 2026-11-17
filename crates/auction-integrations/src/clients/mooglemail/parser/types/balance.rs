@@ -1,6 +1,6 @@
 //! Item Shop 余额的安全快照模型。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use crate::clients::mooglemail::MoogleMailWorld;
 
@@ -10,7 +10,7 @@ pub struct MoogleMailBalanceSnapshot {
     pub world: MoogleMailWorld,
     /// 页面与脚本均证明的 Credits 余额。
     pub credits: i64,
-    pub observed_at: DateTime<Utc>,
+    pub observed_at: Timestamp,
 }
 
 impl MoogleMailBalanceSnapshot {

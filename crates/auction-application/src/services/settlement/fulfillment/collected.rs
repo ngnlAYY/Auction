@@ -1,6 +1,6 @@
 //! 外部 COD 实收同 session 重核与资金化；保持原 Sent collected 证明门。
 
-use chrono::Duration;
+use auction_time::Duration;
 
 use super::{internal::evidence_request, validation::repository_error};
 use crate::errors::ApplicationError;

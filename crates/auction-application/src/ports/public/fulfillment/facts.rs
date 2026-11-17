@@ -3,7 +3,7 @@
 //! 状态原值（义务种类与业务状态、履约执行状态、投递状态、recovery 阶段与撤销结论）保持数据库
 //! 闭集字符串，由 `status` 模块解析，遇到未知值时失败关闭；这里只校验标识、文本与数值形状。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 /// 单个 lot 的一项结算义务，以及它当前履约行与关联投递的状态原值。
@@ -27,7 +27,7 @@ pub struct PublicFulfillmentRecovery {
     /// 撤销结论原值；首次落定即表示成交已撤销。
     pub resolution: Option<String>,
     /// 当前付款期限；COD 重寄时从重寄时刻重新起算。
-    pub payment_deadline_at: DateTime<Utc>,
+    pub payment_deadline_at: Timestamp,
     pub cod_return_count: i32,
     /// 该 recovery 冻结的 COD 退回上限。
     pub cod_return_limit: i32,

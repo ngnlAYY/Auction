@@ -33,7 +33,7 @@ use auction_application::settlement::{
     SettlementReturnProgress, SettlementReturnRecheckClaim, SettlementReturnRecheckOutcome,
     SettlementReturnWorkStore,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use crate::database::DatabaseStore;
@@ -86,7 +86,7 @@ impl SettlementReturnAdminPort for DatabaseStore {
 impl SettlementReturnWorkStore for DatabaseStore {
     fn activate_due_return_take(
         &self,
-        now: DateTime<Utc>,
+        now: Timestamp,
         take_worlds: Vec<String>,
     ) -> auction_application::core::ApplicationFuture<'_, Option<SettlementReturnProgress>> {
         Box::pin(
@@ -96,22 +96,22 @@ impl SettlementReturnWorkStore for DatabaseStore {
 
     fn settle_due_return_take(
         &self,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> auction_application::core::ApplicationFuture<'_, Option<SettlementReturnProgress>> {
         Box::pin(async move { work::settle_due_take_postgres(self.pool(), now).await })
     }
 
     fn complete_due_return_resend(
         &self,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> auction_application::core::ApplicationFuture<'_, Option<SettlementReturnProgress>> {
         Box::pin(async move { resend::complete_due_resend_postgres(self.pool(), now).await })
     }
 
     fn claim_due_return_recheck(
         &self,
-        now: DateTime<Utc>,
-        lease_until: DateTime<Utc>,
+        now: Timestamp,
+        lease_until: Timestamp,
     ) -> auction_application::core::ApplicationFuture<'_, Option<SettlementReturnRecheckClaim>>
     {
         Box::pin(

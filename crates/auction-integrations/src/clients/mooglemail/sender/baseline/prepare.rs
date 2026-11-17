@@ -9,7 +9,7 @@ use auction_application::mail::{
 use auction_application::sent_baseline::{
     SentBaselineEvent, SentBaselineMode, SentBaselinePhase, SentBaselineReason,
 };
-use chrono::Utc;
+use auction_time::Timestamp;
 use tokio::time::Instant;
 
 use super::{MoogleMailSentBaseline, SentBaselineKind, error_reason, telemetry::ShadowSample};
@@ -111,7 +111,7 @@ impl MoogleMailSender {
         let checkpoint = self.sent_scan_checkpoint(cookie, world)?;
         let plan = auction_application::mail::plan_mail_scan(
             Some(&checkpoint),
-            Utc::now(),
+            Timestamp::now(),
             self.client.mail_scan_daily_full_interval(),
         );
         self.observe_scan(

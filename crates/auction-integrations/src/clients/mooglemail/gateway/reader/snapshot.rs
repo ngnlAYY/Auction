@@ -3,7 +3,7 @@
 //! 与收件读取共用只读凭据会话与抓取预算；不执行 organize/解锁/寄送等任何写操作。
 
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use super::MoogleMailGateway;
 use super::error::fetch_budget_exhausted;
@@ -20,7 +20,7 @@ impl MoogleMailGateway {
     pub async fn read_balance(
         &self,
         world: MoogleMailWorld,
-        observed_at: DateTime<Utc>,
+        observed_at: Timestamp,
     ) -> Result<MoogleMailBalanceSnapshot, MoogleMailError> {
         if observed_at.timestamp_nanos_opt().is_none() {
             return Err(operation_error(
@@ -80,7 +80,7 @@ impl MoogleMailGateway {
         &self,
         world: MoogleMailWorld,
         category: MoogleMailInventoryCategory,
-        observed_at: DateTime<Utc>,
+        observed_at: Timestamp,
     ) -> Result<MoogleMailInventorySnapshot, MoogleMailError> {
         if observed_at.timestamp_nanos_opt().is_none() {
             return Err(operation_error(

@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use auction_application::recovery::RecoveryCommandError;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
@@ -293,7 +293,7 @@ pub(in crate::database::recovery::commands) async fn lock_fulfillment_state(
 
 pub(in crate::database::recovery::commands) async fn database_now(
     transaction: &mut Transaction<'_, Postgres>,
-) -> Result<DateTime<Utc>, RecoveryCommandError> {
+) -> Result<Timestamp, RecoveryCommandError> {
     // world/recovery 等锁等待可能跨过换季边界；事务起始时间不能作为重挂许可依据。
     sqlx::query_scalar("SELECT clock_timestamp()")
         .fetch_one(&mut **transaction)

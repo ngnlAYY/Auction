@@ -3,7 +3,7 @@
 use auction_application::admin::{AdminAuditCursor, AdminAuditRecord};
 use auction_application::admin::{AdminAuditListRequest, AdminAuditPage};
 use auction_application::core::ApplicationError;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::Value;
 use sqlx::{Row, types::Json};
 
@@ -142,7 +142,7 @@ pub(super) async fn list_postgres(
                     .try_get("id")
                     .map_err(|error| storage_error_from(error, "读取 Admin 审计标识失败"))?,
                 occurred_at: row
-                    .try_get::<DateTime<Utc>, _>("occurred_at")
+                    .try_get::<Timestamp, _>("occurred_at")
                     .map_err(|error| storage_error_from(error, "读取 Admin 审计时间失败"))?,
                 actor_type: row
                     .try_get("actor_type")

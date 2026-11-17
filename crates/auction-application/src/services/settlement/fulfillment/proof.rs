@@ -75,7 +75,7 @@ pub(super) fn proof_digest(
 #[cfg(test)]
 mod tests {
     use auction_domain::SettlementWorld;
-    use chrono::{TimeZone, Utc};
+    use auction_time::Timestamp;
     use uuid::Uuid;
 
     use super::proof_digest;
@@ -104,7 +104,7 @@ mod tests {
             cod_pending: 30_000,
             remaining_equipment_ids: vec!["100000002".to_owned(), "100000001".to_owned()],
             collected: true,
-            observed_at: Utc.with_ymd_and_hms(2026, 11, 14, 12, 0, 0).single().expect("测试时间"),
+            observed_at: Timestamp::from_ymd_hms(2026, 11, 14, 12, 0, 0).expect("测试时间"),
         };
         let minimal = SettlementFulfillmentSentEvidence {
             external_mail_id: String::new(),
@@ -126,7 +126,7 @@ mod tests {
         let mut unordered = full.clone();
         unordered.remaining_equipment_ids.reverse();
         unordered.recipient = "Other".to_owned();
-        unordered.observed_at = Utc::now();
+        unordered.observed_at = Timestamp::now();
         assert_eq!(digest(&unordered), digest(&full));
     }
 }

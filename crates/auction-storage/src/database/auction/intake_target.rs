@@ -2,7 +2,7 @@
 //! 调用方必须已持有 world 行锁（锁序 world → target/auction）；错误分类留给各自 owner。
 
 use auction_domain::EquipmentKeyEnvelope;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
@@ -13,7 +13,7 @@ pub(crate) struct IntakeTarget {
     pub(crate) auction_status: String,
     pub(crate) state_version: i64,
     pub(crate) preview_revision: i64,
-    pub(crate) intake_opens_at: Option<DateTime<Utc>>,
+    pub(crate) intake_opens_at: Option<Timestamp>,
     world_id: String,
     target_status: String,
 }
@@ -82,7 +82,7 @@ pub(crate) async fn advance(
     connection: &mut PgConnection,
     target: &IntakeTarget,
     (next_preview_revision, next_state_version): (i64, i64),
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<bool, sqlx::Error> {
     sqlx::query(
         r#"UPDATE public.auctions
@@ -111,7 +111,7 @@ pub(crate) async fn insert_equipment_secret(
     connection: &mut PgConnection,
     equipment_id: Uuid,
     envelope: &EquipmentKeyEnvelope,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         r#"INSERT INTO public.equipment_secrets

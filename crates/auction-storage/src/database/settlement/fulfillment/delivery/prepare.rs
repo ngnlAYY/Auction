@@ -4,7 +4,7 @@ use auction_application::settlement::{
     SettlementDeliveryPreparation, SettlementFulfillmentClaim,
     SettlementFulfillmentDeliverySnapshot, SettlementFulfillmentResult, SettlementFulfillmentState,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
@@ -19,7 +19,7 @@ pub(in crate::database::settlement::fulfillment) async fn prepare_postgres(
     notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
     claim: &SettlementFulfillmentClaim,
     preparation: &SettlementDeliveryPreparation,
-    prepared_at: DateTime<Utc>,
+    prepared_at: Timestamp,
     custody: Option<(
         &auction_application::settlement::SettlementInternalEvidenceSnapshot,
         std::time::Instant,
@@ -287,7 +287,7 @@ async fn record_dispatch(
     claim: &SettlementFulfillmentClaim,
     dispatch_no: i32,
     delivery_id: Uuid,
-    prepared_at: DateTime<Utc>,
+    prepared_at: Timestamp,
 ) -> Result<(), DeliveryTransactionError> {
     if dispatch_no > 1 {
         let original: Option<String> = sqlx::query_scalar(

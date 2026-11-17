@@ -111,7 +111,7 @@ pub(super) async fn lock_legacy(
         && claim.state != auction_application::settlement::SettlementFulfillmentState::Enqueued
     {
         let (evidence, operation_id) = custody.ok_or(FundingError::Unproven)?;
-        if !evidence.valid_at(chrono::Utc::now())
+        if !evidence.valid_at(auction_time::Timestamp::now())
             || evidence.operation_id != operation_id
             || evidence.observed_from < claim.claimed_at
             || evidence.identity.world != claim.world

@@ -7,25 +7,27 @@ use auction_domain::{
     AuctionEarlyBirdConfig, AuctionEarlyBirdSlot, AuctionScheduleSource, AuctionScheduleTimes,
     DomainError,
 };
-use chrono::{DateTime, NaiveDate, NaiveDateTime, TimeZone, Utc};
+use auction_time::Timestamp;
+use jiff::civil;
 
 fn required<T>(value: Option<T>) -> T {
     value.unwrap_or_else(|| panic!("测试夹具必须存在"))
 }
 
-fn naive(year: i32, month: u32, day: u32, hour: u32, minute: u32) -> NaiveDateTime {
-    required(required(NaiveDate::from_ymd_opt(year, month, day)).and_hms_opt(hour, minute, 0))
+fn naive(year: i16, month: i8, day: i8, hour: i8, minute: i8) -> civil::DateTime {
+    civil::DateTime::new(year, month, day, hour, minute, 0, 0)
+        .unwrap_or_else(|error| panic!("测试夹具必须存在: {error}"))
 }
 
-fn utc(year: i32, month: u32, day: u32, hour: u32, minute: u32) -> DateTime<Utc> {
-    required(Utc.with_ymd_and_hms(year, month, day, hour, minute, 0).single())
+fn utc(year: i32, month: u32, day: u32, hour: u32, minute: u32) -> Timestamp {
+    required(Timestamp::from_ymd_hms(year, month, day, hour, minute, 0))
 }
 
 fn source(
     timezone: &str,
-    preview: NaiveDateTime,
-    open: NaiveDateTime,
-    end: NaiveDateTime,
+    preview: civil::DateTime,
+    open: civil::DateTime,
+    end: civil::DateTime,
 ) -> AuctionScheduleSource {
     AuctionScheduleSource {
         timezone: timezone.to_owned(),
@@ -79,7 +81,10 @@ fn next_week_keeps_the_wall_clock_across_dst() {
     let after_times = after.resolve().unwrap();
     // 同一墙上钟点跨过前跳，UTC 间隔因此是 167 小时而不是 168。
     assert_eq!(after_times.open_due_at, utc(2026, 3, 8, 22, 0));
-    assert_eq!(after_times.open_due_at - before_times.open_due_at, chrono::Duration::hours(167));
+    assert_eq!(
+        after_times.open_due_at - before_times.open_due_at,
+        auction_time::Duration::hours(167)
+    );
 }
 
 #[test]
@@ -101,7 +106,7 @@ fn frozen_source_rejects_invalid_timezone_and_non_increasing_times() {
 fn early_bird_sessions_cover_window_pre_season_and_intake_boundaries() {
     let config = AuctionEarlyBirdConfig { enabled: true, ..AuctionEarlyBirdConfig::default() };
     let calendar = config.active_calendar().unwrap().expect("启用的早鸟配置必须生成日历");
-    let season = NaiveDate::from_ymd_opt(2026, 11, 1).unwrap();
+    let season = civil::date(2026, 11, 1);
 
     let first = calendar.session(season, 1).expect("窗口首场必须可物化");
     assert_eq!(first.times.preview_due_at, utc(2026, 11, 1, 16, 0));
@@ -156,7 +161,7 @@ fn early_bird_window_uses_local_dst_boundaries() {
         ..AuctionEarlyBirdConfig::default()
     };
     let calendar = config.active_calendar().unwrap().unwrap();
-    let season = NaiveDate::from_ymd_opt(2026, 11, 1).unwrap();
+    let season = civil::date(2026, 11, 1);
 
     // 2026-11-01 当地时间 02:00 回拨；09:00 已是 EST，窗口从 14:00Z 开始。
     let first = calendar.session(season, 1).unwrap();
@@ -198,12 +203,8 @@ fn early_bird_config_rejects_cross_field_violations_even_when_disabled() {
 #[test]
 fn early_bird_slot_is_not_a_weekly_series() {
     let config = AuctionEarlyBirdConfig { enabled: true, ..AuctionEarlyBirdConfig::default() };
-    let slot = config
-        .active_calendar()
-        .unwrap()
-        .unwrap()
-        .session(NaiveDate::from_ymd_opt(2026, 11, 1).unwrap(), 1)
-        .unwrap();
+    let slot =
+        config.active_calendar().unwrap().unwrap().session(civil::date(2026, 11, 1), 1).unwrap();
 
     assert!(matches!(slot.source.next_week(), Err(DomainError::InvalidSchedule(_))));
 }

@@ -3,7 +3,7 @@
 use std::{sync::Arc, time::Instant};
 
 use auction_domain::InternalSettlementAction;
-use chrono::{DateTime, Duration, Utc};
+use auction_time::{Duration, Timestamp};
 
 use super::validation::{claim_context, repository_error};
 use crate::errors::ApplicationError;
@@ -40,7 +40,7 @@ impl SettlementFulfillmentService {
     pub(super) async fn prepare_classified(
         &self,
         mut claim: SettlementFulfillmentClaim,
-        prepared_at: DateTime<Utc>,
+        prepared_at: Timestamp,
         retry_delay: Duration,
     ) -> Result<Outcome, ApplicationError> {
         if super::validation::validate_claim(&claim).is_err() {
@@ -363,7 +363,7 @@ impl SettlementFulfillmentService {
 
 pub(super) fn evidence_request(
     command: &SettlementInternalCommand,
-    now: DateTime<Utc>,
+    now: Timestamp,
     equipment: bool,
     cash: bool,
 ) -> Result<InternalEvidenceRequest, ApplicationError> {

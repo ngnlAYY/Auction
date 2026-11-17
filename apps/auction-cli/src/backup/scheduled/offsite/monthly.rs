@@ -18,11 +18,11 @@ pub(super) async fn exists(
     item: &Pending,
     prefix: &str,
 ) -> anyhow::Result<bool> {
-    let month = item.archive.created_at.format("%Y-%m").to_string();
+    let month = item.archive.created_at.strftime("%Y-%m").to_string();
     let name = marker_name(item);
     let root = crate::backup::object_key(
         prefix,
-        &format!("monthly/{}", item.archive.created_at.format("%Y/%m")),
+        &format!("monthly/{}", item.archive.created_at.strftime("%Y/%m")),
     );
     match state.months.read(&name) {
         Ok(bytes) => {
@@ -109,7 +109,7 @@ pub(super) async fn should_write(
         prefix,
         &format!(
             "monthly/{}/{}/completed.json",
-            item.archive.created_at.format("%Y/%m"),
+            item.archive.created_at.strftime("%Y/%m"),
             item.run_id
         ),
     );
@@ -120,7 +120,7 @@ pub(super) fn save(state: &State, item: &Pending, completion: BackupObject) -> a
     let marker = MonthMarker {
         format: MARKER_FORMAT.to_owned(),
         destination_sha256: item.destination_sha256.clone(),
-        month: item.archive.created_at.format("%Y-%m").to_string(),
+        month: item.archive.created_at.strftime("%Y-%m").to_string(),
         completion,
     };
     let bytes = serde_json::to_vec_pretty(&marker)?;
@@ -134,7 +134,7 @@ pub(super) fn save(state: &State, item: &Pending, completion: BackupObject) -> a
 }
 
 fn marker_name(item: &Pending) -> String {
-    format!("{}-{}.json", item.destination_sha256, item.archive.created_at.format("%Y-%m"))
+    format!("{}-{}.json", item.destination_sha256, item.archive.created_at.strftime("%Y-%m"))
 }
 
 fn validate_record(
@@ -151,7 +151,7 @@ fn validate_record(
     if record.format != UPLOAD_FORMAT
         || record.run_id.is_nil()
         || key != format!("{base}/completed.json")
-        || record.created_at.format("%Y-%m").to_string() != month
+        || record.created_at.strftime("%Y-%m").to_string() != month
         || !plain_name.starts_with("scheduled-")
         || !plain_name.ends_with(&format!("-{}.dump", record.run_id))
         || archive.contains('/')

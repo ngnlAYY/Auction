@@ -167,7 +167,7 @@ mod tests {
     const OPEN_AT: &str = "2026-11-14T12:00:00Z";
 
     fn open_millis() -> i64 {
-        chrono::DateTime::parse_from_rfc3339(OPEN_AT).expect("open time").timestamp_millis()
+        auction_time::Timestamp::parse_from_rfc3339(OPEN_AT).expect("open time").timestamp_millis()
     }
 
     fn capabilities(manual_early_open: bool) -> AdminAuctionCapabilities {

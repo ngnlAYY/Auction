@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use auction_integrations::BackupObject;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -73,7 +73,7 @@ pub(in crate::backup::scheduled) struct ReplicaRecord {
     pub archive: BackupObject,
     pub manifest: BackupObject,
     pub completion: BackupObject,
-    pub verified_at: DateTime<Utc>,
+    pub verified_at: Timestamp,
     /// 旧 v1 副本没有范围对象；新副本在 daily/monthly 各自保存。
     #[serde(default)]
     pub scope: Option<ScopeReplica>,
@@ -99,12 +99,12 @@ impl ScopeReplica {
 pub(super) struct UploadRecord {
     pub format: String,
     pub run_id: Uuid,
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
     pub archive: BackupObject,
     pub manifest: BackupObject,
     pub plaintext_manifest_sha256: String,
     pub age_version: String,
-    pub verified_at: DateTime<Utc>,
+    pub verified_at: Timestamp,
     #[serde(default)]
     pub scope: Option<ScopeReplica>,
 }
@@ -133,7 +133,7 @@ pub(super) struct Cipher {
 pub(super) struct Pending {
     pub format: String,
     pub run_id: Uuid,
-    pub started_at: DateTime<Utc>,
+    pub started_at: Timestamp,
     pub output_dir: PathBuf,
     pub database_name_sha256: String,
     pub destination_sha256: String,

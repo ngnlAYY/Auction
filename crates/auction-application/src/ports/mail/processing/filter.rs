@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use auction_domain::AuctionEarlyBirdCalendar;
 use auction_domain::valid_text;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::Value;
 
 use super::errors::MailProcessingError;
@@ -118,7 +118,7 @@ impl MailEquipmentFilter {
     pub(crate) fn received_qualities(
         &self,
         world_id: &str,
-        received_at: DateTime<Utc>,
+        received_at: Timestamp,
     ) -> Option<&[String]> {
         self.early_bird
             .as_ref()
@@ -224,7 +224,7 @@ fn quality_allowed(allowed: &[String], value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use auction_domain::EquipmentKey;
-    use chrono::{DateTime, Utc};
+    use auction_time::Timestamp;
     use serde_json::{Value, json};
 
     use super::MailEquipmentFilter;
@@ -256,7 +256,7 @@ mod tests {
             level: Some(100),
             tradeable: true,
             attributes,
-            collected_at: DateTime::<Utc>::UNIX_EPOCH,
+            collected_at: Timestamp::UNIX_EPOCH,
             key: EquipmentKey::new("0123456789").expect("固定装备 key"),
         }
     }

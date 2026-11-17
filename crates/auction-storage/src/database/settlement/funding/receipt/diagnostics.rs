@@ -244,7 +244,9 @@ pub(super) async fn diagnose_relation(
         return ReceiptRejection::RelationUnproven;
     }
     // 原授权已经拒绝；余量不足一秒时不再诊断，给原回滚路径保留预算，不刷新 transaction_timeout。
-    if receipt.evidence.expires_at - chrono::Utc::now() < chrono::Duration::seconds(1) {
+    if receipt.evidence.expires_at - auction_time::Timestamp::now()
+        < auction_time::Duration::seconds(1)
+    {
         return ReceiptRejection::RelationUnproven;
     }
     // 不在客户端取消执行中的语句，避免 sqlx 在后续 rollback 时等待并排空剩余响应。

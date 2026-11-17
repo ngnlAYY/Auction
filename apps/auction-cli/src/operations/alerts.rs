@@ -16,7 +16,7 @@ use auction_application::operations::{
     OperationsAlertStore, evaluate_host_backup, evaluate_host_wal,
 };
 use auction_storage::DatabaseConnectionPurpose;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::Serialize;
 
 use crate::app::{print_json, progress};
@@ -72,7 +72,7 @@ async fn report(
         DatabaseConnectionPurpose::CliOperations,
         async |config, store| {
             config.validate_backup().context("备份配置无效")?;
-            let now = Utc::now();
+            let now = Timestamp::now();
             let mut observations = vec![backup_observation(
                 config,
                 backup_output_dir,
@@ -132,7 +132,7 @@ fn backup_observation(
     output_dir: &std::path::Path,
     state_dir: &std::path::Path,
     restore_drill_dir: Option<&std::path::Path>,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> anyhow::Result<Observation> {
     let mut warnings = Vec::new();
     let disk = match disk_usage(output_dir) {
@@ -198,7 +198,7 @@ fn backup_observation(
 fn wal_observation(
     config: &auction_config::AppConfig,
     staging_dir: &std::path::Path,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> anyhow::Result<Observation> {
     // 异机副本关闭时上传器不会删除 WAL 暂存，积压是正常保留而非故障；此时只解除历史告警。
     if !config.backup.offsite.enabled {
@@ -247,7 +247,7 @@ fn require_absolute(path: &std::path::Path, label: &str) -> anyhow::Result<()> {
 struct Report {
     outcome: &'static str,
     reason: &'static str,
-    now: DateTime<Utc>,
+    now: Timestamp,
     batch_window_seconds: u64,
     sources: Vec<SourceReport>,
 }

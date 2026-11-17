@@ -7,7 +7,7 @@ use auction_application::core::diagnostics::{
     DiagnosticContext, DiagnosticError, SafeErrorKind, diagnostic_id,
 };
 use auction_observability::{WorkerLoop, WorkerResult, WorkerRetryKind};
-use chrono::Duration as ChronoDuration;
+use auction_time::TimeDelta;
 use tokio::task::JoinSet;
 
 use super::phase::observe_phase;
@@ -28,13 +28,13 @@ pub(super) async fn process_actions<C>(
     if worker.recovery_delivery.is_none() && worker.recovery_blacklister.is_none() {
         return;
     }
-    let Ok(lease_duration) = ChronoDuration::from_std(worker.recovery.lease_duration) else {
+    let Ok(lease_duration) = TimeDelta::from_std(worker.recovery.lease_duration) else {
         diagnostics::unpersisted(SafeErrorKind::CONFIGURATION_INVALID);
         tracing::error!("recovery action lease duration is invalid");
         merge_worker_result(batch_result, WorkerResult::Error);
         return;
     };
-    let Ok(retry_delay) = ChronoDuration::from_std(worker.recovery.retry_delay) else {
+    let Ok(retry_delay) = TimeDelta::from_std(worker.recovery.retry_delay) else {
         diagnostics::unpersisted(SafeErrorKind::CONFIGURATION_INVALID);
         tracing::error!("recovery action retry delay is invalid");
         merge_worker_result(batch_result, WorkerResult::Error);

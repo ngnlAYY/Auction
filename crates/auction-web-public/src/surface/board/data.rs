@@ -3,11 +3,11 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use auction_time::Timestamp;
 use auction_web_shared::{
     AsyncState, AsyncStateKind, BaseErrorKind, PageVisibility, QueryWriteMode,
     base_api_error_message, t, use_app_boot_ready, use_second_tick,
 };
-use chrono::{DateTime, Utc};
 use dioxus::prelude::*;
 
 use super::alignment::use_alignment_reread;
@@ -81,8 +81,7 @@ pub(crate) fn AuctionData(
     let visibility = use_context::<PageVisibility>();
     let refresh_generation = use_context::<Signal<u64>>();
     let should_refresh_at_open = !historical && auction.presentation_mode != "live";
-    let opening_at =
-        DateTime::parse_from_rfc3339(&auction.opens_at).ok().map(|value| value.with_timezone(&Utc));
+    let opening_at = Timestamp::parse_from_rfc3339(&auction.opens_at).ok();
     let opening_key = format!("{}:{}", auction.id, auction.opens_at);
     let mut opening_refresh_key = use_signal(|| None::<String>);
     let mut opening_refreshed = use_signal(|| false);

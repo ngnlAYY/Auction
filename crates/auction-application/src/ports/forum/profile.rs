@@ -2,7 +2,7 @@
 
 use std::time::Instant;
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use crate::ports::settlement::InternalEvidenceFuture;
 
@@ -11,7 +11,7 @@ use crate::ports::settlement::InternalEvidenceFuture;
 pub struct ForumTargetProfileEvidence {
     pub target_uid: String,
     pub player_name: String,
-    pub observed_at: DateTime<Utc>,
+    pub observed_at: Timestamp,
     pub protocol_version: &'static str,
     pub digest: [u8; 32],
 }

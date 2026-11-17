@@ -14,7 +14,7 @@ use auction_storage::{
     RETENTION_PURGE_RECEIPT_FORMAT, RetentionPurgeApproval, RetentionPurgeFilesystemResult,
     RetentionPurgeOutcome, RetentionPurgeRequest, RetentionPurgeTableApproval,
 };
-use chrono::Utc;
+use auction_time::Timestamp;
 
 use self::dry_run::{DryRunReceipt, load_receipt, require_receipt_headroom, validate_receipt};
 use self::failure::execution_failed;
@@ -56,7 +56,7 @@ pub(crate) async fn run(options: Options<'_>) -> anyhow::Result<()> {
     let (policy_version, policy_sha256) =
         auction_storage::retention_policy_identity().context("编译制品内嵌保留政策无效")?;
     anyhow::ensure!(policy_version == RETENTION_PURGE_POLICY_VERSION, "编译制品的保留政策不是 v2");
-    validate_receipt(&receipt, options.database, policy_version, &policy_sha256, Utc::now())?;
+    validate_receipt(&receipt, options.database, policy_version, &policy_sha256, Timestamp::now())?;
     let plans = build_plans(&receipt, options.database, &policy_sha256)?;
 
     if !options.execute {
@@ -126,7 +126,7 @@ pub(crate) async fn run(options: Options<'_>) -> anyhow::Result<()> {
                 .await
                 .context("保留清理预校验失败；未执行任何删除")?;
             if request.filesystem.is_some() {
-                require_receipt_headroom(receipt.created_at, Utc::now())?;
+                require_receipt_headroom(receipt.created_at, Timestamp::now())?;
                 request.filesystem = Some(run_filesystem_purge(&config, &plans)?);
             }
             let filesystem = request.filesystem.clone();
@@ -139,7 +139,7 @@ pub(crate) async fn run(options: Options<'_>) -> anyhow::Result<()> {
 
     let receipt_document = serde_json::json!({
         "format": RETENTION_PURGE_RECEIPT_FORMAT,
-        "created_at": Utc::now(),
+        "created_at": Timestamp::now(),
         "dry_run_receipt": options.dry_run_receipt,
         "dry_run_run_id": receipt.run_id,
         "dry_run_created_at": receipt.created_at,

@@ -8,7 +8,7 @@
 
 use auction_application::forum::ForumReplyStore;
 use auction_domain::{AuctionId, BidAmount, LotId};
-use chrono::{Duration, Utc};
+use auction_time::{Duration, Timestamp};
 
 use crate::support;
 use crate::support::fixtures::{policy_snapshot, seed_user, stable_id};
@@ -21,7 +21,7 @@ async fn postgres_forum_lot_targets_carry_authoritative_start_prices() {
     let store = database.store().await.expect("以运行账号连接");
     let admin = database.maintenance_store().await.expect("以维护账号连接");
     let pool = admin.postgres_pool();
-    let now = Utc::now();
+    let now = Timestamp::now();
     let deadline = now + Duration::hours(6);
     let auction_id = stable_id(SEED, "auction");
     sqlx::query(

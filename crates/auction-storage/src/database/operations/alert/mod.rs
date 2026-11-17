@@ -14,7 +14,7 @@ use auction_application::operations::{
     OperationsAlertStore, OperationsAlertWebhookClaimRequest, OperationsAlertWebhookDispatch,
     OperationsAlertWebhookFinish,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use crate::database::DatabaseStore;
 
@@ -51,7 +51,7 @@ const MAX_ATTEMPTS_SQL: i32 = {
 impl OperationsAlertSourceReader for DatabaseStore {
     fn snapshot(
         &self,
-        now: DateTime<Utc>,
+        now: Timestamp,
         collection: OperationsAlertCollectionOverdueRead,
     ) -> ApplicationFuture<'_, OperationsAlertSnapshot> {
         Box::pin(async move {
@@ -152,7 +152,7 @@ impl OperationsAlertStore for DatabaseStore {
         &self,
         batch: OperationsAlertEnqueuedBatch,
         status: OperationsAlertDeliveryStatus,
-        completed_at: DateTime<Utc>,
+        completed_at: Timestamp,
     ) -> ApplicationFuture<'_, ()> {
         Box::pin(async move {
             if batch.batch_id.is_nil()

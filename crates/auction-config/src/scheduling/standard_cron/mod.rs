@@ -1,8 +1,8 @@
 //! 五字段标准 cron 调度的解析与下一次触发计算。
 
 use auction_application::scheduling::RecurringSchedule;
-use chrono::{DateTime, Local, TimeDelta, Utc};
-use chrono_tz::Tz;
+use auction_time::{TimeDelta, Timestamp};
+use jiff::tz::TimeZone;
 use thiserror::Error;
 
 mod calendar;
@@ -35,7 +35,7 @@ enum StandardCronKind {
 enum ScheduleTimezone {
     Local,
     Utc,
-    Named(Tz),
+    Named(TimeZone),
 }
 
 /// 标准 cron 配置错误；错误不回显原始配置文本，避免把未来扩展字段带入日志。
@@ -70,13 +70,14 @@ impl StandardCronSchedule {
 }
 
 impl RecurringSchedule for StandardCronSchedule {
-    fn next_after(&self, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
+    fn next_after(&self, now: Timestamp) -> Option<Timestamp> {
         let next = match &self.kind {
             StandardCronKind::Calendar { calendar, timezone: ScheduleTimezone::Local } => {
-                calendar.next_after(now, &Local)?
+                // 进程本地时区每次触发计算时读取，主机改时区后不必重启。
+                calendar.next_after(now, &TimeZone::system())?
             }
             StandardCronKind::Calendar { calendar, timezone: ScheduleTimezone::Utc } => {
-                calendar.next_after(now, &Utc)?
+                calendar.next_after(now, &TimeZone::UTC)?
             }
             StandardCronKind::Calendar {
                 calendar,
@@ -114,7 +115,8 @@ fn split_timezone(value: &str) -> Result<(ScheduleTimezone, &str), StandardCronS
         "Local" => ScheduleTimezone::Local,
         "UTC" => ScheduleTimezone::Utc,
         name => ScheduleTimezone::Named(
-            name.parse::<Tz>().map_err(|_| StandardCronScheduleError::InvalidTimezone)?,
+            auction_domain::parse_timezone(name)
+                .ok_or(StandardCronScheduleError::InvalidTimezone)?,
         ),
     };
     let expression = value[separator..].trim();

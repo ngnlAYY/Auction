@@ -16,7 +16,7 @@ use auction_application::public::{
 };
 use auction_domain::CommandId;
 use auction_storage::{DatabaseAdminRulesCommands, DatabaseStore};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::json;
 use sqlx::Row;
 use uuid::Uuid;
@@ -26,8 +26,8 @@ use crate::support;
 struct SystemClock;
 
 impl Clock for SystemClock {
-    fn now(&self) -> DateTime<Utc> {
-        Utc::now()
+    fn now(&self) -> Timestamp {
+        Timestamp::now()
     }
 }
 

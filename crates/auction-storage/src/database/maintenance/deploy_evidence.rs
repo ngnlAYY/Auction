@@ -1,7 +1,7 @@
 //! 部署安全门禁的只读证据：已越过 sending 围栏的在途外部发送，以及迁移兼容后缀。
 //! 两者都在有界只读快照内读取，不领取任务、不加行锁、不改写任何事实。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::Serialize;
 use sqlx::Row;
 use thiserror::Error;
@@ -13,7 +13,7 @@ use crate::database::{DatabaseStore, MigrationCompatibilityEntry, set_read_only_
 /// 部署前在途发送投影；只含内部标识与时间，不含收件人、正文或凭据。
 #[derive(Debug, Serialize)]
 pub struct PostgresInFlightSends {
-    pub checked_at: DateTime<Utc>,
+    pub checked_at: Timestamp,
     pub mail_sends: Vec<InFlightMailSend>,
     pub pm_sends: Vec<InFlightPmSend>,
 }
@@ -32,16 +32,16 @@ impl PostgresInFlightSends {
 #[derive(Debug, Serialize)]
 pub struct InFlightMailSend {
     pub delivery_id: Uuid,
-    pub sending_at: DateTime<Utc>,
-    pub lease_expires_at: DateTime<Utc>,
+    pub sending_at: Timestamp,
+    pub lease_expires_at: Timestamp,
 }
 
 /// 已越过发送围栏、租约仍然有效的 PM 投递。
 #[derive(Debug, Serialize)]
 pub struct InFlightPmSend {
     pub notification_id: Uuid,
-    pub sending_at: DateTime<Utc>,
-    pub lease_expires_at: DateTime<Utc>,
+    pub sending_at: Timestamp,
+    pub lease_expires_at: Timestamp,
 }
 
 /// 迁移兼容后缀证据；判定交给 [`crate::check_compatible_suffix`]，缺登记绝不能当作兼容。
@@ -80,7 +80,7 @@ impl DatabaseStore {
             .fetch_one(&mut *transaction)
             .await
             .map_err(|error| failure("database_clock", &error))?;
-        let checked_at: DateTime<Utc> =
+        let checked_at: Timestamp =
             clock.try_get("checked_at").map_err(|error| failure("database_clock", &error))?;
 
         let rows = sqlx::query(

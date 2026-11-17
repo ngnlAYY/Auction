@@ -13,7 +13,7 @@ use auction_application::settlement::{
     SettlementInternalEvidenceSnapshot, VerifiedMailEquipmentPresence, VerifiedMainCashObservation,
 };
 use auction_domain::SettlementWorld;
-use chrono::Utc;
+use auction_time::Timestamp;
 
 use super::super::protocol::MoogleMailInventoryCategory;
 use super::credentials::MoogleMailCredentialSession;
@@ -86,10 +86,10 @@ impl MoogleMailGateway {
             return Err(Error::Expired);
         }
         tokio::time::timeout_at(tokio::time::Instant::from_std(read_deadline), async {
-            let observed_from = Utc::now();
+            let observed_from = Timestamp::now();
             let remaining = deadline.saturating_duration_since(Instant::now());
             let expires_at = observed_from
-                + chrono::Duration::from_std(remaining).map_err(|_| Error::Expired)?;
+                + auction_time::Duration::from_std(remaining).map_err(|_| Error::Expired)?;
             let world = MoogleMailWorld::from(request.world);
             session
                 .check_internal_current(read_deadline)
@@ -142,7 +142,7 @@ impl MoogleMailGateway {
                     equipment_id: target.equipment_id,
                     external_equipment_id: target.external_equipment_id.clone(),
                     category: category.as_str().to_owned(),
-                    observed_at: Utc::now(),
+                    observed_at: Timestamp::now(),
                     digest: [0; 32],
                 };
                 presence.digest = presence.compute_digest();
@@ -185,7 +185,7 @@ impl MoogleMailGateway {
                     .map_err(|error| {
                         at(Stage::CashWorld, MoogleMailWorld::Main, map_read_error(error))
                     })?;
-                let observed_at = Utc::now();
+                let observed_at = Timestamp::now();
                 let balance = self
                     .parser
                     .parse_balance_document(&document, MoogleMailWorld::Main, observed_at)
@@ -217,7 +217,7 @@ impl MoogleMailGateway {
                 digest: [0; 32],
             };
             snapshot.digest = snapshot.compute_digest();
-            if !snapshot.valid_at(Utc::now()) {
+            if !snapshot.valid_at(Timestamp::now()) {
                 return Err(at(Stage::SnapshotProof, world, Error::Expired));
             }
             Ok(snapshot)
@@ -246,7 +246,7 @@ impl MoogleMailGateway {
             .profile_reader
             .as_ref()
             .ok_or_else(|| at(Stage::ProfileCapability, world, Error::Unsupported))?;
-        let observed_from = Utc::now();
+        let observed_from = Timestamp::now();
         let target = self.client.identity(world);
         let document = self
             .read_session_document(session, &target)
@@ -266,7 +266,7 @@ impl MoogleMailGateway {
             || profile.protocol_version != "forum_target_profile_mid_v1"
             || profile.digest == [0; 32]
             || profile.observed_at < observed_from
-            || profile.observed_at > Utc::now()
+            || profile.observed_at > Timestamp::now()
         {
             return Err(at(Stage::ProfileValidation, world, Error::Unproven));
         }
@@ -277,7 +277,7 @@ impl MoogleMailGateway {
             authenticated_uid: uid,
             player_name: profile.player_name,
             world: world.into(),
-            observed_at: Utc::now(),
+            observed_at: Timestamp::now(),
             protocol_version: INTERNAL_EVIDENCE_PROTOCOL,
             digest: [0; 32],
         };

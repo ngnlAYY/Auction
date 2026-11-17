@@ -8,7 +8,7 @@ use auction_application::recovery::{
     RecoveryWorkStore,
 };
 use auction_domain::CommandId;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use self::actions::{
@@ -28,7 +28,7 @@ mod returns;
 impl RecoveryWorkStore for DatabaseStore {
     fn record_due_return(
         &self,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> ApplicationFuture<'_, Option<RecoveryReturnAdvance>> {
         Box::pin(async move {
             if now.timestamp_nanos_opt().is_none() {
@@ -40,7 +40,7 @@ impl RecoveryWorkStore for DatabaseStore {
 
     fn consume_due_settlement_return(
         &self,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> ApplicationFuture<'_, Option<auction_application::settlement::SettlementReturnConsumption>>
     {
         Box::pin(async move {
@@ -56,7 +56,7 @@ impl RecoveryWorkStore for DatabaseStore {
 
     fn advance_due_case(
         &self,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> ApplicationFuture<'_, Option<RecoveryCaseAdvance>> {
         Box::pin(async move {
             if now.timestamp_nanos_opt().is_none() {
@@ -69,8 +69,8 @@ impl RecoveryWorkStore for DatabaseStore {
     fn claim_due_action(
         &self,
         worker_id: String,
-        now: DateTime<Utc>,
-        lease_until: DateTime<Utc>,
+        now: Timestamp,
+        lease_until: Timestamp,
     ) -> ApplicationFuture<'_, Option<RecoveryActionClaim>> {
         Box::pin(async move {
             if worker_id.is_empty()
@@ -146,7 +146,7 @@ impl RecoveryWorkStore for DatabaseStore {
         proof_kind: String,
         proof_reference: String,
         proof_digest: [u8; 32],
-        observed_at: DateTime<Utc>,
+        observed_at: Timestamp,
     ) -> ApplicationFuture<'_, ()> {
         Box::pin(async move {
             if claim.action_id.is_nil()
@@ -181,7 +181,7 @@ impl RecoveryWorkStore for DatabaseStore {
     fn observe_action(
         &self,
         claim: RecoveryActionClaim,
-        observed_at: DateTime<Utc>,
+        observed_at: Timestamp,
     ) -> ApplicationFuture<'_, RecoveryActionOutcome> {
         Box::pin(async move {
             if claim.action_id.is_nil()
@@ -203,7 +203,7 @@ impl RecoveryWorkStore for DatabaseStore {
     fn release_action(
         &self,
         claim: RecoveryActionClaim,
-        retry_at: DateTime<Utc>,
+        retry_at: Timestamp,
         failure_code: String,
     ) -> ApplicationFuture<'_, ()> {
         Box::pin(async move {

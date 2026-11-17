@@ -75,7 +75,7 @@ async fn execute(
                     actor_id: actor,
                     operator_identity: Some(super::operator_identity::capture()?),
                     request_id: None,
-                    now: chrono::Utc::now(),
+                    now: auction_time::Timestamp::now(),
                 })
                 .await
                 .context("导入凭据失败")?;

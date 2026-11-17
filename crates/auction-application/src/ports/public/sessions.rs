@@ -1,6 +1,6 @@
 //! Public 固定期限/永久会话与 Admin 滑动会话的应用端口。
 
-use chrono::{DateTime, Duration, Utc};
+use auction_time::{Duration, Timestamp};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -56,13 +56,13 @@ pub struct PublicLoginIdentity {
 pub struct PublicSessionIdentity {
     pub user_id: Uuid,
     pub username: String,
-    pub expires_at: Option<DateTime<Utc>>,
-    pub absolute_expires_at: Option<DateTime<Utc>>,
+    pub expires_at: Option<Timestamp>,
+    pub absolute_expires_at: Option<Timestamp>,
 }
 
 impl PublicSessionIdentity {
     /// 旧会话保留双截止的较早值；永久没有截止，混合空值保守采用存在的截止。
-    pub fn effective_expires_at(&self) -> Option<DateTime<Utc>> {
+    pub fn effective_expires_at(&self) -> Option<Timestamp> {
         match (self.expires_at, self.absolute_expires_at) {
             (Some(expires_at), Some(absolute_expires_at)) => {
                 Some(expires_at.min(absolute_expires_at))
@@ -79,7 +79,7 @@ pub struct PublicSessionRecord {
     pub user_id: Uuid,
     /// 仅用于创建会话的版本门禁，不持久化凭据摘要或改变既有会话的响应契约。
     pub authenticated_user_version: i64,
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
 }
 
 /// 登录成功后只向 HTTP 边界暴露一次的原始 token 和安全投影；调试输出不包含 token。
@@ -102,8 +102,8 @@ impl std::fmt::Debug for PublicLoginResult {
 #[derive(Debug, Clone)]
 pub struct AdminSessionIdentity {
     pub actor: String,
-    pub expires_at: DateTime<Utc>,
-    pub absolute_expires_at: DateTime<Utc>,
+    pub expires_at: Timestamp,
+    pub absolute_expires_at: Timestamp,
 }
 
 /// sessions owner 接收的 Admin 会话和 CSRF 摘要记录；token 摘要已绑定当前管理凭据。
@@ -112,9 +112,9 @@ pub struct AdminSessionRecord {
     pub token_hash: [u8; 32],
     pub csrf_hash: [u8; 32],
     pub actor: String,
-    pub created_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub absolute_expires_at: DateTime<Utc>,
+    pub created_at: Timestamp,
+    pub expires_at: Timestamp,
+    pub absolute_expires_at: Timestamp,
 }
 
 /// Admin 登录成功后只向 HTTP 边界暴露一次的原始 token 对；调试输出同时隐藏 session 与 CSRF。
@@ -154,23 +154,23 @@ pub trait PublicSessionStore: Send + Sync {
     fn inspect_public(
         &self,
         token_hash: [u8; 32],
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> ApplicationFuture<'_, PublicSessionIdentity>;
 
     /// 复核会话并节流记录最后活动时间（距上次记录满 60 秒才写入），不延长旧截止或永久会话。
     fn touch_public(
         &self,
         token_hash: [u8; 32],
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> ApplicationFuture<'_, PublicSessionIdentity>;
 
-    fn revoke_public(&self, token_hash: [u8; 32], now: DateTime<Utc>) -> ApplicationFuture<'_, ()>;
+    fn revoke_public(&self, token_hash: [u8; 32], now: Timestamp) -> ApplicationFuture<'_, ()>;
 
     /// 同一查询中读取有效会话和账号偏好，不刷新活动时间或期限。
     fn get_public_preference(
         &self,
         token_hash: [u8; 32],
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> ApplicationFuture<'_, PublicSessionPreferenceResult>;
 
     /// 同事务锁用户后锁当前会话，复核授权，再重放或原子保存偏好、截止和账本。
@@ -178,14 +178,14 @@ pub trait PublicSessionStore: Send + Sync {
         &self,
         token_hash: [u8; 32],
         command: SetPublicSessionPreferenceCommand,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> ApplicationFuture<'_, PublicSessionPreferenceResult>;
 }
 
 /// Admin 会话持久化窄端口；数据库只保存 token 和 CSRF 摘要。
 pub trait AdminSessionStore: Send + Sync {
     /// Admin 启动前持久撤销全部旧会话；重复执行不改写既有撤销时间，也不触及 Public。
-    fn revoke_all_admin(&self, now: DateTime<Utc>) -> ApplicationFuture<'_, ()>;
+    fn revoke_all_admin(&self, now: Timestamp) -> ApplicationFuture<'_, ()>;
 
     fn create_admin(
         &self,
@@ -196,11 +196,11 @@ pub trait AdminSessionStore: Send + Sync {
         &self,
         token_hash: [u8; 32],
         csrf_hash: [u8; 32],
-        now: DateTime<Utc>,
-        next_expires_at: DateTime<Utc>,
+        now: Timestamp,
+        next_expires_at: Timestamp,
     ) -> ApplicationFuture<'_, AdminSessionIdentity>;
 
-    fn revoke_admin(&self, token_hash: [u8; 32], now: DateTime<Utc>) -> ApplicationFuture<'_, ()>;
+    fn revoke_admin(&self, token_hash: [u8; 32], now: Timestamp) -> ApplicationFuture<'_, ()>;
 }
 
 /// Public session 用例端口，供 HTTP 或其他交付表面使用。
@@ -209,24 +209,24 @@ pub trait PublicSessionPort: Send + Sync {
     fn inspect(
         &self,
         raw_token: String,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> ApplicationFuture<'_, PublicSessionIdentity>;
 
-    fn login(&self, key: Vec<u8>, now: DateTime<Utc>) -> ApplicationFuture<'_, PublicLoginResult>;
+    fn login(&self, key: Vec<u8>, now: Timestamp) -> ApplicationFuture<'_, PublicLoginResult>;
 
     fn current(
         &self,
         raw_token: String,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> ApplicationFuture<'_, PublicSessionIdentity>;
 
-    fn logout(&self, raw_token: String, now: DateTime<Utc>) -> ApplicationFuture<'_, ()>;
+    fn logout(&self, raw_token: String, now: Timestamp) -> ApplicationFuture<'_, ()>;
 
     /// 返回账号默认时长和当前会话实际截止；二者可以因旧会话或其他设备而不同。
     fn get_preference(
         &self,
         raw_token: String,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> ApplicationFuture<'_, PublicSessionPreferenceResult>;
 
     /// 保存后续登录默认值，并且只重设本次认证会话的固定截止。
@@ -234,7 +234,7 @@ pub trait PublicSessionPort: Send + Sync {
         &self,
         raw_token: String,
         command: SetPublicSessionPreferenceCommand,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> ApplicationFuture<'_, PublicSessionPreferenceResult>;
 }
 
@@ -244,15 +244,15 @@ pub trait AdminSessionPort: Send + Sync {
         &self,
         actor: String,
         secret: Vec<u8>,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> ApplicationFuture<'_, AdminLoginResult>;
 
     fn current(
         &self,
         raw_token: String,
         raw_csrf_token: String,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> ApplicationFuture<'_, AdminSessionIdentity>;
 
-    fn logout(&self, raw_token: String, now: DateTime<Utc>) -> ApplicationFuture<'_, ()>;
+    fn logout(&self, raw_token: String, now: Timestamp) -> ApplicationFuture<'_, ()>;
 }

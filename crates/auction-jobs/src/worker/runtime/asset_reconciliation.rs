@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_application::core::{ApplicationError, RepositoryError};
 use auction_application::reconciliation::AssetReconciliationPort;
-use chrono::{DateTime, Duration as ChronoDuration, Utc};
+use auction_time::{TimeDelta, Timestamp};
 
 use crate::worker::diagnostics;
 
@@ -30,7 +30,7 @@ pub struct AssetReconciliationRuntime {
     reconciler: Arc<dyn AssetReconciliationPort>,
     interval: std::time::Duration,
     timeout: std::time::Duration,
-    next_run_at: Mutex<Option<DateTime<Utc>>>,
+    next_run_at: Mutex<Option<Timestamp>>,
 }
 
 impl AssetReconciliationRuntime {
@@ -47,9 +47,9 @@ impl AssetReconciliationRuntime {
     }
 
     /// 到期时执行一次对账；首次调用立即执行。
-    pub async fn run_once(&self, now: DateTime<Utc>) -> Result<bool, ApplicationError> {
+    pub async fn run_once(&self, now: Timestamp) -> Result<bool, ApplicationError> {
         let interval =
-            ChronoDuration::from_std(self.interval).map_err(|_: chrono::OutOfRangeError| {
+            TimeDelta::from_std(self.interval).map_err(|_: auction_time::OutOfRangeError| {
                 ApplicationError::Repository(RepositoryError::Failed(
                     "资产对账周期超出时间范围".to_owned(),
                 ))

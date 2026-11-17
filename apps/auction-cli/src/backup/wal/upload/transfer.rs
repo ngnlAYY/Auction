@@ -140,7 +140,7 @@ pub(super) fn write_receipt(
         format: BASE_RECEIPT_FORMAT.to_owned(),
         backup_id: backup_id.to_owned(),
         destination: destination.to_owned(),
-        uploaded_unix_seconds: u64::try_from(chrono::Utc::now().timestamp())
+        uploaded_unix_seconds: u64::try_from(auction_time::Timestamp::now().timestamp())
             .context("系统时间早于 UNIX 纪元")?,
         completion_sha256: completion_sha256.to_owned(),
     };

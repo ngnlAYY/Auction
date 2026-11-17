@@ -12,7 +12,7 @@ use auction_application::reconciliation::{
     AssetArmoryObservation, AssetReconciliationStore, CustodyMissingSample,
 };
 use auction_domain::SettlementWorld;
-use chrono::{Duration, Utc};
+use auction_time::{Duration, Timestamp};
 
 use crate::support;
 use crate::support::fixtures::{policy_snapshot, stable_id};
@@ -27,7 +27,7 @@ const PERSONAL_EQUIPMENT: &str = "9300002";
 
 /// 写入一场 main 世界的 live 场次、一条 Admin 投稿与一件普通库存；全部以运行账号写入。
 async fn seed(pool: &sqlx::PgPool) {
-    let now = Utc::now();
+    let now = Timestamp::now();
     let opened = now - Duration::hours(1);
     let deadline = now + Duration::hours(2);
     let auction_id = stable_id(SEED, "auction");
@@ -93,7 +93,7 @@ async fn seed(pool: &sqlx::PgPool) {
 fn observation(world: SettlementWorld, equipment_ids: &[&str]) -> AssetArmoryObservation {
     AssetArmoryObservation {
         world,
-        observed_at: Utc::now(),
+        observed_at: Timestamp::now(),
         equipment_ids: equipment_ids.iter().map(|id| (*id).to_owned()).collect(),
         complete: true,
         failure_code: None,

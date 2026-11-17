@@ -11,7 +11,7 @@ use auction_application::settlement::{FundingMutation, SettlementReturnProgress}
 use auction_domain::{
     SettlementReturnBlocker, SettlementReturnCaseStatus, SettlementReturnPlan, cash_return,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::json;
 use sqlx::Postgres;
 use uuid::Uuid;
@@ -44,7 +44,7 @@ use crate::database::settlement::funding::{
 /// “领回能力不可用”。
 pub(super) async fn activate_due_take_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
-    now: DateTime<Utc>,
+    now: Timestamp,
     take_worlds: &[String],
 ) -> Result<Option<SettlementReturnProgress>, ApplicationError> {
     if take_worlds.iter().any(|world| !matches!(world.as_str(), "main" | "isekai")) {
@@ -63,7 +63,7 @@ pub(super) async fn activate_due_take_postgres(
 
 async fn activate_once(
     pool: &crate::database::TrackedPool<Postgres>,
-    now: DateTime<Utc>,
+    now: Timestamp,
     take_worlds: &[String],
 ) -> Result<Option<SettlementReturnProgress>, ReturnTransactionError> {
     let mut tx = pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await?;
@@ -125,7 +125,7 @@ async fn activate_once(
     }
     let prepared = enqueue_in_transaction(&mut tx, &command, Some("prepared"), None).await?;
     // delivery owner 以自身时钟写入创建时刻；激活时刻不得早于它（updated_at >= created_at）。
-    let now = now.max(Utc::now());
+    let now = now.max(Timestamp::now());
     let activation = take_activation(&action, prepared.delivery_id, command.request_hash, now)?;
     activate_in_transaction(&mut tx, &activation, MailDeliveryOrigin::SettlementReturnAction)
         .await?;
@@ -185,7 +185,7 @@ async fn mark_take_unknown(
     case: &CaseRow,
     action: &ActionRow,
     failure_code: &'static str,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<SettlementReturnProgress, ReturnTransactionError> {
     if action.delivery_id.is_some() {
         let updated = sqlx::query(
@@ -234,7 +234,7 @@ async fn mark_take_unknown(
 /// 收口一项 Take 投递已到终态的动作；没有时返回 `None`。
 pub(super) async fn settle_due_take_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<Option<SettlementReturnProgress>, ApplicationError> {
     crate::database::retry_conflicts(
         pool,
@@ -249,7 +249,7 @@ pub(super) async fn settle_due_take_postgres(
 
 async fn settle_once(
     pool: &crate::database::TrackedPool<Postgres>,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<Option<SettlementReturnProgress>, ReturnTransactionError> {
     let mut tx = pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await?;
     let candidate: Option<Uuid> = sqlx::query_scalar(
@@ -352,7 +352,7 @@ pub(super) async fn consume_take_proof(
     case: &CaseRow,
     action: &ActionRow,
     proven: &TakeProof<'_>,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<SettlementReturnProgress, ReturnTransactionError> {
     record_take(tx, case, action, proven, now).await?;
     if let Some(account) = proven.account
@@ -387,7 +387,7 @@ async fn record_take(
     case: &CaseRow,
     action: &ActionRow,
     proven: &TakeProof<'_>,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<(), ReturnTransactionError> {
     let take_delivery =
         action.delivery_id.ok_or_else(|| crate::database::repository_error("Take 投递缺失"))?;
@@ -437,7 +437,7 @@ async fn dispose_taken(
     case: &CaseRow,
     executable: Option<bool>,
     proof: &'static str,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<SettlementReturnProgress, ReturnTransactionError> {
     let context = admission_facts(tx, case, executable, true).await?;
     let resend = match (case.plan, context.fulfillment.as_ref()) {

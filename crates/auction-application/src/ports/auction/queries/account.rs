@@ -1,6 +1,6 @@
 //! Public 当前账户的竞价、代理授权和历史投影端口。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use crate::ports::core::ApplicationFuture;
@@ -59,7 +59,7 @@ pub struct PublicMyBid {
     pub accepted_state_version: i64,
     pub fact_index: i32,
     pub mechanism: String,
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
     pub equipment_name: String,
     pub equipment_category: String,
     pub leading: bool,
@@ -76,7 +76,7 @@ pub struct PublicProxyBid {
     pub accepted_state_version: i64,
     pub fact_index: i32,
     pub mechanism: String,
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
     pub leading: bool,
 }
 
@@ -93,7 +93,7 @@ pub struct PublicProxyTransition {
     pub new_status: String,
     pub reason: Option<String>,
     pub resulting_state_version: i64,
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
 }
 
 /// owner-only 代理授权的派生操作能力。
@@ -122,8 +122,8 @@ pub struct PublicOwnedProxy {
     pub terminal_reason: Option<String>,
     pub state_version: i64,
     pub transitions: Vec<PublicProxyTransition>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
     pub equipment_name: String,
     pub equipment_category: String,
     pub bid: Option<PublicProxyBid>,

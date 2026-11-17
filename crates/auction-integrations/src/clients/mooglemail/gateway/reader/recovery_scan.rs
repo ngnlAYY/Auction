@@ -1,7 +1,7 @@
 //! 恢复核对的列表枚举：按 cut-off 只读列表摘要，不读详情、不改变任何事实。
 
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
-use chrono::{DateTime, Timelike, Utc};
+use auction_time::Timestamp;
 
 use super::MoogleMailGateway;
 use super::error::fetch_budget_exhausted;
@@ -18,8 +18,8 @@ impl MoogleMailGateway {
     pub async fn scan_sent_since(
         &self,
         world: MoogleMailWorld,
-        cutoff_at: DateTime<Utc>,
-        observed_at: DateTime<Utc>,
+        cutoff_at: Timestamp,
+        observed_at: Timestamp,
         maximum_pages: usize,
     ) -> Result<MoogleMailSentRecoveryScan, MoogleMailError> {
         if cutoff_at.timestamp_nanos_opt().is_none()
@@ -58,8 +58,12 @@ impl MoogleMailGateway {
                 let observed_at = observed_at.min(round.observed_at());
                 // Sent 页面只有分钟精度；含秒 cutoff 必须按所在分钟下界比较，保留整个重叠分钟。
                 let cutoff_minute = cutoff_at
-                    - chrono::Duration::seconds(i64::from(cutoff_at.second()))
-                    - chrono::Duration::nanoseconds(i64::from(cutoff_at.timestamp_subsec_nanos()));
+                    - auction_time::Duration::seconds(i64::from(
+                        cutoff_at.to_utc_datetime().second(),
+                    ))
+                    - auction_time::Duration::nanoseconds(i64::from(
+                        cutoff_at.timestamp_subsec_nanos(),
+                    ));
                 let covers_cutoff = list.complete
                     || list.summaries.last().is_some_and(|row| row.sent_at < cutoff_minute);
                 let entries = list
@@ -111,8 +115,8 @@ impl MoogleMailGateway {
     pub async fn scan_read_mail_since(
         &self,
         world: MoogleMailWorld,
-        cutoff_at: DateTime<Utc>,
-        observed_at: DateTime<Utc>,
+        cutoff_at: Timestamp,
+        observed_at: Timestamp,
         maximum_pages: usize,
     ) -> Result<MoogleMailInboundRecoveryScan, MoogleMailError> {
         if cutoff_at.timestamp_nanos_opt().is_none()

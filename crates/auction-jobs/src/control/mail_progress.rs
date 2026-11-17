@@ -10,7 +10,7 @@ use auction_application::mail::{
     MailPollProgressOutcome, MailPollProgressSnapshot, MailPollProgressStage, is_safe_mail_poll_id,
 };
 use auction_application::operations::{WorkerControlCondition, WorkerControlMailProgress};
-use chrono::Utc;
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 /// Main/Isekai 共享的轻量观测 owner；重启清空，锁损坏仅令诊断不可用。
@@ -39,7 +39,7 @@ impl MailPollProgressTracker {
         };
         let snapshot = WorkerControlMailProgress {
             condition: WorkerControlCondition::Available,
-            observed_at: Some(Utc::now()),
+            observed_at: Some(Timestamp::now()),
             pollers: records.values().map(|record| record.snapshot.clone()).collect(),
         };
         if snapshot.validate() {
@@ -78,7 +78,7 @@ impl MailPollProgressObserver for MailPollProgressTracker {
                     world_id: world_id.to_owned(),
                     stage: MailPollProgressStage::Fetching,
                     external_mail_id: None,
-                    updated_at: Utc::now(),
+                    updated_at: Timestamp::now(),
                     last_failure,
                 },
             },
@@ -108,7 +108,7 @@ impl MailPollProgressObserver for MailPollProgressTracker {
         } else {
             None
         };
-        record.snapshot.updated_at = Utc::now();
+        record.snapshot.updated_at = Timestamp::now();
     }
 
     fn finish(&self, claim: &MailPollClaim, outcome: MailPollProgressOutcome) {
@@ -117,7 +117,7 @@ impl MailPollProgressObserver for MailPollProgressTracker {
         if !record.matches(claim) || !record.snapshot.stage.is_active() {
             return;
         }
-        let now = Utc::now();
+        let now = Timestamp::now();
         if outcome == MailPollProgressOutcome::Failed {
             record.snapshot.last_failure = Some(MailPollProgressFailure {
                 stage: record.snapshot.stage,

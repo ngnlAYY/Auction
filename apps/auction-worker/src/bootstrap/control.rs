@@ -14,7 +14,7 @@ use auction_jobs::{WorkerControlHandle, WorkerControlServer, WorkerControlServer
 use auction_observability::{HeartbeatHealthReader, HeartbeatPublisher, ProcessMetrics};
 use auction_process::TaskGuard;
 use auction_process::join_error_kind;
-use chrono::Utc;
+use auction_time::Timestamp;
 
 /// Worker control socket 的单实例锁文件名，位于 control runtime 目录内；与 Public/Admin
 /// listener 的锁名不同，即使目录共享也不会互相占用。
@@ -278,7 +278,7 @@ impl auction_application::operations::WorkerRemoteReadPort for WorkerRemoteReads
                     external_equipment_id: request.external_equipment_id,
                     maximum_pages: mail.maximum_pages,
                     deadline: std::time::Instant::now() + mail.fetch_timeout,
-                    observed_at: Utc::now(),
+                    observed_at: Timestamp::now(),
                 })
                 .await
                 .map_err(|error| match error.category {
@@ -333,7 +333,7 @@ impl auction_application::operations::WorkerRemoteReadPort for WorkerRemoteReads
             }
             let mut response = auction_application::operations::WorkerRecoveryScanResponse {
                 status: "complete".to_owned(),
-                observed_at: Utc::now(),
+                observed_at: Timestamp::now(),
                 paused: true,
                 sent_complete: true,
                 read_mail_complete: true,

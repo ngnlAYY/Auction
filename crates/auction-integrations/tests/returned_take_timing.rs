@@ -26,7 +26,7 @@ use auction_integrations::mooglemail::{
     MoogleMailDeliveryTransport, MoogleMailRuntimeCredential,
 };
 use auction_test_support::mooglemail::MailDouble;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::json;
 use uuid::Uuid;
 
@@ -45,7 +45,7 @@ impl MailLoginKeyReader for NoLoginKeys {
 /// 本用例不触发远端登录失效；回写只为满足数据库来源集合的构造前提。
 struct NoInvalidation;
 impl AdminCredentialRuntimeWriter for NoInvalidation {
-    fn mark_invalid(&self, _credential_id: Uuid, _now: DateTime<Utc>) -> ApplicationFuture<'_, ()> {
+    fn mark_invalid(&self, _credential_id: Uuid, _now: Timestamp) -> ApplicationFuture<'_, ()> {
         Box::pin(async { Ok(()) })
     }
 }
@@ -134,7 +134,7 @@ fn transport(server: &MailDouble) -> MoogleMailDeliveryTransport {
 
 /// 结算退件 Take 的投递领取；每次执行都是新的 claim（重排后的新 fence）。
 fn take_claim(case: Uuid, fencing_version: i64) -> DeliveryWorkClaim {
-    let now = Utc::now();
+    let now = Timestamp::now();
     DeliveryWorkClaim {
         delivery_id: case,
         command_id: Uuid::from_u128(0x5e7),
@@ -148,7 +148,7 @@ fn take_claim(case: Uuid, fencing_version: i64) -> DeliveryWorkClaim {
             "credits": 90, "cod": 0, "attachment_ids": [], "body": null,
         }),
         lease_token: Uuid::new_v4(),
-        lease_until: now + chrono::Duration::minutes(2),
+        lease_until: now + auction_time::Duration::minutes(2),
         fencing_version,
         attempt_count: u32::try_from(fencing_version).expect("尝试次数"),
         worker_id: "returns-timing".to_owned(),

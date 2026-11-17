@@ -1,7 +1,7 @@
 //! users owner 唯一的登录 key 信封写入；Admin 签发与 MoogleMail 注册/重绑共用。
 
 use auction_application::mail::MailLoginKeyEnvelope;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 /// 在调用方事务内覆盖用户当前信封；`updated_at` 只前进，不因时钟回拨倒退。
@@ -9,7 +9,7 @@ pub(super) async fn upsert_login_key_envelope(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     user_id: Uuid,
     envelope: &MailLoginKeyEnvelope,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         "INSERT INTO public.user_login_key_envelopes

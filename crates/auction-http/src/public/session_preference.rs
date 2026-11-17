@@ -10,11 +10,11 @@ use auction_application::public::{
 use auction_contracts::ApiResponse;
 use auction_contracts::{PublicSessionPreferenceResponse, PublicSetSessionPreferenceRequest};
 use auction_domain::CommandId;
+use auction_time::Timestamp;
 use axum::Json;
 use axum::extract::{ConnectInfo, Request, State};
 use axum::http::{HeaderMap, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
-use chrono::Utc;
 
 use crate::diagnostics;
 use crate::errors::{api_error, query_rejection};
@@ -42,7 +42,7 @@ pub(crate) async fn get_session_preference(
     if uri.query().is_some_and(|query| !query.is_empty()) {
         return query_rejection().into_response();
     }
-    match session.get_preference(raw_token, Utc::now()).await {
+    match session.get_preference(raw_token, Timestamp::now()).await {
         Ok(value) if valid(&value) => success(value),
         Ok(_) => session_unavailable(),
         Err(error) => failure(error),
@@ -89,7 +89,7 @@ pub(crate) async fn set_session_preference(
                 duration_seconds: input.duration_seconds,
                 expected_version: input.expected_version,
             },
-            Utc::now(),
+            Timestamp::now(),
         )
         .await;
     let value = match result {
@@ -106,7 +106,7 @@ pub(crate) async fn set_session_preference(
     };
     // 重放返回原命令结果，但后续命令可能已改变当前期限；Cookie 必须使用新权威快照，不能回写历史截止。
     // 该响应仍立即同步 Cookie，避免有限延长/改永久被旧浏览器截止截断；浏览器须持有登录共用锁。
-    let now = Utc::now();
+    let now = Timestamp::now();
     let current = match session.inspect(raw_token.clone(), now).await {
         Ok(current) if current.user_id == identity.user_id => current,
         Ok(_) => return session_unavailable(),

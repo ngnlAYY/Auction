@@ -3,11 +3,11 @@
 use std::borrow::Cow;
 
 use auction_contracts::ApiErrorResponse;
+use auction_time::Timestamp;
 use axum::Json;
 use axum::body::Body;
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use chrono::{DateTime, NaiveDateTime, Utc};
 use rust_embed::EmbeddedFile;
 
 use super::cache::{CachePolicy, StaticCachePolicy};
@@ -39,7 +39,7 @@ pub(super) fn asset_response(
     let last_modified = file
         .metadata
         .last_modified()
-        .and_then(|seconds| DateTime::from_timestamp(i64::try_from(seconds).ok()?, 0));
+        .and_then(|seconds| Timestamp::from_timestamp(i64::try_from(seconds).ok()?, 0));
     // 内容摘要作为强 ETag；嵌入文件 mtime 可能随构建环境变化，ETag 让再验证稳定命中。
     let etag = HeaderValue::from_str(&format!(
         "\"{}\"",
@@ -63,7 +63,7 @@ pub(super) fn asset_response(
     if let Some(last_modified) = last_modified {
         headers.insert(
             header::LAST_MODIFIED,
-            HeaderValue::from_str(&last_modified.format(IMF_FIXDATE).to_string())
+            HeaderValue::from_str(&last_modified.strftime(IMF_FIXDATE).to_string())
                 .unwrap_or_else(|_| HeaderValue::from_static("Thu, 01 Jan 1970 00:00:00 GMT")),
         );
     }
@@ -113,7 +113,7 @@ pub(super) fn etag_not_modified(request_headers: &HeaderMap, response_headers: &
 /// Cloudflare 改写 HTML 时会剥离入口文档的 ETag，浏览器与 CDN 回源时只剩日期验证器；回滚到
 /// 更早的提交后 `Last-Modified` 倒退，按 RFC 的“不晚于”判定会把回滚后的入口回成 304，客户端
 /// 继续停在已撤下的新版。浏览器与 CDN 都原样回传收到的 `Last-Modified`，稳态再验证仍得 304。
-pub(super) fn not_modified(headers: &HeaderMap, last_modified: DateTime<Utc>) -> bool {
+pub(super) fn not_modified(headers: &HeaderMap, last_modified: Timestamp) -> bool {
     headers
         .get(header::IF_MODIFIED_SINCE)
         .and_then(|value| value.to_str().ok())
@@ -122,11 +122,10 @@ pub(super) fn not_modified(headers: &HeaderMap, last_modified: DateTime<Utc>) ->
 }
 
 /// 无法解析（含星期与日期不符）的日期按 RFC 9110 §13.1.3 忽略，响应退回完整内容。
-pub(super) fn parse_http_date(value: &str) -> Option<DateTime<Utc>> {
+pub(super) fn parse_http_date(value: &str) -> Option<Timestamp> {
     std::iter::once(IMF_FIXDATE)
         .chain(OBSOLETE_HTTP_DATES)
-        .find_map(|format| NaiveDateTime::parse_from_str(value, format).ok())
-        .map(|parsed| parsed.and_utc())
+        .find_map(|format| Timestamp::strptime_utc(format, value))
 }
 
 pub(super) fn method_not_allowed(request_headers: &HeaderMap) -> Response {

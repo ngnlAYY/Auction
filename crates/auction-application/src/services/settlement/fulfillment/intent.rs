@@ -417,7 +417,7 @@ mod tests {
         AuctionId, EquipmentId, LotId, SettlementAmount, SettlementLine, SettlementMode,
         SettlementWorld,
     };
-    use chrono::Utc;
+    use auction_time::Timestamp;
     use uuid::Uuid;
 
     use self::super::{
@@ -439,7 +439,7 @@ mod tests {
     const OBLIGATION: &str = "3d7e3f2a-4c1e-4a4c-9a02-1c9a5f0d3b21";
 
     fn claim(kind: SettlementObligationKind) -> SettlementFulfillmentClaim {
-        let now = Utc::now();
+        let now = Timestamp::now();
         SettlementFulfillmentClaim {
             obligation_id: SettlementId::from_uuid(Uuid::parse_str(OBLIGATION).unwrap()),
             auction_id: AuctionId::from_uuid(Uuid::from_u128(2)),
@@ -477,13 +477,13 @@ mod tests {
             state_version: 1,
             worker_id: "worker".to_owned(),
             claimed_at: now,
-            lease_until: now + chrono::Duration::seconds(60),
+            lease_until: now + auction_time::Duration::seconds(60),
             retry_count: 0,
         }
     }
 
-    fn deadline(value: &str) -> chrono::DateTime<Utc> {
-        chrono::DateTime::parse_from_rfc3339(value).unwrap().with_timezone(&Utc)
+    fn deadline(value: &str) -> auction_time::Timestamp {
+        auction_time::Timestamp::parse_from_rfc3339(value).unwrap()
     }
 
     fn canonical_of(claim: &SettlementFulfillmentClaim) -> CanonicalSettlementDelivery {
@@ -825,7 +825,7 @@ mod tests {
                 settlement_mode: claim.settlement_mode.map(|_| "hold_curve_v1".to_owned()),
                 frozen_sent_proven: false,
                 sending_at: Some(claim.claimed_at),
-                funding_source_boundary: Some(claim.claimed_at - chrono::Duration::hours(1)),
+                funding_source_boundary: Some(claim.claimed_at - auction_time::Duration::hours(1)),
                 initial_payment_deadline_at: claim.initial_payment_deadline_at,
             };
             let subject = canonical_settlement_fulfillment_subject(kind, claim.obligation_id)

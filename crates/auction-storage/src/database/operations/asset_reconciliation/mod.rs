@@ -13,7 +13,7 @@ use auction_application::reconciliation::{
     AssetArmoryObservation, AssetReconciliationStore, AssetReportSummary, CustodyInTransitReason,
     CustodyMissingSample, CustodyReconciliationReport, CustodyWorldReport, SolvencyReport,
 };
-use chrono::Utc;
+use auction_time::Timestamp;
 use serde::Serialize;
 use serde_json::Value;
 use sqlx::{Postgres, Row};
@@ -75,7 +75,7 @@ impl AssetReconciliationStore for DatabaseStore {
                 format: CUSTODY_REPORT_FORMAT.to_owned(),
                 report_id: Uuid::new_v4(),
                 database_name,
-                completed_at: Utc::now(),
+                completed_at: Timestamp::now(),
                 sample_limit_per_world: SAMPLE_LIMIT,
                 complete: false,
                 consistent: false,
@@ -101,7 +101,7 @@ impl AssetReconciliationStore for DatabaseStore {
                 }
                 Err(failure_code) => report.failure_code = Some(failure_code.to_owned()),
             }
-            report.completed_at = Utc::now();
+            report.completed_at = Timestamp::now();
             append_report(
                 self,
                 CUSTODY_REPORT_ACTION,
@@ -125,7 +125,7 @@ impl AssetReconciliationStore for DatabaseStore {
                 format: SOLVENCY_REPORT_FORMAT.to_owned(),
                 report_id: Uuid::new_v4(),
                 database_name,
-                completed_at: Utc::now(),
+                completed_at: Timestamp::now(),
                 postage_rate_credits: POSTAGE_RATE_CREDITS,
                 postage_rate_verified: POSTAGE_RATE_VERIFIED,
                 complete: false,
@@ -144,7 +144,7 @@ impl AssetReconciliationStore for DatabaseStore {
                 Ok(()) => report.complete = true,
                 Err(failure_code) => report.failure_code = Some(failure_code.to_owned()),
             }
-            report.completed_at = Utc::now();
+            report.completed_at = Timestamp::now();
             report.solvent = report.is_solvent();
             append_report(
                 self,

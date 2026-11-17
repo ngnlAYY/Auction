@@ -27,7 +27,7 @@ impl MoogleMailSender {
         let checkpoint = self.read_scan_checkpoint(cookie, world);
         let plan = auction_application::mail::plan_mail_scan(
             checkpoint.as_ref(),
-            chrono::Utc::now(),
+            auction_time::Timestamp::now(),
             self.client.mail_scan_daily_full_interval(),
         );
         self.observe_scan(

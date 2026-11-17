@@ -132,7 +132,7 @@ mod tests {
         SellerSummaryLotFact,
     };
     use auction_observability::{WorkerLoop, WorkerResult, current_database_worker_loop};
-    use chrono::{DateTime, Utc};
+    use auction_time::Timestamp;
 
     use super::{
         PlayerNotificationRuntime, PlayerNotificationRuntimeConfig, SCAN_TIMEOUT, run_loop,
@@ -153,7 +153,7 @@ mod tests {
     impl PlayerNotificationScanner for StuckScanner {
         fn seller_summary_facts(
             &self,
-            _settled_since: DateTime<Utc>,
+            _settled_since: Timestamp,
             _limit: u32,
         ) -> ApplicationFuture<'_, Vec<SellerSummaryLotFact>> {
             self.observed_loops.lock().unwrap().push(current_database_worker_loop());
@@ -162,7 +162,7 @@ mod tests {
 
         fn season_reminder_facts(
             &self,
-            _now: DateTime<Utc>,
+            _now: Timestamp,
             _lead_seconds: i64,
             _limit: u32,
         ) -> ApplicationFuture<'_, Vec<SeasonReminderFact>> {

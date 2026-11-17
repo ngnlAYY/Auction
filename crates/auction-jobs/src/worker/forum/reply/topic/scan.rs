@@ -26,9 +26,9 @@ pub(in crate::worker::forum::reply) async fn process_topic(
     runtime: &ForumReplyRuntime,
     topic: auction_application::forum::ForumReplyTopic,
     clock: &dyn auction_application::core::Clock,
-    poll_interval: chrono::Duration,
+    poll_interval: auction_time::Duration,
     write_progress: &ForumWriteProgress,
-) -> Result<Option<chrono::DateTime<chrono::Utc>>, ApplicationError> {
+) -> Result<Option<auction_time::Timestamp>, ApplicationError> {
     let scan_started = std::time::Instant::now();
     // 游标只是已导入的最高楼层；固定楼层页仍必须重读，游标页再核对一次帖子身份。
     let cursor = runtime.store.reply_cursor(topic.auction_id, topic.thread_id.clone()).await?;

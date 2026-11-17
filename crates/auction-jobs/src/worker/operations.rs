@@ -21,7 +21,7 @@ use auction_application::operations::{
     evaluate_snapshot, request_hash,
 };
 use auction_domain::CommandId;
-use chrono::{DateTime, Duration as ChronoDuration, Utc};
+use auction_time::{TimeDelta, Timestamp};
 
 use crate::worker::diagnostics;
 
@@ -109,7 +109,7 @@ impl OperationsAlertRuntime {
     }
 
     /// 执行一轮来源观察；失败不阻塞独立的 dispatch/reconcile 循环。
-    pub async fn scan(&self, now: DateTime<Utc>) -> Result<(), ApplicationError> {
+    pub async fn scan(&self, now: Timestamp) -> Result<(), ApplicationError> {
         let observations = self.observe(now).await;
         self.store
             .observe(OperationsAlertObserveCommand {
@@ -122,7 +122,7 @@ impl OperationsAlertRuntime {
 
     async fn observe(
         &self,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> Vec<auction_application::operations::OperationsAlertSourceObservation> {
         // 长期未领取的超期件数与评估使用同一策略阈值；告警只需计数与最久寄出时长，不读
         // Admin 展示清单。
@@ -168,7 +168,7 @@ impl OperationsAlertRuntime {
         }
     }
 
-    pub async fn dispatch(&self, now: DateTime<Utc>) -> Result<(), ApplicationError> {
+    pub async fn dispatch(&self, now: Timestamp) -> Result<(), ApplicationError> {
         // MoogleMail 内部入队先执行；webhook 是外部 I/O，不能拖慢本地通知通道。
         let mail_result = self.dispatch_mail(now).await;
         let webhook_result =
@@ -177,7 +177,7 @@ impl OperationsAlertRuntime {
         webhook_result
     }
 
-    async fn dispatch_mail(&self, now: DateTime<Utc>) -> Result<(), ApplicationError> {
+    async fn dispatch_mail(&self, now: Timestamp) -> Result<(), ApplicationError> {
         let (Some(delivery), Some(target)) = (&self.delivery, &self.target) else {
             return Ok(());
         };
@@ -227,7 +227,7 @@ impl OperationsAlertRuntime {
     }
 
     /// 领取并发送一条独立 webhook；发送结果未知时只持久化 manual_reconcile。
-    async fn dispatch_webhook(&self, now: DateTime<Utc>) -> Result<(), ApplicationError> {
+    async fn dispatch_webhook(&self, now: Timestamp) -> Result<(), ApplicationError> {
         let Some(webhook) = &self.webhook else {
             return Ok(());
         };
@@ -282,11 +282,7 @@ impl OperationsAlertRuntime {
     }
 
     /// 对账一批已经进入 delivery 的通知，并返回本轮处理数量。
-    pub async fn reconcile(
-        &self,
-        now: DateTime<Utc>,
-        limit: u16,
-    ) -> Result<usize, ApplicationError> {
+    pub async fn reconcile(&self, now: Timestamp, limit: u16) -> Result<usize, ApplicationError> {
         if !(1..=64).contains(&limit) {
             return Err(ApplicationError::OperationsAlert(OperationsAlertError::Invalid));
         }
@@ -352,8 +348,8 @@ fn unavailable_observations()
         .collect()
 }
 
-fn checked_add(now: DateTime<Utc>, duration: Duration) -> Result<DateTime<Utc>, ApplicationError> {
-    let duration = ChronoDuration::from_std(duration)
+fn checked_add(now: Timestamp, duration: Duration) -> Result<Timestamp, ApplicationError> {
+    let duration = TimeDelta::from_std(duration)
         .map_err(|_| ApplicationError::OperationsAlert(OperationsAlertError::Invalid))?;
     now.checked_add_signed(duration)
         .ok_or(ApplicationError::OperationsAlert(OperationsAlertError::Invalid))
@@ -363,7 +359,7 @@ fn checked_add(now: DateTime<Utc>, duration: Duration) -> Result<DateTime<Utc>, 
 mod tests {
     use auction_application::core::RequestHash;
     use auction_application::operations::{OperationsAlertBatchClaim, OperationsAlertTarget};
-    use chrono::Utc;
+    use auction_time::Timestamp;
     use uuid::Uuid;
 
     use super::alert_mail_command;
@@ -381,7 +377,7 @@ mod tests {
             items: Vec::new(),
             claim_token: Uuid::new_v4(),
             claim_fencing: 1,
-            lease_until: Utc::now(),
+            lease_until: Timestamp::now(),
             attempt_count: 1,
         };
         for world_id in ["main", "isekai"] {

@@ -4,7 +4,7 @@
 //! 存储层按固定锁序读取并投影成本结构；本模块只做纯判定，不访问数据库、不写日志。
 //! 阻断项文案是 CLI 与运维契约，不能被静默改写。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::Deserialize;
 use uuid::Uuid;
 
@@ -59,15 +59,15 @@ pub struct SentDelivery {
     pub origin_kind: String,
     pub external_reference: Option<String>,
     pub lease_token: Option<String>,
-    pub lease_expires_at: Option<DateTime<Utc>>,
+    pub lease_expires_at: Option<Timestamp>,
     pub recipient: String,
     pub command_id: Uuid,
     pub request_digest: Option<String>,
     pub activation_command_id: Option<Uuid>,
     pub activation_request_digest: Option<String>,
-    pub sending_at: Option<DateTime<Utc>>,
-    pub completed_at: Option<DateTime<Utc>>,
-    pub activated_at: Option<DateTime<Utc>>,
+    pub sending_at: Option<Timestamp>,
+    pub completed_at: Option<Timestamp>,
+    pub activated_at: Option<Timestamp>,
     pub result_metadata: SentResultMetadata,
     /// 只有结算发送邮件的载荷形状能投影成 [`SentPayload`]；提醒、账号回信等其他投递的载荷
     /// 形状不同，投影为 `None`，由 [`SentAdmissionBlocker::UnsupportedDeliveryScope`] 失败关闭，
@@ -111,11 +111,11 @@ pub struct SentFulfillment {
     pub delivery_operation: String,
     pub dispatch_world: String,
     pub claim_token: Option<String>,
-    pub claim_expires_at: Option<DateTime<Utc>>,
+    pub claim_expires_at: Option<Timestamp>,
     pub proof_kind: Option<String>,
     pub proof_reference: Option<String>,
     pub proof_digest: Option<String>,
-    pub proof_observed_at: Option<DateTime<Utc>>,
+    pub proof_observed_at: Option<Timestamp>,
     pub prepare_command_id: Option<Uuid>,
     pub prepare_request_digest: Option<String>,
     pub activate_command_id: Option<Uuid>,
@@ -289,7 +289,7 @@ fn check(blockers: &mut Vec<SentAdmissionBlocker>, condition: bool, blocker: Sen
 
 impl SentAdmissionSnapshot {
     /// 计算准入结论；同一快照、证据与事务读取时刻的结论唯一。
-    pub fn evaluate(&self, evidence: &ManualSentEvidence, now: DateTime<Utc>) -> SentAdmission {
+    pub fn evaluate(&self, evidence: &ManualSentEvidence, now: Timestamp) -> SentAdmission {
         let delivery = &self.delivery;
         let metadata = &delivery.result_metadata;
         // 准入一：发送结果未知且已开始写出。
@@ -312,7 +312,7 @@ impl SentAdmissionSnapshot {
                 && delivery.sending_at.is_some_and(|start| {
                     evidence
                         .sent_minute
-                        .checked_add_signed(chrono::Duration::minutes(1))
+                        .checked_add_signed(auction_time::Duration::minutes(1))
                         .is_none_or(|upper| upper <= start)
                 }));
         let mut blockers = Vec::new();
@@ -443,7 +443,7 @@ impl SentAdmissionSnapshot {
                         } else {
                             evidence
                                 .sent_minute
-                                .checked_add_signed(chrono::Duration::minutes(1))
+                                .checked_add_signed(auction_time::Duration::minutes(1))
                                 .is_some_and(|upper| upper > start)
                         })
                         && evidence.observed_at >= end

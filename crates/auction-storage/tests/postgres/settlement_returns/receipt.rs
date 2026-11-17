@@ -27,7 +27,7 @@ use auction_application::settlement::returned_mail_body_digest;
 use auction_domain::SettlementReturnAction;
 use auction_integrations::mooglemail::{MoogleMailParser, MoogleMailWorld};
 use auction_storage::DatabaseStore;
-use chrono::{DateTime, Duration, Utc};
+use auction_time::{Duration, Timestamp};
 use serde_json::Value;
 use serde_json::json;
 use sqlx::PgPool;
@@ -73,8 +73,8 @@ fn returned_page(subject: &str, body: &str) -> String {
 struct SystemClock;
 
 impl Clock for SystemClock {
-    fn now(&self) -> DateTime<Utc> {
-        Utc::now()
+    fn now(&self) -> Timestamp {
+        Timestamp::now()
     }
 }
 
@@ -135,7 +135,7 @@ impl MoogleMailboxMaintenance for ReplayedMailbox {
         &'a self,
         _world_id: &'a str,
         _entry: &'a MoogleMailboxSentEntry,
-        _observed_at: DateTime<Utc>,
+        _observed_at: Timestamp,
     ) -> ApplicationFuture<'a, MoogleMailboxSentState> {
         Box::pin(async { unreachable!("Sent 列表为空") })
     }
@@ -205,7 +205,7 @@ async fn returned_with_body(store: &DatabaseStore, sequence: i64, mid: &str) -> 
         }),
     )
     .await;
-    store.consume_due_settlement_return(Utc::now()).await.expect("消费").expect("必须消费");
+    store.consume_due_settlement_return(Timestamp::now()).await.expect("消费").expect("必须消费");
     (Returned { sale, delivery, case }, subject)
 }
 

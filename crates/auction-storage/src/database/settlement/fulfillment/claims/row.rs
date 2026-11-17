@@ -5,7 +5,7 @@ use auction_application::settlement::{
     SettlementFulfillmentOperation, SettlementFulfillmentState,
 };
 use auction_domain::{AuctionId, CommandId, EquipmentId, LotId, SettlementId, SubmissionId};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Row;
 use sqlx::postgres::PgRow;
 use uuid::Uuid;
@@ -25,8 +25,8 @@ pub(super) fn map_claim(
     claim_token: Uuid,
     claim_fencing: i64,
     state_version: u64,
-    claimed_at: DateTime<Utc>,
-    lease_until: DateTime<Utc>,
+    claimed_at: Timestamp,
+    lease_until: Timestamp,
     retry_count: u32,
 ) -> Result<SettlementFulfillmentClaim, ClaimMappingError> {
     let world = settlement_world(

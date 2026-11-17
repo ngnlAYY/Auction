@@ -1,7 +1,7 @@
 //! delivery claimed/sending 租约的释放与续租；进入 sending 只经 `cash` 的授权 fence。
 
 use auction_application::delivery::DeliveryWorkClaim;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Postgres;
 use uuid::Uuid;
 
@@ -13,7 +13,7 @@ use crate::database::delivery::audit::{
 pub(super) async fn release_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     claim: &DeliveryWorkClaim,
-    released_at: DateTime<Utc>,
+    released_at: Timestamp,
 ) -> Result<(), auction_application::core::RepositoryError> {
     let mut transaction = pool.begin().await.map_err(map_storage_error)?;
     lock_delivery_lease(&mut transaction, claim.delivery_id).await?;
@@ -70,8 +70,8 @@ pub(super) async fn release_postgres(
 pub(super) async fn renew_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     claim: &DeliveryWorkClaim,
-    renewed_at: DateTime<Utc>,
-    lease_until: DateTime<Utc>,
+    renewed_at: Timestamp,
+    lease_until: Timestamp,
 ) -> Result<(), auction_application::core::RepositoryError> {
     // 准备和发送共享同一 token/fencing；数据库排队后也必须仍有效，不能用旧调用时间复活过期租约。
     let mut transaction = pool.begin().await.map_err(map_storage_error)?;

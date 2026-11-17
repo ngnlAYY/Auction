@@ -81,7 +81,7 @@ fn parse_template_text(pairs: &[(String, String)], key: &str) -> String {
 /// 只接受可解析的 RFC3339；非法值按未设置处理。
 fn parse_timestamp_text(pairs: &[(String, String)], key: &str) -> String {
     let value = parse_text(pairs, key, 40);
-    if chrono::DateTime::parse_from_rfc3339(&value).is_ok() { value } else { String::new() }
+    if auction_time::Timestamp::parse_from_rfc3339(&value).is_ok() { value } else { String::new() }
 }
 
 pub(crate) fn use_deliveries_query_state() -> QueryState<DeliveriesQuery> {

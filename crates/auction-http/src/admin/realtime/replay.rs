@@ -9,6 +9,7 @@ use auction_contracts::{
     AdminRealtimeReplayEventResponse, AdminRealtimeReplayRequest, AdminRealtimeReplayResponse,
     ApiResponse,
 };
+use auction_time::Timestamp;
 use axum::{
     Json,
     body::Bytes,
@@ -16,7 +17,6 @@ use axum::{
     http::{HeaderMap, StatusCode, Uri},
     response::{IntoResponse, Response},
 };
-use chrono::Utc;
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use uuid::Uuid;
@@ -110,7 +110,7 @@ pub(crate) async fn replay(
             actor_id,
             request_id: request_id(&headers),
             request_hash,
-            created_at: Utc::now(),
+            created_at: Timestamp::now(),
         })
         .await
     {

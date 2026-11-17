@@ -122,7 +122,7 @@ fn write(value: &Value) -> TempFile {
 }
 
 /// 与回执夹具同一天的固定校验时刻；新鲜度窗口按注入时钟计算，测试不读真实时钟。
-fn fixture_now() -> chrono::DateTime<chrono::Utc> {
+fn fixture_now() -> auction_time::Timestamp {
     "2026-11-05T12:00:00Z".parse().expect("fixture time")
 }
 
@@ -140,7 +140,7 @@ fn requirements<'a>(artifact: &'a Artifact) -> Requirements<'a> {
 fn check_at(
     value: &Value,
     artifact: &Artifact,
-    now: chrono::DateTime<chrono::Utc>,
+    now: auction_time::Timestamp,
 ) -> anyhow::Result<super::DrillEvidence> {
     let file = write(value);
     let runtime =
@@ -160,7 +160,7 @@ fn check(value: &Value, artifact: &Artifact) -> anyhow::Result<super::DrillEvide
 #[test]
 fn receipt_freshness_follows_the_injected_clock() {
     let artifact = artifact();
-    let day = |text: &str| -> chrono::DateTime<chrono::Utc> { text.parse().expect("time") };
+    let day = |text: &str| -> auction_time::Timestamp { text.parse().expect("time") };
     // 回执日 2026-11-05 加 7 天窗口（含当日余量）到 11-13 00:00 为止仍有效。
     assert!(check_at(&receipt(), &artifact, day("2026-11-13T00:00:00Z")).is_ok());
     let stale = check_at(&receipt(), &artifact, day("2026-11-13T00:00:01Z")).expect_err("过期");

@@ -5,7 +5,7 @@ use auction_application::realtime::{
     MAX_REALTIME_ADMIN_PAGE_SIZE, RealtimeDashboardSnapshot, RealtimeFailureWater,
     RealtimeLagListRequest,
 };
-use chrono::Utc;
+use auction_time::Timestamp;
 use sqlx::Row;
 
 use super::lag::read_lag_entries_postgres;
@@ -36,7 +36,8 @@ pub(super) async fn dashboard_snapshot_postgres(
         .commit()
         .await
         .map_err(|error| storage_error_from(error, "提交 realtime dashboard 快照失败"))?;
-    let snapshot = RealtimeDashboardSnapshot { observed_at: Utc::now(), total_lag, lags, failure };
+    let snapshot =
+        RealtimeDashboardSnapshot { observed_at: Timestamp::now(), total_lag, lags, failure };
     if snapshot.validate() {
         Ok(snapshot)
     } else {

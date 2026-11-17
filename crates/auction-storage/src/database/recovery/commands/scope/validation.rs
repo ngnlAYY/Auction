@@ -6,7 +6,7 @@ use auction_application::recovery::{
     RecoveryCommandError, RecoveryConfirmationAction, RecoveryConfirmationCommand,
     recovery_confirmation_requires_blacklist,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Postgres;
 use uuid::Uuid;
 
@@ -196,7 +196,7 @@ pub(in crate::database::recovery::commands) async fn validate_obligations(
 pub(in crate::database::recovery::commands) async fn activate_buyer_refund(
     transaction: &mut Transaction<'_, Postgres>,
     recovery: &RecoveryRow,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<(), RecoveryCommandError> {
     let updated = sqlx::query(
         r#"UPDATE public.settlement_obligations

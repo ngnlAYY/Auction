@@ -1,7 +1,7 @@
 //! Admin recovery 报告的安全投影与读取端口。
 
 use auction_domain::{AuctionId, LotId, SettlementId};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use crate::ports::core::ApplicationFuture;
 use crate::ports::recovery::commands::RecoveryConfirmationAction;
@@ -17,8 +17,8 @@ pub struct RecoveryActionReport {
     pub delivery_id: Option<SettlementId>,
     pub failure_code: Option<String>,
     pub proof_kind: Option<String>,
-    pub proof_observed_at: Option<DateTime<Utc>>,
-    pub updated_at: DateTime<Utc>,
+    pub proof_observed_at: Option<Timestamp>,
+    pub updated_at: Timestamp,
 }
 
 /// Admin recovery case 的安全投影。
@@ -34,14 +34,14 @@ pub struct RecoveryReportEntry {
     pub stage: String,
     pub resolution: Option<String>,
     pub state_version: i64,
-    pub payment_deadline_at: DateTime<Utc>,
+    pub payment_deadline_at: Timestamp,
     pub reminder_count: i32,
     pub reminder_limit: i32,
     /// 已计入的 COD 退回次数与冻结上限；决定确认是否须先完成买家拉黑。
     pub cod_return_count: i32,
     pub cod_return_limit: i32,
     pub custody_proof_kind: Option<String>,
-    pub custody_proof_observed_at: Option<DateTime<Utc>>,
+    pub custody_proof_observed_at: Option<Timestamp>,
     pub blocking_code: Option<String>,
     /// 退件不能把原义务每一次可能外达的发送逐一归属的具体原因（闭集见
     /// [`RECOVERY_SEND_ATTRIBUTION_BLOCKERS`]）；只对等待确认或自动推进的 `reclaiming` 记录按
@@ -52,7 +52,7 @@ pub struct RecoveryReportEntry {
     pub relisted_lot_id: Option<LotId>,
     pub actions: Vec<RecoveryActionReport>,
     pub allowed_commands: Vec<String>,
-    pub updated_at: DateTime<Utc>,
+    pub updated_at: Timestamp,
 }
 
 /// 发送归属不成立的具体原因闭集；报告读取与 HTTP 投影按同一集合校验。
@@ -155,7 +155,7 @@ pub fn allowed_recovery_commands(entry: &RecoveryReportEntry) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use auction_domain::{AuctionId, LotId, SettlementId};
-    use chrono::{TimeZone, Utc};
+    use auction_time::Timestamp;
     use uuid::Uuid;
 
     use super::{
@@ -173,7 +173,7 @@ mod tests {
             failure_code: None,
             proof_kind: Some("delivery_recovery_take_succeeded".to_owned()),
             proof_observed_at: None,
-            updated_at: Utc.with_ymd_and_hms(2026, 11, 5, 9, 0, 0).single().unwrap(),
+            updated_at: Timestamp::from_ymd_hms(2026, 11, 5, 9, 0, 0).unwrap(),
         }
     }
 
@@ -183,7 +183,7 @@ mod tests {
         limit: i32,
         actions: Vec<RecoveryActionReport>,
     ) -> RecoveryReportEntry {
-        let at = Utc.with_ymd_and_hms(2026, 11, 5, 9, 0, 0).single().unwrap();
+        let at = Timestamp::from_ymd_hms(2026, 11, 5, 9, 0, 0).unwrap();
         RecoveryReportEntry {
             id: SettlementId::from_uuid(Uuid::from_u128(1)),
             auction_id: AuctionId::from_uuid(Uuid::from_u128(2)),

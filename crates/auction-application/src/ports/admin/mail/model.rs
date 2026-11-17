@@ -1,7 +1,7 @@
 //! Admin Mail owner 的轮询状态和入站邮件安全投影。
 
 use auction_domain::valid_optional_text;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -18,12 +18,12 @@ use crate::ports::mail::MailDisplaySnapshot;
 pub struct AdminMailPollState {
     pub mailbox_key: String,
     pub cursor_value: Option<String>,
-    pub last_poll_at: DateTime<Utc>,
-    pub next_poll_at: DateTime<Utc>,
+    pub last_poll_at: Timestamp,
+    pub next_poll_at: Timestamp,
     pub consecutive_failures: i32,
     pub paused: bool,
     pub state_version: i64,
-    pub updated_at: DateTime<Utc>,
+    pub updated_at: Timestamp,
 }
 
 impl AdminMailPollState {
@@ -45,14 +45,14 @@ impl AdminMailPollState {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AdminMailPollerSnapshot {
     pub mailbox_key: String,
-    pub last_poll_at: DateTime<Utc>,
-    pub next_poll_at: DateTime<Utc>,
+    pub last_poll_at: Timestamp,
+    pub next_poll_at: Timestamp,
     pub consecutive_failures: i32,
     pub paused: bool,
     /// 最近一次进入暂停状态的 Admin 命令时间；不由普通 claim/completion 改写。
-    pub paused_since: Option<DateTime<Utc>>,
+    pub paused_since: Option<Timestamp>,
     pub state_version: i64,
-    pub updated_at: DateTime<Utc>,
+    pub updated_at: Timestamp,
 }
 
 impl AdminMailPollerSnapshot {
@@ -71,7 +71,7 @@ impl AdminMailPollerSnapshot {
 /// Admin 邮件 dashboard 的全量轮询器安全摘要。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AdminMailDashboardSnapshot {
-    pub observed_at: DateTime<Utc>,
+    pub observed_at: Timestamp,
     pub pollers: Vec<AdminMailPollerSnapshot>,
 }
 
@@ -118,8 +118,8 @@ pub struct AdminMailIntakeFilter {
     pub kind: Option<String>,
     pub status: Option<String>,
     pub decision: Option<String>,
-    pub received_from: Option<DateTime<Utc>>,
-    pub received_to: Option<DateTime<Utc>>,
+    pub received_from: Option<Timestamp>,
+    pub received_to: Option<Timestamp>,
     pub page: i64,
     pub page_size: i64,
 }
@@ -163,8 +163,8 @@ pub struct AdminMailIntakeSummary {
     pub kind: String,
     pub status: String,
     pub decision_code: String,
-    pub received_at: DateTime<Utc>,
-    pub processed_at: DateTime<Utc>,
+    pub received_at: Timestamp,
+    pub processed_at: Timestamp,
     pub sender: Option<String>,
     pub subject: Option<String>,
     pub has_message_display: bool,

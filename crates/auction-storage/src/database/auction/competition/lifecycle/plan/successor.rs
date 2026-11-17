@@ -3,6 +3,7 @@
 use auction_application::auction::AuctionPreviewSuccessorPlan;
 use auction_application::core::{CompetitionTransactionError, StoredCommand};
 use auction_domain::Auction;
+use jiff_sqlx::ToSqlx;
 use serde_json::json;
 use sqlx::Row;
 
@@ -97,7 +98,7 @@ pub(super) async fn insert_successor_postgres(
     )
     .bind(successor.round_id)
     .bind(world_id)
-    .bind(successor.local_week)
+    .bind(successor.local_week.to_sqlx())
     .bind(successor.auction_id.as_uuid())
     .bind(successor.preview_due_at)
     .bind(successor.open_due_at)

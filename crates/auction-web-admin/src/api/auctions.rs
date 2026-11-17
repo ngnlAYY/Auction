@@ -9,7 +9,7 @@ use auction_contracts::{
     AdminAuctionCommandResponse, AdminAuctionLifecycleResponse, AdminCreateAuctionRequest,
     AdminUpdateAuctionScheduleRequest, AdminUpdateAuctionScheduleResponse, ApiResponse,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use gloo_net::http::{Request, Response};
 use uuid::Uuid;
 
@@ -261,8 +261,7 @@ fn auction_into_command(value: AdminAuction) -> AdminAuctionCommandResponse {
     }
 }
 
-fn normalize_datetime(value: String) -> Result<DateTime<Utc>, String> {
-    DateTime::parse_from_rfc3339(&super::normalize_datetime(&value))
-        .map(|value| value.with_timezone(&Utc))
+fn normalize_datetime(value: String) -> Result<Timestamp, String> {
+    Timestamp::parse_from_rfc3339(&super::normalize_datetime(&value))
         .map_err(|_| "invalid_request".to_owned())
 }

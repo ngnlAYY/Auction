@@ -6,7 +6,7 @@
 //!
 //! 本模块只含闭集分类与纯决策，不读取配置、不访问远端，也不保存正文或凭据。
 
-use chrono::Duration;
+use auction_time::Duration;
 
 /// 单个 MID 允许的最大字节数；与数据库与轮询游标边界一致。
 pub const MAX_MAIL_SCAN_ID_BYTES: usize = 256;

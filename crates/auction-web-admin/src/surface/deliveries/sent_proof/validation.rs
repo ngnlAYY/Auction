@@ -2,14 +2,11 @@
 //!
 //! 这里只阻止明显不完整的草稿；真正的准入判定仍由服务端预览与事务完成。
 
-use chrono::Timelike;
+use auction_time::SecondsFormat;
 
 use super::evidence::{SELECTABLE_EVIDENCE_KINDS, decode_hex_digest, latest_send_attempt};
 use super::state::{SentProofDraft, SentProofIssue};
 use crate::api::{DeliveryDetail, DeliverySentEvidence, MAX_JSON_SAFE_INTEGER};
-
-/// 发送分钟统一使用带 `Z` 的 UTC 整分钟文本。
-const SENT_MINUTE_FORMAT: &str = "%Y-%m-%dT%H:%M:00Z";
 
 /// 把 `datetime-local` 输入换算为带 `Z` 的整分钟；秒或小数非零时不猜测。
 pub(super) fn sent_minute_from_input(value: &str) -> Option<String> {
@@ -17,22 +14,25 @@ pub(super) fn sent_minute_from_input(value: &str) -> Option<String> {
         return None;
     }
     let normalized = crate::api::normalize_datetime(value);
-    let parsed =
-        chrono::DateTime::parse_from_rfc3339(&normalized).ok()?.with_timezone(&chrono::Utc);
-    if parsed.second() != 0 || parsed.nanosecond() != 0 {
+    let parsed = auction_time::Timestamp::parse_from_rfc3339(&normalized).ok()?;
+    if parsed.to_utc_datetime().second() != 0 || parsed.timestamp_subsec_nanos() != 0 {
         return None;
     }
-    Some(parsed.format(SENT_MINUTE_FORMAT).to_string())
+    Some(sent_minute_text(parsed))
 }
 
 /// 证据里的发送时间戳按整分钟截断；服务端只接受秒与小数均为零的分钟。
 pub(super) fn sent_minute_from_timestamp(value: &str) -> Option<String> {
-    let parsed = chrono::DateTime::parse_from_rfc3339(value)
+    let parsed = auction_time::Timestamp::parse_from_rfc3339(value)
         .ok()?
-        .with_timezone(&chrono::Utc)
         .with_second(0)?
         .with_nanosecond(0)?;
-    Some(parsed.format(SENT_MINUTE_FORMAT).to_string())
+    Some(sent_minute_text(parsed))
+}
+
+/// 发送分钟统一使用带 `Z` 的 UTC 整分钟文本（`YYYY-MM-DDTHH:MM:00Z`）；入参的秒与小数已为零。
+fn sent_minute_text(minute: auction_time::Timestamp) -> String {
+    minute.to_rfc3339_opts(SecondsFormat::Secs, true)
 }
 
 fn valid_sender_name(value: &str) -> Option<String> {

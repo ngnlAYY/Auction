@@ -24,7 +24,7 @@ use auction_application::delivery::{
 };
 use auction_application::recovery::{RecoveryResolutionStore, RecoveryWorkStore};
 use auction_storage::DatabaseStore;
-use chrono::{DateTime, Duration, DurationRound, Utc};
+use auction_time::{Duration, Timestamp};
 use serde_json::json;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -47,7 +47,7 @@ pub(crate) struct CodSale {
 pub(crate) async fn insert_sale(
     pool: &PgPool,
     sequence: i64,
-    at: DateTime<Utc>,
+    at: Timestamp,
     recovery_version: i32,
 ) -> CodSale {
     let payment_timeout_seconds = if recovery_version == 2 { 86_400 } else { 604_800 };
@@ -203,7 +203,7 @@ async fn insert_return_mail(
     pool: &PgPool,
     sale: &CodSale,
     external_mail_id: &str,
-    received_at: DateTime<Utc>,
+    received_at: Timestamp,
 ) -> Uuid {
     let mail_id = Uuid::new_v4();
     sqlx::query(
@@ -236,7 +236,7 @@ async fn insert_return_mail(
 pub(crate) async fn insert_awaiting_recovery(
     pool: &PgPool,
     sale: &CodSale,
-    created_at: DateTime<Utc>,
+    created_at: Timestamp,
 ) -> Uuid {
     let recovery_id = Uuid::new_v4();
     sqlx::query(
@@ -264,9 +264,10 @@ pub(crate) async fn insert_awaiting_recovery(
 }
 
 /// 结算时刻取在某分钟的第 37.5 秒，模拟亚秒级 `due_at`；返回该分钟起点与结算时刻。
-pub(crate) fn settlement_minute() -> (DateTime<Utc>, DateTime<Utc>) {
-    let minute =
-        (Utc::now() - Duration::hours(2)).duration_trunc(Duration::minutes(1)).expect("按分钟取整");
+pub(crate) fn settlement_minute() -> (Timestamp, Timestamp) {
+    let minute = (Timestamp::now() - Duration::hours(2))
+        .duration_trunc(Duration::minutes(1))
+        .expect("按分钟取整");
     (minute, minute + Duration::milliseconds(37_500))
 }
 
@@ -292,7 +293,7 @@ async fn postgres_return_shown_in_the_settlement_minute_is_recorded() {
     let mail_id = insert_return_mail(pool, &sale, "990001", minute).await;
 
     let advance = store
-        .record_due_return(Utc::now())
+        .record_due_return(Timestamp::now())
         .await
         .expect("同一分钟内的合法退件必须被记录")
         .expect("必须领取到该退件");
@@ -340,7 +341,7 @@ async fn postgres_return_within_the_clock_slack_is_recorded() {
     let mail_id = insert_return_mail(pool, &sale, "990002", minute - Duration::minutes(2)).await;
 
     let advance = store
-        .record_due_return(Utc::now())
+        .record_due_return(Timestamp::now())
         .await
         .expect("余量内的退件必须被记录")
         .expect("必须领取到该退件");
@@ -372,7 +373,7 @@ async fn postgres_return_before_the_clock_slack_is_isolated_and_the_queue_advanc
 
     // 队头是更早收到的越界退件：隔离后提交并返回摘要，而不是报错回滚。
     let isolated = store
-        .record_due_return(Utc::now())
+        .record_due_return(Timestamp::now())
         .await
         .expect("越界退件必须隔离而不是报错")
         .expect("必须领取到越界退件");
@@ -413,7 +414,7 @@ async fn postgres_return_before_the_clock_slack_is_isolated_and_the_queue_advanc
 
     // 队列继续推进：下一封合法退件照常记录并建立回收动作。
     let recorded = store
-        .record_due_return(Utc::now())
+        .record_due_return(Timestamp::now())
         .await
         .expect("后续合法退件必须照常记录")
         .expect("必须领取到后续退件");
@@ -423,7 +424,7 @@ async fn postgres_return_before_the_clock_slack_is_isolated_and_the_queue_advanc
     assert_eq!(recorded.action_kinds, vec!["reclaim_equipment_take".to_owned()]);
     assert!(blocked_return_audits(pool, valid_recovery).await.is_empty());
     assert!(
-        store.record_due_return(Utc::now()).await.expect("队列排空不报错").is_none(),
+        store.record_due_return(Timestamp::now()).await.expect("队列排空不报错").is_none(),
         "两封退件都已消费"
     );
 
@@ -452,7 +453,7 @@ async fn postgres_return_with_mismatched_content_is_blocked_with_audit() {
     .expect("改写退件附件证据");
 
     let advance = store
-        .record_due_return(Utc::now())
+        .record_due_return(Timestamp::now())
         .await
         .expect("内容不符的退件必须隔离而不是报错")
         .expect("必须领取到该退件");
@@ -484,7 +485,7 @@ async fn blocked_return_audits(pool: &PgPool, recovery_id: Uuid) -> Vec<serde_js
 
 /// 第 1 次退回已被取回（回收动作已满足）、等待重发 COD 的恢复事实；返回 recovery ID。
 async fn insert_reclaimed_cod(pool: &PgPool, sequence: i64, policy_version: i32) -> Uuid {
-    let at = Utc::now() - Duration::hours(1);
+    let at = Timestamp::now() - Duration::hours(1);
     let sale = insert_sale(pool, sequence, at - Duration::hours(1), policy_version).await;
     let recovery_id = Uuid::new_v4();
     let delivery_id = Uuid::new_v4();
@@ -593,8 +594,8 @@ async fn insert_reclaimed_cod(pool: &PgPool, sequence: i64, policy_version: i32)
     recovery_id
 }
 
-async fn resend_due_cod(store: &DatabaseStore) -> (Uuid, DateTime<Utc>) {
-    let now = Utc::now();
+async fn resend_due_cod(store: &DatabaseStore) -> (Uuid, Timestamp) {
+    let now = Timestamp::now();
     let advance = store
         .advance_due_cod_return(now)
         .await
@@ -625,12 +626,14 @@ async fn postgres_cod_resend_restarts_the_frozen_payment_window() {
         };
         expected.insert(recovery_id, (now + window).timestamp_micros());
     }
-    assert!(store.advance_due_cod_return(Utc::now()).await.expect("重复调度不报错").is_none());
+    assert!(
+        store.advance_due_cod_return(Timestamp::now()).await.expect("重复调度不报错").is_none()
+    );
 
     for recovery_id in [seven_day, pre_season] {
         let (stage, deadline, return_mail_id, custody, count): (
             String,
-            DateTime<Utc>,
+            Timestamp,
             Option<Uuid>,
             Option<String>,
             i32,
@@ -674,7 +677,7 @@ async fn postgres_resent_cod_claim_projects_the_first_send_deadline_separately()
         current.insert(recovery_id, now);
     }
 
-    let now = Utc::now();
+    let now = Timestamp::now();
     let claims = auction_application::settlement::SettlementFulfillmentStore::claim_due(
         &store,
         "a1-deadline-worker".to_owned(),
@@ -687,7 +690,7 @@ async fn postgres_resent_cod_claim_projects_the_first_send_deadline_separately()
     assert_eq!(claims.len(), 2, "两笔重寄 COD 都应被领取：{claims:?}");
     for (recovery_id, window) in [(seven_day, Duration::days(7)), (pre_season, Duration::hours(24))]
     {
-        let (payment_obligation, created_at, deadline): (Uuid, DateTime<Utc>, DateTime<Utc>) =
+        let (payment_obligation, created_at, deadline): (Uuid, Timestamp, Timestamp) =
             sqlx::query_as(
                 "SELECT payment_obligation_id, created_at, payment_deadline_at
                  FROM public.settlement_recoveries WHERE id = $1",
@@ -701,12 +704,12 @@ async fn postgres_resent_cod_claim_projects_the_first_send_deadline_separately()
             .find(|claim| claim.obligation_id.as_uuid() == payment_obligation)
             .expect("必须领取到该 recovery 的付款履约");
         assert_eq!(
-            claim.initial_payment_deadline_at.map(|value| value.timestamp_micros()),
+            claim.initial_payment_deadline_at.map(auction_time::Timestamp::timestamp_micros),
             Some((created_at + window).timestamp_micros()),
             "正文期限必须是首寄期限 D0"
         );
         assert_eq!(
-            claim.payment_deadline_at.map(|value| value.timestamp_micros()),
+            claim.payment_deadline_at.map(auction_time::Timestamp::timestamp_micros),
             Some(deadline.timestamp_micros()),
             "轮询聚焦仍用重寄后重新起算的当前期限"
         );
@@ -759,7 +762,7 @@ async fn advance(
     store: &DatabaseStore,
 ) -> auction_application::recovery::RecoveryResolutionAdvance {
     store
-        .advance_due_cod_return(Utc::now())
+        .advance_due_cod_return(Timestamp::now())
         .await
         .expect("COD 退回推进不报错")
         .expect("领取到到期的 COD 退回")
@@ -806,7 +809,7 @@ async fn postgres_cod_advance_blocks_returns_that_cannot_be_attributed() {
         assert!(!blocked.completed);
     }
     assert!(
-        store.advance_due_cod_return(Utc::now()).await.expect("排空不报错").is_none(),
+        store.advance_due_cod_return(Timestamp::now()).await.expect("排空不报错").is_none(),
         "阻断后的恢复记录不再被自动推进领取"
     );
 
@@ -828,7 +831,7 @@ async fn postgres_cod_advance_blocks_returns_that_cannot_be_attributed() {
         assert_eq!(blocking_code.as_deref(), Some("send_unattributed"));
         assert!(return_mail.is_some(), "当前退件与收回证明保留，供人工核对");
         let (payment, delivery) = payment_of(pool, recovery_id).await;
-        let (status, fence, sending_at): (String, i64, Option<DateTime<Utc>>) = sqlx::query_as(
+        let (status, fence, sending_at): (String, i64, Option<Timestamp>) = sqlx::query_as(
             "SELECT status, fencing_version, sending_at FROM public.deliveries WHERE id = $1",
         )
         .bind(delivery)
@@ -970,7 +973,7 @@ async fn postgres_cod_resend_supersedes_a_queued_original_but_not_a_sending_one(
 
 /// 领取一轮到期投递。
 async fn claim_deliveries(store: &DatabaseStore) -> Vec<DeliveryWorkClaim> {
-    let now = Utc::now();
+    let now = Timestamp::now();
     let grace = StdDuration::from_secs(60);
     DeliveryWorkStore::begin_claim_cycle(store, now, grace).await.expect("领取前清理");
     DeliveryWorkStore::claim_due(
@@ -999,7 +1002,7 @@ async fn fence_cod(store: &DatabaseStore, claim: &DeliveryWorkClaim) -> Delivery
         credential: None,
     }));
     store
-        .start_sending_authorized(claim.clone(), Utc::now(), None, Some(&expectation))
+        .start_sending_authorized(claim.clone(), Timestamp::now(), None, Some(&expectation))
         .await
         .expect("发送围栏必须确定结束")
 }
@@ -1067,7 +1070,9 @@ async fn postgres_delivery_worker_never_sends_a_cod_whose_return_recovery_owns()
         "对照组照常进入 sending"
     );
 
-    DeliveryWorkStore::release(&store, owned_claim, Utc::now()).await.expect("释放未开始的领取");
+    DeliveryWorkStore::release(&store, owned_claim, Timestamp::now())
+        .await
+        .expect("释放未开始的领取");
     assert!(
         claim_deliveries(&store).await.iter().all(|claim| claim.delivery_id != owned_delivery),
         "退件到达之后原 COD 不再被领取"

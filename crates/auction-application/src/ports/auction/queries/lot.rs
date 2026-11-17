@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use auction_domain::EquipmentId;
 use auction_domain::equipment::taxonomy::EquipmentCategory;
 use auction_domain::valid_text as public_text;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -78,8 +78,8 @@ pub struct PublicAuctionProjection {
     pub projection_kind: String,
     pub presentation_mode: String,
     pub bidding_open: bool,
-    pub opens_at: DateTime<Utc>,
-    pub scheduled_ends_at: Option<DateTime<Utc>>,
+    pub opens_at: Timestamp,
+    pub scheduled_ends_at: Option<Timestamp>,
     pub preview_revision: i64,
     pub final_restriction: Option<PublicFinalRestriction>,
 }
@@ -242,18 +242,14 @@ pub struct PublicLiveLotSummary {
     pub next_bid: i64,
     pub has_leader: bool,
     pub leader_name: Option<String>,
-    pub effective_end_at: Option<DateTime<Utc>>,
+    pub effective_end_at: Option<Timestamp>,
     pub state_version: i64,
     pub equipment: PublicEquipment,
 }
 
 impl PublicLiveLotSummary {
     /// 校验正式 lot 的价格、领先者、状态和结束时间关系。
-    pub fn validate(
-        &self,
-        auction_status: &str,
-        opens_at: DateTime<Utc>,
-    ) -> Result<(), &'static str> {
+    pub fn validate(&self, auction_status: &str, opens_at: Timestamp) -> Result<(), &'static str> {
         if self.id.is_nil()
             || self.equipment_id.is_nil()
             || self.auction_id.is_nil()
@@ -294,11 +290,7 @@ pub struct PublicLiveLotDetail {
 
 impl PublicLiveLotDetail {
     /// 校验正式详情的装备属性是可公开的 JSON 对象。
-    pub fn validate(
-        &self,
-        auction_status: &str,
-        opens_at: DateTime<Utc>,
-    ) -> Result<(), &'static str> {
+    pub fn validate(&self, auction_status: &str, opens_at: Timestamp) -> Result<(), &'static str> {
         self.summary.validate(auction_status, opens_at)?;
         if !self.summary.equipment.attributes.is_object() {
             return Err("公开正式 lot 详情装备属性无效");
@@ -532,7 +524,7 @@ fn valid_primary_attribute_initials(value: &str) -> bool {
         })
 }
 
-fn is_go_zero_time(value: DateTime<Utc>) -> bool {
+fn is_go_zero_time(value: Timestamp) -> bool {
     value.timestamp() == -62_135_596_800 && value.timestamp_subsec_nanos() == 0
 }
 

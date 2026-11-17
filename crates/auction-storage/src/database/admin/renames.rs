@@ -25,7 +25,7 @@ async fn list_postgres(
     store: &crate::database::DatabaseStore,
     request: AdminRenameListRequest,
 ) -> Result<AdminRenamePage, ApplicationError> {
-    use chrono::{DateTime, Utc};
+    use auction_time::Timestamp;
     use sqlx::Row;
 
     let mut transaction = store
@@ -93,10 +93,10 @@ async fn list_postgres(
                     .try_get("actor")
                     .map_err(|error| storage_error_from(error, "读取改名 actor 失败"))?,
                 created_at: row
-                    .try_get::<DateTime<Utc>, _>("created_at")
+                    .try_get::<Timestamp, _>("created_at")
                     .map_err(|error| storage_error_from(error, "读取改名时间失败"))?,
                 reverted_at: row
-                    .try_get::<Option<DateTime<Utc>>, _>("reverted_at")
+                    .try_get::<Option<Timestamp>, _>("reverted_at")
                     .map_err(|error| storage_error_from(error, "读取改名回滚时间失败"))?,
             };
             if record.validate() {

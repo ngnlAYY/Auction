@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use super::{
     model::{
@@ -29,21 +29,21 @@ pub struct ProcessState {
     pub process_role: ProcessRole,
     pub instance_id: String,
     pub version: String,
-    pub started_at: DateTime<Utc>,
+    pub started_at: Timestamp,
     pub status: HeartbeatStatus,
     pub readiness: bool,
     /// legacy/shadow 为全部失败；classified 仅为阻断就绪的失败。
     pub audit_failure_count: i64,
     pub tracing: TracingHealth,
-    pub observed_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
+    pub observed_at: Timestamp,
+    pub expires_at: Timestamp,
 }
 
 #[derive(Debug, Clone)]
 pub struct ProcessSnapshot {
     pub processes: Vec<ProcessState>,
     pub summary: HealthSummary,
-    pub observed_at: Option<DateTime<Utc>>,
+    pub observed_at: Option<Timestamp>,
     pub missing_services: Vec<ServiceName>,
 }
 
@@ -69,7 +69,7 @@ impl DashboardStatus {
 #[derive(Debug, Clone)]
 pub struct DashboardSection<T> {
     pub status: DashboardStatus,
-    pub observed_at: Option<DateTime<Utc>>,
+    pub observed_at: Option<Timestamp>,
     pub error_code: Option<&'static str>,
     pub data: Option<T>,
 }

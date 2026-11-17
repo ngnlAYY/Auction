@@ -2,7 +2,7 @@
 
 use auction_application::scheduling::ScheduledRoundPhase;
 use auction_domain::{CommandId, deterministic_uuid, legacy_natural_key_uuid};
-use chrono::NaiveDate;
+use jiff::civil;
 use uuid::Uuid;
 
 pub(crate) fn bounded_text(value: String, max_chars: usize) -> String {
@@ -10,8 +10,8 @@ pub(crate) fn bounded_text(value: String, max_chars: usize) -> String {
 }
 
 /// 轮次在 world 内的身份片段：早鸟场次用时段键，常规周沿用 `YYYY-MM-DD`。
-pub(crate) fn round_identity(local_week: NaiveDate, slot_key: Option<&str>) -> String {
-    slot_key.map_or_else(|| local_week.format("%Y-%m-%d").to_string(), str::to_owned)
+pub(crate) fn round_identity(local_week: civil::Date, slot_key: Option<&str>) -> String {
+    slot_key.map_or_else(|| local_week.strftime("%Y-%m-%d").to_string(), str::to_owned)
 }
 
 pub(crate) fn command_id(

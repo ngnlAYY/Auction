@@ -1,7 +1,7 @@
 //! delivery outbox due claim 与 claim payload 映射。
 
 use auction_application::delivery::{DeliveryClaimExclusions, DeliveryWorkClaim};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Row;
 use sqlx::postgres::PgRow;
 use uuid::Uuid;
@@ -14,7 +14,7 @@ use crate::database::delivery::audit::{
 /// 每一轮领取前执行一次过期回收与退役扫描；清理失败阻断本轮领取。
 pub(super) async fn begin_claim_cycle_postgres(
     store: &crate::database::DatabaseStore,
-    now: DateTime<Utc>,
+    now: Timestamp,
     sending_grace: std::time::Duration,
 ) -> Result<(), auction_application::core::RepositoryError> {
     store
@@ -56,8 +56,8 @@ pub(super) async fn begin_claim_cycle_postgres(
 pub(super) async fn claim_postgres(
     store: &crate::database::DatabaseStore,
     worker_id: &str,
-    now: DateTime<Utc>,
-    lease_until: DateTime<Utc>,
+    now: Timestamp,
+    lease_until: Timestamp,
     exclusions: &DeliveryClaimExclusions,
     limit: u16,
 ) -> Result<Vec<DeliveryWorkClaim>, auction_application::core::RepositoryError> {
@@ -297,9 +297,9 @@ pub(super) fn map_claim(
     row: &PgRow,
     worker_id: &str,
     lease_token: Uuid,
-    lease_until: DateTime<Utc>,
+    lease_until: Timestamp,
     fencing_version: i64,
-    claimed_at: DateTime<Utc>,
+    claimed_at: Timestamp,
     attempt_count: u32,
 ) -> Result<DeliveryWorkClaim, auction_application::core::RepositoryError> {
     let request_digest: Vec<u8> = row.try_get("request_digest").map_err(map_storage_error)?;

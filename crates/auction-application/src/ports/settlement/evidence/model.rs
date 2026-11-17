@@ -3,7 +3,7 @@
 use std::time::Instant;
 
 use auction_domain::{EquipmentId, SettlementWorld};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
@@ -139,7 +139,7 @@ pub struct MailAccountEvidenceBinding {
     pub authenticated_uid: String,
     pub player_name: String,
     pub world: SettlementWorld,
-    pub observed_at: DateTime<Utc>,
+    pub observed_at: Timestamp,
     pub protocol_version: &'static str,
     pub digest: [u8; 32],
 }
@@ -188,7 +188,7 @@ pub struct VerifiedMailEquipmentPresence {
     pub equipment_id: EquipmentId,
     pub external_equipment_id: String,
     pub category: String,
-    pub observed_at: DateTime<Utc>,
+    pub observed_at: Timestamp,
     pub digest: [u8; 32],
 }
 
@@ -211,7 +211,7 @@ impl VerifiedMailEquipmentPresence {
 pub struct VerifiedMainCashObservation {
     pub binding: MailAccountEvidenceBinding,
     pub credits: i64,
-    pub observed_at: DateTime<Utc>,
+    pub observed_at: Timestamp,
     pub digest: [u8; 32],
 }
 
@@ -236,8 +236,8 @@ pub struct SettlementInternalEvidenceSnapshot {
     pub equipment: Option<VerifiedMailEquipmentPresence>,
     pub main_cash: Option<VerifiedMainCashObservation>,
     pub sent_collection: Option<crate::ports::settlement::VerifiedMailSentCollectionObservation>,
-    pub observed_from: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
+    pub observed_from: Timestamp,
+    pub expires_at: Timestamp,
     pub digest: [u8; 32],
 }
 
@@ -268,7 +268,7 @@ impl SettlementInternalEvidenceSnapshot {
             && self.identity.validate()
             && self.expires_at > self.observed_from
             && self.expires_at - self.observed_from
-                <= chrono::Duration::seconds(INTERNAL_EVIDENCE_MAX_AGE_SECONDS)
+                <= auction_time::Duration::seconds(INTERNAL_EVIDENCE_MAX_AGE_SECONDS)
             && self.equipment.as_ref().is_none_or(|value| {
                 value.binding.validate()
                     && self.identity.same_account(&value.binding)
@@ -301,13 +301,13 @@ impl SettlementInternalEvidenceSnapshot {
     }
 
     /// 最早观测到最终提交均受同一个证据预算窗口约束，禁止未来时间证明。
-    pub fn valid_at(&self, now: DateTime<Utc>) -> bool {
-        let valid_time = |time: DateTime<Utc>| time >= self.observed_from && time <= now;
+    pub fn valid_at(&self, now: Timestamp) -> bool {
+        let valid_time = |time: Timestamp| time >= self.observed_from && time <= now;
         self.validate()
             && self.observed_from <= now
             && now < self.expires_at
             && now - self.observed_from
-                <= chrono::Duration::seconds(INTERNAL_EVIDENCE_MAX_AGE_SECONDS)
+                <= auction_time::Duration::seconds(INTERNAL_EVIDENCE_MAX_AGE_SECONDS)
             && valid_time(self.identity.observed_at)
             && self.equipment.as_ref().is_none_or(|value| {
                 valid_time(value.observed_at) && valid_time(value.binding.observed_at)

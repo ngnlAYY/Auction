@@ -6,7 +6,7 @@
 use auction_application::admin::AdminRuntimeMailTemplatesConfig;
 use auction_application::core::CompetitionTransactionError;
 use auction_domain::{AcceptedBid, LotLeadership, UserId};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Postgres;
 use sqlx::Row;
 use uuid::Uuid;
@@ -27,7 +27,7 @@ pub(crate) async fn auto_watch(
     user_id: Uuid,
     lot_id: Uuid,
     action: &str,
-    occurred_at: DateTime<Utc>,
+    occurred_at: Timestamp,
 ) -> Result<bool, CompetitionTransactionError> {
     let version: Option<i64> = sqlx::query_scalar(
         "INSERT INTO public.lot_watches
@@ -55,7 +55,7 @@ pub(crate) async fn auto_watch(
 pub(crate) async fn apply_bid(
     transaction: &mut Transaction<'_, Postgres>,
     bid: &AcceptedBid,
-    occurred_at: DateTime<Utc>,
+    occurred_at: Timestamp,
     notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
     public_base_url: Option<&str>,
     mail_templates: &AdminRuntimeMailTemplatesConfig,

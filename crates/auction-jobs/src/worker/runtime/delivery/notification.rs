@@ -7,7 +7,7 @@ use auction_application::delivery::DeliveryWorkClaim;
 use auction_application::notification_metrics::{
     NotificationFailure, NotificationKind, NotificationRecorder, NotificationStage,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 /// 每次发送的估算邮资消耗（Credits）。
 ///
@@ -24,10 +24,7 @@ pub(super) fn kind_of(claim: &DeliveryWorkClaim) -> Option<NotificationKind> {
 }
 
 /// 创建到终态的送达延迟；负值（宿主时钟回拨）按零处理，不写入虚假的历史分布。
-pub(super) fn latency(
-    created_at: DateTime<Utc>,
-    completed_at: DateTime<Utc>,
-) -> std::time::Duration {
+pub(super) fn latency(created_at: Timestamp, completed_at: Timestamp) -> std::time::Duration {
     (completed_at - created_at).to_std().unwrap_or_default()
 }
 
@@ -71,7 +68,7 @@ mod tests {
     use auction_application::notification_metrics::{
         NotificationKind, NotificationRecorder, NotificationStage,
     };
-    use chrono::{TimeZone, Utc};
+    use auction_time::Timestamp;
     use serde_json::json;
 
     use super::*;
@@ -109,12 +106,12 @@ mod tests {
             recipient: "player".to_owned(),
             payload: json!({"operation": operation, "template": template}),
             lease_token: uuid::Uuid::nil(),
-            lease_until: Utc.timestamp_opt(0, 0).unwrap(),
+            lease_until: Timestamp::from_timestamp(0, 0).unwrap(),
             fencing_version: 1,
             attempt_count: 1,
             worker_id: "worker".to_owned(),
-            claimed_at: Utc.timestamp_opt(0, 0).unwrap(),
-            created_at: Utc.timestamp_opt(0, 0).unwrap(),
+            claimed_at: Timestamp::from_timestamp(0, 0).unwrap(),
+            created_at: Timestamp::from_timestamp(0, 0).unwrap(),
         }
     }
 
@@ -127,7 +124,10 @@ mod tests {
         record_sent(
             &recorder,
             kind,
-            latency(Utc.timestamp_opt(100, 0).unwrap(), Utc.timestamp_opt(190, 0).unwrap()),
+            latency(
+                Timestamp::from_timestamp(100, 0).unwrap(),
+                Timestamp::from_timestamp(190, 0).unwrap(),
+            ),
         );
         assert_eq!(
             recorder.stages.lock().unwrap().as_slice(),
@@ -169,7 +169,10 @@ mod tests {
     #[test]
     fn negative_clock_skew_becomes_zero_latency() {
         assert_eq!(
-            latency(Utc.timestamp_opt(100, 0).unwrap(), Utc.timestamp_opt(90, 0).unwrap()),
+            latency(
+                Timestamp::from_timestamp(100, 0).unwrap(),
+                Timestamp::from_timestamp(90, 0).unwrap()
+            ),
             std::time::Duration::ZERO
         );
     }

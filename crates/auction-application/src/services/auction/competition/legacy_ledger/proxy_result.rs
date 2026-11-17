@@ -4,7 +4,7 @@ use auction_domain::{
     BidAmount, CompetitionPlan, LotBidState, LotId, ProxyAuthorization, ProxyAuthorizationId,
     ProxyStatus, UserId,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use uuid::Uuid;
 
@@ -92,7 +92,7 @@ impl LegacyProxyResult {
         plan: &CompetitionPlan,
         previous_transitions: &[CompetitionProxyTransitionRecord],
         quota_limit: u32,
-        created_at: DateTime<Utc>,
+        created_at: Timestamp,
     ) -> Result<Self, ApplicationError> {
         let expected_id = match command {
             CompetitionCommand::CreateProxy(create) => ProxyAuthorizationId::from_uuid(

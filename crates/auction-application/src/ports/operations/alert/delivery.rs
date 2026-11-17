@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use super::digest::{body_digest, canonical_summary};
@@ -18,7 +18,7 @@ use crate::ports::core::RequestHash;
 #[derive(Debug, Clone)]
 pub struct OperationsAlertObserveCommand {
     pub observations: Vec<OperationsAlertSourceObservation>,
-    pub now: DateTime<Utc>,
+    pub now: Timestamp,
     pub batch_window: Duration,
 }
 
@@ -60,7 +60,7 @@ impl OperationsAlertObserveCommand {
 #[derive(Debug, Clone)]
 pub struct OperationsAlertHostObserveCommand {
     pub observations: Vec<OperationsAlertSourceObservation>,
-    pub now: DateTime<Utc>,
+    pub now: Timestamp,
     pub batch_window: Duration,
 }
 
@@ -101,8 +101,8 @@ impl OperationsAlertHostObserveCommand {
 #[derive(Debug, Clone)]
 pub struct OperationsAlertClaimRequest {
     pub target: OperationsAlertTarget,
-    pub now: DateTime<Utc>,
-    pub lease_until: DateTime<Utc>,
+    pub now: Timestamp,
+    pub lease_until: Timestamp,
     pub max_items: usize,
     pub max_body_bytes: usize,
 }
@@ -145,7 +145,7 @@ pub struct OperationsAlertBatchClaim {
     pub items: Vec<OperationsAlertBatchItem>,
     pub claim_token: Uuid,
     pub claim_fencing: i64,
-    pub lease_until: DateTime<Utc>,
+    pub lease_until: Timestamp,
     pub attempt_count: u32,
 }
 

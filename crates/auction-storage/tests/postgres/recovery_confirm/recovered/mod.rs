@@ -31,7 +31,7 @@ use auction_application::settlement::{
 };
 use auction_domain::CommandId;
 use auction_storage::DatabaseStore;
-use chrono::{Duration, Utc};
+use auction_time::{Duration, Timestamp};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -47,7 +47,7 @@ fn deadline() -> std::time::Instant {
 }
 
 async fn claim_refund(store: &DatabaseStore, refund: Uuid) -> SettlementFulfillmentClaim {
-    let now = Utc::now();
+    let now = Timestamp::now();
     SettlementFulfillmentStore::claim_due(
         store,
         "recovered-refund-worker".to_owned(),
@@ -160,7 +160,12 @@ async fn fund_and_activate_refund(
     };
     let custody = evidence(preparation.prepare_command_id.as_uuid(), &claim, credential);
     let prepared = store
-        .prepare_delivery(claim.clone(), preparation, Utc::now(), Some((&custody, deadline())))
+        .prepare_delivery(
+            claim.clone(),
+            preparation,
+            Timestamp::now(),
+            Some((&custody, deadline())),
+        )
         .await
         .expect("退款 prepare");
     let next = prepared.next_claim;
@@ -172,7 +177,7 @@ async fn fund_and_activate_refund(
             next.clone(),
             activate,
             RequestHash::from_canonical_bytes(b"recovered-refund-activate"),
-            Utc::now(),
+            Timestamp::now(),
             Some((&custody, deadline())),
         )
         .await
@@ -429,7 +434,7 @@ async fn snapshot_at(
                 .with_disposition_read_mode_baseline(mode),
         )
         .snapshot(
-            Utc::now(),
+            Timestamp::now(),
             OperationsAlertCollectionOverdueRead::CountWithItems(StdDuration::from_secs(3_600)),
         )
         .await

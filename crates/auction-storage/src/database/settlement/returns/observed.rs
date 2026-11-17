@@ -15,7 +15,7 @@ use auction_application::delivery::DeliveryTakeExpectation;
 use auction_application::mail::MailDeliveryOrigin;
 use auction_application::settlement::SettlementReturnProgress;
 use auction_domain::{SettlementReturnCaseStatus, SettlementReturnTakeUnknownReason};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::{Value, json};
 use sqlx::Postgres;
 use uuid::Uuid;
@@ -148,7 +148,7 @@ pub(crate) struct TakeObservation<'a> {
 pub(crate) async fn record_take_observation(
     tx: &mut Transaction<'_, Postgres>,
     observation: &TakeObservation<'_>,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<Option<SettlementReturnProgress>, ReturnTransactionError> {
     if !observation.reason.observed() || observation.fencing_version <= 0 {
         return Ok(None);

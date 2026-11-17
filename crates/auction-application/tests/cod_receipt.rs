@@ -13,16 +13,15 @@ use auction_domain::{
     LotId, SettlementAmount, SettlementId, SettlementLine, SettlementObligationKind,
     SettlementWorld,
 };
-use chrono::{DateTime, TimeZone, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 fn uuid(seed: u64) -> Uuid {
     Uuid::from_u64_pair(seed, seed)
 }
 
-fn at(minute: u32) -> DateTime<Utc> {
-    Utc.with_ymd_and_hms(2026, 11, 2, 12, minute, 0)
-        .single()
+fn at(minute: u32) -> Timestamp {
+    Timestamp::from_ymd_hms(2026, 11, 2, 12, minute, 0)
         .unwrap_or_else(|| panic!("固定测试时间必须存在"))
 }
 
@@ -33,9 +32,8 @@ const EQUIPMENT: u64 = 60;
 const DEADLINE_TEXT: &str = "2026-11-22T12:19:28Z";
 
 /// 恢复记录的首寄付款期限 D0（创建时刻加冻结策略版本的付款期限）。
-fn deadline() -> DateTime<Utc> {
-    Utc.with_ymd_and_hms(2026, 11, 22, 12, 19, 28)
-        .single()
+fn deadline() -> Timestamp {
+    Timestamp::from_ymd_hms(2026, 11, 22, 12, 19, 28)
         .unwrap_or_else(|| panic!("固定付款期限必须存在"))
 }
 

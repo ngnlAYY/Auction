@@ -3,7 +3,7 @@
 //! 和审计仍由应用服务与存储事务共同拥有。
 
 use auction_domain::{CommandId, CompetitionPlan, LotId, ProxyAuthorizationId, legacy_worker_uuid};
-use chrono::{DateTime, SecondsFormat, Utc};
+use auction_time::{SecondsFormat, Timestamp};
 use serde::Serialize;
 
 use crate::errors::ApplicationError;
@@ -22,7 +22,7 @@ pub struct SlowProxyDue {
     pub lot_id: LotId,
     pub authorization_id: ProxyAuthorizationId,
     pub generation: u64,
-    pub due_at: DateTime<Utc>,
+    pub due_at: Timestamp,
 }
 
 impl SlowProxyDue {
@@ -81,7 +81,7 @@ pub struct ExecuteSlowProxyCommand {
     pub lot_id: LotId,
     pub authorization_id: ProxyAuthorizationId,
     pub generation: u64,
-    pub due_at: DateTime<Utc>,
+    pub due_at: Timestamp,
     pub request_hash: RequestHash,
 }
 
@@ -109,10 +109,7 @@ pub trait SlowProxyDueReader: Send + Sync {
     fn list_due_slow_proxies(&self, limit: u16) -> ApplicationFuture<'_, Vec<SlowProxyDue>>;
 
     /// 返回严格晚于 `now` 的最早慢速代理到期时刻，只作 Worker 唤醒提示；执行仍重读全部 fence。
-    fn next_slow_proxy_due_at(
-        &self,
-        now: DateTime<Utc>,
-    ) -> ApplicationFuture<'_, Option<DateTime<Utc>>>;
+    fn next_slow_proxy_due_at(&self, now: Timestamp) -> ApplicationFuture<'_, Option<Timestamp>>;
 }
 
 /// 慢速代理命令执行端口。实现必须把账本、竞价事实、代理冻结、审计和事件原子提交。

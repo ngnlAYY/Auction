@@ -8,7 +8,7 @@ use auction_application::operations::{
     OperationsAlertReturnTakeUnknown, SETTLEMENT_RETURN_TAKE_UNKNOWN_REASONS,
 };
 use auction_domain::{SettlementObligationKind, SettlementReturnTakeUnknownReason};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -259,7 +259,7 @@ const COLLECTION_OVERDUE_LIMIT_SQL: i64 = {
 /// 长期未领取时超期件数为 0、清单为空。
 pub(super) async fn fulfillment_snapshot(
     pool: &crate::database::TrackedPool<sqlx::Postgres>,
-    now: DateTime<Utc>,
+    now: Timestamp,
     collection: OperationsAlertCollectionOverdueRead,
 ) -> Result<
     (OperationsAlertFulfillmentSnapshot, Vec<OperationsAlertCollectionOverdueItem>),
@@ -269,7 +269,7 @@ pub(super) async fn fulfillment_snapshot(
     let overdue_cutoff = collection
         .threshold()
         .map(|threshold| {
-            chrono::Duration::from_std(threshold)
+            auction_time::Duration::from_std(threshold)
                 .ok()
                 .and_then(|threshold| now.checked_sub_signed(threshold))
                 .ok_or_else(|| storage_error("长期未领取阈值超出时间范围"))
@@ -356,7 +356,7 @@ pub(super) async fn fulfillment_snapshot(
 /// 不在闭集内或重复时失败关闭。
 fn take_unknown_watermarks(
     row: &sqlx::postgres::PgRow,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<
     [OperationsAlertReturnTakeUnknown; SETTLEMENT_RETURN_TAKE_UNKNOWN_REASONS],
     ApplicationError,
@@ -364,7 +364,7 @@ fn take_unknown_watermarks(
     let column = |error| storage_error_from(error, "读取结算退件结果未知原因失败");
     let reasons: Vec<String> = row.try_get("take_unknown_reasons").map_err(column)?;
     let counts: Vec<i64> = row.try_get("take_unknown_counts").map_err(column)?;
-    let oldest: Vec<DateTime<Utc>> = row.try_get("take_unknown_oldest").map_err(column)?;
+    let oldest: Vec<Timestamp> = row.try_get("take_unknown_oldest").map_err(column)?;
     if reasons.len() != counts.len() || reasons.len() != oldest.len() {
         return Err(storage_error("结算退件结果未知原因水位不一致"));
     }
@@ -391,7 +391,7 @@ fn take_unknown_watermarks(
 /// 不在领域闭集内时失败关闭。
 fn collection_overdue_items(
     row: &sqlx::postgres::PgRow,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<Vec<OperationsAlertCollectionOverdueItem>, ApplicationError> {
     let column = |error| storage_error_from(error, "读取长期未领取清单失败");
     let obligation_ids: Vec<Uuid> = row.try_get("item_obligation_ids").map_err(column)?;
@@ -402,7 +402,7 @@ fn collection_overdue_items(
     let categories: Vec<String> = row.try_get("item_equipment_categories").map_err(column)?;
     let names: Vec<String> = row.try_get("item_equipment_names").map_err(column)?;
     let recipients: Vec<String> = row.try_get("item_recipients").map_err(column)?;
-    let sent_ats: Vec<DateTime<Utc>> = row.try_get("item_sent_ats").map_err(column)?;
+    let sent_ats: Vec<Timestamp> = row.try_get("item_sent_ats").map_err(column)?;
     let read_failures: Vec<bool> = row.try_get("item_last_read_failures").map_err(column)?;
     let count = obligation_ids.len();
     if [

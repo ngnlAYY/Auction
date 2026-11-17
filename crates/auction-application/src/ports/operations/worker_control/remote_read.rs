@@ -7,7 +7,7 @@ use std::future::Future;
 use std::pin::Pin;
 
 use auction_domain::EquipmentKey;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -85,7 +85,7 @@ pub struct WorkerEquipmentReadResponse {
     pub level: Option<i32>,
     pub tradeable: bool,
     pub attributes: Value,
-    pub collected_at: DateTime<Utc>,
+    pub collected_at: Timestamp,
     pub key: String,
 }
 
@@ -182,12 +182,12 @@ pub struct WorkerSentLookupCandidate {
     pub external_mail_id: String,
     pub recipient: String,
     pub subject: String,
-    pub sent_at: Option<DateTime<Utc>>,
+    pub sent_at: Option<Timestamp>,
     pub remaining_credits: i64,
     pub cod_pending: i64,
     pub remaining_equipment_ids: Vec<String>,
     pub collected: bool,
-    pub observed_at: DateTime<Utc>,
+    pub observed_at: Timestamp,
 }
 
 impl std::fmt::Debug for WorkerSentLookupCandidate {
@@ -214,7 +214,7 @@ pub struct WorkerSentLookupResponse {
     pub status: String,
     pub scan_complete: bool,
     pub pages_scanned: u32,
-    pub observed_at: DateTime<Utc>,
+    pub observed_at: Timestamp,
     pub candidates: Vec<WorkerSentLookupCandidate>,
 }
 
@@ -266,7 +266,7 @@ pub struct WorkerRecoveryScanRequest {
     /// 备份时刻；Sent 只报告该时刻之后的外部事实。Read Mail 的列表时间列是原始到达时间，
     /// 不能代表本地处理时间，因此 Read Mail 始终扫描到末页并与恢复库身份核对；是否完整由
     /// `read_mail_complete` 表示。
-    pub cutoff_at: DateTime<Utc>,
+    pub cutoff_at: Timestamp,
     pub maximum_pages: u32,
     /// 需要扫描 Sent 列表的世界；每个世界各一次列表枚举。
     pub sent_worlds: Vec<String>,
@@ -321,7 +321,7 @@ pub struct WorkerRecoverySentEntry {
     pub external_mail_id: String,
     pub recipient: String,
     pub subject: String,
-    pub sent_at: DateTime<Utc>,
+    pub sent_at: Timestamp,
 }
 
 /// Read Mail 列表摘要的安全投影；不含正文。
@@ -332,7 +332,7 @@ pub struct WorkerRecoveryInboundEntry {
     pub external_mail_id: String,
     pub sender: String,
     pub subject: String,
-    pub received_at: DateTime<Utc>,
+    pub received_at: Timestamp,
 }
 
 /// 恢复库可能没有记录的论坛楼层；只含稳定 ID 与楼层号。
@@ -351,7 +351,7 @@ pub struct WorkerRecoveryForumPost {
 pub struct WorkerRecoveryScanResponse {
     /// `complete`、`truncated` 或 `partial`。
     pub status: String,
-    pub observed_at: DateTime<Utc>,
+    pub observed_at: Timestamp,
     /// 执行时暂停仍生效；false 表示调用期间暂停被解除，结果不能用于隔离。
     pub paused: bool,
     pub sent_complete: bool,
@@ -465,7 +465,7 @@ impl WorkerRemoteReadPort for UnavailableWorkerRemoteRead {
 
 #[cfg(test)]
 mod tests {
-    use chrono::TimeDelta;
+    use auction_time::TimeDelta;
     use serde_json::json;
 
     use super::*;
@@ -480,7 +480,7 @@ mod tests {
             level: Some(500),
             tradeable: true,
             attributes: json!({"Primary Attributes / Strength": {"value": "+10.00"}}),
-            collected_at: Utc::now() - TimeDelta::seconds(30),
+            collected_at: Timestamp::now() - TimeDelta::seconds(30),
             key: EquipmentKey::new("0123456789").expect("test key is ten hex characters"),
         }
     }

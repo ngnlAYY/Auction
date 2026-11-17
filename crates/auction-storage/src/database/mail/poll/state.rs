@@ -3,7 +3,7 @@
 use auction_application::admin::AdminMailPollState;
 use auction_application::core::ApplicationError;
 use auction_application::mail::MailPollClaim;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::{Postgres, Row};
 
 use crate::database::TrackedPool;
@@ -13,8 +13,8 @@ use crate::database::storage_error_from;
 pub(crate) async fn ensure(
     pool: &TrackedPool<Postgres>,
     mailbox_key: &str,
-    now: DateTime<Utc>,
-    scheduled_next_at: DateTime<Utc>,
+    now: Timestamp,
+    scheduled_next_at: Timestamp,
     retry_maximum_seconds: i64,
 ) -> Result<AdminMailPollState, ApplicationError> {
     sqlx::query(
@@ -74,8 +74,8 @@ pub(crate) async fn ensure(
 pub(crate) async fn renew(
     pool: &TrackedPool<Postgres>,
     mut claim: MailPollClaim,
-    now: DateTime<Utc>,
-    lease_until: DateTime<Utc>,
+    now: Timestamp,
+    lease_until: Timestamp,
 ) -> Result<MailPollClaim, ApplicationError> {
     let mut transaction = pool
         .begin()

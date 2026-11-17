@@ -5,7 +5,7 @@ use auction_application::core::ApplicationError;
 use auction_application::forum::{
     ForumSyncRecoveryItem, ForumWriteRetryAuthorizationCommand, ForumWriteRetryAuthorizationResult,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::Value;
 use sqlx::Row;
 use uuid::Uuid;
@@ -120,7 +120,7 @@ pub(super) async fn authorize(
     let source_revision: i64 = updated
         .try_get("source_revision")
         .map_err(|error| storage_error_from(error, "读取论坛写入授权源版本失败"))?;
-    let authorized_at: DateTime<Utc> = updated
+    let authorized_at: Timestamp = updated
         .try_get("updated_at")
         .map_err(|error| storage_error_from(error, "读取论坛写入授权时间失败"))?;
     let result = ForumWriteRetryAuthorizationResult {

@@ -1,6 +1,6 @@
 //! 数据库重建预检：会话设置与目录状态采集。
 
-use chrono::Utc;
+use auction_time::Timestamp;
 use sqlx::{PgConnection, Row};
 
 use super::model::{
@@ -138,7 +138,7 @@ pub(super) async fn collect_state(
     Ok(CollectedState {
         preflight: PostgresRebuildPreflight {
             format: super::model::POSTGRES_REBUILD_PREFLIGHT_FORMAT,
-            collected_at: Utc::now(),
+            collected_at: Timestamp::now(),
             maintenance_database_name,
             server_version_num,
             target_database_name: target_database_name.to_owned(),

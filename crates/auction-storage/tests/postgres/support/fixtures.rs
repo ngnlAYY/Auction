@@ -10,13 +10,13 @@ use std::time::{Duration, Instant};
 
 use auction_application::auction::AuctionPolicyTemplate;
 use auction_storage::DatabaseStore;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use uuid::Uuid;
 
 /// 生产形状的冻结策略快照：0 ppm 的统一最低加价策略，起拍价与最低加价由用例指定。
-pub fn policy_snapshot(deadline: DateTime<Utc>, start_price: i64, minimum_increment: i64) -> Value {
+pub fn policy_snapshot(deadline: Timestamp, start_price: i64, minimum_increment: i64) -> Value {
     let template = AuctionPolicyTemplate {
         start_price,
         bid_increment_ppm: 0,

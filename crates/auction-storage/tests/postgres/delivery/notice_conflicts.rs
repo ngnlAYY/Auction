@@ -17,7 +17,7 @@ use auction_application::mail::{
 };
 use auction_domain::CommandId;
 use auction_storage::{DatabaseStore, asset_conflict_gate_passes};
-use chrono::{TimeZone, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use crate::support;
@@ -47,7 +47,7 @@ fn seller_summary() -> MailDeliveryCommand {
 }
 
 fn season_reminder() -> MailDeliveryCommand {
-    let boundary = Utc.with_ymd_and_hms(2026, 11, 1, 9, 0, 0).single().expect("合法边界");
+    let boundary = Timestamp::from_ymd_hms(2026, 11, 1, 9, 0, 0).expect("合法边界");
     MailDeliveryCommand {
         command_id: CommandId::from_uuid(Uuid::new_v4()),
         request_hash: RequestHash::new([8; 32]),

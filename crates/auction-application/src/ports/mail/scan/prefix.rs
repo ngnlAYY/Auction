@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use super::observe::numeric_mail_scan_id;
 use super::plan::{MailScanAnchor, MailScanReason, MailScanWatermark};
@@ -33,7 +33,7 @@ pub enum MailPrefixOutcome {
 pub struct MailPrefixScan {
     pub(super) anchor: MailScanAnchor,
     pub(super) anchor_value: u128,
-    pub(super) previous_at: Option<DateTime<Utc>>,
+    pub(super) previous_at: Option<Timestamp>,
     pub(super) seen: HashSet<String>,
     pub(super) newest: Option<MailScanWatermark>,
     pub(super) found_anchor: bool,
@@ -69,7 +69,7 @@ impl MailPrefixScan {
     pub fn observe(
         &mut self,
         mail_id: &str,
-        observed_at: DateTime<Utc>,
+        observed_at: Timestamp,
     ) -> Result<MailPrefixPage, MailScanReason> {
         if !self.anchor.validate() || observed_at.timestamp_nanos_opt().is_none() {
             return Err(MailScanReason::InvalidMid);

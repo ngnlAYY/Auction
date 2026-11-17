@@ -6,7 +6,7 @@ use auction_application::core::CompetitionTransactionError;
 use auction_domain::{
     BidAmount, CompetitionPlan, ProxyAuthorizationId, ProxyMode, ProxyStatus, ProxyTerminalReason,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use crate::database::auction::competition::PostgresCompetitionTransaction;
 use crate::database::auction::competition::mapping::{i64_version, invalid_state, map_sql_error};
@@ -14,7 +14,7 @@ use crate::database::auction::competition::mapping::{i64_version, invalid_state,
 pub(in crate::database::auction::competition) async fn apply_proxy_changes(
     transaction: &mut PostgresCompetitionTransaction,
     plan: &CompetitionPlan,
-    occurred_at: DateTime<Utc>,
+    occurred_at: Timestamp,
 ) -> Result<(), CompetitionTransactionError> {
     // 与命令结果共用锁后时刻，不能用可能早于上一条转换的事务开始时间。
     let created_ids: HashSet<ProxyAuthorizationId> = plan

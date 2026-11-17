@@ -36,7 +36,7 @@ use auction_domain::{
     SettlementWorld, resend_activate_command_id, resend_delivery_id, resend_prepare_command_id,
 };
 use auction_storage::DatabaseStore;
-use chrono::{DateTime, Duration, DurationRound, Timelike, Utc};
+use auction_time::{Duration, Timestamp};
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -201,7 +201,7 @@ fn delivery_evidence(
     claim: &DeliveryWorkClaim,
     strict: bool,
 ) -> SettlementInternalEvidenceSnapshot {
-    let observed = Utc::now().duration_trunc(Duration::microseconds(1)).expect("截断到微秒");
+    let observed = Timestamp::now().duration_trunc(Duration::microseconds(1)).expect("截断到微秒");
     let mut identity = MailAccountEvidenceBinding {
         credential_id: session.credential,
         credential_version: 1,
@@ -251,7 +251,7 @@ fn custody_evidence(
     claim: &SettlementFulfillmentClaim,
     operation_id: Uuid,
 ) -> SettlementInternalEvidenceSnapshot {
-    let observed = Utc::now().duration_trunc(Duration::microseconds(1)).expect("截断到微秒");
+    let observed = Timestamp::now().duration_trunc(Duration::microseconds(1)).expect("截断到微秒");
     let mut identity = MailAccountEvidenceBinding {
         credential_id: session.credential,
         credential_version: 1,
@@ -318,8 +318,8 @@ pub(super) async fn dispatch(
     let claim = SettlementFulfillmentStore::claim_due(
         store,
         "returns-funding".to_owned(),
-        Utc::now(),
-        Utc::now() + Duration::minutes(5),
+        Timestamp::now(),
+        Timestamp::now() + Duration::minutes(5),
         10,
     )
     .await
@@ -335,7 +335,7 @@ pub(super) async fn dispatch(
         store,
         claim,
         preparation,
-        Utc::now(),
+        Timestamp::now(),
         prepare_custody.as_ref().map(|evidence| (evidence, deadline)),
     )
     .await
@@ -347,7 +347,7 @@ pub(super) async fn dispatch(
         prepared.next_claim,
         activate,
         RequestHash::new([0x62; 32]),
-        Utc::now(),
+        Timestamp::now(),
         activate_custody.as_ref().map(|evidence| (evidence, deadline)),
     )
     .await
@@ -364,7 +364,7 @@ pub(super) async fn send_through_cash_gate(
     strict: bool,
     kind: Kind,
 ) -> (DeliveryWorkClaim, Arc<DeliverySendExpectation>) {
-    let now = Utc::now();
+    let now = Timestamp::now();
     let grace = StdDuration::from_secs(60);
     DeliveryWorkStore::begin_claim_cycle(store, now, grace).await.expect("领取前清理");
     let claim = DeliveryWorkStore::claim_due(
@@ -395,7 +395,7 @@ pub(super) async fn send_through_cash_gate(
     let outcome = store
         .start_sending_authorized_until(
             claim.clone(),
-            Utc::now(),
+            Timestamp::now(),
             &evidence,
             Instant::now() + StdDuration::from_secs(30),
             Some(&DeliveryPreparedExpectation::Send(Arc::clone(&expectation))),
@@ -461,7 +461,7 @@ async fn resending(
         send_through_cash_gate(store, &session, original, [0x51; 32], strict, kind).await;
     let original_result = sent_result(&original_claim, &expectation, "781001");
     store
-        .succeed(original_claim.clone(), original_result.clone(), Utc::now())
+        .succeed(original_claim.clone(), original_result.clone(), Timestamp::now())
         .await
         .expect("首寄 Sent 证明收口");
     assert_eq!(
@@ -473,13 +473,16 @@ async fn resending(
     let case = insert_inbound(
         pool,
         mid,
-        Utc::now(),
+        Timestamp::now(),
         Some(("MoogleMail", format!("[RTS] {} [{obligation}]", kind.subject()))),
         evidence(obligation, amount, &[]),
     )
     .await;
-    let consumed =
-        store.consume_due_settlement_return(Utc::now()).await.expect("消费").expect("必须消费");
+    let consumed = store
+        .consume_due_settlement_return(Timestamp::now())
+        .await
+        .expect("消费")
+        .expect("必须消费");
     assert_eq!((consumed.return_mail_id, consumed.delivery_id), (case, Some(original)));
 
     // 领回补寄：持久 Take 经投递端口以原会话执行并以成功页证明收口，返还原用途一次。
@@ -488,7 +491,7 @@ async fn resending(
         SettlementReturnCaseStatus::TakePending
     );
     store
-        .activate_due_return_take(Utc::now(), super::take_worlds())
+        .activate_due_return_take(Timestamp::now(), super::take_worlds())
         .await
         .expect("激活")
         .expect("必须激活");
@@ -516,11 +519,12 @@ async fn resending(
                     "expected_credits": amount, "expected_cod": 0, "expected_attachment_ids": [],
                 }),
             },
-            Utc::now(),
+            Timestamp::now(),
         )
         .await
         .expect("Take 成功");
-    let settled = store.settle_due_return_take(Utc::now()).await.expect("收口").expect("必须收口");
+    let settled =
+        store.settle_due_return_take(Timestamp::now()).await.expect("收口").expect("必须收口");
     assert_eq!(settled.status, SettlementReturnCaseStatus::ResendPending);
     assert_eq!(allocation_state(pool, allocation).await, ("available".to_owned(), amount, None));
 
@@ -608,12 +612,15 @@ async fn finish_resend(store: &DatabaseStore, resending: &Resending) {
         .succeed(
             resending.resend_claim.clone(),
             sent_result(&resending.resend_claim, &resending.resend_expectation, "781002"),
-            Utc::now(),
+            Timestamp::now(),
         )
         .await
         .expect("补寄 Sent 证明收口");
-    let done =
-        store.complete_due_return_resend(Utc::now()).await.expect("收口补寄").expect("必须收口");
+    let done = store
+        .complete_due_return_resend(Timestamp::now())
+        .await
+        .expect("收口补寄")
+        .expect("必须收口");
     assert_eq!(
         (done.return_mail_id, done.status),
         (resending.case, SettlementReturnCaseStatus::Resent)
@@ -698,7 +705,11 @@ async fn postgres_old_dispatch_cannot_mutate_new_funding() {
     // 不新增来源，也不追加投递审计。
     let audits_before = delivery_audits(pool, resending.original).await;
     store
-        .succeed(resending.original_claim.clone(), resending.original_result.clone(), Utc::now())
+        .succeed(
+            resending.original_claim.clone(),
+            resending.original_result.clone(),
+            Timestamp::now(),
+        )
         .await
         .expect("首寄原成功结果重放幂等");
     assert_eq!(ledger(pool).await, before, "重放不扣减或恢复资金、不新增来源");
@@ -706,7 +717,9 @@ async fn postgres_old_dispatch_cannot_mutate_new_funding() {
     assert_eq!(allocation_state(pool, resending.allocation).await, in_flight, "新一轮资金不变");
     // 拼接了补寄冻结身份的结果不是首寄的原结果：在冻结证明比较处拒绝。
     let spliced = sent_result(&resending.original_claim, &resending.resend_expectation, "781001");
-    assert!(store.succeed(resending.original_claim.clone(), spliced, Utc::now()).await.is_err());
+    assert!(
+        store.succeed(resending.original_claim.clone(), spliced, Timestamp::now()).await.is_err()
+    );
     // 迟到的失败回调：原 claim 已失效，拒绝且不触碰资金。
     assert!(
         DeliveryWorkStore::fail(
@@ -719,7 +732,7 @@ async fn postgres_old_dispatch_cannot_mutate_new_funding() {
                 external_reference: None,
                 result_metadata: json!({"operation": "send", "write_started": true}),
             },
-            Utc::now(),
+            Timestamp::now(),
         )
         .await
         .is_err()
@@ -790,7 +803,7 @@ async fn postgres_old_dispatch_cannot_mutate_new_funding() {
     let late_return = insert_inbound(
         pool,
         "998012",
-        Utc::now(),
+        Timestamp::now(),
         Some((
             "MoogleMail",
             format!("[RTS] Auction seller payout [{}]", resending.sale.seller_obligation),
@@ -798,10 +811,13 @@ async fn postgres_old_dispatch_cannot_mutate_new_funding() {
         evidence(resending.sale.seller_obligation, AMOUNT, &[]),
     )
     .await;
-    let consumed =
-        store.consume_due_settlement_return(Utc::now()).await.expect("消费").expect("必须消费");
+    let consumed = store
+        .consume_due_settlement_return(Timestamp::now())
+        .await
+        .expect("消费")
+        .expect("必须消费");
     assert_eq!((consumed.return_mail_id, consumed.delivery_id), (late_return, None));
-    assert!(store.settle_due_return_take(Utc::now()).await.expect("收口").is_none());
+    assert!(store.settle_due_return_take(Timestamp::now()).await.expect("收口").is_none());
 
     assert_eq!(allocation_state(pool, resending.allocation).await, in_flight, "新一轮资金不变");
     assert_eq!(ledger(pool).await, before, "没有新的支出、返还或来源");
@@ -830,7 +846,7 @@ async fn manual_evidence(
     pool: &PgPool,
     delivery: Uuid,
 ) -> ManualSentEvidence {
-    let (sending_at, completed_at): (Option<DateTime<Utc>>, Option<DateTime<Utc>>) =
+    let (sending_at, completed_at): (Option<Timestamp>, Option<Timestamp>) =
         sqlx::query_as("SELECT sending_at, completed_at FROM public.deliveries WHERE id = $1")
             .bind(delivery)
             .fetch_one(pool)
@@ -877,7 +893,7 @@ async fn postgres_return_resend_manual_sent_admission() {
             external_reference: None,
             result_metadata: json!({"operation": "send", "write_started": true}),
         },
-        Utc::now(),
+        Timestamp::now(),
     )
     .await
     .expect("结果未知收口");
@@ -920,8 +936,11 @@ async fn postgres_return_resend_manual_sent_admission() {
         allocation_state(pool, resending.allocation).await,
         ("spent".to_owned(), AMOUNT, Some(resending.resend))
     );
-    let done =
-        store.complete_due_return_resend(Utc::now()).await.expect("收口补寄").expect("必须收口");
+    let done = store
+        .complete_due_return_resend(Timestamp::now())
+        .await
+        .expect("收口补寄")
+        .expect("必须收口");
     assert_eq!(
         (done.return_mail_id, done.status),
         (resending.case, SettlementReturnCaseStatus::Resent)

@@ -1,7 +1,7 @@
 //! 以当前标的的最终邮件入库事实闭合旧动作；只读取历史，不把已完成退回当作当前持有证明。
 
 use auction_application::settlement::FundingError;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use futures_util::TryStreamExt;
 use serde::Deserialize;
 use sqlx::{Postgres, Row};
@@ -94,7 +94,7 @@ pub(super) async fn closed_source_history(
     let seller: String = row.try_get("seller").map_err(sql_error)?;
     let reference: Option<String> = row.try_get("external_reference").map_err(sql_error)?;
     let count: serde_json::Value = row.try_get("attachment_count").map_err(sql_error)?;
-    let completed_at: DateTime<Utc> = row.try_get("completed_at").map_err(sql_error)?;
+    let completed_at: Timestamp = row.try_get("completed_at").map_err(sql_error)?;
     let Some(payload) = source_payload(&payload, &origin_id, command_id, target, "take", &mid)
     else {
         return Ok(Vec::new());

@@ -4,7 +4,7 @@
 use std::future::Future;
 
 use auction_domain::{CommandId, valid_text};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -56,7 +56,7 @@ pub struct AdminRulesDocument {
     pub markdown: String,
     pub published_by: String,
     pub revision: i64,
-    pub published_at: DateTime<Utc>,
+    pub published_at: Timestamp,
 }
 
 impl AdminRulesDocument {
@@ -204,7 +204,7 @@ pub trait AdminRulesTransaction: Send {
     fn publish_document(
         &mut self,
         command: AdminRulesPublishCommand,
-        published_at: DateTime<Utc>,
+        published_at: Timestamp,
     ) -> impl Future<Output = Result<AdminRulesDocument, AdminRulesTransactionError>> + Send;
 
     fn append_publish_record(

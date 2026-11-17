@@ -3,7 +3,6 @@
 use auction_application::auction::AuctionLifecycleContext;
 use auction_application::core::CompetitionTransactionError;
 use auction_domain::{Auction, AuctionId, AuctionStatus};
-use chrono::NaiveDate;
 use serde_json::Value;
 use sqlx::Row;
 
@@ -125,7 +124,8 @@ pub(super) async fn load_lifecycle_context_postgres(
         final_phase_at: row.try_get("final_phase_at").map_err(map_sql_error)?,
         settled_at: row.try_get("settled_at").map_err(map_sql_error)?,
         scheduled_round_local_week: row
-            .try_get::<Option<NaiveDate>, _>("scheduled_round_local_week")
-            .map_err(map_sql_error)?,
+            .try_get::<Option<jiff_sqlx::Date>, _>("scheduled_round_local_week")
+            .map_err(map_sql_error)?
+            .map(jiff_sqlx::Date::to_jiff),
     }))
 }

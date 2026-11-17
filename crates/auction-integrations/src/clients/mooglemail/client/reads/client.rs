@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Instant;
 
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
-use chrono::Utc;
+use auction_time::Timestamp;
 use tokio::sync::{RwLock, watch};
 use tokio::time;
 
@@ -100,7 +100,7 @@ impl MoogleMailClient {
                 let epoch = Arc::new(ReadEpoch {
                     revision: scope.revision.load(Ordering::Acquire),
                     started: Instant::now(),
-                    observed_at: Utc::now(),
+                    observed_at: Timestamp::now(),
                     requests: StdMutex::new(ReadRequests::default()),
                     lists: lists::ListCells::default(),
                 });
@@ -132,7 +132,7 @@ impl MoogleMailClient {
         let epoch = Arc::new(ReadEpoch {
             revision: scope.revision.load(Ordering::Acquire),
             started: Instant::now(),
-            observed_at: Utc::now(),
+            observed_at: Timestamp::now(),
             requests: StdMutex::new(ReadRequests::default()),
             lists: lists::ListCells::default(),
         });

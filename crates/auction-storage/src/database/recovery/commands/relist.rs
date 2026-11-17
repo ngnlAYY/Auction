@@ -5,7 +5,7 @@ use auction_application::recovery::{
     RecoveryConfirmationResult,
 };
 use auction_domain::{CommandId, legacy_natural_key_uuid};
-use chrono::{DateTime, Duration as ChronoDuration, Utc};
+use auction_time::{TimeDelta, Timestamp};
 use serde_json::json;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
@@ -32,7 +32,7 @@ pub(super) async fn relist_recovery(
     command_id: CommandId,
     preview_event_id: Uuid,
     action: RecoveryConfirmationAction,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<RelistResult, RecoveryCommandError> {
     // 原始收件或成交场次开拍后已跨过赛季边界的装备永不重挂。
     // 收件事实不可变，避免普通场次被改期到新赛季后把旧装备误认成新赛季资产。
@@ -229,12 +229,12 @@ pub(super) async fn update_recovery(
     recovery: &RecoveryRow,
     relist: &RelistResult,
     next_state_version: i64,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<i64, RecoveryCommandError> {
     let completed_at = (relist.stage == "completed").then_some(now);
     // 永久阻断的重挂不再安排自动重试，等待 Admin 按阻断码处理。
     let next_attempt_at = if relist.stage == "relist_pending" && relist.blocking_code.is_none() {
-        Some(now.checked_add_signed(ChronoDuration::minutes(1)).ok_or_else(|| {
+        Some(now.checked_add_signed(TimeDelta::minutes(1)).ok_or_else(|| {
             RecoveryCommandError::Failed("recovery relist 重试时间溢出".to_owned())
         })?)
     } else {
@@ -271,7 +271,7 @@ pub(super) async fn insert_recovery_command(
     transaction: &mut Transaction<'_, Postgres>,
     command: &RecoveryConfirmationCommand,
     result: &RecoveryConfirmationResult,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<(), RecoveryCommandError> {
     let payload =
         serde_json::to_value(result).map_err(|_| RecoveryCommandError::InvalidStoredResult)?;

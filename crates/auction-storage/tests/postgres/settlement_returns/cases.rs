@@ -21,7 +21,7 @@ use auction_application::settlement::{
     SettlementReturnMatch, SettlementReturnWorkStore,
 };
 use auction_domain::{CommandId, SettlementReturnAction, SettlementReturnCaseStatus};
-use chrono::{Duration, Utc};
+use auction_time::{Duration, Timestamp};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -67,7 +67,7 @@ async fn returned_payout(
     )
     .await;
     let consumed = store
-        .consume_due_settlement_return(Utc::now())
+        .consume_due_settlement_return(Timestamp::now())
         .await
         .expect("消费退件")
         .expect("必须领取到退件");
@@ -126,7 +126,7 @@ async fn handle(
         version,
         action,
         "admin-returns",
-        Utc::now(),
+        Timestamp::now(),
     )
     .expect("构造退件命令");
     store.handle_settlement_return(command).await
@@ -243,7 +243,9 @@ async fn postgres_return_cases_include_quarantined_and_terminal_evidence() {
         evidence(unknown, 5, &[]),
     )
     .await;
-    while store.consume_due_settlement_return(Utc::now()).await.expect("消费退件").is_some() {}
+    while store.consume_due_settlement_return(Timestamp::now()).await.expect("消费退件").is_some()
+    {
+    }
 
     let page = store
         .list_settlement_returns(SettlementReturnListRequest { limit: 50, ..Default::default() })
@@ -427,7 +429,7 @@ async fn postgres_return_action_requires_exact_authenticated_binding() {
         evidence(unknown, 5, &[]),
     )
     .await;
-    while store.consume_due_settlement_return(Utc::now()).await.expect("消费").is_some() {}
+    while store.consume_due_settlement_return(Timestamp::now()).await.expect("消费").is_some() {}
     let deliveries_before =
         scalar(pool, "SELECT count(*) FROM public.deliveries WHERE $1 IS NOT NULL", unknown).await;
 
@@ -537,7 +539,7 @@ async fn postgres_return_take_conflicts_with_intake_and_recovery() {
         .await
         .expect("领回代管");
     let progress = store
-        .activate_due_return_take(Utc::now(), super::take_worlds())
+        .activate_due_return_take(Timestamp::now(), super::take_worlds())
         .await
         .expect("激活 Take")
         .expect("必须激活");
@@ -594,17 +596,18 @@ async fn postgres_return_take_unknown_never_restores_funds() {
         .await
         .expect("领回补寄");
     store
-        .activate_due_return_take(Utc::now(), super::take_worlds())
+        .activate_due_return_take(Timestamp::now(), super::take_worlds())
         .await
         .expect("激活")
         .expect("必须激活");
     // 投递未到终态前不收口。
-    assert!(store.settle_due_return_take(Utc::now()).await.expect("收口").is_none());
+    assert!(store.settle_due_return_take(Timestamp::now()).await.expect("收口").is_none());
     let take = take_delivery(pool, returned.case).await;
     finish_take(pool, take, false).await;
     let deliveries_before =
         scalar(pool, "SELECT count(*) FROM public.deliveries WHERE $1 IS NOT NULL", take).await;
-    let progress = store.settle_due_return_take(Utc::now()).await.expect("收口").expect("必须收口");
+    let progress =
+        store.settle_due_return_take(Timestamp::now()).await.expect("收口").expect("必须收口");
     assert_eq!(progress.status, SettlementReturnCaseStatus::TakeUnknown);
     assert_eq!(case_state(pool, returned.case).await.0, "take_unknown");
     assert_eq!(
@@ -646,7 +649,7 @@ async fn postgres_return_take_unknown_never_restores_funds() {
         scalar(pool, "SELECT count(*) FROM public.deliveries WHERE $1 IS NOT NULL", take).await,
         deliveries_before
     );
-    assert!(store.settle_due_return_take(Utc::now()).await.expect("再次收口").is_none());
+    assert!(store.settle_due_return_take(Timestamp::now()).await.expect("再次收口").is_none());
     for action in
         [SettlementReturnAction::ResendFromCustody, SettlementReturnAction::ReclaimAndHold]
     {

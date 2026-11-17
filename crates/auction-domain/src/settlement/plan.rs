@@ -1,6 +1,6 @@
 //! 结算计划的计算。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use super::{
@@ -29,8 +29,8 @@ impl SettlementPlan {
     /// 后续 delivery 关系由应用层在同一结算事务中补齐。
     pub fn calculate(
         policy: &SettlementPolicy,
-        scheduled_open_at: DateTime<Utc>,
-        scheduled_end_at: DateTime<Utc>,
+        scheduled_open_at: Timestamp,
+        scheduled_end_at: Timestamp,
         opening_pool: SettlementAmount,
         facts: &[SettlementFact],
     ) -> Result<Self, DomainError> {

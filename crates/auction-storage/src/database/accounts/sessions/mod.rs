@@ -6,7 +6,7 @@ use auction_application::public::{
     PublicSessionPreferenceResult, PublicSessionRecord, PublicSessionStore,
     SetPublicSessionPreferenceCommand,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use crate::database::DatabaseStore;
 
@@ -14,7 +14,7 @@ mod admin;
 mod public;
 
 impl AdminSessionStore for DatabaseStore {
-    fn revoke_all_admin(&self, now: DateTime<Utc>) -> ApplicationFuture<'_, ()> {
+    fn revoke_all_admin(&self, now: Timestamp) -> ApplicationFuture<'_, ()> {
         Box::pin(async move { admin::revoke_all_postgres(self, now).await })
     }
 
@@ -29,15 +29,15 @@ impl AdminSessionStore for DatabaseStore {
         &self,
         token_hash: [u8; 32],
         csrf_hash: [u8; 32],
-        now: DateTime<Utc>,
-        next_expires_at: DateTime<Utc>,
+        now: Timestamp,
+        next_expires_at: Timestamp,
     ) -> ApplicationFuture<'_, AdminSessionIdentity> {
         Box::pin(async move {
             admin::touch_postgres(self, token_hash, csrf_hash, now, next_expires_at).await
         })
     }
 
-    fn revoke_admin(&self, token_hash: [u8; 32], now: DateTime<Utc>) -> ApplicationFuture<'_, ()> {
+    fn revoke_admin(&self, token_hash: [u8; 32], now: Timestamp) -> ApplicationFuture<'_, ()> {
         Box::pin(async move { admin::revoke_postgres(self, token_hash, now).await })
     }
 }
@@ -46,7 +46,7 @@ impl PublicSessionStore for DatabaseStore {
     fn inspect_public(
         &self,
         token_hash: [u8; 32],
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> ApplicationFuture<'_, PublicSessionIdentity> {
         Box::pin(async move { public::inspect_postgres(self, token_hash, now).await })
     }
@@ -62,19 +62,19 @@ impl PublicSessionStore for DatabaseStore {
     fn touch_public(
         &self,
         token_hash: [u8; 32],
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> ApplicationFuture<'_, PublicSessionIdentity> {
         Box::pin(async move { public::touch_postgres(self, token_hash, now).await })
     }
 
-    fn revoke_public(&self, token_hash: [u8; 32], now: DateTime<Utc>) -> ApplicationFuture<'_, ()> {
+    fn revoke_public(&self, token_hash: [u8; 32], now: Timestamp) -> ApplicationFuture<'_, ()> {
         Box::pin(async move { public::revoke_postgres(self, token_hash, now).await })
     }
 
     fn get_public_preference(
         &self,
         token_hash: [u8; 32],
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> ApplicationFuture<'_, PublicSessionPreferenceResult> {
         Box::pin(async move { public::get_preference_postgres(self, token_hash, now).await })
     }
@@ -83,7 +83,7 @@ impl PublicSessionStore for DatabaseStore {
         &self,
         token_hash: [u8; 32],
         command: SetPublicSessionPreferenceCommand,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> ApplicationFuture<'_, PublicSessionPreferenceResult> {
         Box::pin(
             async move { public::set_preference_postgres(self, token_hash, command, now).await },

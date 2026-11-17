@@ -23,7 +23,7 @@ pub(super) fn current_time_millis() -> i64 {
 
     #[cfg(not(target_arch = "wasm32"))]
     {
-        chrono::Utc::now().timestamp_millis()
+        auction_time::Timestamp::now().timestamp_millis()
     }
 }
 
@@ -37,7 +37,9 @@ pub(super) fn scheduled_time_millis(value: &str) -> Option<i64> {
 
     #[cfg(not(target_arch = "wasm32"))]
     {
-        chrono::DateTime::parse_from_rfc3339(value).ok().map(|value| value.timestamp_millis())
+        auction_time::Timestamp::parse_from_rfc3339(value)
+            .ok()
+            .map(auction_time::Timestamp::timestamp_millis)
     }
 }
 
@@ -83,14 +85,14 @@ pub(super) fn auction_schedule_issue(
 
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let (Ok(preview), Ok(open), Ok(end)) = (
-            chrono::NaiveDateTime::parse_from_str(preview, "%Y-%m-%dT%H:%M"),
-            chrono::NaiveDateTime::parse_from_str(open, "%Y-%m-%dT%H:%M"),
-            chrono::NaiveDateTime::parse_from_str(end, "%Y-%m-%dT%H:%M"),
-        ) else {
+        // 宿主构建没有浏览器时区，`datetime-local` 的分钟文本直接按 UTC 解释。
+        let parse =
+            |value: &str| auction_time::Timestamp::parse_from_rfc3339(&format!("{value}:00Z")).ok();
+        let (Some(preview), Some(open), Some(end)) = (parse(preview), parse(open), parse(end))
+        else {
             return Some(AuctionScheduleIssue::Unparseable);
         };
-        if preview < chrono::Utc::now().naive_utc() {
+        if preview < auction_time::Timestamp::now() {
             return Some(AuctionScheduleIssue::PreviewNotFuture);
         }
         if open < preview {
@@ -107,15 +109,13 @@ pub(super) fn auction_schedule_issue(
 pub(super) fn valid_schedule_update(status: &str, preview: &str, open: &str, end: &str) -> bool {
     // RFC3339 保留秒与小数秒；只有编辑过的本地值需要按浏览器时区规范化。
     let parse = |value: &str| {
-        chrono::DateTime::parse_from_rfc3339(&crate::api::normalize_datetime(value))
-            .ok()
-            .map(|value| value.with_timezone(&chrono::Utc))
+        auction_time::Timestamp::parse_from_rfc3339(&crate::api::normalize_datetime(value)).ok()
     };
     let (Some(preview), Some(open), Some(end), Some(now)) = (
         parse(preview),
         parse(open),
         parse(end),
-        chrono::DateTime::from_timestamp_millis(current_time_millis()),
+        auction_time::Timestamp::from_timestamp_millis(current_time_millis()),
     ) else {
         return false;
     };

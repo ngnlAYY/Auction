@@ -11,7 +11,7 @@ use auction_contracts::{
     AdminSettlementAdjustmentResponse, AdminSettlementAuctionResponse, AdminSettlementLotResponse,
     AdminSettlementReportResponse, AdminSettlementSummaryResponse,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use crate::mapping::timestamp;
@@ -294,11 +294,11 @@ fn valid_report_optional_text(value: Option<&str>, maximum: usize) -> bool {
     value.is_none_or(|value| valid_report_text(value, maximum))
 }
 
-fn valid_report_time(value: DateTime<Utc>) -> bool {
+fn valid_report_time(value: Timestamp) -> bool {
     value.timestamp_nanos_opt().is_some()
 }
 
-fn valid_report_optional_time(value: Option<DateTime<Utc>>) -> bool {
+fn valid_report_optional_time(value: Option<Timestamp>) -> bool {
     value.is_none_or(valid_report_time)
 }
 

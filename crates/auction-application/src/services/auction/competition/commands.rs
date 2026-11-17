@@ -195,7 +195,7 @@ impl CompetitionCommand {
 
     pub(super) fn audit_context(
         &self,
-        occurred_at: chrono::DateTime<chrono::Utc>,
+        occurred_at: auction_time::Timestamp,
     ) -> CompetitionCommandAuditContext {
         let kind = match self {
             Self::PlaceBid(_) => CompetitionCommandAuditKind::PlaceBid,
@@ -216,7 +216,7 @@ impl CompetitionCommand {
     pub(super) fn trigger(
         &self,
         snapshot: &crate::ports::core::CompetitionSnapshot,
-        now: chrono::DateTime<chrono::Utc>,
+        now: auction_time::Timestamp,
         proxy_usage_context: Option<ProxyUsageContext>,
     ) -> Result<CompetitionTrigger, DomainError> {
         match self {

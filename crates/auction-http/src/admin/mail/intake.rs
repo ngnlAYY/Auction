@@ -14,13 +14,13 @@ use auction_contracts::{
     AdminMailIntakeMetadataResponse, AdminMailIntakeSummaryResponse, AdminMailPaginationResponse,
     ApiResponse,
 };
+use auction_time::Timestamp;
 use axum::{
     Json,
     extract::{ConnectInfo, Path, State},
     http::{HeaderMap, StatusCode, Uri},
     response::{IntoResponse, Response},
 };
-use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use super::{feature_unavailable, map_error};
@@ -173,14 +173,8 @@ pub(crate) async fn detail_intake(
         .into_response()
 }
 
-fn parse_time(value: Option<&String>) -> Result<Option<DateTime<Utc>>, ()> {
-    value
-        .map(|value| {
-            DateTime::parse_from_rfc3339(value)
-                .map(|value| value.with_timezone(&Utc))
-                .map_err(|_| ())
-        })
-        .transpose()
+fn parse_time(value: Option<&String>) -> Result<Option<Timestamp>, ()> {
+    value.map(|value| Timestamp::parse_from_rfc3339(value).map_err(|_| ())).transpose()
 }
 
 fn map_summary(summary: AdminMailIntakeSummary) -> AdminMailIntakeSummaryResponse {

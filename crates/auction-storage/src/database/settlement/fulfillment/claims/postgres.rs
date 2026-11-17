@@ -1,7 +1,7 @@
 //! 履约义务的 PostgreSQL 领取：有界候选、锁序与领取 fence；行映射见 `row`。
 
 use auction_application::settlement::SettlementFulfillmentClaim;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
@@ -16,8 +16,8 @@ use crate::database::settlement::fulfillment::reconcile::manual_reconcile_in_tra
 pub(crate) async fn claim_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     worker_id: &str,
-    now: DateTime<Utc>,
-    lease_until: DateTime<Utc>,
+    now: Timestamp,
+    lease_until: Timestamp,
     limit: u16,
 ) -> Result<Vec<SettlementFulfillmentClaim>, auction_application::core::RepositoryError> {
     let mut transaction = pool.begin().await.map_err(map_storage_error)?;

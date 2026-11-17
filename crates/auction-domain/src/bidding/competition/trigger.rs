@@ -1,6 +1,6 @@
 //! 竞价规划器接收的触发器模型。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -28,7 +28,7 @@ pub enum CompetitionTrigger {
         actor_id: UserId,
         amount: BidAmount,
         bid_ids: Vec<crate::BidId>,
-        now: DateTime<Utc>,
+        now: Timestamp,
     },
     CreateProxy {
         command_id: CommandId,
@@ -45,38 +45,38 @@ pub enum CompetitionTrigger {
         /// 同一用户上一份授权的状态；与 `previous_maximum` 同时存在或缺失。
         previous_status: Option<ProxyStatus>,
         bid_ids: Vec<crate::BidId>,
-        now: DateTime<Utc>,
+        now: Timestamp,
     },
     LowerProxy {
         command_id: CommandId,
         actor_id: UserId,
         authorization_id: ProxyAuthorizationId,
         new_maximum: BidAmount,
-        now: DateTime<Utc>,
+        now: Timestamp,
     },
     SlowDue {
         command_id: CommandId,
         authorization_id: ProxyAuthorizationId,
         generation: u64,
-        due_at: DateTime<Utc>,
+        due_at: Timestamp,
         bid_ids: Vec<crate::BidId>,
-        now: DateTime<Utc>,
+        now: Timestamp,
     },
     FinalProxy {
         command_id: CommandId,
         authorization_id: ProxyAuthorizationId,
         bid_ids: Vec<crate::BidId>,
-        now: DateTime<Utc>,
+        now: Timestamp,
     },
     FreezeProxy {
         command_id: CommandId,
         authorization_id: ProxyAuthorizationId,
-        now: DateTime<Utc>,
+        now: Timestamp,
     },
     CloseProxy {
         command_id: CommandId,
         authorization_id: ProxyAuthorizationId,
-        now: DateTime<Utc>,
+        now: Timestamp,
     },
 }
 
@@ -106,7 +106,7 @@ impl CompetitionTrigger {
         }
     }
 
-    pub(super) fn now(&self) -> DateTime<Utc> {
+    pub(super) fn now(&self) -> Timestamp {
         match self {
             Self::OrdinaryBid { now, .. }
             | Self::CreateProxy { now, .. }

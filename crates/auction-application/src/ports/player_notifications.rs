@@ -4,7 +4,7 @@
 //! 因此扫描可以重复执行而不会改写任何冻结结算或投递载荷。通知真正入队仍经
 //! `MailDeliveryEnqueuer`，与既有 outbox 共用同一幂等与审计路径。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -43,7 +43,7 @@ pub struct SellerSummaryLotFact {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SeasonReminderFact {
     /// 已冻结的赛季边界（`auctions.intake_opens_at`），不按当前配置重算。
-    pub season_boundary: DateTime<Utc>,
+    pub season_boundary: Timestamp,
     pub recipient: String,
     pub obligation_kind: String,
     /// lot 的全局唯一 ID；编号只在单场拍卖内唯一。
@@ -68,7 +68,7 @@ pub trait PlayerNotificationScanner: Send + Sync {
     /// 历史场次不回填：早于窗口的场次不产生新通知。
     fn seller_summary_facts(
         &self,
-        settled_since: DateTime<Utc>,
+        settled_since: Timestamp,
         limit: u32,
     ) -> ApplicationFuture<'_, Vec<SellerSummaryLotFact>>;
 
@@ -82,7 +82,7 @@ pub trait PlayerNotificationScanner: Send + Sync {
     /// 也不从当前配置推测边界。
     fn season_reminder_facts(
         &self,
-        now: DateTime<Utc>,
+        now: Timestamp,
         lead_seconds: i64,
         limit: u32,
     ) -> ApplicationFuture<'_, Vec<SeasonReminderFact>>;

@@ -3,7 +3,7 @@
 use auction_application::admin::AdminMailPollState;
 use auction_application::core::ApplicationError;
 use auction_application::mail::{MailPollBatch, MailPollClaim};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
@@ -17,8 +17,8 @@ pub(crate) async fn claim(
     pool: &TrackedPool<Postgres>,
     mailbox_key: &str,
     worker_id: &str,
-    now: DateTime<Utc>,
-    lease_until: DateTime<Utc>,
+    now: Timestamp,
+    lease_until: Timestamp,
     limit: u16,
     force: bool,
 ) -> Result<Vec<MailPollClaim>, ApplicationError> {
@@ -140,7 +140,7 @@ pub(crate) async fn commit(
     let stored_owner: Option<String> = state
         .try_get("claim_owner")
         .map_err(|error| storage_error_from(error, "读取 MoogleMail claim owner 失败"))?;
-    let expires_at: Option<DateTime<Utc>> = state
+    let expires_at: Option<Timestamp> = state
         .try_get("claim_expires_at")
         .map_err(|error| storage_error_from(error, "读取 MoogleMail 租约过期时间失败"))?;
     let current_version: i64 = state
@@ -209,7 +209,7 @@ pub(crate) async fn commit(
 pub(crate) async fn fail(
     pool: &TrackedPool<Postgres>,
     claim: &MailPollClaim,
-    retry_at: DateTime<Utc>,
+    retry_at: Timestamp,
     failure_code: &str,
     safe_detail: &str,
 ) -> Result<AdminMailPollState, ApplicationError> {

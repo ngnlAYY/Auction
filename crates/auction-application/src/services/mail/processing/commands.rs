@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use auction_domain::{CommandId, valid_text};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::Serialize;
 use serde_json::Value;
 use uuid::Uuid;
@@ -142,7 +142,7 @@ pub(super) fn auction_request_hash(
         mailbox_key: &'a str,
         external_mail_id: &'a str,
         seller: &'a str,
-        received_at: DateTime<Utc>,
+        received_at: Timestamp,
         content_digest: [u8; 32],
         items: Items<'a>,
     }

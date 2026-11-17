@@ -2,7 +2,7 @@
 
 use auction_application::recovery::RecoveryCaseAdvance;
 use auction_domain::{CommandId, SettlementId, deterministic_uuid};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
@@ -20,10 +20,10 @@ pub(super) struct DueRecoveryRow {
     pub(super) reminder_limit: i32,
     pub(super) world_id: String,
     pub(super) payment_execution_state: Option<String>,
-    pub(super) payment_completed_at: Option<DateTime<Utc>>,
+    pub(super) payment_completed_at: Option<Timestamp>,
     pub(super) equipment_execution_state: Option<String>,
-    pub(super) equipment_completed_at: Option<DateTime<Utc>>,
-    pub(super) created_at: DateTime<Utc>,
+    pub(super) equipment_completed_at: Option<Timestamp>,
+    pub(super) created_at: Timestamp,
     /// 付款投递已有自动或人工发送证明；没有证明时逾期提醒只延后。
     pub(super) payment_sent_proven: bool,
 }
@@ -32,7 +32,7 @@ const PAYMENT_MAIL_UNPROVEN_RETRY_MINUTES: i64 = 15;
 
 pub(super) async fn advance_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<Option<RecoveryCaseAdvance>, auction_application::core::RepositoryError> {
     pool.observe_transaction(auction_observability::DatabaseTransactionOwner::Recovery, async {
         let mut transaction = pool
@@ -129,7 +129,9 @@ pub(super) async fn advance_postgres(
                            WHERE id = $1 AND stage = $4 AND state_version = $5"#,
                     )
                     .bind(row.id)
-                    .bind(now + chrono::Duration::minutes(PAYMENT_MAIL_UNPROVEN_RETRY_MINUTES))
+                    .bind(
+                        now + auction_time::Duration::minutes(PAYMENT_MAIL_UNPROVEN_RETRY_MINUTES),
+                    )
                     .bind(now)
                     .bind(&row.stage)
                     .bind(row.state_version)

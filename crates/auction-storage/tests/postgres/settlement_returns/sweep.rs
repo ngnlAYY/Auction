@@ -24,7 +24,7 @@ use auction_application::mail::MoogleMailboxEvidenceStore;
 use auction_application::settlement::SettlementReturnWorkStore;
 use auction_domain::{SettlementReturnAction, SettlementReturnCaseStatus};
 use auction_storage::DatabaseStore;
-use chrono::{Duration, Utc};
+use auction_time::{Duration, Timestamp};
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -97,7 +97,7 @@ pub(super) async fn take_into_sending(
     take_delivery: Uuid,
     expectation: &DeliveryTakeExpectation,
 ) -> DeliveryWorkClaim {
-    let now = Utc::now();
+    let now = Timestamp::now();
     let grace = StdDuration::from_secs(60);
     DeliveryWorkStore::begin_claim_cycle(store, now, grace).await.expect("领取前清理");
     let claim = DeliveryWorkStore::claim_due(
@@ -116,7 +116,7 @@ pub(super) async fn take_into_sending(
     .expect("领取到 Take 投递");
     let prepared = DeliveryPreparedExpectation::Take(Arc::new(expectation.clone()));
     let outcome = store
-        .start_sending_authorized(claim.clone(), Utc::now(), None, Some(&prepared))
+        .start_sending_authorized(claim.clone(), Timestamp::now(), None, Some(&prepared))
         .await
         .expect("Take 发送围栏必须确定完成");
     assert!(matches!(outcome, DeliveryFenceOutcome::Sending), "原会话 Take 身份进入 sending");
@@ -163,7 +163,7 @@ pub(super) async fn unknown_take_of(
         SettlementReturnCaseStatus::TakePending
     );
     store
-        .activate_due_return_take(Utc::now(), super::take_worlds())
+        .activate_due_return_take(Timestamp::now(), super::take_worlds())
         .await
         .expect("激活")
         .expect("必须激活");
@@ -191,13 +191,13 @@ pub(super) async fn unknown_take_of(
             external_reference: None,
             result_metadata: json!({"operation": "take", "write_started": true}),
         },
-        Utc::now(),
+        Timestamp::now(),
     )
     .await
     .expect("结果未知收口为人工核对");
     if settle {
         let progress =
-            store.settle_due_return_take(Utc::now()).await.expect("收口").expect("必须收口");
+            store.settle_due_return_take(Timestamp::now()).await.expect("收口").expect("必须收口");
         assert_eq!(
             (progress.return_mail_id, progress.status),
             (returned.case, SettlementReturnCaseStatus::TakeUnknown)
@@ -216,7 +216,7 @@ pub(super) async fn unknown_take_of(
 /// 巡检在原会话观察到的完成证明（与应用层写出的形状一致，预期资产取自 Take 载荷）。
 pub(super) fn completed_observation(mid: &str, reason: &str, credits: i64) -> Value {
     json!({
-        "observed_at": Utc::now(),
+        "observed_at": Timestamp::now(),
         "operation": "take",
         "proof": "action_recovered_inbox_v1",
         "external_reference_proven": true,
@@ -405,7 +405,7 @@ async fn postgres_return_take_unknown_completed_observation_settles_like_take_pr
             .await
             .expect("重放不报错")
     );
-    assert!(store.settle_due_return_take(Utc::now()).await.expect("排空").is_none());
+    assert!(store.settle_due_return_take(Timestamp::now()).await.expect("排空").is_none());
     let replayed = facts(pool, &take).await;
     assert_eq!(replayed, after, "重放不改写任何事实");
 
@@ -487,11 +487,12 @@ async fn postgres_return_take_unknown_still_present_requeues_without_double_take
                     "expected_attachment_ids": [],
                 }),
             },
-            Utc::now(),
+            Timestamp::now(),
         )
         .await
         .expect("Take 成功收口");
-    let settled = store.settle_due_return_take(Utc::now()).await.expect("收口").expect("必须收口");
+    let settled =
+        store.settle_due_return_take(Timestamp::now()).await.expect("收口").expect("必须收口");
     assert_eq!(settled.status, SettlementReturnCaseStatus::Held);
     let done = facts(pool, &take).await;
     assert_eq!((done.takes, done.funding_returns, done.return_entries), (1, 1, 1));
@@ -558,7 +559,7 @@ async fn postgres_return_take_unknown_undecidable_observations_change_nothing() 
             .expect("不报错")
     );
     assert_eq!(facts(pool, &take).await, pending);
-    store.settle_due_return_take(Utc::now()).await.expect("收口").expect("必须收口");
+    store.settle_due_return_take(Timestamp::now()).await.expect("收口").expect("必须收口");
     let unknown = facts(pool, &take).await;
     assert_eq!(unknown.case_status, "take_unknown");
 

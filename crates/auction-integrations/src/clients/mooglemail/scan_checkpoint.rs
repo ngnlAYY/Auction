@@ -4,14 +4,14 @@
 use auction_application::mail::{
     MailScanCheckpoint, MailScanWatermark, advance_mail_scan_watermark,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 /// 水位只前进，本轮没有新水位时沿用旧值；只有完整扫描（`full_at` 有值）才推进
 /// `last_full_scan_at`。
 pub(crate) fn advance_scan_checkpoint(
     previous: Option<&MailScanCheckpoint>,
     newest: Option<MailScanWatermark>,
-    full_at: Option<DateTime<Utc>>,
+    full_at: Option<Timestamp>,
 ) -> MailScanCheckpoint {
     let previous_watermark = previous.and_then(|checkpoint| checkpoint.watermark.as_ref());
     let watermark = match newest {

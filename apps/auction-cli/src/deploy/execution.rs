@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use anyhow::Context;
 use auction_config::PostgresOwnerSecrets;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use super::artifact::REQUIRED_BINARIES;
@@ -44,7 +44,7 @@ pub(super) struct DeployPlan<'a> {
     pub(super) expected_version: i64,
     pub(super) migration_drill_id: Option<&'a str>,
     pub(super) startup_timeout: Duration,
-    pub(super) started_at: DateTime<Utc>,
+    pub(super) started_at: Timestamp,
 }
 
 pub(super) async fn deploy_locked(
@@ -58,7 +58,7 @@ pub(super) async fn deploy_locked(
 
     let archive = plan
         .backup_dir
-        .join(format!("auction-deploy-{}.dump", Utc::now().format("%Y%m%dT%H%M%SZ")));
+        .join(format!("auction-deploy-{}.dump", Timestamp::now().strftime("%Y%m%dT%H%M%SZ")));
     progress(format_args!("创建停机备份：{}", archive.display()));
     let manifest = crate::backup::create_backup(&plan.deployment.worker, database, &archive)
         .await

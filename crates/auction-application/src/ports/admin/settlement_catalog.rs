@@ -1,7 +1,7 @@
 //! Admin 结算报表选择目录的窄只读端口。
 
 use auction_domain::AuctionId;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use crate::ports::core::ApplicationFuture;
 use crate::ports::core::valid_page_window;
@@ -35,7 +35,7 @@ pub struct SettlementCatalogEntry {
     pub auction_id: AuctionId,
     pub world_id: String,
     pub sequence: i64,
-    pub settled_at: DateTime<Utc>,
+    pub settled_at: Timestamp,
 }
 
 impl SettlementCatalogEntry {

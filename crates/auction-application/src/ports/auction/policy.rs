@@ -9,7 +9,7 @@ use auction_domain::{
     DEFAULT_SOFT_CLOSE_EXTENSION, DEFAULT_SOFT_CLOSE_WINDOW, DEFAULT_START_PRICE, DomainError,
     ProxyMode, RecoveryPolicy, SettlementPolicy,
 };
-use chrono::{DateTime, Duration, Utc};
+use auction_time::{Duration, Timestamp};
 use serde_json::{Value, json};
 
 /// 策略快照中沿用旧契约的固定最低增量。
@@ -114,7 +114,7 @@ impl AuctionPolicyTemplate {
     /// 生成 schema v5 快照，显式冻结统一最低出价的竞价策略 v2。
     /// `cancel_cutoff` 不写入当前快照 JSON，因为现有 schema 仍由 auctions 遗留列承载；创建
     /// 事务会用同一模板同时写入该列，保证生命周期读取和快照来源一致。
-    pub fn snapshot(&self, scheduled_end_at: DateTime<Utc>) -> Value {
+    pub fn snapshot(&self, scheduled_end_at: Timestamp) -> Value {
         json!({
             "schema_version": 5,
             "bidding_version": 2,

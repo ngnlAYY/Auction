@@ -109,7 +109,7 @@ pub struct OutbidNotice<'a> {
     pub lot_code: &'a str,
     pub item_name: &'a str,
     /// 当前有效截止（含软截止延长）；尚未进入在拍状态时为空。
-    pub deadline: Option<chrono::DateTime<chrono::Utc>>,
+    pub deadline: Option<auction_time::Timestamp>,
     /// 公开站点 origin；未配置时省略链接而不伪造地址。
     pub site_url: Option<&'a str>,
 }

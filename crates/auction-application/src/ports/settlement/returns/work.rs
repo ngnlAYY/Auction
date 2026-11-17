@@ -6,7 +6,7 @@
 //! 操作者声明；领回证明只消费一次。
 
 use auction_domain::SettlementReturnCaseStatus;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use super::body::ReturnedSettlementBody;
@@ -30,7 +30,7 @@ pub struct SettlementReturnRecheckClaim {
     pub external_mail_id: String,
     pub case_version: i64,
     pub claim_token: Uuid,
-    pub lease_until: DateTime<Utc>,
+    pub lease_until: Timestamp,
 }
 
 /// 只读核验读到的退件事实；不含正文本身。
@@ -44,14 +44,14 @@ pub struct SettlementReturnMailObservation {
     pub cod: i64,
     /// 附件外部装备 ID，严格升序。
     pub attachment_ids: Vec<String>,
-    pub observed_at: DateTime<Utc>,
+    pub observed_at: Timestamp,
 }
 
 /// 只读核验的结果：邮件仍在收件箱时给出观察；已不在收件箱时只记录未找到。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SettlementReturnRecheckOutcome {
     Observed(SettlementReturnMailObservation),
-    NotFound { observed_at: DateTime<Utc> },
+    NotFound { observed_at: Timestamp },
 }
 
 /// 结算退件 Worker 的存储端口；无到期项时返回 `None`。
@@ -62,7 +62,7 @@ pub trait SettlementReturnWorkStore: Send + Sync {
     /// 结果未知后无法巡检）。
     fn activate_due_return_take(
         &self,
-        now: DateTime<Utc>,
+        now: Timestamp,
         take_worlds: Vec<String>,
     ) -> ApplicationFuture<'_, Option<SettlementReturnProgress>>;
 
@@ -70,20 +70,20 @@ pub trait SettlementReturnWorkStore: Send + Sync {
     /// 原资金用途），再按计划代管或授权补寄；否则转人工核对。
     fn settle_due_return_take(
         &self,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> ApplicationFuture<'_, Option<SettlementReturnProgress>>;
 
     /// 收口一项补寄派发已有可信寄出证明的案件。
     fn complete_due_return_resend(
         &self,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> ApplicationFuture<'_, Option<SettlementReturnProgress>>;
 
     /// 领取一项待重新核验的未绑定案件。
     fn claim_due_return_recheck(
         &self,
-        now: DateTime<Utc>,
-        lease_until: DateTime<Utc>,
+        now: Timestamp,
+        lease_until: Timestamp,
     ) -> ApplicationFuture<'_, Option<SettlementReturnRecheckClaim>>;
 
     /// 写回只读核验事实：重新满足来源、资产与唯一原派发绑定时转为待决定，否则保持隔离。

@@ -261,8 +261,8 @@ mod tests {
     };
     use auction_domain::DataKeyDomain;
     use auction_test_support::mooglemail::{Fault, MailDouble};
+    use auction_time::{TimeDelta, Timestamp};
     use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
-    use chrono::{TimeDelta, Utc};
     use uuid::Uuid;
 
     use super::WorkerMailCredentialVerifier;
@@ -360,9 +360,9 @@ mod tests {
                 player_name: None,
                 status: AdminCredentialStatus::Disabled,
                 state_version: 3,
-                created_at: Utc::now(),
+                created_at: Timestamp::now(),
                 rotated_at: None,
-                updated_at: Utc::now(),
+                updated_at: Timestamp::now(),
             },
             envelope,
         }
@@ -384,7 +384,7 @@ mod tests {
 
     /// 安装一小时的主动暂停外部访问快照。
     fn pause_external_access(switches: &RuntimeSwitches) {
-        let now = Utc::now();
+        let now = Timestamp::now();
         switches
             .install(
                 RuntimeSwitchRead {

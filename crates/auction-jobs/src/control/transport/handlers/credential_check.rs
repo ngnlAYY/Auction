@@ -133,11 +133,11 @@ mod tests {
         AdminCredentialCheckStatus, AdminCredentialError, AdminCredentialWorld,
     };
     use auction_application::core::{ApplicationError, ApplicationFuture};
+    use auction_time::Timestamp;
     use axum::body::Bytes;
     use axum::extract::Extension;
     use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
     use axum::response::Response;
-    use chrono::Utc;
     use uuid::Uuid;
 
     use super::mail_credential_check;
@@ -171,7 +171,7 @@ mod tests {
                 Ok(AdminCredentialCheckResult {
                     credential_id,
                     state_version: expected_state_version,
-                    checked_at: Utc::now(),
+                    checked_at: Timestamp::now(),
                     checks,
                 })
             })

@@ -1,6 +1,6 @@
 //! 装备 PM 独立队列端口；发送与只读核对的持久授权不可互换。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -93,9 +93,9 @@ pub struct LotWatchPmSnapshot {
     pub fencing_version: i64,
     pub sender_forum_account_id: Option<String>,
     pub failure_code: Option<String>,
-    pub sending_at: Option<DateTime<Utc>>,
-    pub completed_at: Option<DateTime<Utc>>,
-    pub reconcile_requested_at: Option<DateTime<Utc>>,
+    pub sending_at: Option<Timestamp>,
+    pub completed_at: Option<Timestamp>,
+    pub reconcile_requested_at: Option<Timestamp>,
 }
 
 /// 运维命令仅申请只读核对，不创建第二个论坛客户端。

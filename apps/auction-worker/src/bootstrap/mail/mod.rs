@@ -98,7 +98,7 @@ pub(super) async fn configure_mail_poll(
     })
     .map_err(|error| anyhow::Error::msg(error.to_string()))?;
     // 每日完整校验间隔由部署配置拥有；默认与旧常量一致，避免改变既有扫描节奏。
-    client = client.with_mail_scan_daily_full_interval(chrono::Duration::seconds(
+    client = client.with_mail_scan_daily_full_interval(auction_time::Duration::seconds(
         i64::try_from(mail_config.mail_scan_daily_full_interval_seconds)
             .context("MoogleMail 扫描校验间隔超出可表示范围")?,
     ));

@@ -5,7 +5,7 @@ use std::time::Duration;
 use auction_application::core::Clock;
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError, diagnostic_id};
 use auction_application::delivery::{DeliveryWorkClaim, DeliveryWorkStore};
-use chrono::Duration as ChronoDuration;
+use auction_time::TimeDelta;
 use tokio::time::Instant;
 
 use crate::worker::diagnostics;
@@ -15,7 +15,7 @@ use crate::worker::runtime::DeliveryWorkerRuntimeConfig;
 pub(super) struct DeliveryLease {
     pub(super) deadline: Instant,
     pub(super) renew_at: Instant,
-    span: ChronoDuration,
+    span: TimeDelta,
 }
 
 impl DeliveryLease {
@@ -27,8 +27,7 @@ impl DeliveryLease {
         let observed_at = Instant::now();
         let remaining = (claim.lease_until - clock.now()).to_std().map_err(|_| "lease_expired")?;
         let deadline = observed_at.checked_add(remaining).ok_or("lease_deadline_overflow")?;
-        let span =
-            ChronoDuration::from_std(config.lease_duration).map_err(|_| "lease_span_invalid")?;
+        let span = TimeDelta::from_std(config.lease_duration).map_err(|_| "lease_span_invalid")?;
         // 领取提交/排队已经消耗 TTL；在首次 prepare poll 前立即确认一次续租。
         Ok(Self { deadline, renew_at: observed_at, span })
     }

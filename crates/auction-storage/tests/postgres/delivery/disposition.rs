@@ -9,7 +9,7 @@ use auction_application::delivery::{
     DeliveryDispositionPort,
 };
 use auction_domain::DeliveryDispositionActorSource;
-use chrono::Utc;
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use crate::support;
@@ -18,9 +18,9 @@ use crate::support;
 async fn insert_failed_notification(pool: &sqlx::PgPool) -> (Uuid, i64) {
     let id = Uuid::new_v4();
     let fencing_version = 1_i64;
-    let created_at = Utc::now() - chrono::Duration::minutes(3);
-    let claimed_at = created_at + chrono::Duration::minutes(1);
-    let completed_at = claimed_at + chrono::Duration::minutes(1);
+    let created_at = Timestamp::now() - auction_time::Duration::minutes(3);
+    let claimed_at = created_at + auction_time::Duration::minutes(1);
+    let completed_at = claimed_at + auction_time::Duration::minutes(1);
     sqlx::query(
         "INSERT INTO public.deliveries
             (id, command_id, request_digest, origin_kind, origin_id, recipient, payload,

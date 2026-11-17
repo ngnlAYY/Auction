@@ -8,7 +8,7 @@ use auction_application::admin::AdminRuntimeMailTemplatesConfig;
 use auction_application::public::{
     OutbidNotice, lot_watch_notification, lot_watch_pm_notification,
 };
-use chrono::{TimeZone, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 fn lot() -> Uuid {
@@ -23,7 +23,7 @@ fn notice() -> OutbidNotice<'static> {
     OutbidNotice {
         lot_code: "Clo16",
         item_name: "Phase Robe of Niflheim",
-        deadline: Some(Utc.with_ymd_and_hms(2026, 11, 5, 12, 30, 0).unwrap()),
+        deadline: Some(Timestamp::from_ymd_hms(2026, 11, 5, 12, 30, 0).unwrap()),
         site_url: Some("https://auction.example.com/"),
     }
 }

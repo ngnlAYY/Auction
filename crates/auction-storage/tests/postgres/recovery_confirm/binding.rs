@@ -12,7 +12,7 @@ use auction_application::recovery::{
     RecoveryCommandError, RecoveryCommandRepository, RecoveryConfirmationAction,
 };
 use auction_storage::DatabaseStore;
-use chrono::{DateTime, Duration, Utc};
+use auction_time::{Duration, Timestamp};
 use serde_json::json;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -24,7 +24,7 @@ use crate::support;
 
 /// 夹具里恢复记录的创建时刻；夹具的发送、退件与消费时刻都相对它偏移（原付款 +5 分钟发送，
 /// 当前退件 +30 分钟收到、+31 分钟被消费，截止为 +31 分钟）。
-pub(super) async fn created_at(pool: &PgPool, recovery_id: Uuid) -> DateTime<Utc> {
+pub(super) async fn created_at(pool: &PgPool, recovery_id: Uuid) -> Timestamp {
     sqlx::query_scalar("SELECT created_at FROM public.settlement_recoveries WHERE id = $1")
         .bind(recovery_id)
         .fetch_one(pool)
@@ -38,7 +38,7 @@ pub(super) async fn insert_attempt(
     pool: &PgPool,
     delivery_id: Uuid,
     fence: i64,
-    sending_at: DateTime<Utc>,
+    sending_at: Timestamp,
 ) {
     sqlx::query(
         "INSERT INTO public.delivery_send_attempts
@@ -66,7 +66,7 @@ pub(super) async fn freeze_current_attempt(
     pool: &PgPool,
     delivery_id: Uuid,
     fence: i64,
-    sending_at: DateTime<Utc>,
+    sending_at: Timestamp,
 ) {
     sqlx::query("UPDATE public.deliveries SET fencing_version = $2, sending_at = $3 WHERE id = $1")
         .bind(delivery_id)
@@ -94,7 +94,7 @@ pub(super) async fn freeze_current_attempt(
 
 /// 模拟退件之后经旧 Admin 缺口重试并再次寄出成功：fence 推进、发送围栏落在 `sending_at`，投递
 /// 仍是成功，并留下同一 fence 的冻结发送尝试。
-async fn resend_after_return(pool: &PgPool, delivery_id: Uuid, sending_at: DateTime<Utc>) {
+async fn resend_after_return(pool: &PgPool, delivery_id: Uuid, sending_at: Timestamp) {
     let fence: i64 =
         sqlx::query_scalar("SELECT fencing_version + 1 FROM public.deliveries WHERE id = $1")
             .bind(delivery_id)
@@ -113,7 +113,7 @@ async fn resend_after_return(pool: &PgPool, delivery_id: Uuid, sending_at: DateT
 }
 
 /// 把恢复记录当前退件的收件时刻移到 `received_at`（消费时刻不变）。
-async fn move_return_receipt(pool: &PgPool, recovery_id: Uuid, received_at: DateTime<Utc>) {
+async fn move_return_receipt(pool: &PgPool, recovery_id: Uuid, received_at: Timestamp) {
     sqlx::query(
         "UPDATE public.inbound_mail SET received_at = $2
          WHERE id = (SELECT return_mail_id FROM public.settlement_recoveries WHERE id = $1)",
@@ -131,7 +131,7 @@ async fn add_consumed_return(
     pool: &PgPool,
     sale: &Sale,
     external_mail_id: &str,
-    received_at: DateTime<Utc>,
+    received_at: Timestamp,
 ) {
     let mail = Uuid::new_v4();
     sqlx::query(

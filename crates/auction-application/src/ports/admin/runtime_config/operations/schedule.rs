@@ -1,7 +1,6 @@
 //! 使用部署同一周时间语义校验候选排期；不访问数据库或建立轮次。
 
 use auction_domain::AuctionEarlyBirdConfig;
-use chrono::Timelike;
 use serde::{Deserialize, Serialize};
 
 use super::{invalid, require};
@@ -51,7 +50,7 @@ impl Default for AdminRuntimeScheduleConfig {
 
 impl AdminRuntimeScheduleConfig {
     pub(super) fn validate(&self) -> Result<(), AdminRuntimeConfigError> {
-        require(self.timezone.parse::<chrono_tz::Tz>().is_ok(), "schedule.timezone")?;
+        require(auction_domain::parse_timezone(&self.timezone).is_some(), "schedule.timezone")?;
         require(
             !self.worlds.is_empty()
                 && self.worlds.len() <= 2
@@ -89,6 +88,6 @@ fn week_minute(day: &str, time: &str) -> Option<u32> {
     if time.len() != 5 {
         return None;
     }
-    let time = chrono::NaiveTime::parse_from_str(time, "%H:%M").ok()?;
-    Some(u32::try_from(day).ok()? * 24 * 60 + time.hour() * 60 + time.minute())
+    let minute = auction_domain::parse_clock_minute(time)?;
+    Some(u32::try_from(day).ok()? * 24 * 60 + u32::from(minute))
 }

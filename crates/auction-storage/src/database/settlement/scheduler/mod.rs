@@ -3,7 +3,7 @@
 use auction_application::core::ApplicationError;
 use auction_application::core::ApplicationFuture;
 use auction_application::settlement::{SettlementWorkClaim, SettlementWorkStore};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use crate::database::{DatabaseStore, storage_error};
 
@@ -15,8 +15,8 @@ impl SettlementWorkStore for DatabaseStore {
     fn claim_due(
         &self,
         worker_id: String,
-        now: DateTime<Utc>,
-        lease_until: DateTime<Utc>,
+        now: Timestamp,
+        lease_until: Timestamp,
         limit: u16,
     ) -> ApplicationFuture<'_, Vec<SettlementWorkClaim>> {
         Box::pin(async move {
@@ -32,10 +32,7 @@ impl SettlementWorkStore for DatabaseStore {
         })
     }
 
-    fn next_claimable_at(
-        &self,
-        now: DateTime<Utc>,
-    ) -> ApplicationFuture<'_, Option<DateTime<Utc>>> {
+    fn next_claimable_at(&self, now: Timestamp) -> ApplicationFuture<'_, Option<Timestamp>> {
         Box::pin(async move {
             wakeup::next_claimable_postgres(self.pool(), now).await.map_err(ApplicationError::from)
         })
@@ -44,7 +41,7 @@ impl SettlementWorkStore for DatabaseStore {
     fn complete(
         &self,
         claim: SettlementWorkClaim,
-        completed_at: DateTime<Utc>,
+        completed_at: Timestamp,
     ) -> ApplicationFuture<'_, ()> {
         Box::pin(async move {
             resolution::complete_postgres(self.pool(), &claim, completed_at)

@@ -1,7 +1,7 @@
 //! 收口已失去资格且从未开始发送的提醒；不覆盖 sending 或未知外部结果。
 //! 资格失效包括取消/重新领先与 lot 有效截止已过；两者共用同一预检退役语义。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
@@ -35,7 +35,7 @@ macro_rules! retire_tail {
 
 pub(super) async fn retire_expired(
     transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
-    now: DateTime<Utc>,
+    now: Timestamp,
     notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
 ) -> Result<(), auction_application::core::RepositoryError> {
     let rows = sqlx::query(concat!(
@@ -62,7 +62,7 @@ pub(super) async fn retire_expired(
 /// 不把它当成发送失败或人工对账，也不改写原冻结载荷。
 pub(super) async fn retire_renamed(
     transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
-    now: DateTime<Utc>,
+    now: Timestamp,
     notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
 ) -> Result<(), auction_application::core::RepositoryError> {
     let rows = sqlx::query(concat!(
@@ -88,7 +88,7 @@ pub(super) async fn retire_renamed(
 /// 冻结载荷与投稿事实都不改写。
 pub(super) async fn retire_receipts(
     transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
-    now: DateTime<Utc>,
+    now: Timestamp,
     notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
 ) -> Result<(), auction_application::core::RepositoryError> {
     let rows = sqlx::query(concat!(
@@ -126,7 +126,7 @@ pub(super) async fn retire_receipts(
 /// 冻结载荷、结算结果与义务状态都不改写。
 pub(super) async fn retire_player_notifications(
     transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
-    now: DateTime<Utc>,
+    now: Timestamp,
     notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
 ) -> Result<(), auction_application::core::RepositoryError> {
     // 冻结收件人已改名（Admin 改名、rebind 或论坛身份同步）；谓词与发送围栏共用。
@@ -200,7 +200,7 @@ pub(super) async fn retire_player_notifications(
 async fn record_retirement(
     transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
     rows: Vec<sqlx::postgres::PgRow>,
-    now: DateTime<Utc>,
+    now: Timestamp,
     notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
     failure_code: &str,
 ) -> Result<(), auction_application::core::RepositoryError> {
@@ -268,7 +268,7 @@ async fn record_retirement(
 /// 仍可能有可用慢速代理反击的待定行保持 pending，等竞价事务收口。
 async fn retire_pending(
     transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
-    now: DateTime<Utc>,
+    now: Timestamp,
     notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
 ) -> Result<(), auction_application::core::RepositoryError> {
     let rows = sqlx::query(

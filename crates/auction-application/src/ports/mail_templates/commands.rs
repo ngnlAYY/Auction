@@ -1,7 +1,7 @@
 //! 模板修订命令：稳定摘要、原样重放与版本 CAS。
 
 use auction_domain::valid_text;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -43,7 +43,7 @@ pub struct MailTemplateEvent {
     /// 操作者，Admin 使用会话身份。
     pub actor_id: String,
     /// 数据库接收时间。
-    pub recorded_at: DateTime<Utc>,
+    pub recorded_at: Timestamp,
 }
 
 impl MailTemplateEvent {
@@ -142,7 +142,7 @@ impl MailTemplateCommand {
     pub fn accept(
         &self,
         previous: Option<&MailTemplateEvent>,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> Result<MailTemplateEvent, MailTemplateStoreError> {
         self.validate()?;
         if let Some(previous) = previous {
@@ -190,7 +190,7 @@ fn invalid<T>(_: T) -> MailTemplateStoreError {
 
 #[cfg(test)]
 mod tests {
-    use chrono::{TimeZone, Utc};
+    use auction_time::Timestamp;
     use uuid::Uuid;
 
     use super::{MailTemplateCommand, MailTemplateEvent, MailTemplateOperation};
@@ -210,8 +210,8 @@ mod tests {
         }
     }
 
-    fn now() -> chrono::DateTime<Utc> {
-        Utc.with_ymd_and_hms(2026, 11, 13, 12, 0, 0).unwrap()
+    fn now() -> auction_time::Timestamp {
+        Timestamp::from_ymd_hms(2026, 11, 13, 12, 0, 0).unwrap()
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! 入站处理产生的投递操作、通知模板与限额。
 
 use auction_domain::CommandId;
-use chrono::{DateTime, SecondsFormat, Utc};
+use auction_time::{SecondsFormat, Timestamp};
 use uuid::Uuid;
 
 use super::closed_names::closed_names;
@@ -312,7 +312,7 @@ const SEASON_REMINDER_MAIL_ID_PREFIX: &str = "season-end:";
 
 /// 换季提醒的 `external_mail_id`：固定前缀加秒精度 UTC RFC 3339 的冻结赛季边界。
 /// 发送围栏与预检退役的 SQL 按这一写法解析边界。
-pub fn season_reminder_mail_id(boundary: DateTime<Utc>) -> String {
+pub fn season_reminder_mail_id(boundary: Timestamp) -> String {
     format!(
         "{SEASON_REMINDER_MAIL_ID_PREFIX}{}",
         boundary.to_rfc3339_opts(SecondsFormat::Secs, true)
@@ -323,8 +323,8 @@ pub fn season_reminder_mail_id(boundary: DateTime<Utc>) -> String {
 /// 其他时区、小数秒或小写分隔符等写法与 SQL 解析口径不一致，一律失败关闭。
 pub fn valid_season_reminder_mail_id(value: &str) -> bool {
     value.strip_prefix(SEASON_REMINDER_MAIL_ID_PREFIX).is_some_and(|boundary| {
-        DateTime::parse_from_rfc3339(boundary)
-            .is_ok_and(|parsed| season_reminder_mail_id(parsed.with_timezone(&Utc)) == value)
+        Timestamp::parse_from_rfc3339(boundary)
+            .is_ok_and(|parsed| season_reminder_mail_id(parsed) == value)
     })
 }
 
@@ -347,12 +347,12 @@ pub const EXPLANATION_NOTICE_TEMPLATES: &[&str] = &[
 pub fn explanation_notice_limit(
     window_seconds: u64,
     maximum: u32,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> MailNoticeLimit {
     let seconds = i64::try_from(window_seconds).unwrap_or(604_800).clamp(60, 604_800);
     MailNoticeLimit {
         templates: EXPLANATION_NOTICE_TEMPLATES,
-        since: now - chrono::Duration::seconds(seconds),
+        since: now - auction_time::Duration::seconds(seconds),
         maximum,
     }
 }
@@ -362,7 +362,7 @@ pub fn explanation_notice_limit(
 #[derive(Debug, Clone, Copy)]
 pub struct MailNoticeLimit {
     pub templates: &'static [&'static str],
-    pub since: DateTime<Utc>,
+    pub since: Timestamp,
     /// 0 表示不限制。
     pub maximum: u32,
 }
@@ -390,7 +390,7 @@ pub struct MailDeliveryActivation {
     pub prepare_request_hash: RequestHash,
     pub activate_command_id: CommandId,
     pub activate_request_hash: RequestHash,
-    pub activated_at: DateTime<Utc>,
+    pub activated_at: Timestamp,
 }
 
 /// MoogleMail delivery outbox 入队端口。
@@ -437,7 +437,7 @@ pub trait MailDeliveryEnqueuer: Send + Sync {
 mod tests {
     use std::collections::HashSet;
 
-    use chrono::{TimeZone, Utc};
+    use auction_time::Timestamp;
     use uuid::Uuid;
 
     use super::{
@@ -556,7 +556,7 @@ mod tests {
 
     #[test]
     fn season_reminder_mail_id_accepts_only_its_canonical_form() {
-        let boundary = Utc.with_ymd_and_hms(2026, 11, 1, 9, 0, 0).single().expect("合法时刻");
+        let boundary = Timestamp::from_ymd_hms(2026, 11, 1, 9, 0, 0).expect("合法时刻");
         let canonical = season_reminder_mail_id(boundary);
         assert_eq!(canonical, "season-end:2026-11-01T09:00:00Z");
         assert!(valid_season_reminder_mail_id(&canonical));

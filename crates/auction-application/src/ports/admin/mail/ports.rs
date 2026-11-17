@@ -3,7 +3,7 @@
 use std::future::Future;
 
 use auction_domain::CommandId;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use super::commands::{
@@ -71,7 +71,7 @@ pub trait AdminMailTransaction: Send {
     fn set_polling_paused(
         &mut self,
         command: AdminMailPollingCommand,
-        updated_at: DateTime<Utc>,
+        updated_at: Timestamp,
     ) -> impl Future<Output = Result<AdminMailPollState, AdminMailTransactionError>> + Send;
 
     fn append_pause_record(
@@ -83,7 +83,7 @@ pub trait AdminMailTransaction: Send {
     fn trigger_poll(
         &mut self,
         command: AdminMailPollTriggerCommand,
-        triggered_at: DateTime<Utc>,
+        triggered_at: Timestamp,
     ) -> impl Future<Output = Result<AdminMailPollState, AdminMailTransactionError>> + Send;
 
     fn append_trigger_record(

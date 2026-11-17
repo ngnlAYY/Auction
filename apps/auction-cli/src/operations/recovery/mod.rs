@@ -25,7 +25,7 @@ use auction_application::recovery::{
 };
 use auction_config::AppConfig;
 use auction_storage::DatabaseStore;
-use chrono::{DateTime, TimeDelta, Utc};
+use auction_time::{TimeDelta, Timestamp};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
@@ -44,7 +44,7 @@ const CUTOFF_FUTURE_TOLERANCE_SECONDS: i64 = 300;
 
 /// 一次外部核对的已校验参数；`actor` 为 Some 表示 `--apply` 已通过确认短语与操作者校验。
 struct ReconcileOptions<'a> {
-    cutoff_at: DateTime<Utc>,
+    cutoff_at: Timestamp,
     receipt_path: &'a Path,
     maximum_pages: u32,
     maximum_forum_threads: u16,
@@ -64,10 +64,9 @@ pub(crate) async fn run(config_dir: &ConfigDir, command: RecoveryCommand) -> any
             actor,
             scan_id,
         } => {
-            let cutoff_at = DateTime::parse_from_rfc3339(&cutoff)
-                .context("恢复点必须是 RFC 3339 时间（含时区）")?
-                .with_timezone(&Utc);
-            if cutoff_at > Utc::now() + TimeDelta::seconds(CUTOFF_FUTURE_TOLERANCE_SECONDS) {
+            let cutoff_at = Timestamp::parse_from_rfc3339(&cutoff)
+                .context("恢复点必须是 RFC 3339 时间（含时区）")?;
+            if cutoff_at > Timestamp::now() + TimeDelta::seconds(CUTOFF_FUTURE_TOLERANCE_SECONDS) {
                 anyhow::bail!("恢复点不能晚于当前时刻");
             }
             let actor = resolve_apply_authorization(apply, confirm.as_deref(), actor.as_deref())?;
@@ -340,7 +339,7 @@ fn build_receipt(facts: &ScanFacts, applied: &Applied, options: &ReconcileOption
     let plan = &facts.plan;
     json!({
         "format": EXTERNAL_RECOVERY_RECEIPT_FORMAT,
-        "generated_at": Utc::now(),
+        "generated_at": Timestamp::now(),
         "scan_id": options.scan_id,
         "cutoff_at": options.cutoff_at,
         "dry_run": options.actor.is_none(),

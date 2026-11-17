@@ -10,7 +10,7 @@ use auction_application::operations::{
 use auction_config::AppConfig;
 use auction_integrations::OperationsAlertWebhookConfigError;
 use auction_storage::DatabaseStore;
-use chrono::Utc;
+use auction_time::Timestamp;
 
 pub(super) async fn configure_operations_alert(
     config: &AppConfig,
@@ -26,7 +26,7 @@ pub(super) async fn configure_operations_alert(
         alert_store
             .publish_runtime_status(OperationsAlertRuntimeStatus {
                 enabled: false,
-                updated_at: Utc::now(),
+                updated_at: Timestamp::now(),
             })
             .await
             .map_err(|error| anyhow::Error::msg(error.to_string()))
@@ -84,7 +84,7 @@ pub(super) async fn configure_operations_alert(
     alert_store
         .publish_runtime_status(OperationsAlertRuntimeStatus {
             enabled: true,
-            updated_at: Utc::now(),
+            updated_at: Timestamp::now(),
         })
         .await
         .map_err(|error| anyhow::Error::msg(error.to_string()))

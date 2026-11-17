@@ -40,7 +40,7 @@ use auction_application::runtime_switches::{RuntimeSwitchRole, RuntimeSwitches};
 use auction_application::settlement::{SettlementFulfillmentProof, SettlementFulfillmentStore};
 use auction_domain::{CommandId, SettlementId};
 use auction_storage::DatabaseStore;
-use chrono::{Duration, Utc};
+use auction_time::{Duration, Timestamp};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -108,7 +108,7 @@ async fn closure_audits(pool: &PgPool, sale: &Sale) -> i64 {
 async fn claim_due(
     store: &DatabaseStore,
 ) -> Vec<auction_application::settlement::SettlementFulfillmentClaim> {
-    let now = Utc::now();
+    let now = Timestamp::now();
     SettlementFulfillmentStore::claim_due(
         store,
         "b2-confirm-worker".to_owned(),
@@ -181,7 +181,7 @@ async fn postgres_reclaim_confirmation_closes_payment_and_dependents() {
         kind: "mooglemail_sent_collected".to_owned(),
         reference: "1234567".to_owned(),
         digest: [7; 32],
-        observed_at: Utc::now(),
+        observed_at: Timestamp::now(),
     };
     assert!(store.satisfy(stale.clone(), proof).await.is_err(), "撤销后旧 claim 不能满足付款");
     assert!(
@@ -205,7 +205,7 @@ async fn postgres_reclaim_confirmation_closes_payment_and_dependents() {
                 RuntimeSwitches::new(RuntimeSwitchRole::Worker, AuditFailureMode::Shadow, true)
                     .with_disposition_read_mode_baseline(mode),
             )
-            .snapshot(Utc::now(), OperationsAlertCollectionOverdueRead::Skip)
+            .snapshot(Timestamp::now(), OperationsAlertCollectionOverdueRead::Skip)
             .await
             .expect("读取告警快照");
         assert_eq!(snapshot.fulfillment.expect("履约水位").failed, expected, "{mode:?}");

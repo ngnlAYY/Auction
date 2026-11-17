@@ -1,6 +1,6 @@
 //! 出站通知模板 DTO；数据库修订事实在 HTTP 边界显式映射。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 
 /// 一个模板键的当前状态。
@@ -22,7 +22,7 @@ pub struct AdminMailTemplateDto {
     /// 最新修订的操作者；从未修订过为空。
     pub updated_by: Option<String>,
     /// 最新修订的数据库接收时间；从未修订过为空。
-    pub updated_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<Timestamp>,
     /// 正文必须包含的占位符（不含花括号）。
     pub required_placeholders: Vec<String>,
     /// 正文允许使用的全部占位符（不含花括号）。

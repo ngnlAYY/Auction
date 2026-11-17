@@ -1,6 +1,6 @@
 //! Admin 交付台的查询、命令边界与读写端口。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
@@ -80,9 +80,9 @@ pub struct DeliveryAdminListRequest {
     /// `main` / `isekai`。
     pub world: Option<String>,
     /// 创建时间下界（含）。
-    pub created_from: Option<DateTime<Utc>>,
+    pub created_from: Option<Timestamp>,
     /// 创建时间上界（含）。
-    pub created_to: Option<DateTime<Utc>>,
+    pub created_to: Option<Timestamp>,
     /// 是否列出结算退件 Take 投递（来源 `settlement_return_action`）与被恢复终结的原结算投递
     /// （`failed/recovery_superseded`，没有发送时间）。缺省不列出：已发布的 Admin 页面按闭集解码，
     /// 读到不认识的来源或时间链整页失败，所以只有显式请求扩展投影的页面才列出它们；总数与分页按
@@ -200,19 +200,19 @@ pub struct DeliveryAdminSnapshot {
     pub retirement_reason: Option<String>,
     /// 围栏前抑制原因；只在确定未写入外部系统时出现。
     pub suppression_reason: Option<String>,
-    pub lease_expires_at: Option<DateTime<Utc>>,
+    pub lease_expires_at: Option<Timestamp>,
     pub fencing_version: i64,
     pub attempt_count: u32,
-    pub claimed_at: Option<DateTime<Utc>>,
-    pub sending_at: Option<DateTime<Utc>>,
-    pub completed_at: Option<DateTime<Utc>>,
+    pub claimed_at: Option<Timestamp>,
+    pub sending_at: Option<Timestamp>,
+    pub completed_at: Option<Timestamp>,
     pub external_reference: Option<String>,
     pub failure_code: Option<String>,
     pub reason_code: Option<String>,
     pub take_required: bool,
     pub returned_mail_id: Option<String>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -326,7 +326,6 @@ fn push_go_json_string(output: &mut Vec<u8>, value: &str) {
 
 #[cfg(test)]
 mod tests {
-    use chrono::TimeZone;
 
     use super::*;
     use crate::ports::delivery::{
@@ -346,8 +345,8 @@ mod tests {
             template: Some("settlement_seller_payout".to_owned()),
             category: Some("settlement".to_owned()),
             world: Some("isekai".to_owned()),
-            created_from: Some(Utc.with_ymd_and_hms(2026, 11, 1, 0, 0, 0).single().expect("time")),
-            created_to: Some(Utc.with_ymd_and_hms(2026, 11, 2, 0, 0, 0).single().expect("time")),
+            created_from: Some(Timestamp::from_ymd_hms(2026, 11, 1, 0, 0, 0).expect("time")),
+            created_to: Some(Timestamp::from_ymd_hms(2026, 11, 2, 0, 0, 0).expect("time")),
             ..base()
         };
         assert!(request.validate());
@@ -370,8 +369,8 @@ mod tests {
 
     #[test]
     fn filters_reject_reversed_time_range_and_oversized_pages() {
-        let later = Utc.with_ymd_and_hms(2026, 11, 2, 0, 0, 0).single().expect("time");
-        let earlier = Utc.with_ymd_and_hms(2026, 11, 1, 0, 0, 0).single().expect("time");
+        let later = Timestamp::from_ymd_hms(2026, 11, 2, 0, 0, 0).expect("time");
+        let earlier = Timestamp::from_ymd_hms(2026, 11, 1, 0, 0, 0).expect("time");
         assert!(
             !DeliveryAdminListRequest {
                 created_from: Some(later),

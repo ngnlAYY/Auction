@@ -24,9 +24,9 @@ pub(super) async fn refresh_fixed_posts(
     mut topic: auction_application::forum::ForumReplyTopic,
     scan: TopicScanProgress,
     clock: &dyn auction_application::core::Clock,
-    poll_interval: chrono::Duration,
+    poll_interval: auction_time::Duration,
     write_progress: &ForumWriteProgress,
-) -> Result<Option<chrono::DateTime<chrono::Utc>>, ApplicationError> {
+) -> Result<Option<auction_time::Timestamp>, ApplicationError> {
     let TopicScanProgress { processed_through_post_number, system_entries, scan_completed } = scan;
     let processed_through_post_number_i32 =
         i32::try_from(processed_through_post_number).map_err(|error| {

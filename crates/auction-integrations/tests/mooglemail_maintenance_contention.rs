@@ -30,7 +30,7 @@ use auction_integrations::mooglemail::{
     MoogleMailClient, MoogleMailClientConfig, MoogleMailCredentialSet, MoogleMailDeliveryTransport,
 };
 use auction_test_support::mooglemail::MailDouble;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use tokio::time::{Instant, error::Elapsed, timeout_at};
 use uuid::Uuid;
 
@@ -44,8 +44,8 @@ const OBSERVATION_BUDGET: Duration = Duration::from_secs(3);
 
 struct SystemClock;
 impl Clock for SystemClock {
-    fn now(&self) -> DateTime<Utc> {
-        Utc::now()
+    fn now(&self) -> Timestamp {
+        Timestamp::now()
     }
 }
 

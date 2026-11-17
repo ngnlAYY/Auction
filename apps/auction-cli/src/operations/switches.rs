@@ -37,10 +37,7 @@ pub(crate) async fn run(config_dir: &ConfigDir, command: SwitchCommand) -> anyho
             let name = RuntimeSwitchName::parse(&name).ok_or_else(unknown_switch)?;
             let value = value.map(|value| switch_value(name, value)).transpose()?;
             let expires_at = expires_at
-                .map(|value| {
-                    chrono::DateTime::parse_from_rfc3339(&value)
-                        .map(|time| time.with_timezone(&chrono::Utc))
-                })
+                .map(|value| auction_time::Timestamp::parse_from_rfc3339(&value))
                 .transpose()?;
             let event = store
                 .write(RuntimeSwitchCommand {

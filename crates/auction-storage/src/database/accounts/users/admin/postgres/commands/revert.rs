@@ -4,7 +4,7 @@ use auction_application::admin::{
     AdminRenameRevertWrite, AdminUserCommandKind, AdminUserCommandResult, AdminUserError,
 };
 use auction_application::core::ApplicationError;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -54,7 +54,7 @@ pub(crate) async fn revert_postgres(
                 rename.try_get("previous_username").map_err(map_storage_error)?;
             let next_username: String =
                 rename.try_get("next_username").map_err(map_storage_error)?;
-            let reverted_at: Option<DateTime<Utc>> =
+            let reverted_at: Option<Timestamp> =
                 rename.try_get("reverted_at").map_err(map_storage_error)?;
             if reverted_at.is_some() {
                 return Err(admin_error(AdminUserError::RenameNotRevertable));

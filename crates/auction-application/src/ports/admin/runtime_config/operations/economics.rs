@@ -1,7 +1,7 @@
 //! 后续新场次的经济参数候选；复用领域校验，不建立第二套竞价状态机。
 
 use auction_domain::MAX_BID_AMOUNT;
-use chrono::Duration;
+use auction_time::Duration;
 use serde::{Deserialize, Serialize};
 
 use super::{invalid, require};

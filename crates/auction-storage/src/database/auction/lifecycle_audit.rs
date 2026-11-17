@@ -10,13 +10,13 @@ use auction_application::core::CompetitionTransactionError;
 use auction_domain::{
     AuctionStatus, ProxyMode, ProxyStatus, ProxyTerminalReason, ProxyTransitionKind,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
 /// PostgreSQL 生命周期事务写入冻结审计闭集所需的记录。
 pub(crate) struct LifecycleAuditRecord {
-    pub occurred_at: DateTime<Utc>,
+    pub occurred_at: Timestamp,
     pub actor_type: &'static str,
     pub actor_id: String,
     pub action: &'static str,
@@ -163,7 +163,7 @@ pub(crate) fn lifecycle_parent_audit_record(
 /// 把 Final phase 的单个代理子命令压缩为旧版唯一命令级审计。
 pub(crate) fn final_proxy_audit_record(
     parent: &AuctionLifecycleCommand,
-    occurred_at: DateTime<Utc>,
+    occurred_at: Timestamp,
     proxy_plan: &AuctionFinalProxyPlan,
 ) -> Result<LifecycleAuditRecord, CompetitionTransactionError> {
     let plan = &proxy_plan.competition;

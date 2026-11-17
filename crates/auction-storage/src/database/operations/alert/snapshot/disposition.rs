@@ -18,7 +18,7 @@ use auction_application::operations::{
     SHADOW_OWNER, select_read_counts,
 };
 use auction_application::shadow_run::{record_comparison, record_uncomparable};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Row;
 
 use crate::database::storage_error_from;
@@ -234,7 +234,7 @@ struct PairedCounts {
 /// 读取投递、通知与履约的配对口径；每条语句内部保证一致，两条语句分属不同 owner。
 async fn paired_counts(
     pool: &TrackedPool<sqlx::Postgres>,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<PairedCounts, ApplicationError> {
     let delivery = sqlx::query(sqlx::AssertSqlSafe(PAIRED_DELIVERY_COUNTS.as_str()))
         .bind(now)
@@ -290,7 +290,7 @@ async fn paired_counts(
 ///   不构成向新口径的静默切换。
 pub(crate) async fn apply_read_mode(
     store: &DatabaseStore,
-    now: DateTime<Utc>,
+    now: Timestamp,
     mut snapshot: OperationsAlertSnapshot,
 ) -> Result<OperationsAlertSnapshot, ApplicationError> {
     let mode = store.runtime_switches().disposition_read_mode();

@@ -13,7 +13,7 @@
 //! - 同一投递与 fence 的隔离事实只追加一次；重复执行幂等返回既有结果，不新增审计。
 
 use auction_domain::valid_text;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -113,7 +113,7 @@ pub struct ExternalRecoveryQuarantineMatch {
     pub fencing_version: i64,
     pub world_id: String,
     pub external_mail_id: String,
-    pub sent_at: DateTime<Utc>,
+    pub sent_at: Timestamp,
     pub recipient: String,
     pub subject: String,
     pub expected_credits: i64,
@@ -122,7 +122,7 @@ pub struct ExternalRecoveryQuarantineMatch {
     pub expected_equipment_ids: Option<Vec<String>>,
     /// Sent 详情是否证明邮件已被完全领取；为 true 时不再要求剩余资产一致。
     pub collected: bool,
-    pub observed_at: DateTime<Utc>,
+    pub observed_at: Timestamp,
 }
 
 impl ExternalRecoveryQuarantineMatch {
@@ -289,8 +289,8 @@ pub fn sent_list_projection_may_match(
     world: &str,
     recipient: &str,
     subject: &str,
-    sent_at: DateTime<Utc>,
-    cutoff_at: DateTime<Utc>,
+    sent_at: Timestamp,
+    cutoff_at: Timestamp,
 ) -> bool {
     expectation.world_id == world
         && sent_at >= cutoff_at
@@ -313,8 +313,8 @@ pub fn sent_detail_match(
     world: &str,
     recipient: &str,
     subject: &str,
-    sent_at: DateTime<Utc>,
-    cutoff_at: DateTime<Utc>,
+    sent_at: Timestamp,
+    cutoff_at: Timestamp,
     collected: bool,
     remaining_credits: i64,
     cod_pending: i64,

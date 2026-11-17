@@ -14,7 +14,7 @@ use auction_application::settlement::{
     SettlementWorkClaim, SettlementWorkStore,
 };
 use auction_observability::{WorkerLoop, WorkerRecorder, WorkerResult, WorkerRetryKind};
-use chrono::{DateTime, Duration as ChronoDuration, Utc};
+use auction_time::{TimeDelta, Timestamp};
 
 use crate::worker::diagnostics;
 
@@ -32,7 +32,7 @@ pub(crate) async fn process_fulfillment_claim<C>(
     fulfillment_commands: Arc<dyn SettlementFulfillmentCommandPort>,
     clock: Arc<C>,
     metrics: Arc<dyn WorkerRecorder>,
-    retry_delay: ChronoDuration,
+    retry_delay: TimeDelta,
     claim: SettlementFulfillmentClaim,
 ) -> WorkerResult
 where
@@ -295,10 +295,7 @@ where
     }
 }
 /// 单一预算覆盖guard排队、全部远端读取、数据库等待与提交；超时直接销毁原future，绝不detach。
-fn fulfillment_budget(
-    claim: &SettlementFulfillmentClaim,
-    now: DateTime<Utc>,
-) -> std::time::Duration {
+fn fulfillment_budget(claim: &SettlementFulfillmentClaim, now: Timestamp) -> std::time::Duration {
     (claim.lease_until - now)
         .to_std()
         .unwrap_or_default()

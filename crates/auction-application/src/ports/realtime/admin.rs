@@ -3,7 +3,7 @@
 //! payload、数据库行和驱动错误留在存储 owner；replay 必须在同一事务中追加新事件并解决
 //! 原 failure。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::Value;
 use thiserror::Error;
 use uuid::Uuid;
@@ -47,7 +47,7 @@ pub struct RealtimeEventSnapshot {
     pub stream_sequence: i64,
     pub kind: String,
     pub schema_version: i32,
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,7 +103,7 @@ pub struct RealtimeLagSnapshot {
     pub offset: i64,
     pub latest_sequence: i64,
     pub lag: i64,
-    pub last_advanced_at: Option<DateTime<Utc>>,
+    pub last_advanced_at: Option<Timestamp>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -118,7 +118,7 @@ pub struct RealtimeLagPage {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RealtimeFailureWater {
     pub count: i64,
-    pub oldest_at: Option<DateTime<Utc>>,
+    pub oldest_at: Option<Timestamp>,
     pub latest_code: String,
 }
 
@@ -144,7 +144,7 @@ impl RealtimeFailureWater {
 /// failure 只保留未解决水位，不包含正文和事件 payload。详细列表由 realtime Admin 专用端点提供。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RealtimeDashboardSnapshot {
-    pub observed_at: DateTime<Utc>,
+    pub observed_at: Timestamp,
     pub total_lag: i64,
     pub lags: Vec<RealtimeLagSnapshot>,
     pub failure: RealtimeFailureWater,
@@ -221,8 +221,8 @@ pub struct RealtimeFailureSnapshot {
     pub consumer_key: String,
     pub code: String,
     pub safe_detail: String,
-    pub failed_at: DateTime<Utc>,
-    pub resolved_at: Option<DateTime<Utc>>,
+    pub failed_at: Timestamp,
+    pub resolved_at: Option<Timestamp>,
 }
 
 impl RealtimeFailureSnapshot {
@@ -249,7 +249,7 @@ pub struct RealtimeReplayCommand {
     pub actor_id: String,
     pub request_id: Option<String>,
     pub request_hash: RequestHash,
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
 }
 
 impl RealtimeReplayCommand {
@@ -275,7 +275,7 @@ pub struct RealtimeReplayResult {
     pub stream_sequence: i64,
     pub kind: String,
     pub schema_version: i32,
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
 }
 
 pub trait RealtimeAdminPort: Send + Sync {

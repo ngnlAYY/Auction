@@ -2,7 +2,7 @@
 
 use std::{future::Future, pin::Pin, time::Duration};
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 /// 完成窗口固定七天；未完成慢速代理另作当前积压快照。
 pub const SLI_WINDOW_SECONDS: i64 = 7 * 24 * 60 * 60;
@@ -204,7 +204,7 @@ pub struct SliOutbidMargin {
 #[derive(Debug, Clone)]
 pub struct SliSnapshot {
     /// 数据库快照时刻。
-    pub observed_at: DateTime<Utc>,
+    pub observed_at: Timestamp,
     /// 槽位依次对应 SliWorld::ALL 与 SliBidKind::ALL。
     pub final_bids: [[SliBidCapacity; SliBidKind::ALL.len()]; SliWorld::ALL.len()],
     /// 每个世界当前尚留在 lot 上的到期慢速代理。

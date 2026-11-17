@@ -28,7 +28,7 @@ use auction_application::delivery::{DeliveryClaimExclusions, DeliveryWorkStore};
 use auction_application::lot_watch_reminders::LotWatchReminderStore;
 use auction_domain::{BidAmount, CommandId, LotId, UserId};
 use auction_storage::{BidQueueMode, DatabaseCompetitionCommands, DatabaseStore};
-use chrono::{DateTime, Duration, Utc};
+use auction_time::{Duration, Timestamp};
 use serde_json::json;
 use sqlx::Row;
 use tokio::sync::Barrier;
@@ -70,7 +70,7 @@ async fn seed_round_with_filler(
     with_filler: bool,
 ) -> SeededRound {
     let pool = store.postgres_pool();
-    let deadline = Utc::now() + Duration::hours(2);
+    let deadline = Timestamp::now() + Duration::hours(2);
     let opened = deadline - Duration::hours(4);
     let auction_id = stable_id(seed, "auction");
 
@@ -184,7 +184,7 @@ fn filler_users() -> i64 {
 async fn seed_history(
     pool: &sqlx::PgPool,
     auction_id: Uuid,
-    deadline: DateTime<Utc>,
+    deadline: Timestamp,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         "INSERT INTO public.users (id, username, public_key_hash)
@@ -763,7 +763,7 @@ async fn postgres_lot_watch_outbox_reclaims_lease_and_preserves_state_version_or
     let first_bidder = seeded.bidders[0];
     let second_bidder = stable_id("outbox-order", "second-bidder");
     seed_user(pool, second_bidder, "outbox-order-second-bidder").await;
-    let deadline: DateTime<Utc> =
+    let deadline: Timestamp =
         sqlx::query_scalar("SELECT effective_end_at FROM public.lots WHERE id = $1")
             .bind(lot_id)
             .fetch_one(pool)
@@ -829,14 +829,15 @@ async fn postgres_lot_watch_outbox_reclaims_lease_and_preserves_state_version_or
             "INSERT INTO public.lot_watch_events
                 (event_id, event_kind, lot_id, user_id, bid_id, state_version,
                  occurred_at, next_attempt_at)
-             VALUES ($1, 'bid_accepted', $2, $3, $4, $5, clock_timestamp(), clock_timestamp() + $6)",
+             VALUES ($1, 'bid_accepted', $2, $3, $4, $5, clock_timestamp(),
+                     clock_timestamp() + make_interval(secs => $6::double precision))",
         )
         .bind(event_id)
         .bind(lot_id)
         .bind(bidder)
         .bind(bid_id)
         .bind(version)
-        .bind(delay)
+        .bind(delay.num_seconds())
         .execute(pool)
         .await
         .expect("写入测试事件");
@@ -1461,7 +1462,7 @@ async fn postgres_delivery_wakeup_is_published_after_commit() {
         .expect("唤醒订阅不得断开");
 
     // 通知本身不代替领取；到达后投递必须可被 claim 查询选中。
-    let now = Utc::now();
+    let now = Timestamp::now();
     let claims = store
         .claim_due(
             "wakeup-after-commit".to_owned(),
@@ -1520,7 +1521,7 @@ async fn postgres_delivery_wakeup_crash_before_notify_falls_back_to_scan() {
     .await
     .expect("写入已提交投递");
 
-    let now = Utc::now();
+    let now = Timestamp::now();
     let claims = store
         .claim_due(
             "wakeup-scan".to_owned(),
@@ -1575,7 +1576,7 @@ async fn postgres_delivery_wakeup_does_not_duplicate_claims() {
     .await
     .expect("写入已提交投递");
 
-    let now = Utc::now();
+    let now = Timestamp::now();
     let claim = |worker: &'static str| {
         store.claim_due(
             worker.to_owned(),

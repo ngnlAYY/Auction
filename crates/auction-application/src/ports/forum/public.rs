@@ -2,7 +2,7 @@
 //! 该端口只读取本地已经持久化的论坛同步投影，不直接调用论坛网关，也不把远程发布成功
 //! 推断为本地状态。未接入的后端必须显式报告能力缺失。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use url::Url;
 use uuid::Uuid;
 
@@ -22,7 +22,7 @@ impl PublicForumLink {
     pub fn new(
         url: String,
         content_revision: i64,
-        content_synced_at: Option<DateTime<Utc>>,
+        content_synced_at: Option<Timestamp>,
     ) -> Result<Self, &'static str> {
         validate_forum_content_proof(content_revision, content_synced_at)?;
         if !valid_forum_url(&url) {
@@ -52,13 +52,13 @@ pub struct PublicForumThread {
     /// 最近一次由完整主题读取证明已处理到的真实论坛楼层。
     /// 这是当前观察投影，删帖后可下降；不可用作稳定命令身份或事实 sequence。
     pub processed_through_post_number: i32,
-    pub content_synced_at: Option<DateTime<Utc>>,
-    pub content_last_success_at: Option<DateTime<Utc>>,
+    pub content_synced_at: Option<Timestamp>,
+    pub content_last_success_at: Option<Timestamp>,
     /// 当前未恢复扫描错误的发生时间。
-    pub content_last_error_at: Option<DateTime<Utc>>,
+    pub content_last_error_at: Option<Timestamp>,
     /// 当前未恢复扫描错误的有界稳定码，不包含远端正文。
     pub content_last_error_code: Option<String>,
-    pub updated_at: DateTime<Utc>,
+    pub updated_at: Timestamp,
 }
 
 impl std::fmt::Debug for PublicForumThread {
@@ -131,7 +131,7 @@ impl PublicForumThread {
 /// 历史 published 行可能尚无固定楼层内容证明；不能仅凭状态公开主题地址。
 fn validate_forum_content_proof(
     content_revision: i64,
-    content_synced_at: Option<DateTime<Utc>>,
+    content_synced_at: Option<Timestamp>,
 ) -> Result<(), &'static str> {
     if content_revision <= 0 || content_synced_at.is_none_or(|value| value.timestamp_micros() == 0)
     {
@@ -150,7 +150,7 @@ fn valid_forum_url(value: &str) -> bool {
         })
 }
 
-fn valid_optional_timestamp(value: Option<DateTime<Utc>>) -> bool {
+fn valid_optional_timestamp(value: Option<Timestamp>) -> bool {
     value.is_none_or(|value| value.timestamp_micros() != 0)
 }
 

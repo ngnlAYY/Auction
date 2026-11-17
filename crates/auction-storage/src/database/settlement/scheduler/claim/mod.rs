@@ -5,7 +5,7 @@ use auction_application::settlement::{
     settlement_workflow_id,
 };
 use auction_domain::AuctionId;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::{Value, json};
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
@@ -56,8 +56,8 @@ fn claim_failure(message: &str) -> ClaimError {
 pub(super) async fn claim_postgres(
     pool: &TrackedPool<Postgres>,
     worker_id: &str,
-    now: DateTime<Utc>,
-    lease_until: DateTime<Utc>,
+    now: Timestamp,
+    lease_until: Timestamp,
     limit: u16,
 ) -> Result<Vec<SettlementWorkClaim>, auction_application::core::RepositoryError> {
     // 与竞价/结算相同，含首次最多三次；每次从新事务开始，冲突后按数据库契约抖动退避。
@@ -75,8 +75,8 @@ pub(super) async fn claim_postgres(
 async fn claim_transaction(
     pool: &TrackedPool<Postgres>,
     worker_id: &str,
-    now: DateTime<Utc>,
-    lease_until: DateTime<Utc>,
+    now: Timestamp,
+    lease_until: Timestamp,
     limit: u16,
 ) -> Result<Vec<SettlementWorkClaim>, ClaimError> {
     // 旧版把 final→settling 领取本身视为 Serializable 业务事务，不能只依赖行锁和
@@ -160,7 +160,7 @@ async fn claim_transaction(
     for row in rows {
         let auction_uuid: Uuid = row.try_get("id").map_err(claim_sqlx_error)?;
         let status: String = row.try_get("status").map_err(claim_sqlx_error)?;
-        let due_at: DateTime<Utc> = row.try_get("due_at").map_err(claim_sqlx_error)?;
+        let due_at: Timestamp = row.try_get("due_at").map_err(claim_sqlx_error)?;
         let previous_state_version: i64 = row.try_get("state_version").map_err(claim_sqlx_error)?;
         if previous_state_version <= 0 {
             return Err(claim_failure("结算拍卖状态版本无效"));

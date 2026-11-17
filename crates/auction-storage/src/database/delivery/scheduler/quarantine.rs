@@ -1,6 +1,6 @@
 //! 将历史邮件资产处置冲突转入可观测人工态，不改写原命令或外部 payload。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
@@ -9,7 +9,7 @@ use crate::database::delivery::audit::{DeliveryAudit, append as append_delivery_
 
 pub(super) async fn quarantine_mail_dispositions(
     transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<(), auction_application::core::RepositoryError> {
     let rows = sqlx::query(concat!(
         r#"WITH conflicted AS (

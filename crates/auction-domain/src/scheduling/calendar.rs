@@ -1,11 +1,14 @@
 //! 周排期与赛季早鸟组合日历：为 Worker bootstrap 和开拍后继计算可物化的计划时段。
 //! 已冻结的轮次事实不由这里改写；日历只决定尚未建立的下一轮。
 
-use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Utc};
-use chrono_tz::Tz;
+use auction_time::Timestamp;
+use jiff::ToSpan;
+use jiff::civil;
+use jiff::tz::TimeZone;
 
 use super::early_bird::AuctionEarlyBirdCalendar;
 use super::source::{AuctionScheduleSource, AuctionScheduleTimes};
+use super::wall_clock::{parse_clock_minute, parse_timezone};
 use crate::DomainError;
 
 /// 周时段向后搜索的上限，覆盖约两年；超过即视为配置无法产生合法时段。
@@ -20,7 +23,7 @@ pub struct AuctionScheduleSlot {
     pub source: AuctionScheduleSource,
     pub times: AuctionScheduleTimes,
     /// 时段所在本地周的周一；常规周轮次以它作为 world 内唯一身份。
-    pub local_week: NaiveDate,
+    pub local_week: civil::Date,
 }
 
 impl AuctionScheduleSlot {
@@ -31,7 +34,7 @@ impl AuctionScheduleSlot {
 
     /// 轮次、拍卖与命令稳定 UUID 的身份片段：早鸟用时段键，常规周沿用 `YYYY-MM-DD`。
     pub fn identity_key(&self) -> String {
-        self.slot_key().unwrap_or_else(|| self.local_week.format("%Y-%m-%d").to_string())
+        self.slot_key().unwrap_or_else(|| self.local_week.strftime("%Y-%m-%d").to_string())
     }
 }
 
@@ -39,7 +42,7 @@ impl AuctionScheduleSlot {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuctionWeeklySchedule {
     timezone_name: String,
-    timezone: Tz,
+    timezone: TimeZone,
     preview: (u8, u16),
     open: (u8, u16),
     end: (u8, u16),
@@ -53,8 +56,8 @@ impl AuctionWeeklySchedule {
         open: (u8, u16),
         end: (u8, u16),
     ) -> Result<Self, DomainError> {
-        let parsed: Tz =
-            timezone.parse().map_err(|_| DomainError::InvalidSchedule("周排期时区无效"))?;
+        let parsed =
+            parse_timezone(timezone).ok_or(DomainError::InvalidSchedule("周排期时区无效"))?;
         let week_minute = |(day, minute): (u8, u16)| {
             (day <= 6 && minute < 24 * 60)
                 .then(|| u32::from(day) * 24 * 60 + u32::from(minute))
@@ -81,31 +84,33 @@ impl AuctionWeeklySchedule {
                 .position(|candidate| *candidate == day)
                 .and_then(|day| u8::try_from(day).ok())
                 .ok_or(DomainError::InvalidSchedule("周排期星期无效"))?;
-            // 部署配置沿用 Chrono 的既有钟点解析范围，投影不得另加补零限制。
-            let time = NaiveTime::parse_from_str(time, "%H:%M")
-                .map_err(|_| DomainError::InvalidSchedule("周排期钟点无效"))?;
-            let minute = u16::try_from(time.hour() * 60 + time.minute())
-                .map_err(|_| DomainError::InvalidSchedule("周排期钟点无效"))?;
+            // 部署配置沿用既有的钟点解析范围，投影不得另加补零限制。
+            let minute =
+                parse_clock_minute(time).ok_or(DomainError::InvalidSchedule("周排期钟点无效"))?;
             Ok::<_, DomainError>((day, minute))
         };
         Self::new(timezone, parse(preview)?, parse(open)?, parse(end)?)
     }
 
     /// 返回 `at` 所在本地周的周一。
-    pub fn week_start(&self, at: DateTime<Utc>) -> NaiveDate {
-        let local = at.with_timezone(&self.timezone);
-        local.date_naive() - Duration::days(i64::from(local.weekday().num_days_from_monday()))
+    pub fn week_start(&self, at: Timestamp) -> civil::Date {
+        let local = self.timezone.to_datetime(at.to_jiff()).date();
+        local - i64::from(local.weekday().to_monday_zero_offset()).days()
     }
 
     /// 计算以 `week_start` 为周一的周时段，复用冻结来源的 DST 解析规则。
-    pub fn slot(&self, week_start: NaiveDate) -> Result<AuctionScheduleSlot, DomainError> {
+    pub fn slot(&self, week_start: civil::Date) -> Result<AuctionScheduleSlot, DomainError> {
         let local_at = |(day, minute): (u8, u16)| {
             let date = week_start
-                .checked_add_signed(Duration::days(i64::from(day)))
+                .checked_add(i64::from(day).days())
+                .ok()
                 .ok_or(DomainError::InvalidSchedule("周排期日期超出范围"))?;
-            let time = NaiveTime::from_num_seconds_from_midnight_opt(u32::from(minute) * 60, 0)
+            let time = i8::try_from(minute / 60)
+                .ok()
+                .zip(i8::try_from(minute % 60).ok())
+                .and_then(|(hour, minute)| civil::Time::new(hour, minute, 0, 0).ok())
                 .ok_or(DomainError::InvalidSchedule("周排期钟点无效"))?;
-            Ok::<_, DomainError>(NaiveDateTime::new(date, time))
+            Ok::<_, DomainError>(date.to_datetime(time))
         };
         let source = AuctionScheduleSource {
             timezone: self.timezone_name.clone(),
@@ -121,13 +126,14 @@ impl AuctionWeeklySchedule {
     /// 从 `floor` 所在周起，返回预览不早于 `floor` 且未被早鸟替代的第一个周时段。
     pub fn first_slot_from(
         &self,
-        floor: DateTime<Utc>,
+        floor: Timestamp,
         suppressed: impl Fn(&AuctionScheduleTimes) -> bool,
     ) -> Result<AuctionScheduleSlot, DomainError> {
         let first_week = self.week_start(floor);
         for offset in 0..MAX_WEEKLY_SEARCH {
             let week = first_week
-                .checked_add_signed(Duration::days(offset * 7))
+                .checked_add((offset * 7).days())
+                .ok()
                 .ok_or(DomainError::InvalidSchedule("周排期日期超出范围"))?;
             let slot = self.slot(week)?;
             if slot.times.preview_due_at >= floor && !suppressed(&slot.times) {

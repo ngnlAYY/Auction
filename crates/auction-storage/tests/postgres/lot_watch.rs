@@ -21,7 +21,7 @@ use auction_application::public::{
     lot_watch_notification, lot_watch_pm_notification,
 };
 use auction_domain::CommandId;
-use chrono::{DateTime, Duration, Utc};
+use auction_time::{Duration, Timestamp};
 use serde_json::json;
 use sqlx::{Acquire, Row};
 use uuid::Uuid;
@@ -43,7 +43,7 @@ async fn seed_watch(
     seed: &str,
     world: &str,
     channel: &str,
-    deadline: DateTime<Utc>,
+    deadline: Timestamp,
 ) -> WatchFixture {
     let pool = store.postgres_pool();
     let watcher_id = Uuid::new_v5(&Uuid::NAMESPACE_OID, format!("{seed}-watcher").as_bytes());
@@ -222,7 +222,7 @@ async fn seed_watch(
         .bind(notification.digest.as_bytes().as_slice())
         .bind(&notification.recipient)
         .bind(&notification.payload)
-        .bind(Utc::now())
+        .bind(Timestamp::now())
         .execute(pool)
         .await
         .expect("写入 PM 提醒来源");
@@ -299,7 +299,7 @@ async fn seed_watch(
     .bind(command.request_hash.as_bytes().as_slice())
     .bind(&command.recipient)
     .bind(&payload)
-    .bind(Utc::now())
+    .bind(Timestamp::now())
     .execute(pool)
     .await
     .expect("写入提醒来源");
@@ -309,7 +309,7 @@ async fn seed_watch(
 async fn claim_mail(
     store: &auction_storage::DatabaseStore,
 ) -> Vec<auction_application::delivery::DeliveryWorkClaim> {
-    let now = Utc::now();
+    let now = Timestamp::now();
     let sending_grace = std::time::Duration::from_secs(60);
     store.begin_claim_cycle(now, sending_grace).await.expect("执行领取前清理");
     store
@@ -328,7 +328,7 @@ async fn claim_mail(
 async fn mail_state(
     store: &auction_storage::DatabaseStore,
     delivery_id: Uuid,
-) -> (String, Option<String>, Option<DateTime<Utc>>, i64) {
+) -> (String, Option<String>, Option<Timestamp>, i64) {
     let row = sqlx::query(
         "SELECT status, failure_code, sending_at, fencing_version FROM public.deliveries WHERE id = $1",
     )
@@ -342,7 +342,7 @@ async fn mail_state(
 async fn pm_state(
     store: &auction_storage::DatabaseStore,
     notification_id: Uuid,
-) -> (String, Option<String>, Option<DateTime<Utc>>) {
+) -> (String, Option<String>, Option<Timestamp>) {
     let row = sqlx::query(
         "SELECT status, failure_code, sending_at FROM public.lot_watch_pm_deliveries
          WHERE notification_id = $1",
@@ -398,7 +398,7 @@ fn send_expectation(claim: &DeliveryWorkClaim) -> DeliveryPreparedExpectation {
 async fn fence_mail(
     store: &auction_storage::DatabaseStore,
     claim: &DeliveryWorkClaim,
-    started_at: DateTime<Utc>,
+    started_at: Timestamp,
 ) -> DeliveryFenceOutcome {
     let expectation = send_expectation(claim);
     store
@@ -417,7 +417,7 @@ async fn send_attempts(store: &auction_storage::DatabaseStore, delivery_id: Uuid
 }
 
 /// 出价提醒分类的发送节奏高水位；尚未发送过时为 NULL。
-async fn outbid_cadence(store: &auction_storage::DatabaseStore) -> Option<DateTime<Utc>> {
+async fn outbid_cadence(store: &auction_storage::DatabaseStore) -> Option<Timestamp> {
     sqlx::query_scalar(
         "SELECT last_started_at FROM public.delivery_send_cadence WHERE category = 'outbid'",
     )
@@ -431,7 +431,8 @@ async fn postgres_lot_watch_mail_reminder_is_claimable_before_the_deadline() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
     let fixture =
-        seed_watch(&store, "mail-before", "main", "mm", Utc::now() + Duration::minutes(5)).await;
+        seed_watch(&store, "mail-before", "main", "mm", Timestamp::now() + Duration::minutes(5))
+            .await;
     let delivery_id = fixture.delivery_id.expect("MoogleMail 提醒有投递");
 
     let claims = claim_mail(&store).await;
@@ -451,9 +452,14 @@ async fn postgres_lot_watch_mail_reminder_is_claimable_before_the_deadline() {
 async fn postgres_lot_watch_mail_gate_uses_authoritative_lot_leader() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
-    let fixture =
-        seed_watch(&store, "mail-stale-leader", "main", "mm", Utc::now() + Duration::minutes(5))
-            .await;
+    let fixture = seed_watch(
+        &store,
+        "mail-stale-leader",
+        "main",
+        "mm",
+        Timestamp::now() + Duration::minutes(5),
+    )
+    .await;
     let pool = store.postgres_pool();
     let watcher: Uuid =
         sqlx::query_scalar("SELECT user_id FROM public.lot_watch_notifications WHERE id = $1")
@@ -479,7 +485,8 @@ async fn postgres_lot_watch_mail_reminder_retires_after_the_deadline_before_any_
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
     let fixture =
-        seed_watch(&store, "mail-after", "main", "mm", Utc::now() - Duration::seconds(1)).await;
+        seed_watch(&store, "mail-after", "main", "mm", Timestamp::now() - Duration::seconds(1))
+            .await;
     let delivery_id = fixture.delivery_id.expect("MoogleMail 提醒有投递");
 
     let claims = claim_mail(&store).await;
@@ -505,15 +512,20 @@ async fn postgres_lot_watch_mail_reminder_retires_after_the_deadline_before_any_
 async fn postgres_lot_watch_mail_reminder_fence_starts_sending_before_the_deadline() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
-    let fixture =
-        seed_watch(&store, "mail-fence-open", "main", "mm", Utc::now() + Duration::minutes(5))
-            .await;
+    let fixture = seed_watch(
+        &store,
+        "mail-fence-open",
+        "main",
+        "mm",
+        Timestamp::now() + Duration::minutes(5),
+    )
+    .await;
     let delivery_id = fixture.delivery_id.expect("MoogleMail 提醒有投递");
     let claims = claim_mail(&store).await;
     assert_eq!(claims.len(), 1);
     let cadence_before = outbid_cadence(&store).await;
 
-    let started_at = Utc::now();
+    let started_at = Timestamp::now();
     let outcome = fence_mail(&store, &claims[0], started_at).await;
     assert!(matches!(outcome, DeliveryFenceOutcome::Sending), "截止前的合法围栏必须进入 sending");
 
@@ -521,7 +533,7 @@ async fn postgres_lot_watch_mail_reminder_fence_starts_sending_before_the_deadli
     assert_eq!(status, "sending");
     assert!(failure.is_none());
     assert_eq!(
-        sending_at.map(|value| value.timestamp_micros()),
+        sending_at.map(auction_time::Timestamp::timestamp_micros),
         Some(started_at.timestamp_micros()),
         "sending_at 必须是围栏传入的开始时刻"
     );
@@ -542,7 +554,8 @@ async fn postgres_lot_watch_mail_reminder_fence_rejects_a_claim_that_outlived_th
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
     let fixture =
-        seed_watch(&store, "mail-fence", "main", "mm", Utc::now() + Duration::minutes(5)).await;
+        seed_watch(&store, "mail-fence", "main", "mm", Timestamp::now() + Duration::minutes(5))
+            .await;
     let delivery_id = fixture.delivery_id.expect("MoogleMail 提醒有投递");
     let claims = claim_mail(&store).await;
     assert_eq!(claims.len(), 1);
@@ -551,7 +564,7 @@ async fn postgres_lot_watch_mail_reminder_fence_rejects_a_claim_that_outlived_th
     // 领取发生在截止前，围栏发生在截止后：身份合法也绝不允许开始发送。截止门在
     // persist_sending 的围栏谓词里，确定拒绝回滚整个事务，返回 Deferred 而不是 Err。
     expire_lot(&store, fixture.lot_id).await;
-    let outcome = fence_mail(&store, &claims[0], Utc::now()).await;
+    let outcome = fence_mail(&store, &claims[0], Timestamp::now()).await;
     assert!(matches!(outcome, DeliveryFenceOutcome::Deferred), "截止后 sending 围栏必须确定拒绝");
 
     let (status, failure, sending_at, _) = mail_state(&store, delivery_id).await;
@@ -580,7 +593,7 @@ async fn postgres_lot_watch_mail_reminder_fence_defers_when_watch_lapses_during_
         let store = database.store().await.expect("连接克隆测试数据库");
         let seed = format!("mail-handoff-{case}");
         let fixture =
-            seed_watch(&store, &seed, "main", "mm", Utc::now() + Duration::minutes(5)).await;
+            seed_watch(&store, &seed, "main", "mm", Timestamp::now() + Duration::minutes(5)).await;
         let delivery_id = fixture.delivery_id.expect("MoogleMail 提醒有投递");
         let watcher = Uuid::new_v5(&Uuid::NAMESPACE_OID, format!("{seed}-watcher").as_bytes());
         let claims = claim_mail(&store).await;
@@ -608,7 +621,7 @@ async fn postgres_lot_watch_mail_reminder_fence_defers_when_watch_lapses_during_
                 .expect("交接期间收件人重新领先");
         }
 
-        let outcome = fence_mail(&store, &claims[0], Utc::now()).await;
+        let outcome = fence_mail(&store, &claims[0], Timestamp::now()).await;
         assert!(matches!(outcome, DeliveryFenceOutcome::Deferred), "{case}: 围栏必须确定拒绝");
         let (status, failure, sending_at, _) = mail_state(&store, delivery_id).await;
         assert_eq!(status, "claimed", "{case}: 围栏拒绝不改写未发送的领取状态");
@@ -625,9 +638,10 @@ async fn postgres_lot_watch_mail_reminder_keeps_an_already_fenced_send() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
     let fixture =
-        seed_watch(&store, "mail-sent", "main", "mm", Utc::now() - Duration::seconds(1)).await;
+        seed_watch(&store, "mail-sent", "main", "mm", Timestamp::now() - Duration::seconds(1))
+            .await;
     let delivery_id = fixture.delivery_id.expect("MoogleMail 提醒有投递");
-    let sending_at = Utc::now() - Duration::seconds(30);
+    let sending_at = Timestamp::now() - Duration::seconds(30);
     sqlx::query(
         "UPDATE public.deliveries SET status = 'sending', sending_at = $2, lease_token = $3,
             lease_expires_at = $4, attempt_count = 1
@@ -636,7 +650,7 @@ async fn postgres_lot_watch_mail_reminder_keeps_an_already_fenced_send() {
     .bind(delivery_id)
     .bind(sending_at)
     .bind(Uuid::new_v4())
-    .bind(Utc::now() + Duration::minutes(5))
+    .bind(Timestamp::now() + Duration::minutes(5))
     .execute(store.postgres_pool())
     .await
     .expect("模拟已进入发送围栏的提醒");
@@ -648,7 +662,7 @@ async fn postgres_lot_watch_mail_reminder_keeps_an_already_fenced_send() {
     assert_eq!(status, "sending");
     assert!(failure.is_none());
     assert_eq!(
-        stored_sending_at.map(|value| value.timestamp_micros()),
+        stored_sending_at.map(auction_time::Timestamp::timestamp_micros),
         Some(sending_at.timestamp_micros()),
         "已发送的提醒时间不被退役改写"
     );
@@ -661,7 +675,8 @@ async fn postgres_lot_watch_pm_reminder_parity_before_and_after_the_deadline() {
 
     // 截止前可领取并可开始发送。
     let before =
-        seed_watch(&store, "pm-before", "main", "pm", Utc::now() + Duration::minutes(5)).await;
+        seed_watch(&store, "pm-before", "main", "pm", Timestamp::now() + Duration::minutes(5))
+            .await;
     let claim = pm_claim(&store).await.expect("截止前的 PM 提醒应可领取");
     assert_eq!(claim.message.notification_id, before.notification_id);
     let started = LotWatchPmWorkStore::start_sending(&store, claim, PM_SENDER.to_owned())
@@ -674,7 +689,8 @@ async fn postgres_lot_watch_pm_reminder_parity_before_and_after_the_deadline() {
 
     // 截止后尚未发送的 PM 按同一预检语义退役为 suppressed/source_invalid。
     let after =
-        seed_watch(&store, "pm-after", "isekai", "pm", Utc::now() - Duration::seconds(1)).await;
+        seed_watch(&store, "pm-after", "isekai", "pm", Timestamp::now() - Duration::seconds(1))
+            .await;
     assert!(pm_claim(&store).await.is_none(), "截止后的 PM 提醒不能再被领取");
     let (status, failure, sending_at) = pm_state(&store, after.notification_id).await;
     assert_eq!(status, "suppressed");
@@ -689,7 +705,7 @@ async fn postgres_lot_watch_pm_reminder_fence_and_fenced_send_ignore_the_expired
 
     // 领取在截止前，发送围栏在截止后：拒绝并退役，不发送。
     let fixture =
-        seed_watch(&store, "pm-fence", "main", "pm", Utc::now() + Duration::minutes(5)).await;
+        seed_watch(&store, "pm-fence", "main", "pm", Timestamp::now() + Duration::minutes(5)).await;
     let claim = pm_claim(&store).await.expect("截止前 PM 可领取");
     expire_lot(&store, fixture.lot_id).await;
     let started = LotWatchPmWorkStore::start_sending(&store, claim, PM_SENDER.to_owned())
@@ -703,8 +719,9 @@ async fn postgres_lot_watch_pm_reminder_fence_and_fenced_send_ignore_the_expired
 
     // 已经 sending 的 PM 结果不受退役影响，也不回发送队列。
     let fenced =
-        seed_watch(&store, "pm-sent", "isekai", "pm", Utc::now() - Duration::seconds(1)).await;
-    let sending_at = Utc::now() - Duration::seconds(30);
+        seed_watch(&store, "pm-sent", "isekai", "pm", Timestamp::now() - Duration::seconds(1))
+            .await;
+    let sending_at = Timestamp::now() - Duration::seconds(30);
     sqlx::query(
         "UPDATE public.lot_watch_pm_deliveries SET status = 'sending', sending_at = $2,
             sender_forum_account_id = $3, lease_token = $4, lease_expires_at = $5,
@@ -715,7 +732,7 @@ async fn postgres_lot_watch_pm_reminder_fence_and_fenced_send_ignore_the_expired
     .bind(sending_at)
     .bind(PM_SENDER)
     .bind(Uuid::new_v4())
-    .bind(Utc::now() + Duration::minutes(5))
+    .bind(Timestamp::now() + Duration::minutes(5))
     .bind(WORKER)
     .execute(store.postgres_pool())
     .await
@@ -726,7 +743,7 @@ async fn postgres_lot_watch_pm_reminder_fence_and_fenced_send_ignore_the_expired
     assert_eq!(status, "sending");
     assert!(failure.is_none());
     assert_eq!(
-        stored_sending_at.map(|value| value.timestamp_micros()),
+        stored_sending_at.map(auction_time::Timestamp::timestamp_micros),
         Some(sending_at.timestamp_micros()),
         "已发送的提醒时间不被退役改写"
     );
@@ -738,9 +755,14 @@ async fn postgres_lot_watch_pm_reminder_fence_and_fenced_send_ignore_the_expired
 async fn postgres_lot_watch_pm_gate_uses_authoritative_lot_leader() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
-    let fixture =
-        seed_watch(&store, "pm-stale-leader", "main", "pm", Utc::now() + Duration::minutes(5))
-            .await;
+    let fixture = seed_watch(
+        &store,
+        "pm-stale-leader",
+        "main",
+        "pm",
+        Timestamp::now() + Duration::minutes(5),
+    )
+    .await;
     let pool = store.postgres_pool();
     let watcher: Uuid =
         sqlx::query_scalar("SELECT user_id FROM public.lot_watch_notifications WHERE id = $1")
@@ -776,7 +798,8 @@ async fn postgres_lot_watch_outbox_serializes_with_explicit_unwatch() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
     let fixture =
-        seed_watch(&store, "outbox-unwatch", "main", "mm", Utc::now() + Duration::minutes(5)).await;
+        seed_watch(&store, "outbox-unwatch", "main", "mm", Timestamp::now() + Duration::minutes(5))
+            .await;
     let pool = store.postgres_pool().clone();
     let watcher: Uuid =
         sqlx::query_scalar("SELECT user_id FROM public.lot_watch_notifications WHERE id = $1")
@@ -838,7 +861,7 @@ async fn postgres_lot_watch_outbox_serializes_with_explicit_unwatch() {
     .bind(command_id)
     .bind(fixture.lot_id)
     .bind(challenger)
-    .bind(Utc::now() + Duration::minutes(5))
+    .bind(Timestamp::now() + Duration::minutes(5))
     .execute(&pool)
     .await
     .expect("写入挑战出价");
@@ -937,7 +960,7 @@ async fn postgres_lot_watch_outbox_serializes_with_explicit_unwatch() {
 async fn postgres_unwatch_retires_pending_slow_proxy_reminder() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
-    let deadline = Utc::now() + Duration::hours(1);
+    let deadline = Timestamp::now() + Duration::hours(1);
     let seed = "pending-unwatch";
     let fixture = seed_watch(&store, seed, "main", "mm", deadline).await;
     let watcher = Uuid::new_v5(&Uuid::NAMESPACE_OID, format!("{seed}-watcher").as_bytes());
@@ -1059,7 +1082,7 @@ async fn outbid_watcher_with_preference(
     .bind(command_id)
     .bind(fixture.lot_id)
     .bind(challenger)
-    .bind(Utc::now() + Duration::minutes(5))
+    .bind(Timestamp::now() + Duration::minutes(5))
     .execute(&pool)
     .await
     .expect("写入挑战出价");
@@ -1112,7 +1135,8 @@ async fn postgres_lot_watch_both_channels_create_one_source_per_channel() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
     let fixture =
-        seed_watch(&store, "channel-both", "main", "mm", Utc::now() + Duration::minutes(5)).await;
+        seed_watch(&store, "channel-both", "main", "mm", Timestamp::now() + Duration::minutes(5))
+            .await;
     let watcher = outbid_watcher_with_preference(&store, &fixture, "both").await;
 
     let sources = sources_of_second_cycle(&store, watcher, fixture.lot_id).await;
@@ -1135,7 +1159,8 @@ async fn postgres_lot_watch_no_channel_creates_no_source() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
     let fixture =
-        seed_watch(&store, "channel-none", "main", "mm", Utc::now() + Duration::minutes(5)).await;
+        seed_watch(&store, "channel-none", "main", "mm", Timestamp::now() + Duration::minutes(5))
+            .await;
     let watcher = outbid_watcher_with_preference(&store, &fixture, "none").await;
 
     assert!(sources_of_second_cycle(&store, watcher, fixture.lot_id).await.is_empty());
@@ -1169,7 +1194,8 @@ async fn postgres_lot_watch_preference_accepts_the_channel_set() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
     let fixture =
-        seed_watch(&store, "channel-pref", "main", "mm", Utc::now() + Duration::minutes(5)).await;
+        seed_watch(&store, "channel-pref", "main", "mm", Timestamp::now() + Duration::minutes(5))
+            .await;
     let watcher: Uuid =
         sqlx::query_scalar("SELECT user_id FROM public.lot_watch_notifications WHERE id = $1")
             .bind(fixture.notification_id)
@@ -1207,7 +1233,7 @@ async fn postgres_lot_watch_preference_accepts_the_channel_set() {
 async fn postgres_lot_watch_poison_event_release_keeps_error_and_capped_backoff() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
-    let deadline = Utc::now() + Duration::minutes(5);
+    let deadline = Timestamp::now() + Duration::minutes(5);
     let target = seed_watch(&store, "poison-target", "main", "mm", deadline).await;
     // 另一场 lot 上的出价：事件挂在 target lot 上，处理时按 bid_missing 失败。
     seed_watch(&store, "poison-other", "isekai", "mm", deadline).await;

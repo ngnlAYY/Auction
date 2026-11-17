@@ -97,7 +97,7 @@ impl AdminCredentialRuntimeWriter for DatabaseStore {
     fn mark_invalid(
         &self,
         credential_id: Uuid,
-        now: chrono::DateTime<chrono::Utc>,
+        now: auction_time::Timestamp,
     ) -> ApplicationFuture<'_, ()> {
         Box::pin(async move {
             if credential_id.is_nil() || now.timestamp_nanos_opt().is_none() {

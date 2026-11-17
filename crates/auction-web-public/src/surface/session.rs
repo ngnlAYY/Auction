@@ -429,9 +429,9 @@ pub(crate) fn use_public_session_expiry(
                 .and_then(|identity| identity.as_ref())
                 .filter(|identity| identity.authenticated)
                 .and_then(|identity| {
-                    chrono::DateTime::parse_from_rfc3339(identity.expires_at.as_deref()?).ok().map(
-                        |expiry| (identity.user_id.clone(), expiry.with_timezone(&chrono::Utc)),
-                    )
+                    auction_time::Timestamp::parse_from_rfc3339(identity.expires_at.as_deref()?)
+                        .ok()
+                        .map(|expiry| (identity.user_id.clone(), expiry))
                 })
         });
         let _expiry_check = use_resource(move || {

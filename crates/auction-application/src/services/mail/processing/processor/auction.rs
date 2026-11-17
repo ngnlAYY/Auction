@@ -1,6 +1,6 @@
 //! MoogleMail 装备读取、过滤和拍卖入站编排。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::json;
 
 use super::super::commands::{auction_request_hash, decision, stable_command_id};
@@ -56,7 +56,7 @@ where
     pub(super) async fn process_auction(
         &self,
         mut message: MailMessage,
-        now: DateTime<Utc>,
+        now: Timestamp,
         pending_equipment_diagnostic: &mut Option<
             crate::ports::mail::PendingMailEquipmentDiagnostic,
         >,

@@ -223,7 +223,7 @@ pub async fn validate_mail_evidence_time(
             MailEvidenceRejection::StructureInvalid,
         ));
     }
-    let now = sqlx::query_scalar::<_, chrono::DateTime<chrono::Utc>>("SELECT clock_timestamp()")
+    let now = sqlx::query_scalar::<_, auction_time::Timestamp>("SELECT clock_timestamp()")
         .fetch_one(connection)
         .await?;
     if !snapshot.valid_at(now) {

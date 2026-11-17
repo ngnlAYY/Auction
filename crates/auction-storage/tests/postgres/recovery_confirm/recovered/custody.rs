@@ -27,7 +27,7 @@ use auction_domain::{
     SettlementWorld, resend_activate_command_id, resend_delivery_id, resend_prepare_command_id,
 };
 use auction_storage::DatabaseStore;
-use chrono::{Duration, DurationRound, Utc};
+use auction_time::{Duration, Timestamp};
 use serde_json::json;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -47,7 +47,7 @@ fn delivery_evidence(
     credential: Uuid,
     claim: &auction_application::delivery::DeliveryWorkClaim,
 ) -> SettlementInternalEvidenceSnapshot {
-    let observed = Utc::now().duration_trunc(Duration::microseconds(1)).expect("截断到微秒");
+    let observed = Timestamp::now().duration_trunc(Duration::microseconds(1)).expect("截断到微秒");
     let mut identity = MailAccountEvidenceBinding {
         credential_id: credential,
         credential_version: 1,
@@ -83,7 +83,7 @@ fn delivery_evidence(
 /// 退款投递经资金门进入 sending 后以精确 Sent 证明（Sent MID 为 `mid`）收口：退款分配
 /// reserve → in_flight → spent。
 async fn send_refund(store: &DatabaseStore, credential: Uuid, delivery: Uuid, mid: &str) {
-    let now = Utc::now();
+    let now = Timestamp::now();
     let grace = StdDuration::from_secs(60);
     DeliveryWorkStore::begin_claim_cycle(store, now, grace).await.expect("领取前清理");
     let claim = DeliveryWorkStore::claim_due(
@@ -117,7 +117,7 @@ async fn send_refund(store: &DatabaseStore, credential: Uuid, delivery: Uuid, mi
     let outcome = store
         .start_sending_authorized_until(
             claim.clone(),
-            Utc::now(),
+            Timestamp::now(),
             &delivery_evidence(credential, &claim),
             Instant::now() + StdDuration::from_secs(30),
             Some(&DeliveryPreparedExpectation::Send(Arc::clone(&expectation))),
@@ -140,7 +140,7 @@ async fn send_refund(store: &DatabaseStore, credential: Uuid, delivery: Uuid, mi
                     "sending_fencing_version": claim.fencing_version,
                 }),
             },
-            Utc::now(),
+            Timestamp::now(),
         )
         .await
         .expect("退款 Sent 证明收口");
@@ -197,13 +197,16 @@ async fn postgres_returned_refund_held_in_custody_completes_recovery_independent
     let case = insert_inbound(
         pool,
         "996101",
-        Utc::now(),
+        Timestamp::now(),
         Some(("MoogleMail", format!("[RTS] Auction buyer refund [{}]", sale.refund))),
         evidence(sale.refund, 100, &[]),
     )
     .await;
-    let consumed =
-        store.consume_due_settlement_return(Utc::now()).await.expect("消费").expect("必须消费");
+    let consumed = store
+        .consume_due_settlement_return(Timestamp::now())
+        .await
+        .expect("消费")
+        .expect("必须消费");
     assert_eq!((consumed.return_mail_id, consumed.delivery_id), (case, Some(refund_delivery)));
     assert_eq!(
         handle(&store, case, 1, SettlementReturnAction::ReclaimAndHold).await,
@@ -226,7 +229,7 @@ async fn postgres_returned_refund_held_in_custody_completes_recovery_independent
 
     // 恢复 owner 以独立完成事实结束恢复记录；退款负债、资金用途与案件都不改写。
     let advance = store
-        .complete_due_refund(Utc::now())
+        .complete_due_refund(Timestamp::now())
         .await
         .expect("恢复收口")
         .expect("退款代管必须让恢复记录完成");
@@ -244,13 +247,13 @@ async fn postgres_returned_refund_held_in_custody_completes_recovery_independent
         0,
         "不冒充退款已完成"
     );
-    let completed_at: Option<chrono::DateTime<Utc>> =
+    let completed_at: Option<auction_time::Timestamp> =
         sqlx::query_scalar("SELECT completed_at FROM public.settlement_recoveries WHERE id = $1")
             .bind(sale.recovery_id)
             .fetch_one(pool)
             .await
             .expect("读取完成时刻");
-    let proven_at: chrono::DateTime<Utc> = sqlx::query_scalar(
+    let proven_at: auction_time::Timestamp = sqlx::query_scalar(
         "SELECT proven_at FROM public.settlement_return_takes WHERE return_mail_id = $1",
     )
     .bind(case)
@@ -266,7 +269,10 @@ async fn postgres_returned_refund_held_in_custody_completes_recovery_independent
         refund_allocation(pool, sale.refund).await,
         ("refund".to_owned(), "available".to_owned(), 100)
     );
-    assert!(store.complete_due_refund(Utc::now()).await.expect("排空").is_none(), "只完成一次");
+    assert!(
+        store.complete_due_refund(Timestamp::now()).await.expect("排空").is_none(),
+        "只完成一次"
+    );
 
     // 代管后补寄：恢复记录已完成不阻断补寄，退款履约以第 2 次派发重新可领取。
     let version: i64 = sqlx::query_scalar(
@@ -312,7 +318,12 @@ async fn postgres_returned_refund_held_in_custody_completes_recovery_independent
     };
     let prepare_evidence = custody_evidence(prepare_command.as_uuid(), &claim, credential);
     let prepared = store
-        .prepare_delivery(claim, preparation, Utc::now(), Some((&prepare_evidence, deadline())))
+        .prepare_delivery(
+            claim,
+            preparation,
+            Timestamp::now(),
+            Some((&prepare_evidence, deadline())),
+        )
         .await
         .expect("补寄 prepare");
     assert_eq!(prepared.delivery_id, resend);
@@ -325,7 +336,7 @@ async fn postgres_returned_refund_held_in_custody_completes_recovery_independent
             prepared.next_claim,
             activate,
             RequestHash::from_canonical_bytes(b"recovered-refund-resend-activate"),
-            Utc::now(),
+            Timestamp::now(),
             Some((&activate_evidence, deadline())),
         )
         .await
@@ -355,8 +366,11 @@ async fn postgres_returned_refund_held_in_custody_completes_recovery_independent
         refund_allocation(pool, sale.refund).await,
         ("refund".to_owned(), "spent".to_owned(), 100)
     );
-    let done =
-        store.complete_due_return_resend(Utc::now()).await.expect("收口补寄").expect("必须收口");
+    let done = store
+        .complete_due_return_resend(Timestamp::now())
+        .await
+        .expect("收口补寄")
+        .expect("必须收口");
     assert_eq!((done.return_mail_id, done.status), (case, SettlementReturnCaseStatus::Resent));
     assert_eq!(
         recovery_state(pool, sale.recovery_id).await,

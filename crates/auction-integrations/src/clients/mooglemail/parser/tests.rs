@@ -2,13 +2,13 @@
 
 use std::collections::HashSet;
 
-use chrono::{TimeZone, Utc};
+use auction_time::Timestamp;
 
 use super::*;
 use crate::clients::mooglemail::{MoogleMailErrorCategory, MoogleMailOperation, MoogleMailWorld};
 
-fn at(value: &str) -> chrono::DateTime<Utc> {
-    chrono::DateTime::parse_from_rfc3339(value).unwrap().with_timezone(&Utc)
+fn at(value: &str) -> auction_time::Timestamp {
+    auction_time::Timestamp::parse_from_rfc3339(value).unwrap()
 }
 
 /// 生成符合冻结结构的列表页：唯一表头、按列数严格校验的数据行和一个分页器。
@@ -61,7 +61,7 @@ fn inbox_keeps_minute_time_subject_hex_and_skips_duplicate_mids() {
     assert_eq!(page.summaries[0].received_at, at("2026-11-02T01:14:00Z"));
     assert_eq!(
         page.summaries[1].received_at,
-        Utc.with_ymd_and_hms(2026, 11, 2, 2, 0, 0).single().unwrap()
+        Timestamp::from_ymd_hms(2026, 11, 2, 2, 0, 0).unwrap()
     );
     assert!(!page.has_next_page);
 }

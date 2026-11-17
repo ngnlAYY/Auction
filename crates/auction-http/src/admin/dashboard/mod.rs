@@ -134,7 +134,7 @@ pub(crate) async fn get(
     let owner_snapshot = async {
         match state.operations_alert_source() {
             Some(port) => port
-                .snapshot(chrono::Utc::now(), collection)
+                .snapshot(auction_time::Timestamp::now(), collection)
                 .await
                 .inspect_err(|cause| {
                     diagnostics::warn(

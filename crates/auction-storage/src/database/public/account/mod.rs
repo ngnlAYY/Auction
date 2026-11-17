@@ -5,7 +5,7 @@ use auction_application::auction::{
     PublicAccountReader, PublicMyBidsPage, PublicMyBidsRequest, PublicOwnedProxy,
 };
 use auction_application::core::ApplicationFuture;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use crate::database::DatabaseStore;
@@ -61,8 +61,8 @@ struct ProxyBase {
     status: String,
     terminal_reason: Option<String>,
     state_version: i64,
-    created_at: DateTime<Utc>,
-    updated_at: DateTime<Utc>,
+    created_at: Timestamp,
+    updated_at: Timestamp,
     equipment_name: String,
     equipment_category: String,
     start_price: i64,

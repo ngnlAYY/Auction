@@ -1,7 +1,7 @@
 //! 持久化拍卖轮次的阶段、领取与存储端口。
 
 use auction_domain::{AuctionId, CommandId};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -35,7 +35,7 @@ pub struct ScheduledRoundClaim {
     pub phase: ScheduledRoundPhase,
     pub command_id: CommandId,
     pub worker_id: String,
-    pub lease_until: DateTime<Utc>,
+    pub lease_until: Timestamp,
     /// 领取成功后的轮次版本；完成/失败必须同时匹配它，避免同一 owner 的旧 lease 回写新一代任务。
     pub state_version: i64,
     pub attempt_count: u32,
@@ -51,18 +51,18 @@ pub struct ScheduledRoundBootstrap {
     pub auction_id: AuctionId,
     pub create_command_id: CommandId,
     pub world_id: String,
-    pub local_week: chrono::NaiveDate,
+    pub local_week: jiff::civil::Date,
     /// 早鸟场次键；常规周轮次为 `None`，并继续受 world/local_week 唯一约束。
     pub slot_key: Option<String>,
-    pub preview_due_at: DateTime<Utc>,
-    pub open_due_at: DateTime<Utc>,
-    pub scheduled_end_at: DateTime<Utc>,
+    pub preview_due_at: Timestamp,
+    pub open_due_at: Timestamp,
+    pub scheduled_end_at: Timestamp,
     pub request_hash: crate::ports::core::RequestHash,
     pub policy: AuctionPolicyTemplate,
     /// 新轮次必须冻结原始 IANA 本地计划，后继不按 UTC 固定时长推算。
     pub schedule_source: auction_domain::AuctionScheduleSource,
     /// 新拍卖最早接收装备的时刻；语义与开拍后继一致，不参与请求摘要。
-    pub intake_opens_at: Option<DateTime<Utc>>,
+    pub intake_opens_at: Option<Timestamp>,
 }
 
 /// 周计划 ensure 后返回的安全投影，供调度器决定 Mail owner 的暂停/恢复期望。
@@ -72,28 +72,28 @@ pub struct ScheduledRoundSnapshot {
     pub auction_id: Option<AuctionId>,
     pub active: bool,
     pub world_id: String,
-    pub local_week: chrono::NaiveDate,
+    pub local_week: jiff::civil::Date,
     /// 早鸟场次键；常规周轮次为 `None`。
     pub slot_key: Option<String>,
-    pub preview_due_at: DateTime<Utc>,
-    pub open_due_at: DateTime<Utc>,
-    pub scheduled_end_at: DateTime<Utc>,
+    pub preview_due_at: Timestamp,
+    pub open_due_at: Timestamp,
+    pub scheduled_end_at: Timestamp,
     pub create_command_id: Uuid,
-    pub preview_completed_at: Option<DateTime<Utc>>,
-    pub open_completed_at: Option<DateTime<Utc>>,
+    pub preview_completed_at: Option<Timestamp>,
+    pub open_completed_at: Option<Timestamp>,
 }
 
 /// `claim_due` 的返回值必须来自数据库条件更新/锁定；内存中的 interval 只能唤醒 Worker，
 /// 不能成为 due、租约、完成或失败状态的权威来源。
 pub trait ScheduledRoundStore: Send + Sync {
     /// 返回数据库权威当前时间；周身份和 due 判断不得使用进程本地时钟。
-    fn database_now(&self) -> ApplicationFuture<'_, DateTime<Utc>>;
+    fn database_now(&self) -> ApplicationFuture<'_, Timestamp>;
 
     /// 只读获取已冻结的常规本地周轮次；配置变化不能作为重发旧创建命令或改写既有策略的理由。
     fn find_current_round(
         &self,
         world_id: String,
-        local_week: chrono::NaiveDate,
+        local_week: jiff::civil::Date,
     ) -> ApplicationFuture<'_, Option<ScheduledRoundSnapshot>>;
 
     /// 只读获取已冻结的早鸟场次轮次；与常规周轮次的查找键互不重叠。
@@ -112,26 +112,25 @@ pub trait ScheduledRoundStore: Send + Sync {
     fn claim_due(
         &self,
         worker_id: String,
-        now: DateTime<Utc>,
-        lease_until: DateTime<Utc>,
+        now: Timestamp,
+        lease_until: Timestamp,
         limit: u16,
     ) -> ApplicationFuture<'_, Vec<ScheduledRoundClaim>>;
 
     /// 返回严格晚于 `now` 的最早阶段到期或退避租约结束时刻，供 Worker 提前唤醒；
     /// 这只是唤醒提示，是否可领取仍由 `claim_due` 的锁内谓词决定。
-    fn next_claimable_at(&self, now: DateTime<Utc>)
-    -> ApplicationFuture<'_, Option<DateTime<Utc>>>;
+    fn next_claimable_at(&self, now: Timestamp) -> ApplicationFuture<'_, Option<Timestamp>>;
 
     fn complete(
         &self,
         claim: ScheduledRoundClaim,
-        completed_at: DateTime<Utc>,
+        completed_at: Timestamp,
     ) -> ApplicationFuture<'_, ()>;
 
     fn fail(
         &self,
         claim: ScheduledRoundClaim,
-        retry_at: DateTime<Utc>,
+        retry_at: Timestamp,
         failure_code: String,
         safe_detail: String,
     ) -> ApplicationFuture<'_, ()>;

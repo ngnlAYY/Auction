@@ -49,7 +49,7 @@ pub use proxy::{
 pub use scheduling::{
     AuctionEarlyBirdCalendar, AuctionEarlyBirdConfig, AuctionEarlyBirdSeason, AuctionEarlyBirdSlot,
     AuctionScheduleCalendar, AuctionScheduleSlot, AuctionScheduleSource, AuctionScheduleTimes,
-    AuctionWeeklySchedule,
+    AuctionWeeklySchedule, parse_clock_minute, parse_timezone,
 };
 pub use settlement::{
     AdjustmentAnchor, COMPENSATION_REVERSAL_RULE_VERSION, CompensationReversal,

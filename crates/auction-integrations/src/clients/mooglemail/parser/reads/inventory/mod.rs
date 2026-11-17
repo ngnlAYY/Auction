@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, HashSet};
 
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use scraper::{ElementRef, Html};
 use url::Url;
 
@@ -30,7 +30,7 @@ impl MoogleMailParser {
         bytes: &[u8],
         world: MoogleMailWorld,
         category: MoogleMailInventoryCategory,
-        observed_at: DateTime<Utc>,
+        observed_at: Timestamp,
     ) -> Result<MoogleMailInventorySnapshot, MoogleMailError> {
         let operation = MoogleMailOperation::Inventory;
         let fail = || protocol(operation, world);

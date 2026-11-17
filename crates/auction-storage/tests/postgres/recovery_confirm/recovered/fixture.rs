@@ -12,7 +12,7 @@ use auction_application::settlement::{
     VerifiedMailEquipmentPresence,
 };
 use auction_domain::SettlementWorld;
-use chrono::{Duration, Utc};
+use auction_time::{Duration, Timestamp};
 use serde_json::json;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -49,7 +49,7 @@ pub(crate) async fn insert_recovered_sale(pool: &PgPool, sequence: i64) -> Recov
         Uuid,
         Uuid,
         String,
-        chrono::DateTime<Utc>,
+        auction_time::Timestamp,
     ) = sqlx::query_as(
         "SELECT recovery.lot_id, recovery.equipment_id, equipment.external_equipment_id,
                 recovery.created_at
@@ -213,7 +213,7 @@ pub(crate) async fn insert_recovered_sale(pool: &PgPool, sequence: i64) -> Recov
 /// isekai 草稿接收场次（届次与成交场次错开）：确认后装备直接重列，恢复记录进入 `refunding`。
 pub(crate) async fn insert_relist_target(pool: &PgPool, sequence: i64) {
     let auction = Uuid::new_v4();
-    let at = Utc::now() - Duration::hours(1);
+    let at = Timestamp::now() - Duration::hours(1);
     let mut transaction = pool.begin().await.expect("开启草稿目标事务");
     sqlx::query(
         "INSERT INTO public.auctions
@@ -309,7 +309,7 @@ pub(crate) fn evidence(
     claim: &SettlementFulfillmentClaim,
     credential_id: Uuid,
 ) -> SettlementInternalEvidenceSnapshot {
-    let observed = Utc::now().max(claim.claimed_at);
+    let observed = Timestamp::now().max(claim.claimed_at);
     let mut identity = MailAccountEvidenceBinding {
         credential_id,
         credential_version: 1,

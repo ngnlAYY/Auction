@@ -7,7 +7,7 @@
 use std::path::Path;
 
 use anyhow::Context;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use crate::cli::{ReceiptArgs, ReceiptCommand};
 use crate::support::files::PrivateDirectory;
@@ -82,7 +82,7 @@ pub(crate) fn record(
     state: &PrivateDirectory,
     action: Action,
     outcome: Outcome,
-    started_at: DateTime<Utc>,
+    started_at: Timestamp,
     context: &ReceiptContext,
     migration: Option<MigrationRecord>,
     artifacts: Vec<Artifact>,
@@ -94,7 +94,7 @@ pub(crate) fn record(
         action,
         outcome,
         started_at,
-        finished_at: Utc::now(),
+        finished_at: Timestamp::now(),
         actor: context.actor.clone(),
         actor_uid: context.actor_uid,
         backup_id: context.backup_id.clone(),
@@ -121,7 +121,7 @@ pub(crate) fn record_deploy(
     receipt_id: uuid::Uuid,
     action: Action,
     outcome: Outcome,
-    started_at: DateTime<Utc>,
+    started_at: Timestamp,
     context: &ReceiptContext,
     migration: Option<MigrationRecord>,
     artifacts: Vec<Artifact>,
@@ -137,7 +137,7 @@ pub(crate) fn record_deploy(
         action,
         outcome,
         started_at,
-        finished_at: Utc::now(),
+        finished_at: Timestamp::now(),
         actor: context.actor.clone(),
         actor_uid: context.actor_uid,
         backup_id: context.backup_id.clone(),
@@ -208,7 +208,7 @@ pub(crate) fn query(state_dir: &Path, args: ReceiptArgs) -> anyhow::Result<()> {
 mod tests {
     use std::sync::atomic::{AtomicU32, Ordering};
 
-    use chrono::Utc;
+    use auction_time::Timestamp;
 
     use super::{
         Action, Outcome, ReceiptContext, failure_text,
@@ -262,7 +262,7 @@ mod tests {
             &state,
             Action::Restart,
             Outcome::Succeeded,
-            Utc::now(),
+            Timestamp::now(),
             &context,
             Some(MigrationRecord {
                 before_version: 95,

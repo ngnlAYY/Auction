@@ -5,8 +5,8 @@
 #[cfg(target_arch = "wasm32")]
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 
+use auction_time::Timestamp;
 use auction_web_shared::TransportError;
-use chrono::{DateTime, Utc};
 use gloo_net::http::{Request, Response};
 
 // 旧版以响应 Date 头估算服务端时钟，避免客户端本地时钟偏移导致竞价窗口显示错误。
@@ -61,7 +61,7 @@ fn record_server_date(_raw_date: Option<String>) {
         let Some(raw_date) = _raw_date else {
             return;
         };
-        let Ok(server_date) = DateTime::parse_from_rfc2822(&raw_date) else {
+        let Some(server_date) = Timestamp::parse_from_imf_fixdate(&raw_date) else {
             return;
         };
         let browser_now = js_sys::Date::new_0().get_time();
@@ -96,7 +96,7 @@ fn record_server_date(_raw_date: Option<String>) {
 }
 
 /// 返回按服务端时钟修正后的当前时间；非 WASM 构建沿用系统 UTC 时钟。
-pub(crate) fn estimated_now() -> DateTime<Utc> {
+pub(crate) fn estimated_now() -> Timestamp {
     #[cfg(target_arch = "wasm32")]
     {
         let browser_now = js_sys::Date::new_0().get_time();
@@ -106,10 +106,10 @@ pub(crate) fn estimated_now() -> DateTime<Utc> {
             && let Some(corrected) =
                 (browser_now as i64).checked_add(SERVER_OFFSET_MILLIS.load(Ordering::Acquire))
         {
-            return DateTime::from_timestamp_millis(corrected).unwrap_or_else(Utc::now);
+            return Timestamp::from_timestamp_millis(corrected).unwrap_or_else(Timestamp::now);
         }
     }
-    Utc::now()
+    Timestamp::now()
 }
 
 /// 发送 GET 并在读取 DTO 前采集服务端时钟；所有 Public 读取共用该边界。

@@ -6,7 +6,7 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use auction_application::delivery::DeliveryWorkStore;
-use chrono::Utc;
+use auction_time::Timestamp;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -124,7 +124,7 @@ async fn postgres_player_notices_retire_after_rebind_or_forum_rename() {
     let stable_notice = insert_summary(pool, "Stable").await;
 
     store
-        .begin_claim_cycle(Utc::now(), std::time::Duration::from_secs(60))
+        .begin_claim_cycle(Timestamp::now(), std::time::Duration::from_secs(60))
         .await
         .expect("领取前退役清理");
 

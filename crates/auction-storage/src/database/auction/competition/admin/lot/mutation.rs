@@ -2,7 +2,7 @@
 
 use auction_application::admin::{AdminLotSummary, AdminLotUpdateCommand};
 use auction_application::core::CompetitionTransactionError;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use crate::database::auction::competition::PostgresCompetitionTransaction;
 use crate::database::auction::competition::mapping::map_sql_error;
@@ -10,7 +10,7 @@ use crate::database::auction::competition::mapping::map_sql_error;
 pub(super) async fn update_admin_lot_inner(
     transaction: &mut PostgresCompetitionTransaction,
     command: &AdminLotUpdateCommand,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<AdminLotSummary, CompetitionTransactionError> {
     let start_price = command.start_price;
     // 邮件来源时间或时钟回拨可能令既有更新时间领先本机；修改必须保持时间单调，否则撤拍后的安全

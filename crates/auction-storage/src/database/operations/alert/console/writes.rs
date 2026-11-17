@@ -5,7 +5,7 @@ use auction_application::operations::{
     OperationsAlertAcknowledgeCommand, OperationsAlertCommandResult, OperationsAlertError,
     OperationsAlertSilenceCommand,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -108,12 +108,12 @@ pub(super) async fn write_operator_fact_postgres(
     if !active {
         return Err(ApplicationError::OperationsAlert(OperationsAlertError::Invalid));
     }
-    let occurred_at = Utc::now();
+    let occurred_at = Timestamp::now();
     let silenced_until = match action {
         OperatorAction::Acknowledge => None,
         OperatorAction::Silence { seconds } => Some(
             occurred_at
-                .checked_add_signed(chrono::Duration::seconds(seconds))
+                .checked_add_signed(auction_time::Duration::seconds(seconds))
                 .ok_or(ApplicationError::OperationsAlert(OperationsAlertError::Invalid))?,
         ),
     };
@@ -176,7 +176,7 @@ async fn replay_postgres(
         .map_err(|error| storage_error_from(error, "读取告警重放摘要失败"))?;
     let stored_action: String =
         row.try_get("action").map_err(|error| storage_error_from(error, "读取告警重放动作失败"))?;
-    let silenced_until: Option<DateTime<Utc>> = row
+    let silenced_until: Option<Timestamp> = row
         .try_get("silenced_until")
         .map_err(|error| storage_error_from(error, "读取告警重放静默时间失败"))?;
     if stored_fingerprint.as_slice() != command.fingerprint
@@ -198,8 +198,8 @@ async fn replay_postgres(
 async fn insert_fact(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     command: &OperatorCommand<'_>,
-    silenced_until: Option<DateTime<Utc>>,
-    occurred_at: DateTime<Utc>,
+    silenced_until: Option<Timestamp>,
+    occurred_at: Timestamp,
 ) -> Result<(), ApplicationError> {
     let silence_seconds = match command.action {
         OperatorAction::Acknowledge => None,

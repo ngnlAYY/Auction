@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 use auction_domain::{SettlementObligationKind, SettlementReturnTakeUnknownReason};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use super::digest::valid_age_threshold;
@@ -123,7 +123,7 @@ pub struct OperationsAlertDeliverySnapshot {
     /// 已领取（claimed/sending）的投递数量；用于识别领取后没有推进的队列延迟。
     pub claimed: i64,
     pub oldest_claimed_age_seconds: i64,
-    pub last_update_at: Option<DateTime<Utc>>,
+    pub last_update_at: Option<Timestamp>,
 }
 
 /// Settlement fulfillment source 快照。
@@ -199,7 +199,7 @@ pub struct OperationsAlertCollectionOverdueItem {
     /// 投递冻结的收件人游戏名。
     pub recipient: String,
     /// 寄出时刻（投递完成的数据库时刻 `deliveries.completed_at`）。
-    pub sent_at: DateTime<Utc>,
+    pub sent_at: Timestamp,
     /// 自寄出起已等待的秒数。
     pub age_seconds: i64,
     /// 最近一次 Sent 读取失败（`evidence_unavailable`）；只说明读不到，不代表是否已领取。
@@ -217,9 +217,9 @@ pub struct OperationsAlertRecoveryWorld {
     pub evidence_age_seconds: i64,
     /// 余额读取连续处于同一非正常状态（busy/unavailable）的持续时间；正常时为 0。
     pub balance_stall_age_seconds: i64,
-    pub balance_observed_at: Option<DateTime<Utc>>,
-    pub evidence_last_success_at: Option<DateTime<Utc>>,
-    pub updated_at: DateTime<Utc>,
+    pub balance_observed_at: Option<Timestamp>,
+    pub evidence_last_success_at: Option<Timestamp>,
+    pub updated_at: Timestamp,
 }
 
 /// Recovery source 快照。

@@ -5,7 +5,7 @@ use auction_application::mail::MailAuctionIntakeResult;
 use auction_application::mail::{
     MailAuctionAcceptance, MailAuctionIntakeLookup, mail_auction_aggregate_id,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -48,7 +48,7 @@ pub(super) async fn load_accepted(
     let external_mail_id: Option<String> =
         row.try_get("external_mail_id").map_err(map_sql_error)?;
     let seller: Option<String> = row.try_get("seller").map_err(map_sql_error)?;
-    let received_at: Option<DateTime<Utc>> = row.try_get("received_at").map_err(map_sql_error)?;
+    let received_at: Option<Timestamp> = row.try_get("received_at").map_err(map_sql_error)?;
     let source_kind: Option<String> = row.try_get("source_kind").map_err(map_sql_error)?;
     let world_id: Option<String> = row.try_get("world_id").map_err(map_sql_error)?;
     if command_kind != "mail_auction_intake"
@@ -59,7 +59,7 @@ pub(super) async fn load_accepted(
         || mailbox_key.as_deref() != Some(&lookup.mailbox_key)
         || external_mail_id.as_deref() != Some(&lookup.external_mail_id)
         || seller.as_deref() != Some(&lookup.seller)
-        || received_at.map(|value| value.timestamp_micros())
+        || received_at.map(auction_time::Timestamp::timestamp_micros)
             != Some(lookup.received_at.timestamp_micros())
         || source_kind.as_deref() != Some("mail")
         || world_id.as_deref() != Some(&lookup.world_id)

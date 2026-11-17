@@ -6,7 +6,7 @@ use auction_application::admin::{
     AdminCredentialStatus, AdminCredentialWorld,
 };
 use auction_application::core::ApplicationError;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -65,7 +65,7 @@ pub(super) async fn list_active_postgres(
 pub(super) async fn mark_invalid_postgres(
     store: &crate::database::DatabaseStore,
     credential_id: Uuid,
-    now: chrono::DateTime<chrono::Utc>,
+    now: auction_time::Timestamp,
 ) -> Result<(), ApplicationError> {
     // 远端失效不能因角色时钟落后或回拨而被时间顺序约束拒绝；状态版本仍只推进一次。
     let affected = sqlx::query(
@@ -101,7 +101,7 @@ pub(super) async fn mark_invalid_postgres(
 pub(super) async fn health_postgres(
     store: &crate::database::DatabaseStore,
 ) -> Result<AdminCredentialHealthSnapshot, ApplicationError> {
-    let last_admin_change_at = sqlx::query_scalar::<_, Option<DateTime<Utc>>>(
+    let last_admin_change_at = sqlx::query_scalar::<_, Option<Timestamp>>(
         "SELECT MAX(created_at) FROM public.credential_admin_commands",
     )
     .fetch_one(store.pool())
@@ -133,7 +133,7 @@ pub(super) async fn health_postgres(
         .ok_or_else(|| admin_error(AdminCredentialError::StoredResultCorrupt))?;
         let count = row.try_get::<i64, _>("count").map_err(map_storage_error)?;
         let updated_at =
-            row.try_get::<Option<DateTime<Utc>>, _>("updated_at").map_err(map_storage_error)?;
+            row.try_get::<Option<Timestamp>, _>("updated_at").map_err(map_storage_error)?;
         if count < 0 {
             return Err(admin_error(AdminCredentialError::StoredResultCorrupt));
         }
@@ -163,7 +163,7 @@ pub(super) async fn health_postgres(
         add_health_count(scope_row, status, count)?;
     }
     let snapshot = AdminCredentialHealthSnapshot {
-        observed_at: chrono::Utc::now(),
+        observed_at: auction_time::Timestamp::now(),
         last_admin_change_at,
         scopes,
     };

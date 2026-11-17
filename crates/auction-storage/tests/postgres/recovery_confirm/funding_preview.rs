@@ -8,7 +8,7 @@ use auction_application::recovery::{
 };
 use auction_application::settlement::FundingReconciliationReader;
 use auction_storage::DatabaseStore;
-use chrono::Utc;
+use auction_time::Timestamp;
 use sqlx::PgPool;
 
 use super::fixture::{Sale, SaleSpec, insert_reclaiming_sale};
@@ -136,7 +136,7 @@ async fn postgres_funding_preview_recognizes_three_return_closure() {
     let sale = sale(&store, "main", 7_900_003, 3).await;
 
     let advance = store
-        .advance_due_cod_return(Utc::now())
+        .advance_due_cod_return(Timestamp::now())
         .await
         .expect("推进 COD 退回")
         .expect("达到上限的退回必须推进");

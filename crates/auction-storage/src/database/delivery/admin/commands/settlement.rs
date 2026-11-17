@@ -2,7 +2,7 @@
 
 use auction_application::core::RequestHash;
 use auction_application::delivery::DeliveryAdminError;
-use chrono::Utc;
+use auction_time::Timestamp;
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -41,7 +41,7 @@ pub(super) async fn update_settlement_fulfillment(
     proof_reference: Option<&str>,
     proof_digest: Option<RequestHash>,
 ) -> Result<(), DeliveryAdminTransactionError> {
-    let completed_at = Utc::now();
+    let completed_at = Timestamp::now();
     let proof_digest = proof_digest.map(RequestHash::as_bytes);
     let updated = sqlx::query(
         r#"UPDATE public.settlement_obligation_fulfillments

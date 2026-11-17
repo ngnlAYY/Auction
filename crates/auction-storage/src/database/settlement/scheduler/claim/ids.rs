@@ -1,7 +1,7 @@
 //! 结算领取命令的稳定请求摘要。
 
 use auction_application::core::RequestHash;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -9,13 +9,13 @@ use uuid::Uuid;
 #[derive(Debug, Serialize)]
 pub(super) struct SettlementClaimRequest {
     pub workflow_id: Uuid,
-    pub due_at: DateTime<Utc>,
+    pub due_at: Timestamp,
 }
 
 pub(super) fn request_hash(
     auction_id: Uuid,
     workflow_id: Uuid,
-    due_at: DateTime<Utc>,
+    due_at: Timestamp,
 ) -> Result<Vec<u8>, serde_json::Error> {
     RequestHash::from_request(
         "claim_settlement",

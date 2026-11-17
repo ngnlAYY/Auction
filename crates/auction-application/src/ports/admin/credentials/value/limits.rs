@@ -7,6 +7,6 @@ pub const MAX_ADMIN_CREDENTIAL_PAGE_SIZE: i64 = 200;
 /// Admin 凭据列表允许的最大偏移。
 pub const MAX_ADMIN_CREDENTIAL_OFFSET: i64 = 2_147_483_647;
 
-pub(crate) fn valid_time(value: chrono::DateTime<chrono::Utc>) -> bool {
+pub(crate) fn valid_time(value: auction_time::Timestamp) -> bool {
     value.timestamp_nanos_opt().is_some()
 }

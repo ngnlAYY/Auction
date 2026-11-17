@@ -16,7 +16,7 @@ use auction_application::mail::{
 use auction_application::settlement::{SettlementReturnProgress, SettlementReturnWorkStore};
 use auction_domain::{CommandId, SettlementReturnAction, SettlementReturnCaseStatus};
 use auction_storage::DatabaseStore;
-use chrono::Utc;
+use auction_time::Timestamp;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -141,7 +141,7 @@ async fn race(
         let store = Arc::clone(store);
         move || {
             tokio::spawn(async move {
-                store.activate_due_return_take(Utc::now(), super::take_worlds()).await
+                store.activate_due_return_take(Timestamp::now(), super::take_worlds()).await
             })
         }
     };

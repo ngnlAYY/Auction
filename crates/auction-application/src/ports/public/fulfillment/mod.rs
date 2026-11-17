@@ -6,7 +6,7 @@
 //! Bot 身份与代理模式都不进入本端口的公开输出。
 
 use auction_domain::SettlementWorld;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use crate::errors::diagnostics::{
@@ -83,7 +83,7 @@ pub struct PublicFulfillmentAuction {
 pub struct PublicFulfillmentPage {
     pub auction: PublicFulfillmentAuction,
     /// 快照内的数据库读取时刻；付款逾期按它判定，同一页所有 lot 共用同一时刻。
-    pub read_at: DateTime<Utc>,
+    pub read_at: Timestamp,
     pub entries: Vec<PublicFulfillmentLot>,
     pub total: i64,
     pub limit: i64,
@@ -147,7 +147,7 @@ pub trait PublicFulfillmentReader: Send + Sync {
 
 #[cfg(test)]
 mod tests {
-    use chrono::{DateTime, Duration};
+    use auction_time::{Duration, Timestamp};
     use uuid::Uuid;
 
     use super::{
@@ -197,7 +197,7 @@ mod tests {
                 world_id: "main".to_owned(),
                 sequence: 12,
             },
-            read_at: DateTime::from_timestamp(1_763_200_000, 0).expect("固定读取时刻"),
+            read_at: Timestamp::from_timestamp(1_763_200_000, 0).expect("固定读取时刻"),
             entries,
             total,
             limit: 50,
@@ -282,7 +282,7 @@ mod tests {
         too_many.limit = 1;
         assert!(too_many.validate().is_err(), "本页超过页大小");
         let mut stale = page(Vec::new(), 0);
-        stale.read_at = DateTime::from_timestamp(0, 0).expect("零时刻");
+        stale.read_at = Timestamp::from_timestamp(0, 0).expect("零时刻");
         assert!(stale.validate().is_err(), "读取时刻缺失");
     }
 
@@ -295,7 +295,7 @@ mod tests {
         lot.recovery = Some(PublicFulfillmentRecovery {
             stage: "awaiting_payment".to_owned(),
             resolution: None,
-            payment_deadline_at: DateTime::from_timestamp(1_763_200_000, 0).expect("期限")
+            payment_deadline_at: Timestamp::from_timestamp(1_763_200_000, 0).expect("期限")
                 + Duration::days(1),
             cod_return_count: 0,
             cod_return_limit: 0,

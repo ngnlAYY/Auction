@@ -3,7 +3,7 @@
 //! 幂等命令和状态版本 fence 负责，避免在读取端重复状态迁移。
 
 use auction_domain::{valid_optional_text, valid_text};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use crate::ports::core::ApplicationFuture;
@@ -48,8 +48,8 @@ pub struct AdminRenameRecord {
     pub previous_username: String,
     pub next_username: String,
     pub actor: String,
-    pub created_at: DateTime<Utc>,
-    pub reverted_at: Option<DateTime<Utc>>,
+    pub created_at: Timestamp,
+    pub reverted_at: Option<Timestamp>,
 }
 
 impl AdminRenameRecord {
@@ -108,6 +108,6 @@ pub trait AdminRenameReader: Send + Sync {
     fn list(&self, request: AdminRenameListRequest) -> ApplicationFuture<'_, AdminRenamePage>;
 }
 
-fn valid_time(value: DateTime<Utc>) -> bool {
+fn valid_time(value: Timestamp) -> bool {
     value.timestamp_nanos_opt().is_some()
 }

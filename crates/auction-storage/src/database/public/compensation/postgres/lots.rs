@@ -123,7 +123,7 @@ fn map_lot(row: &PgRow) -> Result<PublicCompensationLot, ApplicationError> {
         "isekai" => format!("https://hentaiverse.org/isekai/equip/{external_id}"),
         _ => return Err(storage_error("逐件结算装备世界不在公开闭集内")),
     };
-    let reversed_at: Option<chrono::DateTime<chrono::Utc>> = row
+    let reversed_at: Option<auction_time::Timestamp> = row
         .try_get("reversed_at")
         .map_err(|error| storage_error_from(error, "读取成交撤销冲正时间失败"))?;
     let reversal = reversed_at

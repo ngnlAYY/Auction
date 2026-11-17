@@ -36,7 +36,7 @@ async fn postgres_report(
     store: &crate::database::DatabaseStore,
     auction_id: AuctionId,
 ) -> Result<Option<SettlementReport>, ApplicationError> {
-    use chrono::{DateTime, Utc};
+    use auction_time::Timestamp;
     use sqlx::Row;
     use uuid::Uuid;
 
@@ -92,7 +92,7 @@ async fn postgres_report(
     let settlement = match settlement_id {
         None => None,
         Some(value) if value == stored_auction_id => {
-            let settled_at: DateTime<Utc> = row
+            let settled_at: Timestamp = row
                 .try_get("settlement_settled_at")
                 .map_err(|error| storage_error_from(error, "读取结算报告完成时间失败"))?;
             Some(SettlementSummary {

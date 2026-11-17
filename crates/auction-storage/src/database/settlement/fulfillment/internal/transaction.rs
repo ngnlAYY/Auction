@@ -62,7 +62,7 @@ pub(super) async fn run(
                 }
                 // PostgreSQL 18 的整事务超时覆盖锁等待与commit，不逐语句重置预算。
                 let budget = (evidence.expires_at.min(command.claim.lease_until)
-                    - chrono::Utc::now())
+                    - auction_time::Timestamp::now())
                 .num_milliseconds();
                 if budget <= 0 {
                     return Err(rejected(
@@ -365,7 +365,7 @@ async fn validate_collected(
         Some("collected_proof_obligation_kind_invalid")
     } else if proof.observed_at < claim.claimed_at {
         Some("collected_proof_observation_before_claim")
-    } else if proof.observed_at > chrono::Utc::now() {
+    } else if proof.observed_at > auction_time::Timestamp::now() {
         Some("collected_proof_observation_in_future")
     } else if auction_application::settlement::canonical_settlement_fulfillment_subject(
         claim.kind,

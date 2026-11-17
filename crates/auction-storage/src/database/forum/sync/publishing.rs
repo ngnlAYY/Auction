@@ -4,7 +4,7 @@ use auction_application::core::ApplicationError;
 use auction_application::forum::{
     ForumPublishedLayout, ForumRenderedPost, ForumRenderedThread, ForumSyncClaim,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use super::super::super::DatabaseStore;
 use super::validation::storage_error;
@@ -16,7 +16,7 @@ pub(super) async fn publish_postgres(
     rendered: &ForumRenderedThread,
     system_log: &ForumRenderedPost,
     published: &ForumPublishedLayout,
-    published_at: DateTime<Utc>,
+    published_at: Timestamp,
 ) -> Result<(), ApplicationError> {
     let mut transaction = store
         .pool()
@@ -103,7 +103,7 @@ pub(super) async fn publish_postgres(
 pub(super) async fn fail_postgres(
     store: &DatabaseStore,
     claim: &ForumSyncClaim,
-    retry_at: DateTime<Utc>,
+    retry_at: Timestamp,
     failure_code: &str,
     safe_detail: &str,
 ) -> Result<(), ApplicationError> {

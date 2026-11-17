@@ -43,7 +43,7 @@ use auction_storage::{
     DatabaseAuctionLifecycleCommands, DatabaseCompetitionCommands, DatabaseSettlementCommands,
     DatabaseStore,
 };
-use chrono::{DateTime, Duration, Utc};
+use auction_time::{Duration, Timestamp};
 use serde_json::json;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -66,14 +66,14 @@ struct Seeded {
     lots: Vec<Uuid>,
     external_ids: Vec<String>,
     bidders: [Uuid; 2],
-    deadline: DateTime<Utc>,
+    deadline: Timestamp,
 }
 
 /// 在 `world` 写入一场 live 场次、两名竞买人与四件带寄售来源的 lot（装备与场次同一世界）；
 /// 只写夹具，不经过被测端口。
 async fn seed(admin: &DatabaseStore, world: &str) -> Seeded {
     let pool = admin.postgres_pool();
-    let deadline = Utc::now() + Duration::hours(2);
+    let deadline = Timestamp::now() + Duration::hours(2);
     let opened = deadline - Duration::hours(4);
     let auction_id = stable_id(SEED, "auction");
     sqlx::query(
@@ -216,7 +216,7 @@ fn final_phase(auction_id: Uuid) -> AuctionLifecycleCommand {
 }
 
 /// 经生产端口完成出价、进入 Final、领取与结算，全部以运行账号提交；返回冻结的结算时刻。
-async fn settle_through_ports(service: &DatabaseStore, seeded: &Seeded) -> DateTime<Utc> {
+async fn settle_through_ports(service: &DatabaseStore, seeded: &Seeded) -> Timestamp {
     let bids = DatabaseCompetitionCommands::new(Arc::new(service.clone()));
     for (lot_id, bidder) in
         [(seeded.lots[0], seeded.bidders[0]), (seeded.lots[1], seeded.bidders[1])]
@@ -366,7 +366,7 @@ async fn insert_return_mail(
     pool: &PgPool,
     payment_obligation_id: Uuid,
     external_equipment_id: &str,
-    received_at: DateTime<Utc>,
+    received_at: Timestamp,
 ) {
     sqlx::query(
         "INSERT INTO public.inbound_mail
@@ -399,7 +399,7 @@ async fn record_return(
     pool: &PgPool,
     payment_obligation_id: Uuid,
     external_equipment_id: &str,
-    settled_at: DateTime<Utc>,
+    settled_at: Timestamp,
 ) -> Vec<String> {
     insert_return_mail(
         pool,
@@ -434,12 +434,7 @@ async fn unblock(pool: &PgPool, lot_id: Uuid, kind: &str) {
 /// 维护账号模拟 Worker 完成一项恢复动作：动作满足并带证明；回收动作另把同一证明投影为 recovery
 /// 的保管证明，与生产终态写入同形状。证明引用退件的外部邮件号，观察时刻落在 recovery 的创建与
 /// 更新时间之间。
-async fn complete_recovery_action(
-    pool: &PgPool,
-    lot_id: Uuid,
-    kind: &str,
-    observed_at: DateTime<Utc>,
-) {
+async fn complete_recovery_action(pool: &PgPool, lot_id: Uuid, kind: &str, observed_at: Timestamp) {
     let digest = [7_u8; 32];
     let reclaim = kind == "reclaim_equipment_take";
     // 回收动作的证明是退件装备取回成功；拉黑动作只需带证明，用夹具标签。
@@ -529,7 +524,7 @@ async fn insert_pending_fulfillment(pool: &PgPool, obligation_id: Uuid) {
     .expect("补写撤拍寄回履约行");
 }
 
-async fn recovery_deadline(pool: &PgPool, lot_id: Uuid) -> DateTime<Utc> {
+async fn recovery_deadline(pool: &PgPool, lot_id: Uuid) -> Timestamp {
     sqlx::query_scalar(
         "SELECT payment_deadline_at FROM public.settlement_recoveries WHERE lot_id = $1",
     )

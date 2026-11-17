@@ -5,7 +5,7 @@
 use auction_application::core::ApplicationError;
 use auction_application::settlement::{SettlementReturnError, SettlementReturnProgress};
 use auction_domain::{SettlementReturnCaseStatus, SettlementReturnPlan};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::json;
 use sqlx::Postgres;
 use uuid::Uuid;
@@ -22,7 +22,7 @@ pub(super) async fn authorize_resend(
     tx: &mut Transaction<'_, Postgres>,
     case: &CaseRow,
     fulfillment: &FulfillmentRow,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<i32, ReturnTransactionError> {
     let (Some(obligation_id), Some(delivery_id)) = (case.obligation_id, case.delivery_id) else {
         return Err(SettlementReturnError::ObligationIneligible.into());
@@ -91,7 +91,7 @@ pub(super) async fn close_fulfillment(
     case: &CaseRow,
     fulfillment: Option<&FulfillmentRow>,
     failure_code: &'static str,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<(), ReturnTransactionError> {
     let (Some(obligation_id), Some(delivery_id), Some(fulfillment)) =
         (case.obligation_id, case.delivery_id, fulfillment)
@@ -145,7 +145,7 @@ async fn fulfillment_audit(
     obligation_id: Uuid,
     action: &'static str,
     metadata: serde_json::Value,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<(), ReturnTransactionError> {
     sqlx::query(
         r#"INSERT INTO public.audit_records
@@ -168,7 +168,7 @@ async fn fulfillment_audit(
 /// 收口一项补寄已有可信寄出证明的案件：派发历史中本案授权的投递已成功且有 Sent 证明。
 pub(super) async fn complete_due_resend_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<Option<SettlementReturnProgress>, ApplicationError> {
     crate::database::retry_conflicts(
         pool,
@@ -183,7 +183,7 @@ pub(super) async fn complete_due_resend_postgres(
 
 async fn complete_once(
     pool: &crate::database::TrackedPool<Postgres>,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<Option<SettlementReturnProgress>, ReturnTransactionError> {
     let mut tx = pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await?;
     let candidate: Option<(Uuid, Uuid, i32)> = sqlx::query_as(

@@ -7,7 +7,7 @@ use auction_domain::{
     LotBidState, LotId, ProxyAuthorization, ProxyAuthorizationId, ProxyMode, ProxyStatus,
     ProxyTransition, ProxyTransitionKind, UserId,
 };
-use chrono::{DateTime, TimeZone, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::{Uuid, Variant};
 
@@ -82,7 +82,7 @@ fn proxy_transition_state_version_must_fit_the_ledger_column() {
         state_version,
         reason: None,
     };
-    let created_at = Utc.with_ymd_and_hms(2026, 11, 14, 0, 0, 0).unwrap();
+    let created_at = Timestamp::from_ymd_hms(2026, 11, 14, 0, 0, 0).unwrap();
     let record = LegacyProxyTransitionRecord::from_domain(&transition(7), created_at).unwrap();
     assert_eq!((record.transition_number, record.resulting_state_version), (7, 7));
     // 超出 i64 的版本号不能饱和成伪造的 i64::MAX 写入账本，必须失败关闭。
@@ -91,8 +91,8 @@ fn proxy_transition_state_version_must_fit_the_ledger_column() {
 
 const QUOTA_LIMIT: u32 = 3;
 
-fn at(hour: u32, minute: u32) -> DateTime<Utc> {
-    Utc.with_ymd_and_hms(2026, 1, 1, hour, minute, 0).single().expect("测试时间必须存在")
+fn at(hour: u32, minute: u32) -> Timestamp {
+    Timestamp::from_ymd_hms(2026, 1, 1, hour, minute, 0).expect("测试时间必须存在")
 }
 
 fn amount(value: i64) -> BidAmount {

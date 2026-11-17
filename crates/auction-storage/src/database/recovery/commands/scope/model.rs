@@ -1,6 +1,6 @@
 //! Recovery 锁定范围和数据库行模型。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
@@ -32,11 +32,11 @@ pub(in crate::database::recovery::commands) struct RecoveryRow {
     pub(in crate::database::recovery::commands) custody_proof_kind: Option<String>,
     pub(in crate::database::recovery::commands) custody_proof_reference: Option<String>,
     pub(in crate::database::recovery::commands) custody_proof_digest: Option<Vec<u8>>,
-    pub(in crate::database::recovery::commands) custody_proof_observed_at: Option<DateTime<Utc>>,
+    pub(in crate::database::recovery::commands) custody_proof_observed_at: Option<Timestamp>,
     /// 已计入的 COD 退回次数与冻结上限；决定确认是否须先完成拉黑。
     pub(in crate::database::recovery::commands) cod_return_count: i32,
     pub(in crate::database::recovery::commands) cod_return_limit: i32,
-    pub(in crate::database::recovery::commands) created_at: DateTime<Utc>,
+    pub(in crate::database::recovery::commands) created_at: Timestamp,
 }
 
 #[derive(Debug, Clone)]
@@ -72,7 +72,7 @@ pub(in crate::database::recovery::commands) struct ActionRow {
     pub(in crate::database::recovery::commands) proof_kind: Option<String>,
     pub(in crate::database::recovery::commands) proof_reference: Option<String>,
     pub(in crate::database::recovery::commands) proof_digest: Option<Vec<u8>>,
-    pub(in crate::database::recovery::commands) proof_observed_at: Option<DateTime<Utc>>,
+    pub(in crate::database::recovery::commands) proof_observed_at: Option<Timestamp>,
 }
 
 pub(in crate::database::recovery::commands) struct RelistResult {

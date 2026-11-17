@@ -27,7 +27,7 @@ use auction_domain::{
     CommandId, SettlementDispatchReference, SettlementReturnAction, SettlementReturnCaseStatus,
     SettlementWorld, resend_delivery_id, resend_prepare_command_id,
 };
-use chrono::{Duration, Utc};
+use auction_time::{Duration, Timestamp};
 use serde_json::json;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -70,7 +70,7 @@ pub(super) async fn returned_payout(
         evidence(sale.seller_obligation, PAYOUT, &[]),
     )
     .await;
-    store.consume_due_settlement_return(Utc::now()).await.expect("消费").expect("必须消费");
+    store.consume_due_settlement_return(Timestamp::now()).await.expect("消费").expect("必须消费");
     Returned { sale, delivery, case }
 }
 
@@ -123,7 +123,7 @@ pub(crate) async fn handle(
         version,
         action,
         "admin-returns",
-        Utc::now(),
+        Timestamp::now(),
     )
     .expect("构造命令");
     store.handle_settlement_return(command).await.expect("执行退件命令").status
@@ -136,7 +136,7 @@ pub(crate) async fn take_through(
 ) {
     let pool = store.postgres_pool();
     store
-        .activate_due_return_take(Utc::now(), super::take_worlds())
+        .activate_due_return_take(Timestamp::now(), super::take_worlds())
         .await
         .expect("激活")
         .expect("必须激活");
@@ -168,7 +168,7 @@ pub(crate) async fn take_through(
     .execute(pool)
     .await
     .expect("模拟 Take 终态");
-    store.settle_due_return_take(Utc::now()).await.expect("收口 Take").expect("必须收口");
+    store.settle_due_return_take(Timestamp::now()).await.expect("收口 Take").expect("必须收口");
 }
 
 pub(super) async fn count(pool: &PgPool, sql: &str, id: Uuid) -> i64 {
@@ -263,7 +263,7 @@ async fn postgres_return_cash_take_returns_funding_once_and_resends() {
         1
     );
     // 同一证明不再消费：再次收口没有到期项，返还与来源计数不变。
-    assert!(store.settle_due_return_take(Utc::now()).await.expect("再次收口").is_none());
+    assert!(store.settle_due_return_take(Timestamp::now()).await.expect("再次收口").is_none());
     assert_eq!(
         count(
             pool,
@@ -278,8 +278,8 @@ async fn postgres_return_cash_take_returns_funding_once_and_resends() {
     let claims = SettlementFulfillmentStore::claim_due(
         &store,
         "returns-fulfillment".to_owned(),
-        Utc::now(),
-        Utc::now() + Duration::minutes(5),
+        Timestamp::now(),
+        Timestamp::now() + Duration::minutes(5),
         10,
     )
     .await
@@ -316,7 +316,7 @@ async fn postgres_return_cash_take_returns_funding_once_and_resends() {
             &store,
             renamed,
             preparation("Renamed seller".to_owned()),
-            Utc::now(),
+            Timestamp::now(),
             None,
         )
         .await
@@ -331,7 +331,7 @@ async fn postgres_return_cash_take_returns_funding_once_and_resends() {
         &store,
         claim.clone(),
         preparation(claim.recipient.clone()),
-        Utc::now(),
+        Timestamp::now(),
         None,
     )
     .await
@@ -384,13 +384,16 @@ async fn postgres_return_cash_take_returns_funding_once_and_resends() {
     .execute(pool)
     .await
     .expect("模拟补寄寄出");
-    let done =
-        store.complete_due_return_resend(Utc::now()).await.expect("收口补寄").expect("必须收口");
+    let done = store
+        .complete_due_return_resend(Timestamp::now())
+        .await
+        .expect("收口补寄")
+        .expect("必须收口");
     assert_eq!(
         (done.return_mail_id, done.status),
         (returned.case, SettlementReturnCaseStatus::Resent)
     );
-    assert!(store.complete_due_return_resend(Utc::now()).await.expect("排空").is_none());
+    assert!(store.complete_due_return_resend(Timestamp::now()).await.expect("排空").is_none());
 
     pool.close().await;
 }
@@ -496,15 +499,18 @@ async fn postgres_resend_return_binds_by_dispatch_reference() {
     let bound = insert_inbound(
         pool,
         "993012",
-        Utc::now(),
+        Timestamp::now(),
         Some(("MoogleMail", subject.clone())),
         json!({"obligation_id": obligation.to_string(), "credits": PAYOUT, "cod": 0,
                "attachment_ids": [], "returned_from": parsed.returned_from,
                "body_digest": hex, "dispatch_reference": parsed.dispatch_reference}),
     )
     .await;
-    let consumed =
-        store.consume_due_settlement_return(Utc::now()).await.expect("消费").expect("必须消费");
+    let consumed = store
+        .consume_due_settlement_return(Timestamp::now())
+        .await
+        .expect("消费")
+        .expect("必须消费");
     assert_eq!(consumed.return_mail_id, bound);
     assert_eq!(consumed.delivery_id, Some(reference.delivery_id));
     assert_eq!(consumed.decision.matched, SettlementReturnMatch::ManualReconcile);
@@ -520,13 +526,16 @@ async fn postgres_resend_return_binds_by_dispatch_reference() {
     let unreferenced = insert_inbound(
         pool,
         "993013",
-        Utc::now(),
+        Timestamp::now(),
         Some(("MoogleMail", subject)),
         evidence(obligation, PAYOUT, &[]),
     )
     .await;
-    let consumed =
-        store.consume_due_settlement_return(Utc::now()).await.expect("消费").expect("必须消费");
+    let consumed = store
+        .consume_due_settlement_return(Timestamp::now())
+        .await
+        .expect("消费")
+        .expect("必须消费");
     assert_eq!(consumed.return_mail_id, unreferenced);
     assert_eq!(
         (consumed.decision.matched, consumed.decision.reason),
@@ -551,7 +560,7 @@ async fn postgres_return_close_preserves_beneficiary_liability() {
     seed_spent_payout(pool, &inbox).await;
 
     let snapshot = store
-        .snapshot(Utc::now(), OperationsAlertCollectionOverdueRead::Skip)
+        .snapshot(Timestamp::now(), OperationsAlertCollectionOverdueRead::Skip)
         .await
         .expect("告警快照");
     let fulfillment = snapshot.fulfillment.expect("履约水位");
@@ -630,7 +639,7 @@ async fn postgres_return_close_preserves_beneficiary_liability() {
     assert_eq!((main.balance_before_take, main.verdict.as_str()), (false, "sufficient"));
 
     let snapshot = store
-        .snapshot(Utc::now(), OperationsAlertCollectionOverdueRead::Skip)
+        .snapshot(Timestamp::now(), OperationsAlertCollectionOverdueRead::Skip)
         .await
         .expect("告警快照");
     let fulfillment = snapshot.fulfillment.expect("履约水位");
@@ -672,8 +681,11 @@ async fn postgres_return_recheck_rebinds_only_with_proof() {
         json!({"obligation_id": sale.seller_obligation.to_string(), "credits": PAYOUT, "cod": 0}),
     )
     .await;
-    let consumed =
-        store.consume_due_settlement_return(Utc::now()).await.expect("消费").expect("必须消费");
+    let consumed = store
+        .consume_due_settlement_return(Timestamp::now())
+        .await
+        .expect("消费")
+        .expect("必须消费");
     assert_eq!(consumed.decision.matched, SettlementReturnMatch::Unbound);
     assert_eq!(
         handle(&store, case, 1, SettlementReturnAction::Recheck).await,
@@ -681,14 +693,14 @@ async fn postgres_return_recheck_rebinds_only_with_proof() {
     );
 
     let claim = store
-        .claim_due_return_recheck(Utc::now(), Utc::now() + Duration::minutes(5))
+        .claim_due_return_recheck(Timestamp::now(), Timestamp::now() + Duration::minutes(5))
         .await
         .expect("领取核验")
         .expect("必须领取");
     assert_eq!((claim.return_mail_id, claim.external_mail_id.as_str()), (case, "993031"));
     assert!(
         store
-            .claim_due_return_recheck(Utc::now(), Utc::now() + Duration::minutes(5))
+            .claim_due_return_recheck(Timestamp::now(), Timestamp::now() + Duration::minutes(5))
             .await
             .expect("再次领取")
             .is_none(),
@@ -704,7 +716,7 @@ async fn postgres_return_recheck_rebinds_only_with_proof() {
                 credits: PAYOUT,
                 cod: 0,
                 attachment_ids: Vec::new(),
-                observed_at: Utc::now(),
+                observed_at: Timestamp::now(),
             }),
         )
         .await
@@ -737,17 +749,17 @@ async fn postgres_return_recheck_rebinds_only_with_proof() {
         json!({"obligation_id": "broken"}),
     )
     .await;
-    store.consume_due_settlement_return(Utc::now()).await.expect("消费").expect("必须消费");
+    store.consume_due_settlement_return(Timestamp::now()).await.expect("消费").expect("必须消费");
     handle(&store, missing, 1, SettlementReturnAction::Recheck).await;
     let claim = store
-        .claim_due_return_recheck(Utc::now(), Utc::now() + Duration::minutes(5))
+        .claim_due_return_recheck(Timestamp::now(), Timestamp::now() + Duration::minutes(5))
         .await
         .expect("领取")
         .expect("必须领取");
     let progress = store
         .record_return_recheck(
             claim,
-            SettlementReturnRecheckOutcome::NotFound { observed_at: Utc::now() },
+            SettlementReturnRecheckOutcome::NotFound { observed_at: Timestamp::now() },
         )
         .await
         .expect("写回核验");
@@ -788,12 +800,15 @@ async fn postgres_return_recheck_verified_assets_drive_take_and_detail() {
         corrupted.clone(),
     )
     .await;
-    let consumed =
-        store.consume_due_settlement_return(Utc::now()).await.expect("消费").expect("必须消费");
+    let consumed = store
+        .consume_due_settlement_return(Timestamp::now())
+        .await
+        .expect("消费")
+        .expect("必须消费");
     assert_eq!(consumed.decision.matched, SettlementReturnMatch::Unbound);
     handle(&store, case, 1, SettlementReturnAction::Recheck).await;
     let claim = store
-        .claim_due_return_recheck(Utc::now(), Utc::now() + Duration::minutes(5))
+        .claim_due_return_recheck(Timestamp::now(), Timestamp::now() + Duration::minutes(5))
         .await
         .expect("领取核验")
         .expect("必须领取");
@@ -807,7 +822,7 @@ async fn postgres_return_recheck_verified_assets_drive_take_and_detail() {
                 credits: PAYOUT,
                 cod: 0,
                 attachment_ids: Vec::new(),
-                observed_at: Utc::now(),
+                observed_at: Timestamp::now(),
             }),
         )
         .await
@@ -958,19 +973,19 @@ async fn postgres_return_reconciliation_tracks_asset_location() {
         evidence(sale.payment_obligation, 0, &[sale.external_equipment_id.as_str()]),
     )
     .await;
-    store.consume_due_settlement_return(Utc::now()).await.expect("消费").expect("必须消费");
+    store.consume_due_settlement_return(Timestamp::now()).await.expect("消费").expect("必须消费");
     let observe = |ids: Vec<String>| {
         vec![
             AssetArmoryObservation {
                 world: SettlementWorld::Main,
-                observed_at: Utc::now(),
+                observed_at: Timestamp::now(),
                 equipment_ids: ids,
                 complete: true,
                 failure_code: None,
             },
             AssetArmoryObservation {
                 world: SettlementWorld::Isekai,
-                observed_at: Utc::now(),
+                observed_at: Timestamp::now(),
                 equipment_ids: Vec::new(),
                 complete: true,
                 failure_code: None,

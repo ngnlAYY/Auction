@@ -7,7 +7,7 @@ use auction_application::forum::{
     ForumWriteRetryAuthorizationCommand, ForumWriteRetryAuthorizationResult,
     MAX_FORUM_SYNC_RECOVERY_ITEMS,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use super::super::DatabaseStore;
 
@@ -56,9 +56,9 @@ impl ForumSyncStore for DatabaseStore {
     fn claim_due(
         &self,
         worker_id: String,
-        now: DateTime<Utc>,
-        lease_until: DateTime<Utc>,
-        startup_recovery_before: Option<DateTime<Utc>>,
+        now: Timestamp,
+        lease_until: Timestamp,
+        startup_recovery_before: Option<Timestamp>,
         available_worlds: Vec<auction_domain::SettlementWorld>,
         limit: u16,
     ) -> ApplicationFuture<'_, Vec<ForumSyncClaim>> {
@@ -102,7 +102,7 @@ impl ForumSyncStore for DatabaseStore {
         rendered: ForumRenderedThread,
         system_log: ForumRenderedPost,
         published: ForumPublishedLayout,
-        published_at: DateTime<Utc>,
+        published_at: Timestamp,
     ) -> ApplicationFuture<'_, ()> {
         Box::pin(async move {
             if !valid_claim(&claim)
@@ -122,7 +122,7 @@ impl ForumSyncStore for DatabaseStore {
     fn fail(
         &self,
         claim: ForumSyncClaim,
-        retry_at: DateTime<Utc>,
+        retry_at: Timestamp,
         failure_code: String,
         safe_detail: String,
     ) -> ApplicationFuture<'_, ()> {

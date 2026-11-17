@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use crate::support::digest::{is_lower_hex, sha256_bytes};
@@ -21,7 +21,7 @@ pub(crate) struct BackupManifest {
     pub(crate) database_name_sha256: String,
     pub(crate) archive_sha256: String,
     pub(crate) schema_version: i64,
-    pub(crate) created_at: DateTime<Utc>,
+    pub(crate) created_at: Timestamp,
 }
 
 impl BackupManifest {

@@ -19,17 +19,15 @@ use auction_application::settlement::{
     settlement_workflow_id,
 };
 use auction_domain::{BidAmount, CommandId, LotId, ProxyAuthorizationId, ProxyMode, UserId};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 fn uuid(value: &str) -> Uuid {
     Uuid::parse_str(value).unwrap_or_else(|error| panic!("测试 UUID 必须合法: {error}"))
 }
 
-fn at(value: &str) -> DateTime<Utc> {
-    DateTime::parse_from_rfc3339(value)
-        .unwrap_or_else(|error| panic!("测试时间必须合法: {error}"))
-        .with_timezone(&Utc)
+fn at(value: &str) -> Timestamp {
+    Timestamp::parse_from_rfc3339(value).unwrap_or_else(|error| panic!("测试时间必须合法: {error}"))
 }
 
 fn hex(bytes: [u8; 32]) -> String {

@@ -15,7 +15,6 @@ use auction_contracts::{
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
-use chrono::SubsecRound;
 
 use crate::diagnostics;
 use crate::errors::{api_error, not_found_error, query_rejection};
@@ -173,11 +172,11 @@ mod tests {
         PublicFulfillmentPage, PublicFulfillmentReader, PublicFulfillmentRecovery,
         PublicFulfillmentRequest,
     };
+    use auction_time::{Duration, Timestamp};
     use axum::Router;
     use axum::body::{Body, to_bytes};
     use axum::http::{Request, StatusCode, header};
     use axum::routing::get;
-    use chrono::{DateTime, Duration};
     use serde_json::{Value, json};
     use tower::ServiceExt;
     use uuid::Uuid;
@@ -202,8 +201,8 @@ mod tests {
         }
     }
 
-    fn read_at() -> DateTime<chrono::Utc> {
-        DateTime::from_timestamp(1_763_200_000, 0).expect("固定读取时刻")
+    fn read_at() -> Timestamp {
+        Timestamp::from_timestamp(1_763_200_000, 0).expect("固定读取时刻")
     }
 
     fn recovery(stage: &str, cod_return_count: i32) -> PublicFulfillmentRecovery {

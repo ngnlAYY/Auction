@@ -59,7 +59,7 @@ pub(super) async fn requeue_retried_take(
     .await?;
     // 只改观察所在 fence 上仍停在人工核对、没有远端引用的这条投递；任何一项变化都按状态冲突
     // 整体回滚。保留自动重排计数，下一次未知不会被当作“确定未外写”或重新获得自动重排。
-    let requeued: Option<chrono::DateTime<chrono::Utc>> = sqlx::query_scalar(
+    let requeued: Option<auction_time::Timestamp> = sqlx::query_scalar(
         r#"UPDATE public.deliveries
            SET status = 'pending', completed_at = NULL, failure_code = NULL, lease_token = NULL,
                lease_expires_at = NULL, claimed_at = NULL, sending_at = NULL,

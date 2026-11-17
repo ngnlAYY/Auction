@@ -10,7 +10,7 @@ use auction_application::operations::{
     OperationsAlertError, OperationsAlertFilter, OperationsAlertKind,
     OperationsAlertSilenceCommand, OperationsAlertSource, parse_alert_id,
 };
-use chrono::{Duration, Utc};
+use auction_time::{Duration, Timestamp};
 use uuid::Uuid;
 
 #[test]
@@ -56,11 +56,11 @@ fn filter_and_pagination_are_fail_closed() {
         active: true,
         count: 2,
         age_seconds: 90,
-        first_seen_at: Utc::now() - Duration::minutes(5),
-        last_seen_at: Utc::now(),
+        first_seen_at: Timestamp::now() - Duration::minutes(5),
+        last_seen_at: Timestamp::now(),
         resolved_at: None,
         last_notified_at: None,
-        next_notify_at: Some(Utc::now() + Duration::minutes(30)),
+        next_notify_at: Some(Timestamp::now() + Duration::minutes(30)),
         acknowledged_at: None,
         acknowledged_by: None,
         silenced_until: None,

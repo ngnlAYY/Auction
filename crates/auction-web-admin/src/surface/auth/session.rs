@@ -81,10 +81,11 @@ pub(super) fn session_write_permission(
 
 #[cfg(target_arch = "wasm32")]
 fn session_refresh_delay(expires_at: &str, absolute_expires_at: &str) -> u32 {
-    let Ok(expires_at) = chrono::DateTime::parse_from_rfc3339(expires_at) else {
+    let Ok(expires_at) = auction_time::Timestamp::parse_from_rfc3339(expires_at) else {
         return 30_000;
     };
-    let Ok(absolute_expires_at) = chrono::DateTime::parse_from_rfc3339(absolute_expires_at) else {
+    let Ok(absolute_expires_at) = auction_time::Timestamp::parse_from_rfc3339(absolute_expires_at)
+    else {
         return 30_000;
     };
     let deadline = expires_at.timestamp_millis().min(absolute_expires_at.timestamp_millis()) as f64;

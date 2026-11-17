@@ -2,7 +2,7 @@
 //! 谓词分批删除运行态行与加密诊断文件。审计、资金、业务事实、有效/永久会话、未解决失败
 //! 与写入未知诊断永不在删除范围；每批一个事务，失败时已提交批次保留并在回执中精确计数。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -31,7 +31,7 @@ struct ValidatedTable {
     table: &'static str,
     rule_ids: Vec<String>,
     candidate_rows: i64,
-    cutoff: DateTime<Utc>,
+    cutoff: Timestamp,
 }
 
 struct ValidatedFamily {
@@ -72,7 +72,7 @@ impl DatabaseStore {
         order.sort_by_key(|index| execution_rank(&validated[*index].dataset_family));
 
         let run_id = Uuid::new_v4();
-        let started_at = Utc::now();
+        let started_at = Timestamp::now();
         // 文件族可能已由调用方在预校验之后删除；即使后续数据库批次失败，也必须如实计入。
         let mut mutation_executed =
             request.filesystem.as_ref().is_some_and(|filesystem| filesystem.deleted_files > 0);
@@ -252,7 +252,7 @@ impl DatabaseStore {
             policy_sha256: retention_policy_sha256(),
             batch_size: request.batch_size,
             started_at,
-            finished_at: Utc::now(),
+            finished_at: Timestamp::now(),
             outcome,
             failure_code,
             families,
@@ -273,7 +273,7 @@ impl DatabaseStore {
                 report.failure_code = Some("audit_append_failed");
             }
         }
-        report.finished_at = Utc::now();
+        report.finished_at = Timestamp::now();
         Ok(report)
     }
 }
@@ -340,7 +340,7 @@ async fn require_current_migrations(
 async fn delete_batch(
     store: &DatabaseStore,
     statement: &'static str,
-    cutoff: DateTime<Utc>,
+    cutoff: Timestamp,
     limit: i64,
 ) -> Result<(i64, i64), RetentionPurgeError> {
     let mut transaction = store

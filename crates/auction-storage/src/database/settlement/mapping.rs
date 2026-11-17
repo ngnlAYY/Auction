@@ -22,7 +22,7 @@ pub(super) fn parse_settlement_policy(
             Some("remind_v1") => auction_domain::RecoveryMode::RemindV1,
             _ => return Err(invalid("恢复策略模式未知")),
         },
-        payment_timeout: chrono::Duration::try_seconds(json_i64(
+        payment_timeout: auction_time::Duration::try_seconds(json_i64(
             recovery.get("payment_timeout_seconds"),
             "恢复付款超时",
         )?)

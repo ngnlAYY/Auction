@@ -10,7 +10,7 @@
 //! 计入待付或应在 Armory。v1 报告没有这些字段，读取时按 0/空列表补齐，不重算历史报告。
 
 use auction_domain::SettlementWorld;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -20,7 +20,7 @@ use crate::ports::core::ApplicationFuture;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssetArmoryObservation {
     pub world: SettlementWorld,
-    pub observed_at: DateTime<Utc>,
+    pub observed_at: Timestamp,
     /// 七个 organize 分类中观察到的外部装备 ID 并集；由观察方去重。
     pub equipment_ids: Vec<String>,
     /// 全部七类页面都通过结构校验时为 true；任一分类失败即 false。
@@ -114,7 +114,7 @@ pub struct CustodyReconciliationReport {
     pub format: String,
     pub report_id: Uuid,
     pub database_name: String,
-    pub completed_at: DateTime<Utc>,
+    pub completed_at: Timestamp,
     pub sample_limit_per_world: i64,
     pub complete: bool,
     pub consistent: bool,
@@ -168,7 +168,7 @@ pub struct SolvencyWorldReport {
     pub postage_estimate_credits: i64,
     pub required_credits: i64,
     pub balance_credits: Option<i64>,
-    pub balance_observed_at: Option<DateTime<Utc>>,
+    pub balance_observed_at: Option<Timestamp>,
     pub balance_status: String,
     pub evidence_status: String,
     /// `sufficient`、`shortfall` 或 `unknown`；余额缺失/过期时不得声称足够。
@@ -182,7 +182,7 @@ pub struct SolvencyReport {
     pub format: String,
     pub report_id: Uuid,
     pub database_name: String,
-    pub completed_at: DateTime<Utc>,
+    pub completed_at: Timestamp,
     /// 每条待发出站邮件的估算邮资；金额未核实前保持 0 并标记 `postage_rate_verified=false`。
     pub postage_rate_credits: i64,
     pub postage_rate_verified: bool,
@@ -230,7 +230,7 @@ pub trait AssetInventoryReader: Send + Sync {
     fn read_inventory(
         &self,
         world: SettlementWorld,
-        observed_at: DateTime<Utc>,
+        observed_at: Timestamp,
     ) -> ApplicationFuture<'_, AssetArmoryObservation>;
 }
 
@@ -273,5 +273,5 @@ pub struct AssetReconciliationOutcome {
 
 /// Worker 周期入口；只追加报告事实，不改变竞价、结算、余额或装备。
 pub trait AssetReconciliationPort: Send + Sync {
-    fn reconcile(&self, now: DateTime<Utc>) -> ApplicationFuture<'_, AssetReconciliationOutcome>;
+    fn reconcile(&self, now: Timestamp) -> ApplicationFuture<'_, AssetReconciliationOutcome>;
 }

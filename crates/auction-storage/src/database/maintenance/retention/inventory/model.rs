@@ -1,6 +1,6 @@
 //! retention 盘点对外模型与失败分类；只描述安全投影，不代表归档、删除或资格授权。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -75,7 +75,7 @@ pub struct RetentionPolicyRule {
 pub struct PostgresSchemaIdentity {
     pub application: String,
     pub baseline_version: i64,
-    pub installed_at: DateTime<Utc>,
+    pub installed_at: Timestamp,
 }
 
 /// SQLx 迁移历史安全投影。
@@ -98,8 +98,8 @@ pub struct PostgresRelationInventory {
     pub estimated_rows: i64,
     pub estimated_dead_rows: i64,
     pub catalog_rows_estimate: i64,
-    pub last_analyze: Option<DateTime<Utc>>,
-    pub last_autoanalyze: Option<DateTime<Utc>>,
+    pub last_analyze: Option<Timestamp>,
+    pub last_autoanalyze: Option<Timestamp>,
     pub table_bytes: i64,
     pub index_bytes: i64,
     pub total_bytes: i64,
@@ -117,8 +117,8 @@ pub struct PostgresRetentionTableInventory {
     pub estimated_rows: Option<i64>,
     pub estimated_dead_rows: Option<i64>,
     pub catalog_rows_estimate: Option<i64>,
-    pub last_analyze: Option<DateTime<Utc>>,
-    pub last_autoanalyze: Option<DateTime<Utc>>,
+    pub last_analyze: Option<Timestamp>,
+    pub last_autoanalyze: Option<Timestamp>,
     pub table_bytes: Option<i64>,
     pub index_bytes: Option<i64>,
     pub total_bytes: Option<i64>,
@@ -211,13 +211,13 @@ pub struct PostgresForeignKeyInventoryReport {
 #[derive(Debug, Serialize)]
 pub struct PostgresRetentionInventory {
     pub format: &'static str,
-    pub collected_at: DateTime<Utc>,
+    pub collected_at: Timestamp,
     pub database_name: String,
     pub server_version: String,
     pub server_version_num: String,
     pub transaction_snapshot: String,
     pub transaction_read_only: String,
-    pub statistics_reset_at: Option<DateTime<Utc>>,
+    pub statistics_reset_at: Option<Timestamp>,
     pub policy_sha256: String,
     pub policy: RetentionPolicy,
     pub schema_identity: PostgresSchemaIdentity,

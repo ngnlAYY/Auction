@@ -4,7 +4,7 @@
 //! 另行完成。
 
 use auction_domain::valid_text;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -40,7 +40,7 @@ pub struct MailPollClaim {
     pub state_version: i64,
     pub paused: bool,
     pub attempt_count: u32,
-    pub lease_until: DateTime<Utc>,
+    pub lease_until: Timestamp,
 }
 
 impl MailPollClaim {
@@ -72,12 +72,12 @@ pub struct MailPollIntake {
     pub mail_kind: String,
     pub status: String,
     pub content_digest: [u8; 32],
-    pub received_at: DateTime<Utc>,
+    pub received_at: Timestamp,
     pub decision_code: String,
     pub decision_metadata: Value,
     pub message_display: Option<MailDisplaySnapshot>,
     pub equipment_diagnostic: Option<crate::ports::mail::MailEquipmentDiagnosticSnapshot>,
-    pub processed_at: DateTime<Utc>,
+    pub processed_at: Timestamp,
 }
 
 /// 远端邮件是否已有完整的本地处理证明。
@@ -121,8 +121,8 @@ pub struct MailPollBatch {
     pub mailbox_key: String,
     pub claim_token: Uuid,
     pub next_cursor: Option<String>,
-    pub polled_at: DateTime<Utc>,
-    pub next_poll_at: DateTime<Utc>,
+    pub polled_at: Timestamp,
+    pub next_poll_at: Timestamp,
     pub items: Vec<MailPollIntake>,
 }
 
@@ -150,7 +150,7 @@ pub trait MailPollStore: Send + Sync {
         mailbox_key: String,
         world_id: String,
         external_mail_id: String,
-        received_at: DateTime<Utc>,
+        received_at: Timestamp,
     ) -> ApplicationFuture<'_, MailPollCompletion>;
 
     /// 确保一个启用的邮箱拥有初始轮询状态，并收敛配置缩短后遗留的过晚调度水位。
@@ -158,8 +158,8 @@ pub trait MailPollStore: Send + Sync {
     fn ensure_state(
         &self,
         mailbox_key: String,
-        now: DateTime<Utc>,
-        scheduled_next_at: DateTime<Utc>,
+        now: Timestamp,
+        scheduled_next_at: Timestamp,
         retry_maximum: std::time::Duration,
     ) -> ApplicationFuture<'_, AdminMailPollState>;
 
@@ -168,8 +168,8 @@ pub trait MailPollStore: Send + Sync {
         &self,
         mailbox_key: String,
         worker_id: String,
-        now: DateTime<Utc>,
-        lease_until: DateTime<Utc>,
+        now: Timestamp,
+        lease_until: Timestamp,
         limit: u16,
         force: bool,
     ) -> ApplicationFuture<'_, Vec<MailPollClaim>>;
@@ -178,8 +178,8 @@ pub trait MailPollStore: Send + Sync {
     fn renew(
         &self,
         claim: MailPollClaim,
-        now: DateTime<Utc>,
-        lease_until: DateTime<Utc>,
+        now: Timestamp,
+        lease_until: Timestamp,
     ) -> ApplicationFuture<'_, MailPollClaim>;
 
     /// 在租约 token 仍有效时原子写入入站事实、命令账本和 cursor。
@@ -195,7 +195,7 @@ pub trait MailPollStore: Send + Sync {
         &self,
         claim: MailPollClaim,
         batch: MailPollBatch,
-        retry_at: DateTime<Utc>,
+        retry_at: Timestamp,
         failure_code: String,
         safe_detail: String,
     ) -> ApplicationFuture<'_, AdminMailPollState>;
@@ -204,7 +204,7 @@ pub trait MailPollStore: Send + Sync {
     fn fail(
         &self,
         claim: MailPollClaim,
-        retry_at: DateTime<Utc>,
+        retry_at: Timestamp,
         failure_code: String,
         safe_detail: String,
     ) -> ApplicationFuture<'_, AdminMailPollState>;

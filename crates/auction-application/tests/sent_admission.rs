@@ -9,16 +9,15 @@ use auction_application::delivery::{
     SentFulfillment, SentFundingAccount, SentFundingAllocation, SentFundingLot, SentLot,
     SentObligation, SentPayload, SentPayloadVariables, SentResultMetadata, SentSettlement,
 };
-use chrono::{DateTime, TimeZone, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 fn uuid(seed: u64) -> Uuid {
     Uuid::from_u64_pair(seed, seed)
 }
 
-fn at(minute: u32) -> DateTime<Utc> {
-    Utc.with_ymd_and_hms(2026, 11, 2, 12, minute, 0)
-        .single()
+fn at(minute: u32) -> Timestamp {
+    Timestamp::from_ymd_hms(2026, 11, 2, 12, minute, 0)
         .unwrap_or_else(|| panic!("固定测试时间必须存在"))
 }
 

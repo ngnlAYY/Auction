@@ -6,7 +6,7 @@
 //! 配置计算而不是由运维填写，避免把保留期配短。
 
 use auction_domain::DataKeyDomain;
-use chrono::{DateTime, Months, Utc};
+use auction_time::Timestamp;
 use serde::Deserialize;
 
 use super::super::ConfigError;
@@ -29,8 +29,8 @@ pub(crate) struct PreviousDataKeyConfig {
 pub struct RetiredDataKey {
     pub(crate) id: String,
     pub(crate) material: SecretString,
-    pub(crate) retired_at: DateTime<Utc>,
-    pub(crate) retain_until: DateTime<Utc>,
+    pub(crate) retired_at: Timestamp,
+    pub(crate) retain_until: Timestamp,
 }
 
 impl RetiredDataKey {
@@ -45,12 +45,12 @@ impl RetiredDataKey {
     }
 
     /// 停止用于新写入的时间。
-    pub fn retired_at(&self) -> DateTime<Utc> {
+    pub fn retired_at(&self) -> Timestamp {
         self.retired_at
     }
 
     /// 最早允许从配置移除的时间；保留期不短于 12 个月。
-    pub fn retain_until(&self) -> DateTime<Utc> {
+    pub fn retain_until(&self) -> Timestamp {
         self.retain_until
     }
 }
@@ -73,7 +73,7 @@ pub(crate) fn retired_keys(
     entries: Vec<PreviousDataKeyConfig>,
 ) -> Result<Vec<RetiredDataKey>, ConfigError> {
     let mut keys = Vec::with_capacity(entries.len());
-    let now = Utc::now();
+    let now = Timestamp::now();
     for entry in entries {
         if !auction_domain::valid_key_id(&entry.id) {
             return Err(invalid_retired_key(domain, "id 必须是 1 至 64 字节的密钥标识"));
@@ -84,14 +84,13 @@ pub(crate) fn retired_keys(
         if keys.iter().any(|key: &RetiredDataKey| key.id == entry.id) {
             return Err(invalid_retired_key(domain, "旧密钥标识重复"));
         }
-        let retired_at = DateTime::parse_from_rfc3339(&entry.retired_at)
-            .map(|value| value.with_timezone(&Utc))
+        let retired_at = Timestamp::parse_from_rfc3339(&entry.retired_at)
             .map_err(|_| invalid_retired_key(domain, "retired_at 必须是 RFC 3339 时间"))?;
         if retired_at > now {
             return Err(invalid_retired_key(domain, "retired_at 不能在未来"));
         }
         let retain_until = retired_at
-            .checked_add_months(Months::new(DATA_KEY_RETENTION_MONTHS))
+            .checked_add_months(DATA_KEY_RETENTION_MONTHS)
             .ok_or_else(|| invalid_retired_key(domain, "retired_at + 12 个月溢出"))?;
         let material = SecretString::new(retired_material_field(domain), entry.key)?;
         keys.push(RetiredDataKey { id: entry.id, material, retired_at, retain_until });
@@ -114,11 +113,11 @@ fn invalid_retired_key(domain: DataKeyDomain, reason: &str) -> ConfigError {
 
 #[cfg(test)]
 mod tests {
-    use chrono::{Duration, Months, Utc};
+    use auction_time::{Duration, Timestamp};
 
     use super::*;
 
-    fn entry(id: &str, retired_at: chrono::DateTime<Utc>) -> PreviousDataKeyConfig {
+    fn entry(id: &str, retired_at: auction_time::Timestamp) -> PreviousDataKeyConfig {
         PreviousDataKeyConfig {
             id: id.to_owned(),
             key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".to_owned(),
@@ -128,7 +127,7 @@ mod tests {
 
     #[test]
     fn retain_until_is_exactly_twelve_months() {
-        let retired_at = Utc::now() - Duration::days(30);
+        let retired_at = Timestamp::now() - Duration::days(30);
         let keys = retired_keys(
             DataKeyDomain::Equipment,
             Some("equipment-2026-11"),
@@ -141,14 +140,14 @@ mod tests {
         assert_eq!(key.retired_at(), retired_at);
         assert_eq!(
             key.retain_until(),
-            retired_at.checked_add_months(Months::new(DATA_KEY_RETENTION_MONTHS)).unwrap()
+            retired_at.checked_add_months(DATA_KEY_RETENTION_MONTHS).unwrap()
         );
         assert!(!format!("{key:?}").contains("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="));
     }
 
     #[test]
     fn future_or_malformed_retirement_is_rejected() {
-        let future = Utc::now() + Duration::days(1);
+        let future = Timestamp::now() + Duration::days(1);
         assert!(matches!(
             retired_keys(
                 DataKeyDomain::Credential,
@@ -170,7 +169,7 @@ mod tests {
 
     #[test]
     fn duplicate_or_current_key_is_rejected() {
-        let retired_at = Utc::now() - Duration::days(1);
+        let retired_at = Timestamp::now() - Duration::days(1);
         assert!(matches!(
             retired_keys(
                 DataKeyDomain::UserLogin,

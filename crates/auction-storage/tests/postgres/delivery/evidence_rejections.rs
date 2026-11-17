@@ -29,7 +29,7 @@ use auction_application::settlement::{
 };
 use auction_domain::SettlementWorld;
 use auction_storage::{DatabaseStore, MailEvidenceRejection, MailEvidenceTransactionError};
-use chrono::{Duration, DurationRound, Utc};
+use auction_time::{Duration, Timestamp};
 use serde_json::json;
 use sqlx::{PgConnection, PgPool};
 use uuid::Uuid;
@@ -176,7 +176,7 @@ pub(crate) fn evidence(
     purpose: InternalEvidencePurpose,
     shape: &EvidenceShape,
 ) -> SettlementInternalEvidenceSnapshot {
-    let observed = (Utc::now() + Duration::seconds(shape.observed_offset_seconds))
+    let observed = (Timestamp::now() + Duration::seconds(shape.observed_offset_seconds))
         .duration_trunc(Duration::microseconds(1))
         .expect("截断到微秒");
     let mut identity = MailAccountEvidenceBinding {
@@ -235,7 +235,7 @@ pub(crate) fn send_expectation(
 
 /// 领取指定投递，租约两分钟。
 async fn claim(store: &DatabaseStore, delivery_id: Uuid) -> DeliveryWorkClaim {
-    let now = Utc::now();
+    let now = Timestamp::now();
     let grace = StdDuration::from_secs(60);
     store.begin_claim_cycle(now, grace).await.expect("领取前清理");
     store
@@ -265,7 +265,7 @@ async fn fence(
     store
         .start_sending_authorized_until(
             claim.clone(),
-            Utc::now(),
+            Timestamp::now(),
             snapshot,
             Instant::now() + StdDuration::from_secs(30),
             Some(&prepared),

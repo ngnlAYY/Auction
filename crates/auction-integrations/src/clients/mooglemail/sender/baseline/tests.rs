@@ -19,7 +19,7 @@ use auction_application::sent_baseline::{
     SentBaselineReason,
 };
 use auction_test_support::mooglemail::{Fault, MailDouble};
-use chrono::{TimeZone, Utc};
+use auction_time::Timestamp;
 use tokio::time::Instant;
 
 use super::SentBaselineKind;
@@ -134,7 +134,7 @@ async fn watermark_baseline_survives_stale_anchor_and_due_daily_verification() {
     let cookie = cookie();
     let stale = MailScanWatermark {
         mail_id: SECOND.to_owned(),
-        observed_at: Utc.with_ymd_and_hms(2026, 11, 1, 0, 0, 0).single().expect("time"),
+        observed_at: Timestamp::from_ymd_hms(2026, 11, 1, 0, 0, 0).expect("time"),
     };
     sender.remember_sent_scan(&cookie, WORLD, Some(stale.clone()), true).await;
     let baseline = sender.prepare_sent_baseline(&cookie, WORLD).await.expect("锚点失效不阻断发送");

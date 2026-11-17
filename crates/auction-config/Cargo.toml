@@ -9,9 +9,9 @@ license.workspace = true
 [dependencies]
 auction-application.workspace = true
 auction-domain.workspace = true
-# 旧版标准 cron 的 Local 时区由配置 owner 解析；浏览器无需本机时区数据库。
-chrono = { workspace = true, features = ["clock"] }
-chrono-tz.workspace = true
+auction-time.workspace = true
+# 必填：标准 cron 未声明时区时沿用进程本地时区（tz-system），具名时区取内嵌的 IANA 数据。
+jiff = { workspace = true, features = ["tz-system", "tzdb-bundle-always"] }
 libc.workspace = true
 serde.workspace = true
 thiserror.workspace = true

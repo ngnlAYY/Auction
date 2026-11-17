@@ -151,7 +151,7 @@ dependencies = [
  "auction-process",
  "auction-setup",
  "auction-storage",
- "chrono",
+ "auction-time",
  "libc",
  "rust-embed",
  "tokio",
@@ -164,10 +164,10 @@ name = "auction-application"
 version = "0.1.8"
 dependencies = [
  "auction-domain",
+ "auction-time",
  "base64 0.23.1",
- "chrono",
- "chrono-tz",
  "hmac",
+ "jiff",
  "serde",
  "serde_json",
  "sha2 0.11.1",
@@ -190,8 +190,9 @@ dependencies = [
  "auction-observability",
  "auction-process",
  "auction-storage",
- "chrono",
+ "auction-time",
  "clap",
+ "jiff",
  "libc",
  "serde",
  "serde_json",
@@ -207,8 +208,8 @@ version = "0.1.8"
 dependencies = [
  "auction-application",
  "auction-domain",
- "chrono",
- "chrono-tz",
+ "auction-time",
+ "jiff",
  "libc",
  "serde",
  "thiserror 2.0.21",
@@ -221,7 +222,7 @@ dependencies = [
 name = "auction-contracts"
 version = "0.1.8"
 dependencies = [
- "chrono",
+ "auction-time",
  "serde",
  "serde_json",
  "uuid",
@@ -231,8 +232,8 @@ dependencies = [
 name = "auction-domain"
 version = "0.1.8"
 dependencies = [
- "chrono",
- "chrono-tz",
+ "auction-time",
+ "jiff",
  "serde",
  "sha2 0.11.1",
  "thiserror 2.0.21",
@@ -247,9 +248,9 @@ dependencies = [
  "auction-contracts",
  "auction-domain",
  "auction-observability",
+ "auction-time",
  "axum",
  "base64 0.23.1",
- "chrono",
  "futures-util",
  "http-body-util",
  "hyper",
@@ -277,8 +278,8 @@ dependencies = [
  "auction-application",
  "auction-domain",
  "auction-test-support",
+ "auction-time",
  "base64 0.23.1",
- "chrono",
  "object_store",
  "reqwest 0.13.5",
  "ring",
@@ -302,8 +303,9 @@ dependencies = [
  "auction-application",
  "auction-domain",
  "auction-observability",
+ "auction-time",
  "axum",
- "chrono",
+ "jiff",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -319,7 +321,7 @@ version = "0.1.8"
 dependencies = [
  "auction-application",
  "auction-process",
- "chrono",
+ "auction-time",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
@@ -354,7 +356,7 @@ dependencies = [
  "auction-observability",
  "auction-process",
  "auction-storage",
- "chrono",
+ "auction-time",
  "rust-embed",
  "tokio",
  "tracing",
@@ -407,8 +409,10 @@ dependencies = [
  "auction-integrations",
  "auction-jobs",
  "auction-observability",
- "chrono",
+ "auction-time",
  "futures-util",
+ "jiff",
+ "jiff-sqlx",
  "serde",
  "serde_json",
  "sha2 0.11.1",
@@ -432,13 +436,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "auction-time"
+version = "0.1.8"
+dependencies = [
+ "jiff",
+ "jiff-sqlx",
+ "js-sys",
+ "serde",
+ "serde_json",
+ "sqlx",
+]
+
+[[package]]
 name = "auction-web-admin"
 version = "0.1.8"
 dependencies = [
  "auction-contracts",
+ "auction-time",
  "auction-web-shared",
  "base64 0.23.1",
- "chrono",
  "dioxus",
  "dioxus-i18n",
  "gloo-net 0.7.0",
@@ -457,8 +473,8 @@ name = "auction-web-public"
 version = "0.1.8"
 dependencies = [
  "auction-contracts",
+ "auction-time",
  "auction-web-shared",
- "chrono",
  "dioxus",
  "dioxus-i18n",
  "futures-util",
@@ -478,7 +494,7 @@ dependencies = [
 name = "auction-web-shared"
 version = "0.1.8"
 dependencies = [
- "chrono",
+ "auction-time",
  "dioxus",
  "dioxus-i18n",
  "futures-util",
@@ -508,7 +524,7 @@ dependencies = [
  "auction-process",
  "auction-storage",
  "auction-test-support",
- "chrono",
+ "auction-time",
  "serde_json",
  "tokio",
  "tracing",
@@ -714,16 +730,6 @@ dependencies = [
  "num-traits",
  "serde",
  "windows-link",
-]
-
-[[package]]
-name = "chrono-tz"
-version = "0.10.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6139a8597ed92cf816dfb33f5dd6cf0bb93a6adc938f11039f371bc5bcd26c3"
-dependencies = [
- "chrono",
- "phf 0.12.1",
 ]
 
 [[package]]
@@ -1060,7 +1066,7 @@ dependencies = [
  "cssparser-macros",
  "dtoa-short",
  "itoa",
- "phf 0.14.0",
+ "phf",
  "smallvec",
 ]
 
@@ -2554,6 +2560,59 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3bd1574e617a9a6c1f8f8181bd7e841e1f20e4277607ef28945765188d6284d4"
 
 [[package]]
+name = "jiff"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9cc767b5763de45e810109520123bb2829a653f3a7ed9be40b2bc4f81158f595"
+dependencies = [
+ "jiff-core",
+ "jiff-static",
+ "jiff-tzdb",
+ "log",
+ "portable-atomic",
+ "portable-atomic-util",
+ "serde_core",
+ "windows-link",
+]
+
+[[package]]
+name = "jiff-core"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "894f7ac42105f584100691b3bf6e6b92dd12fcfa225f6c397f95c8a94b47b68f"
+dependencies = [
+ "log",
+]
+
+[[package]]
+name = "jiff-sqlx"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a4996ad290ff7f7081becdda47e28556fbebb81618c599eac5d09182b5a60e38"
+dependencies = [
+ "jiff",
+ "sqlx",
+]
+
+[[package]]
+name = "jiff-static"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "955491488dc99b572ea6d67b172dcd98787d00744b1fb44a5689b4e6413695a6"
+dependencies = [
+ "jiff-core",
+ "proc-macro2",
+ "quote",
+ "syn 3.0.10",
+]
+
+[[package]]
+name = "jiff-tzdb"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "12e71a1b68a875a44a33bb7a1dd84392cb77145a3367a552a3cfe6a4f5cf3afc"
+
+[[package]]
 name = "jni"
 version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3154,21 +3213,12 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "phf"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "913273894cec178f401a31ec4b656318d95473527be05c0752cc41cdc32be8b7"
-dependencies = [
- "phf_shared 0.12.1",
-]
-
-[[package]]
-name = "phf"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "010378780309880b08997fae13be7834dba947d36393bd372f2b1556deb2a2f6"
 dependencies = [
  "phf_macros",
- "phf_shared 0.14.0",
+ "phf_shared",
  "serde",
 ]
 
@@ -3179,7 +3229,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "41b585a510fb76fdebead6897982ef2a03a21d8e6cbcca904999742a4afc6ffe"
 dependencies = [
  "phf_generator",
- "phf_shared 0.14.0",
+ "phf_shared",
 ]
 
 [[package]]
@@ -3189,7 +3239,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aeb62e0959d5a1bebc965f4d15d9e2b7cea002b6b0f5ba8cde6cc26738467100"
 dependencies = [
  "fastrand",
- "phf_shared 0.14.0",
+ "phf_shared",
 ]
 
 [[package]]
@@ -3199,19 +3249,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5fa8d0ca26d424d27630da600c6624696e7dec8bf7b3b492b383c5dc49e5e085"
 dependencies = [
  "phf_generator",
- "phf_shared 0.14.0",
+ "phf_shared",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
-]
-
-[[package]]
-name = "phf_shared"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06005508882fb681fd97892ecff4b7fd0fee13ef1aa569f8695dae7ab9099981"
-dependencies = [
- "siphasher",
 ]
 
 [[package]]
@@ -3260,6 +3301,15 @@ name = "portable-atomic"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "05c8b63e8d9609db387f0324918f81d68fe27748f084ef092fb35954d0539a85"
+
+[[package]]
+name = "portable-atomic-util"
+version = "0.2.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "10ab3eb7f3becc3a1cbc4f2c6f20267996cfc1a6467a873763411b136a122715"
+dependencies = [
+ "portable-atomic",
+]
 
 [[package]]
 name = "potential_utf"
@@ -4193,7 +4243,6 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "cfg-if",
- "chrono",
  "crc",
  "crossbeam-queue",
  "either",
@@ -4270,7 +4319,6 @@ dependencies = [
  "bitflags",
  "byteorder",
  "bytes",
- "chrono",
  "crc",
  "digest 0.11.3",
  "dotenvy",
@@ -4299,7 +4347,6 @@ dependencies = [
  "base64 0.22.1",
  "bitflags",
  "byteorder",
- "chrono",
  "crc",
  "dotenvy",
  "etcetera",
@@ -4333,7 +4380,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "488e99c397a62007e4229aec669a179816339afc6d2620ca6fa420dbee2e982c"
 dependencies = [
  "atoi",
- "chrono",
  "flume",
  "form_urlencoded",
  "futures-channel",
@@ -4366,7 +4412,7 @@ checksum = "ffa8a5dbe8b3f0bbe29d4c3225daafaeead63afdc1b65fc4c01a1384166038e6"
 dependencies = [
  "new_debug_unreachable",
  "parking_lot",
- "phf_shared 0.14.0",
+ "phf_shared",
  "precomputed-hash",
 ]
 
@@ -4377,7 +4423,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "928dcdf75e47626b3617a976ec205d9f057584c371c1f23b782129268d0e6edc"
 dependencies = [
  "phf_generator",
- "phf_shared 0.14.0",
+ "phf_shared",
  "proc-macro2",
  "quote",
 ]
@@ -5236,7 +5282,7 @@ version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7572660c8890448ba236b7376f27e389c6a7e1c70195622faced601f855c0ada"
 dependencies = [
- "phf 0.14.0",
+ "phf",
  "phf_codegen",
  "string_cache",
  "string_cache_codegen",

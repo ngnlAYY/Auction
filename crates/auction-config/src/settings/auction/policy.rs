@@ -5,7 +5,7 @@ use auction_domain::{
     AdjustmentAnchor, AuctionEarlyBirdConfig, AuctionScheduleCalendar, AuctionWeeklySchedule,
     DEFAULT_COD_RETURN_LIMIT, RecoveryMode, RecoveryPolicy, SettlementMode, SettlementPolicy,
 };
-use chrono::Duration;
+use auction_time::Duration;
 use serde::{Deserialize, Serialize};
 
 use super::super::ConfigError;

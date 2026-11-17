@@ -3,7 +3,7 @@
 use std::fmt;
 
 use auction_domain::{EquipmentKey, valid_text};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::Value;
 
 use super::boundary::{AdminIntakeError, AdminIntakePolicy};
@@ -19,7 +19,7 @@ pub struct AdminIntakeSourceSnapshot {
     pub level: Option<i32>,
     pub tradeable: bool,
     pub attributes: Value,
-    pub collected_at: DateTime<Utc>,
+    pub collected_at: Timestamp,
     pub key: EquipmentKey,
 }
 
@@ -43,7 +43,7 @@ impl fmt::Debug for AdminIntakeSourceSnapshot {
 
 impl AdminIntakeSourceSnapshot {
     /// 返回不含字段原文的首个失败分类；与原有快照校验共用唯一规则。
-    pub fn mail_validation_issue(&self, now: DateTime<Utc>) -> Option<&'static str> {
+    pub fn mail_validation_issue(&self, now: Timestamp) -> Option<&'static str> {
         if !valid_text(&self.adapter, 128) {
             Some("adapter_invalid")
         } else if self.source_fingerprint == [0; 32] {
@@ -71,7 +71,7 @@ impl AdminIntakeSourceSnapshot {
     /// 结构、时间和属性形状与邮件投稿共用 [`Self::mail_validation_issue`] 的同一规则。
     pub fn validate_for_admin(
         &self,
-        now: DateTime<Utc>,
+        now: Timestamp,
         policy: AdminIntakePolicy,
     ) -> Result<(), AdminIntakeError> {
         if self.mail_validation_issue(now).is_some() {

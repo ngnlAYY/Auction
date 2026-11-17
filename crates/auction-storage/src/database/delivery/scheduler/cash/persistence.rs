@@ -3,7 +3,7 @@
 use auction_application::core::diagnostics::SafeErrorKind;
 use auction_application::delivery::{DeliveryPreparedExpectation, DeliveryWorkClaim};
 use auction_application::settlement::SettlementInternalEvidenceSnapshot;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
@@ -81,7 +81,7 @@ pub(super) async fn lock_notice_auction(
 pub(super) async fn persist_sending(
     tx: &mut Transaction<'_, Postgres>,
     claim: &DeliveryWorkClaim,
-    started_at: DateTime<Utc>,
+    started_at: Timestamp,
     evidence: Option<&SettlementInternalEvidenceSnapshot>,
     expectation: Option<&DeliveryPreparedExpectation>,
 ) -> Result<(), FenceError> {

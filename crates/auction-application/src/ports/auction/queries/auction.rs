@@ -1,7 +1,7 @@
 //! Public 拍卖目录和当前拍卖读取端口。
 
 use auction_domain::ProxyMode;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use crate::ports::core::ApplicationFuture;
@@ -31,11 +31,11 @@ pub struct PublicAuctionSummary {
     pub world_id: String,
     pub sequence: i64,
     pub status: String,
-    pub scheduled_open_at: DateTime<Utc>,
-    pub opened_at: Option<DateTime<Utc>>,
-    pub final_phase_at: Option<DateTime<Utc>>,
-    pub effective_end_at: Option<DateTime<Utc>>,
-    pub settled_at: Option<DateTime<Utc>>,
+    pub scheduled_open_at: Timestamp,
+    pub opened_at: Option<Timestamp>,
+    pub final_phase_at: Option<Timestamp>,
+    pub effective_end_at: Option<Timestamp>,
+    pub settled_at: Option<Timestamp>,
     pub lot_count: i64,
     pub sold_count: i64,
     pub unsold_count: i64,
@@ -62,8 +62,8 @@ pub struct CurrentAuctionSnapshot {
     pub world_id: String,
     pub sequence: i64,
     pub status: String,
-    pub opens_at: DateTime<Utc>,
-    pub scheduled_ends_at: Option<DateTime<Utc>>,
+    pub opens_at: Timestamp,
+    pub scheduled_ends_at: Option<Timestamp>,
     pub presentation_mode: String,
     pub bidding_open: bool,
     pub preview_revision: i64,
@@ -126,7 +126,7 @@ pub enum PublicRealtimeAuctionStatus {
     Settled,
 }
 
-fn is_go_zero_time(value: DateTime<Utc>) -> bool {
+fn is_go_zero_time(value: Timestamp) -> bool {
     value.timestamp() == -62_135_596_800 && value.timestamp_subsec_nanos() == 0
 }
 

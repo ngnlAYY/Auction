@@ -12,13 +12,13 @@ use auction_contracts::{
     AdminExternalAccessPauseRequest, AdminExternalAccessPauseResponse, ApiResponse,
     RuntimeSwitchAppliedDto, RuntimeSwitchIntentDto, RuntimeSwitchListResponse,
 };
+use auction_time::Timestamp;
 use axum::{
     body::Bytes,
     extract::{ConnectInfo, State},
     http::{HeaderMap, StatusCode, Uri},
     response::{IntoResponse, Response},
 };
-use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use crate::diagnostics;
@@ -30,10 +30,10 @@ use crate::session::{
 use crate::state::AdminApiState;
 
 /// Admin 暂停的最长期限；忘记恢复时外部访问最迟在此之后自动回落。
-const MAX_ADMIN_PAUSE: chrono::TimeDelta = chrono::TimeDelta::days(7);
+const MAX_ADMIN_PAUSE: auction_time::TimeDelta = auction_time::TimeDelta::days(7);
 /// 浏览器在用户点选时就按本地时钟冻结绝对期限；容忍它比服务端略快，恰为 7 天的预设才不会
 /// 被拒绝。上界只放宽，请求值原样写入账本（不夹紧），同 ID 重试的请求摘要保持不变。
-const CLOCK_SKEW_TOLERANCE: chrono::TimeDelta = chrono::TimeDelta::minutes(5);
+const CLOCK_SKEW_TOLERANCE: auction_time::TimeDelta = auction_time::TimeDelta::minutes(5);
 /// 数据库写入等待上限；超时后提交结果未知，只允许原样重试。
 const PAUSE_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -147,7 +147,7 @@ pub(crate) async fn pause_external_access(
     let Ok(request) = serde_json::from_slice::<AdminExternalAccessPauseRequest>(&body) else {
         return invalid_pause("请求 JSON 无效");
     };
-    let command = match pause_command(request, identity.actor, Utc::now()) {
+    let command = match pause_command(request, identity.actor, Timestamp::now()) {
         Ok(command) => command,
         Err(message) => return invalid_pause(message),
     };
@@ -209,7 +209,7 @@ pub(crate) async fn pause_external_access(
 fn pause_command(
     request: AdminExternalAccessPauseRequest,
     actor_id: String,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<RuntimeSwitchCommand, &'static str> {
     let command_id = Uuid::parse_str(&request.command_id)
         .ok()
@@ -282,7 +282,7 @@ fn pause_error(status: StatusCode, code: &'static str, message: &'static str) ->
 mod tests {
     use super::*;
 
-    fn request(paused: bool, expires_at: Option<DateTime<Utc>>) -> AdminExternalAccessPauseRequest {
+    fn request(paused: bool, expires_at: Option<Timestamp>) -> AdminExternalAccessPauseRequest {
         AdminExternalAccessPauseRequest {
             command_id: Uuid::new_v4().to_string(),
             expected_revision: 0,
@@ -292,14 +292,14 @@ mod tests {
         }
     }
 
-    fn at_micros(value: DateTime<Utc>) -> DateTime<Utc> {
-        DateTime::from_timestamp_micros(value.timestamp_micros()).expect("微秒精度时间")
+    fn at_micros(value: Timestamp) -> Timestamp {
+        Timestamp::from_timestamp_micros(value.timestamp_micros()).expect("微秒精度时间")
     }
 
     #[test]
     fn pause_maps_to_admin_set_with_absolute_expiry() {
-        let now = Utc::now();
-        let until = at_micros(now + chrono::TimeDelta::hours(2));
+        let now = Timestamp::now();
+        let until = at_micros(now + auction_time::TimeDelta::hours(2));
         let command = pause_command(request(true, Some(until)), "admin".to_owned(), now)
             .expect("合法暂停命令");
         assert_eq!(command.name, RuntimeSwitchName::ExternalAccessPaused);
@@ -311,7 +311,7 @@ mod tests {
 
     #[test]
     fn resume_maps_to_clear_without_expiry() {
-        let command = pause_command(request(false, None), "admin".to_owned(), Utc::now())
+        let command = pause_command(request(false, None), "admin".to_owned(), Timestamp::now())
             .expect("合法恢复命令");
         assert_eq!(command.operation, RuntimeSwitchOperation::Clear);
         assert_eq!(command.value, None);
@@ -320,11 +320,11 @@ mod tests {
 
     #[test]
     fn invalid_pause_requests_fail_closed() {
-        let now = Utc::now();
+        let now = Timestamp::now();
         assert!(pause_command(request(true, None), "admin".to_owned(), now).is_err());
-        let too_long = at_micros(now + chrono::TimeDelta::days(8));
+        let too_long = at_micros(now + auction_time::TimeDelta::days(8));
         assert!(pause_command(request(true, Some(too_long)), "admin".to_owned(), now).is_err());
-        let soon = at_micros(now + chrono::TimeDelta::hours(1));
+        let soon = at_micros(now + auction_time::TimeDelta::hours(1));
         assert!(pause_command(request(false, Some(soon)), "admin".to_owned(), now).is_err());
         let mut nil = request(true, Some(soon));
         nil.command_id = Uuid::nil().to_string();
@@ -339,18 +339,18 @@ mod tests {
 
     #[test]
     fn seven_day_pause_tolerates_bounded_browser_clock_skew() {
-        let now = at_micros(Utc::now());
+        let now = at_micros(Timestamp::now());
         // 浏览器比服务端快 30 秒时，恰为 7 天的预设仍被接受，且期限原样写入、不夹紧。
-        let skewed = now + MAX_ADMIN_PAUSE + chrono::TimeDelta::seconds(30);
+        let skewed = now + MAX_ADMIN_PAUSE + auction_time::TimeDelta::seconds(30);
         let command = pause_command(request(true, Some(skewed)), "admin".to_owned(), now)
             .expect("容忍范围内的 7 天暂停");
         assert_eq!(command.expires_at, Some(skewed));
         let boundary = now + MAX_ADMIN_PAUSE + CLOCK_SKEW_TOLERANCE;
         assert!(pause_command(request(true, Some(boundary)), "admin".to_owned(), now).is_ok());
         // 容忍只覆盖时钟偏差：超出上界哪怕一微秒、或偏差达到 6 分钟都失败关闭。
-        let beyond = boundary + chrono::TimeDelta::microseconds(1);
+        let beyond = boundary + auction_time::TimeDelta::microseconds(1);
         assert!(pause_command(request(true, Some(beyond)), "admin".to_owned(), now).is_err());
-        let too_skewed = now + MAX_ADMIN_PAUSE + chrono::TimeDelta::minutes(6);
+        let too_skewed = now + MAX_ADMIN_PAUSE + auction_time::TimeDelta::minutes(6);
         assert!(pause_command(request(true, Some(too_skewed)), "admin".to_owned(), now).is_err());
     }
 }

@@ -11,7 +11,7 @@ use auction_application::mail::{
     MailScanCheckpoint, MailScanCheckpointKey, MailScanCheckpointStore, MailScanEvent,
     MailScanObserver, MailScanStream, MailScanWatermark,
 };
-use chrono::Utc;
+use auction_time::Timestamp;
 
 use super::{CachedReadScan, CachedSentBaseline, CachedSentScan, MoogleMailSender};
 use crate::clients::mooglemail::scan_checkpoint::advance_scan_checkpoint;
@@ -386,7 +386,7 @@ impl MoogleMailSender {
             let checkpoint = advance_scan_checkpoint(
                 previous.map(|entry| &entry.checkpoint),
                 newest,
-                full.then(Utc::now),
+                full.then(Timestamp::now),
             );
             cache.insert(
                 world,
@@ -454,7 +454,7 @@ impl MoogleMailSender {
             let checkpoint = advance_scan_checkpoint(
                 previous.map(|entry| &entry.checkpoint),
                 newest,
-                full.then(Utc::now),
+                full.then(Timestamp::now),
             );
             cache.insert(
                 world,

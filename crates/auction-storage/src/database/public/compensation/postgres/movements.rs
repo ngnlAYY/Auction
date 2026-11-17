@@ -5,7 +5,7 @@ use auction_application::public::{
     PublicCompensationMovement, PublicCompensationMovementKind, PublicCompensationMovementPage,
     PublicCompensationMovementRequest,
 };
-use chrono::DateTime;
+use auction_time::Timestamp;
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -78,7 +78,7 @@ pub(crate) async fn movements(
                 .map_err(|error| storage_error_from(error, "读取补偿账本类型失败"))?;
             let kind = PublicCompensationMovementKind::parse(&kind)
                 .ok_or_else(|| storage_error("补偿账本类型不在公开闭集内"))?;
-            let created_at: DateTime<_> = row
+            let created_at: Timestamp = row
                 .try_get("created_at")
                 .map_err(|error| storage_error_from(error, "读取补偿账本时间失败"))?;
             Ok(PublicCompensationMovement {

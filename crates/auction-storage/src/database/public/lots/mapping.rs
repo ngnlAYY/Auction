@@ -14,7 +14,7 @@ use auction_application::forum::{
 };
 use auction_application::public::lot_code;
 use auction_domain::{AuctionRules, BidAmount, EquipmentId};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::Deserialize;
 use serde_json::Value;
 use uuid::Uuid;
@@ -29,8 +29,8 @@ pub(super) fn map_projection(
     world_id: String,
     sequence: i64,
     auction_status: String,
-    opens_at: DateTime<Utc>,
-    scheduled_ends_at: Option<DateTime<Utc>>,
+    opens_at: Timestamp,
+    scheduled_ends_at: Option<Timestamp>,
     preview_revision: i64,
     presentation_mode: String,
     bidding_open: bool,
@@ -119,7 +119,7 @@ pub(super) fn map_live_fields(
     policy_minimum_increment: i64,
     leader_name: Option<String>,
     seller_name: Option<String>,
-    effective_end_at: Option<DateTime<Utc>>,
+    effective_end_at: Option<Timestamp>,
     state_version: i64,
     external_id: String,
     equipment_name: String,
@@ -186,7 +186,7 @@ pub(super) fn map_live_fields(
         state_version,
         equipment,
     };
-    summary.validate("live", DateTime::<Utc>::default()).map_err(storage_error)?;
+    summary.validate("live", Timestamp::default()).map_err(storage_error)?;
     Ok(summary)
 }
 

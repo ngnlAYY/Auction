@@ -5,7 +5,7 @@
 use auction_application::reconciliation::{
     SolvencyInTransitReason, SolvencyReport, SolvencyWorldReport,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Row;
 
 use super::{WORLDS, open_snapshot, queries, query_failed, snapshot_unavailable};
@@ -57,7 +57,7 @@ pub(super) async fn solvency_snapshot(
             .and_then(|total| total.checked_add(postage_estimate_credits))
             .ok_or("reconciliation_query_failed")?;
         let balance_credits: Option<i64> = row.try_get("balance_credits").map_err(query_failed)?;
-        let balance_observed_at: Option<DateTime<Utc>> =
+        let balance_observed_at: Option<Timestamp> =
             row.try_get("balance_observed_at").map_err(query_failed)?;
         let balance_status: Option<String> = row.try_get("balance_status").map_err(query_failed)?;
         let evidence_status: Option<String> =

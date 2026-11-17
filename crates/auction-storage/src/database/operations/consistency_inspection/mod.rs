@@ -1,6 +1,6 @@
 //! 内部一致性巡检：有界只读快照与独立的只追加报告事实。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::Serialize;
 use sqlx::Row;
 use uuid::Uuid;
@@ -23,9 +23,9 @@ pub struct ConsistencyInspectionReport {
     pub format: &'static str,
     pub report_id: Uuid,
     pub database_name: String,
-    pub observed_at: Option<DateTime<Utc>>,
+    pub observed_at: Option<Timestamp>,
     pub snapshot: Option<String>,
-    pub completed_at: DateTime<Utc>,
+    pub completed_at: Timestamp,
     pub complete: bool,
     pub consistent: bool,
     pub sample_limit_per_check: i64,
@@ -84,7 +84,7 @@ impl DatabaseStore {
             database_name: actual,
             observed_at: None,
             snapshot: None,
-            completed_at: Utc::now(),
+            completed_at: Timestamp::now(),
             complete: false,
             consistent: false,
             sample_limit_per_check: SAMPLE_LIMIT,
@@ -109,7 +109,7 @@ impl DatabaseStore {
             }
             Err(failure_code) => report.failure_code = Some(failure_code),
         }
-        report.completed_at = Utc::now();
+        report.completed_at = Timestamp::now();
         append_report(self, &report).await?;
         Ok(report)
     }

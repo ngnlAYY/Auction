@@ -102,7 +102,8 @@ pub(super) async fn run(
                         cipher_bytes: object.bytes,
                         cipher_sha256: object.sha256.clone(),
                         remote_key: object.key.clone(),
-                        uploaded_unix_seconds: chrono::Utc::now().timestamp().max(1) as u64,
+                        uploaded_unix_seconds: auction_time::Timestamp::now().timestamp().max(1)
+                            as u64,
                     };
                     if let Err(error) = write_wal_upload_receipt(staging_dir, &receipt) {
                         report.failed.push(Failed {

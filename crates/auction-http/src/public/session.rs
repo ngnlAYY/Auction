@@ -4,12 +4,12 @@ use std::net::SocketAddr;
 
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_contracts::{ApiResponse, PublicLoginRequest, PublicLoginResponse};
+use auction_time::Timestamp;
 use axum::Json;
 use axum::body::Bytes;
 use axum::extract::{ConnectInfo, Request, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use chrono::Utc;
 
 use crate::diagnostics;
 use crate::errors::api_error;
@@ -43,7 +43,7 @@ pub(crate) async fn login_session(
                 .into_response();
         }
     };
-    let now = Utc::now();
+    let now = Timestamp::now();
     match session.login(input.key.into_bytes(), now).await {
         Ok(result) => {
             let mut response_headers = no_store_headers();
@@ -82,7 +82,7 @@ pub(crate) async fn current_session(
     let Some(raw_token) = read_public_session_cookie(&headers) else {
         return current_session_response(None);
     };
-    match session.current(raw_token, Utc::now()).await {
+    match session.current(raw_token, Timestamp::now()).await {
         Ok(identity) => current_session_response(Some(identity)),
         Err(error) if is_unauthenticated(&error) => current_session_response(None),
         Err(diagnostic_cause) => {
@@ -122,7 +122,7 @@ pub(crate) async fn refresh_session_cookie(
         return api_error(StatusCode::BAD_REQUEST, "invalid_body", "会话同步只接受空请求体")
             .into_response();
     }
-    let now = Utc::now();
+    let now = Timestamp::now();
     let identity = match session.inspect(raw_token.clone(), now).await {
         Ok(identity) => identity,
         Err(error) if is_unauthenticated(&error) => return authentication_error(),
@@ -166,7 +166,7 @@ pub(crate) async fn logout_session(
     let Some(raw_token) = read_public_session_cookie(&headers) else {
         return authentication_error();
     };
-    let now = Utc::now();
+    let now = Timestamp::now();
     match session.current(raw_token.clone(), now).await {
         Ok(identity) => {
             if let Err(response) = check_public_expected_user(&headers, identity.user_id) {

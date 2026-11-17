@@ -2,7 +2,7 @@
 
 use auction_application::settlement::SettlementWorkClaim;
 use auction_domain::deterministic_uuid;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::json;
 use sqlx::{Postgres, Row};
 
@@ -13,7 +13,7 @@ use crate::database::{TrackedPool, repository_error};
 pub(super) async fn complete_postgres(
     pool: &TrackedPool<Postgres>,
     claim: &SettlementWorkClaim,
-    completed_at: DateTime<Utc>,
+    completed_at: Timestamp,
 ) -> Result<(), auction_application::core::RepositoryError> {
     let result = sqlx::query(
         r#"UPDATE public.auctions
@@ -115,9 +115,9 @@ async fn fail_transaction(
     .await?
     .ok_or(sqlx::Error::RowNotFound)?;
     let attempt_count: i32 = row.try_get("settlement_attempt_count")?;
-    let next_attempt_at: DateTime<Utc> = row.try_get("settlement_next_attempt_at")?;
+    let next_attempt_at: Timestamp = row.try_get("settlement_next_attempt_at")?;
     let state_version: i64 = row.try_get("state_version")?;
-    let observed_at: DateTime<Utc> = row.try_get("updated_at")?;
+    let observed_at: Timestamp = row.try_get("updated_at")?;
     let expected_attempt = claim
         .attempt_count
         .checked_add(1)

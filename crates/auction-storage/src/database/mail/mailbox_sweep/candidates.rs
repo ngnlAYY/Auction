@@ -5,7 +5,7 @@ use auction_application::mail::{
     MoogleMailboxReturnTakeIdentity, MoogleMailboxSweepCandidate, MoogleMailboxUnprovenSend,
 };
 use auction_application::settlement::settlement_return_original_body;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::Value;
 use sqlx::Postgres;
 use uuid::Uuid;
@@ -26,8 +26,8 @@ pub(super) struct UnprovenSendRow {
     result_code: Option<String>,
     user_key_user_id: Option<Uuid>,
     inbound_mail_id: String,
-    sending_at: DateTime<Utc>,
-    outcome_recorded_at: DateTime<Utc>,
+    sending_at: Timestamp,
+    outcome_recorded_at: Timestamp,
     operation: String,
     attachment_value: Value,
     sweep_retries: i64,

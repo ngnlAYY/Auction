@@ -7,7 +7,7 @@ publish.workspace = true
 license.workspace = true
 
 [dependencies]
-chrono.workspace = true
+auction-time.workspace = true
 dioxus.workspace = true
 dioxus-i18n.workspace = true
 # transport 模块的共享 fetch 封装与超时取消边界。

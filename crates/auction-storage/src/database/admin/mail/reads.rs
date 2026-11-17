@@ -6,7 +6,7 @@ use auction_application::admin::{
     AdminMailTransactionError, MAX_ADMIN_MAIL_POLLER_COUNT,
 };
 use auction_application::core::ApplicationError;
-use chrono::Utc;
+use auction_time::Timestamp;
 use serde_json::Value;
 use sqlx::Row;
 use sqlx::types::Json;
@@ -82,7 +82,7 @@ pub(super) async fn dashboard_snapshot_postgres(
         }
         pollers.push(poller);
     }
-    let snapshot = AdminMailDashboardSnapshot { observed_at: Utc::now(), pollers };
+    let snapshot = AdminMailDashboardSnapshot { observed_at: Timestamp::now(), pollers };
     if snapshot.validate() {
         Ok(snapshot)
     } else {

@@ -1,6 +1,6 @@
 //! MoogleMail Item Shop 余额解析。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use scraper::Html;
 
 use crate::clients::mooglemail::parser::{
@@ -16,7 +16,7 @@ impl MoogleMailParser {
         &self,
         document: &[u8],
         world: MoogleMailWorld,
-        observed_at: DateTime<Utc>,
+        observed_at: Timestamp,
     ) -> Result<MoogleMailBalanceSnapshot, MoogleMailError> {
         let document =
             super::identity::trusted_document(document, world, MoogleMailOperation::Balance)?;
@@ -28,7 +28,7 @@ impl MoogleMailParser {
         &self,
         document: &Html,
         world: MoogleMailWorld,
-        observed_at: DateTime<Utc>,
+        observed_at: Timestamp,
     ) -> Result<MoogleMailBalanceSnapshot, MoogleMailError> {
         if observed_at.timestamp_nanos_opt().is_none() {
             return Err(protocol(MoogleMailOperation::Balance, world));

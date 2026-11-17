@@ -1,7 +1,7 @@
 //! 把竞价计划编码为旧实例可重放的成功结果。
 
 use auction_domain::CompetitionPlan;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use super::super::commands::CompetitionCommand;
 use super::EncodedCommandResult;
@@ -27,7 +27,7 @@ pub(in crate::services::auction::competition) fn encode(
     plan: &CompetitionPlan,
     previous_transitions: &[CompetitionProxyTransitionRecord],
     quota_limit: u32,
-    created_at: DateTime<Utc>,
+    created_at: Timestamp,
 ) -> Result<EncodedCommandResult, ApplicationError> {
     plan.validate().map_err(|error| {
         record_error(

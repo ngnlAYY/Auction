@@ -257,7 +257,7 @@ mod tests {
             balance_stall_age_seconds: 0,
             balance_observed_at: None,
             evidence_last_success_at: None,
-            updated_at: chrono::Utc::now(),
+            updated_at: auction_time::Timestamp::now(),
         };
         let recovery = OperationsAlertRecoverySnapshot {
             payment_overdue_count: 0,

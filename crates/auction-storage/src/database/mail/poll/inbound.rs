@@ -2,7 +2,7 @@
 
 use auction_application::core::ApplicationError;
 use auction_application::mail::MailPollIntake;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::Value;
 use sqlx::{Row, types::Json};
 use uuid::Uuid;
@@ -15,7 +15,7 @@ pub(crate) async fn lookup_completion(
     mailbox_key: &str,
     world_id: &str,
     external_mail_id: &str,
-    received_at: DateTime<Utc>,
+    received_at: Timestamp,
 ) -> Result<auction_application::mail::MailPollCompletion, ApplicationError> {
     let row = sqlx::query(
         "SELECT inbound.id, inbound.world_id, inbound.mailbox_key,
@@ -44,7 +44,7 @@ pub(crate) async fn lookup_completion(
     let stored_world: String = row
         .try_get("world_id")
         .map_err(|error| storage_error_from(error, "读取 MoogleMail 完成事实世界失败"))?;
-    let stored_received: DateTime<Utc> = row
+    let stored_received: Timestamp = row
         .try_get("received_at")
         .map_err(|error| storage_error_from(error, "读取 MoogleMail 完成事实时间失败"))?;
     let stored_digest: Vec<u8> = row
@@ -160,7 +160,7 @@ pub(crate) async fn insert_or_verify_intake(
     let stored_digest: Vec<u8> = row
         .try_get("content_digest")
         .map_err(|error| storage_error_from(error, "读取 MoogleMail 入站摘要失败"))?;
-    let stored_received: DateTime<Utc> = row
+    let stored_received: Timestamp = row
         .try_get("received_at")
         .map_err(|error| storage_error_from(error, "读取 MoogleMail 入站时间失败"))?;
     let stored_status: String = row

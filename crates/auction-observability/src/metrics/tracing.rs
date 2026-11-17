@@ -92,7 +92,7 @@ impl TracingCollector {
         }
     }
 
-    fn timestamp_seconds(value: Option<chrono::DateTime<chrono::Utc>>) -> f64 {
+    fn timestamp_seconds(value: Option<auction_time::Timestamp>) -> f64 {
         value.map_or(0.0, |timestamp| timestamp.timestamp_micros() as f64 / 1_000_000.0)
     }
 }

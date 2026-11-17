@@ -6,7 +6,7 @@ use auction_application::core::Clock;
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_application::settlement::SettlementReturnProgress;
 use auction_observability::WorkerResult;
-use chrono::Duration as ChronoDuration;
+use auction_time::TimeDelta;
 
 use super::phase::{observe_phase, run_phase};
 use crate::worker::diagnostics;
@@ -85,7 +85,7 @@ where
     else {
         return;
     };
-    let Ok(lease) = ChronoDuration::from_std(worker.recovery.lease_duration) else {
+    let Ok(lease) = TimeDelta::from_std(worker.recovery.lease_duration) else {
         tracing::error!("结算退件核验租约时长无效");
         observe_phase(worker, batch_result, WorkerResult::Error, 0);
         return;

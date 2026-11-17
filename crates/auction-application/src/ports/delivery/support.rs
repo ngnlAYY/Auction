@@ -4,7 +4,7 @@
 //! 玩家咨询与核对冒充 Bot 的邮件。所有分区都有固定行数上限，且只返回安全投影：不含投递
 //! payload、正文、Cookie、登录 key、会话凭据或代理上限。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use crate::ports::delivery::DeliveryAdminSnapshot;
@@ -71,7 +71,7 @@ pub struct PlayerSupportBid {
     pub amount: i64,
     pub mechanism: String,
     pub lot_status: String,
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -82,7 +82,7 @@ pub struct PlayerSupportDeal {
     pub world_id: String,
     pub equipment_name: String,
     pub final_price: i64,
-    pub effective_end_at: Option<DateTime<Utc>>,
+    pub effective_end_at: Option<Timestamp>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -112,8 +112,8 @@ pub struct PlayerSupportNotification {
     pub state: String,
     pub state_reason: Option<String>,
     pub delivery_id: Option<Uuid>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
 }
 
 /// 命中的参考编号实体类型；让操作员确认这个编号究竟指向哪类记录。

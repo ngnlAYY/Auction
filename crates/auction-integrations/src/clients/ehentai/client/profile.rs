@@ -107,7 +107,7 @@ impl EhentaiClient {
             "check_owner",
             || profile_failure(ProfileStage::Owner, InternalEvidenceError::Revoked),
         ))?;
-        let observed_at = chrono::Utc::now();
+        let observed_at = auction_time::Timestamp::now();
         let protocol_version = "forum_target_profile_mid_v1";
         let mut hash = Sha256::new();
         let observed_text = observed_at.to_rfc3339();

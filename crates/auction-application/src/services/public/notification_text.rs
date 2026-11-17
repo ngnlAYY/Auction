@@ -4,7 +4,7 @@
 //! 否则重放时请求摘要会与已入队通知冲突。
 
 use auction_domain::equipment::taxonomy::EquipmentCategory;
-use chrono::{DateTime, SecondsFormat, Utc};
+use auction_time::{SecondsFormat, Timestamp};
 
 /// 未知装备分类在展示代码中使用的可读前缀。
 const UNKNOWN_LOT_CODE_PREFIX: &str = "Lot";
@@ -37,13 +37,13 @@ pub fn format_credits(amount: i64) -> String {
 }
 
 /// 以 UTC 秒精度书写的有效截止时刻；正文不再换算玩家本地时区。
-pub fn format_deadline(deadline: DateTime<Utc>) -> String {
+pub fn format_deadline(deadline: Timestamp) -> String {
     deadline.to_rfc3339_opts(SecondsFormat::Secs, true)
 }
 
 #[cfg(test)]
 mod tests {
-    use chrono::{TimeZone, Utc};
+    use auction_time::Timestamp;
 
     use super::{format_credits, format_deadline, lot_code};
 
@@ -74,7 +74,7 @@ mod tests {
 
     #[test]
     fn deadline_is_frozen_utc_seconds() {
-        let deadline = Utc.with_ymd_and_hms(2026, 11, 5, 12, 30, 5).unwrap();
+        let deadline = Timestamp::from_ymd_hms(2026, 11, 5, 12, 30, 5).unwrap();
         assert_eq!(format_deadline(deadline), "2026-11-05T12:30:05Z");
     }
 }

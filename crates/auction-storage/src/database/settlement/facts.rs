@@ -2,7 +2,7 @@
 
 use auction_application::settlement::SettlementTransactionError;
 use auction_domain::{AuctionId, CommandId, SettlementPlan, deterministic_uuid};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::json;
 use sqlx::Row;
 use uuid::Uuid;
@@ -27,7 +27,7 @@ pub(super) async fn close_settlement_lots(
     transaction: &mut PostgresCompetitionTransaction,
     auction_id: AuctionId,
     plan: &SettlementPlan,
-    occurred_at: DateTime<Utc>,
+    occurred_at: Timestamp,
 ) -> Result<(), SettlementTransactionError> {
     let lot_ids: Vec<Uuid> = plan.lines.iter().map(|line| line.lot_id.as_uuid()).collect();
     let next_statuses: Vec<&str> = plan
@@ -129,7 +129,7 @@ pub(super) async fn insert_compensation_ledger(
     transaction: &mut PostgresCompetitionTransaction,
     command_id: CommandId,
     plan: &SettlementPlan,
-    occurred_at: DateTime<Utc>,
+    occurred_at: Timestamp,
 ) -> Result<(), SettlementTransactionError> {
     let entries = compensation_ledger_entries(command_id, plan)?;
     // 每批最多 2048 个参数；auction_id 仍取自同事务命令账本，缺失账本时由 NOT NULL 约束拒绝。

@@ -2,7 +2,7 @@
 
 use std::{future::Future, pin::Pin};
 
-use chrono::Utc;
+use auction_time::Timestamp;
 use sqlx::Postgres;
 
 use super::mapping::{map_storage_error, repository_error};
@@ -97,7 +97,7 @@ where
 
                 let operation_result = async {
                     if let Some(custody) = custody {
-                        let budget = (custody.expires_at - Utc::now()).num_milliseconds();
+                        let budget = (custody.expires_at - Timestamp::now()).num_milliseconds();
                         if budget <= 0 {
                             return Err(DeliveryTransactionError::Funding(
                                 auction_application::settlement::FundingError::Unproven,

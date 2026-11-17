@@ -4,7 +4,7 @@
 
 use std::{future::Future, pin::Pin};
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use crate::ports::core::ApplicationFuture;
@@ -69,7 +69,7 @@ pub trait RealtimeConsumerStore: Send + Sync {
         event_id: Uuid,
         failure_code: String,
         safe_detail: String,
-        failed_at: DateTime<Utc>,
+        failed_at: Timestamp,
     ) -> ApplicationFuture<'_, ()>;
 }
 

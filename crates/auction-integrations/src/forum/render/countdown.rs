@@ -2,7 +2,7 @@
 
 use auction_application::forum::ForumRenderError;
 use auction_domain::AuctionId;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use url::Url;
 
 use super::text::push_fmt;
@@ -12,8 +12,8 @@ pub(super) fn write_countdowns(
     body: &mut String,
     auction_id: AuctionId,
     public_url: Option<&str>,
-    intake_closes_at: DateTime<Utc>,
-    scheduled_end_at: Option<DateTime<Utc>>,
+    intake_closes_at: Timestamp,
+    scheduled_end_at: Option<Timestamp>,
 ) -> Result<(), ForumRenderError> {
     if intake_closes_at.timestamp_nanos_opt().is_none()
         || scheduled_end_at.is_some_and(|time| time.timestamp_nanos_opt().is_none())

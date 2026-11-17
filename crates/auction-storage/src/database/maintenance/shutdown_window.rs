@@ -1,7 +1,7 @@
 //! 停机前的只读时段证据：Final 与在拍 lot 截止使用同一数据库快照和时钟，
 //! 不领取任务、不加行锁或 advisory lock、不改写拍卖、代理或审计事实。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::Serialize;
 use sqlx::Row;
 use thiserror::Error;
@@ -12,8 +12,8 @@ use crate::database::{DatabaseStore, set_read_only_limits};
 /// 分体部署停机前的安全投影；只含场次/lot 标识与时间，不含玩家或代理授权信息。
 #[derive(Debug, Serialize)]
 pub struct PostgresShutdownWindow {
-    pub checked_at: DateTime<Utc>,
-    pub protected_until: DateTime<Utc>,
+    pub checked_at: Timestamp,
+    pub protected_until: Timestamp,
     pub final_auctions: Vec<ShutdownFinalAuction>,
     pub ending_lots: Vec<ShutdownEndingLot>,
 }
@@ -22,7 +22,7 @@ pub struct PostgresShutdownWindow {
 #[derive(Debug, Serialize)]
 pub struct ShutdownFinalAuction {
     pub auction_id: Uuid,
-    pub effective_end_at: Option<DateTime<Utc>>,
+    pub effective_end_at: Option<Timestamp>,
 }
 
 /// 有效截止不晚于保护窗口末端（含已过截止）的在拍 lot。
@@ -30,7 +30,7 @@ pub struct ShutdownFinalAuction {
 pub struct ShutdownEndingLot {
     pub auction_id: Uuid,
     pub lot_id: Uuid,
-    pub effective_end_at: DateTime<Utc>,
+    pub effective_end_at: Timestamp,
 }
 
 /// 时段证据不可用时只报告固定阶段、SQLx 变体名与校验后的 SQLSTATE，不携带原始错误。
@@ -67,9 +67,9 @@ impl DatabaseStore {
         .fetch_one(&mut *transaction)
         .await
         .map_err(|error| failure("database_clock", &error))?;
-        let checked_at: DateTime<Utc> =
+        let checked_at: Timestamp =
             clock.try_get("checked_at").map_err(|error| failure("database_clock", &error))?;
-        let protected_until: DateTime<Utc> =
+        let protected_until: Timestamp =
             clock.try_get("protected_until").map_err(|error| failure("database_clock", &error))?;
 
         let rows = sqlx::query(

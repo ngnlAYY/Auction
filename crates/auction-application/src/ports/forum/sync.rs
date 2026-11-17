@@ -9,7 +9,7 @@ use std::sync::{
 };
 
 use auction_domain::{AuctionId, AuctionStatus, SettlementWorld};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
@@ -167,8 +167,8 @@ pub struct ForumSyncClaim {
     pub claim_token: Uuid,
     pub claim_fencing: i64,
     pub worker_id: String,
-    pub claimed_at: DateTime<Utc>,
-    pub lease_until: DateTime<Utc>,
+    pub claimed_at: Timestamp,
+    pub lease_until: Timestamp,
     pub source_revision: i64,
     /// 历史 published 主题的已持久化身份；仅用于首次补齐固定楼层，不允许由标题猜测替代。
     pub existing_thread_id: Option<String>,
@@ -214,7 +214,7 @@ pub struct ForumLotSnapshot {
     pub status: String,
     pub current_bidder: Option<String>,
     pub current_bid_source: Option<ForumCurrentBidSource>,
-    pub effective_end_at: Option<DateTime<Utc>>,
+    pub effective_end_at: Option<Timestamp>,
     pub settlement: Option<ForumLotSettlement>,
     /// 不含装备 key 的权威链接目标；完整 URL 只在 Worker 渲染前短暂解析。
     pub equipment_link_target: PublicEquipmentLinkTarget,
@@ -249,9 +249,9 @@ pub struct ForumAuctionSnapshot {
     pub state_version: i64,
     /// 与拍品来自同一权威快照，不由墙钟推断；Settled 仍须具备完整结算证明。
     pub state: AuctionStatus,
-    pub scheduled_open_at: DateTime<Utc>,
-    pub opened_at: Option<DateTime<Utc>>,
-    pub scheduled_end_at: Option<DateTime<Utc>>,
+    pub scheduled_open_at: Timestamp,
+    pub opened_at: Option<Timestamp>,
+    pub scheduled_end_at: Option<Timestamp>,
     pub public_url: Option<String>,
     pub lots: Vec<ForumLotSnapshot>,
 }
@@ -380,8 +380,8 @@ pub struct ForumSyncRecoveryItem {
     pub source_revision: i64,
     pub attempt_count: u32,
     pub failure_code: String,
-    pub next_attempt_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
+    pub next_attempt_at: Timestamp,
+    pub updated_at: Timestamp,
 }
 
 /// 人工确认精确标题对账未命中后，授权 Worker 再次尝试创建主题的幂等命令。
@@ -401,7 +401,7 @@ pub struct ForumWriteRetryAuthorizationResult {
     pub command_id: Uuid,
     pub auction_id: Uuid,
     pub source_revision: i64,
-    pub authorized_at: DateTime<Utc>,
+    pub authorized_at: Timestamp,
 }
 
 pub trait ForumSyncStore: Send + Sync {
@@ -411,9 +411,9 @@ pub trait ForumSyncStore: Send + Sync {
     fn claim_due(
         &self,
         worker_id: String,
-        now: DateTime<Utc>,
-        lease_until: DateTime<Utc>,
-        startup_recovery_before: Option<DateTime<Utc>>,
+        now: Timestamp,
+        lease_until: Timestamp,
+        startup_recovery_before: Option<Timestamp>,
         available_worlds: Vec<SettlementWorld>,
         limit: u16,
     ) -> ApplicationFuture<'_, Vec<ForumSyncClaim>>;
@@ -426,13 +426,13 @@ pub trait ForumSyncStore: Send + Sync {
         rendered: ForumRenderedThread,
         system_log: ForumRenderedPost,
         published: ForumPublishedLayout,
-        published_at: DateTime<Utc>,
+        published_at: Timestamp,
     ) -> ApplicationFuture<'_, ()>;
 
     fn fail(
         &self,
         claim: ForumSyncClaim,
-        retry_at: DateTime<Utc>,
+        retry_at: Timestamp,
         failure_code: String,
         safe_detail: String,
     ) -> ApplicationFuture<'_, ()>;

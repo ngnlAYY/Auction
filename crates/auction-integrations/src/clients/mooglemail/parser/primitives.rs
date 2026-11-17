@@ -1,11 +1,11 @@
 //! MoogleMail 解析器共用的文本、DOM 与时间辅助。
 
-use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
-use chrono::{DateTime, NaiveDateTime, Utc};
+use auction_application::core::diagnostics::{DiagnosticContext, SafeErrorKind, diagnostic_world};
+use auction_time::Timestamp;
 use scraper::ElementRef;
 use sha2::{Digest, Sha256};
 
-use super::{INBOX_TIME_FORMAT, MAX_MESSAGE_TEXT_BYTES};
+use super::MAX_MESSAGE_TEXT_BYTES;
 use crate::clients::mooglemail::protocol::valid_opaque_id;
 use crate::clients::mooglemail::{
     MoogleMailError, MoogleMailErrorCategory, MoogleMailOperation, MoogleMailWorld,
@@ -155,20 +155,20 @@ pub(crate) fn parse_page_time(
     value: &str,
     operation: MoogleMailOperation,
     world: MoogleMailWorld,
-) -> Result<DateTime<Utc>, MoogleMailError> {
+) -> Result<Timestamp, MoogleMailError> {
     // 游戏页面按 UTC 直接展示邮件时间（2026-10-18 实测：本地 05:14Z 发出的邮件显示 05:14），
     // 不能再按 HVT-8 换算，否则当天邮件整体偏移 +8 小时。
-    let naive =
-        NaiveDateTime::parse_from_str(value, INBOX_TIME_FORMAT).map_err(|diagnostic_cause| {
-            safe_diagnostics::warn(
-                "mooglemail_read",
-                "parse_page_time",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
-            );
-            protocol(operation, world)
-        })?;
-    Ok(naive.and_utc())
+    // 页面时间只到分钟，形如 `2026-10-18 05:14`。
+    let parsed = auction_time::parse_minute_datetime(value).and_then(Timestamp::from_utc_datetime);
+    parsed.ok_or_else(|| {
+        safe_diagnostics::warn(
+            "mooglemail_read",
+            "parse_page_time",
+            safe_diagnostics::category(SafeErrorKind::RESPONSE_PARSE_ERROR),
+            DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+        );
+        protocol(operation, world)
+    })
 }
 
 pub(crate) fn valid_message_body(value: &str) -> bool {

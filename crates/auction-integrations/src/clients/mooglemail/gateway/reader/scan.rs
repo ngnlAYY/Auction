@@ -9,7 +9,7 @@ use auction_application::mail::{
     MailScanAnchor, MailScanEvent, MailScanOutcome, MailScanReason, MailScanStream,
     MailScanWatermark, plan_mail_scan,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use super::super::super::client::MoogleMailReadRound;
 use super::MoogleMailGateway;
@@ -31,7 +31,11 @@ impl MoogleMailGateway {
             .lock()
             .ok()
             .and_then(|checkpoints| checkpoints.get(&(world, stream)).cloned());
-        plan_mail_scan(checkpoint.as_ref(), Utc::now(), self.client.mail_scan_daily_full_interval())
+        plan_mail_scan(
+            checkpoint.as_ref(),
+            Timestamp::now(),
+            self.client.mail_scan_daily_full_interval(),
+        )
     }
 
     /// 只推进进程内检查点；水位不是提交游标，轮询仍以 claim.cursor_value 为锚点。
@@ -40,7 +44,7 @@ impl MoogleMailGateway {
         world: MoogleMailWorld,
         stream: MailScanStream,
         newest: Option<MailScanWatermark>,
-        observed_at: DateTime<Utc>,
+        observed_at: Timestamp,
         full: bool,
     ) {
         let Ok(mut checkpoints) = self.scan_checkpoints.lock() else {

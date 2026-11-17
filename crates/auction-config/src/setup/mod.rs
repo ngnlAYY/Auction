@@ -85,8 +85,9 @@ impl FirstRunConfig {
             ]
             .iter()
             .any(|value| {
-                !chrono::NaiveTime::parse_from_str(value, "%H:%M")
-                    .is_ok_and(|time| time.format("%H:%M").to_string() == value.as_str())
+                !auction_domain::parse_clock_minute(value).is_some_and(|minute| {
+                    format!("{:02}:{:02}", minute / 60, minute % 60) == value.as_str()
+                })
             })
         {
             return Err(FirstRunError::InvalidInput);

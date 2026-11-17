@@ -50,7 +50,7 @@ pub(crate) fn parse_admin_time(value: &str) -> Option<f64> {
 
     #[cfg(not(target_arch = "wasm32"))]
     {
-        chrono::DateTime::parse_from_rfc3339(value)
+        auction_time::Timestamp::parse_from_rfc3339(value)
             .ok()
             .map(|value| value.timestamp_millis() as f64)
     }
@@ -130,11 +130,9 @@ pub(crate) fn datetime_local_value(value: &str) -> Option<String> {
 
     #[cfg(not(target_arch = "wasm32"))]
     {
-        use chrono::Timelike as _;
-
-        chrono::DateTime::parse_from_rfc3339(value).ok().map(|value| {
-            let value = value.with_timezone(&chrono::Utc);
-            format!("{}T{:02}:{:02}", value.date_naive(), value.hour(), value.minute())
+        auction_time::Timestamp::parse_from_rfc3339(value).ok().map(|value| {
+            let utc = value.to_utc_datetime();
+            format!("{}T{:02}:{:02}", utc.date(), utc.hour(), utc.minute())
         })
     }
 }

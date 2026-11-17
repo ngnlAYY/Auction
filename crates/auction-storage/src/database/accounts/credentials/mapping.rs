@@ -7,7 +7,7 @@ use auction_application::admin::{
     AdminCredentialStatus, AdminCredentialWorld,
 };
 use auction_application::core::{ApplicationError, RequestHash};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::{Value, json};
 use sqlx::Row;
 use sqlx::postgres::PgRow;
@@ -109,7 +109,7 @@ pub(super) async fn insert_command(
     request_hash: RequestHash,
     credential_id: Uuid,
     result: &AdminCredentialCommandResult,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<(), ApplicationError> {
     let payload = StoredCredentialPayload {
         credential: result.credential.clone(),
@@ -135,7 +135,7 @@ pub(super) async fn insert_command(
 pub(super) struct CredentialAuditContext<'a> {
     pub actor_id: &'a str,
     pub request_id: Option<&'a str>,
-    pub now: DateTime<Utc>,
+    pub now: Timestamp,
     pub operator_identity: Option<&'a auction_application::core::CliOperatorIdentity>,
 }
 

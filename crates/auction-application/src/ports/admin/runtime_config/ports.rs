@@ -1,7 +1,7 @@
 //! runtime 文件存储、命令账本与配置用例端口。
 
 use auction_domain::CommandId;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use super::{
     commands::{AdminRuntimeAuditRecord, AdminRuntimeReplacement, AdminRuntimeStoredCommand},
@@ -24,7 +24,7 @@ pub trait AdminRuntimeFileStore: Send + Sync {
     fn validate_candidate(
         &self,
         document: &AdminRuntimeDocument,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> Result<(), ApplicationError>;
 
     fn current(&self) -> ApplicationFuture<'_, AdminRuntimeSnapshot>;
@@ -62,7 +62,7 @@ pub trait AdminRuntimeCommandStore: Send + Sync {
         command_id: CommandId,
         request_hash: RequestHash,
         audit: AdminRuntimeAuditRecord,
-        applied_at: DateTime<Utc>,
+        applied_at: Timestamp,
     ) -> ApplicationFuture<'_, AdminRuntimeStoredCommand>;
 
     fn mark_unknown(
@@ -70,14 +70,14 @@ pub trait AdminRuntimeCommandStore: Send + Sync {
         command_id: CommandId,
         request_hash: RequestHash,
         category: String,
-        updated_at: DateTime<Utc>,
+        updated_at: Timestamp,
     ) -> ApplicationFuture<'_, AdminRuntimeStoredCommand>;
 
     fn reopen(
         &self,
         command_id: CommandId,
         request_hash: RequestHash,
-        updated_at: DateTime<Utc>,
+        updated_at: Timestamp,
     ) -> ApplicationFuture<'_, AdminRuntimeStoredCommand>;
 }
 

@@ -5,7 +5,7 @@ use auction_application::admin::{
 };
 use auction_application::core::CompetitionTransactionError;
 use auction_application::core::{ApplicationError, RequestHash};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::{Value, json};
 use sqlx::Row;
 use sqlx::postgres::PgRow;
@@ -62,7 +62,7 @@ pub(super) async fn insert_command_postgres(
     request_hash: RequestHash,
     result: &AdminUserCommandResult,
     user_id: Uuid,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<(), ApplicationError> {
     let response = result.response_envelope.as_ref();
     sqlx::query(
@@ -95,7 +95,7 @@ pub(super) async fn insert_audit_postgres(
     user_id: Uuid,
     actor_id: &str,
     request_id: Option<&str>,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<(), ApplicationError> {
     sqlx::query(
         "INSERT INTO public.audit_records

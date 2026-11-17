@@ -1,13 +1,13 @@
 //! 日历触发、并集日规则与夏令时缺口/回拨的固定期望回归。
 
 use auction_application::scheduling::RecurringSchedule;
-use chrono::{DateTime, SecondsFormat, Utc};
+use auction_time::{SecondsFormat, Timestamp};
 
 use super::{StandardCronSchedule, StandardCronScheduleError};
 
 fn next(expression: &str, now: &str) -> Option<String> {
     let schedule = StandardCronSchedule::parse(expression).unwrap();
-    let now = DateTime::parse_from_rfc3339(now).unwrap().with_timezone(&Utc);
+    let now = Timestamp::parse_from_rfc3339(now).unwrap();
     schedule.next_after(now).map(|next| next.to_rfc3339_opts(SecondsFormat::Secs, true))
 }
 

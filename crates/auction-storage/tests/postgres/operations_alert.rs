@@ -15,7 +15,7 @@ use auction_application::operations::{
     OperationsAlertStore, OperationsAlertTarget, evaluate_snapshot,
 };
 use auction_storage::postgres_expected_migration_version;
-use chrono::Utc;
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use crate::support;
@@ -206,7 +206,7 @@ async fn postgres_operations_alert_new_sources_read_quiet_watermarks() {
 
     // 空库上新增来源的读取查询必须真实执行，并返回零水位而不是来源不可用。
     let snapshot = store
-        .snapshot(Utc::now(), OperationsAlertCollectionOverdueRead::Skip)
+        .snapshot(Timestamp::now(), OperationsAlertCollectionOverdueRead::Skip)
         .await
         .expect("读取告警来源快照");
     let mail = snapshot.mail.expect("收件轮询水位必须可读");
@@ -269,7 +269,7 @@ async fn postgres_host_report_without_drill_dir_keeps_restore_drill_alert() {
     store
         .publish_runtime_status(OperationsAlertRuntimeStatus {
             enabled: true,
-            updated_at: Utc::now(),
+            updated_at: Timestamp::now(),
         })
         .await
         .expect("启用告警");
@@ -293,7 +293,7 @@ async fn postgres_host_report_without_drill_dir_keeps_restore_drill_alert() {
             store
                 .observe_host(OperationsAlertHostObserveCommand {
                     observations: vec![observation],
-                    now: Utc::now(),
+                    now: Timestamp::now(),
                     batch_window: Duration::from_secs(120),
                 })
                 .await
@@ -353,7 +353,7 @@ async fn postgres_payment_mail_unsent_counts_awaiting_payment_after_deadline() {
     let refund_obligation = Uuid::new_v4();
     let command_id = Uuid::new_v4();
     let recovery_id = Uuid::new_v4();
-    let now = Utc::now();
+    let now = Timestamp::now();
 
     sqlx::query(
         "INSERT INTO public.users (id, username, public_key_hash)
@@ -485,8 +485,8 @@ async fn postgres_payment_mail_unsent_counts_awaiting_payment_after_deadline() {
     .bind(payment_obligation)
     .bind(seller_obligation)
     .bind(refund_obligation)
-    .bind(now - chrono::Duration::minutes(5))
-    .bind(now - chrono::Duration::hours(1))
+    .bind(now - auction_time::Duration::minutes(5))
+    .bind(now - auction_time::Duration::hours(1))
     .bind(now)
     .execute(pool)
     .await
@@ -510,7 +510,7 @@ async fn postgres_season_alert_counts_old_outstanding_obligations_before_future_
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
     let pool = store.postgres_pool();
-    let now = Utc::now();
+    let now = Timestamp::now();
     let old_auction = Uuid::new_v4();
     let live_auction = Uuid::new_v4();
     let future_auction = Uuid::new_v4();
@@ -552,7 +552,7 @@ async fn postgres_season_alert_counts_old_outstanding_obligations_before_future_
     .execute(pool)
     .await
     .expect("写入换季测试装备");
-    for (id, status, intake) in [(old_auction, "settled", None::<chrono::DateTime<Utc>>)] {
+    for (id, status, intake) in [(old_auction, "settled", None::<auction_time::Timestamp>)] {
         sqlx::query(
             "INSERT INTO public.auctions
                 (id, world_id, sequence, title, status, scheduled_open_at, preview_scheduled_at,
@@ -617,7 +617,7 @@ async fn postgres_season_alert_counts_old_outstanding_obligations_before_future_
     .bind(i32::try_from(now.timestamp() % 1_000_000).expect("sequence") + 1)
     .bind("season future boundary")
     .bind(now)
-    .bind(now + chrono::Duration::days(1))
+    .bind(now + auction_time::Duration::days(1))
     .bind(&policy)
     .execute(&mut *target_tx)
     .await
@@ -679,7 +679,7 @@ async fn postgres_season_alert_counts_old_outstanding_obligations_before_future_
     let forum = snapshot.forum.expect("论坛快照");
     assert_eq!(forum.remote_page_count, Some(9), "论坛页数只能读取可扫描场次");
     assert_eq!(forum.remote_page_limit, Some(10), "论坛页数必须携带有效上限");
-    let updated_before: chrono::DateTime<Utc> = sqlx::query_scalar(
+    let updated_before: auction_time::Timestamp = sqlx::query_scalar(
         "SELECT updated_at FROM public.auction_forum_sync WHERE auction_id = $1",
     )
     .bind(live_auction)
@@ -690,7 +690,7 @@ async fn postgres_season_alert_counts_old_outstanding_obligations_before_future_
         .record_topic_page_count(auction_domain::AuctionId::from_uuid(live_auction), 10, 10)
         .await
         .expect("推进论坛页数观察");
-    let updated_after: chrono::DateTime<Utc> = sqlx::query_scalar(
+    let updated_after: auction_time::Timestamp = sqlx::query_scalar(
         "SELECT updated_at FROM public.auction_forum_sync WHERE auction_id = $1",
     )
     .bind(live_auction)
@@ -726,7 +726,7 @@ async fn postgres_season_alert_counts_old_outstanding_obligations_before_future_
          WHERE auction_id = $1",
     )
     .bind(live_auction)
-    .bind(now - chrono::Duration::days(8))
+    .bind(now - auction_time::Duration::days(8))
     .execute(pool)
     .await
     .expect("设置过期论坛页数观察");
@@ -869,7 +869,7 @@ async fn postgres_sent_page_count_is_scoped_to_current_credential_and_recent_sca
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
     let pool = store.postgres_pool();
-    let now = Utc::now();
+    let now = Timestamp::now();
     let old_credential = Uuid::new_v4();
     let current_credential = Uuid::new_v4();
     for (id, label, fingerprint, status, version, created_at) in [
@@ -879,7 +879,7 @@ async fn postgres_sent_page_count_is_scoped_to_current_credential_and_recent_sca
             "fingerprint-old",
             "disabled",
             1_i64,
-            now - chrono::Duration::days(2),
+            now - auction_time::Duration::days(2),
         ),
         (current_credential, "current", "fingerprint-current", "active", 2_i64, now),
     ] {
@@ -902,7 +902,7 @@ async fn postgres_sent_page_count_is_scoped_to_current_credential_and_recent_sca
         .expect("写入页数测试凭据");
     }
     for (credential, version, pages, observed_at) in [
-        (old_credential, 1_i64, 99_i32, now - chrono::Duration::days(1)),
+        (old_credential, 1_i64, 99_i32, now - auction_time::Duration::days(1)),
         (current_credential, 2_i64, 16_i32, now),
     ] {
         sqlx::query(
@@ -924,7 +924,7 @@ async fn postgres_sent_page_count_is_scoped_to_current_credential_and_recent_sca
             (mailbox_key, last_poll_at, next_poll_at, consecutive_failures, state_version)
          VALUES ('main', $1, $1, 0, 1)",
     )
-    .bind(now - chrono::Duration::seconds(30))
+    .bind(now - auction_time::Duration::seconds(30))
     .execute(pool)
     .await
     .expect("写入邮件轮询状态");
@@ -944,7 +944,7 @@ async fn postgres_sent_page_count_is_scoped_to_current_credential_and_recent_sca
          WHERE credential_id = $1",
     )
     .bind(current_credential)
-    .bind(now - chrono::Duration::days(8))
+    .bind(now - auction_time::Duration::days(8))
     .execute(pool)
     .await
     .expect("设置过期页数观察");
@@ -978,7 +978,7 @@ async fn postgres_sent_page_count_is_scoped_to_current_credential_and_recent_sca
 
     let mut stale = observation.clone();
     stale.pages_scanned = 3;
-    stale.observed_at = now - chrono::Duration::days(1);
+    stale.observed_at = now - auction_time::Duration::days(1);
     store.record_sent_pages(&stale).await.expect("记录过期页数观察");
     let snapshot = store
         .snapshot(now, OperationsAlertCollectionOverdueRead::Skip)
@@ -1054,10 +1054,10 @@ async fn postgres_operations_alert_webhook_ledger_claims_and_finishes_independen
     .await
     .expect("写入 webhook 来源 signal");
 
-    let now = Utc::now();
+    let now = Timestamp::now();
     let request = auction_application::operations::OperationsAlertWebhookClaimRequest {
         now,
-        lease_until: now + chrono::Duration::seconds(120),
+        lease_until: now + auction_time::Duration::seconds(120),
         template: auction_application::operations::DEFAULT_OPERATIONS_ALERT_WEBHOOK_TEMPLATE
             .to_owned(),
     };
@@ -1075,7 +1075,7 @@ async fn postgres_operations_alert_webhook_ledger_claims_and_finishes_independen
     .expect("读取投递状态");
     assert_eq!(status, "sending");
 
-    let next = now + chrono::Duration::minutes(30);
+    let next = now + auction_time::Duration::minutes(30);
     store
         .finish_webhook(
             dispatch,
@@ -1086,7 +1086,7 @@ async fn postgres_operations_alert_webhook_ledger_claims_and_finishes_independen
         )
         .await
         .expect("写入成功终态");
-    let (status, next_webhook_at): (String, Option<chrono::DateTime<Utc>>) = sqlx::query_as(
+    let (status, next_webhook_at): (String, Option<auction_time::Timestamp>) = sqlx::query_as(
         "SELECT d.status, s.next_webhook_at
          FROM public.operations_alert_webhook_deliveries AS d
          JOIN public.operations_alert_signals AS s ON s.fingerprint = d.fingerprint
@@ -1117,11 +1117,11 @@ async fn postgres_operations_alert_webhook_ledger_claims_and_finishes_independen
     .execute(store.postgres_pool())
     .await
     .expect("写入第二 webhook signal");
-    let now = Utc::now();
+    let now = Timestamp::now();
     let unknown_dispatch = store
         .claim_due_webhook(auction_application::operations::OperationsAlertWebhookClaimRequest {
             now,
-            lease_until: now + chrono::Duration::seconds(120),
+            lease_until: now + auction_time::Duration::seconds(120),
             template: auction_application::operations::DEFAULT_OPERATIONS_ALERT_WEBHOOK_TEMPLATE
                 .to_owned(),
         })
@@ -1138,7 +1138,7 @@ async fn postgres_operations_alert_webhook_ledger_claims_and_finishes_independen
         )
         .await
         .expect("写入未知终态");
-    let (status, next_webhook_at): (String, Option<chrono::DateTime<Utc>>) = sqlx::query_as(
+    let (status, next_webhook_at): (String, Option<auction_time::Timestamp>) = sqlx::query_as(
         "SELECT d.status, s.next_webhook_at
          FROM public.operations_alert_webhook_deliveries AS d
          JOIN public.operations_alert_signals AS s ON s.fingerprint = d.fingerprint
@@ -1165,11 +1165,11 @@ async fn postgres_operations_alert_webhook_ledger_claims_and_finishes_independen
     .execute(store.postgres_pool())
     .await
     .expect("写入租约过期 signal");
-    let now = Utc::now();
+    let now = Timestamp::now();
     let stale_dispatch = store
         .claim_due_webhook(auction_application::operations::OperationsAlertWebhookClaimRequest {
             now,
-            lease_until: now + chrono::Duration::seconds(120),
+            lease_until: now + auction_time::Duration::seconds(120),
             template: auction_application::operations::DEFAULT_OPERATIONS_ALERT_WEBHOOK_TEMPLATE
                 .to_owned(),
         })
@@ -1186,8 +1186,8 @@ async fn postgres_operations_alert_webhook_ledger_claims_and_finishes_independen
     .expect("提前租约");
     let _ = store
         .claim_due_webhook(auction_application::operations::OperationsAlertWebhookClaimRequest {
-            now: Utc::now(),
-            lease_until: Utc::now() + chrono::Duration::seconds(120),
+            now: Timestamp::now(),
+            lease_until: Timestamp::now() + auction_time::Duration::seconds(120),
             template: auction_application::operations::DEFAULT_OPERATIONS_ALERT_WEBHOOK_TEMPLATE
                 .to_owned(),
         })
@@ -1222,11 +1222,11 @@ async fn postgres_operations_alert_webhook_retry_uses_signal_kind_without_payloa
     .execute(store.postgres_pool())
     .await
     .expect("写入重试 signal");
-    let now = Utc::now();
-    let request = |now: chrono::DateTime<Utc>| {
+    let now = Timestamp::now();
+    let request = |now: auction_time::Timestamp| {
         auction_application::operations::OperationsAlertWebhookClaimRequest {
             now,
-            lease_until: now + chrono::Duration::seconds(120),
+            lease_until: now + auction_time::Duration::seconds(120),
             template: "{\"format\":\"auction-operations-alert.v1\",\"source\":\"{source}\"}"
                 .to_owned(),
         }
@@ -1234,7 +1234,7 @@ async fn postgres_operations_alert_webhook_retry_uses_signal_kind_without_payloa
     let dispatch =
         store.claim_due_webhook(request(now)).await.expect("领取重试 signal").expect("到期");
     assert_eq!(dispatch.kind, OperationsAlertKind::ServiceMissing);
-    let retry_at = now + chrono::Duration::seconds(2);
+    let retry_at = now + auction_time::Duration::seconds(2);
     store
         .finish_webhook(
             dispatch,
@@ -1246,7 +1246,7 @@ async fn postgres_operations_alert_webhook_retry_uses_signal_kind_without_payloa
         .await
         .expect("写入可重试终态");
     let retried = store
-        .claim_due_webhook(request(retry_at + chrono::Duration::seconds(1)))
+        .claim_due_webhook(request(retry_at + auction_time::Duration::seconds(1)))
         .await
         .expect("领取重试")
         .expect("pending 行应重新到期");
@@ -1257,7 +1257,7 @@ async fn postgres_operations_alert_webhook_retry_uses_signal_kind_without_payloa
             retried,
             auction_application::operations::OperationsAlertWebhookFinish {
                 outcome: auction_application::operations::OperationsAlertWebhookOutcome::Succeeded,
-                next_webhook_at: Some(retry_at + chrono::Duration::minutes(30)),
+                next_webhook_at: Some(retry_at + auction_time::Duration::minutes(30)),
             },
         )
         .await
@@ -1284,11 +1284,11 @@ async fn postgres_operations_alert_webhook_respects_silence_window() {
     .expect("写入待静默 signal");
 
     // 先完成一次成功投递，模拟“已成功提醒后”被静默的 signal。
-    let first_now = Utc::now();
+    let first_now = Timestamp::now();
     let first = store
         .claim_due_webhook(auction_application::operations::OperationsAlertWebhookClaimRequest {
             now: first_now,
-            lease_until: first_now + chrono::Duration::seconds(120),
+            lease_until: first_now + auction_time::Duration::seconds(120),
             template: auction_application::operations::DEFAULT_OPERATIONS_ALERT_WEBHOOK_TEMPLATE
                 .to_owned(),
         })
@@ -1300,7 +1300,7 @@ async fn postgres_operations_alert_webhook_respects_silence_window() {
             first,
             auction_application::operations::OperationsAlertWebhookFinish {
                 outcome: auction_application::operations::OperationsAlertWebhookOutcome::Succeeded,
-                next_webhook_at: Some(first_now + chrono::Duration::seconds(1)),
+                next_webhook_at: Some(first_now + auction_time::Duration::seconds(1)),
             },
         )
         .await
@@ -1321,15 +1321,15 @@ async fn postgres_operations_alert_webhook_respects_silence_window() {
         .silenced_until
         .expect("静默结果必须带截止时间");
 
-    let during_silence = silenced_until - chrono::Duration::seconds(60);
-    let after_silence = silenced_until + chrono::Duration::seconds(1);
+    let during_silence = silenced_until - auction_time::Duration::seconds(60);
+    let after_silence = silenced_until + auction_time::Duration::seconds(1);
     assert!(during_silence < silenced_until, "测试时钟必须落在静默窗口内");
     assert!(
         store
             .claim_due_webhook(
                 auction_application::operations::OperationsAlertWebhookClaimRequest {
                     now: during_silence,
-                    lease_until: during_silence + chrono::Duration::seconds(120),
+                    lease_until: during_silence + auction_time::Duration::seconds(120),
                     template:
                         auction_application::operations::DEFAULT_OPERATIONS_ALERT_WEBHOOK_TEMPLATE
                             .to_owned(),
@@ -1345,7 +1345,7 @@ async fn postgres_operations_alert_webhook_respects_silence_window() {
             .claim_due_webhook(
                 auction_application::operations::OperationsAlertWebhookClaimRequest {
                     now: after_silence,
-                    lease_until: after_silence + chrono::Duration::seconds(120),
+                    lease_until: after_silence + auction_time::Duration::seconds(120),
                     template:
                         auction_application::operations::DEFAULT_OPERATIONS_ALERT_WEBHOOK_TEMPLATE
                             .to_owned(),
@@ -1380,17 +1380,17 @@ async fn postgres_operations_alert_claim_keeps_active_summary_and_enqueue_preser
     .await
     .expect("写入活动紧急 signal");
 
-    let request = |now: chrono::DateTime<Utc>| OperationsAlertClaimRequest {
+    let request = |now: auction_time::Timestamp| OperationsAlertClaimRequest {
         target: OperationsAlertTarget {
             world_id: "main".to_owned(),
             recipient: "operator".to_owned(),
         },
         now,
-        lease_until: now + chrono::Duration::seconds(120),
+        lease_until: now + auction_time::Duration::seconds(120),
         max_items: 20,
         max_body_bytes: 4_096,
     };
-    let now = Utc::now();
+    let now = Timestamp::now();
     let claim = store
         .claim_due_batch(request(now))
         .await
@@ -1422,8 +1422,8 @@ async fn postgres_operations_alert_claim_keeps_active_summary_and_enqueue_preser
         .expect("静默结果必须带截止时间");
     store.mark_enqueued(claim, Duration::from_secs(1_800)).await.expect("确认入队");
     let (stored_silenced_until, next_notify_at): (
-        Option<chrono::DateTime<Utc>>,
-        Option<chrono::DateTime<Utc>>,
+        Option<auction_time::Timestamp>,
+        Option<auction_time::Timestamp>,
     ) = sqlx::query_as(
         "SELECT silenced_until, next_notify_at
          FROM public.operations_alert_signals WHERE fingerprint = $1",
@@ -1433,7 +1433,7 @@ async fn postgres_operations_alert_claim_keeps_active_summary_and_enqueue_preser
     .await
     .expect("读取静默与重复通知时间");
     assert_eq!(
-        stored_silenced_until.map(|at| at.timestamp_micros()),
+        stored_silenced_until.map(auction_time::Timestamp::timestamp_micros),
         Some(silenced_until.timestamp_micros()),
         "静默截止时间不得被入队确认改写"
     );
@@ -1445,7 +1445,7 @@ async fn postgres_operations_alert_claim_keeps_active_summary_and_enqueue_preser
     );
     assert!(
         store
-            .claim_due_batch(request(silenced_until_db - chrono::Duration::seconds(60)))
+            .claim_due_batch(request(silenced_until_db - auction_time::Duration::seconds(60)))
             .await
             .expect("静默窗口内领取")
             .is_none(),
@@ -1453,7 +1453,7 @@ async fn postgres_operations_alert_claim_keeps_active_summary_and_enqueue_preser
     );
     assert!(
         store
-            .claim_due_batch(request(silenced_until_db + chrono::Duration::seconds(1)))
+            .claim_due_batch(request(silenced_until_db + auction_time::Duration::seconds(1)))
             .await
             .expect("静默到期后领取")
             .is_some(),
@@ -1479,11 +1479,11 @@ async fn postgres_operations_alert_webhook_retry_exhausted_is_terminal_failure()
     .execute(store.postgres_pool())
     .await
     .expect("写入耗尽 signal");
-    let now = Utc::now();
+    let now = Timestamp::now();
     let dispatch = store
         .claim_due_webhook(auction_application::operations::OperationsAlertWebhookClaimRequest {
             now,
-            lease_until: now + chrono::Duration::seconds(120),
+            lease_until: now + auction_time::Duration::seconds(120),
             template: auction_application::operations::DEFAULT_OPERATIONS_ALERT_WEBHOOK_TEMPLATE
                 .to_owned(),
         })
@@ -1518,8 +1518,8 @@ async fn postgres_operations_alert_webhook_retry_exhausted_is_terminal_failure()
 async fn postgres_mail_poller_paused_since_ignores_forced_poll_updates() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
-    let paused_at = Utc::now() - chrono::Duration::hours(2);
-    let last_poll_at = Utc::now() - chrono::Duration::minutes(5);
+    let paused_at = Timestamp::now() - auction_time::Duration::hours(2);
+    let last_poll_at = Timestamp::now() - auction_time::Duration::minutes(5);
     sqlx::query(
         "INSERT INTO public.mail_poll_state
             (mailbox_key, last_poll_at, next_poll_at, consecutive_failures,
@@ -1527,8 +1527,8 @@ async fn postgres_mail_poller_paused_since_ignores_forced_poll_updates() {
          VALUES ('main-mailbox', $1, $2, 0, true, 1, $3)",
     )
     .bind(last_poll_at)
-    .bind(last_poll_at + chrono::Duration::minutes(1))
-    .bind(Utc::now())
+    .bind(last_poll_at + auction_time::Duration::minutes(1))
+    .bind(Timestamp::now())
     .execute(store.postgres_pool())
     .await
     .expect("写入暂停轮询器");
@@ -1554,7 +1554,7 @@ async fn postgres_mail_poller_paused_since_ignores_forced_poll_updates() {
     sqlx::query(
         "UPDATE public.mail_poll_state SET updated_at = $1 WHERE mailbox_key = 'main-mailbox'",
     )
-    .bind(Utc::now())
+    .bind(Timestamp::now())
     .execute(store.postgres_pool())
     .await
     .expect("模拟强制轮询更新时间");
@@ -1584,14 +1584,14 @@ async fn postgres_webhook_generation_allows_new_incident_after_manual_reconcile(
     .execute(store.postgres_pool())
     .await
     .expect("写入首个活动周期 signal");
-    let request = |now: chrono::DateTime<Utc>| {
+    let request = |now: auction_time::Timestamp| {
         auction_application::operations::OperationsAlertWebhookClaimRequest {
             now,
-            lease_until: now + chrono::Duration::seconds(120),
+            lease_until: now + auction_time::Duration::seconds(120),
             template: "{\"format\":\"auction-operations-alert.v1\"}".to_owned(),
         }
     };
-    let now = Utc::now();
+    let now = Timestamp::now();
     let first = store
         .claim_due_webhook(request(now))
         .await
@@ -1632,7 +1632,7 @@ async fn postgres_webhook_generation_allows_new_incident_after_manual_reconcile(
         )
         .await
         .expect("把旧周期结果标为未知");
-    let next_webhook_at: Option<chrono::DateTime<Utc>> = sqlx::query_scalar(
+    let next_webhook_at: Option<auction_time::Timestamp> = sqlx::query_scalar(
         "SELECT next_webhook_at FROM public.operations_alert_signals WHERE fingerprint = $1",
     )
     .bind(fingerprint.as_slice())
@@ -1642,7 +1642,7 @@ async fn postgres_webhook_generation_allows_new_incident_after_manual_reconcile(
     assert!(next_webhook_at.is_some(), "旧周期完成后不得清空新周期的 next_webhook_at");
 
     let second = store
-        .claim_due_webhook(request(Utc::now()))
+        .claim_due_webhook(request(Timestamp::now()))
         .await
         .expect("领取新周期 webhook")
         .expect("上一周期 manual_reconcile 不得阻断新周期");
@@ -1763,17 +1763,17 @@ async fn postgres_operations_alert_new_batch_counts_created_once_and_reclaim_doe
     let counter = std::sync::Arc::new(CreatedCounter::default());
     let service =
         database.store().await.expect("以运行账号连接").with_notification_recorder(counter.clone());
-    let request = |now: chrono::DateTime<Utc>| OperationsAlertClaimRequest {
+    let request = |now: auction_time::Timestamp| OperationsAlertClaimRequest {
         target: OperationsAlertTarget {
             world_id: "main".to_owned(),
             recipient: "operator".to_owned(),
         },
         now,
-        lease_until: now + chrono::Duration::seconds(120),
+        lease_until: now + auction_time::Duration::seconds(120),
         max_items: 20,
         max_body_bytes: 4_096,
     };
-    let now = Utc::now();
+    let now = Timestamp::now();
     let first = service
         .claim_due_batch(request(now))
         .await
@@ -1786,7 +1786,7 @@ async fn postgres_operations_alert_new_batch_counts_created_once_and_reclaim_doe
 
     // 租约到期后重新领取：同一批次、同一投递，不得再计创建。
     let reclaimed = service
-        .claim_due_batch(request(now + chrono::Duration::seconds(121)))
+        .claim_due_batch(request(now + auction_time::Duration::seconds(121)))
         .await
         .expect("重新领取")
         .expect("租约到期的批次必须可重新领取");
@@ -1816,7 +1816,7 @@ async fn postgres_operations_alert_acknowledge_replays_and_rejects_identity_reus
     .execute(store.postgres_pool())
     .await
     .expect("写入待确认 signal");
-    let next_notify_before: chrono::DateTime<Utc> = sqlx::query_scalar(
+    let next_notify_before: auction_time::Timestamp = sqlx::query_scalar(
         "SELECT next_notify_at FROM public.operations_alert_signals WHERE fingerprint = $1",
     )
     .bind(fingerprint.as_slice())
@@ -1870,8 +1870,8 @@ async fn postgres_operations_alert_acknowledge_replays_and_rejects_identity_reus
 
     let (acknowledged_by, silenced_until, next_notify_after): (
         Option<String>,
-        Option<chrono::DateTime<Utc>>,
-        chrono::DateTime<Utc>,
+        Option<auction_time::Timestamp>,
+        auction_time::Timestamp,
     ) = sqlx::query_as(
         "SELECT acknowledged_by, silenced_until, next_notify_at
          FROM public.operations_alert_signals WHERE fingerprint = $1",
@@ -1900,13 +1900,13 @@ async fn postgres_operations_alert_acknowledge_replays_and_rejects_identity_reus
 async fn postgres_admin_mail_poll_state_reads_paused_mailbox() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
-    let now = Utc::now();
+    let now = Timestamp::now();
     sqlx::query(
         "INSERT INTO public.mail_poll_state
             (mailbox_key, last_poll_at, next_poll_at, consecutive_failures, paused, state_version)
          VALUES ('main', $1, $1, 2, true, 3)",
     )
-    .bind(now - chrono::Duration::seconds(30))
+    .bind(now - auction_time::Duration::seconds(30))
     .execute(store.postgres_pool())
     .await
     .expect("写入暂停的轮询状态");
@@ -1936,7 +1936,7 @@ async fn insert_console_signal(
 ) -> [u8; 32] {
     let fingerprint = [marker; 32];
     let (kind, scope, source) = identity;
-    let last_seen_at = Utc::now() - chrono::Duration::minutes(seen_minutes_ago);
+    let last_seen_at = Timestamp::now() - auction_time::Duration::minutes(seen_minutes_ago);
     sqlx::query(
         "INSERT INTO public.operations_alert_signals
             (fingerprint, kind, scope, source, active, first_seen_at, last_seen_at, resolved_at,
@@ -1975,7 +1975,7 @@ async fn postgres_alert_console_lists_each_status_with_active_and_resolved_signa
     let list = |filter, source, page, page_size| {
         store.list_alerts(
             OperationsAlertConsoleQuery { filter, source, page, page_size },
-            Utc::now(),
+            Timestamp::now(),
         )
     };
     let fingerprints = |page: &auction_application::operations::OperationsAlertConsolePage| {

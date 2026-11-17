@@ -5,7 +5,7 @@
 //! 不改变 kind/scope/source/count/age/active，也不跳过阈值评估；到期后重复通知自然恢复。
 
 use auction_domain::{valid_text, valid_text_allow_empty};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use super::signals::{
@@ -105,16 +105,16 @@ pub struct OperationsAlertConsoleEntry {
     pub active: bool,
     pub count: i64,
     pub age_seconds: i64,
-    pub first_seen_at: DateTime<Utc>,
-    pub last_seen_at: DateTime<Utc>,
-    pub resolved_at: Option<DateTime<Utc>>,
-    pub last_notified_at: Option<DateTime<Utc>>,
-    pub next_notify_at: Option<DateTime<Utc>>,
+    pub first_seen_at: Timestamp,
+    pub last_seen_at: Timestamp,
+    pub resolved_at: Option<Timestamp>,
+    pub last_notified_at: Option<Timestamp>,
+    pub next_notify_at: Option<Timestamp>,
     /// 当前活动周期内最近一次操作者确认；signal 恢复后再次出现时由存储层清空。
-    pub acknowledged_at: Option<DateTime<Utc>>,
+    pub acknowledged_at: Option<Timestamp>,
     pub acknowledged_by: Option<String>,
     /// 当前活动周期内最近一次静默到期时间；到期后字段仍保留到下一个周期。
-    pub silenced_until: Option<DateTime<Utc>>,
+    pub silenced_until: Option<Timestamp>,
 }
 
 impl OperationsAlertConsoleEntry {
@@ -324,7 +324,7 @@ pub struct OperationsAlertCommandResult {
     pub command_id: Uuid,
     pub fingerprint: [u8; 32],
     pub action: String,
-    pub silenced_until: Option<DateTime<Utc>>,
+    pub silenced_until: Option<Timestamp>,
     pub replayed: bool,
 }
 
@@ -333,7 +333,7 @@ pub trait OperationsAlertConsole: Send + Sync {
     fn list_alerts(
         &self,
         query: OperationsAlertConsoleQuery,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> ApplicationFuture<'_, OperationsAlertConsolePage>;
 
     fn acknowledge_alert(
@@ -364,11 +364,11 @@ pub struct OperationsAlertWebhookEntry {
     pub scope: String,
     pub source: OperationsAlertSource,
     pub attempt_count: u32,
-    pub next_attempt_at: Option<DateTime<Utc>>,
-    pub sending_at: Option<DateTime<Utc>>,
-    pub completed_at: Option<DateTime<Utc>>,
+    pub next_attempt_at: Option<Timestamp>,
+    pub sending_at: Option<Timestamp>,
+    pub completed_at: Option<Timestamp>,
     pub failure_code: Option<String>,
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
 }
 
 /// 单次运营视图最多返回的 webhook 投递数。

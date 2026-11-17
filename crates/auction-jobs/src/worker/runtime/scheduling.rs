@@ -2,7 +2,7 @@
 
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticDisposition};
 use auction_observability::{WorkerLoop, WorkerRecorder, WorkerResult, WorkerRetryKind};
-use chrono::Duration as ChronoDuration;
+use auction_time::TimeDelta;
 use tokio::task::JoinSet;
 
 use super::error::WorkerError;
@@ -71,10 +71,10 @@ pub(crate) async fn wait_while_paused(shutdown: &mut tokio::sync::watch::Receive
     wait_until_or_shutdown(shutdown, tokio::time::Instant::now() + PAUSE_REREAD_INTERVAL).await
 }
 
-pub(super) fn retry_delay(attempt_count: u32) -> ChronoDuration {
+pub(super) fn retry_delay(attempt_count: u32) -> TimeDelta {
     let exponent = attempt_count.saturating_sub(1).min(8);
     let seconds = 5_u64.saturating_mul(1_u64 << exponent).min(15 * 60);
-    ChronoDuration::seconds(i64::try_from(seconds).unwrap_or(15 * 60))
+    TimeDelta::seconds(i64::try_from(seconds).unwrap_or(15 * 60))
 }
 
 /// 合并批次内任务结果；取消优先于错误，错误优先于成功。

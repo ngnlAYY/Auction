@@ -11,7 +11,7 @@ auction-contracts.workspace = true
 auction-web-shared.workspace = true
 dioxus = { workspace = true, features = ["router"] }
 dioxus-i18n.workspace = true
-chrono.workspace = true
+auction-time.workspace = true
 futures-util.workspace = true
 # Public 同时使用 HTTP/JSON 与实时 WebSocket。
 gloo-net = { workspace = true, features = ["json", "websocket"] }

@@ -1,6 +1,6 @@
 //! 已保存外部 Cookie 的只读认证探测契约；不改变凭据状态或命令账本。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use crate::ports::admin::{
@@ -49,7 +49,7 @@ pub struct AdminCredentialCheckObservation {
 pub struct AdminCredentialCheckResult {
     pub credential_id: Uuid,
     pub state_version: i64,
-    pub checked_at: DateTime<Utc>,
+    pub checked_at: Timestamp,
     pub checks: Vec<AdminCredentialCheckObservation>,
 }
 

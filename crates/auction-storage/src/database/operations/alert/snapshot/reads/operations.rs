@@ -6,7 +6,7 @@ use auction_application::operations::{
 };
 use auction_application::reconciliation::AssetReconciliationStore;
 use auction_observability::{HeartbeatStatus, HeartbeatStore, ServiceName, TracingStatus};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Row;
 
 use super::age_seconds;
@@ -68,7 +68,7 @@ pub(super) async fn process_snapshot(
 
 pub(super) async fn lifecycle_snapshot(
     pool: &crate::database::TrackedPool<sqlx::Postgres>,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<OperationsAlertLifecycleSnapshot, ApplicationError> {
     // 两个 owner 事实：结束时间已过的 live 场次（应进入 Final），以及到期未执行的慢速代理。
     let row = sqlx::query(
@@ -142,7 +142,7 @@ pub(super) async fn lifecycle_snapshot(
 /// 只读取最近追加的两类报告；报告缺失时保持 `None`，evaluator 明确降级。
 pub(super) async fn reconciliation_snapshot(
     store: &crate::database::DatabaseStore,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<auction_application::operations::OperationsAlertReconciliationSnapshot, ApplicationError>
 {
     let reports = store.latest_asset_reports().await?;

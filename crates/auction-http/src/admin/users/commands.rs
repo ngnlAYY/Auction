@@ -11,6 +11,7 @@ use auction_contracts::{
     AdminRenameRevertRequest, AdminUserCreateRequest, AdminUserMutationRequest,
     AdminUserMutationResponse, ApiResponse,
 };
+use auction_time::Timestamp;
 use axum::{
     Json,
     body::Bytes,
@@ -18,7 +19,6 @@ use axum::{
     http::{HeaderMap, StatusCode, Uri},
     response::{IntoResponse, Response},
 };
-use chrono::Utc;
 
 use super::{boundary, map_user};
 use crate::middleware::boundary::request_id;
@@ -86,7 +86,7 @@ pub(crate) async fn create(
             manual_key,
             actor_id: identity.actor,
             request_id: request_id(&headers),
-            now: Utc::now(),
+            now: Timestamp::now(),
         })
         .await
     {
@@ -151,7 +151,7 @@ pub(crate) async fn mutate(
             public_reason: None,
             actor_id: identity.actor,
             request_id: request_id(&headers),
-            now: Utc::now(),
+            now: Timestamp::now(),
         })
         .await
     {
@@ -206,7 +206,7 @@ pub(crate) async fn revert_rename(
             expected_state_version: input.expected_state_version,
             actor_id: identity.actor,
             request_id: request_id(&headers),
-            now: Utc::now(),
+            now: Timestamp::now(),
         })
         .await
     {

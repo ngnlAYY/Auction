@@ -31,15 +31,9 @@ impl DiagnosticError for std::io::Error {
     }
 }
 
-impl DiagnosticError for chrono::OutOfRangeError {
+impl DiagnosticError for auction_time::OutOfRangeError {
     fn diagnostic_kind(&self) -> SafeErrorKind {
         SafeErrorKind::CONFIGURATION_INVALID
-    }
-}
-
-impl DiagnosticError for chrono_tz::ParseError {
-    fn diagnostic_kind(&self) -> SafeErrorKind {
-        SafeErrorKind::DOMAIN_REJECTED
     }
 }
 
@@ -117,7 +111,7 @@ impl<T> DiagnosticError for std::sync::PoisonError<T> {
     }
 }
 
-impl DiagnosticError for chrono::ParseError {
+impl DiagnosticError for auction_time::ParseError {
     fn diagnostic_kind(&self) -> SafeErrorKind {
         SafeErrorKind::DOMAIN_REJECTED
     }

@@ -266,12 +266,12 @@ mod tests {
         DeliveryAdminObligation, DeliveryAdminRecovery, DeliveryAdminSentEvidence,
         DeliveryAdminSnapshot, DeliverySendCredentialBinding,
     };
-    use chrono::{TimeZone, Utc};
+    use auction_time::Timestamp;
 
     use super::*;
 
-    fn time() -> chrono::DateTime<Utc> {
-        Utc.with_ymd_and_hms(2026, 11, 2, 1, 14, 0).single().expect("timestamp")
+    fn time() -> auction_time::Timestamp {
+        Timestamp::from_ymd_hms(2026, 11, 2, 1, 14, 0).expect("timestamp")
     }
 
     fn detail() -> DeliveryAdminDetail {

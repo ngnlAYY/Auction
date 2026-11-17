@@ -345,7 +345,7 @@ fn deploy_receipt_is_readable_from_retained_record_id() {
         record.deploy_receipt_id,
         Action::Deploy,
         Outcome::Succeeded,
-        chrono::Utc::now(),
+        auction_time::Timestamp::now(),
         &context,
         None,
         Vec::new(),
@@ -664,7 +664,7 @@ fn install_failure_receipt_records_the_actual_install_dir() {
         state: &state,
         receipt_id: record.deploy_receipt_id,
         action: Action::Deploy,
-        started_at: chrono::Utc::now(),
+        started_at: auction_time::Timestamp::now(),
         context: &context,
         deploy: &deploy,
     };
@@ -694,8 +694,9 @@ fn set_created_at(
     minutes: i64,
 ) -> RollbackRecord {
     let mut updated = record.clone();
-    updated.created_at = chrono::DateTime::from_timestamp(1_790_000_000, 0).expect("固定时间")
-        + chrono::Duration::minutes(minutes);
+    updated.created_at = auction_time::Timestamp::from_timestamp(1_790_000_000, 0)
+        .expect("固定时间")
+        + auction_time::Duration::minutes(minutes);
     let path = record_dir(&state.path, record.record_id).join("record.json");
     fs::write(&path, serde_json::to_vec_pretty(&updated).expect("序列化")).expect("改写记录");
     updated

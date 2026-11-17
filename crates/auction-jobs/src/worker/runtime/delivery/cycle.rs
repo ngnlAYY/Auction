@@ -12,7 +12,7 @@ use auction_application::delivery::{
 };
 use auction_application::operations::CriticalWriteKind;
 use auction_observability::{WorkerLoop, WorkerResult, WorkerRetryKind};
-use chrono::Duration as ChronoDuration;
+use auction_time::TimeDelta;
 use tokio::task::JoinSet;
 
 use super::dispatch::process_delivery_claim;
@@ -54,7 +54,7 @@ where
         let delivery = worker.delivery_runtime();
         let effective_concurrency = usize::from(transport_concurrency.min(delivery.batch_limit));
         let delivery_started = std::time::Instant::now();
-        let delivery_lease = ChronoDuration::from_std(delivery.lease_duration)
+        let delivery_lease = TimeDelta::from_std(delivery.lease_duration)
             .map_err(|_| WorkerError::InvalidDeliveryConfiguration)?;
         let mut delivery_count = 0usize;
         let mut delivery_result = WorkerResult::Success;

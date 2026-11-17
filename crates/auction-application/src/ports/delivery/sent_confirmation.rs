@@ -3,7 +3,7 @@
 //! 两种准入：结果未知（`manual_reconcile`/`write_unknown`）的发送，以及被 Admin 对账为失败、
 //! 但原生 Sent 证明实际已寄出的发送。后者只追加更正事实，原失败命令与审计保持不变。
 
-use chrono::{DateTime, Timelike, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -23,8 +23,8 @@ pub struct ManualSentEvidence {
     pub sender_name: String,
     pub recipient: String,
     pub subject: String,
-    pub sent_minute: DateTime<Utc>,
-    pub observed_at: DateTime<Utc>,
+    pub sent_minute: Timestamp,
+    pub observed_at: Timestamp,
     pub original_body_digest: [u8; 32],
     pub observed_body_digest: [u8; 32],
     pub remaining_credits: i64,
@@ -44,8 +44,8 @@ impl ManualSentEvidence {
             || !crate::ports::admin::valid_mail_player_name(&self.sender_name)
             || !crate::ports::admin::valid_mail_player_name(&self.recipient)
             || !auction_domain::valid_text(&self.subject, 512)
-            || self.sent_minute.second() != 0
-            || self.sent_minute.nanosecond() != 0
+            || self.sent_minute.to_utc_datetime().second() != 0
+            || self.sent_minute.timestamp_subsec_nanos() != 0
             || self.sent_minute.timestamp_nanos_opt().is_none()
             || self.observed_at.timestamp_nanos_opt().is_none()
             || self.observed_at < self.sent_minute

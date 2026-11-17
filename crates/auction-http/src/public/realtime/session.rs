@@ -4,7 +4,7 @@ use std::{sync::Arc, time::Duration};
 
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_application::public::{PublicSessionIdentity, PublicSessionPort};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use tokio::time::timeout;
 use uuid::Uuid;
 
@@ -24,7 +24,7 @@ pub(super) struct RealtimeSession {
     service: Arc<dyn PublicSessionPort>,
     raw_token: String,
     user_id: Uuid,
-    expires_at: Option<DateTime<Utc>>,
+    expires_at: Option<Timestamp>,
 }
 
 impl RealtimeSession {
@@ -44,14 +44,16 @@ impl RealtimeSession {
     /// 到期时重新读取，允许账号设置已修改期限；永久会话也定期复核撤销状态。
     pub(super) fn next_check_delay(&self) -> Duration {
         self.expires_at.map_or(SESSION_CHECK_INTERVAL, |expires_at| {
-            (expires_at - Utc::now()).to_std().unwrap_or_default().min(SESSION_CHECK_INTERVAL)
+            (expires_at - Timestamp::now()).to_std().unwrap_or_default().min(SESSION_CHECK_INTERVAL)
         })
     }
 
     pub(super) async fn recheck(&mut self) -> Result<(), SessionCheckError> {
-        let result =
-            timeout(SESSION_CHECK_WAIT, self.service.inspect(self.raw_token.clone(), Utc::now()))
-                .await;
+        let result = timeout(
+            SESSION_CHECK_WAIT,
+            self.service.inspect(self.raw_token.clone(), Timestamp::now()),
+        )
+        .await;
         let identity = match result {
             Ok(Ok(identity)) => identity,
             Ok(Err(error)) if is_unauthenticated(&error) => {
@@ -76,7 +78,7 @@ impl RealtimeSession {
                 return Err(SessionCheckError::Unavailable);
             }
         };
-        let now = Utc::now();
+        let now = Timestamp::now();
         if identity.user_id != self.user_id
             || identity.expires_at.is_some() != identity.absolute_expires_at.is_some()
             || identity.expires_at.is_some_and(|expires_at| expires_at <= now)

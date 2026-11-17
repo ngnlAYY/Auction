@@ -2,7 +2,7 @@
 
 use auction_application::core::CompetitionTransactionError;
 use auction_domain::{AcceptedBid, BidAmount, CompetitionPlan, ProxyAuthorizationId};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use crate::database::auction::competition::PostgresCompetitionTransaction;
 use crate::database::auction::competition::mapping::{
@@ -12,7 +12,7 @@ use crate::database::auction::competition::mapping::{
 pub(in crate::database::auction::competition) async fn insert_bid(
     transaction: &mut PostgresCompetitionTransaction,
     bid: &AcceptedBid,
-    occurred_at: DateTime<Utc>,
+    occurred_at: Timestamp,
 ) -> Result<(), CompetitionTransactionError> {
     let event_id = crate::database::lot_watch::bid_event(bid);
     {
@@ -48,7 +48,7 @@ pub(in crate::database::auction::competition) async fn insert_bid(
 pub(in crate::database::auction::competition) async fn update_lot(
     transaction: &mut PostgresCompetitionTransaction,
     plan: &CompetitionPlan,
-    occurred_at: DateTime<Utc>,
+    occurred_at: Timestamp,
 ) -> Result<(), CompetitionTransactionError> {
     let previous_version = plan
         .final_lot

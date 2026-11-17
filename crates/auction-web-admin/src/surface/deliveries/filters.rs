@@ -1,7 +1,7 @@
 //! Delivery 检索筛选器组件：状态 + 收件人、参考编号、模板、类别、世界与时间。
 
+use auction_time::SecondsFormat;
 use auction_web_shared::t;
-use chrono::{SecondsFormat, Utc};
 use dioxus::prelude::*;
 
 use super::labels::{DELIVERY_STATUS_VALUES, delivery_category_label, delivery_status_label};
@@ -30,9 +30,9 @@ fn timestamp_to_local_input(value: &str) -> String {
 
 /// 浏览器本地分钟 → 服务端接受的 UTC RFC3339（秒精度）；空串或无法换算时视为不设界。
 fn local_input_to_timestamp(value: &str) -> String {
-    chrono::DateTime::parse_from_rfc3339(&normalize_datetime(value))
+    auction_time::Timestamp::parse_from_rfc3339(&normalize_datetime(value))
         .ok()
-        .map(|value| value.with_timezone(&Utc).to_rfc3339_opts(SecondsFormat::Secs, true))
+        .map(|value| value.to_rfc3339_opts(SecondsFormat::Secs, true))
         .unwrap_or_default()
 }
 

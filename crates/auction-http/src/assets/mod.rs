@@ -259,8 +259,8 @@ mod tests {
 
     #[test]
     fn http_dates_format_as_imf_fixdate_and_parse_all_three_rfc_9110_forms() {
-        let expected = chrono::DateTime::from_timestamp(784_111_777, 0).unwrap();
-        assert_eq!(expected.format(IMF_FIXDATE).to_string(), "Sun, 06 Nov 1994 08:49:37 GMT");
+        let expected = auction_time::Timestamp::from_timestamp(784_111_777, 0).unwrap();
+        assert_eq!(expected.strftime(IMF_FIXDATE).to_string(), "Sun, 06 Nov 1994 08:49:37 GMT");
         for value in [
             "Sun, 06 Nov 1994 08:49:37 GMT",
             "Sunday, 06-Nov-94 08:49:37 GMT",

@@ -54,7 +54,7 @@ use auction_storage::{
     DatabaseAuctionLifecycleCommands, DatabaseCompetitionCommands, DatabaseSettlementCommands,
     DatabaseStore,
 };
-use chrono::{DateTime, Duration, Timelike, Utc};
+use auction_time::{Duration, Timestamp};
 use uuid::Uuid;
 
 use crate::support;
@@ -71,13 +71,13 @@ struct Seeded {
     sold_lot: Uuid,
     unsold_lot: Uuid,
     bidders: [Uuid; 2],
-    deadline: DateTime<Utc>,
+    deadline: Timestamp,
 }
 
 /// 写入一场 live 场次与两件带寄售来源的 lot；只写夹具，不经过被测端口。
 async fn seed(admin: &DatabaseStore) -> Seeded {
     let pool = admin.postgres_pool();
-    let deadline = Utc::now() + Duration::hours(2);
+    let deadline = Timestamp::now() + Duration::hours(2);
     let opened = deadline - Duration::hours(4);
     let auction_id = stable_id(SEED, "auction");
     sqlx::query(
@@ -239,7 +239,7 @@ struct Settled {
     command: SettleAuctionCommand,
     plan: SettlementPlan,
     settlements: DatabaseSettlementCommands,
-    now: DateTime<Utc>,
+    now: Timestamp,
 }
 
 /// 经生产端口完成出价、进入 Final、领取与结算，全部以运行账号提交；返回尚未完成 fence 的领取。
@@ -279,7 +279,7 @@ async fn settle_through_ports(
     let claim = claims.pop().expect("结算领取");
     assert_eq!(claim.auction_id.as_uuid(), seeded.auction_id);
     // 进入 Final 会重设 lot 有效截止；领取冻结的世代必须等于锁内最晚的 lot 截止。
-    let latest_end: DateTime<Utc> = sqlx::query_scalar(
+    let latest_end: Timestamp = sqlx::query_scalar(
         "SELECT max(effective_end_at) FROM public.lots WHERE auction_id = $1 AND status = 'live'",
     )
     .bind(seeded.auction_id)
@@ -406,7 +406,7 @@ async fn postgres_settlement_claims_settles_replays_and_completes_as_runtime_acc
         lifecycle,
         [("auction.final_phase_entered", 1), ("auction.settling", 1), ("auction.settled", 2)]
     );
-    let settled_at: DateTime<Utc> =
+    let settled_at: Timestamp =
         sqlx::query_scalar("SELECT settled_at FROM public.auctions WHERE id = $1")
             .bind(seeded.auction_id)
             .fetch_one(pool)
@@ -689,7 +689,7 @@ async fn postgres_settlement_report_reads_consistent_snapshot_as_runtime_account
     );
     // 获胜者只有最后一笔出价，持有到 lot 有效截止；报告与公开逐件结算都按结算锁内的同一
     // 公式重放，结果必须与此一致。
-    let (held_from, held_until): (DateTime<Utc>, DateTime<Utc>) = sqlx::query_as(
+    let (held_from, held_until): (Timestamp, Timestamp) = sqlx::query_as(
         "SELECT bid.created_at, lot.effective_end_at
          FROM public.bids AS bid
          JOIN public.lots AS lot ON lot.id = bid.lot_id
@@ -733,7 +733,7 @@ async fn postgres_settlement_report_reads_consistent_snapshot_as_runtime_account
 async fn recovery_row(
     pool: &sqlx::PgPool,
     auction_id: Uuid,
-) -> (Uuid, String, i64, i32, DateTime<Utc>, Option<DateTime<Utc>>) {
+) -> (Uuid, String, i64, i32, Timestamp, Option<Timestamp>) {
     sqlx::query_as(
         "SELECT recovery.id, recovery.stage, recovery.state_version, recovery.reminder_count,
                 recovery.payment_deadline_at, recovery.next_attempt_at
@@ -834,7 +834,7 @@ async fn postgres_recovery_defers_overdue_reminder_without_payment_mail_proof_as
 
 fn manual_evidence() -> ManualSentEvidence {
     let sent_minute =
-        Utc::now().with_second(0).and_then(|value| value.with_nanosecond(0)).expect("整分钟");
+        Timestamp::now().with_second(0).and_then(|value| value.with_nanosecond(0)).expect("整分钟");
     ManualSentEvidence {
         schema_version: 1,
         world_id: "main".to_owned(),

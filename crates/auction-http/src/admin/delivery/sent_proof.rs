@@ -12,6 +12,7 @@ use auction_application::delivery::{
 use auction_contracts::{
     AdminDeliverySentEvidenceRequest, AdminDeliverySentProofConfirmRequest, ApiResponse,
 };
+use auction_time::Timestamp;
 use axum::{
     Json,
     body::Bytes,
@@ -19,7 +20,6 @@ use axum::{
     http::{HeaderMap, StatusCode, Uri},
     response::{IntoResponse, Response},
 };
-use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use super::{feature_unavailable, map_sent_proof_preview, map_sent_proof_result};
@@ -146,9 +146,7 @@ fn invalid_delivery_id() -> Response {
 
 /// 合同的 32 字节摘要与 CLI 使用同一数组编码；时间必须是带时区的 RFC3339。
 fn manual_evidence(input: AdminDeliverySentEvidenceRequest) -> Result<ManualSentEvidence, ()> {
-    let time = |value: &str| {
-        DateTime::parse_from_rfc3339(value).map(|time| time.with_timezone(&Utc)).map_err(drop)
-    };
+    let time = |value: &str| Timestamp::parse_from_rfc3339(value).map_err(drop);
     Ok(ManualSentEvidence {
         schema_version: input.schema_version,
         world_id: input.world_id,

@@ -98,13 +98,13 @@ fn unavailable() -> (StatusCode, Json<ApiErrorResponse>) {
 #[cfg(test)]
 mod tests {
     use auction_application::auction::PublicAuctionCountdown;
-    use chrono::{Duration, TimeZone, Utc};
+    use auction_time::{Duration, Timestamp};
     use uuid::Uuid;
 
     use super::{TimerKind, timer_finished};
 
     fn snapshot(scheduled_end_in: Option<i64>, intake_in: i64) -> PublicAuctionCountdown {
-        let observed_at = Utc.timestamp_opt(1_800_000_000, 0).single().expect("valid time");
+        let observed_at = Timestamp::from_timestamp(1_800_000_000, 0).expect("valid time");
         PublicAuctionCountdown {
             auction_id: Uuid::from_u128(7),
             intake_closes_at: observed_at + Duration::seconds(intake_in),

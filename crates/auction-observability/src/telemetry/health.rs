@@ -5,7 +5,7 @@ use std::sync::{
     atomic::{AtomicI64, Ordering},
 };
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use crate::health::{TracingHealth, TracingHealthReader, TracingStatus};
 
@@ -39,8 +39,8 @@ pub(crate) struct TracingHealthState {
 struct ExportHealth {
     status: TracingStatus,
     failure_count: i64,
-    last_success_at: Option<DateTime<Utc>>,
-    last_failure_at: Option<DateTime<Utc>>,
+    last_success_at: Option<Timestamp>,
+    last_failure_at: Option<Timestamp>,
     last_failure_code: FailureCode,
 }
 
@@ -60,7 +60,7 @@ impl TracingHealthState {
 
     pub(crate) fn record_success(&self) {
         let mut export = self.export.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        export.last_success_at = Some(Utc::now());
+        export.last_success_at = Some(Timestamp::now());
         export.last_failure_code = FailureCode::None;
         export.status = TracingStatus::Ok;
     }
@@ -68,7 +68,7 @@ impl TracingHealthState {
     pub(crate) fn record_failure(&self, code: FailureCode) {
         let mut export = self.export.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         export.failure_count = export.failure_count.saturating_add(1);
-        export.last_failure_at = Some(Utc::now());
+        export.last_failure_at = Some(Timestamp::now());
         export.last_failure_code = code;
         export.status = TracingStatus::Degraded;
     }

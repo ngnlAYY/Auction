@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use super::{
@@ -24,7 +24,7 @@ const MAX_SIDECAR_BYTES: u64 = 256 * 1024;
 #[serde(deny_unknown_fields)]
 pub(crate) struct ScopeSidecar {
     pub(crate) format: String,
-    pub(crate) created_at: DateTime<Utc>,
+    pub(crate) created_at: Timestamp,
     /// 收件人公钥的摘要；不含公钥本身。
     pub(crate) age_recipient_sha256: String,
     pub(crate) bundle_file_name: String,
@@ -117,7 +117,7 @@ pub(crate) fn kinds(sources: &[SourceSummary]) -> Vec<&'static str> {
 mod tests {
     use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 
-    use chrono::Utc;
+    use auction_time::Timestamp;
 
     use super::{
         MAX_LISTED_FILES, ScopeSidecar, bundle_file_name, read, sidecar_file_name,
@@ -131,7 +131,7 @@ mod tests {
     fn sidecar() -> ScopeSidecar {
         ScopeSidecar {
             format: super::FORMAT.to_owned(),
-            created_at: Utc::now(),
+            created_at: Timestamp::now(),
             age_recipient_sha256: "a".repeat(64),
             bundle_file_name: bundle_file_name("scheduled.dump"),
             bundle_sha256: "b".repeat(64),

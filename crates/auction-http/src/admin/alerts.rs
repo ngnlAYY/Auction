@@ -19,6 +19,7 @@ use auction_contracts::{
     AdminAlertWebhookEntryResponse, AdminAlertWebhookListResponse, AdminPendingCountsResponse,
     ApiResponse,
 };
+use auction_time::Timestamp;
 use axum::{
     Json,
     body::Bytes,
@@ -26,7 +27,6 @@ use axum::{
     http::{HeaderMap, StatusCode, Uri},
     response::{IntoResponse, Response},
 };
-use chrono::Utc;
 use uuid::Uuid;
 
 use crate::diagnostics;
@@ -90,7 +90,7 @@ pub(crate) async fn list(
     let Some(console) = state.operations_alert_console() else {
         return storage_unavailable("告警台需要已配置的数据库");
     };
-    match console.list_alerts(request, Utc::now()).await {
+    match console.list_alerts(request, Timestamp::now()).await {
         Ok(page) => Json(ApiResponse::ok(
             "ok",
             AdminAlertListResponse {

@@ -7,7 +7,7 @@ use auction_application::forum::{
     ForumReplyTopic, NotifySubscription,
 };
 use auction_domain::{AuctionId, LotId, SettlementWorld, UserId};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use super::super::DatabaseStore;
@@ -44,8 +44,8 @@ impl ForumReplyStore for DatabaseStore {
     fn claim_published_topics(
         &self,
         worker_id: String,
-        now: DateTime<Utc>,
-        lease_until: DateTime<Utc>,
+        now: Timestamp,
+        lease_until: Timestamp,
         available_worlds: Vec<SettlementWorld>,
         limit: u16,
     ) -> ApplicationFuture<'_, Vec<ForumReplyTopic>> {
@@ -188,7 +188,7 @@ impl ForumReplyStore for DatabaseStore {
     fn earliest_live_lot_deadline(
         &self,
         auction_id: AuctionId,
-    ) -> ApplicationFuture<'_, Option<DateTime<Utc>>> {
+    ) -> ApplicationFuture<'_, Option<Timestamp>> {
         Box::pin(async move {
             if auction_id.is_nil() {
                 return Err(storage_error("论坛回帖截止查询参数无效"));
@@ -215,8 +215,8 @@ impl ForumReplyStore for DatabaseStore {
         catalog: ForumRenderedThread,
         system_log: ForumRenderedPost,
         processed_through_post_number: i32,
-        updated_at: DateTime<Utc>,
-        next_scan_at: DateTime<Utc>,
+        updated_at: Timestamp,
+        next_scan_at: Timestamp,
     ) -> ApplicationFuture<'_, ()> {
         Box::pin(async move {
             if !valid_topic_lease(&topic, updated_at)
@@ -249,7 +249,7 @@ impl ForumReplyStore for DatabaseStore {
         catalog: ForumRenderedThread,
         system_log: ForumRenderedPost,
         processed_through_post_number: i32,
-        updated_at: DateTime<Utc>,
+        updated_at: Timestamp,
     ) -> ApplicationFuture<'_, ()> {
         Box::pin(async move {
             if !valid_topic_lease(&topic, updated_at)
@@ -305,8 +305,8 @@ impl ForumReplyStore for DatabaseStore {
         &self,
         topic: ForumReplyTopic,
         processed_through_post_number: i32,
-        scanned_at: DateTime<Utc>,
-        next_scan_at: DateTime<Utc>,
+        scanned_at: Timestamp,
+        next_scan_at: Timestamp,
     ) -> ApplicationFuture<'_, ()> {
         Box::pin(async move {
             if !valid_topic_lease(&topic, scanned_at)
@@ -332,8 +332,8 @@ impl ForumReplyStore for DatabaseStore {
     fn fail_topic_scan(
         &self,
         topic: ForumReplyTopic,
-        failed_at: DateTime<Utc>,
-        retry_at: DateTime<Utc>,
+        failed_at: Timestamp,
+        retry_at: Timestamp,
         failure_code: String,
     ) -> ApplicationFuture<'_, ()> {
         Box::pin(async move {

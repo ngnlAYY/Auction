@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use auction_config::AppConfig;
-use chrono::Utc;
+use auction_time::Timestamp;
 
 use super::manifest::{FORMAT, manifest_file_name};
 use super::{BackupManifest, libpq, schema_version, scope};
@@ -74,7 +74,7 @@ pub(crate) async fn create_backup(
                 database_name_sha256: sha256_bytes(database.as_bytes()),
                 archive_sha256: sha256_file(output).await?,
                 schema_version: before,
-                created_at: Utc::now(),
+                created_at: Timestamp::now(),
             };
             files::write_private(&manifest_path, &serde_json::to_vec_pretty(&manifest)?)?;
             Ok(manifest)

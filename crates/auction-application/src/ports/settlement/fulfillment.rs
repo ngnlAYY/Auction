@@ -4,7 +4,7 @@ use auction_domain::{
     AuctionId, CommandId, EquipmentId, EquipmentKeyEnvelope, LotId, SettlementId, SettlementLine,
     SettlementMode, SettlementObligationKind, SettlementWorld, SubmissionId,
 };
-use chrono::{DateTime, Duration, Utc};
+use auction_time::{Duration, Timestamp};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -92,7 +92,7 @@ pub struct SettlementFulfillmentDeliverySnapshot {
     pub failure_code: Option<String>,
     /// 投递进入终态的数据库时刻（`deliveries.completed_at`），`succeeded` 时即寄出时刻；
     /// 只用于等待领取的 Sent 轮询分档，不参与证明、金额或状态判定。
-    pub completed_at: Option<DateTime<Utc>>,
+    pub completed_at: Option<Timestamp>,
 }
 
 /// 返回旧版 MoogleMail fulfillment 发送与 Sent 证据共同使用的 canonical 主题。
@@ -147,11 +147,11 @@ pub struct SettlementFulfillmentClaim {
     /// recovery case 当前有效的付款期限：COD 收回重寄后从重寄时刻重新起算。只用于证据轮询
     /// 聚焦（付款截止前后回到基础间隔），逾期判定仍由 recovery owner 负责；不得用来重建正文。
     /// 该值缺失只可能是没有 recovery 行的历史义务，因此不进入必填不变量。
-    pub payment_deadline_at: Option<DateTime<Utc>>,
+    pub payment_deadline_at: Option<Timestamp>,
     /// 结算建立 recovery 时冻结的首寄付款期限 D0（创建时刻加冻结策略版本的付款期限）。重寄沿用
     /// 首次冻结的载荷，正文期限不随当前期限改变，因此付款邮件正文与载荷只按它重建；与
     /// `payment_deadline_at` 同时缺失或同时存在。
-    pub initial_payment_deadline_at: Option<DateTime<Utc>>,
+    pub initial_payment_deadline_at: Option<Timestamp>,
     pub submission_id: Option<SubmissionId>,
     /// 投稿来源闭集；流拍与撤拍均根据来源授权逐件发送原装备。
     pub submission_source_kind: Option<String>,
@@ -171,8 +171,8 @@ pub struct SettlementFulfillmentClaim {
     pub claim_fencing: i64,
     pub state_version: u64,
     pub worker_id: String,
-    pub claimed_at: DateTime<Utc>,
-    pub lease_until: DateTime<Utc>,
+    pub claimed_at: Timestamp,
+    pub lease_until: Timestamp,
     /// 已持久化释放次数；领取本身不增加该值。
     pub retry_count: u32,
 }
@@ -222,8 +222,8 @@ pub struct SettlementFulfillmentSentLookupTarget {
     pub external_equipment_id: String,
     pub credits: i64,
     pub cod: i64,
-    pub sending_at: Option<DateTime<Utc>>,
-    pub completed_at: Option<DateTime<Utc>>,
+    pub sending_at: Option<Timestamp>,
+    pub completed_at: Option<Timestamp>,
 }
 
 /// users owner 的当前收件人读取端口。
@@ -273,7 +273,7 @@ pub struct SettlementFulfillmentSentEvidence {
     pub cod_pending: i64,
     pub remaining_equipment_ids: Vec<String>,
     pub collected: bool,
-    pub observed_at: DateTime<Utc>,
+    pub observed_at: Timestamp,
 }
 
 /// Balance 页面返回的、可用于发送前资金检查的安全快照。
@@ -281,7 +281,7 @@ pub struct SettlementFulfillmentSentEvidence {
 pub struct SettlementFulfillmentBalanceEvidence {
     pub world: SettlementWorld,
     pub credits: i64,
-    pub observed_at: DateTime<Utc>,
+    pub observed_at: Timestamp,
 }
 
 /// Worker 与 MoogleMail owner 之间的外部证明读取窄端口。
@@ -296,7 +296,7 @@ pub trait SettlementFulfillmentEvidenceReader: Send + Sync {
     fn read_balance(
         &self,
         world: SettlementWorld,
-        observed_at: DateTime<Utc>,
+        observed_at: Timestamp,
     ) -> ApplicationFuture<'_, SettlementFulfillmentBalanceEvidence>;
 }
 
@@ -306,7 +306,7 @@ pub struct SettlementFulfillmentProof {
     pub kind: String,
     pub reference: String,
     pub digest: [u8; 32],
-    pub observed_at: DateTime<Utc>,
+    pub observed_at: Timestamp,
 }
 
 /// 履约回执读取后的持久状态。
@@ -375,8 +375,8 @@ pub trait SettlementFulfillmentStore: Send + Sync {
     fn claim_due(
         &self,
         worker_id: String,
-        now: DateTime<Utc>,
-        lease_until: DateTime<Utc>,
+        now: Timestamp,
+        lease_until: Timestamp,
         limit: u16,
     ) -> ApplicationFuture<'_, Vec<SettlementFulfillmentClaim>>;
 
@@ -384,7 +384,7 @@ pub trait SettlementFulfillmentStore: Send + Sync {
         &'a self,
         claim: SettlementFulfillmentClaim,
         preparation: SettlementDeliveryPreparation,
-        prepared_at: DateTime<Utc>,
+        prepared_at: Timestamp,
         custody: Option<(
             &'a crate::ports::settlement::SettlementInternalEvidenceSnapshot,
             std::time::Instant,
@@ -398,7 +398,7 @@ pub trait SettlementFulfillmentStore: Send + Sync {
         claim: SettlementFulfillmentClaim,
         activate_command_id: CommandId,
         activate_request_hash: RequestHash,
-        activated_at: DateTime<Utc>,
+        activated_at: Timestamp,
         custody: Option<(
             &'a crate::ports::settlement::SettlementInternalEvidenceSnapshot,
             std::time::Instant,
@@ -438,14 +438,14 @@ pub trait SettlementFulfillmentCommandPort: Send + Sync {
     fn prepare_next(
         &self,
         claim: SettlementFulfillmentClaim,
-        prepared_at: DateTime<Utc>,
+        prepared_at: Timestamp,
         retry_delay: Duration,
     ) -> ApplicationFuture<'_, crate::ports::settlement::SettlementFulfillmentPreparationOutcome>;
 
     fn activate(
         &self,
         claim: SettlementFulfillmentClaim,
-        activated_at: DateTime<Utc>,
+        activated_at: Timestamp,
         retry_delay: Duration,
     ) -> ApplicationFuture<
         '_,
@@ -458,7 +458,7 @@ pub trait SettlementFulfillmentCommandPort: Send + Sync {
     fn reconcile(
         &self,
         claim: SettlementFulfillmentClaim,
-        observed_at: DateTime<Utc>,
-        retry_at: DateTime<Utc>,
+        observed_at: Timestamp,
+        retry_at: Timestamp,
     ) -> ApplicationFuture<'_, SettlementFulfillmentReconcileResult>;
 }

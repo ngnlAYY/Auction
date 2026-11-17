@@ -18,7 +18,7 @@ auction-observability.workspace = true
 auction-process.workspace = true
 auction-setup = { workspace = true, optional = true }
 rust-embed.workspace = true
-chrono.workspace = true
+auction-time.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true

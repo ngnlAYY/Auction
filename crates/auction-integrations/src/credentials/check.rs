@@ -131,7 +131,7 @@ mod tests {
         UnavailableWorkerMailCredentialCheck, WorkerMailCredentialCheckPort,
         WorkerMailCredentialCheckRequest,
     };
-    use chrono::Utc;
+    use auction_time::Timestamp;
     use uuid::Uuid;
 
     use super::CredentialVerifier;
@@ -178,9 +178,9 @@ mod tests {
                 player_name: None,
                 status,
                 state_version: 6,
-                created_at: Utc::now(),
+                created_at: Timestamp::now(),
                 rotated_at: None,
-                updated_at: Utc::now(),
+                updated_at: Timestamp::now(),
             },
             envelope: AdminCredentialEnvelope::new(
                 vec![1; 32],

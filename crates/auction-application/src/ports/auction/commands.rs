@@ -7,7 +7,7 @@ use auction_domain::{
     BidAmount, CompetitionPlan, ProxyAuthorization, ProxyMode, ProxyStatus, ProxyTerminalReason,
     ProxyTransitionKind,
 };
-use chrono::{DateTime, SecondsFormat, Utc};
+use auction_time::{SecondsFormat, Timestamp};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
 use crate::errors::diagnostics::{
@@ -17,9 +17,9 @@ use crate::ports::core::ApplicationFuture;
 use crate::services::auction::{CreateProxyCommand, LowerProxyCommand, PlaceBidCommand};
 
 /// 按 Go `time.Time` 的 `RFC3339Nano` 规则（已发布的 Public 时间格式）编码 Public 时间。
-/// 领域与存储仍使用 `DateTime<Utc>`；只有对外 wire 去掉无意义的小数尾零，整秒不伪造
+/// 领域与存储仍使用 `Timestamp`；只有对外 wire 去掉无意义的小数尾零，整秒不伪造
 /// `.000000`，并继续用 `Z` 表示 UTC。
-pub fn format_public_time_wire(value: DateTime<Utc>) -> String {
+pub fn format_public_time_wire(value: Timestamp) -> String {
     let mut encoded = value.to_rfc3339_opts(SecondsFormat::Nanos, true);
     let Some(body) = encoded.strip_suffix('Z') else { return encoded };
     let length = body.trim_end_matches('0').trim_end_matches('.').len();
@@ -33,18 +33,18 @@ pub fn format_public_time_wire(value: DateTime<Utc>) -> String {
 /// 保留其 offset 与纳秒字符串。构造入口不向 crate 外开放，避免两者被独立拼装。
 #[derive(Debug, Clone)]
 pub struct CompetitionWireTimestamp {
-    instant: DateTime<Utc>,
+    instant: Timestamp,
     wire: String,
 }
 
 impl CompetitionWireTimestamp {
     /// 从新版 UTC instant 生成旧版兼容 wire。
-    pub(crate) fn from_utc(instant: DateTime<Utc>) -> Self {
+    pub(crate) fn from_utc(instant: Timestamp) -> Self {
         Self { instant, wire: format_public_time_wire(instant) }
     }
 
     /// 返回用于领域校验和时间运算的 UTC instant。
-    pub fn instant(&self) -> DateTime<Utc> {
+    pub fn instant(&self) -> Timestamp {
         self.instant
     }
 
@@ -89,18 +89,16 @@ impl<'de> Deserialize<'de> for CompetitionWireTimestamp {
         D: Deserializer<'de>,
     {
         let wire = String::deserialize(deserializer)?;
-        let instant = DateTime::parse_from_rfc3339(&wire)
-            .map_err(|error| {
-                record_error(
-                    DiagnosticLevel::Error,
-                    error.diagnostic_kind(),
-                    "competition_timestamp",
-                    "parse_legacy_time",
-                    DiagnosticContext::default(),
-                );
-                de::Error::custom("旧版竞价时间不是合法 RFC3339")
-            })?
-            .with_timezone(&Utc);
+        let instant = Timestamp::parse_from_rfc3339(&wire).map_err(|error| {
+            record_error(
+                DiagnosticLevel::Error,
+                error.diagnostic_kind(),
+                "competition_timestamp",
+                "parse_legacy_time",
+                DiagnosticContext::default(),
+            );
+            de::Error::custom("旧版竞价时间不是合法 RFC3339")
+        })?;
         Ok(Self { instant, wire })
     }
 }

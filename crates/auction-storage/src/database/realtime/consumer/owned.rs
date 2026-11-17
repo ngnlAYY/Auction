@@ -5,7 +5,7 @@ use auction_application::core::ApplicationFuture;
 use auction_application::realtime::{
     RealtimeConsumerBatch, RealtimeConsumerRequest, RealtimeConsumerStore, RealtimeStreamStore,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use super::acknowledgement::acknowledge_postgres;
@@ -108,7 +108,7 @@ impl RealtimeConsumerStore for RealtimeConsumerOwnership {
         event_id: Uuid,
         failure_code: String,
         safe_detail: String,
-        failed_at: DateTime<Utc>,
+        failed_at: Timestamp,
     ) -> ApplicationFuture<'_, ()> {
         Box::pin(async move {
             validate_cursor_keys(&consumer_key, &stream_key)?;

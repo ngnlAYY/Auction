@@ -3,7 +3,8 @@
 use std::future::Future;
 
 use auction_domain::{Auction, AuctionId, AuctionStatus, CommandId, CompetitionPlan, LotId};
-use chrono::{DateTime, NaiveDate, Utc};
+use auction_time::Timestamp;
+use jiff::civil;
 use serde::{Deserialize, Serialize};
 
 use crate::ports::core::ApplicationFuture;
@@ -108,20 +109,20 @@ pub struct AuctionLifecycleSnapshot {
     pub world_id: String,
     pub sequence: i64,
     pub status: AuctionStatus,
-    pub preview_scheduled_at: DateTime<Utc>,
-    pub scheduled_open_at: DateTime<Utc>,
-    pub preview_opened_at: Option<DateTime<Utc>>,
+    pub preview_scheduled_at: Timestamp,
+    pub scheduled_open_at: Timestamp,
+    pub preview_opened_at: Option<Timestamp>,
     pub preview_manual_open: bool,
     pub preview_revision: i64,
-    pub opened_at: Option<DateTime<Utc>>,
-    pub final_phase_at: Option<DateTime<Utc>>,
-    pub settled_at: Option<DateTime<Utc>>,
-    pub cancelled_at: Option<DateTime<Utc>>,
+    pub opened_at: Option<Timestamp>,
+    pub final_phase_at: Option<Timestamp>,
+    pub settled_at: Option<Timestamp>,
+    pub cancelled_at: Option<Timestamp>,
     pub cancelled_reason: Option<String>,
     pub cancelled_by: Option<String>,
     pub state_version: u64,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
 }
 
 /// 生命周期命令提交后的稳定幂等结果。
@@ -131,7 +132,7 @@ pub struct AuctionLifecycleResult {
     pub auction_id: AuctionId,
     pub status: AuctionStatus,
     pub state_version: u64,
-    pub updated_at: DateTime<Utc>,
+    pub updated_at: Timestamp,
     /// `None` 只用于读取扩展快照前已经写入的旧 Rust 账本结果；新命令必须持久化完整快照。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auction: Option<AuctionLifecycleSnapshot>,
@@ -147,17 +148,17 @@ pub struct AuctionLifecycleContext {
     /// 与拍卖、可选轮次处于同一锁内快照的世界启用状态。
     pub world_enabled: bool,
     pub sequence: i64,
-    pub preview_scheduled_at: DateTime<Utc>,
-    pub scheduled_open_at: DateTime<Utc>,
-    pub preview_opened_at: Option<DateTime<Utc>>,
-    pub policy_scheduled_end_at: DateTime<Utc>,
-    pub policy_final_phase_lead: chrono::Duration,
+    pub preview_scheduled_at: Timestamp,
+    pub scheduled_open_at: Timestamp,
+    pub preview_opened_at: Option<Timestamp>,
+    pub policy_scheduled_end_at: Timestamp,
+    pub policy_final_phase_lead: auction_time::Duration,
     pub preview_manual_open: bool,
     pub preview_revision: i64,
-    pub opened_at: Option<DateTime<Utc>>,
-    pub final_phase_at: Option<DateTime<Utc>>,
-    pub settled_at: Option<DateTime<Utc>>,
-    pub scheduled_round_local_week: Option<NaiveDate>,
+    pub opened_at: Option<Timestamp>,
+    pub final_phase_at: Option<Timestamp>,
+    pub settled_at: Option<Timestamp>,
+    pub scheduled_round_local_week: Option<civil::Date>,
     /// 旧轮次没有来源时保留历史 UTC 七天规则，不推测时区或重写既定时间。
     pub schedule_source: Option<auction_domain::AuctionScheduleSource>,
 }
@@ -172,15 +173,15 @@ pub struct AuctionPreviewSuccessorPlan {
     pub auction_id: AuctionId,
     pub create_command_id: CommandId,
     pub create_request_hash: crate::ports::core::RequestHash,
-    pub local_week: NaiveDate,
+    pub local_week: civil::Date,
     pub sequence: i64,
     pub title: String,
-    pub preview_due_at: DateTime<Utc>,
-    pub open_due_at: DateTime<Utc>,
-    pub scheduled_end_at: DateTime<Utc>,
+    pub preview_due_at: Timestamp,
+    pub open_due_at: Timestamp,
+    pub scheduled_end_at: Timestamp,
     /// 新草稿最早接收装备的时刻；早鸟窗口内场次为赛季开始，其余为 `None`。
     /// 由冻结的排期来源与日历确定性派生，随拍卖冻结，不参与创建请求摘要。
-    pub intake_opens_at: Option<DateTime<Utc>>,
+    pub intake_opens_at: Option<Timestamp>,
 }
 
 /// Final phase 中单个活动代理的幂等子命令与纯领域竞价计划。
@@ -200,11 +201,11 @@ pub enum AuctionLifecycleEffect {
     /// 取消尚未开拍的拍卖并撤回 pending lot；取消 Preview 时同时建立下一期草稿。
     Cancel { successor: Option<AuctionPreviewSuccessorPlan> },
     /// 进入最终阶段，并原子提交代理转换；人工动作还会把有效截止时间收紧到最终窗口。
-    FinalPhase { proxy_plans: Vec<AuctionFinalProxyPlan>, effective_end_at: Option<DateTime<Utc>> },
+    FinalPhase { proxy_plans: Vec<AuctionFinalProxyPlan>, effective_end_at: Option<Timestamp> },
     /// 立即结束竞价并把拍卖交给既有 settlement Worker；结算事实仍由 Worker 独占写入。
     EarlySettlement {
         proxy_plans: Vec<AuctionFinalProxyPlan>,
-        effective_end_at: DateTime<Utc>,
+        effective_end_at: Timestamp,
         reason: String,
     },
 }

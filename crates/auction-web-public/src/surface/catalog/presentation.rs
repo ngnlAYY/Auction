@@ -3,9 +3,9 @@
 use std::collections::BTreeMap;
 
 use auction_contracts::{EQUIPMENT_CATEGORY_CODES, MAX_PUBLIC_BID_AMOUNT};
+use auction_time::Timestamp;
 use auction_web_shared::i18n::{current_language, format_localized_time_for_language};
 use auction_web_shared::{t, use_second_tick};
-use chrono::{DateTime, Utc};
 use dioxus::prelude::*;
 
 use crate::api::{CatalogRow, estimated_now};
@@ -201,14 +201,14 @@ pub(crate) struct CountdownDisplay {
 /// 截止文本变化时才重新解析；秒针和语言变化仍即时更新显示，不缓存服务端校时结果。
 pub(crate) fn use_countdown_display(ends_at: String) -> CountdownDisplay {
     let end = use_memo(use_reactive((&ends_at,), |(ends_at,)| {
-        DateTime::parse_from_rfc3339(&ends_at).ok().map(|value| value.with_timezone(&Utc))
+        Timestamp::parse_from_rfc3339(&ends_at).ok()
     }));
     let tick = use_second_tick();
     let _ = tick();
     countdown_display(end(), estimated_now())
 }
 
-fn countdown_display(end: Option<DateTime<Utc>>, now: DateTime<Utc>) -> CountdownDisplay {
+fn countdown_display(end: Option<Timestamp>, now: Timestamp) -> CountdownDisplay {
     let Some(end) = end else {
         return CountdownDisplay {
             label: t!("value-empty"),

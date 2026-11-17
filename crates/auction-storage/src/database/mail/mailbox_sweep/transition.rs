@@ -6,7 +6,7 @@
 use auction_application::delivery::{
     DeliverySendCredentialBinding, DeliverySendExpectation, DeliveryTakeExpectation,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::Value;
 use sqlx::Postgres;
 use uuid::Uuid;
@@ -152,9 +152,9 @@ async fn persist_transition_once(
         }
         RecoveryUpdate::Send(..) => None,
     };
-    let (origin_kind, origin_id, completed_at): (String, String, DateTime<Utc>) = match update {
+    let (origin_kind, origin_id, completed_at): (String, String, Timestamp) = match update {
         RecoveryUpdate::Requeue(retries, reason, fencing_version, _, _) => {
-            let updated: Option<(String, DateTime<Utc>)> = sqlx::query_as(
+            let updated: Option<(String, Timestamp)> = sqlx::query_as(
                 "UPDATE public.deliveries
                  SET status='pending', completed_at=NULL, failure_code=NULL, lease_token=NULL,
                      lease_expires_at=NULL, claimed_at=NULL, sending_at=NULL, updated_at=clock_timestamp(),
@@ -217,7 +217,7 @@ async fn persist_transition_once(
             }
             let world = &expectation.world_id;
             let reference = format!("mooglemail:{world}:take:{mid}");
-            let updated: Option<(String, DateTime<Utc>)> = sqlx::query_as(
+            let updated: Option<(String, Timestamp)> = sqlx::query_as(
                 "UPDATE public.deliveries
                  SET external_reference=$2,status='succeeded',failure_code=NULL,
                      completed_at=clock_timestamp(),updated_at=clock_timestamp(),

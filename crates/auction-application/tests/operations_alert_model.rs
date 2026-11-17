@@ -21,7 +21,7 @@ use auction_application::operations::{
     OperationsAlertSignal, OperationsAlertSnapshot, OperationsAlertSource,
     OperationsAlertSourceObservation, evaluate_host_backup, evaluate_host_wal, evaluate_snapshot,
 };
-use chrono::Utc;
+use auction_time::Timestamp;
 
 const COOLDOWN: Duration = Duration::from_secs(1_800);
 
@@ -525,14 +525,14 @@ fn take_unknown_alert_scope_is_the_reason_closed_set() {
 #[test]
 fn observe_command_requires_the_full_source_closed_set_in_order() {
     use auction_application::operations::OperationsAlertObserveCommand;
-    use chrono::Utc;
+    use auction_time::Timestamp;
 
     let observations = evaluate_snapshot(&OperationsAlertSnapshot::default(), &policy())
         .expect("空快照必须可评估");
     assert_eq!(observations.len(), OperationsAlertSource::WORKER.len());
     let command = OperationsAlertObserveCommand {
         observations: observations.clone(),
-        now: Utc::now(),
+        now: Timestamp::now(),
         batch_window: Duration::from_secs(120),
     };
     assert_eq!(command.validate(), Ok(()), "每轮提交完整来源闭集必须被接受");
@@ -540,7 +540,7 @@ fn observe_command_requires_the_full_source_closed_set_in_order() {
     // 旧的四来源名单会拒绝新来源；这里锁定“缺一个来源即失败关闭”。
     let truncated = OperationsAlertObserveCommand {
         observations: observations[..4].to_vec(),
-        now: Utc::now(),
+        now: Timestamp::now(),
         batch_window: Duration::from_secs(120),
     };
     assert_eq!(truncated.validate(), Err(OperationsAlertError::Invalid));
@@ -550,7 +550,7 @@ fn observe_command_requires_the_full_source_closed_set_in_order() {
     reordered.swap(0, 1);
     let command = OperationsAlertObserveCommand {
         observations: reordered,
-        now: Utc::now(),
+        now: Timestamp::now(),
         batch_window: Duration::from_secs(120),
     };
     assert_eq!(command.validate(), Err(OperationsAlertError::Invalid));
@@ -721,7 +721,7 @@ fn host_wal_rejects_inconsistent_or_negative_facts() {
 /// 主机侧命令只接受 host 来源，顺序固定，重复运行命中同一 fingerprint（upsert 去重）。
 #[test]
 fn host_observe_command_dedupes_cli_retries_by_fingerprint() {
-    use chrono::Utc;
+    use auction_time::Timestamp;
 
     let facts = backup_facts(10_000, OperationsAlertHostBackupOutcome::Failed);
     let first = evaluate_host_backup(&facts).expect("备份事实必须可评估");
@@ -742,14 +742,14 @@ fn host_observe_command_dedupes_cli_retries_by_fingerprint() {
     .expect("WAL 事实必须可评估");
     let command = OperationsAlertHostObserveCommand {
         observations: vec![first, wal],
-        now: Utc::now(),
+        now: Timestamp::now(),
         batch_window: Duration::from_secs(120),
     };
     assert_eq!(command.validate(), Ok(()));
 
     let reversed = OperationsAlertHostObserveCommand {
         observations: vec![command.observations[1].clone(), command.observations[0].clone()],
-        now: Utc::now(),
+        now: Timestamp::now(),
         batch_window: Duration::from_secs(120),
     };
     assert_eq!(reversed.validate(), Err(OperationsAlertError::Invalid));
@@ -759,7 +759,7 @@ fn host_observe_command_dedupes_cli_retries_by_fingerprint() {
             OperationsAlertSourceObservation::unavailable(OperationsAlertSource::Mail)
                 .expect("不可用观察必须可构造"),
         ],
-        now: Utc::now(),
+        now: Timestamp::now(),
         batch_window: Duration::from_secs(120),
     };
     assert_eq!(
@@ -770,7 +770,7 @@ fn host_observe_command_dedupes_cli_retries_by_fingerprint() {
 
     let empty = OperationsAlertHostObserveCommand {
         observations: Vec::new(),
-        now: Utc::now(),
+        now: Timestamp::now(),
         batch_window: Duration::from_secs(120),
     };
     assert_eq!(empty.validate(), Err(OperationsAlertError::Invalid));
@@ -867,7 +867,7 @@ fn missing_reconciliation_reports_are_reported_as_unavailable() {
 fn awaiting_payment_overdue_without_payment_mail_proof_alerts_without_overdue_stage() {
     // 原始形状：阶段仍是 awaiting_payment，付款期限已过，付款邮件没有发送证明；
     // 此时 payment_overdue_count 为 0，但付款邮件未寄出信号必须独立产生。
-    let now = Utc::now();
+    let now = Timestamp::now();
     let snapshot = OperationsAlertSnapshot {
         recovery: Some(OperationsAlertRecoverySnapshot {
             payment_overdue_count: 0,

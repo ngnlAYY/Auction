@@ -8,7 +8,7 @@ pub(crate) mod credential_check;
 pub(crate) mod protocol;
 pub(crate) mod remote_read;
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use crate::ports::core::ApplicationFuture;
@@ -78,7 +78,7 @@ pub struct WorkerControlTrigger {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkerControlMailProgress {
     pub condition: WorkerControlCondition,
-    pub observed_at: Option<DateTime<Utc>>,
+    pub observed_at: Option<Timestamp>,
     pub pollers: Vec<MailPollProgressSnapshot>,
 }
 

@@ -1,7 +1,7 @@
 //! Recovery action 的非投递完成、重试释放与人工复核收口。
 
 use auction_application::recovery::RecoveryActionClaim;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
@@ -19,7 +19,7 @@ pub(super) enum RecoveryTerminalState {
         proof_kind: String,
         proof_reference: String,
         proof_digest: [u8; 32],
-        proof_observed_at: DateTime<Utc>,
+        proof_observed_at: Timestamp,
     },
     Failed {
         failure_code: String,
@@ -55,7 +55,7 @@ impl RecoveryTerminalState {
         }
     }
 
-    fn proof(&self) -> Option<(&str, &str, &[u8], DateTime<Utc>)> {
+    fn proof(&self) -> Option<(&str, &str, &[u8], Timestamp)> {
         match self {
             Self::Satisfied { proof_kind, proof_reference, proof_digest, proof_observed_at } => {
                 Some((proof_kind, proof_reference, proof_digest.as_slice(), *proof_observed_at))
@@ -75,7 +75,7 @@ pub(crate) async fn mark_action_satisfied_postgres(
     proof_kind: &str,
     proof_reference: &str,
     proof_digest: [u8; 32],
-    observed_at: DateTime<Utc>,
+    observed_at: Timestamp,
 ) -> Result<(), auction_application::core::RepositoryError> {
     let terminal = RecoveryTerminalState::Satisfied {
         proof_kind: proof_kind.to_owned(),
@@ -89,7 +89,7 @@ pub(crate) async fn mark_action_satisfied_postgres(
 pub(crate) async fn release_action_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     claim: &RecoveryActionClaim,
-    retry_at: DateTime<Utc>,
+    retry_at: Timestamp,
     failure_code: &str,
 ) -> Result<(), auction_application::core::RepositoryError> {
     let claim_snapshot = claim.clone();
@@ -228,7 +228,7 @@ pub(super) async fn complete_action_in_transaction(
     .await
     .map_err(RecoveryActionTransactionError::from)?
     .ok_or_else(|| repository_error("recovery action 终态 claim 已失效"))?;
-    let updated_at: DateTime<Utc> = updated.try_get("updated_at").map_err(map_storage_error)?;
+    let updated_at: Timestamp = updated.try_get("updated_at").map_err(map_storage_error)?;
 
     let projected = if terminal.state() == "satisfied" {
         sqlx::query(

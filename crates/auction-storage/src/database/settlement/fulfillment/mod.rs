@@ -7,7 +7,7 @@ use auction_application::settlement::{
     SettlementFulfillmentReconcileResult, SettlementFulfillmentResult, SettlementFulfillmentStore,
 };
 use auction_domain::CommandId;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use crate::database::DatabaseStore;
 use crate::database::storage_error;
@@ -54,8 +54,8 @@ impl SettlementFulfillmentStore for DatabaseStore {
     fn claim_due(
         &self,
         worker_id: String,
-        now: DateTime<Utc>,
-        lease_until: DateTime<Utc>,
+        now: Timestamp,
+        lease_until: Timestamp,
         limit: u16,
     ) -> auction_application::core::ApplicationFuture<'_, Vec<SettlementFulfillmentClaim>> {
         Box::pin(async move {
@@ -76,7 +76,7 @@ impl SettlementFulfillmentStore for DatabaseStore {
         &'a self,
         claim: SettlementFulfillmentClaim,
         preparation: SettlementDeliveryPreparation,
-        prepared_at: DateTime<Utc>,
+        prepared_at: Timestamp,
         custody: Option<(
             &'a auction_application::settlement::SettlementInternalEvidenceSnapshot,
             std::time::Instant,
@@ -104,7 +104,7 @@ impl SettlementFulfillmentStore for DatabaseStore {
         claim: SettlementFulfillmentClaim,
         activate_command_id: CommandId,
         activate_request_hash: auction_application::core::RequestHash,
-        activated_at: DateTime<Utc>,
+        activated_at: Timestamp,
         custody: Option<(
             &'a auction_application::settlement::SettlementInternalEvidenceSnapshot,
             std::time::Instant,
@@ -173,7 +173,7 @@ impl SettlementFulfillmentStore for DatabaseStore {
     fn fail(
         &self,
         claim: SettlementFulfillmentClaim,
-        retry_delay: chrono::Duration,
+        retry_delay: auction_time::Duration,
         failure_code: String,
     ) -> auction_application::core::ApplicationFuture<'_, ()> {
         Box::pin(async move {

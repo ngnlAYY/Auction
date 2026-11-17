@@ -1,7 +1,7 @@
 //! Admin 结算报告的投影与读取端口。
 
 use auction_domain::AuctionId;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use crate::ports::core::ApplicationFuture;
@@ -15,22 +15,22 @@ pub struct SettlementAuctionSnapshot {
     pub world_id: String,
     pub sequence: i64,
     pub status: String,
-    pub preview_scheduled_at: DateTime<Utc>,
-    pub scheduled_open_at: DateTime<Utc>,
-    pub preview_opened_at: Option<DateTime<Utc>>,
+    pub preview_scheduled_at: Timestamp,
+    pub scheduled_open_at: Timestamp,
+    pub preview_opened_at: Option<Timestamp>,
     pub preview_manual_open: bool,
     pub preview_revision: i64,
-    pub opened_at: Option<DateTime<Utc>>,
-    pub final_phase_at: Option<DateTime<Utc>>,
-    pub settled_at: Option<DateTime<Utc>>,
-    pub cancelled_at: Option<DateTime<Utc>>,
+    pub opened_at: Option<Timestamp>,
+    pub final_phase_at: Option<Timestamp>,
+    pub settled_at: Option<Timestamp>,
+    pub cancelled_at: Option<Timestamp>,
     pub cancelled_reason: Option<String>,
     pub cancelled_by: Option<String>,
     pub state_version: i64,
-    pub scheduled_end_at: Option<DateTime<Utc>>,
-    pub effective_end_at: Option<DateTime<Utc>>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
+    pub scheduled_end_at: Option<Timestamp>,
+    pub effective_end_at: Option<Timestamp>,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
 }
 
 /// 结算报告中允许公开的 adjustment metadata。
@@ -48,7 +48,7 @@ pub struct SettlementSummary {
     pub compensation_out: i64,
     pub closing_balance: i64,
     pub movement_count: i64,
-    pub settled_at: DateTime<Utc>,
+    pub settled_at: Timestamp,
 }
 
 #[derive(Debug, Clone)]

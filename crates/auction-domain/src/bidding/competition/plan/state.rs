@@ -1,6 +1,6 @@
 //! 竞价规划结果的状态推进、软截止和代理调度辅助。
 
-use chrono::{DateTime, Duration, Utc};
+use auction_time::{Duration, Timestamp};
 
 use super::CompetitionPlan;
 use crate::{
@@ -28,7 +28,7 @@ pub(super) fn finalize_plan(
     rules: AuctionRules,
     mut state: LotBidState,
     command_id: CommandId,
-    now: DateTime<Utc>,
+    now: Timestamp,
     drafts: &[BidDraft],
     proxy_output: ProxyPlanOutput,
 ) -> Result<CompetitionPlan, DomainError> {
@@ -144,7 +144,7 @@ pub(super) fn schedule_slow_proxy(
     rules: AuctionRules,
     mut state: LotBidState,
     authorization_id: ProxyAuthorizationId,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<LotBidState, DomainError> {
     let generation =
         state.slow_generation.checked_add(1).ok_or(DomainError::StateVersionOverflow)?;

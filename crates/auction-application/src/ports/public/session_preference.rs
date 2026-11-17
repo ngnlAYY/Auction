@@ -1,7 +1,7 @@
 //! 账号级 Public 登录时长、固定截止计算与会话绑定的幂等请求；默认永久。
 
 use auction_domain::CommandId;
-use chrono::{DateTime, Duration, Utc};
+use auction_time::{Duration, Timestamp};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -31,10 +31,7 @@ impl PublicSessionPreference {
     }
 
     /// 以本次服务器时间计算固定截止，不使用上次活动时间或部署级 Public TTL。
-    pub fn expires_at_from(
-        &self,
-        now: DateTime<Utc>,
-    ) -> Result<Option<DateTime<Utc>>, SessionError> {
+    pub fn expires_at_from(&self, now: Timestamp) -> Result<Option<Timestamp>, SessionError> {
         self.validate()?;
         self.duration_seconds
             .map(|seconds| {

@@ -11,7 +11,7 @@ use auction_application::settlement::{
     SettlementReturnWorkStore,
 };
 use auction_domain::{CommandId, SettlementReturnAction, SettlementReturnCaseStatus};
-use chrono::{Duration, Utc};
+use auction_time::{Duration, Timestamp};
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -63,12 +63,12 @@ async fn postgres_recheck_pending_detail_reports_unavailable_capability() {
     let case = insert_inbound(
         pool,
         "997001",
-        Utc::now() - Duration::minutes(5),
+        Timestamp::now() - Duration::minutes(5),
         Some(("MoogleMail", format!("[RTS] Auction buyer refund [{unknown}]"))),
         evidence(unknown, 100, &[]),
     )
     .await;
-    store.consume_due_settlement_return(Utc::now()).await.expect("消费").expect("必须消费");
+    store.consume_due_settlement_return(Timestamp::now()).await.expect("消费").expect("必须消费");
     assert!(!unavailable(&store, case).await, "隔离案件不显示核验能力说明");
     let command = SettlementReturnCommand::new(
         CommandId::from_uuid(Uuid::new_v4()),
@@ -76,7 +76,7 @@ async fn postgres_recheck_pending_detail_reports_unavailable_capability() {
         1,
         SettlementReturnAction::Recheck,
         "admin-returns",
-        Utc::now(),
+        Timestamp::now(),
     )
     .expect("构造核验命令");
     let result = store.handle_settlement_return(command).await.expect("提交重新核验");
@@ -150,14 +150,14 @@ async fn postgres_recheck_pending_detail_reports_unavailable_capability() {
 
     // 待核验案件照常被领取并写回；之后不再是待核验，不显示说明。
     let claim = store
-        .claim_due_return_recheck(Utc::now(), Utc::now() + Duration::minutes(5))
+        .claim_due_return_recheck(Timestamp::now(), Timestamp::now() + Duration::minutes(5))
         .await
         .expect("领取核验")
         .expect("必须领取");
     store
         .record_return_recheck(
             claim,
-            SettlementReturnRecheckOutcome::NotFound { observed_at: Utc::now() },
+            SettlementReturnRecheckOutcome::NotFound { observed_at: Timestamp::now() },
         )
         .await
         .expect("写回核验结果");
@@ -180,19 +180,19 @@ async fn recheck_pending_case(store: &auction_storage::DatabaseStore, mid: &str)
     let case = insert_inbound(
         store.postgres_pool(),
         mid,
-        Utc::now() - Duration::minutes(5),
+        Timestamp::now() - Duration::minutes(5),
         Some(("MoogleMail", format!("[RTS] Auction buyer refund [{unknown}]"))),
         evidence(unknown, 100, &[]),
     )
     .await;
-    store.consume_due_settlement_return(Utc::now()).await.expect("消费").expect("必须消费");
+    store.consume_due_settlement_return(Timestamp::now()).await.expect("消费").expect("必须消费");
     let command = SettlementReturnCommand::new(
         CommandId::from_uuid(Uuid::new_v4()),
         case,
         1,
         SettlementReturnAction::Recheck,
         "admin-returns",
-        Utc::now(),
+        Timestamp::now(),
     )
     .expect("构造核验命令");
     let result = store.handle_settlement_return(command).await.expect("提交重新核验");

@@ -1,6 +1,6 @@
 //! 结算履约对账结果的落库收口：deferred、failed 与人工对账。
 
-use chrono::Duration;
+use auction_time::Duration;
 use uuid::Uuid;
 
 use crate::errors::ApplicationError;

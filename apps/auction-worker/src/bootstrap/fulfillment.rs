@@ -19,7 +19,7 @@ use auction_integrations::mooglemail::{
     MoogleMailError, MoogleMailErrorCategory, MoogleMailGateway, MoogleMailInventoryCategory,
     MoogleMailWorld,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 pub(super) struct MoogleMailFulfillmentCustodyReader {
     pub(super) gateway: Arc<MoogleMailGateway>,
@@ -69,7 +69,7 @@ impl SettlementFulfillmentEvidenceReader for MoogleMailFulfillmentEvidenceReader
         };
         Box::pin(async move {
             let snapshot = gateway
-                .read_sent(world, &external_mail_id, Utc::now())
+                .read_sent(world, &external_mail_id, Timestamp::now())
                 .await
                 .map_err(mooglemail_evidence_error)?;
             Ok(SettlementFulfillmentSentEvidence {
@@ -89,7 +89,7 @@ impl SettlementFulfillmentEvidenceReader for MoogleMailFulfillmentEvidenceReader
     fn read_balance(
         &self,
         world: SettlementWorld,
-        observed_at: DateTime<Utc>,
+        observed_at: Timestamp,
     ) -> ApplicationFuture<'_, SettlementFulfillmentBalanceEvidence> {
         let (world, gateway) = match fulfillment_gateway(
             &self.gateways,
@@ -136,7 +136,7 @@ impl SettlementReturnMailReader for MoogleMailReturnMailReader {
         };
         Box::pin(async move {
             gateway
-                .read_returned_mail(world, &external_mail_id, Utc::now())
+                .read_returned_mail(world, &external_mail_id, Timestamp::now())
                 .await
                 .map_err(mooglemail_evidence_error)
         })
@@ -172,7 +172,7 @@ impl SettlementFulfillmentEvidenceReader for UnavailableFulfillmentEvidenceReade
     fn read_balance(
         &self,
         _world: SettlementWorld,
-        _observed_at: DateTime<Utc>,
+        _observed_at: Timestamp,
     ) -> ApplicationFuture<'_, SettlementFulfillmentBalanceEvidence> {
         Box::pin(async {
             Err(ApplicationError::CapabilityUnavailable(
@@ -209,7 +209,7 @@ impl auction_application::reconciliation::AssetInventoryReader for MoogleMailAss
     fn read_inventory(
         &self,
         world: SettlementWorld,
-        observed_at: DateTime<Utc>,
+        observed_at: Timestamp,
     ) -> ApplicationFuture<'_, auction_application::reconciliation::AssetArmoryObservation> {
         Box::pin(async move {
             let moogle_world = MoogleMailWorld::from(world);

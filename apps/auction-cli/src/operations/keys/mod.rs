@@ -14,7 +14,7 @@ use anyhow::Context;
 use auction_application::core::CliOperatorIdentity;
 use auction_config::DataKeyDomain;
 use auction_storage::DatabaseStore;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::json;
 use uuid::Uuid;
 
@@ -69,7 +69,7 @@ async fn status(config_dir: &ConfigDir, strict: bool) -> anyhow::Result<()> {
                         json!({ "envelopes": envelopes, "resolvable": resolvable }),
                     );
                 }
-                let now = Utc::now();
+                let now = Timestamp::now();
                 let previous = config
                     .data_key_previous(domain)
                     .iter()
@@ -187,7 +187,7 @@ async fn reencrypt(config_dir: &ConfigDir, args: KeysReencryptArgs) -> anyhow::R
         &config,
         auction_storage::DatabaseConnectionPurpose::CliOperations,
         async |store| {
-            let started_at = Utc::now();
+            let started_at = Timestamp::now();
             let mut processed = Vec::with_capacity(keyrings.len());
             let mut failure = None;
             for (domain, ring) in &keyrings {
@@ -279,7 +279,7 @@ impl ProcessedDomain {
 fn receipt_document(
     receipt_id: Uuid,
     applied: bool,
-    started_at: DateTime<Utc>,
+    started_at: Timestamp,
     processed: &[ProcessedDomain],
     failure: Option<(DataKeyDomain, FailureStage)>,
 ) -> serde_json::Value {
@@ -310,7 +310,7 @@ fn receipt_document(
             "stage": stage,
         })),
         "started_at": started_at.to_rfc3339(),
-        "finished_at": Utc::now().to_rfc3339(),
+        "finished_at": Timestamp::now().to_rfc3339(),
         "from_key_ids": from_key_ids,
         "domains": domains,
         "operator": { "os_uid": files::effective_uid() },

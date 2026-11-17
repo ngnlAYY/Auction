@@ -18,7 +18,7 @@ use auction_application::mail::{MailPollBatch, MailPollClaim, MailPollCompletion
 use auction_application::runtime_switches::RuntimeSwitches;
 use auction_application::scheduling::RecurringSchedule;
 use auction_observability::{WorkerLoop, WorkerResult};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use super::maintenance::run_loop as run_maintenance_loop;
@@ -38,8 +38,8 @@ use crate::worker::runtime::test_fixture::{
 struct EveryMinute;
 
 impl RecurringSchedule for EveryMinute {
-    fn next_after(&self, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
-        Some(now + chrono::Duration::minutes(1))
+    fn next_after(&self, now: Timestamp) -> Option<Timestamp> {
+        Some(now + auction_time::Duration::minutes(1))
     }
 }
 
@@ -115,7 +115,7 @@ impl MailPollStore for ScriptedMailbox {
         _mailbox_key: String,
         _world_id: String,
         external_mail_id: String,
-        _received_at: DateTime<Utc>,
+        _received_at: Timestamp,
     ) -> ApplicationFuture<'_, MailPollCompletion> {
         if self.unclaimed() {
             return unavailable();
@@ -139,8 +139,8 @@ impl MailPollStore for ScriptedMailbox {
     fn ensure_state(
         &self,
         _mailbox_key: String,
-        _now: DateTime<Utc>,
-        _scheduled_next_at: DateTime<Utc>,
+        _now: Timestamp,
+        _scheduled_next_at: Timestamp,
         _retry_maximum: Duration,
     ) -> ApplicationFuture<'_, AdminMailPollState> {
         unavailable()
@@ -150,8 +150,8 @@ impl MailPollStore for ScriptedMailbox {
         &self,
         mailbox_key: String,
         worker_id: String,
-        _now: DateTime<Utc>,
-        lease_until: DateTime<Utc>,
+        _now: Timestamp,
+        lease_until: Timestamp,
         _limit: u16,
         _force: bool,
     ) -> ApplicationFuture<'_, Vec<MailPollClaim>> {
@@ -176,8 +176,8 @@ impl MailPollStore for ScriptedMailbox {
     fn renew(
         &self,
         claim: MailPollClaim,
-        _now: DateTime<Utc>,
-        lease_until: DateTime<Utc>,
+        _now: Timestamp,
+        lease_until: Timestamp,
     ) -> ApplicationFuture<'_, MailPollClaim> {
         if self.unclaimed() {
             return unavailable();
@@ -209,7 +209,7 @@ impl MailPollStore for ScriptedMailbox {
         &self,
         claim: MailPollClaim,
         batch: MailPollBatch,
-        _retry_at: DateTime<Utc>,
+        _retry_at: Timestamp,
         failure_code: String,
         _safe_detail: String,
     ) -> ApplicationFuture<'_, AdminMailPollState> {
@@ -223,7 +223,7 @@ impl MailPollStore for ScriptedMailbox {
     fn fail(
         &self,
         claim: MailPollClaim,
-        _retry_at: DateTime<Utc>,
+        _retry_at: Timestamp,
         failure_code: String,
         _safe_detail: String,
     ) -> ApplicationFuture<'_, AdminMailPollState> {

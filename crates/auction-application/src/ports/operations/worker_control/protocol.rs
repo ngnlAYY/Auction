@@ -2,7 +2,7 @@
 //! 服务端（`auction-jobs`）与客户端（`auction-integrations` 及 Admin 装配）共用同一份
 //! 定义，路径或版本变化必须同时评估旧客户端的兼容处理。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use crate::mail::MailPollProgressSnapshot;
@@ -60,7 +60,7 @@ pub struct WorkerControlStatusResult {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkerControlMailProgressResult {
-    pub observed_at: DateTime<Utc>,
+    pub observed_at: Timestamp,
     pub pollers: Vec<MailPollProgressSnapshot>,
 }
 

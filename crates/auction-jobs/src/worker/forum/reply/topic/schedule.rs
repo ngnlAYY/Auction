@@ -16,8 +16,8 @@ pub(super) async fn completed_scan_times(
     runtime: &ForumReplyRuntime,
     topic: &auction_application::forum::ForumReplyTopic,
     clock: &dyn auction_application::core::Clock,
-    poll_interval: chrono::Duration,
-) -> Result<(chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>), ApplicationError> {
+    poll_interval: auction_time::Duration,
+) -> Result<(auction_time::Timestamp, auction_time::Timestamp), ApplicationError> {
     let completed_at = clock.now();
     let next_scan_at = next_scan_at(runtime, topic, completed_at, poll_interval).await?;
     Ok((completed_at, next_scan_at))
@@ -27,9 +27,9 @@ pub(super) async fn completed_scan_times(
 pub(super) async fn next_scan_at(
     runtime: &ForumReplyRuntime,
     topic: &auction_application::forum::ForumReplyTopic,
-    completed_at: chrono::DateTime<chrono::Utc>,
-    poll_interval: chrono::Duration,
-) -> Result<chrono::DateTime<chrono::Utc>, ApplicationError> {
+    completed_at: auction_time::Timestamp,
+    poll_interval: auction_time::Duration,
+) -> Result<auction_time::Timestamp, ApplicationError> {
     let interval = if topic.reply_phase == auction_application::forum::ForumReplyPhase::Final {
         match runtime.store.earliest_live_lot_deadline(topic.auction_id).await? {
             Some(earliest_deadline) => {
@@ -54,10 +54,10 @@ pub(super) async fn next_scan_at(
 pub(in crate::worker::forum::reply) async fn retry_scan_at(
     runtime: &ForumReplyRuntime,
     topic: &auction_application::forum::ForumReplyTopic,
-    failed_at: chrono::DateTime<chrono::Utc>,
-    poll_interval: chrono::Duration,
+    failed_at: auction_time::Timestamp,
+    poll_interval: auction_time::Duration,
     final_cadence: bool,
-) -> Option<chrono::DateTime<chrono::Utc>> {
+) -> Option<auction_time::Timestamp> {
     if !final_cadence {
         return failed_at.checked_add_signed(poll_interval);
     }
@@ -82,11 +82,11 @@ pub(in crate::worker::forum::reply) async fn retry_scan_at(
 /// 并夹在最短间隔与常规轮询间隔之间。截止已过时固定为最短间隔，
 /// 直到拍卖离开 live/final；这里只改变读取节奏，不改变任何裁决时刻。
 fn final_scan_interval(
-    completed_at: chrono::DateTime<chrono::Utc>,
-    earliest_deadline: chrono::DateTime<chrono::Utc>,
-    poll_interval: chrono::Duration,
-) -> chrono::Duration {
-    let minimum = chrono::Duration::seconds(FINAL_SCAN_MINIMUM_INTERVAL_SECONDS);
+    completed_at: auction_time::Timestamp,
+    earliest_deadline: auction_time::Timestamp,
+    poll_interval: auction_time::Duration,
+) -> auction_time::Duration {
+    let minimum = auction_time::Duration::seconds(FINAL_SCAN_MINIMUM_INTERVAL_SECONDS);
     if poll_interval <= minimum {
         return poll_interval;
     }
@@ -110,42 +110,43 @@ mod tests {
 
     #[test]
     fn final_scan_interval_tightens_near_earliest_deadline() {
-        let completed_at = chrono::DateTime::parse_from_rfc3339("2026-11-04T10:00:00Z")
-            .unwrap_or_else(|error| panic!("时间应合法: {error:?}"))
-            .with_timezone(&chrono::Utc);
-        let poll = chrono::Duration::minutes(5);
+        let completed_at = auction_time::Timestamp::parse_from_rfc3339("2026-11-04T10:00:00Z")
+            .unwrap_or_else(|error| panic!("时间应合法: {error:?}"));
+        let poll = auction_time::Duration::minutes(5);
 
         // 剩余 60 分钟时仍受常规轮询间隔限制。
-        let far = completed_at + chrono::Duration::minutes(60);
+        let far = completed_at + auction_time::Duration::minutes(60);
         assert_eq!(final_scan_interval(completed_at, far, poll), poll);
 
         // 剩余 60 秒时按 1/6 收紧到 10 秒。
-        let near = completed_at + chrono::Duration::seconds(60);
-        assert_eq!(final_scan_interval(completed_at, near, poll), chrono::Duration::seconds(10));
+        let near = completed_at + auction_time::Duration::seconds(60);
+        assert_eq!(
+            final_scan_interval(completed_at, near, poll),
+            auction_time::Duration::seconds(10)
+        );
 
         // 剩余不足 30 秒时收敛到最短间隔，而不是继续线性缩小。
-        let imminent = completed_at + chrono::Duration::seconds(12);
+        let imminent = completed_at + auction_time::Duration::seconds(12);
         assert_eq!(
             final_scan_interval(completed_at, imminent, poll),
-            chrono::Duration::seconds(FINAL_SCAN_MINIMUM_INTERVAL_SECONDS)
+            auction_time::Duration::seconds(FINAL_SCAN_MINIMUM_INTERVAL_SECONDS)
         );
 
         // 截止已过仍保持最短间隔，等到拍卖离开 live/final。
-        let past = completed_at - chrono::Duration::minutes(3);
+        let past = completed_at - auction_time::Duration::minutes(3);
         assert_eq!(
             final_scan_interval(completed_at, past, poll),
-            chrono::Duration::seconds(FINAL_SCAN_MINIMUM_INTERVAL_SECONDS)
+            auction_time::Duration::seconds(FINAL_SCAN_MINIMUM_INTERVAL_SECONDS)
         );
     }
 
     #[test]
     fn final_scan_interval_never_exceeds_poll_interval() {
-        let completed_at = chrono::DateTime::parse_from_rfc3339("2026-11-04T10:00:00Z")
-            .unwrap_or_else(|error| panic!("时间应合法: {error:?}"))
-            .with_timezone(&chrono::Utc);
+        let completed_at = auction_time::Timestamp::parse_from_rfc3339("2026-11-04T10:00:00Z")
+            .unwrap_or_else(|error| panic!("时间应合法: {error:?}"));
         // 轮询间隔本身低于最短间隔时不放大读取频率。
-        let short_poll = chrono::Duration::seconds(3);
-        let near = completed_at + chrono::Duration::seconds(6);
+        let short_poll = auction_time::Duration::seconds(3);
+        let near = completed_at + auction_time::Duration::seconds(6);
         assert_eq!(final_scan_interval(completed_at, near, short_poll), short_poll);
     }
 }

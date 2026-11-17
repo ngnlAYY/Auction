@@ -14,7 +14,7 @@ use auction_application::core::{Clock, RequestHash};
 use auction_application::recovery::RecoveryWorkStore;
 use auction_domain::{CommandId, deterministic_uuid};
 use auction_observability::WorkerResult;
-use chrono::Duration as ChronoDuration;
+use auction_time::TimeDelta;
 use serde::Serialize;
 
 use super::{mark_manual_reconcile, release_recovery_action};
@@ -24,7 +24,7 @@ pub(in crate::worker::runtime) async fn process_recovery_buyer_blacklist<C>(
     store: Arc<dyn RecoveryWorkStore>,
     blacklister: Arc<dyn RecoveryBuyerBlacklister>,
     clock: Arc<C>,
-    retry_delay: ChronoDuration,
+    retry_delay: TimeDelta,
     claim: auction_application::recovery::RecoveryActionClaim,
 ) -> WorkerResult
 where
@@ -184,5 +184,5 @@ struct RecoveryBuyerBlacklistRequest<'a> {
     buyer_user_id: uuid::Uuid,
     public_reason: &'a str,
     actor_id: &'static str,
-    occurred_at: chrono::DateTime<chrono::Utc>,
+    occurred_at: auction_time::Timestamp,
 }

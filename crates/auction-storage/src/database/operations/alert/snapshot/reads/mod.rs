@@ -4,7 +4,7 @@ use auction_application::core::ApplicationError;
 use auction_application::operations::{
     OperationsAlertCollectionOverdueRead, OperationsAlertSnapshot,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use crate::database::DatabaseStore;
 
@@ -23,7 +23,7 @@ pub(super) use self::fulfillment::FULFILLMENT_SNAPSHOT;
 
 pub(crate) async fn snapshot_postgres(
     store: &DatabaseStore,
-    now: DateTime<Utc>,
+    now: Timestamp,
     collection: OperationsAlertCollectionOverdueRead,
 ) -> Result<OperationsAlertSnapshot, ApplicationError> {
     // 每个 source 独立读取；单个 owner 的查询失败只生成该 source 的 unavailable signal，
@@ -72,6 +72,6 @@ const UNDISPOSED: &str = "NOT EXISTS (
                       AND disposition.resolves_alert
                 )";
 
-fn age_seconds(now: DateTime<Utc>, observed_at: Option<DateTime<Utc>>) -> i64 {
+fn age_seconds(now: Timestamp, observed_at: Option<Timestamp>) -> i64 {
     observed_at.map_or(0, |value| now.signed_duration_since(value).num_seconds().max(0))
 }

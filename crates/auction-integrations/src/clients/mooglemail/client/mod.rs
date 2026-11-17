@@ -84,7 +84,7 @@ pub struct MoogleMailClient {
     request_timeout: Duration,
     /// Sent / Inbox / Read Mail 水位每日完整校验的最大间隔；由 Worker 部署配置注入，
     /// 只决定何时多读一轮完整列表，不改变任何水位、证明或发送结果。
-    mail_scan_daily_full_interval: chrono::Duration,
+    mail_scan_daily_full_interval: auction_time::Duration,
     diagnostics: Option<Arc<dyn MailDiagnosticRecorder>>,
     ownership: Option<Arc<dyn AdminCredentialRuntimeOwnership>>,
     external_metrics: Arc<dyn auction_application::external_metrics::ExternalMetricsObserver>,
@@ -219,7 +219,7 @@ impl MoogleMailClient {
     }
 
     /// 注入部署配置的每日完整校验间隔；零值不生效，保持 24 小时默认。
-    pub fn with_mail_scan_daily_full_interval(mut self, interval: chrono::Duration) -> Self {
+    pub fn with_mail_scan_daily_full_interval(mut self, interval: auction_time::Duration) -> Self {
         if !interval.is_zero() {
             self.mail_scan_daily_full_interval = interval;
         }
@@ -227,7 +227,7 @@ impl MoogleMailClient {
     }
 
     /// 每日完整校验间隔；供 Sent/Inbox/Read Mail 的扫描计划共享同一取值。
-    pub(crate) fn mail_scan_daily_full_interval(&self) -> chrono::Duration {
+    pub(crate) fn mail_scan_daily_full_interval(&self) -> auction_time::Duration {
         self.mail_scan_daily_full_interval
     }
 
@@ -355,11 +355,11 @@ mod tests {
             auction_application::mail::MAIL_SCAN_DAILY_FULL_INTERVAL
         );
 
-        let client = client.with_mail_scan_daily_full_interval(chrono::Duration::hours(1));
-        assert_eq!(client.mail_scan_daily_full_interval(), chrono::Duration::hours(1));
+        let client = client.with_mail_scan_daily_full_interval(auction_time::Duration::hours(1));
+        assert_eq!(client.mail_scan_daily_full_interval(), auction_time::Duration::hours(1));
 
         // 零值不生效：配置校验已拒绝 0，这里保持默认而不是退化成每轮完整扫描。
-        let client = client.with_mail_scan_daily_full_interval(chrono::Duration::zero());
-        assert_eq!(client.mail_scan_daily_full_interval(), chrono::Duration::hours(1));
+        let client = client.with_mail_scan_daily_full_interval(auction_time::Duration::zero());
+        assert_eq!(client.mail_scan_daily_full_interval(), auction_time::Duration::hours(1));
     }
 }

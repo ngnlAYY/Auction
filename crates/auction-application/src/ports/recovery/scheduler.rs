@@ -1,7 +1,7 @@
 //! Worker 推进 recovery 的工作项、结果与存储端口。
 
 use auction_domain::{CommandId, SettlementId};
-use chrono::{DateTime, Duration, Utc};
+use auction_time::{Duration, Timestamp};
 use uuid::Uuid;
 
 use crate::ports::core::ApplicationFuture;
@@ -45,7 +45,7 @@ pub struct RecoveryReturnAdvance {
     pub blocking_code: Option<String>,
     pub action_kinds: Vec<String>,
     pub state_version: i64,
-    pub recorded_at: DateTime<Utc>,
+    pub recorded_at: Timestamp,
 }
 
 /// Worker 领取的一条 recovery action。
@@ -79,12 +79,12 @@ pub struct RecoveryActionClaim {
     pub activate_request_hash: Option<RequestHash>,
     pub state_version: i64,
     pub claim_token: Uuid,
-    pub lease_until: DateTime<Utc>,
+    pub lease_until: Timestamp,
     pub fencing_version: i64,
     pub retry_count: u32,
     pub worker_id: String,
-    pub claimed_at: DateTime<Utc>,
-    pub created_at: DateTime<Utc>,
+    pub claimed_at: Timestamp,
+    pub created_at: Timestamp,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -106,7 +106,7 @@ pub trait RecoveryWorkStore: Send + Sync {
     /// 并在同一事务中创建后续 recovery action。
     fn record_due_return(
         &self,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> ApplicationFuture<'_, Option<RecoveryReturnAdvance>>;
 
     /// 消费一封恢复流程不处理的结算退件：货款、退款、流拍/撤拍寄回、无恢复记录的付款，以及
@@ -116,21 +116,21 @@ pub trait RecoveryWorkStore: Send + Sync {
     /// 返回 `None`。复用 recovery 循环的退件阶段与存储句柄，不新增 Worker 装配。
     fn consume_due_settlement_return(
         &self,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> ApplicationFuture<'_, Option<crate::ports::settlement::SettlementReturnConsumption>>;
 
     /// 推进一个当前可处理的 case；没有 due 工作时返回 `None`。
     fn advance_due_case(
         &self,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> ApplicationFuture<'_, Option<RecoveryCaseAdvance>>;
 
     /// 领取一条 payment reminder 或后续 recovery action；返回值必须来自数据库 fence。
     fn claim_due_action(
         &self,
         worker_id: String,
-        now: DateTime<Utc>,
-        lease_until: DateTime<Utc>,
+        now: Timestamp,
+        lease_until: Timestamp,
     ) -> ApplicationFuture<'_, Option<RecoveryActionClaim>>;
 
     /// 将已准备的 delivery 与 pending action 原子关联；关联时刻取数据库时钟。
@@ -157,21 +157,21 @@ pub trait RecoveryWorkStore: Send + Sync {
         proof_kind: String,
         proof_reference: String,
         proof_digest: [u8; 32],
-        observed_at: DateTime<Utc>,
+        observed_at: Timestamp,
     ) -> ApplicationFuture<'_, ()>;
 
     /// 读取 delivery 结果并在同一 fencing 条件下推进 action。
     fn observe_action(
         &self,
         claim: RecoveryActionClaim,
-        observed_at: DateTime<Utc>,
+        observed_at: Timestamp,
     ) -> ApplicationFuture<'_, RecoveryActionOutcome>;
 
     /// 外部 owner 暂时不可用时释放 action 并设置持久化退避。
     fn release_action(
         &self,
         claim: RecoveryActionClaim,
-        retry_at: DateTime<Utc>,
+        retry_at: Timestamp,
         failure_code: String,
     ) -> ApplicationFuture<'_, ()>;
 
@@ -190,7 +190,7 @@ pub trait RecoveryResolutionStore: Send + Sync {
     /// 推进一个到期的 guarded relist；没有 due 工作时返回 `None`。
     fn advance_due_relist(
         &self,
-        now: DateTime<Utc>,
+        now: Timestamp,
         retry_after: Duration,
     ) -> ApplicationFuture<'_, Option<RecoveryResolutionAdvance>>;
 
@@ -198,12 +198,12 @@ pub trait RecoveryResolutionStore: Send + Sync {
     /// （各自追加独立的完成事实，代管不冒充退款已完成）。
     fn complete_due_refund(
         &self,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> ApplicationFuture<'_, Option<RecoveryResolutionAdvance>>;
 
     /// 推进已取回装备的 COD 退回：前两次重发 COD，第三次把装备退回卖家并收口原成交。
     fn advance_due_cod_return(
         &self,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> ApplicationFuture<'_, Option<RecoveryResolutionAdvance>>;
 }

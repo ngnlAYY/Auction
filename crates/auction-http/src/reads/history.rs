@@ -6,11 +6,11 @@ use auction_application::auction::{
 };
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_contracts::{ApiErrorResponse, ApiResponse};
+use auction_time::{Duration, Timestamp};
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::{HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
-use chrono::{DateTime, Duration, NaiveDate, TimeZone, Utc};
 
 use super::mapping::{map_bid_log_page, map_price_history_page};
 use crate::diagnostics;
@@ -313,7 +313,7 @@ fn parse_optional_history_text(
 fn parse_history_date(
     value: Option<&String>,
     exclusive_next_day: bool,
-) -> Result<Option<DateTime<Utc>>, ()> {
+) -> Result<Option<Timestamp>, ()> {
     let Some(value) = value else {
         return Ok(None);
     };
@@ -323,12 +323,11 @@ fn parse_history_date(
     if value != value.trim() {
         return Err(());
     }
-    let date = NaiveDate::parse_from_str(value, "%Y-%m-%d").map_err(|_| ())?;
-    if date.format("%Y-%m-%d").to_string() != *value {
+    let date = auction_time::parse_date(value).ok_or(())?;
+    if date.strftime("%Y-%m-%d").to_string() != *value {
         return Err(());
     }
-    let midnight = date.and_hms_opt(0, 0, 0).ok_or(())?;
-    let timestamp = Utc.from_utc_datetime(&midnight);
+    let timestamp = Timestamp::from_utc_datetime(date.at(0, 0, 0, 0)).ok_or(())?;
     if exclusive_next_day {
         timestamp.checked_add_signed(Duration::days(1)).map(Some).ok_or(())
     } else {
@@ -360,11 +359,11 @@ mod tests {
         PublicDefeatedProxy,
     };
     use auction_application::core::ApplicationFuture;
+    use auction_time::Timestamp;
     use axum::Router;
     use axum::body::{Body, to_bytes};
     use axum::http::{Request, StatusCode};
     use axum::routing::get;
-    use chrono::DateTime;
     use serde_json::{Value, json};
     use tower::ServiceExt;
     use uuid::Uuid;
@@ -400,7 +399,7 @@ mod tests {
             accepted_state_version: state_version,
             fact_index: 1,
             mechanism: "proxy".to_owned(),
-            created_at: DateTime::from_timestamp(1_763_124_640, 0).expect("fixture time"),
+            created_at: Timestamp::from_timestamp(1_763_124_640, 0).expect("fixture time"),
             defeated_proxy,
         }
     }

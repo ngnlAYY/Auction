@@ -4,7 +4,8 @@
 use std::path::Path;
 
 use anyhow::Context;
-use chrono::{DateTime, NaiveDate, TimeZone, Utc};
+use auction_time::Timestamp;
+use jiff::civil;
 use serde::Deserialize;
 
 use super::artifact::Artifact;
@@ -21,7 +22,7 @@ pub(crate) struct DrillEvidence {
     pub(crate) before_version: i64,
     pub(crate) after_version: i64,
     pub(crate) minimum_window_minutes: u32,
-    pub(crate) date_utc: NaiveDate,
+    pub(crate) date_utc: civil::Date,
 }
 
 /// 本次部署的核对输入；由命令参数与已校验制品组成。
@@ -31,7 +32,7 @@ pub(crate) struct Requirements<'a> {
     pub(crate) expected_version: i64,
     pub(crate) protection_window_minutes: u32,
     pub(crate) max_age_days: u32,
-    pub(crate) now: DateTime<Utc>,
+    pub(crate) now: Timestamp,
 }
 
 pub(crate) async fn inspect(
@@ -57,8 +58,8 @@ struct DrillReceipt {
     operator: String,
     reviewer: String,
     date_utc: String,
-    started_at: Option<DateTime<Utc>>,
-    finished_at: Option<DateTime<Utc>>,
+    started_at: Option<Timestamp>,
+    finished_at: Option<Timestamp>,
     artifact: DrillArtifact,
     backup: DrillBackup,
     postgres: DrillPostgres,
@@ -86,7 +87,7 @@ struct DrillArtifact {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct DrillBackup {
-    created_at: Option<DateTime<Utc>>,
+    created_at: Option<Timestamp>,
     schema_version: Option<i64>,
     database_name_sha256: String,
     files: Vec<DrillBackupFile>,
@@ -130,8 +131,8 @@ struct DrillMigration {
     after_version: Option<i64>,
     expected_version: Option<i64>,
     applied: Option<i64>,
-    started_at: Option<DateTime<Utc>>,
-    finished_at: Option<DateTime<Utc>>,
+    started_at: Option<Timestamp>,
+    finished_at: Option<Timestamp>,
     elapsed_seconds: Option<f64>,
     exit_code: Option<i32>,
     result: String,
@@ -154,7 +155,7 @@ struct DrillProbe {
     result: String,
     http_status: Option<i64>,
     exit_code: Option<i32>,
-    checked_at: Option<DateTime<Utc>>,
+    checked_at: Option<Timestamp>,
     pid: Option<i64>,
     evidence: String,
 }
@@ -171,9 +172,9 @@ struct DrillConsistency {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct DrillDowntime {
-    started_at: Option<DateTime<Utc>>,
-    drained_at: Option<DateTime<Utc>>,
-    ready_at: Option<DateTime<Utc>>,
+    started_at: Option<Timestamp>,
+    drained_at: Option<Timestamp>,
+    ready_at: Option<Timestamp>,
     measured_seconds: Option<f64>,
     estimated_seconds: Option<f64>,
     estimate_basis: String,
@@ -218,7 +219,7 @@ impl DrillReceipt {
     }
 
     /// 格式、标识、执行人与审核人分离，以及演练日期不在未来、不超过最大年龄。
-    fn validate_identity(&self, requirements: &Requirements<'_>) -> anyhow::Result<NaiveDate> {
+    fn validate_identity(&self, requirements: &Requirements<'_>) -> anyhow::Result<civil::Date> {
         if self.format != FORMAT {
             anyhow::bail!("迁移演练回执格式不受支持：{}", self.format);
         }
@@ -231,15 +232,14 @@ impl DrillReceipt {
         if self.operator == self.reviewer {
             anyhow::bail!("迁移演练回执必须由执行人以外的人审核");
         }
-        let date = NaiveDate::parse_from_str(&self.date_utc, "%Y-%m-%d")
-            .ok()
+        let date = auction_time::parse_date(&self.date_utc)
             .context("迁移演练回执的 date_utc 必须是 YYYY-MM-DD")?;
-        let midnight = date.and_hms_opt(0, 0, 0).context("迁移演练回执日期无法表示")?;
-        let start = Utc.from_utc_datetime(&midnight);
+        let start = Timestamp::from_utc_datetime(date.at(0, 0, 0, 0))
+            .context("迁移演练回执日期无法表示")?;
         if start > requirements.now {
             anyhow::bail!("迁移演练回执的日期在未来");
         }
-        let max_age = chrono::Duration::days(i64::from(requirements.max_age_days) + 1);
+        let max_age = auction_time::Duration::days(i64::from(requirements.max_age_days) + 1);
         if requirements.now - start > max_age {
             anyhow::bail!(
                 "迁移演练回执超过 {} 天，不能证明本次迁移区间；请重做演练",

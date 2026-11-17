@@ -528,7 +528,7 @@ async fn first_page_tail(store: &DatabaseStore) -> Result<PublicPriceHistoryEntr
         lot_id: last.lot_id.to_string(),
         auction_sequence: last.auction_sequence,
         ordering_lot_number: last.ordering_lot_number,
-        closed_at: last.closed_at.format("%Y-%m-%d %H:%M:%S%.6f%:z").to_string(),
+        closed_at: last.closed_at.strftime("%Y-%m-%d %H:%M:%S%.6f%:z").to_string(),
     })
 }
 

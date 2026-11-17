@@ -37,7 +37,7 @@ use auction_domain::{
     AuctionId, AuctionRules, AuctionStatus, BidAmount, BidId, CompetitionPlan, CompetitionTrigger,
     LotBidState, LotId, SettlementWorld, UserId,
 };
-use chrono::{DateTime, SecondsFormat, Utc};
+use auction_time::{SecondsFormat, Timestamp};
 use uuid::Uuid;
 
 use super::{FinalScanSchedule, ForumReplyPorts, ForumReplyRuntime, run_cycle};
@@ -54,12 +54,12 @@ const LEASE: Duration = Duration::from_secs(300);
 /// 截止前 60 秒：Final 间隔 = 剩余 / 6 = 10 秒。
 const DEADLINE_AFTER: Duration = Duration::from_secs(60);
 
-fn at(offset: Duration) -> DateTime<Utc> {
-    base_time() + chrono::Duration::from_std(offset).unwrap()
+fn at(offset: Duration) -> Timestamp {
+    base_time() + auction_time::Duration::from_std(offset).unwrap()
 }
 
-fn before(offset: Duration) -> DateTime<Utc> {
-    base_time() - chrono::Duration::from_std(offset).unwrap()
+fn before(offset: Duration) -> Timestamp {
+    base_time() - auction_time::Duration::from_std(offset).unwrap()
 }
 
 fn topic(auction_id: AuctionId, reply_phase: ForumReplyPhase) -> ForumReplyTopic {
@@ -89,7 +89,7 @@ fn topic(auction_id: AuctionId, reply_phase: ForumReplyPhase) -> ForumReplyTopic
 
 struct TopicRow {
     topic: ForumReplyTopic,
-    next_scan_at: DateTime<Utc>,
+    next_scan_at: Timestamp,
     leased: bool,
     last_error: Option<String>,
     /// 拍卖已离开可扫描状态（例如撤下或终态不再刷新），领取时不再返回。
@@ -100,15 +100,15 @@ struct TopicRow {
 struct FakeReplyStore {
     rows: Mutex<Vec<TopicRow>>,
     /// 每次领取调用的时刻，无论是否领到主题。
-    attempts: Mutex<Vec<DateTime<Utc>>>,
-    claims: Mutex<Vec<(DateTime<Utc>, AuctionId)>>,
+    attempts: Mutex<Vec<Timestamp>>,
+    claims: Mutex<Vec<(Timestamp, AuctionId)>>,
     /// 账本中仍有 pending 命令（例如序列化冲突后待重试）的拍卖。
     pending: Vec<AuctionId>,
     /// 为 true 时领取调用本身失败（例如连接池 acquire 超时），不改变任何行。
     claims_fail: Mutex<bool>,
     /// 这些拍卖的失败处置写入失败（例如连接池 acquire 超时），内容租约保持被持有。
     unrecordable: Mutex<Vec<AuctionId>>,
-    earliest_deadline: DateTime<Utc>,
+    earliest_deadline: Timestamp,
     /// 配置后回帖者身份解析成功，命令账本记在内存里；未配置时这些端口失败关闭。
     bidder: Option<ForumBidderIdentity>,
     /// lot A01 的权威起拍价。
@@ -155,17 +155,17 @@ impl FakeReplyStore {
     }
 
     /// 持久化的下一次扫描时刻与最近错误码。
-    fn persisted(&self, auction_id: AuctionId) -> (DateTime<Utc>, Option<String>) {
+    fn persisted(&self, auction_id: AuctionId) -> (Timestamp, Option<String>) {
         let rows = self.rows.lock().unwrap();
         let row = rows.iter().find(|row| row.topic.auction_id == auction_id).unwrap();
         (row.next_scan_at, row.last_error.clone())
     }
 
-    fn claims(&self) -> Vec<(DateTime<Utc>, AuctionId)> {
+    fn claims(&self) -> Vec<(Timestamp, AuctionId)> {
         self.claims.lock().unwrap().clone()
     }
 
-    fn attempts(&self) -> Vec<DateTime<Utc>> {
+    fn attempts(&self) -> Vec<Timestamp> {
         self.attempts.lock().unwrap().clone()
     }
 
@@ -174,12 +174,7 @@ impl FakeReplyStore {
         change(rows.iter_mut().find(|row| row.topic.auction_id == auction_id).unwrap());
     }
 
-    fn release(
-        &self,
-        auction_id: AuctionId,
-        next_scan_at: DateTime<Utc>,
-        last_error: Option<String>,
-    ) {
+    fn release(&self, auction_id: AuctionId, next_scan_at: Timestamp, last_error: Option<String>) {
         let mut rows = self.rows.lock().unwrap();
         let row = rows.iter_mut().find(|row| row.topic.auction_id == auction_id).unwrap();
         assert!(row.leased, "只能释放当前持有的内容租约");
@@ -193,8 +188,8 @@ impl ForumReplyStore for FakeReplyStore {
     fn claim_published_topics(
         &self,
         _worker_id: String,
-        now: DateTime<Utc>,
-        _lease_until: DateTime<Utc>,
+        now: Timestamp,
+        _lease_until: Timestamp,
         available_worlds: Vec<SettlementWorld>,
         limit: u16,
     ) -> ApplicationFuture<'_, Vec<ForumReplyTopic>> {
@@ -324,7 +319,7 @@ impl ForumReplyStore for FakeReplyStore {
     fn earliest_live_lot_deadline(
         &self,
         _auction_id: AuctionId,
-    ) -> ApplicationFuture<'_, Option<DateTime<Utc>>> {
+    ) -> ApplicationFuture<'_, Option<Timestamp>> {
         let deadline = self.earliest_deadline;
         Box::pin(async move { Ok(Some(deadline)) })
     }
@@ -356,8 +351,8 @@ impl ForumReplyStore for FakeReplyStore {
         _catalog: ForumRenderedThread,
         _system_log: ForumRenderedPost,
         _processed_through_post_number: i32,
-        _updated_at: DateTime<Utc>,
-        next_scan_at: DateTime<Utc>,
+        _updated_at: Timestamp,
+        next_scan_at: Timestamp,
     ) -> ApplicationFuture<'_, ()> {
         self.release(topic.auction_id, next_scan_at, None);
         Box::pin(async { Ok(()) })
@@ -369,7 +364,7 @@ impl ForumReplyStore for FakeReplyStore {
         _catalog: ForumRenderedThread,
         _system_log: ForumRenderedPost,
         _processed_through_post_number: i32,
-        _updated_at: DateTime<Utc>,
+        _updated_at: Timestamp,
     ) -> ApplicationFuture<'_, ()> {
         // 部分进度保留当前 claim；随后的失败处置负责释放并写入重试水位。
         Box::pin(async { Ok(()) })
@@ -388,8 +383,8 @@ impl ForumReplyStore for FakeReplyStore {
         &self,
         topic: ForumReplyTopic,
         _processed_through_post_number: i32,
-        _scanned_at: DateTime<Utc>,
-        next_scan_at: DateTime<Utc>,
+        _scanned_at: Timestamp,
+        next_scan_at: Timestamp,
     ) -> ApplicationFuture<'_, ()> {
         self.release(topic.auction_id, next_scan_at, None);
         Box::pin(async { Ok(()) })
@@ -398,8 +393,8 @@ impl ForumReplyStore for FakeReplyStore {
     fn fail_topic_scan(
         &self,
         topic: ForumReplyTopic,
-        _failed_at: DateTime<Utc>,
-        retry_at: DateTime<Utc>,
+        _failed_at: Timestamp,
+        retry_at: Timestamp,
         failure_code: String,
     ) -> ApplicationFuture<'_, ()> {
         if self.unrecordable.lock().unwrap().contains(&topic.auction_id) {
@@ -607,7 +602,7 @@ impl ForumCredentialAvailability for InertForumPorts {
     }
 }
 
-fn row(topic: ForumReplyTopic, next_scan_at: DateTime<Utc>) -> TopicRow {
+fn row(topic: ForumReplyTopic, next_scan_at: Timestamp) -> TopicRow {
     TopicRow { topic, next_scan_at, leased: false, last_error: None, hidden: false }
 }
 
@@ -735,8 +730,8 @@ async fn duplicate_claim_keeps_final_cadence_when_another_topic_runs_long() {
     );
     // 重领时剩余 45 秒，Final 间隔 7.5 秒；修复前会被推到常规轮询之后（+300 秒）。
     let (first_next, first_error) = store.persisted(first);
-    assert_eq!(first_next, now + chrono::Duration::milliseconds(7_500));
-    assert!(first_next <= now + chrono::Duration::seconds(10));
+    assert_eq!(first_next, now + auction_time::Duration::milliseconds(7_500));
+    assert!(first_next <= now + auction_time::Duration::seconds(10));
     assert_eq!(first_error, None);
     assert_eq!(outcome.earliest_final_scan, Some(Duration::from_millis(7_500)));
 }

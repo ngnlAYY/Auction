@@ -7,7 +7,7 @@
 use std::{fs, io::ErrorKind, path::Path};
 
 use anyhow::Context;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use super::model::{FORMAT, Outcome, RunReceipt};
 use crate::support::files::MAX_READ_BYTES;
@@ -24,7 +24,7 @@ pub(crate) enum TerminalOutcome {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct TerminalRun {
     pub outcome: TerminalOutcome,
-    pub finished_at: DateTime<Utc>,
+    pub finished_at: Timestamp,
 }
 
 /// 读取 `<state-dir>/receipts/` 中开始时间最晚的终态回执。
@@ -38,7 +38,7 @@ pub(crate) fn latest_terminal_run(state_dir: &Path) -> anyhow::Result<Option<Ter
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error).context("读取备份回执目录失败"),
     };
-    let mut latest: Option<(DateTime<Utc>, TerminalOutcome, DateTime<Utc>)> = None;
+    let mut latest: Option<(Timestamp, TerminalOutcome, Timestamp)> = None;
     for entry in entries {
         let entry = entry.context("枚举备份回执失败")?;
         let file_name = entry.file_name();

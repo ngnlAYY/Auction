@@ -7,7 +7,7 @@
 //! 付款收口。任何未知原值都让判定失败关闭，不猜成相邻的正常阶段。
 
 use auction_domain::{SettlementObligationKind, SettlementObligationState, SettlementWorld};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use super::facts::{PublicFulfillmentLot, PublicFulfillmentObligation, PublicFulfillmentRecovery};
 
@@ -141,7 +141,7 @@ pub struct PublicFulfillmentView {
     /// 成交 lot 的买家与成交价；流拍或缺结算明细时为 `None`。
     pub sale: Option<PublicFulfillmentSale>,
     /// 只在等待付款、已逾期与重寄后等待付款三种状态下给出当前付款期限。
-    pub payment_deadline_at: Option<DateTime<Utc>>,
+    pub payment_deadline_at: Option<Timestamp>,
     /// 只在成交 lot 发生过 COD 退回时给出。
     pub cod_returns: Option<PublicFulfillmentCodReturns>,
 }
@@ -153,7 +153,7 @@ pub struct PublicFulfillmentView {
 pub fn public_fulfillment_view(
     lot: &PublicFulfillmentLot,
     world_id: &str,
-    read_at: DateTime<Utc>,
+    read_at: Timestamp,
 ) -> Result<PublicFulfillmentView, &'static str> {
     lot.validate()?;
     let world = SettlementWorld::from_name(world_id).ok_or("公开履约场次世界不在闭集内")?;
@@ -223,7 +223,7 @@ fn sold_status(
     world: SettlementWorld,
     steps: &Steps,
     recovery: Option<&Recovery<'_>>,
-    read_at: DateTime<Utc>,
+    read_at: Timestamp,
 ) -> PublicFulfillmentStatus {
     if lot.final_price.is_none() {
         return PublicFulfillmentStatus::Unknown;
@@ -504,7 +504,7 @@ impl<'a> Recovery<'a> {
 
 #[cfg(test)]
 mod tests {
-    use chrono::{DateTime, Duration, Utc};
+    use auction_time::{Duration, Timestamp};
     use uuid::Uuid;
 
     use super::{
@@ -515,8 +515,8 @@ mod tests {
         PublicFulfillmentLot, PublicFulfillmentObligation, PublicFulfillmentRecovery,
     };
 
-    fn now() -> DateTime<Utc> {
-        DateTime::from_timestamp(1_763_200_000, 0).expect("固定读取时刻")
+    fn now() -> Timestamp {
+        Timestamp::from_timestamp(1_763_200_000, 0).expect("固定读取时刻")
     }
 
     fn obligation(

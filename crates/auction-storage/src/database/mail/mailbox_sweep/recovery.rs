@@ -4,7 +4,7 @@ use auction_application::delivery::{
     DeliverySendCredentialBinding, DeliverySendExpectation, DeliveryTakeExpectation,
 };
 use auction_application::mail::sent_list_minute_start;
-use chrono::{DateTime, TimeDelta, Utc};
+use auction_time::{TimeDelta, Timestamp};
 use serde_json::Value;
 use sqlx::Postgres;
 use uuid::Uuid;
@@ -76,8 +76,8 @@ struct RecoveryDelivery {
     fencing_version: i64,
     status: String,
     external_reference: Option<String>,
-    sending_at: Option<DateTime<Utc>>,
-    completed_at: Option<DateTime<Utc>>,
+    sending_at: Option<Timestamp>,
+    completed_at: Option<Timestamp>,
 }
 
 /// 调用者已经按 runtime→funding→credential→delivery 锁序持锁；None 不算新增恢复。
@@ -88,7 +88,7 @@ pub(super) async fn bind_send(
     mid: &str,
     metadata: &Value,
     expected: Option<&DeliverySendExpectation>,
-) -> Result<Option<(String, String, DateTime<Utc>)>, RecoveryError> {
+) -> Result<Option<(String, String, Timestamp)>, RecoveryError> {
     let Some(delivery): Option<RecoveryDelivery> = sqlx::query_as(
         "SELECT origin_kind,origin_id,recipient,COALESCE(payload_world,'main') AS world_id,
                 payload,fencing_version,status,external_reference,sending_at,completed_at
@@ -138,10 +138,9 @@ pub(super) async fn bind_send(
         let sent_at = metadata
             .get("sent_at")
             .and_then(Value::as_str)
-            .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
-            .map(|value| value.with_timezone(&Utc))
+            .and_then(|value| Timestamp::parse_from_rfc3339(value).ok())
             .ok_or(RecoveryError::Rejected)?;
-        let now: DateTime<Utc> =
+        let now: Timestamp =
             sqlx::query_scalar("SELECT clock_timestamp()").fetch_one(&mut **tx).await?;
         // 列表时间只到分钟：开始围栏按分钟起点比较，歧义检查覆盖整分钟；
         // 同内容、同凭据且时窗与该分钟重叠的任一未绑定尝试都使本次恢复失败关闭。
@@ -240,7 +239,7 @@ async fn ambiguous_attempt(
     delivery_id: Uuid,
     fencing_version: i64,
     expectation: &DeliverySendExpectation,
-    sent_window: Option<(DateTime<Utc>, DateTime<Utc>)>,
+    sent_window: Option<(Timestamp, Timestamp)>,
 ) -> Result<bool, sqlx::Error> {
     // 与 Rust eq_ignore_ascii_case 同义，只折叠 ASCII；不能用受 locale 影响的 Unicode lower。
     sqlx::query_scalar(

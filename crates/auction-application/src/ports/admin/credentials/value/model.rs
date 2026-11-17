@@ -1,7 +1,7 @@
 //! Admin 凭据闭集模型、安全投影和分页值对象。
 
 use auction_domain::valid_text;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -125,9 +125,9 @@ pub struct AdminCredential {
     pub player_name: Option<String>,
     pub status: AdminCredentialStatus,
     pub state_version: i64,
-    pub created_at: DateTime<Utc>,
-    pub rotated_at: Option<DateTime<Utc>>,
-    pub updated_at: DateTime<Utc>,
+    pub created_at: Timestamp,
+    pub rotated_at: Option<Timestamp>,
+    pub updated_at: Timestamp,
 }
 
 impl AdminCredential {

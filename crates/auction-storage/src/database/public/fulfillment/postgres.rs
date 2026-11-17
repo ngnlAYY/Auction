@@ -11,7 +11,7 @@ use auction_application::public::{
     PublicFulfillmentAuction, PublicFulfillmentLot, PublicFulfillmentObligation,
     PublicFulfillmentPage, PublicFulfillmentRecovery, PublicFulfillmentRequest,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Row;
 use sqlx::postgres::PgRow;
 use uuid::Uuid;
@@ -79,7 +79,7 @@ pub(super) async fn list(
             .map_err(|error| storage_error_from(error, "提交公开履约进度空结果事务失败"))?;
         return Ok(None);
     };
-    let read_at: DateTime<Utc> = auction
+    let read_at: Timestamp = auction
         .try_get("read_at")
         .map_err(|error| storage_error_from(error, "读取公开履约进度读取时刻失败"))?;
     let auction = PublicFulfillmentAuction {
@@ -267,7 +267,7 @@ fn map_recovery(row: &PgRow) -> Result<Option<PublicFulfillmentRecovery>, Applic
     let Some(stage) = stage else {
         return Ok(None);
     };
-    let payment_deadline_at: Option<DateTime<Utc>> = row
+    let payment_deadline_at: Option<Timestamp> = row
         .try_get("recovery_payment_deadline_at")
         .map_err(|error| storage_error_from(error, "读取公开履约付款期限失败"))?;
     let cod_return_count: Option<i32> = row

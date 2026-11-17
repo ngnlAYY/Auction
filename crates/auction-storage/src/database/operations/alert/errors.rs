@@ -14,6 +14,7 @@ pub(super) async fn rollback_operations_alert(
     Err(storage_error(message))
 }
 
-pub(super) fn chrono_duration(value: Duration) -> Result<chrono::Duration, ApplicationError> {
-    chrono::Duration::from_std(value).map_err(|_| storage_error("operations alert 时间范围溢出"))
+pub(super) fn chrono_duration(value: Duration) -> Result<auction_time::Duration, ApplicationError> {
+    auction_time::Duration::from_std(value)
+        .map_err(|_| storage_error("operations alert 时间范围溢出"))
 }

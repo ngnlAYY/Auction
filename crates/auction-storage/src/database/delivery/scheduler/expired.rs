@@ -1,6 +1,6 @@
 //! 过期sending逐条隔离，早锁持久资金账户；不能凭TTL释放占用。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
@@ -13,7 +13,7 @@ use crate::database::settlement::funding;
 
 pub(super) async fn reconcile(
     pool: &crate::database::TrackedPool<Postgres>,
-    now: DateTime<Utc>,
+    now: Timestamp,
     grace_micros: i64,
     notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
 ) -> Result<(), auction_application::core::RepositoryError> {
@@ -46,7 +46,7 @@ pub(super) async fn reconcile(
 async fn expire_one(
     pool: &crate::database::TrackedPool<Postgres>,
     id: Uuid,
-    now: DateTime<Utc>,
+    now: Timestamp,
     grace_micros: i64,
     notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
 ) -> Result<(), OutcomeError> {
@@ -84,7 +84,7 @@ async fn expire_one(
         // 过期 sending 的远端结果未知：按通知种类记一次失败与延迟，不改变人工对账语义。
         let payload: serde_json::Value = row.try_get("payload")?;
         let origin_kind: String = row.try_get("origin_kind")?;
-        let created_at: DateTime<Utc> = row.try_get("created_at")?;
+        let created_at: Timestamp = row.try_get("created_at")?;
         if let Some(kind) =
             auction_application::notification_metrics::NotificationKind::from_delivery(
                 &origin_kind,

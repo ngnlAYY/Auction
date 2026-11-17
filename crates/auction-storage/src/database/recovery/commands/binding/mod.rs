@@ -13,7 +13,7 @@
 mod predicate;
 
 use auction_application::recovery::RecoveryCommandError;
-use chrono::{DateTime, Duration, Utc};
+use auction_time::{Duration, Timestamp};
 use sqlx::{PgConnection, Postgres};
 use uuid::Uuid;
 
@@ -169,7 +169,7 @@ pub(super) async fn block_unattributed_recovery(
     recovery_id: Uuid,
     state_version: i64,
     blocker: SendAttributionBlocker,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<i64, RecoveryCommandError> {
     let (next_state_version, return_mail_id): (i64, Option<Uuid>) = sqlx::query_as(
         r#"UPDATE public.settlement_recoveries
@@ -212,7 +212,7 @@ pub(super) async fn release_attributed_recovery(
     recovery_id: Uuid,
     state_version: i64,
     rule: SendAttributionRule,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<i64, RecoveryCommandError> {
     let (next_state_version, return_mail_id): (i64, Option<Uuid>) = sqlx::query_as(
         r#"UPDATE public.settlement_recoveries
@@ -252,7 +252,7 @@ pub(super) async fn defer_unattributed_recheck(
     transaction: &mut Transaction<'_, Postgres>,
     recovery_id: Uuid,
     state_version: i64,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<(), RecoveryCommandError> {
     let updated = sqlx::query(
         r#"UPDATE public.settlement_recoveries
@@ -273,7 +273,7 @@ pub(super) async fn defer_unattributed_recheck(
     Ok(())
 }
 
-fn recheck_at(now: DateTime<Utc>) -> Result<DateTime<Utc>, RecoveryCommandError> {
+fn recheck_at(now: Timestamp) -> Result<Timestamp, RecoveryCommandError> {
     now.checked_add_signed(Duration::minutes(SEND_ATTRIBUTION_RECHECK_MINUTES))
         .ok_or(RecoveryCommandError::InvalidStoredResult)
 }

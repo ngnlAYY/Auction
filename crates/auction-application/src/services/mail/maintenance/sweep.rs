@@ -169,7 +169,7 @@ mod tests {
         time::Instant,
     };
 
-    use chrono::{TimeZone, Utc};
+    use auction_time::Timestamp;
     use serde_json::Value;
     use uuid::Uuid;
 
@@ -205,8 +205,8 @@ mod tests {
 
     struct NoopClock;
     impl Clock for NoopClock {
-        fn now(&self) -> chrono::DateTime<Utc> {
-            Utc.with_ymd_and_hms(2026, 11, 7, 7, 0, 0).single().expect("fixture time")
+        fn now(&self) -> auction_time::Timestamp {
+            Timestamp::from_ymd_hms(2026, 11, 7, 7, 0, 0).expect("fixture time")
         }
     }
 
@@ -298,7 +298,7 @@ mod tests {
             &'a self,
             _world_id: &'a str,
             entry: &'a MoogleMailboxSentEntry,
-            _observed_at: chrono::DateTime<Utc>,
+            _observed_at: auction_time::Timestamp,
         ) -> ApplicationFuture<'a, MoogleMailboxSentState> {
             let state = MoogleMailboxSentState {
                 external_mail_id: entry.external_mail_id.clone(),
@@ -462,7 +462,10 @@ mod tests {
         }
     }
 
-    fn candidate(sending_at: chrono::DateTime<Utc>, reference: &str) -> MoogleMailboxUnprovenSend {
+    fn candidate(
+        sending_at: auction_time::Timestamp,
+        reference: &str,
+    ) -> MoogleMailboxUnprovenSend {
         MoogleMailboxUnprovenSend {
             delivery_id: Uuid::new_v4(),
             fencing_version: 1,
@@ -479,7 +482,7 @@ mod tests {
             result_code: None,
             user_key_user_id: None,
             sending_at,
-            outcome_recorded_at: sending_at + chrono::Duration::hours(1),
+            outcome_recorded_at: sending_at + auction_time::Duration::hours(1),
             operation: "send".to_owned(),
             attachment_ids: Vec::new(),
             sweep_retries: 0,
@@ -514,7 +517,7 @@ mod tests {
 
     #[test]
     fn prefix_does_not_recover_older_candidate_or_legacy_settlement() {
-        let boundary = Utc.with_ymd_and_hms(2026, 11, 7, 6, 0, 0).single().expect("time");
+        let boundary = Timestamp::from_ymd_hms(2026, 11, 7, 6, 0, 0).expect("time");
         let prefix = MoogleMailboxSentEntries {
             entries: vec![MoogleMailboxSentEntry {
                 external_mail_id: "105".to_owned(),
@@ -528,11 +531,14 @@ mod tests {
         };
         // 旧候选的发送时间在水位前；前缀中的新同主题邮件不能证明旧候选的唯一命中。
         assert_no_bind(
-            candidate(boundary - chrono::Duration::seconds(1), "reference"),
+            candidate(boundary - auction_time::Duration::seconds(1), "reference"),
             prefix.clone(),
         );
         // 即使候选在水位后，legacy settlement 没有任何时间窗，仍必须等待完整列表。
-        assert_no_bind(candidate(boundary + chrono::Duration::minutes(1), "reference"), prefix);
+        assert_no_bind(
+            candidate(boundary + auction_time::Duration::minutes(1), "reference"),
+            prefix,
+        );
     }
 
     fn sweep_report(reads_fail: bool) -> MailboxMaintenanceReport {

@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use auction_domain::{AuctionId, CommandId, SettlementPlan, legacy_worker_uuid};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -31,28 +31,25 @@ pub struct SettleAuctionCommand {
     pub claim_command_id: CommandId,
     pub auction_id: AuctionId,
     /// 本次 workflow 冻结的最晚 lot 有效结束时间。
-    pub due_at: DateTime<Utc>,
+    pub due_at: Timestamp,
     /// Worker 本次执行时间，只用于到期校验和代理终态事实。
-    pub now: DateTime<Utc>,
+    pub now: Timestamp,
     pub request_hash: RequestHash,
 }
 
 /// 从拍卖与截止世代派生结算工作流身份，与旧 Worker 字节编码一致。
-pub fn settlement_workflow_id(auction_id: Uuid, due_at: DateTime<Utc>) -> Option<Uuid> {
+pub fn settlement_workflow_id(auction_id: Uuid, due_at: Timestamp) -> Option<Uuid> {
     legacy_worker_id("auction-settlement", "workflow", auction_id, due_at)
 }
 
 /// 从拍卖与截止世代派生领取命令身份。
-pub fn settlement_claim_command_id(auction_id: Uuid, due_at: DateTime<Utc>) -> Option<CommandId> {
+pub fn settlement_claim_command_id(auction_id: Uuid, due_at: Timestamp) -> Option<CommandId> {
     legacy_worker_id("auction-worker", "settlement_claim", auction_id, due_at)
         .map(CommandId::from_uuid)
 }
 
 /// 从拍卖与截止世代派生完成命令身份。
-pub fn settlement_complete_command_id(
-    auction_id: Uuid,
-    due_at: DateTime<Utc>,
-) -> Option<CommandId> {
+pub fn settlement_complete_command_id(auction_id: Uuid, due_at: Timestamp) -> Option<CommandId> {
     legacy_worker_id("auction-worker", "settlement_complete", auction_id, due_at)
         .map(CommandId::from_uuid)
 }
@@ -61,12 +58,12 @@ pub fn settlement_complete_command_id(
 pub fn settlement_complete_request_hash(
     auction_id: Uuid,
     workflow_id: Uuid,
-    due_at: DateTime<Utc>,
+    due_at: Timestamp,
 ) -> Result<RequestHash, serde_json::Error> {
     #[derive(Serialize)]
     struct SettlementWorkflowRequest {
         workflow_id: Uuid,
-        due_at: DateTime<Utc>,
+        due_at: Timestamp,
     }
 
     RequestHash::from_request(
@@ -82,7 +79,7 @@ fn legacy_worker_id(
     namespace: &str,
     kind: &str,
     auction_id: Uuid,
-    due_at: DateTime<Utc>,
+    due_at: Timestamp,
 ) -> Option<Uuid> {
     due_at
         .timestamp_nanos_opt()

@@ -7,7 +7,7 @@ use auction_contracts::AdminDashboardSectionResponse;
 use auction_observability::{
     DashboardSection, DashboardStatus, ProcessRole, ProcessSnapshot, ServiceName,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::json;
 
 use crate::mapping::timestamp;
@@ -84,7 +84,7 @@ fn mail_world_ready(snapshot: &AdminCredentialHealthSnapshot, world: AdminCreden
 struct EffectiveMailAvailability {
     active_count: i64,
     invalid_count: i64,
-    updated_at: Option<DateTime<Utc>>,
+    updated_at: Option<Timestamp>,
 }
 
 fn effective_mail_availability(

@@ -287,13 +287,13 @@ pub(super) fn valid_recovery_report(report: &RecoveryReport, auction_id: Uuid) -
 mod tests {
     use auction_application::recovery::{RecoveryReport, RecoveryReportEntry};
     use auction_domain::{AuctionId, LotId, SettlementId};
-    use chrono::Utc;
+    use auction_time::Timestamp;
     use uuid::Uuid;
 
     use super::{map_optional_recovery_error_code, map_recovery_report, valid_recovery_report};
 
     fn report(blocker: Option<&str>) -> RecoveryReport {
-        let at = Utc::now();
+        let at = Timestamp::now();
         let auction_id = AuctionId::from_uuid(Uuid::from_u128(2));
         RecoveryReport {
             auction_id,

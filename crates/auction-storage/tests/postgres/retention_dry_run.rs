@@ -11,7 +11,7 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use auction_storage::{RETENTION_DRY_RUN_FORMAT, RetentionDryRunReport, RetentionTableDryRun};
-use chrono::{TimeDelta, Utc};
+use auction_time::{TimeDelta, Timestamp};
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -44,7 +44,7 @@ async fn postgres_retention_dry_run_counts_runtime_candidates_without_mutation()
     let pool = store.postgres_pool();
     let mut connection = pool.acquire().await.expect("获取测试连接");
 
-    let now = Utc::now();
+    let now = Timestamp::now();
     let old = |days: i64| now - TimeDelta::days(days);
 
     // 心跳：31 天前到期（候选）、1 天前到期（宽限内保留）、未来到期（保留）。

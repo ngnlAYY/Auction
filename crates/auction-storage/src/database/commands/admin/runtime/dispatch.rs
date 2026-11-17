@@ -8,7 +8,7 @@ use auction_application::admin::{
 use auction_application::core::ApplicationFuture;
 use auction_application::core::RequestHash;
 use auction_domain::CommandId;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use super::{
     mutations::{apply_postgres, insert_pending_postgres, mark_unknown_postgres, reopen_postgres},
@@ -64,7 +64,7 @@ impl AdminRuntimeCommandStore for DatabaseAdminRuntimeCommands {
         command_id: CommandId,
         request_hash: RequestHash,
         audit: AdminRuntimeAuditRecord,
-        applied_at: DateTime<Utc>,
+        applied_at: Timestamp,
     ) -> ApplicationFuture<'_, AdminRuntimeStoredCommand> {
         let store = Arc::clone(&self.store);
         Box::pin(async move {
@@ -78,7 +78,7 @@ impl AdminRuntimeCommandStore for DatabaseAdminRuntimeCommands {
         command_id: CommandId,
         request_hash: RequestHash,
         category: String,
-        updated_at: DateTime<Utc>,
+        updated_at: Timestamp,
     ) -> ApplicationFuture<'_, AdminRuntimeStoredCommand> {
         let store = Arc::clone(&self.store);
         Box::pin(async move {
@@ -91,7 +91,7 @@ impl AdminRuntimeCommandStore for DatabaseAdminRuntimeCommands {
         &self,
         command_id: CommandId,
         request_hash: RequestHash,
-        updated_at: DateTime<Utc>,
+        updated_at: Timestamp,
     ) -> ApplicationFuture<'_, AdminRuntimeStoredCommand> {
         let store = Arc::clone(&self.store);
         Box::pin(async move {

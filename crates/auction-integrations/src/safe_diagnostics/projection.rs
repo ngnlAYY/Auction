@@ -36,7 +36,8 @@ fixed_projection!(CRYPTOGRAPHIC_ERROR; ring::error::Unspecified, ring::error::Ke
 fixed_projection!(SERIALIZATION_FAILED; serde_json::Error);
 fixed_projection!(RESPONSE_PARSE_ERROR;
     std::str::Utf8Error, std::string::FromUtf8Error, std::num::ParseIntError,
-    std::num::ParseFloatError, std::num::TryFromIntError, base64::DecodeError, chrono::ParseError,
+    std::num::ParseFloatError, std::num::TryFromIntError, base64::DecodeError,
+    auction_time::ParseError,
 );
 fixed_projection!(REQUEST_ENCODING_ERROR;
     reqwest::header::InvalidHeaderValue, reqwest::header::ToStrError,

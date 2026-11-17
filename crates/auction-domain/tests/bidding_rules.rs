@@ -12,7 +12,7 @@ use auction_domain::{
     ProxyAuthorization, ProxyAuthorizationId, ProxyMode, ProxyStatus, ProxyTerminalReason,
     ProxyTransitionKind, UserId,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 fn must<T, E: std::fmt::Debug>(result: Result<T, E>) -> T {
     result.unwrap_or_else(|error| panic!("测试夹具必须合法: {error:?}"))
@@ -22,8 +22,8 @@ fn required<T>(value: Option<T>) -> T {
     value.unwrap_or_else(|| panic!("测试夹具必须存在"))
 }
 
-fn at(hour: u32, minute: u32, second: u32) -> DateTime<Utc> {
-    required(chrono::TimeZone::with_ymd_and_hms(&Utc, 2026, 1, 1, hour, minute, second).single())
+fn at(hour: u32, minute: u32, second: u32) -> Timestamp {
+    required(Timestamp::from_ymd_hms(2026, 1, 1, hour, minute, second))
 }
 
 fn amount(value: i64) -> BidAmount {
@@ -38,7 +38,7 @@ fn lot_state(
     lot_id: LotId,
     current_price: Option<BidAmount>,
     leader_id: Option<UserId>,
-    end: DateTime<Utc>,
+    end: Timestamp,
 ) -> LotBidState {
     LotBidState {
         lot_id,
@@ -78,7 +78,7 @@ fn active_proxy(
 fn ordinary_bid(
     actor: UserId,
     value: BidAmount,
-    now: DateTime<Utc>,
+    now: Timestamp,
     bid_count: usize,
 ) -> CompetitionTrigger {
     CompetitionTrigger::OrdinaryBid {

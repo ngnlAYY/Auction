@@ -114,9 +114,7 @@ fn base_ids_follow_derived_timestamp_form() {
     assert!(valid_base_id("base-20261104T031500Z"));
     assert_eq!(
         base_id(
-            chrono::DateTime::parse_from_rfc3339("2026-11-04T03:15:00Z")
-                .expect("解析时刻")
-                .with_timezone(&chrono::Utc)
+            auction_time::Timestamp::parse_from_rfc3339("2026-11-04T03:15:00Z").expect("解析时刻")
         ),
         "base-20261104T031500Z"
     );

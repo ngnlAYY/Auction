@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use super::{model::AdminCredentialKind, secret::AdminCredentialEnvelope};
@@ -15,7 +15,7 @@ pub struct AdminCredentialRuntimeRecord {
     pub state_version: i64,
     pub player_name: Option<String>,
     pub envelope: AdminCredentialEnvelope,
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
 }
 
 impl fmt::Debug for AdminCredentialRuntimeRecord {

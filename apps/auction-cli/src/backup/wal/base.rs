@@ -16,7 +16,7 @@ use std::{
 };
 
 use anyhow::Context;
-use chrono::Utc;
+use auction_time::Timestamp;
 use serde::Serialize;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
@@ -65,7 +65,7 @@ pub(super) async fn run(request: &Request) -> anyhow::Result<Outcome> {
         anyhow::bail!("age 收件人公钥无效；须与 [backup.offsite] age_recipient 相同");
     }
     let started = process::unix_seconds()?;
-    let backup_id = base_id(Utc::now());
+    let backup_id = base_id(Timestamp::now());
     if let Some(outcome) = resolve_existing(&request.staging_dir, &backup_id)? {
         return Ok(outcome);
     }
@@ -542,9 +542,8 @@ mod tests {
 
     #[test]
     fn backup_ids_are_derived_from_utc() {
-        let now = chrono::DateTime::parse_from_rfc3339("2026-11-04T03:15:00Z")
-            .expect("解析时刻")
-            .with_timezone(&chrono::Utc);
+        let now =
+            auction_time::Timestamp::parse_from_rfc3339("2026-11-04T03:15:00Z").expect("解析时刻");
         assert_eq!(base_id(now), BACKUP_ID);
     }
 }

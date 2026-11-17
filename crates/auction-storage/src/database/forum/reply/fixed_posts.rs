@@ -2,7 +2,7 @@
 
 use auction_application::core::ApplicationError;
 use auction_application::forum::{ForumRenderedPost, ForumRenderedThread, ForumReplyTopic};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use super::super::super::DatabaseStore;
 use crate::database::storage_error;
@@ -14,8 +14,8 @@ pub(super) async fn record_fixed_posts_update_postgres(
     catalog: &ForumRenderedThread,
     system_log: &ForumRenderedPost,
     processed_through_post_number: i32,
-    updated_at: DateTime<Utc>,
-    next_scan_at: DateTime<Utc>,
+    updated_at: Timestamp,
+    next_scan_at: Timestamp,
 ) -> Result<(), ApplicationError> {
     let mut transaction = store
         .pool()
@@ -91,7 +91,7 @@ pub(super) async fn record_fixed_posts_progress_postgres(
     catalog: &ForumRenderedThread,
     system_log: &ForumRenderedPost,
     processed_through_post_number: i32,
-    updated_at: DateTime<Utc>,
+    updated_at: Timestamp,
 ) -> Result<(), ApplicationError> {
     let mut transaction = store
         .pool()
@@ -153,8 +153,8 @@ pub(super) async fn finish_topic_scan_postgres(
     store: &DatabaseStore,
     topic: &ForumReplyTopic,
     processed_through_post_number: i32,
-    scanned_at: DateTime<Utc>,
-    next_scan_at: DateTime<Utc>,
+    scanned_at: Timestamp,
+    next_scan_at: Timestamp,
 ) -> Result<(), ApplicationError> {
     let mut transaction = store
         .pool()
@@ -267,8 +267,8 @@ async fn lock_terminal_version(
 pub(super) async fn fail_topic_scan_postgres(
     store: &DatabaseStore,
     topic: &ForumReplyTopic,
-    failed_at: DateTime<Utc>,
-    retry_at: DateTime<Utc>,
+    failed_at: Timestamp,
+    retry_at: Timestamp,
     failure_code: &str,
 ) -> Result<(), ApplicationError> {
     let result = sqlx::query(

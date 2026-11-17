@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use auction_application::mail::{MailPollClaim, MailPollIntake, MailProcessingDecision};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::json;
 use uuid::Uuid;
 
@@ -70,7 +70,7 @@ pub(super) fn intake_from_message(
     mailbox_key: &str,
     message: MailPollFetchedMessage,
     decision: MailProcessingDecision,
-    processed_at: DateTime<Utc>,
+    processed_at: Timestamp,
 ) -> MailPollIntake {
     let mail_kind = decision.mail_kind;
     let id = Uuid::new_v5(

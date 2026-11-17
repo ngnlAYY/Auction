@@ -3,7 +3,7 @@
 use std::fmt;
 
 use auction_domain::valid_text;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use crate::ports::core::ApplicationFuture;
 use crate::ports::mail::MailPollClaim;
@@ -16,7 +16,7 @@ pub struct MailPollReadSummary {
     /// 首次列表显示名可能被截断，仅保留恢复快照兼容；详情身份与白名单不得使用该值。
     pub sender: String,
     pub subject: String,
-    pub received_at: DateTime<Utc>,
+    pub received_at: Timestamp,
 }
 
 impl MailPollReadSummary {

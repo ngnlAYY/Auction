@@ -4,7 +4,7 @@
 
 use auction_domain::valid_optional_text;
 use auction_domain::valid_text as valid_record_text;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
@@ -21,7 +21,7 @@ pub const MAX_ADMIN_AUDIT_OFFSET: i64 = 2_147_483_647;
 /// Admin 审计记录的时间/ID keyset 游标。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AdminAuditCursor {
-    pub occurred_at: DateTime<Utc>,
+    pub occurred_at: Timestamp,
     pub id: Uuid,
 }
 
@@ -42,8 +42,8 @@ pub struct AdminAuditListRequest {
     pub source: Option<String>,
     pub result: Option<String>,
     pub request_id: Option<String>,
-    pub occurred_from: Option<DateTime<Utc>>,
-    pub occurred_to: Option<DateTime<Utc>>,
+    pub occurred_from: Option<Timestamp>,
+    pub occurred_to: Option<Timestamp>,
     pub page: Option<i64>,
     pub page_size: i64,
     pub cursor: Option<AdminAuditCursor>,
@@ -96,7 +96,7 @@ impl AdminAuditListRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AdminAuditRecord {
     pub id: Uuid,
-    pub occurred_at: DateTime<Utc>,
+    pub occurred_at: Timestamp,
     pub actor_type: String,
     pub actor_id: String,
     pub action: String,

@@ -4,7 +4,7 @@ use auction_application::delivery::{
     DELIVERY_ADMIN_RETIREMENT_REASONS, DeliveryAdminError, DeliveryAdminResult,
     DeliveryAdminSnapshot,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::{Row, postgres::PgRow};
@@ -33,7 +33,7 @@ pub(crate) fn snapshot(row: &PgRow) -> Result<DeliveryAdminSnapshot, DeliveryAdm
     let result_metadata: Value = row.try_get("result_metadata").map_err(map_storage_error)?;
     let status: String = row.try_get("status").map_err(map_storage_error)?;
     let origin_kind: String = row.try_get("origin_kind").map_err(map_storage_error)?;
-    let sending_at: Option<DateTime<Utc>> = row.try_get("sending_at").map_err(map_storage_error)?;
+    let sending_at: Option<Timestamp> = row.try_get("sending_at").map_err(map_storage_error)?;
     let failure_code: Option<String> = row.try_get("failure_code").map_err(map_storage_error)?;
     let reason_code = reason_code_from_metadata(&result_metadata);
     // 只有确定未开始外部写入的终态才能显示退役或抑制原因；进入围栏后的未知结果不改写语义。
@@ -154,17 +154,17 @@ struct LegacyDeliveryPayload {
     #[serde(rename = "LeaseToken")]
     lease_token: Option<[u8; 16]>,
     #[serde(rename = "LeaseExpiresAt")]
-    lease_expires_at: Option<DateTime<Utc>>,
+    lease_expires_at: Option<Timestamp>,
     #[serde(rename = "FencingVersion")]
     fencing_version: i64,
     #[serde(rename = "AttemptCount")]
     attempt_count: i32,
     #[serde(rename = "ClaimedAt")]
-    claimed_at: Option<DateTime<Utc>>,
+    claimed_at: Option<Timestamp>,
     #[serde(rename = "SendingAt")]
-    sending_at: Option<DateTime<Utc>>,
+    sending_at: Option<Timestamp>,
     #[serde(rename = "CompletedAt")]
-    completed_at: Option<DateTime<Utc>>,
+    completed_at: Option<Timestamp>,
     #[serde(rename = "ExternalReference")]
     external_reference: Option<String>,
     #[serde(rename = "FailureCode")]
@@ -172,11 +172,11 @@ struct LegacyDeliveryPayload {
     #[serde(rename = "ResultMetadata")]
     result_metadata: Value,
     #[serde(rename = "ActivatedAt")]
-    activated_at: Option<DateTime<Utc>>,
+    activated_at: Option<Timestamp>,
     #[serde(rename = "CreatedAt")]
-    created_at: DateTime<Utc>,
+    created_at: Timestamp,
     #[serde(rename = "UpdatedAt")]
-    updated_at: DateTime<Utc>,
+    updated_at: Timestamp,
 }
 
 impl LegacyDeliveryPayload {

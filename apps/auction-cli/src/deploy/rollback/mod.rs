@@ -13,7 +13,7 @@
 use std::{path::Path, time::Duration};
 
 use anyhow::Context;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use super::install::{self, ROLE_BINARIES, RecordDirectory, RetainRequest, RollbackRecord};
@@ -49,7 +49,7 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: RollbackArgs) -> anyhow::R
         .map(|value| Uuid::parse_str(&value).context("--receipt-id 必须是回滚记录的 UUID"))
         .transpose()?;
     let context = ReceiptContext::resolve(None, actor.actor.as_deref())?;
-    let started_at = Utc::now();
+    let started_at = Timestamp::now();
     let systemctl = Systemctl::new(&units)?;
     let lock = service::deployment_lock(&units)?;
     let state = lock.directory();
@@ -204,7 +204,7 @@ struct RollbackPlan<'a> {
     database_version: i64,
     startup_timeout: Duration,
     context: &'a ReceiptContext,
-    started_at: DateTime<Utc>,
+    started_at: Timestamp,
     /// 回滚记录对应的部署回执；它描述当前安装的三个角色程序。
     deployed_receipt: &'a DeploymentReceipt,
     /// 停机前读到的安装目录 auction-cli 摘要；回退前后必须不变。

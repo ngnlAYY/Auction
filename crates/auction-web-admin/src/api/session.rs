@@ -90,7 +90,7 @@ fn valid_session_time(value: &str) -> bool {
 
     #[cfg(not(target_arch = "wasm32"))]
     {
-        chrono::DateTime::parse_from_rfc3339(value).is_ok()
+        auction_time::Timestamp::parse_from_rfc3339(value).is_ok()
     }
 }
 

@@ -5,7 +5,7 @@
 use std::future::Future;
 
 use auction_domain::{AuctionId, CommandId, LotId, valid_text};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -123,21 +123,21 @@ pub trait AdminLotUpdateTransaction: Send {
     fn update_admin_lot(
         &mut self,
         command: &AdminLotUpdateCommand,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> impl Future<Output = Result<AdminLotSummary, CompetitionTransactionError>> + Send;
 
     fn advance_admin_preview_revision(
         &mut self,
         auction_id: AuctionId,
         expected_revision: i64,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> impl Future<Output = Result<i64, CompetitionTransactionError>> + Send;
 
     fn insert_withdrawn_return_obligation(
         &mut self,
         command: &AdminLotUpdateCommand,
         snapshot: &AdminLotUpdateSnapshot,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> impl Future<Output = Result<(), CompetitionTransactionError>> + Send;
 
     fn append_admin_lot_record(

@@ -1,7 +1,7 @@
 //! Realtime consumer failure 的 replay 收口；事务入口供 Admin 在同一事务内原子追加替代事件并越过原失败。
 
 use auction_application::core::ApplicationError;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -16,7 +16,7 @@ pub(crate) async fn resolve_failure_postgres_tx(
     stream_key: &str,
     event_id: Uuid,
     replay_event_id: Uuid,
-    resolved_at: DateTime<Utc>,
+    resolved_at: Timestamp,
 ) -> Result<(), ApplicationError> {
     let failure = sqlx::query(
         "SELECT original.stream_key, original.stream_sequence,
@@ -46,7 +46,7 @@ pub(crate) async fn resolve_failure_postgres_tx(
     let existing_replay: Option<Uuid> = failure
         .try_get("replay_event_id")
         .map_err(|error| storage_error_from(error, "读取 PostgreSQL 重放事件引用失败"))?;
-    let already_resolved: Option<DateTime<Utc>> = failure
+    let already_resolved: Option<Timestamp> = failure
         .try_get("resolved_at")
         .map_err(|error| storage_error_from(error, "读取 PostgreSQL 失败解决时间失败"))?;
     if existing_replay.is_some_and(|existing_replay| existing_replay != replay_event_id) {

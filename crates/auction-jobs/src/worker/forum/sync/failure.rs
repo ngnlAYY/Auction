@@ -6,7 +6,7 @@ use auction_application::core::{ApplicationError, Clock, RepositoryError};
 use auction_application::forum::{
     ForumRenderError, ForumSyncClaim, ForumSyncStore, ForumWriteProgress,
 };
-use chrono::Duration;
+use auction_time::Duration;
 
 const RETRY_DELAY: Duration = Duration::minutes(1);
 const MANUAL_RECONCILIATION_DELAY: Duration = Duration::days(365);

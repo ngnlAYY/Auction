@@ -1,6 +1,6 @@
 //! 结算与恢复策略。
 
-use chrono::{DateTime, Duration, Utc};
+use auction_time::{Duration, Timestamp};
 use serde::{Deserialize, Serialize};
 
 use crate::DomainError;
@@ -83,10 +83,7 @@ impl RecoveryPolicy {
     /// 结算建立恢复记录时冻结的首寄付款期限 D0：恢复记录创建时刻加冻结版本的付款期限。
     /// COD 收回重寄只改写恢复记录上的当前期限，已冻结的付款邮件正文仍展示 D0，因此正文与载荷
     /// 只能按 D0 重建。未知版本或时间溢出返回 `None`，调用方失败关闭。
-    pub fn initial_payment_deadline(
-        created_at: DateTime<Utc>,
-        version: u32,
-    ) -> Option<DateTime<Utc>> {
+    pub fn initial_payment_deadline(created_at: Timestamp, version: u32) -> Option<Timestamp> {
         created_at.checked_add_signed(Self::payment_timeout_for_version(version)?)
     }
 
@@ -246,16 +243,16 @@ fn divide_half_away_from_zero(numerator: i128, denominator: i128) -> Result<i128
 
 #[cfg(test)]
 mod tests {
-    use chrono::{DateTime, Duration, TimeZone, Utc};
+    use auction_time::{Duration, Timestamp};
 
     use super::RecoveryPolicy;
 
     /// D0 只由恢复记录创建时刻与冻结版本决定：v1 加七天、v2 加 24 小时；未知版本与溢出没有期限。
     #[test]
     fn initial_payment_deadline_adds_the_frozen_timeout_to_the_recovery_creation() {
-        let created_at =
-            Utc.with_ymd_and_hms(2026, 11, 3, 12, 19, 28).single().expect("固定测试时间必须存在")
-                + Duration::microseconds(437_500);
+        let created_at = Timestamp::from_ymd_hms(2026, 11, 3, 12, 19, 28)
+            .expect("固定测试时间必须存在")
+            + Duration::microseconds(437_500);
         assert_eq!(
             RecoveryPolicy::initial_payment_deadline(created_at, 1),
             Some(created_at + Duration::days(7))
@@ -267,7 +264,7 @@ mod tests {
         for unknown in [0, 3, u32::MAX] {
             assert_eq!(RecoveryPolicy::initial_payment_deadline(created_at, unknown), None);
         }
-        assert_eq!(RecoveryPolicy::initial_payment_deadline(DateTime::<Utc>::MAX_UTC, 1), None);
+        assert_eq!(RecoveryPolicy::initial_payment_deadline(Timestamp::MAX_UTC, 1), None);
     }
 
     /// 版本表是付款期限的唯一来源：默认（v1）与赛季前（v2）策略都按它通过校验，未知版本没有期限。

@@ -7,12 +7,12 @@ use auction_application::auction::{
 use auction_application::core::ApplicationError;
 use auction_application::public::lot_code;
 use auction_domain::valid_positive_decimal;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 pub(super) fn cursor_values(
     request: &PublicBidLogListRequest,
-) -> (DateTime<Utc>, Uuid, i64, i32, Uuid) {
+) -> (Timestamp, Uuid, i64, i32, Uuid) {
     match request.cursor.as_ref() {
         Some(PublicBidLogCursor::Boundary {
             created_at,
@@ -21,7 +21,9 @@ pub(super) fn cursor_values(
             fact_index,
             id,
         }) => (*created_at, *lot_id, *accepted_state_version, *fact_index, *id),
-        Some(PublicBidLogCursor::Start) | None => (Utc::now(), Uuid::nil(), 0, 0, Uuid::nil()),
+        Some(PublicBidLogCursor::Start) | None => {
+            (Timestamp::now(), Uuid::nil(), 0, 0, Uuid::nil())
+        }
     }
 }
 

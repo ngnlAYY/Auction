@@ -12,7 +12,7 @@ use std::{
 
 use anyhow::Context;
 use auction_config::AppConfig;
-use chrono::Utc;
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use crate::support::digest::{sha256_bytes, sha256_file};
@@ -107,7 +107,7 @@ pub(crate) async fn create(
     let listed = digest.entries.len().min(sidecar::MAX_LISTED_FILES);
     let sidecar = sidecar::ScopeSidecar {
         format: sidecar::FORMAT.to_owned(),
-        created_at: Utc::now(),
+        created_at: Timestamp::now(),
         age_recipient_sha256: sha256_bytes(recipient.as_bytes()),
         bundle_file_name: sidecar::bundle_file_name(archive_name),
         bundle_sha256: bundle_sha256.clone(),
@@ -211,7 +211,7 @@ mod tests {
         path::{Path, PathBuf},
     };
 
-    use chrono::Utc;
+    use auction_time::Timestamp;
 
     use super::{
         collect::{self, Plan, SourceKind, SourceSpec},
@@ -273,7 +273,7 @@ mod tests {
         let sha256 = file_sha256(bundle_path);
         ScopeSidecar {
             format: sidecar::FORMAT.to_owned(),
-            created_at: Utc::now(),
+            created_at: Timestamp::now(),
             age_recipient_sha256: "a".repeat(64),
             bundle_file_name: sidecar::bundle_file_name("scheduled.dump"),
             bundle_sha256: sha256,

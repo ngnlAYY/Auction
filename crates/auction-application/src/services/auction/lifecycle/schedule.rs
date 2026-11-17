@@ -2,7 +2,9 @@
 
 use auction_domain::{AuctionId, AuctionScheduleCalendar, CommandId, legacy_natural_key_uuid};
 use auction_domain::{AuctionScheduleSlot, AuctionScheduleSource, AuctionScheduleTimes};
-use chrono::{Datelike, Duration, NaiveDate};
+use auction_time::Duration;
+use jiff::ToSpan;
+use jiff::civil;
 use serde::Serialize;
 
 use super::lifecycle_state;
@@ -22,7 +24,7 @@ pub(super) fn successor_plan(
     context: &AuctionLifecycleContext,
     policy: &AuctionPolicyTemplate,
     calendar: Option<&AuctionScheduleCalendar>,
-    now: chrono::DateTime<chrono::Utc>,
+    now: auction_time::Timestamp,
 ) -> Result<AuctionPreviewSuccessorPlan, ApplicationError> {
     // 后继是新聚合：使用当前有效模板，旧聚合与已接受命令仍按冻结事实重放。
     policy.validate()?;
@@ -47,7 +49,7 @@ pub(super) fn successor_plan(
     };
     let sequence =
         context.sequence.checked_add(1).ok_or_else(|| lifecycle_state("下一期拍卖序号溢出"))?;
-    let local_week_text = local_week.format("%Y-%m-%d").to_string();
+    let local_week_text = local_week.strftime("%Y-%m-%d").to_string();
     // 常规周继续以 world/local_week 派生身份；早鸟场次以时段键派生，允许同周多场。
     let identity = early_bird_slot.map_or_else(|| local_week_text.clone(), |slot| slot.key());
     // 与旧版周计划及 Worker bootstrap 共用长度前缀自然键身份，避免同一 world/周产生双轮次；
@@ -68,9 +70,9 @@ pub(super) fn successor_plan(
         world_id: &'a str,
         sequence: i64,
         local_week: &'a str,
-        preview_due_at: chrono::DateTime<chrono::Utc>,
-        open_due_at: chrono::DateTime<chrono::Utc>,
-        scheduled_end_at: chrono::DateTime<chrono::Utc>,
+        preview_due_at: auction_time::Timestamp,
+        open_due_at: auction_time::Timestamp,
+        scheduled_end_at: auction_time::Timestamp,
         policy: serde_json::Value,
         #[serde(skip_serializing_if = "Option::is_none")]
         schedule_source: &'a Option<auction_domain::AuctionScheduleSource>,
@@ -109,7 +111,7 @@ pub(super) fn successor_plan(
 
 /// 后继时段；没有来源的历史轮次只保留 UTC 时间。
 struct NextSlot {
-    local_week: NaiveDate,
+    local_week: civil::Date,
     source: Option<AuctionScheduleSource>,
     times: AuctionScheduleTimes,
 }
@@ -123,7 +125,7 @@ impl From<AuctionScheduleSlot> for NextSlot {
 fn next_slot(
     context: &AuctionLifecycleContext,
     calendar: Option<&AuctionScheduleCalendar>,
-    now: chrono::DateTime<chrono::Utc>,
+    now: auction_time::Timestamp,
 ) -> Result<NextSlot, ApplicationError> {
     let origin_early_bird =
         context.schedule_source.as_ref().is_some_and(|source| source.early_bird.is_some());
@@ -183,7 +185,7 @@ fn frozen_weekly(
         let times = next.resolve()?;
         return Ok(NextSlot { local_week, source: Some(next), times });
     }
-    let shift = |value: chrono::DateTime<chrono::Utc>, message| {
+    let shift = |value: auction_time::Timestamp, message| {
         value.checked_add_signed(Duration::days(7 * weeks)).ok_or_else(|| lifecycle_state(message))
     };
     Ok(NextSlot {
@@ -208,34 +210,37 @@ fn early_bird_fallback(context: &AuctionLifecycleContext) -> Result<NextSlot, Ap
     Ok(NextSlot { local_week, source: Some(source), times })
 }
 
-fn current_week(context: &AuctionLifecycleContext) -> NaiveDate {
+fn current_week(context: &AuctionLifecycleContext) -> civil::Date {
     context.scheduled_round_local_week.unwrap_or_else(|| {
-        context.preview_scheduled_at.date_naive()
-            - Duration::days(i64::from(
-                context.preview_scheduled_at.weekday().num_days_from_monday(),
-            ))
+        let date = context.preview_scheduled_at.to_utc_datetime().date();
+        date - i64::from(date.weekday().to_monday_zero_offset()).days()
     })
 }
 
 fn checked_add_days(
-    value: NaiveDate,
+    value: civil::Date,
     days: i64,
     message: &str,
-) -> Result<NaiveDate, ApplicationError> {
-    value.checked_add_signed(Duration::days(days)).ok_or_else(|| lifecycle_state(message))
+) -> Result<civil::Date, ApplicationError> {
+    jiff::Span::new()
+        .try_days(days)
+        .and_then(|span| value.checked_add(span))
+        .ok()
+        .ok_or_else(|| lifecycle_state(message))
 }
 
 #[cfg(test)]
 mod tests {
     use auction_domain::{Auction, AuctionId, AuctionStatus};
-    use chrono::{DateTime, Duration, NaiveDate, Utc};
+    use auction_time::{Duration, Timestamp};
+    use jiff::civil;
     use uuid::Uuid;
 
     use super::successor_plan;
     use crate::ports::auction::{AuctionLifecycleContext, AuctionPolicyTemplate};
 
-    fn at(value: &str) -> DateTime<Utc> {
-        DateTime::parse_from_rfc3339(value).expect("测试时间必须合法").with_timezone(&Utc)
+    fn at(value: &str) -> Timestamp {
+        Timestamp::parse_from_rfc3339(value).expect("测试时间必须合法")
     }
 
     fn weekly_context() -> AuctionLifecycleContext {
@@ -267,7 +272,7 @@ mod tests {
             opened_at: None,
             final_phase_at: None,
             settled_at: None,
-            scheduled_round_local_week: NaiveDate::from_ymd_opt(2026, 11, 2),
+            scheduled_round_local_week: Some(civil::date(2026, 11, 2)),
             schedule_source: None,
         }
     }
@@ -283,7 +288,7 @@ mod tests {
             at("2026-11-07T12:00:00Z"),
         )
         .expect("周后继必须可计算");
-        assert_eq!(plan.local_week, NaiveDate::from_ymd_opt(2026, 11, 9).expect("日期合法"));
+        assert_eq!(plan.local_week, civil::date(2026, 11, 9));
         assert_eq!(plan.round_id.to_string(), "5239fe8f-6d40-50af-b5e9-1864ce96bab6");
         assert_eq!(plan.auction_id.to_string(), "bad94535-b67b-5c62-b3db-f61f086a51e1");
         assert_eq!(plan.create_command_id.to_string(), "d486735c-8bec-516a-a46f-d7af61d9150f");

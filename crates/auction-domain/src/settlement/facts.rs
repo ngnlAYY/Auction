@@ -1,6 +1,6 @@
 //! 结算事实、明细行与价格分解校验。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use super::{SETTLEMENT_PPM, SettlementAmount, SettlementMode};
@@ -20,11 +20,11 @@ pub struct SettlementFact {
     pub world: SettlementWorld,
     pub end_price: Option<SettlementAmount>,
     pub leader_id: Option<UserId>,
-    pub leader_since: Option<DateTime<Utc>>,
+    pub leader_since: Option<Timestamp>,
     /// 最终赢家在拍卖期间的累计领先纳秒数；由追加式 bid 事实重建，缺失时结算失败关闭。
     #[serde(default)]
     pub leader_held_nanos: Option<i64>,
-    pub effective_end_at: DateTime<Utc>,
+    pub effective_end_at: Timestamp,
     pub seller_identity: String,
     pub equipment_id: EquipmentId,
     pub submission_id: Option<SubmissionId>,

@@ -26,6 +26,7 @@ auction-process = { path = "crates/auction-process" }
 auction-setup = { path = "crates/auction-setup" }
 auction-storage = { path = "crates/auction-storage" }
 auction-test-support = { path = "crates/auction-test-support" }
+auction-time = { path = "crates/auction-time" }
 auction-web-shared = { path = "crates/auction-web-shared" }
 
 # 异步运行时：Tokio 1.53.x 是官方 LTS 分支，后续只接受该分支内的补丁升级。
@@ -95,7 +96,6 @@ wasm-bindgen = "0.2.130"
 
 # 持久化基础能力；PostgreSQL 18 驱动与 rustls 传输由 auction-storage 无条件启用。
 sqlx = { version = "0.9.0", default-features = false, features = [
-    "chrono",
     "json",
     "macros",
     "migrate",
@@ -108,9 +108,11 @@ anyhow = "1.0.104"
 # 只使用现有 GeneralPurpose 引擎；不为未调用的 SIMD 引擎开启默认 simd-unsafe。
 base64 = { version = "0.23.1", default-features = false, features = ["std"] }
 libc = "0.2.191"
-# 共享图只需 UTC 时间；进程本地时区的 clock feature 由配置 owner 单独启用。
-chrono = { version = "0.4.45", default-features = false, features = ["now", "serde", "std"] }
-chrono-tz = "0.10.4"
+
+# 时刻与时长统一经 auction-time；jiff 只在需要日历与时区运算的 crate 里直接使用。
+jiff = { version = "1.0.0", default-features = false, features = ["serde", "std"] }
+# 只由 auction-time 的 postgres feature 使用，提供 timestamptz 的编解码。
+jiff-sqlx = { version = "1.0.0", default-features = false, features = ["postgres"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 # HMAC/SHA-256 配套使用 digest 0.11；不改变摘要算法、输入编码或会话域分隔符。

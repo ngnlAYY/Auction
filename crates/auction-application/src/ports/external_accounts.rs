@@ -3,7 +3,7 @@
 //! 时长。模型不含凭据、Cookie、远端 URL、页面正文或游标；`None` 表示本进程尚未观察到，
 //! 不能被解读为“未知的成功”或“空闲”。读取器只服务只读 Admin 诊断，不参与任何业务裁决。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 
 /// 一次 MoogleMail 维护轮次的结束状态；只描述本进程观察到的轮次结果。
@@ -46,20 +46,20 @@ pub struct ExternalMailAccountStatus {
     pub gate_wait_seconds_total: i64,
     /// 已开始的物理邮件请求数。
     pub request_count: i64,
-    pub last_request_at: Option<DateTime<Utc>>,
+    pub last_request_at: Option<Timestamp>,
     /// 最近一次边界结果为 `ok` 的请求时间；`canceled` 不改变成功/失败。
-    pub last_success_at: Option<DateTime<Utc>>,
+    pub last_success_at: Option<Timestamp>,
     /// 最近一次边界结果为非 `ok` 且非 `canceled` 的请求时间。
-    pub last_failure_at: Option<DateTime<Utc>>,
+    pub last_failure_at: Option<Timestamp>,
 }
 
 /// 论坛账号的进程内观测；只保留请求边界时间与写入未知计数。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExternalForumAccountStatus {
-    pub last_request_at: Option<DateTime<Utc>>,
-    pub last_success_at: Option<DateTime<Utc>>,
-    pub last_failure_at: Option<DateTime<Utc>>,
+    pub last_request_at: Option<Timestamp>,
+    pub last_success_at: Option<Timestamp>,
+    pub last_failure_at: Option<Timestamp>,
     /// 论坛写入结果未知次数；未知不等于失败，也不授权自动重发。
     pub write_unknown_count: i64,
 }
@@ -69,10 +69,10 @@ pub struct ExternalForumAccountStatus {
 #[serde(deny_unknown_fields)]
 pub struct ExternalMaintenanceStatus {
     pub state: ExternalMaintenanceState,
-    pub last_started_at: Option<DateTime<Utc>>,
-    pub last_success_at: Option<DateTime<Utc>>,
-    pub last_failure_at: Option<DateTime<Utc>>,
-    pub last_canceled_at: Option<DateTime<Utc>>,
+    pub last_started_at: Option<Timestamp>,
+    pub last_success_at: Option<Timestamp>,
+    pub last_failure_at: Option<Timestamp>,
+    pub last_canceled_at: Option<Timestamp>,
     /// 最早已在途维护轮次的持续秒数；仅在 `Running` 时存在。
     pub running_age_seconds: Option<i64>,
 }
@@ -82,7 +82,7 @@ pub struct ExternalMaintenanceStatus {
 #[serde(deny_unknown_fields)]
 pub struct ExternalAccountStatus {
     /// 本快照生成时刻；所有可选时间都不得晚于该时刻。
-    pub observed_at: DateTime<Utc>,
+    pub observed_at: Timestamp,
     pub mail: ExternalMailAccountStatus,
     pub forum: ExternalForumAccountStatus,
     pub maintenance: ExternalMaintenanceStatus,
@@ -140,7 +140,7 @@ impl ExternalAccountStatus {
     }
 }
 
-fn valid_time(value: Option<DateTime<Utc>>, observed_at: DateTime<Utc>) -> bool {
+fn valid_time(value: Option<Timestamp>, observed_at: Timestamp) -> bool {
     value.is_none_or(|value| value.timestamp_nanos_opt().is_some() && value <= observed_at)
 }
 

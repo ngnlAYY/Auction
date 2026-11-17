@@ -3,7 +3,7 @@
 use auction_application::delivery::{
     DELIVERY_ADMIN_RETIREMENT_REASONS, DELIVERY_ADMIN_SUPPRESSION_REASONS, DeliveryAdminSnapshot,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use super::evidence::{preparation_rejected, valid_returned_reference};
 
@@ -13,7 +13,7 @@ const RECOVERY_SUPERSEDED_CODE: &str = "recovery_superseded";
 pub(super) fn valid_live_lease(
     status: &str,
     lease_token: Option<&uuid::Uuid>,
-    lease_expires_at: Option<&DateTime<Utc>>,
+    lease_expires_at: Option<&Timestamp>,
 ) -> bool {
     let has_lease = lease_token.is_some() && lease_expires_at.is_some();
     let valid_token = lease_token.is_none_or(|value| !value.is_nil());
@@ -318,10 +318,10 @@ fn valid_preflight_retirement(snapshot: &DeliveryAdminSnapshot) -> bool {
 }
 
 fn valid_timeline(
-    created_at: DateTime<Utc>,
-    claimed_at: Option<DateTime<Utc>>,
-    sending_at: Option<DateTime<Utc>>,
-    completed_at: Option<DateTime<Utc>>,
+    created_at: Timestamp,
+    claimed_at: Option<Timestamp>,
+    sending_at: Option<Timestamp>,
+    completed_at: Option<Timestamp>,
 ) -> bool {
     if claimed_at.is_some_and(|value| value < created_at) {
         return false;
@@ -352,6 +352,6 @@ pub(super) fn valid_stored_text(value: &str) -> bool {
     !value.is_empty() && value == value.trim()
 }
 
-pub(super) fn is_zero_time(value: DateTime<Utc>) -> bool {
+pub(super) fn is_zero_time(value: Timestamp) -> bool {
     value.timestamp() == -62_135_596_800 && value.timestamp_subsec_nanos() == 0
 }

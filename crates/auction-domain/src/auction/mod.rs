@@ -1,6 +1,6 @@
 //! 拍卖聚合与生命周期状态机。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use crate::{AuctionId, DomainError};
@@ -40,12 +40,12 @@ pub struct Auction {
     pub title: String,
     pub status: AuctionStatus,
     pub state_version: u64,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-    pub scheduled_end_at: Option<DateTime<Utc>>,
-    pub effective_end_at: Option<DateTime<Utc>>,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+    pub scheduled_end_at: Option<Timestamp>,
+    pub effective_end_at: Option<Timestamp>,
     #[serde(default)]
-    pub cancelled_at: Option<DateTime<Utc>>,
+    pub cancelled_at: Option<Timestamp>,
     #[serde(default)]
     pub cancelled_reason: Option<String>,
     #[serde(default)]
@@ -53,17 +53,13 @@ pub struct Auction {
 }
 
 impl Auction {
-    pub fn preview(&mut self, now: DateTime<Utc>) -> Result<(), DomainError> {
+    pub fn preview(&mut self, now: Timestamp) -> Result<(), DomainError> {
         self.transition(AuctionStatus::Preview, now)
     }
 
     /// 原子冻结结束时间并从预览进入开拍状态，只推进一次聚合版本。
     /// lot 激活、结束时间冻结和拍卖开拍是同一个事务事实，不能拆成两个版本。
-    pub fn open(
-        &mut self,
-        scheduled_end_at: DateTime<Utc>,
-        now: DateTime<Utc>,
-    ) -> Result<(), DomainError> {
+    pub fn open(&mut self, scheduled_end_at: Timestamp, now: Timestamp) -> Result<(), DomainError> {
         if self.status != AuctionStatus::Preview {
             return Err(DomainError::InvalidTransition {
                 from: self.status,
@@ -83,14 +79,14 @@ impl Auction {
         Ok(())
     }
 
-    pub fn enter_final(&mut self, now: DateTime<Utc>) -> Result<(), DomainError> {
+    pub fn enter_final(&mut self, now: Timestamp) -> Result<(), DomainError> {
         self.transition(AuctionStatus::Final, now)
     }
 
     /// 记录人工提前结算请求；Live 会先进入 Final，Final 则只推进同一聚合版本。
     /// 该方法只关闭新的竞价入口，不直接伪造 Settling/Settled；权威结算仍由持久化 Worker
     /// claim 推进。
-    pub fn request_early_settlement(&mut self, now: DateTime<Utc>) -> Result<(), DomainError> {
+    pub fn request_early_settlement(&mut self, now: Timestamp) -> Result<(), DomainError> {
         match self.status {
             AuctionStatus::Live => self.transition(AuctionStatus::Final, now),
             AuctionStatus::Final => {
@@ -109,7 +105,7 @@ impl Auction {
     /// 失败关闭，防止用取消命令绕过竞价收口和结算。
     pub fn cancel_before_open_with_metadata(
         &mut self,
-        now: DateTime<Utc>,
+        now: Timestamp,
         reason: impl Into<String>,
         actor: impl Into<String>,
     ) -> Result<(), DomainError> {
@@ -147,7 +143,7 @@ impl Auction {
         Ok((reason, actor))
     }
 
-    fn transition(&mut self, next: AuctionStatus, now: DateTime<Utc>) -> Result<(), DomainError> {
+    fn transition(&mut self, next: AuctionStatus, now: Timestamp) -> Result<(), DomainError> {
         if !self.status.can_transition_to(next) {
             return Err(DomainError::InvalidTransition { from: self.status, to: next });
         }
@@ -170,12 +166,12 @@ impl Auction {
 mod tests {
     use std::time::SystemTime;
 
-    use chrono::{DateTime, Duration, Utc};
+    use auction_time::{Duration, Timestamp};
 
     use super::*;
 
-    fn epoch() -> DateTime<Utc> {
-        DateTime::<Utc>::from(SystemTime::UNIX_EPOCH)
+    fn epoch() -> Timestamp {
+        Timestamp::from(SystemTime::UNIX_EPOCH)
     }
 
     /// 存储层装载的聚合快照；版本从 1 起，结束时间尚未物化。

@@ -3,7 +3,7 @@
 use auction_application::auction::AuctionLifecycleCommand;
 use auction_application::core::{CommandInsert, CompetitionTransactionError};
 use auction_domain::{Auction, AuctionId};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use super::super::record::{insert_lifecycle_audit, previous_lifecycle_version};
 use crate::database::auction::competition::PostgresCompetitionTransaction;
@@ -17,7 +17,7 @@ pub(super) async fn apply_final_plan_postgres(
     command: &AuctionLifecycleCommand,
     auction: &Auction,
     proxy_plans: &[auction_application::auction::AuctionFinalProxyPlan],
-    effective_end_at: Option<DateTime<Utc>>,
+    effective_end_at: Option<Timestamp>,
 ) -> Result<(), CompetitionTransactionError> {
     // 名义与有效截止必须同步收紧：保留 effective >= scheduled 不变量，原始计划留在不可变
     // policy_snapshot 中供审计追溯。
@@ -94,8 +94,8 @@ pub(super) async fn apply_final_proxy_plans_postgres(
 pub(super) async fn clamp_live_lot_deadlines_postgres(
     transaction: &mut PostgresCompetitionTransaction,
     auction_id: AuctionId,
-    effective_end_at: DateTime<Utc>,
-    updated_at: DateTime<Utc>,
+    effective_end_at: Timestamp,
+    updated_at: Timestamp,
 ) -> Result<(), CompetitionTransactionError> {
     let transaction = transaction.transaction_mut()?;
     sqlx::query(

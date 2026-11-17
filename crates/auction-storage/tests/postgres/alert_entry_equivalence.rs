@@ -16,7 +16,7 @@ use std::time::Duration as StdDuration;
 use auction_application::operations::{
     OperationsAlertCollectionOverdueRead, OperationsAlertSourceReader,
 };
-use chrono::{Duration, Utc};
+use auction_time::{Duration, Timestamp};
 use serde_json::Value;
 use sqlx::{AssertSqlSafe, PgPool};
 use uuid::Uuid;
@@ -194,7 +194,7 @@ fn case_id(kind: &str, number: i32) -> Uuid {
 }
 
 async fn seed_matrix(pool: &PgPool) {
-    let now = Utc::now();
+    let now = Timestamp::now();
     let ended = now - Duration::days(10);
     let auction = stable_id(SEED, "auction");
     let command = stable_id(SEED, "command");
@@ -362,7 +362,7 @@ async fn postgres_alert_entry_reads_match_full_scan_across_states() {
 
     let snapshot = store
         .snapshot(
-            Utc::now(),
+            Timestamp::now(),
             OperationsAlertCollectionOverdueRead::CountWithItems(StdDuration::from_secs(3_600)),
         )
         .await

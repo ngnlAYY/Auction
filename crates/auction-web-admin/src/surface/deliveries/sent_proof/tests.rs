@@ -2,7 +2,7 @@ use auction_contracts::{
     AdminDeliveryAttemptResponse, AdminDeliveryCustodyResponse, AdminDeliveryDetailResponse,
     AdminDeliveryEvidenceResponse, AdminDeliveryResponse,
 };
-use chrono::{TimeZone, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use super::evidence::{decode_hex_digest, selectable_evidence};
@@ -10,7 +10,7 @@ use super::state::{SentProofDraft, SentProofIssue};
 use super::validation::{build_evidence, sent_minute_from_input, sent_minute_from_timestamp};
 
 fn time(minute: u32) -> String {
-    Utc.with_ymd_and_hms(2026, 11, 2, 1, minute, 0).single().expect("timestamp").to_rfc3339()
+    Timestamp::from_ymd_hms(2026, 11, 2, 1, minute, 0).expect("timestamp").to_rfc3339()
 }
 
 fn evidence() -> AdminDeliveryEvidenceResponse {

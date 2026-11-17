@@ -1,7 +1,7 @@
 //! Admin 拍卖列表读取端口。
 
 use auction_domain::{valid_optional_text, valid_text};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use crate::ports::core::ApplicationFuture;
@@ -44,7 +44,7 @@ impl AdminAuctionListRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AdminAuctionSummary {
     pub auction: SettlementAuctionSnapshot,
-    pub scheduled_ends_at: Option<DateTime<Utc>>,
+    pub scheduled_ends_at: Option<Timestamp>,
     pub lot_count: i64,
 }
 
@@ -111,11 +111,11 @@ pub trait AdminAuctionReader: Send + Sync {
     ) -> ApplicationFuture<'_, AdminAuctionPage>;
 }
 
-fn valid_time(value: DateTime<Utc>) -> bool {
+fn valid_time(value: Timestamp) -> bool {
     value.timestamp_micros() != 0
 }
 
-fn valid_optional_time(value: Option<DateTime<Utc>>) -> bool {
+fn valid_optional_time(value: Option<Timestamp>) -> bool {
     value.is_none_or(valid_time)
 }
 

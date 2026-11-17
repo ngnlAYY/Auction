@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use auction_test_support::mooglemail::{Fault, MailDouble};
-use chrono::Utc;
+use auction_time::Timestamp;
 
 use crate::mooglemail::{
     MoogleMailClient, MoogleMailClientConfig, MoogleMailComposeState, MoogleMailCookie,
@@ -101,7 +101,7 @@ async fn balance_budget_expiry_after_send_keeps_the_next_read_waiting() {
     let started = Instant::now();
 
     let error = gateway
-        .read_balance(MoogleMailWorld::Main, Utc::now())
+        .read_balance(MoogleMailWorld::Main, Timestamp::now())
         .await
         .expect_err("读取预算先于远端回应耗尽");
     assert_eq!(error.category, MoogleMailErrorCategory::RemoteTemporary);

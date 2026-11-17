@@ -13,7 +13,7 @@ use auction_application::settlement::{
     system_returned_settlement_obligation_id,
 };
 use auction_domain::{SettlementDispatchReference, SettlementObligationKind};
-use chrono::{DateTime, Duration, TimeZone, Utc};
+use auction_time::{Duration, Timestamp};
 use serde_json::json;
 use uuid::Uuid;
 
@@ -24,9 +24,8 @@ fn obligation_id() -> Uuid {
     Uuid::parse_str(OBLIGATION_ID).unwrap_or_else(|error| panic!("固定义务标识：{error}"))
 }
 
-fn at(minute: u32) -> DateTime<Utc> {
-    Utc.with_ymd_and_hms(2026, 11, 5, 9, minute, 0)
-        .single()
+fn at(minute: u32) -> Timestamp {
+    Timestamp::from_ymd_hms(2026, 11, 5, 9, minute, 0)
         .unwrap_or_else(|| panic!("固定测试时间必须存在"))
 }
 

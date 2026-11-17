@@ -13,6 +13,7 @@ use auction_application::core::diagnostics::DiagnosticError;
 use auction_contracts::{
     AdminAuditCursorResponse, AdminAuditRecordResponse, AdminAuditResponse, ApiResponse,
 };
+use auction_time::Timestamp;
 use axum::{
     Json,
     extract::{ConnectInfo, State},
@@ -20,7 +21,6 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -193,23 +193,23 @@ fn optional_text(
 fn parse_optional_time(
     query: &std::collections::BTreeMap<&str, String>,
     key: &str,
-) -> Result<Option<DateTime<Utc>>, ()> {
+) -> Result<Option<Timestamp>, ()> {
     let Some(value) = query.get(key) else {
         return Ok(None);
     };
     parse_time(Some(value)).map(Some)
 }
 
-fn parse_time(value: Option<&String>) -> Result<DateTime<Utc>, ()> {
+fn parse_time(value: Option<&String>) -> Result<Timestamp, ()> {
     let value = value.ok_or(())?;
-    DateTime::parse_from_rfc3339(value).map(|value| value.with_timezone(&Utc)).map_err(|_| ())
+    Timestamp::parse_from_rfc3339(value).map_err(|_| ())
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct CursorToken {
     v: u8,
-    at: DateTime<Utc>,
+    at: Timestamp,
     id: Uuid,
 }
 

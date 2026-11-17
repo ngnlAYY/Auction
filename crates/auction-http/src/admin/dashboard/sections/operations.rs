@@ -51,7 +51,7 @@ fn map_fulfillment_baseline(
         collection_overdue: 0,
         ..snapshot
     };
-    let observed_at = timestamp(chrono::Utc::now());
+    let observed_at = timestamp(auction_time::Timestamp::now());
     let degraded =
         policy.map(|policy| assess_fulfillment(baseline, policy)).is_some_and(|assessment| {
             assessment.manual_reconcile || assessment.failed || assessment.backlog
@@ -86,7 +86,7 @@ fn map_fulfillment_collection_wait(
     collection_overdue_items: &[OperationsAlertCollectionOverdueItem],
     policy: Option<&OperationsAlertPolicy>,
 ) -> AdminDashboardSectionResponse {
-    let observed_at = timestamp(chrono::Utc::now());
+    let observed_at = timestamp(auction_time::Timestamp::now());
     let assessment = policy.map(|policy| assess_fulfillment(snapshot, policy));
     let degraded_reason = if assessment.is_some_and(|assessment| assessment.manual_reconcile) {
         Some("manual_reconcile")
@@ -152,7 +152,7 @@ pub(crate) fn map_delivery(
     snapshot: OperationsAlertDeliverySnapshot,
     policy: Option<&OperationsAlertPolicy>,
 ) -> AdminDashboardSectionResponse {
-    let observed_at = timestamp(chrono::Utc::now());
+    let observed_at = timestamp(auction_time::Timestamp::now());
     let assessment = policy.map(|policy| assess_delivery(snapshot, policy));
     let degraded_reason = if assessment.is_some_and(|assessment| assessment.manual_reconcile) {
         Some("manual_reconcile")
@@ -191,7 +191,7 @@ pub(crate) fn map_recovery(
     snapshot: OperationsAlertRecoverySnapshot,
     policy: Option<&OperationsAlertPolicy>,
 ) -> AdminDashboardSectionResponse {
-    let observed_at = timestamp(chrono::Utc::now());
+    let observed_at = timestamp(auction_time::Timestamp::now());
     let assessment = policy.map(|policy| assess_recovery(&snapshot, policy));
     let degraded_reason = if assessment.is_some_and(|assessment| assessment.manual_reconcile) {
         Some("manual_reconcile")
@@ -249,7 +249,7 @@ pub(crate) fn map_reconciliation(
     snapshot: OperationsAlertReconciliationSnapshot,
     projection: DashboardProjection,
 ) -> AdminDashboardSectionResponse {
-    let observed_at = timestamp(chrono::Utc::now());
+    let observed_at = timestamp(auction_time::Timestamp::now());
     let (Some(custody_report_age_seconds), Some(solvency_report_age_seconds)) =
         (snapshot.custody_report_age_seconds, snapshot.solvency_report_age_seconds)
     else {
@@ -303,7 +303,6 @@ mod tests {
         OperationsAlertReconciliationWorld, OperationsAlertRecoverySnapshot,
     };
     use auction_domain::SettlementObligationKind;
-    use chrono::TimeZone;
     use serde::Deserialize;
     use uuid::Uuid;
 
@@ -488,7 +487,7 @@ mod tests {
     #[test]
     fn awaiting_collection_is_projected_separately_without_backlog() {
         let policy = policy();
-        let sent_at = chrono::Utc.timestamp_opt(1_700_000_000, 0).single().expect("寄出时刻");
+        let sent_at = auction_time::Timestamp::from_timestamp(1_700_000_000, 0).expect("寄出时刻");
         let item = OperationsAlertCollectionOverdueItem {
             obligation_id: Uuid::from_u128(0x10),
             obligation_kind: SettlementObligationKind::SellerPayout,

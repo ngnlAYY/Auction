@@ -4,7 +4,7 @@ use auction_application::core::RepositoryError;
 use auction_application::mail::{
     MailDeliveryCommand, MailDeliveryOperation, MailDeliveryOrigin, MailDeliveryResult,
 };
-use chrono::Utc;
+use auction_time::Timestamp;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
@@ -79,7 +79,7 @@ pub(crate) async fn enqueue_in_transaction(
         .map_err(|_| repository_error("MoogleMail delivery 命令无效"))?;
     let payload = payload(command);
     let status = prepared_status.unwrap_or("pending");
-    let occurred_at = Utc::now();
+    let occurred_at = Timestamp::now();
     let delivery_id = Uuid::new_v5(
         &Uuid::NAMESPACE_URL,
         format!("auction/mail-delivery-v1/{}", command.command_id).as_bytes(),

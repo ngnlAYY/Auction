@@ -3,7 +3,7 @@
 use auction_application::core::{CommandLedgerError, StoredCommand};
 use auction_application::settlement::{SettlementSnapshot, SettlementTransactionError};
 use auction_domain::{AuctionId, CommandId, SettlementAmount, SettlementFact};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::Value;
 use sqlx::Row;
 use uuid::Uuid;
@@ -23,7 +23,7 @@ impl PostgresCompetitionTransaction {
     pub(super) async fn insert_settlement_command(
         &mut self,
         command: StoredCommand,
-        occurred_at: DateTime<Utc>,
+        occurred_at: Timestamp,
     ) -> Result<(), SettlementTransactionError> {
         command.validate().map_err(SettlementTransactionError::from)?;
         let payload: Value = serde_json::from_slice(&command.result_payload)
@@ -99,9 +99,9 @@ impl PostgresCompetitionTransaction {
         let policy_snapshot: Value =
             auction_row.try_get("policy_snapshot").map_err(map_sql_error)?;
         let (policy, recovery_policy) = parse_settlement_policy(&policy_snapshot)?;
-        let scheduled_open_at: DateTime<Utc> =
+        let scheduled_open_at: Timestamp =
             auction_row.try_get("scheduled_open_at").map_err(map_sql_error)?;
-        let scheduled_end_at: DateTime<Utc> =
+        let scheduled_end_at: Timestamp =
             auction_row.try_get("scheduled_end_at").map_err(map_sql_error)?;
         let auction_state_version = positive_u64(
             auction_row.try_get::<i64, _>("auction_state_version").map_err(map_sql_error)?,
@@ -169,7 +169,7 @@ impl PostgresCompetitionTransaction {
                 .try_get::<Option<String>, _>("seller")
                 .map_err(map_sql_error)?
                 .ok_or_else(|| invalid("结算 lot 缺少卖方身份"))?;
-            let fact_end_at: DateTime<Utc> = row.try_get("fact_end_at").map_err(map_sql_error)?;
+            let fact_end_at: Timestamp = row.try_get("fact_end_at").map_err(map_sql_error)?;
             let leader_held_nanos = leader_id
                 .map(|_| {
                     row.try_get::<Option<i64>, _>("leader_held_nanos")

@@ -6,7 +6,7 @@ use auction_application::mail::{
     MailUserResult, MailUserResultCode,
 };
 use auction_domain::CommandId;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::json;
 use sqlx::Row;
 use sqlx::postgres::PgRow;
@@ -57,7 +57,7 @@ pub(super) async fn persist_user_mail_result(
     kind: MailUserCommandKind,
     request_hash: RequestHash,
     result: MailUserResult,
-    now: DateTime<Utc>,
+    now: Timestamp,
     action: &str,
 ) -> Result<(), ApplicationError> {
     result.validate(kind).map_err(ApplicationError::from)?;

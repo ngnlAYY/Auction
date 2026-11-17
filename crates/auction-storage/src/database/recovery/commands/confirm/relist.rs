@@ -3,7 +3,7 @@
 use auction_application::recovery::{
     RecoveryCommandError, RecoveryConfirmationAction, RecoveryResolutionAdvance,
 };
-use chrono::{DateTime, Duration as ChronoDuration, Utc};
+use auction_time::{TimeDelta, Timestamp};
 use serde_json::json;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
@@ -26,8 +26,8 @@ use crate::database::recovery::commands::scope::validate_custody_evidence;
 
 pub(in crate::database::recovery::commands) async fn advance_relist_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
-    now: DateTime<Utc>,
-    retry_after: ChronoDuration,
+    now: Timestamp,
+    retry_after: TimeDelta,
 ) -> Result<Option<RecoveryResolutionAdvance>, RecoveryCommandError> {
     // 与旧 Worker 一致，在 Serializable runner 外生成一次事件 ID，并在重试间保持不变。
     let preview_event_id = Uuid::new_v4();
@@ -43,8 +43,8 @@ pub(in crate::database::recovery::commands) async fn advance_relist_postgres(
 
 pub(in crate::database::recovery::commands) async fn advance_relist_postgres_once(
     pool: &crate::database::TrackedPool<Postgres>,
-    now: DateTime<Utc>,
-    retry_after: ChronoDuration,
+    now: Timestamp,
+    retry_after: TimeDelta,
     preview_event_id: Uuid,
 ) -> Result<Option<RecoveryResolutionAdvance>, RecoveryCommandError> {
     let mut transaction =

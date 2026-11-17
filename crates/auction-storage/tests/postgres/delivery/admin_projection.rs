@@ -15,7 +15,7 @@ use auction_application::delivery::{
     PlayerSupportRequest, PlayerSupportSelector,
 };
 use auction_storage::DatabaseStore;
-use chrono::{DateTime, Duration, TimeZone, Utc};
+use auction_time::{Duration, Timestamp};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -53,7 +53,7 @@ const STORED_ORIGINS: [&str; 10] = [
 const SYSTEM_SENDER: &str = "MoogleMail";
 
 /// 写入一条 pending 投递；结算退件 Take 收件人是系统退件发件人，其余发给 `Sample`。
-async fn insert_pending(pool: &PgPool, origin_kind: &str, created_at: DateTime<Utc>) -> Uuid {
+async fn insert_pending(pool: &PgPool, origin_kind: &str, created_at: Timestamp) -> Uuid {
     let recipient =
         if origin_kind == "settlement_return_action" { SYSTEM_SENDER } else { "Sample" };
     insert_pending_to(pool, origin_kind, recipient, created_at).await
@@ -64,7 +64,7 @@ async fn insert_pending_to(
     pool: &PgPool,
     origin_kind: &str,
     recipient: &str,
-    created_at: DateTime<Utc>,
+    created_at: Timestamp,
 ) -> Uuid {
     let id = Uuid::new_v4();
     let payload = if origin_kind == "settlement_return_action" {
@@ -99,7 +99,7 @@ async fn postgres_admin_delivery_list_default_projection_omits_settlement_return
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("以运行账号连接");
     let pool = store.postgres_pool();
-    let base = Utc.with_ymd_and_hms(2026, 11, 16, 0, 0, 0).single().expect("时间");
+    let base = Timestamp::from_ymd_hms(2026, 11, 16, 0, 0, 0).expect("时间");
     let mut take_id = Uuid::nil();
     for (offset, origin) in (0_i64..).zip(STORED_ORIGINS) {
         let id = insert_pending(pool, origin, base + Duration::minutes(offset)).await;
@@ -221,7 +221,7 @@ async fn postgres_player_support_default_projection_omits_settlement_return_take
     let store = database.store().await.expect("以运行账号连接");
     let pool = store.postgres_pool();
     let user_id = seed_system_sender_user(pool).await;
-    let base = Utc.with_ymd_and_hms(2026, 11, 16, 0, 0, 0).single().expect("时间");
+    let base = Timestamp::from_ymd_hms(2026, 11, 16, 0, 0, 0).expect("时间");
     // 最旧的 Take 落在上限之外，上限条普通投递居中，最新的 Take 按创建时间倒序排在第一行。
     let old_take = insert_pending(pool, "settlement_return_action", base).await;
     for minute in 1..=MAX_PLAYER_SUPPORT_ROWS {
@@ -276,7 +276,7 @@ async fn postgres_player_support_take_without_associated_user_stays_out_of_defau
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("以运行账号连接");
     let pool = store.postgres_pool();
-    let base = Utc.with_ymd_and_hms(2026, 11, 16, 0, 0, 0).single().expect("时间");
+    let base = Timestamp::from_ymd_hms(2026, 11, 16, 0, 0, 0).expect("时间");
     let take = insert_pending(pool, "settlement_return_action", base).await;
 
     let default = player_support(&store, PlayerSupportSelector::Reference(take), false).await;

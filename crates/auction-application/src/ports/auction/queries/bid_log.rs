@@ -1,6 +1,6 @@
 //! Public 竞价日志查询端口。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use crate::ports::core::ApplicationFuture;
@@ -67,7 +67,7 @@ impl PublicBidLogListRequest {
 pub enum PublicBidLogCursor {
     Start,
     Boundary {
-        created_at: DateTime<Utc>,
+        created_at: Timestamp,
         lot_id: Uuid,
         accepted_state_version: i64,
         fact_index: i32,
@@ -98,7 +98,7 @@ pub struct PublicBidLogEntry {
     pub accepted_state_version: i64,
     pub fact_index: i32,
     pub mechanism: String,
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
     /// 本条出价所在的新建代理命令里被排位击败（`ranked_below`）的代理；只挂在该命令的
     /// 第 1 条事实上。
     pub defeated_proxy: Option<PublicDefeatedProxy>,

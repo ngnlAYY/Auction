@@ -5,7 +5,7 @@
 use auction_contracts::{
     AdminDeliveryCommandResponse, AdminDeliveryListResponse, AdminDeliveryResponse,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::Deserialize;
 
 use super::queue::DeliveryAction;
@@ -212,11 +212,11 @@ pub(super) fn decode_delivery(value: AdminDeliveryResponse) -> Result<Delivery, 
     })
 }
 
-pub(super) fn parse_delivery_time(value: &str) -> Option<DateTime<Utc>> {
-    DateTime::parse_from_rfc3339(value).ok().map(|value| value.with_timezone(&Utc))
+pub(super) fn parse_delivery_time(value: &str) -> Option<Timestamp> {
+    Timestamp::parse_from_rfc3339(value).ok()
 }
 
-fn parse_optional_delivery_time(value: Option<&String>) -> Result<Option<DateTime<Utc>>, ()> {
+fn parse_optional_delivery_time(value: Option<&String>) -> Result<Option<Timestamp>, ()> {
     value.map_or(Ok(None), |value| parse_delivery_time(value).map(Some).ok_or(()))
 }
 
@@ -259,15 +259,15 @@ fn recovery_superseded(value: &AdminDeliveryResponse) -> bool {
     value.status == "failed" && value.failure_code.as_deref() == Some("recovery_superseded")
 }
 
-fn is_zero_delivery_time(value: DateTime<Utc>) -> bool {
+fn is_zero_delivery_time(value: Timestamp) -> bool {
     value.timestamp() == -62_135_596_800 && value.timestamp_subsec_nanos() == 0
 }
 
 fn valid_timeline(
-    created_at: DateTime<Utc>,
-    claimed_at: Option<DateTime<Utc>>,
-    sending_at: Option<DateTime<Utc>>,
-    completed_at: Option<DateTime<Utc>>,
+    created_at: Timestamp,
+    claimed_at: Option<Timestamp>,
+    sending_at: Option<Timestamp>,
+    completed_at: Option<Timestamp>,
 ) -> bool {
     claimed_at.is_none_or(|value| value >= created_at)
         && sending_at.is_none_or(|value| claimed_at.is_some_and(|claimed| value >= claimed))
@@ -276,10 +276,10 @@ fn valid_timeline(
 
 fn valid_state_fields(
     value: &AdminDeliveryResponse,
-    lease_expires_at: Option<DateTime<Utc>>,
-    claimed_at: Option<DateTime<Utc>>,
-    sending_at: Option<DateTime<Utc>>,
-    completed_at: Option<DateTime<Utc>>,
+    lease_expires_at: Option<Timestamp>,
+    claimed_at: Option<Timestamp>,
+    sending_at: Option<Timestamp>,
+    completed_at: Option<Timestamp>,
 ) -> bool {
     // 服务端已验证未写入 metadata；浏览器只接受明确非法载荷的完整领取/完成形状。
     if value.status == "failed"

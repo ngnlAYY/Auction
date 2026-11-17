@@ -1,10 +1,10 @@
 //! Public/Admin Cookie、Basic Auth 和 CSRF 头的安全解析与生成。
 
 use auction_application::core::diagnostics::DiagnosticContext;
+use auction_time::Timestamp;
 use axum::http::{HeaderMap, HeaderValue, header};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use chrono::{DateTime, Utc};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 
@@ -77,15 +77,15 @@ pub(crate) fn constant_time_equal(left: &str, right: &str) -> bool {
 pub(crate) fn admin_cookie(
     name: &str,
     token: &str,
-    expires_at: DateTime<Utc>,
-    now: DateTime<Utc>,
+    expires_at: Timestamp,
+    now: Timestamp,
     secure: bool,
     http_only: bool,
 ) -> Result<HeaderValue, ()> {
     let max_age = (expires_at - now).num_seconds().max(0);
     let mut value = format!(
         "{name}={token}; Path=/; Expires={}; Max-Age={max_age}; SameSite=Strict",
-        expires_at.format("%a, %d %b %Y %H:%M:%S GMT"),
+        expires_at.strftime("%a, %d %b %Y %H:%M:%S GMT"),
     );
     if http_only {
         value.push_str("; HttpOnly");
@@ -135,16 +135,16 @@ pub(crate) fn append_clear_admin_cookies(headers: &mut HeaderMap, secure: bool) 
 /// 浏览器持久期最多 400 天；有限会话再受服务器截止约束，只由显式串行化写请求同步。
 pub(crate) fn public_session_cookie(
     token: &str,
-    expires_at: Option<DateTime<Utc>>,
-    now: DateTime<Utc>,
+    expires_at: Option<Timestamp>,
+    now: Timestamp,
     secure: bool,
 ) -> Result<HeaderValue, ()> {
-    let browser_limit = now.checked_add_signed(chrono::Duration::days(400)).ok_or(())?;
+    let browser_limit = now.checked_add_signed(auction_time::Duration::days(400)).ok_or(())?;
     let expires_at = expires_at.map_or(browser_limit, |value| value.min(browser_limit));
     let max_age = (expires_at - now).num_seconds().max(0);
     let mut value = format!(
         "{PUBLIC_SESSION_COOKIE}={token}; Path=/; Expires={}; Max-Age={max_age}; HttpOnly; SameSite=Lax",
-        expires_at.format("%a, %d %b %Y %H:%M:%S GMT"),
+        expires_at.strftime("%a, %d %b %Y %H:%M:%S GMT"),
     );
     if secure {
         value.push_str("; Secure");

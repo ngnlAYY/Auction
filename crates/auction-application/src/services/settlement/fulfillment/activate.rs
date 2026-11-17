@@ -1,6 +1,6 @@
 //! 结算履约 `prepared` 阶段：激活 delivery 并把义务推进到 enqueued。
 
-use chrono::{DateTime, Duration, Utc};
+use auction_time::{Duration, Timestamp};
 
 use super::authorization::authorize_pending_or_prepared;
 use super::intent::{activation_request_hash, dispatch_activate_command_id};
@@ -25,7 +25,7 @@ impl SettlementFulfillmentService {
     pub(super) async fn activate_now(
         &self,
         claim: SettlementFulfillmentClaim,
-        activated_at: DateTime<Utc>,
+        activated_at: Timestamp,
         retry_delay: Duration,
     ) -> Result<
         SettlementFulfillmentPhaseResult<SettlementFulfillmentActivationResult>,

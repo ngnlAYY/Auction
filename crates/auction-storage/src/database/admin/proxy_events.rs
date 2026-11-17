@@ -31,7 +31,7 @@ async fn list_postgres(
     store: &crate::database::DatabaseStore,
     request: AdminProxyEventListRequest,
 ) -> Result<Option<AdminProxyEventPage>, ApplicationError> {
-    use chrono::{DateTime, Utc};
+    use auction_time::Timestamp;
     use sqlx::Row;
     use uuid::Uuid;
 
@@ -135,7 +135,7 @@ async fn list_postgres(
         let command_id: Uuid = row
             .try_get("command_id")
             .map_err(|error| storage_error_from(error, "读取 Admin 代理历史命令标识失败"))?;
-        let created_at: DateTime<Utc> = row
+        let created_at: Timestamp = row
             .try_get("created_at")
             .map_err(|error| storage_error_from(error, "读取 Admin 代理历史创建时间失败"))?;
         let event = AdminProxyEvent {

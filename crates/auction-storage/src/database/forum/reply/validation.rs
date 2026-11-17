@@ -4,7 +4,7 @@ use auction_application::core::ApplicationError;
 use auction_application::forum::{ForumBidCommandRecord, ForumReplyTopic};
 use auction_domain::SettlementWorld;
 pub(super) use auction_domain::valid_text;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 pub(super) const MAX_REPLY_BATCH_SIZE: u16 = 100;
 pub(super) const MAX_PLAYER_NAME_BYTES: usize = 256;
@@ -34,7 +34,7 @@ pub(super) fn valid_command_record(record: &ForumBidCommandRecord) -> bool {
 
 /// 固定楼层写端口共用的主题租约校验：拍卖与主题身份、claim 三元组有效，且租约晚于本次
 /// 操作时刻。四个写端口的拒绝口径只在这里定义。
-pub(super) fn valid_topic_lease(topic: &ForumReplyTopic, at: DateTime<Utc>) -> bool {
+pub(super) fn valid_topic_lease(topic: &ForumReplyTopic, at: Timestamp) -> bool {
     !topic.auction_id.is_nil()
         && valid_decimal_id(&topic.thread_id, MAX_THREAD_ID_BYTES)
         && !topic.content_claim_token.is_nil()
@@ -79,12 +79,12 @@ mod tests {
         ForumCatalogLayout, ForumCatalogPage, ForumReplyPhase, ForumReplyTopic,
     };
     use auction_domain::{AuctionId, SettlementWorld};
-    use chrono::{DateTime, Duration, Utc};
+    use auction_time::{Duration, Timestamp};
     use uuid::Uuid;
 
     use super::{valid_processed_through, valid_topic_layout, valid_topic_lease};
 
-    fn topic(now: DateTime<Utc>) -> ForumReplyTopic {
+    fn topic(now: Timestamp) -> ForumReplyTopic {
         ForumReplyTopic {
             auction_id: AuctionId::from_uuid(Uuid::from_u128(1)),
             world: SettlementWorld::Main,
@@ -113,7 +113,7 @@ mod tests {
 
     #[test]
     fn topic_lease_requires_identity_claim_and_unexpired_lease() {
-        let now = Utc::now();
+        let now = Timestamp::now();
         let valid = topic(now);
         assert!(valid_topic_lease(&valid, now));
         let rejected: [fn(&mut ForumReplyTopic); 5] = [
@@ -134,7 +134,7 @@ mod tests {
 
     #[test]
     fn topic_layout_and_processed_watermark_follow_the_fixed_posts() {
-        let now = Utc::now();
+        let now = Timestamp::now();
         let valid = topic(now);
         assert!(valid_topic_layout(&valid));
         let mut duplicate_page = valid.clone();

@@ -3,7 +3,7 @@
 use std::future::Future;
 
 use auction_domain::{AuctionId, CommandId, valid_text};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use crate::ports::admin::AdminAuctionSummary;
@@ -17,9 +17,9 @@ pub const ADMIN_AUCTION_SCHEDULE_COMMAND_KIND: &str = "admin_auction_schedule_up
 pub struct AdminUpdateAuctionScheduleCommand {
     pub command_id: CommandId,
     pub auction_id: AuctionId,
-    pub preview_scheduled_at: DateTime<Utc>,
-    pub scheduled_open_at: DateTime<Utc>,
-    pub scheduled_end_at: DateTime<Utc>,
+    pub preview_scheduled_at: Timestamp,
+    pub scheduled_open_at: Timestamp,
+    pub scheduled_end_at: Timestamp,
     pub expected_state_version: i64,
     pub actor_id: String,
     pub request_id: Option<String>,
@@ -46,18 +46,18 @@ impl AdminUpdateAuctionScheduleCommand {
 #[derive(Debug, Clone)]
 pub struct AdminAuctionScheduleSnapshot {
     pub summary: AdminAuctionSummary,
-    pub policy_scheduled_end_at: DateTime<Utc>,
+    pub policy_scheduled_end_at: Timestamp,
     pub round_id: Uuid,
     pub round_state_version: i64,
-    pub round_preview_due_at: DateTime<Utc>,
-    pub round_open_due_at: DateTime<Utc>,
-    pub round_scheduled_end_at: DateTime<Utc>,
+    pub round_preview_due_at: Timestamp,
+    pub round_open_due_at: Timestamp,
+    pub round_scheduled_end_at: Timestamp,
     pub schedule_source: Option<auction_domain::AuctionScheduleSource>,
-    pub preview_completed_at: Option<DateTime<Utc>>,
-    pub open_completed_at: Option<DateTime<Utc>>,
-    pub final_completed_at: Option<DateTime<Utc>>,
+    pub preview_completed_at: Option<Timestamp>,
+    pub open_completed_at: Option<Timestamp>,
+    pub final_completed_at: Option<Timestamp>,
     pub lease_owner: Option<String>,
-    pub lease_until: Option<DateTime<Utc>>,
+    pub lease_until: Option<Timestamp>,
 }
 
 impl AdminAuctionScheduleSnapshot {
@@ -84,7 +84,7 @@ impl AdminAuctionScheduleSnapshot {
 
     /// 只有同时存在 owner 且尚未到期的 lease 才代表 Worker 正在执行；owner 为空的未来
     /// `lease_until` 是失败退避水位，计划真正改变时可以一并清除。
-    pub fn has_active_lease(&self, now: DateTime<Utc>) -> bool {
+    pub fn has_active_lease(&self, now: Timestamp) -> bool {
         self.lease_owner.is_some() && self.lease_until.is_some_and(|until| until > now)
     }
 }
@@ -109,20 +109,20 @@ pub trait AdminAuctionScheduleTransaction: Send {
         &mut self,
         command: AdminUpdateAuctionScheduleCommand,
         snapshot: AdminAuctionScheduleSnapshot,
-        updated_at: DateTime<Utc>,
+        updated_at: Timestamp,
     ) -> impl Future<Output = Result<AdminAuctionSummary, CompetitionTransactionError>> + Send;
 
     fn append_admin_auction_schedule_record(
         &mut self,
         command: AdminUpdateAuctionScheduleCommand,
-        previous_preview_scheduled_at: DateTime<Utc>,
-        previous_scheduled_open_at: DateTime<Utc>,
-        previous_scheduled_end_at: DateTime<Utc>,
+        previous_preview_scheduled_at: Timestamp,
+        previous_scheduled_open_at: Timestamp,
+        previous_scheduled_end_at: Timestamp,
         result: AdminAuctionSummary,
         changed: bool,
     ) -> impl Future<Output = Result<(), CompetitionTransactionError>> + Send;
 }
 
-fn valid_optional_time(value: Option<DateTime<Utc>>) -> bool {
+fn valid_optional_time(value: Option<Timestamp>) -> bool {
     value.is_none_or(|value| value.timestamp_micros() != 0)
 }

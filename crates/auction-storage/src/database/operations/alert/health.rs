@@ -2,7 +2,7 @@
 
 use auction_application::core::ApplicationError;
 use auction_application::operations::{OperationsAlertHealth, OperationsAlertRuntimeStatus};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Row;
 
 use crate::database::TrackedPool;
@@ -58,7 +58,7 @@ pub(super) async fn health_postgres(
     if !enabled {
         return Ok(OperationsAlertHealth::disabled());
     }
-    let last_observed_at: Option<DateTime<Utc>> = runtime_row
+    let last_observed_at: Option<Timestamp> = runtime_row
         .try_get("last_observed_at")
         .map_err(|error| storage_error_from(error, "读取 operations alert 扫描水位失败"))?;
     let signal_row = sqlx::query(

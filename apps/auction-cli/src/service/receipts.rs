@@ -1,7 +1,7 @@
 //! 服务命令的回执发布、失败记录与运行中制品摘要。
 
 use anyhow::Context;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use super::systemd::{ManagedRole, Systemctl};
 use crate::cli::UnitArgs;
@@ -22,7 +22,7 @@ pub(super) async fn publish_receipt(
     systemctl: &Systemctl,
     action: Action,
     outcome: Outcome,
-    started_at: DateTime<Utc>,
+    started_at: Timestamp,
     context: &ReceiptContext,
     migration: Option<MigrationRecord>,
     failure: Option<String>,
@@ -38,7 +38,7 @@ pub(crate) async fn record_failure(
     state: &PrivateDirectory,
     systemctl: &Systemctl,
     action: Action,
-    started_at: DateTime<Utc>,
+    started_at: Timestamp,
     context: &ReceiptContext,
     error: &anyhow::Error,
 ) -> anyhow::Result<()> {

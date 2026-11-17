@@ -148,7 +148,7 @@ async fn wait_for_switch(
 
 fn next_maintenance_wake(
     runtime: &MailPollRuntime,
-    now: chrono::DateTime<chrono::Utc>,
+    now: auction_time::Timestamp,
 ) -> Option<tokio::time::Instant> {
     let delay = runtime
         .maintenance_schedule

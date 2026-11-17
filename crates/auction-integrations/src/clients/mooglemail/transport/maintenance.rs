@@ -12,7 +12,7 @@ use auction_application::mail::{
     MoogleMailboxReturnTakeIdentity, MoogleMailboxReturnTakeObservation, MoogleMailboxSentEntries,
     MoogleMailboxSentEntry, MoogleMailboxSentState, MoogleMailboxUnprovenSend,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use super::{MoogleMailDeliveryTransport, MoogleMailNotificationTemplates, render_notification};
 use crate::clients::mooglemail::gateway::MoogleMailCredentialSession;
@@ -275,7 +275,7 @@ impl MoogleMailboxMaintenance for MoogleMailMaintenanceAdapter {
         &'a self,
         world_id: &'a str,
         entry: &'a MoogleMailboxSentEntry,
-        observed_at: DateTime<Utc>,
+        observed_at: Timestamp,
     ) -> ApplicationFuture<'a, MoogleMailboxSentState> {
         Box::pin(async move {
             let world = maintenance_world(world_id)?;

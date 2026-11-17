@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 
 use auction_domain::{SettlementLine, SettlementMode, SettlementObligationKind};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -30,7 +30,7 @@ pub(super) struct SettlementDeliveryIntent {
     pub(super) settlement_mode: Option<SettlementMode>,
     /// 正文展示的首寄付款期限 D0（不是重寄后重新起算的当前期限）；只在存在时写入正文变量，
     /// 历史义务保持原载荷。
-    pub(super) payment_deadline_at: Option<DateTime<Utc>>,
+    pub(super) payment_deadline_at: Option<Timestamp>,
     /// 已存在投递的冻结变量键集合；重放时只允许按历史已知形状原样重建。
     pub(super) frozen_variables: Option<BTreeSet<String>>,
     /// 补寄派发引用（`v1/<派发编号>/<投递 ID>`）；首寄为空，载荷保持原字节。

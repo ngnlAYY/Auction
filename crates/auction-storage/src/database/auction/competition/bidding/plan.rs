@@ -6,7 +6,7 @@ use auction_application::core::{
     CompetitionCommandAuditContext, CompetitionTransactionError, SlowProxyExecutionContext,
 };
 use auction_domain::CompetitionPlan;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use crate::database::auction::competition::{
     PostgresCompetitionTransaction, invalid_state, plan_command_id,
@@ -18,7 +18,7 @@ impl PostgresCompetitionTransaction {
         &mut self,
         plan: &CompetitionPlan,
         audit: Option<CompetitionCommandAuditContext>,
-        occurred_at: DateTime<Utc>,
+        occurred_at: Timestamp,
     ) -> Result<(), CompetitionTransactionError> {
         plan.validate().map_err(|error| invalid_state(error.to_string().as_str()))?;
         super::apply_proxy_changes(self, plan, occurred_at).await?;
@@ -54,7 +54,7 @@ impl PostgresCompetitionTransaction {
         &mut self,
         plan: &CompetitionPlan,
         request_id: Option<String>,
-        occurred_at: DateTime<Utc>,
+        occurred_at: Timestamp,
     ) -> Result<(), CompetitionTransactionError> {
         plan.validate().map_err(|error| invalid_state(error.to_string().as_str()))?;
         let command_id = plan_command_id(plan)?;

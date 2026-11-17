@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex as StdMutex};
 use auction_application::admin::AdminCredentialWorld;
 use auction_application::admin::{AdminCredentialRuntimeOwnership, AdminCredentialRuntimeWriter};
 use auction_domain::SettlementWorld;
-use chrono::Utc;
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use super::MAXIMUM_COOKIE_BYTES;
@@ -275,7 +275,7 @@ impl EhentaiCredentialSession {
         if let (Some(persistent_id), Some(invalidator)) =
             (current.persistent_id, self.set.invalidator.as_ref())
         {
-            invalidator.mark_invalid(persistent_id, Utc::now()).await.map_err(
+            invalidator.mark_invalid(persistent_id, Timestamp::now()).await.map_err(
                 safe_diagnostics::warn_map("forum_credentials", "persist_revocation", || {
                     EhentaiError::credential(EhentaiOperation::FetchTopic)
                 }),

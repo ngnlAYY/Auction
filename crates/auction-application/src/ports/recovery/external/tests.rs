@@ -1,4 +1,4 @@
-use chrono::TimeDelta;
+use auction_time::TimeDelta;
 
 use super::*;
 
@@ -46,13 +46,13 @@ fn subject_projection_accepts_truncation_only() {
 #[test]
 fn list_projection_requires_world_and_cutoff() {
     let expectation = expectation();
-    let cutoff = Utc::now() - TimeDelta::hours(1);
+    let cutoff = Timestamp::now() - TimeDelta::hours(1);
     assert!(sent_list_projection_may_match(
         &expectation,
         "main",
         "Sample",
         "[Auction] settlement",
-        Utc::now() - TimeDelta::minutes(10),
+        Timestamp::now() - TimeDelta::minutes(10),
         cutoff,
     ));
     assert!(!sent_list_projection_may_match(
@@ -60,7 +60,7 @@ fn list_projection_requires_world_and_cutoff() {
         "isekai",
         "Sample",
         "[Auction] settlement",
-        Utc::now() - TimeDelta::minutes(10),
+        Timestamp::now() - TimeDelta::minutes(10),
         cutoff,
     ));
     assert!(!sent_list_projection_may_match(
@@ -77,8 +77,8 @@ fn list_projection_requires_world_and_cutoff() {
 fn detail_match_requires_full_identity_and_assets() {
     let expectation = expectation();
     let subject = expectation.subject.clone().unwrap();
-    let cutoff = Utc::now() - TimeDelta::hours(1);
-    let sent_at = Utc::now() - TimeDelta::minutes(10);
+    let cutoff = Timestamp::now() - TimeDelta::hours(1);
+    let sent_at = Timestamp::now() - TimeDelta::minutes(10);
     assert_eq!(
         sent_detail_match(
             &expectation,
@@ -163,8 +163,8 @@ fn detail_match_requires_full_identity_and_assets() {
 #[test]
 fn restored_payload_identity_matches_without_subject() {
     let expectation = restored_payload_expectation();
-    let cutoff = Utc::now() - TimeDelta::hours(1);
-    let sent_at = Utc::now() - TimeDelta::minutes(10);
+    let cutoff = Timestamp::now() - TimeDelta::hours(1);
+    let sent_at = Timestamp::now() - TimeDelta::minutes(10);
     // 没有标题也能进入详情候选；世界与时间仍然是硬条件。
     assert!(sent_list_projection_may_match(
         &expectation,
@@ -242,8 +242,8 @@ fn restored_payload_identity_matches_without_subject() {
 #[test]
 fn restored_payload_collected_detail_is_unresolved() {
     let expectation = restored_payload_expectation();
-    let cutoff = Utc::now() - TimeDelta::hours(1);
-    let sent_at = Utc::now() - TimeDelta::minutes(10);
+    let cutoff = Timestamp::now() - TimeDelta::hours(1);
+    let sent_at = Timestamp::now() - TimeDelta::minutes(10);
     // 已领取详情不再保留资产；payload 重建没有标题，不能把该 MID 归因到这条投递。
     assert_eq!(
         sent_detail_match(

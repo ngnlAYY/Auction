@@ -3,7 +3,7 @@
 //! 运行凭据、会话或账号忙状态。探测分两段：排队到发出边界由调用方等待，发出交给调用方的独立
 //! 任务走完。
 
-use chrono::Utc;
+use auction_time::Timestamp;
 
 use super::MoogleMailGateway;
 use crate::clients::mooglemail::client::PendingRead;
@@ -37,6 +37,6 @@ impl CandidateProbe {
     /// 调用方应在独立任务中执行：放弃等待不影响已发出的请求走完并持有在途锁到远端回应或客户端超时。
     pub(crate) async fn send(self) -> Result<(), MoogleMailError> {
         let body = self.read.send().await?;
-        self.parser.parse_balance(&body, self.world, Utc::now()).map(|_| ())
+        self.parser.parse_balance(&body, self.world, Timestamp::now()).map(|_| ())
     }
 }

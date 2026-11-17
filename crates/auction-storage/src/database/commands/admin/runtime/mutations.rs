@@ -6,7 +6,7 @@ use auction_application::admin::{
 };
 use auction_application::core::{ApplicationError, RequestHash};
 use auction_domain::CommandId;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use super::{
     errors::{command_corrupt, command_failed, command_sql_failed, map_command_sql_error},
@@ -87,7 +87,7 @@ pub(super) async fn apply_postgres(
     command_id: CommandId,
     request_hash: RequestHash,
     audit: AdminRuntimeAuditRecord,
-    applied_at: DateTime<Utc>,
+    applied_at: Timestamp,
 ) -> Result<AdminRuntimeStoredCommand, ApplicationError> {
     let mut transaction = store
         .pool()
@@ -167,7 +167,7 @@ pub(super) async fn mark_unknown_postgres(
     command_id: CommandId,
     request_hash: RequestHash,
     category: String,
-    updated_at: DateTime<Utc>,
+    updated_at: Timestamp,
 ) -> Result<AdminRuntimeStoredCommand, ApplicationError> {
     let mut transaction = store
         .pool()
@@ -216,7 +216,7 @@ pub(super) async fn reopen_postgres(
     store: &crate::DatabaseStore,
     command_id: CommandId,
     request_hash: RequestHash,
-    updated_at: DateTime<Utc>,
+    updated_at: Timestamp,
 ) -> Result<AdminRuntimeStoredCommand, ApplicationError> {
     let mut transaction = store
         .pool()

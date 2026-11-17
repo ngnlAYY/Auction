@@ -1,7 +1,7 @@
 //! delivery终态与资金结果同事务；Sent支出，失败/未知均不释放资金。
 
 use auction_application::delivery::{DeliverySendResult, DeliveryWorkClaim};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Postgres;
 
 use super::mapping::repository_error;
@@ -15,7 +15,7 @@ pub(super) async fn succeed_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     claim: &DeliveryWorkClaim,
     result: &DeliverySendResult,
-    completed_at: DateTime<Utc>,
+    completed_at: Timestamp,
 ) -> Result<(), auction_application::core::RepositoryError> {
     if claim.payload.get("operation").and_then(serde_json::Value::as_str) == Some("send")
         && !verified_sent_result(claim, result)
@@ -61,7 +61,7 @@ pub(super) async fn succeed_postgres(
 pub(super) async fn reject_preparation_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     claim: &DeliveryWorkClaim,
-    completed_at: DateTime<Utc>,
+    completed_at: Timestamp,
 ) -> Result<(), auction_application::core::RepositoryError> {
     let metadata = serde_json::json!({
         "stage": "preflight_blocked",
@@ -93,7 +93,7 @@ pub(super) async fn fail_postgres(
     outcome_unknown: bool,
     external_reference: Option<&str>,
     result_metadata: &serde_json::Value,
-    completed_at: DateTime<Utc>,
+    completed_at: Timestamp,
 ) -> Result<(), auction_application::core::RepositoryError> {
     persist(
         pool,
@@ -126,7 +126,7 @@ struct Terminal<'a> {
 async fn persist(
     pool: &crate::database::TrackedPool<Postgres>,
     claim: &DeliveryWorkClaim,
-    completed_at: DateTime<Utc>,
+    completed_at: Timestamp,
     terminal: Terminal<'_>,
 ) -> Result<(), auction_application::core::RepositoryError> {
     crate::database::retry_conflicts(
@@ -143,7 +143,7 @@ async fn persist(
 async fn persist_once(
     pool: &crate::database::TrackedPool<Postgres>,
     claim: &DeliveryWorkClaim,
-    completed_at: DateTime<Utc>,
+    completed_at: Timestamp,
     terminal: &Terminal<'_>,
 ) -> Result<(), OutcomeError> {
     let mut tx = pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await?;

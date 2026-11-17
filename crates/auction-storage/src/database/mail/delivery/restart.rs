@@ -16,7 +16,7 @@ pub(in crate::database) async fn restart_unstarted_take_in_transaction(
     delivery_id: Uuid,
     restarts: i64,
 ) -> Result<bool, sqlx::Error> {
-    let restarted: Option<(chrono::DateTime<chrono::Utc>, i64)> = sqlx::query_as(
+    let restarted: Option<(auction_time::Timestamp, i64)> = sqlx::query_as(
         "UPDATE public.deliveries
          SET status = 'pending', lease_token = NULL, lease_expires_at = NULL, claimed_at = NULL,
              sending_at = NULL, completed_at = NULL, failure_code = NULL,

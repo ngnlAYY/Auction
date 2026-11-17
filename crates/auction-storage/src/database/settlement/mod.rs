@@ -19,7 +19,7 @@ use auction_application::settlement::{
     SettlementTransactionFailure, SettlementTransactionRunner,
 };
 use auction_domain::{AuctionId, CommandId, CompetitionPlan, RecoveryPolicy, SettlementPlan};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use super::{DatabaseStore, PostgresCompetitionTransaction};
@@ -174,7 +174,7 @@ impl SettlementTransaction for PostgresCompetitionTransaction {
     fn insert_command(
         &mut self,
         command: StoredCommand,
-        occurred_at: DateTime<Utc>,
+        occurred_at: Timestamp,
     ) -> impl Future<Output = Result<(), SettlementTransactionError>> + Send {
         async move { self.insert_settlement_command(command, occurred_at).await }
     }
@@ -186,7 +186,7 @@ impl SettlementTransaction for PostgresCompetitionTransaction {
         plan: &SettlementPlan,
         proxy_closure_plans: Vec<CompetitionPlan>,
         recovery_policy: RecoveryPolicy,
-        occurred_at: DateTime<Utc>,
+        occurred_at: Timestamp,
     ) -> impl Future<Output = Result<(), SettlementTransactionError>> + Send {
         async move {
             self.apply_settlement_inner(

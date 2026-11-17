@@ -51,7 +51,7 @@ enum Watermark {
 async fn observe_observations(
     pool: &TrackedPool<sqlx::Postgres>,
     observations: &[auction_application::operations::OperationsAlertSourceObservation],
-    now: chrono::DateTime<chrono::Utc>,
+    now: auction_time::Timestamp,
     batch_window: std::time::Duration,
     watermark: Watermark,
 ) -> Result<(), ApplicationError> {

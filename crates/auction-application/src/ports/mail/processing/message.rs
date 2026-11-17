@@ -3,7 +3,7 @@
 use std::{collections::HashSet, fmt};
 
 use auction_domain::{EquipmentKey, valid_text};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use super::delivery_shape::valid_attachment_id;
 use super::errors::{MailProcessingError, clear_string};
@@ -48,7 +48,7 @@ pub struct MailMessage {
     pub mailbox_key: String,
     pub external_mail_id: String,
     pub world_id: String,
-    pub received_at: DateTime<Utc>,
+    pub received_at: Timestamp,
     pub sender: String,
     pub subject: String,
     pub body: String,
@@ -234,7 +234,7 @@ pub trait MailEquipmentReader: Send + Sync {
 #[cfg(test)]
 mod tests {
     use auction_domain::EquipmentKey;
-    use chrono::{DateTime, Utc};
+    use auction_time::Timestamp;
 
     use super::{MailEquipmentAttachment, MailMessage};
     use crate::ports::mail::MailProcessingError;
@@ -244,7 +244,7 @@ mod tests {
             mailbox_key: "mooglemail:main".to_owned(),
             external_mail_id: "3125357".to_owned(),
             world_id: "main".to_owned(),
-            received_at: DateTime::<Utc>::from_timestamp(1_790_000_000, 0).expect("固定时间"),
+            received_at: Timestamp::from_timestamp(1_790_000_000, 0).expect("固定时间"),
             sender: "FixtureSender".to_owned(),
             subject: "auction".to_owned(),
             body: String::new(),

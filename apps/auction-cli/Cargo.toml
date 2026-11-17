@@ -16,8 +16,9 @@ auction-integrations = { workspace = true, features = ["backup"] }
 auction-observability.workspace = true
 auction-process.workspace = true
 auction-storage.workspace = true
-chrono.workspace = true
+auction-time.workspace = true
 clap.workspace = true
+jiff.workspace = true
 libc.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -14,7 +14,7 @@ use auction_application::recovery::{
     MAX_EXTERNAL_RECOVERY_BLOCK_MAIL_IDS, SentDetailMatch, sent_detail_match,
     sent_list_projection_may_match,
 };
-use chrono::{DateTime, TimeDelta, Timelike, Utc};
+use auction_time::{TimeDelta, Timestamp};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
@@ -23,9 +23,9 @@ use uuid::Uuid;
 pub(super) struct SentMatchPlan {
     pub(super) expectations: Vec<ExternalRecoveryDeliveryExpectation>,
     /// 原始恢复截止；精确匹配只接受不早于该时刻的详情。
-    pub(super) cutoff_at: Option<DateTime<Utc>>,
+    pub(super) cutoff_at: Option<Timestamp>,
     /// Sent 分钟精度导致的候选下界；只用于筛选候选，不能用于宣称精确匹配。
-    pub(super) scan_from: Option<DateTime<Utc>>,
+    pub(super) scan_from: Option<Timestamp>,
     /// 有列表候选但尚未读取详情的投递 → 候选 MID。
     pub(super) pending_details: Vec<(usize, SentListCandidate)>,
     pub(super) detail_refs: BTreeSet<WorkerRecoveryMailRef>,
@@ -60,14 +60,14 @@ pub(super) struct ExactDeliveryMatch {
     pub(super) evidence: ExternalRecoverySendEvidence,
     pub(super) world_id: String,
     pub(super) external_mail_id: String,
-    pub(super) sent_at: DateTime<Utc>,
+    pub(super) sent_at: Timestamp,
     pub(super) recipient: String,
     pub(super) subject: String,
     pub(super) expected_credits: i64,
     pub(super) expected_cod: i64,
     pub(super) expected_equipment_ids: Option<Vec<String>>,
     pub(super) collected: bool,
-    pub(super) observed_at: DateTime<Utc>,
+    pub(super) observed_at: Timestamp,
 }
 
 /// `--apply` 前必须证明 Sent 列表与详情完整，且待核对投递未被截断。
@@ -102,16 +102,16 @@ pub(super) fn apply_scan_blockers(
 }
 
 /// Sent 页面只有分钟精度；恢复截止按所在分钟下界比较，保留整个重叠分钟。
-fn cutoff_minute(cutoff_at: DateTime<Utc>) -> DateTime<Utc> {
+fn cutoff_minute(cutoff_at: Timestamp) -> Timestamp {
     cutoff_at
-        - TimeDelta::seconds(i64::from(cutoff_at.second()))
+        - TimeDelta::seconds(i64::from(cutoff_at.to_utc_datetime().second()))
         - TimeDelta::nanoseconds(i64::from(cutoff_at.timestamp_subsec_nanos()))
 }
 
 impl SentMatchPlan {
     pub(super) fn new(
         expectations: &[ExternalRecoveryDeliveryExpectation],
-        cutoff_at: DateTime<Utc>,
+        cutoff_at: Timestamp,
     ) -> Self {
         let frozen_count = expectations
             .iter()

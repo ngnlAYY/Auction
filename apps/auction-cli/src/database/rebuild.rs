@@ -5,7 +5,7 @@ use std::path::Path;
 
 use anyhow::Context;
 use auction_storage::{PostgresDatabaseRebuildGuard, PostgresRebuildError};
-use chrono::Utc;
+use auction_time::Timestamp;
 use serde_json::{Value, json};
 
 use super::DatabaseTarget;
@@ -108,7 +108,7 @@ pub(super) async fn run(options: Options<'_>) -> anyhow::Result<()> {
     progress(format_args!("开始 DROP/CREATE {}", options.database));
     let mut receipt = json!({
         "format": RECEIPT_FORMAT,
-        "started_at": Utc::now(),
+        "started_at": Timestamp::now(),
         "database": options.database,
         "mode": mode,
         "ephemeral": options.ephemeral,
@@ -142,7 +142,7 @@ pub(super) async fn run(options: Options<'_>) -> anyhow::Result<()> {
                 .context("重建失败；未知结果不能推断为未执行，禁止盲目重试"))
         }
     };
-    receipt["finished_at"] = json!(Utc::now());
+    receipt["finished_at"] = json!(Timestamp::now());
     receipt["outcome"] = json!(if outcome.is_ok() { "completed" } else { "failed" });
     files::write_private(receipt_path, &serde_json::to_vec_pretty(&receipt)?)
         .context("重建已执行，但回执写入失败")?;

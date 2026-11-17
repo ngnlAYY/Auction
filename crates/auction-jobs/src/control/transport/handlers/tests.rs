@@ -225,7 +225,7 @@ fn idle_accounts() -> auction_application::external_accounts::ExternalAccountSta
         ExternalMaintenanceState, ExternalMaintenanceStatus,
     };
     ExternalAccountStatus {
-        observed_at: chrono::Utc::now(),
+        observed_at: auction_time::Timestamp::now(),
         mail: ExternalMailAccountStatus {
             busy: false,
             busy_age_seconds: None,

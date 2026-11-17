@@ -7,7 +7,7 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-use chrono::{DateTime, Duration, Utc};
+use auction_time::{Duration, Timestamp};
 use uuid::Uuid;
 
 use crate::support;
@@ -21,7 +21,7 @@ async fn seed_auction(
     world_id: &str,
     sequence: i32,
     status: &str,
-    deadline: DateTime<Utc>,
+    deadline: Timestamp,
 ) -> Uuid {
     let auction_id = Uuid::new_v4();
     let opened = deadline - Duration::hours(4);
@@ -51,7 +51,7 @@ async fn seed_lot(
     number: i32,
     status: &str,
     leader: Option<Uuid>,
-    effective_end_at: DateTime<Utc>,
+    effective_end_at: Timestamp,
 ) -> Uuid {
     let equipment_id = Uuid::new_v4();
     let lot_id = Uuid::new_v4();
@@ -92,7 +92,7 @@ async fn postgres_shutdown_window_protects_final_and_lots_ending_inside_the_wind
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let maintenance = database.maintenance_store().await.expect("以维护账号写入夹具");
     let pool = maintenance.postgres_pool();
-    let now = Utc::now();
+    let now = Timestamp::now();
 
     let leader = Uuid::new_v4();
     sqlx::query("INSERT INTO public.users (id, username, public_key_hash) VALUES ($1, $2, $3)")

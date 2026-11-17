@@ -8,7 +8,7 @@ use auction_domain::{
     CommandId, SettlementObligationKind, SettlementReturnAction, SettlementReturnBlocker,
     SettlementReturnCaseStatus, SettlementReturnPlan, SettlementReturnTakeUnknownReason,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::Serialize;
 use thiserror::Error;
 use uuid::Uuid;
@@ -89,9 +89,9 @@ pub struct SettlementReturnListRequest {
     /// 只列出仍需处理的案件。
     pub open_only: bool,
     /// 收件时间下界（含）。
-    pub received_from: Option<DateTime<Utc>>,
+    pub received_from: Option<Timestamp>,
     /// 收件时间上界（含）。
-    pub received_to: Option<DateTime<Utc>>,
+    pub received_to: Option<Timestamp>,
     /// 参考编号：案件（退件邮件）ID、义务 ID 或原派发投递 ID。
     pub reference: Option<Uuid>,
     pub limit: i64,
@@ -121,7 +121,7 @@ pub struct SettlementReturnCaseSummary {
     pub world_id: String,
     /// 退件在 Bot 收件箱中的远端 MID。
     pub external_mail_id: String,
-    pub received_at: DateTime<Utc>,
+    pub received_at: Timestamp,
     pub obligation_id: Option<Uuid>,
     pub obligation_kind: Option<SettlementObligationKind>,
     pub auction_id: Option<Uuid>,
@@ -140,9 +140,9 @@ pub struct SettlementReturnCaseSummary {
     /// 原义务当前已发生的补寄次数。
     pub resends_used: Option<u32>,
     pub asset_location: SettlementReturnAssetLocation,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-    pub closed_at: Option<DateTime<Utc>>,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+    pub closed_at: Option<Timestamp>,
 }
 
 /// 分页结果；`total` 与 `items` 使用同一筛选。
@@ -158,7 +158,7 @@ pub struct SettlementReturnEvent {
     pub case_version: i64,
     /// 事件种类闭集见 `settlement_return_events.event_kind`。
     pub event_kind: String,
-    pub occurred_at: DateTime<Utc>,
+    pub occurred_at: Timestamp,
     /// Admin 命令触发时为 actor；Worker 事件为空。
     pub actor_id: Option<String>,
     pub command_id: Option<CommandId>,
@@ -173,8 +173,8 @@ pub struct SettlementReturnDispatch {
     pub delivery_id: Uuid,
     /// 投递当前状态；补寄已授权但尚未准备时为空。
     pub delivery_status: Option<String>,
-    pub sending_at: Option<DateTime<Utc>>,
-    pub completed_at: Option<DateTime<Utc>>,
+    pub sending_at: Option<Timestamp>,
+    pub completed_at: Option<Timestamp>,
     /// 授权这次补寄的退件案件；首寄为空。
     pub authorized_by: Option<Uuid>,
 }
@@ -187,7 +187,7 @@ pub struct SettlementReturnTake {
     pub delivery_status: Option<String>,
     pub failure_code: Option<String>,
     /// 领回证明成立的时刻。
-    pub proven_at: Option<DateTime<Utc>>,
+    pub proven_at: Option<Timestamp>,
 }
 
 /// 代管责任：原权利人与代管资产。
@@ -234,7 +234,7 @@ pub struct SettlementReturnCommand {
     pub action: SettlementReturnAction,
     /// 服务端会话身份，不来自请求体。
     pub actor_id: String,
-    pub requested_at: DateTime<Utc>,
+    pub requested_at: Timestamp,
 }
 
 /// 进入请求摘要的稳定字段；字段顺序决定摘要字节，不可调整。
@@ -255,7 +255,7 @@ impl SettlementReturnCommand {
         expected_version: i64,
         action: SettlementReturnAction,
         actor_id: &str,
-        requested_at: DateTime<Utc>,
+        requested_at: Timestamp,
     ) -> Result<Self, ApplicationError> {
         if command_id.is_nil()
             || return_mail_id.is_nil()
@@ -378,7 +378,7 @@ pub trait SettlementReturnAdminPort: Send + Sync {
 #[cfg(test)]
 mod tests {
     use auction_domain::{CommandId, SettlementReturnAction, SettlementReturnCaseStatus};
-    use chrono::Utc;
+    use auction_time::Timestamp;
     use uuid::Uuid;
 
     use super::{SettlementReturnAssetLocation, SettlementReturnCommand, SettlementReturnError};
@@ -388,7 +388,7 @@ mod tests {
     fn command_digest_binds_action_version_and_actor() {
         let command_id = CommandId::from_uuid(Uuid::from_u128(1));
         let case = Uuid::from_u128(2);
-        let now = Utc::now();
+        let now = Timestamp::now();
         let build = |version, action, actor: &str| {
             SettlementReturnCommand::new(command_id, case, version, action, actor, now)
                 .map(|command| command.request_hash)

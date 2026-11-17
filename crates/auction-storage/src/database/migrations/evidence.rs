@@ -1,6 +1,6 @@
 //! 运维只读证据共用的迁移历史与 schema 身份读取；只执行查询，判定、阶段名与错误类型由调用方决定。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::postgres::PgRow;
 use sqlx::{Postgres, Row};
 
@@ -55,7 +55,7 @@ where
     };
     let application: String = row.try_get("application")?;
     let baseline_version: i64 = row.try_get("baseline_version")?;
-    let installed_at: DateTime<Utc> = row.try_get("installed_at")?;
+    let installed_at: Timestamp = row.try_get("installed_at")?;
     if application != "auction" || baseline_version <= 0 {
         return Ok(None);
     }

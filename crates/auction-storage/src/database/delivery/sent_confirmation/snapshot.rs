@@ -4,7 +4,7 @@ use auction_application::delivery::SentAdmissionSnapshot;
 use auction_application::delivery::{
     DeliverySendExpectation, ManualSentEvidence, SentConfirmationPreview,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::Deserialize;
 use serde_json::Value;
 use sqlx::Postgres;
@@ -132,7 +132,7 @@ pub(super) async fn load(
             sending_fencing_version: 0,
         });
     };
-    let now: DateTime<Utc> =
+    let now: Timestamp =
         sqlx::query_scalar("SELECT clock_timestamp()").fetch_one(&mut **tx).await?;
     // 准入判定在应用层完成；这里只把锁定行投影成结构体并翻译阻断项。从未进入发送尝试的投递
     // 没有当前 fence：投影为不存在的 0（fence 从 1 开始），冻结期待同时为空，准入因此给出

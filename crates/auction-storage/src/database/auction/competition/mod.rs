@@ -10,7 +10,7 @@ use auction_application::core::{
     TransactionPolicy, TransactionRunner,
 };
 use auction_domain::{AuctionId, CompetitionPlan, LotId, ProxyAuthorizationId, UserId};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Postgres;
 use uuid::Uuid;
 
@@ -325,7 +325,7 @@ impl CompetitionTransaction for PostgresCompetitionTransaction {
 
     fn current_time(
         &mut self,
-    ) -> impl Future<Output = Result<DateTime<Utc>, CompetitionTransactionError>> + Send {
+    ) -> impl Future<Output = Result<Timestamp, CompetitionTransactionError>> + Send {
         async move { self.current_time_inner().await }
     }
 
@@ -371,7 +371,7 @@ impl CompetitionTransaction for PostgresCompetitionTransaction {
         &mut self,
         plan: &CompetitionPlan,
         audit: Option<CompetitionCommandAuditContext>,
-        occurred_at: DateTime<Utc>,
+        occurred_at: Timestamp,
     ) -> impl Future<Output = Result<(), CompetitionTransactionError>> + Send {
         async move { self.apply_public_command_plan_inner(plan, audit, occurred_at).await }
     }

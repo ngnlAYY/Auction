@@ -8,7 +8,7 @@ use auction_application::mail::{MailDeliveryActivation, MailDeliveryEnqueuer};
 use auction_application::recovery::RecoveryWorkStore;
 use auction_domain::{CommandId, deterministic_uuid};
 use auction_observability::WorkerResult;
-use chrono::Duration as ChronoDuration;
+use auction_time::TimeDelta;
 use serde::Serialize;
 
 use super::{mark_manual_reconcile, observe_recovery_action, release_recovery_action};
@@ -18,7 +18,7 @@ pub(in crate::worker::runtime) async fn activate_recovery_action<C>(
     store: Arc<dyn RecoveryWorkStore>,
     delivery: Arc<dyn MailDeliveryEnqueuer>,
     clock: Arc<C>,
-    retry_delay: ChronoDuration,
+    retry_delay: TimeDelta,
     claim: auction_application::recovery::RecoveryActionClaim,
 ) -> WorkerResult
 where

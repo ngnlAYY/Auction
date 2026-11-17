@@ -4,7 +4,7 @@ use auction_application::core::ApplicationError;
 use auction_application::operations::{
     OperationsAlertDeliverySnapshot, OperationsAlertRecoverySnapshot, OperationsAlertRecoveryWorld,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Row;
 
 use super::{UNDISPOSED, age_seconds};
@@ -16,7 +16,7 @@ const DELIVERY_OWNED: &str = "origin_kind NOT IN ('operations_alert', 'settlemen
 
 pub(super) async fn delivery_snapshot(
     pool: &crate::database::TrackedPool<sqlx::Postgres>,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<OperationsAlertDeliverySnapshot, ApplicationError> {
     // 仅完整匹配追加修复事实及原投递身份的 failed 才已解决；不能仅凭 metadata 消除告警。
     // 替换内容只有已审核的编译期 SQL 常量，不插入任何运行时业务值；仅缓存 SQL 文本，不缓存水位。
@@ -112,7 +112,7 @@ pub(super) async fn delivery_snapshot(
 
 pub(super) async fn recovery_snapshot(
     pool: &crate::database::TrackedPool<sqlx::Postgres>,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<OperationsAlertRecoverySnapshot, ApplicationError> {
     let rows = sqlx::query(
         "SELECT world_id, balance_credits, balance_status, evidence_status,
@@ -173,13 +173,13 @@ pub(super) async fn recovery_snapshot(
             .map_err(|error| storage_error_from(error, "读取 recovery 逾期时间失败"))?;
         snapshot.oldest_overdue_age_seconds =
             snapshot.oldest_overdue_age_seconds.max(oldest_overdue_age_seconds);
-        let balance_observed_at: Option<DateTime<Utc>> = row
+        let balance_observed_at: Option<Timestamp> = row
             .try_get("balance_observed_at")
             .map_err(|error| storage_error_from(error, "读取 recovery 余额时间失败"))?;
-        let evidence_last_success_at: Option<DateTime<Utc>> = row
-            .try_get("evidence_last_success_at")
-            .map_err(|error| storage_error_from(error, "读取 recovery 证据时间失败"))?;
-        let updated_at: DateTime<Utc> = row
+        let evidence_last_success_at: Option<Timestamp> =
+            row.try_get("evidence_last_success_at")
+                .map_err(|error| storage_error_from(error, "读取 recovery 证据时间失败"))?;
+        let updated_at: Timestamp = row
             .try_get("updated_at")
             .map_err(|error| storage_error_from(error, "读取 recovery 更新时间失败"))?;
         snapshot.worlds.push(OperationsAlertRecoveryWorld {

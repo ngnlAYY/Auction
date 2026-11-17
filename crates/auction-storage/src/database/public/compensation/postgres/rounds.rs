@@ -6,7 +6,7 @@ use auction_application::public::{
     PublicCompensationRound,
 };
 use auction_domain::SettlementMode;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::postgres::PgRow;
 use sqlx::{PgConnection, Row};
 use uuid::Uuid;
@@ -184,7 +184,7 @@ pub(crate) async fn list(
     let balance: i64 = state
         .try_get("balance")
         .map_err(|error| storage_error_from(error, "读取公开补偿池余额字段失败"))?;
-    let updated_at: DateTime<Utc> = state
+    let updated_at: Timestamp = state
         .try_get("updated_at")
         .map_err(|error| storage_error_from(error, "读取公开补偿池更新时间失败"))?;
 

@@ -25,7 +25,7 @@ use auction_domain::{
     CommandId, SettlementReturnAction, SettlementReturnBlocker, SettlementReturnCaseStatus,
 };
 use auction_storage::DatabaseStore;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::json;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -92,7 +92,7 @@ async fn unresolved_return(
             external_reference: None,
             result_metadata: json!({"operation": "send", "write_started": true}),
         },
-        Utc::now(),
+        Timestamp::now(),
     )
     .await
     .expect("结果未知收口为人工核对");
@@ -110,13 +110,16 @@ async fn unresolved_return(
     let case = insert_inbound(
         pool,
         mid,
-        Utc::now(),
+        Timestamp::now(),
         Some(("MoogleMail", format!("[RTS] {} [{obligation}]", kind.subject()))),
         evidence(obligation, kind.amount(), &[]),
     )
     .await;
-    let consumed =
-        store.consume_due_settlement_return(Utc::now()).await.expect("消费").expect("必须消费");
+    let consumed = store
+        .consume_due_settlement_return(Timestamp::now())
+        .await
+        .expect("消费")
+        .expect("必须消费");
     assert_eq!((consumed.return_mail_id, consumed.delivery_id), (case, Some(original)));
     Unresolved { sale, allocation, original, claim, expectation, case, session }
 }
@@ -133,7 +136,7 @@ async fn try_handle(
         version,
         action,
         "admin-returns",
-        Utc::now(),
+        Timestamp::now(),
     )
     .expect("构造命令");
     store.handle_settlement_return(command).await.map(|result| result.status)
@@ -210,7 +213,7 @@ async fn hold_then_resend(store: &DatabaseStore, returned: &Unresolved, mid: &st
         SettlementReturnCaseStatus::TakePending
     );
     store
-        .activate_due_return_take(Utc::now(), super::take_worlds())
+        .activate_due_return_take(Timestamp::now(), super::take_worlds())
         .await
         .expect("激活")
         .expect("必须激活");
@@ -238,11 +241,12 @@ async fn hold_then_resend(store: &DatabaseStore, returned: &Unresolved, mid: &st
                     "expected_credits": amount, "expected_cod": 0, "expected_attachment_ids": [],
                 }),
             },
-            Utc::now(),
+            Timestamp::now(),
         )
         .await
         .expect("Take 成功");
-    let settled = store.settle_due_return_take(Utc::now()).await.expect("收口").expect("必须收口");
+    let settled =
+        store.settle_due_return_take(Timestamp::now()).await.expect("收口").expect("必须收口");
     assert_eq!(settled.status, SettlementReturnCaseStatus::Held);
     assert_eq!(
         allocation_state(pool, returned.allocation).await,
@@ -278,7 +282,7 @@ async fn postgres_unknown_original_send_requires_auto_sent_recovery_before_dispo
         let returned = unresolved_return(&store, sequence, mid, strict, kind).await;
         assert_blocked_until_send_proven(&store, &returned).await;
 
-        let (sending_at, fence): (DateTime<Utc>, i64) = sqlx::query_as(
+        let (sending_at, fence): (Timestamp, i64) = sqlx::query_as(
             "SELECT sending_at, fencing_version FROM public.deliveries WHERE id = $1",
         )
         .bind(returned.original)
@@ -292,7 +296,7 @@ async fn postgres_unknown_original_send_requires_auto_sent_recovery_before_dispo
                 fence,
                 sent_mid.clone(),
                 json!({
-                    "observed_at": Utc::now(),
+                    "observed_at": Timestamp::now(),
                     "sent_at": sent_list_minute_start(sending_at),
                     "operation": "send",
                     "proof": "sent_recovered_frozen_v1",
@@ -339,7 +343,7 @@ async fn postgres_unknown_original_send_manual_sent_keeps_case_ownership() {
     let returned = unresolved_return(&store, 7_640_021, "996021", false, kind).await;
     assert_blocked_until_send_proven(&store, &returned).await;
 
-    let (sending_at, completed_at): (DateTime<Utc>, DateTime<Utc>) =
+    let (sending_at, completed_at): (Timestamp, Timestamp) =
         sqlx::query_as("SELECT sending_at, completed_at FROM public.deliveries WHERE id = $1")
             .bind(returned.original)
             .fetch_one(pool)

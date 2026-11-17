@@ -224,7 +224,7 @@ mod tests {
         SettlementObligationKind, SettlementReturnAction, SettlementReturnBlocker,
         SettlementReturnCaseStatus, SettlementReturnPlan, SettlementReturnTakeUnknownReason,
     };
-    use chrono::{TimeZone, Utc};
+    use auction_time::Timestamp;
     use serde_json::json;
     use uuid::Uuid;
 
@@ -233,7 +233,7 @@ mod tests {
     const CASE: Uuid = Uuid::from_u128(0x0f8f_ad5b_d9cb_469f_a165_7086_7728_950e);
 
     fn summary() -> SettlementReturnCaseSummary {
-        let at = Utc.with_ymd_and_hms(2026, 11, 16, 1, 2, 3).single().expect("时间");
+        let at = Timestamp::from_ymd_hms(2026, 11, 16, 1, 2, 3).expect("时间");
         SettlementReturnCaseSummary {
             return_mail_id: CASE,
             case_version: 2,
@@ -264,7 +264,7 @@ mod tests {
     }
 
     fn detail() -> SettlementReturnDetail {
-        let at = Utc.with_ymd_and_hms(2026, 11, 16, 1, 2, 3).single().expect("时间");
+        let at = Timestamp::from_ymd_hms(2026, 11, 16, 1, 2, 3).expect("时间");
         SettlementReturnDetail {
             summary: summary(),
             events: vec![

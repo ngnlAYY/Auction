@@ -1,6 +1,6 @@
 //! Recovery 退回的行、预期与写入模型；退件证据对象的严格模型由应用层结算退件 owner 统一定义。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -11,7 +11,7 @@ pub(super) struct RecoveryReturnRow {
     pub(super) return_external_mail_id: String,
     pub(super) return_world_id: String,
     pub(super) return_metadata: Value,
-    pub(super) return_received_at: DateTime<Utc>,
+    pub(super) return_received_at: Timestamp,
     /// 入站展示快照中的发件人与主题；来源已由查询谓词证明，这里只用于绑定义务种类。
     pub(super) return_sender: Option<String>,
     pub(super) return_subject: Option<String>,
@@ -25,7 +25,7 @@ pub(super) struct RecoveryReturnRow {
     pub(super) payment_obligation_id: Uuid,
     pub(super) equipment_obligation_id: Option<Uuid>,
     pub(super) state_version: i64,
-    pub(super) created_at: DateTime<Utc>,
+    pub(super) created_at: Timestamp,
 }
 
 #[derive(Debug)]
@@ -44,7 +44,7 @@ pub(super) struct RecoveryActionInsert<'a> {
     pub(super) expected_credits: i64,
     pub(super) expected_cod: i64,
     pub(super) expected_attachment_ids: &'a [String],
-    pub(super) now: DateTime<Utc>,
+    pub(super) now: Timestamp,
     /// buyer_blacklist 冻结的公开理由；其它 action 必须为空。
     pub(super) reason: Option<&'a str>,
     /// 同一 recovery/kind 已存在时是否重置回 pending；只用于可反复发生的 reclaim 动作。

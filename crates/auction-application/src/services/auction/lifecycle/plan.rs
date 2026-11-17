@@ -189,10 +189,10 @@ where
 fn final_proxy_plans(
     parent: &AuctionLifecycleCommand,
     snapshots: Vec<(crate::ports::core::CompetitionSnapshot, bool)>,
-    now: chrono::DateTime<chrono::Utc>,
-) -> Result<(Vec<AuctionFinalProxyPlan>, chrono::DateTime<chrono::Utc>), ApplicationError> {
+    now: auction_time::Timestamp,
+) -> Result<(Vec<AuctionFinalProxyPlan>, auction_time::Timestamp), ApplicationError> {
     let mut plans = Vec::new();
-    let mut earliest_end_at: Option<chrono::DateTime<chrono::Utc>> = None;
+    let mut earliest_end_at: Option<auction_time::Timestamp> = None;
     for (snapshot, eligible) in snapshots {
         let lot_id = snapshot.state.lot_id;
         earliest_end_at =

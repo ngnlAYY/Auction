@@ -8,7 +8,7 @@ pub use snapshot::*;
 
 use std::{future::Future, pin::Pin};
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 
 /// 使用开关的进程角色；保持指标标签闭集。
@@ -116,7 +116,7 @@ impl RuntimeSwitchName {
 #[derive(Debug, Clone)]
 pub struct RuntimeSwitchRead {
     /// 数据库读取时刻，用于推算期限，不依赖进程墙钟跳变。
-    pub database_time: DateTime<Utc>,
+    pub database_time: Timestamp,
     /// 每个已知名称最多一个最新事实；不能先过滤过期行。
     pub events: Vec<RuntimeSwitchEvent>,
 }

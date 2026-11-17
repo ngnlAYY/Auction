@@ -2,8 +2,8 @@
 //! 此两阶段确认后写入，其余开关仍只能经 CLI 修改。
 
 use auction_contracts::RuntimeSwitchListResponse;
+use auction_time::Timestamp;
 use auction_web_shared::{AsyncState, AsyncStateKind, ConfirmCommand, t, use_confirm_command};
-use chrono::{DateTime, Utc};
 use dioxus::prelude::*;
 
 use crate::api::{
@@ -100,7 +100,7 @@ pub(super) fn RuntimeSwitchCard() -> Element {
                             article { class: "admin-runtime-switches__entry",
                                 h3 { "{intent.name}" }
                                 p { {t!("admin-switches-intent")} ": " {intent.operation.clone().unwrap_or_else(|| t!("admin-switches-unset"))} " / " {intent.value.map_or_else(|| "—".to_owned(), |value| value.to_string())} " / r{intent.revision}" }
-                                p { {t!("admin-switches-expiry")} ": " {intent.expires_at.map_or_else(|| "—".to_owned(), |until| until.to_rfc3339())} }
+                                p { {t!("admin-switches-expiry")} ": " {intent.expires_at.map_or_else(|| "—".to_owned(), auction_time::Timestamp::to_rfc3339)} }
                                 p { {t!("admin-switches-actor")} ": " {intent.actor_id.unwrap_or_else(|| "—".to_owned())} " / " {intent.entrypoint.unwrap_or_else(|| "—".to_owned())} }
                                 p { {t!("admin-switches-reason")} ": " {intent.reason.unwrap_or_else(|| "—".to_owned())} }
                                 for applied in data.admin_applied.iter().filter(|value| value.name == intent.name) {
@@ -119,7 +119,7 @@ pub(super) fn RuntimeSwitchCard() -> Element {
 ///
 /// 是否暂停与期限分开返回：CLI `--no-expiry` 写入的无期限暂停在 `RuntimeSwitches` 中持续有效，
 /// 不能因缺少期限显示为未暂停，否则界面会提供“暂停”并用定时暂停覆盖它，到期后意外恢复外部访问。
-fn pause_state(data: &RuntimeSwitchListResponse) -> (i64, bool, Option<DateTime<Utc>>) {
+fn pause_state(data: &RuntimeSwitchListResponse) -> (i64, bool, Option<Timestamp>) {
     let Some(intent) =
         data.database_intent.iter().find(|item| item.name == "external_access_paused")
     else {
@@ -132,9 +132,9 @@ fn pause_state(data: &RuntimeSwitchListResponse) -> (i64, bool, Option<DateTime<
 }
 
 /// 首次冻结命令时计算的绝对期限（整秒，满足服务端微秒精度要求）；重试复用同一值。
-fn pause_expiry(hours: i64) -> Option<DateTime<Utc>> {
+fn pause_expiry(hours: i64) -> Option<Timestamp> {
     let seconds = hours.checked_mul(3_600)?;
-    DateTime::from_timestamp(Utc::now().timestamp().checked_add(seconds)?, 0)
+    Timestamp::from_timestamp(Timestamp::now().timestamp().checked_add(seconds)?, 0)
 }
 
 /// 结果未知时只显示原命令的重试；参数来自冻结的命令，不读取当前快照。
@@ -160,7 +160,7 @@ fn ExternalAccessPauseControl(
     state: PauseControlState,
     revision: i64,
     paused: bool,
-    paused_until: Option<DateTime<Utc>>,
+    paused_until: Option<Timestamp>,
     refresh: Signal<u64>,
 ) -> Element {
     let PauseControlState { mut command, mut hours, mut reason, mut accepted } = state;
@@ -197,7 +197,7 @@ fn ExternalAccessPauseControl(
             p { class: "admin-panel__note", {t!("admin-pause-note")} }
             p {
                 if paused {
-                    {t!("admin-pause-active")} ": " {paused_until.map_or_else(|| t!("admin-pause-no-expiry"), |until| until.to_rfc3339())}
+                    {t!("admin-pause-active")} ": " {paused_until.map_or_else(|| t!("admin-pause-no-expiry"), auction_time::Timestamp::to_rfc3339)}
                 } else {
                     {t!("admin-pause-inactive")}
                 }
@@ -213,7 +213,7 @@ fn ExternalAccessPauseControl(
             } else if let Some(pending) = confirmation {
                 p {
                     if pending.paused {
-                        {t!("admin-pause-confirm-pause")} ": " {pending.expires_at.map(|until| until.to_rfc3339()).unwrap_or_default()}
+                        {t!("admin-pause-confirm-pause")} ": " {pending.expires_at.map(auction_time::Timestamp::to_rfc3339).unwrap_or_default()}
                     } else {
                         {t!("admin-pause-confirm-resume")}
                     }
@@ -277,15 +277,15 @@ fn ExternalAccessPauseControl(
 #[cfg(test)]
 mod tests {
     use auction_contracts::{RuntimeSwitchIntentDto, RuntimeSwitchListResponse};
-    use chrono::{DateTime, TimeDelta, Utc};
+    use auction_time::{TimeDelta, Timestamp};
     use serde_json::json;
 
     use super::pause_state;
 
     fn snapshot(
         operation: &str,
-        expires_at: Option<DateTime<Utc>>,
-        now: DateTime<Utc>,
+        expires_at: Option<Timestamp>,
+        now: Timestamp,
     ) -> RuntimeSwitchListResponse {
         RuntimeSwitchListResponse {
             database_time: now,
@@ -306,13 +306,13 @@ mod tests {
 
     #[test]
     fn indefinite_pause_stays_paused_and_offers_resume() {
-        let now = Utc::now();
+        let now = Timestamp::now();
         assert_eq!(pause_state(&snapshot("set", None, now)), (7, true, None));
     }
 
     #[test]
     fn timed_pause_is_active_until_database_time_reaches_expiry() {
-        let now = Utc::now();
+        let now = Timestamp::now();
         let until = now + TimeDelta::hours(2);
         assert_eq!(pause_state(&snapshot("set", Some(until), now)), (7, true, Some(until)));
         let expired = now - TimeDelta::seconds(1);
@@ -321,7 +321,7 @@ mod tests {
 
     #[test]
     fn cleared_or_missing_switch_is_not_paused() {
-        let now = Utc::now();
+        let now = Timestamp::now();
         assert_eq!(pause_state(&snapshot("clear", None, now)), (7, false, None));
         let empty = RuntimeSwitchListResponse {
             database_time: now,

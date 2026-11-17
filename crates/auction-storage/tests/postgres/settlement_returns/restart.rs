@@ -21,7 +21,7 @@ use auction_domain::{
     SettlementReturnAction, SettlementReturnCaseStatus, SettlementReturnTakeUnknownReason,
 };
 use auction_storage::DatabaseStore;
-use chrono::{Duration, Utc};
+use auction_time::{Duration, Timestamp};
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -40,7 +40,7 @@ async fn activated_take(store: &DatabaseStore, sequence: i64, mid: &str) -> (Ret
         SettlementReturnCaseStatus::TakePending
     );
     store
-        .activate_due_return_take(Utc::now(), super::take_worlds())
+        .activate_due_return_take(Timestamp::now(), super::take_worlds())
         .await
         .expect("激活")
         .expect("必须激活");
@@ -60,7 +60,7 @@ async fn take_delivery(pool: &PgPool, case: Uuid) -> Option<Uuid> {
 
 /// 投递 Worker 领取 Take 投递（准备期，尚未进入发送围栏）。
 async fn claim_take(store: &DatabaseStore, take: Uuid) -> DeliveryWorkClaim {
-    let now = Utc::now();
+    let now = Timestamp::now();
     let grace = StdDuration::from_secs(60);
     DeliveryWorkStore::begin_claim_cycle(store, now, grace).await.expect("领取前清理");
     DeliveryWorkStore::claim_due(
@@ -82,7 +82,7 @@ async fn claim_take(store: &DatabaseStore, take: Uuid) -> DeliveryWorkClaim {
 /// 准备期确定的本地拒绝：投递终态 failed，结果记录未开始写出且不是未知。
 async fn reject_before_write(store: &DatabaseStore, take: Uuid) {
     let claim = claim_take(store, take).await;
-    store.reject_preparation(claim, Utc::now()).await.expect("准备期拒绝收口");
+    store.reject_preparation(claim, Timestamp::now()).await.expect("准备期拒绝收口");
 }
 
 async fn case_state(pool: &PgPool, case: Uuid) -> (String, String, String, i64) {
@@ -130,7 +130,8 @@ async fn postgres_return_take_not_started_restarts_and_settles() {
     let (_, _, _, fence_before) = case_state(pool, returned.case).await;
     reject_before_write(&store, take).await;
 
-    let progress = store.settle_due_return_take(Utc::now()).await.expect("收口").expect("必须推进");
+    let progress =
+        store.settle_due_return_take(Timestamp::now()).await.expect("收口").expect("必须推进");
     assert_eq!(
         (progress.status, progress.event_kind),
         (SettlementReturnCaseStatus::TakePending, "take_activated"),
@@ -161,11 +162,12 @@ async fn postgres_return_take_not_started_restarts_and_settles() {
                     "expected_credits": PAYOUT, "expected_cod": 0, "expected_attachment_ids": [],
                 }),
             },
-            Utc::now(),
+            Timestamp::now(),
         )
         .await
         .expect("Take 成功");
-    let settled = store.settle_due_return_take(Utc::now()).await.expect("收口").expect("必须收口");
+    let settled =
+        store.settle_due_return_take(Timestamp::now()).await.expect("收口").expect("必须收口");
     assert_eq!(settled.status, SettlementReturnCaseStatus::Held);
     let returns: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM public.settlement_funding_returns WHERE return_mail_id = $1",
@@ -190,11 +192,12 @@ async fn postgres_return_take_restart_is_bounded_and_needs_unstarted_proof() {
     for restart in 1..=2 {
         reject_before_write(&store, take).await;
         let progress =
-            store.settle_due_return_take(Utc::now()).await.expect("收口").expect("必须推进");
+            store.settle_due_return_take(Timestamp::now()).await.expect("收口").expect("必须推进");
         assert_eq!(progress.status, SettlementReturnCaseStatus::TakePending, "第 {restart} 次");
     }
     reject_before_write(&store, take).await;
-    let progress = store.settle_due_return_take(Utc::now()).await.expect("收口").expect("必须推进");
+    let progress =
+        store.settle_due_return_take(Timestamp::now()).await.expect("收口").expect("必须推进");
     assert_eq!(progress.status, SettlementReturnCaseStatus::TakeUnknown, "用满两次后转结果未知");
     let failure: Option<String> = sqlx::query_scalar(
         "SELECT failure_code FROM public.settlement_return_actions WHERE return_mail_id = $1",
@@ -218,11 +221,12 @@ async fn postgres_return_take_restart_is_bounded_and_needs_unstarted_proof() {
             external_reference: None,
             result_metadata: json!({"operation": "take", "write_started": true}),
         },
-        Utc::now(),
+        Timestamp::now(),
     )
     .await
     .expect("失败收口");
-    let progress = store.settle_due_return_take(Utc::now()).await.expect("收口").expect("必须推进");
+    let progress =
+        store.settle_due_return_take(Timestamp::now()).await.expect("收口").expect("必须推进");
     assert_eq!(
         (progress.return_mail_id, progress.status),
         (other.case, SettlementReturnCaseStatus::TakeUnknown)
@@ -270,7 +274,7 @@ async fn postgres_return_take_conflict_hands_over_after_unexecuted_failure() {
     // 领回命令提交之后、激活之前出现的同邮件意图（命令时已复核互斥）。
     let intake = insert_intake_take(pool, "998131").await;
     let progress = store
-        .activate_due_return_take(Utc::now(), super::take_worlds())
+        .activate_due_return_take(Timestamp::now(), super::take_worlds())
         .await
         .expect("激活")
         .expect("推进");
@@ -283,7 +287,7 @@ async fn postgres_return_take_conflict_hands_over_after_unexecuted_failure() {
     assert_eq!(take_delivery(pool, returned.case).await, None, "冲突时不写入投递");
     assert!(
         store
-            .activate_due_return_take(Utc::now(), super::take_worlds())
+            .activate_due_return_take(Timestamp::now(), super::take_worlds())
             .await
             .expect("激活")
             .is_none(),
@@ -304,7 +308,7 @@ async fn postgres_return_take_conflict_hands_over_after_unexecuted_failure() {
     .expect("意图失败（已进入发送围栏）");
     assert!(
         store
-            .activate_due_return_take(Utc::now(), super::take_worlds())
+            .activate_due_return_take(Timestamp::now(), super::take_worlds())
             .await
             .expect("激活")
             .is_none()
@@ -325,7 +329,7 @@ async fn postgres_return_take_conflict_hands_over_after_unexecuted_failure() {
     .await
     .expect("意图确定从未执行");
     let progress = store
-        .activate_due_return_take(Utc::now(), super::take_worlds())
+        .activate_due_return_take(Timestamp::now(), super::take_worlds())
         .await
         .expect("交接")
         .expect("推进");
@@ -335,7 +339,7 @@ async fn postgres_return_take_conflict_hands_over_after_unexecuted_failure() {
     );
     assert_eq!(last_event(pool, returned.case).await.1["handover"], json!(true));
     let progress = store
-        .activate_due_return_take(Utc::now(), super::take_worlds())
+        .activate_due_return_take(Timestamp::now(), super::take_worlds())
         .await
         .expect("激活")
         .expect("推进");
@@ -424,7 +428,7 @@ async fn postgres_return_take_restart_requires_explicit_boolean_flags() {
         overwrite_metadata(pool, take, metadata).await;
         let (_, _, _, fence_before) = case_state(pool, returned.case).await;
         let progress =
-            store.settle_due_return_take(Utc::now()).await.expect("收口").expect("必须推进");
+            store.settle_due_return_take(Timestamp::now()).await.expect("收口").expect("必须推进");
         assert_eq!(
             (progress.return_mail_id, progress.status),
             (returned.case, SettlementReturnCaseStatus::TakeUnknown),
@@ -455,7 +459,7 @@ async fn postgres_return_take_handover_requires_explicit_boolean_flags() {
         );
         let intake = insert_intake_take(pool, &mid).await;
         let progress = store
-            .activate_due_return_take(Utc::now(), super::take_worlds())
+            .activate_due_return_take(Timestamp::now(), super::take_worlds())
             .await
             .expect("激活")
             .expect("推进");
@@ -474,7 +478,7 @@ async fn postgres_return_take_handover_requires_explicit_boolean_flags() {
         .expect("意图失败");
         assert!(
             store
-                .activate_due_return_take(Utc::now(), super::take_worlds())
+                .activate_due_return_take(Timestamp::now(), super::take_worlds())
                 .await
                 .expect("激活")
                 .is_none(),

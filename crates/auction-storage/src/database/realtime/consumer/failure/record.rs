@@ -1,7 +1,7 @@
 //! Realtime consumer failure 记录事务。
 
 use auction_application::core::ApplicationError;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Connection;
 use uuid::Uuid;
 
@@ -15,7 +15,7 @@ pub(crate) async fn record_failure_postgres(
     event_id: Uuid,
     failure_code: &str,
     safe_detail: &str,
-    failed_at: DateTime<Utc>,
+    failed_at: Timestamp,
 ) -> Result<(), ApplicationError> {
     let mut transaction = connection
         .begin()

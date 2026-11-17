@@ -1,7 +1,7 @@
 //! 一次逻辑操作的凭据会话：持有稳定选择与操作锁，提交前复核凭据仍是当前有效版本。
 
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
-use chrono::Utc;
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use super::super::operation_error;
@@ -199,7 +199,7 @@ impl MoogleMailCredentialSession {
         if let (Some(persistent_id), Some(invalidator)) =
             (current.persistent_id, self.set.invalidator.as_ref())
         {
-            invalidator.mark_invalid(persistent_id, Utc::now()).await.map_err(
+            invalidator.mark_invalid(persistent_id, Timestamp::now()).await.map_err(
                 |diagnostic_cause| {
                     safe_diagnostics::warn(
                         "mooglemail_credentials",

@@ -14,7 +14,7 @@ mod seller;
 
 use auction_application::recovery::{RecoveryCommandError, RecoveryResolutionAdvance};
 use auction_domain::RecoveryPolicy;
-use chrono::{DateTime, Duration, Utc};
+use auction_time::{Duration, Timestamp};
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
@@ -29,7 +29,7 @@ use super::mapping::map_sql_error;
 
 pub(in crate::database::recovery::commands) async fn advance_cod_return_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<Option<RecoveryResolutionAdvance>, RecoveryCommandError> {
     // 退回卖家时要锁补偿池，可能与任一世界的结算发生序列化冲突；冲突有界重试。
     crate::database::retry_conflicts(
@@ -44,7 +44,7 @@ pub(in crate::database::recovery::commands) async fn advance_cod_return_postgres
 
 async fn advance_cod_return_postgres_once(
     pool: &crate::database::TrackedPool<Postgres>,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<Option<RecoveryResolutionAdvance>, RecoveryCommandError> {
     let mut transaction =
         pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await.map_err(map_sql_error)?;
@@ -217,7 +217,7 @@ fn recovery_payment_timeout(policy_version: i32) -> Option<Duration> {
 
 #[cfg(test)]
 mod tests {
-    use chrono::Duration;
+    use auction_time::Duration;
 
     use super::recovery_payment_timeout;
 

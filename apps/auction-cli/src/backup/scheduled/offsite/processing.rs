@@ -68,7 +68,7 @@ impl Processor<'_> {
         pipeline::stage(self.journal, receipt, Stage::OffsiteDaily)?;
         let daily = crate::backup::object_key(
             &self.config.backup.offsite.prefix,
-            &format!("daily/{}/{}", item.archive.created_at.format("%Y/%m/%d"), item.run_id),
+            &format!("daily/{}/{}", item.archive.created_at.strftime("%Y/%m/%d"), item.run_id),
         );
         replica::Transfer {
             store: &self.prepared.store,
@@ -97,7 +97,7 @@ impl Processor<'_> {
         if item.write_monthly == Some(true) {
             let monthly = crate::backup::object_key(
                 &self.config.backup.offsite.prefix,
-                &format!("monthly/{}/{}", item.archive.created_at.format("%Y/%m"), item.run_id),
+                &format!("monthly/{}/{}", item.archive.created_at.strftime("%Y/%m"), item.run_id),
             );
             let completed = replica::Transfer {
                 store: &self.prepared.store,

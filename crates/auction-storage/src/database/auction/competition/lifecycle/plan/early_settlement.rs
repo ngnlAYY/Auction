@@ -3,7 +3,7 @@
 use auction_application::auction::AuctionLifecycleCommand;
 use auction_application::core::CompetitionTransactionError;
 use auction_domain::Auction;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use super::super::record::previous_lifecycle_version;
 use super::final_phase::{
@@ -20,7 +20,7 @@ pub(super) async fn apply_early_settlement_plan_postgres(
     command: &AuctionLifecycleCommand,
     auction: &Auction,
     proxy_plans: &[auction_application::auction::AuctionFinalProxyPlan],
-    effective_end_at: DateTime<Utc>,
+    effective_end_at: Timestamp,
 ) -> Result<(), CompetitionTransactionError> {
     // 不放宽 auctions 的结束时间 shape：原始计划留在 policy_snapshot，
     // 当前列表示人工决定后的权威截止时间。

@@ -13,15 +13,14 @@ use auction_domain::{
     CompetitionTrigger, DEFAULT_START_PRICE, DomainError, LotBidState, LotId, ProxyAuthorization,
     ProxyAuthorizationId, ProxyMode, ProxyStatus, ProxyTerminalReason, ProxyTransitionKind, UserId,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 fn must<T, E: std::fmt::Debug>(result: Result<T, E>) -> T {
     result.unwrap_or_else(|error| panic!("测试夹具必须合法: {error:?}"))
 }
 
-fn at(hour: u32, minute: u32) -> DateTime<Utc> {
-    chrono::TimeZone::with_ymd_and_hms(&Utc, 2026, 1, 1, hour, minute, 0)
-        .single()
+fn at(hour: u32, minute: u32) -> Timestamp {
+    Timestamp::from_ymd_hms(2026, 1, 1, hour, minute, 0)
         .unwrap_or_else(|| panic!("测试时间必须存在"))
 }
 
@@ -56,7 +55,7 @@ fn waiting_state(
     proxy: &ProxyAuthorization,
     current: i64,
     leader: UserId,
-    due_at: DateTime<Utc>,
+    due_at: Timestamp,
 ) -> LotBidState {
     LotBidState {
         slow_generation: 1,
@@ -131,8 +130,8 @@ fn lower(proxy: &ProxyAuthorization, new_maximum: i64) -> CompetitionTrigger {
 fn slow_due(
     authorization_id: ProxyAuthorizationId,
     generation: u64,
-    due_at: DateTime<Utc>,
-    now: DateTime<Utc>,
+    due_at: Timestamp,
+    now: Timestamp,
 ) -> CompetitionTrigger {
     CompetitionTrigger::SlowDue {
         command_id: CommandId::new(),

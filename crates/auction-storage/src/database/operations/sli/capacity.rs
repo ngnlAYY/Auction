@@ -8,7 +8,7 @@ use auction_application::auction::{
 use auction_application::sli::{
     SLI_CANDIDATE_LIMIT, SliBidCapacity, SliBidKind, SliSnapshotError, SliWorld,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
@@ -41,7 +41,7 @@ pub(super) async fn read(
     for row in candidates {
         if let Some(bid_id) = row.try_get::<Option<Uuid>, _>("bid_id").map_err(storage)? {
             bid_ids.push(bid_id);
-            event_times.push(row.try_get::<DateTime<Utc>, _>("created_at").map_err(storage)?);
+            event_times.push(row.try_get::<Timestamp, _>("created_at").map_err(storage)?);
         }
     }
     // LATERAL 的 LIMIT 保留有界主键探测，避免构建全历史哈希表。
@@ -81,7 +81,7 @@ pub(super) async fn read(
             .position(|candidate| *candidate == kind)
             .ok_or(SliSnapshotError::InvalidData)?;
         let command: Uuid = row.try_get("command_id").map_err(storage)?;
-        let at: DateTime<Utc> = row.try_get("event_time").map_err(storage)?;
+        let at: Timestamp = row.try_get("event_time").map_err(storage)?;
         let first = commands.entry((world, kind, command)).or_insert(at);
         *first = (*first).min(at);
     }
@@ -89,7 +89,7 @@ pub(super) async fn read(
     let mut seconds = BTreeMap::<_, u64>::new();
     let rate_since = window
         .now
-        .checked_sub_signed(chrono::Duration::seconds(SliBidCapacity::RATE_WINDOW_SECONDS))
+        .checked_sub_signed(auction_time::Duration::seconds(SliBidCapacity::RATE_WINDOW_SECONDS))
         .ok_or(SliSnapshotError::InvalidData)?;
     for ((world, kind, _command), at) in commands {
         if at > rate_since {

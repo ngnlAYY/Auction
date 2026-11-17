@@ -9,7 +9,7 @@ use auction_application::delivery::{
     DeliveryFenceOutcome, DeliveryPreparedExpectation, DeliveryWorkClaim,
 };
 use auction_application::settlement::{FundingError, SettlementInternalEvidenceSnapshot};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Postgres;
 
 use crate::{MailEvidenceTransactionError, database::TrackedPool};
@@ -116,7 +116,7 @@ fn uncertain() -> ApplicationError {
 pub(in crate::database::delivery::scheduler) async fn run(
     pool: &TrackedPool<Postgres>,
     claim: &DeliveryWorkClaim,
-    started_at: DateTime<Utc>,
+    started_at: Timestamp,
     evidence: Option<&SettlementInternalEvidenceSnapshot>,
     deadline: Option<Instant>,
     intervals: &auction_application::delivery::DeliverySendIntervals,
@@ -137,7 +137,7 @@ pub(in crate::database::delivery::scheduler) async fn run(
 async fn run_transaction(
     pool: &TrackedPool<Postgres>,
     claim: &DeliveryWorkClaim,
-    started_at: DateTime<Utc>,
+    started_at: Timestamp,
     evidence: Option<&SettlementInternalEvidenceSnapshot>,
     deadline: Option<Instant>,
     intervals: &auction_application::delivery::DeliverySendIntervals,
@@ -178,7 +178,7 @@ async fn run_transaction(
                         let remaining = deadline
                             .checked_duration_since(Instant::now())
                             .ok_or(FenceError::Fault(SafeErrorKind::TIMEOUT))?;
-                        let evidence_remaining = (evidence.expires_at - Utc::now())
+                        let evidence_remaining = (evidence.expires_at - Timestamp::now())
                             .to_std()
                             .map_err(|_| FenceError::Fault(SafeErrorKind::TIMEOUT))?;
                         let millis = remaining.min(evidence_remaining).as_millis();

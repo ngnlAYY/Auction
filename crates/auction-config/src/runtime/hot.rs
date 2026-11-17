@@ -7,7 +7,7 @@
 use std::{path::Path, time::UNIX_EPOCH};
 
 use auction_application::admin::{AdminRuntimeDocument, WorkerHotConfig};
-use chrono::Utc;
+use auction_time::Timestamp;
 
 use super::{read_runtime_file, validate_runtime_document};
 use crate::{ConfigError, WorkerConfig};
@@ -52,7 +52,7 @@ pub fn load_worker_hot_config(
     let document: AdminRuntimeDocument = toml::from_str(&contents)
         .map_err(|_: toml::de::Error| ConfigError::RuntimeParse { path: path.to_owned() })?;
     // 失败时调用方保留旧快照并告警。
-    validate_runtime_document(&document, Utc::now()).map_err(|error| {
+    validate_runtime_document(&document, Timestamp::now()).map_err(|error| {
         ConfigError::InvalidRuntimeConfig { path: path.to_owned(), reason: error.to_string() }
     })?;
     Ok(WorkerHotConfig::apply_document(current, &document))

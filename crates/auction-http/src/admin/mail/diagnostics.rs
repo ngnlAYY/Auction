@@ -7,7 +7,7 @@ use auction_contracts::{
     AdminMailPollProgressFailureResponse, AdminMailPollProgressResponse,
     AdminMailPollingDiagnosticsResponse,
 };
-use chrono::Utc;
+use auction_time::Timestamp;
 
 use crate::mapping::timestamp;
 use crate::state::AdminApiState;
@@ -38,7 +38,7 @@ pub(super) async fn read_polling_diagnostics(
         .find(|progress| progress.mailbox_key == polling.mailbox_key)
         .map(map_progress);
     AdminMailPollingDiagnosticsResponse {
-        observed_at: timestamp(Utc::now()),
+        observed_at: timestamp(Timestamp::now()),
         cursor_status: cursor_status.to_owned(),
         completed_external_mail_id,
         worker_condition: worker.condition.as_str().to_owned(),

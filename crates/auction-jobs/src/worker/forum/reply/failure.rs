@@ -2,7 +2,7 @@
 
 use auction_application::core::ApplicationError;
 use auction_application::forum::{ForumReplyPhase, ForumReplyTopic, ForumWriteProgress};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use super::ForumReplyRuntime;
 use super::topic::retry_scan_at;
@@ -12,11 +12,11 @@ use crate::worker::runtime::WorkerError;
 pub(super) async fn record_topic_failure(
     runtime: &ForumReplyRuntime,
     topic: ForumReplyTopic,
-    failed_at: DateTime<Utc>,
-    poll_interval: chrono::Duration,
+    failed_at: Timestamp,
+    poll_interval: auction_time::Duration,
     error: &ApplicationError,
     write_progress: &ForumWriteProgress,
-) -> Result<Option<DateTime<Utc>>, WorkerError> {
+) -> Result<Option<Timestamp>, WorkerError> {
     let failure_code = match error {
         // 精确进度已证明未发送 POST 时，ownership 等预检的保守 write_unknown 不能锁死正文。
         ApplicationError::ForumRemote(remote) if remote.code() != "write_unknown" => remote.code(),
@@ -37,11 +37,11 @@ pub(super) async fn record_topic_failure(
 pub(super) async fn record_topic_failure_code(
     runtime: &ForumReplyRuntime,
     topic: ForumReplyTopic,
-    failed_at: DateTime<Utc>,
-    poll_interval: chrono::Duration,
+    failed_at: Timestamp,
+    poll_interval: auction_time::Duration,
     failure_code: &str,
     write_progress: &ForumWriteProgress,
-) -> Result<Option<DateTime<Utc>>, WorkerError> {
+) -> Result<Option<Timestamp>, WorkerError> {
     if write_progress.is_cancelled() {
         return Ok(None);
     }

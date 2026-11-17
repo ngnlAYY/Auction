@@ -159,7 +159,7 @@ async fn acknowledge_transaction(
     let audit_id = delivery_audit::append(
         &mut transaction,
         DeliveryAudit {
-            occurred_at: chrono::Utc::now(),
+            occurred_at: auction_time::Timestamp::now(),
             actor_type: "admin",
             actor_id: &command.actor_id,
             action: delivery_audit::OPERATOR_ACKNOWLEDGED,

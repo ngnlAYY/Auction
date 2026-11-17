@@ -6,7 +6,7 @@ use auction_application::recovery::{
     RecoveryCommandRepository, RecoveryConfirmationCommand, RecoveryConfirmationResult,
     RecoveryResolutionAdvance, RecoveryResolutionStore,
 };
-use chrono::Duration as ChronoDuration;
+use auction_time::TimeDelta;
 
 mod binding;
 pub(crate) use binding::send_attribution_blocker;
@@ -29,13 +29,13 @@ use crate::database::DatabaseStore;
 impl RecoveryResolutionStore for DatabaseStore {
     fn advance_due_relist(
         &self,
-        now: chrono::DateTime<chrono::Utc>,
-        retry_after: ChronoDuration,
+        now: auction_time::Timestamp,
+        retry_after: TimeDelta,
     ) -> ApplicationFuture<'_, Option<RecoveryResolutionAdvance>> {
         Box::pin(async move {
             if now.timestamp_nanos_opt().is_none()
-                || retry_after <= ChronoDuration::zero()
-                || retry_after > ChronoDuration::hours(24)
+                || retry_after <= TimeDelta::zero()
+                || retry_after > TimeDelta::hours(24)
             {
                 return Err(ApplicationError::Repository(
                     auction_application::core::RepositoryError::Failed(
@@ -51,7 +51,7 @@ impl RecoveryResolutionStore for DatabaseStore {
 
     fn advance_due_cod_return(
         &self,
-        now: chrono::DateTime<chrono::Utc>,
+        now: auction_time::Timestamp,
     ) -> ApplicationFuture<'_, Option<RecoveryResolutionAdvance>> {
         Box::pin(async move {
             if now.timestamp_nanos_opt().is_none() {
@@ -67,7 +67,7 @@ impl RecoveryResolutionStore for DatabaseStore {
 
     fn complete_due_refund(
         &self,
-        now: chrono::DateTime<chrono::Utc>,
+        now: auction_time::Timestamp,
     ) -> ApplicationFuture<'_, Option<RecoveryResolutionAdvance>> {
         Box::pin(async move {
             if now.timestamp_nanos_opt().is_none() {

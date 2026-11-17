@@ -14,7 +14,8 @@ use auction_domain::{
     legacy_natural_key_uuid,
 };
 use auction_observability::WorkerResult;
-use chrono::{DateTime, Duration, NaiveDate, Utc};
+use auction_time::{Duration, Timestamp};
+use jiff::civil;
 use serde::Serialize;
 
 use super::PersistentWorker;
@@ -233,7 +234,7 @@ async fn early_bird_intake_gate<C>(
     world_id: &str,
     target: Option<&AuctionScheduleSlot>,
     snapshot: Option<&ScheduledRoundSnapshot>,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<Option<MailGate>, ApplicationError>
 where
     C: Clock + 'static,
@@ -266,7 +267,7 @@ where
 }
 
 /// 轮次自身的邮箱期望：Preview 后开拍前两小时暂停，开拍或取消/错过后恢复。
-fn round_mail_gate(snapshot: &ScheduledRoundSnapshot, now: DateTime<Utc>) -> Option<MailGate> {
+fn round_mail_gate(snapshot: &ScheduledRoundSnapshot, now: Timestamp) -> Option<MailGate> {
     let paused = if snapshot.active
         && snapshot.preview_completed_at.is_some()
         && snapshot.open_completed_at.is_none()
@@ -285,7 +286,10 @@ fn round_mail_gate(snapshot: &ScheduledRoundSnapshot, now: DateTime<Utc>) -> Opt
 }
 
 fn round_identity(snapshot: &ScheduledRoundSnapshot) -> String {
-    snapshot.slot_key.clone().unwrap_or_else(|| snapshot.local_week.format("%Y-%m-%d").to_string())
+    snapshot
+        .slot_key
+        .clone()
+        .unwrap_or_else(|| snapshot.local_week.strftime("%Y-%m-%d").to_string())
 }
 
 async fn load_or_bootstrap_round<C>(
@@ -293,7 +297,7 @@ async fn load_or_bootstrap_round<C>(
     config: &super::AuctionScheduleRuntimeConfig,
     world_id: &str,
     generation: &AuctionScheduleSlot,
-    now: DateTime<Utc>,
+    now: Timestamp,
     deadline: tokio::time::Instant,
 ) -> Result<Option<ScheduledRoundSnapshot>, ApplicationError>
 where
@@ -377,14 +381,14 @@ struct BootstrapRequest {
     auction_id: AuctionId,
     create_command_id: CommandId,
     world_id: String,
-    local_week: NaiveDate,
+    local_week: civil::Date,
     slot_key: Option<String>,
-    preview_due_at: DateTime<Utc>,
-    open_due_at: DateTime<Utc>,
-    scheduled_end_at: DateTime<Utc>,
+    preview_due_at: Timestamp,
+    open_due_at: Timestamp,
+    scheduled_end_at: Timestamp,
     policy: AuctionPolicyTemplate,
     schedule_source: AuctionScheduleSource,
-    intake_opens_at: Option<DateTime<Utc>>,
+    intake_opens_at: Option<Timestamp>,
 }
 
 impl BootstrapRequest {
@@ -408,10 +412,10 @@ impl BootstrapRequest {
         #[derive(Serialize)]
         struct IdentityRequest<'a> {
             world_id: &'a str,
-            local_week: NaiveDate,
-            preview_due_at: DateTime<Utc>,
-            open_due_at: DateTime<Utc>,
-            scheduled_end_at: DateTime<Utc>,
+            local_week: civil::Date,
+            preview_due_at: Timestamp,
+            open_due_at: Timestamp,
+            scheduled_end_at: Timestamp,
             policy: serde_json::Value,
             schedule_source: &'a AuctionScheduleSource,
         }
@@ -532,7 +536,7 @@ async fn reconcile_mail(
 /// 当前本地周的常规周时段；与早鸟日历、开拍后继共用同一周计划投影。
 fn generation(
     config: &super::AuctionScheduleRuntimeConfig,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<AuctionScheduleSlot, ()> {
     let weekly = &config.weekly;
     weekly.slot(weekly.week_start(now)).map_err(|error| {

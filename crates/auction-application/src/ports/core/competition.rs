@@ -6,7 +6,7 @@ use auction_domain::{
     AuctionRules, AuctionStatus, BidAmount, CommandId, CompetitionPlan, LotBidState, LotId,
     ProxyAuthorization, ProxyAuthorizationId, ProxyStatus, UserId,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use thiserror::Error;
 
 use crate::errors::diagnostics::{
@@ -48,7 +48,7 @@ pub struct CompetitionProxyTransitionRecord {
     pub new_status: String,
     pub reason: Option<String>,
     pub resulting_state_version: i64,
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
 }
 
 impl ProxyUsageContext {
@@ -104,7 +104,7 @@ impl ProxyUsageContext {
 pub struct CompetitionCommandAuditContext {
     pub command_id: CommandId,
     pub actor_id: UserId,
-    pub occurred_at: DateTime<Utc>,
+    pub occurred_at: Timestamp,
     pub kind: CompetitionCommandAuditKind,
 }
 
@@ -121,8 +121,8 @@ pub enum CompetitionCommandAuditKind {
 pub struct SlowProxyExecutionContext {
     pub authorization_id: ProxyAuthorizationId,
     pub generation: u64,
-    pub due_at: DateTime<Utc>,
-    pub executed_at: DateTime<Utc>,
+    pub due_at: Timestamp,
+    pub executed_at: Timestamp,
 }
 
 impl SlowProxyExecutionContext {
@@ -210,7 +210,7 @@ pub trait CompetitionTransaction: Send {
     /// 返回数据库当前时间；调用方在业务锁齐备后读取，截止与事实不使用进程时钟。
     fn current_time(
         &mut self,
-    ) -> impl Future<Output = Result<DateTime<Utc>, CompetitionTransactionError>> + Send;
+    ) -> impl Future<Output = Result<Timestamp, CompetitionTransactionError>> + Send;
 
     fn load_for_update(
         &mut self,
@@ -252,7 +252,7 @@ pub trait CompetitionTransaction: Send {
         &mut self,
         plan: &CompetitionPlan,
         audit: Option<CompetitionCommandAuditContext>,
-        occurred_at: DateTime<Utc>,
+        occurred_at: Timestamp,
     ) -> impl Future<Output = Result<(), CompetitionTransactionError>> + Send;
 
     /// 原子应用慢速代理计划，并写入格式已冻结的 Worker 审计。

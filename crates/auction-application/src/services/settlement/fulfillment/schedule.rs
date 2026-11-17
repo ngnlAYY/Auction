@@ -1,7 +1,7 @@
 //! 履约证据轮询的年龄退避、付款截止聚焦与等待领取的寄出时长分档。
 
 use auction_domain::SettlementObligationKind;
-use chrono::{DateTime, Duration, Utc};
+use auction_time::{Duration, Timestamp};
 
 use crate::errors::ApplicationError;
 
@@ -55,8 +55,8 @@ const COLLECTION_WAIT_SLOW_INTERVAL: Duration = Duration::hours(6);
 pub(super) fn evidence_poll_delay(
     base: Duration,
     retry_count: u32,
-    payment_deadline_at: Option<DateTime<Utc>>,
-    observed_at: DateTime<Utc>,
+    payment_deadline_at: Option<Timestamp>,
+    observed_at: Timestamp,
 ) -> Duration {
     let base = base.max(EVIDENCE_BACKOFF_MINIMUM).min(EVIDENCE_BACKOFF_MAXIMUM);
     if payment_deadline_focus(payment_deadline_at, observed_at) {
@@ -96,8 +96,8 @@ pub(super) fn evidence_read_failure_delay(
 
 /// 观察时刻是否落在付款截止前后的聚焦窗口内。
 pub(super) fn payment_deadline_focus(
-    payment_deadline_at: Option<DateTime<Utc>>,
-    observed_at: DateTime<Utc>,
+    payment_deadline_at: Option<Timestamp>,
+    observed_at: Timestamp,
 ) -> bool {
     let Some(deadline) = payment_deadline_at else {
         return false;
@@ -127,9 +127,9 @@ fn collection_wait_tiered(kind: SettlementObligationKind) -> bool {
 /// 付款截止聚焦窗口内时返回 `None`；24 小时至 7 天为 1 小时，7 天以上为 6 小时。
 pub(super) fn collection_wait_interval(
     kind: SettlementObligationKind,
-    sent_at: Option<DateTime<Utc>>,
-    observed_at: DateTime<Utc>,
-    payment_deadline_at: Option<DateTime<Utc>>,
+    sent_at: Option<Timestamp>,
+    observed_at: Timestamp,
+    payment_deadline_at: Option<Timestamp>,
 ) -> Option<Duration> {
     if !collection_wait_tiered(kind) || payment_deadline_focus(payment_deadline_at, observed_at) {
         return None;
@@ -154,8 +154,8 @@ pub(super) fn collection_wait_interval(
 pub(super) fn widen_for_collection_wait(
     delay: Duration,
     interval: Option<Duration>,
-    observed_at: DateTime<Utc>,
-    payment_deadline_at: Option<DateTime<Utc>>,
+    observed_at: Timestamp,
+    payment_deadline_at: Option<Timestamp>,
 ) -> Duration {
     let Some(interval) = interval else {
         return delay;
@@ -180,10 +180,10 @@ pub(super) fn widen_for_collection_wait(
 /// 该对齐只在非聚焦期保持。付款截止前后改用 `min(窗口, 证据间隔)`，让迟到付款按基础
 /// 频率被确认；没有共享窗口的普通装备寄送直接使用证据间隔。
 pub(super) fn collection_poll_delay(
-    window_next: Option<DateTime<Utc>>,
-    observed_at: DateTime<Utc>,
+    window_next: Option<Timestamp>,
+    observed_at: Timestamp,
     evidence_delay: Duration,
-    payment_deadline_at: Option<DateTime<Utc>>,
+    payment_deadline_at: Option<Timestamp>,
 ) -> Duration {
     let Some(next) = window_next else {
         return evidence_delay;
@@ -198,7 +198,7 @@ pub(super) fn collection_poll_delay(
 #[cfg(test)]
 mod tests {
     use auction_domain::SettlementObligationKind;
-    use chrono::{TimeZone, Utc};
+    use auction_time::Timestamp;
 
     use super::{
         EVIDENCE_BACKOFF_MAXIMUM, collection_poll_delay, collection_wait_interval,
@@ -209,12 +209,12 @@ mod tests {
     use crate::errors::diagnostics::SafeErrorKind;
     use crate::ports::core::RepositoryError;
 
-    fn at(seconds: i64) -> chrono::DateTime<Utc> {
-        Utc.timestamp_opt(seconds, 0).single().expect("时间戳必须在范围内")
+    fn at(seconds: i64) -> auction_time::Timestamp {
+        Timestamp::from_timestamp(seconds, 0).expect("时间戳必须在范围内")
     }
 
-    fn base() -> chrono::Duration {
-        chrono::Duration::seconds(60)
+    fn base() -> auction_time::Duration {
+        auction_time::Duration::seconds(60)
     }
 
     #[test]
@@ -256,7 +256,7 @@ mod tests {
         // 逾期义务的期限已经过去很久；退避不把它永久钉在基础频率，也不改写期限本身。
         // 逾期判定仍由 recovery owner 负责，这里只决定轮询时刻。
         let now = at(1_700_000_000);
-        let deadline = now - chrono::Duration::days(3);
+        let deadline = now - auction_time::Duration::days(3);
         assert!(!payment_deadline_focus(Some(deadline), now));
         assert!(!payment_deadline_focus(None, now));
         assert_eq!(evidence_poll_delay(base(), 4, Some(deadline), now), EVIDENCE_BACKOFF_MAXIMUM);
@@ -272,9 +272,9 @@ mod tests {
         let deadline = at(1_700_003_600);
         // 截止前十秒、截止时刻、截止后一秒直至聚焦窗口边界都使用基础间隔。
         for observed_at in [
-            deadline - chrono::Duration::seconds(10),
+            deadline - auction_time::Duration::seconds(10),
             deadline,
-            deadline + chrono::Duration::seconds(1),
+            deadline + auction_time::Duration::seconds(1),
             deadline + EVIDENCE_BACKOFF_MAXIMUM,
         ] {
             assert!(payment_deadline_focus(Some(deadline), observed_at));
@@ -286,8 +286,8 @@ mod tests {
         }
         // 聚焦窗口之外继续按年龄退避，且仍不超过上限。
         for observed_at in [
-            deadline - EVIDENCE_BACKOFF_MAXIMUM - chrono::Duration::seconds(1),
-            deadline + EVIDENCE_BACKOFF_MAXIMUM + chrono::Duration::seconds(1),
+            deadline - EVIDENCE_BACKOFF_MAXIMUM - auction_time::Duration::seconds(1),
+            deadline + EVIDENCE_BACKOFF_MAXIMUM + auction_time::Duration::seconds(1),
         ] {
             assert!(!payment_deadline_focus(Some(deadline), observed_at));
             assert_eq!(
@@ -301,7 +301,7 @@ mod tests {
     fn missing_deadline_keeps_age_schedule() {
         let now = at(1_700_000_000);
         assert_eq!(evidence_poll_delay(base(), 0, None, now), base());
-        assert_eq!(evidence_poll_delay(base(), 3, None, now), chrono::Duration::seconds(480));
+        assert_eq!(evidence_poll_delay(base(), 3, None, now), auction_time::Duration::seconds(480));
     }
 
     #[test]
@@ -311,12 +311,12 @@ mod tests {
         assert_eq!(evidence_poll_delay(base(), 0, None, now), base());
         // 上限优先于更大的配置值，非正配置被抬到 1 秒。
         assert_eq!(
-            evidence_poll_delay(chrono::Duration::seconds(1_800), 0, None, now),
+            evidence_poll_delay(auction_time::Duration::seconds(1_800), 0, None, now),
             EVIDENCE_BACKOFF_MAXIMUM
         );
         assert_eq!(
-            evidence_poll_delay(chrono::Duration::zero(), 0, None, now),
-            chrono::Duration::seconds(1)
+            evidence_poll_delay(auction_time::Duration::zero(), 0, None, now),
+            auction_time::Duration::seconds(1)
         );
     }
 
@@ -327,12 +327,12 @@ mod tests {
         // 非聚焦期保持共享窗口节奏，不被证据退避缩短或打断。
         assert_eq!(
             collection_poll_delay(Some(window_next), now, base(), None),
-            chrono::Duration::seconds(300)
+            auction_time::Duration::seconds(300)
         );
         // 没有共享窗口的普通寄送直接使用证据退避间隔。
         assert_eq!(
-            collection_poll_delay(None, now, chrono::Duration::seconds(480), None),
-            chrono::Duration::seconds(480)
+            collection_poll_delay(None, now, auction_time::Duration::seconds(480), None),
+            auction_time::Duration::seconds(480)
         );
     }
 
@@ -354,17 +354,17 @@ mod tests {
     #[test]
     fn collection_wait_tiers_follow_time_since_sent() {
         let now = at(1_700_000_000);
-        let sent = |ago: chrono::Duration| Some(now - ago);
-        let hour = chrono::Duration::hours(1);
-        let six_hours = chrono::Duration::hours(6);
+        let sent = |ago: auction_time::Duration| Some(now - ago);
+        let hour = auction_time::Duration::hours(1);
+        let six_hours = auction_time::Duration::hours(6);
         for (ago, expected) in [
-            (chrono::Duration::hours(23) + chrono::Duration::minutes(59), None),
-            (chrono::Duration::hours(24) - chrono::Duration::seconds(1), None),
-            (chrono::Duration::hours(24), Some(hour)),
-            (chrono::Duration::days(3), Some(hour)),
-            (chrono::Duration::days(7) - chrono::Duration::seconds(1), Some(hour)),
-            (chrono::Duration::days(7), Some(six_hours)),
-            (chrono::Duration::days(30), Some(six_hours)),
+            (auction_time::Duration::hours(23) + auction_time::Duration::minutes(59), None),
+            (auction_time::Duration::hours(24) - auction_time::Duration::seconds(1), None),
+            (auction_time::Duration::hours(24), Some(hour)),
+            (auction_time::Duration::days(3), Some(hour)),
+            (auction_time::Duration::days(7) - auction_time::Duration::seconds(1), Some(hour)),
+            (auction_time::Duration::days(7), Some(six_hours)),
+            (auction_time::Duration::days(30), Some(six_hours)),
         ] {
             assert_eq!(
                 collection_wait_interval(
@@ -380,7 +380,7 @@ mod tests {
         let payout = SettlementObligationKind::SellerPayout;
         assert_eq!(collection_wait_interval(payout, None, now, None), None);
         assert_eq!(
-            collection_wait_interval(payout, sent(chrono::Duration::hours(-1)), now, None),
+            collection_wait_interval(payout, sent(auction_time::Duration::hours(-1)), now, None),
             None
         );
     }
@@ -390,7 +390,7 @@ mod tests {
     #[test]
     fn collection_wait_excludes_cod_and_carrier_payments() {
         let now = at(1_700_000_000);
-        let sent = Some(now - chrono::Duration::days(8));
+        let sent = Some(now - auction_time::Duration::days(8));
         for kind in [
             SettlementObligationKind::SellerPayout,
             SettlementObligationKind::BuyerRefund,
@@ -400,7 +400,7 @@ mod tests {
         ] {
             assert_eq!(
                 collection_wait_interval(kind, sent, now, None),
-                Some(chrono::Duration::hours(6)),
+                Some(auction_time::Duration::hours(6)),
                 "{kind:?} 参与分档"
             );
         }
@@ -408,9 +408,11 @@ mod tests {
             SettlementObligationKind::WinnerEquipmentCod,
             SettlementObligationKind::WinnerPaymentCarrierCod,
         ] {
-            for deadline in
-                [None, Some(now - chrono::Duration::days(5)), Some(now + chrono::Duration::days(1))]
-            {
+            for deadline in [
+                None,
+                Some(now - auction_time::Duration::days(5)),
+                Some(now + auction_time::Duration::days(1)),
+            ] {
                 assert_eq!(
                     collection_wait_interval(kind, sent, now, deadline),
                     None,
@@ -424,14 +426,14 @@ mod tests {
     #[test]
     fn collection_wait_only_widens_existing_delay() {
         let now = at(1_700_000_000);
-        let hour = chrono::Duration::hours(1);
-        let window = chrono::Duration::seconds(300);
+        let hour = auction_time::Duration::hours(1);
+        let window = auction_time::Duration::seconds(300);
         assert_eq!(widen_for_collection_wait(window, Some(hour), now, None), hour);
         assert_eq!(
             widen_for_collection_wait(EVIDENCE_BACKOFF_MAXIMUM, Some(hour), now, None),
             hour
         );
-        let wide_window = chrono::Duration::hours(2);
+        let wide_window = auction_time::Duration::hours(2);
         assert_eq!(widen_for_collection_wait(wide_window, Some(hour), now, None), wide_window);
         assert_eq!(widen_for_collection_wait(window, None, now, None), window);
     }
@@ -444,42 +446,46 @@ mod tests {
     fn collection_wait_widening_is_bounded_by_payment_deadline_focus() {
         let kind = SettlementObligationKind::SellerPayout;
         let now = at(1_700_000_000);
-        let sent = Some(now - chrono::Duration::days(3));
+        let sent = Some(now - auction_time::Duration::days(3));
         let window_next = Some(at(1_700_000_300));
 
         // 截止前 5 分钟：处于聚焦窗口，按基础间隔读取。
-        let deadline = Some(now + chrono::Duration::minutes(5));
+        let deadline = Some(now + auction_time::Duration::minutes(5));
         assert_eq!(collection_wait_interval(kind, sent, now, deadline), None);
         let evidence_delay = evidence_poll_delay(base(), 6, deadline, now);
         let delay = collection_poll_delay(window_next, now, evidence_delay, deadline);
         assert_eq!(widen_for_collection_wait(delay, None, now, deadline), base());
 
         // 截止前 30 分钟：分档为 1 小时，但放宽后的读取最迟在截止前 10 分钟（聚焦窗口起点）。
-        let deadline = Some(now + chrono::Duration::minutes(30));
+        let deadline = Some(now + auction_time::Duration::minutes(30));
         let interval = collection_wait_interval(kind, sent, now, deadline);
-        assert_eq!(interval, Some(chrono::Duration::hours(1)));
-        let window = chrono::Duration::seconds(300);
+        assert_eq!(interval, Some(auction_time::Duration::hours(1)));
+        let window = auction_time::Duration::seconds(300);
         assert_eq!(
             widen_for_collection_wait(window, interval, now, deadline),
-            chrono::Duration::minutes(20)
+            auction_time::Duration::minutes(20)
         );
-        assert!(payment_deadline_focus(deadline, now + chrono::Duration::minutes(20)));
+        assert!(payment_deadline_focus(deadline, now + auction_time::Duration::minutes(20)));
         // 配置的追踪窗口（2 小时）本身更宽：保持原窗口，不因分档或截止而缩短。
-        let wide_window = chrono::Duration::hours(2);
+        let wide_window = auction_time::Duration::hours(2);
         assert_eq!(widen_for_collection_wait(wide_window, interval, now, deadline), wide_window);
         // 距聚焦窗口起点比既有间隔还近时保持既有间隔，不因截止而缩短。
-        let deadline = Some(now + chrono::Duration::minutes(12));
+        let deadline = Some(now + auction_time::Duration::minutes(12));
         let interval = collection_wait_interval(kind, sent, now, deadline);
         assert_eq!(widen_for_collection_wait(window, interval, now, deadline), window);
 
         // 截止已过去一天：不在聚焦窗口，按寄出 8 天放宽到 6 小时。
-        let deadline = Some(now - chrono::Duration::days(1));
-        let interval =
-            collection_wait_interval(kind, Some(now - chrono::Duration::days(8)), now, deadline);
-        assert_eq!(interval, Some(chrono::Duration::hours(6)));
+        let deadline = Some(now - auction_time::Duration::days(1));
+        let interval = collection_wait_interval(
+            kind,
+            Some(now - auction_time::Duration::days(8)),
+            now,
+            deadline,
+        );
+        assert_eq!(interval, Some(auction_time::Duration::hours(6)));
         assert_eq!(
             widen_for_collection_wait(window, interval, now, deadline),
-            chrono::Duration::hours(6)
+            auction_time::Duration::hours(6)
         );
     }
 }

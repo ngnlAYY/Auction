@@ -10,7 +10,7 @@
 use auction_application::recovery::{
     RecoveryCommandError, RecoveryConfirmationAction, RecoveryConfirmationCommand,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
@@ -33,7 +33,7 @@ pub(in crate::database::recovery::commands) async fn close_voided_fulfillments(
     transaction: &mut Transaction<'_, Postgres>,
     recovery: &RecoveryRow,
     command: &RecoveryConfirmationCommand,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<(), RecoveryCommandError> {
     let payment_code = match command.action {
         RecoveryConfirmationAction::Reclaimed => "recovery_reclaimed",
@@ -217,7 +217,7 @@ pub(super) async fn fail_fulfillment(
     transaction: &mut Transaction<'_, Postgres>,
     obligation_id: Uuid,
     failure_code: &str,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<(), RecoveryCommandError> {
     let updated = sqlx::query(
         r#"UPDATE public.settlement_obligation_fulfillments
@@ -262,7 +262,7 @@ pub(super) async fn append_closure_audit(
     transaction: &mut Transaction<'_, Postgres>,
     audit: ClosureAudit<'_>,
     command: &RecoveryConfirmationCommand,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<(), RecoveryCommandError> {
     sqlx::query(
         r#"INSERT INTO public.audit_records

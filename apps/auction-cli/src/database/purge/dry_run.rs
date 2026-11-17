@@ -5,7 +5,7 @@ use std::{fs, io::Read, os::unix::fs::MetadataExt, path::Path};
 
 use anyhow::Context;
 use auction_storage::{RETENTION_DRY_RUN_FORMAT, RETENTION_PURGE_RECEIPT_MAX_AGE_SECONDS};
-use chrono::{DateTime, TimeDelta, Utc};
+use auction_time::{TimeDelta, Timestamp};
 use serde::Deserialize;
 use uuid::Uuid;
 
@@ -20,7 +20,7 @@ pub(super) const FILESYSTEM_PURGE_MIN_HEADROOM_SECONDS: i64 = 60;
 pub(super) struct DryRunReceipt {
     pub(super) format: String,
     pub(super) run_id: Uuid,
-    pub(super) created_at: DateTime<Utc>,
+    pub(super) created_at: Timestamp,
     pub(super) database_retention: DatabaseRetention,
     pub(super) filesystem_retention: FilesystemRetention,
 }
@@ -29,7 +29,7 @@ pub(super) struct DryRunReceipt {
 pub(super) struct DatabaseRetention {
     pub(super) format: String,
     pub(super) run_id: Uuid,
-    pub(super) collected_at: DateTime<Utc>,
+    pub(super) collected_at: Timestamp,
     pub(super) database_name: String,
     pub(super) policy_version: i64,
     pub(super) policy_sha256: String,
@@ -99,7 +99,7 @@ pub(super) fn validate_receipt(
     database: &str,
     policy_version: i64,
     policy_sha256: &str,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> anyhow::Result<()> {
     anyhow::ensure!(
         receipt.format == "auction-retention-dry-run-receipt.v1",
@@ -131,18 +131,20 @@ pub(super) fn validate_receipt(
     anyhow::ensure!(
         receipt.created_at >= database_retention.collected_at
             && receipt.created_at - database_retention.collected_at
-                <= chrono::TimeDelta::seconds(
+                <= auction_time::TimeDelta::seconds(
                     auction_storage::RETENTION_PURGE_DRY_RUN_MAX_DURATION_SECONDS
                 ),
         "只读演练回执时间与快照时间不配套"
     );
     anyhow::ensure!(
-        receipt.created_at <= now + chrono::TimeDelta::minutes(2),
+        receipt.created_at <= now + auction_time::TimeDelta::minutes(2),
         "只读演练回执时间在未来"
     );
     anyhow::ensure!(
         now - receipt.created_at
-            <= chrono::TimeDelta::seconds(auction_storage::RETENTION_PURGE_RECEIPT_MAX_AGE_SECONDS),
+            <= auction_time::TimeDelta::seconds(
+                auction_storage::RETENTION_PURGE_RECEIPT_MAX_AGE_SECONDS
+            ),
         "只读演练回执已过期；先重新执行 db retention-dry-run"
     );
     Ok(())
@@ -151,8 +153,8 @@ pub(super) fn validate_receipt(
 /// 删除文件前的回执余量门禁：到期时刻（`created_at` 加最大年龄）距 `now` 不足
 /// [`FILESYSTEM_PURGE_MIN_HEADROOM_SECONDS`] 秒即拒绝，此时尚未删除任何文件。
 pub(super) fn require_receipt_headroom(
-    created_at: DateTime<Utc>,
-    now: DateTime<Utc>,
+    created_at: Timestamp,
+    now: Timestamp,
 ) -> anyhow::Result<()> {
     let remaining = created_at + TimeDelta::seconds(RETENTION_PURGE_RECEIPT_MAX_AGE_SECONDS) - now;
     anyhow::ensure!(

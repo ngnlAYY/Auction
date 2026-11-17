@@ -18,7 +18,7 @@ use std::{
 };
 
 use anyhow::Context;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -57,7 +57,7 @@ pub(crate) struct RollbackRecord {
     pub format: String,
     pub record_id: Uuid,
     pub deploy_receipt_id: Uuid,
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
     pub install_directory: String,
     /// 创建本记录的操作开始前观测到的数据库迁移版本。
     pub observed_database_version: i64,
@@ -77,7 +77,7 @@ struct LegacyRollbackRecord {
     format: String,
     record_id: Uuid,
     deploy_receipt_id: Uuid,
-    created_at: DateTime<Utc>,
+    created_at: Timestamp,
     install_directory: String,
     previous_expected_version: i64,
     deployed_expected_version: i64,
@@ -297,7 +297,7 @@ pub(crate) fn retain(
         format: FORMAT.to_owned(),
         record_id: request.deploy_receipt_id,
         deploy_receipt_id: request.deploy_receipt_id,
-        created_at: Utc::now(),
+        created_at: Timestamp::now(),
         install_directory: request.install_dir.display().to_string(),
         observed_database_version: request.observed_database_version,
         installed_role_schema_version: request.installed_role_schema_version,

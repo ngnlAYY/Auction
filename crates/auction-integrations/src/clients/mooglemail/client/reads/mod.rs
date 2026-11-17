@@ -10,7 +10,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use tokio::sync::{OwnedSemaphorePermit, RwLock, Semaphore, watch};
 use uuid::Uuid;
 
@@ -82,7 +82,7 @@ struct ScopeState {
 struct ReadEpoch {
     revision: u64,
     started: Instant,
-    observed_at: DateTime<Utc>,
+    observed_at: Timestamp,
     requests: StdMutex<ReadRequests>,
     lists: lists::ListCells,
 }
@@ -102,7 +102,7 @@ pub(crate) struct MoogleMailReadRound {
 }
 
 impl MoogleMailReadRound {
-    pub(crate) fn observed_at(&self) -> DateTime<Utc> {
+    pub(crate) fn observed_at(&self) -> Timestamp {
         self.epoch.observed_at
     }
 

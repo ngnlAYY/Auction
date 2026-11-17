@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -62,11 +62,11 @@ pub struct AdminCreateAuctionRequest {
     #[serde(default, deserialize_with = "deserialize_null_default")]
     pub sequence: i64,
     #[serde(default)]
-    pub preview_scheduled_at: Option<DateTime<Utc>>,
+    pub preview_scheduled_at: Option<Timestamp>,
     #[serde(default)]
-    pub scheduled_open_at: Option<DateTime<Utc>>,
+    pub scheduled_open_at: Option<Timestamp>,
     #[serde(default)]
-    pub scheduled_end_at: Option<DateTime<Utc>>,
+    pub scheduled_end_at: Option<Timestamp>,
     #[serde(default, deserialize_with = "deserialize_null_default")]
     pub expected_state_version: i64,
 }
@@ -82,11 +82,11 @@ pub struct AdminUpdateAuctionScheduleRequest {
     #[serde(default, deserialize_with = "deserialize_null_default")]
     pub command_id: String,
     #[serde(default)]
-    pub preview_scheduled_at: Option<DateTime<Utc>>,
+    pub preview_scheduled_at: Option<Timestamp>,
     #[serde(default)]
-    pub scheduled_open_at: Option<DateTime<Utc>>,
+    pub scheduled_open_at: Option<Timestamp>,
     #[serde(default)]
-    pub scheduled_end_at: Option<DateTime<Utc>>,
+    pub scheduled_end_at: Option<Timestamp>,
     #[serde(default, deserialize_with = "deserialize_null_default")]
     pub expected_state_version: i64,
 }

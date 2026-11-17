@@ -149,7 +149,7 @@ impl TomlRuntimeFileStore {
         let contents = read_runtime_file(&self.path, Some(owner_uid))?;
         let document: AdminRuntimeDocument =
             toml::from_str(&contents).map_err(|_| RuntimeFileStoreError::Parse)?;
-        self.validate_document(&document, chrono::Utc::now())
+        self.validate_document(&document, auction_time::Timestamp::now())
             .map_err(|error| RuntimeFileStoreError::InvalidDocument(error.to_string()))?;
         Ok(AdminRuntimeSnapshot {
             fingerprint: document.fingerprint(),
@@ -161,7 +161,7 @@ impl TomlRuntimeFileStore {
     fn validate_document(
         &self,
         document: &AdminRuntimeDocument,
-        now: chrono::DateTime<chrono::Utc>,
+        now: auction_time::Timestamp,
     ) -> Result<(), auction_application::admin::AdminRuntimeConfigError> {
         validate_runtime_document(document, now)?;
         // headers 只由敏感部署文件拥有；不能保存一个重启后必因遗留 headers 而失败的关闭候选。
@@ -174,7 +174,7 @@ impl TomlRuntimeFileStore {
     }
 
     fn encode(&self, document: &AdminRuntimeDocument) -> Result<Vec<u8>, RuntimeFileStoreError> {
-        self.validate_document(document, chrono::Utc::now())
+        self.validate_document(document, auction_time::Timestamp::now())
             .map_err(|error| RuntimeFileStoreError::InvalidDocument(error.to_string()))?;
         let mut encoded =
             toml::to_string_pretty(document).map_err(|_| RuntimeFileStoreError::Parse)?;
@@ -282,7 +282,7 @@ impl AdminRuntimeFileStore for TomlRuntimeFileStore {
     fn validate_candidate(
         &self,
         document: &AdminRuntimeDocument,
-        now: chrono::DateTime<chrono::Utc>,
+        now: auction_time::Timestamp,
     ) -> Result<(), ApplicationError> {
         self.validate_document(document, now).map_err(ApplicationError::from)?;
         // 保存只使用启动时冻结的真实部署基值，不在同步候选校验路径读取文件或猜测 defaults。

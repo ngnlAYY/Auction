@@ -1,6 +1,6 @@
 //! 邮件轮询的只读运行观测；不参与租约、业务授权、游标或命令结果。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use crate::ports::mail::MailPollClaim;
@@ -55,7 +55,7 @@ impl MailPollProgressStage {
 pub struct MailPollProgressFailure {
     pub stage: MailPollProgressStage,
     pub external_mail_id: Option<String>,
-    pub occurred_at: DateTime<Utc>,
+    pub occurred_at: Timestamp,
 }
 
 /// 仅含邮箱、世界、数字 MID 与时间的运行快照；不含 claim token 或原始 cursor。
@@ -66,13 +66,13 @@ pub struct MailPollProgressSnapshot {
     pub world_id: String,
     pub stage: MailPollProgressStage,
     pub external_mail_id: Option<String>,
-    pub updated_at: DateTime<Utc>,
+    pub updated_at: Timestamp,
     pub last_failure: Option<MailPollProgressFailure>,
 }
 
 impl MailPollProgressSnapshot {
     /// 校验跨进程观测的闭集、字段关联和时间边界；不接受任意文本游标。
-    pub fn validate(&self, observed_at: DateTime<Utc>) -> bool {
+    pub fn validate(&self, observed_at: Timestamp) -> bool {
         let has_mail_stage = matches!(
             self.stage,
             MailPollProgressStage::ReadingDetail | MailPollProgressStage::Processing

@@ -1,7 +1,5 @@
 //! 拍卖经济、结算和恢复策略校验。
 
-use chrono::Timelike;
-
 use crate::settings::errors::ConfigError;
 use crate::settings::{AuctionConfig, AuctionScheduleConfig};
 
@@ -40,7 +38,7 @@ fn validate_early_bird(schedule: &AuctionScheduleConfig) -> Result<(), ConfigErr
 }
 
 fn validate_schedule(schedule: &AuctionScheduleConfig) -> Result<(), ConfigError> {
-    if schedule.timezone.parse::<chrono_tz::Tz>().is_err()
+    if auction_domain::parse_timezone(&schedule.timezone).is_none()
         || schedule.worlds.is_empty()
         || schedule.worlds.len() > 2
         || schedule.worlds.iter().any(|world| !matches!(world.as_str(), "main" | "isekai"))
@@ -55,8 +53,7 @@ fn validate_schedule(schedule: &AuctionScheduleConfig) -> Result<(), ConfigError
                 .position(|value| *value == day)?,
         )
         .ok()?;
-        let parsed = chrono::NaiveTime::parse_from_str(time, "%H:%M").ok()?;
-        Some((day, parsed.hour() * 60 + parsed.minute()))
+        Some((day, u32::from(auction_domain::parse_clock_minute(time)?)))
     };
     let Some(preview) = clock(&schedule.preview_day, &schedule.preview_time) else {
         return Err(ConfigError::InvalidAuctionConfig("auction.schedule preview 时间无效"));

@@ -5,7 +5,7 @@ use std::collections::{BTreeSet, HashSet};
 use auction_application::mail::{EquipmentFilterBoundsError, validate_equipment_filter_bounds};
 use auction_application::scheduling::RecurringSchedule;
 use auction_domain::valid_text;
-use chrono::Utc;
+use auction_time::Timestamp;
 use url::Url;
 
 use super::super::{ConfigError, MoogleMailEquipmentFilterConfig, MoogleMailWorkerConfig};
@@ -90,7 +90,7 @@ pub(crate) fn validate_mooglemail_worker(
             "schedule 必须是标准五字段 cron、受支持描述符或 @every duration",
         )
     })?;
-    if schedule.next_after(Utc::now()).is_none() {
+    if schedule.next_after(Timestamp::now()).is_none() {
         return Err(ConfigError::InvalidMoogleMailConfig("schedule 必须存在可计算的未来触发时刻"));
     }
     if let Some(expression) = &config.maintenance_schedule {
@@ -99,7 +99,7 @@ pub(crate) fn validate_mooglemail_worker(
                 "maintenance_schedule 必须是标准五字段 cron、受支持描述符或 @every duration",
             )
         })?;
-        if schedule.next_after(Utc::now()).is_none() {
+        if schedule.next_after(Timestamp::now()).is_none() {
             return Err(ConfigError::InvalidMoogleMailConfig(
                 "maintenance_schedule 必须存在可计算的未来触发时刻",
             ));
@@ -353,7 +353,7 @@ mod tests {
             apply_runtime_document(&mut config, document);
             validate_mooglemail_worker(&config).is_ok()
         };
-        let now = Utc::now();
+        let now = Timestamp::now();
         assert!(validate_runtime_document(&document("Savage"), now).is_ok());
         for token in ["Savage", "Ethereal", "A\u{200B}B"] {
             if validate_runtime_document(&document(token), now).is_ok() {

@@ -23,7 +23,7 @@ use auction_domain::{
     SettlementReturnTakeUnknownReason as Reason,
 };
 use auction_storage::DatabaseStore;
-use chrono::Utc;
+use auction_time::Timestamp;
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -65,7 +65,7 @@ async fn retry(
         version,
         SettlementReturnAction::RetryTake,
         "admin-returns",
-        Utc::now(),
+        Timestamp::now(),
     )
     .expect("构造命令");
     store.handle_settlement_return(command).await
@@ -120,7 +120,7 @@ async fn fail_unknown(
             external_reference: None,
             result_metadata: json!({"operation": "take", "write_started": true}),
         },
-        Utc::now(),
+        Timestamp::now(),
     )
     .await
     .expect("结果未知收口为人工核对");
@@ -367,7 +367,7 @@ async fn postgres_return_take_retry_requires_claimable_observation_each_time() {
     let second_fence = claim.fencing_version;
     assert!(second_fence > take.fencing_version, "再次执行使用新的 fence");
     fail_unknown(&store, claim).await;
-    store.settle_due_return_take(Utc::now()).await.expect("收口").expect("必须收口");
+    store.settle_due_return_take(Timestamp::now()).await.expect("收口").expect("必须收口");
     assert_eq!(reason(&store, case).await, Some(Reason::AwaitingObservation));
     let version = case_version(pool, case).await;
     assert_eq!(
@@ -405,11 +405,12 @@ async fn postgres_return_take_retry_requires_claimable_observation_each_time() {
                     "expected_attachment_ids": [],
                 }),
             },
-            Utc::now(),
+            Timestamp::now(),
         )
         .await
         .expect("Take 成功收口");
-    let settled = store.settle_due_return_take(Utc::now()).await.expect("收口").expect("必须收口");
+    let settled =
+        store.settle_due_return_take(Timestamp::now()).await.expect("收口").expect("必须收口");
     assert_eq!(settled.status, SettlementReturnCaseStatus::Held);
     let done = facts(pool, &take).await;
     assert_eq!((done.takes, done.funding_returns, done.return_entries), (1, 1, 1));

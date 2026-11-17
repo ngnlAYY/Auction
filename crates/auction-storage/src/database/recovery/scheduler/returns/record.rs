@@ -5,7 +5,7 @@ use auction_application::settlement::{
     SettlementReturnDispatchRequest, recovery_return_evidence, system_return_matches_obligation,
 };
 use auction_domain::SettlementObligationKind;
-use chrono::{DateTime, TimeDelta, Timelike, Utc};
+use auction_time::{TimeDelta, Timestamp};
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
@@ -24,7 +24,7 @@ const RETURN_CLOCK_SLACK: TimeDelta = TimeDelta::minutes(2);
 
 pub(crate) async fn record_return_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<Option<RecoveryReturnAdvance>, auction_application::core::RepositoryError> {
     let mut transaction =
         pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await.map_err(map_storage_error)?;

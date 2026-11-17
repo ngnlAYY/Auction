@@ -11,7 +11,7 @@ use auction_application::settlement::{
     settlement_return_dispatch_request, system_returned_settlement_obligation_id,
 };
 use auction_domain::SettlementReturnCaseStatus;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::json;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
@@ -24,16 +24,16 @@ use crate::database::settlement::fulfillment::{hold_for_manual_reconcile, lock_o
 /// 领取一项待核验案件；租约到期前其他 Worker 不会重复领取。
 pub(super) async fn claim_recheck_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
-    now: DateTime<Utc>,
-    lease_until: DateTime<Utc>,
+    now: Timestamp,
+    lease_until: Timestamp,
 ) -> Result<Option<SettlementReturnRecheckClaim>, ApplicationError> {
     claim_once(pool, now, lease_until).await.map_err(ReturnTransactionError::into_application)
 }
 
 async fn claim_once(
     pool: &crate::database::TrackedPool<Postgres>,
-    now: DateTime<Utc>,
-    lease_until: DateTime<Utc>,
+    now: Timestamp,
+    lease_until: Timestamp,
 ) -> Result<Option<SettlementReturnRecheckClaim>, ReturnTransactionError> {
     if lease_until <= now {
         return Err(repository_error("结算退件核验租约无效").into());
@@ -136,7 +136,7 @@ async fn record_once(
                 }
                 _ => None,
             };
-            let received_at: DateTime<Utc> =
+            let received_at: Timestamp =
                 sqlx::query_scalar("SELECT received_at FROM public.inbound_mail WHERE id = $1")
                     .bind(claim.return_mail_id)
                     .fetch_one(&mut *tx)
@@ -270,7 +270,7 @@ async fn record_verification(
     evidence: &serde_json::Value,
     decision: SettlementReturnDecision,
     delivery_id: Option<Uuid>,
-    observed_at: DateTime<Utc>,
+    observed_at: Timestamp,
 ) -> Result<(), ReturnTransactionError> {
     sqlx::query(
         r#"INSERT INTO public.settlement_return_verifications

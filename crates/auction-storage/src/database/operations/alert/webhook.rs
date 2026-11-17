@@ -5,7 +5,7 @@ use auction_application::operations::{
     OperationsAlertKind, OperationsAlertWebhookClaimRequest, OperationsAlertWebhookDispatch,
     OperationsAlertWebhookFinish, OperationsAlertWebhookOutcome, render_webhook_payload,
 };
-use chrono::Utc;
+use auction_time::Timestamp;
 use sha2::{Digest, Sha256};
 use sqlx::Row;
 use uuid::Uuid;
@@ -243,16 +243,18 @@ pub(crate) async fn finish_webhook_postgres(
         storage_error("webhook 终态时间无效")
     })?;
     let (status, next_attempt_at, completed_at, failure_code) = match finish.outcome {
-        OperationsAlertWebhookOutcome::Succeeded => ("succeeded", None, Some(Utc::now()), None),
+        OperationsAlertWebhookOutcome::Succeeded => {
+            ("succeeded", None, Some(Timestamp::now()), None)
+        }
         OperationsAlertWebhookOutcome::Retryable => ("pending", finish.next_webhook_at, None, None),
         OperationsAlertWebhookOutcome::Permanent => {
-            ("failed", None, Some(Utc::now()), Some("permanent"))
+            ("failed", None, Some(Timestamp::now()), Some("permanent"))
         }
         OperationsAlertWebhookOutcome::RetryExhausted => {
-            ("failed", None, Some(Utc::now()), Some("retry_exhausted"))
+            ("failed", None, Some(Timestamp::now()), Some("retry_exhausted"))
         }
         OperationsAlertWebhookOutcome::Unknown => {
-            ("manual_reconcile", None, Some(Utc::now()), Some("outcome_unknown"))
+            ("manual_reconcile", None, Some(Timestamp::now()), Some("outcome_unknown"))
         }
     };
     let mut transaction = pool
@@ -271,7 +273,7 @@ pub(crate) async fn finish_webhook_postgres(
     .bind(next_attempt_at)
     .bind(completed_at)
     .bind(failure_code)
-    .bind(Utc::now())
+    .bind(Timestamp::now())
     .bind(dispatch.command_id)
     .bind(dispatch.claim_token)
     .bind(dispatch.claim_fencing)

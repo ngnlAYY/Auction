@@ -2,7 +2,7 @@
 
 use auction_application::admin::{AdminIntakeResult, AdminIntakeWrite};
 use auction_application::core::{CommandLedgerError, CompetitionTransactionError};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::json;
 use uuid::Uuid;
 
@@ -54,7 +54,7 @@ pub(super) async fn add_admin_intake_inner(
     }
     let auction_id = target.auction_id;
     // 目标可能在外部采集或等待 world 锁期间切换；只使用取得当前目标锁后的数据库实时时间。
-    let now: DateTime<Utc> = sqlx::query_scalar("SELECT clock_timestamp()")
+    let now: Timestamp = sqlx::query_scalar("SELECT clock_timestamp()")
         .fetch_one(&mut **transaction)
         .await
         .map_err(map_sql_error)?;

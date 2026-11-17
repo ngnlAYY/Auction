@@ -6,7 +6,7 @@ use std::{
 
 use auction_application::operations::MigrationCompatibilityMode;
 use auction_config::Role;
-use chrono::Utc;
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use super::guidance::{install_failed, stopped_before_install};
@@ -58,7 +58,7 @@ fn record(retained_roles: RoleIdentity) -> RollbackRecord {
         format: FORMAT.to_owned(),
         record_id: id,
         deploy_receipt_id: id,
-        created_at: Utc::now(),
+        created_at: Timestamp::now(),
         install_directory: "/opt/auction/bin".to_owned(),
         observed_database_version: 1,
         installed_role_schema_version: Some(2),
@@ -74,8 +74,8 @@ fn receipt(action: Action, deploy: DeploySection) -> DeploymentReceipt {
         receipt_id: Uuid::new_v4(),
         action,
         outcome: Outcome::Succeeded,
-        started_at: Utc::now(),
-        finished_at: Utc::now(),
+        started_at: Timestamp::now(),
+        finished_at: Timestamp::now(),
         actor: "operator".to_owned(),
         actor_uid: 0,
         backup_id: None,
@@ -504,7 +504,7 @@ impl Site {
                     state: &self.state,
                     receipt_id: id,
                     action: Action::Deploy,
-                    started_at: Utc::now(),
+                    started_at: Timestamp::now(),
                     context: &context,
                     deploy: &deploy,
                 };
@@ -608,7 +608,7 @@ impl Site {
             id,
             action,
             outcome,
-            Utc::now(),
+            Timestamp::now(),
             &context,
             None,
             self.role_artifacts(),

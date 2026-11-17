@@ -7,7 +7,7 @@ use auction_application::core::{
 use auction_application::public::{
     PublicSessionIdentity, PublicSessionPreference, PublicSessionRecord,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::{Row, postgres::PgRow};
 
 use crate::database::DatabaseStore;
@@ -148,7 +148,7 @@ async fn create_locked(
 pub(super) async fn inspect_postgres(
     store: &DatabaseStore,
     token_hash: [u8; 32],
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<PublicSessionIdentity, ApplicationError> {
     // 查询可能在连接池中等过截止；读取时取实时钟，同时保留请求时间作为保守下界。
     let row = sqlx::query(
@@ -175,7 +175,7 @@ pub(super) async fn inspect_postgres(
 pub(super) async fn touch_postgres(
     store: &DatabaseStore,
     token_hash: [u8; 32],
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<PublicSessionIdentity, ApplicationError> {
     // 认证谓词与只读 inspect 相同，并按实时钟复核截止，连接池等待不能复活过期身份。
     // Public 期限不随活动续期，`last_activity_at` 只供运维观察：距上次记录不足 60 秒时不写入，
@@ -222,7 +222,7 @@ pub(super) async fn touch_postgres(
 pub(super) async fn revoke_postgres(
     store: &DatabaseStore,
     token_hash: [u8; 32],
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<(), ApplicationError> {
     sqlx::query(
         "UPDATE public.public_sessions

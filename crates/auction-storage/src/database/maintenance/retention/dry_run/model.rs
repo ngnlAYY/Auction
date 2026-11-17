@@ -1,6 +1,6 @@
 //! 保留清理只读演练的对外模型；只描述候选规模，不代表归档、删除或资格授权。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::Serialize;
 use thiserror::Error;
 
@@ -13,7 +13,7 @@ pub struct RetentionRuleDryRun {
     pub rule_id: String,
     pub table: Option<String>,
     pub duration_days: i64,
-    pub cutoff: DateTime<Utc>,
+    pub cutoff: Timestamp,
 }
 
 /// 单个数据库表的候选计数；规则候选互斥，候选与保留相加等于总行数。
@@ -53,7 +53,7 @@ pub struct RetentionFamilyDryRun {
 pub struct RetentionDryRunReport {
     pub format: &'static str,
     pub run_id: uuid::Uuid,
-    pub collected_at: DateTime<Utc>,
+    pub collected_at: Timestamp,
     pub database_name: String,
     pub server_version: String,
     pub transaction_snapshot: String,

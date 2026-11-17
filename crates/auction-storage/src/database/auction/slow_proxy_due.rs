@@ -6,7 +6,7 @@ use auction_application::auction::{SlowProxyDue, SlowProxyDueReader};
 use auction_application::core::ApplicationError;
 use auction_application::core::ApplicationFuture;
 use auction_domain::{LotId, ProxyAuthorizationId};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -24,10 +24,7 @@ impl SlowProxyDueReader for DatabaseStore {
         })
     }
 
-    fn next_slow_proxy_due_at(
-        &self,
-        now: DateTime<Utc>,
-    ) -> ApplicationFuture<'_, Option<DateTime<Utc>>> {
+    fn next_slow_proxy_due_at(&self, now: Timestamp) -> ApplicationFuture<'_, Option<Timestamp>> {
         Box::pin(async move { next_due_postgres(self, now).await })
     }
 }
@@ -36,9 +33,9 @@ impl SlowProxyDueReader for DatabaseStore {
 /// 只返回严格晚于 `now` 的到期时刻，已到期候选仍由 `list_due_slow_proxies` 按常规节奏扫描。
 async fn next_due_postgres(
     store: &crate::database::DatabaseStore,
-    now: DateTime<Utc>,
-) -> Result<Option<DateTime<Utc>>, ApplicationError> {
-    sqlx::query_scalar::<_, DateTime<Utc>>(
+    now: Timestamp,
+) -> Result<Option<Timestamp>, ApplicationError> {
+    sqlx::query_scalar::<_, Timestamp>(
         "SELECT lot.slow_due_at
          FROM public.lots AS lot
          JOIN public.auctions AS auction ON auction.id = lot.auction_id

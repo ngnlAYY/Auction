@@ -12,7 +12,7 @@ use auction_domain::{
     CommandId, SettlementReturnAction, SettlementReturnCaseStatus, SettlementReturnPlan,
     cash_return,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::json;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
@@ -247,7 +247,7 @@ async fn record_command(
     command: &SettlementReturnCommand,
     result_version: i64,
     result_status: SettlementReturnCaseStatus,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<(), ReturnTransactionError> {
     sqlx::query(
         r#"INSERT INTO public.settlement_return_commands

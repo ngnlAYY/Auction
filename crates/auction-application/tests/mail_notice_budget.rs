@@ -26,19 +26,19 @@ use auction_application::mail::{
     MailUserPort, MailUserRebindCommand, MailUserRegisterCommand, MailUserRekeyCommand,
     MailUserRekeyWrite, MailUserResult, MailUserResultCode, MailUserStore,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 const NOW: &str = "2026-11-04T12:00:00Z";
 
-fn at(value: &str) -> DateTime<Utc> {
-    DateTime::parse_from_rfc3339(value).unwrap().with_timezone(&Utc)
+fn at(value: &str) -> Timestamp {
+    Timestamp::parse_from_rfc3339(value).unwrap()
 }
 
 struct FixedClock;
 
 impl Clock for FixedClock {
-    fn now(&self) -> DateTime<Utc> {
+    fn now(&self) -> Timestamp {
         at(NOW)
     }
 }
@@ -352,7 +352,7 @@ fn hot_policy_changes_explanation_limits_without_restart() {
     assert_eq!(first.decision_code, "user_assets_rejected");
     let first_limit = service.deliveries.limits().last().copied().expect("first budget");
     assert_eq!(first_limit.maximum, 5);
-    assert_eq!(first_limit.since, at(NOW) - chrono::Duration::seconds(60));
+    assert_eq!(first_limit.since, at(NOW) - auction_time::Duration::seconds(60));
 
     source.replace(MailReplyPolicy {
         account_reply_window_seconds: 240,
@@ -365,7 +365,7 @@ fn hot_policy_changes_explanation_limits_without_restart() {
     assert_eq!(second.decision_code, "user_assets_rejected");
     let second_limit = service.deliveries.limits().last().copied().expect("second budget");
     assert_eq!(second_limit.maximum, 2);
-    assert_eq!(second_limit.since, at(NOW) - chrono::Duration::seconds(120));
+    assert_eq!(second_limit.since, at(NOW) - auction_time::Duration::seconds(120));
 }
 
 // ---- 服务层：轮换写入确实拿到新摘要/信封 -------------------------------

@@ -7,7 +7,7 @@ use auction_application::settlement::{
 use auction_domain::{
     CommandId, SETTLEMENT_RETURN_RESEND_LIMIT, SettlementReturnCaseStatus, SettlementReturnPlan,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::{Value, json};
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
@@ -50,7 +50,7 @@ pub(crate) async fn open_case(
     obligation_id: Option<Uuid>,
     bound: Option<(Uuid, u32)>,
     decision: SettlementReturnDecision,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<(), sqlx::Error> {
     let status = if bound.is_some() {
         SettlementReturnCaseStatus::AwaitingDecision
@@ -224,7 +224,7 @@ pub(super) async fn advance_case(
     tx: &mut Transaction<'_, Postgres>,
     case: &CaseRow,
     next: &CaseTransition,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<i64, ReturnTransactionError> {
     let closed = !next.status.open();
     let version: Option<i64> = sqlx::query_scalar(
@@ -276,7 +276,7 @@ pub(super) async fn append_event(
     case_version: i64,
     status: SettlementReturnCaseStatus,
     event: CaseEvent<'_>,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         r#"INSERT INTO public.settlement_return_events
@@ -303,7 +303,7 @@ pub(super) async fn transition(
     case: &CaseRow,
     next: &CaseTransition,
     event: CaseEvent<'_>,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<i64, ReturnTransactionError> {
     let version = advance_case(tx, case, next, now).await?;
     append_event(tx, case.return_mail_id, version, next.status, event, now).await?;

@@ -2,7 +2,7 @@
 //! 这里定义事件信封、游标和页面边界，不暴露数据库行、SQL 类型或连接细节。事件注册表
 //! 也在应用边界校验，存储适配器遇到未知 schema 时必须要求客户端回读权威快照。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::{Map, Value};
 use uuid::{Uuid, Variant};
 
@@ -48,7 +48,7 @@ pub struct PublicRealtimeEvent {
     pub kind: String,
     pub schema_version: i32,
     pub payload: Value,
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
 }
 
 impl PublicRealtimeEvent {
@@ -282,16 +282,16 @@ fn valid_world(value: Option<&Value>) -> bool {
 fn valid_time(value: Option<&Value>) -> bool {
     value
         .and_then(Value::as_str)
-        .is_some_and(|value| !value.is_empty() && DateTime::parse_from_rfc3339(value).is_ok())
+        .is_some_and(|value| !value.is_empty() && Timestamp::parse_from_rfc3339(value).is_ok())
 }
 
-fn valid_created_at(value: &DateTime<Utc>) -> bool {
+fn valid_created_at(value: &Timestamp) -> bool {
     value.timestamp() != GO_ZERO_TIME_UNIX_SECONDS || value.timestamp_subsec_nanos() != 0
 }
 
 #[cfg(test)]
 mod tests {
-    use chrono::Utc;
+    use auction_time::Timestamp;
     use serde_json::json;
     use uuid::Uuid;
 
@@ -310,7 +310,7 @@ mod tests {
                 "sequence": 3,
                 "state_version": 1,
             }),
-            created_at: Utc::now(),
+            created_at: Timestamp::now(),
         }
     }
 

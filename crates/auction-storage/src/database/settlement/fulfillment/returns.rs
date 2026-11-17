@@ -13,7 +13,7 @@ use auction_application::settlement::{
     SettlementReturnMatch, SettlementReturnObligation, settlement_return_dispatch_request,
 };
 use auction_domain::FIRST_DISPATCH_NO;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
@@ -51,7 +51,7 @@ pub(crate) use system_settlement_return_source;
 /// 重试：无论证据是否可信或可绑定都会消费，不留下每轮重选的队头。
 pub(crate) async fn consume_return_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<Option<SettlementReturnConsumption>, auction_application::core::RepositoryError> {
     let mut transaction =
         pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await.map_err(map_storage_error)?;
@@ -364,7 +364,7 @@ pub(crate) async fn hold_for_manual_reconcile(
     locked: &LockedObligation,
     return_mail_id: Uuid,
     decision: SettlementReturnDecision,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<(), auction_application::core::RepositoryError> {
     let state = locked.facts.execution_state.as_deref();
     let updated = sqlx::query(

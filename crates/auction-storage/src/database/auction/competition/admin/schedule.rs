@@ -6,7 +6,7 @@ use auction_application::admin::{
 };
 use auction_application::core::CompetitionTransactionError;
 use auction_domain::AuctionId;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::{Value, json};
 use sqlx::Row;
 use sqlx::postgres::PgRow;
@@ -36,7 +36,7 @@ impl AdminAuctionScheduleTransaction for PostgresCompetitionTransaction {
         &mut self,
         command: AdminUpdateAuctionScheduleCommand,
         snapshot: AdminAuctionScheduleSnapshot,
-        updated_at: DateTime<Utc>,
+        updated_at: Timestamp,
     ) -> impl Future<Output = Result<AdminAuctionSummary, CompetitionTransactionError>> + Send {
         async move { update_admin_auction_schedule_inner(self, &command, snapshot, updated_at).await }
     }
@@ -44,9 +44,9 @@ impl AdminAuctionScheduleTransaction for PostgresCompetitionTransaction {
     fn append_admin_auction_schedule_record(
         &mut self,
         command: AdminUpdateAuctionScheduleCommand,
-        previous_preview_scheduled_at: DateTime<Utc>,
-        previous_scheduled_open_at: DateTime<Utc>,
-        previous_scheduled_end_at: DateTime<Utc>,
+        previous_preview_scheduled_at: Timestamp,
+        previous_scheduled_open_at: Timestamp,
+        previous_scheduled_end_at: Timestamp,
         result: AdminAuctionSummary,
         changed: bool,
     ) -> impl Future<Output = Result<(), CompetitionTransactionError>> + Send {
@@ -127,7 +127,7 @@ async fn load_admin_auction_schedule_inner(
     let Some(row) = row else {
         return Ok(None);
     };
-    let policy_scheduled_end_at: DateTime<Utc> =
+    let policy_scheduled_end_at: Timestamp =
         row.try_get("policy_scheduled_end_at").map_err(map_sql_error)?;
     let summary = map_schedule_summary(&row, Some(policy_scheduled_end_at))?;
     let schedule_source = row
@@ -161,7 +161,7 @@ async fn update_admin_auction_schedule_inner(
     transaction: &mut PostgresCompetitionTransaction,
     command: &AdminUpdateAuctionScheduleCommand,
     snapshot: AdminAuctionScheduleSnapshot,
-    updated_at: DateTime<Utc>,
+    updated_at: Timestamp,
 ) -> Result<AdminAuctionSummary, CompetitionTransactionError> {
     let previous_state_version = snapshot.summary.auction.state_version;
     let previous_round_state_version = snapshot.round_state_version;
@@ -209,7 +209,7 @@ async fn update_admin_auction_schedule_inner(
         return Err(CompetitionTransactionError::StaleState);
     };
     let state_version: i64 = row.try_get("state_version").map_err(map_sql_error)?;
-    let stored_updated_at: DateTime<Utc> = row.try_get("updated_at").map_err(map_sql_error)?;
+    let stored_updated_at: Timestamp = row.try_get("updated_at").map_err(map_sql_error)?;
 
     let round_row = {
         let transaction = transaction.transaction_mut()?;
@@ -289,9 +289,9 @@ async fn update_admin_auction_schedule_inner(
 async fn append_admin_auction_schedule_record_inner(
     transaction: &mut PostgresCompetitionTransaction,
     command: &AdminUpdateAuctionScheduleCommand,
-    previous_preview_scheduled_at: DateTime<Utc>,
-    previous_scheduled_open_at: DateTime<Utc>,
-    previous_scheduled_end_at: DateTime<Utc>,
+    previous_preview_scheduled_at: Timestamp,
+    previous_scheduled_open_at: Timestamp,
+    previous_scheduled_end_at: Timestamp,
     result: &AdminAuctionSummary,
     changed: bool,
 ) -> Result<(), CompetitionTransactionError> {
@@ -354,7 +354,7 @@ async fn append_admin_auction_schedule_record_inner(
 
 fn map_schedule_summary(
     row: &PgRow,
-    scheduled_ends_at: Option<DateTime<Utc>>,
+    scheduled_ends_at: Option<Timestamp>,
 ) -> Result<AdminAuctionSummary, CompetitionTransactionError> {
     Ok(AdminAuctionSummary {
         auction: decode_auction_snapshot(row).map_err(|(_, error)| map_sql_error(error))?,

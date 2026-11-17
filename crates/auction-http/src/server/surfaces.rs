@@ -517,12 +517,12 @@ mod tests {
         SetPublicSessionPreferenceCommand,
     };
     use auction_contracts::ApiErrorResponse;
+    use auction_time::Timestamp;
     use axum::{
         Router,
         body::{Body, to_bytes},
         http::{Request, StatusCode, header},
     };
-    use chrono::{DateTime, Utc};
     use tower::ServiceExt;
     use uuid::Uuid;
 
@@ -642,7 +642,7 @@ mod tests {
         fn inspect(
             &self,
             _raw_token: String,
-            _now: DateTime<Utc>,
+            _now: Timestamp,
         ) -> ApplicationFuture<'_, PublicSessionIdentity> {
             unused_session_call()
         }
@@ -650,7 +650,7 @@ mod tests {
         fn login(
             &self,
             _key: Vec<u8>,
-            _now: DateTime<Utc>,
+            _now: Timestamp,
         ) -> ApplicationFuture<'_, PublicLoginResult> {
             unused_session_call()
         }
@@ -658,7 +658,7 @@ mod tests {
         fn current(
             &self,
             _raw_token: String,
-            _now: DateTime<Utc>,
+            _now: Timestamp,
         ) -> ApplicationFuture<'_, PublicSessionIdentity> {
             Box::pin(async {
                 Ok(PublicSessionIdentity {
@@ -670,14 +670,14 @@ mod tests {
             })
         }
 
-        fn logout(&self, _raw_token: String, _now: DateTime<Utc>) -> ApplicationFuture<'_, ()> {
+        fn logout(&self, _raw_token: String, _now: Timestamp) -> ApplicationFuture<'_, ()> {
             unused_session_call()
         }
 
         fn get_preference(
             &self,
             _raw_token: String,
-            _now: DateTime<Utc>,
+            _now: Timestamp,
         ) -> ApplicationFuture<'_, PublicSessionPreferenceResult> {
             unused_session_call()
         }
@@ -686,7 +686,7 @@ mod tests {
             &self,
             _raw_token: String,
             _command: SetPublicSessionPreferenceCommand,
-            _now: DateTime<Utc>,
+            _now: Timestamp,
         ) -> ApplicationFuture<'_, PublicSessionPreferenceResult> {
             unused_session_call()
         }

@@ -409,7 +409,7 @@ fn exhaust_waiting_proxy(
     state: LotBidState,
     active: ProxyAuthorization,
     command_id: crate::CommandId,
-    now: chrono::DateTime<chrono::Utc>,
+    now: auction_time::Timestamp,
 ) -> Result<CompetitionPlan, DomainError> {
     let (after, transition) =
         exhaust_proxy(active, command_id, ProxyTerminalReason::StrictlyDefeated)?;

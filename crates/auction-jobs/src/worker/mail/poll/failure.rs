@@ -9,7 +9,7 @@ use auction_application::core::diagnostics::{
 use auction_application::mail::{MailPollBatch, MailPollClaim, MailPollStore};
 use auction_application::scheduling::RecurringSchedule;
 use auction_observability::{WorkerLoop, WorkerRecorder, WorkerRetryKind};
-use chrono::Duration as ChronoDuration;
+use auction_time::TimeDelta;
 
 use super::MailPollRuntimeConfig;
 use crate::worker::diagnostics;
@@ -43,7 +43,7 @@ pub(super) async fn record_failure_with_prefix<C>(
     metric_context.metrics.observe_retry(metric_context.loop_kind, WorkerRetryKind::Persisted);
     let now = clock.now();
     let delay = retry_delay(config.retry_base, config.retry_maximum, claim.attempt_count);
-    let Ok(delay) = ChronoDuration::from_std(delay) else {
+    let Ok(delay) = TimeDelta::from_std(delay) else {
         diagnostics::unpersisted(SafeErrorKind::CONFIGURATION_INVALID);
         tracing::error!("MoogleMail Worker 失败退避时长超出时间表示范围，保留当前 claim");
         return;

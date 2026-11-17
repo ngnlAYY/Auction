@@ -6,7 +6,7 @@ use auction_application::delivery::{
     DeliveryClaimExclusions, DeliverySendResult, DeliveryTransportError, DeliveryWorkClaim,
     DeliveryWorkStore,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use self::claims::{begin_claim_cycle_postgres, claim_postgres};
 use self::mapping::bounded_text;
@@ -240,7 +240,7 @@ impl DeliveryWorkStore for DatabaseStore {
 
     fn begin_claim_cycle(
         &self,
-        now: DateTime<Utc>,
+        now: Timestamp,
         sending_grace: std::time::Duration,
     ) -> auction_application::core::ApplicationFuture<'_, ()> {
         Box::pin(async move {
@@ -253,8 +253,8 @@ impl DeliveryWorkStore for DatabaseStore {
     fn claim_due(
         &self,
         worker_id: String,
-        now: DateTime<Utc>,
-        lease_until: DateTime<Utc>,
+        now: Timestamp,
+        lease_until: Timestamp,
         sending_grace: std::time::Duration,
         exclusions: DeliveryClaimExclusions,
         limit: u16,
@@ -302,7 +302,7 @@ impl DeliveryWorkStore for DatabaseStore {
     fn start_sending_authorized<'a>(
         &'a self,
         claim: DeliveryWorkClaim,
-        started_at: DateTime<Utc>,
+        started_at: Timestamp,
         evidence: Option<&'a auction_application::settlement::SettlementInternalEvidenceSnapshot>,
         expectation: Option<&'a auction_application::delivery::DeliveryPreparedExpectation>,
     ) -> auction_application::core::ApplicationFuture<
@@ -324,7 +324,7 @@ impl DeliveryWorkStore for DatabaseStore {
     fn start_sending_authorized_until<'a>(
         &'a self,
         claim: DeliveryWorkClaim,
-        started_at: DateTime<Utc>,
+        started_at: Timestamp,
         evidence: &'a auction_application::settlement::SettlementInternalEvidenceSnapshot,
         deadline: std::time::Instant,
         expectation: Option<&'a auction_application::delivery::DeliveryPreparedExpectation>,
@@ -350,7 +350,7 @@ impl DeliveryWorkStore for DatabaseStore {
     fn reject_preparation(
         &self,
         claim: DeliveryWorkClaim,
-        completed_at: DateTime<Utc>,
+        completed_at: Timestamp,
     ) -> auction_application::core::ApplicationFuture<'_, ()> {
         Box::pin(async move {
             reject_preparation_postgres(self.pool(), &claim, completed_at)
@@ -362,7 +362,7 @@ impl DeliveryWorkStore for DatabaseStore {
     fn release(
         &self,
         claim: DeliveryWorkClaim,
-        released_at: DateTime<Utc>,
+        released_at: Timestamp,
     ) -> auction_application::core::ApplicationFuture<'_, ()> {
         Box::pin(async move {
             release_postgres(self.pool(), &claim, released_at).await.map_err(ApplicationError::from)
@@ -372,8 +372,8 @@ impl DeliveryWorkStore for DatabaseStore {
     fn renew(
         &self,
         claim: DeliveryWorkClaim,
-        renewed_at: DateTime<Utc>,
-        lease_until: DateTime<Utc>,
+        renewed_at: Timestamp,
+        lease_until: Timestamp,
     ) -> auction_application::core::ApplicationFuture<'_, ()> {
         Box::pin(async move {
             if lease_until <= renewed_at {
@@ -389,7 +389,7 @@ impl DeliveryWorkStore for DatabaseStore {
         &self,
         claim: DeliveryWorkClaim,
         result: DeliverySendResult,
-        completed_at: DateTime<Utc>,
+        completed_at: Timestamp,
     ) -> auction_application::core::ApplicationFuture<'_, ()> {
         Box::pin(async move {
             if result.external_reference.is_empty()
@@ -408,7 +408,7 @@ impl DeliveryWorkStore for DatabaseStore {
         &self,
         claim: DeliveryWorkClaim,
         error: DeliveryTransportError,
-        completed_at: DateTime<Utc>,
+        completed_at: Timestamp,
     ) -> auction_application::core::ApplicationFuture<'_, ()> {
         Box::pin(async move {
             let failure_code = bounded_text(error.failure_code, 64);

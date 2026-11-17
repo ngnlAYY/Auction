@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use chrono::{DateTime, Duration, Utc};
+use auction_time::{Duration, Timestamp};
 
 use super::validation::repository_error;
 use crate::errors::ApplicationError;
@@ -103,8 +103,8 @@ impl SettlementFulfillmentService {
     pub(super) fn collection_next_poll(
         &self,
         claim: &SettlementFulfillmentClaim,
-        now: DateTime<Utc>,
-    ) -> Option<DateTime<Utc>> {
+        now: Timestamp,
+    ) -> Option<Timestamp> {
         if !matches!(
             claim.kind,
             auction_domain::SettlementObligationKind::WinnerEquipmentCod
@@ -137,7 +137,7 @@ impl SettlementFulfillmentCommandPort for SettlementFulfillmentService {
     fn prepare_next(
         &self,
         claim: SettlementFulfillmentClaim,
-        prepared_at: DateTime<Utc>,
+        prepared_at: Timestamp,
         retry_delay: Duration,
     ) -> ApplicationFuture<'_, crate::ports::settlement::SettlementFulfillmentPreparationOutcome>
     {
@@ -147,7 +147,7 @@ impl SettlementFulfillmentCommandPort for SettlementFulfillmentService {
     fn activate(
         &self,
         claim: SettlementFulfillmentClaim,
-        activated_at: DateTime<Utc>,
+        activated_at: Timestamp,
         retry_delay: Duration,
     ) -> ApplicationFuture<
         '_,
@@ -159,8 +159,8 @@ impl SettlementFulfillmentCommandPort for SettlementFulfillmentService {
     fn reconcile(
         &self,
         claim: SettlementFulfillmentClaim,
-        observed_at: DateTime<Utc>,
-        retry_at: DateTime<Utc>,
+        observed_at: Timestamp,
+        retry_at: Timestamp,
     ) -> ApplicationFuture<'_, SettlementFulfillmentReconcileResult> {
         Box::pin(async move { self.reconcile_now(claim, observed_at, retry_at).await })
     }

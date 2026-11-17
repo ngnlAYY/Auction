@@ -1,6 +1,6 @@
 //! 扫描流、水位、锚点、检查点与扫描计划。
 
-use chrono::{DateTime, Duration, Utc};
+use auction_time::{Duration, Timestamp};
 
 use super::observe::numeric_mail_scan_id;
 
@@ -30,7 +30,7 @@ impl MailScanStream {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MailScanWatermark {
     pub mail_id: String,
-    pub observed_at: DateTime<Utc>,
+    pub observed_at: Timestamp,
 }
 
 impl MailScanWatermark {
@@ -50,7 +50,7 @@ impl MailScanWatermark {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MailScanAnchor {
     pub mail_id: String,
-    pub observed_at: Option<DateTime<Utc>>,
+    pub observed_at: Option<Timestamp>,
 }
 
 impl MailScanAnchor {
@@ -77,7 +77,7 @@ pub struct MailScanCheckpoint {
     pub watermark: Option<MailScanWatermark>,
     /// 最近一次完整扫描尝试时间；从未完整校验时为 `None`。
     /// 成功或超限都更新，避免每日校验被无限重试。
-    pub last_full_scan_at: Option<DateTime<Utc>>,
+    pub last_full_scan_at: Option<Timestamp>,
 }
 
 impl MailScanCheckpoint {
@@ -213,7 +213,7 @@ impl MailScanPlan {
 /// 决定本轮是否执行每日完整校验；水位在前缀扫描中仍要独立核对。
 pub fn plan_mail_scan(
     checkpoint: Option<&MailScanCheckpoint>,
-    now: DateTime<Utc>,
+    now: Timestamp,
     daily_full_interval: Duration,
 ) -> MailScanPlan {
     if daily_full_interval <= Duration::zero() || now.timestamp_nanos_opt().is_none() {

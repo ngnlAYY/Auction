@@ -6,7 +6,7 @@ jobs:map_err(|_|) 9
 application:Err(_) 6
 application:map_err(|_|) 12
 http:Err(_) 38
-http:map_err(|_|) 32
+http:map_err(|_|) 31
 storage:Err(_) 4
 storage:map_err(|_|) 276
 integrations:Err(_) 1

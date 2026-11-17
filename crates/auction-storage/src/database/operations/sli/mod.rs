@@ -5,7 +5,7 @@ use auction_application::sli::{
     SLI_CANDIDATE_LIMIT, SLI_WINDOW_SECONDS, SliFlow, SliFlowWindow, SliSnapshot, SliSnapshotError,
     SliSnapshotReader, SliWorld,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::postgres::PgRow;
 use sqlx::{Connection, PgConnection, Row};
 
@@ -60,7 +60,7 @@ async fn read(connection: &mut PgConnection) -> Result<SliSnapshot, SliSnapshotE
         .execute(&mut *transaction)
         .await
         .map_err(storage)?;
-    let observed_at: DateTime<Utc> = sqlx::query_scalar("SELECT transaction_timestamp()")
+    let observed_at: Timestamp = sqlx::query_scalar("SELECT transaction_timestamp()")
         .fetch_one(&mut *transaction)
         .await
         .map_err(storage)?;
@@ -96,14 +96,14 @@ async fn read(connection: &mut PgConnection) -> Result<SliSnapshot, SliSnapshotE
 /// 一次快照的观察窗口；所有流程共用同一对边界。
 #[derive(Clone, Copy)]
 struct Window {
-    since: DateTime<Utc>,
-    now: DateTime<Utc>,
+    since: Timestamp,
+    now: Timestamp,
 }
 
 impl Window {
-    fn ending_at(now: DateTime<Utc>) -> Result<Self, SliSnapshotError> {
+    fn ending_at(now: Timestamp) -> Result<Self, SliSnapshotError> {
         let since = now
-            .checked_sub_signed(chrono::Duration::seconds(SLI_WINDOW_SECONDS))
+            .checked_sub_signed(auction_time::Duration::seconds(SLI_WINDOW_SECONDS))
             .ok_or(SliSnapshotError::InvalidData)?;
         Ok(Self { since, now })
     }

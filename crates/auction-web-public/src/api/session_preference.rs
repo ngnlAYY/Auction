@@ -72,7 +72,7 @@ async fn decode(
         || !result
             .expires_at
             .as_deref()
-            .is_none_or(|value| chrono::DateTime::parse_from_rfc3339(value).is_ok())
+            .is_none_or(|value| auction_time::Timestamp::parse_from_rfc3339(value).is_ok())
         || command.is_some_and(|command| {
             result.duration_seconds != command.duration_seconds
                 || Some(result.version) != command.expected_version.checked_add(1)

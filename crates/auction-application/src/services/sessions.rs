@@ -2,8 +2,8 @@
 
 use std::sync::Arc;
 
+use auction_time::{Duration, Timestamp};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use chrono::{DateTime, Duration, Utc};
 use hmac::{Hmac, KeyInit, Mac};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
@@ -44,7 +44,7 @@ impl PublicSessionPort for PublicSessionService {
     fn inspect(
         &self,
         raw_token: String,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> ApplicationFuture<'_, PublicSessionIdentity> {
         Box::pin(async move {
             let token_hash = hash_token(&raw_token)?;
@@ -52,7 +52,7 @@ impl PublicSessionPort for PublicSessionService {
         })
     }
 
-    fn login(&self, key: Vec<u8>, now: DateTime<Utc>) -> ApplicationFuture<'_, PublicLoginResult> {
+    fn login(&self, key: Vec<u8>, now: Timestamp) -> ApplicationFuture<'_, PublicLoginResult> {
         Box::pin(async move {
             validate_login_key(&key)?;
             let login = self.authenticator.authenticate(key).await?;
@@ -89,7 +89,7 @@ impl PublicSessionPort for PublicSessionService {
     fn current(
         &self,
         raw_token: String,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> ApplicationFuture<'_, PublicSessionIdentity> {
         Box::pin(async move {
             let token_hash = hash_token(&raw_token)?;
@@ -97,7 +97,7 @@ impl PublicSessionPort for PublicSessionService {
         })
     }
 
-    fn logout(&self, raw_token: String, now: DateTime<Utc>) -> ApplicationFuture<'_, ()> {
+    fn logout(&self, raw_token: String, now: Timestamp) -> ApplicationFuture<'_, ()> {
         Box::pin(async move {
             let token_hash = hash_token(&raw_token)?;
             self.store.revoke_public(token_hash, now).await
@@ -107,7 +107,7 @@ impl PublicSessionPort for PublicSessionService {
     fn get_preference(
         &self,
         raw_token: String,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> ApplicationFuture<'_, PublicSessionPreferenceResult> {
         Box::pin(async move {
             let token_hash = hash_token(&raw_token)?;
@@ -119,7 +119,7 @@ impl PublicSessionPort for PublicSessionService {
         &self,
         raw_token: String,
         command: SetPublicSessionPreferenceCommand,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> ApplicationFuture<'_, PublicSessionPreferenceResult> {
         Box::pin(async move {
             let token_hash = hash_token(&raw_token)?;
@@ -149,7 +149,7 @@ impl AdminSessionService {
         actor: String,
         secret: Vec<u8>,
         config: AdminSessionConfig,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> Result<Self, ApplicationError> {
         config.validate()?;
         validate_admin_actor(&actor)?;
@@ -177,7 +177,7 @@ impl AdminSessionPort for AdminSessionService {
         &self,
         actor: String,
         secret: Vec<u8>,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> ApplicationFuture<'_, AdminLoginResult> {
         Box::pin(async move {
             validate_admin_actor(&actor)?;
@@ -221,7 +221,7 @@ impl AdminSessionPort for AdminSessionService {
         &self,
         raw_token: String,
         raw_csrf_token: String,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> ApplicationFuture<'_, AdminSessionIdentity> {
         Box::pin(async move {
             let (token_hash, next_expires_at) =
@@ -237,7 +237,7 @@ impl AdminSessionPort for AdminSessionService {
         })
     }
 
-    fn logout(&self, raw_token: String, now: DateTime<Utc>) -> ApplicationFuture<'_, ()> {
+    fn logout(&self, raw_token: String, now: Timestamp) -> ApplicationFuture<'_, ()> {
         Box::pin(async move {
             let token_hash = self.scoped_token_hash(hash_token(&raw_token)?);
             self.store.revoke_admin(token_hash, now).await
@@ -247,26 +247,23 @@ impl AdminSessionPort for AdminSessionService {
 
 /// 统一计算会话过期时间；时间溢出必须失败关闭，不能写入不可持久化的时间。
 fn session_expiration_window(
-    now: DateTime<Utc>,
+    now: Timestamp,
     idle_ttl: Duration,
     absolute_ttl: Duration,
-) -> Result<(DateTime<Utc>, DateTime<Utc>), ApplicationError> {
+) -> Result<(Timestamp, Timestamp), ApplicationError> {
     Ok((next_session_expiration(now, idle_ttl)?, next_session_expiration(now, absolute_ttl)?))
 }
 
-fn next_session_expiration(
-    now: DateTime<Utc>,
-    ttl: Duration,
-) -> Result<DateTime<Utc>, ApplicationError> {
+fn next_session_expiration(now: Timestamp, ttl: Duration) -> Result<Timestamp, ApplicationError> {
     now.checked_add_signed(ttl).ok_or_else(|| SessionError::InvalidConfiguration.into())
 }
 
 /// 把 Admin 原始 session token 转为摘要并计算滑动过期时间；Public 活动不延长期限。
 fn prepare_session_token(
     raw_token: &str,
-    now: DateTime<Utc>,
+    now: Timestamp,
     idle_ttl: Duration,
-) -> Result<([u8; 32], DateTime<Utc>), ApplicationError> {
+) -> Result<([u8; 32], Timestamp), ApplicationError> {
     Ok((hash_token(raw_token)?, next_session_expiration(now, idle_ttl)?))
 }
 

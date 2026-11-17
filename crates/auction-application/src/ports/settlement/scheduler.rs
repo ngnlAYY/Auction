@@ -1,7 +1,7 @@
 //! Worker 结算执行任务的领取端口。
 
 use auction_domain::{AuctionId, CommandId};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use crate::ports::core::ApplicationFuture;
@@ -16,11 +16,11 @@ pub struct SettlementWorkClaim {
     pub claim_command_id: CommandId,
     pub settlement_command_id: CommandId,
     /// 领取时冻结的最晚 lot 有效结束时间；重试必须保持相同世代。
-    pub due_at: DateTime<Utc>,
+    pub due_at: Timestamp,
     /// 仅补写结算完成 fence，不再次调用结算用例。
     pub completion_only: bool,
     pub worker_id: String,
-    pub lease_until: DateTime<Utc>,
+    pub lease_until: Timestamp,
     pub attempt_count: u32,
 }
 
@@ -30,19 +30,18 @@ pub trait SettlementWorkStore: Send + Sync {
     fn claim_due(
         &self,
         worker_id: String,
-        now: DateTime<Utc>,
-        lease_until: DateTime<Utc>,
+        now: Timestamp,
+        lease_until: Timestamp,
         limit: u16,
     ) -> ApplicationFuture<'_, Vec<SettlementWorkClaim>>;
 
     /// 返回严格晚于 `now` 的最早结算到期或重试时刻，只作 Worker 唤醒提示，不放宽领取谓词。
-    fn next_claimable_at(&self, now: DateTime<Utc>)
-    -> ApplicationFuture<'_, Option<DateTime<Utc>>>;
+    fn next_claimable_at(&self, now: Timestamp) -> ApplicationFuture<'_, Option<Timestamp>>;
 
     fn complete(
         &self,
         claim: SettlementWorkClaim,
-        completed_at: DateTime<Utc>,
+        completed_at: Timestamp,
     ) -> ApplicationFuture<'_, ()>;
 
     /// 记录一次结算失败并按数据库退避表安排重试；退避间隔由存储按尝试次数决定，调用方

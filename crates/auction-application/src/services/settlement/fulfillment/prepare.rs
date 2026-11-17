@@ -1,6 +1,6 @@
 //! 结算履约 `pending` 阶段：把义务制作为 prepared delivery outbox。
 
-use chrono::{DateTime, Duration, Utc};
+use auction_time::{Duration, Timestamp};
 
 use super::authorization::authorize_pending_or_prepared;
 use super::intent::{build_canonical_delivery, dispatch_delivery_id, dispatch_prepare_command_id};
@@ -24,7 +24,7 @@ impl SettlementFulfillmentService {
     pub(super) async fn prepare_external(
         &self,
         claim: SettlementFulfillmentClaim,
-        prepared_at: DateTime<Utc>,
+        prepared_at: Timestamp,
         retry_delay: Duration,
     ) -> Result<SettlementFulfillmentPhaseResult<SettlementFulfillmentResult>, ApplicationError>
     {

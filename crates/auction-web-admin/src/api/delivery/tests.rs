@@ -5,7 +5,7 @@ use auction_contracts::{
     AdminDeliveryDispositionResponse, AdminDeliveryEvidenceResponse, AdminDeliveryResponse,
     AdminDeliverySentProofPreviewResponse, AdminDeliverySentProofResponse,
 };
-use chrono::{TimeZone, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use super::player_support::player_support_url;
@@ -16,7 +16,7 @@ use super::{
 };
 
 fn time(offset: u32) -> String {
-    Utc.with_ymd_and_hms(2026, 11, 2, 1, offset, 0).single().expect("timestamp").to_rfc3339()
+    Timestamp::from_ymd_hms(2026, 11, 2, 1, offset, 0).expect("timestamp").to_rfc3339()
 }
 
 // `valid_uuid` 会校验版本位与变体位，测试夹具必须是规范 UUID。

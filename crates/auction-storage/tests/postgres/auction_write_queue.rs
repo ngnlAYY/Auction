@@ -41,7 +41,7 @@ use auction_domain::{AuctionId, BidAmount, CommandId, LotId, UserId};
 use auction_storage::{
     BidQueueMode, DatabaseAuctionLifecycleCommands, DatabaseCompetitionCommands, DatabaseStore,
 };
-use chrono::{DateTime, Duration, Utc};
+use auction_time::{Duration, Timestamp};
 use tokio::sync::Barrier;
 use uuid::Uuid;
 
@@ -65,8 +65,8 @@ struct SeededAuction {
 struct SystemClock;
 
 impl Clock for SystemClock {
-    fn now(&self) -> DateTime<Utc> {
-        Utc::now()
+    fn now(&self) -> Timestamp {
+        Timestamp::now()
     }
 }
 
@@ -82,7 +82,7 @@ async fn seed_auction(
     lots: usize,
 ) -> SeededAuction {
     let pool = store.postgres_pool();
-    let deadline = Utc::now() + Duration::hours(2);
+    let deadline = Timestamp::now() + Duration::hours(2);
     let opened = deadline - Duration::hours(4);
     let auction_id = stable_id(seed, "auction");
     let lot_status = if status == "draft" { "pending" } else { "live" };
@@ -861,7 +861,7 @@ async fn postgres_final_phase_exhausts_slow_proxy_and_enqueues_pending_reminder(
     let slow_user = stable_id("final-exhaustion", "slow-user");
     seed_user(pool, slow_user, "final-exhaustion-slow-user").await;
 
-    let deadline: DateTime<Utc> =
+    let deadline: Timestamp =
         sqlx::query_scalar("SELECT effective_end_at FROM public.lots WHERE id = $1")
             .bind(lot_id)
             .fetch_one(pool)
@@ -1058,7 +1058,7 @@ async fn postgres_ordinary_bid_exhausts_slow_proxy_and_enqueues_pending_in_trans
     seed_user(pool, slow_user, "ordinary-exhaustion-slow-user").await;
     seed_user(pool, attacker, "ordinary-exhaustion-attacker").await;
 
-    let deadline: DateTime<Utc> =
+    let deadline: Timestamp =
         sqlx::query_scalar("SELECT effective_end_at FROM public.lots WHERE id = $1")
             .bind(lot_id)
             .fetch_one(pool)

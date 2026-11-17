@@ -3,7 +3,7 @@
 use auction_application::admin::{AdminLotUpdateCommand, AdminLotUpdateSnapshot};
 use auction_application::core::CompetitionTransactionError;
 use auction_domain::deterministic_uuid;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use crate::database::auction::competition::PostgresCompetitionTransaction;
 use crate::database::auction::competition::mapping::invalid_state;
@@ -13,7 +13,7 @@ pub(super) async fn insert_withdrawn_return_obligation_inner(
     transaction: &mut PostgresCompetitionTransaction,
     command: &AdminLotUpdateCommand,
     snapshot: &AdminLotUpdateSnapshot,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<(), CompetitionTransactionError> {
     let seller = snapshot.lot.seller.as_deref().ok_or(CompetitionTransactionError::InvalidState)?;
     if !matches!(snapshot.world_id.as_str(), "main" | "isekai") {

@@ -5,13 +5,13 @@ use auction_application::core::{
     CompetitionCommandAuditContext, CompetitionCommandAuditKind, CompetitionTransactionError,
 };
 use auction_domain::{BidMechanism, CompetitionPlan, ProxyTransitionKind};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
 /// PostgreSQL 竞价事务写入冻结审计闭集所需的记录。
 pub(crate) struct CompetitionCommandAuditRecord {
-    pub occurred_at: DateTime<Utc>,
+    pub occurred_at: Timestamp,
     pub actor_type: &'static str,
     pub actor_id: String,
     pub action: &'static str,

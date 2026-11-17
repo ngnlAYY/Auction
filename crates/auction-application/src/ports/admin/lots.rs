@@ -6,7 +6,7 @@ use auction_domain::{
     AuctionId, EquipmentId, LotId, ProxyAuthorizationId, SubmissionId, UserId, valid_optional_text,
     valid_text,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -52,24 +52,24 @@ pub struct AdminLotSummary {
     pub start_price: i64,
     pub current_price: i64,
     pub leader_user_id: Option<UserId>,
-    pub effective_end_at: Option<DateTime<Utc>>,
-    pub slow_due_at: Option<DateTime<Utc>>,
+    pub effective_end_at: Option<Timestamp>,
+    pub slow_due_at: Option<Timestamp>,
     pub slow_generation: i64,
     pub slow_authorization_id: Option<ProxyAuthorizationId>,
     pub state_version: i64,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
     pub external_equipment_id: String,
     pub equipment_name: String,
     pub equipment_category: String,
     pub equipment_attributes: Value,
-    pub equipment_collected_at: DateTime<Utc>,
+    pub equipment_collected_at: Timestamp,
     pub seller: Option<String>,
     pub submission_source_kind: Option<String>,
     pub submission_source_reference: Option<String>,
     pub mailbox_key: Option<String>,
     pub external_mail_id: Option<String>,
-    pub submission_received_at: Option<DateTime<Utc>>,
+    pub submission_received_at: Option<Timestamp>,
 }
 
 impl AdminLotSummary {

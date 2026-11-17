@@ -1,11 +1,11 @@
 use std::collections::HashSet;
 
-use chrono::{DateTime, TimeZone, Utc};
+use auction_time::Timestamp;
 
 use super::*;
 
-fn at(minute: u32) -> DateTime<Utc> {
-    Utc.with_ymd_and_hms(2026, 11, 4, 12, minute, 0).unwrap()
+fn at(minute: u32) -> Timestamp {
+    Timestamp::from_ymd_hms(2026, 11, 4, 12, minute, 0).unwrap()
 }
 
 fn watermark(id: &str, minute: u32) -> MailScanWatermark {

@@ -1,6 +1,6 @@
 //! MoogleMail subject 路由、注册/换绑命令和未知邮件处理。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::json;
 use uuid::Uuid;
 
@@ -102,7 +102,7 @@ where
     async fn process_register(
         &self,
         message: MailMessage,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> Result<MailProcessingDecision, ApplicationError> {
         if has_user_assets(&message) {
             return self.reject_user_assets(&message, "registration").await;
@@ -157,7 +157,7 @@ where
     async fn process_rekey(
         &self,
         message: MailMessage,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> Result<MailProcessingDecision, ApplicationError> {
         if has_user_assets(&message) {
             return self.reject_user_assets(&message, "rekey").await;
@@ -212,7 +212,7 @@ where
     async fn process_rebind(
         &self,
         message: MailMessage,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> Result<MailProcessingDecision, ApplicationError> {
         if has_user_assets(&message) {
             return self.reject_user_assets(&message, "rebind").await;

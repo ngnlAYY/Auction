@@ -18,7 +18,7 @@ use auction_application::runtime_switches::{
     RuntimeSwitchEvent, RuntimeSwitchName, RuntimeSwitchOperation, RuntimeSwitchRead,
     RuntimeSwitches,
 };
-use chrono::{TimeDelta, Utc};
+use auction_time::{TimeDelta, Timestamp};
 use serde_json::json;
 use uuid::Uuid;
 
@@ -85,7 +85,7 @@ impl ForumPmSender for UnreachableForum {
 }
 
 fn install_pause(switches: &RuntimeSwitches, paused: bool) {
-    let now = Utc::now();
+    let now = Timestamp::now();
     let events = if paused {
         vec![RuntimeSwitchEvent {
             command_id: Uuid::new_v4(),

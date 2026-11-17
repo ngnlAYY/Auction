@@ -1,6 +1,6 @@
 //! Public 黑名单读取端口。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use crate::errors::diagnostics::{
     DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
@@ -31,7 +31,7 @@ impl PublicBlacklistRequest {
 pub struct PublicBlacklistEntry {
     pub username: String,
     pub public_reason: String,
-    pub blacklisted_at: DateTime<Utc>,
+    pub blacklisted_at: Timestamp,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -248,7 +248,7 @@ fn error(status: StatusCode, code: &'static str, message: &'static str) -> Respo
 
 #[cfg(test)]
 mod tests {
-    use chrono::{TimeZone, Utc};
+    use auction_time::Timestamp;
     use uuid::Uuid;
 
     use super::{
@@ -278,7 +278,7 @@ mod tests {
             },
             body: body.map(str::to_owned),
             actor_id: "admin".to_owned(),
-            recorded_at: Utc.with_ymd_and_hms(2026, 11, 13, 12, 0, 0).unwrap(),
+            recorded_at: Timestamp::from_ymd_hms(2026, 11, 13, 12, 0, 0).unwrap(),
         }
     }
 

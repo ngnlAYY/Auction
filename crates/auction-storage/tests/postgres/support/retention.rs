@@ -3,14 +3,14 @@
 //! 只写夹具行，执行器由调用方给出（连接池或单条连接），不经过被测端口。
 #![allow(clippy::expect_used)]
 
-use chrono::{DateTime, TimeDelta, Utc};
+use auction_time::{TimeDelta, Timestamp};
 use sqlx::PgExecutor;
 use uuid::Uuid;
 
 pub async fn insert_heartbeat(
     executor: impl PgExecutor<'_>,
     instance: &str,
-    expires_at: DateTime<Utc>,
+    expires_at: Timestamp,
 ) {
     sqlx::query(
         "INSERT INTO public.service_heartbeats
@@ -30,7 +30,7 @@ pub async fn insert_event(
     executor: impl PgExecutor<'_>,
     stream: &str,
     sequence: i64,
-    created_at: DateTime<Utc>,
+    created_at: Timestamp,
     replay_of: Option<Uuid>,
 ) -> Uuid {
     let id = Uuid::new_v4();
@@ -55,8 +55,8 @@ pub async fn insert_failure(
     executor: impl PgExecutor<'_>,
     consumer: &str,
     event_id: Uuid,
-    failed_at: DateTime<Utc>,
-    resolved_at: Option<DateTime<Utc>>,
+    failed_at: Timestamp,
+    resolved_at: Option<Timestamp>,
 ) {
     sqlx::query(
         "INSERT INTO public.realtime_failures
@@ -77,9 +77,9 @@ pub async fn insert_public_session(
     executor: impl PgExecutor<'_>,
     user_id: Uuid,
     token: u8,
-    created_at: DateTime<Utc>,
-    expires_at: Option<DateTime<Utc>>,
-    revoked_at: Option<DateTime<Utc>>,
+    created_at: Timestamp,
+    expires_at: Option<Timestamp>,
+    revoked_at: Option<Timestamp>,
 ) {
     sqlx::query(
         "INSERT INTO public.public_sessions
@@ -101,9 +101,9 @@ pub async fn insert_admin_session(
     executor: impl PgExecutor<'_>,
     token: u8,
     actor: &str,
-    created_at: DateTime<Utc>,
-    expires_at: DateTime<Utc>,
-    revoked_at: Option<DateTime<Utc>>,
+    created_at: Timestamp,
+    expires_at: Timestamp,
+    revoked_at: Option<Timestamp>,
 ) {
     sqlx::query(
         "INSERT INTO public.admin_sessions

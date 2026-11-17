@@ -1,6 +1,6 @@
 //! 已接受的竞价事实与其产生机制。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use crate::{BidAmount, BidId, CommandId, DomainError, LotId, UserId};
@@ -22,7 +22,7 @@ pub struct AcceptedBid {
     pub fact_index: u32,
     #[serde(deserialize_with = "crate::bidding::amount::deserialize_persisted_positive")]
     pub amount: BidAmount,
-    pub effective_end_at: DateTime<Utc>,
+    pub effective_end_at: Timestamp,
     pub state_version: u64,
     pub mechanism: BidMechanism,
 }

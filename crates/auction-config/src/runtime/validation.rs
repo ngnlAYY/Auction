@@ -2,14 +2,14 @@
 
 use auction_application::admin::{AdminRuntimeConfigError, AdminRuntimeDocument};
 use auction_application::scheduling::RecurringSchedule;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use crate::StandardCronSchedule;
 
 /// 校验领域约束与 cron 的未来触发时刻，不读取文件或外部服务。
 pub(crate) fn validate_runtime_document(
     document: &AdminRuntimeDocument,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<(), AdminRuntimeConfigError> {
     document.validate()?;
     crate::settings::validate_runtime_startup(document)

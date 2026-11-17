@@ -5,7 +5,7 @@ use auction_application::core::{
     ProxyUsageContext,
 };
 use auction_domain::{AuctionStatus, BidAmount, LotBidState, LotId, ProxyAuthorizationId, UserId};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Row;
 use sqlx::postgres::PgRow;
 use uuid::Uuid;
@@ -19,7 +19,7 @@ use crate::database::auction::competition::mapping::{
 impl PostgresCompetitionTransaction {
     pub(crate) async fn current_time_inner(
         &mut self,
-    ) -> Result<DateTime<Utc>, CompetitionTransactionError> {
+    ) -> Result<Timestamp, CompetitionTransactionError> {
         sqlx::query_scalar("SELECT clock_timestamp()")
             .fetch_one(&mut **self.transaction_mut()?)
             .await
@@ -121,10 +121,10 @@ impl PostgresCompetitionTransaction {
             },
         );
         let lot_status: String = row.try_get("lot_status").map_err(map_sql_error)?;
-        let scheduled_open_at: DateTime<Utc> =
+        let scheduled_open_at: Timestamp =
             row.try_get("scheduled_open_at").map_err(map_sql_error)?;
         let effective_end_at =
-            row.try_get::<Option<DateTime<Utc>>, _>("effective_end_at").map_err(map_sql_error)?;
+            row.try_get::<Option<Timestamp>, _>("effective_end_at").map_err(map_sql_error)?;
         if !world_enabled
             || !matches!(auction_status, AuctionStatus::Live | AuctionStatus::Final)
             || lot_status != "live"
@@ -176,7 +176,7 @@ impl PostgresCompetitionTransaction {
         };
         self.record_loaded_auction(row.try_get("auction_id").map_err(map_sql_error)?);
         let effective_end_at = row
-            .try_get::<Option<DateTime<Utc>>, _>("effective_end_at")
+            .try_get::<Option<Timestamp>, _>("effective_end_at")
             .map_err(map_sql_error)?
             .ok_or_else(|| invalid_state("结算 lot 缺少有效结束时间"))?;
         let auction_status =
@@ -195,7 +195,7 @@ impl PostgresCompetitionTransaction {
         &mut self,
         lot_id: LotId,
         row: PgRow,
-        effective_end_at: DateTime<Utc>,
+        effective_end_at: Timestamp,
         auction_status: AuctionStatus,
     ) -> Result<CompetitionSnapshot, CompetitionTransactionError> {
         let rules = auction_rules_from_row(&row)?;

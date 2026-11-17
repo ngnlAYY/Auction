@@ -2,7 +2,8 @@
 
 use auction_application::core::RepositoryError;
 use auction_application::scheduling::ScheduledRoundSnapshot;
-use chrono::{Datelike, NaiveDate};
+use jiff::civil;
+use jiff_sqlx::ToSqlx;
 
 use super::{bootstrap, mapping::map_storage_error};
 use crate::database::TrackedPool;
@@ -11,7 +12,7 @@ use crate::database::repository_error;
 pub(super) async fn postgres(
     pool: &TrackedPool<sqlx::Postgres>,
     world_id: &str,
-    local_week: NaiveDate,
+    local_week: civil::Date,
 ) -> Result<Option<ScheduledRoundSnapshot>, RepositoryError> {
     validate_key(world_id, local_week)?;
     sqlx::query(
@@ -22,7 +23,7 @@ pub(super) async fn postgres(
          WHERE world_id = $1 AND local_week = $2 AND slot_key IS NULL",
     )
     .bind(world_id)
-    .bind(local_week)
+    .bind(local_week.to_sqlx())
     .fetch_optional(pool)
     .await
     .map_err(map_storage_error)?
@@ -56,8 +57,8 @@ pub(super) async fn slot_postgres(
     .transpose()
 }
 
-fn validate_key(world_id: &str, local_week: NaiveDate) -> Result<(), RepositoryError> {
-    if !matches!(world_id, "main" | "isekai") || local_week.weekday().num_days_from_monday() != 0 {
+fn validate_key(world_id: &str, local_week: civil::Date) -> Result<(), RepositoryError> {
+    if !matches!(world_id, "main" | "isekai") || local_week.weekday() != civil::Weekday::Monday {
         return Err(repository_error("周计划读取身份无效"));
     }
     Ok(())

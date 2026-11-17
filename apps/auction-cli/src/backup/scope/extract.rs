@@ -8,7 +8,7 @@ use std::{
 };
 
 use anyhow::Context;
-use chrono::Utc;
+use auction_time::Timestamp;
 
 use super::{PlaintextGuard, bundle, collect::SourceKind, crypto};
 use crate::{
@@ -67,7 +67,7 @@ pub(crate) async fn run(options: Options<'_>) -> anyhow::Result<()> {
     guard.remove()?;
     let payload = serde_json::json!({
         "format": RECEIPT_FORMAT,
-        "extracted_at": Utc::now(),
+        "extracted_at": Timestamp::now(),
         "database": options.database,
         "archive_file_name": verified.manifest.archive_file_name,
         "archive_sha256": verified.manifest.archive_sha256,

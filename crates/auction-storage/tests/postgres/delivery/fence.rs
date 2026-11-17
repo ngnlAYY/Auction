@@ -21,7 +21,7 @@ use auction_application::delivery::{
     DeliveryWorkStore,
 };
 use auction_storage::DatabaseStore;
-use chrono::{DateTime, Duration, Utc};
+use auction_time::{Duration, Timestamp};
 use serde_json::json;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -64,7 +64,7 @@ async fn insert_send(pool: &PgPool, recipient: &str) -> Uuid {
 
 /// 领取全部到期投递，租约两分钟。
 async fn claim_due(store: &DatabaseStore) -> Vec<DeliveryWorkClaim> {
-    let now = Utc::now();
+    let now = Timestamp::now();
     let sending_grace = std::time::Duration::from_secs(60);
     store.begin_claim_cycle(now, sending_grace).await.expect("执行领取前清理");
     store
@@ -106,7 +106,7 @@ fn send_expectation(claim: &DeliveryWorkClaim) -> Arc<DeliverySendExpectation> {
 async fn fence_outcome(store: &DatabaseStore, claim: &DeliveryWorkClaim) -> DeliveryFenceOutcome {
     let prepared = DeliveryPreparedExpectation::Send(send_expectation(claim));
     store
-        .start_sending_authorized(claim.clone(), Utc::now(), None, Some(&prepared))
+        .start_sending_authorized(claim.clone(), Timestamp::now(), None, Some(&prepared))
         .await
         .expect("发送围栏必须确定结束")
 }
@@ -121,7 +121,7 @@ async fn send_attempts(pool: &PgPool, delivery_id: Uuid) -> i64 {
 }
 
 /// 手工 Send 所属发送节奏分组的高水位；尚未发送过时为 NULL。
-async fn manual_cadence(pool: &PgPool) -> Option<DateTime<Utc>> {
+async fn manual_cadence(pool: &PgPool) -> Option<Timestamp> {
     sqlx::query_scalar(
         "SELECT last_started_at FROM public.delivery_send_cadence WHERE category = 'manual'",
     )
@@ -135,7 +135,7 @@ async fn fence(store: &DatabaseStore, claim: &DeliveryWorkClaim) -> Arc<Delivery
     let expectation = send_expectation(claim);
     let prepared = DeliveryPreparedExpectation::Send(Arc::clone(&expectation));
     let outcome = store
-        .start_sending_authorized(claim.clone(), Utc::now(), None, Some(&prepared))
+        .start_sending_authorized(claim.clone(), Timestamp::now(), None, Some(&prepared))
         .await
         .expect("发送围栏必须确定完成");
     assert!(matches!(outcome, DeliveryFenceOutcome::Sending), "合法冻结身份必须进入 sending");
@@ -177,7 +177,7 @@ async fn audits(pool: &PgPool, delivery_id: Uuid, action: &str) -> i64 {
 async fn delivery_row(
     pool: &PgPool,
     delivery_id: Uuid,
-) -> (String, Option<String>, Option<Uuid>, Option<DateTime<Utc>>) {
+) -> (String, Option<String>, Option<Uuid>, Option<Timestamp>) {
     sqlx::query_as(
         "SELECT status, external_reference, lease_token, completed_at
          FROM public.deliveries WHERE id = $1",
@@ -210,7 +210,10 @@ async fn postgres_sent_proof_binds_one_mid_and_identical_replay_adds_no_audit() 
     let expectation = fence(&store, &claim).await;
 
     let result = sent_result(&claim, &expectation, "1001");
-    store.succeed(claim.clone(), result.clone(), Utc::now()).await.expect("合法 Sent 证明必须收口");
+    store
+        .succeed(claim.clone(), result.clone(), Timestamp::now())
+        .await
+        .expect("合法 Sent 证明必须收口");
 
     let (status, reference, lease_token, completed_at) = delivery_row(pool, delivery_id).await;
     assert_eq!(status, "succeeded");
@@ -224,7 +227,7 @@ async fn postgres_sent_proof_binds_one_mid_and_identical_replay_adds_no_audit() 
     assert_eq!(audits(pool, delivery_id, "delivery.succeed").await, 1);
 
     // 提交应答丢失后的同一事实重放：返回成功，但不追加审计、不改写终态与绑定。
-    store.succeed(claim.clone(), result, Utc::now()).await.expect("同一成功事实重放必须幂等");
+    store.succeed(claim.clone(), result, Timestamp::now()).await.expect("同一成功事实重放必须幂等");
     assert_eq!(audits(pool, delivery_id, "delivery.succeed").await, 1, "重放不得追加成功审计");
     assert_eq!(
         delivery_row(pool, delivery_id).await,
@@ -250,11 +253,15 @@ async fn postgres_sent_proof_rejects_a_mid_already_bound_to_another_delivery() {
     let second_expectation = fence(&store, &second).await;
 
     store
-        .succeed(first.clone(), sent_result(&first, &first_expectation, "2001"), Utc::now())
+        .succeed(first.clone(), sent_result(&first, &first_expectation, "2001"), Timestamp::now())
         .await
         .expect("首个投递证明 MID");
     let rejected = store
-        .succeed(second.clone(), sent_result(&second, &second_expectation, "2001"), Utc::now())
+        .succeed(
+            second.clone(),
+            sent_result(&second, &second_expectation, "2001"),
+            Timestamp::now(),
+        )
         .await;
     assert!(rejected.is_err(), "同一 world/MID 不能再证明另一投递");
 
@@ -272,7 +279,11 @@ async fn postgres_sent_proof_rejects_a_mid_already_bound_to_another_delivery() {
 
     // 正对照：同一份证明换成未被占用的 MID 即可收口，说明上面的拒绝来自 MID 冲突。
     store
-        .succeed(second.clone(), sent_result(&second, &second_expectation, "2002"), Utc::now())
+        .succeed(
+            second.clone(),
+            sent_result(&second, &second_expectation, "2002"),
+            Timestamp::now(),
+        )
         .await
         .expect("换成未占用的 MID 必须收口");
     assert_eq!(
@@ -296,7 +307,7 @@ async fn postgres_claim_without_sending_fence_cannot_record_external_outcomes() 
 
     assert!(
         store
-            .succeed(claim.clone(), sent_result(&claim, &expectation, "3001"), Utc::now())
+            .succeed(claim.clone(), sent_result(&claim, &expectation, "3001"), Timestamp::now())
             .await
             .is_err(),
         "未进入 sending 的领取不得写回成功证明"
@@ -309,7 +320,7 @@ async fn postgres_claim_without_sending_fence_cannot_record_external_outcomes() 
         result_metadata: json!({"category": "transport"}),
     };
     assert!(
-        store.fail(claim.clone(), failure, Utc::now()).await.is_err(),
+        store.fail(claim.clone(), failure, Timestamp::now()).await.is_err(),
         "未进入 sending 的领取不得写回外部失败"
     );
 
@@ -344,7 +355,7 @@ async fn postgres_unknown_send_outcome_moves_to_manual_reconcile() {
                 external_reference: None,
                 result_metadata: json!({"category": "transport"}),
             },
-            Utc::now(),
+            Timestamp::now(),
         )
         .await
         .expect("未知结果必须收口为人工核对");
@@ -378,7 +389,7 @@ async fn postgres_expired_lease_cannot_be_renewed_or_released() {
     let claim = claim_for(&claim_due(&store).await, delivery_id);
 
     // 对照：有效租约可以续租，证明同一领取结果本身合法。
-    let renewed_at = Utc::now();
+    let renewed_at = Timestamp::now();
     store
         .renew(claim.clone(), renewed_at, renewed_at + Duration::minutes(3))
         .await
@@ -392,7 +403,7 @@ async fn postgres_expired_lease_cannot_be_renewed_or_released() {
     .execute(pool)
     .await
     .expect("把租约置为已过期");
-    let (expired_at, attempt_count): (DateTime<Utc>, i32) = sqlx::query_as(
+    let (expired_at, attempt_count): (Timestamp, i32) = sqlx::query_as(
         "SELECT lease_expires_at, attempt_count FROM public.deliveries WHERE id = $1",
     )
     .bind(delivery_id)
@@ -400,7 +411,7 @@ async fn postgres_expired_lease_cannot_be_renewed_or_released() {
     .await
     .expect("读取过期租约");
 
-    let now = Utc::now();
+    let now = Timestamp::now();
     assert!(
         store.renew(claim.clone(), now, now + Duration::minutes(2)).await.is_err(),
         "过期租约不得续租复活"
@@ -410,7 +421,7 @@ async fn postgres_expired_lease_cannot_be_renewed_or_released() {
     let (status, _, lease_token, _) = delivery_row(pool, delivery_id).await;
     assert_eq!(status, "claimed");
     assert_eq!(lease_token, Some(claim.lease_token));
-    let (lease_after, attempts_after): (DateTime<Utc>, i32) = sqlx::query_as(
+    let (lease_after, attempts_after): (Timestamp, i32) = sqlx::query_as(
         "SELECT lease_expires_at, attempt_count FROM public.deliveries WHERE id = $1",
     )
     .bind(delivery_id)
@@ -461,7 +472,7 @@ async fn postgres_fence_sql_error_rolls_back_as_fault_not_deferral() {
     assert_eq!(manual_cadence(pool).await, cadence_before, "回滚不得消耗发送节奏");
 
     // 确定回滚不是提交未知：原领取仍有效，可以释放回 pending 等下一轮重领。
-    store.release(claim, Utc::now()).await.expect("确定回滚后可以安全释放领取");
+    store.release(claim, Timestamp::now()).await.expect("确定回滚后可以安全释放领取");
     assert_eq!(delivery_row(pool, delivery_id).await.0, "pending");
 
     store.postgres_pool().close().await;

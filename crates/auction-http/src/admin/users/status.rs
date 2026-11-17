@@ -6,6 +6,7 @@ use auction_application::admin::{AdminUserMutationAction, AdminUserMutationComma
 use auction_contracts::{
     AdminUserBlacklistRequest, AdminUserMutationResponse, AdminUserUnblacklistRequest, ApiResponse,
 };
+use auction_time::Timestamp;
 use axum::{
     Json,
     body::Bytes,
@@ -13,7 +14,6 @@ use axum::{
     http::{HeaderMap, StatusCode, Uri},
     response::{IntoResponse, Response},
 };
-use chrono::Utc;
 
 use super::{boundary, map_user};
 use crate::middleware::boundary::request_id;
@@ -100,7 +100,7 @@ async fn mutate_status(
             public_reason,
             actor_id: identity.actor,
             request_id: request_id(&headers),
-            now: Utc::now(),
+            now: Timestamp::now(),
         })
         .await
     {

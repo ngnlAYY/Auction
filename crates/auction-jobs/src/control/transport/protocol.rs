@@ -130,12 +130,12 @@ mod tests {
         ExternalAccountStatus, ExternalForumAccountStatus, ExternalMailAccountStatus,
         ExternalMaintenanceState, ExternalMaintenanceStatus,
     };
-    use chrono::Utc;
+    use auction_time::Timestamp;
 
     use super::ControlEnvelope;
 
     fn idle_status() -> ExternalAccountStatus {
-        let observed_at = Utc::now();
+        let observed_at = Timestamp::now();
         ExternalAccountStatus {
             observed_at,
             mail: ExternalMailAccountStatus {

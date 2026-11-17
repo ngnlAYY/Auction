@@ -15,13 +15,13 @@ use auction_application::mail::{
 };
 use auction_application::realtime::{PublicRealtimeReader, PublicRealtimeRequest};
 use auction_domain::{CommandId, EquipmentId, EquipmentKeyEnvelope};
-use chrono::{Duration as ChronoDuration, Utc};
+use auction_time::{TimeDelta, Timestamp};
 use serde_json::json;
 use uuid::Uuid;
 
 use crate::support;
 
-fn policy_snapshot(now: chrono::DateTime<Utc>) -> serde_json::Value {
+fn policy_snapshot(now: auction_time::Timestamp) -> serde_json::Value {
     json!({
         "schema_version": 5,
         "start_price": 50000,
@@ -51,7 +51,7 @@ async fn postgres_mail_intake_reuses_delivered_equipment_for_resale() {
     let database = support::TestDatabase::create().await.expect("clone template db");
     let store = database.store().await.expect("connect test db");
     let pool = store.postgres_pool();
-    let now = Utc::now();
+    let now = Timestamp::now();
     let old_auction = Uuid::new_v4();
     let old_lot = Uuid::new_v4();
     let old_command = Uuid::new_v4();
@@ -81,7 +81,7 @@ async fn postgres_mail_intake_reuses_delivered_equipment_for_resale() {
     .bind(equipment)
     .bind(json!({"type":"Two-Handed","quality":"Legendary","prefix":"Ethereal",
                  "suffix":"of the Vampire","tradeable":true,"level":100,"stats":{}}))
-    .bind(now - ChronoDuration::days(20))
+    .bind(now - TimeDelta::days(20))
     .execute(pool)
     .await
     .expect("equipment");
@@ -104,7 +104,7 @@ async fn postgres_mail_intake_reuses_delivered_equipment_for_resale() {
          VALUES ($1, 'main', 1, 'old resale auction', 'settled', $2, $2, $2, $2, $2, $2, $3)",
     )
     .bind(old_auction)
-    .bind(now - ChronoDuration::days(20))
+    .bind(now - TimeDelta::days(20))
     .bind(&policy)
     .execute(pool)
     .await
@@ -130,7 +130,7 @@ async fn postgres_mail_intake_reuses_delivered_equipment_for_resale() {
     .bind(old_auction)
     .bind(equipment)
     .bind(winner)
-    .bind(now - ChronoDuration::days(20))
+    .bind(now - TimeDelta::days(20))
     .execute(pool)
     .await
     .expect("old lot");
@@ -144,7 +144,7 @@ async fn postgres_mail_intake_reuses_delivered_equipment_for_resale() {
     .bind(delivery)
     .bind(Uuid::new_v4())
     .bind([2_u8; 32].as_slice())
-    .bind(now - ChronoDuration::days(20))
+    .bind(now - TimeDelta::days(20))
     .execute(pool)
     .await
     .expect("old delivery");
@@ -178,7 +178,7 @@ async fn postgres_mail_intake_reuses_delivered_equipment_for_resale() {
     )
     .bind(old_obligation)
     .bind(delivery)
-    .bind(now - ChronoDuration::days(20))
+    .bind(now - TimeDelta::days(20))
     .execute(pool)
     .await
     .expect("old fulfillment");

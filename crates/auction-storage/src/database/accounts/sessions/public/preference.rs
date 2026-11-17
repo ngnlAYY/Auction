@@ -8,7 +8,7 @@ use auction_application::public::{
     PublicSessionIdentity, PublicSessionPreference, PublicSessionPreferenceResult,
     SetPublicSessionPreferenceCommand,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -22,7 +22,7 @@ use crate::database::{
 pub(in crate::database::accounts::sessions) async fn get_postgres(
     store: &DatabaseStore,
     token_hash: [u8; 32],
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<PublicSessionPreferenceResult, ApplicationError> {
     // 与只读 inspect 共用池等待后的截止门禁，不能按请求开始时间返回过期身份。
     let row = sqlx::query(
@@ -55,7 +55,7 @@ pub(in crate::database::accounts::sessions) async fn set_postgres(
     store: &DatabaseStore,
     token_hash: [u8; 32],
     command: SetPublicSessionPreferenceCommand,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<PublicSessionPreferenceResult, ApplicationError> {
     let request_hash = command.request_hash(token_hash)?;
     store
@@ -71,7 +71,7 @@ async fn set_locked(
     token_hash: [u8; 32],
     command: SetPublicSessionPreferenceCommand,
     request_hash: RequestHash,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<PublicSessionPreferenceResult, ApplicationError> {
     // 与换钥、封禁、并发登录保持 user -> session 顺序；只认仍 active 的账号和 Key。
     let account = sqlx::query(
@@ -221,10 +221,10 @@ async fn append_audit(
     transaction: &mut PostgresCompetitionTransaction,
     command: SetPublicSessionPreferenceCommand,
     previous: PublicSessionPreference,
-    previous_expires_at: Option<DateTime<Utc>>,
-    previous_absolute_expires_at: Option<DateTime<Utc>>,
+    previous_expires_at: Option<Timestamp>,
+    previous_absolute_expires_at: Option<Timestamp>,
     result: &PublicSessionPreferenceResult,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<(), ApplicationError> {
     sqlx::query(
         "INSERT INTO public.audit_records

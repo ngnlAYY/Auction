@@ -7,7 +7,7 @@ use auction_domain::{
     AuctionId, CommandId, RecoveryPolicy, SettlementObligation, SettlementObligationKind,
     SettlementObligationState, SettlementPlan, SettlementWorld, deterministic_uuid,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::json;
 use sqlx::Row;
 
@@ -31,7 +31,7 @@ struct ObligationRow<'a> {
 pub(super) async fn insert_obligations(
     transaction: &mut PostgresCompetitionTransaction,
     plan: &SettlementPlan,
-    occurred_at: DateTime<Utc>,
+    occurred_at: Timestamp,
 ) -> Result<(), SettlementTransactionError> {
     let rows = plan
         .obligations
@@ -132,7 +132,7 @@ pub(super) async fn insert_recoveries(
     auction_id: AuctionId,
     plan: &SettlementPlan,
     recovery_policy: RecoveryPolicy,
-    occurred_at: DateTime<Utc>,
+    occurred_at: Timestamp,
 ) -> Result<(), SettlementTransactionError> {
     let payment_deadline_at = occurred_at
         .checked_add_signed(recovery_policy.payment_timeout)
@@ -255,7 +255,7 @@ pub(super) async fn insert_settlement_audit(
     opening_pool_version: u64,
     closing_pool_version: u64,
     plan: &SettlementPlan,
-    occurred_at: DateTime<Utc>,
+    occurred_at: Timestamp,
 ) -> Result<(), SettlementTransactionError> {
     let sold_count = plan.lines.iter().filter(|line| line.end_price.value() > 0).count();
     let unsold_count =
@@ -306,7 +306,7 @@ pub(super) async fn insert_settlement_realtime(
     command_id: CommandId,
     state_version: u64,
     plan: &SettlementPlan,
-    occurred_at: DateTime<Utc>,
+    occurred_at: Timestamp,
 ) -> Result<(), SettlementTransactionError> {
     let stream_key = format!("auction:{auction_id}");
     let transaction = transaction.transaction_mut().map_err(map_competition_error)?;

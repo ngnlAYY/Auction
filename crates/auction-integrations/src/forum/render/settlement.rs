@@ -2,7 +2,7 @@
 
 use auction_application::forum::{ForumAuctionSnapshot, ForumLotSnapshot, ForumRenderError};
 use auction_domain::AuctionStatus;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use super::text::push_fmt;
 
@@ -28,8 +28,8 @@ pub(super) fn valid_snapshot(snapshot: &ForumAuctionSnapshot) -> bool {
 pub(super) fn write_annotation(
     body: &mut String,
     lot: &ForumLotSnapshot,
-    scheduled_open_at: DateTime<Utc>,
-    scheduled_end_at: Option<DateTime<Utc>>,
+    scheduled_open_at: Timestamp,
+    scheduled_end_at: Option<Timestamp>,
 ) -> Result<(), ForumRenderError> {
     let Some(settlement) = &lot.settlement else { return Ok(()) };
     let planned_end = scheduled_end_at.ok_or(ForumRenderError::InvalidSnapshot)?;
@@ -54,8 +54,8 @@ fn format_held_hours(duration: i64) -> Result<String, ForumRenderError> {
     Ok(format!("{}.{:01}", tenths / 10, tenths % 10))
 }
 
-fn format_hours(start: DateTime<Utc>, end: DateTime<Utc>) -> Result<String, ForumRenderError> {
-    let nanos = |time: DateTime<Utc>| {
+fn format_hours(start: Timestamp, end: Timestamp) -> Result<String, ForumRenderError> {
+    let nanos = |time: Timestamp| {
         i128::from(time.timestamp()) * 1_000_000_000 + i128::from(time.timestamp_subsec_nanos())
     };
     let duration = nanos(end) - nanos(start);

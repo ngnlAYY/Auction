@@ -2,7 +2,7 @@
 
 use std::time::Instant;
 
-use chrono::Utc;
+use auction_time::Timestamp;
 
 use crate::ports::settlement::{
     InternalEvidenceError, InternalEvidenceFuture, SettlementInternalEvidenceSnapshot,
@@ -35,7 +35,7 @@ impl PreparedSettlementInternalEvidence {
         if !lease.is_current() {
             return Err(InternalEvidenceError::Revoked);
         }
-        if !snapshot.valid_at(Utc::now()) || deadline <= Instant::now() {
+        if !snapshot.valid_at(Timestamp::now()) || deadline <= Instant::now() {
             return Err(InternalEvidenceError::Expired);
         }
         Ok(Self { snapshot, lease, deadline, used: false })
@@ -57,7 +57,7 @@ impl PreparedSettlementInternalEvidence {
             if self.used {
                 return Err(InternalEvidenceError::Revoked);
             }
-            if self.deadline <= Instant::now() || !self.snapshot.valid_at(Utc::now()) {
+            if self.deadline <= Instant::now() || !self.snapshot.valid_at(Timestamp::now()) {
                 return Err(InternalEvidenceError::Expired);
             }
             self.lease.check_current(self.deadline).await
@@ -72,7 +72,7 @@ impl PreparedSettlementInternalEvidence {
         if self.used || !self.lease.is_current() {
             return Err(InternalEvidenceError::Revoked);
         }
-        if self.deadline <= Instant::now() || !self.snapshot.valid_at(Utc::now()) {
+        if self.deadline <= Instant::now() || !self.snapshot.valid_at(Timestamp::now()) {
             return Err(InternalEvidenceError::Expired);
         }
         self.used = true;

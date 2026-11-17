@@ -7,7 +7,7 @@ use auction_application::core::diagnostics::{
 };
 use auction_application::core::{ApplicationError, Clock};
 use auction_application::forum::{ForumSyncClaim, ForumWriteProgress};
-use chrono::Duration;
+use auction_time::Duration;
 
 use super::claim::process_claim_inner;
 use super::failure::{record_failure, requires_reconciliation, scoped_failure_code};

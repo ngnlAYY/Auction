@@ -1,6 +1,6 @@
 //! 数据库重建的预检、结果与错误模型。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::Serialize;
 use thiserror::Error;
 
@@ -14,7 +14,7 @@ pub(super) const SUPPORTED_POSTGRES_MAJOR: i32 = 18;
 #[derive(Debug, Clone, Serialize)]
 pub struct PostgresRebuildPreflight {
     pub format: &'static str,
-    pub collected_at: DateTime<Utc>,
+    pub collected_at: Timestamp,
     pub maintenance_database_name: String,
     pub server_version_num: i32,
     pub target_database_name: String,

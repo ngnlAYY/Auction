@@ -1,6 +1,6 @@
 //! 清理请求的逐数据族校验：只认新鲜演练回执与政策 v2 的闭集谓词，产出可执行的批准清单。
 
-use chrono::{TimeDelta, Utc};
+use auction_time::{TimeDelta, Timestamp};
 
 use super::model::{
     RETENTION_PURGE_DRY_RUN_MAX_DURATION_SECONDS, RETENTION_PURGE_MAX_BATCH_SIZE,
@@ -40,7 +40,7 @@ pub(super) fn validate_request(
     if request.policy_sha256 != compiled_sha {
         return Err(RetentionPurgeError::PolicyMismatch);
     }
-    let now = Utc::now();
+    let now = Timestamp::now();
     let skew =
         TimeDelta::try_seconds(CLOCK_SKEW_SECONDS).ok_or(RetentionPurgeError::InvalidRequest)?;
     if request.dry_run_created_at > now + skew {

@@ -9,7 +9,7 @@
 
 use auction_application::delivery::{DeliveryClaimExclusions, DeliveryWorkStore};
 use auction_application::mail::MailSendClasses;
-use chrono::{Duration, Utc};
+use auction_time::{Duration, Timestamp};
 use sqlx::PgConnection;
 use uuid::Uuid;
 
@@ -51,7 +51,7 @@ async fn insert_delivery(connection: &mut PgConnection, origin: &str, template: 
 }
 
 async fn claim(store: &auction_storage::DatabaseStore, classes: MailSendClasses) -> Vec<Uuid> {
-    let now = Utc::now();
+    let now = Timestamp::now();
     let sending_grace = std::time::Duration::from_secs(60);
     store.begin_claim_cycle(now, sending_grace).await.expect("执行领取前清理");
     store

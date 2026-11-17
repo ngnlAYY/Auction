@@ -182,11 +182,11 @@ mod tests {
     };
     use auction_application::core::{ApplicationError, ApplicationFuture};
     use auction_domain::ProxyMode;
+    use auction_time::{Duration, Timestamp};
     use axum::Router;
     use axum::body::{Body, to_bytes};
     use axum::http::{Request, StatusCode};
     use axum::routing::get;
-    use chrono::{DateTime, Duration};
     use serde_json::{Value, json};
     use tower::ServiceExt;
     use uuid::Uuid;
@@ -234,7 +234,7 @@ mod tests {
     }
 
     fn live(proxy_default_mode: ProxyMode) -> CurrentAuctionSnapshot {
-        let opens_at = DateTime::from_timestamp(1_763_200_000, 0).expect("fixture time");
+        let opens_at = Timestamp::from_timestamp(1_763_200_000, 0).expect("fixture time");
         CurrentAuctionSnapshot {
             id: AUCTION_ID,
             world_id: "main".to_owned(),

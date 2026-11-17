@@ -12,7 +12,7 @@ use auction_application::core::ApplicationFuture;
 use auction_application::core::{ApplicationError, RequestHash};
 use auction_application::mail::MailLoginKeyEnvelope;
 use auction_domain::valid_text;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
@@ -180,7 +180,7 @@ fn valid_forum_account_id(value: &str) -> bool {
     auction_domain::valid_positive_decimal(value, 32)
 }
 
-fn valid_time(value: DateTime<Utc>) -> bool {
+fn valid_time(value: Timestamp) -> bool {
     value.timestamp_nanos_opt().is_some()
 }
 

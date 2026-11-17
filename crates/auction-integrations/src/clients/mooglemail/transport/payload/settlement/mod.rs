@@ -294,8 +294,8 @@ fn valid_credit_variables(variables: &BTreeMap<String, String>, current: &[&str]
 
 /// 正文期限只接受规范 UTC 秒精度文本，避免把本地时区或可读日期当成冻结事实。
 fn valid_payment_deadline(value: &str) -> bool {
-    chrono::DateTime::parse_from_rfc3339(value).ok().is_some_and(|deadline| {
-        deadline.to_rfc3339_opts(chrono::SecondsFormat::Secs, true) == value
+    auction_time::Timestamp::parse_from_rfc3339(value).ok().is_some_and(|deadline| {
+        deadline.to_rfc3339_opts(auction_time::SecondsFormat::Secs, true) == value
     })
 }
 

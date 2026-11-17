@@ -78,7 +78,7 @@ mod tests {
     use auction_application::core::ApplicationFuture;
     use auction_application::settlement::InternalEvidenceError;
     use auction_test_support::mooglemail::MailDouble;
-    use chrono::{DateTime, Utc};
+    use auction_time::Timestamp;
     use uuid::Uuid;
 
     use super::CleanComposeWorlds;
@@ -92,11 +92,7 @@ mod tests {
     struct NoInvalidation;
 
     impl AdminCredentialRuntimeWriter for NoInvalidation {
-        fn mark_invalid(
-            &self,
-            _credential_id: Uuid,
-            _now: DateTime<Utc>,
-        ) -> ApplicationFuture<'_, ()> {
+        fn mark_invalid(&self, _credential_id: Uuid, _now: Timestamp) -> ApplicationFuture<'_, ()> {
             Box::pin(async { Ok(()) })
         }
     }

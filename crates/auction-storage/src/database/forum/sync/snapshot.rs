@@ -7,7 +7,7 @@ use auction_application::forum::{
 };
 use auction_application::public::PublicEquipmentLinkTarget;
 use auction_domain::{AuctionId, AuctionStatus, EquipmentId, SettlementWorld};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use super::validation::{lot_code, parse_world, storage_error};
@@ -129,13 +129,13 @@ async fn read_snapshot(
     let state_version: i64 = auction_row
         .try_get("state_version")
         .map_err(|error| storage_error_from(error, "读取论坛快照状态版本失败"))?;
-    let scheduled_open_at: DateTime<Utc> = auction_row
+    let scheduled_open_at: Timestamp = auction_row
         .try_get("scheduled_open_at")
         .map_err(|error| storage_error_from(error, "读取论坛快照开启时间失败"))?;
-    let opened_at: Option<DateTime<Utc>> = auction_row
+    let opened_at: Option<Timestamp> = auction_row
         .try_get("opened_at")
         .map_err(|error| storage_error_from(error, "读取论坛快照实际开启时间失败"))?;
-    let scheduled_end_at: Option<DateTime<Utc>> = auction_row
+    let scheduled_end_at: Option<Timestamp> = auction_row
         .try_get("scheduled_end_at")
         .map_err(|error| storage_error_from(error, "读取论坛快照结束时间失败"))?;
 
@@ -239,7 +239,7 @@ async fn read_snapshot(
         let status: String = row
             .try_get("status")
             .map_err(|error| storage_error_from(error, "读取论坛快照 lot 状态失败"))?;
-        let effective_end_at: Option<DateTime<Utc>> = row
+        let effective_end_at: Option<Timestamp> = row
             .try_get("effective_end_at")
             .map_err(|error| storage_error_from(error, "读取论坛快照 lot 结束时间失败"))?;
         let leader_name: Option<String> = row

@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::Serialize;
 
 use super::delivery::OperationsAlertHostObserveCommand;
@@ -24,7 +24,7 @@ use crate::ports::core::ApplicationFuture;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OperationsAlertRuntimeStatus {
     pub enabled: bool,
-    pub updated_at: DateTime<Utc>,
+    pub updated_at: Timestamp,
 }
 
 impl OperationsAlertRuntimeStatus {
@@ -52,9 +52,9 @@ pub struct OperationsAlertHealth {
     pub webhook_sending_count: i64,
     pub webhook_failed_count: i64,
     pub webhook_manual_reconcile_count: i64,
-    pub last_observed_at: Option<DateTime<Utc>>,
-    pub last_success_at: Option<DateTime<Utc>>,
-    pub last_failure_at: Option<DateTime<Utc>>,
+    pub last_observed_at: Option<Timestamp>,
+    pub last_success_at: Option<Timestamp>,
+    pub last_failure_at: Option<Timestamp>,
     pub last_error_code: String,
 }
 
@@ -138,7 +138,7 @@ pub trait OperationsAlertSourceReader: Send + Sync {
     /// 计数。
     fn snapshot(
         &self,
-        now: DateTime<Utc>,
+        now: Timestamp,
         collection: OperationsAlertCollectionOverdueRead,
     ) -> ApplicationFuture<'_, OperationsAlertSnapshot>;
 }
@@ -182,7 +182,7 @@ pub trait OperationsAlertStore: Send + Sync {
         &self,
         batch: OperationsAlertEnqueuedBatch,
         status: OperationsAlertDeliveryStatus,
-        completed_at: DateTime<Utc>,
+        completed_at: Timestamp,
     ) -> ApplicationFuture<'_, ()>;
 
     /// 领取一条 webhook 独立投递；未启用或没有到期项时返回 None。

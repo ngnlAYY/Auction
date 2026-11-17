@@ -1,6 +1,6 @@
 //! 结算初次领取时的 lot 锁和 due 世代校验。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
@@ -10,9 +10,9 @@ use crate::database::TrackedTransaction as Transaction;
 pub(super) async fn lock_initial_lots(
     transaction: &mut Transaction<'_, Postgres>,
     auction_id: Uuid,
-    now: DateTime<Utc>,
-    expected_due_at: DateTime<Utc>,
-) -> Result<Option<DateTime<Utc>>, sqlx::Error> {
+    now: Timestamp,
+    expected_due_at: Timestamp,
+) -> Result<Option<Timestamp>, sqlx::Error> {
     let rows = sqlx::query(
         r#"SELECT status, effective_end_at
            FROM public.lots
@@ -34,7 +34,7 @@ pub(super) async fn lock_initial_lots(
         if status == "withdrawn" {
             continue;
         }
-        let effective_end_at: Option<DateTime<Utc>> = row.try_get("effective_end_at")?;
+        let effective_end_at: Option<Timestamp> = row.try_get("effective_end_at")?;
         let Some(effective_end_at) = effective_end_at else {
             return Ok(None);
         };
@@ -42,8 +42,7 @@ pub(super) async fn lock_initial_lots(
             return Ok(None);
         }
         latest_end = Some(
-            latest_end
-                .map_or(effective_end_at, |current: DateTime<Utc>| current.max(effective_end_at)),
+            latest_end.map_or(effective_end_at, |current: Timestamp| current.max(effective_end_at)),
         );
     }
     Ok(latest_end.filter(|latest| *latest == expected_due_at))

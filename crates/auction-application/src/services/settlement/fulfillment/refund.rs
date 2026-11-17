@@ -1,6 +1,6 @@
 //! 原合法退款的外部资金用途接缝；不产生新退款权利、不替代原prepare的授权。
 
-use chrono::{DateTime, Duration, Utc};
+use auction_time::{Duration, Timestamp};
 
 use super::internal::evidence_request;
 use super::validation::{claim_context, repository_error};
@@ -25,7 +25,7 @@ impl SettlementFulfillmentService {
         &self,
         claim: SettlementFulfillmentClaim,
         recipient_version: Option<u64>,
-        prepared_at: DateTime<Utc>,
+        prepared_at: Timestamp,
         retry_delay: Duration,
         deadline: std::time::Instant,
     ) -> Result<Outcome, ApplicationError> {

@@ -1,6 +1,6 @@
 //! Admin 凭据的密封、存储、运行期读写与健康端口。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
@@ -73,7 +73,7 @@ pub trait AdminCredentialRuntimeReader: Send + Sync {
 /// 远端明确返回登录失效时，Worker 只能把当前凭据标记为 invalid；该操作必须是幂等的，
 /// 不能把远端写入结果重试成第二次写入，也不能通过 Admin 命令账本伪造一个用户命令。
 pub trait AdminCredentialRuntimeWriter: Send + Sync {
-    fn mark_invalid(&self, credential_id: Uuid, now: DateTime<Utc>) -> ApplicationFuture<'_, ()>;
+    fn mark_invalid(&self, credential_id: Uuid, now: Timestamp) -> ApplicationFuture<'_, ()>;
 }
 
 /// Worker 持有数据库凭据运行时所有权的不透明 guard。

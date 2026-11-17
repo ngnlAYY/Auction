@@ -2,7 +2,7 @@
 //!
 //! 维护读取远端页面并记录观察；只有可证明的恢复才同事务迁移投递、资金、履约与审计。
 
-use chrono::{DateTime, DurationRound, TimeDelta, Utc};
+use auction_time::{TimeDelta, Timestamp};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -32,7 +32,7 @@ pub fn mail_recipient_is_list_projection(list_recipient: &str, full_recipient: &
 
 /// Sent 列表时间只精确到分钟；返回发送开始所在分钟的起点，供列表时间与开始围栏比较。
 /// 截断失败时原样返回，退回严格围栏。
-pub fn sent_list_minute_start(value: DateTime<Utc>) -> DateTime<Utc> {
+pub fn sent_list_minute_start(value: Timestamp) -> Timestamp {
     value.duration_trunc(TimeDelta::minutes(1)).unwrap_or(value)
 }
 
@@ -82,7 +82,7 @@ pub struct MoogleMailboxSentEntry {
     pub external_mail_id: String,
     pub recipient: String,
     pub subject: String,
-    pub sent_at: DateTime<Utc>,
+    pub sent_at: Timestamp,
 }
 
 /// 一次完整 Sent 枚举的页数观察；绑定完整扫描作用域，不能跨凭据/世界/endpoint 复用。
@@ -95,7 +95,7 @@ pub struct MailScanPageObservation {
     pub pages_scanned: u32,
     /// 该次完整枚举生效的页数上限；配置热更新后仍按观察时的有效值评估。
     pub page_limit: u32,
-    pub observed_at: DateTime<Utc>,
+    pub observed_at: Timestamp,
 }
 
 impl MailScanPageObservation {
@@ -115,7 +115,7 @@ impl MailScanPageObservation {
 pub struct MoogleMailboxSentEntries {
     pub entries: Vec<MoogleMailboxSentEntry>,
     /// `None` 表示完整列表；`Some(at)` 表示所有 `sent_at >= at` 的列表条目均已覆盖。
-    pub covered_from: Option<DateTime<Utc>>,
+    pub covered_from: Option<Timestamp>,
     /// 完整枚举是否成功；页数超限时为 false，不能用于恢复证明。
     pub complete: bool,
     /// 最近一次完整枚举的页数观察；前缀或未完整读取时为 None。
@@ -124,7 +124,7 @@ pub struct MoogleMailboxSentEntries {
 
 impl MoogleMailboxSentEntries {
     /// 候选的发送时间落在覆盖范围之外时，不能用该列表证明缺失或唯一命中。
-    pub fn covers(&self, sent_at: DateTime<Utc>) -> bool {
+    pub fn covers(&self, sent_at: Timestamp) -> bool {
         self.complete && self.covered_from.is_none_or(|covered_from| sent_at >= covered_from)
     }
 }
@@ -241,9 +241,9 @@ pub struct MoogleMailboxUnprovenSend {
     /// 通知类登录 key 所属用户；只以 UUID 引用，明文不落库。
     pub user_key_user_id: Option<Uuid>,
     /// 发送围栏时间；分钟级 Sent 列表按其所在分钟起点比较，同分钟同内容的其他尝试由存储侧排除。
-    pub sending_at: DateTime<Utc>,
+    pub sending_at: Timestamp,
     /// 原未知结果持久化时间，限定本次发送证据上界，不用任意时钟偏移扩展窗口。
-    pub outcome_recorded_at: DateTime<Utc>,
+    pub outcome_recorded_at: Timestamp,
     /// `send` 或 `take`；take 只核对收件箱，不重建正文。
     pub operation: String,
     /// take 要领取的附件，或 settlement 冻结 secret 引用解析出的精确装备 ID；不含 secret。
@@ -290,7 +290,7 @@ pub trait MoogleMailboxMaintenance: Send + Sync {
         &'a self,
         world_id: &'a str,
         entry: &'a MoogleMailboxSentEntry,
-        observed_at: DateTime<Utc>,
+        observed_at: Timestamp,
     ) -> ApplicationFuture<'a, MoogleMailboxSentState>;
 
     /// 仅无登录 key 的旧行可按原模板保守核对，且正文必须保留原入站关联。
@@ -427,11 +427,11 @@ pub trait MoogleMailboxEvidenceStore: Send + Sync {
 
 #[cfg(test)]
 mod tests {
-    use chrono::{TimeZone, Utc};
+    use auction_time::Timestamp;
 
     use super::{MoogleMailboxSentEntries, MoogleMailboxSentEntry};
 
-    fn entry(mid: &str, sent_at: chrono::DateTime<Utc>) -> MoogleMailboxSentEntry {
+    fn entry(mid: &str, sent_at: auction_time::Timestamp) -> MoogleMailboxSentEntry {
         MoogleMailboxSentEntry {
             external_mail_id: mid.to_owned(),
             recipient: "recipient".to_owned(),
@@ -442,10 +442,10 @@ mod tests {
 
     #[test]
     fn prefix_coverage_excludes_older_candidates_even_with_a_new_match() {
-        let boundary = Utc.with_ymd_and_hms(2026, 11, 7, 6, 0, 0).single().expect("time");
+        let boundary = Timestamp::from_ymd_hms(2026, 11, 7, 6, 0, 0).expect("time");
         // 旧候选的匹配在水位之前，水印后另有同内容匹配；前缀只能覆盖后者，
         // 因此必须拒绝用“前缀中唯一命中”去恢复旧候选。
-        let old_candidate_sending_at = boundary - chrono::Duration::seconds(1);
+        let old_candidate_sending_at = boundary - auction_time::Duration::seconds(1);
         let coverage = MoogleMailboxSentEntries {
             entries: vec![entry("105", boundary)],
             covered_from: Some(boundary),

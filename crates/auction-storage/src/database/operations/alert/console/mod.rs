@@ -12,7 +12,7 @@ use auction_application::operations::{
     OperationsAlertConsoleQuery, OperationsAlertError, OperationsAlertSilenceCommand,
     OperationsAlertWebhookEntry,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use crate::database::DatabaseStore;
 
@@ -26,7 +26,7 @@ impl OperationsAlertConsole for DatabaseStore {
     fn list_alerts(
         &self,
         query: OperationsAlertConsoleQuery,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> ApplicationFuture<'_, OperationsAlertConsolePage> {
         Box::pin(async move {
             query.validate().map_err(ApplicationError::from)?;

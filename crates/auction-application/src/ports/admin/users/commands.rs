@@ -3,7 +3,7 @@
 use std::fmt;
 
 use auction_domain::SettlementId;
-use chrono::{DateTime, SecondsFormat, Utc};
+use auction_time::{SecondsFormat, Timestamp};
 use serde::Serialize;
 use thiserror::Error;
 use uuid::Uuid;
@@ -26,7 +26,7 @@ pub struct RecoveryBuyerBlacklistCommand {
     pub buyer_user_id: Uuid,
     pub public_reason: String,
     pub actor_id: String,
-    pub occurred_at: DateTime<Utc>,
+    pub occurred_at: Timestamp,
 }
 
 impl RecoveryBuyerBlacklistCommand {
@@ -53,7 +53,7 @@ pub struct RecoveryBuyerBlacklistResult {
     pub user: AdminUser,
     pub public_reason: String,
     pub actor_id: String,
-    pub occurred_at: DateTime<Utc>,
+    pub occurred_at: Timestamp,
 }
 
 impl RecoveryBuyerBlacklistResult {
@@ -102,7 +102,7 @@ impl RecoveryBuyerBlacklistResult {
 }
 
 /// 复现 Go `time.Time.MarshalJSON` 使用的 RFC3339Nano：纳秒位尾零全部移除。
-fn legacy_go_time(value: DateTime<Utc>) -> String {
+fn legacy_go_time(value: Timestamp) -> String {
     let encoded = value.to_rfc3339_opts(SecondsFormat::Nanos, true);
     let Some(without_zone) = encoded.strip_suffix('Z') else {
         return encoded;
@@ -175,7 +175,7 @@ pub struct AdminUserCreateCommand {
     pub manual_key: Option<MailLoginKey>,
     pub actor_id: String,
     pub request_id: Option<String>,
-    pub now: DateTime<Utc>,
+    pub now: Timestamp,
 }
 
 impl fmt::Debug for AdminUserCreateCommand {
@@ -236,7 +236,7 @@ pub struct AdminUserMutationCommand {
     pub public_reason: Option<String>,
     pub actor_id: String,
     pub request_id: Option<String>,
-    pub now: DateTime<Utc>,
+    pub now: Timestamp,
 }
 
 /// 改名回滚命令；回滚目标由 rename_id 绑定，版本 fence 保护用户当前状态。
@@ -247,7 +247,7 @@ pub struct AdminRenameRevertCommand {
     pub expected_state_version: i64,
     pub actor_id: String,
     pub request_id: Option<String>,
-    pub now: DateTime<Utc>,
+    pub now: Timestamp,
 }
 
 /// 管理命令写入的密文 key 材料；不含 key 明文。
@@ -267,7 +267,7 @@ pub struct AdminUserCreateWrite {
     pub key: AdminUserKeyWrite,
     pub actor_id: String,
     pub request_id: Option<String>,
-    pub now: DateTime<Utc>,
+    pub now: Timestamp,
 }
 
 /// Users owner 修改写入。
@@ -283,7 +283,7 @@ pub struct AdminUserMutationWrite {
     pub key: Option<AdminUserKeyWrite>,
     pub actor_id: String,
     pub request_id: Option<String>,
-    pub now: DateTime<Utc>,
+    pub now: Timestamp,
 }
 
 /// Users owner 改名回滚写入。
@@ -294,7 +294,7 @@ pub struct AdminRenameRevertWrite {
     pub expected_state_version: i64,
     pub actor_id: String,
     pub request_id: Option<String>,
-    pub now: DateTime<Utc>,
+    pub now: Timestamp,
 }
 
 /// 用户管理 owner 返回的安全结果；响应 key 是对应命令的历史密文信封。

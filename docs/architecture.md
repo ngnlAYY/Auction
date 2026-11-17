@@ -64,6 +64,7 @@ auction-domain（纯领域规则）
 | [crates/auction-observability/README.md](../crates/auction-observability/README.md) | 基础设施 | 日志、指标、tracing、心跳 |
 | [crates/auction-process/README.md](../crates/auction-process/README.md) | 基础设施 | 信号订阅、有界排空、任务守卫、本机 readiness 探针 |
 | [crates/auction-contracts/README.md](../crates/auction-contracts/README.md) | 契约 | 前后端共用的 HTTP/WebSocket DTO（可编译到 wasm32） |
+| [crates/auction-time/README.md](../crates/auction-time/README.md) | 基础类型 | 各层与两个前端共用的 UTC 时刻、时长、文本格式与本地墙上时间换算（可编译到 wasm32） |
 | [crates/auction-web-shared/README.md](../crates/auction-web-shared/README.md) | 前端 | 两个前端共用的浏览器机制、组件与设计 token |
 | [crates/auction-web-public/README.md](../crates/auction-web-public/README.md) / [crates/auction-web-admin/README.md](../crates/auction-web-admin/README.md) | 前端 | 公开站点 / 管理后台（Dioxus 0.7 CSR） |
 | [crates/auction-test-support/README.md](../crates/auction-test-support/README.md) | 测试 | 只进 `dev-dependencies` 的 MoogleMail 与论坛回环替身，回放脱敏的真实页面 |
@@ -82,14 +83,16 @@ auction-domain（纯领域规则）
 | `MailDeliveryShape` | `auction-application` | 普通（非结算）投递载荷的统一判定：来源 × 操作组合闭集、规范 UUID、附件装备 ID、`external_mail_id` 与 `origin_id` 来源身份，寄出再按上一行的模板表核对。`auction-storage` 的入队校验（`mail/delivery/validation`）与内部履约的资产冲突排除（`conflicts/payload`、`conflicts/intake`）、`auction-integrations` 的 MoogleMail 发送前解码（`transport/payload/mail`）三处只调用它，不各自维护载荷形状规则；口径见[docs/guide/mail-flows.md#普通投递载荷口径](guide/mail-flows.md#普通投递载荷口径) |
 | `shutdown_tracing` | `auction-observability` | 三个装配根须先完成业务排空再调用；第二个终止信号直接结束进程，避免可选 exporter 拖延 systemd 停止 |
 | `support/files`、`support/digest`、`support/process` | `auction-cli`（应用内私有） | 备份、部署与数据库命令共用的私有文件/锁文件/一次性证据边界、以目录描述符固定的 `PrivateDirectory`（定时备份状态与部署回执共用的无覆盖发布与按身份删除）与文件系统容量读取，SHA-256 摘要与十六进制判定，以及有界 stderr 的子进程捕获与临时文件清理；不是跨 crate 公共 API |
+| `Timestamp`、`Duration`、`LocalTime`、`parse_clock`/`parse_date`/`parse_minute_datetime` | `auction-time` | 时刻与时长的文本格式（序列化、RFC 3339 各变体、`Display`）逐字节固定，摘要与已入库 JSON 都依赖它；排期与 cron 解析墙上时间只经 `LocalTime::resolve`，配置、回执与外部页面的日期钟点文本只经这组解析函数，各 crate 不自带第二套格式化或解析 |
 | `wire`、`storage`、`timer` | `auction-web-shared` | 两端 decoder 共用 JSON 安全整数边界与严格键集合谓词；`storage` 容错读写 `localStorage`，非 WASM 构建恒为空操作；`timer` 是唯一的一次性定时等待，释放即取消。业务键名与业务校验仍归各 surface |
 
-每项细节由对应模块 README 拥有：见 [crates/auction-http/README.md](../crates/auction-http/README.md)、[crates/auction-application/README.md](../crates/auction-application/README.md)、[crates/auction-observability/README.md](../crates/auction-observability/README.md)、[crates/auction-process/README.md](../crates/auction-process/README.md)、[apps/auction-cli/README.md](../apps/auction-cli/README.md) 与 [crates/auction-web-shared/README.md](../crates/auction-web-shared/README.md)。
+每项细节由对应模块 README 拥有：见 [crates/auction-http/README.md](../crates/auction-http/README.md)、[crates/auction-application/README.md](../crates/auction-application/README.md)、[crates/auction-observability/README.md](../crates/auction-observability/README.md)、[crates/auction-process/README.md](../crates/auction-process/README.md)、[apps/auction-cli/README.md](../apps/auction-cli/README.md)、[crates/auction-time/README.md](../crates/auction-time/README.md) 与 [crates/auction-web-shared/README.md](../crates/auction-web-shared/README.md)。
 
 依赖规则：
 
 - 内部依赖向内：适配器依赖 application/domain，application 的内部依赖只有 domain；domain 不依赖其他内部 crate。各层仍可使用符合职责的第三方基础库。
-- 前端的内部依赖只有 `auction-contracts` 与 `auction-web-shared`，不依赖任何后端 crate。
+- `auction-time` 是例外的基础类型 crate：不含业务规则、不依赖任何内部 crate，上述各层与前端都可以直接依赖它。
+- 前端的内部依赖只有 `auction-contracts`、`auction-web-shared` 与 `auction-time`，不依赖任何后端 crate。
 - Public 二进制不包含 Admin 前端，Admin 不包含 Public 前端，Worker 不包含任何前端；`auction-server` 不依赖 `auction-cli`。发布脚本用 `cargo tree` 检查这些边界。
 - 能力缺失（未配置数据库、密钥或外部凭据）时端口为空，接口明确返回“能力不可用”，不伪造成功或空数据。
 

@@ -5,7 +5,7 @@ use auction_application::core::ApplicationError;
 use auction_application::realtime::{
     PublicRealtimeEvent, RealtimeAdminError, RealtimeReplayCommand, RealtimeReplayResult,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::{Value, json};
 use sqlx::Row;
 use uuid::Uuid;
@@ -118,7 +118,7 @@ async fn replay_postgres_inner(
         storage_error_from(error, "读取 PostgreSQL realtime failure replay 原记录失败")
     })?
     .ok_or_else(|| admin_error(RealtimeAdminError::NotFound))?;
-    let resolved_at: Option<DateTime<Utc>> = failure.try_get("resolved_at").map_err(|error| {
+    let resolved_at: Option<Timestamp> = failure.try_get("resolved_at").map_err(|error| {
         storage_error_from(error, "读取 PostgreSQL realtime failure 解决时间失败")
     })?;
     let existing_replay: Option<Uuid> = failure.try_get("replay_event_id").map_err(|error| {

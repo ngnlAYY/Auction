@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use auction_process::probe_ready;
-use chrono::Utc;
+use auction_time::Timestamp;
 use serde::Serialize;
 
 use crate::app::{print_json, progress};
@@ -65,7 +65,7 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: ServiceArgs) -> anyhow::Re
             let context =
                 ReceiptContext::resolve(receipt.backup_id.as_deref(), receipt.actor.as_deref())?;
             let owner = crate::database::load_owner_secrets(&owner.owner_secrets)?;
-            let started_at = Utc::now();
+            let started_at = Timestamp::now();
             let state = guard::deployment_lock(&units)?;
             let deployment = prepare(config_dir, &systemctl).await?;
             let mut states = Vec::with_capacity(3);
@@ -144,7 +144,7 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: ServiceArgs) -> anyhow::Re
             let context =
                 ReceiptContext::resolve(receipt.backup_id.as_deref(), receipt.actor.as_deref())?;
             let owner = crate::database::load_owner_secrets(&owner.owner_secrets)?;
-            let started_at = Utc::now();
+            let started_at = Timestamp::now();
             let state = guard::deployment_lock(&units)?;
             // 先证明新配置与 unit 绑定可用，再停止当前服务。
             let deployment = prepare(config_dir, &systemctl).await?;

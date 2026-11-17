@@ -61,8 +61,8 @@ pub(crate) fn valid_base_id(backup_id: &str) -> bool {
 }
 
 /// 由当前 UTC 时刻派生备份 ID；同一秒内的重复运行得到同一身份。
-pub(crate) fn base_id(now: chrono::DateTime<chrono::Utc>) -> String {
-    format!("{BASE_ID_PREFIX}{}", now.format("%Y%m%dT%H%M%SZ"))
+pub(crate) fn base_id(now: auction_time::Timestamp) -> String {
+    format!("{BASE_ID_PREFIX}{}", now.strftime("%Y%m%dT%H%M%SZ"))
 }
 
 pub(crate) fn base_cipher_path(directory: &Path, backup_id: &str) -> PathBuf {

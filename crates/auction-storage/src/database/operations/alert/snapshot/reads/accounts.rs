@@ -5,7 +5,7 @@ use auction_application::operations::{
     OperationsAlertCredentialSnapshot, OperationsAlertForumSnapshot, OperationsAlertMailSnapshot,
     OperationsAlertNotificationSnapshot,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Row;
 
 use super::UNDISPOSED;
@@ -13,7 +13,7 @@ use crate::database::storage_error_from;
 
 pub(super) async fn mail_snapshot(
     pool: &crate::database::TrackedPool<sqlx::Postgres>,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<OperationsAlertMailSnapshot, ApplicationError> {
     // 显式暂停的邮箱不算停滞，Admin 的暂停是决定而不是故障。
     // 没有任何轮询行表示尚未开始轮询（首次轮询会建立行），此时不能凭空判停。
@@ -103,7 +103,7 @@ pub(super) async fn credential_snapshot(
 
 pub(super) async fn forum_snapshot(
     pool: &crate::database::TrackedPool<sqlx::Postgres>,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<OperationsAlertForumSnapshot, ApplicationError> {
     // 主题发布失败是终态；私信只有进入 manual_reconcile 才算失败，未开始发送的退役不算。
     let row = sqlx::query(
@@ -170,7 +170,7 @@ pub(super) async fn forum_snapshot(
 
 pub(super) async fn notification_snapshot(
     pool: &crate::database::TrackedPool<sqlx::Postgres>,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<OperationsAlertNotificationSnapshot, ApplicationError> {
     // 结算与运维告警自身不属于“非结算通知”；已处置终态与 delivery 来源共用同一谓词。
     static QUERY: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {

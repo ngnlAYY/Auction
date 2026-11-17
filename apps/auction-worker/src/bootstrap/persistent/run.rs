@@ -30,7 +30,7 @@ use auction_storage::{
     DatabaseAdminMailCommands, DatabaseAuctionLifecycleCommands, DatabaseCompetitionCommands,
     DatabaseSettlementCommands, DatabaseStore,
 };
-use chrono::Utc;
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use super::profile::{configure_schedule_runtime, database_profile};
@@ -206,7 +206,7 @@ pub(crate) async fn run_worker(
         )
         .with_funding_policy_reader(store.clone())
         .with_bot_players(config.bot_players.clone())
-        .with_evidence_poll_delay(chrono::Duration::seconds(
+        .with_evidence_poll_delay(auction_time::Duration::seconds(
             i64::try_from(config.worker.fulfillment.evidence_poll_seconds).unwrap_or(300),
         ));
         if let Some(internal_evidence_reader) = internal_evidence_reader {
@@ -265,8 +265,8 @@ pub(crate) async fn run_worker(
                 process_role: ProcessRole::Worker,
                 instance_id: worker_id.clone(),
                 version: env!("CARGO_PKG_VERSION").to_owned(),
-                started_at: Utc::now(),
-                ttl: chrono::Duration::seconds(30),
+                started_at: Timestamp::now(),
+                ttl: auction_time::Duration::seconds(30),
             },
             Arc::clone(&heartbeat_health),
             tracing_health,

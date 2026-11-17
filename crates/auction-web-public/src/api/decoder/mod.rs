@@ -16,7 +16,7 @@ use serde_json::{Map, Value};
 pub(crate) use auction_web_shared::wire::json_keys_only;
 
 #[cfg(not(target_arch = "wasm32"))]
-use chrono::DateTime;
+use auction_time::Timestamp;
 
 mod account;
 mod build_hello;
@@ -233,7 +233,7 @@ fn time(value: Option<&Value>) -> bool {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn time(value: Option<&Value>) -> bool {
-    string(value).is_some_and(|value| DateTime::parse_from_rfc3339(value).is_ok())
+    string(value).is_some_and(|value| Timestamp::parse_from_rfc3339(value).is_ok())
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -247,7 +247,7 @@ fn time_value(value: Option<&Value>) -> Option<f64> {
 #[cfg(not(target_arch = "wasm32"))]
 fn time_value(value: Option<&Value>) -> Option<f64> {
     string(value)
-        .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+        .and_then(|value| Timestamp::parse_from_rfc3339(value).ok())
         .map(|value| value.timestamp_millis() as f64)
 }
 

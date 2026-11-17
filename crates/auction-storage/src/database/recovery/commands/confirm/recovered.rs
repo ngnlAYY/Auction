@@ -10,7 +10,7 @@
 //! 整个确认事务回滚，交给人工核对。
 
 use auction_application::recovery::{RecoveryCommandError, RecoveryConfirmationCommand};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
@@ -112,7 +112,7 @@ pub(in crate::database::recovery::commands) async fn close_recovered_dependents(
     recovery: &RecoveryRow,
     take: &ActionRow,
     command: &RecoveryConfirmationCommand,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<(), RecoveryCommandError> {
     let handoff = recovery.equipment_obligation_id.ok_or(RecoveryCommandError::NotConfirmable)?;
     // 卖方货款已开始执行或已有支出：撤销会与之冲突，交给人工核对。

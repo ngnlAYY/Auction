@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use auction_application::admin::{AdminCredentialRuntimeOwnership, AdminCredentialRuntimeWriter};
 use auction_application::core::ApplicationFuture;
 use auction_application::settlement::InternalEvidenceError;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use super::{MoogleMailCredentialSet, MoogleMailRuntimeCredential};
@@ -19,7 +19,7 @@ const COOKIE: &str = "ipb_member_id=fixture; ipb_pass_hash=fixture";
 struct NoInvalidation;
 
 impl AdminCredentialRuntimeWriter for NoInvalidation {
-    fn mark_invalid(&self, _credential_id: Uuid, _now: DateTime<Utc>) -> ApplicationFuture<'_, ()> {
+    fn mark_invalid(&self, _credential_id: Uuid, _now: Timestamp) -> ApplicationFuture<'_, ()> {
         Box::pin(async { Ok(()) })
     }
 }

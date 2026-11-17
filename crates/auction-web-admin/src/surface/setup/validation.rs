@@ -3,7 +3,6 @@
 use std::{net::IpAddr, str::FromStr};
 
 use auction_contracts::{SetupDatabaseRequest, SetupRequest, SetupScheduleRequest};
-use chrono::{NaiveTime, Timelike};
 use url::{Host, Url};
 
 use super::draft::{SetupDraft, SetupField};
@@ -93,7 +92,7 @@ fn issue(draft: &SetupDraft, field: SetupField) -> Option<&'static str> {
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'_' | b'-' | b'+')),
         _ if field.is_weekday() => SetupField::WEEKDAYS.iter().any(|(day, _)| *day == value),
-        _ if field.is_schedule_time() => schedule_time(value).is_some(),
+        _ if field.is_schedule_time() => schedule_minute(value).is_some(),
         SetupField::DatabaseHost => database_text(value) && valid_host(value),
         SetupField::DatabaseUsername | SetupField::DatabasePassword => database_text(value),
         SetupField::DatabaseName => database_text(value) && !matches!(value, "." | ".."),
@@ -122,8 +121,7 @@ fn issue(draft: &SetupDraft, field: SetupField) -> Option<&'static str> {
 fn schedule_order_issue(draft: &SetupDraft) -> Option<&'static str> {
     let minute = |day, time| {
         let day = SetupField::WEEKDAYS.iter().position(|(value, _)| *value == draft.value(day))?;
-        let time = schedule_time(draft.value(time))?;
-        Some(u32::try_from(day).ok()? * 24 * 60 + time.hour() * 60 + time.minute())
+        Some(u32::try_from(day).ok()? * 24 * 60 + schedule_minute(draft.value(time))?)
     };
     let preview = minute(SetupField::SchedulePreviewDay, SetupField::SchedulePreviewTime)?;
     let open = minute(SetupField::ScheduleOpenDay, SetupField::ScheduleOpenTime)?;
@@ -131,9 +129,17 @@ fn schedule_order_issue(draft: &SetupDraft) -> Option<&'static str> {
     (preview + 120 > open || open >= end).then_some("setup-schedule-order")
 }
 
-fn schedule_time(value: &str) -> Option<NaiveTime> {
-    let time = NaiveTime::parse_from_str(value, "%H:%M").ok()?;
-    (time.format("%H:%M").to_string() == value).then_some(time)
+/// 规范的 `HH:MM`（各两位、补零）是当天的第几分钟；其他写法一律不接受。
+fn schedule_minute(value: &str) -> Option<u32> {
+    let [hour_tens, hour_ones, b':', minute_tens, minute_ones] = value.as_bytes() else {
+        return None;
+    };
+    let pair = |tens: &u8, ones: &u8| {
+        (tens.is_ascii_digit() && ones.is_ascii_digit())
+            .then(|| u32::from(tens - b'0') * 10 + u32::from(ones - b'0'))
+    };
+    let (hour, minute) = (pair(hour_tens, hour_ones)?, pair(minute_tens, minute_ones)?);
+    (hour < 24 && minute < 60).then_some(hour * 60 + minute)
 }
 
 fn database_text(value: &str) -> bool {

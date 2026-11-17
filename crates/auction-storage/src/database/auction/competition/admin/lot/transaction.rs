@@ -5,7 +5,7 @@ use auction_application::admin::{
 };
 use auction_application::core::{CompetitionTransactionError, StoredCommand};
 use auction_domain::{AuctionId, LotId};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Row;
 
 use super::{
@@ -44,7 +44,7 @@ impl AdminLotUpdateTransaction for PostgresCompetitionTransaction {
     fn update_admin_lot(
         &mut self,
         command: &AdminLotUpdateCommand,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> impl Future<Output = Result<AdminLotSummary, CompetitionTransactionError>> + Send {
         async move { update_admin_lot_inner(self, command, now).await }
     }
@@ -53,7 +53,7 @@ impl AdminLotUpdateTransaction for PostgresCompetitionTransaction {
         &mut self,
         auction_id: AuctionId,
         expected_revision: i64,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> impl Future<Output = Result<i64, CompetitionTransactionError>> + Send {
         async move {
             // 拍卖和 lot 使用同一时间单调性边界，避免来源时间领先时回退拍卖更新时间。
@@ -89,7 +89,7 @@ impl AdminLotUpdateTransaction for PostgresCompetitionTransaction {
         &mut self,
         command: &AdminLotUpdateCommand,
         snapshot: &AdminLotUpdateSnapshot,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> impl Future<Output = Result<(), CompetitionTransactionError>> + Send {
         async move { insert_withdrawn_return_obligation_inner(self, command, snapshot, now).await }
     }

@@ -1,6 +1,6 @@
 //! 结算履约 `enqueued` 阶段：读取 MoogleMail Sent 证据并推进对账终态。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use super::authorization::{AuthorizationResult, authorize_enqueued_recipient};
 use super::evidence::validate_sent_evidence;
@@ -35,8 +35,8 @@ impl SettlementFulfillmentService {
     pub(super) async fn reconcile_now(
         &self,
         claim: SettlementFulfillmentClaim,
-        observed_at: DateTime<Utc>,
-        retry_at: DateTime<Utc>,
+        observed_at: Timestamp,
+        retry_at: Timestamp,
     ) -> Result<SettlementFulfillmentReconcileResult, ApplicationError> {
         validate_claim(&claim)?;
         if claim.state != SettlementFulfillmentState::Enqueued
@@ -308,7 +308,7 @@ mod tests {
         AuctionId, CommandId, EquipmentId, LotId, SettlementId, SettlementObligationKind,
         SettlementWorld,
     };
-    use chrono::{DateTime, Duration, TimeZone, Utc};
+    use auction_time::{Duration, Timestamp};
     use uuid::Uuid;
 
     use self::super::super::intent::{
@@ -336,8 +336,8 @@ mod tests {
     const MAIL_ID: &str = "700001";
 
     /// 观察时刻恰在 5 分钟追踪窗口边界上，既有节奏是下一个窗口（300 秒后）。
-    fn observed_at() -> DateTime<Utc> {
-        Utc.timestamp_opt(1_700_000_100, 0).single().expect("时间戳必须在范围内")
+    fn observed_at() -> Timestamp {
+        Timestamp::from_timestamp(1_700_000_100, 0).expect("时间戳必须在范围内")
     }
 
     fn unavailable<T>() -> ApplicationFuture<'static, T> {
@@ -355,8 +355,8 @@ mod tests {
         fn claim_due(
             &self,
             _worker_id: String,
-            _now: DateTime<Utc>,
-            _lease_until: DateTime<Utc>,
+            _now: Timestamp,
+            _lease_until: Timestamp,
             _limit: u16,
         ) -> ApplicationFuture<'_, Vec<SettlementFulfillmentClaim>> {
             unavailable()
@@ -366,7 +366,7 @@ mod tests {
             &'a self,
             _claim: SettlementFulfillmentClaim,
             _preparation: SettlementDeliveryPreparation,
-            _prepared_at: DateTime<Utc>,
+            _prepared_at: Timestamp,
             _custody: Option<(&'a SettlementInternalEvidenceSnapshot, std::time::Instant)>,
         ) -> ApplicationFuture<'a, SettlementFulfillmentResult> {
             unavailable()
@@ -377,7 +377,7 @@ mod tests {
             _claim: SettlementFulfillmentClaim,
             _activate_command_id: CommandId,
             _activate_request_hash: RequestHash,
-            _activated_at: DateTime<Utc>,
+            _activated_at: Timestamp,
             _custody: Option<(&'a SettlementInternalEvidenceSnapshot, std::time::Instant)>,
         ) -> ApplicationFuture<'a, SettlementFulfillmentActivationResult> {
             unavailable()
@@ -504,22 +504,22 @@ mod tests {
         fn read_balance(
             &self,
             _world: SettlementWorld,
-            _observed_at: DateTime<Utc>,
+            _observed_at: Timestamp,
         ) -> ApplicationFuture<'_, SettlementFulfillmentBalanceEvidence> {
             unavailable()
         }
     }
 
-    struct FixedClock(DateTime<Utc>);
+    struct FixedClock(Timestamp);
 
     impl Clock for FixedClock {
-        fn now(&self) -> DateTime<Utc> {
+        fn now(&self) -> Timestamp {
             self.0
         }
     }
 
     /// 已寄出、未领取的卖方货款 claim；投递快照与 canonical 意图一致，`sent_at` 为投递完成时刻。
-    fn sent_payout(sent_at: Option<DateTime<Utc>>) -> SettlementFulfillmentClaim {
+    fn sent_payout(sent_at: Option<Timestamp>) -> SettlementFulfillmentClaim {
         let obligation_id = SettlementId::from_uuid(Uuid::from_u128(0x1001));
         let claimed_at = observed_at() - Duration::seconds(1);
         let mut claim = SettlementFulfillmentClaim {
@@ -599,7 +599,7 @@ mod tests {
     }
 
     /// 执行一次 enqueued 对账，返回持久化延期的间隔与原因码。
-    fn defer_after(read: SentRead, sent_at: Option<DateTime<Utc>>) -> (Duration, String) {
+    fn defer_after(read: SentRead, sent_at: Option<Timestamp>) -> (Duration, String) {
         let claim = sent_payout(sent_at);
         let evidence = SettlementFulfillmentSentEvidence {
             external_mail_id: MAIL_ID.to_owned(),
@@ -692,8 +692,8 @@ mod tests {
     /// 带冻结付款期限。COD 沿用三变量旧载荷，免去冻结结算明细；载体付款带 1 Credit 载体。
     fn sent_payment(
         kind: SettlementObligationKind,
-        sent_at: DateTime<Utc>,
-        payment_deadline_at: DateTime<Utc>,
+        sent_at: Timestamp,
+        payment_deadline_at: Timestamp,
     ) -> SettlementFulfillmentClaim {
         let mut claim = sent_payout(Some(sent_at));
         claim.kind = kind;

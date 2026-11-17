@@ -2,7 +2,7 @@
 
 use auction_application::admin::{AdminIntakeError, AdminIntakeSourceSnapshot, CanonicalEquipment};
 use auction_domain::EquipmentKey;
-use chrono::Utc;
+use auction_time::Timestamp;
 
 use super::super::model::{EquipmentFacts, canonical_facts, canonical_fingerprint, sha256};
 use super::diagnostics;
@@ -30,7 +30,7 @@ pub(crate) fn canonical_json_snapshot(
         level: facts.level.legacy_level(),
         tradeable: facts.tradeable,
         attributes,
-        collected_at: Utc::now(),
+        collected_at: Timestamp::now(),
         key,
     })
 }
@@ -55,7 +55,7 @@ pub(super) fn facts_to_snapshot(
         level: facts.level.legacy_level(),
         tradeable: facts.tradeable,
         attributes,
-        collected_at: Utc::now(),
+        collected_at: Timestamp::now(),
         key,
     }
 }

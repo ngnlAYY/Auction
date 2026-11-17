@@ -15,7 +15,7 @@ use auction_application::mail::{
 };
 use auction_application::settlement::{SYSTEM_RETURN_SENDER, SettlementReturnAssets};
 use auction_domain::{CommandId, deterministic_uuid};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::Serialize;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
@@ -131,7 +131,7 @@ pub(super) async fn insert_action(
     tx: &mut Transaction<'_, Postgres>,
     case: &CaseRow,
     assets: &SettlementReturnAssets,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<(), ReturnTransactionError> {
     sqlx::query(
         r#"INSERT INTO public.settlement_return_actions
@@ -214,7 +214,7 @@ pub(super) fn take_activation(
     action: &ActionRow,
     delivery_id: Uuid,
     prepare_request_hash: RequestHash,
-    activated_at: DateTime<Utc>,
+    activated_at: Timestamp,
 ) -> Result<MailDeliveryActivation, ReturnTransactionError> {
     let prepare_digest = prepare_request_hash.as_bytes();
     let activate_request_hash = RequestHash::from_request(

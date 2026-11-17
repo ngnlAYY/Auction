@@ -1,6 +1,6 @@
 //! 运行时开关 DTO；持久记录在 HTTP 边界显式映射。Admin 只能写外部访问暂停。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -16,7 +16,7 @@ pub struct RuntimeSwitchIntentDto {
     pub operation: Option<String>,
     /// 最新 set 的值。
     pub value: Option<Value>,
-    pub expires_at: Option<DateTime<Utc>>,
+    pub expires_at: Option<Timestamp>,
     /// 操作者声明。
     pub actor_id: Option<String>,
     /// 实际入口。
@@ -43,7 +43,7 @@ pub struct RuntimeSwitchAppliedDto {
 #[serde(deny_unknown_fields)]
 pub struct RuntimeSwitchListResponse {
     /// 本次意图查询的数据库时间。
-    pub database_time: DateTime<Utc>,
+    pub database_time: Timestamp,
     /// 数据库最新事实投影。
     pub database_intent: Vec<RuntimeSwitchIntentDto>,
     /// Admin 最后成功快照年龄；空值为从未读取成功。
@@ -67,7 +67,7 @@ pub struct AdminExternalAccessPauseRequest {
     pub paused: bool,
     /// 暂停的绝对 UTC 期限；恢复时必须为空。
     #[serde(default)]
-    pub expires_at: Option<DateTime<Utc>>,
+    pub expires_at: Option<Timestamp>,
     /// 单行非敏感原因。
     pub reason: String,
 }

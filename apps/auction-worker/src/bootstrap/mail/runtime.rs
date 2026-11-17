@@ -18,7 +18,7 @@ use auction_jobs::{
     MailPollRuntimeBindings, MailPollSchedules, PhasedMailSchedule, mail_world_phase,
 };
 use auction_storage::DatabaseStore;
-use chrono::Utc;
+use auction_time::Timestamp;
 
 struct MoogleMailWorkerGateway {
     gateway: Arc<MoogleMailGateway>,
@@ -56,10 +56,10 @@ pub(super) async fn build_poll_runtimes(
     let world_configs = mail_config.configured_worlds();
     // 两个世界即冻结相位；在线切换不能等待新的启动周期，且单世界明确使用零相位。
     let isekai_phase = if world_configs.len() > 1 {
-        mail_world_phase(schedule.as_ref(), Utc::now())
+        mail_world_phase(schedule.as_ref(), Timestamp::now())
             .context("MoogleMail 日程无法计算两个未来触发时刻")?
     } else {
-        chrono::Duration::zero()
+        auction_time::Duration::zero()
     };
     let store_port: Arc<dyn MailPollStore> = store.clone();
     let journal: Arc<dyn auction_application::mail::MailPollReadJournal> = store.clone();
@@ -68,8 +68,11 @@ pub(super) async fn build_poll_runtimes(
     for world_config in world_configs {
         let world = MoogleMailWorld::parse(&world_config.world_id)
             .context("MoogleMail world_id 必须是 main 或 isekai")?;
-        let phase =
-            if world == MoogleMailWorld::Isekai { isekai_phase } else { chrono::Duration::zero() };
+        let phase = if world == MoogleMailWorld::Isekai {
+            isekai_phase
+        } else {
+            auction_time::Duration::zero()
+        };
         let world_schedule = Arc::clone(&schedule);
         let world_phased_schedule: Arc<dyn RecurringSchedule> = if phase.is_zero() {
             Arc::clone(&schedule)
@@ -102,7 +105,7 @@ pub(super) async fn build_poll_runtimes(
             gateway = gateway.with_forum_profile_reader(reader.clone());
         }
         let gateway = Arc::new(gateway);
-        let now = Utc::now();
+        let now = Timestamp::now();
         // 初始 due 只由启动基线选择日程；运行中切换绝不重写 mail_poll_state.next_poll_at。
         let initial_schedule = if mail_config.poll_isolation_enabled {
             &world_phased_schedule

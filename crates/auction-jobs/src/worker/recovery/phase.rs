@@ -4,7 +4,7 @@ use auction_application::core::ApplicationFuture;
 use auction_application::core::Clock;
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_observability::{WorkerLoop, WorkerResult};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use crate::worker::diagnostics;
 use crate::worker::runtime::{PersistentWorker, merge_worker_result};
@@ -15,7 +15,7 @@ pub(super) async fn run_phase<'a, C, T>(
     worker: &PersistentWorker<C>,
     batch_result: &mut WorkerResult,
     phase: (&'static str, &'static str),
-    next_due: impl Fn(DateTime<Utc>) -> ApplicationFuture<'a, Option<T>>,
+    next_due: impl Fn(Timestamp) -> ApplicationFuture<'a, Option<T>>,
     record: impl Fn(&T),
 ) where
     C: Clock + 'static,

@@ -525,8 +525,8 @@ fn session_ended_by_revocation(identity: &PublicSession) -> bool {
         return true;
     };
     // 截止字符串不可解析时保守地不提示，避免把未知状态当作撤销。
-    chrono::DateTime::parse_from_rfc3339(expires_at)
-        .is_ok_and(|expiry| expiry.with_timezone(&chrono::Utc) > estimated_now())
+    auction_time::Timestamp::parse_from_rfc3339(expires_at)
+        .is_ok_and(|expiry| expiry > estimated_now())
 }
 
 /// 旧版只把显式 Isekai 视为第二世界；缺失、Main 与非法 query 都在内存回退 Main，地址栏保持原值。

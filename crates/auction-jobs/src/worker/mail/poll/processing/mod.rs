@@ -9,7 +9,7 @@ use auction_application::core::diagnostics::{
 };
 use auction_application::mail::MailPollClaim;
 use auction_observability::WorkerResult;
-use chrono::Duration as ChronoDuration;
+use auction_time::TimeDelta;
 
 use super::cycle::MailPollProcessContext;
 use crate::worker::diagnostics as worker_diagnostics;
@@ -47,7 +47,7 @@ where
     };
     lease_deadline = lease_deadline.min(observed_deadline);
     let lease_span = context.config.lease_duration;
-    let Ok(lease_duration) = ChronoDuration::from_std(context.config.lease_duration) else {
+    let Ok(lease_duration) = TimeDelta::from_std(context.config.lease_duration) else {
         return WorkerResult::Error;
     };
     let store = Arc::clone(&context.store);

@@ -136,7 +136,7 @@ where
         let limit = MailNoticeLimit {
             templates,
             since: self.clock.now()
-                - chrono::Duration::seconds(bounded_window_seconds(
+                - auction_time::Duration::seconds(bounded_window_seconds(
                     policy.account_reply_window_seconds,
                 )),
             maximum: 1,

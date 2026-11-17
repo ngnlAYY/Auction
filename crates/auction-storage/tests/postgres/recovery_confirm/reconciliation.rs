@@ -14,7 +14,7 @@ use auction_application::recovery::{
     RecoveryCommandRepository, RecoveryConfirmationAction, RecoveryResolutionStore,
 };
 use auction_domain::SettlementWorld;
-use chrono::Utc;
+use auction_time::Timestamp;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -26,7 +26,7 @@ use crate::support;
 fn observation(world: SettlementWorld) -> AssetArmoryObservation {
     AssetArmoryObservation {
         world,
-        observed_at: Utc::now(),
+        observed_at: Timestamp::now(),
         equipment_ids: Vec::new(),
         complete: true,
         failure_code: None,
@@ -75,7 +75,7 @@ async fn postgres_reconciliation_counts_recovered_equipment_where_recovery_place
 
     // 三次退回：Worker 把装备退回卖家，卖家随后领取了退回邮件。
     let returned = sale(pool, "main", 7_900_002).await;
-    store.advance_due_cod_return(Utc::now()).await.expect("推进 COD 退回").expect("退回卖家");
+    store.advance_due_cod_return(Timestamp::now()).await.expect("推进 COD 退回").expect("退回卖家");
     let withdrawn: Uuid = sqlx::query_scalar(
         "SELECT id FROM public.settlement_obligations
          WHERE lot_id = (SELECT lot_id FROM public.settlement_recoveries WHERE id = $1)

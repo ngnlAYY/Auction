@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use auction_domain::SettlementWorld;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use crate::errors::ApplicationError;
 use crate::ports::core::ApplicationFuture;
@@ -33,7 +33,7 @@ impl AssetReconciliationService {
 }
 
 impl AssetReconciliationPort for AssetReconciliationService {
-    fn reconcile(&self, now: DateTime<Utc>) -> ApplicationFuture<'_, AssetReconciliationOutcome> {
+    fn reconcile(&self, now: Timestamp) -> ApplicationFuture<'_, AssetReconciliationOutcome> {
         Box::pin(async move {
             if now.timestamp_nanos_opt().is_none() {
                 return Err(ApplicationError::Repository(RepositoryError::Failed(
@@ -74,7 +74,7 @@ impl AssetReconciliationPort for AssetReconciliationService {
 
 fn unavailable(
     world: SettlementWorld,
-    observed_at: DateTime<Utc>,
+    observed_at: Timestamp,
     failure_code: &'static str,
 ) -> AssetArmoryObservation {
     AssetArmoryObservation {

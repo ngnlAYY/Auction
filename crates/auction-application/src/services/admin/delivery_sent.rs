@@ -85,7 +85,7 @@ impl DeliverySentProofService {
 mod tests {
     use std::sync::Mutex;
 
-    use chrono::{TimeZone, Utc};
+    use auction_time::Timestamp;
 
     use super::*;
     use crate::ports::core::ApplicationFuture;
@@ -187,7 +187,7 @@ mod tests {
     }
 
     fn snapshot(delivery_id: Uuid) -> DeliveryAdminSnapshot {
-        let time = Utc.with_ymd_and_hms(2026, 11, 2, 1, 14, 0).single().expect("timestamp");
+        let time = Timestamp::from_ymd_hms(2026, 11, 2, 1, 14, 0).expect("timestamp");
         DeliveryAdminSnapshot {
             id: delivery_id,
             origin_kind: "settlement".to_owned(),
@@ -225,8 +225,8 @@ mod tests {
             sender_name: "Auction".to_owned(),
             recipient: "Sample".to_owned(),
             subject: "Payment".to_owned(),
-            sent_minute: Utc.with_ymd_and_hms(2026, 11, 2, 1, 14, 0).single().expect("minute"),
-            observed_at: Utc.with_ymd_and_hms(2026, 11, 2, 1, 20, 0).single().expect("observed"),
+            sent_minute: Timestamp::from_ymd_hms(2026, 11, 2, 1, 14, 0).expect("minute"),
+            observed_at: Timestamp::from_ymd_hms(2026, 11, 2, 1, 20, 0).expect("observed"),
             original_body_digest: [1; 32],
             observed_body_digest: [1; 32],
             remaining_credits: 0,
@@ -242,7 +242,7 @@ mod tests {
             reference: format!("mailbox_sweep:{mid}"),
             kind: "mailbox_sweep".to_owned(),
             external_mail_id: Some(mid.to_owned()),
-            observed_at: Utc.with_ymd_and_hms(2026, 11, 2, 1, 20, 0).single(),
+            observed_at: Timestamp::from_ymd_hms(2026, 11, 2, 1, 20, 0),
             sent_at: None,
             recipient: Some("Sample".to_owned()),
             subject: Some("Payment".to_owned()),

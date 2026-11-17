@@ -2,7 +2,7 @@
 
 use anyhow::Context;
 use auction_integrations::R2BackupStore;
-use chrono::Utc;
+use auction_time::Timestamp;
 
 use super::super::{journal::Journal, model::RunReceipt};
 use super::{
@@ -78,7 +78,7 @@ impl Transfer<'_> {
                 manifest: result.manifest.clone().context("缺少 manifest 副本")?,
                 plaintext_manifest_sha256: item.archive.manifest_sha256.clone(),
                 age_version: item.age_version.clone(),
-                verified_at: Utc::now(),
+                verified_at: Timestamp::now(),
                 scope: result.scope.clone(),
             };
             progress_mut(item, monthly).record = Some(record);

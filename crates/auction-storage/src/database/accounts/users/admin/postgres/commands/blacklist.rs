@@ -7,7 +7,7 @@ use auction_application::admin::{
 use auction_application::core::{ApplicationError, RequestHash};
 use auction_application::core::{TransactionFailure, TransactionPolicy};
 use auction_domain::{CommandId, deterministic_uuid};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::json;
 use sqlx::Row;
 use sqlx::types::Json;
@@ -159,7 +159,7 @@ pub(super) async fn freeze_blacklist_proxies_postgres(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     source_command_id: Uuid,
     user_id: Uuid,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<(), ApplicationError> {
     let locked_lots = sqlx::query(
         "SELECT lot.id
@@ -207,7 +207,7 @@ pub(super) async fn freeze_blacklist_proxies_postgres(
         let mode: String = row.try_get("mode").map_err(map_storage_error)?;
         let status: String = row.try_get("status").map_err(map_storage_error)?;
         let state_version: i64 = row.try_get("state_version").map_err(map_storage_error)?;
-        let last_transition_at: DateTime<Utc> =
+        let last_transition_at: Timestamp =
             row.try_get("last_transition_at").map_err(map_storage_error)?;
         // 新授权可能晚于历史 recovery claim；冻结快照和追加转换共用单调副作用时间，
         // 确定性子命令仍使用原 now，不能改变命令重放身份或历史证据。
@@ -312,7 +312,7 @@ pub(super) async fn freeze_blacklist_proxies_postgres(
 pub(super) async fn revoke_public_sessions_postgres(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     user_id: Uuid,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<(), ApplicationError> {
     sqlx::query(
         "UPDATE public.public_sessions

@@ -10,7 +10,7 @@ use auction_application::mail::{
     MailPollStore,
 };
 use auction_domain::valid_text;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use crate::database::DatabaseStore;
 use crate::database::storage_error;
@@ -69,7 +69,7 @@ impl MailPollStore for DatabaseStore {
         mailbox_key: String,
         world_id: String,
         external_mail_id: String,
-        received_at: DateTime<Utc>,
+        received_at: Timestamp,
     ) -> ApplicationFuture<'_, MailPollCompletion> {
         Box::pin(async move {
             if !valid_text(&mailbox_key, 256)
@@ -93,8 +93,8 @@ impl MailPollStore for DatabaseStore {
     fn ensure_state(
         &self,
         mailbox_key: String,
-        now: DateTime<Utc>,
-        scheduled_next_at: DateTime<Utc>,
+        now: Timestamp,
+        scheduled_next_at: Timestamp,
         retry_maximum: std::time::Duration,
     ) -> ApplicationFuture<'_, AdminMailPollState> {
         Box::pin(async move {
@@ -118,8 +118,8 @@ impl MailPollStore for DatabaseStore {
         &self,
         mailbox_key: String,
         worker_id: String,
-        now: DateTime<Utc>,
-        lease_until: DateTime<Utc>,
+        now: Timestamp,
+        lease_until: Timestamp,
         limit: u16,
         force: bool,
     ) -> ApplicationFuture<'_, Vec<MailPollClaim>> {
@@ -156,8 +156,8 @@ impl MailPollStore for DatabaseStore {
     fn renew(
         &self,
         claim: MailPollClaim,
-        now: DateTime<Utc>,
-        lease_until: DateTime<Utc>,
+        now: Timestamp,
+        lease_until: Timestamp,
     ) -> ApplicationFuture<'_, MailPollClaim> {
         Box::pin(async move {
             if !claim.validate()
@@ -175,7 +175,7 @@ impl MailPollStore for DatabaseStore {
         &self,
         claim: MailPollClaim,
         mut batch: MailPollBatch,
-        retry_at: DateTime<Utc>,
+        retry_at: Timestamp,
         failure_code: String,
         safe_detail: String,
     ) -> ApplicationFuture<'_, AdminMailPollState> {
@@ -199,7 +199,7 @@ impl MailPollStore for DatabaseStore {
     fn fail(
         &self,
         claim: MailPollClaim,
-        retry_at: DateTime<Utc>,
+        retry_at: Timestamp,
         failure_code: String,
         safe_detail: String,
     ) -> ApplicationFuture<'_, AdminMailPollState> {

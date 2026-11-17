@@ -1,6 +1,6 @@
 //! Worker 生命周期唤醒提示：只读计算下一次可领取时刻，不加锁、不领取，也不改变调度事实。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Postgres;
 
 use super::mapping::map_storage_error;
@@ -10,9 +10,9 @@ use crate::database::TrackedPool;
 /// 取较晚值。只返回严格晚于 `now` 的时刻；已过期仍未领取的轮次交给常规轮询，避免空转。
 pub(super) async fn next_claimable_postgres(
     pool: &TrackedPool<Postgres>,
-    now: DateTime<Utc>,
-) -> Result<Option<DateTime<Utc>>, auction_application::core::RepositoryError> {
-    sqlx::query_scalar::<_, Option<DateTime<Utc>>>(
+    now: Timestamp,
+) -> Result<Option<Timestamp>, auction_application::core::RepositoryError> {
+    sqlx::query_scalar::<_, Option<Timestamp>>(
         "SELECT MIN(GREATEST(candidate.due_at, candidate.lease_until))
          FROM (
              SELECT round.lease_until,

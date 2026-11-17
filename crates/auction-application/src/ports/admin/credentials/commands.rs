@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -46,7 +46,7 @@ pub struct AdminCredentialImportCommand {
     /// CLI 装配根采集的身份；Admin 入口不提供。
     pub operator_identity: Option<crate::ports::core::CliOperatorIdentity>,
     pub request_id: Option<String>,
-    pub now: DateTime<Utc>,
+    pub now: Timestamp,
 }
 
 impl fmt::Debug for AdminCredentialImportCommand {
@@ -74,7 +74,7 @@ pub struct AdminCredentialRenameCommand {
     pub label: String,
     pub actor_id: String,
     pub request_id: Option<String>,
-    pub now: DateTime<Utc>,
+    pub now: Timestamp,
 }
 
 /// 凭据状态修改命令。
@@ -86,7 +86,7 @@ pub struct AdminCredentialStatusCommand {
     pub status: AdminCredentialStatus,
     pub actor_id: String,
     pub request_id: Option<String>,
-    pub now: DateTime<Utc>,
+    pub now: Timestamp,
 }
 
 /// 凭据删除命令。
@@ -97,7 +97,7 @@ pub struct AdminCredentialDeleteCommand {
     pub expected_state_version: i64,
     pub actor_id: String,
     pub request_id: Option<String>,
-    pub now: DateTime<Utc>,
+    pub now: Timestamp,
 }
 
 /// Admin 凭据导入写入；只含密文信封。
@@ -113,7 +113,7 @@ pub struct AdminCredentialImportWrite {
     pub actor_id: String,
     pub operator_identity: Option<crate::ports::core::CliOperatorIdentity>,
     pub request_id: Option<String>,
-    pub now: DateTime<Utc>,
+    pub now: Timestamp,
 }
 
 /// Admin 凭据标签/状态修改写入。
@@ -128,7 +128,7 @@ pub struct AdminCredentialMutationWrite {
     pub status: Option<AdminCredentialStatus>,
     pub actor_id: String,
     pub request_id: Option<String>,
-    pub now: DateTime<Utc>,
+    pub now: Timestamp,
 }
 
 /// Admin 凭据删除写入。
@@ -140,7 +140,7 @@ pub struct AdminCredentialDeleteWrite {
     pub expected_state_version: i64,
     pub actor_id: String,
     pub request_id: Option<String>,
-    pub now: DateTime<Utc>,
+    pub now: Timestamp,
 }
 
 /// 删除命令的安全重放结果。

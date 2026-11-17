@@ -1,6 +1,6 @@
 //! 竞价规则策略与默认边界。
 
-use chrono::{DateTime, Duration, Utc};
+use auction_time::{Duration, Timestamp};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -129,12 +129,12 @@ pub struct LotBidState {
     pub leader_proxy_last: bool,
     /// 不参与最低价计算；仅保留锁内快照与命令账本 JSON 的既有形状。
     pub material: bool,
-    pub effective_end_at: DateTime<Utc>,
+    pub effective_end_at: Timestamp,
     pub state_version: u64,
     pub last_proxy_sequence: u64,
     pub slow_generation: u64,
     pub slow_authorization_id: Option<ProxyAuthorizationId>,
-    pub slow_due_at: Option<DateTime<Utc>>,
+    pub slow_due_at: Option<Timestamp>,
 }
 
 impl LotBidState {

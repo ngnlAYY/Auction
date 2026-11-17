@@ -1,7 +1,7 @@
 //! Admin Users owner 的安全投影、列表请求和分页模型。
 
 use auction_domain::{valid_optional_text, valid_text};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -109,8 +109,8 @@ pub struct AdminUser {
     pub status: AdminUserStatus,
     pub key_status: AdminUserKeyStatus,
     pub state_version: i64,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
 }
 
 impl AdminUser {
@@ -134,7 +134,7 @@ fn valid_forum_account_id(value: &str) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AdminUserBlacklistHistoryEntry {
     pub public_reason: String,
-    pub blacklisted_at: DateTime<Utc>,
+    pub blacklisted_at: Timestamp,
 }
 
 impl AdminUserBlacklistHistoryEntry {

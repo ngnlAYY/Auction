@@ -1,6 +1,6 @@
 //! Armory organize 页面的完整装备身份快照；只保存外部装备 ID，不保存名称或标签。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use crate::clients::mooglemail::MoogleMailWorld;
 use crate::clients::mooglemail::protocol::MoogleMailInventoryCategory;
@@ -15,7 +15,7 @@ pub struct MoogleMailInventorySnapshot {
     pub category: MoogleMailInventoryCategory,
     /// 按字符串升序、无重复的外部装备 ID。
     pub equipment_ids: Vec<String>,
-    pub observed_at: DateTime<Utc>,
+    pub observed_at: Timestamp,
 }
 
 impl MoogleMailInventorySnapshot {

@@ -42,7 +42,7 @@ use auction_domain::{
     RecoveryPolicy, SettlementId, SettlementMode, SettlementObligationKind, SettlementWorld,
 };
 use auction_storage::DatabaseStore;
-use chrono::{DateTime, Duration, DurationRound, Utc};
+use auction_time::{Duration, Timestamp};
 use serde_json::json;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -135,12 +135,12 @@ struct CodCase {
 /// 当前的付款期限（`payment_deadline_at`）；付款邮件正文按生成方格式写首寄期限 D0，即恢复记录
 /// `created_at` + 冻结恢复策略（`RECOVERY_POLICY_VERSION`）的付款期限，与资金化准入重建期望载荷
 /// 的口径一致。
-async fn seed_case(pool: &PgPool, payment: Payment, payment_deadline: DateTime<Utc>) -> CodCase {
+async fn seed_case(pool: &PgPool, payment: Payment, payment_deadline: Timestamp) -> CodCase {
     let world = payment.world();
     let id = |suffix: &str| stable_id(SEED, &format!("{world}-{suffix}"));
     let winner = id("winner");
     seed_user(pool, winner, WINNER).await;
-    let ended = Utc::now() - Duration::days(1);
+    let ended = Timestamp::now() - Duration::days(1);
     let auction = id("auction");
     let command = id("command");
     let policy = policy_snapshot(ended, END_PRICE, 100);
@@ -308,7 +308,7 @@ async fn seed_case(pool: &PgPool, payment: Payment, payment_deadline: DateTime<U
     let cod = BUYER_CREDITS + payment.carrier_credit();
     // 恢复记录显式写入建立时刻，正文期限取由它与冻结恢复策略版本推出的 D0（生产同一函数）；
     // 当前期限由各用例给出，只决定轮询与等待付款口径，不参与正文与载荷重建。
-    let recovery_created_at = Utc::now();
+    let recovery_created_at = Timestamp::now();
     let deadline = format_deadline(
         RecoveryPolicy::initial_payment_deadline(
             recovery_created_at,
@@ -443,7 +443,7 @@ struct SentObservation<'a> {
     external_mail_id: &'a str,
     recipient: &'a str,
     subject: String,
-    sent_at: DateTime<Utc>,
+    sent_at: Timestamp,
 }
 
 impl Funding {
@@ -464,7 +464,8 @@ impl Funding {
         purpose: InternalEvidencePurpose,
         sent: Option<SentObservation<'_>>,
     ) -> SettlementInternalEvidenceSnapshot {
-        let observed = Utc::now().duration_trunc(Duration::microseconds(1)).expect("截断到微秒");
+        let observed =
+            Timestamp::now().duration_trunc(Duration::microseconds(1)).expect("截断到微秒");
         let mut identity = MailAccountEvidenceBinding {
             credential_id: self.credential,
             credential_version: 1,
@@ -611,7 +612,7 @@ async fn send_through_fence(
     case: &CodCase,
     funding: Option<&Funding>,
 ) {
-    let now = Utc::now();
+    let now = Timestamp::now();
     let sending_grace = StdDuration::from_secs(60);
     DeliveryWorkStore::begin_claim_cycle(store, now, sending_grace).await.expect("领取前清理");
     let claims = DeliveryWorkStore::claim_due(
@@ -662,14 +663,18 @@ async fn send_through_fence(
             store
                 .start_sending_authorized_until(
                     claim.clone(),
-                    Utc::now(),
+                    Timestamp::now(),
                     &evidence,
                     Instant::now() + StdDuration::from_secs(30),
                     Some(&prepared),
                 )
                 .await
         }
-        _ => store.start_sending_authorized(claim.clone(), Utc::now(), None, Some(&prepared)).await,
+        _ => {
+            store
+                .start_sending_authorized(claim.clone(), Timestamp::now(), None, Some(&prepared))
+                .await
+        }
     }
     .expect("发送围栏必须确定完成");
     assert!(matches!(outcome, DeliveryFenceOutcome::Sending), "合法冻结身份必须进入 sending");
@@ -689,7 +694,7 @@ async fn send_through_fence(
                     "sending_fencing_version": claim.fencing_version,
                 }),
             },
-            Utc::now(),
+            Timestamp::now(),
         )
         .await
         .expect("合法 Sent 证明必须收口");
@@ -707,7 +712,7 @@ async fn frozen_sent_proof(pool: &PgPool, delivery: Uuid) -> bool {
 }
 
 /// 以 `at` 观察履约水位与长期未领取清单（带清单读取）。
-async fn observe(store: &DatabaseStore, at: DateTime<Utc>) -> OperationsAlertSnapshot {
+async fn observe(store: &DatabaseStore, at: Timestamp) -> OperationsAlertSnapshot {
     store
         .snapshot(at, OperationsAlertCollectionOverdueRead::CountWithItems(THRESHOLD))
         .await
@@ -728,7 +733,7 @@ fn grouping(fulfillment: &OperationsAlertFulfillmentSnapshot) -> [i64; 6] {
 
 /// 领取付款义务的履约（买家付款后的 Sent 领取阶段）。
 async fn claim_payment(store: &DatabaseStore, case: &CodCase) -> SettlementFulfillmentClaim {
-    let now = Utc::now();
+    let now = Timestamp::now();
     SettlementFulfillmentStore::claim_due(
         store,
         "collection-cod-fulfillment".to_owned(),
@@ -745,10 +750,7 @@ async fn claim_payment(store: &DatabaseStore, case: &CodCase) -> SettlementFulfi
 
 /// 买家付款后的 Sent 领取证明。生产按已发布的 Sent 证明格式计算摘要（应用层）；存储只要求
 /// 非零并原样保存，这里用固定摘要。
-fn collected_proof(
-    external_mail_id: &str,
-    observed_at: DateTime<Utc>,
-) -> SettlementFulfillmentProof {
+fn collected_proof(external_mail_id: &str, observed_at: Timestamp) -> SettlementFulfillmentProof {
     SettlementFulfillmentProof {
         kind: "mooglemail_sent_collected".to_owned(),
         reference: external_mail_id.to_owned(),
@@ -772,7 +774,10 @@ async fn satisfy_by_legacy_entry(
         .and_then(|reference| reference.rsplit(':').next())
         .expect("Sent MID")
         .to_owned();
-    store.satisfy(claim, collected_proof(&reference, Utc::now())).await.map(|result| result.status)
+    store
+        .satisfy(claim, collected_proof(&reference, Timestamp::now()))
+        .await
+        .map(|result| result.status)
 }
 
 /// 以真实资金化入口执行一次实收；结果类型不实现 Debug，转成稳定标签再断言。
@@ -900,7 +905,7 @@ async fn postgres_collection_cod_with_frozen_send_proof_waits_for_payment() {
         let database = support::TestDatabase::create().await.expect("克隆模板库");
         let store = database.store().await.expect("以运行账号连接");
         let pool = store.postgres_pool();
-        let now = Utc::now();
+        let now = Timestamp::now();
         let case = seed_case(pool, payment, now + Duration::days(9)).await;
         send_through_fence(&store, payment, &case, None).await;
         assert!(frozen_sent_proof(pool, case.delivery).await, "{payment:?} 冻结发送证明成立");
@@ -923,7 +928,7 @@ async fn postgres_collection_cod_with_frozen_send_proof_waits_for_payment() {
             SettlementFulfillmentReconcileStatus::Satisfied,
             "{payment:?}"
         );
-        let snapshot = observe(&store, Utc::now()).await;
+        let snapshot = observe(&store, Timestamp::now()).await;
         let fulfillment = snapshot.fulfillment.expect("履约水位");
         assert_eq!(fulfillment.waiting_payment, 0, "{payment:?} 付款领取后不再等待付款");
         let unblocked: String = sqlx::query_scalar(
@@ -950,7 +955,7 @@ async fn postgres_collection_cod_collected_requires_funding_when_protected() {
         let database = support::TestDatabase::create().await.expect("克隆模板库");
         let store = database.store().await.expect("以运行账号连接");
         let pool = store.postgres_pool();
-        let now = Utc::now();
+        let now = Timestamp::now();
         let case = seed_case(pool, payment, now + Duration::days(1)).await;
         send_through_fence(&store, payment, &case, None).await;
         sqlx::query(
@@ -974,7 +979,7 @@ async fn postgres_collection_cod_collected_requires_funding_when_protected() {
         .await
         .expect("读取付款履约");
         assert_eq!(state, "enqueued", "{payment:?} 付款义务未被旧路径满足");
-        let snapshot = observe(&store, Utc::now()).await;
+        let snapshot = observe(&store, Timestamp::now()).await;
         assert_eq!(snapshot.fulfillment.map(|value| value.waiting_payment), Some(1));
 
         pool.close().await;
@@ -991,7 +996,7 @@ async fn postgres_collection_cod_collected_payment_is_funded_through_satisfy_col
         let database = support::TestDatabase::create().await.expect("克隆模板库");
         let store = database.store().await.expect("以运行账号连接");
         let pool = store.postgres_pool();
-        let case = seed_case(pool, payment, Utc::now() + Duration::days(3)).await;
+        let case = seed_case(pool, payment, Timestamp::now() + Duration::days(3)).await;
         // 账户与开户来源先于付款发送：寄出时刻晚于资金来源边界。
         let funding = seed_funding(pool).await;
         send_through_fence(&store, payment, &case, Some(&funding)).await;
@@ -1164,7 +1169,7 @@ async fn postgres_collection_cod_funding_rolls_back_when_the_send_predates_the_f
         let database = support::TestDatabase::create().await.expect("克隆模板库");
         let store = database.store().await.expect("以运行账号连接");
         let pool = store.postgres_pool();
-        let case = seed_case(pool, payment, Utc::now() + Duration::days(3)).await;
+        let case = seed_case(pool, payment, Timestamp::now() + Duration::days(3)).await;
         send_through_fence(&store, payment, &case, None).await;
         let funding = seed_funding(pool).await;
 
@@ -1192,7 +1197,7 @@ async fn postgres_collection_cod_without_frozen_send_proof_is_not_waiting_paymen
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("以运行账号连接");
     let pool = store.postgres_pool();
-    let now = Utc::now();
+    let now = Timestamp::now();
     let case = seed_case(pool, Payment::EquipmentCod, now + Duration::days(1)).await;
     sqlx::query(
         "UPDATE public.deliveries

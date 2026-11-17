@@ -6,7 +6,7 @@ use auction_domain::{
     AuctionId, CommandId, CompetitionPlan, RecoveryPolicy, SettlementAmount, SettlementFact,
     SettlementLine, SettlementMode, SettlementObligationKind, SettlementPlan, SettlementPolicy,
 };
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -44,7 +44,7 @@ pub struct PersistedSettlement {
     pub unsold_count: u64,
     pub obligation_counts: Vec<PersistedSettlementObligationCount>,
     pub state_version: u64,
-    pub settled_at: DateTime<Utc>,
+    pub settled_at: Timestamp,
     pub lines: Vec<SettlementLine>,
 }
 
@@ -60,12 +60,12 @@ pub struct SettlementSnapshot {
     /// 锁内领取命令身份；首次结算必须与调用方一致。
     pub claim_command_id: Option<CommandId>,
     /// 锁内冻结的结算截止世代；首次结算必须与调用方一致。
-    pub due_at: Option<DateTime<Utc>>,
+    pub due_at: Option<Timestamp>,
     pub policy: SettlementPolicy,
     /// 结算时一并冻结的 recovery 策略；后续 Worker 不能读取实时规则替换它。
     pub recovery_policy: RecoveryPolicy,
-    pub scheduled_open_at: DateTime<Utc>,
-    pub scheduled_end_at: DateTime<Utc>,
+    pub scheduled_open_at: Timestamp,
+    pub scheduled_end_at: Timestamp,
     pub opening_pool: SettlementAmount,
     pub opening_pool_version: u64,
     pub facts: Vec<SettlementFact>,
@@ -113,7 +113,7 @@ pub trait SettlementTransaction: Send {
     fn insert_command(
         &mut self,
         command: StoredCommand,
-        occurred_at: DateTime<Utc>,
+        occurred_at: Timestamp,
     ) -> impl Future<Output = Result<(), SettlementTransactionError>> + Send;
 
     /// 借用已校验计划写入同一事务；用例保留原计划作为结果，不复制完整明细与义务。
@@ -124,7 +124,7 @@ pub trait SettlementTransaction: Send {
         plan: &SettlementPlan,
         proxy_closure_plans: Vec<CompetitionPlan>,
         recovery_policy: RecoveryPolicy,
-        occurred_at: DateTime<Utc>,
+        occurred_at: Timestamp,
     ) -> impl Future<Output = Result<(), SettlementTransactionError>> + Send;
 }
 

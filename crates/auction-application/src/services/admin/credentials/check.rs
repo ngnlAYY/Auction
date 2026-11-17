@@ -85,7 +85,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
-    use chrono::{DateTime, TimeZone, Utc};
+    use auction_time::Timestamp;
     use uuid::Uuid;
 
     use super::AdminCredentialCheckService;
@@ -100,8 +100,8 @@ mod tests {
 
     const CREDENTIAL: Uuid = Uuid::from_u128(0x77);
 
-    fn at() -> DateTime<Utc> {
-        Utc.with_ymd_and_hms(2026, 11, 16, 8, 0, 0).single().expect("fixed time")
+    fn at() -> Timestamp {
+        Timestamp::from_ymd_hms(2026, 11, 16, 8, 0, 0).expect("fixed time")
     }
 
     fn credential(state_version: i64, status: AdminCredentialStatus) -> AdminCredential {
@@ -162,7 +162,7 @@ mod tests {
     struct FixedClock;
 
     impl Clock for FixedClock {
-        fn now(&self) -> DateTime<Utc> {
+        fn now(&self) -> Timestamp {
             at()
         }
     }

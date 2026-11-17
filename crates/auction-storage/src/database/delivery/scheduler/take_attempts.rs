@@ -1,7 +1,7 @@
 //! Take 发送前冻结原账号；旧未知动作不能用当前账号的同 MID 观察恢复。
 
 use auction_application::delivery::{DeliveryTakeExpectation, DeliveryWorkClaim};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::Value;
 use sqlx::Postgres;
 use uuid::Uuid;
@@ -24,7 +24,7 @@ pub(super) fn matches_claim(
 pub(super) async fn freeze(
     tx: &mut Transaction<'_, Postgres>,
     claim: &DeliveryWorkClaim,
-    started_at: DateTime<Utc>,
+    started_at: Timestamp,
     expectation: &DeliveryTakeExpectation,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(

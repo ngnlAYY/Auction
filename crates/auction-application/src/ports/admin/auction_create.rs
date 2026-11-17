@@ -3,7 +3,7 @@
 use std::future::Future;
 
 use auction_domain::{AuctionId, CommandId, valid_text};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 use crate::ports::admin::AdminAuctionSummary;
 use crate::ports::auction::AuctionPolicyTemplate;
@@ -18,9 +18,9 @@ pub struct AdminCreateAuctionCommand {
     pub auction_id: AuctionId,
     pub world_id: String,
     pub sequence: i64,
-    pub preview_scheduled_at: DateTime<Utc>,
-    pub scheduled_open_at: DateTime<Utc>,
-    pub scheduled_end_at: DateTime<Utc>,
+    pub preview_scheduled_at: Timestamp,
+    pub scheduled_open_at: Timestamp,
+    pub scheduled_end_at: Timestamp,
     pub expected_state_version: i64,
     pub actor_id: String,
     pub request_id: Option<String>,
@@ -72,7 +72,7 @@ pub trait AdminAuctionCreateTransaction: Send {
         command: AdminCreateAuctionCommand,
         title: String,
         policy: AuctionPolicyTemplate,
-        created_at: DateTime<Utc>,
+        created_at: Timestamp,
     ) -> impl Future<Output = Result<AdminAuctionSummary, CompetitionTransactionError>> + Send;
 
     fn append_admin_auction_created_record(
@@ -82,6 +82,6 @@ pub trait AdminAuctionCreateTransaction: Send {
     ) -> impl Future<Output = Result<(), CompetitionTransactionError>> + Send;
 }
 
-fn valid_time(value: DateTime<Utc>) -> bool {
+fn valid_time(value: Timestamp) -> bool {
     value.timestamp_micros() != 0
 }

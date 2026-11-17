@@ -6,7 +6,7 @@ use auction_application::auction::{
 };
 use auction_application::core::CompetitionTransactionError;
 use auction_domain::Auction;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -117,11 +117,9 @@ async fn complete_schedule_phase_postgres(
     .map_err(map_sql_error)?;
     let Some(row) = row else { return Ok(()) };
     let status: String = row.try_get("status").map_err(map_sql_error)?;
-    let preview: Option<DateTime<Utc>> =
-        row.try_get("preview_completed_at").map_err(map_sql_error)?;
-    let open: Option<DateTime<Utc>> = row.try_get("open_completed_at").map_err(map_sql_error)?;
-    let final_at: Option<DateTime<Utc>> =
-        row.try_get("final_completed_at").map_err(map_sql_error)?;
+    let preview: Option<Timestamp> = row.try_get("preview_completed_at").map_err(map_sql_error)?;
+    let open: Option<Timestamp> = row.try_get("open_completed_at").map_err(map_sql_error)?;
+    let final_at: Option<Timestamp> = row.try_get("final_completed_at").map_err(map_sql_error)?;
     if status != "active" {
         return Err(CompetitionTransactionError::InvalidState);
     }

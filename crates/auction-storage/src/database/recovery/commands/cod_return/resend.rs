@@ -1,7 +1,7 @@
 //! 未达冻结上限的 COD 退回：恢复 owner 重寄原 COD 投递。
 
 use auction_application::recovery::RecoveryCommandError;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::Value;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
@@ -17,11 +17,11 @@ use crate::database::recovery::commands::mapping::map_sql_error;
 /// 接替它，审计 `superseded_queued_intent=true` 记录被接替的待发意图。
 pub(super) async fn resend_cod(
     transaction: &mut Transaction<'_, Postgres>,
-    now: DateTime<Utc>,
+    now: Timestamp,
     recovery_id: Uuid,
     payment_obligation_id: Uuid,
     state_version: i64,
-    payment_deadline_at: DateTime<Utc>,
+    payment_deadline_at: Timestamp,
 ) -> Result<(String, Option<String>, i64), RecoveryCommandError> {
     // 清空当前结果之前冻结安全投影；退件证明只授权本次回收重排，不补造旧 Sent 证明。
     let previous = sqlx::query(

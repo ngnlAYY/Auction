@@ -17,7 +17,7 @@ use auction_application::recovery::{
     ExternalRecoverySendEvidence, ExternalRecoveryStore, ExternalRecoveryUnresolvedBlock,
     MAX_EXTERNAL_RECOVERY_DELIVERIES,
 };
-use chrono::Utc;
+use auction_time::Timestamp;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
@@ -194,7 +194,7 @@ impl ExternalRecoveryStore for DatabaseStore {
                 return Err(storage_error("恢复核对隔离匹配重复"));
             }
             let store = self;
-            let now = Utc::now();
+            let now = Timestamp::now();
             let mut transaction = store
                 .pool()
                 .begin_with("BEGIN ISOLATION LEVEL READ COMMITTED")
@@ -243,7 +243,7 @@ impl ExternalRecoveryStore for DatabaseStore {
                 return Err(storage_error("恢复核对未决阻塞重复"));
             }
             let store = self;
-            let now = Utc::now();
+            let now = Timestamp::now();
             let mut transaction = store
                 .pool()
                 .begin_with("BEGIN ISOLATION LEVEL READ COMMITTED")

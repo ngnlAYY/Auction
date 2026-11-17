@@ -7,7 +7,7 @@ use auction_application::core::diagnostics::{
     DiagnosticContext, DiagnosticError, SafeErrorKind, diagnostic_id,
 };
 use auction_observability::{WorkerLoop, WorkerResult};
-use chrono::Duration as ChronoDuration;
+use auction_time::TimeDelta;
 use tokio::task::JoinSet;
 
 use crate::worker::diagnostics;
@@ -136,7 +136,7 @@ async fn run_lifecycle_phase<C>(worker: &PersistentWorker<C>) -> WorkerResult
 where
     C: Clock + 'static,
 {
-    let Ok(lease_duration) = ChronoDuration::from_std(worker.auction.lease_duration) else {
+    let Ok(lease_duration) = TimeDelta::from_std(worker.auction.lease_duration) else {
         tracing::error!("auction lifecycle lease duration is invalid");
         return WorkerResult::Error;
     };
@@ -284,7 +284,7 @@ where
     else {
         return WorkerResult::Success;
     };
-    let Ok(lease_duration) = ChronoDuration::from_std(worker.auction.lease_duration) else {
+    let Ok(lease_duration) = TimeDelta::from_std(worker.auction.lease_duration) else {
         tracing::error!("auction settlement lease duration is invalid");
         return WorkerResult::Error;
     };

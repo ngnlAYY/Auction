@@ -36,12 +36,12 @@ pub struct EquipmentLossFulfillment {
     pub prepare_request_digest: Option<String>,
     pub activate_request_digest: Option<String>,
     pub claim_token: Option<String>,
-    pub claimed_at: Option<chrono::DateTime<chrono::Utc>>,
-    pub claim_expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub claimed_at: Option<auction_time::Timestamp>,
+    pub claim_expires_at: Option<auction_time::Timestamp>,
     pub proof_kind: Option<String>,
     pub proof_reference: Option<String>,
     pub proof_digest: Option<String>,
-    pub proof_observed_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub proof_observed_at: Option<auction_time::Timestamp>,
 }
 
 /// 恢复 case 投影；已出现任何处置、复核或阻断都必须拒绝。
@@ -65,12 +65,12 @@ pub struct EquipmentLossRecovery {
     pub custody_proof_kind: Option<String>,
     pub custody_proof_reference: Option<String>,
     pub custody_proof_digest: Option<String>,
-    pub custody_proof_observed_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub custody_proof_observed_at: Option<auction_time::Timestamp>,
     pub relisted_auction_id: Option<Uuid>,
     pub relisted_lot_id: Option<Uuid>,
     pub blocking_code: Option<String>,
     pub manual_reconcile_delivery_id: Option<Uuid>,
-    pub completed_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub completed_at: Option<auction_time::Timestamp>,
 }
 
 /// 只表达“该键存在且不是 JSON null”，内容不参与判定。
@@ -130,7 +130,7 @@ pub struct EquipmentLossDelivery {
     pub activation_request_digest: Option<String>,
     pub external_reference: Option<String>,
     pub lease_token: Option<String>,
-    pub lease_expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub lease_expires_at: Option<auction_time::Timestamp>,
     pub result_metadata: EquipmentLossResultMetadata,
     pub payload: EquipmentLossDeliveryPayload,
 }
@@ -149,7 +149,7 @@ pub struct EquipmentLossAuction {
     pub id: Uuid,
     pub world_id: String,
     pub status: String,
-    pub settled_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub settled_at: Option<auction_time::Timestamp>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]

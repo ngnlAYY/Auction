@@ -6,7 +6,7 @@
 use std::{path::Path, time::Duration};
 
 use auction_config::AppConfig;
-use chrono::Utc;
+use auction_time::Timestamp;
 use tokio::time::Instant;
 use uuid::Uuid;
 
@@ -99,7 +99,7 @@ async fn run_reporting(
             receipt.fail("config_error");
         }
     }
-    receipt.finished_at = Some(Utc::now());
+    receipt.finished_at = Some(Timestamp::now());
     receipt.record_elapsed();
     if receipt.outcome == Outcome::Completed {
         receipt.stage = Stage::Receipt;

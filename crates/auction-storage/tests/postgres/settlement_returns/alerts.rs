@@ -25,7 +25,7 @@ use auction_application::settlement::{
     SettlementReturnAdminPort, SettlementReturnCommand, SettlementReturnWorkStore,
 };
 use auction_domain::{CommandId, SettlementReturnAction, SettlementReturnCaseStatus};
-use chrono::{Duration, Utc};
+use auction_time::{Duration, Timestamp};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -78,7 +78,7 @@ async fn bound_return(store: &auction_storage::DatabaseStore, sequence: i64, mid
         evidence(sale.seller_obligation, PAYOUT, &[]),
     )
     .await;
-    store.consume_due_settlement_return(Utc::now()).await.expect("消费").expect("必须消费");
+    store.consume_due_settlement_return(Timestamp::now()).await.expect("消费").expect("必须消费");
     case
 }
 
@@ -103,7 +103,7 @@ async fn quarantined_returns(store: &auction_storage::DatabaseStore) -> (Uuid, U
         evidence(unknown, 5, &[]),
     )
     .await;
-    while store.consume_due_settlement_return(Utc::now()).await.expect("消费").is_some() {}
+    while store.consume_due_settlement_return(Timestamp::now()).await.expect("消费").is_some() {}
     (untrusted, unbound)
 }
 
@@ -120,7 +120,7 @@ async fn handle(
         version,
         action,
         "admin-returns",
-        Utc::now(),
+        Timestamp::now(),
     )
     .expect("构造命令");
     store.handle_settlement_return(command).await.expect("执行退件命令").status
@@ -128,7 +128,7 @@ async fn handle(
 
 /// 模拟 Worker 一轮告警扫描：读取快照、评估并写入观察。
 pub(super) async fn scan(store: &auction_storage::DatabaseStore) {
-    let now = Utc::now();
+    let now = Timestamp::now();
     let snapshot = store
         .snapshot(now, OperationsAlertCollectionOverdueRead::Skip)
         .await
@@ -161,7 +161,7 @@ pub(super) async fn enable_alerts(store: &auction_storage::DatabaseStore) {
     store
         .publish_runtime_status(OperationsAlertRuntimeStatus {
             enabled: true,
-            updated_at: Utc::now(),
+            updated_at: Timestamp::now(),
         })
         .await
         .expect("启用告警扫描");
@@ -186,7 +186,7 @@ async fn postgres_settlement_return_alerts_follow_open_cases_and_close_on_closur
     assert_eq!(signal(pool, "settlement_return_pending", "auction").await, Some((true, 1)));
     assert_eq!(signal(pool, "settlement_return_quarantined", "auction").await, Some((true, 2)));
     let snapshot = store
-        .snapshot(Utc::now(), OperationsAlertCollectionOverdueRead::Skip)
+        .snapshot(Timestamp::now(), OperationsAlertCollectionOverdueRead::Skip)
         .await
         .expect("读取告警快照");
     let fulfillment = snapshot.fulfillment.expect("履约水位");
@@ -239,7 +239,7 @@ async fn postgres_settlement_return_alerts_follow_open_cases_and_close_on_closur
     );
     assert_eq!(store.pending_counts().await.expect("导航待办").settlement_returns, 0);
     let fulfillment = store
-        .snapshot(Utc::now(), OperationsAlertCollectionOverdueRead::Skip)
+        .snapshot(Timestamp::now(), OperationsAlertCollectionOverdueRead::Skip)
         .await
         .expect("读取告警快照")
         .fulfillment
@@ -276,7 +276,7 @@ async fn postgres_take_unknown_moves_case_to_take_unknown_alert() {
     assert_eq!(signal(pool, "settlement_return_quarantined", "auction").await, None);
 
     store
-        .activate_due_return_take(Utc::now(), super::take_worlds())
+        .activate_due_return_take(Timestamp::now(), super::take_worlds())
         .await
         .expect("激活")
         .expect("必须激活");
@@ -298,7 +298,7 @@ async fn postgres_take_unknown_moves_case_to_take_unknown_alert() {
     .execute(pool)
     .await
     .expect("模拟 Take 结果未知");
-    store.settle_due_return_take(Utc::now()).await.expect("收口 Take").expect("必须收口");
+    store.settle_due_return_take(Timestamp::now()).await.expect("收口 Take").expect("必须收口");
     let detail = store.settlement_return_detail(case).await.expect("案件详情");
     assert_eq!(detail.summary.status, SettlementReturnCaseStatus::TakeUnknown);
     assert!(detail.allowed_actions.is_empty(), "结果未知没有人工声明或重试入口");
@@ -345,7 +345,7 @@ async fn postgres_settlement_return_read_failure_keeps_alert_open() {
     maintenance.postgres_pool().close().await;
 
     let snapshot = store
-        .snapshot(Utc::now(), OperationsAlertCollectionOverdueRead::Skip)
+        .snapshot(Timestamp::now(), OperationsAlertCollectionOverdueRead::Skip)
         .await
         .expect("其余来源照常读取");
     assert!(snapshot.fulfillment.is_none(), "履约水位读取失败时缺席，不给零值");

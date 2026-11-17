@@ -6,7 +6,7 @@ use auction_application::settlement::{
     SettlementFulfillmentState,
 };
 use auction_domain::SettlementObligationKind;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
@@ -97,7 +97,7 @@ pub(super) async fn satisfy_postgres(
         || proof.reference != proof.reference.trim()
         || proof.digest == [0; 32]
         || proof.observed_at < claim.claimed_at
-        || proof.observed_at > Utc::now()
+        || proof.observed_at > Timestamp::now()
     {
         return Err(repository_error("结算履约满足证明不满足 fencing 或身份约束"));
     }
@@ -158,7 +158,7 @@ pub(super) async fn satisfy_postgres(
         .fetch_optional(&mut *transaction)
         .await
         .map_err(ReconcileTransactionError::Storage)?;
-        let updated_at: DateTime<Utc> = updated
+        let updated_at: Timestamp = updated
             .ok_or_else(|| {
                 ReconcileTransactionError::Repository(repository_error(
                     "结算履约满足证明的 claim 已失效",
@@ -241,7 +241,7 @@ pub(super) async fn manual_reconcile_in_transaction(
     .fetch_optional(&mut **transaction)
     .await
     .map_err(map_storage_error)?;
-    let updated_at: DateTime<Utc> = updated
+    let updated_at: Timestamp = updated
         .ok_or_else(|| repository_error("结算履约损坏上下文的 claim 已失效"))?
         .try_get("updated_at")
         .map_err(map_storage_error)?;
@@ -302,7 +302,7 @@ async fn finalize_postgres(
         .fetch_optional(&mut *transaction)
         .await
         .map_err(ReconcileTransactionError::Storage)?;
-        let updated_at: DateTime<Utc> = updated
+        let updated_at: Timestamp = updated
             .ok_or_else(|| {
                 ReconcileTransactionError::Repository(repository_error(invalid_claim_message))
             })?
@@ -348,7 +348,7 @@ async fn append_manual_reconcile_audit(
     obligation_id: Uuid,
     claim_fencing: i64,
     failure_code: &str,
-    occurred_at: DateTime<Utc>,
+    occurred_at: Timestamp,
 ) -> Result<(), sqlx::Error> {
     let metadata = serde_json::json!({
         "state": "manual_reconcile",
@@ -393,7 +393,7 @@ pub(super) async fn mark_failed_postgres(
 pub(super) async fn fail_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     claim: &SettlementFulfillmentClaim,
-    retry_delay: chrono::Duration,
+    retry_delay: auction_time::Duration,
     failure_code: &str,
 ) -> Result<(), auction_application::core::RepositoryError> {
     validate_claim_identity(claim)?;
@@ -466,7 +466,7 @@ async fn append_terminal_audit(
     error_code: Option<&str>,
     proof_kind: Option<&str>,
     activated_dependent_count: u64,
-    occurred_at: DateTime<Utc>,
+    occurred_at: Timestamp,
 ) -> Result<(), sqlx::Error> {
     let mut object = serde_json::Map::new();
     object.insert("state".to_owned(), state.into());

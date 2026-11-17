@@ -1,7 +1,7 @@
 //! 旧版 `settlement_claim` 与新版领取账本的局部兼容校验。
 
 use auction_domain::CommandId;
-use chrono::{DateTime, SecondsFormat, Utc};
+use auction_time::{SecondsFormat, Timestamp};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -45,7 +45,7 @@ struct LegacySettlementClaimHash<'a> {
 struct CurrentSettlementClaimResult {
     auction_id: Uuid,
     workflow_id: Uuid,
-    due_at: DateTime<Utc>,
+    due_at: Timestamp,
 }
 
 #[derive(Deserialize)]
@@ -54,8 +54,8 @@ struct LegacySettlementClaimResult {
     auction_id: [u8; 16],
     workflow_id: [u8; 16],
     command_id: [u8; 16],
-    due_at: DateTime<Utc>,
-    started_at: DateTime<Utc>,
+    due_at: Timestamp,
+    started_at: Timestamp,
     attempt_count: i64,
     state_version: i64,
 }
@@ -66,7 +66,7 @@ pub(super) fn validate_claim_ledger(
     auction_id: Uuid,
     workflow_id: Uuid,
     claim_command_id: CommandId,
-    due_at: DateTime<Utc>,
+    due_at: Timestamp,
     allow_legacy: bool,
 ) -> Result<(), ClaimLedgerValidationError> {
     let current_hash = request_hash(auction_id, workflow_id, due_at)
@@ -120,7 +120,7 @@ fn legacy_claim_hash(
     auction_id: Uuid,
     workflow_id: Uuid,
     claim_command_id: CommandId,
-    due_at: DateTime<Utc>,
+    due_at: Timestamp,
 ) -> Result<Vec<u8>, serde_json::Error> {
     let due_at = due_at.to_rfc3339_opts(SecondsFormat::AutoSi, true);
     let encoded = serde_json::to_vec(&LegacySettlementClaimHash {

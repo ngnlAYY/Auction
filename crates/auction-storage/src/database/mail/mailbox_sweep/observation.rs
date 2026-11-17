@@ -3,7 +3,7 @@
 
 use auction_application::delivery::{DeliverySendCredentialBinding, DeliveryTakeExpectation};
 use auction_domain::SettlementReturnTakeUnknownReason;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Postgres;
 use uuid::Uuid;
 
@@ -48,8 +48,7 @@ async fn record_once(
     {
         return Err(RecoveryError::Rejected);
     }
-    let now: DateTime<Utc> =
-        sqlx::query_scalar("SELECT clock_timestamp()").fetch_one(&mut *tx).await?;
+    let now: Timestamp = sqlx::query_scalar("SELECT clock_timestamp()").fetch_one(&mut *tx).await?;
     let recorded = record_take_observation(&mut tx, observation, now).await?;
     if recorded.is_none() {
         tx.rollback().await?;

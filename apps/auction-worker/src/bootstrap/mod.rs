@@ -12,7 +12,7 @@ use auction_application::settlement::{
 use auction_config::{AppConfig, Role};
 use auction_observability::{ProcessMetrics, TracingConfig, TracingRuntime};
 use auction_process::{TaskGuard, TerminationSignals};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 
 mod control;
 mod forum;
@@ -32,8 +32,8 @@ type ShutdownFuture = Pin<Box<dyn std::future::Future<Output = ()> + Send + 'sta
 struct SystemClock;
 
 impl Clock for SystemClock {
-    fn now(&self) -> DateTime<Utc> {
-        Utc::now()
+    fn now(&self) -> Timestamp {
+        Timestamp::now()
     }
 }
 

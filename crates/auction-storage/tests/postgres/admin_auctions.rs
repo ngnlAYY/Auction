@@ -18,7 +18,7 @@ use auction_application::auction::AuctionPolicyTemplate;
 use auction_application::core::RequestHash;
 use auction_application::realtime::{PublicRealtimeReader, PublicRealtimeRequest};
 use auction_domain::{AuctionId, CommandId};
-use chrono::{Duration, DurationRound, Utc};
+use auction_time::{Duration, Timestamp};
 use serde_json::json;
 use uuid::Uuid;
 
@@ -35,8 +35,8 @@ async fn postgres_admin_auction_snapshot_matches_across_schedule_and_lists() {
     ));
     let schedule: Arc<dyn AdminAuctionSchedulePort> =
         Arc::new(AdminAuctionScheduleService::new(Arc::clone(&store)));
-    let base =
-        Utc::now().duration_trunc(Duration::seconds(1)).expect("截断到秒") + Duration::days(2);
+    let base = Timestamp::now().duration_trunc(Duration::seconds(1)).expect("截断到秒")
+        + Duration::days(2);
     let auction_id = AuctionId::from_uuid(Uuid::new_v4());
     let created = create
         .create(AdminCreateAuctionCommand {

@@ -6,7 +6,7 @@ use auction_application::admin::{
     AdminMailTransactionFailure, AdminMailTransactionRunner,
 };
 use auction_application::core::{RequestHash, TransactionFuture, TransactionPolicy};
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use serde_json::Value;
 use sqlx::types::Json;
 use sqlx::{Postgres, Row};
@@ -184,7 +184,7 @@ impl AdminMailTransaction for PostgresMailTransaction {
     fn set_polling_paused(
         &mut self,
         command: AdminMailPollingCommand,
-        updated_at: DateTime<Utc>,
+        updated_at: Timestamp,
     ) -> impl Future<Output = Result<AdminMailPollState, AdminMailTransactionError>> + Send {
         async move {
             let row = sqlx::query(
@@ -224,7 +224,7 @@ impl AdminMailTransaction for PostgresMailTransaction {
     fn trigger_poll(
         &mut self,
         command: AdminMailPollTriggerCommand,
-        triggered_at: DateTime<Utc>,
+        triggered_at: Timestamp,
     ) -> impl Future<Output = Result<AdminMailPollState, AdminMailTransactionError>> + Send {
         async move {
             let row = if command.expected_state_version == 0 {

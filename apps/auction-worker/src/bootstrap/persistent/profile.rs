@@ -77,7 +77,7 @@ mod tests {
     use auction_config::{
         AppConfig, AuctionScheduleConfig, FirstRunConfig, PostgresConnectionConfig, Role,
     };
-    use chrono::{DateTime, NaiveDate, Utc};
+    use auction_time::Timestamp;
     use uuid::Uuid;
 
     use super::configure_schedule_runtime;
@@ -130,9 +130,9 @@ mod tests {
         let runtime = configure_schedule_runtime(config, None).unwrap().unwrap();
         assert_eq!(&runtime.weekly, calendar.weekly());
         assert_eq!(runtime.early_bird.as_ref(), calendar.early_bird());
-        let week = NaiveDate::from_ymd_opt(2026, 3, 2).unwrap();
+        let week = auction_time::parse_date("2026-03-02").unwrap();
         let times = runtime.weekly.slot(week).unwrap().times;
-        let utc = |value: &str| value.parse::<DateTime<Utc>>().unwrap();
+        let utc = |value: &str| value.parse::<Timestamp>().unwrap();
         assert_eq!(times.preview_due_at, utc(preview_due_at));
         assert_eq!(times.open_due_at, utc("2026-03-08T06:30:00Z"));
         assert_eq!(times.scheduled_end_at, utc("2026-03-08T16:00:00Z"));

@@ -18,7 +18,7 @@ use auction_application::auction::{
 use auction_application::public::lot_code;
 use auction_domain::ProxyMode;
 use auction_domain::equipment::taxonomy::EquipmentCategory;
-use chrono::{Duration, Utc};
+use auction_time::{Duration, Timestamp};
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -35,7 +35,7 @@ async fn seed_auction(
     status: &str,
     lots: &[(&str, &str)],
 ) -> Uuid {
-    let now = Utc::now();
+    let now = Timestamp::now();
     // 预览场次的开拍时间在将来，其余场次已开拍。
     let opens_at =
         if status == "preview" { now + Duration::hours(2) } else { now - Duration::hours(4) };
@@ -394,7 +394,7 @@ async fn postgres_public_lot_categories_follow_the_domain_mapping() {
 
 /// 写入一场进行中的场次：每个（分类, 类别内序号）一件 lot，各有一条普通出价事实。
 async fn seed_bid_log(pool: &PgPool, seed: &str, lots: &[(&str, i32)]) -> (Uuid, Vec<Uuid>) {
-    let now = Utc::now();
+    let now = Timestamp::now();
     let deadline = now + Duration::hours(2);
     let auction_id = stable_id(seed, "auction");
     let bidder = stable_id(seed, "bidder");

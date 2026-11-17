@@ -7,7 +7,7 @@ publish.workspace = true
 license.workspace = true
 
 [dependencies]
-chrono.workspace = true
+auction-time.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 uuid.workspace = true

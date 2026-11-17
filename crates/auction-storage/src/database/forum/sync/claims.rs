@@ -3,7 +3,7 @@
 use auction_application::core::ApplicationError;
 use auction_application::forum::ForumSyncClaim;
 use auction_domain::AuctionId;
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use super::super::super::DatabaseStore;
@@ -13,9 +13,9 @@ use crate::database::storage_error_from;
 pub(super) async fn claim_due_postgres(
     store: &DatabaseStore,
     worker_id: &str,
-    now: DateTime<Utc>,
-    lease_until: DateTime<Utc>,
-    startup_recovery_before: Option<DateTime<Utc>>,
+    now: Timestamp,
+    lease_until: Timestamp,
+    startup_recovery_before: Option<Timestamp>,
     available_worlds: &[auction_domain::SettlementWorld],
     limit: u16,
 ) -> Result<Vec<ForumSyncClaim>, ApplicationError> {

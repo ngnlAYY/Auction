@@ -1,6 +1,6 @@
 //! 单表候选计数；只执行 SELECT，谓词与 `limits` 的边界函数和 SQL 时间戳一一对应。
 
-use chrono::{DateTime, Utc};
+use auction_time::Timestamp;
 use sqlx::Row;
 
 use super::model::RetentionTableDryRun;
@@ -33,7 +33,7 @@ pub(super) struct SessionCounts {
 
 pub(super) async fn heartbeats(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
-    cutoff: DateTime<Utc>,
+    cutoff: Timestamp,
 ) -> Result<HeartbeatCounts, RetentionDryRunError> {
     let row = sqlx::query(
         "SELECT COUNT(*)::bigint AS total_rows,
@@ -58,7 +58,7 @@ pub(super) async fn heartbeats(
 /// 仍受 `ON DELETE RESTRICT` 外键阻断，单独计数而不假装可删。
 pub(super) async fn realtime_events(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
-    cutoff: DateTime<Utc>,
+    cutoff: Timestamp,
 ) -> Result<RealtimeEventCounts, RetentionDryRunError> {
     let row = sqlx::query(
         "SELECT COUNT(*)::bigint AS total_rows,
@@ -98,7 +98,7 @@ pub(super) async fn realtime_events(
 
 pub(super) async fn realtime_failures(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
-    cutoff: DateTime<Utc>,
+    cutoff: Timestamp,
 ) -> Result<FailureCounts, RetentionDryRunError> {
     let row = sqlx::query(
         "SELECT COUNT(*)::bigint AS total_rows,
@@ -130,8 +130,8 @@ pub(super) async fn realtime_failures(
 pub(super) async fn sessions(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     table: &'static str,
-    cutoff: DateTime<Utc>,
-    now: DateTime<Utc>,
+    cutoff: Timestamp,
+    now: Timestamp,
 ) -> Result<SessionCounts, RetentionDryRunError> {
     let statement = format!(
         "SELECT COUNT(*)::bigint AS total_rows,
