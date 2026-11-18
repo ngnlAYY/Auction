@@ -269,7 +269,9 @@ export function AuctionHistoryTable(props: {
   return (
     <div class="public-auction-rounds__table">
       <table aria-label={t("page-auctions-title")}>
-        <TableColumns layout="public-auction-history" widths={[12, 8, 22, 7, 7, 7, 21, 16]} />
+        {/* Solid 版把“查看”一列从 16% 加宽到 26%，让四个入口在常见桌面宽度下排成一行；
+            多出的宽度取自结束时间与成交总额两列。Rust 版仍是 [12, 8, 22, 7, 7, 7, 21, 16]。 */}
+        <TableColumns layout="public-auction-history" widths={[12, 8, 17, 7, 7, 7, 16, 26]} />
         <thead>
           <tr>
             <th scope="col">{t("auction-history-number")}</th>
