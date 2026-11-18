@@ -85,6 +85,7 @@ function mountBid(mounted: ReturnType<typeof fixture>) {
                                   leading: false,
                                   blockedReason: "",
                                   proxy: null,
+                                  proxyReadGeneration: null,
                                 });
                               }
                               return null;

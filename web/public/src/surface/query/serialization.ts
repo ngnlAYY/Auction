@@ -91,6 +91,10 @@ export function publicQueryPairs(query: PublicBoardQuery): [string, string][] {
   }
   if (query.category !== null) {
     pairs.push(["type", query.category]);
+  } else if (query.invalidCategory !== null) {
+    for (const value of query.invalidCategory) {
+      pairs.push(["type", value]);
+    }
   }
   if (query.status !== null) {
     pairs.push(["status", query.status]);

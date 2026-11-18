@@ -36,7 +36,8 @@ import {
   updatePublicPageSize,
 } from "../pagination";
 import { publicOffsetLastPage, usePublicPageBounds } from "../pagination/bounds";
-import { updatePublicQueryState, usePublicQueryState } from "../query";
+import { usePublicQueryState } from "../query";
+import { updatePublicQueryPairs } from "../query/location";
 import { usePageRouteGuard } from "../query/route-page";
 
 type HistoryRequest = readonly [world: string, status: string, page: number, pageSize: number];
@@ -132,14 +133,7 @@ export function AuctionList(): JSX.Element {
       if (!routeStillOnPage()) {
         return;
       }
-      updatePublicQueryState(
-        queryStateSignal,
-        (query) => {
-          query.status = null;
-          query.passthrough = query.passthrough.filter(([key]) => key !== "status");
-        },
-        "replace",
-      );
+      updatePublicQueryPairs(queryStateSignal, ["status"], [], "replace");
     },
   );
   const requested = createValueMemo(() =>

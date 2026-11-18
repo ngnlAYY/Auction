@@ -40,6 +40,7 @@ import { rustTrim } from "../../query/text";
 import { useReadRoundDirectory } from "../bid-log/directory";
 import { useLotFilterDraft } from "../bid-log/lots";
 import { createScopeSelection, sameScopeSelection } from "../bid-log/scope-selection";
+import { INVALID_READ_AUCTION_ERROR_ID, InvalidReadAuction } from "../invalid-auction";
 import type {
   FulfillmentBodyState,
   FulfillmentProgressSnapshot,
@@ -172,6 +173,7 @@ export function Fulfillment(): JSX.Element {
 
   // 目录或当前查询还没有结果时由顶栏提示加载，正文留空。
   const body = createValueMemo((): FulfillmentBodyState => {
+    if (rounds.invalidAuction()) return { kind: "invalid-auction" };
     const progressResult = currentResult();
     if (bounds.failed("page") || rounds.failed() || progressResult?.ok === false) {
       return { kind: "error" };
@@ -223,6 +225,8 @@ export function Fulfillment(): JSX.Element {
               name="auction"
               autocomplete="off"
               aria-label={t("fulfillment-round")}
+              aria-invalid={rounds.invalidAuction() ? "true" : undefined}
+              aria-describedby={rounds.invalidAuction() ? INVALID_READ_AUCTION_ERROR_ID : undefined}
               value={selectedAuctionId()}
               disabled={auctionOptions().length === 0}
               onFocus={rounds.loadOptions}
@@ -326,6 +330,9 @@ export function Fulfillment(): JSX.Element {
           </div>
         </div>
         <Switch fallback={null}>
+          <Match when={body().kind === "invalid-auction"}>
+            <InvalidReadAuction onRecover={rounds.clearSelection} />
+          </Match>
           <Match when={body().kind === "error"}>
             <div class="public-auction-empty" role="alert">
               <p class="public-auction-empty__title">{t("data-error")}</p>

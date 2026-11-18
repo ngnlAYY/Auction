@@ -74,6 +74,8 @@ filter-include-unleveled = 显示无等级装备
 filter-level-hint = 留空表示不限，回车或离开输入框时生效。高于上限的装备隐藏；没有数字等级的装备由旁边复选框控制。
 filter-level-invalid = 请检查等级上限（非负整数或留空），并确认是否显示无等级装备。
 filter-error-duplicate = 此筛选条件重复，请只保留一个值。
+filter-category-invalid = 装备类型筛选无效，清除后可读取目录。
+filter-category-clear = 清除装备类型筛选
 filter-all = 全部
 filter-category-selected = 已选 { $count } 类
 filter-done = 完成
@@ -166,6 +168,7 @@ auction-empty-no-auction = 该世界暂无拍卖场次
 auction-empty-no-auction-hint = 请稍后查看下一场拍卖。
 auction-invalid-link = 链接里的场次无效
 auction-view-current = 查看当前场次
+auction-clear-selection = 清除场次选择
 
 
 page-auctions-title = 拍卖历史

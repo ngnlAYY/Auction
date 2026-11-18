@@ -74,6 +74,8 @@ filter-include-unleveled = 레벨 없는 장비 표시
 filter-level-hint = 비워 두면 제한하지 않아요. Enter 키를 누르거나 입력란에서 포커스를 옮기면 적용돼요. 상한을 넘는 장비는 숨기며, 숫자 레벨이 없는 장비는 체크박스로 표시 여부를 정해요.
 filter-level-invalid = 레벨 상한(0 이상의 정수 또는 빈칸)과 레벨 없는 장비의 표시 여부를 확인해 주세요.
 filter-error-duplicate = 이 필터가 중복되었습니다. 값 하나만 입력하세요.
+filter-category-invalid = 장비 유형 필터가 잘못되었습니다. 목록을 불러오려면 필터를 지우세요.
+filter-category-clear = 장비 유형 필터 지우기
 filter-all = 전체
 filter-category-selected = { $count }개 유형 선택됨
 filter-done = 완료
@@ -166,6 +168,7 @@ auction-empty-no-auction = 이 월드에는 아직 경매가 없어요
 auction-empty-no-auction-hint = 다음 경매는 나중에 다시 확인해 주세요.
 auction-invalid-link = 링크에 지정된 경매가 유효하지 않아요.
 auction-view-current = 현재 경매 보기
+auction-clear-selection = 경매 선택 해제
 
 
 page-auctions-title = 경매 이력

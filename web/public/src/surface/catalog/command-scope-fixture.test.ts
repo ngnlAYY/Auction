@@ -106,6 +106,10 @@ export function createElement(tag: string, props: Record<string, unknown> = {}):
   return new TestElement(tag, props);
 }
 
+export function createTextNode(text: string): TestElement {
+  return createElement("#text", { text });
+}
+
 export function insert(parent: TestElement, node: unknown): void {
   parent.nodes.push(createMemo(() => (typeof node === "function" ? node() : node)));
 }

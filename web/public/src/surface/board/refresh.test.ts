@@ -9,6 +9,7 @@ import { createCell } from "@auction/web-shared/reactive/cell";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import { createTaskResource, type ResourceState } from "@auction/web-shared/reactive/resource";
 import { ok } from "@auction/web-shared/result";
+import { RouterContext } from "@auction/web-shared/router";
 import {
   type Context,
   children,
@@ -43,6 +44,7 @@ import {
   BID_REFRESH_JITTER_MILLIS,
   type BidRefreshDecision,
   coalesceWindowMillis,
+  createPublicBidRefresh,
   PublicBidRefreshContext,
   PublicRefreshGenerationContext,
   planBidRefresh,
@@ -169,14 +171,23 @@ function mountCatalog(initialQuery = publicBoardQueryDefault()) {
       clear: () => snapshot.set(undefined),
     });
     const commandOwner = createValueMemo(() => currentUser(session()));
-    const revision = createCell(0);
+    const bidRefresh = createPublicBidRefresh();
     const refresh = createCell(0);
     const query = createCell({ ...initialQuery, pageSize: 100 });
     const notify = () => {
       invalidateAll();
-      revision.update((value) => value + 1);
+      bidRefresh.notify(AUCTION.id);
     };
     const providers = [
+      provide(RouterContext, {
+        current: () => ({ kind: "matched", name: "AuctionIndex", params: {}, query: {} }),
+        currentLocationString: () => "/",
+        currentEntryKey: () => "board-test",
+        push() {},
+        replace() {},
+        goBack() {},
+        restoreScrollAfterCommit() {},
+      }),
       provide(PublicSessionResourceContext, session),
       provide(PublicCommandOwnerContext, commandOwner),
       provide(PublicContentLoadingContext, createCell<ReadonlySet<number>>(new Set())),
@@ -200,7 +211,7 @@ function mountCatalog(initialQuery = publicBoardQueryDefault()) {
       provide(SecondTickerContext, useSecondTicker()),
       provide(PageVisibilityContext, createPageVisibility()),
       provide(PublicRefreshGenerationContext, refresh),
-      provide(PublicBidRefreshContext, { revision, notify }),
+      provide(PublicBidRefreshContext, bidRefresh),
     ];
     const render = () =>
       mountAuctionBoard(query, (props) => {
@@ -339,6 +350,42 @@ test("换号保留已排定的竞价补读，换号后的单条通知也只补�
     expect(board.requests).toHaveLength(3);
   } finally {
     board.dispose();
+  }
+});
+
+test("隐藏看板不因待处理或新到的竞价通知重读，恢复可见后权威刷新一次", async () => {
+  jest.useFakeTimers();
+  const original = Object.getOwnPropertyDescriptor(globalThis, "document");
+  const visibility = { hidden: false };
+  Object.defineProperty(globalThis, "document", { configurable: true, value: visibility });
+  const board = mountCatalog();
+  try {
+    await settleCatalog();
+    board.requests[0]?.complete();
+    await settleCatalog();
+    board.notify();
+    flush();
+    visibility.hidden = true;
+    jest.advanceTimersByTime(250);
+    await settleCatalog();
+    board.notify();
+    flush();
+    jest.advanceTimersByTime(250);
+    await settleCatalog();
+    expect(board.requests).toHaveLength(1);
+    visibility.hidden = false;
+    refreshPublicReads(board.refresh);
+    await settleCatalog();
+    expect(board.requests).toHaveLength(2);
+    board.requests[1]?.complete();
+    jest.advanceTimersByTime(250);
+    await settleCatalog();
+    expect(board.requests).toHaveLength(2);
+  } finally {
+    board.dispose();
+    jest.useRealTimers();
+    if (original === undefined) Reflect.deleteProperty(globalThis, "document");
+    else Object.defineProperty(globalThis, "document", original);
   }
 });
 

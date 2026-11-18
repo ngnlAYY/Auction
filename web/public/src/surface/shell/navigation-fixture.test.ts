@@ -20,7 +20,7 @@ import { InitialPublicLocationContext, initialPublicLocation } from "../query";
 import { PUBLIC_ROUTES } from "../router/route";
 
 export { createEffect as effect, createMemo as memo } from "solid-js";
-export { insert, insertNode, ref, setProp } from "../catalog/command-scope-fixture.test";
+export { insert, insertNode, setProp } from "../catalog/command-scope-fixture.test";
 export { createComponent };
 
 const NAMESPACE = "public-shell-test";
@@ -39,8 +39,11 @@ const SOURCES = new Set(
     "../board/index.tsx",
     "../board/data.tsx",
     "../board/world.tsx",
+    "../board/navigation.tsx",
     "../catalog/actions.tsx",
     "../catalog/command-scope.tsx",
+    "../catalog/filters.tsx",
+    "../catalog/detail/bid-history.tsx",
     "../catalog/detail/drawer.tsx",
     "../catalog/detail/entry.tsx",
     "../catalog/detail/lookup.tsx",
@@ -63,11 +66,21 @@ const SOURCES = new Set(
     "../account/watches/index.tsx",
     "../reads/history/index.tsx",
     "../reads/history/filters/components.tsx",
+    "../reads/bid-log/index.tsx",
+    "../reads/bid-log/table.tsx",
+    "../reads/fulfillment/index.tsx",
+    "../reads/invalid-auction.tsx",
+    "../compensation/index.tsx",
+    "../compensation/table.tsx",
+    "../blacklist.tsx",
+    "../pagination/index.tsx",
     "../../../../shared/src/router/index.tsx",
     "../../../../shared/src/router/link.tsx",
     "../../../../shared/src/router/outlet.tsx",
     "../../../../shared/src/ui/components/async-state.tsx",
     "../../../../shared/src/ui/components/dialog.tsx",
+    "../../../../shared/src/ui/components/pager/index.tsx",
+    "../../../../shared/src/ui/components/truncated-text/index.tsx",
   ].map((path) => resolve(import.meta.dir, path)),
 );
 const stripTypes = new Bun.Transpiler({ loader: "ts" });
@@ -101,6 +114,9 @@ Bun.plugin({
 });
 
 export class DomElement extends TestElement {
+  scrollWidth = 0;
+  clientWidth = 0;
+
   getAttribute(key: string): string | null {
     const value = this.attributes[key];
     return typeof value === "string" ? value : null;
@@ -109,6 +125,15 @@ export class DomElement extends TestElement {
   focus(): void {
     this.attributes.focused = true;
   }
+
+  getBoundingClientRect() {
+    return { top: 100, bottom: 120, left: 20 };
+  }
+}
+
+export function ref(read: () => unknown, element: DomElement): void {
+  const callback = read();
+  if (typeof callback === "function") callback(element);
 }
 
 export function createElement(tag: string, attributes: Record<string, unknown> = {}): DomElement {
@@ -162,6 +187,7 @@ export async function deferLotPage() {
 function installNavigationWindow(initialUrl: string) {
   const installed = installFakeWindow(initialUrl);
   const storage = new Map<string, string>();
+  if (typeof document !== "undefined") Object.assign(installed.fake, { document });
   Object.assign(installed.fake, {
     isSecureContext: true,
     localStorage: {
@@ -214,14 +240,21 @@ function observeNodes(render: () => Element) {
 }
 
 /** 挂载生产入口，历史替身驱动真实路由匹配与兜底。 */
-export async function mountPublicApp(initialUrl: string) {
+export async function mountPublicApp(
+  initialUrl: string,
+  storage: ReadonlyMap<string, string> = new Map(),
+  rejectHistoryWrites = false,
+) {
   const { App }: typeof import("../router") = await import(appModule);
   const installed = installNavigationWindow(initialUrl);
+  installed.fake.rejectWrites(rejectHistoryWrites);
+  for (const [key, value] of storage) installed.storage.set(key, value);
   const mounted = createRoot((dispose) => ({ dispose, find: observeNodes(() => mount(App, {})) }));
   return {
     find: mounted.find,
     storage: installed.storage,
     location: installed.fake.location,
+    rejectWrites: installed.fake.rejectWrites,
     go(href: string) {
       installed.fake.history.pushState(null, "", href);
       installed.fake.dispatchEvent(new Event("popstate"));

@@ -100,6 +100,43 @@ test("accepted_bid_marks_only_the_bid_resource_changed：接受竞价只标记�
   expect(cache.after()).toBe(1);
 });
 
+test("手工进入 Final 后，连续流接受截止收紧后的首笔出价并继续严格检查版本", () => {
+  const cache = createRealtimeCache("auction-1", 0);
+  const first = bid(1, "bid-event-1", "bid-1", 4, 1, 1_500);
+  const final = event(2, "final", "auction.final_phase_entered", {
+    auction_id: "auction-1",
+    state_version: 7,
+  });
+  const next = bid(3, "bid-event-3", "bid-2", 6, 1, 2_000);
+  expect(cache.mergePage(page([first], 1)).bids_changed).toBe(true);
+  expect(cache.mergePage(page([final], 2))).toMatchObject({
+    refresh_required: true,
+    degraded: false,
+  });
+  expect(cache.mergePage(page([next], 3))).toMatchObject({
+    bids_changed: true,
+    refresh_required: false,
+    degraded: false,
+  });
+  expect(cache.after()).toBe(3);
+  expect(cache.mergePage(page([bid(4, "bid-event-4", "bid-3", 8, 1, 2_500)], 4)).degraded).toBe(
+    true,
+  );
+});
+
+test("进入 Final 仍保留已确认事实，拒绝相同 bid_id 的冲突负载", () => {
+  const cache = createRealtimeCache("auction-1", 0);
+  cache.mergePage(page([bid(1, "bid-event-1", "bid-1", 4, 1, 1_500)], 1));
+  const final = event(2, "final", "auction.final_phase_entered", {
+    auction_id: "auction-1",
+    state_version: 7,
+  });
+  cache.mergePage(page([final], 2));
+  expect(cache.mergePage(page([bid(3, "bid-event-3", "bid-1", 6, 1, 2_000)], 3)).degraded).toBe(
+    true,
+  );
+});
+
 test("conflicting_bid_identity_or_state_version_is_a_gap：竞价身份或状态版本冲突形成缺口", () => {
   const cache = createRealtimeCache("auction-1", 0);
   expect(cache.mergePage(page([bid(1, "bid-event-1", "bid-1", 1, 1, 1_500)], 1)).bids_changed).toBe(

@@ -231,7 +231,7 @@ function LotDetailLookupSession(props: {
   const shown = createCell<CatalogRow | null>(null);
   const detailDependencies = createValueMemo(() => ({
     lotId: props.target.lotId,
-    // 本人命令成功后推进的刷新代数；他人出价由下方的竞价通知补读。
+    // 权威刷新使用全局代号，普通出价只补读所属场次的详情。
     refreshGeneration: refreshGeneration(),
   }));
   const detail = createTaskResource(detailDependencies, async (dependencies, context) => {
@@ -262,7 +262,11 @@ function LotDetailLookupSession(props: {
       state.set(next);
     }
   });
-  useBidRefresh(detail, () => true);
+  useBidRefresh(
+    detail,
+    () => true,
+    () => props.target.auctionId,
+  );
   const world = (): DetailWorld =>
     props.target.world === null
       ? { kind: "auction" }

@@ -1,11 +1,10 @@
 // Public 竞价与代理竞价操作面板。
 
 import { MAX_PUBLIC_BID_AMOUNT } from "@auction/contracts/dto/public/commands";
-import { type Cell, createCell } from "@auction/web-shared/reactive/cell";
 import { structuralEquals } from "@auction/web-shared/reactive/equality";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import { createTaskResource } from "@auction/web-shared/reactive/resource";
-import type { Result } from "@auction/web-shared/result";
+import { err } from "@auction/web-shared/result";
 import { Link } from "@auction/web-shared/router";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
@@ -32,14 +31,17 @@ import type { CatalogAction, CommandDialogInput } from "./command-scope";
 import { CommandDialogContext, catalogIdentityMatches } from "./command-scope";
 import type { CatalogDetailBid, CatalogDetailBidSlot } from "./detail";
 import { CatalogDetailDialogContext } from "./detail";
+import { CatalogProxySnapshotsContext, type ProxyRead } from "./proxy-snapshots";
 
-type ProxyRead = Result<OwnedProxy | null, string>;
-const CatalogProxySnapshotsContext = createContext<Cell<ReadonlyMap<string, ProxyRead>>>();
+const CatalogProxyAuctionContext = createContext<() => string>();
 
-/** 在按身份和场次建键的看板子树内保存已读取的授权，目录行卸载后仍可复用。 */
-export function CatalogProxyScope(props: { readonly children: JSX.Element }): JSX.Element {
-  return createComponent(CatalogProxySnapshotsContext, {
-    value: createCell<ReadonlyMap<string, ProxyRead>>(new Map()),
+/** 目录行只访问实际展示场次的代理快照。 */
+export function CatalogProxyScope(props: {
+  readonly auctionId: string;
+  readonly children: JSX.Element;
+}): JSX.Element {
+  return createComponent(CatalogProxyAuctionContext, {
+    value: () => props.auctionId,
     get children() {
       return props.children;
     },
@@ -110,6 +112,7 @@ export function LiveCatalogActions(props: {
   const pending = () => competition?.current()?.command(props.lotId) ?? null;
   const hasPending = () => pending() !== null;
   const snapshots = useContext(CatalogProxySnapshotsContext);
+  const auctionId = useContext(CatalogProxyAuctionContext);
   const droppedLot = props.lotId;
   const activeAction = createValueMemo((): CatalogAction | null => {
     const current = dialog?.();
@@ -132,37 +135,65 @@ export function LiveCatalogActions(props: {
   );
   const proxyDependencies = createValueMemo(() => {
     // 只在本拍品的详情或代理页签打开时跟随刷新代号，避免闭合行随刷新调度空读取。
-    return proxyViewActive() ? { lotId: props.lotId, refresh: refreshGeneration() } : null;
+    return proxyViewActive()
+      ? { auctionId: auctionId(), lotId: props.lotId, refresh: refreshGeneration() }
+      : null;
   });
   const proxyState = createTaskResource(proxyDependencies, async (dependencies, context) => {
     if (dependencies === null) {
       return null;
     }
-    const result = await fetchMyProxy(identity.userId, dependencies.lotId, context.signal);
-    return context.alive() ? { lotId: dependencies.lotId, result } : null;
+    const { auctionId: requestedAuction, lotId } = dependencies;
+    const read = await fetchMyProxy(identity.userId, lotId, context.signal);
+    if (!context.alive()) return null;
+    const result =
+      read.ok && read.value !== null && read.value.auction_id !== requestedAuction
+        ? err("invalid_response")
+        : read;
+    return { request: dependencies, result };
   });
   // enabled 用访问器传入：代理视图关闭后必须立即退订刷新节拍。
-  useBidRefresh(proxyState, proxyViewActive);
-  createEffect(
-    () => {
-      const read = proxyState();
-      return read != null && read.lotId === props.lotId && identityConfirmed() ? read : null;
-    },
-    (read) => {
-      // 同一身份、场次的实际读取才可替换快照；关闭时的空任务不代表授权不存在。
-      if (read !== null && !structuralEquals(snapshots.peek().get(read.lotId), read.result)) {
-        const next = new Map(snapshots.peek());
-        next.set(read.lotId, read.result);
-        snapshots.set(next);
-      }
-    },
-  );
-  const proxySnapshot = createValueMemo(() => {
-    const snapshot = snapshots().get(props.lotId) ?? null;
-    return snapshot === null
-      ? null
-      : usableProxySnapshot(snapshot, identityConfirmed(), proxyState.state() === "ready");
+  useBidRefresh(proxyState, proxyViewActive, auctionId);
+  const scopedProxyRead = () => {
+    const read = proxyState();
+    return read != null &&
+      read.request.auctionId === auctionId() &&
+      read.request.lotId === props.lotId &&
+      identityConfirmed()
+      ? read
+      : null;
+  };
+  createEffect(scopedProxyRead, (read) => {
+    // 成功的同身份读取才能替换授权，包括明确无授权。读取失败不能解除活动授权对普通出价的限制。
+    if (read?.result.ok === true) {
+      snapshots.remember(identity.userId, read.request.auctionId, read.request.lotId, read.result);
+    }
   });
+  const currentProxyRead = createValueMemo(() =>
+    usableProxySnapshot(
+      scopedProxyRead()?.result ?? null,
+      identityConfirmed(),
+      proxyState.state() === "ready",
+    ),
+  );
+  const proxyReadError = () => {
+    const current = currentProxyRead();
+    return current?.ok === false ? current.error : null;
+  };
+  const proxySnapshot = createValueMemo(() => {
+    if (!identityConfirmed()) return null;
+    const current = currentProxyRead();
+    return current?.ok === true ? current : (snapshots.read(auctionId(), props.lotId) ?? current);
+  });
+  const proxyReadGeneration = () => {
+    const read = scopedProxyRead();
+    // 旧快照仍约束普通出价。代理写入须等当前视图这一次授权读取成功。
+    return read?.result.ok === true &&
+      read.request === proxyDependencies() &&
+      proxyState.state() === "ready"
+      ? read.request.refresh
+      : null;
+  };
   const activeProxy = () => activeOwnedProxy(proxySnapshot());
   const proxyLeading = () => activeProxy()?.bid?.leading === true;
   const effectiveLeading = () => props.leading || proxyLeading();
@@ -224,6 +255,8 @@ export function LiveCatalogActions(props: {
       leading: effectiveLeading(),
       blockedReason: actionReason(),
       proxy: proxySnapshot(),
+      proxyReadGeneration: proxyReadGeneration(),
+      proxyReadError: proxyReadError(),
     }),
   );
   createEffect(
@@ -284,7 +317,13 @@ export function LiveCatalogActions(props: {
     if (dialog !== null) {
       const current = dialog.peek();
       if (current !== null && current.lotId === droppedLot) {
-        dialog.set({ ...current, canBid: false, proxy: null });
+        dialog.set({
+          ...current,
+          canBid: false,
+          proxy: null,
+          proxyReadGeneration: null,
+          proxyReadError: null,
+        });
       }
     }
     // 拍品结束后行仍在，但操作栏已卸载：抽屉入口随之失败关闭，不保留最后一次资格。

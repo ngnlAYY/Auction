@@ -35,6 +35,7 @@ export function orderFulfillmentAuctionDirectory(
  * 非法筛选不进入加载态；表格状态只承载页码与分页大小已匹配的读取快照。 */
 export type FulfillmentBodyState =
   | { readonly kind: "error" }
+  | { readonly kind: "invalid-auction" }
   | { readonly kind: "empty-auctions" }
   | { readonly kind: "invalid-filter" }
   | { readonly kind: "table"; readonly read: FulfillmentRead }

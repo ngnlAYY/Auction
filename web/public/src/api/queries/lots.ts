@@ -2,15 +2,17 @@
 
 import type { PublicLotEnvelopeResponse } from "@auction/contracts/dto/public/catalog/lot";
 import { sleep } from "@auction/web-shared/platform/timer";
+import { documentIsVisible } from "@auction/web-shared/platform/visibility";
 import type { Result } from "@auction/web-shared/result";
 import { err, ok, unreachable } from "@auction/web-shared/result";
 import { decodeLotDetail, decodeLotList } from "../decoder/lot";
 import type { CatalogLevelFilter } from "../model";
 import type { CacheRead } from "../swr-cache";
-import { getOrFetch, LIVE_TTL_MILLIS } from "../swr-cache";
+import { deliverCacheRead, getOrFetch, LIVE_TTL_MILLIS, publicReadRetryAfter } from "../swr-cache";
 import { cachedPublicRead, conditionalGet, failureOutcome } from "./cached-get";
 
 const PUBLIC_QUERY_RETRY_DELAY_MILLIS = 1_000;
+const MAX_CATALOG_RETRY_DELAY_MILLIS = 60_000;
 
 /** lot 外壳/列表的缓存投影标识。 */
 const LOT_ENVELOPE_CACHE_TYPE = "public_lot_envelope";
@@ -23,7 +25,7 @@ export type LotDetailFetchError = {
 /** 暂时未取得有效详情。 */
 export const LOT_DETAIL_FETCH_ERROR: LotDetailFetchError = { kind: "lot_detail_fetch_error" };
 
-/** 读取当前场次目录的一页；首次没拿到权威值时按旧实现等待一秒后再读一次。 */
+/** 读取目录的一页；在可见时按服务端提示的时限最多自动补读一次。 */
 export async function fetchCurrentLots(
   auctionId: string,
   category: string | null,
@@ -33,23 +35,56 @@ export async function fetchCurrentLots(
   pageSize: number,
   signal: AbortSignal,
 ): Promise<Result<PublicLotEnvelopeResponse, string>> {
+  const url = currentLotsUrl(auctionId, category, equipmentGroup, levels, page, pageSize);
+  let retryAt: number | null = null;
+  const read = (canSend?: () => boolean) =>
+    fetchCurrentLotsOnce(
+      url,
+      auctionId,
+      category,
+      equipmentGroup,
+      levels,
+      signal,
+      (notBefore) => {
+        retryAt = notBefore;
+      },
+      canSend,
+    );
   return retryOnceUnlessAuthoritative(
-    () => fetchCurrentLotsOnce(auctionId, category, equipmentGroup, levels, page, pageSize, signal),
-    () => wait(PUBLIC_QUERY_RETRY_DELAY_MILLIS, signal),
+    read,
+    async () => {
+      const shared = publicReadRetryAfter(url)?.notBefore ?? null;
+      const delay =
+        shared === null && retryAt === null
+          ? PUBLIC_QUERY_RETRY_DELAY_MILLIS
+          : Math.ceil(Math.max(0, Math.max(shared ?? 0, retryAt ?? 0) - performance.now()));
+      // 超过等待上限就交付首次结果，避免在服务端仍拒绝的窗口内提前重读。
+      if (
+        delay > MAX_CATALOG_RETRY_DELAY_MILLIS ||
+        !documentIsVisible() ||
+        !(await sleep(delay, signal)) ||
+        !documentIsVisible()
+      ) {
+        return null;
+      }
+      let skipped = false;
+      const second = await read(() => {
+        // 同 URL 的在途读可能延后补读。必须在实际发送边界复核可见性。
+        skipped = !documentIsVisible();
+        return !skipped;
+      });
+      return skipped ? null : second;
+    },
     "network_error",
     signal,
   );
 }
 
-/** 旧 Public QueryClient 对目录读取固定再尝试一次，错误壳只在第二次失败后出现。
- * 首次读到权威值（新鲜命中、304 确认或新响应）直接返回；首次失败，或只得到传输失败、暂时性
- * 拒绝后回退的旧快照时，等待后重读一次：等待期间 Resource 保留已展示的目录，拥塞通常已过，
- * 能及时追上价格与领先者。第二次结果原样返回：再次回退时接受旧快照，失败关闭的拒绝照常报错。
- * wait 在首次读取结束后才构造，浏览器定时器从那一刻起计时。 */
-/** 仅供测试使用：以注入的读取与等待函数核对首次回退后的单次重读。 */
+/** 首次权威值直接交付；未得到权威值可在等待后补读一次。等待结束仍不能补读时交付首次结果，
+ * 允许旧快照继续展示。中止优先于回退，第二次读取仍执行相同的失败关闭规则。导出供测试。 */
 export async function retryOnceUnlessAuthoritative<T, E>(
-  read: () => Promise<Result<CacheRead<T>, E>>,
-  wait: () => Promise<boolean>,
+  read: () => Promise<Result<CacheRead<T, E>, E>>,
+  retry: () => Promise<Result<CacheRead<T, E>, E> | null>,
   abortError: E,
   signal: AbortSignal,
 ): Promise<Result<T, E>> {
@@ -60,14 +95,11 @@ export async function retryOnceUnlessAuthoritative<T, E>(
   if (first.ok && first.value.staleFallback === null) {
     return ok(first.value.value);
   }
-  if (!(await wait())) {
-    return err(abortError);
-  }
-  const second = await read();
+  const second = await retry();
   if (signal.aborted) {
     return err(abortError);
   }
-  return second.ok ? ok(second.value.value) : second;
+  return deliverCacheRead(second ?? first);
 }
 
 /** 首屏预取：与 /auctions/current 并行读取上次记住的场次 lots，只单次尝试、丢弃结果。目录随后
@@ -81,25 +113,28 @@ export async function prefetchCurrentLots(
   pageSize: number,
   signal: AbortSignal,
 ): Promise<void> {
-  await fetchCurrentLotsOnce(auctionId, category, equipmentGroup, levels, page, pageSize, signal);
+  const url = currentLotsUrl(auctionId, category, equipmentGroup, levels, page, pageSize);
+  await fetchCurrentLotsOnce(url, auctionId, category, equipmentGroup, levels, signal);
 }
 
 async function fetchCurrentLotsOnce(
+  url: string,
   auctionId: string,
   category: string | null,
   equipmentGroup: string | null,
   levels: CatalogLevelFilter,
-  page: number,
-  pageSize: number,
   signal: AbortSignal,
+  observeRetryAfter: (notBefore: number) => void = () => {},
+  canSend?: () => boolean,
 ): Promise<Result<CacheRead<PublicLotEnvelopeResponse>, string>> {
-  const url = currentLotsUrl(auctionId, category, equipmentGroup, levels, page, pageSize);
   return cachedPublicRead(
     url,
     LIVE_TTL_MILLIS,
     LOT_ENVELOPE_CACHE_TYPE,
     (response) => decodeLotList(response, auctionId, category, equipmentGroup, levels),
     signal,
+    observeRetryAfter,
+    canSend,
   );
 }
 
@@ -178,8 +213,4 @@ export async function fetchLotDetail(
     LOT_DETAIL_FETCH_ERROR,
     signal,
   );
-}
-
-async function wait(milliseconds: number, signal: AbortSignal): Promise<boolean> {
-  return sleep(milliseconds, signal);
 }

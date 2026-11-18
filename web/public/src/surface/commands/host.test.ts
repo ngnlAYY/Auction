@@ -180,7 +180,10 @@ test.each(["create", "lower"] as const)(
           "Change",
         );
       }
-      const form = page.need((element) => element.tag === "form");
+      const proxyForm = page.need(
+        (element) => element.tag === "section" && hasClass(element, "public-auction-bid-form"),
+      );
+      const form = page.need((element) => element.tag === "form", proxyForm);
       const first = await confirm(page, form);
       expect(first.body).toContain('"maximum_amount":2000');
       if (kind === "create") {
@@ -239,7 +242,8 @@ test("同一拍品只显示恢复，结束后可从目录和抽屉打开，其�
       );
     closeDialog();
     dispatch(page.need(recovery), "Click");
-    expect(page.find((element) => element.tag === "form")).toBeNull();
+    const recoveryDialog = page.need((element) => element.attributes.role === "dialog");
+    expect(page.find((element) => element.tag === "form", recoveryDialog)).toBeNull();
     expect(page.find((element) => hasClass(element, "public-bid-dialog__tabs"))).toBeNull();
     closeDialog();
 

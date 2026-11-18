@@ -185,7 +185,8 @@ test("地址栏已切换同场 lot、查询还未同步时放弃旧草稿", asyn
 });
 
 test("场次未变时只写入最后一个合法草稿，保留输入中的空白", async () => {
-  const mounted = mountLotDraft(`/bidlog?world=main&auction=${AUCTION_A}&page=3`);
+  const raw = `%77orld=%6dain&a%75ction=${AUCTION_A}&keep=%2b%20x`;
+  const mounted = mountLotDraft(`/bidlog?${raw}&bidlog_page=3`);
   try {
     mounted.lot.input("One12");
     mounted.lot.input(" Two7 ");
@@ -194,6 +195,7 @@ test("场次未变时只写入最后一个合法草稿，保留输入中的空�
     flush();
     expect(mounted.params().get("lot")).toBe("Two7");
     expect(mounted.params().get("page")).toBeNull();
+    expect(window.location.search).toBe(`?${raw}&lot=Two7`);
     expect(mounted.lot.draft.peek()).toBe(" Two7 ");
   } finally {
     mounted.dispose();

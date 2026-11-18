@@ -10,7 +10,7 @@ import {
 } from "@auction/web-shared/ui/build-notice";
 import { createTimeoutFuture } from "../../platform/timer";
 import { err, ok, type Result, unreachable } from "../../result";
-import { parseJson } from "../wire";
+import { type JsonFieldPolicy, parseJson } from "../wire";
 
 /** 两端共用的默认请求超时上限（恢复旧版 10 秒语义）。 */
 export const DEFAULT_REQUEST_TIMEOUT_MILLIS = 10_000;
@@ -51,7 +51,7 @@ export interface TransportResponse extends TransportResponseMetadata {
   /** 把正文按 UTF-8 解码；无正文时返回空字符串。 */
   text(): string;
   /** 把正文解析为严格 JSON；无正文或不符合源码拒绝边界时返回 decode 错误。 */
-  json(): Result<unknown, TransportError>;
+  json(policy?: JsonFieldPolicy): Result<unknown, TransportError>;
 }
 
 /** 响应头到达时调用；正文仍须在同一超时预算内完整读取。 */
@@ -83,11 +83,11 @@ function transportResponse(
     text() {
       return body === null ? "" : new TextDecoder().decode(body);
     },
-    json() {
+    json(policy) {
       if (body === null) {
         return err({ kind: "decode" });
       }
-      const decoded = parseJson(new TextDecoder().decode(body));
+      const decoded = parseJson(new TextDecoder().decode(body), policy);
       return decoded.ok ? decoded : err({ kind: "decode" });
     },
   };

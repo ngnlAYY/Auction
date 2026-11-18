@@ -22,10 +22,12 @@ import {
   useLotDetailLookup,
 } from "../catalog/detail/lookup";
 import { useContentLoading } from "../loading";
-import { normalizePublicPageSize, publicPageMatches } from "../pagination";
+import { normalizePublicPageSize, publicPageMatches, updatePublicPage } from "../pagination";
 import { usePublicPageBounds } from "../pagination/bounds";
+import { readPublicQuery, updatePublicQueryPairs } from "../query/location";
 import { usePageRouteGuard } from "../query/route-page";
 import { updatePublicQueryState, usePublicQueryState } from "../query/state";
+import { InvalidReadAuction } from "../reads/invalid-auction";
 import { CompensationPoolTable } from "./table";
 
 interface CompensationPoolLoad {
@@ -48,6 +50,7 @@ export function poolPage(): JSX.Element {
   const pageNumber = createValueMemo(() => Math.max(queryStateSignal().page, 1));
   const pageSize = createValueMemo(() => queryStateSignal().pageSize);
   const selectedAuctionId = createValueMemo(() => queryStateSignal().auctionId ?? "");
+  const invalidAuction = createValueMemo(() => queryStateSignal().invalidAuction !== null);
   const movementPage = createValueMemo(() => queryStateSignal().movementPage);
   const movementPageSize = createValueMemo(() => queryStateSignal().movementPageSize);
   const routeStillOnPage = usePageRouteGuard("CompensationPool");
@@ -175,9 +178,23 @@ export function poolPage(): JSX.Element {
   const retry = () => {
     refreshGeneration.set(Math.min(refreshGeneration.peek() + 1, Number.MAX_SAFE_INTEGER));
   };
+  const writeRoundSelection = (auctionId: string | null) =>
+    routeStillOnPage() &&
+    updatePublicQueryPairs(
+      queryStateSignal,
+      ["auction", "movement_page"],
+      auctionId === null ? [] : [["auction", auctionId]],
+      "push",
+    );
 
   return (
     <LotDetailLookupContext value={lookup}>
+      <Show when={invalidAuction()}>
+        <InvalidReadAuction
+          onRecover={() => writeRoundSelection(null)}
+          recoverLabel={t("auction-clear-selection")}
+        />
+      </Show>
       <Switch fallback={null}>
         <Match when={current() === null}>{null}</Match>
         <Match when={currentFailed()}>
@@ -208,17 +225,9 @@ export function poolPage(): JSX.Element {
                 );
               }}
               onPageClamp={(nextPage) => {
-                if (!routeStillOnPage()) {
-                  return false;
-                }
-                return updatePublicQueryState(
-                  queryStateSignal,
-                  (query) => {
-                    query.page = Math.max(nextPage, 1);
-                    query.auctionId = null;
-                    query.movementPage = 1;
-                  },
-                  "replace",
+                // 批次总量只校正批次页码，保留场次原文和明细页码。
+                return (
+                  routeStillOnPage() && updatePublicPage(queryStateSignal, nextPage, "replace")
                 );
               }}
               onPageSizeChange={(size) => {
@@ -234,14 +243,7 @@ export function poolPage(): JSX.Element {
                 );
               }}
               onSelectRound={(auctionId) => {
-                updatePublicQueryState(
-                  queryStateSignal,
-                  (query) => {
-                    query.auctionId = query.auctionId !== auctionId ? auctionId : null;
-                    query.movementPage = 1;
-                  },
-                  "push",
-                );
+                writeRoundSelection(readPublicQuery().auctionId === auctionId ? null : auctionId);
               }}
               onLotPageChange={(nextPage) => {
                 return updatePublicQueryState(
@@ -256,11 +258,10 @@ export function poolPage(): JSX.Element {
                 if (!routeStillOnPage()) {
                   return false;
                 }
-                return updatePublicQueryState(
+                return updatePublicQueryPairs(
                   queryStateSignal,
-                  (query) => {
-                    query.movementPage = Math.max(nextPage, 1);
-                  },
+                  ["movement_page"],
+                  nextPage > 1 ? [["movement_page", String(nextPage)]] : [],
                   "replace",
                 );
               }}

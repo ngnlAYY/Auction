@@ -38,15 +38,17 @@ import {
   useLotDetailLookup,
 } from "../catalog/detail/lookup";
 import { useContentLoading } from "../loading";
+import { usePublicPageBounds } from "../pagination/bounds";
 import {
   normalizeWorldQuery,
   type PublicBoardQuery,
   publicAuctionHomeQuery,
   publicHref,
   redirectPublicAlias,
-  updatePublicQueryState,
   usePublicQueryState,
 } from "../query";
+import { readPublicQuery, updatePublicQueryPairs } from "../query/location";
+import { usePageRouteGuard } from "../query/route-page";
 import {
   CurrentAuctionContext,
   PublicReadinessContext,
@@ -107,6 +109,7 @@ interface AuctionBoardViewProps {
   readonly invalid: boolean;
   readonly failed: boolean;
   readonly empty: boolean;
+  readonly pageBounds: ReturnType<typeof usePublicPageBounds>;
   readonly auction: CurrentAuctionItemResponse | null;
   readonly historical: boolean;
   readonly bootPrerequisitesReady: boolean;
@@ -126,12 +129,21 @@ export function mountAuctionBoard(
   const session = useContext(PublicSessionResourceContext);
   const owner = useContext(PublicCommandOwnerContext);
   const currentAuction = useContext(CurrentAuctionContext);
+  const routeStillOnBoard = usePageRouteGuard("AuctionIndex");
   const invalid = createValueMemo(() => queryStateSignal().invalidAuction !== null);
+  const pageBounds = usePublicPageBounds(queryStateSignal, "AuctionIndex", (query) =>
+    query.invalidAuction !== null || query.invalidCategory !== null
+      ? []
+      : [["page", query.pageSize]],
+  );
+  const queryBlocked = () =>
+    queryStateSignal().invalidCategory !== null || pageBounds.blocked("page");
   // 同路径的历史/当前切换也必须订阅查询，不能仅在 popstate 或首页按钮时重读。
   const requestedAuction = createValueMemo(() => queryStateSignal().auctionId);
   const historical = createValueMemo(() => requestedAuction() !== null);
+  const historyRequest = createValueMemo(() => (queryBlocked() ? null : requestedAuction()));
   const historicalCurrent = createTaskResource(
-    () => [refreshGeneration(), requestedAuction()] as const,
+    () => [refreshGeneration(), historyRequest()] as const,
     async ([, requested], context) => {
       const result =
         requested === null ? ok(null) : await fetchHistoricalAuction(requested, context.signal);
@@ -160,14 +172,17 @@ export function mountAuctionBoard(
         if (result.ok && result.value !== null && result.value.id === state.requested) {
           const auction = result.value;
           const world = normalizeWorldQuery(auction.world);
-          if (state.query.world !== world) {
-            updatePublicQueryState(
-              queryStateSignal,
-              (query) => {
-                query.world = world;
-              },
-              "replace",
-            );
+          if (state.query.world !== world && routeStillOnBoard()) {
+            const latest = readPublicQuery();
+            // 只纠正仍指向本场的地址。场次所属世界不授权重写其他筛选。
+            if (latest.auctionId === state.requested && latest.world !== world) {
+              updatePublicQueryPairs(
+                queryStateSignal,
+                ["world"],
+                world === null ? [] : [["world", world]],
+                "replace",
+              );
+            }
           }
           target = publicRealtimeTargetFromAuction(auction);
         } else {
@@ -240,8 +255,14 @@ export function mountAuctionBoard(
     return loaded !== null && (!loaded.ok || loaded.value === null);
   });
   // 错误与空拍卖本身就是可操作的最终首屏；有拍卖时由 AuctionData 等待主要 lots。
-  useAppBootReady(() => bootPrerequisitesReady() && terminalWithoutAuction());
-  useContentLoading(() => !invalid() && current() === null);
+  useAppBootReady(
+    () =>
+      bootPrerequisitesReady() &&
+      (terminalWithoutAuction() ||
+        queryStateSignal().invalidCategory !== null ||
+        pageBounds.failed("page")),
+  );
+  useContentLoading(() => !invalid() && !queryBlocked() && current() === null);
   const failed = createValueMemo(() => {
     const loaded = current();
     return loaded !== null && !loaded.ok;
@@ -255,7 +276,13 @@ export function mountAuctionBoard(
     return loaded?.ok ? loaded.value : null;
   });
   // 公开读与补读游标早于身份子树建立，换号只替换私有展示和命令宿主。
-  const catalog = useAuctionCatalog(auction, historical, auctionReading, queryStateSignal);
+  const catalog = useAuctionCatalog(
+    auction,
+    historical,
+    auctionReading,
+    queryStateSignal,
+    queryBlocked,
+  );
 
   return For({
     get each() {
@@ -284,6 +311,7 @@ export function mountAuctionBoard(
             get empty() {
               return empty();
             },
+            pageBounds,
             get auction() {
               return auction();
             },
@@ -304,6 +332,7 @@ export function mountAuctionBoard(
 
 function AuctionBoardView(props: AuctionBoardViewProps): JSX.Element {
   const router = useRouter();
+  const routeStillOnBoard = usePageRouteGuard("AuctionIndex");
   const request = useContext(LotViewRequestContext);
   const lookup = useContext(LotDetailLookupContext);
   createEffect(
@@ -315,6 +344,8 @@ function AuctionBoardView(props: AuctionBoardViewProps): JSX.Element {
         !props.invalid &&
         !props.failed &&
         !props.empty &&
+        props.query().invalidCategory === null &&
+        !props.pageBounds.failed("page") &&
         (props.auction === null || (ready === null && props.catalog.reading()));
       const disposition = disposeLotView(
         queued.target,
@@ -351,6 +382,37 @@ function AuctionBoardView(props: AuctionBoardViewProps): JSX.Element {
       <Match when={props.invalid}>
         <InvalidAuctionLink world={props.query().world} />
       </Match>
+      <Match when={props.query().invalidCategory}>
+        {(values) => (
+          <div class="ui-async-state ui-async-state--error">
+            <p id="public-catalog-category-error" role="status" aria-live="polite">
+              {values().length > 1 ? t("filter-error-duplicate") : t("filter-category-invalid")}
+              <bdi> {values().join(" / ")}</bdi>
+            </p>
+            <button
+              class="ui-async-state__retry"
+              type="button"
+              aria-describedby="public-catalog-category-error"
+              onClick={() => {
+                if (routeStillOnBoard()) {
+                  updatePublicQueryPairs(props.query, ["type", "page"], [], "push");
+                }
+              }}
+            >
+              {t("filter-category-clear")}
+            </button>
+          </div>
+        )}
+      </Match>
+      <Match when={props.pageBounds.failed("page")}>
+        <AsyncState
+          kind="error"
+          title={t("data-error")}
+          detail={t("pagination-clamp-error")}
+          retryLabel={t("data-retry")}
+          onRetry={props.pageBounds.retry}
+        />
+      </Match>
       {/* 读取失败或该世界没有场次时看板的筛选工具栏不存在：世界按钮组单独成行，
           否则切到没有场次的世界之后就没有入口切回来。 */}
       <Match when={props.failed}>
@@ -379,7 +441,7 @@ function AuctionBoardView(props: AuctionBoardViewProps): JSX.Element {
       <Match when={props.auction}>
         {(loaded) => (
           <LotWatchScope auctionId={loaded().id}>
-            <CatalogProxyScope>
+            <CatalogProxyScope auctionId={loaded().id}>
               <AuctionData
                 auction={loaded()}
                 historical={props.historical}

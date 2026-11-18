@@ -75,6 +75,8 @@ filter-include-unleveled = Show unleveled equipment
 filter-level-hint = Leave blank for no limit. Press Enter or leave the field to apply. Equipment above the limit is hidden; the checkbox controls equipment without a numeric level.
 filter-level-invalid = Check the level limit (a non-negative whole number or blank) and whether to show unleveled equipment.
 filter-error-duplicate = This filter appears more than once. Enter a single value.
+filter-category-invalid = The equipment type filter is invalid. Clear it to load the catalog.
+filter-category-clear = Clear equipment type filter
 filter-all = All
 filter-category-selected = { $count } types selected
 filter-done = Done
@@ -167,6 +169,7 @@ auction-empty-no-auction = No auction in this world yet
 auction-empty-no-auction-hint = Check back later for the next auction.
 auction-invalid-link = The auction in this link is invalid.
 auction-view-current = View current auction
+auction-clear-selection = Clear auction selection
 
 
 page-auctions-title = Auction history

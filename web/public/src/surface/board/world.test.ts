@@ -259,6 +259,25 @@ test("非法场次的地址不会被自动改成开放世界", async () => {
   }
 });
 
+test("世界自动纠偏只删 world，保留其他查询片段的字节", async () => {
+  const retained = "%74ype=%62ad&keep=%2b%20x&keep=%7e";
+  const search = `?%77orld=isekai&${retained}`;
+  const mounted = mountWorldSwitch({
+    initialUrl: `/${search}`,
+    worlds: worldsResponse([
+      ["main", true],
+      ["isekai", false],
+    ]),
+  });
+  try {
+    await waitFor(() => mounted.selected.peek() === "main");
+    expect(mounted.browserSearch()).toBe(`?${retained}`);
+    expect(mounted.query.peek().invalidCategory).toEqual(["bad"]);
+  } finally {
+    mounted.dispose();
+  }
+});
+
 test("world_switch_choose_does_not_notify_an_unchanged_single_world：全部与主世界之间切换不重复通知", async () => {
   const mounted = mountWorldSwitch({
     initialUrl: "/history",

@@ -5,7 +5,12 @@ import { createRouter, RouterContext } from "@auction/web-shared/router";
 import { installFakeWindow } from "@auction/web-shared/router/test-window";
 import { createRoot, flush, getOwner, runWithOwner, Show } from "solid-js";
 
-import { PublicBidRefreshContext, PublicRefreshGenerationContext } from "../board/refresh";
+import { PublicPageRealtimeTargetContext } from "../board/realtime";
+import {
+  createPublicBidRefresh,
+  PublicBidRefreshContext,
+  PublicRefreshGenerationContext,
+} from "../board/refresh";
 import { PublicContentLoadingContext } from "../loading";
 import { InitialPublicLocationContext, initialPublicLocation } from "../query";
 import { PUBLIC_ROUTES } from "../router/route";
@@ -47,6 +52,7 @@ export function mountReadPage(
   const oldInitial = InitialPublicLocationContext.defaultValue;
   const oldRefresh = PublicRefreshGenerationContext.defaultValue;
   const oldBidRefresh = PublicBidRefreshContext.defaultValue;
+  const oldPageTarget = PublicPageRealtimeTargetContext.defaultValue;
   const oldLoading = PublicContentLoadingContext.defaultValue;
   const oldWorld = WorldSwitchContext.defaultValue;
   const loading = createCell<ReadonlySet<number>>(new Set());
@@ -58,7 +64,8 @@ export function mountReadPage(
     RouterContext.defaultValue = router;
     InitialPublicLocationContext.defaultValue = initial;
     PublicRefreshGenerationContext.defaultValue = createCell(0);
-    PublicBidRefreshContext.defaultValue = { revision: createCell(0), notify: () => {} };
+    PublicBidRefreshContext.defaultValue = createPublicBidRefresh();
+    PublicPageRealtimeTargetContext.defaultValue = createCell(null);
     PublicContentLoadingContext.defaultValue = loading;
     WorldSwitchContext.defaultValue = {
       options: () => ["all", "main", "isekai"].map((value) => ({ value, disabled: false })),
@@ -125,6 +132,7 @@ export function mountReadPage(
       InitialPublicLocationContext.defaultValue = oldInitial;
       PublicRefreshGenerationContext.defaultValue = oldRefresh;
       PublicBidRefreshContext.defaultValue = oldBidRefresh;
+      PublicPageRealtimeTargetContext.defaultValue = oldPageTarget;
       PublicContentLoadingContext.defaultValue = oldLoading;
       WorldSwitchContext.defaultValue = oldWorld;
       restore();

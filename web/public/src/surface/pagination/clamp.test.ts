@@ -223,10 +223,16 @@ test.each(["bid_page", "proxy_page"] as const)(
     const previousOwner = PublicCommandOwnerContext.defaultValue;
     const bid = key === "bid_page" ? 3 : 7;
     const proxy = key === "proxy_page" ? 3 : 7;
-    const probe = mountClampPage(`/me?bid_page=${bid}&proxy_page=${proxy}`, () => {
-      installAccountSession();
-      accountPage();
-    });
+    const raw = "keep=%2b%20x&keep=%7e";
+    const bidValue = bid === 3 ? "3" : "0007";
+    const proxyValue = proxy === 3 ? "3" : "0007";
+    const probe = mountClampPage(
+      `/me?bid_%70age=${bidValue}&proxy_%70age=${proxyValue}&${raw}`,
+      () => {
+        installAccountSession();
+        accountPage();
+      },
+    );
     try {
       probe.mounted.rejectWrites(true);
       showResult(probe.mounted, Match, {
@@ -240,9 +246,9 @@ test.each(["bid_page", "proxy_page"] as const)(
         probe.mounted.elements.filter(({ tag, props }) => tag === "div" && props.hidden === true),
       ).toHaveLength(0);
       expectRejectedClamp(probe, key === "bid_page" ? 0 : 1, key);
-      expect(
-        probe.mounted.location.searchParams.get(key === "bid_page" ? "proxy_page" : "bid_page"),
-      ).toBe("7");
+      expect(probe.mounted.location.search).toBe(
+        `?${key === "bid_page" ? "proxy" : "bid"}_%70age=0007&${raw}`,
+      );
     } finally {
       probe.dispose();
       PublicSessionResourceContext.defaultValue = previousSession;
@@ -252,7 +258,8 @@ test.each(["bid_page", "proxy_page"] as const)(
 );
 
 test("补偿池明细纠偏写入失败可重试，保留所选场次", () => {
-  const address = `/compensation-pool?auction=${AUCTION}&movement_page=3&movement_page_size=10`;
+  const outer = `a%75ction=${AUCTION}&page=%30%31&movement_page_size=10&keep=%2b%20x`;
+  const address = `/compensation-pool?${outer}&movement_page=3`;
   const probe = mountClampPage(address, poolPage);
   try {
     const { mounted } = probe;
@@ -269,7 +276,7 @@ test("补偿池明细纠偏写入失败可重试，保留所选场次", () => {
     showResult(mounted, For, COMPENSATION_ROUND, poolStart);
     showResult(mounted, Match, { ...SHORT_PAGE, lots: [] }, detailsStart);
     expectRejectedClamp(probe, 1, "movement_page");
-    expect(mounted.location.searchParams.get("auction")).toBe(AUCTION);
+    expect(mounted.location.search).toBe(`?${outer}`);
   } finally {
     probe.dispose();
   }

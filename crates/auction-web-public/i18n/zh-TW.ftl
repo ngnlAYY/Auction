@@ -74,6 +74,8 @@ filter-include-unleveled = 顯示無等級裝備
 filter-level-hint = 留空表示不限，按 Enter 或離開輸入框時生效。高於上限的裝備隱藏；沒有數字等級的裝備由旁邊核取方塊控制。
 filter-level-invalid = 請檢查等級上限（非負整數或留空），並確認是否顯示無等級裝備。
 filter-error-duplicate = 此篩選條件重複，請只保留一個值。
+filter-category-invalid = 裝備類型篩選無效，清除後可讀取目錄。
+filter-category-clear = 清除裝備類型篩選
 filter-all = 全部
 filter-category-selected = 已選 { $count } 類
 filter-done = 完成
@@ -166,6 +168,7 @@ auction-empty-no-auction = 此世界目前沒有拍賣場次
 auction-empty-no-auction-hint = 請稍後查看下一場拍賣。
 auction-invalid-link = 連結中的場次無效
 auction-view-current = 查看目前場次
+auction-clear-selection = 清除場次選擇
 
 
 page-auctions-title = 拍賣歷史

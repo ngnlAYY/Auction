@@ -11,7 +11,8 @@ import { validUuid } from "@auction/web-shared/ui/validation";
 
 import { catalogLevelFilterParse } from "../../api/model";
 import { prefetchCurrentLots } from "../../api/queries/lots";
-import { catalogCategoryKeys, type PublicBoardQuery } from "../query";
+import { publicPageCorrections } from "../pagination/bounds";
+import { catalogCategoryKeys, currentBrowserSearch, type PublicBoardQuery } from "../query";
 
 const CURRENT_AUCTION_KEY_PREFIX = "hv.public.current-auction.";
 
@@ -28,9 +29,16 @@ export function rememberCurrentAuction(world: string, auctionId: string): void {
 }
 
 /** 看板首页启动时调用一次。参数推导与看板目录读取完全一致（分类/分组 `all` 视为不筛选、页码
- * 至少为 1），保证两者请求同一 URL；带 `auction` 深链的页面读取历史场次，不预取。 */
+ * 至少为 1），保证两者请求同一 URL；显式 `auction` 由正文确认目标。 */
 export function prefetchBoardLots(world: string, query: PublicBoardQuery): void {
-  if (query.auctionId !== null || query.invalidAuction !== null) {
+  if (
+    query.auctionId !== null ||
+    query.invalidAuction !== null ||
+    query.invalidCategory !== null ||
+    publicPageCorrections(query, currentBrowserSearch(), [["page", query.pageSize]], false).length >
+      0
+  ) {
+    // 越界地址交给正文先 replace；写入失败时，预取也不能以其他页码发起读取。
     return;
   }
   const stored = getItem(currentAuctionKey(world));

@@ -255,15 +255,19 @@ test("only_transient_failure_fallbacks_are_marked_stale：只有暂时性失败�
   now.value = 120_000;
   // 暂时拒绝与传输失败回退的旧快照带标记与最近一次确认时刻（写入时间，不是本次读取时间），
   // 调用方据此决定是否稍后再读或提示数据时点。
-  expect(await readAtNow(busy("read_busy"))).toEqual(ok({ value: "v1", staleFallback: 90_000 }));
-  expect(await readAtNow(transport("network_error"))).toEqual(
+  expect(await readAtNow(busy("read_busy"))).toMatchObject(
+    ok({ value: "v1", staleFallback: 90_000 }),
+  );
+  expect(await readAtNow(transport("network_error"))).toMatchObject(
     ok({ value: "v1", staleFallback: 90_000 }),
   );
   // 304 确认的正文同样是权威值，并把确认时刻前移。
   expect(await readAtNow(notModified())).toEqual(ok({ value: "v1", staleFallback: null }));
   invalidateAll();
   now.value = 150_000;
-  expect(await readAtNow(busy("read_busy"))).toEqual(ok({ value: "v1", staleFallback: 120_000 }));
+  expect(await readAtNow(busy("read_busy"))).toMatchObject(
+    ok({ value: "v1", staleFallback: 120_000 }),
+  );
 });
 
 test("command_invalidation_forbids_falling_back_to_pre_command_snapshots：命令失效禁止回退到命令前快照", async () => {

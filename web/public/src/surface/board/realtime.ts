@@ -1,7 +1,7 @@
 // Public 看板的实时目标、连接状态与唯一的实时连接 owner。
 
 import type { CurrentAuctionItemResponse } from "@auction/contracts/dto/public/catalog/auction";
-import { sleepWhileVisible } from "@auction/web-shared/platform/visibility";
+import { documentIsVisible, sleepWhileVisible } from "@auction/web-shared/platform/visibility";
 import type { Cell } from "@auction/web-shared/reactive/cell";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import { createTaskResource } from "@auction/web-shared/reactive/resource";
@@ -19,7 +19,13 @@ import {
 } from "../../api/realtime/protocol";
 import { requestPublicSessionCheck } from "../../api/session";
 import { invalidateAll } from "../../api/swr-cache";
-import type { LiveConnectionState } from "../query";
+import {
+  type LiveConnectionState,
+  normalizedWorldQuery,
+  type PublicBoardQuery,
+  type WorldScope,
+  worldScopeFromQuery,
+} from "../query";
 import { PageVisibilityContext } from "../shell/contexts";
 import { PublicBidRefreshContext } from "./refresh";
 
@@ -41,6 +47,10 @@ export type PublicRealtimeTarget =
   | { readonly kind: "checking" }
   | { readonly kind: "anonymous" }
   | { readonly kind: "session_error" }
+  | {
+      readonly kind: "no_target";
+      readonly reason: "empty" | "invalid_auction" | "directory_error" | "selection_error";
+    }
   /** 页面目标的拍卖身份读取失败；不拿 URL 世界或默认 Main 代替权威归属。 */
   | { readonly kind: "identity_error"; readonly targetId: string }
   /** 已确认未进入竞价期；世界属于目标身份，切换世界不会沿用旧连接目标。 */
@@ -55,11 +65,28 @@ export type PublicRealtimeTarget =
     };
 
 /** 页面实时目标必须绑定明确请求，不能跨显式拍卖查询复用。 */
-export type PublicRealtimePageKey = { readonly kind: "auction"; readonly id: string };
+export type PublicRealtimePageKey =
+  | { readonly kind: "auction"; readonly id: string }
+  | {
+      readonly kind: "bidlog";
+      readonly id: string | null;
+      readonly invalidAuction: boolean;
+      readonly scope: WorldScope;
+    };
 
-/** 页面公布已按拍卖 UUID 解析的实时目标；外壳只接纳当前请求身份的结果。 */
+/** 出价记录的目标绑定到本次地址选择的场次与世界范围。 */
+export function bidLogRealtimeKey(query: PublicBoardQuery) {
+  return {
+    kind: "bidlog",
+    id: query.auctionId,
+    invalidAuction: query.invalidAuction !== null,
+    scope: worldScopeFromQuery("multi", normalizedWorldQuery(query.world)),
+  } satisfies PublicRealtimePageKey;
+}
+
+/** 页面公布已按拍卖 UUID 解析的实时目标；已结算日志用空目标保留外壳的生命周期订阅。 */
 export type PublicPageRealtimeTarget = Cell<
-  readonly [PublicRealtimePageKey, PublicRealtimeTarget] | null
+  readonly [PublicRealtimePageKey, PublicRealtimeTarget | null] | null
 >;
 
 export const PublicPageRealtimeTargetContext = createContext<PublicPageRealtimeTarget>();
@@ -199,6 +226,10 @@ export function PublicRealtimeOwner(props: {
       realtimeState.set("degraded");
       return;
     }
+    if (target.kind === "no_target") {
+      realtimeState.set(target.reason === "directory_error" ? "degraded" : "manual");
+      return;
+    }
 
     const knownAfter = auctionAfter.peek();
     const initialAfter =
@@ -233,9 +264,9 @@ export function PublicRealtimeOwner(props: {
         if (merge.refresh_required) {
           const nextRefresh = Math.min(refreshGeneration.peek() + 1, Number.MAX_SAFE_INTEGER);
           refreshGeneration.set(nextRefresh);
-        } else if (merge.bids_changed) {
+        } else if (merge.bids_changed && documentIsVisible()) {
           // 同页的生命周期/缺口刷新优先；普通竞价只使相关读取资源失效。
-          bidRefresh.notify();
+          bidRefresh.notify(auctionId);
         }
         return merge.continue_catch_up;
       };
@@ -301,7 +332,7 @@ function setConnectionState(state: Cell<LiveConnectionState>, next: LiveConnecti
 }
 
 /**
- * readiness 与身份仍优先；读取失败显示降级，不借用旧实时成功态。
+ * 已知没有订阅目标时显示页面的终态。需要订阅时等待 readiness 和身份，读取失败显示降级。
  * 停用目标不建立连接：预览期对已登录用户说明开拍后自动连接，匿名用户与竞价期一样是
  * 手动刷新；其余停用场次显示无需实时，不呈现为“未启用”的故障观感。
  */
@@ -312,13 +343,23 @@ export function publicConnectionState(
   target: PublicRealtimeTarget,
   liveState: LiveConnectionState,
 ): PublicConnectionState {
-  if (readiness === "checking") {
-    return "connecting";
-  }
-  if (readiness !== "ready") {
+  if (readiness === "degraded") {
     return "unavailable";
   }
-  if (sessionPending) {
+  if (target.kind === "no_target") {
+    switch (target.reason) {
+      case "empty":
+        return "idle";
+      case "directory_error":
+        return "degraded";
+      case "invalid_auction":
+      case "selection_error":
+        return "unavailable";
+      default:
+        return unreachable(target.reason);
+    }
+  }
+  if (readiness === "checking" || sessionPending) {
     return "connecting";
   }
   if (target.kind === "inactive") {

@@ -15,8 +15,8 @@ import {
   currentPublicPathname,
   type PublicBoardQuery,
   readPublicQuery,
-  updatePublicQueryState,
 } from "../../query";
+import { updatePublicQueryPairs } from "../../query/location";
 import { rustTrim } from "../../query/text";
 
 const NIL_UUID = "00000000-0000-0000-0000-000000000000";
@@ -181,12 +181,12 @@ export function applyLotFilter(
   if (!force && queryState.peek().bidLogLot === nextLot) {
     return true;
   }
-  return updatePublicQueryState(
+  const keys =
+    currentPublicPathname() === "/bidlog" ? ["lot", "page", "bidlog_page"] : ["lot", "page"];
+  return updatePublicQueryPairs(
     queryState,
-    (query) => {
-      query.bidLogLot = nextLot;
-      query.page = 1;
-    },
+    keys,
+    nextLot === null ? [] : [["lot", nextLot]],
     "replace",
   );
 }

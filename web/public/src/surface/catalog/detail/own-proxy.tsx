@@ -12,8 +12,7 @@ import type { CatalogDetailBid } from ".";
 
 /** 从出价入口投影里取出本人对该拍品的代理授权。
  *
- * 只有已登录的命令入口带授权快照；读取中、读取失败或没有设置授权时返回 `null`，
- * 抽屉不为它们占位，错误与重试留给代理弹窗。
+ * 只有已登录的命令入口带上次确认的授权快照。抽屉沿用它展示状态，读取错误与重试留给代理弹窗。
  */
 export function ownProxy(bid: CatalogDetailBid): OwnedProxy | null {
   if (bid.kind !== "command") {

@@ -16,6 +16,8 @@ export interface PublicBoardQuery {
   /** 非法或重复的场次参数原样保留，避免把显式目标当成当前场次。 */
   invalidAuction: readonly string[] | null;
   category: string | null;
+  /** 分类原文只有在玩家修正后才能从地址移除。 */
+  invalidCategory: readonly string[] | null;
   equipmentGroup: string | null;
   /** 非法等级参数保留原文供筛选栏修正，不能先丢条件再发出宽查询。 */
   maxLevel: string | null;
@@ -51,6 +53,7 @@ export function publicBoardQueryDefault(): PublicBoardQuery {
     auctionId: null,
     invalidAuction: null,
     category: null,
+    invalidCategory: null,
     equipmentGroup: null,
     maxLevel: null,
     includeUnleveled: "true",

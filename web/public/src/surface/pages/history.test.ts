@@ -161,6 +161,30 @@ test.each([1001, 1002])("往期拍卖第 %i 页在 GET 前收敛到后端偏移�
   }
 });
 
+test("往期列表只清除旧状态筛选，照常读取已结算场次", async () => {
+  resetStoreForTest();
+  const fetcher = spyOn(globalThis, "fetch").mockResolvedValueOnce(
+    auctionPage([SETTLED_AUCTION], '"history"'),
+  );
+  const raw = "world=%6dain&page_size=10&keep=%2b%20x";
+  const mounted = mountReadPage(
+    `/auctions?${raw}&%73tatus=%6cive&status=unknown#rounds`,
+    AuctionList,
+  );
+  try {
+    await settleRead();
+    expect(mounted.location.search).toBe(`?${raw}`);
+    expect(mounted.location.hash).toBe("#rounds");
+    expect(fetcher.mock.calls.map(([input]) => String(input))).toEqual([
+      "/api/v2/auctions?page=1&page_size=10&status=settled&world=main",
+    ]);
+  } finally {
+    mounted.dispose();
+    fetcher.mockRestore();
+    resetStoreForTest();
+  }
+});
+
 test("往期列表刷新缩减总数后，纠偏被拒才显示可点击的重试", async () => {
   resetStoreForTest();
   const replies = [

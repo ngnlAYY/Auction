@@ -14,7 +14,7 @@ import {
   orderBidLogAuctions,
 } from "../../../api/queries/bid-log";
 import { updatePublicQueryPairs } from "../../pagination/location";
-import { type PublicBoardQuery, readPublicQuery, updatePublicQueryState } from "../../query";
+import { type PublicBoardQuery, readPublicQuery } from "../../query";
 import { directoryForScope, type ScopeSelection, sameScopeSelection } from "./scope-selection";
 
 interface StatusProgress {
@@ -86,16 +86,20 @@ export function useReadRoundDirectory(
   ) => readonly AuctionSummaryResponse[],
 ) {
   const statuses = mode === "bidlog" ? ["live", "final", "settled"] : ["settled"];
+  const auctionPageKeys =
+    mode === "bidlog" ? ["auction", "page", "bidlog_page"] : ["auction", "page"];
+  const selectionKeys = [...auctionPageKeys, "lot"];
   const tasks = createTaskScope();
   const wantedOptions = createCell(false);
   const snapshot = createCell<DirectoryProgress | null>(null);
   const requestedId = createValueMemo(() => queryState().auctionId ?? "");
+  const invalidAuction = createValueMemo(() => queryState().invalidAuction !== null);
   const rejected = createCell(false);
   const waiters = new Set<() => void>();
   const wake = () => {
     for (const check of waiters) check();
   };
-  createEffect(requestedId, wake);
+  createEffect(() => [requestedId(), invalidAuction()] as const, wake);
 
   const dependencies = createValueMemo(() => [selection(), refreshGeneration()] as const);
   createEffect(dependencies, ([selectedScope, generation]) => {
@@ -143,10 +147,12 @@ export function useReadRoundDirectory(
         }
         return new Promise<void>((resolve) => {
           const check = () => {
-            const id = queryState.peek().auctionId ?? "";
+            const query = queryState.peek();
+            const id = query.auctionId ?? "";
             const preferred = current.options[0];
             const thisStatus = current.statuses.get(page.status);
             const needed =
+              query.invalidAuction === null &&
               !current.options.some((auction) => auction.id === id) &&
               (id !== "" ||
                 (current.statuses.size === statuses.length &&
@@ -183,6 +189,8 @@ export function useReadRoundDirectory(
     return current?.generation === generation ? current : null;
   });
   const resolution = createValueMemo(() => {
+    // 非法场次仍可加载下拉选项，但要等玩家提交有效目标或清除条件才确认正文。
+    if (invalidAuction()) return undefined;
     const current = currentSnapshot();
     return current === null ? undefined : directorySelection(current, statuses, requestedId());
   });
@@ -210,15 +218,15 @@ export function useReadRoundDirectory(
     }
     const current = readPublicQuery();
     if (
+      current.invalidAuction !== null ||
       (current.auctionId ?? "") !== change.expected ||
       current.world !== queryState.peek().world
     ) {
       return;
     }
     // 场次与第一页同时生效；保留深链的原始 lot 条件供正文门禁检查。
-    const keys = mode === "bidlog" ? ["auction", "page", "bidlog_page"] : ["auction", "page"];
     const pairs = change.next === "" ? [] : [["auction", change.next] as const];
-    if (!updatePublicQueryPairs(queryState, keys, pairs, "replace")) {
+    if (!updatePublicQueryPairs(queryState, auctionPageKeys, pairs, "replace")) {
       rejected.set(true);
     }
   });
@@ -228,7 +236,8 @@ export function useReadRoundDirectory(
     if (current === null) {
       return [];
     }
-    return resolution() === undefined && current.previousOptions.length > 0 && !current.failed
+    const waiting = invalidAuction() ? current.options.length === 0 : resolution() === undefined;
+    return waiting && current.previousOptions.length > 0 && !current.failed
       ? current.previousOptions
       : current.options;
   });
@@ -241,10 +250,15 @@ export function useReadRoundDirectory(
       ? { id: choice.id, world: choice.world_id, generation: refreshGeneration() }
       : null;
   });
+  const commitSelection = (id: string | null) =>
+    routeStillOnPage() &&
+    updatePublicQueryPairs(queryState, selectionKeys, id === null ? [] : [["auction", id]], "push");
   return {
     options,
     selected,
     readable,
+    invalidAuction,
+    clearSelection: () => commitSelection(null),
     empty: () => resolution() === null && currentSnapshot()?.failed === false,
     failed: () => resolution() === undefined && currentSnapshot()?.failed === true,
     optionsFailed: () => readable() !== null && currentSnapshot()?.failed === true,
@@ -257,19 +271,7 @@ export function useReadRoundDirectory(
       const id = select.value;
       const exists = currentSnapshot()?.options.some((auction) => auction.id === id) === true;
       // 原生下拉先改变选中项；地址写入成功才提交场次、lot 与页码。
-      if (
-        !routeStillOnPage() ||
-        !exists ||
-        !updatePublicQueryState(
-          queryState,
-          (query) => {
-            query.auctionId = id;
-            query.bidLogLot = null;
-            query.page = 1;
-          },
-          "push",
-        )
-      ) {
+      if (!exists || !commitSelection(id)) {
         select.value = selected()?.id ?? "";
       }
     },

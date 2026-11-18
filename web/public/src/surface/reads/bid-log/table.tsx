@@ -59,9 +59,9 @@ export function BidLogTable(props: {
             </thead>
             <tbody>
               <For each={bids()} keyed={(bid) => bid.id}>
-                {(bid) => (
+                {(bid, index) => (
                   // 以服务端 bid id 作为稳定 key，避免翻页/筛选刷新后行状态错位。
-                  <BidLogRow bid={bid()} world={props.world} />
+                  <BidLogRow bid={bid()} world={props.world} anchorOrder={index()} />
                 )}
               </For>
             </tbody>
@@ -86,6 +86,7 @@ export function BidLogTable(props: {
 export function BidLogRow(props: {
   readonly bid: PublicBidLogEntryResponse;
   readonly world: string | null;
+  readonly anchorOrder?: number;
 }): JSX.Element {
   const lotCode = createValueMemo(() =>
     lotCodeFor(props.bid.equipment_category, props.bid.lot_number),
@@ -107,7 +108,12 @@ export function BidLogRow(props: {
       </td>
       {/* 名称外没有链接承接焦点，截断时由文本自身进入 Tab 顺序以查看完整名称。 */}
       <td data-label={t("catalog-item")}>
-        <TruncatedText value={props.bid.equipment_name} size="wide" portal={true} />
+        <TruncatedText
+          value={props.bid.equipment_name}
+          size="wide"
+          portal={true}
+          anchorOrder={props.anchorOrder ?? null}
+        />
       </td>
       <td class="public-auction-bid-log-participant" data-label={t("bidlog-bidder")}>
         <BidHistoryParticipant
@@ -115,6 +121,7 @@ export function BidLogRow(props: {
           source={props.bid.source}
           sourcePostNumber={props.bid.source_post_number}
           sourcePostUrl={props.bid.source_post_url}
+          anchorOrder={props.anchorOrder ?? null}
         />
       </td>
       <td

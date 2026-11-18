@@ -95,7 +95,7 @@ test.each([
 
       const second = await read(secondRead.signal);
       if (status === 503) {
-        expect(second).toEqual(ok({ value: "原快照", staleFallback: expect.any(Number) }));
+        expect(second).toMatchObject(ok({ value: "原快照", staleFallback: expect.any(Number) }));
       } else {
         expect(second).toEqual(err(failure === "超时" ? "request_timeout" : "network_error"));
       }
@@ -105,7 +105,7 @@ test.each([
         expect(third).toEqual(err("network_error"));
         expect(etags).toEqual([null, '"old"', null]);
       } else {
-        expect(third).toEqual(ok({ value: "原快照", staleFallback: expect.any(Number) }));
+        expect(third).toMatchObject(ok({ value: "原快照", staleFallback: expect.any(Number) }));
         expect(etags).toEqual([null, '"old"', '"old"']);
       }
     } finally {

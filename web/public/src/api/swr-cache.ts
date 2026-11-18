@@ -75,11 +75,27 @@ type FetchSnapshot<T, E> = (
   evictMissingSnapshot: () => void,
 ) => Promise<FetchOutcome<T, E>>;
 
-/** 一次缓存读取得到的值及其来源。 */
-export interface CacheRead<T> {
-  readonly value: T;
-  /** 重读遇到暂时性失败时返回旧快照，给出该快照最近一次被服务端确认的毫秒时刻。 */
-  readonly staleFallback: number | null;
+/** 一次缓存读取得到的值及其来源；回退值另保留失败原因与原快照的交付资格。 */
+export type CacheRead<T, E = string> =
+  | { readonly value: T; readonly staleFallback: null }
+  | {
+      readonly value: T;
+      /** 旧快照最近一次被服务端确认的毫秒时刻。 */
+      readonly staleFallback: number;
+      readonly deliverFallback: () => Result<T, E>;
+    };
+
+/** 交付读结果；等待期间回退资格可能已被命令或驱逐撤销。 */
+export function deliverCacheRead<T, E>(read: Result<CacheRead<T, E>, E>): Result<T, E> {
+  if (!read.ok) return read;
+  return read.value.staleFallback === null ? ok(read.value.value) : read.value.deliverFallback();
+}
+
+/** 同一 URL 的实际请求共用服务端给出的最早恢复时刻，采用单调时钟。 */
+interface RetryAfterWindow {
+  readonly notBefore: number;
+  readonly status: number;
+  error: string;
 }
 
 interface CacheEntry<T> {
@@ -100,6 +116,7 @@ interface Store {
   revision: number;
   /** 同一 URL 当前可供合并的请求，命令后的请求可以接替旧登记。 */
   pending: Map<string, Pending>;
+  readonly retryAfter: Map<string, RetryAfterWindow>;
   /** 最近一次竞价命令失效的修订号，也是共享在途请求与回退快照的下限。 */
   fallbackFloor: number;
 }
@@ -108,6 +125,7 @@ const STORE: Store = {
   entries: new Map(),
   revision: 0,
   pending: new Map(),
+  retryAfter: new Map(),
   fallbackFloor: 0,
 };
 
@@ -116,7 +134,42 @@ export function resetStoreForTest(): void {
   STORE.entries.clear();
   STORE.revision = 0;
   STORE.pending.clear();
+  STORE.retryAfter.clear();
   STORE.fallbackFloor = 0;
+}
+
+/** 已收到的 Retry-After 响应头在旧请求取消或命令推进回退下限后仍约束同一 URL。 */
+export function publicReadRetryAfter(url: string): RetryAfterWindow | null {
+  const window = STORE.retryAfter.get(url);
+  if (window === undefined) return null;
+  if (window.notBefore > performance.now()) return window;
+  STORE.retryAfter.delete(url);
+  return null;
+}
+
+/** 在正文读取前即发布时限；读完正文后可补充该次拒绝的实际错误。 */
+export function rememberPublicReadRetryAfter(
+  url: string,
+  status: number,
+  delay: number,
+): RetryAfterWindow {
+  const now = performance.now();
+  const window = {
+    notBefore: Math.min(now + delay, Number.MAX_SAFE_INTEGER),
+    status,
+    error: "invalid_response",
+  };
+  for (const [key, previous] of STORE.retryAfter) {
+    if (previous.notBefore <= now) STORE.retryAfter.delete(key);
+  }
+  const previous = STORE.retryAfter.get(url);
+  if (
+    window.notBefore > now &&
+    (previous === undefined || window.notBefore >= previous.notBefore)
+  ) {
+    STORE.retryAfter.set(url, window);
+  }
+  return window;
 }
 
 /** 仅供测试使用：当前缓存条目数。 */
@@ -261,7 +314,7 @@ export async function getOrFetch<T, E>(
   now: () => number = nowMillis,
 ): Promise<Result<T, E>> {
   const read = await readOrFetch(url, ttlMillis, typeId, fetch, abortError, signal, now);
-  return read.ok ? ok(read.value.value) : read;
+  return deliverCacheRead(read);
 }
 
 /** 读取公开 URL：命中未过期且未被失效的条目时不调用 fetch；否则把旧条目的 ETag 交给 fetch
@@ -276,8 +329,8 @@ export async function readOrFetch<T, E>(
   abortError: E,
   signal: AbortSignal,
   now: () => number = nowMillis,
-): Promise<Result<CacheRead<T>, E>> {
-  const current = (value: T): CacheRead<T> => ({ value, staleFallback: null });
+): Promise<Result<CacheRead<T, E>, E>> {
+  const current = (value: T): CacheRead<T, E> => ({ value, staleFallback: null });
   if (signal.aborted) {
     return err(abortError);
   }
@@ -378,7 +431,14 @@ export async function readOrFetch<T, E>(
       case "busy":
         // 命令可能推进回退下限，404/410 可能撤销登记；按失败返回时的状态判定。
         if (cached !== undefined && guard.ownsRequest() && fallbackAllowed(cached.revision)) {
-          return ok({ value: cached.value, staleFallback: cached.storedAt });
+          return ok({
+            value: cached.value,
+            staleFallback: cached.storedAt,
+            deliverFallback: () =>
+              fallbackAllowed(cached.revision) && STORE.entries.get(url) === cached.source
+                ? ok(cached.value)
+                : err(outcome.error),
+          });
         }
         return err(outcome.error);
       case "rejected":
@@ -412,7 +472,10 @@ function fallbackAllowed(revision: number): boolean {
   return revision >= STORE.fallbackFloor;
 }
 
-function lookup<T>(url: string, typeId: string): (CacheEntry<T> & { value: T }) | undefined {
+function lookup<T>(
+  url: string,
+  typeId: string,
+): (CacheEntry<T> & { source: CacheEntry<unknown> }) | undefined {
   const entry = STORE.entries.get(url);
   if (entry === undefined || entry.typeId !== typeId) {
     return undefined;
@@ -421,6 +484,7 @@ function lookup<T>(url: string, typeId: string): (CacheEntry<T> & { value: T }) 
   // 证明，标识一致才允许把保存值收窄为该查询的类型。
   return {
     typeId: entry.typeId,
+    source: entry,
     // 与 Rust 的 `CachedEntry::value.clone()` 一致：缓存命中的值不能与缓存条目或另一调用方
     // 共享可变引用，保存方修改返回值时不能污染后续命中。
     value: structuredClone(entry.value as T),

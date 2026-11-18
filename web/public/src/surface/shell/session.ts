@@ -19,6 +19,7 @@ import {
   publicSessionRevisions,
   type SessionIdentityEvidence,
 } from "../../api/session/revision";
+import { createCatalogProxySnapshots } from "../catalog/proxy-snapshots";
 import { createCompetitionCommands } from "../commands/host";
 import type { PublicSessionResource, PublicSessionResult } from "../index";
 import { usePublicSessionExpiry, usePublicSessionSync } from "../session/lifecycle";
@@ -40,6 +41,7 @@ export function createPublicShellSession(refreshGeneration: Cell<number>) {
   const snapshot = createCell<PublicSessionResult | undefined>(undefined);
   const sessionEndedElsewhere = createCell(false);
   const commandOwner = createCell<string | null>(null);
+  const proxySnapshots = createCatalogProxySnapshots();
   const lastIdentity = createCell<PublicSession | null>(null);
   let consumed = publicSessionRevisions();
   let localLogoutUnknown = false;
@@ -56,6 +58,7 @@ export function createPublicShellSession(refreshGeneration: Cell<number>) {
     }
     lastIdentity.set(null);
     snapshot.set(undefined);
+    proxySnapshots.replaceIdentity(userId);
     commandOwner.set(userId);
     competition.replaceIdentity(userId);
     return true;
@@ -196,7 +199,14 @@ export function createPublicShellSession(refreshGeneration: Cell<number>) {
   onCleanup(registerPublicSessionCheckTrigger(checkSession, applyIdentity));
   usePublicSessionSync(checkSession);
   usePublicSessionExpiry(lastIdentity, onExpiry);
-  return { session, sessionEndedElsewhere, commandOwner, checkSession, competition };
+  return {
+    session,
+    sessionEndedElsewhere,
+    commandOwner,
+    checkSession,
+    competition,
+    proxySnapshots,
+  };
 }
 
 export function routeFocusToken(route: RouteMatch): string {

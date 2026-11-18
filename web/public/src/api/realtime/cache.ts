@@ -44,6 +44,7 @@ function seenRemember(seen: SeenSet, value: string): string | null {
 interface LastBidFact {
   fact_index: number;
   state_version: number;
+  streamSequence: number;
 }
 
 interface CacheState {
@@ -52,6 +53,7 @@ interface CacheState {
   after: number;
   /** refetch 后每个尚未见过的 lot 可用首个连续 stream 事件建立一次事实基线。 */
   baselineAfter: number | null;
+  finalAt: number | null;
   factIdentities: Map<string, string>;
   lastFacts: Map<string, LastBidFact>;
   seen: SeenSet;
@@ -65,6 +67,7 @@ function newState(auctionId: string, previewRevision: number): CacheState {
     initialPreviewRevision: previewRevision,
     after: 0,
     baselineAfter: null,
+    finalAt: null,
     factIdentities: new Map(),
     lastFacts: new Map(),
     seen: newSeenSet(),
@@ -182,6 +185,9 @@ function mergeEvent(state: CacheState, event: RealtimeEvent): EventMerge {
   seenRemember(state.seen, event.event_id);
   if (newer) {
     state.versions.set(key, value);
+    if (event.kind === "auction.final_phase_entered") {
+      state.finalAt = event.stream_sequence;
+    }
   }
   return { kind: "applied", refresh: newer };
 }
@@ -222,9 +228,17 @@ function mergeAcceptedBid(state: CacheState, event: RealtimeEvent): EventMerge {
 
   const previousVersion = state.versions.get(lotId);
   const expectedVersion = previousVersion === undefined ? null : checkedAddOne(previousVersion);
+  const lastFact = state.lastFacts.get(lotId);
+  // 手工进入 Final 可收紧截止并推进 lot 版本一次，不会追加竞价事实。每个 lot 只在
+  // 该事件后的首笔新事实允许这一步，防重键、事实顺序和流游标继续有效。
+  const clampedInFinal =
+    lastFact !== undefined &&
+    state.finalAt !== null &&
+    lastFact.streamSequence < state.finalAt &&
+    expectedVersion !== null &&
+    checkedAddOne(expectedVersion) === stateVersion;
   if (
-    (previousVersion !== undefined &&
-      (expectedVersion === null || stateVersion !== expectedVersion)) ||
+    (previousVersion !== undefined && stateVersion !== expectedVersion && !clampedInFinal) ||
     !orderedFactIndex(state, lotId, stateVersion, factIndex, event.stream_sequence)
   ) {
     return { kind: "gap" };
@@ -237,7 +251,11 @@ function mergeAcceptedBid(state: CacheState, event: RealtimeEvent): EventMerge {
     state.factIdentities.delete(evicted);
   }
   state.factIdentities.set(bidId, identity);
-  state.lastFacts.set(lotId, { fact_index: factIndex, state_version: stateVersion });
+  state.lastFacts.set(lotId, {
+    fact_index: factIndex,
+    state_version: stateVersion,
+    streamSequence: event.stream_sequence,
+  });
   state.versions.set(lotId, stateVersion);
   state.after = event.stream_sequence;
   return { kind: "bid_applied" };

@@ -72,6 +72,10 @@ export interface CommandDialogInput {
   readonly leading: boolean;
   readonly blockedReason: string;
   readonly proxy: Result<OwnedProxy | null, string> | null;
+  /** 本轮授权读取成功时的刷新代号，缺省禁止新的代理写入。 */
+  readonly proxyReadGeneration: number | null;
+  /** 当前读取失败时同时携带最后确认的授权，供普通出价判定与表单草稿使用。 */
+  readonly proxyReadError?: string | null;
 }
 
 /** 页面级弹窗信号；目录外的只读入口没有提供方。 */
@@ -94,6 +98,7 @@ export function recoveryDialogInput(row: CatalogRow): CommandDialogInput {
     leading: false,
     blockedReason: "",
     proxy: null,
+    proxyReadGeneration: null,
   };
 }
 
@@ -224,6 +229,7 @@ function CatalogCommandDialog(props: {
   const proxySaved = () => feedback()?.error === null;
   const canSubmit = () =>
     mounted && pending() === null && !proxySaved() && commandSession().canSubmit;
+  const canSubmitProxy = () => canSubmit() && input().proxyReadGeneration === refreshGeneration();
   const confirming = () =>
     pending() === null &&
     (bidCommand.confirmation() !== null ||
@@ -258,6 +264,7 @@ function CatalogCommandDialog(props: {
       openedAuction === null ||
       !targetAllowsBid() ||
       !current.canBid ||
+      (payload.kind !== "bid" && !canSubmitProxy()) ||
       props.dialog.peek()?.lotId !== current.lotId
     )
       return;
@@ -315,7 +322,7 @@ function CatalogCommandDialog(props: {
     lotId: input().lotId,
     authenticated: commandSession().authenticated,
     canBid: canBid(),
-    canSubmit: canSubmit(),
+    canSubmit: canSubmitProxy(),
     currentPrice: input().currentPrice,
     nextBid: input().nextBid,
     lotStatus: input().lotStatus,
@@ -324,6 +331,7 @@ function CatalogCommandDialog(props: {
     leading: input().leading,
     blockedReason: input().blockedReason,
     proxy: input().proxy,
+    proxyReadError: input().proxyReadError ?? null,
     refreshGeneration,
     createCommand: proxyCreateCommand,
     lowerCommand: proxyLowerCommand,

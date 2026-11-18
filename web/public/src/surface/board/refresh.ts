@@ -8,6 +8,7 @@
 import type { CurrentAuctionItemResponse } from "@auction/contracts/dto/public/catalog/auction";
 import { useSecondTick } from "@auction/web-shared/platform/clock";
 import { sleep } from "@auction/web-shared/platform/timer";
+import { documentIsVisible } from "@auction/web-shared/platform/visibility";
 import { type Cell, createCell } from "@auction/web-shared/reactive/cell";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import type { TaskResource } from "@auction/web-shared/reactive/resource";
@@ -106,10 +107,31 @@ export function useAuctionOpeningRefresh(
 
 /** Public 外壳持有的竞价失效修订号，与生命周期和人工刷新的全局修订号分离。 */
 export interface PublicBidRefresh {
-  /** 单调递增的竞价失效修订号。 */
+  /** 普通竞价的全局失效修订号，供不限定场次的资源使用。 */
   readonly revision: Cell<number>;
-  /** 推进修订号；外壳把它作为上下文提供给全部竞价资源。 */
-  notify(): void;
+  /** 本场最后一次通知的修订号。 */
+  revisionFor(auctionId: string): number;
+  /** 竞价事实已由唯一实时 owner 验证。 */
+  notify(auctionId: string): void;
+}
+
+/** 各场保留自己的通知，等待合并的资源不会因切换实时连接而丢掉补读。 */
+export function createPublicBidRefresh(): PublicBidRefresh {
+  const revision = createCell(0);
+  const revisionsByAuction = new Map<string, number>();
+  return {
+    revision,
+    revisionFor(auctionId) {
+      revision();
+      return revisionsByAuction.get(auctionId) ?? 0;
+    },
+    notify(auctionId) {
+      // 先记录所属场次，再唤醒读取方，确保观察的修订号与通知一致。
+      const next = Math.min(revision.peek() + 1, Number.MAX_SAFE_INTEGER);
+      revisionsByAuction.set(auctionId, next);
+      revision.set(next);
+    },
+  };
 }
 
 /** 外壳把竞价失效修订号放入此上下文，供 `useBidRefresh` 订阅。 */
@@ -142,7 +164,7 @@ export function planBidRefresh(
   scheduled: boolean,
   ready: boolean,
 ): BidRefreshDecision {
-  if (currentRevision === consumedRevision) {
+  if (currentRevision <= consumedRevision) {
     return "idle";
   }
   if (scheduled) {
@@ -159,13 +181,22 @@ export function planBidRefresh(
  * 竞价修订号不能直接成为资源的依赖，否则持续竞价会反复取消慢请求。
  * 与资源在同一作用域调用：延后任务与已消费修订号一起存活，卸载时由新资源自行读取权威快照。
  */
-export function useBidRefresh<T>(resource: TaskResource<T>, enabled: () => boolean): void {
+export function useBidRefresh<T>(
+  resource: TaskResource<T>,
+  enabled: () => boolean,
+  auctionId?: () => string | null,
+): void {
   const refresh = useContext(PublicBidRefreshContext);
   // 与源码的 use_reactive 一样按值去重；关闭后必须立即退订，不再随每次竞价执行空刷新。
   const enabledValue = createValueMemo(enabled);
   const consumed = createCell(refresh.revision.peek());
   const scheduled = createCell(false);
   const tasks = createTaskScope();
+  const revision = createValueMemo(() => {
+    const selected = auctionId?.();
+    if (selected === undefined) return refresh.revision();
+    return selected === null ? 0 : refresh.revisionFor(selected);
+  });
 
   createEffect(
     () => {
@@ -174,7 +205,7 @@ export function useBidRefresh<T>(resource: TaskResource<T>, enabled: () => boole
       }
       return {
         enabled: true,
-        revision: refresh.revision(),
+        revision: revision(),
         // 先读资源状态以订阅它就绪/重新挂起的变化，再按纯函数决定是否排定。
         state: resource.state(),
       } as const;
@@ -182,6 +213,11 @@ export function useBidRefresh<T>(resource: TaskResource<T>, enabled: () => boole
     (current) => {
       if (!current.enabled) {
         // 闭合的代理面板不订阅竞价或资源状态，避免每行随通知执行空刷新。
+        consumed.set(refresh.revision.peek());
+        return;
+      }
+      if (!documentIsVisible()) {
+        // 外壳恢复可见时会做权威刷新；隐藏期间保留事件游标，合并掉普通竞价读。
         consumed.set(refresh.revision.peek());
         return;
       }
@@ -203,14 +239,18 @@ export function useBidRefresh<T>(resource: TaskResource<T>, enabled: () => boole
           return;
         }
         scheduled.set(false);
-        const revision = refresh.revision.peek();
+        const latest = untrack(revision);
+        if (!documentIsVisible()) {
+          consumed.set(refresh.revision.peek());
+          return;
+        }
         // 等待期间可能切换查询、关闭代理面板或触发全局刷新；只重启空闲资源。
         if (
           untrack(enabledValue) &&
-          revision !== consumed.peek() &&
+          latest > consumed.peek() &&
           untrack(() => resource.state()) === "ready"
         ) {
-          consumed.set(revision);
+          consumed.set(latest);
           resource.restart();
         }
       });

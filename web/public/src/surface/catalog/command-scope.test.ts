@@ -27,7 +27,11 @@ import {
   type PublicSessionResult,
 } from "..";
 import { PublicDisplayedAuctionContext, PublicPageRealtimeTargetContext } from "../board/realtime";
-import { PublicBidRefreshContext, PublicRefreshGenerationContext } from "../board/refresh";
+import {
+  createPublicBidRefresh,
+  PublicBidRefreshContext,
+  PublicRefreshGenerationContext,
+} from "../board/refresh";
 import { CompetitionCommandsContext, createCompetitionCommands } from "../commands/host";
 import { usePublicQueryState } from "../query";
 import {
@@ -149,7 +153,7 @@ function mountBidBoard() {
       provide(SecondTickerContext, useSecondTicker()),
       provide(PageVisibilityContext, createPageVisibility()),
       provide(PublicRefreshGenerationContext, refresh),
-      provide(PublicBidRefreshContext, { revision: createCell(0), notify() {} }),
+      provide(PublicBidRefreshContext, createPublicBidRefresh()),
     ];
     let open = (): void => {
       throw new Error("目录替身未挂载");
@@ -177,6 +181,7 @@ function mountBidBoard() {
               leading: false,
               blockedReason: "",
               proxy: null,
+              proxyReadGeneration: null,
             });
           }
         };

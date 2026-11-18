@@ -5,6 +5,7 @@ import { PUBLIC_EXPECTED_USER_ID_HEADER } from "@auction/contracts/dto/public/co
 import { createCell } from "@auction/web-shared/reactive/cell";
 import { err, ok } from "@auction/web-shared/result";
 import { RouterContext } from "@auction/web-shared/router";
+import { t } from "@auction/web-shared/ui/i18n";
 import {
   type Context,
   children,
@@ -26,7 +27,11 @@ import {
   PublicSessionResourceContext,
   type PublicSessionResult,
 } from "..";
-import { PublicBidRefreshContext, PublicRefreshGenerationContext } from "../board/refresh";
+import {
+  createPublicBidRefresh,
+  PublicBidRefreshContext,
+  PublicRefreshGenerationContext,
+} from "../board/refresh";
 import { PublicCommandIdentityContext } from "../commands/pending";
 import { activeOwnedProxy } from "../commands/proxy";
 import { CommandDialogContext, type CommandDialogInput } from "./command-scope";
@@ -35,6 +40,7 @@ import {
   CatalogDetailDialogContext,
   type CatalogDetailInput,
 } from "./detail";
+import { CatalogProxySnapshotsContext, createCatalogProxySnapshots } from "./proxy-snapshots";
 
 const {
   CatalogProxyScope,
@@ -154,6 +160,7 @@ test("详情在代理入口可用时仍显示普通出价受限的说明", () =>
     leading: false,
     blockedReason: "proxy-active-exists",
     proxy: ok(WAITING_PROXY),
+    proxyReadGeneration: null,
   };
   expect(detailBidReason({ kind: "command", input, disabled: false })).toBe(input.blockedReason);
   expect(
@@ -264,6 +271,8 @@ function mountActions() {
   const requests = interceptProxyReads();
   return createRoot((dispose) => {
     const userId = createCell(FIRST_USER);
+    const snapshots = createCatalogProxySnapshots();
+    snapshots.replaceIdentity(FIRST_USER);
     const auction = createCell(AUCTION_ID);
     const snapshot = createCell(authenticated(FIRST_USER));
     const session: PublicSessionResource = Object.assign(snapshot, {
@@ -288,9 +297,10 @@ function mountActions() {
       provide(PublicSessionResourceContext, session),
       provide(PublicCommandOwnerContext, userId),
       provide(PublicRefreshGenerationContext, createCell(0)),
-      provide(PublicBidRefreshContext, { revision: createCell(0), notify: () => {} }),
+      provide(PublicBidRefreshContext, createPublicBidRefresh()),
       provide(CommandDialogContext, createCell<CommandDialogInput | null>(null)),
       provide(CatalogDetailDialogContext, detail),
+      provide(CatalogProxySnapshotsContext, snapshots),
     ];
     const render = () =>
       For({
@@ -303,6 +313,7 @@ function mountActions() {
             value: { userId: untrack(current).userId },
             get children() {
               return createComponent(CatalogProxyScope, {
+                auctionId: untrack(current).auction,
                 get children() {
                   return Show({
                     get when() {
@@ -343,6 +354,7 @@ function mountActions() {
       open: () => detail.set({ row: LOT, bid: detailBid.peek(), watchable: true }),
       close: () => detail.set(null),
       changeUser(next: string) {
+        snapshots.replaceIdentity(next);
         snapshot.set(authenticated(next));
         userId.set(next);
       },
@@ -375,7 +387,7 @@ test("关闭详情与翻回本页时保留等待反击授权、禁用与说明�
     expect(actions.requests.map((request) => request.userId)).toEqual([FIRST_USER]);
     actions.requests[0]?.reply(WAITING_PROXY_WIRE);
     await settleProxyRead();
-    const blocked = [true, "proxy-active-exists"];
+    const blocked = [true, t("proxy-active-exists")];
     expect(actions.action()).toEqual(blocked);
 
     actions.close();
@@ -400,7 +412,7 @@ test("关闭详情与翻回本页时保留等待反击授权、禁用与说明�
   }
 });
 
-test("换号或更换场次时释放上一个作用域里的授权", async () => {
+test("换号销毁旧快照，场次之间隔离同一账号读取到的授权", async () => {
   const actions = mountActions();
   try {
     flush();
@@ -408,7 +420,7 @@ test("换号或更换场次时释放上一个作用域里的授权", async () =>
     flush();
     actions.requests[0]?.reply(WAITING_PROXY_WIRE);
     await settleProxyRead();
-    expect(actions.action()).toEqual([true, "proxy-active-exists"]);
+    expect(actions.action()).toEqual([true, t("proxy-active-exists")]);
     actions.close();
     actions.changeUser(SECOND_USER);
     flush();
@@ -420,11 +432,15 @@ test("换号或更换场次时释放上一个作用域里的授权", async () =>
     expect(actions.requests.map((request) => request.userId)).toEqual([FIRST_USER, SECOND_USER]);
     actions.requests[1]?.reply(WAITING_PROXY_WIRE);
     await settleProxyRead();
-    expect(actions.action()).toEqual([true, "proxy-active-exists"]);
+    expect(actions.action()).toEqual([true, t("proxy-active-exists")]);
     actions.close();
     actions.auction.set(OTHER_AUCTION_ID);
     flush();
     expect(actions.action()).toEqual([false, ""]);
+    expect(actions.requests).toHaveLength(2);
+    actions.auction.set(AUCTION_ID);
+    flush();
+    expect(actions.action()).toEqual([true, t("proxy-active-exists")]);
     expect(actions.requests).toHaveLength(2);
   } finally {
     actions.dispose();

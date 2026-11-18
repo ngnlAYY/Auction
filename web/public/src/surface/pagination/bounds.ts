@@ -42,7 +42,7 @@ function exceedsSafePage(value: string | null): boolean {
 }
 
 /** 比较本页使用的页码，两个列表共享请求时也只改动越界的键。 */
-function publicPageCorrections(
+export function publicPageCorrections(
   query: PublicBoardQuery,
   search: string,
   limits: PageLimits,

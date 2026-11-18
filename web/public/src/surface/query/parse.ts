@@ -71,6 +71,14 @@ export function parsePublicQuery(pathname: string, search: string): PublicBoardQ
       query.invalidAuction = auctions;
     }
   }
+  const types = params.getAll("type");
+  const [type] = types;
+  if (type !== undefined) {
+    query.category = types.length === 1 ? normalizeCatalogCategories(type) : null;
+    if (query.category === null) {
+      query.invalidCategory = types;
+    }
+  }
   let canonicalPage: number | null = null;
   let legacyBidLogPage: number | null = null;
   for (const [key, value] of params) {
@@ -81,14 +89,6 @@ export function parsePublicQuery(pathname: string, search: string): PublicBoardQ
       case "auction":
         break;
       case "type":
-        {
-          const category = normalizeCatalogCategories(value);
-          if (category !== null) {
-            query.category = category;
-          } else {
-            query.passthrough.push([key, value]);
-          }
-        }
         break;
       case "equipment_group":
         query.equipmentGroup = value === "rare" || value === "fusion" ? value : null;

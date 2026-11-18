@@ -42,13 +42,17 @@ export function DetailLatestBids(props: {
   const latestDependencies = createValueMemo(() => ({
     auctionId: props.auctionId,
     lotId: props.lotId,
-    // 本人命令成功后推进的刷新代数；他人出价由下方的竞价通知补读。
+    // 两种历史读取都跟随权威刷新代号，普通出价只补读所属场次。
     refreshGeneration: refreshGeneration(),
   }));
   const bids = createTaskResource(latestDependencies, async (dependencies, context) =>
     fetchLotBidLog(dependencies.auctionId, dependencies.lotId, 1, LATEST_BIDS, context.signal),
   );
-  useBidRefresh(bids, () => true);
+  useBidRefresh(
+    bids,
+    () => true,
+    () => props.auctionId,
+  );
   // 分页模式的响应带总数；缺失时不提供“查看全部”，不猜测条数。
   const total = () => {
     const snapshot = bids();
@@ -170,7 +174,11 @@ export function DetailBidHistoryDialog(props: {
     );
     return { requested: dependencies.requested, result };
   });
-  useBidRefresh(bidLog, () => true);
+  useBidRefresh(
+    bidLog,
+    () => true,
+    () => props.auctionId,
+  );
   // 翻页期间保留上一页的表格，新页到达后整体替换；只有首次读取时正文为空。
   const loaded = () => bidLog()?.result;
   const loadedPage = () => {

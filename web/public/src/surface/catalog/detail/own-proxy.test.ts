@@ -50,6 +50,7 @@ function command(proxyResult: Result<OwnedProxy | null, string> | null): Catalog
       leading: false,
       blockedReason: "",
       proxy: proxyResult,
+      proxyReadGeneration: null,
     },
     disabled: false,
   };

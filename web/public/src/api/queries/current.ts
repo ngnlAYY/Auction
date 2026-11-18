@@ -76,10 +76,16 @@ export async function fetchHistoricalAuction(
   // 一次 10 条目录请求并在返回时闪现加载态。按场次 ID 打开的页面绝大多数是已结算场次：已结算
   // 目录第一页与 lot 目录同时发出，省去“等状态再查摘要”的一轮串行往返；该 URL 是公开低频缓存
   // 档，状态不是 settled 时丢弃预取结果、按实际状态查找。
-  const [envelopeResult, settledFirstPage] = await Promise.all([
-    fetchCurrentLots(auctionId, null, null, catalogLevelFilterDefault(), 1, 20, signal),
-    fetchAuctionPage(null, "settled", 1, SUMMARY_PAGE_SIZE, signal),
-  ]);
+  const settledFirstPage = fetchAuctionPage(null, "settled", 1, SUMMARY_PAGE_SIZE, signal);
+  const envelopeResult = await fetchCurrentLots(
+    auctionId,
+    null,
+    null,
+    catalogLevelFilterDefault(),
+    1,
+    20,
+    signal,
+  );
   if (signal.aborted) {
     return err("network_error");
   }
@@ -97,7 +103,7 @@ export async function fetchHistoricalAuction(
   const summaryResult = await fetchAuctionSummary(
     envelope.auction_id,
     status,
-    settledFirstPage,
+    await settledFirstPage,
     signal,
   );
   if (signal.aborted) {
@@ -194,24 +200,27 @@ async function fetchMatchingCurrentAuction(
   // 各世界的当前场次互不依赖，并行读取：任一世界命中即返回；都未命中时先报读取失败，不把读不到
   // 的世界当作“不存在目标拍卖”。世界 ID 排序保持旧 BTreeMap 的遍历顺序，便于稳定复现。
   const worldIds = Object.keys(worlds.value.worlds).sort(compareText);
-  const currents = await Promise.all(
-    worldIds.map((worldId) => fetchCurrentAuction(worldId, signal)),
+  const result = await new Promise<Result<CurrentAuctionItemResponse, string>>(
+    (resolve, reject) => {
+      const reads = worldIds.map(async (worldId) => {
+        const current = await fetchCurrentAuction(worldId, signal);
+        if (
+          current.ok &&
+          current.value !== null &&
+          isTargetCurrent(current.value, auctionId, expectedStatus)
+        ) {
+          resolve(ok(current.value));
+        }
+        return current;
+      });
+      void Promise.all(reads).then(
+        (currents) =>
+          resolve(currents.find((current) => !current.ok) ?? err("当前拍卖目录中不存在目标拍卖")),
+        reject,
+      );
+    },
   );
-  if (signal.aborted) {
-    return err("network_error");
-  }
-  let firstError: string | null = null;
-  for (const current of currents) {
-    if (current.ok) {
-      const auction = current.value;
-      if (auction !== null && isTargetCurrent(auction, auctionId, expectedStatus)) {
-        return ok(auction);
-      }
-    } else {
-      firstError ??= current.error;
-    }
-  }
-  return err(firstError ?? "当前拍卖目录中不存在目标拍卖");
+  return signal.aborted ? err("network_error") : result;
 }
 
 /** 当前场次条目是否就是按 ID 打开的目标场次。lot 外壳与当前场次各有缓存 TTL，live→final

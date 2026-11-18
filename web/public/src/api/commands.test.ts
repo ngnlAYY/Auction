@@ -6,6 +6,7 @@ import { err, ok, type Result } from "@auction/web-shared/result";
 
 import {
   COMMAND_NOT_SENT,
+  commandErrorOutcomeUncertain,
   createProxyAuthorization,
   lowerProxyAuthorization,
   placeBid,
@@ -119,6 +120,67 @@ test.each([503, 200])(
     );
   },
 );
+
+test.each([
+  ['{"code":"version_conflict","message":"","data":null}', "version_conflict", false],
+  [
+    '{"code":"unexpected","c\\u006fde":"version_conflict","message":"","data":null}',
+    "invalid_response",
+    true,
+  ],
+  ['{"code":"version_conflict","message":"","data":{"a":1e999,"a":0}}', "invalid_response", true],
+  [
+    '{"code":"version_conflict","message":"","data":{"a":"\\ud800","a":0}}',
+    "invalid_response",
+    true,
+  ],
+  ['{"code":"version_conflict","message":"","data":{"a":1,"a":2}}', "version_conflict", false],
+  [
+    `{"code":"version_conflict","message":"","data":${"[".repeat(127)}0${"]".repeat(127)}}`,
+    "invalid_response",
+    true,
+  ],
+  [
+    `{"code":"version_conflict","message":"","data":${"[".repeat(126)}0${"]".repeat(126)}}`,
+    "version_conflict",
+    false,
+  ],
+] as const)("竞价只接受唯一错误码的明确拒绝：%s", async (body, code, uncertain) => {
+  await withCachedSnapshot(
+    () => new Response(body, { status: 409 }),
+    async (_read, requests) => {
+      const result = await bid(new AbortController().signal);
+      expect(result).toEqual(err({ code, status: 409 }));
+      if (!result.ok) expect(commandErrorOutcomeUncertain(result.error)).toBe(uncertain);
+      expect(requests).toEqual(["GET", "POST"]);
+    },
+  );
+});
+
+test.each(["1", "1.0", "1e0"])("装备标记回执只接受整数版本词法（%s）", async (token) => {
+  const reply = {
+    code: "ok",
+    message: "",
+    extension: { version: 2 },
+    data: {
+      user_id: USER_ID,
+      auction_id: AUCTION_ID,
+      watch: { lot_id: LOT_ID, watched: true, channel: "mm", version: 1 },
+    },
+  };
+  const body = JSON.stringify(reply)
+    .replace('"version":1', `"version":${token}`)
+    .replace('"version":2', '"version":2.0');
+  await withCachedSnapshot(
+    () => new Response(body),
+    async (_read, requests) => {
+      expect(await watch(new AbortController().signal)).toEqual(
+        token === "1" ? ok(reply.data) : err({ code: "invalid_response", status: 200 }),
+      );
+      expect(requests).toEqual(["GET", "PUT"]);
+    },
+  );
+});
 
 test.each([200, 503])(
   "watch_reply_leaves_the_public_catalog_fresh：标记回执 %i 保留公开目录的缓存命中",

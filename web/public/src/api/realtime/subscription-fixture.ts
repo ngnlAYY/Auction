@@ -5,7 +5,7 @@ import { createCell } from "@auction/web-shared/reactive/cell";
 import { children, createEffect, createRoot, flush } from "solid-js";
 
 import { PublicRealtimeOwner, type PublicRealtimeTarget } from "../../surface/board/realtime";
-import { PublicBidRefreshContext } from "../../surface/board/refresh";
+import { createPublicBidRefresh, PublicBidRefreshContext } from "../../surface/board/refresh";
 import type { LiveConnectionState } from "../../surface/query";
 import { PageVisibilityContext } from "../../surface/shell/contexts";
 import { registerPublicSessionCheckTrigger, type SessionRefreshReason } from "../session";
@@ -138,7 +138,7 @@ export function mountRealtimeOwner(onSessionCheck: () => void = () => {}) {
         value: createPageVisibility(),
         get children() {
           return PublicBidRefreshContext({
-            value: { revision: createCell(0), notify: () => {} },
+            value: createPublicBidRefresh(),
             get children() {
               return PublicRealtimeOwner({
                 get target() {

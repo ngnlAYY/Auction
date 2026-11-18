@@ -194,6 +194,8 @@ export function Blacklist(): JSX.Element {
 
 解码统一经 `decode(schema, data)`：返回 `{ ok: true, value }` 或 `{ ok: false }`，调用方把失败映射为 `invalid_response` 并上报 `dto_decode`。不用 `null` 表示失败，因为 `data: null` 对可空 schema 是合法的成功值。路由专属的闭集键与跨字段校验留在各应用的 `api/` 下，先校验原始 JSON，再用 schema 解码。
 
+需要按字段校验原始词法时，通过 `response.json` 显式传入规则。Public 错误信封的 `code`、`message` 和 `data` 各只能出现一次，标记读取与写回执的 `version` 使用整数词法。
+
 ## 样式与译文
 
 - 样式文件与类名沿用现有定义：共享设计变量与控制台外壳在 `auction-web-shared` 的 `style/`，各应用的规则在各自的 `assets/`。装配顺序固定为 base → surface → desktop → mobile → console。
@@ -218,6 +220,8 @@ export function Blacklist(): JSX.Element {
 直接出价、创建代理和降低代理上限沿用 [Rust Public 的竞价命令规则](../crates/auction-web-public/DESIGN.md#竞价代理与标记)。表单只持有未发送的确认草稿。外壳按权威会话确认的用户在内存中持有已发送的请求、冻结目标和回执，同一拍品同时最多有一条未结记录。切换路由或进入登录页不取消请求。同一账号复核期间暂停重试，确认退出或换号时销毁原记录与在途任务。
 
 外壳提示区和拍品弹窗只能原样重试未知命令，或由玩家二次确认后放弃本地记录。刷新或关闭标签页会清除记录。“查看拍品”按冻结的世界及场次定位。命令答复触发权威重读，价格、领先关系和代理状态均由读取投影更新。
+
+已读取的本人代理授权按场次和拍品保存在同一身份的外壳中。目录或场次暂时读不到时，同一账号回到原目录仍沿用已有的授权判定。确认匿名、退出或换号时销毁旧账号的快照。
 
 ## 禁止事项
 

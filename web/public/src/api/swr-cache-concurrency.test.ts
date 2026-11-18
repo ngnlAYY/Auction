@@ -273,7 +273,7 @@ test("command_reply_during_an_inflight_reread_forbids_the_pre_command_fallbackï¼
     if (commandReply) {
       expect(result).toEqual(err(isBusy ? "read_busy" : "network_error"));
     } else {
-      expect(result).toEqual(ok({ value: "v-before", staleFallback: 110_000 }));
+      expect(result).toMatchObject(ok({ value: "v-before", staleFallback: 110_000 }));
     }
   }
 });

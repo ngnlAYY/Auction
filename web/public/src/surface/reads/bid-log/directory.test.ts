@@ -1,10 +1,19 @@
 // 出价、履约页面的目录门禁、按需翻页与地址写入失败恢复。
 
 import { expect, jest, onTestFinished, spyOn, test } from "bun:test";
+import { t } from "@auction/web-shared/ui/i18n";
 import { flush } from "solid-js";
 
 import { resetStoreForTest } from "../../../api/swr-cache";
+import {
+  dispatch,
+  mountCompetition,
+  renderedText,
+  settle,
+  waitFor,
+} from "../../commands/competition-fixture.test";
 import { mountReadPage } from "../../pagination/browser-fixture";
+import { success } from "../../shell/session-fixture";
 import { Fulfillment } from "../fulfillment";
 import { BidLog } from ".";
 
@@ -83,6 +92,110 @@ const pages = [
   ["/bidlog", "bid-log", BidLog],
   ["/fulfillment", "fulfillment", Fulfillment],
 ] as const;
+
+test.each(
+  pages.flatMap(
+    ([path, api]) =>
+      [
+        [path, api, "clear"],
+        [path, api, "select"],
+      ] as const,
+  ),
+)("%s 的非法或重复场次需要显式恢复（%s，%s）", async (path, api, action) => {
+  const page = await mountCompetition("main", true);
+  const suffix = `/${api}`;
+  const body = () => page.reads.filter((read) => read.split("?")[0]?.endsWith(suffix));
+  const locationAtRead: string[][] = [];
+  const raw = action === "clear" ? "auction=bad" : `auction=${LATEST.id}&a%75ction=${OLDER.id}`;
+  const search = `?${raw}&lot=One12&keep=%2b%20x`;
+  try {
+    page.server.readRounds = (url) =>
+      url.searchParams.get("status") === "settled"
+        ? directoryPage([LATEST, OLDER], 1, 2)
+        : directoryPage([], 1, 0);
+    const pageFields = (url: URL) => {
+      locationAtRead.push(page.location.searchParams.getAll("auction"));
+      return {
+        page: Number(url.searchParams.get("page")),
+        page_size: Number(url.searchParams.get("page_size")),
+        total: 0,
+      };
+    };
+    page.server.readBidLog = (url) => success({ bids: [], ...pageFields(url) });
+    page.server.readPage = (url) => {
+      const id = url.pathname.split("/").at(-2);
+      const round = [LATEST, OLDER].find((auction) => auction.id === id);
+      return url.pathname.endsWith("/fulfillment") && round !== undefined
+        ? success({
+            auction: { id: round.id, world: round.world_id, number: round.sequence },
+            lots: [],
+            ...pageFields(url),
+          })
+        : null;
+    };
+    page.go(`${path}${search}`);
+    await waitFor(
+      () =>
+        page.find(
+          (element) => element.tag === "option" && element.getAttribute("value") === LATEST.id,
+        ) !== null,
+    );
+    await settle();
+    expect(page.location.search).toBe(search);
+    expect(body()).toEqual([]);
+    const alert = () =>
+      page.find(
+        (element) =>
+          element.getAttribute("role") === "alert" &&
+          renderedText(element) === t("auction-invalid-link"),
+      );
+    const alertId = alert()?.getAttribute("id");
+    if (!alertId) throw new Error("未挂载非法场次提示");
+    const recover = page.need(
+      (element) => element.tag === "button" && renderedText(element) === t("auction-view-current"),
+    );
+    const select = Object.assign(
+      page.need(
+        (element) => element.tag === "select" && element.getAttribute("name") === "auction",
+      ),
+      { value: "" },
+    );
+    expect(select.getAttribute("aria-invalid")).toBe("true");
+    expect(select.getAttribute("aria-describedby")).toBe(alertId);
+    const apply = () => {
+      if (action === "clear") {
+        dispatch(recover, "Click");
+      } else {
+        select.value = OLDER.id;
+        dispatch(select, "Change");
+      }
+    };
+    page.rejectWrites("push");
+    apply();
+    await settle();
+    expect(page.location.search).toBe(search);
+    expect(alert()).not.toBeNull();
+    expect(select.value).toBe("");
+    expect(body()).toEqual([]);
+
+    page.rejectWrites(false);
+    apply();
+    await waitFor(() => body().length !== 0);
+    await settle();
+    const selected = action === "clear" ? LATEST.id : OLDER.id;
+    const urls = body().map((value) => new URL(value, page.location));
+    expect(
+      urls.map((url) => [url.pathname, url.searchParams.get("page"), url.searchParams.get("lot")]),
+    ).toEqual([[`/api/v1/auctions/${selected}/${api}`, "1", null]]);
+    expect(page.location.searchParams.getAll("auction")).toEqual([selected]);
+    expect(locationAtRead).toEqual([[selected]]);
+    expect(page.location.search).toContain("keep=%2b%20x");
+    expect(alert()).toBeNull();
+    expect(select.getAttribute("aria-invalid")).toBeNull();
+  } finally {
+    page.dispose();
+  }
+});
 
 test.each(pages.flatMap((entry) => [3, 1002].map((page) => [...entry, page] as const)))(
   "%s 默认选场与页码重置只写一次，正文从第一页开始",

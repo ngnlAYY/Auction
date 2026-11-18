@@ -1,8 +1,12 @@
 // 装备属性值的基础值与 roll 百分比格式。
 
 import { expect, test } from "bun:test";
+import { parseJson } from "@auction/web-shared/net/wire";
+import { ok } from "@auction/web-shared/result";
+import { decodeLotDetail } from "../../../api/decoder/lot";
+import { LOT_ID, lotDetailReceipt } from "../../commands/competition-fixture.test";
 
-const { statValueLabel } = await import("./stat-format");
+const { statValueLabel, formatOneDecimal, statRows } = await import("./stat-format");
 
 test("stat_values_carry_base_and_roll_percent_in_parentheses：属性值在括号里带基础值与 roll 百分比", () => {
   expect(statValueLabel("+109.1", 195.0, 97.5)).toBe("+109.1(195/97.5%)");
@@ -14,4 +18,34 @@ test("stat_values_carry_base_and_roll_percent_in_parentheses：属性值在括�
   expect(statValueLabel("+0.25", null, 90.0)).toBe("+0.25(90%)");
   // 没有 roll 的属性只显示数值，不出现空括号。
   expect(statValueLabel("+28.75", null, null)).toBe("+28.75");
+});
+
+test.each([
+  ["-0.0", "0", "0.0"],
+  ["-0.1", "-0.1", "-0.1"],
+  ["0.0", "0", "0.0"],
+] as const)("装备详情从原始 wire 显示属性与平均 roll（%s）", async (token, roll, average) => {
+  const body = (await lotDetailReceipt(LOT_ID).text())
+    .replace('"avg_roll":70', `"avg_roll":${token}`)
+    .replace('"stats":{}', `"stats":{"Test":{"value":"+1","base":169.99,"roll":${token}}}`);
+  const payload = parseJson(body);
+  if (!payload.ok) throw new Error("测试详情不是 JSON");
+  const detail = decodeLotDetail(
+    {
+      status: 200,
+      statusText: "OK",
+      headers: new Headers(),
+      text: () => body,
+      body: new TextEncoder().encode(body),
+      json: () => ok(payload.value),
+    },
+    null,
+    LOT_ID,
+  );
+  if (!detail.ok || detail.value.projection_kind !== "live" || detail.value.lot == null) {
+    throw new Error("测试详情没有通过生产解码器");
+  }
+  const equipment = detail.value.lot.equipment;
+  expect(statRows(equipment.stats)).toEqual([{ name: "Test", value: `+1(169.99/${roll}%)` }]);
+  expect(formatOneDecimal(equipment.avg_roll ?? 1)).toBe(average);
 });

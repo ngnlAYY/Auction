@@ -52,6 +52,8 @@ export interface TruncatedTextProps {
   readonly focusable?: boolean | null;
   readonly portal?: boolean | null;
   readonly legacyDom?: boolean | null;
+  /** 稳定锚点在列表中的位置，仅用来发现固定坐标已过期。 */
+  readonly anchorOrder?: number | null;
 }
 
 /**
@@ -121,6 +123,14 @@ export function TruncatedText(props: TruncatedTextProps): JSX.Element {
     },
     tasks,
   );
+
+  const visibleAnchorOrder = createValueMemo(() =>
+    tooltipPosition() === null ? null : (props.anchorOrder ?? null),
+  );
+  createEffect(visibleAnchorOrder, (order, previous) => {
+    // 按记录标识复用的锚点移动时，尺寸观察不会触发。收起仍停在旧坐标的提示。
+    if (order !== null && previous != null && order !== previous) interaction.close();
+  });
 
   // 固定宽度文本变化不触发 ResizeObserver；内容提交到 DOM 后重测，且不保留旧 portal 正文。
   const contentDependency = createValueMemo(() => [props.value, display()] as const);

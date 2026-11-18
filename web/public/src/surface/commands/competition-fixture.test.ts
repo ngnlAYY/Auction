@@ -55,11 +55,20 @@ function envelope() {
   };
 }
 
-export function lotDetailReceipt(id: string, price = 1500, leader = "Leader"): Response {
+export function lotDetailReceipt(
+  id: string,
+  price = 1500,
+  leader = "Leader",
+  settledAuction: string | null = null,
+): Response {
   return success({
     ...envelope(),
+    ...(settledAuction !== null
+      ? { auction_id: settledAuction, auction_status: "settled", bidding_open: false }
+      : {}),
     lot: {
-      ...lot(id, false, true),
+      ...lot(id, settledAuction !== null, true),
+      auction_id: settledAuction ?? AUCTION_ID,
       current_price: price,
       next_bid: price + 500,
       leader_name: leader,
@@ -142,9 +151,9 @@ export function proxyReceipt(kind: "create" | "lower"): Response {
   });
 }
 
-function ownedProxy() {
+export function ownedProxy(waiting: boolean) {
   return {
-    ...proxyProjection(5000, null),
+    ...proxyProjection(5000, null, waiting ? "slow" : "fast"),
     auction_id: AUCTION_ID,
     lot_number: 1,
     created_at: OPEN_AT,
@@ -160,10 +169,10 @@ function ownedProxy() {
       accepted_state_version: 3,
       mechanism: "proxy",
       created_at: OPEN_AT,
-      leading: true,
+      leading: !waiting,
       equipment: { name: "Legendary Cotton Robe", category: "Cloth" },
     },
-    capabilities: { can_lower: true, waiting: false, at_maximum: false },
+    capabilities: { can_lower: true, waiting, at_maximum: false },
   };
 }
 
@@ -176,7 +185,17 @@ export interface SentRequest {
 }
 
 /** 将真实表单送到实际 fetch 边界，未答复的写入可独立观察取消。 */
-export async function mountCompetition(world = "main", currentEmpty = false) {
+export async function mountCompetition(
+  world = "main",
+  currentEmpty = false,
+  initial?: {
+    readonly href: string;
+    readonly storage?: ReadonlyMap<string, string>;
+    readonly rejectHistoryWrites?: boolean;
+    readonly readCurrent?: (url: URL) => Response | Promise<Response> | null;
+    readonly readDirectory?: (url: URL) => Response | Promise<Response> | null;
+  },
+) {
   invalidateCookieSync();
   resetStoreForTest();
   const commands: SentRequest[] = [];
@@ -192,10 +211,18 @@ export async function mountCompetition(world = "main", currentEmpty = false) {
     },
     currentWorld: world,
     currentEmpty,
+    readCurrent: initial?.readCurrent ?? ((_url: URL): Response | Promise<Response> | null => null),
+    readRounds: (_url: URL): Response | Promise<Response> | null => null,
+    readEvents: (_url: URL): Response | Promise<Response> | null => null,
+    readBidLog: (_url: URL): Response | Promise<Response> | null => null,
+    readPage: (_url: URL): Response | Promise<Response> | null => null,
     directoryFailed: false,
-    readDirectory: (_url: URL): Response | Promise<Response> | null => null,
+    readDirectory:
+      initial?.readDirectory ?? ((_url: URL): Response | Promise<Response> | null => null),
     lotEnded: false,
     activeProxy: false,
+    waitingProxy: false,
+    readProxy: (_url: URL): Response | Promise<Response> | null => null,
     readLot: lotDetailReceipt,
   };
   const fetcher = spyOn(globalThis, "fetch").mockImplementation(
@@ -239,23 +266,26 @@ export async function mountCompetition(world = "main", currentEmpty = false) {
           case "/api/v1/worlds":
             return success({ worlds: { main: { enabled: true }, isekai: { enabled: true } } });
           case "/api/v1/auctions/current":
-            return success({
-              auction:
-                !server.currentEmpty && url.searchParams.get("world") === server.currentWorld
-                  ? {
-                      id: AUCTION_ID,
-                      world: server.currentWorld,
-                      number: 12,
-                      status: "live",
-                      opens_at: OPEN_AT,
-                      scheduled_ends_at: END_AT,
-                      presentation_mode: "live",
-                      bidding_open: true,
-                      preview_revision: 0,
-                      proxy_default_mode: "fast",
-                    }
-                  : null,
-            });
+            return (
+              server.readCurrent(url) ??
+              success({
+                auction:
+                  !server.currentEmpty && url.searchParams.get("world") === server.currentWorld
+                    ? {
+                        id: AUCTION_ID,
+                        world: server.currentWorld,
+                        number: 12,
+                        status: "live",
+                        opens_at: OPEN_AT,
+                        scheduled_ends_at: END_AT,
+                        presentation_mode: "live",
+                        bidding_open: true,
+                        preview_revision: 0,
+                        proxy_default_mode: "fast",
+                      }
+                    : null,
+              })
+            );
           case `/api/v1/auctions/${AUCTION_ID}/lots`: {
             const response = server.readDirectory(url);
             if (response !== null) return response;
@@ -275,18 +305,28 @@ export async function mountCompetition(world = "main", currentEmpty = false) {
           case `/api/v1/lots/${SECOND_LOT_ID}`:
             return server.readLot(url.pathname.split("/").at(-1) ?? "");
           case "/api/v1/auctions":
-            return success({
-              auctions: [],
-              page: 1,
-              page_size: Number(url.searchParams.get("page_size")),
-              total: 0,
-            });
+            return (
+              server.readRounds(url) ??
+              success({
+                auctions: [],
+                page: 1,
+                page_size: Number(url.searchParams.get("page_size")),
+                total: 0,
+              })
+            );
+          case "/api/v1/events":
+            return server.readEvents(url) ?? reject("not_found", 404);
           case `/api/v1/lots/${LOT_ID}/proxy-authorizations/mine`:
           case `/api/v1/lots/${SECOND_LOT_ID}/proxy-authorizations/mine`:
-            return success({
-              authorization:
-                server.activeProxy && url.pathname.includes(LOT_ID) ? ownedProxy() : null,
-            });
+            return (
+              server.readProxy(url) ??
+              success({
+                authorization:
+                  server.activeProxy && url.pathname.includes(LOT_ID)
+                    ? ownedProxy(server.waitingProxy)
+                    : null,
+              })
+            );
           case "/api/v1/me/lot-watches":
             return success({
               user_id: server.identity?.user_id,
@@ -294,13 +334,19 @@ export async function mountCompetition(world = "main", currentEmpty = false) {
               watches: [],
             });
           default:
-            return reject("not_found", 404);
+            if (url.pathname.endsWith("/bid-log"))
+              return server.readBidLog(url) ?? reject("not_found", 404);
+            return server.readPage(url) ?? reject("not_found", 404);
         }
       },
       { preconnect: () => {} },
     ),
   );
-  const mounted = await mountPublicApp(world === "main" ? "/" : `/?world=${world}`);
+  const mounted = await mountPublicApp(
+    initial?.href ?? (world === "main" ? "/" : `/?world=${world}`),
+    initial?.storage,
+    initial?.rejectHistoryWrites,
+  );
   return {
     ...mounted,
     commands,

@@ -32,6 +32,7 @@ import {
   worldSwitchCurrent,
   worldSwitchOptions,
 } from "../query";
+import { updatePublicQueryPairs } from "../query/location";
 import { WorldSwitchContext } from "../shell/contexts";
 
 export type { WorldSwitchOption };
@@ -200,15 +201,8 @@ export function createWorldSwitch(props: CreateWorldSwitchOptions): WorldSwitchC
         latestWorld !== null &&
         latestActive !== requestedWorld;
       if (shouldRewrite) {
-        // 仅实际使用单一世界的路由纠偏；写入失败时保持原地址和选中世界，等待下一次重试。
-        const written = updatePublicQueryState(
-          props.shellQueryState,
-          (query) => {
-            // 自动回退只清掉不可用的显式值，实际世界由目录选出，不传给下一跳。
-            query.world = null;
-          },
-          "replace",
-        );
+        // 自动纠偏只清除 world，保留其他筛选的原文。写址成功后才提交实际世界。
+        const written = updatePublicQueryPairs(props.shellQueryState, ["world"], [], "replace");
         if (!written) {
           return;
         }

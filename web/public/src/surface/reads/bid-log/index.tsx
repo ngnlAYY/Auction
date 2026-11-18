@@ -3,14 +3,20 @@
 
 import type { AuctionSummaryResponse } from "@auction/contracts/dto/public/catalog/auction";
 import type { PublicBidLogListResponse } from "@auction/contracts/dto/public/catalog/history";
+import { structuralEquals } from "@auction/web-shared/reactive/equality";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import { createTaskResource } from "@auction/web-shared/reactive/resource";
 import type { Result } from "@auction/web-shared/result";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
-import { createEffect, For, Match, Show, Switch, useContext } from "solid-js";
+import { createEffect, For, Match, onCleanup, Show, Switch, useContext } from "solid-js";
 
 import { fetchBidLogPage } from "../../../api/queries/bid-log";
+import {
+  bidLogRealtimeKey,
+  PublicPageRealtimeTargetContext,
+  type PublicRealtimeTarget,
+} from "../../board/realtime";
 import {
   PublicRefreshGenerationContext,
   refreshPublicReads,
@@ -34,6 +40,7 @@ import {
 } from "../../query";
 import { usePageRouteGuard } from "../../query/route-page";
 import { rustTrim } from "../../query/text";
+import { INVALID_READ_AUCTION_ERROR_ID, InvalidReadAuction } from "../invalid-auction";
 import { useReadRoundDirectory } from "./directory";
 import { applyLotFilter, resetLotDraft, useLotFilterDraft, validLotFilter } from "./lots";
 import { createScopeSelection, type ScopeSelection, sameScopeSelection } from "./scope-selection";
@@ -77,6 +84,7 @@ interface AuctionOptionGroup {
 
 type BidLogBody =
   | { readonly kind: "error" }
+  | { readonly kind: "invalid-auction" }
   | { readonly kind: "empty" }
   | { readonly kind: "invalid" }
   | { readonly kind: "unselected" }
@@ -146,6 +154,41 @@ export function BidLog(): JSX.Element {
   const auctionOptions = rounds.options;
   const selectedAuction = rounds.selected;
   const selectedAuctionId = () => selectedAuction()?.id ?? "";
+  const pageTarget = useContext(PublicPageRealtimeTargetContext);
+  createEffect(
+    () => ({
+      key: bidLogRealtimeKey(queryStateSignal()),
+      auction: selectedAuction(),
+      failed: rounds.failed(),
+      correctionFailed: rounds.correctionFailed(),
+      empty: rounds.empty(),
+    }),
+    ({ key, auction, failed, correctionFailed, empty }) => {
+      if (!routeStillOnPage()) return;
+      // 只有目录确认的活动场次可订阅，回放也按该场的真实世界校验。
+      let target: PublicRealtimeTarget | null = { kind: "checking" };
+      if (key.invalidAuction) {
+        target = { kind: "no_target", reason: "invalid_auction" };
+      } else if (auction !== null && auction.id === key.id) {
+        const world = auction.world_id;
+        target =
+          auction.status === "live" || auction.status === "final"
+            ? { kind: "auction", auctionId: auction.id, world, previewRevision: 0 }
+            : null;
+      } else if (failed) {
+        target = { kind: "no_target", reason: "directory_error" };
+      } else if (correctionFailed) {
+        target = { kind: "no_target", reason: "selection_error" };
+      } else if (empty) {
+        target = { kind: "no_target", reason: "empty" };
+      }
+      const next = [key, target] as const;
+      if (!structuralEquals(pageTarget.peek(), next)) pageTarget.set(next);
+    },
+  );
+  onCleanup(() => {
+    if (pageTarget.peek()?.[0].kind === "bidlog") pageTarget.set(null);
+  });
   // 全部世界时按世界分组；目录已按主世界、异世界排序，因此相同世界始终相邻。
   const auctionGroups = createValueMemo((): readonly AuctionOptionGroup[] => {
     const groups: AuctionOptionGroup[] = [];
@@ -186,7 +229,11 @@ export function BidLog(): JSX.Element {
       return context.alive() ? { requested: dependencies.requested, result } : null;
     },
   );
-  useBidRefresh(bidLog, () => readRequest() !== null);
+  useBidRefresh(
+    bidLog,
+    () => readRequest() !== null,
+    () => readRequest()?.requested[0] ?? null,
+  );
   const lookup = useLotDetailLookup();
   const currentPage = pageNumber;
   const currentLotFilter = lot.appliedLot;
@@ -218,6 +265,7 @@ export function BidLog(): JSX.Element {
   });
   // 目录或当前查询的记录还没有结果时由顶栏提示加载，正文留空。
   const bodyState = createValueMemo((): BidLogBody => {
+    if (rounds.invalidAuction()) return { kind: "invalid-auction" };
     const resultNow = currentResult();
     if (bounds.failed("page") || rounds.failed() || resultNow?.ok === false) {
       return { kind: "error" };
@@ -261,6 +309,8 @@ export function BidLog(): JSX.Element {
               name="auction"
               autocomplete="off"
               aria-label={t("bidlog-round")}
+              aria-invalid={rounds.invalidAuction() ? "true" : undefined}
+              aria-describedby={rounds.invalidAuction() ? INVALID_READ_AUCTION_ERROR_ID : undefined}
               value={selectedAuctionId()}
               disabled={auctionOptions().length === 0}
               onFocus={rounds.loadOptions}
@@ -359,6 +409,9 @@ export function BidLog(): JSX.Element {
           </div>
         </div>
         <Switch>
+          <Match when={bodyState().kind === "invalid-auction"}>
+            <InvalidReadAuction onRecover={rounds.clearSelection} />
+          </Match>
           <Match when={bodyState().kind === "error"}>
             <div class="public-auction-empty" role="alert">
               <p class="public-auction-empty__title">{t("data-error")}</p>

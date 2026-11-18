@@ -1,13 +1,25 @@
 // 公开只读 GET 的条件请求、非 2xx 响应的缓存分类与带缓存的严格解码；其余查询都经这里读写
 // 公开读缓存。
 
-import type { TransportError, TransportResponse } from "@auction/web-shared/net/transport";
+import type {
+  ResponseObserver,
+  TransportError,
+  TransportResponse,
+  TransportResponseMetadata,
+} from "@auction/web-shared/net/transport";
 import { transportErrorCode } from "@auction/web-shared/net/transport";
 import type { Result } from "@auction/web-shared/result";
 import { err, ok, unreachable } from "@auction/web-shared/result";
-import { sendGetConditional } from "../clock";
+import { parseImfFixdate, sendGetConditional } from "../clock";
 import { decodeErrorCode } from "../decoder";
-import { type CacheRead, type FetchOutcome, readOrFetch } from "../swr-cache";
+import {
+  type CacheRead,
+  deliverCacheRead,
+  type FetchOutcome,
+  publicReadRetryAfter,
+  readOrFetch,
+  rememberPublicReadRetryAfter,
+} from "../swr-cache";
 
 /** 条件 GET 的响应分类；304 只在确实发送了 If-None-Match 时成立。 */
 export type ConditionalResponse =
@@ -30,17 +42,19 @@ export async function conditionalGet(
   etag: string | null,
   evictMissingSnapshot: () => void,
   signal: AbortSignal,
+  observeResponse?: ResponseObserver,
 ): Promise<Result<ConditionalResponse, TransportError>> {
   let status: number | null = null;
   const sent = await sendGetConditional(
     url,
     etag,
     (observed) => {
-      status = observed;
+      status = observed.status;
       // 404/410 一到就撤销旧快照；读取正文时关闭页面也不能恢复其回退资格。
-      if (missingStatus(observed)) {
+      if (missingStatus(observed.status)) {
         evictMissingSnapshot();
       }
+      observeResponse?.(observed);
     },
     signal,
   );
@@ -105,17 +119,19 @@ export async function cachedPublicGet<T>(
   if (signal.aborted) {
     return err("network_error");
   }
-  return read.ok ? ok(read.value.value) : read;
+  return deliverCacheRead(read);
 }
 
 /** 与 cachedPublicGet 相同，但保留“暂时性失败后回退旧快照”的标记与确认时刻，供需要稍后再读
- * 的目录读取与须标明数据时点的页面使用。 */
+ * 的目录读取与须标明数据时点的页面使用。实际请求须在取得读取资格后再检查调用方的发送门禁。 */
 export async function cachedPublicRead<T>(
   url: string,
   ttlMillis: number,
   typeId: string,
   decode: (response: TransportResponse) => Result<T, string>,
   signal: AbortSignal,
+  observeRetryAfter?: (notBefore: number) => void,
+  canSend?: () => boolean,
 ): Promise<Result<CacheRead<T>, string>> {
   const requestUrl = url;
   const read = await readOrFetch(
@@ -123,7 +139,33 @@ export async function cachedPublicRead<T>(
     ttlMillis,
     typeId,
     async (etag, evictMissingSnapshot) => {
-      const conditional = await conditionalGet(requestUrl, etag, evictMissingSnapshot, signal);
+      if (canSend?.() === false) {
+        return { kind: "rejected", error: "network_error" };
+      }
+      // 进到这里才取得同 URL 的读取权。等待预取结束的读也必须检查已公布的时限。
+      const blocked = publicReadRetryAfter(requestUrl);
+      if (blocked !== null) {
+        observeRetryAfter?.(blocked.notBefore);
+        const failure = failureOutcome<T, string>(blocked.status, blocked.error);
+        return failure.kind === "busy" ? failure : { kind: "rejected", error: blocked.error };
+      }
+      const observed: { window?: ReturnType<typeof rememberPublicReadRetryAfter> } = {};
+      const observeResponse =
+        observeRetryAfter === undefined
+          ? undefined
+          : (response: TransportResponseMetadata) => {
+              const delay = requestedRetryDelay(response);
+              if (delay === null) return;
+              observed.window = rememberPublicReadRetryAfter(requestUrl, response.status, delay);
+              observeRetryAfter(observed.window.notBefore);
+            };
+      const conditional = await conditionalGet(
+        requestUrl,
+        etag,
+        evictMissingSnapshot,
+        signal,
+        observeResponse,
+      );
       if (signal.aborted) {
         return { kind: "transport", error: "network_error" };
       }
@@ -134,13 +176,13 @@ export async function cachedPublicRead<T>(
       switch (outcome.kind) {
         case "not_modified":
           return { kind: "not_modified" };
-        case "failure":
-          return failureOutcome<T, string>(
-            outcome.status,
-            outcome.result.ok
-              ? decodeErrorCode(outcome.result.value)
-              : transportErrorCode(outcome.result.error),
-          );
+        case "failure": {
+          const error = outcome.result.ok
+            ? decodeErrorCode(outcome.result.value)
+            : transportErrorCode(outcome.result.error);
+          if (observed.window !== undefined) observed.window.error = error;
+          return failureOutcome<T, string>(outcome.status, error);
+        }
         case "success": {
           const decoded = decode(outcome.response);
           return decoded.ok
@@ -155,6 +197,16 @@ export async function cachedPublicRead<T>(
     signal,
   );
   return signal.aborted ? err("network_error") : read;
+}
+
+function requestedRetryDelay(response: TransportResponseMetadata): number | null {
+  const retryAfter = response.headers.get("Retry-After");
+  if (response.status < 400 || retryAfter === null) return null;
+  if (/^[0-9]+$/u.test(retryAfter)) return Number(retryAfter) * 1_000;
+  const deadline = parseImfFixdate(retryAfter);
+  if (deadline === null) return null;
+  const serverDate = parseImfFixdate(response.headers.get("Date") ?? "");
+  return Math.max(0, deadline - (serverDate ?? Date.now()));
 }
 
 function responseOk(response: { readonly status: number }): boolean {

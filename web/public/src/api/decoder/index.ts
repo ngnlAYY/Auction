@@ -33,7 +33,8 @@ export function decodeSuccess<TSchema extends v.GenericSchema>(
 export function decodeError(
   response: TransportResponse,
 ): Result<readonly [string, unknown], string> {
-  const payload = response.json();
+  // 重复的已知信封键无法证明命令被拒绝；保留 data 内部的 Value 兼容语义。
+  const payload = response.json({ uniqueRootKeys: ["code", "message", "data"] });
   const decoded = payload.ok ? decodeErrorValue(payload.value) : err("invalid_response");
   if (!decoded.ok) {
     reportBrowserError("dto_decode");

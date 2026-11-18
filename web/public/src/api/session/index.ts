@@ -16,7 +16,7 @@ import {
   type TransportResponse,
   transportErrorCode,
 } from "@auction/web-shared/net/transport";
-import { jsonHasExactKeys } from "@auction/web-shared/net/wire";
+import { type JsonFieldPolicy, jsonHasExactKeys } from "@auction/web-shared/net/wire";
 import type { Result } from "@auction/web-shared/result";
 import { err, ok } from "@auction/web-shared/result";
 import { utf8ByteLength } from "@auction/web-shared/text";
@@ -230,8 +230,9 @@ export function decodeIdentitySuccess<TSchema extends v.GenericSchema>(
   response: TransportResponse,
   schema: TSchema,
   validate: (value: unknown) => boolean,
+  policy?: JsonFieldPolicy,
 ): Result<v.InferOutput<TSchema>, string> {
-  const payload = response.json();
+  const payload = response.json(policy);
   if (response.status !== 200 || !payload.ok || object(payload.value)?.code !== "ok") {
     reportBrowserError("dto_decode");
     return err("invalid_response");

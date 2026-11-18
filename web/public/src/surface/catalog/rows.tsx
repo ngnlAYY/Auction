@@ -79,6 +79,7 @@ export function BidHistoryParticipant(props: {
   readonly source: string | null;
   readonly sourcePostNumber: number | null;
   readonly sourcePostUrl: string | null;
+  readonly anchorOrder?: number | null;
 }): JSX.Element {
   const forumSource = createValueMemo(
     (): { readonly postNumber: number; readonly url: string | null } | null => {
@@ -103,6 +104,7 @@ export function BidHistoryParticipant(props: {
         className="public-auction-participant-identity__name"
         portal={true}
         legacyDom={true}
+        anchorOrder={props.anchorOrder ?? null}
       />
       <Switch>
         <Match when={forumSource()}>

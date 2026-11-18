@@ -30,6 +30,7 @@ export interface ProxyFormInput {
   readonly leading: boolean;
   readonly blockedReason: string;
   readonly proxy: Result<OwnedProxy | null, string> | null;
+  readonly proxyReadError?: string | null;
   readonly refreshGeneration: Cell<number>;
   /** 由弹窗持有的创建和降低上限的确认草稿。 */
   readonly createCommand: ProxyConfirmCommand;
@@ -43,11 +44,12 @@ export function ProxyForm(props: { readonly input: ProxyFormInput }): JSX.Elemen
   const input = () => props.input;
   const proxy = () => input().proxy;
   const proxyRead = useProxyDraftRead(proxy);
-  const proxyError = () => proxyRead().error;
+  const proxyError = () => input().proxyReadError ?? proxyRead().error;
   const confirmed = () => proxyRead().confirmed;
   const activeProxy = () => activeOwnedProxy(confirmed());
   // 草稿沿用上次授权快照。新的写入仍需当前授权读取和会话许可，失败时不能使用旧上限。
-  const canSubmit = () => input().canBid && input().canSubmit && proxyRead().canSubmit;
+  const canSubmit = () =>
+    input().canBid && input().canSubmit && proxyRead().canSubmit && proxyError() === null;
   const initialMinimum = () => {
     const previous = confirmed()?.value;
     return previous == null

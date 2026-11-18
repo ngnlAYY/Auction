@@ -22,13 +22,14 @@ import { PublicSessionResourceContext, PublicSessionView } from "..";
 import { CatalogGroupFilters } from "../catalog/filters";
 import { CatalogTable } from "../catalog/tables";
 import { useContentLoading } from "../loading";
-import { publicPageMatches, updatePublicPageSize } from "../pagination";
+import { publicPageMatches, updatePublicPage, updatePublicPageSize } from "../pagination";
 import {
   catalogCategoryKeys,
   type PreviewHistoryLoad,
   type PublicBoardQuery,
   updatePublicQueryState,
 } from "../query";
+import { usePageRouteGuard } from "../query/route-page";
 import { useAlignmentReread } from "./alignment";
 import { previewHistorySwitch } from "./navigation";
 import {
@@ -104,7 +105,11 @@ function useCatalogLots(readScope: () => CatalogReadScope | null, refreshGenerat
       : page;
     return [scope, generation, result] as const;
   });
-  useBidRefresh(lots, () => readScope() !== null);
+  useBidRefresh(
+    lots,
+    () => readScope() !== null,
+    () => readScope()?.auctionId ?? null,
+  );
   return { lots, lotsRefreshGeneration };
 }
 
@@ -114,12 +119,13 @@ export function useAuctionCatalog(
   historical: () => boolean,
   auctionReading: () => boolean,
   queryState: Cell<PublicBoardQuery>,
+  queryBlocked: () => boolean,
 ) {
   const refreshGeneration = useContext(PublicRefreshGenerationContext);
   useAuctionOpeningRefresh(auction, historical, refreshGeneration);
   const catalogScope = createValueMemo((): CatalogReadScope | null => {
     const round = auction();
-    if (round === null) {
+    if (round === null || queryBlocked()) {
       return null;
     }
     const query = queryState();
@@ -207,6 +213,7 @@ export interface AuctionDataProps {
 
 export function AuctionData(props: AuctionDataProps): JSX.Element {
   const queryStateSignal = props.query;
+  const routeStillOnBoard = usePageRouteGuard("AuctionIndex");
   const activeCategory = createValueMemo(() => queryStateSignal().category ?? "all");
   // 手机分类面板应用新分类会让目录重新读取并卸载承载工具栏的目录表。请求必须放在始终挂载的
   // 看板层，下一次工具栏挂载后才能把焦点还给分类开关；面板自身随目录表一起不存在。
@@ -250,6 +257,9 @@ export function AuctionData(props: AuctionDataProps): JSX.Element {
       }
       if (!current.ok) {
         return [world, current] as const;
+      }
+      if (current.value === null || current.value.presentation_mode === "live") {
+        return [world, ok([current.value, []])] as const;
       }
       const rounds = await fetchAuctionList(world, context.signal);
       if (!context.alive()) {
@@ -375,15 +385,9 @@ export function AuctionData(props: AuctionDataProps): JSX.Element {
                   "push",
                 );
               }}
-              onPageClamp={(page) => {
-                updatePublicQueryState(
-                  queryStateSignal,
-                  (query) => {
-                    query.page = page;
-                  },
-                  "replace",
-                );
-              }}
+              onPageClamp={(page) =>
+                routeStillOnBoard() && updatePublicPage(queryStateSignal, page, "replace")
+              }
               onPageSizeChange={(size) => updatePublicPageSize(queryStateSignal, size)}
               pageTotal={snapshot().page.total ?? null}
               pageSize={pageSize()}

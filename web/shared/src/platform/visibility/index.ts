@@ -6,6 +6,11 @@ import { sleep } from "../timer";
 /** 睡眠分片粒度：足够细以便在隐藏时尽快转入事件驱动挂起，又不会引入明显唤醒开销。 */
 const SLEEP_SLICE_MILLIS = 1_000;
 
+/** 调度单次重读前直接检查文档，覆盖可见性监听尚未安装的首屏。 */
+export function documentIsVisible(): boolean {
+  return typeof document === "undefined" || !document.hidden;
+}
+
 interface VisibilityListener {
   readonly document: Document;
   readonly callback: () => void;

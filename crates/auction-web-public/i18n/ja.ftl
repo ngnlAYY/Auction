@@ -74,6 +74,8 @@ filter-include-unleveled = レベル未設定の装備を表示
 filter-level-hint = 空欄なら制限しません。Enter キーを押すか入力欄からフォーカスを外すと適用されます。上限を超える装備は非表示になり、数値レベルのない装備はチェックボックスで表示を切り替えます。
 filter-level-invalid = レベル上限（0以上の整数または空欄）と、レベル未設定の装備を表示するかを確認してください。
 filter-error-duplicate = この絞り込み条件が重複しています。値を一つにしてください。
+filter-category-invalid = 装備タイプの絞り込み条件が無効です。条件を解除すると一覧を読み込めます。
+filter-category-clear = 装備タイプの絞り込みを解除
 filter-all = すべて
 filter-category-selected = { $count } 種類を選択中
 filter-done = 完了
@@ -166,6 +168,7 @@ auction-empty-no-auction = このワールドにはまだオークションが�
 auction-empty-no-auction-hint = 次回のオークションは時間をおいてご確認ください。
 auction-invalid-link = リンク先のオークションが無効です。
 auction-view-current = 現在のオークションを見る
+auction-clear-selection = オークションの選択を解除
 
 
 page-auctions-title = オークション履歴

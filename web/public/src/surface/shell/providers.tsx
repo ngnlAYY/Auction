@@ -8,9 +8,8 @@ import type { Cell } from "@auction/web-shared/reactive/cell";
 import type { JSX } from "@solidjs/web";
 import {
   PublicDisplayedAuctionContext,
+  type PublicPageRealtimeTarget,
   PublicPageRealtimeTargetContext,
-  type PublicRealtimePageKey,
-  type PublicRealtimeTarget,
 } from "../board/realtime";
 import {
   type PublicBidRefresh,
@@ -24,6 +23,10 @@ import {
   type LotViewRequest,
   LotViewRequestContext,
 } from "../catalog/detail/deep-link";
+import {
+  CatalogProxySnapshotsContext,
+  type createCatalogProxySnapshots,
+} from "../catalog/proxy-snapshots";
 import { type CompetitionCommands, CompetitionCommandsContext } from "../commands/host";
 import type {
   CurrentAuctionResource,
@@ -46,13 +49,14 @@ export interface PublicShellProvidersProps {
   readonly selectedWorld: Cell<string>;
   readonly refreshGeneration: Cell<number>;
   readonly bidRefresh: PublicBidRefresh;
-  readonly pageRealtimeTarget: Cell<readonly [PublicRealtimePageKey, PublicRealtimeTarget] | null>;
+  readonly pageRealtimeTarget: PublicPageRealtimeTarget;
   readonly displayedAuction: Cell<CurrentAuctionItemResponse | null>;
   readonly lotViewRequest: Cell<LotViewRequest | null>;
   readonly lotLinkLocation: Cell<LotLinkLocation | null>;
   readonly session: PublicSessionResource;
   readonly commandOwner: Cell<string | null>;
   readonly competition: CompetitionCommands;
+  readonly proxySnapshots: ReturnType<typeof createCatalogProxySnapshots>;
   readonly contentLoading: Cell<ReadonlySet<number>>;
   readonly readiness: PublicReadinessResource;
   readonly currentAuction: CurrentAuctionResource;
@@ -79,7 +83,9 @@ export function PublicShellProviders(props: PublicShellProvidersProps): JSX.Elem
                               <PageVisibilityContext value={props.pageVisibility}>
                                 <LotLinkLocationContext value={props.lotLinkLocation}>
                                   <CompetitionCommandsContext value={props.competition}>
-                                    {props.children}
+                                    <CatalogProxySnapshotsContext value={props.proxySnapshots}>
+                                      {props.children}
+                                    </CatalogProxySnapshotsContext>
                                   </CompetitionCommandsContext>
                                 </LotLinkLocationContext>
                               </PageVisibilityContext>

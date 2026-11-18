@@ -3,6 +3,7 @@
 // 结构化 `TransportError`）；本模块只保留 Public 特有的服务端时钟采样。
 
 import type {
+  ResponseObserver,
   TransportError,
   TransportRequestBuilder,
   TransportResponse,
@@ -206,7 +207,7 @@ export function sendGet(
 export function sendGetConditional(
   url: string,
   etag: string | null,
-  observeStatus: (status: number) => void,
+  observeResponse: ResponseObserver,
   signal: AbortSignal,
 ): Promise<Result<TransportResponse, TransportError>> {
   return sendRequestObserved(
@@ -223,7 +224,7 @@ export function sendGetConditional(
       };
     },
     (response) => {
-      observeStatus(response.status);
+      observeResponse(response);
       observeRevalidatedDate(response);
     },
     signal,
@@ -247,7 +248,8 @@ export function sendRequest(
 }
 
 /** 解析 IMF-fixdate；形状、取值范围或星期与日期不符时返回 `null`。 */
-function parseImfFixdate(text: string): number | null {
+/** 严格读取 HTTP Date 或 Retry-After 的 IMF-fixdate 写法。 */
+export function parseImfFixdate(text: string): number | null {
   if (text.length !== IMF_FIXDATE_LENGTH) {
     return null;
   }

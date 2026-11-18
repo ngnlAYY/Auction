@@ -40,16 +40,21 @@ export async function fetchLotWatches(
   if (!responseOk(response.value)) {
     return err(failure(decodeErrorCode(response.value), status));
   }
-  const page = decodeIdentitySuccess(response.value, PublicLotWatchesResponseSchema, (value) => {
-    const envelope = object(value);
-    if (envelope === null || !jsonHasExactKeys(envelope, ["user_id", "auction_id", "watches"])) {
-      return false;
-    }
-    const watches = envelope.watches;
-    return (
-      Array.isArray(watches) && watches.length <= MAX_WATCHES && watches.every(validWatchValue)
-    );
-  });
+  const page = decodeIdentitySuccess(
+    response.value,
+    PublicLotWatchesResponseSchema,
+    (value) => {
+      const envelope = object(value);
+      if (envelope === null || !jsonHasExactKeys(envelope, ["user_id", "auction_id", "watches"])) {
+        return false;
+      }
+      const watches = envelope.watches;
+      return (
+        Array.isArray(watches) && watches.length <= MAX_WATCHES && watches.every(validWatchValue)
+      );
+    },
+    { integerPaths: [["data", "watches", null, "version"]] },
+  );
   if (!page.ok || !validWatchCollection(page.value, page.value.user_id, auctionId)) {
     return err(failure("invalid_response", status));
   }
@@ -97,14 +102,19 @@ export async function setLotWatch(
   if (!responseOk(response.value)) {
     return err(failure(decodeErrorCode(response.value), status, userId));
   }
-  const result = decodeIdentitySuccess(response.value, PublicSetLotWatchResponseSchema, (value) => {
-    const envelope = object(value);
-    return (
-      envelope !== null &&
-      jsonHasExactKeys(envelope, ["user_id", "auction_id", "watch"]) &&
-      validWatchValue(envelope.watch)
-    );
-  });
+  const result = decodeIdentitySuccess(
+    response.value,
+    PublicSetLotWatchResponseSchema,
+    (value) => {
+      const envelope = object(value);
+      return (
+        envelope !== null &&
+        jsonHasExactKeys(envelope, ["user_id", "auction_id", "watch"]) &&
+        validWatchValue(envelope.watch)
+      );
+    },
+    { integerPaths: [["data", "watch", "version"]] },
+  );
   if (
     !result.ok ||
     result.value.user_id !== userId ||
@@ -151,8 +161,7 @@ function validWatch(watch: PublicLotWatchesResponse["watches"][number]): boolean
 
 function validWatchValue(value: unknown): boolean {
   const watch = object(value);
-  // 已知差异：JSON.parse 会把 `1.0000000000000001` 舍入成 1，JS 无法还原原始写法；
-  // 后端只输出整数版本。TS 只能安全读取安全整数；超出范围的 version 与源码的 i64 分支同样失败关闭。
+  // 传输层已经检查版本词法；这里仍须拒绝不安全的整数与非正版本。
   return (
     watch !== null &&
     jsonHasExactKeys(watch, ["lot_id", "watched", "channel", "version"]) &&

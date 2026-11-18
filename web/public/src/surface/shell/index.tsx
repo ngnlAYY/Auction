@@ -20,14 +20,16 @@ import { fetchCurrentAuction } from "../../api/queries/current";
 import { fetchPublicReadiness } from "../../api/status";
 import { prefetchBoardLots, rememberCurrentAuction } from "../board/prefetch";
 import {
+  bidLogRealtimeKey,
   type PublicConnectionState,
+  type PublicPageRealtimeTarget,
   type PublicReadinessState,
   type PublicRealtimePageKey,
   type PublicRealtimeTarget,
   publicConnectionState,
   tickerAuction,
 } from "../board/realtime";
-import { type PublicBidRefresh, refreshPublicReads } from "../board/refresh";
+import { createPublicBidRefresh, refreshPublicReads } from "../board/refresh";
 import { createWorldSwitch } from "../board/world";
 import type { LotLinkLocation, LotViewRequest } from "../catalog/detail/deep-link";
 import { PublicSessionView, type PublicSessionView as PublicSessionViewType } from "../index";
@@ -127,19 +129,12 @@ function PublicShellContent(props: { readonly locationGeneration: Cell<number> }
   const refreshGeneration = createCell(0);
   const manualRefreshBusy = createCell(false);
   const manualRefreshError = createCell(false);
-  const bidRefreshRevision = createCell(0);
-  const bidRefresh: PublicBidRefresh = {
-    revision: bidRefreshRevision,
-    notify: () =>
-      bidRefreshRevision.update((value) => Math.min(value + 1, Number.MAX_SAFE_INTEGER)),
-  };
+  const bidRefresh = createPublicBidRefresh();
   const readinessGeneration = createCell(0);
   // 游标归整个 Public 外壳；订阅因目标或用户身份变化重启时仍保留已确认位置。
   const auctionAfter = createCell<readonly [string, number] | null>(null);
   const stableRealtimeTarget = createCell<PublicRealtimeTarget>({ kind: "checking" });
-  const pageRealtimeTarget = createCell<
-    readonly [PublicRealtimePageKey, PublicRealtimeTarget] | null
-  >(null);
+  const pageRealtimeTarget: PublicPageRealtimeTarget = createCell(null);
   const realtimeState = createCell<LiveConnectionState>("connecting");
   const tasks = createTaskScope();
   // readiness 只在启动门禁与页面恢复可见时读取一次；持续连接状态由 realtime WS 与各 API
@@ -148,8 +143,14 @@ function PublicShellContent(props: { readonly locationGeneration: Cell<number> }
     () => readinessGeneration(),
     async (_generation, context) => fetchPublicReadiness(context.signal),
   );
-  const { session, sessionEndedElsewhere, commandOwner, checkSession, competition } =
-    createPublicShellSession(refreshGeneration);
+  const {
+    session,
+    sessionEndedElsewhere,
+    commandOwner,
+    checkSession,
+    competition,
+    proxySnapshots,
+  } = createPublicShellSession(refreshGeneration);
   const currentAuction = createTaskResource(
     () => [refreshGeneration(), selectedWorld()] as const,
     async ([, world], context) => {
@@ -253,6 +254,9 @@ function PublicShellContent(props: { readonly locationGeneration: Cell<number> }
   };
   const requestedPageTarget = createValueMemo((): PublicRealtimePageKey | null => {
     const route = currentRoute();
+    if (route.kind === "matched" && route.name === "BidLog") {
+      return bidLogRealtimeKey(currentPublicQuery());
+    }
     if (
       route.kind !== "matched" ||
       (route.name !== "AuctionIndex" && route.name !== "AuctionPage")
@@ -262,7 +266,19 @@ function PublicShellContent(props: { readonly locationGeneration: Cell<number> }
     const auctionId = currentPublicQuery().auctionId;
     return auctionId === null ? null : { kind: "auction", id: auctionId };
   });
+  const resolvedPageTarget = createValueMemo((): PublicRealtimeTarget | null => {
+    const requested = requestedPageTarget();
+    if (requested === null) return null;
+    const loaded = pageRealtimeTarget();
+    return loaded !== null && structuralEquals(loaded[0], requested)
+      ? loaded[1]
+      : { kind: "checking" };
+  });
   const realtimeTargetCandidate = createValueMemo((): PublicRealtimeTarget => {
+    const target = resolvedPageTarget();
+    if (target?.kind === "no_target") {
+      return target;
+    }
     const snapshot = session();
     if (snapshot === undefined) {
       return { kind: "checking" };
@@ -270,14 +286,8 @@ function PublicShellContent(props: { readonly locationGeneration: Cell<number> }
     if (!snapshot.ok) {
       return { kind: "session_error" };
     }
-    const requested = requestedPageTarget();
-    if (requested !== null) {
-      const loaded = pageRealtimeTarget();
-      if (loaded !== null && loaded[0].kind === requested.kind && loaded[0].id === requested.id) {
-        const target = loaded[1];
-        return target.kind === "auction" && !authenticated() ? { kind: "anonymous" } : target;
-      }
-      return { kind: "checking" };
+    if (target !== null) {
+      return target.kind === "auction" && !authenticated() ? { kind: "anonymous" } : target;
     }
     const loadedCurrent = currentAuction();
     if (loadedCurrent !== undefined && loadedCurrent[0] === selectedWorld()) {
@@ -310,7 +320,7 @@ function PublicShellContent(props: { readonly locationGeneration: Cell<number> }
   // 同一 world 的权威 current 快照重读期间保留既有目标；首屏、登出和 world 切换仍失败关闭。
   const realtimeTarget = createValueMemo((): PublicRealtimeTarget => {
     const candidate = realtimeTargetCandidate();
-    if (candidate.kind === "checking" && authenticated() && requestedPageTarget() === null) {
+    if (candidate.kind === "checking" && authenticated() && resolvedPageTarget() === null) {
       const remembered = stableRealtimeTarget();
       if (
         (remembered.kind === "auction" || remembered.kind === "inactive") &&
@@ -321,11 +331,14 @@ function PublicShellContent(props: { readonly locationGeneration: Cell<number> }
     }
     return candidate;
   });
-  createEffect(realtimeTarget, (remembered) => {
-    if (!structuralEquals(stableRealtimeTarget.peek(), remembered)) {
-      stableRealtimeTarget.set(remembered);
-    }
-  });
+  createEffect(
+    () => (resolvedPageTarget() === null ? realtimeTarget() : null),
+    (remembered) => {
+      if (remembered !== null && !structuralEquals(stableRealtimeTarget.peek(), remembered)) {
+        stableRealtimeTarget.set(remembered);
+      }
+    },
+  );
   const connectionState = createValueMemo(
     (): PublicConnectionState =>
       publicConnectionState(
@@ -406,6 +419,7 @@ function PublicShellContent(props: { readonly locationGeneration: Cell<number> }
       session={session}
       commandOwner={commandOwner}
       competition={competition}
+      proxySnapshots={proxySnapshots}
       contentLoading={contentLoading}
       readiness={readiness}
       currentAuction={currentAuction}

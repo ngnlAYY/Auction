@@ -35,6 +35,7 @@ import {
   proxyTransitionSummary,
 } from "../proxy";
 import { updatePublicQueryState, usePublicQueryState } from "../query";
+import { updatePublicQueryPairs } from "../query/location";
 import { usePageRouteGuard } from "../query/route-page";
 import { loginHrefForCurrentLocation } from "../session";
 import { SessionPreference } from "../session-preference";
@@ -259,11 +260,10 @@ function AuthenticatedAccountData(props: { readonly userId: string }): JSX.Eleme
               if (!routeStillOnPage()) {
                 return false;
               }
-              return updatePublicQueryState(
+              return updatePublicQueryPairs(
                 queryStateSignal,
-                (query) => {
-                  query.bidPage = nextPage;
-                },
+                ["bid_page"],
+                nextPage > 1 ? [["bid_page", String(nextPage)]] : [],
                 "replace",
               );
             }}
@@ -280,11 +280,10 @@ function AuthenticatedAccountData(props: { readonly userId: string }): JSX.Eleme
               if (!routeStillOnPage()) {
                 return false;
               }
-              return updatePublicQueryState(
+              return updatePublicQueryPairs(
                 queryStateSignal,
-                (query) => {
-                  query.proxyPage = nextPage;
-                },
+                ["proxy_page"],
+                nextPage > 1 ? [["proxy_page", String(nextPage)]] : [],
                 "replace",
               );
             }}

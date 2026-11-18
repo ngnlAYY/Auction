@@ -12,6 +12,15 @@ export const JSON_MAX_SAFE_INTEGER_F64 = 9_007_199_254_740_991.0;
 /** 键值对形式的 JSON 对象。 */
 export type JsonObject = Record<string, unknown>;
 
+/** 在原文仍可用时校验 DTO 的字段。路径中的 null 表示数组下标。 */
+export interface JsonFieldPolicy {
+  readonly uniqueRootKeys?: readonly string[];
+  readonly integerPaths?: readonly (readonly (string | null)[])[];
+}
+
+/** 与 serde_json 的 128 层递归预算一致，最深允许 127 层容器。 */
+const JSON_CONTAINER_LIMIT = 127;
+
 /** 判断一个 `unknown` 是否为普通、非数组的 JSON 对象。 */
 function jsonObject(value: unknown): JsonObject | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -86,15 +95,54 @@ function validStrictJsonValue(root: unknown): boolean {
   return true;
 }
 
-/** 以 `serde_json` 的拒绝边界解析 JSON：非有限数与孤立代理项都属于无效输入。 */
-export function parseJson(text: string): Result<unknown, "invalid_json"> {
-  let value: unknown;
+/** 对已通过语法解析的原文检查字段词法；每个值都要检查，即使对象后来覆盖了同名键。 */
+function validJsonFields(text: string, policy: JsonFieldPolicy): boolean {
+  const rootKeys = new Set<string>();
+  const path: (string | null)[] = [];
+  const tokens = text.matchAll(
+    /("(?:[^"\\]|\\.)*")([ \t\r\n]*:)?|(-?[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)|[{}[\]]/gu,
+  );
+  for (const [token, quoted, colon, number] of tokens) {
+    if (quoted !== undefined) {
+      const value: unknown = quoted.includes("\\") ? JSON.parse(quoted) : quoted.slice(1, -1);
+      if (typeof value !== "string" || hasLoneSurrogate(value)) return false;
+      if (colon !== undefined) {
+        if (path.length === 1 && policy.uniqueRootKeys?.includes(value)) {
+          if (rootKeys.has(value)) return false;
+          rootKeys.add(value);
+        }
+        path[path.length - 1] = value;
+      }
+    } else if (number !== undefined) {
+      if (!Number.isFinite(Number(number))) return false;
+      if (
+        /[.eE]/u.test(number) &&
+        policy.integerPaths?.some(
+          (field) =>
+            field.length === path.length && field.every((key, index) => key === path[index]),
+        )
+      )
+        return false;
+    } else if (token === "{" || token === "[") {
+      if (path.length === JSON_CONTAINER_LIMIT) return false;
+      path.push(null);
+    } else {
+      path.pop();
+    }
+  }
+  return true;
+}
+
+/** 以 serde_json 的拒绝边界解析 JSON；按调用方指定的契约保留字段词法校验。 */
+export function parseJson(text: string, policy?: JsonFieldPolicy): Result<unknown, "invalid_json"> {
   try {
-    value = JSON.parse(text);
+    const value: unknown = JSON.parse(text);
+    const valid =
+      policy === undefined ? validStrictJsonValue(value) : validJsonFields(text, policy);
+    return valid ? ok(value) : err("invalid_json");
   } catch {
     return err("invalid_json");
   }
-  return validStrictJsonValue(value) ? ok(value) : err("invalid_json");
 }
 
 /** 对象的键必须与 `keys` 完全一致：不接受缺失键，也不接受多余键。 */

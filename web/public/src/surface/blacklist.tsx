@@ -18,8 +18,14 @@ import { For, Match, Show, Switch, useContext } from "solid-js";
 import { fetchBlacklist } from "../api/blacklist";
 import { PublicRefreshGenerationContext } from "./board/refresh";
 import { useContentLoading } from "./loading";
-import { PublicPager, publicPageMatches, updatePublicPageSize } from "./pagination";
+import {
+  PublicPager,
+  publicPageMatches,
+  updatePublicPage,
+  updatePublicPageSize,
+} from "./pagination";
 import { updatePublicQueryState, usePublicQueryState } from "./query";
+import { usePageRouteGuard } from "./query/route-page";
 
 type BlacklistRequest = readonly [page: number, pageSize: number];
 
@@ -34,6 +40,7 @@ export function page(): JSX.Element {
   // 页码与地址栏双向同步。
   const queryState = usePublicQueryState();
   const queryStateSignal = queryState.state;
+  const routeStillOnPage = usePageRouteGuard("Blacklist");
   const pageNumber = createValueMemo(() => Math.max(queryStateSignal().page, 1));
   const pageSize = createValueMemo(() => queryStateSignal().pageSize);
   const requested = createValueMemo(() => [pageNumber(), pageSize()] as const);
@@ -108,15 +115,9 @@ export function page(): JSX.Element {
                 "push",
               );
             }}
-            onPageClamp={(nextPage) => {
-              updatePublicQueryState(
-                queryStateSignal,
-                (query) => {
-                  query.page = nextPage;
-                },
-                "replace",
-              );
-            }}
+            onPageClamp={(nextPage) =>
+              routeStillOnPage() && updatePublicPage(queryStateSignal, nextPage, "replace")
+            }
           />
         )}
       </Match>

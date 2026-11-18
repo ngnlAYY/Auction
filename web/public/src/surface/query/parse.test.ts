@@ -86,6 +86,10 @@ test("catalog_type_lists_are_normalized_and_encoded_as_one_comma_value：分类�
   for (const invalid of ["one,one", "one,", "one,,sta", "one,all", "unknown"]) {
     const query = parsePublicQuery("/", `?type=${encodeURIComponent(invalid)}`);
     expect(query.category).toBeNull();
-    expect(query.passthrough).toContainEqual(["type", invalid]);
+    expect(query.invalidCategory).toEqual([invalid]);
+    expect(new URLSearchParams(publicQueryString(query)).getAll("type")).toEqual([invalid]);
   }
+  const duplicate = parsePublicQuery("/", "?type=clo&type=sta");
+  expect(duplicate.category).toBeNull();
+  expect(duplicate.invalidCategory).toEqual(["clo", "sta"]);
 });

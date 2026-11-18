@@ -60,11 +60,9 @@ function formatShortestFloat(value: number): string {
   if (value === -Infinity) {
     return "-inf";
   }
-  if (Object.is(value, -0)) {
-    return "-0";
-  }
   const negative = value < 0;
   const magnitude = Math.abs(value);
+  // Public 详情与 Rust 解码后的零使用同一显示。
   if (magnitude === 0) {
     return "0";
   }
@@ -179,7 +177,7 @@ export function formatOneDecimal(value: number): string {
   if (value === -Infinity) {
     return "-inf";
   }
-  const negative = value < 0 || Object.is(value, -0);
+  const negative = value < 0;
   const magnitude = Math.abs(value);
   // 按 f64 的精确二进制值做十进制舍入；先乘 10 再取整会把 0.05 这类二进制略大于十进制
   // 半值的数误判成精确半值，`toFixed` 也无法覆盖全部量级。
