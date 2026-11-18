@@ -15,7 +15,7 @@ pub(in crate::surface) fn use_command_auction_provider() {
     let displayed = try_use_context::<PublicDisplayedAuction>();
     let current = try_use_context::<CurrentAuctionResource>();
     let location = use_memo(move || {
-        let requested = query.and_then(|query| query.read().auction_id.clone());
+        let requested = query.and_then(|query| query.read().auction_id().map(str::to_owned));
         if let Some(requested) = requested {
             return displayed?.0.read().as_ref().filter(|auction| auction.id == requested).map(
                 |auction| CommandAuction {

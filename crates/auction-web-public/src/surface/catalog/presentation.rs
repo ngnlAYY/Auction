@@ -9,7 +9,7 @@ use auction_web_shared::{t, use_second_tick};
 use dioxus::prelude::*;
 
 use crate::api::{CatalogRow, estimated_now};
-use crate::surface::{PublicBoardQuery, public_href};
+use crate::surface::{PublicBoardQuery, public_href_for_auction};
 
 pub(crate) fn catalog_count(
     counts: &BTreeMap<String, i64>,
@@ -123,30 +123,27 @@ pub(crate) fn historical_auction_status_label(status: &str) -> String {
 
 pub(crate) fn historical_lots_href(auction_id: &str, world_id: &str) -> String {
     let query = PublicBoardQuery {
-        auction_id: Some(auction_id.to_owned()),
         world: (world_id != "main").then(|| world_id.to_owned()),
         ..PublicBoardQuery::default()
     };
-    public_href("/", &query)
+    public_href_for_auction("/", query, Some(auction_id.to_owned()))
 }
 
 pub(crate) fn historical_bid_log_href(auction_id: &str, world_id: &str) -> String {
     let query = PublicBoardQuery {
-        auction_id: Some(auction_id.to_owned()),
         world: (world_id != "main").then(|| world_id.to_owned()),
         ..PublicBoardQuery::default()
     };
-    public_href("/bidlog", &query)
+    public_href_for_auction("/bidlog", query, Some(auction_id.to_owned()))
 }
 
 /// 已结算场次的履约进度入口：与出价记录入口同一查询口径，带场次与世界（主世界使用缺省 URL）。
 pub(crate) fn historical_fulfillment_href(auction_id: &str, world_id: &str) -> String {
     let query = PublicBoardQuery {
-        auction_id: Some(auction_id.to_owned()),
         world: (world_id != "main").then(|| world_id.to_owned()),
         ..PublicBoardQuery::default()
     };
-    public_href("/fulfillment", &query)
+    public_href_for_auction("/fulfillment", query, Some(auction_id.to_owned()))
 }
 
 /// 订阅渲染作用域的语言信号，允许在按条件出现的时间字段里使用。

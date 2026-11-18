@@ -9,7 +9,7 @@ use auction_web_shared::{storage, valid_uuid};
 use dioxus::prelude::*;
 
 use crate::api::{CatalogLevelFilter, prefetch_current_lots};
-use crate::surface::PublicBoardQuery;
+use crate::surface::{AuctionParameter, PublicBoardQuery};
 
 const CURRENT_AUCTION_KEY_PREFIX: &str = "hv.public.current-auction.";
 
@@ -30,7 +30,7 @@ pub(crate) fn remember_current_auction(world: &str, auction_id: &str) {
 /// 看板首页启动时调用一次。参数推导与看板目录读取完全一致（分类/分组 `all` 视为不筛选、页码
 /// 至少为 1），保证两者请求同一 URL；带 `auction` 深链的页面读取历史场次，不预取。
 pub(crate) fn prefetch_board_lots(world: &str, query: &PublicBoardQuery) {
-    if query.auction_id.is_some() {
+    if !matches!(query.auction_parameter(), AuctionParameter::Unspecified) {
         return;
     }
     let Some(auction_id) =

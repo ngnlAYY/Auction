@@ -10,7 +10,8 @@ use dioxus::prelude::*;
 use crate::api::{WorldStatus, Worlds, revalidate_worlds};
 use crate::surface::router::Route;
 use crate::surface::{
-    PublicBoardQuery, PublicLocationRevision, public_auction_home_query, update_public_query_state,
+    AuctionParameter, AuctionSelection, PublicBoardQuery, QueryCommit, commit_auction_selection,
+    public_auction_home_query, read_public_query, update_public_query_state,
 };
 
 /// 与世界目录的低频 HTTP 缓存档对齐。
@@ -31,8 +32,8 @@ pub(crate) fn WorldPicker(
     );
     let board_route = matches!(&route, Route::AuctionIndex {} | Route::AuctionPage {});
     let shell_query_state = use_context::<Signal<PublicBoardQuery>>();
-    let mut location_revision = use_context::<PublicLocationRevision>().0;
-    let historical_url = history_owns_world_filter || shell_query_state().auction_id.is_some();
+    let historical_url = history_owns_world_filter
+        || has_auction_target(shell_query_state.read().auction_parameter());
     let worlds = use_world_catalog(visibility_generation);
     let (mut options, worlds_loaded) = match &*worlds.read_unchecked() {
         Some(options) => (options.clone(), true),
@@ -60,18 +61,19 @@ pub(crate) fn WorldPicker(
             if !worlds_loaded || historical_url || selected_world() == active {
                 return;
             }
-            selected_world.set(active.clone());
-            if !can_canonicalize {
+            // 目录返回时地址可能已经换到无效深链；只有仍无显式场次才可纠偏。
+            if !can_canonicalize || has_auction_target(read_public_query().auction_parameter()) {
                 return;
             }
             // 仅当前世界失效时纠偏；历史筛选与指定场次深链不得被目录开关抹除。
-            update_public_query_state(
+            let world = active.clone();
+            if update_public_query_state(
                 shell_query_state,
-                move |query| {
-                    query.world = (active != "main").then_some(active);
-                },
+                move |query| query.world = (active != "main").then_some(active),
                 QueryWriteMode::Replace,
-            );
+            ) {
+                selected_world.set(world);
+            }
         },
     ));
     let options_empty = options.is_empty();
@@ -86,24 +88,30 @@ pub(crate) fn WorldPicker(
                 disabled: options_empty,
                 onchange: move |event| {
                     let world = event.value();
-                    selected_world.set(world.clone());
                     if history_owns_world_filter {
+                        selected_world.set(world);
                         return;
                     }
                     // 补偿池等页面也用 `auction` 参数，只有看板上的往期场次随世界切换离开。
-                    let historical_board =
-                        board_route && shell_query_state.peek().auction_id.is_some();
+                    let historical_board = board_route && matches!(
+                        read_public_query().auction_parameter(), AuctionParameter::Selected(_)
+                    );
                     // 用户主动切换要建立可返回的历史条目。
-                    update_public_query_state(
+                    if historical_board {
+                        if let QueryCommit::Applied(applied) = commit_auction_selection(
+                            shell_query_state,
+                            AuctionSelection::Explicit(None),
+                            None,
+                            |query| *query = world_switch_query(query, &world, historical_board),
+                        ) {
+                            selected_world.set(applied.world.unwrap_or_else(|| "main".to_owned()));
+                        }
+                    } else if update_public_query_state(
                         shell_query_state,
                         |query| *query = world_switch_query(query, &world, historical_board),
                         QueryWriteMode::Push,
-                    );
-                    if historical_board {
-                        // pushState 不经过 Router：推进位置版本，让看板的查询状态重读地址栏，
-                        // 正文与顶栏随之换成目标世界的当前场次。
-                        let next = location_revision.peek().saturating_add(1);
-                        location_revision.set(next);
+                    ) {
+                        selected_world.set(world);
                     }
                 },
                 for world in options {
@@ -117,6 +125,10 @@ pub(crate) fn WorldPicker(
             }
         }
     }
+}
+
+fn has_auction_target(auction: &AuctionParameter) -> bool {
+    *auction != AuctionParameter::Unspecified
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -278,8 +290,8 @@ mod tests {
     use dioxus::prelude::*;
 
     use super::{
-        PublicBoardQuery, WorldRead, restart_while_visible, revalidate_on_resume,
-        use_world_catalog, world_switch_query,
+        AuctionParameter, PublicBoardQuery, WorldRead, has_auction_target, restart_while_visible,
+        revalidate_on_resume, use_world_catalog, world_switch_query,
     };
     use crate::api::{WorldStatus, Worlds};
 
@@ -404,7 +416,6 @@ mod tests {
 
     fn historical_query() -> PublicBoardQuery {
         PublicBoardQuery {
-            auction_id: Some("67e55044-10b1-426f-9247-bb680e5fe0c8".to_owned()),
             category: Some("clo".to_owned()),
             equipment_group: Some("rare".to_owned()),
             max_level: Some("400".to_owned()),
@@ -412,6 +423,7 @@ mod tests {
             page_size: 50,
             ..PublicBoardQuery::default()
         }
+        .with_auction_values(["67e55044-10b1-426f-9247-bb680e5fe0c8".to_owned()])
     }
 
     #[test]
@@ -435,5 +447,13 @@ mod tests {
         assert_eq!(query, PublicBoardQuery { world: Some("isekai".to_owned()), ..current });
         let current = PublicBoardQuery { world: Some("isekai".to_owned()), ..historical_query() };
         assert_eq!(world_switch_query(&current, "main", false).world, None);
+    }
+
+    #[test]
+    fn world_correction_preserves_invalid_and_selected_board_links() {
+        let selected = historical_query().auction_id().unwrap().to_owned();
+        assert!(has_auction_target(&AuctionParameter::Selected(selected)));
+        assert!(has_auction_target(&AuctionParameter::Invalid(vec!["bad".to_owned()])));
+        assert!(!has_auction_target(&AuctionParameter::Unspecified));
     }
 }

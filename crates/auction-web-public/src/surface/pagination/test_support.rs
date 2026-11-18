@@ -95,7 +95,6 @@ impl PageBrowserFixture {
         let world = value("world").and_then(normalize_world_query);
         let sizes = self.sizes();
         PublicBoardQuery {
-            auction_id: value("auction").map(str::to_owned),
             world,
             status: value("status")
                 .filter(|status| matches!(*status, "live" | "final" | "settled"))
@@ -117,6 +116,7 @@ impl PageBrowserFixture {
             proxy_page: page("proxy_page").unwrap_or(1),
             ..PublicBoardQuery::default()
         }
+        .with_auction_values(query_values(&pairs, "auction").map(str::to_owned))
     }
 
     pub(super) fn write(

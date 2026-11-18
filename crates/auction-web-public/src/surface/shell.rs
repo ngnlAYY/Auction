@@ -193,9 +193,9 @@ pub(crate) fn PublicShell() -> Element {
     let auction_home_needs_query_reset = matches!(&current_route, Route::AuctionIndex {})
         && current_public_query != auction_home_query;
     let requested_page_target = match &current_route {
-        Route::AuctionIndex {} | Route::AuctionPage {} => {
-            current_public_query.auction_id.map(PublicRealtimePageKey::Auction)
-        }
+        Route::AuctionIndex {} | Route::AuctionPage {} => current_public_query
+            .auction_id()
+            .map(|id| PublicRealtimePageKey::Auction(id.to_owned())),
         _ => None,
     };
     let realtime_target_candidate =

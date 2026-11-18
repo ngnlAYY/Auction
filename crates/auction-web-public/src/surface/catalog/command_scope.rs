@@ -1,16 +1,20 @@
 //! 页面级竞价弹窗宿主；读取分支与目录阶段只更新能力，不拥有已提交命令。
 
+#[cfg(target_arch = "wasm32")]
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use auction_web_shared::{Dialog, use_confirm_command};
 use auction_web_shared::{format_credit_amount, t};
 use dioxus::prelude::*;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::{JsCast, closure::Closure};
 
 use super::actions::active_own_proxy;
 use super::detail::{CatalogDetailDialogContext, CatalogDetailInput};
 use super::toast::{CatalogToastContext, CatalogToastHost, use_catalog_toast_provider};
 use crate::api::CatalogRow;
-use crate::surface::{PublicCommandOwner, commands, watches};
+use crate::surface::{AuctionParameter, PublicCommandOwner, commands, read_public_query, watches};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum CatalogAction {
@@ -78,7 +82,7 @@ pub(crate) fn CatalogCommandScope(children: Element) -> Element {
 
 #[component]
 fn IdentityCommandScope(user_id: Option<String>, children: Element) -> Element {
-    let dialog = use_signal(|| None::<CommandDialogInput>);
+    let mut dialog = use_signal(|| None::<CommandDialogInput>);
     use_context_provider(|| CommandDialogContext(dialog));
     // 详情抽屉的展示信号与命令弹窗同属身份宿主：身份切换时两者一起清空。抽屉本身不产生
     // 任何服务端命令，并由目录内的 CatalogDetailHost 渲染（它需要标记作用域）。
@@ -94,16 +98,88 @@ fn IdentityCommandScope(user_id: Option<String>, children: Element) -> Element {
         .and_then(|value| uuid::Uuid::parse_str(value).ok())
         .unwrap_or_else(uuid::Uuid::nil);
     use_context_provider(|| commands::PublicCommandIdentity(user_id));
+    let router = dioxus::router::hooks::try_router();
+    let invalid = use_memo(move || {
+        if let Some(router) = router {
+            let _ = router.full_route_string();
+        }
+        auction_link_invalid()
+    });
+    let command_auction = use_context::<commands::CommandAuctionContext>().0;
+    // 旧会话投影只携带合法 ID。非法地址不能沿该投影回退到当前可出价场次。
+    let allowed_auction = use_memo(move || if invalid() { None } else { command_auction() });
+    use_context_provider(|| commands::CommandAuctionContext(allowed_auction));
+    use_effect(move || {
+        if invalid() && dialog.read().is_some() {
+            // 作废尚未提交的确认。已发出的命令由外壳保存，沿用原 command_id 和恢复入口。
+            dialog.set(None);
+        }
+    });
     let input = dialog.read().clone();
     rsx! {
         {children}
         {pending_watches}
-        if let Some(input) = input {
+        if !invalid() && let Some(input) = input {
             // 一个页面只有一个模态弹窗；关闭才卸载，后台 GET/分页/阶段切换均不替换它。
             // 它排在 children（含详情抽屉）之后：从抽屉里出价时弹窗是 DOM 顺序上的顶层模态层。
             CatalogCommandDialog { input, dialog }
         }
         CatalogToastHost { toast }
+    }
+}
+
+fn auction_link_invalid() -> bool {
+    matches!(read_public_query().auction_parameter(), AuctionParameter::Invalid(_))
+}
+
+fn use_auction_submit_guard() -> EventHandler<MountedEvent> {
+    #[cfg(target_arch = "wasm32")]
+    let guard = use_hook(|| Rc::new(RefCell::new(None::<AuctionSubmitGuard>)));
+    use_callback(move |_event: MountedEvent| {
+        #[cfg(target_arch = "wasm32")]
+        if let Some(element) = _event.data().downcast::<web_sys::Element>() {
+            guard.replace(AuctionSubmitGuard::install(element.clone()));
+        }
+    })
+}
+
+#[cfg(target_arch = "wasm32")]
+struct AuctionSubmitGuard {
+    element: web_sys::Element,
+    callback: Closure<dyn FnMut(web_sys::Event)>,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl AuctionSubmitGuard {
+    fn install(element: web_sys::Element) -> Option<Self> {
+        // 浏览器已经换址、DOM 尚未更新时，旧表单也不能开始准备新的确认。
+        let callback = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
+            if auction_link_invalid() {
+                event.prevent_default();
+                event.stop_propagation();
+            }
+        });
+        element
+            .add_event_listener_with_callback_and_bool(
+                "submit",
+                callback.as_ref().unchecked_ref(),
+                true,
+            )
+            .ok()?;
+        Some(Self { element, callback })
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl Drop for AuctionSubmitGuard {
+    fn drop(&mut self) {
+        self.element
+            .remove_event_listener_with_callback_and_bool(
+                "submit",
+                self.callback.as_ref().unchecked_ref(),
+                true,
+            )
+            .ok();
     }
 }
 
@@ -119,6 +195,7 @@ fn CatalogCommandDialog(
     let origin = use_signal(|| ());
     let active_auction = use_context::<commands::CommandAuctionContext>().0;
     let opened_auction = use_hook(move || active_auction.peek().clone());
+    let guard_submit = use_auction_submit_guard();
     let mut receipt = use_signal(|| None::<commands::CommandReceipt>);
     let mut bid_command = commands::BidConfirmCommand(use_confirm_command());
     let mut proxy_create_command = commands::ProxyConfirmCommand(use_confirm_command());
@@ -166,6 +243,10 @@ fn CatalogCommandDialog(
         });
     let target_ready = target.is_some();
     let submit = use_callback(move |payload| {
+        // 原生后退可能先于弹窗重绘，提交时须再读当前地址以阻断旧确认。
+        if auction_link_invalid() {
+            return;
+        }
         if let Some(store) = commands.and_then(commands::CompetitionCommands::current)
             && let Some(target) = target.as_ref()
             && store.submit(Rc::clone(target), payload, origin)
@@ -248,6 +329,7 @@ fn CatalogCommandDialog(
         // 顺势落在确认按钮上替用户完成二次确认。包裹层不参与布局，只吞掉重复的 Enter。
         div {
             class: "public-bid-dialog__keys",
+            onmounted: guard_submit,
             onkeydown: move |event| {
                 if event.key() == Key::Enter && event.is_auto_repeating() {
                     event.prevent_default();
@@ -383,8 +465,10 @@ mod tests {
     use std::rc::Rc;
 
     use auction_web_shared::i18n::{DEFAULT_PUBLIC_LOCALE, build_bundle};
-    use auction_web_shared::{PageVisibility, use_second_ticker};
+    use auction_web_shared::query::QueryLocation;
+    use auction_web_shared::{PageVisibility, QueryWriteMode, use_second_ticker};
     use dioxus::dioxus_core::{AttributeValue, ElementId, Mutation, Mutations};
+    use dioxus::history::MemoryHistory;
     use dioxus::prelude::*;
     use dioxus_i18n::prelude::try_use_init_i18n_from_bundle;
 
@@ -684,6 +768,10 @@ mod tests {
     }
 
     fn mounted() -> VirtualDom {
+        mount_with_address(None)
+    }
+
+    fn mount_with_address(history: Option<Rc<MemoryHistory>>) -> VirtualDom {
         enable_requests();
         deep_link_fixture::reset();
         ARRIVAL.set(None);
@@ -695,10 +783,26 @@ mod tests {
         LOT_HTTP_STATUS.set(None);
         LOT_HTTP_READS.set(Vec::new());
         let mut dom = VirtualDom::new(CommandFixture);
+        if let Some(history) = history {
+            dom.provide_root_context(history.clone() as Rc<dyn History>);
+            dom.provide_root_context(Rc::new(FixtureAddress(history)) as Rc<dyn QueryLocation>);
+        }
         dom.rebuild(&mut Mutations::default());
         settle(&mut dom);
         assert!(BID_SUBMIT.get().is_some(), "直接出价表单已挂载");
         dom
+    }
+
+    struct FixtureAddress(Rc<MemoryHistory>);
+
+    impl QueryLocation for FixtureAddress {
+        fn current(&self) -> String {
+            self.0.current_route()
+        }
+
+        fn write(&self, _location: &str, _mode: QueryWriteMode) -> bool {
+            false
+        }
     }
 
     fn submit_bid(dom: &mut VirtualDom) -> Mutations {
@@ -848,6 +952,37 @@ mod tests {
         assert!(contains_text(&shown, "Unknown command results: 0"));
         assert_eq!((CONTROLS.get().unwrap().refresh)(), 2);
         assert!(!contains_text(&settle(&mut dom), "Bid accepted."));
+    }
+
+    #[test]
+    fn invalid_auction_blocks_old_and_new_confirmations_while_preserving_recovery() {
+        let history = Rc::new(MemoryHistory::default());
+        let mut dom = mount_with_address(Some(history));
+        let original = submit_bid_for(&mut dom, LOT);
+        let mut dialog = DIALOG.get().unwrap();
+        dom.in_runtime(|| dialog.set(Some(input(OTHER_LOT, CatalogAction::Bid))));
+        settle(&mut dom);
+        dom.in_runtime(|| BID_SUBMIT.get().unwrap().call(()));
+        settle(&mut dom);
+
+        // 地址已变化，模拟浏览器尚未重绘时送到旧确认按钮的事件。
+        dom.in_runtime(|| CONTROLS.get().unwrap().navigate.call("/?auction=".to_owned()));
+        dom.in_runtime(|| BID_SUBMIT.get().unwrap().call(()));
+        settle(&mut dom);
+        assert_eq!(requests().len(), 1);
+        assert!(original.in_flight());
+        assert!(dialog.peek().is_none());
+
+        BID_SUBMIT.set(None);
+        dom.in_runtime(|| dialog.set(Some(input(OTHER_LOT, CatalogAction::Bid))));
+        settle(&mut dom);
+        assert!(BID_SUBMIT.get().is_none(), "无效地址不挂载新的确认表单");
+        assert!(dialog.peek().is_none());
+        assert!(contains_text(&show_unknown(&mut dom), "Unknown command results: 1"));
+        retry(&mut dom);
+        let replay = requests().pop().unwrap();
+        assert_eq!(replay.url, original.url);
+        assert_eq!(replay.body, original.body);
     }
 
     #[test]

@@ -21,10 +21,10 @@ use crate::api::{
 };
 use crate::surface::loading::use_content_loading;
 use crate::surface::{
-    CatalogGroupFilters, CatalogTable, CurrentAuctionResource, LotDetailLookup, LotViewDisposition,
-    LotViewRequest, PublicBoardQuery, PublicSessionResource, PublicSessionView, dispose_lot_view,
-    public_page_matches, update_public_page_size, update_public_query_state,
-    use_catalog_proxy_snapshots,
+    AuctionParameter, CatalogGroupFilters, CatalogTable, CurrentAuctionResource, LotDetailLookup,
+    LotViewDisposition, LotViewRequest, PublicBoardQuery, PublicSessionResource, PublicSessionView,
+    dispose_lot_view, public_page_matches, read_public_query, update_public_page_size,
+    update_public_query_state, use_catalog_proxy_snapshots,
 };
 
 /// 公开 lots 请求由场次、世界和查询参数决定。
@@ -110,6 +110,10 @@ pub(super) fn use_catalog_read(
         let generation = lots_refresh_generation();
         async move {
             let request = request?;
+            // 导航已经生效时，迟来的刷新不能沿用上一地址的可出价目录。
+            if matches!(read_public_query().auction_parameter(), AuctionParameter::Invalid(_)) {
+                return None;
+            }
             let category = (request.category != "all").then(|| request.category.clone());
             let equipment_group =
                 (request.equipment_group != "all").then(|| request.equipment_group.clone());

@@ -4,7 +4,9 @@ use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use crate::api::CurrentAuction;
-use crate::surface::{PreviewHistoryLoad, normalize_world_query, public_href, read_public_query};
+use crate::surface::{
+    PreviewHistoryLoad, normalize_world_query, public_href_for_auction, read_public_query,
+};
 
 pub(crate) fn preview_history_switch(
     state: Option<&PreviewHistoryLoad>,
@@ -44,18 +46,16 @@ pub(crate) fn preview_history_switch(
     }
 
     let mut current_query = read_public_query();
-    current_query.auction_id = None;
     current_query.world = normalize_world_query(&current.world);
-    let current_href = public_href("/auction", &current_query);
+    let current_href = public_href_for_auction("/auction", current_query, None);
     let previous = rounds
         .iter()
         .filter(|round| round.world_id == current.world && round.sequence < current.number)
         .max_by_key(|round| round.sequence);
     let previous_href = previous.map(|round| {
         let mut query = read_public_query();
-        query.auction_id = Some(round.id.clone());
         query.world = normalize_world_query(&round.world_id);
-        public_href("/auction", &query)
+        public_href_for_auction("/auction", query, Some(round.id.clone()))
     });
 
     rsx! {

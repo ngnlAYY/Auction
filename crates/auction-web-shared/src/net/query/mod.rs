@@ -3,10 +3,12 @@
 //! hook 声明的键，其余键（其他 hook 或路由持有）原样保留。状态形状与解析/序列化规则由
 //! 调用方注入，本模块不含业务键名。
 
+use std::borrow::Cow;
 #[cfg(target_arch = "wasm32")]
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use dioxus::dioxus_core::Runtime;
 use dioxus::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::{JsCast, JsValue, closure::Closure};
@@ -20,28 +22,63 @@ pub enum QueryWriteMode {
     Replace,
 }
 
-/// 读取当前地址栏的全部 query 键值对；非 WASM 构建恒为空。
+/// 由 surface 路由提供的同页地址读写入口。写入返回 `true` 时，路由也已收到新地址。
+pub trait QueryLocation {
+    /// 当前根相对地址，包含查询和片段。
+    fn current(&self) -> String;
+
+    /// 按给定模式提交同页地址，保留视口位置。
+    fn write(&self, location: &str, mode: QueryWriteMode) -> bool;
+}
+
+/// 取得当前组件所属路由的地址读写入口，供该 surface 的查询状态复用。
+pub fn query_location() -> Option<Rc<dyn QueryLocation>> {
+    Runtime::try_current()?.try_current_scope_id()?;
+    try_consume_context()
+}
+
+/// 以首个分隔符拆出路径、查询和片段，查询和片段各自保留其分隔符。
+pub fn location_parts(location: &str) -> (&str, &str, &str) {
+    let (path_query, fragment) = location.split_at(location.find('#').unwrap_or(location.len()));
+    let (path, search) = path_query.split_at(path_query.find('?').unwrap_or(path_query.len()));
+    (path, search, fragment)
+}
+
+/// 从完整 search 中只剥掉第一个问号，其余问号属于查询键或值。
+pub fn parse_query_pairs(search: &str) -> impl Iterator<Item = (Cow<'_, str>, Cow<'_, str>)> {
+    let raw = search.strip_prefix('?').unwrap_or_default();
+    url::form_urlencoded::parse(raw.as_bytes())
+}
+
+/// 读取当前地址栏的全部 query 键值对；没有路由上下文的非 WASM 构建返回空列表。
 pub fn read_query_pairs() -> Vec<(String, String)> {
+    if let Some(location) = query_location() {
+        return owned_query_pairs(location_parts(&location.current()).1);
+    }
     #[cfg(target_arch = "wasm32")]
     {
         let Some(window) = web_sys::window() else {
             return Vec::new();
         };
         let search = window.location().search().unwrap_or_default();
-        let raw = search.strip_prefix('?').unwrap_or_default();
-        url::form_urlencoded::parse(raw.as_bytes())
-            .map(|(key, value)| (key.into_owned(), value.into_owned()))
-            .collect()
+        owned_query_pairs(&search)
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     Vec::new()
 }
 
+fn owned_query_pairs(search: &str) -> Vec<(String, String)> {
+    parse_query_pairs(search).map(|(key, value)| (key.into_owned(), value.into_owned())).collect()
+}
+
 /// 把 `pairs` 合并写回当前地址的 query 段。
 /// `keys` 声明本次写回管理的键：这些键的旧值整体替换为 `pairs`，其余键原样保留。
-/// 返回浏览器 History API 是否写入成功。非 WASM 构建返回 `false`。
+/// 返回地址栏写入是否成功。没有路由上下文的非 WASM 构建返回 `false`。
 pub fn write_query_pairs(keys: &[&str], pairs: &[(String, String)], mode: QueryWriteMode) -> bool {
+    if let Some(location) = query_location() {
+        return location.write(&patch_query(&location.current(), keys, pairs), mode);
+    }
     #[cfg(target_arch = "wasm32")]
     {
         let Some(window) = web_sys::window() else {
@@ -70,18 +107,50 @@ pub fn write_query_pairs(keys: &[&str], pairs: &[(String, String)], mode: QueryW
         };
         // 保留既有 history state（Router 可能在其中记录滚动位置等信息）。
         let state = history.state().unwrap_or(JsValue::NULL);
-        match mode {
-            QueryWriteMode::Push => history.push_state_with_url(&state, "", Some(&url)).is_ok(),
-            QueryWriteMode::Replace => {
-                history.replace_state_with_url(&state, "", Some(&url)).is_ok()
-            }
-        }
+        write_history_entry(&history, &state, Some(&url), mode)
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = (keys, pairs, mode);
         false
+    }
+}
+
+fn patch_query(location: &str, keys: &[&str], pairs: &[(String, String)]) -> String {
+    let (path, search, hash) = location_parts(location);
+    let mut fields: Vec<_> = search
+        .strip_prefix('?')
+        .unwrap_or_default()
+        .split('&')
+        .filter(|field| {
+            url::form_urlencoded::parse(field.as_bytes())
+                .next()
+                .is_some_and(|(key, _)| !keys.contains(&key.as_ref()))
+        })
+        .collect();
+    let encoded = url::form_urlencoded::Serializer::new(String::new()).extend_pairs(pairs).finish();
+    if !encoded.is_empty() {
+        fields.push(&encoded);
+    }
+    if fields.is_empty() {
+        format!("{path}{hash}")
+    } else {
+        format!("{path}?{}{hash}", fields.join("&"))
+    }
+}
+
+/// 向浏览器提交历史项。调用方在成功后才发布地址和查询状态。
+#[cfg(target_arch = "wasm32")]
+pub fn write_history_entry(
+    history: &web_sys::History,
+    state: &JsValue,
+    url: Option<&str>,
+    mode: QueryWriteMode,
+) -> bool {
+    match mode {
+        QueryWriteMode::Push => history.push_state_with_url(state, "", url).is_ok(),
+        QueryWriteMode::Replace => history.replace_state_with_url(state, "", url).is_ok(),
     }
 }
 
@@ -212,6 +281,30 @@ impl PopstateGuard {
         let _ = self.window.remove_event_listener_with_callback(
             "popstate",
             self.callback.as_ref().unchecked_ref(),
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{location_parts, owned_query_pairs, patch_query};
+
+    #[test]
+    fn shared_query_patch_preserves_literal_question_marks_and_fragment() {
+        let size = [("page_size".to_owned(), "50".to_owned())];
+        let next = patch_query("/??page=2&ref=x#title", &["page", "page_size"], &size);
+        assert_eq!(next, "/??page=2&ref=x&page_size=50#title");
+        assert_eq!(
+            owned_query_pairs(location_parts(&next).1),
+            [
+                ("?page".to_owned(), "2".to_owned()),
+                ("ref".to_owned(), "x".to_owned()),
+                size[0].clone()
+            ]
+        );
+        assert_eq!(
+            patch_query("/?page=2#title", &["page", "page_size"], &size),
+            "/?page_size=50#title"
         );
     }
 }

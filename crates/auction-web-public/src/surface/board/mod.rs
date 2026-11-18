@@ -13,16 +13,17 @@ mod refresh;
 mod tests;
 mod world;
 
-use auction_web_shared::{AsyncState, AsyncStateKind, QueryWriteMode, t, use_app_boot_ready};
+use auction_web_shared::{AsyncState, AsyncStateKind, t, use_app_boot_ready};
 use dioxus::prelude::*;
 
 use self::data::{AuctionData, use_catalog_read};
 use super::loading::use_content_loading;
 use super::watches::LotWatchScope;
 use super::{
-    CatalogCommandScope, CatalogDetailHost, CurrentAuctionResource, LotDetailLookupHost,
-    LotViewRequest, PublicReadinessResource, PublicSessionResource, normalize_world_query,
-    redirect_public_alias, update_public_query_state, use_lot_detail_lookup,
+    AuctionParameter, AuctionSelection, CatalogCommandScope, CatalogDetailHost,
+    CurrentAuctionResource, LotDetailLookupHost, LotViewRequest, PublicReadinessResource,
+    PublicSessionResource, commit_auction_selection, normalize_world_query,
+    public_auction_home_href, read_public_query, redirect_public_alias_if, use_lot_detail_lookup,
     use_public_query_state,
 };
 use crate::api::fetch_historical_auction;
@@ -56,7 +57,32 @@ pub(crate) fn AuctionIndex() -> Element {
 
 #[component]
 pub(crate) fn AuctionPage() -> Element {
-    redirect_public_alias("/")
+    let query_state = use_public_query_state().state;
+    if let AuctionParameter::Invalid(_) = query_state.read().auction_parameter() {
+        return rsx! { InvalidAuctionLink { world: query_state.read().world.clone() } };
+    }
+    rsx! { AuctionAlias {} }
+}
+
+#[component]
+fn AuctionAlias() -> Element {
+    redirect_public_alias_if("/", || {
+        !matches!(read_public_query().auction_parameter(), AuctionParameter::Invalid(_))
+    })
+}
+
+#[component]
+fn InvalidAuctionLink(world: Option<String>) -> Element {
+    use_app_boot_ready(true);
+    let href = public_auction_home_href(world.as_deref().unwrap_or("main"));
+    rsx! {
+        section { class: "ui-async-state ui-async-state--error", role: "alert",
+            h2 { class: "ui-async-state__title", {t!("auction-invalid-link")} }
+            p { class: "ui-async-state__detail",
+                Link { to: href, {t!("auction-view-current")} }
+            }
+        }
+    }
 }
 
 /// 拍卖看板；首屏从同源 Public API 读取当前拍卖，不渲染示例数据。
@@ -69,7 +95,9 @@ pub(crate) fn AuctionBoard() -> Element {
     let session = use_context::<PublicSessionResource>();
     let current_auction = use_context::<CurrentAuctionResource>();
     // 同路径的历史/当前切换也必须订阅查询，不能仅在 popstate 或首页按钮时重读。
-    let requested_auction = use_memo(move || query_state.read().auction_id.clone());
+    let requested_auction =
+        use_memo(move || query_state.read().auction_parameter().selected_id().map(str::to_owned));
+    let invalid = matches!(query_state.read().auction_parameter(), AuctionParameter::Invalid(_));
     let historical = requested_auction().is_some();
     let historical_current = use_resource(move || {
         let _ = refresh_generation();
@@ -93,11 +121,16 @@ pub(crate) fn AuctionBoard() -> Element {
         let target = match current {
             Some(Ok(Some(auction))) if auction.id == requested => {
                 let world = normalize_world_query(&auction.world);
-                if query_state.read().world != world {
-                    update_public_query_state(
+                let latest = read_public_query();
+                // 异步场次响应只允许纠偏仍指向该场次的地址，非法目标必须留给用户处理。
+                if latest.auction_parameter().selected_id() == Some(requested.as_str())
+                    && latest.world != world
+                {
+                    commit_auction_selection(
                         query_state,
+                        AuctionSelection::Automatic(Some(requested.clone())),
+                        None,
                         |query| query.world = world,
-                        QueryWriteMode::Replace,
                     );
                 }
                 PublicRealtimeTarget::from_auction(auction)
@@ -140,7 +173,9 @@ pub(crate) fn AuctionBoard() -> Element {
     });
     let historical_snapshot = historical_current.read();
     let current_snapshot = current_auction.read();
-    let current = if historical {
+    let current = if invalid {
+        None
+    } else if historical {
         historical_snapshot
             .as_ref()
             .filter(|(requested, _)| requested == &requested_auction())
@@ -165,7 +200,7 @@ pub(crate) fn AuctionBoard() -> Element {
     let terminal_without_auction = matches!(current, Some(Err(_)) | Some(Ok(None)));
     // 错误与空拍卖本身就是可操作的最终首屏；有拍卖时由 AuctionData 等待主要 lots。
     use_app_boot_ready(boot_prerequisites_ready && terminal_without_auction);
-    use_content_loading(current.is_none());
+    use_content_loading(!invalid && current.is_none());
 
     let content = match current {
         // 加载提示由 ticker 承担；正文保持空位，避免加载块被数据替换时挤压容器。
@@ -206,6 +241,12 @@ pub(crate) fn AuctionBoard() -> Element {
     };
     rsx! {
         // 场次读取临时失败或换筛选时，命令宿主仍可保留已发送命令的原样重试。
-        CatalogCommandScope { {content} }
+        CatalogCommandScope {
+            if invalid {
+                InvalidAuctionLink { world: query_state.read().world.clone() }
+            } else {
+                {content}
+            }
+        }
     }
 }

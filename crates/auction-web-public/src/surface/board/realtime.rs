@@ -11,7 +11,9 @@ use crate::api::{
     CurrentAuction, PublicSessionCheckTrigger, RealtimeCache, SessionRefreshReason, estimated_now,
     subscribe_auction_realtime,
 };
-use crate::surface::LiveConnectionState;
+use crate::surface::{
+    AuctionParameter, LiveConnectionState, current_public_pathname, read_public_query,
+};
 
 /// Public 页头的 readiness 有限状态；只决定外层连接徽章，不改写核心实时四态。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,12 +89,20 @@ pub(crate) fn ticker_auction<'a>(
     displayed: Option<&'a CurrentAuction>,
     current: Option<&'a CurrentAuction>,
 ) -> Option<&'a CurrentAuction> {
+    if invalid_board_auction() {
+        return None;
+    }
     match requested {
         Some(PublicRealtimePageKey::Auction(requested)) => {
             displayed.filter(|auction| &auction.id == requested)
         }
         _ => current,
     }
+}
+
+fn invalid_board_auction() -> bool {
+    matches!(current_public_pathname().as_str(), "/" | "/auction" | "/auction/")
+        && matches!(read_public_query().auction_parameter(), AuctionParameter::Invalid(_))
 }
 
 /// 顶栏倒计时数向哪个时刻；决定标签与到点后的提示文案。
@@ -175,6 +185,11 @@ pub(crate) fn PublicRealtimeOwner(
     let page_visibility = use_context::<PageVisibility>();
     let bid_refresh = use_context::<PublicBidRefresh>();
     let session_check = use_context::<PublicSessionCheckTrigger>();
+    if let Some(router) = dioxus::router::try_router() {
+        let _ = router.full_route_string();
+    }
+    // 外壳的兼容 ID 不表达非法态，实时 owner 也须守住看板的场次边界。
+    let target = if invalid_board_auction() { PublicRealtimeTarget::Checking } else { target };
     // 身份必须进入资源依赖；单独修改静态组件的 key 不会使相等的 target 重启订阅。
     let _stream = use_resource(use_reactive((&target, &user_id), move |(target, _)| {
         let page_visibility = page_visibility.clone();

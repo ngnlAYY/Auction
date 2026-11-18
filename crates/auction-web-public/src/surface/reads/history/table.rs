@@ -9,7 +9,9 @@ use super::presentation::history_groups;
 use super::presentation::history_median_amount;
 use crate::api::{PriceHistoryEntry, PriceHistoryPage, PriceHistoryStats, lot_code_for};
 use crate::surface::LotDetailLookupButton;
-use crate::surface::{PublicPager, catalog_category_key, catalog_category_label, world_label};
+use crate::surface::{
+    AuctionParameter, PublicPager, catalog_category_key, catalog_category_label, world_label,
+};
 
 #[component]
 pub(crate) fn PriceHistoryTable(
@@ -233,7 +235,10 @@ pub(crate) fn PriceHistoryRow(
 
 pub(crate) fn history_auction_href(auction_id: &str, world_id: &str) -> String {
     let mut query = url::form_urlencoded::Serializer::new(String::new());
-    query.append_pair("auction", auction_id);
+    let auction = AuctionParameter::from_values(vec![auction_id.to_owned()]);
+    for value in auction.query_values() {
+        query.append_pair("auction", value);
+    }
     if world_id != "main" {
         query.append_pair("world", world_id);
     }

@@ -10,8 +10,8 @@ use uuid::Uuid;
 
 use super::query::commit_read_query_with;
 use crate::surface::{
-    PublicBoardQuery, page_pathname, query_values, read_page_pairs, read_page_query,
-    use_public_query_pairs, write_page_pairs,
+    AuctionParameter, PublicBoardQuery, page_pathname, query_values, read_page_pairs,
+    read_page_query, use_public_query_pairs, write_page_pairs,
 };
 
 /// 连续输入停顿后才应用筛选，合并读取请求。
@@ -34,7 +34,7 @@ pub(super) fn valid_lot_filter(value: &str) -> bool {
 #[derive(Clone, PartialEq)]
 struct LotFilterLocation {
     world: &'static str,
-    auction_id: Option<String>,
+    auction: AuctionParameter,
     lots: Vec<String>,
 }
 
@@ -42,7 +42,7 @@ impl LotFilterLocation {
     fn new(query: &PublicBoardQuery, lots: Vec<String>) -> Self {
         Self {
             world: if query.world.as_deref() == Some("isekai") { "isekai" } else { "main" },
-            auction_id: query.auction_id.clone(),
+            auction: query.auction_parameter().clone(),
             lots,
         }
     }
@@ -179,7 +179,7 @@ impl LotFilterDraft {
             let Some((current, lots)) = read_query(self.pathname) else {
                 return;
             };
-            // 导航可能先于草稿同步。旧计时器不能覆盖另一个世界、场次或筛选原文。
+            // 导航可能先于草稿同步。旧计时器不能覆盖另一世界、场次状态或筛选原文。
             let matches_applied = origin == *self.applied.peek();
             if matches_applied
                 && origin == LotFilterLocation::new(&current, lots.clone())
@@ -262,9 +262,9 @@ fn use_lot_filter_state(
         if *prior == current {
             return;
         }
-        let moved = prior.world != current.world || prior.auction_id != current.auction_id;
+        let moved = prior.world != current.world || prior.auction != current.auction;
         drop(prior);
-        // 场次变化会作废旧草稿。显式非法或重复的链接也必须站在原地址上提示。
+        // 清除非法场次也会作废旧草稿，重复拍品条件保留原文供修正。
         let should_restore = moved
             || current.requested_lot().is_err()
             || draft.value.peek().trim() != current.value();
@@ -310,6 +310,7 @@ mod tests {
     use std::task::{Context, Poll, Waker};
 
     use auction_web_shared::QueryWriteMode;
+    use auction_web_shared::query::QueryLocation;
     use dioxus::dioxus_core::{AttributeValue, Mutation, NoOpMutations};
     use dioxus::prelude::*;
 
@@ -317,8 +318,9 @@ mod tests {
         LOT_FILTER_WRITE_DEBOUNCE_MILLIS, LotFilterDraft, LotFilterError, LotFilterLocation,
         use_lot_filter_state, valid_lot_filter,
     };
-    use crate::surface::PublicBoardQuery;
     use crate::surface::reads::query::ReadSelection;
+    use crate::surface::reads::query::tests::{OLDER_ROUND_ID, ROUND_ID};
+    use crate::surface::{PublicBoardQuery, read_public_query};
 
     #[derive(Default)]
     struct LotDraftControl {
@@ -328,10 +330,9 @@ mod tests {
 
     #[component]
     fn LotDraftHarness() -> Element {
-        let query = use_signal(|| PublicBoardQuery {
-            auction_id: Some("first-round".to_owned()),
-            page: 4,
-            ..PublicBoardQuery::default()
+        let query = use_signal(|| {
+            PublicBoardQuery { page: 4, ..Default::default() }
+                .with_auction_values([ROUND_ID.to_owned()])
         });
         let draft = use_lot_filter_state(query, "/bidlog", LotFilterLocation::from_query);
         let control = consume_context::<Rc<LotDraftControl>>();
@@ -340,7 +341,7 @@ mod tests {
         let applied = query.read();
         rsx! {
             select { name: "world", value: applied.world.as_deref().unwrap_or("main").to_owned() }
-            select { name: "auction", value: applied.auction_id.clone().unwrap_or_default() }
+            select { name: "auction", value: applied.auction_id().unwrap_or_default() }
         }
     }
 
@@ -365,9 +366,9 @@ mod tests {
         let (mut dom, mut query, mut draft) = mounted_filter();
 
         for (world, auction, applied_lot) in [
-            (None, "second-round", None),
-            (Some("isekai"), "second-round", None),
-            (Some("isekai"), "first-round", Some("One3")),
+            (None, OLDER_ROUND_ID, None),
+            (Some("isekai"), OLDER_ROUND_ID, None),
+            (Some("isekai"), ROUND_ID, Some("One3")),
         ] {
             let previous = dom.in_runtime(|| draft.reset("One12".to_owned()));
             dom.in_runtime(|| query.write().page = 2);
@@ -376,10 +377,12 @@ mod tests {
             assert_eq!(*draft.generation.peek(), previous);
 
             dom.in_runtime(|| {
-                let mut query = query.write();
-                query.world = world.map(str::to_owned);
-                query.auction_id = Some(auction.to_owned());
-                query.bid_log_lot = applied_lot.map(str::to_owned);
+                let next = PublicBoardQuery {
+                    world: world.map(str::to_owned),
+                    bid_log_lot: applied_lot.map(str::to_owned),
+                    ..query.peek().clone()
+                };
+                query.set(next.with_auction_values([auction.to_owned()]));
             });
             settle_query_change(&mut dom);
             assert_eq!(draft.value.peek().as_str(), applied_lot.unwrap_or_default());
@@ -492,7 +495,7 @@ mod tests {
         assert_eq!(after_refusal, initial);
         assert_eq!(draft_after_refusal, "One7");
         assert_eq!(generation_after_refusal, generation);
-        for expected in ["main", "first-round"] {
+        for expected in ["main", ROUND_ID] {
             assert!(redraw.edits.iter().any(|edit| matches!(
                 edit,
                 Mutation::SetAttribute { name: "value", value: AttributeValue::Text(value), .. }
@@ -500,7 +503,7 @@ mod tests {
             )));
         }
         assert_eq!(query.peek().world, initial.world);
-        assert_eq!(query.peek().auction_id, initial.auction_id);
+        assert_eq!(query.peek().auction_id(), initial.auction_id());
         assert_eq!(query.peek().bid_log_lot.as_deref(), Some("One12"));
         assert_eq!(&*query.peek(), &*history.query.borrow());
 
@@ -514,7 +517,7 @@ mod tests {
         });
         assert_eq!(history.write_attempts.get(), 3);
         assert!(query.peek().bid_log_lot.is_none());
-        assert_eq!(query.peek().auction_id, initial.auction_id);
+        assert_eq!(query.peek().auction_id(), initial.auction_id());
         assert_eq!(query.peek().world, initial.world);
         assert!(draft.value.peek().is_empty());
         assert_eq!(&*query.peek(), &*history.query.borrow());
@@ -522,16 +525,16 @@ mod tests {
         assert!(select_target(&dom, query, selection, &history));
         assert_eq!(history.write_attempts.get(), 4);
         assert_eq!(query.peek().world.as_deref(), selected_world);
-        assert_eq!(query.peek().auction_id.as_deref(), selected_auction);
+        assert_eq!(query.peek().auction_id(), selected_auction);
         assert_eq!(&*query.peek(), &*history.query.borrow());
     }
 
     #[test]
     fn rejected_auction_selection_leaves_the_original_lot_filter_usable() {
         check_rejected_selection(
-            ReadSelection::Auction("second-round".to_owned()),
+            ReadSelection::Auction(OLDER_ROUND_ID.to_owned()),
             None,
-            Some("second-round"),
+            Some(OLDER_ROUND_ID),
         );
     }
 
@@ -647,8 +650,7 @@ mod tests {
         assert_eq!(dom.in_runtime(|| edit.as_mut().poll(&mut context)), Poll::Pending);
         assert_eq!(draft.value.peek().as_str(), "One12");
         let previous = *draft.generation.peek();
-        let restored =
-            PublicBoardQuery { auction_id: Some("earlier-round".to_owned()), ..initial.clone() };
+        let restored = initial.clone().with_auction_values([OLDER_ROUND_ID.to_owned()]);
         // 浏览器已返回另一场，组件的查询和草稿代次尚待同步。
         history.query.replace(restored.clone());
         clock.set(LOT_FILTER_WRITE_DEBOUNCE_MILLIS);
@@ -661,14 +663,54 @@ mod tests {
     }
 
     #[test]
+    fn recovering_from_an_invalid_auction_discards_the_lot_timer_before_directory_confirmation() {
+        struct InvalidLink;
+
+        impl QueryLocation for InvalidLink {
+            fn current(&self) -> String {
+                "/bidlog?auction=bad".to_owned()
+            }
+
+            fn write(&self, _location: &str, _mode: QueryWriteMode) -> bool {
+                false
+            }
+        }
+
+        let (mut dom, mut query, draft) = mounted_filter();
+        let initial = dom.in_scope(ScopeId::APP, || {
+            provide_context(Rc::new(InvalidLink) as Rc<dyn QueryLocation>);
+            let initial = read_public_query();
+            query.set(initial.clone());
+            initial
+        });
+        settle_query_change(&mut dom);
+        let history = History::new(initial, true);
+        let expired = Rc::new(Cell::new(false));
+        let timer = expired.clone();
+        let mut edit = pin!(dom.in_runtime(|| {
+            input(draft, "One12", &history, move || {
+                poll_fn(move |_| if timer.get() { Poll::Ready(()) } else { Poll::Pending })
+            })
+        }));
+        let mut context = Context::from_waker(Waker::noop());
+        assert_eq!(dom.in_runtime(|| edit.as_mut().poll(&mut context)), Poll::Pending);
+
+        assert!(select_target(&dom, query, ReadSelection::Clear, &history));
+        // 场次目录尚未确认，地址已经清除了非法场次。先让旧计时器到期，再同步草稿。
+        expired.set(true);
+        assert_eq!(dom.in_runtime(|| edit.as_mut().poll(&mut context)), Poll::Ready(()));
+        assert_eq!(history.write_attempts.get(), 1);
+        assert_eq!(&*history.query.borrow(), &PublicBoardQuery::default());
+        settle_query_change(&mut dom);
+        assert!(draft.value.peek().is_empty());
+    }
+
+    #[test]
     fn delayed_lot_write_checks_the_applied_query_even_before_the_draft_syncs() {
         let matches_query = |origin: &LotFilterLocation, query: &PublicBoardQuery| {
             *origin == LotFilterLocation::from_query(query)
         };
-        let initial = PublicBoardQuery {
-            auction_id: Some("first-round".to_owned()),
-            ..PublicBoardQuery::default()
-        };
+        let initial = PublicBoardQuery::default().with_auction_values([ROUND_ID.to_owned()]);
         let origin = LotFilterLocation::from_query(&initial);
         assert!(matches_query(
             &origin,
@@ -680,7 +722,7 @@ mod tests {
         ));
         assert!(!matches_query(
             &origin,
-            &PublicBoardQuery { auction_id: Some("second-round".to_owned()), ..initial.clone() }
+            &initial.clone().with_auction_values([OLDER_ROUND_ID.to_owned()])
         ));
         assert!(!matches_query(
             &origin,

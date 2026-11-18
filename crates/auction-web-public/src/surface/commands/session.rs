@@ -1151,7 +1151,7 @@ mod tests {
 
         #[component]
         fn FormPage() -> Element {
-            login(None)
+            login()
         }
 
         #[component]

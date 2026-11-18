@@ -2,21 +2,21 @@
 //! 只在浏览器与测试构建中编译，宿主构建的查询状态恒为默认值。
 
 use auction_contracts::EQUIPMENT_CATEGORY_CODES;
-use url::form_urlencoded;
-use uuid::Uuid;
+use auction_web_shared::query::parse_query_pairs;
 
+use super::auction::AuctionParameter;
 use super::{PublicBoardQuery, normalize_world_query};
 use crate::surface::{DEFAULT_PAGE_SIZE, parse_public_page_size};
 
 pub(super) fn parse_public_query(pathname: &str, search: &str) -> PublicBoardQuery {
-    let raw = search.strip_prefix('?').unwrap_or_default();
     let mut query = PublicBoardQuery::default();
+    let mut auctions = Vec::new();
     let mut canonical_page = None;
     let mut legacy_bid_log_page = None;
-    for (key, value) in form_urlencoded::parse(raw.as_bytes()) {
+    for (key, value) in parse_query_pairs(search) {
         match key.as_ref() {
             "world" => query.world = normalize_world_query(&value),
-            "auction" => query.auction_id = Uuid::parse_str(&value).ok().map(|id| id.to_string()),
+            "auction" => auctions.push(value.into_owned()),
             "type" if is_catalog_category(&value) => query.category = Some(value.into_owned()),
             "equipment_group" => {
                 query.equipment_group =
@@ -95,6 +95,7 @@ pub(super) fn parse_public_query(pathname: &str, search: &str) -> PublicBoardQue
             _ => query.passthrough.push((key.into_owned(), value.into_owned())),
         }
     }
+    query.set_auction_parameter(AuctionParameter::from_values(auctions));
     query.page = canonical_page
         .or_else(|| (pathname == "/bidlog").then_some(legacy_bid_log_page).flatten())
         .unwrap_or(1);

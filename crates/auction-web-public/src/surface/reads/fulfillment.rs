@@ -11,7 +11,7 @@ use dioxus::prelude::*;
 
 use super::directory::{RoundOptionsError, RoundPage, use_round_directory};
 use super::lot_filter::use_lot_filter_draft;
-use super::query::{ReadSelection, use_round_body};
+use super::query::{InvalidReadAuction, ReadSelection, use_round_body};
 use crate::api::{
     FulfillmentLot, FulfillmentPage, FulfillmentRead, MAX_FULFILLMENT_PAGE_SIZE,
     fetch_fulfillment_page, fetch_worlds, lot_code_for,
@@ -47,10 +47,7 @@ pub(crate) fn fulfillment() -> Element {
         use_memo(move || query_state_signal.read().page_size.min(MAX_FULFILLMENT_PAGE_SIZE));
     let bounds = use_public_page_bounds(query_state_signal, pathname, |query| {
         // 缺省场次的地址纠偏会同时回到第一页。
-        query
-            .auction_id
-            .as_ref()
-            .map(|_| (PageKey::Page, query.page_size.min(MAX_FULFILLMENT_PAGE_SIZE)))
+        query.auction_id().map(|_| (PageKey::Page, query.page_size.min(MAX_FULFILLMENT_PAGE_SIZE)))
     });
     let lot_draft = use_lot_filter_draft(query_state_signal, pathname);
 
@@ -99,6 +96,11 @@ pub(crate) fn fulfillment() -> Element {
         .map(|(_, result)| result);
     let mut loading = false;
     let body = match current_result {
+        _ if directory.invalid_auction() => rsx! {
+            InvalidReadAuction {
+                on_recover: move |_| { ReadSelection::Clear.select(query_state_signal, pathname); },
+            }
+        },
         _ if bounds.failed(PageKey::Page) => rsx! { PublicPageClampError { bounds } },
         _ if directory.failed() || matches!(current_result, Some(Err(_error))) => rsx! {
             div { class: "public-auction-empty", role: "alert",
@@ -462,23 +464,142 @@ fn status_tone(status: &str) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
     use std::collections::BTreeSet;
     use std::rc::Rc;
 
+    use auction_contracts::PublicFulfillmentAuctionResponse;
+    use auction_web_shared::QueryWriteMode;
     use auction_web_shared::i18n::{DEFAULT_PUBLIC_LOCALE, LocaleSession, build_bundle};
     use dioxus::dioxus_core::Mutation;
     use dioxus::prelude::*;
     use dioxus_i18n::prelude::try_use_init_i18n_from_bundle;
 
-    use super::{fulfillment_stale_notice, status_key, status_tone};
-    use crate::api::FULFILLMENT_STATUSES;
-    use crate::surface::{PublicContentLoading, use_content_loading};
+    use super::super::query::tests::{
+        MountedReadPage, OLDER_ROUND_ID, ROUND_ID, invalid_auction_recovery, mount_read_page,
+    };
+    use super::{fulfillment, fulfillment_stale_notice, status_key, status_tone};
+    use crate::api::{FULFILLMENT_STATUSES, FulfillmentPage};
+    use crate::surface::{
+        PageBrowserFixture, PageReadFixture, PublicContentLoading, dispatch_page_event,
+        page_test_contexts, rendered_event_target, run_page_events, settle_page,
+        use_content_loading,
+    };
 
     /// 英文译文在编译期内嵌，其余语言的键集合由 i18n 门禁核对与英文一致。
     const ENGLISH: &str = include_str!("../../../i18n/en.ftl");
 
     type StaleControl = Rc<Cell<Option<Signal<bool>>>>;
+
+    fn fulfillment_page() -> Element {
+        page_test_contexts();
+        fulfillment()
+    }
+
+    fn mount_fulfillment(
+        browser: &PageBrowserFixture,
+        expected_auction: &'static str,
+        expected_page: i64,
+    ) -> MountedReadPage {
+        let requests = Rc::new(RefCell::new(Vec::new()));
+        let request_log = requests.clone();
+        let applied = browser.clone();
+        let body = PageReadFixture::new(move |url: String| {
+            assert_eq!(applied.value("auction").as_deref(), Some(expected_auction));
+            assert_eq!(
+                applied.value("page"),
+                (expected_page > 1).then(|| expected_page.to_string())
+            );
+            request_log.borrow_mut().push(url);
+            Ok::<_, String>(FulfillmentPage {
+                auction: PublicFulfillmentAuctionResponse {
+                    id: expected_auction.to_owned(),
+                    world: "main".to_owned(),
+                    number: if expected_auction == ROUND_ID { 2 } else { 1 },
+                },
+                lots: Vec::new(),
+                page: expected_page,
+                page_size: 20,
+                total: 40,
+            })
+        });
+        let (dom, edits) = mount_read_page(fulfillment_page, browser, body);
+        (dom, edits, requests)
+    }
+
+    #[test]
+    fn invalid_auction_requires_an_explicit_fulfillment_selection() {
+        run_page_events(
+            module_path!(),
+            "invalid_auction_requires_an_explicit_fulfillment_selection",
+            || {
+                for auction in [
+                    "auction=bad".to_owned(),
+                    format!("auction={ROUND_ID}&auction={OLDER_ROUND_ID}"),
+                ] {
+                    let browser = PageBrowserFixture::new(
+                        "/fulfillment",
+                        &format!("{auction}&page=700&lot=One12&keep=yes"),
+                    );
+                    let before = browser.pairs();
+                    let (mut dom, edits, requests) = mount_fulfillment(&browser, OLDER_ROUND_ID, 1);
+                    invalid_auction_recovery(&dom, &edits);
+                    assert_eq!(browser.pairs(), before);
+                    assert!(browser.writes().is_empty());
+                    assert!(requests.borrow().is_empty());
+
+                    let select =
+                        rendered_event_target(&dom, "select", "name", "auction", "onchange");
+                    dispatch_page_event(&dom, "change", select, OLDER_ROUND_ID);
+                    settle_page(&mut dom);
+                    let writes = browser.writes();
+                    assert_eq!(writes.len(), 1);
+                    assert_eq!(writes[0].mode, QueryWriteMode::Push);
+                    assert_eq!(writes[0].keys, ["auction", "lot", "page"]);
+                    assert_eq!(
+                        writes[0].pairs,
+                        [("auction".to_owned(), OLDER_ROUND_ID.to_owned())]
+                    );
+                    assert_eq!(
+                        browser.pairs(),
+                        [
+                            ("keep".to_owned(), "yes".to_owned()),
+                            ("auction".to_owned(), OLDER_ROUND_ID.to_owned()),
+                        ]
+                    );
+                    assert_eq!(
+                        browser.state().auction_parameter().selected_id(),
+                        Some(OLDER_ROUND_ID)
+                    );
+                    assert_eq!(
+                        &*requests.borrow(),
+                        &[format!(
+                            "/api/v1/auctions/{OLDER_ROUND_ID}/fulfillment?page=1&page_size=20&world=main"
+                        )]
+                    );
+                }
+            },
+        );
+    }
+
+    #[test]
+    fn fulfillment_keeps_the_selected_round_or_applies_the_default() {
+        for (search, expected, page, write_count) in [
+            (format!("auction={OLDER_ROUND_ID}&page=2&lot=One12"), OLDER_ROUND_ID, 2, 0),
+            ("page=2&lot=One12".to_owned(), ROUND_ID, 1, 1),
+        ] {
+            let browser = PageBrowserFixture::new("/fulfillment", &search);
+            let (_, _, requests) = mount_fulfillment(&browser, expected, page);
+            assert_eq!(browser.writes().len(), write_count);
+            assert_eq!(browser.value("lot").as_deref(), Some("One12"));
+            assert_eq!(
+                &*requests.borrow(),
+                &[format!(
+                    "/api/v1/auctions/{expected}/fulfillment?page={page}&page_size=20&world=main&lot=One12"
+                )]
+            );
+        }
+    }
 
     #[component]
     fn StaleNoticeHarness() -> Element {

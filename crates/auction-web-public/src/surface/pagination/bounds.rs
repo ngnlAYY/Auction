@@ -78,7 +78,7 @@ fn corrections(
     limits
         .into_iter()
         .filter_map(|(key, size)| {
-            if key == PageKey::Movement && query.auction_id.is_none() {
+            if key == PageKey::Movement && query.auction_id().is_none() {
                 return None;
             }
             let maximum = offset_last_page(size, MAX_PUBLIC_PAGE_OFFSET);
@@ -209,19 +209,15 @@ mod tests {
 
     #[test]
     fn compensation_splits_bounds_by_each_tables_actual_page_size() {
-        let query = PublicBoardQuery {
-            page: 51,
-            movement_page: 502,
-            auction_id: Some("round".to_owned()),
-            ..Default::default()
-        };
+        let query = PublicBoardQuery { page: 51, movement_page: 502, ..Default::default() }
+            .with_auction_values(["0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b".to_owned()]);
         assert_eq!(
             corrections(&query, [(PageKey::Page, 200), (PageKey::Movement, 20)]),
             [(PageKey::Movement, 501)]
         );
         assert!(public_page_within_offset(51, 200));
         assert!(!public_page_within_offset(502, 20));
-        let collapsed = PublicBoardQuery { auction_id: None, ..query };
+        let collapsed = query.with_auction_values(None);
         assert!(
             corrections(&collapsed, [(PageKey::Page, 200), (PageKey::Movement, 20)]).is_empty()
         );

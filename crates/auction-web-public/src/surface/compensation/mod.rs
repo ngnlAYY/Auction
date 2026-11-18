@@ -6,10 +6,10 @@ use auction_web_shared::{
 use dioxus::prelude::*;
 
 use super::{
-    LotDetailLookupHost, PageKey, PublicBoardQuery, PublicPageClampError,
-    commit_public_query_pairs, normalize_public_page_size, page_pathname, public_page_matches,
-    public_page_within_offset, read_page_query, use_content_loading, use_lot_detail_lookup,
-    use_page_query, use_public_page_bounds,
+    AuctionSelection, LotDetailLookupHost, PageKey, PublicBoardQuery, PublicPageClampError,
+    QueryCommit, commit_auction_selection, commit_public_query_pairs, normalize_public_page_size,
+    page_pathname, public_page_matches, public_page_within_offset, read_page_query,
+    use_content_loading, use_lot_detail_lookup, use_page_query, use_public_page_bounds,
 };
 use crate::api::{fetch_compensation_lots, fetch_compensation_pool};
 #[cfg(test)]
@@ -29,7 +29,7 @@ pub(super) fn pool_page() -> Element {
     let page_number = use_memo(move || query_state_signal.read().page.max(1));
     let page_size = use_memo(move || query_state_signal.read().page_size);
     let selected_auction_id =
-        use_memo(move || query_state_signal.read().auction_id.clone().unwrap_or_default());
+        use_memo(move || query_state_signal.read().auction_id().map(str::to_owned));
     let movement_page = use_memo(move || query_state_signal.read().movement_page);
     let movement_page_size = use_memo(move || query_state_signal.read().movement_page_size);
     let bounds = use_public_page_bounds(query_state_signal, COMPENSATION_PATH, |query| {
@@ -63,20 +63,18 @@ pub(super) fn pool_page() -> Element {
             let page = movement_page();
             let page_size = movement_page_size();
             async move {
+                let auction_id = auction_id?;
                 if !public_page_within_offset(page, page_size) {
                     return None;
                 }
-                let result = if auction_id.is_empty() {
-                    Ok(None)
-                } else {
+                let result =
                     read_lots(auction_id.clone(), page, page_size).await.and_then(|page| {
                         if page.round.auction_id == auction_id {
                             Ok(Some(page))
                         } else {
                             Err("invalid_response".to_owned())
                         }
-                    })
-                };
+                    });
                 Some((auction_id, page, page_size, result))
             }
         }
@@ -120,7 +118,7 @@ pub(super) fn pool_page() -> Element {
             // 只保留同一轮次及同一分页请求的快照，避免旧数据触发新页码纠偏。
             let lot_state = lots.read_unchecked().as_ref().and_then(Option::as_ref).and_then(
                 |(auction_id, page, size, result)| {
-                    (auction_id == &selected_auction_id()
+                    (Some(auction_id) == selected_auction_id().as_ref()
                         && *page == movement_page()
                         && *size == movement_page_size())
                     .then(|| result.clone())
@@ -129,12 +127,13 @@ pub(super) fn pool_page() -> Element {
             rsx! {
                 CompensationPoolTable {
                     page: page.clone(),
-                    selected_auction_id: selected_auction_id(),
+                    selected_auction_id: selected_auction_id().unwrap_or_default(),
                     lots: lot_state,
                     lot_clamp_failed: bounds.failed(PageKey::Movement),
-                    on_page_change: move |page| write_round_page(query_state_signal, page, None, QueryWriteMode::Push),
-                    on_page_clamp: move |page| write_round_page(query_state_signal, page, None, QueryWriteMode::Replace),
-                    on_page_size_change: move |size| write_round_page(query_state_signal, 1, Some(size), QueryWriteMode::Push),
+                    on_page_change: move |page| write_round_page(query_state_signal, page, None),
+                    // 总量变化只纠正批次页码，地址中的场次原文和流水页码仍由玩家选择。
+                    on_page_clamp: move |page| PageKey::Page.write(query_state_signal, COMPENSATION_PATH, page, QueryWriteMode::Replace),
+                    on_page_size_change: move |size| write_round_page(query_state_signal, 1, Some(size)),
                     on_select_round: move |auction_id| toggle_round(query_state_signal, auction_id),
                     on_lot_page_change: move |page| PageKey::Movement.write(query_state_signal, COMPENSATION_PATH, page, QueryWriteMode::Push),
                     on_lot_page_clamp: move |page| PageKey::Movement.write(query_state_signal, COMPENSATION_PATH, page, QueryWriteMode::Replace),
@@ -170,10 +169,14 @@ fn toggle_round(state: Signal<PublicBoardQuery>, auction_id: String) {
     if page_pathname() != COMPENSATION_PATH {
         return;
     }
-    let open = read_page_query().auction_id.as_deref() == Some(auction_id.as_str());
-    let pairs = if open { Vec::new() } else { vec![("auction".to_owned(), auction_id)] };
+    let open = read_page_query().auction_id() == Some(auction_id.as_str());
     // 只有地址接受场次与明细页码的共同更新后，才允许展开或读取新明细。
-    commit_public_query_pairs(state, &["auction", "movement_page"], &pairs, QueryWriteMode::Push);
+    commit_auction_selection(
+        state,
+        AuctionSelection::Explicit((!open).then_some(auction_id)),
+        Some(&["auction", "movement_page"]),
+        |next| next.movement_page = 1,
+    );
 }
 
 async fn read_lots(
@@ -188,25 +191,24 @@ async fn read_lots(
     fetch_compensation_lots(auction_id, page, page_size).await
 }
 
-fn write_round_page(
-    state: Signal<PublicBoardQuery>,
-    page: i64,
-    size: Option<i64>,
-    mode: QueryWriteMode,
-) -> bool {
+fn write_round_page(state: Signal<PublicBoardQuery>, page: i64, size: Option<i64>) -> bool {
     if page_pathname() != COMPENSATION_PATH {
         return false;
     }
     let mut keys = vec!["page", "auction", "movement_page"];
-    let mut pairs = Vec::new();
-    if page > 1 {
-        pairs.push(("page".to_owned(), page.to_string()));
-    }
-    if let Some(size) = size {
+    if size.is_some() {
         keys.push("page_size");
-        pairs.push(("page_size".to_owned(), normalize_public_page_size(size).to_string()));
     }
-    commit_public_query_pairs(state, &keys, &pairs, mode)
+    // 离开一个批次时一并清除展开场次和明细页码，拒写时仍属于原批次。
+    let result =
+        commit_auction_selection(state, AuctionSelection::Explicit(None), Some(&keys), |next| {
+            next.page = page.max(1);
+            next.movement_page = 1;
+            if let Some(size) = size {
+                next.page_size = normalize_public_page_size(size);
+            }
+        });
+    matches!(result, QueryCommit::Applied(_) | QueryCommit::Unchanged(_))
 }
 
 /// 补偿池页面统一展示精确金额，不把整千值缩写为 K/M，避免同一列混用单位影响复算。
@@ -310,6 +312,61 @@ mod tests {
     }
 
     #[test]
+    fn compensation_clamps_batches_without_changing_the_auction() {
+        for (auction, selected) in [("bad", None), (ROUND, Some(ROUND))] {
+            let browser = PageBrowserFixture::new(
+                "/compensation-pool",
+                &format!("auction={auction}&page=2&movement_page=3"),
+            );
+            let requested_pages = Rc::new(RefCell::new(Vec::new()));
+            let pages = requested_pages.clone();
+            let pool = PageReadFixture::new(move |(page, page_size): (i64, i64)| {
+                pages.borrow_mut().push(page);
+                Ok::<_, String>(CompensationPoolPage {
+                    balance: 0,
+                    updated_at: round().settled_at,
+                    rounds: (page == 1).then(round).into_iter().collect(),
+                    page: Some(page),
+                    page_size,
+                    total: Some(1),
+                    cursor: None,
+                    next_cursor: None,
+                    has_more: None,
+                })
+            });
+            let details = PageReadFixture::new(move |(id, page, page_size): (String, i64, i64)| {
+                assert_eq!(Some(id.as_str()), selected);
+                assert_eq!(page, 3);
+                Ok::<_, String>(CompensationLotPage {
+                    round: round(),
+                    lots: Vec::new(),
+                    total: 100,
+                    page,
+                    page_size,
+                })
+            });
+            let mut dom = VirtualDom::new(compensation)
+                .with_root_context(browser.clone())
+                .with_root_context(pool)
+                .with_root_context(details);
+            dom.rebuild_to_vec();
+            settle_page(&mut dom);
+
+            assert_eq!(&*requested_pages.borrow(), &[2, 1]);
+            assert_eq!(browser.state().page, 1);
+            assert_eq!(browser.state().auction_id(), selected);
+            assert_eq!(browser.value("page"), None);
+            assert_eq!(browser.value("auction").as_deref(), Some(auction));
+            assert_eq!(browser.value("movement_page").as_deref(), Some("3"));
+            let writes = browser.writes();
+            assert_eq!(writes.len(), 1);
+            assert_eq!(writes[0].keys, ["page"]);
+            assert_eq!(writes[0].mode, QueryWriteMode::Replace);
+            assert!(writes[0].accepted);
+        }
+    }
+
+    #[test]
     fn compensation_events_drive_the_round_and_both_page_size_writes() {
         run_page_events(
             module_path!(),
@@ -321,7 +378,7 @@ mod tests {
     fn exercise_controls() {
         let browser = PageBrowserFixture::new(
             "/compensation-pool",
-            "page=2&page_size=20&movement_page=3&movement_page_size=50&keep=yes",
+            "auction=bad&page=2&page_size=20&movement_page=3&movement_page_size=50&keep=yes",
         );
         let pool_requests = Rc::new(RefCell::new(Vec::new()));
         let detail_requests = Rc::new(RefCell::new(Vec::new()));
@@ -369,10 +426,14 @@ mod tests {
         );
         let main_select = page_event_target(&edits, "change", "value", "20");
 
+        let before = browser.pairs();
+        let applied = browser.state();
+        assert!(detail_requests.borrow().is_empty());
         browser.allow_writes(false);
         dispatch_page_event(&dom, "click", expand, "");
         settle_page(&mut dom);
-        assert_eq!(browser.state().auction_id, None);
+        assert_eq!(browser.pairs(), before);
+        assert_eq!(browser.state(), applied);
         assert_eq!(browser.state().movement_page, 3);
         assert!(detail_requests.borrow().is_empty());
         assert_eq!(browser.writes()[0].keys, ["auction", "movement_page"]);
@@ -383,7 +444,7 @@ mod tests {
         let edits = settle_page(&mut dom);
         let detail_select = page_event_target(&edits, "change", "value", "50");
         assert_ne!(main_select, detail_select);
-        assert_eq!(browser.state().auction_id.as_deref(), Some(ROUND));
+        assert_eq!(browser.state().auction_id(), Some(ROUND));
         assert_eq!(browser.state().movement_page, 1);
         assert_eq!(&*detail_requests.borrow(), &[(1, 50)]);
 
@@ -463,7 +524,7 @@ mod tests {
         assert_eq!(browser.value("auction"), None);
         assert_eq!(browser.value("movement_page"), None);
         expected.page = 3;
-        expected.auction_id = None;
+        expected = expected.with_auction_values(None);
         expected.movement_page = 1;
         assert_eq!(browser.state(), expected);
         assert_eq!(&*pool_requests.borrow(), &[(2, 20), (2, 20), (3, 20)]);
@@ -474,8 +535,33 @@ mod tests {
         settle_page(&mut dom);
         assert_eq!(browser.state().page_size, 50);
         assert_eq!(browser.state().page, 1);
-        assert_eq!(browser.state().auction_id, None);
+        assert_eq!(browser.state().auction_id(), None);
         assert_eq!(browser.sizes(), [50, 100]);
         assert_eq!(browser.value("keep").as_deref(), Some("yes"));
+
+        let expand = rendered_event_target(
+            &dom,
+            "button",
+            "aria-controls",
+            &format!("compensation-details-{ROUND}"),
+            "onclick",
+        );
+        dispatch_page_event(&dom, "click", expand, "");
+        settle_page(&mut dom);
+        click_page(&mut dom, "Page 2 / 2");
+        assert_eq!(browser.state().movement_page, 2);
+
+        let before = browser.writes().len();
+        let requested = detail_requests.borrow().len();
+        dispatch_page_event(&dom, "click", expand, "");
+        settle_page(&mut dom);
+        let writes = browser.writes();
+        assert_eq!(writes.len(), before + 1);
+        assert_eq!(writes[before].keys, ["auction", "movement_page"]);
+        assert!(writes[before].pairs.is_empty());
+        assert_eq!(browser.value("auction"), None);
+        assert_eq!(browser.value("movement_page"), None);
+        assert_eq!(browser.state().movement_page, 1);
+        assert_eq!(detail_requests.borrow().len(), requested);
     }
 }

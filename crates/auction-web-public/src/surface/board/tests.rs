@@ -6,13 +6,15 @@ use std::rc::Rc;
 use std::task::{Poll, Waker};
 
 use auction_web_shared::i18n::{DEFAULT_PUBLIC_LOCALE, build_bundle};
-use auction_web_shared::{PageVisibility, use_second_ticker};
-use dioxus::dioxus_core::NoOpMutations;
+use auction_web_shared::query::QueryLocation;
+use auction_web_shared::{PageVisibility, QueryWriteMode, use_second_ticker};
+use dioxus::dioxus_core::{AttributeValue, Mutation, Mutations, NoOpMutations};
+use dioxus::history::MemoryHistory;
 use dioxus::prelude::*;
 use dioxus_i18n::prelude::try_use_init_i18n_from_bundle;
 
 use super::refresh::PublicBidRefresh;
-use super::{AuctionIndex, PublicDisplayedAuction, PublicPageRealtimeTarget};
+use super::{AuctionIndex, AuctionPage, PublicDisplayedAuction, PublicPageRealtimeTarget};
 use crate::api::{CurrentAuction, LotEnvelope, PublicSession};
 use crate::surface::router::PUBLIC_LOCALE_CATALOG;
 use crate::surface::watches::SkipWatchReads;
@@ -140,6 +142,8 @@ pub(super) fn bid_timer() -> Option<impl Future<Output = ()>> {
 enum TestRoute {
     #[route("/")]
     AuctionIndex {},
+    #[route("/auction")]
+    AuctionPage {},
 }
 
 #[component]
@@ -232,6 +236,43 @@ fn controls() -> Controls {
 
 fn started() -> usize {
     SCRIPT.with_borrow(|script| script.as_ref().unwrap().requests.len())
+}
+
+struct InvalidBoardLocation(&'static str);
+
+impl QueryLocation for InvalidBoardLocation {
+    fn current(&self) -> String {
+        format!("{}?auction=&auction=broken&world=isekai", self.0)
+    }
+
+    fn write(&self, _location: &str, _mode: QueryWriteMode) -> bool {
+        panic!("非法场次不能触发地址纠偏")
+    }
+}
+
+#[test]
+fn invalid_auction_link_renders_a_current_auction_link_without_reading_lots() {
+    for path in ["/", "/auction"] {
+        SCRIPT.with_borrow_mut(|script| {
+            *script = Some(Script { initial_user: Some(ALICE), ..Script::default() });
+        });
+        let mut dom = VirtualDom::new(TestApp);
+        let address = Rc::new(InvalidBoardLocation(path));
+        let history = Rc::new(MemoryHistory::with_initial_path(path));
+        dom.provide_root_context(history.clone() as Rc<dyn History>);
+        dom.provide_root_context(address as Rc<dyn QueryLocation>);
+        let mut mutations = Mutations::default();
+        dom.rebuild(&mut mutations);
+        settle(&mut dom);
+        assert_eq!(history.current_route(), path, "无效别名也必须保留地址");
+        assert_eq!(started(), 0, "即使当前场次在竞价也不能读取目录");
+        assert!(mutations.edits.iter().any(|edit| matches!(edit,
+            Mutation::CreateTextNode { value, .. } if value == "The auction in this link is invalid."
+        )));
+        assert!(mutations.edits.iter().any(|edit| matches!(edit,
+            Mutation::SetAttribute { name: "href", value: AttributeValue::Text(value), .. } if value == "/?world=isekai"
+        )));
+    }
 }
 
 fn player(user_id: &str) -> PublicSession {

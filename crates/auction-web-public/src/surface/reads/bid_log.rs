@@ -8,7 +8,7 @@ use dioxus::prelude::*;
 
 use super::directory::{RoundOptionsError, RoundPage, use_round_directory};
 use super::lot_filter::use_lot_filter_draft;
-use super::query::{ReadSelection, use_round_body};
+use super::query::{InvalidReadAuction, ReadSelection, use_round_body};
 use crate::api::{BidLogEntry, BidLogPage, fetch_bid_log_page, fetch_worlds, lot_code_for};
 use crate::surface::read_page_query;
 use crate::surface::{
@@ -43,14 +43,14 @@ pub(crate) fn bid_log() -> Element {
     let page_size = use_memo(move || query_state_signal.read().page_size);
     // 缺省场次与第一页一同提交，无需先替换页码。
     let bounds = use_public_page_bounds(query_state_signal, pathname, |query| {
-        query.auction_id.as_ref().map(|_| (PageKey::BidLog, query.page_size))
+        query.auction_id().map(|_| (PageKey::BidLog, query.page_size))
     });
     let lot_draft = use_lot_filter_draft(query_state_signal, pathname);
     // 旧页码别名只在仍属于出价记录且可按既定数量读取时原地收敛。
     use_effect(move || {
         let (has_auction, alias, page, page_size) = {
             let query = query_state_signal.read();
-            (query.auction_id.is_some(), query.bid_log_page_alias, query.page, query.page_size)
+            (query.auction_id().is_some(), query.bid_log_page_alias, query.page, query.page_size)
         };
         // 成功替换会写入同一个 Signal，此时前面的读借用必须已释放。
         if has_auction
@@ -59,7 +59,10 @@ pub(crate) fn bid_log() -> Element {
             && page_pathname() == pathname
         {
             let current = read_page_query();
-            if current.bid_log_page_alias && current.page == page && current.page_size == page_size
+            if current.auction_id().is_some()
+                && current.bid_log_page_alias
+                && current.page == page
+                && current.page_size == page_size
             {
                 PageKey::BidLog.write(
                     query_state_signal,
@@ -119,6 +122,11 @@ pub(crate) fn bid_log() -> Element {
         .map(|(_, result)| result);
     let mut loading = false;
     let body = match current_result {
+        _ if directory.invalid_auction() => rsx! {
+            InvalidReadAuction {
+                on_recover: move |_| { ReadSelection::Clear.select(query_state_signal, pathname); },
+            }
+        },
         _ if bounds.failed(PageKey::BidLog) => rsx! { PublicPageClampError { bounds } },
         _ if directory.failed() || matches!(current_result, Some(Err(_error))) => rsx! {
             div { class: "public-auction-empty", role: "alert",
@@ -401,52 +409,22 @@ mod tests {
     use auction_web_shared::QueryWriteMode;
     use dioxus::prelude::*;
 
+    use super::super::query::tests::{
+        MountedReadPage, ROUND_ID, invalid_auction_recovery, mount_read_page,
+    };
     use super::bid_log;
-    use crate::api::{AuctionListPage, BidLogPage, HistoricalAuction, Worlds};
-    use crate::surface::{PageBrowserFixture, PageReadFixture, page_test_contexts, settle_page};
-
-    const ROUND_ID: &str = "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b";
+    use crate::api::BidLogPage;
+    use crate::surface::{
+        PageBrowserFixture, PageReadFixture, PublicPager, dispatch_page_event, page_test_contexts,
+        rendered_event_target, run_page_events, set_public_page_size, settle_page, use_page_query,
+    };
 
     fn bid_log_page() -> Element {
         page_test_contexts();
         bid_log()
     }
 
-    fn mount_bid_log(
-        browser: &PageBrowserFixture,
-        expected_page: i64,
-    ) -> (VirtualDom, Rc<RefCell<Vec<String>>>) {
-        let directory = PageReadFixture::new(|url: String| {
-            let settled = url.contains("status=settled");
-            let auctions = settled
-                .then(|| HistoricalAuction {
-                    id: ROUND_ID.to_owned(),
-                    world_id: "main".to_owned(),
-                    sequence: 1,
-                    status: "settled".to_owned(),
-                    scheduled_open_at: "2026-11-14T12:00:00Z".to_owned(),
-                    opened_at: None,
-                    final_phase_at: None,
-                    effective_end_at: None,
-                    settled_at: None,
-                    lot_count: 0,
-                    sold_count: 0,
-                    unsold_count: 0,
-                    sold_amount: 0,
-                    state_version: 1,
-                })
-                .into_iter()
-                .collect();
-            Ok::<_, String>(AuctionListPage {
-                auctions,
-                page: Some(1),
-                page_size: 200,
-                total: Some(i64::from(settled)),
-                cursor: None,
-                next_cursor: None,
-                has_more: None,
-            })
-        });
+    fn mount_bid_log(browser: &PageBrowserFixture, expected_page: i64) -> MountedReadPage {
         let requests = Rc::new(RefCell::new(Vec::new()));
         let request_log = requests.clone();
         let applied = browser.clone();
@@ -468,16 +446,8 @@ mod tests {
                 has_more: None,
             })
         });
-        let worlds =
-            PageReadFixture::new(|()| Ok::<_, String>(Worlds { worlds: Default::default() }));
-        let mut dom = VirtualDom::new(bid_log_page)
-            .with_root_context(browser.clone())
-            .with_root_context(directory)
-            .with_root_context(body)
-            .with_root_context(worlds);
-        dom.rebuild_to_vec();
-        settle_page(&mut dom);
-        (dom, requests)
+        let (dom, edits) = mount_read_page(bid_log_page, browser, body);
+        (dom, edits, requests)
     }
 
     #[test]
@@ -486,7 +456,7 @@ mod tests {
             "/bidlog",
             &format!("auction={ROUND_ID}&bidlog_page=2&keep=yes"),
         );
-        let (_dom, requests) = mount_bid_log(&browser, 2);
+        let (_dom, _edits, requests) = mount_bid_log(&browser, 2);
         assert!(!browser.state().bid_log_page_alias);
         let writes = browser.writes();
         assert_eq!(writes.len(), 1);
@@ -503,10 +473,52 @@ mod tests {
     }
 
     #[test]
+    fn invalid_auction_does_not_load_bid_log_body() {
+        run_page_events(module_path!(), "invalid_auction_does_not_load_bid_log_body", || {
+            for auction in
+                ["auction=bad".to_owned(), format!("auction={ROUND_ID}&auction={ROUND_ID}")]
+            {
+                let browser = PageBrowserFixture::new(
+                    "/bidlog",
+                    &format!("{auction}&bidlog_page=4&lot=Wrong%21&keep=yes"),
+                );
+                let before = browser.pairs();
+                let (mut dom, edits, requests) = mount_bid_log(&browser, 1);
+                let recover = invalid_auction_recovery(&dom, &edits);
+                assert!(requests.borrow().is_empty());
+                assert!(browser.writes().is_empty());
+                assert_eq!(browser.pairs(), before);
+
+                browser.allow_writes(false);
+                dispatch_page_event(&dom, "click", recover, "");
+                settle_page(&mut dom);
+                assert!(requests.borrow().is_empty());
+                assert_eq!(browser.pairs(), before);
+                assert!(!browser.writes()[0].accepted);
+
+                browser.allow_writes(true);
+                dispatch_page_event(&dom, "click", recover, "");
+                settle_page(&mut dom);
+                let writes = browser.writes();
+                assert_eq!(writes.len(), 3);
+                assert_eq!(writes[1].mode, QueryWriteMode::Push);
+                assert_eq!(writes[1].keys, ["auction", "lot", "page", "bidlog_page"]);
+                assert!(writes[1].pairs.is_empty());
+                assert_eq!(writes[2].mode, QueryWriteMode::Replace);
+                assert_eq!(browser.value("keep").as_deref(), Some("yes"));
+                assert_eq!(browser.value("auction").as_deref(), Some(ROUND_ID));
+                assert_eq!(browser.value("lot"), None);
+                assert_eq!(requests.borrow().len(), 1);
+                assert!(requests.borrow()[0].contains("bid-log?page=1&"));
+            }
+        });
+    }
+
+    #[test]
     fn default_round_replacement_reaches_the_live_state_before_the_body_get() {
         let browser = PageBrowserFixture::new("/bidlog", "page=3&lot=One12");
-        let (_dom, requests) = mount_bid_log(&browser, 1);
-        assert_eq!(browser.state().auction_id.as_deref(), Some(ROUND_ID));
+        let (_dom, _edits, requests) = mount_bid_log(&browser, 1);
+        assert_eq!(browser.state().auction_id(), Some(ROUND_ID));
         assert_eq!(browser.state().page, 1);
         assert_eq!(browser.state().bid_log_lot.as_deref(), Some("One12"));
         let writes = browser.writes();
@@ -519,6 +531,77 @@ mod tests {
             &[format!(
                 "/api/v1/auctions/{ROUND_ID}/bid-log?page=1&page_size=20&include=defeated_proxy&world=main&lot=One12"
             )]
+        );
+    }
+
+    #[test]
+    fn automatic_round_replacement_preserves_duplicate_lot_values() {
+        let browser = PageBrowserFixture::new("/bidlog", "page=3&lot=One12&lot=Wrong%21+");
+        let (_, _, requests) = mount_bid_log(&browser, 1);
+        assert_eq!(browser.value("auction").as_deref(), Some(ROUND_ID));
+        assert_eq!(browser.value("page"), None);
+        assert_eq!(
+            browser.pairs(),
+            [
+                ("lot".to_owned(), "One12".to_owned()),
+                ("lot".to_owned(), "Wrong! ".to_owned()),
+                ("auction".to_owned(), ROUND_ID.to_owned()),
+            ],
+        );
+        assert!(requests.borrow().is_empty());
+    }
+
+    #[test]
+    fn rejected_page_size_push_keeps_the_previous_effective_address_state_and_preference() {
+        fn pager() -> Element {
+            page_test_contexts();
+            let query = use_page_query();
+            let browser = use_context::<PageBrowserFixture>();
+            rsx! {
+                PublicPager {
+                    page: 2,
+                    page_size: 20,
+                    total: Some(60),
+                    label: "测试出价记录",
+                    on_page_change: |_| false,
+                    on_page_size_commit: move |size| {
+                        browser.allow_writes(false);
+                        Some(set_public_page_size(query, size))
+                    },
+                }
+            }
+        }
+
+        run_page_events(
+            module_path!(),
+            "rejected_page_size_push_keeps_the_previous_effective_address_state_and_preference",
+            || {
+                let browser = PageBrowserFixture::new(
+                    "/bidlog",
+                    &format!("auction={ROUND_ID}&page=2&lot=One12"),
+                );
+                let mut dom = VirtualDom::new(pager).with_root_context(browser.clone());
+                dom.rebuild_to_vec();
+                settle_page(&mut dom);
+                let before = browser.state();
+                let select = rendered_event_target(&dom, "select", "value", "20", "onchange");
+                dispatch_page_event(&dom, "change", select, "50");
+                settle_page(&mut dom);
+
+                let writes = browser.writes();
+                assert_eq!(writes.len(), 2);
+                assert_eq!(writes[0].mode, QueryWriteMode::Replace);
+                assert!(writes[0].accepted);
+                assert_eq!(writes[1].mode, QueryWriteMode::Push);
+                assert!(!writes[1].accepted);
+                assert_eq!(browser.value("page_size").as_deref(), Some("20"));
+                assert_eq!(browser.value("movement_page_size").as_deref(), Some("20"));
+                assert_eq!(browser.value("page").as_deref(), Some("2"));
+                assert_eq!(browser.value("auction").as_deref(), Some(ROUND_ID));
+                assert_eq!(browser.value("lot").as_deref(), Some("One12"));
+                assert_eq!(browser.state(), before);
+                assert_eq!(browser.sizes(), [20, 20]);
+            },
         );
     }
 }

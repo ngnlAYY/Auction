@@ -13,6 +13,7 @@ mod commands;
 mod compensation;
 mod forum;
 mod loading;
+mod login_return;
 mod proxy;
 mod reads;
 mod realtime;
@@ -35,12 +36,12 @@ mod shell;
 
 pub(crate) use board::*;
 pub(crate) use catalog::*;
+pub(crate) use login_return::login_href_for_current_location;
 pub(crate) use pages::*;
 pub(crate) use pagination::*;
 pub(crate) use query::*;
 pub(crate) use router::Route;
 pub use router::run;
-pub(crate) use session::login_href_for_current_location;
 
 use dioxus::prelude::*;
 

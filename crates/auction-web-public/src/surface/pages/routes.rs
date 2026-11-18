@@ -24,7 +24,9 @@ pub(crate) fn History() -> Element {
 
 #[component]
 pub(crate) fn Login(return_to: Option<String>) -> Element {
-    session::login(return_to)
+    // 保留类型化登录入口。嵌套查询由登录页从完整地址解码。
+    let _ = return_to;
+    session::login()
 }
 
 #[component]

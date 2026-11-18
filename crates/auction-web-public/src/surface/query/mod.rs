@@ -1,108 +1,22 @@
 //! Public URL 查询状态、筛选规范化和浏览器历史辅助。
 
+mod auction;
+mod commit;
 #[cfg(any(target_arch = "wasm32", test))]
 mod parse;
 
-use std::cell::Cell;
-use std::rc::Rc;
-
-use auction_web_shared::{QueryState, QueryWriteMode, use_query_state, write_query_pairs};
+use auction_web_shared::QueryWriteMode;
+use auction_web_shared::query::{location_parts, query_location};
 use dioxus::prelude::*;
 use url::form_urlencoded;
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::JsValue;
 
 use super::stored_public_page_size;
 use crate::api::{CurrentAuction, HistoricalAuction};
 #[cfg(any(target_arch = "wasm32", test))]
 use parse::parse_public_query;
 
-/// Router 首次挂载前的公开端地址快照，用于恢复未在 `Routable` 中声明的查询参数。
-#[derive(Clone)]
-pub(crate) struct InitialPublicLocation {
-    #[cfg(target_arch = "wasm32")]
-    pathname: String,
-    #[cfg(target_arch = "wasm32")]
-    search: String,
-    #[cfg(target_arch = "wasm32")]
-    had_query_marker: bool,
-    available: Rc<Cell<bool>>,
-}
-
-impl InitialPublicLocation {
-    #[cfg(target_arch = "wasm32")]
-    fn search_for(&self, pathname: &str) -> Option<String> {
-        (self.available.replace(false) && self.pathname == pathname && !self.search.is_empty())
-            .then(|| self.search.clone())
-    }
-
-    pub(crate) fn expire(&self) {
-        #[cfg(target_arch = "wasm32")]
-        self.remove_router_empty_query();
-        self.available.set(false);
-    }
-
-    /// Dioxus 0.7 会把带可选 query 的裸 `/login` 首次规范化成 `/login?`；旧 Router 保持
-    /// 原地址。这里只在原始 URL 没有 `?`、pathname/search 仍未变化时无历史记录地移除空标记。
-    #[cfg(target_arch = "wasm32")]
-    fn remove_router_empty_query(&self) {
-        if !self.search.is_empty() || self.had_query_marker {
-            return;
-        }
-        let Some(window) = web_sys::window() else {
-            return;
-        };
-        let location = window.location();
-        if location.pathname().ok().as_deref() != Some(self.pathname.as_str())
-            || location.search().is_ok_and(|search| !search.is_empty())
-        {
-            return;
-        }
-        let Ok(href) = location.href() else {
-            return;
-        };
-        if !href.split('#').next().is_some_and(|url| url.ends_with('?')) {
-            return;
-        }
-        let hash = location.hash().unwrap_or_default();
-        let url = format!("{}{hash}", self.pathname);
-        if let Ok(history) = window.history() {
-            let state = history.state().unwrap_or(JsValue::NULL);
-            let _ = history.replace_state_with_url(&state, "", Some(&url));
-        }
-    }
-}
-
-/// 在 Dioxus Router 规范化未声明的 query 前保存首次 pathname 与 search。
-pub(crate) fn initial_public_location() -> InitialPublicLocation {
-    #[cfg(target_arch = "wasm32")]
-    let (pathname, search, had_query_marker) = web_sys::window().map_or_else(
-        || ("/".to_owned(), String::new(), false),
-        |window| {
-            let location = window.location();
-            let had_query_marker = location
-                .href()
-                .ok()
-                .and_then(|href| href.split('#').next().map(str::to_owned))
-                .is_some_and(|url| url.contains('?'));
-            (
-                location.pathname().unwrap_or_else(|_| "/".to_owned()),
-                location.search().unwrap_or_default(),
-                had_query_marker,
-            )
-        },
-    );
-
-    InitialPublicLocation {
-        #[cfg(target_arch = "wasm32")]
-        pathname,
-        #[cfg(target_arch = "wasm32")]
-        search,
-        #[cfg(target_arch = "wasm32")]
-        had_query_marker,
-        available: Rc::new(Cell::new(true)),
-    }
-}
+pub(crate) use auction::{AuctionParameter, AuctionSelection};
+pub(crate) use commit::{QueryCommit, commit_auction_selection, update_public_query_state};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LiveConnectionState {
@@ -116,7 +30,8 @@ pub(crate) enum LiveConnectionState {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PublicBoardQuery {
     pub(crate) world: Option<String>,
-    pub(crate) auction_id: Option<String>,
+    #[doc(hidden)]
+    pub(crate) auction: auction::StoredAuction,
     pub(crate) category: Option<String>,
     pub(crate) equipment_group: Option<String>,
     /// 非法等级参数保留原文供筛选栏修正，不能先丢条件再发出宽查询。
@@ -158,7 +73,7 @@ impl Default for PublicBoardQuery {
     fn default() -> Self {
         Self {
             world: None,
-            auction_id: None,
+            auction: auction::StoredAuction::default(),
             category: None,
             equipment_group: None,
             max_level: None,
@@ -187,35 +102,32 @@ impl Default for PublicBoardQuery {
 }
 
 pub(crate) fn read_public_query() -> PublicBoardQuery {
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(any(target_arch = "wasm32", test))]
     {
-        let Some(window) = web_sys::window() else {
-            return PublicBoardQuery::default();
-        };
-        let pathname = window.location().pathname().unwrap_or_default();
-        let mut search = window.location().search().unwrap_or_default();
-        if search.is_empty()
-            && let Some(initial) = try_consume_context::<InitialPublicLocation>()
-            && let Some(initial_search) = initial.search_for(&pathname)
-        {
-            // 恢复原 query 时保留当前片段与 Router 的 history.state，避免破坏锚点和滚动位置，
-            // 也不额外增加浏览器历史条目。
-            if let Ok(history) = window.history() {
-                let state = history.state().unwrap_or(JsValue::NULL);
-                let hash = window.location().hash().unwrap_or_default();
-                let url = format!("{pathname}{initial_search}{hash}");
-                if history.replace_state_with_url(&state, "", Some(&url)).is_ok() {
-                    search = initial_search;
-                }
-            }
-        }
-        parse_public_query(&pathname, &search)
+        let location = current_public_location();
+        let (path, search, _) = location_parts(&location);
+        parse_public_query(path, search)
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        PublicBoardQuery::default()
+    #[cfg(not(any(target_arch = "wasm32", test)))]
+    PublicBoardQuery::default()
+}
+
+fn current_public_location() -> String {
+    if let Some(location) = query_location() {
+        return location.current();
     }
+    #[cfg(target_arch = "wasm32")]
+    if let Some(window) = web_sys::window() {
+        let location = window.location();
+        return format!(
+            "{}{}{}",
+            location.pathname().unwrap_or_else(|_| "/".to_owned()),
+            location.search().unwrap_or_default(),
+            location.hash().unwrap_or_default(),
+        );
+    }
+    "/".to_owned()
 }
 
 pub(crate) fn normalize_world_query(value: &str) -> Option<String> {
@@ -244,9 +156,13 @@ pub(crate) fn public_query_pairs(query: &PublicBoardQuery) -> Vec<(String, Strin
     if let Some(world) = query.world.as_deref() {
         pairs.push(("world".to_owned(), world.to_owned()));
     }
-    if let Some(auction_id) = query.auction_id.as_deref() {
-        pairs.push(("auction".to_owned(), auction_id.to_owned()));
-    }
+    pairs.extend(
+        query
+            .auction_parameter()
+            .query_values()
+            .iter()
+            .map(|value| ("auction".to_owned(), value.clone())),
+    );
     if let Some(equipment_group) = query.equipment_group.as_deref() {
         pairs.push(("equipment_group".to_owned(), equipment_group.to_owned()));
     }
@@ -296,142 +212,58 @@ pub(crate) fn public_query_pairs(query: &PublicBoardQuery) -> Vec<(String, Strin
     if query.proxy_page > 1 {
         pairs.push(("proxy_page".to_owned(), query.proxy_page.to_string()));
     }
-    for (key, value) in &query.passthrough {
-        pairs.push((key.clone(), value.clone()));
-    }
+    // 整段重置与普通链接的场次都只来自三态，透传值不能另行提供场次。
+    pairs.extend(query.passthrough.iter().filter(|(key, _)| key != "auction").cloned());
     pairs
 }
 
-/// 本 crate 在地址栏管理的全部公开 query 键；含迁移期间曾写出的 `bidlog_page` 别名，
-/// 写回时该别名被清除（序列化只产出 canonical `page`）。
-const PUBLIC_QUERY_KEYS: &[&str] = &[
-    "world",
-    "auction",
-    "type",
-    "equipment_group",
-    "max_level",
-    "include_unleveled",
-    "status",
-    "name",
-    "from",
-    "to",
-    "min_price",
-    "max_price",
-    "buyer",
-    "seller",
-    "history_sort",
-    "history_group",
-    "lot",
-    "page",
-    "page_size",
-    "movement_page",
-    "movement_page_size",
-    "bidlog_page",
-    "bid_page",
-    "proxy_page",
-];
+/// 已应用查询由地址驱动，表单草稿由各页面持有。
+pub(crate) struct PublicQueryState {
+    pub(crate) state: Signal<PublicBoardQuery>,
+}
 
 /// 挂载与地址栏双向同步的公开端查询状态。
-/// 初值与浏览器前进/后退共用 `read_public_query` 的既有解析（含 Router 规范化前保存的
-/// 首次 query 恢复）；Router 完整位置订阅同时覆盖 Link push 和同路径 query 导航。
-/// 写回只替换本 crate 管理的键，未声明的外部入口参数原样保留。
-pub(crate) fn use_public_query_state() -> QueryState<PublicBoardQuery> {
-    let query =
-        use_query_state(PUBLIC_QUERY_KEYS, |_| read_public_query(), managed_public_query_pairs);
+pub(crate) fn use_public_query_state() -> PublicQueryState {
+    let mut state = use_signal(read_public_query);
     let location_revision = try_consume_context::<PublicLocationRevision>();
     let router = dioxus::prelude::router();
-    let mut state = query.state;
     use_effect(move || {
-        // 完整位置读取会订阅 Router，不能仅依赖不含 query 的 Routable 或 popstate。
+        // 从同一个地址恢复 Link、查询直接写回和浏览器前进/后退。
         let _ = router.full_route_string();
         if let Some(PublicLocationRevision(revision)) = location_revision {
             let _ = revision();
         }
-        // pushState 不触发 popstate；首页清理查询后，已挂载目录仍须同步到新的地址栏状态。
         let current = read_public_query();
         if *state.peek() != current {
             state.set(current);
         }
     });
-    query
+    PublicQueryState { state }
 }
 
-/// 把完整查询状态按既有序列化规则写回地址栏（只替换本 crate 管理的键，其余键原样保留）。
-/// 返回地址栏写入是否成功。
-pub(crate) fn write_public_query(query: &PublicBoardQuery, mode: QueryWriteMode) -> bool {
-    write_query_pairs(PUBLIC_QUERY_KEYS, &managed_public_query_pairs(query), mode)
-}
-
-/// 原地写回时未知参数由共享层保留一次；完整链接仍通过 `public_query_pairs` 携带 passthrough。
-fn managed_public_query_pairs(query: &PublicBoardQuery) -> Vec<(String, String)> {
-    public_query_pairs(query)
-        .into_iter()
-        .filter(|(key, _)| PUBLIC_QUERY_KEYS.contains(&key.as_str()))
-        .collect()
-}
-
-/// 读取地址栏最新查询、应用变更并按模式写回（读-改-写），
-/// 同时把给定的 hook 状态信号同步到新值。接收 `Signal`（Copy）而非整个 hook 句柄，
-/// 页面内多个事件闭包可以直接共享。
-pub(crate) fn update_public_query_state(
-    mut state: Signal<PublicBoardQuery>,
-    update: impl FnOnce(&mut PublicBoardQuery),
-    mode: QueryWriteMode,
-) {
-    let mut query = read_public_query();
-    update(&mut query);
-    write_public_query(&query, mode);
-    state.set(query);
-}
-
-/// 当前地址栏 pathname；非 WASM 构建恒为 `/`（仅服务静态检查路径）。
+/// 当前地址栏 pathname；非 WASM 构建缺省为 `/`。
 pub(crate) fn current_public_pathname() -> String {
-    #[cfg(target_arch = "wasm32")]
-    {
-        web_sys::window()
-            .and_then(|window| window.location().pathname().ok())
-            .unwrap_or_else(|| "/".to_owned())
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        "/".to_owned()
-    }
+    location_parts(&current_public_location()).0.to_owned()
 }
 
-#[cfg(target_arch = "wasm32")]
+/// 首页重置等显式导航替换完整查询。
 pub(crate) fn set_public_query(query: &PublicBoardQuery, replace: bool) {
-    let Some(window) = web_sys::window() else {
-        return;
-    };
-    let Ok(history) = window.history() else {
-        return;
-    };
-    let pathname = window.location().pathname().unwrap_or_else(|_| "/".to_owned());
-    let url = format!("{pathname}{}", public_query_string(query));
-    let state = browser_scroll_state(&window);
-    if replace {
-        let _ = history.replace_state_with_url(&state, "", Some(&url));
-    } else {
-        // 与 Dioxus WebHistory 一致，先把离开的条目更新为当前滚动位置，再建立新条目。
-        let _ = history.replace_state_with_url(&state, "", None);
-        let _ = history.push_state_with_url(&state, "", Some(&url));
-    }
+    let Some(location) = query_location() else { return };
+    let mode = if replace { QueryWriteMode::Replace } else { QueryWriteMode::Push };
+    location.write(&public_href(&current_public_pathname(), query), mode);
 }
-
-#[cfg(target_arch = "wasm32")]
-fn browser_scroll_state(window: &web_sys::Window) -> js_sys::Array {
-    let state = js_sys::Array::new();
-    state.push(&JsValue::from_f64(window.scroll_x().unwrap_or_default()));
-    state.push(&JsValue::from_f64(window.scroll_y().unwrap_or_default()));
-    state
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn set_public_query(_query: &PublicBoardQuery, _replace: bool) {}
 
 pub(crate) fn public_href(path: &str, query: &PublicBoardQuery) -> String {
     format!("{path}{}", public_query_string(query))
+}
+
+/// 构建明确选择或清除场次的原生导航链接，保留来源筛选。
+pub(crate) fn public_href_for_auction(
+    path: &str,
+    query: PublicBoardQuery,
+    auction_id: Option<String>,
+) -> String {
+    public_href(path, &query.with_auction_values(auction_id))
 }
 
 /// 首页入口不冻结数量：导航时读取最新本地偏好，避免外壳旧链接覆盖刚保存的选择。
@@ -448,25 +280,22 @@ pub(crate) fn public_auction_home_query(world: &str) -> PublicBoardQuery {
     }
 }
 
-/// 把旧版公开端别名无历史记录地收敛到 canonical URL，并保留筛选/分页查询参数。
-/// 别名本身仍然注册在路由表中，旧链接可以继续打开；跳转使用 `replace`，避免用户按返回
-/// 键时再次落回别名页面。查询字符串由浏览器当前地址读取，不把 URL 状态复制到组件状态。
+/// 收敛公开端别名时保留原地址的查询与片段，替换当前条目使后退不再进入别名。
 pub(crate) fn redirect_public_alias(path: &'static str) -> Element {
-    let target = format!("{path}{}", current_browser_search());
+    redirect_public_alias_if(path, || true)
+}
+
+/// 写入前复核跳转条件，避免过期别名覆盖更新后的地址。
+pub(crate) fn redirect_public_alias_if(path: &'static str, may_redirect: fn() -> bool) -> Element {
+    let source = current_public_pathname();
     use_effect(move || {
-        let _ = navigator().replace(target.clone());
+        let location = current_public_location();
+        let (pathname, search, hash) = location_parts(&location);
+        if pathname == source && may_redirect() {
+            let _ = navigator().replace(format!("{path}{search}{hash}"));
+        }
     });
     rsx! {}
-}
-
-#[cfg(target_arch = "wasm32")]
-pub(crate) fn current_browser_search() -> String {
-    web_sys::window().and_then(|window| window.location().search().ok()).unwrap_or_default()
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn current_browser_search() -> String {
-    String::new()
 }
 
 #[cfg(test)]
@@ -500,7 +329,7 @@ mod tests {
             page: 2,
             ..PublicBoardQuery::default()
         };
-        query.passthrough = vec![("utm".to_owned(), "a b".to_owned())];
+        query.passthrough = pairs(&[("utm", "a b"), ("auction", "unexpected")]);
         assert_eq!(
             public_query_pairs(&query),
             pairs(&[
@@ -589,5 +418,64 @@ mod tests {
         let page_size = keys.iter().position(|(key, _)| key == "page_size").unwrap();
         let passthrough = keys.iter().position(|(key, _)| key == "ref").unwrap();
         assert!(page_size < passthrough);
+    }
+
+    #[test]
+    fn auction_query_distinguishes_absence_valid_ids_and_invalid_values() {
+        const AUCTION: &str = "67e55044-10b1-426f-9247-bb680e5fe0c8";
+        let absent = parse_public_query("/", "");
+        assert_eq!(absent.auction_id(), None);
+        assert_eq!(absent.auction_parameter(), &AuctionParameter::Unspecified);
+        assert!(!public_query_pairs(&absent).iter().any(|(key, _)| key == "auction"));
+
+        for version in 1..=5 {
+            let auction = AUCTION.replace("426f", &format!("{version}26f"));
+            let valid = parse_public_query("/", &format!("?auction={auction}"));
+            assert_eq!(valid.auction_id(), Some(auction.as_str()));
+            assert_eq!(valid.auction_parameter(), &AuctionParameter::Selected(auction));
+        }
+
+        for value in [
+            String::new(),
+            "truncated".to_owned(),
+            AUCTION.to_uppercase(),
+            AUCTION.replace("426f", "726f"),
+            AUCTION.replace("9247", "4247"),
+            AUCTION.replace('-', ""),
+            format!("{{{AUCTION}}}"),
+            format!("urn:uuid:{AUCTION}"),
+        ] {
+            let invalid = parse_public_query("/", &format!("?auction={value}"));
+            assert_eq!(invalid.auction_id(), None, "非法原文不能作为读取目标投影");
+            assert_eq!(
+                invalid.auction_parameter(),
+                &AuctionParameter::Invalid(vec![value.clone()])
+            );
+            assert!(public_query_pairs(&invalid).contains(&("auction".to_owned(), value)));
+        }
+
+        let duplicate = parse_public_query("/", &format!("?auction={AUCTION}&auction={AUCTION}"));
+        assert!(matches!(duplicate.auction_parameter(), AuctionParameter::Invalid(_)));
+        assert_eq!(
+            public_query_pairs(&duplicate).into_iter().filter(|(key, _)| key == "auction").count(),
+            2
+        );
+    }
+
+    #[test]
+    fn auction_link_selection_and_clear_replace_the_invalid_values() {
+        let id = "67e55044-10b1-426f-9247-bb680e5fe0c8";
+        let invalid = parse_public_query("/", "?auction=&auction=broken&world=isekai");
+        assert_eq!(
+            invalid.auction_parameter(),
+            &AuctionParameter::Invalid(vec![String::new(), "broken".to_owned()])
+        );
+        for selection in [Some(id.to_owned()), None] {
+            let href = public_href_for_auction("/", invalid.clone(), selection.clone());
+            let parsed = parse_public_query("/", location_parts(&href).1);
+            assert_eq!(parsed.world.as_deref(), Some("isekai"));
+            assert_eq!(parsed.auction_id(), selection.as_deref());
+            assert!(!matches!(parsed.auction_parameter(), AuctionParameter::Invalid(_)));
+        }
     }
 }

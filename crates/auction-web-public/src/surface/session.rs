@@ -8,8 +8,9 @@ use auction_web_shared::a11y::focus_element_by_id;
 use auction_web_shared::{BaseErrorKind, base_api_error_message, t};
 use dioxus::core::Runtime;
 use dioxus::prelude::*;
-use url::form_urlencoded;
 
+pub(crate) use super::login_return::login_href_for_current_location;
+use super::login_return::login_return_path;
 use super::{PublicSessionResource, Route};
 use crate::api::{
     PublicSession, PublicSessionApiError, SessionRefreshReason, fetch_registration_info,
@@ -51,16 +52,7 @@ enum SessionMenuState {
     Authenticated { user_id: String, username: String },
 }
 
-#[derive(Clone)]
-pub(crate) struct InitialLoginReturnLocation(String);
-
-/// 在 Router 规范化地址前保存首次同源 pathname + search。
-pub(crate) fn initial_login_return_location() -> InitialLoginReturnLocation {
-    let value = browser_path_and_search().unwrap_or_else(|| "/".to_owned());
-    InitialLoginReturnLocation(safe_return_path(Some(&value)))
-}
-
-pub(super) fn login(return_to: Option<String>) -> Element {
+pub(super) fn login() -> Element {
     let mut key = use_signal(String::new);
     #[cfg(test)]
     if let Some(fixture) = try_use_context::<LoginFormFixture>() {
@@ -87,7 +79,7 @@ pub(super) fn login(return_to: Option<String>) -> Element {
     });
     let navigator = use_navigator();
     let commands = use_context::<SessionCommandScope>();
-    let return_path = safe_return_path(return_to.as_deref());
+    let return_path = login_return_path();
     let result_snapshot = result.read();
     let failed = matches!(result_snapshot.as_ref(), Some(LoginState::Failure(_)));
 
@@ -219,64 +211,6 @@ fn retry_registration(mut accounts: RegistrationAccounts) {
     // 先清除上一次失败，让界面回到加载态。重试只启动名单读取。
     accounts.clear();
     accounts.restart();
-}
-
-/// 为需要认证的 CTA 保存当前 pathname 与 search；直接登录入口不携带返回地址。
-pub(crate) fn login_href_for_current_location() -> String {
-    let Some(return_to) = current_path_and_search() else {
-        return "/login".to_owned();
-    };
-    // 旧版用 Router state 保存来源；根路径本就是登录页默认返回值，地址栏保持裸 `/login`。
-    if return_to == "/" {
-        return "/login".to_owned();
-    }
-    let query = form_urlencoded::Serializer::new(String::new())
-        .append_pair("return_to", &return_to)
-        .finish();
-    format!("/login?{query}")
-}
-
-fn safe_return_path(value: Option<&str>) -> String {
-    let Some(value) = value else {
-        return "/".to_owned();
-    };
-    if !value.starts_with('/')
-        || value.starts_with("//")
-        || value.starts_with("/login?")
-        || value == "/login"
-        || value.contains(['\\', '#'])
-        || value.bytes().any(|byte| byte.is_ascii_control())
-    {
-        return "/".to_owned();
-    }
-    value.to_owned()
-}
-
-fn current_path_and_search() -> Option<String> {
-    let current = browser_path_and_search()?;
-    if current.contains('?') {
-        return (safe_return_path(Some(&current)) == current).then_some(current);
-    }
-    if let Some(initial) = try_consume_context::<InitialLoginReturnLocation>()
-        && initial.0.split('?').next() == Some(current.as_str())
-        && safe_return_path(Some(&initial.0)) == initial.0
-    {
-        return Some(initial.0);
-    }
-    (safe_return_path(Some(&current)) == current).then_some(current)
-}
-
-fn browser_path_and_search() -> Option<String> {
-    #[cfg(target_arch = "wasm32")]
-    {
-        let location = web_sys::window()?.location();
-        let pathname = location.pathname().ok()?;
-        let search = location.search().unwrap_or_default();
-        Some(format!("{pathname}{search}"))
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    None
 }
 
 /// 页头账号菜单：头像下拉，集中账户、退出与匿名登录入口。

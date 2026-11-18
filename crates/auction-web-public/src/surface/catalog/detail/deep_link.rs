@@ -265,11 +265,11 @@ fn catalog_position(
     PublicBoardQuery {
         // 主世界沿用无参数 URL。
         world: normalize_world_query(world).filter(|world| world != "main"),
-        auction_id: historical_auction_id,
         category,
         page,
         ..base
     }
+    .with_auction_values(historical_auction_id)
 }
 
 /// 按分类筛选后拍品所在的页码。编号末尾的数字是分类内序号，目录按同一顺序排列，第 n 件在
@@ -466,23 +466,32 @@ pub(in crate::surface::catalog) mod tests {
     }
 
     #[test]
-    fn current_auction_lands_on_the_world_home_with_category_and_page() {
+    fn catalog_position_keeps_the_auction_state_aligned_with_the_link() {
         let query = catalog_position(&row("Clo16", "Cloth"), "main", None, base(10));
         assert_eq!(
-            (query.world, query.auction_id, query.category, query.page, query.page_size),
-            (None, None, Some("clo".to_owned()), 2, 10)
+            (
+                query.world.as_deref(),
+                query.auction_id(),
+                query.category.as_deref(),
+                query.page,
+                query.page_size
+            ),
+            (None, None, Some("clo"), 2, 10)
         );
         // 异世界带世界参数；往期场次带场次参数。
+        let auction_id = "67e55044-10b1-426f-9247-bb680e5fe0c8";
         let query = catalog_position(
             &row("Hea03", "Heavy"),
             "isekai",
-            Some("auction-7".to_owned()),
+            Some(auction_id.to_owned()),
             base(20),
         );
         assert_eq!(
-            (query.world, query.auction_id, query.category, query.page),
-            (Some("isekai".to_owned()), Some("auction-7".to_owned()), Some("hea".to_owned()), 1)
+            (query.world.as_deref(), query.auction_id(), query.category.as_deref(), query.page),
+            (Some("isekai"), Some(auction_id), Some("hea"), 1)
         );
+        let href = super::public_href("/", &query);
+        assert!(href.contains(&format!("auction={auction_id}")));
     }
 
     #[test]
