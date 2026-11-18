@@ -11,10 +11,14 @@ use serde::Deserialize;
 use url::form_urlencoded;
 
 #[cfg(test)]
+use super::AdminApiFailure;
+#[cfg(test)]
 use super::realtime::send_get;
 #[cfg(not(test))]
 use super::send_get;
-use super::{invalid_response_error, response_error, valid_admin_time, valid_uuid};
+use super::{
+    invalid_response_error, parse_local_datetime, response_error, valid_admin_time, valid_uuid,
+};
 
 /// 旧 audit decoder 允许响应增加字段，但所有旧必需字段仍必须显式存在并满足业务语义。
 /// 保留镜像的理由：wire 允许兼容扩展，contracts 的 `AdminAuditResponse`/
@@ -96,7 +100,7 @@ impl AdminAuditFilter {
         }
         let instant = Timestamp::parse_from_rfc3339(value)
             .ok()
-            .or_else(|| Timestamp::parse_from_rfc3339(&super::normalize_datetime(value)).ok())?;
+            .or_else(|| parse_local_datetime(value).ok())?;
         Some(instant.to_rfc3339_opts(SecondsFormat::AutoSi, true))
     }
 }
@@ -123,6 +127,16 @@ pub(crate) async fn fetch_admin_audit(
     append_time_filter(&mut query, "occurred_to", &filter.occurred_to)?;
 
     let url = format!("/api/v1/admin/audit?{}", query.finish());
+    #[cfg(test)]
+    if let Some(stub) = dioxus::prelude::try_consume_context::<AuditReadStub>() {
+        let (status, body) = (stub.0)(&url);
+        if status != 200 {
+            return Err(AdminApiFailure::from_http_body(status, &body).code);
+        }
+        let payload: ApiResponse<StrictAuditPage> =
+            serde_json::from_str(&body).map_err(invalid_response_error)?;
+        return decode_audit_page(payload.data, page, page_size).map_err(invalid_response_error);
+    }
     let response = send_get(&url).await?;
     if !response.ok() {
         return Err(response_error(response).await);
@@ -130,6 +144,21 @@ pub(crate) async fn fetch_admin_audit(
     let payload: ApiResponse<StrictAuditPage> =
         response.json().await.map_err(invalid_response_error)?;
     decode_audit_page(payload.data, page, page_size).map_err(invalid_response_error)
+}
+
+#[cfg(test)]
+type AuditReadResponder = dyn Fn(&str) -> (u16, String);
+
+#[cfg(test)]
+#[derive(Clone)]
+struct AuditReadStub(std::rc::Rc<AuditReadResponder>);
+
+#[cfg(test)]
+impl AdminApiFailure {
+    /// 为审计页宿主回归提供按实际查询地址匹配的原始 HTTP 回执。
+    pub(crate) fn stub_audit_responses(respond: impl Fn(&str) -> (u16, String) + 'static) {
+        dioxus::prelude::provide_context(AuditReadStub(std::rc::Rc::new(respond)));
+    }
 }
 
 fn decode_audit_page(

@@ -70,7 +70,7 @@ pub(super) fn NumberInput(
                             || issues.0.peek().iter().any(|issue| issue.path == path);
                         edit.set(Some(NumberEdit { issue, reported: reported && issue.is_some() }));
                         if reported && issue.is_none() {
-                            announcer.clear();
+                            announcer.clear_field(&field_id(&path));
                         }
                         on_input.call(value);
                     }
@@ -81,13 +81,84 @@ pub(super) fn NumberInput(
                         && !issues.0.peek().iter().any(|issue| issue.path == path)
                     {
                         edit.set(Some(NumberEdit { issue: Some(issue), reported: true }));
-                        announcer.announce_on_blur(issue.message(minimum, maximum));
+                        announcer.announce_on_blur(&field_id(&path), issue.message(minimum, maximum));
                     }
                 },
             }
             if let Some(message) = message.as_ref() {
                 small { id: error_id.clone(), class: "admin-config-field-error", "{message}" }
             }
+        }
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use std::rc::Rc;
+
+    use dioxus::core::Mutation;
+    use dioxus::prelude::*;
+
+    use super::NumberInput;
+    use crate::surface::auctions::draft_page_tests::init_i18n;
+    use crate::surface::config::field_announcement::{FieldLiveRegion, use_field_announcer};
+    use crate::surface::config::test_form::{FormBrowser, dispatch};
+    use crate::surface::config::validation::FormIssues;
+    use crate::surface::realtime::text_attributes;
+
+    fn number_pair() -> Element {
+        init_i18n();
+        let mut first = use_signal(|| "11".to_owned());
+        let mut second = use_signal(|| "0".to_owned());
+        let issues = use_signal(Vec::new);
+        use_context_provider(|| FormIssues(issues));
+        let announcer = use_field_announcer();
+        use_context_provider(|| announcer);
+        rsx! {
+            NumberInput {
+                path: "first", label: "数字一", minimum: "0", maximum: "10",
+                original: Some("11".to_owned()), value: first(), disabled: false,
+                on_input: move |value| first.set(value),
+            }
+            NumberInput {
+                path: "second", label: "数字二", minimum: "0", maximum: "20",
+                original: Some("0".to_owned()), value: second(), disabled: false,
+                on_input: move |value| second.set(value),
+            }
+            FieldLiveRegion { announcer }
+        }
+    }
+
+    #[test]
+    fn correcting_a_number_only_cancels_its_own_pending_announcement() {
+        for corrected in ["first", "second"] {
+            let browser = Rc::new(FormBrowser::default());
+            let mut dom = VirtualDom::new(number_pair).with_root_context(browser.clone());
+            let edits = dom.rebuild_to_vec().edits;
+            let field = |path| {
+                text_attributes(&edits, "data-runtime-number")
+                    .find_map(|(id, name)| (name == path).then_some(id))
+                    .unwrap()
+            };
+            let second = field("second");
+            dispatch(&dom, second, "input", "21");
+            dom.render_immediate_to_vec();
+            dispatch(&dom, second, "blur", "");
+            let invalid = dom.render_immediate_to_vec().edits;
+            assert!(
+                text_attributes(&invalid, "aria-invalid").any(|entry| entry == (second, "true"))
+            );
+            dispatch(&dom, field(corrected), "input", "1");
+            dom.render_immediate_to_vec();
+
+            browser.fire_timer();
+            let announcement = dom.render_immediate_to_vec().edits;
+            assert_eq!(
+                announcement.iter().any(|edit| matches!(edit,
+                    Mutation::SetText { value, .. } if value.contains("20")
+                )),
+                corrected == "first"
+            );
         }
     }
 }

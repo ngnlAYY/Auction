@@ -104,6 +104,11 @@ impl TestPage {
         &self.dom
     }
 
+    pub(in crate::surface) fn rerender(&mut self) {
+        self.dom.mark_dirty(ScopeId::APP);
+        self.render();
+    }
+
     fn render(&mut self) -> Vec<Mutation> {
         let mut edits = Vec::new();
         // 地址变化先传播给资源和草稿 effect，随后更新字段子组件。

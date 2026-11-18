@@ -3,6 +3,8 @@
 use auction_time::Timestamp;
 use auction_web_shared::t;
 
+use crate::api::{LocalTimeError, parse_local_datetime};
+
 pub(super) fn admin_auction_status_label(status: &str) -> String {
     match status {
         "draft" => t!("admin-auctions-status-draft"),
@@ -88,79 +90,17 @@ impl ScheduleIssue {
 
 /// 只在操作员提交时解析本地分钟。用户输入必须在浏览器时区内有唯一的 UTC 对应。
 pub(super) fn parse_local_schedule_time(value: &str) -> Result<Timestamp, ScheduleIssue> {
-    #[cfg(target_arch = "wasm32")]
-    {
-        let date = js_sys::Date::new_0();
-        resolve_local_minute(value, |utc_millis| {
-            if !date.set_time(utc_millis as f64).is_finite() {
-                return None;
-            }
-            Some((
-                [
-                    date.get_full_year() as i32,
-                    date.get_month() as i32 + 1,
-                    date.get_date() as i32,
-                    date.get_hours() as i32,
-                    date.get_minutes() as i32,
-                ],
-                date.get_seconds(),
-            ))
-        })
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    resolve_local_minute(value, |utc_millis| {
-        let utc = Timestamp::from_timestamp_millis(utc_millis)?;
-        Some((minute_fields(utc), u32::from(utc.to_utc_datetime().second().unsigned_abs())))
-    })
-}
-
-fn resolve_local_minute(
-    value: &str,
-    mut local_fields: impl FnMut(i64) -> Option<([i32; 5], u32)>,
-) -> Result<Timestamp, ScheduleIssue> {
     if value.is_empty() {
         return Err(ScheduleIssue::Required);
     }
     if value.len() != 16 || value.as_bytes()[10] != b'T' {
         return Err(ScheduleIssue::InvalidTime);
     }
-    // 仅用这一时刻表示输入的年月日时分，实际 UTC 由下方反向核对确定。
-    let wall = Timestamp::parse_from_rfc3339(&format!("{value}:00Z"))
-        .map_err(|_error| ScheduleIssue::InvalidTime)?;
-    let target = minute_fields(wall);
-    let wall_millis = wall.timestamp_millis();
-    let mut utc = None;
-    // 时区偏移不足一天。遍历可能的分钟偏移并核对本地字段，避免假定回拨幅度为一小时。
-    // 若偏移还包含秒，补正后再核对，禁止将输入静默移到缺口之后。
-    for minutes in -1_440_i64..=1_440 {
-        let probe = wall_millis + minutes * 60_000;
-        let Some((fields, second)) = local_fields(probe) else {
-            continue;
-        };
-        if fields != target {
-            continue;
-        }
-        let candidate = probe - i64::from(second) * 1_000;
-        if second != 0 && local_fields(candidate) != Some((target, 0)) {
-            continue;
-        }
-        if utc.replace(candidate).is_some_and(|previous| previous != candidate) {
-            return Err(ScheduleIssue::AmbiguousLocalTime);
-        }
-    }
-    utc.and_then(Timestamp::from_timestamp_millis).ok_or(ScheduleIssue::NonexistentLocalTime)
-}
-
-fn minute_fields(timestamp: Timestamp) -> [i32; 5] {
-    let fields = timestamp.to_utc_datetime();
-    [
-        i32::from(fields.year()),
-        i32::from(fields.month()),
-        i32::from(fields.day()),
-        i32::from(fields.hour()),
-        i32::from(fields.minute()),
-    ]
+    parse_local_datetime(value).map_err(|error| match error {
+        LocalTimeError::Invalid => ScheduleIssue::InvalidTime,
+        LocalTimeError::Nonexistent => ScheduleIssue::NonexistentLocalTime,
+        LocalTimeError::Ambiguous => ScheduleIssue::AmbiguousLocalTime,
+    })
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -203,17 +143,11 @@ mod tests {
     use auction_time::Timestamp;
 
     use super::{
-        ScheduleField, ScheduleIssue, ScheduleMode, minute_fields, resolve_local_minute,
-        validate_schedule,
+        ScheduleField, ScheduleIssue, ScheduleMode, parse_local_schedule_time, validate_schedule,
     };
 
     fn utc(value: &str) -> Timestamp {
         Timestamp::parse_from_rfc3339(value).unwrap()
-    }
-
-    fn local_minute(probe: i64, offset_minutes: i64) -> Option<([i32; 5], u32)> {
-        let local = Timestamp::from_timestamp_millis(probe + offset_minutes * 60_000)?;
-        Some((minute_fields(local), 0))
     }
 
     #[test]
@@ -230,38 +164,11 @@ mod tests {
     }
 
     #[test]
-    fn spring_forward_accepts_a_valid_minute_and_rejects_a_skipped_one() {
-        let transition = utc("2027-03-14T10:00:00Z").timestamp_millis();
-        let format_local =
-            |probe| local_minute(probe, if probe < transition { -480 } else { -420 });
-        assert_eq!(
-            resolve_local_minute("2027-03-14T03:30", format_local),
-            Ok(utc("2027-03-14T10:30:00Z"))
-        );
-        assert_eq!(
-            resolve_local_minute("2027-03-14T02:30", format_local),
-            Err(ScheduleIssue::NonexistentLocalTime)
-        );
-        assert_eq!(
-            resolve_local_minute("2027-02-29T12:00", format_local),
-            Err(ScheduleIssue::InvalidTime)
-        );
-    }
-
-    #[test]
-    fn rejects_repeated_minutes_without_assuming_a_one_hour_shift() {
-        let transition = utc("2027-11-07T09:00:00Z").timestamp_millis();
-        for shift in [30, 60] {
-            let format_local =
-                |probe| local_minute(probe, if probe < transition { -420 } else { -420 - shift });
-            assert_eq!(
-                resolve_local_minute("2027-11-07T01:45", format_local),
-                Err(ScheduleIssue::AmbiguousLocalTime)
-            );
-            assert_eq!(
-                resolve_local_minute("2027-11-07T02:00", format_local),
-                Ok(utc(if shift == 30 { "2027-11-07T09:30:00Z" } else { "2027-11-07T10:00:00Z" }))
-            );
+    fn schedule_still_requires_local_minute_input() {
+        assert_eq!(parse_local_schedule_time(""), Err(ScheduleIssue::Required));
+        assert_eq!(parse_local_schedule_time("2027-03-14T03:30"), Ok(utc("2027-03-14T03:30:00Z")));
+        for input in ["2027-03-14T03:30:00", "2027-03-14 03:30", "2027-02-29T12:00"] {
+            assert_eq!(parse_local_schedule_time(input), Err(ScheduleIssue::InvalidTime));
         }
     }
 }

@@ -126,7 +126,7 @@ impl CredentialFieldFeedback {
             let issue = field.issue(value);
             if issue != previous {
                 self.errors.write().set(field, issue);
-                self.announcer.clear();
+                self.announcer.clear_field(field.id());
             }
         }
     }
@@ -138,7 +138,7 @@ impl CredentialFieldFeedback {
             && self.errors.peek().get(field) != Some(issue)
         {
             self.errors.write().set(field, Some(issue));
-            self.announcer.announce_on_blur(credential_field_issue_message(issue));
+            self.announcer.announce_on_blur(field.id(), credential_field_issue_message(issue));
         }
     }
 

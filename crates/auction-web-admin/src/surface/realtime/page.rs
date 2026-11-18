@@ -78,7 +78,13 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
             let _ = lag_refresh();
             lag_query()
         },
-        |page, size| fetch_realtime_lag_page(page, String::new(), String::new(), size),
+        |page, size| async move {
+            #[cfg(test)]
+            if let Some(reads) = try_consume_context::<std::rc::Rc<tests::LagReads>>() {
+                return reads.fetch(page, size);
+            }
+            fetch_realtime_lag_page(page, String::new(), String::new(), size).await
+        },
     );
     let (failures, failures_status) = use_admin_page_with_state(
         failure_pagination.clone(),
@@ -547,9 +553,16 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
 
 #[cfg(test)]
 mod tests {
-    use dioxus::dioxus_core::{ElementId, Mutation};
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use auction_contracts::AdminRealtimePaginationResponse;
+    use dioxus::dioxus_core::{DynamicNode, ElementId, Mutation, TemplateNode, VNode};
+    use dioxus::prelude::{VirtualDom, use_context_provider};
 
     use super::outbox_page;
+    use crate::api::{AdminApiFailure, RealtimeLagPage};
+    use crate::surface::auctions::draft_page_tests::{click_button, has_live_text, mount_writer};
     use crate::surface::realtime::filters::{EVENT_FILTER_FORM_ID, FAILURE_FILTER_FORM_ID};
     use crate::surface::realtime::{
         TestPage, get_parameter, selected_options, submit_forms, text_attributes,
@@ -557,6 +570,51 @@ mod tests {
 
     const EVENTS: &str = "/api/v1/admin/realtime/events?";
     const FAILURES: &str = "/api/v1/admin/realtime/failures?";
+
+    #[derive(Default)]
+    pub(super) struct LagReads(RefCell<Vec<(i64, i64)>>);
+
+    impl LagReads {
+        pub(super) fn fetch(&self, page: i64, page_size: i64) -> Result<RealtimeLagPage, String> {
+            let mut reads = self.0.borrow_mut();
+            reads.push((page, page_size));
+            match reads.len() {
+                1 => Err(AdminApiFailure::from_http_body(
+                    503,
+                    r#"{"code":"storage_unavailable","message":"存储暂不可用","data":null,"request_id":null}"#,
+                ).code),
+                2 => Ok(RealtimeLagPage {
+                    lags: Vec::new(),
+                    pagination: AdminRealtimePaginationResponse { page, page_size, total: 0 },
+                }),
+                _ => panic!("发生了额外的消费延迟读取"),
+            }
+        }
+    }
+
+    #[test]
+    fn realtime_retries_failed_read_after_two_page_renders() {
+        let reads = Rc::new(LagReads::default());
+        let (mut page, _) = mount_writer({
+            let reads = reads.clone();
+            move || {
+                use_context_provider(|| reads.clone());
+                outbox_page()
+            }
+        });
+        let failed = "所需服务暂时不可用。请稍后再试。";
+        let empty = "当前筛选没有匹配的消费延迟。";
+        assert!(has_live_text(&page, failed));
+        assert!(!has_live_text(&page, empty));
+        page.rerender();
+        page.rerender();
+        let first = reads.0.borrow()[0];
+        assert_eq!(*reads.0.borrow(), [first]);
+        click_button(&mut page, "重试");
+        assert_eq!(*reads.0.borrow(), [first; 2]);
+        assert!(has_live_text(&page, empty));
+        assert!(!has_live_text(&page, failed));
+    }
 
     #[derive(Clone, Copy)]
     struct TextFilter {
@@ -844,7 +902,36 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(parts.len() > 1);
         assert_eq!(parts.concat(), format!("{raw:?}"));
+        let dom = page.dom();
+        assert_eq!(word_breaks(dom, dom.base_scope().root_node()), parts.len() - 1);
         assert!(page.take_gets().iter().all(|url| !url.starts_with(EVENTS)));
+    }
+
+    fn word_breaks(dom: &VirtualDom, node: &VNode) -> usize {
+        fn in_template(node: &TemplateNode) -> usize {
+            match node {
+                TemplateNode::Element { tag: "wbr", .. } => 1,
+                TemplateNode::Element { children, .. } => children.iter().map(in_template).sum(),
+                _ => 0,
+            }
+        }
+        let static_count: usize = node.template.roots.iter().map(in_template).sum();
+        let dynamic_count: usize = node
+            .dynamic_nodes
+            .iter()
+            .enumerate()
+            .map(|(index, child)| match child {
+                DynamicNode::Component(component) => component
+                    .mounted_scope(index, node, dom)
+                    .and_then(|scope| scope.try_root_node())
+                    .map_or(0, |root| word_breaks(dom, root)),
+                DynamicNode::Fragment(nodes) => {
+                    nodes.iter().map(|node| word_breaks(dom, node)).sum()
+                }
+                _ => 0,
+            })
+            .sum();
+        static_count + dynamic_count
     }
 
     #[test]

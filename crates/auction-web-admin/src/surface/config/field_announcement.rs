@@ -12,6 +12,7 @@ use crate::surface::validation::focus_field;
 #[derive(Clone, Copy, PartialEq)]
 pub(in crate::surface) struct FieldAnnouncer {
     message: Signal<String>,
+    field: Signal<Option<String>>,
     #[cfg(any(target_arch = "wasm32", test))]
     task: Signal<Option<Task>>,
 }
@@ -20,13 +21,14 @@ pub(in crate::surface) struct FieldAnnouncer {
 pub(in crate::surface) fn use_field_announcer() -> FieldAnnouncer {
     FieldAnnouncer {
         message: use_signal(String::new),
+        field: use_signal(|| None),
         #[cfg(any(target_arch = "wasm32", test))]
         task: use_signal(|| None),
     }
 }
 
 impl FieldAnnouncer {
-    /// 字段纠正或下一次提交时撤销仍等待播报的内容。
+    /// 表单提交或替换消息时撤销先前的播报。
     pub(in crate::surface) fn clear(mut self) {
         #[cfg(any(target_arch = "wasm32", test))]
         {
@@ -38,16 +40,26 @@ impl FieldAnnouncer {
         if !self.message.peek().is_empty() {
             self.message.set(String::new());
         }
+        if self.field.peek().is_some() {
+            self.field.set(None);
+        }
+    }
+
+    /// 字段纠正不撤销其他字段的播报；未标记的单字段表单播报沿用原撤销行为。
+    pub(in crate::surface) fn clear_field(self, field_id: &str) {
+        if self.field.peek().as_deref().is_none_or(|pending| pending == field_id) {
+            self.clear();
+        }
     }
 
     /// 让同一条文案的连续两次播报各自产生内容更新。
     pub(in crate::surface) fn announce(self, message: String) {
-        self.schedule(message, 50);
+        self.schedule(None, message, 50);
     }
 
     /// 离焦时先让读屏软件读出接收焦点的控件。
-    pub(in crate::surface) fn announce_on_blur(self, message: String) {
-        self.schedule(message, 500);
+    pub(in crate::surface) fn announce_on_blur(self, field_id: &str, message: String) {
+        self.schedule(Some(field_id), message, 500);
     }
 
     /// 提交失败时由移焦播报字段错误。已聚焦或控件禁用时，通过 live region 播报。
@@ -61,12 +73,13 @@ impl FieldAnnouncer {
             self.clear();
             focus_error_field(field_id);
         } else {
-            self.announce(message);
+            self.schedule(Some(field_id), message, 50);
         }
     }
 
-    fn schedule(mut self, message: String, _delay_millis: u32) {
+    fn schedule(mut self, field_id: Option<&str>, message: String, _delay_millis: u32) {
         self.clear();
+        self.field.set(field_id.map(str::to_owned));
         #[cfg(any(target_arch = "wasm32", test))]
         {
             self.task.set(Some(spawn(async move {

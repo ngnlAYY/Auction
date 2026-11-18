@@ -368,3 +368,76 @@ pub(super) fn AdminRulesWorkspace(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use dioxus::core::Mutation;
+    use dioxus::prelude::*;
+    use gloo_net::http::Method;
+
+    use super::{AdminRulesWorkspace, RulesBaseline};
+    use crate::api::{AdminApiFailure, AdminDocumentKind, AdminRules, AdminRulesCandidate};
+    use crate::surface::auctions::draft_page_tests::{has_live_text, init_i18n, mount_writer};
+    use crate::surface::pending::use_pending_commands;
+    use crate::surface::realtime::text_attributes;
+
+    #[test]
+    fn oversized_publish_explains_how_to_correct_the_draft() {
+        let (mut page, edits) = mount_writer(|| {
+            init_i18n();
+            use_hook(|| {
+                AdminApiFailure::stub_write_response(
+                    "/api/v1/admin/rules",
+                    Method::PUT,
+                    413,
+                    r#"{"code":"body_too_large","message":"请求体过大","data":null,"request_id":null}"#,
+                );
+            });
+            let document = AdminRules {
+                locale: "zh-CN".to_owned(),
+                title: "原规则".to_owned(),
+                markdown: "原正文".to_owned(),
+                published_by: "operator".to_owned(),
+                revision: 1,
+                published_at: "2026-11-18T00:00:00Z".to_owned(),
+            };
+            let baseline = use_signal(|| Some(RulesBaseline::from_document(&document)));
+            let candidate = AdminRulesCandidate {
+                locale: document.locale.clone(),
+                title: document.title.clone(),
+                markdown: "更新的正文".to_owned(),
+            };
+            let draft = use_signal(|| Some(candidate.clone()));
+            let checked_candidate = use_signal(|| Some(candidate));
+            let target_signal = use_signal(|| document.locale.clone());
+            let notice = use_signal(|| None);
+            let busy = use_signal(|| false);
+            let dirty = use_memo(|| true);
+            let reload_generation = use_signal(|| 0);
+            let pending = use_pending_commands(reload_generation);
+            rsx! {
+                AdminRulesWorkspace {
+                    kind: AdminDocumentKind::Rules, document, target: target_signal(), target_signal,
+                    draft, checked_candidate, baseline, notice, busy, reload_generation, pending, dirty,
+                }
+            }
+        });
+        assert!(!has_live_text(&page, "请求体过大。请缩短内容后重试。"));
+        assert!(has_live_text(&page, "保存并发布"));
+        let publish = edits
+            .iter()
+            .rev()
+            .find_map(|edit| match edit {
+                Mutation::NewEventListener { name, id } if name == "click" => Some(*id),
+                _ => None,
+            })
+            .unwrap();
+        page.dispatch("click", publish, "");
+        assert!(has_live_text(&page, "请求体过大。请缩短内容后重试。"));
+        let markdown = text_attributes(&edits, "value")
+            .find_map(|(id, value)| (value == "更新的正文").then_some(id))
+            .unwrap();
+        let edited = page.dispatch("input", markdown, "短正文");
+        assert!(text_attributes(&edited, "value").any(|entry| entry == (markdown, "短正文")));
+    }
+}

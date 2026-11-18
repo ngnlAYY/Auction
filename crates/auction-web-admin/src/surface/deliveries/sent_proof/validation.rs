@@ -13,8 +13,7 @@ pub(super) fn sent_minute_from_input(value: &str) -> Option<String> {
     if value.is_empty() {
         return None;
     }
-    let normalized = crate::api::normalize_datetime(value);
-    let parsed = auction_time::Timestamp::parse_from_rfc3339(&normalized).ok()?;
+    let parsed = crate::api::parse_local_datetime(value).ok()?;
     if parsed.to_utc_datetime().second() != 0 || parsed.timestamp_subsec_nanos() != 0 {
         return None;
     }

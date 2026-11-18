@@ -1,11 +1,11 @@
 //! Delivery 检索筛选器组件：状态 + 收件人、参考编号、模板、类别、世界与时间。
 
-use auction_time::SecondsFormat;
-use auction_web_shared::t;
+use auction_time::{SecondsFormat, Timestamp};
+use auction_web_shared::{a11y::focus_element_by_id_after_render, t};
 use dioxus::prelude::*;
 
 use super::labels::{DELIVERY_STATUS_VALUES, delivery_category_label, delivery_status_label};
-use crate::api::{datetime_local_value, normalize_datetime};
+use crate::api::{LocalTimeError, datetime_local_value, parse_local_datetime};
 use crate::surface::admin_world_label;
 
 /// 提交前的筛选草稿；只在「应用筛选」时写入地址栏，输入过程不触发网络请求。
@@ -22,18 +22,32 @@ pub(super) struct DeliveryFiltersDraft {
 
 const DELIVERY_CATEGORY_VALUES: [&str; 7] =
     ["outbid", "account", "intake", "settlement", "equipment", "operations", "manual"];
+const CREATED_FROM_FIELD: &str = "delivery-created-from";
+const CREATED_TO_FIELD: &str = "delivery-created-to";
 
-/// 地址栏中的 UTC RFC3339 → 浏览器本地分钟；与提交换算、详情与其他筛选页共用同一时区规则。
+/// 只转换显示值，草稿在实际编辑前保留地址栏的精确时刻。
 fn timestamp_to_local_input(value: &str) -> String {
-    datetime_local_value(value).unwrap_or_default()
+    if Timestamp::parse_from_rfc3339(value).is_ok() {
+        datetime_local_value(value).unwrap_or_default()
+    } else {
+        value.to_owned()
+    }
 }
 
-/// 浏览器本地分钟 → 服务端接受的 UTC RFC3339（秒精度）；空串或无法换算时视为不设界。
-fn local_input_to_timestamp(value: &str) -> String {
-    auction_time::Timestamp::parse_from_rfc3339(&normalize_datetime(value))
-        .ok()
-        .map(|value| value.to_rfc3339_opts(SecondsFormat::Secs, true))
-        .unwrap_or_default()
+fn time_bound(value: &str) -> Result<String, LocalTimeError> {
+    if value.is_empty() || Timestamp::parse_from_rfc3339(value).is_ok() {
+        return Ok(value.to_owned());
+    }
+    // 无效边界不能降级成无界查询。
+    parse_local_datetime(value).map(|value| value.to_rfc3339_opts(SecondsFormat::AutoSi, true))
+}
+
+fn time_bound_error(issue: LocalTimeError) -> String {
+    match issue {
+        LocalTimeError::Invalid => t!("admin-auctions-invalid-local-time"),
+        LocalTimeError::Nonexistent => t!("admin-auctions-nonexistent-local-time"),
+        LocalTimeError::Ambiguous => t!("admin-auctions-ambiguous-local-time"),
+    }
 }
 
 #[component]
@@ -56,16 +70,20 @@ pub(super) fn DeliveryFilters(
         template,
         category,
         world,
-        created_from: timestamp_to_local_input(&created_from),
-        created_to: timestamp_to_local_input(&created_to),
+        created_from,
+        created_to,
     };
     let mut draft = use_signal(|| applied.clone());
+    let mut from_error = use_signal(|| None);
+    let mut to_error = use_signal(|| None);
     // 已应用筛选随前进/后退或提交变化时整体重建草稿；否则旧草稿会在下一次“应用”时把过期
     // 条件写回地址栏。已应用筛选不变时保留操作员尚未提交的编辑。
     use_effect(use_reactive((&applied,), move |(applied,)| {
         if *draft.peek() != applied {
             draft.set(applied);
         }
+        from_error.set(None);
+        to_error.set(None);
     }));
     rsx! {
         div { class: "admin-delivery-filter",
@@ -89,14 +107,23 @@ pub(super) fn DeliveryFilters(
                 onsubmit: move |event| {
                     event.prevent_default();
                     let current = draft();
+                    let from = time_bound(&current.created_from);
+                    let to = time_bound(&current.created_to);
+                    from_error.set(from.as_ref().err().copied());
+                    to_error.set(to.as_ref().err().copied());
+                    let first_invalid = if from.is_err() { CREATED_FROM_FIELD } else { CREATED_TO_FIELD };
+                    let (Ok(created_from), Ok(created_to)) = (from, to) else {
+                        focus_element_by_id_after_render(first_invalid);
+                        return;
+                    };
                     on_filters_change.call(DeliveryFiltersDraft {
                         recipient: current.recipient.trim().to_owned(),
                         reference: current.reference.trim().to_owned(),
                         template: current.template.trim().to_owned(),
                         category: current.category,
                         world: current.world,
-                        created_from: local_input_to_timestamp(&current.created_from),
-                        created_to: local_input_to_timestamp(&current.created_to),
+                        created_from,
+                        created_to,
                     });
                 },
                 label { r#for: "delivery-recipient",
@@ -152,26 +179,100 @@ pub(super) fn DeliveryFilters(
                         option { value: "isekai", {admin_world_label("isekai")} }
                     }
                 }
-                label { r#for: "delivery-created-from",
+                label { r#for: CREATED_FROM_FIELD,
                     span { {t!("delivery-created-from")} }
                     input {
-                        id: "delivery-created-from",
+                        id: CREATED_FROM_FIELD,
                         r#type: "datetime-local",
-                        value: "{draft().created_from}",
-                        oninput: move |event| draft.write().created_from = event.value(),
+                        aria_invalid: from_error().is_some().to_string(),
+                        aria_describedby: from_error().is_some().then_some("delivery-created-from-error"),
+                        value: timestamp_to_local_input(&draft.read().created_from),
+                        oninput: move |event| {
+                            let value = event.value();
+                            if from_error.peek().is_some() && time_bound(&value).is_ok() {
+                                from_error.set(None);
+                            }
+                            draft.write().created_from = value;
+                        },
+                    }
+                    if let Some(issue) = from_error() {
+                        small { id: "delivery-created-from-error", class: "admin-field-error", {time_bound_error(issue)} }
                     }
                 }
-                label { r#for: "delivery-created-to",
+                label { r#for: CREATED_TO_FIELD,
                     span { {t!("delivery-created-to")} }
                     input {
-                        id: "delivery-created-to",
+                        id: CREATED_TO_FIELD,
                         r#type: "datetime-local",
-                        value: "{draft().created_to}",
-                        oninput: move |event| draft.write().created_to = event.value(),
+                        aria_invalid: to_error().is_some().to_string(),
+                        aria_describedby: to_error().is_some().then_some("delivery-created-to-error"),
+                        value: timestamp_to_local_input(&draft.read().created_to),
+                        oninput: move |event| {
+                            let value = event.value();
+                            if to_error.peek().is_some() && time_bound(&value).is_ok() {
+                                to_error.set(None);
+                            }
+                            draft.write().created_to = value;
+                        },
+                    }
+                    if let Some(issue) = to_error() {
+                        small { id: "delivery-created-to-error", class: "admin-field-error", {time_bound_error(issue)} }
                     }
                 }
                 button { class: "admin-btn-primary", r#type: "submit", {t!("delivery-search-apply")} }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use dioxus::prelude::*;
+
+    use super::{DeliveryFilters, DeliveryFiltersDraft};
+    use crate::surface::auctions::draft_page_tests::{mount_writer, writer_form};
+    use crate::surface::realtime::text_attributes;
+
+    #[test]
+    fn invalid_delivery_time_blocks_submit_and_unedited_prefill_keeps_precision() {
+        let applied = Rc::new(RefCell::new(Vec::<DeliveryFiltersDraft>::new()));
+        let from = "2026-11-18T09:05:37.500123456+08:00";
+        let to = "2026-11-19T01:05:00Z";
+        let (mut page, edits) = mount_writer({
+            let applied = applied.clone();
+            move || {
+                let applied = applied.clone();
+                rsx! {
+                    DeliveryFilters {
+                        status: "", recipient: "", reference: "", template: "", category: "",
+                        world: "", created_from: from, created_to: to, on_status_change: |_| {},
+                        on_filters_change: move |filters| applied.borrow_mut().push(filters),
+                    }
+                }
+            }
+        });
+        let form = writer_form(&edits);
+        let to_input = text_attributes(&edits, "value")
+            .find_map(|(id, value)| (value == "2026-11-19T01:05").then_some(id))
+            .unwrap();
+
+        page.dispatch("input", to_input, "2026-11-31T01:05");
+        let invalid = page.dispatch("submit", form, "");
+        assert!(applied.borrow().is_empty());
+        assert!(text_attributes(&invalid, "aria-invalid").any(|entry| entry == (to_input, "true")));
+        assert!(
+            text_attributes(&invalid, "aria-describedby")
+                .any(|entry| entry == (to_input, "delivery-created-to-error"))
+        );
+
+        page.dispatch("input", to_input, "2026-11-20T01:05");
+        page.dispatch("submit", form, "");
+        let applied = applied.borrow();
+        assert_eq!(applied.len(), 1);
+        assert_eq!(applied[0].created_from, from);
+        assert_eq!(applied[0].created_to, "2026-11-20T01:05:00Z");
     }
 }

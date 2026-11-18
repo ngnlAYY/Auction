@@ -1,15 +1,10 @@
 //! 告警页的宿主渲染回归，替身只记录发送并提供原始回执。
 
-use std::any::Any;
 use std::cell::{Cell, RefCell};
-use std::process::Command;
 use std::rc::Rc;
 
 use auction_web_shared::{LocaleSession, TransportError, build_bundle};
 use dioxus::dioxus_core::{AttributeValue, DynamicNode, ElementId, Mutation, VNode};
-use dioxus::html;
-use dioxus::html::geometry::{ClientPoint, ElementPoint, PagePoint, ScreenPoint};
-use dioxus::html::input_data::{MouseButton, MouseButtonSet};
 use dioxus::prelude::*;
 use dioxus_i18n::prelude::try_use_init_i18n_from_bundle;
 use serde_json::{Value, json};
@@ -17,6 +12,7 @@ use uuid::Uuid;
 
 use crate::api::{AdminApiFailure, AdminSessionWritePermission};
 use crate::surface::ADMIN_LOCALE_CATALOG;
+use crate::surface::test_events::{dispatch_click_event, dispatch_form_event};
 
 const N: i64 = 2;
 const ALERT_ID: &str = "abababababababababababababababababababababababababababababababab";
@@ -114,7 +110,6 @@ struct Page(VirtualDom);
 
 impl Page {
     fn mount(requests: Rc<Requests>) -> Self {
-        html::set_event_converter(Box::new(PageEventConverter));
         let mut page = Self(VirtualDom::new(test_page).with_root_context(requests));
         page.0.rebuild_to_vec();
         page.render();
@@ -136,9 +131,11 @@ impl Page {
     }
 
     fn event(&mut self, name: &str, target: ElementId, value: &str) -> Vec<Mutation> {
-        let data = html::PlatformEventData::new(Box::new(value.to_owned()));
-        let event: Event<dyn Any> = Event::new(Rc::new(data), !matches!(name, "focus" | "blur"));
-        self.0.runtime().handle_event(name, event, target);
+        if name == "click" {
+            dispatch_click_event(&self.0, target);
+        } else {
+            dispatch_form_event(&self.0, target, name, value);
+        }
         self.render()
     }
 
@@ -258,7 +255,8 @@ fn check_retry(action: &str, action_index: usize) {
     page.event("input", page.reason(), "第二轮备注");
 
     let rejected = page.event("click", retry, "");
-    assert_eq!(updated_text(&rejected, "告警状态已变化。请核对重新读取后的列表"), 1);
+    // 页面反馈与未决面板都说明要以重读后的告警为准。
+    assert_eq!(updated_text(&rejected, "告警状态已变化。请核对重新读取后的列表"), 2);
     assert_eq!(updated_text(&rejected, "关闭已拒绝操作"), 1);
     assert_eq!(*requests.reads.borrow(), ["active", "all", "all"]);
     {
@@ -296,185 +294,47 @@ fn check_retry(action: &str, action_index: usize) {
 
 #[test]
 fn acknowledge_retries_original_incident_and_allows_new_command_after_stale() {
-    in_isolated_renderer(|| check_retry("acknowledge", 0));
+    check_retry("acknowledge", 0);
 }
 
 #[test]
 fn silence_retries_original_incident_and_allows_new_command_after_stale() {
-    in_isolated_renderer(|| check_retry("silence", 1));
+    check_retry("silence", 1);
 }
 
 #[test]
 fn reason_announcement_survives_empty_filter_until_the_draft_is_corrected() {
-    in_isolated_renderer(|| {
-        let requests = Rc::new(Requests::default());
-        let mut page = Page::mount(requests.clone());
-        let too_long = "告".repeat(683);
-        let edits = page.event("input", page.reason(), &too_long);
-        assert_eq!(updated_text(&edits, "备注过长"), 0);
-        let edits = page.event("blur", page.reason(), "");
-        // 可见错误和 live region 各有一条相同的译文。
-        assert_eq!(updated_text(&edits, "备注过长"), 2);
+    let requests = Rc::new(Requests::default());
+    let mut page = Page::mount(requests.clone());
+    let too_long = "告".repeat(683);
+    let edits = page.event("input", page.reason(), &too_long);
+    assert_eq!(updated_text(&edits, "备注过长"), 0);
+    let edits = page.event("blur", page.reason(), "");
+    // 可见错误和 live region 各有一条相同的译文。
+    assert_eq!(updated_text(&edits, "备注过长"), 2);
 
-        let empty = page.filter("resolved");
-        assert_eq!(updated_text(&empty, "没有符合条件的告警"), 1);
-        assert!(page.component("AlertReasonInput").is_none());
-        let remounted = page.filter("active");
-        let reason = page.reason();
-        assert!(remounted.iter().any(|edit| matches!(edit,
-            Mutation::SetAttribute { id, name: "value", value: AttributeValue::Text(value), .. }
-                if *id == reason && *value == too_long
-        )));
-        page.event("focus", reason, "");
-        let edits = page.event("blur", reason, "");
-        assert_eq!(updated_text(&edits, "备注过长"), 0);
-        assert_eq!(updated_text(&remounted, "备注过长"), 1);
+    let empty = page.filter("resolved");
+    assert_eq!(updated_text(&empty, "没有符合条件的告警"), 1);
+    assert!(page.component("AlertReasonInput").is_none());
+    let remounted = page.filter("active");
+    let reason = page.reason();
+    assert!(remounted.iter().any(|edit| matches!(edit,
+        Mutation::SetAttribute { id, name: "value", value: AttributeValue::Text(value), .. }
+            if *id == reason && *value == too_long
+    )));
+    page.event("focus", reason, "");
+    let edits = page.event("blur", reason, "");
+    assert_eq!(updated_text(&edits, "备注过长"), 0);
+    assert_eq!(updated_text(&remounted, "备注过长"), 1);
 
-        let blocked_submit = page.event("click", page.row_actions(false)[0], "");
-        assert!(requests.writes.borrow().is_empty());
-        assert_eq!(updated_text(&blocked_submit, "备注过长"), 1);
+    let blocked_submit = page.event("click", page.row_actions(false)[0], "");
+    assert!(requests.writes.borrow().is_empty());
+    assert_eq!(updated_text(&blocked_submit, "备注过长"), 1);
 
-        page.event("input", reason, "已经修正");
-        page.event("input", reason, &too_long);
-        let edits = page.event("blur", reason, "");
-        assert_eq!(updated_text(&edits, "备注过长"), 2);
-        let edits = page.event("blur", reason, "");
-        assert_eq!(updated_text(&edits, "备注过长"), 0);
-    });
-}
-
-fn in_isolated_renderer(test: impl FnOnce()) {
-    // HTML 事件转换器是进程全局的，别的页面测试会注册各自的转换器。
-    const CHILD: &str = "AUCTION_ALERT_PAGE_TEST_CHILD";
-    let thread = std::thread::current();
-    let test_name = thread.name().unwrap();
-    if std::env::var(CHILD).as_deref() == Ok(test_name) {
-        test();
-        return;
-    }
-    let result = Command::new(std::env::current_exe().unwrap())
-        .args(["--exact", test_name])
-        .env(CHILD, test_name)
-        .output()
-        .unwrap();
-    let stdout = String::from_utf8_lossy(&result.stdout);
-    assert!(
-        result.status.success() && stdout.contains("1 passed"),
-        "{stdout}{}",
-        String::from_utf8_lossy(&result.stderr)
-    );
-}
-
-#[derive(Default)]
-struct PageEvent(String);
-
-impl html::HasFileData for PageEvent {
-    fn files(&self) -> Vec<html::FileData> {
-        Vec::new()
-    }
-}
-
-impl html::HasFormData for PageEvent {
-    fn value(&self) -> String {
-        self.0.clone()
-    }
-    fn valid(&self) -> bool {
-        true
-    }
-    fn values(&self) -> Vec<(String, html::FormValue)> {
-        Vec::new()
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
-
-impl html::HasFocusData for PageEvent {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
-
-impl html::HasMouseData for PageEvent {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
-
-impl html::InteractionLocation for PageEvent {
-    fn client_coordinates(&self) -> ClientPoint {
-        ClientPoint::zero()
-    }
-    fn page_coordinates(&self) -> PagePoint {
-        PagePoint::zero()
-    }
-    fn screen_coordinates(&self) -> ScreenPoint {
-        ScreenPoint::zero()
-    }
-}
-
-impl html::InteractionElementOffset for PageEvent {
-    fn element_coordinates(&self) -> ElementPoint {
-        ElementPoint::zero()
-    }
-}
-
-impl html::ModifiersInteraction for PageEvent {
-    fn modifiers(&self) -> html::Modifiers {
-        html::Modifiers::empty()
-    }
-}
-
-impl html::PointerInteraction for PageEvent {
-    fn trigger_button(&self) -> Option<MouseButton> {
-        Some(MouseButton::Primary)
-    }
-    fn held_buttons(&self) -> MouseButtonSet {
-        MouseButtonSet::empty()
-    }
-}
-
-struct PageEventConverter;
-
-macro_rules! unused_events {
-    ($($method:ident: $data:ident),+ $(,)?) => {
-        $(fn $method(&self, _: &html::PlatformEventData) -> html::$data {
-            panic!("意外的告警页事件：{}", stringify!($method))
-        })+
-    };
-}
-
-impl html::HtmlEventConverter for PageEventConverter {
-    fn convert_form_data(&self, event: &html::PlatformEventData) -> html::FormData {
-        html::FormData::new(PageEvent(event.downcast::<String>().unwrap().clone()))
-    }
-
-    fn convert_focus_data(&self, _: &html::PlatformEventData) -> html::FocusData {
-        html::FocusData::new(PageEvent::default())
-    }
-
-    fn convert_mouse_data(&self, _: &html::PlatformEventData) -> html::MouseData {
-        html::MouseData::new(PageEvent::default())
-    }
-
-    unused_events!(
-        convert_animation_data: AnimationData,
-        convert_cancel_data: CancelData,
-        convert_clipboard_data: ClipboardData,
-        convert_composition_data: CompositionData,
-        convert_drag_data: DragData,
-        convert_image_data: ImageData,
-        convert_keyboard_data: KeyboardData,
-        convert_media_data: MediaData,
-        convert_mounted_data: MountedData,
-        convert_pointer_data: PointerData,
-        convert_resize_data: ResizeData,
-        convert_scroll_data: ScrollData,
-        convert_selection_data: SelectionData,
-        convert_toggle_data: ToggleData,
-        convert_touch_data: TouchData,
-        convert_transition_data: TransitionData,
-        convert_visible_data: VisibleData,
-        convert_wheel_data: WheelData,
-    );
+    page.event("input", reason, "已经修正");
+    page.event("input", reason, &too_long);
+    let edits = page.event("blur", reason, "");
+    assert_eq!(updated_text(&edits, "备注过长"), 2);
+    let edits = page.event("blur", reason, "");
+    assert_eq!(updated_text(&edits, "备注过长"), 0);
 }

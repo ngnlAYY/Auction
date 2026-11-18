@@ -600,14 +600,15 @@ fn sort_audit_records(records: &mut [AdminAuditRecord], column: &str, direction:
 
 #[cfg(test)]
 mod tests {
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
     use std::rc::Rc;
 
     use dioxus::dioxus_core::Mutation;
     use dioxus::prelude::*;
 
     use super::{AuditField, AuditFilterState, audit_time_input, page, use_audit_filter_draft};
-    use crate::api::AdminAuditFilter;
+    use crate::api::{AdminApiFailure, AdminAuditFilter};
+    use crate::surface::auctions::draft_page_tests::{click_button, has_live_text, mount_writer};
     use crate::surface::query::AuditQuery;
     use crate::surface::realtime::{
         FilterValue, TestPage, get_parameter, selected_options, submit_forms, text_attributes,
@@ -629,6 +630,50 @@ mod tests {
                 .into(),
             ..AuditQuery::default()
         }
+    }
+
+    #[test]
+    fn audit_retries_failed_read_after_two_page_renders() {
+        let reads = Rc::new(RefCell::new(Vec::<String>::new()));
+        let (mut mounted, _) = mount_writer({
+            let reads = reads.clone();
+            move || {
+                use_hook({
+                    let reads = reads.clone();
+                    move || {
+                        AdminApiFailure::stub_audit_responses(move |url| {
+                            let mut reads = reads.borrow_mut();
+                            reads.push(url.to_owned());
+                            match reads.len() {
+                            1 => (503, r#"{"code":"storage_unavailable","message":"存储暂不可用","data":null,"request_id":null}"#.to_owned()),
+                            2 => {
+                                let size = get_parameter(url, "page_size").unwrap().parse::<i64>().unwrap();
+                                (200, serde_json::json!({"code":"ok", "message":"已读取", "data":{
+                                    "records": [], "page": 1, "page_size": size, "total": 0,
+                                    "has_more": false, "next_cursor": null, "next_cursor_token": ""
+                                }}).to_string())
+                            }
+                            _ => panic!("发生了额外的审计读取"),
+                        }
+                        });
+                    }
+                });
+                page()
+            }
+        });
+        let failed = "所需服务暂时不可用。请稍后再试。";
+        let empty = "没有符合条件的审计记录。";
+        assert!(has_live_text(&mounted, failed));
+        assert!(!has_live_text(&mounted, empty));
+        mounted.rerender();
+        mounted.rerender();
+        assert_eq!(reads.borrow().len(), 1);
+        click_button(&mut mounted, "重试");
+        let reads = reads.borrow();
+        assert_eq!(reads.len(), 2);
+        assert_eq!(reads[0], reads[1]);
+        assert!(has_live_text(&mounted, empty));
+        assert!(!has_live_text(&mounted, failed));
     }
 
     #[test]
@@ -745,5 +790,33 @@ mod tests {
         );
         assert_eq!(audit_time_input("2026-11-18T17:25"), "2026-11-18T17:25");
         assert_eq!(audit_time_input(""), "");
+    }
+
+    #[test]
+    fn audit_keeps_its_prefilled_bound_when_correcting_the_other_field() {
+        let bound = "2026-11-18T01:05:37.500123456Z";
+        let (mut mounted, initial) = TestPage::mount(page, &format!("from={bound}"));
+        let form = submit_forms(&initial).next().unwrap();
+        let to = text_attributes(&initial, "id")
+            .find_map(|(id, value)| (value == "audit-to").then_some(id))
+            .unwrap();
+        assert_eq!(mounted.take_gets().len(), 1);
+        mounted.dispatch("input", to, "2026-11-31T09:05");
+        let rejected = mounted.dispatch("submit", form, "");
+        assert!(
+            text_attributes(&rejected, "aria-describedby")
+                .any(|entry| entry == (to, "audit-to-error"))
+        );
+        mounted.assert_no_gets();
+
+        mounted.dispatch("input", to, "2026-11-20T09:05");
+        mounted.dispatch("submit", form, "");
+        let requests = mounted.take_gets();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(get_parameter(&requests[0], "occurred_from").as_deref(), Some(bound));
+        assert_eq!(
+            get_parameter(&requests[0], "occurred_to").as_deref(),
+            Some("2026-11-20T09:05:00Z")
+        );
     }
 }

@@ -137,15 +137,7 @@ pub fn CredentialCreateForm(reload_generation: Signal<u64>) -> Element {
                         },
                         move |code| {
                             // 前置拒绝只能说明本次未写入，不能消除先前未知；不凭任意 409 解锁。
-                            let rejected = definite_rejection(&code) || matches!(code.as_str(),
-                                "invalid_credential_kind" | "invalid_credential_world"
-                                | "invalid_credential_request" | "invalid_credential_label"
-                                | "invalid_credential_player_name" | "invalid_credential_secret"
-                                | "credential_conflict"
-                                | "credential_login_rejected" | "credential_login_challenge"
-                                | "credential_login_unavailable" | "credential_login_busy"
-                            );
-                            let remains_unknown = unknown() || !rejected;
+                            let remains_unknown = unknown() || !definite_rejection(&code);
                             unknown.set(remains_unknown);
                             // 可归属字段的服务端错误落到字段旁，其余保持页面级反馈。
                             let errors = CredentialFieldErrors::from_server(&code, submitted_source == CredentialSource::Cookie);
@@ -618,5 +610,36 @@ mod form_tests {
             attribute(&blurred.edits, label, "aria-describedby"),
             Some(&AttributeValue::Text("import-label-error".to_owned()))
         );
+    }
+
+    #[test]
+    fn correcting_cookie_keeps_the_pending_label_announcement() {
+        let browser = Rc::new(FormBrowser::default());
+        let mut dom = VirtualDom::new(import_form).with_root_context(browser.clone());
+        let edits = dom.rebuild_to_vec().edits;
+        let submit = listener(&edits, "submit");
+        let label = listener(&edits, "input");
+        let cookie = crate::surface::realtime::text_attributes(&edits, "id")
+            .find_map(|(id, value)| (value == "import-secret").then_some(id))
+            .unwrap();
+        dispatch(&dom, label, "input", "账号一");
+        dispatch(&dom, submit, "submit", "");
+        let invalid_cookie = dom.render_immediate_to_vec().edits;
+        assert!(matches!(attribute(&invalid_cookie, cookie, "aria-invalid"),
+            Some(AttributeValue::Text(value)) if value == "true"));
+
+        dispatch(&dom, label, "input", " ");
+        dispatch(&dom, label, "blur", "");
+        let invalid_label = dom.render_immediate_to_vec().edits;
+        assert!(matches!(attribute(&invalid_label, label, "aria-invalid"),
+            Some(AttributeValue::Text(value)) if value == "true"));
+        dispatch(&dom, cookie, "input", "example=value");
+        let corrected_cookie = dom.render_immediate_to_vec().edits;
+        assert!(matches!(attribute(&corrected_cookie, cookie, "aria-invalid"),
+            Some(AttributeValue::Text(value)) if value == "false"));
+        browser.fire_timer();
+        assert!(dom.render_immediate_to_vec().edits.iter().any(|edit| matches!(edit,
+            Mutation::SetText { value, .. } if value == "请填写此字段。"
+        )));
     }
 }

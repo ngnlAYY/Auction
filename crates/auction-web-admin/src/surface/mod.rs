@@ -84,20 +84,22 @@ pub fn run() {
 fn App() -> Element {
     router::use_initial_admin_location();
     // 默认语言编译期内嵌；其余语言按目录从静态资源取回，已保存的非默认语言在首屏等待加载。
-    let i18n_bundle = try_use_init_i18n_from_bundle(|| {
-        build_bundle(
-            &DEFAULT_ADMIN_LOCALE,
-            ADMIN_LOCALE_CATALOG.default_ftl,
-            &DEFAULT_ADMIN_LOCALE,
-            None,
-        )
+    let default_ftl = ADMIN_LOCALE_CATALOG.default_ftl;
+    #[cfg(test)]
+    let default_ftl = try_consume_context::<tests::DefaultFtl>().map_or(default_ftl, |ftl| ftl.0);
+    let initialized = try_use_init_i18n_from_bundle(|| {
+        build_bundle(&DEFAULT_ADMIN_LOCALE, default_ftl, &DEFAULT_ADMIN_LOCALE, None)
     });
-    let Ok(i18n_bundle) = i18n_bundle else {
-        return rsx! {
-            div { class: "app-root", "无法初始化界面译文。" }
-        };
-    };
-    let mut session = use_hook(|| LocaleSession::new(i18n_bundle, DEFAULT_ADMIN_LOCALE));
+    match initialized {
+        Ok(_bundle) => rsx! { LocalizedApp {} },
+        Err(_error) => rsx! { div { class: "app-root", "无法初始化界面译文。" } },
+    }
+}
+
+/// 译文初始化成功后才挂载语言与主题的 hook 宿主。
+#[component]
+fn LocalizedApp() -> Element {
+    let mut session = use_hook(|| LocaleSession::new(i18n_bundle(), DEFAULT_ADMIN_LOCALE));
     use_hook(|| session.bootstrap(&ADMIN_LOCALE_CATALOG));
     use_context_provider(|| session);
     use_locale_effects(session);
@@ -119,6 +121,33 @@ fn App() -> Element {
                 refresh_label: t!("stale-build-refresh"),
             }
             Router::<Route> {}
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use dioxus::core::TemplateNode;
+    use dioxus::prelude::*;
+
+    use super::App;
+
+    #[derive(Clone, Copy)]
+    pub(super) struct DefaultFtl(pub(super) &'static str);
+
+    #[test]
+    fn invalid_default_locale_keeps_the_fallback_through_root_rerenders() {
+        let mut dom = VirtualDom::new(App).with_root_context(DefaultFtl("broken = {"));
+        dom.rebuild_to_vec();
+        for _ in 0..3 {
+            let root = dom.get_scope(ScopeId::APP).unwrap().root_node();
+            let [TemplateNode::Element { tag: "div", children, .. }] = root.template.roots else {
+                panic!("译文初始化失败时应渲染错误容器");
+            };
+            assert!(matches!(children, [TemplateNode::Text { text: "无法初始化界面译文。" }]));
+            assert!(root.dynamic_nodes.is_empty());
+            dom.mark_dirty(ScopeId::APP);
+            dom.render_immediate_to_vec();
         }
     }
 }

@@ -317,10 +317,7 @@ pub(crate) fn PendingCommandPanel(
                                 }
                                 if let Some(code) = entry.error.as_deref() {
                                     p { class: "action-feedback action-feedback--error",
-                                        {match AdminApiFailure::display_code(code) {
-                                            "body_too_large" => t!("admin-error-body-too-large"),
-                                            code => admin_api_error_message(code),
-                                        }}
+                                        {admin_api_error_message(code)}
                                     }
                                 }
                             }
@@ -359,11 +356,12 @@ mod tests {
     use gloo_net::http::Method;
     use uuid::Uuid;
 
-    use super::{PendingCommands, definite_rejection, use_pending_commands};
+    use super::{PendingCommandPanel, PendingCommands, definite_rejection, use_pending_commands};
     use crate::api::{
         AdminApiFailure, AdminDocumentKind, AdminSessionWritePermission, AdminUser,
         mutate_admin_user, publish_admin_rules,
     };
+    use crate::surface::auctions::draft_page_tests::{has_live_text, mount_writer};
 
     #[derive(Default)]
     struct CommandHarness {
@@ -377,6 +375,38 @@ mod tests {
         let reload = use_signal(|| 0);
         control.pending.set(Some(use_pending_commands(reload)));
         rsx! { div {} }
+    }
+
+    #[test]
+    fn rejected_panel_entries_render_their_specific_error_messages() {
+        let (page, _) = mount_writer(|| {
+            let reload = use_signal(|| 0);
+            let owner = use_pending_commands(reload);
+            use_hook(move || {
+                for (status, code) in [(409, "alert_stale"), (413, "body_too_large")] {
+                    assert!(owner.submit(
+                        code.to_owned(),
+                        "测试写入".to_owned(),
+                        move |_| {
+                            let body = serde_json::json!({
+                                "code": code, "message": "写入已拒绝", "data": null,
+                                "request_id": null,
+                            });
+                            ready(Err::<(), _>(
+                                AdminApiFailure::from_http_body(status, &body.to_string()).code,
+                            ))
+                        },
+                        |()| panic!("拒绝不能交付成功回执"),
+                        |_| {},
+                    ));
+                }
+            });
+            rsx! { PendingCommandPanel { owner } }
+        });
+        assert!(has_live_text(&page, "关闭已拒绝操作"));
+        assert!(has_live_text(&page, "告警状态已变化。请核对重新读取后的列表，再决定是否处置。"));
+        assert!(has_live_text(&page, "请求体过大。请缩短内容后重试。"));
+        assert!(!has_live_text(&page, "原样重试"));
     }
 
     #[test]

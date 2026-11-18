@@ -111,12 +111,7 @@ pub(super) fn page() -> Element {
                         "action-feedback action-feedback--error"
                     },
                     role: if feedback.is_success() { "status" } else { "alert" },
-                    {match &feedback {
-                        AdminActionFeedback::Error(code) if code == "alert_stale" => {
-                            t!("alert-console-stale")
-                        }
-                        _ => feedback.message(t!("alert-console-action-ok")),
-                    }}
+                    {feedback.message(t!("alert-console-action-ok"))}
                 }
             }
             {content}

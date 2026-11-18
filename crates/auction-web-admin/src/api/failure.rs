@@ -110,6 +110,12 @@ impl AdminApiFailure {
         Self::rejection(&self.code, self.status).is_none()
     }
 
+    /// 只有经过账本核对且状态码吻合的拒绝，才能解除先前结果未知的命令。
+    pub(crate) fn resolves_prior_attempt(&self) -> bool {
+        self.status.is_some()
+            && Self::rejection(&self.code, self.status) == Some(Rejection::ReplayChecked)
+    }
+
     /// 在写请求收到 HTTP 回执后记录端点，供只传递 String 的下游保留分类所需的证据。
     pub(super) fn at_write_endpoint(mut self, endpoint: AdminWriteEndpoint) -> Self {
         if let Some(status) = self.status {
@@ -266,6 +272,9 @@ impl AdminApiFailure {
             | "alert_stale"
             | "already_disposed"
             | "delivery_sent_sighted"
+            // 换绑可恢复，且快照校验早于兼容旧实例的第二次账本检查，两者只裁定本次。
+            | "delivery_recipient_renamed"
+            | "delivery_command_snapshot_unreadable"
             | "settlement_obligation_ineligible"
             | "sent_proof_rejected"
             | "settlement_return_untrusted"
@@ -291,6 +300,8 @@ impl AdminApiFailure {
             | "credential_login_rejected"
             | "credential_login_challenge" => Some(422),
             "rate_limited" | "credential_login_busy" => Some(429),
+            // 登录失败时未得到可导入的凭据，存储写入尚未开始。
+            "credential_login_unavailable" => Some(503),
             _ => None,
         }
     }
@@ -363,6 +374,49 @@ mod tests {
     use auction_contracts::{ApiErrorResponse, ApiErrorResponseWithData};
 
     use super::{AdminApiFailure, AdminWriteEndpoint};
+
+    #[test]
+    fn delivery_guards_reject_this_attempt_without_clearing_an_earlier_unknown() {
+        for code in ["delivery_recipient_renamed", "delivery_command_snapshot_unreadable"] {
+            let body = serde_json::json!({
+                "code": code, "message": "投递动作已拒绝", "data": null, "request_id": null,
+            });
+            let failure = AdminApiFailure::from_http_body(409, &body.to_string());
+            assert!(!failure.outcome_unknown(), "{code}");
+            assert!(!AdminApiFailure::rejection_after_replay_check(&failure.code), "{code}");
+            assert!(AdminApiFailure::from_http_body(503, &body.to_string()).outcome_unknown());
+        }
+    }
+
+    #[test]
+    fn credential_import_rejections_only_resolve_this_attempt() {
+        for (status, code) in [
+            (400, "invalid_credential_kind"),
+            (400, "invalid_credential_world"),
+            (400, "invalid_credential_request"),
+            (400, "invalid_credential_label"),
+            (400, "invalid_credential_player_name"),
+            (400, "invalid_credential_secret"),
+            (409, "credential_conflict"),
+            (422, "credential_login_rejected"),
+            (422, "credential_login_challenge"),
+            (429, "credential_login_busy"),
+            (503, "credential_login_unavailable"),
+        ] {
+            let body = serde_json::json!({
+                "code": code, "message": "凭据导入已拒绝", "data": null, "request_id": null,
+            });
+            let failure = AdminApiFailure::from_http_body(status, &body.to_string());
+            assert!(!failure.outcome_unknown(), "{code}");
+            assert!(!AdminApiFailure::rejection_after_replay_check(&failure.code), "{code}");
+            assert!(AdminApiFailure::from_http_body(502, &body.to_string()).outcome_unknown());
+        }
+        let unavailable = AdminApiFailure::from_http_body(
+            503,
+            r#"{"code":"storage_unavailable","message":"凭据存储不可用","data":null,"request_id":null}"#,
+        );
+        assert!(unavailable.outcome_unknown());
+    }
 
     #[test]
     fn only_complete_error_envelopes_can_be_used_as_rejection_evidence() {
@@ -572,7 +626,9 @@ mod tests {
         let rejection =
             AdminApiFailure::from_http_body(409, &serde_json::to_string(&envelope).unwrap());
         assert!(!rejection.outcome_unknown());
+        assert!(rejection.resolves_prior_attempt());
         assert!(AdminApiFailure::rejection_after_replay_check(&rejection.code));
+        assert!(!AdminApiFailure::client(&rejection.code).resolves_prior_attempt());
 
         let not_sent = AdminApiFailure::not_sent_code(&rejection.code);
         assert!(AdminApiFailure::definite_rejection(&not_sent));
@@ -585,6 +641,7 @@ mod tests {
         for status in [400, 500] {
             let mismatch = AdminApiFailure::from_http(status, rejection.code.clone());
             assert!(mismatch.outcome_unknown());
+            assert!(!mismatch.resolves_prior_attempt());
             assert!(!AdminApiFailure::rejection_after_replay_check(&mismatch.code));
         }
     }
