@@ -3532,14 +3532,48 @@ body:has(.public-catalog-detail) .public-toast-region {
   color: var(--color-live);
 }
 
+/* “查看”入口：四个入口排成等宽的四格并填满整列，文字比格子宽时格子按文字撑开。
+   桌面表格里这一列是刚好容纳四格的固定宽度（各语言入口文字长度不同，按语言给出），
+   其余列按各自的百分比分配剩余宽度；手机卡片上的按钮外观见 mobile.css。 */
+.public-auction-rounds {
+  --rounds-links-size: 16.5rem;
+}
+
+.public-auction-rounds:lang(en) {
+  --rounds-links-size: 21rem;
+}
+
+.public-auction-rounds:lang(ko) {
+  --rounds-links-size: 17.5rem;
+}
+
 .public-auction-rounds__links {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(max-content, 1fr));
   align-items: center;
+  justify-items: center;
   min-inline-size: 0;
-  gap: var(--space-3);
-  white-space: normal;
-  overflow-wrap: anywhere;
+  gap: var(--space-2);
+}
+
+.public-auction-rounds__links > a {
+  white-space: nowrap;
+}
+
+/* 论坛入口固定在第四格：没有履约进度入口的场次不让它前移。 */
+.public-auction-rounds__links > a[target="_blank"] {
+  grid-column: 4;
+}
+
+@media screen and (min-width: 48.0625rem) {
+  /* 列宽写在 col 的 style 属性里，只有 !important 能改写。 */
+  .public-auction-rounds colgroup[data-table-layout="public-auction-history"] > col:last-child {
+    width: var(--rounds-links-size) !important;
+  }
+
+  .public-auction-rounds__table th:last-child {
+    text-align: center;
+  }
 }
 
 /* ===== 登录页 ===== */
@@ -4568,4 +4602,164 @@ body:has(.public-catalog-detail) .public-toast-region {
     white-space: nowrap;
   }
 }
+}
+
+/*
+ * ===== 层外规则：页面级分页条 =====
+ * 页面级的数字分页条固定在内容区最下方：内容区是纵向弹性容器，从页面根到分页条的每一层都撑满
+ * 剩余高度，分页条靠 margin: auto 落到最下面；内容超过一屏时它再以 sticky 停在视口底部。
+ * 只认“页面根之下、每一层都是最后一个子元素”的那一条分页条（往期拍卖、出价记录、履约进度、
+ * 历史成交价、黑名单、补偿池批次、看板目录）；抽屉、展开行里的分页条不受影响，账户页有多个
+ * 各自独立的列表，整页排除。
+ * 这些规则要压过各页面在 surface、desktop、mobile 三层里对自身布局（display、内外边距）的声明，
+ * 逐层重写既冗长又容易漏掉某一页，所以集中写在层外。
+ */
+.public-console .console-main {
+  display: flex;
+  flex-direction: column;
+}
+
+/* 页面根，以及页面根到分页条之间的各层容器。 */
+.public-console
+  .console-main
+  > :not(.public-account-bids-page):is(
+    :has(> .ui-pager--numbered:last-child),
+    :has(> :last-child > .ui-pager--numbered:last-child),
+    :has(> :last-child > :last-child > .ui-pager--numbered:last-child),
+    :has(> :last-child > :last-child > :last-child > .ui-pager--numbered:last-child)
+  ),
+.public-console
+  .console-main
+  > :not(.public-account-bids-page)
+  > :last-child:is(
+    :has(> .ui-pager--numbered:last-child),
+    :has(> :last-child > .ui-pager--numbered:last-child),
+    :has(> :last-child > :last-child > .ui-pager--numbered:last-child)
+  ),
+.public-console
+  .console-main
+  > :not(.public-account-bids-page)
+  > :last-child
+  > :last-child:is(
+    :has(> .ui-pager--numbered:last-child),
+    :has(> :last-child > .ui-pager--numbered:last-child)
+  ),
+.public-console
+  .console-main
+  > :not(.public-account-bids-page)
+  > :last-child
+  > :last-child
+  > :last-child:has(> .ui-pager--numbered:last-child) {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+}
+
+.public-console .console-main > :not(.public-account-bids-page) > .ui-pager--numbered:last-child,
+.public-console
+  .console-main
+  > :not(.public-account-bids-page)
+  > :last-child
+  > .ui-pager--numbered:last-child,
+.public-console
+  .console-main
+  > :not(.public-account-bids-page)
+  > :last-child
+  > :last-child
+  > .ui-pager--numbered:last-child,
+.public-console
+  .console-main
+  > :not(.public-account-bids-page)
+  > :last-child
+  > :last-child
+  > :last-child
+  > .ui-pager--numbered:last-child {
+  position: sticky;
+  inset-block-end: 0;
+  z-index: 2;
+  flex: none;
+  margin-block-start: auto;
+  padding-block: var(--space-2) max(var(--space-2), env(safe-area-inset-bottom, 0px));
+  border-block-start: var(--border-width) solid var(--color-border);
+  background: var(--color-bg);
+}
+
+/* 分页条自己贴到最下面，内容区不再另留底部空白。 */
+.public-console
+  .console-main:has(
+    > :not(.public-account-bids-page) > .ui-pager--numbered:last-child,
+    > :not(.public-account-bids-page) > :last-child > .ui-pager--numbered:last-child,
+    > :not(.public-account-bids-page) > :last-child > :last-child > .ui-pager--numbered:last-child,
+    >
+      :not(.public-account-bids-page)
+      > :last-child
+      > :last-child
+      > :last-child
+      > .ui-pager--numbered:last-child
+  ) {
+  padding-block-end: 0;
+}
+
+/*
+ * 每页条数下拉框：分页条贴在视口底部后，原生下拉列表向下展开会被截掉或盖到窗口之外。
+ * 支持可定制 select 的浏览器里改由页面自己绘制选项列表（顶层弹出层），按可用空间决定展开在
+ * 控件下方还是上方、靠左还是靠右；不支持的浏览器保持原生下拉框（由系统决定展开方向）。
+ */
+@supports (appearance: base-select) {
+  .public-console .ui-pager--numbered .ui-pager__select,
+  .public-console .ui-pager--numbered .ui-pager__select::picker(select) {
+    appearance: base-select;
+  }
+
+  /* 按钮沿用分页条字段的边框、底色与高度；可定制形态下不再按最长选项撑宽，补上内距与不折行。 */
+  .public-console .ui-pager--numbered .ui-pager__select {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding-inline: var(--space-2);
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .public-console .ui-pager--numbered .ui-pager__select::picker-icon {
+    color: var(--color-text-muted);
+    font-size: 0.625em;
+  }
+
+  .public-console .ui-pager--numbered .ui-pager__select:open {
+    border-color: var(--color-accent);
+  }
+
+  .public-console .ui-pager--numbered .ui-pager__select::picker(select) {
+    /* 默认在控件下方、与控件起始边对齐；放不下时先上下翻转，再换对齐侧。 */
+    position-area: block-end span-inline-end;
+    position-try-fallbacks: flip-block, flip-inline, flip-block flip-inline;
+    margin-block: var(--space-1);
+    padding: var(--space-1);
+    border: var(--border-width) solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+    box-shadow: var(--shadow-2);
+    color: var(--color-text);
+    font-size: var(--text-sm);
+  }
+
+  .public-console .ui-pager--numbered .ui-pager__select option {
+    min-block-size: var(--size-control-compact);
+    padding: var(--space-1) var(--space-2);
+    border-radius: var(--radius-sm);
+    white-space: nowrap;
+  }
+
+  .public-console .ui-pager--numbered .ui-pager__select option:is(:hover, :focus-visible) {
+    background: var(--color-surface-raised);
+  }
+
+  .public-console .ui-pager--numbered .ui-pager__select option:checked {
+    font-weight: 600;
+  }
+
+  .public-console .ui-pager--numbered .ui-pager__select option::checkmark {
+    color: var(--color-accent);
+  }
 }

@@ -207,7 +207,9 @@ pub(crate) fn AuctionHistoryTable(rows: Vec<HistoricalAuctionWithForum>) -> Elem
         div { class: "public-auction-rounds__table",
             table {
                 aria_label: t!("page-auctions-title"),
-                auction_web_shared::TableColumns { layout: "public-auction-history", widths: vec![12, 8, 22, 7, 7, 7, 21, 16] }
+                // “查看”一列由 public.css 改成刚好容纳四个入口的固定宽度，最后一项只是没有该样式时的
+                // 回退；其余列按各自的百分比分配剩余宽度。
+                auction_web_shared::TableColumns { layout: "public-auction-history", widths: vec![12, 7, 24, 6, 6, 6, 18, 21] }
                 thead {
                     tr {
                         th { scope: "col", {t!("auction-history-number")} }
