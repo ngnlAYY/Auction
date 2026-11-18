@@ -528,7 +528,23 @@ fn valid_numbered_page(value: &Map<String, Value>) -> bool {
 mod tests {
     use serde_json::{Value, json};
 
-    use super::{bid_log_order_key, valid_current_auction_response, valid_ordered_bid_log};
+    use super::{
+        bid_log_order_key, valid_current_auction_response, valid_ordered_bid_log, valid_worlds,
+    };
+
+    #[test]
+    fn world_directory_requires_the_closed_projection() {
+        assert!(valid_worlds(&json!({
+            "worlds": { "main": { "enabled": true }, "isekai": { "enabled": false } }
+        })));
+        for data in [
+            json!({"worlds": {"main": {"enabled": true, "extra": true}}}),
+            json!({"worlds": {"main": {"enabled": "true"}}}),
+            json!({"worlds": {}, "extra": true}),
+        ] {
+            assert!(!valid_worlds(&data));
+        }
+    }
 
     fn current(proxy_default_mode: Option<Value>) -> Value {
         let mut auction = json!({

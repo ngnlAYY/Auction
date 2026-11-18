@@ -4,6 +4,9 @@ mod cache;
 mod commands;
 mod control;
 
+pub(super) use cache::invalidate_lot_watches;
+#[cfg(test)]
+pub(super) use cache::{load as load_watch_cache, save as save_watch_cache};
 pub(crate) use commands::use_watch_command_owner;
 pub(crate) use control::{LotWatchButton, use_lot_watched};
 
@@ -13,9 +16,9 @@ use auction_contracts::{PublicLotWatchesResponse, PublicSetLotWatchRequest};
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
-use super::PublicSessionResource;
 use super::commands::CommandSession;
-use crate::api::{CommandError, PublicSession, fetch_lot_watches};
+use super::{PublicCommandOwner, PublicSessionResource};
+use crate::api::{CommandError, PublicSession, PublicSessionCheckTrigger, fetch_lot_watches};
 
 #[derive(Clone)]
 struct WatchCommand {
@@ -40,6 +43,13 @@ struct WatchSubmit(EventHandler<(String, String, String, PublicSetLotWatchReques
 /// 不遮蔽外壳的全局刷新 `Signal<u64>`。
 #[derive(Clone, Copy)]
 struct WatchRevision(Signal<u64>);
+
+/// 账号边界销毁旧快照；同账号 Cookie 对账只要求标记重读。
+#[derive(Clone, Copy)]
+pub(super) struct WatchSessionRevision {
+    pub boundary: Signal<u64>,
+    pub refresh: Signal<u64>,
+}
 
 /// 完整集合只索引一次，所有目录行按 lot UUID 查状态；false 墓碑保留其真实版本。
 type WatchSnapshot = BTreeMap<String, (bool, i64)>;
@@ -73,13 +83,17 @@ struct WatchContext {
     resource: Resource<LoadedWatches>,
     cached: Signal<Option<Rc<WatchSnapshot>>>,
     commands: Signal<BTreeMap<String, WatchCommand>>,
+    owner: Signal<Option<String>>,
+    boundary: Option<(Signal<u64>, u64)>,
 }
 
 /// 整场读取按稳定用户隔离；提交集合和任务由外层页面宿主持有。
 #[component]
 pub(crate) fn LotWatchScope(auction_id: String, children: Element) -> Element {
-    let user_id = use_context::<super::PublicCommandOwner>().0();
-    let scope = format!("{}:{}", user_id.as_deref().unwrap_or_default(), auction_id);
+    let user_id = use_context::<PublicCommandOwner>().0();
+    let boundary =
+        try_use_context::<WatchSessionRevision>().map_or(0, |revision| (revision.boundary)());
+    let scope = format!("{boundary}:{}:{auction_id}", user_id.as_deref().unwrap_or_default());
     rsx! {
         for (scope, user_id, auction_id, children) in [(scope, user_id, auction_id, children)] {
             ScopedLotWatches { key: "{scope}", user_id, auction_id, children }
@@ -90,6 +104,11 @@ pub(crate) fn LotWatchScope(auction_id: String, children: Element) -> Element {
 #[component]
 fn ScopedLotWatches(user_id: Option<String>, auction_id: String, children: Element) -> Element {
     let session = use_context::<PublicSessionResource>();
+    let owner = use_context::<PublicCommandOwner>().0;
+    let session_revision = try_use_context::<WatchSessionRevision>();
+    let boundary = use_hook(|| {
+        session_revision.map(|revision| (revision.boundary, *revision.boundary.peek()))
+    });
     let refresh = use_context::<Signal<u64>>();
     let watch_revision = use_context::<WatchRevision>().0;
     let revision = use_signal(|| 0_u64);
@@ -115,6 +134,9 @@ fn ScopedLotWatches(user_id: Option<String>, auction_id: String, children: Eleme
         let auction_id = auction_id.clone();
         move || {
             let requested_revision = (refresh(), watch_revision(), revision());
+            if let Some(session_revision) = session_revision {
+                (session_revision.refresh)();
+            }
             let readable = readable();
             let user_id = user_id.clone();
             let auction_id = auction_id.clone();
@@ -124,11 +146,18 @@ fn ScopedLotWatches(user_id: Option<String>, auction_id: String, children: Eleme
                 }
                 let result = if let Some(user_id) = user_id {
                     // 请求前后复核身份，不能把会话切换期间的响应写入当前缓存。
-                    if current_user(&session.peek()) != Some(user_id.as_str()) {
+                    if !matches_watch_owner(owner, boundary, &user_id)
+                        || current_user(&session.peek()) != Some(user_id.as_str())
+                    {
                         return LoadedWatches { revision: requested_revision, result: Ok(None) };
                     }
+                    let confirmed_logout = PublicSessionCheckTrigger::logout_revisions().0;
                     let result = fetch_lot_watches(&user_id, &auction_id).await;
-                    if current_user(&session.peek()) != Some(user_id.as_str()) {
+                    // 别页确认退出时，主修订的通知可能尚未到达，本次旧响应不能写回已清除的标记。
+                    if !matches_watch_owner(owner, boundary, &user_id)
+                        || current_user(&session.peek()) != Some(user_id.as_str())
+                        || confirmed_logout != PublicSessionCheckTrigger::logout_revisions().0
+                    {
                         return LoadedWatches { revision: requested_revision, result: Ok(None) };
                     }
                     result.map(|page| {
@@ -163,8 +192,17 @@ fn ScopedLotWatches(user_id: Option<String>, auction_id: String, children: Eleme
             }
         }
     });
-    let context =
-        WatchContext { user_id, auction_id, session, revision, resource, cached, commands };
+    let context = WatchContext {
+        user_id,
+        auction_id,
+        session,
+        revision,
+        resource,
+        cached,
+        commands,
+        owner,
+        boundary,
+    };
     use_context_provider(|| context.clone());
     let authenticated = context.identity_matches();
     let ready = context.ready();
@@ -218,9 +256,21 @@ fn current_user(snapshot: &Option<Result<Option<PublicSession>, String>>) -> Opt
     })
 }
 
+fn matches_watch_owner(
+    owner: Signal<Option<String>>,
+    boundary: Option<(Signal<u64>, u64)>,
+    user_id: &str,
+) -> bool {
+    owner.read().as_deref() == Some(user_id)
+        && boundary.is_none_or(|(revision, mounted)| revision() == mounted)
+}
+
 impl WatchContext {
     fn identity_matches(&self) -> bool {
-        self.user_id.is_some() && current_user(&self.session.read()) == self.user_id.as_deref()
+        self.user_id.as_deref().is_some_and(|user_id| {
+            matches_watch_owner(self.owner, self.boundary, user_id)
+                && current_user(&self.session.read()) == Some(user_id)
+        })
     }
 
     /// 本作用域最近一次成功的服务器集合可用；全局定时、竞价或标记成功触发的后台重读期间沿用它，
@@ -254,6 +304,9 @@ impl WatchContext {
     /// 展示用的标记状态：成功提交后等待重读期间取提交的目标状态（标签不先回落到旧值再翻转），
     /// 其次是服务器集合，最后才是本地缓存。只决定图标与文案，不产生 CAS 版本。
     fn displayed(&self, lot_id: &str) -> bool {
+        if !self.identity_matches() {
+            return false;
+        }
         let settled = self
             .commands
             .read()

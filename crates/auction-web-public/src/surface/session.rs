@@ -2,8 +2,11 @@
 //! 页面不保存或回显服务端 session token；登录成功后只展示安全身份投影，注销仍通过服务端
 //! 会话端口完成。
 
+use std::future::Future;
+
 use auction_web_shared::a11y::focus_element_by_id;
 use auction_web_shared::{BaseErrorKind, base_api_error_message, t};
+use dioxus::core::Runtime;
 use dioxus::prelude::*;
 use url::form_urlencoded;
 
@@ -16,6 +19,23 @@ use crate::api::{
 /// 账号面板入口按钮与面板的元素 ID；面板关闭时按 ID 把焦点还给入口。
 const SESSION_TRIGGER_ID: &str = "public-account-session-trigger";
 const SESSION_PANEL_ID: &str = "public-account-session-panel";
+const SESSION_ENDED_DISMISS_ID: &str = "public-session-ended-dismiss";
+
+#[cfg(test)]
+#[derive(Clone)]
+pub(in crate::surface) struct LoginFormFixture(
+    pub std::rc::Rc<std::cell::Cell<Option<Signal<String>>>>,
+);
+
+/// Cookie 命令的生命期归外壳，路由页只消费仍有接收方的界面结果。
+#[derive(Clone, Copy)]
+pub(super) struct SessionCommandScope(pub ScopeId);
+
+impl SessionCommandScope {
+    pub(super) fn spawn(self, command: impl Future<Output = ()> + 'static) {
+        Runtime::current().spawn(self.0, command);
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 enum LoginState {
@@ -42,6 +62,10 @@ pub(crate) fn initial_login_return_location() -> InitialLoginReturnLocation {
 
 pub(super) fn login(return_to: Option<String>) -> Element {
     let mut key = use_signal(String::new);
+    #[cfg(test)]
+    if let Some(fixture) = try_use_context::<LoginFormFixture>() {
+        fixture.0.set(Some(key));
+    }
     let mut result = use_signal(|| None::<LoginState>);
     let mut submitting = use_signal(|| false);
     let mut key_input = use_signal(|| None::<MountedEvent>);
@@ -55,9 +79,14 @@ pub(super) fn login(return_to: Option<String>) -> Element {
         }
     });
     let registration_accounts = use_resource(|| async move {
+        #[cfg(test)]
+        if try_consume_context::<LoginFormFixture>().is_some() {
+            return Ok(String::new());
+        }
         fetch_registration_info().await.map(|info| info.bot_players.join(", "))
     });
     let navigator = use_navigator();
+    let commands = use_context::<SessionCommandScope>();
     let return_path = safe_return_path(return_to.as_deref());
     let result_snapshot = result.read();
     let failed = matches!(result_snapshot.as_ref(), Some(LoginState::Failure(_)));
@@ -86,9 +115,14 @@ pub(super) fn login(return_to: Option<String>) -> Element {
                     key.set(String::new());
                     submitting.set(true);
                     let return_path = return_path.clone();
-                    spawn(async move {
+                    commands.spawn(async move {
                         let login_result = login_public(submitted_key).await;
-                        submitting.set(false);
+                        // 先由外壳交付身份证据和复核通知，卸载的登录页不消费结果或改写地址。
+                        if let Ok(mut busy) = submitting.try_write() {
+                            *busy = false;
+                        } else {
+                            return;
+                        }
                         match login_result {
                             Ok(session) => {
                                 result.set(Some(LoginState::Success(session)));
@@ -249,6 +283,7 @@ fn browser_path_and_search() -> Option<String> {
 #[component]
 pub(super) fn SessionMenu() -> Element {
     let mut session = use_context::<PublicSessionResource>();
+    let commands = use_context::<SessionCommandScope>();
     let mut logout_error = use_signal(|| None::<String>);
     let mut logout_busy = use_signal(|| false);
     let mut menu_open = use_signal(|| false);
@@ -360,7 +395,7 @@ pub(super) fn SessionMenu() -> Element {
                                         logout_error.set(None);
                                         logout_busy.set(true);
                                         let user_id = user_id.clone();
-                                        spawn(async move {
+                                        commands.spawn(async move {
                                             match logout_public(user_id).await {
                                                 Ok(()) => {},
                                                 Err(error) => logout_error.set(Some(error)),
@@ -387,6 +422,55 @@ pub(super) fn SessionMenu() -> Element {
             }
         }
     }
+}
+
+/// 读屏状态区域在外壳首次挂载时就存在；提示可手动关闭，路由切换保留状态。
+#[component]
+pub(super) fn SessionEndedNotice(ended: Signal<bool>) -> Element {
+    rsx! {
+        div { class: if ended() { "public-shell__session-ended-banner" } else { "" },
+            span { class: "public-shell__session-ended-text", role: "status",
+                if ended() { {t!("session-ended-elsewhere")} }
+            }
+            if ended() {
+                Link {
+                    class: "public-shell__session-ended-login",
+                    to: "/login",
+                    {t!("session-ended-relogin")}
+                }
+                button {
+                    id: SESSION_ENDED_DISMISS_ID,
+                    class: "public-shell__session-ended-dismiss",
+                    r#type: "button",
+                    aria_label: t!("catalog-close"),
+                    onclick: move |_| dismiss_session_ended(ended, session_ended_dismiss_is_focused(), || {
+                        focus_element_by_id("public-content");
+                    }),
+                    "✕"
+                }
+            }
+        }
+    }
+}
+
+fn session_ended_dismiss_is_focused() -> bool {
+    #[cfg(target_arch = "wasm32")]
+    {
+        web_sys::window()
+            .and_then(|window| window.document())
+            .and_then(|document| document.active_element())
+            .is_some_and(|element| element.id() == SESSION_ENDED_DISMISS_ID)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    false
+}
+
+fn dismiss_session_ended(mut ended: Signal<bool>, owns_focus: bool, focus_content: impl FnOnce()) {
+    if owns_focus {
+        // 关闭按钮即将卸载，先把焦点交给常驻的正文入口。
+        focus_content();
+    }
+    ended.set(false);
 }
 
 /// 收起账号面板并把焦点还给入口按钮；面板卸载时焦点不能落到 `body`。
@@ -440,52 +524,6 @@ pub(crate) fn use_public_session_sync(check_session: EventHandler<SessionRefresh
     let _ = check_session;
 }
 
-/// 有限会话只在真实截止后复核一次；永久会话不建立计时器，也不把远期日期当永久。
-pub(crate) fn use_public_session_expiry(
-    session: PublicSessionResource,
-    check_session: EventHandler<SessionRefreshReason>,
-) {
-    #[cfg(target_arch = "wasm32")]
-    {
-        // 同一身份及截止的重复快照不重启已完成的任务，避免服务端时钟误差造成忙轮询。
-        let deadline = use_memo(move || {
-            session
-                .read()
-                .as_ref()
-                .and_then(|result| result.as_ref().ok())
-                .and_then(|identity| identity.as_ref())
-                .filter(|identity| identity.authenticated)
-                .and_then(|identity| {
-                    auction_time::Timestamp::parse_from_rfc3339(identity.expires_at.as_deref()?)
-                        .ok()
-                        .map(|expiry| (identity.user_id.clone(), expiry))
-                })
-        });
-        let _expiry_check = use_resource(move || {
-            let deadline = deadline();
-            async move {
-                let Some((_, expiry)) = deadline else { return };
-                loop {
-                    // Date 头只有秒精度；给出一秒余量，长截止分段等待以免浏览器 i32 超时溢出。
-                    let remaining = (expiry - crate::api::estimated_now())
-                        .num_milliseconds()
-                        .saturating_add(1_000);
-                    if remaining <= 0 {
-                        check_session.call(SessionRefreshReason::Refresh);
-                        return;
-                    }
-                    auction_web_shared::timer::TimeoutFuture::new(
-                        remaining.min(i64::from(i32::MAX)) as u32,
-                    )
-                    .await;
-                }
-            }
-        });
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    let _ = (session, check_session);
-}
-
 #[cfg(target_arch = "wasm32")]
 struct PublicSessionSync {
     window: web_sys::Window,
@@ -500,9 +538,11 @@ impl PublicSessionSync {
 
         let window = web_sys::window()?;
         let storage = Closure::new(move |event: web_sys::StorageEvent| {
-            if event.key().as_deref() == Some(crate::api::PUBLIC_SESSION_CHANGE_STORAGE_KEY) {
+            if event.key().as_deref() == Some(crate::api::PUBLIC_SESSION_CHANGE_STORAGE_KEY)
+                && event.new_value().is_some()
+            {
                 // 随机修订只表示认证操作发生，同账号重登仍须保留原未知命令及 ID。
-                check_session.call(SessionRefreshReason::Refresh);
+                check_session.call(SessionRefreshReason::CookieChanged);
             }
         });
         let focus = Closure::new(move || check_session.call(SessionRefreshReason::Refresh));
@@ -545,7 +585,41 @@ mod tests {
     use dioxus::prelude::*;
     use dioxus_i18n::prelude::try_use_init_i18n_from_bundle;
 
-    use super::{RegistrationAccounts, registration_hint, retry_registration};
+    use super::{
+        RegistrationAccounts, dismiss_session_ended, registration_hint, retry_registration,
+    };
+
+    #[derive(Clone)]
+    struct DismissalFixture {
+        has_focus: bool,
+        moved_focus: Rc<Cell<bool>>,
+    }
+
+    #[component]
+    fn DismissalHarness() -> Element {
+        let fixture = consume_context::<DismissalFixture>();
+        let ended = use_signal(|| true);
+        use_effect(move || {
+            dismiss_session_ended(ended, fixture.has_focus, || {
+                assert!(*ended.peek(), "焦点须在关闭按钮卸载前转移");
+                fixture.moved_focus.set(true);
+            });
+            assert!(!*ended.peek());
+        });
+        rsx! {}
+    }
+
+    #[test]
+    fn session_notice_moves_focus_only_when_its_dismiss_button_has_focus() {
+        for has_focus in [true, false] {
+            let moved_focus = Rc::new(Cell::new(false));
+            let fixture = DismissalFixture { has_focus, moved_focus: moved_focus.clone() };
+            let mut dom = VirtualDom::new(DismissalHarness).with_root_context(fixture);
+            dom.rebuild_in_place();
+            dom.process_events();
+            assert_eq!(moved_focus.get(), has_focus);
+        }
+    }
 
     #[derive(Default)]
     struct RegistrationControl {

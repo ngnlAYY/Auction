@@ -1,10 +1,12 @@
 //! 世界列表、当前场次与按场次 ID 打开的历史场次读取。
 
+use gloo_net::http::Request;
 use url::form_urlencoded;
 
 use super::super::swr_cache;
 use super::super::{
-    AuctionListPage, CatalogLevelFilter, CurrentAuction, Worlds, decoder, send_get,
+    AuctionListPage, CatalogLevelFilter, CurrentAuction, TransportError, Worlds, decoder, send_get,
+    send_request,
 };
 use super::cached_get::cached_public_get;
 use super::directory::{SUMMARY_PAGE_SIZE, fetch_auction_page};
@@ -12,12 +14,35 @@ use super::lots::fetch_current_lots;
 #[cfg(test)]
 use crate::surface::PageReadFixture;
 
+/// 默认读取沿用浏览器缓存。
 pub(crate) async fn fetch_worlds() -> Result<Worlds, String> {
     #[cfg(test)]
     if let Some(result) = PageReadFixture::response(()) {
         return result;
     }
-    let response = send_get("/api/v1/worlds").await.map_err(|error| error.code().to_owned())?;
+    read_worlds(false).await
+}
+
+/// 低频目录允许缓存返回旧快照，周期再验证须等待当次响应。
+pub(crate) async fn revalidate_worlds() -> Result<Worlds, String> {
+    read_worlds(true).await
+}
+
+async fn read_worlds(revalidate: bool) -> Result<Worlds, String> {
+    const PATH: &str = "/api/v1/worlds";
+    let response = if revalidate {
+        send_request(|abort_signal| {
+            Request::get(PATH)
+                .cache(web_sys::RequestCache::NoCache)
+                .abort_signal(abort_signal)
+                .build()
+                .map_err(|_error| TransportError::Network(None))
+        })
+        .await
+    } else {
+        send_get(PATH).await
+    }
+    .map_err(|error| error.code().to_owned())?;
     if !response.ok() {
         return Err(decoder::decode_error_code(response).await);
     }

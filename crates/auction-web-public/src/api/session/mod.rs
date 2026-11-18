@@ -12,7 +12,6 @@ use serde_json::Value;
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) use self::identity::PUBLIC_SESSION_CHANGE_STORAGE_KEY;
-use self::identity::observe_expected_user_rejection;
 pub(crate) use self::identity::{
     PublicSessionCheckTrigger, PublicSessionEvidenceTrigger, SessionIdentity,
     SessionIdentityEvidence, SessionRefreshReason,
@@ -21,18 +20,16 @@ pub(super) use self::identity::{
     SessionIdentityObservation, notify_public_session_change, observe_public_session_failure,
     publish_cookie_identity,
 };
+use self::identity::{mark_public_logout, observe_expected_user_rejection, publish_read_identity};
 #[cfg(not(test))]
-use self::transport::SessionRequest;
-use self::transport::send_session_request;
+pub(super) use self::transport::SessionRequest;
+pub(super) use self::transport::send_session_request;
 #[cfg(test)]
 pub(crate) use self::transport::{SessionHttpFixture, SessionRequest};
 pub(super) use self::transport::{decode_account_identity_response, decode_identity_response};
 
 /// 所有可能写入 Public Cookie 的请求必须先持有同一原生跨标签页锁。
-pub(super) async fn lock_cookie_mutation() -> Result<auction_web_shared::BrowserLock, &'static str>
-{
-    cookie::lock().await
-}
+pub(super) use self::cookie::lock as lock_cookie_mutation;
 
 /// 偏好写入可能只提交数据库、未收到响应；下次权威读取须重新核对浏览器持久期。
 pub(super) fn invalidate_cookie_sync() {
@@ -56,26 +53,68 @@ impl PublicSessionApiError {
     pub(crate) fn into_read_code(self) -> String {
         self.code.unwrap_or_else(|| "invalid_response".to_owned())
     }
+
+    /// 错误信封有效仍须匹配写入路由允许的冲突码，才能否定未知结果。
+    pub(super) fn validate_conflict(mut self, known: &[&str]) -> Self {
+        if self.status == Some(409)
+            && !self.code.as_deref().is_some_and(|code| known.contains(&code))
+        {
+            self.code = Some("invalid_response".to_owned());
+        }
+        self
+    }
 }
 
-/// 每次解码成功的 GET 都先报告权威身份。需要写 Cookie 时，必须在锁内再读一遍。
-pub(crate) async fn fetch_public_session() -> Result<Option<PublicSession>, PublicSessionApiError> {
-    let Some(current) = read_session_identity().await? else {
-        cookie::invalidate();
-        return Ok(None);
+/// 会话读取排在 Cookie 写锁之后，读取匿名时能观察到主动退出的结论。
+pub(crate) async fn fetch_public_session(
+    reason: SessionRefreshReason,
+    observe_confirmed_logout: impl Fn(Option<String>),
+) -> (Result<Option<PublicSession>, PublicSessionApiError>, Option<String>) {
+    let mut observed_unknown = None;
+    let result = fetch_session(reason, || {
+        let (confirmed, unknown) = PublicSessionCheckTrigger::logout_revisions();
+        observe_confirmed_logout(confirmed);
+        observed_unknown = unknown;
+    })
+    .await;
+    (result, observed_unknown)
+}
+
+async fn fetch_session(
+    reason: SessionRefreshReason,
+    mut observe_logout_revisions: impl FnMut(),
+) -> Result<Option<PublicSession>, PublicSessionApiError> {
+    let lock = lock_cookie_mutation().await;
+    observe_logout_revisions();
+    let _cookie_lock = match lock {
+        Ok(lock) => lock,
+        Err("session_lock_unavailable") => {
+            // 旧浏览器仍能读取；没有原生锁时不能以本地顺序冒充跨页独占写入。
+            let current = read_session_identity(false).await?;
+            if reason.synchronizes_cookie() && current.as_ref().is_some_and(cookie::needs_sync) {
+                return Err(PublicSessionApiError::local("session_lock_unavailable"));
+            }
+            return Ok(current);
+        }
+        Err(code) => return Err(PublicSessionApiError::local(code)),
     };
-    if !cookie::needs_sync(&current) {
-        return Ok(Some(current));
+    let mut current = read_session_identity(true).await?;
+    if reason == SessionRefreshReason::Refresh && current.as_ref().is_some_and(cookie::needs_sync) {
+        // 例行复核保留同步前的读回；两次读取均在锁内，先等其他标签页发布退出结果。
+        current = read_session_identity(true).await?;
     }
-    let _cookie_lock = lock_session_request().await?;
-    // 等锁期间另一标签页可能已经登录，必须用锁内读取绑定 PUT 的预期用户。
-    let Some(current) = read_session_identity().await? else {
-        cookie::invalidate();
-        return Ok(None);
-    };
-    if !cookie::needs_sync(&current) {
-        return Ok(Some(current));
+    // 等锁期间 Cookie 可能已经换号。只有刚取得的锁内身份可以作为 PUT 前置条件。
+    match current {
+        Some(current) if reason.synchronizes_cookie() && cookie::needs_sync(&current) => {
+            synchronize_cookie(current).await.map(Some)
+        }
+        current => Ok(current),
     }
+}
+
+async fn synchronize_cookie(
+    current: PublicSession,
+) -> Result<PublicSession, PublicSessionApiError> {
     let synchronized = request_current_session(SessionRequest::Sync(&current.user_id))
         .await
         .inspect_err(|error| {
@@ -93,14 +132,24 @@ pub(crate) async fn fetch_public_session() -> Result<Option<PublicSession>, Publ
     };
     cookie::record(&synchronized);
     publish_cookie_identity(SessionIdentity::Snapshot(Some(synchronized.clone())));
-    Ok(Some(synchronized))
+    Ok(synchronized)
 }
 
-async fn read_session_identity() -> Result<Option<PublicSession>, PublicSessionApiError> {
-    let observation = SessionIdentityObservation::start();
+async fn read_session_identity(
+    locked: bool,
+) -> Result<Option<PublicSession>, PublicSessionApiError> {
+    let observation = (!locked).then(SessionIdentityObservation::start);
     let current = request_current_session(SessionRequest::Read).await?;
-    if !observation.publish(SessionIdentity::Snapshot(current.clone())) {
-        return Err(PublicSessionApiError::local("invalid_response"));
+    let evidence = SessionIdentity::Snapshot(current.clone());
+    if let Some(observation) = observation {
+        if !observation.publish(evidence) {
+            return Err(PublicSessionApiError::local("invalid_response"));
+        }
+    } else {
+        publish_read_identity(evidence);
+    }
+    if current.is_none() {
+        cookie::invalidate();
     }
     Ok(current)
 }
@@ -108,7 +157,9 @@ async fn read_session_identity() -> Result<Option<PublicSession>, PublicSessionA
 async fn request_current_session(
     request: SessionRequest<'_>,
 ) -> Result<Option<PublicSession>, PublicSessionApiError> {
-    let response = send_session_request(request).await?;
+    let response = send_session_request(request)
+        .await
+        .map_err(|failure| PublicSessionApiError::local(failure.transport.code()))?;
     let status = response.status();
     let body = response.text().await;
     let current = decode_identity_response::<Option<PublicSession>>(
@@ -122,22 +173,21 @@ async fn request_current_session(
     Ok(current)
 }
 
-async fn lock_session_request()
--> Result<Option<auction_web_shared::BrowserLock>, PublicSessionApiError> {
-    #[cfg(test)]
-    if dioxus::prelude::try_consume_context::<SessionHttpFixture>().is_some() {
-        return Ok(None);
-    }
-    lock_cookie_mutation().await.map(Some).map_err(PublicSessionApiError::local)
-}
-
 pub(crate) async fn login_public(key: String) -> Result<PublicSession, PublicSessionApiError> {
-    let _cookie_lock = lock_session_request().await?;
+    let cookie_lock = lock_cookie_mutation().await.map_err(PublicSessionApiError::local)?;
     cookie::invalidate();
-    let response =
-        send_session_request(SessionRequest::Login(&key)).await.inspect_err(|_error| {
-            notify_public_session_change(SessionRefreshReason::Refresh);
-        })?;
+    let response = send_session_request(SessionRequest::Login(&key)).await;
+    drop(key);
+    let response = match response {
+        Ok(response) => response,
+        Err(failure) => {
+            drop(cookie_lock);
+            if failure.needs_reconciliation() {
+                notify_public_session_change(SessionRefreshReason::CookieChanged);
+            }
+            return Err(PublicSessionApiError::local(failure.transport.code()));
+        }
+    };
     let status = response.status();
     let body = response.text().await;
     let result = decode_identity_response::<PublicLoginResponse>(
@@ -161,33 +211,58 @@ pub(crate) async fn login_public(key: String) -> Result<PublicSession, PublicSes
         cookie::record(identity);
         publish_cookie_identity(SessionIdentity::Snapshot(Some(identity.clone())));
     }
-    if (200..300).contains(&status) {
-        // 成功状态已可能换了 Cookie。只有解码成功才能按新身份建立宿主，其余先复核。
-        super::swr_cache::invalidate_all();
-        notify_public_session_change(SessionRefreshReason::Refresh);
+    drop(cookie_lock);
+    if (200..300).contains(&status)
+        || status >= 500
+        || (status == 409
+            && result
+                .as_ref()
+                .is_err_and(|error| error.code.as_deref() == Some("invalid_response")))
+    {
+        // 只对账当前 Cookie。失败不能证明换号，也不能再次提交登录 key 或失效公开读缓存。
+        notify_public_session_change(SessionRefreshReason::CookieChanged);
     }
     result
 }
 
 pub(crate) async fn logout_public(user_id: String) -> Result<(), String> {
-    let _cookie_lock =
-        lock_session_request().await.map_err(PublicSessionApiError::into_read_code)?;
+    let cookie_lock = lock_cookie_mutation().await.map_err(str::to_owned)?;
     cookie::invalidate();
-    let response = send_session_request(SessionRequest::Logout(&user_id))
-        .await
-        .inspect_err(|_error| {
-            notify_public_session_change(SessionRefreshReason::Refresh);
-        })
-        .map_err(PublicSessionApiError::into_read_code)?;
+    let response = match send_session_request(SessionRequest::Logout(&user_id)).await {
+        Ok(response) => response,
+        Err(failure) => {
+            if failure.needs_reconciliation() {
+                mark_public_logout(false);
+                drop(cookie_lock);
+                notify_public_session_change(SessionRefreshReason::LogoutUnknown);
+            }
+            return Err(failure.transport.code().to_owned());
+        }
+    };
     let status = response.status();
     let body = response.text().await;
-    let result = decode_identity_response::<()>(status, body.as_deref(), Value::is_null);
-    if result.is_ok() {
+    let result = decode_identity_response::<()>(status, body.as_deref(), Value::is_null)
+        .map_err(|error| error.validate_conflict(&["session_changed"]));
+    let reason = if result.is_ok() {
+        mark_public_logout(true);
         publish_cookie_identity(SessionIdentity::Snapshot(None));
-        super::swr_cache::invalidate_all();
-    }
-    if (200..300).contains(&status) {
-        notify_public_session_change(SessionRefreshReason::Refresh);
+        Some(SessionRefreshReason::CookieChanged)
+    } else if (200..300).contains(&status)
+        || status >= 500
+        || (status == 409
+            && result
+                .as_ref()
+                .is_err_and(|error| error.code.as_deref() == Some("invalid_response")))
+    {
+        // 只有完整回执才能确认退出；未知标记仅抑制一次提示，仍保留最后确认的命令宿主。
+        mark_public_logout(false);
+        Some(SessionRefreshReason::LogoutUnknown)
+    } else {
+        None
+    };
+    drop(cookie_lock);
+    if let Some(reason) = reason {
+        notify_public_session_change(reason);
     } else if let Err(error) = &result {
         observe_public_session_failure(
             status,
@@ -258,5 +333,90 @@ fn valid_session_deadlines(expires_at: Option<&str>, absolute_expires_at: Option
             }
         }
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+    use std::future::ready;
+
+    use auction_contracts::{ApiResponse, PublicLoginResponse};
+    use dioxus::prelude::*;
+
+    use super::{SessionHttpFixture, SessionRequest, login_public, logout_public};
+    use crate::api::clock::HttpResponseFixture;
+    use crate::api::swr_cache::{FetchOutcome, get_or_fetch};
+
+    const USER: &str = "018f4c8e-7b2a-4c3d-8e4f-000000000001";
+    const URL: &str = "/api/v1/auctions?world=main&status=settled&page=713";
+
+    thread_local! {
+        static PASSED: Cell<bool> = const { Cell::new(false) };
+    }
+
+    #[component]
+    fn CachedPublicRead() -> Element {
+        use_context_provider(|| SessionHttpFixture {
+            respond: |request| {
+                let body = match request {
+                    SessionRequest::Login(_) => serde_json::to_string(&ApiResponse::ok(
+                        "登录成功",
+                        PublicLoginResponse {
+                            user_id: USER.to_owned(),
+                            username: "用户".to_owned(),
+                            status: "active".to_owned(),
+                            expires_at: None,
+                            absolute_expires_at: None,
+                        },
+                    ))
+                    .unwrap(),
+                    SessionRequest::Logout(_) => {
+                        r#"{"code":"ok","message":"已退出","data":null}"#.to_owned()
+                    }
+                    _ => panic!("公开快照验证只运行登录和退出命令"),
+                };
+                Box::pin(ready(Ok(HttpResponseFixture {
+                    status: 200,
+                    etag: None,
+                    body: Some(body),
+                })))
+            },
+            wait_for_lock: || Box::pin(ready(())),
+            track_lock: |_| {},
+            get_revision: |_| None,
+            set_revision: |_| {},
+        });
+        use_future(|| async {
+            let cached = get_or_fetch(
+                URL,
+                15,
+                || 1,
+                |_| ready(FetchOutcome::<_, ()>::Changed { value: "已结算场次", etag: None }),
+            )
+            .await;
+            assert_eq!(cached, Ok("已结算场次"));
+            login_public("fixture".to_owned()).await.unwrap();
+            let after_login =
+                get_or_fetch(URL, 15, || 2, |_| async { panic!("登录使新鲜的公开读缓存过期") })
+                    .await;
+            assert_eq!(after_login, cached);
+            logout_public(USER.to_owned()).await.unwrap();
+            let after_logout =
+                get_or_fetch(URL, 15, || 3, |_| async { panic!("退出使新鲜的公开读缓存过期") })
+                    .await;
+            assert_eq!(after_logout, cached);
+            PASSED.set(true);
+        });
+        rsx! {}
+    }
+
+    #[test]
+    fn login_and_logout_preserve_a_fresh_public_read() {
+        PASSED.set(false);
+        let mut dom = VirtualDom::new(CachedPublicRead);
+        dom.rebuild_in_place();
+        dom.process_events();
+        assert!(PASSED.get());
     }
 }

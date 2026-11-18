@@ -65,14 +65,14 @@ pub(crate) fn PublicShell() -> Element {
     let bid_refresh = PublicBidRefresh(use_signal(|| 0_u64));
     // 只有 wasm 的页面可见性回调会写该信号；宿主检查看不到 cfg 分支。
     #[allow(unused_mut)]
-    let mut readiness_generation = use_signal(|| 0_u64);
+    let mut visibility_generation = use_signal(|| 0_u64);
     // 游标归整个 Public 外壳；订阅因目标或用户身份变化重启时仍保留已确认位置。
     let auction_after = use_signal(|| None::<(String, i64)>);
     let mut stable_realtime_target = use_signal(|| PublicRealtimeTarget::Checking);
     let page_realtime_target = use_signal(|| None::<(PublicRealtimePageKey, PublicRealtimeTarget)>);
     let realtime_state = use_signal(|| LiveConnectionState::Connecting);
     let readiness = use_resource(move || {
-        let _ = readiness_generation();
+        let _ = visibility_generation();
         fetch_public_readiness()
     });
     let commands = use_competition_commands_provider();
@@ -80,11 +80,10 @@ pub(crate) fn PublicShell() -> Element {
         session,
         page_owner: command_owner,
         competition_owner,
-        ended_elsewhere: mut session_ended_elsewhere,
+        ended_elsewhere: session_ended_elsewhere,
         check: check_session,
     } = use_public_session_checks(commands);
     super::session::use_public_session_sync(check_session);
-    super::session::use_public_session_expiry(session, check_session);
     let current_auction = use_resource(move || {
         let _ = refresh_generation();
         let world = selected_world();
@@ -130,7 +129,7 @@ pub(crate) fn PublicShell() -> Element {
             // 恢复可见时立即补偿一次 readiness 与权威 current 重读，快速回到同步。隐藏期间读到
             // 的条目可能仍在 TTL 内：补读与轮询一样先失效公开读缓存，否则只会原样返回旧快照。
             page_visibility.install(move || {
-                readiness_generation.set(readiness_generation().saturating_add(1));
+                visibility_generation.set(visibility_generation().saturating_add(1));
                 refresh_public_reads(refresh_generation);
                 check_session.call(SessionRefreshReason::Refresh);
             });
@@ -159,8 +158,6 @@ pub(crate) fn PublicShell() -> Element {
     let lot_link_request = use_signal(|| None);
     use_context_provider(|| LotLinkRequest(lot_link_request));
     use_context_provider(|| PublicLocationRevision(location_generation));
-    let session_context = session;
-    use_context_provider(move || session_context);
     use_context_provider(|| PublicCommandOwner(command_owner));
     let content_loading = use_signal(std::collections::BTreeSet::new);
     use_context_provider(|| PublicContentLoading(content_loading));
@@ -434,7 +431,7 @@ pub(crate) fn PublicShell() -> Element {
                     // 世界、语言与主题切换匿名访客同样可用；语言与主题只写本地偏好
                     // （hv.lang / hv.theme），不依赖会话。手机上随导航菜单一起展开。
                     div { class: "public-shell__preferences",
-                        WorldPicker { selected_world }
+                        WorldPicker { selected_world, visibility_generation }
                         LanguagePicker {
                             label: t!("language-label"),
                             catalog: &PUBLIC_LOCALE_CATALOG,
@@ -449,25 +446,7 @@ pub(crate) fn PublicShell() -> Element {
                     div { class: "console-ticker__session", session::SessionMenu {} }
                 }
             }
-            if session_ended_elsewhere() {
-                div { class: "public-shell__session-ended-banner", role: "status",
-                    span { class: "public-shell__session-ended-text",
-                        {t!("session-ended-elsewhere")}
-                    }
-                    Link {
-                        class: "public-shell__session-ended-login",
-                        to: "/login",
-                        {t!("session-ended-relogin")}
-                    }
-                    button {
-                        class: "public-shell__session-ended-dismiss",
-                        r#type: "button",
-                        aria_label: t!("catalog-close"),
-                        onclick: move |_| session_ended_elsewhere.set(false),
-                        "✕"
-                    }
-                }
-            }
+            session::SessionEndedNotice { ended: session_ended_elsewhere }
             div { class: "console-body",
                 presentation::console::ConsoleSidebar {
                     current_route: current_route,

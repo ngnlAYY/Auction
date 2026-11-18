@@ -13,7 +13,9 @@ mod price_history;
 pub(super) use bid_log::fetch_bid_log_auction_status;
 pub(crate) use bid_log::{fetch_bid_log_auctions, fetch_bid_log_page, fetch_lot_bid_log};
 pub(super) use cached_get::cached_public_read;
-pub(crate) use current::{fetch_current_auction, fetch_historical_auction, fetch_worlds};
+pub(crate) use current::{
+    fetch_current_auction, fetch_historical_auction, fetch_worlds, revalidate_worlds,
+};
 pub(crate) use directory::{fetch_auction_history_page, fetch_auction_list};
 pub(crate) use lots::{fetch_current_lots, fetch_lot_detail, prefetch_current_lots};
 pub(crate) use price_history::{PriceHistoryFetchError, fetch_price_history};

@@ -1,6 +1,9 @@
 //! Public 会话请求及可用于身份证据的严格响应信封。
 
-use auction_contracts::{ApiResponse, PUBLIC_EXPECTED_USER_ID_HEADER, PublicLoginRequest};
+use auction_contracts::{
+    ApiResponse, PUBLIC_EXPECTED_USER_ID_HEADER, PublicLoginRequest,
+    PublicSetSessionPreferenceRequest,
+};
 use auction_web_shared::{BrowserErrorClass, report_browser_error};
 use gloo_net::http::{Request, Response};
 use serde::de::DeserializeOwned;
@@ -9,6 +12,7 @@ use serde_json::Value;
 #[cfg(test)]
 use crate::api::clock::HttpFixtureFuture;
 use crate::api::clock::send_response;
+use crate::api::session_preference::PATH as SESSION_PREFERENCE_PATH;
 use crate::api::{CommandError, TransportError};
 
 use super::PublicSessionApiError;
@@ -23,22 +27,52 @@ pub(crate) enum SessionRequest<'a> {
     Sync(&'a str),
     Login(&'a str),
     Logout(&'a str),
+    ReadPreference,
+    SetPreference(&'a str, &'a PublicSetSessionPreferenceRequest),
 }
 
 #[cfg(test)]
 #[derive(Clone, Copy)]
-pub(crate) struct SessionHttpFixture(pub fn(SessionRequest<'_>) -> HttpFixtureFuture);
+pub(crate) struct SessionHttpFixture {
+    pub respond: fn(SessionRequest<'_>) -> HttpFixtureFuture,
+    pub wait_for_lock: fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = ()>>>,
+    pub track_lock: fn(bool),
+    pub get_revision: fn(&str) -> Option<String>,
+    pub set_revision: fn(&str),
+}
 
-pub(super) async fn send_session_request(
+/// 写入失败保留是否已构造请求及正文断流前收到的状态。
+pub(in crate::api) struct SessionRequestError {
+    pub transport: TransportError,
+    started: bool,
+}
+
+impl SessionRequestError {
+    pub(in crate::api) fn needs_reconciliation(&self) -> bool {
+        self.started
+            && match self.transport {
+                TransportError::Network(Some(status @ 400..=499)) => matches!(status, 401 | 409),
+                _ => true,
+            }
+    }
+}
+
+pub(in crate::api) async fn send_session_request(
     request: SessionRequest<'_>,
-) -> Result<crate::api::clock::HttpResponse, PublicSessionApiError> {
+) -> Result<crate::api::clock::HttpResponse, SessionRequestError> {
+    let mut started = false;
     #[cfg(test)]
-    let fixture = dioxus::prelude::try_consume_context::<SessionHttpFixture>()
-        .map(|fixture| (fixture.0)(request));
+    let fixture = dioxus::prelude::try_consume_context::<SessionHttpFixture>().map(|fixture| {
+        started = true;
+        (fixture.respond)(request)
+    });
     send_response(
         |abort_signal| {
             let request = match request {
-                SessionRequest::Read => Request::get(PATH).abort_signal(abort_signal).build(),
+                SessionRequest::Read => Request::get(PATH)
+                    .abort_signal(abort_signal)
+                    .cache(web_sys::RequestCache::NoStore)
+                    .build(),
                 SessionRequest::Sync(user_id) => Request::put(PATH)
                     .abort_signal(abort_signal)
                     .header(PUBLIC_EXPECTED_USER_ID_HEADER, user_id)
@@ -50,14 +84,24 @@ pub(super) async fn send_session_request(
                     .abort_signal(abort_signal)
                     .header(PUBLIC_EXPECTED_USER_ID_HEADER, user_id)
                     .build(),
+                SessionRequest::ReadPreference => {
+                    Request::get(SESSION_PREFERENCE_PATH).abort_signal(abort_signal).build()
+                }
+                SessionRequest::SetPreference(user_id, command) => {
+                    Request::put(SESSION_PREFERENCE_PATH)
+                        .abort_signal(abort_signal)
+                        .header(PUBLIC_EXPECTED_USER_ID_HEADER, user_id)
+                        .json(command)
+                }
             };
+            started = request.is_ok();
             request.map_err(|_| TransportError::Network(None))
         },
         #[cfg(test)]
         fixture,
     )
     .await
-    .map_err(|error| PublicSessionApiError::local(error.code()))
+    .map_err(|transport| SessionRequestError { transport, started })
 }
 
 /// 权威身份只来自 HTTP 200 / `ok` 的对象信封，匿名也必须显式提供 `data`。

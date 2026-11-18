@@ -12,11 +12,16 @@ pub(crate) use auction_contracts::{
     PlaceBidResultResponse as BidResult,
     PublicProxyCommandAuthorizationResponse as ProxyCommandAuthorization,
 };
+use auction_web_shared::send_request_observed;
 use gloo_net::http::Request;
 use serde::Serialize;
 use uuid::Uuid;
 
-use super::{PublicSessionApiError, TransportError, decoder, send_request};
+use super::clock::observe_response_date;
+use super::session::{
+    SessionRefreshReason, notify_public_session_change, observe_public_session_failure,
+};
+use super::{PublicSessionApiError, TransportError, decoder};
 
 const NOT_SENT: &str = "command_not_sent";
 
@@ -26,8 +31,18 @@ type WireReply = Pin<Box<dyn Future<Output = Result<(u16, Option<String>), Trans
 type WireTransport = fn(&str, &str, &[u8]) -> Result<WireReply, TransportError>;
 
 #[cfg(test)]
+type WireTransportWithHead = fn(&str, &str, &[u8]) -> Result<(u16, WireReply), TransportError>;
+
+#[cfg(test)]
+#[derive(Clone, Copy)]
+enum WireFixture {
+    Buffered(WireTransport),
+    WithHead(WireTransportWithHead),
+}
+
+#[cfg(test)]
 thread_local! {
-    static WIRE_TRANSPORT: Cell<Option<WireTransport>> = const { Cell::new(None) };
+    static WIRE_TRANSPORT: Cell<Option<WireFixture>> = const { Cell::new(None) };
 }
 
 /// Public 命令失败的稳定错误投影；不把服务端说明正文带入浏览器展示。
@@ -58,11 +73,19 @@ impl CommandError {
 
     #[cfg(test)]
     pub(crate) fn intercept_test_requests(transport: WireTransport) {
-        WIRE_TRANSPORT.set(Some(transport));
+        WIRE_TRANSPORT.set(Some(WireFixture::Buffered(transport)));
     }
 
-    fn transport(error: TransportError) -> Self {
-        Self { code: error.code().to_owned(), status: 0 }
+    #[cfg(test)]
+    pub(crate) fn intercept_test_requests_with_head(transport: WireTransportWithHead) {
+        WIRE_TRANSPORT.set(Some(WireFixture::WithHead(transport)));
+    }
+
+    fn transport(error: TransportError, response_status: Option<u16>) -> Self {
+        let unauthorized =
+            response_status == Some(401) || matches!(error, TransportError::Network(Some(401)));
+        // 未完成的正文不能了结命令。保留 401 供命令宿主解释尚未确定的结果。
+        Self { code: error.code().to_owned(), status: if unauthorized { 401 } else { 0 } }
     }
 
     fn invalid_response(status: u16) -> Self {
@@ -132,6 +155,7 @@ pub(crate) async fn lower_proxy_authorization(
 #[derive(Default)]
 struct CommandInvalidation {
     request_built: bool,
+    response_status: Option<u16>,
 }
 
 impl CommandInvalidation {
@@ -156,6 +180,14 @@ struct CommandResponse {
     body: Option<String>,
 }
 
+fn observe_command_head(response_status: &mut Option<u16>, status: u16) {
+    *response_status = Some(status);
+    // 401 发起复核并暂停新写入和重试。正文收口前仍保留原命令的归属。
+    if status == 401 {
+        notify_public_session_change(SessionRefreshReason::AuthenticationFailed);
+    }
+}
+
 async fn post_command(
     url: &str,
     user_id: Uuid,
@@ -168,21 +200,43 @@ async fn post_command(
     };
     let expected_user = user_id.to_string();
     #[cfg(test)]
-    if let Some(transport) = WIRE_TRANSPORT.get() {
-        let reply = invalidation.built(transport(url, &expected_user, body.as_bytes()))?;
+    if let Some(fixture) = WIRE_TRANSPORT.get() {
+        let response = match fixture {
+            WireFixture::Buffered(transport) => {
+                transport(url, &expected_user, body.as_bytes()).map(|reply| (None, reply))
+            }
+            WireFixture::WithHead(transport) => transport(url, &expected_user, body.as_bytes())
+                .map(|(status, reply)| (Some(status), reply)),
+        };
+        let (response_status, reply) = invalidation.built(response)?;
+        if let Some(status) = response_status {
+            observe_command_head(&mut invalidation.response_status, status);
+        }
         return reply.await.map(|(status, body)| CommandResponse { status, body });
     }
-    let response = send_request(|abort_signal| {
-        invalidation.built(
-            Request::post(url)
-                .abort_signal(abort_signal)
-                .header(auction_contracts::PUBLIC_EXPECTED_USER_ID_HEADER, &expected_user)
-                .header("Content-Type", "application/json")
-                .body(body)
-                .map_err(|_| TransportError::Network(None)),
+    let response = {
+        let mut response_status = None;
+        let sent = send_request_observed(
+            |abort_signal| {
+                invalidation.built(
+                    Request::post(url)
+                        .abort_signal(abort_signal)
+                        .header(auction_contracts::PUBLIC_EXPECTED_USER_ID_HEADER, &expected_user)
+                        .header("Content-Type", "application/json")
+                        .body(body)
+                        .map_err(|_| TransportError::Network(None)),
+                )
+            },
+            |response| {
+                // 超时可发生在响应头之后，共享超时错误本身不携带状态。
+                observe_command_head(&mut response_status, response.status());
+                observe_response_date(response);
+            },
         )
-    })
-    .await?;
+        .await;
+        invalidation.response_status = response_status;
+        sent?
+    };
     Ok(CommandResponse { status: response.status(), body: response.text().await.ok() })
 }
 
@@ -191,49 +245,49 @@ async fn send_command<T>(
     send: impl AsyncFnOnce(&mut CommandInvalidation) -> Result<CommandResponse, TransportError>,
     decode: impl FnOnce(Option<&str>) -> Result<T, String>,
 ) -> Result<T, CommandError> {
-    let response = {
+    let (response, response_status) = {
         let mut invalidation = CommandInvalidation::default();
-        send(&mut invalidation).await.map_err(|error| {
+        let response = send(&mut invalidation).await.map_err(|error| {
             if invalidation.request_built {
-                CommandError::transport(error)
+                let error = CommandError::transport(error, invalidation.response_status);
+                if error.status == 401 && invalidation.response_status != Some(401) {
+                    notify_public_session_change(SessionRefreshReason::AuthenticationFailed);
+                }
+                error
             } else {
                 CommandError::before_send()
             }
-        })
-    }?;
+        })?;
+        (response, invalidation.response_status)
+    };
     let status = response.status;
     let body = response.body.as_deref();
     if !(200..300).contains(&status) {
-        return Err(read_command_error(status, body, expected_user));
+        let error = read_command_error(status, body);
+        if status != 401 || response_status != Some(401) {
+            observe_public_session_failure(status, &error.code, Some(&expected_user.to_string()));
+        }
+        return Err(error);
     }
     decode(body).map_err(|_| CommandError::invalid_response(status))
 }
 
-fn read_command_error(status: u16, body: Option<&str>, expected_user: Uuid) -> CommandError {
-    let error =
-        super::session::decode_identity_response::<()>(status, body, serde_json::Value::is_null)
-            .err()
-            .map(PublicSessionApiError::into_read_code)
-            .filter(|code| {
-                !code.is_empty()
-                    && code.len() <= 64
-                    && code == code.trim()
-                    && code.chars().all(|character| {
-                        character.is_ascii_lowercase()
-                            || character.is_ascii_digit()
-                            || character == '_'
-                    })
-            })
-            .map_or_else(
-                || CommandError::invalid_response(status),
-                |code| CommandError { code, status },
-            );
-    super::session::observe_public_session_failure(
-        status,
-        &error.code,
-        Some(&expected_user.to_string()),
-    );
-    error
+fn read_command_error(status: u16, body: Option<&str>) -> CommandError {
+    super::session::decode_identity_response::<()>(status, body, serde_json::Value::is_null)
+        .err()
+        .map(PublicSessionApiError::into_read_code)
+        .filter(|code| {
+            !code.is_empty()
+                && code.len() <= 64
+                && code == code.trim()
+                && code.chars().all(|character| {
+                    character.is_ascii_lowercase() || character.is_ascii_digit() || character == '_'
+                })
+        })
+        .map_or_else(
+            || CommandError::invalid_response(status),
+            |code| CommandError { code, status },
+        )
 }
 
 #[cfg(test)]
@@ -289,6 +343,7 @@ mod tests {
             TransportError::Network(None),
             TransportError::Timeout,
             TransportError::Network(Some(200)),
+            TransportError::Network(Some(409)),
             TransportError::Network(Some(503)),
             TransportError::Decode,
         ]
@@ -314,6 +369,22 @@ mod tests {
             assert_eq!(current_revision(), before + 1, "{failure:?}");
             assert_snapshot_invalidated(&url);
         }
+    }
+
+    #[test]
+    fn disconnected_unauthorized_response_keeps_its_header_status() {
+        let error = send_command(
+            Uuid::from_u128(1),
+            async |invalidation| {
+                invalidation.built(Ok(()))?;
+                Err(TransportError::Network(Some(401)))
+            },
+            decode_bid_receipt,
+        )
+        .now_or_never()
+        .unwrap()
+        .unwrap_err();
+        assert_eq!(error, CommandError { code: "network_error".to_owned(), status: 401 });
     }
 
     #[test]

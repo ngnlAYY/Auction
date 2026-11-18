@@ -185,6 +185,7 @@ pub(super) fn outcome_unknown(error: &CommandError, retry: bool) -> bool {
         return retry;
     }
     error.outcome_uncertain()
+        || matches!((error.status, error.code.as_str()), (401, "network_error" | "request_timeout"))
         || !(400..500).contains(&error.status)
         || (retry
             && !matches!(

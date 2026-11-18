@@ -1,7 +1,8 @@
 //! 会话身份证据和会话复核的通知边界。
 //! 有效的当前身份投影替换旧归属，`409 session_changed` 只否定请求携带的预期用户。
 
-use dioxus::{core::Runtime, prelude::*};
+use dioxus::core::Runtime;
+use dioxus::prelude::*;
 
 use super::PublicSession;
 
@@ -25,19 +26,31 @@ pub(crate) struct PublicSessionEvidenceTrigger {
 }
 
 /// 不修改 Cookie 的请求绑定发出时的修订，避免迟到的响应覆盖更新的 Cookie 归属。
-pub(in crate::api) struct SessionIdentityObservation(Option<(PublicSessionEvidenceTrigger, u64)>);
+pub(in crate::api) struct SessionIdentityObservation {
+    source: Option<(PublicSessionEvidenceTrigger, u64)>,
+    session_revision: Option<String>,
+    confirmed_logout: Option<String>,
+}
 
 impl SessionIdentityObservation {
     pub(in crate::api) fn start() -> Self {
-        Self(current_context::<PublicSessionEvidenceTrigger>().map(|trigger| {
+        let source = current_context::<PublicSessionEvidenceTrigger>().map(|trigger| {
             let revision = *trigger.revision.peek();
             (trigger, revision)
-        }))
+        });
+        Self {
+            source,
+            session_revision: get_revision(PUBLIC_SESSION_CHANGE_STORAGE_KEY),
+            confirmed_logout: get_revision(LOGOUT_REVISION_KEY),
+        }
     }
 
     pub(in crate::api) fn publish(self, identity: SessionIdentity) -> bool {
-        if let Some((trigger, revision)) = self.0 {
-            if *trigger.revision.peek() != revision {
+        if let Some((trigger, revision)) = self.source {
+            if *trigger.revision.peek() != revision
+                || self.session_revision != get_revision(PUBLIC_SESSION_CHANGE_STORAGE_KEY)
+                || self.confirmed_logout != get_revision(LOGOUT_REVISION_KEY)
+            {
                 return false;
             }
             trigger
@@ -53,6 +66,10 @@ pub(in crate::api) fn publish_cookie_identity(identity: SessionIdentity) {
     publish_identity(SessionIdentityEvidence::Current { identity, cookie_written: true });
 }
 
+pub(super) fn publish_read_identity(identity: SessionIdentity) {
+    publish_identity(SessionIdentityEvidence::Current { identity, cookie_written: false });
+}
+
 fn publish_identity(evidence: SessionIdentityEvidence) {
     if let Some(trigger) = current_context::<PublicSessionEvidenceTrigger>() {
         trigger.apply.call(evidence);
@@ -62,14 +79,22 @@ fn publish_identity(evidence: SessionIdentityEvidence) {
 /// 一次复核的触发原因，不提供身份归属。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SessionRefreshReason {
+    Initial,
     Refresh,
     AuthenticationFailed,
+    CookieChanged,
+    LogoutUnknown,
+    Expiry,
 }
 
 impl SessionRefreshReason {
     /// 认证失败应清除展示快照，最后确认的竞价宿主仍等候权威复核。
     pub(crate) fn invalidates(self) -> bool {
-        self == Self::AuthenticationFailed
+        matches!(self, Self::AuthenticationFailed | Self::Expiry)
+    }
+
+    pub(super) fn synchronizes_cookie(self) -> bool {
+        matches!(self, Self::Initial | Self::Refresh)
     }
 }
 
@@ -77,9 +102,22 @@ impl SessionRefreshReason {
 #[derive(Clone, Copy)]
 pub(crate) struct PublicSessionCheckTrigger(pub(crate) EventHandler<SessionRefreshReason>);
 
+impl PublicSessionCheckTrigger {
+    /// 已确认退出与结果未知退出的修订值，只含随机标记。
+    pub(crate) fn logout_revisions() -> (Option<String>, Option<String>) {
+        (get_revision(LOGOUT_REVISION_KEY), get_revision(LOGOUT_UNKNOWN_REVISION_KEY))
+    }
+}
+
 /// 标签页间只广播随机修订，不保存用户身份或凭据。
-#[cfg(target_arch = "wasm32")]
 pub(crate) const PUBLIC_SESSION_CHANGE_STORAGE_KEY: &str = "hv.public.session-revision";
+const LOGOUT_REVISION_KEY: &str = "hv.public.session-logout-revision";
+const LOGOUT_UNKNOWN_REVISION_KEY: &str = "hv.public.session-logout-unknown-revision";
+
+pub(super) fn mark_public_logout(confirmed: bool) {
+    // 先在写锁内记录。排队中的权威 GET 可能早于跨页唤醒收到 Cookie 的变化。
+    set_revision(if confirmed { LOGOUT_REVISION_KEY } else { LOGOUT_UNKNOWN_REVISION_KEY });
+}
 
 pub(in crate::api) fn observe_public_session_failure(
     status: u16,
@@ -109,18 +147,40 @@ pub(super) fn observe_expected_user_rejection(
 }
 
 pub(in crate::api) fn notify_public_session_change(reason: SessionRefreshReason) {
+    broadcast_session_change();
     if let Some(trigger) = current_context::<PublicSessionCheckTrigger>() {
         trigger.0.call(reason);
     }
-    broadcast_session_change();
 }
 
 fn broadcast_session_change() {
+    set_revision(PUBLIC_SESSION_CHANGE_STORAGE_KEY);
+}
+
+fn get_revision(key: &str) -> Option<String> {
+    #[cfg(test)]
+    if let Some(fixture) = current_context::<super::transport::SessionHttpFixture>() {
+        return (fixture.get_revision)(key);
+    }
+    auction_web_shared::storage::get_item(key)
+}
+
+fn set_revision(key: &str) {
+    #[cfg(not(test))]
+    write_storage_revision(key);
+    #[cfg(test)]
+    if let Some(fixture) = current_context::<super::transport::SessionHttpFixture>() {
+        (fixture.set_revision)(key);
+    } else {
+        write_storage_revision(key);
+    }
+}
+
+fn write_storage_revision(key: &str) {
     #[cfg(target_arch = "wasm32")]
-    let _ = auction_web_shared::storage::set_item(
-        PUBLIC_SESSION_CHANGE_STORAGE_KEY,
-        &uuid::Uuid::new_v4().to_string(),
-    );
+    let _ = auction_web_shared::storage::set_item(key, &uuid::Uuid::new_v4().to_string());
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = key;
 }
 
 fn current_context<T: Clone + 'static>() -> Option<T> {

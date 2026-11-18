@@ -4,19 +4,28 @@ mod duration;
 mod state;
 
 use auction_web_shared::{Time, t};
+use dioxus::core::current_scope_id;
 use dioxus::prelude::*;
 
 use self::duration::DurationUnit;
 use self::state::{PreferenceOwner, PreferenceState};
+use crate::surface::session::SessionCommandScope;
 use crate::surface::{PublicCommandOwner, PublicSessionResource, use_content_loading};
 
-/// 父页面按用户 UUID 隔离宿主；账号变化或卸载取消任务并销毁未决命令。
+/// 父页面按用户 UUID 隔离表单；外壳持有已发命令，表单卸载后不再消费界面结果。
 #[component]
 pub(super) fn SessionPreference(user_id: String) -> Element {
     let session = use_context::<PublicSessionResource>();
     let mut state = use_signal(PreferenceState::default);
     let identity = use_context::<PublicCommandOwner>().0;
-    let owner = PreferenceOwner { user_id, identity, session, state };
+    let owner = PreferenceOwner {
+        user_id,
+        identity,
+        session,
+        state,
+        form_scope: current_scope_id(),
+        commands: use_context::<SessionCommandScope>(),
+    };
     use_effect({
         let mut owner = owner.clone();
         move || owner.load(false)
@@ -154,7 +163,7 @@ pub(super) fn SessionPreference(user_id: String) -> Element {
                         }
                         if failed && uncertain {
                             button {
-                                r#type: "button", disabled: busy,
+                                r#type: "button", disabled: busy || !ready,
                                 aria_describedby: "session-duration-feedback",
                                 onclick: move |_| retry.submit(),
                                 {t!("session-duration-retry")}

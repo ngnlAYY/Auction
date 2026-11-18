@@ -3,16 +3,46 @@
 use auction_web_shared::{BrowserLock, BrowserLockError, DEFAULT_REQUEST_TIMEOUT_MILLIS};
 
 use super::PublicSession;
+#[cfg(test)]
+use super::transport::SessionHttpFixture;
 
 const LOCK_NAME: &str = "hv.public.session-cookie";
 
-/// 登录、退出、偏好命令和浏览器持久期同步共用同一原生独占锁。
-pub(super) async fn lock() -> Result<BrowserLock, &'static str> {
-    BrowserLock::acquire(LOCK_NAME, DEFAULT_REQUEST_TIMEOUT_MILLIS).await.map_err(|error| {
-        match error {
-            BrowserLockError::Unavailable => "session_lock_unavailable",
-            BrowserLockError::Timeout => "session_lock_timeout",
+/// 本次会话请求持有的独占锁，直到完整响应或传输取消。
+pub(in crate::api) struct CookieLock {
+    _native: Option<BrowserLock>,
+    #[cfg(test)]
+    track_fixture: Option<fn(bool)>,
+}
+
+impl Drop for CookieLock {
+    fn drop(&mut self) {
+        #[cfg(test)]
+        if let Some(track) = self.track_fixture {
+            track(false);
         }
+    }
+}
+
+/// 登录、退出、偏好命令和浏览器持久期同步共用同一原生独占锁。
+pub(in crate::api) async fn lock() -> Result<CookieLock, &'static str> {
+    #[cfg(test)]
+    if let Some(fixture) = dioxus::prelude::try_consume_context::<SessionHttpFixture>() {
+        (fixture.wait_for_lock)().await;
+        (fixture.track_lock)(true);
+        return Ok(CookieLock { _native: None, track_fixture: Some(fixture.track_lock) });
+    }
+    let native =
+        BrowserLock::acquire(LOCK_NAME, DEFAULT_REQUEST_TIMEOUT_MILLIS).await.map_err(|error| {
+            match error {
+                BrowserLockError::Unavailable => "session_lock_unavailable",
+                BrowserLockError::Timeout => "session_lock_timeout",
+            }
+        })?;
+    Ok(CookieLock {
+        _native: Some(native),
+        #[cfg(test)]
+        track_fixture: None,
     })
 }
 

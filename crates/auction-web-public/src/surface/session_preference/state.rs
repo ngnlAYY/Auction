@@ -1,12 +1,14 @@
 //! 登录时长设置的账号隔离命令宿主；未知结果冻结命令、时长和 CAS 版本直到明确确认。
 
 use auction_contracts::{PublicSessionPreferenceResponse, PublicSetSessionPreferenceRequest};
+use dioxus::core::Runtime;
 use dioxus::prelude::*;
 use uuid::Uuid;
 
 use super::duration::DurationDraft;
 use crate::api::{CommandError, fetch_session_preference, set_session_preference};
 use crate::surface::PublicSessionResource;
+use crate::surface::session::SessionCommandScope;
 
 #[derive(Default)]
 pub(super) struct PreferenceState {
@@ -27,14 +29,17 @@ pub(super) struct PreferenceOwner {
     pub(super) identity: Signal<Option<String>>,
     pub(super) session: PublicSessionResource,
     pub(super) state: Signal<PreferenceState>,
+    pub(super) form_scope: ScopeId,
+    pub(super) commands: SessionCommandScope,
 }
 
 impl PreferenceOwner {
     pub(super) fn identity_matches(&self) -> bool {
-        self.identity.peek().as_deref() == Some(self.user_id.as_str())
+        self.state.try_peek().is_ok()
+            && self.identity.peek().as_deref() == Some(self.user_id.as_str())
     }
 
-    /// 新输入须有当前已完成的会话证明；结果收口与原样重试只依赖稳定宿主身份。
+    /// 新输入和原样重试均须有当前会话证明；结果收口只依赖存活的同账号表单。
     pub(super) fn session_ready(&self) -> bool {
         self.identity_matches()
             && *self.session.state().read() == UseResourceState::Ready
@@ -71,7 +76,7 @@ impl PreferenceOwner {
         let current_expires_at = self.state.peek().current_expires_at.clone();
         self.state.set(PreferenceState { busy: true, current_expires_at, ..Default::default() });
         let mut owner = self.clone();
-        spawn(async move {
+        Runtime::current().spawn(self.form_scope, async move {
             if !owner.identity_matches() {
                 return;
             }
@@ -94,10 +99,9 @@ impl PreferenceOwner {
     }
 
     pub(super) fn submit(&mut self) {
-        if !self.identity_matches() || self.state.peek().busy {
+        if !self.session_ready() || self.state.peek().busy {
             return;
         }
-        let session_ready = self.session_ready();
         let payload = {
             let mut state = self.state.write();
             if let Some(pending) = &state.pending {
@@ -106,9 +110,6 @@ impl PreferenceOwner {
                 }
                 pending.clone()
             } else {
-                if !session_ready {
-                    return;
-                }
                 let Some(preference) = &state.authoritative else { return };
                 let expected_version = preference.version;
                 let Ok(duration_seconds) = state.draft.seconds() else {
@@ -131,10 +132,8 @@ impl PreferenceOwner {
             state.confirmed = false;
         }
         let mut owner = self.clone();
-        spawn(async move {
-            if !owner.identity_matches() {
-                return;
-            }
+        self.commands.spawn(async move {
+            // 预期用户与 CAS 由服务端复核；一旦发送，表单卸载也要等收包和 Cookie 对账。
             let result = set_session_preference(&owner.user_id, &payload).await;
             if !owner.identity_matches() {
                 return;
