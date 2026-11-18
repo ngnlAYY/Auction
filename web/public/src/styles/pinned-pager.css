@@ -1,0 +1,94 @@
+/*
+ * Solid 版专属：页面级的数字分页条固定在内容区最下方。
+ * 共用样式里分页条紧跟在表格后面，条目少时停在页面中间，条目多时要滚到底才能翻页。
+ * 这里让内容区成为纵向弹性容器，从页面根到分页条的每一层都撑满剩余高度，分页条靠 `margin: auto`
+ * 落到最下面；内容超过一屏时它再以 sticky 停在视口底部。
+ * 只认“页面根之下、每一层都是最后一个子元素”的那一条分页条（往期拍卖、出价记录、履约进度、
+ * 历史成交价、黑名单、补偿池批次、看板目录）；抽屉、展开行里的分页条不受影响，
+ * 账户页有多个各自独立的列表，整页排除。
+ * Rust 版不加载本文件。规则写在层外，优先于共用样式的各个 @layer。
+ */
+.public-console .console-main {
+  display: flex;
+  flex-direction: column;
+}
+
+/* 页面根，以及页面根到分页条之间的各层容器。 */
+.public-console
+  .console-main
+  > :not(.public-account-bids-page):is(
+    :has(> .ui-pager--numbered:last-child),
+    :has(> :last-child > .ui-pager--numbered:last-child),
+    :has(> :last-child > :last-child > .ui-pager--numbered:last-child),
+    :has(> :last-child > :last-child > :last-child > .ui-pager--numbered:last-child)
+  ),
+.public-console
+  .console-main
+  > :not(.public-account-bids-page)
+  > :last-child:is(
+    :has(> .ui-pager--numbered:last-child),
+    :has(> :last-child > .ui-pager--numbered:last-child),
+    :has(> :last-child > :last-child > .ui-pager--numbered:last-child)
+  ),
+.public-console
+  .console-main
+  > :not(.public-account-bids-page)
+  > :last-child
+  > :last-child:is(
+    :has(> .ui-pager--numbered:last-child),
+    :has(> :last-child > .ui-pager--numbered:last-child)
+  ),
+.public-console
+  .console-main
+  > :not(.public-account-bids-page)
+  > :last-child
+  > :last-child
+  > :last-child:has(> .ui-pager--numbered:last-child) {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+}
+
+.public-console .console-main > :not(.public-account-bids-page) > .ui-pager--numbered:last-child,
+.public-console
+  .console-main
+  > :not(.public-account-bids-page)
+  > :last-child
+  > .ui-pager--numbered:last-child,
+.public-console
+  .console-main
+  > :not(.public-account-bids-page)
+  > :last-child
+  > :last-child
+  > .ui-pager--numbered:last-child,
+.public-console
+  .console-main
+  > :not(.public-account-bids-page)
+  > :last-child
+  > :last-child
+  > :last-child
+  > .ui-pager--numbered:last-child {
+  position: sticky;
+  inset-block-end: 0;
+  z-index: 2;
+  flex: none;
+  margin-block-start: auto;
+  padding-block: var(--space-2) max(var(--space-2), env(safe-area-inset-bottom, 0px));
+  border-block-start: var(--border-width) solid var(--color-border);
+  background: var(--color-bg);
+}
+
+/* 分页条自己贴到最下面，内容区不再另留底部空白。 */
+.public-console
+  .console-main:has(
+    > :not(.public-account-bids-page) > .ui-pager--numbered:last-child,
+    > :not(.public-account-bids-page) > :last-child > .ui-pager--numbered:last-child,
+    > :not(.public-account-bids-page) > :last-child > :last-child > .ui-pager--numbered:last-child,
+    > :not(.public-account-bids-page)
+      > :last-child
+      > :last-child
+      > :last-child
+      > .ui-pager--numbered:last-child
+  ) {
+  padding-block-end: 0;
+}

@@ -1,7 +1,7 @@
 /*
  * Solid 版专属：手机上的出价记录筛选区。
  * 共用样式里它是一张卡片：世界、场次各占一整行并带标签，再加一行场次标题与筛选框，约 250px 高。
- * 这里去掉卡片与边框，控件直接落在页面背景上：世界与场次是并排的两个浅底胶囊下拉，
+ * 这里去掉卡片与边框，控件直接落在页面背景上：世界与场次是并排的两个浅底下拉框，
  * 下面一行是带放大镜的搜索框。场次标题与下拉框内容重复，连同各标签只对读屏保留。
  * Rust 版不加载本文件。规则写在层外，优先于共用样式的各个 @layer。
  */
@@ -50,11 +50,12 @@
     margin: 0;
     padding-inline: 0.875rem;
     border: 0;
-    border-radius: var(--radius-full);
+    border-radius: var(--radius-sm);
     background-color: color-mix(in srgb, var(--color-text-muted) 14%, transparent);
     box-shadow: none;
     color: var(--color-text);
-    font-size: var(--text-sm);
+    /* 16px：字段字号小于它时 iOS 在聚焦时会放大整个页面。 */
+    font-size: 1rem;
     font-weight: 600;
   }
 

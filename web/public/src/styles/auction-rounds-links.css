@@ -1,0 +1,66 @@
+/*
+ * Solid 版专属：往期拍卖列表的“查看”入口。
+ * 共用样式里四个入口靠左排开，桌面端的列按百分比变宽后右侧留下一段空白。
+ * 这里把四个入口排成等宽的四格并填满整列；桌面端的列宽改成刚好容纳四格的固定值
+ * （各语言的入口文字长度不同，按语言给出），其余列按各自的百分比分配剩余宽度。
+ * 手机卡片上四个入口同样等分整行，并画成按钮，命中高度沿用共用样式的触控尺寸。
+ * Rust 版不加载本文件。规则写在层外，优先于共用样式的各个 @layer。
+ */
+.public-auction-rounds {
+  --rounds-links-size: 16.5rem;
+}
+
+.public-auction-rounds:lang(en) {
+  --rounds-links-size: 21rem;
+}
+
+.public-auction-rounds:lang(ko) {
+  --rounds-links-size: 17.5rem;
+}
+
+.public-auction-rounds .public-auction-rounds__links {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(max-content, 1fr));
+  gap: var(--space-2);
+  justify-items: center;
+}
+
+.public-auction-rounds .public-auction-rounds__links > a {
+  white-space: nowrap;
+}
+
+/* 论坛入口固定在第四格：没有履约进度入口的场次不让它前移。 */
+.public-auction-rounds .public-auction-rounds__links > a[target="_blank"] {
+  grid-column: 4;
+}
+
+@media screen and (min-width: 48.0625rem) {
+  /* 列宽写在 col 的 style 属性里，只有 !important 能改写。 */
+  .public-auction-rounds colgroup[data-table-layout="public-auction-history"] > col:last-child {
+    /* biome-ignore lint/complexity/noImportantStyles: 覆盖 col 元素 style 属性里的百分比列宽 */
+    width: var(--rounds-links-size) !important;
+  }
+
+  .public-auction-rounds th:last-child {
+    text-align: center;
+  }
+}
+
+@media screen and (max-width: 48rem) {
+  .public-auction-rounds .public-auction-rounds__links {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    justify-items: stretch;
+  }
+
+  .public-auction-rounds .public-auction-rounds__links > a {
+    justify-content: center;
+    padding-inline: var(--space-1);
+    overflow: hidden;
+    border: var(--border-width) solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface-raised);
+    font-size: var(--text-sm);
+    text-decoration: none;
+    text-overflow: ellipsis;
+  }
+}

@@ -269,9 +269,10 @@ export function AuctionHistoryTable(props: {
   return (
     <div class="public-auction-rounds__table">
       <table aria-label={t("page-auctions-title")}>
-        {/* Solid 版把“查看”一列从 16% 加宽到 26%，让四个入口在常见桌面宽度下排成一行；
-            多出的宽度取自结束时间与成交总额两列。Rust 版仍是 [12, 8, 22, 7, 7, 7, 21, 16]。 */}
-        <TableColumns layout="public-auction-history" widths={[12, 8, 17, 7, 7, 7, 16, 26]} />
+        {/* Solid 版的“查看”一列由 styles/auction-rounds-links.css 改成刚好容纳四个入口的固定宽度，
+            这里最后一项只是没有该样式时的回退；其余列按各自的百分比分配剩余宽度。
+            Rust 版仍是 [12, 8, 22, 7, 7, 7, 21, 16]。 */}
+        <TableColumns layout="public-auction-history" widths={[12, 7, 24, 6, 6, 6, 18, 21]} />
         <thead>
           <tr>
             <th scope="col">{t("auction-history-number")}</th>

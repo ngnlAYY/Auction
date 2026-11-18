@@ -1,7 +1,7 @@
 /*
  * Solid 版专属：手机顶栏。
  * 共用样式（crates 下的五份）里的手机顶栏是两行、带边框的方形按钮；这里改成一条紧凑的应用栏：
- * 品牌缩成眉标，当前场次作主标题，状态是小标签，菜单与刷新是无边框图标，登录是实心胶囊。
+ * 品牌缩成眉标，当前场次作主标题，状态是小标签，菜单与刷新是无边框图标，登录是实心按钮（小圆角，与站内其他控件一致）。
  * Rust 版不加载本文件，两套实现在这一块有意不同。规则写在层外，优先于共用样式的各个 @layer。
  */
 @media screen and (max-width: 48rem) {
@@ -34,7 +34,7 @@
     min-block-size: 2.5rem;
     padding: 0;
     border: 0;
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-sm);
     background: transparent;
     box-shadow: none;
     color: var(--color-text);
@@ -132,7 +132,7 @@
     order: 3;
     flex: none;
     padding: 0.0625rem 0.4375rem;
-    border-radius: var(--radius-full);
+    border-radius: var(--radius-sm);
     background: color-mix(in srgb, var(--color-text-muted) 16%, transparent);
     color: var(--color-text-muted);
     font-size: 0.6875rem;
@@ -185,7 +185,7 @@
     min-block-size: 2.125rem;
     padding: 0 0.875rem;
     border: 0;
-    border-radius: var(--radius-full);
+    border-radius: var(--radius-sm);
     background: var(--color-accent);
     color: var(--color-accent-contrast);
     font-size: var(--text-sm);
@@ -204,17 +204,91 @@
     content: "";
   }
 
-  /* 展开菜单：切换器一行排在顶栏内，导航面板保持原来的下拉定位。 */
+  /*
+   * 展开菜单：顶栏变成固定在顶部的覆盖层，导航链接排在栏下，世界、语言、主题三个切换器
+   * 收在面板最底部的“设置”一行。外壳补上与顶栏等高的上内距，页面内容不会因此跳动。
+   */
+  .public-console:has(.public-shell__nav--open) {
+    padding-block-start: calc(3rem + var(--border-width) + env(safe-area-inset-top, 0px));
+  }
+
+  .public-console .console-ticker:has(.public-shell__nav--open) {
+    position: fixed;
+    inset-block-start: 0;
+    inset-inline: 0;
+    grid-template-areas:
+      "menu brand status session"
+      "menu context status session"
+      "nav nav nav nav"
+      "prefs prefs prefs prefs";
+    max-block-size: 100dvh;
+    overflow-y: auto;
+    box-shadow: var(--shadow-2);
+    overscroll-behavior: contain;
+  }
+
+  .public-console .console-ticker .public-shell__nav--open {
+    position: static;
+    inset: auto;
+    grid-area: nav;
+    inline-size: auto;
+    margin-block-start: var(--space-2);
+    padding: var(--space-2) 0;
+    border: 0;
+    border-block-start: var(--border-width) solid var(--color-border);
+    background: transparent;
+    box-shadow: none;
+    gap: var(--space-1) var(--space-2);
+  }
+
   .public-console .console-ticker .public-shell__preferences {
     grid-area: prefs;
-    margin-block-start: var(--space-2);
-    padding-block: var(--space-2) var(--space-1);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    align-items: end;
+    gap: var(--space-2);
+    padding-block: var(--space-3);
     border-block-start: var(--border-width) solid var(--color-border);
+  }
+
+  /* 每个切换器上方显示小号标签，说明这一格是什么设置。 */
+  .public-console
+    .console-ticker
+    .public-shell__preferences
+    :is(.public-world-switcher, .language-picker, .theme-picker) {
+    display: grid;
+    gap: 0.1875rem;
+  }
+
+  .public-console
+    .console-ticker
+    .public-shell__preferences
+    :is(.public-world-switcher > span, .language-picker__label, .theme-picker__label) {
+    position: static;
+    inline-size: auto;
+    block-size: auto;
+    margin: 0;
+    overflow: visible;
+    clip: auto;
+    clip-path: none;
+    color: var(--color-text-muted);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+  }
+
+  .public-console .console-ticker .public-shell__preferences select {
+    inline-size: 100%;
+    min-inline-size: 0;
+    min-block-size: 2.5rem;
+    border-radius: var(--radius-sm);
+    /* 16px：字段字号小于它时 iOS 在聚焦时会放大整个页面。 */
+    font-size: 1rem;
   }
 
   .public-console .console-ticker .public-shell__nav a {
     padding-inline: var(--space-3);
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-sm);
     color: var(--color-text);
     font-size: var(--text-base);
     text-decoration: none;

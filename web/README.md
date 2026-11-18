@@ -195,7 +195,16 @@ export function Blacklist(): JSX.Element {
 
 - 样式文件与类名沿用现有定义：共享设计变量与控制台外壳在 `auction-web-shared` 的 `style/`，各应用的规则在各自的 `assets/`。装配顺序固定为 base → surface → desktop → mobile → console。
 - 类名用小写连字符与 BEM，并带 `public-` 或 `admin-` 前缀；颜色、字号、间距只用共享变量。
-- Solid 版专属的样式放在各应用的 `src/styles/`，在入口里排在共用样式之后导入，规则写在 `@layer` 之外（因此优先于共用样式），只用共享变量、不改 DOM。目前与 Rust 版有意不同的地方：手机断点下的 `web/public/src/styles/mobile-topbar.css`（顶栏改为单行应用栏）、`mobile-bid-log.css`（出价记录的筛选区改为胶囊下拉加搜索框，共两行）与 `mobile-catalog-filters.css`（看板筛选区改用分段控件与可横向滑动的类型标签，隐藏手机下拉框）；以及往期拍卖表格的列比例（`surface/pages/history.tsx`，“查看”一列加宽到 26%，四个入口排成一行）。新增这类差异时在这里登记，并在文件头或改动处写明与 Rust 版的差别。
+- Solid 版专属的样式放在各应用的 `src/styles/`，在入口里排在共用样式之后导入，规则写在 `@layer` 之外（因此优先于共用样式），只用共享变量。新增这类差异时在下表登记，并在文件头或改动处写明与 Rust 版的差别。目前与 Rust 版有意不同的地方：
+
+  | 位置 | 差别 |
+  | --- | --- |
+  | `web/public/src/styles/mobile-topbar.css` | 手机顶栏改为单行应用栏：品牌作眉标、当前场次作主标题，菜单与刷新是无边框图标 |
+  | `web/public/src/styles/mobile-bid-log.css` | 手机上出价记录的筛选区去掉卡片，下拉框与搜索框共两行 |
+  | `web/public/src/styles/mobile-catalog-filters.css` | 手机上看板筛选区排成带标签的三行（分组按钮、窄等级输入框与复选项、类型下拉框与列设置）；列设置面板改为整宽多列网格 |
+  | `web/public/src/styles/auction-rounds-links.css` | 往期拍卖的“查看”入口等分整列；桌面端该列是刚好容纳四个入口的固定宽度，手机卡片上画成四个等宽按钮 |
+  | `web/public/src/styles/pinned-pager.css` | 页面级分页条固定在内容区最下方，内容超过一屏时停在视口底部（账户页除外） |
+  | `web/public/src/surface/pages/history.tsx` | 往期拍卖表格其余列的比例随“查看”列改为固定宽度而调整 |
 - 译文是各应用 `i18n/` 下的五个 `.ftl` 文件（en、zh-CN、zh-TW、ja、ko），键集合一致，键名用连字符。译文只使用 Fluent 的平铺子集：每条消息占一行，写成 `键 = 文本`，文本里的占位只有 `{ $变量 }` 与字符串字面量 `{"…"}` 两种；加载器遇到子集之外的写法会拒绝整份译文。Public 默认 en，Admin 默认 zh-CN；偏好键 `hv.lang` 与 `hv.theme` 是固定契约。
 
 ## 禁止事项

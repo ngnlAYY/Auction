@@ -9,6 +9,8 @@ import "../../../crates/auction-web-shared/style/console.css";
 import "./styles/mobile-topbar.css";
 import "./styles/mobile-bid-log.css";
 import "./styles/mobile-catalog-filters.css";
+import "./styles/auction-rounds-links.css";
+import "./styles/pinned-pager.css";
 
 import { installErrorHook } from "@auction/web-shared/ui/bootstrap";
 import { render } from "@solidjs/web";
