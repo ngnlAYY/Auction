@@ -671,6 +671,14 @@
   }
 }
 
+/* 命令提示与其他触控操作使用同一目标尺寸，按钮可随文字换行。 */
+@media screen and (max-width: 48rem), screen and (pointer: coarse) {
+  .public-command-notices__actions :is(a, button),
+  .public-command-notices__receipt button {
+    min-block-size: var(--size-target);
+  }
+}
+
 /* 窄屏提示条横向铺满，与内容左右留出相同边距。 */
 @media screen and (max-width: 48rem) {
   .public-toast-region,

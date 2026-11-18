@@ -4,6 +4,8 @@
 
 #[cfg(target_arch = "wasm32")]
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+#[cfg(test)]
+use std::{future::Future, pin::Pin};
 
 use auction_time::Timestamp;
 use auction_web_shared::TransportError;
@@ -131,8 +133,28 @@ pub(super) async fn send_get_conditional(
     url: &str,
     etag: Option<&str>,
 ) -> Result<Response, (TransportError, Option<u16>)> {
+    let response = send_conditional_response(
+        url,
+        etag,
+        #[cfg(test)]
+        None,
+    )
+    .await?;
+    match response {
+        HttpResponse::Browser(response) => Ok(response),
+        #[cfg(test)]
+        HttpResponse::Fixture(response) => Err((TransportError::Decode, Some(response.status))),
+    }
+}
+
+/// 公开条件请求在响应头到达时驱逐已不存在的资源，即使后来未读完正文。
+pub(super) async fn send_conditional_response(
+    url: &str,
+    etag: Option<&str>,
+    #[cfg(test)] fixture: Option<HttpFixtureFuture>,
+) -> Result<HttpResponse, (TransportError, Option<u16>)> {
     let mut status = None;
-    let result = auction_web_shared::send_request_observed(
+    let result = send_response_observed(
         |abort_signal| {
             let request = Request::get(url).abort_signal(abort_signal);
             let request = match etag {
@@ -141,11 +163,17 @@ pub(super) async fn send_get_conditional(
             };
             request.build().map_err(|_| TransportError::Network(None))
         },
+        #[cfg(test)]
+        fixture,
         |response| {
             let response_status = response.status();
             status = Some(response_status);
             super::swr_cache::observe_response_status(url, response_status);
-            observe_revalidated_date(response);
+            match response {
+                ResponseHead::Browser(response) => observe_revalidated_date(response),
+                #[cfg(test)]
+                ResponseHead::Fixture(_) => {}
+            }
         },
     )
     .await;
@@ -157,6 +185,105 @@ pub(crate) async fn send_request(
     build: impl FnOnce(Option<&web_sys::AbortSignal>) -> Result<Request, TransportError>,
 ) -> Result<Response, TransportError> {
     auction_web_shared::send_request_observed(build, observe_response_date).await
+}
+
+/// 保留原始响应头与正文，状态读取和响应处理均在收包边界之后。
+pub(super) enum HttpResponse {
+    Browser(Response),
+    #[cfg(test)]
+    Fixture(HttpResponseFixture),
+}
+
+impl HttpResponse {
+    pub(super) fn status(&self) -> u16 {
+        self.head().status()
+    }
+
+    pub(super) fn etag(&self) -> Option<String> {
+        match self {
+            Self::Browser(response) => response.headers().get("ETag"),
+            #[cfg(test)]
+            Self::Fixture(response) => response.etag.clone(),
+        }
+    }
+
+    pub(super) async fn text(self) -> Option<String> {
+        match self {
+            Self::Browser(response) => response.text().await.ok(),
+            #[cfg(test)]
+            Self::Fixture(response) => response.body,
+        }
+    }
+
+    fn head(&self) -> ResponseHead<'_> {
+        match self {
+            Self::Browser(response) => ResponseHead::Browser(response),
+            #[cfg(test)]
+            Self::Fixture(response) => ResponseHead::Fixture(response),
+        }
+    }
+}
+
+enum ResponseHead<'a> {
+    Browser(&'a Response),
+    #[cfg(test)]
+    Fixture(&'a HttpResponseFixture),
+}
+
+impl ResponseHead<'_> {
+    fn status(&self) -> u16 {
+        match self {
+            Self::Browser(response) => response.status(),
+            #[cfg(test)]
+            Self::Fixture(response) => response.status,
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) struct HttpResponseFixture {
+    pub status: u16,
+    pub etag: Option<String>,
+    pub body: Option<String>,
+}
+
+#[cfg(test)]
+pub(crate) type HttpFixtureFuture =
+    Pin<Box<dyn Future<Output = Result<HttpResponseFixture, TransportError>>>>;
+
+pub(super) async fn send_response(
+    build: impl FnOnce(Option<&web_sys::AbortSignal>) -> Result<Request, TransportError>,
+    #[cfg(test)] fixture: Option<HttpFixtureFuture>,
+) -> Result<HttpResponse, TransportError> {
+    send_response_observed(
+        build,
+        #[cfg(test)]
+        fixture,
+        |head| match head {
+            ResponseHead::Browser(response) => observe_response_date(response),
+            #[cfg(test)]
+            ResponseHead::Fixture(_) => {}
+        },
+    )
+    .await
+}
+
+async fn send_response_observed(
+    build: impl FnOnce(Option<&web_sys::AbortSignal>) -> Result<Request, TransportError>,
+    #[cfg(test)] fixture: Option<HttpFixtureFuture>,
+    observe: impl FnOnce(ResponseHead<'_>),
+) -> Result<HttpResponse, TransportError> {
+    #[cfg(test)]
+    if let Some(fixture) = fixture {
+        let response = HttpResponse::Fixture(fixture.await?);
+        observe(response.head());
+        return Ok(response);
+    }
+    auction_web_shared::send_request_observed(build, |response| {
+        observe(ResponseHead::Browser(response));
+    })
+    .await
+    .map(HttpResponse::Browser)
 }
 
 #[cfg(test)]

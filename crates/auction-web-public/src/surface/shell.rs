@@ -7,20 +7,24 @@ use auction_web_shared::{
 };
 use dioxus::prelude::*;
 
+use super::commands::{
+    CompetitionCommandHost, PublicSessionChecks, use_competition_commands_provider,
+    use_public_session_checks,
+};
 use super::router::{PUBLIC_LOCALE_CATALOG, Route};
 use super::{
-    LiveConnectionState, LotViewRequest, LotViewTarget, PublicBidRefresh, PublicCommandOwner,
-    PublicContentLoading, PublicDisplayedAuction, PublicLocationRevision, PublicPageRealtimeTarget,
-    PublicReadinessState, PublicRealtimeOwner, PublicRealtimePageKey, PublicRealtimeTarget,
-    PublicSessionView, TickerCountdown, WorldPicker, auction_status_label, prefetch_board_lots,
-    presentation, public_auction_home_href, public_auction_home_query, public_connection_state,
-    read_public_query, realtime, refresh_public_reads, remember_current_auction, session,
-    set_public_query, ticker_auction, ticker_countdown, use_public_query_state, world_label,
+    LiveConnectionState, LotLinkRequest, LotViewRequest, LotViewTarget, PublicBidRefresh,
+    PublicCommandOwner, PublicContentLoading, PublicDisplayedAuction, PublicLocationRevision,
+    PublicPageRealtimeTarget, PublicReadinessState, PublicRealtimeOwner, PublicRealtimePageKey,
+    PublicRealtimeTarget, PublicSessionView, TickerCountdown, WorldPicker, auction_status_label,
+    prefetch_board_lots, presentation, public_auction_home_href, public_auction_home_query,
+    public_connection_state, read_public_query, realtime, refresh_public_reads,
+    remember_current_auction, session, set_public_query, ticker_auction, ticker_countdown,
+    use_public_query_state, world_label,
 };
-use crate::api::{
-    CurrentAuction, PublicSession, SessionRefreshReason, estimated_now, fetch_current_auction,
-    fetch_public_readiness, fetch_public_session,
-};
+#[cfg(target_arch = "wasm32")]
+use crate::api::SessionRefreshReason;
+use crate::api::{CurrentAuction, fetch_current_auction, fetch_public_readiness};
 
 /// 权威数据轮询的基础间隔（页面可见时间）。
 const AUTHORITATIVE_POLL_MILLIS: u32 = 60_000;
@@ -71,45 +75,14 @@ pub(crate) fn PublicShell() -> Element {
         let _ = readiness_generation();
         fetch_public_readiness()
     });
-    let mut session = use_resource(fetch_public_session);
-    // 满额登录时服务端注销最久未活动的会话；被注销的设备在这里看到提示。
-    let mut session_ended_elsewhere = use_signal(|| false);
-    let mut command_owner = use_signal(|| None::<String>);
-    use_effect(move || {
-        if let Some(Ok(identity)) = session.read().as_ref() {
-            let next = identity
-                .as_ref()
-                .filter(|identity| identity.authenticated)
-                .map(|identity| identity.user_id.clone());
-            if *command_owner.peek() != next {
-                command_owner.set(next);
-            }
-            if identity.as_ref().is_some_and(|identity| identity.authenticated) {
-                // 重新登录成功后提示自动失效；不保留旧提示继续指向已恢复会话语义。
-                session_ended_elsewhere.set(false);
-            }
-        }
-    });
-    let check_session = use_callback(move |reason: SessionRefreshReason| {
-        if reason.invalidates() {
-            // 未到期却失效的认证会话只可能来自服务端撤销：满额登录腾出的名额、换钥或管理员撤销。
-            // 该设备据此看到“已在其他设备登录”，用原登录 key 重新登录即可恢复。
-            if reason.shows_ended_elsewhere()
-                && session.read().as_ref().is_some_and(|result| {
-                    result.as_ref().is_ok_and(|identity| {
-                        identity.as_ref().is_some_and(session_ended_by_revocation)
-                    })
-                })
-            {
-                session_ended_elsewhere.set(true);
-            }
-            // 已知认证变化先卸载旧用户命令；普通 focus 重读保留原快照，避免打断同身份提交。
-            command_owner.set(None);
-            session.set(None);
-        }
-        session.restart();
-    });
-    use_context_provider(|| crate::api::PublicSessionCheckTrigger(check_session));
+    let commands = use_competition_commands_provider();
+    let PublicSessionChecks {
+        session,
+        page_owner: command_owner,
+        competition_owner,
+        ended_elsewhere: mut session_ended_elsewhere,
+        check: check_session,
+    } = use_public_session_checks(commands);
     super::session::use_public_session_sync(check_session);
     super::session::use_public_session_expiry(session, check_session);
     let current_auction = use_resource(move || {
@@ -183,6 +156,8 @@ pub(crate) fn PublicShell() -> Element {
     // 拍品直达链接的一次性请求：解析页写入，看板处置后清空；跨路由存活但不进入 URL。
     let lot_view_request = use_signal(|| None::<LotViewTarget>);
     use_context_provider(|| LotViewRequest(lot_view_request));
+    let lot_link_request = use_signal(|| None);
+    use_context_provider(|| LotLinkRequest(lot_link_request));
     use_context_provider(|| PublicLocationRevision(location_generation));
     let session_context = session;
     use_context_provider(move || session_context);
@@ -508,25 +483,12 @@ pub(crate) fn PublicShell() -> Element {
                     id: "public-content",
                     class: "console-main",
                     tabindex: "-1",
+                    CompetitionCommandHost { owner: competition_owner }
                     Outlet::<Route> {}
                 }
             }
         }
     }
-}
-
-/// 未到期却失效的认证会话只来自服务端撤销；自然到期不显示“已在其他设备登录”。
-fn session_ended_by_revocation(identity: &PublicSession) -> bool {
-    if !identity.authenticated {
-        return false;
-    }
-    // 永久会话没有截止字段，不可能自然到期。
-    let Some(expires_at) = identity.expires_at.as_deref() else {
-        return true;
-    };
-    // 截止字符串不可解析时保守地不提示，避免把未知状态当作撤销。
-    auction_time::Timestamp::parse_from_rfc3339(expires_at)
-        .is_ok_and(|expiry| expiry > estimated_now())
 }
 
 /// 旧版只把显式 Isekai 视为第二世界；缺失、Main 与非法 query 都在内存回退 Main，地址栏保持原值。

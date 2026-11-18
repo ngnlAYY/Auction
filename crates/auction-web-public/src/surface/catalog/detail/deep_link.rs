@@ -3,121 +3,235 @@
 //! 该拍品的详情抽屉。请求只是一次性的展示意图：不写 URL、不创建命令，也不判定出价资格——
 //! 目录里有这一行时由行自己打开抽屉（出价入口照常由行内操作栏投影），找不到时退回只读抽屉。
 
+use std::rc::Rc;
+
+use auction_web_shared::{AsyncState, AsyncStateKind, t};
 use dioxus::prelude::*;
 
+use super::lookup::LotDetailLookup;
 use crate::api::{
     CatalogRow, CurrentAuction, catalog_row_from_detail, fetch_current_auction,
     fetch_historical_auction, fetch_lot_detail,
 };
 use crate::surface::{
-    PublicBoardQuery, catalog_category_key, normalize_world_query, public_href, use_content_loading,
+    LotLinkLocation, LotLinkRequest, PublicBoardQuery, catalog_category_key, normalize_world_query,
+    public_href, use_content_loading,
 };
 
-/// 一次直达请求要查看的拍品。`auction_id` 来自拍品响应本身，是看板判断“当前展示的是不是
-/// 这件拍品所在场次”的依据。
+/// 带已读详情的一次性请求；只有看板确认对齐行存在后才允许行消费。
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct LotViewTarget {
     pub lot_id: String,
     pub auction_id: String,
+    pub world: Option<String>,
+    pub row: Rc<CatalogRow>,
+    pub row_ready: bool,
 }
 
-/// 外壳持有的直达请求：解析页写入，看板处置一次后清空。它跨路由存活，但不进入 URL，
-/// 刷新或后退都不会重新弹出抽屉。
+/// 解析页与看板共用的一次性抽屉意图。
 #[derive(Clone, Copy)]
 pub(crate) struct LotViewRequest(pub Signal<Option<LotViewTarget>>);
 
-/// 看板对直达请求的处置。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum LotViewDisposition {
-    /// 看板还没落到目标位置（世界仍在同步，或目录页尚未读出）：保留请求。
-    Wait,
-    /// 目录当前页有这一行：交给行自己打开抽屉，出价与标记入口照常可用。
-    Row,
-    /// 看板展示的不是这件拍品所在的场次，或这一页没有它：退回只读抽屉。
-    ReadOnly,
-}
-
-/// 判定当前看板如何处置直达请求。
-///
-/// `url_world` 与 `displayed_world` 不一致说明外壳的世界选择还没跟上地址栏，此时展示的是
-/// 上一个世界的场次，不能据此下结论。`page_lots` 是已与当前筛选、页码对齐的目录页；
-/// 读出之前一律等待。
-pub(crate) fn dispose_lot_view<'a>(
-    target: &LotViewTarget,
-    url_world: &str,
-    displayed_world: &str,
-    displayed_auction_id: &str,
-    page_lots: Option<impl IntoIterator<Item = &'a str>>,
-) -> LotViewDisposition {
-    if url_world != displayed_world {
-        return LotViewDisposition::Wait;
-    }
-    if target.auction_id != displayed_auction_id {
-        return LotViewDisposition::ReadOnly;
-    }
-    match page_lots {
-        None => LotViewDisposition::Wait,
-        Some(lots) => {
-            if lots.into_iter().any(|lot_id| lot_id == target.lot_id) {
-                LotViewDisposition::Row
-            } else {
-                LotViewDisposition::ReadOnly
+impl LotViewRequest {
+    pub(crate) fn deliver(
+        mut self,
+        mut target: LotViewTarget,
+        disposition: LotViewDisposition,
+        lookup: LotDetailLookup,
+    ) {
+        if self.0.peek().as_ref() != Some(&target) {
+            return;
+        }
+        match disposition {
+            LotViewDisposition::Wait => {}
+            LotViewDisposition::Row if !target.row_ready => {
+                target.row_ready = true;
+                self.0.set(Some(target));
+            }
+            LotViewDisposition::Row => {}
+            LotViewDisposition::ReadOnly => {
+                self.0.set(None);
+                lookup.view(target);
             }
         }
     }
 }
 
-/// `/lots/{拍品 UUID}` 的解析页：读出拍品所在位置后无历史记录地跳到看板。
-/// 读取失败（拍品不存在、网络错误）同样回到看板，只是不带直达请求。
+/// 看板对直达请求的处置。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LotViewDisposition {
+    Wait,
+    Row,
+    ReadOnly,
+}
+
+/// 只有当前读取尚未结束才等待；空场、错误或当前页无目标时复用已读详情。
+pub(crate) fn dispose_lot_view<'a>(
+    target: &LotViewTarget,
+    url_world: &str,
+    displayed: Option<(&str, &str)>,
+    reading: bool,
+    page_lots: impl IntoIterator<Item = &'a str>,
+) -> LotViewDisposition {
+    let Some(world) = target.world.as_deref() else {
+        return LotViewDisposition::ReadOnly;
+    };
+    if world != url_world || displayed.is_some_and(|(world, _)| world != url_world) {
+        return if reading { LotViewDisposition::Wait } else { LotViewDisposition::ReadOnly };
+    }
+    if displayed.is_some_and(|(_, auction_id)| target.auction_id != auction_id) {
+        return LotViewDisposition::ReadOnly;
+    }
+    if page_lots.into_iter().any(|lot_id| lot_id == target.lot_id) {
+        return LotViewDisposition::Row;
+    }
+    if reading { LotViewDisposition::Wait } else { LotViewDisposition::ReadOnly }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LotLinkError {
+    ReadFailed,
+    Missing,
+}
+
+/// 失败时保留解析页与冻结位置；成功后用原有首页 URL 和一次性抽屉请求完成导航。
 #[component]
 pub(crate) fn LotDeepLink(lot_id: String) -> Element {
     let mut request = use_context::<LotViewRequest>().0;
-    // 解析期间正文为空，加载提示交给顶栏。
-    use_content_loading(true);
-    // 以拍品为依赖：同一组件实例换了参数时重新解析，而不是沿用上一件的结果。
-    use_effect(use_reactive((&lot_id,), move |(lot_id,)| {
-        spawn(async move {
-            let href = match resolve(lot_id).await {
-                Some((target, query)) => {
-                    request.set(Some(target));
-                    public_href("/", &query)
-                }
-                None => "/".to_owned(),
-            };
-            let _ = navigator().replace(href);
-        });
+    let mut location = use_context::<LotLinkRequest>().0;
+    let mut details = use_resource(use_reactive((&lot_id,), move |(lot_id,)| {
+        let known = location.read().as_ref().filter(|target| target.lot_id == lot_id).cloned();
+        async move {
+            let result = resolve(lot_id.clone(), known).await;
+            (lot_id, result)
+        }
     }));
-    rsx! {}
+    let loading = *details.state().read() == UseResourceState::Pending;
+    use_content_loading(loading);
+    use_effect(use_reactive((&lot_id,), move |(lot_id,)| {
+        let loaded = details.read();
+        if let Some((resolved, Ok((target, query)))) = loaded.as_ref()
+            && resolved == &lot_id
+            && *details.state().read() == UseResourceState::Ready
+        {
+            request.set(Some(target.clone()));
+            let _ = navigator().replace(public_href("/", query));
+        }
+    }));
+    let leaving_lot = lot_id.clone();
+    use_drop(move || {
+        // 成功跳转和中途离开共用这条清理路径，切换拍品时保留新作用域的位置。
+        let owns_location = location.try_peek().is_ok_and(|current| {
+            current.as_ref().is_some_and(|target| target.lot_id == leaving_lot)
+        });
+        if owns_location {
+            location.set(None);
+        }
+    });
+    let failure = details.read().as_ref().and_then(|(resolved, result)| {
+        (resolved == &lot_id && !loading).then(|| result.as_ref().err().copied()).flatten()
+    });
+    let retry = use_callback(move |()| details.restart());
+    #[cfg(test)]
+    tests::observe_retry((failure == Some(LotLinkError::ReadFailed)).then_some(retry));
+    match failure {
+        Some(LotLinkError::ReadFailed) => rsx! {
+            AsyncState {
+                kind: AsyncStateKind::Error,
+                title: t!("catalog-detail"),
+                detail: t!("data-error"),
+                retry_label: t!("data-retry"),
+                on_retry: move |_| retry.call(()),
+            }
+        },
+        Some(LotLinkError::Missing) => rsx! {
+            AsyncState {
+                kind: AsyncStateKind::Empty,
+                title: t!("catalog-detail"),
+                detail: t!("catalog-detail-not-found"),
+            }
+        },
+        None => rsx! {},
+    }
 }
 
-/// 读出拍品及其场次，算出看板应当落到的目录位置。
-///
-/// 直达链接多由被超提醒生成，指向某个世界的当前场次：拍品与两个世界的当前场次并行读取
-/// （当前场次经缓存层与外壳的在途读取合并），命中即可定位，不再串行查场次目录。
-async fn resolve(lot_id: String) -> Option<(LotViewTarget, PublicBoardQuery)> {
-    let (page, main, isekai) = futures_util::join!(
-        fetch_lot_detail(lot_id.clone()),
-        fetch_current_auction("main".to_owned()),
-        fetch_current_auction("isekai".to_owned()),
-    );
-    let page = page.ok()?;
-    let auction_id = page.auction_id.clone();
-    let row = page.lot.map(catalog_row_from_detail)?;
-    let target = LotViewTarget { lot_id, auction_id: auction_id.clone() };
-    // 进行中的场次落到该世界的首页（不带场次参数），与用户平时看到的看板一致。
-    if let Some(world) = current_world(&auction_id, [main, isekai]) {
-        let query = catalog_position(&row, &world, None, PublicBoardQuery::default());
-        return Some((target, query));
+async fn read_link_lot(lot_id: String) -> Result<(String, Rc<CatalogRow>), LotLinkError> {
+    #[cfg(test)]
+    if let Some(result) = tests::lot_response(&lot_id) {
+        return result;
     }
-    // 不是当前场次，或当前场次读取失败：按往期场次处理，指定场次的看板同样可以出价。
-    // 拍品响应不带世界。读不出场次时仍回到看板并保留请求：看板展示的不会是这个场次，
-    // 于是按只读抽屉打开，链接不至于落空。
-    let Ok(auction) = fetch_historical_auction(auction_id.clone()).await else {
-        return Some((target, PublicBoardQuery::default()));
+    let page = fetch_lot_detail(lot_id).await.map_err(|error| {
+        if error.not_found() { LotLinkError::Missing } else { LotLinkError::ReadFailed }
+    })?;
+    let row = page.lot.map(catalog_row_from_detail).ok_or(LotLinkError::ReadFailed)?;
+    Ok((page.auction_id, Rc::new(row)))
+}
+
+async fn resolve(
+    lot_id: String,
+    known: Option<LotLinkLocation>,
+) -> Result<(LotViewTarget, PublicBoardQuery), LotLinkError> {
+    // 冻结目标走指定场次，即使当前场次已轮换也无需重新猜所在世界。
+    if let Some(known) = known {
+        let (auction_id, row) = read_link_lot(lot_id.clone()).await?;
+        if auction_id != known.auction_id {
+            return Err(LotLinkError::ReadFailed);
+        }
+        let query = catalog_position(
+            &row,
+            &known.world,
+            Some(auction_id.clone()),
+            PublicBoardQuery::default(),
+        );
+        return Ok((view_target(lot_id, auction_id, Some(known.world), row), query));
+    }
+    let (lot, main, isekai) = futures_util::join!(
+        read_link_lot(lot_id.clone()),
+        read_current("main"),
+        read_current("isekai"),
+    );
+    let (auction_id, row) = lot?;
+    let (world, query) = if let Some(world) = current_world(&auction_id, [main, isekai]) {
+        let query = catalog_position(&row, &world, None, PublicBoardQuery::default());
+        (Some(world), query)
+    } else if let Ok(auction) = read_historical(auction_id.clone()).await {
+        let query = catalog_position(
+            &row,
+            &auction.world,
+            Some(auction_id.clone()),
+            PublicBoardQuery::default(),
+        );
+        (Some(auction.world), query)
+    } else {
+        // 定位失败时仍带已读详情交给首页的只读宿主。
+        (None, PublicBoardQuery::default())
     };
-    let query =
-        catalog_position(&row, &auction.world, Some(auction_id), PublicBoardQuery::default());
-    Some((target, query))
+    Ok((view_target(lot_id, auction_id, world, row), query))
+}
+
+fn view_target(
+    lot_id: String,
+    auction_id: String,
+    world: Option<String>,
+    row: Rc<CatalogRow>,
+) -> LotViewTarget {
+    LotViewTarget { lot_id, auction_id, world, row, row_ready: false }
+}
+
+async fn read_current(world: &str) -> Result<Option<CurrentAuction>, String> {
+    #[cfg(test)]
+    if tests::observe_location(world) {
+        return Ok(None);
+    }
+    fetch_current_auction(world.to_owned()).await
+}
+
+async fn read_historical(auction_id: String) -> Result<CurrentAuction, String> {
+    #[cfg(test)]
+    if tests::observe_location(&auction_id) {
+        return Err("network_error".to_owned());
+    }
+    fetch_historical_auction(auction_id).await
 }
 
 /// 拍品所在场次是哪个世界的当前场次。读取失败的世界不参与判定；都不命中（含读取失败）时
@@ -167,14 +281,95 @@ fn catalog_page(code: &str, page_size: i64) -> Option<i64> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(in crate::surface::catalog) mod tests {
+    use std::cell::{Cell, RefCell};
+    use std::rc::Rc;
+
+    use dioxus::prelude::EventHandler;
+
     use super::{
-        CatalogRow, CurrentAuction, LotViewDisposition, LotViewTarget, PublicBoardQuery,
-        catalog_page, catalog_position, current_world, dispose_lot_view,
+        CatalogRow, CurrentAuction, LotLinkError, LotViewDisposition, LotViewTarget,
+        PublicBoardQuery, catalog_page, catalog_position, current_world, dispose_lot_view,
     };
 
+    struct Script {
+        lot: Option<(String, Rc<CatalogRow>)>,
+        failures: usize,
+        locations: Vec<String>,
+    }
+
+    thread_local! {
+        static SCRIPT: RefCell<Option<Script>> = const { RefCell::new(None) };
+        pub(in crate::surface::catalog) static RETRY: Cell<Option<EventHandler<()>>> = const { Cell::new(None) };
+    }
+
+    pub(in crate::surface::catalog) fn reset() {
+        SCRIPT.set(None);
+        RETRY.set(None);
+    }
+
+    pub(in crate::surface::catalog) fn script(lot_id: &str, auction_id: &str, failures: usize) {
+        let mut row = row("S07", "Shield");
+        row.lot_id = lot_id.to_owned();
+        row.name = "Authority Shield".to_owned();
+        row.status = "pending".to_owned();
+        SCRIPT.set(Some(Script {
+            lot: Some((auction_id.to_owned(), Rc::new(row))),
+            failures,
+            locations: Vec::new(),
+        }));
+    }
+
+    pub(in crate::surface::catalog) fn use_wire_response() {
+        SCRIPT.set(Some(Script { lot: None, failures: 0, locations: Vec::new() }));
+    }
+
+    pub(in crate::surface::catalog) fn location_lookups() -> Vec<String> {
+        SCRIPT.with_borrow(|state| state.as_ref().unwrap().locations.clone())
+    }
+
+    pub(super) fn observe_retry(retry: Option<EventHandler<()>>) {
+        RETRY.set(retry);
+    }
+
+    pub(in crate::surface::catalog) fn scripted() -> bool {
+        SCRIPT.with_borrow(Option::is_some)
+    }
+
+    pub(super) fn lot_response(
+        lot_id: &str,
+    ) -> Option<Result<(String, Rc<CatalogRow>), LotLinkError>> {
+        SCRIPT.with_borrow_mut(|state| {
+            let state = state.as_mut()?;
+            let lot = state.lot.as_ref()?;
+            assert_eq!(lot.1.lot_id, lot_id);
+            if state.failures > 0 {
+                state.failures -= 1;
+                return Some(Err(LotLinkError::ReadFailed));
+            }
+            Some(Ok(lot.clone()))
+        })
+    }
+
+    pub(super) fn observe_location(location: &str) -> bool {
+        SCRIPT.with_borrow_mut(|state| {
+            if let Some(state) = state {
+                state.locations.push(location.to_owned());
+                true
+            } else {
+                false
+            }
+        })
+    }
+
     fn target() -> LotViewTarget {
-        LotViewTarget { lot_id: "lot-16".to_owned(), auction_id: "auction-7".to_owned() }
+        LotViewTarget {
+            lot_id: "lot-16".to_owned(),
+            auction_id: "auction-7".to_owned(),
+            world: Some("main".to_owned()),
+            row: Rc::new(row("Clo16", "Cloth")),
+            row_ready: false,
+        }
     }
 
     fn row(code: &str, category: &str) -> CatalogRow {
@@ -298,14 +493,12 @@ mod tests {
 
     #[test]
     fn request_waits_until_the_board_shows_the_target_world_and_page() {
-        // 外壳的世界选择还没跟上地址栏：展示的是另一个世界的场次，不下结论。
         assert_eq!(
-            dispose_lot_view(&target(), "isekai", "main", "auction-1", Some(["lot-1"])),
+            dispose_lot_view(&target(), "isekai", Some(("main", "auction-1")), true, ["lot-1"]),
             LotViewDisposition::Wait
         );
-        // 目录页尚未读出。
         assert_eq!(
-            dispose_lot_view(&target(), "main", "main", "auction-7", None::<[&str; 0]>),
+            dispose_lot_view(&target(), "main", Some(("main", "auction-7")), true, []),
             LotViewDisposition::Wait
         );
     }
@@ -313,22 +506,33 @@ mod tests {
     #[test]
     fn row_opens_the_drawer_when_it_is_on_the_page() {
         assert_eq!(
-            dispose_lot_view(&target(), "main", "main", "auction-7", Some(["lot-15", "lot-16"])),
+            dispose_lot_view(
+                &target(),
+                "main",
+                Some(("main", "auction-7")),
+                false,
+                ["lot-15", "lot-16"]
+            ),
             LotViewDisposition::Row
         );
     }
 
     #[test]
-    fn falls_back_to_the_read_only_drawer_when_the_row_is_not_there() {
-        // 页码因撤拍空号偏后：这一页没有它。
+    fn falls_back_after_the_board_or_catalogue_finishes_without_the_row() {
+        for (displayed, lots) in
+            [(None, []), (Some(("main", "auction-7")), []), (Some(("main", "auction-8")), [])]
+        {
+            assert_eq!(
+                dispose_lot_view(&target(), "main", displayed, false, lots),
+                LotViewDisposition::ReadOnly
+            );
+        }
+        let mut target = target();
+        target.world = None;
         assert_eq!(
-            dispose_lot_view(&target(), "main", "main", "auction-7", Some(["lot-21"])),
-            LotViewDisposition::ReadOnly
-        );
-        // 场次已经轮换：看板展示的是同一世界的另一场，不必等目录读完。
-        assert_eq!(
-            dispose_lot_view(&target(), "main", "main", "auction-8", None::<[&str; 0]>),
-            LotViewDisposition::ReadOnly
+            dispose_lot_view(&target, "main", None, true, []),
+            LotViewDisposition::ReadOnly,
+            "场次定位失败时可以直接使用已读详情"
         );
     }
 }

@@ -36,6 +36,8 @@ pub(crate) use watches::{fetch_lot_watches, set_lot_watch};
 
 pub(crate) use account::{MyBidsPage, OwnedBid, OwnedProxy, fetch_my_bids, fetch_my_proxy};
 pub(crate) use blacklist::{BlacklistEntry, BlacklistPage, fetch_blacklist};
+#[cfg(test)]
+pub(crate) use clock::{HttpFixtureFuture, HttpResponseFixture};
 pub(crate) use clock::{estimated_now, send_get, send_request};
 // 传输边界（10 秒取消上限、结构化 TransportError）由 auction-web-shared 统一提供。
 pub(crate) use auction_web_shared::TransportError;
@@ -70,9 +72,12 @@ pub(crate) use rules::{DOCUMENT_UNPUBLISHED, RulesDocument, SiteDocument, fetch_
 #[cfg(target_arch = "wasm32")]
 pub(crate) use session::PUBLIC_SESSION_CHANGE_STORAGE_KEY;
 pub(crate) use session::{
-    PublicSession, PublicSessionApiError, PublicSessionCheckTrigger, SessionRefreshReason,
-    fetch_public_session, login_public, logout_public,
+    PublicSession, PublicSessionApiError, PublicSessionCheckTrigger, PublicSessionEvidenceTrigger,
+    SessionIdentity, SessionIdentityEvidence, SessionRefreshReason, fetch_public_session,
+    login_public, logout_public,
 };
+#[cfg(test)]
+pub(crate) use session::{SessionHttpFixture, SessionRequest};
 pub(crate) use status::fetch_public_readiness;
 // 实时事件等触发普通失效。已发出的状态命令由命令入口收紧快照回退资格。
 pub(crate) use swr_cache::invalidate_all;

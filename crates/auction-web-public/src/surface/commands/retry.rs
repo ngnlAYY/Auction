@@ -1,87 +1,181 @@
-//! 结果不确定命令的原样重试；只重放已提交负载，不重新应用新命令的价格/能力校验。
+//! 未结命令的只读恢复视图与显式放弃确认。
 
-use auction_web_shared::{format_credit_amount, t};
+use auction_web_shared::{Dialog, format_credit_amount, t};
 use dioxus::prelude::*;
 
-use super::bid::BidSuccess;
-use super::pending::{
-    BidConfirmCommand, PendingProxyCommand, ProxyConfirmCommand, bid_error_message,
-    proxy_error_message,
+use super::host::{CommandDialogKey, CompetitionCommands};
+use super::pending::{bid_error_message, proxy_error_message};
+use super::request::{
+    CommandCompletion, CommandKind, CommandReceipt, CommandStatus, SentCommand, command_conflict,
 };
-use crate::api::{
-    CommandError, ProxyCommandAuthorization, create_proxy_authorization, lower_proxy_authorization,
-    place_bid,
-};
+use crate::api::CommandError;
+use crate::surface::{LotLinkLocation, LotLinkRequest, Route};
 
-/// 只有同一 lot/用户宿主保留的已提交命令可以进入此视图；输入只读，取消后重新开始。
 #[component]
-pub(crate) fn BidRetry(
-    lot_id: String,
-    lot_code: String,
-    mut command: BidConfirmCommand,
-    on_success: EventHandler<BidSuccess>,
-    on_close: EventHandler<()>,
+pub(in crate::surface) fn CommandRecovery(
+    command: SentCommand,
+    #[props(default)] origin: Option<CommandDialogKey>,
 ) -> Element {
-    let mut refresh = use_context::<Signal<u64>>();
-    let Some(pending) = (command.command)() else { return rsx! {} };
-    let error = (command.failure)()
-        .map(|error| retry_error_message(&error, |error| bid_error_message(error, pending.amount)));
-    rsx! {
-        form {
-            class: "public-auction-bid-form",
-            aria_busy: (command.submitting)().to_string(),
-            onsubmit: move |event| {
-                event.prevent_default();
-                if (command.submitting)() || !(command.uncertain)() {
-                    return;
-                }
-                let lot_id = lot_id.clone();
-                command.submit(
-                    pending,
-                    move |pending| async move {
-                        place_bid(pending.user_id, lot_id, pending.amount, pending.command_id).await
-                    },
-                    CommandError::outcome_uncertain,
-                    move |result| {
-                        // 与普通出价表单一致：先重读权威投影，再由宿主关闭弹窗并提示结果。
-                        refresh.set(refresh().saturating_add(1));
-                        on_success.call(BidSuccess {
-                            leading: result.leading,
-                            current_price: result.current_price,
-                        });
-                    },
-                    move || refresh.set(refresh().saturating_add(1)),
-                );
-            },
-            p { {t!("command-retry-unchanged")} }
-            p { {t!("bid-confirm-description", amount: format_credit_amount(pending.amount), code: lot_code)} }
-            if let Some(error) = error {
-                p { class: "action-feedback action-feedback--error", role: "alert", "{error}" }
+    let commands = use_context::<CompetitionCommands>();
+    let mut link_request = use_context::<LotLinkRequest>().0;
+    let can_retry = commands.current().is_some_and(|store| store.can_submit());
+    let mut confirming = use_signal(|| false);
+    let command_id = command.payload.command_id();
+    let amount = format_credit_amount(command.payload.amount());
+    let kind = command.payload.kind();
+    let label = kind.label();
+    let target = command.target;
+    let in_dialog = origin.is_some();
+    let summary_id = if in_dialog {
+        format!("public-command-dialog-{}", target.lot_id)
+    } else {
+        format!("public-command-notice-{}", target.lot_id)
+    };
+    let busy = command.status.busy();
+    let unknown = command.status.unknown();
+    let paused = unknown && !can_retry;
+    let message_id = format!("{summary_id}-status");
+    let pause_id = format!("{summary_id}-pause");
+    let retry_description = if paused {
+        format!("{summary_id} {message_id} {pause_id}")
+    } else {
+        format!("{summary_id} {message_id}")
+    };
+    let error = match command.status {
+        CommandStatus::Submitting => None,
+        CommandStatus::Unknown { error, .. } if command_conflict(&error) => {
+            Some(t!("command-replay-conflict"))
+        }
+        CommandStatus::Unknown { error, .. } => Some(command_error_message(kind, &error)),
+    };
+    let retry = use_callback({
+        let target = target.clone();
+        move |()| {
+            if let Some(store) = commands.current() {
+                store.retry(&target.lot_id, command_id, origin);
             }
-            div { class: "public-auction-bid-form__actions",
-                button { r#type: "button", disabled: (command.submitting)(),
-                    onclick: move |_| on_close.call(()), {t!("dialog-cancel")} }
-                button {
-                    r#type: "submit",
-                    disabled: (command.submitting)(),
-                    // 提交期间确认按钮被禁用，焦点已退到弹窗面板；重试视图挂载时把焦点交给
-                    // 唯一的主操作，键盘用户不必再从关闭按钮一路 Tab 过来。
-                    onmounted: move |event| {
-                        let button = event.data();
-                        async move {
-                            let _ = button.set_focus(true).await;
+        }
+    });
+    let ask_abandon = use_callback(move |()| {
+        if !busy {
+            confirming.set(true);
+        }
+    });
+    let route = Route::LotDetail { lot_code: target.lot_id.clone() };
+    let view_lot = use_callback({
+        let target = target.clone();
+        let href = route.to_string();
+        move |()| {
+            link_request.set(Some(LotLinkLocation {
+                lot_id: target.lot_id.clone(),
+                auction_id: target.auction_id.clone(),
+                world: target.world.clone(),
+            }));
+            if navigator().push(href.clone()).is_some() {
+                link_request.set(None);
+            }
+        }
+    });
+    #[cfg(test)]
+    super::tests::observe_recovery(in_dialog, retry, ask_abandon);
+
+    rsx! {
+        div { class: "public-command-notices__entry",
+            p { id: "{summary_id}", class: "public-command-notices__summary",
+                b { "{target.lot_name}" }
+                span { "{label}" }
+                span { "{amount}" }
+            }
+            if in_dialog && unknown {
+                p { {t!("command-retry-unchanged")} }
+                p { {t!("command-memory-only")} }
+            }
+            // 忙碌标志放在操作组。状态节点持续可播报，结果条数不变时也能听到进度与原因。
+            div { class: "public-command-notices__entry-status", role: "status", aria_atomic: "true", aria_labelledby: "{summary_id}",
+                p { id: "{message_id}", class: "public-command-notices__message",
+                    if busy {
+                        if unknown { {t!("command-retrying")} } else { {t!("bid-working")} }
+                    } else if let Some(error) = error {
+                        "{error}"
+                    }
+                }
+                if paused {
+                    p { id: "{pause_id}", class: "public-command-notices__message", {t!("command-retry-session-pending")} }
+                }
+            }
+            if unknown {
+                div { class: "public-command-notices__actions", aria_busy: busy.to_string(),
+                    button {
+                        r#type: "button",
+                        disabled: busy || !can_retry,
+                        aria_describedby: "{retry_description}",
+                        onclick: move |_| retry.call(()),
+                        {t!("data-retry")}
+                    }
+                    if !in_dialog {
+                        Link {
+                            to: route,
+                            onclick_only: true,
+                            onclick: move |_| view_lot.call(()),
+                            aria_label: t!("catalog-view-lot", code: target.lot_code.clone()),
+                            {t!("command-view-lot")}
                         }
-                    },
-                    if (command.submitting)() { {t!("bid-working")} } else { {t!("data-retry")} }
+                    }
+                    button {
+                        r#type: "button",
+                        disabled: busy,
+                        aria_haspopup: "dialog",
+                        aria_describedby: "{summary_id}",
+                        onclick: move |_| ask_abandon.call(()),
+                        {t!("command-abandon")}
+                    }
+                }
+                if confirming() {
+                    AbandonCommandDialog {
+                        on_close: move |_| confirming.set(false),
+                        on_confirm: move |_| {
+                            if let Some(store) = commands.current() {
+                                store.abandon(&target.lot_id, command_id);
+                            }
+                            confirming.set(false);
+                        }
+                    }
                 }
             }
         }
     }
 }
 
-/// 原样重试被拒绝时的文案。重试按服务端当时的价格重新判定，`bid_too_low` 只说明价格已变化：
-/// 本次提交的金额不是最低价，不能代入“至少为”文案，改为提示取消后按当前价格重新操作。
-/// 其余错误码沿用新命令的映射（`command_message` 的金额参数只影响 `bid_too_low`）。
+#[component]
+fn AbandonCommandDialog(on_close: EventHandler<()>, on_confirm: EventHandler<()>) -> Element {
+    #[cfg(test)]
+    super::tests::observe_confirmation(on_close, on_confirm);
+    rsx! {
+        Dialog {
+            title: t!("command-abandon-title"),
+            close_label: t!("catalog-close"),
+            on_close,
+            div { class: "public-command-notices__confirmation",
+                p { {t!("command-abandon-description")} }
+                div { class: "public-command-notices__actions",
+                    button {
+                        r#type: "button",
+                        autofocus: true,
+                        onclick: move |_| on_close.call(()),
+                        {t!("dialog-cancel")}
+                    }
+                    button {
+                        r#type: "button",
+                        onclick: move |_| on_confirm.call(()),
+                        {t!("command-abandon")}
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// 未知结果回显或跨路由拒绝不掌握当前最低价，不能用冻结金额替代价格下限。
 fn retry_error_message(
     error: &CommandError,
     command_message: impl FnOnce(&CommandError) -> String,
@@ -92,86 +186,24 @@ fn retry_error_message(
     command_message(error)
 }
 
-/// 不依赖刷新后的活动授权形状，创建已生效或上限已降低时仍可读取原命令结果。
-#[component]
-pub(super) fn ProxyRetry(
-    lot_id: String,
-    mut command: ProxyConfirmCommand,
-    mut saved_authorization: Signal<Option<Box<ProxyCommandAuthorization>>>,
-    on_close: EventHandler<()>,
-) -> Element {
-    let mut refresh = use_context::<Signal<u64>>();
-    let Some(pending) = (command.command)() else { return rsx! {} };
-    let (amount, description) = match &pending {
-        PendingProxyCommand::Create { amount, mode, .. } => (
-            *amount,
-            t!(
-                "proxy-create-confirm-description",
-                maximum: format_credit_amount(*amount),
-                mode: if mode == "slow" { t!("proxy-mode-slow") } else { t!("proxy-mode-fast") }
-            ),
-        ),
-        PendingProxyCommand::Lower { amount, .. } => (
-            *amount,
-            t!(
-                "proxy-lower-confirm-description", maximum: format_credit_amount(*amount)
-            ),
-        ),
-    };
-    let error = (command.failure)()
-        .map(|error| retry_error_message(&error, |error| proxy_error_message(error, amount)));
-    rsx! {
-        form {
-            class: "public-auction-bid-form",
-            aria_busy: (command.submitting)().to_string(),
-            onsubmit: move |event| {
-                event.prevent_default();
-                if (command.submitting)() || !(command.uncertain)() {
-                    return;
-                }
-                let lot_id = lot_id.clone();
-                command.submit(
-                    pending.clone(),
-                    move |pending| async move {
-                        match pending {
-                            PendingProxyCommand::Create { user_id, amount, mode, command_id } => {
-                                create_proxy_authorization(user_id, lot_id, amount, mode, command_id).await
-                            }
-                            PendingProxyCommand::Lower { user_id, amount, authorization_id, command_id } => {
-                                lower_proxy_authorization(user_id, lot_id, authorization_id, amount, command_id).await
-                            }
-                        }
-                    },
-                    CommandError::outcome_uncertain,
-                    move |authorization| {
-                        saved_authorization.set(Some(Box::new(authorization)));
-                        refresh.set(refresh().saturating_add(1));
-                    },
-                    move || refresh.set(refresh().saturating_add(1)),
-                );
+fn command_error_message(kind: CommandKind, error: &CommandError) -> String {
+    if error.not_sent() {
+        return t!("command-not-sent");
+    }
+    retry_error_message(error, |error| match kind {
+        CommandKind::Bid => bid_error_message(error, 0),
+        CommandKind::CreateProxy | CommandKind::LowerProxy => proxy_error_message(error, 0),
+    })
+}
+
+impl CommandReceipt {
+    pub(in crate::surface) fn message(&self) -> String {
+        match &self.completion {
+            CommandCompletion::Rejected(error) => command_error_message(self.kind, error),
+            CommandCompletion::Accepted => match self.kind {
+                CommandKind::Bid => t!("bid-success"),
+                CommandKind::CreateProxy | CommandKind::LowerProxy => t!("proxy-saved"),
             },
-            p { {t!("command-retry-unchanged")} }
-            p { "{description}" }
-            if let Some(error) = error {
-                p { class: "action-feedback action-feedback--error", role: "alert", "{error}" }
-            }
-            div { class: "public-auction-bid-form__actions",
-                button { r#type: "button", disabled: (command.submitting)(),
-                    onclick: move |_| on_close.call(()), {t!("dialog-cancel")} }
-                button {
-                    r#type: "submit",
-                    disabled: (command.submitting)(),
-                    // 提交期间确认按钮被禁用，焦点已退到弹窗面板；重试视图挂载时把焦点交给
-                    // 唯一的主操作，键盘用户不必再从关闭按钮一路 Tab 过来。
-                    onmounted: move |event| {
-                        let button = event.data();
-                        async move {
-                            let _ = button.set_focus(true).await;
-                        }
-                    },
-                    if (command.submitting)() { {t!("bid-working")} } else { {t!("data-retry")} }
-                }
-            }
         }
     }
 }

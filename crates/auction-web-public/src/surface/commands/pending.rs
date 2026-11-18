@@ -1,4 +1,4 @@
-//! 竞价命令组件共用的短生命周期状态和安全错误映射。
+//! 竞价表单的确认负载、金额提示与安全错误映射。
 
 use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
 use auction_web_shared::{
@@ -27,8 +27,7 @@ pub(crate) enum PendingProxyCommand {
 #[derive(Clone, Copy)]
 pub(crate) struct PublicCommandIdentity(pub(crate) Uuid);
 
-/// 普通竞价的两阶段确认命令 hook。由弹窗宿主持有（整体 Copy），表单经 prop 共享，
-/// 宿主据此接线 Dialog 的 busy 关闭守卫。
+/// 普通竞价的两阶段确认命令 hook。弹窗与表单共享未发送的确认状态，发出后交给身份宿主。
 /// 包一层新类型只为实现 `PartialEq`（`#[component]` props 要求）：逐字段比较 Signal
 /// 身份（Signal 的 PartialEq 是指针比较，不读值、不触发订阅），同一 hook 实例相等。
 /// `Deref`/`DerefMut` 透传内部 hook，调用点与直接使用 `ConfirmCommand` 一致。
@@ -87,7 +86,7 @@ impl std::ops::DerefMut for ProxyConfirmCommand {
 }
 
 /// 二次确认面板的公共骨架：类型与金额两行，加约束性命令说明。
-/// 面板只负责展示；命令冻结、校验与提交仍由各表单持有，组件替换不能取消已提交命令。
+/// 面板只负责展示；表单校验冻结输入，外壳宿主持有已发出的请求。
 pub(super) fn confirm_panel(id: &str, type_label: &str, amount: String, note: String) -> Element {
     rsx! {
         dl { class: "public-bid-confirm__grid",

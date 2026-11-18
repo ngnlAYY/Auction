@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use super::command_scope::{CatalogAction, CommandDialogContext, CommandDialogInput};
 use super::detail::{CatalogDetailBid, CatalogDetailBidSlot, CatalogDetailDialogContext};
-use crate::api::{OwnedProxy, fetch_my_proxy};
+use crate::api::{CatalogRow, OwnedProxy, fetch_my_proxy};
 use crate::surface::session::login_href_for_current_location;
 use crate::surface::{commands, use_bid_refresh};
 
@@ -23,6 +23,53 @@ struct CatalogProxySnapshots(Rc<RefCell<BTreeMap<String, ProxyRead>>>);
 /// 由按身份和场次加键的目录提供，让实际读取的结果跨抽屉关闭和目录行卸载保留。
 pub(crate) fn use_catalog_proxy_snapshots() {
     use_context_provider(CatalogProxySnapshots::default);
+}
+
+/// 结束拍品只恢复该件已发出的命令；不建立出价资格或私有代理读取。
+#[component]
+pub(super) fn CatalogRecoveryEntry(row: CatalogRow) -> Element {
+    let mut dialog = use_context::<CommandDialogContext>().0;
+    let commands = try_use_context::<commands::CompetitionCommands>();
+    let pending = use_memo(use_reactive((&row.lot_id,), move |(lot_id,)| {
+        commands
+            .and_then(commands::CompetitionCommands::current)
+            .and_then(|store| store.command(&lot_id))
+            .map(|command| command.status)
+    }));
+    let reason_id = format!("public-auction-action-reason-{}", row.lot_id);
+    let label = t!("command-recovery-open", code: row.code.clone());
+    let open = use_callback(move |()| {
+        if dialog.peek().is_none()
+            && commands
+                .and_then(commands::CompetitionCommands::current)
+                .is_some_and(|store| store.command(&row.lot_id).is_some())
+        {
+            dialog.set(Some(CommandDialogInput::recovery(&row)));
+        }
+    });
+    let Some(status) = pending() else { return rsx! {} };
+    #[cfg(test)]
+    tests::ENDED_RECOVERY.set(Some(open));
+    rsx! {
+        span { class: "public-auction-catalog__actions-list",
+            button {
+                class: "public-auction-catalog__icon-action",
+                r#type: "button",
+                aria_haspopup: "dialog",
+                aria_label: "{label}",
+                title: "{label}",
+                aria_describedby: "{reason_id}",
+                onclick: move |_| open.call(()),
+                CatalogActionIcon { kind: "gavel" }
+            }
+            span {
+                id: "{reason_id}",
+                class: "public-auction-catalog__leading-reason",
+                role: "note",
+                {status.entry_message()}
+            }
+        }
+    }
 }
 
 #[component]
@@ -50,6 +97,13 @@ pub(crate) fn LiveCatalogActions(
     let session = use_context::<commands::CommandSession>();
     let snapshots = use_context::<CatalogProxySnapshots>();
     let mut dialog = use_context::<CommandDialogContext>().0;
+    let commands = try_use_context::<commands::CompetitionCommands>();
+    let pending = use_memo(use_reactive((&lot_id,), move |(lot_id,)| {
+        commands
+            .and_then(commands::CompetitionCommands::current)
+            .and_then(|store| store.command(&lot_id))
+            .map(|command| command.status)
+    }));
     let active_action = use_memo(use_reactive((&lot_id,), move |(lot_id,)| {
         dialog.read().as_ref().filter(|input| input.lot_id == lot_id).map(|input| input.action)
     }));
@@ -95,7 +149,11 @@ pub(crate) fn LiveCatalogActions(
     let effective_leading = leading || proxy_leading;
     let limit_reached = next_bid > MAX_PUBLIC_BID_AMOUNT;
     let ordinary_blocked = ordinary_bid_blocked(limit_reached, effective_leading, has_active_proxy);
-    let action_reason = if !can_bid {
+    let pending = pending();
+    let has_pending = pending.is_some();
+    let action_reason = if let Some(status) = pending {
+        status.entry_message()
+    } else if !can_bid {
         t!("bid-unavailable")
     } else if has_active_proxy {
         t!("proxy-active-exists")
@@ -108,7 +166,8 @@ pub(crate) fn LiveCatalogActions(
     };
     // 领先由装备高亮表达，行自身已带“正在领先”的描述，不再重复说明；超过金额上限等
     // 其余原因必须可见。不显示说明时按钮不引用它。
-    let show_action_reason = has_active_proxy || !(can_bid && effective_leading && !limit_reached);
+    let show_action_reason =
+        has_pending || has_active_proxy || !(can_bid && effective_leading && !limit_reached);
     let action_reason_id = if show_action_reason {
         format!("public-auction-action-reason-{lot_id}")
     } else {
@@ -140,12 +199,15 @@ pub(crate) fn LiveCatalogActions(
         }
     }));
     // 行内三个分支与抽屉入口共用同一组判定：已登录走命令弹窗，匿名且可出价走登录链接。
-    let command_entry = authenticated && identity_confirmed && can_bid;
+    let command_entry = has_pending || (authenticated && identity_confirmed && can_bid);
     let login_entry = !authenticated && can_bid && session_ready && !limit_reached;
-    let bid_disabled = !can_bid || ordinary_blocked;
+    let bid_disabled = !has_pending && (!can_bid || ordinary_blocked);
     let detail_projection = if command_entry {
-        let entry_action =
-            detail_entry_action(bid_disabled, can_bid, effective_leading, has_active_proxy);
+        let entry_action = if has_pending {
+            Some(CatalogAction::Bid)
+        } else {
+            detail_entry_action(bid_disabled, can_bid, effective_leading, has_active_proxy)
+        };
         let mut detail_input = input.clone();
         detail_input.action = entry_action.unwrap_or(CatalogAction::Bid);
         CatalogDetailBid::Command {
@@ -194,7 +256,7 @@ pub(crate) fn LiveCatalogActions(
                     // 图标按钮的可访问名称带拍品编号，逐行可区分；悬停提示保持简短动作名。
                     aria_label: bid_label,
                     title: t!("catalog-bid"),
-                    aria_describedby: if bid_disabled {
+                    aria_describedby: if bid_disabled || has_pending {
                         action_reason_id.clone()
                     } else {
                         String::new()
@@ -216,7 +278,7 @@ pub(crate) fn LiveCatalogActions(
                     CatalogActionIcon { kind: "gavel" }
                 }
             }
-            if show_action_reason && ordinary_blocked {
+            if show_action_reason && (ordinary_blocked || has_pending) {
                 span {
                     id: action_reason_id,
                     class: "public-auction-catalog__leading-reason",
@@ -303,7 +365,7 @@ pub(super) fn CatalogActionIcon(kind: &'static str) -> Element {
 
 #[cfg(test)]
 pub(super) mod tests {
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
 
     use auction_web_shared::i18n::{DEFAULT_PUBLIC_LOCALE, build_bundle};
     use dioxus::dioxus_core::{AttributeValue, ElementId, Mutation, Mutations};
@@ -340,6 +402,7 @@ pub(super) mod tests {
 
     thread_local! {
         static PROXY_READS: RefCell<Option<ProxyReads>> = const { RefCell::new(None) };
+        pub(in crate::surface::catalog) static ENDED_RECOVERY: Cell<Option<EventHandler<()>>> = const { Cell::new(None) };
     }
 
     pub(super) fn proxy_request(user_id: Uuid, lot_id: &str) -> Option<ProxyRead> {

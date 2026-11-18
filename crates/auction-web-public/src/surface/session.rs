@@ -54,7 +54,6 @@ pub(super) fn login(return_to: Option<String>) -> Element {
             });
         }
     });
-    let mut session_resource = use_context::<PublicSessionResource>();
     let registration_accounts = use_resource(|| async move {
         fetch_registration_info().await.map(|info| info.bot_players.join(", "))
     });
@@ -92,8 +91,7 @@ pub(super) fn login(return_to: Option<String>) -> Element {
                         submitting.set(false);
                         match login_result {
                             Ok(session) => {
-                                result.set(Some(LoginState::Success(session.clone())));
-                                session_resource.set(Some(Ok(Some(session))));
+                                result.set(Some(LoginState::Success(session)));
                                 let _ = navigator.replace(return_path);
                             }
                             Err(error) => result.set(Some(LoginState::Failure(error))),
@@ -364,7 +362,7 @@ pub(super) fn SessionMenu() -> Element {
                                         let user_id = user_id.clone();
                                         spawn(async move {
                                             match logout_public(user_id).await {
-                                                Ok(()) => session.set(Some(Ok(None))),
+                                                Ok(()) => {},
                                                 Err(error) => logout_error.set(Some(error)),
                                             }
                                             logout_busy.set(false);

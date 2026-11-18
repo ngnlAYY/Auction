@@ -8,6 +8,7 @@ use auction_web_shared::format_credit_amount_full;
 use auction_web_shared::{format_credit_amount, t};
 use dioxus::prelude::*;
 
+use super::actions::CatalogRecoveryEntry;
 use super::columns::{CatalogColumn, CatalogColumnsMenu, CatalogLayout, CatalogVisibility};
 use super::detail::{CatalogViewButton, use_catalog_detail_entry};
 use super::{
@@ -363,8 +364,7 @@ pub(crate) fn LiveCatalogRow(
             }
             td { hidden: !visibility.contains(CatalogColumn::Actions), class: "public-auction-catalog__actions", "data-label": t!("catalog-actions"),
                 // 列偏好只隐藏单元格，不卸载命令宿主，保留冻结的 command_id 与 unknown 状态。
-                // 固定顺序：查看、出价、标记。查看入口每行都有；竞价表里已结束的拍品只保留查看，
-                // 仍与同表可竞价拍品的第一个图标对齐。整表都没有命令（已结算）时单个图标居中。
+                // 固定顺序：查看、出价、标记。结束拍品的第二个位置只在存在未结记录时用于恢复。
                 div {
                     class: if show_commands {
                         "public-auction-catalog__action-controls"
@@ -393,6 +393,8 @@ pub(crate) fn LiveCatalogRow(
                             lot_code: row.code.clone(),
                             icon_only: true,
                         }
+                    } else {
+                        CatalogRecoveryEntry { row: row.clone() }
                     }
                 }
             }

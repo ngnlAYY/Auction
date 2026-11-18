@@ -4,25 +4,15 @@ use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
 use auction_web_shared::{format_credit_amount, t};
 use dioxus::prelude::*;
 
-use super::pending::{
-    BidConfirmCommand, PendingBidCommand, PublicCommandIdentity, bid_error_message, confirm_panel,
-};
+use super::host::CompetitionCommands;
+use super::pending::{BidConfirmCommand, PendingBidCommand, PublicCommandIdentity, confirm_panel};
 use super::session::CommandSession;
-use crate::api::place_bid;
 
 const CREDIT_K: i64 = 1_000;
 // 只限制字符写法，空值和金额边界由表单使用站内语言提示。
 const BID_UNITS_PATTERN: &str = r"[ \x09-\x0D]*[0-9]*[ \x09-\x0D]*";
 
-/// 普通竞价成功后的浏览器展示投影；只保留成功提示所需字段，避免把 api 内部 DTO
-/// 类型（未在 api 出口公开）泄漏到组件参数。
-#[derive(Debug, Clone, PartialEq)]
-pub struct BidSuccess {
-    pub leading: bool,
-    pub current_price: i64,
-}
-
-/// 普通竞价表单参数；关闭与成功动作分开表达，避免调用方误用弹窗生命周期。
+/// 普通竞价表单参数。表单只确认负载，发出后由外壳持有请求任务。
 #[derive(Clone, PartialEq)]
 pub struct BidFormInput {
     pub lot_id: String,
@@ -32,13 +22,8 @@ pub struct BidFormInput {
     pub blocked: bool,
     pub blocked_reason: String,
     pub active_proxy_reason_id: Option<&'static str>,
-    /// 由弹窗宿主注入的两阶段确认命令 hook（整体 Copy）；宿主据其 `submitting`
-    /// 在提交中禁用遮罩/Escape/关闭按钮（Dialog busy 守卫），避免弹窗 scope 销毁
-    /// 导致成功后的刷新与成功反馈丢失。
     pub command: BidConfirmCommand,
-    /// 命令成功后把结果交给弹窗宿主：宿主关闭弹窗并显示页面级提示条。表单自身不保留
-    /// 成功状态，也不决定弹窗生命周期。
-    pub on_success: EventHandler<BidSuccess>,
+    pub on_submit: EventHandler<PendingBidCommand>,
     pub on_close: EventHandler<()>,
 }
 
@@ -103,18 +88,17 @@ fn bid_form(input: BidFormInput) -> Element {
         blocked_reason,
         active_proxy_reason_id,
         command,
-        on_success,
+        on_submit,
         on_close,
     } = input;
     let amount_id = format!("public-bid-amount-{lot_id}");
     let user_id = use_context::<PublicCommandIdentity>().0;
     let session = use_context::<CommandSession>();
     let can_submit = session.can_submit_new();
+    let commands = try_use_context::<CompetitionCommands>();
     let mut amount = use_signal(|| default_bid_units(next_bid));
     let mut validation = use_signal(|| None::<String>);
     let mut command = command;
-    let submitting = command.submitting;
-    let mut refresh_generation = use_context::<Signal<u64>>();
     let confirming = (command.confirmation)().is_some();
     let bidding_open = can_bid && lot_status == "live";
     let limit_reached = next_bid > MAX_PUBLIC_BID_AMOUNT;
@@ -133,75 +117,54 @@ fn bid_form(input: BidFormInput) -> Element {
         (false, None) => String::new(),
     };
 
+    let submit = use_callback(move |()| {
+        if blocked
+            || !session.can_submit_new()
+            || !commands.is_some_and(|commands| commands.can_start(&lot_id))
+        {
+            return;
+        }
+        // 只有尚未发送的表单可以准备命令；外壳再次检查同拍品互斥后才发送。
+        if let Some(pending) = (command.confirmation)() {
+            if pending.amount > MAX_PUBLIC_BID_AMOUNT {
+                command.cancel_confirmation();
+                validation.set(Some(t!("bid-invalid-amount")));
+                return;
+            }
+            if pending.amount < next_bid {
+                command.cancel_confirmation();
+                validation
+                    .set(Some(t!("bid-below-minimum", price: format_credit_amount(next_bid))));
+                return;
+            }
+            validation.set(None);
+            on_submit.call(pending);
+            return;
+        }
+        let Some(value) = parse_bid_units(&amount()) else {
+            validation.set(Some(t!("bid-invalid-amount")));
+            return;
+        };
+        if value < next_bid {
+            validation.set(Some(t!("bid-below-minimum", price: format_credit_amount(next_bid))));
+            return;
+        }
+        command.begin(value.to_string(), |command_id| PendingBidCommand {
+            user_id,
+            amount: value,
+            command_id,
+        });
+        validation.set(None);
+    });
+    #[cfg(test)]
+    super::tests::test_support::BID_SUBMIT.set(Some(submit));
+
     rsx! {
         form {
             class: "public-auction-bid-form",
-            aria_busy: submitting().to_string(),
             onsubmit: move |event| {
                 event.prevent_default();
-                if submitting() || blocked || !session.can_submit_new() {
-                    return;
-                }
-                // 两阶段确认：签名取金额序列化，同一金额重试复用同一 command_id（幂等）。
-                let pending = if let Some(pending) = (command.confirmation)() {
-                    if pending.amount > MAX_PUBLIC_BID_AMOUNT {
-                        command.cancel_confirmation();
-                        validation.set(Some(t!("bid-invalid-amount")));
-                        (command.failure).set(None);
-                        return;
-                    }
-                    if pending.amount < next_bid {
-                        command.cancel_confirmation();
-                        validation.set(Some(t!("bid-below-minimum", price: format_credit_amount(next_bid))));
-                        (command.failure).set(None);
-                        return;
-                    }
-                    pending
-                } else {
-                    let Some(value) = parse_bid_units(&amount()) else {
-                        validation.set(Some(t!("bid-invalid-amount")));
-                        (command.failure).set(None);
-                        return;
-                    };
-                    if value < next_bid {
-                        validation.set(Some(t!("bid-below-minimum", price: format_credit_amount(next_bid))));
-                        (command.failure).set(None);
-                        return;
-                    }
-                    command.begin(value.to_string(), |command_id| PendingBidCommand {
-                        user_id,
-                        amount: value,
-                        command_id,
-                    });
-                    validation.set(None);
-                    return;
-                };
-                validation.set(None);
-                let lot_id = lot_id.clone();
-                command.submit(
-                    pending,
-                    move |pending| {
-                        let lot_id = lot_id;
-                        async move {
-                            place_bid(pending.user_id, lot_id, pending.amount, pending.command_id)
-                                .await
-                        }
-                    },
-                    crate::api::CommandError::outcome_uncertain,
-                    move |result| {
-                        // 先重读权威价格与领先者，再把结果交给宿主；宿主随即关闭弹窗，
-                        // 所以这里之后不能再依赖表单自身的状态。
-                        refresh_generation.set(refresh_generation().saturating_add(1));
-                        on_success.call(BidSuccess {
-                            leading: result.leading,
-                            current_price: result.current_price,
-                        });
-                    },
-                    move || {
-                        // 失败也重读权威价格与领先者。
-                        refresh_generation.set(refresh_generation().saturating_add(1));
-                    },
-                );
+                submit.call(());
             },
             if let Some(pending) = (command.confirmation)() {
                 {confirm_panel(
@@ -229,7 +192,7 @@ fn bid_form(input: BidFormInput) -> Element {
                     } else {
                         "public-bid-amount-hint public-bid-unit-hint"
                     },
-                    disabled: submitting() || blocked,
+                    disabled: blocked,
                     value: "{amount}",
                     // 打开弹窗时由焦点陷阱按 autofocus 聚焦；从确认视图“返回修改”或提交被拒后
                     // 金额框重新挂载，此时焦点还留在按钮上，这里把它交还给要修改的金额。
@@ -257,15 +220,9 @@ fn bid_form(input: BidFormInput) -> Element {
             if let Some(message) = validation() {
                 p { id: "public-bid-error", class: "action-feedback action-feedback--error", role: "alert", "{message}" }
             }
-            if let Some(error) = (command.failure)() {
-                p { class: "action-feedback action-feedback--error", role: "alert",
-                    "{bid_error_message(&error, next_bid)}"
-                }
-            }
             div { class: "public-auction-bid-form__actions",
                 button {
                     r#type: "button",
-                    disabled: submitting(),
                     onclick: move |_| {
                         if (command.confirmation)().is_some() {
                             command.cancel_confirmation();
@@ -284,11 +241,9 @@ fn bid_form(input: BidFormInput) -> Element {
                     // 用 Enter 提交金额后输入框被确认面板替换；确认视图的首选焦点是确认按钮，
                     // 而不是弹窗右上角的关闭按钮。编辑态的首选焦点仍是金额框。
                     autofocus: confirming,
-                    disabled: submitting() || blocked || !can_submit,
+                    disabled: blocked || !can_submit,
                     aria_describedby: submit_described_by,
-                    if submitting() {
-                        {t!("bid-working")}
-                    } else if confirming {
+                    if confirming {
                         {t!("bid-confirm-submit")}
                     } else {
                         {t!("bid-submit")}
@@ -346,7 +301,7 @@ mod tests {
             blocked_reason: String::new(),
             active_proxy_reason_id: None,
             command: BidConfirmCommand(use_confirm_command()),
-            on_success: use_callback(|_| {}),
+            on_submit: use_callback(|_| {}),
             on_close: use_callback(|()| {}),
         };
         rsx! { BidForm { input } }

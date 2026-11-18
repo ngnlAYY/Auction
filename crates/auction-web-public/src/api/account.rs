@@ -66,7 +66,7 @@ async fn account_response(url: &str, user_id: &str) -> Result<Response, String> 
     if !response.ok() {
         let status = response.status();
         let code = decoder::decode_error_code(response).await;
-        super::session::observe_public_session_failure(status, &code);
+        super::session::observe_public_session_failure(status, &code, Some(user_id));
         return Err(code);
     }
     Ok(response)

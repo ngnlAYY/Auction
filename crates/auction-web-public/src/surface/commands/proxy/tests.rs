@@ -77,7 +77,7 @@ fn ProxyApp() -> Element {
         blocked_reason: String::new(),
         proxy: read(),
         refresh_generation,
-        saved_authorization: use_signal(|| None),
+        on_submit: use_callback(|_| {}),
         create_command: ProxyConfirmCommand(use_confirm_command()),
         lower_command: ProxyConfirmCommand(use_confirm_command()),
         on_close: use_callback(|()| {}),

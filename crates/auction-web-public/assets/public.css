@@ -3020,7 +3020,100 @@
   overflow-wrap: anywhere;
 }
 
-/* ===== 命令成功提示条 ===== */
+/* ===== 外壳的竞价命令提示区 ===== */
+.public-command-notices,
+.public-command-notices__receipts {
+  min-inline-size: 0;
+  margin: 0 0 var(--space-4);
+  overflow-wrap: anywhere;
+}
+
+.public-command-notices {
+  padding: var(--space-3) var(--space-4);
+  border: var(--border-width) solid var(--color-border);
+  border-inline-start-color: var(--color-warning);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.public-command-notices__status {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.public-command-notices__title {
+  margin: 0;
+  font-size: var(--text-base);
+}
+
+.public-command-notices__list,
+.public-command-notices__receipts {
+  display: grid;
+  gap: var(--space-2);
+  padding: 0;
+  list-style: none;
+}
+
+.public-command-notices__list {
+  margin: 0;
+}
+
+.public-command-notices__item + .public-command-notices__item {
+  padding-block-start: var(--space-2);
+  border-block-start: var(--border-width) solid var(--color-border);
+}
+
+.public-command-notices__entry,
+.public-command-notices__entry-status,
+.public-command-notices__confirmation {
+  display: grid;
+  gap: var(--space-2);
+  overflow-wrap: anywhere;
+}
+
+.public-command-notices__entry > p,
+.public-command-notices__entry-status > p,
+.public-command-notices__confirmation > p,
+.public-command-notices__receipt > p {
+  margin: 0;
+}
+
+.public-command-notices__boundary,
+.public-command-notices__message {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.public-command-notices__summary,
+.public-command-notices__actions,
+.public-command-notices__receipt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.public-command-notices__receipt {
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.public-command-notices__actions :is(a, button),
+.public-command-notices__receipt button {
+  display: inline-flex;
+  min-block-size: var(--size-control-compact);
+  align-items: center;
+  padding-inline: var(--space-2);
+}
+
+/* ===== 目录弹窗内直接出价成功后的提示条 ===== */
 /* 常驻的播报区域：空闲时没有内容也不占位；不拦截指针，位于抽屉与遮罩之上。 */
 .public-toast-region {
   position: fixed;

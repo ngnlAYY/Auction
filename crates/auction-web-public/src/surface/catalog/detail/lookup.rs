@@ -2,11 +2,14 @@
 //! 先读取拍品详情，就绪后才渲染抽屉，避免空外壳滑入后再换内容；抽屉不带出价与标记入口，
 //! 出价资格仍只由目录操作栏在拍卖作用域内判定。
 
+use std::cell::Cell;
+use std::rc::Rc;
+
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use super::drawer::CatalogDetailDrawer;
-use super::{CatalogDetailBid, CatalogDetailInput, DetailWorld};
+use super::{CatalogDetailBid, CatalogDetailInput, DetailWorld, LotViewTarget};
 use crate::api::{CatalogRow, catalog_row_from_detail, fetch_lot_detail};
 use crate::surface::catalog::actions::CatalogActionIcon;
 use crate::surface::use_bid_refresh;
@@ -26,6 +29,8 @@ enum LookupState {
     /// 首次读取中：抽屉尚未渲染，行内按钮显示忙碌。
     Loading(LotDetailTarget),
     Open(LotDetailTarget),
+    /// 深链已读到权威详情，直接展示并参与后续实时重读。
+    Seeded(LotDetailTarget, Rc<CatalogRow>),
     /// 首次读取失败或拍品已不存在；下一次查看请求会覆盖它。
     Failed,
 }
@@ -34,7 +39,11 @@ impl LookupState {
     /// 新的查看请求。同一拍品读取中或已展示时返回 `None`，重复点击不重启读取。
     fn requested(&self, target: LotDetailTarget) -> Option<Self> {
         match self {
-            Self::Loading(current) | Self::Open(current) if *current == target => None,
+            Self::Loading(current) | Self::Open(current) | Self::Seeded(current, _)
+                if *current == target =>
+            {
+                None
+            }
             _ => Some(Self::Loading(target)),
         }
     }
@@ -64,10 +73,16 @@ impl LotDetailLookup {
         }
     }
 
-    /// 不经行内按钮直接查看一件拍品：直达链接在目录当前页找不到对应行时使用。只知道拍卖
-    /// UUID，价格历史按拍卖读取其世界。
-    pub(crate) fn view(self, auction_id: String, lot_id: String) {
-        self.open(LotDetailTarget { auction_id, lot_id, world: None });
+    /// 沿用深链已验证的详情；空看板和目录错误不需要再次读取才能打开抽屉。
+    pub(crate) fn view(mut self, target: LotViewTarget) {
+        self.0.set(LookupState::Seeded(
+            LotDetailTarget {
+                auction_id: target.auction_id,
+                lot_id: target.lot_id,
+                world: target.world,
+            },
+            target.row,
+        ));
     }
 
     /// 最近一次查看请求是否读取失败。
@@ -124,27 +139,37 @@ pub(crate) fn LotDetailLookupButton(
 #[component]
 pub(crate) fn LotDetailLookupHost(lookup: LotDetailLookup) -> Element {
     let target = match &*lookup.0.read() {
-        LookupState::Loading(target) | LookupState::Open(target) => Some(target.clone()),
+        LookupState::Loading(target) | LookupState::Open(target) => Some((target.clone(), None)),
+        LookupState::Seeded(target, row) => Some((target.clone(), Some(row.clone()))),
         LookupState::Closed | LookupState::Failed => None,
     };
 
     rsx! {
-        for target in target {
-            LotDetailLookupSession { key: "{target.lot_id}", target, lookup }
+        for (target, seed) in target {
+            LotDetailLookupSession { key: "{target.lot_id}", target, lookup, seed }
         }
     }
 }
 
 /// 一件拍品从读取到关闭的生命周期。
 #[component]
-fn LotDetailLookupSession(target: LotDetailTarget, lookup: LotDetailLookup) -> Element {
+fn LotDetailLookupSession(
+    target: LotDetailTarget,
+    lookup: LotDetailLookup,
+    seed: Option<Rc<CatalogRow>>,
+) -> Element {
     let refresh_generation = use_context::<Signal<u64>>();
     let mut state = lookup.0;
-    let mut shown = use_signal(|| None::<CatalogRow>);
+    let skip_first_read = use_hook(|| Rc::new(Cell::new(seed.is_some())));
+    let mut shown = use_signal(|| seed.as_deref().cloned());
     let detail = use_resource(use_reactive((&target.lot_id,), move |(lot_id,)| {
         // 本人命令成功后推进的刷新代数；他人出价由下方的竞价通知补读。
         let _ = refresh_generation();
+        let skip_read = skip_first_read.replace(false);
         async move {
+            if skip_read {
+                return;
+            }
             let row = fetch_lot_detail(lot_id.clone())
                 .await
                 .ok()

@@ -6,7 +6,10 @@ use auction_web_shared::wire::json_has_exact_keys;
 use gloo_net::http::Request;
 use serde_json::Value;
 
-use super::{CommandError, TransportError, decoder, send_get, send_request};
+use super::session::{
+    SessionIdentity, SessionIdentityObservation, decode_account_identity_response,
+};
+use super::{CommandError, TransportError, send_get, send_request};
 
 const PATH: &str = "/api/v1/me/lot-watch-preference";
 /// 权威响应必须恰好包含契约字段；漏掉 `pm_available` 会让整页退化为“无法读取偏好”。
@@ -38,8 +41,9 @@ pub(crate) fn channel_value(mm: bool, pm: bool) -> &'static str {
 pub(crate) async fn fetch_lot_watch_preference(
     user_id: &str,
 ) -> Result<PublicLotWatchPreferenceResponse, CommandError> {
+    let observation = SessionIdentityObservation::start();
     let response = send_get(PATH).await.map_err(|error| failure(error.code(), 0))?;
-    decode(response, user_id, None).await
+    decode(response, user_id, None, observation).await
 }
 
 /// 未知结果重试必须传入原 DTO，不能改写命令 ID、渠道或 CAS 版本。
@@ -47,6 +51,7 @@ pub(crate) async fn set_lot_watch_preference(
     user_id: &str,
     command: &PublicSetLotWatchPreferenceRequest,
 ) -> Result<PublicLotWatchPreferenceResponse, CommandError> {
+    let observation = SessionIdentityObservation::start();
     let response = send_request(|abort_signal| {
         Request::put(PATH)
             .abort_signal(abort_signal)
@@ -56,38 +61,40 @@ pub(crate) async fn set_lot_watch_preference(
     })
     .await
     .map_err(|error| failure(error.code(), 0))?;
-    decode(response, user_id, Some(command)).await
+    decode(response, user_id, Some(command), observation).await
 }
 
 async fn decode(
     response: gloo_net::http::Response,
     user_id: &str,
     command: Option<&PublicSetLotWatchPreferenceRequest>,
+    observation: SessionIdentityObservation,
 ) -> Result<PublicLotWatchPreferenceResponse, CommandError> {
     let status = response.status();
-    if !response.ok() {
-        return Err(failure(&decoder::decode_error_code(response).await, status));
-    }
-    let result: PublicLotWatchPreferenceResponse = decoder::decode_success(response, |value| {
-        json_has_exact_keys(value, &RESPONSE_KEYS)
-            && value.get("version").and_then(Value::as_i64).is_some_and(|version| version > 0)
-    })
-    .await
-    .map_err(|_| failure("invalid_response", status))?;
-    if result.user_id != user_id
-        || !valid_uuid(&result.user_id)
+    let result: PublicLotWatchPreferenceResponse =
+        decode_account_identity_response(response, command.map(|_| user_id), |value| {
+            json_has_exact_keys(value, &RESPONSE_KEYS)
+                && value.get("version").and_then(Value::as_i64).is_some_and(|version| version > 0)
+        })
+        .await?;
+    if !valid_uuid(&result.user_id)
         || channel_flags(&result.channel).is_none()
         || command.is_some_and(|command| {
-            result.channel != command.channel || result.version <= command.expected_version
+            result.user_id != user_id
+                || result.channel != command.channel
+                || result.version <= command.expected_version
         })
     {
+        return Err(failure("invalid_response", status));
+    }
+    observation.publish(SessionIdentity::UserId(result.user_id.clone()));
+    if result.user_id != user_id {
         return Err(failure("invalid_response", status));
     }
     Ok(result)
 }
 
 fn failure(code: &str, status: u16) -> CommandError {
-    super::session::observe_public_session_failure(status, code);
     CommandError { code: code.to_owned(), status }
 }
 

@@ -119,8 +119,10 @@ pub(in crate::surface::catalog) fn use_catalog_detail_entry(
     let mut view_request = use_context::<LotViewRequest>().0;
     let requested_lot = row.lot_id.clone();
     use_effect(move || {
-        let requested =
-            view_request.read().as_ref().is_some_and(|target| target.lot_id == requested_lot);
+        let requested = view_request
+            .read()
+            .as_ref()
+            .is_some_and(|target| target.row_ready && target.lot_id == requested_lot);
         if requested {
             view_request.set(None);
             open.call(());

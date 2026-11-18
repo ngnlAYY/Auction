@@ -45,7 +45,10 @@ pub(crate) fn LotDetail(lot_code: String) -> Element {
     let lot_id = uuid::Uuid::parse_str(&lot_code).ok().filter(|lot_id| !lot_id.is_nil());
     match lot_id {
         Some(lot_id) => rsx! {
-            LotDeepLink { lot_id: lot_id.to_string() }
+            // 同一路由的参数变化也要结束上一拍品的解析和冻结位置。
+            for lot_id in [lot_id.to_string()] {
+                LotDeepLink { key: "{lot_id}", lot_id }
+            }
         },
         None => rsx! {
             AuctionPage {}
@@ -89,8 +92,7 @@ pub(crate) fn Status() -> Element {
 }
 
 /// 未匹配任何已冻结路由时回到公开端首页。
-/// 旧版 Public 对未知路径使用无历史记录跳转，而不是在外壳之外渲染独立 404；复用别名
-/// 跳转边界也会保留旧 URL 中的筛选查询，避免分享链接意外丢失上下文。
+/// 复用外壳与别名跳转边界，保留竞价宿主以及旧 URL 中的筛选查询。
 #[component]
 pub(crate) fn NotFound(segments: Vec<String>) -> Element {
     let _ = segments;

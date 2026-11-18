@@ -5,19 +5,29 @@ use std::future::Future;
 use auction_web_shared::timer::TimeoutFuture;
 use url::form_urlencoded;
 
+use super::super::clock::send_conditional_response;
 use super::super::swr_cache::{self, CacheRead, FetchOutcome};
 use super::super::{CatalogLevelFilter, LotEnvelope, decoder};
-use super::cached_get::{
-    ConditionalResponse, cached_public_read, conditional_get, failure_outcome,
-    transport_failure_outcome,
-};
+use super::cached_get::{cached_public_read, failure_outcome, transport_failure_outcome};
 
 const PUBLIC_QUERY_RETRY_DELAY_MILLIS: u32 = 1_000;
 
-/// lot 详情读取失败。详情只在页内抽屉展示：失败统一提示并可重试，不区分状态码，也不把
-/// 服务端 message、响应正文或底层网络错误带进组件。
+/// lot 详情读取失败，仅传递是否已由权威 HTTP 状态确认不存在。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct LotDetailFetchError;
+pub(crate) enum LotDetailFetchError {
+    Missing,
+    Unavailable,
+}
+
+impl LotDetailFetchError {
+    fn for_status(status: Option<u16>) -> Self {
+        if matches!(status, Some(404 | 410)) { Self::Missing } else { Self::Unavailable }
+    }
+
+    pub(crate) fn not_found(self) -> bool {
+        self == Self::Missing
+    }
+}
 
 pub(crate) async fn fetch_current_lots(
     auction_id: String,
@@ -146,18 +156,37 @@ pub(crate) async fn fetch_lot_detail(lot_id: String) -> Result<LotEnvelope, LotD
         swr_cache::LIVE_TTL_MILLIS,
         swr_cache::now_millis,
         move |etag| async move {
-            match conditional_get(&request_url, etag.as_deref()).await {
-                Err((_, status)) => transport_failure_outcome(status, LotDetailFetchError),
-                Ok(ConditionalResponse::NotModified) => FetchOutcome::NotModified,
-                Ok(ConditionalResponse::Failure(response)) => {
-                    failure_outcome(response.status(), LotDetailFetchError)
+            #[cfg(test)]
+            let fixture =
+                dioxus::prelude::try_consume_context::<crate::surface::LotDetailHttpFixture>()
+                    .and_then(|transport| (transport.0)(&request_url, etag.as_deref()));
+            let response = match send_conditional_response(
+                &request_url,
+                etag.as_deref(),
+                #[cfg(test)]
+                fixture,
+            )
+            .await
+            {
+                Ok(reply) => reply,
+                Err((_, status)) => {
+                    return transport_failure_outcome(
+                        status,
+                        LotDetailFetchError::for_status(status),
+                    );
                 }
-                Ok(ConditionalResponse::Success { response, etag }) => {
-                    match decoder::decode_lot_detail(response, None, &lot_id).await {
+            };
+            match response.status() {
+                304 if etag.is_some() => FetchOutcome::NotModified,
+                200..=299 => {
+                    let etag = response.etag();
+                    let body = response.text().await;
+                    match decoder::decode_lot_detail(body.as_deref(), None, &lot_id) {
                         Ok(value) => FetchOutcome::Changed { value, etag },
-                        Err(_) => FetchOutcome::Rejected(LotDetailFetchError),
+                        Err(_) => FetchOutcome::Rejected(LotDetailFetchError::Unavailable),
                     }
                 }
+                status => failure_outcome(status, LotDetailFetchError::for_status(Some(status))),
             }
         },
     )
@@ -167,14 +196,92 @@ pub(crate) async fn fetch_lot_detail(lot_id: String) -> Result<LotEnvelope, LotD
 #[cfg(test)]
 mod tests {
     use std::cell::{Cell, RefCell};
+    use std::future::ready;
 
+    use dioxus::dioxus_core::NoOpMutations;
+    use dioxus::prelude::*;
     use futures_util::FutureExt;
+    use serde_json::json;
 
-    use super::{current_lots_url, retry_once_unless_authoritative};
-    use crate::api::CatalogLevelFilter;
+    use super::{current_lots_url, fetch_lot_detail, retry_once_unless_authoritative};
     use crate::api::swr_cache::CacheRead;
+    use crate::api::{CatalogLevelFilter, HttpResponseFixture, invalidate_all};
+    use crate::surface::LotDetailHttpFixture;
 
     const AUCTION_ID: &str = "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b";
+    const LOT_ID: &str = "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2c";
+
+    thread_local! {
+        static DETAIL_READS: Cell<usize> = const { Cell::new(0) };
+        static DETAIL_FINISHED: Cell<bool> = const { Cell::new(false) };
+    }
+
+    #[component]
+    fn LotCacheFixture() -> Element {
+        use_context_provider(|| {
+            LotDetailHttpFixture(|url, etag| {
+                assert_eq!(url, format!("/api/v1/lots/{LOT_ID}"));
+                let read = DETAIL_READS.get();
+                DETAIL_READS.set(read + 1);
+                let reply = match read {
+                    0 => {
+                        assert_eq!(etag, None);
+                        HttpResponseFixture {
+                        status: 200,
+                        etag: Some("\"present\"".to_owned()),
+                        body: Some(json!({
+                            "code": "ok", "message": "拍品详情",
+                            "data": {
+                                "auction_id": AUCTION_ID, "auction_status": "settled",
+                                "projection_kind": "live", "presentation_mode": "live",
+                                "bidding_open": false, "opens_at": "2026-11-18T12:00:00Z",
+                                "preview_revision": 0,
+                                "lot": {
+                                    "id": LOT_ID, "auction_id": AUCTION_ID, "lot_number": 1,
+                                    "status": "unsold", "start_price": 1000, "current_price": 1000,
+                                    "next_bid": 1000, "has_leader": false, "seller_name": "S",
+                                    "state_version": 1,
+                                    "equipment": { "name": "Shield", "category": "Shield",
+                                        "equipment_group": "rare", "game_equipment_url": "" }
+                                }
+                            }
+                        }).to_string()),
+                    }
+                    }
+                    1 => {
+                        assert_eq!(etag, Some("\"present\""));
+                        HttpResponseFixture { status: 404, etag: None, body: None }
+                    }
+                    2 => {
+                        assert_eq!(etag, None, "404 必须驱逐拍品并清除 ETag");
+                        HttpResponseFixture { status: 503, etag: None, body: None }
+                    }
+                    _ => panic!("多余的拍品请求"),
+                };
+                Some(Box::pin(ready(Ok(reply))))
+            })
+        });
+        use_future(|| async {
+            assert!(fetch_lot_detail(LOT_ID.to_owned()).await.is_ok());
+            invalidate_all();
+            assert!(fetch_lot_detail(LOT_ID.to_owned()).await.unwrap_err().not_found());
+            assert!(!fetch_lot_detail(LOT_ID.to_owned()).await.unwrap_err().not_found());
+            DETAIL_FINISHED.set(true);
+        });
+        rsx! {}
+    }
+
+    #[test]
+    fn lot_detail_response_evicts_the_cached_etag_before_the_next_get() {
+        DETAIL_READS.set(0);
+        DETAIL_FINISHED.set(false);
+        let mut dom = VirtualDom::new(LotCacheFixture);
+        dom.rebuild_in_place();
+        dom.process_events();
+        dom.render_immediate(&mut NoOpMutations);
+        assert!(DETAIL_FINISHED.get());
+        assert_eq!(DETAIL_READS.get(), 3);
+    }
 
     type CatalogRead = Result<CacheRead<&'static str>, &'static str>;
 

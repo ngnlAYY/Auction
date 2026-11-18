@@ -11,13 +11,17 @@ use auction_web_shared::wire::json_has_exact_keys as exact_fields;
 use gloo_net::http::Request;
 use serde_json::Value;
 
-use super::{CommandError, TransportError, decoder, send_get, send_request};
+use super::session::{
+    SessionIdentity, SessionIdentityObservation, decode_account_identity_response,
+};
+use super::{CommandError, TransportError, send_get, send_request};
 
 /// 整场集合有界且不能截断；缺项只有在完整权威读取后才表示 false/version 0。
 pub(crate) async fn fetch_lot_watches(
     user_id: &str,
     auction_id: &str,
 ) -> Result<PublicLotWatchesResponse, CommandError> {
+    let observation = SessionIdentityObservation::start();
     let query = url::form_urlencoded::Serializer::new(String::new())
         .append_pair("auction_id", auction_id)
         .finish();
@@ -25,18 +29,19 @@ pub(crate) async fn fetch_lot_watches(
         .await
         .map_err(|error| failure(error.code(), 0))?;
     let status = response.status();
-    if !response.ok() {
-        return Err(failure(&decoder::decode_error_code(response).await, status));
+    let page: PublicLotWatchesResponse =
+        decode_account_identity_response(response, None, |value| {
+            exact_fields(value, &["user_id", "auction_id", "watches"])
+                && value.get("watches").and_then(Value::as_array).is_some_and(|watches| {
+                    watches.len() <= 10_000 && watches.iter().all(valid_watch_value)
+                })
+        })
+        .await?;
+    if !valid_watch_collection(&page, &page.user_id, auction_id) {
+        return Err(failure("invalid_response", status));
     }
-    let page: PublicLotWatchesResponse = decoder::decode_success(response, |value| {
-        exact_fields(value, &["user_id", "auction_id", "watches"])
-            && value.get("watches").and_then(Value::as_array).is_some_and(|watches| {
-                watches.len() <= 10_000 && watches.iter().all(valid_watch_value)
-            })
-    })
-    .await
-    .map_err(|_| failure("invalid_response", status))?;
-    if !valid_watch_collection(&page, user_id, auction_id) {
+    observation.publish(SessionIdentity::UserId(page.user_id.clone()));
+    if page.user_id != user_id {
         return Err(failure("invalid_response", status));
     }
     Ok(page)
@@ -49,6 +54,7 @@ pub(crate) async fn set_lot_watch(
     lot_id: &str,
     command: &PublicSetLotWatchRequest,
 ) -> Result<PublicSetLotWatchResponse, CommandError> {
+    let observation = SessionIdentityObservation::start();
     let response = send_request(|abort_signal| {
         Request::put(&format!("/api/v1/lots/{lot_id}/watch"))
             .abort_signal(abort_signal)
@@ -59,15 +65,12 @@ pub(crate) async fn set_lot_watch(
     .await
     .map_err(|error| failure(error.code(), 0))?;
     let status = response.status();
-    if !response.ok() {
-        return Err(failure(&decoder::decode_error_code(response).await, status));
-    }
-    let result: PublicSetLotWatchResponse = decoder::decode_success(response, |value| {
-        exact_fields(value, &["user_id", "auction_id", "watch"])
-            && value.get("watch").is_some_and(valid_watch_value)
-    })
-    .await
-    .map_err(|_| failure("invalid_response", status))?;
+    let result: PublicSetLotWatchResponse =
+        decode_account_identity_response(response, Some(user_id), |value| {
+            exact_fields(value, &["user_id", "auction_id", "watch"])
+                && value.get("watch").is_some_and(valid_watch_value)
+        })
+        .await?;
     if result.user_id != user_id
         || result.auction_id != auction_id
         || result.watch.lot_id != lot_id
@@ -77,6 +80,7 @@ pub(crate) async fn set_lot_watch(
     {
         return Err(failure("invalid_response", status));
     }
+    observation.publish(SessionIdentity::UserId(result.user_id.clone()));
     Ok(result)
 }
 
@@ -107,6 +111,5 @@ fn valid_watch_value(value: &Value) -> bool {
 }
 
 fn failure(code: &str, status: u16) -> CommandError {
-    super::session::observe_public_session_failure(status, code);
     CommandError { code: code.to_owned(), status }
 }

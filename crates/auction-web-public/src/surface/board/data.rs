@@ -21,8 +21,8 @@ use crate::api::{
 };
 use crate::surface::loading::use_content_loading;
 use crate::surface::{
-    CatalogGroupFilters, CatalogTable, LotDetailLookup, LotViewDisposition, LotViewRequest,
-    PublicBoardQuery, PublicSessionResource, PublicSessionView, dispose_lot_view,
+    CatalogGroupFilters, CatalogTable, CurrentAuctionResource, LotDetailLookup, LotViewDisposition,
+    LotViewRequest, PublicBoardQuery, PublicSessionResource, PublicSessionView, dispose_lot_view,
     public_page_matches, update_public_page_size, update_public_query_state,
     use_catalog_proxy_snapshots,
 };
@@ -167,6 +167,29 @@ pub(super) fn use_catalog_read(
         lots_refresh_generation,
         refresh_generation,
     );
+    // 只有与本次位置及场次对齐的行能消费深链；空场或目录终态也由稳定看板交给只读宿主。
+    let view_page = request.as_ref().zip(current).and_then(|(request, (_, _, result))| {
+        result
+            .as_ref()
+            .ok()
+            .filter(|snapshot| {
+                aligned
+                    && public_page_matches(
+                        snapshot.page.page,
+                        snapshot.page.page_size,
+                        request.page,
+                        request.page_size,
+                    )
+            })
+            .cloned()
+    });
+    use_lot_view_delivery(
+        auction,
+        historical,
+        query,
+        reading || (!aligned && !alignment.exhausted),
+        view_page,
+    );
     request.map(|request| CatalogRead {
         request,
         current: current.map(|(_, _, result)| result.clone()),
@@ -174,6 +197,43 @@ pub(super) fn use_catalog_read(
         alignment,
         generation: lots_refresh_generation,
     })
+}
+
+fn use_lot_view_delivery(
+    auction: Option<&CurrentAuction>,
+    historical: bool,
+    query: Signal<PublicBoardQuery>,
+    reading: bool,
+    page: Option<CatalogSnapshot>,
+) {
+    let view = use_context::<LotViewRequest>();
+    let lookup = use_context::<LotDetailLookup>();
+    let current = use_context::<CurrentAuctionResource>();
+    let displayed = auction.map(|auction| (auction.world.clone(), auction.id.clone()));
+    use_effect(use_reactive(
+        (&displayed, &historical, &reading, &page),
+        move |(displayed, historical, reading, page)| {
+            let Some(target) = view.0.read().clone() else { return };
+            let query = query.read();
+            let world = query.world.as_deref().unwrap_or("main");
+            // 世界刚切换时，旧世界的当前场次结果不能证明目标世界为空。
+            let waiting_for_world =
+                !historical && !current.read().as_ref().is_some_and(|(loaded, _)| loaded == world);
+            let disposition = if waiting_for_world && target.world.is_some() {
+                LotViewDisposition::Wait
+            } else {
+                dispose_lot_view(
+                    &target,
+                    world,
+                    displayed.as_ref().map(|(world, id)| (world.as_str(), id.as_str())),
+                    reading,
+                    page.iter()
+                        .flat_map(|snapshot| snapshot.rows.iter().map(|row| row.lot_id.as_str())),
+                )
+            };
+            view.deliver(target, disposition, lookup);
+        },
+    ));
 }
 
 fn use_opening_refresh(
@@ -291,26 +351,6 @@ pub(super) fn AuctionData(
                 scope.request.page_size,
             )
     });
-    // 拍品直达链接：目录当前页有这一行时由行自己打开抽屉；看板展示的不是它所在的场次，或
-    // 这一页没有它时，在这里退回只读抽屉。请求只处置一次，不写 URL。
-    let mut view_request = use_context::<LotViewRequest>().0;
-    let lot_lookup = use_context::<LotDetailLookup>();
-    let read_only_view = view_request.read().clone().filter(|target| {
-        let url_world = query_state_signal.read().world.clone();
-        dispose_lot_view(
-            target,
-            url_world.as_deref().unwrap_or("main"),
-            &auction.world,
-            &auction.id,
-            ready_snapshot.map(|snapshot| snapshot.rows.iter().map(|row| row.lot_id.as_str())),
-        ) == LotViewDisposition::ReadOnly
-    });
-    use_effect(use_reactive((&read_only_view,), move |(target,)| {
-        if let Some(target) = target {
-            view_request.set(None);
-            lot_lookup.view(target.auction_id, target.lot_id);
-        }
-    }));
     // 只缓存当前上下文已对齐的预览；明确失败、切换上下文或离开预览立即清除。
     {
         let mut retained = preview_snapshot.borrow_mut();
@@ -506,6 +546,12 @@ async fn read_lots(
     equipment_group: Option<String>,
     levels: CatalogLevelFilter,
 ) -> Result<LotEnvelope, String> {
+    #[cfg(test)]
+    if try_consume_context::<crate::surface::BoardCatalogueFailureFixture>()
+        .is_some_and(|fixture| fixture.0)
+    {
+        return Err("network_error".to_owned());
+    }
     #[cfg(test)]
     if let Some(reply) = super::tests::lots_request(
         &request.auction_id,

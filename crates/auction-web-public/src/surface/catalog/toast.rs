@@ -1,10 +1,12 @@
 //! Public 命令成功后的页面级提示条：弹窗关闭后在视口右下角给出结果，几秒后自行消失。
 //! 提示条只是已提交结果的回显，不保存命令状态；目录行与详情抽屉仍从权威投影读取价格。
 
+#[cfg(target_arch = "wasm32")]
 use auction_web_shared::timer::TimeoutFuture;
 use dioxus::prelude::*;
 
 /// 自动消失前的停留时间；内容只有一两句，且同一结果随后出现在目录行上。
+#[cfg(target_arch = "wasm32")]
 const TOAST_MILLIS: u32 = 5_000;
 
 #[derive(Clone, PartialEq)]
@@ -42,19 +44,23 @@ pub(super) fn use_catalog_toast_provider() -> Signal<Option<CatalogToast>> {
 }
 
 #[component]
-pub(super) fn CatalogToastHost(mut toast: Signal<Option<CatalogToast>>) -> Element {
+pub(super) fn CatalogToastHost(toast: Signal<Option<CatalogToast>>) -> Element {
     // 计时任务归常驻的提示条宿主所有：发出提示的命令弹窗随即卸载，不能由它持有计时器。
-    use_effect(move || {
-        let Some(id) = toast.read().as_ref().map(|toast| toast.id) else {
-            return;
-        };
-        spawn(async move {
-            TimeoutFuture::new(TOAST_MILLIS).await;
-            if toast.peek().as_ref().is_some_and(|current| current.id == id) {
-                toast.set(None);
-            }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut toast = toast;
+        use_effect(move || {
+            let Some(id) = toast.read().as_ref().map(|toast| toast.id) else {
+                return;
+            };
+            spawn(async move {
+                TimeoutFuture::new(TOAST_MILLIS).await;
+                if toast.peek().as_ref().is_some_and(|current| current.id == id) {
+                    toast.set(None);
+                }
+            });
         });
-    });
+    }
     let current = toast.read().clone();
 
     rsx! {

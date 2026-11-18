@@ -6,12 +6,13 @@ use dioxus::prelude::*;
 
 use super::super::super::parse_credit_amount;
 use super::super::super::proxy::proxy_status_label;
+use super::super::host::CompetitionCommands;
 use super::super::pending::{
     PendingProxyCommand, ProxyConfirmCommand, PublicCommandIdentity, amount_hint, confirm_panel,
-    initial_proxy_amount, proxy_error_message,
+    initial_proxy_amount,
 };
 use super::super::session::CommandSession;
-use crate::api::{OwnedProxy, ProxyCommandAuthorization, lower_proxy_authorization};
+use crate::api::OwnedProxy;
 
 #[component]
 pub(super) fn ProxyAuthorizationForm(
@@ -21,24 +22,20 @@ pub(super) fn ProxyAuthorizationForm(
     lot_status: String,
     proxy: OwnedProxy,
     authorization_ready: bool,
-    mut saved_authorization: Signal<Option<Box<ProxyCommandAuthorization>>>,
+    on_submit: EventHandler<PendingProxyCommand>,
     /// 由弹窗宿主注入的两阶段确认命令 hook（降低上限实例；见 ProxyFormInput）。
     command: ProxyConfirmCommand,
-    /// 创建请求未完成时，即使快照已显示活动授权，也不能开始第二个降低命令。
-    peer_submitting: Signal<bool>,
     on_close: EventHandler<()>,
 ) -> Element {
     let user_id = use_context::<PublicCommandIdentity>().0;
     let session = use_context::<CommandSession>();
     let can_submit = authorization_ready && session.can_submit_new();
+    let commands = try_use_context::<CompetitionCommands>();
     let maximum_id = format!("public-proxy-lower-maximum-{lot_id}");
     let lower_bound = if proxy.capabilities.waiting { next_bid } else { current_price };
     let mut maximum_amount = use_signal(|| initial_proxy_amount(lower_bound));
     let mut validation = use_signal(|| None::<String>);
     let mut command = command;
-    let own_submitting = command.submitting;
-    let submitting = move || own_submitting() || peer_submitting();
-    let mut refresh_generation = use_context::<Signal<u64>>();
     let bidding_open = lot_status == "live";
     let limit_reached = lower_bound > MAX_PUBLIC_BID_AMOUNT;
     let can_lower = proxy.capabilities.can_lower && bidding_open && !limit_reached;
@@ -56,10 +53,80 @@ pub(super) fn ProxyAuthorizationForm(
     };
     let confirming = confirmation.is_some();
 
+    let submit = use_callback(move |()| {
+        if !can_lower
+            || !authorization_ready
+            || !session.can_submit_new()
+            || !commands.is_some_and(|commands| commands.can_start(&lot_id))
+        {
+            return;
+        }
+        // 两阶段确认：签名取 (amount, authorization_id)，同输入重试复用同一
+        // command_id（幂等）。
+        let pending = if let Some(pending) = (command.confirmation)() {
+            match &pending {
+                PendingProxyCommand::Lower { amount, authorization_id, .. } => {
+                    if *amount > MAX_PUBLIC_BID_AMOUNT {
+                        command.cancel_confirmation();
+                        validation.set(Some(t!("proxy-invalid-amount")));
+                        return;
+                    }
+                    if authorization_id != &proxy.authorization_id {
+                        // 授权已变更：整条命令作废，彻底清空后退回编辑态。
+                        command.reset();
+                        validation.set(Some(t!("proxy-authorization-not-active")));
+                        return;
+                    }
+                    if *amount >= proxy.maximum_amount {
+                        command.cancel_confirmation();
+                        validation.set(Some(t!("proxy-not-lower")));
+                        return;
+                    }
+                    if *amount < lower_bound {
+                        command.cancel_confirmation();
+                        validation.set(Some(t!(
+                            "proxy-below-minimum",
+                            price: format_credit_amount(lower_bound)
+                        )));
+                        return;
+                    }
+                }
+                // 本表单只冻结 Lower；防御性处理串型，退回编辑态。
+                PendingProxyCommand::Create { .. } => {
+                    command.reset();
+                    return;
+                }
+            }
+            pending
+        } else {
+            let Some(value) = parse_credit_amount(&maximum_amount()) else {
+                validation.set(Some(t!("proxy-invalid-amount")));
+                return;
+            };
+            if value >= proxy.maximum_amount {
+                validation.set(Some(t!("proxy-not-lower")));
+                return;
+            }
+            if value < lower_bound {
+                validation.set(Some(t!(
+                    "proxy-below-minimum",
+                    price: format_credit_amount(lower_bound)
+                )));
+                return;
+            }
+            let authorization_id = proxy.authorization_id.clone();
+            command.begin(format!("{value}:{authorization_id}"), |command_id| {
+                PendingProxyCommand::Lower { user_id, amount: value, authorization_id, command_id }
+            });
+            validation.set(None);
+            return;
+        };
+        validation.set(None);
+        on_submit.call(pending);
+    });
     rsx! {
         section {
             class: "public-auction-bid-form",
-            aria_busy: submitting().to_string(),
             h2 { {t!("proxy-current")} }
             p { {t!("proxy-status", status: proxy_status_label(&proxy.status))} }
             p { {t!("proxy-maximum", maximum: format_credit_amount(proxy.maximum_amount))} }
@@ -67,118 +134,7 @@ pub(super) fn ProxyAuthorizationForm(
                 form {
                     onsubmit: move |event| {
                         event.prevent_default();
-                        if submitting() || !can_lower || !authorization_ready || !session.can_submit_new() {
-                            return;
-                        }
-                        // 两阶段确认：签名取 (amount, authorization_id)，同输入重试复用同一
-                        // command_id（幂等）。
-                        let pending = if let Some(pending) = (command.confirmation)() {
-                            match &pending {
-                                PendingProxyCommand::Lower {
-                                    amount,
-                                    authorization_id,
-                                    ..
-                                } => {
-                                    if *amount > MAX_PUBLIC_BID_AMOUNT {
-                                        command.cancel_confirmation();
-                                        validation.set(Some(t!("proxy-invalid-amount")));
-                                        (command.failure).set(None);
-                                        return;
-                                    }
-                                    if authorization_id != &proxy.authorization_id {
-                                        // 授权已变更：整条命令作废，彻底清空后退回编辑态。
-                                        command.reset();
-                                        validation.set(Some(t!("proxy-authorization-not-active")));
-                                        return;
-                                    }
-                                    if *amount >= proxy.maximum_amount {
-                                        command.cancel_confirmation();
-                                        validation.set(Some(t!("proxy-not-lower")));
-                                        (command.failure).set(None);
-                                        return;
-                                    }
-                                    if *amount < lower_bound {
-                                        command.cancel_confirmation();
-                                        validation.set(Some(t!(
-                                            "proxy-below-minimum",
-                                            price: format_credit_amount(lower_bound)
-                                        )));
-                                        (command.failure).set(None);
-                                        return;
-                                    }
-                                }
-                                // 本表单只冻结 Lower；防御性处理串型，退回编辑态。
-                                PendingProxyCommand::Create { .. } => {
-                                    command.reset();
-                                    return;
-                                }
-                            }
-                            pending
-                        } else {
-                            let Some(value) = parse_credit_amount(&maximum_amount()) else {
-                                validation.set(Some(t!("proxy-invalid-amount")));
-                                (command.failure).set(None);
-                                return;
-                            };
-                            if value >= proxy.maximum_amount {
-                                validation.set(Some(t!("proxy-not-lower")));
-                                (command.failure).set(None);
-                                return;
-                            }
-                            if value < lower_bound {
-                                validation.set(Some(t!(
-                                    "proxy-below-minimum",
-                                    price: format_credit_amount(lower_bound)
-                                )));
-                                (command.failure).set(None);
-                                return;
-                            }
-                            let authorization_id = proxy.authorization_id.clone();
-                            command.begin(
-                                format!("{value}:{authorization_id}"),
-                                |command_id| PendingProxyCommand::Lower {
-                                    user_id,
-                                    amount: value,
-                                    authorization_id,
-                                    command_id,
-                                },
-                            );
-                            validation.set(None);
-                            return;
-                        };
-                        validation.set(None);
-                        // 上面的确认守卫已保证此处必为 Lower。
-                        let PendingProxyCommand::Lower { user_id, amount, authorization_id, command_id } =
-                            pending.clone()
-                        else {
-                            return;
-                        };
-                        let lot_id = lot_id.clone();
-                        command.submit(
-                            pending,
-                            move |_| {
-                                let lot_id = lot_id.clone();
-                                async move {
-                                    lower_proxy_authorization(
-                                        user_id,
-                                        lot_id,
-                                        authorization_id,
-                                        amount,
-                                        command_id,
-                                    )
-                                    .await
-                                }
-                            },
-                            crate::api::CommandError::outcome_uncertain,
-                            move |authorization| {
-                                saved_authorization.set(Some(Box::new(authorization)));
-                                refresh_generation.set(refresh_generation().saturating_add(1));
-                            },
-                            move || {
-                                // 降低失败也要刷新权威 lot/代理状态；hook 保留可重试命令。
-                                refresh_generation.set(refresh_generation().saturating_add(1));
-                            },
-                        );
+                        submit.call(());
                     },
                     if let Some(amount) = confirmation {
                         {confirm_panel(
@@ -209,7 +165,6 @@ pub(super) fn ProxyAuthorizationForm(
                             } else {
                                 "public-proxy-lower-hint"
                             },
-                            disabled: submitting(),
                             value: "{maximum_amount}",
                             // 与直接出价一致：从确认视图“返回修改”或提交被拒后上限框重新挂载，
                             // 此时焦点还留在按钮上，这里把它交还给要修改的上限。
@@ -234,15 +189,9 @@ pub(super) fn ProxyAuthorizationForm(
                     if let Some(message) = validation() {
                         p { id: "public-proxy-lower-error", class: "action-feedback action-feedback--error", role: "alert", "{message}" }
                     }
-                    if let Some(error) = (command.failure)() {
-                        p { class: "action-feedback action-feedback--error", role: "alert",
-                            "{proxy_error_message(&error, lower_bound)}"
-                        }
-                    }
                     div { class: "public-auction-bid-form__actions",
                         button {
                             r#type: "button",
-                            disabled: submitting(),
                             onclick: move |_| {
                                 if (command.confirmation)().is_some() {
                                     command.cancel_confirmation();
@@ -256,11 +205,9 @@ pub(super) fn ProxyAuthorizationForm(
                             r#type: "submit",
                             // 确认视图的首选焦点是确认按钮，而不是弹窗右上角的关闭按钮。
                             autofocus: confirming,
-                            disabled: submitting() || !can_submit,
+                            disabled: !can_submit,
                             aria_describedby: if confirming { confirmation_id } else { String::new() },
-                            if submitting() {
-                                {t!("proxy-working")}
-                            } else if confirming {
+                            if confirming {
                                 {t!("proxy-lower-confirm-submit")}
                             } else {
                                 {t!("proxy-lower-submit")}

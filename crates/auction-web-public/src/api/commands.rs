@@ -2,9 +2,11 @@
 //! 浏览器只生成稳定重试所需的 `command_id` 并提交契约 DTO；金额、资格、锁和幂等结果仍由
 //! 服务端应用端口决定。
 
+#[cfg(test)]
+use std::{cell::Cell, future::Future, pin::Pin};
+
 use auction_contracts::{
-    ApiErrorResponse, CreateProxyAuthorizationRequest, LowerProxyAuthorizationRequest,
-    PlaceBidRequest,
+    CreateProxyAuthorizationRequest, LowerProxyAuthorizationRequest, PlaceBidRequest,
 };
 pub(crate) use auction_contracts::{
     PlaceBidResultResponse as BidResult,
@@ -14,7 +16,19 @@ use gloo_net::http::Request;
 use serde::Serialize;
 use uuid::Uuid;
 
-use super::{TransportError, decoder, send_request};
+use super::{PublicSessionApiError, TransportError, decoder, send_request};
+
+const NOT_SENT: &str = "command_not_sent";
+
+#[cfg(test)]
+type WireReply = Pin<Box<dyn Future<Output = Result<(u16, Option<String>), TransportError>>>>;
+#[cfg(test)]
+type WireTransport = fn(&str, &str, &[u8]) -> Result<WireReply, TransportError>;
+
+#[cfg(test)]
+thread_local! {
+    static WIRE_TRANSPORT: Cell<Option<WireTransport>> = const { Cell::new(None) };
+}
 
 /// Public 命令失败的稳定错误投影；不把服务端说明正文带入浏览器展示。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,11 +38,27 @@ pub(crate) struct CommandError {
 }
 
 impl CommandError {
+    /// 本次尝试在调用 fetch 之前结束。
+    pub(crate) fn before_send() -> Self {
+        Self { code: NOT_SENT.to_owned(), status: 0 }
+    }
+
     /// 缺少明确业务结果时只允许重放原命令；新输入仍须经过正常表单校验。
     pub(crate) fn outcome_uncertain(&self) -> bool {
         // 浏览器会话锁失败发生在 HTTP 发送前，不把首次拒绝误报为未知外写。
-        !matches!(self.code.as_str(), "session_lock_unavailable" | "session_lock_timeout")
+        !self.not_sent()
+            && !matches!(self.code.as_str(), "session_lock_unavailable" | "session_lock_timeout")
             && (self.status == 0 || self.status >= 500 || self.code == "invalid_response")
+    }
+
+    /// 仅由竞争命令的本地传输边界产生，HTTP 响应不能冒充这个状态。
+    pub(crate) fn not_sent(&self) -> bool {
+        self.status == 0 && self.code == NOT_SENT
+    }
+
+    #[cfg(test)]
+    pub(crate) fn intercept_test_requests(transport: WireTransport) {
+        WIRE_TRANSPORT.set(Some(transport));
     }
 
     fn transport(error: TransportError) -> Self {
@@ -49,6 +79,7 @@ pub(crate) async fn place_bid(
     let url = format!("/api/v1/lots/{lot_id}/bids");
     let command = PlaceBidRequest { command_id: command_id.to_string(), amount };
     send_command(
+        user_id,
         async |invalidation| post_command(&url, user_id, &command, invalidation).await,
         |body| decoder::decode_bid_command(body, &lot_id),
     )
@@ -70,6 +101,7 @@ pub(crate) async fn create_proxy_authorization(
         mode: mode.clone(),
     };
     send_command(
+        user_id,
         async |invalidation| post_command(&url, user_id, &command, invalidation).await,
         |body| decoder::decode_create_proxy_command(body, &lot_id, maximum_amount, &mode),
     )
@@ -88,6 +120,7 @@ pub(crate) async fn lower_proxy_authorization(
     let command =
         LowerProxyAuthorizationRequest { command_id: command_id.to_string(), maximum_amount };
     send_command(
+        user_id,
         async |invalidation| post_command(&url, user_id, &command, invalidation).await,
         |body| {
             decoder::decode_lower_proxy_command(body, &lot_id, &authorization_id, maximum_amount)
@@ -129,12 +162,23 @@ async fn post_command(
     command: &impl Serialize,
     invalidation: &mut CommandInvalidation,
 ) -> Result<CommandResponse, TransportError> {
+    // 复用同一份序列化正文建立真实请求或交给传输替身；构造失败时还没有调用 fetch。
+    let Ok(body) = serde_json::to_string(command) else {
+        return Err(TransportError::Decode);
+    };
+    let expected_user = user_id.to_string();
+    #[cfg(test)]
+    if let Some(transport) = WIRE_TRANSPORT.get() {
+        let reply = invalidation.built(transport(url, &expected_user, body.as_bytes()))?;
+        return reply.await.map(|(status, body)| CommandResponse { status, body });
+    }
     let response = send_request(|abort_signal| {
         invalidation.built(
             Request::post(url)
                 .abort_signal(abort_signal)
-                .header(auction_contracts::PUBLIC_EXPECTED_USER_ID_HEADER, &user_id.to_string())
-                .json(command)
+                .header(auction_contracts::PUBLIC_EXPECTED_USER_ID_HEADER, &expected_user)
+                .header("Content-Type", "application/json")
+                .body(body)
                 .map_err(|_| TransportError::Network(None)),
         )
     })
@@ -143,38 +187,52 @@ async fn post_command(
 }
 
 async fn send_command<T>(
+    expected_user: Uuid,
     send: impl AsyncFnOnce(&mut CommandInvalidation) -> Result<CommandResponse, TransportError>,
     decode: impl FnOnce(Option<&str>) -> Result<T, String>,
 ) -> Result<T, CommandError> {
     let response = {
         let mut invalidation = CommandInvalidation::default();
-        send(&mut invalidation).await
-    }
-    .map_err(CommandError::transport)?;
+        send(&mut invalidation).await.map_err(|error| {
+            if invalidation.request_built {
+                CommandError::transport(error)
+            } else {
+                CommandError::before_send()
+            }
+        })
+    }?;
     let status = response.status;
     let body = response.body.as_deref();
     if !(200..300).contains(&status) {
-        return Err(read_command_error(status, body));
+        return Err(read_command_error(status, body, expected_user));
     }
     decode(body).map_err(|_| CommandError::invalid_response(status))
 }
 
-fn read_command_error(status: u16, body: Option<&str>) -> CommandError {
-    let error = body
-        .and_then(|body| serde_json::from_str::<ApiErrorResponse>(body).ok())
-        .filter(|error| {
-            !error.code.is_empty()
-                && error.code.len() <= 64
-                && error.code == error.code.trim()
-                && error.code.chars().all(|character| {
-                    character.is_ascii_lowercase() || character.is_ascii_digit() || character == '_'
-                })
-        })
-        .map_or_else(
-            || CommandError::invalid_response(status),
-            |error| CommandError { code: error.code, status },
-        );
-    super::session::observe_public_session_failure(status, &error.code);
+fn read_command_error(status: u16, body: Option<&str>, expected_user: Uuid) -> CommandError {
+    let error =
+        super::session::decode_identity_response::<()>(status, body, serde_json::Value::is_null)
+            .err()
+            .map(PublicSessionApiError::into_read_code)
+            .filter(|code| {
+                !code.is_empty()
+                    && code.len() <= 64
+                    && code == code.trim()
+                    && code.chars().all(|character| {
+                        character.is_ascii_lowercase()
+                            || character.is_ascii_digit()
+                            || character == '_'
+                    })
+            })
+            .map_or_else(
+                || CommandError::invalid_response(status),
+                |code| CommandError { code, status },
+            );
+    super::session::observe_public_session_failure(
+        status,
+        &error.code,
+        Some(&expected_user.to_string()),
+    );
     error
 }
 
@@ -184,6 +242,7 @@ mod tests {
 
     use futures_util::FutureExt;
     use serde_json::json;
+    use uuid::Uuid;
 
     use super::{BidResult, CommandError, CommandResponse, send_command};
     use crate::api::swr_cache::{FetchOutcome, LIVE_TTL_MILLIS, current_revision, get_or_fetch};
@@ -240,6 +299,7 @@ mod tests {
             seed_snapshot(&url);
             let before = current_revision();
             let error = send_command(
+                Uuid::from_u128(1),
                 async |invalidation| {
                     invalidation.built(Ok(()))?;
                     Err(failure)
@@ -286,6 +346,7 @@ mod tests {
             seed_snapshot(&url);
             let before = current_revision();
             let error = send_command(
+                Uuid::from_u128(1),
                 async |invalidation| {
                     invalidation.built(Ok(()))?;
                     Ok(CommandResponse { status, body: Some(body.to_owned()) })
@@ -321,6 +382,7 @@ mod tests {
             }
         });
         let result = send_command(
+            Uuid::from_u128(1),
             async |invalidation| {
                 invalidation.built(Ok(()))?;
                 Ok(CommandResponse { status: 200, body: Some(body.to_string()) })
@@ -342,12 +404,13 @@ mod tests {
         seed_snapshot(url);
         let before = current_revision();
         let result = send_command(
+            Uuid::from_u128(1),
             async |invalidation| invalidation.built(Err(TransportError::Network(None))),
             decode_bid_receipt,
         )
         .now_or_never()
         .unwrap();
-        assert!(result.is_err());
+        assert!(!result.unwrap_err().outcome_uncertain());
         assert_eq!(current_revision(), before);
         assert_eq!(read_snapshot(url, |_| panic!("发送前失败不应触发重读")), Ok("before"));
     }
@@ -359,6 +422,7 @@ mod tests {
             seed_snapshot(&url);
             let before = current_revision();
             let mut command = Box::pin(send_command(
+                Uuid::from_u128(1),
                 async |invalidation| {
                     if request_built {
                         invalidation.built(Ok(()))?;

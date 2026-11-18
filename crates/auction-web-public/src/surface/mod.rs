@@ -53,11 +53,32 @@ pub(crate) type PublicSessionResource = Resource<Result<Option<PublicSession>, S
 #[derive(Clone, Copy)]
 pub(crate) struct PublicCommandOwner(pub Signal<Option<String>>);
 
+/// 从命令提示进入拍品解析页时传递冻结位置，独立于离开看板时清理的抽屉请求。
+#[derive(Clone, Copy)]
+pub(crate) struct LotLinkRequest(pub Signal<Option<LotLinkLocation>>);
+
+#[derive(Clone, PartialEq)]
+pub(crate) struct LotLinkLocation {
+    pub lot_id: String,
+    pub world: String,
+    pub auction_id: String,
+}
+
 /// Public 外壳唯一拥有的 readiness 快照；默认首页用它协调主内容与首屏门禁。
 pub(crate) type PublicReadinessResource = Resource<Result<bool, String>>;
 
 /// Public 外壳按世界读取的当前拍卖快照；结果携带请求世界，切换期间不得消费旧世界缓存。
 pub(crate) type CurrentAuctionResource = Resource<(String, Result<Option<CurrentAuction>, String>)>;
+
+#[cfg(test)]
+#[derive(Clone, Copy)]
+pub(crate) struct LotDetailHttpFixture(
+    pub fn(&str, Option<&str>) -> Option<crate::api::HttpFixtureFuture>,
+);
+
+#[cfg(test)]
+#[derive(Clone, Copy)]
+pub(crate) struct BoardCatalogueFailureFixture(pub bool);
 
 /// 会话资源快照的统一展示投影，看板、lot 详情和外壳头部共用。
 /// 认证、就绪、错误与查看者身份按同一规则派生，匿名/未就绪/错误一律失败关闭。

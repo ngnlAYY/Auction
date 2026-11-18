@@ -32,12 +32,12 @@ pub(crate) async fn decode_lot_list(
     .await
 }
 
-pub(crate) async fn decode_lot_detail(
-    response: Response,
+pub(crate) fn decode_lot_detail(
+    body: Option<&str>,
     auction_id: Option<&str>,
     lot_id: &str,
 ) -> Result<LotEnvelope, String> {
-    decode_success(response, |value| valid_lot_detail(value, auction_id, lot_id)).await
+    decode_success_text(body, |value| valid_lot_detail(value, auction_id, lot_id))
 }
 
 /// 先完成严格解码，再核对命令目标；错 lot 的成功响应仍属于未知结果。

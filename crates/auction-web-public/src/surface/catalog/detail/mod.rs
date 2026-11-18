@@ -16,6 +16,8 @@ use dioxus::prelude::*;
 use super::command_scope::CommandDialogInput;
 use crate::api::CatalogRow;
 
+#[cfg(test)]
+pub(super) use deep_link::tests as deep_link_fixture;
 pub(crate) use deep_link::{
     LotDeepLink, LotViewDisposition, LotViewRequest, LotViewTarget, dispose_lot_view,
 };

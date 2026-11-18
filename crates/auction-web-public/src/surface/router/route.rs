@@ -68,8 +68,26 @@ pub(crate) enum Route {
 
         #[route("/status")]
         Status {},
-    #[end_layout]
 
-    #[route("/:..segments")]
-    NotFound { segments: Vec<String> },
+        #[route("/:..segments")]
+        NotFound { segments: Vec<String> },
+}
+
+#[cfg(test)]
+mod tests {
+    use dioxus::core::DynamicNode;
+    use dioxus::prelude::Routable;
+
+    use super::Route;
+
+    #[test]
+    fn fallback_uses_the_home_pages_outer_layout() {
+        let home = Route::AuctionIndex {}.render(0).unwrap();
+        let fallback = Route::NotFound { segments: vec!["unknown".to_owned()] }.render(0).unwrap();
+        let [DynamicNode::Component(home)] = &*home.dynamic_nodes else { panic!("首页布局") };
+        let [DynamicNode::Component(fallback)] = &*fallback.dynamic_nodes else {
+            panic!("兜底页布局")
+        };
+        assert_eq!(home.name, fallback.name);
+    }
 }

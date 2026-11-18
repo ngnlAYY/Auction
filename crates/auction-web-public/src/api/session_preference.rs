@@ -6,7 +6,11 @@ use auction_web_shared::wire::json_has_exact_keys;
 use gloo_net::http::Request;
 use serde_json::Value;
 
-use super::{CommandError, TransportError, decoder, send_get, send_request};
+use super::session::{
+    SessionIdentity, SessionIdentityObservation, decode_account_identity_response,
+    publish_cookie_identity,
+};
+use super::{CommandError, TransportError, send_get, send_request};
 
 const PATH: &str = "/api/v1/me/session-preference";
 
@@ -19,8 +23,9 @@ pub(crate) fn valid_session_duration(duration_seconds: Option<i64>) -> bool {
 pub(crate) async fn fetch_session_preference(
     user_id: &str,
 ) -> Result<PublicSessionPreferenceResponse, CommandError> {
+    let observation = SessionIdentityObservation::start();
     let response = send_get(PATH).await.map_err(|error| failure(error.code(), 0))?;
-    decode(response, user_id, None).await
+    decode(response, user_id, None, observation).await
 }
 
 /// 未知结果只重发原始命令及 CAS 版本；响应成功后通过外壳重读身份，不伪造登录结果。
@@ -31,6 +36,7 @@ pub(crate) async fn set_session_preference(
     // 成功、重放和未知结果的重发都须与登录共用原生锁，防止迟到 Set-Cookie 换回旧身份。
     let _cookie_lock =
         super::session::lock_cookie_mutation().await.map_err(|code| failure(code, 0))?;
+    let observation = SessionIdentityObservation::start();
     super::session::invalidate_cookie_sync();
     let response = send_request(|abort_signal| {
         Request::put(PATH)
@@ -41,50 +47,58 @@ pub(crate) async fn set_session_preference(
     })
     .await
     .map_err(|error| failure(error.code(), 0))?;
-    if response.ok() {
+    let cookie_may_have_changed = response.ok();
+    let result = decode(response, user_id, Some(command), observation).await;
+    if cookie_may_have_changed {
         // 即使正文损坏，Cookie 和服务端截止也可能已经更新，仍须通知本页及其他标签页。
         super::session::notify_public_session_change(super::session::SessionRefreshReason::Refresh);
     }
-    decode(response, user_id, Some(command)).await
+    result
 }
 
 async fn decode(
     response: gloo_net::http::Response,
     user_id: &str,
     command: Option<&PublicSetSessionPreferenceRequest>,
+    observation: SessionIdentityObservation,
 ) -> Result<PublicSessionPreferenceResponse, CommandError> {
     let status = response.status();
-    if !response.ok() {
-        return Err(failure(&decoder::decode_error_code(response).await, status));
-    }
-    let result: PublicSessionPreferenceResponse = decoder::decode_success(response, |value| {
-        json_has_exact_keys(value, &["user_id", "duration_seconds", "version", "expires_at"])
-            && value.get("version").and_then(Value::as_i64).is_some_and(|version| version > 0)
-            && value
-                .get("duration_seconds")
-                .is_some_and(|value| value.is_null() || value.as_i64().is_some())
-    })
-    .await
-    .map_err(|_| failure("invalid_response", status))?;
-    if result.user_id != user_id
-        || !valid_uuid(&result.user_id)
+    let result: PublicSessionPreferenceResponse =
+        decode_account_identity_response(response, command.map(|_| user_id), |value| {
+            json_has_exact_keys(value, &["user_id", "duration_seconds", "version", "expires_at"])
+                && value.get("version").and_then(Value::as_i64).is_some_and(|version| version > 0)
+                && value
+                    .get("duration_seconds")
+                    .is_some_and(|value| value.is_null() || value.as_i64().is_some())
+        })
+        .await?;
+    if !valid_uuid(&result.user_id)
         || !valid_session_duration(result.duration_seconds)
         || !result
             .expires_at
             .as_deref()
             .is_none_or(|value| auction_time::Timestamp::parse_from_rfc3339(value).is_ok())
         || command.is_some_and(|command| {
-            result.duration_seconds != command.duration_seconds
+            result.user_id != user_id
+                || result.duration_seconds != command.duration_seconds
                 || Some(result.version) != command.expected_version.checked_add(1)
                 || result.expires_at.is_none() != command.duration_seconds.is_none()
         })
     {
         return Err(failure("invalid_response", status));
     }
+    let identity = SessionIdentity::UserId(result.user_id.clone());
+    if command.is_some() {
+        publish_cookie_identity(identity);
+    } else {
+        observation.publish(identity);
+    }
+    if result.user_id != user_id {
+        return Err(failure("invalid_response", status));
+    }
     Ok(result)
 }
 
 fn failure(code: &str, status: u16) -> CommandError {
-    super::session::observe_public_session_failure(status, code);
     CommandError { code: code.to_owned(), status }
 }

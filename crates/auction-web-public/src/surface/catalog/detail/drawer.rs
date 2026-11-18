@@ -14,7 +14,10 @@ use super::price_history::DetailPriceHistoryDialog;
 use super::{CatalogDetailBid, CatalogDetailDialogContext, CatalogDetailInput, DetailWorld};
 use crate::api::{LotDetailItem, fetch_lot_detail};
 use crate::surface::catalog::actions::active_own_proxy;
-use crate::surface::catalog::command_scope::{CatalogAction, CommandDialogContext};
+use crate::surface::catalog::command_scope::{
+    CatalogAction, CommandDialogContext, CommandDialogInput,
+};
+use crate::surface::commands::CompetitionCommands;
 use crate::surface::watches::LotWatchButton;
 use crate::surface::{
     catalog_category_key, catalog_category_label, countdown_class, equipment_group_label,
@@ -75,6 +78,7 @@ pub(super) fn CatalogDetailDrawer(
     let CatalogDetailInput { row, bid, watchable } = input;
     // 只读入口不在命令宿主之下，此时出价入口必为 `Unavailable`，命令弹窗信号不会被用到。
     let command_dialog = try_use_context::<CommandDialogContext>().map(|context| context.0);
+    let commands = try_use_context::<CompetitionCommands>();
     let mut focus = use_signal(|| DetailFocus::Close);
     let mut history_open = use_signal(|| false);
     let mut price_history_open = use_signal(|| false);
@@ -106,7 +110,24 @@ pub(super) fn CatalogDetailDrawer(
     // 本人对该拍品的代理授权（上限、已用次数）；抽屉是它在目录里唯一的展示位置。
     let own_proxy = own_proxy(&bid).cloned();
     // 出价入口三态与行内操作栏一致：命令按钮（可禁用并说明原因）、登录链接或不渲染。
-    let bid_reason = detail_bid_reason(&bid).to_owned();
+    let pending = commands
+        .and_then(CompetitionCommands::current)
+        .and_then(|store| store.command(&row.lot_id));
+    let bid_reason = pending.as_ref().map_or_else(
+        || detail_bid_reason(&bid).to_owned(),
+        |command| command.status.entry_message(),
+    );
+    let bid = if pending.is_some()
+        && command_dialog.is_some()
+        && !matches!(bid, CatalogDetailBid::Command { disabled: false, .. })
+    {
+        CatalogDetailBid::Command {
+            input: Box::new(CommandDialogInput::recovery(&row)),
+            disabled: false,
+        }
+    } else {
+        bid
+    };
     let bid_entry = match bid {
         CatalogDetailBid::Command { input, disabled } => {
             // 入口打开哪个页签由操作栏投影决定：普通出价受阻的领先者进代理页签。
@@ -302,6 +323,10 @@ pub(super) fn CatalogDetailDrawer(
 fn DetailStats(lot_id: String) -> Element {
     let mut expanded = use_signal(|| false);
     let mut stats = use_resource(use_reactive((&lot_id,), move |(lot_id,)| async move {
+        #[cfg(test)]
+        if super::deep_link::tests::scripted() {
+            return Ok(Vec::new());
+        }
         fetch_lot_detail(lot_id).await.map(|page| match page.lot {
             Some(LotDetailItem::Live(lot)) => stat_rows(lot.equipment.stats),
             Some(LotDetailItem::Preview(lot)) => stat_rows(lot.equipment.stats),
