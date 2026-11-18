@@ -195,6 +195,7 @@ export function Blacklist(): JSX.Element {
 
 - 样式文件与类名沿用现有定义：共享设计变量与控制台外壳在 `auction-web-shared` 的 `style/`，各应用的规则在各自的 `assets/`。装配顺序固定为 base → surface → desktop → mobile → console。
 - 类名用小写连字符与 BEM，并带 `public-` 或 `admin-` 前缀；颜色、字号、间距只用共享变量。
+- Solid 版专属的样式放在各应用的 `src/styles/`，在入口里排在共用样式之后导入，规则写在 `@layer` 之外（因此优先于共用样式），只用共享变量、不改 DOM。目前有两处与 Rust 版有意不同、仅在手机断点生效：`web/public/src/styles/mobile-topbar.css`（顶栏改为单行应用栏）与 `mobile-bid-log.css`（出价记录的筛选区压成两行）。新增这类文件时在这里登记，并在文件头写明与 Rust 版的差别。
 - 译文是各应用 `i18n/` 下的五个 `.ftl` 文件（en、zh-CN、zh-TW、ja、ko），键集合一致，键名用连字符。译文只使用 Fluent 的平铺子集：每条消息占一行，写成 `键 = 文本`，文本里的占位只有 `{ $变量 }` 与字符串字面量 `{"…"}` 两种；加载器遇到子集之外的写法会拒绝整份译文。Public 默认 en，Admin 默认 zh-CN；偏好键 `hv.lang` 与 `hv.theme` 是固定契约。
 
 ## 禁止事项

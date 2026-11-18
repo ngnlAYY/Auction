@@ -5,6 +5,9 @@ import "../../../crates/auction-web-public/assets/public.css";
 import "../../../crates/auction-web-public/assets/desktop.css";
 import "../../../crates/auction-web-public/assets/mobile.css";
 import "../../../crates/auction-web-shared/style/console.css";
+// Solid 版专属的手机样式，排在共用样式之后；Rust 版不加载。
+import "./styles/mobile-topbar.css";
+import "./styles/mobile-bid-log.css";
 
 import { installErrorHook } from "@auction/web-shared/ui/bootstrap";
 import { render } from "@solidjs/web";

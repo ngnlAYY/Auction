@@ -1,0 +1,57 @@
+/*
+ * Solid 版专属：手机上的出价记录筛选区。
+ * 共用样式里它是“世界、场次各占一整行并带标签，再加一行场次标题与筛选框”，约占 250px；
+ * 这里压成两行：世界与场次并排，拍品筛选单独一行。场次标题与下拉框内容重复，改为只对读屏保留。
+ * Rust 版不加载本文件。规则写在层外，优先于共用样式的各个 @layer。
+ */
+@media screen and (max-width: 48rem) {
+  .public-auction-bid-log-page .public-auction-bid-log-controls {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    border-block-end: 0;
+  }
+
+  .public-auction-bid-log-page .public-auction-bid-log-controls label {
+    display: block;
+    min-inline-size: 0;
+    margin: 0;
+  }
+
+  /* 下拉框的当前选项已经说明了含义（“主世界”“第 5 期 · 已结算”），标签只对读屏保留。 */
+  .public-auction-bid-log-page .public-auction-bid-log-controls label > span,
+  .public-auction-bid-log-page .public-auction-bid-log-toolbar label,
+  .public-auction-bid-log-page .public-auction-bid-log-round-header {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    border: 0;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .public-auction-bid-log-page .public-auction-bid-log-controls select,
+  .public-auction-bid-log-page .public-auction-bid-log-toolbar input {
+    inline-size: 100%;
+    min-inline-size: 0;
+    min-block-size: var(--size-target);
+    margin: 0;
+  }
+
+  .public-auction-bid-log-page .public-auction-bid-log-heading {
+    display: block;
+    padding: 0 var(--space-3) var(--space-2);
+    border-block-start: 0;
+  }
+
+  .public-auction-bid-log-page .public-auction-bid-log-toolbar {
+    display: block;
+    inline-size: 100%;
+    margin: 0;
+    padding: 0;
+  }
+}
