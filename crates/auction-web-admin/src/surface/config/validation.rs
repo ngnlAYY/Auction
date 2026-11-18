@@ -1,5 +1,10 @@
 //! 配置表单的本地输入反馈；字段约束来自已渲染控件，服务端仍负责完整候选校验。
 
+#[cfg(any(target_arch = "wasm32", test))]
+use std::collections::BTreeMap;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+use std::{cell::RefCell, rc::Rc};
+
 use auction_web_shared::a11y::focus_element_by_id;
 use auction_web_shared::t;
 use dioxus::prelude::*;
@@ -12,8 +17,52 @@ pub(super) const COLOR_LEVEL_MAXIMUM: &str = "1000";
 #[derive(Clone, PartialEq)]
 pub(super) struct FieldIssue {
     pub(super) path: String,
-    pub(super) label: String,
-    pub(super) message: String,
+    kind: FieldIssueKind,
+}
+
+#[derive(Clone, PartialEq)]
+enum FieldIssueKind {
+    MailboxCount,
+    ColorLevel {
+        number: usize,
+        is_minimum: bool,
+        issue: NumberIssue,
+    },
+    #[cfg(any(target_arch = "wasm32", test))]
+    Number {
+        label_at_validation: String,
+        minimum: String,
+        maximum: String,
+        issue: NumberIssue,
+    },
+}
+
+impl FieldIssue {
+    fn text(&self, _control_label: Option<&str>) -> String {
+        let (label, message) = match &self.kind {
+            FieldIssueKind::MailboxCount => {
+                (t!("admin-runtime-section-mailboxes"), mailbox_count_error())
+            }
+            FieldIssueKind::ColorLevel { number, is_minimum, issue } => {
+                let field = if *is_minimum {
+                    t!("admin-runtime-color-level-min")
+                } else {
+                    t!("admin-runtime-color-level-max")
+                };
+                let context = t!("admin-runtime-color-rule", number: *number);
+                (
+                    t!("admin-runtime-field-context", context: context, field: field),
+                    issue.message(COLOR_LEVEL_MINIMUM, COLOR_LEVEL_MAXIMUM),
+                )
+            }
+            #[cfg(any(target_arch = "wasm32", test))]
+            FieldIssueKind::Number { label_at_validation, minimum, maximum, issue } => (
+                _control_label.unwrap_or(label_at_validation).to_owned(),
+                issue.message(minimum, maximum),
+            ),
+        };
+        format!("{label}: {message}")
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -23,7 +72,7 @@ pub(super) fn field_id(path: &str) -> String {
     format!("runtime-field-{}", path.replace('.', "-"))
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub(super) enum NumberIssue {
     Integer,
     Range,
@@ -58,14 +107,25 @@ pub(super) fn color_level_path(row_id: usize, bound: &str) -> String {
     format!("equipment_colors.rules.{row_id}.level.{bound}")
 }
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(super) struct NumberControl {
+    pub(super) path: String,
+    pub(super) minimum: String,
+    pub(super) maximum: String,
+    pub(super) label: String,
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[derive(Clone, Default)]
+pub(super) struct NumberDocument(pub(super) Rc<RefCell<Vec<NumberControl>>>);
+
 /// 历史值可以就地标错。摘要只拦截编辑后的输入，完整候选仍由后端校验。
 pub(super) fn collect_issues(form: &RuntimeConfigForm) -> Vec<FieldIssue> {
     let mut issues = Vec::new();
     if form.edited_mailboxes_exceed_limit() {
         issues.push(FieldIssue {
             path: "dashboard_mailboxes".to_owned(),
-            label: t!("admin-runtime-section-mailboxes"),
-            message: mailbox_count_error(),
+            kind: FieldIssueKind::MailboxCount,
         });
     }
     for (index, rule) in form.equipment_colors().iter().enumerate() {
@@ -77,25 +137,48 @@ pub(super) fn collect_issues(form: &RuntimeConfigForm) -> Vec<FieldIssue> {
                 continue;
             }
             if let Some(issue) = number_issue(input, COLOR_LEVEL_MINIMUM, COLOR_LEVEL_MAXIMUM) {
-                let field = if bound == "min" {
-                    t!("admin-runtime-color-level-min")
-                } else {
-                    t!("admin-runtime-color-level-max")
-                };
                 issues.push(FieldIssue {
                     path: color_level_path(rule.row_id, bound),
-                    label: t!("admin-runtime-field-context", context: t!("admin-runtime-color-rule", number: index + 1), field: field),
-                    message: issue.message(COLOR_LEVEL_MINIMUM, COLOR_LEVEL_MAXIMUM),
+                    kind: FieldIssueKind::ColorLevel {
+                        number: index + 1,
+                        is_minimum: bound == "min",
+                        issue,
+                    },
                 });
             }
         }
     }
-    // 静态路径沿用控件的 min/max 与标签，避免另维护数值字段清单。
+    #[cfg(any(target_arch = "wasm32", test))]
+    visit_number_controls(|path, minimum, maximum, label| {
+        if let Some(input) = form.edited_input(path)
+            && let Some(issue) = number_issue(input, minimum, maximum)
+        {
+            issues.push(FieldIssue {
+                path: path.to_owned(),
+                kind: FieldIssueKind::Number {
+                    label_at_validation: label(),
+                    minimum: minimum.to_owned(),
+                    maximum: maximum.to_owned(),
+                    issue,
+                },
+            });
+        }
+    });
+    issues
+}
+
+/// 沿用已挂载控件的范围和标签；只在确认有错误后读取其完整分组名。
+#[cfg(any(target_arch = "wasm32", test))]
+fn visit_number_controls(mut visit: impl FnMut(&str, &str, &str, &dyn Fn() -> String)) {
     #[cfg(target_arch = "wasm32")]
-    if let Some(document) = web_sys::window().and_then(|window| window.document())
-        && let Ok(fields) = document.query_selector_all("[data-runtime-number]")
     {
         use wasm_bindgen::JsCast;
+        let Some(fields) = web_sys::window()
+            .and_then(|window| window.document())
+            .and_then(|document| document.query_selector_all("[data-runtime-number]").ok())
+        else {
+            return;
+        };
         for index in 0..fields.length() {
             let Some(field) =
                 fields.item(index).and_then(|node| node.dyn_into::<web_sys::Element>().ok())
@@ -105,20 +188,35 @@ pub(super) fn collect_issues(form: &RuntimeConfigForm) -> Vec<FieldIssue> {
             if field.has_attribute("disabled") {
                 continue;
             }
-            let Some(path) = field.get_attribute("data-runtime-number") else { continue };
-            let Some(input) = form.edited_input(&path) else { continue };
-            let minimum = field.get_attribute("min").unwrap_or_default();
-            let maximum = field.get_attribute("max").unwrap_or_default();
-            if let Some(issue) = number_issue(input, &minimum, &maximum) {
-                issues.push(FieldIssue {
-                    label: control_label(&field, &path),
-                    path,
-                    message: issue.message(&minimum, &maximum),
-                });
+            if let Some(path) = field.get_attribute("data-runtime-number") {
+                let minimum = field.get_attribute("min").unwrap_or_default();
+                let maximum = field.get_attribute("max").unwrap_or_default();
+                visit(&path, &minimum, &maximum, &|| control_label(&field, &path));
             }
         }
     }
-    issues
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    if let Some(document) = try_consume_context::<NumberDocument>() {
+        for field in document.0.borrow().iter() {
+            visit(&field.path, &field.minimum, &field.maximum, &|| field.label.clone());
+        }
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn current_number_label(path: &str) -> Option<String> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let document = web_sys::window()?.document()?;
+        let field = document.get_element_by_id(&field_id(path))?;
+        Some(control_label(&field, path))
+    }
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    {
+        let document = try_consume_context::<NumberDocument>()?;
+        let controls = document.0.borrow();
+        controls.iter().find(|control| control.path == path).map(|control| control.label.clone())
+    }
 }
 
 /// 将所属分组带入字段名称，避免多个“启用”或“超时”在摘要和变更清单里无法区分。
@@ -168,6 +266,39 @@ pub(super) fn focus_summary() {
 
 #[component]
 pub(super) fn ErrorSummary(issues: Vec<FieldIssue>) -> Element {
+    #[cfg(any(target_arch = "wasm32", test))]
+    let numbers = {
+        let mut numbers = use_signal(BTreeMap::new);
+        use_effect(use_reactive((&issues,), move |(issues,)| {
+            // 控件与祖先标题先完成语言更新，再读取实际显示的层级名称与同语种的错误正文。
+            let next = issues
+                .iter()
+                .filter_map(|issue| {
+                    if !matches!(issue.kind, FieldIssueKind::Number { .. }) {
+                        return None;
+                    }
+                    let label = current_number_label(&issue.path);
+                    Some((issue.path.clone(), (issue.kind.clone(), issue.text(label.as_deref()))))
+                })
+                .collect();
+            if *numbers.peek() != next {
+                numbers.set(next);
+            }
+        }));
+        numbers
+    };
+    #[cfg(any(target_arch = "wasm32", test))]
+    let numbers = numbers.read();
+    let rows = issues.into_iter().map(|issue| {
+        #[cfg(any(target_arch = "wasm32", test))]
+        if let Some((kind, text)) = numbers.get(&issue.path)
+            && *kind == issue.kind
+        {
+            return (issue.path, text.clone());
+        }
+        let text = issue.text(None);
+        (issue.path, text)
+    });
     rsx! {
         section {
             id: "runtime-errors", class: "admin-config-errors", tabindex: "-1",
@@ -175,12 +306,12 @@ pub(super) fn ErrorSummary(issues: Vec<FieldIssue>) -> Element {
             onmounted: move |_| focus_summary(),
             h3 { id: "runtime-errors-title", {t!("admin-runtime-field-errors")} }
             ul {
-                for issue in issues {
-                    li { key: "{issue.path}",
+                for (path, message) in rows {
+                    li { key: "{path}",
                         a {
-                            href: "#{field_id(&issue.path)}",
-                            onclick: move |event| { event.prevent_default(); focus_field(&issue.path); },
-                            "{issue.label}: {issue.message}"
+                            href: "#{field_id(&path)}",
+                            onclick: move |event| { event.prevent_default(); focus_field(&path); },
+                            "{message}"
                         }
                     }
                 }

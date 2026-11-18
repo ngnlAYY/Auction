@@ -268,6 +268,13 @@
     display: grid;
   }
 
+  .console-ticker .public-shell__nav--scrollable {
+    /* 绝对定位的包含块是顶栏，100% 包含展开时多出的偏好设置行。 */
+    max-block-size: calc(var(--visual-viewport-height) - 100% - var(--safe-area-bottom));
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+  }
+
   .public-shell__nav a {
     display: flex;
     align-items: center;
@@ -806,25 +813,43 @@
     block-size: auto;
   }
 
-  .public-shell
-    .public-auction-catalog__table
-    tbody
-    td:is(
+  /* 不支持 :has() 的浏览器沿用原来的手机列布局。 */
+  @supports not selector(:has(*)) {
+    .public-shell .public-auction-catalog__table tbody td:is(
       .public-auction-catalog__avg-roll,
       .public-auction-catalog__level,
       .public-auction-catalog__primary-attributes,
       .public-auction-catalog__seller,
       .public-auction-catalog__remaining
+    ),
+    .public-shell .public-auction-catalog__table--preview tbody td:is(
+      .public-auction-catalog__status,
+      .public-auction-catalog__participant-cell
     ) {
-    display: none;
+      display: none;
+    }
   }
 
-  /* 预览阶段每行状态都是 Pending、Leader 都是空；手机卡片省掉这两格，桌面表格保留。 */
-  .public-shell
-    .public-auction-catalog__table--preview
-    tbody
-    td:is(.public-auction-catalog__status, .public-auction-catalog__participant-cell) {
-    display: none;
+  /* 只有卡片已有其它可见列时才省略次要字段，显式 [hidden] 仍由表格负责。 */
+  @supports selector(:has(*)) {
+    .public-shell .public-auction-catalog__table > tbody > tr:has(> td:not(
+      [hidden],
+      .public-auction-catalog__avg-roll,
+      .public-auction-catalog__level,
+      .public-auction-catalog__primary-attributes,
+      .public-auction-catalog__seller,
+      .public-auction-catalog__remaining,
+      .public-auction-catalog__table--preview :is(.public-auction-catalog__status, .public-auction-catalog__participant-cell)
+    )) > td:is(
+      .public-auction-catalog__avg-roll,
+      .public-auction-catalog__level,
+      .public-auction-catalog__primary-attributes,
+      .public-auction-catalog__seller,
+      .public-auction-catalog__remaining,
+      .public-auction-catalog__table--preview :is(.public-auction-catalog__status, .public-auction-catalog__participant-cell)
+    ) {
+      display: none;
+    }
   }
 
   .public-auction-catalog__table--preview .public-auction-catalog__amount {

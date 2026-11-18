@@ -5,7 +5,11 @@ mod state;
 
 pub(crate) use state::{CatalogColumn, CatalogLayout, CatalogVisibility};
 
+#[cfg(target_arch = "wasm32")]
+use auction_web_shared::a11y::bind_document_escape;
 use auction_web_shared::a11y::focus_element_by_id;
+#[cfg(any(target_arch = "wasm32", test))]
+use auction_web_shared::a11y::{EscapeUnsubscribe, use_document_escape};
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
@@ -27,6 +31,15 @@ pub(crate) fn CatalogColumnsMenu(
     let all = usize::try_from(shown).is_ok_and(|shown| shown == layout.columns().len());
     let last_column = shown == 1;
     let mut toggle = open;
+    let dismiss = use_callback(move |()| {
+        if !*open.peek() {
+            return false;
+        }
+        close(open);
+        true
+    });
+    #[cfg(any(target_arch = "wasm32", test))]
+    use_document_escape(move || *open.read(), move || attach_menu_escape(dismiss));
 
     rsx! {
         div { class: "public-catalog-columns-menu",
@@ -40,17 +53,16 @@ pub(crate) fn CatalogColumnsMenu(
                 title: t!("catalog-columns-settings"),
                 onclick: move |_| toggle.set(!toggle()),
                 onkeydown: move |event| {
-                    if open() && event.key() == Key::Escape {
+                    if event.key() == Key::Escape && dismiss.call(()) {
                         event.prevent_default();
                         event.stop_propagation();
-                        close(open);
                     }
                 },
                 ColumnsIcon {}
             }
             if open() {
                 // 透明遮罩接住面板外的点击。
-                div { class: "public-catalog-columns__backdrop", onclick: move |_| close(open) }
+                div { class: "public-catalog-columns__backdrop", onclick: move |_| { dismiss.call(()); } }
                 div {
                     id: PANEL_ID,
                     class: "public-catalog-columns",
@@ -58,10 +70,9 @@ pub(crate) fn CatalogColumnsMenu(
                     aria_labelledby: TITLE_ID,
                     "aria-description": t!("catalog-columns-hint"),
                     onkeydown: move |event| {
-                        if event.key() == Key::Escape {
+                        if event.key() == Key::Escape && dismiss.call(()) {
                             event.prevent_default();
                             event.stop_propagation();
-                            close(open);
                         }
                     },
                     strong { id: TITLE_ID, class: "public-catalog-columns__title", {t!("catalog-columns")} }
@@ -179,5 +190,92 @@ impl CatalogColumn {
 
 fn close(mut open: Signal<bool>) {
     open.set(false);
-    focus_element_by_id(TOGGLE_ID);
+    focus_menu_control(TOGGLE_ID);
+}
+
+fn focus_menu_control(id: &'static str) {
+    focus_element_by_id(id);
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    if let Some(browser) = try_consume_context::<std::rc::Rc<tests::MenuBrowser>>() {
+        browser.focus.set(Some(id));
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn attach_menu_escape(dismiss: Callback<(), bool>) -> Option<EscapeUnsubscribe> {
+    let on_escape = move || dismiss.call(());
+    #[cfg(target_arch = "wasm32")]
+    {
+        // 在冒泡阶段接手，给获焦控件和上层模态先处理 Escape。
+        bind_document_escape(web_sys::window()?.document()?, false, on_escape)
+    }
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    {
+        let browser = try_consume_context::<std::rc::Rc<tests::MenuBrowser>>()?;
+        browser.escape.replace(Some(std::rc::Rc::new(on_escape)));
+        Some(Box::new(move || {
+            browser.escape.take();
+        }))
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use std::cell::{Cell, RefCell};
+    use std::rc::Rc;
+
+    use dioxus::core::{AttributeValue, Mutation};
+    use dioxus::prelude::*;
+
+    use super::{CatalogColumnsMenu, CatalogLayout, CatalogVisibility, TOGGLE_ID};
+    use crate::surface::{
+        dispatch_page_event, page_event_target, page_test_contexts, run_page_events, settle_page,
+    };
+
+    #[derive(Default)]
+    pub(super) struct MenuBrowser {
+        pub(super) escape: RefCell<Option<Rc<dyn Fn() -> bool>>>,
+        pub(super) focus: Cell<Option<&'static str>>,
+    }
+
+    fn menu() -> Element {
+        page_test_contexts();
+        let visibility = use_signal(CatalogVisibility::default);
+        rsx! { CatalogColumnsMenu { visibility, layout: CatalogLayout::Live } }
+    }
+
+    #[test]
+    fn outside_escape_closes_the_open_menu_and_restores_the_toggle() {
+        run_page_events(
+            module_path!(),
+            "outside_escape_closes_the_open_menu_and_restores_the_toggle",
+            || {
+                let browser = Rc::new(MenuBrowser::default());
+                let mut dom = VirtualDom::new(menu).with_root_context(Rc::clone(&browser));
+                let initial = dom.rebuild_to_vec().edits;
+                settle_page(&mut dom);
+                assert!(browser.escape.borrow().is_none());
+                let toggle = page_event_target(&initial, "click", "aria-expanded", "false");
+                dispatch_page_event(&dom, "click", toggle, "");
+                settle_page(&mut dom);
+
+                // 文档事件不经过面板或入口；替身只转发当前安装的监听器。
+                let escape = browser.escape.borrow().clone().expect("面板展开时监听文档 Escape");
+                assert!(escape());
+                let closed = settle_page(&mut dom);
+                assert!(closed.iter().any(|edit| matches!(edit,
+                Mutation::SetAttribute { id, name: "aria-expanded", value: AttributeValue::Text(value), .. }
+                    if *id == toggle && value == "false"
+            )));
+                assert_eq!(browser.focus.get(), Some(TOGGLE_ID));
+                assert!(browser.escape.borrow().is_none());
+                assert!(!escape());
+                dispatch_page_event(&dom, "click", toggle, "");
+                settle_page(&mut dom);
+                assert!(browser.escape.borrow().is_some());
+                drop(dom);
+                assert!(browser.escape.borrow().is_none());
+            },
+        );
+    }
 }

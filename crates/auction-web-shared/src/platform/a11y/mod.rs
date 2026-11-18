@@ -1,7 +1,13 @@
 //! 浏览器端通用无障碍交互。
 //! 不含 surface 业务语义，只处理所有 `aria-modal` 弹窗都需要的键盘焦点、关闭后恢复和
 //! 背景滚动边界。监听在 surface 根壳层挂载一次，始终把最内层弹窗视为当前焦点范围。
-//! 另提供按元素 ID 移动焦点的原语，供菜单收起、校验失败等场景把焦点交给明确的控件。
+//! 另提供文档级 Escape 与按元素 ID 移动焦点的原语，供菜单收起、校验失败等场景使用。
+
+mod escape;
+
+#[cfg(target_arch = "wasm32")]
+pub use escape::bind_document_escape;
+pub use escape::{EscapeUnsubscribe, use_document_escape};
 
 #[cfg(target_arch = "wasm32")]
 use std::{
@@ -310,9 +316,13 @@ impl DialogFocusTrapGuard {
     }
 }
 
+/// 自绘模态的语义选择器。原生对话框的焦点循环由浏览器管理。
+#[cfg(any(target_arch = "wasm32", test))]
+pub(crate) const ARIA_MODAL_SELECTOR: &str = "[role=\"dialog\"][aria-modal=\"true\"]";
+
 #[cfg(target_arch = "wasm32")]
 fn top_dialog(document: &web_sys::Document) -> Option<web_sys::Element> {
-    let dialogs = document.query_selector_all("[role=\"dialog\"][aria-modal=\"true\"]").ok()?;
+    let dialogs = document.query_selector_all(ARIA_MODAL_SELECTOR).ok()?;
     dialogs.item(dialogs.length().checked_sub(1)?)?.dyn_into::<web_sys::Element>().ok()
 }
 
@@ -332,6 +342,14 @@ fn is_focusable(element: &web_sys::HtmlElement) -> bool {
         && element.get_client_rects().length() > 0
         && web_sys::window().and_then(|window| window.get_computed_style(element).ok().flatten())
             .is_none_or(|style| !matches!(style.get_property_value("visibility").ok().as_deref(), Some("hidden" | "collapse")))
+}
+
+/// 聚焦仍连接、可见且可用的控件。
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn focus_control(element: web_sys::Element) {
+    if let Some(control) = element.dyn_into::<web_sys::HtmlElement>().ok().filter(is_focusable) {
+        let _ = control.focus();
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -430,5 +448,6 @@ fn preferred_dialog_focus(dialog: &web_sys::Element) -> Option<web_sys::HtmlElem
     dialog.clone().dyn_into::<web_sys::HtmlElement>().ok()
 }
 
-#[cfg(target_arch = "wasm32")]
-const FOCUSABLE_SELECTOR: &str = "a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex=\"-1\"]),[contenteditable=\"true\"]";
+/// 有资格承接焦点的原生控件和显式可聚焦元素。
+#[cfg(any(target_arch = "wasm32", test))]
+pub(crate) const FOCUSABLE_SELECTOR: &str = "a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex=\"-1\"]),[contenteditable=\"true\"]";

@@ -1582,6 +1582,7 @@ admin-pause-uncertain = The result is unknown. Retry the same command unchanged;
 admin-pause-retry = Retry unchanged
 admin-pause-done = Accepted by the database; all roles apply it within about 5 seconds.
 
+boot-error = The application encountered an error. Refresh the page to try again.
 stale-build-notice = A new version has been deployed. Refresh this page to load it; your current input is not submitted automatically.
 stale-build-refresh = Refresh page
 

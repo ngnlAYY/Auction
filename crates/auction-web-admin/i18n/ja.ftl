@@ -1578,6 +1578,7 @@ admin-pause-uncertain = 送信結果が不明です。新しいコマンドを�
 admin-pause-retry = 同じ内容で再試行
 admin-pause-done = データベースに受理されました。各ロールには約 5 秒以内に反映されます。
 
+boot-error = ページでエラーが発生しました。再読み込みしてください。
 stale-build-notice = 新しいバージョンが公開されました。このページを再読み込みしてください。現在の入力は自動送信されません。
 stale-build-refresh = ページを再読み込み
 

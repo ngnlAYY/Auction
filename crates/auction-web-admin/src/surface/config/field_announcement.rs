@@ -54,11 +54,20 @@ impl FieldAnnouncer {
 
     /// 让同一条文案的连续两次播报各自产生内容更新。
     pub(in crate::surface) fn announce(self, message: String) {
-        self.schedule(None, message, 50);
+        self.schedule(None, move || message, 50);
     }
 
     /// 离焦时先让读屏软件读出接收焦点的控件。
     pub(in crate::surface) fn announce_on_blur(self, field_id: &str, message: String) {
+        self.announce_localized_on_blur(field_id, move || message);
+    }
+
+    /// 焦点播报的等待期内语言可能切换；保留字段错误，在真正播报前翻译。
+    pub(in crate::surface::config) fn announce_localized_on_blur(
+        self,
+        field_id: &str,
+        message: impl FnOnce() -> String + 'static,
+    ) {
         self.schedule(Some(field_id), message, 500);
     }
 
@@ -73,22 +82,27 @@ impl FieldAnnouncer {
             self.clear();
             focus_error_field(field_id);
         } else {
-            self.schedule(Some(field_id), message, 50);
+            self.schedule(Some(field_id), move || message, 50);
         }
     }
 
-    fn schedule(mut self, field_id: Option<&str>, message: String, _delay_millis: u32) {
+    fn schedule(
+        mut self,
+        field_id: Option<&str>,
+        message: impl FnOnce() -> String + 'static,
+        _delay_millis: u32,
+    ) {
         self.clear();
         self.field.set(field_id.map(str::to_owned));
         #[cfg(any(target_arch = "wasm32", test))]
         {
             self.task.set(Some(spawn(async move {
                 wait_for_announcement(_delay_millis).await;
-                self.message.set(message);
+                self.message.set(message());
             })));
         }
         #[cfg(not(any(target_arch = "wasm32", test)))]
-        self.message.set(message);
+        self.message.set(message());
     }
 }
 

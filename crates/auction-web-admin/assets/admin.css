@@ -339,7 +339,7 @@
   font-size: var(--admin-text-note);
 }
 
-.admin-panel [role="alert"] {
+.admin-panel [role="alert"]:not(:where(.admin-shell__banner)) {
   color: var(--color-status-error);
 }
 
@@ -3785,6 +3785,19 @@
  * 表头排序按钮（.admin-sort-trigger）含有列名文本，不在打印时隐藏，仅隐藏排序箭头。 */
 
 @media print {
+  :root,
+  :root[data-theme] {
+    --color-input-bg: var(--color-surface);
+    --color-border-subtle: var(--color-border);
+    --color-bg-muted: var(--color-surface-raised);
+    --color-status-ok: var(--color-success);
+    --color-status-warn: var(--color-warning);
+    --color-status-error: var(--color-danger);
+    --color-status-ok-muted: transparent;
+    --color-status-warn-muted: transparent;
+    --color-status-error-muted: transparent;
+  }
+
   .admin-shell__nav,
   .admin-shell__nav-toggle,
   .admin-shell__banner,

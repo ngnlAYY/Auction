@@ -1579,6 +1579,7 @@ admin-pause-uncertain = 提交结果未知：请原样重试，不要新建命�
 admin-pause-retry = 原样重试
 admin-pause-done = 数据库已接受；各角色约 5 秒内生效。
 
+boot-error = 页面运行出现异常，请刷新页面重试。
 stale-build-notice = 站点已更新。请刷新此页面以载入新版本；当前输入不会被自动提交。
 stale-build-refresh = 刷新页面
 

@@ -81,7 +81,7 @@ pub(super) fn NumberInput(
                         && !issues.0.peek().iter().any(|issue| issue.path == path)
                     {
                         edit.set(Some(NumberEdit { issue: Some(issue), reported: true }));
-                        announcer.announce_on_blur(&field_id(&path), issue.message(minimum, maximum));
+                        announcer.announce_localized_on_blur(&field_id(&path), move || issue.message(minimum, maximum));
                     }
                 },
             }
@@ -96,10 +96,14 @@ pub(super) fn NumberInput(
 mod tests {
     use std::rc::Rc;
 
+    use auction_web_shared::i18n::{DEFAULT_ADMIN_LOCALE, build_bundle};
     use dioxus::core::Mutation;
     use dioxus::prelude::*;
+    use dioxus_i18n::prelude::i18n_bundle;
+    use unic_langid::langid;
 
     use super::NumberInput;
+    use crate::surface::ADMIN_LOCALE_CATALOG;
     use crate::surface::auctions::draft_page_tests::init_i18n;
     use crate::surface::config::field_announcement::{FieldLiveRegion, use_field_announcer};
     use crate::surface::config::test_form::{FormBrowser, dispatch};
@@ -160,5 +164,39 @@ mod tests {
                 corrected == "first"
             );
         }
+    }
+
+    #[test]
+    fn pending_number_announcement_uses_the_language_at_delivery() {
+        let browser = Rc::new(FormBrowser::default());
+        let mut dom = VirtualDom::new(number_pair).with_root_context(browser.clone());
+        let edits = dom.rebuild_to_vec().edits;
+        let (field, _) = text_attributes(&edits, "data-runtime-number")
+            .find(|(_, name)| *name == "second")
+            .unwrap();
+        dispatch(&dom, field, "input", "21");
+        dom.render_immediate_to_vec();
+        dispatch(&dom, field, "blur", "");
+        dom.render_immediate_to_vec();
+
+        dom.in_scope(ScopeId::APP, || {
+            let japanese = build_bundle(
+                &DEFAULT_ADMIN_LOCALE,
+                ADMIN_LOCALE_CATALOG.default_ftl,
+                &langid!("ja"),
+                Some(include_str!("../../../../i18n/ja.ftl")),
+            )
+            .unwrap();
+            i18n_bundle().set_bundle(japanese);
+        });
+        dom.render_immediate_to_vec();
+        browser.fire_timer();
+        let delivered = dom.render_immediate_to_vec().edits;
+        assert!(delivered.iter().any(|edit| matches!(edit,
+            Mutation::SetText { value, .. } if value.contains("0 から 20 までの整数")
+        )));
+        assert!(!delivered.iter().any(|edit| matches!(edit,
+            Mutation::SetText { value, .. } if value.contains("请输入")
+        )));
     }
 }

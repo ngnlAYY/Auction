@@ -40,7 +40,7 @@ pub(crate) fn Navigation(
         nav {
             id: "public-primary-navigation",
             class: if open {
-                "public-shell__nav public-shell__nav--open public-mobile"
+                "public-shell__nav public-shell__nav--open public-shell__nav--scrollable public-mobile"
             } else {
                 "public-shell__nav public-mobile"
             },

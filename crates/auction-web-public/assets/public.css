@@ -86,7 +86,7 @@
   }
 }
 
-.public-shell__nav a[aria-current="page"] {
+.public-shell__nav a[aria-current="page"]:not(:where(.public-shell__nav-account)) {
   color: var(--color-text);
   border-block-end: calc(2 * var(--border-width)) solid var(--color-accent);
 }
@@ -565,6 +565,19 @@
   display: inline;
   white-space: normal;
   overflow: visible;
+}
+
+@media screen and (max-width: 48rem), screen and (max-width: 64rem) and (pointer: coarse) {
+  .public-rules-page__document .shared-markdown__table-wrap {
+    display: block;
+    /* 间距仍参与正文的块级排版，滚动容器只包住表格本身。 */
+    margin-block: 0 var(--space-3);
+    overflow-x: auto;
+  }
+
+  .public-rules-page__document .shared-markdown__table-wrap > table {
+    margin-block: 0;
+  }
 }
 
 .public-rules-page__document tbody tr:last-child > td {
@@ -1765,6 +1778,10 @@
   outline-offset: -2px;
 }
 
+.public-outbid-preference__choices input:checked:focus-visible + label {
+  outline-color: var(--color-accent-contrast);
+}
+
 .public-outbid-preference__actions {
   margin-block-start: var(--space-1);
 }
@@ -2331,6 +2348,13 @@
 
 .public-auction-bid-log-leading {
   background: color-mix(in srgb, var(--color-live) 8%, transparent);
+}
+
+@media (forced-colors: active) {
+  .public-auction-bid-log-table > tbody > .public-auction-bid-log-leading {
+    outline: calc(2 * var(--border-width)) solid CanvasText;
+    outline-offset: calc(-2 * var(--border-width));
+  }
 }
 
 /* 金额与目录一致：正文字体的等宽数字、右对齐；拍品编号仍用等宽字体区分代码。 */
@@ -4354,7 +4378,13 @@ body:has(.public-catalog-detail) .public-toast-region {
 }
 
 .console-ticker .public-world-switcher > span {
-  display: none;
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  margin: -1px;
+  padding: 0;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
 }
 
 .console-ticker .public-shell__preferences :is(select, .language-picker, .theme-picker, .public-world-switcher) {

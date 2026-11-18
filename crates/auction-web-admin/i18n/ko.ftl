@@ -1578,6 +1578,7 @@ admin-pause-uncertain = 제출 결과를 알 수 없습니다. 새 명령을 만
 admin-pause-retry = 같은 내용으로 다시 시도
 admin-pause-done = 데이터베이스가 수락했습니다. 각 역할에 약 5초 이내에 반영됩니다.
 
+boot-error = 페이지에 오류가 발생했습니다. 새로고침해 주세요.
 stale-build-notice = 새 버전이 배포되었습니다. 이 페이지를 새로 고쳐 주세요. 현재 입력은 자동으로 제출되지 않습니다.
 stale-build-refresh = 페이지 새로 고침
 

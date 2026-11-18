@@ -1578,6 +1578,7 @@ admin-pause-uncertain = 提交結果未知：請原樣重試，不要建立新�
 admin-pause-retry = 原樣重試
 admin-pause-done = 資料庫已接受；各角色約 5 秒內生效。
 
+boot-error = 頁面發生錯誤，請重新整理頁面再試一次。
 stale-build-notice = 站點已更新。請重新整理此頁面以載入新版本；目前輸入不會被自動送出。
 stale-build-refresh = 重新整理頁面
 

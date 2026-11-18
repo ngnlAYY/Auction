@@ -43,6 +43,10 @@
 }
 /* 横屏手机仍使用顶部导航，给高密度管理表保留完整的可用宽度。 */
 @media screen and (max-width: 48rem), screen and (max-width: 64rem) and (pointer: coarse) {
+  .admin-console .console-body {
+    flex-direction: column;
+  }
+
   .admin-shell__nav-toggle {
     display: inline-flex;
     align-items: center;
@@ -52,14 +56,22 @@
   .admin-shell__nav--mobile {
     inline-size: 100%;
     flex: 0 0 auto;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
     border-inline-end: 0;
     border-block-end: var(--border-width) solid var(--color-border);
     padding-inline: max(var(--space-3), var(--safe-area-left)) max(var(--space-3), var(--safe-area-right));
   }
 
   .admin-shell__nav--mobile.admin-shell__nav--open {
+    display: block;
+  }
+
+  .admin-shell__nav--mobile > .console-nav {
     display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-shell__nav--mobile .console-nav__link[aria-current="page"] .console-nav__icon {
+    color: currentColor;
   }
 
   .admin-shell__nav a {
@@ -67,6 +79,7 @@
     align-items: center;
     min-inline-size: 0;
     min-block-size: var(--size-target);
+    block-size: auto;
     padding: var(--space-2) var(--space-3);
     overflow-wrap: anywhere;
   }

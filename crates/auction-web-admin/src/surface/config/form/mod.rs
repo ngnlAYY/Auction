@@ -438,8 +438,9 @@ mod tests {
     use auction_web_shared::i18n::{DEFAULT_ADMIN_LOCALE, build_bundle};
     use dioxus::core::{AttributeValue, ElementId, Mutation, ScopeId};
     use dioxus::prelude::*;
-    use dioxus_i18n::prelude::try_use_init_i18n_from_bundle;
+    use dioxus_i18n::prelude::{i18n_bundle, try_use_init_i18n_from_bundle};
     use serde_json::json;
+    use unic_langid::langid;
 
     use super::RuntimeConfigFields;
     use crate::api::fetch_admin_runtime_config;
@@ -448,6 +449,8 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     use crate::surface::config::test_form::{dispatch, listener};
     use crate::surface::config::validation::{self, FormIssues};
+    #[cfg(not(target_arch = "wasm32"))]
+    use crate::surface::config::validation::{NumberControl, NumberDocument};
 
     fn projection() -> ApiResponse<AdminRuntimeConfigResponse> {
         serde_json::from_str(include_str!(
@@ -491,6 +494,9 @@ mod tests {
                     event.prevent_default();
                     issues.set(validation::collect_issues(&form.read()));
                 },
+                if !issues.read().is_empty() {
+                    validation::ErrorSummary { issues: issues() }
+                }
                 RuntimeConfigFields { form, disabled: false, on_dirty: |_| {} }
             }
         }
@@ -510,6 +516,87 @@ mod tests {
                 _ => None,
             })
             .unwrap()
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn submitted_color_level_summary_retranslates_without_resubmitting() {
+        let mut response = projection();
+        response.data.document["equipment_colors"]["rules"] = json!([color_rule(0)]);
+        let model = read_form(response);
+        let mut dom = VirtualDom::new_with_props(EditorFields, EditorFieldsProps { model });
+        let initial = dom.rebuild_to_vec().edits;
+        let path = &validation::color_level_path(0, "min");
+        let input = field(&initial, path);
+        dispatch(&dom, input, "input", "1001");
+        let typing = dom.render_immediate_to_vec().edits;
+        assert!(!has_attribute(&typing, input, "aria-invalid", "true"));
+        dispatch(&dom, listener(&initial, "submit"), "submit", "");
+        let submitted = dom.render_immediate_to_vec().edits;
+        assert!(submitted.iter().any(|edit| matches!(edit, Mutation::CreateTextNode { value, .. }
+            if value.contains("规则 1 / 最低等级") && value.contains("请输入 0 至 1000 之间的整数"))));
+
+        switch_to_japanese(&dom);
+        let switched = dom.render_immediate_to_vec().edits;
+        assert!(switched.iter().any(|edit| matches!(edit, Mutation::SetText { value, .. }
+            if value.contains("ルール 1 / 最小レベル") && value.contains("0 から 1000 までの整数"))));
+        assert!(!has_attribute(&switched, input, "aria-invalid", "false"));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn switch_to_japanese(dom: &VirtualDom) {
+        dom.in_scope(ScopeId::APP, || {
+            let japanese = build_bundle(
+                &DEFAULT_ADMIN_LOCALE,
+                ADMIN_LOCALE_CATALOG.default_ftl,
+                &langid!("ja"),
+                Some(include_str!("../../../../i18n/ja.ftl")),
+            )
+            .unwrap();
+            i18n_bundle().set_bundle(japanese);
+        });
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn static_number_summary_starts_with_the_displayed_label_and_retranslates() {
+        let model = read_form(projection());
+        let browser = NumberDocument::default();
+        let mut dom = VirtualDom::new_with_props(EditorFields, EditorFieldsProps { model })
+            .with_root_context(browser.clone());
+        let initial = dom.rebuild_to_vec().edits;
+        let path = "equipment_filter.level.min";
+        let input = field(&initial, path);
+        let attr = |name| {
+            crate::surface::realtime::text_attributes(&initial, name)
+                .find_map(|(id, value)| (id == input).then_some(value))
+                .unwrap()
+                .to_owned()
+        };
+        let label = format!("装备收录 / 装备过滤 / {}", attr("data-runtime-label"));
+        browser.0.borrow_mut().push(NumberControl {
+            path: path.to_owned(),
+            minimum: attr("min"),
+            maximum: attr("max"),
+            label,
+        });
+        dispatch(&dom, input, "input", "1001");
+        let typing = dom.render_immediate_to_vec().edits;
+        assert!(!has_attribute(&typing, input, "aria-invalid", "true"));
+        dispatch(&dom, listener(&initial, "submit"), "submit", "");
+        let submitted = dom.render_immediate_to_vec().edits;
+        assert!(submitted.iter().any(|edit| matches!(edit, Mutation::CreateTextNode { value, .. }
+            if value.contains("装备收录 / 装备过滤 / 最低等级") && value.contains("请输入 0 至 1000 之间的整数"))));
+        assert!(
+            !submitted.iter().any(|edit| matches!(edit, Mutation::CreateTextNode { value, .. }
+            if value.contains(path)))
+        );
+
+        browser.0.borrow_mut()[0].label = "装備受付 / 装備フィルター / 最小レベル".to_owned();
+        switch_to_japanese(&dom);
+        let switched: Vec<_> = (0..4).flat_map(|_| dom.render_immediate_to_vec().edits).collect();
+        assert!(switched.iter().any(|edit| matches!(edit, Mutation::SetText { value, .. }
+            if value.contains("装備受付 / 装備フィルター / 最小レベル") && value.contains("0 から 1000 までの整数"))));
     }
 
     fn has_attribute(edits: &[Mutation], field: ElementId, name: &str, expected: &str) -> bool {

@@ -10,26 +10,6 @@
 @layer surface {
   .public-console,
   .admin-console {
-    color-scheme: light;
-    --color-bg: #f3f6fa;
-    --color-surface: #ffffff;
-    --color-surface-raised: #f6f8fb;
-    --color-border: #e3e8ef;
-    --color-border-strong: #cbd5e1;
-    --color-border-control: #8b9bb0;
-    --color-text: #101828;
-    --color-text-muted: #5b6676;
-    --color-accent: #2f6bff;
-    --color-accent-contrast: #ffffff;
-    --color-live: #0f9f8f;
-    --color-success: #0f9f8f;
-    --color-warning: #d97706;
-    --color-danger: #c2413b;
-    --color-link: #2f6bff;
-    --color-action-primary: #2f6bff;
-    --color-overlay: rgb(15 23 42 / 32%);
-    --shadow-1: 0 1px 2px rgb(15 23 42 / 6%);
-    --shadow-2: 0 10px 28px rgb(15 23 42 / 12%);
     --console-ticker-h: 2.25rem;
     /* 展开侧栏按整页宽度取 10%，随视口缩放；收起宽度仍是固定 3rem。 */
     --console-sidebar-w: 10%;
@@ -45,28 +25,55 @@
     background: var(--color-bg);
   }
 
-  :root[data-theme="dark"] .public-console,
-  :root[data-theme="dark"] .admin-console {
-    color-scheme: dark;
-    --color-bg: #0b1017;
-    --color-surface: #111823;
-    --color-surface-raised: #16202e;
-    --color-border: #223044;
-    --color-border-strong: #33455c;
-    --color-border-control: #52647a;
-    --color-text: #e7eef6;
-    --color-text-muted: #94a3b8;
-    --color-accent: #6ea8fe;
-    --color-accent-contrast: #0b1017;
-    --color-live: #34d399;
-    --color-success: #34d399;
-    --color-warning: #fbbf24;
-    --color-danger: #f87171;
-    --color-link: #7dd3fc;
-    --color-action-primary: #6ea8fe;
-    --color-overlay: rgb(3 7 12 / 58%);
-    --shadow-1: 0 1px 2px rgb(0 0 0 / 28%);
-    --shadow-2: 0 12px 32px rgb(0 0 0 / 35%);
+  /* 打印沿用 base.css 的纸面变量。 */
+  @media screen {
+    .public-console,
+    .admin-console {
+      color-scheme: light;
+      --color-bg: #f3f6fa;
+      --color-surface: #ffffff;
+      --color-surface-raised: #f6f8fb;
+      --color-border: #e3e8ef;
+      --color-border-strong: #cbd5e1;
+      --color-border-control: #8b9bb0;
+      --color-text: #101828;
+      --color-text-muted: #5b6676;
+      --color-accent: #2f6bff;
+      --color-accent-contrast: #ffffff;
+      --color-live: #0f9f8f;
+      --color-success: #0f9f8f;
+      --color-warning: #d97706;
+      --color-danger: #c2413b;
+      --color-link: #2f6bff;
+      --color-action-primary: #2f6bff;
+      --color-overlay: rgb(15 23 42 / 32%);
+      --shadow-1: 0 1px 2px rgb(15 23 42 / 6%);
+      --shadow-2: 0 10px 28px rgb(15 23 42 / 12%);
+    }
+
+    :root[data-theme="dark"] .public-console,
+    :root[data-theme="dark"] .admin-console {
+      color-scheme: dark;
+      --color-bg: #0b1017;
+      --color-surface: #111823;
+      --color-surface-raised: #16202e;
+      --color-border: #223044;
+      --color-border-strong: #33455c;
+      --color-border-control: #52647a;
+      --color-text: #e7eef6;
+      --color-text-muted: #94a3b8;
+      --color-accent: #6ea8fe;
+      --color-accent-contrast: #0b1017;
+      --color-live: #34d399;
+      --color-success: #34d399;
+      --color-warning: #fbbf24;
+      --color-danger: #f87171;
+      --color-link: #7dd3fc;
+      --color-action-primary: #6ea8fe;
+      --color-overlay: rgb(3 7 12 / 58%);
+      --shadow-1: 0 1px 2px rgb(0 0 0 / 28%);
+      --shadow-2: 0 12px 32px rgb(0 0 0 / 35%);
+    }
   }
 
   /* ===== 顶部 ticker ===== */
@@ -324,33 +331,33 @@
     transition: transform 160ms ease;
   }
 
-  :is(.public-console, .admin-console).is-sidebar-collapsed .console-nav__head,
-  :is(.public-console, .admin-console).is-sidebar-collapsed .console-nav__label,
-  :is(.public-console, .admin-console).is-sidebar-collapsed .console-nav__count,
-  :is(.public-console, .admin-console).is-sidebar-collapsed .console-collapse span {
+  :is(.public-console, .admin-console).is-sidebar-collapsed .console-sidebar .console-nav__head,
+  :is(.public-console, .admin-console).is-sidebar-collapsed .console-sidebar .console-nav__label,
+  :is(.public-console, .admin-console).is-sidebar-collapsed .console-sidebar .console-nav__count,
+  :is(.public-console, .admin-console).is-sidebar-collapsed .console-sidebar .console-collapse span {
     display: none;
   }
 
-  :is(.public-console, .admin-console).is-sidebar-collapsed .console-nav {
+  :is(.public-console, .admin-console).is-sidebar-collapsed .console-sidebar .console-nav {
     padding-inline: var(--space-2);
   }
 
-  :is(.public-console, .admin-console).is-sidebar-collapsed .console-nav__group + .console-nav__group {
+  :is(.public-console, .admin-console).is-sidebar-collapsed .console-sidebar .console-nav__group + .console-nav__group {
     padding-block-start: var(--space-2);
     border-block-start: var(--border-width) solid var(--color-border);
   }
 
-  :is(.public-console, .admin-console).is-sidebar-collapsed .console-nav__link {
+  :is(.public-console, .admin-console).is-sidebar-collapsed .console-sidebar .console-nav__link {
     justify-content: center;
     padding-inline: 0;
   }
 
-  :is(.public-console, .admin-console).is-sidebar-collapsed .console-collapse {
+  :is(.public-console, .admin-console).is-sidebar-collapsed .console-sidebar .console-collapse {
     justify-content: center;
     padding-inline: 0;
   }
 
-  :is(.public-console, .admin-console).is-sidebar-collapsed .console-collapse svg {
+  :is(.public-console, .admin-console).is-sidebar-collapsed .console-sidebar .console-collapse svg {
     transform: rotate(180deg);
   }
 
@@ -372,6 +379,9 @@
   }
 
   .console-skip:focus-visible {
+    position: fixed;
+    inset-block-start: var(--safe-area-top);
+    z-index: var(--z-dialog);
     transform: translateY(0);
   }
 
@@ -434,6 +444,27 @@
     font-size: var(--text-xs);
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  @media print {
+    .console-ticker,
+    .console-sidebar,
+    .console-skip {
+      display: none;
+    }
+
+    .public-console,
+    .admin-console {
+      min-block-size: 0;
+    }
+
+    .console-body {
+      display: block;
+    }
+
+    .console-main {
+      padding: 0;
+    }
   }
 
   /* ===== 响应式 ===== */

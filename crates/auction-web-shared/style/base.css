@@ -261,11 +261,9 @@ button:disabled {
   border-color: var(--color-accent);
 }
 
-/* 部署后旧页面的刷新提示：固定在顶部，不遮挡页面内容也不自动重载。 */
+/* 刷新提示留在页首文档流中，键盘回到刷新按钮时在顶栏上方显示。 */
 .shared-stale-build {
-  position: sticky;
-  inset-block-start: 0;
-  z-index: var(--z-float);
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -276,6 +274,10 @@ button:disabled {
   color: var(--color-text);
   background: var(--color-surface-raised);
   font-size: var(--text-sm);
+}
+
+.shared-stale-build:focus-within {
+  z-index: var(--z-dialog);
 }
 
 .shared-stale-build__message {
@@ -867,6 +869,7 @@ table {
 
   /* 弹窗遮罩与悬浮 tooltip 不属于纸面内容。 */
   .ui-dialog,
+  .shared-stale-build,
   .shared-truncated-text__tooltip,
   .ui-truncated-text__tooltip {
     display: none !important;
