@@ -48,7 +48,13 @@ function hasClassNames(value: JSX.ClassValue): boolean {
   return Object.entries(value).some(([name, enabled]) => enabled === true && name.trim() !== "");
 }
 
-/** 客户端导航链接。 */
+/**
+ * 客户端导航链接。
+ *
+ * 当前页判定把 href 与 Router 的 currentLocationString() 比较；该快照包含地址栏实际的
+ * pathname + search + hash，并会在应用绕过 Router 直接写 History 后经
+ * notifyLocationWritten() 刷新。因此 href 与地址栏完全一致才算当前页，与 Dioxus Link 相同。
+ */
 export function Link(props: LinkProps): JSX.Element {
   const router = useRouter();
   const active = createValueMemo(() => props.href === router.currentLocationString());

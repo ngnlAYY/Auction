@@ -4,6 +4,7 @@ export type { Router, RouterOptions } from "./context";
 export { createRouter, RouterContext, useRouter } from "./context";
 export type { LinkProps } from "./link";
 export { Link } from "./link";
+export { notifyLocationWritten } from "./location-notice";
 export type {
   RouteComponentPage,
   RouteLazyPage,

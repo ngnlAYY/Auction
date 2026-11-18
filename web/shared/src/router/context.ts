@@ -1,11 +1,13 @@
 // 路由对象与上下文：维护当前匹配和实际地址快照，并提供 push/replace/goBack。
-// 当前路由只在初始化、push、replace 与 popstate 时更新；直接改 History API 不通知本模块。
+// 当前路由只在初始化、push、replace 与 popstate 时更新；绕过 Router 的 History 写入
+// 只能经 notifyLocationWritten() 刷新地址快照，不能改变当前匹配。
 
-import { createContext, useContext } from "solid-js";
+import { createContext, onCleanup, useContext } from "solid-js";
 
 import { createCell } from "../reactive/cell";
 import type { ScrollPosition } from "./history";
 import { createWebHistory } from "./history";
+import { watchLocationWritten } from "./location-notice";
 import type { RouteDefinition, RouteMatch } from "./pattern";
 import { compileRoutes, isInternalHref, resolveRoute } from "./pattern";
 
@@ -14,8 +16,9 @@ export interface Router {
   /** 响应式读取当前匹配；未命中时返回 not-found 与解码后的路径段。 */
   current(): RouteMatch;
   /**
-   * 响应式读取路由最近一次更新（初始化、push、replace、popstate）时的实际地址，
-   * 内容为 pathname + search + hash。其他模块直接改 History 时本值不更新。
+   * 响应式读取地址栏当前快照，内容为 pathname + search + hash。
+   * 路由初始化、push、replace、popstate 与直接写 History 后调用 notifyLocationWritten()
+   * 都会刷新本值；直接写 History 却不通知时保持旧快照。
    */
   currentLocationString(): string;
   /** 新增历史记录并同步当前路由。 */
@@ -50,7 +53,8 @@ function navigateExternal(href: string): void {
  *
  * 初始化按 Dioxus 的规则解析当前地址；规范路由串与地址不同时执行一次 replace，
  * 因此未声明的查询参数与 hash 会在初始化时被规范化掉，应用层需要自行保存初始查询快照。
- * 之后只有 push/replace/popstate 会重新读取地址。
+ * 当前匹配之后只在 push/replace/popstate 时重新解析；地址快照还可由
+ * notifyLocationWritten() 单独刷新，但不会因此重新匹配。
  */
 export function createRouter(options: RouterOptions): Router {
   const routes = compileRoutes(options.routes);
@@ -70,6 +74,11 @@ export function createRouter(options: RouterOptions): Router {
   const initial = resolveRoute(routes, browserHistory.currentRoute());
   const currentMatch = createCell(initial.match);
   const currentLocation = createCell(browserHistory.currentRoute());
+  // 应用层写查询参数不经过路由匹配；通知只同步地址快照，让 Link 的当前页判定跟随地址栏。
+  const stopWatchingLocation = watchLocationWritten(() => {
+    currentLocation.set(browserHistory.currentRoute());
+  });
+  onCleanup(stopWatchingLocation);
 
   const updateFromLocation = (): void => {
     navigationVersion += 1;

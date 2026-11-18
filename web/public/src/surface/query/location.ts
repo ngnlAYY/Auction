@@ -1,6 +1,7 @@
 // 地址栏查询读取、首次地址快照与位置变化版本上下文。
 
 import { type Cell, createCell } from "@auction/web-shared/reactive/cell";
+import { notifyLocationWritten } from "@auction/web-shared/router";
 import { createContext } from "solid-js";
 
 import { type PublicBoardQuery, publicBoardQueryDefault } from "./board";
@@ -67,6 +68,7 @@ export function readPublicQuery(initial: InitialPublicSearch | null = null): Pub
         }
         history.replaceState(state, "", `${pathname}${initialSearch}${hash}`);
         search = initialSearch;
+        notifyLocationWritten();
       } catch {
         // 地址栏不可写时保持当前空 query，与 Rust 忽略 replace 失败一致。
       }
@@ -156,6 +158,7 @@ export class InitialPublicLocation {
         // state 读取失败时 Rust 使用 null，但仍清理地址栏。
       }
       history.replaceState(state, "", url);
+      notifyLocationWritten();
     } catch {
       // Rust 明确忽略清理 Router 空 query 标记时的地址栏写入失败。
     }
