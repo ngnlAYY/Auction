@@ -6,16 +6,16 @@ use auction_contracts::PublicSetLotWatchRequest;
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
-use super::{WatchCommand, WatchRevision, WatchSubmit, current_user};
+use super::{WatchCommand, WatchRevision, WatchSubmit};
 use crate::api::set_lot_watch;
 use crate::surface::PublicCommandOwner;
-use crate::surface::PublicSessionResource;
+use crate::surface::commands::CommandSession;
 
 #[derive(Clone)]
 struct WatchCommandOwner {
     user_id: Option<String>,
     identity: Signal<Option<String>>,
-    session: PublicSessionResource,
+    session: CommandSession,
     revision: Signal<u64>,
     commands: Signal<BTreeMap<String, WatchCommand>>,
 }
@@ -27,7 +27,7 @@ pub(crate) fn use_watch_command_owner(user_id: Option<String>) -> Element {
     let mut owner = WatchCommandOwner {
         user_id,
         identity: use_context::<PublicCommandOwner>().0,
-        session: use_context::<PublicSessionResource>(),
+        session: use_context::<CommandSession>(),
         revision,
         commands: use_signal(BTreeMap::new),
     };
@@ -102,9 +102,7 @@ impl WatchCommandOwner {
                     (pending.payload.clone(), pending.uncertain)
                 }
                 None => {
-                    if *self.session.state().read() != UseResourceState::Ready
-                        || current_user(&self.session.read()) != Some(user_id.as_str())
-                    {
+                    if !self.session.can_submit_new() {
                         return;
                     }
                     (payload, false)

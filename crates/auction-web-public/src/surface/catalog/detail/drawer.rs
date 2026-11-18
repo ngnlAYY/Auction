@@ -13,6 +13,7 @@ use super::own_proxy::{DetailOwnProxy, own_proxy};
 use super::price_history::DetailPriceHistoryDialog;
 use super::{CatalogDetailBid, CatalogDetailDialogContext, CatalogDetailInput, DetailWorld};
 use crate::api::{LotDetailItem, fetch_lot_detail};
+use crate::surface::catalog::actions::active_own_proxy;
 use crate::surface::catalog::command_scope::{CatalogAction, CommandDialogContext};
 use crate::surface::watches::LotWatchButton;
 use crate::surface::{
@@ -105,10 +106,7 @@ pub(super) fn CatalogDetailDrawer(
     // 本人对该拍品的代理授权（上限、已用次数）；抽屉是它在目录里唯一的展示位置。
     let own_proxy = own_proxy(&bid).cloned();
     // 出价入口三态与行内操作栏一致：命令按钮（可禁用并说明原因）、登录链接或不渲染。
-    let bid_reason = match &bid {
-        CatalogDetailBid::Command { input, disabled: true } => input.blocked_reason.clone(),
-        _ => String::new(),
-    };
+    let bid_reason = detail_bid_reason(&bid).to_owned();
     let bid_entry = match bid {
         CatalogDetailBid::Command { input, disabled } => {
             // 入口打开哪个页签由操作栏投影决定：普通出价受阻的领先者进代理页签。
@@ -419,9 +417,52 @@ fn DetailCloseIcon() -> Element {
     }
 }
 
+fn detail_bid_reason(bid: &CatalogDetailBid) -> &str {
+    match bid {
+        CatalogDetailBid::Command { input, disabled }
+            if *disabled || active_own_proxy(input.proxy.as_ref()).is_some() =>
+        {
+            &input.blocked_reason
+        }
+        _ => "",
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::stat_value_label;
+    use super::{detail_bid_reason, stat_value_label};
+    use crate::surface::catalog::actions::tests::waiting_proxy;
+    use crate::surface::catalog::command_scope::{CatalogAction, CommandDialogInput};
+    use crate::surface::catalog::detail::CatalogDetailBid;
+
+    #[test]
+    fn a_waiting_proxy_has_a_visible_reason_with_an_enabled_management_entry() {
+        let proxy = waiting_proxy();
+        let mut input = Box::new(CommandDialogInput {
+            lot_id: proxy.lot_id.clone(),
+            lot_code: "S07".to_owned(),
+            lot_name: proxy.equipment.name.clone(),
+            action: CatalogAction::Proxy,
+            can_bid: true,
+            current_price: 110_000,
+            next_bid: 115_000,
+            lot_status: "live".to_owned(),
+            allow_slow: true,
+            proxy_default_mode: Some("slow".to_owned()),
+            ordinary_blocked: true,
+            leading: false,
+            blocked_reason: "现有代理授权说明".to_owned(),
+            proxy: Some(Ok(Some(proxy))),
+        });
+        assert_eq!(
+            detail_bid_reason(&CatalogDetailBid::Command { input: input.clone(), disabled: false }),
+            "现有代理授权说明",
+        );
+        input.proxy = Some(Ok(None));
+        assert!(
+            detail_bid_reason(&CatalogDetailBid::Command { input, disabled: false }).is_empty()
+        );
+    }
 
     #[test]
     fn stat_values_carry_base_and_roll_percent_in_parentheses() {

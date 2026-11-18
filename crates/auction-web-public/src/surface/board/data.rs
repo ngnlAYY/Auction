@@ -10,7 +10,7 @@ use auction_web_shared::{
 };
 use dioxus::prelude::*;
 
-use super::alignment::use_alignment_reread;
+use super::alignment::{AlignmentReread, use_alignment_reread};
 use super::navigation::preview_history_switch;
 use super::refresh::{refresh_public_reads, use_bid_refresh};
 use crate::api::CatalogLevelFilter;
@@ -22,27 +22,34 @@ use crate::api::{
 use crate::surface::loading::use_content_loading;
 use crate::surface::{
     CatalogGroupFilters, CatalogTable, LotDetailLookup, LotViewDisposition, LotViewRequest,
-    PublicSessionResource, PublicSessionView, dispose_lot_view, public_page_matches,
-    update_public_page_size, update_public_query_state, use_public_query_state,
+    PublicBoardQuery, PublicSessionResource, PublicSessionView, dispose_lot_view,
+    public_page_matches, update_public_page_size, update_public_query_state,
+    use_catalog_proxy_snapshots,
 };
 
-/// 目录读取与展示的上下文；预览修订号不属于上下文，允许同场后台更新时保留已确认目录。
+/// 公开 lots 请求由场次、世界和查询参数决定。
 #[derive(Clone, PartialEq)]
-struct CatalogScope {
+struct CatalogRequest {
     auction_id: String,
     world: String,
-    historical: bool,
-    status: String,
-    presentation_mode: String,
-    bidding_open: bool,
-    session_ready: bool,
-    user_id: Option<String>,
     category: String,
     equipment_group: String,
     max_level: Option<String>,
     include_unleveled: String,
     page: i64,
     page_size: i64,
+}
+
+/// 预览过渡快照按展示阶段与身份隔离；同一阶段的预览修订沿用已对齐的目录等待重读。
+#[derive(Clone, PartialEq)]
+struct CatalogScope {
+    request: CatalogRequest,
+    historical: bool,
+    status: String,
+    presentation_mode: String,
+    bidding_open: bool,
+    session_ready: bool,
+    user_id: Option<String>,
 }
 
 /// 行、数量及分页来自同一次权威响应，后台更新不能混用不同修订的字段。
@@ -52,88 +59,201 @@ struct CatalogSnapshot {
     rows: Rc<Vec<CatalogRow>>,
 }
 
-#[component]
-pub(crate) fn AuctionData(
-    auction: CurrentAuction,
+impl PartialEq for CatalogSnapshot {
+    fn eq(&self, other: &Self) -> bool {
+        // 行与页信息一起生成；比较同一响应的引用，避免随会话展示更新逐行比较。
+        Rc::ptr_eq(&self.page, &other.page)
+    }
+}
+
+/// 稳定看板交给目录展示的权威结果与重试句柄。
+#[derive(Clone, PartialEq)]
+pub(super) struct CatalogRead {
+    request: CatalogRequest,
+    current: Option<Result<CatalogSnapshot, String>>,
+    aligned: bool,
+    alignment: AlignmentReread,
+    generation: Signal<u64>,
+}
+
+/// 只在看板调用，确保身份切换保留在途 GET、目录刷新代号和已经排定的竞价补读。
+pub(super) fn use_catalog_read(
+    auction: Option<&CurrentAuction>,
     historical: bool,
-    /// 提供 `auction` 的当前场次（或历史场次）读取仍在进行；对齐重读据此等待本轮读完再判定用尽。
     auction_reading: bool,
-    boot_prerequisites_ready: bool,
-) -> Element {
-    // 开场检查只在 effect 中读取共享秒针；倒计时由叶子组件订阅，目录不随每秒重渲染。
-    let tick = use_second_tick();
-    // 装备分组、分类与页码与地址栏双向同步。
-    let query_state = use_public_query_state();
-    // Signal 为 Copy，各字段 memo 共享同一状态信号，只在各自字段变化时通知订阅者。
-    // 借用查询后只克隆所需字段，避免每个派生值先复制整份筛选与历史查询。
-    let query_state_signal = query_state.state;
-    let active_category = use_memo(move || {
-        query_state_signal.read().category.clone().unwrap_or_else(|| "all".to_owned())
-    });
-    let active_equipment_group = use_memo(move || {
-        query_state_signal.read().equipment_group.clone().unwrap_or_else(|| "all".to_owned())
-    });
-    let active_max_level = use_memo(move || query_state_signal.read().max_level.clone());
-    let active_include_unleveled =
-        use_memo(move || query_state_signal.read().include_unleveled.clone());
-    let page_number = use_memo(move || query_state_signal.read().page.max(1));
-    let requested_page_size = use_memo(move || query_state_signal.read().page_size);
-    let visibility = use_context::<PageVisibility>();
+    query: Signal<PublicBoardQuery>,
+) -> Option<CatalogRead> {
+    #[cfg(test)]
+    super::tests::observe_query(query);
     let refresh_generation = use_context::<Signal<u64>>();
-    let should_refresh_at_open = !historical && auction.presentation_mode != "live";
-    let opening_at = Timestamp::parse_from_rfc3339(&auction.opens_at).ok();
-    let opening_key = format!("{}:{}", auction.id, auction.opens_at);
+    use_opening_refresh(auction, historical, refresh_generation);
+    let auction_key = auction.map(|auction| (auction.id.clone(), auction.world.clone()));
+    let request = use_memo(use_reactive((&auction_key,), move |(auction_key,)| {
+        let (auction_id, world) = auction_key?;
+        let query = query.read();
+        Some(CatalogRequest {
+            auction_id,
+            world,
+            category: query.category.clone().unwrap_or_else(|| "all".to_owned()),
+            equipment_group: query.equipment_group.clone().unwrap_or_else(|| "all".to_owned()),
+            max_level: query.max_level.clone(),
+            include_unleveled: query.include_unleveled.clone(),
+            page: query.page.max(1),
+            page_size: query.page_size,
+        })
+    }));
+    let lots_refresh_generation = use_signal(|| 0_u64);
+    let lots = use_resource(move || {
+        let request = request();
+        let _ = refresh_generation();
+        // 对齐重读只接受该次刷新代号产生的结果。
+        let generation = lots_refresh_generation();
+        async move {
+            let request = request?;
+            let category = (request.category != "all").then(|| request.category.clone());
+            let equipment_group =
+                (request.equipment_group != "all").then(|| request.equipment_group.clone());
+            let Ok(levels) = CatalogLevelFilter::parse(
+                request.max_level.as_deref().unwrap_or_default(),
+                &request.include_unleveled,
+            ) else {
+                return Some((request, generation, Err("invalid_level_filter".to_owned())));
+            };
+            let result =
+                read_lots(&request, category, equipment_group, levels).await.map(|mut page| {
+                    CatalogSnapshot { rows: Rc::new(page.take_rows()), page: Rc::new(page) }
+                });
+            Some((request, generation, result))
+        }
+    });
+    let request = request();
+    use_bid_refresh(lots, request.is_some());
+    let loaded = lots.read();
+    // Resource 重读保留旧值。只用当前请求的快照判定场次对齐，避免越过查询或场次边界。
+    let current = loaded
+        .as_ref()
+        .and_then(Option::as_ref)
+        .filter(|(loaded_request, _, _)| Some(loaded_request) == request.as_ref());
+    let aligned = match (auction, current) {
+        (Some(auction), Some((_, _, Ok(snapshot)))) => {
+            let page = &snapshot.page;
+            page.auction_id == auction.id
+                && page.auction_status == auction.status
+                && page.presentation_mode == auction.presentation_mode
+                && page.bidding_open == auction.bidding_open
+                && page.preview_revision == auction.preview_revision
+        }
+        _ => true,
+    };
+    let alignment_key = auction.map_or_else(String::new, |auction| {
+        format!(
+            "{}:{}:{}:{}:{}",
+            auction.id,
+            auction.status,
+            auction.presentation_mode,
+            auction.bidding_open,
+            auction.preview_revision
+        )
+    });
+    let loaded_generation =
+        current.and_then(|(_, generation, result)| result.is_ok().then_some(*generation));
+    // 等场次与目录的当前读取完成，再判定是否需要重读或已用尽。
+    let reading = auction_reading || *lots.state().read() == UseResourceState::Pending;
+    let alignment = use_alignment_reread(
+        aligned,
+        alignment_key,
+        loaded_generation,
+        reading,
+        lots_refresh_generation,
+        refresh_generation,
+    );
+    request.map(|request| CatalogRead {
+        request,
+        current: current.map(|(_, _, result)| result.clone()),
+        aligned,
+        alignment,
+        generation: lots_refresh_generation,
+    })
+}
+
+fn use_opening_refresh(
+    auction: Option<&CurrentAuction>,
+    historical: bool,
+    refresh_generation: Signal<u64>,
+) {
+    // 开场检查只在 effect 中读取共享秒针，目录不随每秒重渲染。
+    let tick = use_second_tick();
+    let visibility = use_context::<PageVisibility>();
+    let should_refresh_at_open =
+        !historical && auction.is_some_and(|auction| auction.presentation_mode != "live");
+    let opening_at =
+        auction.and_then(|auction| Timestamp::parse_from_rfc3339(&auction.opens_at).ok());
+    let opening_key = auction.map(|auction| format!("{}:{}", auction.id, auction.opens_at));
     let mut opening_refresh_key = use_signal(|| None::<String>);
     let mut opening_refreshed = use_signal(|| false);
-    use_effect(move || {
-        let _ = tick();
-        let now = estimated_now();
-        if opening_refresh_key.peek().as_deref() != Some(opening_key.as_str()) {
-            opening_refresh_key.set(Some(opening_key.clone()));
-            opening_refreshed.set(false);
-        }
-        // 预览不建立 WebSocket，不能用 Live 连接态作为开场补读前提；这里只失效权威读取。
-        if should_refresh_at_open
-            && !*opening_refreshed.peek()
-            && visibility.is_visible()
-            && opening_at.is_some_and(|opens_at| now >= opens_at)
-        {
-            opening_refreshed.set(true);
-            // 开场是一次已确认的生命周期迁移：TTL 内的预览快照可能仍标着 preview，
-            // 必须先失效公开读缓存，否则开场补读会命中旧值并拖到下一次轮询才切换 live。
-            refresh_public_reads(refresh_generation);
-        }
-    });
+    use_effect(use_reactive(
+        (&opening_key, &opening_at, &should_refresh_at_open),
+        move |(opening_key, opening_at, should_refresh_at_open)| {
+            let _ = tick();
+            if *opening_refresh_key.peek() != opening_key {
+                opening_refresh_key.set(opening_key);
+                opening_refreshed.set(false);
+            }
+            // 开场先失效公开缓存。开场记录随看板保留，身份切换不能重复触发这次重读。
+            if should_refresh_at_open
+                && !*opening_refreshed.peek()
+                && visibility.is_visible()
+                && opening_at.is_some_and(|opens_at| estimated_now() >= opens_at)
+            {
+                opening_refreshed.set(true);
+                refresh_public_reads(refresh_generation);
+            }
+        },
+    ));
+}
+
+#[component]
+pub(super) fn AuctionData(
+    auction: CurrentAuction,
+    historical: bool,
+    catalog_read: CatalogRead,
+    query_state_signal: Signal<PublicBoardQuery>,
+    boot_prerequisites_ready: bool,
+) -> Element {
+    use_catalog_proxy_snapshots();
+    let CatalogRead {
+        request,
+        current,
+        aligned,
+        alignment,
+        generation: mut lots_refresh_generation,
+    } = catalog_read;
+    let current = current.as_ref();
+    let refresh_generation = use_context::<Signal<u64>>();
     let mut session = use_context::<PublicSessionResource>();
-    let session_view = PublicSessionView::from_snapshot(session.read().as_ref());
-    let viewer_player_id = session_view.viewer_player_id.clone();
+    let identity = session.read();
+    let session_view = PublicSessionView::from_snapshot(identity.as_ref());
+    let viewer_player_id = session_view.viewer_player_id;
     let session_ready = session_view.ready;
     let session_error = session_view.error;
     let authenticated = session_view.authenticated;
-    let catalog_scope =
-        use_memo(use_reactive((&auction, &historical), move |(auction, historical)| {
-            let identity = session.read();
-            let identity = identity.as_ref().and_then(|result| result.as_ref().ok());
-            CatalogScope {
-                auction_id: auction.id,
-                world: auction.world,
-                historical,
-                status: auction.status,
-                presentation_mode: auction.presentation_mode,
-                bidding_open: auction.bidding_open,
-                session_ready: identity.is_some(),
-                user_id: identity
-                    .and_then(Option::as_ref)
-                    .filter(|identity| identity.authenticated)
-                    .map(|identity| identity.user_id.clone()),
-                category: active_category(),
-                equipment_group: active_equipment_group(),
-                max_level: active_max_level(),
-                include_unleveled: active_include_unleveled(),
-                page: page_number(),
-                page_size: requested_page_size(),
-            }
-        }));
+    let scope = CatalogScope {
+        request,
+        historical,
+        status: auction.status.clone(),
+        presentation_mode: auction.presentation_mode.clone(),
+        bidding_open: auction.bidding_open,
+        session_ready,
+        user_id: identity
+            .as_ref()
+            .and_then(|result| result.as_ref().ok())
+            .and_then(Option::as_ref)
+            .filter(|identity| identity.authenticated)
+            .map(|identity| identity.user_id.clone()),
+    };
+    drop(identity);
+    // 首次揭示等待目录的成功或失败结果，辅助视图切换继续局部异步。
+    use_app_boot_ready(boot_prerequisites_ready && current.is_some());
     let history_switch_world = use_memo(use_reactive(
         (&auction.world, &historical, &auction.presentation_mode),
         |(world, historical, presentation_mode)| {
@@ -156,94 +276,19 @@ pub(crate) fn AuctionData(
             (requested_world, result)
         }
     });
-    let mut lots_refresh_generation = use_signal(|| 0_u64);
-    let lots = use_resource(move || {
-        let _ = refresh_generation();
-        // 结果带上产生它的目录刷新代号，用来判断不对齐的快照是否已来自那次对齐重读。
-        let generation = lots_refresh_generation();
-        let scope = catalog_scope();
-        async move {
-            let category = (scope.category != "all").then(|| scope.category.clone());
-            let equipment_group =
-                (scope.equipment_group != "all").then(|| scope.equipment_group.clone());
-            let Ok(levels) = CatalogLevelFilter::parse(
-                scope.max_level.as_deref().unwrap_or_default(),
-                &scope.include_unleveled,
-            ) else {
-                return (scope, generation, Err("invalid_level_filter".to_owned()));
-            };
-            let result = fetch_current_lots(
-                scope.auction_id.clone(),
-                category,
-                equipment_group,
-                levels,
-                scope.page,
-                scope.page_size,
-            )
-            .await
-            .map(|mut page| CatalogSnapshot {
-                rows: Rc::new(page.take_rows()),
-                page: Rc::new(page),
-            });
-            (scope, generation, result)
-        }
-    });
-    use_bid_refresh(lots, true);
-    let scope = catalog_scope();
-    let loaded = lots.read();
-    // Resource 重读会保留旧值，先核对请求上下文，避免跨账号、世界、筛选或阶段复用。
-    let current = loaded
-        .as_ref()
-        .filter(|(loaded_scope, _, _)| loaded_scope == &scope)
-        .map(|(_, generation, result)| (*generation, result));
-    let aligned = match current {
-        Some((_, Ok(snapshot))) => {
-            let page = &snapshot.page;
-            page.auction_id == auction.id
-                && page.auction_status == auction.status
-                && page.presentation_mode == auction.presentation_mode
-                && page.bidding_open == auction.bidding_open
-                && page.preview_revision == auction.preview_revision
-        }
-        _ => true,
-    };
-    // 首次揭示要等主要目录已有成功或失败结果；辅助视图切换继续局部异步，避免拖慢整页。
-    use_app_boot_ready(boot_prerequisites_ready && current.is_some());
-    let alignment_key = format!(
-        "{}:{}:{}:{}:{}",
-        auction.id,
-        auction.status,
-        auction.presentation_mode,
-        auction.bidding_open,
-        auction.preview_revision
-    );
-    let loaded_generation =
-        current.and_then(|(generation, result)| result.is_ok().then_some(generation));
-    // 场次或目录仍有读取在途（轮询、实时刷新或上一轮对齐重读）：返回后可能就对齐。以订阅方式
-    // 读取目录资源状态，读取结束即重新判定。
-    let reading = auction_reading || *lots.state().read() == UseResourceState::Pending;
-    // 同一上下文只自动对齐重读一次，读取在途先等待；调度与用尽判定见 alignment 模块。
-    let alignment = use_alignment_reread(
-        aligned,
-        alignment_key,
-        loaded_generation,
-        reading,
-        lots_refresh_generation,
-        refresh_generation,
-    );
     let alignment_exhausted = alignment.exhausted;
     let mut alignment_attempt = alignment.attempt;
     let is_live_presentation = auction.presentation_mode == "live";
     let preview_snapshot =
         use_hook(|| Rc::new(RefCell::new(None::<(CatalogScope, CatalogSnapshot)>)));
     let quiet_preview = scope.session_ready && scope.presentation_mode == "preview";
-    let ready_snapshot = current.and_then(|(_, result)| result.as_ref().ok()).filter(|snapshot| {
+    let ready_snapshot = current.and_then(|result| result.as_ref().ok()).filter(|snapshot| {
         aligned
             && public_page_matches(
                 snapshot.page.page,
                 snapshot.page.page_size,
-                scope.page,
-                scope.page_size,
+                scope.request.page,
+                scope.request.page_size,
             )
     });
     // 拍品直达链接：目录当前页有这一行时由行自己打开抽屉；看板展示的不是它所在的场次，或
@@ -271,7 +316,7 @@ pub(crate) fn AuctionData(
         let mut retained = preview_snapshot.borrow_mut();
         if !quiet_preview
             || retained.as_ref().is_some_and(|(retained_scope, _)| retained_scope != &scope)
-            || current.is_some_and(|(_, result)| result.is_err())
+            || current.is_some_and(Result::is_err)
         {
             *retained = None;
         }
@@ -286,12 +331,10 @@ pub(crate) fn AuctionData(
     });
     // 读取失败与对齐重读用尽都是可操作的最终状态（正文给出重试），不再占用顶栏的加载提示。
     use_content_loading(
-        visible_snapshot.is_none()
-            && !alignment_exhausted
-            && !current.is_some_and(|(_, result)| result.is_err()),
+        visible_snapshot.is_none() && !alignment_exhausted && !current.is_some_and(Result::is_err),
     );
     let catalog = match (current, visible_snapshot) {
-        (Some((_, Err(error))), _) => {
+        (Some(Err(error)), _) => {
             rsx! {
                 AsyncState {
                     kind: AsyncStateKind::Error,
@@ -323,7 +366,7 @@ pub(crate) fn AuctionData(
         }
         (_, Some(snapshot)) => {
             let page = &snapshot.page;
-            let fallback_page_size = requested_page_size();
+            let fallback_page_size = scope.request.page_size;
             let page_size = page.page_size.unwrap_or(fallback_page_size);
             // 旧 lot 外壳为详情和列表共用，列表 total 可以省略且没有 has_more 字段；满页时
             // 保留一次向后探测，避免把“当前页长度”伪装成总数并永久隐藏下一页。
@@ -335,11 +378,11 @@ pub(crate) fn AuctionData(
                     projection_kind: page.projection_kind.clone(),
                     auction_status: page.auction_status.clone(),
                     category_counts: page.category_counts.clone().unwrap_or_default(),
-                    active_category: active_category(),
-                    active_equipment_group: active_equipment_group(),
-                    level_filtered: scope.max_level.as_ref().is_some_and(|value| !value.is_empty())
-                        || scope.include_unleveled != "true",
-                    page_number: page_number(),
+                    active_category: scope.request.category.clone(),
+                    active_equipment_group: scope.request.equipment_group.clone(),
+                    level_filtered: scope.request.max_level.as_ref().is_some_and(|value| !value.is_empty())
+                        || scope.request.include_unleveled != "true",
+                    page_number: scope.request.page,
                     on_category_change: move |category: String| {
                         update_public_query_state(
                             query_state_signal,
@@ -412,9 +455,9 @@ pub(crate) fn AuctionData(
                     }
                 }
                 CatalogGroupFilters {
-                    active_equipment_group: active_equipment_group(),
-                    max_level: active_max_level(),
-                    include_unleveled: active_include_unleveled(),
+                    active_equipment_group: scope.request.equipment_group.clone(),
+                    max_level: scope.request.max_level.clone(),
+                    include_unleveled: scope.request.include_unleveled.clone(),
                     on_equipment_group_change: move |equipment_group: String| {
                         update_public_query_state(
                             query_state_signal,
@@ -455,6 +498,32 @@ pub(crate) fn AuctionData(
             }
         }
     }
+}
+
+async fn read_lots(
+    request: &CatalogRequest,
+    category: Option<String>,
+    equipment_group: Option<String>,
+    levels: CatalogLevelFilter,
+) -> Result<LotEnvelope, String> {
+    #[cfg(test)]
+    if let Some(reply) = super::tests::lots_request(
+        &request.auction_id,
+        category.as_deref(),
+        request.page,
+        request.page_size,
+    ) {
+        return reply.await;
+    }
+    fetch_current_lots(
+        request.auction_id.clone(),
+        category,
+        equipment_group,
+        levels,
+        request.page,
+        request.page_size,
+    )
+    .await
 }
 
 /// lot 目录读取失败的本地化文案：先处理本页特有的历史变体码，未命中走共享基础层

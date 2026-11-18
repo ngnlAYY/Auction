@@ -5,17 +5,24 @@
 mod authorization;
 mod create;
 mod success;
+#[cfg(test)]
+mod tests;
+
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use auction_web_shared::{AsyncState, AsyncStateKind, t};
 use dioxus::prelude::*;
 
 use super::pending::ProxyConfirmCommand;
+use super::session::CommandSession;
 use crate::api::{OwnedProxy, ProxyCommandAuthorization};
 use authorization::ProxyAuthorizationForm;
 use create::ProxyCreateForm;
 use success::proxy_success_panel;
 
 /// 公开 lot 的代理授权表单参数；账户状态由服务端投影，不在浏览器端复制代理状态机。
+#[derive(Clone, PartialEq)]
 pub struct ProxyFormInput {
     pub lot_id: String,
     pub can_bid: bool,
@@ -39,7 +46,8 @@ pub struct ProxyFormInput {
 }
 
 /// 公开 lot 的代理授权入口。
-pub fn proxy_form(input: ProxyFormInput) -> Element {
+#[component]
+pub fn ProxyForm(input: ProxyFormInput) -> Element {
     let ProxyFormInput {
         lot_id,
         can_bid,
@@ -57,6 +65,8 @@ pub fn proxy_form(input: ProxyFormInput) -> Element {
         lower_command,
         on_close,
     } = input;
+    let session = use_context::<CommandSession>();
+    let last_success = use_hook(|| Rc::new(RefCell::new(None::<Option<OwnedProxy>>)));
     if let Some(authorization) = saved_authorization() {
         return proxy_success_panel(&authorization, on_close);
     }
@@ -71,12 +81,57 @@ pub fn proxy_form(input: ProxyFormInput) -> Element {
     if let Some(command) = uncertain_command {
         return rsx! { super::retry::ProxyRetry { lot_id, command, saved_authorization, on_close } };
     }
-    if !can_bid {
+    let mut last_success = last_success.borrow_mut();
+    if !session.identity_confirmed() {
+        *last_success = None;
         return rsx! { p { role: "status", {t!("bid-unavailable")} } };
     }
-    match proxy.as_ref() {
-        None => rsx! { p { role: "status", {t!("proxy-loading")} } },
-        Some(Err(_)) => rsx! {
+    // 保留同一宿主的最后成功投影来维持草稿；读取失败或等待重试时，旧投影不授权新写入。
+    if let Some(Ok(snapshot)) = proxy.as_ref()
+        && last_success.as_ref() != Some(snapshot)
+    {
+        *last_success = Some(snapshot.clone());
+    }
+    let authorization_ready = can_bid && proxy.as_ref().is_some_and(Result::is_ok);
+    let form = match last_success.as_ref() {
+        Some(Some(proxy)) if proxy.status == "active" => rsx! {
+            ProxyAuthorizationForm {
+                lot_id,
+                current_price,
+                next_bid,
+                lot_status,
+                proxy: proxy.clone(),
+                authorization_ready,
+                saved_authorization,
+                command: lower_command,
+                peer_submitting: create_command.submitting,
+                on_close,
+            }
+        },
+        Some(snapshot) => rsx! {
+            ProxyCreateForm {
+                lot_id,
+                initial_minimum: snapshot.as_ref().map_or(next_bid, |proxy| next_bid.max(proxy.maximum_amount.saturating_add(1))),
+                lot_status,
+                allow_slow,
+                default_mode,
+                blocked: leading,
+                blocked_reason,
+                authorization_ready,
+                saved_authorization,
+                command: create_command,
+                peer_submitting: lower_command.submitting,
+                on_close,
+            }
+        },
+        None => rsx! {},
+    };
+    rsx! {
+        {form}
+        if !can_bid {
+            p { role: "status", {t!("bid-unavailable")} }
+        }
+        if proxy.as_ref().is_some_and(Result::is_err) {
             AsyncState {
                 kind: AsyncStateKind::Error,
                 title: t!("catalog-proxy"),
@@ -86,49 +141,8 @@ pub fn proxy_form(input: ProxyFormInput) -> Element {
                     refresh_generation.set(refresh_generation().saturating_add(1));
                 },
             }
-        },
-        Some(Ok(None)) => rsx! {
-            ProxyCreateForm {
-                lot_id,
-                initial_minimum: next_bid,
-                lot_status,
-                allow_slow,
-                default_mode,
-                blocked: leading,
-                blocked_reason,
-                saved_authorization,
-                command: create_command,
-                peer_submitting: lower_command.submitting,
-                on_close,
-            }
-        },
-        Some(Ok(Some(proxy))) if proxy.status == "active" => rsx! {
-            ProxyAuthorizationForm {
-                lot_id,
-                current_price,
-                next_bid,
-                lot_status,
-                proxy: proxy.clone(),
-                saved_authorization,
-                command: lower_command,
-                peer_submitting: create_command.submitting,
-                on_close,
-            }
-        },
-        Some(Ok(Some(proxy))) => rsx! {
-            ProxyCreateForm {
-                lot_id,
-                initial_minimum: next_bid.max(proxy.maximum_amount.saturating_add(1)),
-                lot_status,
-                allow_slow,
-                default_mode,
-                blocked: leading,
-                blocked_reason,
-                saved_authorization,
-                command: create_command,
-                peer_submitting: lower_command.submitting,
-                on_close,
-            }
-        },
+        } else if can_bid && proxy.is_none() {
+            p { role: "status", {t!("proxy-loading")} }
+        }
     }
 }

@@ -7,9 +7,12 @@ use dioxus::prelude::*;
 use super::pending::{
     BidConfirmCommand, PendingBidCommand, PublicCommandIdentity, bid_error_message, confirm_panel,
 };
+use super::session::CommandSession;
 use crate::api::place_bid;
 
 const CREDIT_K: i64 = 1_000;
+// 只限制字符写法，空值和金额边界由表单使用站内语言提示。
+const BID_UNITS_PATTERN: &str = r"[ \x09-\x0D]*[0-9]*[ \x09-\x0D]*";
 
 /// 普通竞价成功后的浏览器展示投影；只保留成功提示所需字段，避免把 api 内部 DTO
 /// 类型（未在 api 出口公开）泄漏到组件参数。
@@ -28,6 +31,7 @@ pub struct BidFormInput {
     pub can_bid: bool,
     pub blocked: bool,
     pub blocked_reason: String,
+    pub active_proxy_reason_id: Option<&'static str>,
     /// 由弹窗宿主注入的两阶段确认命令 hook（整体 Copy）；宿主据其 `submitting`
     /// 在提交中禁用遮罩/Escape/关闭按钮（Dialog busy 守卫），避免弹窗 scope 销毁
     /// 导致成功后的刷新与成功反馈丢失。
@@ -46,7 +50,7 @@ fn default_bid_units(next_bid: i64) -> String {
 
 /// 普通出价只接受纯数字 K 单位，避免把代理表单保留的 M/K 缩写规则扩散到确认流程。
 fn parse_bid_units(input: &str) -> Option<i64> {
-    let units = input.trim();
+    let units = trim_bid_units(input);
     if units.is_empty() || !units.chars().all(|character| character.is_ascii_digit()) {
         return None;
     }
@@ -54,8 +58,12 @@ fn parse_bid_units(input: &str) -> Option<i64> {
     (amount > 0 && amount <= MAX_PUBLIC_BID_AMOUNT).then_some(amount)
 }
 
+fn trim_bid_units(input: &str) -> &str {
+    input.trim_matches(|character| matches!(character, ' ' | '\t'..='\r'))
+}
+
 fn bid_amount_hint(value: &str) -> Element {
-    if value.trim().is_empty() {
+    if trim_bid_units(value).is_empty() {
         return rsx! {};
     }
     match parse_bid_units(value) {
@@ -93,12 +101,15 @@ fn bid_form(input: BidFormInput) -> Element {
         can_bid,
         blocked,
         blocked_reason,
+        active_proxy_reason_id,
         command,
         on_success,
         on_close,
     } = input;
     let amount_id = format!("public-bid-amount-{lot_id}");
     let user_id = use_context::<PublicCommandIdentity>().0;
+    let session = use_context::<CommandSession>();
+    let can_submit = session.can_submit_new();
     let mut amount = use_signal(|| default_bid_units(next_bid));
     let mut validation = use_signal(|| None::<String>);
     let mut command = command;
@@ -110,10 +121,16 @@ fn bid_form(input: BidFormInput) -> Element {
     let blocked = blocked || !bidding_open || limit_reached;
     let blocked_reason = if !bidding_open {
         t!("bid-unavailable")
-    } else if limit_reached {
+    } else if limit_reached && blocked_reason.is_empty() {
         t!("bid-limit-note")
     } else {
         blocked_reason
+    };
+    let submit_described_by = match (confirming, active_proxy_reason_id) {
+        (true, Some(reason)) => format!("public-bid-confirmation {reason}"),
+        (true, None) => "public-bid-confirmation".to_owned(),
+        (false, Some(reason)) => reason.to_owned(),
+        (false, None) => String::new(),
     };
 
     rsx! {
@@ -122,7 +139,7 @@ fn bid_form(input: BidFormInput) -> Element {
             aria_busy: submitting().to_string(),
             onsubmit: move |event| {
                 event.prevent_default();
-                if submitting() || blocked {
+                if submitting() || blocked || !session.can_submit_new() {
                     return;
                 }
                 // 两阶段确认：签名取金额序列化，同一金额重试复用同一 command_id（幂等）。
@@ -203,7 +220,7 @@ fn bid_form(input: BidFormInput) -> Element {
                     autofocus: true,
                     inputmode: "numeric",
                     enterkeyhint: "done",
-                    pattern: "[0-9]*",
+                    pattern: BID_UNITS_PATTERN,
                     autocomplete: "off",
                     spellcheck: "false",
                     aria_invalid: validation().is_some().to_string(),
@@ -234,7 +251,7 @@ fn bid_form(input: BidFormInput) -> Element {
                     {t!("bid-shorthand-hint")}
                 }
             }
-            if blocked {
+            if blocked && active_proxy_reason_id.is_none() {
                 p { class: "action-feedback action-feedback--notice", role: "note", "{blocked_reason}" }
             }
             if let Some(message) = validation() {
@@ -267,8 +284,8 @@ fn bid_form(input: BidFormInput) -> Element {
                     // 用 Enter 提交金额后输入框被确认面板替换；确认视图的首选焦点是确认按钮，
                     // 而不是弹窗右上角的关闭按钮。编辑态的首选焦点仍是金额框。
                     autofocus: confirming,
-                    disabled: submitting() || blocked,
-                    aria_describedby: if confirming { "public-bid-confirmation" } else { "" },
+                    disabled: submitting() || blocked || !can_submit,
+                    aria_describedby: submit_described_by,
                     if submitting() {
                         {t!("bid-working")}
                     } else if confirming {
@@ -279,5 +296,118 @@ fn bid_form(input: BidFormInput) -> Element {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
+    use auction_web_shared::i18n::{DEFAULT_PUBLIC_LOCALE, build_bundle};
+    use auction_web_shared::use_confirm_command;
+    use dioxus::dioxus_core::{AttributeValue, Mutation, Mutations};
+    use dioxus::prelude::*;
+    use dioxus_i18n::prelude::try_use_init_i18n_from_bundle;
+    use uuid::Uuid;
+
+    use super::{BID_UNITS_PATTERN, BidForm, BidFormInput, CREDIT_K, parse_bid_units};
+    use crate::surface::commands::pending::{BidConfirmCommand, PublicCommandIdentity};
+    use crate::surface::commands::session::use_command_session_provider;
+    use crate::surface::router::PUBLIC_LOCALE_CATALOG;
+    use crate::surface::{PublicCommandOwner, PublicSessionResource};
+
+    #[test]
+    fn amount_input_pattern_validates_only_token_syntax() {
+        assert_eq!(BID_UNITS_PATTERN, r"[ \x09-\x0D]*[0-9]*[ \x09-\x0D]*");
+    }
+
+    #[component]
+    fn AmountInputFixture() -> Element {
+        try_use_init_i18n_from_bundle(|| {
+            build_bundle(
+                &DEFAULT_PUBLIC_LOCALE,
+                PUBLIC_LOCALE_CATALOG.default_ftl,
+                &DEFAULT_PUBLIC_LOCALE,
+                None,
+            )
+        })
+        .expect("加载公开端英文译文");
+        let session: PublicSessionResource = use_resource(|| async { Ok(None) });
+        use_context_provider(|| session);
+        use_context_provider(|| PublicCommandOwner(Signal::new(None)));
+        use_context_provider(|| PublicCommandIdentity(Uuid::nil()));
+        use_context_provider(|| Signal::new(0_u64));
+        use_command_session_provider(None);
+        let input = BidFormInput {
+            lot_id: "test-lot".to_owned(),
+            next_bid: 50_000,
+            lot_status: "live".to_owned(),
+            can_bid: true,
+            blocked: false,
+            blocked_reason: String::new(),
+            active_proxy_reason_id: None,
+            command: BidConfirmCommand(use_confirm_command()),
+            on_success: use_callback(|_| {}),
+            on_close: use_callback(|()| {}),
+        };
+        rsx! { BidForm { input } }
+    }
+
+    #[test]
+    fn amount_input_renders_the_lexical_pattern() {
+        let mut dom = VirtualDom::new(AmountInputFixture);
+        let mut mutations = Mutations::default();
+        dom.rebuild(&mut mutations);
+        let amount = mutations
+            .edits
+            .iter()
+            .find_map(|edit| match edit {
+                Mutation::SetAttribute {
+                    name: "id",
+                    id,
+                    value: AttributeValue::Text(value),
+                    ..
+                } if value == "public-bid-amount-test-lot" => Some(*id),
+                _ => None,
+            })
+            .expect("金额输入框已渲染");
+        let pattern = mutations.edits.iter().find_map(|edit| match edit {
+            Mutation::SetAttribute {
+                name: "pattern",
+                id,
+                value: AttributeValue::Text(value),
+                ..
+            } if *id == amount => Some(value.as_str()),
+            _ => None,
+        });
+        assert_eq!(pattern, Some(r"[ \x09-\x0D]*[0-9]*[ \x09-\x0D]*"));
+    }
+
+    #[test]
+    fn surrounding_ascii_whitespace_and_leading_zeros_are_accepted() {
+        assert_eq!(parse_bid_units(" \t\n\x0b\r\x0c0050 \t"), Some(50 * CREDIT_K));
+        let maximum_units = MAX_PUBLIC_BID_AMOUNT / CREDIT_K;
+        assert_eq!(parse_bid_units(&format!(" 000{maximum_units} ")), Some(MAX_PUBLIC_BID_AMOUNT));
+    }
+
+    #[test]
+    fn only_ascii_whitespace_and_in_range_ascii_integers_are_accepted() {
+        for invalid in [
+            "",
+            " \t ",
+            "0",
+            "5 0",
+            "5\x0b0",
+            "50\u{a0}",
+            "\u{3000}50",
+            "５０",
+            "1,000",
+            "5.0",
+            "+50",
+        ] {
+            assert_eq!(parse_bid_units(invalid), None, "{invalid:?}");
+        }
+        let above_maximum = MAX_PUBLIC_BID_AMOUNT / CREDIT_K + 1;
+        assert_eq!(parse_bid_units(&above_maximum.to_string()), None);
+        assert_eq!(parse_bid_units("99999999999999999999"), None);
     }
 }

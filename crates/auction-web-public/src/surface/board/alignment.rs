@@ -1,6 +1,6 @@
 //! 看板目录与当前场次的对齐重读调度：同一上下文只自动重读一次，读取在途先等待，两侧都来自那次
 //! 重读仍不对齐才判定用尽。纯判定函数与持有尝试记录、发起失效重读的 hook 放在一起，由
-//! `AuctionData` 调用；组件调度测试用可控的读取替身驱动真实 `Resource`、父组件读取状态与两个刷新
+//! 看板的目录读取调用；组件调度测试用可控的读取替身驱动真实 `Resource`、父组件读取状态与两个刷新
 //! 代号。
 
 use dioxus::prelude::*;
@@ -8,6 +8,7 @@ use dioxus::prelude::*;
 use super::refresh::refresh_public_reads;
 
 /// 一次渲染的对齐重读调度结果。
+#[derive(Clone, Copy, PartialEq)]
 pub(super) struct AlignmentReread {
     /// 自动对齐重读已用尽：快照仍不对齐，且场次与目录都已来自那次重读。
     pub(super) exhausted: bool,

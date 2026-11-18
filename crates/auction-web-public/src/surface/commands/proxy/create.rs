@@ -9,6 +9,7 @@ use super::super::pending::{
     PendingProxyCommand, ProxyConfirmCommand, PublicCommandIdentity, amount_hint, confirm_panel,
     initial_proxy_amount, proxy_error_message,
 };
+use super::super::session::CommandSession;
 use crate::api::{ProxyCommandAuthorization, create_proxy_authorization};
 
 #[component]
@@ -21,6 +22,7 @@ pub(super) fn ProxyCreateForm(
     default_mode: Option<String>,
     blocked: bool,
     blocked_reason: String,
+    authorization_ready: bool,
     mut saved_authorization: Signal<Option<Box<ProxyCommandAuthorization>>>,
     /// 由弹窗宿主注入的两阶段确认命令 hook（创建实例；见 ProxyFormInput）。
     command: ProxyConfirmCommand,
@@ -29,6 +31,8 @@ pub(super) fn ProxyCreateForm(
     on_close: EventHandler<()>,
 ) -> Element {
     let user_id = use_context::<PublicCommandIdentity>().0;
+    let session = use_context::<CommandSession>();
+    let can_submit = authorization_ready && session.can_submit_new();
     let maximum_id = format!("public-proxy-maximum-{lot_id}");
     let mode_name = format!("public-proxy-mode-{lot_id}");
     let fast_mode_id = format!("{mode_name}-fast");
@@ -43,6 +47,8 @@ pub(super) fn ProxyCreateForm(
     // 策略未知时整张表单禁用（见下方 `blocked`），占位选项不会被提交。
     let mut mode = use_signal(move || initial_mode.unwrap_or("fast").to_owned());
     let mut validation = use_signal(|| None::<String>);
+    #[cfg(test)]
+    super::tests::observe_draft(maximum_amount, mode, validation);
     let mut command = command;
     let own_submitting = command.submitting;
     let submitting = move || own_submitting() || peer_submitting();
@@ -76,7 +82,7 @@ pub(super) fn ProxyCreateForm(
             form {
                 onsubmit: move |event| {
                     event.prevent_default();
-                    if submitting() || blocked {
+                    if submitting() || blocked || !authorization_ready || !session.can_submit_new() {
                         return;
                     }
                     // 两阶段确认：签名取 (amount, mode)，同输入重试复用同一 command_id。
@@ -291,7 +297,7 @@ pub(super) fn ProxyCreateForm(
                         // 确认视图的首选焦点是确认按钮；否则焦点陷阱会落到弹窗右上角的关闭按钮，
                         // 再按一次 Enter 就成了关闭弹窗。编辑态的首选焦点仍是上限框。
                         autofocus: confirming,
-                        disabled: submitting() || blocked,
+                        disabled: submitting() || blocked || !can_submit,
                         aria_describedby: if confirming { confirmation_id } else { String::new() },
                         if submitting() {
                             {t!("proxy-working")}

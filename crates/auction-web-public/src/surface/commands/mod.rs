@@ -6,8 +6,10 @@ mod bid;
 mod pending;
 mod proxy;
 mod retry;
+mod session;
 
 pub(super) use bid::{BidForm, BidFormInput, BidSuccess};
 pub(super) use pending::{BidConfirmCommand, ProxyConfirmCommand, PublicCommandIdentity};
-pub(super) use proxy::{ProxyFormInput, proxy_form};
+pub(super) use proxy::{ProxyForm, ProxyFormInput};
 pub(super) use retry::BidRetry;
+pub(super) use session::{CommandSession, use_command_session_provider};

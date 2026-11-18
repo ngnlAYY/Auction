@@ -113,10 +113,8 @@ pub(crate) fn use_bid_refresh<T: 'static>(mut resource: Resource<T>, enabled: bo
             | BidRefreshDecision::WaitForReady => {}
             BidRefreshDecision::Schedule { .. } => {
                 scheduled.set(true);
-                // 每个窗口各取一次随机样本；抖动只改变重读时刻，不改变合并与消费规则。
-                let window_millis = coalesce_window_millis(js_sys::Math::random());
                 spawn(async move {
-                    TimeoutFuture::new(window_millis).await;
+                    wait_for_bid_refresh().await;
                     scheduled.set(false);
                     let revision = *refresh.0.peek();
                     // 等待期间可能切换查询、关闭代理面板或触发全局刷新；只重启空闲资源。
@@ -131,6 +129,16 @@ pub(crate) fn use_bid_refresh<T: 'static>(mut resource: Resource<T>, enabled: bo
             }
         }
     });
+}
+
+async fn wait_for_bid_refresh() {
+    #[cfg(test)]
+    if let Some(timer) = super::tests::bid_timer() {
+        timer.await;
+        return;
+    }
+    // 每个窗口各取一次随机样本；抖动只改变重读时刻，不改变合并与消费规则。
+    TimeoutFuture::new(coalesce_window_millis(js_sys::Math::random())).await;
 }
 
 #[cfg(test)]

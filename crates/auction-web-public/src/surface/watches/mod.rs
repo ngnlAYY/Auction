@@ -14,6 +14,7 @@ use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use super::PublicSessionResource;
+use super::commands::CommandSession;
 use crate::api::{CommandError, PublicSession, fetch_lot_watches};
 
 #[derive(Clone)]
@@ -42,6 +43,11 @@ struct WatchRevision(Signal<u64>);
 
 /// 完整集合只索引一次，所有目录行按 lot UUID 查状态；false 墓碑保留其真实版本。
 type WatchSnapshot = BTreeMap<String, (bool, i64)>;
+
+/// 看板计数测试保留真实标记作用域，隔离浏览器传输。
+#[cfg(test)]
+#[derive(Clone)]
+pub(crate) struct SkipWatchReads;
 
 fn watch_snapshot(page: PublicLotWatchesResponse) -> Rc<WatchSnapshot> {
     Rc::new(
@@ -91,10 +97,16 @@ fn ScopedLotWatches(user_id: Option<String>, auction_id: String, children: Eleme
         user_id.as_deref().and_then(|user| cache::load(user, &auction_id)).map(watch_snapshot)
     });
     let mut commands = use_context::<Signal<BTreeMap<String, WatchCommand>>>();
+    #[cfg(test)]
+    let skip_watch_reads = try_use_context::<SkipWatchReads>().is_some();
     // 只跟随可读身份的变化：会话故障恢复后立即补读，同账号续期不重启整场请求。
     let readable = use_memo({
         let user_id = user_id.clone();
         move || {
+            #[cfg(test)]
+            if skip_watch_reads {
+                return false;
+            }
             user_id.as_deref().is_some_and(|user_id| current_user(&session.read()) == Some(user_id))
         }
     });
@@ -229,6 +241,14 @@ impl WatchContext {
         let snapshot = self.resource.read();
         let page = snapshot.as_ref()?.result.as_ref().ok()?.as_ref()?;
         Some(page.get(lot_id).copied().unwrap_or((false, 0)))
+    }
+
+    /// 新切换只用当前身份的权威 CAS 版本；已有命令继续锁住该拍品。
+    fn toggle_baseline(&self, session: &CommandSession, lot_id: &str) -> Option<(bool, i64)> {
+        if !session.can_submit_new() || self.commands.read().contains_key(lot_id) {
+            return None;
+        }
+        self.authoritative(lot_id)
     }
 
     /// 展示用的标记状态：成功提交后等待重读期间取提交的目标状态（标签不先回落到旧值再翻转），

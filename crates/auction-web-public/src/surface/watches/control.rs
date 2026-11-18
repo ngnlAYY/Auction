@@ -6,6 +6,7 @@ use dioxus::prelude::*;
 use uuid::Uuid;
 
 use super::{WatchContext, WatchSubmit};
+use crate::surface::commands::CommandSession;
 use crate::surface::login_href_for_current_location;
 
 /// 目录行的“已标记”展示状态，用于行首色条。与标记按钮读取同一份整场状态，不发请求；
@@ -21,6 +22,7 @@ pub(crate) fn LotWatchButton(lot_id: String, lot_code: String, icon_only: Option
     let icon_only = icon_only.unwrap_or(false);
     let context = use_context::<WatchContext>();
     let submit = use_context::<WatchSubmit>();
+    let command_session = use_context::<CommandSession>();
     let session = context.session;
     if !context.identity_matches() {
         let snapshot = session.read();
@@ -54,7 +56,7 @@ pub(crate) fn LotWatchButton(lot_id: String, lot_code: String, icon_only: Option
         };
     }
 
-    let authoritative = context.authoritative(&lot_id);
+    let toggle_enabled = context.toggle_baseline(&command_session, &lot_id).is_some();
     let pending = context.commands.read().get(&lot_id).cloned();
     let watched = context.displayed(&lot_id);
     let busy = pending.as_ref().is_some_and(|pending| pending.busy);
@@ -85,14 +87,11 @@ pub(crate) fn LotWatchButton(lot_id: String, lot_code: String, icon_only: Option
                 aria_pressed: watched.to_string(),
                 aria_label: t!("watch-toggle", code: lot_code),
                 aria_describedby: if error.is_some() { error_id } else { String::new() },
-                disabled: authoritative.is_none() || pending.is_some(),
+                disabled: !toggle_enabled,
                 onclick: move |_| {
-                    if !click_context.identity_matches()
-                        || click_context.commands.read().contains_key(&click_lot)
-                    {
-                        return;
-                    }
-                    let Some((watched, version)) = click_context.authoritative(&click_lot) else {
+                    let Some((watched, version)) =
+                        click_context.toggle_baseline(&command_session, &click_lot)
+                    else {
                         return;
                     };
                     submit.0.call((click_context.auction_id.clone(), click_lot.clone(), click_code.clone(), PublicSetLotWatchRequest {

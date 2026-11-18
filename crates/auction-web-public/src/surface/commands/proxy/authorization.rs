@@ -10,6 +10,7 @@ use super::super::pending::{
     PendingProxyCommand, ProxyConfirmCommand, PublicCommandIdentity, amount_hint, confirm_panel,
     initial_proxy_amount, proxy_error_message,
 };
+use super::super::session::CommandSession;
 use crate::api::{OwnedProxy, ProxyCommandAuthorization, lower_proxy_authorization};
 
 #[component]
@@ -19,6 +20,7 @@ pub(super) fn ProxyAuthorizationForm(
     next_bid: i64,
     lot_status: String,
     proxy: OwnedProxy,
+    authorization_ready: bool,
     mut saved_authorization: Signal<Option<Box<ProxyCommandAuthorization>>>,
     /// 由弹窗宿主注入的两阶段确认命令 hook（降低上限实例；见 ProxyFormInput）。
     command: ProxyConfirmCommand,
@@ -27,6 +29,8 @@ pub(super) fn ProxyAuthorizationForm(
     on_close: EventHandler<()>,
 ) -> Element {
     let user_id = use_context::<PublicCommandIdentity>().0;
+    let session = use_context::<CommandSession>();
+    let can_submit = authorization_ready && session.can_submit_new();
     let maximum_id = format!("public-proxy-lower-maximum-{lot_id}");
     let lower_bound = if proxy.capabilities.waiting { next_bid } else { current_price };
     let mut maximum_amount = use_signal(|| initial_proxy_amount(lower_bound));
@@ -63,7 +67,7 @@ pub(super) fn ProxyAuthorizationForm(
                 form {
                     onsubmit: move |event| {
                         event.prevent_default();
-                        if submitting() || !can_lower {
+                        if submitting() || !can_lower || !authorization_ready || !session.can_submit_new() {
                             return;
                         }
                         // 两阶段确认：签名取 (amount, authorization_id)，同输入重试复用同一
@@ -252,7 +256,7 @@ pub(super) fn ProxyAuthorizationForm(
                             r#type: "submit",
                             // 确认视图的首选焦点是确认按钮，而不是弹窗右上角的关闭按钮。
                             autofocus: confirming,
-                            disabled: submitting(),
+                            disabled: submitting() || !can_submit,
                             aria_describedby: if confirming { confirmation_id } else { String::new() },
                             if submitting() {
                                 {t!("proxy-working")}

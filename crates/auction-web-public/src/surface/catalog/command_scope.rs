@@ -4,10 +4,11 @@ use auction_web_shared::{Dialog, use_confirm_command};
 use auction_web_shared::{format_credit_amount, t};
 use dioxus::prelude::*;
 
+use super::actions::active_own_proxy;
 use super::detail::{CatalogDetailDialogContext, CatalogDetailInput};
 use super::toast::{CatalogToastContext, CatalogToastHost, use_catalog_toast_provider};
 use crate::api::ProxyCommandAuthorization;
-use crate::surface::{PublicCommandOwner, PublicSessionResource, commands, watches};
+use crate::surface::{PublicCommandOwner, commands, watches};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum CatalogAction {
@@ -62,6 +63,7 @@ fn IdentityCommandScope(user_id: Option<String>, children: Element) -> Element {
     use_context_provider(|| CatalogDetailDialogContext(detail));
     // 成功提示条比发出它的命令弹窗活得久，因此由身份宿主持有并常驻渲染。
     let toast = use_catalog_toast_provider();
+    commands::use_command_session_provider(user_id.clone());
     let pending_watches = watches::use_watch_command_owner(user_id.clone());
     let user_id = user_id
         .as_deref()
@@ -87,13 +89,7 @@ fn CatalogCommandDialog(
     mut dialog: Signal<Option<CommandDialogInput>>,
 ) -> Element {
     let refresh_generation = use_context::<Signal<u64>>();
-    let session = use_context::<PublicSessionResource>();
-    let user_id = use_context::<commands::PublicCommandIdentity>().0;
-    let authenticated = *session.state().read() == UseResourceState::Ready
-        && session.read().as_ref().is_some_and(|snapshot| {
-            matches!(snapshot, Ok(Some(identity)) if identity.authenticated
-                && uuid::Uuid::parse_str(&identity.user_id).ok() == Some(user_id))
-        });
+    let session = use_context::<commands::CommandSession>();
     let toasts = use_context::<CatalogToastContext>();
     // 代理成功投影与命令状态都由稳定宿主持有；表单替换不能取消任务或丢失结果。
     let proxy_success = use_signal(|| None::<Box<ProxyCommandAuthorization>>);
@@ -151,7 +147,9 @@ fn CatalogCommandDialog(
     let mut tab_dialog = dialog;
     let switch_tab = EventHandler::new(move |action: CatalogAction| {
         let Some(mut next) = tab_dialog.peek().clone() else { return };
-        if next.action == action {
+        if next.action == action
+            || (action == CatalogAction::Bid && active_own_proxy(next.proxy.as_ref()).is_some())
+        {
             return;
         }
         next.action = action;
@@ -165,7 +163,11 @@ fn CatalogCommandDialog(
             CatalogAction::Proxy => t!("proxy-dialog-title", code: input.lot_code.clone()),
         }
     };
-    let can_bid = input.can_bid && authenticated;
+    let can_bid = input.can_bid && session.identity_confirmed();
+    let has_active_proxy = active_own_proxy(input.proxy.as_ref()).is_some();
+    let active_proxy_reason_id =
+        (has_active_proxy && !recovering && (!confirming || input.action == CatalogAction::Bid))
+            .then_some("public-bid-active-proxy");
     let lot_name = input.lot_name.clone();
     let lot_code = input.lot_code.clone();
     let current_price = format_credit_amount(input.current_price);
@@ -227,7 +229,8 @@ fn CatalogCommandDialog(
                                 },
                                 r#type: "button",
                                 aria_pressed: (input.action == CatalogAction::Bid).to_string(),
-                                disabled: busy,
+                                disabled: busy || has_active_proxy,
+                                aria_describedby: active_proxy_reason_id,
                                 onclick: move |_| switch_tab.call(CatalogAction::Bid),
                                 {t!("bid-tab-direct")}
                             }
@@ -244,6 +247,14 @@ fn CatalogCommandDialog(
                                 {t!("bid-tab-proxy")}
                             }
                         }
+                    }
+                }
+                if let Some(reason_id) = active_proxy_reason_id {
+                    p {
+                        id: reason_id,
+                        class: "action-feedback action-feedback--notice",
+                        role: "note",
+                        {t!("proxy-active-exists")}
                     }
                 }
                 if input.action == CatalogAction::Bid {
@@ -263,15 +274,16 @@ fn CatalogCommandDialog(
                             can_bid,
                             blocked: input.ordinary_blocked,
                             blocked_reason: input.blocked_reason,
+                            active_proxy_reason_id,
                             command: bid_command,
                             on_success: bid_succeeded,
                             on_close: close,
                         } }
                     }
                 } else {
-                    {commands::proxy_form(commands::ProxyFormInput {
+                    commands::ProxyForm { input: commands::ProxyFormInput {
                         lot_id: input.lot_id,
-                        can_bid,
+                        can_bid: input.can_bid,
                         current_price: input.current_price,
                         next_bid: input.next_bid,
                         lot_status: input.lot_status,
@@ -285,7 +297,7 @@ fn CatalogCommandDialog(
                         create_command: proxy_create_command,
                         lower_command: proxy_lower_command,
                         on_close: close,
-                    })}
+                    } }
                 }
             }
         }

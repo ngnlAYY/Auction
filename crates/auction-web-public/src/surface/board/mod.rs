@@ -9,11 +9,14 @@ mod navigation;
 mod prefetch;
 mod realtime;
 mod refresh;
+#[cfg(test)]
+mod tests;
 mod world;
 
 use auction_web_shared::{AsyncState, AsyncStateKind, QueryWriteMode, t, use_app_boot_ready};
 use dioxus::prelude::*;
 
+use self::data::{AuctionData, use_catalog_read};
 use super::loading::use_content_loading;
 use super::watches::LotWatchScope;
 use super::{
@@ -24,7 +27,6 @@ use super::{
 };
 use crate::api::fetch_historical_auction;
 
-pub(crate) use data::AuctionData;
 pub(crate) use prefetch::{prefetch_board_lots, remember_current_auction};
 pub(crate) use realtime::{
     PublicConnectionState, PublicDisplayedAuction, PublicPageRealtimeTarget, PublicReadinessState,
@@ -47,7 +49,7 @@ pub(crate) fn AuctionIndex() -> Element {
         }
     });
     rsx! {
-        CatalogCommandScope { AuctionBoard {} }
+        AuctionBoard {}
         LotDetailLookupHost { lookup }
     }
 }
@@ -156,6 +158,8 @@ pub(crate) fn AuctionBoard() -> Element {
     } else {
         *current_auction.state().read() == UseResourceState::Pending
     };
+    let auction = current.and_then(|result| result.as_ref().ok()).and_then(Option::as_ref);
+    let catalog_read = use_catalog_read(auction, historical, auction_reading, query_state);
     let boot_prerequisites_ready =
         readiness.read().is_some() && session.read().is_some() && current_auction.read().is_some();
     let terminal_without_auction = matches!(current, Some(Err(_)) | Some(Ok(None)));
@@ -163,7 +167,7 @@ pub(crate) fn AuctionBoard() -> Element {
     use_app_boot_ready(boot_prerequisites_ready && terminal_without_auction);
     use_content_loading(current.is_none());
 
-    match current {
+    let content = match current {
         // 加载提示由 ticker 承担；正文保持空位，避免加载块被数据替换时挤压容器。
         None => rsx! {},
         Some(Err(_)) => rsx! {
@@ -184,18 +188,24 @@ pub(crate) fn AuctionBoard() -> Element {
             }
         },
         Some(Ok(Some(auction))) => rsx! {
-            LotWatchScope {
-                auction_id: auction.id.clone(),
-                AuctionData {
-                    auction: auction.clone(),
-                    historical,
-                    auction_reading,
-                    boot_prerequisites_ready,
+            if let Some(catalog_read) = catalog_read {
+                LotWatchScope {
+                    auction_id: auction.id.clone(),
+                    AuctionData {
+                        auction: auction.clone(),
+                        historical,
+                        catalog_read,
+                        query_state_signal: query_state,
+                        boot_prerequisites_ready,
+                    }
+                    // 详情和表格的身份投影随标记作用域重建；目录读取仍留在看板。
+                    CatalogDetailHost { auction_id: auction.id.clone() }
                 }
-                // 详情抽屉挂在标记作用域内（底部标记按钮需要它），并与目录共存亡：
-                // 切换场次或目录壳被错误/空态替换时，抽屉随之关闭。
-                CatalogDetailHost { auction_id: auction.id.clone() }
             }
         },
+    };
+    rsx! {
+        // 场次读取临时失败或换筛选时，命令宿主仍可保留已发送命令的原样重试。
+        CatalogCommandScope { {content} }
     }
 }
