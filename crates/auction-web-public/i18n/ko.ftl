@@ -513,7 +513,6 @@ proxy-binding-note = 자동 입찰이 활성 상태인 동안에는 상한이 �
 bid-type-proxy-lower = 자동 입찰 (상한 낮추기)
 bid-error = 입찰을 접수하지 못했습니다. 물품 상태와 금액을 확인해 주세요.
 bid-leading = 현재 이 품목의 선두 입찰자입니다.
-proxy-active = 이 품목에는 활성 상태인 자동 입찰 설정이 있습니다.
 
 rules-title-fallback = 규칙
 rules-load-error-title = 데이터를 불러오지 못했어요 — 자동으로 다시 시도해요.

@@ -514,7 +514,6 @@ proxy-binding-note = Your proxy maximum stays private while the authorization is
 bid-type-proxy-lower = Proxy bid (lower maximum)
 bid-error = Bid was not accepted. Check the lot status and amount.
 bid-leading = You are currently leading this lot.
-proxy-active = An active proxy authorization is controlling this lot.
 
 rules-title-fallback = Rules
 rules-load-error-title = Could not load data — it will retry automatically.

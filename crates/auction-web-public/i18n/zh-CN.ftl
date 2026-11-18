@@ -513,7 +513,6 @@ proxy-binding-note = 代理生效期间，上限不会公开。如果你的代�
 bid-type-proxy-lower = 代理出价（降低上限）
 bid-error = 出价未被接受，请检查拍品状态和金额。
 bid-leading = 你当前正在领先此拍品。
-proxy-active = 当前已有有效代理授权控制此拍品。
 
 rules-title-fallback = 竞拍规则
 rules-load-error-title = 数据加载失败——将自动重试。

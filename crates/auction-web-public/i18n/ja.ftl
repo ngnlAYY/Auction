@@ -513,7 +513,6 @@ proxy-binding-note = 代理入札が有効な間、上限額は非公開です�
 bid-type-proxy-lower = 代理入札（上限額引き下げ）
 bid-error = 入札を受け付けられませんでした。出品状態と金額をご確認ください。
 bid-leading = この出品で現在最高額です。
-proxy-active = この出品には有効な代理入札の設定があります。
 
 rules-title-fallback = ルール
 rules-load-error-title = データを読み込めませんでした——自動的に再試行します。
