@@ -37,7 +37,8 @@ bash ci/checks/check.sh <检查项>...
 | `markdown-links` | 离线检查全部 Markdown 的相对链接目标、同页与跨页锚点，并拒绝紧跟在表格行之后、会被渲染进表格的文本行，规则见[ci/checks/README.md#markdown-相对链接](checks/README.md#markdown-相对链接) |
 | `migration-compatibility` | 075 起每个迁移末尾恰好登记自身一次，闭集等级、版本及事务规范见[ci/checks/README.md#迁移兼容登记](checks/README.md#迁移兼容登记) |
 | `published-migrations` | 每个发布 tag（`v<版本>`）中存在的 `migrations/postgres/*.up.sql` 必须在当前工作树逐字节不变；禁止修改、重命名或删除已发布文件，只允许追加新编号 |
-| `all` | `repository public-redaction layout import-groups module-docs hot-fields config systemd-templates i18n equipment-contract ratchet audit-writes test-module-paths work-item-ids markdown-links migration-compatibility published-migrations` |
+| `web-build-inputs` | 离线核对 Web 指纹清单与浏览器 crate 的工作区路径依赖闭包，见[ci/checks/README.md#web-输入依赖闭包](checks/README.md#web-输入依赖闭包) |
+| `all` | `repository public-redaction layout import-groups module-docs hot-fields config systemd-templates i18n equipment-contract ratchet audit-writes test-module-paths work-item-ids markdown-links migration-compatibility published-migrations web-build-inputs` |
 | `fmt` | `cargo fmt --all -- --check` |
 | `check` | `cargo check --locked --workspace --all-targets` |
 | `lint` | `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` |
@@ -160,7 +161,9 @@ bash ci/release/web-bundle.sh public
 bash ci/release/web-bundle.sh admin
 ```
 
-以 `wasm-release` profile 运行 `dx bundle`（工具由 mise 按固定版本提供），复制到稳定目录 `target/dx/build/<包名>/web/public`（后端 `web-embed` 从这里内嵌），写入 payload 清单与哈希。生成清单前依次完成四步改写：在入口 `index.html` 的脚本预加载之前声明带指纹的 WASM 预加载（`<link rel="preload" as="fetch" type="application/wasm" crossorigin>`），让 WASM 与加载器 JS 并行下载；给入口模块脚本加 `data-cfasync="false"`，让 Cloudflare Rocket Loader 不改写它（见[ops/README.md#cdncloudflare](../ops/README.md#cdncloudflare)）；把 dx 按源码路径排列的静态样式表改排为 base → surface → desktop → mobile → console（样式只由静态 head 声明，运行时不再插入第二份；同一 `@layer` 内同特异度的规则靠加载先后覆盖）；再为 `assets/` 下可压缩资源生成 brotli 副本（`*.br`）。找不到唯一的 WASM、唯一的脚本预加载锚点或唯一的模块脚本，或样式表不是恰好这五份且首尾相连时构建失败，不产出未完成改写的 payload。预压缩要求 PATH 中有 `brotli`（release 构建工作流已安装），版本写入 `WEB-BUILD-INFO` 参与复用判定。复用要求本 surface、共享层、契约、工具配方及构建环境指纹一致，且现有 payload 再次通过完整门禁；仅比较 `dx` 与 `rustc` 版本不足以证明可复用。
+以 `wasm-release` profile 运行 `dx bundle`（工具由 mise 按固定版本提供），复制到稳定目录 `target/dx/build/<包名>/web/public`（后端 `web-embed` 从这里内嵌），写入 payload 清单与哈希。生成清单前依次完成四步改写：在入口 `index.html` 的脚本预加载之前声明带指纹的 WASM 预加载（`<link rel="preload" as="fetch" type="application/wasm" crossorigin>`），让 WASM 与加载器 JS 并行下载；给入口模块脚本加 `data-cfasync="false"`，让 Cloudflare Rocket Loader 不改写它（见[ops/README.md#cdncloudflare](../ops/README.md#cdncloudflare)）；把 dx 按源码路径排列的静态样式表改排为 base → surface → desktop → mobile → console（样式只由静态 head 声明，运行时不再插入第二份；同一 `@layer` 内同特异度的规则靠加载先后覆盖）；再为 `assets/` 下可压缩资源生成 brotli 副本（`*.br`）。找不到唯一的 WASM、唯一的脚本预加载锚点或唯一的模块脚本，或样式表不是恰好这五份且首尾相连时构建失败，不产出未完成改写的 payload。预压缩要求 PATH 中有 `brotli`（release 构建工作流已安装）。
+
+`WEB-BUILD-INFO` 记录单端输入指纹、构建环境指纹、dx/rustc/brotli 版本与实际编译进 WASM 的构建号（`build_id`）。复用要求回执全部字段匹配，且现有 payload 再次通过完整门禁。任一端的变更使共享构建号变化时，两端都要重建。缺少该字段的旧回执同样触发重建。构建结束后重新计算单端输入指纹、环境指纹与共享构建号，全部与构建前匹配才原子发布回执。
 
 ### Web payload 体积预算
 
@@ -184,4 +187,6 @@ mise run web-size                                # 同上
 
 `ci/release/release.sh` 与 `ci/release/web-bundle.sh` 共用：选择发布工具（用 `mise which` 解析后放到 `PATH` 前部，并设置 `NO_DOWNLOADS=1` 与专用的 `DX_HOME`，见[ci/tools/README.md#发布构建如何取用工具](tools/README.md#发布构建如何取用工具)）、计算源码身份指纹（已跟踪与未忽略的新文件、删除与 mode 变化）、计算前后端共享构建号、读取 BUILD-INFO、校验 Web payload，以及只读的 payload 体积测量与预算判定。未通过环境变量指定时，显式清空 Cargo 配置中的两类 rustc 包装器；环境变量指定的 `sccache` 替换为 mise 安装的版本，其他显式包装器保留并计入构建环境指纹。
 
-两个入口都在构建前把 `web_build_identity`（两个 Web surface 输入并集指纹的前 32 位）导出为 `AUCTION_BUILD_ID`。原生程序把它写进每个不可被共享缓存重放的 HTTP 响应的 `x-auction-build` 头与实时 WebSocket 首帧，浏览器把同一值编译进 payload 并与自身比较；不一致时只提示刷新，不自动重载。该值只随浏览器 payload 输入变化，后端专属部署不会误报。
+`web_inputs_fingerprint` 覆盖本 surface、浏览器工作区路径依赖的传递闭包、工作区构建配置与锁文件，以及 Web 构建脚本和工具配方。`web_build_identity` 共用同一份依赖清单，取 Public 与 Admin 输入并集指纹的前 32 位十六进制。路径依赖清单由 [`web-build-inputs` 门禁](checks/README.md#web-输入依赖闭包) 校验。
+
+两个入口都在构建前把 `web_build_identity` 导出为 `AUCTION_BUILD_ID`。原生程序把它写进每个不可被共享缓存重放的 HTTP 响应的 `x-auction-build` 头与实时 WebSocket 首帧，浏览器把同一值编译进 payload 并与自身比较。检测到不同值时提示刷新，由用户决定何时重载。只改浏览器依赖闭包之外的后端源码时，构建号保持原值。

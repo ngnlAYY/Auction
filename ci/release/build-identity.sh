@@ -116,6 +116,13 @@ source_fingerprint() {
 	} | sha256sum | awk '{print $1}'
 }
 
+# 浏览器工作区路径依赖的闭包由 web-build-inputs 核对。依赖变化时，单端缓存与共享构建号一同失效。
+web_workspace_dependency_paths=(
+	crates/auction-web-shared
+	crates/auction-contracts
+	crates/auction-time
+)
+
 # 前后端共享的构建号：两个 Web surface 输入并集指纹的前 32 位十六进制。
 # 它只随浏览器 payload 的输入变化，后端专属改动不改变构建号，因此部署后不会误报；
 # 值满足 1–64 位 URL/HTTP 头安全字符闭集。原生程序与浏览器必须用同一份来源计算。
@@ -124,7 +131,7 @@ web_build_identity() {
 	identity=$(path_fingerprint \
 		Cargo.toml Cargo.lock rust-toolchain.toml .cargo \
 		crates/auction-web-public crates/auction-web-admin \
-		crates/auction-web-shared crates/auction-contracts \
+		"${web_workspace_dependency_paths[@]}" \
 		ci/release/web-bundle.sh ci/release/build-identity.sh "${tool_recipe_inputs[@]}") || return 1
 	printf '%s\n' "${identity:0:32}"
 }
@@ -388,6 +395,6 @@ web_inputs_fingerprint() {
 	case "$surface" in public | admin) ;; *) return 2 ;; esac
 	path_fingerprint \
 		Cargo.toml Cargo.lock rust-toolchain.toml .cargo \
-		"crates/auction-web-$surface" crates/auction-web-shared crates/auction-contracts \
+		"crates/auction-web-$surface" "${web_workspace_dependency_paths[@]}" \
 		ci/release/web-bundle.sh ci/release/build-identity.sh "${tool_recipe_inputs[@]}"
 }

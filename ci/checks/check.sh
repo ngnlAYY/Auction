@@ -620,6 +620,12 @@ check_published_migrations() {
 	bash ci/checks/published-migrations.sh
 }
 
+check_web_build_inputs() (
+	source ci/release/build-identity.sh
+	cargo metadata --format-version 1 --no-deps --locked --offline |
+		perl ci/checks/web-build-inputs.pl "${web_workspace_dependency_paths[@]}"
+)
+
 # 本地 mise 任务与 CI 共用命令定义，避免编译参数在两处漂移。
 run_checks() {
 	local check
@@ -642,6 +648,7 @@ run_checks() {
 		port-coverage) check_port_coverage --uncovered ;;
 		migration-compatibility) check_migration_compatibility ;;
 		published-migrations) check_published_migrations ;;
+		web-build-inputs) check_web_build_inputs ;;
 		dependency-versions) check_dependency_versions ;;
 		repository) check_repository_contracts ;;
 		public-redaction) check_public_redaction ;;
@@ -661,7 +668,7 @@ run_checks() {
 		dependency-audit) bash ci/checks/dependency-audit.sh Cargo.lock ;;
 		release-dependency-audit) bash ci/checks/release-dependency-audit.sh ;;
 		dependency-unused) cargo machete ;;
-		all) run_checks repository public-redaction layout import-groups module-docs hot-fields config systemd-templates i18n equipment-contract ratchet audit-writes test-module-paths work-item-ids markdown-links migration-compatibility published-migrations ;;
+		all) run_checks repository public-redaction layout import-groups module-docs hot-fields config systemd-templates i18n equipment-contract ratchet audit-writes test-module-paths work-item-ids markdown-links migration-compatibility published-migrations web-build-inputs ;;
 		rust) run_checks fmt check dependency-versions lint wasm rustdoc ;;
 		*)
 			printf '未知静态检查：%s\n' "$check" >&2

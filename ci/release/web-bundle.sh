@@ -1,6 +1,39 @@
 #!/usr/bin/env bash
-# 构建单个 Web surface 的固定 payload；输入未变且产物通过完整门禁时直接复用。
+# 构建单个 Web surface 的固定 payload。复用时核对输入、共享构建号与产物完整性。
 # 用法：ci/release/web-bundle.sh public|admin
+
+# 写入与复用比较共用字段清单。回执须绑定实际编译进 WASM 的构建号。
+web_build_fields() {
+	printf '%s\n' \
+		'schema=auction-web-build/1' \
+		"surface=$surface" \
+		'profile=wasm-release' \
+		"dx_version=$dx_version" \
+		"rustc_version=$rustc_version" \
+		"brotli_version=$brotli_version" \
+		"source_fingerprint=$source_identity" \
+		"build_env_sha256=$build_environment" \
+		"build_id=$AUCTION_BUILD_ID"
+}
+
+# 命中后既不重新运行 dx，也不改写 mtime，保证内嵌资源与上一份制品逐字节相同。
+web_payload_reusable() {
+	[[ -d "$stable_root" && ! -L "$stable_root" && -f "$web_build_info" && ! -L "$web_build_info" ]] || return 1
+	[[ $(cat "$web_build_info") == "$(web_build_fields)" ]] || return 1
+	verify_web_payload "$surface" "$stable_root" >/dev/null
+}
+
+web_build_inputs_unchanged() {
+	local current_source_identity current_build_environment current_build_id
+	current_source_identity=$(web_inputs_fingerprint "$surface") || return 1
+	current_build_environment=$(build_env_fingerprint) || return 1
+	current_build_id=$(web_build_identity) || return 1
+	[[ "$current_source_identity" == "$source_identity" &&
+		"$current_build_environment" == "$build_environment" &&
+		"$current_build_id" == "$AUCTION_BUILD_ID" ]]
+}
+
+if [[ ${BASH_SOURCE[0]} != "$0" ]]; then return; fi
 
 set -euo pipefail
 
@@ -11,7 +44,7 @@ cd "$repository_root"
 source ci/release/build-identity.sh
 configure_build_tools
 
-# 浏览器构建号与原生程序共用来源指纹；部署后旧页面据此发现偏差。复用判定不因它改变。
+# 浏览器与原生程序使用同一构建号，即使单端输入未变，复用也必须维持这一不变量。
 AUCTION_BUILD_ID=$(web_build_identity) || exit 1
 export AUCTION_BUILD_ID
 
@@ -42,31 +75,10 @@ if [[ -z "$dx_version" || -z "$rustc_version" || -z "$brotli_version" ]]; then
 	printf '无法读取 dx/rustc/brotli 版本，Web 构建不能建立复用标记\n' >&2
 	exit 1
 fi
-# payload 指纹覆盖本 surface、共享层与契约源码；DTO 变化必须重建两个浏览器，避免内嵌旧协议。
+# payload 指纹覆盖本 surface 及浏览器的工作区路径依赖，防止交付由旧依赖编译的 WASM。
 source_identity=$(web_inputs_fingerprint "$surface")
 # WASM 自定义 profile 与 rustflags 同样影响页面产物，不能只使外层原生二进制缓存失效。
 build_environment=$(build_env_fingerprint)
-
-# WEB-BUILD-INFO 的全部字段；写入与复用比较共用一份清单。
-web_build_fields() {
-	printf '%s\n' \
-		'schema=auction-web-build/1' \
-		"surface=$surface" \
-		'profile=wasm-release' \
-		"dx_version=$dx_version" \
-		"rustc_version=$rustc_version" \
-		"brotli_version=$brotli_version" \
-		"source_fingerprint=$source_identity" \
-		"build_env_sha256=$build_environment"
-}
-
-# 复用条件：构建标记逐字段一致，且已有 payload 重新通过完整门禁。
-# 命中后既不重新运行 dx，也不改写 mtime，保证内嵌资源与上一份制品逐字节相同。
-web_payload_reusable() {
-	[[ -d "$stable_root" && ! -L "$stable_root" && -f "$web_build_info" && ! -L "$web_build_info" ]] || return 1
-	[[ $(cat "$web_build_info") == "$(web_build_fields)" ]] || return 1
-	verify_web_payload "$surface" "$stable_root" >/dev/null
-}
 
 if web_payload_reusable; then
 	printf '%s Web payload 输入未变，复用：sha256=%s files=%s\n' \
@@ -223,12 +235,9 @@ find "$payload_root" -type d -exec chmod 0755 {} +
 find "$payload_root" -exec touch -d "@$source_epoch" {} +
 touch -d "@$source_epoch" "$payload_manifest"
 
-# 新 payload 与复用走同一完整门禁，并复核构建期间输入未变，不能把中途变化标记成旧快照。
+# 新 payload 与复用走同一完整门禁。回执只能绑定构建前冻结的输入和构建号。
 verify_web_payload "$surface" "$stable_root" >/dev/null
-current_source_identity=$(web_inputs_fingerprint "$surface")
-current_build_environment=$(build_env_fingerprint)
-if [[ "$current_source_identity" != "$source_identity" ||
-"$current_build_environment" != "$build_environment" ]]; then
+if ! web_build_inputs_unchanged; then
 	printf '%s Web 构建期间输入发生变化，请重新构建\n' "$surface" >&2
 	exit 1
 fi

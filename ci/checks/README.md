@@ -2,7 +2,7 @@
 
 [ci/README.md](../README.md) · [docs/development.md](../../docs/development.md)
 
-[ci/checks/check.sh](check.sh) 是本地与 CI 的共同入口。`all` 包含仓库契约、公开仓库脱敏、目录布局、配置示例、systemd 模板、翻译键、装备诊断闭集、源码计数棘轮、审计写入失败分类、模块层级、Markdown 链接、迁移兼容登记与已发布迁移不可变检查；完整清单见 [ci/README.md#静态门禁cicheckschecksh](../README.md#静态门禁cicheckschecksh)。`mise run verify` 等价于 `bash ci/checks/check.sh all fmt check dependency-versions lint wasm rustdoc`：先运行 `all`，再依次执行格式、宿主默认 feature 编译、依赖版本、宿主全 feature Clippy、Public/Admin 两组 wasm32 Clippy 与 rustdoc 检查，不运行行为测试。
+[ci/checks/check.sh](check.sh) 是本地与 CI 的共同入口。`all` 包含仓库契约、公开仓库脱敏、目录布局、配置示例、systemd 模板、翻译键、装备诊断闭集、源码计数棘轮、审计写入失败分类、模块层级、Markdown 链接、迁移兼容登记、已发布迁移不可变和 Web 输入依赖闭包检查；完整清单见 [ci/README.md#静态门禁cicheckschecksh](../README.md#静态门禁cicheckschecksh)。`mise run verify` 等价于 `bash ci/checks/check.sh all fmt check dependency-versions lint wasm rustdoc`：先运行 `all`，再依次执行格式、宿主默认 feature 编译、依赖版本、宿主全 feature Clippy、Public/Admin 两组 wasm32 Clippy 与 rustdoc 检查，不运行行为测试。
 
 ## 公开仓库脱敏
 
@@ -39,6 +39,17 @@ bash ci/checks/check.sh published-migrations
 [ci/checks/published-migrations.sh](published-migrations.sh) 把每个 `v<数字>` 发布 tag 视为已发布版本，读取该 tag 的 `migrations/postgres/*.up.sql`，要求当前工作树中同一路径仍然是普通文件、且字节内容与 tag 中的 Git blob 完全一致。修改、重命名或删除任一已发布迁移都会失败；追加新编号文件不受影响。检查只比较 Git 对象与工作树，不执行 SQL、不联网，也不修改 tag。
 
 为实现失败关闭，检查拒绝浅克隆：`git rev-parse --is-shallow-repository` 必须为 `false`，CI 的 `docs` 作业因此使用 `fetch-depth: 0`。本地缺少 tag 时先执行 `git fetch --tags`；没有发布 tag 时输出“仅有未发布的迁移”并通过。发布工作流的 `guard` 作业在构建前独立运行这一检查。
+
+## Web 输入依赖闭包
+
+```bash
+bash ci/checks/check.sh web-build-inputs
+bash ci/checks/web-build-inputs-test.sh
+```
+
+`web-build-inputs` 从 `cargo metadata --format-version 1 --no-deps --locked --offline` 的结果读取依赖声明，以 `auction-web-public`、`auction-web-admin` 与 `auction-web-shared` 为入口，递归收集指向工作区成员的路径依赖。目标条件、可选 feature、构建和测试依赖的声明都计入。检查将闭包与两种 Web 指纹共用的清单比较，分别列出缺少与多出的依赖目录。清单不一致时退出 1。相关实现见 [ci/checks/web-build-inputs.pl](web-build-inputs.pl) 与 [ci/release/build-identity.sh](../release/build-identity.sh)。
+
+Cargo 只需读取工作区清单，下载缓存为空时也可运行，因此该门禁纳入 `all`。独立的回归脚本使用临时工作区验证传递依赖、指纹、复用和构建结束复核。
 
 ## unwrap/expect 门禁
 
