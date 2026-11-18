@@ -265,7 +265,7 @@ test("world_scope_switch_clears_auction_list_dependencies：往期拍卖切换�
   ];
   for (const [scope, world] of scopes) {
     const next = worldScopeSwitchQuery("AuctionList", scope, false);
-    expect(next).toEqual({ world, auctionId: null, category: null, page: 1 });
+    expect(next).toEqual({ world, auction: { kind: "unspecified" }, category: null, page: 1 });
   }
 });
 
@@ -292,7 +292,7 @@ test("world_scope_switch_clears_round_and_lot_filters_for_bidlog_and_fulfillment
       const next = worldScopeSwitchQuery(routeName, scope, false);
       expect(next).toEqual({
         world,
-        auctionId: null,
+        auction: { kind: "unspecified" },
         bidLogLot: null,
         page: 1,
       });

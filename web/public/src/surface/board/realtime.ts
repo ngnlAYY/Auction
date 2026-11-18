@@ -23,6 +23,7 @@ import {
   type LiveConnectionState,
   normalizedWorldQuery,
   type PublicBoardQuery,
+  queryAuctionId,
   type WorldScope,
   worldScopeFromQuery,
 } from "../query";
@@ -78,8 +79,8 @@ export type PublicRealtimePageKey =
 export function bidLogRealtimeKey(query: PublicBoardQuery) {
   return {
     kind: "bidlog",
-    id: query.auctionId,
-    invalidAuction: query.invalidAuction !== null,
+    id: queryAuctionId(query),
+    invalidAuction: query.auction.kind === "invalid",
     scope: worldScopeFromQuery("multi", normalizedWorldQuery(query.world)),
   } satisfies PublicRealtimePageKey;
 }

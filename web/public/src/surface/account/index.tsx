@@ -125,11 +125,6 @@ function AccountReadScope(props: { readonly userId: string }): JSX.Element {
     <LotDetailLookupContext value={lookup}>
       <CurrentWatches userId={props.userId} />
       <AuthenticatedAccountData userId={props.userId} />
-      <Show when={lookup.failed()}>
-        <p class="action-feedback action-feedback--error" role="alert">
-          {t("data-error")}
-        </p>
-      </Show>
       <LotDetailLookupHost lookup={lookup} />
     </LotDetailLookupContext>
   );

@@ -286,3 +286,18 @@
     font-size: 1rem;
   }
 }
+
+/* 强制颜色会移除闭合图标的渐变，沿用系统按钮文字色显示三条横线。 */
+@media screen and (max-width: 48rem) and (forced-colors: active) {
+  .public-console .console-ticker .public-shell__nav-toggle[aria-expanded="false"]::before {
+    inline-size: auto;
+    block-size: auto;
+    background: none;
+    color: ButtonText;
+    content: "☰";
+    /* biome-ignore lint/suspicious/noDuplicateProperties: 上一条是旧浏览器回退，空替代文本保留按钮名称。 */
+    content: "☰" / "";
+    font-size: var(--text-lg);
+    line-height: 1;
+  }
+}

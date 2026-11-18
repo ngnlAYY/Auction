@@ -1,6 +1,14 @@
 // 在生产外壳的焦点陷阱下提供 DOM 查询、捕获阶段和提交后的 MutationObserver。
 
-import { untrack } from "solid-js";
+import { expect } from "bun:test";
+import { flush, untrack } from "solid-js";
+import {
+  dispatch,
+  hasClass,
+  mountCompetition,
+  openBid,
+  waitFor,
+} from "../commands/competition-fixture.test";
 import { DomElement } from "./navigation-fixture.test";
 
 type Find = (match: (element: DomElement) => boolean, parent?: DomElement) => DomElement | null;
@@ -66,6 +74,7 @@ export function installDialogFocus() {
     documentElement: { setAttribute() {} },
     hidden: false,
     scrollingElement: null,
+    querySelector: (selector: string) => nodes(selector).item(0),
     querySelectorAll: nodes,
     getElementById(id: string) {
       const element = find((node) => node.attributes.id === id);
@@ -107,6 +116,19 @@ export function installDialogFocus() {
       Object.defineProperty(event, "target", { value: adapt(element) });
       documentFixture.dispatchEvent(event);
     },
+    focus(element: DomElement) {
+      adapt(element).focus();
+    },
+    keydown(element: DomElement, key: string, isComposing = false) {
+      const event = new Event("keydown", { cancelable: true });
+      Object.defineProperties(event, {
+        target: { value: adapt(element) },
+        key: { value: key },
+        isComposing: { value: isComposing },
+      });
+      documentFixture.dispatchEvent(event);
+      return event.defaultPrevented;
+    },
     commit() {
       for (const observer of observers) observer([]);
     },
@@ -118,4 +140,47 @@ export function installDialogFocus() {
       }
     },
   };
+}
+
+/** 在实际页面上验证面板关闭、还焦以及把按键留给前景模态。 */
+export async function checkPagePanelEscape(id: string): Promise<void> {
+  const dom = installDialogFocus();
+  let mounted: Awaited<ReturnType<typeof mountCompetition>> | null = null;
+  try {
+    const page = await mountCompetition();
+    mounted = page;
+    const findTrigger = () => page.find((element) => element.getAttribute("id") === id);
+    dom.attach(page.find);
+    await waitFor(() => findTrigger() !== null);
+    const trigger = findTrigger();
+    if (trigger === null) throw new Error("缺少面板入口");
+    const outside = page.need((element) => hasClass(element, "public-connection-refresh"));
+    dispatch(trigger, "Click");
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    dom.focus(outside);
+    expect(dom.keydown(outside, "Tab")).toBe(false);
+    expect(dom.keydown(outside, "Escape", true)).toBe(false);
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(dom.activeElement()).toBe(outside);
+
+    expect(dom.keydown(outside, "Escape")).toBe(true);
+    flush();
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(dom.activeElement()).toBe(trigger);
+    dom.focus(outside);
+    expect(dom.keydown(outside, "Escape")).toBe(false);
+    expect(dom.activeElement()).toBe(outside);
+
+    dispatch(trigger, "Click");
+    await openBid(page);
+    dom.commit();
+    const focused = dom.activeElement();
+    if (focused === null) throw new Error("未把焦点交给前景弹窗");
+    expect(dom.keydown(focused, "Escape")).toBe(false);
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(page.commands).toEqual([]);
+  } finally {
+    mounted?.dispose();
+    dom.restore();
+  }
 }

@@ -212,10 +212,10 @@ export async function mountCompetition(
     currentWorld: world,
     currentEmpty,
     readCurrent: initial?.readCurrent ?? ((_url: URL): Response | Promise<Response> | null => null),
-    readRounds: (_url: URL): Response | Promise<Response> | null => null,
+    readRounds: (_url: URL, _init?: RequestInit): Response | Promise<Response> | null => null,
     readEvents: (_url: URL): Response | Promise<Response> | null => null,
     readBidLog: (_url: URL): Response | Promise<Response> | null => null,
-    readPage: (_url: URL): Response | Promise<Response> | null => null,
+    readPage: (_url: URL, _init?: RequestInit): Response | Promise<Response> | null => null,
     directoryFailed: false,
     readDirectory:
       initial?.readDirectory ?? ((_url: URL): Response | Promise<Response> | null => null),
@@ -223,7 +223,8 @@ export async function mountCompetition(
     activeProxy: false,
     waitingProxy: false,
     readProxy: (_url: URL): Response | Promise<Response> | null => null,
-    readLot: lotDetailReceipt,
+    readLot: (id: string, _signal?: AbortSignal | null): Response | Promise<Response> =>
+      lotDetailReceipt(id),
   };
   const fetcher = spyOn(globalThis, "fetch").mockImplementation(
     Object.assign(
@@ -303,10 +304,10 @@ export async function mountCompetition(
           }
           case `/api/v1/lots/${LOT_ID}`:
           case `/api/v1/lots/${SECOND_LOT_ID}`:
-            return server.readLot(url.pathname.split("/").at(-1) ?? "");
+            return server.readLot(url.pathname.split("/").at(-1) ?? "", init?.signal);
           case "/api/v1/auctions":
             return (
-              server.readRounds(url) ??
+              server.readRounds(url, init) ??
               success({
                 auctions: [],
                 page: 1,
@@ -336,7 +337,7 @@ export async function mountCompetition(
           default:
             if (url.pathname.endsWith("/bid-log"))
               return server.readBidLog(url) ?? reject("not_found", 404);
-            return server.readPage(url) ?? reject("not_found", 404);
+            return server.readPage(url, init) ?? reject("not_found", 404);
         }
       },
       { preconnect: () => {} },

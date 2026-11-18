@@ -60,13 +60,7 @@ export function createTooltipInteraction(
   return { ...state, close, deferClose };
 }
 
-const POPUP_EVENTS: readonly string[] = [
-  "mouseenter",
-  "mouseleave",
-  "focusin",
-  "focusout",
-  "keydown",
-];
+const POPUP_EVENTS: readonly string[] = ["mouseenter", "mouseleave", "focusin", "focusout"];
 
 /** 浮层事件监听的生命周期守卫。 */
 export interface PopupListeners {
@@ -98,13 +92,6 @@ export function attachPopupListeners(
     } else if (event.type === "focusout") {
       state.popupFocused.set(false);
       deferClose();
-    } else if (event.type === "keydown" && event instanceof KeyboardEvent) {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        state.close();
-        documentNode.getElementById(triggerId)?.focus();
-      }
     }
   };
   const outside = (event: Event): void => {

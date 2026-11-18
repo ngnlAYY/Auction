@@ -1,5 +1,6 @@
 // 截断文本浮层的定位、显示与关闭：视口边界内放置，传送门渲染到 body，滚动或缩放时收起。
 
+import { containingModal } from "../../../platform/a11y/escape";
 import type { Cell } from "../../../reactive/cell";
 import type { TooltipPosition, TooltipRequest } from ".";
 import type { TooltipInteraction } from "./interaction";
@@ -184,7 +185,7 @@ export function renderPortalTooltip(
     return false;
   }
   // 弹窗里的浮层留在所属焦点范围与层叠上下文内，避免 body portal 落到遮罩后面。
-  const parent = trigger.closest('[role="dialog"][aria-modal="true"]') ?? document.body ?? null;
+  const parent = containingModal(trigger) ?? document.body ?? null;
   if (parent === null) {
     return false;
   }

@@ -197,6 +197,65 @@ test.each(
   }
 });
 
+test.each(pages)("%s 的非法场次恢复后，目录晚于计时器返回也不会写回旧 lot", async (path, api) => {
+  const page = await mountCompetition("main", true);
+  const directory = Promise.withResolvers<Response>();
+  const body = () => page.reads.filter((read) => read.split("?")[0]?.endsWith(`/${api}`));
+  try {
+    page.server.readRounds = (url) =>
+      url.searchParams.get("status") === "settled" ? directory.promise : directoryPage([], 1, 0);
+    page.server.readBidLog = () => success({ bids: [], page: 1, page_size: 20, total: 0 });
+    page.server.readPage = (url) =>
+      url.pathname.endsWith("/fulfillment")
+        ? success({
+            auction: { id: LATEST.id, world: "main", number: LATEST.sequence },
+            lots: [],
+            page: 1,
+            page_size: 20,
+            total: 0,
+          })
+        : null;
+    page.go(`${path}?auction=invalid&keep=%2b%20x`);
+    const recover = () =>
+      page.find(
+        (element) =>
+          element.tag === "button" && renderedText(element) === t("auction-view-current"),
+      );
+    await waitFor(() => recover() !== null);
+    const input = Object.assign(
+      page.need((element) => element.tag === "input" && element.getAttribute("name") === "lot"),
+      { value: "One12" },
+    );
+    jest.useFakeTimers();
+    onTestFinished(() => jest.useRealTimers());
+    dispatch(input, "Input");
+    expect(input.getAttribute("value")).toBe("One12");
+    const button = recover();
+    if (button === null) throw new Error("未挂载恢复按钮");
+    dispatch(button, "Click");
+    expect(page.location.searchParams.has("auction")).toBe(false);
+    jest.advanceTimersByTime(300);
+    for (let turn = 0; turn < 10; turn += 1) {
+      await Promise.resolve();
+      flush();
+    }
+    expect(page.location.search).toBe("?keep=%2b%20x");
+    expect(body()).toEqual([]);
+
+    jest.useRealTimers();
+    directory.resolve(directoryPage([LATEST], 1, 1));
+    await waitFor(() => body().length > 0);
+    expect(body().map((read) => new URL(read, page.location).searchParams.get("lot"))).toEqual([
+      null,
+    ]);
+    expect(page.location.searchParams.get("auction")).toBe(LATEST.id);
+    expect(page.location.searchParams.has("lot")).toBe(false);
+  } finally {
+    directory.resolve(directoryPage([], 1, 0));
+    page.dispose();
+  }
+});
+
 test.each(pages.flatMap((entry) => [3, 1002].map((page) => [...entry, page] as const)))(
   "%s 默认选场与页码重置只写一次，正文从第一页开始",
   async (path, api, render, page) => {

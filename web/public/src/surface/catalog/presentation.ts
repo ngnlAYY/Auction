@@ -11,7 +11,12 @@ import type { Accessor } from "solid-js";
 import { estimatedNow } from "../../api/clock";
 import type { CatalogRow } from "../../api/model";
 import { parseStrictRfc3339 } from "../../api/session/rfc3339";
-import { type PublicBoardQuery, publicBoardQueryDefault, publicHref } from "../query";
+import {
+  auctionParameter,
+  type PublicBoardQuery,
+  publicBoardQueryDefault,
+  publicHref,
+} from "../query";
 import { rustTrim } from "../query/text";
 
 const UTF8_ENCODER = new TextEncoder();
@@ -194,7 +199,7 @@ export function historicalAuctionStatusLabel(status: string): string {
 export function historicalLotsHref(auctionId: string, worldId: string): string {
   const query: PublicBoardQuery = {
     ...publicBoardQueryDefault(),
-    auctionId,
+    auction: auctionParameter(auctionId),
     world: worldId === "main" ? null : worldId,
   };
   return publicHref("/", query);
@@ -205,7 +210,7 @@ export function historicalLotsHref(auctionId: string, worldId: string): string {
 export function historicalBidLogHref(auctionId: string, world: string | null): string {
   const query: PublicBoardQuery = {
     ...publicBoardQueryDefault(),
-    auctionId,
+    auction: auctionParameter(auctionId),
     world,
   };
   return publicHref("/bidlog", query);
@@ -216,7 +221,7 @@ export function historicalBidLogHref(auctionId: string, world: string | null): s
 export function historicalFulfillmentHref(auctionId: string, world: string | null): string {
   const query: PublicBoardQuery = {
     ...publicBoardQueryDefault(),
-    auctionId,
+    auction: auctionParameter(auctionId),
     world,
   };
   return publicHref("/fulfillment", query);

@@ -5,10 +5,11 @@ import { createCell } from "@auction/web-shared/reactive/cell";
 import { createRouter, RouterContext } from "@auction/web-shared/router";
 import { installFakeWindow } from "@auction/web-shared/router/test-window";
 import { createRoot, flush } from "solid-js";
-
 import {
+  auctionParameter,
   InitialPublicLocationContext,
   initialPublicLocation,
+  queryAuctionId,
   readPublicQuery,
   usePublicQueryState,
 } from "../../query";
@@ -109,21 +110,25 @@ test.each(["/bidlog", "/fulfillment"])(
   async (pathname) => {
     const mounted = mountLotDraft(`${pathname}?world=main&auction=${AUCTION_A}&page=3`);
     try {
-      mounted.query.push({ ...mounted.query.state.peek(), auctionId: AUCTION_B, page: 2 });
+      mounted.query.push({
+        ...mounted.query.state.peek(),
+        auction: auctionParameter(AUCTION_B),
+        page: 2,
+      });
       flush();
-      expect(mounted.query.state.peek().auctionId).toBe(AUCTION_B);
+      expect(queryAuctionId(mounted.query.state.peek())).toBe(AUCTION_B);
       mounted.lot.input("One12");
       expect(mounted.lot.draft.peek()).toBe("One12");
 
       mounted.back();
-      expect(mounted.query.state.peek().auctionId).toBe(AUCTION_A);
+      expect(queryAuctionId(mounted.query.state.peek())).toBe(AUCTION_A);
       expect(mounted.lot.draft.peek()).toBe("");
       await Bun.sleep(2 * DEBOUNCE_MILLIS);
       expect(mounted.params().get("lot")).toBeNull();
       expect(mounted.params().get("page")).toBe("3");
 
       mounted.forward();
-      expect(mounted.query.state.peek().auctionId).toBe(AUCTION_B);
+      expect(queryAuctionId(mounted.query.state.peek())).toBe(AUCTION_B);
       expect(mounted.params().get("page")).toBe("2");
     } finally {
       mounted.dispose();
@@ -139,7 +144,7 @@ test("换世界恢复已应用筛选，返回原范围也不会恢复旧计时�
     mounted.query.push({
       ...mounted.query.state.peek(),
       world: "isekai",
-      auctionId: AUCTION_A,
+      auction: auctionParameter(AUCTION_A),
       bidLogLot: "Two7",
     });
     flush();

@@ -7,14 +7,13 @@ import type {
 import type { Result } from "@auction/web-shared/result";
 
 import { storedPublicPageSize } from "../pagination/preferences";
+import { type AuctionParameter, auctionParameter } from "./auction";
 import { rustTrim } from "./text";
 
 /** 公开拍卖看板的 URL 状态；筛选和分页必须能被刷新、分享和返回操作恢复。 */
 export interface PublicBoardQuery {
   world: string | null;
-  auctionId: string | null;
-  /** 非法或重复的场次参数原样保留，避免把显式目标当成当前场次。 */
-  invalidAuction: readonly string[] | null;
+  auction: AuctionParameter;
   category: string | null;
   /** 分类原文只有在玩家修正后才能从地址移除。 */
   invalidCategory: readonly string[] | null;
@@ -50,8 +49,7 @@ export interface PublicBoardQuery {
 export function publicBoardQueryDefault(): PublicBoardQuery {
   return {
     world: null,
-    auctionId: null,
-    invalidAuction: null,
+    auction: auctionParameter(null),
     category: null,
     invalidCategory: null,
     equipmentGroup: null,
@@ -77,6 +75,11 @@ export function publicBoardQueryDefault(): PublicBoardQuery {
     proxyPage: 1,
     passthrough: [],
   };
+}
+
+/** 已通过查询校验的场次 UUID，从唯一的场次参数派生。 */
+export function queryAuctionId(query: PublicBoardQuery): string | null {
+  return query.auction.kind === "selected" ? query.auction.id : null;
 }
 
 export function normalizeWorldQuery(value: string): string | null {

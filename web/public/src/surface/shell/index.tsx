@@ -263,8 +263,8 @@ function PublicShellContent(props: { readonly locationGeneration: Cell<number> }
     ) {
       return null;
     }
-    const auctionId = currentPublicQuery().auctionId;
-    return auctionId === null ? null : { kind: "auction", id: auctionId };
+    const auction = currentPublicQuery().auction;
+    return auction.kind === "selected" ? { kind: "auction", id: auction.id } : null;
   });
   const resolvedPageTarget = createValueMemo((): PublicRealtimeTarget | null => {
     const requested = requestedPageTarget();

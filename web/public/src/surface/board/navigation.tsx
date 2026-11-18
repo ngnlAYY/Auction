@@ -9,7 +9,7 @@ import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
 import { Match, Switch } from "solid-js";
 import type { PreviewHistoryLoad, PublicBoardQuery } from "../query";
-import { normalizeWorldQuery, publicHref } from "../query";
+import { auctionParameter, normalizeWorldQuery, publicHref } from "../query";
 
 interface ViewNavigation {
   readonly currentHref: string;
@@ -89,7 +89,7 @@ function viewNavigation(
   }
   // 链接随筛选与分页的查询状态重算；两份链接各自复制，避免改一处时污染另一份。
   const currentQuery = { ...query };
-  currentQuery.auctionId = null;
+  currentQuery.auction = auctionParameter(null);
   currentQuery.world = normalizeWorldQuery(current.world);
   const currentHref = publicHref("/auction", currentQuery);
   const previous = maxRound(
@@ -99,7 +99,7 @@ function viewNavigation(
   let previousHref: string | null = null;
   if (previous !== null) {
     const previousQuery = { ...query };
-    previousQuery.auctionId = previous.id;
+    previousQuery.auction = auctionParameter(previous.id);
     previousQuery.world = normalizeWorldQuery(previous.world_id);
     previousHref = publicHref("/auction", previousQuery);
   }

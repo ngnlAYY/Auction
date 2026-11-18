@@ -166,10 +166,12 @@ function preferenceOwnerSubmit(owner: PreferenceOwner): void {
     }
     const error = result.error;
     owner.state.update((state) => {
-      // 只有路由的明确冲突码能否定本命令；裸 409 或损坏响应不能抹掉首次未知。
+      // 服务端先查账本再校验版本和私信资格，只有对应的明确拒绝才能结束首次未知。
+      const rejected =
+        (error.status === 409 && error.code === "watch_preference_conflict") ||
+        pmChannelUnavailable(error);
       const pendingUncertain =
-        !(error.status === 409 && error.code === "watch_preference_conflict") &&
-        (state.pendingUncertain || commandErrorOutcomeUncertain(error));
+        !rejected && (state.pendingUncertain || commandErrorOutcomeUncertain(error));
       return { ...state, busy: false, pendingUncertain, error };
     });
   });
@@ -324,6 +326,10 @@ export function OutbidNotifications(props: { readonly userId: string }): JSX.Ele
   );
 }
 
+function pmChannelUnavailable(error: CommandError | null): boolean {
+  return error?.status === 422 && error.code === "pm_channel_unavailable";
+}
+
 function feedback(state: PreferenceState): string {
   if (state.pending === null) {
     return t("outbid-load-error");
@@ -333,6 +339,9 @@ function feedback(state: PreferenceState): string {
   }
   if (state.pendingUncertain) {
     return t("outbid-unknown");
+  }
+  if (pmChannelUnavailable(state.error)) {
+    return t("outbid-pm-unavailable");
   }
   return t("outbid-save-error");
 }

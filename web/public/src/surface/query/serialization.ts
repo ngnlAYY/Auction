@@ -73,10 +73,10 @@ export function publicQueryPairs(query: PublicBoardQuery): [string, string][] {
   if (query.world !== null) {
     pairs.push(["world", query.world]);
   }
-  if (query.auctionId !== null) {
-    pairs.push(["auction", query.auctionId]);
-  } else if (query.invalidAuction !== null) {
-    for (const value of query.invalidAuction) {
+  if (query.auction.kind === "selected") {
+    pairs.push(["auction", query.auction.id]);
+  } else if (query.auction.kind === "invalid") {
+    for (const value of query.auction.values) {
       pairs.push(["auction", value]);
     }
   }

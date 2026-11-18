@@ -123,13 +123,13 @@ export function BidLog(): JSX.Element {
   const lot = useLotFilterDraft(queryStateSignal, "/bidlog", LOT_FILTER_WRITE_DEBOUNCE_MILLIS);
   // 缺省场次会和第一页一起写址，先纠偏页码会生成另一次无意义的 replace。
   const bounds = usePublicPageBounds(queryStateSignal, "BidLog", (query) =>
-    query.auctionId === null ? [] : [["page", query.pageSize]],
+    query.auction.kind !== "selected" ? [] : [["page", query.pageSize]],
   );
   // 已有场次时只替换迁移期的分页别名，保留仍需修正的原始筛选。
   createEffect(
     () =>
       [
-        queryStateSignal().auctionId !== null && queryStateSignal().bidLogPageAlias,
+        queryStateSignal().auction.kind === "selected" && queryStateSignal().bidLogPageAlias,
         pageNumber(),
         bounds.blocked("page"),
       ] as const,
@@ -453,11 +453,6 @@ export function BidLog(): JSX.Element {
             )}
           </Match>
         </Switch>
-        <Show when={lookup.failed()}>
-          <p class="action-feedback action-feedback--error" role="alert">
-            {t("data-error")}
-          </p>
-        </Show>
         {/* 抽屉宿主在记录读取分支之外：翻页、筛选或后台重读替换表格时，已打开的详情不被卸载。 */}
         <LotDetailLookupHost lookup={lookup} />
       </section>

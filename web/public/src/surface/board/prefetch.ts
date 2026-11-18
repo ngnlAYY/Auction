@@ -32,8 +32,7 @@ export function rememberCurrentAuction(world: string, auctionId: string): void {
  * 至少为 1），保证两者请求同一 URL；显式 `auction` 由正文确认目标。 */
 export function prefetchBoardLots(world: string, query: PublicBoardQuery): void {
   if (
-    query.auctionId !== null ||
-    query.invalidAuction !== null ||
+    query.auction.kind !== "unspecified" ||
     query.invalidCategory !== null ||
     publicPageCorrections(query, currentBrowserSearch(), [["page", query.pageSize]], false).length >
       0

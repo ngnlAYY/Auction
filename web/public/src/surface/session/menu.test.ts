@@ -13,6 +13,7 @@ import {
   type PublicSessionResult,
 } from "../index";
 import { type NormalizedWorldQuery, worldScopeHref } from "../query";
+import { checkPagePanelEscape } from "../shell/dialog-focus-fixture.test";
 import { SessionMenu } from "./menu";
 
 const IDENTITY: PublicSession = {
@@ -77,3 +78,6 @@ test("顶栏登录身份的我的链接继承显式世界，缺省值仍可省�
   expect(accountMenuLinks(null, IDENTITY)).toEqual(["/me"]);
   expect(accountMenuLinks("isekai", null)).toEqual([]);
 });
+
+test("账户面板在焦点移出后按 Escape 收起并还焦", () =>
+  checkPagePanelEscape("public-account-session-trigger"));

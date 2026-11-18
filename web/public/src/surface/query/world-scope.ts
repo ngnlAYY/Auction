@@ -1,6 +1,7 @@
 // Public 世界范围的纯函数：路由类别、地址栏读写、导航继承与页面世界按钮组。
 // Solid 版由外壳提供控制器、页面内按钮组切换世界；Rust 版仍保留各页面自己的世界选择器。
 
+import { auctionParameter } from "./auction";
 import { publicAuctionHomeQuery } from "./links";
 import type { PublicQueryWrite } from "./state";
 
@@ -170,7 +171,7 @@ export function worldScopeSwitchQuery(
   if (routeName === "AuctionList") {
     return {
       world: worldQueryForScope("multi", scope),
-      auctionId: null,
+      auction: auctionParameter(null),
       category: null,
       page: 1,
     };
@@ -184,7 +185,7 @@ export function worldScopeSwitchQuery(
   if (routeName === "BidLog" || routeName === "Fulfillment") {
     return {
       world: worldQueryForScope("multi", scope),
-      auctionId: null,
+      auction: auctionParameter(null),
       bidLogLot: null,
       page: 1,
     };

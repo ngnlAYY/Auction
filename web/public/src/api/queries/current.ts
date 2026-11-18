@@ -15,7 +15,7 @@ import { decodeCurrentAuction, decodeWorlds } from "../decoder/catalog";
 import { catalogLevelFilterDefault } from "../model";
 import { LIVE_TTL_MILLIS } from "../swr-cache";
 import { cachedPublicGet } from "./cached-get";
-import { fetchAuctionPage, SUMMARY_PAGE_SIZE } from "./directory";
+import { fetchAuctionPage, revalidateRecentSettled, SUMMARY_PAGE_SIZE } from "./directory";
 import { fetchCurrentLots } from "./lots";
 
 /** 当前场次投影的缓存类型标识；同一 URL 不得被其他查询类型复用。 */
@@ -102,7 +102,6 @@ export async function fetchHistoricalAuction(
   }
   const summaryResult = await fetchAuctionSummary(
     envelope.auction_id,
-    status,
     await settledFirstPage,
     signal,
   );
@@ -112,7 +111,15 @@ export async function fetchHistoricalAuction(
   if (!summaryResult.ok) {
     return summaryResult;
   }
-  const summary = summaryResult.value;
+  let summary = summaryResult.value;
+  if (summary === null) {
+    // 拍品与目录有独立的新鲜期。缺席只允许一次近期目录再验证，不能用旧目录推断场次归属。
+    const recent = await revalidateRecentSettled(signal);
+    if (signal.aborted) return err("network_error");
+    if (!recent.ok) return recent;
+    summary = recent.value.auctions.find((auction) => auction.id === envelope.auction_id) ?? null;
+    if (summary === null) return err("拍卖目录中不存在目标拍卖");
+  }
   return ok({
     id: envelope.auction_id,
     world: summary.world_id,
@@ -127,13 +134,12 @@ export async function fetchHistoricalAuction(
   });
 }
 
-/** 在指定状态的场次目录中查找摘要；firstPage 是调用方已并行取得的第一页。 */
+/** 在结算场次目录中查找摘要；firstPage 是调用方已并行取得的第一页。 */
 async function fetchAuctionSummary(
   auctionId: string,
-  status: string,
   firstPage: Result<AuctionListResponse, string>,
   signal: AbortSignal,
-): Promise<Result<AuctionSummaryResponse, string>> {
+): Promise<Result<AuctionSummaryResponse | null, string>> {
   if (signal.aborted) {
     return err("network_error");
   }
@@ -152,7 +158,13 @@ async function fetchAuctionSummary(
       if (signal.aborted) {
         return err("network_error");
       }
-      const fetched = await fetchAuctionPage(null, status, pageNumber, SUMMARY_PAGE_SIZE, signal);
+      const fetched = await fetchAuctionPage(
+        null,
+        "settled",
+        pageNumber,
+        SUMMARY_PAGE_SIZE,
+        signal,
+      );
       if (signal.aborted) {
         return err("network_error");
       }
@@ -175,7 +187,7 @@ async function fetchAuctionSummary(
       rowCount < SUMMARY_PAGE_SIZE ||
       (total !== null && saturatingMultiply(pageNumber, SUMMARY_PAGE_SIZE) >= total)
     ) {
-      return err("拍卖目录中不存在目标拍卖");
+      return ok(null);
     }
     const nextPage = pageNumber + 1;
     if (!Number.isSafeInteger(nextPage)) {

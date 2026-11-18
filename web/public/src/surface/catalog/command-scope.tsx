@@ -40,7 +40,7 @@ import {
 import { activeOwnedProxy, type ProxyFormInput, proxyForm } from "../commands/proxy";
 import { type CommandPayload, type CommandReceipt, commandBusy } from "../commands/request";
 import { CommandRecovery, commandReceiptMessage } from "../commands/retry";
-import { readPublicQuery } from "../query";
+import { queryAuctionId, readPublicQuery } from "../query";
 import {
   currentUser,
   useWatchCommandOwner,
@@ -198,13 +198,14 @@ function CatalogCommandDialog(props: {
   // popstate 已改地址时，不能用新场次或世界替换打开弹窗时的目标。
   const targetAllowsBid = () => {
     const query = readPublicQuery();
+    const selected = queryAuctionId(query);
     return (
       !props.auctionInvalid &&
-      query.invalidAuction === null &&
+      query.auction.kind !== "invalid" &&
       openedAuction !== null &&
       props.auction?.id === openedAuction.id &&
       props.auction.world === openedAuction.world &&
-      (query.auctionId === null || query.auctionId === openedAuction.id) &&
+      (selected === null || selected === openedAuction.id) &&
       (query.world ?? "main") === openedAuction.world
     );
   };

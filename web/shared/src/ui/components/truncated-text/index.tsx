@@ -6,6 +6,7 @@ import { createEffect, onCleanup, onSettled, Show } from "solid-js";
 import { createCell } from "../../../reactive/cell";
 import { createValueMemo } from "../../../reactive/memo";
 import { createTaskScope } from "../../../reactive/tasks";
+import { registerTooltipEscape } from "./escape";
 import {
   attachPopupListeners,
   createTooltipInteraction,
@@ -39,6 +40,7 @@ interface TooltipDismissHandle {
   readonly viewport: VisualViewport | null;
   readonly resizeCallback: () => void;
   readonly scrollCallback: (event: Event) => void;
+  readonly stopEscape: () => void;
   popupListeners: PopupListeners | null;
   dispose(): void;
 }
@@ -134,7 +136,7 @@ export function TruncatedText(props: TruncatedTextProps): JSX.Element {
 
   // 固定宽度文本变化不触发 ResizeObserver；内容提交到 DOM 后重测，且不保留旧 portal 正文。
   const contentDependency = createValueMemo(() => [props.value, display()] as const);
-  createEffect(contentDependency, () => {
+  createEffect(contentDependency, ([value, displayed]) => {
     const element = mountedElement.peek();
     if (element === null) {
       return;
@@ -142,7 +144,7 @@ export function TruncatedText(props: TruncatedTextProps): JSX.Element {
     if (interaction.position.peek() !== null) {
       interaction.close();
     }
-    updateTruncatedState(element, displayDiffers(), truncated, tooltipPosition, portalElement);
+    updateTruncatedState(element, value !== displayed, truncated, tooltipPosition, portalElement);
   });
   // ref 回调发生在元素插入文档之前；挂载后的首次测量与尺寸观察统一推迟到布局完成。
   onSettled(() => {
@@ -222,6 +224,7 @@ export function TruncatedText(props: TruncatedTextProps): JSX.Element {
       viewport,
       resizeCallback,
       scrollCallback,
+      stopEscape: registerTooltipEscape(window.document, popupId, interaction.close),
       popupListeners: null,
       dispose() {
         removeTooltipDismissHandle(this);
@@ -337,11 +340,7 @@ export function TruncatedText(props: TruncatedTextProps): JSX.Element {
           }
         }}
         onKeyDown={(event) => {
-          if (event.key === "Escape" && tooltipPosition() !== null) {
-            event.stopPropagation();
-            event.preventDefault();
-            interaction.close();
-          } else if (focusable() && truncated() && (event.key === "Enter" || event.key === " ")) {
+          if (focusable() && truncated() && (event.key === "Enter" || event.key === " ")) {
             event.preventDefault();
             event.stopPropagation();
             toggleTooltip(
@@ -380,6 +379,7 @@ export function TruncatedText(props: TruncatedTextProps): JSX.Element {
 }
 
 function removeTooltipDismissHandle(handle: TooltipDismissHandle): void {
+  handle.stopEscape();
   try {
     handle.window.removeEventListener("resize", handle.resizeCallback);
   } catch {

@@ -9,9 +9,9 @@ import {
 import type { Cell } from "@auction/web-shared/reactive/cell";
 import { structuralEquals } from "@auction/web-shared/reactive/equality";
 import { useRouter, writeLocationPreservingScroll } from "@auction/web-shared/router";
-import { validUuid } from "@auction/web-shared/ui/validation";
 import { createEffect, useContext } from "solid-js";
 
+import { type AuctionParameter, auctionParameter } from "./auction";
 import type { PublicBoardQuery } from "./board";
 import {
   currentBrowserHash,
@@ -31,9 +31,11 @@ import {
   queryPairsString,
 } from "./serialization";
 
-/** 可写查询不携带非法原文；省略场次字段表示沿用地址中的场次。 */
-export type PublicQueryWrite = Omit<PublicBoardQuery, "auctionId" | "invalidAuction"> & {
-  readonly auctionId?: string | null;
+type PublicQueryFields = Omit<PublicBoardQuery, "auction">;
+
+/** 完整写入可替换场次参数；省略时沿用最新地址的原场次。 */
+export type PublicQueryWrite = PublicQueryFields & {
+  readonly auction?: AuctionParameter;
 };
 
 /** 读出完整状态，写入时可省略场次。 */
@@ -97,17 +99,6 @@ export function setPublicQuery(query: PublicQueryWrite, replace: boolean): boole
   return persistQuery(query, replace ? "replace" : "push", true) !== null;
 }
 
-function withAuctionWrite(query: PublicQueryWrite, current: PublicBoardQuery): PublicBoardQuery {
-  // 提供 auctionId（包括 null）就替换整条场次状态，丢弃旧非法原文；省略才沿用当前地址。
-  if (!Object.hasOwn(query, "auctionId")) {
-    return { ...query, auctionId: current.auctionId, invalidAuction: current.invalidAuction };
-  }
-  const auctionId = query.auctionId ?? null;
-  return auctionId !== null && !validUuid(auctionId)
-    ? { ...query, auctionId: null, invalidAuction: [auctionId] }
-    : { ...query, auctionId, invalidAuction: null };
-}
-
 function persistQuery(
   query: PublicQueryWrite,
   mode: QueryWriteMode,
@@ -119,7 +110,7 @@ function persistQuery(
   const pathname = currentPublicPathname();
   const search = currentBrowserSearch();
   const current = parsePublicQuery(pathname, search);
-  const next = withAuctionWrite(query, current);
+  const next = { ...query, auction: query.auction ?? current.auction };
   // 重复应用当前筛选不创建可返回的条目，也不把省略的默认值写入地址。
   if (!replaceAll && mode === "push" && structuralEquals(next, current)) {
     return null;
@@ -170,35 +161,62 @@ function changedAccountPageKeys(current: PublicBoardQuery, next: PublicBoardQuer
   return keys;
 }
 
-/** 读取地址栏最新查询、应用变更并按模式写回（读-改-写），同步 hook 状态。 */
+/** 读取地址栏最新查询、更新场次以外的筛选；只有写入成功才同步查询。 */
 export function updatePublicQueryState(
   state: Cell<PublicBoardQuery>,
-  update: (query: PublicBoardQuery) => void,
+  update: (query: PublicQueryFields) => void,
   mode: QueryWriteMode,
 ): boolean {
-  const query = readPublicQuery(initialSearchByState.get(state) ?? null);
-  // 非法态的可见 ID 也是 null，读-改-写须在赋值时记录调用方是否提供场次。
-  let auctionId = query.auctionId;
-  let wroteAuction = false;
-  const draft: PublicBoardQuery = {
-    ...query,
-    get auctionId() {
-      return auctionId;
-    },
-    set auctionId(value) {
-      auctionId = value;
-      wroteAuction = true;
-    },
-  };
+  return updateFullQuery(state, update, mode);
+}
+
+/** 提交场次选择及同一次操作负责的筛选或分页，拒写时保留原查询。
+ * 自动选择只用 replace，不能覆盖尚待玩家修复的非法场次。 */
+export function commitAuctionSelection(
+  state: Cell<PublicBoardQuery>,
+  id: string | null,
+  mode: QueryWriteMode,
+  change: readonly string[] | ((query: PublicQueryFields) => void),
+): boolean {
+  const auction = auctionParameter(id);
+  if (
+    auction.kind === "invalid" ||
+    (mode === "replace" && readPublicQuery().auction.kind === "invalid")
+  ) {
+    return false;
+  }
+  if (typeof change === "function") {
+    return updateFullQuery(state, change, mode, auction);
+  }
+  return updatePublicQueryPairs(
+    state,
+    ["auction", ...change],
+    auction.kind === "selected" ? [["auction", auction.id]] : [],
+    mode,
+  );
+}
+
+function updateFullQuery(
+  state: Cell<PublicBoardQuery>,
+  update: (query: PublicQueryFields) => void,
+  mode: QueryWriteMode,
+  selection?: AuctionParameter,
+): boolean {
+  const current = readPublicQuery(initialSearchByState.get(state) ?? null);
+  const { auction, ...draft } = current;
   update(draft);
-  if (!wroteAuction && currentPublicPathname() === "/me") {
-    const keys = changedAccountPageKeys(query, draft);
+  if (selection === undefined && currentPublicPathname() === "/me") {
+    const next = { ...draft, auction };
+    const keys = changedAccountPageKeys(current, next);
     if (keys.length !== 0) {
       // 账户翻页只提交改动的表；另一张表与其余筛选仍使用各自的原始查询片段。
-      const pairs = managedPublicQueryPairs(draft).filter(([key]) => keys.includes(key));
+      const pairs = managedPublicQueryPairs(next).filter(([key]) => keys.includes(key));
       return updatePublicQueryPairs(state, keys, pairs, mode);
     }
   }
-  const { auctionId: selected, invalidAuction: _invalidAuction, ...fields } = draft;
-  return commitQuery(state, wroteAuction ? { ...fields, auctionId: selected } : fields, mode);
+  return commitQuery(
+    state,
+    selection === undefined ? draft : { ...draft, auction: selection },
+    mode,
+  );
 }

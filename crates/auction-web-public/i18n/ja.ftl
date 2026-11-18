@@ -645,6 +645,7 @@ watch-conflict = マークが変更されたか、コマンドが競合しまし
 watch-save-error = マークを保存できません。サーバーのマークを再取得してから再試行してください。
 watch-retry-command = 元の保存を再試行
 
+boot-error = ページでエラーが発生しました。再読み込みしてください。
 stale-build-notice = 新しいバージョンが公開されました。このページを再読み込みしてください。現在の入力は自動送信されません。
 stale-build-refresh = ページを再読み込み
 

@@ -645,6 +645,7 @@ watch-conflict = 표시가 변경되었거나 명령이 충돌했습니다. 새�
 watch-save-error = 표시를 저장하지 못했습니다. 서버 표시를 새로 고친 후 재시도하세요.
 watch-retry-command = 원래 저장 재시도
 
+boot-error = 페이지에 오류가 발생했습니다. 새로고침해 주세요.
 stale-build-notice = 새 버전이 배포되었습니다. 이 페이지를 새로 고쳐 주세요. 현재 입력은 자동으로 제출되지 않습니다.
 stale-build-refresh = 페이지 새로 고침
 

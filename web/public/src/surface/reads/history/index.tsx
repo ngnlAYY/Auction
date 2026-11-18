@@ -233,11 +233,6 @@ export function History(): JSX.Element {
             </Switch>
           </div>
         </Show>
-        <Show when={lookup.failed()}>
-          <p class="action-feedback action-feedback--error" role="alert">
-            {t("data-error")}
-          </p>
-        </Show>
         {/* 抽屉宿主在结果读取分支之外：翻页、筛选或后台重读替换表格时，已打开的详情不被卸载。 */}
         <LotDetailLookupHost lookup={lookup} />
       </section>

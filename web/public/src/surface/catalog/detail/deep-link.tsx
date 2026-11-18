@@ -20,7 +20,12 @@ import { fetchLotDetail, type LotDetailFetchError } from "../../../api/queries/l
 import { PublicRefreshGenerationContext } from "../../board/refresh";
 import { useContentLoading } from "../../loading";
 import type { PublicBoardQuery } from "../../query";
-import { normalizeWorldQuery, publicBoardQueryDefault, publicHref } from "../../query";
+import {
+  auctionParameter,
+  normalizeWorldQuery,
+  publicBoardQueryDefault,
+  publicHref,
+} from "../../query";
 import { catalogCategoryKey } from "../presentation";
 
 /** 一次直达请求携带已读详情，只有对齐后的目录行可以接管它。 */
@@ -252,7 +257,7 @@ export function catalogPosition(
     ...base,
     // 主世界沿用无参数 URL。
     world: normalizedWorld === null || normalizedWorld === "main" ? null : normalizedWorld,
-    auctionId: historicalAuctionId,
+    auction: auctionParameter(historicalAuctionId),
     category: categoryFilter,
     page,
   };

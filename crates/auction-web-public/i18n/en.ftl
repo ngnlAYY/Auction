@@ -646,6 +646,7 @@ watch-conflict = Marks changed or command conflicted. Refresh, review the server
 watch-save-error = Mark could not be saved. Refresh server marks before trying again.
 watch-retry-command = Retry original save
 
+boot-error = The application encountered an error. Refresh the page to try again.
 stale-build-notice = A new version has been deployed. Refresh this page to load it; your current input is not submitted automatically.
 stale-build-refresh = Refresh page
 

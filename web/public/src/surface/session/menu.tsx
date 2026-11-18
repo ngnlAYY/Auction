@@ -1,6 +1,7 @@
 // 页头账号菜单：头像下拉、账户入口、退出与匿名登录入口。
 
 import { focusElementById } from "@auction/web-shared/platform/a11y";
+import { usePagePanelEscape } from "@auction/web-shared/platform/a11y/escape";
 import { type Cell, createCell } from "@auction/web-shared/reactive/cell";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import { createTaskScope } from "@auction/web-shared/reactive/tasks";
@@ -55,6 +56,11 @@ export function SessionMenu(props: { readonly scopedHref: (path: string) => stri
     return current.kind === "authenticated" ? current : null;
   };
   const closeMenu = () => closeSessionMenu(menuOpen);
+  usePagePanelEscape(() => authenticated() !== null && menuOpen(), {
+    triggerId: SESSION_TRIGGER_ID,
+    panelId: SESSION_PANEL_ID,
+    dismiss: closeMenu,
+  });
 
   return (
     // biome-ignore lint/a11y/useAriaPropsSupportedByRole: 源码在账号菜单的普通容器上保留 aria-label，不能改 DOM 层级。
@@ -94,13 +100,6 @@ export function SessionMenu(props: { readonly scopedHref: (path: string) => stri
                   aria-controls={SESSION_PANEL_ID}
                   aria-expanded={menuOpen() ? "true" : "false"}
                   onClick={() => menuOpen.set(!menuOpen())}
-                  onKeyDown={(event) => {
-                    if (menuOpen() && event.key === "Escape") {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      closeMenu();
-                    }
-                  }}
                 >
                   <span class="public-account-session-avatar" aria-hidden="true">
                     {initial()}
@@ -121,20 +120,9 @@ export function SessionMenu(props: { readonly scopedHref: (path: string) => stri
                 </button>
                 <Show when={menuOpen()}>
                   {/* biome-ignore lint/a11y/noStaticElementInteractions: 遮罩只承担关闭点击，交互面板在内层。 */}
-                  {/* biome-ignore lint/a11y/useKeyWithClickEvents: 遮罩只承担关闭点击，键盘关闭由面板根处理。 */}
+                  {/* biome-ignore lint/a11y/useKeyWithClickEvents: 遮罩只承担关闭点击，文档监听处理 Escape。 */}
                   <div class="public-account-session-backdrop" onClick={() => closeMenu()} />
-                  {/* biome-ignore lint/a11y/noStaticElementInteractions: 面板根只处理 Escape，条目本身是普通链接与按钮。 */}
-                  <div
-                    id={SESSION_PANEL_ID}
-                    class="public-account-session-panel"
-                    onKeyDown={(event) => {
-                      if (event.key === "Escape") {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        closeMenu();
-                      }
-                    }}
-                  >
+                  <div id={SESSION_PANEL_ID} class="public-account-session-panel">
                     {/* “我的”与退出不把焦点还给入口：路由切换接管焦点，退出后入口随会话卸载。 */}
                     <Link
                       class="public-account-session-item"

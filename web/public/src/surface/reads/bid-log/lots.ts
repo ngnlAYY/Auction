@@ -21,10 +21,10 @@ import { rustTrim } from "../../query/text";
 
 const NIL_UUID = "00000000-0000-0000-0000-000000000000";
 
-type LotFilterScope = Pick<PublicBoardQuery, "world" | "auctionId">;
+type LotFilterScope = Pick<PublicBoardQuery, "world" | "auction">;
 
 function sameLotFilterScope(left: LotFilterScope, right: LotFilterScope): boolean {
-  return left.world === right.world && left.auctionId === right.auctionId;
+  return left.world === right.world && structuralEquals(left.auction, right.auction);
 }
 
 function readLotValues(search: string): string[] {
@@ -59,7 +59,7 @@ export function useLotFilterDraft(
   const interacted = createCell(false);
   const selection = createValueMemo(() => {
     const query = queryState();
-    return { world: query.world, auctionId: query.auctionId, values: appliedValues() };
+    return { world: query.world, auction: query.auction, values: appliedValues() };
   });
   const restore = (value: string) => {
     edited.set(false);

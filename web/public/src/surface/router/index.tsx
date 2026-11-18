@@ -66,6 +66,15 @@ function LocalizedApp(props: {
   const session = createLocaleSession(props.bundle, DEFAULT_PUBLIC_LOCALE);
   session.bootstrap(PUBLIC_LOCALE_CATALOG);
   useLocaleEffects(session);
+  createEffect(
+    () => (session.isReady() ? t("boot-error") : null),
+    (message) => {
+      if (message === null || typeof document === "undefined") return;
+      // 语言就绪时预先写入独立于应用树的横幅，异常中断渲染后仍能显示。
+      const banner = document.querySelector("#main > .app-boot > .app-boot__error");
+      if (banner !== null) banner.textContent = message;
+    },
+  );
   // 首次渲染前恢复 hv.theme，应用显示时已是目标主题。
   const themeState: ThemeState = useThemeEffects();
   const initialReturn = useContext(InitialLoginReturnLocationContext);

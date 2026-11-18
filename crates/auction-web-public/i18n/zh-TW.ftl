@@ -645,6 +645,7 @@ watch-conflict = 標記已變更或命令衝突。請重新整理、確認伺服
 watch-save-error = 標記儲存失敗，請先重新整理伺服器標記再重試。
 watch-retry-command = 重試原儲存命令
 
+boot-error = 頁面發生錯誤，請重新整理頁面再試一次。
 stale-build-notice = 站點已更新。請重新整理此頁面以載入新版本；目前輸入不會被自動送出。
 stale-build-refresh = 重新整理頁面
 

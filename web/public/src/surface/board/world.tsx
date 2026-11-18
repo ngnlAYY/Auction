@@ -17,6 +17,7 @@ import { createEffect, For, Show, untrack, useContext } from "solid-js";
 import { decodeWorlds } from "../../api/decoder/catalog";
 import { cachedPublicRead } from "../../api/queries/cached-get";
 import {
+  commitAuctionSelection,
   normalizedWorldQuery,
   type PublicBoardQuery,
   readPublicQuery,
@@ -140,7 +141,7 @@ export function createWorldSwitch(props: CreateWorldSwitchOptions): WorldSwitchC
   const family = createValueMemo(() => worldScopeFamily(routeName()));
   const queryWorld = createValueMemo(() => normalizedWorldQuery(props.shellQueryState().world));
   const historicalUrl = createValueMemo(
-    () => isBoardRouteName(routeName()) && props.shellQueryState().auctionId !== null,
+    () => isBoardRouteName(routeName()) && props.shellQueryState().auction.kind === "selected",
   );
   const switchInput = createValueMemo(
     (): WorldSwitchInput => ({
@@ -189,8 +190,7 @@ export function createWorldSwitch(props: CreateWorldSwitchOptions): WorldSwitchC
       // 看板上显式场次的地址不可被世界纠偏改写，包括等待用户修复的非法目标。
       const preserveWorld =
         latestFamily === "multi" ||
-        (isBoardRouteName(latestRouteName) &&
-          (latestQuery.auctionId !== null || latestQuery.invalidAuction !== null));
+        (isBoardRouteName(latestRouteName) && latestQuery.auction.kind !== "unspecified");
       const latestActive =
         preserveWorld || state.catalog.enabled.length === 0
           ? requestedWorld
@@ -226,15 +226,16 @@ export function createWorldSwitch(props: CreateWorldSwitchOptions): WorldSwitchC
     const currentRouteName = routeNameOf(currentRoute);
     // 补偿池等页面也用 `auction` 参数，只有看板上的往期场次随世界切换离开。
     const historicalBoard =
-      isBoardRouteName(currentRouteName) && readPublicQuery().auctionId !== null;
+      isBoardRouteName(currentRouteName) && readPublicQuery().auction.kind === "selected";
     // 用户主动切换要建立可返回的历史条目；写入口同时推进共享位置版本。
-    const written = updatePublicQueryState(
-      props.shellQueryState,
-      (query) => {
-        Object.assign(query, worldScopeSwitchQuery(currentRouteName, scope, historicalBoard));
-      },
-      "push",
-    );
+    const { auction, ...fields } = worldScopeSwitchQuery(currentRouteName, scope, historicalBoard);
+    const update = (query: Omit<PublicBoardQuery, "auction">) => {
+      Object.assign(query, fields);
+    };
+    const written =
+      auction === undefined
+        ? updatePublicQueryState(props.shellQueryState, update, "push")
+        : commitAuctionSelection(props.shellQueryState, null, "push", update);
     if (written) {
       setSelectedWorld(nextSelected);
     }

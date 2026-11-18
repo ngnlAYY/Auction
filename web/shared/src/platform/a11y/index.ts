@@ -64,6 +64,14 @@ function focusElement(element: HTMLElement): void {
   }
 }
 
+/** 聚焦触发文本本身或承载它的可聚焦链接、按钮。 */
+export function focusClosestControl(trigger: Element): void {
+  const control = trigger.closest(FOCUSABLE_SELECTOR);
+  if (control instanceof HTMLElement && control.isConnected) {
+    focusElement(control);
+  }
+}
+
 /** 匹配失败按不匹配处理，避免选择器兼容差异中断焦点循环。 */
 function matches(element: HTMLElement, selector: string): boolean {
   try {

@@ -3,9 +3,9 @@
 
 import { parseQuerySearch } from "@auction/web-shared/net/query";
 import { utf8ByteLength } from "@auction/web-shared/text";
-import { validUuid } from "@auction/web-shared/ui/validation";
 
 import { DEFAULT_PAGE_SIZE, parsePublicPageSize } from "../pagination";
+import { parseAuctionParameter } from "./auction";
 import { normalizeWorldQuery, type PublicBoardQuery, publicBoardQueryDefault } from "./board";
 import { normalizeCatalogCategories } from "./category";
 import { rustTrim } from "./text";
@@ -61,16 +61,7 @@ function retainedQueryValue(value: string): string | null {
 export function parsePublicQuery(pathname: string, search: string): PublicBoardQuery {
   const query = publicBoardQueryDefault();
   const params = parseQuerySearch(search.startsWith("?") ? search : "");
-  const auctions = params.getAll("auction");
-  const [auction] = auctions;
-  if (auction !== undefined) {
-    // 多值地址没有唯一目标；保留每个原值，让看板失败关闭。
-    if (auctions.length === 1 && validUuid(auction)) {
-      query.auctionId = auction;
-    } else {
-      query.invalidAuction = auctions;
-    }
-  }
+  query.auction = parseAuctionParameter(params.getAll("auction"));
   const types = params.getAll("type");
   const [type] = types;
   if (type !== undefined) {

@@ -5,10 +5,16 @@ import type { QueryState, QueryWriteMode } from "@auction/web-shared/net/query";
 import { writeLocationPreservingScroll } from "@auction/web-shared/router";
 import { flush } from "solid-js";
 
+import { auctionParameter } from "./auction";
 import { type PublicBoardQuery, publicBoardQueryDefault } from "./board";
 import { initialPublicLocation, readPublicQuery } from "./location";
 import { expectCurrentAddress, mountQueryStates } from "./query-state-fixture.test";
-import { setPublicQuery, updatePublicQueryState, writePublicQuery } from "./state";
+import {
+  commitAuctionSelection,
+  setPublicQuery,
+  updatePublicQueryState,
+  writePublicQuery,
+} from "./state";
 
 test("writing_from_one_query_state_refreshes_the_others：一个实例写回后其他实例读到新值", () => {
   const mounted = mountQueryStates();
@@ -16,13 +22,13 @@ test("writing_from_one_query_state_refreshes_the_others：一个实例写回后�
     const next = {
       ...publicBoardQueryDefault(),
       world: "isekai",
-      auctionId: "67e55044-10b1-426f-9247-bb680e5fe0c8",
+      auction: auctionParameter(AUCTION),
     };
     mounted.first.set(next, "replace");
     expectCurrentAddress(mounted);
     flush();
     expect(mounted.second.state().world).toBe("isekai");
-    expect(mounted.second.state().auctionId).toBe(next.auctionId);
+    expect(mounted.second.state().auction).toEqual(next.auction);
   } finally {
     mounted.close();
   }
@@ -52,17 +58,15 @@ const AUCTION = "67e55044-10b1-426f-9247-bb680e5fe0c8";
 test.each([
   {
     pathname: "/bidlog",
-    mode: "replace",
-    update(query: PublicBoardQuery) {
-      query.auctionId = AUCTION;
+    mode: "push",
+    update(query: Omit<PublicBoardQuery, "auction">) {
       query.page = 1;
     },
   },
   {
     pathname: "/fulfillment",
     mode: "push",
-    update(query: PublicBoardQuery) {
-      query.auctionId = AUCTION;
+    update(query: Omit<PublicBoardQuery, "auction">) {
       query.bidLogLot = null;
       query.page = 1;
     },
@@ -70,35 +74,33 @@ test.each([
   {
     pathname: "/compensation-pool",
     mode: "push",
-    update(query: PublicBoardQuery) {
-      query.auctionId = query.auctionId !== AUCTION ? AUCTION : null;
+    update(query: Omit<PublicBoardQuery, "auction">) {
       query.movementPage = 1;
     },
   },
-] satisfies { pathname: string; mode: QueryWriteMode; update(query: PublicBoardQuery): void }[])(
-  "$pathname 写入合法场次后，地址和查询状态都读回新选择",
-  ({ pathname, mode, update }) => {
-    const mounted = mountQueryStates(`${pathname}?auction=truncated&page=4&lot=One12`);
-    try {
-      expect(mounted.first.state.peek().invalidAuction).toEqual(["truncated"]);
-      expect(updatePublicQueryState(mounted.first.state, update, mode)).toBe(true);
-      expectCurrentAddress(mounted);
-      expect(mounted.first.state.peek()).toMatchObject({
-        auctionId: AUCTION,
-        invalidAuction: null,
-      });
-      flush();
-      expect(mounted.location.searchParams.getAll("auction")).toEqual([AUCTION]);
-      expect(readPublicQuery()).toMatchObject({ auctionId: AUCTION, invalidAuction: null });
-      expect(mounted.second.state.peek()).toMatchObject({
-        auctionId: AUCTION,
-        invalidAuction: null,
-      });
-    } finally {
-      mounted.close();
-    }
-  },
-);
+] satisfies {
+  pathname: string;
+  mode: QueryWriteMode;
+  update(query: Omit<PublicBoardQuery, "auction">): void;
+}[])("$pathname 写入合法场次后，地址和查询状态都读回新选择", ({ pathname, mode, update }) => {
+  const mounted = mountQueryStates(`${pathname}?auction=truncated&page=4&lot=One12`);
+  try {
+    expect(mounted.first.state.peek().auction).toEqual({ kind: "invalid", values: ["truncated"] });
+    expect(commitAuctionSelection(mounted.first.state, AUCTION, mode, update)).toBe(true);
+    expectCurrentAddress(mounted);
+    expect(mounted.first.state.peek()).toMatchObject({
+      auction: { kind: "selected", id: AUCTION },
+    });
+    flush();
+    expect(mounted.location.searchParams.getAll("auction")).toEqual([AUCTION]);
+    expect(readPublicQuery()).toMatchObject({ auction: { kind: "selected", id: AUCTION } });
+    expect(mounted.second.state.peek()).toMatchObject({
+      auction: { kind: "selected", id: AUCTION },
+    });
+  } finally {
+    mounted.close();
+  }
+});
 
 test("保留未触及的非法场次，补偿池显式清除时恢复未指定状态", () => {
   const mounted = mountQueryStates("/compensation-pool?auction=truncated&movement_page=4&page=3");
@@ -113,28 +115,45 @@ test("保留未触及的非法场次，补偿池显式清除时恢复未指定�
       ),
     ).toBe(true);
     expectCurrentAddress(mounted);
-    expect(readPublicQuery().invalidAuction).toEqual(["truncated"]);
+    expect(readPublicQuery().auction).toEqual({ kind: "invalid", values: ["truncated"] });
 
     expect(
-      updatePublicQueryState(
-        mounted.first.state,
-        (query) => {
-          query.page = 2;
-          query.auctionId = null;
-          query.movementPage = 1;
-        },
-        "push",
-      ),
+      commitAuctionSelection(mounted.first.state, null, "push", (query) => {
+        query.page = 2;
+        query.movementPage = 1;
+      }),
     ).toBe(true);
     expectCurrentAddress(mounted);
     expect(mounted.location.searchParams.has("auction")).toBe(false);
-    expect(readPublicQuery()).toMatchObject({ auctionId: null, invalidAuction: null });
+    expect(readPublicQuery()).toMatchObject({ auction: { kind: "unspecified" } });
     mounted.back();
     expect(mounted.first.state.peek()).toMatchObject({
-      auctionId: null,
-      invalidAuction: ["truncated"],
+      auction: { kind: "invalid", values: ["truncated"] },
       movementPage: 2,
     });
+  } finally {
+    mounted.close();
+  }
+});
+
+test("自动选场保留非法链接，显式提交也拒绝非 UUID 目标", () => {
+  const mounted = mountQueryStates("/bidlog?auction=bad&a%75ction=other&page=4&keep=%2b#history");
+  try {
+    const state = mounted.first.state;
+    const previous = state.peek();
+    const address = mounted.location.href;
+    expect(commitAuctionSelection(state, AUCTION, "replace", ["page"])).toBe(false);
+    expect(commitAuctionSelection(state, "invalid", "push", ["page"])).toBe(false);
+    expect(state.peek()).toBe(previous);
+    expect(mounted.location.href).toBe(address);
+
+    expect(commitAuctionSelection(state, AUCTION, "push", ["page"])).toBe(true);
+    expect(mounted.location.search).toBe(`?keep=%2b&auction=${AUCTION}`);
+    expect(mounted.location.hash).toBe("#history");
+    expect(state.peek().auction).toEqual({ kind: "selected", id: AUCTION });
+    mounted.back();
+    expect(mounted.location.href).toBe(address);
+    expect(state.peek().auction).toEqual({ kind: "invalid", values: ["bad", "other"] });
   } finally {
     mounted.close();
   }
@@ -143,21 +162,23 @@ test("保留未触及的非法场次，补偿池显式清除时恢复未指定�
 test("从非法查询构造完整状态时，新的合法 ID 不会继承旧非法值", () => {
   const mounted = mountQueryStates("/bidlog?auction=truncated");
   try {
-    mounted.first.replace({ ...mounted.first.state.peek(), auctionId: AUCTION });
+    mounted.first.replace({ ...mounted.first.state.peek(), auction: auctionParameter(AUCTION) });
     expectCurrentAddress(mounted);
-    expect(mounted.first.state.peek()).toMatchObject({ auctionId: AUCTION, invalidAuction: null });
-    expect(readPublicQuery()).toMatchObject({ auctionId: AUCTION, invalidAuction: null });
+    expect(mounted.first.state.peek()).toMatchObject({
+      auction: { kind: "selected", id: AUCTION },
+    });
+    expect(readPublicQuery()).toMatchObject({ auction: { kind: "selected", id: AUCTION } });
   } finally {
     mounted.close();
   }
 });
 
 test.each(["set", "replace", "push", "writePublicQuery", "setPublicQuery"] as const)(
-  "完整查询 %s 显式写入 null 后，地址栏读回未指定场次",
+  "完整查询 %s 显式清除场次后，地址栏读回未指定场次",
   (entry) => {
     const mounted = mountQueryStates("/?auction=truncated&ref=x");
     try {
-      const cleared = { ...mounted.first.state.peek(), auctionId: null };
+      const cleared = { ...mounted.first.state.peek(), auction: auctionParameter(null) };
       switch (entry) {
         case "set":
           mounted.first.set(cleared, "replace");
@@ -178,8 +199,8 @@ test.each(["set", "replace", "push", "writePublicQuery", "setPublicQuery"] as co
       expectCurrentAddress(mounted);
       flush();
       expect(mounted.location.searchParams.has("auction")).toBe(false);
-      expect(readPublicQuery()).toMatchObject({ auctionId: null, invalidAuction: null });
-      expect(mounted.first.state.peek()).toMatchObject({ auctionId: null, invalidAuction: null });
+      expect(readPublicQuery()).toMatchObject({ auction: { kind: "unspecified" } });
+      expect(mounted.first.state.peek()).toMatchObject({ auction: { kind: "unspecified" } });
     } finally {
       mounted.close();
     }
@@ -190,13 +211,12 @@ test.each(["truncated", AUCTION])("完整查询省略场次时沿用地址中的
   const mounted = mountQueryStates(`/?auction=${auction}&ref=x`);
   try {
     const original = readPublicQuery();
-    const { auctionId: _auctionId, invalidAuction: _invalidAuction, ...fields } = original;
+    const { auction: _auction, ...fields } = original;
     mounted.first.replace({ ...fields, page: 2 });
     expectCurrentAddress(mounted);
     expect(mounted.location.searchParams.getAll("auction")).toEqual([auction]);
     expect(readPublicQuery()).toMatchObject({
-      auctionId: original.auctionId,
-      invalidAuction: original.invalidAuction,
+      auction: original.auction,
       page: 2,
     });
   } finally {

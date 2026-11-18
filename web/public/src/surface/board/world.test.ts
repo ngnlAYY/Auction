@@ -509,7 +509,7 @@ test.each([
     mounted.controller.choose("main");
     flush();
     expect(mounted.location.searchParams.get("world")).toBe("main");
-    expect(mounted.query.peek().auctionId).toBeNull();
+    expect(mounted.query.peek().auction.kind).toBe("unspecified");
     expect(mounted.query.peek().page).toBe(1);
     mounted.router.push(mobileHref(mounted, "/bidlog"));
     flush();

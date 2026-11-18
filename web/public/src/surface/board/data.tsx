@@ -333,15 +333,6 @@ export function AuctionData(props: AuctionDataProps): JSX.Element {
           onRetry={() => props.catalog.retry()}
         />
       </Match>
-      <Match when={visibleSnapshot() === null && alignmentExhausted()}>
-        <AsyncState
-          kind="error"
-          title={t("data-error")}
-          detail={lotListErrorMessage("temporarily_unavailable")}
-          retryLabel={t("data-retry")}
-          onRetry={() => props.catalog.alignment.attempt.set(null)}
-        />
-      </Match>
       <Match when={visibleSnapshot()}>
         {(snapshot) => {
           const pageSize = () => snapshot().page.page_size ?? requestedPageSize();
@@ -469,6 +460,20 @@ export function AuctionData(props: AuctionDataProps): JSX.Element {
             queryStateSignal(),
           )}
         </CatalogGroupFilters>
+        <Show when={alignmentExhausted() && !currentFailed()}>
+          <AsyncState
+            kind="error"
+            title={t("data-error")}
+            detail={
+              visibleSnapshot() === null
+                ? lotListErrorMessage("temporarily_unavailable")
+                : t("catalog-preview-stale")
+            }
+            retryLabel={t("data-retry")}
+            // 保留最后对齐的预览，仅重置本次对齐记录，由调度器发起一轮权威重读。
+            onRetry={() => props.catalog.alignment.attempt.set(null)}
+          />
+        </Show>
         <Show
           when={
             !props.historical &&

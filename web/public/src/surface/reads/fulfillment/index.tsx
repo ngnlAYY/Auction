@@ -81,7 +81,9 @@ export function Fulfillment(): JSX.Element {
     Math.min(queryStateSignal().pageSize, MAX_FULFILLMENT_PAGE_SIZE),
   );
   const bounds = usePublicPageBounds(queryStateSignal, "Fulfillment", (query) =>
-    query.auctionId === null ? [] : [["page", Math.min(query.pageSize, MAX_FULFILLMENT_PAGE_SIZE)]],
+    query.auction.kind !== "selected"
+      ? []
+      : [["page", Math.min(query.pageSize, MAX_FULFILLMENT_PAGE_SIZE)]],
   );
   const lot = useLotFilterDraft(queryStateSignal, "/fulfillment", LOT_FILTER_WRITE_DEBOUNCE_MILLIS);
   const lotFilter = lot.appliedLot;
@@ -386,11 +388,6 @@ export function Fulfillment(): JSX.Element {
             )}
           </Match>
         </Switch>
-        <Show when={lookup.failed()}>
-          <p class="action-feedback action-feedback--error" role="alert">
-            {t("data-error")}
-          </p>
-        </Show>
         {/* 抽屉宿主在进度读取分支之外：翻页、筛选或后台重读替换表格时，已打开的详情不被卸载。 */}
         <LotDetailLookupHost lookup={lookup} />
       </section>

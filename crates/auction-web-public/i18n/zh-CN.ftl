@@ -645,6 +645,7 @@ watch-conflict = 标记已变化或命令冲突。请刷新、确认服务器状
 watch-save-error = 标记保存失败，请先刷新服务器标记再重试。
 watch-retry-command = 重试原保存命令
 
+boot-error = 页面运行出现异常，请刷新页面重试。
 stale-build-notice = 站点已更新。请刷新此页面以载入新版本；当前输入不会被自动提交。
 stale-build-refresh = 刷新页面
 

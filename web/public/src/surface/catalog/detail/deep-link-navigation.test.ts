@@ -214,7 +214,7 @@ test.each([200, 404, 410, 503] as const)(
         const expectedText = t(missing ? "catalog-detail-not-found" : "data-error");
         const failure = (element: DomElement) =>
           hasClass(element, missing ? "ui-async-state--empty" : "ui-async-state--error") &&
-          renderedText(element).includes(t("catalog-detail")) &&
+          renderedText(element).includes(t("catalog-view-lot", { code: "Clo01" })) &&
           renderedText(element).includes(expectedText);
         await waitFor(() => page.find(failure) !== null);
         const panel = page.need(failure);
@@ -250,6 +250,75 @@ test.each([200, 404, 410, 503] as const)(
       );
     } finally {
       directory.resolve(reject("not_found", 404));
+      page.dispose();
+    }
+  },
+);
+
+test.each([200, 404, 410, 503] as const)(
+  "只读抽屉先于重试回执打开，失效后按详情补读的 HTTP %i 更新",
+  async (status) => {
+    const page = await mountCompetition("isekai");
+    const drawer = () => page.find((element) => hasClass(element, "public-catalog-detail"));
+    const detailReads = () => page.reads.filter((url) => url === `/api/v1/lots/${LOT_ID}`);
+    try {
+      await record(page);
+      page.go("/login");
+      page.server.readDirectory = (url) =>
+        url.searchParams.has("category") ? reject("not_found", 404) : null;
+      const notice = page.need((element) => hasClass(element, "public-command-notices"));
+      dispatch(
+        page.need(
+          (element) => element.tag === "button" && renderedText(element) === t("data-retry"),
+          notice,
+        ),
+        "Click",
+      );
+      await waitFor(() => page.commands.length === 2);
+      expect(page.commands[1]?.body).toBe(page.commands[0]?.body);
+      viewCommandLot(page);
+      const opened = await openedDrawer(page, "Legendary Cotton Robe");
+      expect(renderedText(opened)).toContain(formatCreditAmount(1500));
+      expect(renderedText(opened)).toContain("Leader");
+      expect(detailReads()).toHaveLength(1);
+      const targetAddress = page.location.href;
+
+      page.server.readLot = (id) =>
+        status === 200
+          ? lotDetailReceipt(id, 4000, "Current bidder")
+          : reject(status === 503 ? "temporarily_unavailable" : "not_found", status);
+      page.commands[1]?.respond(bidReceipt(LOT_ID, 3500));
+      await waitFor(() => detailReads().length === 2);
+      await settle();
+      expect(page.location.href).toBe(targetAddress);
+      if (status !== 200) {
+        expect(drawer()).toBeNull();
+        const missing = status === 404 || status === 410;
+        const feedback = page.need(
+          (element) =>
+            hasClass(element, missing ? "ui-async-state--empty" : "ui-async-state--error") &&
+            renderedText(element).includes(t("catalog-view-lot", { code: "Clo01" })),
+        );
+        expect(renderedText(feedback)).toContain(
+          t(missing ? "catalog-detail-not-found" : "data-error"),
+        );
+        const retry = (element: DomElement) => hasClass(element, "ui-async-state__retry");
+        if (missing) {
+          expect(page.find(retry, feedback)).toBeNull();
+          return;
+        }
+        const beforeRetry = page.reads.length;
+        page.server.readLot = (id) => lotDetailReceipt(id, 4000, "Current bidder");
+        dispatch(page.need(retry, feedback), "Click");
+        await openedDrawer(page, "Legendary Cotton Robe");
+        expect(page.reads.slice(beforeRetry).filter((url) => url.includes("/lots?"))).toEqual([]);
+        expect(detailReads()).toHaveLength(3);
+      }
+      expect(page.commands).toHaveLength(2);
+      expect(renderedText(drawer())).toContain(formatCreditAmount(4000));
+      expect(renderedText(drawer())).toContain("Current bidder");
+      expect(renderedText(drawer())).not.toContain(formatCreditAmount(1500));
+    } finally {
       page.dispose();
     }
   },
@@ -296,6 +365,103 @@ test.each([false, true])("目录加载期间的打开请求只交给目标历史
     expect(page.find(drawer)).toBeNull();
   } finally {
     directory.resolve(reject("not_found", 404));
+    page.dispose();
+  }
+});
+
+test.each(["open", "failed", "late-success", "late-failure"] as const)(
+  "只读抽屉已交付后，后退到同一路径的上一条记录清理详情（%s）",
+  async (stage) => {
+    const page = await mountCompetition("isekai");
+    const read = Promise.withResolvers<Response>();
+    const signals: AbortSignal[] = [];
+    const readError = () => reject("internal_error", 500);
+    const detailReads = () => page.reads.filter((url) => url === `/api/v1/lots/${LOT_ID}`);
+    const drawer = () => page.find((element) => hasClass(element, "public-catalog-detail"));
+    const failure = () =>
+      page.find(
+        (element) =>
+          hasClass(element, "ui-async-state--error") &&
+          renderedText(element).includes(t("catalog-view-lot", { code: "Clo01" })),
+      );
+    try {
+      await waitFor(
+        () => page.find((node) => hasClass(node, "public-auction-catalog__table")) !== null,
+      );
+      const previousAddress = page.location.href;
+      page.server.readDirectory = (url) =>
+        url.searchParams.has("category") ? reject("not_found", 404) : null;
+      page.go(`/lots/${LOT_ID}`);
+      await openedDrawer(page, "Legendary Cotton Robe");
+      expect(page.location.pathname).toBe("/");
+      expect(page.location.href).not.toBe(previousAddress);
+      const targetAddress = page.location.href;
+      expect(detailReads()).toHaveLength(1);
+
+      if (stage !== "open") {
+        page.server.readLot = (_id, signal) => {
+          if (signal == null) throw new Error("详情补读缺少取消信号");
+          signals.push(signal);
+          return read.promise;
+        };
+        dispatch(
+          page.need((node) => hasClass(node, "public-connection-refresh")),
+          "Click",
+        );
+        await waitFor(() => signals.length === 1);
+        if (stage === "failed") {
+          read.resolve(readError());
+          await waitFor(() => failure() !== null);
+          const panel = failure();
+          if (panel === null) throw new Error("未挂载详情错误");
+          expect(
+            page.find((node) => hasClass(node, "ui-async-state__retry"), panel),
+          ).not.toBeNull();
+        }
+        expect(detailReads()).toHaveLength(2);
+      }
+
+      page.back();
+      expect(page.location.href).toBe(previousAddress);
+      if (stage === "late-success" || stage === "late-failure") {
+        expect(signals[0]?.aborted).toBe(true);
+        read.resolve(stage === "late-success" ? lotDetailReceipt(LOT_ID, 4000) : readError());
+      }
+      await settle();
+      expect(drawer()).toBeNull();
+      expect(failure()).toBeNull();
+      page.forward();
+      await settle();
+      expect(page.location.href).toBe(targetAddress);
+      expect(drawer()).toBeNull();
+      expect(failure()).toBeNull();
+      expect(detailReads()).toHaveLength(stage === "open" ? 1 : 2);
+    } finally {
+      read.resolve(readError());
+      page.dispose();
+    }
+  },
+);
+
+test("地址完全相同时，深链只读抽屉仍只属于交付的历史条目", async () => {
+  const href = "/?page_size=20&movement_page_size=20";
+  const page = await mountCompetition("main", true, { href });
+  const drawer = () => page.find((element) => hasClass(element, "public-catalog-detail"));
+  try {
+    const previousAddress = page.location.href;
+    page.go(`/lots/${LOT_ID}`);
+    await openedDrawer(page, "Legendary Cotton Robe");
+    expect(page.location.href).toBe(previousAddress);
+    page.back();
+    await settle();
+    expect(page.location.href).toBe(previousAddress);
+    expect(drawer()).toBeNull();
+    page.forward();
+    await settle();
+    expect(page.location.href).toBe(previousAddress);
+    expect(drawer()).toBeNull();
+    expect(page.reads.filter((url) => url === `/api/v1/lots/${LOT_ID}`)).toHaveLength(1);
+  } finally {
     page.dispose();
   }
 });

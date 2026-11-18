@@ -6,10 +6,20 @@ import type { Cell } from "@auction/web-shared/reactive/cell";
 import { createCell } from "@auction/web-shared/reactive/cell";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import { createTaskResource } from "@auction/web-shared/reactive/resource";
+import { useRouter } from "@auction/web-shared/router";
 import { AsyncState } from "@auction/web-shared/ui/components/async-state";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
-import { createContext, For, Match, Show, Switch, useContext } from "solid-js";
+import {
+  createContext,
+  createEffect,
+  For,
+  Match,
+  Show,
+  Switch,
+  untrack,
+  useContext,
+} from "solid-js";
 
 import type { CatalogRow } from "../../../api/model";
 import { catalogRowFromDetail } from "../../../api/model";
@@ -22,7 +32,7 @@ import { PublicRefreshGenerationContext, useBidRefresh } from "../../board/refre
 import { CatalogActionIcon } from "../actions";
 import type { CatalogDetailBid, DetailWorld } from ".";
 import { catalogDetailBidDefault } from ".";
-import type { LotViewTarget } from "./deep-link";
+import type { LotViewRequest, LotViewTarget } from "./deep-link";
 import { CatalogDetailDrawer } from "./drawer";
 
 /** 一次查看请求指向的拍品。`auctionId` 用于抽屉内的竞价历史读取；`world` 是入口已知的
@@ -31,7 +41,12 @@ export interface LotDetailTarget {
   readonly auctionId: string;
   readonly lotId: string;
   readonly world: string | null;
+  readonly lotCode: string;
+  /** 仅从深链交付的请求绑定历史条目；行内查看仍随本页宿主持有。 */
+  readonly entryKey: string | null;
 }
+
+type LotDetailSnapshot = Pick<LotViewTarget, "row" | "refreshGeneration">;
 
 /** 查看状态；只有加载中或已展示时才渲染抽屉。仅供测试使用。 */
 export type LookupState =
@@ -40,7 +55,7 @@ export type LookupState =
   | {
       readonly kind: "loading";
       readonly target: LotDetailTarget;
-      readonly prefetched?: Pick<LotViewTarget, "row" | "refreshGeneration">;
+      readonly prefetched?: LotDetailSnapshot;
     }
   | { readonly kind: "open"; readonly target: LotDetailTarget }
   /** 保留失败的目标与分类，暂时故障只重读原拍品。 */
@@ -52,8 +67,15 @@ export type LookupState =
 
 function targetsEqual(left: LotDetailTarget, right: LotDetailTarget): boolean {
   return (
-    left.auctionId === right.auctionId && left.lotId === right.lotId && left.world === right.world
+    left.auctionId === right.auctionId &&
+    left.lotId === right.lotId &&
+    left.world === right.world &&
+    left.entryKey === right.entryKey
   );
+}
+
+function belongsToEntry(target: LotDetailTarget, entryKey: string): boolean {
+  return target.entryKey === null || target.entryKey === entryKey;
 }
 
 /** 新的查看请求。同一拍品读取中或已展示时返回 `null`，重复点击不重启读取。
@@ -65,19 +87,23 @@ export function requested(state: LookupState, target: LotDetailTarget): LookupSt
   return { kind: "loading", target };
 }
 
-/** 读取完成后的迁移。结果只对仍在等待的同一拍品生效：已展示时的后台重读失败保留
- * 上一次快照，已关闭或已改看其他拍品的迟到结果直接丢弃。仅供测试使用。 */
+/** 读取完成后的迁移。暂时性错误只允许保留同一读取代号的快照。
+ * 已关闭或改看其他拍品的结果直接丢弃。仅供测试使用。 */
 export function resolved(
   state: LookupState,
-  lotId: string,
+  target: LotDetailTarget,
   error: LotDetailFetchError | null,
+  shownInGeneration: boolean,
 ): LookupState | null {
-  if (state.kind !== "loading" || state.target.lotId !== lotId) {
+  if ((state.kind !== "loading" && state.kind !== "open") || !targetsEqual(state.target, target)) {
     return null;
   }
-  return error === null
-    ? { kind: "open", target: state.target }
-    : { kind: "failed", target: state.target, error };
+  if (error === null) {
+    return state.kind === "loading" ? { kind: "open", target: state.target } : null;
+  }
+  return error.kind === "not_found" || !shownInGeneration
+    ? { kind: "failed", target: state.target, error }
+    : null;
 }
 
 /** 查找句柄私有状态的键；模块外不可见，调用方只能通过上下文取得句柄。 */
@@ -87,10 +113,8 @@ const LOOKUP_STATE = Symbol("lot-detail-lookup-state");
  * 读取不会被取消，忙碌态也不会卡住。 */
 export interface LotDetailLookup {
   readonly [LOOKUP_STATE]: Cell<LookupState>;
-  /** 看板无法交给目录行时，交付解析页的详情及其读取代号。 */
-  view(target: LotViewTarget): void;
-  /** 最近一次查看请求是否读取失败。 */
-  failed(): boolean;
+  /** 看板无法交给目录行时，连同条目标识交付预读详情。 */
+  view(request: LotViewRequest): void;
 }
 
 function lookupState(lookup: LotDetailLookup): Cell<LookupState> {
@@ -111,15 +135,12 @@ export function useLotDetailLookup(): LotDetailLookup {
   const state = createCell<LookupState>({ kind: "closed" });
   const lookup: LotDetailLookup = {
     [LOOKUP_STATE]: state,
-    view({ auctionId, lotId, world, row, refreshGeneration }) {
+    view({ entryKey, target: { auctionId, lotId, world, row, refreshGeneration } }) {
       state.set({
         kind: "loading",
-        target: { auctionId, lotId, world },
+        target: { auctionId, lotId, world, lotCode: row.code, entryKey },
         prefetched: { row, refreshGeneration },
       });
-    },
-    failed() {
-      return state().kind === "failed";
     },
   };
   return lookup;
@@ -160,6 +181,8 @@ export function LotDetailLookupButton(props: {
           auctionId: props.auctionId,
           lotId: props.lotId,
           world: props.world ?? null,
+          lotCode: props.lotCode,
+          entryKey: null,
         })
       }
     >
@@ -168,49 +191,79 @@ export function LotDetailLookupButton(props: {
   );
 }
 
-/** 只读详情抽屉的宿主。以拍品为 key：改看另一件时整体重建，上一件的读取随之取消。 */
+/** 只读详情抽屉的宿主。切换拍品或离开深链条目时，卸载读取任务并丢弃展示。 */
 export function LotDetailLookupHost(props: { readonly lookup: LotDetailLookup }): JSX.Element {
+  const state = lookupState(props.lookup);
+  const currentEntry = useRouter().currentEntryKey;
+  createEffect(currentEntry, (entryKey) => {
+    const snapshot = state.peek();
+    // 深链是一次性查看意图，离开条目后即使前进回来也不能恢复旧抽屉或错误。
+    if (snapshot.kind !== "closed" && !belongsToEntry(snapshot.target, entryKey)) {
+      state.set({ kind: "closed" });
+    }
+  });
   const target = () => {
-    const state = lookupState(props.lookup)();
-    return state.kind === "loading" || state.kind === "open" ? state.target : null;
+    const snapshot = state();
+    return (snapshot.kind === "loading" || snapshot.kind === "open") &&
+      belongsToEntry(snapshot.target, currentEntry())
+      ? snapshot.target
+      : null;
   };
   const targets = () => {
     const current = target();
     return current === null ? [] : [current];
   };
   return (
-    <For each={targets()} keyed={(current) => current.lotId}>
-      {(current) => <LotDetailLookupSession target={current()} lookup={props.lookup} />}
-    </For>
+    <>
+      <LotDetailFailure lookup={props.lookup} />
+      <For
+        each={targets()}
+        keyed={(current) =>
+          `${current.auctionId}:${current.lotId}:${current.world}:${current.entryKey ?? ""}`
+        }
+      >
+        {(current) => <LotDetailLookupSession target={current()} lookup={props.lookup} />}
+      </For>
+    </>
   );
 }
 
-/** 看板交付到只读宿主后，拍品读取失败由此呈现，不与目录的重试合并。 */
-export function BoardLotDetailFailure(props: { readonly lookup: LotDetailLookup }): JSX.Element {
+/** 详情读取失败有独立目标，重试不重读所在页面。 */
+function LotDetailFailure(props: { readonly lookup: LotDetailLookup }): JSX.Element {
   const state = lookupState(props.lookup);
+  const currentEntry = useRouter().currentEntryKey;
   const failure = () => {
     const current = state();
-    return current.kind === "failed" ? current : null;
+    return current.kind === "failed" && belongsToEntry(current.target, currentEntry())
+      ? current
+      : null;
   };
   return (
     <Switch>
-      <Match when={failure()?.error.kind === "not_found"}>
-        <AsyncState
-          kind="empty"
-          title={t("catalog-detail")}
-          detail={t("catalog-detail-not-found")}
-        />
+      <Match when={failure()?.error.kind === "not_found" ? failure() : null}>
+        {(failed) => (
+          <AsyncState
+            kind="empty"
+            title={t("catalog-view-lot", { code: failed().target.lotCode })}
+            detail={t("catalog-detail-not-found")}
+          />
+        )}
       </Match>
       <Match when={failure()}>
         {(failed) => (
           <AsyncState
             kind="error"
-            title={t("catalog-detail")}
+            title={t("catalog-view-lot", { code: failed().target.lotCode })}
             detail={t("data-error")}
             retryLabel={t("data-retry")}
             onRetry={() => {
               const current = state.peek();
-              if (current === failed() && current.error.kind === "lot_detail_fetch_error") {
+              if (
+                current.kind === "failed" &&
+                current.error.kind === "lot_detail_fetch_error" &&
+                belongsToEntry(current.target, untrack(currentEntry)) &&
+                current === failed()
+              ) {
                 openTarget(props.lookup, current.target);
               }
             }}
@@ -228,40 +281,54 @@ function LotDetailLookupSession(props: {
 }): JSX.Element {
   const refreshGeneration = useContext(PublicRefreshGenerationContext);
   const state = lookupState(props.lookup);
-  const shown = createCell<CatalogRow | null>(null);
+  const currentEntry = useRouter().currentEntryKey;
+  const shown = createCell<LotDetailSnapshot | null>(null);
   const detailDependencies = createValueMemo(() => ({
-    lotId: props.target.lotId,
+    target: props.target,
     // 权威刷新使用全局代号，普通出价只补读所属场次的详情。
     refreshGeneration: refreshGeneration(),
   }));
-  const detail = createTaskResource(detailDependencies, async (dependencies, context) => {
-    const current = state.peek();
-    const prefetched =
-      current.kind === "loading" && current.target.lotId === dependencies.lotId
-        ? current.prefetched
-        : undefined;
-    // 目录等待期间竞价命令可能已推进代号。只有同代号的预读能直接作为首次展示。
-    let row =
-      prefetched?.refreshGeneration === dependencies.refreshGeneration ? prefetched.row : null;
-    let error: LotDetailFetchError | null = null;
-    if (row === null) {
-      const page = await fetchLotDetail(dependencies.lotId, context.signal);
-      if (!context.alive()) return;
-      if (page.ok && page.value.lot !== null) {
-        row = catalogRowFromDetail(page.value.lot);
-      } else {
-        error = page.ok ? LOT_DETAIL_FETCH_ERROR : page.error;
+  const detail = createTaskResource(
+    detailDependencies,
+    async ({ target, refreshGeneration: generation }, context) => {
+      if (!belongsToEntry(target, untrack(currentEntry))) return;
+      const current = state.peek();
+      const prefetched =
+        current.kind === "loading" && targetsEqual(current.target, target)
+          ? current.prefetched
+          : undefined;
+      // 目录等待期间竞价命令可能已推进代号。只有同代号的预读能直接作为首次展示。
+      let row: CatalogRow | null =
+        prefetched?.refreshGeneration === generation ? prefetched.row : null;
+      let error: LotDetailFetchError | null = null;
+      if (row === null) {
+        const page = await fetchLotDetail(target.lotId, context.signal);
+        if (!context.alive()) return;
+        if (page.ok && page.value.auction_id === target.auctionId && page.value.lot !== null) {
+          row = catalogRowFromDetail(page.value.lot);
+        } else {
+          error = page.ok ? LOT_DETAIL_FETCH_ERROR : page.error;
+        }
       }
-    }
-    if (row !== null) {
-      shown.set(row);
-    }
-    // 读取任务处于响应式上下文内，这里只窥视状态，避免把迁移结果订阅成重读依赖。
-    const next = resolved(state.peek(), dependencies.lotId, error);
-    if (next !== null) {
-      state.set(next);
-    }
-  });
+      // 只有当前条目与读取代号内的目标才能发布价格或失败状态。
+      const latest = state.peek();
+      if (
+        !belongsToEntry(target, untrack(currentEntry)) ||
+        refreshGeneration.peek() !== generation ||
+        (latest.kind !== "loading" && latest.kind !== "open") ||
+        !targetsEqual(latest.target, target)
+      ) {
+        return;
+      }
+      if (row !== null) {
+        shown.set({ row, refreshGeneration: generation });
+      }
+      const next = resolved(latest, target, error, shown.peek()?.refreshGeneration === generation);
+      if (next !== null) {
+        state.set(next);
+      }
+    },
+  );
   useBidRefresh(
     detail,
     () => true,
@@ -272,7 +339,7 @@ function LotDetailLookupSession(props: {
       ? { kind: "auction" }
       : { kind: "known", world: props.target.world };
   return (
-    <Show when={shown()}>
+    <Show when={shown()?.row}>
       {(row) => {
         return (
           <CatalogDetailDrawer

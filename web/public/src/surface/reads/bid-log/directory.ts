@@ -13,8 +13,12 @@ import {
   fetchBidLogAuctions,
   orderBidLogAuctions,
 } from "../../../api/queries/bid-log";
-import { updatePublicQueryPairs } from "../../pagination/location";
-import { type PublicBoardQuery, readPublicQuery } from "../../query";
+import {
+  commitAuctionSelection,
+  type PublicBoardQuery,
+  queryAuctionId,
+  readPublicQuery,
+} from "../../query";
 import { directoryForScope, type ScopeSelection, sameScopeSelection } from "./scope-selection";
 
 interface StatusProgress {
@@ -86,14 +90,13 @@ export function useReadRoundDirectory(
   ) => readonly AuctionSummaryResponse[],
 ) {
   const statuses = mode === "bidlog" ? ["live", "final", "settled"] : ["settled"];
-  const auctionPageKeys =
-    mode === "bidlog" ? ["auction", "page", "bidlog_page"] : ["auction", "page"];
+  const auctionPageKeys = mode === "bidlog" ? ["page", "bidlog_page"] : ["page"];
   const selectionKeys = [...auctionPageKeys, "lot"];
   const tasks = createTaskScope();
   const wantedOptions = createCell(false);
   const snapshot = createCell<DirectoryProgress | null>(null);
-  const requestedId = createValueMemo(() => queryState().auctionId ?? "");
-  const invalidAuction = createValueMemo(() => queryState().invalidAuction !== null);
+  const requestedId = createValueMemo(() => queryAuctionId(queryState()) ?? "");
+  const invalidAuction = createValueMemo(() => queryState().auction.kind === "invalid");
   const rejected = createCell(false);
   const waiters = new Set<() => void>();
   const wake = () => {
@@ -148,11 +151,11 @@ export function useReadRoundDirectory(
         return new Promise<void>((resolve) => {
           const check = () => {
             const query = queryState.peek();
-            const id = query.auctionId ?? "";
+            const id = queryAuctionId(query) ?? "";
             const preferred = current.options[0];
             const thisStatus = current.statuses.get(page.status);
             const needed =
-              query.invalidAuction === null &&
+              query.auction.kind !== "invalid" &&
               !current.options.some((auction) => auction.id === id) &&
               (id !== "" ||
                 (current.statuses.size === statuses.length &&
@@ -218,15 +221,14 @@ export function useReadRoundDirectory(
     }
     const current = readPublicQuery();
     if (
-      current.invalidAuction !== null ||
-      (current.auctionId ?? "") !== change.expected ||
+      current.auction.kind === "invalid" ||
+      (queryAuctionId(current) ?? "") !== change.expected ||
       current.world !== queryState.peek().world
     ) {
       return;
     }
     // 场次与第一页同时生效；保留深链的原始 lot 条件供正文门禁检查。
-    const pairs = change.next === "" ? [] : [["auction", change.next] as const];
-    if (!updatePublicQueryPairs(queryState, auctionPageKeys, pairs, "replace")) {
+    if (!commitAuctionSelection(queryState, change.next || null, "replace", auctionPageKeys)) {
       rejected.set(true);
     }
   });
@@ -251,8 +253,7 @@ export function useReadRoundDirectory(
       : null;
   });
   const commitSelection = (id: string | null) =>
-    routeStillOnPage() &&
-    updatePublicQueryPairs(queryState, selectionKeys, id === null ? [] : [["auction", id]], "push");
+    routeStillOnPage() && commitAuctionSelection(queryState, id, "push", selectionKeys);
   return {
     options,
     selected,

@@ -2,18 +2,20 @@
 
 import { expect, test } from "bun:test";
 
+const { queryAuctionId } = await import("./board");
 const { parsePublicQuery } = await import("./parse");
 const { publicQueryString } = await import("./serialization");
 
 test("场次参数接受规范 UUID，并保留非法值供页面拒绝", () => {
   const auction = "67e55044-10b1-426f-9247-bb680e5fe0c8";
-  expect(parsePublicQuery("/", "")).toMatchObject({ auctionId: null, invalidAuction: null });
+  const unspecified = parsePublicQuery("/", "");
+  expect(unspecified.auction).toEqual({ kind: "unspecified" });
+  expect(queryAuctionId(unspecified)).toBeNull();
   for (const version of [1, 2, 3, 4, 5]) {
     const valid = auction.replace("426f", `${version}26f`);
-    expect(parsePublicQuery("/", `?auction=${valid}`)).toMatchObject({
-      auctionId: valid,
-      invalidAuction: null,
-    });
+    const query = parsePublicQuery("/", `?auction=${valid}`);
+    expect(query.auction).toEqual({ kind: "selected", id: valid });
+    expect(queryAuctionId(query)).toBe(valid);
   }
   for (const invalid of [
     "",
@@ -26,11 +28,13 @@ test("场次参数接受规范 UUID，并保留非法值供页面拒绝", () => 
     `urn:uuid:${auction}`,
   ]) {
     const query = parsePublicQuery("/", `?auction=${invalid}`);
-    expect(query).toMatchObject({ auctionId: null, invalidAuction: [invalid] });
+    expect(query.auction).toEqual({ kind: "invalid", values: [invalid] });
+    expect(queryAuctionId(query)).toBeNull();
     expect(new URLSearchParams(publicQueryString(query)).get("auction")).toBe(invalid);
   }
   const duplicate = parsePublicQuery("/", `?auction=${auction}&auction=${auction}`);
-  expect(duplicate).toMatchObject({ auctionId: null, invalidAuction: [auction, auction] });
+  expect(duplicate.auction).toEqual({ kind: "invalid", values: [auction, auction] });
+  expect(queryAuctionId(duplicate)).toBeNull();
   expect(new URLSearchParams(publicQueryString(duplicate)).getAll("auction")).toEqual([
     auction,
     auction,

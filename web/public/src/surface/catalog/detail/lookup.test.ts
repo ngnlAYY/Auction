@@ -8,7 +8,7 @@ const { requested, resolved } = await import("./lookup");
 const MISSING: LotDetailFetchError = { kind: "not_found" };
 
 function target(lotId: string): LotDetailTarget {
-  return { auctionId: "auction-1", lotId, world: null };
+  return { auctionId: "auction-1", lotId, world: null, lotCode: "Clo01", entryKey: null };
 }
 
 test("repeated_request_for_the_same_lot_does_not_restart_the_read：同一拍品的重复请求不会重启读取", () => {
@@ -33,9 +33,12 @@ test("a_new_request_replaces_any_other_state：新请求替换其他任何状态
 
 test("first_read_decides_between_open_and_failed：首次读取成功打开、失败关闭", () => {
   const loading: LookupState = { kind: "loading", target: target("lot-a") };
-  expect(resolved(loading, "lot-a", null)).toEqual({ kind: "open", target: target("lot-a") });
+  expect(resolved(loading, target("lot-a"), null, false)).toEqual({
+    kind: "open",
+    target: target("lot-a"),
+  });
   for (const error of [MISSING, LOT_DETAIL_FETCH_ERROR]) {
-    expect(resolved(loading, "lot-a", error)).toEqual({
+    expect(resolved(loading, target("lot-a"), error, false)).toEqual({
       kind: "failed",
       target: target("lot-a"),
       error,
@@ -43,11 +46,34 @@ test("first_read_decides_between_open_and_failed：首次读取成功打开、�
   }
 });
 
-test("late_or_background_results_never_change_the_state：迟到或后台结果不改变状态", () => {
-  // 已展示时的后台重读失败保留抽屉；已关闭或已改看其他拍品的结果被丢弃。
-  expect(resolved({ kind: "open", target: target("lot-a") }, "lot-a", MISSING)).toBeNull();
-  expect(resolved({ kind: "closed" }, "lot-a", null)).toBeNull();
+test("暂时失败只允许保留同代快照，明确不存在总是撤下抽屉", () => {
+  const opened: LookupState = { kind: "open", target: target("lot-a") };
+  expect(resolved(opened, opened.target, LOT_DETAIL_FETCH_ERROR, true)).toBeNull();
+  expect(resolved(opened, opened.target, LOT_DETAIL_FETCH_ERROR, false)).toMatchObject({
+    kind: "failed",
+    error: LOT_DETAIL_FETCH_ERROR,
+  });
+  expect(resolved(opened, opened.target, MISSING, true)).toMatchObject({
+    kind: "failed",
+    error: MISSING,
+  });
+});
+
+test("已关闭、失败或换目标之后丢弃迟到结果", () => {
+  expect(resolved({ kind: "closed" }, target("lot-a"), null, false)).toBeNull();
   const failed: LookupState = { kind: "failed", target: target("lot-a"), error: MISSING };
-  expect(resolved(failed, "lot-a", null)).toBeNull();
-  expect(resolved({ kind: "loading", target: target("lot-b") }, "lot-a", null)).toBeNull();
+  expect(resolved(failed, target("lot-a"), null, false)).toBeNull();
+  expect(
+    resolved({ kind: "loading", target: target("lot-b") }, target("lot-a"), null, false),
+  ).toBeNull();
+});
+
+test("同一拍品的不同历史条目各自建立读取，旧条目的结果不能交付", () => {
+  const first = { ...target("lot-a"), entryKey: "first" };
+  const second = { ...target("lot-a"), entryKey: "second" };
+  expect(requested({ kind: "open", target: first }, second)).toEqual({
+    kind: "loading",
+    target: second,
+  });
+  expect(resolved({ kind: "loading", target: second }, first, MISSING, false)).toBeNull();
 });

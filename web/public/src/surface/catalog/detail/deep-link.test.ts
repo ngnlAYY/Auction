@@ -3,9 +3,9 @@
 import { expect, test } from "bun:test";
 import type { CurrentAuctionItemResponse } from "@auction/contracts/dto/public/catalog/auction";
 import { err, ok, type Result } from "@auction/web-shared/result";
-
 import type { CatalogRow } from "../../../api/model";
 import type { PublicBoardQuery } from "../../query";
+import { queryAuctionId } from "../../query";
 import type { LotViewTarget } from "./deep-link";
 
 const { publicBoardQueryDefault } = await import("../../query");
@@ -103,7 +103,7 @@ test("page_follows_the_ordinal_inside_the_category：页码跟随分类内序号
 
 test("current_auction_lands_on_the_world_home_with_category_and_page：当前场次落到带分类与页码的世界首页", () => {
   let query = catalogPosition(row("Clo16", "Cloth"), "main", null, base(10));
-  expect([query.world, query.auctionId, query.category, query.page, query.pageSize]).toEqual([
+  expect([query.world, queryAuctionId(query), query.category, query.page, query.pageSize]).toEqual([
     null,
     null,
     "clo",
@@ -111,10 +111,15 @@ test("current_auction_lands_on_the_world_home_with_category_and_page：当前场
     10,
   ]);
   // 异世界带世界参数；往期场次带场次参数。
-  query = catalogPosition(row("Hea03", "Heavy"), "isekai", "auction-7", base(20));
-  expect([query.world, query.auctionId, query.category, query.page]).toEqual([
+  query = catalogPosition(
+    row("Hea03", "Heavy"),
     "isekai",
-    "auction-7",
+    "67e55044-10b1-426f-9247-bb680e5fe0c8",
+    base(20),
+  );
+  expect([query.world, queryAuctionId(query), query.category, query.page]).toEqual([
+    "isekai",
+    "67e55044-10b1-426f-9247-bb680e5fe0c8",
     "hea",
     1,
   ]);

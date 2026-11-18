@@ -2,6 +2,7 @@
 // 只改写本地列偏好，不改变目录查询、URL 或竞价状态；隐藏列不卸载表格命令宿主。
 
 import { focusElementById } from "@auction/web-shared/platform/a11y";
+import { usePagePanelEscape } from "@auction/web-shared/platform/a11y/escape";
 import type { Cell } from "@auction/web-shared/reactive/cell";
 import { createCell } from "@auction/web-shared/reactive/cell";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
@@ -47,6 +48,7 @@ export function CatalogColumnsMenu(props: {
     open.set(false);
     focusElementById(TOGGLE_ID);
   };
+  usePagePanelEscape(open, { triggerId: TOGGLE_ID, panelId: PANEL_ID, dismiss: close });
 
   return (
     <div class="public-catalog-columns-menu">
@@ -59,20 +61,13 @@ export function CatalogColumnsMenu(props: {
         aria-label={t("catalog-columns-settings")}
         title={t("catalog-columns-settings")}
         onClick={() => open.set(!open())}
-        onKeyDown={(event) => {
-          if (open() && event.key === "Escape") {
-            event.preventDefault();
-            event.stopPropagation();
-            close();
-          }
-        }}
       >
         <ColumnsIcon />
       </button>
       <Show when={open()} fallback={<div id={PANEL_ID} hidden={true} />}>
         {/* 透明遮罩接住面板外的点击。 */}
-        {/* biome-ignore lint/a11y/noStaticElementInteractions: 遮罩只承担关闭点击，键盘关闭由面板根处理。 */}
-        {/* biome-ignore lint/a11y/useKeyWithClickEvents: 遮罩不单独接收键盘，面板根统一处理 Escape。 */}
+        {/* biome-ignore lint/a11y/noStaticElementInteractions: 遮罩只承担关闭点击，键盘关闭由文档监听处理。 */}
+        {/* biome-ignore lint/a11y/useKeyWithClickEvents: 遮罩不单独接收键盘，文档监听处理 Escape。 */}
         <div class="public-catalog-columns__backdrop" onClick={() => close()} />
         {/* biome-ignore lint/a11y/useSemanticElements: 源码使用 div role=group 保持 DOM 结构。 */}
         <div
@@ -81,13 +76,6 @@ export function CatalogColumnsMenu(props: {
           role="group"
           aria-labelledby={TITLE_ID}
           aria-description={t("catalog-columns-hint")}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              event.preventDefault();
-              event.stopPropagation();
-              close();
-            }
-          }}
         >
           <strong id={TITLE_ID} class="public-catalog-columns__title">
             {t("catalog-columns")}

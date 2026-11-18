@@ -3,11 +3,11 @@
 // 归档到子模块，使用方直接从定义模块导入。
 
 import type { CurrentAuctionItemResponse } from "@auction/contracts/dto/public/catalog/auction";
-import type { Cell } from "@auction/web-shared/reactive/cell";
+import { type Cell, createCell } from "@auction/web-shared/reactive/cell";
 import { structuralEquals } from "@auction/web-shared/reactive/equality";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import { createTaskResource } from "@auction/web-shared/reactive/resource";
-import { err, ok } from "@auction/web-shared/result";
+import { err, ok, type Result } from "@auction/web-shared/result";
 import { Link, useRouter } from "@auction/web-shared/router";
 import { useAppBootReady } from "@auction/web-shared/ui/bootstrap";
 import { AsyncState } from "@auction/web-shared/ui/components/async-state";
@@ -32,7 +32,6 @@ import { CatalogCommandScope } from "../catalog/command-scope";
 import { disposeLotView, LotViewRequestContext } from "../catalog/detail/deep-link";
 import { CatalogDetailHost } from "../catalog/detail/drawer";
 import {
-  BoardLotDetailFailure,
   LotDetailLookupContext,
   LotDetailLookupHost,
   useLotDetailLookup,
@@ -44,6 +43,7 @@ import {
   type PublicBoardQuery,
   publicAuctionHomeQuery,
   publicHref,
+  queryAuctionId,
   redirectPublicAlias,
   usePublicQueryState,
 } from "../query";
@@ -77,7 +77,6 @@ export function AuctionIndex(): JSX.Element {
   return (
     <LotDetailLookupContext value={lookup}>
       <AuctionBoard />
-      <BoardLotDetailFailure lookup={lookup} />
       <LotDetailLookupHost lookup={lookup} />
     </LotDetailLookupContext>
   );
@@ -87,7 +86,7 @@ export function AuctionPage(): JSX.Element {
   const query = usePublicQueryState().state;
   return (
     <Show
-      when={query().invalidAuction === null}
+      when={query().auction.kind !== "invalid"}
       fallback={<InvalidAuctionLink world={query().world} />}
     >
       <AuctionAlias />
@@ -108,6 +107,7 @@ interface AuctionBoardViewProps {
   readonly userId: string | null;
   readonly invalid: boolean;
   readonly failed: boolean;
+  readonly worldCorrectionFailed: boolean;
   readonly empty: boolean;
   readonly pageBounds: ReturnType<typeof usePublicPageBounds>;
   readonly auction: CurrentAuctionItemResponse | null;
@@ -116,7 +116,20 @@ interface AuctionBoardViewProps {
   readonly catalog: ReturnType<typeof useAuctionCatalog>;
   readonly query: Cell<PublicBoardQuery>;
   readonly onRetry: () => void;
+  readonly onRetryWorldCorrection: () => void;
 }
+
+interface WorldCorrection {
+  readonly auctionId: string;
+  readonly world: string;
+}
+
+type HistoricalBoard =
+  | { readonly kind: "correct-world"; readonly correction: WorldCorrection }
+  | {
+      readonly kind: "loaded";
+      readonly result: Result<CurrentAuctionItemResponse | null, string>;
+    };
 
 /** 先装配看板的公开读取，再挂载随身份更换的正文与命令宿主。 */
 export function mountAuctionBoard(
@@ -130,16 +143,16 @@ export function mountAuctionBoard(
   const owner = useContext(PublicCommandOwnerContext);
   const currentAuction = useContext(CurrentAuctionContext);
   const routeStillOnBoard = usePageRouteGuard("AuctionIndex");
-  const invalid = createValueMemo(() => queryStateSignal().invalidAuction !== null);
+  const invalid = createValueMemo(() => queryStateSignal().auction.kind === "invalid");
   const pageBounds = usePublicPageBounds(queryStateSignal, "AuctionIndex", (query) =>
-    query.invalidAuction !== null || query.invalidCategory !== null
+    query.auction.kind === "invalid" || query.invalidCategory !== null
       ? []
       : [["page", query.pageSize]],
   );
   const queryBlocked = () =>
     queryStateSignal().invalidCategory !== null || pageBounds.blocked("page");
   // 同路径的历史/当前切换也必须订阅查询，不能仅在 popstate 或首页按钮时重读。
-  const requestedAuction = createValueMemo(() => queryStateSignal().auctionId);
+  const requestedAuction = createValueMemo(() => queryAuctionId(queryStateSignal()));
   const historical = createValueMemo(() => requestedAuction() !== null);
   const historyRequest = createValueMemo(() => (queryBlocked() ? null : requestedAuction()));
   const historicalCurrent = createTaskResource(
@@ -153,43 +166,84 @@ export function mountAuctionBoard(
       return [requested, result] as const;
     },
   );
+  const historicalBoard = createValueMemo((): HistoricalBoard | null => {
+    const requested = historyRequest();
+    const loaded = historicalCurrent();
+    if (requested === null || loaded === undefined || loaded[0] !== requested) {
+      return null;
+    }
+    const result = loaded[1];
+    if (!result.ok || result.value === null) {
+      return { kind: "loaded", result };
+    }
+    const auction = result.value;
+    const world = normalizeWorldQuery(auction.world);
+    if (auction.id !== requested || world === null) {
+      return { kind: "loaded", result: err("invalid_response") };
+    }
+    if (queryStateSignal().world !== world) {
+      return { kind: "correct-world", correction: { auctionId: requested, world } };
+    }
+    // 写入成功后还要等外壳读到同一地址，顶栏、订阅和目录才可发布该场次。
+    return selectedWorld() === world ? { kind: "loaded", result } : null;
+  });
+  const worldCorrection = createValueMemo(() => {
+    const board = historicalBoard();
+    return board?.kind === "correct-world" ? board.correction : null;
+  });
+  const rejectedWorld = createCell<WorldCorrection | null>(null);
+  const correctWorld = ({ auctionId, world }: WorldCorrection): void => {
+    if (!routeStillOnBoard()) return;
+    const latest = readPublicQuery();
+    // 异步定位只纠正仍指向本场且有效的查询，保留其他筛选的原始字节。
+    if (
+      queryAuctionId(latest) !== auctionId ||
+      latest.invalidCategory !== null ||
+      latest.world === world
+    ) {
+      return;
+    }
+    const written = updatePublicQueryPairs(
+      queryStateSignal,
+      ["world"],
+      [["world", world]],
+      "replace",
+    );
+    rejectedWorld.set(written ? null : { auctionId, world });
+  };
+  createEffect(worldCorrection, (correction) => {
+    if (correction === null) {
+      if (rejectedWorld.peek() !== null) rejectedWorld.set(null);
+    } else if (!structuralEquals(rejectedWorld.peek(), correction)) {
+      correctWorld(correction);
+    }
+  });
+  const worldCorrectionFailed = createValueMemo(() => {
+    const correction = worldCorrection();
+    return correction !== null && structuralEquals(rejectedWorld(), correction);
+  });
   const pageTarget = useContext(PublicPageRealtimeTargetContext);
+  const displayedAuction = useContext(PublicDisplayedAuctionContext);
   createEffect(
-    () => ({
-      requested: requestedAuction(),
-      loaded: historicalCurrent(),
-      query: queryStateSignal(),
-    }),
-    (state) => {
-      if (state.requested === null) {
+    () => [requestedAuction(), historicalBoard()] as const,
+    ([requested, board]) => {
+      const auction = board?.kind === "loaded" && board.result.ok ? board.result.value : null;
+      if (!structuralEquals(displayedAuction.peek(), auction)) {
+        displayedAuction.set(auction);
+      }
+      if (requested === null) {
+        if (pageTarget.peek()?.[0].kind === "auction") {
+          pageTarget.set(null);
+        }
         return;
       }
-      let target: PublicRealtimeTarget;
-      if (state.loaded === undefined || state.loaded[0] !== state.requested) {
-        target = { kind: "checking" };
-      } else {
-        const result = state.loaded[1];
-        if (result.ok && result.value !== null && result.value.id === state.requested) {
-          const auction = result.value;
-          const world = normalizeWorldQuery(auction.world);
-          if (state.query.world !== world && routeStillOnBoard()) {
-            const latest = readPublicQuery();
-            // 只纠正仍指向本场的地址。场次所属世界不授权重写其他筛选。
-            if (latest.auctionId === state.requested && latest.world !== world) {
-              updatePublicQueryPairs(
-                queryStateSignal,
-                ["world"],
-                world === null ? [] : [["world", world]],
-                "replace",
-              );
-            }
-          }
-          target = publicRealtimeTargetFromAuction(auction);
-        } else {
-          target = { kind: "identity_error", targetId: state.requested };
-        }
+      let target: PublicRealtimeTarget = { kind: "checking" };
+      if (auction !== null) {
+        target = publicRealtimeTargetFromAuction(auction);
+      } else if (board?.kind === "loaded") {
+        target = { kind: "identity_error", targetId: requested };
       }
-      const next = [{ kind: "auction", id: state.requested } as const, target] as const;
+      const next = [{ kind: "auction", id: requested } as const, target] as const;
       if (!structuralEquals(pageTarget.peek(), next)) {
         pageTarget.set(next);
       }
@@ -200,30 +254,6 @@ export function mountAuctionBoard(
     if (current !== null && current[0].kind === "auction") {
       pageTarget.set(null);
     }
-  });
-  // 标题与截止时间由外壳 ticker 展示：把正文实际展示的历史场次交给它，回到当前场次或
-  // 离开页面时清空。只公布与请求同一拍卖 UUID 的已加载结果；写入前用 peek 比较，不订阅自身。
-  const displayedAuction = useContext(PublicDisplayedAuctionContext);
-  createEffect(
-    () => ({ requested: requestedAuction(), loaded: historicalCurrent() }),
-    (state) => {
-      let next: CurrentAuctionItemResponse | null = null;
-      if (
-        state.requested !== null &&
-        state.loaded !== undefined &&
-        state.loaded[0] === state.requested
-      ) {
-        const result = state.loaded[1];
-        if (result.ok && result.value !== null && result.value.id === state.requested) {
-          next = result.value;
-        }
-      }
-      if (!structuralEquals(displayedAuction.peek(), next)) {
-        displayedAuction.set(next);
-      }
-    },
-  );
-  onCleanup(() => {
     displayedAuction.set(null);
   });
   const current = createValueMemo(() => {
@@ -232,11 +262,8 @@ export function mountAuctionBoard(
       return null;
     }
     if (historical()) {
-      const loaded = historicalCurrent();
-      if (loaded === undefined || loaded[0] !== requestedAuction()) {
-        return null;
-      }
-      return loaded[1];
+      const board = historicalBoard();
+      return board?.kind === "loaded" ? board.result : null;
     }
     const loaded = currentAuction();
     if (loaded === undefined || loaded[0] !== selectedWorld()) {
@@ -259,10 +286,13 @@ export function mountAuctionBoard(
     () =>
       bootPrerequisitesReady() &&
       (terminalWithoutAuction() ||
+        worldCorrectionFailed() ||
         queryStateSignal().invalidCategory !== null ||
         pageBounds.failed("page")),
   );
-  useContentLoading(() => !invalid() && !queryBlocked() && current() === null);
+  useContentLoading(
+    () => !invalid() && !queryBlocked() && !worldCorrectionFailed() && current() === null,
+  );
   const failed = createValueMemo(() => {
     const loaded = current();
     return loaded !== null && !loaded.ok;
@@ -308,6 +338,9 @@ export function mountAuctionBoard(
             get failed() {
               return failed();
             },
+            get worldCorrectionFailed() {
+              return worldCorrectionFailed();
+            },
             get empty() {
               return empty();
             },
@@ -324,6 +357,10 @@ export function mountAuctionBoard(
             catalog,
             query: queryStateSignal,
             onRetry: () => refreshPublicReads(refreshGeneration),
+            onRetryWorldCorrection: () => {
+              const correction = untrack(worldCorrection);
+              if (correction !== null) correctWorld(correction);
+            },
           });
         },
       }),
@@ -365,7 +402,7 @@ function AuctionBoardView(props: AuctionBoardViewProps): JSX.Element {
         request.set({ ...queued, target: { ...queued.target, rowReady: true } });
       } else if (disposition === "read_only") {
         request.set(null);
-        lookup?.view(queued.target);
+        lookup?.view(queued);
       }
     },
   );
@@ -415,6 +452,18 @@ function AuctionBoardView(props: AuctionBoardViewProps): JSX.Element {
       </Match>
       {/* 读取失败或该世界没有场次时看板的筛选工具栏不存在：世界按钮组单独成行，
           否则切到没有场次的世界之后就没有入口切回来。 */}
+      <Match when={props.worldCorrectionFailed}>
+        <div class="public-auction-group-toolbar public-world-toolbar">
+          <WorldTabs />
+        </div>
+        <AsyncState
+          kind="error"
+          title={t("page-auctions-title")}
+          detail={t("world-correction-error")}
+          retryLabel={t("data-retry")}
+          onRetry={props.onRetryWorldCorrection}
+        />
+      </Match>
       <Match when={props.failed}>
         <div class="public-auction-group-toolbar public-world-toolbar">
           <WorldTabs />

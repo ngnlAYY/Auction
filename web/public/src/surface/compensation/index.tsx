@@ -24,9 +24,14 @@ import {
 import { useContentLoading } from "../loading";
 import { normalizePublicPageSize, publicPageMatches, updatePublicPage } from "../pagination";
 import { usePublicPageBounds } from "../pagination/bounds";
+import { queryAuctionId } from "../query/board";
 import { readPublicQuery, updatePublicQueryPairs } from "../query/location";
 import { usePageRouteGuard } from "../query/route-page";
-import { updatePublicQueryState, usePublicQueryState } from "../query/state";
+import {
+  commitAuctionSelection,
+  updatePublicQueryState,
+  usePublicQueryState,
+} from "../query/state";
 import { InvalidReadAuction } from "../reads/invalid-auction";
 import { CompensationPoolTable } from "./table";
 
@@ -49,13 +54,13 @@ export function poolPage(): JSX.Element {
   const queryStateSignal = queryState.state;
   const pageNumber = createValueMemo(() => Math.max(queryStateSignal().page, 1));
   const pageSize = createValueMemo(() => queryStateSignal().pageSize);
-  const selectedAuctionId = createValueMemo(() => queryStateSignal().auctionId ?? "");
-  const invalidAuction = createValueMemo(() => queryStateSignal().invalidAuction !== null);
+  const selectedAuctionId = createValueMemo(() => queryAuctionId(queryStateSignal()) ?? "");
+  const invalidAuction = createValueMemo(() => queryStateSignal().auction.kind === "invalid");
   const movementPage = createValueMemo(() => queryStateSignal().movementPage);
   const movementPageSize = createValueMemo(() => queryStateSignal().movementPageSize);
   const routeStillOnPage = usePageRouteGuard("CompensationPool");
   const bounds = usePublicPageBounds(queryStateSignal, "CompensationPool", (query) =>
-    query.auctionId === null
+    query.auction.kind !== "selected"
       ? [["page", query.pageSize]]
       : [
           ["page", query.pageSize],
@@ -180,12 +185,7 @@ export function poolPage(): JSX.Element {
   };
   const writeRoundSelection = (auctionId: string | null) =>
     routeStillOnPage() &&
-    updatePublicQueryPairs(
-      queryStateSignal,
-      ["auction", "movement_page"],
-      auctionId === null ? [] : [["auction", auctionId]],
-      "push",
-    );
+    commitAuctionSelection(queryStateSignal, auctionId, "push", ["movement_page"]);
 
   return (
     <LotDetailLookupContext value={lookup}>
@@ -214,15 +214,10 @@ export function poolPage(): JSX.Element {
               selectedAuctionId={selectedAuctionId()}
               lots={lotState()}
               onPageChange={(nextPage) => {
-                return updatePublicQueryState(
-                  queryStateSignal,
-                  (query) => {
-                    query.page = Math.max(nextPage, 1);
-                    query.auctionId = null;
-                    query.movementPage = 1;
-                  },
-                  "push",
-                );
+                return commitAuctionSelection(queryStateSignal, null, "push", (query) => {
+                  query.page = Math.max(nextPage, 1);
+                  query.movementPage = 1;
+                });
               }}
               onPageClamp={(nextPage) => {
                 // 批次总量只校正批次页码，保留场次原文和明细页码。
@@ -231,19 +226,16 @@ export function poolPage(): JSX.Element {
                 );
               }}
               onPageSizeChange={(size) => {
-                return updatePublicQueryState(
-                  queryStateSignal,
-                  (query) => {
-                    query.pageSize = normalizePublicPageSize(size);
-                    query.page = 1;
-                    query.auctionId = null;
-                    query.movementPage = 1;
-                  },
-                  "push",
-                );
+                return commitAuctionSelection(queryStateSignal, null, "push", (query) => {
+                  query.pageSize = normalizePublicPageSize(size);
+                  query.page = 1;
+                  query.movementPage = 1;
+                });
               }}
               onSelectRound={(auctionId) => {
-                writeRoundSelection(readPublicQuery().auctionId === auctionId ? null : auctionId);
+                writeRoundSelection(
+                  queryAuctionId(readPublicQuery()) === auctionId ? null : auctionId,
+                );
               }}
               onLotPageChange={(nextPage) => {
                 return updatePublicQueryState(
@@ -280,11 +272,6 @@ export function poolPage(): JSX.Element {
           )}
         </Match>
       </Switch>
-      <Show when={lookup.failed()}>
-        <p class="action-feedback action-feedback--error" role="alert">
-          {t("data-error")}
-        </p>
-      </Show>
       {/* 抽屉宿主在批次读取分支之外：翻页或后台重读替换表格时，已打开的详情不被卸载。 */}
       <LotDetailLookupHost lookup={lookup} />
     </LotDetailLookupContext>
