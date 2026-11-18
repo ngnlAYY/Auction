@@ -1,4 +1,4 @@
-// 各读取页将自动纠偏的拒绝和重试结果传到实际分页控件。
+// 各读取页的实际分页控件处理纠偏重试与历史导航。
 
 import { expect, spyOn, test } from "bun:test";
 import { createCell } from "@auction/web-shared/reactive/cell";
@@ -18,6 +18,7 @@ import {
   type PublicSessionResult,
 } from "../index";
 import { AuctionHistoryPage, AuctionList } from "../pages/history";
+import { usePublicQueryState } from "../query";
 import { BidLog } from "../reads/bid-log";
 import { BidLogTable } from "../reads/bid-log/table";
 import { Fulfillment } from "../reads/fulfillment";
@@ -44,6 +45,22 @@ const COMPENSATION_ROUND = {
   reversal_count: 0,
   settled_at: "2026-01-01T00:00:00Z",
 };
+
+function installAccountSession(): void {
+  PublicSessionResourceContext.defaultValue = Object.assign(
+    createCell<PublicSessionResult>(
+      ok({
+        authenticated: true,
+        user_id: USER,
+        username: "viewer",
+        expires_at: null,
+        absolute_expires_at: null,
+      }),
+    ),
+    { state: () => "ready" as const, restart() {}, cancel() {}, clear() {} },
+  );
+  PublicCommandOwnerContext.defaultValue = createCell<string | null>(null);
+}
 
 const LIST_PAGES = [
   {
@@ -207,19 +224,7 @@ test.each(["bid_page", "proxy_page"] as const)(
     const bid = key === "bid_page" ? 3 : 7;
     const proxy = key === "proxy_page" ? 3 : 7;
     const probe = mountClampPage(`/me?bid_page=${bid}&proxy_page=${proxy}`, () => {
-      PublicSessionResourceContext.defaultValue = Object.assign(
-        createCell<PublicSessionResult>(
-          ok({
-            authenticated: true,
-            user_id: USER,
-            username: "viewer",
-            expires_at: null,
-            absolute_expires_at: null,
-          }),
-        ),
-        { state: () => "ready" as const, restart() {}, cancel() {}, clear() {} },
-      );
-      PublicCommandOwnerContext.defaultValue = createCell<string | null>(null);
+      installAccountSession();
       accountPage();
     });
     try {
@@ -267,5 +272,94 @@ test("补偿池明细纠偏写入失败可重试，保留所选场次", () => {
     expect(mounted.location.searchParams.get("auction")).toBe(AUCTION);
   } finally {
     probe.dispose();
+  }
+});
+
+test.each([
+  {
+    name: "出价记录",
+    pathname: "/bidlog",
+    raw: `auction=${AUCTION}&lot=%4fne12&buyer=Alice&buyer=Bad%0aName&other=%2f`,
+    originalPage: "bidlog_page=%30%32",
+    restoredPage: "page=2",
+    parameter: "page",
+    pageField: "page",
+    other: { bidLogLot: "One12" },
+    render: BidLog,
+    read: { page: 2, page_size: 10, total: 40, bids: [] },
+  },
+  {
+    name: "账户竞价",
+    pathname: "/me",
+    raw: "proxy_%70age=0005&buyer=Alice&buyer=Bad%0aName&other=%2f",
+    originalPage: "bid_page=%30%32",
+    restoredPage: "bid_page=%30%32",
+    parameter: "bid_page",
+    pageField: "bidPage",
+    other: { proxyPage: 5 },
+    render: () => {
+      installAccountSession();
+      return accountPage();
+    },
+    read: {
+      bids: [],
+      proxies: [],
+      bid_page: 2,
+      proxy_page: 5,
+      page_size: 10,
+      bid_total: 40,
+      proxy_total: 50,
+    },
+  },
+] as const)("$name 通过分页控件前进后退时同步地址、快照和已应用查询", (scenario) => {
+  const {
+    name,
+    pathname,
+    raw,
+    originalPage,
+    restoredPage,
+    parameter,
+    pageField,
+    other,
+    render,
+    read,
+  } = scenario;
+  const initial = `${pathname}?${raw}&${originalPage}`;
+  const previousAddress = `${pathname}?${raw}&${restoredPage}`;
+  const nextAddress = `${pathname}?${raw}&${parameter}=3`;
+  const previousSession = PublicSessionResourceContext.defaultValue;
+  const previousOwner = PublicCommandOwnerContext.defaultValue;
+  const query: { state?: ReturnType<typeof usePublicQueryState>["state"] } = {};
+  const probe = mountClampPage(initial, () => {
+    query.state = usePublicQueryState().state;
+    render();
+  });
+  try {
+    const { mounted } = probe;
+    showResult(mounted, Match, read);
+    const next = mounted
+      .visible(probe.pagers[0])
+      .find(({ tag, props }) => tag === "button" && props["aria-label"] === t("catalog-next"))
+      ?.props.onClick;
+    if (typeof next !== "function") throw new Error(`${name}未装配下一页控件`);
+    const expectApplied = (address: string, page: number) => {
+      expect(mounted.location.href).toBe(`https://auction.test${address}`);
+      expect(mounted.router.currentLocationString()).toBe(address);
+      expect(query.state?.peek()).toMatchObject({ ...other, [pageField]: page });
+    };
+
+    expectApplied(previousAddress, 2);
+    next();
+    expect(mounted.router.currentLocationString()).toBe(nextAddress);
+    flush();
+    expectApplied(nextAddress, 3);
+    mounted.back();
+    expectApplied(previousAddress, 2);
+    mounted.forward();
+    expectApplied(nextAddress, 3);
+  } finally {
+    probe.dispose();
+    PublicSessionResourceContext.defaultValue = previousSession;
+    PublicCommandOwnerContext.defaultValue = previousOwner;
   }
 });

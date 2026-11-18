@@ -2,102 +2,16 @@
 
 import { expect } from "bun:test";
 import { createRouter, type Router, RouterContext } from "@auction/web-shared/router";
+import { installFakeWindow } from "@auction/web-shared/router/test-window";
 import { createEffect, createRoot, flush } from "solid-js";
 
 import { type PublicQueryState, usePublicQueryState } from "./state";
-
-interface FakeHistory {
-  readonly state: unknown;
-  scrollRestoration: "auto" | "manual";
-  pushState(state: unknown, title: string, url?: string | null): void;
-  replaceState(state: unknown, title: string, url?: string | null): void;
-  back(): void;
-  forward(): void;
-}
-
-interface FakeWindow extends EventTarget {
-  readonly location: URL;
-  readonly history: FakeHistory;
-  failHistoryWrites(fail: boolean): void;
-  pushCount(): number;
-  readonly scrollX: number;
-  readonly scrollY: number;
-  scrollTo(): void;
-  requestAnimationFrame(callback: FrameRequestCallback): number;
-  cancelAnimationFrame(handle: number): void;
-}
-
-function createFakeWindow(initialUrl: string): FakeWindow {
-  const events = new EventTarget();
-  const location = new URL(initialUrl, "https://auction.test");
-  const past: { url: string; state: unknown }[] = [];
-  const future: { url: string; state: unknown }[] = [];
-  let entry: { url: string; state: unknown } = { url: location.href, state: null };
-  let failWrites = false;
-  let pushes = 0;
-  const writeEntry = (state: unknown, url: string | null | undefined): void => {
-    location.href = new URL(url ?? location.href, location).href;
-    entry = { url: location.href, state };
-  };
-  const fixture: Omit<FakeWindow, keyof EventTarget> = {
-    location,
-    history: {
-      get state() {
-        return entry.state;
-      },
-      scrollRestoration: "auto",
-      pushState(nextState, _title, url) {
-        if (failWrites) {
-          throw new Error("history.pushState 被测试拒绝");
-        }
-        pushes += 1;
-        past.push(entry);
-        future.length = 0;
-        writeEntry(nextState, url);
-      },
-      replaceState(nextState, _title, url) {
-        if (failWrites) {
-          throw new Error("history.replaceState 被测试拒绝");
-        }
-        writeEntry(nextState, url);
-      },
-      back() {
-        const previous = past.pop();
-        if (previous !== undefined) {
-          future.push(entry);
-          writeEntry(previous.state, previous.url);
-          events.dispatchEvent(new Event("popstate"));
-        }
-      },
-      forward() {
-        const next = future.pop();
-        if (next !== undefined) {
-          past.push(entry);
-          writeEntry(next.state, next.url);
-          events.dispatchEvent(new Event("popstate"));
-        }
-      },
-    },
-    failHistoryWrites(fail) {
-      failWrites = fail;
-    },
-    pushCount: () => pushes,
-    scrollX: 0,
-    scrollY: 0,
-    scrollTo() {},
-    requestAnimationFrame() {
-      return 0;
-    },
-    cancelAnimationFrame() {},
-  };
-  return Object.assign(events, fixture);
-}
 
 interface MountedQueryStates {
   readonly first: PublicQueryState;
   readonly second: PublicQueryState;
   readonly router: Router;
-  readonly location: FakeWindow["location"];
+  readonly location: URL;
   failHistoryWrites(fail: boolean): void;
   secondUpdates(): number;
   snapshotUpdates(): number;
@@ -110,13 +24,7 @@ interface MountedQueryStates {
 
 /** 挂载使用同一地址的两个 Public 查询实例及列表替身。 */
 export function mountQueryStates(initialUrl = "/"): MountedQueryStates {
-  const fake = createFakeWindow(initialUrl);
-  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
-  Object.defineProperty(globalThis, "window", {
-    configurable: true,
-    writable: true,
-    value: fake,
-  });
+  const { fake, restore } = installFakeWindow(initialUrl);
   let first!: PublicQueryState;
   let second!: PublicQueryState;
   let router!: Router;
@@ -167,10 +75,10 @@ export function mountQueryStates(initialUrl = "/"): MountedQueryStates {
     second,
     router,
     location: fake.location,
-    failHistoryWrites: (fail) => fake.failHistoryWrites(fail),
+    failHistoryWrites: fake.rejectWrites,
     secondUpdates: () => updates,
     snapshotUpdates: () => snapshotUpdates,
-    pushCount: fake.pushCount,
+    pushCount: () => fake.writes.filter(({ mode }) => mode === "push").length,
     back() {
       fake.history.back();
       flush();
@@ -184,11 +92,7 @@ export function mountQueryStates(initialUrl = "/"): MountedQueryStates {
       disposeRoot();
       flush();
       RouterContext.defaultValue = previousRouterDefault;
-      if (previousWindow === undefined) {
-        Reflect.deleteProperty(globalThis, "window");
-      } else {
-        Object.defineProperty(globalThis, "window", previousWindow);
-      }
+      restore();
     },
   };
 }

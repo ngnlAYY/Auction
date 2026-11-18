@@ -274,6 +274,54 @@ test("成交历史分组、排序、翻页各自修改地址键并保持查询�
   }
 });
 
+test("成交历史排序写入与前进后退同步已应用查询，保留无关筛选原文", () => {
+  resetStoreForTest();
+  const fetcher = spyOn(globalThis, "fetch").mockImplementation(
+    Object.assign(async () => new Response("{}", { status: 503 }), { preconnect() {} }),
+  );
+  const raw = "name=%52obe&auction=%74runcated&auction=bad%0a&other=%2f&bare";
+  const initial = `/history?${raw}&history_%73ort=closed_desc#results`;
+  const next = `/history?${raw}&history_sort=price_desc#results`;
+  const query: { state?: ReturnType<typeof usePublicQueryState>["state"] } = {};
+  const mounted = mountReadPage(
+    initial,
+    () => {
+      query.state = usePublicQueryState().state;
+      History();
+    },
+    ({ tag, props }) => {
+      if (typeof tag === "function" && tag === HistoryResultControls) {
+        Reflect.apply(tag, undefined, [props]);
+      }
+    },
+  );
+  try {
+    const sort = mounted.elements.find(
+      ({ tag, props }) => tag === "select" && props.name === "history_sort",
+    )?.props.onChange;
+    if (typeof sort !== "function") throw new Error("未装配成交排序");
+    const expectApplied = (address: string, historySort: string) => {
+      expect(mounted.location.href).toBe(`https://auction.test${address}`);
+      expect(mounted.router.currentLocationString()).toBe(address);
+      expect(query.state?.peek()).toMatchObject({ historySort, historyName: "Robe" });
+    };
+
+    expectApplied(initial, "closed_desc");
+    sort({ currentTarget: { value: "price_desc" } });
+    expect(mounted.router.currentLocationString()).toBe(next);
+    flush();
+    expectApplied(next, "price_desc");
+    mounted.back();
+    expectApplied(initial, "closed_desc");
+    mounted.forward();
+    expectApplied(next, "price_desc");
+  } finally {
+    mounted.dispose();
+    fetcher.mockRestore();
+    resetStoreForTest();
+  }
+});
+
 test("仅有空格买家的原始筛选也需要写址才能清除", async () => {
   resetStoreForTest();
   const fetcher = spyOn(globalThis, "fetch").mockImplementation(

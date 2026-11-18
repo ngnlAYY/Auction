@@ -2,6 +2,7 @@
 
 import { createCell } from "@auction/web-shared/reactive/cell";
 import { createRouter, RouterContext } from "@auction/web-shared/router";
+import { installFakeWindow } from "@auction/web-shared/router/test-window";
 import { createRoot, flush, getOwner, runWithOwner, Show } from "solid-js";
 
 import { PublicBidRefreshContext, PublicRefreshGenerationContext } from "../board/refresh";
@@ -22,41 +23,17 @@ export function mountReadPage(
   render: () => void,
   mountElement?: (element: ReadPageElement) => void,
 ) {
-  const location = new URL(initialUrl, "https://auction.test");
-  const writes: { mode: "push" | "replace"; url: URL }[] = [];
+  const { fake, restore } = installFakeWindow(initialUrl);
+  const { location, writes } = fake;
   const storage = new Map<string, string>();
-  let failWrites: boolean | "push" = false;
-  let historyState: unknown = null;
-  const history = {
-    get state() {
-      return historyState;
-    },
-    pushState(state: unknown, _title: string, url?: string | null) {
-      if (failWrites) throw new Error("测试拒绝 pushState");
-      historyState = state;
-      if (url != null) location.href = new URL(url, location).href;
-      writes.push({ mode: "push", url: new URL(location) });
-    },
-    replaceState(state: unknown, _title: string, url?: string | null) {
-      if (failWrites === true) throw new Error("测试拒绝 replaceState");
-      historyState = state;
-      if (url != null) location.href = new URL(url, location).href;
-      writes.push({ mode: "replace", url: new URL(location) });
-    },
-  };
-  const win = Object.assign(new EventTarget(), {
-    location,
-    history,
-    scrollTo() {},
+  Object.assign(fake, {
     localStorage: {
       getItem: (key: string) => storage.get(key) ?? null,
       setItem: (key: string, value: string) => storage.set(key, value),
     },
   });
-  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
   const previousJsx = Object.getOwnPropertyDescriptor(globalThis, "jsx");
   const elements: ReadPageElement[] = [];
-  Object.defineProperty(globalThis, "window", { configurable: true, value: win });
   Object.defineProperty(globalThis, "jsx", {
     configurable: true,
     value: (tag: unknown, props: Record<string, unknown> | null, ...children: unknown[]) => {
@@ -91,6 +68,8 @@ export function mountReadPage(
     };
     render();
     flush();
+    // 与 Public 启动一致，交互开始前首次地址不再作为查询回退。
+    initial.expire();
     return { dispose, router, run: <T>(task: () => T) => runWithOwner(owner, task) };
   });
 
@@ -130,8 +109,14 @@ export function mountReadPage(
     router: root.router,
     run: root.run,
     visible,
-    rejectWrites(reject: boolean | "push") {
-      failWrites = reject;
+    rejectWrites: fake.rejectWrites,
+    back() {
+      fake.history.back();
+      flush();
+    },
+    forward() {
+      fake.history.forward();
+      flush();
     },
     dispose() {
       root.dispose();
@@ -142,8 +127,7 @@ export function mountReadPage(
       PublicBidRefreshContext.defaultValue = oldBidRefresh;
       PublicContentLoadingContext.defaultValue = oldLoading;
       WorldSwitchContext.defaultValue = oldWorld;
-      if (previousWindow === undefined) Reflect.deleteProperty(globalThis, "window");
-      else Object.defineProperty(globalThis, "window", previousWindow);
+      restore();
       if (previousJsx === undefined) Reflect.deleteProperty(globalThis, "jsx");
       else Object.defineProperty(globalThis, "jsx", previousJsx);
     },

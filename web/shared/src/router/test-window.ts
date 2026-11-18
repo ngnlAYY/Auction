@@ -25,6 +25,7 @@ interface FakeHistory {
 interface FakeWindow extends EventTarget {
   readonly location: URL;
   readonly history: FakeHistory;
+  readonly writes: { mode: "push" | "replace"; url: URL }[];
   readonly scrollX: number;
   readonly scrollY: number;
   scrollTo(x: number, y: number): void;
@@ -34,6 +35,7 @@ interface FakeWindow extends EventTarget {
   cancelAnimationFrame(handle: number): void;
   followFragment(hash: string, dispatchPop?: boolean, beforeHashChange?: () => void): void;
   commitFrame(): void;
+  rejectWrites(reject: boolean | "push"): void;
 }
 
 function createFakeWindow(initialUrl: string, initialState: unknown): FakeWindow {
@@ -43,6 +45,8 @@ function createFakeWindow(initialUrl: string, initialState: unknown): FakeWindow
   let index = 0;
   let scroll = { x: 0, y: 0 };
   let nextFrame = 0;
+  let failWrites: boolean | "push" = false;
+  const writes: FakeWindow["writes"] = [];
   const frames = new Map<number, FrameRequestCallback>();
   const setEntry = (state: unknown, url?: string | null): void => {
     location.href = new URL(url ?? location.href, location).href;
@@ -62,12 +66,20 @@ function createFakeWindow(initialUrl: string, initialState: unknown): FakeWindow
     },
     scrollRestoration: "auto",
     pushState(nextState, _title, url) {
+      if (failWrites) {
+        throw new Error("测试拒绝 pushState");
+      }
       index += 1;
       entries.splice(index);
       setEntry(nextState, url);
+      writes.push({ mode: "push", url: new URL(location) });
     },
     replaceState(nextState, _title, url) {
+      if (failWrites === true) {
+        throw new Error("测试拒绝 replaceState");
+      }
       setEntry(nextState, url);
+      writes.push({ mode: "replace", url: new URL(location) });
     },
     back: () => traverse(index - 1),
     forward: () => traverse(index + 1),
@@ -75,6 +87,7 @@ function createFakeWindow(initialUrl: string, initialState: unknown): FakeWindow
   const fake = Object.assign(events, {
     location,
     history,
+    writes,
     scrollX: 0,
     scrollY: 0,
     scrollTo(x: number | ScrollToOptions, y?: number) {
@@ -114,6 +127,9 @@ function createFakeWindow(initialUrl: string, initialState: unknown): FakeWindow
         callback(0);
       }
     },
+    rejectWrites(reject: boolean | "push") {
+      failWrites = reject;
+    },
   });
   Object.defineProperties(fake, {
     scrollX: { get: () => scroll.x },
@@ -122,15 +138,16 @@ function createFakeWindow(initialUrl: string, initialState: unknown): FakeWindow
   return fake;
 }
 
-interface OpenRouter {
-  readonly router: Router;
+interface InstalledWindow {
   readonly fake: FakeWindow;
-  disposeRouter(): void;
   restore(): void;
 }
 
-/** 装配能模拟同文档历史导航的路由替身。 */
-export function openRouter(initialUrl: string, initialState: unknown = null): OpenRouter {
+/** 安装共用的窗口替身，供各页面装配自己的路由表。 */
+export function installFakeWindow(
+  initialUrl: string,
+  initialState: unknown = null,
+): InstalledWindow {
   const fake = createFakeWindow(initialUrl, initialState);
   const previous = Object.getOwnPropertyDescriptor(globalThis, "window");
   Object.defineProperty(globalThis, "window", {
@@ -138,6 +155,26 @@ export function openRouter(initialUrl: string, initialState: unknown = null): Op
     writable: true,
     value: fake,
   });
+  return {
+    fake,
+    restore() {
+      if (previous === undefined) {
+        Reflect.deleteProperty(globalThis, "window");
+        return;
+      }
+      Object.defineProperty(globalThis, "window", previous);
+    },
+  };
+}
+
+interface OpenRouter extends InstalledWindow {
+  readonly router: Router;
+  disposeRouter(): void;
+}
+
+/** 装配能模拟同文档历史导航的路由替身。 */
+export function openRouter(initialUrl: string, initialState: unknown = null): OpenRouter {
+  const installed = installFakeWindow(initialUrl, initialState);
   let dispose = (): void => {};
   let disposed = false;
   const router = createRoot((disposeRoot) => {
@@ -146,20 +183,13 @@ export function openRouter(initialUrl: string, initialState: unknown = null): Op
   });
   return {
     router,
-    fake,
+    ...installed,
     disposeRouter() {
       if (disposed) {
         return;
       }
       disposed = true;
       dispose();
-    },
-    restore() {
-      if (previous === undefined) {
-        Reflect.deleteProperty(globalThis, "window");
-        return;
-      }
-      Object.defineProperty(globalThis, "window", previous);
     },
   };
 }

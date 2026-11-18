@@ -3,6 +3,7 @@
 import { expect, test } from "bun:test";
 import { createCell } from "@auction/web-shared/reactive/cell";
 import { createRouter, RouterContext } from "@auction/web-shared/router";
+import { installFakeWindow } from "@auction/web-shared/router/test-window";
 import { createRoot, flush } from "solid-js";
 
 import {
@@ -40,117 +41,19 @@ test("lot_filter_rejects_values_the_endpoint_answers_with_400：lot 筛选拒绝
   expect(validLotFilter("00000000-0000-0000-0000-000000000000")).toBe(false);
 });
 
-interface FakeHistory {
-  readonly state: unknown;
-  pushState(state: unknown, title: string, url?: string | null): void;
-  replaceState(state: unknown, title: string, url?: string | null): void;
-  back(): void;
-  forward(): void;
-}
-
-interface FakeWindow extends EventTarget {
-  readonly location: URL;
-  readonly history: FakeHistory;
-  failHistoryWrites(fail: boolean): void;
-}
-
-interface HistoryEntry {
-  readonly url: string;
-  readonly state: unknown;
-}
-
-function installFakeWindow(initialUrl: string): {
-  readonly fake: FakeWindow;
-  restore(): void;
-} {
-  const location = new URL(initialUrl, "https://auction.test");
-  let current: HistoryEntry = { url: location.href, state: null };
-  const past: HistoryEntry[] = [];
-  const future: HistoryEntry[] = [];
-  const events = new EventTarget();
-  let failWrites = false;
-  const apply = (entry: HistoryEntry): void => {
-    current = entry;
-    location.href = entry.url;
-  };
-  const entryFor = (state: unknown, url: string | null | undefined): HistoryEntry => ({
-    state,
-    url: url == null ? location.href : new URL(url, location).href,
-  });
-  const traverse = (from: HistoryEntry[], to: HistoryEntry[]): void => {
-    const entry = from.pop();
-    if (entry !== undefined) {
-      to.push(current);
-      apply(entry);
-      events.dispatchEvent(new Event("popstate"));
-    }
-  };
-  const fake: FakeWindow = Object.assign(events, {
-    location,
-    scrollX: 0,
-    scrollY: 0,
-    scrollTo() {},
-    history: {
-      get state() {
-        return current.state;
-      },
-      pushState(nextState: unknown, _title: string, url?: string | null) {
-        if (failWrites) {
-          throw new Error("history.pushState 被测试拒绝");
-        }
-        const next = entryFor(nextState, url);
-        past.push(current);
-        future.length = 0;
-        apply(next);
-      },
-      replaceState(nextState: unknown, _title: string, url?: string | null) {
-        if (failWrites) {
-          throw new Error("history.replaceState 被测试拒绝");
-        }
-        apply(entryFor(nextState, url));
-      },
-      back() {
-        traverse(past, future);
-      },
-      forward() {
-        traverse(future, past);
-      },
-    },
-    failHistoryWrites(fail: boolean) {
-      failWrites = fail;
-    },
-  });
-  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
-  Object.defineProperty(globalThis, "window", {
-    configurable: true,
-    writable: true,
-    value: fake,
-  });
-  return {
-    fake,
-    restore() {
-      if (previousWindow === undefined) {
-        Reflect.deleteProperty(globalThis, "window");
-      } else {
-        Object.defineProperty(globalThis, "window", previousWindow);
-      }
-    },
-  };
-}
-
 test("failed_lot_filter_writes_keep_applied_state_and_retry_the_same_value：lot 写入失败不提交且同值可重试", () => {
   const mounted = installFakeWindow("/bidlog?page=3");
   try {
     const queryState = createCell(readPublicQuery());
     expect(queryState.peek().page).toBe(3);
 
-    mounted.fake.failHistoryWrites(true);
+    mounted.fake.rejectWrites(true);
     expect(applyLotFilter(queryState, "One12")).toBe(false);
     expect(queryState.peek().page).toBe(3);
     expect(queryState.peek().bidLogLot).toBeNull();
     expect(new URLSearchParams(mounted.fake.location.search).get("lot")).toBeNull();
 
-    mounted.fake.failHistoryWrites(false);
+    mounted.fake.rejectWrites(false);
     expect(applyLotFilter(queryState, "One12")).toBe(true);
     expect(queryState.peek().bidLogLot).toBe("One12");
     expect(queryState.peek().page).toBe(1);
@@ -173,6 +76,7 @@ function mountLotDraft(initialUrl: string) {
     const query = usePublicQueryState();
     const lot = useLotFilterDraft(query.state, fake.location.pathname, DEBOUNCE_MILLIS);
     flush();
+    initial.expire();
     return { dispose, router, query, lot };
   });
   return {

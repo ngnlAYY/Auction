@@ -3,6 +3,7 @@
 import { expect, test } from "bun:test";
 import { MAX_PUBLIC_PAGE_SIZE } from "@auction/contracts/dto/public/pagination";
 import { createCell } from "@auction/web-shared/reactive/cell";
+import { installFakeWindow } from "@auction/web-shared/router/test-window";
 import { Pager } from "@auction/web-shared/ui/components/pager";
 import { PageSizePicker } from "@auction/web-shared/ui/components/pager/size";
 import { flush } from "solid-js";
@@ -21,94 +22,17 @@ const {
 } = await import(".");
 const { publicBoardQueryDefault, usePublicQueryState } = await import("../query");
 
-interface FakeHistory {
-  readonly state: unknown;
-  pushState(state: unknown, title: string, url?: string | null): void;
-  replaceState(state: unknown, title: string, url?: string | null): void;
-}
-
-interface FakeWindow {
-  readonly location: { pathname: string; search: string; hash: string };
-  readonly history: FakeHistory;
-  readonly localStorage: {
-    getItem(key: string): string | null;
-    setItem(key: string, value: string): void;
-  };
-  failHistoryWrites(fail: boolean): void;
-  storageValue(key: string): string | null;
-}
-
-function installFakeWindow(
-  initialUrl: string,
-  initialStorage: Map<string, string>,
-): {
-  readonly fake: FakeWindow;
-  restore(): void;
-} {
-  const location = { pathname: "/", search: "", hash: "" };
-  let state: unknown = null;
-  let failWrites = false;
-  const applyUrl = (url: string | null | undefined): void => {
-    if (url === undefined || url === null) {
-      return;
-    }
-    const parsed = new URL(url, "https://auction.test");
-    location.pathname = parsed.pathname;
-    location.search = parsed.search;
-    location.hash = parsed.hash;
-  };
-  applyUrl(initialUrl);
-  const fake: FakeWindow = {
-    location,
-    history: {
-      get state() {
-        return state;
-      },
-      pushState(nextState, _title, url) {
-        if (failWrites) {
-          throw new Error("history.pushState 被测试拒绝");
-        }
-        state = nextState;
-        applyUrl(url);
-      },
-      replaceState(nextState, _title, url) {
-        if (failWrites) {
-          throw new Error("history.replaceState 被测试拒绝");
-        }
-        state = nextState;
-        applyUrl(url);
-      },
-    },
-    localStorage: {
-      getItem(key) {
-        return initialStorage.get(key) ?? null;
-      },
-      setItem(key, value) {
-        initialStorage.set(key, value);
-      },
-    },
-    failHistoryWrites(fail) {
-      failWrites = fail;
-    },
-    storageValue(key) {
-      return initialStorage.get(key) ?? null;
-    },
-  };
-  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
-  Object.defineProperty(globalThis, "window", {
-    configurable: true,
-    writable: true,
-    value: fake,
-  });
+function installPageSizeWindow(initialUrl: string, initialStorage: Map<string, string>) {
+  const { fake, restore } = installFakeWindow(initialUrl);
   return {
-    fake,
-    restore() {
-      if (previousWindow === undefined) {
-        Reflect.deleteProperty(globalThis, "window");
-      } else {
-        Object.defineProperty(globalThis, "window", previousWindow);
-      }
-    },
+    fake: Object.assign(fake, {
+      localStorage: {
+        getItem: (key: string) => initialStorage.get(key) ?? null,
+        setItem: (key: string, value: string) => initialStorage.set(key, value),
+      },
+      storageValue: (key: string) => initialStorage.get(key) ?? null,
+    }),
+    restore,
   };
 }
 
@@ -131,19 +55,19 @@ test("failed_page_size_write_keeps_preference：页长写入失败时不保存�
     ["hv.public.page-size", "20"],
     ["hv.public.movement-page-size", "20"],
   ]);
-  const mounted = installFakeWindow("/", storage);
+  const mounted = installPageSizeWindow("/", storage);
   try {
     const queryState = createCell(publicBoardQueryDefault());
     expect(queryState.peek().pageSize).toBe(20);
 
-    mounted.fake.failHistoryWrites(true);
+    mounted.fake.rejectWrites(true);
     expect(
       commitPublicPageSizeChoice(50, false, (size) => updatePublicPageSize(queryState, size)),
     ).toBe(false);
     expect(queryState.peek().pageSize).toBe(20);
     expect(mounted.fake.storageValue("hv.public.page-size")).toBe("20");
 
-    mounted.fake.failHistoryWrites(false);
+    mounted.fake.rejectWrites(false);
     expect(
       commitPublicPageSizeChoice(50, false, (size) => updatePublicPageSize(queryState, size)),
     ).toBe(true);
@@ -160,7 +84,10 @@ test.each([false, true])(
   (movement) => {
     const key = movement ? "hv.public.movement-page-size" : "hv.public.page-size";
     const sizeParam = movement ? "movement_page_size" : "page_size";
-    const mounted = installFakeWindow(`/compensation-pool?${sizeParam}=20`, new Map([[key, "20"]]));
+    const mounted = installPageSizeWindow(
+      `/compensation-pool?${sizeParam}=20`,
+      new Map([[key, "20"]]),
+    );
     const write = (size: number) => {
       try {
         mounted.fake.history.pushState(null, "", `/compensation-pool?${sizeParam}=${size}`);
@@ -169,10 +96,10 @@ test.each([false, true])(
       }
     };
     try {
-      mounted.fake.failHistoryWrites(true);
+      mounted.fake.rejectWrites(true);
       expect(commitPublicPageSizeChoice(50, movement, write)).toBe(false);
       expect(mounted.fake.storageValue(key)).toBe("20");
-      mounted.fake.failHistoryWrites(false);
+      mounted.fake.rejectWrites(false);
       expect(commitPublicPageSizeChoice(50, movement, write)).toBe(true);
       expect(mounted.fake.storageValue(key)).toBe("50");
     } finally {
@@ -183,7 +110,7 @@ test.each([false, true])(
 
 test("地址里的页长恰好相同不能证明旧回调成功重置页码", () => {
   const storage = new Map([["hv.public.page-size", "50"]]);
-  const mounted = installFakeWindow("/compensation-pool?page_size=20&page=3", storage);
+  const mounted = installPageSizeWindow("/compensation-pool?page_size=20&page=3", storage);
   try {
     expect(commitPublicPageSizeChoice(20, false, () => {})).toBe(false);
     expect(mounted.fake.storageValue("hv.public.page-size")).toBe("50");

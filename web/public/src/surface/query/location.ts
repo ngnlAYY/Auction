@@ -1,11 +1,13 @@
-// 地址栏查询读取、首次地址快照与位置变化版本上下文。
+// 地址栏查询读写、首次地址快照与位置变化版本上下文。
 
+import type { QueryPair, QueryWriteMode } from "@auction/web-shared/net/query";
 import { type Cell, createCell } from "@auction/web-shared/reactive/cell";
 import { writeLocationPreservingScroll } from "@auction/web-shared/router";
 import { createContext } from "solid-js";
 
 import { type PublicBoardQuery, publicBoardQueryDefault } from "./board";
 import { parsePublicQuery } from "./parse";
+import { queryPairsString } from "./serialization";
 
 /** 可提供首次 query 的地址快照；路由首次挂载后该快照会失效。 */
 export interface InitialPublicSearch {
@@ -186,4 +188,51 @@ export function currentBrowserHash(): string {
   } catch {
     return "";
   }
+}
+
+/** 只编码本次写入的键值对，保留其余 URL 查询片段的原始字节和顺序。 */
+export function writePublicQueryPatch(
+  keys: readonly string[],
+  pairs: readonly QueryPair[],
+  mode: QueryWriteMode,
+): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  const raw = currentBrowserSearch().slice(1);
+  const parts =
+    raw === ""
+      ? []
+      : raw.split("&").filter((part) => {
+          const separator = part.indexOf("=");
+          const encodedKey = separator === -1 ? part : part.slice(0, separator);
+          // 只解码键来识别等价编码，未触及的片段不经重新序列化。
+          const key = new URLSearchParams(`key=${encodedKey}`).get("key");
+          return key === null || !keys.includes(key);
+        });
+  if (pairs.length !== 0) {
+    parts.push(queryPairsString(pairs));
+  }
+  const search = parts.length === 0 ? "" : `?${parts.join("&")}`;
+  try {
+    const { pathname, hash } = window.location;
+    // 原始查询串直接交给路由；条目标识与快照只随成功写入更新。
+    return writeLocationPreservingScroll(`${pathname}${search}${hash}`, mode);
+  } catch {
+    return false;
+  }
+}
+
+/** 按键写回并同步已应用查询；地址写入成功才让页面读取新状态。 */
+export function updatePublicQueryPairs(
+  state: Cell<PublicBoardQuery>,
+  keys: readonly string[],
+  pairs: readonly QueryPair[],
+  mode: QueryWriteMode,
+): boolean {
+  if (!writePublicQueryPatch(keys, pairs, mode)) {
+    return false;
+  }
+  state.set(readPublicQuery());
+  return true;
 }

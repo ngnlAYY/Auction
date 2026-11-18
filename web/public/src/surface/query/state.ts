@@ -21,6 +21,7 @@ import {
   type InitialPublicSearch,
   PublicLocationRevisionContext,
   readPublicQuery,
+  updatePublicQueryPairs,
 } from "./location";
 import { parsePublicQuery } from "./parse";
 import {
@@ -153,6 +154,22 @@ function commitQuery(
   return true;
 }
 
+function changedAccountPageKeys(current: PublicBoardQuery, next: PublicBoardQuery): string[] {
+  const { bidPage, proxyPage, ...previous } = current;
+  const { bidPage: nextBidPage, proxyPage: nextProxyPage, ...rest } = next;
+  if (!structuralEquals(previous, rest)) {
+    return [];
+  }
+  const keys: string[] = [];
+  if (bidPage !== nextBidPage) {
+    keys.push("bid_page");
+  }
+  if (proxyPage !== nextProxyPage) {
+    keys.push("proxy_page");
+  }
+  return keys;
+}
+
 /** 读取地址栏最新查询、应用变更并按模式写回（读-改-写），同步 hook 状态。 */
 export function updatePublicQueryState(
   state: Cell<PublicBoardQuery>,
@@ -174,6 +191,14 @@ export function updatePublicQueryState(
     },
   };
   update(draft);
+  if (!wroteAuction && currentPublicPathname() === "/me") {
+    const keys = changedAccountPageKeys(query, draft);
+    if (keys.length !== 0) {
+      // 账户翻页只提交改动的表；另一张表与其余筛选仍使用各自的原始查询片段。
+      const pairs = managedPublicQueryPairs(draft).filter(([key]) => keys.includes(key));
+      return updatePublicQueryPairs(state, keys, pairs, mode);
+    }
+  }
   const { auctionId: selected, invalidAuction: _invalidAuction, ...fields } = draft;
   return commitQuery(state, wroteAuction ? { ...fields, auctionId: selected } : fields, mode);
 }
