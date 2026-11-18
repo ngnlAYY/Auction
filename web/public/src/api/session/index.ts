@@ -81,6 +81,11 @@ export function observePublicSessionFailure(status: number, code: string): void 
   }
 }
 
+/** 由当前页外壳按 Cookie 重读权威会话。 */
+export function requestPublicSessionCheck(reason: SessionRefreshReason): void {
+  registeredSessionCheckTrigger?.trigger(reason);
+}
+
 /** 通知本页外壳与其他标签页重新读取权威会话；修订值只用于唤醒，不携带身份。 */
 export function notifyPublicSessionChange(reason: SessionRefreshReason): void {
   const registration = registeredSessionCheckTrigger;

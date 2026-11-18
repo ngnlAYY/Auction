@@ -17,17 +17,38 @@ export type ConditionalResponse =
       readonly response: TransportResponse;
       readonly etag: string | null;
     }
-  | { readonly kind: "failure"; readonly response: TransportResponse };
+  | {
+      readonly kind: "failure";
+      readonly status: number;
+      readonly result: Result<TransportResponse, TransportError>;
+    };
 
 /** 发送条件 GET：有 ETag 时带 `If-None-Match`，否则要求浏览器向服务端再验证；`signal` 中止时
  * 传输层取消请求与正文读取。 */
 export async function conditionalGet(
   url: string,
   etag: string | null,
+  evictMissingSnapshot: () => void,
   signal: AbortSignal,
 ): Promise<Result<ConditionalResponse, TransportError>> {
-  const sent = await sendGetConditional(url, etag, signal);
+  let status: number | null = null;
+  const sent = await sendGetConditional(
+    url,
+    etag,
+    (observed) => {
+      status = observed;
+      // 404/410 一到就撤销旧快照；读取正文时关闭页面也不能恢复其回退资格。
+      if (missingStatus(observed)) {
+        evictMissingSnapshot();
+      }
+    },
+    signal,
+  );
   if (!sent.ok) {
+    // 超时本身不携带 HTTP 状态；以已收到的响应头区分明确拒绝和可回退的传输失败。
+    if (status !== null && !responseOk({ status })) {
+      return ok({ kind: "failure", status, result: sent });
+    }
     return err(sent.error);
   }
   if (signal.aborted) {
@@ -39,11 +60,11 @@ export async function conditionalGet(
       etag !== null
         ? { kind: "not_modified" }
         : // 无 ETag 的请求不应收到 304；交给错误 envelope 解码归一为 invalid_response。
-          { kind: "failure", response },
+          { kind: "failure", status: response.status, result: sent },
     );
   }
   if (!responseOk(response)) {
-    return ok({ kind: "failure", response });
+    return ok({ kind: "failure", status: response.status, result: sent });
   }
   return ok({ kind: "success", response, etag: response.headers.get("ETag") });
 }
@@ -52,6 +73,9 @@ export async function conditionalGet(
  * 网关返回的 502/504 与 CDN 的 520–524，都是暂时性拒绝，与断网同样处理：缓存层有可回退的旧
  * 快照时继续展示。其余状态（含无 ETag 却收到的 304、500 与业务拒绝）失败关闭。 */
 export function failureOutcome<T, E>(status: number, error: E): FetchOutcome<T, E> {
+  if (missingStatus(status)) {
+    return { kind: "missing", error };
+  }
   if (
     status === 429 ||
     status === 502 ||
@@ -62,6 +86,10 @@ export function failureOutcome<T, E>(status: number, error: E): FetchOutcome<T, 
     return { kind: "busy", error };
   }
   return { kind: "rejected", error };
+}
+
+function missingStatus(status: number): boolean {
+  return status === 404 || status === 410;
 }
 
 /** 对公开只读 GET 执行带缓存的严格解码。decode 必须完成全部跨字段校验（含响应与请求身份的
@@ -94,8 +122,8 @@ export async function cachedPublicRead<T>(
     requestUrl,
     ttlMillis,
     typeId,
-    async (etag) => {
-      const conditional = await conditionalGet(requestUrl, etag, signal);
+    async (etag, evictMissingSnapshot) => {
+      const conditional = await conditionalGet(requestUrl, etag, evictMissingSnapshot, signal);
       if (signal.aborted) {
         return { kind: "transport", error: "network_error" };
       }
@@ -108,8 +136,10 @@ export async function cachedPublicRead<T>(
           return { kind: "not_modified" };
         case "failure":
           return failureOutcome<T, string>(
-            outcome.response.status,
-            decodeErrorCode(outcome.response),
+            outcome.status,
+            outcome.result.ok
+              ? decodeErrorCode(outcome.result.value)
+              : transportErrorCode(outcome.result.error),
           );
         case "success": {
           const decoded = decode(outcome.response);
@@ -127,6 +157,6 @@ export async function cachedPublicRead<T>(
   return signal.aborted ? err("network_error") : read;
 }
 
-function responseOk(response: TransportResponse): boolean {
+function responseOk(response: { readonly status: number }): boolean {
   return response.status >= 200 && response.status < 300;
 }

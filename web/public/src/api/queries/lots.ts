@@ -145,8 +145,8 @@ export async function fetchLotDetail(
     url,
     LIVE_TTL_MILLIS,
     LOT_ENVELOPE_CACHE_TYPE,
-    async (etag) => {
-      const conditional = await conditionalGet(requestUrl, etag, signal);
+    async (etag, evictMissingSnapshot) => {
+      const conditional = await conditionalGet(requestUrl, etag, evictMissingSnapshot, signal);
       if (signal.aborted) {
         return { kind: "transport", error: LOT_DETAIL_FETCH_ERROR };
       }
@@ -159,7 +159,7 @@ export async function fetchLotDetail(
           return { kind: "not_modified" };
         case "failure":
           return failureOutcome<PublicLotEnvelopeResponse, LotDetailFetchError>(
-            outcome.response.status,
+            outcome.status,
             LOT_DETAIL_FETCH_ERROR,
           );
         case "success": {

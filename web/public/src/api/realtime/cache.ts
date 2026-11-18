@@ -115,8 +115,8 @@ function makeCache(
 }
 
 /**
- * 按旧版 `sync()` 顺序合并一页：refetch 页不消费事件，普通页先逐事件合并，再接受
- * `next_after` 的单调前移。返回 false 时只停止本轮 HTTP catch-up，不关闭 WebSocket。
+ * HTTP 回放的原始流连续性由服务端检查，公开投影可能跳过隐藏事件；订阅入口单独检查 WebSocket
+ * 单帧连续性。refetch 页只推进游标并丢弃局部事实，其余页逐事件合并后接受 `next_after`。
  */
 function mergePage(state: CacheState, page: RealtimePage): RealtimePageMerge {
   if (page.refetch_required) {
@@ -168,10 +168,6 @@ type EventMerge =
 function mergeEvent(state: CacheState, event: RealtimeEvent): EventMerge {
   if (event.stream_sequence <= state.after || seenContains(state.seen, event.event_id)) {
     return { kind: "ignored" };
-  }
-  const expected = checkedAddOne(state.after);
-  if (expected === null || expected !== event.stream_sequence) {
-    return { kind: "gap" };
   }
   if (event.kind === "lot.bid_accepted") {
     return mergeAcceptedBid(state, event);

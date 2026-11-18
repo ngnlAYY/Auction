@@ -77,51 +77,26 @@ function isRustWhitespace(code: number): boolean {
   );
 }
 
-export async function placeBid(
+/** 提交同一份普通出价命令并校验服务端回执。 */
+export function placeBid(
   userId: string,
   lotId: string,
   amount: number,
   commandId: string,
   signal: AbortSignal,
 ): Promise<Result<BidResult, CommandError>> {
-  const url = `/api/v1/lots/${lotId}/bids`;
   const command: PlaceBidRequest = { command_id: commandId, amount };
-  const response = await sendRequest(
-    () =>
-      ok({
-        url,
-        init: {
-          method: "POST",
-          headers: {
-            [PUBLIC_EXPECTED_USER_ID_HEADER]: userId,
-            "content-type": "application/json",
-          },
-          body: JSON.stringify(command),
-        },
-      }),
+  return sendCompetitionCommand(
+    `/api/v1/lots/${lotId}/bids`,
+    userId,
+    command,
+    (response) => decodeBidCommand(response, lotId),
     signal,
   );
-  if (signal.aborted) {
-    return err({ code: "network_error", status: 0 });
-  }
-  if (!response.ok) {
-    return err({ code: transportErrorCode(response.error), status: 0 });
-  }
-  if (!responseOk(response.value)) {
-    return err(await readCommandError(response.value));
-  }
-  const status = response.value.status;
-  const result = decodeBidCommand(response.value, lotId);
-  if (!result.ok) {
-    return err(invalidResponse(status));
-  }
-  // 竞价已提交：目录价格、领先者、详情与竞价日志都可能有新权威快照，下一次读取不得命中 TTL 缓存。
-  invalidateAfterCommand();
-  return ok(result.value);
 }
 
 /** 创建代理授权并解码旧契约要求的完整命令投影。 */
-export async function createProxyAuthorization(
+export function createProxyAuthorization(
   userId: string,
   lotId: string,
   maximumAmount: number,
@@ -129,48 +104,22 @@ export async function createProxyAuthorization(
   commandId: string,
   signal: AbortSignal,
 ): Promise<Result<ProxyCommandAuthorization, CommandError>> {
-  const url = `/api/v1/lots/${lotId}/proxy-authorizations`;
   const command: CreateProxyAuthorizationRequest = {
     command_id: commandId,
     maximum_amount: maximumAmount,
     mode,
   };
-  const response = await sendRequest(
-    () =>
-      ok({
-        url,
-        init: {
-          method: "POST",
-          headers: {
-            [PUBLIC_EXPECTED_USER_ID_HEADER]: userId,
-            "content-type": "application/json",
-          },
-          body: JSON.stringify(command),
-        },
-      }),
+  return sendCompetitionCommand(
+    `/api/v1/lots/${lotId}/proxy-authorizations`,
+    userId,
+    command,
+    (response) => decodeCreateProxyCommand(response, lotId, maximumAmount, mode),
     signal,
   );
-  if (signal.aborted) {
-    return err({ code: "network_error", status: 0 });
-  }
-  if (!response.ok) {
-    return err({ code: transportErrorCode(response.error), status: 0 });
-  }
-  if (!responseOk(response.value)) {
-    return err(await readCommandError(response.value));
-  }
-  const status = response.value.status;
-  const result = decodeCreateProxyCommand(response.value, lotId, maximumAmount, mode);
-  if (!result.ok) {
-    return err(invalidResponse(status));
-  }
-  // 代理授权成功会改变 lot 的权威投影；公开读取缓存随之失效。
-  invalidateAfterCommand();
-  return ok(result.value);
 }
 
 /** 降低代理授权上限并解码旧契约要求的完整命令投影。 */
-export async function lowerProxyAuthorization(
+export function lowerProxyAuthorization(
   userId: string,
   lotId: string,
   authorizationId: string,
@@ -178,55 +127,70 @@ export async function lowerProxyAuthorization(
   commandId: string,
   signal: AbortSignal,
 ): Promise<Result<ProxyCommandAuthorization, CommandError>> {
-  const url = `/api/v1/lots/${lotId}/proxy-authorizations/${authorizationId}/lower`;
   const command: LowerProxyAuthorizationRequest = {
     command_id: commandId,
     maximum_amount: maximumAmount,
   };
-  const response = await sendRequest(
-    () =>
-      ok({
-        url,
-        init: {
-          method: "POST",
-          headers: {
-            [PUBLIC_EXPECTED_USER_ID_HEADER]: userId,
-            "content-type": "application/json",
-          },
-          body: JSON.stringify(command),
-        },
-      }),
+  return sendCompetitionCommand(
+    `/api/v1/lots/${lotId}/proxy-authorizations/${authorizationId}/lower`,
+    userId,
+    command,
+    (response) => decodeLowerProxyCommand(response, lotId, authorizationId, maximumAmount),
     signal,
   );
+}
+
+async function sendCompetitionCommand<T>(
+  url: string,
+  userId: string,
+  command: PlaceBidRequest | CreateProxyAuthorizationRequest | LowerProxyAuthorizationRequest,
+  readReceipt: (response: TransportResponse) => Result<T, string>,
+  signal: AbortSignal,
+): Promise<Result<T, CommandError>> {
+  let dispatched = false;
+  const sent = await sendRequest((requestSignal) => {
+    if (requestSignal.aborted) {
+      return err({ kind: "network", status: null });
+    }
+    const body = JSON.stringify(command);
+    // 共享传输在构造成功后同步调用 fetch，之后断流、取消或超时无法确认命令未到达。
+    dispatched = true;
+    return ok({
+      url,
+      init: {
+        method: "POST",
+        headers: {
+          [PUBLIC_EXPECTED_USER_ID_HEADER]: userId,
+          "content-type": "application/json",
+        },
+        body,
+      },
+    });
+  }, signal);
+  // 成功、拒绝和结果未知都要求竞价视图向服务端再确认，旧快照不能作为命令后的权威结果。
+  if (dispatched) {
+    invalidateAfterCommand();
+  }
   if (signal.aborted) {
     return err({ code: "network_error", status: 0 });
   }
-  if (!response.ok) {
-    return err({ code: transportErrorCode(response.error), status: 0 });
+  if (!sent.ok) {
+    return err({ code: transportErrorCode(sent.error), status: 0 });
   }
-  if (!responseOk(response.value)) {
-    return err(await readCommandError(response.value));
+  const response = sent.value;
+  if (!responseOk(response)) {
+    return err(readCommandError(response));
   }
-  const status = response.value.status;
-  const result = decodeLowerProxyCommand(response.value, lotId, authorizationId, maximumAmount);
-  if (!result.ok) {
-    return err(invalidResponse(status));
-  }
-  // 降低上限同样改变 lot 的权威投影；公开读取缓存随之失效。
-  invalidateAfterCommand();
-  return ok(result.value);
+  const result = readReceipt(response);
+  return result.ok ? result : err(invalidResponse(response.status));
 }
 
 function responseOk(response: { status: number }): boolean {
   return response.status >= 200 && response.status <= 299;
 }
 
-async function readCommandError(response: TransportResponse): Promise<CommandError> {
+function readCommandError(response: TransportResponse): CommandError {
   const status = response.status;
-  // 服务端已对命令作答：被拒绝通常正是因为价格、领先者或拍品状态已经变化。表单随后会重读
-  // 权威快照并据此提示下一口价，这次重读不得命中 TTL 内的旧条目，遇到暂时性失败也不得退回
-  // 命令之前的快照（否则提示会引用过期的最低价）；命令的传输失败不经过这里。
-  invalidateAfterCommand();
   const payload = response.json();
   const decoded = payload.ok ? decode(ApiErrorResponseSchema, payload.value) : null;
   const error: ApiErrorResponse | null = decoded?.ok === true ? decoded.value : null;

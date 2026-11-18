@@ -12,7 +12,12 @@ import { createContext, useContext } from "solid-js";
 import { estimatedNow } from "../../api/clock";
 import { type RealtimePage, subscribeAuctionRealtime } from "../../api/realtime";
 import { createRealtimeCacheAfter } from "../../api/realtime/cache";
-import { realtimeErrorDetail, realtimeErrorIsPermanent } from "../../api/realtime/protocol";
+import {
+  REALTIME_SESSION_CLOSE_CODE,
+  realtimeErrorDetail,
+  realtimeErrorIsPermanent,
+} from "../../api/realtime/protocol";
+import { requestPublicSessionCheck } from "../../api/session";
 import { invalidateAll } from "../../api/swr-cache";
 import type { LiveConnectionState } from "../query";
 import { PageVisibilityContext } from "../shell/contexts";
@@ -245,6 +250,14 @@ export function PublicRealtimeOwner(props: {
       if (!context.alive()) {
         return;
       }
+      // 会话复核可能推进外壳状态；重连只按连接结束时的存活时长计数。
+      const survivedMillis = estimatedNow() - attemptStartedMillis;
+      if (!result.ok && result.error.closeCode === REALTIME_SESSION_CLOSE_CODE) {
+        requestPublicSessionCheck("refresh");
+      }
+      if (!context.alive()) {
+        return;
+      }
       if (!result.ok) {
         if (realtimeErrorIsPermanent(result.error)) {
           // 重连不能自愈：页头降级为手动刷新，不再自动重连。
@@ -256,7 +269,6 @@ export function PublicRealtimeOwner(props: {
         }
         // 普通断线按退避策略重连；与 Rust 的 debug 级诊断一致，发布构建不输出。
       }
-      const survivedMillis = estimatedNow() - attemptStartedMillis;
       if (survivedMillis >= RECONNECT_HEALTHY_MILLIS) {
         consecutiveFailures = 0;
       } else {

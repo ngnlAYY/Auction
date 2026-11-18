@@ -33,16 +33,24 @@ export interface RealtimeError {
   kind: "permanent" | "transient";
   /** 失败明细只用于诊断日志，不参与重连决策。 */
   detail: string;
+  /** 浏览器已收到 WebSocket 关闭事件时的关闭码；其他错误为 null。 */
+  closeCode: number | null;
 }
+
+/** 服务端通过策略关闭通知会话需要权威复核。 */
+export const REALTIME_SESSION_CLOSE_CODE = 1008;
 
 /** 重连无法自愈：游标或拍卖 ID 无效、认证/权限被拒绝、目标拍卖不存在。 */
 export function realtimeErrorPermanent(detail: string): RealtimeError {
-  return { kind: "permanent", detail };
+  return { kind: "permanent", detail, closeCode: null };
 }
 
 /** 网络抖动、服务端瞬时故障、毒帧超限或握手超时等可重试失败。 */
-export function realtimeErrorTransient(detail: string): RealtimeError {
-  return { kind: "transient", detail };
+export function realtimeErrorTransient(
+  detail: string,
+  closeCode: number | null = null,
+): RealtimeError {
+  return { kind: "transient", detail, closeCode };
 }
 
 /** 失败是否属于重连无法自愈的永久错误。 */

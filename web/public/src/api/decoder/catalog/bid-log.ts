@@ -4,7 +4,8 @@ import { type JsonObject, jsonKeysOnly } from "@auction/web-shared/net/wire";
 import { compareText } from "@auction/web-shared/text";
 import { validUuid } from "@auction/web-shared/ui/validation";
 
-import { boolValue, forumPostUrl, int, nonempty, object, positive, string, time } from "..";
+import { parseStrictRfc3339 } from "../../session/rfc3339";
+import { boolValue, forumPostUrl, int, nonempty, object, positive, string } from "..";
 import { validNumberedPage } from "./auction";
 
 /** 校验竞价日志编号页、逐条闭集和稳定降序事实。 */
@@ -16,35 +17,48 @@ export function validBidLogPage(value: unknown): boolean {
   return validNumberedPage(page) && Array.isArray(bids) && validOrderedBidLog(bids);
 }
 
+interface ValidatedBidLogEntry {
+  bid: JsonObject;
+  createdAt: bigint;
+}
+
 function validOrderedBidLog(values: readonly unknown[]): boolean {
-  if (!values.every(validBidLogEntry)) return false;
-  return values.slice(1).every((currentValue, offset) => {
-    const previous = object(values[offset]);
-    const current = object(currentValue);
-    if (previous === null || current === null) return false;
-    for (const key of ["created_at", "lot_id"]) {
-      const previousField = string(previous[key]) ?? "";
-      const currentField = string(current[key]) ?? "";
-      if (previousField !== currentField) {
-        return compareText(previousField, currentField) > 0;
-      }
+  let previous: ValidatedBidLogEntry | null = null;
+  for (const value of values) {
+    const current = validatedBidLogEntry(value);
+    if (current === null) return false;
+    if (
+      previous !== null &&
+      (previous.createdAt < current.createdAt ||
+        (previous.createdAt === current.createdAt && !orderedBidLogTie(previous.bid, current.bid)))
+    ) {
+      return false;
     }
-    for (const key of ["accepted_state_version", "fact_index"]) {
-      const previousField = int(previous[key]) ?? 0;
-      const currentField = int(current[key]) ?? 0;
-      if (previousField !== currentField) {
-        return previousField > currentField;
-      }
-    }
-    return compareText(string(previous.id) ?? "", string(current.id) ?? "") > 0;
-  });
+    previous = current;
+  }
+  return true;
+}
+
+function orderedBidLogTie(previous: JsonObject, current: JsonObject): boolean {
+  const lotOrder = compareText(string(previous.lot_id) ?? "", string(current.lot_id) ?? "");
+  if (lotOrder !== 0) return lotOrder > 0;
+  for (const key of ["accepted_state_version", "fact_index"]) {
+    const previousField = int(previous[key]) ?? 0;
+    const currentField = int(current[key]) ?? 0;
+    if (previousField !== currentField) return previousField > currentField;
+  }
+  return compareText(string(previous.id) ?? "", string(current.id) ?? "") > 0;
 }
 
 /** 仅供测试使用：直接校验单条竞价事实及其落败代理附加字段。 */
 export function validBidLogEntry(value: unknown): boolean {
+  return validatedBidLogEntry(value) !== null;
+}
+
+function validatedBidLogEntry(value: unknown): ValidatedBidLogEntry | null {
   const bid = object(value);
-  if (bid === null) return false;
-  return (
+  if (bid === null) return null;
+  const valid =
     jsonKeysOnly(
       bid,
       [
@@ -77,9 +91,10 @@ export function validBidLogEntry(value: unknown): boolean {
     positive(bid.fact_index) &&
     (string(bid.mechanism) === "ordinary" || string(bid.mechanism) === "proxy") &&
     validBidLogSource(bid) &&
-    validBidLogDefeatedProxy(bid) &&
-    time(bid.created_at)
-  );
+    validBidLogDefeatedProxy(bid);
+  if (!valid) return null;
+  const createdAt = parseStrictRfc3339(string(bid.created_at) ?? "");
+  return createdAt === null ? null : { bid, createdAt };
 }
 
 /** 落败代理只随代理竞争的那一条胜者代理事实下发，且不会是胜者本人。 */

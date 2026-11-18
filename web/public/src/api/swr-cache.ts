@@ -9,22 +9,21 @@
 // 并恢复新鲜。传输失败（网络/超时）与服务端暂时拒绝（429 读闸繁忙或来源超额、503 依赖暂不
 // 可用、源站不可达时的网关 502/504 与 CDN 520–524）在已有条目时回退旧值
 // （stale-while-revalidate）并标明这是回退及该快照最近一次被服务端确认的时刻，没有条目时照常
-// 返回错误；其他 4xx/5xx 与正文校验失败失败关闭，既不写入也不回退。旧快照只用于读视图展示：
-// 命令仍由服务端权威校验，过期的下一口价只会被服务端拒绝。失效只把全部条目标为过期（保留正文
-// 与 ETag）并推进修订号。
-// 同一 URL 的读取经在途登记串行：已有请求在途时，后到的读取等它结束再按上述规则查缓存，不并发
-// 发出相同请求，因此成功响应不会比已有条目旧，总是替换其正文与 ETag。请求期间发生过失效时，
-// 响应只作为过期条目保留，供条件请求与暂时性失败回退，不作为新鲜命中；在途请求失败、被取消或
-// 期间失效时，等待方自行请求。
+// 返回错误；404/410 按 URL 驱逐条目并撤销在途读的写入资格，其他拒绝与正文校验失败时本次读取失败关闭。
+// 旧快照只用于展示；命令仍由服务端权威校验。普通失效只把全部条目标为过期（保留正文与 ETag）
+// 并推进修订号。
+// 同一 URL 的读取共享可用的在途请求，等待方醒来后仍按缓存规则检查。普通失效后，旧响应可以
+// 保存为过期条目。竞价命令失效后，新读取跳过命令前的在途请求；旧请求若已被接替，只能向自己
+// 的调用方交付结果，不能覆盖新请求的正文或验证器。
 //
 // 本层是这些读取唯一的客户端新鲜度来源：未命中（或旧条目没有 ETag）时的请求要求浏览器向服务端
 // 再验证，不接受 HTTP 缓存按 max-age/stale-while-revalidate 给出的旧副本，否则旧正文会被当作
 // 新快照保留到 TTL 结束；带 If-None-Match 的条件请求按 Fetch 规范同样绕过 HTTP 缓存。失效时机
 // 是实时事件、开场迁移、外壳权威轮询（非 Live 每 60 秒，Live 约每 5 分钟兜底）、页面恢复可见、
-// 看板对齐重读与错误重试、会话变化，以及竞价与代理命令得到服务端答复（成功或被拒绝）；只推进
-// 页面刷新代号而不失效时，TTL 内的读取直接命中新鲜条目，不会回到服务端。命令答复后的失效另把
-// 回退下限推进到新修订号：用户刚提交的命令之后，读视图只显示权威结果或错误，不退回命令之前的
-// 价格与领先者；回退资格在失败返回时按当时最新的下限判定，命令答复发生在重读在途期间同样生效。
+// 看板对齐重读与错误重试、会话变化，以及竞价和代理命令收到答复或结果未知。只推进页面
+// 刷新代号时，TTL 内仍会直接命中缓存。命令失效另把回退下限推进到新修订号：用户刚提交的命令
+// 之后，读视图只显示权威结果或错误，不退回命令之前的价格与领先者；回退资格在失败返回时按
+// 当时最新的下限判定，重读在途期间命令失效同样生效。
 // 他人竞价等事件触发的普通失效仍允许繁忙时先显示最后已知快照。
 
 import { err, ok, type Result, unreachable } from "@auction/web-shared/result";
@@ -60,10 +59,21 @@ export type FetchOutcome<T, E> =
       readonly error: E;
     }
   | {
-      /** 其他非 2xx 或正文校验失败：失败关闭，既不写入缓存也不回退旧值。 */
+      /** 已确认资源不可读取：驱逐旧值，后续传输失败也不再回退。 */
+      readonly kind: "missing";
+      readonly error: E;
+    }
+  | {
+      /** 其他非 2xx 或正文校验失败：本次读取失败关闭。 */
       readonly kind: "rejected";
       readonly error: E;
     };
+
+/** 收到 404/410 响应头时立即按地址驱逐，正文收尾时不会再次驱逐。 */
+type FetchSnapshot<T, E> = (
+  etag: string | null,
+  evictMissingSnapshot: () => void,
+) => Promise<FetchOutcome<T, E>>;
 
 /** 一次缓存读取得到的值及其来源。 */
 export interface CacheRead<T> {
@@ -88,9 +98,9 @@ interface Store {
   entries: Map<string, CacheEntry<unknown>>;
   /** 每次失效递增，已有条目随之全部过期。 */
   revision: number;
-  /** 同一 URL 正在进行的请求。 */
+  /** 同一 URL 当前可供合并的请求，命令后的请求可以接替旧登记。 */
   pending: Map<string, Pending>;
-  /** 暂时性失败回退的修订号下限。 */
+  /** 最近一次竞价命令失效的修订号，也是共享在途请求与回退快照的下限。 */
   fallbackFloor: number;
 }
 
@@ -119,13 +129,15 @@ export function hasEntryForTest(url: string): boolean {
   return STORE.entries.has(url);
 }
 
-/** 在途请求的完成通知；只表示“该请求已结束”，不携带结果。 */
+/** 在途请求结束或读登记被驱逐时唤醒等待方，不携带结果。 */
 class Pending {
   done = false;
+  readonly revision: number;
   readonly promise: Promise<void>;
   #resolve: (() => void) | null = null;
 
-  constructor() {
+  constructor(revision: number) {
+    this.revision = revision;
     this.promise = new Promise<void>((resolve) => {
       this.#resolve = resolve;
     });
@@ -141,7 +153,7 @@ class Pending {
   }
 }
 
-/** 等待在途请求结束；调用方被取消时立即返回 `false`，不再关心该请求的结果。 */
+/** 等待在途登记释放；调用方被取消时立即返回 `false`。 */
 function waitForPending(pending: Pending, signal: AbortSignal): Promise<boolean> {
   if (pending.done) {
     return Promise.resolve(true);
@@ -180,13 +192,17 @@ class PendingGuard {
   }
 
   static register(url: string): PendingGuard {
-    const pending = new Pending();
+    const pending = new Pending(currentRevision());
     STORE.pending.set(url, pending);
     return new PendingGuard(url, pending);
   }
 
+  ownsRequest(): boolean {
+    return STORE.pending.get(this.url) === this.pending;
+  }
+
   release(): void {
-    if (STORE.pending.get(this.url) === this.pending) {
+    if (this.ownsRequest()) {
       STORE.pending.delete(this.url);
     }
     this.pending.finish();
@@ -239,7 +255,7 @@ export async function getOrFetch<T, E>(
   url: string,
   ttlMillis: number,
   typeId: string,
-  fetch: (etag: string | null) => Promise<FetchOutcome<T, E>>,
+  fetch: FetchSnapshot<T, E>,
   abortError: E,
   signal: AbortSignal,
   now: () => number = nowMillis,
@@ -256,7 +272,7 @@ export async function readOrFetch<T, E>(
   url: string,
   ttlMillis: number,
   typeId: string,
-  fetch: (etag: string | null) => Promise<FetchOutcome<T, E>>,
+  fetch: FetchSnapshot<T, E>,
   abortError: E,
   signal: AbortSignal,
   now: () => number = nowMillis,
@@ -267,7 +283,7 @@ export async function readOrFetch<T, E>(
   }
   // 非白名单 URL 一律直连：不读取、不写入，也不改变失效修订号。
   if (!isCacheableUrl(url)) {
-    const outcome = await fetch(null);
+    const outcome = await fetch(null, () => {});
     if (signal.aborted) {
       return err(abortError);
     }
@@ -276,6 +292,7 @@ export async function readOrFetch<T, E>(
         return ok(current(outcome.value));
       case "transport":
       case "busy":
+      case "missing":
       case "rejected":
         return err(outcome.error);
       case "not_modified":
@@ -287,10 +304,9 @@ export async function readOrFetch<T, E>(
   }
   const fresh = (entry: CacheEntry<T>): boolean =>
     entry.current && Math.max(0, now() - entry.storedAt) < ttlMillis;
-  // 同一 URL 已有请求在途（例如启动预取）：等它结束再按同一规则读缓存。单线程内“检查—登记”
-  // 之间没有 await，因此不会有两个请求同时登记同一 URL。
+  // 命令后的权威重读必须独立于命令前发出的请求，避免被旧请求阻塞或受其结果影响。
   let pending = STORE.pending.get(url);
-  while (pending !== undefined) {
+  while (pending !== undefined && pending.revision >= STORE.fallbackFloor) {
     if (!(await waitForPending(pending, signal))) {
       return err(abortError);
     }
@@ -315,56 +331,58 @@ export async function readOrFetch<T, E>(
     if (signal.aborted) {
       return err(abortError);
     }
-    const revision = currentRevision();
+    const revision = guard.pending.revision;
     const cached = lookup<T>(url, typeId);
-    if (cached !== undefined) {
-      if (fresh(cached)) {
-        if (signal.aborted) {
-          return err(abortError);
-        }
-        return ok(current(cached.value));
-      }
-      // 过期与已被失效的条目同样带旧 ETag 再验证：正文未变时 304 直接复用，不重传整页。
-      const outcome = await fetch(cached.etag);
+    if (cached !== undefined && fresh(cached)) {
       if (signal.aborted) {
         return err(abortError);
       }
-      switch (outcome.kind) {
-        case "changed":
-          store(url, typeId, outcome.value, outcome.etag, now(), revision);
-          return ok(current(outcome.value));
-        case "not_modified":
-          // 304 表示正文在本次请求时仍未变：期间没有再发生失效时，前移写入时间并标回当前修订号。
-          touch(url, now(), revision);
-          return ok(current(cached.value));
-        case "transport":
-        case "busy":
-          // 条目早于最近一次命令答复时不回退，按失败返回；下限可能在本次请求在途期间被推进，
-          // 必须在此刻重新判定，不能沿用请求前结论。
-          if (fallbackAllowed(cached.revision)) {
-            return ok({ value: cached.value, staleFallback: cached.storedAt });
-          }
-          return err(outcome.error);
-        case "rejected":
-          return err(outcome.error);
-        default:
-          return unreachable(outcome);
-      }
+      return ok(current(cached.value));
     }
-    const outcome = await fetch(null);
+    let evicted = false;
+    const evictMissingSnapshot = () => {
+      if (evicted) return;
+      evicted = true;
+      // 发请求的先后不能证明服务端处理的先后。按地址驱逐并撤销在途登记，防止迟到响应恢复快照。
+      STORE.entries.delete(url);
+      const pending = STORE.pending.get(url);
+      STORE.pending.delete(url);
+      pending?.finish();
+    };
+    // 过期与已被失效的条目带旧 ETag 再验证：正文未变时 304 直接复用，不重传整页。
+    const outcome = await fetch(cached?.etag ?? null, evictMissingSnapshot);
+    if (outcome.kind === "missing") {
+      evictMissingSnapshot();
+      return err(signal.aborted ? abortError : outcome.error);
+    }
     if (signal.aborted) {
       return err(abortError);
     }
     switch (outcome.kind) {
       case "changed":
-        store(url, typeId, outcome.value, outcome.etag, now(), revision);
+        // 失去在途登记的旧结果只能交还原调用方。
+        if (guard.ownsRequest()) {
+          store(url, typeId, outcome.value, outcome.etag, now(), revision);
+        }
         return ok(current(outcome.value));
+      case "not_modified":
+        if (cached === undefined) {
+          throw new Error("未提供 ETag 的读取不应返回 304");
+        }
+        // 期间没有再发生失效时，304 将已确认的快照标回当前修订号。
+        if (guard.ownsRequest()) {
+          touch(url, now(), revision);
+        }
+        return ok(current(cached.value));
       case "transport":
       case "busy":
+        // 命令可能推进回退下限，404/410 可能撤销登记；按失败返回时的状态判定。
+        if (cached !== undefined && guard.ownsRequest() && fallbackAllowed(cached.revision)) {
+          return ok({ value: cached.value, staleFallback: cached.storedAt });
+        }
+        return err(outcome.error);
       case "rejected":
         return err(outcome.error);
-      case "not_modified":
-        throw new Error("未提供 ETag 的读取不应返回 304");
       default:
         return unreachable(outcome);
     }
@@ -379,8 +397,7 @@ export function invalidateAll(): void {
   STORE.revision += 1;
 }
 
-/** 用户命令（竞价、代理创建与降额）得到服务端答复后调用：与 invalidateAll 一样使全部条目
- * 过期，另把回退下限推进到新修订号。 */
+/** 用户命令已改变或可能改变权威状态时，使旧条目过期并禁止回退到命令前的快照。 */
 export function invalidateAfterCommand(): void {
   STORE.revision += 1;
   STORE.fallbackFloor = STORE.revision;
@@ -390,7 +407,7 @@ function currentRevision(): number {
   return STORE.revision;
 }
 
-/** 修订号为 revision 的条目此刻能否作为暂时性失败的回退值：不早于最近一次命令答复推进的下限。 */
+/** 修订号为 revision 的条目此刻能否作为回退值：不早于最近一次命令失效推进的下限。 */
 function fallbackAllowed(revision: number): boolean {
   return revision >= STORE.fallbackFloor;
 }
@@ -422,9 +439,8 @@ function store<T>(
   storedAt: number,
   revision: number,
 ): void {
-  // 同一 URL 的请求经在途登记串行，响应不会比已有条目旧，因此总是替换正文与 ETag：页面已展示
-  // 这份响应，之后的条件请求与暂时性失败回退都不能退回更早的快照。revision 是请求开始时的
-  // 修订号，期间发生过失效时条目随即落后于当前修订号，只作过期条目，不成为新鲜命中。
+  // 写入采用发请求时的修订号。期间发生失效时，保留旧正文和 ETag 供再验证，旧条目不会重新
+  // 变成新鲜。命令前的修订号也没有回退资格。
   if (!STORE.entries.has(url) && STORE.entries.size >= MAX_ENTRIES) {
     let oldestKey: string | null = null;
     let oldestStoredAt = Number.POSITIVE_INFINITY;

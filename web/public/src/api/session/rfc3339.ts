@@ -1,5 +1,5 @@
 // 严格 RFC 3339 时刻解析；只接受后端 `Timestamp::parse_from_rfc3339` 的定宽语法。
-// 解析结果是纪元纳秒，用于比较会话截止，不参与页面格式化或时区换算。
+// 解析结果是纪元纳秒，用于精确比较时刻。
 
 function asciiDigit(text: string, index: number): number | null {
   const code = text.charCodeAt(index);

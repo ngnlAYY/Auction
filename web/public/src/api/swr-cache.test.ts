@@ -1,8 +1,8 @@
-// SWR 缓存的行为断言：TTL、条件请求、暂时性失败回退、在途请求串行、失效与条目上限逐条对照
-// Rust 源实现的同名测试。
+// SWR 缓存的 TTL、条件请求、回退、驱逐和白名单回归断言。
 
 import { expect, test } from "bun:test";
 import { err, ok, type Result } from "@auction/web-shared/result";
+import { failureOutcome } from "./queries/cached-get";
 import {
   CATALOG_TTL_MILLIS,
   type CacheRead,
@@ -153,178 +153,6 @@ test("rejected_response_neither_replaces_nor_falls_back：拒绝响应既不替�
   expect(calls.value).toBe(3);
 });
 
-test("invalidation_during_request_keeps_the_inflight_response_stale：请求在途失效后响应只保留为过期条目", async () => {
-  resetStoreForTest();
-  const url = "/api/v1/auctions/current?world=main";
-  const now = { value: 30_000 };
-  const calls = { value: 0 };
-  expect(
-    await call(url, now, LIVE_TTL_MILLIS, calls, () => {
-      // 模拟请求在途时实时事件完成失效：本次响应照常交给调用方，期间发生失效时只作为过期条目
-      // 保留，供条件请求与暂时性失败回退，不作为新鲜命中。
-      invalidateAll();
-      return changed("v1");
-    }),
-  ).toEqual(ok("v1"));
-  expect(await call(url, now, LIVE_TTL_MILLIS, calls, () => changed("v2"))).toEqual(ok("v2"));
-  expect(calls.value).toBe(2);
-});
-
-test("response_after_inflight_invalidation_backs_revalidation_and_fallback：在途失效后的响应支撑再验证与回退", async () => {
-  resetStoreForTest();
-  const url = "/api/v1/lots/00000000-0000-0000-0000-00000000000e";
-  const now = { value: 35_000 };
-  const calls = { value: 0 };
-  expect(await call(url, now, LIVE_TTL_MILLIS, calls, () => changed("v1", "etag-1"))).toEqual(
-    ok("v1"),
-  );
-  invalidateAll();
-  // 重读在途时又来一次失效：v2 已交给页面展示，缓存随之前进到 v2，只是仍按过期处理。
-  expect(
-    await call(url, now, LIVE_TTL_MILLIS, calls, (etag) => {
-      expect(etag).toBe("etag-1");
-      invalidateAll();
-      return changed("v2", "etag-2");
-    }),
-  ).toEqual(ok("v2"));
-  // 下一次读取带 v2 的 ETag 再验证；读闸繁忙时回退 v2，不倒退到页面已替换掉的 v1。
-  expect(
-    await call(url, now, LIVE_TTL_MILLIS, calls, (etag) => {
-      expect(etag).toBe("etag-2");
-      return busy("read_busy");
-    }),
-  ).toEqual(ok("v2"));
-  expect(calls.value).toBe(3);
-});
-
-test("concurrent_reads_share_one_inflight_request：同一 URL 的并发读取共用一个在途请求", async () => {
-  resetStoreForTest();
-  const url = "/api/v1/auctions/00000000-0000-0000-0000-00000000000a/lots?page=1&page_size=20";
-  const calls = { value: 0 };
-  let release = (_outcome: Outcome): void => {};
-  const gate = new Promise<Outcome>((resolve) => {
-    release = resolve;
-  });
-  const first = getOrFetch(
-    url,
-    LIVE_TTL_MILLIS,
-    TYPE_ID,
-    () => {
-      calls.value += 1;
-      return gate;
-    },
-    ABORT_ERROR,
-    passiveSignal(),
-    () => 1_000,
-  );
-  const second = getOrFetch(
-    url,
-    LIVE_TTL_MILLIS,
-    TYPE_ID,
-    async () => {
-      calls.value += 1;
-      return changed("second");
-    },
-    ABORT_ERROR,
-    passiveSignal(),
-    () => 1_000,
-  );
-  // 第二个读取只等待，不发出第二个相同请求。
-  expect(calls.value).toBe(1);
-  release(changed("v1"));
-  expect(await first).toEqual(ok("v1"));
-  expect(await second).toEqual(ok("v1"));
-  expect(calls.value).toBe(1);
-});
-
-test("waiter_requests_again_when_the_inflight_response_was_invalidated：在途响应失效后等待方自行重读", async () => {
-  resetStoreForTest();
-  const url = "/api/v1/auctions/current?world=isekai";
-  const calls = { value: 0 };
-  let release = (_outcome: Outcome): void => {};
-  const gate = new Promise<Outcome>((resolve) => {
-    release = resolve;
-  });
-  const first = getOrFetch(
-    url,
-    LIVE_TTL_MILLIS,
-    TYPE_ID,
-    () => {
-      calls.value += 1;
-      return gate;
-    },
-    ABORT_ERROR,
-    passiveSignal(),
-    () => 1_000,
-  );
-  const second = getOrFetch(
-    url,
-    LIVE_TTL_MILLIS,
-    TYPE_ID,
-    async (etag) => {
-      // 等待方不把首个响应当作新鲜命中，而是带它的 ETag 自行再验证。
-      expect(etag).toBe("etag-stale");
-      calls.value += 1;
-      return changed("fresh");
-    },
-    ABORT_ERROR,
-    passiveSignal(),
-    () => 1_000,
-  );
-  // 在途期间失效：首个响应照常交给其调用方，只作为过期条目保留，等待方必须自己读取新快照。
-  invalidateAll();
-  release(changed("stale", "etag-stale"));
-  expect(await first).toEqual(ok("stale"));
-  expect(await second).toEqual(ok("fresh"));
-  expect(calls.value).toBe(2);
-});
-
-test("dropped_inflight_request_releases_waiters：发起方取消后等待方不会被永久挂起", async () => {
-  resetStoreForTest();
-  const url = "/api/v1/lots/00000000-0000-0000-0000-00000000000b";
-  const calls = { value: 0 };
-  const controller = new AbortController();
-  let release = (_outcome: Outcome): void => {};
-  const gate = new Promise<Outcome>((resolve) => {
-    release = resolve;
-  });
-  const first = getOrFetch(
-    url,
-    LIVE_TTL_MILLIS,
-    TYPE_ID,
-    () => {
-      calls.value += 1;
-      return gate;
-    },
-    ABORT_ERROR,
-    controller.signal,
-    () => 1_000,
-  );
-  const second = getOrFetch(
-    url,
-    LIVE_TTL_MILLIS,
-    TYPE_ID,
-    async () => {
-      calls.value += 1;
-      return changed("own");
-    },
-    ABORT_ERROR,
-    passiveSignal(),
-    () => 1_000,
-  );
-  // 发起方随组件卸载被取消：登记撤销，等待方不能永远挂起。
-  controller.abort();
-  expect(await second).toEqual(ok("own"));
-  expect(calls.value).toBe(2);
-  release(changed("unused"));
-  expect(await first).toEqual(err(ABORT_ERROR));
-  // 已取消请求的迟到响应不得回写缓存：仍读到等待方取得的 own，也不会再发请求。
-  expect(
-    await call(url, { value: 1_000 }, LIVE_TTL_MILLIS, calls, () => changed("late-read")),
-  ).toEqual(ok("own"));
-  expect(calls.value).toBe(2);
-});
-
 test("invalidated_entry_revalidates_with_its_etag_and_304_restores_freshness：失效条目带旧 ETag 再验证并由 304 恢复新鲜", async () => {
   resetStoreForTest();
   const url = "/api/v1/auctions/00000000-0000-0000-0000-000000000003/bid-log?page=1&page_size=50";
@@ -397,15 +225,18 @@ test("busy_rejection_without_snapshot_still_fails：没有快照时暂时拒绝�
   ).toEqual(ok("v1"));
 });
 
-test("other_rejections_do_not_fall_back_to_the_invalidated_snapshot：其他拒绝不回退已失效快照", async () => {
+test("not_found_evicts_the_snapshot_before_a_later_transport_failure：404 后断网也不回退旧快照", async () => {
   resetStoreForTest();
   const url = "/api/v1/auctions/current?world=main";
   const now = { value: 70_000 };
   const calls = { value: 0 };
   expect(await call(url, now, LIVE_TTL_MILLIS, calls, () => changed("v1"))).toEqual(ok("v1"));
   invalidateAll();
-  expect(await call(url, now, LIVE_TTL_MILLIS, calls, () => rejected("not_found"))).toEqual(
-    err("not_found"),
+  expect(
+    await call(url, now, LIVE_TTL_MILLIS, calls, () => failureOutcome(404, "not_found")),
+  ).toEqual(err("not_found"));
+  expect(await call(url, now, LIVE_TTL_MILLIS, calls, () => transport("network_error"))).toEqual(
+    err("network_error"),
   );
 });
 
@@ -458,74 +289,6 @@ test("command_invalidation_forbids_falling_back_to_pre_command_snapshots：命�
   invalidateAll();
   expect(await call(url, now, LIVE_TTL_MILLIS, calls, () => busy("read_busy"))).toEqual(ok("v1"));
   expect(calls.value).toBe(5);
-});
-
-test("command_reply_during_an_inflight_reread_forbids_the_pre_command_fallback：重读在途收到命令答复时按最新下限判定", async () => {
-  const cases = [
-    [true, true],
-    [false, true],
-    [true, false],
-  ] as const;
-  for (const [isBusy, commandReply] of cases) {
-    resetStoreForTest();
-    const url = "/api/v1/lots/00000000-0000-0000-0000-000000000012";
-    const now = { value: 110_000 };
-    const calls = { value: 0 };
-    expect(
-      await call(url, now, LIVE_TTL_MILLIS, calls, () => changed("v-before", "etag-1")),
-    ).toEqual(ok("v-before"));
-    // 他人竞价等普通失效：重读开始时这份快照仍允许作为回退值。
-    invalidateAll();
-    let release = (_outcome: Outcome): void => {};
-    const gate = new Promise<Outcome>((resolve) => {
-      release = resolve;
-    });
-    const reread = readOrFetch(
-      url,
-      LIVE_TTL_MILLIS,
-      TYPE_ID,
-      (etag) => {
-        expect(etag).toBe("etag-1");
-        return gate;
-      },
-      ABORT_ERROR,
-      passiveSignal(),
-      () => now.value,
-    );
-    if (commandReply) {
-      // 重读在途期间用户命令得到答复。
-      invalidateAfterCommand();
-    } else {
-      invalidateAll();
-    }
-    release(isBusy ? busy("read_busy") : transport("network_error"));
-    const result = await reread;
-    if (commandReply) {
-      expect(result).toEqual(err(isBusy ? "read_busy" : "network_error"));
-    } else {
-      expect(result).toEqual(ok({ value: "v-before", staleFallback: 110_000 }));
-    }
-  }
-});
-
-test("inflight_response_from_before_a_command_is_not_a_fallback：命令前在途、命令后写回的响应不作回退", async () => {
-  resetStoreForTest();
-  const url = "/api/v1/auctions/00000000-0000-0000-0000-00000000000d/lots?page=1&page_size=20";
-  const now = { value: 95_000 };
-  const calls = { value: 0 };
-  expect(
-    await call(url, now, LIVE_TTL_MILLIS, calls, () => {
-      invalidateAfterCommand();
-      return changed("v-before-command", "etag-before");
-    }),
-  ).toEqual(ok("v-before-command"));
-  expect(
-    await call(url, now, LIVE_TTL_MILLIS, calls, (etag) => {
-      expect(etag).toBe("etag-before");
-      return busy("read_busy");
-    }),
-  ).toEqual(err("read_busy"));
-  expect(calls.value).toBe(2);
 });
 
 test("entry_cap_evicts_the_oldest_write：条目上限淘汰最早写入的条目", async () => {

@@ -174,12 +174,24 @@ function systemNowMillis(): number {
 
 /** 发送 GET 并在读取 DTO 前采集服务端时钟；所有 Public 读取共用该边界。
  * 结构化错误直接向调用方传播，由调用方用 `transportErrorCode` 折回稳定 transport code。
+ * 调用方可在正文读取前观察 HTTP 状态。
  * `signal` 中止时共享传输层同时取消 `fetch` 与正文读取。 */
 export function sendGet(
   url: string,
   signal: AbortSignal,
+  observeStatus?: (status: number) => void,
 ): Promise<Result<TransportResponse, TransportError>> {
-  return sendGetObserved(url, observeResponseDate, signal);
+  if (observeStatus === undefined) {
+    return sendGetObserved(url, observeResponseDate, signal);
+  }
+  return sendGetObserved(
+    url,
+    (response) => {
+      observeStatus(response.status);
+      observeResponseDate(response);
+    },
+    signal,
+  );
 }
 
 /** 发送 SWR 缓存层的公开 GET：有 ETag 时携带 `If-None-Match`，没有时要求浏览器向服务端再验证。
@@ -194,6 +206,7 @@ export function sendGet(
 export function sendGetConditional(
   url: string,
   etag: string | null,
+  observeStatus: (status: number) => void,
   signal: AbortSignal,
 ): Promise<Result<TransportResponse, TransportError>> {
   return sendRequestObserved(
@@ -209,7 +222,10 @@ export function sendGetConditional(
         value: { url, init: { method: "GET", headers: { "If-None-Match": etag } } },
       };
     },
-    observeRevalidatedDate,
+    (response) => {
+      observeStatus(response.status);
+      observeRevalidatedDate(response);
+    },
     signal,
   );
 }

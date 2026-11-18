@@ -66,14 +66,18 @@ test("newer_revision_refreshes_and_duplicate_event_is_ignored：较新 revision 
   expect(cache.after()).toBe(1);
 });
 
-test("sequence_gap_requests_refetch_and_keeps_the_page_cursor：序列缺口要求重读并保留页游标", () => {
+test("http_replay_applies_events_after_hidden_sequences_and_advances_the_cursor：HTTP 回放跳过隐藏事件并推进游标", () => {
   const cache = createRealtimeCache("auction-1", 0);
-  const merge = cache.mergePage(page([previewUpdate(2, 9)], 4));
+  const merge = cache.mergePage({
+    ...page([previewUpdate(2, 9), bid(4, "bid-event-4", "bid-1", 1, 1, 1_500)], 5),
+    has_more: true,
+  });
 
   expect(merge.refresh_required).toBe(true);
-  expect(merge.degraded).toBe(true);
-  expect(merge.continue_catch_up).toBe(false);
-  expect(cache.after()).toBe(4);
+  expect(merge.bids_changed).toBe(true);
+  expect(merge.degraded).toBe(false);
+  expect(merge.continue_catch_up).toBe(true);
+  expect(cache.after()).toBe(5);
 });
 
 test("stale_events_are_ignored_without_reporting_a_gap：过期事件忽略且不报告缺口", () => {

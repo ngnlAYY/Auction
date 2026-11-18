@@ -1,5 +1,6 @@
 // HTTP catch-up 与 WebSocket 订阅生命周期。
 // 连接建立只受握手超时约束；业务消息空闲不能证明断线，协议 Ping/Pong 不暴露给浏览器 API。
+// HTTP 补读由自己的结果结束，之后读循环按队列处理已到达的套接字事件。
 // 每帧先解码，序列跳号时回到 HTTP 补发，缺口仍存在才降级重连。
 
 import { transportErrorCode } from "@auction/web-shared/net/transport";
@@ -47,21 +48,23 @@ async function fetchRealtimePage(
   query.append("auction_id", canonical.value);
   query.append("after", String(after));
   query.append("page_size", String(PAGE_SIZE));
-  const response = await sendGet(`/api/v1/events?${query.toString()}`, signal);
+  let observedStatus: number | null = null;
+  const response = await sendGet(`/api/v1/events?${query.toString()}`, signal, (status) => {
+    observedStatus = status;
+  });
   if (signal.aborted) {
     return err(realtimeErrorTransient("network_error"));
+  }
+  // 响应头已确认拒绝时，正文断流或超时仍按该 HTTP 状态结束订阅。
+  const status = response.ok ? response.value.status : observedStatus;
+  if (status === 401 || status === 403 || status === 404) {
+    return err(realtimeErrorPermanent(`HTTP ${status}`));
   }
   if (!response.ok) {
     return err(realtimeErrorTransient(transportErrorCode(response.error)));
   }
   if (!responseOk(response.value)) {
-    const status = response.value.status;
-    // 401/403 认证或权限失败、404 目标拍卖不存在：重连不能自愈，按永久错误处理。
-    return err(
-      status === 401 || status === 403 || status === 404
-        ? realtimeErrorPermanent(`HTTP ${status}`)
-        : realtimeErrorTransient(`HTTP ${status}`),
-    );
+    return err(realtimeErrorTransient(`HTTP ${response.value.status}`));
   }
   const payload = decodeAuctionRealtimePage(response.value, canonical.value);
   if (!payload.ok) {
@@ -131,55 +134,41 @@ export async function subscribeAuctionRealtime(
     return openedSocket;
   }
   const connection = openedSocket.value;
-
-  const timeout = createTimeoutFuture(REALTIME_CONNECT_TIMEOUT_MILLIS);
-  let abortListener: (() => void) | null = null;
-  const aborted = new Promise<"aborted">((resolve) => {
-    if (signalAborted(signal)) {
-      resolve("aborted");
-      return;
-    }
-    abortListener = () => resolve("aborted");
-    signal?.addEventListener("abort", abortListener, { once: true });
-    if (signalAborted(signal)) {
-      abortListener();
-    }
-  });
-  const outcome = await Promise.race([
-    connection.opened,
-    timeout.promise.then(() => "timeout" as const),
-    aborted,
-  ]);
-  timeout.cancel();
-  if (abortListener !== null) {
-    signal?.removeEventListener("abort", abortListener);
+  try {
+    const result = await receiveRealtime(connection, after, canonical.value, world, onPage, signal);
+    // 退出原因决定错误类别；关闭码只附在这一次返回的错误上。
+    return result.ok ? result : err({ ...result.error, closeCode: connection.closeCode() });
+  } finally {
+    connection.inbox.dispose();
   }
+}
+
+async function receiveRealtime(
+  connection: SocketConnection,
+  after: number,
+  auctionId: string,
+  world: string,
+  onPage: (page: RealtimePage) => boolean,
+  signal: AbortSignal,
+): Promise<Result<null, RealtimeError>> {
+  const outcome = await waitForSocketOpen(connection.opened, signal);
 
   if (outcome === "aborted" || signalAborted(signal)) {
-    connection.inbox.dispose();
     return ok(null);
   }
   if (outcome === "timeout") {
-    connection.inbox.dispose();
     return err(realtimeErrorTransient("实时 WebSocket 握手超时"));
   }
-  if (outcome === "failed") {
-    connection.inbox.dispose();
-    return err(realtimeErrorTransient("实时 WebSocket 建立失败"));
-  }
-  if (!connection.isOpen()) {
-    connection.inbox.dispose();
+  if (outcome === "failed" || !connection.isOpen()) {
     return err(realtimeErrorTransient("实时 WebSocket 建立失败"));
   }
 
   const expectedAfter = { value: after };
-  const caughtUp = await catchUpRealtime(canonical.value, expectedAfter, onPage, signal);
+  const caughtUp = await catchUpRealtime(auctionId, expectedAfter, onPage, signal);
   if (signalAborted(signal)) {
-    connection.inbox.dispose();
     return ok(null);
   }
   if (!caughtUp.ok) {
-    connection.inbox.dispose();
     return caughtUp;
   }
 
@@ -187,20 +176,13 @@ export async function subscribeAuctionRealtime(
   // 存活检查由服务端 Ping/Pong 拥有；静默拍卖保持连接，关闭/错误才触发恢复。
   for (;;) {
     const message = await connection.inbox.next(signal);
-    if (signalAborted(signal)) {
-      connection.inbox.dispose();
-      return ok(null);
-    }
-    if (message === null) {
-      connection.inbox.dispose();
+    if (signalAborted(signal) || message === null) {
       return ok(null);
     }
     if (message.kind === "closed") {
-      connection.inbox.dispose();
       return err(realtimeErrorTransient("实时 WebSocket 已关闭"));
     }
     if (message.kind === "failed") {
-      connection.inbox.dispose();
       return err(realtimeErrorTransient(`实时 WebSocket 读取失败：${message.detail}`));
     }
     if (message.kind === "binary") {
@@ -208,7 +190,6 @@ export async function subscribeAuctionRealtime(
       reportBrowserError("realtime_protocol");
       consecutiveBadFrames += 1;
       if (consecutiveBadFrames >= MAX_CONSECUTIVE_BAD_FRAMES) {
-        connection.inbox.dispose();
         return err(realtimeErrorTransient("实时 WebSocket 连续返回不支持的二进制帧"));
       }
       continue;
@@ -219,12 +200,11 @@ export async function subscribeAuctionRealtime(
       observeServerBuildId(serverBuild);
       continue;
     }
-    const decoded = decodeRealtimeEvent(message.text, canonical.value, world);
+    const decoded = decodeRealtimeEvent(message.text, auctionId, world);
     if (!decoded.ok) {
       reportBrowserError("realtime_protocol");
       consecutiveBadFrames += 1;
       if (consecutiveBadFrames >= MAX_CONSECUTIVE_BAD_FRAMES) {
-        connection.inbox.dispose();
         return err(realtimeErrorTransient(`实时事件帧连续解码失败：${decoded.error}`));
       }
       continue;
@@ -236,17 +216,14 @@ export async function subscribeAuctionRealtime(
     }
     const nextSequence = checkedAddOne(expectedAfter.value);
     if (nextSequence === null) {
-      connection.inbox.dispose();
       return err(realtimeErrorPermanent("实时事件序列超过可表示范围"));
     }
     if (event.stream_sequence !== nextSequence) {
-      const catchUp = await catchUpRealtime(canonical.value, expectedAfter, onPage, signal);
+      const catchUp = await catchUpRealtime(auctionId, expectedAfter, onPage, signal);
       if (signalAborted(signal)) {
-        connection.inbox.dispose();
         return ok(null);
       }
       if (!catchUp.ok) {
-        connection.inbox.dispose();
         return catchUp;
       }
     }
@@ -255,12 +232,10 @@ export async function subscribeAuctionRealtime(
     }
     const nextAfterCatchUp = checkedAddOne(expectedAfter.value);
     if (nextAfterCatchUp === null) {
-      connection.inbox.dispose();
       return err(realtimeErrorPermanent("实时事件序列超过可表示范围"));
     }
     if (event.stream_sequence !== nextAfterCatchUp) {
       reportBrowserError("realtime_protocol");
-      connection.inbox.dispose();
       return err(realtimeErrorTransient("实时事件序列出现断档"));
     }
     expectedAfter.value = event.stream_sequence;
@@ -271,6 +246,30 @@ export async function subscribeAuctionRealtime(
       refetch_required: false,
     };
     onPage(page);
+  }
+}
+
+async function waitForSocketOpen(
+  opened: SocketConnection["opened"],
+  signal: AbortSignal,
+): Promise<"open" | "failed" | "aborted" | "timeout"> {
+  const timeout = createTimeoutFuture(REALTIME_CONNECT_TIMEOUT_MILLIS);
+  let abortListener: (() => void) | null = null;
+  const aborted = new Promise<"aborted">((resolve) => {
+    if (signal.aborted) {
+      resolve("aborted");
+      return;
+    }
+    abortListener = () => resolve("aborted");
+    signal.addEventListener("abort", abortListener, { once: true });
+  });
+  try {
+    return await Promise.race([opened, timeout.promise.then(() => "timeout" as const), aborted]);
+  } finally {
+    timeout.cancel();
+    if (abortListener !== null) {
+      signal.removeEventListener("abort", abortListener);
+    }
   }
 }
 
@@ -339,6 +338,7 @@ interface SocketConnection {
   opened: Promise<"open" | "failed">;
   inbox: Inbox;
   isOpen(): boolean;
+  closeCode(): number | null;
 }
 
 /** 建立原生 WebSocket，并在握手完成前就开始缓存帧，避免慢 catch-up 丢失订阅间隙事件。 */
@@ -356,6 +356,7 @@ function openSocket(url: string): Result<SocketConnection, RealtimeError> {
   const queue: Incoming[] = [];
   const waiters: Array<(message: Incoming | null) => void> = [];
   let closed = false;
+  let closeCode: number | null = null;
   let opened = false;
   let resolveOpened: ((state: "open" | "failed") => void) | null = null;
   const openedPromise = new Promise<"open" | "failed">((resolve) => {
@@ -401,6 +402,9 @@ function openSocket(url: string): Result<SocketConnection, RealtimeError> {
       push({ kind: "failed", detail: "WebSocket 错误" });
     }
   };
+  const recordCloseCode = (event: CloseEvent): void => {
+    closeCode ??= event.code;
+  };
   const onClose = (): void => {
     if (!opened) {
       settleOpen("failed");
@@ -411,6 +415,7 @@ function openSocket(url: string): Result<SocketConnection, RealtimeError> {
   socket.addEventListener("message", onMessage);
   socket.addEventListener("open", onOpen);
   socket.addEventListener("error", onError);
+  socket.addEventListener("close", recordCloseCode);
   socket.addEventListener("close", onClose);
   if (socket.readyState === WebSocket.OPEN) {
     onOpen();
@@ -455,6 +460,7 @@ function openSocket(url: string): Result<SocketConnection, RealtimeError> {
       socket.removeEventListener("message", onMessage);
       socket.removeEventListener("open", onOpen);
       socket.removeEventListener("error", onError);
+      socket.removeEventListener("close", recordCloseCode);
       socket.removeEventListener("close", onClose);
       markClosed();
       for (const waiter of waiters.splice(0)) {
@@ -474,5 +480,6 @@ function openSocket(url: string): Result<SocketConnection, RealtimeError> {
     opened: openedPromise,
     inbox,
     isOpen: () => socket.readyState === WebSocket.OPEN,
+    closeCode: () => closeCode,
   });
 }

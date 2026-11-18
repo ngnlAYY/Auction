@@ -10,7 +10,13 @@ import { fetchBidLogAuctionStatus, fetchBidLogAuctions } from "./bid-log";
 
 const MAIN_LIVE_ID = "00000000-0000-4000-8000-000000000001";
 
-function auction(id: string, worldId: string, sequence: number, status: string): JsonObject {
+function auction(
+  id: string,
+  worldId: string,
+  sequence: number,
+  status: string,
+  stateVersion = 1,
+): JsonObject {
   return {
     id,
     world_id: worldId,
@@ -21,7 +27,7 @@ function auction(id: string, worldId: string, sequence: number, status: string):
     sold_count: 0,
     unsold_count: 0,
     sold_amount: 0,
-    state_version: 1,
+    state_version: stateVersion,
   };
 }
 
@@ -45,17 +51,18 @@ function requestedStatus(url: string): string | null {
 test("all_world_bid_log_directory_omits_world_and_groups_by_world：全部世界目录请求不带 world，合并后按世界分组", async () => {
   const byStatus: Readonly<Record<string, readonly JsonObject[]>> = {
     live: [
-      auction(MAIN_LIVE_ID, "main", 5, "live"),
+      auction(MAIN_LIVE_ID, "main", 5, "live", 2),
       auction("00000000-0000-4000-8000-000000000002", "isekai", 9, "live"),
       auction("00000000-0000-4000-8000-000000000003", "main", 3, "live"),
     ],
     final: [
       auction("00000000-0000-4000-8000-000000000004", "main", 4, "final"),
       auction("00000000-0000-4000-8000-000000000005", "isekai", 8, "final"),
+      auction(MAIN_LIVE_ID, "main", 5, "final", 3),
     ],
     // 目录逐页读取期间该场次已结算，以同一 ID 再次出现；合并时必须保留一条。
     settled: [
-      auction(MAIN_LIVE_ID, "main", 5, "settled"),
+      auction(MAIN_LIVE_ID, "main", 5, "settled", 5),
       auction("00000000-0000-4000-8000-000000000006", "isekai", 7, "settled"),
     ],
   };
@@ -105,13 +112,50 @@ test("all_world_bid_log_directory_omits_world_and_groups_by_world：全部世界
       ["isekai", 7],
     ]);
     expect(
-      result.value.filter((entry) => entry.id === MAIN_LIVE_ID).map((entry) => entry.status),
-    ).toEqual(["live"]);
+      result.value
+        .filter((entry) => entry.id === MAIN_LIVE_ID)
+        .map((entry) => [entry.status, entry.state_version]),
+    ).toEqual([["settled", 5]]);
   } finally {
     fetchSpy.mockRestore();
     resetStoreForTest();
   }
 });
+
+test.each([
+  [2, 3],
+  [3, 2],
+])(
+  "duplicate_bid_log_auctions_keep_the_highest_version：输入版本 %i、%i",
+  async (first, second) => {
+    const fetchSpy = spyOn(globalThis, "fetch");
+    resetStoreForTest();
+    try {
+      fetchSpy.mockImplementation(
+        Object.assign(
+          async (input: URL | RequestInfo) => {
+            const url =
+              typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+            const auctions =
+              requestedStatus(url) === "live"
+                ? [
+                    auction(MAIN_LIVE_ID, "main", 5, "live", first),
+                    auction(MAIN_LIVE_ID, "main", 5, "live", second),
+                  ]
+                : [];
+            return new Response(envelope(auctions));
+          },
+          { preconnect: () => {} },
+        ),
+      );
+      const result = await fetchBidLogAuctions(null, new AbortController().signal);
+      expect(result.ok && result.value.map((entry) => entry.state_version)).toEqual([3]);
+    } finally {
+      fetchSpy.mockRestore();
+      resetStoreForTest();
+    }
+  },
+);
 
 test("all_world_bid_log_directory_rejects_unknown_world：不限世界目录出现未知世界时整体失败", async () => {
   const fetchSpy = spyOn(globalThis, "fetch");

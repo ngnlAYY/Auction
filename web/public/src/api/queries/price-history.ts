@@ -50,8 +50,8 @@ export async function fetchPriceHistory(
     url,
     CATALOG_TTL_MILLIS,
     PRICE_HISTORY_CACHE_TYPE,
-    async (etag) => {
-      const conditional = await conditionalGet(requestUrl, etag, signal);
+    async (etag, evictMissingSnapshot) => {
+      const conditional = await conditionalGet(requestUrl, etag, evictMissingSnapshot, signal);
       if (signal.aborted) {
         return { kind: "transport", error: PRICE_HISTORY_FETCH_ERROR };
       }
@@ -64,7 +64,7 @@ export async function fetchPriceHistory(
           return { kind: "not_modified" };
         case "failure":
           return failureOutcome<PublicPriceHistoryListResponse, PriceHistoryFetchError>(
-            outcome.response.status,
+            outcome.status,
             PRICE_HISTORY_FETCH_ERROR,
           );
         case "success": {

@@ -137,13 +137,18 @@ export async function fetchBidLogAuctionStatus(
   }
 }
 
-/** 合并多个状态目录：主世界在前、异世界在后，同一世界内按期号倒序；目录逐页读取期间发生
- * 状态迁移时，同一场次可能以多个状态重复出现，排序后按现有规则去掉相邻重复项。 */
+/** 目录读取期间同一场次可能跨多个状态出现；保留最高版本后按世界、期号排序。 */
 function orderBidLogAuctions(
   auctions: readonly AuctionSummaryResponse[],
 ): AuctionSummaryResponse[] {
-  const ordered = auctions.slice();
-  ordered.sort((left, right) => {
+  const latest = new Map<string, AuctionSummaryResponse>();
+  for (const auction of auctions) {
+    const previous = latest.get(auction.id);
+    if (previous === undefined || auction.state_version > previous.state_version) {
+      latest.set(auction.id, auction);
+    }
+  }
+  return [...latest.values()].sort((left, right) => {
     const worldOrder = bidLogWorldRank(left.world_id) - bidLogWorldRank(right.world_id);
     if (worldOrder !== 0) {
       return worldOrder;
@@ -153,14 +158,6 @@ function orderBidLogAuctions(
     }
     return compareText(right.id, left.id);
   });
-  const deduped: AuctionSummaryResponse[] = [];
-  for (const auction of ordered) {
-    const previous = deduped[deduped.length - 1];
-    if (previous === undefined || previous.id !== auction.id) {
-      deduped.push(auction);
-    }
-  }
-  return deduped;
 }
 
 function bidLogWorldRank(worldId: string): number {
