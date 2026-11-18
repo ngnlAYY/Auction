@@ -24,7 +24,7 @@ export function FulfillmentTable(props: {
   readonly lotFilter: string;
   readonly onPageChange: (page: number) => void;
   readonly onPageClamp: (page: number) => void;
-  readonly onPageSizeChange: (size: number) => void;
+  readonly onPageSizeChange: (size: number) => unknown;
 }): JSX.Element {
   const auctionId = createValueMemo(() => props.page.auction.id);
   const world = createValueMemo(() => props.page.auction.world);

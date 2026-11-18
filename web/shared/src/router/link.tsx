@@ -10,7 +10,7 @@ import { isInternalHref } from "./pattern";
 
 type PassthroughAttributes = Omit<
   JSX.AnchorHTMLAttributes<HTMLAnchorElement>,
-  "children" | "class" | "href" | "onClick" | "rel" | "target"
+  "aria-current" | "children" | "class" | "href" | "onClick" | "rel" | "target"
 >;
 
 /** Link 的属性；其余属性原样透传给 `<a>`。 */
@@ -19,6 +19,11 @@ export interface LinkProps extends PassthroughAttributes {
   readonly class?: JSX.ClassValue;
   /** 当前 href 与实际地址相同时追加的类名。 */
   readonly activeClass?: string;
+  /**
+   * 显式指定当前页语义；给出时覆盖按 href 与地址完全相等自动判定的结果。
+   * 传 `"false"` 可明确表示不是当前页。
+   */
+  readonly "aria-current"?: JSX.AnchorHTMLAttributes<HTMLAnchorElement>["aria-current"];
   readonly rel?: string;
   /** 新标签页打开；同时决定 target 与是否拦截点击。 */
   readonly newTab?: boolean;
@@ -54,6 +59,7 @@ function hasClassNames(value: JSX.ClassValue): boolean {
  * 当前页判定把 href 与 Router 的 currentLocationString() 比较；该快照包含地址栏实际的
  * pathname + search + hash，并会在应用绕过 Router 直接写 History 后经
  * notifyLocationWritten() 刷新。因此 href 与地址栏完全一致才算当前页，与 Dioxus Link 相同。
+ * 导航链接带 query 时无法用整串 href 判断当前页，调用方可传 `aria-current` 显式覆盖该判定。
  */
 export function Link(props: LinkProps): JSX.Element {
   const router = useRouter();
@@ -91,6 +97,7 @@ export function Link(props: LinkProps): JSX.Element {
     "href",
     "class",
     "activeClass",
+    "aria-current",
     "rel",
     "newTab",
     "onClick",
@@ -105,7 +112,7 @@ export function Link(props: LinkProps): JSX.Element {
       class={className()}
       rel={rel()}
       target={props.newTab === true ? "_blank" : undefined}
-      aria-current={active() ? "page" : undefined}
+      aria-current={props["aria-current"] ?? (active() ? "page" : undefined)}
       {...attributes}
     >
       {props.children}

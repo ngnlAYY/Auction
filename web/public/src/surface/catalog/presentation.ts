@@ -200,22 +200,24 @@ export function historicalLotsHref(auctionId: string, worldId: string): string {
   return publicHref("/", query);
 }
 
-/** 历史场次出价记录入口；与拍品目录入口使用同一查询口径。 */
-export function historicalBidLogHref(auctionId: string, worldId: string): string {
+/** 历史场次出价记录入口；`world` 是当前地址栏要继承的世界范围，`null` 表示全部世界。
+ * 目标页是跨世界页，钻取链接不能替用户改范围，因此不能使用场次自己的 `world_id`。 */
+export function historicalBidLogHref(auctionId: string, world: string | null): string {
   const query: PublicBoardQuery = {
     ...publicBoardQueryDefault(),
     auctionId,
-    world: worldId === "main" ? null : worldId,
+    world,
   };
   return publicHref("/bidlog", query);
 }
 
-/** 已结算场次的履约进度入口：与出价记录入口同一查询口径，带场次与世界（主世界使用缺省 URL）。 */
-export function historicalFulfillmentHref(auctionId: string, worldId: string): string {
+/** 已结算场次的履约进度入口；`world` 是当前地址栏要继承的世界范围，`null` 表示全部世界。
+ * 目标页是跨世界页，钻取链接不能替用户改范围，因此不能使用场次自己的 `world_id`。 */
+export function historicalFulfillmentHref(auctionId: string, world: string | null): string {
   const query: PublicBoardQuery = {
     ...publicBoardQueryDefault(),
     auctionId,
-    world: worldId === "main" ? null : worldId,
+    world,
   };
   return publicHref("/fulfillment", query);
 }

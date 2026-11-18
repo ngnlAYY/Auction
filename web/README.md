@@ -199,12 +199,14 @@ export function Blacklist(): JSX.Element {
 
   | 位置 | 差别 |
   | --- | --- |
-  | `web/public/src/styles/mobile-topbar.css` | 手机顶栏改为两行应用栏：第一行是当前场次与状态标签，第二行是世界切换与倒计时；不显示品牌名，语言与主题移到设置页；菜单与刷新是无边框图标 |
-  | `web/public/src/styles/mobile-bid-log.css` | 手机上出价记录的筛选区去掉卡片，下拉框与搜索框共两行 |
+  | `web/public/src/styles/mobile-topbar.css` | 手机顶栏改为两行应用栏：第一行是当前场次与所在世界，第二行是状态标签与倒计时（放不下时截断）；不显示品牌名，语言与主题移到设置页，顶栏没有任何切换器；菜单与刷新是无边框图标 |
+  | `web/public/src/styles/round-pages.css` | 出价记录与履约进度的场次区：场次下拉框就是场次标题；手机上去掉卡片，下拉框与搜索框共两行。历史成交价的主筛选行少了世界一列 |
   | `web/public/src/styles/mobile-catalog-filters.css` | 手机上看板筛选区排成带标签的三行（分组按钮、窄等级输入框与复选项、类型下拉框与列设置）；列设置面板改为整宽多列网格 |
-  | `web/public/src/styles/auction-rounds-links.css` | 往期拍卖的“查看”入口等分整列；桌面端该列是刚好容纳四个入口的固定宽度，手机卡片上画成四个等宽按钮 |
-  | `web/public/src/styles/pinned-pager.css` | 页面级分页条固定在内容区最下方，内容超过一屏时停在视口底部（账户页除外） |
-  | `web/public/src/surface/pages/history.tsx` | 往期拍卖表格其余列的比例随“查看”列改为固定宽度而调整 |
+  | `web/public/src/surface/query/world-scope.ts`、`surface/board/world.tsx`、`styles/world-tabs.css` | 世界切换是页面里的按钮组（`WorldTabs`，“世界 [全部世界][主世界][异世界]”），顶栏与页面里都没有世界下拉框；状态与写回逻辑在外壳的控制器里。按钮只列配置里开放的世界，只有一个可选时整组不显示；关闭的世界不作为选项，但它的历史在跨世界页仍可见。往期拍卖、历史成交价、出价记录、履约进度是跨世界页：有「全部世界」，`world` 缺省 = 全部（出价记录与履约进度在 Rust 版缺省是主世界）；看板与论坛同步只有各个世界，缺省 = 主世界。导航链接把显式选择的世界带到目标页 |
+  | `web/public/src/surface/pages/history.tsx` | 往期拍卖没有状态筛选，只列已结算；地址栏里的 `status` 读到后即移除 |
+  | `web/public/src/surface/reads/bid-log/`、`reads/fulfillment/` | 场次下拉框并入场次标题（全部世界时按世界分组），页面上方不再有单独的控件行；出价记录的选项只显示期数，状态由旁边的标签给出 |
+  | `web/public/src/surface/query/category.ts`、`presentation/desktop.tsx`、`presentation/mobile.tsx` | 装备分类多选：地址栏 `type` 与接口 `category` 是逗号分隔的分类键列表；桌面是可多选的开关按钮，手机是多选下拉面板，面板里的勾选是草稿、关闭面板时一次生效（Rust 版单选） |
+  | `web/shared/src/router/outlet.tsx`、`ui/bootstrap/page-load-recovery.ts` | 目标页面的代码尚未加载时立即卸载上一个页面，不让旧页面在新地址下继续运行；页面代码加载失败（部署后旧标签页引用的分块已不存在）时整页重载一次，同一地址 30 秒内已重载过才显示错误横幅。Rust 版是单个 WASM 包，没有这两种情形 |
   | `web/public/src/surface/settings.tsx`、`styles/settings-page.css` | 设置页 `/settings`（语言与主题）：Rust 版没有这个页面；入口只在手机导航里，桌面顶栏仍保留两个切换器 |
 - 译文是各应用 `i18n/` 下的五个 `.ftl` 文件（en、zh-CN、zh-TW、ja、ko），键集合一致，键名用连字符。译文只使用 Fluent 的平铺子集：每条消息占一行，写成 `键 = 文本`，文本里的占位只有 `{ $变量 }` 与字符串字面量 `{"…"}` 两种；加载器遇到子集之外的写法会拒绝整份译文。Public 默认 en，Admin 默认 zh-CN；偏好键 `hv.lang` 与 `hv.theme` 是固定契约。
 

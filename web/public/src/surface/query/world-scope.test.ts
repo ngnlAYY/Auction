@@ -1,0 +1,369 @@
+// Public 世界范围的纯函数：路由类别、地址栏读写、导航继承与世界按钮组。
+
+import { expect, test } from "bun:test";
+
+import type { PublicBoardQuery } from "./board";
+import type {
+  NormalizedWorldQuery,
+  WorldScope,
+  WorldScopeFamily,
+  WorldSwitchInput,
+} from "./world-scope";
+
+const { publicBoardQueryDefault } = await import("./board");
+const {
+  routeUsesSingleWorld,
+  scopedWorld,
+  worldQueryForScope,
+  worldScopeFamily,
+  worldScopeFromQuery,
+  worldScopeHref,
+  worldScopeNavigationWorld,
+  worldScopeSwitchQuery,
+  worldSwitchCurrent,
+  worldSwitchOptions,
+} = await import("./world-scope");
+const { publicAuctionHomeQuery } = await import("./links");
+
+const MULTI_ROUTES = ["AuctionList", "History", "BidLog", "Fulfillment"] as const;
+const SINGLE_ROUTES = [
+  null,
+  "AuctionIndex",
+  "AuctionPage",
+  "LotDetail",
+  "Rules",
+  "Settings",
+] as const;
+
+test("world_scope_family_matches_the_four_multi_world_routes：只有四个跨世界路由属于 multi", () => {
+  for (const routeName of MULTI_ROUTES) {
+    expect(worldScopeFamily(routeName)).toBe("multi");
+  }
+  for (const routeName of SINGLE_ROUTES) {
+    expect(worldScopeFamily(routeName)).toBe("single");
+  }
+  expect(worldScopeFamily("UnknownRoute")).toBe("single");
+});
+
+test("world_scope_uses_single_world_only_for_content_routes：只有依赖世界内容的单世界页纠偏地址", () => {
+  for (const routeName of ["AuctionIndex", "AuctionPage", "LotDetail", "Forum"]) {
+    expect(routeUsesSingleWorld(routeName)).toBe(true);
+  }
+  for (const routeName of [
+    null,
+    "AuctionList",
+    "History",
+    "BidLog",
+    "Fulfillment",
+    "Rules",
+    "About",
+    "Blacklist",
+    "CompensationPool",
+    "Settings",
+    "Login",
+    "Me",
+    "Account",
+    "Status",
+  ]) {
+    expect(routeUsesSingleWorld(routeName)).toBe(false);
+  }
+});
+
+test("world_scope_query_round_trips_follow_each_family_default：两类页面的世界读写遵循各自缺省", () => {
+  const table: readonly [
+    family: WorldScopeFamily,
+    query: NormalizedWorldQuery,
+    scope: WorldScope,
+    written: string | null,
+  ][] = [
+    ["multi", null, "all", null],
+    ["multi", "main", "main", "main"],
+    ["multi", "isekai", "isekai", "isekai"],
+    ["single", null, "main", null],
+    ["single", "main", "main", null],
+    ["single", "isekai", "isekai", "isekai"],
+  ];
+  for (const [family, query, scope, written] of table) {
+    expect(worldScopeFromQuery(family, query)).toBe(scope);
+    expect(worldQueryForScope(family, scope)).toBe(written);
+  }
+  expect(worldQueryForScope("single", "all")).toBeNull();
+  expect(worldQueryForScope("single", "main")).toBeNull();
+  expect(worldQueryForScope("single", "main", true)).toBe("main");
+  expect(worldQueryForScope("multi", "main", true)).toBe("main");
+  expect(scopedWorld("all")).toBe("main");
+  expect(scopedWorld("all", ["main", "isekai"], true)).toBe("main");
+  expect(scopedWorld("all", ["isekai"], true)).toBe("isekai");
+  expect(scopedWorld("all", [], true)).toBe("main");
+  expect(scopedWorld("all", ["isekai"], false)).toBe("main");
+  expect(scopedWorld("main")).toBe("main");
+  expect(scopedWorld("isekai")).toBe("isekai");
+});
+
+function switchInput(overrides: Partial<WorldSwitchInput> = {}): WorldSwitchInput {
+  return {
+    family: "multi",
+    world: null,
+    enabledWorlds: ["main", "isekai"],
+    worldsLoaded: true,
+    historicalUrl: false,
+    ...overrides,
+  };
+}
+
+test("world_switch_options_list_only_enabled_worlds：按钮组只列配置开放的世界", () => {
+  const both = switchInput();
+  expect(worldSwitchOptions(both)).toEqual([
+    { value: "all", disabled: false },
+    { value: "main", disabled: false },
+    { value: "isekai", disabled: false },
+  ]);
+  expect(worldSwitchCurrent(both)).toBe("all");
+
+  const onlyMain = switchInput({ enabledWorlds: ["main"] });
+  expect(worldSwitchOptions(onlyMain)).toEqual([{ value: "main", disabled: false }]);
+  expect(worldSwitchCurrent(onlyMain)).toBe("main");
+
+  const onlyIsekai = switchInput({ enabledWorlds: ["isekai"] });
+  expect(worldSwitchOptions(onlyIsekai)).toEqual([{ value: "isekai", disabled: false }]);
+  // “全部”地址仍按不带 world 读取；当前值只把唯一开放世界标成选中，不写回地址。
+  expect(worldSwitchCurrent(onlyIsekai)).toBe("isekai");
+
+  const none = switchInput({ enabledWorlds: [] });
+  expect(worldSwitchOptions(none)).toEqual([]);
+  expect(worldSwitchCurrent(none)).toBe("main");
+});
+
+test("world_switch_options_expose_an_explicitly_requested_closed_world：跨世界页保留关闭世界深链", () => {
+  const closedIsekai = switchInput({ world: "isekai", enabledWorlds: ["main"] });
+  expect(worldSwitchOptions(closedIsekai)).toEqual([
+    { value: "main", disabled: false },
+    { value: "isekai", disabled: true },
+  ]);
+  expect(worldSwitchCurrent(closedIsekai)).toBe("isekai");
+
+  const closedMain = switchInput({ world: "main", enabledWorlds: ["isekai"] });
+  expect(worldSwitchOptions(closedMain)).toEqual([
+    { value: "isekai", disabled: false },
+    { value: "main", disabled: true },
+  ]);
+  expect(worldSwitchCurrent(closedMain)).toBe("main");
+});
+
+test("world_switch_options_keep_a_closed_single_world_current：单世界页保留地址指向的关闭世界供重试", () => {
+  const historicalClosed = switchInput({
+    family: "single",
+    enabledWorlds: ["isekai"],
+    historicalUrl: true,
+  });
+  expect(worldSwitchOptions(historicalClosed)).toEqual([
+    { value: "isekai", disabled: false },
+    { value: "main", disabled: true },
+  ]);
+  expect(worldSwitchCurrent(historicalClosed)).toBe("main");
+
+  const closedIsekai = switchInput({
+    family: "single",
+    world: "isekai",
+    enabledWorlds: ["main"],
+    historicalUrl: true,
+  });
+  expect(worldSwitchOptions(closedIsekai)).toEqual([
+    { value: "main", disabled: false },
+    { value: "isekai", disabled: true },
+  ]);
+  expect(worldSwitchCurrent(closedIsekai)).toBe("isekai");
+
+  const explicitClosed = switchInput({
+    family: "single",
+    world: "isekai",
+    enabledWorlds: ["main"],
+    historicalUrl: false,
+  });
+  expect(worldSwitchOptions(explicitClosed)).toEqual([
+    { value: "main", disabled: false },
+    { value: "isekai", disabled: true },
+  ]);
+  // 当前项取地址里的关闭世界，而不是自动纠偏想要写成的开放世界。
+  expect(worldSwitchCurrent(explicitClosed)).toBe("isekai");
+
+  const ordinaryClosed = switchInput({
+    family: "single",
+    enabledWorlds: ["isekai"],
+    historicalUrl: false,
+  });
+  expect(worldSwitchOptions(ordinaryClosed)).toEqual([{ value: "isekai", disabled: false }]);
+  // 无 world 的单世界地址按主世界解释；选项隐藏时仍不把自动回退当成地址事实。
+  expect(worldSwitchCurrent(ordinaryClosed)).toBe("main");
+
+  const noWorldsHistory = switchInput({
+    family: "single",
+    world: "isekai",
+    enabledWorlds: [],
+    historicalUrl: true,
+  });
+  expect(worldSwitchOptions(noWorldsHistory)).toEqual([{ value: "isekai", disabled: true }]);
+  expect(worldSwitchCurrent(noWorldsHistory)).toBe("isekai");
+});
+
+test("world_switch_options_fall_back_before_the_world_catalog_loads：目录未返回或失败时两个世界都开放", () => {
+  const pending = switchInput({ enabledWorlds: [], worldsLoaded: false });
+  expect(worldSwitchOptions(pending)).toEqual([
+    { value: "all", disabled: false },
+    { value: "main", disabled: false },
+    { value: "isekai", disabled: false },
+  ]);
+  expect(worldSwitchCurrent(pending)).toBe("all");
+
+  const pendingSingle = switchInput({
+    family: "single",
+    world: "isekai",
+    enabledWorlds: [],
+    worldsLoaded: false,
+  });
+  expect(worldSwitchOptions(pendingSingle)).toEqual([
+    { value: "main", disabled: false },
+    { value: "isekai", disabled: false },
+  ]);
+  expect(worldSwitchCurrent(pendingSingle)).toBe("isekai");
+});
+
+test("world_scope_href_carries_only_the_inherited_world：导航继承显式世界且不传播自动回退", () => {
+  expect(worldScopeNavigationWorld(null, true)).toBeNull();
+  expect(worldScopeNavigationWorld("main", true)).toBe("main");
+  expect(worldScopeNavigationWorld("isekai", true)).toBe("isekai");
+  // 目录已加载但只有一个可选世界时，导航不携带自动回退值。
+  expect(worldScopeNavigationWorld("main", false)).toBeNull();
+
+  expect(worldScopeHref("/history", null)).toBe("/history");
+  expect(worldScopeHref("/history", "main")).toBe("/history?world=main");
+  expect(worldScopeHref("/", "isekai")).toBe("/?world=isekai");
+  // 手机首页与同页重置查询消费同一份导航范围：两个世界时保留显式主世界，
+  // 只有一个开放世界时不把自动回退写成参数。
+  expect(worldScopeHref("/", worldScopeNavigationWorld("main", true))).toBe("/?world=main");
+  expect(worldScopeHref("/", worldScopeNavigationWorld(null, false))).toBe("/");
+  expect(publicAuctionHomeQuery(worldScopeNavigationWorld("main", true)).world).toBe("main");
+});
+
+test("public_auction_home_query_keeps_the_explicit_navigation_world：首页查询保留显式主世界", () => {
+  expect(publicAuctionHomeQuery(null).world).toBeNull();
+  expect(publicAuctionHomeQuery("main").world).toBe("main");
+  expect(publicAuctionHomeQuery("isekai").world).toBe("isekai");
+});
+
+function switchFixture(): PublicBoardQuery {
+  return {
+    ...publicBoardQueryDefault(),
+    world: "isekai",
+    auctionId: "67e55044-10b1-426f-9247-bb680e5fe0c8",
+    category: "clo",
+    equipmentGroup: "rare",
+    maxLevel: "400",
+    includeUnleveled: "false",
+    status: "live",
+    historyName: "Robe",
+    historyFrom: "2025-01-01",
+    historyTo: "2025-02-01",
+    historyMinPrice: "10",
+    historyMaxPrice: "100",
+    historyBuyer: "Buyer",
+    historySeller: "Seller",
+    historySort: "price_desc",
+    historyGroup: "buyer",
+    bidLogLot: "One12",
+    page: 3,
+    pageSize: 50,
+    movementPage: 2,
+    movementPageSize: 50,
+    bidPage: 2,
+    proxyPage: 2,
+    passthrough: [["utm", "lane"]],
+  };
+}
+
+test("world_scope_switch_clears_auction_list_dependencies：往期拍卖切换世界清空场次、类型与页码", () => {
+  const scopes: readonly [WorldScope, string | null][] = [
+    ["all", null],
+    ["main", "main"],
+    ["isekai", "isekai"],
+  ];
+  for (const [scope, world] of scopes) {
+    const current = switchFixture();
+    const snapshot = structuredClone(current);
+    const next = worldScopeSwitchQuery("AuctionList", current, scope, false);
+    expect(next).toEqual({ ...snapshot, world, auctionId: null, category: null, page: 1 });
+    expect(next).not.toBe(current);
+    expect(current).toEqual(snapshot);
+  }
+});
+
+test("world_scope_switch_keeps_history_filters_but_resets_page：价格历史切换世界保留筛选并回到首页", () => {
+  const scopes: readonly [WorldScope, string | null][] = [
+    ["all", null],
+    ["main", "main"],
+    ["isekai", "isekai"],
+  ];
+  for (const [scope, world] of scopes) {
+    const current = switchFixture();
+    const snapshot = structuredClone(current);
+    const next = worldScopeSwitchQuery("History", current, scope, false);
+    expect(next).toEqual({ ...snapshot, world, page: 1 });
+    expect(next).not.toBe(current);
+    expect(current).toEqual(snapshot);
+  }
+});
+
+test("world_scope_switch_clears_round_and_lot_filters_for_bidlog_and_fulfillment：出价记录与履约进度切换世界清空场次和 lot", () => {
+  const scopes: readonly [WorldScope, NormalizedWorldQuery][] = [
+    ["all", null],
+    ["main", "main"],
+    ["isekai", "isekai"],
+  ];
+  for (const routeName of ["BidLog", "Fulfillment"] as const) {
+    for (const [scope, world] of scopes) {
+      const current = switchFixture();
+      const snapshot = structuredClone(current);
+      const next = worldScopeSwitchQuery(routeName, current, scope, false);
+      expect(next).toEqual({
+        ...snapshot,
+        world,
+        auctionId: null,
+        bidLogLot: null,
+        page: 1,
+      });
+      expect(next).not.toBe(current);
+      expect(current).toEqual(snapshot);
+    }
+  }
+});
+
+test("world_scope_switch_on_single_world_pages_only_changes_the_world：单世界页面切换世界只改世界", () => {
+  const cases: readonly [WorldScope, string | null][] = [
+    ["all", null],
+    ["main", null],
+    ["isekai", "isekai"],
+  ];
+  for (const [scope, world] of cases) {
+    const current = switchFixture();
+    const snapshot = structuredClone(current);
+    const next = worldScopeSwitchQuery("Rules", current, scope, false);
+    expect(next).toEqual({ ...snapshot, world });
+    expect(next).not.toBe(current);
+    expect(current).toEqual(snapshot);
+  }
+});
+
+test("world_scope_switch_on_a_historical_board_returns_to_the_world_home：历史看板切换世界回到目标世界首页", () => {
+  const current = switchFixture();
+  const snapshot = structuredClone(current);
+  const isekai = worldScopeSwitchQuery("AuctionIndex", current, "isekai", true);
+  expect(isekai).toEqual({
+    ...publicBoardQueryDefault(),
+    world: "isekai",
+  });
+  expect(isekai).not.toBe(current);
+  expect(worldScopeSwitchQuery("AuctionIndex", current, "main", true)).toEqual(
+    publicBoardQueryDefault(),
+  );
+  expect(current).toEqual(snapshot);
+});

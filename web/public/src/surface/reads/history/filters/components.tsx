@@ -1,11 +1,11 @@
 // 价格历史筛选器的表单和字段控件。
+// 世界由页面顶部的世界按钮组（WorldTabs）切换，本表单不提供世界下拉框；Rust 版的筛选表单仍包含世界选择。
 
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
 import { For, onSettled, Show } from "solid-js";
 
-import { worldLabel } from "../../../board/world";
 import { HistoryApply } from "../../../presentation/mobile";
 import type { HistoryFilterError, HistoryPriceUnit } from "./model";
 import { historyPriceUnitAsStr, historyPriceUnitFromStr } from "./model";
@@ -21,7 +21,6 @@ const HISTORY_MONTHS = Object.freeze(Array.from({ length: 12 }, (_, index) => in
 
 /** 渲染价格历史的主筛选表单。 */
 export function PriceHistoryFilters(props: {
-  readonly world: string;
   readonly name: string;
   readonly fromMonth: string;
   readonly fromYear: string;
@@ -33,11 +32,9 @@ export function PriceHistoryFilters(props: {
   readonly maximumPriceUnit: HistoryPriceUnit;
   readonly buyer: string;
   readonly seller: string;
-  readonly worldOptions: readonly string[];
   readonly activeFilterCount: number;
   readonly settingsOpen: boolean;
   readonly filterError: HistoryFilterError | null;
-  readonly setWorld: (world: string) => void;
   readonly setName: (name: string) => void;
   readonly setFromMonth: (month: string) => void;
   readonly setFromYear: (year: string) => void;
@@ -85,22 +82,6 @@ export function PriceHistoryFilters(props: {
       }}
     >
       <div class="public-history-primary-filters">
-        <label>
-          <span>{t("history-filter-world")}</span>
-          <select
-            name="world"
-            value={props.world}
-            onChange={(event) => {
-              props.setWorld(event.currentTarget.value);
-              props.setFilterError(null);
-            }}
-          >
-            <option value="all">{t("auction-history-world-all")}</option>
-            <For each={props.worldOptions} keyed={false}>
-              {(optionWorld) => <option value={optionWorld()}>{worldLabel(optionWorld())}</option>}
-            </For>
-          </select>
-        </label>
         <label for="public-history-name">
           <span>{t("history-filter-name")}</span>
           <input
@@ -271,7 +252,7 @@ export function PriceHistoryFilters(props: {
           <p class="public-history-price-hint">{t("history-filter-price-hint")}</p>
           <p class="public-history-player-hint">{t("history-filter-player-hint")}</p>
           <div class="public-history-filter-actions">
-            {/* 同步清除已应用的 URL 条件，保留顶部搜索并移除旧结果。 */}
+            {/* 同步清除已应用的筛选条件（保留世界范围与顶部搜索），并移除旧结果。 */}
             <button
               type="button"
               class="public-history-filter-actions__clear"

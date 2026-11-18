@@ -34,17 +34,20 @@ import {
   tickerAuction,
 } from "../board/realtime";
 import { type PublicBidRefresh, refreshPublicReads } from "../board/refresh";
+import { createWorldSwitch } from "../board/world";
 import type { LotViewTarget } from "../catalog/detail/deep-link";
 import { PublicSessionView, type PublicSessionView as PublicSessionViewType } from "../index";
 import {
   InitialPublicLocationContext,
   type LiveConnectionState,
+  normalizedWorldQuery,
   PublicLocationRevisionContext,
-  publicAuctionHomeHref,
   publicAuctionHomeQuery,
   readPublicQuery,
   setPublicQuery,
   usePublicQueryState,
+  worldScopeHref,
+  worldScopeNavigationWorld,
 } from "../query";
 import {
   publicConnectionClass,
@@ -56,8 +59,8 @@ import {
   CurrentAuctionContext,
   PageVisibilityContext,
   PublicReadinessContext,
-  PublicWorldQueryContext,
   SelectedWorldContext,
+  WorldSwitchContext,
 } from "./contexts";
 import { PublicShellProviders } from "./providers";
 import {
@@ -78,8 +81,8 @@ export {
   CurrentAuctionContext,
   PageVisibilityContext,
   PublicReadinessContext,
-  PublicWorldQueryContext,
   SelectedWorldContext,
+  WorldSwitchContext,
 };
 
 export function PublicShell(): JSX.Element {
@@ -112,18 +115,23 @@ function PublicShellContent(props: { readonly locationGeneration: Cell<number> }
   const worldQuerySignal = worldQueryState.state;
   const initialLocation = useContext(InitialPublicLocationContext);
   const selectedWorld = createCell(selectedWorldFromQuery(readPublicQuery(initialLocation).world));
+  // 世界目录同步、单世界页纠偏与切换动作随外壳常驻；页面只渲染按钮组。
+  const worldSwitch = createWorldSwitch({
+    selectedWorld,
+    shellQueryState: worldQuerySignal,
+  });
+  // Solid 版导航继承地址里显式选择的世界；Rust 版没有这层统一的世界范围。
+  const navigationWorld = createValueMemo(() =>
+    worldScopeNavigationWorld(
+      normalizedWorldQuery(worldQuerySignal().world),
+      worldSwitch.selectable(),
+    ),
+  );
+  const scopedHref = (path: string): string => worldScopeHref(path, navigationWorld());
   // 看板首页冷启动时与当前场次读取并行预取上次场次的 lots；只在首次渲染执行一次。
   if (auctionPageOwnsInitialBoot()) {
     prefetchBoardLots(selectedWorld.peek(), readPublicQuery(initialLocation));
   }
-  createEffect(
-    () => selectedWorldFromQuery(worldQuerySignal().world),
-    (world) => {
-      if (selectedWorld.peek() !== world) {
-        selectedWorld.set(world);
-      }
-    },
-  );
   const locationGeneration = props.locationGeneration;
   const navigationOpen = createCell(false);
   const sidebarCollapsed = createCell(loadSidebarCollapsed());
@@ -272,8 +280,8 @@ function PublicShellContent(props: { readonly locationGeneration: Cell<number> }
     worldQuerySignal();
     return readPublicQuery(initialLocation);
   });
-  const auctionHomeQuery = createValueMemo(() => publicAuctionHomeQuery(selectedWorld()));
-  const auctionHomeHref = createValueMemo(() => publicAuctionHomeHref(selectedWorld()));
+  const auctionHomeQuery = createValueMemo(() => publicAuctionHomeQuery(navigationWorld()));
+  const auctionHomeHref = createValueMemo(() => scopedHref("/"));
   const auctionHomeNeedsQueryReset = () => {
     const route = currentRoute();
     return (
@@ -372,12 +380,16 @@ function PublicShellContent(props: { readonly locationGeneration: Cell<number> }
   const connectionMessage = () => publicConnectionMessage(connectionState());
   const connectionTitle = () => connectionMessage();
   const goHome = (): void => {
+    let written = true;
     if (auctionHomeNeedsQueryReset()) {
       // 同路由的首页入口仍清除历史场次与筛选；两端导航共享同一写回动作。
-      setPublicQuery(publicAuctionHomeQuery(selectedWorld.peek()), false);
+      written = setPublicQuery(auctionHomeQuery(), false);
     }
     navigationOpen.set(false);
-    locationGeneration.set(Math.min(locationGeneration() + 1, Number.MAX_SAFE_INTEGER));
+    if (written) {
+      // 写入失败时地址没有变化，不能唤醒位置订阅者重读。
+      locationGeneration.set(Math.min(locationGeneration() + 1, Number.MAX_SAFE_INTEGER));
+    }
   };
   const manualRefresh = (): void => {
     if (manualRefreshBusy.peek()) {
@@ -422,8 +434,8 @@ function PublicShellContent(props: { readonly locationGeneration: Cell<number> }
   return (
     <PublicShellProviders
       secondTicker={secondTicker}
+      worldSwitch={worldSwitch}
       selectedWorld={selectedWorld}
-      worldQuerySignal={worldQuerySignal}
       refreshGeneration={refreshGeneration}
       bidRefresh={bidRefresh}
       pageRealtimeTarget={pageRealtimeTarget}
@@ -437,7 +449,6 @@ function PublicShellContent(props: { readonly locationGeneration: Cell<number> }
       pageVisibility={pageVisibility}
     >
       <PublicShellView
-        selectedWorld={selectedWorld}
         navigationOpen={navigationOpen}
         sidebarCollapsed={sidebarCollapsed}
         manualRefreshBusy={manualRefreshBusy}
@@ -449,6 +460,7 @@ function PublicShellContent(props: { readonly locationGeneration: Cell<number> }
         realtimeState={realtimeState}
         currentRoute={currentRoute}
         auctionHomeHref={auctionHomeHref}
+        scopedHref={scopedHref}
         auctionHomeNeedsQueryReset={auctionHomeNeedsQueryReset}
         connectionClass={connectionClass}
         connectionStateName={connectionStateName}

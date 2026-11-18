@@ -30,7 +30,7 @@ import { PublicSessionResourceContext, PublicSessionView } from "../index";
 import { useContentLoading } from "../loading";
 import { publicPageMatches, updatePublicPageSize } from "../pagination";
 import type { PreviewHistoryLoad } from "../query";
-import { updatePublicQueryState, usePublicQueryState } from "../query";
+import { catalogCategoryKeys, updatePublicQueryState, usePublicQueryState } from "../query";
 import { PageVisibilityContext } from "../shell/contexts";
 import { useAlignmentReread } from "./alignment";
 import { previewHistorySwitch } from "./navigation";
@@ -74,6 +74,9 @@ export function AuctionData(props: AuctionDataProps): JSX.Element {
   const queryState = usePublicQueryState();
   const queryStateSignal = queryState.state;
   const activeCategory = createValueMemo(() => queryStateSignal().category ?? "all");
+  // 手机分类面板应用新分类会让目录重新读取并卸载承载工具栏的目录表。请求必须放在始终挂载的
+  // 看板层，下一次工具栏挂载后才能把焦点还给分类开关；面板自身随目录表一起不存在。
+  const categoryFocusRequest = createCell(false);
   const activeEquipmentGroup = createValueMemo(() => queryStateSignal().equipmentGroup ?? "all");
   const activeMaxLevel = createValueMemo(() => queryStateSignal().maxLevel);
   const activeIncludeUnleveled = createValueMemo(() => queryStateSignal().includeUnleveled);
@@ -166,7 +169,8 @@ export function AuctionData(props: AuctionDataProps): JSX.Element {
   const lots = createTaskResource(
     () => [refreshGeneration(), lotsRefreshGeneration(), catalogScope()] as const,
     async ([, generation, scope], context) => {
-      const category = scope.category !== "all" ? scope.category : null;
+      // Solid 版分类可为集合；空集合不发送 category 参数，Rust 版仍只发送单个分类。
+      const category = catalogCategoryKeys(scope.category).length === 0 ? null : scope.category;
       const equipmentGroup = scope.equipmentGroup !== "all" ? scope.equipmentGroup : null;
       const levels = catalogLevelFilterParse(scope.maxLevel ?? "", scope.includeUnleveled);
       if (!levels.ok) {
@@ -371,13 +375,20 @@ export function AuctionData(props: AuctionDataProps): JSX.Element {
               categoryCounts={new Map(Object.entries(snapshot().page.category_counts ?? {}))}
               activeCategory={activeCategory()}
               activeEquipmentGroup={activeEquipmentGroup()}
+              categoryFocusRequest={categoryFocusRequest}
               levelFiltered={levelFiltered()}
               pageNumber={pageNumber()}
               onCategoryChange={(category) => {
-                updatePublicQueryState(
+                const nextCategory = catalogCategoryKeys(category).length === 0 ? null : category;
+                const latest = queryStateSignal.peek();
+                if (latest.category === nextCategory && latest.page === 1) {
+                  // 目标值已是当前查询：不重复写历史，但对手机面板仍表示无需重试。
+                  return true;
+                }
+                return updatePublicQueryState(
                   queryStateSignal,
                   (query) => {
-                    query.category = category !== "all" ? category : null;
+                    query.category = nextCategory;
                     query.page = 1;
                   },
                   "push",

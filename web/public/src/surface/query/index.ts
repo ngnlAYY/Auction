@@ -8,7 +8,11 @@ export {
   publicBoardQueryDefault,
 } from "./board";
 export {
-  publicAuctionHomeHref,
+  catalogCategoryKeys,
+  normalizeCatalogCategories,
+  toggleCatalogCategory,
+} from "./category";
+export {
   publicAuctionHomeQuery,
   publicHref,
   redirectPublicAlias,
@@ -31,3 +35,21 @@ export {
   usePublicQueryState,
   writePublicQuery,
 } from "./state";
+export {
+  type NormalizedWorldQuery,
+  normalizedWorldQuery,
+  routeUsesSingleWorld,
+  scopedWorld,
+  type WorldScope,
+  type WorldScopeFamily,
+  type WorldSwitchInput,
+  type WorldSwitchOption,
+  worldQueryForScope,
+  worldScopeFamily,
+  worldScopeFromQuery,
+  worldScopeHref,
+  worldScopeNavigationWorld,
+  worldScopeSwitchQuery,
+  worldSwitchCurrent,
+  worldSwitchOptions,
+} from "./world-scope";

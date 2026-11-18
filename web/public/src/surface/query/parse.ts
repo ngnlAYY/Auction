@@ -1,11 +1,11 @@
 // 地址栏 query 的解析：按键分派、值规范化与非法值处理；未声明的键原样透传。
 // 只在浏览器中读取，宿主构建不参与这里的地址栏状态。
 
-import { EQUIPMENT_CATEGORY_CODES } from "@auction/contracts/dto/public/catalog/lot";
 import { utf8ByteLength } from "@auction/web-shared/text";
 
 import { DEFAULT_PAGE_SIZE, parsePublicPageSize } from "../pagination";
 import { normalizeWorldQuery, type PublicBoardQuery, publicBoardQueryDefault } from "./board";
+import { normalizeCatalogCategories } from "./category";
 import { rustTrim } from "./text";
 
 const INT64_MAX = 9_223_372_036_854_775_807n;
@@ -36,10 +36,6 @@ function parsePositivePage(value: string): number | null {
     return null;
   }
   return Number(parsed);
-}
-
-function isCatalogCategory(value: string): boolean {
-  return EQUIPMENT_CATEGORY_CODES.some(([category]) => category === value);
 }
 
 function isHistoryStatus(value: string): boolean {
@@ -94,10 +90,13 @@ export function parsePublicQuery(pathname: string, search: string): PublicBoardQ
         query.auctionId = canonicalUuid(value);
         break;
       case "type":
-        if (isCatalogCategory(value)) {
-          query.category = value;
-        } else {
-          query.passthrough.push([key, value]);
+        {
+          const category = normalizeCatalogCategories(value);
+          if (category !== null) {
+            query.category = category;
+          } else {
+            query.passthrough.push([key, value]);
+          }
         }
         break;
       case "equipment_group":

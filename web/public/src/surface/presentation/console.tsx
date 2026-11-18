@@ -1,5 +1,6 @@
 //! 公开端控制台外壳：顶部 ticker、可收起分组侧栏与倒计时叶子。
-//! 页面内容、查询与实时状态仍由既有页面组件拥有；本模块只做展示与导航。
+//! 页面内容、查询与实时状态仍由既有页面组件拥有；本模块只做展示与导航，
+//! 世界相关的链接由外壳生成后传入，不在这里读取查询状态。
 
 import type { RouteMatch } from "@auction/web-shared/router";
 import { Link } from "@auction/web-shared/router";
@@ -83,6 +84,7 @@ function ConsoleNavLink(props: {
 /** 公开端分组侧栏；当前路由只从外壳传入，不复制任何查询或命令状态。 */
 export function ConsoleSidebar(props: {
   currentRoute: RouteMatch;
+  scopedHref: (path: string) => string;
   collapsed: boolean;
   onToggle: () => void;
   onNavigate: () => void;
@@ -107,21 +109,21 @@ export function ConsoleSidebar(props: {
         <div class="console-nav__group">
           <div class="console-nav__head">{t("console-nav-overview")}</div>
           <ConsoleNavLink
-            href="/"
+            href={props.scopedHref("/")}
             icon="grid"
             label={t("nav-auctions")}
             active={homeActive()}
             onNavigate={() => props.onNavigate()}
           />
           <ConsoleNavLink
-            href="/bidlog"
+            href={props.scopedHref("/bidlog")}
             icon="list"
             label={t("page-bidlog-title")}
             active={is("BidLog")}
             onNavigate={() => props.onNavigate()}
           />
           <ConsoleNavLink
-            href="/fulfillment"
+            href={props.scopedHref("/fulfillment")}
             icon="package"
             label={t("page-fulfillment-title")}
             active={is("Fulfillment")}
@@ -131,21 +133,21 @@ export function ConsoleSidebar(props: {
         <div class="console-nav__group">
           <div class="console-nav__head">{t("console-nav-market")}</div>
           <ConsoleNavLink
-            href="/auctions"
+            href={props.scopedHref("/auctions")}
             icon="clock"
             label={t("nav-auction-history")}
             active={is("AuctionList")}
             onNavigate={() => props.onNavigate()}
           />
           <ConsoleNavLink
-            href="/history"
+            href={props.scopedHref("/history")}
             icon="activity"
             label={t("nav-price-history")}
             active={is("History")}
             onNavigate={() => props.onNavigate()}
           />
           <ConsoleNavLink
-            href="/compensation-pool"
+            href={props.scopedHref("/compensation-pool")}
             icon="shield"
             label={t("page-compensation-pool-title")}
             active={is("CompensationPool")}
@@ -155,28 +157,28 @@ export function ConsoleSidebar(props: {
         <div class="console-nav__group">
           <div class="console-nav__head">{t("console-nav-community")}</div>
           <ConsoleNavLink
-            href="/forum"
+            href={props.scopedHref("/forum")}
             icon="message"
             label={t("nav-forum")}
             active={is("Forum")}
             onNavigate={() => props.onNavigate()}
           />
           <ConsoleNavLink
-            href="/rules"
+            href={props.scopedHref("/rules")}
             icon="file"
             label={t("page-rules-title")}
             active={is("Rules")}
             onNavigate={() => props.onNavigate()}
           />
           <ConsoleNavLink
-            href="/blacklist"
+            href={props.scopedHref("/blacklist")}
             icon="ban"
             label={t("nav-blacklist")}
             active={is("Blacklist")}
             onNavigate={() => props.onNavigate()}
           />
           <ConsoleNavLink
-            href="/about"
+            href={props.scopedHref("/about")}
             icon="info"
             label={t("page-about-title")}
             active={is("About")}

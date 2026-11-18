@@ -87,4 +87,8 @@ test("lot_list_url_always_requests_the_summary_projection：lot 列表 URL 总�
   expect(currentLotsUrl(AUCTION_ID, "clo", "rare", levels, 3, 50)).toBe(
     `/api/v1/auctions/${AUCTION_ID}/lots?page=3&page_size=50&category=clo&equipment_group=rare&max_level=450&include_unleveled=false&fields=summary`,
   );
+  // 逗号列表作为单个参数发出；URLSearchParams 编码逗号，服务端解码后按列表解析。
+  expect(currentLotsUrl(AUCTION_ID, "clo,one", null, catalogLevelFilterDefault(), 1, 20)).toBe(
+    `/api/v1/auctions/${AUCTION_ID}/lots?page=1&page_size=20&category=clo%2Cone&fields=summary`,
+  );
 });

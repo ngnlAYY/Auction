@@ -22,11 +22,11 @@ import { PublicPager } from "../../pagination";
 export function BidLogTable(props: {
   readonly page: PublicBidLogListResponse;
   readonly currentPage: number;
-  readonly world: string;
+  readonly world: string | null;
   readonly lotFilter: string;
   readonly onPageChange: (page: number) => void;
   readonly onPageClamp: (page: number) => void;
-  readonly onPageSizeChange: (size: number) => void;
+  readonly onPageSizeChange: (size: number) => unknown;
 }): JSX.Element {
   const hasMore = createValueMemo(() => props.page.has_more ?? false);
   const bids = createValueMemo(() => bidHistoryRows(props.page.bids));
@@ -85,7 +85,7 @@ export function BidLogTable(props: {
 /** 竞价记录行；编号只作标识，详情经操作栏的查看按钮在页内抽屉打开。 */
 export function BidLogRow(props: {
   readonly bid: PublicBidLogEntryResponse;
-  readonly world: string;
+  readonly world: string | null;
 }): JSX.Element {
   const lotCode = createValueMemo(() =>
     lotCodeFor(props.bid.equipment_category, props.bid.lot_number),

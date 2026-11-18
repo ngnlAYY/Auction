@@ -73,6 +73,8 @@ filter-include-unleveled = レベル未設定の装備を表示
 filter-level-hint = 空欄なら制限しません。Enter キーを押すか入力欄からフォーカスを外すと適用されます。上限を超える装備は非表示になり、数値レベルのない装備はチェックボックスで表示を切り替えます。
 filter-level-invalid = レベル上限（0以上の整数または空欄）と、レベル未設定の装備を表示するかを確認してください。
 filter-all = すべて
+filter-category-selected = { $count } 種類を選択中
+filter-done = 完了
 
 category-one-handed = 片手武器
 category-two-handed = 両手武器
@@ -252,6 +254,7 @@ bidlog-invalid = 現在の最高入札ではありません
 bidlog-time = 時刻
 bidlog-round = 開催回
 bidlog-round-option = #{ $number } · { $status }
+bidlog-round-short = #{ $number }
 bidlog-round-number = ラウンド { $number }
 bidlog-world = ワールド: { $world }
 bidlog-status-unknown = 不明な状態

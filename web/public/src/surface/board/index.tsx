@@ -44,6 +44,7 @@ import {
   publicRealtimeTargetFromAuction,
 } from "./realtime";
 import { PublicRefreshGenerationContext, refreshPublicReads } from "./refresh";
+import { WorldTabs } from "./world";
 
 export function AuctionIndex(): JSX.Element {
   // 拍品直达链接在目录当前页找不到对应行时退回的只读抽屉；宿主挂在看板之外，不随场次切换
@@ -202,8 +203,21 @@ export function AuctionBoard(): JSX.Element {
   });
 
   return (
-    <Switch fallback={null}>
+    <Switch
+      fallback={
+        // 新世界的当前场次仍在读取时，三个终态分支都不命中；按钮组必须仍在页面上，
+        // 否则用户切到另一个世界后要等待读取结束才能切回。
+        <div class="public-world-toolbar">
+          <WorldTabs />
+        </div>
+      }
+    >
+      {/* 读取失败或该世界没有场次时看板的筛选工具栏不存在：世界按钮组单独成行，
+          否则切到没有场次的世界之后就没有入口切回来。 */}
       <Match when={failed()}>
+        <div class="public-world-toolbar">
+          <WorldTabs />
+        </div>
         <AsyncState
           kind="error"
           title={t("page-auctions-title")}
@@ -214,6 +228,9 @@ export function AuctionBoard(): JSX.Element {
         />
       </Match>
       <Match when={empty()}>
+        <div class="public-world-toolbar">
+          <WorldTabs />
+        </div>
         <AsyncState
           kind="empty"
           title={t("auction-empty-no-auction")}

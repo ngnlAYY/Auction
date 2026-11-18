@@ -2,8 +2,11 @@
 // 交付、卖家货款与成交撤销）。
 //
 // 状态由服务端闭集给出，本页只把状态映射为文案与语气样式，不重建判定；付款期限与 COD 退回
-// 次数只在服务端给出时显示。世界/场次选择、目录门禁与请求身份绑定沿用竞价日志页。重读失败时
-// 缓存层回退的旧快照会连同其确认时刻一起提示，不把旧状态当作当前结果静默显示。
+// 次数只在服务端给出时显示。目录门禁与请求身份绑定沿用竞价日志页。重读失败时缓存层回退的
+// 旧快照会连同其确认时刻一起提示，不把旧状态当作当前结果静默显示。
+//
+// 与 Rust 版有意不同：页面里没有世界下拉框，世界由页面顶部的世界按钮组（WorldTabs）切换并写入
+// 地址栏，`world` 缺省表示全部世界；期次下拉框与场次标题合并在标题区，Rust 版是页面内的下拉框。
 
 import type { AuctionSummaryResponse } from "@auction/contracts/dto/public/catalog/auction";
 import { sleep } from "@auction/web-shared/platform/timer";
@@ -14,7 +17,7 @@ import { createTaskScope } from "@auction/web-shared/reactive/tasks";
 import { ok, type Result } from "@auction/web-shared/result";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
-import { createEffect, For, Match, Show, Switch, useContext } from "solid-js";
+import { createEffect, For, Match, Show, Switch, untrack, useContext } from "solid-js";
 
 import type { FulfillmentRead } from "../../../api/fulfillment";
 import {
@@ -22,9 +25,9 @@ import {
   fetchFulfillmentPage,
   MAX_FULFILLMENT_PAGE_SIZE,
 } from "../../../api/fulfillment";
-import { fetchWorlds } from "../../../api/queries/current";
+import { fetchBidLogAuctionStatus } from "../../../api/queries/bid-log";
 import { PublicRefreshGenerationContext, refreshPublicReads } from "../../board/refresh";
-import { supportedWorlds, worldLabel } from "../../board/world";
+import { WorldTabs, worldLabel } from "../../board/world";
 import {
   LotDetailLookupContext,
   LotDetailLookupHost,
@@ -32,23 +35,55 @@ import {
 } from "../../catalog/detail/lookup";
 import { formatAuctionTime } from "../../catalog/presentation";
 import { useContentLoading } from "../../loading";
-import { normalizePublicPageSize, publicPageMatches } from "../../pagination";
+import { publicPageMatches, updatePublicPageSize } from "../../pagination";
 import {
   currentPublicPathname,
+  normalizedWorldQuery,
   updatePublicQueryState,
   usePublicQueryState,
-  writePublicQuery,
+  type WorldScope,
+  worldScopeFromQuery,
 } from "../../query";
+import { usePageRouteGuard } from "../../query/route-page";
 import { rustTrim } from "../../query/text";
 import { applyLotFilter, resetLotDraft, validLotFilter } from "../bid-log";
+import { createScopeSelection, sameScopeSelection } from "../bid-log/scope-selection";
 import type {
   FulfillmentAuctionsSnapshot,
   FulfillmentBodyState,
   FulfillmentProgressSnapshot,
   FulfillmentRequest,
 } from "./model";
-import { LOT_FILTER_ERROR_ID, LOT_FILTER_WRITE_DEBOUNCE_MILLIS } from "./model";
+import {
+  currentFulfillmentAuctions,
+  LOT_FILTER_ERROR_ID,
+  LOT_FILTER_WRITE_DEBOUNCE_MILLIS,
+  orderFulfillmentAuctionDirectory,
+} from "./model";
 import { FulfillmentTable } from "./table";
+
+/** 全部世界范围先主世界、后异世界；目录读取与下拉分组共用这一顺序。 */
+const WORLD_SCOPE_ORDER = ["main", "isekai"] as const;
+
+interface FulfillmentAuctionGroup {
+  readonly world: "main" | "isekai";
+  readonly auctions: readonly AuctionSummaryResponse[];
+}
+
+/** 目录接口按范围读取；全部世界由一次不带 `world` 的读取返回，再稳定整理为两个世界的顺序。 */
+async function fetchFulfillmentAuctionsForScope(
+  scope: WorldScope,
+  signal: AbortSignal,
+): Promise<Result<AuctionSummaryResponse[], string>> {
+  if (scope !== "all") {
+    return fetchFulfillmentAuctions(scope, signal);
+  }
+  const result = await fetchBidLogAuctionStatus(null, "settled", signal);
+  if (!result.ok) {
+    return result;
+  }
+  return ok(orderFulfillmentAuctionDirectory(result.value));
+}
 
 /** 路由入口。 */
 export function Fulfillment(): JSX.Element {
@@ -56,10 +91,14 @@ export function Fulfillment(): JSX.Element {
   const queryState = usePublicQueryState();
   const queryStateSignal = queryState.state;
   const refreshGeneration = useContext(PublicRefreshGenerationContext);
-  const worldFilter = createValueMemo(() => {
-    const value = queryStateSignal().world ?? "main";
-    return value === "main" || value === "isekai" ? value : "main";
-  });
+  const routeStillOnPage = usePageRouteGuard("Fulfillment");
+  // 跨世界页：缺省 `world` 表示全部世界，显式 `main`/`isekai` 限定单个世界。
+  const worldScope = createValueMemo(
+    (): WorldScope => worldScopeFromQuery("multi", normalizedWorldQuery(queryStateSignal().world)),
+  );
+  // 世界范围与本次选择的序号一起变化；目录资源只依赖这一个值，避免“新范围 + 旧代际”
+  // 先启动一轮读取再被下一轮取消。
+  const scopeSelection = createScopeSelection(worldScope);
   // 空串表示目录读取前尚未选定场次；目录到达后再替换地址栏并重置到第一页。
   const selectedAuctionId = createValueMemo(() => queryStateSignal().auctionId ?? "");
   const pageNumber = createValueMemo(() => queryStateSignal().page);
@@ -73,9 +112,18 @@ export function Fulfillment(): JSX.Element {
   const lotWriteGeneration = createCell(0);
   const tasks = createTaskScope();
 
+  let draftSelection = untrack(scopeSelection);
   createEffect(
-    () => lotFilter(),
-    (applied) => {
+    () => ({ applied: lotFilter(), selection: scopeSelection() }),
+    ({ applied, selection }) => {
+      // 世界范围选择变化时，旧计时器必须作废并丢弃未提交草稿；同一范围内的后台刷新不改变
+      // 选择身份，草稿保持不变。新范围没有已应用筛选时也要清空纯空白等输入，因此用已应用值
+      // 重置，避免把旧范围的输入带到新范围。
+      if (!sameScopeSelection(selection, draftSelection)) {
+        draftSelection = selection;
+        resetLotDraft(lotDraft, lotWriteGeneration, applied);
+        return;
+      }
       // 地址栏（前进、后退或清除筛选）变更时同步输入框；用户正在输入的空格保留，
       // 否则每次回写都会把尚未提交的边缘空白抹掉。
       if (rustTrim(lotDraft.peek()) !== applied) {
@@ -84,44 +132,45 @@ export function Fulfillment(): JSX.Element {
     },
   );
 
-  const worlds = createTaskResource(
-    () => 0,
-    async (_dependencies, context) => fetchWorlds(context.signal),
-  );
-  const worldOptions = createValueMemo(() => {
-    const result = worlds();
-    return result?.ok === true ? supportedWorlds(result.value) : [worldFilter()];
-  });
-
   const auctions = createTaskResource(
     // 外壳轮询与人工刷新先重读已结算目录；进度请求随后只消费本轮确认的场次。
-    () => [refreshGeneration(), worldFilter()] as const,
-    async ([generation, world], context): Promise<FulfillmentAuctionsSnapshot | null> => {
-      const result = await fetchFulfillmentAuctions(world, context.signal);
+    () => ({
+      refreshGeneration: refreshGeneration(),
+      selection: scopeSelection(),
+    }),
+    async (dependencies, context): Promise<FulfillmentAuctionsSnapshot | null> => {
+      const result = await fetchFulfillmentAuctionsForScope(
+        dependencies.selection.scope,
+        context.signal,
+      );
       if (!context.alive()) {
         return null;
       }
-      return { world, generation, result };
+      return {
+        selection: dependencies.selection,
+        generation: dependencies.refreshGeneration,
+        result,
+      };
     },
   );
 
-  const currentAuctions = createValueMemo((): Result<AuctionSummaryResponse[], string> | null => {
-    const snapshot = auctions();
-    if (snapshot === null || snapshot === undefined) {
-      return null;
-    }
-    return snapshot.world === worldFilter() ? snapshot.result : null;
-  });
+  const currentAuctions = createValueMemo(() =>
+    currentFulfillmentAuctions(auctions(), scopeSelection()),
+  );
 
-  // 保留仍在本世界目录里的选择；所选场次不在目录时纠偏到最近一场。
+  // 保留仍在当前范围目录里的选择；所选场次不在目录时纠偏到最近一场。
   createEffect(
     () => {
       const snapshot = auctions();
+      const selection = scopeSelection();
       if (snapshot === null || snapshot === undefined || !snapshot.result.ok) {
         return null;
       }
       // 后台刷新期间保留旧目录；旧目录不能改写新一轮已经确定的场次或页码。
-      if (snapshot.world !== worldFilter() || snapshot.generation !== refreshGeneration()) {
+      if (
+        !sameScopeSelection(snapshot.selection, selection) ||
+        snapshot.generation !== refreshGeneration()
+      ) {
         return null;
       }
       const selected = selectedAuctionId();
@@ -135,6 +184,10 @@ export function Fulfillment(): JSX.Element {
       if (nextAuctionId === null) {
         return;
       }
+      // 前进/后退换页时旧页面可能在新地址下被唤醒；纠偏只能写回仍属于本页的地址。
+      if (!routeStillOnPage()) {
+        return;
+      }
       updatePublicQueryState(
         queryStateSignal,
         (query) => {
@@ -146,12 +199,38 @@ export function Fulfillment(): JSX.Element {
     },
   );
 
+  const auctionOptions = createValueMemo((): readonly AuctionSummaryResponse[] => {
+    const result = currentAuctions();
+    return result?.ok === true ? result.value : [];
+  });
+  const selectedAuction = createValueMemo((): AuctionSummaryResponse | null => {
+    const selected = selectedAuctionId();
+    return auctionOptions().find((auction) => auction.id === selected) ?? null;
+  });
+  const auctionGroups = createValueMemo((): readonly FulfillmentAuctionGroup[] => {
+    if (worldScope() !== "all") {
+      return [];
+    }
+    const options = auctionOptions();
+    const groups: FulfillmentAuctionGroup[] = [];
+    for (const world of WORLD_SCOPE_ORDER) {
+      const auctionsForWorld = options.filter((auction) => auction.world_id === world);
+      if (auctionsForWorld.length > 0) {
+        groups.push({ world, auctions: auctionsForWorld });
+      }
+    }
+    return groups;
+  });
+
   const progress = createTaskResource(
     () => {
       const auctionId = selectedAuctionId();
       const page = pageNumber();
       const size = pageSize();
-      const world = worldFilter();
+      const selection = scopeSelection();
+      const auction = selectedAuction();
+      // 服务端请求始终带所选场次自己的世界，与范围是全部还是单个世界无关。
+      const world = auction?.world_id ?? "";
       const rawLot = lotFilter();
       const lot = rustTrim(rawLot);
       // 地址栏带入的非法筛选不发请求：服务端只会回 400，格式提示由输入框承担。
@@ -163,13 +242,16 @@ export function Fulfillment(): JSX.Element {
       const readable =
         directory !== null &&
         directory !== undefined &&
-        directory.world === world &&
+        sameScopeSelection(directory.selection, selection) &&
         directory.generation === refreshGeneration.peek() &&
         directory.result.ok &&
+        auction !== null &&
+        auction.id === auctionId &&
         directory.result.value.some((auction) => auction.id === auctionId) &&
         lotValid;
       return {
         auctionId,
+        selection,
         world,
         lot: requestedLot,
         lotFilter: rawLot,
@@ -181,6 +263,7 @@ export function Fulfillment(): JSX.Element {
     async (requested, context): Promise<FulfillmentProgressSnapshot | null> => {
       const request: FulfillmentRequest = [
         requested.auctionId,
+        requested.selection,
         requested.world,
         requested.lot,
         requested.page,
@@ -204,24 +287,18 @@ export function Fulfillment(): JSX.Element {
     },
   );
 
-  const auctionOptions = createValueMemo((): readonly AuctionSummaryResponse[] => {
-    const result = currentAuctions();
-    return result?.ok === true ? result.value : [];
-  });
-  const selectedAuction = createValueMemo((): AuctionSummaryResponse | null => {
-    const selected = selectedAuctionId();
-    return auctionOptions().find((auction) => auction.id === selected) ?? null;
-  });
   const currentResult = createValueMemo((): Result<FulfillmentRead | null, string> | null => {
     const snapshot = progress();
     if (snapshot === null || snapshot === undefined) {
       return null;
     }
-    const [auctionId, world, lot, page, size] = snapshot.request;
+    const [auctionId, selection, world, lot, page, size] = snapshot.request;
+    const selected = selectedAuction();
     if (
-      selectedAuction() === null ||
+      selected === null ||
       auctionId !== selectedAuctionId() ||
-      world !== worldFilter() ||
+      !sameScopeSelection(selection, scopeSelection()) ||
+      world !== selected.world_id ||
       (lot ?? "") !== rustTrim(lotFilter()) ||
       page !== pageNumber() ||
       size !== pageSize()
@@ -296,45 +373,20 @@ export function Fulfillment(): JSX.Element {
   return (
     <LotDetailLookupContext value={lookup}>
       <section class="public-fulfillment" aria-label={t("page-fulfillment-title")}>
-        <div class="public-fulfillment__controls">
-          <label for="public-fulfillment-world">
-            <span>{t("world-label")}</span>
-            <select
-              id="public-fulfillment-world"
-              name="world"
-              autocomplete="off"
-              value={worldFilter()}
-              disabled={worldOptions().length === 0}
-              onChange={(event) => {
-                const world = event.currentTarget.value;
-                // 切换世界清除场次与 lot 筛选：草稿一并清空，在途的防抖写入作废。
-                resetLotDraft(lotDraft, lotWriteGeneration, "");
-                updatePublicQueryState(
-                  queryStateSignal,
-                  (query) => {
-                    // 主世界使用缺省 URL，非主世界才写入 `world`。
-                    query.world = world !== "main" ? world : null;
-                    query.auctionId = null;
-                    query.bidLogLot = null;
-                    query.page = 1;
-                  },
-                  "push",
-                );
-              }}
-            >
-              <For each={worldOptions()} keyed={false}>
-                {(world) => <option value={world()}>{worldLabel(world())}</option>}
-              </For>
-            </select>
-          </label>
-          <label for="public-fulfillment-round">
-            <span>{t("fulfillment-round")}</span>
+        {/* 世界切换：页面顶部的按钮组（WorldTabs，Solid 版专属）；Rust 版用页面内的下拉框。 */}
+        <div class="public-world-toolbar">
+          <WorldTabs />
+        </div>
+        <div class="public-fulfillment__heading">
+          <div class="public-fulfillment__round">
             <select
               id="public-fulfillment-round"
+              class="public-fulfillment__round-select"
               name="auction"
               autocomplete="off"
-              disabled={auctionOptions().length === 0}
+              aria-label={t("fulfillment-round")}
               value={selectedAuctionId()}
+              disabled={auctionOptions().length === 0}
               onChange={(event) => {
                 const auctionId = event.currentTarget.value;
                 resetLotDraft(lotDraft, lotWriteGeneration, "");
@@ -349,36 +401,53 @@ export function Fulfillment(): JSX.Element {
                 );
               }}
             >
-              <For each={auctionOptions()} keyed={false}>
-                {(auction) => (
-                  <option value={auction().id}>
-                    {t("fulfillment-round-option", { number: auction().sequence })}
-                  </option>
-                )}
-              </For>
+              <Show
+                when={worldScope() === "all"}
+                fallback={
+                  <For each={auctionOptions()} keyed={(auction) => auction.id}>
+                    {(auction) => (
+                      <option value={auction().id} selected={selectedAuctionId() === auction().id}>
+                        {t("fulfillment-round-option", { number: auction().sequence })}
+                      </option>
+                    )}
+                  </For>
+                }
+              >
+                <For each={auctionGroups()} keyed={(group) => group.world}>
+                  {(group) => (
+                    <optgroup label={worldLabel(group().world)}>
+                      <For each={group().auctions} keyed={(auction) => auction.id}>
+                        {(auction) => (
+                          <option
+                            value={auction().id}
+                            selected={selectedAuctionId() === auction().id}
+                          >
+                            {t("fulfillment-round-option", { number: auction().sequence })}
+                          </option>
+                        )}
+                      </For>
+                    </optgroup>
+                  )}
+                </For>
+              </Show>
             </select>
-          </label>
-        </div>
-        <div class="public-fulfillment__heading">
-          <Show when={selectedAuction()}>
-            {(auction) => (
-              <div class="public-fulfillment__round">
-                <strong class="public-fulfillment__round-number">
-                  {t("fulfillment-round-number", { number: auction().sequence })}
-                </strong>
-                <span class="public-fulfillment__round-detail">
-                  {t("fulfillment-world", { world: worldLabel(auction().world_id) })}
-                </span>
-                <Show when={auction().settled_at !== null && auction().settled_at !== undefined}>
+            <Show when={selectedAuction()}>
+              {(auction) => (
+                <>
                   <span class="public-fulfillment__round-detail">
-                    {t("fulfillment-settled-at", {
-                      date: formatAuctionTime(auction().settled_at ?? ""),
-                    })}
+                    {t("fulfillment-world", { world: worldLabel(auction().world_id) })}
                   </span>
-                </Show>
-              </div>
-            )}
-          </Show>
+                  <Show when={auction().settled_at !== null && auction().settled_at !== undefined}>
+                    <span class="public-fulfillment__round-detail">
+                      {t("fulfillment-settled-at", {
+                        date: formatAuctionTime(auction().settled_at ?? ""),
+                      })}
+                    </span>
+                  </Show>
+                </>
+              )}
+            </Show>
+          </div>
           <div class="public-fulfillment__toolbar">
             <label for="public-fulfillment-filter">{t("fulfillment-filter-label")}</label>
             <input
@@ -465,26 +534,27 @@ export function Fulfillment(): JSX.Element {
                   currentPage={pageNumber()}
                   lotFilter={lotFilter()}
                   onPageChange={(nextPage) => {
-                    // 从当前状态提交：仍在防抖中的筛选草稿不随翻页提交。
-                    const next = { ...queryStateSignal.peek() };
-                    next.page = nextPage;
-                    writePublicQuery(next, "push");
-                    queryStateSignal.set(next);
+                    // 从当前状态提交：仍在防抖中的筛选草稿不随翻页提交。写入失败时保留原页，
+                    // 查询入口不提交本地状态。
+                    updatePublicQueryState(
+                      queryStateSignal,
+                      (query) => {
+                        query.page = nextPage;
+                      },
+                      "push",
+                    );
                   }}
                   onPageClamp={(nextPage) => {
                     // 纠偏无历史记录写回，不建立可返回的无效页条目。
-                    const next = { ...queryStateSignal.peek() };
-                    next.page = nextPage;
-                    writePublicQuery(next, "replace");
-                    queryStateSignal.set(next);
+                    updatePublicQueryState(
+                      queryStateSignal,
+                      (query) => {
+                        query.page = nextPage;
+                      },
+                      "replace",
+                    );
                   }}
-                  onPageSizeChange={(size) => {
-                    const next = { ...queryStateSignal.peek() };
-                    next.pageSize = normalizePublicPageSize(size);
-                    next.page = 1;
-                    writePublicQuery(next, "push");
-                    queryStateSignal.set(next);
-                  }}
+                  onPageSizeChange={(size) => updatePublicPageSize(queryStateSignal, size)}
                 />
               </>
             )}

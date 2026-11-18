@@ -4,12 +4,12 @@ import { ThemePicker } from "@auction/web-shared/platform/theme";
 import type { Cell } from "@auction/web-shared/reactive/cell";
 import { Link, type RouteMatch, RouteOutlet } from "@auction/web-shared/router";
 import { reportAppFailure } from "@auction/web-shared/ui/bootstrap";
+import { reloadAfterPageLoadError } from "@auction/web-shared/ui/bootstrap/page-load-recovery";
 import { LanguagePicker, t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
 import { Show } from "solid-js";
 
 import { PublicRealtimeOwner, type PublicRealtimeTarget } from "../board/realtime";
-import { WorldPicker } from "../board/world";
 import { ConsoleCountdown, ConsoleSidebar } from "../presentation/console";
 import { Navigation } from "../presentation/mobile";
 import type { LiveConnectionState } from "../query";
@@ -18,7 +18,6 @@ import { PUBLIC_PAGES } from "../router/route";
 import { SessionMenu } from "../session";
 
 export interface PublicShellViewProps {
-  readonly selectedWorld: Cell<string>;
   readonly navigationOpen: Cell<boolean>;
   readonly sidebarCollapsed: Cell<boolean>;
   readonly manualRefreshBusy: Cell<boolean>;
@@ -30,6 +29,7 @@ export interface PublicShellViewProps {
   readonly realtimeState: Cell<LiveConnectionState>;
   readonly currentRoute: () => RouteMatch;
   readonly auctionHomeHref: () => string;
+  readonly scopedHref: (path: string) => string;
   readonly auctionHomeNeedsQueryReset: () => boolean;
   readonly connectionClass: () => string;
   readonly connectionStateName: () => string;
@@ -75,6 +75,8 @@ export function PublicShellView(props: PublicShellViewProps): JSX.Element {
         <div class="console-ticker__left">
           <Navigation
             auctionHomeHref={props.auctionHomeHref()}
+            currentRoute={props.currentRoute()}
+            scopedHref={props.scopedHref}
             resetHomeQuery={props.auctionHomeNeedsQueryReset()}
             open={props.navigationOpen()}
             onToggle={props.onToggleNavigation}
@@ -158,7 +160,6 @@ export function PublicShellView(props: PublicShellViewProps): JSX.Element {
           </div>
           <span class="console-ticker__sep" aria-hidden="true" />
           <div class="public-shell__preferences">
-            <WorldPicker selectedWorld={props.selectedWorld} />
             <LanguagePicker label={t("language-label")} catalog={PUBLIC_LOCALE_CATALOG} />
             <ThemePicker
               label={t("theme-label")}
@@ -191,12 +192,23 @@ export function PublicShellView(props: PublicShellViewProps): JSX.Element {
       <div class="console-body">
         <ConsoleSidebar
           currentRoute={props.currentRoute()}
+          scopedHref={props.scopedHref}
           collapsed={props.sidebarCollapsed()}
           onToggle={props.onToggleSidebar}
           onNavigate={props.onCloseNavigation}
         />
         <main id="public-content" class="console-main" tabindex="-1">
-          <RouteOutlet pages={PUBLIC_PAGES} notFound={null} onLoadError={reportAppFailure} />
+          <RouteOutlet
+            pages={PUBLIC_PAGES}
+            notFound={null}
+            onLoadError={(error) => {
+              // 页面代码加载失败多半是部署后旧标签页引用的分块已不存在：先整页重载一次，
+              // 同一地址短时间内已经重载过才显示错误横幅。
+              if (!reloadAfterPageLoadError()) {
+                reportAppFailure(error);
+              }
+            }}
+          />
         </main>
       </div>
     </div>

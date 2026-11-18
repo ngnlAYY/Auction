@@ -73,6 +73,8 @@ filter-include-unleveled = 레벨 없는 장비 표시
 filter-level-hint = 비워 두면 제한하지 않아요. Enter 키를 누르거나 입력란에서 포커스를 옮기면 적용돼요. 상한을 넘는 장비는 숨기며, 숫자 레벨이 없는 장비는 체크박스로 표시 여부를 정해요.
 filter-level-invalid = 레벨 상한(0 이상의 정수 또는 빈칸)과 레벨 없는 장비의 표시 여부를 확인해 주세요.
 filter-all = 전체
+filter-category-selected = { $count }개 유형 선택됨
+filter-done = 완료
 
 category-one-handed = 한손 무기
 category-two-handed = 양손 무기
@@ -252,6 +254,7 @@ bidlog-invalid = 현재 선두 아님
 bidlog-time = 시간
 bidlog-round = 회차
 bidlog-round-option = #{ $number } · { $status }
+bidlog-round-short = #{ $number }
 bidlog-round-number = 라운드 { $number }
 bidlog-world = 월드: { $world }
 bidlog-status-unknown = 알 수 없는 상태

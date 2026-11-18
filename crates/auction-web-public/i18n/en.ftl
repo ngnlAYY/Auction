@@ -74,6 +74,8 @@ filter-include-unleveled = Show unleveled equipment
 filter-level-hint = Leave blank for no limit. Press Enter or leave the field to apply. Equipment above the limit is hidden; the checkbox controls equipment without a numeric level.
 filter-level-invalid = Check the level limit (a non-negative whole number or blank) and whether to show unleveled equipment.
 filter-all = All
+filter-category-selected = { $count } types selected
+filter-done = Done
 
 category-one-handed = One-Handed
 category-two-handed = Two-Handed
@@ -253,6 +255,7 @@ bidlog-invalid = Not currently leading
 bidlog-time = Time
 bidlog-round = Auction
 bidlog-round-option = #{ $number } · { $status }
+bidlog-round-short = #{ $number }
 bidlog-round-number = Round { $number }
 bidlog-world = World: { $world }
 bidlog-status-unknown = Unknown status

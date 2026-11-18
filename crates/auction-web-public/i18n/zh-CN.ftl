@@ -73,6 +73,8 @@ filter-include-unleveled = 显示无等级装备
 filter-level-hint = 留空表示不限，回车或离开输入框时生效。高于上限的装备隐藏；没有数字等级的装备由旁边复选框控制。
 filter-level-invalid = 请检查等级上限（非负整数或留空），并确认是否显示无等级装备。
 filter-all = 全部
+filter-category-selected = 已选 { $count } 类
+filter-done = 完成
 
 category-one-handed = 单手武器
 category-two-handed = 双手武器
@@ -252,6 +254,7 @@ bidlog-invalid = 当前未领先
 bidlog-time = 时间
 bidlog-round = 场次
 bidlog-round-option = 第 { $number } 期 · { $status }
+bidlog-round-short = 第 { $number } 期
 bidlog-round-number = 第 { $number } 场
 bidlog-world = 世界：{ $world }
 bidlog-status-unknown = 未知状态

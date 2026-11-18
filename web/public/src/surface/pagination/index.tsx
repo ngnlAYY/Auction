@@ -36,8 +36,8 @@ export function normalizePublicPageSize(size: number): number {
 }
 
 /** 切换数量与回到首页作为一次 URL 更新，保留世界、场次和筛选条件。 */
-export function updatePublicPageSize(state: Cell<PublicBoardQuery>, size: number): void {
-  updatePublicQueryState(
+export function updatePublicPageSize(state: Cell<PublicBoardQuery>, size: number): boolean {
+  return updatePublicQueryState(
     state,
     (query) => {
       query.pageSize = normalizePublicPageSize(size);
@@ -73,7 +73,21 @@ export interface PublicPagerProps {
   readonly label: string;
   readonly onPageChange: (page: number) => void;
   readonly onPageClamp?: (page: number) => void;
-  readonly onPageSizeChange?: (size: number) => void;
+  /** 返回 `false` 表示地址栏写入失败；分页组件据此决定是否保存本地偏好。 */
+  readonly onPageSizeChange?: (size: number) => unknown;
+}
+
+/** 页长偏好只能在页面的地址栏写入成功后保存；回调未提供或没有返回值时沿用旧行为。 */
+export function commitPublicPageSizeChoice(
+  size: number,
+  movement: boolean,
+  writePageSize: ((size: number) => unknown) | undefined,
+): boolean {
+  if (writePageSize?.(size) === false) {
+    return false;
+  }
+  savePublicPageSize(size, movement);
+  return true;
 }
 
 /** 注入 Public 五语言文案、1 到契约上限的数量与本地偏好，分页计算及键盘交互由共享组件负责。
@@ -144,8 +158,7 @@ export function PublicPager(props: PublicPagerProps): JSX.Element {
           ],
           "replace",
         );
-        props.onPageSizeChange?.(size);
-        savePublicPageSize(size, movement());
+        return commitPublicPageSizeChoice(size, movement(), props.onPageSizeChange);
       }}
     />
   );

@@ -1,4 +1,5 @@
-// 价格历史筛选值的规范化与校验。
+// 价格历史筛选值的规范化、查询门槛与校验。
+// 世界由页面顶部的世界按钮组控制，不参与本页筛选计数；Rust 版把表单里的世界选择计入筛选数。
 
 import { compareText } from "@auction/web-shared/text";
 
@@ -218,10 +219,9 @@ export function historyDaysInMonth(year: number, month: number): number {
   return 31;
 }
 
-/** 统计已应用筛选条件数量；世界为 all 或空值不计。 */
+/** 统计本页筛选表单里的已应用条件数量；世界由世界按钮组控制，不计入。 */
 export function historyActiveFilterCount(query: PriceHistoryQuery): number {
   const values = [
-    query.world === null || query.world === "all" ? null : query.world,
     query.name,
     query.from,
     query.to,
@@ -231,6 +231,32 @@ export function historyActiveFilterCount(query: PriceHistoryQuery): number {
     query.seller,
   ];
   return values.filter((value) => value !== null && value !== "").length;
+}
+
+/** 是否具备发起历史读取的条件；具体世界不算筛选条件，但单独选择时仍须查询。 */
+export function historyHasRequestCondition(query: PriceHistoryQuery): boolean {
+  return historyActiveFilterCount(query) > 0 || (query.world !== null && query.world !== "all");
+}
+
+/** 已应用查询中属于本页表单的部分；世界由世界按钮组控制，切换范围不能覆盖未提交的草稿。 */
+export function historyFormFilters(query: PriceHistoryQuery): PriceHistoryQuery {
+  return { ...query, world: null, sort: "", page: 1 };
+}
+
+/** `resetFilters` 是否确实会改变地址栏的已应用状态；世界、页长与透传参数不由本页清除。 */
+export function historyResetChangesQuery(query: PublicBoardQuery): boolean {
+  return (
+    query.historyName !== null ||
+    query.historyFrom !== null ||
+    query.historyTo !== null ||
+    query.historyMinPrice !== null ||
+    query.historyMaxPrice !== null ||
+    query.historyBuyer !== null ||
+    query.historySeller !== null ||
+    query.historySort !== "closed_desc" ||
+    query.historyGroup !== "equipment" ||
+    query.page !== 1
+  );
 }
 
 /** 去除 Rust 语义空白后返回非空文本；空文本返回 null。 */

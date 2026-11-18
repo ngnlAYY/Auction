@@ -7,6 +7,7 @@ import type { JSX } from "@solidjs/web";
 import { createEffect, For, Show } from "solid-js";
 import type { CatalogLevelFilter } from "../../api/model";
 import { catalogLevelFilterParse } from "../../api/model";
+import { WorldTabs } from "../board/world";
 import { EquipmentGroupFilter } from "../presentation/mobile";
 import { currentPublicPathname } from "../query";
 import { equipmentGroupLabel } from "./presentation";
@@ -45,6 +46,8 @@ export function CatalogGroupFilters(props: {
   };
   return (
     <div class="public-auction-group-toolbar">
+      {/* 世界切换与装备分组同一行（Solid 版专属）；只有一个世界可选时整组不渲染。 */}
+      <WorldTabs />
       {/* 桌面分组标签与手机原生选择器由 CSS 二选一，共用当前分组与回调。 */}
       <nav
         class="public-auction-filter public-desktop"

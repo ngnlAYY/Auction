@@ -1,7 +1,7 @@
 // Public 拍卖目录筛选、分组表格和分页。
 
 import { EQUIPMENT_CATEGORY_CODES } from "@auction/contracts/dto/public/catalog/lot";
-import { createCell } from "@auction/web-shared/reactive/cell";
+import { type Cell, createCell } from "@auction/web-shared/reactive/cell";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
@@ -11,6 +11,7 @@ import type { CatalogRow } from "../../../api/model";
 import { PublicPager } from "../../pagination";
 import { CategoryFilter as DesktopCategoryFilter } from "../../presentation/desktop";
 import { CategoryFilter as MobileCategoryFilter } from "../../presentation/mobile";
+import { catalogCategoryKeys } from "../../query";
 import { CatalogColumnsMenu } from "../columns";
 import type { CatalogLayout } from "../columns/state";
 import { catalogVisibilityForLayout, catalogVisibilityLoad } from "../columns/state";
@@ -31,9 +32,10 @@ export function CatalogTable(props: {
   readonly categoryCounts: ReadonlyMap<string, number>;
   readonly activeCategory: string;
   readonly activeEquipmentGroup: string;
+  readonly categoryFocusRequest: Cell<boolean>;
   readonly levelFiltered: boolean;
   readonly pageNumber: number;
-  readonly onCategoryChange: (category: string) => void;
+  readonly onCategoryChange: (category: string) => boolean;
   readonly onPageChange: (page: number) => void;
   readonly onPageClamp: (page: number) => void;
   readonly onPageSizeChange: (size: number) => void;
@@ -50,10 +52,10 @@ export function CatalogTable(props: {
 }): JSX.Element {
   const visibility = createCell(catalogVisibilityLoad());
   const indices = createValueMemo(() => {
-    const active = props.activeCategory;
+    const active = new Set(catalogCategoryKeys(props.activeCategory));
     const result: number[] = [];
     props.rows.forEach((row, index) => {
-      if (active === "all" || catalogCategoryKey(row.category) === active) {
+      if (active.size === 0 || active.has(catalogCategoryKey(row.category))) {
         result.push(index);
       }
     });
@@ -101,6 +103,7 @@ export function CatalogTable(props: {
         <MobileCategoryFilter
           active={props.activeCategory}
           counts={counts()}
+          focusRequest={props.categoryFocusRequest}
           onChange={props.onCategoryChange}
         />
         {/* 列设置在类型工具栏右端：图标按钮加下拉面板，只改写本地列偏好。 */}
@@ -120,7 +123,7 @@ export function CatalogTable(props: {
             <p class="ui-async-state__title">
               {props.activeEquipmentGroup !== "all" || props.levelFiltered
                 ? t("catalog-empty-filtered")
-                : props.activeCategory === "all"
+                : catalogCategoryKeys(props.activeCategory).length === 0
                   ? t("catalog-empty-all")
                   : t("catalog-empty-category")}
             </p>

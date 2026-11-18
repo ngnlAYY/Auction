@@ -7,11 +7,10 @@ import "../../../crates/auction-web-public/assets/mobile.css";
 import "../../../crates/auction-web-shared/style/console.css";
 // Solid 版专属的手机样式，排在共用样式之后；Rust 版不加载。
 import "./styles/mobile-topbar.css";
-import "./styles/mobile-bid-log.css";
+import "./styles/round-pages.css";
 import "./styles/mobile-catalog-filters.css";
-import "./styles/auction-rounds-links.css";
-import "./styles/pinned-pager.css";
 import "./styles/settings-page.css";
+import "./styles/world-tabs.css";
 
 import { installErrorHook } from "@auction/web-shared/ui/bootstrap";
 import { render } from "@solidjs/web";

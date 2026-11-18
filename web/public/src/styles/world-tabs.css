@@ -1,0 +1,87 @@
+/*
+ * Solid 版专属：页面里的世界按钮组（surface/board/world.tsx 的 WorldTabs）。
+ * Rust 版用顶栏与页面内的下拉框切换世界；Solid 版改成“世界 [全部世界][主世界][异世界]”这样一组按钮，
+ * 与看板上的“装备分组”同一种按钮。看板把它放在筛选工具栏里、排在装备分组之前；其余页面放在
+ * 页面最上方单独一行（.public-world-toolbar）。只有一个世界可选时组件不渲染，这一行随之隐藏。
+ * Rust 版不加载本文件。规则写在层外，优先于共用样式的各个 @layer。
+ */
+.public-world-toolbar {
+  display: flex;
+  min-inline-size: 0;
+  margin-block-end: var(--space-3);
+}
+
+.public-world-toolbar:not(:has(> .public-world-filter)) {
+  display: none;
+}
+
+.public-world-toolbar > .public-world-filter {
+  min-inline-size: 0;
+  margin: 0;
+}
+
+/* 当前世界：与“装备分组”的当前项一样用强调色边框；已关闭的世界只作为不可点的当前项出现。 */
+.public-world-filter .public-auction-filter__tab:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+@media screen and (max-width: 48rem) {
+  /* 手机上是带标签的一行：标签列与看板筛选区对齐，按钮连成一组，当前项填强调色。 */
+  .public-world-toolbar {
+    margin-block-end: 0;
+    padding: var(--space-2) var(--space-3);
+  }
+
+  .public-world-toolbar > .public-world-filter {
+    --filter-label-size: 4.25rem;
+
+    display: flex;
+    flex: 1 1 auto;
+    align-items: center;
+    gap: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
+
+  .public-world-toolbar .public-auction-filter__label {
+    flex: none;
+    inline-size: calc(var(--filter-label-size) + var(--space-2));
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+  }
+
+  .public-world-toolbar .public-auction-filter__tab {
+    min-inline-size: 3.75rem;
+    min-block-size: 2.25rem;
+    margin: 0 0 0 calc(-1 * var(--border-width));
+    padding: 0 var(--space-3);
+    border: var(--border-width) solid var(--color-border-control);
+    border-radius: 0;
+    background: var(--color-surface);
+    box-shadow: none;
+    color: var(--color-text);
+    font-size: var(--text-sm);
+    white-space: nowrap;
+  }
+
+  .public-world-toolbar .public-auction-filter__tab:first-of-type {
+    margin-inline-start: 0;
+    border-start-start-radius: var(--radius-sm);
+    border-end-start-radius: var(--radius-sm);
+  }
+
+  .public-world-toolbar .public-auction-filter__tab:last-of-type {
+    border-start-end-radius: var(--radius-sm);
+    border-end-end-radius: var(--radius-sm);
+  }
+
+  .public-world-toolbar .public-auction-filter__tab[aria-current="true"] {
+    position: relative;
+    border-color: var(--color-accent);
+    background: var(--color-accent);
+    color: var(--color-accent-contrast);
+    font-weight: 600;
+  }
+}

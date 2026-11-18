@@ -1,6 +1,6 @@
-// Public 历史拍卖列表。
+// Public 历史拍卖列表。本页只列已结算场次，没有状态筛选；页面里没有世界下拉框，世界由页面
+// 顶部的世界按钮组（WorldTabs）切换并写入地址栏。Rust 版页面内有世界与状态两个下拉框。
 
-import type { WorldsResponse } from "@auction/contracts/dto/public/account";
 import type {
   AuctionListResponse,
   AuctionSummaryV2Response,
@@ -16,11 +16,10 @@ import { Time } from "@auction/web-shared/ui/components/time";
 import { formatCreditAmount } from "@auction/web-shared/ui/format";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
-import { For, Match, Show, Switch } from "solid-js";
+import { createEffect, For, Match, Show, Switch } from "solid-js";
 
-import { fetchWorlds } from "../../api/queries/current";
 import { fetchAuctionHistoryPage } from "../../api/queries/directory";
-import { supportedWorlds, worldLabel } from "../board/world";
+import { WorldTabs, worldLabel } from "../board/world";
 import {
   auctionStatusClass,
   historicalAuctionStatusLabel,
@@ -31,6 +30,7 @@ import {
 import { useContentLoading } from "../loading";
 import { PublicPager, publicPageMatches, updatePublicPageSize } from "../pagination";
 import { updatePublicQueryState, usePublicQueryState } from "../query";
+import { usePageRouteGuard } from "../query/route-page";
 
 type HistoryRequest = readonly [world: string, status: string, page: number, pageSize: number];
 
@@ -39,41 +39,43 @@ interface LoadedHistory {
   readonly result: Result<AuctionListResponse<AuctionSummaryV2Response>, string>;
 }
 
-/** 历史拍卖列表入口；筛选器保持挂载，切换查询、失败或重试时不会丢失键盘焦点。 */
+/** 历史拍卖列表入口；本页只列已结算场次，状态筛选已移除。页面里没有世界下拉框，世界范围由
+ * 页面顶部的世界按钮组（WorldTabs）写入地址栏；Rust 版页面内有世界与状态两个下拉框。 */
 export function AuctionList(): JSX.Element {
-  // 世界/状态/页码与地址栏双向同步。
+  // 世界范围与页码仍来自地址栏；状态不再读取查询参数。
   const queryState = usePublicQueryState();
   const queryStateSignal = queryState.state;
   const worldFilter = createValueMemo(() => queryStateSignal().world ?? "all");
-  const statusFilter = createValueMemo(() => {
-    const status = queryStateSignal().status;
-    return status === "live" || status === "final" || status === "settled" ? status : "settled";
-  });
   const pageNumber = createValueMemo(() => Math.max(queryStateSignal().page, 1));
   const pageSize = createValueMemo(() => queryStateSignal().pageSize);
   const refreshGeneration = createCell(0);
-  const worlds = createTaskResource<null, Result<WorldsResponse, string> | null>(
-    () => null,
-    async (_dependencies, context) => {
-      const result = await fetchWorlds(context.signal);
-      if (!context.alive()) {
-        return null;
+  const routeStillOnPage = usePageRouteGuard("AuctionList");
+  // 旧链接里的 status 不再生效；含解析器未接受的未知取值在内，读入后无历史地移除一次。
+  createEffect(
+    () => {
+      const query = queryStateSignal();
+      return query.status ?? query.passthrough.find(([key]) => key === "status")?.[1] ?? null;
+    },
+    (status) => {
+      if (status === null) {
+        return;
       }
-      return result;
+      // 前进/后退换页时旧页面可能在新地址下被唤醒；纠偏只能写回仍属于本页的地址。
+      if (!routeStillOnPage()) {
+        return;
+      }
+      updatePublicQueryState(
+        queryStateSignal,
+        (query) => {
+          query.status = null;
+          query.passthrough = query.passthrough.filter(([key]) => key !== "status");
+        },
+        "replace",
+      );
     },
   );
-  const worldOptions = createValueMemo(() => {
-    const loaded = worlds();
-    const options = loaded?.ok === true ? supportedWorlds(loaded.value) : ["main", "isekai"];
-    const selected = worldFilter();
-    // 历史深链的世界即使已从当前目录移除，也必须在筛选器中保留真实值。
-    if (selected !== "all" && !options.includes(selected)) {
-      options.push(selected);
-    }
-    return options;
-  });
   const requested = createValueMemo(
-    () => [worldFilter(), statusFilter(), pageNumber(), pageSize()] as const,
+    () => [worldFilter(), "settled", pageNumber(), pageSize()] as const,
   );
   const auctions = createTaskResource(
     () => ({ generation: refreshGeneration(), requested: requested() }),
@@ -136,54 +138,9 @@ export function AuctionList(): JSX.Element {
 
   return (
     <section class="public-auction-rounds" aria-label={t("page-auctions-title")}>
-      <div class="public-auction-rounds__controls">
-        <label>
-          {t("auction-history-world")}
-          <select
-            name="world"
-            value={worldFilter()}
-            onChange={(event) => {
-              const world = event.currentTarget.value;
-              updatePublicQueryState(
-                queryStateSignal,
-                (query) => {
-                  query.world = world === "all" ? null : world;
-                  query.auctionId = null;
-                  query.category = null;
-                  query.page = 1;
-                },
-                "push",
-              );
-            }}
-          >
-            <option value="all">{t("auction-history-world-all")}</option>
-            <For each={worldOptions()} keyed={false}>
-              {(world) => <option value={world()}>{worldLabel(world())}</option>}
-            </For>
-          </select>
-        </label>
-        <label>
-          {t("auction-history-status")}
-          <select
-            name="status"
-            value={statusFilter()}
-            onChange={(event) => {
-              const status = event.currentTarget.value;
-              updatePublicQueryState(
-                queryStateSignal,
-                (query) => {
-                  query.status = status;
-                  query.page = 1;
-                },
-                "push",
-              );
-            }}
-          >
-            <option value="settled">{t("auction-history-status-settled")}</option>
-            <option value="final">{t("auction-history-status-final")}</option>
-            <option value="live">{t("auction-history-status-live")}</option>
-          </select>
-        </label>
+      {/* 世界切换：页面顶部的按钮组（WorldTabs，Solid 版专属）；Rust 版用页面内的下拉框。 */}
+      <div class="public-world-toolbar">
+        <WorldTabs />
       </div>
       <Switch>
         <Match when={currentResult() === null}>{null}</Match>
@@ -201,6 +158,7 @@ export function AuctionList(): JSX.Element {
             <AuctionHistoryPage
               page={page()}
               pageNumber={pageNumber()}
+              world={queryStateSignal().world}
               onPageSizeChange={(size) => updatePublicPageSize(queryStateSignal, size)}
               onPageChange={(nextPage) => {
                 updatePublicQueryState(
@@ -232,6 +190,7 @@ export function AuctionList(): JSX.Element {
 export function AuctionHistoryPage(props: {
   readonly page: AuctionListResponse<AuctionSummaryV2Response>;
   readonly pageNumber: number;
+  readonly world: string | null;
   readonly onPageChange: (page: number) => void;
   readonly onPageClamp: (page: number) => void;
   readonly onPageSizeChange: (size: number) => void;
@@ -241,11 +200,10 @@ export function AuctionHistoryPage(props: {
     <div>
       <Show
         when={props.page.auctions.length === 0}
-        fallback={<AuctionHistoryTable rows={props.page.auctions} />}
+        fallback={<AuctionHistoryTable rows={props.page.auctions} world={props.world} />}
       >
         <div class="public-auction-empty" role="status">
           <p class="public-auction-empty__title">{t("auction-history-empty-title")}</p>
-          <p class="public-auction-empty__hint">{t("auction-history-empty-hint")}</p>
         </div>
       </Show>
       <PublicPager
@@ -265,13 +223,13 @@ export function AuctionHistoryPage(props: {
 /** 历史场次表；行内容全部来自 v2 摘要，论坛地址为可选列。 */
 export function AuctionHistoryTable(props: {
   readonly rows: readonly AuctionSummaryV2Response[];
+  readonly world: string | null;
 }): JSX.Element {
   return (
     <div class="public-auction-rounds__table">
       <table aria-label={t("page-auctions-title")}>
-        {/* Solid 版的“查看”一列由 styles/auction-rounds-links.css 改成刚好容纳四个入口的固定宽度，
-            这里最后一项只是没有该样式时的回退；其余列按各自的百分比分配剩余宽度。
-            Rust 版仍是 [12, 8, 22, 7, 7, 7, 21, 16]。 */}
+        {/* “查看”一列由共用样式 public.css 改成刚好容纳四个入口的固定宽度，最后一项只是没有该样式时的
+            回退；其余列按各自的百分比分配剩余宽度。两套实现的列比例相同。 */}
         <TableColumns layout="public-auction-history" widths={[12, 7, 24, 6, 6, 6, 18, 21]} />
         <thead>
           <tr>
@@ -307,11 +265,12 @@ export function AuctionHistoryTable(props: {
                     auction.opened_at ??
                     auction.scheduled_open_at,
                   lotsHref: historicalLotsHref(auction.id, auction.world_id),
-                  bidLogHref: historicalBidLogHref(auction.id, auction.world_id),
+                  // 出价记录与履约进度都是跨世界页；行内入口继承当前地址栏的世界范围，不替用户改范围。
+                  bidLogHref: historicalBidLogHref(auction.id, props.world),
                   // 只有已结算场次有履约进度；进行中的场次不给入口。
                   fulfillmentHref:
                     auction.status === "settled"
-                      ? historicalFulfillmentHref(auction.id, auction.world_id)
+                      ? historicalFulfillmentHref(auction.id, props.world)
                       : null,
                   statusClass: auctionStatusClass(auction.status),
                   statusLabel: historicalAuctionStatusLabel(auction.status),

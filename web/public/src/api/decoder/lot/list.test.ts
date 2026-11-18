@@ -3,7 +3,7 @@
 import { expect, test } from "bun:test";
 
 import type { TransportResponse } from "@auction/web-shared/net/transport";
-import type { JsonObject } from "@auction/web-shared/net/wire";
+import { JSON_MAX_SAFE_INTEGER, type JsonObject } from "@auction/web-shared/net/wire";
 import { ok } from "@auction/web-shared/result";
 
 const { catalogLevelFilterDefault, lotEnvelopeTakeRows } = await import("../../model");
@@ -11,6 +11,7 @@ const { decodeLotList } = await import(".");
 
 const AUCTION_ID = "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b";
 const LOT_ID = "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2c";
+const SECOND_LOT_ID = "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2d";
 
 function responseWith(payload: JsonObject): TransportResponse {
   return {
@@ -23,7 +24,33 @@ function responseWith(payload: JsonObject): TransportResponse {
   };
 }
 
-function listEnvelope(equipment: JsonObject): JsonObject {
+function categoryCounts(values: Readonly<Record<string, number>>): JsonObject {
+  return {
+    all: 0,
+    one: 0,
+    two: 0,
+    sta: 0,
+    shd: 0,
+    clo: 0,
+    lig: 0,
+    hea: 0,
+    ...values,
+  };
+}
+
+function listEnvelope(
+  equipment: JsonObject,
+  total = 1,
+  counts = categoryCounts({ all: 1, clo: 1 }),
+): JsonObject {
+  return listEnvelopeWithRows([equipment], total, counts);
+}
+
+function listEnvelopeWithRows(
+  equipments: readonly JsonObject[],
+  total: number,
+  counts: JsonObject,
+): JsonObject {
   return {
     code: "ok",
     message: "拍卖批次已加载",
@@ -35,45 +62,75 @@ function listEnvelope(equipment: JsonObject): JsonObject {
       bidding_open: true,
       opens_at: "2025-11-15T08:00:00Z",
       preview_revision: 0,
+      lots: equipments.map((equipment, index) => ({
+        id: index === 0 ? LOT_ID : SECOND_LOT_ID,
+        auction_id: AUCTION_ID,
+        lot_number: index + 1,
+        status: "live",
+        start_price: 1000,
+        current_price: 1500,
+        next_bid: 1600,
+        has_leader: true,
+        leader_name: "leader",
+        seller_name: "seller",
+        effective_end_at: "2025-11-16T08:00:00Z",
+        state_version: 3,
+        equipment,
+      })),
+      total,
+      page: 1,
+      page_size: 20,
+      category_counts: counts,
+    },
+  };
+}
+
+function previewListEnvelope(
+  equipmentCategory: string | null,
+  total: number,
+  counts: JsonObject,
+): JsonObject {
+  return {
+    code: "ok",
+    message: "拍卖批次已加载",
+    data: {
+      auction_id: AUCTION_ID,
+      auction_status: "preview",
+      projection_kind: "preview",
+      presentation_mode: "preview",
+      bidding_open: false,
+      opens_at: "2025-11-15T08:00:00Z",
+      preview_revision: 0,
       lots: [
         {
           id: LOT_ID,
           auction_id: AUCTION_ID,
-          lot_number: 1,
-          status: "live",
-          start_price: 1000,
-          current_price: 1500,
-          next_bid: 1600,
-          has_leader: true,
-          leader_name: "leader",
+          code: "Clo01",
+          status: "pending",
           seller_name: "seller",
-          effective_end_at: "2025-11-16T08:00:00Z",
-          state_version: 3,
-          equipment,
+          start_price: 1000,
+          equipment_name: "Legendary Cotton Robe of Heimdall",
+          equipment_group: "rare",
+          ...(equipmentCategory === null ? {} : { equipment_category: equipmentCategory }),
+          equipment_level: 450,
+          primary_attribute_initials: "IW",
+          avg_roll: 70.0,
+          game_equipment_url: "https://hentaiverse.org/equip/123456/0123456789",
         },
       ],
-      total: 1,
+      total,
       page: 1,
       page_size: 20,
-      category_counts: {
-        all: 1,
-        one: 0,
-        two: 0,
-        sta: 0,
-        shd: 0,
-        clo: 1,
-        lig: 0,
-        hea: 0,
-      },
+      category_counts: counts,
     },
   };
 }
 
 /// `fields=summary` 的 live 行：只缺属性明细，首字母与 avg_roll 仍由服务端给出。
-function summaryEquipment(): JsonObject {
+function summaryEquipment(category = "Cloth"): JsonObject {
   return {
     name: "Legendary Cotton Robe of Heimdall",
-    category: "Cloth",
+    category,
     equipment_group: "rare",
     level: 450,
     primary_attribute_initials: "IW",
@@ -82,14 +139,19 @@ function summaryEquipment(): JsonObject {
   };
 }
 
-function catalogRows(payload: JsonObject) {
+function decodeCatalog(payload: JsonObject, category: string | null = null) {
   const decoded = decodeLotList(
     responseWith(payload),
     AUCTION_ID,
-    null,
+    category,
     null,
     catalogLevelFilterDefault(),
   );
+  return decoded;
+}
+
+function catalogRows(payload: JsonObject) {
+  const decoded = decodeCatalog(payload);
   expect(decoded.ok).toBe(true);
   if (!decoded.ok) {
     throw new Error("lot 列表必须通过严格解码");
@@ -114,4 +176,44 @@ test("summary_projection_decodes_to_the_same_catalog_rows：摘要投影解码�
   expect(summaryRows).toEqual(fullRows);
   expect(summaryRows[0]?.primaryAttributeInitials).toBe("IW");
   expect(summaryRows[0]?.avgRoll).toBe(70.0);
+});
+
+test("multi_category_requests_match_rows_and_selected_count_total：多分类按集合核对行与总数", () => {
+  const counts = categoryCounts({ all: 4, clo: 1, lig: 2, sta: 1 });
+  const selectedRows = [summaryEquipment(), summaryEquipment("Light")];
+  // 两个所选分类的计数和是 3；误用 all=4 的旧实现会把这组响应判错。
+  expect(decodeCatalog(listEnvelopeWithRows(selectedRows, 3, counts), "clo,lig").ok).toBe(true);
+  expect(decodeCatalog(listEnvelopeWithRows(selectedRows, 4, counts), "clo,lig").ok).toBe(false);
+
+  // 未选分类时仍以 all 计数核对 total，并接受集合内的任意行。
+  expect(decodeCatalog(listEnvelopeWithRows(selectedRows, 4, counts), null).ok).toBe(true);
+
+  const single = listEnvelope(summaryEquipment(), 1, categoryCounts({ all: 1, clo: 1 }));
+  expect(decodeCatalog(single, "clo").ok).toBe(true);
+
+  // 第二种行属于 lig，不在请求的 clo、sta 集合内。
+  expect(decodeCatalog(listEnvelopeWithRows(selectedRows, 2, counts), "clo,sta").ok).toBe(false);
+  for (const category of ["clo,clo", "all", "unknown"]) {
+    expect(decodeCatalog(single, category).ok).toBe(false);
+  }
+});
+
+test("selected_category_count_overflow_fails_closed：所选分类计数求和超出安全整数时失败关闭", () => {
+  const counts = categoryCounts({
+    all: JSON_MAX_SAFE_INTEGER,
+    clo: JSON_MAX_SAFE_INTEGER - 1,
+    lig: 2,
+  });
+  expect(
+    decodeCatalog(listEnvelope(summaryEquipment("Cloth"), JSON_MAX_SAFE_INTEGER, counts), "clo,lig")
+      .ok,
+  ).toBe(false);
+});
+
+test("preview_category_membership_is_checked_against_equipment_category：预览行按装备分类核对集合", () => {
+  const counts = categoryCounts({ all: 1, clo: 1 });
+  expect(decodeCatalog(previewListEnvelope("Cloth", 1, counts), "clo").ok).toBe(true);
+  expect(decodeCatalog(previewListEnvelope(null, 1, counts), null).ok).toBe(true);
+  // 缺少分类的旧预览行不能证明属于所选集合。
+  expect(decodeCatalog(previewListEnvelope(null, 1, counts), "clo").ok).toBe(false);
 });

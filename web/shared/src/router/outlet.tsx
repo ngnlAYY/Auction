@@ -141,6 +141,10 @@ export function RouteOutlet(props: RouteOutletProps): JSX.Element {
         router.restoreScrollAfterCommit();
         return;
       }
+      // 目标页面的代码还没到：先卸载上一个地址的页面，而不是让它留到新页面就绪。
+      // 旧页面仍然挂载时会把新地址当成自己的地址来读——纠偏类的 effect 会把自己的查询参数
+      //（例如所选场次）写进新地址，数据读取也会按新地址重发。
+      shown.set(null);
       running = tasks.spawn(async (context) => {
         try {
           const component = await entry.promise;

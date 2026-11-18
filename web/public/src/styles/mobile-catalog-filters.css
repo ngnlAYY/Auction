@@ -1,10 +1,13 @@
 /*
  * Solid 版专属：手机上的看板筛选区。
  * 共用样式在手机上是一张表单卡片：分组、等级上限、复选框、类型各占一行，约 310px 高。
- * 这里按维护者给的版式排成三行，标签列对齐：
+ * 这里按维护者给的版式排成带标签的几行，标签列对齐：
+ *   世界      [主世界][异世界]              （世界按钮组，见 styles/world-tabs.css；只有一个世界可选时没有这一行）
  *   装备分组  [全部][稀有][融合]            （桌面端本来就有的标签按钮，替代分组下拉框）
  *   等级上限  [窄输入框]  显示无等级装备
- *   装备类型  [下拉框]  [显示列]
+ *   装备类型  [多选下拉]  [显示列]
+ * 装备类型在 Solid 版是多选（Rust 版是原生单选下拉框）：按钮画成下拉框的样子，点开后在工具栏下方
+ * 展开整宽的勾选面板；面板里的勾选在关闭面板时一次生效。
  * 列设置面板在共用样式里是一列竖排（十几行，约 510px 高），这里改成贴着工具栏整宽展开的多列网格。
  * 输入框与下拉框的字号保持 16px：小于它时 iOS 在聚焦时会放大整个页面。
  * Rust 版不加载本文件。规则写在层外，优先于共用样式的各个 @layer。
@@ -46,14 +49,14 @@
     --filter-level-size: 6.5rem;
   }
 
-  /* 第一行：分组用标签按钮，手机下拉框隐藏。 */
+  /* 世界与分组各占一行，都用标签按钮；分组的手机下拉框隐藏。 */
   .public-auction-live
     .public-auction-group-toolbar
     > .public-catalog-category-picker.public-mobile {
     display: none;
   }
 
-  .public-auction-live .public-auction-group-toolbar > nav.public-auction-filter.public-desktop {
+  .public-auction-live .public-auction-group-toolbar > nav.public-auction-filter {
     display: flex;
     grid-column: 1 / -1;
     align-items: center;
@@ -162,7 +165,7 @@
     accent-color: var(--color-accent);
   }
 
-  /* 第三行：类型用下拉框，标签按钮隐藏；显示列按钮排在最右。 */
+  /* 第三行：类型用多选下拉，标签按钮隐藏；显示列按钮排在最右。 */
   .public-auction-live .public-auction-type-toolbar > nav.public-auction-filter {
     display: none;
   }
@@ -178,13 +181,119 @@
     font-size: var(--text-sm);
   }
 
-  .public-auction-live .public-auction-type-toolbar > .public-catalog-category-picker select {
+  .public-auction-live .public-auction-type-toolbar .public-catalog-category-menu {
+    position: static;
+    min-inline-size: 0;
+  }
+
+  /* 按钮与同页的下拉框同高同形：左边是摘要文字，右边是箭头（两条斜向渐变拼成，不引用图片）。 */
+  .public-auction-live .public-auction-type-toolbar .public-catalog-category-menu__toggle {
+    display: block;
     inline-size: 100%;
     min-inline-size: 0;
     min-block-size: 2.25rem;
     margin: 0;
+    padding: 0 1.75rem 0 var(--space-2);
+    overflow: hidden;
+    border: var(--border-width) solid var(--color-border-control);
     border-radius: var(--radius-sm);
+    background:
+      linear-gradient(45deg, transparent 50%, currentcolor 50%) right 0.875rem top 55% / 0.3125rem
+      0.3125rem no-repeat,
+      linear-gradient(135deg, currentcolor 50%, transparent 50%) right 0.5625rem top 55% / 0.3125rem
+      0.3125rem no-repeat,
+      var(--color-surface-raised);
+    box-shadow: none;
+    color: var(--color-text);
     font-size: 1rem;
+    font-weight: 400;
+    text-align: start;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .public-auction-live
+    .public-auction-type-toolbar
+    .public-catalog-category-menu__toggle[aria-expanded="true"] {
+    border-color: var(--color-accent);
+  }
+
+  .public-auction-live .public-auction-type-toolbar .public-catalog-category-menu__backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+  }
+
+  /* 面板与筛选区等宽：“全部”独占第一行，七个分类排成两列，计数靠右。 */
+  .public-auction-live .public-auction-type-toolbar .public-catalog-category-menu__panel {
+    position: absolute;
+    inset-block-start: calc(100% - var(--space-1));
+    inset-inline: var(--space-3);
+    z-index: 61;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0 var(--space-2);
+    max-block-size: min(70vh, 32rem);
+    padding: var(--space-2);
+    overflow-y: auto;
+    border: var(--border-width) solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+    box-shadow: var(--shadow-2);
+  }
+
+  .public-auction-live .public-auction-type-toolbar .public-catalog-category-menu__panel[hidden] {
+    display: none;
+  }
+
+  .public-auction-live .public-auction-type-toolbar .public-catalog-category-menu__option {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-inline-size: 0;
+    min-block-size: 2.5rem;
+    padding-inline: var(--space-2);
+    border-radius: var(--radius-sm);
+    color: var(--color-text);
+    font-size: var(--text-sm);
+    line-height: 1.2;
+    cursor: pointer;
+  }
+
+  .public-auction-live
+    .public-auction-type-toolbar
+    .public-catalog-category-menu__option:first-child {
+    grid-column: 1 / -1;
+    border-block-end: var(--border-width) solid var(--color-border);
+    border-radius: 0;
+  }
+
+  .public-auction-live .public-auction-type-toolbar .public-catalog-category-menu__option input {
+    flex: none;
+    inline-size: 1.125rem;
+    block-size: 1.125rem;
+    margin: 0;
+    accent-color: var(--color-accent);
+  }
+
+  .public-auction-live .public-auction-type-toolbar .public-catalog-category-menu__count {
+    margin-inline-start: auto;
+    color: var(--color-text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* 面板里的勾选是草稿，关闭面板时才生效；“完成”按钮是最明确的关闭入口。 */
+  .public-auction-live .public-auction-type-toolbar .public-catalog-category-menu__done {
+    grid-column: 1 / -1;
+    min-block-size: 2.5rem;
+    margin-block-start: var(--space-2);
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: var(--color-accent);
+    box-shadow: none;
+    color: var(--color-accent-contrast);
+    font-size: var(--text-sm);
+    font-weight: 600;
   }
 
   /*

@@ -2,20 +2,19 @@
  * Solid 版专属：手机顶栏。
  * 共用样式（crates 下的五份）里的手机顶栏是两行、带边框的方形按钮，世界、语言、主题三个切换器
  * 随导航菜单展开。这里改成一条两行的应用栏：
- *   第一行  当前场次（主标题）+ 状态标签
- *   第二行  世界切换（顶栏里唯一保留的切换器，无边框下拉框）+ 倒计时
+ *   第一行  当前场次（主标题）+ 所在世界
+ *   第二行  状态标签 + 倒计时（放不下时截断）
  *   右侧    连接状态圆点、刷新、会话入口
  * 品牌名在手机顶栏里不再显示（文档标题仍是它）；语言与主题移到设置页（surface/settings.tsx），
- * 入口在导航菜单里。菜单与刷新是无边框图标，登录是实心按钮，圆角一律用小圆角。
+ * 入口在导航菜单里；世界切换是各页面里的按钮组（styles/world-tabs.css），顶栏只显示当前世界的名称。菜单与刷新是无边框图标，登录是实心按钮，圆角一律用小圆角。
  * Rust 版不加载本文件，两套实现在这一块有意不同。规则写在层外，优先于共用样式的各个 @layer。
  */
 @media screen and (max-width: 48rem) {
   .public-console .console-ticker {
     display: grid;
     /*
-     * 列：菜单 | 场次名与世界下拉框（取两者较宽的一个）| 余量 | 状态 | 会话。
-     * 状态标签在余量列里紧跟场次名；倒计时跨第 2、3 列并靠右，不随场次名的宽度被挤出去。
-     * 间距用各项自己的外边距。
+     * 列：菜单 | 场次名与状态标签（取两者较宽的一个）| 世界名与倒计时（占余量）| 状态 | 会话。
+     * 两行上下对齐成两列；间距用各项自己的外边距。
      */
     grid-template-columns: auto auto minmax(0, 1fr) auto auto;
     grid-template-rows: auto auto;
@@ -88,9 +87,8 @@
     line-height: 1;
   }
 
-  /* 品牌名让位给世界切换；场次信息的各项直接成为顶栏栅格的子项，按行列摆放。 */
-  .public-console .console-ticker .console-ticker__brand,
-  .public-console .console-ticker .console-ticker__world {
+  /* 品牌名不显示；场次信息的各项直接成为顶栏栅格的子项，按行列摆放。 */
+  .public-console .console-ticker .console-ticker__brand {
     display: none;
   }
 
@@ -101,7 +99,8 @@
   .public-console .console-ticker .console-ticker__auction {
     grid-row: 1;
     grid-column: 2;
-    align-self: end;
+    /* 与右边的世界名按文字基线对齐。 */
+    align-self: baseline;
     min-inline-size: 0;
     overflow: hidden;
     color: var(--color-text);
@@ -112,16 +111,27 @@
     white-space: nowrap;
   }
 
-  .public-console .console-ticker .console-ticker__live {
+  /* “ / 主世界”紧跟场次名，放不下时截断。 */
+  .public-console .console-ticker .console-ticker__world {
     grid-row: 1;
     grid-column: 3;
-    align-self: end;
+    align-self: baseline;
     justify-self: start;
     min-inline-size: 0;
     max-inline-size: calc(100% - 0.375rem);
-    margin-block-end: 0.125rem;
     margin-inline-start: 0.375rem;
     overflow: hidden;
+    color: var(--color-text-muted);
+    font-size: var(--text-base);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .public-console .console-ticker .console-ticker__live {
+    grid-row: 2;
+    grid-column: 2;
+    align-self: center;
+    justify-self: start;
     padding: 0.0625rem 0.4375rem;
     border-radius: var(--radius-sm);
     background: color-mix(in srgb, var(--color-text-muted) 16%, transparent);
@@ -132,84 +142,34 @@
     white-space: nowrap;
   }
 
+  /* 倒计时排在世界名正下方；空间不够时截断，不另起一行。 */
   .public-console .console-ticker .console-ticker__context > .console-ticker__countdown {
     grid-row: 2;
-    grid-column: 2 / 4;
+    grid-column: 3;
     align-self: center;
-    justify-self: end;
+    justify-self: start;
     min-inline-size: 0;
-    max-inline-size: 100%;
-    margin: 0;
+    max-inline-size: calc(100% - var(--space-2));
+    margin: 0 0 0 var(--space-2);
     overflow: hidden;
     font-family: var(--font-mono);
     font-size: var(--text-sm);
     font-variant-numeric: tabular-nums;
+    text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  /* 读取中：提示占第一行，世界切换仍在第二行。 */
+  /* 读取中：提示占场次名的位置。 */
   .public-console .console-ticker .console-ticker__loading {
     grid-row: 1;
-    grid-column: 2 / 4;
+    grid-column: 2;
     align-self: end;
     justify-self: start;
   }
 
-  /*
-   * 世界切换：切换器容器不参与布局，世界下拉框落在第二行；语言与主题在手机上只出现在设置页。
-   * 下拉框去掉边框与底色，读起来是“主世界 ▾”这样一段可点的文字；字号保持 16px
-   * （小于它时 iOS 在聚焦时会放大整个页面），上下留白把命中高度补到 28px。
-   */
+  /* 语言与主题在手机上只出现在设置页；顶栏里的这一组切换器整体隐藏。 */
   .public-console .console-ticker .public-shell__preferences {
-    display: contents;
-  }
-
-  .public-console
-    .console-ticker
-    .public-shell__preferences
-    > :is(.language-picker, .theme-picker, .language-picker__error) {
     display: none;
-  }
-
-  .public-console .console-ticker .public-shell__preferences > .public-world-switcher {
-    display: block;
-    grid-row: 2;
-    grid-column: 2;
-    align-self: center;
-    inline-size: auto;
-    min-inline-size: 0;
-    max-inline-size: none;
-  }
-
-  .public-console .console-ticker .public-shell__preferences > .public-world-switcher select {
-    inline-size: auto;
-    min-inline-size: 0;
-    max-inline-size: 100%;
-    block-size: 1.75rem;
-    min-block-size: 1.75rem;
-    padding: 0 1.125rem 0 0;
-    border: 0;
-    border-radius: var(--radius-sm);
-    appearance: none;
-    /* 箭头由两条斜向渐变拼成，不引用外部图片（CSP 不放行 data: 图片）。 */
-    background:
-      linear-gradient(45deg, transparent 50%, currentcolor 50%) right 0.3125rem top 55% / 0.3125rem
-      0.3125rem no-repeat,
-      linear-gradient(135deg, currentcolor 50%, transparent 50%) right 0 top 55% / 0.3125rem
-      0.3125rem no-repeat;
-    box-shadow: none;
-    color: var(--color-text-muted);
-    font-size: 1rem;
-    line-height: 1.75rem;
-  }
-
-  .public-console
-    .console-ticker
-    .public-shell__preferences
-    > .public-world-switcher
-    select:focus-visible {
-    outline: 2px solid var(--color-accent);
-    outline-offset: 2px;
   }
 
   .public-console .console-ticker .public-shell__connection {
@@ -320,30 +280,9 @@
   }
 }
 
-/* 340px 以下第二行放不下倒计时：它单独占第三行，不裁掉数字。 */
+/* 340px 以下第一行很挤：场次名收小一号。 */
 @media screen and (max-width: 21.25rem) {
-  .public-console .console-ticker {
-    grid-template-rows: auto auto auto;
-  }
-
-  .public-console .console-ticker .console-ticker__context > .console-ticker__countdown {
-    grid-row: 3;
-    grid-column: 2 / -1;
-    justify-self: start;
-  }
-
-  .public-console .console-ticker:has(.public-shell__nav--open) {
-    grid-template-rows: auto auto auto auto;
-  }
-
-  .public-console .console-ticker:has(.console-ticker__countdown) .public-shell__nav--open {
-    grid-row: 4;
-  }
-}
-
-/* 日文的场次名比其他语言长一截，420px 以下第一行放不下状态标签；场次状态在页面内容里仍然可见。 */
-@media screen and (max-width: 26.25rem) {
-  .public-console:lang(ja) .console-ticker .console-ticker__live {
-    display: none;
+  .public-console .console-ticker .console-ticker__auction {
+    font-size: 1rem;
   }
 }

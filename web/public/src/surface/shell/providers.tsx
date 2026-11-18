@@ -17,6 +17,7 @@ import {
   PublicBidRefreshContext,
   PublicRefreshGenerationContext,
 } from "../board/refresh";
+import type { WorldSwitch } from "../board/world";
 import type { LotViewTarget } from "../catalog/detail/deep-link";
 import { LotViewRequestContext } from "../catalog/detail/deep-link";
 import type {
@@ -26,19 +27,18 @@ import type {
 } from "../index";
 import { PublicCommandOwnerContext, PublicSessionResourceContext } from "../index";
 import { PublicContentLoadingContext } from "../loading";
-import type { PublicBoardQuery } from "../query";
 import {
   CurrentAuctionContext,
   PageVisibilityContext,
   PublicReadinessContext,
-  PublicWorldQueryContext,
   SelectedWorldContext,
+  WorldSwitchContext,
 } from "./contexts";
 
 export interface PublicShellProvidersProps {
   readonly secondTicker: SecondTicker;
+  readonly worldSwitch: WorldSwitch;
   readonly selectedWorld: Cell<string>;
-  readonly worldQuerySignal: Cell<PublicBoardQuery>;
   readonly refreshGeneration: Cell<number>;
   readonly bidRefresh: PublicBidRefresh;
   readonly pageRealtimeTarget: Cell<readonly [PublicRealtimePageKey, PublicRealtimeTarget] | null>;
@@ -56,9 +56,9 @@ export interface PublicShellProvidersProps {
 /** 外壳根部的上下文组合；值的 owner 与读写责任仍在外壳组件。 */
 export function PublicShellProviders(props: PublicShellProvidersProps): JSX.Element {
   return (
-    <SecondTickerContext value={props.secondTicker}>
-      <SelectedWorldContext value={props.selectedWorld}>
-        <PublicWorldQueryContext value={props.worldQuerySignal}>
+    <WorldSwitchContext value={props.worldSwitch}>
+      <SecondTickerContext value={props.secondTicker}>
+        <SelectedWorldContext value={props.selectedWorld}>
           <PublicRefreshGenerationContext value={props.refreshGeneration}>
             <PublicBidRefreshContext value={props.bidRefresh}>
               <PublicPageRealtimeTargetContext value={props.pageRealtimeTarget}>
@@ -82,8 +82,8 @@ export function PublicShellProviders(props: PublicShellProvidersProps): JSX.Elem
               </PublicPageRealtimeTargetContext>
             </PublicBidRefreshContext>
           </PublicRefreshGenerationContext>
-        </PublicWorldQueryContext>
-      </SelectedWorldContext>
-    </SecondTickerContext>
+        </SelectedWorldContext>
+      </SecondTickerContext>
+    </WorldSwitchContext>
   );
 }

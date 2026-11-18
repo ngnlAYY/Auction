@@ -17,6 +17,7 @@ import {
   type InitialPublicSearch,
   markBrowserLocationChanged,
   PublicLocationRevisionContext,
+  readBrowserLocationRevision,
   readPublicQuery,
 } from "./location";
 import { managedPublicQueryPairs, PUBLIC_QUERY_KEYS, queryPairsString } from "./serialization";
@@ -41,16 +42,19 @@ export function usePublicQueryState(): QueryState<PublicBoardQuery> {
   const result: QueryState<PublicBoardQuery> = {
     state: query.state,
     set(value, mode) {
-      writePublicQuery(value, mode);
-      query.state.set(value);
+      if (writePublicQuery(value, mode)) {
+        query.state.set(value);
+      }
     },
     push(value) {
-      writePublicQuery(value, "push");
-      query.state.set(value);
+      if (writePublicQuery(value, "push")) {
+        query.state.set(value);
+      }
     },
     replace(value) {
-      writePublicQuery(value, "replace");
-      query.state.set(value);
+      if (writePublicQuery(value, "replace")) {
+        query.state.set(value);
+      }
     },
   };
   const locationRevision = useContext(PublicLocationRevisionContext);
@@ -58,11 +62,16 @@ export function usePublicQueryState(): QueryState<PublicBoardQuery> {
   createEffect(
     () => {
       // 完整位置读取订阅 Router，覆盖 Link push 与同路径 query 导航。
-      router.currentLocationString();
       if (locationRevision !== null) {
         locationRevision.revision();
       }
-      return null;
+      // 本模块直接写 History 时不经过 Router，也不一定由发起写入的实例自己重读；
+      // 每个挂载中的查询状态都订阅这一点，成功写入后统一从地址栏取最新值。
+      return [
+        router.currentLocationString(),
+        locationRevision === null ? -1 : locationRevision.revision(),
+        readBrowserLocationRevision(),
+      ] as const;
     },
     () => {
       // 地址栏读取含首次 query 恢复，属于 effect 的副作用阶段。
@@ -75,24 +84,25 @@ export function usePublicQueryState(): QueryState<PublicBoardQuery> {
   return result;
 }
 
-/** 把完整查询状态按既有序列化规则写回地址栏（只替换本 crate 管理的键）。 */
-export function writePublicQuery(query: PublicBoardQuery, mode: QueryWriteMode): void {
-  writePublicQueryPairs(PUBLIC_QUERY_KEYS, managedPublicQueryPairs(query), mode);
+/** 把完整查询状态按既有序列化规则写回地址栏（只替换本 crate 管理的键）。
+ * 返回是否真正写入；只有成功时才推进共享地址版本。 */
+export function writePublicQuery(query: PublicBoardQuery, mode: QueryWriteMode): boolean {
+  return writePublicQueryPairs(PUBLIC_QUERY_KEYS, managedPublicQueryPairs(query), mode);
 }
 
 function writePublicQueryPairs(
   keys: readonly string[],
   pairs: readonly (readonly [string, string])[],
   mode: QueryWriteMode,
-): void {
+): boolean {
   if (typeof window === "undefined") {
-    return;
+    return false;
   }
   let history: History;
   try {
     history = window.history;
   } catch {
-    return;
+    return false;
   }
   const merged: [string, string][] = [];
   for (const pair of readQueryPairs()) {
@@ -131,8 +141,10 @@ function writePublicQueryPairs(
     }
     markBrowserLocationChanged();
   } catch {
-    // 地址栏不可写时保持现有导航状态；状态更新仍由调用方决定。
+    // 地址栏不可写时调用方必须保持原查询状态；失败不能推进地址版本或通知其他实例。
+    return false;
   }
+  return true;
 }
 
 /** 读取地址栏最新查询、应用变更并按模式写回（读-改-写），同步 hook 状态。 */
@@ -140,9 +152,12 @@ export function updatePublicQueryState(
   state: Cell<PublicBoardQuery>,
   update: (query: PublicBoardQuery) => void,
   mode: QueryWriteMode,
-): void {
+): boolean {
   const query = readPublicQuery(initialSearchByState.get(state) ?? null);
   update(query);
-  writePublicQuery(query, mode);
+  if (!writePublicQuery(query, mode)) {
+    return false;
+  }
   state.set(query);
+  return true;
 }

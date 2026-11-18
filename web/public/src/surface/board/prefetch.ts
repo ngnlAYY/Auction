@@ -11,7 +11,7 @@ import { validUuid } from "@auction/web-shared/ui/validation";
 
 import { catalogLevelFilterParse } from "../../api/model";
 import { prefetchCurrentLots } from "../../api/queries/lots";
-import type { PublicBoardQuery } from "../query";
+import { catalogCategoryKeys, type PublicBoardQuery } from "../query";
 
 const CURRENT_AUCTION_KEY_PREFIX = "hv.public.current-auction.";
 
@@ -41,7 +41,8 @@ export function prefetchBoardLots(world: string, query: PublicBoardQuery): void 
   if (!levels.ok) {
     return;
   }
-  const category = query.category === "all" ? null : query.category;
+  const categoryKeys = catalogCategoryKeys(query.category);
+  const category = categoryKeys.length === 0 ? null : categoryKeys.join(",");
   const equipmentGroup = query.equipmentGroup === "all" ? null : query.equipmentGroup;
   const tasks = createTaskScope();
   tasks.spawn(async (context) => {

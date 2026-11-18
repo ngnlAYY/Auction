@@ -7,16 +7,17 @@ import { type PublicBoardQuery, publicBoardQueryDefault } from "./board";
 import { browserScrollState, currentBrowserSearch, markBrowserLocationChanged } from "./location";
 import { publicQueryString } from "./serialization";
 
-/** 原地写回完整查询；push 前先把离开的条目更新为当前滚动位置，与 Dioxus 历史一致。 */
-export function setPublicQuery(query: PublicBoardQuery, replace: boolean): void {
+/** 原地写回完整查询；push 前先把离开的条目更新为当前滚动位置，与 Dioxus 历史一致。
+ * 返回是否真正写入地址栏；失败时不推进共享地址版本。 */
+export function setPublicQuery(query: PublicBoardQuery, replace: boolean): boolean {
   if (typeof window === "undefined") {
-    return;
+    return false;
   }
   let history: History;
   try {
     history = window.history;
   } catch {
-    return;
+    return false;
   }
   let pathname: string;
   try {
@@ -30,10 +31,11 @@ export function setPublicQuery(query: PublicBoardQuery, replace: boolean): void 
     try {
       history.replaceState(state, "", url);
       markBrowserLocationChanged();
+      return true;
     } catch {
       // Rust 对历史写入失败不做回退；保持调用前的地址栏状态。
+      return false;
     }
-    return;
   }
   try {
     history.replaceState(state, "");
@@ -43,8 +45,10 @@ export function setPublicQuery(query: PublicBoardQuery, replace: boolean): void 
   try {
     history.pushState(state, "", url);
     markBrowserLocationChanged();
+    return true;
   } catch {
     // Rust 对 push 失败不做回退；保持调用前的地址栏状态。
+    return false;
   }
 }
 
@@ -52,17 +56,12 @@ export function publicHref(path: string, query: PublicBoardQuery): string {
   return `${path}${publicQueryString(query)}`;
 }
 
-/** 首页入口不冻结数量：导航时读取最新本地偏好，避免外壳旧链接覆盖刚保存的选择。 */
-export function publicAuctionHomeHref(world: string): string {
-  return world === "isekai" ? "/?world=isekai" : "/";
-}
-
-/** 生成当前世界的拍卖首页查询；同路由导航可直接用它替换历史视图状态。 */
-export function publicAuctionHomeQuery(world: string): PublicBoardQuery {
-  // 只保留目标世界与本地数量偏好，避免从其他页面带回不属于首页的筛选和页码。
+/** 生成首页查询；`world` 是导航实际继承的地址值，`null` 表示省略并采用主世界缺省。
+ * 只保留目标世界与本地数量偏好，避免从其他页面带回不属于首页的筛选和页码。 */
+export function publicAuctionHomeQuery(world: string | null): PublicBoardQuery {
   return {
     ...publicBoardQueryDefault(),
-    world: world === "isekai" ? "isekai" : null,
+    world,
   };
 }
 

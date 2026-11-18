@@ -45,9 +45,10 @@ export async function fetchBidLogPage(
   return signal.aborted ? err("network_error") : read;
 }
 
-/** 读取可供公开竞价日志选择的 live、final 和 settled 拍卖，保留已结算场次的历史深链。 */
+/** 读取可供公开竞价日志选择的 live、final 和 settled 拍卖，保留已结算场次的历史深链。
+ * `worldId` 为 `null` 时读取全部世界；合并后主世界在前、异世界在后，同一世界内按期号倒序。 */
 export async function fetchBidLogAuctions(
-  worldId: string,
+  worldId: string | null,
   signal: AbortSignal,
 ): Promise<Result<AuctionSummaryResponse[], string>> {
   // 状态目录相互独立，最多并发三个读取；首个错误会中止兄弟读取，与源实现的 `try_join!` 一致。
@@ -74,28 +75,16 @@ export async function fetchBidLogAuctions(
     }
     const [liveAuctions, finalAuctions, settledAuctions] = joined.value;
     const auctions = [...liveAuctions, ...finalAuctions, ...settledAuctions];
-    auctions.sort((left, right) => {
-      if (left.sequence !== right.sequence) {
-        return right.sequence < left.sequence ? -1 : 1;
-      }
-      return compareText(right.id, left.id);
-    });
-    const deduped: AuctionSummaryResponse[] = [];
-    for (const auction of auctions) {
-      const previous = deduped[deduped.length - 1];
-      if (previous === undefined || previous.id !== auction.id) {
-        deduped.push(auction);
-      }
-    }
-    return ok(deduped);
+    return ok(orderBidLogAuctions(auctions));
   } finally {
     signal.removeEventListener("abort", abortFromCaller);
   }
 }
 
-/** 按编号顺序逐页读完单一状态的公开拍卖目录；竞价日志与履约进度的场次选择共用。 */
+/** 按编号顺序逐页读完单一状态的公开拍卖目录；竞价日志与履约进度的场次选择共用。
+ * `worldId` 为 `null` 时由底层目录接口返回全部世界。 */
 export async function fetchBidLogAuctionStatus(
-  worldId: string,
+  worldId: string | null,
   status: string,
   signal: AbortSignal,
 ): Promise<Result<AuctionSummaryResponse[], string>> {
@@ -111,6 +100,16 @@ export async function fetchBidLogAuctionStatus(
     }
     if (!page.ok) {
       return page;
+    }
+    // 其他目录调用方允许未知世界；只有不限世界的竞价日志/履约目录需要冻结闭集，避免未知世界
+    // 进入跨世界合并。整页失败关闭，不返回部分目录。
+    if (
+      worldId === null &&
+      !page.value.auctions.every(
+        (auction) => auction.world_id === "main" || auction.world_id === "isekai",
+      )
+    ) {
+      return err("invalid_response");
     }
     const rowCount = page.value.auctions.length;
     // Rust 的数组长度转换不可能失败；保留该失败关闭分支。
@@ -136,6 +135,39 @@ export async function fetchBidLogAuctionStatus(
     }
     pageNumber = nextPage;
   }
+}
+
+/** 合并多个状态目录：主世界在前、异世界在后，同一世界内按期号倒序；目录逐页读取期间发生
+ * 状态迁移时，同一场次可能以多个状态重复出现，排序后按现有规则去掉相邻重复项。 */
+function orderBidLogAuctions(
+  auctions: readonly AuctionSummaryResponse[],
+): AuctionSummaryResponse[] {
+  const ordered = auctions.slice();
+  ordered.sort((left, right) => {
+    const worldOrder = bidLogWorldRank(left.world_id) - bidLogWorldRank(right.world_id);
+    if (worldOrder !== 0) {
+      return worldOrder;
+    }
+    if (left.sequence !== right.sequence) {
+      return right.sequence < left.sequence ? -1 : 1;
+    }
+    return compareText(right.id, left.id);
+  });
+  const deduped: AuctionSummaryResponse[] = [];
+  for (const auction of ordered) {
+    const previous = deduped[deduped.length - 1];
+    if (previous === undefined || previous.id !== auction.id) {
+      deduped.push(auction);
+    }
+  }
+  return deduped;
+}
+
+function bidLogWorldRank(worldId: string): number {
+  if (worldId === "main") {
+    return 0;
+  }
+  return worldId === "isekai" ? 1 : 2;
 }
 
 /** 读取单个 lot 的编号竞价历史；分页参数沿用公开竞价日志契约。 */

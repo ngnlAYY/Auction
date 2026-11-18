@@ -2,25 +2,32 @@
 
 import { expect, test } from "bun:test";
 
-const { catalogCategoryKey, historicalFulfillmentHref } = await import("./presentation");
+const { catalogCategoryKey, historicalBidLogHref, historicalFulfillmentHref } = await import(
+  "./presentation"
+);
 
-test("fulfillment_entry_opens_the_round_in_its_world：履约入口按世界打开对应场次", () => {
+test("historical_entries_preserve_the_current_world_scope：行内入口继承当前世界范围", () => {
   const auctionId = "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b";
-  const cases: readonly (readonly [string, string | null])[] = [
+  const cases: readonly (readonly [string | null, string | null])[] = [
+    [null, null],
+    ["main", "main"],
     ["isekai", "isekai"],
-    ["main", null],
   ];
-  for (const [world, expectedWorld] of cases) {
-    const href = historicalFulfillmentHref(auctionId, world);
-    const question = href.indexOf("?");
-    expect(question).toBeGreaterThanOrEqual(0);
-    const path = href.slice(0, question);
-    const search = href.slice(question + 1);
-    expect(path).toBe("/fulfillment");
-    const values = new URLSearchParams(search);
-    expect(values.get("auction")).toBe(auctionId);
-    // 主世界是页面缺省世界，与出价记录入口一样不写 `world`。
-    expect(values.get("world")).toBe(expectedWorld);
+  const entries = [
+    ["/bidlog", historicalBidLogHref],
+    ["/fulfillment", historicalFulfillmentHref],
+  ] as const;
+  for (const [expectedPath, hrefFor] of entries) {
+    for (const [world, expectedWorld] of cases) {
+      const href = hrefFor(auctionId, world);
+      const question = href.indexOf("?");
+      expect(question).toBeGreaterThanOrEqual(0);
+      expect(href.slice(0, question)).toBe(expectedPath);
+      const values = new URLSearchParams(href.slice(question + 1));
+      expect(values.get("auction")).toBe(auctionId);
+      // 缺省表示全部世界，主世界必须显式携带，不能被场次自己的世界改回缺省。
+      expect(values.get("world")).toBe(expectedWorld);
+    }
   }
 });
 

@@ -11,7 +11,7 @@ import { Show, useContext } from "solid-js";
 
 import { type ForumThread, fetchForumSyncEnabled, fetchForumThread } from "../api/forum";
 import { PublicRefreshGenerationContext } from "./board/refresh";
-import { worldLabel } from "./board/world";
+import { WorldTabs, worldLabel } from "./board/world";
 import { formatAuctionTime } from "./catalog/presentation";
 import { useContentLoading } from "./loading";
 import {
@@ -60,6 +60,10 @@ export function page(): JSX.Element {
 
   return (
     <section class="public-forum-page" aria-label={t("page-forum-title")}>
+      {/* 世界切换：页面内的按钮组（Solid 版专属；Rust 版用顶栏与页面内的下拉框）。 */}
+      <div class="public-world-toolbar">
+        <WorldTabs />
+      </div>
       <Show when={syncEnabled() !== undefined} fallback={null}>
         <Show when={!syncError()} fallback={forumPageState(() => t("forum-unavailable"), true)}>
           <Show

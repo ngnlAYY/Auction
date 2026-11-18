@@ -3,7 +3,7 @@
 import type { Cell } from "@auction/web-shared/reactive/cell";
 import { utf8ByteLength } from "@auction/web-shared/text";
 
-import { type PublicBoardQuery, writePublicQuery } from "../../query";
+import { type PublicBoardQuery, updatePublicQueryState } from "../../query";
 
 const NIL_UUID = "00000000-0000-0000-0000-000000000000";
 
@@ -25,16 +25,21 @@ export function resetLotDraft(draft: Cell<string>, generation: Cell<number>, val
   draft.set(value);
 }
 
-/** 把合法的 lot 筛选同时写入已应用状态与地址栏（无历史记录）并回到第一页；筛选未变时
- * 不改动，保留当前页码。 */
-export function applyLotFilter(queryState: Cell<PublicBoardQuery>, lot: string): void {
+/** 把合法的 lot 筛选写入地址栏（无历史记录）并回到第一页，写入成功后才提交已应用状态；
+ * 失败时保留原状态，之后输入同一值仍会重试。筛选未变时不改动，保留当前页码。 */
+export function applyLotFilter(queryState: Cell<PublicBoardQuery>, lot: string): boolean {
   const nextLot = lot !== "" ? lot : null;
   if (queryState.peek().bidLogLot === nextLot) {
-    return;
+    return true;
   }
-  const next: PublicBoardQuery = { ...queryState.peek(), bidLogLot: nextLot, page: 1 };
-  writePublicQuery(next, "replace");
-  queryState.set(next);
+  return updatePublicQueryState(
+    queryState,
+    (query) => {
+      query.bidLogLot = nextLot;
+      query.page = 1;
+    },
+    "replace",
+  );
 }
 
 /** 接受 uuid crate 的简单、连字符、花括号与 URN 形式，并输出规范小写连字符 UUID。 */

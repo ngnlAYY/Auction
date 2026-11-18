@@ -1,4 +1,5 @@
 // Public 价格历史页面及其筛选、值规范化、结果表格和详情查找宿主。
+// 世界由页面顶部的世界按钮组（WorldTabs）切换，本页筛选表单不含世界；Rust 版仍在表单内提供世界下拉框。
 
 import type { PublicPriceHistoryListResponse } from "@auction/contracts/dto/public/catalog/history";
 import { createCell } from "@auction/web-shared/reactive/cell";
@@ -13,10 +14,9 @@ import type { JSX } from "@solidjs/web";
 import { createEffect, For, Match, Show, Switch, useContext } from "solid-js";
 
 import type { PriceHistoryQuery } from "../../../api/model";
-import { fetchWorlds } from "../../../api/queries/current";
 import { fetchPriceHistory, type PriceHistoryFetchError } from "../../../api/queries/price-history";
 import { PublicRefreshGenerationContext } from "../../board/refresh";
-import { supportedWorlds } from "../../board/world";
+import { WorldTabs } from "../../board/world";
 import {
   LotDetailLookupContext,
   LotDetailLookupHost,
@@ -24,7 +24,12 @@ import {
 } from "../../catalog/detail/lookup";
 import { useContentLoading } from "../../loading";
 import { publicPageMatches, updatePublicPageSize } from "../../pagination";
-import { type PublicBoardQuery, updatePublicQueryState, usePublicQueryState } from "../../query";
+import {
+  type PublicBoardQuery,
+  readPublicQuery,
+  updatePublicQueryState,
+  usePublicQueryState,
+} from "../../query";
 import { PriceHistoryFilters } from "./filters/components";
 import type { HistoryFilterError, HistoryPriceUnit } from "./filters/model";
 import { historyDateValue, historyNameValue, historyPriceValue } from "./filters/validation";
@@ -33,9 +38,12 @@ import { PriceHistoryTable } from "./table";
 import {
   historyActiveFilterCount,
   historyDateParts,
+  historyFormFilters,
+  historyHasRequestCondition,
   historyPriceParts,
   historyPriceRangeReversed,
   historyQueryError,
+  historyResetChangesQuery,
   normalizeHistoryQuery,
   optionalFilterValue,
 } from "./values";
@@ -63,16 +71,10 @@ export function History(): JSX.Element {
   const pageSize = createValueMemo(() => queryStateSignal().pageSize);
   // 日期沿用既有恢复规则；非法名称/金额保留为字段错误并阻止查询，不改写地址栏。
   const appliedQuery = createValueMemo(() => historyQueryFromBoard(queryStateSignal()));
-  // 草稿只随实际筛选条件恢复；翻页与排序不应覆盖尚未提交的输入或字段错误。
-  const appliedFilters = createValueMemo((): PriceHistoryQuery => {
-    const filters = { ...appliedQuery() };
-    filters.sort = "";
-    filters.page = 1;
-    return filters;
-  });
+  // 草稿只随实际筛选条件恢复；世界、翻页与排序不应覆盖尚未提交的输入或字段错误。
+  const appliedFilters = createValueMemo(() => historyFormFilters(appliedQuery()));
   // 筛选草稿以已应用查询为初值，筛选条件变化（含前进/后退恢复）时经 effect 同步。
   const initial = historyQueryFromBoard(queryStateSignal.peek());
-  const worldFilter = createCell(initial.world ?? "all");
   const nameFilter = createCell(initial.name ?? "");
   const [fromMonth, fromYear] = historyDateParts(initial.from);
   const [toMonth, toYear] = historyDateParts(initial.to);
@@ -97,7 +99,6 @@ export function History(): JSX.Element {
   const filterError = createCell(initialError);
 
   createEffect(appliedFilters, (applied) => {
-    worldFilter.set(applied.world ?? "all");
     nameFilter.set(applied.name ?? "");
     const [nextFromMonth, nextFromYear] = historyDateParts(applied.from);
     fromMonthFilter.set(nextFromMonth);
@@ -120,18 +121,9 @@ export function History(): JSX.Element {
     filterError.set(error);
   });
 
-  const worlds = createTaskResource(
-    () => 0,
-    async (_dependencies, context) => fetchWorlds(context.signal),
-  );
-  const worldOptions = createValueMemo(() => {
-    const result = worlds();
-    return result?.ok === true ? supportedWorlds(result.value) : ["main", "isekai"];
-  });
-
   const activeFilterCount = createValueMemo(() => historyActiveFilterCount(appliedQuery()));
   const hasSearch = createValueMemo(
-    () => activeFilterCount() > 0 && historyQueryError(appliedQuery()) === null,
+    () => historyHasRequestCondition(appliedQuery()) && historyQueryError(appliedQuery()) === null,
   );
   const historyDependencies = createValueMemo(() => {
     return {
@@ -142,9 +134,9 @@ export function History(): JSX.Element {
     };
   });
   const history = createTaskResource(historyDependencies, async (dependencies, context) => {
-    // 空查询只展示搜索入口；输入草稿在提交并写回 URL 后才触发权威历史读取。
+    // 既无表单条件也无具体世界时只展示搜索入口；输入草稿在提交并写回 URL 后才触发权威读取。
     if (
-      historyActiveFilterCount(dependencies.query) === 0 ||
+      !historyHasRequestCondition(dependencies.query) ||
       historyQueryError(dependencies.query) !== null
     ) {
       return null;
@@ -264,30 +256,17 @@ export function History(): JSX.Element {
       return;
     }
     filterError.set(null);
-    const world = worldFilter() !== "all" ? worldFilter() : null;
-    const nextQuery: PriceHistoryQuery = {
-      world,
-      name: name.value,
-      from,
-      to,
-      minPrice: minimum,
-      maxPrice: maximum,
-      buyer: optionalFilterValue(buyerFilter()),
-      seller: optionalFilterValue(sellerFilter()),
-      sort: applied.sort,
-      page: 1,
-    };
     updatePublicQueryState(
       queryStateSignal,
       (query: PublicBoardQuery) => {
-        query.world = nextQuery.world;
-        query.historyName = nextQuery.name;
-        query.historyFrom = nextQuery.from;
-        query.historyTo = nextQuery.to;
-        query.historyMinPrice = nextQuery.minPrice;
-        query.historyMaxPrice = nextQuery.maxPrice;
-        query.historyBuyer = nextQuery.buyer;
-        query.historySeller = nextQuery.seller;
+        // 世界由世界按钮组写入地址栏；应用本页筛选时保留当前世界范围。
+        query.historyName = name.value;
+        query.historyFrom = from;
+        query.historyTo = to;
+        query.historyMinPrice = minimum;
+        query.historyMaxPrice = maximum;
+        query.historyBuyer = optionalFilterValue(buyerFilter());
+        query.historySeller = optionalFilterValue(sellerFilter());
         query.page = 1;
       },
       "push",
@@ -295,7 +274,6 @@ export function History(): JSX.Element {
   };
 
   const resetFilters = () => {
-    worldFilter.set("all");
     nameFilter.set("");
     fromMonthFilter.set("");
     fromYearFilter.set("");
@@ -309,10 +287,14 @@ export function History(): JSX.Element {
     sellerFilter.set("");
     settingsOpen.set(false);
     filterError.set(null);
+    // 已经处于清空后的状态时不新增一条相同的历史记录；世界与页长不参与判断。
+    if (!historyResetChangesQuery(readPublicQuery())) {
+      return;
+    }
     updatePublicQueryState(
       queryStateSignal,
       (query: PublicBoardQuery) => {
-        query.world = null;
+        // 清除本页筛选不清除世界按钮组所选的范围。
         query.historyName = null;
         query.historyFrom = null;
         query.historyTo = null;
@@ -331,9 +313,12 @@ export function History(): JSX.Element {
   return (
     <LotDetailLookupContext value={lookup}>
       <section class="public-history-page" aria-label={t("page-history-title")}>
+        {/* 世界切换：页面顶部的按钮组（WorldTabs，Solid 版专属）；Rust 版用页面内的下拉框。 */}
+        <div class="public-world-toolbar">
+          <WorldTabs />
+        </div>
         <div class="public-history-search-region">
           <PriceHistoryFilters
-            world={worldFilter()}
             name={nameFilter()}
             fromMonth={fromMonthFilter()}
             fromYear={fromYearFilter()}
@@ -345,11 +330,9 @@ export function History(): JSX.Element {
             maximumPriceUnit={maximumPriceUnitFilter()}
             buyer={buyerFilter()}
             seller={sellerFilter()}
-            worldOptions={worldOptions()}
             activeFilterCount={activeFilterCount()}
             settingsOpen={settingsOpen()}
             filterError={filterError()}
-            setWorld={worldFilter.set}
             setName={nameFilter.set}
             setFromMonth={fromMonthFilter.set}
             setFromYear={fromYearFilter.set}

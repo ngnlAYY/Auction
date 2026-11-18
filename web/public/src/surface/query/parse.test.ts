@@ -3,6 +3,7 @@
 import { expect, test } from "bun:test";
 
 const { parsePublicQuery } = await import("./parse");
+const { publicQueryString } = await import("./serialization");
 
 test("invalid_lot_in_the_address_bar_is_kept_instead_of_widening_the_bid_log：地址栏非法 lot 保留而不放宽竞价日志", () => {
   // 超长或含控制字符的 lot 原样保留，竞价日志页据此报字段错误且不发请求。
@@ -27,4 +28,22 @@ test("linked_page_sizes_above_the_public_maximum_restore_the_default：超过 Pu
   expect([overLimit.pageSize, overLimit.movementPageSize]).toEqual([20, 20]);
   const invalid = parsePublicQuery("/compensation", "?page_size=0&movement_page_size=-5");
   expect([invalid.pageSize, invalid.movementPageSize]).toEqual([20, 20]);
+});
+
+test("catalog_type_lists_are_normalized_and_encoded_as_one_comma_value：分类列表规范化并编码为单个逗号参数", () => {
+  const single = parsePublicQuery("/", "?type=clo");
+  expect(single.category).toBe("clo");
+  expect(publicQueryString(single)).toContain("type=clo");
+
+  const multiple = parsePublicQuery("/", "?type=sta,one");
+  expect(multiple.category).toBe("one,sta");
+  const encoded = publicQueryString(multiple);
+  expect(encoded).toContain("type=one%2Csta");
+  expect(encoded).not.toContain("type=one,sta");
+
+  for (const invalid of ["one,one", "one,", "one,,sta", "one,all", "unknown"]) {
+    const query = parsePublicQuery("/", `?type=${encodeURIComponent(invalid)}`);
+    expect(query.category).toBeNull();
+    expect(query.passthrough).toContainEqual(["type", invalid]);
+  }
 });

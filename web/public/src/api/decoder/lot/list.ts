@@ -19,7 +19,8 @@ import {
 import { validLiveLot } from "./live-lot";
 import { validPreviewLot } from "./preview-equipment";
 
-/** 校验 lot 目录页的投影绑定、编号页、分类计数与逐行筛选一致性。 */
+/** 校验 lot 目录页的投影绑定、编号页、分类计数与逐行筛选一致性。
+ * Solid 版请求可带逗号分隔的分类集合；Rust 版仍是单个分类。 */
 export function validLotList(
   value: unknown,
   auctionId: string,
@@ -56,15 +57,17 @@ export function validLotList(
   ) {
     return false;
   }
-  const categoryKey = category ?? "all";
   const counts = object(decoded.category_counts);
   if (counts === null) return false;
-  if (
-    !categoryCountKeys().includes(categoryKey) ||
-    int(counts[categoryKey]) !== int(decoded.total)
-  ) {
-    return false;
-  }
+  const requestedCategories = category === null ? null : category.split(",");
+  if (requestedCategories !== null && !validRequestedCategories(requestedCategories)) return false;
+  const selectedCategories = requestedCategories === null ? null : new Set(requestedCategories);
+  const expectedTotal =
+    selectedCategories === null
+      ? categoryCountBigInt(counts.all)
+      : selectedCategoryTotal(counts, selectedCategories);
+  const total = int(decoded.total);
+  if (expectedTotal === null || total === null || expectedTotal !== BigInt(total)) return false;
   const lots = decoded.lots;
   if (!Array.isArray(lots)) return false;
   return lots.every((lot) => {
@@ -77,9 +80,14 @@ export function validLotList(
     const lotObject = object(lot);
     const equipment = preview ? lotObject : lotObject === null ? null : object(lotObject.equipment);
     const level = equipment === null ? null : int(equipment[preview ? "equipment_level" : "level"]);
+    const rowCategory = preview
+      ? publicCategoryKey(string(lotObject?.equipment_category ?? null))
+      : publicCategoryKey(string(equipment?.category ?? null));
     return (
       valid &&
       catalogLevelFilterMatchesLevel(levels, level) &&
+      (selectedCategories === null ||
+        (rowCategory !== null && selectedCategories.has(rowCategory))) &&
       (equipmentGroup === null ||
         (equipment !== null && string(equipment.equipment_group) === equipmentGroup))
     );
@@ -186,10 +194,37 @@ function validCategoryCounts(value: unknown): boolean {
   const keys = categoryCountKeys();
   if (!jsonKeysOnly(decoded, keys, []) || !keys.every((key) => nonnegative(decoded[key])))
     return false;
-  let categoriesTotal = 0;
+  let categoriesTotal = 0n;
   for (const key of keys.slice(1)) {
-    const count = int(decoded[key]);
-    if (count !== null) categoriesTotal += count;
+    const count = categoryCountBigInt(decoded[key]);
+    if (count === null) return false;
+    categoriesTotal += count;
   }
-  return categoriesTotal <= (int(decoded.all) ?? -1);
+  const all = categoryCountBigInt(decoded.all);
+  return all !== null && categoriesTotal <= all;
+}
+
+function validRequestedCategories(keys: readonly string[]): boolean {
+  const known = categoryCountKeys().slice(1);
+  return new Set(keys).size === keys.length && keys.every((key) => known.includes(key));
+}
+
+function selectedCategoryTotal(counts: JsonObject, selected: ReadonlySet<string>): bigint | null {
+  let total = 0n;
+  for (const key of selected) {
+    const count = categoryCountBigInt(counts[key]);
+    if (count === null) return null;
+    total += count;
+  }
+  return total;
+}
+
+function categoryCountBigInt(value: unknown): bigint | null {
+  const count = int(value);
+  return count === null ? null : BigInt(count);
+}
+
+/** 只接受 wire 的规范大类名；公开分类键只出现在查询参数与计数键中。 */
+function publicCategoryKey(category: string | null): string | null {
+  return EQUIPMENT_CATEGORY_CODES.find(([, name]) => name === category)?.[0] ?? null;
 }
