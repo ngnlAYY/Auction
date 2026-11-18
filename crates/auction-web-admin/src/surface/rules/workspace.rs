@@ -1,9 +1,9 @@
 //! 站点文档（规则、关于）草稿编辑、校验和发布 workspace。
 
-use auction_web_shared::{Dialog, Time, t};
+use auction_web_shared::{Dialog, SUPPORTED_LOCALES, Time, t};
 use dioxus::prelude::*;
 
-use super::draft::{DEFAULT_RULES_LOCALE, notice_text, valid_locale};
+use super::draft::{DEFAULT_RULES_LOCALE, notice_text};
 use super::model::{RuleNotice, RulesBaseline, RulesTransition};
 use super::preview::AdminRulesPreview;
 use crate::api::{
@@ -17,8 +17,6 @@ pub(super) fn AdminRulesWorkspace(
     kind: AdminDocumentKind,
     document: AdminRules,
     target: String,
-    mut locales: Signal<Vec<String>>,
-    mut new_locale: Signal<String>,
     mut target_signal: Signal<String>,
     mut draft: Signal<Option<AdminRulesCandidate>>,
     mut checked_candidate: Signal<Option<AdminRulesCandidate>>,
@@ -45,26 +43,17 @@ pub(super) fn AdminRulesWorkspace(
             return;
         }
         match transition {
-            RulesTransition::Select { locale, add } => {
-                if locale == *target_signal.peek() {
-                    if add {
-                        new_locale.set(String::new());
-                    }
+            RulesTransition::Select { locale } => {
+                if locale == target_signal.peek().as_str() {
                     transition_confirmation.set(None);
                     return;
-                }
-                if add {
-                    if !locales.peek().iter().any(|existing| existing == &locale) {
-                        locales.write().push(locale.clone());
-                    }
-                    new_locale.set(String::new());
                 }
                 draft.set(None);
                 baseline.set(None);
                 checked_candidate.set(None);
                 notice.set(None);
                 transition_confirmation.set(None);
-                target_signal.set(locale);
+                target_signal.set(locale.to_owned());
             }
             RulesTransition::Reload => {
                 draft.set(None);
@@ -80,9 +69,9 @@ pub(super) fn AdminRulesWorkspace(
         if frozen() {
             return;
         }
-        // 添加当前语言不切换目标，也不能清空当前草稿。
+        // 重新选择当前语言不能清空当前草稿。
         let same_target = match &transition {
-            RulesTransition::Select { locale, .. } => locale == &*target_signal.peek(),
+            RulesTransition::Select { locale } => *locale == target_signal.peek().as_str(),
             RulesTransition::Reload => false,
         };
         if same_target {
@@ -104,61 +93,17 @@ pub(super) fn AdminRulesWorkspace(
                 class: "admin-rules-tabs",
                 role: "group",
                 aria_label: t!("admin-rules-languages"),
-                for locale in locales() {
+                for locale in SUPPORTED_LOCALES {
                     button {
-                        key: "{locale}",
+                        key: "{locale.code}",
                         r#type: "button",
-                        aria_pressed: (locale == target).to_string(),
+                        lang: locale.code,
+                        aria_pressed: (locale.code == target).to_string(),
                         disabled: frozen(),
-                        onclick: {
-                            let next_locale = locale;
-                            move |_| request_transition.call(RulesTransition::Select {
-                                locale: next_locale.clone(),
-                                add: false,
-                            })
-                        },
-                        "{locale}"
+                        onclick: move |_| request_transition.call(RulesTransition::Select { locale: locale.code }),
+                        "{locale.label}"
                     }
                 }
-            }
-
-            form {
-                class: "admin-rules-add",
-                onsubmit: move |event| {
-                    event.prevent_default();
-                    let next_locale = new_locale().trim().to_owned();
-                    if frozen() || !valid_locale(&next_locale) {
-                        return;
-                    }
-                    request_transition.call(RulesTransition::Select { locale: next_locale, add: true });
-                },
-                label {
-                    r#for: "rules-locale",
-                    {t!("admin-rules-add-locale")}
-                }
-                input {
-                    id: "rules-locale",
-                    name: "locale",
-                    autocomplete: "off",
-                    autocapitalize: "none",
-                    spellcheck: "false",
-                    maxlength: "35",
-                    aria_describedby: "rules-locale-help",
-                    placeholder: t!("admin-rules-locale-placeholder"),
-                    required: true,
-                    r#type: "text",
-                    value: new_locale(),
-                    disabled: frozen(),
-                    oninput: move |event| {
-                        if !frozen() { new_locale.set(event.value()); }
-                    },
-                }
-                button {
-                    r#type: "submit",
-                    disabled: frozen() || !valid_locale(&new_locale()),
-                    {t!("admin-rules-add")}
-                }
-                p { id: "rules-locale-help", class: "admin-panel__note admin-rules-add__help", {t!("admin-rules-locale-help")} }
             }
 
             label {
@@ -173,9 +118,7 @@ pub(super) fn AdminRulesWorkspace(
                 id: "rules-default-locale",
                 name: "default_locale",
                 value: DEFAULT_RULES_LOCALE,
-                for locale in locales() {
-                    option { key: "{locale}", value: "{locale}", "{locale}" }
-                }
+                option { value: DEFAULT_RULES_LOCALE, "{DEFAULT_RULES_LOCALE}" }
             }
 
             div { class: "admin-rules-facts",
@@ -397,8 +340,8 @@ pub(super) fn AdminRulesWorkspace(
                     close_label: t!("admin-runtime-keep-editing"),
                     on_close: move |_| transition_confirmation.set(None),
                     match &transition {
-                        RulesTransition::Select { locale, .. } => rsx! {
-                            p { {t!("admin-rules-discard-switch-detail", locale: locale.clone())} }
+                        RulesTransition::Select { locale } => rsx! {
+                            p { {t!("admin-rules-discard-switch-detail", locale: *locale)} }
                         },
                         RulesTransition::Reload => rsx! {
                             p { {t!("admin-rules-discard-reload-detail")} }

@@ -8,7 +8,8 @@ use super::super::poll::{AutoPollControls, use_auto_poll};
 use super::super::query::use_realtime_query_state;
 use super::event::RealtimeEventTable;
 use super::failure::RealtimeFailureTable;
-use super::filters::{RealtimeEventFilters, RealtimeFailureFilters};
+use super::filter_field::fetch_filtered;
+use super::filters::{RealtimeEventFilters, RealtimeFailureFilters, RealtimeFailureStateFilter};
 use super::lag::RealtimeLagTable;
 use super::overview::{
     activity_count_state, consumer_count_state, failure_count_state, metric_card, metric_value,
@@ -40,7 +41,8 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
     let replay_busy = move || pending.any_busy();
     // 已应用的事件/failure 筛选与三个分区的分页跟地址栏双向同步；筛选输入框草稿（留在
     // 筛选组件本地）、replay 对话框与负载输入是瞬态，不入 URL。
-    let query = use_realtime_query_state();
+    let realtime_query = use_realtime_query_state();
+    let query = realtime_query.location;
     let query_state = query.state;
     let event_pagination =
         use_admin_pagination("realtime-events", &["event_page_size"], Some(200), 1_000_000);
@@ -49,32 +51,26 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
     let lag_pagination =
         use_admin_pagination("realtime-lag", &["lag_page_size"], Some(200), 1_000_000);
     // 三个分区只订阅自己的请求身份；另一区翻页或切换轮询间隔不重发无关 GET。
-    let event_query = use_memo(move || {
-        let current = query_state.read();
-        (current.event_page, current.event_stream.clone(), current.event_kind.clone())
-    });
+    let event_query = use_memo(move || query_state.read().event_page_request());
     let lag_query = use_memo(move || query_state.read().lag_page);
-    let failure_query = use_memo(move || {
-        let current = query_state.read();
-        (
-            current.failure_page,
-            current.failure_stream.clone(),
-            current.failure_consumer.clone(),
-            current.failure_code.clone(),
-            current.failure_state.clone(),
-        )
-    });
+    let failure_query = use_memo(move || query_state.read().failure_page_request());
+    let event_allowed = use_memo(move || event_query.read().is_some());
+    let failure_allowed = use_memo(move || failure_query.read().is_some());
     let (events, events_status) = use_admin_page_with_state(
         event_pagination.clone(),
         move || {
             let _ = event_refresh();
             event_query()
         },
-        |(page, stream, kind), size| fetch_realtime_event_page(page, stream, kind, size),
+        |request, size| {
+            fetch_filtered(request, move |(page, stream, kind)| {
+                fetch_realtime_event_page(page, stream, kind, size)
+            })
+        },
     );
     let event_overview = use_resource(move || {
         let _ = event_refresh();
-        fetch_realtime_event_total()
+        fetch_filtered(event_allowed().then_some(()), |()| fetch_realtime_event_total())
     });
     let (lag, lag_status) = use_admin_page_with_state(
         lag_pagination.clone(),
@@ -90,25 +86,30 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
             let _ = failure_refresh();
             failure_query()
         },
-        |(page, stream, consumer, code, state), size| {
-            fetch_realtime_failure_page(page, stream, consumer, code, state, size)
+        |request, size| {
+            fetch_filtered(request, move |(page, stream, consumer, code, state)| {
+                fetch_realtime_failure_page(page, stream, consumer, code, state, size)
+            })
         },
     );
     let unresolved_failures = use_resource(move || {
         let _ = failure_refresh();
-        fetch_realtime_failure_page(
-            1,
-            String::new(),
-            String::new(),
-            String::new(),
-            "dead_letter".to_owned(),
-            10,
-        )
+        fetch_filtered(failure_allowed().then_some(()), |()| {
+            fetch_realtime_failure_page(
+                1,
+                String::new(),
+                String::new(),
+                String::new(),
+                "dead_letter".to_owned(),
+                10,
+            )
+        })
     });
     // 各分区只在自己的读取（含配套计数）完成后轮询；慢请求不能被下一节拍取消。
     let poll_seconds = use_memo(move || query_state.read().poll_seconds);
     use_auto_poll(poll_seconds, move || {
-        if events_status.cloned() == UseResourceState::Ready
+        if event_allowed()
+            && events_status.cloned() == UseResourceState::Ready
             && event_overview.state().cloned() == UseResourceState::Ready
         {
             event_refresh.set(event_refresh().saturating_add(1));
@@ -116,7 +117,8 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
         if lag_status.cloned() == UseResourceState::Ready {
             lag_refresh.set(lag_refresh().saturating_add(1));
         }
-        if failures_status.cloned() == UseResourceState::Ready
+        if failure_allowed()
+            && failures_status.cloned() == UseResourceState::Ready
             && unresolved_failures.state().cloned() == UseResourceState::Ready
         {
             failure_refresh.set(failure_refresh().saturating_add(1));
@@ -124,22 +126,13 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
     });
 
     let mut load_events_query = query.clone();
-    let load_events = move |(stream, kind): (String, String)| {
+    let load_events = move |filters| {
         // 应用草稿筛选并回到第一页；事件分区资源响应查询状态变化自动重新加载。
-        let mut next = query_state();
-        next.event_stream = stream;
-        next.event_kind = kind;
-        next.event_page = 1;
-        load_events_query.push(next);
+        load_events_query.push(query_state().with_event_filters(filters));
     };
     let mut load_failures_query = query.clone();
-    let load_failures = move |(stream, consumer, code): (String, String, String)| {
-        let mut next = query_state();
-        next.failure_stream = stream;
-        next.failure_consumer = consumer;
-        next.failure_code = code;
-        next.failure_page = 1;
-        load_failures_query.push(next);
+    let load_failures = move |filters| {
+        load_failures_query.push(query_state().with_failure_filters(filters));
         selected_failure.set(None);
     };
     // 顶部手动刷新、轮询开关与 failure 状态选择各持一份 hook 克隆。
@@ -153,15 +146,23 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
     let failure_state = failures.read_unchecked();
     let unresolved_failure_state = unresolved_failures.read_unchecked();
     let lag_page = (*lag_state).as_ref().and_then(|result| result.as_ref().ok());
-    let unresolved_failure_page =
-        (*unresolved_failure_state).as_ref().and_then(|result| result.as_ref().ok());
-    let event_total =
-        (*event_overview_state).as_ref().and_then(|result| result.as_ref().ok()).copied();
+    let unresolved_failure_page = (*unresolved_failure_state)
+        .as_ref()
+        .filter(|_| failure_allowed())
+        .and_then(|result| result.as_ref().ok());
+    let event_total = (*event_overview_state)
+        .as_ref()
+        .filter(|_| event_allowed())
+        .and_then(|result| result.as_ref().ok())
+        .copied();
     let consumer_total = lag_page.map(|page| page.pagination.total);
     let failure_total = unresolved_failure_page.map(|page| page.pagination.total);
     let selected_id = selected_failure();
-    let selected =
-        (*failure_state).as_ref().and_then(|result| result.as_ref().ok()).and_then(|page| {
+    let selected = (*failure_state)
+        .as_ref()
+        .filter(|_| failure_allowed())
+        .and_then(|result| result.as_ref().ok())
+        .and_then(|page| {
             selected_id
                 .as_ref()
                 .and_then(|id| page.failures.iter().find(|failure| &failure.id == id).cloned())
@@ -363,12 +364,14 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
                     }
                 }
                 RealtimeEventFilters {
-                    initial_stream: query_state.peek().event_stream.clone(),
-                    initial_kind: query_state.peek().event_kind.clone(),
+                    applied: realtime_query.event_filters,
+                    invalid_applied: !event_allowed(),
                     on_load: load_events,
                 }
-                {event_content}
-                {event_pager}
+                if event_allowed() {
+                    {event_content}
+                    {event_pager}
+                }
             }
 
             section { class: "admin-realtime-section", aria_labelledby: "realtime-lag-title",
@@ -387,30 +390,20 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
                         h2 { id: "realtime-failures-title", {t!("realtime-failure-title")} }
                         p { {t!("realtime-failure-note")} }
                     }
-                    div { class: "admin-realtime-status",
-                        label { r#for: "outbox-status",
-                            {t!("realtime-filter-state")}
-                            select {
-                                id: "outbox-status",
-                                value: query_state().failure_state,
-                                onchange: move |event| {
-                                    // 状态筛选选择后立即生效并写回地址栏。
-                                    let mut next = query_state();
-                                    next.failure_state = event.value();
-                                    next.failure_page = 1;
-                                    state_query.push(next);
-                                    selected_failure.set(None);
-                                },
-                                option { value: "", {t!("realtime-filter-all")} }
-                                option { value: "pending", disabled: true, {t!("realtime-state-pending")} }
-                                option { value: "retry", disabled: true, {t!("realtime-state-retry")} }
-                                option { value: "dead_letter", {t!("realtime-state-dead-letter")} }
-                                option { value: "completed", {t!("realtime-state-completed")} }
-                            }
-                        }
+                    RealtimeFailureStateFilter {
+                        value: query_state().failure_state,
+                        on_change: move |value: String| {
+                            let mut next = query_state();
+                            next.failure_state = value.into();
+                            next.failure_page = 1;
+                            state_query.push(next);
+                            selected_failure.set(None);
+                        },
                     }
                 }
-                {failure_content}
+                if failure_allowed() {
+                    {failure_content}
+                }
                 if let Some(feedback) = notice() {
                     p {
                         class: if feedback.is_success() {
@@ -422,11 +415,12 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
                         {feedback.message(t!("realtime-replay-success"))}
                     }
                 }
-                {failure_pager}
+                if failure_allowed() {
+                    {failure_pager}
+                }
                 RealtimeFailureFilters {
-                    initial_stream: query_state.peek().failure_stream.clone(),
-                    initial_consumer: query_state.peek().failure_consumer.clone(),
-                    initial_code: query_state.peek().failure_code.clone(),
+                    applied: realtime_query.failure_filters,
+                    invalid_applied: !failure_allowed(),
                     on_load: load_failures,
                 }
             }
@@ -547,6 +541,322 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
                     }
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use dioxus::dioxus_core::{ElementId, Mutation};
+
+    use super::outbox_page;
+    use crate::surface::realtime::filters::{EVENT_FILTER_FORM_ID, FAILURE_FILTER_FORM_ID};
+    use crate::surface::realtime::{
+        TestPage, get_parameter, selected_options, submit_forms, text_attributes,
+    };
+
+    const EVENTS: &str = "/api/v1/admin/realtime/events?";
+    const FAILURES: &str = "/api/v1/admin/realtime/failures?";
+
+    #[derive(Clone, Copy)]
+    struct TextFilter {
+        address_key: &'static str,
+        input_id: &'static str,
+        form_id: &'static str,
+        endpoint: &'static str,
+        parameter: &'static str,
+        overview_size: &'static str,
+    }
+
+    const TEXT_FILTERS: [TextFilter; 2] = [
+        TextFilter {
+            address_key: "event_kind",
+            input_id: "realtime-event-kind",
+            form_id: EVENT_FILTER_FORM_ID,
+            endpoint: EVENTS,
+            parameter: "kind",
+            overview_size: "1",
+        },
+        TextFilter {
+            address_key: "failure_consumer",
+            input_id: "realtime-failure-consumer",
+            form_id: FAILURE_FILTER_FORM_ID,
+            endpoint: FAILURES,
+            parameter: "consumer_key",
+            overview_size: "10",
+        },
+    ];
+
+    const FILTER_KEYS: [&str; 5] =
+        ["event_stream", "event_kind", "failure_stream", "failure_consumer", "failure_code"];
+
+    fn location(label: &str, event_page: i64, failure_page: i64) -> Vec<(String, String)> {
+        let mut pairs =
+            FILTER_KEYS.map(|key| (key.to_owned(), format!(" {label}-{key} "))).to_vec();
+        pairs.push(("event_page".to_owned(), event_page.to_string()));
+        pairs.push(("failure_page".to_owned(), failure_page.to_string()));
+        pairs
+    }
+
+    fn mount_form(field: TextFilter) -> (TestPage, ElementId, ElementId) {
+        let (page, edits) =
+            TestPage::mount(outbox_page, "event_kind=initial&failure_consumer=initial");
+        let by_id = |name| {
+            text_attributes(&edits, "id")
+                .find_map(|(id, actual)| (actual == name).then_some(id))
+                .unwrap()
+        };
+        let form = by_id(field.form_id);
+        assert!(submit_forms(&edits).any(|target| target == form));
+        let input = by_id(field.input_id);
+        let initial = page.take_gets();
+        assert!(
+            initial.iter().any(|url| {
+                url.starts_with(field.endpoint)
+                    && get_parameter(url, field.parameter).as_deref() == Some("initial")
+            }),
+            "{initial:?}"
+        );
+        (page, form, input)
+    }
+
+    fn assert_list_get(gets: &[String], field: TextFilter, value: &str) {
+        let lists: Vec<_> = gets
+            .iter()
+            .filter(|url| {
+                url.starts_with(field.endpoint) && get_parameter(url, field.parameter).is_some()
+            })
+            .collect();
+        assert_eq!(lists.len(), 1, "{gets:?}");
+        assert_eq!(get_parameter(lists[0], field.parameter).as_deref(), Some(value), "{gets:?}");
+    }
+
+    fn assert_error(edits: &[Mutation], input: ElementId) {
+        assert!(text_attributes(edits, "aria-invalid").any(|entry| entry == (input, "true")));
+        assert!(
+            text_attributes(edits, "aria-describedby")
+                .any(|(id, description)| id == input && description.ends_with("-error"))
+        );
+        assert!(edits.iter().any(|edit| matches!(edit,
+            Mutation::CreateTextNode { value, .. } if value == "请求参数无效。请检查输入内容后重试。"
+        )));
+    }
+
+    #[test]
+    fn failure_status_bookmarks_select_the_option_used_by_the_first_list_get() {
+        for (state, resolved) in [("dead_letter", "false"), ("completed", "true")] {
+            // 消费者筛选用于区分列表与同一端点的全局失败概览。
+            let query = format!("failure_state={state}&failure_consumer=consumer");
+            let (page, edits) = TestPage::mount(outbox_page, &query);
+            let gets = page.take_gets();
+            assert_eq!(gets.iter().filter(|url| url.starts_with(FAILURES)).count(), 2, "{gets:?}");
+            let list = gets
+                .iter()
+                .find(|url| {
+                    url.starts_with(FAILURES)
+                        && get_parameter(url, "consumer_key").as_deref() == Some("consumer")
+                })
+                .unwrap();
+            assert_eq!(get_parameter(list, "resolved").as_deref(), Some(resolved));
+            assert_eq!(selected_options(&edits), [state]);
+        }
+    }
+
+    #[test]
+    fn invalid_bookmarks_skip_both_lists_and_their_overviews_on_mount() {
+        let (page, _) =
+            TestPage::mount(outbox_page, "event_kind=a%0Ab&failure_consumer=&failure_consumer=x");
+        let gets = page.take_gets();
+        assert_eq!(gets.len(), 1, "只应读取无关的 lag 分区：{gets:?}");
+        assert!(gets[0].starts_with("/api/v1/admin/realtime/lag?"), "{gets:?}");
+    }
+
+    #[test]
+    fn realtime_forms_restore_history_and_preserve_drafts_on_pagination() {
+        let (mut page, setup) = TestPage::mount(outbox_page, "");
+        let forms: Vec<_> = submit_forms(&setup).collect();
+        assert_eq!(forms.len(), 2);
+        let initial = page.restore(location("first", 1, 1));
+        let inputs = FILTER_KEYS.map(|key| {
+            let expected = format!("first-{key}");
+            text_attributes(&initial, "value")
+                .find_map(|(input, value)| (value == expected).then_some(input))
+                .unwrap_or_else(|| panic!("缺少 {expected} 对应的筛选控件更新"))
+        });
+        let [event_stream, _, _, failure_consumer, _] = inputs;
+        for (input, value) in
+            [(event_stream, " event draft "), (failure_consumer, " consumer draft ")]
+        {
+            let typed = page.dispatch("input", input, value);
+            assert!(text_attributes(&typed, "value").any(|entry| entry == (input, value)));
+        }
+        for (event_page, failure_page) in [(2, 1), (2, 3), (2, 3)] {
+            let paged = page.restore(location("first", event_page, failure_page));
+            assert!(!text_attributes(&paged, "value").any(|(input, _)| inputs.contains(&input)));
+        }
+        page.take_gets();
+        for form in forms {
+            page.dispatch("submit", form, "");
+        }
+        let gets = page.take_gets();
+        let event = gets.iter().find(|url| url.starts_with(EVENTS)).unwrap();
+        assert_eq!(get_parameter(event, "stream_key").as_deref(), Some("event draft"));
+        assert_list_get(&gets, TEXT_FILTERS[0], "first-event_kind");
+        assert_list_get(&gets, TEXT_FILTERS[1], "consumer draft");
+
+        for label in ["second", "first", "second"] {
+            let restored = page.restore(location(label, 1, 1));
+            for (input, key) in inputs.into_iter().zip(FILTER_KEYS) {
+                let expected = format!("{label}-{key}");
+                assert!(
+                    text_attributes(&restored, "value")
+                        .any(|entry| entry == (input, expected.as_str()))
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn realtime_forms_round_trip_128_bytes_and_reject_129_on_submit() {
+        let valid = format!("{}ab", "汉".repeat(42));
+        let too_long = "汉".repeat(43);
+        assert_eq!((valid.len(), too_long.len()), (128, 129));
+        for field in TEXT_FILTERS {
+            let (mut page, form, input) = mount_form(field);
+            let initial = page.address();
+            page.dispatch("input", input, &format!(" {valid} "));
+            page.dispatch("submit", form, "");
+            let applied = page.address();
+            assert!(applied.contains(&(field.address_key.to_owned(), valid.clone())));
+            assert_list_get(&page.take_gets(), field, &valid);
+            page.restore(initial);
+            page.take_gets();
+            let restored = page.restore(applied.clone());
+            assert!(
+                text_attributes(&restored, "value").any(|entry| entry == (input, valid.as_str()))
+            );
+            assert_list_get(&page.take_gets(), field, &valid);
+
+            page.dispatch("input", input, &too_long);
+            let rejected = page.dispatch("submit", form, "");
+            assert_eq!(page.address(), applied);
+            assert_error(&rejected, input);
+            page.assert_no_gets();
+        }
+    }
+
+    fn assert_invalid_restore(field: TextFilter, originals: &[&str]) {
+        let (mut page, form, input) = mount_form(field);
+        let mut address = page.address();
+        address.retain(|(key, _)| key != field.address_key);
+        address.extend(
+            originals.iter().map(|value| (field.address_key.to_owned(), (*value).to_owned())),
+        );
+        let restored = page.restore(address);
+        page.assert_no_gets();
+        assert_error(&restored, input);
+        for original in originals {
+            let escaped = format!("{original:?}");
+            let count = restored
+                .iter()
+                .filter(|edit| {
+                    matches!(edit,
+                        Mutation::CreateTextNode { value, .. } if *value == escaped
+                    )
+                })
+                .count();
+            assert_eq!(
+                count,
+                originals.iter().filter(|value| value == &original).count(),
+                "{escaped}"
+            );
+        }
+        if originals.iter().any(|value| value.contains('\n')) {
+            assert!(restored.iter().any(|edit| matches!(edit,
+                Mutation::CreateTextNode { value, .. } if value.contains("U+000A")
+            )));
+        }
+
+        let invalid_address = page.address();
+        page.dispatch("submit", form, "");
+        assert_eq!(page.address(), invalid_address);
+        page.assert_no_gets();
+        page.dispatch("input", input, "fixed");
+        assert_eq!(page.address(), invalid_address);
+        page.assert_no_gets();
+        page.dispatch("submit", form, "");
+        assert_eq!(
+            page.address().iter().filter(|(key, _)| key == field.address_key).collect::<Vec<_>>(),
+            [&(field.address_key.to_owned(), "fixed".to_owned())]
+        );
+        let gets = page.take_gets();
+        assert_eq!(gets.len(), 2, "{gets:?}");
+        assert_list_get(&gets, field, "fixed");
+        assert!(
+            gets.iter().any(|url| {
+                url.starts_with(field.endpoint)
+                    && get_parameter(url, field.parameter).is_none()
+                    && get_parameter(url, "page_size").as_deref() == Some(field.overview_size)
+            }),
+            "{gets:?}"
+        );
+    }
+
+    #[test]
+    fn repeated_filters_preserve_empty_and_identical_values_until_corrected() {
+        let too_long = "汉".repeat(43);
+        for field in TEXT_FILTERS {
+            assert_invalid_restore(field, &["", &too_long]);
+            assert_invalid_restore(field, &["same", "same"]);
+        }
+    }
+
+    #[test]
+    fn restored_control_characters_are_escaped_and_wait_for_a_correction() {
+        for field in TEXT_FILTERS {
+            assert_invalid_restore(field, &["a\nb"]);
+        }
+    }
+
+    #[test]
+    fn restored_overlong_values_use_the_same_error_and_wait_for_a_correction() {
+        let too_long = format!(" {} ", "汉".repeat(43));
+        for field in TEXT_FILTERS {
+            assert_invalid_restore(field, &[&too_long]);
+        }
+    }
+
+    #[test]
+    fn overlong_ascii_value_renders_in_parts_without_losing_text() {
+        let raw = "X".repeat(129);
+        let (page, edits) = TestPage::mount(outbox_page, &format!("event_kind={raw}"));
+        let parts = edits
+            .iter()
+            .filter_map(|edit| match edit {
+                Mutation::CreateTextNode { value, .. }
+                    if value.contains('X')
+                        && value.chars().all(|character| matches!(character, 'X' | '"')) =>
+                {
+                    Some(value.as_str())
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(parts.len() > 1);
+        assert_eq!(parts.concat(), format!("{raw:?}"));
+        assert!(page.take_gets().iter().all(|url| !url.starts_with(EVENTS)));
+    }
+
+    #[test]
+    fn a_single_valid_filter_restores_and_queries_without_an_edit() {
+        for field in TEXT_FILTERS {
+            let (mut page, _, input) = mount_form(field);
+            let mut address = page.address();
+            address.iter_mut().find(|(key, _)| key == field.address_key).unwrap().1 =
+                " valid ".to_owned();
+            let restored = page.restore(address);
+            assert!(text_attributes(&restored, "value").any(|entry| entry == (input, "valid")));
+            assert_list_get(&page.take_gets(), field, "valid");
         }
     }
 }

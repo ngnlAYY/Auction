@@ -471,7 +471,15 @@ fn decode_section<T: DeserializeOwned>(
 mod tests {
     use serde_json::{Value, json};
 
-    use super::decode_dashboard_response;
+    use super::{AdminDashboardSnapshot, decode_dashboard_response};
+
+    impl AdminDashboardSnapshot {
+        pub(crate) fn test_fixture(update: impl FnOnce(&mut Value)) -> Self {
+            let mut payload = complete_payload();
+            update(&mut payload);
+            decode_dashboard_response(payload).expect("Dashboard 渲染夹具必须通过现有解码校验")
+        }
+    }
 
     fn unknown_section() -> Value {
         json!({"status": "unknown", "error_code": "source_unavailable"})

@@ -2,6 +2,11 @@
 //! 浏览器只接收事件元数据与 lag/failure 的安全投影；replay 的公开 payload 由管理操作员
 //! 显式输入，并由服务端事件注册表、命令账本和数据库事务做最终校验。
 
+#[cfg(test)]
+use std::cell::RefCell;
+#[cfg(test)]
+use std::rc::Rc;
+
 pub(crate) use auction_contracts::{
     AdminRealtimeEventListResponse as RealtimeEventPage,
     AdminRealtimeFailureListResponse as RealtimeFailurePage,
@@ -12,17 +17,32 @@ use auction_contracts::{
     AdminRealtimeEventResponse, AdminRealtimeFailurePaginationResponse, AdminRealtimeLagResponse,
     AdminRealtimePaginationResponse, AdminRealtimeReplayRequest, ApiResponse,
 };
+#[cfg(test)]
+use dioxus::prelude::try_consume_context;
 use gloo_net::http::Request;
+#[cfg(test)]
+use gloo_net::http::Response;
 use serde::Deserialize;
 use serde_json::Value;
 use url::form_urlencoded;
 use uuid::Uuid;
 
+#[cfg(not(test))]
+use super::send_get;
 use super::{
     MAX_JSON_SAFE_INTEGER, OptionalField, invalid_request_error, invalid_response_error,
-    response_error, send_get, valid_admin_time, valid_count, valid_safe_text, valid_trimmed_text,
-    valid_uuid,
+    response_error, valid_admin_time, valid_count, valid_safe_text, valid_trimmed_text, valid_uuid,
 };
+
+/// 宿主页测试记录实际序列化后的 GET，把响应留在等待态，只观测发送时机。
+#[cfg(test)]
+pub(super) async fn send_get(url: &str) -> Result<Response, String> {
+    if let Some(gets) = try_consume_context::<Rc<RefCell<Vec<String>>>>() {
+        gets.borrow_mut().push(url.to_owned());
+        return std::future::pending().await;
+    }
+    super::send_get(url).await
+}
 
 // 保留镜像的理由：旧 realtime decoder 允许对象扩展字段，contracts 的
 // `AdminRealtimeEventListResponse`/`AdminRealtimeLagListResponse`/

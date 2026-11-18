@@ -15,7 +15,6 @@ use crate::surface::pending::PendingCommandPanel;
 pub fn page(kind: AdminDocumentKind) -> Element {
     let RulesDraft {
         target,
-        locales,
         mut draft,
         mut baseline,
         mut checked_candidate,
@@ -25,7 +24,6 @@ pub fn page(kind: AdminDocumentKind) -> Element {
         pending,
         dirty,
     } = use_context::<DocumentDrafts>().get(kind);
-    let new_locale = use_signal(String::new);
     let rules = use_resource(move || {
         let generation = reload_generation();
         let locale = target();
@@ -111,8 +109,6 @@ pub fn page(kind: AdminDocumentKind) -> Element {
                     kind,
                     document,
                     target: target(),
-                    locales,
-                    new_locale,
                     target_signal: target,
                     draft,
                     checked_candidate,
@@ -136,8 +132,6 @@ pub fn page(kind: AdminDocumentKind) -> Element {
                 kind,
                 document: document.clone(),
                 target: target(),
-                locales,
-                new_locale,
                 target_signal: target,
                 draft,
                 checked_candidate,

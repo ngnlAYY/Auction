@@ -58,7 +58,7 @@ mod tests {
 
     #[test]
     fn exactly_one_entry_round_trips_through_the_address_bar() {
-        for applied in [query("alice", ""), query("", REFERENCE)] {
+        for applied in [query("alice", ""), query("Player-One", ""), query("", REFERENCE)] {
             assert!(applied.valid());
             assert_eq!(parse_support_query(&support_query_pairs(&applied)), applied);
         }

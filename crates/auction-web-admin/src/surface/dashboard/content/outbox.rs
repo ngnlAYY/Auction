@@ -1,10 +1,11 @@
 //! Realtime outbox 健康面板：积压、死信与最老失败年龄。
 
+use auction_time::Timestamp;
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use super::derived::DashboardDerived;
-use super::widgets::{badge, card, text};
+use super::widgets::{badge, card, count_text, text};
 use crate::api::AdminDashboardSnapshot;
 
 pub(super) fn outbox_panel(
@@ -27,35 +28,36 @@ pub(super) fn outbox_panel(
         )}
         {card(
             t!("dashboard-legacy-outbox-pending"),
-            text(if realtime.is_none() {
-                t!("dashboard-legacy-no-data")
-            } else if !has_realtime_consumers {
+            text(if realtime.is_some() && !has_realtime_consumers {
                 t!("dashboard-legacy-outbox-status-no-consumers")
             } else {
-                pending.to_string()
+                count_text(pending)
             }),
         )}
         {card(
             t!("dashboard-legacy-outbox-dead-letter"),
-            text(if realtime.is_none() {
-                t!("dashboard-legacy-no-data")
-            } else {
-                failures.to_string()
-            }),
+            text(count_text(failures)),
         )}
     }
-    if realtime.is_none() {
+    if let Some(realtime) = realtime {
+        if !has_realtime_consumers {
+            p { class: "admin-dashboard-status", {t!("dashboard-legacy-outbox-status-no-consumers")} }
+        }
+        p { class: "admin-dashboard-status",
+            if realtime.failure.count == 0 {
+                {t!("dashboard-legacy-outbox-no-unresolved-failures")}
+            } else if let Some(seconds) = oldest_failure_age(
+                &realtime.observed_at,
+                realtime.failure.oldest_at.as_deref(),
+            ) {
+                {t!("dashboard-legacy-outbox-oldest-age", seconds: seconds)}
+            } else {
+                {t!("dashboard-legacy-no-data")}
+            }
+        }
+    } else {
         p { class: "admin-dashboard-status",
             {t!("dashboard-legacy-outbox-metrics-unavailable")}
-        }
-    } else if !has_realtime_consumers {
-        p { class: "admin-dashboard-status", {t!("dashboard-legacy-outbox-status-no-consumers")} }
-    } else if let Some(realtime) = realtime {
-        p { class: "admin-dashboard-status",
-            {t!(
-                "dashboard-legacy-outbox-oldest-age",
-                seconds: oldest_age(realtime.failure.oldest_at.as_deref())
-            )}
         }
     }
     details { class: "admin-dashboard-details",
@@ -68,21 +70,8 @@ pub(super) fn outbox_panel(
     }
 }
 
-fn oldest_age(value: Option<&str>) -> i64 {
-    let Some(value) = value else {
-        return 0;
-    };
-    #[cfg(target_arch = "wasm32")]
-    {
-        let parsed = js_sys::Date::parse(value);
-        if !parsed.is_finite() {
-            return 0;
-        }
-        ((js_sys::Date::now() - parsed) / 1000.0).floor().max(0.0) as i64
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let _ = value;
-        0
-    }
+fn oldest_failure_age(observed_at: &str, oldest_at: Option<&str>) -> Option<i64> {
+    let observed_at = Timestamp::parse_from_rfc3339(observed_at).ok()?;
+    let oldest_at = Timestamp::parse_from_rfc3339(oldest_at?).ok()?;
+    (observed_at >= oldest_at).then(|| observed_at.signed_duration_since(oldest_at).num_seconds())
 }

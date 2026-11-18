@@ -4,7 +4,7 @@ use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use super::derived::DashboardDerived;
-use super::widgets::{badge, card, text};
+use super::widgets::{badge, card, count_text, text};
 use crate::api::AdminDashboardSnapshot;
 
 pub(super) fn audit_panel(
@@ -25,13 +25,14 @@ pub(super) fn audit_panel(
         )}
         {card(
             t!("dashboard-legacy-audit-failures-total"),
-            text(audit_failures.to_string()),
+            text(count_text((!audit_metrics_unavailable || audit_failures > 0).then_some(audit_failures))),
         )}
     }
     p { class: "admin-dashboard-status",
         {t!(
             "dashboard-legacy-audit-metrics-line",
-            api: availability(snapshot, "public"),
+            public: availability(snapshot, "public"),
+            admin: availability(snapshot, "admin"),
             worker: availability(snapshot, "worker")
         )}
     }

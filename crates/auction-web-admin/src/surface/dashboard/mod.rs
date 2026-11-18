@@ -38,6 +38,7 @@ pub(super) fn page() -> Element {
     });
     let mut poll_query = query;
     let readiness = use_context::<AdminReadinessResource>();
+    let manual_refresh = use_manual_refresh(refresh, readiness);
     // 默认管理首页的聚合快照无论成功或失败，只要已有结果就一次性揭示真实页面。
     use_app_boot_ready(readiness.read().is_some() && dashboard.read().is_some());
     let state = dashboard.read_unchecked();
@@ -61,7 +62,7 @@ pub(super) fn page() -> Element {
                     button {
                         class: "admin-btn-secondary",
                         r#type: "button",
-                        onclick: move |_| refresh.set(refresh().saturating_add(1)),
+                        onclick: move |_| manual_refresh.call(()),
                         {t!("dashboard-refresh")}
                     }
                 }
@@ -80,7 +81,7 @@ pub(super) fn page() -> Element {
                     title: admin_api_error_message(error),
                     detail: "",
                     retry_label: t!("admin-retry"),
-                    on_retry: move |_| refresh.set(refresh().saturating_add(1)),
+                    on_retry: move |_| manual_refresh.call(()),
                 }
             }
             if let Some(Ok(snapshot)) = state.as_ref() {
@@ -97,5 +98,72 @@ pub(super) fn page() -> Element {
                 }
             }
         }
+    }
+}
+
+fn use_manual_refresh(
+    mut refresh: Signal<u64>,
+    mut readiness: AdminReadinessResource,
+) -> Callback<()> {
+    use_callback(move |()| {
+        let next = refresh.peek().saturating_add(1);
+        refresh.set(next);
+        // 用外壳注入的同一份就绪资源复核；正在进行的检查继续完成，不重启请求。
+        if readiness.state().cloned() != UseResourceState::Pending {
+            readiness.restart();
+        }
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    use dioxus::prelude::*;
+
+    use super::use_manual_refresh;
+    use crate::surface::AdminReadinessResource;
+
+    type RefreshHandles = (Signal<u64>, AdminReadinessResource, Callback<()>);
+
+    #[derive(Default)]
+    struct RefreshControl {
+        ready: Cell<bool>,
+        handles: Cell<Option<RefreshHandles>>,
+    }
+
+    fn refresh_harness() -> Element {
+        let control = consume_context::<Rc<RefreshControl>>();
+        let probe = control.clone();
+        let readiness = use_resource(move || {
+            let ready = probe.ready.get();
+            async move { Ok(ready) }
+        });
+        let refresh = use_signal(|| 0_u64);
+        let manual_refresh = use_manual_refresh(refresh, readiness);
+        control.handles.set(Some((refresh, readiness, manual_refresh)));
+        rsx! { "{refresh()}" }
+    }
+
+    #[test]
+    fn manual_refresh_rechecks_the_shared_readiness_while_polling_only_reloads_the_snapshot() {
+        let control = Rc::new(RefreshControl::default());
+        control.ready.set(true);
+        let mut dom = VirtualDom::new(refresh_harness).with_root_context(control.clone());
+        dom.rebuild_in_place();
+        dom.render_immediate_to_vec();
+        let (mut refresh, readiness, manual) = control.handles.get().unwrap();
+        assert_eq!(readiness.peek().as_ref(), Some(&Ok(true)));
+
+        control.ready.set(false);
+        dom.in_runtime(|| refresh.set(1));
+        dom.render_immediate_to_vec();
+        assert_eq!(readiness.peek().as_ref(), Some(&Ok(true)));
+
+        manual.call(());
+        dom.render_immediate_to_vec();
+        assert_eq!(*refresh.peek(), 2);
+        assert_eq!(readiness.peek().as_ref(), Some(&Ok(false)));
     }
 }

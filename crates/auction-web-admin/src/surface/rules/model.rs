@@ -1,6 +1,5 @@
 //! 会话内站点文档（规则、关于）草稿、版本基线和已提交发布意图；两种文档各有一份，互不影响。
 
-use auction_web_shared::SUPPORTED_LOCALES;
 use dioxus::prelude::*;
 
 use super::draft::DEFAULT_RULES_LOCALE;
@@ -19,7 +18,7 @@ pub(super) enum RuleNotice {
 /// 丢弃确认只保存用户选择的下一步，不承载发布命令或草稿正文。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum RulesTransition {
-    Select { locale: String, add: bool },
+    Select { locale: &'static str },
     Reload,
 }
 
@@ -64,7 +63,6 @@ impl RulesBaseline {
 #[derive(Clone, Copy)]
 pub(super) struct RulesDraft {
     pub(super) target: Signal<String>,
-    pub(super) locales: Signal<Vec<String>>,
     pub(super) draft: Signal<Option<AdminRulesCandidate>>,
     pub(super) baseline: Signal<Option<RulesBaseline>>,
     pub(super) checked_candidate: Signal<Option<AdminRulesCandidate>>,
@@ -103,9 +101,6 @@ pub(in crate::surface) fn use_rules_draft() {
 
 fn use_document_draft() -> RulesDraft {
     let target = use_signal(|| DEFAULT_RULES_LOCALE.to_owned());
-    let locales = use_signal(|| {
-        SUPPORTED_LOCALES.iter().map(|locale| locale.code.to_owned()).collect::<Vec<_>>()
-    });
     let draft = use_signal(|| None::<AdminRulesCandidate>);
     let baseline = use_signal(|| None::<RulesBaseline>);
     let checked_candidate = use_signal(|| None::<AdminRulesCandidate>);
@@ -124,7 +119,6 @@ fn use_document_draft() -> RulesDraft {
     });
     RulesDraft {
         target,
-        locales,
         draft,
         baseline,
         checked_candidate,

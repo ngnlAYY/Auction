@@ -12,7 +12,7 @@ use crate::ports::core::ApplicationFuture;
 use crate::ports::core::{
     RequestHash, TransactionFuture, TransactionPolicy, TransactionPolicyError,
 };
-use crate::ports::public::SiteDocumentKind;
+use crate::ports::public::{PUBLIC_RULES_LOCALES, SiteDocumentKind};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdminRulesRequest {
@@ -44,7 +44,7 @@ impl AdminRulesCandidate {
 
     /// 校验规则候选的语言、标题和正文边界。
     pub fn validate(&self) -> Result<(), AdminRulesError> {
-        validate_document_fields(&self.locale, &self.title, &self.markdown)
+        validate_publication(&self.locale, &self.title, &self.markdown)
     }
 }
 
@@ -62,7 +62,10 @@ pub struct AdminRulesDocument {
 impl AdminRulesDocument {
     /// 校验从存储层返回的完整规则快照。
     pub fn validate(&self) -> Result<(), AdminRulesError> {
-        validate_document_fields(&self.locale, &self.title, &self.markdown)?;
+        if !valid_locale(&self.locale) {
+            return Err(AdminRulesError::InvalidLocale);
+        }
+        validate_document_content(&self.title, &self.markdown)?;
         if self.revision <= 0
             || self.published_at.timestamp_micros() == 0
             || !valid_text(&self.published_by, MAX_RULE_ACTOR_BYTES)
@@ -107,7 +110,7 @@ impl AdminRulesPublishCommand {
         {
             return Err(AdminRulesError::InvalidCommand);
         }
-        validate_document_fields(&self.locale, &self.title, &self.markdown)
+        validate_publication(&self.locale, &self.title, &self.markdown)
     }
 }
 
@@ -238,15 +241,15 @@ pub const MAX_RULE_ACTOR_BYTES: usize = 128;
 /// 请求关联 ID 允许的最大字节数。
 pub const MAX_RULE_REQUEST_ID_BYTES: usize = 128;
 
-/// 候选、发布命令和存储快照复用借用校验，避免仅为检查上限而复制整篇 Markdown。
-fn validate_document_fields(
-    locale: &str,
-    title: &str,
-    markdown: &str,
-) -> Result<(), AdminRulesError> {
-    if !valid_locale(locale) {
+fn validate_publication(locale: &str, title: &str, markdown: &str) -> Result<(), AdminRulesError> {
+    // 新发布的语言必须能通过 Public 读取校验，历史快照仍按原语言标签规则读取。
+    if !PUBLIC_RULES_LOCALES.contains(&locale) {
         return Err(AdminRulesError::InvalidLocale);
     }
+    validate_document_content(title, markdown)
+}
+
+fn validate_document_content(title: &str, markdown: &str) -> Result<(), AdminRulesError> {
     if !valid_text(title, MAX_RULE_TITLE_BYTES) || markdown.len() > MAX_RULE_MARKDOWN_BYTES {
         return Err(AdminRulesError::InvalidDocument);
     }
@@ -276,4 +279,69 @@ pub enum AdminRulesError {
     RevisionConflict { current_revision: i64 },
     #[error("规则发布结果损坏")]
     StoredResultCorrupt,
+}
+
+#[cfg(test)]
+mod tests {
+    use auction_domain::CommandId;
+    use auction_time::Timestamp;
+    use uuid::Uuid;
+
+    use super::{
+        AdminRulesCandidate, AdminRulesDocument, AdminRulesError, AdminRulesPublishCommand,
+        AdminRulesRequest,
+    };
+    use crate::ports::core::RequestHash;
+    use crate::ports::public::{PublicRulesRequest, SiteDocumentKind};
+
+    #[test]
+    fn candidate_and_publication_follow_the_public_read_locale_set() {
+        for kind in [SiteDocumentKind::Rules, SiteDocumentKind::About] {
+            for locale in ["en", "zh-CN", "zh-TW", "ja", "ko", "fr", "zh-cn", " en"] {
+                let expected = PublicRulesRequest { kind, locale: locale.to_owned() }
+                    .validate()
+                    .is_ok()
+                    .then_some(())
+                    .ok_or(AdminRulesError::InvalidLocale);
+                let candidate = AdminRulesCandidate {
+                    locale: locale.to_owned(),
+                    title: "Title".to_owned(),
+                    markdown: String::new(),
+                };
+                assert_eq!(candidate.validate(), expected, "{kind:?} {locale}");
+                let command = AdminRulesPublishCommand {
+                    command_id: CommandId::from_uuid(Uuid::from_u128(1)),
+                    kind,
+                    expected_revision: 0,
+                    locale: candidate.locale,
+                    title: candidate.title,
+                    markdown: candidate.markdown,
+                    actor_id: "admin".to_owned(),
+                    request_id: None,
+                    request_hash: RequestHash::new([0; 32]),
+                };
+                assert_eq!(command.validate(), expected, "{kind:?} {locale}");
+            }
+        }
+    }
+
+    #[test]
+    fn legacy_document_locale_remains_readable() {
+        let locale = "fr".to_owned();
+        for kind in [SiteDocumentKind::Rules, SiteDocumentKind::About] {
+            assert!(AdminRulesRequest { kind, locale: locale.clone() }.validate().is_ok());
+        }
+        assert!(
+            AdminRulesDocument {
+                locale,
+                title: "Title".to_owned(),
+                markdown: String::new(),
+                published_by: "admin".to_owned(),
+                revision: 1,
+                published_at: Timestamp::parse_from_rfc3339("2026-11-18T00:00:00Z").unwrap(),
+            }
+            .validate()
+            .is_ok()
+        );
+    }
 }

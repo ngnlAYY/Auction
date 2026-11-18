@@ -347,3 +347,28 @@ fn map_error(error: ApplicationError) -> Response {
         response,
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use auction_application::admin::AdminRulesCandidate;
+    use auction_contracts::ApiErrorResponse;
+    use axum::body::to_bytes;
+    use axum::http::StatusCode;
+
+    use super::map_error;
+
+    #[tokio::test]
+    async fn unsupported_publication_locale_keeps_the_invalid_locale_response() {
+        let candidate = AdminRulesCandidate {
+            locale: "fr".to_owned(),
+            title: "Titre".to_owned(),
+            markdown: String::new(),
+        };
+        let error = candidate.validate().expect_err("Public 不支持 fr");
+        let response = map_error(error.into());
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let error: ApiErrorResponse = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(error.code, "invalid_locale");
+    }
+}

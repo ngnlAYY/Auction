@@ -5,15 +5,16 @@ use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use super::derived::DashboardDerived;
+use super::widgets::count_text;
 use crate::api::AdminDashboardSnapshot;
 use crate::surface::router::Route;
 
-pub(super) fn summary_section(
+pub(super) fn summary_metrics(
     snapshot: &AdminDashboardSnapshot,
     derived: &DashboardDerived,
 ) -> Element {
     let worker_up = snapshot.worker.condition == "available";
-    let active_alerts = snapshot.alerting.data.as_ref().map_or(0, |data| data.active_signal_count);
+    let active_alerts = snapshot.alerting.data.as_ref().map(|data| data.active_signal_count);
 
     rsx! {
         div { class: "console-kpi console-kpi--6",
@@ -48,13 +49,22 @@ pub(super) fn summary_section(
             }
             div { class: "console-kpi__cell",
                 div { class: "console-kpi__label", {t!("dashboard-legacy-outbox-pending")} }
-                div { class: "console-kpi__value", "{derived.pending}" }
+                div { class: "console-kpi__value", {count_text(derived.pending)} }
             }
             div { class: "console-kpi__cell",
                 div { class: "console-kpi__label", {t!("dashboard-legacy-alerting-active")} }
-                div { class: "console-kpi__value", "{active_alerts}" }
+                div { class: "console-kpi__value", {count_text(active_alerts)} }
             }
         }
+    }
+}
+
+pub(super) fn summary_section(
+    snapshot: &AdminDashboardSnapshot,
+    derived: &DashboardDerived,
+) -> Element {
+    rsx! {
+        {summary_metrics(snapshot, derived)}
         section {
             class: "admin-dashboard-overview",
             aria_labelledby: "dashboard-shortcuts-title",

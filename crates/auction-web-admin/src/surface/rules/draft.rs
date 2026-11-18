@@ -1,4 +1,4 @@
-//! 规则草稿、反馈和 locale 边界辅助。
+//! 规则草稿与反馈。
 
 use auction_web_shared::t;
 
@@ -34,13 +34,4 @@ pub(super) fn missing_rules_document(locale: String) -> AdminRules {
         revision: 0,
         published_at: String::new(),
     }
-}
-
-pub(super) fn valid_locale(value: &str) -> bool {
-    let value = value.trim();
-    !value.is_empty()
-        && value.len() <= 35
-        && !value.starts_with('-')
-        && !value.ends_with('-')
-        && value.chars().all(|character| character.is_ascii_alphanumeric() || character == '-')
 }

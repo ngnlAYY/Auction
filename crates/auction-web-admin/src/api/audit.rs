@@ -6,10 +6,15 @@ use auction_contracts::{AdminAuditCursorResponse, ApiResponse};
 pub(crate) use auction_contracts::{
     AdminAuditRecordResponse as AdminAuditRecord, AdminAuditResponse as AdminAuditPage,
 };
+use auction_time::{SecondsFormat, Timestamp};
 use serde::Deserialize;
 use url::form_urlencoded;
 
-use super::{invalid_response_error, response_error, send_get, valid_admin_time, valid_uuid};
+#[cfg(test)]
+use super::realtime::send_get;
+#[cfg(not(test))]
+use super::send_get;
+use super::{invalid_response_error, response_error, valid_admin_time, valid_uuid};
 
 /// 旧 audit decoder 允许响应增加字段，但所有旧必需字段仍必须显式存在并满足业务语义。
 /// 保留镜像的理由：wire 允许兼容扩展，contracts 的 `AdminAuditResponse`/
@@ -64,13 +69,46 @@ pub(crate) struct AdminAuditFilter {
     pub occurred_to: String,
 }
 
+impl AdminAuditFilter {
+    /// 应用、恢复和发送筛选共用首尾空白规则，避免同一个精确匹配条件产生两个查询身份。
+    pub(crate) fn normalize_text(&mut self) {
+        for value in [
+            &mut self.actor,
+            &mut self.actor_type,
+            &mut self.action,
+            &mut self.entity,
+            &mut self.source,
+            &mut self.result,
+            &mut self.request_id,
+        ] {
+            let trimmed = value.trim();
+            if trimmed.len() != value.len() {
+                *value = trimmed.to_owned();
+            }
+        }
+    }
+
+    /// 将本地时间或带偏移的旧值规范化，保证每个绝对时刻有唯一的筛选身份。
+    pub(crate) fn absolute_time(value: &str) -> Option<String> {
+        let value = value.trim();
+        if value.is_empty() {
+            return Some(String::new());
+        }
+        let instant = Timestamp::parse_from_rfc3339(value)
+            .ok()
+            .or_else(|| Timestamp::parse_from_rfc3339(&super::normalize_datetime(value)).ok())?;
+        Some(instant.to_rfc3339_opts(SecondsFormat::AutoSi, true))
+    }
+}
+
 /// 读取一页 Admin 审计安全投影。
 pub(crate) async fn fetch_admin_audit(
     page: i64,
-    filter: AdminAuditFilter,
+    mut filter: AdminAuditFilter,
     page_size: i64,
 ) -> Result<AdminAuditPage, String> {
     super::pagination::validate(page, page_size, 200, i64::from(i32::MAX))?;
+    filter.normalize_text();
     let mut query = form_urlencoded::Serializer::new(String::new());
     query.append_pair("page", &page.max(1).to_string());
     query.append_pair("page_size", &page_size.to_string());
@@ -81,8 +119,8 @@ pub(crate) async fn fetch_admin_audit(
     append_filter(&mut query, "source", &filter.source);
     append_filter(&mut query, "result", &filter.result);
     append_filter(&mut query, "request_id", &filter.request_id);
-    append_time_filter(&mut query, "occurred_from", &filter.occurred_from);
-    append_time_filter(&mut query, "occurred_to", &filter.occurred_to);
+    append_time_filter(&mut query, "occurred_from", &filter.occurred_from)?;
+    append_time_filter(&mut query, "occurred_to", &filter.occurred_to)?;
 
     let url = format!("/api/v1/admin/audit?{}", query.finish());
     let response = send_get(&url).await?;
@@ -165,19 +203,20 @@ fn decode_audit_record(record: StrictAuditRecord) -> Result<AdminAuditRecord, &'
 }
 
 fn append_filter(query: &mut form_urlencoded::Serializer<String>, key: &str, value: &str) {
-    let value = value.trim();
     if !value.is_empty() {
         query.append_pair(key, value);
     }
 }
 
-fn append_time_filter(query: &mut form_urlencoded::Serializer<String>, key: &str, value: &str) {
-    let value = value.trim();
-    if value.is_empty() {
-        return;
-    }
-    let normalized = super::normalize_datetime(value);
-    query.append_pair(key, &normalized);
+fn append_time_filter(
+    query: &mut form_urlencoded::Serializer<String>,
+    key: &str,
+    value: &str,
+) -> Result<(), String> {
+    let absolute =
+        AdminAuditFilter::absolute_time(value).ok_or_else(|| "invalid_query".to_owned())?;
+    append_filter(query, key, &absolute);
+    Ok(())
 }
 
 #[cfg(test)]

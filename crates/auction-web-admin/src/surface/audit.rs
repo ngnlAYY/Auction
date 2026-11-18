@@ -4,26 +4,32 @@
 
 use std::cmp::Ordering;
 
-use auction_web_shared::t;
+use auction_time::Timestamp;
 use auction_web_shared::{AsyncState, AsyncStateKind, Time, TruncatedText};
+use auction_web_shared::{a11y::focus_element_by_id_after_render, t};
 use dioxus::prelude::*;
 
 use super::admin_api_error_message;
 use super::pagination::{AdminPager as Pager, use_admin_page, use_admin_pagination};
 use super::query::{AuditQuery, use_audit_query_state};
+use super::realtime::{
+    FilterValue, QueryFilterInput, QueryFilterSelect, fetch_filtered, normalize_filter_input,
+    normalize_filter_text,
+};
 use super::sort::{MobileSortControl, SortDirection, SortableTh, sort_rows};
-use crate::api::{AdminAuditFilter, AdminAuditPage, AdminAuditRecord, fetch_admin_audit};
+use crate::api::{
+    AdminAuditFilter, AdminAuditPage, AdminAuditRecord, datetime_local_value, fetch_admin_audit,
+};
 
 pub(super) fn page() -> Element {
     // 已应用的筛选与分页跟地址栏双向同步；表单草稿是提交前的瞬态，只在提交时入 URL。
     let query = use_audit_query_state();
     let query_state = query.state;
     let requested_query = use_memo(move || {
-        let current = query_state.read();
-        (current.page, current.filter.clone())
+        let current: &AuditQuery = &query_state.read();
+        current.page_request()
     });
-    // 草稿初值取自地址栏恢复的已应用筛选，刷新后表单与列表保持一致；之后的编辑不落 URL。
-    let filter = use_signal(move || query_state.peek().filter.clone());
+    let applied_filter = use_memo(move || query_state.read().filter.clone());
     let mut refresh = use_signal(|| 0_u64);
     let pagination = use_admin_pagination("audit", &["page_size"], Some(200), i64::from(i32::MAX));
     let audit = use_admin_page(
@@ -32,13 +38,15 @@ pub(super) fn page() -> Element {
             let _ = refresh();
             requested_query()
         },
-        |(page, filter), size| fetch_admin_audit(page, filter, size),
+        |request, size| {
+            fetch_filtered(request, move |(page, filter)| fetch_admin_audit(page, filter, size))
+        },
     );
 
     let mut apply_query = query.clone();
     let apply_filter = move |next_filter: AdminAuditFilter| {
         // 提交筛选回到第一页并保留排序；查询资源响应状态变化自动重新加载。
-        apply_query.push(AuditQuery { filter: next_filter, page: 1, ..query_state() });
+        apply_query.push(query_state().with_filter(next_filter));
     };
     let content = match &*audit.read_unchecked() {
         None => rsx! {
@@ -91,181 +99,289 @@ pub(super) fn page() -> Element {
     rsx! {
         section { class: "admin-audit-page", aria_labelledby: "admin-audit-title",
             h1 { id: "admin-audit-title", {t!("page-audit-title")} }
-            AuditFilters { filter, on_submit: apply_filter }
-            {content}
+            AuditFilters { applied: applied_filter, on_submit: apply_filter }
+            if requested_query.read().is_some() {
+                {content}
+            }
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AuditField {
+    Actor,
+    Entity,
+    Action,
+    RequestId,
+    ActorType,
+    Source,
+    Result,
+    From,
+    To,
+}
+
+impl AuditField {
+    const ALL: [Self; 9] = [
+        Self::Actor,
+        Self::Entity,
+        Self::Action,
+        Self::RequestId,
+        Self::ActorType,
+        Self::Source,
+        Self::Result,
+        Self::From,
+        Self::To,
+    ];
+
+    fn names(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Actor => ("actor", "audit-actor"),
+            Self::Entity => ("entity", "audit-entity"),
+            Self::Action => ("action", "audit-action"),
+            Self::RequestId => ("request_id", "audit-request-id"),
+            Self::ActorType => ("actor_type", "audit-actor-type"),
+            Self::Source => ("source", "audit-source"),
+            Self::Result => ("result", "audit-result"),
+            Self::From => ("from", "audit-from"),
+            Self::To => ("to", "audit-to"),
+        }
+    }
+
+    fn label(self) -> String {
+        match self {
+            Self::Actor => t!("admin-audit-actor-id"),
+            Self::Entity => t!("admin-audit-entity-identity"),
+            Self::Action => t!("admin-audit-action"),
+            Self::RequestId => t!("admin-audit-request-id"),
+            Self::ActorType => t!("admin-audit-actor-type"),
+            Self::Source => t!("admin-audit-source"),
+            Self::Result => t!("admin-audit-result"),
+            Self::From => t!("admin-audit-from"),
+            Self::To => t!("admin-audit-to"),
+        }
+    }
+
+    fn choices(self) -> Option<&'static [&'static str]> {
+        match self {
+            Self::ActorType => Some(&["public_user", "admin", "worker", "system"]),
+            Self::Source => Some(&["public", "admin", "cli", "worker", "system"]),
+            Self::Result => Some(&["success", "rejected", "failure"]),
+            _ => None,
+        }
+    }
+
+    fn choice_label(self, value: &str) -> String {
+        match self {
+            Self::ActorType => audit_actor_type_label(value),
+            Self::Source => audit_source_label(value),
+            Self::Result => audit_result_label(value),
+            _ => value.to_owned(),
+        }
+    }
+
+    fn normalize(self, value: &str) -> Option<String> {
+        let maximum = match self {
+            Self::Actor => 256,
+            Self::Entity => 385,
+            Self::Action | Self::RequestId => 128,
+            Self::From | Self::To => {
+                return AdminAuditFilter::absolute_time(normalize_filter_input(value)?);
+            }
+            _ => {
+                let value = normalize_filter_input(value)?;
+                return (value.is_empty() || self.choices()?.contains(&value))
+                    .then(|| value.to_owned());
+            }
+        };
+        normalize_filter_text(value, maximum).map(str::to_owned)
+    }
+}
+
+/// 审计地址与表单的筛选状态，只有每个字段都有效时才构造 API 筛选。
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(super) struct AuditFilterState([FilterValue; AuditField::ALL.len()]);
+
+impl From<AdminAuditFilter> for AuditFilterState {
+    fn from(mut filter: AdminAuditFilter) -> Self {
+        filter.normalize_text();
+        Self(
+            [
+                filter.actor,
+                filter.entity,
+                filter.action,
+                filter.request_id,
+                filter.actor_type,
+                filter.source,
+                filter.result,
+                filter.occurred_from,
+                filter.occurred_to,
+            ]
+            .map(FilterValue::Text),
+        )
+    }
+}
+
+impl AuditFilterState {
+    pub(super) fn restore(pairs: &[(String, String)]) -> Self {
+        Self(AuditField::ALL.map(|field| {
+            FilterValue::restore(pairs, field.names().0, |value| field.normalize(value))
+        }))
+    }
+
+    pub(super) fn append_pairs(&self, pairs: &mut Vec<(String, String)>) {
+        for (field, value) in AuditField::ALL.into_iter().zip(&self.0) {
+            value.append_pairs(pairs, field.names().0);
+        }
+    }
+
+    pub(super) fn request(&self) -> Option<AdminAuditFilter> {
+        self.prepare().ok()
+    }
+
+    fn prepare(&self) -> Result<AdminAuditFilter, AuditField> {
+        let mut values = AuditField::ALL.map(|_| String::new());
+        for (field, (value, normalized)) in
+            AuditField::ALL.into_iter().zip(self.0.iter().zip(&mut values))
+        {
+            *normalized = value.text().and_then(|text| field.normalize(text)).ok_or(field)?;
+        }
+        let [
+            actor,
+            entity,
+            action,
+            request_id,
+            actor_type,
+            source,
+            result,
+            occurred_from,
+            occurred_to,
+        ] = values;
+        Ok(AdminAuditFilter {
+            actor,
+            entity,
+            action,
+            request_id,
+            actor_type,
+            source,
+            result,
+            occurred_from,
+            occurred_to,
+        })
     }
 }
 
 #[component]
 fn AuditFilters(
-    mut filter: Signal<AdminAuditFilter>,
+    applied: Memo<AuditFilterState>,
     on_submit: EventHandler<AdminAuditFilter>,
 ) -> Element {
-    let submit_filter = on_submit;
-    let clear_filter = on_submit;
+    let (mut draft, mut submitted) = use_audit_filter_draft(applied);
+    let (primary, advanced) = AuditField::ALL.split_at(AuditField::ActorType as usize);
+    let advanced_active = draft.read().0[primary.len()..]
+        .iter()
+        .any(|value| value.text().is_none_or(|text| !text.is_empty()));
     rsx! {
         form {
             class: "admin-audit-filter",
             autocomplete: "off",
             onsubmit: move |event| {
                 event.prevent_default();
-                submit_filter.call(filter());
+                let next = draft.read().prepare();
+                match next {
+                    Ok(filter) => {
+                        submitted.set(false);
+                        draft.set(filter.clone().into());
+                        on_submit.call(filter);
+                    }
+                    Err(field) => {
+                        submitted.set(true);
+                        focus_element_by_id_after_render(field.names().1);
+                    }
+                }
             },
             p { class: "admin-audit-filter__hint", {t!("admin-audit-filter-hint")} }
             div { class: "admin-audit-filter__primary",
-                label {
-                    {t!("admin-audit-actor-id")}
-                    input {
-                        name: "actor",
-                        r#type: "search",
-                        autocapitalize: "none",
-                        spellcheck: "false",
-                        enterkeyhint: "search",
-                        maxlength: "256",
-                        value: filter().actor,
-                        oninput: move |event| {
-                            filter.write().actor = event.value();
-                        },
-                    }
-                }
-                label {
-                    {t!("admin-audit-entity-identity")}
-                    input {
-                        name: "entity",
-                        r#type: "search",
-                        autocapitalize: "none",
-                        spellcheck: "false",
-                        enterkeyhint: "search",
-                        maxlength: "385",
-                        value: filter().entity,
-                        oninput: move |event| {
-                            filter.write().entity = event.value();
-                        },
-                    }
-                }
-                label {
-                    {t!("admin-audit-action")}
-                    input {
-                        name: "action",
-                        r#type: "search",
-                        autocapitalize: "none",
-                        spellcheck: "false",
-                        enterkeyhint: "search",
-                        maxlength: "128",
-                        value: filter().action,
-                        oninput: move |event| {
-                            filter.write().action = event.value();
-                        },
-                    }
-                }
-                label {
-                    {t!("admin-audit-request-id")}
-                    input {
-                        name: "request_id",
-                        r#type: "search",
-                        autocapitalize: "none",
-                        spellcheck: "false",
-                        enterkeyhint: "search",
-                        maxlength: "128",
-                        value: filter().request_id,
-                        oninput: move |event| {
-                            filter.write().request_id = event.value();
-                        },
-                    }
+                for field in primary.iter().copied() {
+                    AuditFilterControl { key: "{field:?}", field, draft, show_errors: submitted() }
                 }
             }
-            details {
-                class: "admin-audit-filter__advanced",
-                open: audit_advanced_filter_active(&filter()),
+            details { class: "admin-audit-filter__advanced", open: advanced_active,
                 summary { {t!("admin-audit-advanced-filters")} }
                 div { class: "admin-audit-filter__advanced-grid",
-                    label {
-                        {t!("admin-audit-actor-type")}
-                        select {
-                            name: "actor_type",
-                            value: filter().actor_type,
-                            onchange: move |event| {
-                                filter.write().actor_type = event.value();
-                            },
-                            option { value: "", {t!("admin-audit-all")} }
-                            option { value: "public_user", {audit_actor_type_label("public_user")} }
-                            option { value: "admin", {audit_actor_type_label("admin")} }
-                            option { value: "worker", {audit_actor_type_label("worker")} }
-                            option { value: "system", {audit_actor_type_label("system")} }
-                        }
-                    }
-                    label {
-                        {t!("admin-audit-source")}
-                        select {
-                            name: "source",
-                            value: filter().source,
-                            onchange: move |event| {
-                                filter.write().source = event.value();
-                            },
-                            option { value: "", {t!("admin-audit-all")} }
-                            option { value: "public", {audit_source_label("public")} }
-                            option { value: "admin", {audit_source_label("admin")} }
-                            option { value: "cli", {audit_source_label("cli")} }
-                            option { value: "worker", {audit_source_label("worker")} }
-                            option { value: "system", {audit_source_label("system")} }
-                        }
-                    }
-                    label {
-                        {t!("admin-audit-result")}
-                        select {
-                            name: "result",
-                            value: filter().result,
-                            onchange: move |event| {
-                                filter.write().result = event.value();
-                            },
-                            option { value: "", {t!("admin-audit-all")} }
-                            option { value: "success", {audit_result_label("success")} }
-                            option { value: "rejected", {audit_result_label("rejected")} }
-                            option { value: "failure", {audit_result_label("failure")} }
-                        }
-                    }
-                    label {
-                        {t!("admin-audit-from")}
-                        input {
-                            name: "occurred_from",
-                            r#type: "datetime-local",
-                            value: filter().occurred_from,
-                            oninput: move |event| {
-                                filter.write().occurred_from = event.value();
-                            },
-                        }
-                    }
-                    label {
-                        {t!("admin-audit-to")}
-                        input {
-                            name: "occurred_to",
-                            r#type: "datetime-local",
-                            value: filter().occurred_to,
-                            oninput: move |event| {
-                                filter.write().occurred_to = event.value();
-                            },
-                        }
+                    for field in advanced.iter().copied() {
+                        AuditFilterControl { key: "{field:?}", field, draft, show_errors: submitted() }
                     }
                 }
             }
             div { class: "admin-audit-filter__actions",
-                button {
-                    class: "admin-btn-primary",
-                    r#type: "submit",
-                    {t!("admin-audit-load")}
-                }
+                button { class: "admin-btn-primary", r#type: "submit", {t!("admin-audit-load")} }
                 button {
                     r#type: "button",
                     onclick: move |_| {
-                        let empty = AdminAuditFilter::default();
-                        filter.set(empty.clone());
-                        clear_filter.call(empty);
+                        draft.set(AuditFilterState::default());
+                        submitted.set(false);
+                        on_submit.call(AdminAuditFilter::default());
                     },
                     {t!("admin-audit-clear")}
                 }
             }
         }
+    }
+}
+
+#[component]
+fn AuditFilterControl(
+    field: AuditField,
+    mut draft: Signal<AuditFilterState>,
+    show_errors: bool,
+) -> Element {
+    let (name, id) = field.names();
+    let slot = draft.read();
+    let value = &slot.0[field as usize];
+    let on_input = move |value| draft.write().0[field as usize] = FilterValue::Text(value);
+    if let Some(options) = field.choices() {
+        let choices = std::iter::once(("", t!("admin-audit-all"), false))
+            .chain(options.iter().map(|&key| (key, field.choice_label(key), false)))
+            .collect();
+        return rsx! { QueryFilterSelect { id, name, label: field.label(), value: value.clone(), choices, on_change: on_input } };
+    }
+    let local_time = matches!(field, AuditField::From | AuditField::To);
+    let input_type = if local_time { "datetime-local" } else { "search" };
+    let input = value.input_value();
+    let displayed = if local_time { audit_time_input(input) } else { input.to_owned() };
+    let invalid_draft =
+        show_errors && value.text().is_some_and(|text| field.normalize(text).is_none());
+    rsx! {
+        QueryFilterInput {
+            id, name, label: field.label(), value: displayed,
+            input_type,
+            error_values: value.error_values(invalid_draft), on_input,
+        }
+    }
+}
+
+fn use_audit_filter_draft(
+    applied: Memo<AuditFilterState>,
+) -> (Signal<AuditFilterState>, Signal<bool>) {
+    let mut draft = use_signal(move || applied.peek().clone());
+    let mut submitted = use_signal(|| false);
+    // 草稿只订阅已应用的筛选，排序、翻页和重读不能抹去未提交输入。
+    use_effect(move || {
+        let next = applied();
+        if *draft.peek() != next {
+            draft.set(next);
+        }
+        submitted.set(false);
+    });
+    (draft, submitted)
+}
+
+fn audit_time_input(value: &str) -> String {
+    // 本地文本只作为输入框显示值，未编辑的时间边界仍按链接里的精确时刻提交。
+    if Timestamp::parse_from_rfc3339(value).is_ok() {
+        datetime_local_value(value).unwrap_or_default()
+    } else {
+        value.to_owned()
     }
 }
 
@@ -435,14 +551,6 @@ fn AuditRow(record: AdminAuditRecord) -> Element {
     }
 }
 
-fn audit_advanced_filter_active(filter: &AdminAuditFilter) -> bool {
-    !filter.actor_type.is_empty()
-        || !filter.source.is_empty()
-        || !filter.result.is_empty()
-        || !filter.occurred_from.is_empty()
-        || !filter.occurred_to.is_empty()
-}
-
 fn metadata_text(value: &serde_json::Value) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| "{}".to_owned())
 }
@@ -488,4 +596,154 @@ fn sort_audit_records(records: &mut [AdminAuditRecord], column: &str, direction:
         "result" => left.result.cmp(&right.result),
         _ => Ordering::Equal,
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    use dioxus::dioxus_core::Mutation;
+    use dioxus::prelude::*;
+
+    use super::{AuditField, AuditFilterState, audit_time_input, page, use_audit_filter_draft};
+    use crate::api::AdminAuditFilter;
+    use crate::surface::query::AuditQuery;
+    use crate::surface::realtime::{
+        FilterValue, TestPage, get_parameter, selected_options, submit_forms, text_attributes,
+    };
+
+    type Control = Rc<Cell<Option<(Signal<AuditQuery>, Signal<AuditFilterState>)>>>;
+
+    fn draft_harness() -> Element {
+        let query = use_signal(|| audit_query("first"));
+        let applied = use_memo(move || query.read().filter.clone());
+        let (draft, _) = use_audit_filter_draft(applied);
+        consume_context::<Control>().set(Some((query, draft)));
+        rsx! { "{draft.read().0[AuditField::Actor as usize].input_value()}" }
+    }
+
+    fn audit_query(actor: &str) -> AuditQuery {
+        AuditQuery {
+            filter: AdminAuditFilter { actor: actor.to_owned(), ..AdminAuditFilter::default() }
+                .into(),
+            ..AuditQuery::default()
+        }
+    }
+
+    #[test]
+    fn audit_bookmark_selects_the_options_used_by_the_first_get() {
+        let (page, edits) = TestPage::mount(page, "actor_type=worker&source=cli&result=failure");
+        let gets = page.take_gets();
+        assert_eq!(gets.len(), 1, "{gets:?}");
+        assert!(gets[0].starts_with("/api/v1/admin/audit?"));
+        for (key, value) in [("actor_type", "worker"), ("source", "cli"), ("result", "failure")] {
+            assert_eq!(get_parameter(&gets[0], key).as_deref(), Some(value));
+        }
+        assert_eq!(selected_options(&edits), ["worker", "cli", "failure"]);
+    }
+
+    #[test]
+    fn restored_audit_actor_shows_every_original_and_waits_for_submission() {
+        for originals in [&["", "alice"][..], &["alice\n"][..]] {
+            let (mut mounted, setup) = TestPage::mount(page, "actor=first");
+            let form = submit_forms(&setup).next().unwrap();
+            let initial = mounted.take_gets();
+            assert_eq!(initial.len(), 1, "{initial:?}");
+            assert_eq!(get_parameter(&initial[0], "actor").as_deref(), Some("first"));
+            let invalid_address = originals
+                .iter()
+                .map(|value| ("actor".to_owned(), (*value).to_owned()))
+                .collect::<Vec<_>>();
+            let edits = mounted.restore(invalid_address.clone());
+            mounted.assert_no_gets();
+            let input = text_attributes(&edits, "aria-describedby")
+                .find_map(|(id, value)| (value == "audit-actor-error").then_some(id))
+                .unwrap();
+            for original in originals {
+                let escaped = format!("{original:?}");
+                assert!(edits.iter().any(|edit| matches!(edit,
+                    Mutation::CreateTextNode { value, .. } if value == &escaped
+                )));
+            }
+            mounted.dispatch("submit", form, "");
+            assert_eq!(mounted.address(), invalid_address);
+            mounted.assert_no_gets();
+            mounted.dispatch("input", input, "fixed");
+            assert_eq!(mounted.address(), invalid_address);
+            mounted.assert_no_gets();
+            mounted.dispatch("submit", form, "");
+            let gets = mounted.take_gets();
+            assert_eq!(gets.len(), 1, "{gets:?}");
+            assert_eq!(get_parameter(&gets[0], "actor").as_deref(), Some("fixed"));
+        }
+    }
+
+    #[test]
+    fn draft_tracks_history_filter_changes_and_preserves_edits_on_page_and_sort_changes() {
+        let control = Control::default();
+        let mut dom = VirtualDom::new(draft_harness).with_root_context(control.clone());
+        dom.rebuild_in_place();
+        dom.render_immediate_to_vec();
+        let (mut location, mut draft) = control.get().unwrap();
+        dom.in_runtime(|| {
+            draft.write().0[AuditField::Actor as usize] = FilterValue::Text("unsaved".to_owned());
+        });
+
+        for query in [
+            audit_query("first"),
+            AuditQuery { sort: "actor".to_owned(), ..audit_query("first") },
+            AuditQuery { page: 2, ..audit_query("first") },
+        ] {
+            dom.in_runtime(|| location.set(query));
+            dom.render_immediate_to_vec();
+            assert_eq!(draft.peek().0[AuditField::Actor as usize].input_value(), "unsaved");
+        }
+        for expected in ["second", "first", "second"] {
+            dom.in_runtime(|| location.set(audit_query(expected)));
+            dom.render_immediate_to_vec();
+            assert_eq!(draft.peek().0[AuditField::Actor as usize].input_value(), expected);
+        }
+    }
+
+    #[test]
+    fn returning_from_a_sort_preserves_the_draft_after_applying_a_padded_actor() {
+        let control = Control::default();
+        let mut dom = VirtualDom::new(draft_harness).with_root_context(control.clone());
+        dom.rebuild_in_place();
+        dom.render_immediate_to_vec();
+        let (mut location, mut draft) = control.get().unwrap();
+
+        let submitted = location.peek().clone().with_filter(AdminAuditFilter {
+            actor: " alice ".to_owned(),
+            ..AdminAuditFilter::default()
+        });
+        let history = submitted.restored_from_history();
+        dom.in_runtime(|| location.set(submitted));
+        dom.render_immediate_to_vec();
+        dom.in_runtime(|| {
+            draft.write().0[AuditField::Actor as usize] = FilterValue::Text("unsaved".to_owned());
+            location.write().sort = "actor".to_owned();
+        });
+        dom.render_immediate_to_vec();
+        assert_eq!(draft.peek().0[AuditField::Actor as usize].input_value(), "unsaved");
+
+        dom.in_runtime(|| location.set(history));
+        dom.render_immediate_to_vec();
+        assert_eq!(draft.peek().0[AuditField::Actor as usize].input_value(), "unsaved");
+        assert_eq!(location.peek().page_request().unwrap().1.actor, "alice");
+    }
+
+    #[test]
+    fn prefill_displays_browser_local_minutes_and_keeps_the_exact_time_on_submit() {
+        // 宿主测试的本地时区按 UTC；WASM 由浏览器提供时区。
+        let bound = "2026-11-18T09:05:37.500123+08:00";
+        assert_eq!(audit_time_input(bound), "2026-11-18T01:05");
+        assert_eq!(
+            AdminAuditFilter::absolute_time(bound).as_deref(),
+            Some("2026-11-18T01:05:37.500123Z")
+        );
+        assert_eq!(audit_time_input("2026-11-18T17:25"), "2026-11-18T17:25");
+        assert_eq!(audit_time_input(""), "");
+    }
 }

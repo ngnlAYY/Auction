@@ -122,6 +122,27 @@ mod tests {
         (status, serde_json::from_slice(&bytes).expect("错误响应是 JSON"))
     }
 
+    #[tokio::test]
+    async fn hyphenated_usernames_and_canonical_user_ids_pass_but_partial_ids_fail() {
+        for user in ["Player-One", "Player-One-Two", REFERENCE] {
+            let request = support_request(&uri(&format!("user={user}"))).expect(user);
+            assert_eq!(request.selector, PlayerSupportSelector::User(user.to_owned()));
+        }
+        for user in [
+            "0f8fad5b-d9cb-469f-a165-70867728950",
+            "0f8fad5b-d9cb-469f-a165",
+            "0f8fad5b-d9cb-469f-a165-70867728950z",
+            "0f8fad5bd9cb469fa16570867728950e",
+            "0F8FAD5B-D9CB-469F-A165-70867728950E",
+            "00000000-0000-0000-0000-000000000000",
+        ] {
+            let response = support_request(&uri(&format!("user={user}"))).expect_err(user);
+            let (status, body) = rejection(*response).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{user}");
+            assert_eq!(body["code"], "invalid_query", "{user}");
+        }
+    }
+
     /// 缺省请求不含结算退件 Take；只有精确的 `include=settlement_returns` 才包含，且两种检索入口
     /// 都按同一投影解析。
     #[test]

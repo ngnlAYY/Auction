@@ -11,8 +11,8 @@ pub(super) struct DashboardDerived {
     pub poll_state: &'static str,
     pub poll_status: String,
     pub has_realtime_consumers: bool,
-    pub pending: i64,
-    pub failures: i64,
+    pub pending: Option<i64>,
+    pub failures: Option<i64>,
     pub outbox_state: &'static str,
     pub outbox_status: String,
     pub audit_failures: i64,
@@ -48,26 +48,28 @@ impl DashboardDerived {
         };
         let realtime = snapshot.realtime.data.as_ref();
         let has_realtime_consumers = realtime.is_some_and(|data| !data.lags.is_empty());
-        let pending = realtime.map_or(0, |data| data.total_lag);
-        let failures = realtime.map_or(0, |data| data.failure.count);
+        let pending = realtime.map(|data| data.total_lag);
+        let failures = realtime.map(|data| data.failure.count);
+        let has_failures = failures.is_some_and(|count| count > 0);
+        let has_pending = pending.is_some_and(|count| count > 0);
         let outbox_state = if realtime.is_none() {
             "neutral"
-        } else if failures > 0 {
+        } else if has_failures {
             "error"
         } else if !has_realtime_consumers {
             "neutral"
-        } else if pending > 0 {
+        } else if has_pending {
             "warn"
         } else {
             "ok"
         };
         let outbox_status = if realtime.is_none() {
             t!("dashboard-legacy-outbox-status-unavailable")
-        } else if failures > 0 {
+        } else if has_failures {
             t!("dashboard-legacy-outbox-status-dead-letters")
         } else if !has_realtime_consumers {
             t!("dashboard-legacy-outbox-status-no-consumers")
-        } else if pending > 0 {
+        } else if has_pending {
             t!("dashboard-legacy-outbox-status-lagging")
         } else {
             t!("dashboard-legacy-outbox-status-ok")
@@ -88,11 +90,7 @@ impl DashboardDerived {
             "ok"
         };
         let audit_failures = snapshot.health.audit_failure_count;
-        let audit_metrics_unavailable = snapshot
-            .health
-            .missing_services
-            .iter()
-            .any(|service| service == "public" || service == "worker");
+        let audit_metrics_unavailable = !snapshot.health.missing_services.is_empty();
         let audit_state = if audit_failures > 0 {
             "error"
         } else if audit_metrics_unavailable {

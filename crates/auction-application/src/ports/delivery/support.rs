@@ -4,6 +4,7 @@
 //! 玩家咨询与核对冒充 Bot 的邮件。所有分区都有固定行数上限，且只返回安全投影：不含投递
 //! payload、正文、Cookie、登录 key、会话凭据或代理上限。
 
+use auction_domain::valid_text;
 use auction_time::Timestamp;
 use uuid::Uuid;
 
@@ -11,7 +12,7 @@ use crate::ports::delivery::DeliveryAdminSnapshot;
 
 /// 每个分区最多返回的行数；超过时置 `truncated`，不静默分页。
 pub const MAX_PLAYER_SUPPORT_ROWS: i64 = 50;
-/// 用户名筛选的最大字符数；与 Admin 输入框 maxlength 对齐。
+/// 用户名筛选的最大 UTF-8 字节数，与用户名写入、HTTP 查询使用同一边界。
 pub const MAX_PLAYER_SUPPORT_USER_LEN: usize = 256;
 
 /// 只读汇总的检索入口；两者互斥，必须严格提供一个。
@@ -34,22 +35,34 @@ pub struct PlayerSupportRequest {
 }
 
 impl PlayerSupportRequest {
-    /// 校验单一检索入口与有界文本；带连字符的用户输入必须是规范 UUID，参考编号不能为 nil。
+    /// 校验单一检索入口；UUID 形用户输入与参考编号都必须为规范非零 UUID。
     pub fn validate(&self) -> bool {
         match &self.selector {
-            PlayerSupportSelector::User(value) => {
-                !value.is_empty()
-                    && value == value.trim()
-                    && value.chars().count() <= MAX_PLAYER_SUPPORT_USER_LEN
-                    && !value.chars().any(char::is_control)
-                    && (!value.contains('-')
-                        || Uuid::parse_str(value).is_ok_and(|parsed| {
-                            !parsed.is_nil() && parsed.hyphenated().to_string() == *value
-                        }))
-            }
+            PlayerSupportSelector::User(value) => valid_user_selector(value),
             PlayerSupportSelector::Reference(reference) => !reference.is_nil(),
         }
     }
+}
+
+fn valid_user_selector(value: &str) -> bool {
+    if !valid_text(value, MAX_PLAYER_SUPPORT_USER_LEN) {
+        return false;
+    }
+    // 存储会把可解析的 UUID 当作用户 ID；非规范拼写与残缺 ID 不能回落到用户名查询。
+    if let Ok(parsed) = Uuid::parse_str(value) {
+        return !parsed.is_nil() && parsed.hyphenated().to_string() == value;
+    }
+    let mut groups = value.split('-');
+    let has_uuid_prefix = [8, 4, 4, 4]
+        .into_iter()
+        .all(|width| groups.next().is_some_and(|group| group.len() == width));
+    let tail = groups.next().unwrap_or_default();
+    let uuid_shaped = has_uuid_prefix
+        && groups.next().is_none()
+        && (tail.len() == 12
+            || tail.len() < 12
+                && value.bytes().all(|byte| byte == b'-' || byte.is_ascii_hexdigit()));
+    !uuid_shaped
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
