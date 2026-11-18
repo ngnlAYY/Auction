@@ -103,6 +103,8 @@ pub struct OperationsAlertConsoleEntry {
     pub scope: String,
     pub source: OperationsAlertSource,
     pub active: bool,
+    /// 同一指纹恢复后再出现时递增，用于绑定处置所针对的事件。
+    pub incident_generation: i64,
     pub count: i64,
     pub age_seconds: i64,
     pub first_seen_at: Timestamp,
@@ -134,6 +136,7 @@ impl OperationsAlertConsoleEntry {
     pub fn validate(&self) -> Result<(), OperationsAlertError> {
         if OperationsAlertSource::parse(self.source.as_str()).is_none()
             || !auction_domain::valid_text(&self.scope, 128)
+            || self.incident_generation < 0
             || self.count < 0
             || self.age_seconds < 0
             || self.last_seen_at < self.first_seen_at
@@ -218,20 +221,27 @@ impl AdminPendingCounts {
 pub struct OperationsAlertAcknowledgeCommand {
     pub command_id: Uuid,
     pub fingerprint: [u8; 32],
+    pub incident_generation: i64,
     pub actor_id: String,
     pub reason: String,
     pub request_hash: RequestHash,
 }
 
 impl OperationsAlertAcknowledgeCommand {
-    /// 同 ID 同参重放的稳定摘要；`request_id` 不属于摘要。
-    pub fn request_hash(fingerprint: &[u8; 32], actor_id: &str, reason: &str) -> RequestHash {
-        request_digest("acknowledge", fingerprint, 0, actor_id, reason)
+    /// 同 ID 同参重放的稳定摘要，绑定操作员看到的事件代数。
+    pub fn request_hash(
+        fingerprint: &[u8; 32],
+        incident_generation: i64,
+        actor_id: &str,
+        reason: &str,
+    ) -> RequestHash {
+        request_digest("acknowledge", fingerprint, incident_generation, 0, actor_id, reason)
     }
 
     pub fn new(
         command_id: Uuid,
         fingerprint: [u8; 32],
+        incident_generation: i64,
         actor_id: impl Into<String>,
         reason: impl Into<String>,
     ) -> Result<Self, OperationsAlertError> {
@@ -240,7 +250,8 @@ impl OperationsAlertAcknowledgeCommand {
         let command = Self {
             command_id,
             fingerprint,
-            request_hash: Self::request_hash(&fingerprint, &actor_id, &reason),
+            incident_generation,
+            request_hash: Self::request_hash(&fingerprint, incident_generation, &actor_id, &reason),
             actor_id,
             reason,
         };
@@ -251,6 +262,7 @@ impl OperationsAlertAcknowledgeCommand {
     pub fn validate(&self) -> Result<(), OperationsAlertError> {
         if self.command_id.is_nil()
             || self.fingerprint == [0; 32]
+            || self.incident_generation < 0
             || !valid_alert_actor(&self.actor_id)
             || !valid_alert_reason(&self.reason)
             || self.request_hash.as_bytes() == [0; 32]
@@ -266,6 +278,7 @@ impl OperationsAlertAcknowledgeCommand {
 pub struct OperationsAlertSilenceCommand {
     pub command_id: Uuid,
     pub fingerprint: [u8; 32],
+    pub incident_generation: i64,
     pub silence_seconds: i64,
     pub actor_id: String,
     pub reason: String,
@@ -273,18 +286,28 @@ pub struct OperationsAlertSilenceCommand {
 }
 
 impl OperationsAlertSilenceCommand {
+    /// 同 ID 同参重放的稳定摘要，绑定操作员看到的事件代数。
     pub fn request_hash(
         fingerprint: &[u8; 32],
+        incident_generation: i64,
         silence_seconds: i64,
         actor_id: &str,
         reason: &str,
     ) -> RequestHash {
-        request_digest("silence", fingerprint, silence_seconds, actor_id, reason)
+        request_digest(
+            "silence",
+            fingerprint,
+            incident_generation,
+            silence_seconds,
+            actor_id,
+            reason,
+        )
     }
 
     pub fn new(
         command_id: Uuid,
         fingerprint: [u8; 32],
+        incident_generation: i64,
         silence_seconds: i64,
         actor_id: impl Into<String>,
         reason: impl Into<String>,
@@ -294,8 +317,15 @@ impl OperationsAlertSilenceCommand {
         let command = Self {
             command_id,
             fingerprint,
+            incident_generation,
             silence_seconds,
-            request_hash: Self::request_hash(&fingerprint, silence_seconds, &actor_id, &reason),
+            request_hash: Self::request_hash(
+                &fingerprint,
+                incident_generation,
+                silence_seconds,
+                &actor_id,
+                &reason,
+            ),
             actor_id,
             reason,
         };
@@ -306,6 +336,7 @@ impl OperationsAlertSilenceCommand {
     pub fn validate(&self) -> Result<(), OperationsAlertError> {
         if self.command_id.is_nil()
             || self.fingerprint == [0; 32]
+            || self.incident_generation < 0
             || !(MIN_OPERATIONS_ALERT_SILENCE_SECONDS..=MAX_OPERATIONS_ALERT_SILENCE_SECONDS)
                 .contains(&self.silence_seconds)
             || !valid_alert_actor(&self.actor_id)
@@ -390,6 +421,7 @@ pub fn parse_alert_id(value: &str) -> Option<[u8; 32]> {
 fn request_digest(
     action: &str,
     fingerprint: &[u8; 32],
+    incident_generation: i64,
     silence_seconds: i64,
     actor_id: &str,
     reason: &str,
@@ -399,7 +431,10 @@ fn request_digest(
     payload.extend_from_slice(action.as_bytes());
     payload.extend_from_slice(b"\",\"fingerprint\":\"");
     payload.extend_from_slice(crate::ports::core::lower_hex(fingerprint).as_bytes());
-    payload.extend_from_slice(b"\",\"silence_seconds\":");
+    // 同 ID 改换事件属于换参，即使指纹、操作与备注都相同。
+    payload.extend_from_slice(b"\",\"incident_generation\":");
+    payload.extend_from_slice(incident_generation.to_string().as_bytes());
+    payload.extend_from_slice(b",\"silence_seconds\":");
     payload.extend_from_slice(silence_seconds.to_string().as_bytes());
     payload.extend_from_slice(b",\"actor_id\":\"");
     payload.extend_from_slice(actor_id.as_bytes());
@@ -459,6 +494,7 @@ mod tests {
         let command = OperationsAlertSilenceCommand::new(
             Uuid::new_v4(),
             fingerprint,
+            1,
             3_600,
             "admin",
             "维护窗口",
@@ -466,12 +502,19 @@ mod tests {
         .expect("valid command");
         assert_eq!(
             command.request_hash,
-            OperationsAlertSilenceCommand::request_hash(&fingerprint, 3_600, "admin", "维护窗口")
+            OperationsAlertSilenceCommand::request_hash(
+                &fingerprint,
+                1,
+                3_600,
+                "admin",
+                "维护窗口"
+            )
         );
         assert!(matches!(
             OperationsAlertSilenceCommand::new(
                 Uuid::new_v4(),
                 fingerprint,
+                1,
                 MIN_OPERATIONS_ALERT_SILENCE_SECONDS - 1,
                 "admin",
                 ""
@@ -482,6 +525,7 @@ mod tests {
             OperationsAlertSilenceCommand::new(
                 Uuid::new_v4(),
                 fingerprint,
+                1,
                 MAX_OPERATIONS_ALERT_SILENCE_SECONDS + 1,
                 "admin",
                 ""
@@ -493,12 +537,50 @@ mod tests {
     #[test]
     fn acknowledge_rejects_empty_actor_and_zero_fingerprint() {
         assert!(matches!(
-            OperationsAlertAcknowledgeCommand::new(Uuid::new_v4(), [0; 32], "admin", ""),
+            OperationsAlertAcknowledgeCommand::new(Uuid::new_v4(), [0; 32], 1, "admin", ""),
             Err(OperationsAlertError::Invalid)
         ));
         assert!(matches!(
-            OperationsAlertAcknowledgeCommand::new(Uuid::new_v4(), [2; 32], "", ""),
+            OperationsAlertAcknowledgeCommand::new(Uuid::new_v4(), [2; 32], 1, "", ""),
             Err(OperationsAlertError::Invalid)
         ));
+    }
+
+    #[test]
+    fn confirmation_and_silence_hashes_bind_the_incident_generation() {
+        let fingerprint = [2; 32];
+        let command_id = Uuid::new_v4();
+        let hashes = |incident_generation| {
+            (
+                OperationsAlertAcknowledgeCommand::new(
+                    command_id,
+                    fingerprint,
+                    incident_generation,
+                    "admin",
+                    "核对中",
+                )
+                .map(|command| command.request_hash),
+                OperationsAlertSilenceCommand::new(
+                    command_id,
+                    fingerprint,
+                    incident_generation,
+                    3_600,
+                    "admin",
+                    "核对中",
+                )
+                .map(|command| command.request_hash),
+            )
+        };
+        let original = hashes(0);
+        assert!(original.0.is_ok() && original.1.is_ok());
+        assert_eq!(original, hashes(0));
+        let next = hashes(1);
+        assert!(next.0.is_ok() && next.1.is_ok());
+        assert_ne!(original.0, next.0);
+        assert_ne!(original.1, next.1);
+        assert_eq!(
+            hashes(-1),
+            (Err(OperationsAlertError::Invalid), Err(OperationsAlertError::Invalid))
+        );
     }
 }

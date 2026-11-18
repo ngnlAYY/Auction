@@ -5,6 +5,9 @@
 use auction_web_shared::{AsyncState, AsyncStateKind, Time, t};
 use dioxus::prelude::*;
 
+use self::reason::{
+    AlertReasonDraft, AlertReasonInput, use_alert_reason_draft, valid_alert_reason_length,
+};
 use super::pagination::{AdminPager, use_admin_page, use_admin_pagination};
 use super::pending::{PendingCommandPanel, PendingCommands, set_if_alive, use_pending_commands};
 use super::query::{AlertsQuery, alert_status_choice, use_alerts_query_state};
@@ -13,6 +16,10 @@ use crate::api::{
     AdminAlert, AdminAlertPage, acknowledge_admin_alert, fetch_admin_alerts, fetch_admin_webhooks,
     silence_admin_alert,
 };
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod page_tests;
+mod reason;
 
 /// 公开仓库中的处置手册；Admin 不复制手册正文，只链接到固定锚点。
 const RUNBOOK_BASE_URL: &str = "https://github.com/ngnlAYY/Auction/blob/main/ops/README.md";
@@ -26,7 +33,7 @@ pub(super) fn page() -> Element {
     let query_state = query.state;
     let mut refresh = use_signal(|| 0_u64);
     let notice = use_signal(|| None::<AdminActionFeedback>);
-    let reason = use_signal(String::new);
+    let reason = use_alert_reason_draft();
     // 命令成功后宿主递增 refresh，列表与 webhook 视图随之重读。
     let pending = use_pending_commands(refresh);
     let pagination = use_admin_pagination("alerts", &["page_size"], Some(100), 100_000);
@@ -104,7 +111,12 @@ pub(super) fn page() -> Element {
                         "action-feedback action-feedback--error"
                     },
                     role: if feedback.is_success() { "status" } else { "alert" },
-                    {feedback.message(t!("alert-console-action-ok"))}
+                    {match &feedback {
+                        AdminActionFeedback::Error(code) if code == "alert_stale" => {
+                            t!("alert-console-stale")
+                        }
+                        _ => feedback.message(t!("alert-console-action-ok")),
+                    }}
                 }
             }
             {content}
@@ -116,10 +128,20 @@ pub(super) fn page() -> Element {
 #[component]
 fn AlertTable(
     page: AdminAlertPage,
-    reason: Signal<String>,
+    reason: AlertReasonDraft,
     notice: Signal<Option<AdminActionFeedback>>,
     refresh: Signal<u64>,
 ) -> Element {
+    let pending = use_context::<PendingCommands>();
+    let mut focus_reason = use_signal(|| false);
+    let on_action = use_callback(move |command: AlertCommand| {
+        if !valid_alert_reason_length(command.reason()) {
+            reason.mark_invalid();
+            focus_reason.set(true);
+            return;
+        }
+        submit_alert_command(pending, notice, refresh, command);
+    });
     if page.alerts.is_empty() {
         return rsx! {
             AsyncState {
@@ -147,27 +169,11 @@ fn AlertTable(
                 }
                 tbody {
                     for alert in page.alerts {
-                        AlertRow { key: "{alert.id}", alert, reason, notice, refresh }
+                        AlertRow { key: "{alert.id}", alert, reason: reason.value, on_action }
                     }
                 }
             }
-            div { class: "admin-alert-console__reason",
-                label {
-                    {t!("alert-console-reason")}
-                    input {
-                        r#type: "text",
-                        maxlength: "2048",
-                        value: reason(),
-                        oninput: move |event| {
-                            let value = event.value();
-                            if value.chars().count() <= 2048 {
-                                let mut signal = reason;
-                                signal.set(value);
-                            }
-                        }
-                    }
-                }
-            }
+            AlertReasonInput { draft: reason, focus_requested: focus_reason }
         }
     }
 }
@@ -177,8 +183,7 @@ fn AlertTable(
 fn AlertRow(
     alert: AdminAlert,
     reason: Signal<String>,
-    notice: Signal<Option<AdminActionFeedback>>,
-    refresh: Signal<u64>,
+    on_action: EventHandler<AlertCommand>,
 ) -> Element {
     let pending = use_context::<PendingCommands>();
     let mut silence_hours = use_signal(|| DEFAULT_SILENCE_HOURS);
@@ -248,15 +253,14 @@ fn AlertRow(
                 }
             }
             td {
-                if alert.active {
+                if let Some(incident_generation) = alert.incident_generation.filter(|_| alert.active) {
                     div { class: "admin-alert-console__action-group",
                         button {
                             class: "admin-btn-secondary",
                             r#type: "button",
                             disabled: blocked,
                             onclick: move |_| {
-                                let command = AlertCommand::acknowledge(&acknowledge_id, &reason());
-                                submit_alert_command(pending, notice, refresh, command);
+                                on_action.call(AlertCommand::acknowledge(&acknowledge_id, incident_generation, &reason()));
                             },
                             {t!("alert-console-acknowledge")}
                         }
@@ -281,9 +285,7 @@ fn AlertRow(
                             r#type: "button",
                             disabled: blocked,
                             onclick: move |_| {
-                                let command =
-                                    AlertCommand::silence(&silence_id, silence_hours(), &reason());
-                                submit_alert_command(pending, notice, refresh, command);
+                                on_action.call(AlertCommand::silence(&silence_id, incident_generation, silence_hours(), &reason()));
                             },
                             {t!("alert-console-silence")}
                         }
@@ -373,23 +375,27 @@ fn severity_label(alert: &AdminAlert) -> String {
     }
 }
 
-/// 点击时冻结的告警命令。保护不变量“同 ID 同请求返回原结果、结果未知只允许原样重试”：
-/// 未决宿主的首次提交与每次重试都只读这份负载并复用同一 `command_id`，服务端按原请求重放，
-/// 不会再追加一条只追加的确认/静默事实，静默截止也不会按重试时间后移。
+/// 点击时冻结本行的事件代数和表单参数。首次提交与原样重试共用这份负载，
+/// 列表重读不能替换未决命令的事件代数，避免将旧意图落到复发后的告警。
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum AlertCommand {
-    Acknowledge { alert_id: String, reason: String },
-    Silence { alert_id: String, reason: String, silence_seconds: i64 },
+    Acknowledge { alert_id: String, incident_generation: i64, reason: String },
+    Silence { alert_id: String, incident_generation: i64, reason: String, silence_seconds: i64 },
 }
 
 impl AlertCommand {
-    fn acknowledge(alert_id: &str, reason: &str) -> Self {
-        Self::Acknowledge { alert_id: alert_id.to_owned(), reason: reason.trim().to_owned() }
+    fn acknowledge(alert_id: &str, incident_generation: i64, reason: &str) -> Self {
+        Self::Acknowledge {
+            alert_id: alert_id.to_owned(),
+            incident_generation,
+            reason: reason.trim().to_owned(),
+        }
     }
 
-    fn silence(alert_id: &str, hours: i64, reason: &str) -> Self {
+    fn silence(alert_id: &str, incident_generation: i64, hours: i64, reason: &str) -> Self {
         Self::Silence {
             alert_id: alert_id.to_owned(),
+            incident_generation,
             reason: reason.trim().to_owned(),
             silence_seconds: hours.saturating_mul(3_600),
         }
@@ -398,6 +404,12 @@ impl AlertCommand {
     fn alert_id(&self) -> &str {
         match self {
             Self::Acknowledge { alert_id, .. } | Self::Silence { alert_id, .. } => alert_id,
+        }
+    }
+
+    fn reason(&self) -> &str {
+        match self {
+            Self::Acknowledge { reason, .. } | Self::Silence { reason, .. } => reason,
         }
     }
 }
@@ -430,11 +442,24 @@ fn submit_alert_command(
             let command = command.clone();
             async move {
                 let result = match command {
-                    AlertCommand::Acknowledge { alert_id, reason } => {
-                        acknowledge_admin_alert(command_id, &alert_id, &reason).await
+                    AlertCommand::Acknowledge { alert_id, incident_generation, reason } => {
+                        acknowledge_admin_alert(command_id, &alert_id, incident_generation, &reason)
+                            .await
                     }
-                    AlertCommand::Silence { alert_id, reason, silence_seconds } => {
-                        silence_admin_alert(command_id, &alert_id, silence_seconds, &reason).await
+                    AlertCommand::Silence {
+                        alert_id,
+                        incident_generation,
+                        reason,
+                        silence_seconds,
+                    } => {
+                        silence_admin_alert(
+                            command_id,
+                            &alert_id,
+                            incident_generation,
+                            silence_seconds,
+                            &reason,
+                        )
+                        .await
                     }
                 };
                 result.map(|_| ()).map_err(|failure| failure.code)
@@ -446,7 +471,9 @@ fn submit_alert_command(
             // 事实：重读列表供操作员判断下一步。结果未知等其他失败不重读，只能原样重试。
             if alert_snapshot_stale(&code) {
                 let mut refresh = refresh;
-                refresh.set(refresh().saturating_add(1));
+                if let Ok(mut generation) = refresh.try_write() {
+                    *generation = generation.saturating_add(1);
+                }
             }
             set_if_alive(notice, Some(AdminActionFeedback::Error(code)));
         },
@@ -461,30 +488,35 @@ mod tests {
     use super::{AlertCommand, SILENCE_HOUR_OPTIONS, alert_command_entity, alert_snapshot_stale};
 
     #[test]
-    fn frozen_commands_trim_reason_and_convert_row_duration() {
+    fn frozen_commands_keep_row_generation_trim_reason_and_convert_duration() {
         assert_eq!(
-            AlertCommand::acknowledge("ab", "  disk replaced \n"),
+            AlertCommand::acknowledge("ab", 1, "  disk replaced \n"),
             AlertCommand::Acknowledge {
                 alert_id: "ab".to_owned(),
+                incident_generation: 1,
                 reason: "disk replaced".to_owned()
             }
         );
         assert_eq!(
-            AlertCommand::silence("ab", 8, " maintenance "),
+            AlertCommand::silence("ab", 2, 8, " maintenance "),
             AlertCommand::Silence {
                 alert_id: "ab".to_owned(),
+                incident_generation: 2,
                 reason: "maintenance".to_owned(),
                 silence_seconds: 28_800,
             }
         );
-        assert_eq!(alert_command_entity(AlertCommand::silence("ab", 1, "").alert_id()), "alert:ab");
+        assert_eq!(
+            alert_command_entity(AlertCommand::silence("ab", 2, 1, "").alert_id()),
+            "alert:ab"
+        );
     }
 
     #[test]
     fn every_row_duration_stays_within_server_silence_bounds() {
         for hours in SILENCE_HOUR_OPTIONS {
             let AlertCommand::Silence { silence_seconds, .. } =
-                AlertCommand::silence("ab", hours, "")
+                AlertCommand::silence("ab", 2, hours, "")
             else {
                 panic!("silence command expected");
             };

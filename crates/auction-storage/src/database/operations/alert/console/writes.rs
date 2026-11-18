@@ -40,6 +40,7 @@ impl OperatorAction {
 pub(super) struct OperatorCommand<'a> {
     command_id: Uuid,
     fingerprint: [u8; 32],
+    incident_generation: i64,
     request_digest: [u8; 32],
     actor_id: &'a str,
     reason: &'a str,
@@ -51,6 +52,7 @@ impl<'a> OperatorCommand<'a> {
         Self {
             command_id: command.command_id,
             fingerprint: command.fingerprint,
+            incident_generation: command.incident_generation,
             request_digest: command.request_hash.as_bytes(),
             actor_id: &command.actor_id,
             reason: &command.reason,
@@ -62,6 +64,7 @@ impl<'a> OperatorCommand<'a> {
         Self {
             command_id: command.command_id,
             fingerprint: command.fingerprint,
+            incident_generation: command.incident_generation,
             request_digest: command.request_hash.as_bytes(),
             actor_id: &command.actor_id,
             reason: &command.reason,
@@ -70,8 +73,8 @@ impl<'a> OperatorCommand<'a> {
     }
 }
 
-/// 同一事务内：锁命令 ID → 同 ID 重放（不变量 1）→ 锁 signal 并要求 active → 只追加操作者事实
-/// （不变量 8）→ 更新投影。确认与静默都不改写 kind/scope/source/count/age/active。
+/// 先锁命令 ID 并重放已提交的事实（不变量 1）。新命令在 signal 行锁下核对活动状态和代数，
+/// 过期请求失败关闭（不变量 6），校验通过才追加操作者事实并更新投影（不变量 8）。
 pub(super) async fn write_operator_fact_postgres(
     pool: &TrackedPool<sqlx::Postgres>,
     command: OperatorCommand<'_>,
@@ -93,7 +96,7 @@ pub(super) async fn write_operator_fact_postgres(
         return Ok(result);
     }
     let signal = sqlx::query(
-        "SELECT active FROM public.operations_alert_signals
+        "SELECT active, webhook_generation FROM public.operations_alert_signals
          WHERE fingerprint = $1
          FOR UPDATE",
     )
@@ -102,6 +105,12 @@ pub(super) async fn write_operator_fact_postgres(
     .await
     .map_err(|error| storage_error_from(error, "读取告警水位失败"))?
     .ok_or(ApplicationError::OperationsAlert(OperationsAlertError::Invalid))?;
+    let incident_generation: i64 = signal
+        .try_get("webhook_generation")
+        .map_err(|error| storage_error_from(error, "读取告警事件代数失败"))?;
+    if incident_generation != command.incident_generation {
+        return Err(ApplicationError::OperationsAlert(OperationsAlertError::StaleClaim));
+    }
     let active: bool = signal
         .try_get("active")
         .map_err(|error| storage_error_from(error, "读取告警活动状态失败"))?;

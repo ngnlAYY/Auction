@@ -419,14 +419,14 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
         .route("/api/v1/admin/audit", get(admin_handlers::audit::list))
         .route(
             "/api/v1/admin/alerts/{alert_id}/acknowledge",
-            post(admin_alerts::acknowledge).layer(DefaultBodyLimit::max(4 << 10)).layer(
-                middleware::from_fn_with_state(strict_json::post(4 << 10), strict_json::enforce),
+            post(admin_alerts::acknowledge).layer(DefaultBodyLimit::max(13 << 10)).layer(
+                middleware::from_fn_with_state(strict_json::post(13 << 10), strict_json::enforce),
             ),
         )
         .route(
             "/api/v1/admin/alerts/{alert_id}/silence",
-            post(admin_alerts::silence).layer(DefaultBodyLimit::max(4 << 10)).layer(
-                middleware::from_fn_with_state(strict_json::post(4 << 10), strict_json::enforce),
+            post(admin_alerts::silence).layer(DefaultBodyLimit::max(13 << 10)).layer(
+                middleware::from_fn_with_state(strict_json::post(13 << 10), strict_json::enforce),
             ),
         )
         .route("/api/v1/admin/settlement-returns", get(admin_handlers::settlement_returns::list))

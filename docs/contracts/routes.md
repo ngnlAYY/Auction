@@ -228,10 +228,10 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | GET / POST / DELETE | `/api/v1/admin/session` | 读取会话 / Basic 认证登录（actor:secret）/ 退出。GET 和 POST 接受可选的 `include=server_time`，其他取值、重复参数或未知查询键返回 400 `invalid_query` |
 | POST | `/api/v1/admin/session/activity` | 上报人工活动并续期。空请求体，无需 `Content-Type`，使用 Admin 写入限流，成功时返回带 `server_time` 的会话 DTO。无需 `command_id`，不追加审计 |
 | GET | `/api/v1/admin/dashboard` | 仪表盘聚合快照（健康、Worker、进程、邮件、外部账号、realtime、凭据、投递、履约、恢复、告警、资产对账）。查询参数只有可选的 `include`，且只接受 `collection_wait`：其他取值（含空值、大小写不同与逗号列表）为 400 `invalid_query`（附加字段无效），重复出现或其他查询键为 400 `invalid_query`（查询参数无效）。不带 `include` 时保持已发布的字段集合与口径，已打开的旧页面照常解码（兼容规则见[crates/auction-contracts/README.md#变更规则](../../crates/auction-contracts/README.md#变更规则)）：履约分区含可推进积压（`pending`）、受阻、失败、人工核对、等待买家付款与等待前置分类，已寄出、只等收件人领取的 Send 义务仍计入 `pending` 与 `oldest_backlog_age_seconds` 并参与分区降级，不评估长期未领取；`reconciliation` 分区各 world 只含缺失件数 `custody_missing_count` 与待付缺口 `solvency_shortfall_credits`。带 `include=collection_wait`（Admin 页面始终携带）时：履约分区按等待领取口径，已寄出的 Send 义务不计入 `pending`、积压年龄与 `fulfillment_backlog`，单列“等待领取”分组——总等待数 `awaiting_collection`、其中最近一次 Sent 读取失败的 `awaiting_collection_unreadable`、按投递完成时刻计的 `oldest_awaiting_collection_age_seconds`、按 Admin 生效的告警策略阈值计的超期件数 `collection_overdue_count`（大于 0 时分区降级，与 `fulfillment_collection_overdue` 告警同一计数），以及与之同一只读快照的长期未领取清单 `collection_overdue_items`：只列寄出时长达到阈值的等待领取，寄出最早优先，最多 20 条，每项含 `obligation_id`、`obligation_kind`（`seller_payout`/`buyer_refund`/`unsold_return`/`withdrawn_return`/`winner_equipment_handoff`）、场次 `world` 与 `auction_sequence`、`lot_number`（分类内编号，与 `equipment_category` 组成拍品代码）、`equipment_category`、`equipment_name`、收件人 `recipient`、寄出时刻 `sent_at`、已等待秒数 `age_seconds` 与 `last_read_failed`（最近一次 Sent 读取失败；`false` 只表示没有记录读取失败）；没有告警策略时不评估超期，计数为 0、清单为空；COD/载体付款仍按等待买家付款口径；原投递本轮的系统退件已被恢复流程消费（交付被退回、恢复记录当前退件指向已消费的本义务退件，常见于 Take 已完成、Admin 尚未确认 `equipment_recovered`）的义务不计入等待领取、超期件数与清单，也不回落 `pending`，由恢复流程承担；`reconciliation` 分区各 world 追加只展示、不参与降级的在途装备件数 `custody_in_transit_count` 与在途货款/退款笔数和金额 `solvency_in_transit_count`/`solvency_in_transit_credits`。回滚到不认识该参数的服务端后，新页面这次读取为 400 `invalid_query`，按构建号提示刷新后恢复。两种投影共有：审计失败计数汇总 Public、Admin 与 Worker 的有效心跳，`missing_services` 标记缺测角色；凭据分区的活跃数是数据库记录，`restart_required` 为 `true` 表示 Worker 待重启，为 `null` 表示无法确认。`realtime.failure.oldest_at` 是未解决失败的最早发生时刻，无未解决失败时为 `null`。告警分区含 Webhook 待重试/发送中/失败/人工核对计数；对账报告缺失时 `reconciliation` 为 `unknown`；`external_accounts` 分区只在 Worker control 快照不可用时为 `unknown`，否则含忙碌时长、请求门等待、维护轮次与论坛状态，并嵌套 `pollers`/`credentials` 投影（各自带 `available|unavailable`），缺失的投影不冒充空列表；Admin 页面默认每 30 秒自动轮询（`poll=0` 关闭，10/30/60 秒可选） |
-| GET | `/api/v1/admin/alerts` | 告警台列表（`status=active|resolved|all`，默认 `active`；`source`；`page`、`page_size` ≤100）；`total` 只计所选状态，`active_total`/`resolved_total` 是不随状态筛选变化的两类计数；返回来源、范围、首次/最近时间、计数、确认/静默投影与处置手册锚点 `runbook_anchor` |
+| GET | `/api/v1/admin/alerts` | 告警台列表（`status` 为 `active`、`resolved` 或 `all`，默认 `active`；`source`；`page`、`page_size` ≤100）。`total` 只计所选状态，`active_total`/`resolved_total` 是不随状态筛选变化的两类计数。缺省投影返回来源、范围、首次/最近时间、计数、确认/静默投影与处置手册锚点 `runbook_anchor`。`include=incident_generation` 追加事件代数，详见[告警处置](#告警处置) |
 | GET | `/api/v1/admin/alerts/webhooks` | 最近 webhook 投递安全投影（`limit` 1–100，默认 50）；返回状态、kind/source/scope、尝试次数、下次尝试/发送/完成时间与失败码，不含冻结 JSON、收件人或凭据；只读 |
-| POST | `/api/v1/admin/alerts/{alert_id}/acknowledge` | 确认告警；`alert_id` 为 64 位十六进制 fingerprint。只追加操作者事实（`command_id` 幂等），不改变 signal 状态、计数、阈值或恢复判定 |
-| POST | `/api/v1/admin/alerts/{alert_id}/silence` | 静默告警到 `silence_seconds`（60–604800）之后；只抑制重复通知，到期后仍活动的 signal 按原阈值继续通知，不改变阈值评估 |
+| POST | `/api/v1/admin/alerts/{alert_id}/acknowledge` | 确认告警并追加操作者事实，详见[告警处置](#告警处置) |
+| POST | `/api/v1/admin/alerts/{alert_id}/silence` | 在 `silence_seconds`（60–604800）内抑制重复通知，详见[告警处置](#告警处置) |
 | GET | `/api/v1/admin/pending-counts` | 导航待办数：`delivery_manual_reconcile`（不含运维告警投递与结算退件 Take 投递 `settlement_return_action`，后者归所属案件，计入 `settlement_returns`）、`recovery_confirmation`（reclaiming 且证据齐全、恰好一个候选结果；需要拉黑的确认须已完成拉黑——main `reclaimed` 始终需要，isekai `cancelled` 只在退回次数达到冻结上限时需要）、`active_alerts`。查询参数只有可选的 `include`，且只接受 `settlement_returns`：带它时追加未结案结算退件案件数 `settlement_returns`（`closed_at` 为空的案件，含隔离、待重新核验与 Take 结果未知，与两类退件告警合计同一口径，不要求存在义务），Admin 页面始终携带；不带时保持已发布的三字段集合，已打开的旧页面照常解码。其他取值（含空值、大小写不同与逗号列表）为 400 `invalid_query`（附加字段无效），重复出现或其他查询键为 400 `invalid_query`（告警查询参数无效）；回滚到不认识该参数的服务端后，新页面的导航待办数这次读取失败、不显示徽标，按构建号提示刷新后恢复 |
 | GET | `/api/v1/admin/worlds` | 业务世界及启用状态 |
 | PATCH | `/api/v1/admin/worlds/{world_id}` | 启用/停用业务世界（即时生效） |
@@ -307,6 +307,16 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 投递行可安全展示但完整命令快照无法读取时，详情继续返回状态、尝试、证据与处置历史。释放、重排与对账在预览和锁内提交共用完整快照校验，阻断码均为 `delivery_command_snapshot_unreadable`，提交返回 409。确认已处置独立判断当前 fence 与无资产影响资格。
 
 携带登录 key 的 `mail_intake` 回信（`register_key`、`rekey_key`）发现收件角色已换绑时按 v0.1.8 已支持的 `failed` 形状收口。围栏前的 `failure_code` 为 `invalid_payload`，进入围栏后为 `preflight_blocked` 并保留真实的 `sending_at`。释放或重排时实时复核绑定，不匹配返回 `409 delivery_recipient_renamed`。已有投递、证据与命令账本保持原样。符合无资金和资产影响条件的失败可以确认已处置。
+
+### 告警处置
+
+列表缺省响应保持已发布的字段集合。请求带 `include=incident_generation` 时，每条告警追加非负整数 `incident_generation`。该值来自 `webhook_generation`，只在同指纹的告警恢复后再次发生时递增。新 Admin 页面始终请求该投影。其他 `include` 取值（含空值、大小写不同与逗号列表）、重复参数或未知查询键返回 `400 invalid_query`。回滚到旧服务端后，新页面的这次读取返回 `400 invalid_query`，按构建号提示刷新后恢复。
+
+`alert_id` 为 64 位十六进制 fingerprint。确认的 JSON 请求体包含 `command_id`、列表该条目返回的 `incident_generation` 与可选 `reason`，静默还须提供 `silence_seconds`。备注解码后为最多 2048 个 UTF-8 字节的单行文本，可留空。两条路由的 JSON 请求体上限均为 13 KiB，按备注每个解码字节最多占用 6 个编码字节计算。超限时返回 `413 body_too_large`。确认与静默的请求体自本版起要求 `incident_generation`，升级前发出的命令不能跨版本原样重放。
+
+同一 `command_id` 原样重试返回已提交结果，即使告警已经恢复或复发。同 ID 更换事件代数或其他参数返回 `409 command_conflict`。新命令在锁定告警行后核对代数与活动状态。代数不符返回 `409 alert_stale`，不追加事实或更新投影，页面重读列表。代数缺失、为 null 或类型不是整数返回 `400 invalid_json`，负数、告警不存在或同代数的告警已恢复返回 `400 invalid_alert_command`。
+
+确认只记录操作者知悉该事件。静默只抑制该事件的重复通知，到期后仍活动的告警按原阈值继续通知。
 
 ### 运行时开关只读接口
 

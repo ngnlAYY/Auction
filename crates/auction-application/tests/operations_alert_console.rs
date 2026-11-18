@@ -54,6 +54,7 @@ fn filter_and_pagination_are_fail_closed() {
         scope: "delivery".to_owned(),
         source: OperationsAlertSource::Delivery,
         active: true,
+        incident_generation: 1,
         count: 2,
         age_seconds: 90,
         first_seen_at: Timestamp::now() - Duration::minutes(5),
@@ -116,25 +117,25 @@ fn filter_and_pagination_are_fail_closed() {
 #[test]
 fn silence_hash_binds_action_duration_actor_and_reason() {
     let fingerprint = [3; 32];
-    let base = OperationsAlertSilenceCommand::request_hash(&fingerprint, 3_600, "admin", "note");
+    let base = OperationsAlertSilenceCommand::request_hash(&fingerprint, 1, 3_600, "admin", "note");
     assert_eq!(
         base,
-        OperationsAlertSilenceCommand::request_hash(&fingerprint, 3_600, "admin", "note")
+        OperationsAlertSilenceCommand::request_hash(&fingerprint, 1, 3_600, "admin", "note")
     );
     for other in [
-        OperationsAlertSilenceCommand::request_hash(&fingerprint, 7_200, "admin", "note"),
-        OperationsAlertSilenceCommand::request_hash(&fingerprint, 3_600, "other", "note"),
-        OperationsAlertSilenceCommand::request_hash(&fingerprint, 3_600, "admin", "other"),
+        OperationsAlertSilenceCommand::request_hash(&fingerprint, 1, 7_200, "admin", "note"),
+        OperationsAlertSilenceCommand::request_hash(&fingerprint, 1, 3_600, "other", "note"),
+        OperationsAlertSilenceCommand::request_hash(&fingerprint, 1, 3_600, "admin", "other"),
     ] {
         assert_ne!(base, other);
     }
 
     assert!(matches!(
-        OperationsAlertSilenceCommand::new(Uuid::new_v4(), [0; 32], 3_600, "admin", ""),
+        OperationsAlertSilenceCommand::new(Uuid::new_v4(), [0; 32], 1, 3_600, "admin", ""),
         Err(OperationsAlertError::Invalid)
     ));
     assert!(matches!(
-        OperationsAlertSilenceCommand::new(Uuid::nil(), fingerprint, 3_600, "admin", ""),
+        OperationsAlertSilenceCommand::new(Uuid::nil(), fingerprint, 1, 3_600, "admin", ""),
         Err(OperationsAlertError::Invalid)
     ));
 }

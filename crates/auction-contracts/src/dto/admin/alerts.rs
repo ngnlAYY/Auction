@@ -16,6 +16,9 @@ pub struct AdminAlertEntryResponse {
     /// `urgent` 或 `digest`。
     pub severity: String,
     pub active: bool,
+    /// 仅 `include=incident_generation` 投影返回。同一指纹的告警恢复后再出现时递增。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub incident_generation: Option<i64>,
     pub count: i64,
     pub age_seconds: i64,
     pub first_seen_at: String,
@@ -69,6 +72,8 @@ pub struct AdminAlertWebhookListResponse {
 pub struct AdminAlertAcknowledgeRequest {
     #[serde(default, deserialize_with = "deserialize_null_default")]
     pub command_id: String,
+    /// 列表中所见的事件代数。
+    pub incident_generation: i64,
     #[serde(default, deserialize_with = "deserialize_null_default")]
     pub reason: String,
 }
@@ -78,6 +83,8 @@ pub struct AdminAlertAcknowledgeRequest {
 pub struct AdminAlertSilenceRequest {
     #[serde(default, deserialize_with = "deserialize_null_default")]
     pub command_id: String,
+    /// 列表中所见的事件代数。
+    pub incident_generation: i64,
     #[serde(default, deserialize_with = "deserialize_null_default")]
     pub reason: String,
     #[serde(default, deserialize_with = "deserialize_null_default")]

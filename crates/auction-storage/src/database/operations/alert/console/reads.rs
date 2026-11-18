@@ -135,7 +135,8 @@ pub(super) async fn list_postgres(
     let rows = sqlx::query(
         "SELECT fingerprint, kind, scope, source, active, first_seen_at, last_seen_at,
                 resolved_at, last_notified_at, next_notify_at, count_value, age_seconds,
-                acknowledged_at, acknowledged_by, silenced_until
+                acknowledged_at, acknowledged_by, silenced_until,
+                webhook_generation AS incident_generation
          FROM public.operations_alert_signals
          WHERE ($1::bool IS NULL OR active = $1)
            AND ($2::text IS NULL OR source = $2)
@@ -197,6 +198,9 @@ pub(super) fn entry_from_row(
         active: row
             .try_get("active")
             .map_err(|error| storage_error_from(error, "读取告警活动状态失败"))?,
+        incident_generation: row
+            .try_get("incident_generation")
+            .map_err(|error| storage_error_from(error, "读取告警事件代数失败"))?,
         count: row
             .try_get("count_value")
             .map_err(|error| storage_error_from(error, "读取告警计数失败"))?,

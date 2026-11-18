@@ -193,17 +193,22 @@ async fn postgres_settlement_return_alerts_follow_open_cases_and_close_on_closur
     assert_eq!(fulfillment.manual_reconcile, 0, "由案件接管的人工对账不重复计数");
 
     // 告警确认只追加操作者事实，不改变案件；下一轮扫描仍按未结案案件保持活动。
-    let fingerprint: Vec<u8> = sqlx::query_scalar(
-        "SELECT fingerprint FROM public.operations_alert_signals
+    let (fingerprint, incident_generation): (Vec<u8>, i64) = sqlx::query_as(
+        "SELECT fingerprint, webhook_generation FROM public.operations_alert_signals
          WHERE kind = 'settlement_return_pending' AND source = 'fulfillment'",
     )
     .fetch_one(pool)
     .await
     .expect("读取告警指纹");
     let fingerprint: [u8; 32] = fingerprint.try_into().expect("指纹 32 字节");
-    let acknowledge =
-        OperationsAlertAcknowledgeCommand::new(Uuid::new_v4(), fingerprint, "operator", "核对中")
-            .expect("构造确认命令");
+    let acknowledge = OperationsAlertAcknowledgeCommand::new(
+        Uuid::new_v4(),
+        fingerprint,
+        incident_generation,
+        "operator",
+        "核对中",
+    )
+    .expect("构造确认命令");
     store.acknowledge_alert(acknowledge).await.expect("确认告警");
     let detail = store.settlement_return_detail(bound).await.expect("案件详情");
     assert_eq!(detail.summary.status, SettlementReturnCaseStatus::AwaitingDecision);

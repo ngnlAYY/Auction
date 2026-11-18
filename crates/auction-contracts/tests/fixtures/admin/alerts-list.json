@@ -1,0 +1,53 @@
+{
+  "code": "ok",
+  "message": "ok",
+  "data": {
+    "alerts": [
+      {
+        "id": "abababababababababababababababababababababababababababababababab",
+        "kind": "service_missing",
+        "scope": "worker",
+        "source": "process",
+        "severity": "urgent",
+        "active": true,
+        "incident_generation": 2,
+        "count": 1,
+        "age_seconds": 0,
+        "first_seen_at": "2026-11-18T12:00:00.000000Z",
+        "last_seen_at": "2026-11-18T12:00:00.000000Z",
+        "resolved_at": null,
+        "last_notified_at": null,
+        "next_notify_at": "2026-11-18T12:02:00.000000Z",
+        "acknowledged_at": null,
+        "acknowledged_by": null,
+        "silenced_until": null,
+        "runbook_anchor": "alert-runbook-process"
+      },
+      {
+        "id": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+        "kind": "service_missing",
+        "scope": "admin",
+        "source": "process",
+        "severity": "urgent",
+        "active": true,
+        "incident_generation": 1,
+        "count": 1,
+        "age_seconds": 60,
+        "first_seen_at": "2026-11-18T11:58:00.000000Z",
+        "last_seen_at": "2026-11-18T11:59:00.000000Z",
+        "resolved_at": null,
+        "last_notified_at": "2026-11-18T11:58:00.000000Z",
+        "next_notify_at": "2026-11-18T13:00:00.000000Z",
+        "acknowledged_at": "2026-11-18T12:00:00.000000Z",
+        "acknowledged_by": "operator",
+        "silenced_until": "2026-11-18T13:00:00.000000Z",
+        "runbook_anchor": "alert-runbook-process"
+      }
+    ],
+    "page": 1,
+    "page_size": 50,
+    "total": 2,
+    "active_total": 2,
+    "resolved_total": 0
+  }
+}

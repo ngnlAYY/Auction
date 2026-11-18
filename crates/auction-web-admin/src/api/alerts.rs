@@ -2,6 +2,9 @@
 //! 浏览器只接收告警台的安全投影；确认/静默命令携带稳定 `command_id`，同一输入重试复用
 //! 同一 ID 与服务端摘要。页面不能把静默当作阈值修改，服务端也不会改变 signal 状态。
 
+#[cfg(test)]
+use std::rc::Rc;
+
 use auction_contracts::{
     AdminAlertAcknowledgeRequest, AdminAlertCommandResponse, AdminAlertSilenceRequest, ApiResponse,
 };
@@ -12,6 +15,8 @@ pub(crate) use auction_contracts::{
     AdminAlertWebhookListResponse as AdminAlertWebhookPage,
     AdminPendingCountsResponse as AdminPendingCounts,
 };
+#[cfg(test)]
+use auction_web_shared::TransportError;
 use gloo_net::http::Request;
 use uuid::Uuid;
 
@@ -26,17 +31,29 @@ pub(crate) async fn fetch_admin_alerts(
     page: i64,
     page_size: i64,
 ) -> Result<AdminAlertPage, String> {
+    let url = alert_list_url(status, page, page_size)?;
+    let body = send_alert_request(&url, None).await.map_err(|failure| failure.code)?;
+    decode_alert_page(&body, status, page, page_size)
+}
+
+fn alert_list_url(status: &str, page: i64, page_size: i64) -> Result<String, String> {
     super::pagination::validate(page, page_size, 100, 100_000)?;
     if !matches!(status, "active" | "resolved" | "all") {
         return Err("invalid_request".to_owned());
     }
-    let url = format!("/api/v1/admin/alerts?status={status}&page={page}&page_size={page_size}");
-    let response = send_get(&url).await?;
-    if !response.ok() {
-        return Err(response_error(response).await);
-    }
+    Ok(format!(
+        "/api/v1/admin/alerts?status={status}&page={page}&page_size={page_size}&include=incident_generation"
+    ))
+}
+
+fn decode_alert_page(
+    body: &str,
+    status: &str,
+    page: i64,
+    page_size: i64,
+) -> Result<AdminAlertPage, String> {
     let payload: ApiResponse<AdminAlertPage> =
-        response.json().await.map_err(invalid_response_error)?;
+        serde_json::from_str(body).map_err(invalid_response_error)?;
     let page_data = payload.data;
     if !valid_alert_page(status, page, page_size, &page_data) {
         return Err(invalid_response_error("alert page"));
@@ -75,12 +92,10 @@ pub(crate) async fn fetch_admin_webhooks(limit: usize) -> Result<Vec<AdminAlertW
     if limit == 0 || limit > 100 {
         return Err("invalid_request".to_owned());
     }
-    let response = send_get(&format!("/api/v1/admin/alerts/webhooks?limit={limit}")).await?;
-    if !response.ok() {
-        return Err(response_error(response).await);
-    }
+    let url = format!("/api/v1/admin/alerts/webhooks?limit={limit}");
+    let body = send_alert_request(&url, None).await.map_err(|failure| failure.code)?;
     let payload: ApiResponse<AdminAlertWebhookPage> =
-        response.json().await.map_err(invalid_response_error)?;
+        serde_json::from_str(&body).map_err(invalid_response_error)?;
     let page = payload.data;
     if page.entries.len() > limit
         || page.entries.iter().any(|entry| {
@@ -125,9 +140,10 @@ fn valid_pending_counts(counts: &AdminPendingCounts) -> bool {
 pub(crate) async fn acknowledge_admin_alert(
     command_id: Uuid,
     alert_id: &str,
+    incident_generation: i64,
     reason: &str,
 ) -> Result<AdminAlertCommandResult, AdminApiFailure> {
-    let command = acknowledge_request(command_id, reason);
+    let command = acknowledge_request(command_id, incident_generation, reason);
     submit_alert_command(command_id, alert_id, "acknowledge", command).await
 }
 
@@ -135,21 +151,31 @@ pub(crate) async fn acknowledge_admin_alert(
 pub(crate) async fn silence_admin_alert(
     command_id: Uuid,
     alert_id: &str,
+    incident_generation: i64,
     silence_seconds: i64,
     reason: &str,
 ) -> Result<AdminAlertCommandResult, AdminApiFailure> {
-    let command = silence_request(command_id, silence_seconds, reason)?;
+    let command = silence_request(command_id, incident_generation, silence_seconds, reason)?;
     submit_alert_command(command_id, alert_id, "silence", command).await
 }
 
-/// 请求体只由冻结的命令 ID 与备注决定：同一输入重试得到逐字节相同的请求，服务端按原 ID 重放。
-fn acknowledge_request(command_id: Uuid, reason: &str) -> AdminAlertAcknowledgeRequest {
-    AdminAlertAcknowledgeRequest { command_id: command_id.to_string(), reason: reason.to_owned() }
+/// 请求体只用首次提交冻结的参数，重试复用原命令 ID 与所处置的事件代数。
+fn acknowledge_request(
+    command_id: Uuid,
+    incident_generation: i64,
+    reason: &str,
+) -> AdminAlertAcknowledgeRequest {
+    AdminAlertAcknowledgeRequest {
+        command_id: command_id.to_string(),
+        incident_generation,
+        reason: reason.to_owned(),
+    }
 }
 
 /// 静默时长越界在发送前失败关闭，不交给服务端裁剪；其余同 [`acknowledge_request`]。
 fn silence_request(
     command_id: Uuid,
+    incident_generation: i64,
     silence_seconds: i64,
     reason: &str,
 ) -> Result<AdminAlertSilenceRequest, AdminApiFailure> {
@@ -158,6 +184,7 @@ fn silence_request(
     }
     Ok(AdminAlertSilenceRequest {
         command_id: command_id.to_string(),
+        incident_generation,
         reason: reason.to_owned(),
         silence_seconds,
     })
@@ -172,23 +199,11 @@ async fn submit_alert_command<T: serde::Serialize>(
     if alert_id.len() != 64 || !alert_id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err(AdminApiFailure::client("invalid_request"));
     }
-    let csrf_token = fetch_csrf_token().await.map_err(AdminApiFailure::client)?;
     let url = format!("/api/v1/admin/alerts/{alert_id}/{action}");
-    let response = send_request(|abort_signal| {
-        Request::post(&url)
-            .abort_signal(abort_signal)
-            .header("x-csrf-token", &csrf_token)
-            .json(&command)
-            .map_err(invalid_request_error)
-    })
-    .await
-    .map_err(AdminApiFailure::client)?;
-    if !response.ok() {
-        return Err(response_failure(response).await);
-    }
-    let payload: ApiResponse<AdminAlertCommandResponse> = response
-        .json()
-        .await
+    let request_body = serde_json::to_string(&command)
+        .map_err(|error| AdminApiFailure::client(invalid_request_error(error)))?;
+    let body = send_alert_request(&url, Some(request_body)).await?;
+    let payload: ApiResponse<AdminAlertCommandResponse> = serde_json::from_str(&body)
         .map_err(|error| AdminApiFailure::client(invalid_response_error(error)))?;
     let result = payload.data.alert;
     if result.id != alert_id
@@ -201,6 +216,56 @@ async fn submit_alert_command<T: serde::Serialize>(
         return Err(AdminApiFailure::client(invalid_response_error("alert command")));
     }
     Ok(result)
+}
+
+async fn send_alert_request(url: &str, body: Option<String>) -> Result<String, AdminApiFailure> {
+    #[cfg(test)]
+    if let Some(stub) = dioxus::prelude::try_consume_context::<AlertResponseStub>() {
+        let (status, response) = (stub.0)(url, body.as_deref())
+            .map_err(|error| AdminApiFailure::client(error.code()))?;
+        return if (200..300).contains(&status) {
+            Ok(response)
+        } else {
+            Err(AdminApiFailure::from_http_body(status, &response))
+        };
+    }
+
+    let response = if let Some(body) = body {
+        let csrf_token = fetch_csrf_token().await.map_err(AdminApiFailure::client)?;
+        send_request(|abort_signal| {
+            Request::post(url)
+                .abort_signal(abort_signal)
+                .header("x-csrf-token", &csrf_token)
+                .header("Content-Type", "application/json")
+                .body(body)
+                .map_err(invalid_request_error)
+        })
+        .await
+    } else {
+        send_get(url).await
+    }
+    .map_err(AdminApiFailure::client)?;
+    if !response.ok() {
+        return Err(response_failure(response).await);
+    }
+    response.text().await.map_err(|error| AdminApiFailure::client(invalid_response_error(error)))
+}
+
+#[cfg(test)]
+type AlertRequestStub = dyn Fn(&str, Option<&str>) -> Result<(u16, String), TransportError>;
+
+#[cfg(test)]
+#[derive(Clone)]
+struct AlertResponseStub(Rc<AlertRequestStub>);
+
+#[cfg(test)]
+impl AdminApiFailure {
+    /// 告警页宿主测试记录已序列化的请求，并提供原始 HTTP 回执或传输超时。
+    pub(crate) fn stub_alert_responses(
+        send: impl Fn(&str, Option<&str>) -> Result<(u16, String), TransportError> + 'static,
+    ) {
+        dioxus::prelude::provide_context(AlertResponseStub(Rc::new(send)));
+    }
 }
 
 fn valid_alert(alert: &AdminAlert) -> bool {
@@ -225,6 +290,7 @@ fn valid_alert(alert: &AdminAlert) -> bool {
         && !alert.kind.is_empty()
         && !alert.scope.is_empty()
         && !alert.runbook_anchor.is_empty()
+        && alert.incident_generation.is_some_and(|generation| generation >= 0)
         && alert.count >= 0
         && alert.age_seconds >= 0
         && alert.active == alert.resolved_at.is_none()
@@ -234,11 +300,12 @@ fn valid_alert(alert: &AdminAlert) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::{Value, json};
     use uuid::Uuid;
 
     use super::{
-        AdminAlert, AdminAlertPage, AdminPendingCounts, acknowledge_request, silence_request,
-        valid_alert, valid_alert_page, valid_pending_counts,
+        AdminAlert, AdminAlertPage, AdminPendingCounts, acknowledge_request, alert_list_url,
+        decode_alert_page, silence_request, valid_alert, valid_alert_page, valid_pending_counts,
     };
     use crate::api::MAX_JSON_SAFE_INTEGER;
 
@@ -267,6 +334,7 @@ mod tests {
             source: source.to_owned(),
             severity: "urgent".to_owned(),
             active: true,
+            incident_generation: Some(1),
             count: 1,
             age_seconds: 0,
             first_seen_at: "2026-11-07T00:00:00Z".to_owned(),
@@ -359,31 +427,62 @@ mod tests {
     }
 
     #[test]
+    fn alert_list_always_requests_the_incident_generation() {
+        assert_eq!(
+            alert_list_url("all", 2, 50).expect("告警列表 URL"),
+            "/api/v1/admin/alerts?status=all&page=2&page_size=50&include=incident_generation"
+        );
+        assert!(alert_list_url("active&include=unknown", 1, 50).is_err());
+    }
+
+    #[test]
+    fn alert_page_requires_a_nonnegative_integer_incident_generation() {
+        let wire = include_str!("../../../auction-contracts/tests/fixtures/admin/alerts-list.json");
+        let decode = |body: &str| decode_alert_page(body, "active", 1, 50);
+        let page = decode(wire).expect("接受后端告警列表");
+        assert_eq!(page.alerts[0].incident_generation, Some(2));
+        assert_eq!(page.alerts[1].incident_generation, Some(1));
+        assert!(page.alerts[1].acknowledged_at.is_some());
+        assert!(page.alerts[1].silenced_until.is_some());
+
+        let mut invalid: Value = serde_json::from_str(wire).expect("告警列表样本");
+        invalid["data"]["alerts"][0]
+            .as_object_mut()
+            .expect("告警条目")
+            .remove("incident_generation");
+        assert!(decode(&invalid.to_string()).is_err());
+        for generation in [json!(-1), json!(1.5), Value::Null] {
+            invalid["data"]["alerts"][0]["incident_generation"] = generation;
+            assert!(decode(&invalid.to_string()).is_err());
+        }
+    }
+
+    #[test]
     fn frozen_alert_commands_serialize_to_fixed_wire_bytes() {
-        // 负载只由冻结的命令 ID、备注与静默秒数决定；与固定字面量逐字节比较，字段增减、改名
-        // 或换序都会让同一命令的重试摘要漂移。
+        // 用固定载荷核对事件代数与其余冻结参数都进入原样重试的请求体。
         let command_id = Uuid::from_u128(0x0123_4567_89ab_4cde_8f01_2345_6789_abcd);
         let acknowledge =
-            serde_json::to_string(&acknowledge_request(command_id, "disk replaced")).expect("json");
+            serde_json::to_string(&acknowledge_request(command_id, 1, "disk replaced"))
+                .expect("json");
         assert_eq!(
             acknowledge,
-            r#"{"command_id":"01234567-89ab-4cde-8f01-23456789abcd","reason":"disk replaced"}"#
+            r#"{"command_id":"01234567-89ab-4cde-8f01-23456789abcd","incident_generation":1,"reason":"disk replaced"}"#
         );
-        let silence = silence_request(command_id, 86_400, "maintenance")
+        let silence = silence_request(command_id, 2, 86_400, "maintenance")
             .map(|request| serde_json::to_string(&request).expect("json"))
             .expect("合法静默时长");
         assert_eq!(
             silence,
-            r#"{"command_id":"01234567-89ab-4cde-8f01-23456789abcd","reason":"maintenance","silence_seconds":86400}"#
+            r#"{"command_id":"01234567-89ab-4cde-8f01-23456789abcd","incident_generation":2,"reason":"maintenance","silence_seconds":86400}"#
         );
     }
 
     #[test]
     fn silence_duration_outside_server_bounds_is_rejected_before_sending() {
         let command_id = Uuid::from_u128(1);
-        assert!(silence_request(command_id, 59, "").is_err());
-        assert!(silence_request(command_id, 7 * 24 * 3_600 + 1, "").is_err());
-        assert!(silence_request(command_id, 60, "").is_ok());
-        assert!(silence_request(command_id, 7 * 24 * 3_600, "").is_ok());
+        assert!(silence_request(command_id, 1, 59, "").is_err());
+        assert!(silence_request(command_id, 1, 7 * 24 * 3_600 + 1, "").is_err());
+        assert!(silence_request(command_id, 1, 60, "").is_ok());
+        assert!(silence_request(command_id, 1, 7 * 24 * 3_600, "").is_ok());
     }
 }

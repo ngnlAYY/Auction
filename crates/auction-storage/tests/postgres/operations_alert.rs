@@ -1309,6 +1309,7 @@ async fn postgres_operations_alert_webhook_respects_silence_window() {
     let silence = auction_application::operations::OperationsAlertSilenceCommand::new(
         Uuid::new_v4(),
         fingerprint,
+        1,
         3_600,
         "operator",
         "planned maintenance",
@@ -1409,6 +1410,7 @@ async fn postgres_operations_alert_claim_keeps_active_summary_and_enqueue_preser
     let silence = auction_application::operations::OperationsAlertSilenceCommand::new(
         Uuid::new_v4(),
         fingerprint,
+        1,
         7 * 24 * 3_600,
         "operator",
         "planned maintenance",
@@ -1828,6 +1830,7 @@ async fn postgres_operations_alert_acknowledge_replays_and_rejects_identity_reus
     let acknowledge = auction_application::operations::OperationsAlertAcknowledgeCommand::new(
         command_id,
         fingerprint,
+        1,
         "operator",
         "investigating",
     )
@@ -1843,6 +1846,7 @@ async fn postgres_operations_alert_acknowledge_replays_and_rejects_identity_reus
     let changed = auction_application::operations::OperationsAlertAcknowledgeCommand::new(
         command_id,
         fingerprint,
+        1,
         "operator",
         "another reason",
     )
@@ -1856,6 +1860,7 @@ async fn postgres_operations_alert_acknowledge_replays_and_rejects_identity_reus
     let silence = auction_application::operations::OperationsAlertSilenceCommand::new(
         command_id,
         fingerprint,
+        1,
         3_600,
         "operator",
         "investigating",
@@ -1891,6 +1896,187 @@ async fn postgres_operations_alert_acknowledge_replays_and_rejects_identity_reus
     .await
     .expect("读取操作者事实");
     assert_eq!(facts, 1, "重放与冲突都不得追加事实");
+
+    store.postgres_pool().close().await;
+}
+
+#[tokio::test]
+async fn postgres_operations_alert_actions_bind_to_the_observed_incident() {
+    use auction_application::core::ApplicationError;
+    use auction_application::operations::{
+        OperationsAlertAcknowledgeCommand, OperationsAlertConsoleQuery, OperationsAlertError,
+        OperationsAlertFilter, OperationsAlertObserveCommand, OperationsAlertRuntimeStatus,
+        OperationsAlertSignal, OperationsAlertSilenceCommand, OperationsAlertSourceObservation,
+    };
+
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接克隆测试数据库");
+    // 克隆库保留了模板的状态发布时间，以此作为夹具时钟的下限。
+    let published_at: Timestamp = sqlx::query_scalar(
+        "SELECT updated_at FROM public.operations_alert_runtime_state WHERE singleton_id = 1",
+    )
+    .fetch_one(store.postgres_pool())
+    .await
+    .expect("读取告警运行状态发布时间");
+    let start = Timestamp::now().max(published_at);
+    store
+        .publish_runtime_status(OperationsAlertRuntimeStatus { enabled: true, updated_at: start })
+        .await
+        .expect("启用告警");
+    let source = OperationsAlertSource::Process;
+    let signal =
+        OperationsAlertSignal::new(OperationsAlertKind::ServiceMissing, "worker", source, 1, 0)
+            .expect("构造信号");
+    let fingerprint = signal.fingerprint;
+    let observe = |active, elapsed| {
+        let observations = OperationsAlertSource::WORKER
+            .into_iter()
+            .map(|current| {
+                let signals =
+                    if current == source && active { vec![signal.clone()] } else { vec![] };
+                OperationsAlertSourceObservation::available(current, signals).expect("构造来源观察")
+            })
+            .collect();
+        store.observe(OperationsAlertObserveCommand {
+            observations,
+            now: start + auction_time::Duration::seconds(elapsed),
+            batch_window: Duration::from_secs(120),
+        })
+    };
+    let read_alert = || async {
+        let page = store
+            .list_alerts(
+                OperationsAlertConsoleQuery {
+                    filter: OperationsAlertFilter::All,
+                    source: Some(source),
+                    page: 1,
+                    page_size: 10,
+                },
+                Timestamp::now(),
+            )
+            .await
+            .expect("读取告警台");
+        assert_eq!(page.entries.len(), 1);
+        page.entries.into_iter().next().expect("同一指纹的告警")
+    };
+    let count_facts = || async {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM public.operations_alert_acknowledgements WHERE fingerprint = $1",
+        )
+        .bind(fingerprint.as_slice())
+        .fetch_one(store.postgres_pool())
+        .await
+        .expect("读取操作者事实数")
+    };
+    let acknowledge = |command_id, generation| {
+        OperationsAlertAcknowledgeCommand::new(
+            command_id,
+            fingerprint,
+            generation,
+            "operator",
+            "核对中",
+        )
+        .expect("构造确认命令")
+    };
+    let silence = |command_id, generation| {
+        OperationsAlertSilenceCommand::new(
+            command_id,
+            fingerprint,
+            generation,
+            3_600,
+            "operator",
+            "核对中",
+        )
+        .expect("构造静默命令")
+    };
+
+    observe(true, 0).await.expect("观察到首轮故障");
+    let original = read_alert().await;
+    assert!(original.active);
+    let generation = original.incident_generation;
+    assert_eq!(generation, 1);
+    observe(true, 1).await.expect("重复观察首轮故障");
+    assert_eq!(read_alert().await.incident_generation, generation);
+    let old_acknowledge = acknowledge(Uuid::new_v4(), generation);
+    let old_silence = silence(Uuid::new_v4(), generation);
+    let first_acknowledge =
+        store.acknowledge_alert(old_acknowledge.clone()).await.expect("确认首轮");
+    let first_silence = store.silence_alert(old_silence.clone()).await.expect("静默首轮");
+
+    observe(false, 2).await.expect("观察到恢复");
+    let resolved = read_alert().await;
+    assert!(!resolved.active);
+    assert_eq!(resolved.incident_generation, generation);
+    observe(true, 3).await.expect("观察到复发");
+    let current = read_alert().await;
+    assert_eq!(current.fingerprint, original.fingerprint);
+    assert!(current.active);
+    let current_generation = current.incident_generation;
+    assert_eq!(current_generation, generation + 1);
+    assert_eq!(current.acknowledged_at, None);
+    assert_eq!(current.silenced_until, None);
+
+    for result in [
+        store.acknowledge_alert(acknowledge(Uuid::new_v4(), generation)).await,
+        store.silence_alert(silence(Uuid::new_v4(), generation)).await,
+    ] {
+        assert!(
+            matches!(
+                result,
+                Err(ApplicationError::OperationsAlert(OperationsAlertError::StaleClaim))
+            ),
+            "旧页面不能处置复发告警：{result:?}"
+        );
+    }
+    let ack_replay = store.acknowledge_alert(old_acknowledge).await.expect("重放首轮确认");
+    assert!(ack_replay.replayed);
+    assert_eq!(ack_replay.command_id, first_acknowledge.command_id);
+    assert_eq!(ack_replay.action, first_acknowledge.action);
+    assert_eq!(ack_replay.silenced_until, first_acknowledge.silenced_until);
+    let silence_replay = store.silence_alert(old_silence).await.expect("重放首轮静默");
+    assert!(silence_replay.replayed);
+    assert_eq!(silence_replay.command_id, first_silence.command_id);
+    assert_eq!(silence_replay.action, first_silence.action);
+    // 数据库存储与 HTTP 契约均使用微秒精度。
+    assert_eq!(
+        silence_replay.silenced_until.map(Timestamp::timestamp_micros),
+        first_silence.silenced_until.map(Timestamp::timestamp_micros),
+    );
+    for result in [
+        store
+            .acknowledge_alert(acknowledge(first_acknowledge.command_id, current_generation))
+            .await,
+        store.silence_alert(silence(first_silence.command_id, current_generation)).await,
+    ] {
+        assert!(
+            matches!(
+                result,
+                Err(ApplicationError::OperationsAlert(OperationsAlertError::IdentityConflict))
+            ),
+            "同命令 ID 换代数必须冲突：{result:?}"
+        );
+    }
+    assert_eq!(read_alert().await, current, "旧请求均不得改写新一轮投影");
+    assert_eq!(count_facts().await, 2, "旧请求均不得追加事实");
+
+    let fresh_acknowledge = store
+        .acknowledge_alert(acknowledge(Uuid::new_v4(), current_generation))
+        .await
+        .expect("确认当前故障");
+    let fresh_silence = store
+        .silence_alert(silence(Uuid::new_v4(), current_generation))
+        .await
+        .expect("静默当前故障");
+    assert!(!fresh_acknowledge.replayed && !fresh_silence.replayed);
+    let updated = read_alert().await;
+    assert_eq!(updated.acknowledged_by.as_deref(), Some("operator"));
+    assert_eq!(
+        updated.silenced_until.map(Timestamp::timestamp_micros),
+        fresh_silence.silenced_until.map(Timestamp::timestamp_micros),
+    );
+    assert!(updated.silenced_until.is_some());
+    assert!(updated.next_notify_at >= updated.silenced_until);
+    assert_eq!(count_facts().await, 4);
 
     store.postgres_pool().close().await;
 }
