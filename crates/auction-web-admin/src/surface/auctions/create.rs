@@ -1,12 +1,16 @@
 //! Admin 拍卖创建表单。
 
+use auction_time::Timestamp;
 use auction_web_shared::{Dialog, t};
 use dioxus::prelude::*;
 use uuid::Uuid;
 
 use super::actions::AdminAuctionNotice;
-use super::presentation::{AuctionScheduleIssue, auction_schedule_issue};
-use crate::api::{create_admin_auction, normalize_datetime};
+use super::presentation::{
+    ScheduleField, ScheduleIssue, ScheduleMode, ScheduleTimes, parse_local_schedule_time,
+    validate_schedule,
+};
+use crate::api::{MAX_JSON_SAFE_INTEGER, create_admin_auction};
 use crate::surface::pending::{PendingCommands, set_if_alive};
 use crate::surface::validation::{FieldError, focus_field};
 use crate::surface::{AdminActionFeedback, admin_world_label};
@@ -49,9 +53,7 @@ struct CreateRequest {
     auction_id: Uuid,
     world_id: String,
     sequence: i64,
-    preview_scheduled_at: String,
-    scheduled_open_at: String,
-    scheduled_end_at: String,
+    times: ScheduleTimes,
 }
 
 /// 创建表单各字段的校验结果；None 表示该字段当前无错误。
@@ -59,18 +61,12 @@ struct CreateRequest {
 struct CreateFieldErrors {
     world: Option<CreateFieldIssue>,
     sequence: Option<CreateFieldIssue>,
-    preview: Option<CreateFieldIssue>,
-    open: Option<CreateFieldIssue>,
-    end: Option<CreateFieldIssue>,
+    schedule: Option<(ScheduleField, ScheduleIssue)>,
 }
 
 impl CreateFieldErrors {
     const fn any(&self) -> bool {
-        self.world.is_some()
-            || self.sequence.is_some()
-            || self.preview.is_some()
-            || self.open.is_some()
-            || self.end.is_some()
+        self.world.is_some() || self.sequence.is_some() || self.schedule.is_some()
     }
 
     /// 表单序上第一个错误字段的控件 id，用于提交失败后聚焦。
@@ -79,14 +75,22 @@ impl CreateFieldErrors {
             Some("create-world")
         } else if self.sequence.is_some() {
             Some("create-sequence")
-        } else if self.preview.is_some() {
-            Some("create-preview")
-        } else if self.open.is_some() {
-            Some("create-open")
-        } else if self.end.is_some() {
-            Some("create-end")
         } else {
-            None
+            match self.schedule {
+                Some((ScheduleField::Preview, _)) => Some("create-preview"),
+                Some((ScheduleField::Open, _)) => Some("create-open"),
+                Some((ScheduleField::End, _)) => Some("create-end"),
+                None => None,
+            }
+        }
+    }
+    fn schedule_issue(self, field: ScheduleField) -> Option<ScheduleIssue> {
+        self.schedule.filter(|(invalid, _)| *invalid == field).map(|(_, issue)| issue)
+    }
+
+    fn clear_schedule_issue(&mut self, field: ScheduleField) {
+        if self.schedule_issue(field).is_some() {
+            self.schedule = None;
         }
     }
 }
@@ -95,10 +99,7 @@ impl CreateFieldErrors {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CreateFieldIssue {
     Required,
-    NotPositiveInteger,
-    PreviewNotFuture,
-    OpenBeforePreview,
-    EndNotAfterOpen,
+    InvalidSequence,
     /// 服务端返回世界不存在。
     WorldNotFound,
 }
@@ -106,14 +107,16 @@ enum CreateFieldIssue {
 fn create_field_issue_message(issue: CreateFieldIssue) -> String {
     match issue {
         CreateFieldIssue::Required => t!("admin-field-required"),
-        CreateFieldIssue::NotPositiveInteger => t!("admin-field-positive-integer"),
-        CreateFieldIssue::PreviewNotFuture => t!("admin-auctions-create-field-preview-past"),
-        CreateFieldIssue::OpenBeforePreview => {
-            t!("admin-auctions-create-field-open-before-preview")
+        CreateFieldIssue::InvalidSequence => {
+            t!("admin-auctions-create-field-sequence-range", max: MAX_JSON_SAFE_INTEGER)
         }
-        CreateFieldIssue::EndNotAfterOpen => t!("admin-auctions-create-field-end-after-open"),
         CreateFieldIssue::WorldNotFound => t!("admin-error-world-not-found"),
     }
+}
+
+fn parse_sequence(value: &str) -> Option<i64> {
+    // 与 Admin 创建命令使用的公开 JSON 安全整数上限一致。
+    value.trim().parse().ok().filter(|value| (1..=MAX_JSON_SAFE_INTEGER).contains(value))
 }
 
 #[component]
@@ -136,6 +139,7 @@ fn AdminAuctionCreateFields(
         Fragment {
             form {
             class: "admin-auction-create",
+            novalidate: true,
             aria_busy: busy().to_string(),
             onsubmit: move |event| {
                     event.prevent_default();
@@ -143,50 +147,22 @@ fn AdminAuctionCreateFields(
                         return;
                     }
                     let world_id_value = world_id();
-                    let preview_scheduled_at_value = preview_scheduled_at();
-                    let scheduled_open_at_value = scheduled_open_at();
-                    let scheduled_end_at_value = scheduled_end_at();
-                    // 逐字段校验并定位错误；服务端 400 类错误也尽量落回对应字段。
                     let mut errors = CreateFieldErrors::default();
                     if world_id_value.trim().is_empty() {
                         errors.world = Some(CreateFieldIssue::Required);
                     }
-                    let sequence_value = sequence().trim().parse::<i64>().ok().filter(|value| *value > 0);
+                    let sequence_value = parse_sequence(&sequence());
                     if sequence_value.is_none() {
-                        errors.sequence = Some(CreateFieldIssue::NotPositiveInteger);
+                        errors.sequence = Some(CreateFieldIssue::InvalidSequence);
                     }
-                    if preview_scheduled_at_value.trim().is_empty() {
-                        errors.preview = Some(CreateFieldIssue::Required);
-                    }
-                    if scheduled_open_at_value.trim().is_empty() {
-                        errors.open = Some(CreateFieldIssue::Required);
-                    }
-                    if scheduled_end_at_value.trim().is_empty() {
-                        errors.end = Some(CreateFieldIssue::Required);
-                    }
-                    // 重试只通过页级冻结工厂执行，不再经过当前时间校验。
-                    if errors.preview.is_none() && errors.open.is_none() && errors.end.is_none() {
-                        match auction_schedule_issue(
-                            &preview_scheduled_at_value,
-                            &scheduled_open_at_value,
-                            &scheduled_end_at_value,
-                        ) {
-                            None => {}
-                            Some(AuctionScheduleIssue::PreviewNotFuture) => {
-                                errors.preview = Some(CreateFieldIssue::PreviewNotFuture);
-                            }
-                            Some(AuctionScheduleIssue::OpenBeforePreview) => {
-                                errors.open = Some(CreateFieldIssue::OpenBeforePreview);
-                            }
-                            Some(AuctionScheduleIssue::EndNotAfterOpen) => {
-                                errors.end = Some(CreateFieldIssue::EndNotAfterOpen);
-                            }
-                            // 三项均非空却无法解析属于畸形输入；落到预览字段提示重新选择。
-                            Some(AuctionScheduleIssue::Unparseable) => {
-                                errors.preview = Some(CreateFieldIssue::Required);
-                            }
-                        }
-                    }
+                    let times = validate_schedule(
+                        parse_local_schedule_time(&preview_scheduled_at()),
+                        parse_local_schedule_time(&scheduled_open_at()),
+                        parse_local_schedule_time(&scheduled_end_at()),
+                        ScheduleMode::Create,
+                        Timestamp::now(),
+                    );
+                    errors.schedule = times.as_ref().err().copied();
                     if errors.any() {
                         field_errors.set(errors);
                         if let Some(field_id) = errors.first_invalid_id() {
@@ -194,8 +170,7 @@ fn AdminAuctionCreateFields(
                         }
                         return;
                     }
-                    // sequence 校验未过时 errors 非空并在上面返回，这里必有值。
-                    let Some(sequence_value) = sequence_value else {
+                    let (Some(sequence_value), Ok(times)) = (sequence_value, times) else {
                         return;
                     };
                     field_errors.set(CreateFieldErrors::default());
@@ -204,9 +179,7 @@ fn AdminAuctionCreateFields(
                         auction_id: Uuid::new_v4(),
                         world_id: world_id_value,
                         sequence: sequence_value,
-                        preview_scheduled_at: normalize_datetime(&preview_scheduled_at_value),
-                        scheduled_open_at: normalize_datetime(&scheduled_open_at_value),
-                        scheduled_end_at: normalize_datetime(&scheduled_end_at_value),
+                        times,
                     };
                     pending.submit(
                         "create-auction".to_owned(),
@@ -219,9 +192,9 @@ fn AdminAuctionCreateFields(
                                     request.auction_id,
                                     request.world_id,
                                     request.sequence,
-                                    request.preview_scheduled_at,
-                                    request.scheduled_open_at,
-                                    request.scheduled_end_at,
+                                    request.times.preview,
+                                    request.times.open,
+                                    request.times.end,
                                 )
                                 .await
                             }
@@ -254,7 +227,7 @@ fn AdminAuctionCreateFields(
                     disabled: frozen(),
                     autofocus: true,
                     required: true,
-                    aria_invalid: field_errors().world.is_some().then_some("true"),
+                    aria_invalid: field_errors().world.is_some().to_string(),
                     aria_describedby: field_errors().world.is_some().then_some("create-world-error"),
                     value: world_id(),
                     onchange: move |event| {
@@ -282,9 +255,10 @@ fn AdminAuctionCreateFields(
                     inputmode: "numeric",
                     r#type: "number",
                     min: "1",
+                    max: MAX_JSON_SAFE_INTEGER.to_string(),
                     required: true,
                     disabled: frozen(),
-                    aria_invalid: field_errors().sequence.is_some().then_some("true"),
+                    aria_invalid: field_errors().sequence.is_some().to_string(),
                     aria_describedby: field_errors().sequence.is_some().then_some("create-sequence-error"),
                     value: sequence(),
                     oninput: move |event| {
@@ -309,19 +283,19 @@ fn AdminAuctionCreateFields(
                     r#type: "datetime-local",
                     required: true,
                     disabled: frozen(),
-                    aria_invalid: field_errors().preview.is_some().then_some("true"),
-                    aria_describedby: field_errors().preview.is_some().then_some("create-preview-error"),
+                    aria_invalid: field_errors().schedule_issue(ScheduleField::Preview).is_some().to_string(),
+                    aria_describedby: field_errors().schedule_issue(ScheduleField::Preview).is_some().then_some("create-preview-error"),
                     value: preview_scheduled_at(),
                     oninput: move |event| {
                         if frozen() { return; }
                         preview_scheduled_at.set(event.value());
-                        field_errors.write().preview = None;
+                        field_errors.write().clear_schedule_issue(ScheduleField::Preview);
                         feedback.set(None);
                     },
                 }
                 FieldError {
                     id: "create-preview-error",
-                    message: field_errors().preview.map(create_field_issue_message),
+                    message: field_errors().schedule_issue(ScheduleField::Preview).map(ScheduleIssue::message),
                 }
                 label {
                     r#for: "create-open",
@@ -334,19 +308,19 @@ fn AdminAuctionCreateFields(
                     r#type: "datetime-local",
                     required: true,
                     disabled: frozen(),
-                    aria_invalid: field_errors().open.is_some().then_some("true"),
-                    aria_describedby: field_errors().open.is_some().then_some("create-open-error"),
+                    aria_invalid: field_errors().schedule_issue(ScheduleField::Open).is_some().to_string(),
+                    aria_describedby: field_errors().schedule_issue(ScheduleField::Open).is_some().then_some("create-open-error"),
                     value: scheduled_open_at(),
                     oninput: move |event| {
                         if frozen() { return; }
                         scheduled_open_at.set(event.value());
-                        field_errors.write().open = None;
+                        field_errors.write().clear_schedule_issue(ScheduleField::Open);
                         feedback.set(None);
                     },
                 }
                 FieldError {
                     id: "create-open-error",
-                    message: field_errors().open.map(create_field_issue_message),
+                    message: field_errors().schedule_issue(ScheduleField::Open).map(ScheduleIssue::message),
                 }
                 label {
                     r#for: "create-end",
@@ -359,19 +333,19 @@ fn AdminAuctionCreateFields(
                     r#type: "datetime-local",
                     required: true,
                     disabled: frozen(),
-                    aria_invalid: field_errors().end.is_some().then_some("true"),
-                    aria_describedby: field_errors().end.is_some().then_some("create-end-error"),
+                    aria_invalid: field_errors().schedule_issue(ScheduleField::End).is_some().to_string(),
+                    aria_describedby: field_errors().schedule_issue(ScheduleField::End).is_some().then_some("create-end-error"),
                     value: scheduled_end_at(),
                     oninput: move |event| {
                         if frozen() { return; }
                         scheduled_end_at.set(event.value());
-                        field_errors.write().end = None;
+                        field_errors.write().clear_schedule_issue(ScheduleField::End);
                         feedback.set(None);
                     },
                 }
                 FieldError {
                     id: "create-end-error",
-                    message: field_errors().end.map(create_field_issue_message),
+                    message: field_errors().schedule_issue(ScheduleField::End).map(ScheduleIssue::message),
                 }
                 button {
                     r#type: "submit",
@@ -402,6 +376,19 @@ fn AdminAuctionCreateFields(
                     {t!("admin-auctions-create-close")}
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_sequence;
+
+    #[test]
+    fn creates_only_positive_json_safe_sequence_numbers() {
+        assert_eq!(parse_sequence("9007199254740991"), Some(9_007_199_254_740_991));
+        for input in ["0", "-1", "9007199254740992", "1.5", "99999999999999999999"] {
+            assert_eq!(parse_sequence(input), None, "{input}");
         }
     }
 }

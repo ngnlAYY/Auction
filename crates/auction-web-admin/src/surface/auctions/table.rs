@@ -21,6 +21,7 @@ use crate::surface::pending::PendingCommands;
 pub(super) fn AdminAuctionTable(
     state: Option<Result<AdminAuctionPage, String>>,
     pagination: AdminPagination,
+    edits_ready: bool,
     /// 当前世界筛选（地址栏恢复后的值）；变更经 `on_query_change` 由页面写回 URL。
     world: String,
     /// 当前排序列（空串 = 服务端原始顺序）与方向；变更经 `on_sort_change` 由页面写回 URL。
@@ -28,10 +29,9 @@ pub(super) fn AdminAuctionTable(
     direction: SortDirection,
     on_query_change: EventHandler<AuctionsQuery>,
     on_sort_change: EventHandler<(String, SortDirection)>,
-    reload_generation: Signal<u64>,
+    notice: Signal<Option<AdminAuctionNotice>>,
 ) -> Element {
     // 秒级时钟只在行内就绪与动作叶子单元格订阅（见 row.rs/dialog.rs），整表不随秒针重渲染。
-    let notice = use_signal(|| None::<AdminAuctionNotice>);
     let owner = use_context::<PendingCommands>();
     let intake_busy = owner.is_busy(&format!("intake:{world}"));
     // 翻页保留当前世界筛选与排序。
@@ -127,6 +127,7 @@ pub(super) fn AdminAuctionTable(
                                     key: "{auction.id}",
                                     auction,
                                     capabilities: capabilities.clone(),
+                                    edits_ready,
                                     notice,
                                 }
                             }

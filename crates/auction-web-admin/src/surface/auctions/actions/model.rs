@@ -107,22 +107,23 @@ pub(super) fn lifecycle_action_submit_label(action: AdminAuctionLifecycleAction)
 pub(super) fn lifecycle_action_confirm_title(
     action: AdminAuctionLifecycleAction,
     auction_sequence: i64,
+    world: &str,
 ) -> String {
     match action {
         AdminAuctionLifecycleAction::Preview => {
-            t!("admin-auctions-confirm-preview", number: auction_sequence)
+            t!("admin-auctions-confirm-preview", number: auction_sequence, world: world)
         }
         AdminAuctionLifecycleAction::Open => {
-            t!("admin-auctions-confirm-open", number: auction_sequence)
+            t!("admin-auctions-confirm-open", number: auction_sequence, world: world)
         }
         AdminAuctionLifecycleAction::Cancel => {
-            t!("admin-auctions-confirm-cancel", number: auction_sequence)
+            t!("admin-auctions-confirm-cancel", number: auction_sequence, world: world)
         }
         AdminAuctionLifecycleAction::FinalPhase => {
-            t!("admin-auctions-confirm-final", number: auction_sequence)
+            t!("admin-auctions-confirm-final", number: auction_sequence, world: world)
         }
         AdminAuctionLifecycleAction::EarlySettlement => {
-            t!("admin-auctions-confirm-early-settlement", number: auction_sequence)
+            t!("admin-auctions-confirm-early-settlement", number: auction_sequence, world: world)
         }
     }
 }
@@ -137,6 +138,44 @@ pub(super) fn lifecycle_action_confirm_note(action: AdminAuctionLifecycleAction)
             t!("admin-auctions-confirm-early-settlement-note")
         }
     }
+}
+
+/// 写入准备阶段的同名错误不能作为已拒绝的版本冲突回执。
+pub(super) fn stale_auction_failure(code: &str) -> bool {
+    code == "stale_auction_state"
+}
+
+// 镜像 Admin 生命周期 HTTP 入口的原因约束，长度按 UTF-8 字节计算。
+const MAX_LIFECYCLE_REASON_BYTES: usize = 1_024;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum LifecycleReasonIssue {
+    Required,
+    TooLong,
+    ControlCharacter,
+}
+
+impl LifecycleReasonIssue {
+    pub(super) fn message(self) -> String {
+        match self {
+            Self::Required => t!("admin-field-required"),
+            Self::TooLong => t!("admin-field-max-utf8-bytes", max: MAX_LIFECYCLE_REASON_BYTES),
+            Self::ControlCharacter => t!("admin-field-no-control-characters"),
+        }
+    }
+}
+
+pub(super) fn validate_lifecycle_reason(reason: &str) -> Result<&str, LifecycleReasonIssue> {
+    if reason.trim().is_empty() {
+        return Err(LifecycleReasonIssue::Required);
+    }
+    if reason.len() > MAX_LIFECYCLE_REASON_BYTES {
+        return Err(LifecycleReasonIssue::TooLong);
+    }
+    if reason.chars().any(char::is_control) {
+        return Err(LifecycleReasonIssue::ControlCharacter);
+    }
+    Ok(reason.trim())
 }
 
 pub(crate) fn lifecycle_action_success_label(action: AdminAuctionLifecycleAction) -> String {
@@ -161,7 +200,10 @@ pub(crate) fn auction_notice_label(notice: AdminAuctionNotice) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{lifecycle_actions, pending_open_millis};
+    use super::{
+        LifecycleReasonIssue, lifecycle_actions, pending_open_millis, stale_auction_failure,
+        validate_lifecycle_reason,
+    };
     use crate::api::{AdminAuctionCapabilities, AdminAuctionLifecycleAction};
 
     const OPEN_AT: &str = "2026-11-14T12:00:00Z";
@@ -221,5 +263,32 @@ mod tests {
             lifecycle_actions("preview", &capabilities(false), "not a time", open),
             vec![AdminAuctionLifecycleAction::Cancel]
         );
+    }
+
+    #[test]
+    fn lifecycle_reason_obeys_utf8_and_control_character_rules() {
+        let exact_limit = "拍".repeat(341) + "a";
+        assert_eq!(validate_lifecycle_reason(&exact_limit), Ok(exact_limit.as_str()));
+        assert_eq!(validate_lifecycle_reason("  要核对  "), Ok("要核对"));
+        assert_eq!(
+            validate_lifecycle_reason(&(exact_limit + "b")),
+            Err(LifecycleReasonIssue::TooLong)
+        );
+        assert_eq!(validate_lifecycle_reason(" "), Err(LifecycleReasonIssue::Required));
+        for value in ["原因\n第二行", "原因\u{0085}"] {
+            assert_eq!(
+                validate_lifecycle_reason(value),
+                Err(LifecycleReasonIssue::ControlCharacter)
+            );
+        }
+    }
+
+    #[test]
+    fn only_version_rejections_enter_the_auction_stale_path() {
+        assert!(stale_auction_failure("stale_auction_state"));
+        assert!(!stale_auction_failure("stale_state_version"));
+        assert!(!stale_auction_failure("not_sent:stale_auction_state"));
+        assert!(!stale_auction_failure("command_conflict"));
+        assert!(!stale_auction_failure("outcome_unknown"));
     }
 }

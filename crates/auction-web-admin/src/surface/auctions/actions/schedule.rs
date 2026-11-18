@@ -1,284 +1,367 @@
 //! Admin 正式开拍前预览、开拍与计划结束时间修改对话框。
 
+use auction_time::Timestamp;
 use auction_web_shared::{Dialog, t};
 use dioxus::prelude::*;
 
-use super::super::presentation::valid_schedule_update;
-use super::model::AdminAuctionNotice;
-use crate::api::{datetime_local_value, normalize_datetime, update_admin_auction_schedule};
-use crate::surface::admin_api_error_message;
-use crate::surface::pending::{PendingCommands, set_if_alive};
+use super::super::editor::{
+    DraftFeedback, DraftRead, DraftRefreshButton, close_edit_draft, close_matching_draft,
+    focus_draft_field_after_render, observe_draft_write,
+};
+use super::super::presentation::{
+    ScheduleField, ScheduleIssue, ScheduleMode, ScheduleTimes, parse_local_schedule_time,
+    validate_schedule,
+};
+use super::model::{AdminAuctionNotice, stale_auction_failure};
+use crate::api::{AdminAuction, datetime_local_value, update_admin_auction_schedule};
+use crate::surface::pending::{PendingCommandPanel, PendingCommands, set_if_alive};
+use crate::surface::validation::FieldError;
 
 #[component]
-pub(super) fn AdminAuctionScheduleAction(
-    auction_id: String,
-    auction_sequence: i64,
-    status: String,
-    expected_state_version: i64,
-    preview_scheduled_at: String,
-    scheduled_open_at: String,
-    scheduled_end_at: Option<String>,
-    busy: Signal<bool>,
-    mut notice: Signal<Option<AdminAuctionNotice>>,
-) -> Element {
-    let owner = use_context::<PendingCommands>();
-    let blocked = owner.contains(&format!("auction:{auction_id}"));
-    let mut pending = use_signal(|| false);
-    let mut preview_value = use_signal(String::new);
-    let mut open_value = use_signal(String::new);
-    let mut end_value = use_signal(String::new);
-    let mut feedback = use_signal(|| None::<String>);
-    let original_preview_scheduled_at = preview_scheduled_at.clone();
-    let original_scheduled_open_at = scheduled_open_at.clone();
-    let original_scheduled_end_at = scheduled_end_at.clone().unwrap_or_default();
-
-    rsx! {
-        button {
-            class: "admin-btn-secondary",
-            r#type: "button",
-            disabled: busy() || blocked,
-            onclick: {
-                let preview_scheduled_at = preview_scheduled_at;
-                let scheduled_open_at = scheduled_open_at;
-                let scheduled_end_at = scheduled_end_at;
-                move |_| {
-                    if busy() || blocked {
-                        return;
-                    }
-                    notice.set(None);
-                    preview_value.set(
-                        datetime_local_value(&preview_scheduled_at).unwrap_or_default(),
-                    );
-                    open_value.set(
-                        datetime_local_value(&scheduled_open_at).unwrap_or_default(),
-                    );
-                    end_value.set(
-                        scheduled_end_at
-                            .as_deref()
-                            .and_then(datetime_local_value)
-                            .unwrap_or_default(),
-                    );
-                    feedback.set(None);
-                    pending.set(true);
-                }
-            },
-            {t!("admin-auctions-action-schedule")}
-        }
-        if pending() {
-            AdminAuctionScheduleDialog {
-                auction_id,
-                auction_sequence,
-                status,
-                original_preview_scheduled_at,
-                original_scheduled_open_at,
-                original_scheduled_end_at,
-                expected_state_version,
-                busy,
-                notice,
-                pending,
-                preview_value,
-                open_value,
-                end_value,
-                feedback,
-            }
-        }
-    }
-}
-
-#[component]
-fn AdminAuctionScheduleDialog(
-    auction_id: String,
-    auction_sequence: i64,
-    status: String,
-    original_preview_scheduled_at: String,
-    original_scheduled_open_at: String,
-    original_scheduled_end_at: String,
-    expected_state_version: i64,
-    busy: Signal<bool>,
+pub(super) fn AdminAuctionScheduleDialog(
+    draft: Signal<Option<ScheduleDraft>>,
+    latest_version: Option<i64>,
+    read: DraftRead,
     notice: Signal<Option<AdminAuctionNotice>>,
-    pending: Signal<bool>,
-    preview_value: Signal<String>,
-    open_value: Signal<String>,
-    end_value: Signal<String>,
-    feedback: Signal<Option<String>>,
+    reload_generation: Signal<u64>,
 ) -> Element {
     let owner = use_context::<PendingCommands>();
-    let preview_locked = status == "preview";
-    // 先恢复未编辑字段的精度，再校验最终候选；重试直接使用第一次提交的完整请求。
-    let request = ScheduleRequest {
-        auction_id: auction_id.clone(),
-        expected_state_version,
-        preview_scheduled_at: normalize_datetime(&if preview_locked {
-            original_preview_scheduled_at
-        } else {
-            preserve_unchanged_datetime(preview_value(), &original_preview_scheduled_at)
-        }),
-        scheduled_open_at: normalize_datetime(&preserve_unchanged_datetime(
-            open_value(),
-            &original_scheduled_open_at,
-        )),
-        scheduled_end_at: normalize_datetime(&preserve_unchanged_datetime(
-            end_value(),
-            &original_scheduled_end_at,
-        )),
+    let mut feedback = use_signal(|| None::<String>);
+    let mut issue = use_signal(|| None::<(ScheduleField, ScheduleIssue)>);
+    let Some(open_draft) = draft() else {
+        return rsx! {};
     };
-    let can_submit = !busy()
-        && !owner.contains(&format!("auction:{auction_id}"))
-        && valid_schedule_update(
-            &status,
-            &request.preview_scheduled_at,
-            &request.scheduled_open_at,
-            &request.scheduled_end_at,
-        );
-    let preview_input_id = format!("schedule-preview-{auction_id}");
-    let open_input_id = format!("schedule-open-{auction_id}");
-    let end_input_id = format!("schedule-end-{auction_id}");
-    let signals =
-        ScheduleSignals { owner, notice, pending, preview_value, open_value, end_value, feedback };
-    // 外壳（遮罩/标题栏/关闭守卫）由共享 Dialog 接管；关闭统一走 close_schedule_dialog。
+    let entity = format!("auction:{}", open_draft.auction_id);
+    let blocked = owner.contains(&entity);
+    let busy = owner.is_busy(&entity);
+    let failure = feedback();
+    let conflict = !blocked
+        && (failure.as_deref().is_some_and(stale_auction_failure)
+            || read.version_changed(open_draft.state_version, latest_version));
+    let can_submit = read.is_ready()
+        && !blocked
+        && !conflict
+        && latest_version == Some(open_draft.state_version);
+    let on_close = move |()| close_edit_draft(draft, reload_generation, conflict);
+    let auction_id = open_draft.auction_id.clone();
     rsx! {
         Dialog {
-            title: t!("admin-auctions-schedule-title", number: auction_sequence),
+            title: t!("admin-auctions-schedule-title", number: open_draft.sequence),
             close_label: t!("admin-auctions-action-close"),
-            busy: busy(),
-            on_close: move |_| close_schedule_dialog(signals),
+            busy,
+            on_close,
             form {
-                    class: "admin-auction-open",
-                    onsubmit: move |event| {
-                        event.prevent_default();
-                        if can_submit {
-                            run_schedule_action(request.clone(), signals);
+                class: "admin-auction-open",
+                novalidate: true,
+                onsubmit: move |event| {
+                    event.prevent_default();
+                    if !can_submit {
+                        return;
+                    }
+                    let Some(submitted) = draft() else { return; };
+                    let times = match submitted.times(Timestamp::now()) {
+                        Ok(times) => times,
+                        Err(error) => {
+                            issue.set(Some(error));
+                            focus_draft_field_after_render(schedule_field_id(error.0, &submitted.auction_id));
+                            return;
                         }
-                    },
-                    p { class: "admin-panel__note", {t!("admin-auctions-schedule-note")} }
-                    label { r#for: preview_input_id.clone(), {t!("admin-auctions-schedule-preview")} }
-                    input {
-                        id: preview_input_id,
-                        r#type: "datetime-local",
-                        required: true,
-                        autofocus: !preview_locked,
-                        disabled: busy() || preview_locked,
-                        value: preview_value(),
-                        oninput: move |event| {
-                            preview_value.set(event.value());
-                            feedback.set(None);
-                        },
+                    };
+                    issue.set(None);
+                    if submit_schedule(submitted, times, owner, notice, draft, feedback) {
+                        feedback.set(None);
                     }
-                    label { r#for: open_input_id.clone(), {t!("admin-auctions-schedule-open")} }
-                    input {
-                        id: open_input_id,
-                        r#type: "datetime-local",
-                        required: true,
-                        autofocus: preview_locked,
-                        disabled: busy(),
-                        value: open_value(),
-                        oninput: move |event| {
-                            open_value.set(event.value());
-                            feedback.set(None);
-                        },
+                },
+                p { class: "admin-panel__note", {t!("admin-auctions-schedule-note")} }
+                for field in [ScheduleField::Preview, ScheduleField::Open, ScheduleField::End] {
+                    ScheduleInputField {
+                        field,
+                        auction_id: auction_id.clone(),
+                        disabled: blocked,
+                        read_only: conflict,
+                        value: open_draft.input(field).value.clone(),
+                        preview_locked: open_draft.mode == ScheduleMode::Preview,
+                        draft,
+                        issue,
                     }
-                    label { r#for: end_input_id.clone(), {t!("admin-auctions-schedule-end")} }
-                    input {
-                        id: end_input_id,
-                        r#type: "datetime-local",
-                        required: true,
-                        disabled: busy(),
-                        value: end_value(),
-                        oninput: move |event| {
-                            end_value.set(event.value());
-                            feedback.set(None);
-                        },
-                    }
-                    if !can_submit && !busy() {
-                        p { class: "action-feedback action-feedback--error", role: "alert",
-                            {t!("admin-auctions-schedule-invalid")}
-                        }
-                    } else if let Some(code) = feedback() {
-                        p { class: "action-feedback action-feedback--error", role: "alert",
-                            {admin_api_error_message(&code)}
-                        }
-                    }
-                    div { class: "admin-shell__dialog-actions",
+                }
+                if !blocked {
+                    DraftFeedback { conflict, read: read.clone(), failure }
+                }
+                div { class: "admin-shell__dialog-actions",
+                    if !conflict {
                         button {
                             r#type: "button",
-                            disabled: busy(),
-                            onclick: move |_| close_schedule_dialog(signals),
+                            disabled: busy,
+                            onclick: move |_| on_close(()),
                             {t!("admin-auctions-action-close")}
                         }
+                    }
+                    if !blocked {
+                        DraftRefreshButton { read, conflict, reload: reload_generation, on_close }
+                    }
+                    if !conflict && (!blocked || busy) {
                         button {
                             class: "admin-btn-primary",
                             r#type: "submit",
                             disabled: !can_submit,
-                            if busy() { {t!("admin-action-working")} } else { {t!("admin-auctions-schedule-submit")} }
+                            if busy { {t!("admin-action-working")} }
+                            else { {t!("admin-auctions-schedule-submit")} }
                         }
                     }
+                }
+            }
+            if blocked && !busy {
+                PendingCommandPanel { owner }
             }
         }
     }
 }
 
-#[derive(Clone, Copy)]
-struct ScheduleSignals {
-    owner: PendingCommands,
-    notice: Signal<Option<AdminAuctionNotice>>,
-    pending: Signal<bool>,
-    preview_value: Signal<String>,
-    open_value: Signal<String>,
-    end_value: Signal<String>,
-    feedback: Signal<Option<String>>,
-}
-
-#[derive(Clone, PartialEq)]
-struct ScheduleRequest {
+#[component]
+fn ScheduleInputField(
+    field: ScheduleField,
     auction_id: String,
-    expected_state_version: i64,
-    preview_scheduled_at: String,
-    scheduled_open_at: String,
-    scheduled_end_at: String,
-}
-
-fn close_schedule_dialog(mut signals: ScheduleSignals) {
-    signals.pending.set(false);
-    signals.preview_value.set(String::new());
-    signals.open_value.set(String::new());
-    signals.end_value.set(String::new());
-    signals.feedback.set(None);
-}
-
-/// `datetime-local` 仅显示到分钟；值未被编辑时保留服务端的秒与小数秒精度。
-fn preserve_unchanged_datetime(display_value: String, original_rfc3339: &str) -> String {
-    if datetime_local_value(original_rfc3339).as_deref() == Some(display_value.as_str()) {
-        original_rfc3339.to_owned()
-    } else {
-        display_value
+    disabled: bool,
+    read_only: bool,
+    value: String,
+    preview_locked: bool,
+    mut draft: Signal<Option<ScheduleDraft>>,
+    mut issue: Signal<Option<(ScheduleField, ScheduleIssue)>>,
+) -> Element {
+    let field_locked = field == ScheduleField::Preview && preview_locked;
+    let autofocus =
+        field == if preview_locked { ScheduleField::Open } else { ScheduleField::Preview };
+    let input_id = schedule_field_id(field, &auction_id);
+    let error_id = format!("{input_id}-error");
+    let error = issue().filter(|(invalid, _)| *invalid == field).map(|(_, issue)| issue);
+    let described_by = error.map(|_| error_id.clone());
+    let label = match field {
+        ScheduleField::Preview => t!("admin-auctions-schedule-preview"),
+        ScheduleField::Open => t!("admin-auctions-schedule-open"),
+        ScheduleField::End => t!("admin-auctions-schedule-end"),
+    };
+    rsx! {
+        label { r#for: input_id.clone(), "{label}" }
+        input {
+            id: input_id,
+            name: schedule_field_name(field),
+            // 只读文本保留原本地时间字符串，允许整段选择和复制。
+            r#type: if read_only { "text" } else { "datetime-local" },
+            required: true,
+            autofocus: autofocus && !read_only,
+            disabled: disabled || (field_locked && !read_only),
+            readonly: read_only,
+            value,
+            aria_invalid: error.is_some().to_string(),
+            aria_describedby: described_by,
+            oninput: move |event| {
+                if disabled || field_locked || read_only { return; }
+                if let Some(current) = draft.write().as_mut() {
+                    current.set_input(field, event.value());
+                }
+                if issue().is_some_and(|(invalid, _)| invalid == field) {
+                    issue.set(None);
+                }
+            },
+        }
+        FieldError { id: error_id, message: error.map(ScheduleIssue::message) }
     }
 }
 
-/// 首次提交冻结精确时间与版本；页级重试直接调用工厂，不重新以当前时钟校验。
-fn run_schedule_action(request: ScheduleRequest, signals: ScheduleSignals) {
-    if signals.owner.submit(
-        format!("auction:{}", request.auction_id),
+fn schedule_field_name(field: ScheduleField) -> &'static str {
+    match field {
+        ScheduleField::Preview => "preview_scheduled_at",
+        ScheduleField::Open => "scheduled_open_at",
+        ScheduleField::End => "scheduled_end_at",
+    }
+}
+
+fn schedule_field_id(field: ScheduleField, auction_id: &str) -> String {
+    format!("schedule-{}-{auction_id}", schedule_field_name(field))
+}
+
+/// 实体、版本和三个原始时刻来自同一快照。编辑与刷新都不能更新这个版本。
+#[derive(Clone)]
+pub(super) struct ScheduleDraft {
+    auction_id: String,
+    sequence: i64,
+    state_version: i64,
+    mode: ScheduleMode,
+    preview: ScheduleInput,
+    open: ScheduleInput,
+    end: ScheduleInput,
+}
+
+impl ScheduleDraft {
+    pub(super) fn from_auction(auction: &AdminAuction) -> Option<Self> {
+        let mode = match auction.status.as_str() {
+            "draft" => ScheduleMode::Draft,
+            "preview" => ScheduleMode::Preview,
+            _ => return None,
+        };
+        Some(Self {
+            auction_id: auction.id.clone(),
+            sequence: auction.sequence,
+            state_version: auction.state_version,
+            mode,
+            preview: ScheduleInput::new(Some(&auction.preview_scheduled_at)),
+            open: ScheduleInput::new(Some(&auction.scheduled_open_at)),
+            end: ScheduleInput::new(auction.scheduled_ends_at.as_deref()),
+        })
+    }
+
+    pub(super) fn auction_id(&self) -> &str {
+        &self.auction_id
+    }
+
+    fn input(&self, field: ScheduleField) -> &ScheduleInput {
+        match field {
+            ScheduleField::Preview => &self.preview,
+            ScheduleField::Open => &self.open,
+            ScheduleField::End => &self.end,
+        }
+    }
+
+    fn set_input(&mut self, field: ScheduleField, value: String) {
+        let input = self.input_mut(field);
+        input.edited |= input.value != value;
+        input.value = value;
+    }
+
+    fn input_mut(&mut self, field: ScheduleField) -> &mut ScheduleInput {
+        match field {
+            ScheduleField::Preview => &mut self.preview,
+            ScheduleField::Open => &mut self.open,
+            ScheduleField::End => &mut self.end,
+        }
+    }
+
+    fn times(&self, now: Timestamp) -> Result<ScheduleTimes, (ScheduleField, ScheduleIssue)> {
+        validate_schedule(
+            self.preview.resolve(),
+            self.open.resolve(),
+            self.end.resolve(),
+            self.mode,
+            now,
+        )
+    }
+}
+
+#[derive(Clone)]
+struct ScheduleInput {
+    original: Option<Timestamp>,
+    value: String,
+    edited: bool,
+}
+
+impl ScheduleInput {
+    fn new(original: Option<&str>) -> Self {
+        Self {
+            original: original.and_then(|value| Timestamp::parse_from_rfc3339(value).ok()),
+            value: original.and_then(datetime_local_value).unwrap_or_default(),
+            edited: false,
+        }
+    }
+
+    fn resolve(&self) -> Result<Timestamp, ScheduleIssue> {
+        // 未改动的预填值已有确定的 UTC（包括回拨小时及秒以下精度）；新输入必须唯一可逆。
+        if !self.edited
+            && let Some(original) = self.original
+        {
+            return Ok(original);
+        }
+        parse_local_schedule_time(&self.value)
+    }
+}
+
+/// 页级重试保留首次提交的版本、UTC 值和 command_id；只有已确认成功才清空原草稿。
+fn submit_schedule(
+    draft: ScheduleDraft,
+    times: ScheduleTimes,
+    owner: PendingCommands,
+    notice: Signal<Option<AdminAuctionNotice>>,
+    open: Signal<Option<ScheduleDraft>>,
+    feedback: Signal<Option<String>>,
+) -> bool {
+    let submitted_id = draft.auction_id.clone();
+    let submitted_version = draft.state_version;
+    owner.submit(
+        format!("auction:{}", draft.auction_id),
         t!("admin-auctions-action-schedule"),
         move |command_id| {
-            let request = request.clone();
-            async move {
+            observe_draft_write(
                 update_admin_auction_schedule(
                     command_id,
-                    request.auction_id,
-                    request.preview_scheduled_at,
-                    request.scheduled_open_at,
-                    request.scheduled_end_at,
-                    request.expected_state_version,
-                )
-                .await
-            }
+                    draft.auction_id.clone(),
+                    times.preview,
+                    times.open,
+                    times.end,
+                    draft.state_version,
+                ),
+                feedback,
+            )
         },
         move |_| {
-            set_if_alive(signals.notice, Some(AdminAuctionNotice::Schedule));
-            set_if_alive(signals.feedback, None);
+            set_if_alive(notice, Some(AdminAuctionNotice::Schedule));
+            set_if_alive(feedback, None);
+            // 离开本框后从未决区重试时，回执不能关闭操作员新打开的另一份草稿。
+            close_matching_draft(open, |draft| {
+                draft.auction_id == submitted_id && draft.state_version == submitted_version
+            });
         },
-        move |code| set_if_alive(signals.feedback, Some(code)),
-    ) {
-        close_schedule_dialog(signals);
+        |_| {},
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use auction_time::Timestamp;
+
+    use super::{ScheduleDraft, ScheduleInput};
+    use crate::api::AdminAuction;
+
+    fn auction() -> AdminAuction {
+        serde_json::from_value(serde_json::json!({
+            "id": "00000000-0000-0000-0000-000000000001",
+            "world_id": "main", "sequence": 3, "state_version": 7, "status": "draft",
+            "preview_scheduled_at": "2099-04-01T11:00:03.123456Z",
+            "scheduled_open_at": "2099-04-01T12:00:00Z", "scheduled_ends_at": "2099-04-01T13:00:00Z",
+            "preview_opened_at": null, "preview_manual_open": false, "preview_revision": 0,
+            "opened_at": null, "final_phase_at": null, "settled_at": null, "cancelled_at": null,
+            "cancelled_reason": null, "cancelled_by": null,
+            "created_at": "2099-04-01T10:00:00Z", "updated_at": "2099-04-01T10:00:00Z"
+        })).unwrap()
+    }
+
+    #[test]
+    fn a_refresh_does_not_rebase_values_or_version() {
+        let mut latest = auction();
+        let mut draft = ScheduleDraft::from_auction(&latest).unwrap();
+        let now = Timestamp::parse_from_rfc3339(&latest.created_at).unwrap();
+        draft.end.value = "2099-04-01T14:00".to_owned();
+        draft.end.edited = true;
+        latest.state_version += 1;
+        latest.scheduled_open_at = "2099-04-01T12:30:00Z".to_owned();
+        assert_eq!(draft.state_version, 7);
+        assert_eq!(
+            draft.times(now).unwrap().open,
+            Timestamp::parse_from_rfc3339("2099-04-01T12:00:00Z").unwrap()
+        );
+        let fresh = ScheduleDraft::from_auction(&latest).unwrap();
+        assert_eq!(fresh.end.original, draft.end.original);
+        assert!(!fresh.end.edited);
+        assert_eq!(fresh.state_version, 8);
+        assert_ne!(fresh.times(now).unwrap().open, draft.times(now).unwrap().open);
+    }
+
+    #[test]
+    fn untouched_prefill_keeps_original_utc_precision() {
+        let original = "2099-04-01T11:00:03.123456Z";
+        let mut field = ScheduleInput::new(Some(original));
+        assert_eq!(field.resolve(), Ok(Timestamp::parse_from_rfc3339(original).unwrap()));
+        field.edited = true;
+        field.value.clear();
+        assert!(field.resolve().is_err());
     }
 }

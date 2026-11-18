@@ -86,7 +86,7 @@ pub(crate) fn valid_safe_text(value: &str, maximum_bytes: usize) -> bool {
 }
 
 /// 将浏览器 `datetime-local` 按本地时区转换为 API 使用的 UTC 文本。
-/// Admin 的创建和筛选必须共享这一转换，否则非 UTC 管理员提交的时间范围会产生偏移。
+/// 保留发货证据与筛选的既有换算约定；场次排期单独拒绝不存在或重复的本地钟点。
 pub(crate) fn normalize_datetime(value: &str) -> String {
     if value.is_empty()
         || value.ends_with('Z')

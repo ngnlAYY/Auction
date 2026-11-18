@@ -6,14 +6,13 @@ use auction_contracts::{
     AdminAuctionResponse, AdminLotListResponse, AdminLotPaginationResponse, AdminLotUpdateRequest,
     AdminLotUpdateResponse, ApiResponse,
 };
-use gloo_net::http::Request;
+use gloo_net::http::Method;
 use uuid::Uuid;
 
-use super::auctions::decode_auction;
+use super::auctions::{decode_auction, send_auction_edit};
 use super::{
-    MAX_JSON_SAFE_INTEGER, invalid_request_error, invalid_response_error, response_error, send_get,
-    send_request, valid_admin_time, valid_optional_text, valid_optional_time, valid_trimmed_text,
-    valid_uuid,
+    MAX_JSON_SAFE_INTEGER, invalid_response_error, response_error, send_get, valid_admin_time,
+    valid_optional_text, valid_optional_time, valid_trimmed_text, valid_uuid,
 };
 
 // 结构闭集由 contracts 的 `AdminLotResponse`/`AdminLotListResponse`/`AdminLotUpdateResponse`
@@ -102,7 +101,6 @@ pub(crate) async fn update_admin_lot(
     action: AdminLotUpdateAction,
     start_price: Option<i64>,
 ) -> Result<AdminLot, String> {
-    let csrf_token = super::fetch_csrf_token().await?;
     let url = format!("/api/v1/admin/lots/{lot_id}");
     let command = AdminLotUpdateRequest {
         command_id,
@@ -110,19 +108,8 @@ pub(crate) async fn update_admin_lot(
         action: action.as_str().to_owned(),
         start_price,
     };
-    let response = send_request(|abort_signal| {
-        Request::patch(&url)
-            .abort_signal(abort_signal)
-            .header("x-csrf-token", &csrf_token)
-            .json(&command)
-            .map_err(invalid_request_error)
-    })
-    .await?;
-    if !response.ok() {
-        return Err(response_error(response).await);
-    }
     let payload: ApiResponse<AdminLotUpdateResponse> =
-        response.json().await.map_err(invalid_response_error)?;
+        send_auction_edit(Method::PATCH, &url, &command).await?;
     let lot = decode_lot(payload.data.lot).map_err(invalid_response_error)?;
     if lot.id != lot_id || lot.state_version <= 0 {
         return Err("invalid_response".to_owned());

@@ -16,10 +16,9 @@ use crate::surface::admin_world_label;
 pub(crate) fn AdminAuctionRow(
     auction: AdminAuction,
     capabilities: AdminAuctionCapabilities,
+    edits_ready: bool,
     notice: Signal<Option<AdminAuctionNotice>>,
 ) -> Element {
-    let auction_id = auction.id.clone();
-    let lifecycle_status = auction.status.clone();
     rsx! {
         tr { class: "admin-auctions__row",
             td { "data-label": t!("admin-auctions-sequence"), "#{auction.sequence}" }
@@ -45,14 +44,9 @@ pub(crate) fn AdminAuctionRow(
             }
             td { "data-label": t!("admin-auctions-actions"),
                 AdminAuctionActions {
-                    auction_id,
-                    auction_sequence: auction.sequence,
-                    status: lifecycle_status,
-                    expected_state_version: auction.state_version,
+                    auction: auction.clone(),
                     capabilities,
-                    preview_scheduled_at: auction.preview_scheduled_at.clone(),
-                    scheduled_open_at: auction.scheduled_open_at.clone(),
-                    scheduled_end_at: auction.scheduled_ends_at.clone(),
+                    edits_ready,
                     notice,
                 }
             }

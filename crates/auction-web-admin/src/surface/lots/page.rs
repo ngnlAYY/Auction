@@ -5,10 +5,13 @@ use auction_web_shared::{AsyncState, AsyncStateKind};
 use dioxus::prelude::*;
 
 use super::super::admin_api_error_message;
+use super::super::auctions::use_draft_page;
 use super::super::query::use_lots_query_state;
 use super::super::router::Route;
+use super::edit::{AdminLotEditDialog, LotEdit};
+use super::state::LotUpdateNotice;
 use crate::api::fetch_admin_lots;
-use crate::surface::pagination::{use_admin_page, use_admin_pagination};
+use crate::surface::pagination::use_admin_pagination;
 use crate::surface::pending::{PendingCommandPanel, use_pending_commands};
 
 /// 加载并展示一个拍卖的 Admin lot 安全投影。
@@ -30,22 +33,32 @@ fn AdminAuctionLotsPage(auction_id: String) -> Element {
     let reload_generation = use_signal(|| 0_u64);
     let pending = use_pending_commands(reload_generation);
     let pagination = use_admin_pagination("lots", &["page_size"], Some(100), 100_000);
-    let lots = use_admin_page(
+    let draft = use_signal(|| None::<LotEdit>);
+    let notice = use_signal(|| None::<LotUpdateNotice>);
+    let edited_lot = use_memo(move || draft.read().as_ref().map(|edit| edit.lot_id().to_owned()))();
+    let editing = edited_lot.is_some();
+    let (read, lots) = use_draft_page(
         pagination.clone(),
-        move || {
-            let _ = reload_generation();
-            (auction_id.clone(), requested_page())
-        },
+        reload_generation,
+        editing,
+        move || (auction_id.clone(), requested_page()),
         |(auction_id, page), size| fetch_admin_lots(auction_id, page, size),
     );
+    let latest_version = {
+        let page = lots.as_ref().and_then(|result| result.as_ref().ok());
+        edited_lot.as_ref().and_then(|lot_id| {
+            page.and_then(|page| page.lots.iter().find(|lot| &lot.id == lot_id))
+                .map(|lot| lot.state_version)
+        })
+    };
 
-    let content = match &*lots.read_unchecked() {
+    let content = match lots {
         None => rsx! {
             AdminLotLoading {}
         },
         Some(Err(error)) => rsx! {
             AdminLotLoadError {
-                detail: admin_api_error_message(error),
+                detail: admin_api_error_message(&error),
                 reload_generation,
             }
         },
@@ -54,8 +67,9 @@ fn AdminAuctionLotsPage(auction_id: String) -> Element {
             let mut on_sort_change = query;
             rsx! {
                 super::table::AdminLotTable {
-                    page: page.clone(),
+                    page: page.as_ref().clone(),
                     pagination,
+                    edits_ready: read.is_ready(),
                     sort: query_state().sort,
                     direction: query_state().direction,
                     on_page_change: move |next_page| {
@@ -70,13 +84,24 @@ fn AdminAuctionLotsPage(auction_id: String) -> Element {
                         on_sort_change.push(next);
                     },
                     reload_generation,
+                    draft,
+                    notice,
                 }
             }
         }
     };
+    let pending_in_dialog = edited_lot.as_ref().is_some_and(|id| {
+        let entity = format!("lot:{id}");
+        pending.contains(&entity) && !pending.is_busy(&entity)
+    });
     rsx! {
-        PendingCommandPanel { owner: pending }
+        if !pending_in_dialog {
+            PendingCommandPanel { owner: pending }
+        }
         {content}
+        if editing {
+            AdminLotEditDialog { draft, latest_version, read, reload_generation, notice }
+        }
     }
 }
 

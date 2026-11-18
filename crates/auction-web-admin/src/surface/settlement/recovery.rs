@@ -9,11 +9,13 @@ use super::presentation::{
     recovery_action_summary, recovery_command_label, recovery_stage_label,
     send_attribution_blocker_label,
 };
+use super::query::read_settlement_query;
 use super::report::AdminSettlementPager;
 use crate::api::{AdminRecovery, AdminRecoveryReport, confirm_admin_recovery};
 use crate::surface::AdminActionFeedback;
 use crate::surface::pagination::AdminPagination;
 use crate::surface::pending::{PendingCommands, set_if_alive};
+use crate::surface::validation::{FieldError, focus_field};
 
 #[component]
 pub(super) fn AdminRecoveryTable(
@@ -110,15 +112,15 @@ fn AdminRecoveryRow(
     let actions = recovery_action_summary(&recovery.actions);
     rsx! {
         tr {
-            td { "{lot_code}" }
-            td {
+            td { "data-label": t!("admin-recovery-lot"), "{lot_code}" }
+            td { "data-label": t!("admin-recovery-equipment"),
                 TruncatedText { value: display_equipment_identity, size: "wide", portal: true }
             }
-            td { {recovery_stage_label(&recovery.stage)} }
-            td { Time { value: recovery.payment_deadline_at.clone() } }
-            td { TruncatedText { value: evidence, portal: true } }
-            td { TruncatedText { value: actions, size: "wide", portal: true } }
-            td {
+            td { "data-label": t!("admin-recovery-stage"), {recovery_stage_label(&recovery.stage)} }
+            td { "data-label": t!("admin-recovery-deadline"), Time { value: recovery.payment_deadline_at.clone() } }
+            td { "data-label": t!("admin-recovery-evidence"), TruncatedText { value: evidence, portal: true } }
+            td { "data-label": t!("admin-recovery-actions"), TruncatedText { value: actions, size: "wide", portal: true } }
+            td { "data-label": t!("admin-recovery-commands"),
                 div { class: "admin-auction-actions",
                     for action in recovery.allowed_commands.clone() {
                         {
@@ -136,7 +138,8 @@ fn AdminRecoveryRow(
                                     r#type: "button",
                                     disabled: action_busy() || pending.contains(&recovery_id),
                                     onclick: move |_| {
-                                        if pending.any_busy() || pending.contains(&draft.recovery_id) {
+                                        if read_settlement_query().is_err()
+                            || pending.any_busy() || pending.contains(&draft.recovery_id) {
                                             return;
                                         }
                                         confirmation.set(Some(draft.clone()));
@@ -161,7 +164,7 @@ fn AdminRecoveryRow(
 
 #[component]
 pub(super) fn AdminRecoveryDialog(
-    draft: Option<RecoveryConfirmationDraft>,
+    draft: RecoveryConfirmationDraft,
     mut confirmation: Signal<Option<RecoveryConfirmationDraft>>,
     mut reason: Signal<String>,
     busy: ReadSignal<bool>,
@@ -171,10 +174,10 @@ pub(super) fn AdminRecoveryDialog(
     mut recovery_reload_generation: Signal<u64>,
 ) -> Element {
     let pending = use_context::<PendingCommands>();
-    let Some(draft) = draft else {
-        return rsx! {};
-    };
+    let mut reason_issue = use_signal(|| None::<RecoveryReasonIssue>);
+    let generation = selection_generation();
     let requires_reason = draft.action != "reclaimed";
+    let shows_refund = activates_buyer_refund(&draft.action);
     // 外壳（遮罩/标题栏/关闭守卫）由共享 Dialog 接管；共享组件暂不支持 aria_describedby，
     // 描述段落保留在内容区首部。
     rsx! {
@@ -185,26 +188,37 @@ pub(super) fn AdminRecoveryDialog(
             on_close: move |_| {
                 confirmation.set(None);
                 reason.set(String::new());
+                reason_issue.set(None);
             },
             p {
                 {t!("admin-recovery-confirm-description", lot: draft.lot_code.clone(), equipment: draft.equipment_name.clone())}
             }
+            if shows_refund {
+                p { {t!("admin-recovery-confirm-refund-description")} }
+            }
             form {
                     class: "admin-auction-recovery-confirm",
+                    novalidate: true,
                     onsubmit: move |event| {
                         event.prevent_default();
-                        if pending.any_busy() || pending.contains(&draft.recovery_id)
-                            || (requires_reason && reason().trim().is_empty())
+                        // 首次提交只作用于打开确认时选中的场次，重试继续使用冻结的意图。
+                        if read_settlement_query().is_err()
+                            || pending.any_busy() || pending.contains(&draft.recovery_id)
+                            || selected_auction_id() != draft.auction_id
+                            || selection_generation() != generation
                         {
                             return;
                         }
-                        let draft = draft.clone();
-                        let reason_value = if draft.action == "reclaimed" {
-                            String::new()
-                        } else {
-                            reason().trim().to_owned()
+                        let reason_value = match validate_recovery_reason(&draft.action, &reason()) {
+                            Ok(value) => value.to_owned(),
+                            Err(error) => {
+                                reason_issue.set(Some(error));
+                                focus_field("admin-recovery-reason");
+                                return;
+                            }
                         };
-                        let submitted_selection_generation = selection_generation();
+                        let draft = draft.clone();
+                        let submitted_selection_generation = generation;
                         let success_auction_id = draft.auction_id.clone();
                         let failure_auction_id = draft.auction_id.clone();
                         let submitted = pending.submit(
@@ -222,27 +236,30 @@ pub(super) fn AdminRecoveryDialog(
                                         reason_value,
                                     ).await;
                                     if result.as_ref().is_err_and(crate::api::AdminApiFailure::is_conflict)
-                                        && selected_auction_id() == draft.auction_id
-                                        && selection_generation() == submitted_selection_generation
+                                        && same_recovery_selection(
+                                            selected_auction_id, selection_generation,
+                                            &draft.auction_id, submitted_selection_generation,
+                                        )
+                                        && let Ok(mut reload) = recovery_reload_generation.try_write()
                                     {
-                                        recovery_reload_generation.set(
-                                            recovery_reload_generation().saturating_add(1),
-                                        );
+                                        *reload = reload.saturating_add(1);
                                     }
                                     result.map_err(|error| error.code)
                                 }
                             },
                             move |_| {
-                                if selected_auction_id() == success_auction_id
-                                    && selection_generation() == submitted_selection_generation
-                                {
+                                if same_recovery_selection(
+                                    selected_auction_id, selection_generation,
+                                    &success_auction_id, submitted_selection_generation,
+                                ) {
                                     set_if_alive(feedback, Some(AdminActionFeedback::Success));
                                 }
                             },
                             move |code| {
-                                if selected_auction_id() == failure_auction_id
-                                    && selection_generation() == submitted_selection_generation
-                                {
+                                if same_recovery_selection(
+                                    selected_auction_id, selection_generation,
+                                    &failure_auction_id, submitted_selection_generation,
+                                ) {
                                     set_if_alive(feedback, Some(AdminActionFeedback::Error(code)));
                                 }
                             },
@@ -251,6 +268,7 @@ pub(super) fn AdminRecoveryDialog(
                             // 完整意图归页级宿主；关闭展示不能修改未知命令的原因、版本或 UUID。
                             confirmation.set(None);
                             reason.set(String::new());
+                            reason_issue.set(None);
                             feedback.set(None);
                         }
                     },
@@ -260,12 +278,21 @@ pub(super) fn AdminRecoveryDialog(
                             {t!("admin-recovery-reason")}
                             textarea {
                                 id: "admin-recovery-reason",
+                                name: "reason",
                                 rows: "4",
-                                maxlength: "512",
                                 required: true,
                                 value: reason(),
-                                oninput: move |event| reason.set(event.value()),
+                                aria_invalid: reason_issue().is_some().to_string(),
+                                aria_describedby: reason_issue().is_some().then_some("admin-recovery-reason-error"),
+                                oninput: move |event| {
+                                    reason.set(event.value());
+                                    reason_issue.set(None);
+                                },
                             }
+                        }
+                        FieldError {
+                            id: "admin-recovery-reason-error",
+                            message: reason_issue().map(RecoveryReasonIssue::message),
                         }
                     }
                     div { class: "admin-shell__dialog-actions",
@@ -277,17 +304,163 @@ pub(super) fn AdminRecoveryDialog(
                             onclick: move |_| {
                                 confirmation.set(None);
                                 reason.set(String::new());
+                                reason_issue.set(None);
                             },
                             {t!("admin-recovery-cancel")}
                         }
                         button {
                             class: "admin-btn-primary admin-auction-recovery-action",
                             r#type: "submit",
-                            disabled: busy() || (requires_reason && reason().trim().is_empty()),
+                            disabled: busy(),
                             {t!("admin-recovery-confirm")}
                         }
                     }
             }
         }
+    }
+}
+
+/// 无效链接会卸载选择视图。已提交命令的回执不得再读取销毁的视图状态。
+fn same_recovery_selection(
+    auction: Signal<String>,
+    generation: Signal<u64>,
+    expected_auction: &str,
+    expected_generation: u64,
+) -> bool {
+    auction.try_peek().is_ok_and(|value| value.as_str() == expected_auction)
+        && generation.try_peek().is_ok_and(|value| *value == expected_generation)
+}
+
+// 恢复确认应用端口检查 trim 后将要提交的理由，内部换行是合法输入。
+const MAX_RECOVERY_REASON_BYTES: usize = 512;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RecoveryReasonIssue {
+    Required,
+    TooLong,
+}
+
+impl RecoveryReasonIssue {
+    fn message(self) -> String {
+        match self {
+            Self::Required => t!("admin-field-required"),
+            Self::TooLong => t!("admin-field-max-utf8-bytes", max: MAX_RECOVERY_REASON_BYTES),
+        }
+    }
+}
+
+fn validate_recovery_reason<'a>(
+    action: &str,
+    reason: &'a str,
+) -> Result<&'a str, RecoveryReasonIssue> {
+    if action == "reclaimed" {
+        return Ok("");
+    }
+    let reason = reason.trim();
+    if reason.is_empty() {
+        return Err(RecoveryReasonIssue::Required);
+    }
+    if reason.len() > MAX_RECOVERY_REASON_BYTES {
+        return Err(RecoveryReasonIssue::TooLong);
+    }
+    Ok(reason)
+}
+
+fn activates_buyer_refund(action: &str) -> bool {
+    action == "equipment_recovered"
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use auction_web_shared::i18n::{DEFAULT_ADMIN_LOCALE, build_bundle};
+    use dioxus::dioxus_core::{AttributeValue, Mutation};
+    use dioxus::prelude::*;
+    use dioxus_i18n::prelude::try_use_init_i18n_from_bundle;
+
+    use super::AdminRecoveryRow;
+    use super::{RecoveryReasonIssue, activates_buyer_refund, validate_recovery_reason};
+    use crate::api::AdminRecovery;
+    use crate::surface::ADMIN_LOCALE_CATALOG;
+    use crate::surface::pending::use_pending_commands;
+
+    fn recovery_row() -> Element {
+        try_use_init_i18n_from_bundle(|| {
+            build_bundle(
+                &DEFAULT_ADMIN_LOCALE,
+                ADMIN_LOCALE_CATALOG.default_ftl,
+                &DEFAULT_ADMIN_LOCALE,
+                None,
+            )
+        })
+        .unwrap();
+        let reload = use_signal(|| 0);
+        use_pending_commands(reload);
+        let action_busy = use_signal(|| false);
+        let confirmation = use_signal(|| None);
+        let reason = use_signal(String::new);
+        let action_feedback = use_signal(|| None);
+        let recovery: AdminRecovery = serde_json::from_value(serde_json::json!({
+            "id": "00000000-0000-0000-0000-000000000001", "world_id": "main",
+            "auction_id": "00000000-0000-0000-0000-000000000002", "lot_number": 1,
+            "lot_id": "00000000-0000-0000-0000-000000000003", "equipment_name": "Phase Robe",
+            "equipment_category": "Cloth", "stage": "reclaiming", "resolution": null,
+            "state_version": 2, "payment_deadline_at": "2027-01-01T00:00:00Z",
+            "reminder_count": 0, "reminder_limit": 1, "custody_proof_kind": null,
+            "custody_proof_observed_at": null, "blocking_code": null,
+            "manual_reconcile_delivery_id": null, "relisted_auction_id": null, "relisted_lot_id": null,
+            "actions": [], "allowed_commands": ["reclaimed"], "updated_at": "2027-01-01T00:00:00Z"
+        })).unwrap();
+        rsx! { AdminRecoveryRow { recovery, action_busy, confirmation, reason, action_feedback } }
+    }
+
+    #[test]
+    fn every_recovery_cell_renders_its_card_label() {
+        let mutations = VirtualDom::new(recovery_row).rebuild_to_vec();
+        let labels = mutations
+            .edits
+            .iter()
+            .filter_map(|edit| match edit {
+                Mutation::SetAttribute {
+                    name: "data-label",
+                    value: AttributeValue::Text(value),
+                    ..
+                } => Some(value.as_str()),
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            labels,
+            BTreeSet::from([
+                "拍品",
+                "装备",
+                "恢复阶段",
+                "付款截止",
+                "证据/阻塞原因",
+                "恢复操作",
+                "操作"
+            ])
+        );
+    }
+
+    #[test]
+    fn recovery_reasons_count_utf8_bytes_and_allow_internal_newlines() {
+        let limit = "拍".repeat(170) + "ab";
+        assert_eq!(validate_recovery_reason("cancelled", &limit), Ok(limit.as_str()));
+        assert_eq!(
+            validate_recovery_reason("equipment_recovered", &"拍".repeat(171)),
+            Err(RecoveryReasonIssue::TooLong)
+        );
+        assert_eq!(validate_recovery_reason("cancelled", " 原因\n第二行 "), Ok("原因\n第二行"));
+        assert_eq!(validate_recovery_reason("cancelled", " "), Err(RecoveryReasonIssue::Required));
+        assert_eq!(validate_recovery_reason("reclaimed", ""), Ok(""));
+    }
+
+    #[test]
+    fn refund_consequences_apply_only_to_recovered_equipment() {
+        assert!(activates_buyer_refund("equipment_recovered"));
+        assert!(!activates_buyer_refund("reclaimed"));
+        assert!(!activates_buyer_refund("cancelled"));
     }
 }

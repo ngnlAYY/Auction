@@ -10,7 +10,7 @@ use dioxus_i18n::prelude::try_use_init_i18n_from_bundle;
 use url::form_urlencoded;
 
 use crate::surface::ADMIN_LOCALE_CATALOG;
-use crate::surface::test_events::dispatch_form_event;
+use crate::surface::test_events::{dispatch_click_event, dispatch_form_event};
 
 type QueryPairs = Vec<(String, String)>;
 
@@ -91,8 +91,17 @@ impl TestPage {
         target: ElementId,
         value: &str,
     ) -> Vec<Mutation> {
-        dispatch_form_event(&self.dom, target, name, value);
+        if name == "click" {
+            dispatch_click_event(&self.dom, target);
+        } else {
+            dispatch_form_event(&self.dom, target, name, value);
+        }
         self.render()
+    }
+
+    /// 点击前可用当前树按命令条目等祖先定位按钮。
+    pub(in crate::surface) fn dom(&self) -> &VirtualDom {
+        &self.dom
     }
 
     fn render(&mut self) -> Vec<Mutation> {

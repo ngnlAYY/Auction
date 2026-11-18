@@ -6,6 +6,7 @@ use auction_web_shared::t;
 use dioxus::prelude::*;
 use serde_json::Value;
 
+use super::lots::{MAX_START_PRICE, parse_start_price};
 use crate::api::{AdminIntakeResult, add_admin_intake};
 use crate::surface::pending::{PendingCommands, set_if_alive};
 use crate::surface::validation::{FieldError, focus_field};
@@ -44,7 +45,7 @@ impl IntakeFieldErrors {
 enum IntakeFieldIssue {
     Required,
     InvalidJson,
-    NotPositiveInteger,
+    InvalidPrice,
     /// 服务端返回卖家已被拉黑。
     PlayerBlacklisted,
     /// 服务端返回装备冲突。
@@ -55,7 +56,7 @@ fn intake_field_issue_message(issue: IntakeFieldIssue) -> String {
     match issue {
         IntakeFieldIssue::Required => t!("admin-field-required"),
         IntakeFieldIssue::InvalidJson => t!("admin-intake-invalid-json"),
-        IntakeFieldIssue::NotPositiveInteger => t!("admin-field-positive-integer"),
+        IntakeFieldIssue::InvalidPrice => t!("admin-lots-invalid-price", max: MAX_START_PRICE),
         IntakeFieldIssue::PlayerBlacklisted => t!("admin-error-auction-intake-player-blacklisted"),
         IntakeFieldIssue::EquipmentConflict => t!("admin-error-equipment-conflict"),
     }
@@ -107,10 +108,9 @@ pub(super) fn AdminIntakeForm(world_id: String) -> Element {
                     } else if !valid_canonical_equipment_json(&equipment_json_value) {
                         errors.source = Some(IntakeFieldIssue::InvalidJson);
                     }
-                    let start_price_value =
-                        start_price().trim().parse::<i64>().ok().filter(|value| *value > 0);
+                    let start_price_value = parse_start_price(&start_price());
                     if start_price_value.is_none() {
-                        errors.price = Some(IntakeFieldIssue::NotPositiveInteger);
+                        errors.price = Some(IntakeFieldIssue::InvalidPrice);
                     }
                     if player_id_value.is_empty() || player_id_value.len() > 256 {
                         errors.player = Some(IntakeFieldIssue::Required);
@@ -255,7 +255,7 @@ pub(super) fn AdminIntakeForm(world_id: String) -> Element {
                         step: "1",
                         required: true,
                         disabled: busy(),
-                        aria_invalid: field_errors().price.is_some().then_some("true"),
+                        aria_invalid: field_errors().price.is_some().to_string(),
                         aria_describedby: field_errors().price.is_some().then_some("auction-intake-price-error"),
                         value: start_price(),
                         oninput: move |event| {
@@ -365,12 +365,14 @@ fn valid_canonical_equipment_json(value: &str) -> bool {
     {
         return false;
     }
-    for (key, maximum) in [("name", 512_usize), ("category", 128), ("equipment_type", 128)] {
+    for (key, maximum) in
+        [("name", 512_usize), ("category", 128), ("equipment_type", 128), ("quality", 128)]
+    {
         if !canonical_text(equipment.get(key), maximum) {
             return false;
         }
     }
-    for key in ["quality", "prefix", "suffix"] {
+    for key in ["prefix", "suffix"] {
         if !canonical_optional_text(equipment.get(key), 128) {
             return false;
         }
@@ -384,7 +386,7 @@ fn valid_canonical_equipment_json(value: &str) -> bool {
     let Some(Value::Object(stats)) = equipment.get("stats") else {
         return false;
     };
-    if stats.is_empty() || stats.len() > 256 {
+    if stats.len() > 256 {
         return false;
     }
     if !stats.iter().all(|(name, stat)| valid_canonical_stat(name, stat)) {
@@ -433,5 +435,36 @@ fn valid_canonical_stat(name: &str, value: &Value) -> bool {
         Some(value) => value
             .as_f64()
             .is_some_and(|value| value.is_finite() && (0.0..=1_000_000.0).contains(&value)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::{Value, json};
+
+    use super::valid_canonical_equipment_json;
+
+    fn equipment() -> Value {
+        json!({
+            "external_equipment_id": "123", "name": "Legendary Phase Robe",
+            "category": "Cloth", "equipment_type": "Phase Robe", "quality": "Legendary",
+            "prefix": "", "suffix": "", "level": null, "tradeable": true,
+            "stats": {"Defense": {"value": "1"}}, "key": "0123456789"
+        })
+    }
+
+    #[test]
+    fn accepts_empty_stats_and_affixes() {
+        let mut equipment = equipment();
+        equipment["stats"] = json!({});
+        assert!(valid_canonical_equipment_json(&equipment.to_string()));
+    }
+
+    #[test]
+    fn rejects_empty_quality() {
+        let mut equipment = equipment();
+        assert!(valid_canonical_equipment_json(&equipment.to_string()));
+        equipment["quality"] = json!("");
+        assert!(!valid_canonical_equipment_json(&equipment.to_string()));
     }
 }

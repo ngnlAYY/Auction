@@ -10,7 +10,9 @@ use auction_contracts::{
     AdminUpdateAuctionScheduleRequest, AdminUpdateAuctionScheduleResponse, ApiResponse,
 };
 use auction_time::Timestamp;
-use gloo_net::http::{Request, Response};
+use gloo_net::http::{Method, Request, RequestBuilder};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 use uuid::Uuid;
 
 use super::{
@@ -62,9 +64,9 @@ pub(crate) async fn create_admin_auction(
     auction_id: Uuid,
     world_id: String,
     sequence: i64,
-    preview_scheduled_at: String,
-    scheduled_open_at: String,
-    scheduled_end_at: String,
+    preview_scheduled_at: Timestamp,
+    scheduled_open_at: Timestamp,
+    scheduled_end_at: Timestamp,
 ) -> Result<AdminAuctionCommandResponse, String> {
     let csrf_token = super::fetch_csrf_token().await?;
     let command = AdminCreateAuctionRequest {
@@ -72,9 +74,9 @@ pub(crate) async fn create_admin_auction(
         auction_id: auction_id.to_string(),
         world_id,
         sequence,
-        preview_scheduled_at: Some(normalize_datetime(preview_scheduled_at)?),
-        scheduled_open_at: Some(normalize_datetime(scheduled_open_at)?),
-        scheduled_end_at: Some(normalize_datetime(scheduled_end_at)?),
+        preview_scheduled_at: Some(preview_scheduled_at),
+        scheduled_open_at: Some(scheduled_open_at),
+        scheduled_end_at: Some(scheduled_end_at),
         expected_state_version: 0,
     };
     let response = send_request(|abort_signal| {
@@ -88,7 +90,8 @@ pub(crate) async fn create_admin_auction(
     if !response.ok() {
         return Err(response_error(response).await);
     }
-    let auction = decode_auction_command_response(response).await?;
+    let auction =
+        decode_auction_command_response(response.json().await.map_err(invalid_response_error)?)?;
     if auction.id != auction_id.to_string() || auction.status != "draft" {
         return Err("invalid_response".to_owned());
     }
@@ -99,42 +102,27 @@ pub(crate) async fn create_admin_auction(
 pub(crate) async fn update_admin_auction_schedule(
     command_id: Uuid,
     auction_id: String,
-    preview_scheduled_at: String,
-    scheduled_open_at: String,
-    scheduled_end_at: String,
+    preview_scheduled_at: Timestamp,
+    scheduled_open_at: Timestamp,
+    scheduled_end_at: Timestamp,
     expected_state_version: i64,
 ) -> Result<AdminAuction, String> {
     if !valid_uuid(&auction_id) || expected_state_version <= 0 {
         return Err("invalid_request".to_owned());
     }
-    let normalized_preview = normalize_datetime(preview_scheduled_at)?;
-    let normalized_open = normalize_datetime(scheduled_open_at)?;
-    let normalized_end = normalize_datetime(scheduled_end_at)?;
-    let expected_preview = normalized_preview.timestamp_millis();
-    let expected_open = normalized_open.timestamp_millis();
-    let expected_end = normalized_end.timestamp_millis();
+    let expected_preview = preview_scheduled_at.timestamp_millis();
+    let expected_open = scheduled_open_at.timestamp_millis();
+    let expected_end = scheduled_end_at.timestamp_millis();
     let command = AdminUpdateAuctionScheduleRequest {
         command_id: command_id.to_string(),
-        preview_scheduled_at: Some(normalized_preview),
-        scheduled_open_at: Some(normalized_open),
-        scheduled_end_at: Some(normalized_end),
+        preview_scheduled_at: Some(preview_scheduled_at),
+        scheduled_open_at: Some(scheduled_open_at),
+        scheduled_end_at: Some(scheduled_end_at),
         expected_state_version,
     };
-    let csrf_token = super::fetch_csrf_token().await?;
     let url = format!("/api/v1/admin/auctions/{auction_id}/schedule");
-    let response = send_request(|abort_signal| {
-        Request::patch(&url)
-            .abort_signal(abort_signal)
-            .header("x-csrf-token", &csrf_token)
-            .json(&command)
-            .map_err(invalid_request_error)
-    })
-    .await?;
-    if !response.ok() {
-        return Err(response_error(response).await);
-    }
     let payload: ApiResponse<AdminUpdateAuctionScheduleResponse> =
-        response.json().await.map_err(invalid_response_error)?;
+        send_auction_edit(Method::PATCH, &url, &command).await?;
     let auction = decode_auction(payload.data.auction).map_err(invalid_response_error)?;
     if auction.id != auction_id
         || !matches!(auction.status.as_str(), "draft" | "preview")
@@ -152,14 +140,69 @@ pub(crate) async fn update_admin_auction_schedule(
 }
 
 /// 生命周期与创建命令共用旧版 `{ auction }` 闭集 decoder。
-pub(super) async fn decode_auction_command_response(
-    response: Response,
+pub(super) fn decode_auction_command_response(
+    payload: ApiResponse<AdminAuctionLifecycleResponse>,
 ) -> Result<AdminAuctionCommandResponse, String> {
-    let payload: ApiResponse<AdminAuctionLifecycleResponse> =
-        response.json().await.map_err(invalid_response_error)?;
     decode_auction(command_into_auction(payload.data.auction))
         .map(auction_into_command)
         .map_err(invalid_response_error)
+}
+
+/// 场次与拍品的可变命令共用写入边界；请求替身读取实际要发送的 JSON 字节。
+pub(super) async fn send_auction_edit<T: DeserializeOwned>(
+    method: Method,
+    url: &str,
+    command: &impl Serialize,
+) -> Result<T, String> {
+    let body = serde_json::to_string(command).map_err(invalid_request_error)?;
+    #[cfg(test)]
+    if let Some(stub) = dioxus::prelude::try_consume_context::<AuctionEditResponseStub>() {
+        let (status, body) =
+            stub.0(method, url, body.as_bytes()).map_err(|error| error.code().to_owned())?;
+        if (200..300).contains(&status) {
+            return serde_json::from_str(&body).map_err(invalid_response_error);
+        }
+        return Err(super::AdminApiFailure::from_http_body(status, &body).code);
+    }
+
+    let csrf_token = super::fetch_csrf_token().await?;
+    let response = send_request(|abort_signal| {
+        RequestBuilder::new(url)
+            .method(method)
+            .abort_signal(abort_signal)
+            .header("x-csrf-token", &csrf_token)
+            .header("Content-Type", "application/json")
+            .body(body)
+            .map_err(invalid_request_error)
+    })
+    .await?;
+    if !response.ok() {
+        return Err(response_error(response).await);
+    }
+    response.json().await.map_err(invalid_response_error)
+}
+
+#[cfg(test)]
+type AuctionEditResponder =
+    dyn Fn(Method, &str, &[u8]) -> Result<(u16, String), auction_web_shared::TransportError>;
+
+#[cfg(test)]
+#[derive(Clone)]
+struct AuctionEditResponseStub(std::rc::Rc<AuctionEditResponder>);
+
+#[cfg(test)]
+impl super::AdminApiFailure {
+    /// 宿主回归用真实序列化请求匹配脚本，将原始状态与正文交给生产错误解码。
+    pub(crate) fn stub_auction_edit(
+        dispatch: impl Fn(
+            Method,
+            &str,
+            &[u8],
+        ) -> Result<(u16, String), auction_web_shared::TransportError>
+        + 'static,
+    ) {
+        dioxus::prelude::provide_context(AuctionEditResponseStub(std::rc::Rc::new(dispatch)));
+    }
 }
 
 fn decode_auction_list(data: AdminAuctionPage) -> Result<AdminAuctionPage, &'static str> {
@@ -259,9 +302,4 @@ fn auction_into_command(value: AdminAuction) -> AdminAuctionCommandResponse {
         created_at: value.created_at,
         updated_at: value.updated_at,
     }
-}
-
-fn normalize_datetime(value: String) -> Result<Timestamp, String> {
-    Timestamp::parse_from_rfc3339(&super::normalize_datetime(&value))
-        .map_err(|_| "invalid_request".to_owned())
 }

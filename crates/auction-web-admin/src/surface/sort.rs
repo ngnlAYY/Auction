@@ -102,11 +102,18 @@ pub(super) fn MobileSortControl(
     sort: String,
     direction: SortDirection,
     on_sort_change: EventHandler<(String, SortDirection)>,
+    /// 显示未指定列时的顺序。提供标签的列表仅在有选定列时允许切换方向。
+    #[props(default)]
+    default_order_label: Option<String>,
 ) -> Element {
     let select_sort = sort.clone();
     let active_sort = sort.clone();
     let current_sort = sort;
-    let direction_hint = if direction == SortDirection::Asc {
+    let direction_disabled = current_sort.is_empty() && default_order_label.is_some();
+    let default_option = default_order_label.unwrap_or_else(|| t!("value-empty"));
+    let direction_hint = if direction_disabled {
+        default_option.clone()
+    } else if direction == SortDirection::Asc {
         t!("admin-sort-ascending-hint")
     } else {
         t!("admin-sort-descending-hint")
@@ -126,7 +133,7 @@ pub(super) fn MobileSortControl(
                         };
                         on_sort_change.call((next, next_direction));
                     },
-                    option { value: "", selected: select_sort.is_empty(), {t!("value-empty")} }
+                    option { value: "", selected: select_sort.is_empty(), "{default_option}" }
                     for (column, label) in columns {
                         option {
                             value: column,
@@ -139,16 +146,21 @@ pub(super) fn MobileSortControl(
             button {
                 class: "admin-btn-secondary admin-mobile-sort__direction",
                 r#type: "button",
+                disabled: direction_disabled,
                 title: direction_hint.clone(),
                 aria_label: direction_hint,
-                onclick: move |_| on_sort_change.call((current_sort.clone(), direction.toggled())),
-                span { aria_hidden: "true", {direction.arrow()} }
+                onclick: move |_| {
+                    if !direction_disabled {
+                        on_sort_change.call((current_sort.clone(), direction.toggled()));
+                    }
+                },
+                span { aria_hidden: "true", {if direction_disabled { "↕" } else { direction.arrow() }} }
             }
         }
     }
 }
 
-/// 可排序表头单元格；`aria-sort` 始终给出当前状态（未排序列为 `none`），
+/// 可排序表头单元格；已排序列始终标出方向，旧调用方可以保留未排序列的标记。
 /// 按钮 title 提示排序仅对当前页生效。
 #[component]
 pub(super) fn SortableTh(
@@ -164,9 +176,16 @@ pub(super) fn SortableTh(
     /// 附加在 th 上的样式类。
     #[props(default)]
     class: Option<&'static str>,
+    /// 采用可排序表格的 ARIA 约定，在未选中的列上省略 `aria-sort`。
+    #[props(default)]
+    omit_inactive_aria_sort: bool,
 ) -> Element {
     let is_active = active == column;
-    let aria_sort = if is_active { direction.aria() } else { "none" };
+    let aria_sort = if is_active {
+        Some(direction.aria())
+    } else {
+        (!omit_inactive_aria_sort).then_some("none")
+    };
     let hint = if is_active {
         match direction {
             SortDirection::Asc => t!("admin-sort-ascending-hint"),

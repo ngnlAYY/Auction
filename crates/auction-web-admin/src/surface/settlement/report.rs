@@ -52,6 +52,7 @@ pub(super) fn AdminSettlementReportView(
                                 {stacked_pair(
                                     rsx! { {t!("admin-settlement-seller")} },
                                     rsx! { {t!("admin-settlement-winner")} },
+                                    None,
                                 )}
                             }
                             th { class: "admin-auction-num", scope: "col", {t!("admin-settlement-final-price")} }
@@ -59,6 +60,7 @@ pub(super) fn AdminSettlementReportView(
                                 {stacked_pair(
                                     rsx! { {t!("admin-settlement-hold")} },
                                     rsx! { {t!("admin-settlement-adjustment")} },
+                                    None,
                                 )}
                             }
                             th { class: "admin-auction-num", scope: "col", {t!("admin-settlement-held-time")} }
@@ -66,6 +68,7 @@ pub(super) fn AdminSettlementReportView(
                                 {stacked_pair(
                                     rsx! { {t!("admin-settlement-discount-penalty")} },
                                     rsx! { {t!("admin-settlement-listed-price")} },
+                                    None,
                                 )}
                             }
                             th { class: "admin-auction-num", scope: "col", {t!("admin-settlement-compensation")} }
@@ -73,6 +76,7 @@ pub(super) fn AdminSettlementReportView(
                                 {stacked_pair(
                                     rsx! { {t!("admin-settlement-buyer")} },
                                     rsx! { {t!("admin-settlement-seller-amount")} },
+                                    None,
                                 )}
                             }
                         }
@@ -125,8 +129,8 @@ fn AdminSettlementLotRow(lot: AdminSettlementLot) -> Element {
     let winner = lot.winner.unwrap_or_else(|| t!("value-empty"));
     rsx! {
         tr {
-            td { class: "admin-auction-num", "{lot_code}" }
-            td {
+            td { class: "admin-auction-num", "data-label": t!("admin-settlement-lot-id"), "{lot_code}" }
+            td { "data-label": t!("admin-settlement-equipment"),
                 // 装备名本身即游戏装备链接，最多两行、超出由 CSS 截断；DOM 与 title 保留全文，
                 // 读屏名称以可见装备名为主体并说明跳转动作。API 层已拒绝无效装备 URL。
                 a {
@@ -139,28 +143,31 @@ fn AdminSettlementLotRow(lot: AdminSettlementLot) -> Element {
                     "{equipment_name}"
                 }
             }
-            td {
+            td { "data-label": t!("admin-settlement-seller"),
                 {stacked_pair(
                     rsx! { TruncatedText { value: seller } },
                     rsx! { TruncatedText { value: winner } },
+                    Some(t!("admin-settlement-winner")),
                 )}
             }
-            td { class: "admin-auction-num", {format_credit_amount(lot.final_price)} }
-            td { class: "admin-auction-num",
-                {stacked_pair(rsx! { "{hold_share}" }, rsx! { "{adjustment_rate}" })}
+            td { class: "admin-auction-num", "data-label": t!("admin-settlement-final-price"), {format_credit_amount(lot.final_price)} }
+            td { class: "admin-auction-num", "data-label": t!("admin-settlement-hold"),
+                {stacked_pair(rsx! { "{hold_share}" }, rsx! { "{adjustment_rate}" }, Some(t!("admin-settlement-adjustment")))}
             }
-            td { class: "admin-auction-num", "{held_time}" }
-            td { class: "admin-auction-num",
+            td { class: "admin-auction-num", "data-label": t!("admin-settlement-held-time"), "{held_time}" }
+            td { class: "admin-auction-num", "data-label": t!("admin-settlement-discount-penalty"),
                 {stacked_pair(
                     rsx! { "{price_adjustment}" },
                     rsx! { {format_credit_amount(lot.listed_price)} },
+                    Some(t!("admin-settlement-listed-price")),
                 )}
             }
-            td { class: "admin-auction-num", {format_credit_amount(lot.compensation_amount)} }
-            td { class: "admin-auction-num",
+            td { class: "admin-auction-num", "data-label": t!("admin-settlement-compensation"), {format_credit_amount(lot.compensation_amount)} }
+            td { class: "admin-auction-num", "data-label": t!("admin-settlement-buyer"),
                 {stacked_pair(
                     rsx! { {format_credit_amount(lot.buyer_amount)} },
                     rsx! { {format_credit_amount(lot.seller_amount)} },
+                    Some(t!("admin-settlement-seller-amount")),
                 )}
             }
         }
@@ -169,10 +176,10 @@ fn AdminSettlementLotRow(lot: AdminSettlementLot) -> Element {
 
 /// 相邻两个字段共用一列：上行是原顺序中的前一字段，下行是后一字段，表头与单元格同构。
 /// 十三个字段单行至少需要约 1400px，合并成对字段后桌面报告卡内可完整显示金额与比例。
-fn stacked_pair(primary: Element, secondary: Element) -> Element {
+fn stacked_pair(primary: Element, secondary: Element, secondary_label: Option<String>) -> Element {
     rsx! {
         span { class: "admin-settlement__line", {primary} }
-        span { class: "admin-settlement__line admin-settlement__line--secondary", {secondary} }
+        span { class: "admin-settlement__line admin-settlement__line--secondary", "data-label": secondary_label, {secondary} }
     }
 }
 
@@ -229,5 +236,87 @@ pub(super) fn AdminSettlementPager(
             label,
             on_page_change: move |next_page| page.set(next_page),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use auction_web_shared::i18n::{DEFAULT_ADMIN_LOCALE, build_bundle};
+    use dioxus::dioxus_core::{AttributeValue, Mutation};
+    use dioxus::prelude::*;
+    use dioxus_i18n::prelude::try_use_init_i18n_from_bundle;
+
+    use super::AdminSettlementLotRow;
+    use crate::api::AdminSettlementLot;
+    use crate::surface::ADMIN_LOCALE_CATALOG;
+
+    fn report_row() -> Element {
+        try_use_init_i18n_from_bundle(|| {
+            build_bundle(
+                &DEFAULT_ADMIN_LOCALE,
+                ADMIN_LOCALE_CATALOG.default_ftl,
+                &DEFAULT_ADMIN_LOCALE,
+                None,
+            )
+        })
+        .unwrap();
+        let lot: AdminSettlementLot = serde_json::from_value(serde_json::json!({
+            "id": "00000000-0000-0000-0000-000000000001", "lot_number": 1, "status": "sold",
+            "equipment_name": "Legendary Phase Robe", "equipment_category": "Cloth",
+            "game_equipment_url": "https://example.invalid/equip/123", "seller": "seller", "winner": "winner",
+            "final_price": 300000, "listed_price": 298800, "buyer_amount": 300000,
+            "seller_amount": 300000, "tax_amount": 0, "compensation_amount": 0,
+            "hold_ppm": 300000, "adjustment_ppm": -4000, "leader_held_nanos": 1000000000,
+            "adjustment": { "policy": "hold_curve_v2" }
+        })).unwrap();
+        rsx! { AdminSettlementLotRow { lot } }
+    }
+
+    #[test]
+    fn report_cards_label_each_value_in_the_paired_columns() {
+        let mutations = VirtualDom::new(report_row).rebuild_to_vec();
+        let labels = mutations
+            .edits
+            .iter()
+            .filter_map(|edit| match edit {
+                Mutation::SetAttribute {
+                    name: "data-label",
+                    value: AttributeValue::Text(value),
+                    ..
+                } => Some(value.as_str()),
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            labels,
+            BTreeSet::from([
+                "编号 ID",
+                "装备",
+                "卖家",
+                "得主",
+                "成交价",
+                "持有比例",
+                "调整比例",
+                "总时间",
+                "名义折扣 / 惩罚",
+                "挂牌价",
+                "补偿",
+                "买家应付",
+                "卖家应收",
+            ])
+        );
+        // 名义折扣和实际分配分栏；没有奖池补偿时，名义折扣不降低买家应付。
+        let text = mutations
+            .edits
+            .iter()
+            .filter_map(|edit| match edit {
+                Mutation::CreateTextNode { value, .. } => Some(value.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(text.iter().any(|value| value.contains("名义折扣 −1,200")));
+        assert_eq!(text.iter().filter(|value| **value == "300K").count(), 3);
     }
 }
