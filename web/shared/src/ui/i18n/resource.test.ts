@@ -1,8 +1,8 @@
 // i18n bundle 构造与 FTL 平铺子集校验的回归用例，逐条对照 Rust `ui::i18n` 的测试。
 
-import { expect, test } from "bun:test";
+import { expect, spyOn, test, vi } from "bun:test";
 import type { FluentBundle } from "@fluent/bundle";
-import { buildBundle } from "./resource";
+import { buildBundle, fetchCatalogLocale } from "./resource";
 
 const DEFAULT_FTL = "greeting = Hello\nfallback-only = Default fallback\n";
 
@@ -37,4 +37,26 @@ test("default_language_ignores_extra_resource：目标语言等于默认语言�
 test("invalid_ftl_is_rejected：非法 FTL 整份拒绝", () => {
   expect(buildBundle("en", DEFAULT_FTL, "ja", "= broken\n").ok).toBe(false);
   expect(buildBundle("en", "= broken\n", "en", null).ok).toBe(false);
+});
+
+test("译文请求超时后中止 fetch 并返回失败", async () => {
+  vi.useFakeTimers();
+  const { promise, resolve } = Promise.withResolvers<Response>();
+  const fetchSpy = spyOn(globalThis, "fetch").mockReturnValue(promise);
+  const controller = new AbortController();
+  try {
+    const result = fetchCatalogLocale(
+      { defaultLocale: "en", defaultFtl: DEFAULT_FTL, sources: [{ id: "ja", url: "/ja.ftl" }] },
+      "ja",
+      { alive: () => !controller.signal.aborted, signal: controller.signal },
+    );
+    const signal = fetchSpy.mock.calls[0]?.[1]?.signal;
+    vi.advanceTimersByTime(3000);
+    expect(await result).toEqual({ ok: false, error: "locale fetch timeout" });
+    expect(signal?.aborted).toBe(true);
+  } finally {
+    resolve(new Response(null, { status: 503 }));
+    fetchSpy.mockRestore();
+    vi.useRealTimers();
+  }
 });

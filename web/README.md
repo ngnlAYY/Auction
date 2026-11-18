@@ -25,16 +25,18 @@ Public 与 Admin 两个浏览器应用的 TypeScript 源码、构建配置与编
 | 命令 | 作用 |
 | --- | --- |
 | `bun install --frozen-lockfile` | 按锁文件还原依赖 |
-| `bun run typecheck` | 四个包依次做类型检查；`typecheck:contracts`、`typecheck:shared`、`typecheck:public`、`typecheck:admin` 只查单个包 |
+| `bun run typecheck` | 检查四个包、Vite 构建配置和测试。`typecheck:contracts`、`typecheck:shared`、`typecheck:public`、`typecheck:admin` 只查单个包 |
 | `bun run lint` | Biome 的格式与静态规则检查，不写文件 |
 | `bun run test` | 单元测试（`bun test`）；测试文件与被测模块同目录，以 `.test.ts` 结尾 |
 | `bun run format` | 按 Biome 规则改写格式并应用安全修复 |
 | `bun run build:public`、`bun run build:admin` | 生产构建，产物写入 `target/web/<surface>/public` |
 
+生产构建校验最终 HTML 恰有一个模块入口脚本，且 `data-cfasync="false"` 位于 `src` 之前。Public 入口引用由[共享 SVG](../crates/auction-web-shared/assets/favicon.svg)生成的 `assets/favicon-<指纹>.svg`。
+
 ## 文件与命名
 
 - 文件与目录一律小写连字符（`browser-lock.ts`）。有子模块的模块以 `name/index.ts` 为入口，叶子模块是单个 `name.ts`，两者不并存。含 JSX 的文件用 `.tsx`。
-- 导入不写扩展名与 `/index`：`import { sendGet } from "@auction/web-shared/net/transport";`。
+- 源码导入省略扩展名与 `/index`。Vite 入口配置导入共用配置时显式写 `.ts`，供 Vite 原生加载器解析。
 - 每个源码文件以 `//` 注释开头说明模块职责；导出的类型、函数与组件用 `/** … */` 说明。注释与文档用中文，只写本地的不变量与理由，不复述代码。
 - 类型、接口与组件用 `PascalCase`；函数、变量与非 DTO 字段用 `camelCase`；模块级常量用 `SCREAMING_SNAKE_CASE`。DTO 字段与线上 JSON 完全一致，保持 `snake_case`。
 - 单个文件不超过 600 行；超过时按职责拆成子模块（`name.ts` 变成 `name/index.ts` 加若干子模块，对外导入路径不变）。不靠删除空行、合并语句或压缩注释来凑行数；接近上限就应当拆分。
@@ -47,7 +49,7 @@ Public 与 Admin 两个浏览器应用的 TypeScript 源码、构建配置与编
 - `switch` 覆盖联合类型时，`default` 分支调用 `unreachable(value)`（`@auction/web-shared/result`），漏掉成员时编译失败。
 - “没有值”统一用 `null`。`undefined` 只表示“尚未加载”（`createTaskResource` 的结果）与组件的可选 props。
 - 预期内的失败作为值返回：`Result<T, E>`、`ok(value)`、`err(error)`（`@auction/web-shared/result`）。不用异常表达网络失败、解码失败或校验失败；`try`/`catch` 只包住会抛异常的浏览器接口，`catch` 分支要么处理、要么转成 `Result`；确实可以忽略的失败（例如移除监听、释放观察器）在分支里用注释写明忽略的理由，不留没有说明的空分支。
-- 整数金额、版本与序号是 `number`，取值必须是安全整数，由解码器保证。UUID 是 `string`，新 `command_id` 用 `crypto.randomUUID()` 生成。
+- 整数金额、版本与序号是 `number`，取值必须是安全整数，由解码器保证。UUID 是 `string`，新 `command_id` 用 `@auction/web-shared/platform/uuid` 的 `createUuidV4()` 生成。明文环境缺少 `crypto.randomUUID()` 时使用 `getRandomValues`。
 - 文本长度上限若在后端按 UTF-8 字节计，这里也按字节计：`utf8ByteLength(text)`（`@auction/web-shared/text`），不用 `text.length` 代替。
 - 字符串的大小比较与排序用 `compareText(a, b)`（同一模块，按 Unicode 码点）。JS 的 `<`、`>` 与默认 `sort()` 按 UTF-16 码元比较，对 U+10000 以上的字符与后端顺序相反；相等判断仍用 `===`。
 - 解析 JSON 文本统一用 `parseJson(text)`（`@auction/web-shared/net/wire`），不直接调用 `JSON.parse`：后者会接受超出范围的数与孤立代理项，后端的解析器会拒绝。
@@ -62,7 +64,7 @@ Public 与 Admin 两个浏览器应用的 TypeScript 源码、构建配置与编
 | `createCell(initial)` | 本地状态。`cell()` 响应式读取，`cell.peek()` 不订阅并立即看到最近一次写入，`cell.set(value)` 写入，`cell.update(fn)` 以当前值计算新值 |
 | `createValueMemo(compute)` | 按结构相等去重的派生值；结果与上次按值相等时不通知下游 |
 | `createTaskScope()` | 与组件同生命周期的任务集合；`scope.spawn(async (context) => …)` |
-| `createTaskResource(dependencies, task)` | 随依赖重跑的异步读取；`resource()` 取结果，`resource.state()` 取阶段，另有 `restart()`、`cancel()`、`clear()` |
+| `createTaskResource(dependencies, task)` | 随依赖重跑的异步读取，`resource()` 取结果，`resource.state()` 取阶段。`restart()` 与本轮依赖变化合并，另有 `cancel()`、`clear()` |
 | `structuralEquals(a, b)` | 按值比较 JSON 形状的数据 |
 
 必须遵守的语义：
@@ -207,7 +209,7 @@ export function Blacklist(): JSX.Element {
   | `web/public/src/surface/pages/history.tsx` | 往期拍卖没有状态筛选，只列已结算；地址栏里的 `status` 读到后即移除 |
   | `web/public/src/surface/reads/bid-log/`、`reads/fulfillment/` | 场次下拉框并入场次标题（全部世界时按世界分组），页面上方不再有单独的控件行；出价记录的选项只显示期数，状态由旁边的标签给出 |
   | `web/public/src/surface/query/category.ts`、`presentation/desktop.tsx`、`presentation/mobile.tsx` | 装备分类多选：地址栏 `type` 与接口 `category` 是逗号分隔的分类键列表；桌面是可多选的开关按钮，手机是多选下拉面板，面板里的勾选是草稿、关闭面板时一次生效（Rust 版单选） |
-  | `web/shared/src/router/outlet.tsx`、`ui/bootstrap/page-load-recovery.ts` | 目标页面的代码尚未加载时立即卸载上一个页面，不让旧页面在新地址下继续运行；页面代码加载失败（部署后旧标签页引用的分块已不存在）时整页重载一次，同一地址 30 秒内已重载过才显示错误横幅。Rust 版是单个 WASM 包，没有这两种情形 |
+  | `web/shared/src/router/outlet.tsx`、`ui/bootstrap/page-load-recovery.ts` | 目标页面的代码尚未加载时立即卸载上一个页面。页面分块加载失败时，用当前标签页在 `sessionStorage` 保留的最近 8 条路径与时间判断是否重载，路径不含查询与片段。30 秒内已重载过同一路径或存储不可用时显示错误横幅。Rust 版是单个 WASM 包，无需分块恢复 |
   | `web/public/src/surface/settings.tsx`、`styles/settings-page.css` | 设置页 `/settings`（语言与主题）：Rust 版没有这个页面；入口只在手机导航里，桌面顶栏仍保留两个切换器 |
 - 译文是各应用 `i18n/` 下的五个 `.ftl` 文件（en、zh-CN、zh-TW、ja、ko），键集合一致，键名用连字符。译文只使用 Fluent 的平铺子集：每条消息占一行，写成 `键 = 文本`，文本里的占位只有 `{ $变量 }` 与字符串字面量 `{"…"}` 两种；加载器遇到子集之外的写法会拒绝整份译文。Public 默认 en，Admin 默认 zh-CN；偏好键 `hv.lang` 与 `hv.theme` 是固定契约。
 
@@ -216,4 +218,4 @@ export function Blacklist(): JSX.Element {
 - 不引入服务端渲染、hydration、虚拟 DOM 库或其他 UI 框架。
 - 不在浏览器重建业务状态机：金额、资格、幂等与状态迁移以服务端结果为准；改变状态的请求携带 `command_id`，结果未知时只允许原样重试。
 - 不用 `innerHTML`、`eval`、`new Function` 与内联脚本；内容安全策略只放行同源脚本。
-- 不直接调用 `fetch`、`localStorage`、`setTimeout`：分别经 `@auction/web-shared` 的传输、存储与定时模块。共享层内部有两处按原实现直接 `fetch` 的例外：译文文件的按需加载（3 秒竞速）与浏览器错误信标。
+- `fetch`、`localStorage`、`sessionStorage` 与 `setTimeout` 统一经 `@auction/web-shared` 的传输、存储与定时模块。共享层内部直接 `fetch` 的两处例外是译文文件的按需加载（3 秒超时）与浏览器错误信标。

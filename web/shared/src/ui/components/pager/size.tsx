@@ -6,6 +6,9 @@ import { createEffect, For, onSettled, Show } from "solid-js";
 import { createCell } from "../../../reactive/cell";
 import { createValueMemo } from "../../../reactive/memo";
 
+// 同一页面可能同时挂载多个分页控件，各输入只能关联自己的提示。
+let nextHintId = 1;
+
 /** 每页数量选择器的当前值、候选值、文案与提交回调。 */
 export interface PageSizePickerProps {
   readonly pageSize: number;
@@ -25,7 +28,8 @@ export function PageSizePicker(props: PageSizePickerProps): JSX.Element {
   const input = createCell(props.pageSize.toString());
   const touched = createCell(false);
   let inputElement: HTMLInputElement | undefined;
-  const hintId = `page-size-hint-${crypto.randomUUID()}`;
+  const hintId = `page-size-hint-${nextHintId}`;
+  nextHintId += 1;
   const pageSize = createValueMemo(() => props.pageSize);
 
   createEffect(pageSize, (size) => {

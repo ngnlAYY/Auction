@@ -1,6 +1,7 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
+    "allowImportingTsExtensions": true,
     "types": ["bun"]
   },
   "include": ["tooling/vite-config.ts", "public/vite.config.ts", "admin/vite.config.ts"]

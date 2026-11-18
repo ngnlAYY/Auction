@@ -4,6 +4,7 @@ import type {
   PublicSessionPreferenceResponse,
   PublicSetSessionPreferenceRequest,
 } from "@auction/contracts/dto/public/account";
+import { createUuidV4 } from "@auction/web-shared/platform/uuid";
 import type { Cell } from "@auction/web-shared/reactive/cell";
 import type { TaskScope } from "@auction/web-shared/reactive/tasks";
 import { untrack } from "solid-js";
@@ -171,7 +172,7 @@ export function preferenceOwnerSubmit(owner: PreferenceOwner): void {
       return;
     }
     payload = {
-      command_id: crypto.randomUUID(),
+      command_id: createUuidV4(),
       duration_seconds: durationSeconds.value,
       expected_version: preference.version,
     };

@@ -132,6 +132,6 @@ export function decode<TSchema extends v.GenericSchema>(
   schema: TSchema,
   data: unknown,
 ): Decoded<v.InferOutput<TSchema>> {
-  const parsed = v.safeParse(schema, data);
+  const parsed = v.safeParse(schema, data, { abortEarly: true });
   return parsed.success ? { ok: true, value: parsed.output } : { ok: false };
 }

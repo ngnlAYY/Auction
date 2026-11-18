@@ -113,3 +113,28 @@ test("可空 schema 的 null 是成功值，不是解码失败", () => {
   expect(decode(Nullable, null)).toEqual({ ok: true, value: null });
   expect(accepts(Nullable, 1)).toBe(false);
 });
+
+test("解码在失败分支遇错即停，保留联合分支的成功值与失败结果", () => {
+  let previewChecks = 0;
+  const preview = v.pipe(
+    v.string(),
+    v.check((value) => {
+      previewChecks += 1;
+      return value.startsWith("preview-");
+    }),
+  );
+  const schema = v.union([v.array(preview), v.array(v.literal("live"))]);
+  for (const input of [
+    ["live", "live"],
+    ["live", "broken"],
+  ]) {
+    previewChecks = 0;
+    const exhaustive = v.safeParse(schema, input, { abortEarly: false });
+    expect(previewChecks).toBe(2);
+    previewChecks = 0;
+    expect(decode(schema, input)).toEqual(
+      exhaustive.success ? { ok: true, value: exhaustive.output } : { ok: false },
+    );
+    expect(previewChecks).toBe(1);
+  }
+});

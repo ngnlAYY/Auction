@@ -6,6 +6,7 @@
 //
 // hook 不硬编码文案与业务字段；宿主需要共享 `submitting` 时提升到创建处并整体下发。
 
+import { createUuidV4 } from "../../platform/uuid";
 import { type Cell, createCell } from "../../reactive/cell";
 import { createTaskScope } from "../../reactive/tasks";
 import type { Result } from "../../result";
@@ -78,7 +79,7 @@ export function useConfirmCommand<P, E>(): ConfirmCommand<P, E> {
       if (remembered !== null && remembered.signature === signature) {
         commandId = remembered.commandId;
       } else {
-        commandId = crypto.randomUUID();
+        commandId = createUuidV4();
         frozen.set({ signature, commandId });
       }
       const pending = build(commandId);

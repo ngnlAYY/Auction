@@ -5,6 +5,7 @@ import type {
   PublicLotWatchPreferenceResponse,
   PublicSetLotWatchPreferenceRequest,
 } from "@auction/contracts/dto/public/watch-preference";
+import { createUuidV4 } from "@auction/web-shared/platform/uuid";
 import type { Cell } from "@auction/web-shared/reactive/cell";
 import { createCell } from "@auction/web-shared/reactive/cell";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
@@ -138,7 +139,7 @@ function preferenceOwnerSubmit(owner: PreferenceOwner): void {
       return;
     }
     payload = {
-      command_id: crypto.randomUUID(),
+      command_id: createUuidV4(),
       channel: selected,
       expected_version: preference.version,
     };

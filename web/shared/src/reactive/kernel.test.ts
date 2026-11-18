@@ -136,6 +136,103 @@ test("createTaskResource：依赖变化取消旧任务并保留旧值，支持�
   expect(resource.peek()).toBeUndefined();
 });
 
+test("createTaskResource：首次提交前的重启只用初始依赖启动一次", () => {
+  createRoot((dispose) => {
+    try {
+      const seen: number[] = [];
+      const page = createCell(1);
+      const resource = createTaskResource(page, async (current) => {
+        seen.push(current);
+        return current;
+      });
+      resource.restart();
+      flush();
+      expect(seen).toEqual([1]);
+    } finally {
+      dispose();
+    }
+  });
+});
+
+test("createTaskResource：同轮更新依赖与多次重启只启动最新任务", () => {
+  createRoot((dispose) => {
+    try {
+      const seen: number[] = [];
+      const page = createCell(1);
+      const resource = createTaskResource(page, async (current) => {
+        seen.push(current);
+        return current;
+      });
+      flush();
+      page.set(2);
+      resource.restart();
+      resource.restart();
+      flush();
+      expect(seen).toEqual([1, 2]);
+      resource.restart();
+      flush();
+      expect(seen).toEqual([1, 2, 2]);
+    } finally {
+      dispose();
+    }
+  });
+});
+
+test.each([true, false])(
+  "createTaskResource：跨 effect 更新后只启动最新任务，手动重启 %s",
+  (restart) => {
+    createRoot((dispose) => {
+      try {
+        const seen: number[] = [];
+        const page = createCell(1);
+        createEffect(page, (current) => {
+          if (current === 2) {
+            page.set(3);
+            if (restart) {
+              resource.restart();
+            }
+          }
+        });
+        const pageQuery = createValueMemo(() => page());
+        const resource = createTaskResource(pageQuery, async (current) => {
+          seen.push(current);
+          return current;
+        });
+        flush();
+        page.set(2);
+        flush();
+        expect(seen).toEqual([1, 3]);
+      } finally {
+        dispose();
+      }
+    });
+  },
+);
+
+test("createTaskResource：取消待提交的重启后仍响应新的依赖变化", () => {
+  createRoot((dispose) => {
+    try {
+      const seen: number[] = [];
+      const page = createCell(1);
+      const resource = createTaskResource(page, async (current) => {
+        seen.push(current);
+        return current;
+      });
+      flush();
+      resource.restart();
+      resource.cancel();
+      flush();
+      expect(resource.state()).toBe("stopped");
+      expect(seen).toEqual([1]);
+      page.set(2);
+      flush();
+      expect(seen).toEqual([1, 2]);
+    } finally {
+      dispose();
+    }
+  });
+});
+
 test("createTaskScope：宿主销毁后任务不再存活，新任务不执行", async () => {
   let dispose = () => {};
   const scope = createRoot((disposeRoot) => {

@@ -1,4 +1,4 @@
-// 浏览器 `localStorage` 的容错读写。
+// 浏览器 `localStorage` 与 `sessionStorage` 的容错读写。
 // 存储不可用、被隐私设置禁用、配额不足或值损坏都只返回缺失/失败，不抛到当前页面；
 // 本模块不持有键名，偏好与缓存的键由各 surface 自行声明。
 
@@ -7,21 +7,21 @@ import { parseJson } from "../../net/wire";
 /** 单条本地 JSON 值的解析上限：拒绝被其他脚本写入或损坏的超大值，而不是部分解析。 */
 const MAX_PARSED_BYTES = 2_000_000;
 
+type StorageScope = "local" | "session";
+
 /** 取得可用存储；访问被安全策略阻止时视为存储不可用。 */
-function availableStorage(): Storage | null {
+function availableStorage(scope: StorageScope = "local"): Storage | null {
   if (typeof window === "undefined") {
     return null;
   }
   try {
-    return window.localStorage;
+    return scope === "session" ? window.sessionStorage : window.localStorage;
   } catch {
     return null;
   }
 }
 
-/** 读取原始字符串值；缺失或读取失败返回 `null`。 */
-export function getItem(key: string): string | null {
-  const storage = availableStorage();
+function readItem(storage: Storage | null, key: string): string | null {
   if (storage === null) {
     return null;
   }
@@ -32,9 +32,7 @@ export function getItem(key: string): string | null {
   }
 }
 
-/** 写入字符串值；成功返回 `true`，配额不足等失败返回 `false`。 */
-export function setItem(key: string, value: string): boolean {
-  const storage = availableStorage();
+function writeItem(storage: Storage | null, key: string, value: string): boolean {
   if (storage === null) {
     return false;
   }
@@ -44,6 +42,26 @@ export function setItem(key: string, value: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** 读取本地存储的原始字符串值；缺失或读取失败返回 `null`。 */
+export function getItem(key: string): string | null {
+  return readItem(availableStorage(), key);
+}
+
+/** 写入本地存储；成功返回 `true`，配额不足等失败返回 `false`。 */
+export function setItem(key: string, value: string): boolean {
+  return writeItem(availableStorage(), key, value);
+}
+
+/** 读取当前标签页的会话存储；缺失或读取失败返回 `null`。 */
+export function getSessionItem(key: string): string | null {
+  return readItem(availableStorage("session"), key);
+}
+
+/** 写入当前标签页的会话存储；成功返回 `true`，不可写时返回 `false`。 */
+export function setSessionItem(key: string, value: string): boolean {
+  return writeItem(availableStorage("session"), key, value);
 }
 
 /** 删除单个键；键不存在或存储不可用时静默返回。 */

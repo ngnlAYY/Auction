@@ -2,7 +2,7 @@
 // 不使用 Solid 的异步派生与 Loading 边界：页面需要显式区分“加载中、已就绪、已停止”，
 // 并在重跑期间继续显示上一次结果。
 
-import { createEffect } from "solid-js";
+import { createEffect, createMemo, onSettled, untrack } from "solid-js";
 import type { Cell } from "./cell";
 import { createCell } from "./cell";
 import type { TaskContext, TaskHandle } from "./tasks";
@@ -19,7 +19,7 @@ export interface TaskResource<T> {
   peek(): T | undefined;
   /** 响应式读取当前阶段。 */
   state(): ResourceState;
-  /** 取消在途任务并以当前依赖重新执行。 */
+  /** 取消在途任务，在本轮依赖提交时以最新值重新执行。 */
   restart(): void;
   /** 取消在途任务，阶段置为 stopped；已有结果保留。 */
   cancel(): void;
@@ -41,35 +41,59 @@ export function createTaskResource<D, T>(
   const value: Cell<T | undefined> = createCell<T | undefined>(undefined);
   const state = createCell<ResourceState>("pending");
   const scope = createTaskScope();
-  let running: TaskHandle | undefined;
-  let latestDependencies: D;
+  const restartRevision = createCell(0);
+  const dependencySnapshot = createMemo(() => ({ value: dependencies() }));
+  let running: TaskHandle | null = null;
+  let restartRequested = false;
+  let startedSnapshot: ReturnType<typeof dependencySnapshot> | null = null;
 
-  const run = (current: D) => {
-    running?.cancel();
-    state.set("pending");
-    const handle = scope.spawn(async (context) => {
-      const result = await task(current, context);
-      if (!context.alive()) {
+  createEffect(
+    () => ({ snapshot: dependencySnapshot(), revision: restartRevision() }),
+    ({ snapshot, revision }) => {
+      if (revision !== restartRevision.peek()) {
         return;
       }
-      value.set(result);
-      state.set("ready");
-    });
-    running = handle;
-  };
-
-  createEffect(dependencies, (current) => {
-    latestDependencies = current;
-    run(current);
-  });
+      // 其他 apply 可以使快照过时。等本轮依赖提交后再启动，旧快照不能进入任务体。
+      onSettled(() => {
+        if (
+          !scope.alive() ||
+          revision !== restartRevision.peek() ||
+          snapshot !== untrack(dependencySnapshot)
+        ) {
+          return;
+        }
+        // 取消排队的手动重启不影响尚未启动任务的依赖更新。
+        if (!restartRequested && snapshot === startedSnapshot) {
+          return;
+        }
+        restartRequested = false;
+        startedSnapshot = snapshot;
+        running?.cancel();
+        state.set("pending");
+        running = scope.spawn(async (context) => {
+          const result = await task(snapshot.value, context);
+          if (!context.alive()) {
+            return;
+          }
+          value.set(result);
+          state.set("ready");
+        });
+      });
+    },
+  );
 
   const resource = (() => value()) as TaskResource<T>;
   resource.peek = () => value.peek();
   resource.state = () => state();
   resource.restart = () => {
-    run(latestDependencies);
+    running?.cancel();
+    running = null;
+    restartRequested = true;
+    state.set("pending");
+    restartRevision.update((revision) => revision + 1);
   };
   resource.cancel = () => {
+    restartRequested = false;
     running?.cancel();
     state.set("stopped");
   };

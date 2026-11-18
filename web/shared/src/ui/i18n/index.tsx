@@ -52,12 +52,12 @@ export function LanguagePicker(props: {
           id={props.id ?? "language"}
           name="language"
           class="language-picker__select"
-          value={session.current()}
+          value={session.selected()}
           onChange={(event) => session.switch(props.catalog, event.currentTarget.value)}
         >
           <For each={SUPPORTED_LOCALES} keyed={false}>
             {(locale) => (
-              <option value={locale().code} selected={session.current() === locale().code}>
+              <option value={locale().code} selected={session.selected() === locale().code}>
                 {locale().label}
               </option>
             )}

@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import solid from "@solidjs/vite-plugin";
-import type { UserConfig } from "vite";
+import type { Plugin, UserConfig } from "vite";
 
 /** 两个互不依赖的浏览器应用；各自只打包自己的页面、样式与译文。 */
 export type Surface = "public" | "admin";
@@ -14,6 +14,59 @@ const REPOSITORY_ROOT = resolve(WEB_ROOT, "..");
 
 /** 构建号只允许 1–64 个 URL 安全字符，与服务端的校验口径一致。 */
 const BUILD_ID_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
+
+const HTML_COMMENT = /<!--[\s\S]*?(?:-->|$)/g;
+const SCRIPT_TAG = /<script\s[^>]*>/gi;
+const MODULE_TYPE = /\stype\s*=\s*(?:"module"|'module'|module)(?=\s|>)/i;
+const SCRIPT_SOURCE = /\ssrc="[^"]+"/;
+const CF_ASYNC_ATTRIBUTE = /\sdata-cfasync(?=[\s=>])/gi;
+const ROCKET_LOADER_OPT_OUT = 'data-cfasync="false"';
+
+function entryModuleScript(html: string): { tag: string; offset: number } {
+  // 注释里的示例脚本不会执行。等长屏蔽注释可保留入口在原 HTML 中的位置。
+  const markup = html.replace(HTML_COMMENT, (comment) => " ".repeat(comment.length));
+  const [entry, extra] = [...markup.matchAll(SCRIPT_TAG)].filter(([tag]) => MODULE_TYPE.test(tag));
+  if (entry?.index === undefined || extra !== undefined || !SCRIPT_SOURCE.test(entry[0])) {
+    throw new Error("Web 入口 HTML 必须恰好包含一个带 src 的模块脚本");
+  }
+  return { tag: entry[0], offset: entry.index };
+}
+
+function rocketLoaderOptOut(): Plugin {
+  return {
+    name: "auction-rocket-loader-opt-out",
+    apply: "build",
+    transformIndexHtml: {
+      order: "post",
+      handler(html) {
+        // Vite 会重建入口标签，Rocket Loader 要求豁免属性出现在 src 之前。
+        const { tag, offset } = entryModuleScript(html);
+        if (tag.match(CF_ASYNC_ATTRIBUTE) !== null) {
+          return html;
+        }
+        const exempt = tag.replace(/^<script/i, `<script ${ROCKET_LOADER_OPT_OUT}`);
+        return html.slice(0, offset) + exempt + html.slice(offset + tag.length);
+      },
+    },
+    generateBundle: {
+      order: "post",
+      handler(_options, bundle) {
+        const index = bundle["index.html"];
+        if (index?.type !== "asset" || typeof index.source !== "string") {
+          this.error("Web 构建缺少最终入口 HTML");
+        }
+        const { tag: entry } = entryModuleScript(index.source);
+        const beforeSource = entry.slice(0, entry.search(SCRIPT_SOURCE)).split(/\s+/);
+        if (
+          entry.match(CF_ASYNC_ATTRIBUTE)?.length !== 1 ||
+          !beforeSource.includes(ROCKET_LOADER_OPT_OUT)
+        ) {
+          this.error("Web 入口模块脚本缺少有效的 Rocket Loader 豁免");
+        }
+      },
+    },
+  };
+}
 
 /** 读取根 Cargo.toml 的 workspace.package.version；前后端共用同一个版本号。 */
 function workspaceVersion(): string {
@@ -38,7 +91,7 @@ export function surfaceConfig(surface: Surface): UserConfig {
   return {
     root: resolve(WEB_ROOT, surface),
     publicDir: false,
-    plugins: [solid()],
+    plugins: [solid(), rocketLoaderOptOut()],
     resolve: {
       alias: [
         { find: /^@auction\/contracts\//, replacement: `${resolve(WEB_ROOT, "contracts/src")}/` },

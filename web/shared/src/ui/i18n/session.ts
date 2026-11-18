@@ -1,12 +1,12 @@
 // 语言会话、当前 Fluent bundle 与翻译失败处理。
-// 连续切换只应用最后一个目标；会话任务随根组件销毁而取消。
+// 连续切换只应用最后一次选择；会话任务随根组件销毁而取消。
 
 import type { FluentBundle, FluentVariable } from "@fluent/bundle";
 import { createContext, createEffect, useContext } from "solid-js";
 
 import { setItem } from "../../platform/storage";
 import { type Cell, createCell } from "../../reactive/cell";
-import { createTaskScope } from "../../reactive/tasks";
+import { createTaskScope, type TaskHandle } from "../../reactive/tasks";
 import { err, ok } from "../../result";
 import { reportBrowserError } from "../bootstrap";
 import {
@@ -23,7 +23,7 @@ export type LocaleError = "language-switch-failed";
 
 interface LocaleState {
   readonly current: LocaleCode;
-  readonly pending: LocaleCode | null;
+  readonly pendingLocale: LocaleCode | null;
   readonly ready: boolean;
   readonly error: LocaleError | null;
 }
@@ -104,6 +104,8 @@ export function withoutFluentIsolation(value: string): string {
 /** 按需语言会话：持有当前 bundle 与语言信号；根组件创建一次并经 context 提供。 */
 export interface LocaleSession {
   current(): LocaleCode;
+  /** 选择器保留在途目标，让回选已生效语言也能触发 change。 */
+  selected(): LocaleCode;
   isReady(): boolean;
   error(): LocaleError | null;
   /** 首屏加载：默认语言直接就绪；已保存的非默认语言先取回再渲染。 */
@@ -120,41 +122,52 @@ export function createLocaleSession(
   activeBundle.set(initialBundle);
   const state = createCell<LocaleState>({
     current: defaultLocale,
-    pending: null,
+    pendingLocale: null,
     ready: false,
     error: null,
   });
   const tasks = createTaskScope();
+  let loadGeneration = 0;
+  let pending: TaskHandle | null = null;
 
   const current = (): LocaleCode => state().current;
+  const selected = (): LocaleCode => {
+    const locale = state();
+    return locale.pendingLocale ?? locale.current;
+  };
   const isReady = (): boolean => state().ready;
   const error = (): LocaleError | null => state().error;
 
-  const load = (catalog: LocaleCatalog, target: LocaleCode, persist: boolean): void => {
-    state.update((previous) => ({
-      ...previous,
-      pending: target,
-      error: null,
-    }));
-    tasks.spawn(async (context) => {
+  const advanceGeneration = (): number => {
+    loadGeneration += 1;
+    pending?.cancel();
+    pending = null;
+    return loadGeneration;
+  };
+
+  const load = (
+    catalog: LocaleCatalog,
+    target: LocaleCode,
+    persist: boolean,
+    generation: number,
+  ): void => {
+    state.update((previous) => ({ ...previous, pendingLocale: target, error: null }));
+    pending = tasks.spawn(async (context) => {
       const fetched =
         target === catalog.defaultLocale
           ? ok<string | null>(null)
           : await fetchCatalogLocale(catalog, target, context);
+      // 同一语言可能被重复选择，只有最新代次能构造并提交译文、错误与偏好。
+      if (!context.alive() || generation !== loadGeneration) {
+        return;
+      }
       const built = fetched.ok
         ? buildBundle(catalog.defaultLocale, catalog.defaultFtl, target, fetched.value)
         : err<string>(fetched.error);
-      if (!context.alive()) {
-        return;
-      }
-      // 连续切换只应用最后一次选择：被更新目标替换的加载结果直接丢弃。
-      if (state.peek().pending !== target) {
-        return;
-      }
       if (built.ok) {
         state.set({
           current: target,
-          pending: null,
+          pendingLocale: null,
           ready: true,
           error: null,
         });
@@ -166,7 +179,7 @@ export function createLocaleSession(
       }
       state.update((previous) => ({
         ...previous,
-        pending: null,
+        pendingLocale: null,
         ready: true,
         error: "language-switch-failed",
       }));
@@ -174,26 +187,30 @@ export function createLocaleSession(
   };
 
   const bootstrap = (catalog: LocaleCatalog): void => {
+    const generation = advanceGeneration();
     const target = initialLanguage(catalog.defaultLocale);
     if (target === catalog.defaultLocale) {
-      state.update((previous) => ({ ...previous, ready: true }));
+      state.update((previous) => ({ ...previous, pendingLocale: null, ready: true }));
       return;
     }
-    load(catalog, target, false);
+    load(catalog, target, false, generation);
   };
 
   const switchLocale = (catalog: LocaleCatalog, code: string): void => {
+    const generation = advanceGeneration();
     const target = parseSupported(code) ?? catalog.defaultLocale;
-    if (target === current()) {
+    if (target === state.peek().current) {
+      state.update((previous) => ({ ...previous, pendingLocale: null, ready: true, error: null }));
       // 沿用源码：即使传入非法 code，当前已是回退目标时仍原样保存选择值。
       setItem(LANGUAGE_STORAGE_KEY, code);
       return;
     }
-    load(catalog, target, true);
+    load(catalog, target, true, generation);
   };
 
   return {
     current,
+    selected,
     isReady,
     error,
     bootstrap,

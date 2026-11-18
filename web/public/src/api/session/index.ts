@@ -13,6 +13,7 @@ import { jsonValue } from "@auction/contracts/wire";
 import { type TransportResponse, transportErrorCode } from "@auction/web-shared/net/transport";
 import { jsonHasExactKeys } from "@auction/web-shared/net/wire";
 import { setItem } from "@auction/web-shared/platform/storage";
+import { createUuidV4 } from "@auction/web-shared/platform/uuid";
 import type { Result } from "@auction/web-shared/result";
 import { err, ok } from "@auction/web-shared/result";
 import { utf8ByteLength } from "@auction/web-shared/text";
@@ -86,7 +87,7 @@ export function notifyPublicSessionChange(reason: SessionRefreshReason): void {
   if (registration !== null) {
     registration.trigger(reason);
   }
-  const revision = crypto.randomUUID();
+  const revision = createUuidV4();
   setItem(PUBLIC_SESSION_CHANGE_STORAGE_KEY, revision);
 }
 

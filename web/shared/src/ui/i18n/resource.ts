@@ -3,7 +3,7 @@
 
 import { FluentBundle, FluentResource } from "@fluent/bundle";
 
-import { createTimeoutFuture } from "../../platform/timer";
+import { sleep } from "../../platform/timer";
 import type { TaskContext } from "../../reactive/tasks";
 import { err, ok, type Result } from "../../result";
 import type { LocaleCatalog, LocaleCode, LocaleSource } from "./catalog";
@@ -57,7 +57,7 @@ export async function fetchCatalogLocale(
   if (source === null) {
     return err("unsupported locale");
   }
-  const fetched = await fetchLocaleText(source.url);
+  const fetched = await fetchLocaleText(source.url, context.signal);
   if (!context.alive()) {
     return err("locale fetch cancelled");
   }
@@ -78,26 +78,34 @@ function localeSource(catalog: LocaleCatalog, target: LocaleCode): LocaleSource 
 }
 
 /** 超时或非 2xx 都按失败处理，由调用方保留当前语言。 */
-async function fetchLocaleText(url: string): Promise<Result<string, string>> {
-  const timeout = createTimeoutFuture(3000);
-  const outcome = await Promise.race([
-    fetchLocaleTextDirect(url).then((result) => ({
-      kind: "request" as const,
-      result,
-    })),
-    timeout.promise.then(() => ({ kind: "timeout" as const })),
-  ]);
-  timeout.cancel();
-  if (outcome.kind === "timeout") {
-    return err("locale fetch timeout");
+async function fetchLocaleText(url: string, signal: AbortSignal): Promise<Result<string, string>> {
+  if (signal.aborted) {
+    return err("locale fetch cancelled");
   }
-  return outcome.result;
+  const request = new AbortController();
+  const abortRequest = () => request.abort();
+  signal.addEventListener("abort", abortRequest, { once: true });
+  try {
+    return await Promise.race([
+      fetchLocaleTextDirect(url, request.signal),
+      sleep(3000, request.signal).then((elapsed) =>
+        err(elapsed ? "locale fetch timeout" : "locale fetch cancelled"),
+      ),
+    ]);
+  } finally {
+    signal.removeEventListener("abort", abortRequest);
+    // 等待结束时同时收口计时器和 fetch，超时不能留下在途正文读取。
+    abortRequest();
+  }
 }
 
-async function fetchLocaleTextDirect(url: string): Promise<Result<string, string>> {
+async function fetchLocaleTextDirect(
+  url: string,
+  signal: AbortSignal,
+): Promise<Result<string, string>> {
   let response: Response;
   try {
-    response = await fetch(url, { method: "GET" });
+    response = await fetch(url, { method: "GET", signal });
   } catch {
     return err("locale fetch failed");
   }

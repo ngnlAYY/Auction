@@ -1,6 +1,7 @@
 //! 原生装备标记按钮：忙碌、冲突与未知结果重放均可见且可用键盘操作。
 
 import type { PublicSetLotWatchRequest } from "@auction/contracts/dto/public/watch";
+import { createUuidV4 } from "@auction/web-shared/platform/uuid";
 import { Link } from "@auction/web-shared/router";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
@@ -62,7 +63,7 @@ export function LotWatchButton(props: {
       return;
     }
     const request: PublicSetLotWatchRequest = {
-      command_id: crypto.randomUUID(),
+      command_id: createUuidV4(),
       watched: !current[0],
       channel: "mm",
       expected_version: current[1],
