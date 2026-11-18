@@ -407,10 +407,20 @@ pub(crate) async fn fetch_dashboard() -> Result<AdminDashboardSnapshot, String> 
 fn decode_dashboard_response(value: Value) -> Result<AdminDashboardSnapshot, String> {
     let snapshot: AdminDashboardResponse =
         serde_json::from_value(value).map_err(invalid_response_error)?;
+    let process = decode_section::<AdminProcessSectionData>(snapshot.process, false)?;
+    // 心跳读取成功但没有存活进程时，后端返回降级分区，此时没有可报告的观测时刻。
+    if process.observed_at.is_none()
+        && process
+            .data
+            .as_ref()
+            .is_some_and(|data| process.status != "degraded" || !data.processes.is_empty())
+    {
+        return Err(invalid_response_error("dashboard_process_observed_at"));
+    }
     let snapshot = AdminDashboardSnapshot {
         health: snapshot.health,
         worker: snapshot.worker,
-        process: decode_section(snapshot.process, true)?,
+        process,
         mail: decode_section(snapshot.mail, true)?,
         realtime: decode_section(snapshot.realtime, true)?,
         credentials: decode_section(snapshot.credentials, true)?,
@@ -596,6 +606,74 @@ mod tests {
             },
             "reconciliation": unknown_section()
         })
+    }
+
+    fn payload_without_live_heartbeats() -> Value {
+        let mut payload = complete_payload();
+        let summary = json!({
+            "status": "degraded",
+            "readiness": false,
+            "audit_failure_count": 0,
+            "missing_services": ["public", "admin", "worker"]
+        });
+        payload["health"] = summary.clone();
+        payload["process"] = json!({
+            "status": "degraded",
+            "data": {
+                "processes": [],
+                "summary": summary,
+                "observed_at": "0001-01-01T00:00:00Z"
+            }
+        });
+        payload
+    }
+
+    #[test]
+    fn degraded_empty_process_section_preserves_the_rest_of_the_snapshot() {
+        let snapshot = decode_dashboard_response(payload_without_live_heartbeats()).unwrap();
+        assert_eq!(snapshot.process.status, "degraded");
+        assert!(snapshot.process.observed_at.is_none());
+        let process = snapshot.process.data.unwrap();
+        assert!(process.processes.is_empty());
+        assert_eq!(process.summary.missing_services, ["public", "admin", "worker"]);
+        assert_eq!(snapshot.fulfillment.data.unwrap().pending, 2);
+    }
+
+    #[test]
+    fn other_observed_sections_still_require_an_observation_time() {
+        let mut healthy = payload_without_live_heartbeats();
+        healthy["process"]["status"] = json!("ok");
+        assert!(decode_dashboard_response(healthy).is_err());
+
+        let mut with_heartbeat = payload_without_live_heartbeats();
+        let observed_at = "2026-01-01T00:00:00.000000Z";
+        with_heartbeat["process"]["data"]["processes"] = json!([{
+            "service_name": "admin",
+            "process_role": "admin",
+            "instance_id": "admin-1",
+            "version": "0.1.0",
+            "started_at": observed_at,
+            "status": "ready",
+            "readiness": true,
+            "audit_failure_count": 0,
+            "tracing": {
+                "status": "disabled",
+                "dropped_span_count": 0,
+                "export_failure_count": 0,
+                "last_success_at": null,
+                "last_failure_at": null,
+                "last_error_code": ""
+            },
+            "observed_at": observed_at,
+            "expires_at": "2026-01-01T00:01:00.000000Z"
+        }]);
+        with_heartbeat["process"]["data"]["observed_at"] = json!(observed_at);
+        assert!(decode_dashboard_response(with_heartbeat.clone()).is_err());
+        with_heartbeat["process"]["observed_at"] = json!(observed_at);
+        assert!(decode_dashboard_response(with_heartbeat).is_ok());
+
+        let no_fulfillment_time = with(complete_payload(), "/fulfillment", "observed_at", None);
+        assert!(decode_dashboard_response(no_fulfillment_time).is_err());
     }
 
     /// 在完整载荷的 `pointer` 对象上改写一个键；`None` 表示删除该键。

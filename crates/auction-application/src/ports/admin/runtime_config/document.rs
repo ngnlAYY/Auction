@@ -362,20 +362,17 @@ impl AdminRuntimeDocument {
         Ok(())
     }
 
-    /// 为浏览器和新 runtime 文件补齐业务默认值与未接管的运行参数候选。
-    /// 升级前文件在内存中继续保留 `None`，因此其既有 fingerprint 与 durable command 摘要
-    /// 不会变化；只有 API 投影或用户保存的新候选会显式携带这些字段。
+    /// 为 Admin HTTP 投影补齐业务默认值与未接管的运行参数候选。
+    /// 在已校验的文件快照副本上补齐，响应继续以原始 fingerprint 约束并发保存和 durable 重放。
     pub fn materialize_business_defaults(&mut self) {
         if self.worlds.is_none() && self.equipment_filter.is_none() && self.mail_templates.is_none()
         {
-            self.worlds = Some(AdminRuntimeWorldsConfig::default());
-            self.equipment_filter = Some(AdminRuntimeEquipmentFilterConfig::default());
             // 模板区块已不生效；仍随另外两个区块一起补齐，保存后的文件才能被旧程序加载。
             self.mail_templates = Some(AdminRuntimeMailTemplatesConfig::default());
         }
-        if let Some(equipment_filter) = &mut self.equipment_filter
-            && equipment_filter.qualities.is_empty()
-        {
+        self.worlds.get_or_insert_with(Default::default);
+        let equipment_filter = self.equipment_filter.get_or_insert_with(Default::default);
+        if equipment_filter.qualities.is_empty() {
             equipment_filter.qualities = crate::ports::mail::default_accepted_qualities();
         }
         self.equipment_colors.get_or_insert_with(Default::default);
@@ -481,5 +478,51 @@ impl AdminRuntimeSnapshot {
             return Err(AdminRuntimeConfigError::StoredResultCorrupt);
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        AdminRuntimeDocument, AdminRuntimeEquipmentFilterConfig, AdminRuntimeMailTemplatesConfig,
+        AdminRuntimeWorldsConfig,
+    };
+
+    #[test]
+    fn business_projection_fills_defaults_alongside_legacy_templates() {
+        let templates = AdminRuntimeMailTemplatesConfig {
+            register_result: "旧正文".to_owned(),
+            ..Default::default()
+        };
+        let mut projected =
+            AdminRuntimeDocument { mail_templates: Some(templates.clone()), ..Default::default() };
+        assert!(projected.validate().is_ok());
+        projected.materialize_business_defaults();
+        assert_eq!(projected.worlds, Some(AdminRuntimeWorldsConfig::default()));
+        assert_eq!(projected.equipment_filter, Some(AdminRuntimeEquipmentFilterConfig::default()));
+        assert_eq!(projected.mail_templates, Some(templates));
+    }
+
+    #[test]
+    fn business_projection_keeps_explicit_settings_and_legacy_template_condition() {
+        let mut old = AdminRuntimeDocument::default();
+        old.materialize_business_defaults();
+        assert_eq!(old.mail_templates, Some(AdminRuntimeMailTemplatesConfig::default()));
+
+        let mut worlds = AdminRuntimeWorldsConfig::default();
+        worlds.isekai.enabled = false;
+        let filter = AdminRuntimeEquipmentFilterConfig {
+            qualities: vec!["Magnificent".to_owned()],
+            ..Default::default()
+        };
+        let mut configured = AdminRuntimeDocument {
+            worlds: Some(worlds.clone()),
+            equipment_filter: Some(filter.clone()),
+            ..Default::default()
+        };
+        configured.materialize_business_defaults();
+        assert_eq!(configured.worlds, Some(worlds));
+        assert_eq!(configured.equipment_filter, Some(filter));
+        assert!(configured.mail_templates.is_none());
     }
 }

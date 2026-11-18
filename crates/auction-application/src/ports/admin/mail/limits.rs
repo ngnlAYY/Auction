@@ -24,7 +24,7 @@ pub(super) fn valid_kind(value: Option<&str>) -> bool {
         value.is_empty()
             || matches!(
                 value,
-                "equipment" | "bid" | "delivery" | "registration" | "rebind" | "unknown"
+                "equipment" | "bid" | "delivery" | "registration" | "rebind" | "rekey" | "unknown"
             )
     })
 }
@@ -36,4 +36,34 @@ pub(super) fn valid_status(value: Option<&str>) -> bool {
 
 pub(super) fn valid_string_list(values: &[String]) -> bool {
     values.len() <= 1000 && values.iter().all(|value| valid_text(value, 512))
+}
+
+#[cfg(test)]
+mod tests {
+    use auction_time::Timestamp;
+    use uuid::Uuid;
+
+    use super::super::model::AdminMailIntakeSummary;
+
+    #[test]
+    fn intake_summary_accepts_rekey_and_rejects_unrecognized_kind() {
+        let received_at = Timestamp::from_ymd_hms(2026, 11, 6, 10, 0, 0).unwrap();
+        let mut summary = AdminMailIntakeSummary {
+            id: Uuid::from_u128(1),
+            mailbox_key: "main-mailbox".to_owned(),
+            external_mail_id: "1234".to_owned(),
+            world_id: "main".to_owned(),
+            kind: "rekey".to_owned(),
+            status: "accepted".to_owned(),
+            decision_code: "rekeyed".to_owned(),
+            received_at,
+            processed_at: received_at,
+            sender: None,
+            subject: None,
+            has_message_display: false,
+        };
+        assert!(summary.validate());
+        summary.kind = "other_kind".to_owned();
+        assert!(!summary.validate());
+    }
 }

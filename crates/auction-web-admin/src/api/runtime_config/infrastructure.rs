@@ -69,11 +69,21 @@ pub(super) fn valid_security(value: &Value) -> bool {
     ) else {
         return false;
     };
-    bool_field(security, "allowed_origins_enabled").is_some()
-        && bool_field(security, "cookie_secure").is_some()
+    let Some(origins_enabled) = bool_field(security, "allowed_origins_enabled") else {
+        return false;
+    };
+    let Some(origins) = security.get("allowed_origins").and_then(Value::as_array) else {
+        return false;
+    };
+    bool_field(security, "cookie_secure").is_some()
         && bool_field(security, "trusted_unix_proxy").is_some()
-        && valid_string_list(&security["allowed_origins"], 16, 512, false)
-        && valid_string_list(&security["trusted_proxy_cidrs"], 64, 128, true)
+        && origins.len() <= 16
+        && origins.iter().all(|value| {
+            value.as_str().is_some_and(|origin| !origins_enabled || valid_text(origin, 512, false))
+        })
+        && security
+            .get("trusted_proxy_cidrs")
+            .is_some_and(|value| valid_string_list(value, 64, 128, true))
         && u64_field(security, "login_rate_limit")
             .is_some_and(|value| (1..=10_000).contains(&value))
         && u64_field(security, "mutation_rate_limit")
@@ -144,7 +154,7 @@ pub(super) fn valid_tracing(value: &Value) -> bool {
         && u64_field(tracing, "sample_ratio_ppm").is_some_and(|value| value <= 1_000_000)
         && (!enabled && endpoint.is_empty()
             || (endpoint.starts_with("http://") || endpoint.starts_with("https://"))
-                && valid_text(endpoint, 2048, false))
+                && valid_text(endpoint, usize::MAX, false))
 }
 
 /// Worker control socket 路径的字节上限；与服务端 Worker 绑定规则同口径。

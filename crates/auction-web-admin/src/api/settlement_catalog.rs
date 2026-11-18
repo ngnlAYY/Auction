@@ -3,11 +3,9 @@
 use std::collections::HashSet;
 
 use auction_contracts::{AdminSettlementCatalogResponse, ApiResponse};
+use auction_time::Timestamp;
 
-use super::{
-    MAX_JSON_SAFE_INTEGER, invalid_response_error, parse_admin_time, response_error, send_get,
-    valid_uuid,
-};
+use super::{MAX_JSON_SAFE_INTEGER, invalid_response_error, response_error, send_get, valid_uuid};
 
 // contracts DTO 拒绝未知字段；此处补充排序、去重与筛选回显等跨字段校验。
 
@@ -84,8 +82,9 @@ fn decode_catalog(
     let mut previous_key: Option<CatalogOrderKey<'_>> = None;
     // 校验阶段借用完整响应中的文本，成功后再转移字段，避免去重和排序键逐行复制字符串。
     for entry in &data.auctions {
-        let settled_at = parse_admin_time(&entry.settled_at)
-            .filter(|value| value.is_finite())
+        // 后端按微秒排序，只有时刻真正相等才使用后续排序键。
+        let settled_at = Timestamp::parse_from_rfc3339(&entry.settled_at)
+            .ok()
             .ok_or("settlement_catalog_time")?;
         if !valid_uuid(&entry.auction_id)
             || !matches!(entry.world_id.as_str(), "main" | "isekai")
@@ -132,7 +131,7 @@ fn decode_catalog(
 }
 
 struct CatalogOrderKey<'a> {
-    settled_at: f64,
+    settled_at: Timestamp,
     world_id: &'a str,
     sequence: i64,
     auction_id: &'a str,
@@ -156,4 +155,52 @@ fn catalog_order_valid(
         return previous.sequence > current.sequence;
     }
     previous.auction_id >= current.auction_id
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{AdminSettlementCatalogResponse, decode_catalog};
+
+    fn catalog_within_same_millisecond() -> AdminSettlementCatalogResponse {
+        serde_json::from_value(json!({
+            "auctions": [
+                {
+                    "auction_id": "0f8fad5b-d9cb-469f-a165-70867728950e",
+                    "world_id": "main",
+                    "sequence": 9,
+                    "settled_at": "2026-11-06T10:00:00.123999Z"
+                },
+                {
+                    "auction_id": "2c9e63a1-7f4b-4a0e-b3d5-9f8c1e2d4b60",
+                    "world_id": "isekai",
+                    "sequence": 9,
+                    "settled_at": "2026-11-06T10:00:00.123001Z"
+                }
+            ],
+            "pagination": {"page": 1, "page_size": 10, "total": 2}
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn cross_world_catalog_keeps_submillisecond_order() {
+        let mut catalog = catalog_within_same_millisecond();
+        assert!(decode_catalog(catalog.clone(), "all", None, 1, 10).is_ok());
+        catalog.auctions.swap(0, 1);
+        assert_eq!(decode_catalog(catalog, "all", None, 1, 10), Err("settlement_catalog_order"));
+    }
+
+    #[test]
+    fn cross_world_catalog_breaks_exact_time_ties_by_world() {
+        let mut catalog = catalog_within_same_millisecond();
+        catalog.auctions[1].settled_at = catalog.auctions[0].settled_at.clone();
+        assert_eq!(
+            decode_catalog(catalog.clone(), "all", None, 1, 10),
+            Err("settlement_catalog_order")
+        );
+        catalog.auctions.swap(0, 1);
+        assert!(decode_catalog(catalog, "all", None, 1, 10).is_ok());
+    }
 }

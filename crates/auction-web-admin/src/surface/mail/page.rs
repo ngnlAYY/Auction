@@ -258,6 +258,7 @@ pub fn page() -> Element {
                                 option { value: "delivery", {t!("admin-mail-filter-kind-delivery")} }
                                 option { value: "registration", {t!("admin-mail-filter-kind-registration")} }
                                 option { value: "rebind", {t!("admin-mail-filter-kind-rebind")} }
+                                option { value: "rekey", {t!("admin-mail-kind-rekey")} }
                                 option { value: "unknown", {t!("admin-mail-filter-kind-unknown")} }
                             }
                         }

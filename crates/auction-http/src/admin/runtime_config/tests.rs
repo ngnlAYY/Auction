@@ -4,7 +4,10 @@
 
 use std::collections::BTreeSet;
 
-use auction_application::admin::{AdminRuntimeDocument, AdminRuntimeSnapshot};
+use auction_application::admin::{
+    AdminRuntimeDocument, AdminRuntimeEquipmentFilterConfig, AdminRuntimeSnapshot,
+    AdminRuntimeWorldsConfig,
+};
 use axum::body::to_bytes;
 use axum::http::{StatusCode, Uri};
 use serde_json::{Value, json};
@@ -109,6 +112,24 @@ fn mail_keys(projected: &Value) -> BTreeSet<&str> {
         .keys()
         .map(String::as_str)
         .collect()
+}
+
+#[test]
+fn legacy_templates_project_business_defaults_with_the_original_snapshot_fingerprint() {
+    let source = document(json!({"mail_templates": {"register_result": "旧正文"}}));
+    assert!(source.worlds.is_none() && source.equipment_filter.is_none());
+    let (projected, snapshot_fingerprint) = project(source);
+
+    assert_eq!(
+        projected["worlds"],
+        serde_json::to_value(AdminRuntimeWorldsConfig::default()).unwrap()
+    );
+    assert_eq!(
+        projected["equipment_filter"],
+        serde_json::to_value(AdminRuntimeEquipmentFilterConfig::default()).unwrap()
+    );
+    assert_eq!(projected["mail_templates"]["register_result"], "旧正文");
+    assert_ne!(document(projected).fingerprint(), snapshot_fingerprint);
 }
 
 /// 没有 operations 的旧文件与只写了 `managed` 的旧邮件区块：省略键全部按服务端默认值补齐。

@@ -15,12 +15,12 @@ pub(super) fn valid_operations(value: &Value) -> bool {
     else {
         return false;
     };
-    valid_economics(&document["economics"])
-        && valid_schedule(&document["schedule"])
-        && valid_forum(&document["forum"])
-        && valid_alerts(&document["alerts"])
-        && valid_worker(&document["worker"])
-        && valid_mail(&document["mail"])
+    document.get("economics").is_some_and(valid_economics)
+        && document.get("schedule").is_some_and(valid_schedule)
+        && document.get("forum").is_some_and(valid_forum)
+        && document.get("alerts").is_some_and(valid_alerts)
+        && document.get("worker").is_some_and(valid_worker)
+        && document.get("mail").is_some_and(valid_mail)
 }
 
 /// 服务端投影已补齐邮件区块的全部默认值；这里只校验完整闭集与数值边界，缺键即拒绝。
@@ -169,6 +169,20 @@ fn valid_schedule(value: &Value) -> bool {
 }
 
 fn valid_early_bird(value: &Value) -> bool {
+    let mut required = vec!["worlds", "season_starts", "session_days", "qualities"];
+    // 后端省略赛季前场次的默认值，两键各自出现时仍须符合类型与取值边界。
+    if let Some(session) = value.get("pre_season_session") {
+        if !session.is_boolean() {
+            return false;
+        }
+        required.push("pre_season_session");
+    }
+    if let Some(days) = value.get("pre_season_days_before") {
+        if !days.as_u64().is_some_and(|days| (1..=31).contains(&days)) {
+            return false;
+        }
+        required.push("pre_season_days_before");
+    }
     if !valid_scalars(
         value,
         &["enabled", "pause_intake_before_season"],
@@ -178,7 +192,7 @@ fn valid_early_bird(value: &Value) -> bool {
             ("preview_lead_minutes", 120, 10_080),
             ("live_minutes", 1, 10_080),
         ],
-        &["worlds", "season_starts", "session_days", "qualities"],
+        &required,
     ) {
         return false;
     }
@@ -278,7 +292,6 @@ fn valid_worker_delivery(value: &Value) -> bool {
         &[],
         &[
             ("batch_limit", 1, 1000),
-            ("concurrency", 1, 1000),
             ("poll_interval_seconds", 1, 86400),
             ("jitter_seconds", 0, 86400),
             ("lease_duration_seconds", 1, 86400),
@@ -351,10 +364,166 @@ fn valid_scalars(
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use serde_json::{Value, json};
 
-    use super::{valid_alerts, valid_mail};
+    use super::{valid_alerts, valid_early_bird, valid_mail, valid_operations};
+
+    /// 各后端 Default 经当前 HTTP 扩展投影后的运行参数。
+    pub(in crate::api::runtime_config) fn default_operations() -> Value {
+        json!({
+            "economics": {
+                "managed": false,
+                "start_price": 1000,
+                "bid_increment_ppm": 50000,
+                "soft_close_window_seconds": 900,
+                "soft_close_extension_seconds": 900,
+                "cancel_cutoff_seconds": 86400,
+                "proxy_enabled": true,
+                "proxy_default_mode": "fast",
+                "proxy_slow_interval_seconds": 600,
+                "proxy_max_outbid_uses": 3,
+                "final_phase_lead_seconds": 900
+            },
+            "schedule": {
+                "managed": false,
+                "enabled": false,
+                "timezone": "UTC",
+                "preview_day": "Thursday",
+                "preview_time": "22:00",
+                "open_day": "Friday",
+                "open_time": "00:00",
+                "nominal_end_day": "Saturday",
+                "nominal_end_time": "12:00",
+                "worlds": ["main", "isekai"]
+            },
+            "forum": {
+                "managed": false,
+                "enabled": false,
+                "batch_size": 100,
+                "poll_interval_seconds": 300,
+                "jitter_seconds": 5,
+                "maximum_response_bytes": 2097152,
+                "maximum_topic_pages": 10,
+                "minimum_request_interval_millis": 750,
+                "request_timeout_seconds": 30,
+                "item_timeout_seconds": 240,
+                "lease_duration_seconds": 300
+            },
+            "alerts": complete_alerts(),
+            "worker": {
+                "managed": false,
+                "concurrency": 8,
+                "poll_interval_seconds": 60,
+                "batch_limit": 100,
+                "jitter_seconds": 5,
+                "item_timeout_seconds": 30,
+                "recovery_retry_delay_seconds": 60,
+                "delivery": {
+                    "batch_limit": 100,
+                    "poll_interval_seconds": 60,
+                    "jitter_seconds": 5,
+                    "lease_duration_seconds": 60,
+                    "renew_interval_seconds": 10,
+                    "sending_grace_seconds": 300,
+                    "request_timeout_seconds": 180,
+                    "finalize_timeout_seconds": 5
+                },
+                "fulfillment": {
+                    "batch_limit": 100,
+                    "concurrency": 8,
+                    "poll_interval_seconds": 60,
+                    "jitter_seconds": 5,
+                    "lease_duration_seconds": 60,
+                    "item_timeout_seconds": 30,
+                    "retry_delay_seconds": 60
+                },
+                "recovery": {
+                    "batch_limit": 100,
+                    "concurrency": 8,
+                    "poll_interval_seconds": 60,
+                    "jitter_seconds": 5,
+                    "lease_duration_seconds": 60,
+                    "item_timeout_seconds": 30,
+                    "low_balance_threshold": 100,
+                    "health_refresh_interval_seconds": 60,
+                    "evidence_stale_after_seconds": 300
+                }
+            },
+            "mail": complete_mail()
+        })
+    }
+
+    #[test]
+    fn operations_accepts_the_complete_default_projection() {
+        assert!(valid_operations(&default_operations()));
+    }
+
+    #[test]
+    fn operations_rejects_missing_and_extra_projection_fields() {
+        for (section, required, extra) in [
+            ("", "worker", "extra"),
+            ("/economics", "start_price", "extra"),
+            ("/schedule", "open_time", "extra"),
+            ("/forum", "maximum_topic_pages", "extra"),
+            ("/alerts", "source_timeout_seconds", "extra"),
+            ("/worker", "concurrency", "extra"),
+            ("/worker/delivery", "batch_limit", "concurrency"),
+            ("/worker/fulfillment", "concurrency", "extra"),
+            ("/worker/recovery", "concurrency", "extra"),
+            ("/mail", "send_classes", "extra"),
+        ] {
+            let mut missing = default_operations();
+            let object = missing.pointer_mut(section).and_then(Value::as_object_mut).unwrap();
+            assert!(object.remove(required).is_some());
+            assert!(!valid_operations(&missing), "{section}/{required}");
+
+            let mut unexpected = default_operations();
+            let object = unexpected.pointer_mut(section).and_then(Value::as_object_mut).unwrap();
+            assert!(object.insert(extra.to_owned(), json!(1)).is_none());
+            assert!(!valid_operations(&unexpected), "{section}/{extra}");
+        }
+    }
+
+    #[test]
+    fn early_bird_accepts_the_optional_pre_season_fields_independently() {
+        let defaults = json!({
+            "enabled": false,
+            "timezone": "UTC",
+            "worlds": ["isekai"],
+            "season_starts": ["05-01", "11-01"],
+            "season_start_time": "09:00",
+            "window_days": 7,
+            "session_days": [1, 3, 5, 7],
+            "open_time": "18:00",
+            "preview_lead_minutes": 120,
+            "live_minutes": 1440,
+            "qualities": [],
+            "pause_intake_before_season": true
+        });
+        assert!(valid_early_bird(&defaults));
+        let mut explicit = defaults.clone();
+        explicit["pre_season_session"] = json!(false);
+        assert!(valid_early_bird(&explicit));
+        explicit["pre_season_days_before"] = json!(4);
+        assert!(valid_early_bird(&explicit));
+        explicit.as_object_mut().unwrap().remove("pre_season_session");
+        assert!(valid_early_bird(&explicit));
+
+        for (key, invalid) in [
+            ("pre_season_session", json!("false")),
+            ("pre_season_days_before", json!(0)),
+            ("pre_season_days_before", json!(32)),
+            ("pre_season_days_before", Value::Null),
+            ("extra", json!(1)),
+        ] {
+            let mut early_bird = defaults.clone();
+            early_bird[key] = invalid;
+            assert!(!valid_early_bird(&early_bird), "{key}");
+        }
+        explicit.as_object_mut().unwrap().remove("worlds");
+        assert!(!valid_early_bird(&explicit));
+    }
 
     /// 带 `include=fulfillment_collection_overdue_age_seconds` 时服务端给出的完整告警区块。
     fn complete_alerts() -> Value {

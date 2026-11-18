@@ -6,13 +6,14 @@ use auction_contracts::{
     AdminDeliverySentProofPreviewResponse, AdminDeliverySentProofResponse,
 };
 use auction_time::Timestamp;
+use serde_json::{Value, json};
 use uuid::Uuid;
 
 use super::player_support::player_support_url;
 use super::queue::{DeliverySearchFilters, delivery_list_url};
 use super::{
-    decode::StrictDeliveryEnvelope, decode_confirmation, decode_detail, decode_preview,
-    delivery_detail_url,
+    decode::{StrictDeliveryEnvelope, decode_delivery_list},
+    decode_confirmation, decode_detail, decode_preview, delivery_detail_url,
 };
 
 fn time(offset: u32) -> String {
@@ -114,6 +115,257 @@ fn accepts_complete_detail() {
     assert_eq!(decoded.attempts.len(), 1);
 }
 
+/// 对应 storage 的 `retired_player_notification` 夹具与投稿回执退役投影。
+fn retired_before_send(origin_kind: &str, reason_code: &str, failure_code: &str) -> Value {
+    json!({
+        "id": DELIVERY_ID,
+        "origin_kind": origin_kind,
+        "origin_id": format!("{origin_kind}:1:alice"),
+        "recipient": "alice",
+        "cod": 0,
+        "status": "failed",
+        "world": "main",
+        "retirement_reason": reason_code,
+        "lease_expires_at": null,
+        "fencing_version": 1,
+        "attempt_count": 0,
+        "claimed_at": null,
+        "sending_at": null,
+        "completed_at": "2026-11-06T10:00:05.000000Z",
+        "external_reference": null,
+        "failure_code": failure_code,
+        "reason_code": reason_code,
+        "created_at": "2026-11-06T10:00:00.000000Z",
+        "updated_at": "2026-11-06T10:00:05.000000Z"
+    })
+}
+
+fn check_before_send_projection(delivery: Value, valid: bool) {
+    let list = json!({
+        "code": "ok",
+        "message": "loaded",
+        "data": {
+            "deliveries": [delivery],
+            "pagination": {"page": 1, "page_size": 10, "total": 1}
+        }
+    });
+    let list = serde_json::from_value(list).unwrap();
+    let list_valid = decode_delivery_list(list, 1, 10).is_ok();
+
+    let mut data = detail();
+    data.attempts.clear();
+    data.delivery = serde_json::from_value(delivery.clone()).unwrap();
+    let response =
+        StrictDeliveryEnvelope { code: "ok".to_owned(), message: "loaded".to_owned(), data };
+    let detail_valid = decode_detail(response).is_ok();
+    assert_eq!((list_valid, detail_valid), (valid, valid), "列表与详情投影 {delivery}");
+}
+
+#[test]
+fn delivery_accepts_server_preflight_retirements() {
+    for (origin, reason, failure) in [
+        ("lot_watch", "lot_watch_invalidated", "lot_watch_invalidated"),
+        ("lot_watch", "recipient_renamed", "recipient_renamed"),
+        ("seller_summary", "recipient_renamed", "recipient_renamed"),
+        ("season_reminder", "recipient_renamed", "recipient_renamed"),
+        ("season_reminder", "season_boundary_passed", "season_notice_invalidated"),
+        ("season_reminder", "season_reminder_resolved", "season_notice_invalidated"),
+        ("mail_intake", "auction_opened", "auction_notice_invalidated"),
+    ] {
+        check_before_send_projection(retired_before_send(origin, reason, failure), true);
+    }
+
+    let mut claimed = retired_before_send(
+        "season_reminder",
+        "season_boundary_passed",
+        "season_notice_invalidated",
+    );
+    claimed["claimed_at"] = json!("2026-11-06T10:00:01.000000Z");
+    claimed["attempt_count"] = json!(1);
+    claimed["fencing_version"] = json!(2);
+    check_before_send_projection(claimed, true);
+}
+
+#[test]
+fn delivery_rejects_malformed_preflight_retirements() {
+    let valid = retired_before_send(
+        "season_reminder",
+        "season_boundary_passed",
+        "season_notice_invalidated",
+    );
+    for (key, invalid) in [
+        ("origin_kind", json!("seller_summary")),
+        ("failure_code", json!("recipient_renamed")),
+        ("completed_at", Value::Null),
+        ("completed_at", json!("2026-11-06T10:00:06.000000Z")),
+        ("claimed_at", json!("2026-11-06T10:00:01.000000Z")),
+        ("external_reference", json!("3120869")),
+        ("fencing_version", json!(0)),
+        ("cod", json!(1)),
+        ("retirement_reason", json!("season_reminder_resolved")),
+        ("suppression_reason", json!("retry_exhausted")),
+    ] {
+        let mut malformed = valid.clone();
+        malformed[key] = invalid;
+        check_before_send_projection(malformed, false);
+    }
+    // 即使正常失败的完整时间链有效，换季退役也不能携带发送事实。
+    let mut sent = valid;
+    sent["claimed_at"] = json!("2026-11-06T10:00:01.000000Z");
+    sent["sending_at"] = json!("2026-11-06T10:00:02.000000Z");
+    sent["attempt_count"] = json!(1);
+    let mut missing_reason = sent.clone();
+    missing_reason.as_object_mut().unwrap().remove("reason_code");
+    check_before_send_projection(missing_reason, false);
+    sent.as_object_mut().unwrap().remove("retirement_reason");
+    check_before_send_projection(sent, false);
+}
+
+fn preparation_failure(failure_code: &str) -> Value {
+    let mut failed = serde_json::to_value(delivery()).unwrap();
+    failed["status"] = json!("failed");
+    failed["sending_at"] = Value::Null;
+    failed["failure_code"] = json!(failure_code);
+    failed["suppression_reason"] = json!(failure_code);
+    failed
+}
+
+#[test]
+fn delivery_rejects_suppression_outside_its_projected_reason_and_state() {
+    let prepared = preparation_failure("invalid_payload");
+    check_before_send_projection(prepared.clone(), true);
+    for label in ["unknown_reason", "retry_exhausted"] {
+        let mut mislabeled = prepared.clone();
+        mislabeled["suppression_reason"] = json!(label);
+        check_before_send_projection(mislabeled, false);
+    }
+
+    let mut sent = serde_json::to_value(delivery()).unwrap();
+    sent["status"] = json!("failed");
+    sent["failure_code"] = json!("retry_exhausted");
+    check_before_send_projection(sent.clone(), true);
+    sent["suppression_reason"] = json!("retry_exhausted");
+    check_before_send_projection(sent, false);
+
+    let mut pending = prepared;
+    pending["status"] = json!("pending");
+    pending["failure_code"] = Value::Null;
+    pending["claimed_at"] = Value::Null;
+    pending["completed_at"] = Value::Null;
+    pending["reason_code"] = json!("invalid_payload");
+    check_before_send_projection(pending, false);
+}
+
+#[test]
+fn delivery_suppression_prefers_failure_code_and_can_use_reason_code() {
+    let mut alert = preparation_failure("retry_exhausted");
+    alert["origin_kind"] = json!("operations_alert");
+    alert["claimed_at"] = Value::Null;
+    alert["attempt_count"] = json!(0);
+    alert["fencing_version"] = json!(0);
+    alert["reason_code"] = json!("operations_alert_batch_terminal");
+    check_before_send_projection(alert.clone(), true);
+    alert["suppression_reason"] = json!("operations_alert_batch_terminal");
+    check_before_send_projection(alert, false);
+
+    let mut conflict = preparation_failure("verified_not_sent");
+    conflict["origin_kind"] = json!("mail_intake");
+    conflict["reason_code"] = json!("mail_disposition_conflict");
+    conflict["suppression_reason"] = json!("mail_disposition_conflict");
+    check_before_send_projection(conflict, true);
+}
+
+#[test]
+fn delivery_rejects_preparation_failure_disguised_as_disposition_conflict() {
+    let mut failed = preparation_failure("task_panic");
+    failed["origin_kind"] = json!("mail_intake");
+    failed["reason_code"] = json!("mail_disposition_conflict");
+    check_before_send_projection(failed.clone(), false);
+    failed.as_object_mut().unwrap().remove("reason_code");
+    check_before_send_projection(failed, true);
+}
+
+#[test]
+fn delivery_checks_disposition_conflict_before_recovery_superseded() {
+    let mut conflict = preparation_failure("recovery_superseded");
+    conflict["origin_kind"] = json!("mail_intake");
+    conflict["category"] = json!("intake");
+    conflict["template"] = json!("auction_equipment_rejected");
+    conflict["reason_code"] = json!("mail_disposition_conflict");
+    conflict["suppression_reason"] = json!("mail_disposition_conflict");
+    check_before_send_projection(conflict.clone(), true);
+
+    // 处置冲突已有领取时间时必须有尝试记录。
+    let mut unattempted = conflict.clone();
+    unattempted["attempt_count"] = json!(0);
+    check_before_send_projection(unattempted, false);
+
+    conflict["sending_at"] = json!(time(0));
+    conflict.as_object_mut().unwrap().remove("suppression_reason");
+    check_before_send_projection(conflict, false);
+}
+
+#[test]
+fn delivery_rejects_attempt_count_outside_the_storage_range() {
+    let mut projected =
+        retired_before_send("seller_summary", "recipient_renamed", "recipient_renamed");
+    projected["attempt_count"] = json!(i32::MAX);
+    check_before_send_projection(projected.clone(), true);
+    projected["attempt_count"] = json!(i32::MAX as u32 + 1);
+    check_before_send_projection(projected, false);
+}
+
+#[test]
+fn delivery_requires_world_for_returned_mail_reference() {
+    let mut returned = serde_json::to_value(delivery()).unwrap();
+    returned["failure_code"] = json!("recipient_not_found");
+    returned["reason_code"] = json!("recipient_not_found");
+    returned["take_required"] = json!(true);
+    returned["returned_mail_id"] = json!("3120869");
+    returned["external_reference"] = json!("3120869");
+    check_before_send_projection(returned.clone(), true);
+    returned.as_object_mut().unwrap().remove("world");
+    check_before_send_projection(returned, false);
+}
+
+#[test]
+fn delivery_accepts_recovery_quarantine_before_send() {
+    let mut quarantined =
+        retired_before_send("settlement", "recipient_renamed", "recipient_renamed");
+    quarantined["status"] = json!("manual_reconcile");
+    let object = quarantined.as_object_mut().unwrap();
+    object.remove("reason_code");
+    object.remove("retirement_reason");
+    for failure in [
+        "external_recovery_sent_match",
+        "external_recovery_payload_match",
+        "external_recovery_unresolved_send",
+    ] {
+        quarantined["failure_code"] = json!(failure);
+        check_before_send_projection(quarantined.clone(), true);
+    }
+    let mut unknown = quarantined.clone();
+    unknown["failure_code"] = json!("other_failure");
+    check_before_send_projection(unknown, false);
+    quarantined["completed_at"] = Value::Null;
+    check_before_send_projection(quarantined, false);
+}
+
+#[test]
+fn delivery_rejects_recovery_quarantine_with_send_facts() {
+    let sent = serde_json::to_value(delivery()).unwrap();
+    check_before_send_projection(sent.clone(), true);
+    for failure in [
+        "external_recovery_sent_match",
+        "external_recovery_payload_match",
+        "external_recovery_unresolved_send",
+    ] {
+        let mut quarantined = sent.clone();
+        quarantined["failure_code"] = json!(failure);
+        check_before_send_projection(quarantined, false);
+    }
+}
+
 /// 被恢复终结的原结算投递（`failed/recovery_superseded`）没有发送时间，只在扩展投影里出现：
 /// 解码接受这一确定未发送的终态，来源不是结算或带发送时间时拒绝。
 #[test]
@@ -135,6 +387,9 @@ fn accepts_recovery_superseded_settlement_delivery_only_without_send_facts() {
     superseded.sending_at = None;
     superseded.attempt_count = 0;
     assert!(decode(superseded.clone()).is_ok());
+    let mut claimed = superseded.clone();
+    claimed.claimed_at = Some(time(0));
+    assert!(decode(claimed).is_ok());
     let mut sent = superseded.clone();
     sent.claimed_at = Some(time(0));
     sent.sending_at = Some(time(0));

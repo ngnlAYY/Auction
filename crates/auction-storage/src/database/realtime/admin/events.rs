@@ -12,17 +12,14 @@ use uuid::Uuid;
 use crate::database::storage_error;
 use crate::database::storage_error_from;
 
-pub(super) async fn list_events_postgres(
-    store: &crate::database::DatabaseStore,
-    request: RealtimeEventListRequest,
-) -> Result<RealtimeEventPage, ApplicationError> {
-    // payload 与内部来源字段不进入 SELECT，从 SQL 投影上保证 Admin 端无法误返回它们。
-    // 页与计数分别规划，避免双重引用让全量元数据物化后再排序；两者仍属于同一语句快照。
-    let rows = sqlx::query(
-        "WITH filtered AS NOT MATERIALIZED (
+// payload 与内部来源字段不进入 SELECT，从 SQL 投影上保证 Admin 端无法误返回它们。
+// 页与计数分别规划，避免双重引用让全量元数据物化后再排序；两者仍属于同一语句快照。
+// 竞价事件提交后才补号；列表和总数只反映当前快照中已进入事件流的记录。
+const LIST_EVENTS_SQL: &str = "WITH filtered AS NOT MATERIALIZED (
              SELECT event_id, stream_key, stream_sequence, kind, schema_version, created_at
              FROM public.realtime_events
-             WHERE stream_key = COALESCE($1::text, stream_key)
+             WHERE stream_sequence IS NOT NULL
+               AND stream_key = COALESCE($1::text, stream_key)
                AND kind = COALESCE($2::text, kind)
          ), page AS (
              SELECT event_id, stream_key, stream_sequence, kind, schema_version, created_at
@@ -36,15 +33,20 @@ pub(super) async fn list_events_postgres(
                 page.schema_version, page.created_at, summary.total
          FROM summary
          LEFT JOIN page ON TRUE
-         ORDER BY page.created_at DESC NULLS LAST, page.event_id DESC NULLS LAST",
-    )
-    .bind(request.stream_key.as_deref())
-    .bind(request.kind.as_deref())
-    .bind(request.limit)
-    .bind(request.offset)
-    .fetch_all(store.pool())
-    .await
-    .map_err(|error| storage_error_from(error, "读取 PostgreSQL realtime 事件元数据失败"))?;
+         ORDER BY page.created_at DESC NULLS LAST, page.event_id DESC NULLS LAST";
+
+pub(super) async fn list_events_postgres(
+    store: &crate::database::DatabaseStore,
+    request: RealtimeEventListRequest,
+) -> Result<RealtimeEventPage, ApplicationError> {
+    let rows = sqlx::query(LIST_EVENTS_SQL)
+        .bind(request.stream_key.as_deref())
+        .bind(request.kind.as_deref())
+        .bind(request.limit)
+        .bind(request.offset)
+        .fetch_all(store.pool())
+        .await
+        .map_err(|error| storage_error_from(error, "读取 PostgreSQL realtime 事件元数据失败"))?;
     let total = rows
         .first()
         .ok_or_else(|| storage_error("PostgreSQL realtime 事件摘要缺失"))?
@@ -134,4 +136,54 @@ fn validate_event_page(
         previous = Some((&entry.created_at, entry.event_id));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use sqlx::{AssertSqlSafe, Connection, Executor, Row};
+    use uuid::Uuid;
+
+    use super::{LIST_EVENTS_SQL, event_from_postgres_page_row};
+
+    #[tokio::test]
+    #[ignore = "需要 AUCTION_TEST_DATABASE_URL 指向隔离的 PostgreSQL 18"]
+    async fn postgres_admin_events_page_and_total_only_include_assigned_sequences()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let url = std::env::var("AUCTION_TEST_DATABASE_URL")?;
+        let mut connection = sqlx::PgConnection::connect(&url).await?;
+        let mut transaction = connection.begin().await?;
+        transaction
+            .execute(
+                "CREATE TEMP TABLE realtime_events (
+                    event_id uuid, stream_key text, stream_sequence bigint, kind text,
+                    schema_version integer, created_at timestamptz
+                );
+                INSERT INTO pg_temp.realtime_events VALUES
+                  ('00000000-0000-0000-0000-000000000001', 'auction:test', 1, 'lot.bid_accepted',
+                   2, '2026-11-06T10:00:00Z'),
+                  ('00000000-0000-0000-0000-000000000002', 'auction:test', NULL, 'lot.bid_accepted',
+                   2, '2026-11-06T10:00:01Z');",
+            )
+            .await?;
+        // 复用生产查询，只将表名指向连接私有夹具。
+        let sql = LIST_EVENTS_SQL.replace("public.realtime_events", "pg_temp.realtime_events");
+        for offset in [0_i64, 1] {
+            let row = sqlx::query(AssertSqlSafe(sql.as_str()))
+                .bind("auction:test")
+                .bind("lot.bid_accepted")
+                .bind(1_i64)
+                .bind(offset)
+                .fetch_one(&mut *transaction)
+                .await?;
+            assert_eq!(row.try_get::<i64, _>("total")?, 1);
+            let entry = event_from_postgres_page_row(row)?;
+            assert_eq!(
+                entry.as_ref().map(|entry| entry.event_id),
+                (offset == 0).then_some(Uuid::from_u128(1))
+            );
+            assert_eq!(entry.map(|entry| entry.stream_sequence), (offset == 0).then_some(1));
+        }
+        transaction.rollback().await?;
+        Ok(())
+    }
 }

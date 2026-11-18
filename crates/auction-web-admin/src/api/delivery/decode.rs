@@ -28,6 +28,14 @@ pub(super) struct StrictDeliveryEnvelope<T> {
 }
 
 const MAX_DELIVERY_PAGE_SIZE: i64 = 100;
+const SUPPRESSION_REASONS: &[&str] = &[
+    "mail_disposition_conflict",
+    "invalid_payload",
+    "task_panic",
+    "dependency_mismatch",
+    "retry_exhausted",
+    "operations_alert_batch_terminal",
+];
 
 pub(super) fn decode_delivery_list(
     payload: StrictDeliveryEnvelope<AdminDeliveryListResponse>,
@@ -85,6 +93,14 @@ pub(super) fn decode_delivery_command(
 }
 
 pub(super) fn decode_delivery(value: AdminDeliveryResponse) -> Result<Delivery, ()> {
+    let retirement_reason_valid = preflight_retirement_reason_valid(&value);
+    // 展示标记必须绑定到已知退役原因及其来源、失败码，避免通过普通失败分支获得退役语义。
+    if value.retirement_reason.as_deref().is_some_and(|reason| {
+        retirement_reason_valid != Some(true) || value.reason_code.as_deref() != Some(reason)
+    }) || !valid_suppression_projection(&value)
+    {
+        return Err(());
+    }
     if !valid_optional_text(value.template.as_deref())
         || value.template.as_deref().is_some_and(|template| template.len() > 64)
         || value.category.as_deref().is_some_and(|category| {
@@ -100,8 +116,6 @@ pub(super) fn decode_delivery(value: AdminDeliveryResponse) -> Result<Delivery, 
             )
         })
         || value.world.as_deref().is_some_and(|world| !matches!(world, "main" | "isekai"))
-        || !valid_optional_text(value.retirement_reason.as_deref())
-        || !valid_optional_text(value.suppression_reason.as_deref())
     {
         return Err(());
     }
@@ -114,53 +128,6 @@ pub(super) fn decode_delivery(value: AdminDeliveryResponse) -> Result<Delivery, 
     let claimed_at = parse_optional_delivery_time(value.claimed_at.as_ref())?;
     let sending_at = parse_optional_delivery_time(value.sending_at.as_ref())?;
     let completed_at = parse_optional_delivery_time(value.completed_at.as_ref())?;
-    // 服务端只为从未激活的告警投递使用该终态，时间链从创建直接到完成。
-    let before_activation = value.status == "failed"
-        && value.origin_kind == "operations_alert"
-        && value.reason_code.as_deref() == Some("operations_alert_batch_terminal");
-    let disposition_conflict = value.reason_code.as_deref() == Some("mail_disposition_conflict");
-    let watch_invalidated = value.origin_kind == "lot_watch"
-        && matches!(
-            value.reason_code.as_deref(),
-            Some("lot_watch_invalidated" | "recipient_renamed")
-        );
-    let preparation_rejected = value.status == "failed"
-        && value.failure_code.as_deref() == Some("invalid_payload")
-        && sending_at.is_none();
-    // 恢复接管退件后由恢复 owner 终结的原结算投递从未进入发送围栏（只在扩展投影中出现）。
-    let recovery_superseded = recovery_superseded(&value);
-    let timeline_valid = if preparation_rejected {
-        claimed_at.is_some_and(|claimed| {
-            !is_zero_delivery_time(claimed)
-                && claimed >= created_at
-                && completed_at.is_some_and(|completed| {
-                    !is_zero_delivery_time(completed)
-                        && completed >= claimed
-                        && completed <= updated_at
-                })
-        })
-    } else if disposition_conflict || watch_invalidated || recovery_superseded {
-        sending_at.is_none()
-            && claimed_at.is_none_or(|claimed| {
-                !is_zero_delivery_time(claimed) && claimed >= created_at && value.attempt_count > 0
-            })
-            && completed_at.is_some_and(|completed| {
-                !is_zero_delivery_time(completed)
-                    && completed >= created_at
-                    && claimed_at.is_none_or(|claimed| completed >= claimed)
-                    && completed <= updated_at
-            })
-    } else if before_activation {
-        claimed_at.is_none()
-            && sending_at.is_none()
-            && completed_at.is_some_and(|completed| {
-                !is_zero_delivery_time(completed)
-                    && completed >= created_at
-                    && completed <= updated_at
-            })
-    } else {
-        valid_timeline(created_at, claimed_at, sending_at, completed_at)
-    };
 
     if !valid_origin_kind(&value.origin_kind)
         || !valid_trimmed_text(&value.origin_id)
@@ -169,17 +136,24 @@ pub(super) fn decode_delivery(value: AdminDeliveryResponse) -> Result<Delivery, 
         || !valid_status(&value.status)
         || value.fencing_version < 0
         || value.fencing_version > MAX_JSON_SAFE_INTEGER
-        || i64::from(value.attempt_count) > MAX_JSON_SAFE_INTEGER
+        || value.attempt_count > i32::MAX as u32
         || is_zero_delivery_time(created_at)
         || is_zero_delivery_time(updated_at)
         || updated_at < created_at
         || lease_expires_at.is_some_and(is_zero_delivery_time)
-        || !timeline_valid
         || !valid_optional_text(value.external_reference.as_deref())
         || !valid_optional_text(value.failure_code.as_deref())
         || !valid_optional_text(value.reason_code.as_deref())
         || !valid_returned_mail_id(value.returned_mail_id.as_deref())
-        || !valid_state_fields(&value, lease_expires_at, claimed_at, sending_at, completed_at)
+        || !valid_state_fields(
+            &value,
+            created_at,
+            updated_at,
+            claimed_at,
+            sending_at,
+            completed_at,
+            retirement_reason_valid,
+        )
     {
         return Err(());
     }
@@ -255,8 +229,60 @@ fn valid_returned_mail_id(value: Option<&str>) -> bool {
     })
 }
 
+fn preparation_rejected(value: &AdminDeliveryResponse) -> bool {
+    value.status == "failed"
+        && matches!(value.failure_code.as_deref(), Some("invalid_payload" | "task_panic"))
+        && value.sending_at.is_none()
+}
+
+fn valid_suppression_projection(value: &AdminDeliveryResponse) -> bool {
+    let Some(reason) = value.suppression_reason.as_deref() else {
+        return true;
+    };
+    // 存储投影只在围栏前失败时派生抑制原因，闭集内的失败码优先于原因码。
+    value.status == "failed"
+        && value.sending_at.is_none()
+        && value.retirement_reason.is_none()
+        && value.failure_code.as_deref().filter(|code| SUPPRESSION_REASONS.contains(code)).or_else(
+            || value.reason_code.as_deref().filter(|code| SUPPRESSION_REASONS.contains(code)),
+        ) == Some(reason)
+}
+
 fn recovery_superseded(value: &AdminDeliveryResponse) -> bool {
     value.status == "failed" && value.failure_code.as_deref() == Some("recovery_superseded")
+}
+
+fn recovery_quarantine(value: &AdminDeliveryResponse) -> bool {
+    value.status == "manual_reconcile"
+        && matches!(
+            value.failure_code.as_deref(),
+            Some(
+                "external_recovery_sent_match"
+                    | "external_recovery_payload_match"
+                    | "external_recovery_unresolved_send"
+            )
+        )
+}
+
+/// 返回已知退役原因的来源和失败码是否相符；已知原因即使组合无效也须进入退役校验。
+fn preflight_retirement_reason_valid(value: &AdminDeliveryResponse) -> Option<bool> {
+    let reason = value.reason_code.as_deref()?;
+    let (origin_allowed, expected_failure) = match reason {
+        "lot_watch_invalidated" => (value.origin_kind == "lot_watch", reason),
+        "recipient_renamed" => (
+            matches!(
+                value.origin_kind.as_str(),
+                "lot_watch" | "seller_summary" | "season_reminder"
+            ),
+            reason,
+        ),
+        "season_boundary_passed" | "season_reminder_resolved" => {
+            (value.origin_kind == "season_reminder", "season_notice_invalidated")
+        }
+        "auction_opened" => (value.origin_kind == "mail_intake", "auction_notice_invalidated"),
+        _ => return None,
+    };
+    Some(origin_allowed && value.failure_code.as_deref() == Some(expected_failure))
 }
 
 fn is_zero_delivery_time(value: Timestamp) -> bool {
@@ -276,51 +302,39 @@ fn valid_timeline(
 
 fn valid_state_fields(
     value: &AdminDeliveryResponse,
-    lease_expires_at: Option<Timestamp>,
+    created_at: Timestamp,
+    updated_at: Timestamp,
     claimed_at: Option<Timestamp>,
     sending_at: Option<Timestamp>,
     completed_at: Option<Timestamp>,
+    retirement_reason_valid: Option<bool>,
 ) -> bool {
-    // 服务端已验证未写入 metadata；浏览器只接受明确非法载荷的完整领取/完成形状。
-    if value.status == "failed"
-        && value.failure_code.as_deref() == Some("invalid_payload")
-        && sending_at.is_none()
-    {
+    let has_lease = value.lease_expires_at.is_some();
+    let valid_before_send = || {
+        !has_lease
+            && sending_at.is_none()
+            && value.external_reference.is_none()
+            && !value.take_required
+            && value.returned_mail_id.is_none()
+            && claimed_at
+                .is_none_or(|claimed| !is_zero_delivery_time(claimed) && claimed >= created_at)
+            && completed_at.is_some_and(|completed| {
+                !is_zero_delivery_time(completed)
+                    && completed >= created_at
+                    && claimed_at.is_none_or(|claimed| completed >= claimed)
+                    && completed <= updated_at
+            })
+    };
+    let claimed_has_attempt = claimed_at.is_none() || value.attempt_count > 0;
+
+    // 专用分支按存储层 valid_snapshot 的顺序选定，匹配后一起校验时间链和状态。
+    // 准备失败须保留领取与完成事实，并优先校验这一终态以拒绝相冲突的原因码。
+    if preparation_rejected(value) {
         return value.reason_code.is_none()
-            && lease_expires_at.is_none()
             && claimed_at.is_some()
-            && completed_at.is_some()
-            && value.external_reference.is_none()
-            && !value.take_required
-            && value.returned_mail_id.is_none()
             && value.fencing_version > 0
-            && value.attempt_count > 0;
-    }
-    // 被恢复终结的原结算投递只有确定未发送的终态形状。
-    if recovery_superseded(value) {
-        return value.origin_kind == "settlement"
-            && value.reason_code.is_none()
-            && lease_expires_at.is_none()
-            && sending_at.is_none()
-            && completed_at.is_some()
-            && value.external_reference.is_none()
-            && !value.take_required
-            && value.returned_mail_id.is_none()
-            && value.fencing_version > 0;
-    }
-    // watch 失效或收件人改名只能作为未发送的明确失败；不能放宽普通失败或未知发送的时间链。
-    if matches!(value.reason_code.as_deref(), Some("lot_watch_invalidated" | "recipient_renamed")) {
-        return value.origin_kind == "lot_watch"
-            && value.status == "failed"
-            && value.failure_code.as_deref() == value.reason_code.as_deref()
-            && value.cod == Some(0)
-            && lease_expires_at.is_none()
-            && sending_at.is_none()
-            && completed_at.is_some()
-            && value.external_reference.is_none()
-            && !value.take_required
-            && value.returned_mail_id.is_none()
-            && value.fencing_version > 0;
+            && value.attempt_count > 0
+            && valid_before_send();
     }
     // 资产处置冲突只能在发送前隔离；人工失败后仍保留原因，不能混入普通可重试失败。
     if value.reason_code.as_deref() == Some("mail_disposition_conflict") {
@@ -332,17 +346,53 @@ fn valid_state_fields(
                 "failed" => value.failure_code.as_deref().is_some_and(valid_trimmed_text),
                 _ => false,
             }
-            && lease_expires_at.is_none()
-            && sending_at.is_none()
-            && completed_at.is_some()
-            && value.external_reference.is_none()
-            && !value.take_required
-            && value.returned_mail_id.is_none()
-            && value.fencing_version > 0;
+            && value.fencing_version > 0
+            && claimed_has_attempt
+            && valid_before_send();
+    }
+    // 退役须有确定的未发送事实，围栏版本推进后才能让浏览器接受该终态。
+    if let Some(reason_valid) = retirement_reason_valid {
+        return reason_valid
+            && value.status == "failed"
+            && value.cod == Some(0)
+            && value.suppression_reason.is_none()
+            && value.fencing_version > 0
+            && claimed_has_attempt
+            && valid_before_send();
+    }
+    // 未激活的告警从创建直接到完成，未获得发送围栏。
+    if value.status == "failed"
+        && value.origin_kind == "operations_alert"
+        && value.reason_code.as_deref() == Some("operations_alert_batch_terminal")
+    {
+        return claimed_at.is_none()
+            && matches!(
+                value.failure_code.as_deref(),
+                Some("dependency_mismatch" | "retry_exhausted")
+            )
+            && value.fencing_version == 0
+            && value.attempt_count == 0
+            && valid_before_send();
+    }
+    // 恢复隔离或终结可从本地直接完成，领取时间本身不能作为发送尝试的证据。
+    if recovery_quarantine(value) {
+        return value.fencing_version > 0
+            && value.retirement_reason.is_none()
+            && value.suppression_reason.is_none()
+            && valid_before_send();
+    }
+    if recovery_superseded(value) {
+        return value.origin_kind == "settlement"
+            && value.reason_code.is_none()
+            && value.fencing_version > 0
+            && valid_before_send();
+    }
+    if !valid_timeline(created_at, claimed_at, sending_at, completed_at) {
+        return false;
     }
     match value.status.as_str() {
         "prepared" | "pending" => {
-            lease_expires_at.is_none()
+            !has_lease
                 && claimed_at.is_none()
                 && sending_at.is_none()
                 && completed_at.is_none()
@@ -350,7 +400,7 @@ fn valid_state_fields(
                 && value.failure_code.is_none()
         }
         "claimed" => {
-            lease_expires_at.is_some()
+            has_lease
                 && claimed_at.is_some()
                 && sending_at.is_none()
                 && completed_at.is_none()
@@ -360,7 +410,7 @@ fn valid_state_fields(
                 && value.attempt_count > 0
         }
         "sending" => {
-            lease_expires_at.is_some()
+            has_lease
                 && claimed_at.is_some()
                 && sending_at.is_some()
                 && completed_at.is_none()
@@ -370,7 +420,7 @@ fn valid_state_fields(
                 && value.attempt_count > 0
         }
         "succeeded" => {
-            lease_expires_at.is_none()
+            !has_lease
                 && claimed_at.is_some()
                 && sending_at.is_some()
                 && completed_at.is_some()
@@ -380,41 +430,25 @@ fn valid_state_fields(
                 && value.attempt_count > 0
         }
         "failed" | "manual_reconcile" => {
-            let before_activation = value.status == "failed"
-                && value.origin_kind == "operations_alert"
-                && value.reason_code.as_deref() == Some("operations_alert_batch_terminal")
-                && lease_expires_at.is_none()
-                && claimed_at.is_none()
-                && sending_at.is_none()
-                && completed_at.is_some()
-                && value.external_reference.is_none()
-                && !value.take_required
-                && value.returned_mail_id.is_none()
-                && matches!(
-                    value.failure_code.as_deref(),
-                    Some("dependency_mismatch" | "retry_exhausted")
-                )
-                && value.fencing_version == 0
-                && value.attempt_count == 0;
-            // 已证明收件人不存在的退信 MID 是人工取回线索，不是发送成功引用。
+            // 已证明收件人不存在的退信 MID 绑定到对应世界的回收邮箱。
             let returned_to_sender = value.status == "manual_reconcile"
                 && value.failure_code.as_deref() == Some("recipient_not_found")
                 && value.reason_code.as_deref() == Some("recipient_not_found")
+                && value.world.is_some()
                 && value.cod.is_some()
                 && value.take_required
                 && value.returned_mail_id.as_deref().is_some_and(|mid| {
                     value.external_reference.as_deref() == Some(mid)
                         && valid_returned_mail_id(Some(mid))
                 });
-            before_activation
-                || (lease_expires_at.is_none()
-                    && claimed_at.is_some()
-                    && sending_at.is_some()
-                    && completed_at.is_some()
-                    && (value.external_reference.is_none() || returned_to_sender)
-                    && value.failure_code.as_deref().is_some_and(valid_trimmed_text)
-                    && value.fencing_version > 0
-                    && value.attempt_count > 0)
+            !has_lease
+                && claimed_at.is_some()
+                && sending_at.is_some()
+                && completed_at.is_some()
+                && (value.external_reference.is_none() || returned_to_sender)
+                && value.failure_code.as_deref().is_some_and(valid_trimmed_text)
+                && value.fencing_version > 0
+                && value.attempt_count > 0
         }
         _ => false,
     }

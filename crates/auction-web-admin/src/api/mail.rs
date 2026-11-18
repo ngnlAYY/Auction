@@ -58,6 +58,12 @@ pub(crate) struct AdminMailIntakeQuery {
     pub status: String,
 }
 
+impl AdminMailIntakeQuery {
+    /// 入站邮件摘要与 URL 筛选共用的类型闭集。
+    pub(crate) const KIND_VALUES: &[&str] =
+        &["equipment", "bid", "delivery", "registration", "rebind", "rekey", "unknown"];
+}
+
 pub(crate) async fn fetch_mail_state(mailbox_key: String) -> Result<AdminMailPolling, String> {
     let encoded = encode_query(&mailbox_key);
     let response =
@@ -257,7 +263,7 @@ fn valid_mail_intake(value: &AdminMailIntake) -> bool {
         && valid_safe_text(&value.world_id, 256)
         && value.sender.as_deref().is_none_or(|sender| valid_safe_text(sender, 256))
         && value.subject.as_deref().is_none_or(|subject| valid_safe_text(subject, 512))
-        && valid_trimmed_text(&value.kind)
+        && AdminMailIntakeQuery::KIND_VALUES.contains(&value.kind.as_str())
         && valid_trimmed_text(&value.status)
         && processed_at >= received_at
 }
@@ -484,4 +490,31 @@ fn valid_optional_metadata_text(value: &str) -> bool {
 
 fn valid_metadata_list(values: &[String]) -> bool {
     values.len() <= 1000 && values.iter().all(|value| valid_safe_text(value, 512))
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{AdminMailIntake, valid_mail_intake};
+
+    #[test]
+    fn mail_intake_accepts_rekey_and_rejects_unrecognized_kind() {
+        let mut intake: AdminMailIntake = serde_json::from_value(json!({
+            "id": "0f8fad5b-d9cb-469f-a165-70867728950e",
+            "mailbox_key": "main-mailbox",
+            "external_mail_id": "1234",
+            "world_id": "main",
+            "kind": "rekey",
+            "status": "accepted",
+            "decision_code": "rekeyed",
+            "received_at": "2026-11-06T10:00:00Z",
+            "processed_at": "2026-11-06T10:00:01Z",
+            "has_message_display": false
+        }))
+        .unwrap();
+        assert!(valid_mail_intake(&intake));
+        intake.kind = "other_kind".to_owned();
+        assert!(!valid_mail_intake(&intake));
+    }
 }
