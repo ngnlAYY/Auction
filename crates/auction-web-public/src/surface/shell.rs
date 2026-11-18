@@ -1,9 +1,8 @@
 //! Public 页面外壳：顶栏、侧栏导航、会话与实时目标的唯一宿主，各页面只消费它提供的上下文。
 
 use auction_web_shared::{
-    LanguagePicker, PageVisibility, ThemePicker, load_sidebar_collapsed, save_sidebar_collapsed,
-    sleep_while_visible, t, use_app_boot_ready, use_dialog_focus_trap, use_route_focus,
-    use_second_ticker,
+    LanguagePicker, PageVisibility, ThemePicker, load_sidebar_collapsed, save_sidebar_collapsed, t,
+    use_app_boot_ready, use_dialog_focus_trap, use_route_focus, use_second_ticker,
 };
 use dioxus::prelude::*;
 
@@ -27,8 +26,10 @@ use crate::api::SessionRefreshReason;
 use crate::api::{CurrentAuction, fetch_current_auction, fetch_public_readiness};
 
 /// 权威数据轮询的基础间隔（页面可见时间）。
+#[cfg(target_arch = "wasm32")]
 const AUTHORITATIVE_POLL_MILLIS: u32 = 60_000;
 /// 实时连接正常时连续跳过的轮数；4 轮跳过加 1 轮刷新，即约每 5 分钟兜底一次。
+#[cfg(target_arch = "wasm32")]
 const LIVE_POLL_SKIPPED_ROUNDS: u32 = 4;
 
 #[component]
@@ -43,7 +44,8 @@ pub(crate) fn PublicShell() -> Element {
     // world 同步覆盖 Router Link push、同路径 query 导航和浏览器前进/后退。
     let world_query_state = use_public_query_state();
     let world_query_signal = world_query_state.state;
-    let mut selected_world = use_signal(|| selected_world_from_query(read_public_query().world));
+    let mut selected_world =
+        use_signal(|| selected_world_from_query(read_public_query().world.as_deref()));
     // 看板首页冷启动时与当前场次读取并行预取上次场次的 lots；只在首次渲染执行一次。
     use_hook(|| {
         if auction_page_owns_initial_boot {
@@ -51,7 +53,7 @@ pub(crate) fn PublicShell() -> Element {
         }
     });
     use_effect(move || {
-        let world = selected_world_from_query(world_query_signal().world);
+        let world = selected_world_from_query(world_query_signal.read().world.as_deref());
         if *selected_world.peek() != world {
             selected_world.set(world);
         }
@@ -62,7 +64,7 @@ pub(crate) fn PublicShell() -> Element {
     let refresh_generation = use_signal(|| 0_u64);
     let mut manual_refresh_busy = use_signal(|| false);
     let mut manual_refresh_error = use_signal(|| false);
-    let bid_refresh = PublicBidRefresh(use_signal(|| 0_u64));
+    use_context_provider(PublicBidRefresh::new);
     // 只有 wasm 的页面可见性回调会写该信号；宿主检查看不到 cfg 分支。
     #[allow(unused_mut)]
     let mut visibility_generation = use_signal(|| 0_u64);
@@ -100,13 +102,19 @@ pub(crate) fn PublicShell() -> Element {
     let page_visibility = use_hook(PageVisibility::new);
     // readiness 只在启动门禁与页面恢复可见时读取一次；持续连接状态由 realtime WS
     // 与各 API 的失败反馈承担，不按固定周期轮询 `/health/ready`。
+    #[cfg(target_arch = "wasm32")]
     let current_poll_visibility = page_visibility.clone();
+    #[cfg(target_arch = "wasm32")]
     let _authoritative_current_poll = use_future(move || {
         let page_visibility = current_poll_visibility.clone();
         async move {
             let mut skipped_while_live = 0_u32;
             loop {
-                sleep_while_visible(&page_visibility, AUTHORITATIVE_POLL_MILLIS).await;
+                auction_web_shared::sleep_while_visible(
+                    &page_visibility,
+                    AUTHORITATIVE_POLL_MILLIS,
+                )
+                .await;
                 // 实时连接正常时，数据变化由事件推送、断线由游标回放补齐，轮询只作兜底。
                 // 预览、已结束与匿名（Manual）以及连接异常时仍每轮刷新，开拍切换与预览目录
                 // 更新依赖这条路径。
@@ -148,7 +156,6 @@ pub(crate) fn PublicShell() -> Element {
     // 页头 WorldPicker 的 URL 写回经外壳 hook 状态信号，保证 popstate 恢复的相等判断不失效。
     use_context_provider(|| world_query_signal);
     use_context_provider(|| refresh_generation);
-    use_context_provider(|| bid_refresh);
     use_context_provider(|| PublicPageRealtimeTarget(page_realtime_target));
     let displayed_auction = use_signal(|| None::<CurrentAuction>);
     use_context_provider(|| PublicDisplayedAuction(displayed_auction));
@@ -187,6 +194,9 @@ pub(crate) fn PublicShell() -> Element {
         .map(|identity| identity.user_id.clone());
     let selected_world_value = selected_world();
     let current_public_query = read_public_query();
+    let historical_world_applied = |world: &str| {
+        selected_world_value == world && current_public_query.world.as_deref() == Some(world)
+    };
     let auction_home_query = public_auction_home_query(&selected_world_value);
     let auction_home_href = public_auction_home_href(&selected_world_value);
     // Routable 不包含 query；位于 AuctionIndex 时，只有查询不同才需要绕过 Router 的同路由优化。
@@ -204,10 +214,18 @@ pub(crate) fn PublicShell() -> Element {
             (Some(Err(_)), _) => PublicRealtimeTarget::SessionError,
             (Some(Ok(_)), Some(requested)) => match page_realtime_target.read().as_ref() {
                 Some((loaded, target)) if loaded == requested => {
-                    if matches!(target, PublicRealtimeTarget::Auction { .. }) && !authenticated {
-                        PublicRealtimeTarget::Anonymous
-                    } else {
-                        target.clone()
+                    // 同场次的新地址可能先于看板 effect 到达，不能复用旧世界的订阅目标。
+                    match target {
+                        PublicRealtimeTarget::Auction { world, .. }
+                        | PublicRealtimeTarget::Inactive { world, .. }
+                            if !historical_world_applied(world) =>
+                        {
+                            PublicRealtimeTarget::Checking
+                        }
+                        PublicRealtimeTarget::Auction { .. } if !authenticated => {
+                            PublicRealtimeTarget::Anonymous
+                        }
+                        target => target.clone(),
                     }
                 }
                 _ => PublicRealtimeTarget::Checking,
@@ -299,7 +317,9 @@ pub(crate) fn PublicShell() -> Element {
             (world == &selected_world_value).then(|| result.as_ref().ok()?.as_ref()).flatten()
         });
         let displayed = displayed_auction.read();
-        ticker_auction(requested_page_target.as_ref(), displayed.as_ref(), current).cloned()
+        let displayed =
+            displayed.as_ref().filter(|auction| historical_world_applied(&auction.world));
+        ticker_auction(requested_page_target.as_ref(), displayed, current).cloned()
     };
     let ticker_title = ticker_auction.as_ref().map_or_else(
         || t!("nav-auctions"),
@@ -436,10 +456,13 @@ pub(crate) fn PublicShell() -> Element {
                             label: t!("language-label"),
                             catalog: &PUBLIC_LOCALE_CATALOG,
                         }
-                        ThemePicker {
-                            label: t!("theme-label"),
-                            dark_label: t!("theme-dark"),
-                            light_label: t!("theme-light"),
+                        // 主题控件直接访问浏览器 DOM，宿主页面回归只挂载其余外壳。
+                        if cfg!(target_arch = "wasm32") {
+                            ThemePicker {
+                                label: t!("theme-label"),
+                                dark_label: t!("theme-dark"),
+                                light_label: t!("theme-light"),
+                            }
                         }
                     }
                     span { class: "console-ticker__sep", aria_hidden: "true" }
@@ -471,6 +494,6 @@ pub(crate) fn PublicShell() -> Element {
 }
 
 /// 旧版只把显式 Isekai 视为第二世界；缺失、Main 与非法 query 都在内存回退 Main，地址栏保持原值。
-fn selected_world_from_query(value: Option<String>) -> String {
-    if value.as_deref() == Some("isekai") { "isekai" } else { "main" }.to_owned()
+fn selected_world_from_query(value: Option<&str>) -> String {
+    if value == Some("isekai") { "isekai" } else { "main" }.to_owned()
 }

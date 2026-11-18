@@ -13,17 +13,32 @@ use super::command_scope::{CatalogAction, CommandDialogContext, CommandDialogInp
 use super::detail::{CatalogDetailBid, CatalogDetailBidSlot, CatalogDetailDialogContext};
 use crate::api::{CatalogRow, OwnedProxy, fetch_my_proxy};
 use crate::surface::session::login_href_for_current_location;
-use crate::surface::{commands, use_bid_refresh};
+use crate::surface::{commands, use_auction_bid_refresh};
 
 type ProxyRead = Result<Option<OwnedProxy>, String>;
 
-#[derive(Clone, Default)]
-struct CatalogProxySnapshots(Rc<RefCell<BTreeMap<String, ProxyRead>>>);
+type AuctionProxySnapshots = BTreeMap<String, BTreeMap<String, Option<OwnedProxy>>>;
 
-/// 由按身份和场次加键的目录提供，让实际读取的结果跨抽屉关闭和目录行卸载保留。
-pub(crate) fn use_catalog_proxy_snapshots() {
-    use_context_provider(CatalogProxySnapshots::default);
+/// 一份缓存只属于外壳确认的单个身份，授权按场次与拍品分别保存。
+#[derive(Clone, Default)]
+pub(crate) struct CatalogProxySnapshots(Rc<RefCell<AuctionProxySnapshots>>);
+
+impl CatalogProxySnapshots {
+    fn remember(&self, auction_id: String, lot_id: String, result: &ProxyRead) {
+        // 同场暂时读取失败不抹掉已确认的授权；失败结果由本次读取显示，不能用于授权写入。
+        if let Ok(snapshot) = result {
+            self.0.borrow_mut().entry(auction_id).or_default().insert(lot_id, snapshot.clone());
+        }
+    }
+
+    fn get(&self, auction_id: &str, lot_id: &str) -> Option<Option<OwnedProxy>> {
+        self.0.borrow().get(auction_id)?.get(lot_id).cloned()
+    }
 }
+
+/// 目录行所属场次。
+#[derive(Clone)]
+pub(crate) struct CatalogAuctionId(pub(crate) String);
 
 /// 结束拍品只恢复该件已发出的命令；不建立出价资格或私有代理读取。
 #[component]
@@ -95,7 +110,7 @@ pub(crate) fn LiveCatalogActions(
     let refresh_generation = use_context::<Signal<u64>>();
     let user_id = use_context::<commands::PublicCommandIdentity>().0;
     let session = use_context::<commands::CommandSession>();
-    let snapshots = use_context::<CatalogProxySnapshots>();
+    let CatalogAuctionId(auction_id) = use_context::<CatalogAuctionId>();
     let mut dialog = use_context::<CommandDialogContext>().0;
     let commands = try_use_context::<commands::CompetitionCommands>();
     let pending = use_memo(use_reactive((&lot_id,), move |(lot_id,)| {
@@ -113,36 +128,46 @@ pub(crate) fn LiveCatalogActions(
     let detail_open = use_memo(use_reactive((&lot_id,), move |(lot_id,)| {
         detail_dialog.read().as_ref().is_some_and(|input| input.row.lot_id == lot_id)
     }));
-    let proxy_view_active = move || active_action() == Some(CatalogAction::Proxy) || detail_open();
-    let proxy_state = use_resource(use_reactive((&lot_id,), {
+    let proxy_view_active =
+        use_memo(move || active_action() == Some(CatalogAction::Proxy) || detail_open());
+    let proxy_state = use_resource(use_reactive((&auction_id, &lot_id), {
         let session = session.clone();
-        let snapshots = snapshots.clone();
-        move |(lot_id,)| {
+        move |(auction_id, lot_id)| {
             // 只在本拍品详情或代理页签打开时订阅刷新，避免闭合行随全局刷新调度空任务。
             let should_read =
                 proxy_view_active() && session.identity_confirmed() && !user_id.is_nil();
-            if should_read {
-                let _ = refresh_generation();
-            }
-            let snapshots = snapshots.clone();
+            let request = should_read
+                .then(|| {
+                    let generation = refresh_generation();
+                    let snapshots = commands
+                        .and_then(commands::CompetitionCommands::current)
+                        .and_then(|store| store.proxy_snapshots(user_id).cloned())?;
+                    Some((generation, snapshots))
+                })
+                .flatten();
             async move {
-                if should_read {
-                    let result = read_my_proxy(user_id, lot_id.clone()).await;
-                    // 只有同一身份、场次内的实际读取能替换这件拍品的结果，关闭视图不使其失效。
-                    snapshots.0.borrow_mut().insert(lot_id, result);
-                }
+                let (generation, snapshots) = request?;
+                let result = read_my_proxy(user_id, lot_id.clone()).await.and_then(|proxy| {
+                    if proxy.as_ref().is_some_and(|proxy| proxy.auction_id != auction_id) {
+                        return Err("invalid_response".to_owned());
+                    }
+                    Ok(proxy)
+                });
+                snapshots.remember(auction_id, lot_id, &result);
+                Some((generation, result))
             }
         }
     }));
     let identity_confirmed = session.identity_confirmed();
     let proxy_view_active = proxy_view_active() && identity_confirmed;
-    use_bid_refresh(proxy_state, proxy_view_active);
+    use_auction_bid_refresh(proxy_state, proxy_view_active.then_some(auction_id.as_str()));
     // 每行跟随自己的 Resource 更新，授权结果变化不通知其他拍品。
-    let proxy_ready = *proxy_state.state().read() == UseResourceState::Ready;
-    let proxy_snapshot =
-        usable_proxy_snapshot(snapshots.0.borrow().get(&lot_id), identity_confirmed, proxy_ready)
-            .cloned();
-    let active_proxy = active_own_proxy(proxy_snapshot.as_ref());
+    let _ = proxy_state.read();
+    let cached = commands
+        .and_then(commands::CompetitionCommands::current)
+        .filter(|_| identity_confirmed)
+        .and_then(|store| store.proxy_snapshots(user_id)?.get(&auction_id, &lot_id));
+    let active_proxy = active_own_proxy(cached.as_ref());
     let has_active_proxy = active_proxy.is_some();
     let proxy_leading =
         active_proxy.and_then(|proxy| proxy.bid.as_ref()).is_some_and(|bid| bid.leading);
@@ -187,7 +212,8 @@ pub(crate) fn LiveCatalogActions(
         ordinary_blocked,
         leading: effective_leading,
         blocked_reason: action_reason.clone(),
-        proxy: proxy_snapshot,
+        proxy: cached,
+        proxy_read: proxy_view_active.then_some(proxy_state),
     };
     use_effect(use_reactive((&input,), move |(mut next,)| {
         let current = dialog.peek().clone();
@@ -233,6 +259,7 @@ pub(crate) fn LiveCatalogActions(
         {
             input.can_bid = false;
             input.proxy = None;
+            input.proxy_read = None;
         }
         // 拍品结束后行仍在，但操作栏已卸载：抽屉入口随之失败关闭，不保留最后一次资格。
         if let Ok(mut current) = detail_slot.try_write() {
@@ -293,19 +320,14 @@ pub(crate) fn LiveCatalogActions(
 async fn read_my_proxy(user_id: Uuid, lot_id: String) -> ProxyRead {
     #[cfg(test)]
     if let Some(result) = tests::proxy_request(user_id, &lot_id) {
-        return result;
+        return result.await;
     }
     fetch_my_proxy(&user_id.to_string(), lot_id).await
 }
 
 /// 只有读到本人的生效授权才提前限制普通出价；未知授权由服务端裁决。
-pub(super) fn active_own_proxy(
-    snapshot: Option<&Result<Option<OwnedProxy>, String>>,
-) -> Option<&OwnedProxy> {
-    match snapshot {
-        Some(Ok(Some(proxy))) if proxy.status == "active" => Some(proxy),
-        _ => None,
-    }
+pub(super) fn active_own_proxy(snapshot: Option<&Option<OwnedProxy>>) -> Option<&OwnedProxy> {
+    snapshot.and_then(Option::as_ref).filter(|proxy| proxy.status == "active")
 }
 
 fn ordinary_bid_blocked(limit_reached: bool, leading: bool, has_active_proxy: bool) -> bool {
@@ -329,15 +351,6 @@ fn detail_entry_action(
     } else {
         (!ordinary_disabled).then_some(CatalogAction::Bid)
     }
-}
-
-/// 重试时保留已确认授权与资格提示，暂时收起上一次读取错误及重试入口。
-fn usable_proxy_snapshot(
-    snapshot: Option<&ProxyRead>,
-    identity_confirmed: bool,
-    ready: bool,
-) -> Option<&ProxyRead> {
-    snapshot.filter(|result| identity_confirmed && (ready || result.is_ok()))
 }
 
 /// 目录行操作图标；1.5px stroke 与侧栏图标一致，只表达查看、出价语义。
@@ -366,6 +379,9 @@ pub(super) fn CatalogActionIcon(kind: &'static str) -> Element {
 #[cfg(test)]
 pub(super) mod tests {
     use std::cell::{Cell, RefCell};
+    use std::future::{Future, poll_fn};
+    use std::rc::Rc;
+    use std::task::{Poll, Waker};
 
     use auction_web_shared::i18n::{DEFAULT_PUBLIC_LOCALE, build_bundle};
     use dioxus::dioxus_core::{AttributeValue, ElementId, Mutation, Mutations};
@@ -374,17 +390,24 @@ pub(super) mod tests {
     use uuid::Uuid;
 
     use super::{
-        CatalogAction, LiveCatalogActions, ProxyRead, active_own_proxy, detail_entry_action,
-        ordinary_bid_blocked, usable_proxy_snapshot, use_catalog_proxy_snapshots,
+        CatalogAction, CatalogAuctionId, CatalogProxySnapshots, LiveCatalogActions, ProxyRead,
+        active_own_proxy, detail_entry_action, ordinary_bid_blocked,
     };
-    use crate::api::{CatalogRow, OwnedProxy, PublicSession};
-    use crate::surface::catalog::command_scope::CatalogCommandScope;
+    use crate::api::{CatalogRow, CurrentAuction, OwnedProxy, PublicSession};
+    use crate::surface::catalog::command_scope::{
+        CatalogCommandScope, CommandDialogContext, CommandDialogInput,
+    };
     use crate::surface::catalog::detail::{
         CatalogDetailBid, CatalogDetailBidSlot, CatalogDetailDialogContext, CatalogDetailInput,
     };
+    use crate::surface::commands::{CompetitionCommandHost, use_competition_commands_provider};
+    use crate::surface::commands::{form_fixture, test_support};
     use crate::surface::router::PUBLIC_LOCALE_CATALOG;
     use crate::surface::watches::{LotWatchScope, SkipWatchReads};
-    use crate::surface::{PublicBidRefresh, PublicCommandOwner, PublicSessionResource};
+    use crate::surface::{
+        CurrentAuctionResource, LotLinkRequest, PublicBidRefresh, PublicCommandOwner,
+        PublicSessionResource,
+    };
 
     const ALICE: &str = "018f4c8e-7b2a-4c3d-8e4f-000000000001";
     const BOB: &str = "018f4c8e-7b2a-4c3d-8e4f-000000000002";
@@ -394,10 +417,17 @@ pub(super) mod tests {
 
     struct ProxyReads {
         authorization: Option<OwnedProxy>,
+        read_fails: bool,
         requests: Vec<(Uuid, String)>,
         owner: Option<Signal<Option<String>>>,
+        refresh: Option<Signal<u64>>,
+        visible: Option<Signal<bool>>,
         row: Option<Signal<bool>>,
         detail: Option<Signal<Option<CatalogDetailInput>>>,
+        dialog: Option<Signal<Option<CommandDialogInput>>>,
+        bid: Option<Signal<CatalogDetailBid>>,
+        next_get: Option<Rc<RefCell<Option<Waker>>>>,
+        get_pending: bool,
     }
 
     thread_local! {
@@ -405,11 +435,32 @@ pub(super) mod tests {
         pub(in crate::surface::catalog) static ENDED_RECOVERY: Cell<Option<EventHandler<()>>> = const { Cell::new(None) };
     }
 
-    pub(super) fn proxy_request(user_id: Uuid, lot_id: &str) -> Option<ProxyRead> {
-        PROXY_READS.with_borrow_mut(|reads| {
+    pub(super) fn proxy_request(
+        user_id: Uuid,
+        lot_id: &str,
+    ) -> Option<impl Future<Output = ProxyRead>> {
+        let (gate, result) = PROXY_READS.with_borrow_mut(|reads| {
             let reads = reads.as_mut()?;
             reads.requests.push((user_id, lot_id.to_owned()));
-            Some(Ok(reads.authorization.clone()))
+            let result = if reads.read_fails {
+                Err("network_error".to_owned())
+            } else {
+                Ok(reads.authorization.clone())
+            };
+            Some((reads.next_get.take(), result))
+        })?;
+        Some(async move {
+            if let Some(gate) = gate {
+                poll_fn(|cx| {
+                    if !PROXY_READS.with_borrow(|reads| reads.as_ref().unwrap().get_pending) {
+                        return Poll::Ready(());
+                    }
+                    gate.replace(Some(cx.waker().clone()));
+                    Poll::Pending
+                })
+                .await;
+            }
+            result
         })
     }
 
@@ -439,27 +490,60 @@ pub(super) mod tests {
         });
         use_context_provider(|| session);
         use_context_provider(|| PublicCommandOwner(owner));
-        use_context_provider(|| Signal::new(0_u64));
-        use_context_provider(|| PublicBidRefresh(Signal::new(0_u64)));
+        let refresh = use_context_provider(|| Signal::new(0_u64));
+        use_context_provider(|| Signal::new("main".to_owned()));
+        use_context_provider(|| LotLinkRequest(Signal::new(None)));
+        let current: CurrentAuctionResource = use_resource(|| async {
+            (
+                "main".to_owned(),
+                Ok(Some(CurrentAuction {
+                    id: AUCTION.to_owned(),
+                    world: "main".to_owned(),
+                    number: 2,
+                    status: "live".to_owned(),
+                    opens_at: "2026-11-18T12:00:00Z".to_owned(),
+                    scheduled_ends_at: None,
+                    presentation_mode: "live".to_owned(),
+                    bidding_open: true,
+                    preview_revision: 0,
+                    proxy_default_mode: Some("slow".to_owned()),
+                })),
+            )
+        });
+        use_context_provider(|| current);
+        use_context_provider(PublicBidRefresh::new);
         use_context_provider(|| SkipWatchReads);
-        PROXY_READS.with_borrow_mut(|reads| reads.as_mut().unwrap().owner = Some(owner));
+        use_competition_commands_provider();
+        let visible = use_signal(|| true);
+        PROXY_READS.with_borrow_mut(|reads| {
+            let reads = reads.as_mut().unwrap();
+            reads.owner = Some(owner);
+            reads.refresh = Some(refresh);
+            reads.visible = Some(visible);
+        });
         rsx! {
+            CompetitionCommandHost { owner }
             CatalogCommandScope {
-                LotWatchScope { auction_id: AUCTION.to_owned(), CatalogRowFixture {} }
+                if visible() {
+                    LotWatchScope { auction_id: AUCTION.to_owned(), CatalogRowFixture {} }
+                }
             }
         }
     }
 
     #[component]
     fn CatalogRowFixture() -> Element {
-        use_catalog_proxy_snapshots();
+        use_context_provider(|| CatalogAuctionId(AUCTION.to_owned()));
         let detail = use_context::<CatalogDetailDialogContext>().0;
+        let dialog = use_context::<CommandDialogContext>().0;
         let row = use_signal(|| true);
         let bid = use_signal(CatalogDetailBid::default);
         PROXY_READS.with_borrow_mut(|reads| {
             let reads = reads.as_mut().unwrap();
             reads.row = Some(row);
             reads.detail = Some(detail);
+            reads.dialog = Some(dialog);
+            reads.bid = Some(bid);
         });
         rsx! {
             if row() {
@@ -487,10 +571,17 @@ pub(super) mod tests {
         PROXY_READS.with_borrow_mut(|reads| {
             *reads = Some(ProxyReads {
                 authorization: Some(waiting_proxy()),
+                read_fails: false,
                 requests: Vec::new(),
                 owner: None,
+                refresh: None,
+                visible: None,
                 row: None,
                 detail: None,
+                dialog: None,
+                bid: None,
+                next_get: None,
+                get_pending: false,
             });
         });
         let mut dom = VirtualDom::new(CatalogFixture);
@@ -636,6 +727,127 @@ pub(super) mod tests {
         });
     }
 
+    #[test]
+    fn an_auction_read_failure_and_recovery_keep_the_confirmed_proxy_snapshot() {
+        let mut dom = mounted();
+        assert!(shows_proxy_reason(&show_detail(&mut dom, true)));
+        show_detail(&mut dom, false);
+        let mut visible = PROXY_READS.with_borrow(|reads| reads.as_ref().unwrap().visible.unwrap());
+        dom.in_runtime(|| visible.set(false));
+        settle(&mut dom, &mut Mutations::default());
+        dom.in_runtime(|| visible.set(true));
+        let mut recovered = Mutations::default();
+        settle(&mut dom, &mut recovered);
+        assert!(bid_button(&recovered, true).is_some());
+        assert!(shows_proxy_reason(&recovered));
+        assert_eq!(requests(), 1);
+    }
+
+    #[test]
+    fn recovered_auction_checks_current_authorization_before_create_or_lower() {
+        for lower in [false, true] {
+            test_support::enable_requests();
+            let mut dom = mounted();
+            let mut visible = PROXY_READS.with_borrow_mut(|reads| {
+                let reads = reads.as_mut().unwrap();
+                reads.authorization = lower.then(waiting_proxy);
+                reads.visible.unwrap()
+            });
+            show_detail(&mut dom, true);
+            show_detail(&mut dom, false);
+            dom.in_runtime(|| visible.set(false));
+            settle(&mut dom, &mut Mutations::default());
+            dom.in_runtime(|| visible.set(true));
+            settle(&mut dom, &mut Mutations::default());
+            let gate = Rc::new(RefCell::new(None));
+            let (mut dialog, bid) = PROXY_READS.with_borrow_mut(|reads| {
+                let reads = reads.as_mut().unwrap();
+                reads.next_get = Some(gate.clone());
+                reads.get_pending = true;
+                (reads.dialog.unwrap(), reads.bid.unwrap())
+            });
+            let CatalogDetailBid::Command { mut input, .. } = bid() else {
+                panic!("已恢复的拍品提供命令入口")
+            };
+            assert_eq!(input.ordinary_blocked, lower);
+            input.action = CatalogAction::Proxy;
+            dom.in_runtime(|| dialog.set(Some(*input)));
+            let mut opened = Mutations::default();
+            settle(&mut dom, &mut opened);
+            assert_eq!(requests(), 2);
+            assert!(gate.borrow().is_some(), "本轮授权 GET 正在等待");
+            let form = opened
+                .edits
+                .iter()
+                .find_map(|edit| match edit {
+                    Mutation::NewEventListener { name, id } if name == "submit" => Some(*id),
+                    _ => None,
+                })
+                .expect("等待授权时仍展示缓存对应的表单");
+            form_fixture::submit(&dom, form);
+            let mut attempted = Mutations::default();
+            settle(&mut dom, &mut attempted);
+            form_fixture::submit(&dom, form);
+            settle(&mut dom, &mut attempted);
+            assert!(test_support::requests().is_empty(), "挂起的授权 GET 不允许 POST");
+
+            PROXY_READS.with_borrow_mut(|reads| reads.as_mut().unwrap().get_pending = false);
+            gate.take().unwrap().wake();
+            settle(&mut dom, &mut Mutations::default());
+            form_fixture::submit(&dom, form);
+            settle(&mut dom, &mut Mutations::default());
+            assert!(test_support::requests().is_empty(), "首次提交只准备确认");
+
+            // 代号先于界面重绘推进，旧确认按钮仍在 DOM 中时也不能发出写入。
+            let mut refresh =
+                PROXY_READS.with_borrow(|reads| reads.as_ref().unwrap().refresh.unwrap());
+            dom.in_runtime(|| refresh.set(1));
+            form_fixture::submit(&dom, form);
+            assert!(test_support::requests().is_empty());
+            settle(&mut dom, &mut Mutations::default());
+            assert_eq!(requests(), 3);
+            form_fixture::submit(&dom, form);
+            settle(&mut dom, &mut Mutations::default());
+            let posts = test_support::requests();
+            assert_eq!(posts.len(), 1);
+            let resource = format!("/api/v1/lots/{LOT}/proxy-authorizations");
+            let expected = if lower {
+                format!("{resource}/{}/lower", waiting_proxy().authorization_id)
+            } else {
+                resource
+            };
+            assert_eq!(posts[0].url, expected);
+        }
+    }
+
+    #[test]
+    fn an_authorization_error_only_releases_the_bid_block_after_a_confirmed_absence() {
+        let mut dom = mounted();
+        assert!(shows_proxy_reason(&show_detail(&mut dom, true)));
+        show_detail(&mut dom, false);
+        PROXY_READS.with_borrow_mut(|reads| reads.as_mut().unwrap().read_fails = true);
+        let failed = show_detail(&mut dom, true);
+        assert_eq!(requests(), 2);
+        assert!(bid_button(&failed, false).is_none());
+        show_detail(&mut dom, false);
+        let mut visible = PROXY_READS.with_borrow(|reads| reads.as_ref().unwrap().visible.unwrap());
+        dom.in_runtime(|| visible.set(false));
+        settle(&mut dom, &mut Mutations::default());
+        dom.in_runtime(|| visible.set(true));
+        let mut recovered = Mutations::default();
+        settle(&mut dom, &mut recovered);
+        assert!(bid_button(&recovered, true).is_some());
+        assert!(shows_proxy_reason(&recovered));
+
+        PROXY_READS.with_borrow_mut(|reads| {
+            let reads = reads.as_mut().unwrap();
+            reads.read_fails = false;
+            reads.authorization = None;
+        });
+        assert!(bid_button(&show_detail(&mut dom, true), false).is_some());
+        assert_eq!(requests(), 3);
+    }
+
     pub(in crate::surface::catalog) fn waiting_proxy() -> OwnedProxy {
         serde_json::from_value(serde_json::json!({
             "authorization_id": "018f4c8e-7b2a-4c3d-8e4f-000000000004",
@@ -685,7 +897,7 @@ pub(super) mod tests {
 
     #[test]
     fn active_waiting_proxy_blocks_ordinary_bid_but_allows_management() {
-        let snapshot = Ok(Some(waiting_proxy()));
+        let snapshot = Some(waiting_proxy());
         let active_proxy = active_own_proxy(Some(&snapshot));
         assert!(active_proxy.is_some_and(|proxy| proxy.capabilities.waiting));
         let leading =
@@ -701,8 +913,8 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn missing_or_failed_proxy_reads_leave_ordinary_bid_available() {
-        for snapshot in [None, Some(Ok(None)), Some(Err(String::from("network_error")))] {
+    fn missing_proxy_snapshots_leave_ordinary_bid_available() {
+        for snapshot in [None, Some(None)] {
             let has_active_proxy = active_own_proxy(snapshot.as_ref()).is_some();
             let ordinary_blocked = ordinary_bid_blocked(false, false, has_active_proxy);
             assert!(!ordinary_blocked);
@@ -714,31 +926,16 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn finished_read_is_usable_by_the_confirmed_identity() {
-        let success = Ok(Some(waiting_proxy()));
-        assert!(usable_proxy_snapshot(Some(&success), true, true).is_some());
-        // 读取失败也要交给表单，由它展示错误与重试入口。
+    fn only_a_successful_check_changes_the_confirmed_snapshot() {
+        let snapshots = CatalogProxySnapshots::default();
+        let remember = |result| snapshots.remember(AUCTION.to_owned(), LOT.to_owned(), &result);
         let failure = Err("network_error".to_owned());
-        assert!(usable_proxy_snapshot(Some(&failure), true, true).is_some());
-        assert!(usable_proxy_snapshot(Some(&success), false, true).is_none());
-    }
-
-    #[test]
-    fn refresh_keeps_the_last_successful_snapshot() {
-        // 回归：竞价事件触发的刷新不能卸载正在填写的代理表单。
-        let success = Ok(Some(waiting_proxy()));
-        assert!(usable_proxy_snapshot(Some(&success), true, false).is_some());
-    }
-
-    #[test]
-    fn a_snapshot_requires_an_actual_read() {
-        assert!(usable_proxy_snapshot(None, true, true).is_none());
-        assert!(usable_proxy_snapshot(None, true, false).is_none());
-    }
-
-    #[test]
-    fn retry_hides_the_previous_read_error() {
-        let failure = Err("network_error".to_owned());
-        assert!(usable_proxy_snapshot(Some(&failure), true, false).is_none());
+        remember(failure.clone());
+        assert_eq!(snapshots.get(AUCTION, LOT), None);
+        remember(Ok(Some(waiting_proxy())));
+        remember(failure);
+        assert_eq!(snapshots.get(AUCTION, LOT), Some(Some(waiting_proxy())));
+        remember(Ok(None));
+        assert_eq!(snapshots.get(AUCTION, LOT), Some(None));
     }
 }

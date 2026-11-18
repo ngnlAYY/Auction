@@ -77,7 +77,7 @@ fn owned_query_pairs(search: &str) -> Vec<(String, String)> {
 /// 返回地址栏写入是否成功。没有路由上下文的非 WASM 构建返回 `false`。
 pub fn write_query_pairs(keys: &[&str], pairs: &[(String, String)], mode: QueryWriteMode) -> bool {
     if let Some(location) = query_location() {
-        return location.write(&patch_query(&location.current(), keys, pairs), mode);
+        return location.write(&patch_query(&location.current(), keys, pairs, false), mode);
     }
     #[cfg(target_arch = "wasm32")]
     {
@@ -117,16 +117,32 @@ pub fn write_query_pairs(keys: &[&str], pairs: &[(String, String)], mode: QueryW
     }
 }
 
-fn patch_query(location: &str, keys: &[&str], pairs: &[(String, String)]) -> String {
+/// 经 surface 路由替换指定查询键，连同空段保留其余查询片段。没有路由上下文时拒绝写入。
+pub fn write_query_pairs_preserving_segments(
+    keys: &[&str],
+    pairs: &[(String, String)],
+    mode: QueryWriteMode,
+) -> bool {
+    query_location().is_some_and(|location| {
+        location.write(&patch_query(&location.current(), keys, pairs, true), mode)
+    })
+}
+
+fn patch_query(
+    location: &str,
+    keys: &[&str],
+    pairs: &[(String, String)],
+    preserve_empty: bool,
+) -> String {
     let (path, search, hash) = location_parts(location);
-    let mut fields: Vec<_> = search
-        .strip_prefix('?')
-        .unwrap_or_default()
+    let raw = search.strip_prefix('?').unwrap_or_default();
+    let mut fields: Vec<_> = raw
         .split('&')
         .filter(|field| {
-            url::form_urlencoded::parse(field.as_bytes())
-                .next()
-                .is_some_and(|(key, _)| !keys.contains(&key.as_ref()))
+            (preserve_empty && !raw.is_empty() && field.is_empty())
+                || url::form_urlencoded::parse(field.as_bytes())
+                    .next()
+                    .is_some_and(|(key, _)| !keys.contains(&key.as_ref()))
         })
         .collect();
     let encoded = url::form_urlencoded::Serializer::new(String::new()).extend_pairs(pairs).finish();
@@ -292,7 +308,7 @@ mod tests {
     #[test]
     fn shared_query_patch_preserves_literal_question_marks_and_fragment() {
         let size = [("page_size".to_owned(), "50".to_owned())];
-        let next = patch_query("/??page=2&ref=x#title", &["page", "page_size"], &size);
+        let next = patch_query("/??page=2&ref=x#title", &["page", "page_size"], &size, false);
         assert_eq!(next, "/??page=2&ref=x&page_size=50#title");
         assert_eq!(
             owned_query_pairs(location_parts(&next).1),
@@ -303,8 +319,23 @@ mod tests {
             ]
         );
         assert_eq!(
-            patch_query("/?page=2#title", &["page", "page_size"], &size),
+            patch_query("/?page=2#title", &["page", "page_size"], &size, false),
             "/?page_size=50#title"
         );
+    }
+
+    #[test]
+    fn scoped_patch_preserves_other_raw_segments_including_empty_ones() {
+        let initial = "/?world=main&%74ype=%63lo&&keep=%2b%20x&keep=#lots";
+        let pairs = [("world".to_owned(), "isekai".to_owned())];
+        assert_eq!(
+            patch_query(initial, &["world"], &pairs, true),
+            "/?%74ype=%63lo&&keep=%2b%20x&keep=&world=isekai#lots",
+        );
+        assert_eq!(
+            patch_query(initial, &["world"], &pairs, false),
+            "/?%74ype=%63lo&keep=%2b%20x&keep=&world=isekai#lots",
+        );
+        assert_eq!(patch_query("/#lots", &["world"], &pairs, true), "/?world=isekai#lots");
     }
 }

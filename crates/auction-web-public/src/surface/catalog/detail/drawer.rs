@@ -477,13 +477,14 @@ mod tests {
             ordinary_blocked: true,
             leading: false,
             blocked_reason: "现有代理授权说明".to_owned(),
-            proxy: Some(Ok(Some(proxy))),
+            proxy: Some(Some(proxy)),
+            proxy_read: None,
         });
         assert_eq!(
             detail_bid_reason(&CatalogDetailBid::Command { input: input.clone(), disabled: false }),
             "现有代理授权说明",
         );
-        input.proxy = Some(Ok(None));
+        input.proxy = Some(None);
         assert!(
             detail_bid_reason(&CatalogDetailBid::Command { input, disabled: false }).is_empty()
         );

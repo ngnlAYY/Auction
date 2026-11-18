@@ -22,10 +22,9 @@ use dioxus_i18n::prelude::try_use_init_i18n_from_bundle;
 
 use super::location::query_values;
 use super::preferences::parse_public_page_size;
+use crate::surface::query::parse_public_query;
 use crate::surface::router::PUBLIC_LOCALE_CATALOG;
-use crate::surface::{
-    PublicBidRefresh, PublicBoardQuery, PublicContentLoading, normalize_world_query,
-};
+use crate::surface::{PublicBidRefresh, PublicBoardQuery, PublicContentLoading};
 
 #[derive(Clone)]
 pub(crate) struct PageBrowserFixture(Rc<Browser>);
@@ -86,16 +85,20 @@ impl PageBrowserFixture {
     }
 
     // 替身只还原测试所需的页面键；原始值供生产筛选器独立校验。
-    pub(super) fn query(&self) -> PublicBoardQuery {
+    pub(crate) fn query(&self) -> PublicBoardQuery {
         let pairs = self.0.pairs.borrow();
         let value = |key| query_values(&pairs, key).last();
         let page =
             |key| value(key).and_then(|value| value.parse::<i64>().ok()).filter(|page| *page > 0);
         let alias = (self.pathname() == "/bidlog").then(|| page("bidlog_page")).flatten();
-        let world = value("world").and_then(normalize_world_query);
+        let search = url::form_urlencoded::Serializer::new(String::from("?"))
+            .extend_pairs(pairs.iter())
+            .finish();
+        let parsed = parse_public_query(self.pathname(), &search);
         let sizes = self.sizes();
         PublicBoardQuery {
-            world,
+            world: parsed.world,
+            category: parsed.category,
             status: value("status")
                 .filter(|status| matches!(*status, "live" | "final" | "settled"))
                 .map(str::to_owned),
@@ -189,7 +192,7 @@ pub(crate) fn page_test_contexts() {
     .expect("加载测试译文");
     use_context_provider(|| LocaleSession::new(bundle, DEFAULT_PUBLIC_LOCALE));
     use_context_provider(|| Signal::new(0_u64));
-    use_context_provider(|| PublicBidRefresh(Signal::new(0_u64)));
+    use_context_provider(PublicBidRefresh::new);
     use_context_provider(|| PublicContentLoading(Signal::new(Default::default())));
 }
 

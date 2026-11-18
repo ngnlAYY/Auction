@@ -6,10 +6,11 @@ use auction_web_shared::{
 use dioxus::prelude::*;
 
 use super::{
-    AuctionSelection, LotDetailLookupHost, PageKey, PublicBoardQuery, PublicPageClampError,
-    QueryCommit, commit_auction_selection, commit_public_query_pairs, normalize_public_page_size,
-    page_pathname, public_page_matches, public_page_within_offset, read_page_query,
-    use_content_loading, use_lot_detail_lookup, use_page_query, use_public_page_bounds,
+    AuctionParameter, AuctionSelection, LotDetailLookupHost, PageKey, PublicBoardQuery,
+    PublicPageClampError, QueryCommit, commit_auction_selection, commit_public_query_pairs,
+    normalize_public_page_size, page_pathname, public_page_matches, public_page_within_offset,
+    read_page_query, use_content_loading, use_lot_detail_lookup, use_page_query,
+    use_public_page_bounds,
 };
 use crate::api::{fetch_compensation_lots, fetch_compensation_pool};
 #[cfg(test)]
@@ -30,6 +31,8 @@ pub(super) fn pool_page() -> Element {
     let page_size = use_memo(move || query_state_signal.read().page_size);
     let selected_auction_id =
         use_memo(move || query_state_signal.read().auction_id().map(str::to_owned));
+    let invalid_auction =
+        matches!(query_state_signal.read().auction_parameter(), AuctionParameter::Invalid(_));
     let movement_page = use_memo(move || query_state_signal.read().movement_page);
     let movement_page_size = use_memo(move || query_state_signal.read().movement_page_size);
     let bounds = use_public_page_bounds(query_state_signal, COMPENSATION_PATH, |query| {
@@ -156,10 +159,26 @@ pub(super) fn pool_page() -> Element {
         }
     };
     rsx! {
-        {body}
-        if lookup.failed() {
-            p { class: "action-feedback action-feedback--error", role: "alert", {t!("data-error")} }
+        if invalid_auction {
+            div { class: "public-auction-empty",
+                p { id: "public-compensation-auction-error", class: "public-auction-empty__title",
+                    role: "alert", {t!("auction-invalid-link")}
+                }
+                button {
+                    id: "public-compensation-clear-auction",
+                    class: "public-auction-empty__retry",
+                    r#type: "button",
+                    aria_describedby: "public-compensation-auction-error",
+                    onclick: move |_| {
+                        if matches!(read_page_query().auction_parameter(), AuctionParameter::Invalid(_)) {
+                            write_round_selection(query_state_signal, None);
+                        }
+                    },
+                    {t!("auction-clear-selection")}
+                }
+            }
         }
+        {body}
         // 抽屉宿主在批次读取分支之外：翻页或后台重读替换表格时，已打开的详情不被卸载。
         LotDetailLookupHost { lookup }
     }
@@ -170,10 +189,17 @@ fn toggle_round(state: Signal<PublicBoardQuery>, auction_id: String) {
         return;
     }
     let open = read_page_query().auction_id() == Some(auction_id.as_str());
+    write_round_selection(state, (!open).then_some(auction_id));
+}
+
+fn write_round_selection(state: Signal<PublicBoardQuery>, selected: Option<String>) {
+    if page_pathname() != COMPENSATION_PATH {
+        return;
+    }
     // 只有地址接受场次与明细页码的共同更新后，才允许展开或读取新明细。
     commit_auction_selection(
         state,
-        AuctionSelection::Explicit((!open).then_some(auction_id)),
+        AuctionSelection::Explicit(selected),
         Some(&["auction", "movement_page"]),
         |next| next.movement_page = 1,
     );
@@ -309,6 +335,67 @@ mod tests {
         assert_eq!(write.mode, mode);
         assert_eq!(write.keys, keys);
         assert_eq!(write.pairs, [(keys[0].to_owned(), value.to_owned())]);
+    }
+
+    #[test]
+    fn invalid_compensation_link_can_be_cleared_after_a_rejected_write() {
+        run_page_events(
+            module_path!(),
+            "invalid_compensation_link_can_be_cleared_after_a_rejected_write",
+            exercise_invalid_link,
+        );
+    }
+
+    fn exercise_invalid_link() {
+        for search in ["auction=bad&keep=yes", "auction=&auction=bad&keep=yes"] {
+            let browser = PageBrowserFixture::new("/compensation-pool", search);
+            let pool = PageReadFixture::new(|(page, page_size)| {
+                Ok::<_, String>(CompensationPoolPage {
+                    balance: 0,
+                    updated_at: round().settled_at,
+                    rounds: vec![round()],
+                    page: Some(page),
+                    page_size,
+                    total: Some(1),
+                    cursor: None,
+                    next_cursor: None,
+                    has_more: None,
+                })
+            });
+            let details =
+                PageReadFixture::<(String, i64, i64), Result<CompensationLotPage, String>>::new(
+                    |request| panic!("非法或已清除的场次不能发出明细请求：{request:?}"),
+                );
+            let mut dom = VirtualDom::new(compensation)
+                .with_root_context(browser.clone())
+                .with_root_context(pool)
+                .with_root_context(details);
+            let mut edits = dom.rebuild_to_vec().edits;
+            edits.extend(settle_page(&mut dom));
+            assert!(edits.iter().any(|edit| matches!(edit,
+                Mutation::CreateTextNode { value, .. } if value == "The auction in this link is invalid."
+            )));
+            let clear = rendered_event_target(
+                &dom,
+                "button",
+                "id",
+                "public-compensation-clear-auction",
+                "onclick",
+            );
+            let before = browser.pairs();
+            browser.allow_writes(false);
+            dispatch_page_event(&dom, "click", clear, "");
+            settle_page(&mut dom);
+            assert_eq!(browser.pairs(), before);
+            browser.allow_writes(true);
+            dispatch_page_event(&dom, "click", clear, "");
+            settle_page(&mut dom);
+            assert_eq!(browser.pairs(), [("keep".to_owned(), "yes".to_owned())]);
+            assert_eq!(
+                browser.state().auction_parameter(),
+                &crate::surface::AuctionParameter::Unspecified
+            );
+        }
     }
 
     #[test]

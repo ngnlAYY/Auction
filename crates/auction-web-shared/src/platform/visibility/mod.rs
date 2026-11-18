@@ -19,6 +19,15 @@ pub mod broadcast;
 type WakerSlot = RefCell<Option<Waker>>;
 type WakerRegistry = RefCell<Vec<Weak<WakerSlot>>>;
 
+/// 检查文档当前是否可见，无需等待页面生命周期监听器安装。
+pub fn document_is_visible() -> bool {
+    #[cfg(target_arch = "wasm32")]
+    if let Some(document) = web_sys::window().and_then(|window| window.document()) {
+        return !document.hidden();
+    }
+    true
+}
+
 /// 页面可见性；`visibilitychange` 监听器更新内部状态并唤醒挂起的等待者。
 /// 内部是 `Rc` 共享状态，克隆体与原体看到同一份可见性，供同一页面的多个循环共用。
 #[derive(Clone)]

@@ -11,7 +11,8 @@ use crate::api::{WorldStatus, Worlds, revalidate_worlds};
 use crate::surface::router::Route;
 use crate::surface::{
     AuctionParameter, AuctionSelection, PublicBoardQuery, QueryCommit, commit_auction_selection,
-    public_auction_home_query, read_public_query, update_public_query_state,
+    commit_public_query_pairs, public_auction_home_query, read_public_query,
+    update_public_query_state,
 };
 
 /// 与世界目录的低频 HTTP 缓存档对齐。
@@ -66,13 +67,8 @@ pub(crate) fn WorldPicker(
                 return;
             }
             // 仅当前世界失效时纠偏；历史筛选与指定场次深链不得被目录开关抹除。
-            let world = active.clone();
-            if update_public_query_state(
-                shell_query_state,
-                move |query| query.world = (active != "main").then_some(active),
-                QueryWriteMode::Replace,
-            ) {
-                selected_world.set(world);
+            if replace_world_query(shell_query_state, (active != "main").then_some(&active)) {
+                selected_world.set(active);
             }
         },
     ));
@@ -104,7 +100,7 @@ pub(crate) fn WorldPicker(
                             None,
                             |query| *query = world_switch_query(query, &world, historical_board),
                         ) {
-                            selected_world.set(applied.world.unwrap_or_else(|| "main".to_owned()));
+                            selected_world.set(applied.world.as_deref().unwrap_or("main").to_owned());
                         }
                     } else if update_public_query_state(
                         shell_query_state,
@@ -125,6 +121,13 @@ pub(crate) fn WorldPicker(
             }
         }
     }
+}
+
+/// 世界自动纠偏只拥有 `world`，其他片段随当前历史条目保留。
+pub(super) fn replace_world_query(state: Signal<PublicBoardQuery>, world: Option<&str>) -> bool {
+    let pairs =
+        world.into_iter().map(|world| ("world".to_owned(), world.to_owned())).collect::<Vec<_>>();
+    commit_public_query_pairs(state, &["world"], &pairs, QueryWriteMode::Replace)
 }
 
 fn has_auction_target(auction: &AuctionParameter) -> bool {
@@ -234,7 +237,7 @@ fn world_switch_query(
     }
     PublicBoardQuery {
         // 主世界沿用旧版无参数 URL。
-        world: (world != "main").then(|| world.to_owned()),
+        world: (world != "main").then(|| world.to_owned()).into(),
         ..current.clone()
     }
 }
@@ -279,7 +282,7 @@ pub(crate) fn world_label(world: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use std::cell::{Cell, RefCell};
     use std::future::poll_fn;
     use std::rc::Rc;
@@ -295,17 +298,30 @@ mod tests {
     };
     use crate::api::{WorldStatus, Worlds};
 
-    pub(super) struct CatalogTimerFixture {
+    pub(in crate::surface::board) struct CatalogTimerFixture {
         pub(super) now: Cell<Timestamp>,
+        enabled_world: &'static str,
         calls: Cell<usize>,
         elapsed: Cell<u64>,
         timer: RefCell<Option<Waker>>,
     }
 
     impl CatalogTimerFixture {
+        pub(in crate::surface::board) fn new(enabled_world: &'static str, now: Timestamp) -> Self {
+            Self {
+                now: Cell::new(now),
+                enabled_world,
+                calls: Cell::new(0),
+                elapsed: Cell::new(0),
+                timer: RefCell::default(),
+            }
+        }
+
         pub(super) fn read(&self) -> Worlds {
             self.calls.update(|n| n + 1);
-            Worlds { worlds: [("main".to_owned(), WorldStatus { enabled: true })].into() }
+            Worlds {
+                worlds: [(self.enabled_world.to_owned(), WorldStatus { enabled: true })].into(),
+            }
         }
 
         pub(super) async fn wait(&self) {
@@ -339,12 +355,7 @@ mod tests {
     #[test]
     fn elapsed_catalog_timer_revalidates_even_if_wall_clock_moved_back() {
         let timestamp = |seconds: i64| Timestamp::from_timestamp_millis(seconds * 1_000).unwrap();
-        let fixture = Rc::new(CatalogTimerFixture {
-            now: Cell::new(timestamp(0)),
-            calls: Cell::new(0),
-            elapsed: Cell::new(0),
-            timer: RefCell::default(),
-        });
+        let fixture = Rc::new(CatalogTimerFixture::new("main", timestamp(0)));
         let mut dom = VirtualDom::new(CatalogTimerHarness).with_root_context(fixture.clone());
         dom.rebuild_in_place();
         let settle = |dom: &mut VirtualDom| {
@@ -416,7 +427,7 @@ mod tests {
 
     fn historical_query() -> PublicBoardQuery {
         PublicBoardQuery {
-            category: Some("clo".to_owned()),
+            category: Some("clo".to_owned()).into(),
             equipment_group: Some("rare".to_owned()),
             max_level: Some("400".to_owned()),
             page: 3,
@@ -432,7 +443,10 @@ mod tests {
         // 场次、筛选与页码全部清除，每页条数取本地偏好。
         assert_eq!(
             query,
-            PublicBoardQuery { world: Some("isekai".to_owned()), ..PublicBoardQuery::default() }
+            PublicBoardQuery {
+                world: Some("isekai".to_owned()).into(),
+                ..PublicBoardQuery::default()
+            }
         );
         assert_eq!(
             world_switch_query(&historical_query(), "main", true),
@@ -444,9 +458,10 @@ mod tests {
     fn switching_world_elsewhere_only_changes_the_world() {
         let current = historical_query();
         let query = world_switch_query(&current, "isekai", false);
-        assert_eq!(query, PublicBoardQuery { world: Some("isekai".to_owned()), ..current });
-        let current = PublicBoardQuery { world: Some("isekai".to_owned()), ..historical_query() };
-        assert_eq!(world_switch_query(&current, "main", false).world, None);
+        assert_eq!(query, PublicBoardQuery { world: Some("isekai".to_owned()).into(), ..current });
+        let current =
+            PublicBoardQuery { world: Some("isekai".to_owned()).into(), ..historical_query() };
+        assert_eq!(world_switch_query(&current, "main", false).world.as_deref(), None);
     }
 
     #[test]

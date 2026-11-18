@@ -1,8 +1,13 @@
 //! 公开只读 GET 的条件请求、非 2xx 响应的缓存分类与带缓存的严格解码；其余查询都经这里读写
 //! 公开读缓存。
 
+use std::cell::Cell;
 use std::future::Future;
+#[cfg(test)]
+use std::pin::Pin;
 
+use auction_time::Timestamp;
+use auction_web_shared::clock::monotonic_millis;
 use gloo_net::http::Response;
 
 use super::super::clock::send_get_conditional;
@@ -22,7 +27,15 @@ pub(super) async fn conditional_get(
     url: &str,
     etag: Option<&str>,
 ) -> Result<ConditionalResponse, (TransportError, Option<u16>)> {
-    let response = send_get_conditional(url, etag).await?;
+    conditional_get_observed(url, etag, |_, _, _| {}).await
+}
+
+async fn conditional_get_observed(
+    url: &str,
+    etag: Option<&str>,
+    observe: impl FnOnce(u16, Option<&str>, Option<&str>),
+) -> Result<ConditionalResponse, (TransportError, Option<u16>)> {
+    let response = send_get_conditional(url, etag, observe).await?;
     if response.status() == 304 {
         return Ok(if etag.is_some() {
             ConditionalResponse::NotModified
@@ -78,7 +91,26 @@ pub(in crate::api) async fn cached_public_read<T, D, Fut>(
     url: &str,
     ttl_millis: u64,
     decode: D,
-) -> Result<CacheRead<T>, String>
+) -> Result<CacheRead<T, String>, String>
+where
+    T: Clone + 'static,
+    D: FnOnce(Response) -> Fut,
+    Fut: Future<Output = Result<T, String>>,
+{
+    match cached_public_read_with_retry(url, ttl_millis, decode, None, || true).await {
+        Some(result) => result,
+        None => unreachable!("无发送门禁的读取总有结果"),
+    }
+}
+
+/// 目录在取得同 URL 的读取权之后也必须检查已有时限，包含刚等完首屏预取的正文。
+pub(super) async fn cached_public_read_with_retry<T, D, Fut>(
+    url: &str,
+    ttl_millis: u64,
+    decode: D,
+    retry_at: Option<&Cell<Option<u64>>>,
+    can_send: impl FnOnce() -> bool,
+) -> Option<Result<CacheRead<T, String>, String>>
 where
     T: Clone + 'static,
     D: FnOnce(Response) -> Fut,
@@ -86,24 +118,88 @@ where
 {
     #[cfg(test)]
     if let Some(result) = PageReadFixture::<String, Result<T, String>>::response(url.to_owned()) {
-        return result.map(|value| CacheRead { value, stale_fallback: None });
+        return Some(result.map(CacheRead::current));
+    }
+    #[cfg(test)]
+    if let Some(result) =
+        PageReadFixture::<String, Pin<Box<dyn Future<Output = Result<T, String>>>>>::response(
+            url.to_owned(),
+        )
+    {
+        return Some(result.await.map(CacheRead::current));
     }
     let request_url = url.to_owned();
-    swr_cache::read_or_fetch(url, ttl_millis, swr_cache::now_millis, move |etag| async move {
-        match conditional_get(&request_url, etag.as_deref()).await {
-            Err((error, status)) => transport_failure_outcome(status, error.code().to_owned()),
-            Ok(ConditionalResponse::NotModified) => FetchOutcome::NotModified,
-            Ok(ConditionalResponse::Failure(response)) => {
-                let status = response.status();
-                failure_outcome(status, decoder::decode_error_code(response).await)
+    swr_cache::read_or_fetch_if(
+        url,
+        ttl_millis,
+        swr_cache::now_millis,
+        can_send,
+        move |etag| async move {
+            if let Some(retry_at) = retry_at
+                && let Some(window) = swr_cache::public_read_retry_after(&request_url, retry_now())
+            {
+                retry_at.set(Some(window.not_before));
+                return failure_outcome(window.status, window.error.borrow().clone());
             }
-            Ok(ConditionalResponse::Success { response, etag }) => match decode(response).await {
-                Ok(value) => FetchOutcome::Changed { value, etag },
-                Err(error) => FetchOutcome::Rejected(error),
-            },
-        }
-    })
+            let mut observed = None;
+            let response =
+                conditional_get_observed(&request_url, etag.as_deref(), |status, header, date| {
+                    if let Some(retry_at) = retry_at
+                        && let Some(delay) = requested_retry_delay(status, header, date)
+                    {
+                        let window = swr_cache::remember_retry_after(
+                            &request_url,
+                            status,
+                            delay,
+                            retry_now(),
+                        );
+                        retry_at.set(Some(window.not_before));
+                        observed = Some(window);
+                    }
+                })
+                .await;
+            let failure = match response {
+                Err((error, status)) => (status, error.code().to_owned()),
+                Ok(ConditionalResponse::Failure(response)) => {
+                    (Some(response.status()), decoder::decode_error_code(response).await)
+                }
+                Ok(ConditionalResponse::NotModified) => return FetchOutcome::NotModified,
+                Ok(ConditionalResponse::Success { response, etag }) => {
+                    return match decode(response).await {
+                        Ok(value) => FetchOutcome::Changed { value, etag },
+                        Err(error) => FetchOutcome::Rejected(error),
+                    };
+                }
+            };
+            if let Some(window) = observed {
+                window.error.replace(failure.1.clone());
+            }
+            transport_failure_outcome(failure.0, failure.1)
+        },
+    )
     .await
+}
+
+fn requested_retry_delay(
+    status: u16,
+    retry_after: Option<&str>,
+    date: Option<&str>,
+) -> Option<u64> {
+    let retry_after = retry_after.filter(|_| status >= 400)?;
+    if !retry_after.is_empty() && retry_after.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Some(retry_after.parse::<u64>().unwrap_or(u64::MAX).saturating_mul(1_000));
+    }
+    let deadline = Timestamp::parse_from_imf_fixdate(retry_after)?;
+    let reference = date.and_then(Timestamp::parse_from_imf_fixdate).unwrap_or_else(Timestamp::now);
+    Some(deadline.timestamp_millis().saturating_sub(reference.timestamp_millis()).max(0) as u64)
+}
+
+pub(super) fn retry_now() -> u64 {
+    #[cfg(test)]
+    if let Some(now) = PageReadFixture::<(), u64>::response(()) {
+        return now;
+    }
+    monotonic_millis().ceil() as u64
 }
 
 #[cfg(test)]

@@ -32,7 +32,7 @@ pub(crate) fn CatalogTable(
     page_number: i64,
     on_category_change: EventHandler<String>,
     on_page_change: EventHandler<i64>,
-    on_page_clamp: EventHandler<i64>,
+    on_page_clamp: Callback<i64, bool>,
     on_page_size_change: EventHandler<i64>,
     page_total: Option<i64>,
     page_size: i64,
@@ -125,6 +125,7 @@ pub(crate) fn CatalogTable(
             label: t!("auction-pager-label"),
             on_page_change,
             on_page_clamp,
+            report_clamp_failure: true,
             on_page_size_change,
         }
     }

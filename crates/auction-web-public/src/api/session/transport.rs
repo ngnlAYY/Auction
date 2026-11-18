@@ -117,13 +117,15 @@ pub(in crate::api) fn decode_identity_response<T: DeserializeOwned>(
             ..PublicSessionApiError::local("invalid_response")
         }
     };
-    let envelope = body
-        .and_then(|body| serde_json::from_str::<Value>(body).ok())
+    let body = body.ok_or_else(invalid_response)?;
+    let envelope = serde_json::from_str::<Value>(body)
+        .ok()
         .filter(|value| value.as_object().is_some_and(|object| object.contains_key("data")))
         .ok_or_else(invalid_response)?;
-    let envelope: ApiResponse<Value> =
-        serde_json::from_value(envelope).map_err(|_decode_error| invalid_response())?;
     if !(200..300).contains(&status) {
+        // 确定拒绝前从原文检查信封键唯一。上面的 Value 校验仍约束整个对象（含扩展字段）。
+        let envelope: ApiResponse<Value> =
+            serde_json::from_str(body).map_err(|_decode_error| invalid_response())?;
         let public_reason = (status == 403 && envelope.code == "account_blacklisted")
             .then(|| blacklist_reason(&envelope.data))
             .flatten();
@@ -133,6 +135,8 @@ pub(in crate::api) fn decode_identity_response<T: DeserializeOwned>(
             public_reason,
         });
     }
+    let envelope: ApiResponse<Value> =
+        serde_json::from_value(envelope).map_err(|_decode_error| invalid_response())?;
     if status != 200 || envelope.code != "ok" || !validate(&envelope.data) {
         return Err(invalid_response());
     }

@@ -62,11 +62,13 @@ pub(crate) use model::{
     lot_code_for,
 };
 pub(crate) use queries::{
-    PriceHistoryFetchError, fetch_auction_history_page, fetch_auction_list, fetch_bid_log_auctions,
-    fetch_bid_log_page, fetch_current_auction, fetch_current_lots, fetch_historical_auction,
-    fetch_lot_bid_log, fetch_lot_detail, fetch_price_history, fetch_worlds, prefetch_current_lots,
-    revalidate_worlds,
+    LotDetailFetchError, PriceHistoryFetchError, fetch_auction_history_page, fetch_auction_list,
+    fetch_bid_log_auctions, fetch_bid_log_page, fetch_current_auction, fetch_current_lots,
+    fetch_historical_auction, fetch_lot_bid_log, fetch_lot_detail, fetch_price_history,
+    fetch_worlds, prefetch_current_lots, revalidate_worlds,
 };
+#[cfg(test)]
+pub(crate) use realtime::ReplayFixture;
 pub(crate) use realtime::{RealtimeCache, RealtimePage, subscribe_auction_realtime};
 pub(crate) use registration::fetch_registration_info;
 pub(crate) use rules::{DOCUMENT_UNPUBLISHED, RulesDocument, SiteDocument, fetch_site_document};

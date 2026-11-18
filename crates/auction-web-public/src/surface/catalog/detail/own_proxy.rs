@@ -11,14 +11,10 @@ use crate::surface::proxy::{proxy_mode_label, proxy_quota_label, proxy_status_la
 
 /// 从出价入口投影里取出本人对该拍品的代理授权。
 ///
-/// 只有已登录的命令入口带授权快照；读取中、读取失败或没有设置授权时返回 `None`，
-/// 抽屉不为它们占位，错误与重试留给代理弹窗。
+/// 只有已登录的命令入口带已确认的快照。无快照时不占位，读取状态留给代理弹窗。
 pub(super) fn own_proxy(bid: &CatalogDetailBid) -> Option<&OwnedProxy> {
     match bid {
-        CatalogDetailBid::Command { input, .. } => match input.proxy.as_ref() {
-            Some(Ok(Some(proxy))) => Some(proxy),
-            _ => None,
-        },
+        CatalogDetailBid::Command { input, .. } => input.proxy.as_ref().and_then(Option::as_ref),
         CatalogDetailBid::Login | CatalogDetailBid::Unavailable => None,
     }
 }
@@ -85,7 +81,7 @@ mod tests {
         .expect("fixture matches the owned proxy contract")
     }
 
-    fn command(proxy: Option<Result<Option<OwnedProxy>, String>>) -> CatalogDetailBid {
+    fn command(proxy: Option<Option<OwnedProxy>>) -> CatalogDetailBid {
         CatalogDetailBid::Command {
             input: Box::new(CommandDialogInput {
                 lot_id: "018f4c8e-7b2a-7c3d-8e4f-000000000003".to_owned(),
@@ -102,6 +98,7 @@ mod tests {
                 leading: false,
                 blocked_reason: String::new(),
                 proxy,
+                proxy_read: None,
             }),
             disabled: false,
         }
@@ -110,14 +107,13 @@ mod tests {
     #[test]
     fn drawer_shows_the_own_proxy_only_after_it_was_read() {
         // 回归：本人代理的上限与已用次数要在详情抽屉里可见。
-        let loaded = command(Some(Ok(Some(proxy()))));
+        let loaded = command(Some(Some(proxy())));
         let shown = own_proxy(&loaded).expect("loaded authorization is shown");
         assert_eq!((shown.maximum_amount, shown.quota.used, shown.quota.limit), (250_000, 2, 3));
 
         // 读取中、读取失败与没有设置授权都不占位。
         assert!(own_proxy(&command(None)).is_none());
-        assert!(own_proxy(&command(Some(Err("unauthenticated".to_owned())))).is_none());
-        assert!(own_proxy(&command(Some(Ok(None)))).is_none());
+        assert!(own_proxy(&command(Some(None))).is_none());
         // 匿名访客与没有操作栏的行没有授权快照。
         assert!(own_proxy(&CatalogDetailBid::Login).is_none());
         assert!(own_proxy(&CatalogDetailBid::Unavailable).is_none());

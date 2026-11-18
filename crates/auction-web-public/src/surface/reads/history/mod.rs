@@ -133,9 +133,6 @@ pub(crate) fn history() -> Element {
             } else if clamp_failed {
                 {body}
             }
-            if lookup.failed() {
-                p { class: "action-feedback action-feedback--error", role: "alert", {t!("data-error")} }
-            }
             LotDetailLookupHost { lookup }
         }
     }

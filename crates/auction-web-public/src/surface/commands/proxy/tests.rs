@@ -65,6 +65,11 @@ fn ProxyApp() -> Element {
     let refresh_generation = use_context_provider(|| Signal::new(0_u64));
     let read = use_signal(|| Some(Ok(None)));
     READ.set(Some(read));
+    let proxy_read = use_resource(move || {
+        let generation = refresh_generation();
+        let result = read();
+        async move { result.map(|result| (generation, result)) }
+    });
     let input = ProxyFormInput {
         lot_id: "test-lot".to_owned(),
         can_bid: true,
@@ -75,7 +80,8 @@ fn ProxyApp() -> Element {
         default_mode: Some("fast".to_owned()),
         leading: false,
         blocked_reason: String::new(),
-        proxy: read(),
+        proxy: Some(None),
+        proxy_read: Some(proxy_read),
         refresh_generation,
         on_submit: use_callback(|_| {}),
         create_command: ProxyConfirmCommand(use_confirm_command()),

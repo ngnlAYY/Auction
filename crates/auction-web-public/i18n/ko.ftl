@@ -17,6 +17,8 @@ nav-blacklist = 블랙리스트
 nav-price-history = 낙찰 이력
 nav-forum = 포럼 동기화
 world-label = 월드
+world-invalid-link = 링크의 월드가 유효하지 않습니다. 계속하려면 월드를 선택하세요.
+world-correction-error = 링크의 월드를 수정할 수 없습니다.
 
 auction-pager-label = 실시간 경매
 auction-header-title = 제 { $number }회 경매
@@ -68,6 +70,7 @@ equipment-group = 장비 그룹
 equipment-group-rare = 희귀
 equipment-group-fusion = 융합
 catalog-empty-filtered = 선택한 조건에 해당하는 출품이 없어요.
+catalog-preview-stale = 미리보기가 갱신되었습니다. 표에는 이전 버전이 표시됩니다.
 filter-max-level = 레벨 상한
 filter-level-unlimited = 제한 없음
 filter-include-unleveled = 레벨 없는 장비 표시

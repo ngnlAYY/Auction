@@ -61,6 +61,26 @@ fn bid(
 }
 
 #[test]
+fn final_transition_allows_one_version_step_without_a_bid_fact() {
+    let mut cache = RealtimeCache::new("auction-1".to_owned(), 0);
+    assert!(cache.merge_page(&page(vec![bid(1, "bid-a", "a", 1, 1, 1_500)], 1)).bids_changed);
+    let final_event = event(
+        2,
+        "final",
+        "auction.final_phase_entered",
+        json!({"auction_id": "auction-1", "state_version": 3}),
+    );
+    assert!(cache.merge_page(&page(vec![final_event], 2)).refresh_required);
+    let mut skipped_fact = cache.clone();
+    assert!(skipped_fact.merge_page(&page(vec![bid(3, "bid-b", "b", 3, 2, 2_000)], 3)).degraded);
+    let merge = cache.merge_page(&page(vec![bid(3, "bid-b", "b", 3, 1, 2_000)], 3));
+    assert!(merge.bids_changed && !merge.degraded);
+    let mut conflicting = cache.clone();
+    assert!(conflicting.merge_page(&page(vec![bid(4, "conflict", "b", 3, 1, 2_500)], 4)).degraded);
+    assert!(cache.merge_page(&page(vec![bid(4, "bid-c", "c", 5, 1, 2_500)], 4)).degraded);
+}
+
+#[test]
 fn newer_revision_refreshes_and_duplicate_event_is_ignored() {
     let mut cache = RealtimeCache::new("auction-1".to_owned(), 7);
     let event = preview_update(1, 8);

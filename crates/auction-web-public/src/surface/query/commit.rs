@@ -108,11 +108,16 @@ fn commit_query(
         return QueryCommit::Unchanged(current);
     }
 
-    // 场次未变时连原有编码一起保留。变更时整组替换，避免保留同名非法值。
+    // 无关写回保留待修正参数的原始编码和重复次数。显式修正时才替换整组值。
     let keys: Vec<_> = PUBLIC_QUERY_KEYS
         .iter()
         .copied()
-        .filter(|key| *key != "auction" || !keep_auction)
+        .filter(|key| match *key {
+            "auction" => !keep_auction,
+            "world" => !next.world.invalid() || current.world != next.world,
+            "type" => !next.category.invalid() || current.category != next.category,
+            _ => true,
+        })
         .collect();
     let pairs: Vec<_> = public_query_pairs(&next)
         .into_iter()

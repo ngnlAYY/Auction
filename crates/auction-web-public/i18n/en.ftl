@@ -18,6 +18,8 @@ nav-blacklist = Blacklist
 nav-price-history = Price history
 nav-forum = Forum sync
 world-label = World
+world-invalid-link = The world in this link is invalid. Select a world to continue.
+world-correction-error = Could not update the world in this link.
 
 auction-pager-label = Auctions
 auction-header-title = Auction #{ $number }
@@ -69,6 +71,7 @@ equipment-group = Equipment group
 equipment-group-rare = Rare
 equipment-group-fusion = Fusion
 catalog-empty-filtered = No lots match the selected filters.
+catalog-preview-stale = The preview has changed. The table still shows the previous revision.
 filter-max-level = Level limit
 filter-level-unlimited = Unlimited
 filter-include-unleveled = Show unleveled equipment

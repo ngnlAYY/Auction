@@ -6,8 +6,8 @@ use dioxus::prelude::*;
 
 use super::directory::RoundDirectory;
 use crate::surface::{
-    AuctionSelection, PublicBoardQuery, QueryCommit, commit_auction_selection, page_pathname,
-    public_page_within_offset, read_page_query,
+    AuctionSelection, FilterParameter, PublicBoardQuery, QueryCommit, commit_auction_selection,
+    page_pathname, public_page_within_offset, read_page_query,
 };
 
 type RoundListQuery = (String, String, Option<String>, i64, i64);
@@ -34,6 +34,9 @@ pub(super) fn use_round_body<T: 'static>(
             let Some((round, lot, page, size)) = requested else {
                 return std::future::pending().await;
             };
+            if read_page_query().world.invalid() {
+                return std::future::pending().await;
+            }
             let key = (round.id.clone(), round.world.clone(), lot.clone(), page, size);
             (key, fetch(round.id, round.world, lot, page, size).await)
         }
@@ -53,6 +56,9 @@ impl ReadSelection {
     /// 以最新地址为起点切换读取目标。
     pub(super) fn select(self, state: Signal<PublicBoardQuery>, pathname: &str) -> bool {
         if page_pathname() != pathname {
+            return false;
+        }
+        if matches!(&self, Self::World(world) if !matches!(world.as_str(), "main" | "isekai")) {
             return false;
         }
         let (world, auction) = self.into_fields();
@@ -88,7 +94,7 @@ impl ReadSelection {
 
     fn reset_filters(next: &mut PublicBoardQuery, world: Option<Option<String>>) {
         if let Some(world) = world {
-            next.world = world;
+            next.world = world.into();
         }
         next.bid_log_lot = None;
         next.bid_log_page_alias = false;
@@ -144,6 +150,21 @@ pub(super) fn commit_read_query_with(
     true
 }
 
+/// 读取页的世界地址错误，与原生选择器关联并显示原始值。
+#[component]
+pub(super) fn InvalidReadWorld(world: FilterParameter) -> Element {
+    let values = world.query_values();
+    let message =
+        if values.len() > 1 { t!("filter-error-duplicate") } else { t!("world-invalid-link") };
+    let raw = values.join(" / ");
+    rsx! {
+        p { id: "public-read-world-error", class: "public-auction-empty__title", role: "alert",
+            "{message}"
+            bdi { " {raw}" }
+        }
+    }
+}
+
 /// 非法链接由玩家主动清除，目录才能选择可读场次。
 #[component]
 pub(super) fn InvalidReadAuction(on_recover: EventHandler<()>) -> Element {
@@ -169,7 +190,7 @@ pub(super) mod tests {
     use dioxus::dioxus_core::{ElementId, Mutation};
     use dioxus::prelude::*;
 
-    use crate::api::{AuctionListPage, HistoricalAuction, Worlds};
+    use crate::api::{AuctionListPage, HistoricalAuction, WorldStatus, Worlds};
     use crate::surface::{
         PageBrowserFixture, PageReadFixture, PublicContentLoading, rendered_event_target,
         settle_page,
@@ -187,7 +208,9 @@ pub(super) mod tests {
         browser: &PageBrowserFixture,
         body: PageReadFixture<String, Result<T, String>>,
     ) -> (VirtualDom, Vec<Mutation>) {
-        let directory = PageReadFixture::new(|url: String| {
+        let applied = browser.clone();
+        let directory = PageReadFixture::new(move |url: String| {
+            assert!(applied.query().world.round_world().is_some(), "非法世界不读取场次目录");
             let auctions = if url.contains("status=settled") {
                 [(ROUND_ID, 2), (OLDER_ROUND_ID, 1)]
                     .into_iter()
@@ -221,12 +244,19 @@ pub(super) mod tests {
                 has_more: None,
             })
         });
-        let worlds =
-            PageReadFixture::new(|()| Ok::<_, String>(Worlds { worlds: Default::default() }));
+        let worlds = PageReadFixture::new(|()| {
+            Ok::<_, String>(Worlds {
+                worlds: ["main", "isekai"]
+                    .into_iter()
+                    .map(|world| (world.to_owned(), WorldStatus { enabled: true }))
+                    .collect(),
+            })
+        });
         let mut dom = VirtualDom::new(page)
             .with_root_context(browser.clone())
             .with_root_context(directory)
             .with_root_context(body)
+            .with_root_context(PageReadFixture::new(|()| std::future::ready(())))
             .with_root_context(worlds);
         let mut edits = dom.rebuild_to_vec().edits;
         edits.extend(settle_page(&mut dom));

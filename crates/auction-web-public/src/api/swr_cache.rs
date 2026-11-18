@@ -60,13 +60,51 @@ pub(crate) enum FetchOutcome<T, E> {
 }
 
 /// 一次缓存读取得到的值及其来源。
-pub(crate) struct CacheRead<T> {
+pub(crate) struct CacheRead<T, E> {
     pub(crate) value: T,
-    /// 重读遇到传输失败或服务端暂时拒绝，返回的是已有的过期或已被失效快照时，给出该快照最近
-    /// 一次被服务端确认（写入或 304）的时刻，取自注入的 `now_millis`（浏览器中是墙钟毫秒）；
-    /// 需要尽快追上权威值的调用方可据此稍后再读，须向用户标明数据时点的页面据此提示。新鲜命中、
-    /// 304 确认与新响应都为 `None`。
-    pub(crate) stale_fallback: Option<u64>,
+    fallback: Option<StaleFallback<E>>,
+}
+
+struct StaleFallback<E> {
+    stored_at_millis: u64,
+    revision: u64,
+    snapshot: Rc<dyn Any>,
+    error: E,
+}
+
+impl<T, E> CacheRead<T, E> {
+    pub(super) fn current(value: T) -> Self {
+        Self { value, fallback: None }
+    }
+
+    /// 暂时失败后回退的旧快照最近一次被服务端确认（写入或 304）的时刻，单位为墙钟毫秒。
+    pub(super) fn stale_since(&self) -> Option<u64> {
+        self.fallback.as_ref().map(|fallback| fallback.stored_at_millis)
+    }
+
+    /// 等待是否补读期间，命令失效或 404/410 仍可撤销首次快照的交付资格。
+    pub(super) fn deliver(self, url: &str) -> Result<T, E> {
+        if let Some(fallback) = self.fallback {
+            let allowed = STORE.with_borrow(|store| {
+                fallback.revision >= store.fallback_floor
+                    && store
+                        .entries
+                        .get(url)
+                        .is_some_and(|entry| Rc::ptr_eq(&entry.value, &fallback.snapshot))
+            });
+            if !allowed {
+                return Err(fallback.error);
+            }
+        }
+        Ok(self.value)
+    }
+}
+
+/// 目录预取和正文共用服务端给出的最早重读时刻，独立于缓存正文和在途登记。
+pub(super) struct RetryAfterWindow {
+    pub(super) not_before: u64,
+    pub(super) status: u16,
+    pub(super) error: RefCell<String>,
 }
 
 struct Entry {
@@ -86,6 +124,7 @@ struct Store {
     revision: u64,
     /// 同一 URL 可供合并和更新缓存的在途请求。
     pending: HashMap<String, Rc<Pending>>,
+    retry_after: HashMap<String, Rc<RetryAfterWindow>>,
     /// 最近一次命令失效的修订号。更早的条目只可带 ETag 再验证，更早发出的请求也不得写回缓存。
     /// 修订号按 u64 逐次递增，实际不会回绕。
     fallback_floor: u64,
@@ -170,6 +209,7 @@ struct CachedEntry<T> {
     current: bool,
     /// 条目写入或最近一次确认时的修订号；能否作为暂时性失败的回退值见 [`fallback_allowed`]。
     revision: u64,
+    snapshot: Rc<dyn Any>,
 }
 
 /// 判断完整 URL 是否属于允许缓存的公开只读 GET。
@@ -235,24 +275,45 @@ pub(crate) async fn read_or_fetch<T, E, C, F, Fut>(
     ttl_millis: u64,
     now_millis: C,
     fetch: F,
-) -> Result<CacheRead<T>, E>
+) -> Result<CacheRead<T, E>, E>
 where
     T: Clone + 'static,
     C: Fn() -> u64,
     F: FnOnce(Option<String>) -> Fut,
     Fut: Future<Output = FetchOutcome<T, E>>,
 {
-    let current = |value| CacheRead { value, stale_fallback: None };
+    match read_or_fetch_if(url, ttl_millis, now_millis, || true, fetch).await {
+        Some(result) => result,
+        None => unreachable!("无发送门禁的读取总有结果"),
+    }
+}
+
+/// 等待单飞并检查新鲜期后，由调用方决定是否还可以发起请求。
+pub(super) async fn read_or_fetch_if<T, E, C, F, Fut>(
+    url: &str,
+    ttl_millis: u64,
+    now_millis: C,
+    can_send: impl FnOnce() -> bool,
+    fetch: F,
+) -> Option<Result<CacheRead<T, E>, E>>
+where
+    T: Clone + 'static,
+    C: Fn() -> u64,
+    F: FnOnce(Option<String>) -> Fut,
+    Fut: Future<Output = FetchOutcome<T, E>>,
+{
+    let current = CacheRead::current;
     // 非白名单 URL 一律直连：不读取、不写入，也不改变失效修订号。
     if !is_cacheable_url(url) {
-        return match fetch(None).await {
+        can_send().then_some(())?;
+        return Some(match fetch(None).await {
             FetchOutcome::Changed { value, .. } => Ok(current(value)),
             FetchOutcome::Transport(error)
             | FetchOutcome::Busy(error)
             | FetchOutcome::Rejected(error) => Err(error),
             // 调用方在未收到 ETag 时必须把 304 归为 Rejected；这里没有可回退的值。
             FetchOutcome::NotModified => unreachable!("未提供 ETag 的读取不应返回 304"),
-        };
+        });
     }
     let fresh = |entry: &CachedEntry<T>| {
         entry.current && now_millis().saturating_sub(entry.stored_at_millis) < ttl_millis
@@ -261,17 +322,20 @@ where
     while let Some(pending) = pending_for(url) {
         WaitPending(pending).await;
         if let Some(entry) = lookup::<T>(url).filter(fresh) {
-            return Ok(current(entry.value));
+            return Some(Ok(current(entry.value)));
         }
     }
+    let entry = match lookup::<T>(url) {
+        Some(entry) if fresh(&entry) => return Some(Ok(current(entry.value))),
+        entry => entry,
+    };
+    // 取得发送权时可能已隐藏或取消。此时不得建立在途登记或改变缓存与回退资格。
+    can_send().then_some(())?;
     let request = PendingGuard::register(url);
     let revision = current_revision();
-    if let Some(entry) = lookup::<T>(url) {
-        if fresh(&entry) {
-            return Ok(current(entry.value));
-        }
+    if let Some(entry) = entry {
         // 过期与已被失效的条目同样带旧 ETag 再验证：正文未变时 304 直接复用，不重传整页。
-        return match fetch(entry.etag.clone()).await {
+        return Some(match fetch(entry.etag.clone()).await {
             FetchOutcome::Changed { value, etag } => {
                 store(&request, &value, etag, now_millis(), revision);
                 Ok(current(value))
@@ -289,16 +353,21 @@ where
                 if fallback_allowed(&request, entry.revision) {
                     Ok(CacheRead {
                         value: entry.value,
-                        stale_fallback: Some(entry.stored_at_millis),
+                        fallback: Some(StaleFallback {
+                            stored_at_millis: entry.stored_at_millis,
+                            revision: entry.revision,
+                            snapshot: entry.snapshot,
+                            error,
+                        }),
                     })
                 } else {
                     Err(error)
                 }
             }
             FetchOutcome::Rejected(error) => Err(error),
-        };
+        });
     }
-    match fetch(None).await {
+    Some(match fetch(None).await {
         FetchOutcome::Changed { value, etag } => {
             store(&request, &value, etag, now_millis(), revision);
             Ok(current(value))
@@ -307,7 +376,42 @@ where
         | FetchOutcome::Busy(error)
         | FetchOutcome::Rejected(error) => Err(error),
         FetchOutcome::NotModified => unreachable!("未提供 ETag 的读取不应返回 304"),
-    }
+    })
+}
+
+pub(super) fn public_read_retry_after(url: &str, now: u64) -> Option<Rc<RetryAfterWindow>> {
+    STORE.with_borrow_mut(|store| {
+        let window = store.retry_after.get(url)?;
+        if window.not_before <= now {
+            store.retry_after.remove(url);
+            return None;
+        }
+        Some(window.clone())
+    })
+}
+
+pub(super) fn remember_retry_after(
+    url: &str,
+    status: u16,
+    delay: u64,
+    now: u64,
+) -> Rc<RetryAfterWindow> {
+    let not_before = now.saturating_add(delay);
+    let window = Rc::new(RetryAfterWindow {
+        not_before,
+        status,
+        error: RefCell::new("invalid_response".to_owned()),
+    });
+    STORE.with_borrow_mut(|store| {
+        store.retry_after.retain(|_, prior| prior.not_before > now);
+        // 响应头先于正文发布时限。取消旧请求、完成命令或收到较短等待时间都不能提前发这条 GET。
+        if not_before > now
+            && store.retry_after.get(url).is_none_or(|prior| prior.not_before <= not_before)
+        {
+            store.retry_after.insert(url.to_owned(), window.clone());
+        }
+    });
+    window
 }
 
 /// 使全部公开读缓存过期；实时事件与命令结果等在权威快照可能变化后调用。
@@ -355,6 +459,7 @@ fn lookup<T: Clone + 'static>(url: &str) -> Option<CachedEntry<T>> {
             stored_at_millis: entry.stored_at_millis,
             current: entry.revision == store.revision,
             revision: entry.revision,
+            snapshot: entry.value.clone(),
         })
     })
 }
@@ -844,7 +949,7 @@ mod tests {
                 || now.get(),
                 |_| std::future::ready(outcome),
             ))
-            .map(|cached| (cached.value, cached.stale_fallback))
+            .map(|cached| (cached.value, cached.stale_since()))
         };
         // 新响应与 TTL 内的新鲜命中（不会调用 fetch）都是权威值。
         assert_eq!(read(changed("v1", Some("etag-1"))), Ok(("v1", None)));
@@ -938,7 +1043,7 @@ mod tests {
                 FetchOutcome::Transport("network_error")
             });
             let read = match poll_once(reread.as_mut()) {
-                Poll::Ready(read) => read.map(|cached| (cached.value, cached.stale_fallback)),
+                Poll::Ready(read) => read.map(|cached| (cached.value, cached.stale_since())),
                 Poll::Pending => panic!("放行后重读必须结束"),
             };
             if command_reply {
@@ -1303,7 +1408,7 @@ mod tests {
         let lots = "/api/v1/auctions/00000000-0000-0000-0000-000000000011/lots?page=1&page_size=20";
         let read = |url: &str, ttl: u64, outcome: FetchOutcome<&'static str, &'static str>| {
             block_on(read_or_fetch(url, ttl, || 200_000, |_| std::future::ready(outcome)))
-                .map(|cached| (cached.value, is_fallback(cached.stale_fallback)))
+                .map(|cached| (cached.value, is_fallback(cached.stale_since())))
         };
         assert_eq!(
             read(directory, CATALOG_TTL_MILLIS, changed("final", Some("d1"))),

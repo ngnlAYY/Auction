@@ -27,14 +27,13 @@ pub(crate) fn remember_current_auction(world: &str, auction_id: &str) {
     }
 }
 
-/// 看板首页启动时调用一次。参数推导与看板目录读取完全一致（分类/分组 `all` 视为不筛选、页码
-/// 至少为 1），保证两者请求同一 URL；带 `auction` 深链的页面读取历史场次，不预取。
+/// 看板首页启动时调用一次。只预取可按原地址读取的目录；带 `auction` 的深链不预取。
 pub(crate) fn prefetch_board_lots(world: &str, query: &PublicBoardQuery) {
     if !matches!(query.auction_parameter(), AuctionParameter::Unspecified) {
         return;
     }
-    let Some(auction_id) =
-        storage::get_item(&current_auction_key(world)).filter(|auction_id| valid_uuid(auction_id))
+    let Some(category) = query.catalog_request_category() else { return };
+    let Some(auction_id) = remembered_auction(world).filter(|auction_id| valid_uuid(auction_id))
     else {
         return;
     };
@@ -44,14 +43,68 @@ pub(crate) fn prefetch_board_lots(world: &str, query: &PublicBoardQuery) {
     ) else {
         return;
     };
-    let category = query.category.clone().filter(|category| category != "all");
     let equipment_group = query.equipment_group.clone().filter(|group| group != "all");
     spawn(prefetch_current_lots(
         auction_id,
-        category,
+        category.map(str::to_owned),
         equipment_group,
         levels,
-        query.page.max(1),
+        query.page,
         query.page_size,
     ));
+}
+
+fn remembered_auction(world: &str) -> Option<String> {
+    let key = current_auction_key(world);
+    #[cfg(test)]
+    if let Some(result) = crate::surface::PageReadFixture::response(key.clone()) {
+        return result;
+    }
+    storage::get_item(&key)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use dioxus::prelude::*;
+
+    use super::prefetch_board_lots;
+    use crate::api::LotEnvelope;
+    use crate::surface::query::parse_public_query;
+    use crate::surface::{PageReadFixture, settle_page};
+
+    const AUCTION: &str = "018f4c8e-7b2a-4c3d-8e4f-000000000001";
+
+    #[test]
+    fn boot_prefetch_only_reads_a_valid_category_and_offset() {
+        for (search, expected) in [
+            ("?type=unknown", None),
+            ("?type=clo&type=shd", None),
+            ("?type=clo&page=52&page_size=200", None),
+            ("?type=clo&page=9223372036854775807&page_size=200", None),
+            ("?type=clo&page=51&page_size=200", Some("page=51&page_size=200&category=clo")),
+        ] {
+            let requests = Rc::new(RefCell::new(Vec::new()));
+            let gets = requests.clone();
+            let mut dom = VirtualDom::new(|| rsx! {})
+                .with_root_context(PageReadFixture::new(|key: String| {
+                    assert_eq!(key, "hv.public.current-auction.main");
+                    Some(AUCTION.to_owned())
+                }))
+                .with_root_context(PageReadFixture::new(move |url: String| {
+                    gets.borrow_mut().push(url);
+                    Err::<LotEnvelope, _>("fixture".to_owned())
+                }));
+            dom.rebuild_in_place();
+            dom.in_scope(ScopeId::APP, || {
+                prefetch_board_lots("main", &parse_public_query("/", search));
+            });
+            settle_page(&mut dom);
+            let expected = expected
+                .map(|query| format!("/api/v1/auctions/{AUCTION}/lots?{query}&fields=summary"));
+            assert_eq!(*requests.borrow(), expected.into_iter().collect::<Vec<_>>());
+        }
+    }
 }

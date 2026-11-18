@@ -31,8 +31,10 @@ use super::protocol::{
     RealtimeError, RealtimePage, canonical_auction_id, validate_realtime_page_sequence,
     websocket_url,
 };
+#[cfg(any(target_arch = "wasm32", test))]
+use crate::api::TransportError;
 #[cfg(target_arch = "wasm32")]
-use crate::api::send_get;
+use crate::api::clock::observe_response_date;
 
 /// 握手超时；只限制连接建立阶段（见模块文档）。
 #[cfg(target_arch = "wasm32")]
@@ -57,15 +59,16 @@ async fn fetch_realtime_page(after: i64, auction_id: &str) -> Result<RealtimePag
         .append_pair("after", &after.to_string())
         .append_pair("page_size", "100");
     let url = format!("/api/v1/events?{}", query.finish());
-    let response = send_get(&url).await.map_err(|error| RealtimeError::transient(error.code()))?;
+    let response = read_catch_up_response(async |status| {
+        auction_web_shared::send_get_observed(&url, |response| {
+            *status = Some(response.status());
+            observe_response_date(response);
+        })
+        .await
+    })
+    .await?;
     if !response.ok() {
-        let status = response.status();
-        // 401/403 认证或权限失败、404 目标拍卖不存在：重连不能自愈，按永久错误处理。
-        return Err(if matches!(status, 401 | 403 | 404) {
-            RealtimeError::permanent(format!("HTTP {status}"))
-        } else {
-            RealtimeError::transient(format!("HTTP {status}"))
-        });
+        return Err(RealtimeError::transient(format!("HTTP {}", response.status())));
     }
     let payload = crate::api::decoder::decode_auction_realtime_page(response, &auction_id)
         .await
@@ -79,6 +82,19 @@ async fn fetch_realtime_page(after: i64, auction_id: &str) -> Result<RealtimePag
     };
     validate_realtime_page_sequence(&page, after).map_err(RealtimeError::transient)?;
     Ok(page)
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+async fn read_catch_up_response<T>(
+    send: impl AsyncFnOnce(&mut Option<u16>) -> Result<T, TransportError>,
+) -> Result<T, RealtimeError> {
+    let mut status = None;
+    let result = send(&mut status).await;
+    // 认证、权限或目标不存在已由响应头确认，正文断流或超时不能重开重连。
+    if let Some(status @ (401 | 403 | 404)) = status {
+        return Err(RealtimeError::permanent(format!("HTTP {status}")));
+    }
+    result.map_err(|error| RealtimeError::transient(error.code()))
 }
 
 /// 订阅单个拍卖的实时流，并把服务端事件页交给页面替换当前安全快照；拍卖页面用它对齐旧版的
@@ -308,7 +324,30 @@ pub(crate) async fn subscribe_auction_realtime<F>(
 where
     F: FnMut(RealtimePage) -> bool,
 {
+    #[cfg(test)]
+    if let Some(fixture) =
+        crate::surface::PageReadFixture::<(i64, String, String), ReplayFixture>::response((
+            _after,
+            _auction_id,
+            _world,
+        ))
+    {
+        return read_catch_up_response(async |status| {
+            *status = Some(fixture.status);
+            fixture.body.await
+        })
+        .await
+        .map_err(|error| error.with_close_code(fixture.close_code));
+    }
     Err(RealtimeError::permanent("实时 WebSocket 仅在 wasm32 浏览器目标可用"))
+}
+
+#[cfg(test)]
+pub(crate) struct ReplayFixture {
+    pub(crate) status: u16,
+    pub(crate) close_code: u16,
+    pub(crate) body:
+        std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), TransportError>>>>,
 }
 
 #[cfg(test)]
@@ -319,7 +358,40 @@ mod tests {
     };
 
     use super::super::protocol::RealtimeError;
-    use super::{check_websocket_open, run_subscription, websocket_read_error};
+    use super::{
+        check_websocket_open, read_catch_up_response, run_subscription, websocket_read_error,
+    };
+    use crate::api::TransportError;
+
+    #[test]
+    fn interrupted_catch_up_bodies_keep_the_http_reconnect_policy() {
+        for status in [401, 403, 404, 200, 503] {
+            for transport in [TransportError::Timeout, TransportError::Network(Some(status))] {
+                let error = read_catch_up_response::<()>(async |head| {
+                    *head = Some(status);
+                    Err(transport)
+                })
+                .now_or_never()
+                .unwrap()
+                .unwrap_err();
+                assert_eq!(error.is_permanent(), matches!(status, 401 | 403 | 404));
+                if error.is_permanent() {
+                    assert_eq!(error.detail(), format!("HTTP {status}"));
+                } else {
+                    assert_eq!(error.detail(), transport.code());
+                }
+            }
+        }
+        assert!(
+            read_catch_up_response(async |head| {
+                *head = Some(200);
+                Ok(())
+            })
+            .now_or_never()
+            .unwrap()
+            .is_ok()
+        );
+    }
 
     #[test]
     fn websocket_close_keeps_the_code_and_the_transient_retry_policy() {

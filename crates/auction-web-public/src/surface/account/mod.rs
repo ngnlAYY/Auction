@@ -100,9 +100,6 @@ fn AccountReadScope(user_id: String) -> Element {
     rsx! {
         watches::CurrentWatches { user_id: user_id.clone() }
         AuthenticatedAccountData { user_id }
-        if lookup.failed() {
-            p { class: "action-feedback action-feedback--error", role: "alert", {t!("data-error")} }
-        }
         LotDetailLookupHost { lookup }
     }
 }

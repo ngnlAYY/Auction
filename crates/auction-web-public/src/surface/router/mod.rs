@@ -16,6 +16,10 @@ pub(crate) use route::Route;
 
 #[cfg(target_arch = "wasm32")]
 use std::rc::Rc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
+};
 
 use auction_web_shared::i18n::{
     DEFAULT_PUBLIC_LOCALE, LocaleCatalog, LocaleSession, LocaleSource, build_bundle,
@@ -56,6 +60,21 @@ pub(crate) static PUBLIC_LOCALE_CATALOG: LocaleCatalog = LocaleCatalog {
         LocaleSource { id: langid!("ko"), asset: asset!("/i18n/ko.ftl") },
     ],
 };
+
+/// 页内一次性操作绑定历史条目，replace 纠偏不会改变条目身份。
+#[derive(Clone, Default)]
+pub(crate) struct PublicHistoryEntry(Arc<AtomicU64>);
+
+impl PublicHistoryEntry {
+    pub(crate) fn revision(&self) -> u64 {
+        self.0.load(Ordering::Relaxed)
+    }
+
+    #[cfg(any(target_arch = "wasm32", test))]
+    fn advance(&self) {
+        self.0.fetch_add(1, Ordering::Relaxed);
+    }
+}
 
 pub fn run() {
     dioxus::launch(App);
@@ -135,6 +154,7 @@ fn use_public_history() {
         let history = Rc::clone(&history);
         move || {
             provide_history_context(history.clone() as Rc<dyn History>);
+            provide_context(history.entry());
             provide_context(history as Rc<dyn QueryLocation>);
         }
     });
@@ -144,6 +164,33 @@ fn use_public_history() {
             scroll.enter(&history.current_route(), false);
         }
     });
+}
+
+#[cfg(test)]
+pub(crate) fn provide_test_public_history<R: Routable>(
+    dom: &mut VirtualDom,
+    memory: std::rc::Rc<dioxus::history::MemoryHistory>,
+    allow: impl Fn(&str, auction_web_shared::QueryWriteMode) -> bool + 'static,
+) {
+    use std::rc::Rc;
+
+    use auction_web_shared::QueryWriteMode;
+    use auction_web_shared::query::QueryLocation;
+    use dioxus::history::History;
+
+    let public = Rc::new(history::PublicHistory::<R>::new(memory.clone(), move |url, mode, _| {
+        if !allow(url, mode) {
+            return false;
+        }
+        match mode {
+            QueryWriteMode::Push => memory.push(url.to_owned()),
+            QueryWriteMode::Replace => memory.replace(url.to_owned()),
+        }
+        true
+    }));
+    dom.provide_root_context(public.entry());
+    dom.provide_root_context(public.clone() as Rc<dyn History>);
+    dom.provide_root_context(public as Rc<dyn QueryLocation>);
 }
 
 #[cfg(test)]
@@ -207,6 +254,7 @@ mod tests {
         apply: Callback<(Option<&'static str>, i64), bool>,
         choose_auction: Callback<AuctionSelection, QueryCommit>,
         shared_size: Callback<i64, bool>,
+        correct_world: Callback<&'static str, bool>,
         back: Callback<()>,
         push: Callback<&'static str>,
     }
@@ -216,12 +264,14 @@ mod tests {
         actions: Cell<Option<Actions>>,
         address: RefCell<String>,
         query: RefCell<PublicBoardQuery>,
+        header_world: RefCell<Option<String>>,
         pairs: RefCell<Vec<(String, String)>>,
     }
 
     #[component]
     fn QueryPanel() -> Element {
         let state = use_public_query_state().state;
+        let header = use_public_query_state().state;
         let view = use_context::<Rc<View>>();
         let actions = Actions {
             apply: use_callback(move |(name, page): (Option<&str>, i64)| {
@@ -255,6 +305,18 @@ mod tests {
                     QueryWriteMode::Replace,
                 )
             }),
+            correct_world: use_callback(move |world: &str| {
+                let auction = state.peek().auction_id().map(str::to_owned);
+                matches!(
+                    commit_auction_selection(
+                        state,
+                        AuctionSelection::Automatic(auction),
+                        None,
+                        |query| query.world = crate::surface::normalize_world_query(world).into(),
+                    ),
+                    QueryCommit::Applied(_)
+                )
+            }),
             back: use_callback(move |()| navigator().go_back()),
             push: use_callback(move |location: &str| {
                 navigator().push(location);
@@ -263,6 +325,7 @@ mod tests {
         view.actions.set(Some(actions));
         view.address.replace(router().full_route_string());
         view.query.replace(state());
+        view.header_world.replace(header.read().world.as_deref().map(str::to_owned));
         view.pairs.replace(read_query_pairs());
         rsx! {}
     }
@@ -368,6 +431,27 @@ mod tests {
         assert!(mounted.dom.in_runtime(|| mounted.actions().shared_size.call(50)));
         mounted.settle();
         assert_eq!(mounted.view.query.borrow().page, 2);
+    }
+
+    #[test]
+    fn correcting_a_deep_links_world_reaches_the_independent_header_query() {
+        const ID: &str = "67e55044-10b1-426f-9247-bb680e5fe0c8";
+        let address = format!("/?auction={ID}");
+        let mut mounted = Mounted::new(&address);
+        assert!(mounted.view.header_world.borrow().is_none());
+        mounted.rejects_writes.set(true);
+        assert!(!mounted.dom.in_runtime(|| mounted.actions().correct_world.call("isekai")));
+        mounted.settle();
+        assert!(mounted.view.header_world.borrow().is_none());
+        assert_eq!(mounted.history.current_route(), address);
+        mounted.rejects_writes.set(false);
+        assert!(mounted.dom.in_runtime(|| mounted.actions().correct_world.call("isekai")));
+        mounted.settle();
+        assert_eq!(mounted.view.query.borrow().auction_id(), Some(ID));
+        assert_eq!(mounted.view.query.borrow().world.as_deref(), Some("isekai"));
+        assert_eq!(mounted.view.header_world.borrow().as_deref(), Some("isekai"));
+        assert!(mounted.history.current_route().contains("world=isekai"));
+        assert_eq!(mounted.pushes.get(), 0);
     }
 
     #[test]

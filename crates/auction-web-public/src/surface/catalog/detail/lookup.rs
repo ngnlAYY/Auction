@@ -5,14 +5,15 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use auction_web_shared::t;
+use auction_web_shared::{AsyncState, AsyncStateKind, t};
 use dioxus::prelude::*;
 
+use super::deep_link::lot_view_entry_is_current;
 use super::drawer::CatalogDetailDrawer;
 use super::{CatalogDetailBid, CatalogDetailInput, DetailWorld, LotViewTarget};
-use crate::api::{CatalogRow, catalog_row_from_detail, fetch_lot_detail};
+use crate::api::{CatalogRow, LotDetailFetchError, catalog_row_from_detail, fetch_lot_detail};
 use crate::surface::catalog::actions::CatalogActionIcon;
-use crate::surface::use_bid_refresh;
+use crate::surface::use_auction_bid_refresh;
 
 /// 一次查看请求指向的拍品。`auction_id` 用于抽屉内的竞价历史读取；`world` 是入口已知的
 /// 拍品所在世界，未知时价格历史按拍卖读取。
@@ -21,6 +22,14 @@ struct LotDetailTarget {
     auction_id: String,
     lot_id: String,
     world: Option<String>,
+    lot_code: String,
+    entry: Option<u64>,
+}
+
+#[derive(Clone, PartialEq)]
+struct LotDetailSeed {
+    row: Rc<CatalogRow>,
+    generation: u64,
 }
 
 #[derive(Clone, PartialEq)]
@@ -30,9 +39,9 @@ enum LookupState {
     Loading(LotDetailTarget),
     Open(LotDetailTarget),
     /// 深链已读到权威详情，直接展示并参与后续实时重读。
-    Seeded(LotDetailTarget, Rc<CatalogRow>),
-    /// 首次读取失败或拍品已不存在；下一次查看请求会覆盖它。
-    Failed,
+    Seeded(LotDetailTarget, LotDetailSeed),
+    /// 保留读取目标，明确不存在与可补读的错误不能互相替代。
+    Failed(LotDetailTarget, LotDetailFetchError),
 }
 
 impl LookupState {
@@ -48,14 +57,10 @@ impl LookupState {
         }
     }
 
-    /// 读取完成后的迁移。结果只对仍在等待的同一拍品生效：已展示时的后台重读失败保留
-    /// 上一次快照，已关闭或已改看其他拍品的迟到结果直接丢弃。
-    fn resolved(&self, lot_id: &str, loaded: bool) -> Option<Self> {
+    fn reading_target(&self) -> Option<&LotDetailTarget> {
         match self {
-            Self::Loading(target) if target.lot_id == lot_id => {
-                Some(if loaded { Self::Open(target.clone()) } else { Self::Failed })
-            }
-            _ => None,
+            Self::Loading(target) | Self::Open(target) | Self::Seeded(target, _) => Some(target),
+            Self::Closed | Self::Failed(_, _) => None,
         }
     }
 }
@@ -80,14 +85,11 @@ impl LotDetailLookup {
                 auction_id: target.auction_id,
                 lot_id: target.lot_id,
                 world: target.world,
+                lot_code: target.row.code.clone(),
+                entry: target.entry,
             },
-            target.row,
+            LotDetailSeed { row: target.row, generation: target.generation },
         ));
-    }
-
-    /// 最近一次查看请求是否读取失败。
-    pub(crate) fn failed(self) -> bool {
-        matches!(&*self.0.read(), LookupState::Failed)
     }
 }
 
@@ -120,7 +122,7 @@ pub(crate) fn LotDetailLookupButton(
             aria_haspopup: "dialog",
             aria_busy: busy.to_string(),
             // 可访问名称带拍品编号，逐行可区分；悬停提示保持简短动作名。
-            aria_label: t!("catalog-view-lot", code: lot_code),
+            aria_label: t!("catalog-view-lot", code: lot_code.clone()),
             title: t!("catalog-view"),
             onclick: move |_| {
                 lookup
@@ -128,6 +130,8 @@ pub(crate) fn LotDetailLookupButton(
                         auction_id: auction_id.clone(),
                         lot_id: lot_id.clone(),
                         world: world.clone(),
+                        lot_code: lot_code.clone(),
+                        entry: None,
                     });
             },
             CatalogActionIcon { kind: "eye" }
@@ -138,15 +142,64 @@ pub(crate) fn LotDetailLookupButton(
 /// 只读详情抽屉的宿主。以拍品为 key：改看另一件时整体重建，上一件的读取随之取消。
 #[component]
 pub(crate) fn LotDetailLookupHost(lookup: LotDetailLookup) -> Element {
-    let target = match &*lookup.0.read() {
+    let mut state = lookup.0;
+    let router = dioxus::router::try_router();
+    use_effect(move || {
+        if let Some(router) = router {
+            let _ = router.full_route_string();
+        }
+        let entry = match &*state.read() {
+            LookupState::Failed(target, _) => target.entry,
+            current => current.reading_target().and_then(|target| target.entry),
+        };
+        if !lot_view_entry_is_current(entry) {
+            state.set(LookupState::Closed);
+        }
+    });
+    let snapshot = state.read();
+    let target = match &*snapshot {
         LookupState::Loading(target) | LookupState::Open(target) => Some((target.clone(), None)),
-        LookupState::Seeded(target, row) => Some((target.clone(), Some(row.clone()))),
-        LookupState::Closed | LookupState::Failed => None,
+        LookupState::Seeded(target, seed) => Some((target.clone(), Some(seed.clone()))),
+        LookupState::Closed | LookupState::Failed(_, _) => None,
+    };
+    let failure = match &*snapshot {
+        LookupState::Failed(target, error) if lot_view_entry_is_current(target.entry) => {
+            Some((target.clone(), *error))
+        }
+        _ => None,
     };
 
     rsx! {
         for (target, seed) in target {
-            LotDetailLookupSession { key: "{target.lot_id}", target, lookup, seed }
+            LotDetailLookupSession { key: "{target.auction_id}:{target.lot_id}:{target.entry:?}", target, lookup, seed }
+        }
+        if let Some((target, error)) = failure {
+            if error.not_found() {
+                AsyncState {
+                    kind: AsyncStateKind::Error,
+                    title: t!("catalog-view-lot", code: target.lot_code),
+                    detail: t!("catalog-detail-not-found"),
+                }
+            } else {
+                div { class: "ui-async-state ui-async-state--error",
+                    div { role: "alert",
+                        p { class: "ui-async-state__title", {t!("catalog-view-lot", code: target.lot_code.clone())} }
+                        p { id: "public-lot-detail-read-error", class: "ui-async-state__detail", {t!("data-error")} }
+                    }
+                    button {
+                        id: "public-lot-detail-retry",
+                        class: "ui-async-state__retry",
+                        r#type: "button",
+                        aria_describedby: "public-lot-detail-read-error",
+                        onclick: move |_| {
+                            if lot_view_entry_is_current(target.entry) {
+                                lookup.open(target.clone());
+                            }
+                        },
+                        {t!("data-retry")}
+                    }
+                }
+            }
         }
     }
 }
@@ -156,38 +209,58 @@ pub(crate) fn LotDetailLookupHost(lookup: LotDetailLookup) -> Element {
 fn LotDetailLookupSession(
     target: LotDetailTarget,
     lookup: LotDetailLookup,
-    seed: Option<Rc<CatalogRow>>,
+    seed: Option<LotDetailSeed>,
 ) -> Element {
     let refresh_generation = use_context::<Signal<u64>>();
     let mut state = lookup.0;
-    let skip_first_read = use_hook(|| Rc::new(Cell::new(seed.is_some())));
-    let mut shown = use_signal(|| seed.as_deref().cloned());
-    let detail = use_resource(use_reactive((&target.lot_id,), move |(lot_id,)| {
+    let seed = seed.filter(|seed| seed.generation == *refresh_generation.peek());
+    let seed_generation =
+        use_hook(|| Rc::new(Cell::new(seed.as_ref().map(|seed| seed.generation))));
+    let mut shown = use_signal(|| seed);
+    let detail = use_resource(use_reactive((&target,), move |(target,)| {
         // 本人命令成功后推进的刷新代数；他人出价由下方的竞价通知补读。
-        let _ = refresh_generation();
-        let skip_read = skip_first_read.replace(false);
+        let generation = refresh_generation();
+        let skip_read = seed_generation.take() == Some(generation);
         async move {
-            if skip_read {
+            if skip_read || !lot_view_entry_is_current(target.entry) {
                 return;
             }
-            let row = fetch_lot_detail(lot_id.clone())
-                .await
-                .ok()
-                .and_then(|page| page.lot)
-                .map(catalog_row_from_detail);
-            let loaded = row.is_some();
-            if let Some(row) = row {
-                shown.set(Some(row));
+            let result = fetch_lot_detail(target.lot_id.clone()).await.and_then(|page| {
+                if page.auction_id != target.auction_id {
+                    return Err(LotDetailFetchError::Unavailable);
+                }
+                page.lot.map(catalog_row_from_detail).ok_or(LotDetailFetchError::Unavailable)
+            });
+            // 命令失效之前发出的读取不能发布旧价格；离开目标历史条目后也不能弹出抽屉。
+            if generation != *refresh_generation.peek()
+                || !lot_view_entry_is_current(target.entry)
+                || state.peek().reading_target() != Some(&target)
+            {
+                return;
             }
-            // 读取任务处于响应式上下文内，这里只窥视状态，避免把迁移结果订阅成重读依赖。
-            let next = state.peek().resolved(&lot_id, loaded);
-            if let Some(next) = next {
-                state.set(next);
+            match result {
+                Ok(row) => {
+                    shown.set(Some(LotDetailSeed { row: Rc::new(row), generation }));
+                    if matches!(&*state.peek(), LookupState::Loading(_)) {
+                        state.set(LookupState::Open(target));
+                    }
+                }
+                // 命令失效后，补读失败不能继续展示提交前的价格与领先者。
+                Err(error)
+                    if error.not_found()
+                        || shown
+                            .peek()
+                            .as_ref()
+                            .is_none_or(|shown| shown.generation != generation) =>
+                {
+                    state.set(LookupState::Failed(target, error));
+                }
+                Err(_error) => {}
             }
         }
     }));
-    use_bid_refresh(detail, true);
-    let Some(row) = shown() else {
+    use_auction_bid_refresh(detail, Some(&target.auction_id));
+    let Some(shown) = shown() else {
         return rsx! {};
     };
 
@@ -195,7 +268,7 @@ fn LotDetailLookupSession(
         CatalogDetailDrawer {
             auction_id: target.auction_id.clone(),
             input: CatalogDetailInput {
-                row,
+                row: (*shown.row).clone(),
                 bid: CatalogDetailBid::Unavailable,
                 watchable: false,
             },
@@ -208,12 +281,15 @@ fn LotDetailLookupSession(
 #[cfg(test)]
 mod tests {
     use super::{LookupState, LotDetailTarget};
+    use crate::api::LotDetailFetchError;
 
     fn target(lot_id: &str) -> LotDetailTarget {
         LotDetailTarget {
             auction_id: "auction-1".to_owned(),
             lot_id: lot_id.to_owned(),
             world: None,
+            lot_code: "One01".to_owned(),
+            entry: None,
         }
     }
 
@@ -227,7 +303,7 @@ mod tests {
     fn a_new_request_replaces_any_other_state() {
         for state in [
             LookupState::Closed,
-            LookupState::Failed,
+            LookupState::Failed(target("lot-a"), LotDetailFetchError::Unavailable),
             LookupState::Loading(target("lot-a")),
             LookupState::Open(target("lot-a")),
         ] {
@@ -238,18 +314,15 @@ mod tests {
     }
 
     #[test]
-    fn first_read_decides_between_open_and_failed() {
+    fn only_loading_or_open_targets_accept_results() {
         let loading = LookupState::Loading(target("lot-a"));
-        assert!(loading.resolved("lot-a", true) == Some(LookupState::Open(target("lot-a"))));
-        assert!(loading.resolved("lot-a", false) == Some(LookupState::Failed));
-    }
-
-    #[test]
-    fn late_or_background_results_never_change_the_state() {
-        // 已展示时的后台重读失败保留抽屉；已关闭或已改看其他拍品的结果被丢弃。
-        assert!(LookupState::Open(target("lot-a")).resolved("lot-a", false).is_none());
-        assert!(LookupState::Closed.resolved("lot-a", true).is_none());
-        assert!(LookupState::Failed.resolved("lot-a", true).is_none());
-        assert!(LookupState::Loading(target("lot-b")).resolved("lot-a", true).is_none());
+        assert!(loading.reading_target() == Some(&target("lot-a")));
+        assert!(loading.reading_target() != Some(&target("lot-b")));
+        assert!(LookupState::Closed.reading_target().is_none());
+        assert!(
+            LookupState::Failed(target("lot-a"), LotDetailFetchError::Missing)
+                .reading_target()
+                .is_none()
+        );
     }
 }

@@ -1,6 +1,7 @@
 //! 读写分页与读取页拥有的查询键，保留其他参数原文。
 
-use auction_web_shared::{QueryWriteMode, read_query_pairs, write_query_pairs};
+use auction_web_shared::query::write_query_pairs_preserving_segments;
+use auction_web_shared::{QueryWriteMode, read_query_pairs};
 use dioxus::prelude::*;
 
 #[cfg(test)]
@@ -75,7 +76,7 @@ pub(crate) fn write_page_pairs(
     if let Some(browser) = try_consume_context::<PageBrowserFixture>() {
         return browser.write(keys, pairs, mode);
     }
-    write_query_pairs(keys, pairs, mode)
+    write_query_pairs_preserving_segments(keys, pairs, mode)
 }
 
 /// 读取某个键的全部值，区别缺省、空值与重复值。

@@ -11,6 +11,8 @@ mod subscription;
 
 pub(crate) use cache::RealtimeCache;
 pub(crate) use protocol::RealtimePage;
+#[cfg(test)]
+pub(crate) use subscription::ReplayFixture;
 pub(crate) use subscription::subscribe_auction_realtime;
 
 #[cfg(test)]

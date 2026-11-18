@@ -6,9 +6,6 @@ mod create;
 #[cfg(test)]
 mod tests;
 
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use auction_web_shared::{AsyncState, AsyncStateKind, t};
 use dioxus::prelude::*;
 
@@ -17,6 +14,10 @@ use super::session::CommandSession;
 use crate::api::OwnedProxy;
 use authorization::ProxyAuthorizationForm;
 use create::ProxyCreateForm;
+
+/// 本轮读取的结果与启动它的刷新代号，独立于最后确认的授权快照。
+pub(in crate::surface) type ProxyAuthorizationRead =
+    Resource<Option<(u64, Result<Option<OwnedProxy>, String>)>>;
 
 /// 公开 lot 的代理授权表单参数；账户状态由服务端投影，不在浏览器端复制代理状态机。
 #[derive(Clone, PartialEq)]
@@ -31,7 +32,8 @@ pub struct ProxyFormInput {
     pub default_mode: Option<String>,
     pub leading: bool,
     pub blocked_reason: String,
-    pub proxy: Option<Result<Option<OwnedProxy>, String>>,
+    pub proxy: Option<Option<OwnedProxy>>,
+    pub proxy_read: Option<ProxyAuthorizationRead>,
     pub refresh_generation: Signal<u64>,
     pub on_submit: EventHandler<PendingProxyCommand>,
     pub create_command: ProxyConfirmCommand,
@@ -53,6 +55,7 @@ pub fn ProxyForm(input: ProxyFormInput) -> Element {
         leading,
         blocked_reason,
         proxy,
+        proxy_read,
         mut refresh_generation,
         on_submit,
         create_command,
@@ -60,20 +63,19 @@ pub fn ProxyForm(input: ProxyFormInput) -> Element {
         on_close,
     } = input;
     let session = use_context::<CommandSession>();
-    let last_success = use_hook(|| Rc::new(RefCell::new(None::<Option<OwnedProxy>>)));
-    let mut last_success = last_success.borrow_mut();
+    let displayed = proxy.clone();
+    let authorize = use_callback(move |()| {
+        // 二次确认也复核读取状态，失效或请求重启先于重绘时不能沿用旧授权写入。
+        can_bid
+            && proxy_read_status(proxy_read, refresh_generation(), displayed.as_ref())
+                == ProxyReadStatus::Confirmed
+    });
+    let read_status = proxy_read_status(proxy_read, refresh_generation(), proxy.as_ref());
     if !session.identity_confirmed() {
-        *last_success = None;
         return rsx! { p { role: "status", {t!("bid-unavailable")} } };
     }
-    // 保留同一宿主的最后成功投影来维持草稿；读取失败或等待重试时，旧投影不授权新写入。
-    if let Some(Ok(snapshot)) = proxy.as_ref()
-        && last_success.as_ref() != Some(snapshot)
-    {
-        *last_success = Some(snapshot.clone());
-    }
-    let authorization_ready = can_bid && proxy.as_ref().is_some_and(Result::is_ok);
-    let form = match last_success.as_ref() {
+    let authorization_ready = can_bid && read_status == ProxyReadStatus::Confirmed;
+    let form = match proxy.as_ref() {
         Some(Some(proxy)) if proxy.status == "active" => rsx! {
             ProxyAuthorizationForm {
                 lot_id,
@@ -82,6 +84,7 @@ pub fn ProxyForm(input: ProxyFormInput) -> Element {
                 lot_status,
                 proxy: proxy.clone(),
                 authorization_ready,
+                authorize,
                 on_submit,
                 command: lower_command,
                 on_close,
@@ -97,6 +100,7 @@ pub fn ProxyForm(input: ProxyFormInput) -> Element {
                 blocked: leading,
                 blocked_reason,
                 authorization_ready,
+                authorize,
                 on_submit,
                 command: create_command,
                 on_close,
@@ -109,18 +113,46 @@ pub fn ProxyForm(input: ProxyFormInput) -> Element {
         if !can_bid {
             p { role: "status", {t!("bid-unavailable")} }
         }
-        if proxy.as_ref().is_some_and(Result::is_err) {
+        if read_status == ProxyReadStatus::Failed {
             AsyncState {
                 kind: AsyncStateKind::Error,
                 title: t!("catalog-proxy"),
                 detail: t!("proxy-load-error"),
                 retry_label: t!("data-retry"),
                 on_retry: move |_| {
-                    refresh_generation.set(refresh_generation().saturating_add(1));
+                    // 推进代号立即撤销本轮授权，旧投影仍可用于展示。
+                    let next = refresh_generation.peek().saturating_add(1);
+                    refresh_generation.set(next);
                 },
             }
-        } else if can_bid && proxy.is_none() {
+        } else if can_bid && read_status == ProxyReadStatus::Loading {
             p { role: "status", {t!("proxy-loading")} }
         }
+    }
+}
+
+#[derive(PartialEq, Eq)]
+enum ProxyReadStatus {
+    Loading,
+    Confirmed,
+    Failed,
+}
+
+fn proxy_read_status(
+    read: Option<ProxyAuthorizationRead>,
+    generation: u64,
+    displayed: Option<&Option<OwnedProxy>>,
+) -> ProxyReadStatus {
+    let Some(read) = read else { return ProxyReadStatus::Loading };
+    if !read.state().try_read().is_ok_and(|state| *state == UseResourceState::Ready) {
+        return ProxyReadStatus::Loading;
+    }
+    let Ok(read) = read.try_read() else { return ProxyReadStatus::Loading };
+    match read.as_ref().and_then(Option::as_ref) {
+        Some((checked, Ok(snapshot))) if *checked == generation && Some(snapshot) == displayed => {
+            ProxyReadStatus::Confirmed
+        }
+        Some((checked, Err(_error))) if *checked == generation => ProxyReadStatus::Failed,
+        _ => ProxyReadStatus::Loading,
     }
 }

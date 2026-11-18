@@ -5,7 +5,9 @@ use auction_web_shared::{Dialog, Time, format_credit_amount, t};
 use dioxus::prelude::*;
 
 use crate::api::fetch_lot_bid_log;
-use crate::surface::{BidHistoryParticipant, PublicPager, bid_history_rows, use_bid_refresh};
+use crate::surface::{
+    BidHistoryParticipant, PublicPager, bid_history_rows, use_auction_bid_refresh,
+};
 
 /// 抽屉内直接展示的最近出价条数。
 const LATEST_BIDS: i64 = 4;
@@ -27,7 +29,7 @@ pub(super) fn DetailLatestBids(
             let _ = refresh_generation();
             async move { fetch_lot_bid_log(auction_id, lot_id, 1, LATEST_BIDS).await }
         }));
-    use_bid_refresh(bids, true);
+    use_auction_bid_refresh(bids, Some(&auction_id));
     let snapshot = bids.read_unchecked();
     // 分页模式的响应带总数；缺失时不提供“查看全部”，不猜测条数。
     let total = match snapshot.as_ref() {
@@ -119,7 +121,7 @@ pub(super) fn DetailBidHistoryDialog(
                 (requested, result)
             }
         }));
-    use_bid_refresh(bid_log, true);
+    use_auction_bid_refresh(bid_log, Some(&auction_id));
     let snapshot = bid_log.read_unchecked();
     // 翻页期间保留上一页的表格，新页到达后整体替换；只有首次读取时正文为空。
     let loaded = snapshot.as_ref().map(|(_, result)| result);

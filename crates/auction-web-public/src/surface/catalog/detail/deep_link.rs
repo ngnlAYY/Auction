@@ -13,6 +13,7 @@ use crate::api::{
     CatalogRow, CurrentAuction, catalog_row_from_detail, fetch_current_auction,
     fetch_historical_auction, fetch_lot_detail,
 };
+use crate::surface::router::PublicHistoryEntry;
 use crate::surface::{
     LotLinkLocation, LotLinkRequest, PublicBoardQuery, catalog_category_key, normalize_world_query,
     public_href, use_content_loading,
@@ -25,7 +26,16 @@ pub(crate) struct LotViewTarget {
     pub auction_id: String,
     pub world: Option<String>,
     pub row: Rc<CatalogRow>,
+    pub generation: u64,
+    pub entry: Option<u64>,
     pub row_ready: bool,
+}
+
+pub(super) fn lot_view_entry_is_current(entry: Option<u64>) -> bool {
+    entry.is_none_or(|revision| {
+        try_consume_context::<PublicHistoryEntry>()
+            .is_some_and(|entry| entry.revision() == revision)
+    })
 }
 
 /// 解析页与看板共用的一次性抽屉意图。
@@ -40,6 +50,10 @@ impl LotViewRequest {
         lookup: LotDetailLookup,
     ) {
         if self.0.peek().as_ref() != Some(&target) {
+            return;
+        }
+        if !lot_view_entry_is_current(target.entry) {
+            self.0.set(None);
             return;
         }
         match disposition {
@@ -99,23 +113,43 @@ enum LotLinkError {
 pub(crate) fn LotDeepLink(lot_id: String) -> Element {
     let mut request = use_context::<LotViewRequest>().0;
     let mut location = use_context::<LotLinkRequest>().0;
+    let refresh = use_context::<Signal<u64>>();
+    let history_entry = try_use_context::<PublicHistoryEntry>();
+    let mut navigation_failed = use_signal(|| false);
+    let departure = use_hook(|| {
+        auction_web_shared::query::location_parts(&router().full_route_string()).0.to_owned()
+    });
     let mut details = use_resource(use_reactive((&lot_id,), move |(lot_id,)| {
         let known = location.read().as_ref().filter(|target| target.lot_id == lot_id).cloned();
+        let entry = history_entry.as_ref().map(PublicHistoryEntry::revision);
+        let generation = *refresh.peek();
         async move {
-            let result = resolve(lot_id.clone(), known).await;
-            (lot_id, result)
+            let result = resolve(lot_id.clone(), known, generation, entry).await;
+            (lot_id, entry, result)
         }
     }));
     let loading = *details.state().read() == UseResourceState::Pending;
     use_content_loading(loading);
     use_effect(use_reactive((&lot_id,), move |(lot_id,)| {
-        let loaded = details.read();
-        if let Some((resolved, Ok((target, query)))) = loaded.as_ref()
-            && resolved == &lot_id
+        if navigation_failed() {
+            return;
+        }
+        let route = router().full_route_string();
+        let loaded = details.read().clone();
+        if let Some((resolved, entry, Ok((target, query)))) = loaded
+            && resolved == lot_id
             && *details.state().read() == UseResourceState::Ready
+            && auction_web_shared::query::location_parts(&route).0 == departure
+            && lot_view_entry_is_current(entry)
         {
-            request.set(Some(target.clone()));
-            let _ = navigator().replace(public_href("/", query));
+            let href = public_href("/", &query);
+            let _ = navigator().replace(href.clone());
+            if router().full_route_string() == href {
+                // 只向成功写入的历史条目交接，后退不能消费这次展示请求。
+                request.set(Some(target));
+            } else {
+                navigation_failed.set(true);
+            }
         }
     }));
     let leaving_lot = lot_id.clone();
@@ -128,10 +162,17 @@ pub(crate) fn LotDeepLink(lot_id: String) -> Element {
             location.set(None);
         }
     });
-    let failure = details.read().as_ref().and_then(|(resolved, result)| {
-        (resolved == &lot_id && !loading).then(|| result.as_ref().err().copied()).flatten()
+    let failure = if navigation_failed() {
+        Some(LotLinkError::ReadFailed)
+    } else {
+        details.read().as_ref().and_then(|(resolved, _, result)| {
+            (resolved == &lot_id && !loading).then(|| result.as_ref().err().copied()).flatten()
+        })
+    };
+    let retry = use_callback(move |()| {
+        navigation_failed.set(false);
+        details.restart();
     });
-    let retry = use_callback(move |()| details.restart());
     #[cfg(test)]
     tests::observe_retry((failure == Some(LotLinkError::ReadFailed)).then_some(retry));
     match failure {
@@ -170,6 +211,8 @@ async fn read_link_lot(lot_id: String) -> Result<(String, Rc<CatalogRow>), LotLi
 async fn resolve(
     lot_id: String,
     known: Option<LotLinkLocation>,
+    generation: u64,
+    entry: Option<u64>,
 ) -> Result<(LotViewTarget, PublicBoardQuery), LotLinkError> {
     // 冻结目标走指定场次，即使当前场次已轮换也无需重新猜所在世界。
     if let Some(known) = known {
@@ -183,7 +226,10 @@ async fn resolve(
             Some(auction_id.clone()),
             PublicBoardQuery::default(),
         );
-        return Ok((view_target(lot_id, auction_id, Some(known.world), row), query));
+        return Ok((
+            view_target(lot_id, auction_id, Some(known.world), row, generation, entry),
+            query,
+        ));
     }
     let (lot, main, isekai) = futures_util::join!(
         read_link_lot(lot_id.clone()),
@@ -206,7 +252,7 @@ async fn resolve(
         // 定位失败时仍带已读详情交给首页的只读宿主。
         (None, PublicBoardQuery::default())
     };
-    Ok((view_target(lot_id, auction_id, world, row), query))
+    Ok((view_target(lot_id, auction_id, world, row, generation, entry), query))
 }
 
 fn view_target(
@@ -214,8 +260,10 @@ fn view_target(
     auction_id: String,
     world: Option<String>,
     row: Rc<CatalogRow>,
+    generation: u64,
+    entry: Option<u64>,
 ) -> LotViewTarget {
-    LotViewTarget { lot_id, auction_id, world, row, row_ready: false }
+    LotViewTarget { lot_id, auction_id, world, row, generation, entry, row_ready: false }
 }
 
 async fn read_current(world: &str) -> Result<Option<CurrentAuction>, String> {
@@ -264,8 +312,8 @@ fn catalog_position(
     };
     PublicBoardQuery {
         // 主世界沿用无参数 URL。
-        world: normalize_world_query(world).filter(|world| world != "main"),
-        category,
+        world: normalize_world_query(world).filter(|world| world != "main").into(),
+        category: category.into(),
         page,
         ..base
     }
@@ -368,6 +416,8 @@ pub(in crate::surface::catalog) mod tests {
             auction_id: "auction-7".to_owned(),
             world: Some("main".to_owned()),
             row: Rc::new(row("Clo16", "Cloth")),
+            generation: 0,
+            entry: None,
             row_ready: false,
         }
     }
@@ -497,7 +547,7 @@ pub(in crate::surface::catalog) mod tests {
     #[test]
     fn unfilterable_category_keeps_the_first_unfiltered_page() {
         let query = catalog_position(&row("Lot07", "Accessory"), "main", None, base(10));
-        assert_eq!((query.category, query.page), (None, 1));
+        assert_eq!((query.category.as_deref(), query.page), (None, 1));
     }
 
     #[test]

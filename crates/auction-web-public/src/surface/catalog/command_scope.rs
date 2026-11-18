@@ -40,7 +40,8 @@ pub(super) struct CommandDialogInput {
     pub ordinary_blocked: bool,
     pub leading: bool,
     pub blocked_reason: String,
-    pub proxy: Option<Result<Option<crate::api::OwnedProxy>, String>>,
+    pub proxy: Option<Option<crate::api::OwnedProxy>>,
+    pub proxy_read: Option<commands::ProxyAuthorizationRead>,
 }
 
 impl CommandDialogInput {
@@ -60,6 +61,7 @@ impl CommandDialogInput {
             leading: false,
             blocked_reason: String::new(),
             proxy: None,
+            proxy_read: None,
         }
     }
 }
@@ -446,6 +448,7 @@ fn CatalogCommandDialog(
                         leading: input.leading,
                         blocked_reason: input.blocked_reason,
                         proxy: input.proxy,
+                        proxy_read: input.proxy_read,
                         refresh_generation,
                         on_submit: submit_proxy,
                         create_command: proxy_create_command,
@@ -465,7 +468,6 @@ mod tests {
     use std::rc::Rc;
 
     use auction_web_shared::i18n::{DEFAULT_PUBLIC_LOCALE, build_bundle};
-    use auction_web_shared::query::QueryLocation;
     use auction_web_shared::{PageVisibility, QueryWriteMode, use_second_ticker};
     use dioxus::dioxus_core::{AttributeValue, ElementId, Mutation, Mutations};
     use dioxus::history::MemoryHistory;
@@ -475,8 +477,9 @@ mod tests {
     use super::super::detail::deep_link_fixture;
     use super::{CatalogAction, CatalogCommandScope, CommandDialogContext, CommandDialogInput};
     use crate::api::{
-        CatalogRow, CommandError, CurrentAuction, HttpResponseFixture, PublicSessionApiError,
-        SessionRefreshReason, SessionRequest, TransportError, login_public, logout_public,
+        BidLogPage, CatalogRow, CommandError, CurrentAuction, HttpResponseFixture,
+        PublicSessionApiError, SessionRefreshReason, SessionRequest, TransportError, login_public,
+        logout_public,
     };
     use crate::surface::catalog::actions::tests::{ENDED_RECOVERY, waiting_proxy};
     use crate::surface::catalog::columns::CatalogVisibility;
@@ -489,16 +492,16 @@ mod tests {
         ABANDON_CONFIRMATION, BID_SUBMIT, FAIL_BUILD, RECOVERY, Request, enable_requests, requests,
     };
     use crate::surface::commands::{
-        CommandStatus, CompetitionCommandHost, CompetitionCommands,
+        CommandStatus, CompetitionCommandHost, CompetitionCommands, ProxyAuthorizationRead,
         use_competition_commands_provider, use_public_session_checks,
     };
-    use crate::surface::router::PUBLIC_LOCALE_CATALOG;
+    use crate::surface::router::{PUBLIC_LOCALE_CATALOG, provide_test_public_history};
     use crate::surface::watches::{LotWatchScope, SkipWatchReads};
     use crate::surface::{
         AuctionIndex, BoardCatalogueFailureFixture, CurrentAuctionResource, LotDetailHttpFixture,
-        LotLinkRequest, LotViewRequest, PublicBidRefresh, PublicCommandOwner, PublicContentLoading,
-        PublicDisplayedAuction, PublicPageRealtimeTarget, PublicReadinessResource,
-        PublicSessionResource,
+        LotLinkRequest, LotViewRequest, PageReadFixture, PublicBidRefresh, PublicCommandOwner,
+        PublicContentLoading, PublicDisplayedAuction, PublicPageRealtimeTarget,
+        PublicReadinessResource, PublicSessionResource,
     };
 
     const USER: &str = "018f4c8e-7b2a-4c3d-8e4f-000000000001";
@@ -521,6 +524,8 @@ mod tests {
         view: LotViewRequest,
         location: LotLinkRequest,
         navigate: EventHandler<String>,
+        back: EventHandler<()>,
+        pause_destination: Signal<bool>,
     }
 
     #[derive(Clone, Copy)]
@@ -535,11 +540,13 @@ mod tests {
         static BOARD_DROPS: Cell<usize> = const { Cell::new(0) };
         static CATALOGUE_FAILURE: Cell<bool> = const { Cell::new(false) };
         static LOT_HTTP_STATUS: Cell<Option<u16>> = const { Cell::new(None) };
+        static REJECT_DRAWER_ADDRESS: Cell<bool> = const { Cell::new(false) };
         static LOT_HTTP_READS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
         static COOKIE_RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
         static ARRIVAL: RefCell<Option<(Option<String>, Option<String>)>> = const { RefCell::new(None) };
         static CONTROLS: Cell<Option<Controls>> = const { Cell::new(None) };
         static DIALOG: Cell<Option<Signal<Option<CommandDialogInput>>>> = const { Cell::new(None) };
+        static PROXY_READ: Cell<Option<ProxyAuthorizationRead>> = const { Cell::new(None) };
     }
 
     #[allow(unreachable_code, reason = "Routable 派生对无误段的错误映射不可达")]
@@ -584,7 +591,7 @@ mod tests {
         let location = use_context_provider(|| LotLinkRequest(Signal::new(None)));
         let view = use_context_provider(|| LotViewRequest(Signal::new(None)));
         use_context_provider(|| PublicContentLoading(Signal::new(Default::default())));
-        use_context_provider(|| PublicBidRefresh(Signal::new(0)));
+        use_context_provider(PublicBidRefresh::new);
         use_context_provider(|| SkipWatchReads);
         let ended = use_signal(|| false);
         use_context_provider(|| EndedRowFixture(ended));
@@ -592,7 +599,22 @@ mod tests {
             LotDetailHttpFixture(|url, _etag| {
                 let status = LOT_HTTP_STATUS.get()?;
                 LOT_HTTP_READS.with_borrow_mut(|reads| reads.push(url.to_owned()));
-                Some(Box::pin(ready(Ok(HttpResponseFixture { status, etag: None, body: None }))))
+                let body = (status == 200).then(fresh_lot_body);
+                Some(Box::pin(ready(Ok(HttpResponseFixture { status, etag: None, body }))))
+            })
+        });
+        use_context_provider(|| {
+            PageReadFixture::new(|url: String| {
+                assert!(url.starts_with(&format!("/api/v1/auctions/{AUCTION}/bid-log?lot={LOT}")));
+                Ok::<_, String>(BidLogPage {
+                    bids: Vec::new(),
+                    page: Some(1),
+                    page_size: 4,
+                    total: Some(0),
+                    cursor: None,
+                    next_cursor: None,
+                    has_more: None,
+                })
             })
         });
         let checks = use_public_session_checks(commands);
@@ -608,6 +630,8 @@ mod tests {
         let navigate = use_callback(move |path: String| {
             navigator.push(path);
         });
+        let back = use_callback(move |()| navigator.go_back());
+        let pause_destination = use_signal(|| false);
         let mutate_session = use_callback(move |mutation| {
             spawn(async move {
                 let result = match mutation {
@@ -632,11 +656,35 @@ mod tests {
             view,
             location,
             navigate,
+            back,
+            pause_destination,
         }));
         rsx! {
             CompetitionCommandHost { owner: checks.competition_owner }
             Outlet::<routes::TestRoute> {}
         }
+    }
+
+    fn fresh_lot_body() -> String {
+        serde_json::json!({
+            "code": "ok", "message": "拍品详情",
+            "data": {
+                "auction_id": AUCTION, "auction_status": "live",
+                "projection_kind": "live", "presentation_mode": "live",
+                "bidding_open": true, "opens_at": "2026-11-18T12:00:00Z",
+                "preview_revision": 0,
+                "lot": {
+                    "id": LOT, "auction_id": AUCTION, "lot_number": 7,
+                    "status": "live", "start_price": 100_000, "current_price": 200_000,
+                    "next_bid": 205_000, "has_leader": true, "leader_name": "New Leader",
+                    "seller_name": "Seller", "effective_end_at": "2026-11-19T12:00:00Z",
+                    "state_version": 2,
+                    "equipment": { "name": "Fresh Shield", "category": "Shield",
+                        "equipment_group": "rare", "game_equipment_url": "" }
+                }
+            }
+        })
+        .to_string()
     }
 
     fn current_auction(world: &str) -> CurrentAuction {
@@ -661,6 +709,9 @@ mod tests {
         let arriving = use_hook(|| view.0.peek().is_some());
         if arriving {
             ARRIVAL.set(Some((world, auction)));
+            if (CONTROLS.get().unwrap().pause_destination)() {
+                return rsx! {};
+            }
             rsx! { DestinationBoard {} }
         } else {
             rsx! { CatalogCommandScope { OpenBidFixture {} } }
@@ -706,7 +757,8 @@ mod tests {
             ordinary_blocked: false,
             leading: false,
             blocked_reason: String::new(),
-            proxy: Some(Ok(None)),
+            proxy: Some(None),
+            proxy_read: None,
         }
     }
 
@@ -714,6 +766,8 @@ mod tests {
     fn OpenBidFixture() -> Element {
         let mut dialog = use_context::<CommandDialogContext>().0;
         let ended = use_context::<EndedRowFixture>().0;
+        let proxy_read: ProxyAuthorizationRead = use_resource(|| async { None });
+        PROXY_READ.set(Some(proxy_read));
         DIALOG.set(Some(dialog));
         use_effect(move || dialog.set(Some(input(LOT, CatalogAction::Bid))));
         rsx! {
@@ -781,28 +835,20 @@ mod tests {
         session_fixture::reset();
         COOKIE_RESULT.set(None);
         LOT_HTTP_STATUS.set(None);
+        REJECT_DRAWER_ADDRESS.set(false);
         LOT_HTTP_READS.set(Vec::new());
         let mut dom = VirtualDom::new(CommandFixture);
         if let Some(history) = history {
-            dom.provide_root_context(history.clone() as Rc<dyn History>);
-            dom.provide_root_context(Rc::new(FixtureAddress(history)) as Rc<dyn QueryLocation>);
+            provide_test_public_history::<routes::TestRoute>(&mut dom, history, |href, mode| {
+                !(REJECT_DRAWER_ADDRESS.get()
+                    && mode == QueryWriteMode::Replace
+                    && href.starts_with("/?"))
+            });
         }
         dom.rebuild(&mut Mutations::default());
         settle(&mut dom);
         assert!(BID_SUBMIT.get().is_some(), "直接出价表单已挂载");
         dom
-    }
-
-    struct FixtureAddress(Rc<MemoryHistory>);
-
-    impl QueryLocation for FixtureAddress {
-        fn current(&self) -> String {
-            self.0.current_route()
-        }
-
-        fn write(&self, _location: &str, _mode: QueryWriteMode) -> bool {
-            false
-        }
     }
 
     fn submit_bid(dom: &mut VirtualDom) -> Mutations {
@@ -1115,8 +1161,15 @@ mod tests {
         let mut dialog = DIALOG.get().unwrap();
         let mut proxy_input = input(LOT, CatalogAction::Proxy);
         proxy_input.proxy_default_mode = Some("slow".to_owned());
-        proxy_input.proxy = Some(Ok(lower.then(waiting_proxy)));
-        dom.in_runtime(|| dialog.set(Some(proxy_input)));
+        let snapshot = lower.then(waiting_proxy);
+        let mut proxy_read = PROXY_READ.get().unwrap();
+        let generation = (CONTROLS.get().unwrap().refresh)();
+        proxy_input.proxy = Some(snapshot.clone());
+        proxy_input.proxy_read = Some(proxy_read);
+        dom.in_runtime(|| {
+            proxy_read.set(Some(Some((generation, Ok(snapshot)))));
+            dialog.set(Some(proxy_input));
+        });
         let opened = settle(&mut dom);
         let form = opened
             .edits
@@ -1637,6 +1690,162 @@ mod tests {
         assert!(CONTROLS.get().unwrap().view.0.peek().is_none());
         assert!(!contains_text(&settle(&mut dom), "Authority Shield"), "只消费一次");
         assert!(status(&dom, LOT).is_some());
+    }
+
+    #[test]
+    fn successful_retry_requires_a_new_lot_get_before_the_read_only_drawer_opens() {
+        crate::surface::run_page_events(
+            module_path!(),
+            "successful_retry_requires_a_new_lot_get_before_the_read_only_drawer_opens",
+            exercise_retry_then_drawer,
+        );
+    }
+
+    #[test]
+    fn a_drawer_opened_during_retry_retracts_its_invalidated_projection() {
+        crate::surface::run_page_events(
+            module_path!(),
+            "a_drawer_opened_during_retry_retracts_its_invalidated_projection",
+            || {
+                let mut dom = mounted();
+                submit_bid(&mut dom);
+                let link = recovery_link(&show_unknown(&mut dom), LOT);
+                retry(&mut dom);
+                let replay = requests().pop().unwrap();
+                deep_link_fixture::script(LOT, AUCTION, 0);
+                CATALOGUE_FAILURE.set(true);
+                let waiting = click_view_lot(&mut dom, link);
+                assert!(contains_text(&waiting, "Authority Shield"));
+                assert!(LOT_HTTP_READS.take().is_empty());
+                let drawer = crate::surface::rendered_event_target(
+                    &dom,
+                    "aside",
+                    "class",
+                    "public-catalog-detail",
+                    "onkeydown",
+                );
+
+                LOT_HTTP_STATUS.set(Some(503));
+                replay.complete(Ok(()));
+                let failed = settle(&mut dom);
+                assert_eq!(LOT_HTTP_READS.take(), [format!("/api/v1/lots/{LOT}")]);
+                assert!(contains_text(&failed, "Bid accepted."));
+                assert!(removed(&failed, drawer), "撤下已失效的详情抽屉");
+                let retry = crate::surface::rendered_event_target(
+                    &dom,
+                    "button",
+                    "id",
+                    "public-lot-detail-retry",
+                    "onclick",
+                );
+                LOT_HTTP_STATUS.set(Some(200));
+                crate::surface::dispatch_page_event(&dom, "click", retry, "");
+                let loaded = settle(&mut dom);
+                assert_eq!(LOT_HTTP_READS.take(), [format!("/api/v1/lots/{LOT}")]);
+                assert!(contains_text(&loaded, "Fresh Shield"));
+                assert!(contains_text(&loaded, "New Leader"));
+                assert!(contains_text(&loaded, "200K"));
+            },
+        );
+    }
+
+    fn exercise_retry_then_drawer() {
+        for status in [200, 404, 410, 503] {
+            let mut dom = mounted();
+            submit_bid(&mut dom);
+            let link = recovery_link(&show_unknown(&mut dom), LOT);
+            retry(&mut dom);
+            let replay = requests().pop().unwrap();
+            let controls = CONTROLS.get().unwrap();
+            let mut pause = controls.pause_destination;
+            dom.in_runtime(|| pause.set(true));
+            deep_link_fixture::script(LOT, AUCTION, 0);
+            CATALOGUE_FAILURE.set(true);
+            let waiting = click_view_lot(&mut dom, link);
+            assert!(!contains_text(&waiting, "Authority Shield"));
+            assert!(controls.view.0.peek().is_some(), "详情已预读并交到目标看板");
+            replay.complete(Ok(()));
+            let receipt = settle(&mut dom);
+            assert!(contains_text(&receipt, "Bid accepted."));
+            assert_eq!((controls.refresh)(), 2);
+
+            LOT_HTTP_STATUS.set(Some(status));
+            dom.in_runtime(|| pause.set(false));
+            let shown = settle(&mut dom);
+            assert_eq!(LOT_HTTP_READS.take(), [format!("/api/v1/lots/{LOT}")]);
+            assert!(!contains_text(&shown, "Authority Shield"));
+            match status {
+                200 => {
+                    assert!(contains_text(&shown, "Fresh Shield"));
+                    assert!(contains_text(&shown, "New Leader"));
+                    assert!(contains_text(&shown, "200K"));
+                }
+                404 | 410 => {
+                    assert!(contains_text(
+                        &shown,
+                        "This lot does not exist or is no longer available."
+                    ));
+                }
+                _ => {
+                    assert!(contains_text(&shown, "Retry"));
+                    let retry = crate::surface::rendered_event_target(
+                        &dom,
+                        "button",
+                        "id",
+                        "public-lot-detail-retry",
+                        "onclick",
+                    );
+                    LOT_HTTP_STATUS.set(Some(200));
+                    crate::surface::dispatch_page_event(&dom, "click", retry, "");
+                    let loaded = settle(&mut dom);
+                    assert_eq!(LOT_HTTP_READS.take(), [format!("/api/v1/lots/{LOT}")]);
+                    assert!(contains_text(&loaded, "New Leader"));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn going_back_to_the_same_board_url_drops_the_pending_lot_request() {
+        let history = Rc::new(MemoryHistory::default());
+        let mut dom = mount_with_address(Some(history.clone()));
+        deep_link_fixture::script(LOT, AUCTION, 0);
+        let controls = CONTROLS.get().unwrap();
+        let mut pause = controls.pause_destination;
+        dom.in_runtime(|| pause.set(true));
+        navigate(&mut dom, &format!("/lots/{LOT}"));
+        let view = controls.view.0;
+        assert!(view.peek().as_ref().is_some_and(|target| target.entry.is_some()));
+        assert!(history.can_go_back());
+        dom.in_runtime(|| controls.back.call(()));
+        assert_eq!(history.current_route(), "/");
+        // 允许返回后旧看板仍挂载，必须由历史条目门禁丢弃已经交付的请求。
+        dom.in_runtime(|| {
+            assert!(view.peek().is_some());
+            pause.set(false);
+        });
+        let shown = settle(&mut dom);
+        assert!(!contains_text(&shown, "Authority Shield"));
+        assert!(view.peek().is_none());
+        assert!(LOT_HTTP_READS.take().is_empty());
+    }
+
+    #[test]
+    fn a_rejected_drawer_destination_keeps_the_link_retryable() {
+        let history = Rc::new(MemoryHistory::default());
+        let mut dom = mount_with_address(Some(history.clone()));
+        deep_link_fixture::script(LOT, AUCTION, 0);
+        REJECT_DRAWER_ADDRESS.set(true);
+        let source = format!("/lots/{LOT}");
+        let failed = navigate(&mut dom, &source);
+        assert_eq!(history.current_route(), source);
+        assert!(contains_text(&failed, "temporarily unavailable"));
+        assert!(CONTROLS.get().unwrap().view.0.peek().is_none());
+        REJECT_DRAWER_ADDRESS.set(false);
+        dom.in_runtime(|| deep_link_fixture::RETRY.get().unwrap().call(()));
+        let shown = settle(&mut dom);
+        assert!(history.current_route().starts_with("/?"));
+        assert!(contains_text(&shown, "Authority Shield"));
     }
 
     #[test]

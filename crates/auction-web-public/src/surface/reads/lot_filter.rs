@@ -33,7 +33,7 @@ pub(super) fn valid_lot_filter(value: &str) -> bool {
 
 #[derive(Clone, PartialEq)]
 struct LotFilterLocation {
-    world: &'static str,
+    world: crate::surface::FilterParameter,
     auction: AuctionParameter,
     lots: Vec<String>,
 }
@@ -41,7 +41,10 @@ struct LotFilterLocation {
 impl LotFilterLocation {
     fn new(query: &PublicBoardQuery, lots: Vec<String>) -> Self {
         Self {
-            world: if query.world.as_deref() == Some("isekai") { "isekai" } else { "main" },
+            world: query
+                .world
+                .round_world()
+                .map_or_else(|| query.world.clone(), |world| Some(world.to_owned()).into()),
             auction: query.auction_parameter().clone(),
             lots,
         }
@@ -378,7 +381,7 @@ mod tests {
 
             dom.in_runtime(|| {
                 let next = PublicBoardQuery {
-                    world: world.map(str::to_owned),
+                    world: world.map(str::to_owned).into(),
                     bid_log_lot: applied_lot.map(str::to_owned),
                     ..query.peek().clone()
                 };
@@ -714,11 +717,11 @@ mod tests {
         let origin = LotFilterLocation::from_query(&initial);
         assert!(matches_query(
             &origin,
-            &PublicBoardQuery { world: Some("main".to_owned()), page: 2, ..initial.clone() }
+            &PublicBoardQuery { world: Some("main".to_owned()).into(), page: 2, ..initial.clone() }
         ));
         assert!(!matches_query(
             &origin,
-            &PublicBoardQuery { world: Some("isekai".to_owned()), ..initial.clone() }
+            &PublicBoardQuery { world: Some("isekai".to_owned()).into(), ..initial.clone() }
         ));
         assert!(!matches_query(
             &origin,

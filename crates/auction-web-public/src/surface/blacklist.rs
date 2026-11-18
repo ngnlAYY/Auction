@@ -6,7 +6,7 @@ use auction_web_shared::{AsyncState, AsyncStateKind, QueryWriteMode, Time};
 use dioxus::prelude::*;
 
 use super::{
-    PublicPager, public_page_matches, update_public_page_size, update_public_query_state,
+    PageKey, PublicPager, public_page_matches, update_public_page_size, update_public_query_state,
     use_content_loading, use_public_query_state,
 };
 use crate::api::{BlacklistEntry, BlacklistPage, fetch_blacklist};
@@ -68,13 +68,9 @@ pub(super) fn page() -> Element {
                         QueryWriteMode::Push,
                     );
                 },
-                on_page_clamp: move |next_page| {
-                    update_public_query_state(
-                        query_state_signal,
-                        |query| query.page = next_page,
-                        QueryWriteMode::Replace,
-                    );
-                },
+                on_page_clamp: move |next_page| PageKey::Page.write(
+                    query_state_signal, "/blacklist", next_page, QueryWriteMode::Replace,
+                ),
             }
         },
     }
@@ -84,7 +80,7 @@ pub(super) fn page() -> Element {
 fn BlacklistTable(
     page: BlacklistPage,
     on_page_change: EventHandler<i64>,
-    on_page_clamp: EventHandler<i64>,
+    on_page_clamp: Callback<i64, bool>,
     on_page_size_change: EventHandler<i64>,
 ) -> Element {
     rsx! {
@@ -121,6 +117,7 @@ fn BlacklistTable(
                     max_offset: Some(i64::from(i32::MAX)),
                     on_page_change,
                     on_page_clamp,
+                    report_clamp_failure: true,
                     on_page_size_change,
                 }
             }
@@ -142,6 +139,76 @@ fn BlacklistRow(entry: BlacklistEntry) -> Element {
                 "data-label": t!("blacklist-time"),
                 Time { value: entry.blacklisted_at }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use auction_web_shared::QueryWriteMode;
+    use dioxus::history::MemoryHistory;
+    use dioxus::prelude::*;
+
+    use super::page;
+    use crate::api::BlacklistPage;
+    use crate::surface::router::provide_test_public_history;
+    use crate::surface::{PageReadFixture, page_test_contexts, settle_page};
+
+    #[derive(Clone, PartialEq, Routable)]
+    enum BlacklistRoute {
+        #[route("/blacklist")]
+        BlacklistFixture {},
+    }
+
+    #[component]
+    fn BlacklistFixture() -> Element {
+        page_test_contexts();
+        page()
+    }
+
+    #[test]
+    fn total_clamp_preserves_the_other_query_segments_and_waits_for_the_address() {
+        const INITIAL: &str = "/blacklist?keep=%2b%20x&&%70age=8&%74ype=%63lo&keep=#list";
+        const CORRECTED: &str = "/blacklist?keep=%2b%20x&&%74ype=%63lo&keep=#list";
+        for accepted in [false, true] {
+            let history = Rc::new(MemoryHistory::with_initial_path(INITIAL));
+            let requests = Rc::new(RefCell::new(Vec::new()));
+            let reads = PageReadFixture::new({
+                let requests = requests.clone();
+                let history = history.clone();
+                move |url: String| {
+                    let page = if url.contains("page=8&") { 8 } else { 1 };
+                    requests.borrow_mut().push((url, history.current_route()));
+                    Ok::<_, String>(BlacklistPage { users: vec![], total: 3, page, page_size: 20 })
+                }
+            });
+            let mut dom =
+                VirtualDom::new(|| rsx! { Router::<BlacklistRoute> {} }).with_root_context(reads);
+            let writes = Rc::new(RefCell::new(Vec::new()));
+            provide_test_public_history::<BlacklistRoute>(&mut dom, history.clone(), {
+                let writes = writes.clone();
+                move |url, mode| {
+                    assert_eq!(mode, QueryWriteMode::Replace);
+                    writes.borrow_mut().push(url.to_owned());
+                    accepted
+                }
+            });
+            dom.rebuild_in_place();
+            settle_page(&mut dom);
+            assert_eq!(*writes.borrow(), [CORRECTED]);
+            assert_eq!(history.current_route(), if accepted { CORRECTED } else { INITIAL });
+            let mut expected =
+                vec![("/api/v1/blacklist?page=8&page_size=20".to_owned(), INITIAL.to_owned())];
+            if accepted {
+                expected.push((
+                    "/api/v1/blacklist?page=1&page_size=20".to_owned(),
+                    CORRECTED.to_owned(),
+                ));
+            }
+            assert_eq!(*requests.borrow(), expected);
         }
     }
 }

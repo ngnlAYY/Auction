@@ -11,20 +11,17 @@ use auction_web_shared::{
 use dioxus::prelude::*;
 
 use super::alignment::{AlignmentReread, use_alignment_reread};
-use super::navigation::preview_history_switch;
-use super::refresh::{refresh_public_reads, use_bid_refresh};
+use super::navigation::use_preview_history_switch;
+use super::refresh::{refresh_public_reads, use_auction_bid_refresh};
 use crate::api::CatalogLevelFilter;
 use crate::api::LotEnvelope;
-use crate::api::{
-    CatalogRow, CurrentAuction, LotEnvelopeRows, estimated_now, fetch_auction_list,
-    fetch_current_auction, fetch_current_lots,
-};
+use crate::api::{CatalogRow, CurrentAuction, LotEnvelopeRows, estimated_now, fetch_current_lots};
 use crate::surface::loading::use_content_loading;
 use crate::surface::{
-    AuctionParameter, CatalogGroupFilters, CatalogTable, CurrentAuctionResource, LotDetailLookup,
-    LotViewDisposition, LotViewRequest, PublicBoardQuery, PublicSessionResource, PublicSessionView,
-    dispose_lot_view, public_page_matches, read_public_query, update_public_page_size,
-    update_public_query_state, use_catalog_proxy_snapshots,
+    CatalogAuctionId, CatalogGroupFilters, CatalogTable, CurrentAuctionResource, FilterParameter,
+    LotDetailLookup, LotViewDisposition, LotViewRequest, PageKey, PublicBoardQuery,
+    PublicSessionResource, PublicSessionView, dispose_lot_view, public_page_matches,
+    read_public_query, update_public_page_size, update_public_query_state,
 };
 
 /// 公开 lots 请求由场次、世界和查询参数决定。
@@ -91,10 +88,11 @@ pub(super) fn use_catalog_read(
     let request = use_memo(use_reactive((&auction_key,), move |(auction_key,)| {
         let (auction_id, world) = auction_key?;
         let query = query.read();
+        let category = query.catalog_request_category()?;
         Some(CatalogRequest {
             auction_id,
             world,
-            category: query.category.clone().unwrap_or_else(|| "all".to_owned()),
+            category: category.unwrap_or("all").to_owned(),
             equipment_group: query.equipment_group.clone().unwrap_or_else(|| "all".to_owned()),
             max_level: query.max_level.clone(),
             include_unleveled: query.include_unleveled.clone(),
@@ -111,9 +109,7 @@ pub(super) fn use_catalog_read(
         async move {
             let request = request?;
             // 导航已经生效时，迟来的刷新不能沿用上一地址的可出价目录。
-            if matches!(read_public_query().auction_parameter(), AuctionParameter::Invalid(_)) {
-                return None;
-            }
+            read_public_query().catalog_request_category()?;
             let category = (request.category != "all").then(|| request.category.clone());
             let equipment_group =
                 (request.equipment_group != "all").then(|| request.equipment_group.clone());
@@ -131,7 +127,7 @@ pub(super) fn use_catalog_read(
         }
     });
     let request = request();
-    use_bid_refresh(lots, request.is_some());
+    use_auction_bid_refresh(lots, request.as_ref().map(|request| request.auction_id.as_str()));
     let loaded = lots.read();
     // Resource 重读保留旧值。只用当前请求的快照判定场次对齐，避免越过查询或场次边界。
     let current = loaded
@@ -213,10 +209,14 @@ fn use_lot_view_delivery(
     let view = use_context::<LotViewRequest>();
     let lookup = use_context::<LotDetailLookup>();
     let current = use_context::<CurrentAuctionResource>();
+    let router = dioxus::router::try_router();
     let displayed = auction.map(|auction| (auction.world.clone(), auction.id.clone()));
     use_effect(use_reactive(
         (&displayed, &historical, &reading, &page),
         move |(displayed, historical, reading, page)| {
+            if let Some(router) = router {
+                let _ = router.full_route_string();
+            }
             let Some(target) = view.0.read().clone() else { return };
             let query = query.read();
             let world = query.world.as_deref().unwrap_or("main");
@@ -284,7 +284,7 @@ pub(super) fn AuctionData(
     query_state_signal: Signal<PublicBoardQuery>,
     boot_prerequisites_ready: bool,
 ) -> Element {
-    use_catalog_proxy_snapshots();
+    use_context_provider(|| CatalogAuctionId(auction.id.clone()));
     let CatalogRead {
         request,
         current,
@@ -318,28 +318,7 @@ pub(super) fn AuctionData(
     drop(identity);
     // 首次揭示等待目录的成功或失败结果，辅助视图切换继续局部异步。
     use_app_boot_ready(boot_prerequisites_ready && current.is_some());
-    let history_switch_world = use_memo(use_reactive(
-        (&auction.world, &historical, &auction.presentation_mode),
-        |(world, historical, presentation_mode)| {
-            (historical || presentation_mode != "live").then_some(world)
-        },
-    ));
-    let history_switch = use_resource(move || {
-        let _ = refresh_generation();
-        let requested_world = history_switch_world();
-        async move {
-            let result = async {
-                let Some(world) = requested_world.as_ref() else {
-                    return Ok(None);
-                };
-                let current = fetch_current_auction(world.clone()).await?;
-                let rounds = fetch_auction_list(world.clone()).await?;
-                Ok(Some((current, rounds)))
-            }
-            .await;
-            (requested_world, result)
-        }
-    });
+    let view_switch = use_preview_history_switch(&auction, historical, refresh_generation);
     let alignment_exhausted = alignment.exhausted;
     let mut alignment_attempt = alignment.attempt;
     let is_live_presentation = auction.presentation_mode == "live";
@@ -377,6 +356,25 @@ pub(super) fn AuctionData(
     use_content_loading(
         visible_snapshot.is_none() && !alignment_exhausted && !current.is_some_and(Result::is_err),
     );
+    let alignment_error = if alignment_exhausted && !current.is_some_and(Result::is_err) {
+        let detail = if visible_snapshot.is_some() {
+            t!("catalog-preview-stale")
+        } else {
+            lot_list_error_message("temporarily_unavailable")
+        };
+        rsx! {
+            AsyncState {
+                kind: AsyncStateKind::Error,
+                title: t!("data-error"),
+                detail,
+                retry_label: t!("data-retry"),
+                // 保留上一份已对齐的预览；重试只重置本次对齐记录，由 effect 再发权威读取。
+                on_retry: move |_| alignment_attempt.set(None),
+            }
+        }
+    } else {
+        rsx! {}
+    };
     let catalog = match (current, visible_snapshot) {
         (Some(Err(error)), _) => {
             rsx! {
@@ -391,20 +389,6 @@ pub(super) fn AuctionData(
                             .set(lots_refresh_generation().saturating_add(1));
                         refresh_public_reads(refresh_generation);
                     },
-                }
-            }
-        }
-        // 快照与当前场次仍不对齐，且场次与目录都已来自那次对齐重读（例如读闸繁忙时保留的旧快照）：
-        // 显示可重试的错误而不是留空。重试只清掉尝试记录，由上面的 effect 经共用刷新入口重新发起
-        // 一次失效后的对齐重读。
-        (_, None) if alignment_exhausted => {
-            rsx! {
-                AsyncState {
-                    kind: AsyncStateKind::Error,
-                    title: t!("data-error"),
-                    detail: lot_list_error_message("temporarily_unavailable"),
-                    retry_label: t!("data-retry"),
-                    on_retry: move |_| alignment_attempt.set(None),
                 }
             }
         }
@@ -431,7 +415,9 @@ pub(super) fn AuctionData(
                         update_public_query_state(
                             query_state_signal,
                             |query| {
-                                query.category = (category != "all").then_some(category.clone());
+                                query.category = FilterParameter::from_categories(
+                                    (category != "all").then_some(category).into_iter().collect(),
+                                );
                                 query.page = 1;
                             },
                             QueryWriteMode::Push,
@@ -444,13 +430,9 @@ pub(super) fn AuctionData(
                             QueryWriteMode::Push,
                         );
                     },
-                    on_page_clamp: move |page| {
-                        update_public_query_state(
-                            query_state_signal,
-                            |query| query.page = page,
-                            QueryWriteMode::Replace,
-                        );
-                    },
+                    on_page_clamp: move |page| PageKey::Page.write(
+                        query_state_signal, "/", page, QueryWriteMode::Replace,
+                    ),
                     on_page_size_change: move |size| update_public_page_size(query_state_signal, size),
                     page_total: page.total,
                     page_size,
@@ -471,16 +453,6 @@ pub(super) fn AuctionData(
         // 目录加载提示同样交给 ticker；正文不做占位，避免表格出现时挤压布局。
         _ => rsx! {},
     };
-    // 切换世界或展示模式时，旧辅助结果不能冒充本次查询；同查询刷新保留已完成快照。
-    let history_switch_snapshot = history_switch.read();
-    let current_history_switch = history_switch_snapshot
-        .as_ref()
-        .filter(|(world, _)| *world == history_switch_world())
-        .map(|(_, result)| result);
-    // 只有会显示视图切换的预览/历史场次才等待它；竞价中的当前场次不展示切换。
-    use_content_loading(
-        (historical || auction.presentation_mode != "live") && current_history_switch.is_none(),
-    );
     rsx! {
         // 标题与截止时间已收进顶部 ticker；场次名称只作为本区域的可访问名称。
         section {
@@ -531,9 +503,10 @@ pub(super) fn AuctionData(
                         );
                     },
                     // 预览与往期场次的视图切换停在分组栏右端。
-                    {preview_history_switch(current_history_switch, &auction, historical)}
+                    {view_switch}
                 }
                 // 当前场次的目录包在一个块容器里（往期场次直接铺在弹性列上）；表格自带可访问名称。
+                {alignment_error}
                 if !historical && (is_live_presentation || auction.presentation_mode == "preview") {
                     section { {catalog} }
                 } else {

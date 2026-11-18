@@ -22,6 +22,7 @@ pub(super) fn ProxyAuthorizationForm(
     lot_status: String,
     proxy: OwnedProxy,
     authorization_ready: bool,
+    authorize: Callback<(), bool>,
     on_submit: EventHandler<PendingProxyCommand>,
     /// 由弹窗宿主注入的两阶段确认命令 hook（降低上限实例；见 ProxyFormInput）。
     command: ProxyConfirmCommand,
@@ -55,7 +56,7 @@ pub(super) fn ProxyAuthorizationForm(
 
     let submit = use_callback(move |()| {
         if !can_lower
-            || !authorization_ready
+            || !authorize.call(())
             || !session.can_submit_new()
             || !commands.is_some_and(|commands| commands.can_start(&lot_id))
         {

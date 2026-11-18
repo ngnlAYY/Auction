@@ -1,23 +1,25 @@
 //! 地址栏 query 的解析：按键分派、值规范化与非法值处理；未声明的键原样透传。
 //! 只在浏览器与测试构建中编译，宿主构建的查询状态恒为默认值。
 
-use auction_contracts::EQUIPMENT_CATEGORY_CODES;
 use auction_web_shared::query::parse_query_pairs;
 
 use super::auction::AuctionParameter;
+use super::filter::FilterParameter;
 use super::{PublicBoardQuery, normalize_world_query};
 use crate::surface::{DEFAULT_PAGE_SIZE, parse_public_page_size};
 
-pub(super) fn parse_public_query(pathname: &str, search: &str) -> PublicBoardQuery {
+pub(in crate::surface) fn parse_public_query(pathname: &str, search: &str) -> PublicBoardQuery {
     let mut query = PublicBoardQuery::default();
     let mut auctions = Vec::new();
+    let mut worlds = Vec::new();
+    let mut categories = Vec::new();
     let mut canonical_page = None;
     let mut legacy_bid_log_page = None;
     for (key, value) in parse_query_pairs(search) {
         match key.as_ref() {
-            "world" => query.world = normalize_world_query(&value),
+            "world" => worlds.push(value.into_owned()),
             "auction" => auctions.push(value.into_owned()),
-            "type" if is_catalog_category(&value) => query.category = Some(value.into_owned()),
+            "type" => categories.push(value.into_owned()),
             "equipment_group" => {
                 query.equipment_group =
                     matches!(value.as_ref(), "rare" | "fusion").then(|| value.into_owned());
@@ -96,6 +98,13 @@ pub(super) fn parse_public_query(pathname: &str, search: &str) -> PublicBoardQue
         }
     }
     query.set_auction_parameter(AuctionParameter::from_values(auctions));
+    query.world = FilterParameter::from_values(worlds, |value| {
+        if matches!(pathname, "/bidlog" | "/fulfillment") && value != value.trim() {
+            return None;
+        }
+        normalize_world_query(value)
+    });
+    query.category = FilterParameter::from_categories(categories);
     query.page = canonical_page
         .or_else(|| (pathname == "/bidlog").then_some(legacy_bid_log_page).flatten())
         .unwrap_or(1);
@@ -115,10 +124,6 @@ fn normalize_optional_query(value: &str, maximum: usize) -> Option<String> {
 /// lot 与 name 由页面校验，这里只去空白：非法值留给页面报字段错误且不发请求，解析时丢弃会扩大查询。
 fn retained_query_value(value: &str) -> Option<String> {
     Some(value.trim()).filter(|value| !value.is_empty()).map(str::to_owned)
-}
-
-fn is_catalog_category(value: &str) -> bool {
-    EQUIPMENT_CATEGORY_CODES.iter().any(|(category, _, _)| *category == value)
 }
 
 fn is_history_status(value: &str) -> bool {

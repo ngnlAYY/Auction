@@ -2,6 +2,7 @@
 
 mod auction;
 mod commit;
+mod filter;
 #[cfg(any(target_arch = "wasm32", test))]
 mod parse;
 
@@ -10,13 +11,14 @@ use auction_web_shared::query::{location_parts, query_location};
 use dioxus::prelude::*;
 use url::form_urlencoded;
 
-use super::stored_public_page_size;
+use super::{public_page_within_offset, stored_public_page_size};
 use crate::api::{CurrentAuction, HistoricalAuction};
 #[cfg(any(target_arch = "wasm32", test))]
-use parse::parse_public_query;
+pub(super) use parse::parse_public_query;
 
 pub(crate) use auction::{AuctionParameter, AuctionSelection};
 pub(crate) use commit::{QueryCommit, commit_auction_selection, update_public_query_state};
+pub(crate) use filter::FilterParameter;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LiveConnectionState {
@@ -29,10 +31,10 @@ pub(crate) enum LiveConnectionState {
 /// 公开拍卖看板的 URL 状态；筛选和分页必须能被刷新、分享和返回操作恢复。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PublicBoardQuery {
-    pub(crate) world: Option<String>,
+    pub(crate) world: FilterParameter,
     #[doc(hidden)]
     pub(crate) auction: auction::StoredAuction,
-    pub(crate) category: Option<String>,
+    pub(crate) category: FilterParameter,
     pub(crate) equipment_group: Option<String>,
     /// 非法等级参数保留原文供筛选栏修正，不能先丢条件再发出宽查询。
     pub(crate) max_level: Option<String>,
@@ -63,7 +65,7 @@ pub(crate) struct PublicBoardQuery {
 }
 
 pub(crate) type PreviewHistoryLoad =
-    Result<Option<(Option<CurrentAuction>, Vec<HistoricalAuction>)>, String>;
+    Result<Option<(CurrentAuction, Vec<HistoricalAuction>)>, String>;
 
 /// 浏览器 pathname/query 变化版本；查询驱动页面通过独立类型订阅，避免与数据刷新信号混淆。
 #[derive(Clone, Copy)]
@@ -72,9 +74,9 @@ pub(crate) struct PublicLocationRevision(pub(crate) Signal<u64>);
 impl Default for PublicBoardQuery {
     fn default() -> Self {
         Self {
-            world: None,
+            world: FilterParameter::Unspecified,
             auction: auction::StoredAuction::default(),
-            category: None,
+            category: FilterParameter::Unspecified,
             equipment_group: None,
             max_level: None,
             include_unleveled: "true".to_owned(),
@@ -98,6 +100,18 @@ impl Default for PublicBoardQuery {
             proxy_page: 1,
             passthrough: Vec::new(),
         }
+    }
+}
+
+impl PublicBoardQuery {
+    /// 启动预取与正文使用同一门禁，待修正的地址不能发目录查询。
+    pub(crate) fn catalog_request_category(&self) -> Option<Option<&str>> {
+        if matches!(self.auction_parameter(), AuctionParameter::Invalid(_))
+            || !public_page_within_offset(self.page, self.page_size)
+        {
+            return None;
+        }
+        self.category.catalog_category()
     }
 }
 
@@ -153,9 +167,8 @@ pub(crate) fn public_query_string(query: &PublicBoardQuery) -> String {
 /// 序列化公开端查询状态；数量即使为 10 也显式保留，防止本地偏好改变分享及历史语义。
 pub(crate) fn public_query_pairs(query: &PublicBoardQuery) -> Vec<(String, String)> {
     let mut pairs = Vec::new();
-    if let Some(world) = query.world.as_deref() {
-        pairs.push(("world".to_owned(), world.to_owned()));
-    }
+    pairs
+        .extend(query.world.query_values().iter().map(|value| ("world".to_owned(), value.clone())));
     pairs.extend(
         query
             .auction_parameter()
@@ -172,9 +185,9 @@ pub(crate) fn public_query_pairs(query: &PublicBoardQuery) -> Vec<(String, Strin
     if query.include_unleveled != "true" {
         pairs.push(("include_unleveled".to_owned(), query.include_unleveled.clone()));
     }
-    if let Some(category) = query.category.as_deref() {
-        pairs.push(("type".to_owned(), category.to_owned()));
-    }
+    pairs.extend(
+        query.category.query_values().iter().map(|value| ("type".to_owned(), value.clone())),
+    );
     if let Some(status) = query.status.as_deref() {
         pairs.push(("status".to_owned(), status.to_owned()));
     }
@@ -213,7 +226,13 @@ pub(crate) fn public_query_pairs(query: &PublicBoardQuery) -> Vec<(String, Strin
         pairs.push(("proxy_page".to_owned(), query.proxy_page.to_string()));
     }
     // 整段重置与普通链接的场次都只来自三态，透传值不能另行提供场次。
-    pairs.extend(query.passthrough.iter().filter(|(key, _)| key != "auction").cloned());
+    pairs.extend(
+        query
+            .passthrough
+            .iter()
+            .filter(|(key, _)| !matches!(key.as_str(), "auction" | "world" | "type"))
+            .cloned(),
+    );
     pairs
 }
 
@@ -275,7 +294,7 @@ pub(crate) fn public_auction_home_href(world: &str) -> String {
 pub(crate) fn public_auction_home_query(world: &str) -> PublicBoardQuery {
     // 只保留目标世界与本地数量偏好，避免从其他页面带回不属于首页的筛选和页码。
     PublicBoardQuery {
-        world: (world == "isekai").then(|| "isekai".to_owned()),
+        world: (world == "isekai").then(|| "isekai".to_owned()).into(),
         ..PublicBoardQuery::default()
     }
 }
@@ -321,8 +340,8 @@ mod tests {
     #[test]
     fn canonical_pairs_follow_the_documented_order_and_keep_passthrough() {
         let mut query = PublicBoardQuery {
-            world: Some("main".to_owned()),
-            category: Some("One-Handed".to_owned()),
+            world: Some("main".to_owned()).into(),
+            category: Some("one".to_owned()).into(),
             status: Some("live".to_owned()),
             history_sort: "price_desc".to_owned(),
             history_group: "buyer".to_owned(),
@@ -334,7 +353,7 @@ mod tests {
             public_query_pairs(&query),
             pairs(&[
                 ("world", "main"),
-                ("type", "One-Handed"),
+                ("type", "one"),
                 ("status", "live"),
                 ("history_sort", "price_desc"),
                 ("history_group", "buyer"),

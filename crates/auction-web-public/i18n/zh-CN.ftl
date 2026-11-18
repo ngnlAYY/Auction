@@ -17,6 +17,8 @@ nav-blacklist = 黑名单
 nav-price-history = 历史成交价
 nav-forum = 论坛同步
 world-label = 世界
+world-invalid-link = 链接里的世界无效。请选择世界后继续。
+world-correction-error = 无法更正链接中的世界。
 
 auction-pager-label = 实时竞拍
 auction-header-title = 第 { $number } 届拍卖
@@ -68,6 +70,7 @@ equipment-group = 装备分组
 equipment-group-rare = 稀有
 equipment-group-fusion = 融合
 catalog-empty-filtered = 暂无符合当前筛选条件的拍品。
+catalog-preview-stale = 预览已更新，表格仍显示上一份目录。
 filter-max-level = 等级上限
 filter-level-unlimited = 不限
 filter-include-unleveled = 显示无等级装备

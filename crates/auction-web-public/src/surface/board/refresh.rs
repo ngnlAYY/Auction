@@ -5,7 +5,11 @@
 //! 随机窗口后重读自己的权威接口。事件负载中的价格、领先者或版本都不参与页面结果，因此取消
 //! 合并或丢弃通知只会多读或少读一次快照，不会产生第二种竞价状态。
 
+use std::collections::BTreeMap;
+
 use auction_web_shared::timer::TimeoutFuture;
+use auction_web_shared::visibility::document_is_visible;
+use dioxus::dioxus_core::Task;
 use dioxus::prelude::*;
 
 /// 合并窗口的基础时长：从首次待处理通知起至少合并 100 毫秒；后续竞价不延后截止时间。
@@ -38,13 +42,43 @@ pub(crate) fn refresh_public_reads(mut refresh_generation: Signal<u64>) {
 
 /// Public 外壳持有的竞价失效修订号，与生命周期和人工刷新的全局修订号分离。
 #[derive(Clone, Copy)]
-pub(crate) struct PublicBidRefresh(pub(crate) Signal<u64>);
+pub(crate) struct PublicBidRefresh(Signal<BidRefreshNotices>);
+
+#[derive(Default)]
+struct BidRefreshNotices {
+    latest: BidRefreshNotice,
+    by_auction: BTreeMap<String, BidRefreshNotice>,
+}
+
+#[derive(Clone, Copy, Default)]
+struct BidRefreshNotice {
+    revision: u64,
+    authority_generation: u64,
+}
 
 impl PublicBidRefresh {
-    pub(crate) fn notify(mut self) {
-        let next = self.0.peek().saturating_add(1);
-        self.0.set(next);
+    pub(crate) fn new() -> Self {
+        Self(Signal::new(BidRefreshNotices::default()))
     }
+
+    pub(crate) fn notify(mut self, auction_id: &str, authority_generation: u64) {
+        if bid_refresh_visible() {
+            let mut notices = self.0.write();
+            let revision = notices.latest.revision.saturating_add(1);
+            let notice = BidRefreshNotice { revision, authority_generation };
+            // 与全局修订号一起更新所属场次，另一场的通知不能覆盖已排定的抽屉补读。
+            notices.by_auction.insert(auction_id.to_owned(), notice);
+            notices.latest = notice;
+        }
+    }
+}
+
+fn bid_refresh_visible() -> bool {
+    #[cfg(test)]
+    if let Some(visible) = crate::surface::PageReadFixture::<(), bool>::response(()) {
+        return visible;
+    }
+    document_is_visible()
 }
 
 /// 单次竞价通知在合并窗口内的调度判定。
@@ -71,7 +105,7 @@ pub(crate) fn plan_bid_refresh(
     scheduled: bool,
     ready: bool,
 ) -> BidRefreshDecision {
-    if current_revision == consumed_revision {
+    if current_revision <= consumed_revision {
         return BidRefreshDecision::Idle;
     }
     if scheduled {
@@ -86,25 +120,75 @@ pub(crate) fn plan_bid_refresh(
 /// 仅刷新已挂载且启用的竞价资源；进行中的读取先完成，再补读尚未消费的通知。
 /// 竞价修订号不能直接成为 `use_resource` 的依赖，否则持续竞价会反复取消慢请求。
 /// 延后任务由消费组件拥有：卸载会取消任务，新挂载的资源自行读取最新权威快照。
-pub(crate) fn use_bid_refresh<T: 'static>(mut resource: Resource<T>, enabled: bool) {
+pub(crate) fn use_bid_refresh<T: 'static>(resource: Resource<T>, enabled: bool) {
+    use_bid_refresh_scope(
+        resource,
+        if enabled { BidRefreshScope::Any } else { BidRefreshScope::Disabled },
+    );
+}
+
+/// 只在所读场次收到普通竞价时补读。
+pub(crate) fn use_auction_bid_refresh<T: 'static>(resource: Resource<T>, auction_id: Option<&str>) {
+    let scope =
+        auction_id.map_or(BidRefreshScope::Disabled, |id| BidRefreshScope::Auction(id.to_owned()));
+    use_bid_refresh_scope(resource, scope);
+}
+
+#[derive(Clone, PartialEq)]
+enum BidRefreshScope {
+    Disabled,
+    Any,
+    Auction(String),
+}
+
+impl BidRefreshScope {
+    fn latest(&self, notices: &BidRefreshNotices) -> Option<BidRefreshNotice> {
+        match self {
+            Self::Disabled => None,
+            Self::Any => Some(notices.latest),
+            Self::Auction(id) => notices.by_auction.get(id).copied(),
+        }
+    }
+}
+
+fn use_bid_refresh_scope<T: 'static>(mut resource: Resource<T>, scope: BidRefreshScope) {
     let refresh = use_context::<PublicBidRefresh>();
-    let enabled = use_memo(use_reactive((&enabled,), |(enabled,)| enabled));
-    let mut consumed = use_signal(|| *refresh.0.peek());
-    let mut scheduled = use_signal(|| false);
+    let authority = use_context::<Signal<u64>>();
+    let scope = use_memo(use_reactive((&scope,), |(scope,)| scope));
+    let mut prior_scope = use_signal(|| scope.peek().clone());
+    let mut consumed = use_signal(|| refresh.0.peek().latest.revision);
+    let mut scheduled = use_signal(|| None::<Task>);
 
     use_effect(move || {
-        if !enabled() {
+        let active = scope();
+        if *prior_scope.peek() != active {
+            // 场次一变即放弃旧窗口，身份切换不改变场次键或已排定的补读。
+            let previous = scheduled.write().take();
+            if let Some(previous) = previous {
+                previous.cancel();
+            }
+            prior_scope.set(active.clone());
+        }
+        if active == BidRefreshScope::Disabled {
             // 闭合的代理面板不订阅竞价或资源状态，避免每行随通知执行空刷新。
-            consumed.set(*refresh.0.peek());
+            consumed.set(refresh.0.peek().latest.revision);
             return;
         }
-        let revision = (refresh.0)();
+        let Some(notice) = active.latest(&refresh.0.read()) else { return };
+        let revision = notice.revision;
+        if revision <= *consumed.peek() {
+            return;
+        }
+        if notice.authority_generation != *authority.peek() || !bid_refresh_visible() {
+            consumed.set(revision);
+            return;
+        }
         // 先读资源状态以订阅它就绪/重新挂起的变化，再按纯函数决定是否排定。
         let state = resource.state().cloned();
         let decision = plan_bid_refresh(
             revision,
             *consumed.peek(),
-            *scheduled.peek(),
+            scheduled.peek().is_some(),
             state == UseResourceState::Ready,
         );
         match decision {
@@ -112,20 +196,27 @@ pub(crate) fn use_bid_refresh<T: 'static>(mut resource: Resource<T>, enabled: bo
             | BidRefreshDecision::Coalescing
             | BidRefreshDecision::WaitForReady => {}
             BidRefreshDecision::Schedule { .. } => {
-                scheduled.set(true);
-                spawn(async move {
+                let task = spawn(async move {
                     wait_for_bid_refresh().await;
-                    scheduled.set(false);
-                    let revision = *refresh.0.peek();
-                    // 等待期间可能切换查询、关闭代理面板或触发全局刷新；只重启空闲资源。
-                    if *enabled.peek()
-                        && revision != *consumed.peek()
-                        && *resource.state().peek() == UseResourceState::Ready
-                    {
+                    scheduled.set(None);
+                    if *scope.peek() != active {
+                        return;
+                    }
+                    let Some(notice) = active.latest(&refresh.0.peek()) else { return };
+                    let revision = notice.revision;
+                    if revision <= *consumed.peek() {
+                        return;
+                    }
+                    let covered = notice.authority_generation != *authority.peek();
+                    // 隐藏期间放弃普通竞价补读，重新可见时由外壳权威刷新补偿。
+                    if covered || !bid_refresh_visible() {
+                        consumed.set(revision);
+                    } else if *resource.state().peek() == UseResourceState::Ready {
                         consumed.set(revision);
                         resource.restart();
                     }
                 });
+                scheduled.set(Some(task));
             }
         }
     });
@@ -134,6 +225,21 @@ pub(crate) fn use_bid_refresh<T: 'static>(mut resource: Resource<T>, enabled: bo
 async fn wait_for_bid_refresh() {
     #[cfg(test)]
     if let Some(timer) = super::tests::bid_timer() {
+        timer.await;
+        return;
+    }
+    #[cfg(test)]
+    if let Some(timer) = crate::surface::PageReadFixture::<
+        (),
+        std::pin::Pin<Box<dyn std::future::Future<Output = ()>>>,
+    >::response(())
+    {
+        timer.await;
+        return;
+    }
+    #[cfg(test)]
+    if let Some(timer) = crate::surface::PageReadFixture::<(), std::future::Ready<()>>::response(())
+    {
         timer.await;
         return;
     }

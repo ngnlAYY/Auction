@@ -46,6 +46,7 @@ impl SeenSet {
 struct LastBidFact {
     fact_index: i64,
     state_version: i64,
+    stream_sequence: i64,
 }
 
 /// 旧版单拍卖浏览器维护的有界实时防重与版本栅栏。
@@ -58,6 +59,7 @@ pub(crate) struct RealtimeCache {
     after: i64,
     /// refetch 后每个尚未见过的 lot 可用首个连续 stream 事件建立一次事实基线。
     baseline_after: Option<i64>,
+    final_at: Option<i64>,
     fact_identities: BTreeMap<String, String>,
     last_facts: BTreeMap<String, LastBidFact>,
     seen: SeenSet,
@@ -73,6 +75,7 @@ impl RealtimeCache {
             initial_preview_revision: preview_revision,
             after: 0,
             baseline_after: None,
+            final_at: None,
             fact_identities: BTreeMap::new(),
             last_facts: BTreeMap::new(),
             seen: SeenSet::new(),
@@ -152,6 +155,9 @@ impl RealtimeCache {
         let _ = self.seen.remember(event.event_id.clone());
         if newer {
             self.versions.insert(key, version);
+            if event.kind == "auction.final_phase_entered" && self.final_at.is_none() {
+                self.final_at = Some(event.stream_sequence);
+            }
         }
         EventMerge::Applied { refresh: newer }
     }
@@ -192,11 +198,14 @@ impl RealtimeCache {
             return EventMerge::Applied { refresh: false };
         }
 
-        if self
-            .versions
-            .get(lot_id)
-            .is_some_and(|previous| state_version != previous.saturating_add(1))
-            || !self.ordered_fact_index(lot_id, state_version, fact_index, event.stream_sequence)
+        if self.last_facts.get(lot_id).is_some_and(|previous| {
+            let expected = previous.state_version.checked_add(1);
+            // Final 收紧截止可推进一次 lot 版本而不写竞价事实。只有本 lot 跨越该场次事件的
+            // 首个新事实能解释这一步，命令事实序号和流游标仍须分别通过原校验。
+            let clamped_in_final = self.final_at.is_some_and(|at| previous.stream_sequence < at)
+                && expected.and_then(|version| version.checked_add(1)) == Some(state_version);
+            expected != Some(state_version) && !clamped_in_final
+        }) || !self.ordered_fact_index(lot_id, state_version, fact_index, event.stream_sequence)
         {
             return EventMerge::Gap;
         }
@@ -207,8 +216,10 @@ impl RealtimeCache {
             self.fact_identities.remove(&evicted);
         }
         self.fact_identities.insert(bid_id.to_owned(), identity);
-        self.last_facts.insert(lot_id.to_owned(), LastBidFact { fact_index, state_version });
-        self.versions.insert(lot_id.to_owned(), state_version);
+        self.last_facts.insert(
+            lot_id.to_owned(),
+            LastBidFact { fact_index, state_version, stream_sequence: event.stream_sequence },
+        );
         self.after = event.stream_sequence;
         EventMerge::BidApplied
     }

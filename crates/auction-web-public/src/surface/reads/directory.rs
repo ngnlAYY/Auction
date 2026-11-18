@@ -41,7 +41,7 @@ impl RoundPage {
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 struct DirectoryScope {
-    world: String,
+    world: Option<String>,
     generation: u64,
 }
 
@@ -245,7 +245,8 @@ impl RoundDirectory {
     }
 
     pub(super) fn load_options(mut self) {
-        self.opened_world.set(Some(self.scope.peek().world.clone()));
+        let world = self.scope.peek().world.clone();
+        self.opened_world.set(world);
     }
 }
 
@@ -253,7 +254,7 @@ impl RoundDirectory {
 pub(super) fn use_round_directory(
     page: RoundPage,
     query: Signal<PublicBoardQuery>,
-    world: Memo<String>,
+    world: Memo<Option<String>>,
     refresh: Signal<u64>,
 ) -> RoundDirectory {
     use_round_directory_with(page, query, world, refresh, fetch_bid_log_auctions)
@@ -262,7 +263,7 @@ pub(super) fn use_round_directory(
 fn use_round_directory_with(
     page: RoundPage,
     query: Signal<PublicBoardQuery>,
-    world: Memo<String>,
+    world: Memo<Option<String>>,
     refresh: Signal<u64>,
     fetch_page: impl AsyncFn(
         String,
@@ -281,23 +282,28 @@ fn use_round_directory_with(
         let scope = scope();
         let current = directory.read();
         (page == RoundPage::Fulfillment
+            && scope.world.is_some()
             && current.scope == scope
             && current.needs_more_options()
-            && opened_world.read().as_deref() == Some(scope.world.as_str()))
-        .then_some(scope)
+            && *opened_world.read() == scope.world)
+            .then_some(scope)
     });
     let full_fulfillment = use_resource(move || {
         let scope = full_fulfillment_request();
         async move {
             let scope = scope?;
-            let result = fetch_fulfillment_auctions(scope.world.clone()).await.map(Rc::<[_]>::from);
+            if read_page_query().world.invalid() {
+                return None;
+            }
+            let result =
+                fetch_fulfillment_auctions(scope.world.clone()?).await.map(Rc::<[_]>::from);
             Some((scope, result))
         }
     });
     use_effect(move || {
         let current = scope();
         let wanted = requested();
-        let opened = opened_world.read().as_deref() == Some(current.world.as_str());
+        let opened = *opened_world.read() == current.world;
         let scope_changed = directory.peek().scope != current;
         if scope_changed {
             for (_, task) in std::mem::take(&mut *tasks.borrow_mut()) {
@@ -315,6 +321,11 @@ fn use_round_directory_with(
                 }
             };
             directory.set(Directory::new(current.clone(), page, previous));
+        }
+        // 非法世界仍保留在地址中，取消上一范围的目录且不发生任何场次查询。
+        let Some(world) = current.world.as_ref() else { return };
+        if read_page_query().world.invalid() {
+            return;
         }
         if full_fulfillment
             .read_unchecked()
@@ -334,8 +345,9 @@ fn use_round_directory_with(
             }
             let expected = current.clone();
             let fetch_page = fetch_page.clone();
+            let world = world.clone();
             let task = spawn(async move {
-                let result = fetch_page(expected.world.clone(), status, number).await;
+                let result = fetch_page(world, status, number).await;
                 // 迟到的目录只属于发起时的世界与代际。
                 let same_scope = *scope.peek() == expected && directory.peek().scope == expected;
                 if same_scope {
@@ -347,6 +359,7 @@ fn use_round_directory_with(
     });
     let view = use_memo(move || {
         let scope = scope();
+        scope.world.as_ref()?;
         let target = requested();
         let id = target.selected_id();
         let invalid = matches!(&target, AuctionParameter::Invalid(_));
@@ -623,7 +636,7 @@ mod tests {
         let control = consume_context::<Rc<ReadTrace>>();
         let trace = use_signal(|| control.clone());
         let query = use_page_query();
-        let world = use_memo(|| "main".to_owned());
+        let world = use_memo(|| Some("main".to_owned()));
         let refresh = use_signal(|| 0);
         let directory = use_round_directory_with(
             control.page,

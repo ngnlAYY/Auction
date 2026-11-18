@@ -1,16 +1,21 @@
 //! lot 目录读取（首次未得到权威值时的单次重读、首屏预取与唯一 URL 构造点）与 lot 详情读取。
 
+use std::cell::Cell;
 use std::future::Future;
 
 use auction_web_shared::timer::TimeoutFuture;
+use auction_web_shared::visibility::document_is_visible;
 use url::form_urlencoded;
 
 use super::super::clock::send_conditional_response;
 use super::super::swr_cache::{self, CacheRead, FetchOutcome};
 use super::super::{CatalogLevelFilter, LotEnvelope, decoder};
-use super::cached_get::{cached_public_read, failure_outcome, transport_failure_outcome};
+use super::cached_get::{
+    cached_public_read_with_retry, failure_outcome, retry_now, transport_failure_outcome,
+};
 
-const PUBLIC_QUERY_RETRY_DELAY_MILLIS: u32 = 1_000;
+const PUBLIC_QUERY_RETRY_DELAY_MILLIS: u64 = 1_000;
+const MAX_CATALOG_RETRY_DELAY_MILLIS: u64 = 60_000;
 
 /// lot 详情读取失败，仅传递是否已由权威 HTTP 状态确认不存在。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,40 +42,90 @@ pub(crate) async fn fetch_current_lots(
     page: i64,
     page_size: i64,
 ) -> Result<LotEnvelope, String> {
+    let url = current_lots_url(
+        &auction_id,
+        category.as_deref(),
+        equipment_group.as_deref(),
+        levels,
+        page,
+        page_size,
+    );
+    let retry_at = Cell::new(None);
     retry_once_unless_authoritative(
-        || {
+        &url,
+        |retry| {
             fetch_current_lots_once(
+                &url,
                 &auction_id,
                 category.as_deref(),
                 equipment_group.as_deref(),
                 levels,
-                page,
-                page_size,
+                &retry_at,
+                retry,
             )
         },
-        || TimeoutFuture::new(PUBLIC_QUERY_RETRY_DELAY_MILLIS),
+        || {
+            let now = retry_now();
+            let shared =
+                swr_cache::public_read_retry_after(&url, now).map(|window| window.not_before);
+            let delay = shared
+                .into_iter()
+                .chain(retry_at.get())
+                .max()
+                .map_or(PUBLIC_QUERY_RETRY_DELAY_MILLIS, |deadline| deadline.saturating_sub(now));
+            wait_to_retry(delay)
+        },
     )
     .await
 }
 
-/// 旧 Public QueryClient 对目录读取固定再尝试一次，错误壳只在第二次失败后出现。
-/// 首次读到权威值（新鲜命中、304 确认或新响应）直接返回；首次失败，或只得到传输失败、暂时性拒绝
-/// 暂时性拒绝后回退的旧快照时，等待后重读一次：等待期间 Resource 保留已展示的目录，拥塞通常
-/// 已过，能及时追上价格与领先者。第二次结果原样返回：再次回退时接受旧快照，失败关闭的拒绝照常
-/// 报错。
-/// `wait` 在首次读取结束后才构造，浏览器定时器从那一刻起计时。
-async fn retry_once_unless_authoritative<T, E, R, RF, W, WF>(read: R, wait: W) -> Result<T, E>
-where
-    R: Fn() -> RF,
-    RF: Future<Output = Result<CacheRead<T>, E>>,
-    W: FnOnce() -> WF,
-    WF: Future<Output = ()>,
-{
-    if let Ok(CacheRead { value, stale_fallback: None }) = read().await {
-        return Ok(value);
+fn retry_visible() -> bool {
+    #[cfg(test)]
+    if let Some(visible) = crate::surface::PageReadFixture::<(), bool>::response(()) {
+        return visible;
     }
-    wait().await;
-    read().await.map(|cached| cached.value)
+    document_is_visible()
+}
+
+async fn wait_to_retry(delay: u64) -> bool {
+    // 超出等待预算时交付首次结果，不能在服务端要求的时间之前发出补读。
+    if delay > MAX_CATALOG_RETRY_DELAY_MILLIS || !retry_visible() {
+        return false;
+    }
+    let delay = delay as u32;
+    #[cfg(test)]
+    if let Some(wait) = crate::surface::PageReadFixture::<
+        u32,
+        std::pin::Pin<Box<dyn Future<Output = ()>>>,
+    >::response(delay)
+    {
+        wait.await;
+        return retry_visible();
+    }
+    TimeoutFuture::new(delay).await;
+    retry_visible()
+}
+
+/// 首次权威值立即交付。等待期间仍可补读才发起第二次 GET，否则交付首次错误或旧快照。
+async fn retry_once_unless_authoritative<T, E, R, RF, W, WF>(
+    url: &str,
+    read: R,
+    wait: W,
+) -> Result<T, E>
+where
+    R: Fn(bool) -> RF,
+    RF: Future<Output = Option<Result<CacheRead<T, E>, E>>>,
+    W: FnOnce() -> WF,
+    WF: Future<Output = bool>,
+{
+    let Some(first) = read(false).await else {
+        unreachable!("首次读目录不受补读发送门禁限制");
+    };
+    if first.as_ref().is_ok_and(|read| read.stale_since().is_none()) || !wait().await {
+        return first.and_then(|cached| cached.deliver(url));
+    }
+    // 等同 URL 在途请求时可见性仍会变化。未发送补读时，按此刻的回退下限重新交付首次结果。
+    read(true).await.unwrap_or(first).and_then(|cached| cached.deliver(url))
 }
 
 /// 首屏预取：与 `/auctions/current` 并行读取上次记住的场次 lots，只单次尝试、丢弃结果。
@@ -83,39 +138,54 @@ pub(crate) async fn prefetch_current_lots(
     page: i64,
     page_size: i64,
 ) {
-    let _ = fetch_current_lots_once(
+    let url = current_lots_url(
         &auction_id,
         category.as_deref(),
         equipment_group.as_deref(),
         levels,
         page,
         page_size,
+    );
+    let _ = fetch_current_lots_once(
+        &url,
+        &auction_id,
+        category.as_deref(),
+        equipment_group.as_deref(),
+        levels,
+        &Cell::new(None),
+        false,
     )
     .await;
 }
 
 async fn fetch_current_lots_once(
+    url: &str,
     auction_id: &str,
     category: Option<&str>,
     equipment_group: Option<&str>,
     levels: CatalogLevelFilter,
-    page: i64,
-    page_size: i64,
-) -> Result<CacheRead<LotEnvelope>, String> {
-    let url = current_lots_url(auction_id, category, equipment_group, levels, page, page_size);
+    retry_at: &Cell<Option<u64>>,
+    retry: bool,
+) -> Option<Result<CacheRead<LotEnvelope, String>, String>> {
     let expected_auction = auction_id.to_owned();
     let expected_category = category.map(str::to_owned);
     let expected_equipment_group = equipment_group.map(str::to_owned);
-    cached_public_read(&url, swr_cache::LIVE_TTL_MILLIS, move |response| async move {
-        decoder::decode_lot_list(
-            response,
-            &expected_auction,
-            expected_category.as_deref(),
-            expected_equipment_group.as_deref(),
-            levels,
-        )
-        .await
-    })
+    cached_public_read_with_retry(
+        url,
+        swr_cache::LIVE_TTL_MILLIS,
+        move |response| async move {
+            decoder::decode_lot_list(
+                response,
+                &expected_auction,
+                expected_category.as_deref(),
+                expected_equipment_group.as_deref(),
+                levels,
+            )
+            .await
+        },
+        Some(retry_at),
+        move || !retry || retry_visible(),
+    )
     .await
 }
 
@@ -196,17 +266,26 @@ pub(crate) async fn fetch_lot_detail(lot_id: String) -> Result<LotEnvelope, LotD
 #[cfg(test)]
 mod tests {
     use std::cell::{Cell, RefCell};
-    use std::future::ready;
+    use std::future::{Future, poll_fn, ready};
+    use std::pin::Pin;
+    use std::rc::Rc;
+    use std::task::Poll;
 
     use dioxus::dioxus_core::NoOpMutations;
     use dioxus::prelude::*;
     use futures_util::FutureExt;
     use serde_json::json;
 
-    use super::{current_lots_url, fetch_lot_detail, retry_once_unless_authoritative};
-    use crate::api::swr_cache::CacheRead;
-    use crate::api::{CatalogLevelFilter, HttpResponseFixture, invalidate_all};
-    use crate::surface::LotDetailHttpFixture;
+    use super::{
+        current_lots_url, fetch_current_lots, fetch_lot_detail, prefetch_current_lots,
+        retry_once_unless_authoritative,
+    };
+    use crate::api::clock::ConditionalGetFailure;
+    use crate::api::swr_cache::{self, CacheRead, FetchOutcome};
+    use crate::api::{
+        CatalogLevelFilter, HttpResponseFixture, LotEnvelope, TransportError, invalidate_all,
+    };
+    use crate::surface::{LotDetailHttpFixture, PageReadFixture};
 
     const AUCTION_ID: &str = "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b";
     const LOT_ID: &str = "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2c";
@@ -283,14 +362,26 @@ mod tests {
         assert_eq!(DETAIL_READS.get(), 3);
     }
 
-    type CatalogRead = Result<CacheRead<&'static str>, &'static str>;
+    type CatalogRead = Result<CacheRead<&'static str, &'static str>, &'static str>;
+    const STALE_URL: &str = "/api/v1/auctions/fixture/lots?page=1&page_size=20";
 
     fn authoritative(value: &'static str) -> CatalogRead {
-        Ok(CacheRead { value, stale_fallback: None })
+        Ok(CacheRead::current(value))
     }
 
     fn stale(value: &'static str) -> CatalogRead {
-        Ok(CacheRead { value, stale_fallback: Some(1_000) })
+        swr_cache::read_or_fetch(
+            STALE_URL,
+            0,
+            || 0,
+            |_| ready(FetchOutcome::<_, &'static str>::Changed { value, etag: None }),
+        )
+        .now_or_never()
+        .unwrap()
+        .unwrap();
+        swr_cache::read_or_fetch(STALE_URL, 0, || 1_000, |_| ready(FetchOutcome::Busy("read_busy")))
+            .now_or_never()
+            .unwrap()
     }
 
     /// 依次给出每次读取的结果，返回最终结果、读取次数与等待次数；读取与等待都立即就绪。
@@ -301,13 +392,16 @@ mod tests {
         let read_count = Cell::new(0);
         let wait_count = Cell::new(0);
         let result = retry_once_unless_authoritative(
-            || {
+            STALE_URL,
+            |_| {
                 read_count.set(read_count.get() + 1);
-                std::future::ready(reads.borrow_mut().next().unwrap_or(Err("unexpected_read")))
+                std::future::ready(Some(
+                    reads.borrow_mut().next().unwrap_or(Err("unexpected_read")),
+                ))
             },
             || {
                 wait_count.set(wait_count.get() + 1);
-                std::future::ready(())
+                std::future::ready(true)
             },
         )
         .now_or_never()
@@ -327,6 +421,345 @@ mod tests {
         assert_eq!(run_catalog_retry([stale("v1"), Err("not_found")]), (Err("not_found"), 2, 1));
         // 首次失败（没有可回退的快照）：照旧再读一次。
         assert_eq!(run_catalog_retry([Err("read_busy"), authoritative("v1")]), (Ok("v1"), 2, 1));
+        let kept = retry_once_unless_authoritative(
+            STALE_URL,
+            |_| ready(Some(stale("v1"))),
+            || ready(false),
+        )
+        .now_or_never()
+        .unwrap();
+        assert_eq!(kept, Ok("v1"));
+    }
+
+    #[test]
+    fn a_skipped_retry_rejects_a_snapshot_invalidated_during_the_wait() {
+        for invalidate in [swr_cache::invalidate_after_command, || {
+            swr_cache::observe_response_status(STALE_URL, 404);
+        }] {
+            let result = retry_once_unless_authoritative(
+                STALE_URL,
+                |_| ready(Some(stale("v1"))),
+                || {
+                    invalidate();
+                    ready(false)
+                },
+            )
+            .now_or_never()
+            .unwrap();
+            assert_eq!(result, Err("read_busy"));
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    enum CatalogStart {
+        Direct,
+        WaitingForPrefetch,
+        AfterPrefetch,
+        CancelledPrefetch,
+    }
+
+    struct CatalogRetryTrace {
+        page: i64,
+        start: CatalogStart,
+        now: Cell<u64>,
+        retry_after: &'static str,
+        visible: Cell<bool>,
+        visible_on_wake: bool,
+        delays: RefCell<Vec<u32>>,
+        requests: RefCell<Vec<String>>,
+        finished: Cell<bool>,
+    }
+
+    fn retry_fixture() -> Element {
+        let trace = consume_context::<Rc<CatalogRetryTrace>>();
+        use_context_provider({
+            let trace = trace.clone();
+            move || {
+                PageReadFixture::new(move |(url, _etag): (String, Option<String>)| {
+                    let first = trace.requests.borrow().is_empty();
+                    trace.requests.borrow_mut().push(url);
+                    let mut pending = first && !matches!(trace.start, CatalogStart::Direct);
+                    let read_body = Box::pin(poll_fn(move |cx| {
+                        if std::mem::take(&mut pending) {
+                            cx.waker().wake_by_ref();
+                            Poll::Pending
+                        } else {
+                            Poll::Ready(())
+                        }
+                    }));
+                    ConditionalGetFailure {
+                        status: Some(429),
+                        retry_after: Some(trace.retry_after),
+                        date: Some("Wed, 18 Nov 2026 12:00:00 GMT"),
+                        transport: TransportError::Timeout,
+                        read_body: Some(read_body),
+                    }
+                })
+            }
+        });
+        use_context_provider({
+            let trace = trace.clone();
+            move || PageReadFixture::new(move |()| trace.visible.get())
+        });
+        use_context_provider({
+            let trace = trace.clone();
+            move || PageReadFixture::new(move |()| trace.now.get())
+        });
+        use_context_provider({
+            let trace = trace.clone();
+            move || {
+                PageReadFixture::new(move |delay: u32| -> Pin<Box<dyn Future<Output = ()>>> {
+                    assert_eq!(trace.requests.borrow().len(), 1, "时限到期前只能有首次 GET");
+                    trace.delays.borrow_mut().push(delay);
+                    let trace = trace.clone();
+                    let mut first_poll = true;
+                    Box::pin(poll_fn(move |cx| {
+                        if std::mem::take(&mut first_poll) {
+                            cx.waker().wake_by_ref();
+                            Poll::Pending
+                        } else {
+                            trace.now.set(trace.now.get() + u64::from(delay));
+                            trace.visible.set(trace.visible_on_wake);
+                            Poll::Ready(())
+                        }
+                    }))
+                })
+            }
+        });
+        use_future(move || {
+            let trace = trace.clone();
+            async move {
+                let read = fetch_current_lots(
+                    AUCTION_ID.to_owned(),
+                    None,
+                    None,
+                    CatalogLevelFilter::default(),
+                    trace.page,
+                    20,
+                );
+                let warm = prefetch_current_lots(
+                    AUCTION_ID.to_owned(),
+                    None,
+                    None,
+                    CatalogLevelFilter::default(),
+                    trace.page,
+                    20,
+                );
+                let result = match trace.start {
+                    CatalogStart::Direct => read.await,
+                    CatalogStart::WaitingForPrefetch => futures_util::join!(warm, read).1,
+                    CatalogStart::AfterPrefetch => {
+                        warm.await;
+                        read.await
+                    }
+                    CatalogStart::CancelledPrefetch => {
+                        let mut warm = Box::pin(warm);
+                        assert!(warm.as_mut().now_or_never().is_none());
+                        drop(warm);
+                        swr_cache::invalidate_after_command();
+                        read.await
+                    }
+                };
+                assert_eq!(result.unwrap_err(), "request_timeout");
+                trace.finished.set(true);
+            }
+        });
+        rsx! {}
+    }
+
+    #[test]
+    fn catalog_rechecks_visibility_after_waiting_for_an_inflight_get() {
+        for (visible, invalidated, expected_gets) in
+            [(true, false, 3), (false, false, 2), (false, true, 2)]
+        {
+            let requests = Rc::new(Cell::new(0));
+            let wake = Rc::new(Cell::new(false));
+            let finish = Rc::new(Cell::new(false));
+            let shown = Rc::new(Cell::new(true));
+            let page = 27 + i64::from(visible) + 2 * i64::from(invalidated);
+            let url =
+                current_lots_url(AUCTION_ID, None, None, CatalogLevelFilter::default(), page, 20);
+            swr_cache::get_or_fetch(&url, 0, swr_cache::now_millis, |_| {
+                ready(FetchOutcome::<_, String>::Changed {
+                    value: LotEnvelope {
+                        auction_id: AUCTION_ID.to_owned(),
+                        auction_status: "live".to_owned(),
+                        projection_kind: "live".to_owned(),
+                        presentation_mode: "live".to_owned(),
+                        bidding_open: true,
+                        opens_at: "2026-11-18T12:00:00Z".to_owned(),
+                        preview_revision: 0,
+                        final_restriction: None,
+                        lots: None,
+                        lot: None,
+                        total: Some(0),
+                        page: Some(page),
+                        page_size: Some(20),
+                        category_counts: None,
+                    },
+                    etag: Some("\"old\"".to_owned()),
+                })
+            })
+            .now_or_never()
+            .unwrap()
+            .unwrap();
+            swr_cache::invalidate_all();
+            let wire = PageReadFixture::new({
+                let requests = requests.clone();
+                let finish = finish.clone();
+                move |(_url, etag): (String, Option<String>)| {
+                    assert_eq!(etag.as_deref(), Some("\"old\""));
+                    let count = requests.get() + 1;
+                    requests.set(count);
+                    let read_body = (count == 2).then(|| {
+                        let finish = finish.clone();
+                        Box::pin(poll_fn(move |_| {
+                            if finish.get() { Poll::Ready(()) } else { Poll::Pending }
+                        })) as Pin<Box<dyn Future<Output = ()>>>
+                    });
+                    ConditionalGetFailure {
+                        status: Some(503),
+                        retry_after: None,
+                        date: None,
+                        read_body,
+                        transport: TransportError::Timeout,
+                    }
+                }
+            });
+            let timer = PageReadFixture::new({
+                let wake = wake.clone();
+                move |delay: u32| -> Pin<Box<dyn Future<Output = ()>>> {
+                    assert_eq!(delay, 1_000);
+                    let wake = wake.clone();
+                    Box::pin(poll_fn(
+                        move |_| if wake.get() { Poll::Ready(()) } else { Poll::Pending },
+                    ))
+                }
+            });
+            let visibility = PageReadFixture::new({
+                let shown = shown.clone();
+                move |()| shown.get()
+            });
+            let mut dom = VirtualDom::new(|| rsx! {})
+                .with_root_context(wire)
+                .with_root_context(timer)
+                .with_root_context(visibility);
+            dom.rebuild_in_place();
+            dom.in_scope(ScopeId::APP, || {
+                let mut read = Box::pin(fetch_current_lots(
+                    AUCTION_ID.to_owned(),
+                    None,
+                    None,
+                    CatalogLevelFilter::default(),
+                    page,
+                    20,
+                ));
+                assert!(read.as_mut().now_or_never().is_none());
+                assert_eq!(requests.get(), 1);
+                let mut inflight = Box::pin(prefetch_current_lots(
+                    AUCTION_ID.to_owned(),
+                    None,
+                    None,
+                    CatalogLevelFilter::default(),
+                    page,
+                    20,
+                ));
+                assert!(inflight.as_mut().now_or_never().is_none());
+                wake.set(true);
+                assert!(read.as_mut().now_or_never().is_none(), "补读等单飞请求结束");
+                assert_eq!(requests.get(), 2);
+                shown.set(visible);
+                if invalidated {
+                    swr_cache::invalidate_after_command();
+                }
+                finish.set(true);
+                inflight.now_or_never().unwrap();
+                let result = read.now_or_never().unwrap();
+                assert_eq!(requests.get(), expected_gets);
+                if invalidated {
+                    assert_eq!(result.unwrap_err(), "request_timeout");
+                } else {
+                    assert_eq!(result.unwrap().page, Some(page));
+                }
+            });
+        }
+    }
+
+    #[test]
+    fn catalog_uses_observed_retry_after_and_drops_hidden_retries() {
+        for (index, (retry_after, visible, visible_on_wake, expected_delay, requests)) in [
+            ("4", true, true, Some(4_000), 2),
+            ("Wed, 18 Nov 2026 12:00:07 GMT", true, true, Some(7_000), 2),
+            ("invalid", true, true, Some(1_000), 2),
+            ("60", true, true, Some(60_000), 2),
+            ("61", true, true, None, 1),
+            ("999999999999999999999999", true, true, None, 1),
+            ("4", false, true, None, 1),
+            ("4", true, false, Some(4_000), 1),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let trace = Rc::new(CatalogRetryTrace {
+                page: i64::try_from(index).unwrap() + 1,
+                start: CatalogStart::Direct,
+                now: Cell::new(0),
+                retry_after,
+                visible: Cell::new(visible),
+                visible_on_wake,
+                delays: RefCell::default(),
+                requests: RefCell::default(),
+                finished: Cell::default(),
+            });
+            run_retry_fixture(trace, expected_delay, requests);
+        }
+    }
+
+    #[test]
+    fn directory_waits_for_the_retry_window_even_when_the_header_came_from_prefetch() {
+        for (page, start) in [
+            (1, CatalogStart::WaitingForPrefetch),
+            (2, CatalogStart::AfterPrefetch),
+            (3, CatalogStart::CancelledPrefetch),
+        ] {
+            let trace = Rc::new(CatalogRetryTrace {
+                page,
+                start,
+                now: Cell::new(0),
+                retry_after: "4",
+                visible: Cell::new(true),
+                visible_on_wake: true,
+                delays: RefCell::default(),
+                requests: RefCell::default(),
+                finished: Cell::default(),
+            });
+            run_retry_fixture(trace, Some(4_000), 2);
+        }
+    }
+
+    fn run_retry_fixture(
+        trace: Rc<CatalogRetryTrace>,
+        expected_delay: Option<u32>,
+        requests: usize,
+    ) {
+        let mut dom = VirtualDom::new(retry_fixture).with_root_context(trace.clone());
+        dom.rebuild_in_place();
+        for _ in 0..12 {
+            dom.process_events();
+            dom.render_immediate(&mut NoOpMutations);
+        }
+        assert!(trace.finished.get());
+        assert_eq!(*trace.delays.borrow(), expected_delay.into_iter().collect::<Vec<_>>());
+        assert_eq!(
+            *trace.requests.borrow(),
+            vec![
+                format!(
+                    "/api/v1/auctions/{AUCTION_ID}/lots?page={}&page_size=20&fields=summary",
+                    trace.page
+                );
+                requests
+            ]
+        );
     }
 
     #[test]

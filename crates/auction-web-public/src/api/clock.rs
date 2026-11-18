@@ -132,12 +132,38 @@ pub(crate) async fn send_get(url: &str) -> Result<Response, TransportError> {
 pub(super) async fn send_get_conditional(
     url: &str,
     etag: Option<&str>,
+    observe: impl FnOnce(u16, Option<&str>, Option<&str>),
 ) -> Result<Response, (TransportError, Option<u16>)> {
-    let response = send_conditional_response(
+    #[cfg(test)]
+    if let Some(reply) = crate::surface::PageReadFixture::<
+        (String, Option<String>),
+        ConditionalGetFailure,
+    >::response((url.to_owned(), etag.map(str::to_owned)))
+    {
+        if let Some(status) = reply.status {
+            super::swr_cache::observe_response_status(url, status);
+            observe(status, reply.retry_after, reply.date);
+        }
+        if let Some(wait) = reply.read_body {
+            wait.await;
+        }
+        return Err((reply.transport, reply.status));
+    }
+    let response = send_conditional_response_observed(
         url,
         etag,
         #[cfg(test)]
         None,
+        |head| match head {
+            ResponseHead::Browser(response) => {
+                let headers = response.headers();
+                let retry_after = headers.get("Retry-After");
+                let date = retry_after.as_ref().and_then(|_| headers.get("Date"));
+                observe(response.status(), retry_after.as_deref(), date.as_deref());
+            }
+            #[cfg(test)]
+            ResponseHead::Fixture(_) => {}
+        },
     )
     .await?;
     match response {
@@ -147,11 +173,36 @@ pub(super) async fn send_get_conditional(
     }
 }
 
+#[cfg(test)]
+pub(super) struct ConditionalGetFailure {
+    pub(super) status: Option<u16>,
+    pub(super) retry_after: Option<&'static str>,
+    pub(super) date: Option<&'static str>,
+    pub(super) transport: TransportError,
+    pub(super) read_body: Option<std::pin::Pin<Box<dyn std::future::Future<Output = ()>>>>,
+}
+
 /// 公开条件请求在响应头到达时驱逐已不存在的资源，即使后来未读完正文。
 pub(super) async fn send_conditional_response(
     url: &str,
     etag: Option<&str>,
     #[cfg(test)] fixture: Option<HttpFixtureFuture>,
+) -> Result<HttpResponse, (TransportError, Option<u16>)> {
+    send_conditional_response_observed(
+        url,
+        etag,
+        #[cfg(test)]
+        fixture,
+        |_| {},
+    )
+    .await
+}
+
+async fn send_conditional_response_observed(
+    url: &str,
+    etag: Option<&str>,
+    #[cfg(test)] fixture: Option<HttpFixtureFuture>,
+    observe: impl FnOnce(ResponseHead<'_>),
 ) -> Result<HttpResponse, (TransportError, Option<u16>)> {
     let mut status = None;
     let result = send_response_observed(
@@ -169,11 +220,12 @@ pub(super) async fn send_conditional_response(
             let response_status = response.status();
             status = Some(response_status);
             super::swr_cache::observe_response_status(url, response_status);
-            match response {
+            match &response {
                 ResponseHead::Browser(response) => observe_revalidated_date(response),
                 #[cfg(test)]
                 ResponseHead::Fixture(_) => {}
             }
+            observe(response);
         },
     )
     .await;

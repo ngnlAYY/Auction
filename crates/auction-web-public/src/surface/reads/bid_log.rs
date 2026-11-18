@@ -8,7 +8,7 @@ use dioxus::prelude::*;
 
 use super::directory::{RoundOptionsError, RoundPage, use_round_directory};
 use super::lot_filter::use_lot_filter_draft;
-use super::query::{InvalidReadAuction, ReadSelection, use_round_body};
+use super::query::{InvalidReadAuction, InvalidReadWorld, ReadSelection, use_round_body};
 use crate::api::{BidLogEntry, BidLogPage, fetch_bid_log_page, fetch_worlds, lot_code_for};
 use crate::surface::read_page_query;
 use crate::surface::{
@@ -16,7 +16,7 @@ use crate::surface::{
     use_content_loading, use_page_query, world_label,
 };
 use crate::surface::{
-    LotDetailLookupButton, LotDetailLookupHost, use_bid_refresh, use_lot_detail_lookup,
+    LotDetailLookupButton, LotDetailLookupHost, use_auction_bid_refresh, use_lot_detail_lookup,
 };
 use crate::surface::{
     PageKey, PublicPageClampError, page_pathname, public_page_within_offset, set_public_page_size,
@@ -31,18 +31,14 @@ pub(crate) fn bid_log() -> Element {
     let mut refresh_generation = use_context::<Signal<u64>>();
     // 世界/拍卖/页码/lot 筛选与地址栏双向同步。
     let query_state_signal = use_page_query();
-    let world_filter = use_memo(move || {
-        query_state_signal
-            .read()
-            .world
-            .clone()
-            .filter(|world| matches!(world.as_str(), "main" | "isekai"))
-            .unwrap_or_else(|| "main".to_owned())
-    });
+    let world_filter =
+        use_memo(move || query_state_signal.read().world.round_world().map(str::to_owned));
+    let invalid_world = world_filter.read().is_none();
     let page_number = use_memo(move || query_state_signal.read().page);
     let page_size = use_memo(move || query_state_signal.read().page_size);
     // 缺省场次与第一页一同提交，无需先替换页码。
     let bounds = use_public_page_bounds(query_state_signal, pathname, |query| {
+        query.world.round_world()?;
         query.auction_id().map(|_| (PageKey::BidLog, query.page_size))
     });
     let lot_draft = use_lot_filter_draft(query_state_signal, pathname);
@@ -50,7 +46,12 @@ pub(crate) fn bid_log() -> Element {
     use_effect(move || {
         let (has_auction, alias, page, page_size) = {
             let query = query_state_signal.read();
-            (query.auction_id().is_some(), query.bid_log_page_alias, query.page, query.page_size)
+            (
+                query.auction_id().is_some() && !query.world.invalid(),
+                query.bid_log_page_alias,
+                query.page,
+                query.page_size,
+            )
         };
         // 成功替换会写入同一个 Signal，此时前面的读借用必须已释放。
         if has_auction
@@ -60,6 +61,7 @@ pub(crate) fn bid_log() -> Element {
         {
             let current = read_page_query();
             if current.auction_id().is_some()
+                && !current.world.invalid()
                 && current.bid_log_page_alias
                 && current.page == page
                 && current.page_size == page_size
@@ -75,12 +77,12 @@ pub(crate) fn bid_log() -> Element {
     });
 
     let worlds = use_resource(fetch_worlds);
-    let selected_world = world_filter();
+    let selected_world = world_filter().unwrap_or_default();
     let mut world_options = match &*worlds.read_unchecked() {
         Some(Ok(worlds)) => supported_worlds(worlds),
-        _ => vec![selected_world.clone()],
+        _ => vec!["main".to_owned(), "isekai".to_owned()],
     };
-    if !world_options.contains(&selected_world) {
+    if !invalid_world && !world_options.contains(&selected_world) {
         world_options.push(selected_world.clone());
     }
     let directory = use_round_directory(
@@ -98,7 +100,8 @@ pub(crate) fn bid_log() -> Element {
             fetch_bid_log_page(auction_id, page, world, lot, size).await
         },
     );
-    use_bid_refresh(data, readable);
+    let bid_scope = readable.then(|| directory.readable()).flatten();
+    use_auction_bid_refresh(data, bid_scope.as_ref().map(|round| round.id.as_str()));
     let lookup = use_lot_detail_lookup();
     let current_page = page_number();
     let current_lot_filter = lot_draft.applied_value();
@@ -122,6 +125,9 @@ pub(crate) fn bid_log() -> Element {
         .map(|(_, result)| result);
     let mut loading = false;
     let body = match current_result {
+        _ if invalid_world => {
+            rsx! { InvalidReadWorld { world: query_state_signal.read().world.clone() } }
+        }
         _ if directory.invalid_auction() => rsx! {
             InvalidReadAuction {
                 on_recover: move |_| { ReadSelection::Clear.select(query_state_signal, pathname); },
@@ -153,7 +159,7 @@ pub(crate) fn bid_log() -> Element {
                 BidLogTable {
                     page: page.clone(),
                     current_page,
-                    world: world_filter(),
+                    world: selected_world.clone(),
                     lot_filter: current_lot_filter.clone(),
                     on_page_change: move |page| PageKey::BidLog.write(query_state_signal, pathname, page, QueryWriteMode::Push),
                     on_page_clamp: move |page| PageKey::BidLog.write(query_state_signal, pathname, page, QueryWriteMode::Replace),
@@ -178,14 +184,19 @@ pub(crate) fn bid_log() -> Element {
                         name: "world",
                         autocomplete: "off",
                         value: selected_world.clone(),
+                        aria_invalid: invalid_world.to_string(),
+                        aria_describedby: invalid_world.then_some("public-read-world-error"),
                         disabled: world_options.is_empty(),
                         onchange: move |event| {
                             if !ReadSelection::World(event.value()).select(query_state_signal, pathname) {
                                 restore_select_value(&event, &selected_world);
                             }
                         },
+                        if invalid_world {
+                            option { value: "", disabled: true, selected: true, {t!("world-label")} }
+                        }
                         for world in &world_options {
-                            option { value: world.clone(), {world_label(world)} }
+                            option { value: world.clone(), selected: selected_world == *world, {world_label(world)} }
                         }
                     }
                 }
@@ -268,9 +279,6 @@ pub(crate) fn bid_log() -> Element {
                 }
             }
             {body}
-            if lookup.failed() {
-                p { class: "action-feedback action-feedback--error", role: "alert", {t!("data-error")} }
-            }
             // 抽屉宿主在记录读取分支之外：翻页、筛选或后台重读替换表格时，已打开的详情不被卸载。
             LotDetailLookupHost { lookup }
         }
@@ -403,21 +411,34 @@ pub(crate) fn bid_log_status_class(status: &str) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
+    use std::future::{Future, poll_fn, ready};
+    use std::pin::Pin;
     use std::rc::Rc;
+    use std::task::{Poll, Waker};
 
-    use auction_web_shared::QueryWriteMode;
+    use auction_web_shared::{QueryWriteMode, use_second_ticker};
     use dioxus::prelude::*;
 
     use super::super::query::tests::{
-        MountedReadPage, ROUND_ID, invalid_auction_recovery, mount_read_page,
+        MountedReadPage, OLDER_ROUND_ID, ROUND_ID, invalid_auction_recovery, mount_read_page,
     };
     use super::bid_log;
-    use crate::api::BidLogPage;
-    use crate::surface::{
-        PageBrowserFixture, PageReadFixture, PublicPager, dispatch_page_event, page_test_contexts,
-        rendered_event_target, run_page_events, set_public_page_size, settle_page, use_page_query,
+    use crate::api::{
+        AuctionListPage, BidLogEntry, BidLogPage, HistoricalAuction, HttpResponseFixture,
+        WorldStatus, Worlds,
     };
+    use crate::surface::{
+        LotDetailHttpFixture, PageBrowserFixture, PageReadFixture, PublicBidRefresh, PublicPager,
+        dispatch_page_event, page_test_contexts, rendered_event_target, run_page_events,
+        set_public_page_size, settle_page, use_page_query,
+    };
+
+    const LOT_ID: &str = "018f4c8e-7b2a-4c3d-8e4f-000000000019";
+
+    thread_local! {
+        static DETAIL_READS: Cell<usize> = const { Cell::new(0) };
+    }
 
     fn bid_log_page() -> Element {
         page_test_contexts();
@@ -448,6 +469,286 @@ mod tests {
         });
         let (dom, edits) = mount_read_page(bid_log_page, browser, body);
         (dom, edits, requests)
+    }
+
+    #[test]
+    fn invalid_bid_log_world_blocks_reads_until_an_explicit_selection() {
+        run_page_events(
+            module_path!(),
+            "invalid_bid_log_world_blocks_reads_until_an_explicit_selection",
+            || {
+                for world in ["world=unknown", "world=main&world=isekai"] {
+                    let browser = PageBrowserFixture::new("/bidlog", &format!("{world}&keep=yes"));
+                    let (mut dom, edits, requests) = mount_bid_log(&browser, 1);
+                    assert!(requests.borrow().is_empty());
+                    assert!(browser.writes().is_empty());
+                    assert!(edits.iter().any(|edit| matches!(
+                    edit, dioxus::dioxus_core::Mutation::SetAttribute {
+                        name: "aria-describedby", value: dioxus::dioxus_core::AttributeValue::Text(value), ..
+                    } if value == "public-read-world-error"
+                )));
+                    let select = rendered_event_target(
+                        &dom,
+                        "select",
+                        "id",
+                        "public-auction-bid-log-world",
+                        "onchange",
+                    );
+                    browser.allow_writes(false);
+                    dispatch_page_event(&dom, "change", select, "main");
+                    settle_page(&mut dom);
+                    assert!(requests.borrow().is_empty());
+                    assert!(browser.state().world.invalid());
+                    browser.allow_writes(true);
+                    dispatch_page_event(&dom, "change", select, "main");
+                    settle_page(&mut dom);
+                    assert_eq!(requests.borrow().len(), 1);
+                    assert!(browser.value("world").is_none());
+                    assert_eq!(browser.value("keep").as_deref(), Some("yes"));
+                    assert!(requests.borrow()[0].ends_with("world=main"));
+                }
+            },
+        );
+    }
+
+    #[test]
+    fn a_bid_for_another_round_leaves_the_settled_bid_log_alone() {
+        let browser = PageBrowserFixture::new("/bidlog", &format!("auction={ROUND_ID}"));
+        let (mut dom, _, requests) = mount_bid_log(&browser, 1);
+        assert_eq!(requests.borrow().len(), 1);
+        for (auction, expected) in [(OLDER_ROUND_ID, 1), (ROUND_ID, 2)] {
+            dom.in_scope(ScopeId::APP, || {
+                consume_context::<crate::surface::PublicBidRefresh>().notify(auction, 0);
+            });
+            settle_page(&mut dom);
+            assert_eq!(requests.borrow().len(), expected);
+        }
+    }
+
+    fn bid_log_for_drawer() -> Element {
+        use_second_ticker();
+        bid_log_page()
+    }
+
+    fn drawer_directory(url: String) -> Result<AuctionListPage, String> {
+        let (auction_id, world) = if url.contains("world=isekai") {
+            (OLDER_ROUND_ID, "isekai")
+        } else {
+            (ROUND_ID, "main")
+        };
+        let auctions = url.contains("status=settled").then(|| HistoricalAuction {
+            id: auction_id.to_owned(),
+            world_id: world.to_owned(),
+            sequence: 1,
+            status: "settled".to_owned(),
+            scheduled_open_at: "2026-11-14T12:00:00Z".to_owned(),
+            opened_at: None,
+            final_phase_at: None,
+            effective_end_at: None,
+            settled_at: None,
+            lot_count: 1,
+            sold_count: 1,
+            unsold_count: 0,
+            sold_amount: 1000,
+            state_version: 1,
+        });
+        Ok(AuctionListPage {
+            total: Some(i64::from(auctions.is_some())),
+            auctions: auctions.into_iter().collect(),
+            page: Some(1),
+            page_size: 200,
+            cursor: None,
+            next_cursor: None,
+            has_more: None,
+        })
+    }
+
+    fn drawer_bids(url: &str) -> BidLogPage {
+        let for_log = url.contains("world=main");
+        let page_size = if url.contains("page_size=4") {
+            4
+        } else if url.contains("page_size=10") {
+            10
+        } else {
+            20
+        };
+        let bids = for_log.then(|| BidLogEntry {
+            id: "018f4c8e-7b2a-4c3d-8e4f-000000000020".to_owned(),
+            auction_id: ROUND_ID.to_owned(),
+            lot_id: LOT_ID.to_owned(),
+            lot_number: 1,
+            amount: 1000,
+            equipment_name: "Shield".to_owned(),
+            equipment_category: "Shield".to_owned(),
+            bidder_name: "Buyer".to_owned(),
+            source: None,
+            source_post_number: None,
+            source_post_url: None,
+            valid: true,
+            accepted_state_version: 1,
+            fact_index: 1,
+            mechanism: "direct".to_owned(),
+            created_at: "2026-11-15T12:00:00Z".to_owned(),
+            defeated_proxy: None,
+        });
+        BidLogPage {
+            bids: bids.into_iter().collect(),
+            page: Some(1),
+            page_size,
+            total: Some(5),
+            cursor: None,
+            next_cursor: None,
+            has_more: None,
+        }
+    }
+
+    fn drawer_detail() -> HttpResponseFixture {
+        HttpResponseFixture {
+            status: 200,
+            etag: None,
+            body: Some(
+                serde_json::json!({
+                    "code": "ok", "message": "拍品详情",
+                    "data": {
+                        "auction_id": ROUND_ID, "auction_status": "settled",
+                        "projection_kind": "live", "presentation_mode": "live",
+                        "bidding_open": false, "opens_at": "2026-11-14T12:00:00Z",
+                        "preview_revision": 0,
+                        "lot": {
+                            "id": LOT_ID, "auction_id": ROUND_ID, "lot_number": 1,
+                            "status": "unsold", "start_price": 1000, "current_price": 1000,
+                            "next_bid": 1000, "has_leader": false, "seller_name": "Seller",
+                            "state_version": 1,
+                            "equipment": { "name": "Shield", "category": "Shield",
+                                "equipment_group": "rare", "game_equipment_url": "" }
+                        }
+                    }
+                })
+                .to_string(),
+            ),
+        }
+    }
+
+    #[test]
+    fn a_preserved_drawer_rereads_its_round_even_after_a_bid_for_the_new_world() {
+        run_page_events(
+            module_path!(),
+            "a_preserved_drawer_rereads_its_round_even_after_a_bid_for_the_new_world",
+            || {
+                DETAIL_READS.set(0);
+                let browser = PageBrowserFixture::new("/bidlog", &format!("auction={ROUND_ID}"));
+                let requests = Rc::new(RefCell::new(Vec::new()));
+                let bid_reads = PageReadFixture::new({
+                    let requests = requests.clone();
+                    move |url: String| {
+                        let result = drawer_bids(&url);
+                        requests.borrow_mut().push(url);
+                        Ok::<_, String>(result)
+                    }
+                });
+                let released = Rc::new(Cell::new(false));
+                let wakers = Rc::new(RefCell::new(Vec::<Waker>::new()));
+                let timers = PageReadFixture::new({
+                    let released = released.clone();
+                    let wakers = wakers.clone();
+                    move |()| -> Pin<Box<dyn Future<Output = ()>>> {
+                        let released = released.clone();
+                        let wakers = wakers.clone();
+                        Box::pin(poll_fn(move |context| {
+                            if released.get() {
+                                Poll::Ready(())
+                            } else {
+                                wakers.borrow_mut().push(context.waker().clone());
+                                Poll::Pending
+                            }
+                        }))
+                    }
+                });
+                let mut dom = VirtualDom::new(bid_log_for_drawer)
+                    .with_root_context(browser.clone())
+                    .with_root_context(PageReadFixture::new(drawer_directory))
+                    .with_root_context(PageReadFixture::new(|()| {
+                        Ok::<_, String>(Worlds {
+                            worlds: ["main", "isekai"]
+                                .into_iter()
+                                .map(|world| (world.to_owned(), WorldStatus { enabled: true }))
+                                .collect(),
+                        })
+                    }))
+                    .with_root_context(bid_reads)
+                    .with_root_context(timers)
+                    .with_root_context(LotDetailHttpFixture(|url, _etag| {
+                        assert_eq!(url, format!("/api/v1/lots/{LOT_ID}"));
+                        DETAIL_READS.update(|calls| calls + 1);
+                        Some(Box::pin(ready(Ok(drawer_detail()))))
+                    }));
+                dom.rebuild_in_place();
+                settle_page(&mut dom);
+                let view =
+                    rendered_event_target(&dom, "button", "class", "public-lot-view", "onclick");
+                dispatch_page_event(&dom, "click", view, "");
+                settle_page(&mut dom);
+                let history = rendered_event_target(
+                    &dom,
+                    "button",
+                    "class",
+                    "public-catalog-detail__more",
+                    "onclick",
+                );
+                dispatch_page_event(&dom, "click", history, "");
+                settle_page(&mut dom);
+                assert_eq!(DETAIL_READS.get(), 1);
+
+                let notify = |dom: &VirtualDom, auction_id| {
+                    dom.in_scope(ScopeId::APP, || {
+                        consume_context::<PublicBidRefresh>().notify(auction_id, 0);
+                    });
+                };
+                notify(&dom, ROUND_ID);
+                settle_page(&mut dom);
+                assert_eq!(wakers.borrow().len(), 4, "目录与抽屉的三个读取均已排定");
+                let world = rendered_event_target(
+                    &dom,
+                    "select",
+                    "id",
+                    "public-auction-bid-log-world",
+                    "onchange",
+                );
+                dispatch_page_event(&dom, "change", world, "isekai");
+                settle_page(&mut dom);
+                assert_eq!(browser.state().auction_id(), Some(OLDER_ROUND_ID));
+                notify(&dom, OLDER_ROUND_ID);
+                settle_page(&mut dom);
+                assert_eq!(DETAIL_READS.get(), 1);
+                assert_eq!(requests.borrow().len(), 4, "合并窗口仍在等待");
+
+                // 实时入口先使缓存过期。只读抽屉仍属于 A，页面的新目录已经属于 B。
+                crate::api::invalidate_all();
+                released.set(true);
+                for waker in wakers.take() {
+                    waker.wake();
+                }
+                settle_page(&mut dom);
+                assert_eq!(DETAIL_READS.get(), 2);
+                let log = requests.borrow();
+                let round_a = format!("/api/v1/auctions/{ROUND_ID}/bid-log");
+                let round_b = format!("/api/v1/auctions/{OLDER_ROUND_ID}/bid-log");
+                for (path, parameters, expected) in [
+                    (&round_a, "page_size=20&include=defeated_proxy&world=main", 1),
+                    (&round_a, "page_size=4&include=defeated_proxy", 2),
+                    (&round_a, "page_size=10&include=defeated_proxy", 2),
+                    (&round_b, "page_size=20&include=defeated_proxy&world=isekai", 2),
+                ] {
+                    assert_eq!(
+                        log.iter()
+                            .filter(|url| url.starts_with(path) && url.ends_with(parameters))
+                            .count(),
+                        expected
+                    );
+                }
+                assert_eq!(log.len(), 7);
+            },
+        );
     }
 
     #[test]

@@ -123,7 +123,7 @@ pub(crate) fn historical_auction_status_label(status: &str) -> String {
 
 pub(crate) fn historical_lots_href(auction_id: &str, world_id: &str) -> String {
     let query = PublicBoardQuery {
-        world: (world_id != "main").then(|| world_id.to_owned()),
+        world: (world_id != "main").then(|| world_id.to_owned()).into(),
         ..PublicBoardQuery::default()
     };
     public_href_for_auction("/", query, Some(auction_id.to_owned()))
@@ -131,7 +131,7 @@ pub(crate) fn historical_lots_href(auction_id: &str, world_id: &str) -> String {
 
 pub(crate) fn historical_bid_log_href(auction_id: &str, world_id: &str) -> String {
     let query = PublicBoardQuery {
-        world: (world_id != "main").then(|| world_id.to_owned()),
+        world: (world_id != "main").then(|| world_id.to_owned()).into(),
         ..PublicBoardQuery::default()
     };
     public_href_for_auction("/bidlog", query, Some(auction_id.to_owned()))
@@ -140,7 +140,7 @@ pub(crate) fn historical_bid_log_href(auction_id: &str, world_id: &str) -> Strin
 /// 已结算场次的履约进度入口：与出价记录入口同一查询口径，带场次与世界（主世界使用缺省 URL）。
 pub(crate) fn historical_fulfillment_href(auction_id: &str, world_id: &str) -> String {
     let query = PublicBoardQuery {
-        world: (world_id != "main").then(|| world_id.to_owned()),
+        world: (world_id != "main").then(|| world_id.to_owned()).into(),
         ..PublicBoardQuery::default()
     };
     public_href_for_auction("/fulfillment", query, Some(auction_id.to_owned()))

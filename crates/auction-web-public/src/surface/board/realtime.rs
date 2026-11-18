@@ -1,6 +1,6 @@
 //! Public 看板的实时目标、连接状态与唯一的实时连接 owner。
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use auction_web_shared::{PageVisibility, sleep_while_visible};
@@ -162,10 +162,11 @@ fn reconnect_delay_millis(failures: u32) -> u32 {
 }
 
 fn refresh_session_on_socket_close(
+    current: bool,
     close_code: Option<u16>,
     refresh: impl FnOnce(SessionRefreshReason),
 ) {
-    if close_code == Some(1008) {
+    if current && close_code == Some(1008) {
         // 当前身份由权威会话读取决定，关闭码只触发复核。
         refresh(SessionRefreshReason::Refresh);
     }
@@ -190,10 +191,28 @@ pub(crate) fn PublicRealtimeOwner(
     }
     // 外壳的兼容 ID 不表达非法态，实时 owner 也须守住看板的场次边界。
     let target = if invalid_board_auction() { PublicRealtimeTarget::Checking } else { target };
+    // 换场或换号从渲染起即使旧任务失效，等待资源重新调度期间也不接收它的会话证据。
+    let subscription = use_hook(|| Rc::new(Cell::new(0_u64)));
+    let desired = use_hook(|| Rc::new(RefCell::new((target.clone(), user_id.clone()))));
+    let changed = {
+        let desired = desired.borrow();
+        desired.0 != target || desired.1 != user_id
+    };
+    if changed {
+        desired.replace((target.clone(), user_id));
+        subscription.set(subscription.get().wrapping_add(1));
+    }
+    let revision = subscription.get();
+    let lifetime = subscription.clone();
+    use_drop(move || lifetime.set(lifetime.get().wrapping_add(1)));
     // 身份必须进入资源依赖；单独修改静态组件的 key 不会使相等的 target 重启订阅。
-    let _stream = use_resource(use_reactive((&target, &user_id), move |(target, _)| {
+    let _stream = use_resource(use_reactive((&target, &revision), move |(target, revision)| {
         let page_visibility = page_visibility.clone();
+        let subscription = subscription.clone();
         async move {
+            if subscription.get() != revision {
+                return;
+            }
             let (auction_id, world, cache) = match target {
                 PublicRealtimeTarget::Checking => {
                     realtime_state.set(LiveConnectionState::Connecting);
@@ -234,7 +253,7 @@ pub(crate) fn PublicRealtimeOwner(
             };
 
             let mut consecutive_failures = 0_u32;
-            loop {
+            while subscription.get() == revision {
                 set_connection_state(&mut realtime_state, LiveConnectionState::Connecting);
                 let after = cache.borrow().after();
                 let callback_cache = Rc::clone(&cache);
@@ -242,7 +261,11 @@ pub(crate) fn PublicRealtimeOwner(
                 let mut callback_auction_after = auction_after;
                 let mut callback_state = realtime_state;
                 let mut callback_refresh = refresh_generation;
+                let callback_subscription = subscription.clone();
                 let on_page = move |page: crate::api::RealtimePage| {
+                    if callback_subscription.get() != revision {
+                        return false;
+                    }
                     let merge = callback_cache.borrow_mut().merge_page(&page);
                     // 目标短暂切到 Checking 再回来时订阅会重启；游标写回外壳，从已确认位置续接，
                     // 不从 0 重放同一批事件。
@@ -267,7 +290,7 @@ pub(crate) fn PublicRealtimeOwner(
                         callback_refresh.set(next_refresh);
                     } else if merge.bids_changed {
                         // 同页的生命周期/缺口刷新优先；普通竞价只使相关读取资源失效。
-                        bid_refresh.notify();
+                        bid_refresh.notify(&callback_auction_id, *callback_refresh.peek());
                     }
                     merge.continue_catch_up
                 };
@@ -275,10 +298,20 @@ pub(crate) fn PublicRealtimeOwner(
                 let result =
                     subscribe_auction_realtime(after, auction_id.clone(), world.clone(), on_page)
                         .await;
+                if subscription.get() != revision {
+                    return;
+                }
                 if let Err(error) = result {
-                    refresh_session_on_socket_close(error.close_code(), |reason| {
-                        session_check.0.call(reason);
-                    });
+                    refresh_session_on_socket_close(
+                        subscription.get() == revision,
+                        error.close_code(),
+                        |reason| {
+                            session_check.0.call(reason);
+                        },
+                    );
+                    if subscription.get() != revision {
+                        return;
+                    }
                     if error.is_permanent() {
                         // 重连不能自愈：页头降级为手动刷新，不再自动重连。
                         tracing::warn!(
@@ -378,7 +411,7 @@ mod tests {
     fn only_websocket_policy_violation_triggers_one_authoritative_session_refresh() {
         for code in [Some(1008), Some(1013), Some(1001), None] {
             let mut reasons = Vec::new();
-            refresh_session_on_socket_close(code, |reason| reasons.push(reason));
+            refresh_session_on_socket_close(true, code, |reason| reasons.push(reason));
             if code == Some(1008) {
                 assert_eq!(reasons, [SessionRefreshReason::Refresh]);
                 assert!(!reasons[0].invalidates());
@@ -386,6 +419,9 @@ mod tests {
                 assert!(reasons.is_empty());
             }
         }
+        refresh_session_on_socket_close(false, Some(1008), |_| {
+            panic!("已被替换的连接不能复核会话")
+        });
     }
 
     fn auction(id: &str, number: i64, status: &str) -> CurrentAuction {

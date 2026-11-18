@@ -11,7 +11,7 @@ use dioxus::prelude::*;
 
 use super::directory::{RoundOptionsError, RoundPage, use_round_directory};
 use super::lot_filter::use_lot_filter_draft;
-use super::query::{InvalidReadAuction, ReadSelection, use_round_body};
+use super::query::{InvalidReadAuction, InvalidReadWorld, ReadSelection, use_round_body};
 use crate::api::{
     FulfillmentLot, FulfillmentPage, FulfillmentRead, MAX_FULFILLMENT_PAGE_SIZE,
     fetch_fulfillment_page, fetch_worlds, lot_code_for,
@@ -33,31 +33,27 @@ pub(crate) fn fulfillment() -> Element {
     let refresh_generation = use_context::<Signal<u64>>();
     // 世界/场次/页码/lot 筛选与地址栏双向同步，键与竞价日志共用。
     let query_state_signal = use_page_query();
-    let world_filter = use_memo(move || {
-        query_state_signal
-            .read()
-            .world
-            .clone()
-            .filter(|world| matches!(world.as_str(), "main" | "isekai"))
-            .unwrap_or_else(|| "main".to_owned())
-    });
+    let world_filter =
+        use_memo(move || query_state_signal.read().world.round_world().map(str::to_owned));
+    let invalid_world = world_filter.read().is_none();
     let page_number = use_memo(move || query_state_signal.read().page);
     // 接口每页最多 100 件；共享偏好或地址栏里更大的数量按上限请求，分页器显示实际数量。
     let page_size =
         use_memo(move || query_state_signal.read().page_size.min(MAX_FULFILLMENT_PAGE_SIZE));
     let bounds = use_public_page_bounds(query_state_signal, pathname, |query| {
         // 缺省场次的地址纠偏会同时回到第一页。
+        query.world.round_world()?;
         query.auction_id().map(|_| (PageKey::Page, query.page_size.min(MAX_FULFILLMENT_PAGE_SIZE)))
     });
     let lot_draft = use_lot_filter_draft(query_state_signal, pathname);
 
     let worlds = use_resource(fetch_worlds);
-    let selected_world = world_filter();
+    let selected_world = world_filter().unwrap_or_default();
     let mut world_options = match &*worlds.read_unchecked() {
         Some(Ok(worlds)) => supported_worlds(worlds),
-        _ => vec![selected_world.clone()],
+        _ => vec!["main".to_owned(), "isekai".to_owned()],
     };
-    if !world_options.contains(&selected_world) {
+    if !invalid_world && !world_options.contains(&selected_world) {
         world_options.push(selected_world.clone());
     }
     let directory = use_round_directory(
@@ -96,6 +92,9 @@ pub(crate) fn fulfillment() -> Element {
         .map(|(_, result)| result);
     let mut loading = false;
     let body = match current_result {
+        _ if invalid_world => {
+            rsx! { InvalidReadWorld { world: query_state_signal.read().world.clone() } }
+        }
         _ if directory.invalid_auction() => rsx! {
             InvalidReadAuction {
                 on_recover: move |_| { ReadSelection::Clear.select(query_state_signal, pathname); },
@@ -153,14 +152,19 @@ pub(crate) fn fulfillment() -> Element {
                         name: "world",
                         autocomplete: "off",
                         value: selected_world.clone(),
+                        aria_invalid: invalid_world.to_string(),
+                        aria_describedby: invalid_world.then_some("public-read-world-error"),
                         disabled: world_options.is_empty(),
                         onchange: move |event| {
                             if !ReadSelection::World(event.value()).select(query_state_signal, pathname) {
                                 restore_select_value(&event, &selected_world);
                             }
                         },
+                        if invalid_world {
+                            option { value: "", disabled: true, selected: true, {t!("world-label")} }
+                        }
                         for world in &world_options {
-                            option { value: world.clone(), {world_label(world)} }
+                            option { value: world.clone(), selected: selected_world == *world, {world_label(world)} }
                         }
                     }
                 }
@@ -244,9 +248,6 @@ pub(crate) fn fulfillment() -> Element {
                 }
             }
             {body}
-            if lookup.failed() {
-                p { class: "action-feedback action-feedback--error", role: "alert", {t!("data-error")} }
-            }
             // 抽屉宿主在进度读取分支之外：翻页、筛选或后台重读替换表格时，已打开的详情不被卸载。
             LotDetailLookupHost { lookup }
         }
@@ -525,6 +526,42 @@ mod tests {
         });
         let (dom, edits) = mount_read_page(fulfillment_page, browser, body);
         (dom, edits, requests)
+    }
+
+    #[test]
+    fn invalid_fulfillment_world_blocks_reads_until_an_explicit_selection() {
+        run_page_events(
+            module_path!(),
+            "invalid_fulfillment_world_blocks_reads_until_an_explicit_selection",
+            || {
+                for world in ["world=unknown", "world=main&world=isekai"] {
+                    let browser =
+                        PageBrowserFixture::new("/fulfillment", &format!("{world}&keep=yes"));
+                    let (mut dom, _, requests) = mount_fulfillment(&browser, ROUND_ID, 1);
+                    assert!(requests.borrow().is_empty());
+                    assert!(browser.writes().is_empty());
+                    let select = rendered_event_target(
+                        &dom,
+                        "select",
+                        "id",
+                        "public-fulfillment-world",
+                        "onchange",
+                    );
+                    browser.allow_writes(false);
+                    dispatch_page_event(&dom, "change", select, "main");
+                    settle_page(&mut dom);
+                    assert!(requests.borrow().is_empty());
+                    assert!(browser.state().world.invalid());
+                    browser.allow_writes(true);
+                    dispatch_page_event(&dom, "change", select, "main");
+                    settle_page(&mut dom);
+                    assert_eq!(requests.borrow().len(), 1);
+                    assert!(!browser.state().world.invalid());
+                    assert_eq!(browser.value("keep").as_deref(), Some("yes"));
+                    assert!(requests.borrow()[0].ends_with("world=main"));
+                }
+            },
+        );
     }
 
     #[test]

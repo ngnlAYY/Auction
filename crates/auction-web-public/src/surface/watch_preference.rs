@@ -167,6 +167,12 @@ pub(super) fn OutbidNotifications(user_id: String) -> Element {
         t!("outbid-conflict")
     } else if uncertain {
         t!("outbid-unknown")
+    } else if snapshot
+        .error
+        .as_ref()
+        .is_some_and(|error| error.status == 422 && error.code == "pm_channel_unavailable")
+    {
+        t!("outbid-pm-unavailable")
     } else {
         t!("outbid-save-error")
     };
@@ -229,6 +235,7 @@ pub(super) fn OutbidNotifications(user_id: String) -> Element {
                 }
                 div { class: "public-outbid-preference__actions",
                     button {
+                        id: "public-outbid-save",
                         r#type: "button", disabled: !ready || busy || pending,
                         aria_describedby: "outbid-feedback",
                         onclick: move |_| submit.submit(),
@@ -243,6 +250,7 @@ pub(super) fn OutbidNotifications(user_id: String) -> Element {
                         }
                     } else if failed {
                         button {
+                            id: "public-outbid-refresh",
                             r#type: "button", disabled: busy,
                             aria_describedby: "outbid-feedback",
                             onclick: move |_| {
@@ -262,6 +270,108 @@ pub(super) fn OutbidNotifications(user_id: String) -> Element {
                     }
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    use auction_contracts::{PublicLotWatchPreferenceResponse, PublicSetLotWatchPreferenceRequest};
+    use dioxus::dioxus_core::Mutation;
+    use dioxus::prelude::*;
+
+    use super::OutbidNotifications;
+    use crate::api::{CommandError, PublicSession};
+    use crate::surface::{
+        PageReadFixture, PublicCommandOwner, PublicSessionResource, dispatch_page_event,
+        page_test_contexts, rendered_event_target, run_page_events, settle_page,
+    };
+
+    const USER: &str = "018f4c8e-7b2a-4c3d-8e4f-000000000001";
+    const PATH: &str = "/api/v1/me/lot-watch-preference";
+    const PM_REASON: &str =
+        "PM needs forum sync to be enabled and a forum account linked to this account.";
+
+    fn preferences() -> Element {
+        page_test_contexts();
+        use_context_provider(|| PublicCommandOwner(Signal::new(Some(USER.to_owned()))));
+        let session: PublicSessionResource = use_resource(|| async {
+            Ok(Some(PublicSession {
+                authenticated: true,
+                user_id: USER.to_owned(),
+                username: "player".to_owned(),
+                expires_at: None,
+                absolute_expires_at: None,
+            }))
+        });
+        use_context_provider(|| session);
+        rsx! { OutbidNotifications { user_id: USER.to_owned() } }
+    }
+
+    #[test]
+    fn pm_eligibility_rejection_explains_the_reason_and_reloads_the_capability() {
+        run_page_events(
+            module_path!(),
+            "pm_eligibility_rejection_explains_the_reason_and_reloads_the_capability",
+            exercise_rejection,
+        );
+    }
+
+    fn exercise_rejection() {
+        for code in ["pm_channel_unavailable", "invalid_request"] {
+            let reads = Rc::new(Cell::new(0));
+            let writes = Rc::new(Cell::new(0));
+            let read = PageReadFixture::new({
+                let reads = reads.clone();
+                move |(path, user_id): (&'static str, String)| {
+                    assert_eq!((path, user_id.as_str()), (PATH, USER));
+                    let previous = reads.get();
+                    reads.set(previous + 1);
+                    Ok::<_, CommandError>(PublicLotWatchPreferenceResponse {
+                        user_id,
+                        channel: "pm".to_owned(),
+                        version: 1,
+                        pm_available: previous == 0,
+                    })
+                }
+            });
+            let write = PageReadFixture::new({
+                let writes = writes.clone();
+                move |(path, user_id, command): (
+                    &'static str,
+                    String,
+                    PublicSetLotWatchPreferenceRequest,
+                )| {
+                    assert_eq!((path, user_id.as_str()), (PATH, USER));
+                    assert_eq!((command.channel.as_str(), command.expected_version), ("pm", 1));
+                    writes.set(writes.get() + 1);
+                    Err::<PublicLotWatchPreferenceResponse, _>(CommandError {
+                        status: 422,
+                        code: code.to_owned(),
+                    })
+                }
+            });
+            let mut dom =
+                VirtualDom::new(preferences).with_root_context(read).with_root_context(write);
+            dom.rebuild_in_place();
+            settle_page(&mut dom);
+            let save = rendered_event_target(&dom, "button", "id", "public-outbid-save", "onclick");
+            dispatch_page_event(&dom, "click", save, "");
+            let feedback = settle_page(&mut dom);
+            assert_eq!(writes.get(), 1);
+            assert_eq!(reads.get(), 1);
+            assert_eq!(feedback.iter().any(|edit| matches!(
+                edit, Mutation::CreateTextNode { value, .. } | Mutation::SetText { value, .. } if value == PM_REASON
+            )), code == "pm_channel_unavailable");
+            let refresh =
+                rendered_event_target(&dom, "button", "id", "public-outbid-refresh", "onclick");
+            dispatch_page_event(&dom, "click", refresh, "");
+            settle_page(&mut dom);
+            assert_eq!(reads.get(), 2);
+            assert_eq!(writes.get(), 1);
         }
     }
 }

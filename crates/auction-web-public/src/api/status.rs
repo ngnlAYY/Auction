@@ -10,6 +10,10 @@ use super::{TransportError, send_request};
 
 /// 读取 Public 进程 readiness，并保留旧客户端的 JSON Accept 头与 10 秒请求上限。
 pub(crate) async fn fetch_public_readiness() -> Result<bool, String> {
+    #[cfg(test)]
+    if let Some(result) = crate::surface::PageReadFixture::response(()) {
+        return result;
+    }
     let response = send_request(|abort_signal| {
         Request::get("/health/ready")
             .header("Accept", "application/json")

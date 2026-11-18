@@ -17,6 +17,8 @@ nav-blacklist = ブラックリスト
 nav-price-history = 落札履歴
 nav-forum = フォーラム同期
 world-label = ワールド
+world-invalid-link = リンクのワールドが無効です。ワールドを選択してください。
+world-correction-error = リンクのワールドを修正できませんでした。
 
 auction-pager-label = リアルタイムオークション
 auction-header-title = 第 { $number } 回オークション
@@ -68,6 +70,7 @@ equipment-group = 装備グループ
 equipment-group-rare = レア
 equipment-group-fusion = 融合
 catalog-empty-filtered = 選択した条件に一致する出品がありません。
+catalog-preview-stale = プレビューが更新されました。表には前の版が表示されています。
 filter-max-level = レベル上限
 filter-level-unlimited = 制限なし
 filter-include-unleveled = レベル未設定の装備を表示

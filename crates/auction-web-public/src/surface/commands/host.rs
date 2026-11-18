@@ -14,6 +14,7 @@ use super::request::{
 };
 use super::session::{CommandSession, use_command_session};
 use crate::api::{CommandError, estimated_now};
+use crate::surface::CatalogProxySnapshots;
 
 /// 稳定的外壳入口；身份切换时只替换命令宿主。
 #[derive(Clone, Copy)]
@@ -87,6 +88,7 @@ fn IdentityCommands(user_id: String, owner: Signal<Option<String>>, revision: u6
     let mut active = commands.active;
     let session = use_command_session(Some(user_id.clone()), owner);
     let state = use_signal(CommandState::default);
+    let proxy_snapshots = use_hook(CatalogProxySnapshots::default);
     let scope = use_hook(current_scope_id);
     let refresh = use_context::<Signal<u64>>();
     let parsed = Uuid::try_parse(&user_id).ok();
@@ -101,6 +103,7 @@ fn IdentityCommands(user_id: String, owner: Signal<Option<String>>, revision: u6
                 state,
                 scope,
                 refresh,
+                proxy_snapshots: proxy_snapshots.clone(),
             }));
         }
     });
@@ -139,9 +142,18 @@ pub(in crate::surface) struct CommandStore {
     state: Signal<CommandState>,
     scope: ScopeId,
     refresh: Signal<u64>,
+    proxy_snapshots: CatalogProxySnapshots,
 }
 
 impl CommandStore {
+    /// 代理快照与命令一起在确认换号或退出时销毁。
+    pub(in crate::surface) fn proxy_snapshots(
+        &self,
+        user_id: Uuid,
+    ) -> Option<&CatalogProxySnapshots> {
+        (self.user_id == user_id).then_some(&self.proxy_snapshots)
+    }
+
     pub(in crate::surface) fn command(&self, lot_id: &str) -> Option<SentCommand> {
         self.state.read().pending.get(lot_id).cloned()
     }

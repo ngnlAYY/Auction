@@ -61,7 +61,7 @@ pub(crate) async fn fetch_fulfillment_page(
         .await?;
     // 确认时刻无法表示时不展示旧快照，按读取失败处理：页面显示错误与重试，不静默显示旧状态。
     let stale_since = read
-        .stale_fallback
+        .stale_since()
         .map(|confirmed_at| {
             confirmation_time(confirmed_at).ok_or_else(|| "invalid_response".to_owned())
         })

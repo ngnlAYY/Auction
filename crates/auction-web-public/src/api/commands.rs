@@ -402,6 +402,24 @@ mod tests {
                 "bid_too_low",
                 false,
             ),
+            (
+                409,
+                r#"{"code":"internal","c\u006fde":"bid_too_low","message":"","data":null}"#,
+                "invalid_response",
+                true,
+            ),
+            (
+                409,
+                r#"{"code":"bid_too_low","message":"first","message":"last","data":null}"#,
+                "invalid_response",
+                true,
+            ),
+            (
+                409,
+                r#"{"code":"bid_too_low","message":"","data":[],"data":null}"#,
+                "invalid_response",
+                true,
+            ),
             (200, "{", "invalid_response", true),
             (
                 200,

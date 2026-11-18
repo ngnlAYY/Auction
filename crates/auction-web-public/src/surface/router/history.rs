@@ -14,6 +14,8 @@ use dioxus::prelude::Routable;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsValue;
 
+use super::PublicHistoryEntry;
+
 type WriteLocation = dyn Fn(&str, QueryWriteMode, bool) -> bool;
 type RouterUpdate = Arc<dyn Fn() + Send + Sync>;
 
@@ -23,6 +25,7 @@ pub(super) struct PublicHistory<R> {
     write_location: Box<WriteLocation>,
     initial: RefCell<Option<String>>,
     notify: RefCell<Option<RouterUpdate>>,
+    entry: PublicHistoryEntry,
     route: PhantomData<R>,
 }
 
@@ -36,14 +39,26 @@ impl<R: Routable> PublicHistory<R> {
             write_location: Box::new(write_location),
             initial: RefCell::default(),
             notify: RefCell::default(),
+            entry: PublicHistoryEntry::default(),
             route: PhantomData,
         }
     }
 
+    pub(super) fn entry(&self) -> PublicHistoryEntry {
+        self.entry.clone()
+    }
+
     fn navigate(&self, location: &str, mode: QueryWriteMode, preserve_scroll: bool) -> bool {
         let canonical = canonical_location::<R>(location);
-        canonical != self.current_route()
-            && (self.write_location)(&canonical, mode, preserve_scroll)
+        if canonical == self.current_route()
+            || !(self.write_location)(&canonical, mode, preserve_scroll)
+        {
+            return false;
+        }
+        if mode == QueryWriteMode::Push {
+            self.entry.advance();
+        }
+        true
     }
 }
 
@@ -57,10 +72,16 @@ impl<R: Routable> History for PublicHistory<R> {
     }
 
     fn go_back(&self) {
+        if self.inner.can_go_back() {
+            self.entry.advance();
+        }
         self.inner.go_back();
     }
 
     fn go_forward(&self) {
+        if self.inner.can_go_forward() {
+            self.entry.advance();
+        }
         self.inner.go_forward();
     }
 
@@ -93,7 +114,12 @@ impl<R: Routable> History for PublicHistory<R> {
         if initial.parse::<R>().is_ok_and(|route| route.to_string() != initial) {
             self.initial.replace(Some(initial));
         }
-        self.inner.updater(Arc::clone(&callback));
+        let entry = self.entry();
+        let on_pop = Arc::clone(&callback);
+        self.inner.updater(Arc::new(move || {
+            entry.advance();
+            on_pop();
+        }));
         self.notify.replace(Some(callback));
     }
 }

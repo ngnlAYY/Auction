@@ -23,7 +23,7 @@ pub(super) use host::{
 };
 pub(super) use location::{CommandAuctionContext, use_command_auction_provider};
 pub(super) use pending::{BidConfirmCommand, ProxyConfirmCommand, PublicCommandIdentity};
-pub(super) use proxy::{ProxyForm, ProxyFormInput};
+pub(super) use proxy::{ProxyAuthorizationRead, ProxyForm, ProxyFormInput};
 #[cfg(test)]
 pub(super) use request::CommandStatus;
 pub(super) use request::{CommandKind, CommandPayload, CommandReceipt, CommandTarget};

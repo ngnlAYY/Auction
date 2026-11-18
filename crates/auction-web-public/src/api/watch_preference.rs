@@ -41,6 +41,10 @@ pub(crate) fn channel_value(mm: bool, pm: bool) -> &'static str {
 pub(crate) async fn fetch_lot_watch_preference(
     user_id: &str,
 ) -> Result<PublicLotWatchPreferenceResponse, CommandError> {
+    #[cfg(test)]
+    if let Some(result) = crate::surface::PageReadFixture::response((PATH, user_id.to_owned())) {
+        return result;
+    }
     let observation = SessionIdentityObservation::start();
     let response = send_get(PATH).await.map_err(|error| failure(error.code(), 0))?;
     decode(response, user_id, None, observation).await
@@ -51,6 +55,12 @@ pub(crate) async fn set_lot_watch_preference(
     user_id: &str,
     command: &PublicSetLotWatchPreferenceRequest,
 ) -> Result<PublicLotWatchPreferenceResponse, CommandError> {
+    #[cfg(test)]
+    if let Some(result) =
+        crate::surface::PageReadFixture::response((PATH, user_id.to_owned(), command.clone()))
+    {
+        return result;
+    }
     let observation = SessionIdentityObservation::start();
     let response = send_request(|abort_signal| {
         Request::put(PATH)
