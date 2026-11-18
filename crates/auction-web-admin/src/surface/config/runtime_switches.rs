@@ -3,104 +3,97 @@
 
 use auction_contracts::RuntimeSwitchListResponse;
 use auction_time::Timestamp;
-use auction_web_shared::{AsyncState, AsyncStateKind, ConfirmCommand, t, use_confirm_command};
+use auction_web_shared::{AsyncState, AsyncStateKind, t};
 #[cfg(target_arch = "wasm32")]
 use auction_web_shared::{PageVisibility, timer::TimeoutFuture};
 use dioxus::prelude::*;
 
 use super::field_announcement::{FieldLiveRegion, use_field_announcer};
 use crate::api::{
-    AdminApiFailure, ExternalAccessPauseAttempt, fetch_runtime_switches,
-    submit_external_access_pause,
+    ExternalAccessPauseAttempt, fetch_runtime_switches, submit_external_access_pause,
+};
+use crate::surface::pending::{
+    CommandDelivery, CommandReceipt, PendingCommandPanel, PendingCommands, set_if_alive,
+    use_pending_commands,
 };
 
 /// 可选暂停时长（小时）；上限与服务端的 7 天一致。
 const PAUSE_HOURS: [i64; 6] = [1, 2, 6, 24, 72, 168];
+const PAUSE_ENTITY: &str = "runtime-switch:external_access_paused";
 
-/// 暂停命令与草稿由卡片持有，读取失败导致控件卸载时仍保留原样重试所需的 ID 与参数。
-/// `PartialEq` 比较 Signal 身份，避免 props 比较订阅控件状态。
-#[derive(Clone, Copy)]
+#[derive(Clone, PartialEq)]
+struct PauseConfirmation {
+    expected_revision: i64,
+    paused: bool,
+    expires_at: Option<Timestamp>,
+    reason: String,
+}
+
+/// 卡片只持有草稿及确认；已提交的暂停或恢复由会话宿主原样重试。
+#[derive(Clone, Copy, PartialEq)]
 struct PauseControlState {
-    command: ConfirmCommand<ExternalAccessPauseAttempt, AdminApiFailure>,
+    pending: PendingCommands,
+    confirmation: Signal<Option<PauseConfirmation>>,
     hours: Signal<i64>,
     reason: Signal<String>,
     accepted: Signal<bool>,
-    required_generation: Signal<u64>,
-}
-
-impl PartialEq for PauseControlState {
-    fn eq(&self, other: &Self) -> bool {
-        self.command.command == other.command.command
-            && self.command.confirmation == other.command.confirmation
-            && self.command.submitting == other.command.submitting
-            && self.command.failure == other.command.failure
-            && self.command.uncertain == other.command.uncertain
-            && self.hours == other.hours
-            && self.reason == other.reason
-            && self.accepted == other.accepted
-            && self.required_generation == other.required_generation
-    }
 }
 
 impl PauseControlState {
-    /// 提交或原样重试；结果未知时 `ConfirmCommand` 只重放冻结的原命令。
-    fn submit(mut self, pending: ExternalAccessPauseAttempt, mut refresh: Signal<u64>) {
-        // 冲突清除原命令后，迟到的按钮事件不能再发送它。
-        if self.command.command.peek().as_ref() != Some(&pending) {
+    fn submit(mut self, confirmation: PauseConfirmation) {
+        if self.confirmation.peek().as_ref() != Some(&confirmation) {
             return;
         }
-        let mut accepted = self.accepted;
-        let mut reason = self.reason;
-        let mut command = self.command;
-        let mut required_generation = self.required_generation;
-        self.command.submit(
-            pending,
-            |attempt| async move {
-                #[cfg(test)]
-                if let Some(requests) = try_consume_context::<std::rc::Rc<tests::PauseRequests>>() {
-                    return requests.write(attempt);
-                }
-                submit_external_access_pause(&attempt).await
-            },
-            AdminApiFailure::outcome_unknown,
-            move |_| {
-                accepted.set(true);
-                reason.set(String::new());
-                refresh.set(refresh().saturating_add(1));
-            },
-            move || {
-                let rejection = command
-                    .failure
-                    .peek()
-                    .as_ref()
-                    .filter(|failure| failure.resolves_prior_attempt())
-                    .cloned();
-                if let Some(failure) = rejection {
-                    // 账本已核对才能丢弃旧 ID。重新读取版本后，由操作员确认新命令。
-                    let generation = refresh.peek().saturating_add(1);
-                    required_generation.set(generation);
-                    command.reset();
-                    command.failure.set(Some(failure));
-                    refresh.set(generation);
+        let action =
+            if confirmation.paused { t!("admin-pause-start") } else { t!("admin-pause-resume") };
+        // 暂停和恢复共用实体；原样重试复用确认时冻结的绝对期限与版本。
+        if self.pending.submit_with_receipt(
+            PAUSE_ENTITY.to_owned(),
+            action,
+            move |command_id| {
+                let confirmation = confirmation.clone();
+                async move {
+                    submit_external_access_pause(&ExternalAccessPauseAttempt {
+                        command_id,
+                        expected_revision: confirmation.expected_revision,
+                        paused: confirmation.paused,
+                        expires_at: confirmation.expires_at,
+                        reason: confirmation.reason,
+                    })
+                    .await
+                    .map_err(|failure| failure.code)
                 }
             },
-        );
+            move |_, source_alive| {
+                if source_alive {
+                    set_if_alive(self.accepted, true);
+                    set_if_alive(self.reason, String::new());
+                }
+                CommandDelivery::reported(source_alive, || {
+                    Some(CommandReceipt::Text(t!("admin-pause-done")))
+                })
+            },
+            |_| {},
+        ) {
+            self.confirmation.set(None);
+        }
     }
 }
 
 #[component]
 pub(super) fn RuntimeSwitchCard() -> Element {
     let mut refresh = use_signal(|| 0_u64);
+    // 只把命令了结后的读取作为新意图的版本围栏；手动刷新期间保留原草稿和确认。
+    let command_refresh = use_signal(|| 0_u64);
     let pause = PauseControlState {
-        command: use_confirm_command(),
+        pending: use_pending_commands(command_refresh, |entity| entity == PAUSE_ENTITY),
+        confirmation: use_signal(|| None),
         hours: use_signal(|| 2_i64),
         reason: use_signal(String::new),
         accepted: use_signal(|| false),
-        required_generation: use_signal(|| 0),
     };
-    let pause_uncertain = (pause.command.uncertain)();
     let snapshot = use_resource(move || {
-        let generation = refresh();
+        let generation = (refresh(), command_refresh());
         async move {
             #[cfg(test)]
             if let Some(requests) = try_consume_context::<std::rc::Rc<tests::PauseRequests>>() {
@@ -118,7 +111,7 @@ pub(super) fn RuntimeSwitchCard() -> Element {
         });
         use_drop(move || visibility.cleanup());
         use_resource(move || {
-            let generation = refresh();
+            let generation = (refresh(), command_refresh());
             let delay = snapshot
                 .read()
                 .as_ref()
@@ -134,8 +127,8 @@ pub(super) fn RuntimeSwitchCard() -> Element {
                     remaining -= i64::from(slice);
                 }
                 // 定时器仅唤醒读取，由数据库快照确认到期。复核已开始时旧任务不得再次刷新。
-                if *refresh.peek() == generation {
-                    refresh.set(generation.saturating_add(1));
+                if (*refresh.peek(), *command_refresh.peek()) == generation {
+                    refresh.set(generation.0.saturating_add(1));
                 }
             }
         });
@@ -146,23 +139,23 @@ pub(super) fn RuntimeSwitchCard() -> Element {
             h2 { {t!("admin-switches-title")} }
             p { class: "admin-panel__note", {t!("admin-switches-note")} }
             button { class: "admin-btn-secondary", r#type: "button", onclick: move |_| refresh.set(refresh().saturating_add(1)), {t!("admin-switches-refresh")} }
-            if let Some(failure) = (pause.command.failure)() {
-                p { class: "admin-shell__banner", role: "alert", {super::super::admin_api_error_message(&failure.code)} }
+            PendingCommandPanel { owner: pause.pending }
+            div { role: "status",
+                if (pause.accepted)() {
+                    p { class: "admin-shell__banner", {t!("admin-pause-done")} }
+                }
             }
             match current {
-                // 快照不可用时仍保留结果未知命令的原样重试入口。
                 None => rsx! {
-                    if pause_uncertain { PendingPauseRetry { state: pause, refresh } }
                     AsyncState { kind: AsyncStateKind::Loading, title: t!("admin-switches-loading"), detail: "" }
                 },
                 Some((_, Err(code))) => rsx! {
-                    if pause_uncertain { PendingPauseRetry { state: pause, refresh } }
                     AsyncState { kind: AsyncStateKind::Error, title: super::super::admin_api_error_message(&code), detail: "" }
                 },
-                Some((loaded_generation, Ok(data))) => {
+                Some(((_, loaded_generation), Ok(data))) => {
                     let (revision, paused, paused_until) = pause_state(&data);
                     rsx! {
-                        ExternalAccessPauseControl { state: pause, revision, paused, paused_until, refresh, loaded_generation }
+                        ExternalAccessPauseControl { state: pause, revision, paused, paused_until, command_refresh, loaded_generation }
                         p { {t!("admin-switches-age")} ": " {data.admin_last_success_age_seconds.map_or_else(|| t!("admin-switches-unconfirmed"), |age| format!("{age:.1} s"))} }
                         if data.admin_last_success_age_seconds.is_none_or(|age| age > 10.0) {
                             p { class: "admin-panel__note", {t!("admin-switches-stale")} }
@@ -219,24 +212,6 @@ fn pause_expiry(hours: i64) -> Option<Timestamp> {
     Timestamp::from_timestamp(Timestamp::now().timestamp().checked_add(seconds)?, 0)
 }
 
-/// 结果未知时只显示原命令的重试；参数来自冻结的命令，不读取当前快照。
-#[component]
-fn PendingPauseRetry(state: PauseControlState, refresh: Signal<u64>) -> Element {
-    let submitting = (state.command.submitting)();
-    rsx! {
-        if let Some(pending) = (state.command.command)() {
-            p { class: "admin-panel__note", role: "status", {t!("admin-pause-uncertain")} }
-            button {
-                class: "admin-btn-primary",
-                r#type: "button",
-                disabled: submitting,
-                onclick: move |_| state.submit(pending.clone(), refresh),
-                {t!("admin-pause-retry")}
-            }
-        }
-    }
-}
-
 const PAUSE_REASON_ID: &str = "admin-pause-reason";
 
 fn reason_error_text() -> String {
@@ -252,23 +227,26 @@ fn ExternalAccessPauseControl(
     revision: i64,
     paused: bool,
     paused_until: Option<Timestamp>,
-    refresh: Signal<u64>,
+    command_refresh: Signal<u64>,
     loaded_generation: u64,
 ) -> Element {
-    let PauseControlState { mut command, mut hours, mut reason, mut accepted, required_generation } =
+    let PauseControlState { pending, mut confirmation, mut hours, mut reason, mut accepted } =
         state;
-    let submitting = (command.submitting)();
-    let uncertain = (command.uncertain)();
-    let confirmation = (command.confirmation)();
-    let may_prepare = !uncertain && confirmation.is_none() && !submitting;
-    let waiting_for_snapshot = loaded_generation < required_generation();
+    let occupied = pending.contains(PAUSE_ENTITY);
+    let waiting_for_snapshot = move || loaded_generation != command_refresh();
+    let draft = confirmation();
+    let stale = draft
+        .as_ref()
+        .is_some_and(|draft| draft.expected_revision != revision || draft.paused == paused);
+    let entry_label = if paused { t!("admin-pause-resume") } else { t!("admin-pause-start") };
     let mut reason_edited = use_signal(|| false);
     let mut reason_invalid = use_signal(|| false);
     let announcer = use_field_announcer();
 
     let begin = move |event: FormEvent| {
         event.prevent_default();
-        if !may_prepare || loaded_generation < *required_generation.peek() {
+        if pending.contains(PAUSE_ENTITY) || confirmation.peek().is_some() || waiting_for_snapshot()
+        {
             return;
         }
         let reason_text = reason().trim().to_owned();
@@ -286,15 +264,12 @@ fn ExternalAccessPauseControl(
             return;
         }
         accepted.set(false);
-        // 签名覆盖全部意图字段：同一输入的重试复用 command_id，输入变化即生成新命令。
-        let signature = format!("{paused}:{selected}:{revision}:{reason_text}");
-        command.begin(signature, |command_id| ExternalAccessPauseAttempt {
-            command_id,
+        confirmation.set(Some(PauseConfirmation {
             expected_revision: revision,
             paused: !paused,
             expires_at,
             reason: reason_text,
-        });
+        }));
     };
 
     rsx! {
@@ -314,31 +289,29 @@ fn ExternalAccessPauseControl(
                     {t!("admin-pause-inactive")}
                 }
             }
-            if accepted() {
-                p { class: "admin-shell__banner", role: "status", {t!("admin-pause-done")} }
-            }
-            if uncertain {
-                PendingPauseRetry { state, refresh }
-            } else if let Some(pending) = confirmation {
+            if let Some(draft) = draft {
                 p {
-                    if pending.paused {
-                        {t!("admin-pause-confirm-pause")} ": " {pending.expires_at.map(auction_time::Timestamp::to_rfc3339).unwrap_or_default()}
+                    if draft.paused {
+                        {t!("admin-pause-confirm-pause")} ": " {draft.expires_at.map(auction_time::Timestamp::to_rfc3339).unwrap_or_default()}
                     } else {
                         {t!("admin-pause-confirm-resume")}
                     }
                 }
                 button {
-                    class: if pending.paused { "admin-btn-danger" } else { "admin-btn-primary" },
+                    class: if draft.paused { "admin-btn-danger" } else { "admin-btn-primary" },
                     r#type: "button",
-                    disabled: submitting || waiting_for_snapshot,
-                    onclick: move |_| state.submit(pending.clone(), refresh),
+                    disabled: occupied || waiting_for_snapshot() || stale,
+                    onclick: move |_| {
+                        if !waiting_for_snapshot() && !stale {
+                            state.submit(draft.clone());
+                        }
+                    },
                     {t!("admin-pause-confirm")}
                 }
                 button {
                     class: "admin-btn-secondary",
                     r#type: "button",
-                    disabled: submitting,
-                    onclick: move |_| command.cancel_confirmation(),
+                    onclick: move |_| confirmation.set(None),
                     {t!("admin-pause-cancel")}
                 }
             } else {
@@ -347,6 +320,7 @@ fn ExternalAccessPauseControl(
                         {t!("admin-pause-duration")}
                         select {
                             name: "duration",
+                            disabled: occupied,
                             value: "{hours()}",
                             onchange: move |event| {
                                 let value = event.value().parse::<i64>().ok().filter(|value| PAUSE_HOURS.contains(value));
@@ -367,6 +341,7 @@ fn ExternalAccessPauseControl(
                             name: "reason",
                             r#type: "text",
                             required: true,
+                            disabled: occupied,
                             aria_invalid: reason_invalid().to_string(),
                             aria_describedby: reason_invalid().then_some("admin-pause-reason-error"),
                             value: reason(),
@@ -396,8 +371,8 @@ fn ExternalAccessPauseControl(
                 button {
                     class: if paused { "admin-btn-primary" } else { "admin-btn-danger" },
                     r#type: "submit",
-                    disabled: submitting || waiting_for_snapshot,
-                    if paused { {t!("admin-pause-resume")} } else { {t!("admin-pause-start")} }
+                    disabled: occupied || waiting_for_snapshot(),
+                    "{entry_label}"
                 }
             }
         }
@@ -410,9 +385,10 @@ mod tests {
     use std::cell::{Cell, RefCell};
     use std::rc::Rc;
 
-    use auction_contracts::{RuntimeSwitchIntentDto, RuntimeSwitchListResponse};
+    use auction_contracts::{
+        AdminExternalAccessPauseRequest, RuntimeSwitchIntentDto, RuntimeSwitchListResponse,
+    };
     use auction_time::{TimeDelta, Timestamp};
-    use auction_web_shared::TransportError;
     use dioxus::core::ElementId;
     use dioxus::prelude::*;
     use serde_json::json;
@@ -423,28 +399,33 @@ mod tests {
     use crate::api::{AdminApiFailure, ExternalAccessPauseAttempt};
     use crate::surface::auctions::draft_page_tests::{
         RecordRead, assert_field, button, click_button, has_live_text, mount_writer, settle_writer,
-        writer_form,
+        submit_button_disabled, writer_form,
     };
+    use crate::surface::pending::{PendingCommandHost, PendingCommandNotices};
     use crate::surface::realtime::{TestPage, text_attributes};
 
     pub(super) struct PauseRequests {
         reads: Cell<usize>,
+        initial_reads: usize,
         refresh_reply: RecordRead<RuntimeSwitchListResponse>,
-        writes: RefCell<Vec<ExternalAccessPauseAttempt>>,
+        writes: RefCell<Vec<String>>,
+        accept_replay: bool,
     }
 
     impl PauseRequests {
         fn new() -> Self {
             Self {
                 reads: Cell::new(0),
+                initial_reads: 1,
                 refresh_reply: RecordRead::new(),
                 writes: RefCell::new(Vec::new()),
+                accept_replay: false,
             }
         }
 
         pub(super) async fn read(&self) -> Result<RuntimeSwitchListResponse, String> {
             let prior = self.reads.replace(self.reads.get() + 1);
-            if prior == 0 {
+            if prior < self.initial_reads {
                 return Ok(snapshot("clear", None, Timestamp::now()));
             }
             self.refresh_reply.fetch().await
@@ -456,18 +437,26 @@ mod tests {
             self.refresh_reply.respond(Ok(data));
         }
 
-        pub(super) fn write(
+        fn write(
             &self,
-            attempt: ExternalAccessPauseAttempt,
+            attempt: &AdminExternalAccessPauseRequest,
         ) -> Result<RuntimeSwitchIntentDto, AdminApiFailure> {
             let mut writes = self.writes.borrow_mut();
-            writes.push(attempt);
+            writes.push(serde_json::to_string(attempt).unwrap());
             let failure = match writes.len() {
-                1 => AdminApiFailure::client(TransportError::Timeout.code()),
+                1 => AdminApiFailure::from_http_body(
+                    503,
+                    r#"{"code":"storage_unavailable","message":"暂不可用","data":null,"request_id":null}"#,
+                ),
                 2 | 4 => AdminApiFailure::from_http_body(
                     429,
                     r#"{"code":"rate_limited","message":"请求过多","data":null,"request_id":null}"#,
                 ),
+                3 if self.accept_replay => {
+                    let mut accepted = snapshot("set", attempt.expires_at, Timestamp::now());
+                    accepted.database_intent[0].revision = 8;
+                    return Ok(accepted.database_intent.remove(0));
+                }
                 3 => AdminApiFailure::from_http_body(
                     409,
                     r#"{"code":"runtime_switch_conflict","message":"版本已变化","data":null,"request_id":null}"#,
@@ -476,11 +465,19 @@ mod tests {
             };
             Err(failure)
         }
+
+        fn install(self: &Rc<Self>) {
+            use_context_provider(|| self.clone());
+            let requests = self.clone();
+            use_hook(move || {
+                ExternalAccessPauseAttempt::stub_submit(move |attempt| requests.write(attempt));
+            });
+        }
     }
 
     fn mount_card(requests: Rc<PauseRequests>) -> (TestPage, ElementId, ElementId) {
         let (page, edits) = mount_writer(move || {
-            use_context_provider(|| requests.clone());
+            requests.install();
             rsx! { RuntimeSwitchCard {} }
         });
         let reason = text_attributes(&edits, "id")
@@ -521,7 +518,7 @@ mod tests {
         page.dispatch("input", reason, "演练");
         page.dispatch("submit", form, "");
         click_button(&mut page, "确认");
-        assert!(has_live_text(&page, "提交结果未知：请原样重试，不要新建命令。"));
+        assert!(has_live_text(&page, "曾有请求结果未知，请保留原命令，勿为同一实体新建操作。"));
         click_button(&mut page, "原样重试");
         assert!(button(&page, "原样重试").is_some());
         assert_eq!(requests.reads.get(), 1);
@@ -548,8 +545,107 @@ mod tests {
         click_button(&mut page, "确认");
         let writes = requests.writes.borrow();
         assert_eq!(writes.len(), 4);
-        assert_eq!(writes[3].expected_revision, 8);
-        assert_ne!(writes[3].command_id, writes[0].command_id);
+        let first: AdminExternalAccessPauseRequest = serde_json::from_str(&writes[0]).unwrap();
+        let latest: AdminExternalAccessPauseRequest = serde_json::from_str(&writes[3]).unwrap();
+        assert_eq!(latest.expected_revision, 8);
+        assert_ne!(latest.command_id, first.command_id);
+    }
+
+    #[test]
+    fn pause_cannot_replace_unknown_after_leaving_and_returning() {
+        let requests = Rc::new(PauseRequests::new());
+        let (mut page, initial) = mount_writer({
+            let requests = requests.clone();
+            move || {
+                requests.install();
+                let host = use_context::<PendingCommandHost>();
+                let mut visible = use_signal(|| true);
+                rsx! {
+                    button { onclick: move |_| visible.toggle(), {"切换测试路由".to_owned()} }
+                    PendingCommandNotices { host }
+                    if visible() { RuntimeSwitchCard {} }
+                }
+            }
+        });
+        let reason = |edits: &[dioxus::core::Mutation]| {
+            text_attributes(edits, "id")
+                .find_map(|(id, value)| (value == PAUSE_REASON_ID).then_some(id))
+                .unwrap()
+        };
+        page.dispatch("input", reason(&initial), "演练");
+        page.dispatch("submit", writer_form(&initial), "");
+        click_button(&mut page, "确认");
+        click_button(&mut page, "切换测试路由");
+        click_button(&mut page, "切换测试路由");
+        requests.finish_refresh();
+        let remounted = settle_writer(&mut page);
+        page.dispatch("input", reason(&remounted), "重新输入的原因");
+        page.dispatch("submit", writer_form(&remounted), "");
+        assert!(button(&page, "确认").is_none());
+        assert!(button(&page, "原样重试").is_some());
+        assert_eq!(requests.writes.borrow().len(), 1);
+        click_button(&mut page, "原样重试");
+        let writes = requests.writes.borrow();
+        assert_eq!(writes.len(), 2);
+        assert_eq!(writes[0], writes[1]);
+    }
+
+    #[test]
+    fn remounted_pause_waits_for_the_read_after_the_original_command_settles() {
+        for accept_replay in [true, false] {
+            let requests =
+                Rc::new(PauseRequests { initial_reads: 2, accept_replay, ..PauseRequests::new() });
+            let (mut page, initial) = mount_writer({
+                let requests = requests.clone();
+                move || {
+                    requests.install();
+                    let host = use_context::<PendingCommandHost>();
+                    let mut on_config = use_signal(|| true);
+                    rsx! {
+                        button { onclick: move |_| on_config.toggle(), {"切换测试路由".to_owned()} }
+                        PendingCommandNotices { host }
+                        if on_config() { RuntimeSwitchCard {} }
+                    }
+                }
+            });
+            let reason = |edits: &[dioxus::core::Mutation]| {
+                text_attributes(edits, "id")
+                    .find_map(|(id, value)| (value == PAUSE_REASON_ID).then_some(id))
+                    .unwrap()
+            };
+            page.dispatch("input", reason(&initial), "第一次暂停");
+            page.dispatch("submit", writer_form(&initial), "");
+            click_button(&mut page, "确认");
+            click_button(&mut page, "切换测试路由");
+            let remounted = click_button(&mut page, "切换测试路由");
+            assert_eq!(requests.reads.get(), 2);
+            assert!(has_live_text(&page, "暂停外部访问…"));
+            let form = writer_form(&remounted);
+            click_button(&mut page, "原样重试");
+            click_button(&mut page, "原样重试");
+            assert!(button(&page, "原样重试").is_none());
+            assert_eq!(requests.reads.get(), 3);
+            assert_eq!(submit_button_disabled(&page, "暂停外部访问…"), Some(true));
+            page.dispatch("input", reason(&remounted), "恢复访问");
+            page.dispatch("submit", form, "");
+            assert!(button(&page, "确认").is_none());
+            assert_eq!(requests.writes.borrow().len(), 3);
+
+            requests.finish_refresh();
+            settle_writer(&mut page);
+            assert_eq!(submit_button_disabled(&page, "恢复外部访问…"), Some(false));
+            page.dispatch("submit", form, "");
+            click_button(&mut page, "确认");
+            let writes = requests.writes.borrow();
+            assert_eq!(writes.len(), 4);
+            assert_eq!(writes[0], writes[2]);
+            let original: AdminExternalAccessPauseRequest =
+                serde_json::from_str(&writes[0]).unwrap();
+            let latest: AdminExternalAccessPauseRequest = serde_json::from_str(&writes[3]).unwrap();
+            assert_ne!(latest.command_id, original.command_id);
+            assert_eq!(latest.expected_revision, 8);
+            assert!(!latest.paused);
+        }
     }
 
     fn snapshot(
@@ -624,17 +720,18 @@ mod form_tests {
     use std::rc::Rc;
 
     use auction_web_shared::i18n::{DEFAULT_ADMIN_LOCALE, build_bundle};
-    use auction_web_shared::use_confirm_command;
     use dioxus::core::{AttributeValue, ElementId, Mutation, ScopeId};
     use dioxus::prelude::*;
     use dioxus_i18n::prelude::try_use_init_i18n_from_bundle;
 
     use super::{
-        ExternalAccessPauseControl, PAUSE_REASON_ID, PauseControlState, reason_error_text,
+        ExternalAccessPauseControl, PAUSE_ENTITY, PAUSE_REASON_ID, PauseControlState,
+        reason_error_text,
     };
     use crate::api::ExternalAccessPauseAttempt;
     use crate::surface::ADMIN_LOCALE_CATALOG;
     use crate::surface::config::test_form::{FormBrowser, dispatch, listener};
+    use crate::surface::pending::{use_pending_command_host, use_pending_commands};
 
     fn pause_form() -> Element {
         try_use_init_i18n_from_bundle(|| {
@@ -646,17 +743,18 @@ mod form_tests {
             )
         })
         .unwrap();
+        use_pending_command_host();
+        let command_refresh = use_signal(|| 0);
         let state = PauseControlState {
-            command: use_confirm_command(),
+            pending: use_pending_commands(command_refresh, |entity| entity == PAUSE_ENTITY),
+            confirmation: use_signal(|| None),
             hours: use_signal(|| 2),
             reason: use_signal(|| {
                 "界".repeat(ExternalAccessPauseAttempt::MAX_REASON_BYTES / 3 + 1)
             }),
             accepted: use_signal(|| false),
-            required_generation: use_signal(|| 0),
         };
-        let refresh = use_signal(|| 0);
-        rsx! { ExternalAccessPauseControl { state, revision: 7, paused: false, paused_until: None, refresh, loaded_generation: 0 } }
+        rsx! { ExternalAccessPauseControl { state, revision: 7, paused: false, paused_until: None, command_refresh, loaded_generation: 0 } }
     }
 
     fn mount(focused: &'static str) -> (VirtualDom, Rc<FormBrowser>, ElementId, String) {

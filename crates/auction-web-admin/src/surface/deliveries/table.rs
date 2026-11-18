@@ -8,6 +8,7 @@ use dioxus::prelude::*;
 
 use super::super::router::Route;
 use super::super::sort::{MobileSortControl, SortDirection, SortableTh, sort_rows};
+use super::delivery_command_entity;
 use super::dialog::DeliveryDialog;
 use super::labels::{
     delivery_category_label, delivery_display_id, delivery_display_type, delivery_outcome_label,
@@ -251,7 +252,7 @@ pub(super) fn DeliveryRow(
                         button {
                             r#type: "button",
                             class: "admin-btn-primary",
-                            disabled: commands.any_busy() || commands.contains(&delivery.id),
+                            disabled: commands.any_busy() || commands.contains(&delivery_command_entity(&delivery.id)),
                             onclick: move |_| on_open.call((delivery_for_action.clone(), kind)),
                             {t!("delivery-review-actions")}
                         }

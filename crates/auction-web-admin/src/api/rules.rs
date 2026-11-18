@@ -46,10 +46,37 @@ impl AdminDocumentKind {
     }
 }
 
+#[cfg(test)]
+type StubRead = std::rc::Rc<dyn Fn(AdminDocumentKind, &str) -> AdminRules>;
+#[cfg(test)]
+type StubPublish = std::rc::Rc<
+    dyn Fn(
+        AdminDocumentKind,
+        AdminRulesPublishRequest,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = AdminRules>>>,
+>;
+
+#[cfg(test)]
+impl AdminDocumentKind {
+    pub(crate) fn stub_documents<F: std::future::Future<Output = AdminRules> + 'static>(
+        read: impl Fn(AdminDocumentKind, &str) -> AdminRules + 'static,
+        publish: impl Fn(AdminDocumentKind, AdminRulesPublishRequest) -> F + 'static,
+    ) {
+        dioxus::prelude::provide_context(std::rc::Rc::new(read) as StubRead);
+        let publish: StubPublish =
+            std::rc::Rc::new(move |kind, request| Box::pin(publish(kind, request)));
+        dioxus::prelude::provide_context(publish);
+    }
+}
+
 pub(crate) async fn fetch_admin_rules(
     kind: AdminDocumentKind,
     locale: String,
 ) -> Result<AdminRules, AdminRulesApiError> {
+    #[cfg(test)]
+    if let Some(read) = dioxus::prelude::try_consume_context::<StubRead>() {
+        return decode_read_document(read(kind, &locale), &locale);
+    }
     let mut query = url::form_urlencoded::Serializer::new(String::new());
     query.append_pair("lang", locale.trim());
     let url = format!("{}?{}", kind.api_path(), query.finish());
@@ -61,7 +88,11 @@ pub(crate) async fn fetch_admin_rules(
         .json()
         .await
         .map_err(|error| AdminApiFailure::client(invalid_response_error(error)))?;
-    let rules = decode_rules(payload.data).map_err(invalid_rules_response)?;
+    decode_read_document(payload.data, &locale)
+}
+
+fn decode_read_document(value: AdminRules, locale: &str) -> Result<AdminRules, AdminRulesApiError> {
+    let rules = decode_rules(value).map_err(invalid_rules_response)?;
     if rules.locale != locale.trim() {
         return Err(AdminApiFailure::client("invalid_response"));
     }
@@ -113,6 +144,11 @@ pub(crate) async fn publish_admin_rules(
 ) -> Result<AdminRules, AdminRulesApiError> {
     let request =
         AdminRulesPublishRequest { command_id, expected_revision, locale, title, markdown };
+    #[cfg(test)]
+    if let Some(publish) = dioxus::prelude::try_consume_context::<StubPublish>() {
+        let result = publish(kind, request.clone()).await;
+        return decode_publish_receipt(result, &request);
+    }
     let endpoint = match kind {
         AdminDocumentKind::Rules => AdminWriteEndpoint::RulesPublish,
         AdminDocumentKind::About => AdminWriteEndpoint::AboutPublish,
@@ -124,7 +160,14 @@ pub(crate) async fn publish_admin_rules(
         .json()
         .await
         .map_err(|error| AdminApiFailure::client(invalid_response_error(error)))?;
-    let rules = decode_rules(payload.data).map_err(invalid_rules_response)?;
+    decode_publish_receipt(payload.data, &request)
+}
+
+fn decode_publish_receipt(
+    value: AdminRules,
+    request: &AdminRulesPublishRequest,
+) -> Result<AdminRules, AdminRulesApiError> {
+    let rules = decode_rules(value).map_err(invalid_rules_response)?;
     if rules.locale != request.locale
         || rules.title != request.title
         || rules.markdown != request.markdown

@@ -46,7 +46,13 @@ pub(super) fn AdminShell() -> Element {
     let readiness_refresh = use_signal(|| 0_u64);
     let readiness = use_resource(move || {
         let _ = readiness_refresh();
-        fetch_admin_readiness()
+        async {
+            #[cfg(test)]
+            if try_consume_context::<self::effects::TestSession>().is_some() {
+                return Ok(true);
+            }
+            fetch_admin_readiness().await
+        }
     });
     let readiness_context: AdminReadinessResource = readiness;
     use_context_provider(move || readiness_context);

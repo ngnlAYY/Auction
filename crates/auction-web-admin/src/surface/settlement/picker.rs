@@ -3,9 +3,9 @@
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
-use super::page::RecoveryConfirmationDraft;
 use super::page::reset_detail_state;
 use super::query::{SettlementQuery, push_settlement_query};
+use super::recovery::RecoveryConfirmationDraft;
 use crate::api::{AdminSettlementCatalogEntry, AdminSettlementCatalogPage};
 use crate::surface::pagination::{AdminPager as Pager, AdminPagination};
 use crate::surface::{AdminActionFeedback, admin_world_label, format_admin_time};

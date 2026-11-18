@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 use crate::api::{AdminApiFailure, AdminSessionWritePermission};
 use crate::surface::ADMIN_LOCALE_CATALOG;
+use crate::surface::pending::{PendingCommandNotices, use_pending_command_host};
 use crate::surface::test_events::{dispatch_click_event, dispatch_form_event};
 
 const N: i64 = 2;
@@ -32,7 +33,7 @@ impl Requests {
             let mut writes = self.writes.borrow_mut();
             writes.push((url.to_owned(), body.to_owned()));
             return match writes.len() {
-                1 => Err(TransportError::Timeout),
+                1 => Ok((503, r#"{"code":"storage_unavailable","message":"暂不可用","data":null,"request_id":null}"#.to_owned())),
                 2 => Ok((409, STALE.to_owned())),
                 3 => {
                     let (fingerprint, action) =
@@ -97,6 +98,17 @@ fn test_page() -> Element {
     use_hook(move || {
         AdminApiFailure::stub_alert_responses(move |url, body| requests.reply(url, body));
     });
+    let mut alerts = use_signal(|| true);
+    let host = use_pending_command_host();
+    rsx! {
+        button { onclick: move |_| alerts.toggle(), "切换测试路由" }
+        PendingCommandNotices { host }
+        if alerts() { AlertRoute {} }
+    }
+}
+
+#[component]
+fn AlertRoute() -> Element {
     super::page()
 }
 
@@ -140,7 +152,7 @@ impl Page {
     }
 
     fn filter(&mut self, status: &str) -> Vec<Mutation> {
-        let select = self.controls(self.root(), "onchange");
+        let select = self.controls(self.component("AlertRoute").unwrap(), "onchange");
         assert_eq!(select.len(), 1);
         self.event("change", select[0].id, status)
     }
@@ -162,6 +174,11 @@ impl Page {
         let selectors = self.controls(self.component("AlertRow").unwrap(), "onchange");
         assert_eq!(selectors.len(), 1);
         self.event("change", selectors[0].id, hours);
+    }
+
+    fn navigate(&mut self) -> Vec<Mutation> {
+        let button = self.controls(self.root(), "onclick")[0].id;
+        self.event("click", button, "")
     }
 
     fn pending_action(&self) -> ElementId {
@@ -240,7 +257,7 @@ fn check_retry(action: &str, action_index: usize) {
     }
     let timed_out = page.event("click", page.row_actions(false)[action_index], "");
     assert_eq!(updated_text(&timed_out, "曾有请求结果未知"), 1);
-    assert_eq!(updated_text(&timed_out, "原样重试"), 1);
+    assert_eq!(updated_text(&timed_out, "原样重试"), 2);
     page.row_actions(true);
     page.pending_action();
     assert_eq!(*requests.reads.borrow(), ["active"]);
@@ -300,6 +317,35 @@ fn acknowledge_retries_original_incident_and_allows_new_command_after_stale() {
 #[test]
 fn silence_retries_original_incident_and_allows_new_command_after_stale() {
     check_retry("silence", 1);
+}
+
+#[test]
+fn silence_cannot_replace_unknown_after_leaving_and_returning() {
+    let requests = Rc::new(Requests::default());
+    let mut page = Page::mount(requests.clone());
+    page.event("input", page.reason(), "原始备注");
+    page.event("click", page.row_actions(false)[1], "");
+    page.navigate();
+    assert!(page.component("AlertRoute").is_none());
+    assert!(page.component("PendingCommandNotices").is_some());
+    page.navigate();
+    let [acknowledge, silence] = page.row_actions(true);
+    page.event("click", acknowledge, "");
+    page.event("click", silence, "");
+    assert_eq!(requests.writes.borrow().len(), 1);
+
+    page.navigate();
+    let shell = page.component("PendingCommandNotices").unwrap();
+    let [retry, abandon] = page.controls(shell, "onclick")[..] else {
+        panic!("切页后外壳仍应提供原样重试与放弃");
+    };
+    assert!(!retry.disabled && !abandon.disabled);
+    let rejected = page.event("click", retry.id, "");
+    assert_eq!(updated_text(&rejected, "关闭回执"), 1);
+    let writes = requests.writes.borrow();
+    assert_eq!(writes.len(), 2);
+    assert_eq!(writes[0], writes[1]);
+    assert_eq!(*requests.reads.borrow(), ["active", "active"]);
 }
 
 #[test]

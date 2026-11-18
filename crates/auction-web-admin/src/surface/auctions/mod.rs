@@ -32,7 +32,11 @@ pub(super) fn page() -> Element {
     let query = use_auctions_query_state();
     let query_state = query.state;
     let reload_generation = use_signal(|| 0_u64);
-    let pending = use_pending_commands(reload_generation);
+    let pending = use_pending_commands(reload_generation, |entity| {
+        entity == "create-auction"
+            || entity.starts_with("auction:")
+            || entity.starts_with("intake:")
+    });
     let pagination = use_admin_pagination("auctions", &["page_size"], Some(100), 100_000);
     let drafts = use_auction_drafts();
     let notice = use_signal(|| None::<AdminAuctionNotice>);

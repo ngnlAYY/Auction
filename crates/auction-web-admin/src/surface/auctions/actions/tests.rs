@@ -47,7 +47,7 @@ fn Fixture() -> Element {
     let test = consume_context::<Rc<AuctionPageTest>>();
     init_i18n();
     let reload_generation = use_signal(|| 0);
-    test.owner.set(Some(use_pending_commands(reload_generation)));
+    test.owner.set(Some(use_pending_commands(reload_generation, |_| true)));
     let drafts = use_auction_drafts();
     let notice = use_signal(|| None);
     let edited_auction = drafts.auction_id();

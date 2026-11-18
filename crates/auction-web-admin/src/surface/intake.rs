@@ -8,7 +8,9 @@ use serde_json::Value;
 
 use super::lots::{MAX_START_PRICE, parse_start_price};
 use crate::api::{AdminIntakeResult, add_admin_intake};
-use crate::surface::pending::{PendingCommands, set_if_alive};
+use crate::surface::pending::{
+    CommandDelivery, CommandReceipt, PendingCommands, set_if_alive, try_set_if_alive,
+};
 use crate::surface::validation::{FieldError, focus_field};
 use crate::surface::{admin_api_error_message, admin_world_label};
 
@@ -79,7 +81,6 @@ pub(super) fn AdminIntakeForm(world_id: String) -> Element {
     // 服务端返回的错误码；输入层校验错误由各字段信号承担，不走整页提示。
     let mut failure = use_signal(|| None::<String>);
     let mut field_errors = use_signal(IntakeFieldErrors::default);
-    let empty_value = t!("value-empty");
 
     rsx! {
         section {
@@ -132,15 +133,18 @@ pub(super) fn AdminIntakeForm(world_id: String) -> Element {
                     // 只冻结已选择来源的参数，另一来源的未提交草稿不进入页宿主。
                     let equipment_url_value = if source_kind_value == "url" { equipment_url_value } else { String::new() };
                     let equipment_json_value = if source_kind_value == "json" { equipment_json_value } else { String::new() };
-                    owner.submit(
+                    owner.submit_with_receipt(
                         format!("intake:{world_id}"), t!("admin-intake-title", world: admin_world_label(&world_id)),
                         move |command_id| add_admin_intake(command_id, world_id.clone(),
                             source_kind_value.clone(), equipment_url_value.clone(), equipment_json_value.clone(),
                             start_price, player_id_value.clone()),
-                        move |value| {
-                            set_if_alive(result, Some(value));
-                            set_if_alive(failure, None);
-                            set_if_alive(field_errors, IntakeFieldErrors::default());
+                        move |value, source_alive| {
+                            let delivered = source_alive && try_set_if_alive(result, Some(value.clone()));
+                            if delivered {
+                                set_if_alive(failure, None);
+                                set_if_alive(field_errors, IntakeFieldErrors::default());
+                            }
+                            CommandDelivery::reported(delivered, || Some(CommandReceipt::Text(intake_result_message(&value))))
                         },
                         move |code| {
                             set_if_alive(result, None);
@@ -316,19 +320,17 @@ pub(super) fn AdminIntakeForm(world_id: String) -> Element {
             }
             if let Some(value) = result() {
                 p { class: "action-feedback action-feedback--success", role: "status",
-                    {t!(
-                        "admin-intake-result",
-                        name: value.equipment_name,
-                        number: value.auction_sequence,
-                        lot: value.lot_number,
-                        category: value.equipment_category,
-                        level: value
-                            .equipment_level.map_or_else(|| empty_value.clone(), |level| level.to_string())
-                    )}
+                    {intake_result_message(&value)}
                 }
             }
         }
     }
+}
+
+fn intake_result_message(value: &AdminIntakeResult) -> String {
+    t!("admin-intake-result", name: &value.equipment_name, number: value.auction_sequence,
+        lot: value.lot_number, category: &value.equipment_category,
+        level: value.equipment_level.map_or_else(|| t!("value-empty"), |level| level.to_string()))
 }
 
 /// 在请求发送前复现旧版对 canonical JSON 的结构校验，避免把明显错误的 JSON 交给网络层。

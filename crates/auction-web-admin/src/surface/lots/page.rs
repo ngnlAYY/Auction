@@ -31,7 +31,6 @@ fn AdminAuctionLotsPage(auction_id: String) -> Element {
     let query_state = query.state;
     let requested_page = use_memo(move || query_state.read().page);
     let reload_generation = use_signal(|| 0_u64);
-    let pending = use_pending_commands(reload_generation);
     let pagination = use_admin_pagination("lots", &["page_size"], Some(100), 100_000);
     let draft = use_signal(|| None::<LotEdit>);
     let notice = use_signal(|| None::<LotUpdateNotice>);
@@ -44,6 +43,15 @@ fn AdminAuctionLotsPage(auction_id: String) -> Element {
         move || (auction_id.clone(), requested_page()),
         |(auction_id, page), size| fetch_admin_lots(auction_id, page, size),
     );
+    let visible_lots = use_memo(use_reactive((&lots,), |(lots,)| lots.and_then(Result::ok)));
+    let pending = use_pending_commands(reload_generation, move |entity| {
+        entity.strip_prefix("lot:").is_some_and(|lot_id| {
+            visible_lots
+                .peek()
+                .as_ref()
+                .is_none_or(|page| page.lots.iter().any(|lot| lot.id == lot_id))
+        })
+    });
     let latest_version = {
         let page = lots.as_ref().and_then(|result| result.as_ref().ok());
         edited_lot.as_ref().and_then(|lot_id| {

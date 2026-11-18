@@ -17,6 +17,7 @@ use crate::api::{
 use crate::surface::admin_api_error_message;
 use crate::surface::admin_world_label;
 use crate::surface::pagination::{AdminPager, use_admin_page, use_admin_pagination};
+use crate::surface::pending::use_pending_commands;
 use crate::surface::query::{ReturnsQuery, use_returns_query_state};
 use crate::surface::router::Route;
 
@@ -24,6 +25,7 @@ pub(crate) fn page() -> Element {
     let query = use_returns_query_state();
     let query_state = query.state;
     let mut refresh = use_signal(|| 0_u64);
+    use_pending_commands(refresh, |entity| entity.starts_with("settlement-return:"));
     let mut lookup = use_signal(String::new);
     let mut lookup_invalid = use_signal(|| false);
     let navigator = navigator();

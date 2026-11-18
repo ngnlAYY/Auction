@@ -21,7 +21,14 @@ use super::session::{
 };
 use crate::api::{AdminApiFailure, AdminSession, fetch_admin_session, logout_admin};
 
+/// 宿主测试注入会话投影和事件，继续通过真实 Router 与认证外壳挂载业务页面。
+#[cfg(test)]
+#[derive(Clone, Copy)]
+pub(super) struct TestSession(pub(super) Signal<View>, pub(super) EventHandler<Event>);
+
 pub(super) fn use_session() -> (Signal<View>, EventHandler<Event>) {
+    #[cfg(test)]
+    let fixture = try_consume_context::<TestSession>();
     let view = use_signal(View::default);
     let runtime = use_hook(|| Rc::new(SessionRuntime::new(view)));
     let dispatch = {
@@ -46,7 +53,17 @@ pub(super) fn use_session() -> (Signal<View>, EventHandler<Event>) {
     });
     #[cfg(not(target_arch = "wasm32"))]
     let _ = on_input;
-    use_effect(move || dispatch.call(Event::Start));
+    use_effect(move || {
+        #[cfg(test)]
+        if fixture.is_some() {
+            return;
+        }
+        dispatch.call(Event::Start);
+    });
+    #[cfg(test)]
+    if let Some(TestSession(view, dispatch)) = fixture {
+        return (view, dispatch);
+    }
     (view, dispatch)
 }
 

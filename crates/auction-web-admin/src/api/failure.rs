@@ -111,6 +111,7 @@ impl AdminApiFailure {
     }
 
     /// 只有经过账本核对且状态码吻合的拒绝，才能解除先前结果未知的命令。
+    #[cfg(test)]
     pub(crate) fn resolves_prior_attempt(&self) -> bool {
         self.status.is_some()
             && Self::rejection(&self.code, self.status) == Some(Rejection::ReplayChecked)

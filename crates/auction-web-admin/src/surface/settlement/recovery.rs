@@ -4,7 +4,6 @@ use auction_web_shared::{AsyncState, AsyncStateKind, Time, TruncatedText};
 use auction_web_shared::{Dialog, t};
 use dioxus::prelude::*;
 
-use super::page::RecoveryConfirmationDraft;
 use super::presentation::{
     recovery_action_summary, recovery_command_label, recovery_stage_label,
     send_attribution_blocker_label,
@@ -17,6 +16,29 @@ use crate::surface::pagination::AdminPagination;
 use crate::surface::pending::{PendingCommands, set_if_alive};
 use crate::surface::validation::{FieldError, focus_field};
 
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct RecoveryConfirmationDraft {
+    pub(super) auction_id: String,
+    pub(super) recovery_id: String,
+    pub(super) state_version: i64,
+    pub(super) action: String,
+    pub(super) equipment_name: String,
+    pub(super) lot_code: String,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub(super) struct RecoveryRead {
+    pub(super) reload: Signal<u64>,
+    pub(super) recovery_reload: Signal<u64>,
+    pub(super) generation: (u64, u64),
+}
+
+impl RecoveryRead {
+    fn is_current(self) -> bool {
+        ((self.reload)(), (self.recovery_reload)()) == self.generation
+    }
+}
+
 #[component]
 pub(super) fn AdminRecoveryTable(
     report: Option<AdminRecoveryReport>,
@@ -24,6 +46,7 @@ pub(super) fn AdminRecoveryTable(
     pagination: AdminPagination,
     mut page: Signal<i64>,
     action_busy: ReadSignal<bool>,
+    recovery_read: RecoveryRead,
     mut confirmation: Signal<Option<RecoveryConfirmationDraft>>,
     mut reason: Signal<String>,
     mut action_feedback: Signal<Option<AdminActionFeedback>>,
@@ -65,6 +88,7 @@ pub(super) fn AdminRecoveryTable(
                                     AdminRecoveryRow {
                                         recovery,
                                         action_busy,
+                                        recovery_read,
                                         confirmation,
                                         reason,
                                         action_feedback,
@@ -90,6 +114,7 @@ pub(super) fn AdminRecoveryTable(
 fn AdminRecoveryRow(
     recovery: AdminRecovery,
     action_busy: ReadSignal<bool>,
+    recovery_read: RecoveryRead,
     mut confirmation: Signal<Option<RecoveryConfirmationDraft>>,
     mut reason: Signal<String>,
     mut action_feedback: Signal<Option<AdminActionFeedback>>,
@@ -136,10 +161,11 @@ fn AdminRecoveryRow(
                                 button {
                                     class: "admin-btn-primary admin-auction-recovery-action",
                                     r#type: "button",
-                                    disabled: action_busy() || pending.contains(&recovery_id),
+                                    disabled: !recovery_read.is_current() || action_busy()
+                                        || pending.contains(&format!("settlement-recovery:{recovery_id}")),
                                     onclick: move |_| {
-                                        if read_settlement_query().is_err()
-                            || pending.any_busy() || pending.contains(&draft.recovery_id) {
+                                        if !recovery_read.is_current() || read_settlement_query().is_err()
+                                            || pending.any_busy() || pending.contains(&format!("settlement-recovery:{}", draft.recovery_id)) {
                                             return;
                                         }
                                         confirmation.set(Some(draft.clone()));
@@ -171,6 +197,7 @@ pub(super) fn AdminRecoveryDialog(
     mut feedback: Signal<Option<AdminActionFeedback>>,
     selected_auction_id: Signal<String>,
     selection_generation: Signal<u64>,
+    recovery_read: RecoveryRead,
     mut recovery_reload_generation: Signal<u64>,
 ) -> Element {
     let pending = use_context::<PendingCommands>();
@@ -178,6 +205,7 @@ pub(super) fn AdminRecoveryDialog(
     let generation = selection_generation();
     let requires_reason = draft.action != "reclaimed";
     let shows_refund = activates_buyer_refund(&draft.action);
+    let blocked = pending.contains(&format!("settlement-recovery:{}", draft.recovery_id));
     // 外壳（遮罩/标题栏/关闭守卫）由共享 Dialog 接管；共享组件暂不支持 aria_describedby，
     // 描述段落保留在内容区首部。
     rsx! {
@@ -202,8 +230,8 @@ pub(super) fn AdminRecoveryDialog(
                     onsubmit: move |event| {
                         event.prevent_default();
                         // 首次提交只作用于打开确认时选中的场次，重试继续使用冻结的意图。
-                        if read_settlement_query().is_err()
-                            || pending.any_busy() || pending.contains(&draft.recovery_id)
+                        if !recovery_read.is_current() || read_settlement_query().is_err()
+                            || pending.any_busy() || pending.contains(&format!("settlement-recovery:{}", draft.recovery_id))
                             || selected_auction_id() != draft.auction_id
                             || selection_generation() != generation
                         {
@@ -221,8 +249,8 @@ pub(super) fn AdminRecoveryDialog(
                         let submitted_selection_generation = generation;
                         let success_auction_id = draft.auction_id.clone();
                         let failure_auction_id = draft.auction_id.clone();
-                        let submitted = pending.submit(
-                            draft.recovery_id.clone(),
+                        let submitted = pending.submit_with_receipt(
+                            format!("settlement-recovery:{}", draft.recovery_id),
                             recovery_command_label(&draft.action),
                             move |command_id| {
                                 let draft = draft.clone();
@@ -247,13 +275,12 @@ pub(super) fn AdminRecoveryDialog(
                                     result.map_err(|error| error.code)
                                 }
                             },
-                            move |_| {
-                                if same_recovery_selection(
+                            move |_, source_alive| {
+                                let delivered = source_alive && same_recovery_selection(
                                     selected_auction_id, selection_generation,
                                     &success_auction_id, submitted_selection_generation,
-                                ) {
-                                    set_if_alive(feedback, Some(AdminActionFeedback::Success));
-                                }
+                                ) && crate::surface::pending::try_set_if_alive(feedback, Some(AdminActionFeedback::Success));
+                                crate::surface::pending::CommandDelivery::reported(delivered, || None)
                             },
                             move |code| {
                                 if same_recovery_selection(
@@ -265,7 +292,7 @@ pub(super) fn AdminRecoveryDialog(
                             },
                         );
                         if submitted {
-                            // 完整意图归页级宿主；关闭展示不能修改未知命令的原因、版本或 UUID。
+                            // 完整意图归认证外壳；关闭展示不能修改未知命令的原因、版本或 UUID。
                             confirmation.set(None);
                             reason.set(String::new());
                             reason_issue.set(None);
@@ -311,7 +338,7 @@ pub(super) fn AdminRecoveryDialog(
                         button {
                             class: "admin-btn-primary admin-auction-recovery-action",
                             r#type: "submit",
-                            disabled: busy(),
+                            disabled: busy() || blocked || !recovery_read.is_current(),
                             {t!("admin-recovery-confirm")}
                         }
                     }
@@ -374,33 +401,32 @@ fn activates_buyer_refund(action: &str) -> bool {
 mod tests {
     use std::collections::BTreeSet;
 
-    use auction_web_shared::i18n::{DEFAULT_ADMIN_LOCALE, build_bundle};
     use dioxus::dioxus_core::{AttributeValue, Mutation};
     use dioxus::prelude::*;
-    use dioxus_i18n::prelude::try_use_init_i18n_from_bundle;
 
-    use super::AdminRecoveryRow;
+    use super::{AdminRecoveryRow, RecoveryRead};
     use super::{RecoveryReasonIssue, activates_buyer_refund, validate_recovery_reason};
     use crate::api::AdminRecovery;
-    use crate::surface::ADMIN_LOCALE_CATALOG;
-    use crate::surface::pending::use_pending_commands;
+    use crate::surface::auctions::draft_page_tests::{
+        button, click_button, has_live_text, init_i18n, mount_writer,
+    };
+    use crate::surface::pending::{use_pending_command_host, use_pending_commands};
 
     fn recovery_row() -> Element {
-        try_use_init_i18n_from_bundle(|| {
-            build_bundle(
-                &DEFAULT_ADMIN_LOCALE,
-                ADMIN_LOCALE_CATALOG.default_ftl,
-                &DEFAULT_ADMIN_LOCALE,
-                None,
-            )
-        })
-        .unwrap();
-        let reload = use_signal(|| 0);
-        use_pending_commands(reload);
+        init_i18n();
+        let mut reload = use_signal(|| 0);
+        let mut loaded_generation = use_signal(|| 0);
+        use_pending_command_host();
+        use_pending_commands(reload, |_| true);
         let action_busy = use_signal(|| false);
         let confirmation = use_signal(|| None);
         let reason = use_signal(String::new);
         let action_feedback = use_signal(|| None);
+        let recovery_read = RecoveryRead {
+            reload,
+            recovery_reload: reload,
+            generation: (loaded_generation(), loaded_generation()),
+        };
         let recovery: AdminRecovery = serde_json::from_value(serde_json::json!({
             "id": "00000000-0000-0000-0000-000000000001", "world_id": "main",
             "auction_id": "00000000-0000-0000-0000-000000000002", "lot_number": 1,
@@ -412,7 +438,12 @@ mod tests {
             "manual_reconcile_delivery_id": null, "relisted_auction_id": null, "relisted_lot_id": null,
             "actions": [], "allowed_commands": ["reclaimed"], "updated_at": "2027-01-01T00:00:00Z"
         })).unwrap();
-        rsx! { AdminRecoveryRow { recovery, action_busy, confirmation, reason, action_feedback } }
+        rsx! {
+            button { onclick: move |_| reload.set(1), {"使恢复报告失效".to_owned()} }
+            button { onclick: move |_| loaded_generation.set(1), {"完成恢复报告读取".to_owned()} }
+            AdminRecoveryRow { recovery, action_busy, recovery_read, confirmation, reason, action_feedback }
+            if confirmation().is_some() { p { {"已有恢复确认草稿".to_owned()} } }
+        }
     }
 
     #[test]
@@ -442,6 +473,20 @@ mod tests {
                 "操作"
             ])
         );
+    }
+
+    #[test]
+    fn recovery_entry_rejects_events_from_an_invalidated_report() {
+        let (mut page, _) = mount_writer(recovery_row);
+        assert!(!button(&page, "确认已回收").unwrap().1);
+        click_button(&mut page, "使恢复报告失效");
+        let (stale, disabled) = button(&page, "确认已回收").unwrap();
+        assert!(disabled);
+        page.dispatch("click", stale, "");
+        assert!(!has_live_text(&page, "已有恢复确认草稿"));
+        click_button(&mut page, "完成恢复报告读取");
+        click_button(&mut page, "确认已回收");
+        assert!(has_live_text(&page, "已有恢复确认草稿"));
     }
 
     #[test]

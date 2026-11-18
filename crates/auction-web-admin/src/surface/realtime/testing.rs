@@ -10,6 +10,7 @@ use dioxus_i18n::prelude::try_use_init_i18n_from_bundle;
 use url::form_urlencoded;
 
 use crate::surface::ADMIN_LOCALE_CATALOG;
+use crate::surface::pending::use_pending_command_host;
 use crate::surface::test_events::{dispatch_click_event, dispatch_form_event};
 
 type QueryPairs = Vec<(String, String)>;
@@ -125,6 +126,7 @@ fn test_root() -> Element {
         build_bundle(&catalog.default_locale, catalog.default_ftl, &catalog.default_locale, None)
     })
     .unwrap();
+    use_pending_command_host();
     consume_context::<fn() -> Element>()()
 }
 

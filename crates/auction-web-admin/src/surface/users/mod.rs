@@ -1,6 +1,5 @@
 //! Admin 用户管理页面。
-//! 页面只维护筛选、表单和安全用户投影；页级命令宿主冻结完整负载和 command_id，
-//! 原样重试并使用返回的 state_version，一次性 Key 由稳定页面接收。
+//! 页面维护筛选、表单与安全用户投影；会话命令宿主冻结完整负载和 command_id。
 
 #[cfg(test)]
 use std::{cell::Cell, rc::Rc};
@@ -9,7 +8,7 @@ use auction_web_shared::t;
 use auction_web_shared::{AsyncState, AsyncStateKind, use_popstate_revision};
 use dioxus::prelude::*;
 
-use super::pagination::{use_admin_page, use_admin_pagination};
+use super::pagination::{use_admin_pagination, use_versioned_admin_page};
 use super::pending::{
     PendingCommandPanel, use_pending_command_gate, use_pending_commands_with_gate,
 };
@@ -23,8 +22,15 @@ pub(super) mod fields;
 mod row;
 mod table;
 
-use create::{AdminUserCreateForm, AdminUserGeneratedKeyDialog, UserKeyDelivery};
+use create::AdminUserCreateForm;
 use table::{AdminUserFilters, AdminUserTable};
+
+pub(super) use create::{AdminUserGeneratedKey, AdminUserGeneratedKeyDialog};
+
+/// 改名回滚和用户页的动作共用用户的实体围栏。
+pub(super) fn user_command_entity(user_id: &str) -> String {
+    format!("user:{user_id}")
+}
 
 #[cfg(test)]
 pub(super) struct UsersPageFixture {
@@ -52,19 +58,18 @@ pub(super) fn page() -> Element {
     let mut create_open = use_signal(|| false);
     let mut action_busy = use_signal(|| false);
     let command_gate = use_pending_command_gate();
-    let delivery = UserKeyDelivery { gate: command_gate, generated: use_signal(|| None) };
-    let pending = use_pending_commands_with_gate(reload_generation, Some(command_gate));
+    let pending = use_pending_commands_with_gate(reload_generation, Some(command_gate), |entity| {
+        entity == "create-user" || entity.starts_with("user:")
+    });
     // effect 仅用于既有控件的忙态展示；首次提交/重试在执行边界同步占用同一门禁。
     use_effect(move || action_busy.set(pending.any_busy() || command_gate.blocked()));
     let mut action_feedback = use_signal(|| None::<AdminActionFeedback>);
     let mut create_notice = use_signal(|| None::<String>);
     let pagination = use_admin_pagination("users", &["page_size"], Some(200), i64::from(i32::MAX));
-    let users = use_admin_page(
+    let users = use_versioned_admin_page(
         pagination.clone(),
-        move || {
-            let _ = reload_generation();
-            requested_query()
-        },
+        reload_generation,
+        move || requested_query.cloned(),
         |(name, status, page), size| async move {
             #[cfg(test)]
             if let Some(fixture) = try_consume_context::<Rc<UsersPageFixture>>() {
@@ -77,7 +82,7 @@ pub(super) fn page() -> Element {
     let mut correction_failed = use_signal(|| false);
     let mut correct_page = move || {
         let failed = match users.read().as_ref() {
-            Some(Ok(page)) => !query_state().correct_page(query_state, &page.pagination),
+            Some(Ok((_, page))) => !query_state().correct_page(query_state, &page.pagination),
             _ => false,
         };
         correction_failed.set(failed);
@@ -89,7 +94,7 @@ pub(super) fn page() -> Element {
     let needs_correction = result.as_ref().is_some_and(|result| {
         result
             .as_ref()
-            .is_ok_and(|page| query_state.read().page_correction(&page.pagination).is_some())
+            .is_ok_and(|(_, page)| query_state.read().page_correction(&page.pagination).is_some())
     });
     let state = result.as_ref().filter(|_| !needs_correction).cloned();
     let content = match state {
@@ -124,7 +129,7 @@ pub(super) fn page() -> Element {
                 on_retry: move |_| reload_generation.set(reload_generation().saturating_add(1)),
             }
         },
-        Some(Ok(page)) => {
+        Some(Ok((loaded_generation, page))) => {
             rsx! {
             AdminUserTable {
                 page,
@@ -143,10 +148,10 @@ pub(super) fn page() -> Element {
                     next.apply(query_state);
                 },
                 reload_generation,
+                loaded_generation,
                 action_busy,
                 action_feedback,
                 create_notice,
-                delivery,
             }
             }
         }
@@ -174,7 +179,7 @@ pub(super) fn page() -> Element {
             }
             if create_open() {
                 AdminUserCreateForm {
-                    delivery,
+                    gate: command_gate,
                     open: create_open,
                     notice: create_notice,
                 }
@@ -202,10 +207,10 @@ pub(super) fn page() -> Element {
             }
             {content}
         }
-        if let Some(key) = (delivery.generated)() {
+        if let Some((command_id, key)) = pending.generated_key() {
             AdminUserGeneratedKeyDialog {
                 generated: key,
-                on_close: move |_| delivery.acknowledge(),
+                on_close: move |_| pending.acknowledge_key(command_id),
             }
         }
     }

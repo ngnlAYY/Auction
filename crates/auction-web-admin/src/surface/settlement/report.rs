@@ -7,9 +7,8 @@ use auction_web_shared::{
 };
 use dioxus::prelude::*;
 
-use super::page::RecoveryConfirmationDraft;
 use super::presentation::{page_count, page_slice, price_adjustment_label};
-use super::recovery::AdminRecoveryTable;
+use super::recovery::{AdminRecoveryTable, RecoveryConfirmationDraft, RecoveryRead};
 use crate::api::{
     AdminRecoveryReport, AdminSettlementLot, AdminSettlementReport, AdminSettlementSummary,
 };
@@ -23,6 +22,7 @@ pub(super) fn AdminSettlementReportView(
     mut lot_page: Signal<i64>,
     mut recovery_page: Signal<i64>,
     action_busy: ReadSignal<bool>,
+    recovery_read: RecoveryRead,
     confirmation: Signal<Option<RecoveryConfirmationDraft>>,
     reason: Signal<String>,
     action_feedback: Signal<Option<AdminActionFeedback>>,
@@ -109,6 +109,7 @@ pub(super) fn AdminSettlementReportView(
             pagination: recovery_pagination,
             page: recovery_page,
             action_busy,
+            recovery_read,
             confirmation,
             reason,
             action_feedback,

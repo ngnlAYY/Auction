@@ -286,6 +286,7 @@ mod tests {
             )
         })
         .unwrap();
+        crate::surface::pending::use_pending_command_host();
         page()
     }
 

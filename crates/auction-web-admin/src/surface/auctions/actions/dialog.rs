@@ -359,7 +359,7 @@ mod tests {
     use crate::api::AdminAuctionLifecycleAction;
     use crate::surface::ADMIN_LOCALE_CATALOG;
     use crate::surface::auctions::editor::DraftRead;
-    use crate::surface::pending::use_pending_commands;
+    use crate::surface::pending::{use_pending_command_host, use_pending_commands};
 
     fn final_dialog(world_id: String) -> Element {
         try_use_init_i18n_from_bundle(|| {
@@ -372,7 +372,8 @@ mod tests {
         })
         .unwrap();
         let reload_generation = use_signal(|| 0);
-        use_pending_commands(reload_generation);
+        use_pending_command_host();
+        use_pending_commands(reload_generation, |_| true);
         let notice = use_signal(|| None);
         let target = LifecycleTarget {
             auction_id: "test-auction".to_owned(),

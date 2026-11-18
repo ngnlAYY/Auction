@@ -4,14 +4,24 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use auction_contracts::AdminMailTemplateDto;
-use auction_web_shared::{AsyncState, AsyncStateKind, ConfirmCommand, t, use_confirm_command};
+use auction_web_shared::{AsyncState, AsyncStateKind, t};
 use dioxus::prelude::*;
 
 use crate::api::{
-    AdminApiFailure, MailTemplateAttempt, MailTemplateBodyProblem, fetch_mail_templates,
-    mail_template_body_problem, submit_mail_template,
+    MailTemplateAttempt, MailTemplateBodyProblem, fetch_mail_templates, mail_template_body_problem,
+    submit_mail_template,
 };
-use crate::surface::{admin_api_error_message, format_admin_time};
+use crate::surface::format_admin_time;
+use crate::surface::pending::{
+    CommandDelivery, CommandReceipt, PendingCommandPanel, PendingCommands, try_set_if_alive,
+    use_pending_commands,
+};
+
+const TEMPLATE_ENTITY_PREFIX: &str = "mail-template:";
+
+fn template_entity(key: &str) -> String {
+    format!("{TEMPLATE_ENTITY_PREFIX}{key}")
+}
 
 #[derive(Clone)]
 struct TemplateDraft {
@@ -25,55 +35,56 @@ impl TemplateDraft {
     }
 }
 
-/// 卡片持有的全部编辑状态。模板列表在刷新或读取失败时会卸载；草稿与结果未知的命令若留在
-/// 各模板的编辑器里会随之丢失，重新挂载后只能发新命令，违反“结果未知只允许原样重试”。
-/// 手写 `PartialEq` 只比较 Signal 身份（`#[component]` props 要求），不读值、不触发订阅。
-#[derive(Clone, Copy)]
+#[derive(Clone, PartialEq)]
+struct TemplateConfirmation {
+    key: String,
+    expected_revision: i64,
+    body: Option<String>,
+}
+
+type TemplateListResult = Result<Vec<AdminMailTemplateDto>, String>;
+type TemplateListRead = (u64, TemplateListResult);
+
+/// 卡片持有尚未提交的草稿和确认，已提交的模板意图归认证会话。
+#[derive(Clone, Copy, PartialEq)]
 struct TemplateEditState {
-    command: ConfirmCommand<MailTemplateAttempt, AdminApiFailure>,
+    pending: PendingCommands,
+    confirmation: Signal<Option<TemplateConfirmation>>,
     /// 正文与首次编辑时的版本一起保留，列表刷新不得替换草稿的版本围栏。
     drafts: Signal<BTreeMap<String, TemplateDraft>>,
     /// 服务端冲突按模板保留，避免另一模板的操作清除这一次拒绝。
     conflicts: Signal<BTreeSet<String>>,
     /// 最近一次被数据库接受的模板键，用于显示成功提示。
     accepted: Signal<Option<String>>,
-    snapshot: Resource<Result<Vec<AdminMailTemplateDto>, String>>,
-}
-
-impl PartialEq for TemplateEditState {
-    fn eq(&self, other: &Self) -> bool {
-        self.command.command == other.command.command
-            && self.command.confirmation == other.command.confirmation
-            && self.command.submitting == other.command.submitting
-            && self.command.failure == other.command.failure
-            && self.command.uncertain == other.command.uncertain
-            && self.drafts == other.drafts
-            && self.conflicts == other.conflicts
-            && self.accepted == other.accepted
-            && self.snapshot == other.snapshot
-    }
+    snapshot: Resource<TemplateListRead>,
+    refresh: Signal<u64>,
 }
 
 impl TemplateEditState {
+    fn list_ready(self) -> bool {
+        // 命令了结立即使旧版本失效，Resource 尚未开始新一轮读取时也不能提交。
+        let generation = (self.refresh)();
+        *self.snapshot.state().read() == UseResourceState::Ready
+            && self.snapshot.read().as_ref().is_some_and(|(loaded, _)| *loaded == generation)
+    }
+
     fn current_revision(self, key: &str) -> Option<i64> {
         let snapshot = self.snapshot.peek();
-        let templates = snapshot.as_ref()?.as_ref().ok()?;
+        let templates = snapshot.as_ref()?.1.as_ref().ok()?;
         templates.iter().find(|template| template.key == key).map(|template| template.revision)
     }
 
     fn can_edit(self, key: &str, revision: i64) -> bool {
-        !*self.command.submitting.peek()
-            && !*self.command.uncertain.peek()
-            && self.command.confirmation.peek().is_none()
+        !self.pending.contains(&template_entity(key))
+            && !self.pending.contains_local(TEMPLATE_ENTITY_PREFIX)
+            && self.confirmation.peek().is_none()
             && !self.conflicts.peek().contains(key)
             && self.current_revision(key) == Some(revision)
     }
 
     fn begin_save(mut self, template: &AdminMailTemplateDto) -> Option<MailTemplateBodyProblem> {
         let key = &template.key;
-        if !self.can_edit(key, template.revision)
-            || *self.snapshot.state().peek() != UseResourceState::Ready
-        {
+        if !self.can_edit(key, template.revision) || !self.list_ready() {
             return None;
         }
         let draft = self.drafts.peek().get(key).cloned()?;
@@ -82,61 +93,82 @@ impl TemplateEditState {
             return Some(problem);
         }
         self.accepted.set(None);
-        // 签名覆盖全部意图字段：同一输入的重试复用 command_id，输入变化即生成新命令。
-        let signature = format!("set:{key}:{revision}:{}", draft.body);
-        self.command.begin(signature, |command_id| MailTemplateAttempt {
-            command_id,
+        self.confirmation.set(Some(TemplateConfirmation {
             key: key.clone(),
             expected_revision: revision,
             body: Some(draft.body),
-        });
+        }));
         None
     }
 
-    /// 提交或原样重试；结果未知时 `ConfirmCommand` 只重放冻结的原命令。
-    fn submit(mut self, pending: MailTemplateAttempt) {
-        if !*self.command.uncertain.peek()
-            && (self.command.confirmation.peek().as_ref() != Some(&pending)
-                || self.conflicts.peek().contains(&pending.key)
-                || *self.snapshot.state().peek() != UseResourceState::Ready
-                || self.current_revision(&pending.key) != Some(pending.expected_revision))
+    fn submit(mut self, confirmation: TemplateConfirmation) {
+        if self.confirmation.peek().as_ref() != Some(&confirmation)
+            || self.pending.contains_local(TEMPLATE_ENTITY_PREFIX)
+            || self.conflicts.peek().contains(&confirmation.key)
+            || !self.list_ready()
+            || self.current_revision(&confirmation.key) != Some(confirmation.expected_revision)
         {
             return;
         }
-        let key = pending.key.clone();
-        let mut command = self.command;
-        let mut accepted = self.accepted;
-        let mut drafts = self.drafts;
-        let mut conflicts = self.conflicts;
-        let mut snapshot = self.snapshot;
-        self.command.submit(
-            pending,
-            |attempt| async move { submit_mail_template(&attempt).await },
-            AdminApiFailure::outcome_unknown,
-            move |template: AdminMailTemplateDto| {
-                drafts.write().remove(&template.key);
-                accepted.set(Some(template.key));
-                // 接受后的旧投影不能成为下一份草稿的基准。
-                snapshot.clear();
-                snapshot.restart();
-            },
-            move || {
-                let conflict = command.failure.peek().as_ref().is_some_and(is_template_conflict);
-                if conflict {
-                    // 同 ID 账本检查和修订围栏证明旧命令不会再生效。结束确认状态，保留原基准和正文。
-                    command.reset();
-                    conflicts.write().insert(key);
+        let key = confirmation.key.clone();
+        let entity = template_entity(&key);
+        let action = if confirmation.body.is_some() {
+            t!("admin-mail-template-save")
+        } else {
+            t!("admin-mail-template-reset")
+        };
+        let action = format!("{action} · {}", template_label(&key));
+        // 同键保存与恢复默认共用实体围栏；重试只用确认的版本与正文。
+        if self.pending.submit_with_receipt(
+            entity,
+            action,
+            move |command_id| {
+                let confirmation = confirmation.clone();
+                async move {
+                    submit_mail_template(&MailTemplateAttempt {
+                        command_id,
+                        key: confirmation.key,
+                        expected_revision: confirmation.expected_revision,
+                        body: confirmation.body,
+                    })
+                    .await
+                    .map_err(|failure| failure.code)
                 }
             },
-        );
+            move |template: AdminMailTemplateDto, source_alive| {
+                let displayed =
+                    source_alive && try_set_if_alive(self.accepted, Some(template.key.clone()));
+                if displayed {
+                    let mut drafts = self.drafts;
+                    let mut snapshot = self.snapshot;
+                    drafts.write().remove(&template.key);
+                    // 接受后的旧投影不能成为下一份草稿的基准。
+                    snapshot.clear();
+                }
+                CommandDelivery::reported(displayed, || {
+                    Some(CommandReceipt::Text(t!("admin-mail-template-done")))
+                })
+            },
+            move |code| {
+                if code == "mail_template_conflict" {
+                    // 账本核对和修订围栏使旧命令了结，未保存草稿仍保留原版本。
+                    let mut conflicts = self.conflicts;
+                    conflicts.write().insert(key.clone());
+                }
+            },
+        ) {
+            self.confirmation.set(None);
+        }
     }
 
     fn discard(mut self, key: &str, conflicted: bool) {
-        if *self.command.submitting.peek() || *self.command.uncertain.peek() {
+        if self.pending.contains(&template_entity(key))
+            || self.pending.contains_local(TEMPLATE_ENTITY_PREFIX)
+        {
             return;
         }
-        if self.command.command.peek().as_ref().is_some_and(|pending| pending.key == key) {
-            self.command.reset();
+        if self.confirmation.peek().as_ref().is_some_and(|pending| pending.key == key) {
+            self.confirmation.set(None);
         }
         self.drafts.write().remove(key);
         self.conflicts.write().remove(key);
@@ -147,29 +179,35 @@ impl TemplateEditState {
     }
 }
 
-fn is_template_conflict(failure: &AdminApiFailure) -> bool {
-    failure.status == Some(409)
-        && AdminApiFailure::display_code(&failure.code) == "mail_template_conflict"
-        && AdminApiFailure::rejection_after_replay_check(&failure.code)
-}
-
 fn use_template_edit_state(
-    snapshot: Resource<Result<Vec<AdminMailTemplateDto>, String>>,
+    snapshot: Resource<TemplateListRead>,
+    refresh: Signal<u64>,
 ) -> TemplateEditState {
     TemplateEditState {
-        command: use_confirm_command(),
+        pending: use_pending_commands(refresh, |entity| entity.starts_with(TEMPLATE_ENTITY_PREFIX)),
+        confirmation: use_signal(|| None),
         drafts: use_signal(BTreeMap::new),
         conflicts: use_signal(BTreeSet::new),
         accepted: use_signal(|| None),
         snapshot,
+        refresh,
     }
 }
 
 #[component]
 pub(super) fn MailTemplateCard() -> Element {
-    let mut snapshot = use_resource(fetch_mail_templates);
-    let state = use_template_edit_state(snapshot);
-    let uncertain = (state.command.uncertain)();
+    let mut refresh = use_signal(|| 0_u64);
+    let snapshot = use_resource(move || {
+        let generation = refresh();
+        async move {
+            #[cfg(test)]
+            if let Some(reads) = try_consume_context::<tests::TemplateReads>() {
+                return (generation, reads.next());
+            }
+            (generation, fetch_mail_templates().await)
+        }
+    });
+    let state = use_template_edit_state(snapshot, refresh);
     let current = snapshot.read_unchecked().clone();
     rsx! {
         section { class: "admin-mail-templates admin-panel",
@@ -178,21 +216,25 @@ pub(super) fn MailTemplateCard() -> Element {
             button {
                 class: "admin-btn-secondary",
                 r#type: "button",
-                onclick: move |_| snapshot.restart(),
+                onclick: move |_| refresh.set(refresh().saturating_add(1)),
                 {t!("admin-mail-templates-refresh")}
             }
-            // 结果未知的命令独立于列表显示：列表读取失败时仍保留原样重试入口。
-            if uncertain {
-                PendingTemplateRetry { state }
+            PendingCommandPanel { owner: state.pending }
+            div { role: "status",
+                if let Some(key) = (state.accepted)() {
+                    p { class: "admin-shell__banner",
+                        {template_label(&key)} " · " {t!("admin-mail-template-done")}
+                    }
+                }
             }
             match current {
                 None => rsx! {
                     AsyncState { kind: AsyncStateKind::Loading, title: t!("admin-mail-templates-loading"), detail: "" }
                 },
-                Some(Err(code)) => rsx! {
+                Some((_, Err(code))) => rsx! {
                     AsyncState { kind: AsyncStateKind::Error, title: super::super::admin_api_error_message(&code), detail: "" }
                 },
-                Some(Ok(templates)) => rsx! {
+                Some((_, Ok(templates))) => rsx! {
                     div { class: "admin-mail-templates__list",
                         for template in templates {
                             MailTemplateEditor { key: "{template.key}", template, state }
@@ -204,41 +246,18 @@ pub(super) fn MailTemplateCard() -> Element {
     }
 }
 
-/// 结果未知时只显示原命令的重试；参数来自冻结的命令，不读取当前列表或草稿。
-#[component]
-fn PendingTemplateRetry(state: TemplateEditState) -> Element {
-    let submitting = (state.command.submitting)();
-    rsx! {
-        if let Some(pending) = (state.command.command)() {
-            p { class: "admin-panel__note", role: "status",
-                {template_label(&pending.key)} ": " {t!("admin-mail-template-uncertain")}
-            }
-            button {
-                class: "admin-btn-primary",
-                r#type: "button",
-                disabled: submitting,
-                onclick: move |_| state.submit(pending.clone()),
-                {t!("admin-mail-template-retry")}
-            }
-        }
-    }
-}
-
 #[component]
 fn MailTemplateEditor(template: AdminMailTemplateDto, state: TemplateEditState) -> Element {
-    let TemplateEditState { mut command, mut drafts, mut accepted, .. } = state;
+    let TemplateEditState { mut confirmation, mut drafts, mut accepted, .. } = state;
     let key = template.key.clone();
     let label = template_label(&key);
-    let submitting = (command.submitting)();
-    let uncertain = (command.uncertain)();
-    // 同一时刻只有一条命令：其他模板的确认或重试进行中时，本模板的写入入口停用。
-    let confirmation = (command.confirmation)();
-    let own_confirmation = confirmation.clone().filter(|pending| pending.key == key);
+    let occupied = state.pending.contains(&template_entity(&key));
+    let card_busy = state.pending.contains_local(TEMPLATE_ENTITY_PREFIX);
+    let pending_confirmation = confirmation();
+    let own_confirmation = pending_confirmation.clone().filter(|pending| pending.key == key);
     let confirming = own_confirmation.is_some();
-    let busy = submitting || uncertain || confirmation.is_some();
-    let list_ready = *state.snapshot.state().read() == UseResourceState::Ready;
-    let failure = (command.failure)()
-        .filter(|_| (command.command)().is_some_and(|pending| pending.key == key) && !uncertain);
+    let busy = occupied || card_busy || pending_confirmation.is_some();
+    let list_ready = state.list_ready();
     let draft = drafts.read().get(&key).cloned();
     let dirty = draft.is_some();
     let rejected = state.conflicts.read().contains(&key);
@@ -256,9 +275,7 @@ fn MailTemplateEditor(template: AdminMailTemplateDto, state: TemplateEditState) 
         None
     };
     let just_accepted = accepted().as_deref() == Some(key.as_str());
-    // 有草稿、待确认的命令、刚被接受的结果或失败提示时保持展开，否则这些内容会随分区折叠
-    // 而看不到；其余时候由用户自己展开或折叠。
-    let expanded = dirty || confirming || conflicted || just_accepted || failure.is_some();
+    let expanded = dirty || confirming || conflicted || just_accepted || occupied;
 
     let saved_body = template.body.clone();
     let input_key = key.clone();
@@ -299,19 +316,17 @@ fn MailTemplateEditor(template: AdminMailTemplateDto, state: TemplateEditState) 
     let reset_key = key.clone();
     let begin_reset = move |_| {
         if !state.can_edit(&reset_key, revision)
-            || *state.snapshot.state().peek() != UseResourceState::Ready
+            || !state.list_ready()
             || drafts.peek().get(&reset_key).is_some_and(|draft| draft.revision != revision)
         {
             return;
         }
         accepted.set(None);
-        let signature = format!("reset:{reset_key}:{revision}");
-        command.begin(signature, |command_id| MailTemplateAttempt {
-            command_id,
+        confirmation.set(Some(TemplateConfirmation {
             key: reset_key.clone(),
             expected_revision: revision,
             body: None,
-        });
+        }));
     };
     let discard_key = key.clone();
     let discard = move |_| {
@@ -404,18 +419,12 @@ fn MailTemplateEditor(template: AdminMailTemplateDto, state: TemplateEditState) 
                 if let Some(problem) = visible_problem {
                     p { class: "admin-runtime-section-warning", id: error_id, {problem_message(problem)} }
                 }
-                if just_accepted {
-                    p { class: "admin-shell__banner", role: "status", {t!("admin-mail-template-done")} }
-                }
-                if let Some(failure) = failure.filter(|failure| !is_template_conflict(failure)) {
-                    p { class: "admin-shell__banner", role: "alert", {admin_api_error_message(AdminApiFailure::display_code(&failure.code))} }
-                }
                 if conflicted {
                     p { class: "admin-runtime-section-warning", role: "status", {t!("admin-mail-template-draft-conflict")} }
                     button {
                         class: "admin-btn-secondary",
                         r#type: "button",
-                        disabled: submitting || uncertain || (busy && !confirming),
+                        disabled: occupied || card_busy || (busy && !confirming),
                         onclick: discard,
                         {t!("admin-mail-template-discard-reload")}
                     }
@@ -431,15 +440,14 @@ fn MailTemplateEditor(template: AdminMailTemplateDto, state: TemplateEditState) 
                         button {
                             class: "admin-btn-primary",
                             r#type: "button",
-                            disabled: submitting || !list_ready,
+                            disabled: occupied || card_busy || !list_ready,
                             onclick: move |_| state.submit(pending.clone()),
                             {t!("admin-mail-template-confirm")}
                         }
                         button {
                             class: "admin-btn-secondary",
                             r#type: "button",
-                            disabled: submitting,
-                            onclick: move |_| command.cancel_confirmation(),
+                            onclick: move |_| confirmation.set(None),
                             {t!("admin-mail-template-cancel")}
                         }
                     }
@@ -536,12 +544,22 @@ mod tests {
 
     use auction_contracts::{AdminMailTemplateDto, AdminMailTemplateUpdateRequest};
     use dioxus::prelude::*;
+    use uuid::Uuid;
 
     use super::{
-        TemplateDraft, TemplateEditState, is_template_conflict, placeholder_list,
-        use_template_edit_state,
+        MailTemplateCard, MailTemplateEditor, TemplateDraft, TemplateEditState, TemplateListResult,
+        placeholder_list, template_entity, use_template_edit_state,
     };
-    use crate::api::{AdminApiFailure, MailTemplateAttempt, MailTemplateBodyProblem};
+    use crate::api::{
+        AdminApiFailure, AdminSessionWritePermission, MailTemplateAttempt, MailTemplateBodyProblem,
+    };
+    use crate::surface::auctions::draft_page_tests::{
+        button, click_button, has_live_text, init_i18n, mount_writer, writer_form,
+    };
+    use crate::surface::pending::{
+        PendingCommandHost, PendingCommandNotices, use_pending_command_host,
+    };
+    use crate::surface::realtime::text_attributes;
 
     #[derive(Default)]
     struct EditorHarness {
@@ -566,7 +584,57 @@ mod tests {
         }
     }
 
+    #[derive(Clone)]
+    pub(super) struct TemplateReads(Rc<RefCell<VecDeque<TemplateListResult>>>);
+
+    impl TemplateReads {
+        pub(super) fn next(&self) -> TemplateListResult {
+            self.0.borrow_mut().pop_front().expect("模板读取对应脚本回执")
+        }
+    }
+
+    #[test]
+    fn template_receipt_remains_visible_when_the_read_after_save_fails() {
+        let failure = AdminApiFailure::from_http_body(
+            503,
+            r#"{"code":"storage_unavailable","message":"暂不可用","data":null,"request_id":null}"#,
+        );
+        let reads = TemplateReads(Rc::new(RefCell::new(VecDeque::from([
+            Ok(vec![published(5)]),
+            Err(failure.code),
+            Ok(vec![published(6)]),
+        ]))));
+        let (mut page, initial) = mount_writer(move || {
+            use_context_provider(|| reads.clone());
+            use_hook(|| {
+                MailTemplateAttempt::stub_submit(|body| {
+                    let request: AdminMailTemplateUpdateRequest =
+                        serde_json::from_str(body).unwrap();
+                    assert_eq!(request.expected_revision, 5);
+                    Ok(published(6))
+                });
+            });
+            rsx! { MailTemplateCard {} }
+        });
+        let field = text_attributes(&initial, "value")
+            .find_map(|(id, value)| (value == "服务器正文 5").then_some(id))
+            .unwrap();
+        assert!(!has_live_text(&page, "数据库已接受；各角色约 5 秒内生效。"));
+        page.dispatch("input", field, "已更新正文");
+        page.dispatch("submit", writer_form(&initial), "");
+        click_button(&mut page, "确认");
+        assert!(has_live_text(&page, "所需服务暂时不可用。请稍后再试。"));
+        assert!(has_live_text(&page, "数据库已接受；各角色约 5 秒内生效。"));
+        click_button(&mut page, "刷新");
+        assert!(!has_live_text(&page, "所需服务暂时不可用。请稍后再试。"));
+        assert!(has_live_text(&page, "数据库已接受；各角色约 5 秒内生效。"));
+    }
+
     fn test_editor() -> Element {
+        init_i18n();
+        let permission = use_memo(|| true);
+        use_context_provider(|| AdminSessionWritePermission(permission));
+        use_pending_command_host();
         let harness = consume_context::<Rc<EditorHarness>>();
         use_hook({
             let harness = harness.clone();
@@ -581,13 +649,74 @@ mod tests {
             }
         });
         let latest = use_signal(|| published(5));
+        let refresh = use_signal(|| 0_u64);
         let snapshot = use_resource(move || {
+            let generation = refresh();
             let template = latest();
-            async move { Ok(vec![template]) }
+            async move { (generation, Ok(vec![template])) }
         });
         harness.latest.set(Some(latest));
-        harness.editor.set(Some(use_template_edit_state(snapshot)));
+        harness.editor.set(Some(use_template_edit_state(snapshot, refresh)));
         rsx! { div {} }
+    }
+
+    #[component]
+    fn TemplateRoute() -> Element {
+        let refresh = use_signal(|| 0_u64);
+        let snapshot = use_resource(move || {
+            let generation = refresh();
+            async move { (generation, Ok(vec![published(5)])) }
+        });
+        let state = use_template_edit_state(snapshot, refresh);
+        rsx! {
+            MailTemplateEditor { state, template: published(5) }
+        }
+    }
+
+    #[test]
+    fn template_cannot_replace_unknown_after_leaving_and_returning() {
+        let requests = Rc::new(RefCell::new(Vec::new()));
+        let (mut page, initial) = mount_writer({
+            let requests = requests.clone();
+            move || {
+                let requests = requests.clone();
+                use_hook(move || {
+                    MailTemplateAttempt::stub_submit(move |body| {
+                        requests.borrow_mut().push(body.to_owned());
+                        Err(AdminApiFailure::from_http_body(
+                            503,
+                            r#"{"code":"storage_unavailable","message":"暂不可用","data":null,"request_id":null}"#,
+                        ))
+                    });
+                });
+                let host = use_context::<PendingCommandHost>();
+                let mut visible = use_signal(|| true);
+                rsx! {
+                    button { onclick: move |_| visible.toggle(), {"切换测试路由".to_owned()} }
+                    PendingCommandNotices { host }
+                    if visible() { TemplateRoute {} }
+                }
+            }
+        });
+        let body_field = |edits: &[dioxus::core::Mutation]| {
+            text_attributes(edits, "value")
+                .find_map(|(id, value)| (value == "服务器正文 5").then_some(id))
+                .unwrap()
+        };
+        page.dispatch("input", body_field(&initial), "第一次正文");
+        page.dispatch("submit", writer_form(&initial), "");
+        click_button(&mut page, "确认");
+        assert_eq!(requests.borrow().len(), 1);
+        click_button(&mut page, "切换测试路由");
+        let remounted = click_button(&mut page, "切换测试路由");
+        page.dispatch("input", body_field(&remounted), "第二次正文");
+        page.dispatch("submit", writer_form(&remounted), "");
+        assert!(button(&page, "确认").is_none());
+        assert_eq!(requests.borrow().len(), 1);
+        click_button(&mut page, "原样重试");
+        let writes = requests.borrow();
+        assert_eq!(writes.len(), 2);
+        assert_eq!(writes[0], writes[1]);
     }
 
     #[test]
@@ -614,14 +743,8 @@ mod tests {
     #[test]
     fn a_version_conflict_blocks_save_even_before_refresh() {
         let draft = TemplateDraft { revision: 5, body: "仍未保存的草稿".into() };
-        let rejected = AdminApiFailure { status: Some(409), code: "mail_template_conflict".into() };
-        assert!(is_template_conflict(&rejected));
-        assert_eq!(draft.save_revision(5, is_template_conflict(&rejected)), None);
-        assert!(!is_template_conflict(&AdminApiFailure::client("network_error")));
-        assert!(!is_template_conflict(&AdminApiFailure {
-            status: Some(409),
-            code: "http_409".into()
-        }));
+        assert_eq!(draft.save_revision(5, true), None);
+        assert_eq!(draft.save_revision(5, false), Some(5));
     }
 
     #[test]
@@ -667,39 +790,40 @@ mod tests {
                 editor.begin_save(&original),
                 Some(MailTemplateBodyProblem::RequestTooLarge)
             );
-            assert!(editor.command.confirmation.peek().is_none());
+            assert!(editor.confirmation.peek().is_none());
 
             editor.drafts.write().get_mut(key).unwrap().body = "保留草稿".to_owned();
             assert_eq!(editor.begin_save(&original), None);
-            let attempt = editor.command.confirmation.peek().clone().unwrap();
+            let attempt = editor.confirmation.peek().clone().unwrap();
             editor.submit(attempt);
         });
         dom.process_events();
-        assert!(*editor.command.uncertain.peek());
+        assert!(editor.pending.contains(&template_entity(key)));
+        let first: AdminMailTemplateUpdateRequest =
+            serde_json::from_str(&harness.requests.borrow()[0]).unwrap();
+        let command_id = Uuid::parse_str(&first.command_id).unwrap();
 
         dom.in_scope(ScopeId::APP, || latest.set(published(6)));
         for attempt in 2..=attempt_count {
             dom.in_scope(ScopeId::APP, || {
-                let attempt = editor.command.command.peek().clone().unwrap();
-                editor.submit(attempt);
+                consume_context::<PendingCommandHost>().retry(command_id);
             });
             dom.process_events();
             if attempt < attempt_count {
-                assert!(*editor.command.uncertain.peek());
+                assert!(editor.pending.contains(&template_entity(key)));
                 assert!(!editor.conflicts.peek().contains(key));
                 dom.in_scope(ScopeId::APP, || editor.discard(key, true));
                 assert_eq!(editor.drafts.peek()[key].body, "保留草稿");
             }
         }
-        assert!(!*editor.command.uncertain.peek());
+        assert!(!editor.pending.contains(&template_entity(key)));
         assert!(editor.conflicts.peek().contains(key));
         assert_eq!(editor.drafts.peek()[key].body, "保留草稿");
-        let first = {
+        {
             let requests = harness.requests.borrow();
             assert_eq!(requests.len(), attempt_count);
             assert!(requests.windows(2).all(|pair| pair[0] == pair[1]));
-            serde_json::from_str::<AdminMailTemplateUpdateRequest>(&requests[0]).unwrap()
-        };
+        }
         assert_eq!(first.expected_revision, 5);
         assert_eq!(first.body.as_deref(), Some("保留草稿"));
 
@@ -713,7 +837,7 @@ mod tests {
                 TemplateDraft { revision: 6, body: "以最新版本编辑".to_owned() },
             );
             assert_eq!(editor.begin_save(&published(6)), None);
-            let attempt = editor.command.confirmation.peek().clone().unwrap();
+            let attempt = editor.confirmation.peek().clone().unwrap();
             editor.submit(attempt);
         });
         dom.process_events();

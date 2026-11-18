@@ -4,16 +4,27 @@ use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use super::super::{AdminActionFeedback, admin_api_error_message, format_admin_time};
+use super::mailbox_command_entity;
 use super::progress::MailPollingProgress;
 use crate::api::{AdminMailPolling, set_mail_paused, trigger_mail_poll};
 use crate::surface::pending::{
-    PendingCommandPanel, PendingCommands, set_if_alive, use_pending_commands,
+    CommandDelivery, CommandReceipt, PendingCommandPanel, PendingCommands, set_if_alive,
+    try_set_if_alive, use_pending_commands,
 };
 
 /// 轮询卡片可以随邮箱切换，命令宿主始终保留；成功只刷新轮询状态，不干扰入站投递。
 #[component]
-pub(super) fn MailPollingCommands(refresh: Signal<u64>, children: Element) -> Element {
-    let owner = use_pending_commands(refresh);
+pub(super) fn MailPollingCommands(
+    refresh: Signal<u64>,
+    active_mailbox: Signal<String>,
+    children: Element,
+) -> Element {
+    let owner = use_pending_commands(refresh, move |entity| {
+        entity == "mail-poll-trigger"
+            || entity
+                .strip_prefix(super::MAILBOX_ENTITY_PREFIX)
+                .is_some_and(|mailbox| mailbox == active_mailbox.peek().as_str())
+    });
     rsx! {
         PendingCommandPanel { owner }
         {children}
@@ -31,14 +42,18 @@ pub(super) fn MailTriggerButton() -> Element {
             r#type: "button",
             disabled: owner.contains("mail-poll-trigger"),
             onclick: move |_| {
+                if owner.contains("mail-poll-trigger") { return; }
                 notice.set(None);
-                owner.submit(
+                owner.submit_with_receipt(
                     "mail-poll-trigger".to_owned(),
                     t!("admin-mail-trigger"),
                     |command_id| async move {
                         trigger_mail_poll(command_id).await.map_err(|error| error.code)
                     },
-                    move |pollers| set_if_alive(notice, Some(Ok(pollers))),
+                    move |pollers, source_alive| CommandDelivery::reported(
+                        source_alive && try_set_if_alive(notice, Some(Ok(pollers))),
+                        || Some(CommandReceipt::Text(t!("admin-mail-trigger-accepted", pollers: pollers))),
+                    ),
                     move |code| set_if_alive(notice, Some(Err(code))),
                 );
             },
@@ -60,7 +75,11 @@ pub(super) fn MailTriggerButton() -> Element {
 }
 
 #[component]
-pub(super) fn MailPollingCard(polling: AdminMailPolling) -> Element {
+pub(super) fn MailPollingCard(
+    polling: AdminMailPolling,
+    refresh: Signal<u64>,
+    loaded_generation: u64,
+) -> Element {
     // 反馈属于按邮箱重挂载的卡片；旧命令仍由稳定宿主持有，不能写到后来选择的邮箱。
     let mut notice = use_signal(|| None::<AdminActionFeedback>);
     let desired_paused = !polling.paused;
@@ -68,11 +87,13 @@ pub(super) fn MailPollingCard(polling: AdminMailPolling) -> Element {
     let state_label =
         if polling.paused { t!("admin-mail-paused") } else { t!("admin-mail-running") };
     let owner = use_context::<PendingCommands>();
-    let entity = format!("mailbox:{}", polling.mailbox_key);
+    let entity = mailbox_command_entity(&polling.mailbox_key);
     let busy = owner.is_busy(&entity);
+    // 切换回来也须等命令触发的 GET，不能按刚刚失效的邮箱版本分配新 UUID。
+    let read_is_current = move || refresh() == loaded_generation;
     let blocked = owner.contains(&entity);
+    let button_label = if busy { t!("admin-action-working") } else { label.clone() };
     let pause_polling = polling.clone();
-    let action_label = label.clone();
     rsx! {
         article {
             class: "admin-mail-state",
@@ -99,27 +120,32 @@ pub(super) fn MailPollingCard(polling: AdminMailPolling) -> Element {
             MailPollingProgress { diagnostics: polling.diagnostics }
             button {
                 r#type: "button",
-                disabled: blocked,
+                disabled: blocked || !read_is_current(),
                 onclick: move |_| {
+                    if !read_is_current() || owner.contains(&entity) { return; }
                     notice.set(None);
-                    // 卡片随邮箱切换卸载，已提交暂停/恢复仍由页级 owner 保留原负载和结果。
+                    // 卡片随邮箱切换卸载，已提交暂停/恢复仍由会话宿主保留原负载和结果。
                     let polling = pause_polling.clone();
-                    owner.submit(
+                    owner.submit_with_receipt(
                         entity.clone(),
-                        action_label.clone(),
+                        label.clone(),
                         move |command_id| {
                             let polling = polling.clone();
                             async move {
+                                #[cfg(test)]
+                                if let Some(reply) = try_consume_context::<tests::PollingReply>() {
+                                    return reply.0.fetch().await;
+                                }
                                 set_mail_paused(command_id, polling, desired_paused)
                                     .await
                                     .map_err(|error| error.code)
                             }
                         },
-                        move |_| set_if_alive(notice, Some(AdminActionFeedback::Success)),
+                        move |_, source_alive| CommandDelivery::reported(source_alive && try_set_if_alive(notice, Some(AdminActionFeedback::Success)), || None),
                         move |code| set_if_alive(notice, Some(AdminActionFeedback::Error(code))),
                     );
                 },
-                if busy { {t!("admin-action-working")} } else { "{label}" }
+                "{button_label}"
             }
             if let Some(feedback) = notice() {
                 p {
@@ -131,6 +157,85 @@ pub(super) fn MailPollingCard(polling: AdminMailPolling) -> Element {
                     role: if feedback.is_success() { "status" } else { "alert" },
                     {feedback.message(t!("admin-mail-action-success"))}
                 }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::rc::Rc;
+
+    use dioxus::prelude::*;
+
+    use super::{MailPollingCard, MailPollingCommands};
+    use crate::api::AdminMailPolling;
+    use crate::surface::auctions::draft_page_tests::{
+        RecordRead, button, click_button, has_live_text, init_i18n, mount_writer, settle_writer,
+    };
+    use crate::surface::pending::{PendingCommandHost, PendingCommandNotices};
+
+    #[derive(Clone)]
+    pub(super) struct PollingReply(pub(super) Rc<RecordRead<AdminMailPolling>>);
+
+    fn polling(mailbox_key: String) -> AdminMailPolling {
+        AdminMailPolling {
+            mailbox_key,
+            paused: false,
+            state_version: 1,
+            consecutive_failures: 0,
+            last_poll_at: "2026-11-18T00:00:00Z".to_owned(),
+            next_poll_at: "2026-11-18T00:01:00Z".to_owned(),
+            updated_at: "2026-11-18T00:00:00Z".to_owned(),
+            diagnostics: None,
+        }
+    }
+
+    #[test]
+    fn mailbox_switch_keeps_the_first_mailbox_receipt_and_does_not_reload_the_other_mailbox() {
+        for switch in [false, true] {
+            let reply = Rc::new(RecordRead::new());
+            let (mut page, _) = mount_writer({
+                let reply = reply.clone();
+                move || {
+                    init_i18n();
+                    use_context_provider(|| PollingReply(reply.clone()));
+                    let host = use_context::<PendingCommandHost>();
+                    let reload = use_signal(|| 0);
+                    let mut mailbox = use_signal(|| "mail-a".to_owned());
+                    rsx! {
+                        PendingCommandNotices { host }
+                        button { onclick: move |_| mailbox.set("mail-b".to_owned()), {"切换邮箱".to_owned()} }
+                        p { "轮询世代 {reload()}" }
+                        MailPollingCommands { refresh: reload, active_mailbox: mailbox,
+                            for key in [mailbox()] {
+                                MailPollingCard { key: "{key}", polling: polling(key), refresh: reload, loaded_generation: 0 }
+                            }
+                        }
+                    }
+                }
+            });
+            click_button(&mut page, "暂停轮询");
+            if switch {
+                click_button(&mut page, "切换邮箱");
+            }
+            let mut accepted = polling("mail-a".to_owned());
+            accepted.paused = true;
+            accepted.state_version = 2;
+            reply.respond(Ok(accepted));
+            settle_writer(&mut page);
+            assert_eq!(button(&page, "关闭回执").is_some(), switch);
+            if switch {
+                assert!(has_live_text(&page, "轮询世代 0"));
+                assert!(!button(&page, "暂停轮询").unwrap().1);
+            } else {
+                assert!(has_live_text(&page, "轮询世代 1"));
+                assert!(has_live_text(&page, "邮件轮询状态已更新。"));
+                let (pause, disabled) = button(&page, "暂停轮询").unwrap();
+                assert!(disabled);
+                page.dispatch("click", pause, "");
+                assert!(has_live_text(&page, "轮询世代 1"));
+                assert!(has_live_text(&page, "邮件轮询状态已更新。"));
             }
         }
     }

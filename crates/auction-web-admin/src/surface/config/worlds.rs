@@ -25,10 +25,18 @@ pub(super) fn AdminBusinessWorlds() -> Element {
     let mut refresh = use_signal(|| 0_u64);
     let notice = use_signal(|| None::<BusinessWorldNotice>);
     let command_gate = use_pending_command_gate();
-    let pending = use_pending_commands_with_gate(refresh, Some(command_gate));
+    let pending = use_pending_commands_with_gate(refresh, Some(command_gate), |entity| {
+        entity.starts_with("world:")
+    });
     let worlds = use_resource(move || {
-        let _ = refresh();
-        fetch_admin_business_worlds()
+        let generation = refresh();
+        async move {
+            #[cfg(test)]
+            if let Some(reads) = try_consume_context::<std::rc::Rc<tests::WorldReads>>() {
+                return (generation, reads.fetch().await);
+            }
+            (generation, fetch_admin_business_worlds().await)
+        }
     });
 
     let state = worlds.read_unchecked().clone();
@@ -47,7 +55,7 @@ pub(super) fn AdminBusinessWorlds() -> Element {
                         detail: "",
                     }
                 },
-                Some(Err(code)) => rsx! {
+                Some((_, Err(code))) => rsx! {
                     // 共享面板没有 disabled 态；繁忙时重试点击在回调里直接忽略。
                     AsyncState {
                         kind: AsyncStateKind::Error,
@@ -61,14 +69,15 @@ pub(super) fn AdminBusinessWorlds() -> Element {
                         },
                     }
                 },
-                Some(Ok(worlds)) => rsx! {
+                Some((loaded_generation, Ok(worlds))) => rsx! {
                     div { class: "admin-business-worlds__grid",
                         for world in worlds {
                             BusinessWorldCard {
-                                key: "{world.id}",
+                                key: "{world.id}:{world.policy_revision}",
                                 world,
                                 notice,
                                 refresh,
+                                loaded_generation,
                             }
                         }
                     }
@@ -100,14 +109,26 @@ fn BusinessWorldCard(
     world: AdminBusinessWorld,
     notice: Signal<Option<BusinessWorldNotice>>,
     refresh: Signal<u64>,
+    loaded_generation: u64,
 ) -> Element {
     let pending = use_context::<PendingCommands>();
     let target_enabled = !world.enabled;
     let world_id = world.id.clone();
     let world_name = admin_world_label(&world.id);
-    let action_busy = pending.is_busy(&world.id);
-    let blocked = pending.any_busy() || pending.contains(&world.id);
+    let action_busy = pending.is_busy(&format!("world:{}", world.id));
+    // 旧快照可展示。只有当前读取的策略版本才能开启或确认新的启停命令。
+    let read_is_current = move || refresh() == loaded_generation;
+    let blocked = !read_is_current()
+        || pending.any_busy()
+        || pending.contains(&format!("world:{}", world.id));
     let availability = availability_label(&world.availability);
+    let action_label = if action_busy {
+        t!("admin-action-working")
+    } else if world.enabled {
+        t!("admin-business-world-disable")
+    } else {
+        t!("admin-business-world-enable")
+    };
     // 启停是危险操作：按钮只打开确认对话框，真正的 mutation 由对话框确认按钮触发。
     let mut confirm_open = use_signal(|| false);
 
@@ -144,19 +165,14 @@ fn BusinessWorldCard(
                 disabled: blocked,
                 aria_busy: action_busy.to_string(),
                 onclick: move |_| {
-                    if pending.any_busy() || pending.contains(&world.id) {
+                    if !read_is_current()
+                        || pending.any_busy() || pending.contains(&format!("world:{}", world.id)) {
                         return;
                     }
                     notice.set(None);
                     confirm_open.set(true);
                 },
-                if action_busy {
-                    {t!("admin-action-working")}
-                } else if world.enabled {
-                    {t!("admin-business-world-disable")}
-                } else {
-                    {t!("admin-business-world-enable")}
-                }
+                "{action_label}"
             }
         }
         if confirm_open() {
@@ -188,13 +204,14 @@ fn BusinessWorldCard(
                         r#type: "button",
                         disabled: blocked,
                         onclick: move |_| {
-                            if pending.any_busy() || pending.contains(&world_id) {
+                            if !read_is_current()
+                                || pending.any_busy() || pending.contains(&format!("world:{world_id}")) {
                                 return;
                             }
                             let request_world_id = world_id.clone();
                             let failure_world_id = world_id.clone();
                             let submitted = pending.submit(
-                                world_id.clone(),
+                                format!("world:{world_id}"),
                                 if target_enabled {
                                     t!("admin-business-world-enable")
                                 } else {
@@ -261,5 +278,109 @@ fn availability_label(availability: &str) -> String {
         "degraded" => t!("admin-business-world-availability-degraded"),
         "unavailable" => t!("admin-business-world-availability-unavailable"),
         _ => availability.to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+    use std::future::ready;
+    use std::rc::Rc;
+
+    use dioxus::prelude::*;
+
+    use super::AdminBusinessWorlds;
+    use crate::api::{AdminApiFailure, AdminBusinessWorld};
+    use crate::surface::auctions::draft_page_tests::{
+        RecordRead, button, click_button, has_live_text, mount_writer, settle_writer,
+    };
+    use crate::surface::pending::{
+        PendingCommandHost, PendingCommandNotices, use_pending_commands,
+    };
+
+    pub(super) struct WorldReads {
+        count: Cell<usize>,
+        refreshed: RecordRead<Vec<AdminBusinessWorld>>,
+    }
+
+    impl WorldReads {
+        pub(super) async fn fetch(&self) -> Result<Vec<AdminBusinessWorld>, String> {
+            let previous = self.count.replace(self.count.get() + 1);
+            if previous < 2 {
+                return Ok(worlds(true, 7));
+            }
+            self.refreshed.fetch().await
+        }
+    }
+
+    fn worlds(enabled: bool, policy_revision: i64) -> Vec<AdminBusinessWorld> {
+        vec![AdminBusinessWorld {
+            id: "main".to_owned(),
+            enabled,
+            availability: "available".to_owned(),
+            policy_revision,
+        }]
+    }
+
+    #[component]
+    fn OriginalWorldCommand() -> Element {
+        let reload = use_signal(|| 0);
+        let pending = use_pending_commands(reload, |entity| entity == "world:main");
+        let writes = use_context::<Rc<Cell<usize>>>();
+        rsx! {
+            button { onclick: move |_| {
+                let writes = writes.clone();
+                assert!(pending.submit(
+                    "world:main".to_owned(), "关闭业务世界".to_owned(),
+                    move |_| {
+                        let previous = writes.replace(writes.get() + 1);
+                        ready(if previous == 0 {
+                            Err(AdminApiFailure::from_http_body(
+                                503, r#"{"code":"storage_unavailable","message":"暂不可用","data":null,"request_id":null}"#,
+                            ).code)
+                        } else { Ok(()) })
+                    }, |()| {}, |_| {},
+                ));
+            }, {"从原先的卡片发起命令".to_owned()} }
+        }
+    }
+
+    #[test]
+    fn reopened_world_card_awaits_a_current_policy_after_replay() {
+        let reads = Rc::new(WorldReads { count: Cell::new(0), refreshed: RecordRead::new() });
+        let (mut page, _) = mount_writer({
+            let reads = reads.clone();
+            move || {
+                use_context_provider(|| reads.clone());
+                use_context_provider(|| Rc::new(Cell::new(0_usize)));
+                let host = use_context::<PendingCommandHost>();
+                let mut visible = use_signal(|| true);
+                let mut original = use_signal(|| true);
+                rsx! {
+                    button { onclick: move |_| { visible.toggle(); original.set(false); }, {"切换测试路由".to_owned()} }
+                    PendingCommandNotices { host }
+                    if visible() {
+                        if original() { OriginalWorldCommand {} }
+                        AdminBusinessWorlds {}
+                    }
+                }
+            }
+        });
+        assert!(button(&page, "关闭业务世界").is_some_and(|(_, disabled)| !disabled));
+        click_button(&mut page, "从原先的卡片发起命令");
+        click_button(&mut page, "切换测试路由");
+        click_button(&mut page, "切换测试路由");
+        assert_eq!(reads.count.get(), 2);
+        assert!(button(&page, "原样重试").is_some());
+        click_button(&mut page, "原样重试");
+        assert_eq!(reads.count.get(), 3);
+        let (open, disabled) = button(&page, "关闭业务世界").unwrap();
+        assert!(disabled);
+        page.dispatch("click", open, "");
+        assert!(!has_live_text(&page, "确认关闭业务世界"));
+        reads.refreshed.respond(Ok(worlds(false, 8)));
+        settle_writer(&mut page);
+        click_button(&mut page, "开放业务世界");
+        assert!(has_live_text(&page, "确认开放业务世界"));
     }
 }

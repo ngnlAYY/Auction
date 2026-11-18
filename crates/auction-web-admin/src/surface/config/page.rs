@@ -12,7 +12,9 @@ use crate::api::{
     fetch_admin_runtime_config, update_admin_runtime_config, validate_admin_runtime_config,
 };
 use crate::surface::admin_api_error_message;
-use crate::surface::pending::{PendingCommandPanel, set_if_alive};
+use crate::surface::pending::{
+    CommandDelivery, CommandReceipt, PendingCommandPanel, set_if_alive, use_pending_commands,
+};
 
 /// 在认证外壳内安装配置草稿与整页离开提示。
 pub(crate) fn use_config_draft() {
@@ -36,6 +38,22 @@ pub(super) enum ConfigNotice {
 
 /// 加载并展示 Admin runtime 非敏感配置。
 pub(crate) fn page() -> Element {
+    rsx! {
+        section {
+            class: "admin-config-page",
+            aria_labelledby: "config-title",
+            h1 { id: "config-title", {t!("page-config-title")} }
+            p { class: "admin-config-intro", {t!("admin-runtime-note")} }
+            AdminBusinessWorlds {}
+            runtime_switches::RuntimeSwitchCard {}
+            mail_templates::MailTemplateCard {}
+            RuntimeConfigDocument {}
+        }
+    }
+}
+
+#[component]
+fn RuntimeConfigDocument() -> Element {
     let config_draft = use_context::<draft::ConfigDraft>();
     let draft::ConfigDraft {
         mut form,
@@ -46,10 +64,10 @@ pub(crate) fn page() -> Element {
         mut notice,
         restart_required,
         dirty,
-        pending,
         mut refresh,
         validating,
     } = config_draft;
+    let pending = use_pending_commands(refresh, |entity| entity == "runtime-config");
     let mut form_ready = use_signal(|| false);
     let mut issues = use_signal(Vec::<validation::FieldIssue>::new);
     use_context_provider(|| validation::FormIssues(issues));
@@ -66,17 +84,20 @@ pub(crate) fn page() -> Element {
     // 重读期间 Resource 保留旧值；只有本轮完成快照能装配草稿，不能恢复已丢弃的旧基线。
     use_effect(move || {
         let generation = refresh();
+        let snapshot = config.read();
         if config.state().cloned() != UseResourceState::Ready {
             return;
         }
-        let snapshot = config.read_unchecked();
         let Some((loaded_generation, result)) = snapshot.as_ref() else { return };
         if *loaded_generation != generation {
             return;
         }
         if let Ok(value) = result {
             // 未决命令保留提交时的配置与基线，读取不能改变重试或确认的负载。
-            if command.peek().is_some() && baseline.peek().is_some() {
+            if command.peek().is_some()
+                && baseline.peek().is_some()
+                && pending.contains("runtime-config")
+            {
                 form_ready.set(true);
                 return;
             }
@@ -139,14 +160,17 @@ pub(crate) fn page() -> Element {
     };
 
     let snapshot = config.read_unchecked();
+    let read_generation = refresh();
     let current = if config.state().cloned() == UseResourceState::Ready {
         snapshot
             .as_ref()
-            .filter(|(generation, _)| *generation == refresh())
+            .filter(|(generation, _)| *generation == read_generation)
             .map(|(_, result)| result)
     } else {
         None
     };
+    let read_requires_restart =
+        current.and_then(|result| result.as_ref().ok()).is_some_and(|value| value.restart_required);
     let content = match current {
         None => rsx! {
             AsyncState {
@@ -188,8 +212,13 @@ pub(crate) fn page() -> Element {
         Some(Ok(snapshot)) => {
             let current_fingerprint = fingerprint().unwrap_or_else(|| snapshot.fingerprint.clone());
             let editor_key = current_fingerprint.clone();
+            let matches_baseline = current_fingerprint == snapshot.fingerprint;
+            // 入口和确认都以当前一轮 GET 的指纹为围栏，旧渲染的点击回调也不能提交。
+            let has_current_baseline =
+                move || matches_baseline && *refresh.peek() == read_generation;
             // 编辑已清除校验签名时，不能保存，也无需为每次按键重建并序列化整个候选文档。
-            let can_update = !frozen()
+            let can_update = matches_baseline
+                && !frozen()
                 && dirty()
                 && !checked_signature.read().is_empty()
                 && form
@@ -202,6 +231,12 @@ pub(crate) fn page() -> Element {
                 .count();
             let equipment_filter_enabled = form.read().boolean("equipment_filter.enabled");
             let update_fingerprint = current_fingerprint.clone();
+            let can_confirm = matches_baseline
+                && update_confirm_open()
+                && command
+                    .read()
+                    .as_ref()
+                    .is_some_and(|draft| draft.fingerprint == current_fingerprint);
             let config_changes = if update_confirm_open() {
                 command
                     .read()
@@ -215,6 +250,10 @@ pub(crate) fn page() -> Element {
                 Vec::new()
             };
             let requires_restart = config_changes.iter().any(review::ConfigChange::needs_restart);
+            let update_label =
+                if busy() { t!("admin-action-working") } else { t!("admin-runtime-update") };
+            let confirm_label =
+                if busy() { t!("admin-action-working") } else { t!("admin-users-action-confirm") };
 
             rsx! {
                 div {
@@ -329,28 +368,15 @@ pub(crate) fn page() -> Element {
                                 }
                             },
                         }
-                        if let Some(current_notice) = notice() {
+                        if let Some(current_notice) = notice().filter(|notice| *notice != ConfigNotice::Saved) {
                             p {
-                                class: if matches!(
-                                    &current_notice,
-                                    ConfigNotice::Validated | ConfigNotice::Saved
-                                ) {
+                                class: if current_notice == ConfigNotice::Validated {
                                     "admin-panel__note action-feedback action-feedback--success"
                                 } else {
                                     "admin-panel__note action-feedback action-feedback--error"
                                 },
-                                role: if matches!(
-                                    &current_notice,
-                                    ConfigNotice::Validated | ConfigNotice::Saved
-                                ) { "status" } else { "alert" },
+                                role: if current_notice == ConfigNotice::Validated { "status" } else { "alert" },
                                 {notice_text(&current_notice)}
-                            }
-                        }
-                        if restart_required() || snapshot.restart_required {
-                            p {
-                                class: "admin-panel__note admin-runtime-config__restart",
-                                role: "status",
-                                {t!("admin-runtime-restart-required")}
                             }
                         }
                         div { class: "admin-panel__actions",
@@ -382,7 +408,7 @@ pub(crate) fn page() -> Element {
                                 onclick: {
                                     let form = form;
                                     move |_| {
-                                        if frozen() { return; }
+                                        if frozen() || !has_current_baseline() { return; }
                                         let document = match form.read().to_document() {
                                             Ok(document) => document,
                                             Err(()) => {
@@ -403,11 +429,7 @@ pub(crate) fn page() -> Element {
                                         update_confirm_open.set(true);
                                     }
                                 },
-                                if busy() {
-                                    {t!("admin-action-working")}
-                                } else {
-                                    {t!("admin-runtime-update")}
-                                }
+                                "{update_label}"
                             }
                         }
                     }
@@ -431,18 +453,21 @@ pub(crate) fn page() -> Element {
                                         button {
                                             class: "admin-btn-danger",
                                             r#type: "button",
-                                            disabled: frozen(),
+                                            disabled: frozen() || !can_confirm,
                                             onclick: move |_| {
-                                                if frozen() {
+                                                if frozen() || !has_current_baseline() {
                                                     return;
                                                 }
                                                 let Some(current_command) = command() else {
                                                     update_confirm_open.set(false);
                                                     return;
                                                 };
+                                                if fingerprint.peek().as_deref() != Some(current_command.fingerprint.as_str()) {
+                                                    return;
+                                                }
                                                 update_confirm_open.set(false);
                                                 notice.set(None);
-                                                pending.submit(
+                                                pending.submit_with_receipt(
                                                     "runtime-config".to_owned(),
                                                     t!("admin-runtime-update"),
                                                     move |command_id| {
@@ -452,27 +477,27 @@ pub(crate) fn page() -> Element {
                                                                 command_id,
                                                                 current_command.fingerprint,
                                                                 current_command.document,
-                                                            )
-                                                            .await
-                                                            .map_err(|error| error.code)?;
+                                                            ).await.map_err(|error| error.code)?;
                                                             let next_form = RuntimeConfigForm::from_response(&result)
                                                                 .map_err(|()| "invalid_response".to_owned())?;
                                                             Ok((result, next_form))
                                                         }
                                                     },
-                                                    move |(result, next_form)| {
+                                                    move |(result, next_form), source_alive| {
+                                                        let restart = result.restart_required && requires_restart;
+                                                        // 写入回执同时推进会话草稿的版本与读取世代。
                                                         config_draft.apply_saved_config(result, next_form, requires_restart);
+                                                        if source_alive {
+                                                            set_if_alive(notice, Some(ConfigNotice::Saved));
+                                                        }
+                                                        CommandDelivery::reported(source_alive, || restart.then(|| CommandReceipt::Text(t!("admin-runtime-restart-required"))))
                                                     },
                                                     move |code| {
                                                         set_if_alive(notice, Some(ConfigNotice::ActionError(code)));
                                                     },
                                                 );
                                             },
-                                            if busy() {
-                                                {t!("admin-action-working")}
-                                            } else {
-                                                {t!("admin-users-action-confirm")}
-                                            }
+                                            "{confirm_label}"
                                         }
                                         button {
                                             class: "admin-btn-secondary",
@@ -491,16 +516,20 @@ pub(crate) fn page() -> Element {
     };
 
     rsx! {
-        section {
-            class: "admin-config-page",
-            aria_labelledby: "config-title",
-            h1 { id: "config-title", {t!("page-config-title")} }
-            p { class: "admin-config-intro", {t!("admin-runtime-note")} }
-            AdminBusinessWorlds {}
-            runtime_switches::RuntimeSwitchCard {}
-            mail_templates::MailTemplateCard {}
             h2 { class: "admin-config-page__runtime-title", {t!("admin-runtime-document-title")} }
-            PendingCommandPanel { owner: pending, session_scoped: true }
+            PendingCommandPanel { owner: pending }
+            div { role: "status",
+                if matches!(notice(), Some(ConfigNotice::Saved)) {
+                    p { class: "admin-panel__note action-feedback action-feedback--success",
+                        {notice_text(&ConfigNotice::Saved)}
+                    }
+                }
+                if restart_required() || read_requires_restart {
+                    p { class: "admin-panel__note admin-runtime-config__restart",
+                        {t!("admin-runtime-restart-required")}
+                    }
+                }
+            }
             {content}
             if reload_confirm_open() {
                 Dialog {
@@ -521,7 +550,6 @@ pub(crate) fn page() -> Element {
                     }
                 }
             }
-        }
     }
 }
 
@@ -567,19 +595,121 @@ pub(super) fn notice_text(notice: &ConfigNotice) -> String {
 
 #[cfg(test)]
 mod tests {
-    use auction_contracts::{AdminRuntimeConfigResponse, ApiResponse};
+    use std::cell::{Cell, RefCell};
+    use std::rc::Rc;
+
+    use auction_contracts::{
+        AdminRuntimeConfigResponse, AdminRuntimeConfigUpdateRequest, ApiResponse,
+    };
     use dioxus::core::ScopeId;
     use dioxus::prelude::*;
     use serde_json::json;
 
     use super::draft::{ConfigDraft, use_config_draft};
-    use super::{ConfigCommand, ConfigNotice};
+    use super::{ConfigCommand, RuntimeConfigDocument};
+    use crate::api::{AdminApiFailure, stub_runtime_config};
+    use crate::surface::auctions::draft_page_tests::{
+        button, click_button, has_live_text, mount_writer,
+    };
     use crate::surface::config::model::RuntimeConfigForm;
     use crate::surface::config::review::{ConfigChange, changes};
 
     fn draft_harness() -> Element {
         use_config_draft();
         VNode::empty()
+    }
+
+    struct ConfigRequests {
+        projection: RefCell<AdminRuntimeConfigResponse>,
+        reads: Cell<usize>,
+        writes: Cell<usize>,
+    }
+
+    impl ConfigRequests {
+        fn read(&self) -> Result<AdminRuntimeConfigResponse, AdminApiFailure> {
+            let previous = self.reads.replace(self.reads.get() + 1);
+            if previous == 1 {
+                return Err(AdminApiFailure::from_http_body(
+                    503,
+                    r#"{"code":"storage_unavailable","message":"暂不可用","data":null,"request_id":null}"#,
+                ));
+            }
+            Ok(self.projection.borrow().clone())
+        }
+
+        fn save(&self, command: AdminRuntimeConfigUpdateRequest) -> AdminRuntimeConfigResponse {
+            self.writes.set(self.writes.get() + 1);
+            let mut saved = self.projection.borrow_mut();
+            assert!(!command.command_id.is_nil());
+            assert_eq!(command.expected_fingerprint, saved.fingerprint);
+            assert_eq!(command.document["operations"]["forum"]["lease_duration_seconds"], 600);
+            saved.document = command.document;
+            saved.fingerprint = format!("sha256:{}", "1".repeat(64));
+            let mut response = saved.clone();
+            response.restart_required = true;
+            response
+        }
+    }
+
+    #[test]
+    fn config_save_and_restart_receipt_remain_visible_when_the_read_after_save_fails() {
+        let mut response: ApiResponse<AdminRuntimeConfigResponse> =
+            serde_json::from_str(include_str!(
+                "../../../../auction-contracts/tests/fixtures/admin/runtime-config-default.json"
+            ))
+            .unwrap();
+        let forum = &mut response.data.document["operations"]["forum"];
+        forum["managed"] = json!(true);
+        forum["lease_duration_seconds"] = json!(300);
+        forum["item_timeout_seconds"] = json!(240);
+        let requests = Rc::new(ConfigRequests {
+            projection: RefCell::new(response.data),
+            reads: Cell::new(0),
+            writes: Cell::new(0),
+        });
+        let (mut page, _) = mount_writer({
+            let requests = requests.clone();
+            move || {
+                use_config_draft();
+                use_hook({
+                    let reads = requests.clone();
+                    let writes = requests.clone();
+                    move || {
+                        stub_runtime_config(
+                            move || reads.read(),
+                            move |command| writes.save(command),
+                        );
+                    }
+                });
+                let mut draft = use_context::<ConfigDraft>();
+                rsx! {
+                    button { onclick: move |_| {
+                        draft.form.write().set_input("operations.forum.lease_duration_seconds", "600".to_owned());
+                        draft.checked_signature.set(draft.form.peek().signature().unwrap());
+                    }, {"准备已校验的候选".to_owned()} }
+                    RuntimeConfigDocument {}
+                }
+            }
+        });
+        let saved = "运行时配置已写入 TOML 文件。";
+        let restart = "请重启受影响的进程，以应用尚未生效的配置。";
+        let error = "所需服务暂时不可用。请稍后再试。";
+        assert!(!has_live_text(&page, saved));
+        assert!(!has_live_text(&page, restart));
+        click_button(&mut page, "准备已校验的候选");
+        click_button(&mut page, "写入配置");
+        click_button(&mut page, "确认");
+        assert_eq!(requests.writes.get(), 1);
+        assert_eq!(requests.reads.get(), 2);
+        assert!(has_live_text(&page, error));
+        assert!(button(&page, "写入配置").is_none());
+        assert!(has_live_text(&page, saved));
+        assert!(has_live_text(&page, restart));
+        click_button(&mut page, "重试");
+        assert_eq!(requests.reads.get(), 3);
+        assert!(!has_live_text(&page, error));
+        assert!(has_live_text(&page, saved));
+        assert!(has_live_text(&page, restart));
     }
 
     #[test]
@@ -635,7 +765,7 @@ mod tests {
                 assert_eq!((draft.fingerprint)(), Some(result.fingerprint));
                 assert!((draft.checked_signature)().is_empty());
                 assert!((draft.command)().is_none());
-                assert_eq!((draft.notice)(), Some(ConfigNotice::Saved));
+                assert!((draft.notice)().is_none());
             }
             draft.remember_restart_notice(false);
             assert!((draft.restart_required)(), "普通文件重读并非重启确认");

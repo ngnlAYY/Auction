@@ -28,6 +28,7 @@ pub(crate) fn evidence_kind_label(kind: &str) -> String {
 pub(crate) fn SentProofDialog(
     detail: DeliveryDetail,
     busy: bool,
+    #[props(default)] blocked: bool,
     on_submit: EventHandler<SentProofSubmission>,
     on_cancel: EventHandler<()>,
     on_stale: EventHandler<()>,
@@ -54,8 +55,16 @@ pub(crate) fn SentProofDialog(
         Some(Ok(proof)) if proof.can_confirm(&detail.delivery.id, fence)
     ) && valid_reason(&current.reason);
 
+    let disabled = busy || blocked;
+    let confirm_label =
+        if busy { t!("admin-action-working") } else { t!("delivery-sent-proof-confirm") };
+    let preview_label = if review_state.pending {
+        t!("delivery-sent-proof-previewing")
+    } else {
+        t!("delivery-sent-proof-preview")
+    };
     let preview_detail = detail.clone();
-    let trigger_preview = move || run_preview(&preview_detail, busy, draft, review, on_stale);
+    let trigger_preview = move || run_preview(&preview_detail, disabled, draft, review, on_stale);
     let submit_delivery_id = detail.delivery.id.clone();
 
     let world = attempt.map(|attempt| admin_world_label(&attempt.world_id));
@@ -104,9 +113,10 @@ pub(crate) fn SentProofDialog(
             busy,
             on_close: move |_| on_cancel.call(()),
             form { class: "admin-delivery-sent-proof", method: "post",
+                aria_describedby: blocked.then_some("admin-sent-proof-occupied"),
                 onsubmit: move |event| {
                     event.prevent_default();
-                    if busy {
+                    if disabled {
                         return;
                     }
                     submit_proof(
@@ -118,11 +128,14 @@ pub(crate) fn SentProofDialog(
                     );
                 },
                 p { class: "admin-panel__note", {t!("delivery-sent-proof-help")} }
+                if blocked {
+                    p { id: "admin-sent-proof-occupied", class: "admin-panel__note", {t!("delivery-command-occupied")} }
+                }
                 label { r#for: "delivery-sent-evidence", {t!("delivery-sent-proof-evidence")} }
                 select {
                     id: "delivery-sent-evidence",
                     name: "evidence_reference",
-                    disabled: busy,
+                    disabled: disabled,
                     aria_invalid: field_is_invalid(local_issue, "delivery-sent-evidence").to_string(),
                     aria_describedby: if missing_ids {
                         Some("delivery-sent-evidence-missing-ids".to_owned())
@@ -212,7 +225,7 @@ pub(crate) fn SentProofDialog(
                     name: "sender_name",
                     r#type: "text",
                     required: true,
-                    disabled: busy,
+                    disabled: disabled,
                     aria_invalid: field_is_invalid(local_issue, "delivery-sent-sender-name").to_string(),
                     aria_describedby: field_error_id(local_issue, "delivery-sent-sender-name"),
                     value: current.sender_name.clone(),
@@ -231,7 +244,7 @@ pub(crate) fn SentProofDialog(
                     r#type: "text",
                     inputmode: "numeric",
                     required: true,
-                    disabled: busy,
+                    disabled: disabled,
                     aria_invalid: field_is_invalid(local_issue, "delivery-sent-sender-uid").to_string(),
                     aria_describedby: field_error_id(local_issue, "delivery-sent-sender-uid"),
                     value: current.sender_uid.clone(),
@@ -249,7 +262,7 @@ pub(crate) fn SentProofDialog(
                     name: "sent_minute",
                     r#type: "datetime-local",
                     required: true,
-                    disabled: busy,
+                    disabled: disabled,
                     aria_invalid: field_is_invalid(local_issue, "delivery-sent-minute").to_string(),
                     aria_describedby: field_error_id(local_issue, "delivery-sent-minute"),
                     value: current.sent_minute.clone(),
@@ -273,7 +286,7 @@ pub(crate) fn SentProofDialog(
                     r#type: "number",
                     min: "0",
                     required: true,
-                    disabled: busy,
+                    disabled: disabled,
                     aria_invalid: field_is_invalid(local_issue, "delivery-sent-remaining-credits").to_string(),
                     aria_describedby: field_error_id(local_issue, "delivery-sent-remaining-credits"),
                     value: current.remaining_credits.clone(),
@@ -292,7 +305,7 @@ pub(crate) fn SentProofDialog(
                     r#type: "number",
                     min: "0",
                     required: true,
-                    disabled: busy,
+                    disabled: disabled,
                     aria_invalid: field_is_invalid(local_issue, "delivery-sent-cod-pending").to_string(),
                     aria_describedby: field_error_id(local_issue, "delivery-sent-cod-pending"),
                     value: current.cod_pending.clone(),
@@ -309,7 +322,7 @@ pub(crate) fn SentProofDialog(
                         id: "delivery-sent-collected",
                         r#type: "checkbox",
                         name: "collected",
-                        disabled: busy,
+                        disabled: disabled,
                         checked: current.collected,
                         onchange: move |event| {
                             let mut next = collected_draft();
@@ -326,7 +339,7 @@ pub(crate) fn SentProofDialog(
                         id: "delivery-sent-receipt",
                         name: "receipt",
                         rows: "3",
-                        disabled: busy,
+                        disabled: disabled,
                         aria_invalid: field_is_invalid(local_issue, "delivery-sent-receipt").to_string(),
                         aria_describedby: field_error_id(local_issue, "delivery-sent-receipt"),
                         value: current.receipt.clone(),
@@ -345,7 +358,7 @@ pub(crate) fn SentProofDialog(
                     name: "reason",
                     rows: "3",
                     required: true,
-                    disabled: busy,
+                    disabled: disabled,
                     value: current.reason.clone(),
                     oninput: move |event| {
                         let mut next = reason_draft();
@@ -357,13 +370,9 @@ pub(crate) fn SentProofDialog(
                 div { class: "admin-shell__dialog-actions",
                     button {
                         r#type: "button",
-                        disabled: busy || review_state.pending || missing_ids,
+                        disabled: disabled || review_state.pending || missing_ids,
                         onclick: move |_| trigger_preview(),
-                        if review_state.pending {
-                            {t!("delivery-sent-proof-previewing")}
-                        } else {
-                            {t!("delivery-sent-proof-preview")}
-                        }
+                        "{preview_label}"
                     }
                     button {
                         r#type: "button",
@@ -374,15 +383,11 @@ pub(crate) fn SentProofDialog(
                     button {
                         r#type: "submit",
                         class: "admin-btn-primary",
-                        disabled: busy || !can_confirm,
-                        if busy {
-                            {t!("admin-action-working")}
-                        } else {
-                            {t!("delivery-sent-proof-confirm")}
-                        }
+                        disabled: disabled || !can_confirm,
+                        "{confirm_label}"
                     }
                 }
-                {preview_panel(&review_state, busy, review)}
+                {preview_panel(&review_state, disabled, review)}
             }
         }
     }

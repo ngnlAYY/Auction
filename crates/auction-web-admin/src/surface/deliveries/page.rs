@@ -5,6 +5,7 @@ use auction_web_shared::{AsyncState, AsyncStateKind};
 use dioxus::prelude::*;
 
 use super::super::query::use_deliveries_query_state;
+use super::delivery_command_entity;
 use super::dialog::{DIALOG_ID, DeliveryDialog};
 use super::filters::{DeliveryFilters, DeliveryFiltersDraft};
 use super::labels::action_feedback_message;
@@ -23,7 +24,7 @@ pub fn page() -> Element {
     let mut refresh = use_signal(|| 0_u64);
     let mut notice = use_signal(|| None::<AdminActionFeedback>);
     let mut success_action = use_signal(|| None::<DeliveryAction>);
-    let commands = use_pending_commands(refresh);
+    let commands = use_pending_commands(refresh, |entity| entity.starts_with("delivery:"));
     // 状态筛选与分页跟地址栏双向同步；对话框、对账草稿和命令上下文是瞬态，不入 URL。
     let query = use_deliveries_query_state();
     let query_state = query.state;
@@ -58,7 +59,7 @@ pub fn page() -> Element {
     );
 
     let open_dialog = move |(delivery, kind): (Delivery, DeliveryDialogKind)| {
-        if !commands.any_busy() && !commands.contains(&delivery.id) {
+        if !commands.any_busy() && !commands.contains(&delivery_command_entity(&delivery.id)) {
             notice.set(None);
             success_action.set(None);
             if kind == DeliveryDialogKind::Reconcile
@@ -70,7 +71,7 @@ pub fn page() -> Element {
         }
     };
     let update_reconcile_draft = move |draft: DeliveryReconcileDraft| {
-        if commands.contains(&draft.delivery_id) {
+        if commands.contains(&delivery_command_entity(&draft.delivery_id)) {
             return;
         }
         if reconcile_draft()
@@ -81,7 +82,8 @@ pub fn page() -> Element {
         }
     };
     let confirm_action = move |request: DeliveryActionRequest| {
-        if commands.any_busy() || commands.contains(&request.delivery_id) {
+        if commands.any_busy() || commands.contains(&delivery_command_entity(&request.delivery_id))
+        {
             return;
         }
         let Some(dialog) = pending_dialog() else { return };
@@ -110,8 +112,14 @@ pub fn page() -> Element {
         notice.set(None);
         success_action.set(None);
         let submitted = commands.submit(
-            delivery_id.clone(),
-            t!("delivery-confirm"),
+            delivery_command_entity(&delivery_id),
+            match action {
+                DeliveryAction::Release => t!("delivery-release"),
+                DeliveryAction::Retry => t!("delivery-retry"),
+                DeliveryAction::ReconcileRetry => t!("delivery-reconcile-action-retry"),
+                DeliveryAction::ReconcileSucceeded => t!("delivery-reconcile-action-succeeded"),
+                DeliveryAction::ReconcileFailed => t!("delivery-reconcile-action-failed"),
+            },
             move |command_id| {
                 let delivery_id = delivery_id.clone();
                 let external_reference = external_reference.clone();

@@ -296,6 +296,10 @@ type LocalTimeParser = fn(&str) -> Result<Timestamp, LocalTimeError>;
 type PreviewRequests = RefCell<Vec<SentProofRequest>>;
 type StalePreviews = BTreeMap<String, Rc<StalePreview>>;
 
+pub(in crate::surface::deliveries) fn use_preview_stub() {
+    use_context_provider(|| Rc::new(PreviewRequests::default()));
+}
+
 #[derive(Default)]
 struct StalePreview {
     ready: Cell<bool>,

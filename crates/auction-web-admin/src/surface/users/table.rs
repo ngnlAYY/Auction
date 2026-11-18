@@ -6,7 +6,6 @@ use auction_web_shared::t;
 use auction_web_shared::{AsyncState, AsyncStateKind};
 use dioxus::prelude::*;
 
-use super::create::UserKeyDelivery;
 use super::dialogs::{parse_status_filter, status_filter_value};
 use super::fields::{UserFieldError, UserFieldIssue, search_name_issue};
 use super::row::AdminUserRow;
@@ -169,10 +168,10 @@ pub(super) fn AdminUserTable(
     on_page_change: EventHandler<i64>,
     on_sort_change: EventHandler<(String, SortDirection)>,
     reload_generation: Signal<u64>,
+    loaded_generation: u64,
     action_busy: Signal<bool>,
     action_feedback: Signal<Option<AdminActionFeedback>>,
     create_notice: Signal<Option<String>>,
-    delivery: UserKeyDelivery,
 ) -> Element {
     let is_empty = page.users.is_empty();
     let mut users = page.users;
@@ -222,9 +221,9 @@ pub(super) fn AdminUserTable(
                             key: "{user.id}",
                             user,
                             reload_generation,
+                            loaded_generation,
                             busy: action_busy,
                             feedback: action_feedback,
-                            delivery,
                         }
                     }
                 }

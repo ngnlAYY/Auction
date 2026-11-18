@@ -2,7 +2,7 @@
 //!
 //! 只允许选择该投递维护流程已写入的 Sent 证据（`mailbox_sweep` 或
 //! `sent_reference_sighting`），并把冻结尝试与观察组合成 `auction-contracts` 的闭集请求。
-//! 预览无副作用；提交沿用页面命令宿主的稳定 `command_id`，服务端仍会重新判定准入，
+//! 预览无副作用；提交沿用会话宿主的稳定 `command_id`，服务端仍会重新判定准入，
 //! 不把预览当作成功证明，也不重发邮件或改写原失败命令。
 //!
 //! 状态、证据选择、预览/确认动作与渲染分别由子模块拥有；对外仍只暴露对话框、
@@ -20,3 +20,6 @@ pub(super) use state::SentProofSubmission;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+pub(super) use tests::use_preview_stub;

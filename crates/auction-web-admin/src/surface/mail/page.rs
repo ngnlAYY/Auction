@@ -24,14 +24,13 @@ pub fn page() -> Element {
     let mut mailbox_key = use_signal(String::new);
     let mut active_mailbox = use_signal(String::new);
     let mut refresh = use_signal(|| 0_u64);
-    let delivery_commands = use_pending_commands(refresh);
     let mut polling_refresh = use_signal(|| 0_u64);
     // 重排反馈由页面持有，详情刷新或切换期间不会把成功排队误报为已送达。
     let mut delivery_notice = use_signal(|| None::<(String, AdminActionFeedback)>);
     let mut selected_intake = use_signal(|| None::<String>);
 
     let polling = use_resource(move || {
-        let _ = polling_refresh();
+        let generation = polling_refresh();
         let mailbox = active_mailbox();
         async move {
             let result = if mailbox.is_empty() {
@@ -39,7 +38,7 @@ pub fn page() -> Element {
             } else {
                 fetch_mail_state(mailbox.clone()).await.map(Some)
             };
-            (mailbox, result)
+            (mailbox, generation, result)
         }
     });
     let pagination = use_admin_pagination("mail", &["page_size"], Some(100), i64::from(i32::MAX));
@@ -69,6 +68,22 @@ pub fn page() -> Element {
             };
             (intake_id, result)
         }
+    });
+    let delivery_commands = use_pending_commands(refresh, move |entity| {
+        let Some(delivery_id) = entity.strip_prefix("delivery:") else {
+            return false;
+        };
+        let selected = selected_intake.peek();
+        selected.is_some()
+            && detail
+                .peek()
+                .as_ref()
+                .filter(|(intake_id, _)| intake_id == &*selected)
+                .and_then(|(_, result)| result.as_ref().ok())
+                .and_then(Option::as_ref)
+                .is_none_or(|detail| {
+                    detail.deliveries.iter().any(|delivery| delivery.id == delivery_id)
+                })
     });
 
     let load_polling = move |event: FormEvent| {
@@ -143,9 +158,8 @@ pub fn page() -> Element {
     };
     let polling_state = polling.read_unchecked();
     // 只保留当前邮箱的完成快照；切换邮箱不能继续显示或操作上一邮箱的轮询状态。
-    let current_polling = polling_state
-        .as_ref()
-        .and_then(|(mailbox, result)| (mailbox == &active_mailbox()).then_some(result));
+    let current_polling =
+        polling_state.as_ref().filter(|(mailbox, _, _)| mailbox == &active_mailbox());
     let polling_content = if active_mailbox().is_empty() {
         rsx! {
             p { {t!("admin-mail-polling-not-loaded")} }
@@ -159,7 +173,7 @@ pub fn page() -> Element {
                     detail: "",
                 }
             },
-            Some(Err(error)) => rsx! {
+            Some((_, _, Err(error))) => rsx! {
                 AsyncState {
                     kind: AsyncStateKind::Error,
                     title: admin_api_error_message(error),
@@ -170,15 +184,17 @@ pub fn page() -> Element {
                     },
                 }
             },
-            Some(Ok(Some(polling))) => rsx! {
+            Some((_, loaded_generation, Ok(Some(polling)))) => rsx! {
                 for polling in [polling.clone()] {
                     super::actions::MailPollingCard {
                         key: "{polling.mailbox_key}",
                         polling,
+                        refresh: polling_refresh,
+                        loaded_generation: *loaded_generation,
                     }
                 }
             },
-            Some(Ok(None)) => rsx! {
+            Some((_, _, Ok(None))) => rsx! {
                 p { {t!("admin-mail-polling-not-loaded")} }
             },
         }
@@ -307,6 +323,7 @@ pub fn page() -> Element {
                         }
                         super::actions::MailPollingCommands {
                             refresh: polling_refresh,
+                            active_mailbox,
                             super::actions::MailTriggerButton {}
                             {polling_content}
                         }

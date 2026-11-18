@@ -254,6 +254,30 @@ pub(in crate::surface) mod tests {
         button_in(dom, dom.base_scope().root_node(), label)
     }
 
+    /// 表单提交按钮的点击由表单处理，按钮自身没有 `onclick`。
+    pub(in crate::surface) fn submit_button_disabled(page: &TestPage, label: &str) -> Option<bool> {
+        let dom = page.dom();
+        find_in_tree(dom, dom.base_scope().root_node(), &|vnode| {
+            vnode.dynamic_nodes.iter().enumerate().find_map(|(index, node)| {
+                if !matches!(node, DynamicNode::Text(text) if text.value == label) {
+                    return None;
+                }
+                let (_, button_path) = vnode.template.node_paths[index].split_last()?;
+                vnode
+                    .template
+                    .attr_paths
+                    .iter()
+                    .zip(&vnode.dynamic_attrs)
+                    .filter(|(path, _)| **path == button_path)
+                    .flat_map(|(_, attributes)| attributes.iter())
+                    .find_map(|attribute| match (&attribute.value, attribute.name) {
+                        (AttributeValue::Bool(disabled), "disabled") => Some(*disabled),
+                        _ => None,
+                    })
+            })
+        })
+    }
+
     pub(in crate::surface) fn click_button(page: &mut TestPage, label: &str) -> Vec<Mutation> {
         let (id, disabled) = button(page, label).unwrap_or_else(|| panic!("缺少按钮「{label}」"));
         assert!(!disabled, "按钮「{label}」应可点击");

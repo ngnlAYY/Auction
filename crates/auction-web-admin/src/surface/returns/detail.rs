@@ -35,16 +35,20 @@ pub(crate) fn detail_page(return_id: String) -> Element {
 fn ReturnDetailPage(return_id: String) -> Element {
     let mut refresh = use_signal(|| 0_u64);
     // 命令成功后宿主递增 refresh 重读详情；结果未知的命令留在未决区按原 command_id 重试。
-    let commands = use_pending_commands(refresh);
+    let commands = use_pending_commands(refresh, {
+        let target = format!("settlement-return:{return_id}");
+        move |entity| entity == target
+    });
     let notice = use_signal(|| None::<AdminActionFeedback>);
     let detail = use_resource(use_reactive((&return_id,), move |(return_id,)| {
-        let _ = refresh();
+        let generation = refresh();
         async move {
             let result = fetch_settlement_return(return_id.clone()).await;
-            (return_id, result)
+            (return_id, generation, result)
         }
     }));
     let loading = detail.state().cloned() != UseResourceState::Ready;
+    let loaded_generation = refresh();
     // 刷新期间不展示上一轮结果，避免按旧版本提交命令。
     let loaded = if loading {
         None
@@ -52,8 +56,10 @@ fn ReturnDetailPage(return_id: String) -> Element {
         detail
             .read()
             .as_ref()
-            .filter(|(loaded_id, _)| loaded_id == &return_id)
-            .map(|(_, result)| result.clone())
+            .filter(|(loaded_id, generation, _)| {
+                loaded_id == &return_id && *generation == loaded_generation
+            })
+            .map(|(_, _, result)| result.clone())
     };
     let can_refresh = loaded.as_ref().is_some_and(Result::is_ok);
     rsx! {
@@ -110,7 +116,7 @@ fn ReturnDetailPage(return_id: String) -> Element {
                         }
                     }
                     SummarySection { summary: detail.summary.clone() }
-                    ActionSection { detail: detail.clone(), notice, refresh }
+                    ActionSection { detail: detail.clone(), notice, refresh, loaded_generation }
                     if shows_asset_location(&detail.summary.status) {
                         TakeSection {
                             take: detail.take.clone(),

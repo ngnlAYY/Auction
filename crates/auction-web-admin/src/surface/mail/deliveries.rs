@@ -4,6 +4,7 @@ use auction_contracts::{AdminDeliveryActionBlocker, AdminDeliveryActionsResponse
 use auction_web_shared::{TableColumns, TruncatedText, t};
 use dioxus::prelude::*;
 
+use super::super::deliveries::delivery_command_entity;
 use super::super::deliveries::dialog::{
     DeliveryConfirmationFacts, DeliveryEvidenceStatus, ReconcileEvidenceCandidates,
 };
@@ -14,7 +15,9 @@ use crate::api::{
 };
 use crate::surface::AdminActionFeedback;
 use crate::surface::pagination::{AdminPager as Pager, use_admin_pagination};
-use crate::surface::pending::{PendingCommands, set_if_alive};
+use crate::surface::pending::{
+    CommandDelivery, CommandReceipt, PendingCommands, set_if_alive, try_set_if_alive,
+};
 
 const DIALOG_ID: &str = "mail-delivery-action-dialog";
 
@@ -38,7 +41,7 @@ pub(super) fn MailDeliveriesPanel(
             if busy() {
                 return;
             }
-            if commands.contains(&delivery.id)
+            if commands.contains(&delivery_command_entity(&delivery.id))
                 || pending().is_none_or(|row| {
                     row.id != delivery.id || row.fencing_version != delivery.fencing_version
                 })
@@ -48,8 +51,8 @@ pub(super) fn MailDeliveriesPanel(
             let success_intake_id = confirm_intake_id.clone();
             let failure_intake_id = confirm_intake_id.clone();
             notice.set(None);
-            let submitted = commands.submit(
-                delivery.id.clone(),
+            let submitted = commands.submit_with_receipt(
+                delivery_command_entity(&delivery.id),
                 retry_label(&operation),
                 move |command_id| {
                     let delivery_id = delivery.id.clone();
@@ -66,11 +69,16 @@ pub(super) fn MailDeliveriesPanel(
                         .map_err(|error| error.code)
                     }
                 },
-                move |_| {
-                    set_if_alive(
-                        notice,
-                        Some((success_intake_id.clone(), AdminActionFeedback::Success)),
-                    );
+                move |_, source_alive| {
+                    let delivered = source_alive
+                        && pending.try_peek().is_ok()
+                        && try_set_if_alive(
+                            notice,
+                            Some((success_intake_id.clone(), AdminActionFeedback::Success)),
+                        );
+                    CommandDelivery::reported(delivered, || {
+                        Some(CommandReceipt::Text(t!("admin-mail-delivery-requeued")))
+                    })
                 },
                 move |code| {
                     if matches!(
@@ -124,10 +132,10 @@ pub(super) fn MailDeliveriesPanel(
                         for delivery in visible {
                             MailDeliveryRow {
                                 key: "{delivery.id}",
-                                busy: busy() || commands.contains(&delivery.id),
+                                busy: busy() || commands.contains(&delivery_command_entity(&delivery.id)),
                                 delivery,
                                 on_retry: move |delivery: AdminMailIntakeDelivery| {
-                                    if !busy() && !commands.contains(&delivery.id) {
+                                    if !busy() && !commands.contains(&delivery_command_entity(&delivery.id)) {
                                         notice.set(None);
                                         pending.set(Some(delivery));
                                     }

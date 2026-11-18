@@ -9,13 +9,17 @@ use super::super::query::use_page_query_state;
 use super::labels::CredentialFeedback;
 use super::{CredentialCreateForm, CredentialDeleteDialog, CredentialTable};
 use crate::api::{AdminCredential, delete_admin_credential, fetch_admin_credentials};
-use crate::surface::pagination::{AdminPager, use_admin_page, use_admin_pagination};
-use crate::surface::pending::{PendingCommandPanel, set_if_alive, use_pending_commands};
+use crate::surface::pagination::{AdminPager, use_admin_pagination, use_versioned_admin_page};
+use crate::surface::pending::{
+    CommandDelivery, CommandReceipt, PendingCommandPanel, set_if_alive, try_set_if_alive,
+    use_pending_commands,
+};
 
 /// 加载并展示 Admin 凭据管理页面。
 pub fn page() -> Element {
     let mut reload_generation = use_signal(|| 0_u64);
-    let pending_commands = use_pending_commands(reload_generation);
+    let pending_commands =
+        use_pending_commands(reload_generation, |entity| entity.starts_with("credential:"));
     // 分页跟地址栏双向同步（?page=）；创建表单与删除确认对话框是瞬态，不入 URL。
     let query = use_page_query_state();
     let query_state = query.state;
@@ -24,41 +28,64 @@ pub fn page() -> Element {
     let mut delete_feedback = use_signal(|| None::<CredentialFeedback>);
     let pagination =
         use_admin_pagination("credentials", &["page_size"], Some(200), i64::from(i32::MAX));
-    let credentials = use_admin_page(
+    let credentials = use_versioned_admin_page(
         pagination.clone(),
-        move || {
-            let _ = reload_generation();
-            requested_page()
-        },
+        reload_generation,
+        move || *requested_page.read(),
         |page, size| {
             fetch_admin_credentials(String::new(), String::new(), String::new(), page, size)
         },
     );
 
+    let delete_is_current = move |credential: &AdminCredential| {
+        let generation = reload_generation();
+        // 删除确认冻结了凭据版本；当前页重读或翻页不能把它转成对另一版本的删除。
+        credentials.read().as_ref().is_some_and(|loaded| {
+            loaded.as_ref().is_ok_and(|(loaded_generation, page)| {
+                *loaded_generation == generation
+                    && page.credentials.iter().any(|current| {
+                        current.id == credential.id
+                            && current.state_version == credential.state_version
+                    })
+            })
+        })
+    };
     let open_delete = move |credential: AdminCredential| {
-        if !pending_commands.contains(&format!("credential:{}", credential.id)) {
+        if delete_is_current(&credential)
+            && !pending_commands.contains(&format!("credential:{}", credential.id))
+        {
             delete_feedback.set(None);
             pending_delete.set(Some(credential));
         }
     };
     let confirm_delete = move |credential: AdminCredential| {
-        if pending_commands.contains(&format!("credential:{}", credential.id)) {
+        if !delete_is_current(&credential)
+            || pending_commands.contains(&format!("credential:{}", credential.id))
+        {
             return;
         }
         delete_feedback.set(None);
         // 删除与行内变更共用实体门禁；关闭确认框不能丢弃未知结果的原 UUID 和版本。
-        if pending_commands.submit(
+        if pending_commands.submit_with_receipt(
             format!("credential:{}", credential.id),
             t!("admin-credentials-action-delete"),
             move |command_id| {
                 let credential = credential.clone();
                 async move { delete_admin_credential(command_id, &credential).await }
             },
-            move |result| {
-                set_if_alive(
-                    delete_feedback,
-                    Some(CredentialFeedback::Success { restart_required: result.restart_required }),
-                );
+            move |result, source_alive| {
+                let delivered = source_alive
+                    && try_set_if_alive(
+                        delete_feedback,
+                        Some(CredentialFeedback::Success {
+                            restart_required: result.restart_required,
+                        }),
+                    );
+                CommandDelivery::reported(delivered, || {
+                    result
+                        .restart_required
+                        .then(|| CommandReceipt::Text(t!("admin-credentials-action-restart")))
+                })
             },
             move |code| set_if_alive(delete_feedback, Some(CredentialFeedback::Error(code))),
         ) {
@@ -83,12 +110,14 @@ pub fn page() -> Element {
                 on_retry: move |_| reload_generation.set(reload_generation().saturating_add(1)),
             }
         },
-        Some(Ok(page)) => {
+        Some(Ok((loaded_generation, page))) => {
             let mut on_page_change = query.clone();
             let mut on_sort_change = query;
             rsx! {
                     CredentialTable {
                         page: page.clone(),
+                        reload_generation,
+                        loaded_generation: *loaded_generation,
                         sort: query_state().sort,
                         direction: query_state().direction,
                         on_sort_change: move |(sort, direction)| {
@@ -139,6 +168,8 @@ pub fn page() -> Element {
         if let Some(credential) = pending {
             CredentialDeleteDialog {
                 busy: pending_commands.is_busy(&format!("credential:{}", credential.id)),
+                blocked: !delete_is_current(&credential)
+                    || pending_commands.contains(&format!("credential:{}", credential.id)),
                 credential,
                 on_confirm: confirm_delete,
                 on_cancel: move |_| pending_delete.set(None),

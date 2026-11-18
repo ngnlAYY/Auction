@@ -83,6 +83,27 @@ where
     use_admin_page_with_state(pagination, request, fetch).0
 }
 
+/// 给携带版本的写操作标记读取世代。等待新版本时，表格可保留上一份快照和交互状态。
+pub(crate) fn use_versioned_admin_page<Q, T, F>(
+    pagination: AdminPagination,
+    reload: Signal<u64>,
+    request: impl Fn() -> Q + 'static,
+    fetch: impl Fn(Q, i64) -> F + 'static,
+) -> VersionedAdminPage<T>
+where
+    Q: Clone + PartialEq + 'static,
+    T: Clone + PartialEq + 'static,
+    F: Future<Output = Result<T, String>> + 'static,
+{
+    use_admin_page(pagination, request, move |query, size| {
+        let generation = reload();
+        let result = fetch(query, size);
+        async move { result.await.map(|page| (generation, page)) }
+    })
+}
+
+type VersionedAdminPage<T> = Memo<Option<Result<(u64, T), String>>>;
+
 /// 额外返回读取状态，供自动轮询跳过仍在进行的请求；展示身份与快照复用规则保持一致。
 pub(crate) fn use_admin_page_with_state<Q, T, F>(
     pagination: AdminPagination,

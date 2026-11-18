@@ -34,7 +34,9 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
     let mut lag_refresh = use_signal(|| 0_u64);
     let mut notice = use_signal(|| None::<AdminActionFeedback>);
     let mut selected_failure = use_signal(|| None::<String>);
-    let pending = use_pending_commands(failure_refresh);
+    let replay_refresh = use_signal(|| 0_u64);
+    let pending =
+        use_pending_commands(replay_refresh, |entity| entity.starts_with("realtime-failure:"));
     let mut schema_version = use_signal(|| "1".to_owned());
     let mut public_payload = use_signal(|| "{}".to_owned());
     let mut replay_invalid = use_signal(|| false);
@@ -59,6 +61,7 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
     let (events, events_status) = use_admin_page_with_state(
         event_pagination.clone(),
         move || {
+            let _ = replay_refresh();
             let _ = event_refresh();
             event_query()
         },
@@ -69,12 +72,14 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
         },
     );
     let event_overview = use_resource(move || {
+        let _ = replay_refresh();
         let _ = event_refresh();
         fetch_filtered(event_allowed().then_some(()), |()| fetch_realtime_event_total())
     });
     let (lag, lag_status) = use_admin_page_with_state(
         lag_pagination.clone(),
         move || {
+            let _ = replay_refresh();
             let _ = lag_refresh();
             lag_query()
         },
@@ -89,6 +94,7 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
     let (failures, failures_status) = use_admin_page_with_state(
         failure_pagination.clone(),
         move || {
+            let _ = replay_refresh();
             let _ = failure_refresh();
             failure_query()
         },
@@ -99,6 +105,7 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
         },
     );
     let unresolved_failures = use_resource(move || {
+        let _ = replay_refresh();
         let _ = failure_refresh();
         fetch_filtered(failure_allowed().then_some(()), |()| {
             fetch_realtime_failure_page(
@@ -237,7 +244,7 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
             RealtimeFailureTable {
                 page: failure_page.clone(),
                 on_select: move |failure: RealtimeFailure| {
-                    if replay_busy() || pending.contains(&failure.id) { return; }
+                    if replay_busy() || pending.contains(&format!("realtime-failure:{}", failure.id)) { return; }
                     schema_version.set("1".to_owned());
                     public_payload.set("{}".to_owned());
                     replay_invalid.set(false);
@@ -482,7 +489,7 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
                                 r#type: "button",
                                 disabled: replay_busy(),
                                 onclick: move |_| {
-                                    if replay_busy() || pending.contains(&failure.id) {
+                                    if replay_busy() || pending.contains(&format!("realtime-failure:{}", failure.id)) {
                                         return;
                                     }
                                     let failure_id = failure.id.clone();
@@ -502,7 +509,7 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
                                     replay_invalid.set(false);
                                     notice.set(None);
                                     let submitted = pending.submit(
-                                        failure_id.clone(),
+                                        format!("realtime-failure:{failure_id}"),
                                         t!("realtime-replay-submit"),
                                         move |command_id| {
                                             let failure_id = failure_id.clone();
@@ -519,10 +526,6 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
                                         },
                                         move |()| {
                                             set_if_alive(notice, Some(AdminActionFeedback::Success));
-                                            let mut event_refresh = event_refresh;
-                                            let mut lag_refresh = lag_refresh;
-                                            event_refresh.set(event_refresh().saturating_add(1));
-                                            lag_refresh.set(lag_refresh().saturating_add(1));
                                         },
                                         move |code| {
                                             set_if_alive(notice, Some(AdminActionFeedback::Error(code)));

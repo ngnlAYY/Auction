@@ -12,6 +12,7 @@ use super::login::AdminReadinessStatus;
 use super::navigation;
 use crate::api::{AdminReadinessState, AdminSession};
 use crate::surface::admin_api_error_message;
+use crate::surface::pending::{PendingCommandNotices, use_pending_command_host};
 use crate::surface::router::Route;
 
 /// 已认证的管理端外壳与注销动作。
@@ -30,6 +31,7 @@ pub(crate) fn AdminAuthenticatedShell(
     // 已确认会话供 `api::transport::fetch_csrf_token` 核对 actor 与 CSRF 未被其他标签页替换；
     // 缺少该 context 时全部写入都会失败关闭。
     use_context_provider(|| session.clone());
+    let command_host = use_pending_command_host();
     super::super::config::use_config_draft();
     super::super::rules::use_rules_draft();
     // 外壳持有唯一的秒级共享时钟；需要每秒刷新的子树（如拍卖列表倒计时）通过
@@ -45,7 +47,13 @@ pub(crate) fn AdminAuthenticatedShell(
     let pending_refresh = use_signal(|| 0_u64);
     let pending_counts = use_resource(move || {
         let _ = pending_refresh();
-        crate::api::fetch_admin_pending_counts()
+        async {
+            #[cfg(test)]
+            if try_consume_context::<super::effects::TestSession>().is_some() {
+                return Err("feature_not_supported".to_owned());
+            }
+            crate::api::fetch_admin_pending_counts().await
+        }
     });
     use_context_provider(|| pending_counts);
     // 挂载时沿用外壳已有的就绪快照（首屏门禁正在等它），只在之后真正切换路由时重读。
@@ -56,6 +64,15 @@ pub(crate) fn AdminAuthenticatedShell(
         refresh_after_navigation(route, refresh_route, pending_refresh, readiness_refresh);
     }));
     use_route_focus(format!("{current_route:?}"), "admin-content");
+    let theme_picker = rsx! {
+        ThemePicker { label: t!("theme-label"), dark_label: t!("theme-dark"), light_label: t!("theme-light") }
+    };
+    #[cfg(test)]
+    let theme_picker = if try_consume_context::<super::effects::TestSession>().is_some() {
+        VNode::empty()
+    } else {
+        theme_picker
+    };
     rsx! {
         div {
             class: if sidebar_collapsed() {
@@ -80,11 +97,7 @@ pub(crate) fn AdminAuthenticatedShell(
                         label: t!("language-label"),
                         catalog: &crate::surface::ADMIN_LOCALE_CATALOG,
                     }
-                    ThemePicker {
-                        label: t!("theme-label"),
-                        dark_label: t!("theme-dark"),
-                        light_label: t!("theme-light"),
-                    }
+                    {theme_picker}
                     button {
                         class: LOGOUT_BUTTON_CLASS,
                         r#type: "button",
@@ -142,6 +155,7 @@ pub(crate) fn AdminAuthenticatedShell(
                     },
                     id: "admin-content",
                     tabindex: "-1",
+                    PendingCommandNotices { host: command_host }
                     fieldset {
                         disabled: !session_confirmed,
                         style: "display: contents;",

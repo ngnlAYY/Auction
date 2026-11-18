@@ -183,7 +183,7 @@ fn AdminAuctionCreateFields(
                     };
                     pending.submit(
                         "create-auction".to_owned(),
-                        t!("admin-auctions-create-submit"),
+                        format!("{} · {} · {sequence_value}", t!("admin-auctions-create-submit"), admin_world_label(&request.world_id)),
                         move |command_id| {
                             let request = request.clone();
                             async move {

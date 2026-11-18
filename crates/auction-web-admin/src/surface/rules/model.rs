@@ -4,7 +4,6 @@ use dioxus::prelude::*;
 
 use super::draft::DEFAULT_RULES_LOCALE;
 use crate::api::{AdminDocumentKind, AdminRules, AdminRulesCandidate};
-use crate::surface::pending::{PendingCommands, use_owned_pending_commands};
 use crate::surface::presentation::use_unload_warning;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,7 +68,6 @@ pub(super) struct RulesDraft {
     pub(super) notice: Signal<Option<RuleNotice>>,
     pub(super) busy: Signal<bool>,
     pub(super) reload_generation: Signal<u64>,
-    pub(super) pending: PendingCommands,
     pub(super) dirty: Memo<bool>,
 }
 
@@ -107,7 +105,6 @@ fn use_document_draft() -> RulesDraft {
     let notice = use_signal(|| None::<RuleNotice>);
     let busy = use_signal(|| false);
     let reload_generation = use_signal(|| 0_u64);
-    let pending = use_owned_pending_commands(reload_generation, None);
     let dirty = use_memo(move || {
         let draft = draft.read();
         let baseline = baseline.read();
@@ -125,7 +122,6 @@ fn use_document_draft() -> RulesDraft {
         notice,
         busy,
         reload_generation,
-        pending,
         dirty,
     }
 }

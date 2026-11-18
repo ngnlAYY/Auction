@@ -96,6 +96,8 @@ pub(crate) use rules::{
     AdminDocumentKind, AdminRules, AdminRulesCandidate, fetch_admin_rules, publish_admin_rules,
     validate_admin_rules,
 };
+#[cfg(test)]
+pub(crate) use runtime_config::stub_runtime_config;
 pub(crate) use runtime_config::{
     fetch_admin_runtime_config, update_admin_runtime_config, validate_admin_runtime_config,
 };

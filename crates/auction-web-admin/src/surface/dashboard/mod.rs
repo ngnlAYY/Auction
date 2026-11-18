@@ -20,10 +20,12 @@ use controls::MailPollerControls;
 /// 按旧版单快照请求模型加载管理总览。
 pub(super) fn page() -> Element {
     let mut refresh = use_signal(|| 0_u64);
-    let pending = use_pending_commands(refresh);
+    let pending = use_pending_commands(refresh, |entity| {
+        entity == "mail-poll-trigger" || entity.starts_with(super::mail::MAILBOX_ENTITY_PREFIX)
+    });
     let dashboard = use_resource(move || {
-        let _ = refresh();
-        fetch_dashboard()
+        let generation = refresh();
+        async move { (generation, fetch_dashboard().await) }
     });
     // 自动轮询开关与间隔入 URL（`poll` 键），默认 30 秒；页面隐藏时轮询挂起。
     // 轮询只重取当前快照，不额外写地址栏。
@@ -75,7 +77,7 @@ pub(super) fn page() -> Element {
                     detail: "",
                 }
             }
-            if let Some(Err(error)) = state.as_ref() {
+            if let Some((_, Err(error))) = state.as_ref() {
                 AsyncState {
                     kind: AsyncStateKind::Error,
                     title: admin_api_error_message(error),
@@ -84,7 +86,7 @@ pub(super) fn page() -> Element {
                     on_retry: move |_| manual_refresh.call(()),
                 }
             }
-            if let Some(Ok(snapshot)) = state.as_ref() {
+            if let Some((loaded_generation, Ok(snapshot))) = state.as_ref() {
                 DashboardContent { snapshot: snapshot.clone(),
                     MailPollerControls {
                         pollers: snapshot
@@ -94,6 +96,7 @@ pub(super) fn page() -> Element {
                             .map(|data| data.pollers.clone())
                             .unwrap_or_default(),
                         refresh,
+                        loaded_generation: *loaded_generation,
                     }
                 }
             }

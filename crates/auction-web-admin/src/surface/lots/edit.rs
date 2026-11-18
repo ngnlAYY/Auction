@@ -287,7 +287,7 @@ mod tests {
     fn harness(test: Rc<LotsPageTest>) -> Element {
         init_i18n();
         let reload_generation = use_signal(|| 0_u64);
-        let owner = use_pending_commands(reload_generation);
+        let owner = use_pending_commands(reload_generation, |_| true);
         let draft = use_signal(|| None::<LotEdit>);
         let notice = use_signal(|| None);
         let selected_lot = use_signal(|| None);

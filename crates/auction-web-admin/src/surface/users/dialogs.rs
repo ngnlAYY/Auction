@@ -4,10 +4,10 @@ use auction_web_shared::t;
 use dioxus::prelude::*;
 use uuid::Uuid;
 
-use super::create::UserKeyDelivery;
+use super::create::AdminUserGeneratedKey;
 use crate::api::{AdminApiFailure, AdminUserStatusFilter};
 use crate::surface::AdminActionFeedback;
-use crate::surface::pending::{PendingCommands, set_if_alive};
+use crate::surface::pending::{PendingCommands, set_if_alive, try_set_if_alive};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum AdminUserDialogKind {
@@ -58,26 +58,27 @@ pub(super) fn AdminUserDialogActions(
     }
 }
 
-/// 一次性 Key 直接交付用户页持有的状态，行与弹窗卸载不影响交付。
+/// 一次性 Key 由会话保留，普通用户反馈仍交付给页面。
 pub(super) fn run_user_action<F>(
     owner: PendingCommands,
     entity: String,
     action: String,
     feedback: Signal<Option<AdminActionFeedback>>,
     reload_generation: Signal<u64>,
-    delivery: UserKeyDelivery,
     operation: impl Fn(Uuid) -> F + 'static,
 ) -> bool
 where
     F: std::future::Future<Output = Result<Option<String>, String>> + 'static,
 {
-    owner.submit(
+    owner.submit_with_receipt(
         entity,
         action,
         operation,
-        move |key| {
-            delivery.deliver(key);
-            set_if_alive(feedback, Some(AdminActionFeedback::Success));
+        move |key, source_alive| {
+            AdminUserGeneratedKey::delivery(
+                key,
+                source_alive && try_set_if_alive(feedback, Some(AdminActionFeedback::Success)),
+            )
         },
         move |code| {
             let code = AdminApiFailure::display_code(&code).to_owned();

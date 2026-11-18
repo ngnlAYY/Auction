@@ -9,7 +9,9 @@ use super::preview::AdminRulesPreview;
 use crate::api::{
     AdminDocumentKind, AdminRules, AdminRulesCandidate, publish_admin_rules, validate_admin_rules,
 };
-use crate::surface::pending::{PendingCommands, set_if_alive};
+use crate::surface::pending::{
+    CommandDelivery, PendingCommands, advance_command_reload, set_if_alive,
+};
 
 /// 展示规则编辑器，并确保只有最近一次已校验草稿可以发布。
 #[component]
@@ -299,7 +301,7 @@ pub(super) fn AdminRulesWorkspace(
                                     let candidate = publish_value.clone();
                                     let revision = document.revision;
                                     notice.set(None);
-                                    pending.submit(
+                                    pending.submit_with_receipt(
                                         kind.pending_key().to_owned(),
                                         t!("admin-rules-publish"),
                                         move |command_id| {
@@ -317,11 +319,16 @@ pub(super) fn AdminRulesWorkspace(
                                                 .map_err(|error| error.code)
                                             }
                                         },
-                                        move |_| {
+                                        move |_, source_alive| {
+                                            // 清理会话草稿时废弃同世代的读取，避免重挂载的编辑器停在加载或使用旧基线。
                                             set_if_alive(draft, None);
                                             set_if_alive(baseline, None);
                                             set_if_alive(checked_candidate, None);
-                                            set_if_alive(notice, Some(RuleNotice::Published));
+                                            advance_command_reload(reload_generation);
+                                            if source_alive {
+                                                set_if_alive(notice, Some(RuleNotice::Published));
+                                            }
+                                            CommandDelivery::reported(source_alive, || None)
                                         },
                                         move |code| {
                                             set_if_alive(notice, Some(RuleNotice::ActionError(code)));
@@ -414,7 +421,7 @@ mod tests {
             let busy = use_signal(|| false);
             let dirty = use_memo(|| true);
             let reload_generation = use_signal(|| 0);
-            let pending = use_pending_commands(reload_generation);
+            let pending = use_pending_commands(reload_generation, |_| true);
             rsx! {
                 AdminRulesWorkspace {
                     kind: AdminDocumentKind::Rules, document, target: target_signal(), target_signal,

@@ -6,7 +6,7 @@ use dioxus::prelude::*;
 use super::model::RuntimeConfigForm;
 use super::page::ConfigCommand;
 use super::page::ConfigNotice;
-use crate::surface::pending::{PendingCommands, set_if_alive, use_pending_commands};
+use crate::surface::pending::{advance_command_reload, set_if_alive};
 use crate::surface::presentation::use_unload_warning;
 
 /// 草稿由认证外壳持有，站内切页不丢失输入与重试命令；退出当前会话后随外壳销毁。
@@ -20,7 +20,6 @@ pub(super) struct ConfigDraft {
     pub(super) notice: Signal<Option<ConfigNotice>>,
     pub(super) restart_required: Signal<bool>,
     pub(super) dirty: Memo<bool>,
-    pub(super) pending: PendingCommands,
     pub(super) refresh: Signal<u64>,
     pub(super) validating: Signal<bool>,
 }
@@ -47,7 +46,7 @@ impl ConfigDraft {
         // 写入响应采用通用重启标志。实际差异决定本次是否增加提醒，既有提醒继续保留。
         self.remember_restart_notice(result.restart_required && requires_restart);
         set_if_alive(self.command, None);
-        set_if_alive(self.notice, Some(ConfigNotice::Saved));
+        advance_command_reload(self.refresh);
     }
 }
 
@@ -61,7 +60,6 @@ pub(super) fn use_config_draft() {
     let notice = use_signal(|| None::<ConfigNotice>);
     let restart_required = use_signal(|| false);
     let refresh = use_signal(|| 0_u64);
-    let pending = use_pending_commands(refresh);
     let validating = use_signal(|| false);
     let dirty = use_memo(move || {
         baseline.read().as_ref().is_some_and(|initial| !initial.same_edits_as(&form.read()))
@@ -75,7 +73,6 @@ pub(super) fn use_config_draft() {
         notice,
         restart_required,
         dirty,
-        pending,
         refresh,
         validating,
     });

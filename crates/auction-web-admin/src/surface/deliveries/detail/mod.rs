@@ -8,6 +8,7 @@ use auction_web_shared::{AsyncState, AsyncStateKind, t};
 use dioxus::prelude::*;
 
 use super::super::router::Route;
+use super::delivery_command_entity;
 use super::labels::action_blocker_label;
 use super::sent_proof::{SentProofDialog, SentProofSubmission, selectable_evidence};
 use crate::api::{
@@ -36,7 +37,14 @@ pub(crate) fn detail_page(delivery_id: String) -> Element {
 #[component]
 fn DeliveryDetailPage(delivery_id: String) -> Element {
     let mut refresh = use_signal(|| 0_u64);
-    let commands = use_pending_commands(refresh);
+    let commands = use_pending_commands(refresh, {
+        let target = delivery_command_entity(&delivery_id);
+        move |entity| entity == target
+    });
+    let entity = delivery_command_entity(&delivery_id);
+    let occupied = commands.contains(&entity);
+    let blocked_note = occupied.then_some("admin-delivery-command-occupied");
+    let busy = commands.any_busy();
     let mut notice = use_signal(|| None::<AdminActionFeedback>);
     let mut sent_open = use_signal(|| false);
     let mut sent_submitted = use_signal(|| false);
@@ -46,6 +54,12 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
     let detail = use_resource(use_reactive((&delivery_id,), move |(delivery_id,)| {
         let revision = refresh();
         async move {
+            #[cfg(test)]
+            if let Some(tests::DetailFixture(projection)) =
+                try_consume_context::<tests::DetailFixture>()
+            {
+                return (delivery_id, revision, Ok(projection));
+            }
             let result = fetch_delivery_detail(delivery_id.clone()).await;
             (delivery_id, revision, result)
         }
@@ -68,18 +82,22 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
     let confirm_delivery_id = delivery_id.clone();
     let confirm_sent_proof = move |submission: SentProofSubmission| {
         let entity = confirm_delivery_id.clone();
-        if commands.any_busy() || commands.contains(&entity) {
+        if commands.any_busy() || commands.contains(&delivery_command_entity(&entity)) {
             return;
         }
         notice.set(None);
         sent_submitted.set(false);
         let submitted = commands.submit(
-            entity.clone(),
+            delivery_command_entity(&entity),
             t!("delivery-sent-proof-confirm"),
             move |command_id| {
                 let delivery_id = entity.clone();
                 let submission = submission.clone();
                 async move {
+                    #[cfg(test)]
+                    if let Some(requests) = try_consume_context::<tests::SentConfirmRequests>() {
+                        return requests.reject();
+                    }
                     confirm_delivery_sent_proof(SentProofCommand {
                         command_id,
                         delivery_id,
@@ -124,12 +142,15 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
         };
         let entity = acknowledge_delivery_id.clone();
         let reason = acknowledge_reason().trim().to_owned();
-        if reason.is_empty() || commands.any_busy() || commands.contains(&entity) {
+        if reason.is_empty()
+            || commands.any_busy()
+            || commands.contains(&delivery_command_entity(&entity))
+        {
             return;
         }
         notice.set(None);
         commands.submit(
-            entity.clone(),
+            delivery_command_entity(&entity),
             t!("delivery-detail-acknowledge-submit"),
             move |command_id| {
                 let delivery_id = entity.clone();
@@ -182,6 +203,8 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
                     textarea {
                         rows: "3",
                         maxlength: "2048",
+                        disabled: occupied || busy,
+                        aria_describedby: blocked_note,
                         value: "{reason}",
                         oninput: move |event| reason.set(event.value()),
                     }
@@ -189,7 +212,8 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
                 button {
                     r#type: "button",
                     class: "admin-btn-primary",
-                    disabled: commands.any_busy() || reason().trim().is_empty(),
+                    disabled: occupied || busy || reason().trim().is_empty(),
+                    aria_describedby: blocked_note,
                     onclick: move |_| submit(()),
                     {t!("delivery-detail-acknowledge-submit")}
                 }
@@ -212,8 +236,12 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
                     button {
                         r#type: "button",
                         class: "admin-btn-primary",
-                        disabled: commands.any_busy(),
+                        disabled: occupied || busy,
+                        aria_describedby: blocked_note,
                         onclick: move |_| {
+                            if commands.contains(&entity) || commands.any_busy() {
+                                return;
+                            }
                             notice.set(None);
                             sent_open.set(true);
                         },
@@ -244,7 +272,8 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
             if sent_open() {
                 SentProofDialog {
                     detail: detail,
-                    busy: commands.any_busy(),
+                    busy,
+                    blocked: occupied,
                     on_submit: confirm_sent_proof,
                     on_cancel: move |_| sent_open.set(false),
                     on_stale: move |_| {
@@ -268,6 +297,9 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
                 }
             }
             PendingCommandPanel { owner: commands }
+            if let Some(blocked_note) = blocked_note {
+                p { id: blocked_note, class: "admin-panel__note", {t!("delivery-command-occupied")} }
+            }
             match loaded {
                 None if !valid_uuid(&delivery_id) => rsx! {
                     AsyncState {
@@ -312,5 +344,122 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
             {acknowledge_entry}
             {sent_entry}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+    use std::future::ready;
+    use std::rc::Rc;
+
+    use auction_contracts::AdminDeliveryDetailWithActionsResponse;
+    use dioxus::core::Mutation;
+    use dioxus::prelude::*;
+    use serde_json::{Value, json};
+
+    use super::DeliveryDetailPage;
+    use crate::api::{AdminApiFailure, DeliverySentProofResult};
+    use crate::surface::auctions::draft_page_tests::{
+        button, click_button, has_live_text, init_i18n, mount_writer, submit_button_disabled,
+        writer_form,
+    };
+    use crate::surface::deliveries::delivery_command_entity;
+    use crate::surface::deliveries::sent_proof::use_preview_stub;
+    use crate::surface::pending::use_pending_commands;
+
+    #[derive(Clone)]
+    pub(super) struct DetailFixture(pub(super) AdminDeliveryDetailWithActionsResponse);
+
+    #[derive(Clone, Default)]
+    pub(super) struct SentConfirmRequests(Rc<Cell<usize>>);
+
+    impl SentConfirmRequests {
+        pub(super) fn reject(&self) -> Result<DeliverySentProofResult, String> {
+            self.0.set(self.0.get() + 1);
+            Err(AdminApiFailure::from_http_body(
+                429,
+                r#"{"code":"rate_limited","message":"请求过多","data":null,"request_id":null}"#,
+            )
+            .code)
+        }
+    }
+
+    #[derive(Clone, Debug, PartialEq, Routable)]
+    enum TestRoute {
+        #[route("/")]
+        Fixture {},
+    }
+
+    #[component]
+    fn Fixture() -> Element {
+        let projection = use_context::<DetailFixture>();
+        rsx! { DeliveryDetailPage { delivery_id: projection.0.detail.delivery.id } }
+    }
+
+    #[test]
+    fn another_sources_pending_delivery_blocks_detail_entries_and_the_open_dialog() {
+        let [mut projection, _, _]: [Value; 3] = serde_json::from_str(include_str!(
+            "../../../../../auction-contracts/tests/fixtures/admin/delivery-sent-proof-detail.json"
+        ))
+        .unwrap();
+        projection["data"]["actions"]["acknowledge"] = json!({"state":"eligible"});
+        let fixture = DetailFixture(serde_json::from_value(projection["data"].take()).unwrap());
+        let confirms = SentConfirmRequests::default();
+        let (mut page, edits) = mount_writer({
+            let confirms = confirms.clone();
+            move || {
+                init_i18n();
+                use_preview_stub();
+                use_context_provider(|| fixture.clone());
+                use_context_provider(|| confirms.clone());
+                let refresh = use_signal(|| 0);
+                let other_source = use_pending_commands(refresh, |_| false);
+                let entity = delivery_command_entity(&fixture.0.detail.delivery.id);
+                rsx! {
+                    button { onclick: move |_| {
+                        let failure = AdminApiFailure::from_http_body(
+                            503, r#"{"code":"storage_unavailable","message":"暂不可用","data":null,"request_id":null}"#,
+                        );
+                        assert!(other_source.submit(entity.clone(), "列表处置".to_owned(), move |_| ready(Err::<(), _>(failure.code.clone())), |()| {}, |_| {}));
+                    }, {"列表提交同一投递".to_owned()} }
+                    Router::<TestRoute> {}
+                }
+            }
+        });
+        let reason = edits
+            .iter()
+            .find_map(|edit| match edit {
+                Mutation::NewEventListener { name, id } if name == "input" => Some(*id),
+                _ => None,
+            })
+            .unwrap();
+        page.dispatch("input", reason, "已核对");
+        assert!(!button(&page, "确认已处置").unwrap().1);
+        let opened = click_button(&mut page, "打开人工 Sent 证明");
+        let form = writer_form(&opened);
+        let mut inputs = opened.iter().filter_map(|edit| match edit {
+            Mutation::NewEventListener { name, id } if name == "input" => Some(*id),
+            _ => None,
+        });
+        page.dispatch("input", inputs.next().unwrap(), "Sample");
+        page.dispatch("input", inputs.next().unwrap(), "12345");
+        page.dispatch("input", inputs.next().unwrap(), "2026-11-02T01:14");
+        page.dispatch("input", inputs.next_back().unwrap(), "已核对 Sent 实见");
+        click_button(&mut page, "预览准入");
+        assert!(has_live_text(&page, "准入通过。确认时仍会重新核验快照。"));
+        assert_eq!(submit_button_disabled(&page, "确认证明"), Some(false));
+        click_button(&mut page, "列表提交同一投递");
+        assert!(has_live_text(&page, "这条投递还有未了结的操作，请先在未决区核对。"));
+        assert!(has_live_text(&page, "准入通过。确认时仍会重新核验快照。"));
+        assert!(button(&page, "确认已处置").unwrap().1);
+        assert_eq!(submit_button_disabled(&page, "确认证明"), Some(true));
+        page.dispatch("submit", form, "");
+        assert_eq!(confirms.0.get(), 0);
+        assert!(button(&page, "打开人工 Sent 证明").unwrap().1);
+        click_button(&mut page, "取消");
+        let (sent, _) = button(&page, "打开人工 Sent 证明").unwrap();
+        page.dispatch("click", sent, "");
+        assert!(submit_button_disabled(&page, "确认证明").is_none());
     }
 }

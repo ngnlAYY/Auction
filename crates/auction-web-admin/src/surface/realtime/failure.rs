@@ -88,7 +88,7 @@ pub(super) fn RealtimeFailureTable(
                                     if !failure.resolved {
                                         button {
                                             r#type: "button",
-                                            disabled: pending.any_busy() || pending.contains(&failure.id),
+                                            disabled: pending.any_busy() || pending.contains(&format!("realtime-failure:{}", failure.id)),
                                             onclick: move |_| on_select.call(failure_for_action.clone()),
                                             {t!("realtime-replay")}
                                         }

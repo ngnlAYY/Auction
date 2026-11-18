@@ -188,7 +188,7 @@ pub(super) fn MailIntakeDetailPanel(
                 dt { {t!("admin-mail-delivery-ids")} }
                 dd { "{delivery_ids}" }
             }
-            // 只重建当前收件的分页与未提交确认；已提交 delivery 仍归稳定页级命令宿主。
+            // 只重建当前收件的分页与未提交确认，已提交的投递处置仍归会话宿主。
             for (intake_id, deliveries) in [(detail.id, detail.deliveries)] {
                 super::deliveries::MailDeliveriesPanel {
                     key: "{intake_id}",

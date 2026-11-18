@@ -1,12 +1,24 @@
+use std::cell::Cell;
+use std::future::{pending, ready};
 use std::rc::Rc;
 
 use auction_time::{Duration, Timestamp};
+use dioxus::history::MemoryHistory;
+use dioxus::prelude::*;
+use dioxus::router::{Navigator, RouterConfig};
 
+use super::super::effects::TestSession;
 use super::{
     CheckReason, Cookie, Effect, Event, LogoutOutcome, Phase, ReadOutcome, RenewalOutcome, State,
     Ticket, Timer, step,
 };
-use crate::api::AdminSession;
+use crate::api::{AdminApiFailure, AdminSession};
+use crate::surface::auctions::draft_page_tests::{
+    button, click_button, has_live_text, init_i18n, mount_writer,
+};
+use crate::surface::pending::use_pending_commands;
+use crate::surface::realtime::TestPage;
+use crate::surface::router::{Route, TestNotFoundPage};
 
 mod projections;
 mod sequences;
@@ -452,4 +464,232 @@ fn confirmed_expiration_unmounts_and_broadcasts_only_a_verified_generation() {
         assert!(state.view().session.is_none());
         assert_eq!(count_notices(&effects), expected_notices);
     }
+}
+
+#[derive(Clone, Copy)]
+enum SessionEnd {
+    Logout,
+    IdleExpiration,
+    Broadcast,
+}
+
+#[derive(Default)]
+struct CommandRequests {
+    sent: Cell<usize>,
+    cancelled: Cell<bool>,
+    source_unmounted: Rc<Cell<bool>>,
+    navigation: Cell<Option<Navigator>>,
+}
+
+struct WaitingRequest(Rc<CommandRequests>);
+
+impl Drop for WaitingRequest {
+    fn drop(&mut self) {
+        self.0.cancelled.set(true);
+    }
+}
+
+#[component]
+fn AuthenticatedCommands() -> Element {
+    let reload = use_signal(|| 0);
+    let commands = use_pending_commands(reload, |_| true);
+    let requests = use_context::<Rc<CommandRequests>>();
+    let navigation = navigator();
+    requests.navigation.set(Some(navigation));
+    let delayed = requests.clone();
+    rsx! {
+        button { onclick: move |_| {
+            let _ = navigation.push(Route::Status {});
+        }, {"离开命令页".to_owned()} }
+        button { onclick: move |_| {
+            let requests = requests.clone();
+            assert!(commands.submit(
+                "alert:fixture".to_owned(), "测试静默".to_owned(), move |_| {
+                    requests.sent.set(requests.sent.get() + 1);
+                    let reply = AdminApiFailure::from_http_body(
+                        503,
+                        r#"{"code":"storage_unavailable","message":"暂不可用","data":null,"request_id":null}"#,
+                    );
+                    ready(Err::<(), _>(reply.code))
+                },
+                |()| panic!("故障替身没有返回成功回执"), |_| {},
+            ));
+        }, {"发送会话命令".to_owned()} }
+        button { onclick: move |_| {
+            let delayed = delayed.clone();
+            assert!(commands.submit(
+                "world:fixture".to_owned(), "测试世界命令".to_owned(), move |_| {
+                    let delayed = delayed.clone();
+                    async move {
+                        delayed.sent.set(delayed.sent.get() + 1);
+                        let _request = WaitingRequest(delayed);
+                        pending::<Result<(), String>>().await
+                    }
+                },
+                |()| panic!("已结束的会话不能交付旧命令"), |_| {},
+            ));
+        }, {"保持命令在途".to_owned()} }
+    }
+}
+
+fn command_fixture_route() -> Route {
+    Route::NotFound { segments: vec!["test-authenticated-commands".to_owned()] }
+}
+
+fn fixture_outlet(segments: Vec<String>) -> Element {
+    assert_eq!(segments, ["test-authenticated-commands"]);
+    rsx! { AuthenticatedCommands {} }
+}
+
+fn end_fixture_session(fixture: &SessionFixture, state: State, end: SessionEnd) -> State {
+    match end {
+        SessionEnd::Logout => {
+            let (state, effects) = fixture.apply(state, Event::LogoutClicked, NOW);
+            fixture
+                .apply(
+                    state,
+                    Event::LogoutFinished(
+                        logout_ticket(&effects),
+                        fixture.cookie.clone(),
+                        LogoutOutcome::Succeeded,
+                    ),
+                    NOW,
+                )
+                .0
+        }
+        SessionEnd::IdleExpiration => {
+            let ticket = state.check_timer.unwrap();
+            let (state, effects) =
+                fixture.apply(state, Event::TimerElapsed(Timer::Check, ticket), NOW + 900_000.0);
+            fixture
+                .apply(
+                    state,
+                    Event::ReadFinished(
+                        read_ticket(&effects),
+                        fixture.cookie.clone(),
+                        ReadOutcome::Unauthenticated,
+                    ),
+                    NOW + 900_000.0,
+                )
+                .0
+        }
+        SessionEnd::Broadcast => fixture.apply(state, Event::Broadcast, NOW).0,
+    }
+}
+
+fn mount_session_commands(end: SessionEnd) -> (TestPage, Rc<CommandRequests>) {
+    let requests = Rc::new(CommandRequests::default());
+    let (page, _) = mount_writer({
+        let requests = requests.clone();
+        let fixture = Rc::new(SessionFixture::new("current-cookie", 900));
+        move || {
+            init_i18n();
+            use_context_provider(|| requests.clone());
+            use_context_provider(|| TestNotFoundPage {
+                render: fixture_outlet,
+                unmounted: requests.source_unmounted.clone(),
+            });
+            use_context_provider(|| {
+                Rc::new(MemoryHistory::with_initial_path(command_fixture_route()))
+                    as Rc<dyn History>
+            });
+            let mut state = use_signal(|| fixture.authenticated());
+            let mut view = use_signal(|| state.peek().view());
+            let mut check = use_signal(|| None);
+            let events = fixture.clone();
+            let dispatch = use_callback(move |event| {
+                let before = state.peek().clone();
+                let next = if matches!(event, Event::LogoutClicked) {
+                    end_fixture_session(&events, before, SessionEnd::Logout)
+                } else {
+                    let (next, effects) = events.apply(before, event, NOW);
+                    if effects.iter().any(|effect| matches!(effect, Effect::Read(_))) {
+                        check.set(Some(read_ticket(&effects)));
+                    }
+                    next
+                };
+                view.set(next.view());
+                state.set(next);
+            });
+            use_context_provider(|| TestSession(view, dispatch));
+            let finish = fixture.clone();
+            let end_fixture = fixture.clone();
+            let routes = requests.clone();
+            rsx! {
+                button { onclick: move |_| routes.navigation.get().unwrap().go_back(), {"返回命令页".to_owned()} }
+                button { onclick: move |_| dispatch.call(Event::CheckRequested), {"复核测试会话".to_owned()} }
+                button { onclick: move |_| {
+                    dispatch.call(finish.read_ok(check().unwrap()));
+                }, {"复核通过".to_owned()} }
+                button { onclick: move |_| {
+                    let next = end_fixture_session(&end_fixture, state.peek().clone(), end);
+                    view.set(next.view());
+                    state.set(next);
+                }, {"结束测试会话".to_owned()} }
+                button { onclick: move |_| {
+                    let next = SessionFixture::new("next-cookie", 900).authenticated();
+                    view.set(next.view());
+                    state.set(next);
+                }, {"开始新会话".to_owned()} }
+                Router::<Route> { config: move |_| RouterConfig::<Route>::default().on_update(|router| {
+                    matches!(router.current(), Route::Dashboard {}).then(|| command_fixture_route().into())
+                }) }
+            }
+        }
+    });
+    (page, requests)
+}
+
+#[test]
+fn pending_commands_survive_session_review_but_cannot_retry_until_confirmed() {
+    let (mut page, requests) = mount_session_commands(SessionEnd::Logout);
+    click_button(&mut page, "发送会话命令");
+    click_button(&mut page, "复核测试会话");
+    let (retry, disabled) = button(&page, "原样重试").unwrap();
+    assert!(disabled);
+    page.dispatch("click", retry, "");
+    assert_eq!(requests.sent.get(), 1);
+    click_button(&mut page, "复核通过");
+    click_button(&mut page, "原样重试");
+    assert_eq!(requests.sent.get(), 2);
+}
+
+#[test]
+fn ending_the_session_drops_unknown_records_and_cancels_only_its_waiting_requests() {
+    for end in [SessionEnd::Logout, SessionEnd::IdleExpiration, SessionEnd::Broadcast] {
+        let (mut page, requests) = mount_session_commands(end);
+        click_button(&mut page, "发送会话命令");
+        click_button(&mut page, "保持命令在途");
+        assert!(button(&page, "原样重试").is_some());
+        assert!(!requests.cancelled.get());
+        click_button(
+            &mut page,
+            if matches!(end, SessionEnd::Logout) { "退出登录" } else { "结束测试会话" },
+        );
+        assert!(requests.cancelled.get());
+        assert!(button(&page, "原样重试").is_none());
+        click_button(&mut page, "开始新会话");
+        assert!(button(&page, "原样重试").is_none());
+        assert_eq!(requests.sent.get(), 2);
+        click_button(&mut page, "发送会话命令");
+        assert_eq!(requests.sent.get(), 3);
+    }
+}
+
+#[test]
+fn authenticated_outlet_navigation_keeps_the_same_command_host() {
+    let (mut page, requests) = mount_session_commands(SessionEnd::Logout);
+    click_button(&mut page, "发送会话命令");
+    click_button(&mut page, "保持命令在途");
+    assert!(!requests.source_unmounted.get());
+    click_button(&mut page, "离开命令页");
+    assert!(requests.source_unmounted.get());
+    assert!(has_live_text(&page, "服务状态"));
+    assert!(button(&page, "发送会话命令").is_none());
+    assert!(!requests.cancelled.get());
+    assert!(button(&page, "原样重试").is_some());
+    click_button(&mut page, "返回命令页");
+    assert!(button(&page, "发送会话命令").is_some());
+    assert!(button(&page, "原样重试").is_some());
+    assert!(!requests.cancelled.get());
 }

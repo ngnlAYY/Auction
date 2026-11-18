@@ -276,10 +276,31 @@ fn current_browser_suffix() -> String {
     String::new()
 }
 
+/// 宿主测试可在真实的认证 Outlet 注入本地命令夹具。
+#[cfg(test)]
+#[derive(Clone)]
+pub(super) struct TestNotFoundPage {
+    pub(super) render: fn(Vec<String>) -> Element,
+    pub(super) unmounted: std::rc::Rc<std::cell::Cell<bool>>,
+}
+
 /// 404 位于认证外壳的 `main#admin-content` 之内：只输出页面区块，不再嵌套第二个 `main`
 /// 地标，也不套用整屏高度的外壳类。
 #[component]
 fn NotFound(segments: Vec<String>) -> Element {
+    #[cfg(test)]
+    {
+        let fixture = try_consume_context::<TestNotFoundPage>();
+        let unmounted = fixture.as_ref().map(|fixture| fixture.unmounted.clone());
+        use_drop(move || {
+            if let Some(unmounted) = unmounted {
+                unmounted.set(true);
+            }
+        });
+        if let Some(fixture) = fixture {
+            return (fixture.render)(segments);
+        }
+    }
     rsx! {
         section { class: "admin-panel", aria_labelledby: "admin-not-found-title",
             h1 { id: "admin-not-found-title", {t!("not-found-title")} }

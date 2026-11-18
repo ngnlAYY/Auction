@@ -9,6 +9,7 @@ use dioxus::prelude::*;
 
 use super::pagination::{AdminPager as Pager, use_admin_page, use_admin_pagination};
 use super::query::use_renames_query_state;
+use super::users::user_command_entity;
 use super::{AdminActionFeedback, admin_api_error_message};
 use crate::api::{
     AdminRename, AdminRenamePage, AdminRenameRevertCommand, fetch_admin_renames,
@@ -31,7 +32,9 @@ pub(super) fn page() -> Element {
     let mut refresh = use_signal(|| 0_u64);
     let mut notice = use_signal(|| None::<AdminActionFeedback>);
     let command_gate = use_pending_command_gate();
-    let pending = use_pending_commands_with_gate(refresh, Some(command_gate));
+    let pending = use_pending_commands_with_gate(refresh, Some(command_gate), |entity| {
+        entity.starts_with("user:")
+    });
     let mut selected = use_signal(|| None::<AdminRename>);
     let pagination =
         use_admin_pagination("renames", &["page_size"], Some(200), i64::from(i32::MAX));
@@ -49,13 +52,16 @@ pub(super) fn page() -> Element {
         let Some(rename) = selected() else {
             return;
         };
-        if rename.reverted_at.is_some() || pending.any_busy() || pending.contains(&rename.user_id) {
+        if rename.reverted_at.is_some()
+            || pending.any_busy()
+            || pending.contains(&user_command_entity(&rename.user_id))
+        {
             return;
         }
         // 首次准备成功后冻结 fence；重放只使用同一请求，不能重新读取用户版本。
         let frozen = Rc::new(RefCell::new(None::<AdminRenameRevertCommand>));
         let submitted = pending.submit(
-            rename.user_id.clone(),
+            user_command_entity(&rename.user_id),
             t!("admin-renames-revert"),
             move |command_id| {
                 let rename = rename.clone();
@@ -115,7 +121,7 @@ pub(super) fn page() -> Element {
                 sort: query_state().sort,
                 direction: query_state().direction,
                 on_select: move |rename: AdminRename| {
-                    if !pending.any_busy() && !pending.contains(&rename.user_id) {
+                    if !pending.any_busy() && !pending.contains(&user_command_entity(&rename.user_id)) {
                         selected.set(Some(rename));
                     }
                 },
@@ -204,7 +210,7 @@ pub(super) fn page() -> Element {
                     div { class: "admin-shell__dialog-actions",
                         button {
                             r#type: "button",
-                            disabled: pending.any_busy(),
+                            disabled: pending.any_busy() || pending.contains(&user_command_entity(&rename.user_id)),
                             onclick: confirm_revert,
                             {t!("admin-users-action-confirm")}
                         }
@@ -313,7 +319,7 @@ fn RenameRow(rename: AdminRename, on_select: EventHandler<AdminRename>) -> Eleme
                 } else {
                     button {
                         r#type: "button",
-                        disabled: pending.any_busy() || pending.contains(&rename_for_action.user_id),
+                        disabled: pending.any_busy() || pending.contains(&user_command_entity(&rename_for_action.user_id)),
                         onclick: move |_| on_select.call(rename_for_action.clone()),
                         {t!("admin-renames-revert")}
                     }

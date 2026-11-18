@@ -18,12 +18,16 @@ use super::{
 };
 use crate::api::{AdminCredential, AdminCredentialPage, mutate_admin_credential};
 use crate::surface::config::{FieldLiveRegion, use_field_announcer};
-use crate::surface::pending::{PendingCommands, set_if_alive};
+use crate::surface::pending::{
+    CommandDelivery, CommandReceipt, PendingCommands, set_if_alive, try_set_if_alive,
+};
 use crate::surface::sort::{MobileSortControl, SortDirection, SortableTh, sort_rows};
 
 #[component]
 pub fn CredentialTable(
     page: AdminCredentialPage,
+    reload_generation: Signal<u64>,
+    loaded_generation: u64,
     /// 当前排序列（空串 = 服务端原始顺序）与方向；变更经 `on_sort_change` 由页面写回 URL。
     sort: String,
     direction: SortDirection,
@@ -100,6 +104,8 @@ pub fn CredentialTable(
                         CredentialRow {
                             key: "{credential.id}",
                             credential,
+                            reload_generation,
+                            loaded_generation,
                             on_delete,
                         }
                     }
@@ -120,12 +126,16 @@ pub fn CredentialTable(
 pub fn CredentialRow(
     credential: AdminCredential,
     on_delete: EventHandler<AdminCredential>,
+    reload_generation: Signal<u64>,
+    loaded_generation: u64,
 ) -> Element {
     let mut rename_dialog = use_signal(|| false);
     let busy = use_signal(|| false);
     let feedback = use_signal(|| None::<CredentialFeedback>);
     let owner = use_context::<PendingCommands>();
-    let blocked = owner.contains(&format!("credential:{}", credential.id));
+    // 保留当前行与回执，写操作必须等待了结后的新凭据版本。
+    let read_is_current = move || reload_generation() == loaded_generation;
+    let blocked = !read_is_current() || owner.contains(&format!("credential:{}", credential.id));
     let credential_for_rename_submit = credential.clone();
     let credential_for_enable = credential.clone();
     let credential_for_disable = credential.clone();
@@ -170,7 +180,7 @@ pub fn CredentialRow(
                         disabled: busy() || blocked || credential.status == "active",
                         onclick: move |_| {
                             let credential = credential_for_enable.clone();
-                            if busy() { return; }
+                            if busy() || !read_is_current() { return; }
                             submit_credential(owner, credential, "set_status", None, Some("active".to_owned()), feedback);
                         },
                         {t!("admin-credentials-action-enable")}
@@ -180,7 +190,7 @@ pub fn CredentialRow(
                         disabled: busy() || blocked || credential.status == "disabled",
                         onclick: move |_| {
                             let credential = credential_for_disable.clone();
-                            if busy() { return; }
+                            if busy() || !read_is_current() { return; }
                             submit_credential(owner, credential, "set_status", None, Some("disabled".to_owned()), feedback);
                         },
                         {t!("admin-credentials-action-disable")}
@@ -188,7 +198,9 @@ pub fn CredentialRow(
                     button {
                         r#type: "button",
                         disabled: busy() || blocked,
-                        onclick: move |_| rename_dialog.set(true),
+                        onclick: move |_| {
+                            if read_is_current() { rename_dialog.set(true); }
+                        },
                         {t!("admin-credentials-action-rename-open")}
                     }
                     button {
@@ -226,8 +238,10 @@ pub fn CredentialRow(
                         initial_label: credential.label.clone(),
                         input_id: rename_input_id,
                         busy: busy(),
+                        blocked,
                         on_close: move |_| rename_dialog.set(false),
                         on_save: move |label| {
+                            if !read_is_current() { return; }
                             let credential = credential_for_rename_submit.clone();
                             if submit_credential(owner, credential, "rename", Some(label), None, feedback) {
                                 rename_dialog.set(false);
@@ -245,6 +259,7 @@ fn CredentialRenameDialog(
     initial_label: String,
     input_id: String,
     busy: bool,
+    #[props(default)] blocked: bool,
     on_close: EventHandler<()>,
     on_save: EventHandler<String>,
 ) -> Element {
@@ -265,7 +280,7 @@ fn CredentialRenameDialog(
                 novalidate: true,
                 onsubmit: move |event| {
                     event.prevent_default();
-                    if busy {
+                    if busy || blocked {
                         return;
                     }
                     let label = rename_value();
@@ -312,7 +327,7 @@ fn CredentialRenameDialog(
                     button {
                         r#type: "submit",
                         class: "admin-btn-primary",
-                        disabled: busy,
+                        disabled: busy || blocked,
                         if busy { {t!("admin-action-working")} } else { {t!("admin-credentials-rename-save")} }
                     }
                 }
@@ -338,26 +353,35 @@ fn submit_credential(
     } else {
         t!("admin-credentials-action-disable")
     };
-    let accepted =
-        owner.submit(
-            format!("credential:{}", credential.id),
-            action_label,
-            move |command_id| {
-                let credential = credential.clone();
-                let label = label.clone();
-                let status = status.clone();
-                async move {
-                    mutate_admin_credential(command_id, &credential, action, label, status).await
+    let accepted = owner.submit_with_receipt(
+        format!("credential:{}", credential.id),
+        action_label,
+        move |command_id| {
+            let credential = credential.clone();
+            let label = label.clone();
+            let status = status.clone();
+            async move {
+                #[cfg(all(test, not(target_arch = "wasm32")))]
+                if let Some(reply) = try_consume_context::<tests::CredentialReply>() {
+                    return reply.0.fetch().await;
                 }
-            },
-            move |result| {
-                set_if_alive(
+                mutate_admin_credential(command_id, &credential, action, label, status).await
+            }
+        },
+        move |result, source_alive| {
+            let delivered = source_alive
+                && try_set_if_alive(
                     feedback,
                     Some(CredentialFeedback::Success { restart_required: result.restart_required }),
                 );
-            },
-            move |code| set_if_alive(feedback, Some(CredentialFeedback::Error(code))),
-        );
+            CommandDelivery::reported(delivered, || {
+                result
+                    .restart_required
+                    .then(|| CommandReceipt::Text(t!("admin-credentials-action-restart")))
+            })
+        },
+        move |code| set_if_alive(feedback, Some(CredentialFeedback::Error(code))),
+    );
     if accepted {
         set_if_alive(feedback, None);
     }
@@ -376,19 +400,146 @@ fn sort_credentials(credentials: &mut [AdminCredential], column: &str, direction
     });
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
 mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
+    use auction_contracts::AdminCredentialMutationResponse;
     use auction_web_shared::i18n::{DEFAULT_ADMIN_LOCALE, build_bundle};
     use dioxus::core::{AttributeValue, Mutation};
     use dioxus::prelude::*;
     use dioxus_i18n::prelude::try_use_init_i18n_from_bundle;
 
-    use super::CredentialRenameDialog;
+    use super::{CredentialRenameDialog, CredentialRow, submit_credential};
+    use crate::api::AdminCredential;
     use crate::surface::ADMIN_LOCALE_CATALOG;
+    use crate::surface::auctions::draft_page_tests::{
+        RecordRead, button, click_button, has_live_text, init_i18n, mount_writer, settle_writer,
+    };
     use crate::surface::config::test_form::{dispatch, listener};
+    use crate::surface::credentials::labels::CredentialFeedback;
+    use crate::surface::pagination::{use_admin_pagination, use_versioned_admin_page};
+    use crate::surface::pending::{
+        PendingCommandHost, PendingCommandNotices, PendingCommands, use_pending_commands,
+    };
+
+    #[derive(Clone)]
+    pub(super) struct CredentialReply(pub(super) Rc<RecordRead<AdminCredentialMutationResponse>>);
+
+    fn credential() -> AdminCredential {
+        AdminCredential {
+            id: "0f8fad5b-d9cb-469f-a165-70867728950e".to_owned(),
+            kind: "mail_cookie".to_owned(),
+            world: "main".to_owned(),
+            label: "测试凭据".to_owned(),
+            player_name: None,
+            status: "active".to_owned(),
+            state_version: 1,
+            created_at: "2026-11-18T00:00:00Z".to_owned(),
+            rotated_at: None,
+            updated_at: "2026-11-18T00:00:00Z".to_owned(),
+        }
+    }
+
+    #[test]
+    fn credential_actions_wait_for_the_new_version_while_the_old_row_stays_visible() {
+        let read = Rc::new(RecordRead::new());
+        let written = Rc::new(RecordRead::new());
+        let (mut page, _) = mount_writer({
+            let read = read.clone();
+            move || {
+                init_i18n();
+                use_context_provider(|| CredentialReply(written.clone()));
+                let mut reload = use_signal(|| 0);
+                let owner = use_pending_commands(reload, |_| true);
+                let pagination =
+                    use_admin_pagination("credential-version-test", &["page_size"], None, 100);
+                let read = read.clone();
+                let rows = use_versioned_admin_page(
+                    pagination,
+                    reload,
+                    || (),
+                    move |(), _| {
+                        let read = read.clone();
+                        async move {
+                            if *reload.peek() == 0 { Ok(credential()) } else { read.fetch().await }
+                        }
+                    },
+                );
+                rsx! {
+                    button { onclick: move |_| reload.set(1), {"使凭据投影失效".to_owned()} }
+                    if let Some(Ok((loaded_generation, row))) = rows() {
+                        CredentialRow { credential: row, reload_generation: reload, loaded_generation, on_delete: |_| () }
+                    }
+                    if owner.any_busy() { p { {"已经发送凭据写入".to_owned()} } }
+                }
+            }
+        });
+        assert!(!button(&page, "停用").unwrap().1);
+        click_button(&mut page, "使凭据投影失效");
+        let (stale, disabled) = button(&page, "停用").unwrap();
+        assert!(disabled);
+        page.dispatch("click", stale, "");
+        assert!(!has_live_text(&page, "已经发送凭据写入"));
+        let mut updated = credential();
+        updated.state_version = 2;
+        updated.status = "disabled".to_owned();
+        read.respond(Ok(updated));
+        settle_writer(&mut page);
+        click_button(&mut page, "启用");
+        assert!(has_live_text(&page, "已经发送凭据写入"));
+    }
+
+    #[component]
+    fn CredentialRowFixture() -> Element {
+        let owner = use_context::<PendingCommands>();
+        let feedback = use_signal(|| None::<CredentialFeedback>);
+        rsx! {
+            button { onclick: move |_| {
+                assert!(submit_credential(owner, credential(), "set_status", None, Some("disabled".to_owned()), feedback));
+            }, {"停用测试凭据".to_owned()} }
+            if let Some(feedback) = feedback() { p { {feedback.message()} } }
+        }
+    }
+
+    #[test]
+    fn a_removed_credential_row_still_delivers_the_restart_warning() {
+        for unload_row in [false, true] {
+            let reply = Rc::new(RecordRead::new());
+            let (mut page, _) = mount_writer({
+                let reply = reply.clone();
+                move || {
+                    use_context_provider(|| CredentialReply(reply.clone()));
+                    let host = use_context::<PendingCommandHost>();
+                    let reload = use_signal(|| 0);
+                    use_pending_commands(reload, |entity| entity.starts_with("credential:"));
+                    let mut row_visible = use_signal(|| true);
+                    rsx! {
+                        PendingCommandNotices { host }
+                        button { onclick: move |_| row_visible.set(false), {"凭据翻页".to_owned()} }
+                        if row_visible() { CredentialRowFixture {} }
+                    }
+                }
+            });
+            click_button(&mut page, "停用测试凭据");
+            if unload_row {
+                click_button(&mut page, "凭据翻页");
+                assert!(button(&page, "停用测试凭据").is_none());
+            }
+            let mut updated = credential();
+            updated.status = "disabled".to_owned();
+            updated.state_version = 2;
+            reply.respond(Ok(AdminCredentialMutationResponse {
+                credential: updated,
+                restart_required: true,
+            }));
+            settle_writer(&mut page);
+            assert!(has_live_text(&page, "操作已完成。请重启 Worker 以应用凭据变更。"));
+            assert_eq!(button(&page, "关闭回执").is_some(), unload_row);
+        }
+    }
 
     fn rename_dialog() -> Element {
         try_use_init_i18n_from_bundle(|| {

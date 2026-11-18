@@ -9,7 +9,7 @@ use super::model::{DocumentDrafts, RuleNotice, RulesBaseline, RulesDraft};
 use super::workspace::AdminRulesWorkspace;
 use crate::api::{AdminDocumentKind, fetch_admin_rules};
 use crate::surface::admin_api_error_message;
-use crate::surface::pending::PendingCommandPanel;
+use crate::surface::pending::{PendingCommandPanel, use_pending_commands};
 
 /// 读取并展示一种 Admin 站点文档；语言切换会让请求带上旧版约定的 `lang` 查询参数。
 pub fn page(kind: AdminDocumentKind) -> Element {
@@ -21,9 +21,10 @@ pub fn page(kind: AdminDocumentKind) -> Element {
         mut notice,
         busy,
         reload_generation,
-        pending,
         dirty,
     } = use_context::<DocumentDrafts>().get(kind);
+    let pending =
+        use_pending_commands(reload_generation, move |entity| entity == kind.pending_key());
     let rules = use_resource(move || {
         let generation = reload_generation();
         let locale = target();
@@ -37,10 +38,10 @@ pub fn page(kind: AdminDocumentKind) -> Element {
     use_effect(move || {
         let requested_locale = target();
         let requested_generation = reload_generation();
+        let snapshot = rules.read();
         if rules.state().cloned() != UseResourceState::Ready {
             return;
         }
-        let snapshot = rules.read_unchecked();
         let Some(((loaded_locale, loaded_generation), result)) = snapshot.as_ref() else { return };
         if loaded_locale != &requested_locale || *loaded_generation != requested_generation {
             return;
@@ -161,7 +162,7 @@ pub fn page(kind: AdminDocumentKind) -> Element {
                     AdminDocumentKind::About => t!("admin-about-description"),
                 }
             }
-            PendingCommandPanel { owner: pending, session_scoped: true }
+            PendingCommandPanel { owner: pending }
             {content}
         }
     }
@@ -177,5 +178,128 @@ pub(super) fn AdminRulesLoadError(detail: String, mut reload_generation: Signal<
             retry_label: t!("admin-rules-retry"),
             on_retry: move |_| reload_generation.set(reload_generation().saturating_add(1)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::{Cell, RefCell};
+    use std::rc::Rc;
+
+    use dioxus::core::Mutation;
+    use dioxus::prelude::*;
+
+    use super::page;
+    use crate::api::{AdminDocumentKind, AdminRules, AdminRulesCandidate};
+    use crate::surface::auctions::draft_page_tests::{
+        RecordRead, click_button, has_live_text, init_i18n, mount_writer, settle_writer,
+    };
+    use crate::surface::rules::model::DocumentDrafts;
+
+    struct Publication {
+        document: RefCell<AdminRules>,
+        reply: RecordRead<AdminRules>,
+        reads: Cell<usize>,
+    }
+
+    #[component]
+    fn DocumentPage(kind: AdminDocumentKind) -> Element {
+        page(kind)
+    }
+
+    fn check_completion_after_return(kind: AdminDocumentKind) {
+        let publication = Rc::new(Publication {
+            document: RefCell::new(AdminRules {
+                locale: "en".to_owned(),
+                title: "原始标题".to_owned(),
+                markdown: "原始正文".to_owned(),
+                published_by: "operator".to_owned(),
+                published_at: "2026-11-18T00:00:00Z".to_owned(),
+                revision: 1,
+            }),
+            reply: RecordRead::new(),
+            reads: Cell::new(0),
+        });
+        let (mut mounted, mut edits) = mount_writer({
+            let publication = publication.clone();
+            move || {
+                init_i18n();
+                super::super::model::use_rules_draft();
+                let current = use_context::<DocumentDrafts>().get(kind);
+                let read = publication.clone();
+                let write = publication.clone();
+                use_hook(move || {
+                    AdminDocumentKind::stub_documents(
+                        move |requested, locale| {
+                            assert_eq!(requested, kind);
+                            let document = read.document.borrow();
+                            assert_eq!(locale, document.locale);
+                            read.reads.set(read.reads.get() + 1);
+                            document.clone()
+                        },
+                        move |requested, request| {
+                            assert_eq!(requested, kind);
+                            assert_eq!(request.expected_revision, 1);
+                            assert_eq!(request.title, "新标题");
+                            let write = write.clone();
+                            async move { write.reply.fetch().await.unwrap() }
+                        },
+                    );
+                });
+                let mut open = use_signal(|| true);
+                rsx! {
+                    button { onclick: move |_| open.toggle(), {"切换测试路由".to_owned()} }
+                    button { onclick: move |_| {
+                        let mut draft = current.draft;
+                        let mut checked = current.checked_candidate;
+                        let candidate = AdminRulesCandidate {
+                            locale: "en".to_owned(), title: "新标题".to_owned(), markdown: "新正文".to_owned(),
+                        };
+                        draft.set(Some(candidate.clone()));
+                        checked.set(Some(candidate));
+                    }, {"准备已校验草稿".to_owned()} }
+                    if open() { DocumentPage { kind } }
+                }
+            }
+        });
+        edits.extend(settle_writer(&mut mounted));
+        assert!(has_live_text(&mounted, "保存并发布"));
+        let publish = edits
+            .iter()
+            .rev()
+            .find_map(|edit| match edit {
+                Mutation::NewEventListener { name, id } if name == "click" => Some(*id),
+                _ => None,
+            })
+            .unwrap();
+        click_button(&mut mounted, "准备已校验草稿");
+        mounted.dispatch("click", publish, "");
+        click_button(&mut mounted, "切换测试路由");
+        click_button(&mut mounted, "切换测试路由");
+        assert_eq!(publication.reads.get(), 2);
+        assert!(has_live_text(&mounted, "保存并发布"));
+
+        let document = {
+            let mut document = publication.document.borrow_mut();
+            document.revision = 2;
+            document.title = "新标题".to_owned();
+            document.markdown = "新正文".to_owned();
+            document.clone()
+        };
+        publication.reply.respond(Ok(document));
+        settle_writer(&mut mounted);
+        assert_eq!(publication.reads.get(), 3);
+        assert!(has_live_text(&mounted, "保存并发布"));
+        assert!(!has_live_text(&mounted, "正在加载文档……"));
+    }
+
+    #[test]
+    fn rules_reload_after_returning_before_publication_settles() {
+        check_completion_after_return(AdminDocumentKind::Rules);
+    }
+
+    #[test]
+    fn about_reloads_after_returning_before_publication_settles() {
+        check_completion_after_return(AdminDocumentKind::About);
     }
 }

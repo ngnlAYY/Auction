@@ -8,7 +8,7 @@ use super::query::{
     SETTLEMENT_PAGE_SIZE, SettlementQuery, read_settlement_query, replace_settlement_query,
     use_settlement_location_revision,
 };
-use super::recovery::AdminRecoveryDialog;
+use super::recovery::{AdminRecoveryDialog, RecoveryConfirmationDraft, RecoveryRead};
 use super::report::AdminSettlementReportView;
 use crate::api::{
     AdminSettlementCatalogEntry, AdminSettlementCatalogPage, AdminSettlementReport,
@@ -16,19 +16,9 @@ use crate::api::{
 };
 use crate::surface::pagination::use_admin_pagination;
 use crate::surface::pending::{
-    PendingCommandPanel, PendingCommands, use_pending_command_gate, use_pending_commands_with_gate,
+    PendingCommandPanel, use_pending_command_gate, use_pending_commands_with_gate,
 };
 use crate::surface::{AdminActionFeedback, admin_api_error_message, admin_world_label};
-
-#[derive(Debug, Clone, PartialEq)]
-pub(super) struct RecoveryConfirmationDraft {
-    pub(super) auction_id: String,
-    pub(super) recovery_id: String,
-    pub(super) state_version: i64,
-    pub(super) action: String,
-    pub(super) equipment_name: String,
-    pub(super) lot_code: String,
-}
 
 pub(super) struct CatalogLoad {
     pub(super) world_id: String,
@@ -53,12 +43,9 @@ pub(crate) fn page() -> Element {
     let location_revision = use_settlement_location_revision();
     let _ = location_revision();
     let reload_generation = use_signal(|| 0_u64);
-    let command_gate = use_pending_command_gate();
-    // 同路径切到无效链接时只卸载读取与编辑视图，已经提交的命令仍归页级宿主持有。
-    let pending = use_pending_commands_with_gate(reload_generation, Some(command_gate));
     match read_settlement_query() {
         Ok(initial_query) => rsx! {
-            AdminSettlementPage { initial_query, location_revision, reload_generation, pending }
+            AdminSettlementPage { initial_query, location_revision, reload_generation }
         },
         Err(_invalid_link) => rsx! {
             section {
@@ -80,7 +67,6 @@ fn AdminSettlementPage(
     initial_query: SettlementQuery,
     location_revision: Signal<u64>,
     reload_generation: Signal<u64>,
-    pending: PendingCommands,
 ) -> Element {
     let initial_world = initial_query.world_id;
     let initial_auction = initial_query.auction_id;
@@ -100,8 +86,6 @@ fn AdminSettlementPage(
     let reason = use_signal(String::new);
     let action_feedback = use_signal(|| None::<AdminActionFeedback>);
     let selection_generation = use_signal(|| 0_u64);
-    // 派生值：只通知读取它的报告与确认框，页面本身不因命令忙碌状态多渲染一轮。
-    let action_busy = use_memo(move || pending.any_busy());
 
     // 浏览器返回/前进可能只改变 query；按地址恢复筛选并关闭旧报告上的操作上下文。
     use_effect(move || {
@@ -187,8 +171,7 @@ fn AdminSettlementPage(
         }
     });
     let recovery = use_resource(move || {
-        let _ = reload_generation();
-        let _ = recovery_reload_generation();
+        let generation = (reload_generation(), recovery_reload_generation());
         let auction_id = selected_auction_id();
         async move {
             let result = if auction_id.is_empty() {
@@ -196,9 +179,30 @@ fn AdminSettlementPage(
             } else {
                 fetch_admin_recovery(auction_id.clone()).await.map(Some)
             };
-            DetailLoad { auction_id, result }
+            (generation, DetailLoad { auction_id, result })
         }
     });
+    let command_gate = use_pending_command_gate();
+    let pending =
+        use_pending_commands_with_gate(reload_generation, Some(command_gate), move |entity| {
+            let Some(recovery_id) = entity.strip_prefix("settlement-recovery:") else {
+                return false;
+            };
+            let selected = selected_auction_id.peek();
+            !selected.is_empty()
+                && recovery
+                    .peek()
+                    .as_ref()
+                    .map(|(_, load)| load)
+                    .filter(|load| load.auction_id == *selected)
+                    .and_then(|load| load.result.as_ref().ok())
+                    .and_then(Option::as_ref)
+                    .is_none_or(|report| {
+                        report.recoveries.iter().any(|recovery| recovery.id == recovery_id)
+                    })
+        });
+    // 派生值供恢复报告和确认框订阅，避免命令忙碌时重绘整页。
+    let action_busy = use_memo(move || pending.any_busy());
 
     // 每个筛选页都以服务端稳定排序的第一项为默认值；第一页因此始终选择最后结算的一期。
     use_effect(move || {
@@ -321,7 +325,17 @@ fn AdminSettlementPage(
         });
 
     let current_settlement = settlement_state.as_ref().filter(|load| load.auction_id == selected);
-    let current_recovery = recovery_state.as_ref().filter(|load| load.auction_id == selected);
+    // 恢复表单依赖恢复报告的版本；会话宿主收到回执后，旧报告不能授权新命令。
+    let recovery_generation = (reload_generation(), recovery_reload_generation());
+    let recovery_read = RecoveryRead {
+        reload: reload_generation,
+        recovery_reload: recovery_reload_generation,
+        generation: recovery_generation,
+    };
+    let current_recovery = recovery_state
+        .as_ref()
+        .filter(|(loaded, load)| *loaded == recovery_generation && load.auction_id == selected)
+        .map(|(_, load)| load);
     let mut detail_error = selected_entry.and_then(|_| {
         current_settlement
             .and_then(|load| load.result.as_ref().err())
@@ -344,7 +358,13 @@ fn AdminSettlementPage(
         .and_then(Option::as_ref)
         .cloned();
     // 确认框和命令入口都必须由目录与详情的同一条场次事实授权。
-    let recovery_draft = recovery_report.as_ref().and_then(|_| confirmation());
+    let recovery_draft = confirmation().filter(|draft| {
+        recovery_report.as_ref().is_some_and(|report| {
+            report.recoveries.iter().any(|entry| {
+                entry.id == draft.recovery_id && entry.state_version == draft.state_version
+            })
+        })
+    });
     let detail_loading = selected_entry.is_some()
         && !selected.is_empty()
         && (current_settlement.is_none() || current_recovery.is_none());
@@ -439,7 +459,7 @@ fn AdminSettlementPage(
                             }
                         }
                         if let Some(report) = report {
-                            // key 必须位于迭代片段，才能随场次销毁报告内的分页草稿；页级命令宿主保留。
+                            // key 必须位于迭代片段，才能随场次销毁报告内的分页草稿。
                             for (report, recovery) in [(report, recovery_report)] {
                                 AdminSettlementReportView {
                                     key: "{report.auction.id}",
@@ -448,6 +468,7 @@ fn AdminSettlementPage(
                                     lot_page,
                                     recovery_page,
                                     action_busy,
+                                    recovery_read,
                                     confirmation,
                                     reason,
                                     action_feedback,
@@ -477,6 +498,7 @@ fn AdminSettlementPage(
                     feedback: action_feedback,
                     selected_auction_id,
                     selection_generation,
+                    recovery_read,
                     recovery_reload_generation,
                 }
             }
@@ -606,6 +628,7 @@ mod tests {
                 )
             })
             .unwrap();
+            crate::surface::pending::use_pending_command_host();
             page()
         })
         .with_root_context(Rc::new(TestSettlementSearch(search.into_owned().collect())));

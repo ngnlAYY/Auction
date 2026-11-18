@@ -5,9 +5,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use auction_web_shared::{Dialog, Time, TruncatedText, t};
 use dioxus::prelude::*;
 
-use super::create::UserKeyDelivery;
 use super::dialogs::{AdminUserDialogActions, AdminUserDialogKind, run_user_action};
 use super::fields::{UserFieldError, UserFieldIssue, blacklist_reason_issue, forum_account_issue};
+use super::user_command_entity;
 use crate::api::{AdminUser, blacklist_admin_user, mutate_admin_user, unblacklist_admin_user};
 use crate::surface::AdminActionFeedback;
 use crate::surface::pending::PendingCommands;
@@ -28,9 +28,9 @@ struct HistoryTooltipPosition {
 pub(super) fn AdminUserRow(
     user: AdminUser,
     reload_generation: Signal<u64>,
+    loaded_generation: u64,
     busy: Signal<bool>,
     feedback: Signal<Option<AdminActionFeedback>>,
-    delivery: UserKeyDelivery,
 ) -> Element {
     let mut forum_account_id_value =
         use_signal(|| user.forum_account_id.clone().unwrap_or_default());
@@ -38,7 +38,9 @@ pub(super) fn AdminUserRow(
     let mut dialog_reason = use_signal(String::new);
     let mut field_issue = use_signal(|| None::<UserFieldIssue>);
     let owner = use_context::<PendingCommands>();
-    let blocked = owner.contains(&format!("user:{}", user.id));
+    // 原命令了结后旧行可显示，获取当前用户版本前不能打开或提交会写入的对话框。
+    let read_is_current = move || reload_generation() == loaded_generation;
+    let blocked = !read_is_current() || owner.contains(&user_command_entity(&user.id));
     let user_for_forum_dialog = user.clone();
     let user_for_revoke = user.clone();
     let user_for_reissue = user.clone();
@@ -82,6 +84,7 @@ pub(super) fn AdminUserRow(
                         r#type: "button",
                         disabled: busy() || blocked,
                         onclick: move |_| {
+                            if !read_is_current() { return; }
                             forum_account_id_value
                                 .set(user.forum_account_id.clone().unwrap_or_default());
                             field_issue.set(None);
@@ -92,13 +95,17 @@ pub(super) fn AdminUserRow(
                     button {
                         r#type: "button",
                         disabled: busy() || blocked,
-                        onclick: move |_| dialog.set(Some(AdminUserDialogKind::ReissueKey)),
+                        onclick: move |_| {
+                            if read_is_current() { dialog.set(Some(AdminUserDialogKind::ReissueKey)); }
+                        },
                         {t!("admin-users-action-reissue-key")}
                     }
                     button {
                         r#type: "button",
                         disabled: busy() || blocked || user.key_status == "revoked",
-                        onclick: move |_| dialog.set(Some(AdminUserDialogKind::RevokeKey)),
+                        onclick: move |_| {
+                            if read_is_current() { dialog.set(Some(AdminUserDialogKind::RevokeKey)); }
+                        },
                         {t!("admin-users-action-revoke-key")}
                     }
                     if user.status == "blacklisted" {
@@ -106,7 +113,9 @@ pub(super) fn AdminUserRow(
                             class: "admin-btn-secondary",
                             r#type: "button",
                             disabled: busy() || blocked,
-                            onclick: move |_| dialog.set(Some(AdminUserDialogKind::Unblacklist)),
+                            onclick: move |_| {
+                                if read_is_current() { dialog.set(Some(AdminUserDialogKind::Unblacklist)); }
+                            },
                             {t!("admin-users-action-unblacklist")}
                         }
                     } else {
@@ -115,6 +124,7 @@ pub(super) fn AdminUserRow(
                             r#type: "button",
                             disabled: busy() || blocked,
                             onclick: move |_| {
+                                if !read_is_current() { return; }
                                 dialog_reason.set(String::new());
                                 field_issue.set(None);
                                 dialog.set(Some(AdminUserDialogKind::Blacklist));
@@ -141,7 +151,7 @@ pub(super) fn AdminUserRow(
                                     novalidate: true,
                                     onsubmit: move |event| {
                                         event.prevent_default();
-                                        if busy() {
+                                        if busy() || !read_is_current() {
                                             return;
                                         }
                                         let user = user_for_forum_dialog.clone();
@@ -153,8 +163,8 @@ pub(super) fn AdminUserRow(
                                             return;
                                         }
                                         if run_user_action(
-                                            owner, format!("user:{}", user.id), t!("admin-users-action-set-forum-account-id"),
-                                            feedback, reload_generation, delivery,
+                                            owner, user_command_entity(&user.id), t!("admin-users-action-set-forum-account-id"),
+                                            feedback, reload_generation,
                                             move |command_id| {
                                                 let user = user.clone();
                                                 let value = value.clone();
@@ -203,7 +213,7 @@ pub(super) fn AdminUserRow(
                                     novalidate: true,
                                     onsubmit: move |event| {
                                         event.prevent_default();
-                                        if busy() {
+                                        if busy() || !read_is_current() {
                                             return;
                                         }
                                         let user = user_for_blacklist.clone();
@@ -215,8 +225,8 @@ pub(super) fn AdminUserRow(
                                             return;
                                         }
                                         if run_user_action(
-                                            owner, format!("user:{}", user.id), t!("admin-users-action-blacklist"),
-                                            feedback, reload_generation, delivery,
+                                            owner, user_command_entity(&user.id), t!("admin-users-action-blacklist"),
+                                            feedback, reload_generation,
                                             move |command_id| {
                                                 let user = user.clone();
                                                 let reason = reason.clone();
@@ -278,7 +288,7 @@ pub(super) fn AdminUserRow(
                                         },
                                         disabled: busy() || blocked,
                                         onclick: move |_| {
-                                            if busy() { return; }
+                                            if busy() || !read_is_current() { return; }
                                             let user = match kind {
                                                 AdminUserDialogKind::RevokeKey => user_for_revoke.clone(),
                                                 AdminUserDialogKind::ReissueKey => user_for_reissue.clone(),
@@ -292,8 +302,8 @@ pub(super) fn AdminUserRow(
                                                 _ => return,
                                             };
                                             if run_user_action(
-                                                owner, format!("user:{}", user.id), kind.title(&user.username),
-                                                feedback, reload_generation, delivery,
+                                                owner, user_command_entity(&user.id), kind.title(&user.username),
+                                                feedback, reload_generation,
                                                 move |command_id| {
                                                     let user = user.clone();
                                                     async move {

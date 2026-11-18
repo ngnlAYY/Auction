@@ -9,6 +9,7 @@ use crate::api::AdminCredential;
 pub fn CredentialDeleteDialog(
     credential: AdminCredential,
     busy: bool,
+    blocked: bool,
     on_confirm: EventHandler<AdminCredential>,
     on_cancel: EventHandler<()>,
 ) -> Element {
@@ -32,7 +33,7 @@ pub fn CredentialDeleteDialog(
                     button {
                         r#type: "button",
                         class: "admin-btn-danger",
-                        disabled: busy,
+                        disabled: busy || blocked,
                         onclick: move |_| on_confirm.call(credential.clone()),
                         if busy { {t!("admin-action-working")} } else { {t!("admin-credentials-action-delete")} }
                     }

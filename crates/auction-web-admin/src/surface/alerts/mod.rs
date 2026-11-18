@@ -35,7 +35,7 @@ pub(super) fn page() -> Element {
     let notice = use_signal(|| None::<AdminActionFeedback>);
     let reason = use_alert_reason_draft();
     // 命令成功后宿主递增 refresh，列表与 webhook 视图随之重读。
-    let pending = use_pending_commands(refresh);
+    let pending = use_pending_commands(refresh, |entity| entity.starts_with("alert:"));
     let pagination = use_admin_pagination("alerts", &["page_size"], Some(100), 100_000);
     let alerts = use_admin_page(
         pagination.clone(),

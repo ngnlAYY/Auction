@@ -69,6 +69,23 @@ impl ExternalAccessPauseAttempt {
     }
 }
 
+#[cfg(test)]
+type PauseSubmitStub = std::rc::Rc<
+    dyn Fn(&AdminExternalAccessPauseRequest) -> Result<RuntimeSwitchIntentDto, AdminApiFailure>,
+>;
+
+#[cfg(test)]
+impl ExternalAccessPauseAttempt {
+    pub(crate) fn stub_submit(
+        submit: impl Fn(
+            &AdminExternalAccessPauseRequest,
+        ) -> Result<RuntimeSwitchIntentDto, AdminApiFailure>
+        + 'static,
+    ) {
+        dioxus::prelude::provide_context(std::rc::Rc::new(submit) as PauseSubmitStub);
+    }
+}
+
 /// 提交外部访问暂停或恢复；只接受与命令一致的已接受事实。
 pub(crate) async fn submit_external_access_pause(
     attempt: &ExternalAccessPauseAttempt,
@@ -88,6 +105,10 @@ pub(crate) async fn submit_external_access_pause(
         expires_at: attempt.expires_at,
         reason: reason.to_owned(),
     };
+    #[cfg(test)]
+    if let Some(submit) = dioxus::prelude::try_consume_context::<PauseSubmitStub>() {
+        return submit(&command);
+    }
     let csrf_token = fetch_csrf_token().await.map_err(AdminApiFailure::client)?;
     let response = send_request(|abort_signal| {
         Request::post("/api/v1/admin/runtime-switches/external-access-paused")

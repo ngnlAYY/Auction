@@ -2,6 +2,9 @@
 //! 浏览器只编辑非敏感 JSON 文档，并把服务端返回的 fingerprint 原样作为更新 fence；TOML
 //! 文件、密钥和命令账本永远不进入浏览器。
 
+#[cfg(test)]
+use std::rc::Rc;
+
 mod document;
 mod fields;
 mod infrastructure;
@@ -31,8 +34,31 @@ pub(crate) type AdminRuntimeConfigApiError = AdminApiFailure;
 const RUNTIME_CONFIG_QUERY: &str =
     "include_equipment_taxonomy=true&include=fulfillment_collection_overdue_age_seconds";
 
+#[cfg(test)]
+#[derive(Clone)]
+struct RuntimeConfigStub {
+    read: Rc<dyn Fn() -> Result<AdminRuntimeConfig, AdminApiFailure>>,
+    save: Rc<dyn Fn(AdminRuntimeConfigUpdateRequest) -> AdminRuntimeConfig>,
+}
+
+/// 替换宿主回归的读写传输，保留请求 DTO 和真实投影校验。
+#[cfg(test)]
+pub(crate) fn stub_runtime_config(
+    read: impl Fn() -> Result<AdminRuntimeConfig, AdminApiFailure> + 'static,
+    save: impl Fn(AdminRuntimeConfigUpdateRequest) -> AdminRuntimeConfig + 'static,
+) {
+    dioxus::prelude::provide_context(RuntimeConfigStub {
+        read: Rc::new(read),
+        save: Rc::new(save),
+    });
+}
+
 pub(crate) async fn fetch_admin_runtime_config()
 -> Result<AdminRuntimeConfig, AdminRuntimeConfigApiError> {
+    #[cfg(test)]
+    if let Some(stub) = dioxus::prelude::try_consume_context::<RuntimeConfigStub>() {
+        return decode_runtime_config((stub.read)()?, false).map_err(invalid_runtime_response);
+    }
     let payload = fetch_runtime_config_response().await?;
     decode_runtime_config(payload.data, false).map_err(invalid_runtime_response)
 }
@@ -85,9 +111,13 @@ pub(crate) async fn update_admin_runtime_config(
     expected_fingerprint: String,
     document: Value,
 ) -> Result<AdminRuntimeConfig, AdminRuntimeConfigApiError> {
+    let command = AdminRuntimeConfigUpdateRequest { command_id, expected_fingerprint, document };
+    #[cfg(test)]
+    if let Some(stub) = dioxus::prelude::try_consume_context::<RuntimeConfigStub>() {
+        return decode_runtime_config((stub.save)(command), true).map_err(invalid_runtime_response);
+    }
     let csrf_token =
         super::fetch_csrf_token().await.map_err(|code| AdminApiFailure { status: None, code })?;
-    let command = AdminRuntimeConfigUpdateRequest { command_id, expected_fingerprint, document };
     let response = send_request(|abort_signal| {
         Request::put(&format!("/api/v1/admin/config?{RUNTIME_CONFIG_QUERY}"))
             .abort_signal(abort_signal)

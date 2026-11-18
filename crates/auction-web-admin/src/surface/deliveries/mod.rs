@@ -14,3 +14,8 @@ mod table;
 
 pub(super) use detail::detail_page;
 pub(super) use page::page;
+
+/// 投递列表、详情、Sent 证明和收件关联投递共用一个实体围栏。
+pub(super) fn delivery_command_entity(delivery_id: &str) -> String {
+    format!("delivery:{delivery_id}")
+}

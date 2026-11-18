@@ -8,7 +8,10 @@ use super::fields::{
 };
 use crate::api::{AdminApiFailure, create_admin_user};
 use crate::surface::AdminActionFeedback;
-use crate::surface::pending::{PendingCommandGate, PendingCommands, set_if_alive};
+use crate::surface::pending::{
+    CommandDelivery, CommandReceipt, PendingCommandGate, PendingCommands, set_if_alive,
+    try_set_if_alive,
+};
 use crate::surface::validation::focus_field;
 
 /// 创建用户表单各字段的校验结果；None 表示该字段当前无错误。
@@ -36,7 +39,7 @@ impl UserFieldErrors {
 
 /// 一次性展示的登录 Key；嵌套派生 Debug 也必须保持脱敏。
 #[derive(Clone, PartialEq)]
-pub(super) struct AdminUserGeneratedKey {
+pub(in crate::surface) struct AdminUserGeneratedKey {
     pub(super) key: String,
 }
 
@@ -46,42 +49,35 @@ impl std::fmt::Debug for AdminUserGeneratedKey {
     }
 }
 
-/// 页级持有一次性 Key，创建弹窗或表格卸载后仍能交付；确认展示后立即清除。
-#[derive(Clone, Copy, PartialEq)]
-pub(super) struct UserKeyDelivery {
-    pub(super) gate: PendingCommandGate,
-    pub(super) generated: Signal<Option<AdminUserGeneratedKey>>,
-}
-
-impl UserKeyDelivery {
-    pub(super) fn deliver(mut self, key: Option<String>) {
-        if let Some(key) = key {
-            self.gate.hold_result();
-            self.generated.set(Some(AdminUserGeneratedKey { key }));
+impl AdminUserGeneratedKey {
+    /// 生成的 Key 保存到会话回执中，直到操作员确认交付。
+    pub(in crate::surface) fn delivery(key: Option<String>, reported: bool) -> CommandDelivery {
+        match key {
+            Some(key) => CommandDelivery::Receipt(Some(CommandReceipt::GeneratedKey(Self { key }))),
+            None => CommandDelivery::reported(reported, || None),
         }
-    }
-
-    pub(super) fn acknowledge(mut self) {
-        self.generated.set(None);
-        self.gate.acknowledge();
     }
 }
 
 fn finish_create(
     username: String,
     generated_key: Option<String>,
-    delivery: UserKeyDelivery,
-    mut open: Signal<bool>,
-    mut notice: Signal<Option<String>>,
-) {
-    delivery.deliver(generated_key);
-    notice.set(Some(username));
-    open.set(false);
+    source_alive: bool,
+    open: Signal<bool>,
+    notice: Signal<Option<String>>,
+) -> CommandDelivery {
+    if source_alive {
+        set_if_alive(open, false);
+    }
+    AdminUserGeneratedKey::delivery(
+        generated_key,
+        source_alive && try_set_if_alive(notice, Some(username)),
+    )
 }
 
 #[component]
 pub(super) fn AdminUserCreateForm(
-    delivery: UserKeyDelivery,
+    gate: PendingCommandGate,
     mut open: Signal<bool>,
     notice: Signal<Option<String>>,
 ) -> Element {
@@ -108,7 +104,7 @@ pub(super) fn AdminUserCreateForm(
                     novalidate: true,
                     onsubmit: move |event| {
                         event.prevent_default();
-                        if pending.contains("create-user") || delivery.gate.blocked() {
+                        if pending.contains("create-user") || gate.blocked() {
                             return;
                         }
                         let username = username();
@@ -126,11 +122,11 @@ pub(super) fn AdminUserCreateForm(
                             return;
                         }
                         feedback.set(None);
-                        // 手动 Key 仅留在页级工厂内存；重试复制原值，不从已清空的输入框重建。
+                        // 手动 Key 仅留在当前会话的工厂内存；重试复制原值，不从已清空的输入框重建。
                         let manual = (key_mode == "manual").then_some(submitted_manual_key);
-                        let submitted = pending.submit(
+                        let submitted = pending.submit_with_receipt(
                             "create-user".to_owned(),
-                            t!("admin-users-create-submit"),
+                            format!("{} · {username}", t!("admin-users-create-open")),
                             move |command_id| {
                                 let username = username.clone();
                                 let forum_account_id = (!forum_account_id.is_empty())
@@ -147,7 +143,7 @@ pub(super) fn AdminUserCreateForm(
                                     .await
                                 }
                             },
-                            move |result| finish_create(result.user.username, result.generated_key, delivery, open, notice),
+                            move |result, source_alive| finish_create(result.user.username, result.generated_key, source_alive, open, notice),
                             move |code| {
                                 let mut field_errors = field_errors;
                                 if code == "user_conflict"
@@ -269,7 +265,7 @@ pub(super) fn AdminUserCreateForm(
                     button {
                         r#type: "submit",
                         class: "admin-btn-primary",
-                        disabled: pending.contains("create-user") || delivery.gate.blocked(),
+                        disabled: pending.contains("create-user") || gate.blocked(),
                         {t!("admin-users-create-submit")}
                     }
                 }
@@ -289,7 +285,7 @@ pub(super) fn AdminUserCreateForm(
 }
 
 #[component]
-pub(super) fn AdminUserGeneratedKeyDialog(
+pub(in crate::surface) fn AdminUserGeneratedKeyDialog(
     generated: AdminUserGeneratedKey,
     on_close: EventHandler<()>,
 ) -> Element {
@@ -317,92 +313,97 @@ pub(super) fn AdminUserGeneratedKeyDialog(
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        cell::{Cell, RefCell},
-        rc::Rc,
-    };
+    use std::cell::Cell;
+    use std::future::ready;
+    use std::rc::Rc;
 
-    use dioxus::dioxus_core::NoOpMutations;
     use dioxus::prelude::*;
 
-    use super::{UserKeyDelivery, finish_create};
-    use crate::surface::pending::use_pending_command_gate;
-
-    #[derive(Default)]
-    struct PageControls {
-        open: Cell<Option<Signal<bool>>>,
-        notice: Cell<Option<Signal<Option<String>>>>,
-        delivery: Cell<Option<UserKeyDelivery>>,
-        dialog_dropped: Cell<bool>,
-        completion: RefCell<Option<Box<dyn FnOnce()>>>,
-    }
+    use super::{AdminUserGeneratedKey, AdminUserGeneratedKeyDialog, finish_create};
+    use crate::api::AdminApiFailure;
+    use crate::surface::auctions::draft_page_tests::{
+        button, click_button, has_live_text, mount_writer,
+    };
+    use crate::surface::pending::{
+        PendingCommandPanel, PendingCommands, use_pending_command_gate,
+        use_pending_commands_with_gate,
+    };
+    use crate::surface::realtime::TestPage;
 
     #[component]
-    fn DialogScope(
-        delivery: UserKeyDelivery,
+    fn CreateDialogFixture(
         open: Signal<bool>,
         notice: Signal<Option<String>>,
+        generate_key: bool,
     ) -> Element {
-        let control = consume_context::<Rc<PageControls>>();
-        let page = control.clone();
-        use_hook(move || {
-            *page.completion.borrow_mut() = Some(Box::new(move || {
-                finish_create("玩家".into(), Some("一次性测试值".into()), delivery, open, notice);
-            }));
-        });
-        use_drop(move || control.dialog_dropped.set(true));
-        rsx! { div {} }
+        let owner = use_context::<PendingCommands>();
+        let attempts = use_hook(|| Rc::new(Cell::new(0)));
+        rsx! {
+            button { onclick: move |_| {
+                let attempts = attempts.clone();
+                assert!(owner.submit_with_receipt(
+                    "create-user".to_owned(), "测试创建玩家".to_owned(),
+                    move |_| {
+                        let prior = attempts.replace(attempts.get() + 1);
+                        ready(if prior == 0 && generate_key {
+                            Err(AdminApiFailure::from_http_body(
+                                503, r#"{"code":"storage_unavailable","message":"暂不可用","data":null,"request_id":null}"#,
+                            ).code)
+                        } else { Ok(generate_key.then(|| "一次性测试值".to_owned())) })
+                    },
+                    move |key, live| finish_create("玩家".to_owned(), key, live, open, notice),
+                    |_| {},
+                ));
+            }, {"创建测试用户".to_owned()} }
+        }
     }
 
-    fn user_page() -> Element {
-        let control = consume_context::<Rc<PageControls>>();
-        let open = use_signal(|| true);
-        let notice = use_signal(|| None);
-        let delivery =
-            UserKeyDelivery { gate: use_pending_command_gate(), generated: use_signal(|| None) };
-        control.open.set(Some(open));
-        control.notice.set(Some(notice));
-        control.delivery.set(Some(delivery));
-        rsx! { if open() { DialogScope { delivery, open, notice } } }
+    fn mount_user_creation(generate_key: bool) -> TestPage {
+        mount_writer(move || {
+            let mut open = use_signal(|| true);
+            let notice = use_signal(|| None);
+            let reload = use_signal(|| 0);
+            let gate = use_pending_command_gate();
+            let owner = use_pending_commands_with_gate(reload, Some(gate), |_| true);
+            rsx! {
+                button { onclick: move |_| open.set(false), {"关闭创建框".to_owned()} }
+                button { disabled: gate.blocked(), onclick: move |_| {}, {"开始下一次".to_owned()} }
+                if open() { CreateDialogFixture { open, notice, generate_key } }
+                if let Some(name) = notice() { p { "{name}" } }
+                PendingCommandPanel { owner }
+                if let Some((command_id, key)) = owner.generated_key() {
+                    AdminUserGeneratedKeyDialog { generated: key, on_close: move |_| owner.acknowledge_key(command_id) }
+                }
+            }
+        }).0
     }
 
     #[test]
     fn successful_retry_delivers_to_the_page_after_the_dialog_unmounts() {
-        let control = Rc::new(PageControls::default());
-        let mut dom = VirtualDom::new(user_page).with_root_context(control.clone());
-        dom.rebuild_in_place();
-        let mut open = control.open.get().unwrap();
-        let notice = control.notice.get().unwrap();
-        let delivery = control.delivery.get().unwrap();
+        let mut page = mount_user_creation(true);
+        click_button(&mut page, "创建测试用户");
+        click_button(&mut page, "关闭创建框");
+        assert!(button(&page, "创建测试用户").is_none());
+        assert!(!has_live_text(&page, "一次性测试值"));
 
-        dom.in_runtime(|| open.set(false));
-        dom.render_immediate(&mut NoOpMutations);
-        assert!(control.dialog_dropped.get());
-        assert!(delivery.generated.peek().is_none());
+        click_button(&mut page, "原样重试");
+        assert!(has_live_text(&page, "玩家"));
+        assert!(has_live_text(&page, "一次性测试值"));
+        assert!(button(&page, "开始下一次").unwrap().1);
+        let key = AdminUserGeneratedKey { key: "一次性测试值".to_owned() };
+        assert!(!format!("{key:?}").contains("一次性测试值"));
 
-        let complete = control.completion.borrow_mut().take().unwrap();
-        dom.in_runtime(complete);
-        assert_eq!(notice.peek().as_deref(), Some("玩家"));
-        assert!(delivery.gate.blocked());
-        assert_eq!(
-            delivery.generated.peek().as_ref().map(|result| result.key.as_str()),
-            Some("一次性测试值")
-        );
-        let debug = format!("{:?}", delivery.generated.peek().as_ref());
-        assert!(!debug.contains("一次性测试值"));
-        dom.in_runtime(|| delivery.acknowledge());
-        assert!(delivery.generated.peek().is_none());
-        assert!(!delivery.gate.blocked());
+        click_button(&mut page, "关闭");
+        assert!(!has_live_text(&page, "一次性测试值"));
+        assert!(!button(&page, "开始下一次").unwrap().1);
     }
 
     #[test]
     fn a_keyless_result_does_not_open_the_key_dialog_or_hold_the_gate() {
-        let control = Rc::new(PageControls::default());
-        let mut dom = VirtualDom::new(user_page).with_root_context(control.clone());
-        dom.rebuild_in_place();
-        let delivery = control.delivery.get().unwrap();
-        dom.in_runtime(|| delivery.deliver(None));
-        assert!(delivery.generated.peek().is_none());
-        assert!(!delivery.gate.blocked());
+        let mut page = mount_user_creation(false);
+        click_button(&mut page, "创建测试用户");
+        assert!(has_live_text(&page, "玩家"));
+        assert!(button(&page, "关闭").is_none());
+        assert!(!button(&page, "开始下一次").unwrap().1);
     }
 }
