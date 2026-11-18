@@ -8,6 +8,8 @@
 use dioxus::dioxus_core::{SpawnIfAsync, SuperFrom};
 use dioxus::prelude::*;
 
+use crate::validation::restore_input_value;
+
 mod size;
 
 use size::PageSizePicker;
@@ -36,8 +38,8 @@ impl<Args: 'static> SuperFrom<EventHandler<Args>, PaginationCallbackHandled>
 /// 展示长列表分页，并把目标页交给调用页面更新 URL 或查询状态。
 /// - `total: Some(total)`：后端返回总数的稳定分页；
 /// - `total: None` + `has_more`：游标语义的兼容投影，可跳转范围限制到当前已知下一页。
-/// 钳制契约（不得改）：渲染期先把 `page` 钳制到合法范围得到 `valid_page`，所有交互从
-/// 钳制后页码出发；页码或总量变化后由纠偏 effect 通知父级把状态与 URL 收敛到合法页。
+/// 导航范围按钳制后的页码计算；页码或总量变化后由 effect 通知父级纠偏。
+/// 调用方提供失败文案时，显示页码以父级已提交结果为准，失败后允许重试。
 #[component]
 pub fn Pager(
     page: i64,
@@ -60,9 +62,15 @@ pub fn Pager(
     jump_label: String,
     jump_button_label: String,
     on_page_change: EventHandler<i64>,
+    /// 由地址驱动的调用方可返回写入结果；缺省调用 `on_page_change`。
+    #[props(default)]
+    on_page_commit: Callback<i64, Option<bool>>,
     /// 非用户操作的页码纠偏。默认回调返回 false，沿用 `on_page_change`；返回 true 表示已纠偏。
     #[props(default)]
     on_page_clamp: Callback<i64, bool>,
+    /// 错误与重试文案。提供时，纠偏被拒后保留已应用页码，并由用户重试。
+    #[props(default)]
+    clamp_failure: Option<(String, String)>,
     /// 非空时启用数字分页与原生数量选择器；选项和文案归调用方。
     #[props(default)]
     page_size_options: Vec<i64>,
@@ -87,6 +95,9 @@ pub fn Pager(
     #[props(default)]
     range_summary: Callback<(i64, i64, i64), String>,
     #[props(default)] on_page_size_change: EventHandler<i64>,
+    /// 由地址驱动的调用方可返回写入结果；缺省调用 `on_page_size_change`。
+    #[props(default)]
+    on_page_size_commit: Callback<i64, Option<bool>>,
 ) -> Element {
     let page_size = page_size.max(1);
     let total_pages = total
@@ -97,16 +108,39 @@ pub fn Pager(
         .max(1)
         .min(max_page.unwrap_or(i64::MAX).max(1));
     let valid_page = page.clamp(1, total_pages);
-    let mut jump_page = use_signal(|| valid_page.to_string());
+    let applied_page = if clamp_failure.is_some() { page.max(1) } else { valid_page };
+    let mut jump_page = use_signal(|| applied_page.to_string());
+    let mut input_element = use_signal(|| None::<MountedEvent>);
+    let mut clamp_rejected = use_signal(|| false);
 
-    use_effect(use_reactive((&valid_page,), move |(valid_page,)| {
-        jump_page.set(valid_page.to_string());
+    use_effect(use_reactive((&applied_page,), move |(applied_page,)| {
+        jump_page.set(applied_page.to_string());
     }));
-    // 普通 props 不会被 effect 自动追踪；总量收缩后也须让父级重新读取有效页。
-    use_effect(use_reactive((&page, &valid_page), move |(page, valid_page)| {
-        if page != valid_page && !on_page_clamp.call(valid_page) {
+    let change_page = use_callback(move |target| {
+        if let Some(written) = on_page_commit.call(target) {
+            if !written {
+                let value = applied_page.to_string();
+                if let Some(element) = input_element.peek().as_ref() {
+                    restore_input_value(element, &value);
+                }
+                jump_page.set(value);
+            }
+        } else {
+            on_page_change.call(target);
+        }
+    });
+    let retry_clamp = clamp_failure.is_some();
+    let correct_page = use_callback(move |(page, valid_page)| {
+        let rejected = page != valid_page && !on_page_clamp.call(valid_page);
+        if retry_clamp {
+            clamp_rejected.set(rejected);
+        } else if rejected {
             on_page_change.call(valid_page);
         }
+    });
+    // 普通 props 不会被 effect 自动追踪；总量收缩后也须让父级重新读取有效页。
+    use_effect(use_reactive((&page, &valid_page), move |(page, valid_page)| {
+        correct_page.call((page, valid_page));
     }));
 
     let jump_target = {
@@ -119,14 +153,16 @@ pub fn Pager(
     };
     let can_jump = jump_target.is_some();
     let numbered = !page_size_options.is_empty();
-    // 范围按钳制后的有效页计算，总数收缩的瞬间不会显示越界序号；空列表固定为 0–0。
-    let item_range = total.filter(|_| numbered && show_range_summary).map(|total_items| {
+    // 总数收缩后仍待提交的页不显示条目序号；空列表固定为 0–0。
+    let item_range = total.filter(|_| numbered && show_range_summary).and_then(|total_items| {
         if total_items <= 0 {
-            (0, 0, 0)
-        } else {
+            Some((0, 0, 0))
+        } else if applied_page == valid_page {
             let start = (valid_page - 1).saturating_mul(page_size).saturating_add(1);
             let end = valid_page.saturating_mul(page_size).min(total_items);
-            (start, end, total_items)
+            Some((start, end, total_items))
+        } else {
+            None
         }
     });
 
@@ -141,7 +177,7 @@ pub fn Pager(
                 button {
                     r#type: "button",
                     disabled: valid_page <= 1,
-                    onclick: move |_| on_page_change.call(valid_page - 1),
+                    onclick: move |_| change_page.call(valid_page - 1),
                     aria_label: previous_label,
                     if numbered {
                         span { aria_hidden: "true", "‹" }
@@ -158,10 +194,10 @@ pub fn Pager(
                                     r#type: "button",
                                     class: "ui-pager__page",
                                     aria_label: status.call((target, total_pages)),
-                                    aria_current: if target == valid_page { "page" } else { "false" },
+                                    aria_current: if target == applied_page { "page" } else { "false" },
                                     onclick: move |_| {
-                                        if target != valid_page {
-                                            on_page_change.call(target);
+                                        if target != applied_page {
+                                            change_page.call(target);
                                         }
                                     },
                                     "{target}"
@@ -175,12 +211,12 @@ pub fn Pager(
                 span {
                     class: if numbered { "ui-pager__sr-only" } else { "ui-pager__status" },
                     aria_live: "polite",
-                    {status.call((valid_page, total_pages))}
+                    {status.call((applied_page, total_pages))}
                 }
                 button {
                     r#type: "button",
                     disabled: valid_page >= total_pages,
-                    onclick: move |_| on_page_change.call(valid_page.saturating_add(1)),
+                    onclick: move |_| change_page.call(valid_page.saturating_add(1)),
                     aria_label: next_label,
                     if numbered {
                         span { aria_hidden: "true", "›" }
@@ -204,7 +240,10 @@ pub fn Pager(
                     custom_label: page_size_custom_label,
                     apply_label: page_size_apply_label,
                     invalid_label: page_size_invalid_label,
-                    on_change: on_page_size_change,
+                    on_change: move |size| on_page_size_commit.call(size).unwrap_or_else(|| {
+                        on_page_size_change.call(size);
+                        true
+                    }),
                 }
             }
             form {
@@ -213,7 +252,7 @@ pub fn Pager(
                 onsubmit: move |event| {
                     event.prevent_default();
                     if let Some(target) = jump_target {
-                        on_page_change.call(target);
+                        change_page.call(target);
                     }
                 },
                 label { class: "ui-pager__label",
@@ -228,11 +267,22 @@ pub fn Pager(
                         inputmode: "numeric",
                         autocomplete: "off",
                         enterkeyhint: "go",
+                        onmounted: move |event| input_element.set(Some(event)),
                         value: jump_page(),
                         oninput: move |event| jump_page.set(event.value()),
                     }
                 }
                 button { r#type: "submit", disabled: !can_jump, "{jump_button_label}" }
+            }
+        }
+        if let Some((message, retry_label)) = clamp_failure {
+            div { class: "ui-pager__error", role: "status", aria_live: "polite",
+                if page != valid_page && clamp_rejected() {
+                    span { "{message}" }
+                    button { r#type: "button", onclick: move |_| correct_page.call((page, valid_page)),
+                        "{retry_label}"
+                    }
+                }
             }
         }
     }
@@ -275,6 +325,7 @@ mod tests {
 
     enum PagerCallback {
         Clamp,
+        ClampRejected,
         SizeLabel,
         Range,
     }
@@ -306,6 +357,13 @@ mod tests {
             (PagerCallback::Clamp, 1..=3) => props
                 .on_page_clamp(move |page| fixture.page_calls.borrow_mut().push((revision, page)))
                 .build(),
+            (PagerCallback::ClampRejected, _) => props
+                .clamp_failure(Some(("页码未写入".to_owned(), "重试".to_owned())))
+                .on_page_clamp(move |page| {
+                    fixture.page_calls.borrow_mut().push((revision, page));
+                    false
+                })
+                .build(),
             (PagerCallback::SizeLabel, 1..=3) => props
                 .page_size_option_label(move |size| format!("{revision}：每页 {size} 条"))
                 .build(),
@@ -335,7 +393,7 @@ mod tests {
             .custom_label("自定义数量".to_owned())
             .apply_label("应用".to_owned())
             .invalid_label("数量无效".to_owned())
-            .on_change(|_| {});
+            .on_change(|_| true);
         let props = if (1..=3).contains(&revision) {
             props.option_label(move |size| format!("{revision}：每页 {size} 条")).build()
         } else {
@@ -378,6 +436,16 @@ mod tests {
             dom.render_immediate_to_vec();
         }
         assert_eq!(&*fixture.page_calls.borrow(), &[(0, 4), (3, 4), (-4, 4)]);
+    }
+
+    #[test]
+    fn failed_total_clamp_keeps_the_applied_page_without_falling_back_to_push() {
+        let (mut dom, fixture, initial) = mount_pager(PagerCallback::ClampRejected);
+        assert!(has_text(&initial, "10/4"));
+        let edits = dom.render_immediate_to_vec();
+        assert!(has_text(&edits, "页码未写入"));
+        assert!(has_text(&edits, "重试"));
+        assert_eq!(&*fixture.page_calls.borrow(), &[(0, 4)]);
     }
 
     #[test]

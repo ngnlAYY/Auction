@@ -6,13 +6,31 @@ use auction_contracts::MAX_PUBLIC_PAGE_SIZE;
 use auction_web_shared::{Pager, QueryWriteMode, t};
 use dioxus::prelude::*;
 
-use super::{PublicBoardQuery, read_public_query, update_public_query_state};
+use super::PublicBoardQuery;
 
+mod bounds;
+mod location;
 mod preferences;
+#[cfg(test)]
+mod test_support;
 
+pub(crate) use bounds::{
+    PageKey, PublicPageClampError, public_page_within_offset, use_public_page_bounds,
+};
+pub(crate) use location::{
+    commit_public_query_pairs, page_pathname, query_values, read_page_pairs, read_page_query,
+    use_page_query, use_public_query_pairs, write_page_pairs,
+};
 #[cfg(any(target_arch = "wasm32", test))]
 pub(crate) use preferences::parse_public_page_size;
 pub(crate) use preferences::stored_public_page_size;
+#[cfg(test)]
+pub(crate) use test_support::{
+    PageBrowserFixture, PageReadFixture, assert_selected_error, dispatch_page_event,
+    page_event_target, page_test_contexts, rendered_event_target, run_page_events, settle_page,
+};
+
+use self::bounds::{MAX_PUBLIC_PAGE_OFFSET, offset_last_page};
 
 pub(crate) const DEFAULT_PAGE_SIZE: i64 = 20;
 pub(crate) const PUBLIC_PAGE_SIZES: [i64; 4] = [10, 20, 50, 100];
@@ -34,14 +52,51 @@ pub(crate) fn normalize_public_page_size(size: i64) -> i64 {
 
 /// 切换数量与回到首页作为一次 URL 更新，保留世界、场次和筛选条件。
 pub(crate) fn update_public_page_size(state: Signal<PublicBoardQuery>, size: i64) {
-    update_public_query_state(
+    set_public_page_size(state, size);
+}
+
+/// 地址确认后同时提交页长与首页；只写分页键，非法筛选仍留在原地址。
+pub(crate) fn set_public_page_size(state: Signal<PublicBoardQuery>, size: i64) -> bool {
+    let keys = if page_pathname() == "/bidlog" {
+        &["page_size", "page", "bidlog_page"][..]
+    } else {
+        &["page_size", "page"][..]
+    };
+    commit_public_query_pairs(
         state,
-        |query| {
-            query.page_size = normalize_public_page_size(size);
-            query.page = 1;
-        },
+        keys,
+        &[("page_size".to_owned(), normalize_public_page_size(size).to_string())],
         QueryWriteMode::Push,
-    );
+    )
+}
+
+fn commit_page_size_choice(
+    freeze: impl FnOnce() -> bool,
+    write: impl FnOnce() -> bool,
+    save: impl FnOnce(),
+) -> bool {
+    // 冻结旧历史项以后才提交新的数量。任何一次拒写都不能改变本地偏好。
+    if !freeze() || !write() {
+        return false;
+    }
+    save();
+    true
+}
+
+fn freeze_page_sizes(applied: &[(String, String)]) -> bool {
+    let previous = read_page_query();
+    let missing: Vec<_> =
+        [("page_size", previous.page_size), ("movement_page_size", previous.movement_page_size)]
+            .into_iter()
+            .filter(|(key, _)| !applied.iter().any(|(name, _)| name == key))
+            .collect();
+    if missing.is_empty() {
+        return true;
+    }
+    let keys: Vec<_> = missing.iter().map(|(key, _)| *key).collect();
+    let pairs: Vec<_> =
+        missing.iter().map(|(key, size)| ((*key).to_owned(), size.to_string())).collect();
+    write_page_pairs(&keys, &pairs, QueryWriteMode::Replace)
 }
 
 /// 资源重读期间不能把旧页总数用于新分页状态的纠偏；可选字段沿用旧 DTO 兼容语义。
@@ -69,7 +124,7 @@ pub(crate) fn PublicPager(
     movement: bool,
     /// 大多数 Public API 的 offset 上限为 10000，黑名单单独注入其既有边界；
     /// `None` 表示该列表按后端总数分页，不受 offset 限制。
-    #[props(default = Some(10_000))]
+    #[props(default = Some(MAX_PUBLIC_PAGE_OFFSET))]
     max_offset: Option<i64>,
     /// 单页时保留挂载但隐藏控件，让总量收缩后的页码与 URL 仍能自动收敛。
     #[props(default)]
@@ -85,11 +140,16 @@ pub(crate) fn PublicPager(
     #[props(default)]
     max_page_size: Option<i64>,
     label: String,
-    on_page_change: EventHandler<i64>,
+    on_page_change: Callback<i64, bool>,
     #[props(default)] on_page_clamp: Callback<i64, bool>,
     #[props(default)] on_page_size_change: EventHandler<i64>,
+    #[props(default)] on_page_size_commit: Callback<i64, Option<bool>>,
+    /// 指定了返回地址写入结果的纠偏回调时启用原地重试。
+    #[props(default)]
+    report_clamp_failure: bool,
 ) -> Element {
     let page_size = page_size.max(1);
+    let pathname = page_pathname();
     let maximum =
         max_page_size.map_or(MAX_PUBLIC_PAGE_SIZE, |limit| limit.min(MAX_PUBLIC_PAGE_SIZE));
     let pager = rsx! {
@@ -98,7 +158,7 @@ pub(crate) fn PublicPager(
             page_size,
             total,
             has_more,
-            max_page: max_offset.map(|max_offset| max_offset / page_size + 1),
+            max_page: max_offset.map(|max_offset| offset_last_page(page_size, max_offset)),
             label,
             previous_label: t!("catalog-previous"),
             status: move |(page, pages)| t!("catalog-page", page: page, pages: pages),
@@ -125,31 +185,33 @@ pub(crate) fn PublicPager(
             page_size_custom_label: t!("pagination-custom"),
             page_size_apply_label: t!("pagination-apply"),
             page_size_invalid_label: t!("pagination-size-limit", maximum: maximum.to_string()),
-            on_page_change,
+            on_page_change: move |page| { on_page_change.call(page); },
+            on_page_commit: move |page| Some(on_page_change.call(page)),
             on_page_clamp: move |page| on_page_clamp.call(page),
-            on_page_size_change: move |size| {
+            clamp_failure: report_clamp_failure.then(|| (t!("pagination-clamp-error"), t!("data-retry"))),
+            on_page_size_commit: move |size| Some({
                 // 共享分页器已拒绝超出上限的数量；这里再守一次，不把它写进地址栏与偏好。
                 if accepted_public_page_size(size).is_none_or(|size| size > maximum) {
-                    return;
+                    return Some(false);
                 }
-                // 先冻结离开条目的数量（含 10），再更新 URL 和偏好；返回时不读到新偏好。
-                // 只替换数量键，不能覆盖出价日志尚在防抖写回的筛选。
-                let previous = read_public_query();
-                auction_web_shared::write_query_pairs(
-                    &["page_size", "movement_page_size"],
-                    &[
-                        ("page_size".to_owned(), previous.page_size.to_string()),
-                        ("movement_page_size".to_owned(), previous.movement_page_size.to_string()),
-                    ],
-                    QueryWriteMode::Replace,
-                );
-                on_page_size_change.call(size);
-                preferences::save_public_page_size(size, movement);
-            },
+                commit_page_size_choice(
+                    || page_pathname() == pathname && freeze_page_sizes(&read_page_pairs()),
+                    || on_page_size_commit.call(size).unwrap_or_else(|| {
+                        let before = read_page_pairs();
+                        on_page_size_change.call(size);
+                        let after = read_page_pairs();
+                        let key = if movement { "movement_page_size" } else { "page_size" };
+                        // 尚未返回写入结果的调用方，须由实际地址确认本次提交。
+                        before != after && after.iter().any(|(name, value)| name == key && *value == size.to_string())
+                    }),
+                    || preferences::save_public_page_size(size, movement),
+                )
+            }),
         }
     };
     if hide_when_single {
-        let single_page = total.is_some_and(|total| total <= page_size);
+        let single_page =
+            (!report_clamp_failure || page <= 1) && total.is_some_and(|total| total <= page_size);
         return rsx! {
             div { hidden: single_page, {pager} }
         };
@@ -165,14 +227,18 @@ mod tests {
     };
 
     use auction_contracts::MAX_PUBLIC_PAGE_SIZE;
+    use auction_web_shared::QueryWriteMode;
     use auction_web_shared::i18n::{DEFAULT_PUBLIC_LOCALE, build_bundle};
+    use dioxus::dioxus_core::{AttributeValue, Mutation};
     use dioxus::prelude::*;
     use dioxus_i18n::prelude::try_use_init_i18n_from_bundle;
 
     use super::{
-        DEFAULT_PAGE_SIZE, PUBLIC_PAGE_SIZES, PublicPager, PublicPagerProps,
-        accepted_public_page_size, normalize_public_page_size, parse_public_page_size,
+        DEFAULT_PAGE_SIZE, PUBLIC_PAGE_SIZES, PageKey, PublicPager, PublicPagerProps,
+        accepted_public_page_size, commit_page_size_choice, normalize_public_page_size,
+        parse_public_page_size, set_public_page_size, use_page_query,
     };
+    use crate::surface::PageBrowserFixture;
     use crate::surface::router::PUBLIC_LOCALE_CATALOG;
 
     #[derive(Default)]
@@ -181,7 +247,7 @@ mod tests {
         calls: RefCell<Vec<(i64, i64)>>,
     }
 
-    fn clamp_fixture() -> Element {
+    fn init_english() {
         try_use_init_i18n_from_bundle(|| {
             build_bundle(
                 &DEFAULT_PUBLIC_LOCALE,
@@ -191,6 +257,10 @@ mod tests {
             )
         })
         .expect("加载公开端英文译文");
+    }
+
+    fn clamp_fixture() -> Element {
+        init_english();
         let fixture = consume_context::<Rc<ClampFixture>>();
         let revision = fixture.revision.get();
         let fallback = fixture.clone();
@@ -226,6 +296,32 @@ mod tests {
         assert_eq!(&*fixture.calls.borrow(), &[(0, 4), (3, 4), (-4, 4)]);
     }
 
+    fn offset_fixture() -> Element {
+        init_english();
+        rsx! {
+            PublicPager {
+                page: 1001, page_size: 10, total: Some(10_020),
+                label: "分页".to_owned(), on_page_change: |_| {},
+            }
+        }
+    }
+
+    #[test]
+    fn numbered_pager_includes_page_1001_but_never_offers_page_1002() {
+        let mut dom = VirtualDom::new(offset_fixture);
+        let initial = dom.rebuild_to_vec();
+        assert!(initial.edits.iter().any(|edit| matches!(
+            edit, Mutation::SetAttribute { name: "max", value: AttributeValue::Text(value), .. }
+                if value == "1001"
+        )));
+        assert!(initial.edits.iter().any(|edit| matches!(
+            edit, Mutation::CreateTextNode { value, .. } if value == "1001"
+        )));
+        assert!(!initial.edits.iter().any(|edit| matches!(
+            edit, Mutation::CreateTextNode { value, .. } if value == "1002"
+        )));
+    }
+
     #[test]
     fn page_size_choices_stop_at_the_contract_maximum() {
         assert_eq!(MAX_PUBLIC_PAGE_SIZE, 200);
@@ -252,5 +348,50 @@ mod tests {
         for value in ["", "0", "+20", "-20", "20.0", "2e1", " 20", "20 "] {
             assert_eq!(parse_public_page_size(value), None, "{value}");
         }
+    }
+
+    #[test]
+    fn preference_follows_address_commit_and_a_failed_freeze_blocks_the_push() {
+        let preference = Cell::new(20);
+        let attempts = Cell::new(0);
+        for (freeze, push, saved, attempt_count) in
+            [(false, false, 20, 0), (true, false, 20, 1), (true, true, 50, 2)]
+        {
+            assert_eq!(
+                commit_page_size_choice(
+                    || freeze,
+                    || {
+                        attempts.set(attempts.get() + 1);
+                        push
+                    },
+                    || preference.set(50)
+                ),
+                push
+            );
+            assert_eq!(preference.get(), saved);
+            assert_eq!(attempts.get(), attempt_count);
+        }
+    }
+
+    #[test]
+    fn accepted_page_size_and_page_push_both_reach_the_live_query_signal() {
+        fn mounted_query() -> Element {
+            use_page_query();
+            rsx! {}
+        }
+
+        let browser = PageBrowserFixture::new("/bidlog", "bidlog_page=2&lot=One12");
+        let mut dom = VirtualDom::new(mounted_query).with_root_context(browser.clone());
+        dom.rebuild_in_place();
+        dom.in_scope(ScopeId::APP, || {
+            let state = browser.signal();
+            assert!(set_public_page_size(state, 50));
+            assert_eq!(browser.state().page_size, 50);
+            assert_eq!(browser.state().page, 1);
+            assert!(!browser.state().bid_log_page_alias);
+            assert!(PageKey::BidLog.write(state, "/bidlog", 3, QueryWriteMode::Push));
+            assert_eq!(browser.state().page, 3);
+            assert_eq!(browser.state().bid_log_lot.as_deref(), Some("One12"));
+        });
     }
 }

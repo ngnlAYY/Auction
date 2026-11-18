@@ -1,5 +1,7 @@
 //! Public 每页数量的本地偏好；只存展示数量，URL 明确值优先且不会因访问链接覆盖偏好。
 
+#[cfg(test)]
+use super::test_support::PageBrowserFixture;
 use super::{DEFAULT_PAGE_SIZE, accepted_public_page_size};
 
 #[cfg(target_arch = "wasm32")]
@@ -37,6 +39,11 @@ pub(crate) fn stored_public_page_size(movement: bool) -> i64 {
 /// 只在用户主动确认合法数量后保存；写入失败不影响本次分页和 URL。
 pub(super) fn save_public_page_size(size: i64, movement: bool) {
     if accepted_public_page_size(size).is_none() {
+        return;
+    }
+    #[cfg(test)]
+    if let Some(browser) = dioxus::prelude::try_consume_context::<PageBrowserFixture>() {
+        browser.save_size(size, movement);
         return;
     }
     #[cfg(target_arch = "wasm32")]

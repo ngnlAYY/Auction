@@ -14,15 +14,22 @@ use crate::surface::{
 pub(super) fn CompensationLotDetails(
     round: CompensationRound,
     lots: Option<Result<Option<CompensationLotPage>, String>>,
-    on_lot_page_change: EventHandler<i64>,
-    on_lot_page_clamp: EventHandler<i64>,
-    on_lot_page_size_change: EventHandler<i64>,
+    lot_clamp_failed: bool,
+    on_lot_page_change: Callback<i64, bool>,
+    on_lot_page_clamp: Callback<i64, bool>,
+    on_lot_page_size_change: Callback<i64, bool>,
     on_retry_lots: EventHandler<()>,
 ) -> Element {
-    use_content_loading(lots.is_none());
+    use_content_loading(lots.is_none() && !lot_clamp_failed);
     rsx! {
         section { class: "public-compensation-movements", aria_label: t!("compensation-lots"),
             match lots {
+                None if lot_clamp_failed => rsx! {
+                    div { class: "ui-pager__error", role: "status",
+                        span { {t!("pagination-clamp-error")} }
+                        button { r#type: "button", onclick: move |_| on_retry_lots.call(()), {t!("data-retry")} }
+                    }
+                },
                 None => rsx! {},
                 Some(Err(_)) => rsx! {
                     div { role: "alert",
@@ -87,7 +94,8 @@ pub(super) fn CompensationLotDetails(
                             movement: true,
                             on_page_change: on_lot_page_change,
                             on_page_clamp: on_lot_page_clamp,
-                            on_page_size_change: on_lot_page_size_change,
+                            on_page_size_commit: move |size| Some(on_lot_page_size_change.call(size)),
+                            report_clamp_failure: true,
                         }
                     }
                 }

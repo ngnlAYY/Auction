@@ -44,6 +44,7 @@ auction-history-no-previous = 没有上一轮已结算拍卖
 auction-history-world = 世界
 auction-history-world-all = 全部世界
 auction-history-status = 状态
+auction-history-status-invalid = 请选择有效的拍卖状态。
 auction-history-status-settled = 已结算
 auction-history-status-final = 最终阶段
 auction-history-status-live = 进行中

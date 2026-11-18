@@ -1,6 +1,7 @@
 //! Public 只读历史页面的职责分组。
 
 mod bid_log;
+mod directory;
 mod fulfillment;
 mod history;
 mod lot_filter;

@@ -44,6 +44,7 @@ auction-history-no-previous = 前回の終了済みオークションはあり�
 auction-history-world = ワールド
 auction-history-world-all = すべてのワールド
 auction-history-status = 状態
+auction-history-status-invalid = 有効なオークションの状態を選択してください。
 auction-history-status-settled = 清算済み
 auction-history-status-final = 最終段階
 auction-history-status-live = 開催中

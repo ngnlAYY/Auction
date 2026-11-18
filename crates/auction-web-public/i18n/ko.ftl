@@ -44,6 +44,7 @@ auction-history-no-previous = 이전 종료 경매가 없습니다
 auction-history-world = 월드
 auction-history-world-all = 모든 월드
 auction-history-status = 상태
+auction-history-status-invalid = 올바른 경매 상태를 선택하세요.
 auction-history-status-settled = 정산 완료
 auction-history-status-final = 최종 단계
 auction-history-status-live = 진행 중

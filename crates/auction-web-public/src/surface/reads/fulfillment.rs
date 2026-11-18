@@ -5,29 +5,34 @@
 //! 次数只在服务端给出时显示。世界/场次选择、目录门禁与请求身份绑定沿用竞价日志页。重读失败时
 //! 缓存层回退的旧快照会连同其确认时刻一起提示，不把旧状态当作当前结果静默显示。
 
+use auction_web_shared::validation::restore_select_value;
 use auction_web_shared::{QueryWriteMode, TruncatedText, format_credit_amount, t};
 use dioxus::prelude::*;
 
-use super::lot_filter::{use_lot_filter_draft, valid_lot_filter};
-use super::query::{ReadSelection, commit_read_query, update_read_query};
+use super::directory::{RoundOptionsError, RoundPage, use_round_directory};
+use super::lot_filter::use_lot_filter_draft;
+use super::query::{ReadSelection, use_round_body};
 use crate::api::{
     FulfillmentLot, FulfillmentPage, FulfillmentRead, MAX_FULFILLMENT_PAGE_SIZE,
-    fetch_fulfillment_auctions, fetch_fulfillment_page, fetch_worlds, lot_code_for,
+    fetch_fulfillment_page, fetch_worlds, lot_code_for,
 };
 use crate::surface::{
     LotDetailLookupButton, LotDetailLookupHost, PublicPager, format_auction_time,
-    normalize_public_page_size, public_page_matches, refresh_public_reads, supported_worlds,
-    use_content_loading, use_lot_detail_lookup, use_public_query_state, world_label,
+    public_page_matches, refresh_public_reads, supported_worlds, use_content_loading,
+    use_lot_detail_lookup, use_page_query, world_label,
+};
+use crate::surface::{
+    PageKey, PublicPageClampError, page_pathname, set_public_page_size, use_public_page_bounds,
 };
 
 /// lot 筛选格式提示的元素 ID，供输入框 `aria-describedby` 引用。
 const LOT_FILTER_ERROR_ID: &str = "public-fulfillment-filter-error";
 
 pub(crate) fn fulfillment() -> Element {
+    let pathname = RoundPage::Fulfillment.pathname();
     let refresh_generation = use_context::<Signal<u64>>();
     // 世界/场次/页码/lot 筛选与地址栏双向同步，键与竞价日志共用。
-    let query_state = use_public_query_state();
-    let query_state_signal = query_state.state;
+    let query_state_signal = use_page_query();
     let world_filter = use_memo(move || {
         query_state_signal
             .read()
@@ -36,121 +41,66 @@ pub(crate) fn fulfillment() -> Element {
             .filter(|world| matches!(world.as_str(), "main" | "isekai"))
             .unwrap_or_else(|| "main".to_owned())
     });
-    let selected_auction_id =
-        use_memo(move || query_state_signal.read().auction_id.clone().unwrap_or_default());
     let page_number = use_memo(move || query_state_signal.read().page);
     // 接口每页最多 100 件；共享偏好或地址栏里更大的数量按上限请求，分页器显示实际数量。
     let page_size =
         use_memo(move || query_state_signal.read().page_size.min(MAX_FULFILLMENT_PAGE_SIZE));
-    let lot_filter =
-        use_memo(move || query_state_signal.read().bid_log_lot.clone().unwrap_or_default());
-    let lot_draft = use_lot_filter_draft(query_state_signal, "/fulfillment");
+    let bounds = use_public_page_bounds(query_state_signal, pathname, |query| {
+        // 缺省场次的地址纠偏会同时回到第一页。
+        query
+            .auction_id
+            .as_ref()
+            .map(|_| (PageKey::Page, query.page_size.min(MAX_FULFILLMENT_PAGE_SIZE)))
+    });
+    let lot_draft = use_lot_filter_draft(query_state_signal, pathname);
+
     let worlds = use_resource(fetch_worlds);
-    let world_options = match &*worlds.read_unchecked() {
+    let selected_world = world_filter();
+    let mut world_options = match &*worlds.read_unchecked() {
         Some(Ok(worlds)) => supported_worlds(worlds),
-        _ => vec![world_filter()],
+        _ => vec![selected_world.clone()],
     };
-    // 外壳轮询与人工刷新先重读已结算目录；进度请求随后只消费本轮确认的场次。
-    let auctions = use_resource(move || {
-        let generation = refresh_generation();
-        let world = world_filter();
-        async move {
-            let result = fetch_fulfillment_auctions(world.clone()).await;
-            ((world, generation), result)
-        }
-    });
-
-    // 保留仍在本世界目录里的选择；所选场次不在目录时纠偏到最近一场。
-    use_effect(move || {
-        let Some(((world, generation), Ok(auction_list))) = &*auctions.read_unchecked() else {
-            return;
-        };
-        // 后台刷新保留旧目录用于展示，但它不能纠偏新世界或新代际的选择。
-        if world != &world_filter() || *generation != refresh_generation() {
-            return;
-        }
-        let selected = selected_auction_id();
-        let next_auction_id = auction_list
-            .iter()
-            .find(|auction| auction.id == selected)
-            .or_else(|| auction_list.first())
-            .map(|auction| auction.id.clone())
-            .unwrap_or_default();
-        if selected != next_auction_id {
-            update_read_query(
-                query_state_signal,
-                |query| {
-                    query.auction_id =
-                        (!next_auction_id.is_empty()).then_some(next_auction_id.clone());
-                    query.page = 1;
-                },
-                QueryWriteMode::Replace,
-            );
-        }
-    });
-
-    let progress = use_resource(move || {
-        let auction_id = selected_auction_id();
-        let page = page_number();
-        let page_size = page_size();
-        let world = world_filter();
-        let lot = lot_filter().trim().to_owned();
-        // 地址栏带入的非法筛选不发请求：服务端只会回 400，格式提示由输入框承担。
-        let lot_valid = valid_lot_filter(&lot);
-        let lot = (!lot.is_empty()).then_some(lot);
-        let requested = (auction_id.clone(), world.clone(), lot.clone(), page, page_size);
-        // 不直接订阅全局刷新：目录未就绪、失败或已不含该场时不发 GET。
-        let readable = auctions.read_unchecked().as_ref().is_some_and(
-            |((loaded_world, generation), result)| {
-                loaded_world == &world
-                    && *generation == *refresh_generation.peek()
-                    && result
-                        .as_ref()
-                        .is_ok_and(|rows| rows.iter().any(|auction| auction.id == auction_id))
-            },
-        ) && lot_valid;
-        async move {
-            let result = if readable {
-                fetch_fulfillment_page(auction_id, world, lot, page, page_size).await.map(Some)
-            } else {
-                Ok(None)
-            };
-            (requested, result)
-        }
-    });
-    let auction_snapshot = auctions.read_unchecked();
-    let current_auctions = auction_snapshot
-        .as_ref()
-        .filter(|((world, _), _)| world == &world_filter())
-        .map(|(_, result)| result);
-    let auction_options = match current_auctions {
-        Some(Ok(auction_list)) => auction_list.as_slice(),
-        _ => &[],
-    };
-    let selected = selected_auction_id();
-    let selected_auction = auction_options.iter().find(|auction| auction.id == selected);
+    if !world_options.contains(&selected_world) {
+        world_options.push(selected_world.clone());
+    }
+    let directory = use_round_directory(
+        RoundPage::Fulfillment,
+        query_state_signal,
+        world_filter,
+        refresh_generation,
+    );
+    let (data, _) = use_round_body(
+        directory,
+        move || lot_draft.requested_lot().ok(),
+        page_number,
+        page_size,
+        fetch_fulfillment_page,
+    );
     let lookup = use_lot_detail_lookup();
     let current_page = page_number();
-    let current_lot_filter = lot_filter();
+    let current_lot_filter = lot_draft.applied_value();
     let draft_value = lot_draft.value();
-    let draft_invalid = !valid_lot_filter(draft_value.trim());
-    let progress_state = progress.read_unchecked();
-    // 同查询后台刷新保留完成快照；目录确认场次已不可见后，迟到结果也不能恢复旧行和分页。
-    let current_result = progress_state
+    let filter_error = lot_draft.error(|| t!("fulfillment-filter-invalid"));
+    let selected_auction = directory.selected();
+    let selected = selected_auction.as_ref().map_or_else(String::new, |auction| auction.id.clone());
+    let auction_options = directory.options();
+    let applied_lot = lot_draft.requested_lot();
+    let data_snapshot = data.read_unchecked();
+    let current_result = data_snapshot
         .as_ref()
         .filter(|((auction_id, world, lot, page, size), _)| {
-            selected_auction.is_some()
-                && auction_id == &selected_auction_id()
-                && world == &world_filter()
-                && lot.as_deref().unwrap_or_default() == current_lot_filter.trim()
+            selected_auction
+                .as_ref()
+                .is_some_and(|auction| &auction.id == auction_id && &auction.world_id == world)
+                && applied_lot.as_ref().is_ok_and(|applied| applied == lot)
                 && *page == current_page
                 && *size == page_size()
         })
         .map(|(_, result)| result);
-    // 目录或当前查询还没有结果时由顶栏提示加载，正文留空。
     let mut loading = false;
-    let body = match (current_auctions, current_result) {
-        (Some(Err(_)), _) | (Some(Ok(_)), Some(Err(_))) => rsx! {
+    let body = match current_result {
+        _ if bounds.failed(PageKey::Page) => rsx! { PublicPageClampError { bounds } },
+        _ if directory.failed() || matches!(current_result, Some(Err(_error))) => rsx! {
             div { class: "public-auction-empty", role: "alert",
                 p { class: "public-auction-empty__title", {t!("data-error")} }
                 button {
@@ -162,14 +112,14 @@ pub(crate) fn fulfillment() -> Element {
                 }
             }
         },
-        (Some(Ok(auction_list)), _) if auction_list.is_empty() => rsx! {
+        _ if directory.empty() => rsx! {
             div { class: "public-auction-empty", role: "status",
                 p { class: "public-auction-empty__title", {t!("fulfillment-empty-auctions")} }
             }
         },
-        // 已应用的筛选非法（来自地址栏）时没有发出请求：正文留空且不提示加载。
-        (Some(Ok(_)), _) if !valid_lot_filter(current_lot_filter.trim()) => rsx! {},
-        (Some(Ok(_)), Some(Ok(Some(FulfillmentRead { page, stale_since }))))
+        // 非法筛选与拒写后的未选场次均可在控件处修正，不进入加载态。
+        _ if applied_lot.is_err() || directory.correction_failed() => rsx! {},
+        Some(Ok(FulfillmentRead { page, stale_since }))
             if public_page_matches(page.page, page.page_size, current_page, page_size()) =>
         {
             rsx! {
@@ -178,24 +128,9 @@ pub(crate) fn fulfillment() -> Element {
                     page: page.clone(),
                     current_page,
                     lot_filter: current_lot_filter.clone(),
-                    on_page_change: move |next_page: i64| {
-                        // 从当前状态提交：仍在防抖中的筛选草稿不随翻页提交。
-                        let mut next = query_state_signal.peek().clone();
-                        next.page = next_page;
-                        commit_read_query(query_state_signal, next, QueryWriteMode::Push);
-                    },
-                    on_page_clamp: move |next_page: i64| {
-                        // 纠偏无历史记录写回，不建立可返回的无效页条目。
-                        let mut next = query_state_signal.peek().clone();
-                        next.page = next_page;
-                        commit_read_query(query_state_signal, next, QueryWriteMode::Replace);
-                    },
-                    on_page_size_change: move |size| {
-                        let mut next = query_state_signal.peek().clone();
-                        next.page_size = normalize_public_page_size(size);
-                        next.page = 1;
-                        commit_read_query(query_state_signal, next, QueryWriteMode::Push);
-                    },
+                    on_page_change: move |page| PageKey::Page.write(query_state_signal, pathname, page, QueryWriteMode::Push),
+                    on_page_clamp: move |page| PageKey::Page.write(query_state_signal, pathname, page, QueryWriteMode::Replace),
+                    on_page_size_change: move |size| page_pathname() == pathname && set_public_page_size(query_state_signal, size),
                 }
             }
         }
@@ -215,9 +150,13 @@ pub(crate) fn fulfillment() -> Element {
                         id: "public-fulfillment-world",
                         name: "world",
                         autocomplete: "off",
-                        value: world_filter(),
+                        value: selected_world.clone(),
                         disabled: world_options.is_empty(),
-                        onchange: move |event| ReadSelection::World(event.value()).select(query_state_signal),
+                        onchange: move |event| {
+                            if !ReadSelection::World(event.value()).select(query_state_signal, pathname) {
+                                restore_select_value(&event, &selected_world);
+                            }
+                        },
                         for world in &world_options {
                             option { value: world.clone(), {world_label(world)} }
                         }
@@ -229,20 +168,33 @@ pub(crate) fn fulfillment() -> Element {
                         id: "public-fulfillment-round",
                         name: "auction",
                         autocomplete: "off",
-                        value: selected,
+                        value: selected.clone(),
                         disabled: auction_options.is_empty(),
-                        onchange: move |event| ReadSelection::Auction(event.value()).select(query_state_signal),
-                        for auction in auction_options {
+                        onfocus: move |_| directory.load_options(),
+                        onchange: move |event| {
+                            let id = event.value();
+                            if !directory.selectable(&id) || !ReadSelection::Auction(id).select(query_state_signal, pathname) {
+                                let applied = directory.selected().map_or_else(String::new, |round| round.id);
+                                restore_select_value(&event, &applied);
+                            }
+                        },
+                        option { value: "", disabled: true, selected: selected.is_empty(),
+                            {t!("round-select-placeholder")}
+                        }
+                        for auction in auction_options.iter() {
                             option {
-                                value: auction.id.clone(),
+                                value: auction.id.clone(), selected: auction.id == selected,
                                 {t!("fulfillment-round-option", number: auction.sequence)}
                             }
                         }
                     }
                 }
             }
+            if directory.options_failed() && selected_auction.is_some() {
+                RoundOptionsError { on_retry: move |_| refresh_public_reads(refresh_generation) }
+            }
             div { class: "public-fulfillment__heading",
-                if let Some(auction) = selected_auction {
+                if let Some(ref auction) = selected_auction {
                     div { class: "public-fulfillment__round",
                         strong { class: "public-fulfillment__round-number",
                             {t!("fulfillment-round-number", number: auction.sequence)}
@@ -269,26 +221,23 @@ pub(crate) fn fulfillment() -> Element {
                         spellcheck: "false",
                         value: draft_value,
                         placeholder: t!("fulfillment-filter-placeholder"),
-                        aria_invalid: draft_invalid.to_string(),
-                        aria_describedby: draft_invalid.then_some(LOT_FILTER_ERROR_ID),
+                        aria_invalid: filter_error.is_some().to_string(),
+                        aria_describedby: filter_error.as_ref().map(|_| LOT_FILTER_ERROR_ID),
                         oninput: move |event| lot_draft.edit(event.value()),
+                        onblur: move |_| lot_draft.blur(),
                     }
-                    if !draft_value.is_empty() || !current_lot_filter.is_empty() {
+                    if !draft_value.is_empty() || !current_lot_filter.is_empty() || applied_lot.is_err() {
                         button {
                             r#type: "button",
                             onclick: move |_| lot_draft.clear(),
                             {t!("fulfillment-filter-clear")}
                         }
                     }
-                    if draft_invalid {
-                        p {
-                            id: LOT_FILTER_ERROR_ID,
-                            class: "public-fulfillment__toolbar-error",
-                            // 逐字输入 UUID 时每次按键都会判定；用礼貌播报，不打断输入。
-                            role: "status",
-                            aria_live: "polite",
-                            {t!("fulfillment-filter-invalid")}
-                        }
+                    if let Some(ref error) = filter_error {
+                        p { id: LOT_FILTER_ERROR_ID, class: "public-fulfillment__toolbar-error", "{error}" }
+                    }
+                    span { class: "ui-pager__sr-only", aria_live: "polite", aria_atomic: "true",
+                        if let Some(ref error) = filter_error { "{error}" }
                     }
                 }
             }
@@ -324,9 +273,9 @@ fn FulfillmentTable(
     page: FulfillmentPage,
     current_page: i64,
     lot_filter: String,
-    on_page_change: EventHandler<i64>,
-    on_page_clamp: EventHandler<i64>,
-    on_page_size_change: EventHandler<i64>,
+    on_page_change: Callback<i64, bool>,
+    on_page_clamp: Callback<i64, bool>,
+    on_page_size_change: Callback<i64, bool>,
 ) -> Element {
     let auction_id = page.auction.id.clone();
     let world = page.auction.world.clone();
@@ -381,7 +330,8 @@ fn FulfillmentTable(
                 label: t!("page-fulfillment-title"),
                 on_page_change,
                 on_page_clamp,
-                on_page_size_change,
+                on_page_size_commit: move |size| Some(on_page_size_change.call(size)),
+                report_clamp_failure: true,
             }
         }
     }

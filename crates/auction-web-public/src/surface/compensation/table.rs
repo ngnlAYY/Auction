@@ -13,13 +13,14 @@ pub(super) fn CompensationPoolTable(
     page: CompensationPoolPage,
     selected_auction_id: String,
     lots: Option<Result<Option<CompensationLotPage>, String>>,
-    on_page_change: EventHandler<i64>,
-    on_page_clamp: EventHandler<i64>,
-    on_page_size_change: EventHandler<i64>,
+    lot_clamp_failed: bool,
+    on_page_change: Callback<i64, bool>,
+    on_page_clamp: Callback<i64, bool>,
+    on_page_size_change: Callback<i64, bool>,
     on_select_round: EventHandler<String>,
-    on_lot_page_change: EventHandler<i64>,
-    on_lot_page_clamp: EventHandler<i64>,
-    on_lot_page_size_change: EventHandler<i64>,
+    on_lot_page_change: Callback<i64, bool>,
+    on_lot_page_clamp: Callback<i64, bool>,
+    on_lot_page_size_change: Callback<i64, bool>,
     on_retry_lots: EventHandler<()>,
 ) -> Element {
     let page_size = page.page_size.max(1);
@@ -85,6 +86,7 @@ pub(super) fn CompensationPoolTable(
                                             open,
                                             show_reversal,
                                             lots,
+                                            lot_clamp_failed,
                                             on_select_round,
                                             on_lot_page_change,
                                             on_lot_page_clamp,
@@ -106,7 +108,8 @@ pub(super) fn CompensationPoolTable(
                 label: t!("page-compensation-pool-title"),
                 on_page_change,
                 on_page_clamp,
-                on_page_size_change,
+                on_page_size_commit: move |size| Some(on_page_size_change.call(size)),
+                report_clamp_failure: true,
             }
         }
     }
@@ -118,10 +121,11 @@ fn CompensationRoundRow(
     open: bool,
     show_reversal: bool,
     lots: Option<Result<Option<CompensationLotPage>, String>>,
+    lot_clamp_failed: bool,
     on_select_round: EventHandler<String>,
-    on_lot_page_change: EventHandler<i64>,
-    on_lot_page_clamp: EventHandler<i64>,
-    on_lot_page_size_change: EventHandler<i64>,
+    on_lot_page_change: Callback<i64, bool>,
+    on_lot_page_clamp: Callback<i64, bool>,
+    on_lot_page_size_change: Callback<i64, bool>,
     on_retry_lots: EventHandler<()>,
 ) -> Element {
     let details_id = format!("compensation-details-{}", round.auction_id);
@@ -186,6 +190,7 @@ fn CompensationRoundRow(
                     CompensationLotDetails {
                         round: round.clone(),
                         lots,
+                        lot_clamp_failed,
                         on_lot_page_change,
                         on_lot_page_clamp,
                         on_lot_page_size_change,

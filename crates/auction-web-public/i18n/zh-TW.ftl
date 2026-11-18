@@ -44,6 +44,7 @@ auction-history-no-previous = 沒有上一輪已結算拍賣
 auction-history-world = 世界
 auction-history-world-all = 全部世界
 auction-history-status = 狀態
+auction-history-status-invalid = 請選擇有效的拍賣狀態。
 auction-history-status-settled = 已結算
 auction-history-status-final = 最終階段
 auction-history-status-live = 進行中

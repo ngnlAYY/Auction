@@ -2,8 +2,10 @@
 
 use auction_web_shared::t;
 
-use super::super::{history_date_parts, history_days_in_month, history_is_valid_date};
-use super::{HistoryDateError, HistoryFilterError, HistoryPriceError, HistoryPriceUnit};
+use super::model::{HistoryDateError, HistoryFilterError, HistoryPriceError, HistoryPriceUnit};
+use crate::surface::reads::history::values::{
+    history_date_parts, history_days_in_month, history_is_valid_date,
+};
 
 /// 名称查询的词数上限，与 HTTP 层的 `MAX_PUBLIC_HISTORY_NAME_TERMS` 一致。
 const MAX_NAME_TERMS: usize = 8;
@@ -16,10 +18,10 @@ fn name_terms(value: &str) -> impl Iterator<Item = &str> {
 
 /// 名称字段复用 HTTP 的空白/逗号拆词和应用端口字节边界；缩写片段均须命中装备名。
 pub(crate) fn history_name_value(value: &str) -> Result<Option<String>, HistoryFilterError> {
-    let value = value.trim();
     if value.len() > 1_024 {
         return Err(HistoryFilterError::NameTooLong);
     }
+    let value = value.trim();
     let mut term_count = 0;
     let mut term_too_long = false;
     let mut invalid = false;
@@ -61,50 +63,34 @@ pub(crate) fn history_equipment_name_query(equipment_name: &str) -> Option<Strin
     history_name_value(&query).ok().flatten()
 }
 
-/// 将名称字段的稳定错误分类转换为本 surface 的文案。
-pub(crate) fn history_name_error(error: Option<HistoryFilterError>) -> Option<String> {
-    match error? {
-        HistoryFilterError::NameTooManyTerms => Some(t!("history-filter-error-name-terms")),
-        HistoryFilterError::NameTermTooLong => Some(t!("history-filter-error-name-term-length")),
-        HistoryFilterError::NameTooLong => Some(t!("history-filter-error-name-length")),
-        HistoryFilterError::NameInvalid => Some(t!("history-filter-error-name-invalid")),
-        _ => None,
-    }
-}
-
-/// 将页面错误分类转换为对应的本地化日期错误。
-pub(crate) fn history_date_error(error: Option<HistoryFilterError>, from: bool) -> Option<String> {
-    match (error?, from) {
-        (HistoryFilterError::FromDateIncomplete, true)
-        | (HistoryFilterError::ToDateIncomplete, false) => {
-            Some(t!("history-filter-error-date-incomplete"))
+/// 提交、失焦与深链恢复使用同一份字段提示。
+pub(super) fn history_error_message(error: HistoryFilterError) -> String {
+    match error {
+        HistoryFilterError::Duplicate => t!("filter-error-duplicate"),
+        HistoryFilterError::WorldInvalid => t!("history-filter-error-world"),
+        HistoryFilterError::PlayerLength => t!("history-filter-error-player-length"),
+        HistoryFilterError::PlayerInvalid => t!("history-filter-error-player-invalid"),
+        HistoryFilterError::NameTooManyTerms => t!("history-filter-error-name-terms"),
+        HistoryFilterError::NameTermTooLong => t!("history-filter-error-name-term-length"),
+        HistoryFilterError::NameTooLong => t!("history-filter-error-name-length"),
+        HistoryFilterError::NameInvalid => t!("history-filter-error-name-invalid"),
+        HistoryFilterError::FromDateIncomplete | HistoryFilterError::ToDateIncomplete => {
+            t!("history-filter-error-date-incomplete")
         }
-        (HistoryFilterError::FromDateInvalid, true)
-        | (HistoryFilterError::ToDateInvalid, false) => {
-            Some(t!("history-filter-error-date-invalid"))
+        HistoryFilterError::FromDateInvalid | HistoryFilterError::ToDateInvalid => {
+            t!("history-filter-error-date-invalid")
         }
-        (HistoryFilterError::DateRange, true) => Some(t!("history-filter-error-date-range")),
-        _ => None,
-    }
-}
-
-/// 将页面错误分类转换为对应的本地化金额错误。
-pub(crate) fn history_price_error(
-    error: Option<HistoryFilterError>,
-    minimum: bool,
-) -> Option<String> {
-    match (error?, minimum) {
-        (HistoryFilterError::MinimumPriceC, true) | (HistoryFilterError::MaximumPriceC, false) => {
-            Some(t!("history-filter-error-price-c"))
+        HistoryFilterError::DateRange => t!("history-filter-error-date-range"),
+        HistoryFilterError::MinimumPriceC | HistoryFilterError::MaximumPriceC => {
+            t!("history-filter-error-price-c")
         }
-        (HistoryFilterError::MinimumPriceK, true) | (HistoryFilterError::MaximumPriceK, false) => {
-            Some(t!("history-filter-error-price-k"))
+        HistoryFilterError::MinimumPriceK | HistoryFilterError::MaximumPriceK => {
+            t!("history-filter-error-price-k")
         }
-        (HistoryFilterError::MinimumPriceM, true) | (HistoryFilterError::MaximumPriceM, false) => {
-            Some(t!("history-filter-error-price-m"))
+        HistoryFilterError::MinimumPriceM | HistoryFilterError::MaximumPriceM => {
+            t!("history-filter-error-price-m")
         }
-        (HistoryFilterError::PriceRange, true) => Some(t!("history-filter-error-price-range")),
-        _ => None,
+        HistoryFilterError::PriceRange => t!("history-filter-error-price-range"),
     }
 }
 

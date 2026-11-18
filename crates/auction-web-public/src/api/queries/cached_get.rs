@@ -8,6 +8,8 @@ use gloo_net::http::Response;
 use super::super::clock::send_get_conditional;
 use super::super::swr_cache::{self, CacheRead, FetchOutcome};
 use super::super::{TransportError, decoder};
+#[cfg(test)]
+use crate::surface::PageReadFixture;
 
 /// 条件 GET 的响应分类；304 只在确实发送了 `If-None-Match` 时成立。
 pub(super) enum ConditionalResponse {
@@ -82,6 +84,10 @@ where
     D: FnOnce(Response) -> Fut,
     Fut: Future<Output = Result<T, String>>,
 {
+    #[cfg(test)]
+    if let Some(result) = PageReadFixture::<String, Result<T, String>>::response(url.to_owned()) {
+        return result.map(|value| CacheRead { value, stale_fallback: None });
+    }
     let request_url = url.to_owned();
     swr_cache::read_or_fetch(url, ttl_millis, swr_cache::now_millis, move |etag| async move {
         match conditional_get(&request_url, etag.as_deref()).await {

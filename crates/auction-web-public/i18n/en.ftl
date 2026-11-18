@@ -45,6 +45,7 @@ auction-history-no-previous = No previous settled round
 auction-history-world = World
 auction-history-world-all = All worlds
 auction-history-status = Status
+auction-history-status-invalid = Select a valid auction status.
 auction-history-status-settled = Settled
 auction-history-status-final = Final phase
 auction-history-status-live = Live

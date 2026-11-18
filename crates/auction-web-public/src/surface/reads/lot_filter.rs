@@ -2,14 +2,16 @@
 
 use std::future::Future;
 
-use auction_web_shared::QueryWriteMode;
 use auction_web_shared::timer::TimeoutFuture;
+use auction_web_shared::validation::escaped_single_line_input;
+use auction_web_shared::{QueryWriteMode, t};
 use dioxus::prelude::*;
 use uuid::Uuid;
 
 use super::query::commit_read_query_with;
 use crate::surface::{
-    PublicBoardQuery, current_public_pathname, read_public_query, write_public_query,
+    PublicBoardQuery, page_pathname, query_values, read_page_pairs, read_page_query,
+    use_public_query_pairs, write_page_pairs,
 };
 
 /// 连续输入停顿后才应用筛选，合并读取请求。
@@ -33,29 +35,62 @@ pub(super) fn valid_lot_filter(value: &str) -> bool {
 struct LotFilterLocation {
     world: &'static str,
     auction_id: Option<String>,
-    lot: String,
+    lots: Vec<String>,
 }
 
 impl LotFilterLocation {
-    fn from_query(query: &PublicBoardQuery) -> Self {
+    fn new(query: &PublicBoardQuery, lots: Vec<String>) -> Self {
         Self {
             world: if query.world.as_deref() == Some("isekai") { "isekai" } else { "main" },
             auction_id: query.auction_id.clone(),
-            lot: query.bid_log_lot.clone().unwrap_or_default(),
+            lots,
         }
     }
 
-    fn matches_query(&self, query: &PublicBoardQuery) -> bool {
-        *self == Self::from_query(query)
+    #[cfg(test)]
+    fn from_query(query: &PublicBoardQuery) -> Self {
+        Self::new(query, query.bid_log_lot.iter().cloned().collect())
     }
+
+    fn value(&self) -> &str {
+        self.lots.first().map_or("", String::as_str)
+    }
+
+    fn requested_lot(&self) -> Result<Option<String>, LotFilterError> {
+        match self.lots.as_slice() {
+            [] => Ok(None),
+            [raw] if !raw.trim().is_empty() && valid_lot_draft(raw) => {
+                Ok(Some(raw.trim().to_owned()))
+            }
+            [_] => Err(LotFilterError::Invalid),
+            _ => Err(LotFilterError::Duplicate),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum LotFilterError {
+    Invalid,
+    Duplicate,
+}
+
+fn lot_values(pairs: &[(String, String)]) -> Vec<String> {
+    query_values(pairs, "lot").map(str::to_owned).collect()
+}
+
+fn valid_lot_draft(value: &str) -> bool {
+    !value.chars().any(char::is_control) && valid_lot_filter(value.trim())
 }
 
 /// 出价记录与履约进度共用的拍品筛选草稿和延时写入状态。
 #[derive(Clone, Copy)]
 pub(super) struct LotFilterDraft {
     query: Signal<PublicBoardQuery>,
+    applied: Memo<LotFilterLocation>,
     value: Signal<String>,
     generation: Signal<u64>,
+    edited: Signal<bool>,
+    blurred: Signal<bool>,
     pathname: &'static str,
 }
 
@@ -65,13 +100,57 @@ impl LotFilterDraft {
         (self.value)()
     }
 
+    pub(super) fn applied_value(self) -> String {
+        self.applied.read().value().to_owned()
+    }
+
+    pub(super) fn requested_lot(self) -> Result<Option<String>, LotFilterError> {
+        self.applied.read().requested_lot()
+    }
+
+    pub(super) fn error(self, invalid_message: impl FnOnce() -> String) -> Option<String> {
+        let error = if (self.edited)() {
+            ((self.blurred)() && !valid_lot_draft(&self.value())).then_some(LotFilterError::Invalid)
+        } else {
+            self.requested_lot().err()
+        }?;
+        Some(match error {
+            LotFilterError::Duplicate => {
+                let values = self
+                    .applied
+                    .read()
+                    .lots
+                    .iter()
+                    .map(|value| format!("{value:?}"))
+                    .collect::<Vec<_>>()
+                    .join(" / ");
+                format!("{} {values}", t!("filter-error-duplicate"))
+            }
+            LotFilterError::Invalid => {
+                let message = invalid_message();
+                if let Some(value) = escaped_single_line_input(&self.value()) {
+                    format!("{message} {value}")
+                } else {
+                    message
+                }
+            }
+        })
+    }
+
+    pub(super) fn blur(mut self) {
+        self.blurred.set(true);
+    }
+
     /// 合法草稿等待输入停顿后再应用，非法草稿仅供字段提示。
     pub(super) fn edit(self, value: String) {
         if let Some(edit) = self.delayed_edit(
             value,
             || TimeoutFuture::new(LOT_FILTER_WRITE_DEBOUNCE_MILLIS),
-            |pathname| (current_public_pathname() == pathname).then(read_public_query),
-            write_public_query,
+            |pathname| {
+                (page_pathname() == pathname)
+                    .then(|| (read_page_query(), lot_values(&read_page_pairs())))
+            },
+            move |next, mode| write_lot_filter(next, self.pathname, mode),
         ) {
             spawn(edit);
         }
@@ -81,56 +160,71 @@ impl LotFilterDraft {
         mut self,
         value: String,
         delay: impl FnOnce() -> F + 'static,
-        read_query: impl FnOnce(&str) -> Option<PublicBoardQuery> + 'static,
+        read_query: impl FnOnce(&str) -> Option<(PublicBoardQuery, Vec<String>)> + 'static,
         write_query: impl FnOnce(&PublicBoardQuery, QueryWriteMode) -> bool + 'static,
     ) -> Option<impl Future<Output = ()> + 'static> {
         let lot = value.trim().to_owned();
+        let valid = valid_lot_draft(&value);
         let generation = self.reset(value);
-        if !valid_lot_filter(&lot) {
+        self.edited.set(true);
+        if !valid {
             return None;
         }
-        let origin = LotFilterLocation::from_query(&self.query.peek());
+        let origin = self.applied.peek().clone();
         Some(async move {
             delay().await;
             if *self.generation.peek() != generation {
                 return;
             }
-            let Some(current) = read_query(self.pathname) else {
+            let Some((current, lots)) = read_query(self.pathname) else {
                 return;
             };
-            // 导航可能先于草稿同步 effect。只允许原世界、场次和已应用筛选的任务改写当前地址。
-            if origin.matches_query(&current) && origin.matches_query(&self.query.peek()) {
-                apply_lot_filter(self.query, current, lot, write_query);
+            // 导航可能先于草稿同步。旧计时器不能覆盖另一个世界、场次或筛选原文。
+            let matches_applied = origin == *self.applied.peek();
+            if matches_applied
+                && origin == LotFilterLocation::new(&current, lots.clone())
+                && !apply_lot_filter(self.query, current, &lots, lot, write_query)
+            {
+                self.restore(origin.value().to_owned());
             }
         })
     }
 
     /// 清除立即应用，并作废此前排队的输入。
     pub(super) fn clear(self) {
-        self.clear_with(read_public_query(), write_public_query);
+        if page_pathname() == self.pathname {
+            self.clear_with(
+                read_page_query(),
+                &lot_values(&read_page_pairs()),
+                move |next, mode| write_lot_filter(next, self.pathname, mode),
+            );
+        }
     }
 
     fn clear_with(
         mut self,
         current: PublicBoardQuery,
+        lots: &[String],
         write_query: impl FnOnce(&PublicBoardQuery, QueryWriteMode) -> bool,
     ) {
-        // 清除取代先前排队的输入。地址拒绝时保留草稿，供再次编辑或清除。
-        self.advance_generation();
-        if apply_lot_filter(self.query, current, String::new(), write_query) {
-            self.value.set(String::new());
-        }
+        let written = apply_lot_filter(self.query, current, lots, String::new(), write_query);
+        self.restore(if written {
+            String::new()
+        } else {
+            lots.first().cloned().unwrap_or_default()
+        });
+    }
+
+    fn restore(&mut self, value: String) {
+        self.reset(value);
+        self.edited.set(false);
     }
 
     fn reset(&mut self, value: String) -> u64 {
-        let generation = self.advance_generation();
-        self.value.set(value);
-        generation
-    }
-
-    fn advance_generation(&mut self) -> u64 {
         let generation = self.generation.peek().wrapping_add(1);
         self.generation.set(generation);
+        self.value.set(value);
+        self.blurred.set(false);
         generation
     }
 }
@@ -140,12 +234,26 @@ pub(super) fn use_lot_filter_draft(
     query: Signal<PublicBoardQuery>,
     pathname: &'static str,
 ) -> LotFilterDraft {
-    let applied = use_memo(move || LotFilterLocation::from_query(&query.read()));
+    let pairs = use_public_query_pairs(query);
+    use_lot_filter_state(query, pathname, move |query| {
+        LotFilterLocation::new(query, lot_values(&pairs.read()))
+    })
+}
+
+fn use_lot_filter_state(
+    query: Signal<PublicBoardQuery>,
+    pathname: &'static str,
+    locate: impl Fn(&PublicBoardQuery) -> LotFilterLocation + 'static,
+) -> LotFilterDraft {
+    let applied = use_memo(move || locate(&query.read()));
     let mut previous = use_signal(|| applied.peek().clone());
     let mut draft = LotFilterDraft {
         query,
-        value: use_signal(|| applied.peek().lot.clone()),
+        applied,
+        value: use_signal(|| applied.peek().value().to_owned()),
         generation: use_signal(|| 0_u64),
+        edited: use_signal(|| false),
+        blurred: use_signal(|| false),
         pathname,
     };
     use_effect(move || {
@@ -156,31 +264,43 @@ pub(super) fn use_lot_filter_draft(
         }
         let moved = prior.world != current.world || prior.auction_id != current.auction_id;
         drop(prior);
-        // 所属世界或场次变化时，即使 lot 文本相同也要作废旧代次。
-        if moved || draft.value.peek().trim() != current.lot {
-            draft.reset(current.lot.clone());
+        // 场次变化会作废旧草稿。显式非法或重复的链接也必须站在原地址上提示。
+        let should_restore = moved
+            || current.requested_lot().is_err()
+            || draft.value.peek().trim() != current.value();
+        if should_restore {
+            draft.restore(current.value().to_owned());
         }
         previous.set(current);
     });
     draft
 }
 
+fn write_lot_filter(query: &PublicBoardQuery, pathname: &str, mode: QueryWriteMode) -> bool {
+    let pairs =
+        query.bid_log_lot.iter().map(|lot| ("lot".to_owned(), lot.clone())).collect::<Vec<_>>();
+    let keys: &[&str] =
+        if pathname == "/bidlog" { &["lot", "page", "bidlog_page"] } else { &["lot", "page"] };
+    write_page_pairs(keys, &pairs, mode)
+}
+
 /// 确认按现有值或成功写入的地址应用筛选。
 fn apply_lot_filter(
     query_state: Signal<PublicBoardQuery>,
     mut next: PublicBoardQuery,
+    applied: &[String],
     lot: String,
     write_query: impl FnOnce(&PublicBoardQuery, QueryWriteMode) -> bool,
 ) -> bool {
     let lot = (!lot.is_empty()).then_some(lot);
-    if next.bid_log_lot == lot {
+    if applied.iter().eq(lot.iter()) {
         return true;
     }
     next.bid_log_lot = lot;
     next.page = 1;
+    next.bid_log_page_alias = false;
     commit_read_query_with(query_state, next, QueryWriteMode::Replace, write_query)
 }
-
 #[cfg(test)]
 mod tests {
     use std::cell::{Cell, RefCell};
@@ -194,8 +314,8 @@ mod tests {
     use dioxus::prelude::*;
 
     use super::{
-        LOT_FILTER_WRITE_DEBOUNCE_MILLIS, LotFilterDraft, LotFilterLocation, use_lot_filter_draft,
-        valid_lot_filter,
+        LOT_FILTER_WRITE_DEBOUNCE_MILLIS, LotFilterDraft, LotFilterError, LotFilterLocation,
+        use_lot_filter_state, valid_lot_filter,
     };
     use crate::surface::PublicBoardQuery;
     use crate::surface::reads::query::ReadSelection;
@@ -213,7 +333,7 @@ mod tests {
             page: 4,
             ..PublicBoardQuery::default()
         });
-        let draft = use_lot_filter_draft(query, "/bidlog");
+        let draft = use_lot_filter_state(query, "/bidlog", LotFilterLocation::from_query);
         let control = consume_context::<Rc<LotDraftControl>>();
         control.query.set(Some(query));
         control.draft.set(Some(draft));
@@ -311,7 +431,9 @@ mod tests {
                 delay,
                 move |path| {
                     assert_eq!(path, "/bidlog");
-                    Some(reader.query.borrow().clone())
+                    let current = reader.query.borrow().clone();
+                    let values = LotFilterLocation::from_query(&current).lots;
+                    Some((current, values))
                 },
                 move |next, mode| writer.write(next, mode),
             )
@@ -383,7 +505,13 @@ mod tests {
         assert_eq!(&*query.peek(), &*history.query.borrow());
 
         let address = history.query.borrow().clone();
-        dom.in_runtime(|| draft.clear_with(address, |next, mode| history.write(next, mode)));
+        dom.in_runtime(|| {
+            draft.clear_with(
+                address.clone(),
+                &LotFilterLocation::from_query(&address).lots,
+                |next, mode| history.write(next, mode),
+            );
+        });
         assert_eq!(history.write_attempts.get(), 3);
         assert!(query.peek().bid_log_lot.is_none());
         assert_eq!(query.peek().auction_id, initial.auction_id);
@@ -422,12 +550,12 @@ mod tests {
         assert_eq!(history.write_attempts.get(), 1);
         assert_eq!(&*history.query.borrow(), &initial);
         assert_eq!(&*query.peek(), &initial);
-        assert_eq!(draft.value.peek().as_str(), "One12");
+        assert!(draft.value.peek().is_empty());
 
         history.accepts_write.set(true);
-        submit_input(&dom, draft, "One3", &history);
+        submit_input(&dom, draft, "One12", &history);
         assert_eq!(history.write_attempts.get(), 2);
-        assert_eq!(query.peek().bid_log_lot.as_deref(), Some("One3"));
+        assert_eq!(query.peek().bid_log_lot.as_deref(), Some("One12"));
         assert_eq!(query.peek().page, 1);
         assert_eq!(&*query.peek(), &*history.query.borrow());
     }
@@ -438,10 +566,16 @@ mod tests {
         let initial = query.peek().clone();
         let history = History::new(initial.clone(), false);
         submit_input(&dom, draft, "One12", &history);
-        assert_eq!(draft.value.peek().as_str(), "One12");
+        assert!(draft.value.peek().is_empty());
 
         let current = history.query.borrow().clone();
-        dom.in_runtime(|| draft.clear_with(current, |next, mode| history.write(next, mode)));
+        dom.in_runtime(|| {
+            draft.clear_with(
+                current.clone(),
+                &LotFilterLocation::from_query(&current).lots,
+                |next, mode| history.write(next, mode),
+            );
+        });
 
         assert_eq!(history.write_attempts.get(), 1);
         assert_eq!(&*query.peek(), &initial);
@@ -459,7 +593,13 @@ mod tests {
 
         history.accepts_write.set(false);
         let current = history.query.borrow().clone();
-        dom.in_runtime(|| draft.clear_with(current, |next, mode| history.write(next, mode)));
+        dom.in_runtime(|| {
+            draft.clear_with(
+                current.clone(),
+                &LotFilterLocation::from_query(&current).lots,
+                |next, mode| history.write(next, mode),
+            );
+        });
         assert_eq!(history.write_attempts.get(), 2);
         assert_eq!(&*query.peek(), &initial);
         assert_eq!(&*history.query.borrow(), &initial);
@@ -468,11 +608,17 @@ mod tests {
         submit_input(&dom, draft, "", &history);
         assert_eq!(history.write_attempts.get(), 3);
         assert_eq!(&*query.peek(), &initial);
-        assert!(draft.value.peek().is_empty());
+        assert_eq!(draft.value.peek().as_str(), "One12");
 
         history.accepts_write.set(true);
         let current = history.query.borrow().clone();
-        dom.in_runtime(|| draft.clear_with(current, |next, mode| history.write(next, mode)));
+        dom.in_runtime(|| {
+            draft.clear_with(
+                current.clone(),
+                &LotFilterLocation::from_query(&current).lots,
+                |next, mode| history.write(next, mode),
+            );
+        });
         assert_eq!(history.write_attempts.get(), 4);
         assert!(query.peek().bid_log_lot.is_none());
         assert_eq!(&*query.peek(), &*history.query.borrow());
@@ -516,29 +662,48 @@ mod tests {
 
     #[test]
     fn delayed_lot_write_checks_the_applied_query_even_before_the_draft_syncs() {
+        let matches_query = |origin: &LotFilterLocation, query: &PublicBoardQuery| {
+            *origin == LotFilterLocation::from_query(query)
+        };
         let initial = PublicBoardQuery {
             auction_id: Some("first-round".to_owned()),
             ..PublicBoardQuery::default()
         };
         let origin = LotFilterLocation::from_query(&initial);
-        assert!(origin.matches_query(&PublicBoardQuery {
-            world: Some("main".to_owned()),
-            page: 2,
-            ..initial.clone()
-        }));
-        assert!(!origin.matches_query(&PublicBoardQuery {
-            world: Some("isekai".to_owned()),
-            ..initial.clone()
-        }));
-        assert!(!origin.matches_query(&PublicBoardQuery {
-            auction_id: Some("second-round".to_owned()),
-            ..initial.clone()
-        }));
-        assert!(
-            !origin.matches_query(&PublicBoardQuery {
-                bid_log_lot: Some("One3".to_owned()),
-                ..initial
-            })
+        assert!(matches_query(
+            &origin,
+            &PublicBoardQuery { world: Some("main".to_owned()), page: 2, ..initial.clone() }
+        ));
+        assert!(!matches_query(
+            &origin,
+            &PublicBoardQuery { world: Some("isekai".to_owned()), ..initial.clone() }
+        ));
+        assert!(!matches_query(
+            &origin,
+            &PublicBoardQuery { auction_id: Some("second-round".to_owned()), ..initial.clone() }
+        ));
+        assert!(!matches_query(
+            &origin,
+            &PublicBoardQuery { bid_log_lot: Some("One3".to_owned()), ..initial }
+        ));
+    }
+
+    #[test]
+    fn duplicate_empty_and_invalid_link_filters_block_reads_until_replaced() {
+        let query = PublicBoardQuery::default();
+        let duplicates = vec!["One12".to_owned(), "Sta1".to_owned()];
+        let duplicate = LotFilterLocation::new(&query, duplicates.clone());
+        assert_eq!(duplicate.lots, duplicates);
+        assert_eq!(duplicate.requested_lot(), Err(LotFilterError::Duplicate));
+        for value in ["", " ", "One-12", "One12\n"] {
+            let invalid = LotFilterLocation::new(&query, vec![value.to_owned()]);
+            assert_eq!(invalid.value(), value);
+            assert_eq!(invalid.requested_lot(), Err(LotFilterError::Invalid));
+        }
+        assert_eq!(LotFilterLocation::new(&query, Vec::new()).requested_lot(), Ok(None));
+        assert_eq!(
+            LotFilterLocation::new(&query, vec!["Sta1".to_owned()]).requested_lot(),
+            Ok(Some("Sta1".to_owned()))
         );
     }
 

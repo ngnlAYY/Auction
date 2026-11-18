@@ -2,7 +2,10 @@
 //! 回调属性须为非可选类型，避免更新时拷入会随临时 VNode 释放的句柄
 //! （Dioxus 0.7.10 的 `dioxus-core-macro/src/props/mod.rs:694–715` 与 `dioxus-core/src/events.rs:555–556`）。
 
+use dioxus::dioxus_core::needs_update;
 use dioxus::prelude::*;
+
+use crate::validation::restore_input_value;
 
 /// 数量文案与可选上限由 surface 注入；显式启用才显示自定义输入。
 #[component]
@@ -16,7 +19,7 @@ pub(super) fn PageSizePicker(
     custom_label: String,
     apply_label: String,
     invalid_label: String,
-    on_change: EventHandler<i64>,
+    on_change: Callback<i64, bool>,
 ) -> Element {
     let mut input = use_signal(|| page_size.to_string());
     let mut touched = use_signal(|| false);
@@ -29,10 +32,7 @@ pub(super) fn PageSizePicker(
 
     // 不用浮点转换或 type=number：科学计数法、符号、空白和小数都不能成为数量。
     let value = input();
-    let target = (!value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()))
-        .then(|| value.parse::<i64>().ok())
-        .flatten()
-        .filter(|size| *size > 0 && max_page_size.is_none_or(|maximum| *size <= maximum));
+    let target = parse_size(&value, max_page_size);
     let invalid = touched() && target.is_none();
     let custom_selected = !options.contains(&page_size);
     let allowed_sizes = options.clone();
@@ -47,14 +47,11 @@ pub(super) fn PageSizePicker(
                 value: page_size.to_string(),
                 onchange: move |event| {
                     let value = event.value();
-                    if !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit())
-                        && let Ok(size) = value.parse::<i64>()
-                        && size > 0
-                        && max_page_size.is_none_or(|maximum| size <= maximum)
-                        && allowed_sizes.contains(&size)
-                    {
-                        on_change.call(size);
-                    }
+                    let size = parse_size(&value, max_page_size)
+                        .filter(|size| allowed_sizes.contains(size));
+                    // 原生 change 已改变选项；拒写后重绘 volatile value，把已应用数量写回同一控件。
+                    apply_size_selection(size, page_size, |size| on_change.call(size),
+                        |_| needs_update());
                 },
                 for size in options {
                     option {
@@ -80,7 +77,14 @@ pub(super) fn PageSizePicker(
                     event.prevent_default();
                     touched.set(true);
                     if let Some(size) = target {
-                        on_change.call(size);
+                        if !on_change.call(size) {
+                            let applied = page_size.to_string();
+                            if let Some(element) = input_element.peek().as_ref() {
+                                restore_input_value(element, &applied);
+                            }
+                            input.set(applied);
+                            touched.set(false);
+                        }
                     } else if let Some(input) = input_element() {
                         spawn(async move {
                             let _ = input.set_focus(true).await;
@@ -114,5 +118,49 @@ pub(super) fn PageSizePicker(
                 }
             }
         }
+    }
+}
+
+fn parse_size(value: &str, maximum: Option<i64>) -> Option<i64> {
+    (!value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()))
+        .then(|| value.parse::<i64>().ok())
+        .flatten()
+        .filter(|size| *size > 0 && maximum.is_none_or(|maximum| *size <= maximum))
+}
+
+fn apply_size_selection(
+    size: Option<i64>,
+    applied: i64,
+    commit: impl FnOnce(i64) -> bool,
+    restore: impl FnOnce(i64),
+) {
+    if size.is_some_and(|size| !commit(size)) {
+        restore(applied);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+
+    use super::{apply_size_selection, parse_size};
+
+    #[test]
+    fn native_selection_restores_applied_size_when_the_commit_is_rejected() {
+        let value = Cell::new(50);
+        for accepted in [false, true] {
+            value.set(50);
+            apply_size_selection(
+                parse_size("50", Some(100)),
+                20,
+                |size| {
+                    assert_eq!(size, 50);
+                    accepted
+                },
+                |size| value.set(size),
+            );
+            assert_eq!(value.get(), if accepted { 50 } else { 20 });
+        }
+        assert_eq!(parse_size("201", Some(200)), None);
     }
 }

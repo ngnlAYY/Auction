@@ -2,6 +2,7 @@
 
 use std::future::Future;
 
+use auction_web_shared::validation::restore_select_value;
 use auction_web_shared::{
     AsyncState, AsyncStateKind, QueryWriteMode, Time, format_credit_amount, t,
 };
@@ -11,24 +12,28 @@ use crate::api::{AuctionListPage, fetch_worlds};
 use crate::api::{HistoricalAuctionWithForum, fetch_auction_history_page};
 use crate::surface::loading::use_content_loading;
 use crate::surface::{
-    PublicPager, auction_status_class, historical_auction_status_label, historical_bid_log_href,
-    historical_fulfillment_href, historical_lots_href, public_page_matches, supported_worlds,
-    update_public_page_size, update_public_query_state, use_public_query_state, world_label,
+    PageKey, PublicPageClampError, PublicPager, auction_status_class, commit_public_query_pairs,
+    historical_auction_status_label, historical_bid_log_href, historical_fulfillment_href,
+    historical_lots_href, page_pathname, public_page_matches, public_page_within_offset,
+    query_values, set_public_page_size, supported_worlds, use_page_query, use_public_page_bounds,
+    use_public_query_pairs, world_label,
 };
 
 #[component]
 pub(crate) fn AuctionList() -> Element {
     // 世界/状态/页码与地址栏双向同步。
-    let query_state = use_public_query_state();
-    let query_state_signal = query_state.state;
+    let query_state_signal = use_page_query();
+    let pairs = use_public_query_pairs(query_state_signal);
     let world_filter = use_memo(move || {
-        query_state_signal.read().world.clone().unwrap_or_else(|| "all".to_owned())
+        ListFilter::read(&pairs.read(), "world", "all", &["all", "main", "isekai"])
     });
     let status_filter = use_memo(move || {
-        let status = query_state_signal.read().status.clone();
-        status
-            .filter(|status| matches!(status.as_str(), "live" | "final" | "settled"))
-            .unwrap_or_else(|| "settled".to_owned())
+        ListFilter::read(&pairs.read(), "status", "settled", &["settled", "final", "live"])
+    });
+    let filters_valid =
+        use_memo(move || world_filter.read().valid() && status_filter.read().valid());
+    let bounds = use_public_page_bounds(query_state_signal, AUCTIONS_PATH, |query| {
+        [(PageKey::Page, query.page_size)]
     });
     let page_number = use_memo(move || query_state_signal.read().page.max(1));
     let page_size = use_memo(move || query_state_signal.read().page_size);
@@ -38,43 +43,57 @@ pub(crate) fn AuctionList() -> Element {
         Some(Ok(worlds)) => supported_worlds(worlds),
         _ => vec!["main".to_owned(), "isekai".to_owned()],
     };
-    let selected_world = world_filter();
+    let selected_world = world_filter.read().value().to_owned();
+    let selected_status = status_filter.read().value().to_owned();
+    let world_invalid = !world_filter.read().valid();
+    let status_invalid = !status_filter.read().valid();
     // 历史深链的世界即使已从当前目录移除，也必须在筛选器中保留真实值。
-    if selected_world != "all" && !world_options.contains(&selected_world) {
+    if !world_filter.read().unknown()
+        && selected_world != "all"
+        && !world_options.contains(&selected_world)
+    {
         world_options.push(selected_world.clone());
     }
     let auctions = use_auction_list_read(refresh_generation, move || {
-        let world = world_filter();
-        let status = status_filter();
+        let world = world_filter.read().value().to_owned();
+        let status = status_filter.read().value().to_owned();
         let page = page_number();
         let size = page_size();
+        let readable = filters_valid() && public_page_within_offset(page, size);
         let requested = (world.clone(), status.clone(), page, size);
         let world = (world != "all").then_some(world);
         async move {
+            if !readable {
+                return None;
+            }
             let result = fetch_auction_history_page(world, status, page, size).await;
-            (requested, result)
+            Some((requested, result))
         }
     });
     let auction_state = auctions.read_unchecked();
     // 查询变化时旧快照不能参与列表展示或页码纠偏，同查询后台刷新仍保留旧值。
     let current_result = auction_state
         .as_ref()
+        .and_then(Option::as_ref)
         .filter(|((world, status, page, size), _)| {
-            world == &world_filter()
-                && status == &status_filter()
+            filters_valid()
+                && world == world_filter.read().value()
+                && status == status_filter.read().value()
                 && *page == page_number()
                 && *size == page_size()
         })
         .map(|(_, result)| result);
     // 没有当前查询的结果（含等待页码纠偏后的重读）时由顶栏提示加载，正文留空。
+    let clamp_failed = bounds.failed(PageKey::Page);
     use_content_loading(match current_result {
-        None => true,
+        None => filters_valid() && !clamp_failed,
         Some(Ok(page)) => {
             !public_page_matches(page.page, page.page_size, page_number(), page_size())
         }
         Some(Err(_)) => false,
     });
     let content = match current_result {
+        _ if clamp_failed => rsx! { PublicPageClampError { bounds } },
         None => rsx! {},
         Some(Err(_)) => rsx! {
             AsyncState {
@@ -96,21 +115,10 @@ pub(crate) fn AuctionList() -> Element {
             AuctionHistoryPage {
                 page: page.clone(),
                 page_number: page_number(),
-                on_page_size_change: move |size| update_public_page_size(query_state_signal, size),
-                on_page_change: move |page| {
-                    update_public_query_state(
-                        query_state_signal,
-                        |query| query.page = page,
-                        QueryWriteMode::Push,
-                    );
-                },
-                on_page_clamp: move |page| {
-                    update_public_query_state(
-                        query_state_signal,
-                        |query| query.page = page,
-                        QueryWriteMode::Replace,
-                    );
-                },
+                on_page_size_change: move |size| page_pathname() == AUCTIONS_PATH
+                    && set_public_page_size(query_state_signal, size),
+                on_page_change: move |page| PageKey::Page.write(query_state_signal, AUCTIONS_PATH, page, QueryWriteMode::Push),
+                on_page_clamp: move |page| PageKey::Page.write(query_state_signal, AUCTIONS_PATH, page, QueryWriteMode::Replace),
             }
         },
     };
@@ -122,49 +130,114 @@ pub(crate) fn AuctionList() -> Element {
                     {t!("auction-history-world")}
                     select {
                         name: "world",
-                        value: selected_world,
+                        value: selected_world.clone(),
+                        aria_invalid: world_invalid.to_string(),
+                        aria_describedby: world_invalid.then_some("public-auction-rounds-world-error"),
                         onchange: move |event| {
-                            let world = event.value();
-                            update_public_query_state(
-                                query_state_signal,
-                                |query| {
-                                    query.world = (world != "all").then_some(world.clone());
-                                    query.auction_id = None;
-                                    query.category = None;
-                                    query.page = 1;
-                                },
-                                QueryWriteMode::Push,
-                            );
+                            let value = event.value();
+                            let pairs = (value != "all").then(|| ("world".to_owned(), value))
+                                .into_iter().collect::<Vec<_>>();
+                            if page_pathname() != AUCTIONS_PATH || !commit_public_query_pairs(
+                                query_state_signal, &["world", "auction", "type", "page"], &pairs, QueryWriteMode::Push,
+                            ) {
+                                restore_select_value(&event, &selected_world);
+                            }
                         },
+                        if world_filter.read().unknown() {
+                            option { value: world_filter.read().value().to_owned(), disabled: true, selected: true,
+                                {world_filter.read().value().to_owned()}
+                            }
+                        }
                         option { value: "all", {t!("auction-history-world-all")} }
                         for world in world_options {
                             option { value: world, {world_label(&world)} }
                         }
                     }
                 }
+                if world_invalid {
+                    p { id: "public-auction-rounds-world-error", class: "public-history-field-error", role: "status",
+                        {world_filter.read().message(t!("history-filter-error-world"))}
+                    }
+                }
                 label {
                     {t!("auction-history-status")}
                     select {
                         name: "status",
-                        value: status_filter(),
+                        value: selected_status.clone(),
+                        aria_invalid: status_invalid.to_string(),
+                        aria_describedby: status_invalid.then_some("public-auction-rounds-status-error"),
                         onchange: move |event| {
-                            let status = event.value();
-                            update_public_query_state(
-                                query_state_signal,
-                                |query| {
-                                    query.status = Some(status);
-                                    query.page = 1;
-                                },
-                                QueryWriteMode::Push,
-                            );
+                            if page_pathname() != AUCTIONS_PATH || !commit_public_query_pairs(
+                                query_state_signal, &["status", "page"], &[("status".to_owned(), event.value())], QueryWriteMode::Push,
+                            ) {
+                                restore_select_value(&event, &selected_status);
+                            }
                         },
+                        if status_filter.read().unknown() {
+                            option { value: status_filter.read().value().to_owned(), disabled: true, selected: true,
+                                {status_filter.read().value().to_owned()}
+                            }
+                        }
                         option { value: "settled", {t!("auction-history-status-settled")} }
                         option { value: "final", {t!("auction-history-status-final")} }
                         option { value: "live", {t!("auction-history-status-live")} }
                     }
                 }
+                if status_invalid {
+                    p { id: "public-auction-rounds-status-error", class: "public-history-field-error", role: "status",
+                        {status_filter.read().message(t!("auction-history-status-invalid"))}
+                    }
+                }
             }
             {content}
+        }
+    }
+}
+
+const AUCTIONS_PATH: &str = "/auctions";
+
+#[derive(Clone, PartialEq)]
+struct ListFilter {
+    raw: Vec<String>,
+    default: &'static str,
+    unknown: bool,
+}
+
+impl ListFilter {
+    fn read(
+        pairs: &[(String, String)],
+        key: &str,
+        default: &'static str,
+        allowed: &[&str],
+    ) -> Self {
+        let raw: Vec<_> = query_values(pairs, key).map(str::to_owned).collect();
+        let unknown = raw
+            .first()
+            .is_some_and(|value| !value.is_empty() && !allowed.contains(&value.as_str()));
+        Self { raw, default, unknown }
+    }
+
+    fn value(&self) -> &str {
+        self.raw.first().filter(|value| !value.is_empty()).map_or(self.default, String::as_str)
+    }
+
+    fn valid(&self) -> bool {
+        !self.unknown && self.raw.len() <= 1
+    }
+
+    fn unknown(&self) -> bool {
+        self.unknown
+    }
+
+    fn message(&self, invalid: String) -> String {
+        if self.raw.len() > 1 {
+            let values =
+                self.raw.iter().map(|value| format!("{value:?}")).collect::<Vec<_>>().join(" / ");
+            format!("{} {values}", t!("filter-error-duplicate"))
+        } else if self.unknown {
+            format!("{invalid} {:?}", self.value())
+        } else {
+            invalid
         }
     }
 }
@@ -186,9 +259,9 @@ fn use_auction_list_read<F: Future + 'static>(
 pub(crate) fn AuctionHistoryPage(
     page: AuctionListPage<HistoricalAuctionWithForum>,
     page_number: i64,
-    on_page_change: EventHandler<i64>,
-    on_page_clamp: EventHandler<i64>,
-    on_page_size_change: EventHandler<i64>,
+    on_page_change: Callback<i64, bool>,
+    on_page_clamp: Callback<i64, bool>,
+    on_page_size_change: Callback<i64, bool>,
 ) -> Element {
     let page_size = page.page_size.max(1);
     rsx! {
@@ -209,7 +282,8 @@ pub(crate) fn AuctionHistoryPage(
                 label: t!("page-auctions-title"),
                 on_page_change,
                 on_page_clamp,
-                on_page_size_change,
+                on_page_size_commit: move |size| Some(on_page_size_change.call(size)),
+                report_clamp_failure: true,
             }
         }
     }
@@ -304,7 +378,100 @@ mod tests {
 
     use dioxus::prelude::*;
 
-    use super::use_auction_list_read;
+    use super::{AuctionList, ListFilter, use_auction_list_read};
+    use crate::api::{AuctionListPage, HistoricalAuctionWithForum, Worlds};
+    use crate::surface::{
+        PageBrowserFixture, PageReadFixture, assert_selected_error, dispatch_page_event,
+        page_event_target, page_test_contexts, run_page_events, settle_page,
+    };
+
+    #[test]
+    fn auction_list_status_preserves_invalid_and_duplicate_values_until_corrected() {
+        let read =
+            |pairs| ListFilter::read(pairs, "status", "settled", &["settled", "final", "live"]);
+        assert!(read(&[]).valid());
+        let raw = [("status".to_owned(), "unrecognized".to_owned())];
+        assert!(!read(&raw).valid());
+        assert_eq!(read(&raw).value(), "unrecognized");
+        let duplicates =
+            [("status".to_owned(), "live".to_owned()), ("status".to_owned(), "final".to_owned())];
+        assert!(!read(&duplicates).valid());
+        assert!(read(&duplicates[1..]).valid());
+    }
+
+    fn auction_list() -> Element {
+        page_test_contexts();
+        rsx! { AuctionList {} }
+    }
+
+    #[test]
+    fn auction_list_first_frame_selects_and_describes_both_unknown_values() {
+        let browser =
+            PageBrowserFixture::new("/auctions", "world=outside%20world&status=unknown%20phase");
+        let mut dom = VirtualDom::new(auction_list).with_root_context(browser).with_root_context(
+            PageReadFixture::new(|()| Ok::<_, String>(Worlds { worlds: Default::default() })),
+        );
+        let initial = dom.rebuild_to_vec();
+        assert_selected_error(
+            &dom,
+            &initial.edits,
+            "outside world",
+            "public-auction-rounds-world-error",
+            "Select a world or All worlds.",
+        );
+        assert_selected_error(
+            &dom,
+            &initial.edits,
+            "unknown phase",
+            "public-auction-rounds-status-error",
+            "Select a valid auction status.",
+        );
+    }
+
+    #[test]
+    fn auction_list_select_changes_commit_world_and_status_to_the_live_signal() {
+        run_page_events(
+            module_path!(),
+            "auction_list_select_changes_commit_world_and_status_to_the_live_signal",
+            || {
+                let browser = PageBrowserFixture::new(
+                    "/auctions",
+                    "world=outside&status=unknown&page=4&keep=yes",
+                );
+                let auctions = PageReadFixture::new(|url: String| {
+                    assert_eq!(url, "/api/v2/auctions?page=1&page_size=20&status=live&world=main");
+                    Ok::<_, String>(AuctionListPage::<HistoricalAuctionWithForum> {
+                        auctions: Vec::new(),
+                        page: Some(1),
+                        page_size: 20,
+                        total: Some(0),
+                        cursor: None,
+                        next_cursor: None,
+                        has_more: None,
+                    })
+                });
+                let mut dom = VirtualDom::new(auction_list)
+                    .with_root_context(browser.clone())
+                    .with_root_context(auctions)
+                    .with_root_context(PageReadFixture::new(|()| {
+                        Ok::<_, String>(Worlds { worlds: Default::default() })
+                    }));
+                let initial = dom.rebuild_to_vec();
+                let world = page_event_target(&initial.edits, "change", "value", "outside");
+                let status = page_event_target(&initial.edits, "change", "value", "unknown");
+                dispatch_page_event(&dom, "change", world, "main");
+                settle_page(&mut dom);
+                assert_eq!(browser.state().world.as_deref(), Some("main"));
+                assert_eq!(browser.value("status").as_deref(), Some("unknown"));
+                dispatch_page_event(&dom, "change", status, "live");
+                settle_page(&mut dom);
+                assert_eq!(browser.state().status.as_deref(), Some("live"));
+                assert_eq!(browser.state().page, 1);
+                assert_eq!(browser.value("keep").as_deref(), Some("yes"));
+                assert!(browser.writes().iter().all(|write| write.accepted));
+            },
+        );
+    }
 
     #[derive(Default)]
     struct ReadControl {

@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 
+use auction_web_shared::validation::restore_select_value;
 use auction_web_shared::{format_credit_amount, t};
 use dioxus::prelude::*;
 
@@ -12,15 +13,19 @@ use crate::api::{PriceHistoryEntry, PriceHistoryStats};
 pub(super) fn HistoryResultControls(
     sort: String,
     grouping: String,
-    on_sort_change: EventHandler<String>,
-    on_group_change: EventHandler<String>,
+    on_sort_change: Callback<String, bool>,
+    on_group_change: Callback<String, bool>,
 ) -> Element {
     rsx! {
         div { class: "public-history-view-controls",
             label {
                 span { {t!("history-sort-label")} }
-                select { name: "history_sort", value: sort,
-                    onchange: move |event| on_sort_change.call(event.value()),
+                select { name: "history_sort", value: sort.clone(),
+                    onchange: move |event| {
+                        if !on_sort_change.call(event.value()) {
+                            restore_select_value(&event, &sort);
+                        }
+                    },
                     option { value: "closed_desc", {t!("history-sort-closed-desc")} }
                     option { value: "closed_asc", {t!("history-sort-closed-asc")} }
                     option { value: "price_desc", {t!("history-sort-price-desc")} }
@@ -29,8 +34,12 @@ pub(super) fn HistoryResultControls(
             }
             label {
                 span { {t!("history-group-label")} }
-                select { name: "history_group", value: grouping,
-                    onchange: move |event| on_group_change.call(event.value()),
+                select { name: "history_group", value: grouping.clone(),
+                    onchange: move |event| {
+                        if !on_group_change.call(event.value()) {
+                            restore_select_value(&event, &grouping);
+                        }
+                    },
                     option { value: "flat", {t!("history-group-flat")} }
                     option { value: "equipment", {t!("history-group-equipment")} }
                     option { value: "buyer", {t!("history-group-buyer")} }

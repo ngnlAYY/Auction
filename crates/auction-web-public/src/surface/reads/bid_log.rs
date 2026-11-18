@@ -2,30 +2,35 @@
 
 use auction_web_shared::TruncatedText;
 use auction_web_shared::t;
+use auction_web_shared::validation::restore_select_value;
 use auction_web_shared::{QueryWriteMode, Time, format_credit_amount};
 use dioxus::prelude::*;
 
-use super::lot_filter::{use_lot_filter_draft, valid_lot_filter};
-use super::query::{ReadSelection, commit_read_query, update_read_query};
-use crate::api::{
-    BidLogEntry, BidLogPage, fetch_bid_log_auctions, fetch_bid_log_page, fetch_worlds, lot_code_for,
-};
+use super::directory::{RoundOptionsError, RoundPage, use_round_directory};
+use super::lot_filter::use_lot_filter_draft;
+use super::query::{ReadSelection, use_round_body};
+use crate::api::{BidLogEntry, BidLogPage, fetch_bid_log_page, fetch_worlds, lot_code_for};
+use crate::surface::read_page_query;
 use crate::surface::{
     BidHistoryParticipant, PublicPager, bid_history_rows, public_page_matches, supported_worlds,
-    use_content_loading, use_public_query_state, world_label,
+    use_content_loading, use_page_query, world_label,
 };
 use crate::surface::{
     LotDetailLookupButton, LotDetailLookupHost, use_bid_refresh, use_lot_detail_lookup,
+};
+use crate::surface::{
+    PageKey, PublicPageClampError, page_pathname, public_page_within_offset, set_public_page_size,
+    use_public_page_bounds,
 };
 
 /// lot 筛选格式提示的元素 ID，供输入框 `aria-describedby` 引用。
 const LOT_FILTER_ERROR_ID: &str = "public-auction-bid-log-filter-error";
 
 pub(crate) fn bid_log() -> Element {
+    let pathname = RoundPage::BidLog.pathname();
     let mut refresh_generation = use_context::<Signal<u64>>();
     // 世界/拍卖/页码/lot 筛选与地址栏双向同步。
-    let query_state = use_public_query_state();
-    let query_state_signal = query_state.state;
+    let query_state_signal = use_page_query();
     let world_filter = use_memo(move || {
         query_state_signal
             .read()
@@ -34,132 +39,88 @@ pub(crate) fn bid_log() -> Element {
             .filter(|world| matches!(world.as_str(), "main" | "isekai"))
             .unwrap_or_else(|| "main".to_owned())
     });
-    let selected_auction_id =
-        use_memo(move || query_state_signal.read().auction_id.clone().unwrap_or_default());
     let page_number = use_memo(move || query_state_signal.read().page);
     let page_size = use_memo(move || query_state_signal.read().page_size);
-    let lot_filter =
-        use_memo(move || query_state_signal.read().bid_log_lot.clone().unwrap_or_default());
-    let lot_draft = use_lot_filter_draft(query_state_signal, "/bidlog");
-    // 迁移期间曾写出 `bidlog_page`；读取后立即无历史记录地收敛回旧版 `page`。
-    use_effect(move || {
-        if query_state_signal().bid_log_page_alias {
-            let mut next = query_state_signal.peek().clone();
-            next.bid_log_page_alias = false;
-            commit_read_query(query_state_signal, next, QueryWriteMode::Replace);
-        }
+    // 缺省场次与第一页一同提交，无需先替换页码。
+    let bounds = use_public_page_bounds(query_state_signal, pathname, |query| {
+        query.auction_id.as_ref().map(|_| (PageKey::BidLog, query.page_size))
     });
-    let worlds = use_resource(fetch_worlds);
-    let world_options = match &*worlds.read_unchecked() {
-        Some(Ok(worlds)) => supported_worlds(worlds),
-        _ => vec![world_filter()],
-    };
-    // 生命周期、可见页定时和人工刷新先重读目录；记录请求随后只消费本轮确认的公开场次。
-    let auctions = use_resource(move || {
-        let generation = refresh_generation();
-        let world = world_filter();
-        async move {
-            let result = fetch_bid_log_auctions(world.clone()).await;
-            ((world, generation), result)
-        }
-    });
-
-    // 保留仍可公开读取的历史选择；仅在所选场次不属于本世界目录时纠偏。
+    let lot_draft = use_lot_filter_draft(query_state_signal, pathname);
+    // 旧页码别名只在仍属于出价记录且可按既定数量读取时原地收敛。
     use_effect(move || {
-        let Some(((world, generation), Ok(auction_list))) = &*auctions.read_unchecked() else {
-            return;
+        let (has_auction, alias, page, page_size) = {
+            let query = query_state_signal.read();
+            (query.auction_id.is_some(), query.bid_log_page_alias, query.page, query.page_size)
         };
-        // 后台刷新保留旧目录用于展示，但它不能纠偏新世界或新生命周期代际的选择。
-        if world != &world_filter() || *generation != refresh_generation() {
-            return;
-        }
-        let selected = selected_auction_id();
-        let next_auction_id = auction_list
-            .iter()
-            .find(|auction| auction.id == selected)
-            .or_else(|| auction_list.first())
-            .map(|auction| auction.id.clone());
-        let next_auction_id = next_auction_id.unwrap_or_default();
-        if selected != next_auction_id {
-            update_read_query(
-                query_state_signal,
-                |query| {
-                    query.auction_id =
-                        (!next_auction_id.is_empty()).then_some(next_auction_id.clone());
-                    query.page = 1;
-                },
-                QueryWriteMode::Replace,
-            );
+        // 成功替换会写入同一个 Signal，此时前面的读借用必须已释放。
+        if has_auction
+            && alias
+            && public_page_within_offset(page, page_size)
+            && page_pathname() == pathname
+        {
+            let current = read_page_query();
+            if current.bid_log_page_alias && current.page == page && current.page_size == page_size
+            {
+                PageKey::BidLog.write(
+                    query_state_signal,
+                    pathname,
+                    current.page,
+                    QueryWriteMode::Replace,
+                );
+            }
         }
     });
 
-    let bid_log = use_resource(move || {
-        let auction_id = selected_auction_id();
-        let page = page_number();
-        let page_size = page_size();
-        let world = world_filter();
-        let lot_id = lot_filter().trim().to_owned();
-        // 地址栏带入的非法筛选同样不发请求：服务端只会回 400，格式提示由输入框承担。
-        let lot_valid = valid_lot_filter(&lot_id);
-        let lot_id = (!lot_id.is_empty()).then_some(lot_id);
-        let requested = (auction_id.clone(), world.clone(), lot_id.clone(), page, page_size);
-        // 不直接订阅全局刷新：先确认本轮目录，避免按过期的场次可见性读取记录。
-        // 目录未就绪、失败或已移除该场时不发 GET；查询切换也不能绕过这道门禁。
-        let readable = auctions.read_unchecked().as_ref().is_some_and(
-            |((loaded_world, generation), result)| {
-                loaded_world == &world
-                    && *generation == *refresh_generation.peek()
-                    && result
-                        .as_ref()
-                        .is_ok_and(|rows| rows.iter().any(|auction| auction.id == auction_id))
-            },
-        ) && lot_valid;
-        async move {
-            let result = if readable {
-                fetch_bid_log_page(auction_id, page, world, lot_id, page_size).await.map(Some)
-            } else {
-                Ok(None)
-            };
-            (requested, result)
-        }
-    });
-    let auction_snapshot = auctions.read_unchecked();
-    let current_auctions = auction_snapshot
-        .as_ref()
-        .filter(|((world, _), _)| world == &world_filter())
-        .map(|(_, result)| result);
-    let auction_options = match current_auctions {
-        Some(Ok(auction_list)) => auction_list.as_slice(),
-        _ => &[],
+    let worlds = use_resource(fetch_worlds);
+    let selected_world = world_filter();
+    let mut world_options = match &*worlds.read_unchecked() {
+        Some(Ok(worlds)) => supported_worlds(worlds),
+        _ => vec![selected_world.clone()],
     };
-    let selected = selected_auction_id();
-    let selected_auction = auction_options.iter().find(|auction| auction.id == selected);
-    let directory_current = auction_snapshot.as_ref().is_some_and(|((world, generation), _)| {
-        world == &world_filter() && *generation == refresh_generation()
-    });
-    use_bid_refresh(bid_log, directory_current && selected_auction.is_some());
+    if !world_options.contains(&selected_world) {
+        world_options.push(selected_world.clone());
+    }
+    let directory = use_round_directory(
+        RoundPage::BidLog,
+        query_state_signal,
+        world_filter,
+        refresh_generation,
+    );
+    let (data, readable) = use_round_body(
+        directory,
+        move || lot_draft.requested_lot().ok(),
+        page_number,
+        page_size,
+        async |auction_id, world, lot, page, size| {
+            fetch_bid_log_page(auction_id, page, world, lot, size).await
+        },
+    );
+    use_bid_refresh(data, readable);
     let lookup = use_lot_detail_lookup();
     let current_page = page_number();
-    let current_lot_filter = lot_filter();
+    let current_lot_filter = lot_draft.applied_value();
     let draft_value = lot_draft.value();
-    let draft_invalid = !valid_lot_filter(draft_value.trim());
-    let bid_log_state = bid_log.read_unchecked();
-    // 同查询后台刷新保留完成快照；目录确认场次已不可见后，迟到记录也不能恢复旧行和分页。
-    let current_result = bid_log_state
+    let filter_error = lot_draft.error(|| t!("bidlog-filter-invalid"));
+    let selected_auction = directory.selected();
+    let selected = selected_auction.as_ref().map_or_else(String::new, |auction| auction.id.clone());
+    let auction_options = directory.options();
+    let applied_lot = lot_draft.requested_lot();
+    let data_snapshot = data.read_unchecked();
+    let current_result = data_snapshot
         .as_ref()
-        .filter(|((auction_id, world, lot_id, page, size), _)| {
-            selected_auction.is_some()
-                && auction_id == &selected_auction_id()
-                && world == &world_filter()
-                && lot_id.as_deref().unwrap_or_default() == current_lot_filter.trim()
+        .filter(|((auction_id, world, lot, page, size), _)| {
+            selected_auction
+                .as_ref()
+                .is_some_and(|auction| &auction.id == auction_id && &auction.world_id == world)
+                && applied_lot.as_ref().is_ok_and(|applied| applied == lot)
                 && *page == current_page
                 && *size == page_size()
         })
         .map(|(_, result)| result);
-    // 目录或当前查询的记录还没有结果时由顶栏提示加载，正文留空。
     let mut loading = false;
-    let body = match (current_auctions, current_result) {
-        (Some(Err(_)), _) | (Some(Ok(_)), Some(Err(_))) => rsx! {
+    let body = match current_result {
+        _ if bounds.failed(PageKey::BidLog) => rsx! { PublicPageClampError { bounds } },
+        _ if directory.failed() || matches!(current_result, Some(Err(_error))) => rsx! {
             div { class: "public-auction-empty", role: "alert",
                 p { class: "public-auction-empty__title", {t!("data-error")} }
                 button {
@@ -170,14 +131,14 @@ pub(crate) fn bid_log() -> Element {
                 }
             }
         },
-        (Some(Ok(auction_list)), _) if auction_list.is_empty() => rsx! {
+        _ if directory.empty() => rsx! {
             div { class: "public-auction-empty", role: "status",
                 p { class: "public-auction-empty__title", {t!("data-empty")} }
             }
         },
-        // 已应用的筛选非法（来自地址栏）时没有发出请求：正文留空且不提示加载，格式提示在输入框旁。
-        (Some(Ok(_)), _) if !valid_lot_filter(current_lot_filter.trim()) => rsx! {},
-        (Some(Ok(_)), Some(Ok(Some(page))))
+        // 非法筛选与拒写后的未选场次均可在控件处修正，不进入加载态。
+        _ if applied_lot.is_err() || directory.correction_failed() => rsx! {},
+        Some(Ok(page))
             if public_page_matches(page.page, page.page_size, current_page, page_size()) =>
         {
             rsx! {
@@ -186,25 +147,9 @@ pub(crate) fn bid_log() -> Element {
                     current_page,
                     world: world_filter(),
                     lot_filter: current_lot_filter.clone(),
-                    on_page_change: move |next_page: i64| {
-                        // 从当前状态提交：已应用的 lot 筛选与地址栏同时写入，仍在防抖中的草稿
-                        // 不随翻页提交。
-                        let mut next = query_state_signal.peek().clone();
-                        next.page = next_page;
-                        commit_read_query(query_state_signal, next, QueryWriteMode::Push);
-                    },
-                    on_page_clamp: move |next_page: i64| {
-                        // 纠偏无历史记录写回，不建立可返回的无效页条目。
-                        let mut next = query_state_signal.peek().clone();
-                        next.page = next_page;
-                        commit_read_query(query_state_signal, next, QueryWriteMode::Replace);
-                    },
-                    on_page_size_change: move |size| {
-                        let mut next = query_state_signal.peek().clone();
-                        next.page_size = super::super::normalize_public_page_size(size);
-                        next.page = 1;
-                        commit_read_query(query_state_signal, next, QueryWriteMode::Push);
-                    },
+                    on_page_change: move |page| PageKey::BidLog.write(query_state_signal, pathname, page, QueryWriteMode::Push),
+                    on_page_clamp: move |page| PageKey::BidLog.write(query_state_signal, pathname, page, QueryWriteMode::Replace),
+                    on_page_size_change: move |size| page_pathname() == pathname && set_public_page_size(query_state_signal, size),
                 }
             }
         }
@@ -224,9 +169,13 @@ pub(crate) fn bid_log() -> Element {
                         id: "public-auction-bid-log-world",
                         name: "world",
                         autocomplete: "off",
-                        value: world_filter(),
+                        value: selected_world.clone(),
                         disabled: world_options.is_empty(),
-                        onchange: move |event| ReadSelection::World(event.value()).select(query_state_signal),
+                        onchange: move |event| {
+                            if !ReadSelection::World(event.value()).select(query_state_signal, pathname) {
+                                restore_select_value(&event, &selected_world);
+                            }
+                        },
                         for world in &world_options {
                             option { value: world.clone(), {world_label(world)} }
                         }
@@ -238,12 +187,22 @@ pub(crate) fn bid_log() -> Element {
                         id: "public-auction-bid-log-round",
                         name: "auction",
                         autocomplete: "off",
-                        value: selected,
+                        value: selected.clone(),
                         disabled: auction_options.is_empty(),
-                        onchange: move |event| ReadSelection::Auction(event.value()).select(query_state_signal),
-                        for auction in auction_options {
+                        onfocus: move |_| directory.load_options(),
+                        onchange: move |event| {
+                            let id = event.value();
+                            if !directory.selectable(&id) || !ReadSelection::Auction(id).select(query_state_signal, pathname) {
+                                let applied = directory.selected().map_or_else(String::new, |round| round.id);
+                                restore_select_value(&event, &applied);
+                            }
+                        },
+                        option { value: "", disabled: true, selected: selected.is_empty(),
+                            {t!("round-select-placeholder")}
+                        }
+                        for auction in auction_options.iter() {
                             option {
-                                value: auction.id.clone(),
+                                value: auction.id.clone(), selected: auction.id == selected,
                                 {t!("bidlog-round-option", number: auction.sequence,
                                     status: bid_log_status_label(&auction.status))}
                             }
@@ -251,8 +210,11 @@ pub(crate) fn bid_log() -> Element {
                     }
                 }
             }
+            if directory.options_failed() && selected_auction.is_some() {
+                RoundOptionsError { on_retry: move |_| refresh_generation.set(refresh_generation().saturating_add(1)) }
+            }
             div { class: "public-auction-bid-log-heading",
-                if let Some(auction) = selected_auction {
+                if let Some(ref auction) = selected_auction {
                     div { class: "public-auction-bid-log-round-header",
                         strong { class: "public-auction-bid-log-round-number",
                             {t!("bidlog-round-number", number: auction.sequence)}
@@ -277,26 +239,23 @@ pub(crate) fn bid_log() -> Element {
                         spellcheck: "false",
                         value: draft_value,
                         placeholder: t!("bidlog-filter-placeholder"),
-                        aria_invalid: draft_invalid.to_string(),
-                        aria_describedby: draft_invalid.then_some(LOT_FILTER_ERROR_ID),
+                        aria_invalid: filter_error.is_some().to_string(),
+                        aria_describedby: filter_error.as_ref().map(|_| LOT_FILTER_ERROR_ID),
                         oninput: move |event| lot_draft.edit(event.value()),
+                        onblur: move |_| lot_draft.blur(),
                     }
-                    if !draft_value.is_empty() || !current_lot_filter.is_empty() {
+                    if !draft_value.is_empty() || !current_lot_filter.is_empty() || applied_lot.is_err() {
                         button {
                             r#type: "button",
                             onclick: move |_| lot_draft.clear(),
                             {t!("bidlog-filter-clear")}
                         }
                     }
-                    if draft_invalid {
-                        p {
-                            id: LOT_FILTER_ERROR_ID,
-                            class: "public-auction-bid-log-toolbar__error",
-                            // 逐字输入 UUID 时每次按键都会判定；用礼貌播报，不打断输入。
-                            role: "status",
-                            aria_live: "polite",
-                            {t!("bidlog-filter-invalid")}
-                        }
+                    if let Some(ref error) = filter_error {
+                        p { id: LOT_FILTER_ERROR_ID, class: "public-auction-bid-log-toolbar__error", "{error}" }
+                    }
+                    span { class: "ui-pager__sr-only", aria_live: "polite", aria_atomic: "true",
+                        if let Some(ref error) = filter_error { "{error}" }
                     }
                 }
             }
@@ -316,9 +275,9 @@ pub(crate) fn BidLogTable(
     current_page: i64,
     world: String,
     lot_filter: String,
-    on_page_change: EventHandler<i64>,
-    on_page_clamp: EventHandler<i64>,
-    on_page_size_change: EventHandler<i64>,
+    on_page_change: Callback<i64, bool>,
+    on_page_clamp: Callback<i64, bool>,
+    on_page_size_change: Callback<i64, bool>,
 ) -> Element {
     let has_more = page.has_more.unwrap_or(false);
     let bids = bid_history_rows(page.bids);
@@ -368,7 +327,8 @@ pub(crate) fn BidLogTable(
                 label: t!("page-bidlog-title"),
                 on_page_change,
                 on_page_clamp,
-                on_page_size_change,
+                on_page_size_commit: move |size| Some(on_page_size_change.call(size)),
+                report_clamp_failure: true,
             }
         }
     }
@@ -430,5 +390,135 @@ pub(crate) fn bid_log_status_class(status: &str) -> &'static str {
         "live" => "public-auction-bid-log-round-status public-auction-bid-log-round-status-live",
         "final" => "public-auction-bid-log-round-status public-auction-bid-log-round-status-final",
         _ => "public-auction-bid-log-round-status",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use auction_web_shared::QueryWriteMode;
+    use dioxus::prelude::*;
+
+    use super::bid_log;
+    use crate::api::{AuctionListPage, BidLogPage, HistoricalAuction, Worlds};
+    use crate::surface::{PageBrowserFixture, PageReadFixture, page_test_contexts, settle_page};
+
+    const ROUND_ID: &str = "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b";
+
+    fn bid_log_page() -> Element {
+        page_test_contexts();
+        bid_log()
+    }
+
+    fn mount_bid_log(
+        browser: &PageBrowserFixture,
+        expected_page: i64,
+    ) -> (VirtualDom, Rc<RefCell<Vec<String>>>) {
+        let directory = PageReadFixture::new(|url: String| {
+            let settled = url.contains("status=settled");
+            let auctions = settled
+                .then(|| HistoricalAuction {
+                    id: ROUND_ID.to_owned(),
+                    world_id: "main".to_owned(),
+                    sequence: 1,
+                    status: "settled".to_owned(),
+                    scheduled_open_at: "2026-11-14T12:00:00Z".to_owned(),
+                    opened_at: None,
+                    final_phase_at: None,
+                    effective_end_at: None,
+                    settled_at: None,
+                    lot_count: 0,
+                    sold_count: 0,
+                    unsold_count: 0,
+                    sold_amount: 0,
+                    state_version: 1,
+                })
+                .into_iter()
+                .collect();
+            Ok::<_, String>(AuctionListPage {
+                auctions,
+                page: Some(1),
+                page_size: 200,
+                total: Some(i64::from(settled)),
+                cursor: None,
+                next_cursor: None,
+                has_more: None,
+            })
+        });
+        let requests = Rc::new(RefCell::new(Vec::new()));
+        let request_log = requests.clone();
+        let applied = browser.clone();
+        let body = PageReadFixture::new(move |url: String| {
+            assert_eq!(applied.value("bidlog_page"), None);
+            assert_eq!(
+                applied.value("page"),
+                (expected_page > 1).then(|| expected_page.to_string())
+            );
+            assert_eq!(applied.value("auction").as_deref(), Some(ROUND_ID));
+            request_log.borrow_mut().push(url);
+            Ok::<_, String>(BidLogPage {
+                bids: Vec::new(),
+                page: Some(expected_page),
+                page_size: 20,
+                total: Some(40),
+                cursor: None,
+                next_cursor: None,
+                has_more: None,
+            })
+        });
+        let worlds =
+            PageReadFixture::new(|()| Ok::<_, String>(Worlds { worlds: Default::default() }));
+        let mut dom = VirtualDom::new(bid_log_page)
+            .with_root_context(browser.clone())
+            .with_root_context(directory)
+            .with_root_context(body)
+            .with_root_context(worlds);
+        dom.rebuild_to_vec();
+        settle_page(&mut dom);
+        (dom, requests)
+    }
+
+    #[test]
+    fn old_alias_replace_releases_query_before_committing_and_reading_body() {
+        let browser = PageBrowserFixture::new(
+            "/bidlog",
+            &format!("auction={ROUND_ID}&bidlog_page=2&keep=yes"),
+        );
+        let (_dom, requests) = mount_bid_log(&browser, 2);
+        assert!(!browser.state().bid_log_page_alias);
+        let writes = browser.writes();
+        assert_eq!(writes.len(), 1);
+        assert!(writes[0].accepted);
+        assert_eq!(writes[0].mode, QueryWriteMode::Replace);
+        assert_eq!(writes[0].keys, ["page", "bidlog_page"]);
+        assert_eq!(browser.value("keep").as_deref(), Some("yes"));
+        assert_eq!(
+            &*requests.borrow(),
+            &[format!(
+                "/api/v1/auctions/{ROUND_ID}/bid-log?page=2&page_size=20&include=defeated_proxy&world=main"
+            )]
+        );
+    }
+
+    #[test]
+    fn default_round_replacement_reaches_the_live_state_before_the_body_get() {
+        let browser = PageBrowserFixture::new("/bidlog", "page=3&lot=One12");
+        let (_dom, requests) = mount_bid_log(&browser, 1);
+        assert_eq!(browser.state().auction_id.as_deref(), Some(ROUND_ID));
+        assert_eq!(browser.state().page, 1);
+        assert_eq!(browser.state().bid_log_lot.as_deref(), Some("One12"));
+        let writes = browser.writes();
+        assert_eq!(writes.len(), 1);
+        assert!(writes[0].accepted);
+        assert_eq!(writes[0].mode, QueryWriteMode::Replace);
+        assert_eq!(writes[0].keys, ["auction", "page", "bidlog_page"]);
+        assert_eq!(
+            &*requests.borrow(),
+            &[format!(
+                "/api/v1/auctions/{ROUND_ID}/bid-log?page=1&page_size=20&include=defeated_proxy&world=main&lot=One12"
+            )]
+        );
     }
 }

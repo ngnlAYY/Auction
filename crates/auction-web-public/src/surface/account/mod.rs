@@ -11,16 +11,21 @@ use super::proxy::{
 use super::session_preference::SessionPreference;
 use super::watch_preference::OutbidNotifications;
 use super::{
-    PublicPager, PublicSessionResource, login_href_for_current_location, update_public_query_state,
-    use_content_loading, use_public_query_state,
+    PageKey, PublicPageClampError, PublicPager, PublicSessionResource,
+    login_href_for_current_location, public_page_within_offset, use_content_loading,
+    use_page_query, use_public_page_bounds,
 };
 use crate::api::{MyBidsPage, OwnedBid, OwnedProxy, fetch_my_bids, lot_code_for};
+#[cfg(test)]
+use crate::surface::PageReadFixture;
 use crate::surface::{
     LotDetailLookupButton, LotDetailLookupHost, PublicCommandOwner, use_bid_refresh,
     use_lot_detail_lookup,
 };
 
+// 与 /me/bids 的固定请求页长一致。
 const DEFAULT_ACCOUNT_PAGE_SIZE: i64 = 10;
+const ACCOUNT_PATH: &str = "/me";
 
 mod watches;
 
@@ -108,34 +113,53 @@ fn AuthenticatedAccountData(user_id: String) -> Element {
     let refresh_generation = use_context::<Signal<u64>>();
     let mut account_reload_generation = use_signal(|| 0_u64);
     // 竞价与代理页码与地址栏双向同步。
-    let query_state = use_public_query_state();
-    let query_state_signal = query_state.state;
+    let query_state_signal = use_page_query();
     let bid_page = use_memo(move || query_state_signal.read().bid_page);
     let proxy_page = use_memo(move || query_state_signal.read().proxy_page);
+    let bounds = use_public_page_bounds(query_state_signal, ACCOUNT_PATH, |_| {
+        [(PageKey::Bid, DEFAULT_ACCOUNT_PAGE_SIZE), (PageKey::Proxy, DEFAULT_ACCOUNT_PAGE_SIZE)]
+    });
+    let in_range = use_memo(move || {
+        public_page_within_offset(bid_page(), DEFAULT_ACCOUNT_PAGE_SIZE)
+            && public_page_within_offset(proxy_page(), DEFAULT_ACCOUNT_PAGE_SIZE)
+    });
     let account = use_resource(move || {
         let _ = refresh_generation();
         let _ = account_reload_generation();
         let requested = (bid_page(), proxy_page());
         let user_id = user_id.clone();
+        let in_range = in_range();
         async move {
+            if !in_range {
+                return None;
+            }
+            #[cfg(test)]
+            if let Some(result) =
+                PageReadFixture::response((user_id.clone(), requested.0, requested.1))
+            {
+                return Some((requested, result));
+            }
             let result = fetch_my_bids(&user_id, requested.0, requested.1).await;
-            (requested, result)
+            Some((requested, result))
         }
     });
-    use_bid_refresh(account, true);
+    use_bid_refresh(account, in_range());
 
     let loaded = account.read_unchecked();
     let current = loaded
         .as_ref()
+        .and_then(Option::as_ref)
         .filter(|(requested, _)| *requested == (bid_page(), proxy_page()))
         .map(|(_, result)| result);
     // 没有当前页码的结果（含等待页码纠偏后的重读）时由顶栏提示加载，正文留空。
+    let clamp_failed = bounds.failed(PageKey::Bid) || bounds.failed(PageKey::Proxy);
     use_content_loading(match current {
-        None => true,
+        None => !clamp_failed,
         Some(Ok(page)) => page.bid_page != bid_page() || page.proxy_page != proxy_page(),
         Some(Err(_)) => false,
     });
     match current {
+        _ if clamp_failed => rsx! { PublicPageClampError { bounds } },
         None => rsx! {},
         Some(Err(_)) => rsx! {
             div {
@@ -162,32 +186,24 @@ fn AuthenticatedAccountData(user_id: String) -> Element {
                 bid_page: bid_page(),
                 proxy_page: proxy_page(),
                 on_bid_page_change: move |next_page| {
-                    update_public_query_state(
-                        query_state_signal,
-                        |query| query.bid_page = next_page,
-                        QueryWriteMode::Push,
-                    );
+                    PageKey::Bid.write(
+                        query_state_signal, ACCOUNT_PATH, next_page, QueryWriteMode::Push,
+                    )
                 },
                 on_bid_page_clamp: move |next_page| {
-                    update_public_query_state(
-                        query_state_signal,
-                        |query| query.bid_page = next_page,
-                        QueryWriteMode::Replace,
-                    );
+                    PageKey::Bid.write(
+                        query_state_signal, ACCOUNT_PATH, next_page, QueryWriteMode::Replace,
+                    )
                 },
                 on_proxy_page_change: move |next_page| {
-                    update_public_query_state(
-                        query_state_signal,
-                        |query| query.proxy_page = next_page,
-                        QueryWriteMode::Push,
-                    );
+                    PageKey::Proxy.write(
+                        query_state_signal, ACCOUNT_PATH, next_page, QueryWriteMode::Push,
+                    )
                 },
                 on_proxy_page_clamp: move |next_page| {
-                    update_public_query_state(
-                        query_state_signal,
-                        |query| query.proxy_page = next_page,
-                        QueryWriteMode::Replace,
-                    );
+                    PageKey::Proxy.write(
+                        query_state_signal, ACCOUNT_PATH, next_page, QueryWriteMode::Replace,
+                    )
                 },
             }
         },
@@ -199,12 +215,12 @@ fn AccountPage(
     page: MyBidsPage,
     bid_page: i64,
     proxy_page: i64,
-    on_bid_page_change: EventHandler<i64>,
-    on_bid_page_clamp: EventHandler<i64>,
-    on_proxy_page_change: EventHandler<i64>,
-    on_proxy_page_clamp: EventHandler<i64>,
+    on_bid_page_change: Callback<i64, bool>,
+    on_bid_page_clamp: Callback<i64, bool>,
+    on_proxy_page_change: Callback<i64, bool>,
+    on_proxy_page_clamp: Callback<i64, bool>,
 ) -> Element {
-    let page_size = if page.page_size > 0 { page.page_size } else { DEFAULT_ACCOUNT_PAGE_SIZE };
+    let page_size = DEFAULT_ACCOUNT_PAGE_SIZE;
     rsx! {
         div { class: "public-account-activity",
             BidSection {
@@ -233,8 +249,8 @@ fn BidSection(
     page: i64,
     total: i64,
     page_size: i64,
-    on_page_change: EventHandler<i64>,
-    on_page_clamp: EventHandler<i64>,
+    on_page_change: Callback<i64, bool>,
+    on_page_clamp: Callback<i64, bool>,
 ) -> Element {
     rsx! {
         section { class: "public-account-section", aria_labelledby: "account-bids-title",
@@ -273,7 +289,7 @@ fn BidSection(
                 page_size,
                 hide_when_single: true,
                 show_size_picker: false,
-                max_offset: None,
+                report_clamp_failure: true,
                 jump_label: Some(t!("catalog-page-input")),
                 on_page_change,
                 on_page_clamp,
@@ -317,8 +333,8 @@ fn ProxySection(
     page: i64,
     total: i64,
     page_size: i64,
-    on_page_change: EventHandler<i64>,
-    on_page_clamp: EventHandler<i64>,
+    on_page_change: Callback<i64, bool>,
+    on_page_clamp: Callback<i64, bool>,
 ) -> Element {
     rsx! {
         section { class: "public-account-section", aria_labelledby: "account-proxies-title",
@@ -356,7 +372,7 @@ fn ProxySection(
                 page_size,
                 hide_when_single: true,
                 show_size_picker: false,
-                max_offset: None,
+                report_clamp_failure: true,
                 jump_label: Some(t!("catalog-page-input")),
                 on_page_change,
                 on_page_clamp,
@@ -387,5 +403,123 @@ fn ProxyRow(proxy: OwnedProxy) -> Element {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+    use std::collections::HashSet;
+    use std::rc::Rc;
+
+    use auction_web_shared::QueryWriteMode;
+    use dioxus::dioxus_core::{AttributeValue, Mutation};
+    use dioxus::prelude::*;
+
+    use super::page;
+    use crate::api::{MyBidsPage, PublicSession, Worlds};
+    use crate::surface::{
+        PageBrowserFixture, PageReadFixture, PublicCommandOwner, page_test_contexts, settle_page,
+    };
+
+    fn authenticated_page() -> Element {
+        page_test_contexts();
+        let session = use_resource(|| {
+            std::future::ready(Ok::<_, String>(Some(PublicSession {
+                authenticated: true,
+                user_id: "reader".to_owned(),
+                username: "Test".to_owned(),
+                expires_at: None,
+                absolute_expires_at: None,
+            })))
+        });
+        use_context_provider(|| session);
+        use_context_provider(|| PublicCommandOwner(Signal::new(None)));
+        page()
+    }
+
+    fn mount_account(
+        browser: PageBrowserFixture,
+        read: impl Fn((String, i64, i64)) -> Result<MyBidsPage, String> + 'static,
+    ) -> Vec<Mutation> {
+        let mut dom = VirtualDom::new(authenticated_page)
+            .with_root_context(browser)
+            .with_root_context(PageReadFixture::new(read))
+            .with_root_context(PageReadFixture::new(|()| {
+                Ok::<_, String>(Worlds { worlds: Default::default() })
+            }));
+        let mut edits = dom.rebuild_to_vec().edits;
+        edits.extend(settle_page(&mut dom));
+        edits
+    }
+
+    fn activity(bid_page: i64, proxy_page: i64, bid_total: i64) -> MyBidsPage {
+        MyBidsPage {
+            bids: Vec::new(),
+            proxies: Vec::new(),
+            bid_total,
+            proxy_total: 12_000,
+            page: bid_page,
+            bid_page,
+            proxy_page,
+            page_size: 10,
+        }
+    }
+
+    #[test]
+    fn account_route_corrects_only_the_excess_page_and_caps_both_real_pagers() {
+        for (bid, proxy, excess) in [(1001, 1002, "proxy_page"), (1002, 1001, "bid_page")] {
+            let browser = PageBrowserFixture::new(
+                "/me",
+                &format!("bid_page={bid}&proxy_page={proxy}&keep=yes"),
+            );
+            let requested = Rc::new(RefCell::new(Vec::new()));
+            let requests = requested.clone();
+            let address = browser.clone();
+            let edits = mount_account(browser.clone(), move |(user, bid_page, proxy_page)| {
+                assert_eq!(user, "reader");
+                assert_eq!(address.value(excess).as_deref(), Some("1001"), "先替换地址才读取");
+                requests.borrow_mut().push((bid_page, proxy_page));
+                Ok(activity(bid_page, proxy_page, 12_000))
+            });
+
+            let writes = browser.writes();
+            assert_eq!(writes.len(), 1);
+            assert_eq!(writes[0].mode, QueryWriteMode::Replace);
+            assert_eq!(writes[0].keys, [excess]);
+            assert!(writes[0].accepted);
+            assert_eq!(&*requested.borrow(), &[(1001, 1001)]);
+            assert_eq!(browser.value("keep").as_deref(), Some("yes"));
+            let max_inputs = edits
+                .into_iter()
+                .filter_map(|edit| match edit {
+                    Mutation::SetAttribute {
+                        name: "max",
+                        value: AttributeValue::Text(ref value),
+                        id,
+                        ..
+                    } if value == "1001" => Some(id),
+                    _ => None,
+                })
+                .collect::<HashSet<_>>();
+            assert_eq!(max_inputs.len(), 2, "竞价与代理分页器都必须允许第 1001 页并以它为上限");
+        }
+    }
+
+    #[test]
+    fn accepted_total_clamp_updates_the_account_signal_and_reloads_only_the_clamped_page() {
+        let browser = PageBrowserFixture::new("/me", "bid_page=3&proxy_page=4");
+        let requested = Rc::new(RefCell::new(Vec::new()));
+        let requests = requested.clone();
+        mount_account(browser.clone(), move |(_, bid, proxy)| {
+            requests.borrow_mut().push((bid, proxy));
+            Ok(activity(bid, proxy, 8))
+        });
+        let writes = browser.writes();
+        assert_eq!(writes.len(), 1);
+        assert_eq!(writes[0].mode, QueryWriteMode::Replace);
+        assert_eq!(writes[0].keys, ["bid_page"]);
+        assert_eq!(browser.value("bid_page"), None);
+        assert_eq!(&*requested.borrow(), &[(3, 4), (1, 4)]);
     }
 }

@@ -9,8 +9,14 @@ use super::super::{
 use super::cached_get::cached_public_get;
 use super::directory::{SUMMARY_PAGE_SIZE, fetch_auction_page};
 use super::lots::fetch_current_lots;
+#[cfg(test)]
+use crate::surface::PageReadFixture;
 
 pub(crate) async fn fetch_worlds() -> Result<Worlds, String> {
+    #[cfg(test)]
+    if let Some(result) = PageReadFixture::response(()) {
+        return result;
+    }
     let response = send_get("/api/v1/worlds").await.map_err(|error| error.code().to_owned())?;
     if !response.ok() {
         return Err(decoder::decode_error_code(response).await);
