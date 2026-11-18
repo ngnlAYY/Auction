@@ -1,7 +1,9 @@
 // 地址栏 query 的解析：按键分派、值规范化与非法值处理；未声明的键原样透传。
 // 只在浏览器中读取，宿主构建不参与这里的地址栏状态。
 
+import { parseQuerySearch } from "@auction/web-shared/net/query";
 import { utf8ByteLength } from "@auction/web-shared/text";
+import { validUuid } from "@auction/web-shared/ui/validation";
 
 import { DEFAULT_PAGE_SIZE, parsePublicPageSize } from "../pagination";
 import { normalizeWorldQuery, type PublicBoardQuery, publicBoardQueryDefault } from "./board";
@@ -56,38 +58,27 @@ function retainedQueryValue(value: string): string | null {
   return trimmed === "" ? null : trimmed;
 }
 
-/** 接受 uuid crate 的简单、连字符、花括号与 URN 形式，并输出规范小写连字符 UUID。 */
-function canonicalUuid(value: string): string | null {
-  let hyphenated = value;
-  if (value.length === 38 && value.startsWith("{") && value.endsWith("}")) {
-    hyphenated = value.slice(1, -1);
-  } else if (value.length === 45 && value.slice(0, 9).toLowerCase() === "urn:uuid:") {
-    hyphenated = value.slice(9);
-  } else if (value.length === 32 && /^[0-9a-fA-F]{32}$/u.test(value)) {
-    hyphenated = `${value.slice(0, 8)}-${value.slice(8, 12)}-${value.slice(12, 16)}-${value.slice(16, 20)}-${value.slice(20)}`;
-  }
-  if (
-    !/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/u.test(
-      hyphenated,
-    )
-  ) {
-    return null;
-  }
-  return hyphenated.toLowerCase();
-}
-
 export function parsePublicQuery(pathname: string, search: string): PublicBoardQuery {
-  const raw = search.startsWith("?") ? search.slice(1) : "";
   const query = publicBoardQueryDefault();
+  const params = parseQuerySearch(search.startsWith("?") ? search : "");
+  const auctions = params.getAll("auction");
+  const [auction] = auctions;
+  if (auction !== undefined) {
+    // 多值地址没有唯一目标；保留每个原值，让看板失败关闭。
+    if (auctions.length === 1 && validUuid(auction)) {
+      query.auctionId = auction;
+    } else {
+      query.invalidAuction = auctions;
+    }
+  }
   let canonicalPage: number | null = null;
   let legacyBidLogPage: number | null = null;
-  for (const [key, value] of new URLSearchParams(raw)) {
+  for (const [key, value] of params) {
     switch (key) {
       case "world":
         query.world = normalizeWorldQuery(value);
         break;
       case "auction":
-        query.auctionId = canonicalUuid(value);
         break;
       case "type":
         {

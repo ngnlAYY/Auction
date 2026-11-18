@@ -1,145 +1,372 @@
-// 浏览器 History API 适配：与 Dioxus WebHistory::new(None, true) 保持相同的滚动位置协议。
-// 路由匹配不在这里解析；本模块只负责读取当前地址、写入条目，并在页面提交后恢复 popstate 的位置。
+// 同文档历史条目的落点与地址写入。
 
 import { onCleanup } from "solid-js";
 
-/** 浏览器滚动位置；history state 仍按 Dioxus 的 `[x, y]` 数组保存。 */
-export interface ScrollPosition {
-  readonly x: number;
-  readonly y: number;
+import { createUuidV4 } from "../platform/uuid";
+import { notifyLocationWritten } from "./location-notice";
+import type { ScrollPosition, ScrollTarget } from "./scroll";
+import { fragmentTarget, hasFragmentTarget, restoreScroll, sameScrollPosition } from "./scroll";
+
+type WriteMode = "push" | "replace";
+
+interface HistorySnapshot {
+  readonly key: string | null;
+  readonly landing: ScrollTarget;
 }
+
+interface HistoryEntry {
+  readonly key: string;
+  landing: ScrollTarget;
+}
+
+const TOP: ScrollPosition = { x: 0, y: 0 };
+const SCROLL_INPUT_WINDOW_MS = 250;
+const SCROLL_KEYS = new Set([
+  "ArrowDown",
+  "ArrowLeft",
+  "ArrowRight",
+  "ArrowUp",
+  "End",
+  "Home",
+  "PageDown",
+  "PageUp",
+  " ",
+]);
+const queryWriters = new WeakMap<Window, (route: string, mode: WriteMode) => boolean>();
 
 /** 浏览器历史适配器。 */
 export interface WebHistory {
-  /** 当前地址的 pathname + search + hash，不含 origin。 */
   currentRoute(): string;
-  /** 先保存当前滚动位置，再新增一条历史记录；地址相同时不重复写入。 */
-  push(route: string): void;
-  /** 用当前滚动位置替换当前条目。 */
-  replace(route: string): void;
-  /** 返回上一条历史记录；实际路由更新由随后的 popstate 完成。 */
+  navigate(route: string, mode: WriteMode): boolean;
   goBack(): void;
-  /** 在目标页面提交后的下一帧恢复 popstate 保存的位置；导航已变化或路由已卸载时跳过。 */
-  restoreScrollAfterCommit(position: ScrollPosition, isCurrent: () => boolean): void;
+  restoreScrollAfterCommit(): void;
 }
 
-/** 创建历史适配器所需的回调。 */
+/** 原生导航完成后刷新路由匹配；滚动由历史条目管理。 */
 export interface WebHistoryOptions {
-  /** popstate 已经发生、浏览器地址已是目标地址时调用，并传入该条目保存的位置。 */
-  readonly onPopState: (position: ScrollPosition | null) => void;
+  readonly onLocationChanged: () => void;
 }
 
-function currentWindowRoute(): string {
-  const pathname = window.location.pathname || "/";
-  return `${pathname}${window.location.search}${window.location.hash}`;
+function currentWindowRoute(includeEmptyQuery = false): string {
+  const location = window.location;
+  const { pathname, search, hash } = location;
+  // location.search 将末尾的裸问号读成空串，比较写入地址时仍须区分。
+  const emptyQuery =
+    includeEmptyQuery && search === "" && location.href?.split("#", 1)[0]?.endsWith("?") ? "?" : "";
+  return `${pathname || "/"}${search || emptyQuery}${hash}`;
 }
 
-function currentScrollPosition(): ScrollPosition {
-  return { x: window.scrollX, y: window.scrollY };
+function currentScroll(): ScrollPosition {
+  return { x: window.scrollX ?? 0, y: window.scrollY ?? 0 };
 }
 
-function positionState(position: ScrollPosition): [number, number] {
-  return [position.x, position.y];
+function positionTarget(position: ScrollPosition): ScrollTarget {
+  return { kind: "position", position };
 }
 
-function replaceState(position: ScrollPosition, url: string | null): boolean {
+function fragmentInRoute(route: string): ScrollTarget | null {
+  const hash = route.indexOf("#");
+  return hash === -1 ? null : fragmentTarget(route.slice(hash));
+}
+
+function readEntry(): HistorySnapshot | null {
+  let state: unknown;
   try {
-    if (url === null) {
-      window.history.replaceState(positionState(position), "");
+    state = window.history.state;
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(state)) {
+    return null;
+  }
+  const [first, second, rawKey]: unknown[] = state;
+  const key = typeof rawKey === "string" ? rawKey : null;
+  if (first === "fragment" && typeof second === "string" && key !== null) {
+    return { key, landing: { kind: "fragment", id: second } };
+  }
+  if (
+    typeof first === "number" &&
+    typeof second === "number" &&
+    Number.isFinite(first) &&
+    Number.isFinite(second)
+  ) {
+    return { key, landing: positionTarget({ x: first, y: second }) };
+  }
+  return null;
+}
+
+function writeEntry(
+  mode: WriteMode,
+  entry: HistorySnapshot,
+  route?: string,
+  onWritten?: () => void,
+): boolean {
+  try {
+    const { key, landing } = entry;
+    const entryKey = key ?? createUuidV4();
+    // 坐标继续兼容旧 [x, y]；未完成的片段在该条目里单独存为目标。
+    const state =
+      landing.kind === "fragment"
+        ? ["fragment", landing.id, entryKey]
+        : [landing.position.x, landing.position.y, entryKey];
+    if (mode === "push") {
+      window.history.pushState(state, "", route);
     } else {
-      window.history.replaceState(positionState(position), "", url);
+      window.history.replaceState(state, "", route);
     }
-    return true;
   } catch {
-    // Dioxus 忽略 History API 的失败；失败时保留原地址与状态。
+    // 浏览器拒绝写入时，查询状态仍以原地址为准。
     return false;
   }
-}
-
-function pushState(position: ScrollPosition, url: string): boolean {
-  try {
-    window.history.pushState(positionState(position), "", url);
-    return true;
-  } catch {
-    // 跨源等非法地址不能写入历史条目；调用方随后按当前地址重新解析。
-    return false;
+  onWritten?.();
+  if (route !== undefined) {
+    // 成功写入地址并登记条目后才发布快照，确保路由快照、已应用查询与地址取自同一次写入。
+    notifyLocationWritten();
   }
+  return true;
 }
 
-function updateCurrentScroll(): void {
-  void replaceState(currentScrollPosition(), null);
-}
-
-function savedScrollPosition(): ScrollPosition | null {
-  const state: unknown = window.history.state;
-  if (!Array.isArray(state) || state.length < 2) {
-    return null;
+/** 查询 replace 沿用当前落点；push 继承同页待定位的片段或从当前视口开始。 */
+export function writeLocationPreservingScroll(route: string, mode: WriteMode): boolean {
+  const writer = queryWriters.get(window);
+  if (writer !== undefined) {
+    return writer(route, mode);
   }
-  const x: unknown = state[0];
-  const y: unknown = state[1];
-  if (typeof x !== "number" || typeof y !== "number") {
-    return null;
-  }
-  return { x, y };
+  const saved = mode === "replace" ? readEntry() : null;
+  return (
+    route !== currentWindowRoute(true) &&
+    writeEntry(mode, saved ?? { key: null, landing: positionTarget(currentScroll()) }, route)
+  );
 }
 
-/**
- * 创建与 Dioxus WebHistory 对齐的浏览器历史。
- * 初始化时接管滚动恢复并给当前条目写入滚动 state；之后的 push/replace 写入
- * `[scrollX, scrollY]` 数组。popstate 只把位置交给路由；路由要等目标页面提交后再请求恢复，
- * 避免异步页面尚未挂载时把位置滚动到一个错误的文档高度；路由卸载会取消尚未执行的恢复帧。
- */
+/** 每个条目只拥有一个落点。未完成的片段在离开后仍可在前进或后退时继续等待。 */
 export function createWebHistory(options: WebHistoryOptions): WebHistory {
   if ("scrollRestoration" in window.history) {
     window.history.scrollRestoration = "manual";
   }
 
-  const currentUrl = currentWindowRoute();
-  void replaceState(currentScrollPosition(), currentUrl);
-
-  const handlePopState = (): void => {
-    options.onPopState(savedScrollPosition());
+  const snapshot = readEntry();
+  const initialFragment = fragmentTarget(window.location.hash);
+  const entries = new Map<string, HistoryEntry>();
+  let active: HistoryEntry = {
+    key: snapshot?.key ?? createUuidV4(),
+    landing: initialFragment ?? snapshot?.landing ?? positionTarget(currentScroll()),
   };
-  let restoreFrame: number | null = null;
-  const cancelPendingRestore = (): void => {
-    if (restoreFrame !== null) {
-      window.cancelAnimationFrame(restoreFrame);
-      restoreFrame = null;
+  entries.set(active.key, active);
+  if (snapshot?.key == null || initialFragment !== null) {
+    void writeEntry("replace", active);
+  }
+
+  let activeRoute = currentWindowRoute();
+  let waiting = initialFragment !== null || snapshot !== null;
+  let stopRestore: (() => void) | null = null;
+  let departurePosition: ScrollPosition | null = null;
+  let nativeFragmentPending = false;
+  let inputAt: number | null = null;
+  let ownScroll: ScrollPosition | null = null;
+  let applyingScroll = false;
+
+  const stopWaiting = (): void => {
+    stopRestore?.();
+    stopRestore = null;
+    waiting = false;
+  };
+  const activate = (entry: HistoryEntry, restore: boolean): void => {
+    stopWaiting();
+    active = entry;
+    activeRoute = currentWindowRoute();
+    entries.set(entry.key, entry);
+    departurePosition = null;
+    nativeFragmentPending = false;
+    inputAt = null;
+    waiting = restore;
+  };
+  const recordPosition = (position: ScrollPosition, persist: boolean): void => {
+    active.landing = positionTarget(position);
+    if (!persist) {
+      return;
+    }
+    const saved = readEntry();
+    if (
+      saved?.key !== active.key ||
+      saved.landing.kind !== "position" ||
+      !sameScrollPosition(saved.landing.position, position)
+    ) {
+      void writeEntry("replace", active);
     }
   };
-  window.addEventListener("popstate", handlePopState);
+  const saveOnDeparture = (persist: boolean): void => {
+    if (departurePosition !== null) {
+      recordPosition(departurePosition, persist);
+      departurePosition = null;
+    }
+  };
+  const performScroll = (scroll: () => void): void => {
+    const before = currentScroll();
+    applyingScroll = true;
+    try {
+      scroll();
+    } finally {
+      const after = currentScroll();
+      if (!sameScrollPosition(before, after)) {
+        ownScroll = after;
+      }
+      applyingScroll = false;
+    }
+  };
+  const noteScrollInput = (event: Event): void => {
+    if (!event.defaultPrevented) {
+      inputAt = performance.now();
+    }
+  };
+  const noteScrollKey = (event: KeyboardEvent): void => {
+    if (SCROLL_KEYS.has(event.key)) {
+      noteScrollInput(event);
+    }
+  };
+  const trackScroll = (): void => {
+    if (applyingScroll) {
+      return;
+    }
+    const key = readEntry()?.key ?? null;
+    if (key === null ? activeRoute !== currentWindowRoute() : key !== active.key) {
+      return;
+    }
+    const next = currentScroll();
+    // 自己调用滚动后可能异步收到事件；输入事件才是用户滚动的依据。
+    const fromModule = ownScroll !== null && sameScrollPosition(ownScroll, next);
+    ownScroll = null;
+    if (fromModule) {
+      return;
+    }
+    // 无输入佐证的滚动也让出视口，但不能把布局截短的位置写进历史。
+    stopWaiting();
+    if (
+      nativeFragmentPending ||
+      (inputAt !== null && performance.now() - inputAt <= SCROLL_INPUT_WINDOW_MS)
+    ) {
+      departurePosition = next;
+    }
+    nativeFragmentPending = false;
+  };
+  const restoreScrollAfterCommit = (): void => {
+    if (waiting && stopRestore === null) {
+      stopRestore = restoreScroll(active.landing, performScroll, () => {
+        stopWaiting();
+        recordPosition(currentScroll(), true);
+      });
+    }
+  };
+  const enterFromHistory = (): void => {
+    const stored = readEntry();
+    if (stored?.key === active.key && activeRoute === currentWindowRoute()) {
+      return;
+    }
+    const fragment = stored === null ? fragmentTarget(window.location.hash) : null;
+    const native = fragment?.kind === "fragment" && hasFragmentTarget(fragment.id);
+    const missing = fragment !== null && !native;
+    // popstate 时浏览器已切换条目，来源的新落点只能先记在内存。
+    saveOnDeparture(false);
+    const key = stored?.key ?? createUuidV4();
+    const next = entries.get(key) ?? {
+      key,
+      landing: stored?.landing ?? fragment ?? positionTarget(currentScroll()),
+    };
+    activate(next, stored !== null || missing);
+    // 原生片段可能在 popstate 之后才滚动；离开前，落点仍由目标 ID 表示。
+    nativeFragmentPending = native;
+    if (stored?.key == null) {
+      void writeEntry("replace", next);
+    }
+    options.onLocationChanged();
+    if (missing) {
+      // 原生同页链接不必等待路由重新挂载；popstate 和 hashchange 共用已登记的目标。
+      restoreScrollAfterCommit();
+    }
+  };
+  const handleHashChange = (event: HashChangeEvent): void => {
+    if (event.newURL === window.location.href && activeRoute !== currentWindowRoute()) {
+      enterFromHistory();
+    }
+  };
+  const leaveDocument = (): void => saveOnDeparture(true);
+
+  const navigateTo = (route: string, mode: WriteMode, landing: ScrollTarget, restore: boolean) => {
+    if (route === currentWindowRoute(true)) {
+      return false;
+    }
+    if (mode === "push") {
+      saveOnDeparture(true);
+    }
+    const next = { key: mode === "push" ? createUuidV4() : active.key, landing };
+    return writeEntry(mode, next, route, () => activate(next, restore));
+  };
+  queryWriters.set(window, (route, mode) => {
+    if (mode === "push") {
+      const fragment = fragmentInRoute(route);
+      const pending =
+        waiting &&
+        active.landing.kind === "fragment" &&
+        fragment?.kind === "fragment" &&
+        fragment.id === active.landing.id &&
+        route.split(/[?#]/u, 1)[0] === window.location.pathname;
+      const written = navigateTo(
+        route,
+        mode,
+        pending ? fragment : positionTarget(currentScroll()),
+        pending,
+      );
+      if (written && pending) {
+        // 查询写入复用页面，新条目仍要自行安排待定位的片段。
+        restoreScrollAfterCommit();
+      }
+      return written;
+    }
+    // replace 只改 URL；落点仍归同一个条目，等待和用户位置都继续有效。
+    return (
+      route !== currentWindowRoute(true) &&
+      writeEntry("replace", active, route, () => {
+        activeRoute = currentWindowRoute();
+      })
+    );
+  });
+
+  const scrollInputs = ["wheel", "touchmove", "pointerdown"] as const;
+  for (const type of scrollInputs) {
+    window.addEventListener(type, noteScrollInput, { passive: true });
+  }
+  window.addEventListener("keydown", noteScrollKey);
+  window.addEventListener("scroll", trackScroll, { passive: true });
+  window.addEventListener("pagehide", leaveDocument);
+  window.addEventListener("popstate", enterFromHistory);
+  window.addEventListener("hashchange", handleHashChange);
   onCleanup(() => {
-    window.removeEventListener("popstate", handlePopState);
-    cancelPendingRestore();
+    for (const type of scrollInputs) {
+      window.removeEventListener(type, noteScrollInput);
+    }
+    window.removeEventListener("keydown", noteScrollKey);
+    window.removeEventListener("scroll", trackScroll);
+    window.removeEventListener("pagehide", leaveDocument);
+    window.removeEventListener("popstate", enterFromHistory);
+    window.removeEventListener("hashchange", handleHashChange);
+    stopWaiting();
+    queryWriters.delete(window);
   });
 
   return {
     currentRoute: currentWindowRoute,
-    push(route) {
-      if (route === currentWindowRoute()) {
-        return;
+    navigate(route, mode) {
+      const fragment = fragmentInRoute(route);
+      if (!navigateTo(route, mode, fragment ?? positionTarget(TOP), fragment !== null)) {
+        return false;
       }
-      updateCurrentScroll();
-      if (pushState(currentScrollPosition(), route)) {
-        window.scrollTo(0, 0);
-      }
-    },
-    replace(route) {
-      if (replaceState(currentScrollPosition(), route)) {
-        window.scrollTo(0, 0);
-      }
+      performScroll(() => window.scrollTo({ left: 0, top: 0, behavior: "instant" }));
+      return true;
     },
     goBack() {
+      saveOnDeparture(true);
       window.history.back();
     },
-    restoreScrollAfterCommit(position, isCurrent) {
-      cancelPendingRestore();
-      restoreFrame = window.requestAnimationFrame(() => {
-        restoreFrame = null;
-        if (isCurrent()) {
-          window.scrollTo(position.x, position.y);
-        }
-      });
-    },
+    restoreScrollAfterCommit,
   };
 }

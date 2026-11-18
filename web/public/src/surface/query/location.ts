@@ -1,7 +1,7 @@
 // 地址栏查询读取、首次地址快照与位置变化版本上下文。
 
 import { type Cell, createCell } from "@auction/web-shared/reactive/cell";
-import { notifyLocationWritten } from "@auction/web-shared/router";
+import { writeLocationPreservingScroll } from "@auction/web-shared/router";
 import { createContext } from "solid-js";
 
 import { type PublicBoardQuery, publicBoardQueryDefault } from "./board";
@@ -12,23 +12,9 @@ export interface InitialPublicSearch {
   searchFor(pathname: string): string | null;
 }
 
-// 查询状态直接改 History API 时 Router 不会收到通知；登录返回地址等依赖地址栏的响应式
-// 计算需要一个覆盖这些写入的版本信号，不能只依赖 Router 的当前位置。
-const browserLocationRevision = createCell(0);
-
-/** 标记浏览器地址已由本模块直接改写；Router 导航另有自己的位置信号。 */
-export function markBrowserLocationChanged(): void {
-  browserLocationRevision.update((revision) => Math.min(revision + 1, Number.MAX_SAFE_INTEGER));
-}
-
-/** 响应式读取地址栏直接写入的版本；在 memo、effect 或 JSX 中调用会订阅后续变化。 */
-export function readBrowserLocationRevision(): number {
-  return browserLocationRevision();
-}
-
-/** 读取当前地址栏查询；首次挂载时可恢复 Router 尚未声明的 query。
+/** 读取当前地址栏查询；首次规范化期间查询暂时为空时可恢复快照。
  *
- * 恢复只在 `replaceState` 成功后才采用初始 search：写地址失败时解析到的仍是当前空查询，
+ * 恢复只在地址替换成功后才采用初始 search：写地址失败时解析到的仍是当前空查询，
  * 不能把未真正恢复的参数当成地址栏状态。首次地址快照由调用方在自己的组件上下文取得并显式
  * 传入；模块级“最近创建的快照”会让多个宿主或重新挂载的实例互相串用。
  */
@@ -50,34 +36,17 @@ export function readPublicQuery(initial: InitialPublicSearch | null = null): Pub
   }
   if (search === "") {
     const initialSearch = initial?.searchFor(pathname) ?? null;
-    if (initialSearch !== null) {
-      // 恢复原 query 时保留当前片段与 history.state，避免破坏锚点和滚动位置。
-      try {
-        const history = window.history;
-        let state: unknown = null;
-        try {
-          state = history.state;
-        } catch {
-          // state 读取失败时 Rust 使用 null，但仍继续恢复 query。
-        }
-        let hash: string;
-        try {
-          hash = window.location.hash;
-        } catch {
-          hash = "";
-        }
-        history.replaceState(state, "", `${pathname}${initialSearch}${hash}`);
-        search = initialSearch;
-        notifyLocationWritten();
-      } catch {
-        // 地址栏不可写时保持当前空 query，与 Rust 忽略 replace 失败一致。
-      }
+    if (
+      initialSearch !== null &&
+      writeLocationPreservingScroll(`${pathname}${initialSearch}${currentBrowserHash()}`, "replace")
+    ) {
+      search = initialSearch;
     }
   }
   return parsePublicQuery(pathname, search);
 }
 
-/** Router 首次挂载前的公开端地址快照，用于恢复未在路由表中声明的查询参数。 */
+/** Router 首次规范化期间的公开端查询回退。 */
 export class InitialPublicLocation {
   private readonly pathname: string;
   private readonly search: string;
@@ -142,30 +111,11 @@ export class InitialPublicLocation {
     if (!beforeHash.endsWith("?")) {
       return;
     }
-    let hash: string;
-    try {
-      hash = location.hash;
-    } catch {
-      hash = "";
-    }
-    const url = `${this.pathname}${hash}`;
-    try {
-      const history = window.history;
-      let state: unknown = null;
-      try {
-        state = history.state;
-      } catch {
-        // state 读取失败时 Rust 使用 null，但仍清理地址栏。
-      }
-      history.replaceState(state, "", url);
-      notifyLocationWritten();
-    } catch {
-      // Rust 明确忽略清理 Router 空 query 标记时的地址栏写入失败。
-    }
+    writeLocationPreservingScroll(`${this.pathname}${currentBrowserHash()}`, "replace");
   }
 }
 
-/** 在 Router 规范化未声明的 query 前保存首次 pathname 与 search。 */
+/** 保存首次 pathname 与 search，供 Router 首次规范化短暂回退。 */
 export function initialPublicLocation(): InitialPublicLocation {
   if (typeof window === "undefined") {
     return new InitialPublicLocation("/", "", false);
@@ -226,19 +176,14 @@ export function currentBrowserSearch(): string {
   }
 }
 
-/** 读取当前滚动位置作为历史状态；任一轴读取失败时 Rust 使用 0。 */
-export function browserScrollState(): [number, number] {
-  let scrollX = 0;
-  let scrollY = 0;
-  try {
-    scrollX = window.scrollX;
-  } catch {
-    // Rust 对 X 滚动位置读取失败使用 0，不影响历史写入。
+/** 当前地址片段；读取失败时按无片段处理。 */
+export function currentBrowserHash(): string {
+  if (typeof window === "undefined") {
+    return "";
   }
   try {
-    scrollY = window.scrollY;
+    return window.location.hash;
   } catch {
-    // Y 滚动位置读取失败同样使用 0。
+    return "";
   }
-  return [scrollX, scrollY];
 }

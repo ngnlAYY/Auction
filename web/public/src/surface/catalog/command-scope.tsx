@@ -1,7 +1,7 @@
 // 页面级竞价弹窗宿主；读取分支与目录阶段只更新能力，不拥有已提交命令。
 
 import { MAX_PUBLIC_BID_AMOUNT } from "@auction/contracts/dto/public/commands";
-import { useConfirmCommand } from "@auction/web-shared/net/commands";
+import { type ConfirmCommand, useConfirmCommand } from "@auction/web-shared/net/commands";
 import type { Cell } from "@auction/web-shared/reactive/cell";
 import { createCell } from "@auction/web-shared/reactive/cell";
 import type { Result } from "@auction/web-shared/result";
@@ -27,6 +27,7 @@ import {
 } from "../commands/pending";
 import { activeOwnedProxy, type ProxyFormInput, proxyForm } from "../commands/proxy";
 import { BidRetry } from "../commands/retry";
+import { readPublicQuery } from "../query";
 import {
   currentUser,
   useWatchCommandOwner,
@@ -87,14 +88,35 @@ export function catalogCommandSession(
   ready: boolean,
   hostedUserId: string,
   confirmedUserId: string | null,
+  targetAllowsBid = true,
 ): { authenticated: boolean; canSubmit: boolean } {
   const authenticated = catalogIdentityMatches(snapshot, hostedUserId, confirmedUserId);
-  return { authenticated, canSubmit: authenticated && ready && snapshot?.ok === true };
+  return {
+    authenticated,
+    canSubmit: targetAllowsBid && authenticated && ready && snapshot?.ok === true,
+  };
+}
+
+/** 发送时再核对地址目标；恢复路径只重放宿主已冻结且发出过的命令。 */
+function useCatalogConfirmCommand<P>(
+  targetAllowsBid: () => boolean,
+): ConfirmCommand<P, CommandError> {
+  const command = useConfirmCommand<P, CommandError>();
+  return {
+    ...command,
+    submit(pending, action, outcomeUncertain, onSuccess, onFailure) {
+      // 非法场次禁止产生新的提交，已经发出的未知命令仍由原宿主使用原 command_id 恢复。
+      if (command.uncertain.peek() || targetAllowsBid()) {
+        command.submit(pending, action, outcomeUncertain, onSuccess, onFailure);
+      }
+    },
+  };
 }
 
 /** 看板按已确认用户建键；单个宿主只持有本身份的命令与抽屉。 */
 export function CatalogCommandScope(props: {
   readonly userId: string | null;
+  readonly auctionInvalid: boolean;
   readonly children: JSX.Element;
 }): JSX.Element {
   const dialog = createCell<CommandDialogInput | null>(null);
@@ -106,7 +128,6 @@ export function CatalogCommandScope(props: {
   const pendingWatches = useWatchCommandOwner(props.userId);
   const userId = canonicalUuid(props.userId) ?? NIL_UUID;
   const identity = { userId };
-  const input = () => dialog();
 
   return (
     <WatchCommandOwnerContext value={pendingWatches}>
@@ -116,8 +137,14 @@ export function CatalogCommandScope(props: {
             <PublicCommandIdentityContext value={identity}>
               {props.children}
               <WatchCommandStatus owner={pendingWatches} />
-              <Show when={input()}>
-                {(current) => <CatalogCommandDialog input={current()} dialog={dialog} />}
+              <Show when={dialog()}>
+                {(current) => (
+                  <CatalogCommandDialog
+                    input={current()}
+                    dialog={dialog}
+                    auctionInvalid={props.auctionInvalid}
+                  />
+                )}
               </Show>
               <CatalogToastHost toast={toast.toast} />
             </PublicCommandIdentityContext>
@@ -131,22 +158,31 @@ export function CatalogCommandScope(props: {
 function CatalogCommandDialog(props: {
   readonly input: CommandDialogInput;
   readonly dialog: Cell<CommandDialogInput | null>;
+  readonly auctionInvalid: boolean;
 }): JSX.Element {
   const input = () => props.input;
   const refreshGeneration = useContext(PublicRefreshGenerationContext);
   const session = useContext(PublicSessionResourceContext);
   const owner = useContext(PublicCommandOwnerContext);
   const identity = useContext(PublicCommandIdentityContext);
+  // popstate 已改地址时，事件处理不能沿用仍显示上一场的表单能力。
+  const targetAllowsBid = () => !props.auctionInvalid && readPublicQuery().invalidAuction === null;
   const commandSession = () =>
-    catalogCommandSession(session(), session.state() === "ready", identity.userId, owner());
+    catalogCommandSession(
+      session(),
+      session.state() === "ready",
+      identity.userId,
+      owner(),
+      targetAllowsBid(),
+    );
   const toasts = useContext(CatalogToastContext);
   // 代理成功投影与命令状态都由稳定宿主持有；表单替换不能取消任务或丢失结果。
   const proxySuccess = createCell<ProxyCommandAuthorization | null>(null);
   // 身份宿主销毁会连带丢弃结果未知的冻结命令；这是与 Rust 实现一致的行为，
   // 如需保留恢复记录，必须两套实现同时调整。
-  const bidCommand = useConfirmCommand<PendingBidCommand, CommandError>();
-  const proxyCreateCommand = useConfirmCommand<PendingProxyCommand, CommandError>();
-  const proxyLowerCommand = useConfirmCommand<PendingProxyCommand, CommandError>();
+  const bidCommand = useCatalogConfirmCommand<PendingBidCommand>(targetAllowsBid);
+  const proxyCreateCommand = useCatalogConfirmCommand<PendingProxyCommand>(targetAllowsBid);
+  const proxyLowerCommand = useCatalogConfirmCommand<PendingProxyCommand>(targetAllowsBid);
   const busy = () =>
     bidCommand.submitting() || proxyCreateCommand.submitting() || proxyLowerCommand.submitting();
   // 二次确认是确认视图的唯一状态来源；不复制到本地信号，避免命令被替换后
@@ -184,7 +220,7 @@ function CatalogCommandDialog(props: {
   // 切换 tab 走同一弹窗快照：actions.rs 的代理资源与刷新订阅据此激活，不另建状态。
   const switchTab = (action: CatalogAction) => {
     const next = props.dialog.peek();
-    if (next === null || next.action === action) {
+    if (next === null || next.action === action || !targetAllowsBid()) {
       return;
     }
     props.dialog.set({ ...next, action });
@@ -195,7 +231,7 @@ function CatalogCommandDialog(props: {
       : input().action === "bid"
         ? t("bid-dialog-title", { code: input().lotCode })
         : t("proxy-dialog-title", { code: input().lotCode });
-  const canBid = () => input().canBid && commandSession().authenticated;
+  const canBid = () => !props.auctionInvalid && input().canBid && commandSession().authenticated;
   const activeProxy = () => activeOwnedProxy(input().proxy) !== null;
   const proxyInput = (): ProxyFormInput => ({
     lotId: input().lotId,
@@ -257,7 +293,7 @@ function CatalogCommandDialog(props: {
                   </div>
                 </div>
               </div>
-              <Show when={!recovering()}>
+              <Show when={!recovering() && !props.auctionInvalid}>
                 {/* 直接出价/代理出价共用同一弹窗；切换只替换表单内容，不新建命令状态。 */}
                 {/* biome-ignore lint/a11y/useSemanticElements: 源码使用 div role=group 保持 DOM 结构。 */}
                 <div class="public-bid-dialog__tabs" role="group" aria-label={t("bid-type-label")}>

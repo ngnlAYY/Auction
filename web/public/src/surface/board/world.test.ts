@@ -280,6 +280,34 @@ test("world_switch_choose_keeps_the_old_world_when_history_write_fails：写入�
   }
 });
 
+test("非法场次的地址不会被自动改成开放世界", async () => {
+  const worlds = worldsResponse([
+    ["main", true],
+    ["isekai", false],
+  ]);
+  const search = "?world=isekai&auction=truncated&page=3";
+  const invalid = mountWorldSwitch({ routeName: "AuctionIndex", worlds, initialUrl: `/${search}` });
+  try {
+    await flushWorlds();
+    expect(invalid.browserSearch()).toBe(search);
+    expect(invalid.selected.peek()).toBe("isekai");
+  } finally {
+    invalid.dispose();
+  }
+
+  const current = mountWorldSwitch({
+    routeName: "AuctionIndex",
+    worlds,
+    initialUrl: "/?world=isekai",
+  });
+  try {
+    await waitFor(() => current.selected.peek() === "main");
+    expect(new URLSearchParams(current.browserSearch()).has("world")).toBe(false);
+  } finally {
+    current.dispose();
+  }
+});
+
 test("world_switch_choose_does_not_notify_an_unchanged_single_world：全部与主世界之间切换不重复通知", async () => {
   const mounted = mountWorldSwitch({
     routeName: "History",

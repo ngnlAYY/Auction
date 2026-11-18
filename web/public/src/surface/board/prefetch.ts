@@ -30,7 +30,7 @@ export function rememberCurrentAuction(world: string, auctionId: string): void {
 /** 看板首页启动时调用一次。参数推导与看板目录读取完全一致（分类/分组 `all` 视为不筛选、页码
  * 至少为 1），保证两者请求同一 URL；带 `auction` 深链的页面读取历史场次，不预取。 */
 export function prefetchBoardLots(world: string, query: PublicBoardQuery): void {
-  if (query.auctionId !== null) {
+  if (query.auctionId !== null || query.invalidAuction !== null) {
     return;
   }
   const stored = getItem(currentAuctionKey(world));

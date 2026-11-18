@@ -121,17 +121,18 @@ export function createWorldSwitch(props: CreateWorldSwitchOptions): WorldSwitch 
         setSelectedWorld(requestedWorld);
         return;
       }
-      // 跨世界页与看板的往期深链保留目标世界；论坛即使带 auction 也不是往期看板。
-      const latestHistorical =
+      // 看板上显式场次的地址不可被世界纠偏改写，包括等待用户修复的非法目标。
+      const preserveWorld =
         latestFamily === "multi" ||
-        (isBoardRouteName(latestRouteName) && latestQuery.auctionId !== null);
+        (isBoardRouteName(latestRouteName) &&
+          (latestQuery.auctionId !== null || latestQuery.invalidAuction !== null));
       const latestActive =
-        latestHistorical || state.catalog.enabled.length === 0
+        preserveWorld || state.catalog.enabled.length === 0
           ? requestedWorld
           : activeSingleWorld(state.catalog.enabled, requestedWorld);
       const shouldRewrite =
         routeUsesSingleWorld(latestRouteName) &&
-        !latestHistorical &&
+        !preserveWorld &&
         state.catalog.enabled.length > 0 &&
         latestActive !== requestedWorld;
       if (shouldRewrite) {
@@ -171,10 +172,7 @@ export function createWorldSwitch(props: CreateWorldSwitchOptions): WorldSwitch 
     const written = updatePublicQueryState(
       props.shellQueryState,
       (query) => {
-        Object.assign(
-          query,
-          worldScopeSwitchQuery(currentRouteName, query, scope, historicalBoard),
-        );
+        Object.assign(query, worldScopeSwitchQuery(currentRouteName, scope, historicalBoard));
       },
       "push",
     );

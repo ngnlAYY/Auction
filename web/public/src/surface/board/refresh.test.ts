@@ -27,7 +27,9 @@ import {
   PublicSessionResourceContext,
   type PublicSessionResult,
 } from "..";
+import { loadCommandScopeFixture } from "../catalog/command-scope-fixture.test";
 import { publicBoardQueryDefault } from "../query";
+import { parsePublicQuery } from "../query/parse";
 import {
   CurrentAuctionContext,
   PageVisibilityContext,
@@ -35,7 +37,6 @@ import {
   SelectedWorldContext,
 } from "../shell/contexts";
 import { currentUser } from "../watches/commands";
-import { mountAuctionBoard } from ".";
 import { PublicDisplayedAuctionContext, PublicPageRealtimeTargetContext } from "./realtime";
 import {
   BID_REFRESH_COALESCE_MILLIS,
@@ -47,6 +48,10 @@ import {
   planBidRefresh,
   refreshPublicReads,
 } from "./refresh";
+
+const {
+  board: { mountAuctionBoard },
+} = await loadCommandScopeFixture();
 
 interface LotRequest {
   readonly page: number;
@@ -150,7 +155,7 @@ function interceptLots(): LotRequest[] {
   return requests;
 }
 
-function mountCatalog() {
+function mountCatalog(initialQuery = publicBoardQueryDefault()) {
   const requests = interceptLots();
   return createRoot((dispose) => {
     const owners: (string | null)[] = [];
@@ -166,7 +171,7 @@ function mountCatalog() {
     const commandOwner = createValueMemo(() => currentUser(session()));
     const revision = createCell(0);
     const refresh = createCell(0);
-    const query = createCell({ ...publicBoardQueryDefault(), pageSize: 100 });
+    const query = createCell({ ...initialQuery, pageSize: 100 });
     const notify = () => {
       invalidateAll();
       revision.update((value) => value + 1);
@@ -226,6 +231,27 @@ async function settleCatalog(): Promise<void> {
   }
   flush();
 }
+
+test("非法场次不加载当前可出价目录，显式恢复当前场次后才读取", async () => {
+  const board = mountCatalog(parsePublicQuery("/", "?world=main&auction=truncated"));
+  try {
+    flush();
+    await settleCatalog();
+    expect(board.requests).toHaveLength(0);
+
+    board.query.set({ ...publicBoardQueryDefault(), pageSize: 100 });
+    await settleCatalog();
+    expect(board.requests).toHaveLength(1);
+
+    board.query.set(parsePublicQuery("/", "?auction="));
+    await settleCatalog();
+    expect(board.requests[0]?.signal.aborted).toBe(true);
+    expect(board.requests).toHaveLength(1);
+    expect(board.lotsReady.peek()).toBe(false);
+  } finally {
+    board.dispose();
+  }
+});
 
 test("匿名晚到、登录确认和退出复用在途 lots，分页、筛选、刷新仍发起新读", async () => {
   const board = mountCatalog();

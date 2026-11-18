@@ -19,7 +19,7 @@ import {
 } from "@auction/web-shared/ui/i18n";
 import type { FluentBundle } from "@fluent/bundle";
 import type { JSX } from "@solidjs/web";
-import { createEffect, Show } from "solid-js";
+import { createEffect, Show, useContext } from "solid-js";
 import {
   type InitialPublicLocation,
   InitialPublicLocationContext,
@@ -36,8 +36,9 @@ import { NotFoundPage, PUBLIC_ROUTES } from "./route";
 export { PUBLIC_LOCALE_CATALOG } from "./locale-catalog";
 
 export function App(): JSX.Element {
-  // Router 会规范化未声明的 query；在它挂载前分别保留页面查询状态和认证返回来源。
+  // 两个首次地址快照都只在 Router 首次渲染的规范化窗口有效。
   const initialLocation = initialPublicLocation();
+  const initialReturn = initialLoginReturnLocation();
   const built = buildBundle(
     DEFAULT_PUBLIC_LOCALE,
     PUBLIC_LOCALE_CATALOG.defaultFtl,
@@ -46,7 +47,7 @@ export function App(): JSX.Element {
   );
   return (
     <InitialPublicLocationContext value={initialLocation}>
-      <InitialLoginReturnLocationContext value={initialLoginReturnLocation()}>
+      <InitialLoginReturnLocationContext value={initialReturn}>
         <Show
           when={built.ok ? built.value : undefined}
           fallback={<div class="app-root">Unable to initialize translations.</div>}
@@ -67,12 +68,13 @@ function LocalizedApp(props: {
   useLocaleEffects(session);
   // 首次渲染前恢复 hv.theme，应用显示时已是目标主题。
   const themeState: ThemeState = useThemeEffects();
-  // Router 只在语言就绪后挂载：已保存的非默认语言首帧只渲染空壳，此时作废快照会让
-  // 冷加载地址里的 query 在 Router 规范化后无从恢复。快照保留到 Router 首次渲染结束。
+  const initialReturn = useContext(InitialLoginReturnLocationContext);
+  // 已保存的非默认语言首帧只渲染空壳；等 Router 真正挂载后才作废首次地址。
   const routerRendered = createValueMemo(() => session.isReady());
   createEffect(routerRendered, (ready) => {
     if (ready) {
       props.initialLocation.expire();
+      initialReturn?.expire();
     }
   });
   return (

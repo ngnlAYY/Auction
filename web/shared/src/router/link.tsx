@@ -56,9 +56,8 @@ function hasClassNames(value: JSX.ClassValue): boolean {
 /**
  * 客户端导航链接。
  *
- * 当前页判定把 href 与 Router 的 currentLocationString() 比较；该快照包含地址栏实际的
- * pathname + search + hash，并会在应用绕过 Router 直接写 History 后经
- * notifyLocationWritten() 刷新。因此 href 与地址栏完全一致才算当前页，与 Dioxus Link 相同。
+ * 当前页判定使用 Router 的实际地址快照（pathname + search + hash）。
+ * 路由导航和查询写入成功后，href 与地址栏完全一致才算当前页。
  * 导航链接带 query 时无法用整串 href 判断当前页，调用方可传 `aria-current` 显式覆盖该判定。
  */
 export function Link(props: LinkProps): JSX.Element {

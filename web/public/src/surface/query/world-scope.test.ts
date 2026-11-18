@@ -2,7 +2,6 @@
 
 import { expect, test } from "bun:test";
 
-import type { PublicBoardQuery } from "./board";
 import type {
   NormalizedWorldQuery,
   WorldScope,
@@ -273,36 +272,6 @@ test("public_auction_home_query_keeps_the_explicit_navigation_world：首页查�
   expect(publicAuctionHomeQuery("isekai").world).toBe("isekai");
 });
 
-function switchFixture(): PublicBoardQuery {
-  return {
-    ...publicBoardQueryDefault(),
-    world: "isekai",
-    auctionId: "67e55044-10b1-426f-9247-bb680e5fe0c8",
-    category: "clo",
-    equipmentGroup: "rare",
-    maxLevel: "400",
-    includeUnleveled: "false",
-    status: "live",
-    historyName: "Robe",
-    historyFrom: "2025-01-01",
-    historyTo: "2025-02-01",
-    historyMinPrice: "10",
-    historyMaxPrice: "100",
-    historyBuyer: "Buyer",
-    historySeller: "Seller",
-    historySort: "price_desc",
-    historyGroup: "buyer",
-    bidLogLot: "One12",
-    page: 3,
-    pageSize: 50,
-    movementPage: 2,
-    movementPageSize: 50,
-    bidPage: 2,
-    proxyPage: 2,
-    passthrough: [["utm", "lane"]],
-  };
-}
-
 test("world_scope_switch_clears_auction_list_dependencies：往期拍卖切换世界清空场次、类型与页码", () => {
   const scopes: readonly [WorldScope, string | null][] = [
     ["all", null],
@@ -310,12 +279,8 @@ test("world_scope_switch_clears_auction_list_dependencies：往期拍卖切换�
     ["isekai", "isekai"],
   ];
   for (const [scope, world] of scopes) {
-    const current = switchFixture();
-    const snapshot = structuredClone(current);
-    const next = worldScopeSwitchQuery("AuctionList", current, scope, false);
-    expect(next).toEqual({ ...snapshot, world, auctionId: null, category: null, page: 1 });
-    expect(next).not.toBe(current);
-    expect(current).toEqual(snapshot);
+    const next = worldScopeSwitchQuery("AuctionList", scope, false);
+    expect(next).toEqual({ world, auctionId: null, category: null, page: 1 });
   }
 });
 
@@ -326,12 +291,8 @@ test("world_scope_switch_keeps_history_filters_but_resets_page：价格历史切
     ["isekai", "isekai"],
   ];
   for (const [scope, world] of scopes) {
-    const current = switchFixture();
-    const snapshot = structuredClone(current);
-    const next = worldScopeSwitchQuery("History", current, scope, false);
-    expect(next).toEqual({ ...snapshot, world, page: 1 });
-    expect(next).not.toBe(current);
-    expect(current).toEqual(snapshot);
+    const next = worldScopeSwitchQuery("History", scope, false);
+    expect(next).toEqual({ world, page: 1 });
   }
 });
 
@@ -343,18 +304,13 @@ test("world_scope_switch_clears_round_and_lot_filters_for_bidlog_and_fulfillment
   ];
   for (const routeName of ["BidLog", "Fulfillment"] as const) {
     for (const [scope, world] of scopes) {
-      const current = switchFixture();
-      const snapshot = structuredClone(current);
-      const next = worldScopeSwitchQuery(routeName, current, scope, false);
+      const next = worldScopeSwitchQuery(routeName, scope, false);
       expect(next).toEqual({
-        ...snapshot,
         world,
         auctionId: null,
         bidLogLot: null,
         page: 1,
       });
-      expect(next).not.toBe(current);
-      expect(current).toEqual(snapshot);
     }
   }
 });
@@ -366,26 +322,16 @@ test("world_scope_switch_on_single_world_pages_only_changes_the_world：单世�
     ["isekai", "isekai"],
   ];
   for (const [scope, world] of cases) {
-    const current = switchFixture();
-    const snapshot = structuredClone(current);
-    const next = worldScopeSwitchQuery("Rules", current, scope, false);
-    expect(next).toEqual({ ...snapshot, world });
-    expect(next).not.toBe(current);
-    expect(current).toEqual(snapshot);
+    const next = worldScopeSwitchQuery("Rules", scope, false);
+    expect(next).toEqual({ world });
   }
 });
 
 test("world_scope_switch_on_a_historical_board_returns_to_the_world_home：历史看板切换世界回到目标世界首页", () => {
-  const current = switchFixture();
-  const snapshot = structuredClone(current);
-  const isekai = worldScopeSwitchQuery("AuctionIndex", current, "isekai", true);
+  const isekai = worldScopeSwitchQuery("AuctionIndex", "isekai", true);
   expect(isekai).toEqual({
     ...publicBoardQueryDefault(),
     world: "isekai",
   });
-  expect(isekai).not.toBe(current);
-  expect(worldScopeSwitchQuery("AuctionIndex", current, "main", true)).toEqual(
-    publicBoardQueryDefault(),
-  );
-  expect(current).toEqual(snapshot);
+  expect(worldScopeSwitchQuery("AuctionIndex", "main", true)).toEqual(publicBoardQueryDefault());
 });

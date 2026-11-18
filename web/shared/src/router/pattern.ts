@@ -1,10 +1,10 @@
 // 路由定义、路径匹配与规范路由串：只处理静态段、单个动态段和已声明查询参数。
-// 解析口径逐条对应 Dioxus 0.7 的 Route::from_str，包括尾斜杠与非法百分号编码的保留方式。
+// 路径匹配沿用 Dioxus 0.7；地址规范化只改路径，不重写页面拥有的查询与片段。
+
+import { parseQuerySearch } from "../net/query";
 
 /**
- * 一条路由声明；query 按声明顺序决定规范路由串中的查询参数顺序。
- * 已声明但全部缺值的查询不生成裸 `?`：Dioxus 宏会保留该标记，Public 原有入口也会清理它，
- * 本实现按车道契约直接省略。
+ * 一条路由声明；query 列出由路由解码并交给页面的参数。
  *
  * 根路径 `/` 除外，其余 pattern 只允许末尾的一个斜杠产生空段；中间空段会在编译路由表时拒绝。
  * 任意两条定义不得匹配同一地址：段数相同，且每个位置要么是相同的静态段，
@@ -64,8 +64,7 @@ export interface ResolvedRoute {
 }
 
 const HEX_DIGITS = "0123456789ABCDEF";
-const PATH_EXTRA_BYTES = new Set(['"', "#", "<", ">", "?", "^", "`", "{", "}"]);
-const QUERY_EXTRA_BYTES = new Set(['"', "#", "<", ">"]);
+const PATH_EXTRA_BYTES = new Set(['"', "#", "%", "/", "<", ">", "?", "\\", "^", "`", "{", "}"]);
 // ignoreBOM 必须为 true：Rust 的 String::from_utf8 保留 BOM，而 TextDecoder 默认会吞掉它。
 const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 
@@ -130,15 +129,6 @@ function shouldEncodePathByte(byte: number): boolean {
   );
 }
 
-function shouldEncodeQueryByte(byte: number): boolean {
-  return (
-    byte < 0x20 ||
-    byte === 0x7f ||
-    byte === 0x20 ||
-    QUERY_EXTRA_BYTES.has(String.fromCharCode(byte))
-  );
-}
-
 function percentEncode(value: string, shouldEncode: (byte: number) => boolean): string {
   const bytes = new TextEncoder().encode(value);
   let encoded = "";
@@ -152,14 +142,9 @@ function percentEncode(value: string, shouldEncode: (byte: number) => boolean): 
   return encoded;
 }
 
-/** 使用 Dioxus 的 PATH_ASCII_SET 编码一个路径段。 */
+/** 编码一个路径段，段内的分隔字符和百分号不可在规范化时改变路由边界。 */
 export function encodePathSegment(value: string): string {
   return percentEncode(value, shouldEncodePathByte);
-}
-
-/** 使用 Dioxus 的 QUERY_ASCII_SET 编码一个查询参数。 */
-function encodeQueryArgument(value: string): string {
-  return percentEncode(value, shouldEncodeQueryByte);
 }
 
 function compilePattern(definition: RouteDefinition): CompiledRoute {
@@ -253,33 +238,23 @@ export function compileRoutes(routes: readonly RouteDefinition[]): readonly Comp
 
 interface ParsedHref {
   readonly segments: readonly string[];
-  readonly queryText: string;
+  readonly search: string;
+  readonly hash: string;
 }
 
 function parseHref(href: string): ParsedHref | null {
   const hashIndex = href.indexOf("#");
   const routeAndQuery = hashIndex === -1 ? href : href.slice(0, hashIndex);
   const queryIndex = routeAndQuery.indexOf("?");
-  const pathAndQuery = queryIndex === -1 ? routeAndQuery : routeAndQuery.slice(0, queryIndex);
-  const queryText = queryIndex === -1 ? "" : routeAndQuery.slice(queryIndex + 1);
-  const path = pathAndQuery.endsWith("/") ? pathAndQuery.slice(0, -1) : pathAndQuery;
+  const pathname = queryIndex === -1 ? routeAndQuery : routeAndQuery.slice(0, queryIndex);
+  const search = queryIndex === -1 ? "" : routeAndQuery.slice(queryIndex);
+  const hash = hashIndex === -1 ? "" : href.slice(hashIndex);
+  const path = pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
   if (!href.startsWith("/")) {
     return null;
   }
   const segments = path === "" ? [] : path.slice(1).split("/").map(percentDecode);
-  return { segments, queryText };
-}
-
-function parseQuery(queryText: string): Map<string, string> {
-  const values = new Map<string, string>();
-  for (const item of percentDecode(queryText).split("&")) {
-    const separator = item.indexOf("=");
-    if (separator === -1) {
-      continue;
-    }
-    values.set(item.slice(0, separator), item.slice(separator + 1));
-  }
-  return values;
+  return { segments, search: search === "?" ? "" : search, hash };
 }
 
 function matchCompiledRoute(
@@ -335,30 +310,6 @@ function routePath(route: CompiledRoute, params: RouteParams): string {
   return `/${path}`;
 }
 
-function appendQuery(path: string, route: CompiledRoute, query: RouteQuery): string {
-  let result = path;
-  let first = true;
-  for (const name of route.definition.query ?? []) {
-    if (!Object.hasOwn(query, name)) {
-      continue;
-    }
-    const value = query[name];
-    if (value === undefined) {
-      continue;
-    }
-    result += first ? "?" : "&";
-    first = false;
-    result += encodeQueryArgument(`${name}=${value}`);
-  }
-  // 只输出已声明且有值的参数；Dioxus 宏会给全空的 typed query 留下一个裸 `?`，
-  // Public 的旧 Router 另外清理该标记，本实现按任务契约不生成它。
-  return result;
-}
-
-function matchedRouteString(route: CompiledRoute, match: MatchedRoute): string {
-  return appendQuery(routePath(route, match.params), route, match.query);
-}
-
 function notFoundRouteString(segments: readonly string[]): string {
   if (segments.length === 0) {
     return "/";
@@ -376,16 +327,19 @@ export function resolveRoute(routes: readonly CompiledRoute[], href: string): Re
       routeString: notFoundRouteString(segments),
     };
   }
-  const queryValues = parseQuery(parsed.queryText);
+  // 分隔外层字段后再解码，return_to 内的分隔符属于该字段的值。
+  const queryValues = new Map(parseQuerySearch(parsed.search));
+  // 未声明的查询也可能由页面独立消费，且重编码可能改变字面键名（如 `?page`）。
+  const suffix = `${parsed.search}${parsed.hash}`;
   for (const route of routes) {
     const match = matchCompiledRoute(route, parsed.segments, queryValues);
     if (match !== null) {
-      return { match, routeString: matchedRouteString(route, match) };
+      return { match, routeString: `${routePath(route, match.params)}${suffix}` };
     }
   }
   return {
     match: { kind: "not-found", segments: parsed.segments },
-    routeString: notFoundRouteString(parsed.segments),
+    routeString: `${notFoundRouteString(parsed.segments)}${suffix}`,
   };
 }
 

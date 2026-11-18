@@ -162,6 +162,8 @@ data-empty = 현재 진행 중인 경매가 없습니다.
 data-retry = 다시 시도
 auction-empty-no-auction = 이 월드에는 아직 경매가 없어요
 auction-empty-no-auction-hint = 다음 경매는 나중에 다시 확인해 주세요.
+auction-invalid-link = 링크에 지정된 경매가 유효하지 않아요.
+auction-view-current = 현재 경매 보기
 
 
 page-auctions-title = 경매 이력

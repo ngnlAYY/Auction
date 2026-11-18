@@ -451,7 +451,6 @@
 
 .public-rules-page__document :is(h2, h3, h4, h5, h6) {
   line-height: 1.35;
-  scroll-margin-block-start: var(--space-6);
 }
 
 .public-rules-page__document h2 {
@@ -1625,8 +1624,17 @@
   overflow-wrap: anywhere;
 }
 
-.public-account-bids-page :is(h2[id], section[id]) {
-  scroll-margin-block-start: var(--space-4);
+.public-account-bids-page :is(h2[id], section[id]),
+.public-rules-page__document :is(h1, h2, h3, h4, h5, h6)[id] {
+  scroll-margin-top: calc(max(var(--console-ticker-h), var(--size-target)) + var(--space-4) + var(--safe-area-top));
+}
+
+@media screen and (max-width: 48rem) {
+  /* 窄屏顶栏可换成两行，锚点须让出控件与场次标题的高度。 */
+  .public-account-bids-page :is(h2[id], section[id]),
+  .public-rules-page__document :is(h1, h2, h3, h4, h5, h6)[id] {
+    scroll-margin-top: calc(var(--console-ticker-h) + var(--size-target) + var(--space-4) + var(--safe-area-top));
+  }
 }
 
 .public-session-preference,

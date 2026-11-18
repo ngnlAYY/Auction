@@ -1,12 +1,10 @@
 // 路由对象与上下文：维护当前匹配和实际地址快照，并提供 push/replace/goBack。
-// 当前路由只在初始化、push、replace 与 popstate 时更新；绕过 Router 的 History 写入
-// 只能经 notifyLocationWritten() 刷新地址快照，不能改变当前匹配。
+// 查询写入同步实际地址快照，路由导航和历史遍历另行更新路由匹配。
 
 import { createContext, onCleanup, useContext } from "solid-js";
 
 import { createCell } from "../reactive/cell";
-import type { ScrollPosition } from "./history";
-import { createWebHistory } from "./history";
+import { createWebHistory, writeLocationPreservingScroll } from "./history";
 import { watchLocationWritten } from "./location-notice";
 import type { RouteDefinition, RouteMatch } from "./pattern";
 import { compileRoutes, isInternalHref, resolveRoute } from "./pattern";
@@ -17,8 +15,7 @@ export interface Router {
   current(): RouteMatch;
   /**
    * 响应式读取地址栏当前快照，内容为 pathname + search + hash。
-   * 路由初始化、push、replace、popstate 与直接写 History 后调用 notifyLocationWritten()
-   * 都会刷新本值；直接写 History 却不通知时保持旧快照。
+   * 路由初始化、浏览器导航以及成功的路由和查询写入都会刷新本值。
    */
   currentLocationString(): string;
   /** 新增历史记录并同步当前路由。 */
@@ -27,7 +24,7 @@ export interface Router {
   replace(href: string): void;
   /** 返回上一条历史记录；路由在浏览器发出 popstate 时更新。 */
   goBack(): void;
-  /** 页面提交后调用；恢复仍属于当前导航的 popstate 滚动位置。 */
+  /** 页面提交后调用；定位仍属于当前导航的片段或历史滚动位置。 */
   restoreScrollAfterCommit(): void;
 }
 
@@ -51,85 +48,59 @@ function navigateExternal(href: string): void {
 /**
  * 创建路由对象。
  *
- * 初始化按 Dioxus 的规则解析当前地址；规范路由串与地址不同时执行一次 replace，
- * 因此未声明的查询参数与 hash 会在初始化时被规范化掉，应用层需要自行保存初始查询快照。
- * 当前匹配之后只在 push/replace/popstate 时重新解析；地址快照还可由
- * notifyLocationWritten() 单独刷新，但不会因此重新匹配。
+ * 只规范化已匹配路由的 pathname，原查询和片段随地址保留。
+ * 路由导航和历史遍历才需要重新匹配页面；同页查询写入只刷新地址快照。
  */
 export function createRouter(options: RouterOptions): Router {
   const routes = compileRoutes(options.routes);
-  let navigationVersion = 0;
-  let pendingScrollRestore: {
-    readonly version: number;
-    readonly position: ScrollPosition;
-  } | null = null;
   const browserHistory = createWebHistory({
-    onPopState: (position) => {
-      updateFromLocation();
-      if (position !== null) {
-        pendingScrollRestore = { version: navigationVersion, position };
-      }
-    },
+    onLocationChanged: () => updateFromLocation(),
   });
-  const initial = resolveRoute(routes, browserHistory.currentRoute());
-  const currentMatch = createCell(initial.match);
+  const canonicalLocation = (href: string): string => {
+    const resolved = resolveRoute(routes, href);
+    // 协议相对地址或含路径分隔符的解码结果不能被改写成另一种导航。
+    return resolved.match.kind === "matched" &&
+      !href.startsWith("//") &&
+      !resolved.routeString.startsWith("//")
+      ? resolved.routeString
+      : href;
+  };
+  const initial = browserHistory.currentRoute();
+  const canonical = canonicalLocation(initial);
+  if (canonical !== initial) {
+    writeLocationPreservingScroll(canonical, "replace");
+  }
+  const currentMatch = createCell(resolveRoute(routes, browserHistory.currentRoute()).match);
   const currentLocation = createCell(browserHistory.currentRoute());
-  // 应用层写查询参数不经过路由匹配；通知只同步地址快照，让 Link 的当前页判定跟随地址栏。
+  // 路由和查询共用写入通知，查询变化时可保留已经挂载的页面。
   const stopWatchingLocation = watchLocationWritten(() => {
     currentLocation.set(browserHistory.currentRoute());
   });
   onCleanup(stopWatchingLocation);
 
   const updateFromLocation = (): void => {
-    navigationVersion += 1;
-    pendingScrollRestore = null;
-    const resolved = resolveRoute(routes, browserHistory.currentRoute());
-    currentMatch.set(resolved.match);
-    currentLocation.set(browserHistory.currentRoute());
+    const location = browserHistory.currentRoute();
+    currentMatch.set(resolveRoute(routes, location).match);
+    currentLocation.set(location);
   };
 
-  if (initial.routeString !== browserHistory.currentRoute()) {
-    browserHistory.replace(initial.routeString);
-    updateFromLocation();
-  }
-
-  const push = (href: string): void => {
+  const navigate = (href: string, mode: "push" | "replace"): void => {
     if (!isInternalHref(href)) {
       navigateExternal(href);
       return;
     }
-    browserHistory.push(href);
-    updateFromLocation();
-  };
-
-  const replace = (href: string): void => {
-    if (!isInternalHref(href)) {
-      navigateExternal(href);
-      return;
+    if (browserHistory.navigate(canonicalLocation(href), mode)) {
+      currentMatch.set(resolveRoute(routes, browserHistory.currentRoute()).match);
     }
-    browserHistory.replace(href);
-    updateFromLocation();
-  };
-
-  const restoreScrollAfterCommit = (): void => {
-    const pending = pendingScrollRestore;
-    if (pending === null) {
-      return;
-    }
-    pendingScrollRestore = null;
-    browserHistory.restoreScrollAfterCommit(
-      pending.position,
-      () => pending.version === navigationVersion,
-    );
   };
 
   return {
     current: () => currentMatch(),
     currentLocationString: () => currentLocation(),
-    push,
-    replace,
+    push: (href) => navigate(href, "push"),
+    replace: (href) => navigate(href, "replace"),
     goBack: () => browserHistory.goBack(),
-    restoreScrollAfterCommit,
+    restoreScrollAfterCommit: () => browserHistory.restoreScrollAfterCommit(),
   };
 }
 

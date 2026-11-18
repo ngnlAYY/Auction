@@ -7,6 +7,7 @@ import { getOwner, onSettled, runWithOwner } from "solid-js";
 
 import { type Cell, createCell } from "../../reactive/cell";
 import { structuralEquals } from "../../reactive/equality";
+import { writeLocationPreservingScroll } from "../../router/history";
 
 /** 写回地址栏时创建还是替换浏览器历史项。 */
 export type QueryWriteMode = "push" | "replace";
@@ -14,19 +15,17 @@ export type QueryWriteMode = "push" | "replace";
 /** 一个 URL query 键值对；重复键按出现顺序保留。 */
 export type QueryPair = readonly [key: string, value: string];
 
+/** 解析完整 search；第一个问号是分隔符，其余问号属于参数。 */
+export function parseQuerySearch(search: string): URLSearchParams {
+  return new URLSearchParams(search);
+}
+
 /** 读取当前地址栏的全部 query 键值对；浏览器不可用时为空。 */
 export function readQueryPairs(): readonly QueryPair[] {
   if (typeof window === "undefined") {
     return [];
   }
-  const search = window.location.search;
-  const raw = search.startsWith("?") ? search.slice(1) : search;
-  const params = new URLSearchParams(raw);
-  const pairs: QueryPair[] = [];
-  for (const [key, value] of params) {
-    pairs.push([key, value]);
-  }
-  return pairs;
+  return [...parseQuerySearch(window.location.search)];
 }
 
 /** 把 `pairs` 合并写回当前地址的 query 段；`keys` 声明的旧值整体替换，其余键原样保留。 */
@@ -36,12 +35,6 @@ export function writeQueryPairs(
   mode: QueryWriteMode,
 ): void {
   if (typeof window === "undefined") {
-    return;
-  }
-  let history: History;
-  try {
-    history = window.history;
-  } catch {
     return;
   }
   const location = window.location;
@@ -57,7 +50,6 @@ export function writeQueryPairs(
   const encoded = parameters.toString();
   let pathname = "/";
   let hash = "";
-  let state: unknown = null;
   try {
     pathname = location.pathname;
   } catch {
@@ -68,21 +60,8 @@ export function writeQueryPairs(
   } catch {
     hash = "";
   }
-  try {
-    state = history.state;
-  } catch {
-    state = null;
-  }
   const url = encoded.length === 0 ? `${pathname}${hash}` : `${pathname}?${encoded}${hash}`;
-  try {
-    if (mode === "push") {
-      history.pushState(state, "", url);
-    } else {
-      history.replaceState(state, "", url);
-    }
-  } catch {
-    // 地址栏不可写时保持现有导航状态；状态更新仍由调用方决定。
-  }
+  writeLocationPreservingScroll(url, mode);
 }
 
 /** 状态 → 写回键值对的序列化器（省略等于默认值的键）。 */

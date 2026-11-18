@@ -1,8 +1,8 @@
 // Public 世界范围的纯函数：路由类别、地址栏读写、导航继承与页面世界按钮组。
 // Solid 版由外壳提供控制器、页面内按钮组切换世界；Rust 版仍保留各页面自己的世界选择器。
 
-import type { PublicBoardQuery } from "./board";
 import { publicAuctionHomeQuery } from "./links";
+import type { PublicQueryWrite } from "./state";
 
 /** 世界按钮组可表达的完整世界范围；只有跨世界页面才允许 `all`。 */
 export type WorldScope = "all" | "main" | "isekai";
@@ -171,18 +171,16 @@ export function worldScopeHref(path: string, world: NormalizedWorldQuery): strin
 }
 
 /**
- * 世界按钮切换范围后，当前页面应写回地址栏的完整查询。
+ * 世界按钮切换范围后，只写回该操作拥有的字段。
  * 跨世界页面会清掉与旧世界绑定的场次选择；其余页面沿用原来的单世界切换规则。
  */
 export function worldScopeSwitchQuery(
   routeName: string | null,
-  current: PublicBoardQuery,
   scope: WorldScope,
   historicalBoard: boolean,
-): PublicBoardQuery {
+): Partial<PublicQueryWrite> {
   if (routeName === "AuctionList") {
     return {
-      ...current,
       world: worldQueryForScope("multi", scope),
       auctionId: null,
       category: null,
@@ -191,37 +189,33 @@ export function worldScopeSwitchQuery(
   }
   if (routeName === "History") {
     return {
-      ...current,
       world: worldQueryForScope("multi", scope),
       page: 1,
     };
   }
   if (routeName === "BidLog" || routeName === "Fulfillment") {
     return {
-      ...current,
       world: worldQueryForScope("multi", scope),
       auctionId: null,
       bidLogLot: null,
       page: 1,
     };
   }
-  return worldSwitchQuery(current, scopedWorld(scope), historicalBoard);
+  return worldSwitchQuery(scopedWorld(scope), historicalBoard);
 }
 
 /** 单世界页面切换世界后的查询。看板正在展示往期场次时回到目标世界的首页（清除场次、筛选与页码，
  * 每页条数取本地偏好），与首页入口一致，避免所选世界与正文场次不一致；
  * 其余情况只改世界。 */
 export function worldSwitchQuery(
-  current: PublicBoardQuery,
   world: string,
   historicalBoard: boolean,
-): PublicBoardQuery {
+): Partial<PublicQueryWrite> {
   if (historicalBoard) {
     // 单世界页的主世界沿用无参数缺省；只有导航显式继承时才写 `world=main`。
     return publicAuctionHomeQuery(world === "main" ? null : world);
   }
   return {
-    ...current,
     // 主世界沿用旧版无参数 URL。
     world: world !== "main" ? world : null,
   };

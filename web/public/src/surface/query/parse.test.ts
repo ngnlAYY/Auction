@@ -5,6 +5,48 @@ import { expect, test } from "bun:test";
 const { parsePublicQuery } = await import("./parse");
 const { publicQueryString } = await import("./serialization");
 
+test("场次参数接受规范 UUID，并保留非法值供页面拒绝", () => {
+  const auction = "67e55044-10b1-426f-9247-bb680e5fe0c8";
+  expect(parsePublicQuery("/", "")).toMatchObject({ auctionId: null, invalidAuction: null });
+  for (const version of [1, 2, 3, 4, 5]) {
+    const valid = auction.replace("426f", `${version}26f`);
+    expect(parsePublicQuery("/", `?auction=${valid}`)).toMatchObject({
+      auctionId: valid,
+      invalidAuction: null,
+    });
+  }
+  for (const invalid of [
+    "",
+    "truncated",
+    auction.toUpperCase(),
+    auction.replace("426f", "726f"),
+    auction.replace("9247", "4247"),
+    auction.replaceAll("-", ""),
+    `{${auction}}`,
+    `urn:uuid:${auction}`,
+  ]) {
+    const query = parsePublicQuery("/", `?auction=${invalid}`);
+    expect(query).toMatchObject({ auctionId: null, invalidAuction: [invalid] });
+    expect(new URLSearchParams(publicQueryString(query)).get("auction")).toBe(invalid);
+  }
+  const duplicate = parsePublicQuery("/", `?auction=${auction}&auction=${auction}`);
+  expect(duplicate).toMatchObject({ auctionId: null, invalidAuction: [auction, auction] });
+  expect(new URLSearchParams(publicQueryString(duplicate)).getAll("auction")).toEqual([
+    auction,
+    auction,
+  ]);
+});
+
+test("查询只去掉分隔符，参数名开头的问号原样保留", () => {
+  const query = parsePublicQuery("/", "??page=2&ref=x");
+  expect(query.page).toBe(1);
+  expect(query.passthrough).toEqual([
+    ["?page", "2"],
+    ["ref", "x"],
+  ]);
+  expect(parsePublicQuery("/", "?page=2").page).toBe(2);
+});
+
 test("invalid_lot_in_the_address_bar_is_kept_instead_of_widening_the_bid_log：地址栏非法 lot 保留而不放宽竞价日志", () => {
   // 超长或含控制字符的 lot 原样保留，竞价日志页据此报字段错误且不发请求。
   const longLot = "a".repeat(129);

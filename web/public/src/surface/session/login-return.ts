@@ -1,18 +1,29 @@
 // 登录返回地址与需要认证入口的链接生成。
 // 首次同源地址在 Router 规范化前保存；登录 key 不经过这里，也不进入任何地址状态。
 
+import { createCell } from "@auction/web-shared/reactive/cell";
 import { useRouter } from "@auction/web-shared/router";
 import { createContext, useContext } from "solid-js";
 
-import { readBrowserLocationRevision } from "../query/location";
 import { queryPairsString } from "../query/serialization";
 
-/** 在 Router 规范化地址前保存首次同源 pathname + search；与 Rust 上下文读取一样可重复使用。 */
+/** 在 Router 首次规范化地址期间才可以用首次同源 pathname + search 回退。 */
 export class InitialLoginReturnLocation {
   readonly value: string;
+  private readonly available = createCell(true);
 
   constructor(value: string) {
     this.value = value;
+  }
+
+  /** 首次规范化结束后，禁止在同一 pathname 上重新采用已经离开的查询。 */
+  expire(): void {
+    this.available.set(false);
+  }
+
+  /** 仅在首次规范化期间为同一路径提供备选地址。 */
+  forPathname(pathname: string): string | null {
+    return this.available() && this.value.split("?", 1)[0] === pathname ? this.value : null;
   }
 }
 
@@ -92,14 +103,12 @@ export const LOGIN_ROUTE_HREF = "/login?";
 /** 为需要认证的 CTA 保存当前 pathname 与 search；直接登录入口不携带返回地址。
  *
  * 源码只在渲染链接属性时调用本函数；事件处理器不得调用，因为 `useContext` 需要组件宿主。
- * 初始地址上下文在 Router 启动后失效，本函数只读取它，不在这里销毁。链接节点会被复用，
- * 直接读地址栏不会建立依赖；先读路由位置与直接 History 写入的版本，让 href 随同路径查询
- * 导航和查询状态写回重算。
+ * 初始地址上下文在 Router 启动后失效。链接节点复用时，由路由快照触发重读地址栏，
+ * 使 href 随同路径导航和查询写入重算。
  */
 export function loginHrefForCurrentLocation(): string {
   const router = useRouter();
   router.currentLocationString();
-  readBrowserLocationRevision();
   const initial = useContext(InitialLoginReturnLocationContext);
   const returnTo = currentPathAndSearch(initial);
   if (returnTo === null) {
@@ -120,12 +129,8 @@ function currentPathAndSearch(initial: InitialLoginReturnLocation | null): strin
   if (current.includes("?")) {
     return safeReturnPath(current) === current ? current : null;
   }
-  const initialValue = initial?.value ?? null;
-  if (
-    initialValue !== null &&
-    (initialValue.split("?")[0] ?? "") === current &&
-    safeReturnPath(initialValue) === initialValue
-  ) {
+  const initialValue = initial?.forPathname(current) ?? null;
+  if (initialValue !== null && safeReturnPath(initialValue) === initialValue) {
     return initialValue;
   }
   return safeReturnPath(current) === current ? current : null;

@@ -163,6 +163,8 @@ data-empty = There is no current auction.
 data-retry = Retry
 auction-empty-no-auction = No auction in this world yet
 auction-empty-no-auction-hint = Check back later for the next auction.
+auction-invalid-link = The auction in this link is invalid.
+auction-view-current = View current auction
 
 
 page-auctions-title = Auction history

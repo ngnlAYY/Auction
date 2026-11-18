@@ -162,6 +162,8 @@ data-empty = 現在開催中のオークションはありません。
 data-retry = 再試行
 auction-empty-no-auction = このワールドにはまだオークションがありません
 auction-empty-no-auction-hint = 次回のオークションは時間をおいてご確認ください。
+auction-invalid-link = リンク先のオークションが無効です。
+auction-view-current = 現在のオークションを見る
 
 
 page-auctions-title = オークション履歴

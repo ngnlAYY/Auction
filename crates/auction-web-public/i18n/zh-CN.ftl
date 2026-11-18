@@ -162,6 +162,8 @@ data-empty = 当前没有进行中的拍卖。
 data-retry = 重试
 auction-empty-no-auction = 该世界暂无拍卖场次
 auction-empty-no-auction-hint = 请稍后查看下一场拍卖。
+auction-invalid-link = 链接里的场次无效
+auction-view-current = 查看当前场次
 
 
 page-auctions-title = 拍卖历史

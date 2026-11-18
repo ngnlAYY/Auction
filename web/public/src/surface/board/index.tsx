@@ -8,6 +8,7 @@ import { structuralEquals } from "@auction/web-shared/reactive/equality";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import { createTaskResource } from "@auction/web-shared/reactive/resource";
 import { err, ok } from "@auction/web-shared/result";
+import { Link } from "@auction/web-shared/router";
 import { useAppBootReady } from "@auction/web-shared/ui/bootstrap";
 import { AsyncState } from "@auction/web-shared/ui/components/async-state";
 import { t } from "@auction/web-shared/ui/i18n";
@@ -18,6 +19,7 @@ import {
   For,
   Match,
   onCleanup,
+  Show,
   Switch,
   untrack,
   useContext,
@@ -38,6 +40,8 @@ import { useContentLoading } from "../loading";
 import {
   normalizeWorldQuery,
   type PublicBoardQuery,
+  publicAuctionHomeQuery,
+  publicHref,
   redirectPublicAlias,
   updatePublicQueryState,
   usePublicQueryState,
@@ -76,6 +80,18 @@ export function AuctionIndex(): JSX.Element {
 }
 
 export function AuctionPage(): JSX.Element {
+  const query = usePublicQueryState().state;
+  return (
+    <Show
+      when={query().invalidAuction === null}
+      fallback={<InvalidAuctionLink world={query().world} />}
+    >
+      <AuctionAlias />
+    </Show>
+  );
+}
+
+function AuctionAlias(): JSX.Element {
   return redirectPublicAlias("/");
 }
 
@@ -86,6 +102,7 @@ export function AuctionBoard(): JSX.Element {
 
 interface AuctionBoardViewProps {
   readonly userId: string | null;
+  readonly invalid: boolean;
   readonly failed: boolean;
   readonly empty: boolean;
   readonly auction: CurrentAuctionItemResponse | null;
@@ -107,6 +124,7 @@ export function mountAuctionBoard(
   const session = useContext(PublicSessionResourceContext);
   const owner = useContext(PublicCommandOwnerContext);
   const currentAuction = useContext(CurrentAuctionContext);
+  const invalid = createValueMemo(() => queryStateSignal().invalidAuction !== null);
   // 同路径的历史/当前切换也必须订阅查询，不能仅在 popstate 或首页按钮时重读。
   const requestedAuction = createValueMemo(() => queryStateSignal().auctionId);
   const historical = createValueMemo(() => requestedAuction() !== null);
@@ -192,6 +210,10 @@ export function mountAuctionBoard(
     displayedAuction.set(null);
   });
   const current = createValueMemo(() => {
+    // 显式目标非法时关闭目录与出价入口，直到玩家主动离开错误地址。
+    if (invalid()) {
+      return null;
+    }
     if (historical()) {
       const loaded = historicalCurrent();
       if (loaded === undefined || loaded[0] !== requestedAuction()) {
@@ -217,7 +239,7 @@ export function mountAuctionBoard(
   });
   // 错误与空拍卖本身就是可操作的最终首屏；有拍卖时由 AuctionData 等待主要 lots。
   useAppBootReady(() => bootPrerequisitesReady() && terminalWithoutAuction());
-  useContentLoading(() => current() === null);
+  useContentLoading(() => !invalid() && current() === null);
   const failed = createValueMemo(() => {
     const loaded = current();
     return loaded !== null && !loaded.ok;
@@ -239,85 +261,112 @@ export function mountAuctionBoard(
     },
     keyed: (userId) => userId,
     children: (userId) =>
-      createComponent(View, {
+      createComponent(CatalogCommandScope, {
         userId: untrack(userId),
-        get failed() {
-          return failed();
+        get auctionInvalid() {
+          return invalid();
         },
-        get empty() {
-          return empty();
+        get children() {
+          // 目录分支可以卸载，身份宿主须继续持有已发出的命令与恢复入口。
+          return createComponent(View, {
+            userId: untrack(userId),
+            get invalid() {
+              return invalid();
+            },
+            get failed() {
+              return failed();
+            },
+            get empty() {
+              return empty();
+            },
+            get auction() {
+              return auction();
+            },
+            get historical() {
+              return historical();
+            },
+            get bootPrerequisitesReady() {
+              return bootPrerequisitesReady();
+            },
+            catalog,
+            query: queryStateSignal,
+            onRetry: () => refreshPublicReads(refreshGeneration),
+          });
         },
-        get auction() {
-          return auction();
-        },
-        get historical() {
-          return historical();
-        },
-        get bootPrerequisitesReady() {
-          return bootPrerequisitesReady();
-        },
-        catalog,
-        query: queryStateSignal,
-        onRetry: () => refreshPublicReads(refreshGeneration),
       }),
   });
 }
 
 function AuctionBoardView(props: AuctionBoardViewProps): JSX.Element {
   return (
-    <CatalogCommandScope userId={props.userId}>
-      <Switch
-        fallback={
-          // 新世界的当前场次仍在读取时，三个终态分支都不命中；按钮组必须仍在页面上，
-          // 否则用户切到另一个世界后要等待读取结束才能切回。
-          <div class="public-auction-group-toolbar public-world-toolbar">
-            <WorldTabs />
-          </div>
-        }
-      >
-        {/* 读取失败或该世界没有场次时看板的筛选工具栏不存在：世界按钮组单独成行，
+    <Switch
+      fallback={
+        // 新世界的当前场次仍在读取时，三个终态分支都不命中；按钮组必须仍在页面上，
+        // 否则用户切到另一个世界后要等待读取结束才能切回。
+        <div class="public-auction-group-toolbar public-world-toolbar">
+          <WorldTabs />
+        </div>
+      }
+    >
+      <Match when={props.invalid}>
+        <InvalidAuctionLink world={props.query().world} />
+      </Match>
+      {/* 读取失败或该世界没有场次时看板的筛选工具栏不存在：世界按钮组单独成行，
           否则切到没有场次的世界之后就没有入口切回来。 */}
-        <Match when={props.failed}>
-          <div class="public-auction-group-toolbar public-world-toolbar">
-            <WorldTabs />
-          </div>
-          <AsyncState
-            kind="error"
-            title={t("page-auctions-title")}
-            detail={t("data-error")}
-            retryLabel={t("data-retry")}
-            // 与对齐重读、恢复可见共用刷新入口：先失效公开读缓存，重试才真正回到服务端。
-            onRetry={() => props.onRetry()}
-          />
-        </Match>
-        <Match when={props.empty}>
-          <div class="public-auction-group-toolbar public-world-toolbar">
-            <WorldTabs />
-          </div>
-          <AsyncState
-            kind="empty"
-            title={t("auction-empty-no-auction")}
-            detail={t("auction-empty-no-auction-hint")}
-          />
-        </Match>
-        <Match when={props.auction}>
-          {(loaded) => (
-            <LotWatchScope auctionId={loaded().id}>
-              <CatalogProxyScope>
-                <AuctionData
-                  auction={loaded()}
-                  historical={props.historical}
-                  catalog={props.catalog}
-                  query={props.query}
-                  bootPrerequisitesReady={props.bootPrerequisitesReady}
-                />
-              </CatalogProxyScope>
-              {/* 详情抽屉挂在标记作用域内（底部标记按钮需要它），并与目录共存亡。 */}
-              <CatalogDetailHost auctionId={loaded().id} />
-            </LotWatchScope>
-          )}
-        </Match>
-      </Switch>
-    </CatalogCommandScope>
+      <Match when={props.failed}>
+        <div class="public-auction-group-toolbar public-world-toolbar">
+          <WorldTabs />
+        </div>
+        <AsyncState
+          kind="error"
+          title={t("page-auctions-title")}
+          detail={t("data-error")}
+          retryLabel={t("data-retry")}
+          // 与对齐重读、恢复可见共用刷新入口：先失效公开读缓存，重试才真正回到服务端。
+          onRetry={() => props.onRetry()}
+        />
+      </Match>
+      <Match when={props.empty}>
+        <div class="public-auction-group-toolbar public-world-toolbar">
+          <WorldTabs />
+        </div>
+        <AsyncState
+          kind="empty"
+          title={t("auction-empty-no-auction")}
+          detail={t("auction-empty-no-auction-hint")}
+        />
+      </Match>
+      <Match when={props.auction}>
+        {(loaded) => (
+          <LotWatchScope auctionId={loaded().id}>
+            <CatalogProxyScope>
+              <AuctionData
+                auction={loaded()}
+                historical={props.historical}
+                catalog={props.catalog}
+                query={props.query}
+                bootPrerequisitesReady={props.bootPrerequisitesReady}
+              />
+            </CatalogProxyScope>
+            {/* 详情抽屉挂在标记作用域内（底部标记按钮需要它），并与目录共存亡。 */}
+            <CatalogDetailHost auctionId={loaded().id} />
+          </LotWatchScope>
+        )}
+      </Match>
+    </Switch>
+  );
+}
+
+function InvalidAuctionLink(props: { readonly world: string | null }): JSX.Element {
+  useAppBootReady(() => true);
+  return (
+    <section class="ui-async-state ui-async-state--error" role="alert">
+      <h2 class="ui-async-state__title">{t("auction-invalid-link")}</h2>
+      <p class="ui-async-state__detail">
+        <Link href={publicHref("/", publicAuctionHomeQuery(props.world))}>
+          {t("auction-view-current")}
+        </Link>
+      </p>
+    </section>
   );
 }

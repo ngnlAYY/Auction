@@ -75,6 +75,10 @@ export function publicQueryPairs(query: PublicBoardQuery): [string, string][] {
   }
   if (query.auctionId !== null) {
     pairs.push(["auction", query.auctionId]);
+  } else if (query.invalidAuction !== null) {
+    for (const value of query.invalidAuction) {
+      pairs.push(["auction", value]);
+    }
   }
   if (query.equipmentGroup !== null) {
     pairs.push(["equipment_group", query.equipmentGroup]);
