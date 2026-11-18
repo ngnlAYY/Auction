@@ -207,7 +207,7 @@ export function AuctionBoard(): JSX.Element {
       fallback={
         // 新世界的当前场次仍在读取时，三个终态分支都不命中；按钮组必须仍在页面上，
         // 否则用户切到另一个世界后要等待读取结束才能切回。
-        <div class="public-world-toolbar">
+        <div class="public-auction-group-toolbar public-world-toolbar">
           <WorldTabs />
         </div>
       }
@@ -215,7 +215,7 @@ export function AuctionBoard(): JSX.Element {
       {/* 读取失败或该世界没有场次时看板的筛选工具栏不存在：世界按钮组单独成行，
           否则切到没有场次的世界之后就没有入口切回来。 */}
       <Match when={failed()}>
-        <div class="public-world-toolbar">
+        <div class="public-auction-group-toolbar public-world-toolbar">
           <WorldTabs />
         </div>
         <AsyncState
@@ -228,7 +228,7 @@ export function AuctionBoard(): JSX.Element {
         />
       </Match>
       <Match when={empty()}>
-        <div class="public-world-toolbar">
+        <div class="public-auction-group-toolbar public-world-toolbar">
           <WorldTabs />
         </div>
         <AsyncState

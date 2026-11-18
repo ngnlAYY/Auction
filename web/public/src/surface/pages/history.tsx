@@ -139,7 +139,7 @@ export function AuctionList(): JSX.Element {
   return (
     <section class="public-auction-rounds" aria-label={t("page-auctions-title")}>
       {/* 世界切换：页面顶部的按钮组（WorldTabs，Solid 版专属）；Rust 版用页面内的下拉框。 */}
-      <div class="public-world-toolbar">
+      <div class="public-auction-group-toolbar public-world-toolbar">
         <WorldTabs />
       </div>
       <Switch>

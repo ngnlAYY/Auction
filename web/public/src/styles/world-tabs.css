@@ -2,12 +2,12 @@
  * Solid 版专属：页面里的世界按钮组（surface/board/world.tsx 的 WorldTabs）。
  * Rust 版用顶栏与页面内的下拉框切换世界；Solid 版改成“世界 [全部世界][主世界][异世界]”这样一组按钮，
  * 与看板上的“装备分组”同一种按钮。看板把它放在筛选工具栏里、排在装备分组之前；其余页面放在
- * 页面最上方单独一行（.public-world-toolbar）。只有一个世界可选时组件不渲染，这一行随之隐藏。
+ * 页面最上方单独一行，外面包着与看板筛选工具栏相同的容器
+ * （class="public-auction-group-toolbar public-world-toolbar"，边框、底色与内距都沿用前者）。
+ * 只有一个世界可选时组件不渲染，这一行随之隐藏。
  * Rust 版不加载本文件。规则写在层外，优先于共用样式的各个 @layer。
  */
 .public-world-toolbar {
-  display: flex;
-  min-inline-size: 0;
   margin-block-end: var(--space-3);
 }
 
@@ -28,9 +28,15 @@
 
 @media screen and (max-width: 48rem) {
   /* 手机上是带标签的一行：标签列与看板筛选区对齐，按钮连成一组，当前项填强调色。 */
+  /* 与手机上的看板筛选区一致：不画卡片，控件直接落在页面背景上。 */
   .public-world-toolbar {
+    display: flex;
     margin-block-end: 0;
     padding: var(--space-2) var(--space-3);
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
   }
 
   .public-world-toolbar > .public-world-filter {

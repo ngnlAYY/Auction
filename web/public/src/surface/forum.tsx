@@ -61,7 +61,7 @@ export function page(): JSX.Element {
   return (
     <section class="public-forum-page" aria-label={t("page-forum-title")}>
       {/* 世界切换：页面内的按钮组（Solid 版专属；Rust 版用顶栏与页面内的下拉框）。 */}
-      <div class="public-world-toolbar">
+      <div class="public-auction-group-toolbar public-world-toolbar">
         <WorldTabs />
       </div>
       <Show when={syncEnabled() !== undefined} fallback={null}>
