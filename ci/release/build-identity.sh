@@ -181,6 +181,13 @@ web_payload_tree_is_plain() {
 # payload 文件摘要清单（不含内嵌标记），按路径排序；生成与复核共用同一算法。
 web_payload_checksums() (
 	cd "$1" || return 1
+	local forbidden
+	# 清单认证的是可公开内嵌的文件，生成与复核都必须先拒绝源码映射和路径中的点段。
+	forbidden=$(find . -type f \( -name '*.map' -o -path '*/.*' \) -print -quit) || return 1
+	if [[ -n "$forbidden" ]]; then
+		printf 'Web payload 含禁止发布的文件：%q\n' "$forbidden" >&2
+		return 1
+	fi
 	find . -type f ! -name auction-web-manifest.v1 -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum
 )
 

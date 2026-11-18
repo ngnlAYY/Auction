@@ -57,7 +57,9 @@
 
 低频档 5 分钟内直接使用缓存；之后一小时内缓存先回旧副本并在后台刷新，下一次请求拿到新内容；超过一小时无人访问则同步回源。运营修改或新结算最迟在“5 分钟后的第二次访问”可见，单次访问看到的内容最多旧约 65 分钟；需要立即生效时清除对应 URL 的 CDN 缓存（见[ops/README.md#cdncloudflare](../../ops/README.md#cdncloudflare)）。已结算档 1 天内直接使用缓存，之后 7 天内先回旧副本并在后台刷新：账号改名（管理端改名或回滚、`rebind` 换绑、论坛身份同步）后，这三类响应最迟在“1 天后的第二次访问”显示新名字，单次访问看到的名字最多旧约 8 天；需要立即生效时按前缀清除 `/api/v1/auctions/` 与 `/api/v1/lots/` 的 CDN 缓存，浏览器已保存的副本不受清除影响，仍按 1 天到期。准入与金额从不读取这些缓存：世界停用、黑名单与规则的效力都由服务端在命令事务内即时判定。论坛同步开关取自 Worker 的最新观测，心跳缺失时要立刻反映，保持 `no-store`。两档响应都附带内容 ETag；进行中场次继续使用 2 秒目录缓存。
 
-静态产物按文件类型缓存：`assets/` 下带内容指纹的 JS、WASM、CSS、FTL 与图标资源为 `public, max-age=31536000, immutable`；SPA 入口文档与 HTML 为 `no-cache`，稳定文件名的站点图标 `/favicon.ico` 为 `public, max-age=86400`，两者都携带由内容摘要生成的 `ETag` 与 `Last-Modified`，再验证命中返回 304：请求带 `If-None-Match` 时只按 ETag 判定（精确匹配、弱比较匹配或 `*`），`If-Modified-Since` 仅在它缺席时参与，且只有与 `Last-Modified` 为同一秒时才判为未修改：同一提交重建或回滚后 `Last-Modified` 不前进甚至倒退，Cloudflare 改写 HTML 时又会剥离入口文档的 ETag，按“不晚于”判定会把回滚后的入口回成 304。SPA 入口文档另带 `Link` 响应头，逐项列出文档引用的带指纹样式表、脚本与 WASM（`rel=preload`，属性与文档内的 `<link>` 一致）：入口文档每次都回源再验证，前置 CDN 可据此在等待源站期间先发 103 Early Hints。
+静态资源携带由所选表示的 SHA-256 摘要生成的强 `ETag`。只有 `assets/` 下文件名带内容指纹的资源使用 `public, max-age=31536000, immutable` 并保留 `Last-Modified`。SPA 入口文档、HTML 和稳定文件名的资源（包括 `assets/` 下的原名文件）使用 `no-cache`，其中 `/favicon.ico` 使用 `public, max-age=86400`。入口和其他稳定 URL 按内容 ETag 再验证，因为不同内容的构建可能共享同一个时间戳。
+
+`If-None-Match` 支持精确匹配、弱比较匹配与 `*`。缺少该头时，指纹资源仍可在 `If-Modified-Since` 与 `Last-Modified` 同秒时返回 304。稳定 URL 的日期请求返回完整的当前表示。再验证命中的 304 保留缓存头并在响应头处结束。若传送 `Content-Length`，其值等于对应 200 表示的字节数。SPA 入口另带 `Link`，逐项列出文档引用的带指纹样式表、脚本与 WASM（`rel=preload`，属性与文档内的 `<link>` 一致），供 CDN 在等待源站时先发 103 Early Hints。
 
 CDN 专用头（`CDN-Cache-Control` 与 `Cloudflare-CDN-Cache-Control`，每个响应都带）跟随响应语义：静态响应使用同一缓存指令；动态响应中 `no-store` 与 `private` 映射为 `no-store`，`no-cache` 映射为 `no-cache`；`public` 且带有效 `max-age`/`s-maxage` 的公开读取获得边缘缓存资格，指令按边缘语义重写为 `public, max-age=<s-maxage，缺省取 max-age>`，并照搬 `stale-while-revalidate` 与 `stale-if-error`（Cloudflare 在指令含 `s-maxage` 时不提供过期后先回旧值、后台刷新，所以不原样复制）；其余（缺失缓存头、无 `public`、无新鲜度或新鲜度写坏）一律 `no-store`。`no-store` 永不因 CDN 映射被放宽。前置 CDN 需要的缓存规则见[ops/README.md#cdncloudflare](../../ops/README.md#cdncloudflare)。
 
@@ -324,7 +326,9 @@ Worker 实际值应核对其指标，不能把 Admin 显示的数据库意图当
 | POST | `/api/v1/setup/validate` | 校验表单并试连数据库 |
 | POST | `/api/v1/setup/complete` | 生成并发布配置目录 |
 
-浏览器入口为 `/setup`，仅另提供存在的 `/index.html`、`/favicon.ico` 与 `/assets/` 下资源；其余路径返回 404。`/assets/` 下另有带指纹的 Fluent 译文资源（`<lang>-dxh<hash>.ftl`）：浏览器只内嵌各 surface 的默认语言，其余语言按 `hv.lang` 按需取回，加载失败保持当前语言并提示。可压缩的静态资源同时带构建期生成的高等级 brotli 副本：请求 `Accept-Encoding` 接受 `br` 时返回副本并附 `Content-Encoding: br`，有副本的资源始终带 `Vary: Accept-Encoding`；以 `.br` 结尾的路径不对外提供（404）。首次设置使用独立的 `SetupResponse` / `SetupErrorResponse`，成功字段为 `status` 与 `initialize_and_start`；正式 Admin 不挂载这三个写接口。合并部署的 `complete` 还要求 `confirm_initialize = true`，完成后由监管进程初始化专用空库并启动角色。
+浏览器入口为 `/setup`，仅另提供存在的 `/index.html`、`/favicon.ico` 与 `/assets/` 下资源；其余路径返回 404。`/assets/` 下另有带指纹的 Fluent 译文资源（`<lang>-dxh<hash>.ftl`）：浏览器只内嵌各 surface 的默认语言，其余语言按 `hv.lang` 按需取回，加载失败保持当前语言并提示。可压缩的静态资源同时带构建期生成的高等级 brotli 副本：请求 `Accept-Encoding` 接受 `br` 时返回副本并附 `Content-Encoding: br`，有副本的资源始终带 `Vary: Accept-Encoding`；以 `.br` 结尾的路径不对外提供（404）。首次设置使用独立的 `SetupResponse` / `SetupErrorResponse`，成功字段为 `status` 与 `initialize_and_start`；正式 Admin 不挂载这三个写接口。
+
+合并部署的 `complete` 要求 `confirm_initialize = true` 和恰好一个 `x-setup-confirm-target` 请求头。该头按 `application/x-www-form-urlencoded` 编码确认时的三项，依次为 `host`、十进制 `port` 和 `name`，例如 `host=127.0.0.1&port=5432&name=auction`。改变其中任一项须重新确认。试连及写配置前，服务端将头值与提交正文中三项按同一格式编码的值核对。缺失、重复、格式错误或目标不一致时返回 400 `setup_confirmation_required`。确认只包含这三项，账号和口令仍仅随配置正文提交。配置发布后，服务端把确认的目标随完成结果交给监管进程。监管进程须再次比对重读的服务配置和实际用于迁移的 owner 连接目标，匹配后才初始化专用空库并启动角色。
 
 ## 三角色附加指标出口（loopback TCP）
 
@@ -362,7 +366,7 @@ Public/Admin/Worker 可在业务 listener、control socket 之外启用独立出
 
 ## 浏览器页面
 
-只有下列路径返回 SPA 的 `index.html`；其他未知路径返回 404。`web-embed` 资源缺失时页面路径返回 503。
+下列规范路径返回各自的 SPA `index.html`。GET 或 HEAD 若去掉恰好一个尾斜杠后命中同一端的页面白名单，则返回 308，`Location` 使用该规范路径并原样保留查询串，片段由浏览器继承。重定向使用 `Cache-Control: no-cache`。根路径 `/` 直接提供入口，双斜杠、点段、编码斜杠、非页面路径及其他方法沿用各自原有响应。未知路径返回 404，`web-embed` 资源缺失时规范页面路径返回 503。
 
 | Public 路径 | 页面 |
 | --- | --- |

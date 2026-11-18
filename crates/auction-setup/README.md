@@ -17,7 +17,9 @@ PostgreSQL 首次部署的一次性设置服务：在没有任何配置时提供
 | 入口 | 行为 |
 | --- | --- |
 | `auction-admin-api`（无参数且找不到配置）或 `auction-admin-api setup --output-dir <绝对路径>` | 分体部署：写完配置后退出，不建库、不迁移 |
-| `auction-server --config-dir <目录>`（目录不存在） | 合并部署：表单须确认“初始化并启动”，配置写为合并布局（Worker control socket 位于同级运行目录），随后由 `auction-server` 初始化专用空库并启动三角色 |
+| `auction-server --config-dir <目录>`（目录不存在） | 合并部署：表单须确认当前数据库主机、端口和库名，配置写为合并布局（Worker control socket 位于同级运行目录），随后由 `auction-server` 初始化专用空库并启动三角色 |
+
+目标确认在试连和写配置前复核。合并部署的完成结果携带确认时的主机、端口和库名，供监管进程在初始化前再次核对配置与 owner 凭据。请求头与失败码见[首次设置接口](../../docs/contracts/routes.md#首次设置auction-setup)。
 
 默认只监听 loopback，推荐经 SSH 隧道访问。本地请求的 `Host` 必须精确匹配监听 IP 或 `localhost` 及端口；可省略 `Origin`，提供时必须匹配同一 HTTP origin（80 端口允许显式或省略）。Origin 校验只比较借用的 scheme 与 authority，不为每次请求重新拼接两个候选 URL。
 

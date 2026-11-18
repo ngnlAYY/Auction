@@ -7,6 +7,8 @@ mod cache;
 mod negotiation;
 mod response;
 mod routes;
+#[cfg(test)]
+mod wire_tests;
 
 use axum::{
     extract::Request,
@@ -19,7 +21,8 @@ use self::negotiation::{
     accepts_brotli, entry_preload_links, exact_asset_path, reserved_json_path, static_method,
 };
 use self::response::{
-    asset_response, assets_missing, json_not_found, method_not_allowed, not_found,
+    asset_response, assets_missing, canonical_page_redirect, json_not_found, method_not_allowed,
+    not_found,
 };
 use self::routes::Surface;
 
@@ -158,24 +161,34 @@ fn serve<A: rust_embed::RustEmbed>(
         };
     }
 
+    if !setup_only && let Some(response) = canonical_page_redirect(surface, method, request.uri()) {
+        return response;
+    }
     not_found(surface, method, request_headers)
 }
 
 #[cfg(test)]
 mod tests {
+    use std::borrow::Cow;
+
+    use axum::Router;
     use axum::body::{Body, to_bytes};
     use axum::extract::Request;
-    use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+    use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Version, header};
     use axum::response::{IntoResponse, Response};
+    use rust_embed::{EmbeddedFile, Metadata};
+    use sha2::{Digest, Sha256};
+    use tower::ServiceExt;
 
-    use super::cache::cdn_cache_policy;
+    use super::cache::{CachePolicy, cdn_cache_policy, exact_asset_cache};
     use super::negotiation::{accepts_brotli, entry_preload_links};
-    use super::response::parse_http_date;
-    use super::{IMF_FIXDATE, serve_public_asset};
+    use super::response::{asset_response, parse_http_date};
+    use super::routes::Surface;
+    use super::{IMF_FIXDATE, serve_admin_asset, serve_public_asset};
 
     #[derive(rust_embed::Embed)]
     #[folder = "tests/assets-fixture"]
-    struct TestAssets;
+    pub(super) struct TestAssets;
 
     fn request(uri: &str, accept_encoding: Option<&str>) -> Request {
         let mut builder = Request::builder().method("GET").uri(uri);
@@ -283,14 +296,22 @@ mod tests {
         }
     }
 
-    /// 取一次完整响应的再验证头；夹具文件必须同时带 ETag 与 Last-Modified。
-    async fn validators(uri: &str) -> (HeaderValue, HeaderValue) {
+    async fn etag(uri: &str) -> HeaderValue {
         let response = serve_public_asset::<TestAssets>(request(uri, None)).await;
         assert_eq!(response.status(), StatusCode::OK);
-        let etag = response.headers().get(header::ETAG).cloned().expect("etag");
-        let last_modified =
-            response.headers().get(header::LAST_MODIFIED).cloned().expect("last-modified");
-        (etag, last_modified)
+        response.headers().get(header::ETAG).cloned().expect("etag")
+    }
+
+    fn embedded_at_build_second(data: &'static [u8], mime: &'static str) -> EmbeddedFile {
+        EmbeddedFile {
+            data: Cow::Borrowed(data),
+            metadata: Metadata::__rust_embed_new(
+                Sha256::digest(data).into(),
+                Some(784_111_777),
+                None,
+                mime,
+            ),
+        }
     }
 
     fn conditional(uri: &str, headers: &[(header::HeaderName, &HeaderValue)]) -> Request {
@@ -303,20 +324,38 @@ mod tests {
 
     #[tokio::test]
     async fn matching_etag_revalidates_without_body() {
-        let (etag, _) = validators("/").await;
-        let response =
-            serve_public_asset::<TestAssets>(conditional("/", &[(header::IF_NONE_MATCH, &etag)]))
-                .await;
-        assert_eq!(response.status(), StatusCode::NOT_MODIFIED);
-        assert_eq!(response.headers().get(header::ETAG), Some(&etag));
-        assert_eq!(response.headers().get(header::CACHE_CONTROL).unwrap(), "no-cache");
-        assert!(response.headers().get(header::CONTENT_LENGTH).is_none());
-        assert!(body_text(response).await.is_empty());
+        let app = Router::new().fallback(serve_public_asset::<TestAssets>);
+        for (uri, encoding) in [("/", None), ("/assets/app.css", Some("br"))] {
+            let mut request = request(uri, encoding);
+            *request.version_mut() = Version::HTTP_2;
+            let response = app.clone().oneshot(request).await.unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let mut revalidate =
+                conditional(uri, &[(header::IF_NONE_MATCH, &response.headers()[header::ETAG])]);
+            *revalidate.version_mut() = Version::HTTP_2;
+            if let Some(encoding) = encoding {
+                revalidate
+                    .headers_mut()
+                    .insert(header::ACCEPT_ENCODING, HeaderValue::from_static(encoding));
+            }
+            let length = response.headers()[header::CONTENT_LENGTH].to_str().unwrap();
+            let length: usize = length.parse().unwrap();
+            assert!(length > 0);
+            let revalidated = app.clone().oneshot(revalidate).await.unwrap();
+            assert_eq!(revalidated.status(), StatusCode::NOT_MODIFIED);
+            for header in
+                [header::ETAG, header::CACHE_CONTROL, header::VARY, header::CONTENT_LENGTH]
+            {
+                assert_eq!(revalidated.headers().get(&header), response.headers().get(&header));
+            }
+            assert!(body_text(revalidated).await.is_empty());
+            assert_eq!(body_text(response).await.len(), length);
+        }
     }
 
     #[tokio::test]
     async fn weak_wildcard_and_repeated_validators_revalidate() {
-        let (etag, _) = validators("/").await;
+        let etag = etag("/").await;
         let weak =
             HeaderValue::from_str(&format!("W/{}", etag.to_str().expect("etag text"))).unwrap();
         let wildcard = HeaderValue::from_static("*");
@@ -338,41 +377,69 @@ mod tests {
         assert_eq!(response.status(), StatusCode::NOT_MODIFIED);
     }
 
-    /// 回归：同一提交重建或回滚后 `Last-Modified` 不前进，旧 ETag 不能被日期判成未修改。
+    /// 构建秒值相同也必须返回当前入口；同内容仍可按 ETag 再验证。
     #[tokio::test]
-    async fn stale_etag_is_not_rescued_by_if_modified_since() {
-        let (_, last_modified) = validators("/").await;
-        let stale = HeaderValue::from_static("\"stale\"");
-        let response = serve_public_asset::<TestAssets>(conditional(
-            "/",
-            &[(header::IF_NONE_MATCH, &stale), (header::IF_MODIFIED_SINCE, &last_modified)],
-        ))
-        .await;
-        assert_eq!(response.status(), StatusCode::OK);
-        assert!(body_text(response).await.contains("fixture"));
+    async fn entry_rebuild_in_same_second_requires_current_etag() {
+        let respond = |document, headers: &HeaderMap| {
+            asset_response(
+                embedded_at_build_second(document, "text/html"),
+                &Method::GET,
+                headers,
+                CachePolicy::NoCache,
+                "text/html",
+                None,
+            )
+        };
+        let mut headers = HeaderMap::new();
+        let before = respond(b"first entry", &headers);
+        headers.insert(
+            header::IF_MODIFIED_SINCE,
+            HeaderValue::from_static("Sun, 06 Nov 1994 08:49:37 GMT"),
+        );
+        let after = respond(b"second entry", &headers);
+        assert_eq!(after.status(), StatusCode::OK);
+        assert!(before.headers().get(header::LAST_MODIFIED).is_none());
+        assert!(after.headers().get(header::LAST_MODIFIED).is_none());
+        let current_etag = after.headers()[header::ETAG].clone();
+        let old_etag = before.headers()[header::ETAG].clone();
+        assert_ne!(current_etag, old_etag);
+        assert_eq!(body_text(after).await, "second entry");
+
+        headers.insert(header::IF_NONE_MATCH, old_etag);
+        assert_eq!(respond(b"second entry", &headers).status(), StatusCode::OK);
+        headers.insert(header::IF_NONE_MATCH, current_etag);
+        assert_eq!(respond(b"second entry", &headers).status(), StatusCode::NOT_MODIFIED);
     }
 
     #[tokio::test]
-    async fn if_modified_since_alone_still_revalidates() {
-        let (_, last_modified) = validators("/").await;
-        let response = serve_public_asset::<TestAssets>(conditional(
-            "/",
-            &[(header::IF_MODIFIED_SINCE, &last_modified)],
-        ))
-        .await;
-        assert_eq!(response.status(), StatusCode::NOT_MODIFIED);
-
-        let epoch = HeaderValue::from_static("Thu, 01 Jan 1970 00:00:00 GMT");
-        let response = serve_public_asset::<TestAssets>(conditional(
-            "/",
-            &[(header::IF_MODIFIED_SINCE, &epoch)],
-        ))
-        .await;
-        assert_eq!(response.status(), StatusCode::OK);
+    async fn only_fingerprinted_assets_can_revalidate_by_date() {
+        let mut headers = HeaderMap::new();
+        let date = HeaderValue::from_static("Sun, 06 Nov 1994 08:49:37 GMT");
+        headers.insert(header::IF_MODIFIED_SINCE, date.clone());
+        for (policy, status, last_modified) in [
+            (
+                exact_asset_cache("assets/style-dxh01234567.css"),
+                StatusCode::NOT_MODIFIED,
+                Some(&date),
+            ),
+            (exact_asset_cache("assets/app.css"), StatusCode::OK, None),
+            (exact_asset_cache("robots.txt"), StatusCode::OK, None),
+            (CachePolicy::Favicon, StatusCode::OK, None),
+        ] {
+            let response = asset_response(
+                embedded_at_build_second(b"asset", "text/css"),
+                &Method::GET,
+                &headers,
+                policy,
+                "text/css",
+                None,
+            );
+            assert_eq!(response.status(), status);
+            assert_eq!(response.headers().get(header::LAST_MODIFIED), last_modified);
+        }
     }
 
-    /// 回归：回滚后入口的 `Last-Modified` 早于客户端缓存的日期；CDN 剥离 ETag 后只剩日期验证器，
-    /// 晚于本资源的日期也必须拿到完整的回滚后入口，不能回 304 让客户端停在已撤下的版本。
+    /// CDN 只转发旧日期时，回滚也必须返回当前入口。
     #[tokio::test]
     async fn later_if_modified_since_after_rollback_returns_the_current_entry() {
         let later = HeaderValue::from_static("Fri, 31 Dec 2100 23:59:59 GMT");
@@ -399,6 +466,72 @@ mod tests {
         let response =
             serve_public_asset::<TestAssets>(request("/assets/app.css.br", Some("br"))).await;
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn trailing_slash_redirects_to_each_surfaces_canonical_page() {
+        for (surface, method, source, location) in [
+            (Surface::Public, Method::GET, "/rules/?lang=ja&x=%2f&x=", "/rules?lang=ja&x=%2f&x="),
+            (Surface::Public, Method::HEAD, "/me/", "/me"),
+            (Surface::Public, Method::GET, "/lots/example/?", "/lots/example?"),
+            (Surface::Admin, Method::GET, "/dashboard/", "/dashboard"),
+            (
+                Surface::Admin,
+                Method::HEAD,
+                "/auctions/example/lots/?page=2",
+                "/auctions/example/lots?page=2",
+            ),
+        ] {
+            let response = page_request(surface, method, source).await;
+            assert_eq!(response.status(), StatusCode::PERMANENT_REDIRECT, "{source}");
+            assert_eq!(response.headers()[header::LOCATION], location);
+            assert_eq!(response.headers()[header::CACHE_CONTROL], "no-cache");
+            assert_eq!(cdn_cache_policy(&response), "no-cache");
+            assert!(body_text(response).await.is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn only_page_get_and_head_with_one_trailing_slash_are_redirected() {
+        for surface in [Surface::Public, Surface::Admin] {
+            for (method, path, status) in [
+                (Method::GET, "/", StatusCode::OK),
+                (Method::GET, "/assets/app.css", StatusCode::OK),
+                (Method::GET, "/assets/app.css/", StatusCode::NOT_FOUND),
+                (Method::GET, "//", StatusCode::NOT_FOUND),
+                (Method::GET, "//host/", StatusCode::NOT_FOUND),
+                (Method::GET, "/rules//", StatusCode::NOT_FOUND),
+                (Method::GET, "/lots//example/", StatusCode::NOT_FOUND),
+                (Method::GET, "/lots/../", StatusCode::NOT_FOUND),
+                (Method::GET, "/lots/%2F/", StatusCode::NOT_FOUND),
+                (Method::GET, "/deliveries/%2f/", StatusCode::NOT_FOUND),
+                (Method::GET, "/unknown/", StatusCode::NOT_FOUND),
+                (Method::GET, "/api/v1/unknown/?lang=ja", StatusCode::NOT_FOUND),
+                (Method::HEAD, "/health/ready/", StatusCode::NOT_FOUND),
+                (Method::POST, "/rules/", StatusCode::NOT_FOUND),
+            ] {
+                let response = page_request(surface, method, path).await;
+                assert_eq!(response.status(), status, "{path}");
+                assert!(!response.headers().contains_key(header::LOCATION), "{path}");
+                if path.starts_with("/api/") || path.starts_with("/health/") {
+                    assert_eq!(response.headers()[header::CONTENT_TYPE], "application/json");
+                }
+            }
+        }
+        for (surface, path) in [(Surface::Public, "/dashboard/"), (Surface::Admin, "/me/")] {
+            let response = page_request(surface, Method::GET, path).await;
+            assert_eq!(response.status(), StatusCode::NOT_FOUND);
+            assert!(!response.headers().contains_key(header::LOCATION));
+        }
+    }
+
+    async fn page_request(surface: Surface, method: Method, path: &str) -> Response {
+        let mut request = request(path, None);
+        *request.method_mut() = method;
+        match surface {
+            Surface::Public => serve_public_asset::<TestAssets>(request).await,
+            Surface::Admin => serve_admin_asset::<TestAssets>(request).await,
+        }
     }
 
     fn dynamic_response(values: &[&'static str]) -> Response {
@@ -511,9 +644,16 @@ mod tests {
     #[tokio::test]
     async fn cdn_policy_prefers_static_cache_extension() {
         let response = serve_public_asset::<TestAssets>(request("/assets/app.css", None)).await;
-        assert_eq!(
-            cdn_cache_policy(&response).to_str().expect("ascii"),
-            "public, max-age=31536000, immutable"
+        assert_eq!(cdn_cache_policy(&response), "no-cache");
+
+        let fingerprinted = asset_response(
+            embedded_at_build_second(b"body{color:red}", "text/css"),
+            &Method::GET,
+            &HeaderMap::new(),
+            exact_asset_cache("assets/app-dxh0123456789abcdef.css"),
+            "text/css",
+            None,
         );
+        assert_eq!(cdn_cache_policy(&fingerprinted), "public, max-age=31536000, immutable");
     }
 }

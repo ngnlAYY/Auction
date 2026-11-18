@@ -1,5 +1,7 @@
 //! 首次部署的页面内草稿与字段元数据；保留原始数字输入，不持久化或格式化凭据。
 
+use auction_contracts::SetupDatabaseRequest;
+
 /// 字段顺序同时决定渲染、错误摘要和首个错误焦点的顺序。
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum SetupField {
@@ -30,6 +32,8 @@ pub(super) enum SetupField {
 }
 
 impl SetupField {
+    pub(super) const DATABASE_TARGET: [Self; 3] =
+        [Self::DatabaseHost, Self::DatabasePort, Self::DatabaseName];
     pub(super) const DATABASE: [Self; 5] = [
         Self::DatabaseHost,
         Self::DatabasePort,
@@ -168,12 +172,27 @@ impl SetupField {
     }
 }
 
+/// 合并部署初始化确认只包含数据库地址和库名。
+#[derive(Clone, PartialEq, Eq)]
+pub(super) struct DatabaseTarget {
+    pub(super) host: String,
+    pub(super) port: u16,
+    pub(super) name: String,
+}
+
+impl DatabaseTarget {
+    pub(super) fn matches(&self, database: &SetupDatabaseRequest) -> bool {
+        self.host == database.host && self.port == database.port && self.name == database.name
+    }
+}
+
 /// 固定字段集的短生命周期草稿；不实现 Debug，避免敏感输入被意外记录。
 #[derive(Clone, PartialEq)]
 pub(super) struct SetupDraft {
     values: [String; 24],
     pub(super) metrics_enabled: bool,
     pub(super) schedule_enabled: bool,
+    pub(super) confirmed_database_target: Option<DatabaseTarget>,
 }
 
 impl Default for SetupDraft {
@@ -182,6 +201,7 @@ impl Default for SetupDraft {
             values: std::array::from_fn(|_| String::new()),
             metrics_enabled: true,
             schedule_enabled: false,
+            confirmed_database_target: None,
         };
         for (field, value) in [
             (SetupField::DatabaseHost, "127.0.0.1"),
@@ -221,7 +241,12 @@ impl SetupDraft {
     }
 
     pub(super) fn set(&mut self, field: SetupField, value: String) {
-        self.values[field as usize] = value;
+        let previous = &mut self.values[field as usize];
+        if SetupField::DATABASE_TARGET.contains(&field) && *previous != value {
+            // 授权只绑定到当时的目标。改后再改回也必须重新勾选。
+            self.confirmed_database_target = None;
+        }
+        *previous = value;
     }
 
     /// 两个独立 v4 UUID 共含 244 位随机熵；使用既有系统/浏览器安全随机源，不降级。
@@ -239,13 +264,14 @@ impl SetupDraft {
         }
     }
 
-    /// 完成部署后清空所有密码，包括仅用于浏览器确认、不进入 DTO 的重复输入。
+    /// 结束当前设置会话时清空所有密码和已确认的目标。
     pub(super) fn clear_passwords(&mut self) {
         for field in
             [SetupField::DatabasePassword, SetupField::AdminSecret, SetupField::AdminConfirmation]
         {
             self.values[field as usize].clear();
         }
+        self.confirmed_database_target = None;
     }
 }
 

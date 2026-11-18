@@ -6,6 +6,6 @@
 mod server;
 
 pub use server::{
-    FirstRunOutcome, FirstRunPolicy, FirstRunServerOptions, RemoteSetupAccess, run_first_run,
-    run_first_run_with_policy,
+    FirstRunOutcome, FirstRunPolicy, FirstRunServerOptions, RemoteSetupAccess, SetupDatabaseTarget,
+    run_first_run, run_first_run_with_policy,
 };

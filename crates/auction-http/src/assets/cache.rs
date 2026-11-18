@@ -1,10 +1,10 @@
 //! 静态资源与 CDN 的缓存策略。
 
+use std::path::Path;
+
 use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::Response;
 use rust_embed::EmbeddedFile;
-
-use super::INDEX_HTML;
 
 #[derive(Clone, Copy)]
 pub(super) enum CachePolicy {
@@ -108,13 +108,17 @@ pub(super) fn delta_seconds(value: &str) -> Option<&str> {
 }
 
 pub(super) fn exact_asset_cache(relative_path: &str) -> CachePolicy {
-    if relative_path == INDEX_HTML {
-        // 入口文档必须再验证，但允许浏览器/CDN 保存，避免每次导航都完整回源。
-        return CachePolicy::NoCache;
-    }
-    // Dioxus 把 JS、WASM、CSS 等构建资源全部放进 assets/ 并加内容指纹；该目录之外的文件名稳定，
-    // 必须每次再验证，不能把全部非 index 文件都标为 immutable。
-    if relative_path.starts_with("assets/") { CachePolicy::Immutable } else { CachePolicy::NoCache }
+    // assets/ 也可包含原名发布的文件；只有 dx 的内容指纹文件名才能获得不可变缓存策略。
+    let fingerprinted = relative_path.starts_with("assets/")
+        && Path::new(relative_path)
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .and_then(|name| name.rsplit_once("-dxh"))
+            .is_some_and(|(_, hash)| {
+                // dx 逐字节输出 8 个哈希字节的十六进制，每字节 1 至 2 位。
+                (8..=16).contains(&hash.len()) && hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+            });
+    if fingerprinted { CachePolicy::Immutable } else { CachePolicy::NoCache }
 }
 
 pub(super) fn favicon_file<A: rust_embed::RustEmbed>() -> Option<EmbeddedFile> {

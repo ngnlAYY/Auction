@@ -4,12 +4,14 @@ use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use super::{
-    draft::{SetupDraft, SetupField},
+    draft::{DatabaseTarget, SetupDraft, SetupField},
     error_key,
     fields::{SetupErrors, SetupInput},
     validation::{self, SetupIssue},
 };
 use crate::{api::submit_first_run, surface::validation::focus_field};
+
+const CONFIRM_INITIALIZE_ID: &str = "setup-confirm-initialize";
 
 #[component]
 pub(super) fn ConfigurationForm(
@@ -24,14 +26,9 @@ pub(super) fn ConfigurationForm(
     let mut pending = use_signal(|| None::<bool>);
     let mut issues = use_signal(Vec::<SetupIssue>::new);
     let mut advanced_open = use_signal(|| false);
-    let mut confirm_initialize = use_signal(|| false);
     let submit = use_callback(move |complete: bool| {
         // 回调内也检查门禁，防止键盘提交或尚未重渲染的按钮绕过 disabled。
         if pending.read().is_some() || outcome_unknown() {
-            return;
-        }
-        if complete && initialize_and_start && !confirm_initialize() {
-            notice.set(Some((false, "setup-confirm-initialize".to_owned())));
             return;
         }
         notice.set(None);
@@ -48,12 +45,28 @@ pub(super) fn ConfigurationForm(
                 return;
             }
         };
-        request.confirm_initialize = initialize_and_start && confirm_initialize();
         issues.write().clear();
+        let confirmed_target = if complete && initialize_and_start {
+            // 使用勾选时的快照核对本次请求，不能从提交草稿重建授权。
+            let confirmed = draft.read().confirmed_database_target.clone();
+            let Some(confirmed) = confirmed.filter(|target| target.matches(&request.database))
+            else {
+                notice.set(Some((false, "setup-error-confirm-initialize".to_owned())));
+                focus_field(CONFIRM_INITIALIZE_ID);
+                return;
+            };
+            request.confirm_initialize = true;
+            Some(confirmed)
+        } else {
+            None
+        };
         pending.set(Some(complete));
         let submitted_token = token();
         spawn(async move {
-            let result = submit_first_run(&submitted_token, &request, complete).await;
+            let confirmed = confirmed_target
+                .as_ref()
+                .map(|target| (target.host.as_str(), target.port, target.name.as_str()));
+            let result = submit_first_run(&submitted_token, &request, complete, confirmed).await;
             pending.set(None);
             match result {
                 Ok(()) if complete => {
@@ -68,12 +81,15 @@ pub(super) fn ConfigurationForm(
                 Ok(()) => notice.set(Some((true, "setup-valid".to_owned()))),
                 Err(code) => {
                     notice.set(Some((false, error_key(&code).to_owned())));
-                    if code == "setup_outcome_unknown" {
-                        outcome_unknown.set(true);
-                        token.set(String::new());
-                        draft.write().clear_passwords();
-                    } else if code == "setup_auth" {
-                        on_auth_failure.call(());
+                    let failure = apply_submission_failure(&mut draft.write(), &code);
+                    match failure {
+                        SubmissionFailure::OutcomeUnknown => {
+                            outcome_unknown.set(true);
+                            token.set(String::new());
+                        }
+                        SubmissionFailure::Authenticate => on_auth_failure.call(()),
+                        SubmissionFailure::ReconfirmTarget => focus_field(CONFIRM_INITIALIZE_ID),
+                        SubmissionFailure::Other => {}
                     }
                 }
             }
@@ -82,6 +98,19 @@ pub(super) fn ConfigurationForm(
     let waiting = pending.read().is_some();
     // 终态禁用字段和动作，但不能向辅助技术声称仍有请求正在等待。
     let busy = waiting || outcome_unknown();
+    let displayed_target =
+        initialize_and_start.then(|| validation::database_target(&draft.read())).flatten();
+    let confirmation_checked = displayed_target
+        .as_ref()
+        .is_some_and(|target| draft.read().confirmed_database_target.as_ref() == Some(target));
+    let confirmation_label = displayed_target.as_ref().map(|target| {
+        t!(
+            "setup-confirm-initialize",
+            host: target.host.clone(),
+            port: target.port.to_string(),
+            name: target.name.clone()
+        )
+    });
 
     rsx! {
         form {
@@ -194,14 +223,30 @@ pub(super) fn ConfigurationForm(
                     }
                 }
             }
-            p { class: "admin-setup__hint", if initialize_and_start { {t!("setup-initialize-help")} } else { {t!("setup-save-help")} } }
+            p { id: "setup-save-help", class: "admin-setup__hint",
+                if initialize_and_start { {t!("setup-initialize-help")} } else { {t!("setup-save-help")} }
+            }
             if initialize_and_start {
-                label { class: "admin-setup__check",
+                div { class: "admin-setup__check",
                     input {
-                        r#type: "checkbox", checked: confirm_initialize(), disabled: busy,
-                        onchange: move |event| { if !busy { confirm_initialize.set(event.checked()); } },
+                        id: CONFIRM_INITIALIZE_ID,
+                        name: "confirm_initialize",
+                        r#type: "checkbox",
+                        checked: confirmation_checked,
+                        disabled: busy || displayed_target.is_none(),
+                        aria_describedby: "setup-save-help",
+                        onchange: move |event| {
+                            if pending.read().is_some() || outcome_unknown() { return; }
+                            update_confirmation(&mut draft.write(), displayed_target.as_ref(), event.checked());
+                            notice.set(None);
+                        },
                     }
-                    {t!("setup-confirm-initialize")}
+                    label { r#for: CONFIRM_INITIALIZE_ID,
+                        // 库名中的连续空格属于目标的一部分，显示时也必须保留。
+                        white_space: "pre-wrap",
+                        overflow_wrap: "anywhere",
+                        {confirmation_label.unwrap_or_else(|| t!("setup-confirm-target-unavailable"))}
+                    }
                 }
             }
             div { class: "admin-setup__actions",
@@ -214,10 +259,95 @@ pub(super) fn ConfigurationForm(
                 button {
                     class: "admin-btn-primary",
                     r#type: "submit",
-                    disabled: busy || (initialize_and_start && !confirm_initialize()),
+                    disabled: busy,
                     if pending() == Some(true) { {t!("setup-saving")} } else if initialize_and_start { {t!("setup-save-start")} } else { {t!("setup-save")} }
                 }
             }
         }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum SubmissionFailure {
+    OutcomeUnknown,
+    Authenticate,
+    ReconfirmTarget,
+    Other,
+}
+
+fn apply_submission_failure(draft: &mut SetupDraft, code: &str) -> SubmissionFailure {
+    match code {
+        "setup_outcome_unknown" => {
+            draft.clear_passwords();
+            SubmissionFailure::OutcomeUnknown
+        }
+        "setup_auth" => SubmissionFailure::Authenticate,
+        "setup_confirmation_required" => {
+            // 服务端在写入前已拒绝，清除旧授权并允许重新确认当前目标。
+            draft.confirmed_database_target = None;
+            SubmissionFailure::ReconfirmTarget
+        }
+        _ => SubmissionFailure::Other,
+    }
+}
+
+fn update_confirmation(
+    draft: &mut SetupDraft,
+    displayed_target: Option<&DatabaseTarget>,
+    checked: bool,
+) {
+    // 勾选必须对应画面上的目标。输入已改变但页面还未更新时拒绝沿用旧目标。
+    draft.confirmed_database_target = displayed_target
+        .filter(|target| checked && validation::database_target(draft).as_ref() == Some(*target))
+        .cloned();
+}
+
+#[cfg(test)]
+mod tests {
+    use auction_contracts::SetupErrorResponse;
+
+    use super::{SubmissionFailure, apply_submission_failure, update_confirmation};
+    use crate::surface::setup::{
+        draft::{SetupDraft, SetupField},
+        validation::database_target,
+    };
+
+    #[test]
+    fn setup_target_mismatch_clears_confirmation_and_allows_reconfirming() {
+        let response: SetupErrorResponse = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../auction-contracts/tests/fixtures/admin/setup-confirm-target-mismatch.json"
+        )))
+        .unwrap();
+        let mut draft = SetupDraft::default();
+        let displayed = database_target(&draft).unwrap();
+        update_confirmation(&mut draft, Some(&displayed), true);
+        assert!(draft.confirmed_database_target.as_ref() == Some(&displayed));
+
+        assert_eq!(
+            apply_submission_failure(&mut draft, &response.code),
+            SubmissionFailure::ReconfirmTarget
+        );
+        assert!(draft.confirmed_database_target.is_none());
+
+        draft.set(SetupField::DatabaseName, "current_target".to_owned());
+        update_confirmation(&mut draft, Some(&displayed), true);
+        assert!(draft.confirmed_database_target.is_none());
+        let current = database_target(&draft).unwrap();
+        update_confirmation(&mut draft, Some(&current), true);
+        assert!(draft.confirmed_database_target.as_ref() == Some(&current));
+    }
+
+    #[test]
+    fn setup_unknown_outcome_requires_manual_verification() {
+        let mut draft = SetupDraft::default();
+        let displayed = database_target(&draft).unwrap();
+        update_confirmation(&mut draft, Some(&displayed), true);
+        assert_eq!(
+            apply_submission_failure(&mut draft, "setup_outcome_unknown"),
+            SubmissionFailure::OutcomeUnknown
+        );
+        assert!(draft.confirmed_database_target.is_none());
+        assert!(draft.value(SetupField::AdminSecret).is_empty());
     }
 }

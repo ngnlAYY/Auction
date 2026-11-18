@@ -5,7 +5,10 @@ mod configuration;
 mod filesystem;
 mod supervisor;
 
+use std::{future::Future, ops::AsyncFnOnce, path::Path};
+
 use anyhow::{Context, bail};
+use auction_setup::{FirstRunOutcome, SetupDatabaseTarget};
 use clap::Parser;
 
 use cli::{ChildRole, Cli};
@@ -67,50 +70,15 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     .await
 }
 
-async fn prepare(
-    cli: &Cli,
-    config_dir: &std::path::Path,
-) -> anyhow::Result<Vec<configuration::RolePlan>> {
-    let first_run = match std::fs::symlink_metadata(config_dir) {
-        Ok(_) => {
-            filesystem::trusted_directory(config_dir)?;
-            false
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
-        Err(error) => return Err(error).context("检查 server 配置目录失败"),
-    };
-    if first_run {
-        // 严格配置的服务账号固定为无 DDL 的 auction_runtime，不能执行首次 CREATE SCHEMA/迁移。
-        if cli.owner_secrets.is_none() {
-            bail!(
-                "首次设置必须提供 --owner-secrets（迁移 owner 凭据）；服务账号 auction_runtime 没有 DDL 权限"
-            );
-        }
-        setup(cli, config_dir).await?;
-    }
-    let plans = configuration::load(config_dir)?;
-    configuration::ensure_available(&plans).await?;
-    if first_run {
-        eprintln!("配置已保存；正在初始化专用空 PostgreSQL 数据库，尚未启动角色。");
-        let owner_path = cli.owner_secrets.as_deref().context("首次设置缺少迁移 owner 凭据")?;
-        let owner = auction_config::load_postgres_owner_secrets(owner_path)
-            .context("读取迁移 owner 凭据失败；不会回退到服务账号")?;
-        let service_url = plans[0].config.database_url().context("缺少数据库配置")?;
-        same_database_target(service_url, owner.database_url())?;
-        tokio::time::timeout(
-            std::time::Duration::from_secs(300),
-            auction_storage::initialize_empty_postgres(
-                owner.database_url(),
-                database_profile(
-                    &plans[0].config,
-                    auction_storage::DatabaseConnectionPurpose::ServerInitialize,
-                ),
-            ),
-        )
-        .await
-        .context("首次初始化超时；保留配置与数据库现场，普通重启不会重试迁移")?
-        .context("首次初始化失败；保留配置，核对数据库后用 auction-cli 的 db 命令受控恢复")?;
-    }
+async fn prepare(cli: &Cli, config_dir: &Path) -> anyhow::Result<Vec<configuration::RolePlan>> {
+    let plans = prepare_configuration(
+        cli,
+        config_dir,
+        setup(cli, config_dir),
+        configuration::ensure_available,
+        auction_storage::initialize_empty_postgres,
+    )
+    .await?;
     // 空库、部分迁移或待升级 schema 不允许先启动 Worker；只读就绪校验不能隐式迁移。
     use auction_application::operations::ProcessReadinessPort;
     let url = plans[0].config.database_url().context("缺少数据库配置")?;
@@ -135,7 +103,69 @@ async fn prepare(
     Ok(plans)
 }
 
-async fn setup(cli: &Cli, output: &std::path::Path) -> anyhow::Result<()> {
+async fn prepare_configuration(
+    cli: &Cli,
+    config_dir: &Path,
+    setup_outcome: impl Future<Output = anyhow::Result<FirstRunOutcome>>,
+    ensure_available: impl AsyncFnOnce(&[configuration::RolePlan]) -> anyhow::Result<()>,
+    initialize: impl AsyncFnOnce(
+        &str,
+        auction_storage::DatabaseConnectionProfile,
+    ) -> Result<(), auction_storage::FirstDatabaseInitializationError>,
+) -> anyhow::Result<Vec<configuration::RolePlan>> {
+    let first_run = match std::fs::symlink_metadata(config_dir) {
+        Ok(_) => {
+            filesystem::trusted_directory(config_dir)?;
+            false
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+        Err(error) => return Err(error).context("检查 server 配置目录失败"),
+    };
+    let confirmed_database = if first_run {
+        // 严格配置的服务账号固定为无 DDL 的 auction_runtime，不能执行首次 CREATE SCHEMA/迁移。
+        if cli.owner_secrets.is_none() {
+            bail!(
+                "首次设置必须提供 --owner-secrets（迁移 owner 凭据）；服务账号 auction_runtime 没有 DDL 权限"
+            );
+        }
+        match setup_outcome.await? {
+            FirstRunOutcome::Completed { confirmed_database } => Some(
+                confirmed_database
+                    .context("首次设置缺少已确认的数据库目标，请核对配置与迁移 owner 凭据")?,
+            ),
+            FirstRunOutcome::Interrupted => bail!("首次设置被中断；未启动任何角色"),
+            FirstRunOutcome::OutcomeUnknown => bail!("首次设置结果未知；重启前先核对配置"),
+        }
+    } else {
+        None
+    };
+    let plans = configuration::load(config_dir)?;
+    ensure_available(&plans).await?;
+    if let Some(confirmed_database) = confirmed_database {
+        let owner_path = cli.owner_secrets.as_deref().context("首次设置缺少迁移 owner 凭据")?;
+        let owner = auction_config::load_postgres_owner_secrets(owner_path)
+            .context("读取迁移 owner 凭据失败；不会回退到服务账号")?;
+        let service_url = plans[0].config.database_url().context("缺少数据库配置")?;
+        same_database_target(&confirmed_database, service_url, owner.database_url())?;
+        eprintln!("配置已保存；正在初始化专用空 PostgreSQL 数据库，尚未启动角色。");
+        tokio::time::timeout(
+            std::time::Duration::from_secs(300),
+            initialize(
+                owner.database_url(),
+                database_profile(
+                    &plans[0].config,
+                    auction_storage::DatabaseConnectionPurpose::ServerInitialize,
+                ),
+            ),
+        )
+        .await
+        .context("首次初始化超时；保留配置与数据库现场，普通重启不会重试迁移")?
+        .context("首次初始化失败；保留配置，核对数据库后用 auction-cli 的 db 命令受控恢复")?;
+    }
+    Ok(plans)
+}
+
+async fn setup(cli: &Cli, output: &Path) -> anyhow::Result<FirstRunOutcome> {
     if !cfg!(feature = "web-embed") {
         bail!("首次设置需要启用 web-embed 的发布构建");
     }
@@ -147,7 +177,7 @@ async fn setup(cli: &Cli, output: &std::path::Path) -> anyhow::Result<()> {
     } else {
         None
     };
-    let outcome = auction_setup::run_first_run_with_policy::<auction_admin_api::AdminWebAssets>(
+    auction_setup::run_first_run_with_policy::<auction_admin_api::AdminWebAssets>(
         auction_setup::FirstRunServerOptions {
             output_dir: output.to_owned(),
             control_group: filesystem::current_group()?,
@@ -161,23 +191,22 @@ async fn setup(cli: &Cli, output: &std::path::Path) -> anyhow::Result<()> {
         },
     )
     .await
-    .map_err(anyhow::Error::msg)?;
-    match outcome {
-        auction_setup::FirstRunOutcome::Completed => Ok(()),
-        auction_setup::FirstRunOutcome::Interrupted => {
-            bail!("首次设置被中断；未启动任何角色")
-        }
-        auction_setup::FirstRunOutcome::OutcomeUnknown => {
-            bail!("首次设置结果未知；重启前先核对配置")
-        }
-    }
+    .map_err(anyhow::Error::msg)
 }
 
-/// 证明迁移 owner 与服务配置指向同一数据库端点；错误不回显连接串或密码。
-///
-/// 复用 SQLx 的实际解析选项，覆盖 host/hostaddr、Unix socket、显式端口与查询参数，
-/// 不用 `Url` 的 host/path 近似判断。
-fn same_database_target(service_url: &str, owner_url: &str) -> anyhow::Result<()> {
+/// 初始化只授权给确认时的目标，服务配置和实际用于迁移的 owner 凭据都要复核。
+fn same_database_target(
+    confirmed: &SetupDatabaseTarget,
+    service_url: &str,
+    owner_url: &str,
+) -> anyhow::Result<()> {
+    if SetupDatabaseTarget::from_database_url(service_url).as_ref() != Some(confirmed)
+        || SetupDatabaseTarget::from_database_url(owner_url).as_ref() != Some(confirmed)
+    {
+        bail!(
+            "重新读取的数据库目标与首次设置确认不一致，已拒绝初始化。请核对服务配置与迁移 owner 凭据"
+        );
+    }
     let service =
         auction_storage::PostgresTarget::parse(service_url).ok().context("服务数据库连接无效")?;
     let owner = auction_storage::PostgresTarget::parse(owner_url)
@@ -210,10 +239,24 @@ fn database_profile(
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        cell::Cell,
+        ffi::OsStr,
+        fs,
+        io::Write,
+        os::unix::fs::{DirBuilderExt, OpenOptionsExt},
+        path::PathBuf,
+        sync::atomic::{AtomicUsize, Ordering},
+    };
+
+    use auction_config::{AuctionScheduleConfig, FirstRunConfig, PostgresConnectionConfig};
+    use auction_setup::{FirstRunOutcome, SetupDatabaseTarget};
+    use clap::Parser;
     use tokio::runtime::RuntimeFlavor;
 
-    use super::cli::ChildRole;
-    use super::runtime_builder;
+    use super::cli::{ChildRole, Cli};
+    use super::configuration::RolePlan;
+    use super::{filesystem, prepare_configuration, runtime_builder};
 
     #[test]
     fn child_roles_run_multi_threaded_while_supervisor_stays_single_threaded() {
@@ -223,5 +266,126 @@ mod tests {
         }
         let supervisor = runtime_builder(None).enable_all().build().unwrap();
         assert_eq!(supervisor.handle().runtime_flavor(), RuntimeFlavor::CurrentThread);
+    }
+
+    #[tokio::test]
+    async fn rejects_database_changed_after_setup_confirmation() {
+        let calls = Cell::new(0);
+        let result = prepare_after_setup("replaced", &calls).await;
+        assert_eq!(calls.get(), 0);
+        let error = result.expect_err("首次启动必须拒绝重新指向的数据库").to_string();
+        assert!(error.contains("首次设置确认不一致"), "{error}");
+        assert!(!error.contains("fixture-password"));
+    }
+
+    #[tokio::test]
+    async fn initializes_the_confirmed_database_once() {
+        let calls = Cell::new(0);
+        prepare_after_setup("confirmed", &calls).await.unwrap();
+        assert_eq!(calls.get(), 1);
+    }
+
+    async fn prepare_after_setup(
+        reloaded_database: &str,
+        calls: &Cell<usize>,
+    ) -> anyhow::Result<()> {
+        let directory = StartupDirectory::new();
+        let config_dir = directory.0.join("config");
+        let owner_path = directory.0.join("owner.toml");
+        let cli = Cli::parse_from([
+            OsStr::new("auction-server"),
+            OsStr::new("--owner-secrets"),
+            owner_path.as_os_str(),
+        ]);
+        let runtime = auction_config::managed_runtime_directory(&config_dir)?;
+        let _ownership = filesystem::acquire_runtime(&runtime)?;
+        let setup_outcome = async {
+            let mut config = first_run_config();
+            config.write_managed_to(&config_dir)?;
+            let confirmed_database =
+                SetupDatabaseTarget::from_database_url(&config.database.connection_url()?);
+            let outcome = FirstRunOutcome::Completed { confirmed_database };
+
+            // 在发布成功后改写本机配置，保留刚刚完成的确认结果。
+            if config.database.name != reloaded_database {
+                fs::rename(&config_dir, directory.0.join("published-config"))?;
+                config.database.name = reloaded_database.to_owned();
+                config.write_managed_to(&config_dir)?;
+            }
+            let mut owner = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&owner_path)?;
+            writeln!(
+                owner,
+                "database_url = \"postgresql://auction_owner:fixture-password@127.0.0.1:5432/{reloaded_database}\""
+            )?;
+            Ok(outcome)
+        };
+        prepare_configuration(
+            &cli,
+            &config_dir,
+            setup_outcome,
+            async |_: &[RolePlan]| Ok(()),
+            async |owner_url: &str, _profile| {
+                calls.set(calls.get() + 1);
+                let target = auction_storage::PostgresTarget::parse(owner_url).unwrap();
+                assert_eq!(target.database, reloaded_database);
+                assert_eq!(target.username, "auction_owner");
+                Ok(())
+            },
+        )
+        .await
+        .map(|_plans| ())
+    }
+
+    fn first_run_config() -> FirstRunConfig {
+        FirstRunConfig {
+            database: PostgresConnectionConfig {
+                host: "127.0.0.1".to_owned(),
+                port: 5432,
+                username: "auction_runtime".to_owned(),
+                password: "fixture-password".to_owned(),
+                name: "confirmed".to_owned(),
+            },
+            admin_actor: "operator".to_owned(),
+            admin_secret: "a".repeat(32),
+            public_origin: "https://public.example.test".to_owned(),
+            admin_origin: "https://admin.example.test".to_owned(),
+            public_listener_port: 8090,
+            admin_listener_port: 8091,
+            metrics_enabled: true,
+            schedule: AuctionScheduleConfig::default(),
+            start_price: 1000,
+            log_filter: "info".to_owned(),
+            worker_concurrency: 4,
+            worker_poll_interval_seconds: 15,
+            realtime_poll_interval_millis: 250,
+            control_group: "auction".to_owned(),
+            // SAFETY：测试用配置的控制面权限与当前有效 UID 对齐。
+            control_uid: unsafe { libc::geteuid() },
+        }
+    }
+
+    struct StartupDirectory(PathBuf);
+
+    impl StartupDirectory {
+        fn new() -> Self {
+            static NEXT: AtomicUsize = AtomicUsize::new(0);
+            let path = std::env::temp_dir().canonicalize().unwrap().join(format!(
+                "auction-startup-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed),
+            ));
+            fs::DirBuilder::new().mode(0o700).create(&path).unwrap();
+            Self(path)
+        }
+    }
+
+    impl Drop for StartupDirectory {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
     }
 }

@@ -5,7 +5,7 @@ use dioxus::prelude::*;
 
 use super::{
     draft::{SetupDraft, SetupField},
-    validation::SetupIssue,
+    validation::{self, SetupIssue},
 };
 use crate::surface::validation::{FieldError, focus_field};
 
@@ -18,12 +18,19 @@ pub(super) fn SetupInput(
 ) -> Element {
     let id = field.id();
     let mut reveal_secret = use_signal(|| false);
+    let mut actor_edited = use_signal(|| false);
+    let mut actor_blur_issue = use_signal(|| None::<&'static str>);
     let help_id = format!("{id}-help");
     let error_id = format!("{id}-error");
-    let error = issues.read().iter().find(|issue| issue.field == field).map(|issue| t!(issue.key));
+    let submitted_issue =
+        issues.read().iter().find(|issue| issue.field == field).map(|issue| issue.key);
+    let error = submitted_issue.or_else(&*actor_blur_issue).map(|key| t!(key));
     let invalid = error.is_some();
     let description = if invalid { format!("{help_id} {error_id}") } else { help_id.clone() };
     let bounds = field.number_bounds();
+    let help = rsx! {
+        p { id: help_id, class: "admin-setup__hint", {t!(&format!("{id}-help"))} }
+    };
 
     rsx! {
         div { class: "admin-setup__field",
@@ -68,8 +75,22 @@ pub(super) fn SetupInput(
                     value: draft.read().value(field).to_owned(),
                     oninput: move |event| {
                         if busy { return; }
-                        draft.write().set(field, event.value());
+                        let value = event.value();
+                        let mut draft = draft.write();
+                        if field == SetupField::AdminActor && draft.value(field) != value {
+                            actor_edited.set(true);
+                        }
+                        draft.set(field, value);
+                        if field == SetupField::AdminActor {
+                            if validation::issue(&draft, field).is_some() { return; }
+                            actor_blur_issue.set(None);
+                        }
                         issues.write().retain(|issue| !field.related(issue.field));
+                    },
+                    onblur: move |_| {
+                        if !busy && field == SetupField::AdminActor && actor_edited() {
+                            actor_blur_issue.set(validation::issue(&draft.read(), field));
+                        }
                     },
                 }
             }
@@ -97,8 +118,19 @@ pub(super) fn SetupInput(
                     }
                 }
             }
-            p { id: help_id, class: "admin-setup__hint", {t!(&format!("{id}-help"))} }
-            FieldError { id: error_id, message: error }
+            if field == SetupField::AdminActor {
+                div {
+                    {help}
+                    div { aria_live: if submitted_issue.is_some() { "off" } else { "polite" },
+                        if let Some(error) = error {
+                            p { id: error_id, class: "admin-field-error", "{error}" }
+                        }
+                    }
+                }
+            } else {
+                {help}
+                FieldError { id: error_id, message: error }
+            }
         }
     }
 }

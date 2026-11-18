@@ -51,6 +51,14 @@ bash ci/checks/web-build-inputs-test.sh
 
 Cargo 只需读取工作区清单，下载缓存为空时也可运行，因此该门禁纳入 `all`。独立的回归脚本使用临时工作区验证传递依赖、指纹、复用和构建结束复核。
 
+## Web 发布清单
+
+```bash
+bash ci/checks/web-payload-test.sh
+```
+
+自测在临时目录验证[发布清单门禁](../release/build-identity.sh)接受普通文件和压缩副本，拒绝源码映射、点文件和点目录下的文件，并检查失败时的文件路径诊断。
+
 ## unwrap/expect 门禁
 
 根 [Cargo.toml](../../Cargo.toml) 的 workspace Clippy 将 `unwrap_used`、`expect_used` 设为 `deny`；所有成员继承统一策略。`lint` 检查 native 全工作区、全部 target 与 feature，`wasm` 分别检查 Public/Admin 浏览器及共享依赖，覆盖只在 `wasm32` 编译的分支。构建脚本随所属成员检查；Clippy 会跳过部分宏展开，因此新增或修改本仓库宏时仍须核对定义中的 `unwrap`/`expect`，不能只依靠调用点的 Clippy 结果。

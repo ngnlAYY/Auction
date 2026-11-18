@@ -1,4 +1,4 @@
-//! 静态资源响应构造、条件请求与 404/405/503 页面。
+//! 静态资源响应构造、条件请求与页面重定向及错误。
 
 use std::borrow::Cow;
 
@@ -6,12 +6,13 @@ use auction_contracts::ApiErrorResponse;
 use auction_time::Timestamp;
 use axum::Json;
 use axum::body::Body;
-use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use rust_embed::EmbeddedFile;
 
 use super::cache::{CachePolicy, StaticCachePolicy};
-use super::routes::Surface;
+use super::negotiation::static_method;
+use super::routes::{Surface, browser_route};
 use super::{
     ADMIN_NOT_FOUND_HTML, ASSETS_MISSING_BODY, IMF_FIXDATE, OBSOLETE_HTTP_DATES,
     PUBLIC_NOT_FOUND_HTML,
@@ -28,7 +29,7 @@ pub(super) fn asset_response(
     encoding: Option<&'static str>,
 ) -> Response {
     // HTML 不是可共享的静态缓存候选，即使构建产物把它放在 assets/ 下。
-    let cache_policy = if file.metadata.mimetype().eq_ignore_ascii_case("text/html") {
+    let cache_policy = if content_type.eq_ignore_ascii_case("text/html") {
         CachePolicy::NoCache
     } else {
         cache_policy
@@ -36,11 +37,15 @@ pub(super) fn asset_response(
     let content_length = file.data.len();
     let content_type = HeaderValue::from_str(content_type)
         .unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream"));
-    let last_modified = file
-        .metadata
-        .last_modified()
-        .and_then(|seconds| Timestamp::from_timestamp(i64::try_from(seconds).ok()?, 0));
-    // 内容摘要作为强 ETag；嵌入文件 mtime 可能随构建环境变化，ETag 让再验证稳定命中。
+    // 同秒重建或回滚会让稳定 URL 的构建时间与内容变化脱钩，仅保留指纹资源的日期验证器。
+    let last_modified = if matches!(cache_policy, CachePolicy::Immutable) {
+        file.metadata
+            .last_modified()
+            .and_then(|seconds| Timestamp::from_timestamp(i64::try_from(seconds).ok()?, 0))
+    } else {
+        None
+    };
+    // 对实际发送的表示使用内容摘要，压缩副本与原文各自再验证。
     let etag = HeaderValue::from_str(&format!(
         "\"{}\"",
         auction_application::core::lower_hex(&file.metadata.sha256_hash())
@@ -67,18 +72,16 @@ pub(super) fn asset_response(
                 .unwrap_or_else(|_| HeaderValue::from_static("Thu, 01 Jan 1970 00:00:00 GMT")),
         );
     }
-    // 不变量：请求带 `If-None-Match` 时只按内容 ETag 判定，`If-Modified-Since` 仅在它缺席时参与
-    // （RFC 9110 §13.1.3）。`Last-Modified` 取自构建时的提交时间：同一提交重建或回滚到更早的
-    // 提交后内容已变而时间没有前进，两者按“或”合并会让浏览器一直停在另一版入口文档上。
-    // 只有日期验证器时也只认原样回传的同一时刻（见 `not_modified`）。
+    // If-None-Match 优先，陈旧 ETag 不得被相同日期覆盖（RFC 9110 §13.1.3）。
     let revalidated = if request_headers.contains_key(header::IF_NONE_MATCH) {
         etag_not_modified(request_headers, &headers)
     } else {
         last_modified.is_some_and(|last_modified| not_modified(request_headers, last_modified))
     };
     if revalidated {
-        headers.remove(header::CONTENT_LENGTH);
-        let mut response = (StatusCode::NOT_MODIFIED, headers).into_response();
+        // RFC 9110 §15.4.5 要求 304 在响应头结束。保留对应 200 表示的长度（§8.6），
+        // 让真正的空正文在 HTTP/2 的 HEADERS 上结束流，同时防止 axum 补出长度 0。
+        let mut response = (StatusCode::NOT_MODIFIED, headers, Body::empty()).into_response();
         response.extensions_mut().insert(StaticCachePolicy(cache_policy));
         return response;
     }
@@ -109,10 +112,7 @@ pub(super) fn etag_not_modified(request_headers: &HeaderMap, response_headers: &
         .any(|candidates| etag_matches(candidates, etag))
 }
 
-/// 只有 `If-Modified-Since` 时，仅当它与本资源的 `Last-Modified` 是同一秒才判为未修改。
-/// Cloudflare 改写 HTML 时会剥离入口文档的 ETag，浏览器与 CDN 回源时只剩日期验证器；回滚到
-/// 更早的提交后 `Last-Modified` 倒退，按 RFC 的“不晚于”判定会把回滚后的入口回成 304，客户端
-/// 继续停在已撤下的新版。浏览器与 CDN 都原样回传收到的 `Last-Modified`，稳态再验证仍得 304。
+/// 指纹资源沿用日期验证器同秒匹配的行为。
 pub(super) fn not_modified(headers: &HeaderMap, last_modified: Timestamp) -> bool {
     headers
         .get(header::IF_MODIFIED_SINCE)
@@ -126,6 +126,31 @@ pub(super) fn parse_http_date(value: &str) -> Option<Timestamp> {
     std::iter::once(IMF_FIXDATE)
         .chain(OBSOLETE_HTTP_DATES)
         .find_map(|format| Timestamp::strptime_utc(format, value))
+}
+
+/// 只把同一 surface 白名单中的页面重定向到去掉一个尾斜杠后的规范路径。
+pub(super) fn canonical_page_redirect(
+    surface: Surface,
+    method: &Method,
+    uri: &Uri,
+) -> Option<Response> {
+    if !static_method(method) {
+        return None;
+    }
+    let canonical = uri.path().strip_suffix('/')?;
+    // 双斜杠去掉一个后会等于根路径，不能把它当成白名单页面的别名。
+    if canonical == "/" || !browser_route(surface, canonical) {
+        return None;
+    }
+    let location = match uri.query() {
+        Some(query) => format!("{canonical}?{query}"),
+        None => canonical.to_owned(),
+    };
+    let headers = [
+        (header::LOCATION, HeaderValue::from_str(&location).ok()?),
+        (header::CACHE_CONTROL, HeaderValue::from_static(CachePolicy::NoCache.value())),
+    ];
+    Some((StatusCode::PERMANENT_REDIRECT, headers).into_response())
 }
 
 pub(super) fn method_not_allowed(request_headers: &HeaderMap) -> Response {

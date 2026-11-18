@@ -88,9 +88,9 @@ usermod -aG auction-worker-control auction
 
 1. 安装 `auction-server` 与 `auction-cli`，建立 `auction` 账号，预先建立专用的**空**数据库与应用角色。
 2. 安装 [auction-server.service.example](deploy/systemd/auction-server.service.example) 为 `/etc/systemd/system/auction-server.service`（配置目录 `/var/lib/auction/config`，运行目录 `/var/lib/auction/.config.server`），`systemctl enable --now auction-server`。
-3. 配置目录不存在时进入首次设置：准备 owner 凭据 `/var/lib/auction/owner/postgres.toml` 并通过 `--owner-secrets` 传入；在 `journalctl -u auction-server` 取得令牌，经 SSH 隧道访问 `http://127.0.0.1:8091/setup`，确认“初始化并启动”。无法使用隧道时可临时用 [setup.Caddyfile.example](deploy/caddy/setup.Caddyfile.example) 反代并加 `--allow-remote-setup --setup-origin https://<域名> --setup-proxy-ip 127.0.0.1`，完成后立即删除。
+3. 配置目录不存在时进入首次设置：准备 owner 凭据 `/var/lib/auction/owner/postgres.toml` 并通过 `--owner-secrets` 传入；在 `journalctl -u auction-server` 取得令牌，经 SSH 隧道访问 `http://127.0.0.1:8091/setup`。核对确认框所列数据库的主机、端口和库名后保存，修改其中任一项须重新勾选。无法使用隧道时可临时用 [setup.Caddyfile.example](deploy/caddy/setup.Caddyfile.example) 反代并加 `--allow-remote-setup --setup-origin https://<域名> --setup-proxy-ip 127.0.0.1`，完成后立即删除。
 
-初始化失败或结果未知时服务不会自动重试（unit 为 `Restart=no`）：保留配置与数据库现场，核对后用 `auction-cli db` 系列命令恢复。合并部署是单一故障域：三个子进程任一退出都会停止其余角色，需要人工核对后恢复。
+监管进程重读配置与迁移 owner 凭据后，须核对两者的实际连接目标都与网页确认一致才初始化。若目标不一致，初始化在写库前停止。核对已发布配置和 owner 凭据后走受控恢复。初始化失败或结果未知时服务不会自动重试（unit 为 `Restart=no`）：保留配置与数据库现场，核对后用 `auction-cli db` 系列命令恢复。合并部署是单一故障域：三个子进程任一退出都会停止其余角色，需要人工核对后恢复。
 
 ## 端口与套接字
 
@@ -215,9 +215,11 @@ Cloudflare 默认只按**文件扩展名**决定能否缓存：`.js`、`.css`、
 
 | 响应 | 源站的 CDN 指令 | `cf-cache-status` |
 | --- | --- | --- |
-| `/assets/*`（JS、WASM、CSS、译文、图标） | `public, max-age=31536000, immutable` | 首次 `MISS`，之后 `HIT` |
-| `/favicon.ico` | `public, max-age=86400` | `HIT`，过期后 `REVALIDATED` |
-| 入口文档（`/` 与各页面路径）、补偿池汇总（含当前余额）、履约进度 | `no-cache` | `REVALIDATED`：每次向源站做条件请求，未变化时源站只回 304，正文由边缘给出 |
+| `/assets/` 下文件名带内容指纹的资源（JS、WASM、CSS、译文、图标） | `public, max-age=31536000, immutable` | 首次 `MISS`，之后 `HIT` |
+| 入口文档及稳定文件名的静态资源（包括 `/assets/` 下的原名文件） | `no-cache` | 每次向源站按内容 ETag 再验证，命中时为 `REVALIDATED` |
+| `/favicon.ico` | `public, max-age=86400` | `HIT`，过期后按内容 ETag 再验证 |
+| 白名单页面的尾斜杠重定向 | `no-cache` | 每次回源获取当前重定向 |
+| 补偿池汇总（含当前余额）、履约进度 | `no-cache` | `REVALIDATED`：每次向源站做条件请求，未变化时源站只回 304，正文由边缘给出 |
 | 低频内容：世界目录、规则、关于、黑名单、注册说明、已结算拍卖列表、价格历史、补偿池流水与明细 | `public, max-age=300, stale-while-revalidate=3600` | `HIT`；过期后一小时内 `UPDATING`/`STALE`（先回旧值，后台刷新） |
 | 已结算批次的 lots、lot 详情与竞价日志 | `public, max-age=86400, stale-while-revalidate=604800` | `HIT`；过期后 7 天内 `UPDATING`/`STALE`（先回旧值，后台刷新） |
 | 倒计时图片（仍倒数或未排期） | `public, max-age=5` | `HIT`，5 秒后 `EXPIRED` |
@@ -237,7 +239,8 @@ Cloudflare 默认只按**文件扩展名**决定能否缓存：`.js`、`.css`、
 - **Tiered Cache：开启 Smart Tiered Cache**（Caching → Tiered Cache）。访问量小时单个节点很容易没有副本，开启后节点未命中先问上层节点而不是回源。
 - **Browser Cache TTL：Respect Existing Headers**；缓存键保持默认（包含查询串），不要启用忽略查询串。
 - **SSL/TLS：Full (strict)**。
-- 不需要为静态资源做清除：文件名带内容指纹，入口文档每次再验证。**升级改变了公开只读接口的响应形状时**，部署后在 Caching → Configuration 做一次 Purge Everything（或按前缀 `/api/` 清除）：边缘上旧形状的已结算/历史响应最长可保留一天，新页面的严格解码会拒绝它们。
+- **升级静态资源缓存策略**。免清除仅适用于文件名带内容指纹的资源。本版将 `/assets/` 下的稳定文件名资源从一年 `immutable` 改为按内容 ETag 再验证，CDN 中的旧条目仍会沿用旧有效期。新版本就绪后，将按完整 URL 清除一次 CDN 缓存纳入升级步骤，或等待旧条目过期。清除范围为 `/assets/<固定文件名>` 和 `/assets/<子目录>/<固定文件名>` 等无内容指纹的资源，带查询串的 URL 要保留对应查询串。浏览器已保存的副本按旧有效期到期，独立于 CDN 清除。
+- **升级改变了公开只读接口的响应形状时**，部署后在 Caching → Configuration 做一次 Purge Everything（或按前缀 `/api/` 清除）：边缘上旧形状的已结算/历史响应最长可保留一天，新页面的严格解码会拒绝它们。
 
 配置后的核对（把域名换成实际值；`.wasm` 的文件名取自入口文档）：
 

@@ -21,15 +21,18 @@ pub(crate) async fn submit_first_run(
     token: &str,
     form: &SetupRequest,
     complete: bool,
+    confirmed_target: Option<(&str, u16, &str)>,
 ) -> Result<(), String> {
     let path = if complete { "/api/v1/setup/complete" } else { "/api/v1/setup/validate" };
+    let confirmation = confirmed_target.map(|(host, port, name)| encode_target(host, port, name));
     let result = async {
         let response = super::send_request(|abort_signal| {
-            Request::post(path)
-                .abort_signal(abort_signal)
-                .header("x-setup-token", token)
-                .json(form)
-                .map_err(|_| "invalid_input".to_owned())
+            let mut request =
+                Request::post(path).abort_signal(abort_signal).header("x-setup-token", token);
+            if let Some(confirmation) = &confirmation {
+                request = request.header("x-setup-confirm-target", confirmation);
+            }
+            request.json(form).map_err(|_| "invalid_input".to_owned())
         })
         .await?;
         let expected = if complete { "completed" } else { "validated" };
@@ -51,6 +54,14 @@ pub(crate) async fn submit_first_run(
     })
 }
 
+fn encode_target(host: &str, port: u16, name: &str) -> String {
+    url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("host", host)
+        .append_pair("port", &port.to_string())
+        .append_pair("name", name)
+        .finish()
+}
+
 async fn setup_response(response: Response, expected: &str) -> Result<SetupResponse, String> {
     if !response.ok() {
         return Err(response
@@ -60,4 +71,17 @@ async fn setup_response(response: Response, expected: &str) -> Result<SetupRespo
     }
     let body: SetupResponse = response.json().await.map_err(|_| "setup_unknown".to_owned())?;
     if body.status == expected { Ok(body) } else { Err("setup_unknown".to_owned()) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::encode_target;
+
+    #[test]
+    fn setup_database_confirmation_has_the_canonical_header_format() {
+        assert_eq!(
+            encode_target("::1", 5432, "拍卖 & %"),
+            "host=%3A%3A1&port=5432&name=%E6%8B%8D%E5%8D%96+%26+%25"
+        );
+    }
 }

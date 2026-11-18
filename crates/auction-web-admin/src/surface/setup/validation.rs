@@ -5,7 +5,8 @@ use std::{net::IpAddr, str::FromStr};
 use auction_contracts::{SetupDatabaseRequest, SetupRequest, SetupScheduleRequest};
 use url::{Host, Url};
 
-use super::draft::{SetupDraft, SetupField};
+use super::draft::{DatabaseTarget, SetupDraft, SetupField};
+use crate::api::valid_safe_text;
 
 /// 只保存字段身份和翻译键，不在错误中带入凭据或固定当前语言。
 #[derive(Clone, PartialEq)]
@@ -56,8 +57,26 @@ pub(super) fn validate(draft: &SetupDraft) -> Result<SetupRequest, Vec<SetupIssu
     })
 }
 
-fn issue(draft: &SetupDraft, field: SetupField) -> Option<&'static str> {
+/// 确认只接收可提交的目标字段，避免把无效输入呈现成可授权的目标。
+pub(super) fn database_target(draft: &SetupDraft) -> Option<DatabaseTarget> {
+    let [host, port, name] = SetupField::DATABASE_TARGET;
+    if SetupField::DATABASE_TARGET.into_iter().any(|field| issue(draft, field).is_some()) {
+        return None;
+    }
+    Some(DatabaseTarget {
+        host: draft.value(host).to_owned(),
+        port: draft.value(port).parse().ok()?,
+        name: draft.value(name).to_owned(),
+    })
+}
+
+pub(super) fn issue(draft: &SetupDraft, field: SetupField) -> Option<&'static str> {
     let value = draft.value(field);
+    if field == SetupField::AdminActor {
+        // 与首次设置配置的 128 字节边界及正式登录的冒号约束对齐，原文留给用户修正。
+        return (!valid_safe_text(value, 128) || value.contains(':'))
+            .then_some("setup-admin-actor-invalid");
+    }
     if value.is_empty() {
         return Some("admin-field-required");
     }
@@ -96,7 +115,6 @@ fn issue(draft: &SetupDraft, field: SetupField) -> Option<&'static str> {
         SetupField::DatabaseHost => database_text(value) && valid_host(value),
         SetupField::DatabaseUsername | SetupField::DatabasePassword => database_text(value),
         SetupField::DatabaseName => database_text(value) && !matches!(value, "." | ".."),
-        SetupField::AdminActor => !value.contains([':', '\r', '\n', '\0']),
         SetupField::AdminSecret => {
             value.len() >= 32 && !value.bytes().any(|byte| byte.is_ascii_control())
         }
@@ -177,4 +195,72 @@ fn valid_origin(value: &str) -> bool {
 
 fn number<T: FromStr>(draft: &SetupDraft, field: SetupField) -> Result<T, Vec<SetupIssue>> {
     draft.value(field).parse().map_err(|_| vec![SetupIssue { field, key: "setup-field-invalid" }])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{database_target, issue};
+    use crate::surface::setup::draft::{SetupDraft, SetupField};
+
+    #[test]
+    fn setup_admin_actor_rejects_noncanonical_text_without_changing_the_input() {
+        let mut draft = SetupDraft::default();
+        let field = SetupField::AdminActor;
+        for valid in ["管理 员".to_owned(), "é".repeat(64)] {
+            draft.set(field, valid.clone());
+            assert_eq!(issue(&draft, field), None);
+            assert_eq!(draft.value(field), valid);
+        }
+        for invalid in [
+            " admin".to_owned(),
+            "admin ".to_owned(),
+            "\u{2003}admin".to_owned(),
+            "a\tmin".to_owned(),
+            "a\u{0085}min".to_owned(),
+            "admin:owner".to_owned(),
+            "é".repeat(65),
+            String::new(),
+        ] {
+            draft.set(field, invalid.clone());
+            assert_eq!(issue(&draft, field), Some("setup-admin-actor-invalid"), "{invalid:?}");
+            assert_eq!(draft.value(field), invalid);
+        }
+    }
+
+    #[test]
+    fn setup_confirmation_is_revoked_on_each_target_edit() {
+        for (field, edited) in [
+            (SetupField::DatabaseHost, "::1"),
+            (SetupField::DatabasePort, "5433"),
+            (SetupField::DatabasePort, "05432"),
+            (SetupField::DatabaseName, "other"),
+        ] {
+            let mut draft = SetupDraft::default();
+            let original = draft.value(field).to_owned();
+            draft.confirmed_database_target = database_target(&draft);
+            assert!(draft.confirmed_database_target.is_some());
+            draft.set(SetupField::DatabasePassword, "changed-password".to_owned());
+            draft.set(field, original.clone());
+            assert!(draft.confirmed_database_target.is_some());
+            draft.set(field, edited.to_owned());
+            assert!(draft.confirmed_database_target.is_none());
+            draft.set(field, original);
+            assert!(draft.confirmed_database_target.is_none());
+            assert!(database_target(&draft).is_some());
+        }
+    }
+
+    #[test]
+    fn setup_confirmation_requires_a_valid_host_port_and_name() {
+        for (field, invalid) in [
+            (SetupField::DatabaseHost, "https://database.example.test"),
+            (SetupField::DatabasePort, "0"),
+            (SetupField::DatabaseName, ".."),
+        ] {
+            let mut draft = SetupDraft::default();
+            assert!(database_target(&draft).is_some());
+            draft.set(field, invalid.to_owned());
+            assert!(database_target(&draft).is_none());
+        }
+    }
 }

@@ -133,7 +133,7 @@ fn error_key(code: &str) -> &'static str {
     match code {
         "invalid_input" => "setup-error-input",
         "setup_origin" => "setup-error-origin",
-        "setup_confirmation_required" => "setup-confirm-initialize",
+        "setup_confirmation_required" => "setup-error-confirm-initialize",
         "database_unavailable" => "setup-error-database",
         "configuration_invalid" => "setup-error-config",
         "setup_locked" | "setup_completed" => "setup-error-locked",
