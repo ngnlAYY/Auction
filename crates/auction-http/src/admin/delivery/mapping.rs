@@ -1,9 +1,71 @@
 //! Admin 交付 DTO 映射。
 
-use auction_application::delivery::DeliveryAdminSnapshot;
-use auction_contracts::AdminDeliveryResponse;
+use auction_application::delivery::{
+    DeliveryAdminAction, DeliveryAdminGuardBlocker, DeliveryAdminGuardSnapshot,
+    DeliveryAdminSnapshot,
+};
+use auction_contracts::{
+    AdminDeliveryActionAvailability, AdminDeliveryActionBlocker, AdminDeliveryActionsResponse,
+    AdminDeliveryResponse,
+};
 
 use crate::mapping::timestamp;
+
+pub(super) fn map_actions(
+    guard: &DeliveryAdminGuardSnapshot,
+    acknowledge: Option<DeliveryAdminGuardBlocker>,
+) -> AdminDeliveryActionsResponse {
+    let decision = |action| map_availability(guard.projected_blocker(action));
+    AdminDeliveryActionsResponse {
+        release: decision(DeliveryAdminAction::Release),
+        retry_failed: decision(DeliveryAdminAction::RetryFailed),
+        reconcile_retry: decision(DeliveryAdminAction::ReconcileRetry),
+        reconcile_succeeded: decision(DeliveryAdminAction::ReconcileSucceeded),
+        reconcile_failed: decision(DeliveryAdminAction::ReconcileFailed),
+        acknowledge: map_availability(acknowledge),
+    }
+}
+
+fn map_availability(blocker: Option<DeliveryAdminGuardBlocker>) -> AdminDeliveryActionAvailability {
+    use DeliveryAdminGuardBlocker as Blocker;
+
+    let reason = match blocker {
+        None => return AdminDeliveryActionAvailability::Eligible {},
+        Some(Blocker::SettlementReturnActionOwned) => {
+            AdminDeliveryActionBlocker::SettlementReturnActionOwned
+        }
+        Some(Blocker::SettlementIneligible) => AdminDeliveryActionBlocker::SettlementIneligible,
+        Some(Blocker::FundedDelivery) => AdminDeliveryActionBlocker::FundedDelivery,
+        Some(Blocker::RetiredDelivery) => AdminDeliveryActionBlocker::RetiredDelivery,
+        Some(Blocker::StaleFencingVersion) => AdminDeliveryActionBlocker::StaleFencingVersion,
+        Some(Blocker::SentSighted) => AdminDeliveryActionBlocker::SentSighted,
+        Some(Blocker::ReconcileSucceededForSend) => {
+            AdminDeliveryActionBlocker::ReconcileSucceededForSend
+        }
+        Some(Blocker::DeliveryNotEligible) => AdminDeliveryActionBlocker::DeliveryNotEligible,
+        Some(Blocker::StatusMismatch) => AdminDeliveryActionBlocker::StatusMismatch,
+        Some(Blocker::QuarantinedMailActionNotAllowed) => {
+            AdminDeliveryActionBlocker::QuarantinedMailActionNotAllowed
+        }
+        Some(Blocker::MissingReconcileReference) => {
+            AdminDeliveryActionBlocker::MissingReconcileReference
+        }
+        Some(Blocker::RecipientRenamed) => AdminDeliveryActionBlocker::RecipientRenamed,
+        Some(Blocker::AlreadyDisposed) => AdminDeliveryActionBlocker::AlreadyDisposed,
+        Some(Blocker::NotAcknowledgeable) => AdminDeliveryActionBlocker::NotAcknowledgeable,
+        Some(Blocker::RecoveryRetryIneligible) => {
+            AdminDeliveryActionBlocker::RecoveryRetryIneligible
+        }
+        Some(Blocker::SettlementFulfillmentState) => {
+            AdminDeliveryActionBlocker::SettlementFulfillmentState
+        }
+        Some(Blocker::MissingSendingFence) => AdminDeliveryActionBlocker::MissingSendingFence,
+        Some(Blocker::CommandSnapshotUnreadable) => {
+            AdminDeliveryActionBlocker::DeliveryCommandSnapshotUnreadable
+        }
+    };
+    AdminDeliveryActionAvailability::Blocked { reason }
+}
 
 /// 将 delivery 应用快照转换为管理端安全 DTO。
 pub(crate) fn map_snapshot(snapshot: DeliveryAdminSnapshot) -> AdminDeliveryResponse {
@@ -424,5 +486,117 @@ mod tests {
         let value = serde_json::to_value(map_detail(input)).expect("serialize");
         assert!(value.get("obligation").is_none());
         assert!(value.get("recovery").is_none());
+    }
+
+    #[test]
+    fn delivery_serialized_blocked_registration_reply_matches_browser_fixture() {
+        use auction_contracts::{AdminDeliveryDetailWithActionsResponse, ApiResponse};
+
+        use crate::admin::delivery::projection::DeliveryProjection;
+
+        let mut input = detail();
+        let delivery = &mut input.delivery;
+        delivery.id = uuid::Uuid::parse_str("0f8fad5b-d9cb-469f-a165-70867728950e").expect("uuid");
+        delivery.origin_kind = "mail_intake".to_owned();
+        delivery.origin_id = "main:4242:send".to_owned();
+        delivery.status = "failed".to_owned();
+        delivery.template = Some("register_key".to_owned());
+        delivery.category = Some("account".to_owned());
+        delivery.claimed_at = Some(time());
+        delivery.failure_code = Some("preflight_blocked".to_owned());
+        let guard = DeliveryAdminGuardSnapshot {
+            action: DeliveryAdminAction::Release,
+            expected_fencing_version: delivery.fencing_version,
+            fencing_version: delivery.fencing_version,
+            status: delivery.status.clone(),
+            reason_code: delivery.reason_code.clone(),
+            has_sending_fence: true,
+            origin_kind: delivery.origin_kind.clone(),
+            payload_operation: Some("send".to_owned()),
+            sent_reference_sighted: false,
+            funded_delivery: false,
+            command_snapshot_readable: true,
+            retired: false,
+            lot_eligible: Some(true),
+            settlement_eligible: None,
+            settlement_fulfillment_state: None,
+            has_reconcile_reference: false,
+            mail_handed_over: false,
+            recipient_renamed: true,
+            recovery_retry_eligible: true,
+        };
+        let attempt = &mut input.attempts[0];
+        attempt.subject = Some("Fixture".to_owned());
+        attempt.body_digest = Some([0x44; 32]);
+        attempt.credits = Some(0);
+        attempt.equipment_ids.clear();
+        attempt.credential = None;
+        attempt.bound_sent_mail_id = None;
+        input.evidence.clear();
+        input.dispositions.clear();
+        input.obligation = None;
+        input.recovery = None;
+        input.custody.collected = None;
+        input.custody.cod_pending = None;
+        input.custody.remaining_credits = None;
+        input.custody.observed_at = None;
+        let projected = |detail: DeliveryAdminDetail, acknowledge| {
+            let guard = DeliveryAdminGuardSnapshot {
+                has_sending_fence: detail.delivery.sending_at.is_some(),
+                ..guard.clone()
+            };
+            ApiResponse::ok(
+                "交付详情已加载",
+                AdminDeliveryDetailWithActionsResponse {
+                    detail: DeliveryProjection::DispositionActions
+                        .project_detail(map_detail(detail))
+                        .expect("详情投影"),
+                    actions: map_actions(&guard, acknowledge),
+                },
+            )
+        };
+        let blocked = projected(input.clone(), Some(DeliveryAdminGuardBlocker::AlreadyDisposed));
+        assert_eq!(
+            blocked.data.actions.retry_failed.blocker(),
+            Some(AdminDeliveryActionBlocker::RecipientRenamed)
+        );
+        let mut before_fence = input.clone();
+        before_fence.delivery.sending_at = None;
+        before_fence.delivery.failure_code = Some("invalid_payload".to_owned());
+        before_fence.delivery.suppression_reason = before_fence.delivery.failure_code.clone();
+        before_fence.attempts.clear();
+        for (detail, fixture) in [
+            (
+                input,
+                include_str!(
+                    "../../../../auction-web-admin/src/api/delivery/blocked_registration_reply.json"
+                ),
+            ),
+            (
+                before_fence,
+                include_str!(
+                    "../../../../auction-web-admin/src/api/delivery/blocked_registration_reply_before_fence.json"
+                ),
+            ),
+        ] {
+            let mapped = projected(detail, None);
+            assert!(mapped.data.actions.acknowledge.blocker().is_none());
+            let fixture: serde_json::Value = serde_json::from_str(fixture).expect("浏览器回归样本");
+            assert_eq!(serde_json::to_value(&mapped).expect("序列化详情"), fixture);
+        }
+    }
+
+    #[test]
+    fn delivery_serialized_new_action_blockers_match_browser_fixture() {
+        let response = [
+            map_availability(Some(DeliveryAdminGuardBlocker::SettlementFulfillmentState)),
+            map_availability(Some(DeliveryAdminGuardBlocker::MissingSendingFence)),
+            map_availability(Some(DeliveryAdminGuardBlocker::CommandSnapshotUnreadable)),
+        ];
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../auction-web-admin/src/api/delivery/disposition_action_blockers.json"
+        ))
+        .expect("浏览器回归样本");
+        assert_eq!(serde_json::to_value(response).expect("序列化阻断原因"), fixture);
     }
 }

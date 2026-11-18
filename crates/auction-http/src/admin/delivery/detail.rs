@@ -5,7 +5,7 @@
 
 use std::net::SocketAddr;
 
-use auction_contracts::ApiResponse;
+use auction_contracts::{AdminDeliveryDetailWithActionsResponse, ApiResponse};
 use axum::{
     Json,
     extract::{ConnectInfo, Path, State},
@@ -14,6 +14,7 @@ use axum::{
 };
 use uuid::Uuid;
 
+use super::mapping::map_actions;
 use super::projection::DeliveryProjection;
 use super::{feature_unavailable, map_delivery_error, map_detail};
 use crate::errors::{api_error, invalid_query};
@@ -50,6 +51,26 @@ pub(crate) async fn detail(
     let Some(port) = state.delivery_admin() else {
         return feature_unavailable();
     };
+    if projection == DeliveryProjection::DispositionActions {
+        let (detail, guard, acknowledge) = match port.detail_with_guard(delivery_id).await {
+            Ok(projected) => projected,
+            Err(error) => return map_delivery_error(error),
+        };
+        let detail = match projection.project_detail(map_detail(detail)) {
+            Ok(detail) => detail,
+            Err(response) => return *response,
+        };
+        let response = AdminDeliveryDetailWithActionsResponse {
+            detail,
+            actions: map_actions(&guard, acknowledge),
+        };
+        return (
+            StatusCode::OK,
+            no_store_headers(),
+            Json(ApiResponse::ok("交付详情已加载", response)),
+        )
+            .into_response();
+    }
     let detail = match port.detail(delivery_id).await {
         Ok(detail) => detail,
         Err(error) => return map_delivery_error(error),
@@ -67,7 +88,10 @@ pub(crate) async fn detail(
 fn detail_projection(uri: &Uri) -> Result<DeliveryProjection, Box<Response>> {
     let mut query = parse_query(uri, &["include"])
         .map_err(|()| Box::new(invalid_query("投递详情查询参数无效")))?;
-    DeliveryProjection::parse(query.remove("include").as_deref())
+    match query.remove("include").as_deref() {
+        Some("disposition_actions") => Ok(DeliveryProjection::DispositionActions),
+        include => DeliveryProjection::parse(include),
+    }
 }
 
 #[cfg(test)]
@@ -92,7 +116,7 @@ mod tests {
         }
     }
 
-    /// 缺省投影不带参数；只有精确的 `include=settlement_returns` 是扩展投影。旧的单项取值
+    /// 缺省投影不带参数；扩展投影只接受精确的单项取值。旧的单项取值
     /// `recovery_equipment_recovered`、其他取值与未登记的键都以 400 `invalid_query` 拒绝，不静默
     /// 退回缺省投影。
     #[tokio::test]
@@ -102,6 +126,10 @@ mod tests {
         assert_eq!(
             parse("?include=settlement_returns").await,
             Ok(DeliveryProjection::SettlementReturns)
+        );
+        assert_eq!(
+            parse("?include=disposition_actions").await,
+            Ok(DeliveryProjection::DispositionActions)
         );
         for (query, message) in [
             ("?include=", "附加字段无效"),

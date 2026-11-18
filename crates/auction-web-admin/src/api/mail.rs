@@ -179,17 +179,28 @@ pub(crate) async fn trigger_mail_poll(command_id: Uuid) -> Result<i64, AdminApiF
     if !response.ok() {
         return Err(response_failure(response).await);
     }
+    if response.status() != 202 {
+        return Err(AdminApiFailure::client(invalid_response_error("mail_poll_trigger_status")));
+    }
     let payload: ApiResponse<AdminMailPollTriggerResponse> = response
         .json()
         .await
         .map_err(|error| AdminApiFailure::client(invalid_response_error(error)))?;
-    if !valid_uuid(&payload.data.command_id)
-        || payload.data.command_id != command_id.to_string()
-        || !(1..=MAX_JSON_SAFE_INTEGER).contains(&payload.data.pollers)
-    {
-        return Err(AdminApiFailure::client("invalid_response"));
-    }
-    Ok(payload.data.pollers)
+    accepted_pollers(payload, command_id)
+        .ok_or_else(|| AdminApiFailure::client(invalid_response_error("mail_poll_trigger_receipt")))
+}
+
+fn accepted_pollers(
+    payload: ApiResponse<AdminMailPollTriggerResponse>,
+    command_id: Uuid,
+) -> Option<i64> {
+    let receipt = payload.data;
+    (payload.code == "accepted"
+        && !payload.message.is_empty()
+        && valid_uuid(&receipt.command_id)
+        && receipt.command_id == command_id.to_string()
+        && (1..=MAX_JSON_SAFE_INTEGER).contains(&receipt.pollers))
+    .then_some(receipt.pollers)
 }
 
 fn decode_mail_state(data: StrictMailState) -> Result<AdminMailPolling, &'static str> {
@@ -494,9 +505,27 @@ fn valid_metadata_list(values: &[String]) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use auction_contracts::{AdminMailPollTriggerResponse, ApiResponse};
     use serde_json::json;
+    use uuid::Uuid;
 
-    use super::{AdminMailIntake, valid_mail_intake};
+    use super::{AdminMailIntake, accepted_pollers, valid_mail_intake};
+
+    #[test]
+    fn poll_trigger_uses_the_count_from_the_accepted_receipt() {
+        let command_id = Uuid::parse_str("0f8fad5b-d9cb-469f-a165-70867728950e").unwrap();
+        let mut payload = ApiResponse::accepted(
+            "邮件轮询已触发",
+            AdminMailPollTriggerResponse { command_id: command_id.to_string(), pollers: 3 },
+        );
+        assert_eq!(accepted_pollers(payload.clone(), command_id), Some(3));
+        assert_eq!(accepted_pollers(payload.clone(), Uuid::nil()), None);
+        payload.code = "ok".to_owned();
+        assert_eq!(accepted_pollers(payload.clone(), command_id), None);
+        payload.code = "accepted".to_owned();
+        payload.data.pollers = 0;
+        assert_eq!(accepted_pollers(payload, command_id), None);
+    }
 
     #[test]
     fn mail_intake_accepts_rekey_and_rejects_unrecognized_kind() {

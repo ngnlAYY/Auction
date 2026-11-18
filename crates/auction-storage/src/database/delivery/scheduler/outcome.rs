@@ -5,6 +5,7 @@ use auction_time::Timestamp;
 use sqlx::Postgres;
 
 use super::mapping::repository_error;
+use super::recipient::key_reply_user;
 use crate::database::delivery::audit::{
     DeliveryAudit, FAIL, OUTCOME_UNKNOWN, SUCCEED, append as append_delivery_audit,
     worker_state_metadata,
@@ -155,6 +156,32 @@ async fn persist_once(
             .fetch_one(&mut *tx)
             .await?;
     let mut terminal = *terminal;
+    let recipient_renamed = terminal.failure == Some("preflight_blocked")
+        && terminal.metadata.get("preflight_reason").and_then(serde_json::Value::as_str)
+            == Some("recipient_renamed");
+    let mut preflight_metadata;
+    if recipient_renamed {
+        if terminal.status != "failed"
+            || terminal.reference.is_some()
+            || terminal.metadata.get("stage").and_then(serde_json::Value::as_str)
+                != Some("preflight_blocked")
+            || terminal.metadata.get("write_started").and_then(serde_json::Value::as_bool)
+                != Some(false)
+            || terminal.metadata.get("reason_code").is_some()
+            || key_reply_user(&claim.origin_kind, &claim.payload).is_none()
+            || account.is_some()
+        {
+            return Err(OutcomeError::Rejected);
+        }
+        if status == "claimed" {
+            // 围栏前的拒绝沿用旧版 invalid_payload 终态，保留真实的 claimed 时间，不伪造 sending。
+            preflight_metadata = terminal.metadata.clone();
+            preflight_metadata["failure_code"] = "invalid_payload".into();
+            terminal.failure = Some("invalid_payload");
+            terminal.preparation_rejected = true;
+            terminal.metadata = &preflight_metadata;
+        }
+    }
     let mut panic_metadata;
     if terminal.failure == Some("task_panic") && status == "claimed" {
         // 数据库仍为 claimed 才能证明尚未外写；sending 或提交未知一律保留人工核对。
@@ -276,6 +303,11 @@ async fn persist_once(
         audit_metadata["preflight_blocked"] = serde_json::json!(true);
         audit_metadata["write_started"] = serde_json::json!(false);
         audit_metadata["outcome_unknown"] = serde_json::json!(false);
+    }
+    if recipient_renamed {
+        audit_metadata["preflight_reason"] = "recipient_renamed".into();
+        audit_metadata["write_started"] = false.into();
+        audit_metadata["outcome_unknown"] = false.into();
     }
     append_delivery_audit(
         &mut tx,

@@ -1,0 +1,5 @@
+[
+  {"state": "blocked", "reason": "settlement_fulfillment_state"},
+  {"state": "blocked", "reason": "missing_sending_fence"},
+  {"state": "blocked", "reason": "delivery_command_snapshot_unreadable"}
+]

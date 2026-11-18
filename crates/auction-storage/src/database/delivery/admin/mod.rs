@@ -29,6 +29,7 @@ macro_rules! extended_projection_delivery_sql {
 
 mod commands;
 mod detail;
+mod eligibility;
 mod mapping;
 mod reads;
 mod support;
@@ -62,6 +63,27 @@ impl DeliveryAdminPort for DatabaseStore {
                 return Err(DeliveryAdminError::Invalid.into());
             }
             detail::detail(self.pool(), delivery_id).await.map_err(ApplicationError::from)
+        })
+    }
+
+    fn detail_with_guard(
+        &self,
+        delivery_id: Uuid,
+    ) -> auction_application::core::ApplicationFuture<
+        '_,
+        (
+            auction_application::delivery::DeliveryAdminDetail,
+            auction_application::delivery::DeliveryAdminGuardSnapshot,
+            Option<auction_application::delivery::DeliveryAdminGuardBlocker>,
+        ),
+    > {
+        Box::pin(async move {
+            if delivery_id.is_nil() {
+                return Err(DeliveryAdminError::Invalid.into());
+            }
+            detail::detail_with_guard(self.pool(), delivery_id)
+                .await
+                .map_err(ApplicationError::from)
         })
     }
 

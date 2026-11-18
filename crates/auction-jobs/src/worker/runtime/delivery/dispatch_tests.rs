@@ -21,12 +21,15 @@ use auction_application::core::ApplicationFuture;
 use auction_application::core::diagnostics::SafeErrorKind;
 use auction_application::core::{ApplicationError, Clock, RepositoryError, RequestHash};
 use auction_application::delivery::{
-    AuthorizedDeliveryPreparation, AuthorizedDeliverySend, DeliveryClaimExclusions,
-    DeliveryFenceOutcome, DeliveryPreparation, DeliveryPreparedExpectation, DeliverySendResult,
-    DeliveryTransport, DeliveryTransportError, DeliveryWakeup, DeliveryWorkClaim,
-    DeliveryWorkStore,
+    AuthorizedDeliveryPreparation, AuthorizedDeliverySend, DeliveryAdminError,
+    DeliveryClaimExclusions, DeliveryFenceOutcome, DeliveryPreparation,
+    DeliveryPreparedExpectation, DeliverySendResult, DeliveryTransport, DeliveryTransportError,
+    DeliveryWakeup, DeliveryWorkClaim, DeliveryWorkStore,
 };
-use auction_application::notification_metrics::noop_notification_recorder;
+use auction_application::notification_metrics::{
+    NotificationFailure, NotificationKind, NotificationRecorder, NotificationStage,
+    noop_notification_recorder,
+};
 use auction_application::operations::{
     CriticalWriteKind, ExternalWriteActivity, ExternalWriteLifecycle,
 };
@@ -85,6 +88,7 @@ enum Renewal {
     Healthy,
     RejectedAfter(usize),
     HangsAfter(usize),
+    RecipientRenamedAfter(usize),
 }
 
 /// sending 围栏的应答。
@@ -199,7 +203,13 @@ impl DeliveryWorkStore for OutboxStore {
             if let Some(hook) = hook {
                 hook();
             }
-            Ok(vec![claim(world, worker_id, now, lease_until)])
+            let mut claim = claim(world, worker_id, now, lease_until);
+            if matches!(self.renewal, Renewal::RecipientRenamedAfter(_)) {
+                claim.origin_kind = "mail_intake".to_owned();
+                claim.payload["template"] = "register_key".into();
+                claim.payload["user_key_user_id"] = Uuid::new_v4().to_string().into();
+            }
+            Ok(vec![claim])
         })
     }
 
@@ -266,6 +276,9 @@ impl DeliveryWorkStore for OutboxStore {
                     Err(repository_failure("租约已被接管"))
                 }
                 Renewal::HangsAfter(healthy) if attempt >= healthy => std::future::pending().await,
+                Renewal::RecipientRenamedAfter(healthy) if attempt >= healthy => {
+                    Err(DeliveryAdminError::RecipientRenamed.into())
+                }
                 _ => Ok(()),
             }
         })
@@ -513,6 +526,79 @@ fn observed_drain(store: &Arc<OutboxStore>) -> TestDrain {
 /// 准备、围栏前、围栏后三次续租与围栏本身都发生在领取时刻。
 fn handoff_calls() -> Vec<(u64, Call)> {
     vec![(0, Call::Renew), (0, Call::Renew), (0, Call::Fence), (0, Call::Renew)]
+}
+
+#[derive(Default)]
+struct ReplyFailures(Mutex<Vec<(NotificationKind, NotificationFailure)>>);
+
+impl NotificationRecorder for ReplyFailures {
+    fn observe_stage(&self, _kind: NotificationKind, _stage: NotificationStage) {}
+
+    fn observe_failure(&self, kind: NotificationKind, failure: NotificationFailure) {
+        self.0.lock().unwrap().push((kind, failure));
+    }
+
+    fn observe_delivery_latency(&self, _kind: NotificationKind, _latency: Duration) {}
+
+    fn observe_postage_estimate(&self, _kind: NotificationKind, _credits: u64) {}
+}
+
+#[tokio::test(start_paused = true)]
+async fn renamed_login_key_reply_stops_before_remote_send_and_records_business_failure() {
+    for (healthy_renewals, expected_calls) in [
+        (0, vec![(0, Call::Renew)]),
+        (1, vec![(0, Call::Renew), (0, Call::Renew)]),
+        (2, handoff_calls()),
+    ] {
+        // 第三次续租发生在已提交 sending、首次 poll 传输之前。前两次也允许确定收口。
+        let store = OutboxStore::new(
+            &["main"],
+            Renewal::RecipientRenamedAfter(healthy_renewals),
+            Fence::Sending,
+        );
+        let transport = ScriptedTransport::new(Preparation::Ready, Some(Duration::ZERO));
+        let (mut worker, metrics) =
+            delivery_worker(&store, &transport, ExternalWriteLifecycle::default());
+        let replies = Arc::new(ReplyFailures::default());
+        worker.notifications = replies.clone();
+
+        run_delivery_cycle(&worker).await.unwrap();
+
+        let mut expected = expected_calls;
+        expected.push((
+            0,
+            Call::Fail {
+                failure_code: "preflight_blocked".to_owned(),
+                outcome_unknown: false,
+                stage: Some("preflight_blocked".to_owned()),
+            },
+        ));
+        assert_eq!(store.calls(), expected, "走终态提交，没有释放或重领旧 claim");
+        assert_eq!(transport.prepares(), usize::from(healthy_renewals != 0));
+        assert_eq!(transport.send_polls(), 0, "远端传输替身收到零次写入请求");
+        assert_eq!(metrics.iterations(), vec![(WorkerLoop::Delivery, WorkerResult::Success)]);
+        assert!(metrics.unpersisted().is_empty(), "已经落库的拒绝不能计入 REPOSITORY_FAILED");
+        assert_eq!(
+            *replies.0.lock().unwrap(),
+            vec![(NotificationKind::RegisterKey, NotificationFailure::PreflightBlocked)]
+        );
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn login_key_reply_rebind_during_remote_write_keeps_outcome_unknown() {
+    // 准备、围栏前与围栏后复核都通过，发送 future 已经 poll，后续续租拒绝不能声明未外写。
+    let store = OutboxStore::new(&["main"], Renewal::RecipientRenamedAfter(3), Fence::Sending);
+    let transport = ScriptedTransport::new(Preparation::Ready, None);
+    let (worker, metrics) = delivery_worker(&store, &transport, ExternalWriteLifecycle::default());
+
+    run_delivery_cycle(&worker).await.unwrap();
+
+    let mut expected = handoff_calls();
+    expected.extend([(10, Call::Renew), (10, outcome_unknown("lease_renewal"))]);
+    assert_eq!(store.calls(), expected);
+    assert_eq!(transport.send_polls(), 1);
+    assert_eq!(metrics.iterations(), vec![(WorkerLoop::Delivery, WorkerResult::Error)]);
 }
 
 #[tokio::test(start_paused = true)]

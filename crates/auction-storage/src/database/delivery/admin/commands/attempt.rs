@@ -7,6 +7,9 @@ use auction_application::delivery::{
 };
 use sqlx::{Postgres, Row};
 
+use super::super::eligibility::{
+    key_recipient_renamed, permanently_retired, settlement_fulfillment_state,
+};
 use super::super::mapping::{legacy_result_payload, stored_snapshot};
 use super::super::transaction::{DeliveryAdminTransactionError, PostgresDeliveryAdminTransaction};
 use super::ledger::{committed_command, existing_command, lock_command};
@@ -19,6 +22,7 @@ use crate::database::delivery::audit::{
     ADMIN_RECONCILE, ADMIN_RELEASE, ADMIN_RETRY_FAILED, DeliveryAudit,
     append as append_delivery_audit,
 };
+use crate::database::recovery::commands::reset_after_delivery_retry;
 use crate::database::settlement::fulfillment::SettlementDeliveryEligibility;
 
 pub(super) async fn execute_transaction(
@@ -116,7 +120,8 @@ pub(super) async fn execute_transaction(
     .await
     .map_err(DeliveryAdminTransactionError::Sqlx)?
     .ok_or(DeliveryAdminError::NotFound)?;
-    let current = stored_snapshot(&row).map_err(DeliveryAdminTransactionError::Business)?;
+    // 已锁行的完整命令快照必须可读，避免以安全详情的部分字段改写不能重放的记录。
+    let current = stored_snapshot(&row).ok_or(DeliveryAdminError::CommandSnapshotUnreadable)?;
     // 兼容滚动升级期间尚未取得 advisory lock 的旧实例：delivery 行锁等待结束后重新读取
     // 命令账本，必须先识别重放/冲突，再判断已经被前一命令推进的 fencing version。
     if let Some(result) = existing_command(&mut transaction, command).await? {
@@ -125,33 +130,14 @@ pub(super) async fn execute_transaction(
     }
     // 旧投递已由追加修复事实永久退役；当前 fulfillment 指针复建后也不能把它当作普通孤儿重发。
     // 原成功命令已在上方重放；这里只拒绝新动作，因此不依赖用于放行的 trusted 证明匹配。
-    let retired: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM public.settlement_legacy_self_reconciliations WHERE delivery_id=$1)
-          OR EXISTS(SELECT 1 FROM public.settlement_equipment_losses WHERE delivery_id=$1)",
-    )
-    .bind(command.delivery_id)
-    .fetch_one(transaction.connection()?)
-    .await
-    .map_err(DeliveryAdminTransactionError::Sqlx)?;
+    let retired = permanently_retired(transaction.transaction_mut()?, &current)
+        .await
+        .map_err(DeliveryAdminTransactionError::Sqlx)?;
     // Worker 已在完整 Sent 中目击同一结算义务主题时，重试可能重复寄出现金或装备，判失败会
     // 把已成交误记为未发；目击只由当前人工核对行的维护写入，动作准入在领域闭集中判定。
-    let sent_reference_sighted = if matches!(
-        command.action,
-        DeliveryAdminAction::ReconcileRetry | DeliveryAdminAction::ReconcileFailed
-    ) {
-        sqlx::query_scalar(
-            "SELECT COALESCE(result_metadata,'{}'::jsonb) ? 'sent_reference_sighting'
-             FROM public.deliveries
-             WHERE id=$1 AND origin_kind='settlement' AND payload_operation='send'",
-        )
-        .bind(command.delivery_id)
-        .fetch_optional(transaction.connection()?)
-        .await
-        .map_err(DeliveryAdminTransactionError::Sqlx)?
-        .unwrap_or(false)
-    } else {
-        false
-    };
+    let result_metadata: serde_json::Value =
+        row.try_get("result_metadata").map_err(DeliveryAdminTransactionError::Sqlx)?;
+    let sent_reference_sighted = result_metadata.get("sent_reference_sighting").is_some();
     let lot_eligible = if reactivates {
         Some(
             crate::database::lot_watch::delivery_eligible(
@@ -173,12 +159,32 @@ pub(super) async fn execute_transaction(
         .map_err(DeliveryAdminTransactionError::Sqlx)?;
     let payload: serde_json::Value =
         row.try_get("payload").map_err(DeliveryAdminTransactionError::Sqlx)?;
+    let recipient_renamed = reactivates
+        && key_recipient_renamed(transaction.transaction_mut()?, &current, &payload, true)
+            .await
+            .map_err(DeliveryAdminTransactionError::Sqlx)?;
+    let (recovery_retry_eligible, recovery_retry) = if retries_delivery {
+        let retry = reset_after_delivery_retry(transaction.transaction_mut()?, command.delivery_id)
+            .await
+            .map_err(DeliveryAdminTransactionError::Sqlx)?;
+        (retry.eligible(), Some(retry))
+    } else {
+        (true, None)
+    };
+    let fulfillment_state = if command.action == DeliveryAdminAction::Release {
+        None
+    } else {
+        settlement_fulfillment_state(transaction.transaction_mut()?, command.delivery_id, true)
+            .await
+            .map_err(DeliveryAdminTransactionError::Sqlx)?
+    };
     let guard = DeliveryAdminGuardSnapshot {
         action: command.action,
         expected_fencing_version: command.expected_fencing_version,
         fencing_version: current.fencing_version,
         status: current.status.clone(),
         reason_code: current.reason_code.clone(),
+        has_sending_fence: current.sending_at.is_some(),
         origin_kind: current.origin_kind.clone(),
         payload_operation: payload
             .get("operation")
@@ -186,11 +192,15 @@ pub(super) async fn execute_transaction(
             .map(str::to_owned),
         sent_reference_sighted,
         funded_delivery: funded.is_some(),
+        command_snapshot_readable: true,
         retired,
         lot_eligible,
         settlement_eligible,
+        settlement_fulfillment_state: fulfillment_state,
         has_reconcile_reference: command.external_reference.is_some(),
         mail_handed_over,
+        recipient_renamed,
+        recovery_retry_eligible,
     };
     let decision = guard.evaluate();
     if let Some(blocker) = decision.blockers.first() {
@@ -198,17 +208,15 @@ pub(super) async fn execute_transaction(
     }
     let next_status = decision.transition.next_status;
     apply_delivery_action(&mut transaction, command, &current, &decision).await?;
-    if command.action == DeliveryAdminAction::RetryFailed
-        || command.action == DeliveryAdminAction::ReconcileRetry
-    {
-        reset_settlement_fulfillment(&mut transaction, command.delivery_id).await?;
+    let fulfillment_state = guard.settlement_fulfillment_state.as_deref();
+    if let Some(retry) = recovery_retry {
+        reset_settlement_fulfillment(&mut transaction, command.delivery_id, fulfillment_state)
+            .await?;
         // Recovery owner 在同一命令事务中恢复投影；失败则连 delivery 重试一并回滚。
-        if !crate::database::recovery::commands::reset_after_delivery_retry(
-            transaction.transaction_mut()?,
-            command.delivery_id,
-        )
-        .await
-        .map_err(DeliveryAdminTransactionError::Sqlx)?
+        if !retry
+            .apply(transaction.transaction_mut()?, command.delivery_id)
+            .await
+            .map_err(DeliveryAdminTransactionError::Sqlx)?
         {
             return Err(DeliveryAdminError::Stale.into());
         }
@@ -219,6 +227,7 @@ pub(super) async fn execute_transaction(
         update_settlement_fulfillment(
             &mut transaction,
             command.delivery_id,
+            fulfillment_state,
             "satisfied",
             None,
             Some(external_reference),
@@ -229,6 +238,7 @@ pub(super) async fn execute_transaction(
         update_settlement_fulfillment(
             &mut transaction,
             command.delivery_id,
+            fulfillment_state,
             "failed",
             command.failure_code.as_deref(),
             None,

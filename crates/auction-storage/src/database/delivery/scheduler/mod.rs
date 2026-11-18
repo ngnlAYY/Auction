@@ -220,6 +220,7 @@ mod expired;
 mod mapping;
 mod outcome;
 mod quarantine;
+pub(in crate::database::delivery) mod recipient;
 mod state;
 pub(in crate::database) mod take_attempts;
 mod wakeup;
@@ -379,9 +380,7 @@ impl DeliveryWorkStore for DatabaseStore {
             if lease_until <= renewed_at {
                 return Err(storage_error("delivery 续租时间无效"));
             }
-            renew_postgres(self.pool(), &claim, renewed_at, lease_until)
-                .await
-                .map_err(ApplicationError::from)
+            renew_postgres(self.pool(), &claim, renewed_at, lease_until).await
         })
     }
 

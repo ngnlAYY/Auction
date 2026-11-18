@@ -8,7 +8,8 @@ use std::collections::HashSet;
 
 use auction_application::delivery::{
     DeliveryAdminAttempt, DeliveryAdminCustody, DeliveryAdminDetail, DeliveryAdminDisposition,
-    DeliveryAdminError, DeliveryAdminObligation, DeliveryAdminRecovery, DeliveryAdminSentEvidence,
+    DeliveryAdminError, DeliveryAdminGuardBlocker, DeliveryAdminGuardSnapshot,
+    DeliveryAdminObligation, DeliveryAdminRecovery, DeliveryAdminSentEvidence,
     DeliverySendExpectation, DeliveryTakeExpectation,
 };
 use auction_time::Timestamp;
@@ -16,8 +17,9 @@ use serde_json::Value;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
+use super::eligibility::read_guard;
 use super::map_storage_error;
-use super::mapping::{decode_result_payload, snapshot};
+use super::mapping::{decode_result_payload, snapshot, stored_snapshot};
 use crate::database::{TrackedPool, TrackedTransaction as Transaction};
 
 pub(crate) async fn detail(
@@ -25,39 +27,75 @@ pub(crate) async fn detail(
     delivery_id: Uuid,
 ) -> Result<DeliveryAdminDetail, DeliveryAdminError> {
     let mut transaction = pool.begin_read_snapshot().await.map_err(map_storage_error)?;
+    let (detail, ..) = read_detail(&mut transaction, delivery_id, false).await?;
+    transaction.commit().await.map_err(map_storage_error)?;
+    Ok(detail)
+}
+
+pub(super) async fn detail_with_guard(
+    pool: &TrackedPool<Postgres>,
+    delivery_id: Uuid,
+) -> Result<
+    (DeliveryAdminDetail, DeliveryAdminGuardSnapshot, Option<DeliveryAdminGuardBlocker>),
+    DeliveryAdminError,
+> {
+    let mut transaction = pool.begin_read_snapshot().await.map_err(map_storage_error)?;
+    let (detail, payload, result_metadata, command_snapshot_readable) =
+        read_detail(&mut transaction, delivery_id, true).await?;
+    let (guard, acknowledge) = read_guard(
+        &mut transaction,
+        &detail.delivery,
+        &payload,
+        &result_metadata,
+        command_snapshot_readable,
+    )
+    .await
+    .map_err(map_storage_error)?;
+    transaction.commit().await.map_err(map_storage_error)?;
+    Ok((detail, guard, acknowledge))
+}
+
+async fn read_detail(
+    transaction: &mut Transaction<'_, Postgres>,
+    delivery_id: Uuid,
+    with_guard: bool,
+) -> Result<(DeliveryAdminDetail, Value, Value, bool), DeliveryAdminError> {
     let row = sqlx::query(
         r#"SELECT id, origin_kind, origin_id, recipient, payload, result_metadata, status,
                   lease_token, lease_expires_at, fencing_version, attempt_count, claimed_at,
                   sending_at, completed_at, external_reference, failure_code,
-                  created_at, updated_at
+                  created_at, updated_at, command_id, request_digest, activation_command_id,
+                  activation_request_digest, activated_at
            FROM public.deliveries WHERE id = $1"#,
     )
     .bind(delivery_id)
-    .fetch_optional(&mut *transaction)
+    .fetch_optional(&mut **transaction)
     .await
     .map_err(map_storage_error)?
     .ok_or(DeliveryAdminError::NotFound)?;
     let result_metadata: Value = row.try_get("result_metadata").map_err(map_storage_error)?;
+    let payload: Value = row.try_get("payload").map_err(map_storage_error)?;
     let delivery = snapshot(&row)?;
-    let attempts = attempts(&mut transaction, delivery_id).await?;
-    let confirmation_rows = confirmations(&mut transaction, delivery_id).await?;
-    let mut dispositions = admin_commands(&mut transaction, delivery_id).await?;
+    // 完整命令快照只决定写入资格，已通过安全校验的证据仍需显示，供操作者核对。
+    let command_snapshot_readable = !with_guard || stored_snapshot(&row).is_some();
+    let attempts = attempts(transaction, delivery_id).await?;
+    let confirmation_rows = confirmations(transaction, delivery_id).await?;
+    let mut dispositions = admin_commands(transaction, delivery_id).await?;
     let custody = custody(&result_metadata, &confirmation_rows);
     dispositions.extend(confirmation_rows.iter().map(confirmation_disposition));
     let mut seen: HashSet<Uuid> = dispositions.iter().map(|item| item.command_id).collect();
     dispositions.extend(
-        unified_dispositions(&mut transaction, delivery_id)
+        unified_dispositions(transaction, delivery_id)
             .await?
             .into_iter()
             .filter(|item| seen.insert(item.command_id)),
     );
     let evidence = evidence(&result_metadata, &confirmation_rows);
-    let (obligation, recovery) = origin_chain(&mut transaction, delivery_id).await?;
-    transaction.commit().await.map_err(map_storage_error)?;
+    let (obligation, recovery) = origin_chain(transaction, delivery_id).await?;
     dispositions.sort_by(|left, right| {
         right.occurred_at.cmp(&left.occurred_at).then(right.command_id.cmp(&left.command_id))
     });
-    Ok(DeliveryAdminDetail {
+    let detail = DeliveryAdminDetail {
         delivery,
         attempts,
         evidence,
@@ -65,7 +103,8 @@ pub(crate) async fn detail(
         dispositions,
         obligation,
         recovery,
-    })
+    };
+    Ok((detail, payload, result_metadata, command_snapshot_readable))
 }
 
 /// 统一处置表的安全投影。部分种类没有命令账本身份（自动 Sent 证明、预检退役），

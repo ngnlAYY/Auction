@@ -113,6 +113,11 @@ pub(super) fn location_key(value: &str) -> Option<&'static str> {
     })
 }
 
+/// 补寄案的结案证据只证明寄出；案件不再跟踪后续持有人或领取状态。
+pub(super) fn shows_asset_location(status: &str) -> bool {
+    status != "resent"
+}
+
 /// 处理计划的译文键。
 pub(super) fn plan_key(value: &str) -> Option<&'static str> {
     Some(match value {
@@ -256,8 +261,9 @@ mod tests {
 
     use super::{
         action_effect_key, action_key, blocker_key, event_details_text, event_key, kind_key,
-        location_key, match_key, plan_key, reason_key, settlement_return_case, status_key,
-        take_state_key, take_unknown_guidance_key, take_unknown_reason_key,
+        location_key, match_key, plan_key, reason_key, settlement_return_case,
+        shows_asset_location, status_key, take_state_key, take_unknown_guidance_key,
+        take_unknown_reason_key,
     };
 
     /// 闭集取值到译文键的映射函数。
@@ -270,6 +276,13 @@ mod tests {
         ("ja", include_str!("../../../i18n/ja.ftl")),
         ("ko", include_str!("../../../i18n/ko.ftl")),
     ];
+
+    #[test]
+    fn resent_case_does_not_present_historical_custody_as_current() {
+        assert!(!shows_asset_location("resent"));
+        assert!(shows_asset_location("held"));
+        assert!(shows_asset_location("take_unknown"));
+    }
 
     fn ftl_keys(source: &str) -> BTreeSet<&str> {
         source

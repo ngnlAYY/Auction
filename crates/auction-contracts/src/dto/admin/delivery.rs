@@ -126,6 +126,68 @@ pub struct AdminDeliveryDetailResponse {
     pub recovery: Option<AdminDeliveryRecoveryResponse>,
 }
 
+/// `include=disposition_actions` 的详情投影，准入与详情中的 fencing version 属于同一快照。
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminDeliveryDetailWithActionsResponse {
+    pub detail: AdminDeliveryDetailResponse,
+    pub actions: AdminDeliveryActionsResponse,
+}
+
+/// 当前 fence 上的处置准入。人工 Sent 证明使用独立的证据预览。
+#[derive(Debug, Clone, Copy, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminDeliveryActionsResponse {
+    pub release: AdminDeliveryActionAvailability,
+    pub retry_failed: AdminDeliveryActionAvailability,
+    pub reconcile_retry: AdminDeliveryActionAvailability,
+    pub reconcile_succeeded: AdminDeliveryActionAvailability,
+    pub reconcile_failed: AdminDeliveryActionAvailability,
+    pub acknowledge: AdminDeliveryActionAvailability,
+}
+
+/// 准入为闭集。阻断时须携带稳定原因码，提交仍按状态、fence 和命令参数复核。
+#[derive(Debug, Clone, Copy, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AdminDeliveryActionAvailability {
+    Eligible {},
+    Blocked { reason: AdminDeliveryActionBlocker },
+}
+
+impl AdminDeliveryActionAvailability {
+    /// 读取后端给出的阻断原因；可执行时为空。
+    pub const fn blocker(self) -> Option<AdminDeliveryActionBlocker> {
+        match self {
+            Self::Eligible {} => None,
+            Self::Blocked { reason } => Some(reason),
+        }
+    }
+}
+
+/// 投递处置阻断原因的稳定 wire 闭集。
+#[derive(Debug, Clone, Copy, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AdminDeliveryActionBlocker {
+    SettlementReturnActionOwned,
+    SettlementIneligible,
+    FundedDelivery,
+    RetiredDelivery,
+    StaleFencingVersion,
+    SentSighted,
+    ReconcileSucceededForSend,
+    DeliveryNotEligible,
+    StatusMismatch,
+    QuarantinedMailActionNotAllowed,
+    MissingReconcileReference,
+    RecipientRenamed,
+    AlreadyDisposed,
+    NotAcknowledgeable,
+    RecoveryRetryIneligible,
+    SettlementFulfillmentState,
+    MissingSendingFence,
+    DeliveryCommandSnapshotUnreadable,
+}
+
 /// 一次冻结外部动作尝试；`operation=send` 携带冻结内容摘要，`take` 携带目标 MID。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]

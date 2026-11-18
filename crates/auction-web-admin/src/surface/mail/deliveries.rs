@@ -1,13 +1,22 @@
 //! 收件关联投递的安全展示与手动重排；原邮件处理结果和外部完成证明仍由后端拥有。
 
-use auction_web_shared::{Dialog, TableColumns, TruncatedText, t};
+use auction_contracts::{AdminDeliveryActionBlocker, AdminDeliveryActionsResponse};
+use auction_web_shared::{TableColumns, TruncatedText, t};
 use dioxus::prelude::*;
 
-use super::super::deliveries::labels::delivery_status_label;
-use crate::api::{AdminMailIntakeDelivery, DeliveryAction, execute_delivery};
+use super::super::deliveries::dialog::{
+    DeliveryConfirmationFacts, DeliveryEvidenceStatus, ReconcileEvidenceCandidates,
+};
+use super::super::deliveries::labels::{action_blocker_label, delivery_status_label};
+use super::super::deliveries::modal::{DeliveryModal, close_delivery_modal};
+use crate::api::{
+    AdminMailIntakeDelivery, Delivery, DeliveryAction, execute_delivery, fetch_delivery_detail,
+};
 use crate::surface::AdminActionFeedback;
 use crate::surface::pagination::{AdminPager as Pager, use_admin_pagination};
 use crate::surface::pending::{PendingCommands, set_if_alive};
+
+const DIALOG_ID: &str = "mail-delivery-action-dialog";
 
 #[component]
 pub(super) fn MailDeliveriesPanel(
@@ -24,61 +33,66 @@ pub(super) fn MailDeliveriesPanel(
     let busy = move || commands.any_busy();
     let mut pending = use_signal(|| None::<AdminMailIntakeDelivery>);
     let confirm_intake_id = intake_id;
-    let confirm_action = move |_| {
-        if busy() {
-            return;
-        }
-        let Some(delivery) = pending() else {
-            return;
+    let confirm_action =
+        move |(delivery, action, operation): (Delivery, DeliveryAction, String)| {
+            if busy() {
+                return;
+            }
+            if commands.contains(&delivery.id)
+                || pending().is_none_or(|row| {
+                    row.id != delivery.id || row.fencing_version != delivery.fencing_version
+                })
+            {
+                return;
+            }
+            let success_intake_id = confirm_intake_id.clone();
+            let failure_intake_id = confirm_intake_id.clone();
+            notice.set(None);
+            let submitted = commands.submit(
+                delivery.id.clone(),
+                retry_label(&operation),
+                move |command_id| {
+                    let delivery_id = delivery.id.clone();
+                    async move {
+                        execute_delivery(
+                            command_id,
+                            delivery_id,
+                            action,
+                            delivery.fencing_version,
+                            None,
+                            None,
+                        )
+                        .await
+                        .map_err(|error| error.code)
+                    }
+                },
+                move |_| {
+                    set_if_alive(
+                        notice,
+                        Some((success_intake_id.clone(), AdminActionFeedback::Success)),
+                    );
+                },
+                move |code| {
+                    if matches!(
+                        code.as_str(),
+                        "stale_delivery_state"
+                            | "stale_state_version"
+                            | "delivery_recipient_renamed"
+                    ) {
+                        let mut refresh = refresh;
+                        refresh.set(refresh().saturating_add(1));
+                    }
+                    set_if_alive(
+                        notice,
+                        Some((failure_intake_id.clone(), AdminActionFeedback::Error(code))),
+                    );
+                },
+            );
+            if submitted {
+                close_delivery_modal(DIALOG_ID);
+                pending.set(None);
+            }
         };
-        let Some(action) = retry_action(&delivery) else {
-            return;
-        };
-        if commands.contains(&delivery.id) {
-            return;
-        }
-        let success_intake_id = confirm_intake_id.clone();
-        let failure_intake_id = confirm_intake_id.clone();
-        notice.set(None);
-        let submitted = commands.submit(
-            delivery.id.clone(),
-            retry_label(&delivery.operation),
-            move |command_id| {
-                let delivery_id = delivery.id.clone();
-                async move {
-                    execute_delivery(
-                        command_id,
-                        delivery_id,
-                        action,
-                        delivery.fencing_version,
-                        None,
-                        None,
-                    )
-                    .await
-                    .map_err(|error| error.code)
-                }
-            },
-            move |_| {
-                set_if_alive(
-                    notice,
-                    Some((success_intake_id.clone(), AdminActionFeedback::Success)),
-                );
-            },
-            move |code| {
-                if matches!(code.as_str(), "stale_delivery_state" | "stale_state_version") {
-                    let mut refresh = refresh;
-                    refresh.set(refresh().saturating_add(1));
-                }
-                set_if_alive(
-                    notice,
-                    Some((failure_intake_id.clone(), AdminActionFeedback::Error(code))),
-                );
-            },
-        );
-        if submitted {
-            pending.set(None);
-        }
-    };
     let total = i64::try_from(deliveries.len()).unwrap_or(i64::MAX);
     let current_page = page().clamp(1, if total == 0 { 1 } else { 1 + (total - 1) / page_size });
     let offset =
@@ -136,47 +150,78 @@ pub(super) fn MailDeliveriesPanel(
                     on_page_change: move |next| page.set(next),
             }
             if let Some(delivery) = pending() {
-                Dialog {
-                    title: retry_label(&delivery.operation),
-                    close_label: t!("delivery-cancel"),
+                MailRetryDialog {
+                    delivery,
                     busy: busy(),
-                    on_close: move |_| {
-                        if !busy() {
-                            pending.set(None);
+                    on_submit: confirm_action,
+                    on_cancel: move |_| pending.set(None),
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn MailRetryDialog(
+    delivery: AdminMailIntakeDelivery,
+    busy: bool,
+    on_submit: EventHandler<(Delivery, DeliveryAction, String)>,
+    on_cancel: EventHandler<()>,
+) -> Element {
+    let mut resource = use_resource(use_reactive((&delivery.id,), move |(delivery_id,)| {
+        fetch_delivery_detail(delivery_id)
+    }));
+    let result =
+        if resource.state().cloned() == UseResourceState::Ready { resource.cloned() } else { None };
+    let evidence_status = match &result {
+        None => Some(t!("delivery-reconcile-sightings-loading")),
+        Some(Ok(projected))
+            if projected.detail.delivery.fencing_version == delivery.fencing_version
+                && retry_action(projected.actions) == Ok(DeliveryAction::ReconcileRetry)
+                && projected.detail.evidence.is_empty() =>
+        {
+            Some(t!("delivery-reconcile-sightings-empty"))
+        }
+        _ => None,
+    };
+    rsx! {
+        DeliveryModal {
+            dialog_id: DIALOG_ID,
+            title: retry_label(&delivery.operation),
+            busy,
+            on_cancel,
+            DeliveryEvidenceStatus { message: evidence_status }
+            div {
+                match result {
+                    None => rsx! {},
+                    Some(Err(_error)) => rsx! {
+                        p { class: "action-feedback action-feedback--error", role: "alert", {t!("delivery-reconcile-sightings-error")} }
+                        button { r#type: "button", disabled: busy, onclick: move |_| resource.restart(), {t!("admin-retry")} }
+                    },
+                    Some(Ok(projected)) if projected.detail.delivery.fencing_version != delivery.fencing_version => rsx! {
+                        p { class: "action-feedback action-feedback--error", role: "alert", {t!("delivery-action-blocked-stale")} }
+                    },
+                    Some(Ok(projected)) => {
+                        let target = projected.detail.delivery;
+                        let operation = delivery.operation;
+                        match retry_action(projected.actions) {
+                            Ok(action) => rsx! {
+                                DeliveryConfirmationFacts { delivery: target.clone() }
+                                if action == DeliveryAction::ReconcileRetry {
+                                    ReconcileEvidenceCandidates { evidence: projected.detail.evidence }
+                                    p { class: "admin-mail-deliveries__warning", {t!("admin-mail-delivery-confirm-unknown")} }
+                                }
+                                button {
+                                    r#type: "button",
+                                    class: "admin-btn-primary",
+                                    disabled: busy,
+                                    onclick: move |_| on_submit.call((target.clone(), action, operation.clone())),
+                                    {t!("delivery-confirm")}
+                                }
+                            },
+                            Err(blocker) => rsx! { p { class: "admin-panel__note", {action_blocker_label(blocker)} } },
                         }
                     },
-                    p { {t!("admin-mail-delivery-confirm", recipient: delivery.recipient.clone())} }
-                    dl { class: "admin-mail-detail__grid",
-                        dt { {t!("admin-mail-delivery-id")} }
-                        dd { TruncatedText { value: delivery.id.clone(), portal: true } }
-                        dt { {t!("delivery-status")} }
-                        dd { {delivery_status_label(&delivery.status)} }
-                        dt { {t!("delivery-failure-code")} }
-                        dd { TruncatedText { value: delivery.failure_code.clone().unwrap_or_else(|| t!("value-empty")), portal: true } }
-                        dt { {t!("delivery-external-reference")} }
-                        dd { TruncatedText { value: delivery.external_reference.clone().unwrap_or_else(|| t!("value-empty")), portal: true } }
-                    }
-                    if delivery.status == "manual_reconcile" {
-                        p { class: "admin-mail-deliveries__warning", {t!("admin-mail-delivery-confirm-unknown")} }
-                    }
-                    div { class: "admin-shell__dialog-actions",
-                        button {
-                            r#type: "button",
-                            autofocus: true,
-                            disabled: busy(),
-                            onclick: move |_| {
-                                pending.set(None);
-                            },
-                            {t!("delivery-cancel")}
-                        }
-                        button {
-                            r#type: "button",
-                            class: "admin-btn-primary",
-                            disabled: busy(),
-                            onclick: confirm_action,
-                            if busy() { {t!("admin-action-working")} } else { {t!("delivery-confirm")} }
-                        }
-                    }
                 }
             }
         }
@@ -189,8 +234,6 @@ fn MailDeliveryRow(
     busy: bool,
     on_retry: EventHandler<AdminMailIntakeDelivery>,
 ) -> Element {
-    let can_retry = retry_action(&delivery).is_some();
-    let action = retry_label(&delivery.operation);
     let target = delivery.clone();
     rsx! {
         tr {
@@ -201,29 +244,27 @@ fn MailDeliveryRow(
             td { "{delivery.attempt_count}" }
             td { TruncatedText { value: delivery.failure_code.unwrap_or_else(|| t!("value-empty")) } }
             td {
-                if can_retry {
-                    button {
-                        r#type: "button",
-                        disabled: busy,
-                        onclick: move |_| on_retry.call(target.clone()),
-                        "{action}"
-                    }
-                } else {
-                    TruncatedText { value: t!("admin-mail-delivery-no-retry") }
+                button {
+                    r#type: "button",
+                    disabled: busy,
+                    onclick: move |_| on_retry.call(target.clone()),
+                    {t!("delivery-review-actions")}
                 }
             }
         }
     }
 }
 
-fn retry_action(delivery: &AdminMailIntakeDelivery) -> Option<DeliveryAction> {
-    if delivery.reason_code.as_deref() == Some("mail_disposition_conflict") {
-        return None;
-    }
-    match delivery.status.as_str() {
-        "failed" => Some(DeliveryAction::Retry),
-        "manual_reconcile" => Some(DeliveryAction::ReconcileRetry),
-        _ => None,
+fn retry_action(
+    actions: AdminDeliveryActionsResponse,
+) -> Result<DeliveryAction, AdminDeliveryActionBlocker> {
+    use AdminDeliveryActionBlocker::StatusMismatch;
+
+    match (actions.retry_failed.blocker(), actions.reconcile_retry.blocker()) {
+        (None, Some(_)) => Ok(DeliveryAction::Retry),
+        (Some(_), None) => Ok(DeliveryAction::ReconcileRetry),
+        (Some(StatusMismatch), Some(reason)) | (Some(reason), Some(_)) => Err(reason),
+        (None, None) => Err(StatusMismatch),
     }
 }
 
@@ -242,5 +283,38 @@ fn retry_label(operation: &str) -> String {
         "return" => t!("admin-mail-delivery-return-again"),
         "take" => t!("admin-mail-delivery-take-again"),
         _ => t!("value-empty"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use auction_contracts::{
+        AdminDeliveryActionAvailability, AdminDeliveryActionBlocker, AdminDeliveryActionsResponse,
+    };
+
+    use super::retry_action;
+    use crate::api::DeliveryAction;
+
+    #[test]
+    fn linked_mail_uses_the_fence_decision_for_retry() {
+        let mismatch = AdminDeliveryActionAvailability::Blocked {
+            reason: AdminDeliveryActionBlocker::StatusMismatch,
+        };
+        let mut actions = AdminDeliveryActionsResponse {
+            release: mismatch,
+            retry_failed: mismatch,
+            reconcile_retry: AdminDeliveryActionAvailability::Eligible {},
+            reconcile_succeeded: mismatch,
+            reconcile_failed: mismatch,
+            acknowledge: mismatch,
+        };
+        assert_eq!(retry_action(actions), Ok(DeliveryAction::ReconcileRetry));
+        actions.reconcile_retry = AdminDeliveryActionAvailability::Blocked {
+            reason: AdminDeliveryActionBlocker::SettlementReturnActionOwned,
+        };
+        assert_eq!(
+            retry_action(actions),
+            Err(AdminDeliveryActionBlocker::SettlementReturnActionOwned)
+        );
     }
 }

@@ -10,15 +10,21 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use auction_application::core::ApplicationError;
 use auction_application::delivery::{
-    DeliveryAdminListRequest, DeliveryAdminPort, MAX_PLAYER_SUPPORT_ROWS, PlayerSupportBundle,
-    PlayerSupportRequest, PlayerSupportSelector,
+    DeliveryAcknowledgementCommand, DeliveryAdminAction, DeliveryAdminCommand, DeliveryAdminError,
+    DeliveryAdminGuardBlocker, DeliveryAdminListRequest, DeliveryAdminPort,
+    DeliveryDispositionPort, DeliveryFenceOutcome, DeliveryTransportError, DeliveryWorkStore,
+    MAX_PLAYER_SUPPORT_ROWS, PlayerSupportBundle, PlayerSupportRequest, PlayerSupportSelector,
 };
+use auction_domain::DeliveryDispositionActorSource;
 use auction_storage::DatabaseStore;
 use auction_time::{Duration, Timestamp};
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use super::evidence_rejections::insert_manual_send;
+use super::fence::{claim_due, claim_for, fence_outcome};
 use crate::support;
 
 /// 升级前已发布 Admin 页面（v0.1.5）解码投递时认可的来源闭集（`valid_origin_kind`）；独立抄录，
@@ -90,6 +96,172 @@ async fn insert_pending_to(
     .await
     .expect("写入投递");
     id
+}
+
+#[tokio::test]
+async fn postgres_admin_reconcile_projects_missing_sending_fence_before_transition() {
+    let database = support::TestDatabase::create().await.unwrap();
+    let store = database.store().await.unwrap();
+    let pool = store.postgres_pool();
+    for (failure_code, metadata, blocker) in [
+        (
+            "external_recovery_unresolved_send",
+            serde_json::json!({}),
+            Some(DeliveryAdminGuardBlocker::MissingSendingFence),
+        ),
+        (
+            "mail_disposition_conflict",
+            serde_json::json!({
+                "reason_code": "mail_disposition_conflict", "preflight_blocked": true, "outcome_unknown": true,
+            }),
+            None,
+        ),
+    ] {
+        let delivery_id = insert_pending(pool, "mail_intake", Timestamp::now()).await;
+        sqlx::query(
+            "UPDATE public.deliveries SET status='manual_reconcile', failure_code=$2,
+             result_metadata=$3, fencing_version=1, completed_at=clock_timestamp(),
+             updated_at=clock_timestamp() WHERE id=$1",
+        )
+        .bind(delivery_id)
+        .bind(failure_code)
+        .bind(metadata)
+        .execute(pool)
+        .await
+        .unwrap();
+        let (before, guard, _) = store.detail_with_guard(delivery_id).await.unwrap();
+        let action = DeliveryAdminAction::ReconcileFailed;
+        assert_eq!(guard.projected_blocker(action), blocker);
+        let result = store
+            .execute(DeliveryAdminCommand {
+                command_id: Uuid::new_v4(),
+                delivery_id,
+                expected_fencing_version: 1,
+                action,
+                actor_id: "admin".to_owned(),
+                failure_code: Some("verified_not_sent".to_owned()),
+                external_reference: None,
+                request_id: None,
+                request_hash: action.request_hash(
+                    delivery_id,
+                    1,
+                    None,
+                    Some("verified_not_sent"),
+                    "admin",
+                ),
+            })
+            .await;
+        if let Some(blocker) = blocker {
+            assert!(
+                matches!(result, Err(ApplicationError::DeliveryAdmin(error)) if error == blocker.error())
+            );
+            assert_eq!(store.detail(delivery_id).await.unwrap(), before);
+        } else {
+            assert_eq!(result.unwrap().snapshot.status, "failed");
+        }
+    }
+}
+
+#[tokio::test]
+async fn postgres_delivery_action_preview_checks_command_snapshot_shape() {
+    let database = support::TestDatabase::create().await.unwrap();
+    let store = database.store().await.unwrap();
+    let pool = store.postgres_pool();
+    let delivery_id = insert_manual_send(pool, "Sample", 0).await;
+    let command = |action: DeliveryAdminAction, fence| DeliveryAdminCommand {
+        command_id: Uuid::new_v4(),
+        delivery_id,
+        expected_fencing_version: fence,
+        action,
+        actor_id: "admin".to_owned(),
+        failure_code: None,
+        external_reference: None,
+        request_id: None,
+        request_hash: action.request_hash(delivery_id, fence, None, None, "admin"),
+    };
+    let claim = claim_for(&claim_due(&store).await, delivery_id);
+    let release = command(DeliveryAdminAction::Release, claim.fencing_version);
+    let release_id = release.command_id;
+    store.execute(release).await.expect("先记录一次人工释放");
+
+    let claim = claim_for(&claim_due(&store).await, delivery_id);
+    let fence = claim.fencing_version;
+    assert!(matches!(fence_outcome(&store, &claim).await, DeliveryFenceOutcome::Sending));
+    let completed_at = Timestamp::now();
+    store.fail(claim, DeliveryTransportError {
+        failure_code: "verified_not_sent".to_owned(),
+        safe_detail: "传输替身确认未寄出".to_owned(),
+        outcome_unknown: false,
+        external_reference: None,
+        result_metadata: serde_json::json!({"mailbox_sweep": {"mid": "9090", "observed_at": completed_at.to_rfc3339()}}),
+    }, completed_at).await.unwrap();
+
+    let (before, guard, acknowledge) = store.detail_with_guard(delivery_id).await.unwrap();
+    assert_eq!(before.delivery.status, "failed");
+    assert_eq!(before.attempts.len(), 1);
+    assert_eq!(before.attempts[0].fencing_version, fence);
+    assert_eq!(before.evidence[0].reference, "mailbox_sweep:9090");
+    assert!(before.dispositions.iter().any(|item| item.command_id == release_id));
+    assert_eq!(guard.projected_blocker(DeliveryAdminAction::RetryFailed), None);
+    assert_eq!(acknowledge, None);
+
+    sqlx::query(
+        "UPDATE public.deliveries SET request_digest=decode(repeat('00',32),'hex') WHERE id=$1",
+    )
+    .bind(delivery_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    let (detail, guard, acknowledge) =
+        store.detail_with_guard(delivery_id).await.expect("仍能读取原有证据");
+    assert_eq!(detail, before);
+    assert_eq!(acknowledge, None);
+    for action in [
+        DeliveryAdminAction::Release,
+        DeliveryAdminAction::RetryFailed,
+        DeliveryAdminAction::ReconcileRetry,
+        DeliveryAdminAction::ReconcileSucceeded,
+        DeliveryAdminAction::ReconcileFailed,
+    ] {
+        assert_eq!(
+            guard.projected_blocker(action),
+            Some(DeliveryAdminGuardBlocker::CommandSnapshotUnreadable)
+        );
+    }
+    let blocker = guard.projected_blocker(DeliveryAdminAction::RetryFailed).unwrap();
+    assert_eq!(blocker.error(), DeliveryAdminError::CommandSnapshotUnreadable);
+    assert!(matches!(
+        store.execute(command(DeliveryAdminAction::RetryFailed, fence)).await,
+        Err(ApplicationError::DeliveryAdmin(error)) if error == blocker.error()
+    ));
+    assert_eq!(store.detail(delivery_id).await.unwrap(), before);
+
+    let reason = "核对未寄出证据，确认已处置";
+    let acknowledged = store
+        .acknowledge(DeliveryAcknowledgementCommand {
+            command_id: Uuid::new_v4(),
+            delivery_id,
+            expected_fencing_version: fence,
+            actor_source: DeliveryDispositionActorSource::Admin,
+            actor_id: "admin".to_owned(),
+            reason: reason.to_owned(),
+            operator_identity: None,
+            request_id: None,
+            request_hash: DeliveryAcknowledgementCommand::request_hash(
+                delivery_id,
+                fence,
+                "admin",
+                reason,
+            ),
+        })
+        .await
+        .expect("完整命令快照不可读不影响确认处置");
+    assert_eq!(acknowledged.kind, "operator_acknowledged");
+    let (after, _, acknowledge) = store.detail_with_guard(delivery_id).await.unwrap();
+    assert_eq!(after.delivery, before.delivery);
+    assert_eq!(after.attempts, before.attempts);
+    assert_eq!(after.evidence, before.evidence);
+    assert_eq!(acknowledge, Some(DeliveryAdminGuardBlocker::AlreadyDisposed));
 }
 
 /// 缺省列表的每个来源都在旧页面闭集内，结算退件 Take 不计入总数、不占分页；扩展投影列出它，

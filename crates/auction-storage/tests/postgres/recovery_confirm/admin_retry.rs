@@ -15,7 +15,8 @@ use std::time::Duration as StdDuration;
 
 use auction_application::core::ApplicationError;
 use auction_application::delivery::{
-    DeliveryAdminAction, DeliveryAdminCommand, DeliveryAdminError, DeliveryAdminPort,
+    DeliveryAdminAction, DeliveryAdminCommand, DeliveryAdminError, DeliveryAdminGuardBlocker,
+    DeliveryAdminPort,
 };
 use auction_application::recovery::{RecoveryCommandRepository, RecoveryConfirmationAction};
 use auction_storage::DatabaseStore;
@@ -196,6 +197,141 @@ async fn sale(store: &DatabaseStore, world: &'static str, sequence: i64) -> Sale
         },
     )
     .await
+}
+
+#[tokio::test]
+async fn postgres_admin_retry_projection_matches_recovery_owner_at_same_fence() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("以运行账号连接");
+    let pool = store.postgres_pool();
+    let parent = sale(&store, "main", 7_600_108).await;
+    let delivery_id = Uuid::new_v4();
+    let prepare = Uuid::new_v4();
+    let activate = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO public.deliveries
+            (id, command_id, request_digest, origin_kind, origin_id, recipient, payload, status,
+             activation_command_id, activation_request_digest, activated_at)
+         VALUES ($1, $2, decode(repeat('4b',32),'hex'), 'settlement_recovery_action', $3, 'Recovery buyer',
+                 '{\"schema_version\":1,\"operation\":\"send\",\"world\":\"main\",\"template\":\"recovery_payment_reminder\"}'::jsonb,
+                 'pending', $4, decode(repeat('4c',32),'hex'), clock_timestamp())",
+    )
+    .bind(delivery_id).bind(prepare).bind(format!("recovery:{}", parent.recovery_id)).bind(activate)
+    .execute(pool).await.expect("写入恢复提醒投递");
+    sqlx::query(
+        "INSERT INTO public.settlement_recovery_actions
+            (id, recovery_id, kind, ordinal, execution_state, delivery_id, prepare_command_id,
+             prepare_request_digest, activate_command_id, activate_request_digest, last_error_code, completed_at)
+         VALUES (gen_random_uuid(), $1, 'payment_reminder', 3, 'failed', $2, $3,
+                 decode(repeat('4b',32),'hex'), $4, decode(repeat('4c',32),'hex'),
+                 'recovery_delivery_failed', clock_timestamp())",
+    )
+    .bind(parent.recovery_id).bind(delivery_id).bind(prepare).bind(activate)
+    .execute(pool).await.expect("写入失败提醒动作");
+    let action = DeliveryAdminAction::RetryFailed;
+    let fence = stage_delivery(pool, delivery_id, action).await;
+
+    for parent_blocker in ["recovery_delivery_conflict", "recovery_delivery_failed"] {
+        sqlx::query("UPDATE public.settlement_recoveries SET blocking_code = $2, manual_reconcile_delivery_id = NULL WHERE id = $1")
+            .bind(parent.recovery_id).bind(parent_blocker).execute(pool).await.expect("设置父恢复阻断");
+        if parent_blocker == "recovery_delivery_failed" {
+            sqlx::query("UPDATE public.settlement_recovery_actions SET execution_state = 'failed', last_error_code = 'fixture_failed' WHERE recovery_id = $1 AND kind = 'buyer_blacklist'")
+                .bind(parent.recovery_id).execute(pool).await.expect("保留另一动作的失败阻断");
+        }
+        let (detail, guard, _) = store.detail_with_guard(delivery_id).await.expect("读取阻断投影");
+        assert_eq!(detail.delivery.fencing_version, fence);
+        let blocker = guard.projected_blocker(action).expect("恢复 owner 拒绝重排");
+        assert_eq!(blocker, DeliveryAdminGuardBlocker::RecoveryRetryIneligible);
+        let error = store
+            .execute(admin_command(delivery_id, fence, action))
+            .await
+            .expect_err("实际提交应按同一谓词拒绝");
+        assert!(
+            matches!(error, ApplicationError::DeliveryAdmin(error) if error == blocker.error())
+        );
+        assert_eq!(delivery_state(pool, delivery_id).await, ("failed".to_owned(), fence));
+    }
+
+    sqlx::query("UPDATE public.settlement_recovery_actions SET execution_state = 'satisfied', last_error_code = NULL WHERE recovery_id = $1 AND kind = 'buyer_blacklist'")
+        .bind(parent.recovery_id).execute(pool).await.expect("其它动作已完成");
+    let (_, guard, _) = store.detail_with_guard(delivery_id).await.expect("读取准入投影");
+    assert_eq!(guard.projected_blocker(action), None);
+    let result = store
+        .execute(admin_command(delivery_id, fence, action))
+        .await
+        .expect("实际提交应重排同一投递");
+    assert_eq!(result.snapshot.status, "pending");
+    assert_eq!(result.snapshot.fencing_version, fence + 1);
+    let state: (String, Option<String>) = sqlx::query_as(
+        "SELECT action.execution_state, recovery.blocking_code
+         FROM public.settlement_recovery_actions action JOIN public.settlement_recoveries recovery ON recovery.id = action.recovery_id
+         WHERE action.delivery_id = $1",
+    ).bind(delivery_id).fetch_one(pool).await.expect("读取同事务恢复投影");
+    assert_eq!(state, ("enqueued".to_owned(), None));
+}
+
+#[tokio::test]
+async fn postgres_admin_delivery_actions_follow_fulfillment_state_at_the_same_fence() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("以运行账号连接");
+    let pool = store.postgres_pool();
+    for (sequence, action, owner_state, next_state) in [
+        (7_600_109, DeliveryAdminAction::RetryFailed, "failed", "enqueued"),
+        (7_600_110, DeliveryAdminAction::ReconcileRetry, "manual_reconcile", "enqueued"),
+        (7_600_111, DeliveryAdminAction::ReconcileFailed, "manual_reconcile", "failed"),
+    ] {
+        let sale = sale(&store, "main", sequence).await;
+        clear_current_return(pool, sale.recovery_id).await;
+        let delivery_id = sale.payment_delivery;
+        let fence = stage_delivery(pool, delivery_id, action).await;
+        let failure_code =
+            (action == DeliveryAdminAction::ReconcileFailed).then_some("verified_not_sent");
+        let command = DeliveryAdminCommand {
+            failure_code: failure_code.map(str::to_owned),
+            request_hash: action.request_hash(delivery_id, fence, None, failure_code, "admin"),
+            ..admin_command(delivery_id, fence, action)
+        };
+        sqlx::query(
+            "UPDATE public.settlement_obligation_fulfillments
+             SET execution_state='enqueued', completed_at=NULL, last_error_code=NULL,
+                 proof_kind=NULL, proof_reference=NULL, proof_digest=NULL, proof_observed_at=NULL
+             WHERE obligation_id=$1",
+        )
+        .bind(sale.payment)
+        .execute(pool)
+        .await
+        .expect("履约循环尚未收口投递结果");
+        let (before, guard, _) = store.detail_with_guard(delivery_id).await.unwrap();
+        assert_eq!(before.delivery.fencing_version, fence);
+        assert_eq!(
+            guard.projected_blocker(action),
+            Some(DeliveryAdminGuardBlocker::SettlementFulfillmentState)
+        );
+        assert!(matches!(
+            store.execute(command.clone()).await,
+            Err(ApplicationError::DeliveryAdmin(DeliveryAdminError::Stale))
+        ));
+        assert_eq!(store.detail(delivery_id).await.unwrap(), before);
+        assert_eq!(fulfillment(pool, sale.payment).await.0, "enqueued");
+
+        sqlx::query(
+            "UPDATE public.settlement_obligation_fulfillments
+             SET execution_state=$2, last_error_code='send_result', completed_at=clock_timestamp()
+             WHERE obligation_id=$1",
+        )
+        .bind(sale.payment)
+        .bind(owner_state)
+        .execute(pool)
+        .await
+        .expect("履约循环已收口同一投递的结果");
+        let (detail, guard, _) = store.detail_with_guard(delivery_id).await.unwrap();
+        assert_eq!(detail.delivery.fencing_version, fence);
+        assert_eq!(guard.projected_blocker(action), None);
+        let result = store.execute(command).await.expect("同一 fence 现可执行");
+        assert_eq!(result.snapshot.status, action.transition().next_status);
+        assert_eq!(result.snapshot.fencing_version, fence + 1);
+        assert_eq!(fulfillment(pool, sale.payment).await.0, next_state);
+    }
 }
 
 /// 三种 resolution 下释放、重试与对账重试都拒绝重新激活原结算投递；未撤销的投递照常重试，

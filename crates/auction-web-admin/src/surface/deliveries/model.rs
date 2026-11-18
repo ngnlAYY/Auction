@@ -1,8 +1,5 @@
 //! Delivery 页面组件之间共享的本地状态模型。
 
-use auction_web_shared::t;
-
-use super::labels::is_mail_disposition_conflict;
 use crate::api::{Delivery, DeliveryAction};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -24,8 +21,7 @@ impl DeliveryReconcileDraft {
     pub(super) fn for_delivery(delivery: &Delivery) -> Self {
         Self {
             delivery_id: delivery.id.clone(),
-            action: if is_mail_disposition_conflict(delivery) { "failed" } else { "retry" }
-                .to_owned(),
+            action: String::new(),
             external_reference: String::new(),
             failure_code: String::new(),
         }
@@ -46,15 +42,6 @@ impl DeliveryDialogKind {
             Self::Release => DeliveryAction::Release,
             Self::Retry => DeliveryAction::Retry,
             Self::Reconcile | Self::ReconcileRetry => DeliveryAction::ReconcileRetry,
-        }
-    }
-
-    pub(super) fn action_label(self) -> String {
-        match self {
-            Self::Release => t!("delivery-release"),
-            Self::Retry => t!("delivery-retry"),
-            Self::Reconcile => t!("delivery-reconcile"),
-            Self::ReconcileRetry => t!("delivery-retry"),
         }
     }
 }

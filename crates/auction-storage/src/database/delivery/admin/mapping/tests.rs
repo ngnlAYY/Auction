@@ -200,6 +200,14 @@ fn player_notification_retirements_still_reject_malformed_rows() {
 }
 
 #[test]
+fn login_key_reply_cannot_use_the_watch_retirement_reason() {
+    let mut reply =
+        retired_player_notification("mail_intake", "recipient_renamed", "recipient_renamed");
+    reply.template = Some("register_key".to_owned());
+    assert!(!valid_snapshot(&reply));
+}
+
+#[test]
 fn recovery_quarantine_from_pending_delivery_validates() {
     let mut snapshot =
         retired_player_notification("settlement", "recipient_renamed", "recipient_renamed");

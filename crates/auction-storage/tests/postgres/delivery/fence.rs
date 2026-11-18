@@ -63,7 +63,7 @@ async fn insert_send(pool: &PgPool, recipient: &str) -> Uuid {
 }
 
 /// 领取全部到期投递，租约两分钟。
-async fn claim_due(store: &DatabaseStore) -> Vec<DeliveryWorkClaim> {
+pub(super) async fn claim_due(store: &DatabaseStore) -> Vec<DeliveryWorkClaim> {
     let now = Timestamp::now();
     let sending_grace = std::time::Duration::from_secs(60);
     store.begin_claim_cycle(now, sending_grace).await.expect("执行领取前清理");
@@ -80,7 +80,7 @@ async fn claim_due(store: &DatabaseStore) -> Vec<DeliveryWorkClaim> {
         .expect("领取投递")
 }
 
-fn claim_for(claims: &[DeliveryWorkClaim], delivery_id: Uuid) -> DeliveryWorkClaim {
+pub(super) fn claim_for(claims: &[DeliveryWorkClaim], delivery_id: Uuid) -> DeliveryWorkClaim {
     claims
         .iter()
         .find(|claim| claim.delivery_id == delivery_id)
@@ -103,7 +103,10 @@ fn send_expectation(claim: &DeliveryWorkClaim) -> Arc<DeliverySendExpectation> {
 }
 
 /// 以冻结 Send 身份调用发送围栏并返回确定结论；Err（提交结果未知）视为用例失败。
-async fn fence_outcome(store: &DatabaseStore, claim: &DeliveryWorkClaim) -> DeliveryFenceOutcome {
+pub(super) async fn fence_outcome(
+    store: &DatabaseStore,
+    claim: &DeliveryWorkClaim,
+) -> DeliveryFenceOutcome {
     let prepared = DeliveryPreparedExpectation::Send(send_expectation(claim));
     store
         .start_sending_authorized(claim.clone(), Timestamp::now(), None, Some(&prepared))
@@ -143,7 +146,7 @@ async fn fence(store: &DatabaseStore, claim: &DeliveryWorkClaim) -> Arc<Delivery
 }
 
 /// 传输边界在 Sent 列表核验同一冻结请求后产生的成功证明。
-fn sent_result(
+pub(super) fn sent_result(
     claim: &DeliveryWorkClaim,
     expectation: &DeliverySendExpectation,
     external_mail_id: &str,

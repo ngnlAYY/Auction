@@ -1,0 +1,42 @@
+{
+  "code": "ok",
+  "message": "交付详情已加载",
+  "data": {
+    "detail": {
+      "delivery": {
+        "id": "0f8fad5b-d9cb-469f-a165-70867728950e",
+        "origin_kind": "mail_intake",
+        "origin_id": "main:4242:send",
+        "recipient": "Sample",
+        "cod": 0,
+        "status": "failed",
+        "template": "register_key",
+        "category": "account",
+        "world": "main",
+        "suppression_reason": "invalid_payload",
+        "lease_expires_at": null,
+        "fencing_version": 4,
+        "attempt_count": 1,
+        "claimed_at": "2026-11-02T01:14:00.000000Z",
+        "sending_at": null,
+        "completed_at": "2026-11-02T01:14:00.000000Z",
+        "external_reference": null,
+        "failure_code": "invalid_payload",
+        "created_at": "2026-11-02T01:14:00.000000Z",
+        "updated_at": "2026-11-02T01:14:00.000000Z"
+      },
+      "attempts": [],
+      "evidence": [],
+      "custody": {},
+      "dispositions": []
+    },
+    "actions": {
+      "release": {"state": "blocked", "reason": "status_mismatch"},
+      "retry_failed": {"state": "blocked", "reason": "recipient_renamed"},
+      "reconcile_retry": {"state": "blocked", "reason": "status_mismatch"},
+      "reconcile_succeeded": {"state": "blocked", "reason": "reconcile_succeeded_for_send"},
+      "reconcile_failed": {"state": "blocked", "reason": "status_mismatch"},
+      "acknowledge": {"state": "eligible"}
+    }
+  }
+}

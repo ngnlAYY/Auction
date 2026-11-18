@@ -4,6 +4,7 @@ use auction_web_shared::t;
 use auction_web_shared::{AsyncState, AsyncStateKind, QueryState};
 use dioxus::prelude::*;
 
+use super::super::deliveries::labels::action_feedback_message;
 use super::super::query::{MailQuery, use_mail_query_state};
 use super::super::{AdminActionFeedback, admin_api_error_message, admin_world_label};
 use crate::api::{fetch_mail_intake_detail, fetch_mail_intakes, fetch_mail_state};
@@ -25,7 +26,6 @@ pub fn page() -> Element {
     let mut refresh = use_signal(|| 0_u64);
     let delivery_commands = use_pending_commands(refresh);
     let mut polling_refresh = use_signal(|| 0_u64);
-    let mut notice = use_signal(|| None::<AdminActionFeedback>);
     // 重排反馈由页面持有，详情刷新或切换期间不会把成功排队误报为已送达。
     let mut delivery_notice = use_signal(|| None::<(String, AdminActionFeedback)>);
     let mut selected_intake = use_signal(|| None::<String>);
@@ -78,7 +78,6 @@ pub fn page() -> Element {
             return;
         }
         active_mailbox.set(next_mailbox);
-        notice.set(None);
         polling_refresh.set(polling_refresh().saturating_add(1));
     };
 
@@ -203,7 +202,6 @@ pub fn page() -> Element {
                                     apply_mail_filter(
                                         &mut world_query,
                                         selected_intake,
-                                        notice,
                                         |next| next.world = event.value(),
                                     );
                                 },
@@ -225,7 +223,6 @@ pub fn page() -> Element {
                                     apply_mail_filter(
                                         &mut status_query,
                                         selected_intake,
-                                        notice,
                                         |next| next.status = event.value(),
                                     );
                                 },
@@ -248,7 +245,6 @@ pub fn page() -> Element {
                                     apply_mail_filter(
                                         &mut kind_query,
                                         selected_intake,
-                                        notice,
                                         |next| next.kind = event.value(),
                                     );
                                 },
@@ -286,7 +282,7 @@ pub fn page() -> Element {
                                 "admin-panel__note action-feedback action-feedback--error"
                             },
                             role: if feedback.is_success() { "status" } else { "alert" },
-                            {feedback.message(t!("admin-mail-delivery-requeued"))}
+                            {action_feedback_message(&feedback, t!("admin-mail-delivery-requeued"))}
                         }
                     }
                     details { class: "admin-mail-polling",
@@ -311,31 +307,19 @@ pub fn page() -> Element {
                         }
                         super::actions::MailPollingCommands {
                             refresh: polling_refresh,
-                            super::actions::MailTriggerButton { notice }
+                            super::actions::MailTriggerButton {}
                             {polling_content}
-                        }
-                        if let Some(feedback) = notice() {
-                            p {
-                                class: if feedback.is_success() {
-                                    "admin-panel__note action-feedback action-feedback--success"
-                                } else {
-                                    "admin-panel__note action-feedback action-feedback--error"
-                                },
-                                role: if feedback.is_success() { "status" } else { "alert" },
-                                {feedback.message(t!("admin-mail-action-success"))}
-                            }
                         }
                     }
         }
     }
 }
 
-/// 闭集筛选选择变化后立即生效：push 到地址栏并回到第一页，同时清理详情与操作反馈——
+/// 闭集筛选选择变化后立即生效：push 到地址栏并回到第一页，同时清理详情——
 /// 旧选择不再属于新结果集。查询资源响应 `query.state` 变化自动重新加载，无需手动刷新。
 fn apply_mail_filter(
     query: &mut QueryState<MailQuery>,
     mut selected_intake: Signal<Option<String>>,
-    mut notice: Signal<Option<AdminActionFeedback>>,
     update: impl FnOnce(&mut MailQuery),
 ) {
     let state = query.state;
@@ -344,5 +328,4 @@ fn apply_mail_filter(
     next.page = 1;
     query.push(next);
     selected_intake.set(None);
-    notice.set(None);
 }

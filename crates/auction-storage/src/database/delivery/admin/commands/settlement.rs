@@ -11,7 +11,10 @@ use super::super::transaction::{DeliveryAdminTransactionError, PostgresDeliveryA
 pub(super) async fn reset_settlement_fulfillment(
     transaction: &mut PostgresDeliveryAdminTransaction,
     delivery_id: Uuid,
+    locked_state: Option<&str>,
 ) -> Result<(), DeliveryAdminTransactionError> {
+    let Some(locked_state) = locked_state else { return Ok(()) };
+    // 准入用守卫判定的已锁状态；更新仍匹配该状态，失败时整条投递重排回滚。
     let updated = sqlx::query(
         r#"UPDATE public.settlement_obligation_fulfillments
            SET execution_state = 'enqueued',
@@ -23,24 +26,26 @@ pub(super) async fn reset_settlement_fulfillment(
                state_version = state_version + 1,
                updated_at = CURRENT_TIMESTAMP
            WHERE delivery_id = $1
-             AND execution_state IN ('failed', 'manual_reconcile')"#,
+             AND execution_state = $2"#,
     )
     .bind(delivery_id)
+    .bind(locked_state)
     .execute(transaction.connection()?)
     .await
     .map_err(DeliveryAdminTransactionError::Sqlx)?;
-    ensure_settlement_update_or_non_settlement(transaction, delivery_id, updated.rows_affected())
-        .await
+    require_updated_fulfillment(updated.rows_affected())
 }
 
 pub(super) async fn update_settlement_fulfillment(
     transaction: &mut PostgresDeliveryAdminTransaction,
     delivery_id: Uuid,
+    locked_state: Option<&str>,
     next_state: &str,
     failure_code: Option<&str>,
     proof_reference: Option<&str>,
     proof_digest: Option<RequestHash>,
 ) -> Result<(), DeliveryAdminTransactionError> {
+    let Some(locked_state) = locked_state else { return Ok(()) };
     let completed_at = Timestamp::now();
     let proof_digest = proof_digest.map(RequestHash::as_bytes);
     let updated = sqlx::query(
@@ -58,7 +63,7 @@ pub(super) async fn update_settlement_fulfillment(
                state_version = state_version + 1,
                updated_at = CURRENT_TIMESTAMP
            WHERE delivery_id = $1
-             AND execution_state = 'manual_reconcile'"#,
+             AND execution_state = $7"#,
     )
     .bind(delivery_id)
     .bind(next_state)
@@ -66,26 +71,15 @@ pub(super) async fn update_settlement_fulfillment(
     .bind(proof_reference)
     .bind(proof_digest.as_ref().map(<[u8; 32]>::as_slice))
     .bind(completed_at)
+    .bind(locked_state)
     .execute(transaction.connection()?)
     .await
     .map_err(DeliveryAdminTransactionError::Sqlx)?;
-    ensure_settlement_update_or_non_settlement(transaction, delivery_id, updated.rows_affected())
-        .await
+    require_updated_fulfillment(updated.rows_affected())
 }
 
-async fn ensure_settlement_update_or_non_settlement(
-    transaction: &mut PostgresDeliveryAdminTransaction,
-    delivery_id: Uuid,
-    affected: u64,
-) -> Result<(), DeliveryAdminTransactionError> {
-    let is_settlement: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM public.settlement_obligation_fulfillments WHERE delivery_id = $1)",
-    )
-    .bind(delivery_id)
-    .fetch_one(transaction.connection()?)
-    .await
-    .map_err(DeliveryAdminTransactionError::Sqlx)?;
-    if is_settlement && affected != 1 {
+fn require_updated_fulfillment(affected: u64) -> Result<(), DeliveryAdminTransactionError> {
+    if affected != 1 {
         return Err(DeliveryAdminTransactionError::Business(DeliveryAdminError::Stale));
     }
     Ok(())

@@ -67,6 +67,8 @@ Bot 通过 HentaiVerse 的 MoogleMail 与玩家交互：玩家寄来投稿、注
 
 账户类邮件带资产时整封退回并回信说明（`user_assets_rejected`）。登录 key 只出现在回信中，系统只保存其摘要与加密信封；回信需要 `user_login_data_key`。
 
+登录 key 回信冻结入站发件人的游戏名。Admin 释放或重排前、Worker 领取后构造正文前，以及 `sending` 提交后启动发送流程前的最后一次续租，都按原账号 UUID 精确核对当前邮件用户名。不符时停止发送，已拦下的回信以确定失败收口。最后一次续租提交后到实际 Send POST 之间，还会重读写信页、等待请求门和在途锁，并复核邮件凭据所有权。这段时间内完成换绑，已渲染的回信仍可能把有效 key 寄到冻结的旧角色名。
+
 ## 结算退件
 
 结算寄出的 COD、装备、货款或退款邮件被收件人拒收（或过期）退回时，由系统发件人 `MoogleMail` 寄回 Bot 收件箱：主题为 `[RTS] ` + 原主题（仍带原义务 ID），正文为原正文加一行 `This message was returned from <玩家>, kupo!`。退信携带的附件、Credits 与 COD 原样记作证据，处理器不推断退信是否保留原 COD。处理器只在发件人恰为 `MoogleMail`（精确匹配，与集成层退信回执的判定一致）且去掉前缀后是上表四种结算主题之一时识别为退件。义务 ID 可由公开的场次与 lot ID 推出，不能证明来源，因此无前缀的结算主题、玩家自拟的同名 `[RTS] …` 主题和其他系统退信（例如 `[RTS] Auction payment overdue`）都按未知邮件处理。识别后处理器只把它记录为退件证据（义务 ID、Credits、COD、附件），不领取、不退回、不回信；来源已认证的退件即使资产异常（例如不可领取）也照样记为证据，交给后续消费方隔离，不让入站游标停在这封邮件上。
@@ -133,10 +135,10 @@ Admin “结算退件”页（`/settlement-returns`）按案件列出全部退�
 <!-- notification-catalog:start -->
 | 模板键 / 身份 | 触发事实 | 收件人 | 渠道 | 发送类别 | 出队位置 | 失效条件 | 冻结字段（正文外） |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `register_key` | `register` 命令成功（`registered`）或找回既有账号（`recovered`） | 发件人游戏名 | MM | account | `deliveries` outbox / delivery 循环 | 同账号 24 小时内已回过一封（抑制）；创建后不退役 | 收件人、主题、登录 key 引用；正文占位符 `{login_key}`、`{username}` |
+| `register_key` | `register` 命令成功（`registered`）或找回既有账号（`recovered`） | 发件人游戏名 | MM | account | `deliveries` outbox / delivery 循环 | 同账号 24 小时内已回过一封（抑制）；发送前绑定核对不符（确定失败） | 收件人、主题、登录 key 引用；正文占位符 `{login_key}`、`{username}` |
 | `register_result` | `register` 命令被拒（`blacklisted`、`identity_conflict`） | 发件人游戏名 | MM | account | `deliveries` outbox / delivery 循环 | 同账号 24 小时预算（抑制） | 收件人、结果码；占位符 `{result_code}`、`{username}` |
 | `rebind_result` | `rebind` 成功或失败（key 无效、被拉黑、身份冲突） | 发件人游戏名 | MM | account | `deliveries` outbox / delivery 循环 | 发件人 24 小时说明信上限（抑制） | 收件人、结果码；占位符 `{result_code}`、`{username}` |
-| `rekey_key` | `rekey` 命令轮换成功（原会话已注销） | 发件人游戏名 | MM | account | `deliveries` outbox / delivery 循环 | 同账号 24 小时预算（抑制） | 收件人、主题、登录 key 引用；占位符 `{login_key}`、`{username}` |
+| `rekey_key` | `rekey` 命令轮换成功（原会话已注销） | 发件人游戏名 | MM | account | `deliveries` outbox / delivery 循环 | 同账号 24 小时预算（抑制）；发送前绑定核对不符（确定失败） | 收件人、主题、登录 key 引用；占位符 `{login_key}`、`{username}` |
 | `rekey_result` | `rekey` 被拒（未注册、被拉黑、身份冲突） | 发件人游戏名 | MM | account | `deliveries` outbox / delivery 循环 | 同账号 24 小时预算（抑制） | 收件人、结果码；占位符 `{result_code}`、`{username}` |
 | `auction_assets_rejected` | 投稿邮件含 Credits、CoD 或非装备资产，整封退回 | 发件人游戏名 | MM | intake | `deliveries` outbox / delivery 循环 | 发件人 24 小时说明信上限（抑制）；退回动作独立执行 | 收件人、主题、退回邮件身份；正文无占位符 |
 | `auction_no_attachments` | `auction` 邮件事务内没有任何装备附件 | 发件人游戏名 | MM | intake | `deliveries` outbox / delivery 循环 | 发件人 24 小时说明信上限（抑制） | 收件人、主题；正文无占位符 |

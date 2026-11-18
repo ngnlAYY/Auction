@@ -4,6 +4,7 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use auction_application::delivery::DeliveryAdminGuardBlocker;
 use auction_application::delivery::{
     DeliveryAcknowledgementCommand, DeliveryAdminPort, DeliveryDispositionCommandError,
     DeliveryDispositionPort,
@@ -73,9 +74,14 @@ async fn postgres_acknowledge_appends_disposition_and_is_visible_in_detail() {
         ),
     };
 
+    let (_, _, blocker) = store.detail_with_guard(delivery_id).await.unwrap();
+    assert_eq!(blocker, None);
+
     let result = store.acknowledge(command.clone()).await.expect("确认处置");
     assert_eq!(result.kind, "operator_acknowledged");
     assert_eq!(result.fencing_version, fencing_version);
+    let (_, _, blocker) = store.detail_with_guard(delivery_id).await.unwrap();
+    assert_eq!(blocker, Some(DeliveryAdminGuardBlocker::AlreadyDisposed));
 
     // 统一处置表中的预检退役也要出现在详情中；它没有命令账本身份，
     // 详情以处置事实自身 UUID 作为稳定展示身份。
@@ -131,6 +137,17 @@ async fn postgres_acknowledge_appends_disposition_and_is_visible_in_detail() {
             DeliveryDispositionCommandError::CommandConflict
         ))
     ));
+
+    // 模拟重排推进 fence 后再次失败，历史确认不能挡住新的失败处置。
+    sqlx::query("UPDATE public.deliveries SET fencing_version = fencing_version + 1 WHERE id = $1")
+        .bind(delivery_id)
+        .execute(store.postgres_pool())
+        .await
+        .unwrap();
+    let (detail, _, blocker) = store.detail_with_guard(delivery_id).await.unwrap();
+    assert_eq!(detail.delivery.fencing_version, fencing_version + 1);
+    assert!(detail.dispositions.iter().any(|fact| fact.kind == "operator_acknowledged"));
+    assert_eq!(blocker, None);
 }
 
 #[tokio::test]
@@ -148,6 +165,8 @@ async fn postgres_acknowledge_rejects_funded_or_obligation_delivery() {
     .execute(store.postgres_pool())
     .await
     .expect("修改测试载荷");
+    let (_, _, blocker) = store.detail_with_guard(delivery_id).await.unwrap();
+    assert_eq!(blocker, Some(DeliveryAdminGuardBlocker::NotAcknowledgeable));
     let reason = "must not be accepted";
     let command = DeliveryAcknowledgementCommand {
         command_id: Uuid::new_v4(),

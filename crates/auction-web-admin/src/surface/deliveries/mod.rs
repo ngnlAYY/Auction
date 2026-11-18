@@ -3,9 +3,10 @@
 //! 结果仍由服务端命令端口证明，浏览器只提交安全投影中的 fencing version。
 
 mod detail;
-mod dialog;
+pub(crate) mod dialog;
 mod filters;
 pub(crate) mod labels;
+pub(crate) mod modal;
 mod model;
 mod page;
 mod sent_proof;

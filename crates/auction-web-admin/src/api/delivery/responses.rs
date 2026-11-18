@@ -1,8 +1,8 @@
 //! 投递详情、预览与确认响应的严格解码。
 
 use auction_contracts::{
-    AdminDeliveryDetailResponse, AdminDeliverySentProofPreviewResponse,
-    AdminDeliverySentProofResponse,
+    AdminDeliveryDetailResponse, AdminDeliveryDetailWithActionsResponse,
+    AdminDeliverySentProofPreviewResponse, AdminDeliverySentProofResponse,
 };
 use uuid::Uuid;
 
@@ -12,14 +12,34 @@ use crate::api::{
     valid_uuid,
 };
 
+#[cfg(test)]
 pub(super) fn decode_detail(
     payload: StrictDeliveryEnvelope<AdminDeliveryDetailResponse>,
 ) -> Result<AdminDeliveryDetailResponse, ()> {
     if !valid_success_code(&payload.code) || payload.message.is_empty() {
         return Err(());
     }
+    validate_detail(&payload.data)?;
+    Ok(payload.data)
+}
+
+pub(super) fn decode_detail_with_actions(
+    payload: StrictDeliveryEnvelope<AdminDeliveryDetailWithActionsResponse>,
+    delivery_id: &str,
+) -> Result<AdminDeliveryDetailWithActionsResponse, ()> {
     let data = payload.data;
-    let _delivery = decode_delivery(data.delivery.clone())?;
+    if data.detail.delivery.id != delivery_id
+        || !valid_success_code(&payload.code)
+        || payload.message.is_empty()
+    {
+        return Err(());
+    }
+    validate_detail(&data.detail)?;
+    Ok(data)
+}
+
+fn validate_detail(data: &AdminDeliveryDetailResponse) -> Result<(), ()> {
+    decode_delivery(data.delivery.clone())?;
     if data.attempts.iter().any(|attempt| !valid_attempt(attempt))
         || data.evidence.iter().any(|evidence| !valid_evidence(evidence))
         || !valid_custody(&data.custody)
@@ -29,7 +49,7 @@ pub(super) fn decode_detail(
     {
         return Err(());
     }
-    Ok(data)
+    Ok(())
 }
 
 pub(super) fn decode_preview(

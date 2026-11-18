@@ -5,9 +5,10 @@ use auction_web_shared::{AsyncState, AsyncStateKind};
 use dioxus::prelude::*;
 
 use super::super::query::use_deliveries_query_state;
-use super::dialog::DeliveryDialog;
+use super::dialog::{DIALOG_ID, DeliveryDialog};
 use super::filters::{DeliveryFilters, DeliveryFiltersDraft};
-use super::labels::is_mail_disposition_conflict;
+use super::labels::action_feedback_message;
+use super::modal::close_delivery_modal;
 use super::model::{
     DeliveryActionRequest, DeliveryDialogKind, DeliveryDialogState, DeliveryReconcileDraft,
 };
@@ -61,10 +62,7 @@ pub fn page() -> Element {
             notice.set(None);
             success_action.set(None);
             if kind == DeliveryDialogKind::Reconcile
-                && reconcile_draft().as_ref().is_none_or(|draft| {
-                    draft.delivery_id != delivery.id
-                        || (is_mail_disposition_conflict(&delivery) && draft.action != "failed")
-                })
+                && reconcile_draft().as_ref().is_none_or(|draft| draft.delivery_id != delivery.id)
             {
                 reconcile_draft.set(Some(DeliveryReconcileDraft::for_delivery(&delivery)));
             }
@@ -86,14 +84,13 @@ pub fn page() -> Element {
         if commands.any_busy() || commands.contains(&request.delivery_id) {
             return;
         }
-        if pending_dialog().is_some_and(|dialog| {
-            is_mail_disposition_conflict(&dialog.delivery)
-                && request.action != DeliveryAction::ReconcileFailed
-        }) {
+        let Some(dialog) = pending_dialog() else { return };
+        if dialog.delivery.id != request.delivery_id
+            || dialog.delivery.fencing_version != request.expected_fencing_version
+        {
             return;
         }
         if request.action == DeliveryAction::ReconcileRetry
-            && let Some(dialog) = pending_dialog()
             && dialog.kind == DeliveryDialogKind::Reconcile
         {
             // 旧版 retry 人工对账先关闭字段框，再进入共用的第二确认框；此时不能发 mutation。
@@ -138,7 +135,10 @@ pub fn page() -> Element {
             },
             move |code| {
                 // 新的版本拒绝不能抹掉更早一次未知；原 fence 与 UUID 仍由宿主保留。
-                if matches!(code.as_str(), "stale_delivery_state" | "stale_state_version") {
+                if matches!(
+                    code.as_str(),
+                    "stale_delivery_state" | "stale_state_version" | "delivery_recipient_renamed"
+                ) {
                     let mut refresh = refresh;
                     refresh.set(refresh().saturating_add(1));
                 }
@@ -146,6 +146,7 @@ pub fn page() -> Element {
             },
         );
         if submitted {
+            close_delivery_modal(DIALOG_ID);
             pending_dialog.set(None);
             reconcile_draft.set(None);
         }
@@ -160,8 +161,12 @@ pub fn page() -> Element {
     let pending = pending_dialog();
     // 行内对账草稿由对话框所在行订阅；页面只在页级确认框打开时读取，表格只转交信号，
     // 因此输入外部引用时页面、表格与其他行都不重渲染。
-    let row_dialog = pending.clone().filter(|dialog| dialog.kind == DeliveryDialogKind::Reconcile);
-    let page_dialog = pending.filter(|dialog| dialog.kind != DeliveryDialogKind::Reconcile);
+    let row_dialog = pending.clone().filter(|dialog| {
+        matches!(dialog.kind, DeliveryDialogKind::Reconcile | DeliveryDialogKind::ReconcileRetry)
+    });
+    let page_dialog = pending.filter(|dialog| {
+        !matches!(dialog.kind, DeliveryDialogKind::Reconcile | DeliveryDialogKind::ReconcileRetry)
+    });
     let success_message = delivery_success_message(success_action());
     // 渲染期只取一次地址栏状态快照；事件回调仍各自读取最新值。
     let current = query_state();
@@ -268,7 +273,7 @@ pub fn page() -> Element {
                         "action-feedback action-feedback--error"
                     },
                     role: if feedback.is_success() { "status" } else { "alert" },
-                    {feedback.message(success_message)}
+                    {action_feedback_message(&feedback, success_message)}
                 }
             }
             if let Some(page) = page {

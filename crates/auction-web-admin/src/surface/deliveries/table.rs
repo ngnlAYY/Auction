@@ -11,7 +11,7 @@ use super::super::sort::{MobileSortControl, SortDirection, SortableTh, sort_rows
 use super::dialog::DeliveryDialog;
 use super::labels::{
     delivery_category_label, delivery_display_id, delivery_display_type, delivery_outcome_label,
-    delivery_status_label, is_mail_disposition_conflict,
+    delivery_status_label,
 };
 use super::model::{
     DeliveryActionRequest, DeliveryDialogKind, DeliveryDialogState, DeliveryReconcileDraft,
@@ -41,9 +41,7 @@ pub(super) fn DeliveryTable(
     // 只有对话框所在行收到对话框状态；开合对话框时其余行 props 不变。行数据在 rsx 外配好，
     // 循环体根节点才能直接是带 key 的 DeliveryRow。
     let rows = deliveries.into_iter().map(|delivery| {
-        let row_dialog = pending_dialog.clone().filter(|dialog| {
-            dialog.kind == DeliveryDialogKind::Reconcile && dialog.delivery.id == delivery.id
-        });
+        let row_dialog = pending_dialog.clone().filter(|dialog| dialog.delivery.id == delivery.id);
         (delivery, row_dialog)
     });
     rsx! {
@@ -141,7 +139,7 @@ pub(super) fn DeliveryTable(
     }
 }
 
-/// 为单条 delivery 选择服务端允许的动作。
+/// 列表打开处置预览，实际操作需读取当前 fence 的判定。
 #[component]
 pub(super) fn DeliveryRow(
     delivery: Delivery,
@@ -153,24 +151,12 @@ pub(super) fn DeliveryRow(
     on_cancel: EventHandler<()>,
 ) -> Element {
     let commands = use_context::<PendingCommands>();
-    // 结算退件 Take 由退件案件推进：投递台不提供人工动作，服务端同样拒绝；处理入口在退件页。
-    let case_owned = delivery.origin_kind == "settlement_return_action";
     let kind = match delivery.status.as_str() {
-        _ if case_owned => None,
         "claimed" => Some(DeliveryDialogKind::Release),
-        "failed"
-            if !is_mail_disposition_conflict(&delivery)
-                && !matches!(
-                    delivery.reason_code.as_deref(),
-                    Some("lot_watch_invalidated" | "recipient_renamed")
-                ) =>
-        {
-            Some(DeliveryDialogKind::Retry)
-        }
+        "failed" => Some(DeliveryDialogKind::Retry),
         "manual_reconcile" => Some(DeliveryDialogKind::Reconcile),
         _ => None,
     };
-    let action_label = kind.map(DeliveryDialogKind::action_label);
     let status = delivery_status_label(&delivery.status);
     let cod = delivery.cod.map_or_else(|| t!("value-empty"), format_credit_amount);
     let template = delivery.template.clone().unwrap_or_else(|| t!("value-empty"));
@@ -261,21 +247,19 @@ pub(super) fn DeliveryRow(
                         to: Route::DeliveryDetail { delivery_id: delivery.id.clone() },
                         {t!("delivery-detail-open")}
                     }
-                    if let (Some(kind), Some(label)) = (kind, action_label) {
+                    if let Some(kind) = kind {
                         button {
                             r#type: "button",
                             class: "admin-btn-primary",
                             disabled: commands.any_busy() || commands.contains(&delivery.id),
                             onclick: move |_| on_open.call((delivery_for_action.clone(), kind)),
-                            "{label}"
+                            {t!("delivery-review-actions")}
                         }
                     }
                 }
             }
         }
-        if let Some(dialog) = pending_dialog.filter(|dialog| {
-            dialog.kind == DeliveryDialogKind::Reconcile && dialog.delivery.id == delivery.id
-        }) {
+        if let Some(dialog) = pending_dialog {
             tr {
                 class: "admin-delivery-dialog-row",
                 td {

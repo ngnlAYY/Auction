@@ -1,16 +1,52 @@
 //! Delivery 状态和来源辅助。
 
+use auction_contracts::AdminDeliveryActionBlocker;
 use auction_web_shared::t;
 
 use crate::api::Delivery;
+use crate::surface::AdminActionFeedback;
+
+pub(crate) fn action_blocker_label(reason: AdminDeliveryActionBlocker) -> String {
+    use AdminDeliveryActionBlocker as Blocker;
+
+    match reason {
+        Blocker::SettlementReturnActionOwned => t!("delivery-action-blocked-return-owned"),
+        Blocker::SettlementIneligible => t!("delivery-action-blocked-settlement"),
+        Blocker::FundedDelivery => t!("delivery-action-blocked-funded"),
+        Blocker::RetiredDelivery => t!("delivery-action-blocked-retired"),
+        Blocker::StaleFencingVersion => t!("delivery-action-blocked-stale"),
+        Blocker::SentSighted => t!("delivery-action-blocked-sent-sighted"),
+        Blocker::ReconcileSucceededForSend => t!("delivery-reconcile-send-proof-required"),
+        Blocker::DeliveryNotEligible => t!("delivery-action-blocked-ineligible"),
+        Blocker::StatusMismatch => t!("delivery-action-blocked-status"),
+        Blocker::QuarantinedMailActionNotAllowed => t!("delivery-mail-disposition-conflict"),
+        Blocker::MissingReconcileReference => t!("delivery-action-blocked-reference"),
+        Blocker::RecipientRenamed => t!("delivery-action-blocked-recipient-renamed"),
+        Blocker::AlreadyDisposed => t!("delivery-action-blocked-disposed"),
+        Blocker::NotAcknowledgeable => t!("delivery-action-blocked-acknowledge"),
+        Blocker::RecoveryRetryIneligible => t!("delivery-action-blocked-recovery-retry"),
+        Blocker::SettlementFulfillmentState => t!("delivery-action-blocked-fulfillment-state"),
+        Blocker::MissingSendingFence => t!("delivery-action-blocked-missing-sending-fence"),
+        Blocker::DeliveryCommandSnapshotUnreadable => {
+            t!("delivery-action-blocked-command-snapshot-unreadable")
+        }
+    }
+}
+
+pub(crate) fn action_feedback_message(feedback: &AdminActionFeedback, success: String) -> String {
+    match feedback {
+        AdminActionFeedback::Error(code) if code == "delivery_recipient_renamed" => {
+            action_blocker_label(AdminDeliveryActionBlocker::RecipientRenamed)
+        }
+        AdminActionFeedback::Error(code) if code == "delivery_command_snapshot_unreadable" => {
+            action_blocker_label(AdminDeliveryActionBlocker::DeliveryCommandSnapshotUnreadable)
+        }
+        _ => feedback.message(success),
+    }
+}
 
 pub(crate) const DELIVERY_STATUS_VALUES: [&str; 7] =
     ["prepared", "pending", "claimed", "sending", "succeeded", "failed", "manual_reconcile"];
-
-/// 历史资产处置冲突即使已人工标为失败也禁止重发。
-pub(super) fn is_mail_disposition_conflict(delivery: &Delivery) -> bool {
-    delivery.reason_code.as_deref() == Some("mail_disposition_conflict")
-}
 
 pub(crate) fn delivery_status_label(status: &str) -> String {
     match status {

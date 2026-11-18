@@ -3,7 +3,7 @@
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
-use super::super::{AdminActionFeedback, format_admin_time};
+use super::super::{AdminActionFeedback, admin_api_error_message, format_admin_time};
 use super::progress::MailPollingProgress;
 use crate::api::{AdminMailPolling, set_mail_paused, trigger_mail_poll};
 use crate::surface::pending::{
@@ -21,9 +21,10 @@ pub(super) fn MailPollingCommands(refresh: Signal<u64>, children: Element) -> El
 }
 
 #[component]
-pub(super) fn MailTriggerButton(mut notice: Signal<Option<AdminActionFeedback>>) -> Element {
+pub(super) fn MailTriggerButton() -> Element {
     let owner = use_context::<PendingCommands>();
     let busy = owner.is_busy("mail-poll-trigger");
+    let mut notice = use_signal(|| None::<Result<i64, String>>);
     rsx! {
         button {
             class: "admin-btn-primary",
@@ -37,11 +38,23 @@ pub(super) fn MailTriggerButton(mut notice: Signal<Option<AdminActionFeedback>>)
                     |command_id| async move {
                         trigger_mail_poll(command_id).await.map_err(|error| error.code)
                     },
-                    move |_| set_if_alive(notice, Some(AdminActionFeedback::Success)),
-                    move |code| set_if_alive(notice, Some(AdminActionFeedback::Error(code))),
+                    move |pollers| set_if_alive(notice, Some(Ok(pollers))),
+                    move |code| set_if_alive(notice, Some(Err(code))),
                 );
             },
             if busy { {t!("admin-action-working")} } else { {t!("admin-mail-trigger")} }
+        }
+        div { role: "status",
+            if let Some(Ok(pollers)) = notice() {
+                p { class: "admin-panel__note action-feedback action-feedback--success",
+                    {t!("admin-mail-trigger-accepted", pollers: pollers)}
+                }
+            }
+        }
+        if let Some(Err(code)) = notice() {
+            p { class: "admin-panel__note action-feedback action-feedback--error", role: "alert",
+                {admin_api_error_message(&code)}
+            }
         }
     }
 }

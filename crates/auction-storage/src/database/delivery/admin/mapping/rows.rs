@@ -103,9 +103,9 @@ pub(crate) fn legacy_result_payload(
     Ok((payload, snapshot))
 }
 
-/// 按旧版完整不变量读取命令事务中的 delivery 行。
-pub(crate) fn stored_snapshot(row: &PgRow) -> Result<DeliveryAdminSnapshot, DeliveryAdminError> {
-    LegacyDeliveryPayload::from_row(row)?.safe_snapshot()
+/// 校验已经读取的投递行能否作为命令快照。行映射错误已经过安全记录，详情仍独立校验。
+pub(crate) fn stored_snapshot(row: &PgRow) -> Option<DeliveryAdminSnapshot> {
+    LegacyDeliveryPayload::from_row(row).and_then(|legacy| legacy.safe_snapshot()).ok()
 }
 
 /// 双读旧完整结果与当前精简结果，供未发布版本产生的账本继续稳定重放。

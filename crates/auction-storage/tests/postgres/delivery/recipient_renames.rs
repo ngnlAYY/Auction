@@ -5,7 +5,11 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-use auction_application::delivery::DeliveryWorkStore;
+use auction_application::core::ApplicationError;
+use auction_application::delivery::{
+    DeliveryAdminAction, DeliveryAdminCommand, DeliveryAdminError, DeliveryAdminGuardBlocker,
+    DeliveryAdminPort, DeliveryWorkStore,
+};
 use auction_time::Timestamp;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -158,4 +162,75 @@ async fn postgres_player_notices_retire_after_rebind_or_forum_rename() {
         .expect("读取未改名投递");
     assert_eq!(status, "pending", "当前名存在的收件人不得退役");
     store.postgres_pool().close().await;
+}
+
+#[tokio::test]
+async fn postgres_admin_retry_cannot_revive_retired_player_notices_after_name_reuse() {
+    let database = support::TestDatabase::create().await.unwrap();
+    let store = database.store().await.unwrap();
+    let pool = store.postgres_pool();
+    let owner = seed_user(pool, "NewPlayer").await;
+    seed_rebind_history(pool, owner, "OldPlayer", "NewPlayer").await;
+    let summary = insert_summary(pool, "OldPlayer").await;
+    let reminder = insert_summary(pool, "OldPlayer").await;
+    sqlx::query(
+        "UPDATE public.deliveries SET origin_kind = 'season_reminder',
+         payload = payload || '{\"world\":\"isekai\",\"template\":\"isekai_season_reminder\",\"result_code\":\"season_end\"}'::jsonb
+         WHERE id = $1",
+    )
+    .bind(reminder)
+    .execute(pool)
+    .await
+    .unwrap();
+    store.begin_claim_cycle(Timestamp::now(), std::time::Duration::from_secs(60)).await.unwrap();
+
+    let other = seed_user(pool, "OldPlayer").await;
+    assert_ne!(owner, other);
+    let ordinary_failure = insert_summary(pool, "NewPlayer").await;
+    sqlx::query(
+        "UPDATE public.deliveries SET status='failed', failure_code='send_rejected',
+         attempt_count=1, fencing_version=1, claimed_at=created_at, sending_at=created_at,
+         completed_at=clock_timestamp(), updated_at=clock_timestamp() WHERE id=$1",
+    )
+    .bind(ordinary_failure)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    for delivery_id in [summary, reminder, ordinary_failure] {
+        let (detail, guard, _) = store.detail_with_guard(delivery_id).await.unwrap();
+        let retired = delivery_id != ordinary_failure;
+        assert_eq!(
+            detail.delivery.retirement_reason.as_deref(),
+            retired.then_some("recipient_renamed")
+        );
+        let fence = detail.delivery.fencing_version;
+        let action = DeliveryAdminAction::RetryFailed;
+        assert_eq!(
+            guard.projected_blocker(action),
+            retired.then_some(DeliveryAdminGuardBlocker::RetiredDelivery)
+        );
+        let result = store
+            .execute(DeliveryAdminCommand {
+                command_id: Uuid::new_v4(),
+                delivery_id,
+                expected_fencing_version: fence,
+                action,
+                external_reference: None,
+                failure_code: None,
+                actor_id: "admin".to_owned(),
+                request_id: None,
+                request_hash: action.request_hash(delivery_id, fence, None, None, "admin"),
+            })
+            .await;
+        if retired {
+            assert!(matches!(
+                result,
+                Err(ApplicationError::DeliveryAdmin(DeliveryAdminError::Invalid))
+            ));
+            assert_eq!(store.detail(delivery_id).await.unwrap(), detail);
+        } else {
+            assert_eq!(result.unwrap().snapshot.status, "pending");
+        }
+    }
 }

@@ -11,9 +11,10 @@ use uuid::Uuid;
 
 use super::player_support::player_support_url;
 use super::queue::{DeliverySearchFilters, delivery_list_url};
+use super::responses::{decode_detail, decode_detail_with_actions};
 use super::{
     decode::{StrictDeliveryEnvelope, decode_delivery_list},
-    decode_confirmation, decode_detail, decode_preview, delivery_detail_url,
+    decode_confirmation, decode_preview, delivery_detail_url,
 };
 
 fn time(offset: u32) -> String {
@@ -219,6 +220,222 @@ fn delivery_rejects_malformed_preflight_retirements() {
     check_before_send_projection(missing_reason, false);
     sent.as_object_mut().unwrap().remove("retirement_reason");
     check_before_send_projection(sent, false);
+}
+
+#[test]
+fn delivery_decodes_actual_http_failure_and_action_projection() {
+    use auction_contracts::AdminDeliveryActionBlocker;
+
+    // HTTP 的映射测试对照同一个序列化样本，保护详情/列表共用的安全投影与准入闭集。
+    let fixture: Value =
+        serde_json::from_str(include_str!("blocked_registration_reply.json")).unwrap();
+    let decoded =
+        decode_detail_with_actions(serde_json::from_value(fixture.clone()).unwrap(), DELIVERY_ID)
+            .unwrap();
+    assert_eq!(
+        decoded.actions.retry_failed.blocker(),
+        Some(AdminDeliveryActionBlocker::RecipientRenamed)
+    );
+    assert_eq!(decoded.actions.acknowledge.blocker(), None);
+    check_before_send_projection(fixture["data"]["detail"]["delivery"].clone(), true);
+    assert!(
+        decode_detail_with_actions(serde_json::from_value(fixture.clone()).unwrap(), OTHER_ID)
+            .is_err()
+    );
+
+    for (field, invalid) in [
+        ("retry_failed", json!({"state": "blocked", "reason": "future_reason"})),
+        ("release", json!({"state": "blocked"})),
+        ("acknowledge", json!({"state": "eligible", "reason": "already_disposed"})),
+        ("reconcile_retry", Value::Null),
+    ] {
+        let mut malformed = fixture.clone();
+        malformed["data"]["actions"][field] = invalid;
+        let result = serde_json::from_value(malformed)
+            .map(|payload| decode_detail_with_actions(payload, DELIVERY_ID));
+        assert!(result.is_err(), "必须拒绝损坏的动作投影 {field}");
+    }
+}
+
+#[test]
+fn delivery_decodes_new_blockers_serialized_by_http() {
+    use auction_contracts::AdminDeliveryActionBlocker;
+
+    let mut fixture: Value =
+        serde_json::from_str(include_str!("blocked_registration_reply.json")).unwrap();
+    let blockers: Vec<Value> =
+        serde_json::from_str(include_str!("disposition_action_blockers.json")).unwrap();
+    fixture["data"]["actions"]["retry_failed"] = blockers[0].clone();
+    fixture["data"]["actions"]["reconcile_failed"] = blockers[1].clone();
+    fixture["data"]["actions"]["release"] = blockers[2].clone();
+    let decoded =
+        decode_detail_with_actions(serde_json::from_value(fixture).unwrap(), DELIVERY_ID).unwrap();
+    assert_eq!(
+        decoded.actions.retry_failed.blocker(),
+        Some(AdminDeliveryActionBlocker::SettlementFulfillmentState)
+    );
+    assert_eq!(
+        decoded.actions.reconcile_failed.blocker(),
+        Some(AdminDeliveryActionBlocker::MissingSendingFence)
+    );
+    assert_eq!(
+        decoded.actions.release.blocker(),
+        Some(AdminDeliveryActionBlocker::DeliveryCommandSnapshotUnreadable)
+    );
+    assert_eq!(decoded.actions.acknowledge.blocker(), None);
+}
+
+/// 摘录 v0.1.8 的 api/delivery/decode.rs 与 api/validation.rs 中适用于这两种回信失败形状的条件。
+fn v018_accepts_mail_intake_failure(row: &AdminDeliveryResponse) -> bool {
+    use crate::api::valid_optional_text;
+
+    const V018_JSON_MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
+    let parse = |time: &str| Timestamp::parse_from_rfc3339(time).ok();
+    let is_zero =
+        |time: Timestamp| time.timestamp() == -62_135_596_800 && time.timestamp_subsec_nanos() == 0;
+    let (Some(created), Some(updated), Some(claimed), Some(completed)) = (
+        parse(&row.created_at),
+        parse(&row.updated_at),
+        row.claimed_at.as_deref().and_then(parse),
+        row.completed_at.as_deref().and_then(parse),
+    ) else {
+        return false;
+    };
+    if !crate::api::valid_uuid(&row.id)
+        || row.origin_kind != "mail_intake"
+        || row.status != "failed"
+        || !crate::api::valid_trimmed_text(&row.origin_id)
+        || !crate::api::valid_trimmed_text(&row.recipient)
+        || !valid_optional_text(row.template.as_deref())
+        || row.template.as_deref().is_some_and(|template| template.len() > 64)
+        || row.category.as_deref().is_some_and(|category| {
+            !matches!(
+                category,
+                "outbid"
+                    | "account"
+                    | "intake"
+                    | "settlement"
+                    | "equipment"
+                    | "operations"
+                    | "manual"
+            )
+        })
+        || row.world.as_deref().is_some_and(|world| !matches!(world, "main" | "isekai"))
+        || row.cod.is_some_and(|cod| !(0..=V018_JSON_MAX_SAFE_INTEGER).contains(&cod))
+        || !valid_optional_text(row.retirement_reason.as_deref())
+        || !valid_optional_text(row.suppression_reason.as_deref())
+        || !valid_optional_text(row.reason_code.as_deref())
+        || row.returned_mail_id.as_deref().is_some_and(|mid| {
+            !(1..=32).contains(&mid.len()) || !mid.bytes().all(|byte| byte.is_ascii_digit())
+        })
+        || row.lease_expires_at.is_some()
+        || row.external_reference.is_some()
+        || !(1..=V018_JSON_MAX_SAFE_INTEGER).contains(&row.fencing_version)
+        || row.attempt_count == 0
+        || is_zero(created)
+        || is_zero(updated)
+        || updated < created
+        || claimed < created
+        || matches!(
+            row.reason_code.as_deref(),
+            Some("lot_watch_invalidated" | "recipient_renamed" | "mail_disposition_conflict")
+        )
+        || row.failure_code.as_deref() == Some("recovery_superseded")
+    {
+        return false;
+    }
+    if row.sending_at.is_none() && row.failure_code.as_deref() == Some("invalid_payload") {
+        row.reason_code.is_none()
+            && !is_zero(claimed)
+            && !is_zero(completed)
+            && completed >= claimed
+            && completed <= updated
+            && !row.take_required
+            && row.returned_mail_id.is_none()
+    } else {
+        row.failure_code.as_deref().is_some_and(crate::api::valid_trimmed_text)
+            && row
+                .sending_at
+                .as_deref()
+                .and_then(parse)
+                .is_some_and(|sending| sending >= claimed && completed >= sending)
+    }
+}
+
+#[test]
+fn login_key_reply_failure_shapes_keep_v018_list_compatibility() {
+    let read_http_projection = |fixture| -> AdminDeliveryResponse {
+        let fixture: Value = serde_json::from_str(fixture).unwrap();
+        let delivery = fixture["data"]["detail"]["delivery"].clone();
+        check_before_send_projection(delivery.clone(), true);
+        decode_detail_with_actions(serde_json::from_value(fixture).unwrap(), DELIVERY_ID).unwrap();
+        let row = serde_json::from_value(delivery).unwrap();
+        assert!(v018_accepts_mail_intake_failure(&row));
+        row
+    };
+    let mut after_fence = read_http_projection(include_str!("blocked_registration_reply.json"));
+    let mut before_fence =
+        read_http_projection(include_str!("blocked_registration_reply_before_fence.json"));
+
+    after_fence.sending_at = None;
+    assert!(!v018_accepts_mail_intake_failure(&after_fence));
+    before_fence.reason_code = Some("recipient_renamed".to_owned());
+    before_fence.retirement_reason = before_fence.reason_code.clone();
+    before_fence.failure_code = before_fence.reason_code.clone();
+    before_fence.suppression_reason = None;
+    assert!(!v018_accepts_mail_intake_failure(&before_fence));
+    check_before_send_projection(serde_json::to_value(&before_fence).unwrap(), false);
+}
+
+#[test]
+fn v018_login_key_reply_projection_rejects_metadata_outside_release_boundaries() {
+    let fixture: Value =
+        serde_json::from_str(include_str!("blocked_registration_reply_before_fence.json")).unwrap();
+    let mut boundary: AdminDeliveryResponse =
+        serde_json::from_value(fixture["data"]["detail"]["delivery"].clone()).unwrap();
+    boundary.template = Some("a".repeat(64));
+    boundary.cod = Some(9_007_199_254_740_991);
+    assert!(v018_accepts_mail_intake_failure(&boundary));
+
+    let delivery = &fixture["data"]["detail"]["delivery"];
+    for (field, invalid) in [
+        ("template", json!("界".repeat(22))),
+        ("category", json!("future_category")),
+        ("world", json!("future_world")),
+        ("cod", json!(-1)),
+        ("cod", json!(9_007_199_254_740_992_i64)),
+    ] {
+        let mut row = delivery.clone();
+        row[field] = invalid;
+        let row = serde_json::from_value(row).unwrap();
+        assert!(!v018_accepts_mail_intake_failure(&row), "v0.1.8 应拒绝超界的 {field}");
+    }
+}
+
+#[test]
+fn v018_login_key_reply_projection_rejects_zero_times_at_the_release_boundaries() {
+    let fixture: Value =
+        serde_json::from_str(include_str!("blocked_registration_reply_before_fence.json")).unwrap();
+    let delivery = &fixture["data"]["detail"]["delivery"];
+    let before_zero = json!("0000-12-31T23:59:59Z");
+    let zero = json!("0001-01-01T00:00:00Z");
+    for (field, earlier_fields) in [
+        ("created_at", &[][..]),
+        ("updated_at", &["created_at", "claimed_at", "completed_at"][..]),
+        ("claimed_at", &["created_at"][..]),
+        ("completed_at", &["created_at", "claimed_at"][..]),
+    ] {
+        let mut row = delivery.clone();
+        for earlier in earlier_fields {
+            row[*earlier] = before_zero.clone();
+        }
+        assert!(v018_accepts_mail_intake_failure(&serde_json::from_value(row.clone()).unwrap()));
+        row[field] = zero.clone();
+        assert!(
+            !v018_accepts_mail_intake_failure(&serde_json::from_value(row).unwrap()),
+            "v0.1.8 应拒绝 {field} 的零值时间"
+        );
+    }
 }
 
 fn preparation_failure(failure_code: &str) -> Value {
@@ -559,7 +776,7 @@ fn confirmation_must_echo_command_and_delivery() {
 fn detail_url_requests_the_settlement_returns_projection() {
     assert_eq!(
         delivery_detail_url(DELIVERY_ID),
-        format!("/api/v1/admin/deliveries/{DELIVERY_ID}?include=settlement_returns")
+        format!("/api/v1/admin/deliveries/{DELIVERY_ID}?include=disposition_actions")
     );
 }
 

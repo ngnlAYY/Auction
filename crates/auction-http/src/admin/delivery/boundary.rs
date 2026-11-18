@@ -45,6 +45,20 @@ pub(crate) fn map_delivery_error(error: ApplicationError) -> Response {
             "结算义务已不可执行，不能重新激活原投递",
         )
         .into_response(),
+        ApplicationError::DeliveryAdmin(DeliveryAdminError::RecipientRenamed) => api_error(
+            StatusCode::CONFLICT,
+            "delivery_recipient_renamed",
+            "登录 key 回信的收件角色已换绑，不能重新排队",
+        )
+        .into_response(),
+        ApplicationError::DeliveryAdmin(DeliveryAdminError::CommandSnapshotUnreadable) => {
+            api_error(
+                StatusCode::CONFLICT,
+                "delivery_command_snapshot_unreadable",
+                "这条投递的命令记录无法读取，不能执行该动作",
+            )
+            .into_response()
+        }
         ApplicationError::DeliveryAdmin(DeliveryAdminError::CommandConflict) => {
             api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
                 .into_response()
@@ -140,6 +154,16 @@ mod tests {
             (DeliveryAdminError::Invalid, StatusCode::BAD_REQUEST, "invalid_delivery_command"),
             (DeliveryAdminError::Stale, StatusCode::CONFLICT, "stale_delivery_state"),
             (DeliveryAdminError::SentSighted, StatusCode::CONFLICT, "delivery_sent_sighted"),
+            (
+                DeliveryAdminError::RecipientRenamed,
+                StatusCode::CONFLICT,
+                "delivery_recipient_renamed",
+            ),
+            (
+                DeliveryAdminError::CommandSnapshotUnreadable,
+                StatusCode::CONFLICT,
+                "delivery_command_snapshot_unreadable",
+            ),
             (
                 DeliveryAdminError::Unavailable,
                 StatusCode::SERVICE_UNAVAILABLE,

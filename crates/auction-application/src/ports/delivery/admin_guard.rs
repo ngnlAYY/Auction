@@ -47,6 +47,8 @@ pub struct DeliveryAdminGuardSnapshot {
     pub status: String,
     /// 冻结载荷的发送原因；`mail_disposition_conflict` 表示发送前已被隔离。
     pub reason_code: Option<String>,
+    /// 当前 fence 已进入 sending；普通对账终态需要真实 sending 时间。
+    pub has_sending_fence: bool,
     /// `settlement` 等来源种类；只有结算来源才可能有 Sent 目击。
     pub origin_kind: String,
     /// 冻结载荷的 `operation`；非 `send` 载荷不得借人工对账伪装外部成功。
@@ -55,17 +57,25 @@ pub struct DeliveryAdminGuardSnapshot {
     pub sent_reference_sighted: bool,
     /// 该投递已绑定资金 allocation；释放或重试会改写资金责任。
     pub funded_delivery: bool,
-    /// 已被装备损失或历史自寄核对永久退役，任何新动作都不能重新激活。
+    /// 释放、重排和对账使用的完整命令快照已通过校验。
+    pub command_snapshot_readable: bool,
+    /// 已由装备损失、历史自寄核对或预检退役收口，任何新动作都不能重新激活。
     pub retired: bool,
     /// 只有 `Release`/`RetryFailed`/`ReconcileRetry` 读取 lot 发送资格；其余动作为 `None`。
     pub lot_eligible: Option<bool>,
     /// 同样只有这三个动作读取：结算来源投递的义务是否仍可执行且本投递是其当前派发；非结算来源
     /// 或其余动作为 `None`。
     pub settlement_eligible: Option<bool>,
+    /// 该投递占用的履约行状态；`None` 表示没有绑定的履约行。
+    pub settlement_fulfillment_state: Option<String>,
     /// `ReconcileSucceeded` 是否提供了外部引用（`Some`，空串与旧版一致仍交给后续校验）。
     pub has_reconcile_reference: bool,
     /// 本投递是入站或恢复对某封邮件的领取/退回意图，而同一邮件已有结算退件 Take（交接之后）。
     pub mail_handed_over: bool,
+    /// 登录 key 回信的冻结收件人不再匹配。
+    pub recipient_renamed: bool,
+    /// 恢复 owner 是否允许重排关联动作。无关联时为真。
+    pub recovery_retry_eligible: bool,
 }
 
 /// 阻断项闭集；顺序即判定优先级，调用方取第一项。
@@ -79,6 +89,8 @@ pub enum DeliveryAdminGuardBlocker {
     SettlementIneligible,
     /// 已绑定资金责任，禁止人工释放/重试/对账改写。
     FundedDelivery,
+    /// 当前持久行不能作为释放、重排或对账命令的快照。
+    CommandSnapshotUnreadable,
     /// 已被永久退役事实收口。
     RetiredDelivery,
     /// 预期 fencing version 已过期。
@@ -95,23 +107,42 @@ pub enum DeliveryAdminGuardBlocker {
     QuarantinedMailActionNotAllowed,
     /// 对账成功缺少外部引用，不能形成可核验的人工证明。
     MissingReconcileReference,
+    /// 重新排队不能把账号当前的登录 key 寄往旧角色。
+    RecipientRenamed,
+    /// 本 fence 已有解除告警的处置事实。
+    AlreadyDisposed,
+    /// 历史失败仍含资金、资产或履约责任，或当前并非失败态。
+    NotAcknowledgeable,
+    /// 父恢复或关联动作的状态、阻断归属或证明不允许重排。
+    RecoveryRetryIneligible,
+    /// 本投递关联的履约行尚不允许该人工迁移。
+    SettlementFulfillmentState,
+    /// 当前投递缺少可支撑普通对账终态的发送围栏。
+    MissingSendingFence,
 }
 
 impl DeliveryAdminGuardBlocker {
-    /// 映射回 `DeliveryAdminError`；只有结算资格阻断有专属错误，其余沿用既有类别。
+    /// 映射回提交端的稳定 `DeliveryAdminError` 分类。
     pub const fn error(self) -> DeliveryAdminError {
         match self {
             Self::SettlementIneligible => DeliveryAdminError::SettlementIneligible,
+            Self::RecipientRenamed => DeliveryAdminError::RecipientRenamed,
+            Self::CommandSnapshotUnreadable => DeliveryAdminError::CommandSnapshotUnreadable,
             Self::SettlementReturnActionOwned
             | Self::FundedDelivery
             | Self::RetiredDelivery
             | Self::ReconcileSucceededForSend
             | Self::QuarantinedMailActionNotAllowed
-            | Self::MissingReconcileReference => DeliveryAdminError::Invalid,
+            | Self::MissingReconcileReference
+            | Self::AlreadyDisposed
+            | Self::NotAcknowledgeable => DeliveryAdminError::Invalid,
             Self::SentSighted => DeliveryAdminError::SentSighted,
-            Self::StaleFencingVersion | Self::DeliveryNotEligible | Self::StatusMismatch => {
-                DeliveryAdminError::Stale
-            }
+            Self::StaleFencingVersion
+            | Self::DeliveryNotEligible
+            | Self::StatusMismatch
+            | Self::RecoveryRetryIneligible
+            | Self::SettlementFulfillmentState
+            | Self::MissingSendingFence => DeliveryAdminError::Stale,
         }
     }
 }
@@ -140,25 +171,46 @@ const fn checks_sent_sighting(action: DeliveryAdminAction) -> bool {
 }
 
 impl DeliveryAdminGuardSnapshot {
+    /// 预览使用当前 fence，并假定操作员会填写命令要求的字段；提交时仍复核实际输入和持久事实。
+    pub fn projected_blocker(
+        &self,
+        action: DeliveryAdminAction,
+    ) -> Option<DeliveryAdminGuardBlocker> {
+        Self {
+            action,
+            expected_fencing_version: self.fencing_version,
+            has_reconcile_reference: true,
+            ..self.clone()
+        }
+        .evaluate()
+        .blockers
+        .into_iter()
+        .next()
+    }
+
     /// 计算唯一判定；阻断项按判定优先级排列。
     pub fn evaluate(&self) -> DeliveryAdminGuardDecision {
         let transition = self.action.transition();
         let mut blockers = Vec::new();
-        if self.origin_kind == "settlement_return_action"
-            || (checks_lot_eligibility(self.action) && self.mail_handed_over)
-        {
-            blockers.push(DeliveryAdminGuardBlocker::SettlementReturnActionOwned);
-        }
+        // 提交先锁资金与结算资格，再在投递锁内判断其余事实，预览按同一优先级给原因。
         if checks_lot_eligibility(self.action) && self.settlement_eligible == Some(false) {
             blockers.push(DeliveryAdminGuardBlocker::SettlementIneligible);
         }
         if self.funded_delivery {
             blockers.push(DeliveryAdminGuardBlocker::FundedDelivery);
         }
+        if !self.command_snapshot_readable {
+            blockers.push(DeliveryAdminGuardBlocker::CommandSnapshotUnreadable);
+        }
+        if self.origin_kind == "settlement_return_action"
+            || (checks_lot_eligibility(self.action) && self.mail_handed_over)
+        {
+            blockers.push(DeliveryAdminGuardBlocker::SettlementReturnActionOwned);
+        }
         if self.retired {
             blockers.push(DeliveryAdminGuardBlocker::RetiredDelivery);
         }
-        if self.fencing_version != self.expected_fencing_version {
+        if self.fencing_version <= 0 || self.fencing_version != self.expected_fencing_version {
             blockers.push(DeliveryAdminGuardBlocker::StaleFencingVersion);
         }
         if checks_sent_sighting(self.action)
@@ -180,11 +232,40 @@ impl DeliveryAdminGuardSnapshot {
         if self.status != transition.expected_status {
             blockers.push(DeliveryAdminGuardBlocker::StatusMismatch);
         }
-        let quarantined_mail = self.reason_code.as_deref() == Some("mail_disposition_conflict")
-            && self.action != DeliveryAdminAction::ReconcileFailed;
-        if quarantined_mail {
+        if checks_lot_eligibility(self.action) && self.recipient_renamed {
+            blockers.push(DeliveryAdminGuardBlocker::RecipientRenamed);
+        }
+        if matches!(
+            self.action,
+            DeliveryAdminAction::RetryFailed | DeliveryAdminAction::ReconcileRetry
+        ) && !self.recovery_retry_eligible
+        {
+            blockers.push(DeliveryAdminGuardBlocker::RecoveryRetryIneligible);
+        }
+        if self.settlement_fulfillment_state.as_deref().is_some_and(|state| match self.action {
+            DeliveryAdminAction::Release => false,
+            DeliveryAdminAction::RetryFailed | DeliveryAdminAction::ReconcileRetry => {
+                !matches!(state, "failed" | "manual_reconcile")
+            }
+            DeliveryAdminAction::ReconcileSucceeded | DeliveryAdminAction::ReconcileFailed => {
+                state != "manual_reconcile"
+            }
+        }) {
+            blockers.push(DeliveryAdminGuardBlocker::SettlementFulfillmentState);
+        }
+        let disposition_conflict = self.reason_code.as_deref() == Some("mail_disposition_conflict");
+        if disposition_conflict && self.action != DeliveryAdminAction::ReconcileFailed {
             // 隔离发生在发送前；旧 payload 没有重新发送或伪装外部成功的授权。
             blockers.push(DeliveryAdminGuardBlocker::QuarantinedMailActionNotAllowed);
+        }
+        if matches!(
+            self.action,
+            DeliveryAdminAction::ReconcileSucceeded | DeliveryAdminAction::ReconcileFailed
+        ) && !self.has_sending_fence
+            && !disposition_conflict
+        {
+            // 普通对账结果须保留真实的发送时间链；已知邮件处置冲突另有兼容终态。
+            blockers.push(DeliveryAdminGuardBlocker::MissingSendingFence);
         }
         if self.action == DeliveryAdminAction::ReconcileSucceeded && !self.has_reconcile_reference {
             blockers.push(DeliveryAdminGuardBlocker::MissingReconcileReference);
@@ -195,7 +276,7 @@ impl DeliveryAdminGuardSnapshot {
                     serde_json::json!({"resolution":"admin_reconciled_succeeded"})
                 }
                 DeliveryAdminAction::ReconcileFailed => {
-                    if self.reason_code.as_deref() == Some("mail_disposition_conflict") {
+                    if disposition_conflict {
                         serde_json::json!({
                             "resolution": "admin_reconciled_failed",
                             "reason_code": "mail_disposition_conflict",

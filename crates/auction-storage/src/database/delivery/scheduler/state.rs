@@ -1,11 +1,13 @@
 //! delivery claimed/sending 租约的释放与续租；进入 sending 只经 `cash` 的授权 fence。
 
-use auction_application::delivery::DeliveryWorkClaim;
+use auction_application::core::ApplicationError;
+use auction_application::delivery::{DeliveryAdminError, DeliveryWorkClaim};
 use auction_time::Timestamp;
 use sqlx::Postgres;
 use uuid::Uuid;
 
 use super::mapping::{map_storage_error, repository_error};
+use super::recipient::{binding_matches, key_reply_user};
 use crate::database::delivery::audit::{
     DeliveryAudit, RELEASE, append as append_delivery_audit, worker_state_metadata,
 };
@@ -72,11 +74,11 @@ pub(super) async fn renew_postgres(
     claim: &DeliveryWorkClaim,
     renewed_at: Timestamp,
     lease_until: Timestamp,
-) -> Result<(), auction_application::core::RepositoryError> {
+) -> Result<(), ApplicationError> {
     // 准备和发送共享同一 token/fencing；数据库排队后也必须仍有效，不能用旧调用时间复活过期租约。
     let mut transaction = pool.begin().await.map_err(map_storage_error)?;
     lock_delivery_lease(&mut transaction, claim.delivery_id).await?;
-    let result = sqlx::query(
+    let renewed = sqlx::query(
         r#"UPDATE public.deliveries
            SET lease_expires_at = GREATEST(lease_expires_at, $3),
                updated_at = CURRENT_TIMESTAMP
@@ -97,8 +99,32 @@ pub(super) async fn renew_postgres(
     .execute(&mut *transaction)
     .await
     .map_err(map_storage_error)?;
-    if result.rows_affected() != 1 {
-        return Err(repository_error("delivery 续租时 lease 已失效"));
+    if renewed.rows_affected() != 1 {
+        return Err(repository_error("delivery 续租时 lease 已失效").into());
+    }
+    if let Some(user_id) = key_reply_user(&claim.origin_kind, &claim.payload) {
+        let exact: bool = sqlx::query_scalar(
+            "SELECT origin_kind = $2 AND payload = $3 AND recipient = $4
+             FROM public.deliveries WHERE id = $1",
+        )
+        .bind(claim.delivery_id)
+        .bind(&claim.origin_kind)
+        .bind(&claim.payload)
+        .bind(&claim.recipient)
+        .fetch_one(&mut *transaction)
+        .await
+        .map_err(map_storage_error)?;
+        if !exact {
+            return Err(repository_error("登录 key 回信与持久投递不一致").into());
+        }
+        // 续租只确认当前 fence 与绑定，不替 Worker 推断外部结果。提交续租后由原 owner 写终态。
+        if !binding_matches(&mut transaction, user_id, &claim.recipient, true)
+            .await
+            .map_err(map_storage_error)?
+        {
+            transaction.commit().await.map_err(map_storage_error)?;
+            return Err(DeliveryAdminError::RecipientRenamed.into());
+        }
     }
     transaction.commit().await.map_err(map_storage_error)?;
     Ok(())

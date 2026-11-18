@@ -55,6 +55,8 @@ pub enum DeliveryAdminError {
     CommandConflict,
     #[error("delivery Admin 持久化结果损坏")]
     StoredResultCorrupt,
+    #[error("这条投递的命令记录无法读取，不能执行该动作")]
+    CommandSnapshotUnreadable,
     #[error("delivery Admin 依赖暂不可用")]
     Unavailable,
     /// Worker 已在 Sent 中目击同一结算义务的邮件；重试或判失败可能重复付款或误判，须走人工 Sent 证明。
@@ -64,6 +66,9 @@ pub enum DeliveryAdminError {
     /// 该义务被退回的邮件（重寄只归恢复流程）；重新激活会重复付款或寄出已收回的装备。
     #[error("投递所属结算义务已不可执行")]
     SettlementIneligible,
+    /// 登录 key 回信的冻结收件人已不再是该账号的绑定角色。
+    #[error("登录 key 回信的收件角色已换绑，不能重新排队")]
+    RecipientRenamed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -250,6 +255,23 @@ pub trait DeliveryAdminPort: Send + Sync {
         &self,
         delivery_id: Uuid,
     ) -> ApplicationFuture<'_, crate::ports::delivery::DeliveryAdminDetail>;
+
+    /// 同一只读快照中的详情、投递守卫事实，以及确认已处置的阻断原因。
+    fn detail_with_guard(
+        &self,
+        _delivery_id: Uuid,
+    ) -> ApplicationFuture<
+        '_,
+        (
+            crate::ports::delivery::DeliveryAdminDetail,
+            crate::ports::delivery::DeliveryAdminGuardSnapshot,
+            Option<crate::ports::delivery::DeliveryAdminGuardBlocker>,
+        ),
+    > {
+        Box::pin(async {
+            Err(crate::core::ApplicationError::CapabilityUnavailable("delivery action projection"))
+        })
+    }
 
     fn execute(&self, command: DeliveryAdminCommand) -> ApplicationFuture<'_, DeliveryAdminResult>;
 

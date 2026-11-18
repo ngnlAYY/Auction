@@ -9,7 +9,8 @@ use dioxus::prelude::*;
 use super::actions::ActionSection;
 use super::labels::{
     event_details_text, event_key, kind_key, label, location_key, match_key, plan_key, reason_key,
-    status_key, take_state_key, take_unknown_guidance_key, take_unknown_reason_key,
+    shows_asset_location, status_key, take_state_key, take_unknown_guidance_key,
+    take_unknown_reason_key,
 };
 use super::list::assets_text;
 use crate::api::{
@@ -54,12 +55,20 @@ fn ReturnDetailPage(return_id: String) -> Element {
             .filter(|(loaded_id, _)| loaded_id == &return_id)
             .map(|(_, result)| result.clone())
     };
+    let can_refresh = loaded.as_ref().is_some_and(Result::is_ok);
     rsx! {
         section { class: "admin-settlement-return-detail", aria_labelledby: "settlement-return-detail-title",
             div { class: "admin-settlement-return-detail__head",
                 h1 { id: "settlement-return-detail-title", {t!("settlement-return-detail-title")} }
                 Link { to: Route::SettlementReturns {}, class: "admin-settlement-return-detail__back",
                     {t!("settlement-return-detail-back")}
+                }
+                if can_refresh {
+                    button {
+                        r#type: "button",
+                        onclick: move |_| refresh.set(refresh().saturating_add(1)),
+                        {t!("settlement-return-refresh-case")}
+                    }
                 }
             }
             PendingCommandPanel { owner: commands }
@@ -102,13 +111,15 @@ fn ReturnDetailPage(return_id: String) -> Element {
                     }
                     SummarySection { summary: detail.summary.clone() }
                     ActionSection { detail: detail.clone(), notice, refresh }
-                    TakeSection {
-                        take: detail.take.clone(),
-                        status: detail.summary.status.clone(),
-                        unknown_reason: detail.take_unknown_reason.clone(),
-                    }
-                    if let Some(custody) = detail.custody.clone() {
-                        CustodySection { custody }
+                    if shows_asset_location(&detail.summary.status) {
+                        TakeSection {
+                            take: detail.take.clone(),
+                            status: detail.summary.status.clone(),
+                            unknown_reason: detail.take_unknown_reason.clone(),
+                        }
+                        if let Some(custody) = detail.custody.clone() {
+                            CustodySection { custody }
+                        }
                     }
                     DispatchSection {
                         dispatches: detail.dispatches.clone(),
@@ -134,10 +145,16 @@ fn SummarySection(summary: SettlementReturnSummary) -> Element {
     rsx! {
         section { class: "admin-panel", aria_labelledby: "settlement-return-summary-title",
             h2 { id: "settlement-return-summary-title", {t!("settlement-return-summary-title")} }
-            p { class: "admin-panel__note", {t!("settlement-return-location-note")} }
+            if shows_asset_location(&summary.status) {
+                p { class: "admin-panel__note", {t!("settlement-return-location-note")} }
+            } else {
+                p { class: "admin-panel__note", {t!("settlement-return-location-resent-in-transit")} }
+            }
             dl { class: "admin-delivery-detail__grid",
-                dt { {t!("settlement-return-field-location")} }
-                dd { strong { {label(location_key, &summary.asset_location)} } }
+                if shows_asset_location(&summary.status) {
+                    dt { {t!("settlement-return-field-location")} }
+                    dd { strong { {label(location_key, &summary.asset_location)} } }
+                }
                 dt { {t!("settlement-return-column-status")} }
                 dd { {label(status_key, &summary.status)} }
                 dt { {t!("settlement-return-field-id")} }

@@ -8,7 +8,9 @@ use auction_contracts::{
 use auction_web_shared::{AsyncState, AsyncStateKind, QueryState, Time, TruncatedText, t};
 use dioxus::prelude::*;
 
-use super::labels::{kind_key, label, location_key, match_key, reason_key, status_key};
+use super::labels::{
+    kind_key, label, location_key, match_key, reason_key, shows_asset_location, status_key,
+};
 use crate::api::{
     SettlementReturnPage, SettlementReturnSummary, fetch_settlement_returns, valid_uuid,
 };
@@ -264,7 +266,13 @@ fn ReturnRow(item: SettlementReturnSummary) -> Element {
             td { "data-label": t!("settlement-return-column-status"),
                 span { class: status_badge(&item.status), {label(status_key, &item.status)} }
             }
-            td { "data-label": t!("settlement-return-column-location"), {label(location_key, &item.asset_location)} }
+            td { "data-label": t!("settlement-return-column-location"),
+                if shows_asset_location(&item.status) {
+                    {label(location_key, &item.asset_location)}
+                } else {
+                    {t!("settlement-return-location-resent-in-transit")}
+                }
+            }
             td { "data-label": t!("settlement-return-column-kind"), "{kind}" }
             td { "data-label": t!("settlement-return-column-recipient"),
                 TruncatedText { value: recipient, portal: true }

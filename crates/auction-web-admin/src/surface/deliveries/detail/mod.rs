@@ -3,10 +3,12 @@
 //! 只读聚合与人工 Sent 证明入口；所有字段都来自 `auction-contracts` 的安全投影，
 //! 页面不展示投递 payload、正文、Cookie 或登录 key，也不在浏览器重建状态机。
 
+use auction_contracts::AdminDeliveryActionBlocker;
 use auction_web_shared::{AsyncState, AsyncStateKind, t};
 use dioxus::prelude::*;
 
 use super::super::router::Route;
+use super::labels::action_blocker_label;
 use super::sent_proof::{SentProofDialog, SentProofSubmission, selectable_evidence};
 use crate::api::{
     DeliverySentProofResult, SentProofCommand, acknowledge_delivery, confirm_delivery_sent_proof,
@@ -111,8 +113,12 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
     let acknowledge_fencing_version = loaded
         .as_ref()
         .and_then(|result| result.as_ref().ok())
-        .map_or(0, |detail| detail.delivery.fencing_version);
+        .filter(|projection| projection.actions.acknowledge.blocker().is_none())
+        .map(|projection| projection.detail.delivery.fencing_version);
     let acknowledge = move |_| {
+        let Some(acknowledge_fencing_version) = acknowledge_fencing_version else {
+            return;
+        };
         let entity = acknowledge_delivery_id.clone();
         let reason = acknowledge_reason().trim().to_owned();
         if reason.is_empty() || commands.any_busy() || commands.contains(&entity) {
@@ -153,13 +159,12 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
         );
     };
     let acknowledge_entry = loaded.clone().and_then(std::result::Result::ok).map_or_else(|| rsx! {}, |detail| {
-        let already = acknowledged()
-            || detail
-                .dispositions
-                .iter()
-                .any(|value| value.kind == "operator_acknowledged");
-        let eligible = detail.delivery.status == "failed" && !already;
-        if !eligible {
+        if let Some(blocker) = detail.actions.acknowledge.blocker() {
+            if blocker != AdminDeliveryActionBlocker::StatusMismatch {
+                return rsx! {
+                    p { class: "admin-panel__note", {action_blocker_label(blocker)} }
+                };
+            }
             return rsx! {};
         }
         let mut reason = acknowledge_reason;
@@ -190,7 +195,8 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
     });
 
     // 证明入口只有在存在可引用证据且投递处于可准入状态时出现；服务端仍会重新判定。
-    let sent_entry = loaded.clone().and_then(std::result::Result::ok).map(|detail| {
+    let sent_entry = loaded.clone().and_then(std::result::Result::ok).map(|projection| {
+        let detail = projection.detail;
         let candidates = !selectable_evidence(&detail).is_empty();
         let can_prove =
             matches!(detail.delivery.status.as_str(), "manual_reconcile" | "failed") && candidates;
@@ -276,15 +282,15 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
                         on_retry: move |_| refresh.set(refresh().saturating_add(1)),
                     }
                 },
-                Some(Ok(detail)) => rsx! {
-                    DeliverySummary { detail: detail.clone() }
-                    AttemptSection { attempts: detail.attempts.clone() }
-                    EvidenceSection { evidence: detail.evidence.clone() }
-                    CustodySection { custody: detail.custody.clone() }
-                    DispositionSection { dispositions: detail.dispositions.clone() }
+                Some(Ok(projection)) => rsx! {
+                    DeliverySummary { detail: projection.detail.clone() }
+                    AttemptSection { attempts: projection.detail.attempts.clone() }
+                    EvidenceSection { evidence: projection.detail.evidence.clone() }
+                    CustodySection { custody: projection.detail.custody.clone() }
+                    DispositionSection { dispositions: projection.detail.dispositions.clone() }
                     ObligationSection {
-                        obligation: detail.obligation.clone(),
-                        recovery: detail.recovery,
+                        obligation: projection.detail.obligation.clone(),
+                        recovery: projection.detail.recovery,
                     }
                 },
             }

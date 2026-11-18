@@ -56,6 +56,8 @@ pub(crate) enum DeliveryProjection {
     /// `include=settlement_returns`：列出结算退件 Take 投递，详情追加装备收回处置
     /// `recovery_equipment_recovered`（迁移 `000113` 新增）。之后新增的值不随它输出。
     SettlementReturns,
+    /// `include=disposition_actions`：详情额外附带当前 fence 上的处置准入。
+    DispositionActions,
 }
 
 impl DeliveryProjection {
@@ -72,7 +74,7 @@ impl DeliveryProjection {
 
     /// 列表是否列出结算退件 Take 投递；由存储在同一条件下计数与分页，不在页内事后过滤。
     pub(crate) const fn includes_settlement_return_actions(self) -> bool {
-        matches!(self, Self::SettlementReturns)
+        matches!(self, Self::SettlementReturns | Self::DispositionActions)
     }
 
     /// 按投影输出详情。缺省投影下结算退件 Take 与被恢复终结的原结算投递返回 404
