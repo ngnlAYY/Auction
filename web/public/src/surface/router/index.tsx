@@ -8,6 +8,7 @@ import {
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import { createRouter, RouterContext } from "@auction/web-shared/router";
 import { StaleBuildBanner } from "@auction/web-shared/ui/build-notice";
+import { installSharedUi } from "@auction/web-shared/ui/components";
 import {
   buildBundle,
   createLocaleSession,
@@ -78,6 +79,7 @@ function LocalizedApp(props: {
     <LocaleSessionContext value={session}>
       <ThemeStateContext value={themeState}>
         <Show when={routerRendered()} fallback={<div class="app-root"></div>}>
+          <SharedUiEffects />
           <div class="app-root">
             <StaleBuildBanner
               message={t("stale-build-notice")}
@@ -89,6 +91,16 @@ function LocalizedApp(props: {
       </ThemeStateContext>
     </LocaleSessionContext>
   );
+}
+
+/**
+ * 安装两端共用的页面级副作用：表格截断提示与 VisualViewport 监听。
+ * 对应 Rust 版根组件里的 `BaseStylesheet {}`：它不输出节点（样式由入口静态装配），
+ * 但语言就绪后必须挂载一次，否则手机软键盘与表格提示的行为缺失。
+ */
+function SharedUiEffects(): JSX.Element {
+  installSharedUi();
+  return null;
 }
 
 function RouterHost(): JSX.Element {

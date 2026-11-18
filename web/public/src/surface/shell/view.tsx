@@ -93,7 +93,8 @@ export function PublicShellView(props: PublicShellViewProps): JSX.Element {
                     <span class="console-ticker__sep" aria-hidden="true" />
                   </Show>
                   <span class="console-ticker__auction">{props.tickerTitle()}</span>
-                  <span class="console-ticker__world"> / {props.tickerWorld()}</span>
+                  {/* 整段写成一个文本节点：拆成“ / ”与世界名两个节点后，字形排布会差约 0.016px。 */}
+                  <span class="console-ticker__world">{` / ${props.tickerWorld()}`}</span>
                   <Show when={props.tickerCountdown()}>
                     {(countdown) => (
                       <>

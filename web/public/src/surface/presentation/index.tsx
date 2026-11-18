@@ -7,6 +7,7 @@ import type { JSX } from "@solidjs/web";
 import { Show, useContext } from "solid-js";
 
 import { PublicSessionResourceContext } from "..";
+import { LOGIN_ROUTE_HREF } from "../session/login-return";
 
 /** 导航目标与首页查询动作只维护一份；两端视图不复制会话或世界选择器。 */
 export function NavigationLinks(props: {
@@ -37,7 +38,10 @@ export function NavigationLinks(props: {
       <Link href="/blacklist">{t("nav-blacklist")}</Link>
       <Link href="/compensation-pool">{t("page-compensation-pool-title")}</Link>
       <Link href="/forum">{t("nav-forum")}</Link>
-      <Show when={authenticated()} fallback={<Link href="/login">{t("session-login")}</Link>}>
+      <Show
+        when={authenticated()}
+        fallback={<Link href={LOGIN_ROUTE_HREF}>{t("session-login")}</Link>}
+      >
         <Link href="/account">{t("nav-my-bids")}</Link>
       </Show>
     </>

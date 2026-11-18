@@ -81,6 +81,14 @@ export function safeReturnPath(value: string | null): string {
   return value;
 }
 
+/**
+ * 导航里“登录”链接的地址。与 Rust 版 `Route::Login { return_to: None }` 的显示串一致：
+ * Dioxus 对“已声明但为空”的查询输出裸 `?`。它与地址栏的 `/login` 不相等，所以这条链接在
+ * 登录页不会被标成当前页。顶栏会话菜单与“会话已在别处结束”提示里的登录入口在 Rust 版里
+ * 直接写的是 `/login`，它们在登录页会被标成当前页；两者不要混用。
+ */
+export const LOGIN_ROUTE_HREF = "/login?";
+
 /** 为需要认证的 CTA 保存当前 pathname 与 search；直接登录入口不携带返回地址。
  *
  * 源码只在渲染链接属性时调用本函数；事件处理器不得调用，因为 `useContext` 需要组件宿主。

@@ -1,7 +1,7 @@
 // 表格列比例的渲染原语；字段顺序与具体比例由各业务表格拥有。
 
 import type { JSX } from "@solidjs/web";
-import { For } from "solid-js";
+import { createEffect, For } from "solid-js";
 
 import { createValueMemo } from "../../reactive/memo";
 
@@ -24,9 +24,31 @@ export function TableColumns(props: TableColumnsProps): JSX.Element {
   return (
     <colgroup data-table-layout={props.layout}>
       <For each={props.widths} keyed={false}>
-        {(width) => <col style={`width: ${formatTableColumnPercent(width(), total())}%`} />}
+        {(width) => <TableColumn style={`width: ${formatTableColumnPercent(width(), total())}%`} />}
       </For>
     </colgroup>
+  );
+}
+
+/**
+ * 单个列定义。样式经 setAttribute 写入而不走 CSSOM：浏览器会把 CSSOM 写入的值规范化
+ * （`12.000000%` 变成 `12%`、`47.368421%` 变成 `47.3684%`），属性文本就与既有输出不同。
+ */
+function TableColumn(props: { style: string }): JSX.Element {
+  let column: HTMLTableColElement | undefined;
+  createEffect(
+    () => props.style,
+    (style) => {
+      column?.setAttribute("style", style);
+    },
+  );
+  return (
+    <col
+      ref={(element) => {
+        column = element;
+        element.setAttribute("style", props.style);
+      }}
+    />
   );
 }
 
