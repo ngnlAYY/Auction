@@ -3,7 +3,7 @@
 HentaiVerse 装备拍卖服务的全 Rust 实现：玩家在网站或 E-Hentai 论坛出价，通过游戏内 MoogleMail 寄售装备、注册账号、付款与收货；运营人员在管理后台处理场次、凭据、投递与结算。
 
 - **后端**：三个可独立部署的进程——Public API、Admin API、Worker——加运维命令行 `auction-cli`；也可用 `auction-server` 单文件合并运行。
-- **前端**：Public 与 Admin 两个 Dioxus 0.7 CSR（WASM）单页应用，内嵌在对应后端二进制中同源提供；五种界面语言。
+- **前端**：Public 与 Admin 两个 Dioxus 0.7 CSR（WASM）单页应用，内嵌在对应后端二进制中同源提供；五种界面语言。`web/` 下另有一套进行中的 TypeScript + SolidJS 实现（目前只有 Public，尚未接入构建与发布），见 [web/README.md](web/README.md)。
 - **存储**：PostgreSQL 18 是唯一事实来源。
 - **平台**：原生程序仅支持 Linux x86_64。
 

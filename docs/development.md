@@ -13,6 +13,8 @@
 | 数据库 | PostgreSQL 18（运行与运维命令需要；静态检查不需要） |
 | 页面构建 | `dx`（Dioxus CLI 0.7）、`wasm-bindgen`、`wasm-opt` 与 `esbuild`，随 `mise install` 安装；`dx` 首次从源码编译，需要 C 编译器、CMake、`pkg-config` 与 OpenSSL 开发文件 |
 
+页面的 TypeScript + SolidJS 实现在 `web/` 下，用同样由 mise 安装的 bun 管理依赖；它的命令（`bun install --frozen-lockfile`、`bun run typecheck`、`bun run lint`、`bun run test`、`bun run build:public`）与编码规则见 [web/README.md](../web/README.md)，目前不属于 `mise run verify` 与发布构建。
+
 直接调用负责依赖解析的 Cargo 命令时加 `--locked`；mise 任务、CI 检查与发布构建已固定该参数。本地配置命令通过独立参数传递目录，包含空格的路径须在调用 `mise run` 时加引号。如需本机编译加速（sccache、mold 等），只在用户级 `~/.cargo/config.toml` 中配置，不改仓库 profile。
 
 ## 常用命令

@@ -12,6 +12,7 @@
 | 配置字段与示例 | [ops/config/README.md](ops/config/README.md) |
 | 部署、备份、监控与运维手册 | [ops/README.md](ops/README.md) |
 | 本地重建与线上部署的代理操作流程（脱敏版技能） | [ops/skills/README.md](ops/skills/README.md) |
+| 页面的 TypeScript + SolidJS 实现（进行中）：目录、命令、编码规则，以及它与 Rust 版有意不同的地方 | [web/README.md](web/README.md) |
 | 单个程序或 crate 的细节 | 各自的 `apps/*/README.md`、`crates/*/README.md` |
 
 ## 项目速览
@@ -20,6 +21,7 @@
 - `apps/` 下五个可部署程序：`auction-public-api`（Public 竞价站点）、`auction-admin-api`（Admin 后台与分体部署首次设置）、`auction-worker`（生命周期、结算履约、MoogleMail、论坛、告警等全部后台任务）、`auction-cli`（配置检查、部署编排、迁移、备份恢复与业务运维），以及可选的 `auction-server`（单主机上以子进程监管前三个角色）。
 - 工具与命令入口由 [mise](https://mise.jdx.dev) 管理：版本在 `mise.toml`、校验和在 `mise.lock`，一律取上游原始版本，不携带补丁；命令入口是 `mise run <任务>`。清单见[ci/tools/README.md](ci/tools/README.md)。
 - Rust 2024 工作区：工具链固定为 1.100.0（`rust-toolchain.toml`，mise 读取该文件），MSRV 1.94.1 由 CI 单独检查。后端用 axum 与 sqlx；前端是两个 Dioxus 0.7 CSR 单页应用，编译到 `wasm32-unknown-unknown`，由后端以 `web-embed` 内嵌。
+- 页面另有一套进行中的 TypeScript 7 + SolidJS 2.0 实现，放在 `web/`（bun 管理依赖），目前只写了 Public，尚未接入 `web-embed` 与发布构建：构建、发布与部署的仍然只有 Rust 版。
 - 原生程序只支持 Linux x86_64，装配根在其他平台编译期报错；通用制品不使用 `target-cpu=native`。
 - PostgreSQL 18 是唯一数据库后端与唯一事实来源，没有独立缓存进程。未配置数据库时进程以运行期骨架模式启动，相关接口返回“能力不可用”；不存在“无数据库”的编译形态。
 - 普通启动从不隐式迁移。迁移只经 `auction-cli db migrate`、`auction-cli service start/restart`（停机门禁后）与合并部署首次初始化（网页明确确认后的专用空库）执行。
@@ -45,6 +47,7 @@
 | `auction-time` | 各层与前端共用的 UTC 时刻、时长、文本格式与本地墙上时间换算；不含业务规则、不依赖内部 crate；已持久化的文本格式不得改动 |
 | `auction-web-public` / `auction-web-admin` | 各自的页面、路由、交互与译文；互不依赖，不导入任何后端 crate |
 | `auction-web-shared` | 两端通用、无业务偏向的浏览器能力与设计 token |
+| `web/*` | 页面的 TypeScript 实现：`web/contracts`、`web/shared`、`web/public`、`web/admin` 与四个浏览器相关的 Rust crate 一一对应；不导入后端代码，边界与规则见[web/README.md](web/README.md) |
 | `apps/*` | 参数与配置加载、依赖注入、监听绑定、优雅关闭与退出码 |
 
 - 功能按“领域 → 用例/端口 → 存储/外部适配 → HTTP/Web/Worker”的顺序落地。
@@ -117,11 +120,12 @@
 
 ## Web
 
-- Public/Admin 是独立的 Dioxus CSR SPA，各自拥有路由、译文与资源。不启用 SSR、hydration 或 fullstack，不引入 JavaScript 框架、TypeScript 或 npm 运行时依赖；`dx` 构建时使用的 esbuild 是唯一例外。
+- Public/Admin 是独立的 Dioxus CSR SPA，各自拥有路由、译文与资源。不启用 SSR、hydration 或 fullstack；Rust 实现不引入 JavaScript 框架、TypeScript 或 npm 运行时依赖，`dx` 构建时使用的 esbuild 是唯一例外。
+- `web/` 是第二套实现（TypeScript + SolidJS，同样是纯客户端渲染），规则以[web/README.md](web/README.md)为准，运行期依赖限于该文件列出的几项。两套实现共用样式表（`crates/auction-web-shared/style`、各 surface 的 `assets/`）与译文（`i18n/*.ftl`）：改这些共用文件会同时影响两套实现，改完两边都要核对。Solid 版与 Rust 版有意不同的地方逐项登记在 web/README.md 的差异表里，没有登记的行为应保持一致。
 - `mise run web-build` 用 `dx bundle` 以 `wasm-release` profile 构建，复制到稳定目录后由后端 `web-embed` 内嵌。未构建时后端仍可编译，页面路由返回 503。只有显式 `web-embed` 才内嵌资源；Public 二进制不得包含 Admin 资源，反之亦然。
 - 浏览器只消费 `auction-contracts` DTO；改变状态的动作携带 `command_id`，结果未知时只允许原样重试。不在浏览器重建业务状态机。
-- 所有界面文案走各自的 `i18n/*.ftl`：五种语言（en、zh-CN、zh-TW、ja、ko）键集合一致，键名用连字符、不含点号（`i18n` 门禁）。Public 默认 en，Admin 默认 zh-CN；偏好键 `hv.lang`、`hv.theme` 是固定契约。
-- 新增或删除页面时，同步前端 `Route` 枚举、[crates/auction-http/src/assets/routes.rs](crates/auction-http/src/assets/routes.rs) 与[docs/contracts/routes.md](docs/contracts/routes.md)。
+- 所有界面文案走各自的 `i18n/*.ftl`：五种语言（en、zh-CN、zh-TW、ja、ko）键集合一致，键名用连字符、不含点号（`i18n` 门禁，同时检查两套实现的引用）。Public 默认 en，Admin 默认 zh-CN；偏好键 `hv.lang`、`hv.theme` 是固定契约。
+- 新增或删除页面时，同步前端 `Route` 枚举（Rust 版）或路由表（`web/*/src/surface/router/route.ts`）、[crates/auction-http/src/assets/routes.rs](crates/auction-http/src/assets/routes.rs) 与[docs/contracts/routes.md](docs/contracts/routes.md)；只有一套实现提供的页面在契约里注明。
 
 ## 验证范围
 
@@ -132,6 +136,8 @@ mise run verify     # bash ci/checks/check.sh all fmt check dependency-versions 
 ```
 
 它覆盖四种编译配置：宿主默认 feature（`check`）、宿主全 feature（`lint`）、Public 与 Admin 两组 wasm32（`wasm`），外加 `rustdoc`。只跑单项时要注意：`cfg(target_arch = "wasm32")` 代码只会被 `wasm` 项检查。
+
+`web/` 下的改动另需在 `web/` 目录里通过 `bun run typecheck`、`bun run lint` 与 `bun run test`；这三项尚未并入 `mise run verify` 与 CI，提交前手工运行。
 
 行为变更必须随功能维护并运行受影响范围的测试；已有测试保留，修改行为时同步正反例与回归断言。
 

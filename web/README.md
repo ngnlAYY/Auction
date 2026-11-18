@@ -27,6 +27,7 @@ Public 与 Admin 两个浏览器应用的 TypeScript 源码、构建配置与编
 | `bun install --frozen-lockfile` | 按锁文件还原依赖 |
 | `bun run typecheck` | 四个包依次做类型检查；`typecheck:contracts`、`typecheck:shared`、`typecheck:public`、`typecheck:admin` 只查单个包 |
 | `bun run lint` | Biome 的格式与静态规则检查，不写文件 |
+| `bun run test` | 单元测试（`bun test`）；测试文件与被测模块同目录，以 `.test.ts` 结尾 |
 | `bun run format` | 按 Biome 规则改写格式并应用安全修复 |
 | `bun run build:public`、`bun run build:admin` | 生产构建，产物写入 `target/web/<surface>/public` |
 
