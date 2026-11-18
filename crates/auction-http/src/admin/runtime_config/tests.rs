@@ -17,7 +17,9 @@ use axum::http::{StatusCode, Uri};
 use axum::response::Response;
 use serde_json::{Value, json};
 
-use super::{RuntimeProjection, map_error, map_snapshot, runtime_projection, update, validate};
+use super::{
+    RuntimeProjection, get, map_error, map_snapshot, runtime_projection, update, validate,
+};
 use crate::admin::auctions::command_test_support::{VALID_UUID, headers, state_with_runtime};
 
 /// 已发布页面（基线 b2300b46）`valid_alerts` 严格校验的告警区块闭集：缺省投影必须恰好是它。
@@ -453,5 +455,58 @@ async fn invalid_runtime_response_exposes_only_fixed_worker_file_hints() {
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(body["code"], "invalid_runtime_config");
         assert_eq!(body["message"], "runtime 配置文档无效");
+    }
+}
+
+/// 完整 GET 响应与浏览器解码器共用夹具。改动投影时，三份夹具和两端测试须一起更新。
+#[tokio::test]
+async fn runtime_config_get_matches_browser_fixtures() {
+    let uri: Uri = "/api/v1/admin/config?include_equipment_taxonomy=true&include=fulfillment_collection_overdue_age_seconds"
+        .parse()
+        .unwrap();
+    let address = ConnectInfo("127.0.0.1:20123".parse().unwrap());
+    let long_prefix = format!("/{}/", "装".repeat(200));
+    let long_endpoint = format!("https://example.invalid/{}/v1/traces", "a".repeat(2100));
+    for (name, input, fixture) in [
+        (
+            "default",
+            json!({}),
+            include_str!(
+                "../../../../auction-contracts/tests/fixtures/admin/runtime-config-default.json"
+            ),
+        ),
+        (
+            "long-values",
+            json!({
+                "equipment_source": {"allowed_path_prefixes": [long_prefix]},
+                "tracing": {"enabled": true, "sample_ratio_ppm": 1, "endpoint": long_endpoint},
+            }),
+            include_str!(
+                "../../../../auction-contracts/tests/fixtures/admin/runtime-config-long-values.json"
+            ),
+        ),
+        (
+            "disabled-origins",
+            json!({
+                "security": {
+                    "allowed_origins_enabled": false,
+                    "allowed_origins": ["", " https://example.invalid ", ""],
+                },
+            }),
+            include_str!(
+                "../../../../auction-contracts/tests/fixtures/admin/runtime-config-disabled-origins.json"
+            ),
+        ),
+    ] {
+        // 固定文档由端口计算真实文件指纹，比较保留指纹和全部响应字段。
+        let state = state_with_runtime(Some(Arc::new(RuntimeWithWorkerError {
+            current: document(input),
+            worker_error: WORKER_FILE_HINT,
+        })));
+        let response = get(state, address, headers(), uri.clone()).await;
+        let (status, actual) = json_response(response).await;
+        assert_eq!(status, StatusCode::OK, "{name}");
+        let expected: Value = serde_json::from_str(fixture).unwrap();
+        assert_eq!(actual, expected, "{name}");
     }
 }

@@ -4,8 +4,11 @@
 use auction_contracts::RuntimeSwitchListResponse;
 use auction_time::Timestamp;
 use auction_web_shared::{AsyncState, AsyncStateKind, ConfirmCommand, t, use_confirm_command};
+#[cfg(target_arch = "wasm32")]
+use auction_web_shared::{PageVisibility, timer::TimeoutFuture};
 use dioxus::prelude::*;
 
+use super::field_announcement::{FieldLiveRegion, use_field_announcer};
 use crate::api::{
     AdminApiFailure, ExternalAccessPauseAttempt, fetch_runtime_switches,
     submit_external_access_pause,
@@ -69,10 +72,41 @@ pub(super) fn RuntimeSwitchCard() -> Element {
     };
     let pause_uncertain = (pause.command.uncertain)();
     let snapshot = use_resource(move || {
-        let _ = refresh();
-        fetch_runtime_switches()
+        let generation = refresh();
+        async move { (generation, fetch_runtime_switches().await) }
     });
-    let current = snapshot.read_unchecked().clone();
+    #[cfg(target_arch = "wasm32")]
+    {
+        let visibility = use_hook(PageVisibility::new);
+        use_effect({
+            let visibility = visibility.clone();
+            move || visibility.install(move || refresh.set(refresh().saturating_add(1)))
+        });
+        use_drop(move || visibility.cleanup());
+        use_resource(move || {
+            let generation = refresh();
+            let delay = snapshot
+                .read()
+                .as_ref()
+                .filter(|(loaded, _)| *loaded == generation)
+                .and_then(|(_, result)| result.as_ref().ok())
+                .and_then(pause_refresh_millis);
+            async move {
+                let Some(mut remaining) = delay else { return };
+                // CLI 可写入较长的期限，需分片等待以免超出浏览器定时器上限。
+                while remaining > 0 {
+                    let slice = remaining.min(i64::from(i32::MAX)) as u32;
+                    TimeoutFuture::new(slice).await;
+                    remaining -= i64::from(slice);
+                }
+                // 定时器仅唤醒读取，由数据库快照确认到期。复核已开始时旧任务不得再次刷新。
+                if *refresh.peek() == generation {
+                    refresh.set(generation.saturating_add(1));
+                }
+            }
+        });
+    }
+    let current = snapshot.read_unchecked().as_ref().map(|(_, result)| result.clone());
     rsx! {
         section { class: "admin-runtime-switches admin-panel",
             h2 { {t!("admin-switches-title")} }
@@ -131,6 +165,17 @@ fn pause_state(data: &RuntimeSwitchListResponse) -> (i64, bool, Option<Timestamp
     (intent.revision, paused, intent.expires_at.filter(|_| paused))
 }
 
+#[cfg(any(test, target_arch = "wasm32"))]
+fn pause_refresh_millis(data: &RuntimeSwitchListResponse) -> Option<i64> {
+    let remaining = pause_state(data).2? - data.database_time;
+    // 亚毫秒余量向上取整，避免在数据库期限之前补读。
+    Some(
+        remaining
+            .num_milliseconds()
+            .saturating_add(i64::from(remaining.subsec_nanos() % 1_000_000 != 0)),
+    )
+}
+
 /// 首次冻结命令时计算的绝对期限（整秒，满足服务端微秒精度要求）；重试复用同一值。
 fn pause_expiry(hours: i64) -> Option<Timestamp> {
     let seconds = hours.checked_mul(3_600)?;
@@ -155,6 +200,15 @@ fn PendingPauseRetry(state: PauseControlState, refresh: Signal<u64>) -> Element 
     }
 }
 
+const PAUSE_REASON_ID: &str = "admin-pause-reason";
+
+fn reason_error_text() -> String {
+    t!(
+        "admin-pause-reason-invalid",
+        maximum: ExternalAccessPauseAttempt::MAX_REASON_BYTES as i64
+    )
+}
+
 #[component]
 fn ExternalAccessPauseControl(
     state: PauseControlState,
@@ -167,13 +221,26 @@ fn ExternalAccessPauseControl(
     let submitting = (command.submitting)();
     let uncertain = (command.uncertain)();
     let confirmation = (command.confirmation)();
+    let may_prepare = !uncertain && confirmation.is_none() && !submitting;
     let failure = (command.failure)();
+    let mut reason_edited = use_signal(|| false);
+    let mut reason_invalid = use_signal(|| false);
+    let announcer = use_field_announcer();
 
-    let begin = move |_| {
-        let reason_text = reason().trim().to_owned();
-        if reason_text.is_empty() {
+    let begin = move |event: FormEvent| {
+        event.prevent_default();
+        if !may_prepare {
             return;
         }
+        let reason_text = reason().trim().to_owned();
+        if !ExternalAccessPauseAttempt::valid_reason(&reason_text) {
+            reason_invalid.set(true);
+            announcer.invalid_submit(PAUSE_REASON_ID, reason_error_text(), true);
+            return;
+        }
+        reason_invalid.set(false);
+        announcer.clear();
+        reason_edited.set(false);
         let selected = hours();
         let expires_at = if paused { None } else { pause_expiry(selected) };
         if !paused && expires_at.is_none() {
@@ -192,8 +259,14 @@ fn ExternalAccessPauseControl(
     };
 
     rsx! {
-        article { class: "admin-runtime-switches__entry admin-runtime-pause",
-            h3 { {t!("admin-pause-title")} }
+        form {
+            class: "admin-runtime-switches__entry admin-runtime-pause",
+            method: "post",
+            action: "/api/v1/admin/runtime-switches/external-access-paused",
+            aria_labelledby: "admin-runtime-pause-title",
+            novalidate: true,
+            onsubmit: begin,
+            h3 { id: "admin-runtime-pause-title", {t!("admin-pause-title")} }
             p { class: "admin-panel__note", {t!("admin-pause-note")} }
             p {
                 if paused {
@@ -237,6 +310,7 @@ fn ExternalAccessPauseControl(
                     label {
                         {t!("admin-pause-duration")}
                         select {
+                            name: "duration",
                             value: "{hours()}",
                             onchange: move |event| {
                                 let value = event.value().parse::<i64>().ok().filter(|value| PAUSE_HOURS.contains(value));
@@ -248,29 +322,50 @@ fn ExternalAccessPauseControl(
                         }
                     }
                 }
-                label {
-                    {t!("admin-pause-reason")}
-                    input {
-                        r#type: "text",
-                        maxlength: "1024",
-                        value: reason(),
-                        oninput: move |event| {
-                            let value = event.value();
-                            if value.chars().count() <= 1024 && !value.contains('\n') {
+                div {
+                    label {
+                        r#for: PAUSE_REASON_ID,
+                        {t!("admin-pause-reason", maximum: ExternalAccessPauseAttempt::MAX_REASON_BYTES as i64)}
+                        input {
+                            id: PAUSE_REASON_ID,
+                            name: "reason",
+                            r#type: "text",
+                            required: true,
+                            aria_invalid: reason_invalid().to_string(),
+                            aria_describedby: reason_invalid().then_some("admin-pause-reason-error"),
+                            value: reason(),
+                            oninput: move |event| {
+                                let value = event.value();
+                                if ExternalAccessPauseAttempt::valid_reason(value.trim()) {
+                                    reason_invalid.set(false);
+                                    announcer.clear();
+                                }
+                                reason_edited.set(true);
                                 reason.set(value);
-                            }
-                        },
+                            },
+                            onblur: move |_| {
+                                if reason_edited() && !reason_invalid()
+                                    && !ExternalAccessPauseAttempt::valid_reason(reason().trim())
+                                {
+                                    reason_invalid.set(true);
+                                    announcer.announce_on_blur(reason_error_text());
+                                }
+                            },
+                        }
+                    }
+                    if reason_invalid() {
+                        p { id: "admin-pause-reason-error", class: "admin-field-error", {reason_error_text()} }
                     }
                 }
                 button {
                     class: if paused { "admin-btn-primary" } else { "admin-btn-danger" },
-                    r#type: "button",
-                    disabled: submitting || reason().trim().is_empty(),
-                    onclick: begin,
+                    r#type: "submit",
+                    disabled: submitting,
                     if paused { {t!("admin-pause-resume")} } else { {t!("admin-pause-start")} }
                 }
             }
         }
+        FieldLiveRegion { announcer }
     }
 }
 
@@ -280,7 +375,7 @@ mod tests {
     use auction_time::{TimeDelta, Timestamp};
     use serde_json::json;
 
-    use super::pause_state;
+    use super::{pause_refresh_millis, pause_state};
 
     fn snapshot(
         operation: &str,
@@ -330,5 +425,116 @@ mod tests {
             admin_applied: Vec::new(),
         };
         assert_eq!(pause_state(&empty), (0, false, None));
+    }
+
+    #[test]
+    fn timed_pause_refresh_uses_database_time_and_rounds_up() {
+        let database_time = Timestamp::from_timestamp(1_700_000_000, 0).unwrap();
+        let until = database_time + TimeDelta::milliseconds(10) + TimeDelta::microseconds(300);
+        let before_expiry = snapshot("set", Some(until), database_time);
+        assert_eq!(pause_refresh_millis(&before_expiry), Some(11));
+        assert_eq!(pause_refresh_millis(&snapshot("set", Some(until), until)), None);
+    }
+
+    #[test]
+    fn indefinite_or_cleared_pause_never_schedules_expiry_refresh() {
+        let now = Timestamp::from_timestamp(1_700_000_000, 0).unwrap();
+        assert_eq!(pause_refresh_millis(&snapshot("set", None, now)), None);
+        assert_eq!(pause_refresh_millis(&snapshot("clear", None, now)), None);
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod form_tests {
+    use std::rc::Rc;
+
+    use auction_web_shared::i18n::{DEFAULT_ADMIN_LOCALE, build_bundle};
+    use auction_web_shared::use_confirm_command;
+    use dioxus::core::{AttributeValue, ElementId, Mutation, ScopeId};
+    use dioxus::prelude::*;
+    use dioxus_i18n::prelude::try_use_init_i18n_from_bundle;
+
+    use super::{
+        ExternalAccessPauseControl, PAUSE_REASON_ID, PauseControlState, reason_error_text,
+    };
+    use crate::api::ExternalAccessPauseAttempt;
+    use crate::surface::ADMIN_LOCALE_CATALOG;
+    use crate::surface::config::test_form::{FormBrowser, dispatch, listener};
+
+    fn pause_form() -> Element {
+        try_use_init_i18n_from_bundle(|| {
+            build_bundle(
+                &DEFAULT_ADMIN_LOCALE,
+                ADMIN_LOCALE_CATALOG.default_ftl,
+                &DEFAULT_ADMIN_LOCALE,
+                None,
+            )
+        })
+        .unwrap();
+        let state = PauseControlState {
+            command: use_confirm_command(),
+            hours: use_signal(|| 2),
+            reason: use_signal(|| {
+                "界".repeat(ExternalAccessPauseAttempt::MAX_REASON_BYTES / 3 + 1)
+            }),
+            accepted: use_signal(|| false),
+        };
+        let refresh = use_signal(|| 0);
+        rsx! { ExternalAccessPauseControl { state, revision: 7, paused: false, paused_until: None, refresh } }
+    }
+
+    fn mount(focused: &'static str) -> (VirtualDom, Rc<FormBrowser>, ElementId, String) {
+        let browser = Rc::new(FormBrowser::default());
+        browser.focused.set(focused);
+        let mut dom = VirtualDom::new(pause_form).with_root_context(browser.clone());
+        let submit = listener(&dom.rebuild_to_vec().edits, "submit");
+        let error = dom.in_scope(ScopeId::APP, reason_error_text);
+        (dom, browser, submit, error)
+    }
+
+    fn updated_text(edits: &[Mutation], text: &str) -> Option<ElementId> {
+        edits.iter().find_map(|edit| match edit {
+            Mutation::SetText { value, id } if value == text => Some(*id),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn enter_with_focus_on_invalid_reason_announces_without_moving_focus() {
+        let (mut dom, browser, submit, error) = mount(PAUSE_REASON_ID);
+        dispatch(&dom, submit, "submit", "");
+        let rendered = dom.render_immediate_to_vec();
+        assert!(rendered.edits.iter().any(|edit| matches!(edit,
+            Mutation::SetAttribute { name: "aria-invalid", value: AttributeValue::Text(value), .. }
+                if value == "true"
+        )));
+        assert_eq!(updated_text(&rendered.edits, &error), None);
+        assert_eq!(browser.moved_focus_to.get(), None);
+
+        browser.fire_timer();
+        assert!(updated_text(&dom.render_immediate_to_vec().edits, &error).is_some());
+    }
+
+    #[test]
+    fn submit_from_elsewhere_moves_focus_to_invalid_reason() {
+        let (mut dom, browser, submit, error) = mount("pause-submit");
+        dispatch(&dom, submit, "submit", "");
+        assert_eq!(browser.moved_focus_to.get(), Some(PAUSE_REASON_ID));
+        assert_eq!(updated_text(&dom.render_immediate_to_vec().edits, &error), None);
+    }
+
+    #[test]
+    fn repeat_submit_clears_the_live_region_before_announcing_the_same_error() {
+        let (mut dom, browser, submit, error) = mount(PAUSE_REASON_ID);
+        dispatch(&dom, submit, "submit", "");
+        dom.render_immediate_to_vec();
+        browser.fire_timer();
+        let region = updated_text(&dom.render_immediate_to_vec().edits, &error).unwrap();
+
+        dispatch(&dom, submit, "submit", "");
+        assert_eq!(updated_text(&dom.render_immediate_to_vec().edits, ""), Some(region));
+        browser.fire_timer();
+        assert_eq!(updated_text(&dom.render_immediate_to_vec().edits, &error), Some(region));
+        assert_eq!(browser.moved_focus_to.get(), None);
     }
 }

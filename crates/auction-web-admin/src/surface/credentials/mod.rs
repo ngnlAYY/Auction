@@ -4,6 +4,7 @@
 
 mod check;
 mod dialogs;
+mod field_validation;
 mod form;
 mod labels;
 mod page;

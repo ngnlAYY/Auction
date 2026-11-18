@@ -33,6 +33,8 @@ mod setup;
 mod sort;
 mod status;
 mod support;
+#[cfg(test)]
+mod test_events;
 mod users;
 mod validation;
 

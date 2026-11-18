@@ -1,6 +1,4 @@
-//! 运行配置 JSON 的字段读取、基础格式校验与响应错误构造。
-
-use std::collections::HashSet;
+//! 运行配置 JSON 的结构校验、字段读取与响应错误构造。
 
 use serde_json::{Map, Value};
 
@@ -25,28 +23,50 @@ pub(super) fn string_field<'a>(object: &'a Map<String, Value>, key: &str) -> Opt
 }
 
 pub(super) fn u64_field(object: &Map<String, Value>, key: &str) -> Option<u64> {
-    object.get(key)?.as_u64().filter(|value| *value <= MAX_JSON_SAFE_INTEGER as u64)
+    safe_u64(object.get(key)?)
 }
 
-pub(super) fn valid_string_list(
+pub(super) fn safe_u64(value: &Value) -> Option<u64> {
+    value.as_u64().filter(|value| *value <= MAX_JSON_SAFE_INTEGER as u64)
+}
+
+pub(super) fn safe_i64(value: &Value) -> Option<i64> {
+    value.as_i64().filter(|value| (-MAX_JSON_SAFE_INTEGER..=MAX_JSON_SAFE_INTEGER).contains(value))
+}
+
+pub(super) fn valid_string_array(value: &Value) -> bool {
+    value.as_array().is_some_and(|values| values.iter().all(Value::is_string))
+}
+
+/// 响应只核对字段闭集、类型和安全整数，取值规则由服务端校验候选时裁定。
+pub(super) fn valid_scalars(
     value: &Value,
-    maximum_count: usize,
-    maximum_bytes: usize,
-    unique: bool,
+    booleans: &[&str],
+    strings: &[&str],
+    numbers: &[&str],
+    nested: &[&str],
 ) -> bool {
-    let Some(values) = value.as_array() else {
+    valid_scalars_with_signed(value, booleans, strings, numbers, &[], nested)
+}
+
+/// 有符号字段可携带安全范围内的负数，业务范围留给表单和服务端。
+pub(super) fn valid_scalars_with_signed(
+    value: &Value,
+    booleans: &[&str],
+    strings: &[&str],
+    unsigned: &[&str],
+    signed: &[&str],
+    nested: &[&str],
+) -> bool {
+    let Some(object) = value.as_object() else {
         return false;
     };
-    if values.len() > maximum_count {
-        return false;
-    }
-    // 借用名称建立索引，不复制配置正文；唯一性校验按索引一次完成，无需逐项重扫前缀。
-    let mut seen = HashSet::new();
-    values.iter().all(|value| {
-        value.as_str().is_some_and(|text| {
-            valid_text(text, maximum_bytes, false) && (!unique || seen.insert(text))
-        })
-    })
+    object.len() == booleans.len() + strings.len() + unsigned.len() + signed.len() + nested.len()
+        && nested.iter().all(|name| object.contains_key(*name))
+        && booleans.iter().all(|name| bool_field(object, name).is_some())
+        && strings.iter().all(|name| string_field(object, name).is_some())
+        && unsigned.iter().all(|name| u64_field(object, name).is_some())
+        && signed.iter().all(|name| object.get(*name).and_then(safe_i64).is_some())
 }
 
 pub(super) fn valid_text(value: &str, maximum_bytes: usize, allow_empty: bool) -> bool {
@@ -54,17 +74,6 @@ pub(super) fn valid_text(value: &str, maximum_bytes: usize, allow_empty: bool) -
         && value.len() <= maximum_bytes
         && value == value.trim()
         && !value.chars().any(char::is_control)
-}
-
-pub(super) fn valid_path(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 512
-        && value.starts_with('/')
-        && value != "/"
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
-        && !value.contains("//")
-        && value.split('/').all(|segment| segment != "." && segment != "..")
 }
 
 pub(super) fn valid_fingerprint(value: &str) -> bool {

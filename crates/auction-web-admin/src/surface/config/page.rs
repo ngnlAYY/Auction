@@ -36,6 +36,7 @@ pub(super) enum ConfigNotice {
 
 /// 加载并展示 Admin runtime 非敏感配置。
 pub(crate) fn page() -> Element {
+    let config_draft = use_context::<draft::ConfigDraft>();
     let draft::ConfigDraft {
         mut form,
         mut baseline,
@@ -43,12 +44,12 @@ pub(crate) fn page() -> Element {
         mut checked_signature,
         mut command,
         mut notice,
-        mut restart_required,
+        restart_required,
         dirty,
         pending,
         mut refresh,
         validating,
-    } = use_context::<draft::ConfigDraft>();
+    } = config_draft;
     let mut form_ready = use_signal(|| false);
     let mut issues = use_signal(Vec::<validation::FieldIssue>::new);
     use_context_provider(|| validation::FormIssues(issues));
@@ -108,7 +109,7 @@ pub(crate) fn page() -> Element {
                     form.set(next_form);
                     form_ready.set(true);
                     fingerprint.set(Some(value.fingerprint.clone()));
-                    restart_required.set(value.restart_required);
+                    config_draft.remember_restart_notice(value.restart_required);
                     checked_signature.set(String::new());
                     command.set(None);
                     notice.set(None);
@@ -186,6 +187,7 @@ pub(crate) fn page() -> Element {
         }
         Some(Ok(snapshot)) => {
             let current_fingerprint = fingerprint().unwrap_or_else(|| snapshot.fingerprint.clone());
+            let editor_key = current_fingerprint.clone();
             // 编辑已清除校验签名时，不能保存，也无需为每次按键重建并序列化整个候选文档。
             let can_update = !frozen()
                 && dirty()
@@ -212,6 +214,7 @@ pub(crate) fn page() -> Element {
             } else {
                 Vec::new()
             };
+            let requires_restart = config_changes.iter().any(review::ConfigChange::needs_restart);
 
             rsx! {
                 div {
@@ -246,6 +249,7 @@ pub(crate) fn page() -> Element {
                             move |event| {
                                 event.prevent_default();
                                 if frozen() { return; }
+                                checked_signature.set(String::new());
                                 notice.set(None);
                                 let field_issues = validation::collect_issues(&form.read());
                                 if !field_issues.is_empty() {
@@ -261,6 +265,10 @@ pub(crate) fn page() -> Element {
                                         return;
                                     }
                                 };
+                                let Ok(signature) = serde_json::to_string(&document) else {
+                                    notice.set(Some(ConfigNotice::InvalidForm));
+                                    return;
+                                };
                                 let mut busy = validating;
                                 let mut form = form;
                                 let mut checked_signature = checked_signature;
@@ -270,21 +278,17 @@ pub(crate) fn page() -> Element {
                                 dioxus::core::Runtime::current().in_scope(form.origin_scope(), || {
                                     spawn(async move {
                                     match validate_admin_runtime_config(document).await {
-                                        Ok(result) => match RuntimeConfigForm::from_response(&result) {
-                                            Ok(next_form) => match next_form.signature() {
-                                                Ok(signature) => {
-                                                    form.set(next_form);
-                                                    checked_signature.set(signature);
-                                                    command.set(None);
-                                                    notice.set(Some(ConfigNotice::Validated));
-                                                }
-                                                Err(()) => notice
-                                                    .set(Some(ConfigNotice::InvalidForm)),
-                                            },
-                                            Err(()) => {
+                                        Ok(result) => {
+                                            if let Some(taxonomy) = result.equipment_taxonomy.as_ref() {
+                                                // 校验只确认发出的候选。保持原始投影和编辑记录，保存时提交同一份 JSON。
+                                                form.write().refresh_equipment_taxonomy(taxonomy);
+                                                checked_signature.set(signature);
+                                                command.set(None);
+                                                notice.set(Some(ConfigNotice::Validated));
+                                            } else {
                                                 notice.set(Some(ConfigNotice::InvalidForm));
                                             }
-                                        },
+                                        }
                                         Err(error) => {
                                             notice.set(Some(if error.is_conflict() {
                                                 ConfigNotice::Conflict
@@ -305,6 +309,7 @@ pub(crate) fn page() -> Element {
                             validation::ErrorSummary { issues: issues() }
                         }
                         RuntimeConfigFields {
+                            key: "{editor_key}",
                             form,
                             disabled: frozen(),
                             on_dirty: move |_| {
@@ -313,7 +318,14 @@ pub(crate) fn page() -> Element {
                                 command.set(None);
                                 notice.set(None);
                                 if !issues.peek().is_empty() {
-                                    issues.set(validation::collect_issues(&form.read()));
+                                    // 输入可以纠正已报告的错误，新错误等离焦或再次提交。
+                                    let remaining = {
+                                        let previous = issues.peek();
+                                        validation::collect_issues(&form.read()).into_iter()
+                                            .filter(|issue| previous.iter().any(|old| old.path == issue.path))
+                                            .collect()
+                                    };
+                                    issues.set(remaining);
                                 }
                             },
                         }
@@ -378,6 +390,11 @@ pub(crate) fn page() -> Element {
                                                 return;
                                             }
                                         };
+                                        if !serde_json::to_string(&document)
+                                            .is_ok_and(|signature| signature == *checked_signature.peek())
+                                        {
+                                            return;
+                                        }
                                         command.set(Some(ConfigCommand {
                                             fingerprint: update_fingerprint.clone(),
                                             document,
@@ -409,7 +426,7 @@ pub(crate) fn page() -> Element {
                                             fields: config_changes.len() as i64
                                         )}
                                     }
-                                    review::ConfigChangeList { changes: config_changes }
+                                    review::ConfigChangeList { changes: config_changes, pending_restart: restart_required() }
                                     div { class: "admin-shell__dialog-actions",
                                         button {
                                             class: "admin-btn-danger",
@@ -444,13 +461,7 @@ pub(crate) fn page() -> Element {
                                                         }
                                                     },
                                                     move |(result, next_form)| {
-                                                        set_if_alive(baseline, Some(next_form.clone()));
-                                                        set_if_alive(form, next_form);
-                                                        set_if_alive(checked_signature, String::new());
-                                                        set_if_alive(fingerprint, Some(result.fingerprint));
-                                                        set_if_alive(restart_required, result.restart_required);
-                                                        set_if_alive(command, None);
-                                                        set_if_alive(notice, Some(ConfigNotice::Saved));
+                                                        config_draft.apply_saved_config(result, next_form, requires_restart);
                                                     },
                                                     move |code| {
                                                         set_if_alive(notice, Some(ConfigNotice::ActionError(code)));
@@ -551,5 +562,83 @@ pub(super) fn notice_text(notice: &ConfigNotice) -> String {
         ConfigNotice::InvalidForm => t!("admin-runtime-invalid-form"),
         ConfigNotice::ActionError(code) => admin_api_error_message(code),
         ConfigNotice::Conflict => t!("admin-runtime-conflict"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use auction_contracts::{AdminRuntimeConfigResponse, ApiResponse};
+    use dioxus::core::ScopeId;
+    use dioxus::prelude::*;
+    use serde_json::json;
+
+    use super::draft::{ConfigDraft, use_config_draft};
+    use super::{ConfigCommand, ConfigNotice};
+    use crate::surface::config::model::RuntimeConfigForm;
+    use crate::surface::config::review::{ConfigChange, changes};
+
+    fn draft_harness() -> Element {
+        use_config_draft();
+        VNode::empty()
+    }
+
+    #[test]
+    fn hot_forum_timeout_save_preserves_the_previous_lease_restart_notice() {
+        let mut response: ApiResponse<AdminRuntimeConfigResponse> =
+            serde_json::from_str(include_str!(
+                "../../../../auction-contracts/tests/fixtures/admin/runtime-config-default.json"
+            ))
+            .unwrap();
+        let forum = &mut response.data.document["operations"]["forum"];
+        forum["managed"] = json!(true);
+        forum["lease_duration_seconds"] = json!(300);
+        forum["item_timeout_seconds"] = json!(240);
+
+        let mut dom = VirtualDom::new(draft_harness);
+        dom.rebuild_to_vec();
+        dom.in_scope(ScopeId::APP, || {
+            let mut draft = consume_context::<ConfigDraft>();
+            let startup = RuntimeConfigForm::from_response(&response.data).unwrap();
+            draft.baseline.set(Some(startup.clone()));
+            draft.form.set(startup);
+            draft.fingerprint.set(Some(response.data.fingerprint.clone()));
+
+            for (field, input, needs_restart, fingerprint_digit) in [
+                ("lease_duration_seconds", 600, true, "1"),
+                // 360 秒小于新租约，却与仍在运行的 300 秒启动租约不相容。
+                ("item_timeout_seconds", 360, false, "2"),
+            ] {
+                assert_eq!((draft.restart_required)(), !needs_restart);
+                let mut result = response.data.clone();
+                let initial = (draft.baseline)().unwrap();
+                result.document.clone_from(initial.source_document());
+                result.document["operations"]["forum"][field] = json!(input);
+                result.restart_required = true;
+                result.fingerprint = format!("sha256:{}", fingerprint_digit.repeat(64));
+
+                let changed = changes(initial.source_document(), &result.document);
+                assert_eq!(changed.len(), 1);
+                let requires_restart = changed.iter().any(ConfigChange::needs_restart);
+                assert_eq!(requires_restart, needs_restart);
+                let next_form = RuntimeConfigForm::from_response(&result).unwrap();
+                draft.checked_signature.set("已校验的候选".to_owned());
+                draft.command.set(Some(ConfigCommand {
+                    fingerprint: (draft.fingerprint)().unwrap(),
+                    document: result.document.clone(),
+                }));
+
+                draft.apply_saved_config(result.clone(), next_form, requires_restart);
+
+                assert!((draft.restart_required)());
+                assert_eq!((draft.baseline)().unwrap().source_document(), &result.document);
+                assert_eq!(draft.form.read().source_document(), &result.document);
+                assert_eq!((draft.fingerprint)(), Some(result.fingerprint));
+                assert!((draft.checked_signature)().is_empty());
+                assert!((draft.command)().is_none());
+                assert_eq!((draft.notice)(), Some(ConfigNotice::Saved));
+            }
+            draft.remember_restart_notice(false);
+            assert!((draft.restart_required)(), "普通文件重读并非重启确认");
+        });
     }
 }

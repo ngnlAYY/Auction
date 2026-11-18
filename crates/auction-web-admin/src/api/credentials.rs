@@ -24,9 +24,13 @@ use super::{
 // 导入须容纳服务端 10 秒论坛获取及原子写入；不延长其他 API 请求，也不自动重试。
 const CREDENTIAL_IMPORT_TIMEOUT_MILLIS: u32 = 20_000;
 
+// shared 邮件检查串行检查两个世界，须覆盖 WORKER_MAIL_CREDENTIAL_CHECK_TIMEOUT_SECONDS（12 秒）
+// 和 Admin HTTP 默认的 15 秒预算，另留 3 秒给响应传输。
+const SHARED_MAIL_CHECK_TIMEOUT_MILLIS: u32 = 18_000;
+
 // 结构闭集由 contracts 的 `AdminCredentialResponse`（`rotated_at` 保持必填 nullable 语义）、
 // `AdminCredentialListResponse`/`AdminCredentialMutationResponse`/`AdminCredentialDeleteResponse`
-//（均为 `deny_unknown_fields`）负责；本文件只保留筛选回显、restart_required 与版本递增等跨字段谓词。
+//（均为 `deny_unknown_fields`）负责；本文件只保留筛选回显与版本递增等跨字段谓词。
 
 /// 凭据列表页的浏览器展示投影；分页字段在这里展平，wire 形状仍由 contracts 拥有。
 #[derive(Debug, Clone, PartialEq)]
@@ -58,20 +62,37 @@ pub(crate) async fn check_admin_credential(
     let credential_id = Uuid::parse_str(&credential.id).map_err(invalid_request_error)?;
     let csrf_token = fetch_csrf_token().await?;
     let request = AdminCredentialCheckRequest { expected_state_version: credential.state_version };
-    let response = send_request(|abort_signal| {
-        Request::post(&format!("/api/v1/admin/credentials/{credential_id}/check"))
-            .abort_signal(abort_signal)
-            .header("x-csrf-token", &csrf_token)
-            .json(&request)
-            .map_err(invalid_request_error)
-    })
+    let response = send_request_with_timeout(
+        |abort_signal| {
+            Request::post(&format!("/api/v1/admin/credentials/{credential_id}/check"))
+                .abort_signal(abort_signal)
+                .header("x-csrf-token", &csrf_token)
+                .json(&request)
+                .map_err(invalid_request_error)
+        },
+        credential_check_timeout(credential),
+    )
     .await?;
     if !response.ok() {
         return Err(response_error(response).await);
     }
     let payload: ApiResponse<AdminCredentialCheck> =
         response.json().await.map_err(invalid_response_error)?;
-    let result = payload.data;
+    decode_credential_check(payload.data, credential)
+}
+
+fn credential_check_timeout(credential: &AdminCredential) -> u32 {
+    if credential.kind == "mail_cookie" && credential.world == "shared" {
+        SHARED_MAIL_CHECK_TIMEOUT_MILLIS
+    } else {
+        auction_web_shared::DEFAULT_REQUEST_TIMEOUT_MILLIS
+    }
+}
+
+fn decode_credential_check(
+    result: AdminCredentialCheck,
+    credential: &AdminCredential,
+) -> Result<AdminCredentialCheck, String> {
     let worlds: &[&str] = match (credential.kind.as_str(), credential.world.as_str()) {
         ("forum_cookie", _) => &["shared"],
         ("mail_cookie", "main") => &["main"],
@@ -130,7 +151,7 @@ pub(crate) async fn fetch_admin_credentials(
 /// 导入一条凭据；来源由完整命令确定，密码/CK 不进入持久化状态或响应模型。
 pub(crate) async fn create_admin_credential(
     command: AdminCredentialCreateRequest,
-) -> Result<AdminCredential, String> {
+) -> Result<AdminCredentialMutationResponse, String> {
     let csrf_token = fetch_csrf_token().await?;
     let response = send_request_with_timeout(
         |abort_signal| {
@@ -156,7 +177,7 @@ pub(crate) async fn create_admin_credential(
     {
         return Err("invalid_response".to_owned());
     }
-    Ok(data.credential)
+    Ok(data)
 }
 
 /// 修改凭据标签或状态。
@@ -166,7 +187,7 @@ pub(crate) async fn mutate_admin_credential(
     action: &'static str,
     label: Option<String>,
     status: Option<String>,
-) -> Result<AdminCredential, String> {
+) -> Result<AdminCredentialMutationResponse, String> {
     let credential_id =
         Uuid::parse_str(&credential.id).map_err(|_| "invalid_request".to_owned())?;
     let csrf_token = fetch_csrf_token().await?;
@@ -192,7 +213,7 @@ pub(crate) async fn mutate_admin_credential(
     let payload: ApiResponse<AdminCredentialMutationResponse> =
         response.json().await.map_err(invalid_response_error)?;
     let data = decode_credential_data(payload.data).map_err(invalid_response_error)?;
-    let updated = data.credential;
+    let updated = &data.credential;
     if updated.id != command.credential_id.to_string()
         || Some(updated.state_version) != command.expected_state_version.checked_add(1)
         || updated.kind != credential.kind
@@ -214,7 +235,7 @@ pub(crate) async fn mutate_admin_credential(
     {
         return Err("invalid_response".to_owned());
     }
-    Ok(updated)
+    Ok(data)
 }
 
 /// 删除凭据。
@@ -292,12 +313,9 @@ fn decode_credential_list(
 fn decode_credential_data(
     data: AdminCredentialMutationResponse,
 ) -> Result<AdminCredentialMutationResponse, &'static str> {
-    if !data.restart_required {
-        return Err("credential_restart");
-    }
     Ok(AdminCredentialMutationResponse {
         credential: decode_credential(data.credential)?,
-        restart_required: true,
+        restart_required: data.restart_required,
     })
 }
 
@@ -306,19 +324,14 @@ fn decode_credential_delete(
     requested_credential_id: &str,
     expected_state_version: i64,
 ) -> Result<AdminCredentialDeleteResult, &'static str> {
-    if !data.restart_required
-        || !valid_uuid(&data.credential_id)
+    if !valid_uuid(&data.credential_id)
         || data.credential_id != requested_credential_id
         || Some(data.state_version) != expected_state_version.checked_add(1)
         || !(1..=MAX_JSON_SAFE_INTEGER).contains(&data.state_version)
     {
         return Err("credential_delete");
     }
-    Ok(AdminCredentialDeleteResult {
-        credential_id: data.credential_id,
-        state_version: data.state_version,
-        restart_required: true,
-    })
+    Ok(data)
 }
 
 /// 跨字段谓词保留为独立校验：类型/世界/状态枚举与值域仍在浏览器边界 fail-closed。
@@ -340,4 +353,106 @@ fn decode_credential(value: AdminCredential) -> Result<AdminCredential, &'static
         return Err("credential");
     }
     Ok(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use auction_contracts::{AdminCredentialDeleteResponse, AdminCredentialMutationResponse};
+    use serde_json::{Value, json};
+
+    use super::{
+        AdminCredential, credential_check_timeout, decode_credential_check, decode_credential_data,
+        decode_credential_delete,
+    };
+
+    const CREDENTIAL_ID: &str = "11111111-1111-4111-8111-111111111111";
+    const OBSERVED_AT: &str = "2026-11-18T00:00:00Z";
+
+    fn credential_document() -> Value {
+        json!({
+            "id": CREDENTIAL_ID,
+            "kind": "mail_cookie",
+            "world": "shared",
+            "label": "Worker",
+            "player_name": null,
+            "status": "active",
+            "state_version": 7,
+            "created_at": OBSERVED_AT,
+            "rotated_at": null,
+            "updated_at": OBSERVED_AT,
+        })
+    }
+
+    #[test]
+    fn credential_mutations_preserve_the_server_restart_flag() {
+        for restart_required in [true, false] {
+            let mutation: AdminCredentialMutationResponse = serde_json::from_value(json!({
+                "credential": credential_document(),
+                "restart_required": restart_required,
+            }))
+            .unwrap();
+            let deletion: AdminCredentialDeleteResponse = serde_json::from_value(json!({
+                "credential_id": CREDENTIAL_ID,
+                "state_version": 8,
+                "restart_required": restart_required,
+            }))
+            .unwrap();
+            assert_eq!(
+                decode_credential_data(mutation.clone()).unwrap().restart_required,
+                restart_required
+            );
+            assert_eq!(
+                decode_credential_delete(deletion.clone(), CREDENTIAL_ID, 7)
+                    .unwrap()
+                    .restart_required,
+                restart_required
+            );
+            assert!(decode_credential_delete(deletion, CREDENTIAL_ID, 8).is_err());
+            let mut invalid = mutation;
+            invalid.credential.status = "unknown".to_owned();
+            assert!(decode_credential_data(invalid).is_err());
+        }
+    }
+
+    #[test]
+    fn only_shared_mail_check_extends_the_browser_budget() {
+        let mut credential: AdminCredential =
+            serde_json::from_value(credential_document()).unwrap();
+        assert_eq!(credential_check_timeout(&credential), 18_000);
+        credential.world = "main".to_owned();
+        assert_eq!(
+            credential_check_timeout(&credential),
+            auction_web_shared::DEFAULT_REQUEST_TIMEOUT_MILLIS
+        );
+        credential.world = "shared".to_owned();
+        credential.kind = "forum_cookie".to_owned();
+        assert_eq!(
+            credential_check_timeout(&credential),
+            auction_web_shared::DEFAULT_REQUEST_TIMEOUT_MILLIS
+        );
+    }
+
+    #[test]
+    fn shared_mail_check_preserves_per_world_inconclusive_results() {
+        let credential: AdminCredential = serde_json::from_value(credential_document()).unwrap();
+        let mut payload = json!({
+            "credential_id": CREDENTIAL_ID,
+            "state_version": 7,
+            "checked_at": OBSERVED_AT,
+            "checks": [
+                {"world": "main", "status": "inconclusive"},
+                {"world": "isekai", "status": "inconclusive"},
+            ],
+        });
+        let result =
+            decode_credential_check(serde_json::from_value(payload.clone()).unwrap(), &credential)
+                .unwrap();
+        assert_eq!(result.checks.len(), 2);
+        assert!(result.checks.iter().all(|check| check.status == "inconclusive"));
+
+        payload["checks"][1]["world"] = json!("main");
+        assert!(
+            decode_credential_check(serde_json::from_value(payload).unwrap(), &credential).is_err()
+        );
+    }
 }

@@ -1,15 +1,16 @@
 //! 运行时配置的分组表单控件。
 
 mod equipment_colors;
+mod number;
 mod operations;
 
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
-use super::{
-    model::RuntimeConfigForm,
-    validation::{self, FormIssues},
-};
+use self::number::NumberInput;
+use super::field_announcement::{FieldLiveRegion, use_field_announcer};
+use super::model::{MAX_DASHBOARD_MAILBOXES, RuntimeConfigForm};
+use super::validation;
 use crate::surface::admin_world_label;
 
 #[component]
@@ -18,9 +19,12 @@ pub(super) fn RuntimeConfigFields(
     disabled: bool,
     on_dirty: EventHandler<()>,
 ) -> Element {
+    let announcer = use_field_announcer();
+    use_context_provider(|| announcer);
     let listener_mode = form.read().input("listener.mode");
     let mailboxes = form.read().mailboxes();
-    let can_add_mailbox = mailboxes.len() < 2;
+    let can_add_mailbox = mailboxes.len() < MAX_DASHBOARD_MAILBOXES;
+    let too_many_mailboxes = mailboxes.len() > MAX_DASHBOARD_MAILBOXES;
 
     rsx! {
         div { class: "admin-runtime-fields",
@@ -85,7 +89,17 @@ pub(super) fn RuntimeConfigFields(
 
             RuntimeSection { title: t!("admin-runtime-section-mailboxes"), open: false,
                 p { class: "admin-runtime-section-note", {t!("admin-runtime-mailboxes-note")} }
+                if too_many_mailboxes {
+                    p { class: "admin-config-field-error", id: "admin-runtime-mailbox-count-error",
+                        {validation::mailbox_count_error()}
+                    }
+                }
                 div { class: "admin-runtime-mailboxes",
+                    id: validation::field_id("dashboard_mailboxes"),
+                    tabindex: "-1",
+                    role: "group",
+                    aria_label: t!("admin-runtime-section-mailboxes"),
+                    aria_describedby: too_many_mailboxes.then_some("admin-runtime-mailbox-count-error"),
                     for (index, mailbox) in mailboxes.into_iter().enumerate() {
                         div { class: "admin-runtime-mailbox", key: "mailbox-{index}",
                             label {
@@ -228,6 +242,7 @@ pub(super) fn RuntimeConfigFields(
                 }
             }
         }
+        FieldLiveRegion { announcer }
     }
 }
 
@@ -276,7 +291,12 @@ fn SwitchField(
                 },
             }
             span { class: "admin-runtime-switch__track", aria_hidden: "true" }
-            span { class: "admin-runtime-switch__label", "{label}" }
+            span { class: "admin-runtime-switch__label",
+                "{label}"
+                if super::hot_fields::is_hot(path) {
+                    span { class: "admin-runtime-hot-badge", title: t!("admin-runtime-hot-field-title"), {t!("admin-runtime-hot-field-badge")} }
+                }
+            }
         }
     }
 }
@@ -326,41 +346,20 @@ fn NumberField(
     maximum: &'static str,
     on_dirty: EventHandler<()>,
 ) -> Element {
-    let value = use_memo(use_reactive((&path,), move |(path,)| form.read().input(path)));
-    let issues = use_context::<FormIssues>();
-    let message =
-        issues.0.read().iter().find(|issue| issue.path == path).map(|issue| issue.message.clone());
-    let error_id = format!("{}-error", validation::field_id(path));
+    let input = use_memo(use_reactive((&path,), move |(path,)| {
+        let form = form.read();
+        // 由控件报告原始值的范围错误，未编辑的候选字段仍保留原值。
+        let original = form.source_input(path).map(str::to_owned);
+        (form.input(path), original)
+    }));
+    let (value, original) = input.cloned();
     rsx! {
-        label { class: "admin-runtime-field",
-            span { "{label}"
-                if super::hot_fields::is_hot(path) {
-                    span { class: "admin-runtime-hot-badge", title: t!("admin-runtime-hot-field-title"), {t!("admin-runtime-hot-field-badge")} }
-                }
-            }
-            input {
-                id: validation::field_id(path),
-                name: path,
-                autocomplete: "off",
-                inputmode: "numeric",
-                "data-runtime-number": path,
-                "data-runtime-label": label,
-                aria_invalid: message.as_ref().map(|_| "true"),
-                aria_describedby: message.as_ref().map(|_| error_id.clone()),
-                r#type: "number",
-                disabled,
-                min: minimum,
-                max: maximum,
-                step: "1",
-                value: value(),
-                oninput: move |event: FormEvent| {
-                    form.write().set_input(path, event.value());
-                    on_dirty.call(());
-                },
-            }
-            if let Some(message) = message.as_ref() {
-                small { id: error_id.clone(), class: "admin-config-field-error", "{message}" }
-            }
+        NumberInput {
+            path: path.to_owned(), label, minimum, maximum, original, value, disabled,
+            on_input: move |value| {
+                form.write().set_input(path, value);
+                on_dirty.call(());
+            },
         }
     }
 }
@@ -425,6 +424,250 @@ fn SelectField(
                     option { value: option_value, "{option_label}" }
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::future::Future;
+    use std::pin::pin;
+    use std::task::{Context, Poll, Waker};
+
+    use auction_contracts::{AdminRuntimeConfigResponse, ApiResponse};
+    use auction_web_shared::i18n::{DEFAULT_ADMIN_LOCALE, build_bundle};
+    use dioxus::core::{AttributeValue, ElementId, Mutation, ScopeId};
+    use dioxus::prelude::*;
+    use dioxus_i18n::prelude::try_use_init_i18n_from_bundle;
+    use serde_json::json;
+
+    use super::RuntimeConfigFields;
+    use crate::api::fetch_admin_runtime_config;
+    use crate::surface::ADMIN_LOCALE_CATALOG;
+    use crate::surface::config::model::RuntimeConfigForm;
+    #[cfg(not(target_arch = "wasm32"))]
+    use crate::surface::config::test_form::{dispatch, listener};
+    use crate::surface::config::validation::{self, FormIssues};
+
+    fn projection() -> ApiResponse<AdminRuntimeConfigResponse> {
+        serde_json::from_str(include_str!(
+            "../../../../../auction-contracts/tests/fixtures/admin/runtime-config-default.json"
+        ))
+        .unwrap()
+    }
+
+    fn read_form(response: ApiResponse<AdminRuntimeConfigResponse>) -> RuntimeConfigForm {
+        let dom = VirtualDom::prebuilt(VNode::empty).with_root_context(response);
+        let decoded = dom.in_scope(ScopeId::APP, || {
+            let mut fetch = pin!(fetch_admin_runtime_config());
+            let Poll::Ready(response) =
+                fetch.as_mut().poll(&mut Context::from_waker(Waker::noop()))
+            else {
+                panic!("夹具读取应在当前轮完成");
+            };
+            response.unwrap()
+        });
+        RuntimeConfigForm::from_response(&decoded).unwrap()
+    }
+
+    #[component]
+    fn EditorFields(model: RuntimeConfigForm) -> Element {
+        try_use_init_i18n_from_bundle(|| {
+            build_bundle(
+                &DEFAULT_ADMIN_LOCALE,
+                ADMIN_LOCALE_CATALOG.default_ftl,
+                &DEFAULT_ADMIN_LOCALE,
+                None,
+            )
+        })
+        .unwrap();
+        let form = use_signal(|| model);
+        let mut issues = use_signal(Vec::new);
+        use_context_provider(|| FormIssues(issues));
+        rsx! {
+            form {
+                novalidate: true,
+                onsubmit: move |event| {
+                    event.prevent_default();
+                    issues.set(validation::collect_issues(&form.read()));
+                },
+                RuntimeConfigFields { form, disabled: false, on_dirty: |_| {} }
+            }
+        }
+    }
+
+    fn field(edits: &[Mutation], path: &str) -> ElementId {
+        let field_id = validation::field_id(path);
+        edits
+            .iter()
+            .find_map(|edit| match edit {
+                Mutation::SetAttribute {
+                    id,
+                    name: "id",
+                    value: AttributeValue::Text(value),
+                    ..
+                } if value == &field_id => Some(*id),
+                _ => None,
+            })
+            .unwrap()
+    }
+
+    fn has_attribute(edits: &[Mutation], field: ElementId, name: &str, expected: &str) -> bool {
+        edits.iter().any(|edit| matches!(edit,
+            Mutation::SetAttribute { id, name: attribute, value: AttributeValue::Text(value), .. }
+                if *id == field && *attribute == name && value == expected
+        ))
+    }
+
+    #[test]
+    fn negative_threshold_is_rendered_with_a_field_error_and_round_trips_unedited() {
+        let mut response = projection();
+        let path = "operations.alerts.delivery_pending_count_threshold";
+        response.data.document["operations"]["alerts"]["managed"] = json!(true);
+        response.data.document["operations"]["alerts"]["delivery_pending_count_threshold"] =
+            json!(-1);
+        let mut model = read_form(response.clone());
+
+        let mut dom =
+            VirtualDom::new_with_props(EditorFields, EditorFieldsProps { model: model.clone() });
+        let edits = dom.rebuild_to_vec().edits;
+        let input = field(&edits, path);
+        assert!(has_attribute(&edits, input, "value", "-1"));
+        assert!(has_attribute(&edits, input, "aria-invalid", "true"));
+        assert!(has_attribute(
+            &edits,
+            input,
+            "aria-describedby",
+            &format!("{}-error", validation::field_id(path))
+        ));
+        assert!(edits.iter().any(|edit| matches!(edit,
+            Mutation::CreateTextNode { value, .. } if value.contains("之间的整数"))));
+
+        assert_eq!(model.edited_input(path), None);
+        let mut expected = response.data.document;
+        let metrics = !expected["metrics"]["enabled"].as_bool().unwrap();
+        model.set_boolean("metrics.enabled", metrics);
+        expected["metrics"]["enabled"] = json!(metrics);
+        assert_eq!(model.to_document().unwrap(), expected);
+
+        model.set_input(path, "12".to_owned());
+        assert_eq!(
+            model.to_document().unwrap()["operations"]["alerts"]["delivery_pending_count_threshold"],
+            12
+        );
+    }
+
+    #[test]
+    fn nonnegative_historical_number_outside_the_range_is_marked_and_preserved() {
+        let mut response = projection();
+        let path = "tracing.queue_capacity";
+        response.data.document["tracing"]["queue_capacity"] = json!(0);
+        let mut model = read_form(response.clone());
+        let mut dom =
+            VirtualDom::new_with_props(EditorFields, EditorFieldsProps { model: model.clone() });
+        let edits = dom.rebuild_to_vec().edits;
+        let input = field(&edits, path);
+        assert!(has_attribute(&edits, input, "value", "0"));
+        assert!(has_attribute(&edits, input, "aria-invalid", "true"));
+        let error_id = format!("{}-error", validation::field_id(path));
+        assert!(has_attribute(&edits, input, "aria-describedby", &error_id));
+        assert!(edits.iter().any(|edit| matches!(edit,
+            Mutation::CreateTextNode { value, .. } if value.contains("之间的整数")
+        )));
+
+        assert_eq!(model.edited_input(path), None);
+        let mut expected = response.data.document;
+        let metrics = !expected["metrics"]["enabled"].as_bool().unwrap();
+        model.set_boolean("metrics.enabled", metrics);
+        expected["metrics"]["enabled"] = json!(metrics);
+        assert_eq!(model.to_document().unwrap(), expected);
+    }
+
+    fn color_rule(level_min: i32) -> serde_json::Value {
+        json!({
+            "category": "Cloth", "equipment_type": "Phase", "quality": "Legendary",
+            "level": {"min": level_min, "max": 500}, "prefixes": ["Radiant"], "suffixes": [],
+            "prefix_color": "#ff0000", "suffix_color": "#00aa00", "combined_color": "#aa00aa",
+        })
+    }
+
+    #[test]
+    fn conflicting_color_selections_and_extra_mailboxes_open_with_repair_controls() {
+        let mut response = projection();
+        let mut rule = color_rule(0);
+        rule["categories"] = json!(["Light"]);
+        response.data.document["equipment_colors"]["rules"] = json!([rule]);
+        response.data.document["dashboard_mailboxes"] = json!([
+            {"world_id": "main", "mailbox_key": "mail-1"},
+            {"world_id": "isekai", "mailbox_key": "mail-2"},
+            {"world_id": "main", "mailbox_key": "mail-3"},
+        ]);
+        let model = read_form(response.clone());
+        assert_eq!(model.to_document().unwrap(), response.data.document);
+        let mut dom = VirtualDom::new_with_props(EditorFields, EditorFieldsProps { model });
+        let edits = dom.rebuild_to_vec().edits;
+        for expected in
+            ["旧单值和新数组同时存在", "保留旧单值", "保留新数组", "仪表盘邮箱超过允许的"]
+        {
+            assert!(
+                edits.iter().any(|edit| matches!(edit,
+                    Mutation::CreateTextNode { value, .. } if value.contains(expected)
+                )),
+                "{expected}"
+            );
+        }
+        assert!(edits.iter().any(|edit| matches!(edit,
+            Mutation::SetAttribute { name: "value", value: AttributeValue::Text(value), .. }
+                if value == "mail-3"
+        )));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn clearing_an_edited_level_waits_for_blur_or_submit_and_valid_input_clears_the_error() {
+        for trigger in ["blur", "submit"] {
+            let mut response = projection();
+            response.data.document["equipment_colors"]["rules"] = json!([color_rule(-1)]);
+            let model = read_form(response);
+            let mut dom = VirtualDom::new_with_props(EditorFields, EditorFieldsProps { model });
+            let edits = dom.rebuild_to_vec().edits;
+            let input = field(&edits, &validation::color_level_path(0, "min"));
+            let submit = listener(&edits, "submit");
+            assert!(has_attribute(&edits, input, "value", "-1"));
+            assert!(has_attribute(&edits, input, "aria-invalid", "true"));
+
+            dispatch(&dom, input, "input", "5");
+            assert!(has_attribute(
+                &dom.render_immediate_to_vec().edits,
+                input,
+                "aria-invalid",
+                "false"
+            ));
+            dispatch(&dom, input, "input", "");
+            let typing = dom.render_immediate_to_vec().edits;
+            assert!(!has_attribute(&typing, input, "aria-invalid", "true"));
+            dispatch(&dom, if trigger == "submit" { submit } else { input }, trigger, "");
+            assert!(has_attribute(
+                &dom.render_immediate_to_vec().edits,
+                input,
+                "aria-invalid",
+                "true"
+            ));
+
+            dispatch(&dom, input, "input", "-2");
+            assert!(!has_attribute(
+                &dom.render_immediate_to_vec().edits,
+                input,
+                "aria-invalid",
+                "false"
+            ));
+            dispatch(&dom, input, "input", "7");
+            assert!(has_attribute(
+                &dom.render_immediate_to_vec().edits,
+                input,
+                "aria-invalid",
+                "false"
+            ));
         }
     }
 }

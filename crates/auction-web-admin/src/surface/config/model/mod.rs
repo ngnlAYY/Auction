@@ -10,9 +10,7 @@ use super::{early_bird, operational_fields};
 mod document;
 mod nested;
 
-use self::nested::{
-    color_selection_text, legacy_material_selection, list_text, nested_value, set_nested_value,
-};
+use self::nested::{ColorSelection, legacy_material_selection, list_text, nested_value};
 
 const TEXT_FIELDS: &[&str] = &[
     "listener.address",
@@ -66,14 +64,18 @@ pub(super) struct RuntimeMailboxForm {
     pub(super) mailbox_key: String,
 }
 
+pub(super) const MAX_DASHBOARD_MAILBOXES: usize = 2;
+
 /// 论坛装备标色规则的前端编辑状态；多选列表按行保存，兼容旧单值规则回填。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) struct RuntimeEquipmentColorForm {
-    pub(super) category: String,
-    pub(super) equipment_type: String,
-    /// 旧材质单值保持精确匹配，用户主动改种类后才转换为新材质族多选。
-    pub(super) legacy_equipment_type: Option<String>,
-    pub(super) quality: String,
+    source_index: Option<usize>,
+    pub(super) row_id: usize,
+    pub(super) category: ColorSelection,
+    pub(super) equipment_type: ColorSelection,
+    /// 旧材质单值保持精确匹配，最终选项变更时才改用多选。
+    legacy_equipment_type: Option<String>,
+    pub(super) quality: ColorSelection,
     pub(super) level_min: String,
     pub(super) level_max: String,
     pub(super) prefixes: String,
@@ -83,13 +85,36 @@ pub(super) struct RuntimeEquipmentColorForm {
     pub(super) combined_color: String,
 }
 
+impl RuntimeEquipmentColorForm {
+    pub(super) fn legacy_equipment_type(&self) -> Option<String> {
+        self.legacy_equipment_type
+            .as_ref()
+            .filter(|original| {
+                self.equipment_type.uses_legacy_syntax() && *original == &self.equipment_type.text
+            })
+            .cloned()
+    }
+
+    fn selection_mut(&mut self, field: &str) -> Option<&mut ColorSelection> {
+        match field {
+            "category" => Some(&mut self.category),
+            "equipment_type" => Some(&mut self.equipment_type),
+            "quality" => Some(&mut self.quality),
+            _ => None,
+        }
+    }
+}
+
 /// 页面保留服务端的完整安全投影，并只把可编辑标量转成适合浏览器输入的文本。
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(super) struct RuntimeConfigForm {
     document: Value,
-    inputs: BTreeMap<String, String>,
+    inputs: BTreeMap<&'static str, String>,
+    input_edits: BTreeMap<&'static str, String>,
+    boolean_edits: BTreeMap<&'static str, bool>,
     mailboxes: Vec<RuntimeMailboxForm>,
     equipment_colors: Vec<RuntimeEquipmentColorForm>,
+    next_color_row_id: usize,
     had_equipment_colors: bool,
     equipment_taxonomy: Option<Rc<EquipmentTaxonomyDto>>,
 }
@@ -107,7 +132,7 @@ impl RuntimeConfigForm {
         let mut inputs = BTreeMap::new();
         for path in TEXT_FIELDS.iter().chain(operational_fields::TEXT_FIELDS) {
             let value = nested_value(document, path).and_then(Value::as_str).ok_or(())?;
-            inputs.insert((*path).to_owned(), value.to_owned());
+            inputs.insert(*path, value.to_owned());
         }
         for path in LIST_FIELDS.iter().chain(operational_fields::LIST_FIELDS) {
             // bot_players 对旧文档缺省时按空列表展示，其余列表仍必须是显式数组。
@@ -123,20 +148,21 @@ impl RuntimeConfigForm {
                 None if *path == "bot_players" => String::new(),
                 None => return Err(()),
             };
-            inputs.insert((*path).to_owned(), text);
+            inputs.insert(*path, text);
         }
         // 服务端投影已补齐邮件区块的默认值；任何数字缺失都是响应损坏，不在浏览器补默认值。
-        for path in UNSIGNED_NUMBER_FIELDS.iter().chain(operational_fields::NUMBER_FIELDS) {
+        for path in UNSIGNED_NUMBER_FIELDS.iter().chain(operational_fields::UNSIGNED_NUMBER_FIELDS)
+        {
             let value = nested_value(document, path).and_then(Value::as_u64).ok_or(())?;
-            inputs.insert((*path).to_owned(), value.to_string());
+            inputs.insert(*path, value.to_string());
         }
-        for path in SIGNED_NUMBER_FIELDS {
+        for path in SIGNED_NUMBER_FIELDS.iter().chain(operational_fields::SIGNED_NUMBER_FIELDS) {
             let value = nested_value(document, path).and_then(Value::as_i64).ok_or(())?;
-            inputs.insert((*path).to_owned(), value.to_string());
+            inputs.insert(*path, value.to_string());
         }
         // 旧文档缺省早鸟区块时按默认值展示；未改动不会写回，保持原指纹。
         for (path, value) in early_bird::inputs(document)? {
-            inputs.insert(path.to_owned(), value);
+            inputs.insert(path, value);
         }
         let mailboxes = nested_value(document, "dashboard_mailboxes")
             .and_then(Value::as_array)
@@ -154,9 +180,6 @@ impl RuntimeConfigForm {
                 })
             })
             .collect::<Result<Vec<_>, ()>>()?;
-        if mailboxes.len() > 2 {
-            return Err(());
-        }
         let had_equipment_colors = nested_value(document, "equipment_colors").is_some();
         let equipment_colors = nested_value(document, "equipment_colors")
             .and_then(|value| value.get("rules"))
@@ -164,17 +187,24 @@ impl RuntimeConfigForm {
             .map(|rules| {
                 rules
                     .iter()
-                    .map(|rule| {
+                    .enumerate()
+                    .map(|(index, rule)| {
                         let object = rule.as_object().ok_or(())?;
                         Ok(RuntimeEquipmentColorForm {
-                            category: color_selection_text(object, "categories", "category")?,
-                            equipment_type: color_selection_text(
+                            source_index: Some(index),
+                            row_id: index,
+                            category: ColorSelection::from_source(
+                                object,
+                                "categories",
+                                "category",
+                            )?,
+                            equipment_type: ColorSelection::from_source(
                                 object,
                                 "equipment_types",
                                 "equipment_type",
                             )?,
                             legacy_equipment_type: legacy_material_selection(object, taxonomy),
-                            quality: color_selection_text(object, "qualities", "quality")?,
+                            quality: ColorSelection::from_source(object, "qualities", "quality")?,
                             level_min: object
                                 .get("level")
                                 .and_then(|level| level.get("min"))
@@ -213,7 +243,10 @@ impl RuntimeConfigForm {
         Ok(Self {
             document: document.clone(),
             inputs,
+            input_edits: BTreeMap::new(),
+            boolean_edits: BTreeMap::new(),
             mailboxes,
+            next_color_row_id: equipment_colors.len(),
             equipment_colors,
             had_equipment_colors,
             equipment_taxonomy: Some(Rc::new(taxonomy.clone())),
@@ -234,7 +267,10 @@ impl RuntimeConfigForm {
             // 同版本仅保留草稿仍选中的既有权威候选，新响应同名优先，不在浏览器推断语法。
             for kind in &previous.resolved_kinds {
                 let selected = self.equipment_colors.iter().any(|rule| {
-                    rule.equipment_type.lines().any(|value| value.eq_ignore_ascii_case(&kind.name))
+                    rule.equipment_type
+                        .text
+                        .lines()
+                        .any(|value| value.eq_ignore_ascii_case(&kind.name))
                 });
                 if selected
                     && !refreshed
@@ -254,49 +290,65 @@ impl RuntimeConfigForm {
     /// 服务端词典独立演进不构成待保存修改，非法数字等原始编辑中间态仍参与比较。
     pub(super) fn same_edits_as(&self, other: &Self) -> bool {
         self.document == other.document
-            && self.inputs == other.inputs
+            && self.input_edits == other.input_edits
+            && self.boolean_edits == other.boolean_edits
             && self.mailboxes == other.mailboxes
             && self.equipment_colors == other.equipment_colors
             && self.had_equipment_colors == other.had_equipment_colors
     }
 
     pub(super) fn input(&self, path: &str) -> String {
-        self.inputs.get(path).cloned().unwrap_or_default()
+        self.input_edits.get(path).or_else(|| self.inputs.get(path)).cloned().unwrap_or_default()
+    }
+
+    pub(super) fn source_input(&self, path: &str) -> Option<&str> {
+        self.inputs.get(path).map(String::as_str)
     }
 
     pub(super) fn set_input(&mut self, path: &'static str, value: String) {
-        if path == "listener.mode" {
-            // 切换模式即清空不适用字段，确保确认清单与最终提交展示同一份清理结果。
-            let inactive_fields: &[&str] = match value.as_str() {
-                "tcp" => &["listener.group", "listener.runtime_directory", "listener.socket_path"],
-                "unix" => &["listener.address"],
-                _ => &[],
-            };
-            for field in inactive_fields {
-                if let Some(input) = self.inputs.get_mut(*field) {
-                    input.clear();
-                }
-            }
+        if !self.edits_field(path) {
+            return;
         }
-        self.inputs.insert(path.to_owned(), value);
+        // 非空原始数组也可能回填为空文本。只有用户编辑后清空才写入空数组。
+        let clears_origins = path == "security.allowed_origins"
+            && value.is_empty()
+            && nested_value(&self.document, path)
+                .and_then(Value::as_array)
+                .is_some_and(|origins| !origins.is_empty());
+        if !clears_origins && self.inputs.get(path) == Some(&value) {
+            self.input_edits.remove(path);
+        } else {
+            self.input_edits.insert(path, value);
+        }
     }
 
     pub(super) fn boolean(&self, path: &str) -> bool {
+        self.boolean_edits.get(path).copied().unwrap_or_else(|| self.source_boolean(path))
+    }
+
+    fn source_boolean(&self, path: &str) -> bool {
         if let Some(value) = early_bird::boolean(&self.document, path) {
             return value;
         }
         nested_value(&self.document, path).and_then(Value::as_bool).unwrap_or(false)
     }
 
-    pub(super) fn set_boolean(&mut self, path: &str, value: bool) {
-        if let Some(name) = early_bird::field(path) {
-            // 区块缺省时先补默认区块，切换开关即视为开始编辑早鸟期。
-            if let Ok(block) = early_bird::ensure_block(&mut self.document) {
-                block.insert(name.to_owned(), Value::Bool(value));
-            }
+    pub(super) fn set_boolean(&mut self, path: &'static str, value: bool) {
+        if !self.edits_field(path) {
             return;
         }
-        let _ = set_nested_value(&mut self.document, path, Value::Bool(value));
+        // 关闭接管即丢弃组内未保存的输入，之后重新接管也从原始值开始。
+        if !value && operational_fields::management_path(path) == Some(path) {
+            self.input_edits
+                .retain(|field, _| operational_fields::management_path(field) != Some(path));
+            self.boolean_edits
+                .retain(|field, _| operational_fields::management_path(field) != Some(path));
+        }
+        if value == self.source_boolean(path) {
+            self.boolean_edits.remove(path);
+        } else {
+            self.boolean_edits.insert(path, value);
+        }
     }
 
     pub(super) fn mailboxes(&self) -> Vec<RuntimeMailboxForm> {
@@ -304,7 +356,7 @@ impl RuntimeConfigForm {
     }
 
     pub(super) fn add_mailbox(&mut self) {
-        if self.mailboxes.len() >= 2 {
+        if self.mailboxes.len() >= MAX_DASHBOARD_MAILBOXES {
             return;
         }
         let world_id = ["main", "isekai"]
@@ -341,10 +393,12 @@ impl RuntimeConfigForm {
 
     pub(super) fn add_equipment_color(&mut self) {
         self.equipment_colors.push(RuntimeEquipmentColorForm {
-            category: String::new(),
-            equipment_type: String::new(),
+            source_index: None,
+            row_id: self.next_color_row_id,
+            category: ColorSelection::default(),
+            equipment_type: ColorSelection::default(),
             legacy_equipment_type: None,
-            quality: String::new(),
+            quality: ColorSelection::default(),
             level_min: "0".to_owned(),
             level_max: "0".to_owned(),
             prefixes: String::new(),
@@ -353,6 +407,7 @@ impl RuntimeConfigForm {
             suffix_color: "#00aa00".to_owned(),
             combined_color: "#aa00aa".to_owned(),
         });
+        self.next_color_row_id += 1;
     }
 
     pub(super) fn remove_equipment_color(&mut self, index: usize) {
@@ -368,17 +423,28 @@ impl RuntimeConfigForm {
         }
     }
 
-    pub(super) fn set_equipment_color_field(&mut self, index: usize, field: &str, value: String) {
+    pub(super) fn set_equipment_color_field(
+        &mut self,
+        index: usize,
+        field: &str,
+        mut value: String,
+    ) {
         let Some(rule) = self.equipment_colors.get_mut(index) else { return };
-        match field {
-            "category" => rule.category = value,
-            "equipment_type" => {
-                if rule.equipment_type != value {
-                    rule.legacy_equipment_type = None;
-                }
-                rule.equipment_type = value;
+        if field == "equipment_type"
+            && rule.equipment_type.uses_legacy_syntax()
+            && let Some(original) = rule.legacy_equipment_type.as_ref()
+            && original.eq_ignore_ascii_case(&value)
+        {
+            // 选回同一材质时恢复旧单值的拼写与精确匹配，避免临时换选扩大规则。
+            value.clone_from(original);
+        }
+        if let Some(selection) = rule.selection_mut(field) {
+            if selection.conflicting_single.is_none() {
+                selection.text = value;
             }
-            "quality" => rule.quality = value,
+            return;
+        }
+        match field {
             "level_min" => rule.level_min = value,
             "level_max" => rule.level_max = value,
             "prefixes" => rule.prefixes = value,
@@ -390,16 +456,30 @@ impl RuntimeConfigForm {
         }
     }
 
+    pub(super) fn resolve_equipment_color_selection(
+        &mut self,
+        index: usize,
+        field: &str,
+        keep_single: bool,
+    ) {
+        if let Some(selection) =
+            self.equipment_colors.get_mut(index).and_then(|rule| rule.selection_mut(field))
+        {
+            selection.resolve(keep_single);
+        }
+    }
+
     pub(super) fn signature(&self) -> Result<String, ()> {
         serde_json::to_string(&self.to_document()?).map_err(|_| ())
     }
 
-    fn required_input(&self, path: &str) -> Result<&str, ()> {
-        self.inputs.get(path).map(String::as_str).ok_or(())
+    pub(super) fn edited_input(&self, path: &str) -> Option<&str> {
+        self.input_edits.get(path).filter(|_| self.edits_field(path)).map(String::as_str)
     }
 
     /// 未接管的分组既不提交草稿输入，也不参与本地字段错误摘要。
-    pub(super) fn edits_field(&self, path: &str) -> bool {
-        operational_fields::management_path(path).is_none_or(|managed| self.boolean(managed))
+    fn edits_field(&self, path: &str) -> bool {
+        operational_fields::management_path(path)
+            .is_none_or(|managed| path == managed || self.boolean(managed))
     }
 }

@@ -20,9 +20,9 @@ fn update_selection(
     let form_state = form.read();
     let Some(rule) = form_state.equipment_colors().get(index) else { return };
     let current = match field {
-        "category" => &rule.category,
-        "equipment_type" => &rule.equipment_type,
-        "quality" => &rule.quality,
+        "category" => &rule.category.text,
+        "equipment_type" => &rule.equipment_type.text,
+        "quality" => &rule.quality.text,
         "prefixes" => &rule.prefixes,
         "suffixes" => &rule.suffixes,
         _ => return,
@@ -45,7 +45,7 @@ fn update_selection(
 /// 复选框均有原生名称和可见标签；空过滤集合表示任意，词缀集合仍保留原有空值语义。
 #[component]
 pub(super) fn ColorMultiSelect(
-    form: Signal<RuntimeConfigForm>,
+    mut form: Signal<RuntimeConfigForm>,
     index: usize,
     field: &'static str,
     label: String,
@@ -53,6 +53,7 @@ pub(super) fn ColorMultiSelect(
     value: String,
     disabled: bool,
     on_dirty: EventHandler<()>,
+    #[props(default)] conflicting_single: Option<String>,
     #[props(default)] allow_any: bool,
     #[props(default)] legacy_exact_type: Option<String>,
     #[props(default)] material_names: Vec<String>,
@@ -66,13 +67,40 @@ pub(super) fn ColorMultiSelect(
     }
     let name = format!("color-{field}-{index}");
     let hint_id = format!("{name}-hint");
+    let conflict_id = format!("{name}-conflict");
+    let has_conflict = conflicting_single.is_some();
     rsx! {
         fieldset { class: "admin-runtime-color-multi", disabled,
+            aria_invalid: has_conflict.to_string(),
+            aria_describedby: has_conflict.then_some(conflict_id),
             legend { "{label}" }
+            if let Some(single) = conflicting_single.as_ref() {
+                p { class: "admin-config-field-error", id: conflict_id.clone(),
+                    {t!("admin-runtime-color-selection-conflict")}
+                }
+                button {
+                    r#type: "button",
+                    class: "admin-btn-secondary",
+                    onclick: move |_| {
+                        form.write().resolve_equipment_color_selection(index, field, true);
+                        on_dirty.call(());
+                    },
+                    {t!("admin-runtime-color-keep-single", value: single.clone())}
+                }
+                button {
+                    r#type: "button",
+                    class: "admin-btn-secondary",
+                    onclick: move |_| {
+                        form.write().resolve_equipment_color_selection(index, field, false);
+                        on_dirty.call(());
+                    },
+                    {t!("admin-runtime-color-keep-multiple")}
+                }
+            }
             if allow_any {
                 button {
                     r#type: "button",
-                    disabled: disabled || selected.is_empty(),
+                    disabled: disabled || has_conflict || selected.is_empty(),
                     onclick: move |_| {
                         update_selection(form, index, field, None, false);
                         on_dirty.call(());
@@ -91,6 +119,7 @@ pub(super) fn ColorMultiSelect(
                             r#type: "checkbox",
                             value: option.clone(),
                             checked: selected.iter().any(|value| value.eq_ignore_ascii_case(&option)),
+                            disabled: has_conflict,
                             "aria-describedby": hint_id.clone(),
                             onchange: {
                                 let option = option.clone();

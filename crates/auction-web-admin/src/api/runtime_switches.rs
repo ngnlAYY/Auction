@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use super::{
     AdminApiFailure, fetch_csrf_token, invalid_request_error, invalid_response_error,
-    response_error, response_failure, send_get, send_request,
+    response_error, response_failure, send_get, send_request, valid_safe_text,
 };
 
 const KNOWN_SWITCHES: [&str; 7] = [
@@ -59,14 +59,25 @@ pub(crate) struct ExternalAccessPauseAttempt {
     pub(crate) reason: String,
 }
 
+impl ExternalAccessPauseAttempt {
+    /// 与服务端 RuntimeSwitchCommand 共用的 UTF-8 字节边界。
+    pub(crate) const MAX_REASON_BYTES: usize = 1024;
+
+    /// 校验将提交的单行原因。表单与发送前检查使用同一口径。
+    pub(crate) fn valid_reason(value: &str) -> bool {
+        valid_safe_text(value, Self::MAX_REASON_BYTES)
+    }
+}
+
 /// 提交外部访问暂停或恢复；只接受与命令一致的已接受事实。
 pub(crate) async fn submit_external_access_pause(
     attempt: &ExternalAccessPauseAttempt,
 ) -> Result<RuntimeSwitchIntentDto, AdminApiFailure> {
+    let reason = attempt.reason.trim();
     if attempt.command_id.is_nil()
         || attempt.expected_revision < 0
         || attempt.paused != attempt.expires_at.is_some()
-        || attempt.reason.trim().is_empty()
+        || !ExternalAccessPauseAttempt::valid_reason(reason)
     {
         return Err(AdminApiFailure::client("invalid_request"));
     }
@@ -75,7 +86,7 @@ pub(crate) async fn submit_external_access_pause(
         expected_revision: attempt.expected_revision,
         paused: attempt.paused,
         expires_at: attempt.expires_at,
-        reason: attempt.reason.trim().to_owned(),
+        reason: reason.to_owned(),
     };
     let csrf_token = fetch_csrf_token().await.map_err(AdminApiFailure::client)?;
     let response = send_request(|abort_signal| {
@@ -103,4 +114,27 @@ pub(crate) async fn submit_external_access_pause(
         return Err(AdminApiFailure::client(invalid_response_error("external access pause")));
     }
     Ok(accepted)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ExternalAccessPauseAttempt;
+
+    #[test]
+    fn pause_reason_uses_the_server_utf8_byte_limit() {
+        let at_limit = format!("{}x", "停".repeat(341));
+        assert_eq!(at_limit.len(), 1024);
+        assert!(ExternalAccessPauseAttempt::valid_reason(&at_limit));
+        assert!(ExternalAccessPauseAttempt::valid_reason(&"x".repeat(1024)));
+        assert!(!ExternalAccessPauseAttempt::valid_reason(&"停".repeat(342)));
+        assert!(!ExternalAccessPauseAttempt::valid_reason(&"x".repeat(1025)));
+    }
+
+    #[test]
+    fn pause_reason_must_be_nonempty_normalized_single_line_text() {
+        assert!(ExternalAccessPauseAttempt::valid_reason("暂停检查"));
+        for value in ["", " ", " 前后有空白 ", "两\n行", "有\t控制字符"] {
+            assert!(!ExternalAccessPauseAttempt::valid_reason(value), "{value:?}");
+        }
+    }
 }

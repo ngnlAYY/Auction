@@ -5,6 +5,7 @@
 
 mod draft;
 mod early_bird;
+mod field_announcement;
 mod form;
 mod hot_fields;
 mod mail_templates;
@@ -15,4 +16,7 @@ mod review;
 mod runtime_switches;
 mod validation;
 mod worlds;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(super) use field_announcement::test_form;
+pub(super) use field_announcement::{FieldAnnouncer, FieldLiveRegion, use_field_announcer};
 pub(super) use page::{page, use_config_draft};

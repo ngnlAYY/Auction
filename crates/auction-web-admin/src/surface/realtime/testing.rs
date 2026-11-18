@@ -1,17 +1,16 @@
 //! 宿主筛选回归的历史、表单事件与 GET 记录。
 
-use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use auction_web_shared::build_bundle;
 use dioxus::dioxus_core::{AttributeValue, ElementId, Mutation};
-use dioxus::html;
 use dioxus::prelude::*;
 use dioxus_i18n::prelude::try_use_init_i18n_from_bundle;
 use url::form_urlencoded;
 
 use crate::surface::ADMIN_LOCALE_CATALOG;
+use crate::surface::test_events::dispatch_form_event;
 
 type QueryPairs = Vec<(String, String)>;
 
@@ -55,7 +54,6 @@ impl TestPage {
         page: fn() -> Element,
         bookmark: &str,
     ) -> (Self, Vec<Mutation>) {
-        html::set_event_converter(Box::new(FormConverter));
         let initial = form_urlencoded::parse(bookmark.as_bytes()).into_owned().collect();
         let history = Rc::new(TestHistory { initial, ..TestHistory::default() });
         let gets = Rc::new(RefCell::new(Vec::<String>::new()));
@@ -93,9 +91,7 @@ impl TestPage {
         target: ElementId,
         value: &str,
     ) -> Vec<Mutation> {
-        let data = html::PlatformEventData::new(Box::new(value.to_owned()));
-        let event: Event<dyn Any> = Event::new(Rc::new(data), true);
-        self.dom.runtime().handle_event(name, event, target);
+        dispatch_form_event(&self.dom, target, name, value);
         self.render()
     }
 
@@ -152,67 +148,4 @@ pub(in crate::surface) fn get_parameter(url: &str, key: &str) -> Option<String> 
     let (_, query) = url.split_once('?')?;
     form_urlencoded::parse(query.as_bytes())
         .find_map(|(name, value)| (name == key).then(|| value.into_owned()))
-}
-
-struct FormValue(String);
-
-impl html::HasFileData for FormValue {
-    fn files(&self) -> Vec<html::FileData> {
-        Vec::new()
-    }
-}
-
-impl html::HasFormData for FormValue {
-    fn value(&self) -> String {
-        self.0.clone()
-    }
-    fn valid(&self) -> bool {
-        true
-    }
-    fn values(&self) -> Vec<(String, html::FormValue)> {
-        Vec::new()
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
-
-// 宿主测试使用实际 Dioxus 表单事件，替身只承接控件值，无需启用额外的序列化 feature。
-struct FormConverter;
-
-macro_rules! unused_events {
-    ($($method:ident: $data:ident),+ $(,)?) => {
-        $(fn $method(&self, _: &html::PlatformEventData) -> html::$data {
-            panic!("筛选测试未预期的事件：{}", stringify!($method))
-        })+
-    };
-}
-
-impl html::HtmlEventConverter for FormConverter {
-    fn convert_form_data(&self, event: &html::PlatformEventData) -> html::FormData {
-        html::FormData::new(FormValue(event.downcast::<String>().unwrap().clone()))
-    }
-
-    unused_events!(
-        convert_animation_data: AnimationData,
-        convert_cancel_data: CancelData,
-        convert_clipboard_data: ClipboardData,
-        convert_composition_data: CompositionData,
-        convert_drag_data: DragData,
-        convert_focus_data: FocusData,
-        convert_image_data: ImageData,
-        convert_keyboard_data: KeyboardData,
-        convert_media_data: MediaData,
-        convert_mounted_data: MountedData,
-        convert_mouse_data: MouseData,
-        convert_pointer_data: PointerData,
-        convert_resize_data: ResizeData,
-        convert_scroll_data: ScrollData,
-        convert_selection_data: SelectionData,
-        convert_toggle_data: ToggleData,
-        convert_touch_data: TouchData,
-        convert_transition_data: TransitionData,
-        convert_visible_data: VisibleData,
-        convert_wheel_data: WheelData,
-    );
 }

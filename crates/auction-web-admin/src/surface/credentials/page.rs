@@ -4,8 +4,9 @@ use auction_web_shared::t;
 use auction_web_shared::{AsyncState, AsyncStateKind};
 use dioxus::prelude::*;
 
+use super::super::admin_api_error_message;
 use super::super::query::use_page_query_state;
-use super::super::{AdminActionFeedback, admin_api_error_message};
+use super::labels::CredentialFeedback;
 use super::{CredentialCreateForm, CredentialDeleteDialog, CredentialTable};
 use crate::api::{AdminCredential, delete_admin_credential, fetch_admin_credentials};
 use crate::surface::pagination::{AdminPager, use_admin_page, use_admin_pagination};
@@ -20,7 +21,7 @@ pub fn page() -> Element {
     let query_state = query.state;
     let requested_page = use_memo(move || query_state.read().page);
     let mut pending_delete = use_signal(|| None::<AdminCredential>);
-    let mut delete_feedback = use_signal(|| None::<AdminActionFeedback>);
+    let mut delete_feedback = use_signal(|| None::<CredentialFeedback>);
     let pagination =
         use_admin_pagination("credentials", &["page_size"], Some(200), i64::from(i32::MAX));
     let credentials = use_admin_page(
@@ -51,10 +52,15 @@ pub fn page() -> Element {
             t!("admin-credentials-action-delete"),
             move |command_id| {
                 let credential = credential.clone();
-                async move { delete_admin_credential(command_id, &credential).await.map(|_| ()) }
+                async move { delete_admin_credential(command_id, &credential).await }
             },
-            move |()| set_if_alive(delete_feedback, Some(AdminActionFeedback::Success)),
-            move |code| set_if_alive(delete_feedback, Some(AdminActionFeedback::Error(code))),
+            move |result| {
+                set_if_alive(
+                    delete_feedback,
+                    Some(CredentialFeedback::Success { restart_required: result.restart_required }),
+                );
+            },
+            move |code| set_if_alive(delete_feedback, Some(CredentialFeedback::Error(code))),
         ) {
             pending_delete.set(None);
         }
@@ -126,7 +132,7 @@ pub fn page() -> Element {
                         "admin-panel__note action-feedback action-feedback--error"
                     },
                     role: if feedback.is_success() { "status" } else { "alert" },
-                    {feedback.message(t!("admin-credentials-action-success"))}
+                    {feedback.message()}
                 }
             }
         }

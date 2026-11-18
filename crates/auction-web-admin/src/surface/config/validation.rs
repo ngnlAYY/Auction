@@ -4,7 +4,10 @@ use auction_web_shared::a11y::focus_element_by_id;
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
-use super::model::RuntimeConfigForm;
+use super::model::{MAX_DASHBOARD_MAILBOXES, RuntimeConfigForm};
+
+pub(super) const COLOR_LEVEL_MINIMUM: &str = "0";
+pub(super) const COLOR_LEVEL_MAXIMUM: &str = "1000";
 
 #[derive(Clone, PartialEq)]
 pub(super) struct FieldIssue {
@@ -20,9 +23,74 @@ pub(super) fn field_id(path: &str) -> String {
     format!("runtime-field-{}", path.replace('.', "-"))
 }
 
-/// 复用控件的 min/max 与标签，避免在错误摘要内维护第二份配置范围和译文映射。
-pub(super) fn collect_issues(_form: &RuntimeConfigForm) -> Vec<FieldIssue> {
+#[derive(Clone, Copy)]
+pub(super) enum NumberIssue {
+    Integer,
+    Range,
+}
+
+impl NumberIssue {
+    pub(super) fn message(self, minimum: &str, maximum: &str) -> String {
+        match self {
+            Self::Integer => t!("admin-runtime-field-integer"),
+            Self::Range => t!("admin-runtime-field-range", minimum: minimum, maximum: maximum),
+        }
+    }
+}
+
+pub(super) fn number_issue(input: &str, minimum: &str, maximum: &str) -> Option<NumberIssue> {
+    let Ok(value) = input.parse::<i128>() else {
+        return Some(NumberIssue::Integer);
+    };
+    if minimum.parse::<i128>().is_ok_and(|min| value < min)
+        || maximum.parse::<i128>().is_ok_and(|max| value > max)
+    {
+        return Some(NumberIssue::Range);
+    }
+    None
+}
+
+pub(super) fn mailbox_count_error() -> String {
+    t!("admin-runtime-mailbox-too-many", maximum: MAX_DASHBOARD_MAILBOXES)
+}
+
+pub(super) fn color_level_path(row_id: usize, bound: &str) -> String {
+    format!("equipment_colors.rules.{row_id}.level.{bound}")
+}
+
+/// 历史值可以就地标错。摘要只拦截编辑后的输入，完整候选仍由后端校验。
+pub(super) fn collect_issues(form: &RuntimeConfigForm) -> Vec<FieldIssue> {
     let mut issues = Vec::new();
+    if form.edited_mailboxes_exceed_limit() {
+        issues.push(FieldIssue {
+            path: "dashboard_mailboxes".to_owned(),
+            label: t!("admin-runtime-section-mailboxes"),
+            message: mailbox_count_error(),
+        });
+    }
+    for (index, rule) in form.equipment_colors().iter().enumerate() {
+        for (bound, input) in [("min", &rule.level_min), ("max", &rule.level_max)] {
+            if form
+                .source_color_level(index, bound)
+                .is_some_and(|source| source.to_string() == *input)
+            {
+                continue;
+            }
+            if let Some(issue) = number_issue(input, COLOR_LEVEL_MINIMUM, COLOR_LEVEL_MAXIMUM) {
+                let field = if bound == "min" {
+                    t!("admin-runtime-color-level-min")
+                } else {
+                    t!("admin-runtime-color-level-max")
+                };
+                issues.push(FieldIssue {
+                    path: color_level_path(rule.row_id, bound),
+                    label: t!("admin-runtime-field-context", context: t!("admin-runtime-color-rule", number: index + 1), field: field),
+                    message: issue.message(COLOR_LEVEL_MINIMUM, COLOR_LEVEL_MAXIMUM),
+                });
+            }
+        }
+    }
+    // 静态路径沿用控件的 min/max 与标签，避免另维护数值字段清单。
     #[cfg(target_arch = "wasm32")]
     if let Some(document) = web_sys::window().and_then(|window| window.document())
         && let Ok(fields) = document.query_selector_all("[data-runtime-number]")
@@ -38,30 +106,18 @@ pub(super) fn collect_issues(_form: &RuntimeConfigForm) -> Vec<FieldIssue> {
                 continue;
             }
             let Some(path) = field.get_attribute("data-runtime-number") else { continue };
-            if !_form.edits_field(&path) {
-                continue;
-            }
+            let Some(input) = form.edited_input(&path) else { continue };
             let minimum = field.get_attribute("min").unwrap_or_default();
             let maximum = field.get_attribute("max").unwrap_or_default();
-            let input = _form.input(&path);
-            let message = match input.parse::<i128>() {
-                Err(_) => Some(t!("admin-runtime-field-integer")),
-                Ok(value)
-                    if minimum.parse::<i128>().is_ok_and(|min| value < min)
-                        || maximum.parse::<i128>().is_ok_and(|max| value > max) =>
-                {
-                    Some(t!("admin-runtime-field-range", minimum: minimum, maximum: maximum))
-                }
-                _ => None,
-            };
-            if let Some(message) = message {
-                issues.push(FieldIssue { label: control_label(&field, &path), path, message });
+            if let Some(issue) = number_issue(input, &minimum, &maximum) {
+                issues.push(FieldIssue {
+                    label: control_label(&field, &path),
+                    path,
+                    message: issue.message(&minimum, &maximum),
+                });
             }
         }
     }
-    // 原生目标只参与静态编译；浏览器控件的范围校验不会替代后续服务端规范化校验。
-    #[cfg(not(target_arch = "wasm32"))]
-    let _ = &mut issues;
     issues
 }
 

@@ -45,12 +45,51 @@ fn ManagedSection(
         RuntimeSection { title, open: false,
             SwitchField { form, disabled, path, label: t!("admin-runtime-op-managed"), on_dirty }
             if managed {
-                p { class: "admin-runtime-section-note", {t!("admin-runtime-op-managed-note")} }
+                p { class: "admin-runtime-section-note",
+                    {t!("admin-runtime-op-managed-note", hot_reload_note: t!("admin-runtime-hot-fields-note"))}
+                }
                 p { class: "admin-runtime-section-note", "{note}" }
                 {children}
             } else {
                 p { class: "admin-runtime-section-note", {t!("admin-runtime-op-inherited")} }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use auction_web_shared::i18n::{DEFAULT_ADMIN_LOCALE, build_bundle};
+    use dioxus_i18n::fluent::FluentArgs;
+    use unic_langid::langid;
+
+    use crate::surface::ADMIN_LOCALE_CATALOG;
+
+    #[test]
+    fn managed_group_note_uses_the_conditional_hot_reload_copy_in_every_locale() {
+        let default_ftl = ADMIN_LOCALE_CATALOG.default_ftl;
+        for (locale, ftl) in [
+            (langid!("zh-CN"), default_ftl),
+            (langid!("en"), include_str!("../../../../../i18n/en.ftl")),
+            (langid!("zh-TW"), include_str!("../../../../../i18n/zh-TW.ftl")),
+            (langid!("ja"), include_str!("../../../../../i18n/ja.ftl")),
+            (langid!("ko"), include_str!("../../../../../i18n/ko.ftl")),
+        ] {
+            let bundle =
+                build_bundle(&DEFAULT_ADMIN_LOCALE, default_ftl, &locale, Some(ftl)).unwrap();
+            let format = |key, args: Option<&FluentArgs<'_>>| {
+                let message = bundle.get_message(key).unwrap();
+                let mut errors = Vec::new();
+                let formatted =
+                    bundle.format_pattern(message.value().unwrap(), args, &mut errors).into_owned();
+                assert!(errors.is_empty(), "{locale}: {errors:?}");
+                formatted
+            };
+            let conditional = format("admin-runtime-hot-fields-note", None);
+            let mut args = FluentArgs::new();
+            args.set("hot_reload_note", conditional.as_str());
+            let managed = format("admin-runtime-op-managed-note", Some(&args));
+            assert!(managed.contains(&conditional), "{locale}");
         }
     }
 }

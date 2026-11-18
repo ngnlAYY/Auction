@@ -4,7 +4,7 @@ use auction_contracts::EquipmentTaxonomyDto;
 
 use super::fields::valid_text;
 
-/// 只验证投影的完整性、界限及引用，不把展示候选用作历史规则的准入条件。
+/// 词典名称用作复选框键，分类、材质和部位引用决定提示候选；各列表也限制渲染开销。
 pub(super) fn valid_equipment_taxonomy(value: &EquipmentTaxonomyDto) -> bool {
     valid_text(&value.revision, 128, false)
         && valid_names(value.categories.iter().map(String::as_str), 64, 64, false)

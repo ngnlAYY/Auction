@@ -3,7 +3,11 @@
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
+use super::number::NumberInput;
 use crate::surface::config::model::RuntimeConfigForm;
+use crate::surface::config::validation::{
+    COLOR_LEVEL_MAXIMUM, COLOR_LEVEL_MINIMUM, color_level_path,
+};
 
 mod options;
 
@@ -29,7 +33,7 @@ pub(super) fn EquipmentColorRulesField(
         div { class: "admin-runtime-color-rules",
             p { class: "admin-runtime-section-note", {t!("admin-runtime-equipment-colors-note")} }
             for (index, rule) in rules.iter().enumerate() {
-                div { class: "admin-runtime-color-rule", key: "color-rule-{index}",
+                div { class: "admin-runtime-color-rule", key: "color-rule-{rule.row_id}",
                     div { class: "admin-runtime-color-rule__head",
                         strong { {t!("admin-runtime-color-rule", number: index + 1)} }
                         div { class: "admin-runtime-color-rule__actions",
@@ -81,7 +85,8 @@ pub(super) fn EquipmentColorRulesField(
                             field: "category",
                             label: t!("admin-runtime-color-category"),
                             options: taxonomy.categories.clone(),
-                            value: rule.category.clone(),
+                            value: rule.category.text.clone(),
+                            conflicting_single: rule.category.conflicting_single.clone(),
                             allow_any: true,
                             disabled,
                             on_dirty,
@@ -91,10 +96,11 @@ pub(super) fn EquipmentColorRulesField(
                             index,
                             field: "equipment_type",
                             label: t!("admin-runtime-color-type"),
-                            options: equipment_kinds_for(&taxonomy, &rule.category),
+                            options: equipment_kinds_for(&taxonomy, &rule.category.text),
                             material_names: taxonomy.materials.iter().map(|option| option.name.clone()).collect(),
-                            value: rule.equipment_type.clone(),
-                            legacy_exact_type: rule.legacy_equipment_type.clone(),
+                            value: rule.equipment_type.text.clone(),
+                            conflicting_single: rule.equipment_type.conflicting_single.clone(),
+                            legacy_exact_type: rule.legacy_equipment_type(),
                             allow_any: true,
                             disabled,
                             on_dirty,
@@ -105,52 +111,19 @@ pub(super) fn EquipmentColorRulesField(
                             field: "quality",
                             label: t!("admin-runtime-color-quality"),
                             options: taxonomy.qualities.iter().map(|option| option.name.clone()).collect(),
-                            value: rule.quality.clone(),
+                            value: rule.quality.text.clone(),
+                            conflicting_single: rule.quality.conflicting_single.clone(),
                             allow_any: true,
                             disabled,
                             on_dirty,
                         }
-                        label { class: "admin-runtime-field",
-                            span { {t!("admin-runtime-color-level-min")} }
-                            input {
-                                r#type: "number",
-                                min: "0",
-                                max: "1000",
-                                disabled,
-                                value: rule.level_min.clone(),
-                                oninput: {
-                                    let mut form = form;
-                                    move |event: FormEvent| {
-                                        form.write().set_equipment_color_field(
-                                            index,
-                                            "level_min",
-                                            event.value(),
-                                        );
-                                        on_dirty.call(());
-                                    }
-                                },
-                            }
+                        ColorLevelField {
+                            form, index, row_id: rule.row_id, bound: "min", label: t!("admin-runtime-color-level-min"),
+                            value: rule.level_min.clone(), disabled, on_dirty,
                         }
-                        label { class: "admin-runtime-field",
-                            span { {t!("admin-runtime-color-level-max")} }
-                            input {
-                                r#type: "number",
-                                min: "0",
-                                max: "1000",
-                                disabled,
-                                value: rule.level_max.clone(),
-                                oninput: {
-                                    let mut form = form;
-                                    move |event: FormEvent| {
-                                        form.write().set_equipment_color_field(
-                                            index,
-                                            "level_max",
-                                            event.value(),
-                                        );
-                                        on_dirty.call(());
-                                    }
-                                },
-                            }
+                        ColorLevelField {
+                            form, index, row_id: rule.row_id, bound: "max", label: t!("admin-runtime-color-level-max"),
+                            value: rule.level_max.clone(), disabled, on_dirty,
                         }
                     }
                     div { class: "admin-runtime-field-grid admin-runtime-field-grid--lists",
@@ -159,7 +132,7 @@ pub(super) fn EquipmentColorRulesField(
                             index,
                             field: "prefixes",
                             label: t!("admin-runtime-color-prefixes"),
-                            options: prefixes_for(&taxonomy, &rule.category, &rule.equipment_type),
+                            options: prefixes_for(&taxonomy, &rule.category.text, &rule.equipment_type.text),
                             value: rule.prefixes.clone(),
                             disabled,
                             on_dirty,
@@ -169,7 +142,7 @@ pub(super) fn EquipmentColorRulesField(
                             index,
                             field: "suffixes",
                             label: t!("admin-runtime-color-suffixes"),
-                            options: suffixes_for(&taxonomy, &rule.category, &rule.equipment_type),
+                            options: suffixes_for(&taxonomy, &rule.category.text, &rule.equipment_type.text),
                             value: rule.suffixes.clone(),
                             disabled,
                             on_dirty,
@@ -249,6 +222,31 @@ pub(super) fn EquipmentColorRulesField(
                 },
                 {t!("admin-runtime-color-add")}
             }
+        }
+    }
+}
+
+#[component]
+fn ColorLevelField(
+    mut form: Signal<RuntimeConfigForm>,
+    index: usize,
+    row_id: usize,
+    bound: &'static str,
+    label: String,
+    value: String,
+    disabled: bool,
+    on_dirty: EventHandler<()>,
+) -> Element {
+    let original = form.read().source_color_level(index, bound).map(|value| value.to_string());
+    let field = if bound == "min" { "level_min" } else { "level_max" };
+    rsx! {
+        NumberInput {
+            path: color_level_path(row_id, bound), label, minimum: COLOR_LEVEL_MINIMUM,
+            maximum: COLOR_LEVEL_MAXIMUM, original, value, disabled,
+            on_input: move |value| {
+                form.write().set_equipment_color_field(index, field, value);
+                on_dirty.call(());
+            },
         }
     }
 }

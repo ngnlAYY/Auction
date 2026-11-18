@@ -32,24 +32,86 @@ pub(super) fn list_text(value: Option<&Value>) -> Result<String, ()> {
         .ok_or(())
 }
 
-/// 新数组和旧单值互斥；旧规则回填为一个已选项，双重非空输入失败关闭。
-pub(super) fn color_selection_text(
-    object: &Map<String, Value>,
-    plural: &str,
-    singular: &str,
-) -> Result<String, ()> {
-    let scalar = match object.get(singular) {
-        Some(value) => value.as_str().ok_or(())?,
-        None => "",
-    };
-    let selected = match object.get(plural) {
-        Some(value) => list_text(Some(value))?,
-        None => String::new(),
-    };
-    if !selected.is_empty() && !scalar.is_empty() {
-        return Err(());
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ColorSelectionChoice {
+    Single,
+    Multiple,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(in crate::surface::config) struct ColorSelection {
+    pub(in crate::surface::config) text: String,
+    pub(in crate::surface::config) conflicting_single: Option<String>,
+    resolved: Option<ColorSelectionChoice>,
+}
+
+impl ColorSelection {
+    pub(super) fn from_source(
+        object: &Map<String, Value>,
+        plural: &str,
+        singular: &str,
+    ) -> Result<Self, ()> {
+        let scalar = match object.get(singular) {
+            Some(value) => value.as_str().ok_or(())?,
+            None => "",
+        };
+        if let Some(value) = object.get(plural)
+            && !value.as_array().ok_or(())?.is_empty()
+        {
+            return Ok(Self {
+                text: list_text(Some(value))?,
+                conflicting_single: (!scalar.is_empty()).then(|| scalar.to_owned()),
+                resolved: None,
+            });
+        }
+        Ok(Self { text: scalar.to_owned(), ..Self::default() })
     }
-    Ok(if selected.is_empty() { scalar.to_owned() } else { selected })
+
+    pub(super) fn uses_legacy_syntax(&self) -> bool {
+        self.conflicting_single.is_none() && self.resolved != Some(ColorSelectionChoice::Multiple)
+    }
+
+    pub(super) fn resolve(&mut self, keep_single: bool) {
+        let Some(single) = self.conflicting_single.take() else { return };
+        self.resolved = Some(if keep_single {
+            self.text = single;
+            ColorSelectionChoice::Single
+        } else {
+            ColorSelectionChoice::Multiple
+        });
+    }
+
+    pub(super) fn write(
+        &self,
+        object: &mut Map<String, Value>,
+        source: Option<&Map<String, Value>>,
+        plural: &str,
+        singular: &str,
+    ) -> Result<(), ()> {
+        // 原投影中的冲突需由管理员解决；保留单值时仍按精确匹配解释旧材质。
+        if self.resolved == Some(ColorSelectionChoice::Single)
+            && object.get(singular).and_then(Value::as_str) == Some(self.text.as_str())
+        {
+            object.remove(plural);
+            return Ok(());
+        }
+        let original =
+            source.map(|source| Self::from_source(source, plural, singular)).transpose()?;
+        let same_values = original.as_ref().is_some_and(|original| original.text == self.text);
+        if same_values && self.resolved.is_none() {
+            return Ok(());
+        }
+        object.insert(singular.to_owned(), Value::String(String::new()));
+        if !same_values {
+            let selected = lines(&self.text);
+            if selected.is_empty() {
+                object.remove(plural);
+            } else {
+                object.insert(plural.to_owned(), Value::Array(selected));
+            }
+        }
+        Ok(())
+    }
 }
 
 pub(super) fn legacy_material_selection(

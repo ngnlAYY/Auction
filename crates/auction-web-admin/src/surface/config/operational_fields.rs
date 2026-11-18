@@ -14,7 +14,7 @@ pub(super) const TEXT_FIELDS: &[&str] = &[
     "operations.alerts.recipient",
 ];
 
-pub(super) const NUMBER_FIELDS: &[&str] = &[
+pub(super) const UNSIGNED_NUMBER_FIELDS: &[&str] = &[
     "operations.mail.send_intervals.outbid_seconds",
     "operations.mail.send_intervals.account_seconds",
     "operations.mail.send_intervals.intake_seconds",
@@ -40,14 +40,7 @@ pub(super) const NUMBER_FIELDS: &[&str] = &[
     "operations.mail.account_reply_window_seconds",
     "operations.mail.explanation_mail_window_seconds",
     "operations.mail.explanation_mail_limit",
-    "operations.economics.start_price",
-    "operations.economics.bid_increment_ppm",
-    "operations.economics.soft_close_window_seconds",
-    "operations.economics.soft_close_extension_seconds",
-    "operations.economics.cancel_cutoff_seconds",
-    "operations.economics.proxy_slow_interval_seconds",
     "operations.economics.proxy_max_outbid_uses",
-    "operations.economics.final_phase_lead_seconds",
     "operations.forum.batch_size",
     "operations.forum.poll_interval_seconds",
     "operations.forum.jitter_seconds",
@@ -67,13 +60,9 @@ pub(super) const NUMBER_FIELDS: &[&str] = &[
     "operations.alerts.max_signals_per_scan",
     "operations.alerts.max_batch_items",
     "operations.alerts.max_body_bytes",
-    "operations.alerts.delivery_pending_count_threshold",
     "operations.alerts.delivery_pending_age_seconds",
-    "operations.alerts.delivery_manual_reconcile_count_threshold",
-    "operations.alerts.fulfillment_backlog_count_threshold",
     "operations.alerts.fulfillment_backlog_age_seconds",
     "operations.alerts.fulfillment_collection_overdue_age_seconds",
-    "operations.alerts.recovery_overdue_count_threshold",
     "operations.alerts.recovery_overdue_age_seconds",
     "operations.worker.concurrency",
     "operations.worker.poll_interval_seconds",
@@ -102,9 +91,24 @@ pub(super) const NUMBER_FIELDS: &[&str] = &[
     "operations.worker.recovery.jitter_seconds",
     "operations.worker.recovery.lease_duration_seconds",
     "operations.worker.recovery.item_timeout_seconds",
-    "operations.worker.recovery.low_balance_threshold",
     "operations.worker.recovery.health_refresh_interval_seconds",
     "operations.worker.recovery.evidence_stale_after_seconds",
+];
+
+/// 与服务端 runtime 文档中的 i64 字段对齐。
+pub(super) const SIGNED_NUMBER_FIELDS: &[&str] = &[
+    "operations.economics.start_price",
+    "operations.economics.bid_increment_ppm",
+    "operations.economics.soft_close_window_seconds",
+    "operations.economics.soft_close_extension_seconds",
+    "operations.economics.cancel_cutoff_seconds",
+    "operations.economics.proxy_slow_interval_seconds",
+    "operations.economics.final_phase_lead_seconds",
+    "operations.alerts.delivery_pending_count_threshold",
+    "operations.alerts.delivery_manual_reconcile_count_threshold",
+    "operations.alerts.fulfillment_backlog_count_threshold",
+    "operations.alerts.recovery_overdue_count_threshold",
+    "operations.worker.recovery.low_balance_threshold",
 ];
 
 pub(super) const LIST_FIELDS: &[&str] = &["operations.schedule.worlds"];
