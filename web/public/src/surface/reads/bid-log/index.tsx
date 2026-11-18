@@ -5,13 +5,17 @@ import type { AuctionSummaryResponse } from "@auction/contracts/dto/public/catal
 import type { PublicBidLogListResponse } from "@auction/contracts/dto/public/catalog/history";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import { createTaskResource } from "@auction/web-shared/reactive/resource";
-import { ok, type Result } from "@auction/web-shared/result";
+import type { Result } from "@auction/web-shared/result";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
 import { createEffect, For, Match, Show, Switch, useContext } from "solid-js";
 
-import { fetchBidLogAuctions, fetchBidLogPage } from "../../../api/queries/bid-log";
-import { PublicRefreshGenerationContext, useBidRefresh } from "../../board/refresh";
+import { fetchBidLogPage } from "../../../api/queries/bid-log";
+import {
+  PublicRefreshGenerationContext,
+  refreshPublicReads,
+  useBidRefresh,
+} from "../../board/refresh";
 import { WorldTabs, worldLabel } from "../../board/world";
 import {
   LotDetailLookupContext,
@@ -19,16 +23,18 @@ import {
   useLotDetailLookup,
 } from "../../catalog/detail/lookup";
 import { useContentLoading } from "../../loading";
-import { publicPageMatches, updatePublicPageSize } from "../../pagination";
+import { publicPageMatches, updatePublicPage, updatePublicPageSize } from "../../pagination";
+import { usePublicPageBounds } from "../../pagination/bounds";
+import { updatePublicQueryPairs } from "../../pagination/location";
 import {
   normalizedWorldQuery,
-  updatePublicQueryState,
   usePublicQueryState,
   type WorldScope,
   worldScopeFromQuery,
 } from "../../query";
 import { usePageRouteGuard } from "../../query/route-page";
 import { rustTrim } from "../../query/text";
+import { useReadRoundDirectory } from "./directory";
 import { applyLotFilter, resetLotDraft, useLotFilterDraft, validLotFilter } from "./lots";
 import { createScopeSelection, type ScopeSelection, sameScopeSelection } from "./scope-selection";
 import { BidLogRow, BidLogTable, bidLogStatusClass, bidLogStatusLabel } from "./table";
@@ -64,12 +70,6 @@ interface BidLogSnapshot {
   readonly result: Result<PublicBidLogListResponse | null, string>;
 }
 
-interface AuctionSnapshot {
-  readonly selection: ScopeSelection;
-  readonly generation: number;
-  readonly result: Result<AuctionSummaryResponse[], string>;
-}
-
 interface AuctionOptionGroup {
   readonly world: string;
   readonly auctions: AuctionSummaryResponse[];
@@ -79,6 +79,7 @@ type BidLogBody =
   | { readonly kind: "error" }
   | { readonly kind: "empty" }
   | { readonly kind: "invalid" }
+  | { readonly kind: "unselected" }
   | { readonly kind: "loading" }
   | { readonly kind: "page"; readonly page: PublicBidLogListResponse };
 
@@ -109,112 +110,42 @@ export function BidLog(): JSX.Element {
   // 世界范围与本次选择的序号一起变化；目录资源只依赖这一个值，避免“新范围 + 旧代际”
   // 先启动一轮读取再被下一轮取消。目录纠偏、记录读取门禁与实时重读都只接受这次选择确认的目录。
   const scopeSelection = createScopeSelection(worldScope);
-  const selectedAuctionId = createValueMemo(() => queryStateSignal().auctionId ?? "");
   const pageNumber = createValueMemo(() => queryStateSignal().page);
   const pageSize = createValueMemo(() => queryStateSignal().pageSize);
-  const lotFilter = createValueMemo(() => queryStateSignal().bidLogLot ?? "");
-  const {
-    draft: lotDraft,
-    input: onLotFilterInput,
-    clear: clearLotFilter,
-  } = useLotFilterDraft(queryStateSignal, "/bidlog", LOT_FILTER_WRITE_DEBOUNCE_MILLIS);
-  // 迁移期间曾写出 `bidlog_page`；读取后立即无历史记录地收敛回旧版 `page`。
-  createEffect(
-    () => queryStateSignal(),
-    (query) => {
-      if (!query.bidLogPageAlias) {
-        return;
-      }
-      // 写回成功后才提交本地状态；失败时保留别名，下一次查询变化再重试。
-      updatePublicQueryState(
-        queryStateSignal,
-        (latest) => {
-          latest.bidLogPageAlias = false;
-        },
-        "replace",
-      );
-    },
+  const lot = useLotFilterDraft(queryStateSignal, "/bidlog", LOT_FILTER_WRITE_DEBOUNCE_MILLIS);
+  // 缺省场次会和第一页一起写址，先纠偏页码会生成另一次无意义的 replace。
+  const bounds = usePublicPageBounds(queryStateSignal, "BidLog", (query) =>
+    query.auctionId === null ? [] : [["page", query.pageSize]],
   );
-  // 生命周期、可见页定时和人工刷新先重读目录；记录请求随后只消费本轮确认的公开场次。
-  const auctions = createTaskResource(
-    () => ({
-      generation: refreshGeneration(),
-      selection: scopeSelection(),
-    }),
-    async (dependencies, context): Promise<AuctionSnapshot | null> => {
-      const result = await fetchBidLogAuctions(
-        dependencies.selection.scope === "all" ? null : dependencies.selection.scope,
-        context.signal,
-      );
-      return context.alive()
-        ? {
-            selection: dependencies.selection,
-            generation: dependencies.generation,
-            result,
-          }
-        : null;
-    },
-  );
-
-  // 保留仍可公开读取的历史选择；仅在所选场次不属于本范围目录时纠偏。
+  // 已有场次时只替换迁移期的分页别名，保留仍需修正的原始筛选。
   createEffect(
-    () => {
-      const selection = scopeSelection();
-      return {
-        snapshot: auctions(),
-        selection,
-        generation: refreshGeneration(),
-        selected: selectedAuctionId(),
-      };
-    },
-    (current) => {
-      const snapshot = current.snapshot;
-      if (snapshot === null || snapshot === undefined || !snapshot.result.ok) {
-        return;
-      }
-      // 后台刷新保留旧目录用于展示，但它不能纠偏别的范围选择或新生命周期代际的选择。
-      if (
-        !sameScopeSelection(snapshot.selection, current.selection) ||
-        snapshot.generation !== current.generation
-      ) {
-        return;
-      }
-      // 前进/后退换页时旧页面可能在新地址下被唤醒；纠偏只能写回仍属于本页的地址。
-      if (!routeStillOnPage()) {
-        return;
-      }
-      const auctionList = snapshot.result.value;
-      const nextAuctionId =
-        auctionList.find((auction) => auction.id === current.selected)?.id ??
-        auctionList[0]?.id ??
-        "";
-      if (current.selected !== nextAuctionId) {
-        updatePublicQueryState(
+    () =>
+      [
+        queryStateSignal().auctionId !== null && queryStateSignal().bidLogPageAlias,
+        pageNumber(),
+        bounds.blocked("page"),
+      ] as const,
+    ([alias, page, blocked]) => {
+      if (alias && !blocked && routeStillOnPage()) {
+        updatePublicQueryPairs(
           queryStateSignal,
-          (query) => {
-            query.auctionId = nextAuctionId !== "" ? nextAuctionId : null;
-            query.page = 1;
-          },
+          ["page", "bidlog_page"],
+          page === 1 ? [] : [["page", String(page)]],
           "replace",
         );
       }
     },
   );
-
-  const currentAuctions = createValueMemo(() => {
-    const snapshot = auctions();
-    if (snapshot === null || snapshot === undefined) {
-      return null;
-    }
-    return sameScopeSelection(snapshot.selection, scopeSelection()) ? snapshot.result : null;
-  });
-  const auctionOptions = createValueMemo((): readonly AuctionSummaryResponse[] => {
-    const current = currentAuctions();
-    return current?.ok === true ? current.value : [];
-  });
-  const selectedAuction = createValueMemo(
-    () => auctionOptions().find((auction) => auction.id === selectedAuctionId()) ?? null,
+  const rounds = useReadRoundDirectory(
+    "bidlog",
+    scopeSelection,
+    refreshGeneration,
+    queryStateSignal,
+    routeStillOnPage,
   );
+  const auctionOptions = rounds.options;
+  const selectedAuction = rounds.selected;
+  const selectedAuctionId = () => selectedAuction()?.id ?? "";
   // 全部世界时按世界分组；目录已按主世界、异世界排序，因此相同世界始终相邻。
   const auctionGroups = createValueMemo((): readonly AuctionOptionGroup[] => {
     const groups: AuctionOptionGroup[] = [];
@@ -229,75 +160,47 @@ export function BidLog(): JSX.Element {
     return groups;
   });
 
+  const readRequest = createValueMemo(() => {
+    const auction = rounds.readable();
+    if (auction === null || bounds.blocked("page") || !lot.appliedValid()) {
+      return null;
+    }
+    const requested: BidLogRequested = [
+      auction.id,
+      scopeSelection(),
+      auction.world,
+      rustTrim(lot.appliedLot()) || null,
+      pageNumber(),
+      pageSize(),
+    ];
+    return { requested, generation: auction.generation };
+  });
   const bidLog = createTaskResource(
-    () => {
-      const auctionId = selectedAuctionId();
-      const page = pageNumber();
-      const size = pageSize();
-      const selection = scopeSelection();
-      const lot = rustTrim(lotFilter());
-      // 地址栏带入的非法筛选同样不发请求：服务端只会回 400，格式提示由输入框承担。
-      const lotValid = validLotFilter(lot);
-      const lotId = lot !== "" ? lot : null;
-      // 记录接口始终使用所选场次自己的世界；范围只决定目录，不得把 `all` 传给记录读取。
-      const selected = selectedAuction();
-      const worldId = selected?.world_id ?? "";
-      const requested: BidLogRequested = [auctionId, selection, worldId, lotId, page, size];
-      // 不直接订阅全局刷新：先确认本轮目录，避免按过期的场次可见性读取记录。
-      // 目录未就绪、失败或已移除该场时不发 GET；查询切换也不能绕过这道门禁。
-      const snapshot = auctions();
-      const readable =
-        snapshot !== null &&
-        snapshot !== undefined &&
-        sameScopeSelection(snapshot.selection, selection) &&
-        snapshot.generation === refreshGeneration.peek() &&
-        snapshot.result.ok &&
-        selected !== null &&
-        worldId !== "" &&
-        snapshot.result.value.some((auction) => auction.id === auctionId) &&
-        lotValid;
-      return { auctionId, page, size, worldId, lotId, requested, readable };
-    },
+    readRequest,
     async (dependencies, context): Promise<BidLogSnapshot | null> => {
-      let result: Result<PublicBidLogListResponse | null, string>;
-      if (dependencies.readable) {
-        const fetched = await fetchBidLogPage(
-          dependencies.auctionId,
-          dependencies.page,
-          dependencies.worldId,
-          dependencies.lotId,
-          dependencies.size,
-          context.signal,
-        );
-        if (!context.alive()) {
-          return null;
-        }
-        result = fetched.ok ? ok(fetched.value) : fetched;
-      } else {
-        result = ok(null);
+      if (dependencies === null || !routeStillOnPage()) {
+        return bidLog.peek() ?? null;
       }
-      return { requested: dependencies.requested, result };
+      const [auctionId, , world, lotId, page, size] = dependencies.requested;
+      const result = await fetchBidLogPage(auctionId, page, world, lotId, size, context.signal);
+      return context.alive() ? { requested: dependencies.requested, result } : null;
     },
   );
-  const directoryCurrent = createValueMemo(() => {
-    const snapshot = auctions();
-    return (
-      snapshot !== null &&
-      snapshot !== undefined &&
-      sameScopeSelection(snapshot.selection, scopeSelection()) &&
-      snapshot.generation === refreshGeneration()
-    );
-  });
-  useBidRefresh(bidLog, () => directoryCurrent() && selectedAuction() !== null);
+  useBidRefresh(bidLog, () => readRequest() !== null);
   const lookup = useLotDetailLookup();
-  const currentPage = createValueMemo(() => pageNumber());
-  const currentLotFilter = createValueMemo(() => lotFilter());
-  const draftInvalid = createValueMemo(() => !validLotFilter(rustTrim(lotDraft())));
+  const currentPage = pageNumber;
+  const currentLotFilter = lot.appliedLot;
   // 同查询后台刷新保留完成快照；目录确认场次已不可见后，迟到记录也不能恢复旧行和分页。
   const currentResult = createValueMemo(() => {
     const snapshot = bidLog();
     const selected = selectedAuction();
-    if (snapshot === null || snapshot === undefined || selected === null) {
+    if (
+      snapshot === null ||
+      snapshot === undefined ||
+      selected === null ||
+      !lot.appliedValid() ||
+      bounds.blocked("page")
+    ) {
       return null;
     }
     const [auctionId, selection, worldId, lotId, page, size] = snapshot.requested;
@@ -315,23 +218,20 @@ export function BidLog(): JSX.Element {
   });
   // 目录或当前查询的记录还没有结果时由顶栏提示加载，正文留空。
   const bodyState = createValueMemo((): BidLogBody => {
-    const auctionsNow = currentAuctions();
     const resultNow = currentResult();
-    if (auctionsNow?.ok === false) {
+    if (bounds.failed("page") || rounds.failed() || resultNow?.ok === false) {
       return { kind: "error" };
     }
-    if (auctionsNow?.ok === true && resultNow?.ok === false) {
-      return { kind: "error" };
+    if (rounds.correctionFailed()) {
+      return { kind: "unselected" };
     }
-    if (auctionsNow?.ok === true && auctionsNow.value.length === 0) {
+    if (rounds.empty()) {
       return { kind: "empty" };
     }
-    // 已应用的筛选非法（来自地址栏）时没有发出请求：正文留空且不提示加载，格式提示在输入框旁。
-    if (auctionsNow?.ok === true && !validLotFilter(rustTrim(currentLotFilter()))) {
+    if (!lot.appliedValid()) {
       return { kind: "invalid" };
     }
     if (
-      auctionsNow?.ok === true &&
       resultNow?.ok === true &&
       resultNow.value !== null &&
       publicPageMatches(resultNow.value.page, resultNow.value.page_size, currentPage(), pageSize())
@@ -363,19 +263,15 @@ export function BidLog(): JSX.Element {
               aria-label={t("bidlog-round")}
               value={selectedAuctionId()}
               disabled={auctionOptions().length === 0}
-              onChange={(event) => {
-                const auctionId = event.currentTarget.value;
-                updatePublicQueryState(
-                  queryStateSignal,
-                  (query) => {
-                    query.auctionId = auctionId;
-                    query.bidLogLot = null;
-                    query.page = 1;
-                  },
-                  "push",
-                );
-              }}
+              onFocus={rounds.loadOptions}
+              onPointerDown={rounds.loadOptions}
+              onChange={(event) => rounds.choose(event.currentTarget)}
             >
+              <Show when={selectedAuctionId() === "" && auctionOptions().length > 0}>
+                <option value="" disabled selected>
+                  {t("round-select-placeholder")}
+                </option>
+              </Show>
               <Show
                 when={worldScope() === "all"}
                 fallback={
@@ -405,6 +301,11 @@ export function BidLog(): JSX.Element {
                 </For>
               </Show>
             </select>
+            <Show when={rounds.optionsFailed()}>
+              <button type="button" onClick={() => refreshPublicReads(refreshGeneration)}>
+                {t("data-retry")}
+              </button>
+            </Show>
             <Show when={selectedAuction()}>
               {(auction) => (
                 <>
@@ -428,26 +329,31 @@ export function BidLog(): JSX.Element {
               enterkeyhint="search"
               autocapitalize="none"
               spellcheck="false"
-              value={lotDraft()}
+              value={lot.draft()}
               placeholder={t("bidlog-filter-placeholder")}
-              aria-invalid={draftInvalid() ? "true" : "false"}
-              aria-describedby={draftInvalid() ? LOT_FILTER_ERROR_ID : undefined}
-              onInput={(event) => onLotFilterInput(event.currentTarget.value)}
+              aria-invalid={lot.interacted() && lot.draftError() !== null ? "true" : "false"}
+              aria-describedby={lot.draftError() === null ? undefined : LOT_FILTER_ERROR_ID}
+              onInput={(event) => lot.input(event.currentTarget.value)}
+              onBlur={lot.blur}
             />
-            <Show when={lotDraft() !== ""}>
-              <button type="button" onClick={() => clearLotFilter()}>
+            <Show when={lot.draft() !== "" || !lot.appliedValid()}>
+              <button type="button" onClick={lot.clear}>
                 {t("bidlog-filter-clear")}
               </button>
             </Show>
-            <Show when={draftInvalid()}>
+            <Show when={lot.draftError() !== null}>
               <p
                 id={LOT_FILTER_ERROR_ID}
                 class="public-auction-bid-log-toolbar__error"
-                // 逐字输入 UUID 时每次按键都会判定；用礼貌播报，不打断输入。
                 role="status"
                 aria-live="polite"
               >
-                {t("bidlog-filter-invalid")}
+                {lot.draftError() === "duplicate"
+                  ? t("filter-error-duplicate")
+                  : t("bidlog-filter-invalid")}
+                <Show when={lot.errorOriginal() !== null}>
+                  <bdi> {lot.errorOriginal()}</bdi>
+                </Show>
               </p>
             </Show>
           </div>
@@ -460,9 +366,13 @@ export function BidLog(): JSX.Element {
                 class="public-auction-empty__retry"
                 type="button"
                 onClick={() => {
-                  refreshGeneration.set(
-                    Math.min(refreshGeneration.peek() + 1, Number.MAX_SAFE_INTEGER),
-                  );
+                  if (bounds.failed("page")) {
+                    bounds.retry();
+                  } else {
+                    refreshGeneration.set(
+                      Math.min(refreshGeneration.peek() + 1, Number.MAX_SAFE_INTEGER),
+                    );
+                  }
                 }}
               >
                 {t("data-retry")}
@@ -481,27 +391,10 @@ export function BidLog(): JSX.Element {
                 currentPage={currentPage()}
                 world={selectedAuction()?.world_id ?? null}
                 lotFilter={currentLotFilter()}
-                onPageChange={(nextPage) => {
-                  // 从当前状态提交：已应用的 lot 筛选与地址栏同时写入，仍在防抖中的草稿
-                  // 不随翻页提交。写入失败时保留原页，查询入口不提交本地状态。
-                  updatePublicQueryState(
-                    queryStateSignal,
-                    (query) => {
-                      query.page = nextPage;
-                    },
-                    "push",
-                  );
-                }}
-                onPageClamp={(nextPage) => {
-                  // 纠偏无历史记录写回，不建立可返回的无效页条目。
-                  updatePublicQueryState(
-                    queryStateSignal,
-                    (query) => {
-                      query.page = nextPage;
-                    },
-                    "replace",
-                  );
-                }}
+                onPageChange={(nextPage) => updatePublicPage(queryStateSignal, nextPage, "push")}
+                onPageClamp={(nextPage) =>
+                  routeStillOnPage() && updatePublicPage(queryStateSignal, nextPage, "replace")
+                }
                 onPageSizeChange={(size) => updatePublicPageSize(queryStateSignal, size)}
               />
             )}

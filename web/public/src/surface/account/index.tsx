@@ -26,6 +26,7 @@ import {
 import { PublicCommandOwnerContext, PublicSessionResourceContext } from "../index";
 import { useContentLoading } from "../loading";
 import { PublicPager } from "../pagination";
+import { usePublicPageBounds } from "../pagination/bounds";
 import { AccountNavigation } from "../presentation/mobile";
 import {
   proxyModeLabel,
@@ -34,6 +35,7 @@ import {
   proxyTransitionSummary,
 } from "../proxy";
 import { updatePublicQueryState, usePublicQueryState } from "../query";
+import { usePageRouteGuard } from "../query/route-page";
 import { loginHrefForCurrentLocation } from "../session";
 import { SessionPreference } from "../session-preference";
 import { OutbidNotifications } from "../watch-preference";
@@ -141,6 +143,13 @@ function AuthenticatedAccountData(props: { readonly userId: string }): JSX.Eleme
   const queryStateSignal = queryState.state;
   const bidPage = createValueMemo(() => queryStateSignal().bidPage);
   const proxyPage = createValueMemo(() => queryStateSignal().proxyPage);
+  // /me/bids 的两个列表固定使用 10 条，任一页越界都会使整个请求失败。
+  const bounds = usePublicPageBounds(queryStateSignal, "Me", () => [
+    ["bidPage", 10],
+    ["proxyPage", 10],
+  ]);
+  const routeStillOnPage = usePageRouteGuard("Me");
+  const boundsFailed = () => bounds.failed("bidPage") || bounds.failed("proxyPage");
   const account = createTaskResource(
     () => ({
       refresh: refreshGeneration(),
@@ -148,8 +157,12 @@ function AuthenticatedAccountData(props: { readonly userId: string }): JSX.Eleme
       bidPage: bidPage(),
       proxyPage: proxyPage(),
       userId: props.userId,
+      blocked: bounds.blocked("bidPage") || bounds.blocked("proxyPage"),
     }),
     async (dependencies, context) => {
+      if (dependencies.blocked) {
+        return null;
+      }
       const requested = [dependencies.bidPage, dependencies.proxyPage] as const;
       const result = await fetchMyBids(
         dependencies.userId,
@@ -157,6 +170,9 @@ function AuthenticatedAccountData(props: { readonly userId: string }): JSX.Eleme
         dependencies.proxyPage,
         context.signal,
       );
+      if (!context.alive()) {
+        return null;
+      }
       return { requested, result };
     },
   );
@@ -164,14 +180,14 @@ function AuthenticatedAccountData(props: { readonly userId: string }): JSX.Eleme
 
   const current = createValueMemo(() => {
     const loaded = account();
-    if (loaded === undefined) {
+    if (loaded == null || bounds.blocked("bidPage") || bounds.blocked("proxyPage")) {
       return undefined;
     }
     return loaded.requested[0] === bidPage() && loaded.requested[1] === proxyPage()
       ? loaded.result
       : undefined;
   });
-  const currentFailed = () => current()?.ok === false;
+  const currentFailed = () => boundsFailed() || current()?.ok === false;
   const currentPageMismatch = () => {
     const result = current();
     return (
@@ -189,6 +205,9 @@ function AuthenticatedAccountData(props: { readonly userId: string }): JSX.Eleme
   });
   // 没有当前页码的结果（含等待页码纠偏后的重读）时由顶栏提示加载，正文留空。
   useContentLoading(() => {
+    if (boundsFailed()) {
+      return false;
+    }
     const result = current();
     if (result === undefined) {
       return true;
@@ -199,13 +218,16 @@ function AuthenticatedAccountData(props: { readonly userId: string }): JSX.Eleme
     return result.value.bid_page !== bidPage() || result.value.proxy_page !== proxyPage();
   });
   const retryAccount = () => {
+    if (boundsFailed()) {
+      bounds.retry();
+      return;
+    }
     accountReloadGeneration.set(
       Math.min(accountReloadGeneration.peek() + 1, Number.MAX_SAFE_INTEGER),
     );
   };
   return (
     <Switch>
-      <Match when={current() === undefined}>{null}</Match>
       <Match when={currentFailed()}>
         <div>
           <div class="public-auction-empty" role="alert">
@@ -216,6 +238,7 @@ function AuthenticatedAccountData(props: { readonly userId: string }): JSX.Eleme
           </div>
         </div>
       </Match>
+      <Match when={current() === undefined}>{null}</Match>
       <Match when={currentPageMismatch()}>{null}</Match>
       <Match when={currentPage()}>
         {(pageData) => (
@@ -224,7 +247,7 @@ function AuthenticatedAccountData(props: { readonly userId: string }): JSX.Eleme
             bidPage={bidPage()}
             proxyPage={proxyPage()}
             onBidPageChange={(nextPage) => {
-              updatePublicQueryState(
+              return updatePublicQueryState(
                 queryStateSignal,
                 (query) => {
                   query.bidPage = nextPage;
@@ -233,7 +256,10 @@ function AuthenticatedAccountData(props: { readonly userId: string }): JSX.Eleme
               );
             }}
             onBidPageClamp={(nextPage) => {
-              updatePublicQueryState(
+              if (!routeStillOnPage()) {
+                return false;
+              }
+              return updatePublicQueryState(
                 queryStateSignal,
                 (query) => {
                   query.bidPage = nextPage;
@@ -242,7 +268,7 @@ function AuthenticatedAccountData(props: { readonly userId: string }): JSX.Eleme
               );
             }}
             onProxyPageChange={(nextPage) => {
-              updatePublicQueryState(
+              return updatePublicQueryState(
                 queryStateSignal,
                 (query) => {
                   query.proxyPage = nextPage;
@@ -251,7 +277,10 @@ function AuthenticatedAccountData(props: { readonly userId: string }): JSX.Eleme
               );
             }}
             onProxyPageClamp={(nextPage) => {
-              updatePublicQueryState(
+              if (!routeStillOnPage()) {
+                return false;
+              }
+              return updatePublicQueryState(
                 queryStateSignal,
                 (query) => {
                   query.proxyPage = nextPage;
@@ -270,10 +299,10 @@ interface AccountPageProps {
   readonly page: MyBidsPage;
   readonly bidPage: number;
   readonly proxyPage: number;
-  readonly onBidPageChange: (page: number) => void;
-  readonly onBidPageClamp: (page: number) => void;
-  readonly onProxyPageChange: (page: number) => void;
-  readonly onProxyPageClamp: (page: number) => void;
+  readonly onBidPageChange: (page: number) => boolean;
+  readonly onBidPageClamp: (page: number) => boolean;
+  readonly onProxyPageChange: (page: number) => boolean;
+  readonly onProxyPageClamp: (page: number) => boolean;
 }
 
 function AccountPage(props: AccountPageProps): JSX.Element {
@@ -306,8 +335,8 @@ interface BidSectionProps {
   readonly page: number;
   readonly total: number;
   readonly pageSize: number;
-  readonly onPageChange: (page: number) => void;
-  readonly onPageClamp: (page: number) => void;
+  readonly onPageChange: (page: number) => boolean;
+  readonly onPageClamp: (page: number) => boolean;
 }
 
 /** 同一拍品的多笔出价分别标识，刷新时查看按钮随各自的记录保留。 */
@@ -354,7 +383,6 @@ function BidSection(props: BidSectionProps): JSX.Element {
         pageSize={props.pageSize}
         hideWhenSingle={true}
         showSizePicker={false}
-        maxOffset={null}
         jumpLabel={t("catalog-page-input")}
         onPageChange={props.onPageChange}
         onPageClamp={props.onPageClamp}
@@ -408,8 +436,8 @@ interface ProxySectionProps {
   readonly page: number;
   readonly total: number;
   readonly pageSize: number;
-  readonly onPageChange: (page: number) => void;
-  readonly onPageClamp: (page: number) => void;
+  readonly onPageChange: (page: number) => boolean;
+  readonly onPageClamp: (page: number) => boolean;
 }
 
 /** 代理状态变化可更新原行，授权更换后使用新的行。 */
@@ -458,7 +486,6 @@ function ProxySection(props: ProxySectionProps): JSX.Element {
         pageSize={props.pageSize}
         hideWhenSingle={true}
         showSizePicker={false}
-        maxOffset={null}
         jumpLabel={t("catalog-page-input")}
         onPageChange={props.onPageChange}
         onPageClamp={props.onPageClamp}

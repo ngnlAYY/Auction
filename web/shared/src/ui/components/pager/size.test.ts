@@ -57,3 +57,47 @@ test("没有 randomUUID 时两个分页控件各自关联同一实例的提示",
     }
   }
 });
+
+test.each([false, true])("页长提交结果为 %s 时，原生下拉显示对应的页长", (accepted) => {
+  const jsx = Object.getOwnPropertyDescriptor(globalThis, "jsx");
+  let change: unknown;
+  Object.defineProperty(globalThis, "jsx", {
+    configurable: true,
+    value: (tag: unknown, props: Record<string, unknown> | null) => {
+      if (tag === "select") {
+        change = props?.onChange;
+      }
+      return null;
+    },
+  });
+  try {
+    createRoot((dispose) => {
+      try {
+        PageSizePicker({
+          pageSize: 20,
+          options: [20, 50],
+          label: "每页数量",
+          allowCustom: false,
+          customLabel: "",
+          applyLabel: "",
+          invalidLabel: "",
+          onChange: () => accepted,
+        });
+        const select = { value: "50" };
+        if (typeof change !== "function") {
+          throw new Error("未挂载页长下拉");
+        }
+        change({ currentTarget: select });
+        expect(select.value).toBe(accepted ? "50" : "20");
+      } finally {
+        dispose();
+      }
+    });
+  } finally {
+    if (jsx === undefined) {
+      Reflect.deleteProperty(globalThis, "jsx");
+    } else {
+      Object.defineProperty(globalThis, "jsx", jsx);
+    }
+  }
+});

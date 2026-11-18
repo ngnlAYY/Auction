@@ -29,7 +29,13 @@ import {
   historicalLotsHref,
 } from "../catalog/presentation";
 import { useContentLoading } from "../loading";
-import { PublicPager, publicPageMatches, updatePublicPageSize } from "../pagination";
+import {
+  PublicPager,
+  publicPageMatches,
+  updatePublicPage,
+  updatePublicPageSize,
+} from "../pagination";
+import { publicOffsetLastPage, usePublicPageBounds } from "../pagination/bounds";
 import { updatePublicQueryState, usePublicQueryState } from "../query";
 import { usePageRouteGuard } from "../query/route-page";
 
@@ -41,7 +47,7 @@ interface LoadedHistory {
 }
 
 /** 往期列表读取只展示当前查询的快照，页内重试与外壳刷新各自触发重读。 */
-export function useAuctionHistory(requested: Accessor<HistoryRequest>) {
+export function useAuctionHistory(requested: Accessor<HistoryRequest | null>) {
   const refreshGeneration = useContext(PublicRefreshGenerationContext);
   const retryGeneration = createCell(0);
   const auctions = createTaskResource(
@@ -51,7 +57,13 @@ export function useAuctionHistory(requested: Accessor<HistoryRequest>) {
       requested: requested(),
     }),
     async (dependencies, context): Promise<LoadedHistory | null> => {
+      if (dependencies.requested === null) {
+        return null;
+      }
       const [world, status, page, size] = dependencies.requested;
+      if (page > publicOffsetLastPage(size)) {
+        return null;
+      }
       const result = await fetchAuctionHistoryPage(
         world === "all" ? null : world,
         status,
@@ -69,10 +81,11 @@ export function useAuctionHistory(requested: Accessor<HistoryRequest>) {
   const currentResult = createValueMemo(
     (): Result<AuctionListResponse<AuctionSummaryV2Response>, string> | null => {
       const loaded = auctions();
-      if (loaded === null || loaded === undefined) {
+      const request = requested();
+      if (loaded === null || loaded === undefined || request === null) {
         return null;
       }
-      const [world, status, page, size] = requested();
+      const [world, status, page, size] = request;
       const requestedPage = loaded.requested;
       if (
         requestedPage[0] !== world ||
@@ -102,6 +115,9 @@ export function AuctionList(): JSX.Element {
   const pageNumber = createValueMemo(() => Math.max(queryStateSignal().page, 1));
   const pageSize = createValueMemo(() => queryStateSignal().pageSize);
   const routeStillOnPage = usePageRouteGuard("AuctionList");
+  const bounds = usePublicPageBounds(queryStateSignal, "AuctionList", (query) => [
+    ["page", query.pageSize],
+  ]);
   // 旧链接里的 status 不再生效；含解析器未接受的未知取值在内，读入后无历史地移除一次。
   createEffect(
     () => {
@@ -126,8 +142,8 @@ export function AuctionList(): JSX.Element {
       );
     },
   );
-  const requested = createValueMemo(
-    () => [worldFilter(), "settled", pageNumber(), pageSize()] as const,
+  const requested = createValueMemo(() =>
+    bounds.blocked("page") ? null : ([worldFilter(), "settled", pageNumber(), pageSize()] as const),
   );
   const { currentResult, retry } = useAuctionHistory(requested);
   const currentPage = createValueMemo(() => {
@@ -140,6 +156,9 @@ export function AuctionList(): JSX.Element {
   });
   // 没有当前查询的结果（含等待页码纠偏后的重读）时由顶栏提示加载，正文留空。
   const contentLoading = createValueMemo(() => {
+    if (bounds.failed("page")) {
+      return false;
+    }
     const result = currentResult();
     if (result === null) {
       return true;
@@ -155,6 +174,15 @@ export function AuctionList(): JSX.Element {
         <WorldTabs />
       </div>
       <Switch>
+        <Match when={bounds.failed("page")}>
+          <AsyncState
+            kind="error"
+            title={t("page-auctions-title")}
+            detail={t("data-error")}
+            retryLabel={t("data-retry")}
+            onRetry={bounds.retry}
+          />
+        </Match>
         <Match when={currentResult() === null}>{null}</Match>
         <Match when={currentResult()?.ok === false}>
           <AsyncState
@@ -172,24 +200,10 @@ export function AuctionList(): JSX.Element {
               pageNumber={pageNumber()}
               world={queryStateSignal().world}
               onPageSizeChange={(size) => updatePublicPageSize(queryStateSignal, size)}
-              onPageChange={(nextPage) => {
-                updatePublicQueryState(
-                  queryStateSignal,
-                  (query) => {
-                    query.page = nextPage;
-                  },
-                  "push",
-                );
-              }}
-              onPageClamp={(nextPage) => {
-                updatePublicQueryState(
-                  queryStateSignal,
-                  (query) => {
-                    query.page = nextPage;
-                  },
-                  "replace",
-                );
-              }}
+              onPageChange={(nextPage) => updatePublicPage(queryStateSignal, nextPage, "push")}
+              onPageClamp={(nextPage) =>
+                routeStillOnPage() && updatePublicPage(queryStateSignal, nextPage, "replace")
+              }
             />
           )}
         </Match>
@@ -203,9 +217,9 @@ export function AuctionHistoryPage(props: {
   readonly page: AuctionListResponse<AuctionSummaryV2Response>;
   readonly pageNumber: number;
   readonly world: string | null;
-  readonly onPageChange: (page: number) => void;
-  readonly onPageClamp: (page: number) => void;
-  readonly onPageSizeChange: (size: number) => void;
+  readonly onPageChange: (page: number) => boolean;
+  readonly onPageClamp: (page: number) => boolean;
+  readonly onPageSizeChange: (size: number) => boolean;
 }): JSX.Element {
   const pageSize = createValueMemo(() => Math.max(props.page.page_size, 1));
   return (

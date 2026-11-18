@@ -6,39 +6,16 @@ import { compareText } from "@auction/web-shared/text";
 
 import type { PriceHistoryQuery } from "../../../api/model";
 import type { PublicBoardQuery, WorldSwitchOption } from "../../query";
-import type { HistoryFilterError, HistoryPriceUnit } from "./filters/model";
-import { historyNameValue } from "./filters/validation";
+import type {
+  HistoryFilterDuplicates,
+  HistoryFilterErrors,
+  HistoryFilterField,
+  HistoryPriceUnit,
+} from "./filters/model";
+import { historyNameValue, historyPlayerValue } from "./filters/validation";
 
 const U64_MAX = 18_446_744_073_709_551_615n;
 const MAX_SAFE_CREDITS = 9_007_199_254_740_991n;
-
-function isRustWhitespace(code: number): boolean {
-  return (
-    (code >= 0x0009 && code <= 0x000d) ||
-    code === 0x0020 ||
-    code === 0x0085 ||
-    code === 0x00a0 ||
-    code === 0x1680 ||
-    (code >= 0x2000 && code <= 0x200a) ||
-    code === 0x2028 ||
-    code === 0x2029 ||
-    code === 0x202f ||
-    code === 0x205f ||
-    code === 0x3000
-  );
-}
-
-function rustTrim(value: string): string {
-  let start = 0;
-  let end = value.length;
-  while (start < end && isRustWhitespace(value.charCodeAt(start))) {
-    start += 1;
-  }
-  while (end > start && isRustWhitespace(value.charCodeAt(end - 1))) {
-    end -= 1;
-  }
-  return value.slice(start, end);
-}
 
 function isAsciiDigit(character: string): boolean {
   const code = character.charCodeAt(0);
@@ -69,61 +46,145 @@ function parseU32Decimal(value: string): number | null {
   return parsed === null ? null : Number(parsed);
 }
 
-/** 归一化地址栏恢复的筛选条件；非法名称与金额保留，非法日期与倒置区间丢弃。 */
+/** 只有合法的条件才可规范化；保留非法值供字段错误与请求门禁使用。 */
 export function normalizeHistoryQuery(query: PublicBoardQuery): PublicBoardQuery {
   const normalized = { ...query };
-  if (normalized.historyName !== null) {
-    const name = historyNameValue(normalized.historyName);
-    // 非法条件保留给字段错误与请求门禁，不能悄悄丢弃后扩大为无此条件的查询。
-    normalized.historyName = name.ok ? name.value : normalized.historyName;
+  if (query.historyName !== null) {
+    const name = historyNameValue(query.historyName);
+    normalized.historyName = name.ok ? name.value : query.historyName;
   }
-  normalized.historyFrom =
-    normalized.historyFrom === null || !historyIsValidDate(normalized.historyFrom)
-      ? null
-      : normalized.historyFrom;
-  normalized.historyTo =
-    normalized.historyTo === null || !historyIsValidDate(normalized.historyTo)
-      ? null
-      : normalized.historyTo;
-  // 非法金额与倒置区间保留为可修正字段；丢弃条件会扩大查询范围。
-  if (normalized.historyMinPrice !== null) {
-    normalized.historyMinPrice =
-      historyNormalizedPrice(normalized.historyMinPrice) ?? normalized.historyMinPrice;
-  }
-  if (normalized.historyMaxPrice !== null) {
-    normalized.historyMaxPrice =
-      historyNormalizedPrice(normalized.historyMaxPrice) ?? normalized.historyMaxPrice;
-  }
-  if (
-    normalized.historyFrom !== null &&
-    normalized.historyTo !== null &&
-    compareText(normalized.historyFrom, normalized.historyTo) > 0
-  ) {
-    normalized.historyFrom = null;
-    normalized.historyTo = null;
-  }
+  // 地址栏中的金额已经用 Credits 表示，按 HTTP 的十进制表示校验。
+  normalized.historyMinPrice = query.historyMinPrice === "" ? null : query.historyMinPrice;
+  normalized.historyMaxPrice = query.historyMaxPrice === "" ? null : query.historyMaxPrice;
   return normalized;
 }
 
-/** URL 名称与金额采用同一字段校验并阻止无效请求；日期沿用既有恢复规则。 */
-export function historyQueryError(query: PriceHistoryQuery): HistoryFilterError | null {
-  const name = historyNameValue(query.name ?? "");
-  if (!name.ok) {
-    return name.error;
+/** 历史表单管理的地址键，恢复与写回共用。 */
+export const HISTORY_FILTER_KEYS: readonly (readonly [HistoryFilterField, string])[] = [
+  ["name", "name"],
+  ["world", "world"],
+  ["from", "from"],
+  ["to", "to"],
+  ["minPrice", "min_price"],
+  ["maxPrice", "max_price"],
+  ["buyer", "buyer"],
+  ["seller", "seller"],
+];
+
+/** 历史筛选从原始地址恢复；解析器丢弃的非法值与重复键不能扩大查询。 */
+export function historyQueryFromUrl(query: PublicBoardQuery, search: string) {
+  const params = new URLSearchParams(search);
+  const duplicates: HistoryFilterDuplicates = {};
+  const fields: Partial<Record<HistoryFilterField, string>> = {};
+  for (const [field, key] of HISTORY_FILTER_KEYS) {
+    const values = params.getAll(key);
+    if (values.length > 1) {
+      duplicates[field] = values;
+    }
+    const first = values[0];
+    if (first !== undefined && first !== "") {
+      fields[field] = first;
+    }
   }
-  if (query.minPrice !== null && historyNormalizedPrice(query.minPrice) === null) {
-    return "minimum_price_c";
+  const world = fields.world === "all" ? null : (fields.world ?? null);
+  const normalized = normalizeHistoryQuery({
+    ...query,
+    historyName: fields.name ?? null,
+    historyFrom: fields.from ?? null,
+    historyTo: fields.to ?? null,
+    historyMinPrice: fields.minPrice ?? null,
+    historyMaxPrice: fields.maxPrice ?? null,
+    historyBuyer: fields.buyer ?? null,
+    historySeller: fields.seller ?? null,
+  });
+  const restored: PriceHistoryQuery = {
+    world,
+    name: normalized.historyName,
+    from: normalized.historyFrom,
+    to: normalized.historyTo,
+    minPrice: normalized.historyMinPrice,
+    maxPrice: normalized.historyMaxPrice,
+    buyer: normalized.historyBuyer,
+    seller: normalized.historySeller,
+    sort: normalized.historySort,
+    page: Math.max(normalized.page, 1),
+  };
+  const duplicateErrors: HistoryFilterErrors = {};
+  for (const [field] of HISTORY_FILTER_KEYS) {
+    if (duplicates[field] !== undefined) {
+      duplicateErrors[field] = "duplicate";
+    }
   }
-  if (query.maxPrice !== null && historyNormalizedPrice(query.maxPrice) === null) {
-    return "maximum_price_c";
-  }
-  return historyPriceRangeReversed(query.minPrice, query.maxPrice) ? "price_range" : null;
+  return { query: restored, errors: historyQueryErrors(restored, duplicateErrors), duplicates };
 }
 
-/** 把合法日期拆成表单使用的月份和四位年份；无值或非法日期返回空对。 */
+/** 深链与提交共用字段校验，只有无错误的查询才能进入读取。 */
+export function historyQueryErrors(
+  query: PriceHistoryQuery,
+  fieldErrors: HistoryFilterErrors = {},
+): HistoryFilterErrors {
+  const errors = { ...fieldErrors };
+  if (query.world !== null && query.world !== "main" && query.world !== "isekai") {
+    errors.world ??= "world_invalid";
+  }
+  const name = historyNameValue(query.name ?? "");
+  if (!name.ok) {
+    errors.name ??= name.error;
+  }
+  const from = query.from;
+  const to = query.to;
+  // 结束日转换成次日 UTC；auction-time 的 UTC 上限落在 9999-12-30，应用端口另拒绝 Unix 纪元。
+  if (
+    from !== null &&
+    (!historyIsValidDate(from) || from === "1970-01-01" || from === "9999-12-31")
+  ) {
+    errors.from ??= "from_date_invalid";
+  }
+  if (
+    to !== null &&
+    (!historyIsValidDate(to) || to === "1969-12-31" || compareText(to, "9999-12-30") >= 0)
+  ) {
+    errors.to ??= "to_date_invalid";
+  }
+  if (query.minPrice !== null && historyNormalizedPrice(query.minPrice) === null) {
+    errors.minPrice ??= "minimum_price_c";
+  }
+  if (query.maxPrice !== null && historyNormalizedPrice(query.maxPrice) === null) {
+    errors.maxPrice ??= "maximum_price_c";
+  }
+  for (const field of ["buyer", "seller"] as const) {
+    const player = historyPlayerValue(query[field] ?? "");
+    if (!player.ok) {
+      errors[field] ??= player.error;
+    }
+  }
+  // 只有两端各自通过字段校验，才能用已经规范化的值比较区间。
+  if (
+    from !== null &&
+    to !== null &&
+    errors.from === undefined &&
+    errors.to === undefined &&
+    compareText(from, to) > 0
+  ) {
+    errors.from = "date_range";
+  }
+  if (
+    errors.minPrice === undefined &&
+    errors.maxPrice === undefined &&
+    historyPriceRangeReversed(query.minPrice, query.maxPrice)
+  ) {
+    errors.minPrice = "price_range";
+  }
+  return errors;
+}
+
+/** 把日期拆成表单使用的年月；格式非法时在可编辑的年份栏保留原文。 */
 export function historyDateParts(value: string | null): readonly [string, string] {
-  if (value === null || !historyIsValidDate(value)) {
+  if (value === null) {
     return ["", ""];
+  }
+  if (!historyIsValidDate(value)) {
+    return ["", value];
   }
   const parts = value.split("-");
   return [parts[1] ?? "", parts[0] ?? ""];
@@ -205,6 +266,9 @@ export function historyIsValidDate(value: string): boolean {
 
 /** 把无符号十进制金额规范成安全整数 Credits 字符串；语法非法或溢出返回 null。 */
 export function historyNormalizedPrice(value: string): string | null {
+  if (!/^(?:0|[1-9][0-9]*)$/u.test(value)) {
+    return null;
+  }
   const amount = parseUnsignedDecimal(value, U64_MAX);
   return amount !== null && amount <= MAX_SAFE_CREDITS ? amount.toString() : null;
 }
@@ -286,24 +350,16 @@ export function historyApplyChangesQuery(
 }
 
 /** `resetFilters` 是否确实会改变地址栏的已应用状态；页长与透传参数不由本页清除。 */
-export function historyResetChangesQuery(query: PublicBoardQuery): boolean {
+export function historyResetChangesQuery(
+  restored: ReturnType<typeof historyQueryFromUrl>,
+  group: string,
+): boolean {
+  const { query, errors } = restored;
   return (
-    historyWorldFilterActive(query.world) ||
-    query.historyName !== null ||
-    query.historyFrom !== null ||
-    query.historyTo !== null ||
-    query.historyMinPrice !== null ||
-    query.historyMaxPrice !== null ||
-    query.historyBuyer !== null ||
-    query.historySeller !== null ||
-    query.historySort !== "closed_desc" ||
-    query.historyGroup !== "equipment" ||
+    historyHasRequestCondition(query) ||
+    Object.keys(errors).length !== 0 ||
+    query.sort !== "closed_desc" ||
+    group !== "equipment" ||
     query.page !== 1
   );
-}
-
-/** 去除 Rust 语义空白后返回非空文本；空文本返回 null。 */
-export function optionalFilterValue(value: string): string | null {
-  const trimmed = rustTrim(value);
-  return trimmed !== "" ? trimmed : null;
 }

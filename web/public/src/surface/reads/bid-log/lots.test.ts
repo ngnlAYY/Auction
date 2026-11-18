@@ -295,3 +295,25 @@ test("场次未变时只写入最后一个合法草稿，保留输入中的空�
     mounted.dispose();
   }
 });
+
+test.each([
+  ["lot=One12&lot=Two7", "One12", "duplicate"],
+  ["lot=+", " ", "invalid"],
+  ["lot=One12%09", "One12\t", "invalid"],
+] as const)("lot 深链保留非法原文 %s，修正并成功写入后才解除门禁", async (search, raw, error) => {
+  const mounted = mountLotDraft(`/bidlog?world=main&auction=${AUCTION_A}&${search}`);
+  try {
+    expect(mounted.lot.draft.peek()).toBe(raw);
+    expect(mounted.lot.draftError()).toBe(error);
+    expect(mounted.lot.appliedValid()).toBe(false);
+    expect(mounted.lot.interacted.peek()).toBe(false);
+
+    mounted.lot.input("One12");
+    await Bun.sleep(2 * DEBOUNCE_MILLIS);
+    flush();
+    expect(mounted.params().getAll("lot")).toEqual(["One12"]);
+    expect(mounted.lot.appliedValid()).toBe(true);
+  } finally {
+    mounted.dispose();
+  }
+});

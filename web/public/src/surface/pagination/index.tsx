@@ -1,7 +1,7 @@
 //! Public 列表的统一分页选项、译文和查询状态更新；不改变 Admin 分页策略。
 
 import { MAX_PUBLIC_PAGE_SIZE } from "@auction/contracts/dto/public/pagination";
-import { writeQueryPairs } from "@auction/web-shared/net/query";
+import { type QueryWriteMode, readQueryPairs } from "@auction/web-shared/net/query";
 import type { Cell } from "@auction/web-shared/reactive/cell";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import { Pager } from "@auction/web-shared/ui/components/pager";
@@ -9,7 +9,10 @@ import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
 import { Show } from "solid-js";
 
-import { type PublicBoardQuery, readPublicQuery, updatePublicQueryState } from "../query";
+import { type PublicBoardQuery, readPublicQuery } from "../query";
+import { currentBrowserSearch, currentPublicPathname } from "../query/location";
+import { MAX_PUBLIC_PAGE_OFFSET, publicOffsetLastPage } from "./bounds";
+import { updatePublicQueryPairs, writePublicQueryPatch } from "./location";
 import { savePublicPageSize } from "./preferences";
 
 export { parsePublicPageSize, storedPublicPageSize } from "./preferences";
@@ -37,14 +40,25 @@ export function normalizePublicPageSize(size: number): number {
 
 /** 切换数量与回到首页作为一次 URL 更新，保留世界、场次和筛选条件。 */
 export function updatePublicPageSize(state: Cell<PublicBoardQuery>, size: number): boolean {
-  return updatePublicQueryState(
+  return updatePublicQueryPairs(
     state,
-    (query) => {
-      query.pageSize = normalizePublicPageSize(size);
-      query.page = 1;
-    },
+    [...pageKeys(), "page_size"],
+    [["page_size", String(normalizePublicPageSize(size))]],
     "push",
   );
+}
+
+/** 翻页只替换页码，保留地址里的其他筛选原文。 */
+export function updatePublicPage(
+  state: Cell<PublicBoardQuery>,
+  page: number,
+  mode: QueryWriteMode,
+): boolean {
+  return updatePublicQueryPairs(state, pageKeys(), page > 1 ? [["page", String(page)]] : [], mode);
+}
+
+function pageKeys(): readonly string[] {
+  return currentPublicPathname() === "/bidlog" ? ["page", "bidlog_page"] : ["page"];
 }
 
 /** 资源重读期间不能把旧页总数用于新分页状态的纠偏；可选字段沿用旧 DTO 兼容语义。 */
@@ -71,19 +85,28 @@ export interface PublicPagerProps {
   readonly jumpLabel?: string;
   readonly maxPageSize?: number | null;
   readonly label: string;
-  readonly onPageChange: (page: number) => void;
-  readonly onPageClamp?: (page: number) => void;
+  /** 返回 false 时恢复跳页输入为已应用页码。 */
+  readonly onPageChange: (page: number) => unknown;
+  readonly onPageClamp?: (page: number) => unknown;
   /** 返回 `false` 表示地址栏写入失败；分页组件据此决定是否保存本地偏好。 */
   readonly onPageSizeChange?: (size: number) => unknown;
 }
 
-/** 页长偏好只能在页面的地址栏写入成功后保存；回调未提供或没有返回值时沿用旧行为。 */
+/** 页长偏好只能在地址栏写入成功后保存；未返回结果的旧回调需要核对写入值。 */
 export function commitPublicPageSizeChoice(
   size: number,
   movement: boolean,
   writePageSize: ((size: number) => unknown) | undefined,
 ): boolean {
-  if (writePageSize?.(size) === false) {
+  const before = currentBrowserSearch();
+  const result = writePageSize?.(size);
+  const key = movement ? "movement_page_size" : "page_size";
+  if (
+    result !== true &&
+    (result === false ||
+      before === currentBrowserSearch() ||
+      !readQueryPairs().some(([name, value]) => name === key && value === String(size)))
+  ) {
     return false;
   }
   savePublicPageSize(size, movement);
@@ -99,17 +122,18 @@ export function PublicPager(props: PublicPagerProps): JSX.Element {
     Math.min(props.maxPageSize ?? MAX_PUBLIC_PAGE_SIZE, MAX_PUBLIC_PAGE_SIZE),
   );
   const maxOffset = createValueMemo(() =>
-    props.maxOffset === undefined ? 10_000 : props.maxOffset,
+    props.maxOffset === undefined ? MAX_PUBLIC_PAGE_OFFSET : props.maxOffset,
   );
   const maxPage = createValueMemo(() => {
     const offset = maxOffset();
-    return offset === null ? null : Math.trunc(offset / pageSize()) + 1;
+    return offset === null ? null : publicOffsetLastPage(pageSize(), offset);
   });
   const movement = createValueMemo(() => props.movement ?? false);
   const total = () => props.total;
   const singlePage = () => {
     const count = total();
-    return count !== null && count <= pageSize();
+    // 原页仍待纠偏时保留重试入口，即使新总数只剩一页。
+    return props.page <= 1 && count !== null && count <= pageSize();
   };
   const pager = (
     <Pager
@@ -142,22 +166,31 @@ export function PublicPager(props: PublicPagerProps): JSX.Element {
       pageSizeInvalidLabel={t("pagination-size-limit", { maximum: String(maximum()) })}
       onPageChange={props.onPageChange}
       onPageClamp={props.onPageClamp ?? null}
+      clampFailure={{ message: t("pagination-clamp-error"), retryLabel: t("data-retry") }}
       onPageSizeChange={(size) => {
         // 共享分页器已拒绝超出上限的数量；这里再守一次，不把它写进地址栏与偏好。
         if (acceptedPublicPageSize(size) === null || size > maximum()) {
-          return;
+          return false;
         }
         // 先冻结离开条目的数量（含 10），再更新 URL 和偏好；返回时不读到新偏好。
         // 只替换数量键，不能覆盖出价日志尚在防抖写回的筛选。
         const previous = readPublicQuery();
-        writeQueryPairs(
-          ["page_size", "movement_page_size"],
-          [
-            ["page_size", String(previous.pageSize)],
-            ["movement_page_size", String(previous.movementPageSize)],
-          ],
-          "replace",
-        );
+        const sizes = [
+          ["page_size", String(previous.pageSize)],
+          ["movement_page_size", String(previous.movementPageSize)],
+        ] as const;
+        const applied = readQueryPairs();
+        const missing = sizes.filter(([key]) => !applied.some(([name]) => name === key));
+        if (
+          missing.length !== 0 &&
+          !writePublicQueryPatch(
+            missing.map(([key]) => key),
+            missing,
+            "replace",
+          )
+        ) {
+          return false;
+        }
         return commitPublicPageSizeChoice(size, movement(), props.onPageSizeChange);
       }}
     />

@@ -29,6 +29,14 @@ export function sameScopeSelection(left: ScopeSelection, right: ScopeSelection):
   return left.scope === right.scope && left.generation === right.generation;
 }
 
+/** 展示目录只要求世界选择身份一致；发起重读另校验当前刷新代号。 */
+export function directoryForScope<T extends { readonly selection: ScopeSelection }>(
+  snapshot: T | null | undefined,
+  selection: ScopeSelection,
+): T | null {
+  return snapshot != null && sameScopeSelection(snapshot.selection, selection) ? snapshot : null;
+}
+
 /** 由世界范围派生选择身份；上一次选择只保存在闭包中。范围不变时返回同一个值，下游不会
  * 重跑；范围变化时一次更新同时带出新范围与新序号。 */
 export function createScopeSelection(scope: Accessor<WorldScope>): Accessor<ScopeSelection> {

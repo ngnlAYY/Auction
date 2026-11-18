@@ -10,3 +10,8 @@ const VALID_UUID =
 export function validUuid(value: string): boolean {
   return utf8ByteLength(value) === 36 && VALID_UUID.test(value);
 }
+
+/** 以转义文本补充单行输入控件会剔除的换行。 */
+export function escapedSingleLineInput(value: string): string | null {
+  return /[\r\n]/u.test(value) ? JSON.stringify(value) : null;
+}

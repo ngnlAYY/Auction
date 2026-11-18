@@ -2,18 +2,14 @@
 
 import { expect, test } from "bun:test";
 import type { AuctionSummaryResponse } from "@auction/contracts/dto/public/catalog/auction";
-import { ok } from "@auction/web-shared/result";
 
 import {
+  directoryForScope,
   nextScopeSelection,
   type ScopeSelection,
   sameScopeSelection,
 } from "../bid-log/scope-selection";
-import {
-  currentFulfillmentAuctions,
-  type FulfillmentAuctionsSnapshot,
-  orderFulfillmentAuctionDirectory,
-} from "./model";
+import { orderFulfillmentAuctionDirectory } from "./model";
 
 function auctionSummary(worldId: string, sequence: number, suffix: number): AuctionSummaryResponse {
   return {
@@ -64,26 +60,24 @@ test("scope_generation_changes_with_the_scope：范围不变序号不变，变�
 });
 
 test("fulfillment_directory_requires_the_current_scope_generation：代际不匹配时场次选项为空，等新目录返回", () => {
-  const result = ok([auctionSummary("main", 1, 1)]);
-  const snapshot: FulfillmentAuctionsSnapshot = {
-    selection: { scope: "all", generation: 1 },
+  const snapshot = {
+    selection: { scope: "all", generation: 1 } as const,
     generation: 7,
-    result,
+    options: [auctionSummary("main", 1, 1)],
   };
-  expect(currentFulfillmentAuctions(snapshot, { scope: "all", generation: 1 })).toBe(result);
+  expect(directoryForScope(snapshot, { scope: "all", generation: 1 })).toBe(snapshot);
   // 切回同一范围但代际不同：不得沿用上一轮目录启用场次下拉框。
-  expect(currentFulfillmentAuctions(snapshot, { scope: "all", generation: 2 })).toBeNull();
-  expect(currentFulfillmentAuctions(snapshot, { scope: "main", generation: 1 })).toBeNull();
-  expect(currentFulfillmentAuctions(undefined, { scope: "all", generation: 1 })).toBeNull();
+  expect(directoryForScope(snapshot, { scope: "all", generation: 2 })).toBeNull();
+  expect(directoryForScope(snapshot, { scope: "main", generation: 1 })).toBeNull();
+  expect(directoryForScope(undefined, { scope: "all", generation: 1 })).toBeNull();
 });
 
 test("fulfillment_directory_survives_same_scope_background_refresh：同范围后台刷新仍保留旧目录选项", () => {
-  const result = ok([auctionSummary("main", 1, 1)]);
-  const snapshot: FulfillmentAuctionsSnapshot = {
-    selection: { scope: "main", generation: 2 },
+  const snapshot = {
+    selection: { scope: "main", generation: 2 } as const,
     generation: 3,
-    result,
+    options: [auctionSummary("main", 1, 1)],
   };
   // 刷新代号只约束纠偏与进度读取，不改变“当前可展示目录”。
-  expect(currentFulfillmentAuctions(snapshot, { scope: "main", generation: 2 })).toBe(result);
+  expect(directoryForScope(snapshot, { scope: "main", generation: 2 })).toBe(snapshot);
 });

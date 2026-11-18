@@ -12,8 +12,8 @@ import type { JSX } from "@solidjs/web";
 export function HistoryResultControls(props: {
   readonly sort: string;
   readonly grouping: string;
-  readonly onSortChange: (sort: string) => void;
-  readonly onGroupChange: (grouping: string) => void;
+  readonly onSortChange: (sort: string) => boolean;
+  readonly onGroupChange: (grouping: string) => boolean;
 }): JSX.Element {
   return (
     <>
@@ -23,7 +23,11 @@ export function HistoryResultControls(props: {
           <select
             name="history_sort"
             value={props.sort}
-            onChange={(event) => props.onSortChange(event.currentTarget.value)}
+            onChange={(event) => {
+              const select = event.currentTarget;
+              // 原生选择先更新显示，写址失败时恢复当前已应用排序。
+              if (!props.onSortChange(select.value)) select.value = props.sort;
+            }}
           >
             <option value="closed_desc">{t("history-sort-closed-desc")}</option>
             <option value="closed_asc">{t("history-sort-closed-asc")}</option>
@@ -36,7 +40,10 @@ export function HistoryResultControls(props: {
           <select
             name="history_group"
             value={props.grouping}
-            onChange={(event) => props.onGroupChange(event.currentTarget.value)}
+            onChange={(event) => {
+              const select = event.currentTarget;
+              if (!props.onGroupChange(select.value)) select.value = props.grouping;
+            }}
           >
             <option value="flat">{t("history-group-flat")}</option>
             <option value="equipment">{t("history-group-equipment")}</option>

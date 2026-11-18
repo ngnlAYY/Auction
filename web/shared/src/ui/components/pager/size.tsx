@@ -20,7 +20,8 @@ export interface PageSizePickerProps {
   readonly customLabel: string;
   readonly applyLabel: string;
   readonly invalidLabel: string;
-  readonly onChange?: ((size: number) => void) | undefined;
+  /** 返回 false 时恢复浏览器已经改变的控件值。 */
+  readonly onChange?: ((size: number) => unknown) | undefined;
 }
 
 /** 数量文案与可选上限由 surface 注入；显式启用才显示自定义输入。 */
@@ -66,20 +67,20 @@ export function PageSizePicker(props: PageSizePickerProps): JSX.Element {
           autocomplete="off"
           value={props.pageSize.toString()}
           onChange={(event) => {
-            const value = event.currentTarget.value;
-            if (!asciiDigits(value)) {
-              return;
-            }
+            const select = event.currentTarget;
+            const value = select.value;
             const size = Number(value);
             if (
+              !asciiDigits(value) ||
               !Number.isSafeInteger(size) ||
               size <= 0 ||
               (props.maxPageSize != null && size > props.maxPageSize) ||
-              !props.options.includes(size)
+              !props.options.includes(size) ||
+              props.onChange?.(size) === false
             ) {
-              return;
+              // 原生 change 已经改变选中项；写入被拒时 props 不变，不会触发重新渲染。
+              select.value = props.pageSize.toString();
             }
-            (props.onChange ?? (() => undefined))(size);
           }}
         >
           <For each={props.options} keyed={(size) => size}>
@@ -109,7 +110,14 @@ export function PageSizePicker(props: PageSizePickerProps): JSX.Element {
             touched.set(true);
             const size = target();
             if (size !== null) {
-              (props.onChange ?? (() => undefined))(size);
+              if (props.onChange?.(size) === false) {
+                const applied = props.pageSize.toString();
+                input.set(applied);
+                touched.set(false);
+                if (inputElement !== undefined) {
+                  inputElement.value = applied;
+                }
+              }
             } else {
               onSettled(() => {
                 inputElement?.focus();

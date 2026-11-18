@@ -15,6 +15,19 @@ const BID_LOG_INCLUDE = "defeated_proxy";
 /** 竞价日志页的缓存投影标识；同一 URL 的其他查询投影不得命中该条目。 */
 const BID_LOG_CACHE_TYPE = "public_bid_log_page";
 
+/** 单个状态本次已验证的目录页；还有后续页时由页面按需继续读取。 */
+export interface AuctionDirectoryPage {
+  readonly status: string;
+  readonly auctions: readonly AuctionSummaryResponse[];
+  readonly complete: boolean;
+}
+
+/** 有后续页时可等待页面需要更多选项，再继续同一条分页链。 */
+export type AuctionDirectoryObserver = (
+  page: AuctionDirectoryPage,
+  signal: AbortSignal,
+) => void | Promise<void>;
+
 /** 读取单个场次（可限定 lot）的编号竞价日志页。 */
 export async function fetchBidLogPage(
   auctionId: string,
@@ -50,6 +63,7 @@ export async function fetchBidLogPage(
 export async function fetchBidLogAuctions(
   worldId: string | null,
   signal: AbortSignal,
+  observe?: AuctionDirectoryObserver,
 ): Promise<Result<AuctionSummaryResponse[], string>> {
   // 状态目录相互独立，最多并发三个读取；首个错误会中止兄弟读取，与源实现的 `try_join!` 一致。
   const controller = new AbortController();
@@ -61,9 +75,9 @@ export async function fetchBidLogAuctions(
   }
   try {
     const joined = await tryJoinThree(
-      fetchBidLogAuctionStatus(worldId, "live", controller.signal),
-      fetchBidLogAuctionStatus(worldId, "final", controller.signal),
-      fetchBidLogAuctionStatus(worldId, "settled", controller.signal),
+      fetchBidLogAuctionStatus(worldId, "live", controller.signal, observe),
+      fetchBidLogAuctionStatus(worldId, "final", controller.signal, observe),
+      fetchBidLogAuctionStatus(worldId, "settled", controller.signal, observe),
       () => controller.abort(),
     );
     if (!joined.ok) {
@@ -87,6 +101,7 @@ export async function fetchBidLogAuctionStatus(
   worldId: string | null,
   status: string,
   signal: AbortSignal,
+  observe?: AuctionDirectoryObserver,
 ): Promise<Result<AuctionSummaryResponse[], string>> {
   const auctions: AuctionSummaryResponse[] = [];
   let pageNumber = 1;
@@ -123,10 +138,15 @@ export async function fetchBidLogAuctionStatus(
     const total = page.value.total;
     auctions.push(...page.value.auctions);
     // 满页且缺 total 时继续读取，避免选择器静默截断到第一页。
-    if (
-      rowCount < pageSize ||
-      (total !== null && saturatingMultiply(pageNumber, pageSize) >= total)
-    ) {
+    const complete =
+      rowCount < pageSize || (total !== null && saturatingMultiply(pageNumber, pageSize) >= total);
+    if (observe !== undefined) {
+      await observe({ status, auctions: page.value.auctions, complete }, signal);
+      if (signal.aborted) {
+        return err("network_error");
+      }
+    }
+    if (complete) {
       return ok(auctions);
     }
     const nextPage = pageNumber + 1;
@@ -138,7 +158,7 @@ export async function fetchBidLogAuctionStatus(
 }
 
 /** 目录读取期间同一场次可能跨多个状态出现；保留最高版本后按世界、期号排序。 */
-function orderBidLogAuctions(
+export function orderBidLogAuctions(
   auctions: readonly AuctionSummaryResponse[],
 ): AuctionSummaryResponse[] {
   const latest = new Map<string, AuctionSummaryResponse>();

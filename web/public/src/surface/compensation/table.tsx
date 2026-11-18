@@ -29,13 +29,13 @@ export function CompensationPoolTable(props: {
   readonly page: CompensationPoolPage;
   readonly selectedAuctionId: string;
   readonly lots: Result<CompensationLotPage | null, string> | null;
-  readonly onPageChange: (page: number) => void;
-  readonly onPageClamp: (page: number) => void;
-  readonly onPageSizeChange: (size: number) => void;
+  readonly onPageChange: (page: number) => boolean;
+  readonly onPageClamp: (page: number) => boolean;
+  readonly onPageSizeChange: (size: number) => boolean;
   readonly onSelectRound: (auctionId: string) => void;
-  readonly onLotPageChange: (page: number) => void;
-  readonly onLotPageClamp: (page: number) => void;
-  readonly onLotPageSizeChange: (size: number) => void;
+  readonly onLotPageChange: (page: number) => boolean;
+  readonly onLotPageClamp: (page: number) => boolean;
+  readonly onLotPageSizeChange: (size: number) => boolean;
   readonly onRetryLots: () => void;
 }): JSX.Element {
   const pageSize = createValueMemo(() => Math.max(props.page.page_size, 1));
@@ -157,9 +157,9 @@ function CompensationRoundRow(props: {
   readonly showReversal: boolean;
   readonly lots: Result<CompensationLotPage | null, string> | null;
   readonly onSelectRound: (auctionId: string) => void;
-  readonly onLotPageChange: (page: number) => void;
-  readonly onLotPageClamp: (page: number) => void;
-  readonly onLotPageSizeChange: (size: number) => void;
+  readonly onLotPageChange: (page: number) => boolean;
+  readonly onLotPageClamp: (page: number) => boolean;
+  readonly onLotPageSizeChange: (size: number) => boolean;
   readonly onRetryLots: () => void;
 }): JSX.Element {
   const detailsId = createValueMemo(() => `compensation-details-${props.round.auction_id}`);

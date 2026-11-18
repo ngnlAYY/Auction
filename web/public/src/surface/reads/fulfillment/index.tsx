@@ -11,18 +11,13 @@
 import type { AuctionSummaryResponse } from "@auction/contracts/dto/public/catalog/auction";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import { createTaskResource } from "@auction/web-shared/reactive/resource";
-import { ok, type Result } from "@auction/web-shared/result";
+import type { Result } from "@auction/web-shared/result";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
-import { createEffect, For, Match, Show, Switch, useContext } from "solid-js";
+import { For, Match, Show, Switch, useContext } from "solid-js";
 
 import type { FulfillmentRead } from "../../../api/fulfillment";
-import {
-  fetchFulfillmentAuctions,
-  fetchFulfillmentPage,
-  MAX_FULFILLMENT_PAGE_SIZE,
-} from "../../../api/fulfillment";
-import { fetchBidLogAuctionStatus } from "../../../api/queries/bid-log";
+import { fetchFulfillmentPage, MAX_FULFILLMENT_PAGE_SIZE } from "../../../api/fulfillment";
 import { PublicRefreshGenerationContext, refreshPublicReads } from "../../board/refresh";
 import { WorldTabs, worldLabel } from "../../board/world";
 import {
@@ -32,26 +27,25 @@ import {
 } from "../../catalog/detail/lookup";
 import { formatAuctionTime } from "../../catalog/presentation";
 import { useContentLoading } from "../../loading";
-import { publicPageMatches, updatePublicPageSize } from "../../pagination";
+import { publicPageMatches, updatePublicPage, updatePublicPageSize } from "../../pagination";
+import { usePublicPageBounds } from "../../pagination/bounds";
 import {
   normalizedWorldQuery,
-  updatePublicQueryState,
   usePublicQueryState,
   type WorldScope,
   worldScopeFromQuery,
 } from "../../query";
 import { usePageRouteGuard } from "../../query/route-page";
 import { rustTrim } from "../../query/text";
-import { useLotFilterDraft, validLotFilter } from "../bid-log/lots";
+import { useReadRoundDirectory } from "../bid-log/directory";
+import { useLotFilterDraft } from "../bid-log/lots";
 import { createScopeSelection, sameScopeSelection } from "../bid-log/scope-selection";
 import type {
-  FulfillmentAuctionsSnapshot,
   FulfillmentBodyState,
   FulfillmentProgressSnapshot,
   FulfillmentRequest,
 } from "./model";
 import {
-  currentFulfillmentAuctions,
   LOT_FILTER_ERROR_ID,
   LOT_FILTER_WRITE_DEBOUNCE_MILLIS,
   orderFulfillmentAuctionDirectory,
@@ -64,21 +58,6 @@ const WORLD_SCOPE_ORDER = ["main", "isekai"] as const;
 interface FulfillmentAuctionGroup {
   readonly world: "main" | "isekai";
   readonly auctions: readonly AuctionSummaryResponse[];
-}
-
-/** 目录接口按范围读取；全部世界由一次不带 `world` 的读取返回，再稳定整理为两个世界的顺序。 */
-async function fetchFulfillmentAuctionsForScope(
-  scope: WorldScope,
-  signal: AbortSignal,
-): Promise<Result<AuctionSummaryResponse[], string>> {
-  if (scope !== "all") {
-    return fetchFulfillmentAuctions(scope, signal);
-  }
-  const result = await fetchBidLogAuctionStatus(null, "settled", signal);
-  if (!result.ok) {
-    return result;
-  }
-  return ok(orderFulfillmentAuctionDirectory(result.value));
 }
 
 /** 路由入口。 */
@@ -95,95 +74,27 @@ export function Fulfillment(): JSX.Element {
   // 世界范围与本次选择的序号一起变化；目录资源只依赖这一个值，避免“新范围 + 旧代际”
   // 先启动一轮读取再被下一轮取消。
   const scopeSelection = createScopeSelection(worldScope);
-  // 空串表示目录读取前尚未选定场次；目录到达后再替换地址栏并重置到第一页。
-  const selectedAuctionId = createValueMemo(() => queryStateSignal().auctionId ?? "");
   const pageNumber = createValueMemo(() => queryStateSignal().page);
-  // 接口每页最多 100 件；共享偏好或地址栏里更大的数量按上限请求，分页器显示实际数量。
+  // 接口每页最多 100 件；纠偏、请求与分页器共用实际页长。
   const pageSize = createValueMemo(() =>
     Math.min(queryStateSignal().pageSize, MAX_FULFILLMENT_PAGE_SIZE),
   );
-  const lotFilter = createValueMemo(() => queryStateSignal().bidLogLot ?? "");
-  const {
-    draft: lotDraft,
-    input: submitLotFilter,
-    clear: clearLotFilter,
-  } = useLotFilterDraft(queryStateSignal, "/fulfillment", LOT_FILTER_WRITE_DEBOUNCE_MILLIS);
-
-  const auctions = createTaskResource(
-    // 外壳轮询与人工刷新先重读已结算目录；进度请求随后只消费本轮确认的场次。
-    () => ({
-      refreshGeneration: refreshGeneration(),
-      selection: scopeSelection(),
-    }),
-    async (dependencies, context): Promise<FulfillmentAuctionsSnapshot | null> => {
-      const result = await fetchFulfillmentAuctionsForScope(
-        dependencies.selection.scope,
-        context.signal,
-      );
-      if (!context.alive()) {
-        return null;
-      }
-      return {
-        selection: dependencies.selection,
-        generation: dependencies.refreshGeneration,
-        result,
-      };
-    },
+  const bounds = usePublicPageBounds(queryStateSignal, "Fulfillment", (query) =>
+    query.auctionId === null ? [] : [["page", Math.min(query.pageSize, MAX_FULFILLMENT_PAGE_SIZE)]],
   );
-
-  const currentAuctions = createValueMemo(() =>
-    currentFulfillmentAuctions(auctions(), scopeSelection()),
+  const lot = useLotFilterDraft(queryStateSignal, "/fulfillment", LOT_FILTER_WRITE_DEBOUNCE_MILLIS);
+  const lotFilter = lot.appliedLot;
+  const rounds = useReadRoundDirectory(
+    "fulfillment",
+    scopeSelection,
+    refreshGeneration,
+    queryStateSignal,
+    routeStillOnPage,
+    orderFulfillmentAuctionDirectory,
   );
-
-  // 保留仍在当前范围目录里的选择；所选场次不在目录时纠偏到最近一场。
-  createEffect(
-    () => {
-      const snapshot = auctions();
-      const selection = scopeSelection();
-      if (snapshot === null || snapshot === undefined || !snapshot.result.ok) {
-        return null;
-      }
-      // 后台刷新期间保留旧目录；旧目录不能改写新一轮已经确定的场次或页码。
-      if (
-        !sameScopeSelection(snapshot.selection, selection) ||
-        snapshot.generation !== refreshGeneration()
-      ) {
-        return null;
-      }
-      const selected = selectedAuctionId();
-      const nextAuctionId =
-        snapshot.result.value.find((auction) => auction.id === selected)?.id ??
-        snapshot.result.value[0]?.id ??
-        "";
-      return selected === nextAuctionId ? null : nextAuctionId;
-    },
-    (nextAuctionId) => {
-      if (nextAuctionId === null) {
-        return;
-      }
-      // 前进/后退换页时旧页面可能在新地址下被唤醒；纠偏只能写回仍属于本页的地址。
-      if (!routeStillOnPage()) {
-        return;
-      }
-      updatePublicQueryState(
-        queryStateSignal,
-        (query) => {
-          query.auctionId = nextAuctionId === "" ? null : nextAuctionId;
-          query.page = 1;
-        },
-        "replace",
-      );
-    },
-  );
-
-  const auctionOptions = createValueMemo((): readonly AuctionSummaryResponse[] => {
-    const result = currentAuctions();
-    return result?.ok === true ? result.value : [];
-  });
-  const selectedAuction = createValueMemo((): AuctionSummaryResponse | null => {
-    const selected = selectedAuctionId();
-    return auctionOptions().find((auction) => auction.id === selected) ?? null;
-  });
+  const auctionOptions = rounds.options;
+  const selectedAuction = rounds.selected;
+  const selectedAuctionId = () => selectedAuction()?.id ?? "";
   const auctionGroups = createValueMemo((): readonly FulfillmentAuctionGroup[] => {
     if (worldScope() !== "all") {
       return [];
@@ -199,84 +110,58 @@ export function Fulfillment(): JSX.Element {
     return groups;
   });
 
+  const readRequest = createValueMemo(() => {
+    const auction = rounds.readable();
+    if (auction === null || bounds.blocked("page") || !lot.appliedValid()) {
+      return null;
+    }
+    const request: FulfillmentRequest = [
+      auction.id,
+      scopeSelection(),
+      auction.world,
+      rustTrim(lotFilter()) || null,
+      pageNumber(),
+      pageSize(),
+    ];
+    return { request, generation: auction.generation };
+  });
   const progress = createTaskResource(
-    () => {
-      const auctionId = selectedAuctionId();
-      const page = pageNumber();
-      const size = pageSize();
-      const selection = scopeSelection();
-      const auction = selectedAuction();
-      // 服务端请求始终带所选场次自己的世界，与范围是全部还是单个世界无关。
-      const world = auction?.world_id ?? "";
-      const rawLot = lotFilter();
-      const lot = rustTrim(rawLot);
-      // 地址栏带入的非法筛选不发请求：服务端只会回 400，格式提示由输入框承担。
-      const lotValid = validLotFilter(lot);
-      const requestedLot = lot === "" ? null : lot;
-      const directory = auctions();
-      // 同查询后台刷新保留完成快照；目录/分页切换后旧快照不得装配到新页面。
-      // 不直接订阅全局刷新：目录未就绪、失败或已不含该场时不发 GET。
-      const readable =
-        directory !== null &&
-        directory !== undefined &&
-        sameScopeSelection(directory.selection, selection) &&
-        directory.generation === refreshGeneration.peek() &&
-        directory.result.ok &&
-        auction !== null &&
-        auction.id === auctionId &&
-        directory.result.value.some((auction) => auction.id === auctionId) &&
-        lotValid;
-      return {
-        auctionId,
-        selection,
-        world,
-        lot: requestedLot,
-        lotFilter: rawLot,
-        page,
-        pageSize: size,
-        readable,
-      } as const;
-    },
-    async (requested, context): Promise<FulfillmentProgressSnapshot | null> => {
-      const request: FulfillmentRequest = [
-        requested.auctionId,
-        requested.selection,
-        requested.world,
-        requested.lot,
-        requested.page,
-        requested.pageSize,
-      ];
-      if (!requested.readable) {
-        return { request, result: ok(null) };
+    readRequest,
+    async (dependencies, context): Promise<FulfillmentProgressSnapshot | null> => {
+      if (dependencies === null || !routeStillOnPage()) {
+        return progress.peek() ?? null;
       }
+      const [auctionId, , world, lotId, page, size] = dependencies.request;
       const result = await fetchFulfillmentPage(
-        requested.auctionId,
-        requested.world,
-        requested.lot,
-        requested.page,
-        requested.pageSize,
+        auctionId,
+        world,
+        lotId,
+        page,
+        size,
         context.signal,
       );
-      if (!context.alive()) {
-        return null;
-      }
-      return { request, result };
+      return context.alive() ? { request: dependencies.request, result } : null;
     },
   );
 
   const currentResult = createValueMemo((): Result<FulfillmentRead | null, string> | null => {
     const snapshot = progress();
-    if (snapshot === null || snapshot === undefined) {
+    if (
+      snapshot === null ||
+      snapshot === undefined ||
+      !lot.appliedValid() ||
+      bounds.blocked("page")
+    ) {
       return null;
     }
-    const [auctionId, selection, world, lot, page, size] = snapshot.request;
+    const [auctionId, selection, world, requestLot, page, size] = snapshot.request;
     const selected = selectedAuction();
     if (
       selected === null ||
       auctionId !== selectedAuctionId() ||
       !sameScopeSelection(selection, scopeSelection()) ||
       world !== selected.world_id ||
-      (lot ?? "") !== rustTrim(lotFilter()) ||
+      (requestLot ?? "") !== rustTrim(lotFilter()) ||
       page !== pageNumber() ||
       size !== pageSize()
     ) {
@@ -287,23 +172,20 @@ export function Fulfillment(): JSX.Element {
 
   // 目录或当前查询还没有结果时由顶栏提示加载，正文留空。
   const body = createValueMemo((): FulfillmentBodyState => {
-    const auctionResult = currentAuctions();
     const progressResult = currentResult();
-    if (
-      auctionResult?.ok === false ||
-      (auctionResult?.ok === true && progressResult?.ok === false)
-    ) {
+    if (bounds.failed("page") || rounds.failed() || progressResult?.ok === false) {
       return { kind: "error" };
     }
-    if (auctionResult?.ok === true && auctionResult.value.length === 0) {
+    if (rounds.correctionFailed()) {
+      return { kind: "unselected" };
+    }
+    if (rounds.empty()) {
       return { kind: "empty-auctions" };
     }
-    // 已应用的筛选非法（来自地址栏）时没有发出请求：正文留空且不提示加载。
-    if (auctionResult?.ok === true && !validLotFilter(rustTrim(lotFilter()))) {
+    if (!lot.appliedValid()) {
       return { kind: "invalid-filter" };
     }
     if (
-      auctionResult?.ok === true &&
       progressResult?.ok === true &&
       progressResult.value !== null &&
       publicPageMatches(
@@ -325,7 +207,6 @@ export function Fulfillment(): JSX.Element {
   useContentLoading(loading);
 
   const lookup = useLotDetailLookup();
-  const invalidDraft = createValueMemo(() => !validLotFilter(rustTrim(lotDraft())));
 
   return (
     <LotDetailLookupContext value={lookup}>
@@ -344,19 +225,15 @@ export function Fulfillment(): JSX.Element {
               aria-label={t("fulfillment-round")}
               value={selectedAuctionId()}
               disabled={auctionOptions().length === 0}
-              onChange={(event) => {
-                const auctionId = event.currentTarget.value;
-                updatePublicQueryState(
-                  queryStateSignal,
-                  (query) => {
-                    query.auctionId = auctionId;
-                    query.bidLogLot = null;
-                    query.page = 1;
-                  },
-                  "push",
-                );
-              }}
+              onFocus={rounds.loadOptions}
+              onPointerDown={rounds.loadOptions}
+              onChange={(event) => rounds.choose(event.currentTarget)}
             >
+              <Show when={selectedAuctionId() === "" && auctionOptions().length > 0}>
+                <option value="" disabled selected>
+                  {t("round-select-placeholder")}
+                </option>
+              </Show>
               <Show
                 when={worldScope() === "all"}
                 fallback={
@@ -387,6 +264,11 @@ export function Fulfillment(): JSX.Element {
                 </For>
               </Show>
             </select>
+            <Show when={rounds.optionsFailed()}>
+              <button type="button" onClick={() => refreshPublicReads(refreshGeneration)}>
+                {t("data-retry")}
+              </button>
+            </Show>
             <Show when={selectedAuction()}>
               {(auction) => (
                 <>
@@ -414,28 +296,31 @@ export function Fulfillment(): JSX.Element {
               enterkeyhint="search"
               autocapitalize="none"
               spellcheck="false"
-              value={lotDraft()}
+              value={lot.draft()}
               placeholder={t("fulfillment-filter-placeholder")}
-              aria-invalid={invalidDraft() ? "true" : "false"}
-              aria-describedby={invalidDraft() ? LOT_FILTER_ERROR_ID : undefined}
-              onInput={(event) => {
-                submitLotFilter(event.currentTarget.value);
-              }}
+              aria-invalid={lot.interacted() && lot.draftError() !== null ? "true" : "false"}
+              aria-describedby={lot.draftError() === null ? undefined : LOT_FILTER_ERROR_ID}
+              onInput={(event) => lot.input(event.currentTarget.value)}
+              onBlur={lot.blur}
             />
-            <Show when={lotDraft() !== ""}>
-              <button type="button" onClick={() => clearLotFilter()}>
+            <Show when={lot.draft() !== "" || !lot.appliedValid()}>
+              <button type="button" onClick={lot.clear}>
                 {t("fulfillment-filter-clear")}
               </button>
             </Show>
-            <Show when={invalidDraft()}>
-              {/* 逐字输入 UUID 时每次按键都会判定；用礼貌播报，不打断输入。 */}
+            <Show when={lot.draftError() !== null}>
               <p
                 id={LOT_FILTER_ERROR_ID}
                 class="public-fulfillment__toolbar-error"
                 role="status"
                 aria-live="polite"
               >
-                {t("fulfillment-filter-invalid")}
+                {lot.draftError() === "duplicate"
+                  ? t("filter-error-duplicate")
+                  : t("fulfillment-filter-invalid")}
+                <Show when={lot.errorOriginal() !== null}>
+                  <bdi> {lot.errorOriginal()}</bdi>
+                </Show>
               </p>
             </Show>
           </div>
@@ -448,7 +333,9 @@ export function Fulfillment(): JSX.Element {
               <button
                 class="public-auction-empty__retry"
                 type="button"
-                onClick={() => refreshPublicReads(refreshGeneration)}
+                onClick={() =>
+                  bounds.failed("page") ? bounds.retry() : refreshPublicReads(refreshGeneration)
+                }
               >
                 {t("data-retry")}
               </button>
@@ -482,27 +369,10 @@ export function Fulfillment(): JSX.Element {
                   page={read().page}
                   currentPage={pageNumber()}
                   lotFilter={lotFilter()}
-                  onPageChange={(nextPage) => {
-                    // 从当前状态提交：仍在防抖中的筛选草稿不随翻页提交。写入失败时保留原页，
-                    // 查询入口不提交本地状态。
-                    updatePublicQueryState(
-                      queryStateSignal,
-                      (query) => {
-                        query.page = nextPage;
-                      },
-                      "push",
-                    );
-                  }}
-                  onPageClamp={(nextPage) => {
-                    // 纠偏无历史记录写回，不建立可返回的无效页条目。
-                    updatePublicQueryState(
-                      queryStateSignal,
-                      (query) => {
-                        query.page = nextPage;
-                      },
-                      "replace",
-                    );
-                  }}
+                  onPageChange={(nextPage) => updatePublicPage(queryStateSignal, nextPage, "push")}
+                  onPageClamp={(nextPage) =>
+                    routeStillOnPage() && updatePublicPage(queryStateSignal, nextPage, "replace")
+                  }
                   onPageSizeChange={(size) => updatePublicPageSize(queryStateSignal, size)}
                 />
               </>

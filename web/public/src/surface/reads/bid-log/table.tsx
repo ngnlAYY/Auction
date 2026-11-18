@@ -24,8 +24,8 @@ export function BidLogTable(props: {
   readonly currentPage: number;
   readonly world: string | null;
   readonly lotFilter: string;
-  readonly onPageChange: (page: number) => void;
-  readonly onPageClamp: (page: number) => void;
+  readonly onPageChange: (page: number) => boolean;
+  readonly onPageClamp: (page: number) => boolean;
   readonly onPageSizeChange: (size: number) => unknown;
 }): JSX.Element {
   const hasMore = createValueMemo(() => props.page.has_more ?? false);

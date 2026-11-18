@@ -23,6 +23,8 @@ import {
 } from "../catalog/detail/lookup";
 import { useContentLoading } from "../loading";
 import { normalizePublicPageSize, publicPageMatches } from "../pagination";
+import { usePublicPageBounds } from "../pagination/bounds";
+import { usePageRouteGuard } from "../query/route-page";
 import { updatePublicQueryState, usePublicQueryState } from "../query/state";
 import { CompensationPoolTable } from "./table";
 
@@ -48,11 +50,26 @@ export function poolPage(): JSX.Element {
   const selectedAuctionId = createValueMemo(() => queryStateSignal().auctionId ?? "");
   const movementPage = createValueMemo(() => queryStateSignal().movementPage);
   const movementPageSize = createValueMemo(() => queryStateSignal().movementPageSize);
+  const routeStillOnPage = usePageRouteGuard("CompensationPool");
+  const bounds = usePublicPageBounds(queryStateSignal, "CompensationPool", (query) =>
+    query.auctionId === null
+      ? [["page", query.pageSize]]
+      : [
+          ["page", query.pageSize],
+          ["movementPage", query.movementPageSize],
+        ],
+  );
   // 逐件明细的查看按钮在页内打开只读的拍品详情抽屉；读取任务归页面宿主，不随翻页卸载。
   const lookup = useLotDetailLookup();
   const pool = createTaskResource(
-    () => [refreshGeneration(), pageNumber(), pageSize()] as const,
-    async ([, requestedPage, requestedSize], context): Promise<CompensationPoolLoad> => {
+    () => [refreshGeneration(), pageNumber(), pageSize(), bounds.blocked("page")] as const,
+    async (
+      [, requestedPage, requestedSize, blocked],
+      context,
+    ): Promise<CompensationPoolLoad | null> => {
+      if (blocked) {
+        return null;
+      }
       const result = await fetchCompensationPool(requestedPage, requestedSize, context.signal);
       if (!context.alive()) {
         return {
@@ -67,8 +84,21 @@ export function poolPage(): JSX.Element {
     },
   );
   const lots = createTaskResource(
-    () => [refreshGeneration(), selectedAuctionId(), movementPage(), movementPageSize()] as const,
-    async ([, auctionId, page, pageSize], context): Promise<CompensationLotsLoad> => {
+    () =>
+      [
+        refreshGeneration(),
+        selectedAuctionId(),
+        movementPage(),
+        movementPageSize(),
+        bounds.blocked("movementPage"),
+      ] as const,
+    async (
+      [, auctionId, page, pageSize, blocked],
+      context,
+    ): Promise<CompensationLotsLoad | null> => {
+      if (blocked) {
+        return null;
+      }
       let result: Result<CompensationLotPage | null, string>;
       if (auctionId === "") {
         result = ok(null);
@@ -88,9 +118,12 @@ export function poolPage(): JSX.Element {
   );
 
   const current = createValueMemo((): Result<CompensationPoolPage, string> | null => {
+    if (bounds.blocked("page")) {
+      return bounds.failed("page") ? err("invalid_query") : null;
+    }
     const loaded = pool();
     if (
-      loaded === undefined ||
+      loaded == null ||
       loaded.requested[0] !== pageNumber() ||
       loaded.requested[1] !== pageSize()
     ) {
@@ -126,8 +159,11 @@ export function poolPage(): JSX.Element {
   });
   // 只保留同一轮次及同一分页请求的快照，避免旧数据触发新页码纠偏。
   const lotState = (): Result<CompensationLotPage | null, string> | null => {
+    if (bounds.blocked("movementPage")) {
+      return bounds.failed("movementPage") ? err("invalid_query") : null;
+    }
     const loaded = lots();
-    if (loaded === undefined) {
+    if (loaded == null) {
       return null;
     }
     return loaded.auctionId === selectedAuctionId() &&
@@ -150,7 +186,7 @@ export function poolPage(): JSX.Element {
             title={t("page-compensation-pool-title")}
             detail={t("data-error")}
             retryLabel={t("data-retry")}
-            onRetry={retry}
+            onRetry={() => (bounds.failed("page") ? bounds.retry() : retry())}
           />
         </Match>
         <Match when={currentMismatch()}>{null}</Match>
@@ -161,7 +197,7 @@ export function poolPage(): JSX.Element {
               selectedAuctionId={selectedAuctionId()}
               lots={lotState()}
               onPageChange={(nextPage) => {
-                updatePublicQueryState(
+                return updatePublicQueryState(
                   queryStateSignal,
                   (query) => {
                     query.page = Math.max(nextPage, 1);
@@ -172,7 +208,10 @@ export function poolPage(): JSX.Element {
                 );
               }}
               onPageClamp={(nextPage) => {
-                updatePublicQueryState(
+                if (!routeStillOnPage()) {
+                  return false;
+                }
+                return updatePublicQueryState(
                   queryStateSignal,
                   (query) => {
                     query.page = Math.max(nextPage, 1);
@@ -183,7 +222,7 @@ export function poolPage(): JSX.Element {
                 );
               }}
               onPageSizeChange={(size) => {
-                updatePublicQueryState(
+                return updatePublicQueryState(
                   queryStateSignal,
                   (query) => {
                     query.pageSize = normalizePublicPageSize(size);
@@ -205,7 +244,7 @@ export function poolPage(): JSX.Element {
                 );
               }}
               onLotPageChange={(nextPage) => {
-                updatePublicQueryState(
+                return updatePublicQueryState(
                   queryStateSignal,
                   (query) => {
                     query.movementPage = Math.max(nextPage, 1);
@@ -214,7 +253,10 @@ export function poolPage(): JSX.Element {
                 );
               }}
               onLotPageClamp={(nextPage) => {
-                updatePublicQueryState(
+                if (!routeStillOnPage()) {
+                  return false;
+                }
+                return updatePublicQueryState(
                   queryStateSignal,
                   (query) => {
                     query.movementPage = Math.max(nextPage, 1);
@@ -223,7 +265,7 @@ export function poolPage(): JSX.Element {
                 );
               }}
               onLotPageSizeChange={(size) => {
-                updatePublicQueryState(
+                return updatePublicQueryState(
                   queryStateSignal,
                   (query) => {
                     query.movementPageSize = normalizePublicPageSize(size);
@@ -232,7 +274,7 @@ export function poolPage(): JSX.Element {
                   "push",
                 );
               }}
-              onRetryLots={retry}
+              onRetryLots={() => (bounds.failed("movementPage") ? bounds.retry() : retry())}
             />
           )}
         </Match>

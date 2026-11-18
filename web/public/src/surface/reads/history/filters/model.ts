@@ -11,6 +11,10 @@ export type HistoryPriceError = "invalid";
 
 /** 价格历史筛选器向页面反馈的稳定错误分类。 */
 export type HistoryFilterError =
+  | "duplicate"
+  | "world_invalid"
+  | "player_length"
+  | "player_invalid"
   | "name_too_many_terms"
   | "name_term_too_long"
   | "name_too_long"
@@ -27,6 +31,23 @@ export type HistoryFilterError =
   | "maximum_price_k"
   | "maximum_price_m"
   | "price_range";
+
+/** URL 与表单共用的价格历史字段。 */
+export type HistoryFilterField =
+  | "world"
+  | "name"
+  | "from"
+  | "to"
+  | "minPrice"
+  | "maxPrice"
+  | "buyer"
+  | "seller";
+
+/** 同时保留每个字段的错误，修正一项不掩盖其他无效条件。 */
+export type HistoryFilterErrors = Partial<Record<HistoryFilterField, HistoryFilterError>>;
+
+/** 重复参数的全部原文，保留顺序供用户确认要提交的值。 */
+export type HistoryFilterDuplicates = Partial<Record<HistoryFilterField, readonly string[]>>;
 
 /** 价格单位对应的线上字符串。 */
 export function historyPriceUnitAsStr(unit: HistoryPriceUnit): string {

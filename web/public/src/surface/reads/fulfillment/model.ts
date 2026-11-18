@@ -4,7 +4,7 @@ import type { AuctionSummaryResponse } from "@auction/contracts/dto/public/catal
 import type { Result } from "@auction/web-shared/result";
 
 import type { FulfillmentRead } from "../../../api/fulfillment";
-import { type ScopeSelection, sameScopeSelection } from "../bid-log/scope-selection";
+import type { ScopeSelection } from "../bid-log/scope-selection";
 
 /** 写回输入筛选前的短暂防抖；地址栏只在用户停下后更新。 */
 export const LOT_FILTER_WRITE_DEBOUNCE_MILLIS = 300;
@@ -38,7 +38,8 @@ export type FulfillmentBodyState =
   | { readonly kind: "empty-auctions" }
   | { readonly kind: "invalid-filter" }
   | { readonly kind: "table"; readonly read: FulfillmentRead }
-  | { readonly kind: "loading" };
+  | { readonly kind: "loading" }
+  | { readonly kind: "unselected" };
 
 /** 一次进度读取的查询身份。`selection` 防止跨范围或跨代际复用旧快照，`world` 是所选场次
  * 自己的世界：既用于发往服务端的请求，也用于展示时核对场次世界。完成快照只有与当前场次、
@@ -51,27 +52,6 @@ export type FulfillmentRequest = readonly [
   page: number,
   pageSize: number,
 ];
-
-/** 已结算场次目录的读取快照。`selection` 把范围与本次选择的序号绑在一起，确保只消费当前
- * 这次范围选择确认过的目录；`generation` 仍是同一范围内的后台刷新代号，刷新期间保留的旧
- * 目录可以继续展示，但不能纠偏场次选择或放行进度读取。 */
-export interface FulfillmentAuctionsSnapshot {
-  readonly selection: ScopeSelection;
-  readonly generation: number;
-  readonly result: Result<AuctionSummaryResponse[], string>;
-}
-
-/** 当前可展示的已结算目录：只接受当前这次范围选择确认过的快照；范围相同但代际不同
- * （切走再切回）仍视为过期，同一范围内的后台刷新不改变选择身份，旧目录继续用于选项。 */
-export function currentFulfillmentAuctions(
-  snapshot: FulfillmentAuctionsSnapshot | null | undefined,
-  selection: ScopeSelection,
-): Result<AuctionSummaryResponse[], string> | null {
-  if (snapshot === null || snapshot === undefined) {
-    return null;
-  }
-  return sameScopeSelection(snapshot.selection, selection) ? snapshot.result : null;
-}
 
 /** 进度读取的完成快照及其查询身份；目录确认场次已不可见后，迟到结果不能恢复旧行和分页。 */
 export interface FulfillmentProgressSnapshot {

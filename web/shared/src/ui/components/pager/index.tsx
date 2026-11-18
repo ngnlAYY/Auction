@@ -4,7 +4,7 @@
 // 页码导航位于数量和跳页之前；数字组独立换行，响应式样式不复制或重挂载表单。
 
 import type { JSX } from "@solidjs/web";
-import { createEffect, For, Show } from "solid-js";
+import { createEffect, For, Show, untrack } from "solid-js";
 
 import { createCell } from "../../../reactive/cell";
 import { createValueMemo } from "../../../reactive/memo";
@@ -28,9 +28,12 @@ export interface PagerProps {
   readonly nextLabel: string;
   readonly jumpLabel: string;
   readonly jumpButtonLabel: string;
-  readonly onPageChange: (page: number) => void;
-  /** 非用户操作的页码纠偏；URL 调用方可替换历史记录，省略时沿用 `onPageChange`。 */
-  readonly onPageClamp?: ((page: number) => void) | null;
+  /** 返回 false 表示翻页未提交，恢复当前已应用的输入值。 */
+  readonly onPageChange: (page: number) => unknown;
+  /** 页码纠偏可替换历史记录，返回 false 时允许重试，省略时沿用 `onPageChange`。 */
+  readonly onPageClamp?: ((page: number) => unknown) | null;
+  /** 调用方提供写入失败提示与纠偏重试按钮文案。 */
+  readonly clampFailure?: { readonly message: string; readonly retryLabel: string };
   /** 非空时启用数字分页与原生数量选择器；选项和文案归调用方。 */
   readonly pageSizeOptions?: readonly number[];
   readonly pageSizeLabel?: string;
@@ -49,15 +52,14 @@ export interface PagerProps {
    * 提供后替代 `totalSummary`，避免同一工具条重复显示总数。
    */
   readonly rangeSummary?: ((value: readonly [number, number, number]) => string) | null;
-  readonly onPageSizeChange?: (size: number) => void;
+  readonly onPageSizeChange?: (size: number) => unknown;
 }
 
 /**
  * 展示长列表分页，并把目标页交给调用页面更新 URL 或查询状态。
  * - `total` 有值：后端返回总数的稳定分页；
  * - `total === null` + `hasMore`：游标语义的兼容投影，可跳转范围限制到当前已知下一页。
- * 钳制契约（不得改）：渲染期先把 `page` 钳制到合法范围得到 `validPage`，所有交互从
- * 钳制后页码出发；页码或总量变化后由纠偏 effect 通知父级把状态与 URL 收敛到合法页。
+ * 页码与总量变化时尝试纠偏。可选页受总量约束，显示值以已提交的页码为准。
  */
 export function Pager(props: PagerProps): JSX.Element {
   const pageSize = createValueMemo(() => Math.max(props.pageSize, 1));
@@ -73,20 +75,38 @@ export function Pager(props: PagerProps): JSX.Element {
           : 1 + Math.floor((total - 1) / pageSize());
     return Math.min(Math.max(raw, 1), Math.max(props.maxPage ?? Number.MAX_SAFE_INTEGER, 1));
   });
-  const validPage = createValueMemo(() => Math.min(Math.max(props.page, 1), totalPages()));
-  const jumpPage = createCell(validPage().toString());
+  const appliedPage = createValueMemo(() => Math.max(props.page, 1));
+  const validPage = createValueMemo(() => Math.min(appliedPage(), totalPages()));
+  const jumpPage = createCell(appliedPage().toString());
+  const clampRejected = createCell(false);
+  let jumpInput: HTMLInputElement | undefined;
 
-  createEffect(validPage, (current) => {
-    jumpPage.set(current.toString());
-  });
+  const showJumpPage = (page: number) => {
+    const value = page.toString();
+    jumpPage.set(value);
+    if (jumpInput !== undefined) jumpInput.value = value;
+  };
+  createEffect(appliedPage, showJumpPage);
 
-  // 普通 props 不会被 effect 自动追踪；总量收缩后也须让父级重新读取有效页。
-  const clampDependency = createValueMemo(() => [props.page, validPage()] as const);
-  createEffect(clampDependency, ([page, current]) => {
-    if (page !== current) {
-      (props.onPageClamp ?? props.onPageChange)(current);
+  const changePage = (page: number, write = props.onPageChange): boolean => {
+    if (write(page) === false) {
+      // 地址未写入时回显已提交页码，原生控件也可能持有尚未生效的输入。
+      showJumpPage(untrack(appliedPage));
+      return false;
     }
-  });
+    return true;
+  };
+
+  // 总数只决定可用页与纠偏目标。写入失败后由用户重试，避免反复改写同一地址。
+  const clampDependency = createValueMemo(() => [props.page, validPage()] as const);
+  const correctPage = ([page, target]: readonly [number, number]) =>
+    clampRejected.set(
+      page !== target && !changePage(target, props.onPageClamp ?? props.onPageChange),
+    );
+  createEffect(clampDependency, correctPage);
+  const retryClamp = () => {
+    if (clampRejected.peek()) correctPage(clampDependency());
+  };
 
   const jumpTarget = createValueMemo(() => {
     const clean = rustTrim(jumpPage());
@@ -97,7 +117,7 @@ export function Pager(props: PagerProps): JSX.Element {
     return Number.isSafeInteger(target) && target >= 1 && target <= totalPages() ? target : null;
   });
   const numbered = createValueMemo(() => (props.pageSizeOptions?.length ?? 0) > 0);
-  // 范围按钳制后的有效页计算，总数收缩的瞬间不会显示越界序号；空列表固定为 0–0。
+  // 只有已提交的页仍在范围内，才给它显示条目序号。
   const itemRange = createValueMemo((): readonly [number, number, number] | null => {
     const total = props.total ?? null;
     if (total === null) {
@@ -106,7 +126,10 @@ export function Pager(props: PagerProps): JSX.Element {
     if (total <= 0) {
       return [0, 0, 0];
     }
-    const current = validPage();
+    const current = appliedPage();
+    if (current !== validPage()) {
+      return null;
+    }
     const start = saturatingAdd(saturatingMultiply(current - 1, pageSize()), 1);
     const end = Math.min(saturatingMultiply(current, pageSize()), total);
     return [start, end, total];
@@ -121,7 +144,7 @@ export function Pager(props: PagerProps): JSX.Element {
   });
   const pageItems = createValueMemo(() => pageEntries(validPage(), totalPages()));
 
-  return (
+  const controls = (
     <nav class={numbered() ? "ui-pager ui-pager--numbered" : "ui-pager"} aria-label={props.label}>
       <Show when={numbered() && rangeText() !== null}>
         <span class="ui-pager__range">{rangeText()}</span>
@@ -130,7 +153,7 @@ export function Pager(props: PagerProps): JSX.Element {
         <button
           type="button"
           disabled={validPage() <= 1}
-          onClick={() => props.onPageChange(validPage() - 1)}
+          onClick={() => changePage(validPage() - 1)}
           aria-label={props.previousLabel}
         >
           <Show when={numbered()} fallback={props.previousLabel}>
@@ -154,10 +177,10 @@ export function Pager(props: PagerProps): JSX.Element {
                       type="button"
                       class="ui-pager__page"
                       aria-label={props.status([target(), totalPages()])}
-                      aria-current={target() === validPage() ? "page" : "false"}
+                      aria-current={target() === appliedPage() ? "page" : "false"}
                       onClick={() => {
-                        if (target() !== validPage()) {
-                          props.onPageChange(target());
+                        if (target() !== appliedPage()) {
+                          changePage(target());
                         }
                       }}
                     >
@@ -170,12 +193,12 @@ export function Pager(props: PagerProps): JSX.Element {
           </div>
         </Show>
         <span class={numbered() ? "ui-pager__sr-only" : "ui-pager__status"} aria-live="polite">
-          {props.status([validPage(), totalPages()])}
+          {props.status([appliedPage(), totalPages()])}
         </span>
         <button
           type="button"
           disabled={validPage() >= totalPages()}
-          onClick={() => props.onPageChange(saturatingAdd(validPage(), 1))}
+          onClick={() => changePage(saturatingAdd(validPage(), 1))}
           aria-label={props.nextLabel}
         >
           <Show when={numbered()} fallback={props.nextLabel}>
@@ -211,7 +234,7 @@ export function Pager(props: PagerProps): JSX.Element {
           event.preventDefault();
           const target = jumpTarget();
           if (target !== null) {
-            props.onPageChange(target);
+            changePage(target);
           }
         }}
       >
@@ -227,6 +250,9 @@ export function Pager(props: PagerProps): JSX.Element {
             inputmode="numeric"
             autocomplete="off"
             enterkeyhint="go"
+            ref={(element) => {
+              jumpInput = element;
+            }}
             value={jumpPage()}
             onInput={(event) => jumpPage.set(event.currentTarget.value)}
           />
@@ -236,6 +262,23 @@ export function Pager(props: PagerProps): JSX.Element {
         </button>
       </form>
     </nav>
+  );
+  return (
+    <>
+      {controls}
+      <Show when={props.clampFailure}>
+        {(failure) => (
+          <div class="ui-pager__error" role="status" aria-live="polite">
+            <Show when={clampRejected() && props.page !== validPage()}>
+              <span>{failure().message}</span>{" "}
+              <button type="button" onClick={retryClamp}>
+                {failure().retryLabel}
+              </button>
+            </Show>
+          </div>
+        )}
+      </Show>
+    </>
   );
 }
 

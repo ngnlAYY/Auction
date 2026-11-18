@@ -39,9 +39,9 @@ interface CompensationLotReversal {
 export function CompensationLotDetails(props: {
   readonly round: CompensationRound;
   readonly lots: Result<CompensationLotPage | null, string> | null;
-  readonly onLotPageChange: (page: number) => void;
-  readonly onLotPageClamp: (page: number) => void;
-  readonly onLotPageSizeChange: (size: number) => void;
+  readonly onLotPageChange: (page: number) => boolean;
+  readonly onLotPageClamp: (page: number) => boolean;
+  readonly onLotPageSizeChange: (size: number) => boolean;
   readonly onRetryLots: () => void;
 }): JSX.Element {
   useContentLoading(() => props.lots === null);

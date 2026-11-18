@@ -22,8 +22,8 @@ export function FulfillmentTable(props: {
   readonly page: FulfillmentPage;
   readonly currentPage: number;
   readonly lotFilter: string;
-  readonly onPageChange: (page: number) => void;
-  readonly onPageClamp: (page: number) => void;
+  readonly onPageChange: (page: number) => boolean;
+  readonly onPageClamp: (page: number) => boolean;
   readonly onPageSizeChange: (size: number) => unknown;
 }): JSX.Element {
   const auctionId = createValueMemo(() => props.page.auction.id);

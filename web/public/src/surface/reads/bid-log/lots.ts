@@ -2,12 +2,16 @@
 
 import { sleep } from "@auction/web-shared/platform/timer";
 import { type Cell, createCell } from "@auction/web-shared/reactive/cell";
+import { structuralEquals } from "@auction/web-shared/reactive/equality";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import { createTaskScope } from "@auction/web-shared/reactive/tasks";
 import { utf8ByteLength } from "@auction/web-shared/text";
+import { escapedSingleLineInput } from "@auction/web-shared/ui/validation";
 import { createEffect } from "solid-js";
 
+import { usePublicQuerySearch } from "../../pagination/location";
 import {
+  currentBrowserSearch,
   currentPublicPathname,
   type PublicBoardQuery,
   readPublicQuery,
@@ -23,42 +27,96 @@ function sameLotFilterScope(left: LotFilterScope, right: LotFilterScope): boolea
   return left.world === right.world && left.auctionId === right.auctionId;
 }
 
+function readLotValues(search: string): string[] {
+  return new URLSearchParams(search).getAll("lot");
+}
+
+function validLotDraft(value: string): boolean {
+  return !/\p{Cc}/u.test(value) && validLotFilter(rustTrim(value));
+}
+
 /** 出价记录与履约共用草稿；延时写入只属于输入时已应用的世界、场次与 lot 筛选。 */
 export function useLotFilterDraft(
   queryState: Cell<PublicBoardQuery>,
   pathname: string,
   debounceMillis: number,
-): {
-  readonly draft: Cell<string>;
-  input(value: string): void;
-  clear(): void;
-} {
+) {
   const tasks = createTaskScope();
+  const search = usePublicQuerySearch();
+  const appliedValues = createValueMemo(() => readLotValues(search()));
+  const appliedLot = createValueMemo(() => appliedValues()[0] ?? "");
+  const duplicate = createValueMemo(() => appliedValues().length > 1);
+  const appliedValid = createValueMemo(
+    () =>
+      !duplicate() &&
+      (appliedValues().length === 0 ||
+        (rustTrim(appliedLot()) !== "" && validLotDraft(appliedLot()))),
+  );
   let appliedScope: LotFilterScope = queryState.peek();
-  const draft = createCell(queryState.peek().bidLogLot ?? "");
+  const draft = createCell(appliedLot());
   const generation = createCell(0);
+  const edited = createCell(false);
+  const interacted = createCell(false);
   const selection = createValueMemo(() => {
     const query = queryState();
-    return { world: query.world, auctionId: query.auctionId, lot: query.bidLogLot ?? "" };
+    return { world: query.world, auctionId: query.auctionId, values: appliedValues() };
   });
+  const restore = (value: string) => {
+    edited.set(false);
+    interacted.set(false);
+    resetLotDraft(draft, generation, value);
+  };
+  let previousValues = appliedValues();
   createEffect(selection, (applied) => {
     const scopeChanged = !sameLotFilterScope(applied, appliedScope);
     appliedScope = applied;
+    const changed = !structuralEquals(applied.values, previousValues);
+    previousValues = applied.values;
     // 换场或换世界必须作废旧输入，即使两边都没有已应用的 lot 筛选。
     // 同范围写回后的值与草稿去空白后相同时，保留用户正在编辑的原文。
-    if (scopeChanged || rustTrim(draft.peek()) !== applied.lot) {
-      resetLotDraft(draft, generation, applied.lot);
+    const value = applied.values[0] ?? "";
+    if (
+      scopeChanged ||
+      (changed && rustTrim(draft.peek()) !== value) ||
+      applied.values.length > 1
+    ) {
+      restore(value);
     }
+  });
+  const draftError = createValueMemo(() => {
+    if (!edited()) {
+      return duplicate() ? "duplicate" : appliedValid() ? null : "invalid";
+    }
+    return interacted() && !validLotDraft(draft()) ? "invalid" : null;
+  });
+  const errorOriginal = createValueMemo(() => {
+    const error = draftError();
+    if (error === "duplicate") {
+      return appliedValues()
+        .map((value) => JSON.stringify(value))
+        .join(" / ");
+    }
+    return error === "invalid" ? escapedSingleLineInput(draft()) : null;
   });
   return {
     draft,
-    input(value) {
+    appliedLot,
+    appliedValid,
+    draftError,
+    errorOriginal,
+    interacted,
+    blur() {
+      if (edited.peek()) interacted.set(true);
+    },
+    input(value: string) {
       const lot = rustTrim(value);
       resetLotDraft(draft, generation, value);
-      if (!validLotFilter(lot)) {
+      edited.set(true);
+      if (!validLotDraft(value)) {
         return;
       }
       const requested = queryState.peek();
+      const rawValues = readLotValues(currentBrowserSearch());
       const requestedGeneration = generation.peek();
       tasks.spawn(async (context) => {
         await sleep(debounceMillis, context.signal);
@@ -71,14 +129,25 @@ export function useLotFilterDraft(
         }
         // 地址可能先于查询状态更新；旧草稿不能覆盖另一世界、场次或已应用的 lot。
         const current = readPublicQuery();
-        if (sameLotFilterScope(requested, current) && requested.bidLogLot === current.bidLogLot) {
-          applyLotFilter(queryState, lot);
+        if (
+          sameLotFilterScope(requested, current) &&
+          structuralEquals(rawValues, readLotValues(currentBrowserSearch())) &&
+          !applyLotFilter(
+            queryState,
+            lot,
+            rawValues.length > 0 && (rawValues.length > 1 || rawValues[0] !== lot),
+          )
+        ) {
+          restore(rawValues[0] ?? "");
         }
       });
     },
     clear() {
-      resetLotDraft(draft, generation, "");
-      applyLotFilter(queryState, "");
+      // 清除与普通输入共用 URL 提交点；失败时恢复未被改写的已应用值。
+      const values = readLotValues(currentBrowserSearch());
+      const written =
+        currentPublicPathname() === pathname && applyLotFilter(queryState, "", values.length > 0);
+      restore(written ? "" : (values[0] ?? ""));
     },
   };
 }
@@ -103,9 +172,13 @@ export function resetLotDraft(draft: Cell<string>, generation: Cell<number>, val
 
 /** 把合法的 lot 筛选写入地址栏（无历史记录）并回到第一页，写入成功后才提交已应用状态；
  * 失败时保留原状态，之后输入同一值仍会重试。筛选未变时不改动，保留当前页码。 */
-export function applyLotFilter(queryState: Cell<PublicBoardQuery>, lot: string): boolean {
+export function applyLotFilter(
+  queryState: Cell<PublicBoardQuery>,
+  lot: string,
+  force = false,
+): boolean {
   const nextLot = lot !== "" ? lot : null;
-  if (queryState.peek().bidLogLot === nextLot) {
+  if (!force && queryState.peek().bidLogLot === nextLot) {
     return true;
   }
   return updatePublicQueryState(

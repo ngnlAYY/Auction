@@ -96,10 +96,10 @@ function hasControlCharacter(value: string): boolean {
 
 /** 名称字段复用 HTTP 的空白/逗号拆词和应用端口字节边界；缩写片段均须命中装备名。 */
 export function historyNameValue(value: string): Result<string | null, HistoryFilterError> {
-  const trimmed = rustTrim(value);
-  if (utf8ByteLength(trimmed) > 1_024) {
+  if (utf8ByteLength(value) > 1_024) {
     return err("name_too_long");
   }
+  const trimmed = rustTrim(value);
   let termCount = 0;
   let termTooLong = false;
   let invalid = false;
@@ -143,12 +143,31 @@ export function historyEquipmentNameQuery(equipmentName: string): string | null 
   return normalized.ok ? normalized.value : null;
 }
 
-/** 将名称字段的稳定错误分类转换为本 surface 的文案。 */
-export function historyNameError(error: HistoryFilterError | null): string | null {
+/** HTTP 按完整名称比较；按原文校验字节与控制字符，不能先 trim 再丢掉非法条件。 */
+export function historyPlayerValue(value: string): Result<string | null, HistoryFilterError> {
+  if (utf8ByteLength(value) > 256) {
+    return err("player_length");
+  }
+  if (hasControlCharacter(value)) {
+    return err("player_invalid");
+  }
+  return ok(value === "" ? null : value);
+}
+
+/** 字段错误的本地化提示，供提交与地址栏恢复共用。 */
+export function historyFilterErrorMessage(error: HistoryFilterError | null): string | null {
   if (error === null) {
     return null;
   }
   switch (error) {
+    case "duplicate":
+      return t("filter-error-duplicate");
+    case "world_invalid":
+      return t("history-filter-error-world");
+    case "player_length":
+      return t("history-filter-error-player-length");
+    case "player_invalid":
+      return t("history-filter-error-player-invalid");
     case "name_too_many_terms":
       return t("history-filter-error-name-terms");
     case "name_term_too_long":
@@ -158,112 +177,24 @@ export function historyNameError(error: HistoryFilterError | null): string | nul
     case "name_invalid":
       return t("history-filter-error-name-invalid");
     case "from_date_incomplete":
-    case "from_date_invalid":
     case "to_date_incomplete":
-    case "to_date_invalid":
-    case "date_range":
-    case "minimum_price_c":
-    case "minimum_price_k":
-    case "minimum_price_m":
-    case "maximum_price_c":
-    case "maximum_price_k":
-    case "maximum_price_m":
-    case "price_range":
-      return null;
-    default:
-      return unreachable(error);
-  }
-}
-
-/** 将页面错误分类转换为对应的本地化日期错误。 */
-export function historyDateError(error: HistoryFilterError | null, from: boolean): string | null {
-  if (error === null) {
-    return null;
-  }
-  switch (error) {
-    case "from_date_incomplete":
-      return from ? t("history-filter-error-date-incomplete") : null;
-    case "to_date_incomplete":
-      return from ? null : t("history-filter-error-date-incomplete");
+      return t("history-filter-error-date-incomplete");
     case "from_date_invalid":
-      return from ? t("history-filter-error-date-invalid") : null;
     case "to_date_invalid":
-      return from ? null : t("history-filter-error-date-invalid");
+      return t("history-filter-error-date-invalid");
     case "date_range":
-      return from ? t("history-filter-error-date-range") : null;
-    case "name_too_many_terms":
-    case "name_term_too_long":
-    case "name_too_long":
-    case "name_invalid":
+      return t("history-filter-error-date-range");
     case "minimum_price_c":
-    case "minimum_price_k":
-    case "minimum_price_m":
-    case "maximum_price_c":
-    case "maximum_price_k":
-    case "maximum_price_m":
-    case "price_range":
-      return null;
-    default:
-      return unreachable(error);
-  }
-}
-
-/** 将页面错误分类转换为对应的本地化金额错误。 */
-export function historyPriceError(
-  error: HistoryFilterError | null,
-  minimum: boolean,
-): string | null {
-  if (error === null) {
-    return null;
-  }
-  if (minimum) {
-    switch (error) {
-      case "minimum_price_c":
-        return t("history-filter-error-price-c");
-      case "minimum_price_k":
-        return t("history-filter-error-price-k");
-      case "minimum_price_m":
-        return t("history-filter-error-price-m");
-      case "price_range":
-        return t("history-filter-error-price-range");
-      case "name_too_many_terms":
-      case "name_term_too_long":
-      case "name_too_long":
-      case "name_invalid":
-      case "from_date_incomplete":
-      case "from_date_invalid":
-      case "to_date_incomplete":
-      case "to_date_invalid":
-      case "date_range":
-      case "maximum_price_c":
-      case "maximum_price_k":
-      case "maximum_price_m":
-        return null;
-      default:
-        return unreachable(error);
-    }
-  }
-  switch (error) {
     case "maximum_price_c":
       return t("history-filter-error-price-c");
+    case "minimum_price_k":
     case "maximum_price_k":
       return t("history-filter-error-price-k");
+    case "minimum_price_m":
     case "maximum_price_m":
       return t("history-filter-error-price-m");
-    case "name_too_many_terms":
-    case "name_term_too_long":
-    case "name_too_long":
-    case "name_invalid":
-    case "from_date_incomplete":
-    case "from_date_invalid":
-    case "to_date_incomplete":
-    case "to_date_invalid":
-    case "date_range":
-    case "minimum_price_c":
-    case "minimum_price_k":
-    case "minimum_price_m":
     case "price_range":
-      return null;
+      return t("history-filter-error-price-range");
     default:
       return unreachable(error);
   }

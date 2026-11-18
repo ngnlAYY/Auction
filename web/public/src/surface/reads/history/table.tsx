@@ -30,9 +30,9 @@ export function PriceHistoryTable(props: {
   readonly currentPage: number;
   readonly onBuyerFilter: (buyer: string) => void;
   readonly onSellerFilter: (seller: string) => void;
-  readonly onPageChange: (page: number) => void;
-  readonly onPageClamp: (page: number) => void;
-  readonly onPageSizeChange: (size: number) => void;
+  readonly onPageChange: (page: number) => boolean;
+  readonly onPageClamp: (page: number) => boolean;
+  readonly onPageSizeChange: (size: number) => boolean;
 }): JSX.Element {
   const pageSize = createValueMemo(() => Math.max(props.page.page_size, 1));
   const empty = createValueMemo(() => props.page.rows.length === 0);

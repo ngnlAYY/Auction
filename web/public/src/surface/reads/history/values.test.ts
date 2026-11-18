@@ -7,9 +7,12 @@ const {
   historyApplyChangesQuery,
   historyFormFilters,
   historyHasRequestCondition,
+  historyQueryErrors,
+  historyQueryFromUrl,
   historyResetChangesQuery,
   historyWorldDraftForApply,
   historyWorldDraftValid,
+  normalizeHistoryQuery,
 } = await import("./values");
 const { priceHistoryQueryDefault } = await import("../../../api/model");
 const { publicBoardQueryDefault } = await import("../../query");
@@ -40,6 +43,37 @@ test("world_adds_to_the_history_filter_count：世界与其他条件一起累计
 test("all_worlds_with_a_name_starts_the_history_query：全部世界加名称仍应查询", () => {
   const query = { ...priceHistoryQueryDefault(), world: null, name: "Phase Robe" };
   expect(historyHasRequestCondition(query)).toBe(true);
+});
+
+test("买卖家按原文的 UTF-8 字节数和控制字符判断，避免放宽装备查询", () => {
+  const query = { ...priceHistoryQueryDefault(), name: "Phase Robe" };
+  expect(historyQueryErrors({ ...query, buyer: `甲${"é".repeat(126)}A` })).toEqual({});
+  expect(historyQueryErrors({ ...query, buyer: "甲".repeat(86) })).toEqual({
+    buyer: "player_length",
+  });
+  expect(historyQueryErrors({ ...query, seller: "Bob\t" })).toEqual({ seller: "player_invalid" });
+});
+
+test("倒置的深链保留日期并阻止查询，同日区间有效", () => {
+  const from = "2026-06-30";
+  const to = "2026-06-01";
+  const query = normalizeHistoryQuery({
+    ...publicBoardQueryDefault(),
+    historyFrom: from,
+    historyTo: to,
+  });
+  expect([query.historyFrom, query.historyTo]).toEqual([from, to]);
+  expect(historyQueryErrors({ ...priceHistoryQueryDefault(), from, to })).toEqual({
+    from: "date_range",
+  });
+  expect(historyQueryErrors({ ...priceHistoryQueryDefault(), from, to: from })).toEqual({});
+  expect(historyQueryErrors({ ...priceHistoryQueryDefault(), from: "1970-01-01" })).toEqual({
+    from: "from_date_invalid",
+  });
+  expect(historyQueryErrors({ ...priceHistoryQueryDefault(), to: "9999-12-30" })).toEqual({
+    to: "to_date_invalid",
+  });
+  expect(historyQueryErrors({ ...priceHistoryQueryDefault(), to: "9999-12-29" })).toEqual({});
 });
 
 test("world_changes_sync_the_form_draft：世界变化进入表单草稿投影", () => {
@@ -112,10 +146,57 @@ test("reset_writes_when_only_world_is_applied：只有世界被选时清空会�
     pageSize: 20,
     movementPageSize: 20,
   };
-  expect(historyResetChangesQuery({ ...cleared, world: "main" })).toBe(true);
-  expect(historyResetChangesQuery(cleared)).toBe(false);
-  expect(historyResetChangesQuery({ ...cleared, world: "all" })).toBe(false);
-  expect(historyResetChangesQuery({ ...cleared, historyName: "Phase Robe" })).toBe(true);
-  expect(historyResetChangesQuery({ ...cleared, historySort: "price_asc" })).toBe(true);
-  expect(historyResetChangesQuery({ ...cleared, page: 2 })).toBe(true);
+  const shouldReset = (search: string, board = cleared) =>
+    historyResetChangesQuery(historyQueryFromUrl(board, search), board.historyGroup);
+  expect(shouldReset("?world=main")).toBe(true);
+  expect(shouldReset("")).toBe(false);
+  expect(shouldReset("?world=all")).toBe(false);
+  expect(shouldReset("?name=Phase+Robe")).toBe(true);
+  expect(shouldReset("?buyer=+")).toBe(true);
+  expect(shouldReset("?buyer=&buyer=")).toBe(true);
+  expect(shouldReset("?buyer=")).toBe(false);
+  expect(shouldReset("?history_sort=price_asc", { ...cleared, historySort: "price_asc" })).toBe(
+    true,
+  );
+  expect(shouldReset("?page=2", { ...cleared, page: 2 })).toBe(true);
+});
+
+test("重复字段与非法日期仍能从原始链接逐项还原", () => {
+  const search = new URLSearchParams([
+    ["name", "Robe"],
+    ["buyer", "Alice"],
+    ["buyer", "Bob"],
+    ["seller", "Eve\r"],
+    ["from", "2026-02-30"],
+  ]);
+  const { query, errors, duplicates } = historyQueryFromUrl(
+    publicBoardQueryDefault(),
+    search.toString(),
+  );
+  expect(query).toMatchObject({
+    name: "Robe",
+    buyer: "Alice",
+    seller: "Eve\r",
+    from: "2026-02-30",
+  });
+  expect(errors).toEqual({
+    buyer: "duplicate",
+    seller: "player_invalid",
+    from: "from_date_invalid",
+  });
+  expect(duplicates).toEqual({ buyer: ["Alice", "Bob"] });
+  search.delete("buyer");
+  search.set("seller", "Eve");
+  search.set("from", "2028-02-29");
+  expect(historyQueryFromUrl(publicBoardQueryDefault(), search.toString()).errors).toEqual({});
+});
+
+test("区间任一端是重复参数时优先保留字段错误", () => {
+  const board = publicBoardQueryDefault();
+  expect(historyQueryFromUrl(board, "?from=2026-07-31&to=2026-07-01&to=2026-08-01").errors).toEqual(
+    { to: "duplicate" },
+  );
+  expect(historyQueryFromUrl(board, "?min_price=20&max_price=10&max_price=30").errors).toEqual({
+    maxPrice: "duplicate",
+  });
 });

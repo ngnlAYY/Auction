@@ -1,84 +1,108 @@
-// 价格历史筛选器的表单和字段控件。
-// 世界是“筛选条件”面板里的一项，按钮只改草稿，点「应用」才生效，缺省为全部世界；Rust 版把
-// 世界下拉框放在表单的主筛选行。
+// 价格历史表单的字段、交互时校验与错误关联。
 
+import { sleep } from "@auction/web-shared/platform/timer";
+import { createCell } from "@auction/web-shared/reactive/cell";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
+import { createTaskScope } from "@auction/web-shared/reactive/tasks";
 import { t } from "@auction/web-shared/ui/i18n";
+import { escapedSingleLineInput } from "@auction/web-shared/ui/validation";
 import type { JSX } from "@solidjs/web";
 import { For, onSettled, Show } from "solid-js";
 
 import { worldLabel } from "../../../board/world";
 import { HistoryApply } from "../../../presentation/mobile";
 import type { WorldSwitchOption } from "../../../query";
-import type { HistoryFilterError, HistoryPriceUnit } from "./model";
+import type { HistoryFilterField, HistoryPriceUnit } from "./model";
 import { historyPriceUnitAsStr, historyPriceUnitFromStr } from "./model";
-import {
-  historyDateError,
-  historyMonthLabel,
-  historyNameError,
-  historyNameValue,
-  historyPriceError,
-} from "./validation";
+import type { HistoryDraft, useHistoryFilters } from "./state";
+import { historyFilterErrorMessage, historyMonthLabel } from "./validation";
 
 const HISTORY_MONTHS = Object.freeze(Array.from({ length: 12 }, (_, index) => index + 1));
 
-/** 渲染价格历史的主筛选表单。 */
+interface FieldFeedback {
+  readonly id: string;
+  readonly field: HistoryFilterField;
+  invalid(): "true" | "false";
+  description(): string | undefined;
+  message(): string | null;
+  original(): string | null;
+  edit(patch: Partial<HistoryDraft>): void;
+  blur(): void;
+}
+
+/** 历史筛选表单；深链错误随原文显示，交互后再标记输入控件。 */
 export function PriceHistoryFilters(props: {
-  readonly world: string;
+  readonly filters: ReturnType<typeof useHistoryFilters>;
   readonly worldOptions: readonly WorldSwitchOption[];
-  readonly name: string;
-  readonly fromMonth: string;
-  readonly fromYear: string;
-  readonly toMonth: string;
-  readonly toYear: string;
-  readonly minimumPrice: string;
-  readonly minimumPriceUnit: HistoryPriceUnit;
-  readonly maximumPrice: string;
-  readonly maximumPriceUnit: HistoryPriceUnit;
-  readonly buyer: string;
-  readonly seller: string;
   readonly activeFilterCount: number;
-  readonly settingsOpen: boolean;
-  readonly filterError: HistoryFilterError | null;
-  readonly setWorld: (world: string) => void;
-  readonly setName: (name: string) => void;
-  readonly setFromMonth: (month: string) => void;
-  readonly setFromYear: (year: string) => void;
-  readonly setToMonth: (month: string) => void;
-  readonly setToYear: (year: string) => void;
-  readonly setMinimumPrice: (price: string) => void;
-  readonly setMinimumPriceUnit: (unit: HistoryPriceUnit) => void;
-  readonly setMaximumPrice: (price: string) => void;
-  readonly setMaximumPriceUnit: (unit: HistoryPriceUnit) => void;
-  readonly setBuyer: (buyer: string) => void;
-  readonly setSeller: (seller: string) => void;
-  readonly setSettingsOpen: (open: boolean) => void;
-  readonly setFilterError: (error: HistoryFilterError | null) => void;
-  readonly onApply: () => void;
-  readonly onReset: () => void;
 }): JSX.Element {
-  const currentError = createValueMemo(() => props.filterError);
-  // 与顶部按钮组相同的条件：至少两个开放世界，或地址正指向一个已关闭世界的禁用项。
-  const worldFilterVisible = createValueMemo(() => {
-    const options = props.worldOptions;
-    return (
-      options.filter((option) => !option.disabled).length > 1 ||
-      options.some((option) => option.disabled)
-    );
-  });
-  const nameError = createValueMemo(() => historyNameError(currentError()));
-  const nameDescription = createValueMemo(() =>
-    nameError() !== null
-      ? "public-history-name-hint public-history-name-error"
-      : "public-history-name-hint",
+  const filters = props.filters;
+  const draft = filters.draft;
+  const worldFilterVisible = createValueMemo(
+    () =>
+      filters.errors().world !== undefined ||
+      props.worldOptions.filter((option) => !option.disabled).length > 1 ||
+      props.worldOptions.some((option) => option.disabled),
   );
-  const fromDateError = createValueMemo(() => historyDateError(currentError(), true));
-  const toDateError = createValueMemo(() => historyDateError(currentError(), false));
-  const minimumPriceError = createValueMemo(() => historyPriceError(currentError(), true));
-  const maximumPriceError = createValueMemo(() => historyPriceError(currentError(), false));
+  const announcer = createCell("");
+  const announcementTasks = createTaskScope();
+  let announcement: ReturnType<typeof announcementTasks.spawn> | null = null;
+  const clearAnnouncement = () => {
+    announcement?.cancel();
+    announcer.set("");
+  };
+  const field = (key: HistoryFilterField, label: () => string): FieldFeedback => {
+    const id = `public-history-${key}-error`;
+    const error = () => filters.errors()[key]?.code ?? null;
+    return {
+      id,
+      field: key,
+      invalid: () => (error() !== null && filters.interacted().includes(key) ? "true" : "false"),
+      description: () => (error() !== null ? id : undefined),
+      message: () => historyFilterErrorMessage(error()),
+      original: () => {
+        const input = filters.errors()[key]?.input;
+        if (input == null) return null;
+        if (typeof input !== "string") {
+          return input.map((value) => JSON.stringify(value)).join(" / ");
+        }
+        // 原生搜索框会移除换行，年月选择器也不能显示精确到日的区间端点。
+        return key === "world" || key === "from" || key === "to"
+          ? JSON.stringify(input)
+          : escapedSingleLineInput(input);
+      },
+      edit(patch) {
+        clearAnnouncement();
+        filters.updateField(key, patch);
+      },
+      blur() {
+        const message = historyFilterErrorMessage(filters.blur(key));
+        if (message !== null) {
+          clearAnnouncement();
+          // 等下一字段获得焦点后再读错误，避免打断读屏对新字段的提示。
+          announcement = announcementTasks.spawn(async (context) => {
+            await sleep(500, context.signal);
+            if (context.alive()) {
+              announcer.set(`${label()} ${message}`);
+            }
+          });
+        }
+      },
+    };
+  };
+
+  const name = field("name", () => t("history-filter-name"));
+  const world = field("world", () => t("history-filter-world"));
+  const from = field("from", () => t("history-filter-from"));
+  const to = field("to", () => t("history-filter-to"));
+  const minimum = field("minPrice", () => t("history-filter-min-price"));
+  const maximum = field("maxPrice", () => t("history-filter-max-price"));
+  const buyer = field("buyer", () => t("history-filter-buyer"));
+  const seller = field("seller", () => t("history-filter-seller"));
+
   let settingsToggle: HTMLButtonElement | undefined;
   const closeSettings = () => {
-    props.setSettingsOpen(false);
+    filters.settingsOpen.set(false);
     const toggle = settingsToggle;
     if (toggle !== undefined) {
       onSettled(() => {
@@ -90,9 +114,17 @@ export function PriceHistoryFilters(props: {
     <form
       class="public-history-filters"
       autocomplete="off"
+      novalidate
       onSubmit={(event) => {
         event.preventDefault();
-        props.onApply();
+        clearAnnouncement();
+        const form = event.currentTarget;
+        const firstError = filters.apply();
+        if (firstError !== null) {
+          onSettled(() => {
+            form.querySelector<HTMLElement>(`[data-history-field="${firstError}"]`)?.focus();
+          });
+        }
       }}
     >
       <div class="public-history-primary-filters">
@@ -100,27 +132,22 @@ export function PriceHistoryFilters(props: {
           <span>{t("history-filter-name")}</span>
           <input
             id="public-history-name"
+            data-history-field="name"
             name="name"
             type="search"
             enterkeyhint="search"
             autocapitalize="none"
             spellcheck="false"
-            value={props.name}
+            value={draft().name}
             placeholder={t("history-filter-name-placeholder")}
-            maxlength="1024"
-            aria-invalid={nameError() !== null ? "true" : "false"}
-            aria-describedby={nameDescription()}
-            onInput={(event) => {
-              props.setName(event.currentTarget.value);
-              props.setFilterError(null);
-            }}
-            onBlur={() => {
-              const name = historyNameValue(props.name);
-              const error = name.ok ? null : name.error;
-              if (error !== null || historyNameError(props.filterError) !== null) {
-                props.setFilterError(error);
-              }
-            }}
+            aria-invalid={name.invalid()}
+            aria-describedby={
+              name.message() === null
+                ? "public-history-name-hint"
+                : `public-history-name-hint ${name.id}`
+            }
+            onInput={(event) => name.edit({ name: event.currentTarget.value })}
+            onBlur={name.blur}
           />
         </label>
         <div class="public-history-filter-toolbar">
@@ -128,11 +155,11 @@ export function PriceHistoryFilters(props: {
             type="button"
             class="public-history-settings-toggle"
             aria-controls="public-history-settings"
-            aria-expanded={props.settingsOpen ? "true" : "false"}
+            aria-expanded={filters.settingsOpen() ? "true" : "false"}
             ref={(element) => {
               settingsToggle = element;
             }}
-            onClick={() => props.setSettingsOpen(!props.settingsOpen)}
+            onClick={() => filters.settingsOpen.update((open) => !open)}
           >
             <span aria-hidden="true">⚙</span>
             {t("history-filter-settings")}
@@ -150,12 +177,11 @@ export function PriceHistoryFilters(props: {
       <p id="public-history-name-hint" class="public-history-name-hint">
         {t("history-filter-name-hint")}
       </p>
-      <Show when={nameError() !== null}>
-        <p id="public-history-name-error" class="public-history-field-error" role="alert">
-          {nameError()}
-        </p>
-      </Show>
-      <Show when={props.settingsOpen}>
+      <HistoryFieldError feedback={name} />
+      <p class="ui-pager__sr-only" role="status" aria-live="polite">
+        {announcer()}
+      </p>
+      <Show when={filters.settingsOpen()}>
         {/* biome-ignore lint/a11y/useSemanticElements: 源码使用 role=group 的 div，保留既有 DOM。 */}
         <div
           id="public-history-settings"
@@ -190,10 +216,12 @@ export function PriceHistoryFilters(props: {
                     {(option) => (
                       <button
                         type="button"
+                        data-history-field={option().disabled ? undefined : "world"}
                         class="public-auction-filter__tab"
-                        aria-pressed={props.world === option().value ? "true" : "false"}
+                        aria-pressed={draft().world === option().value ? "true" : "false"}
+                        aria-describedby={world.description()}
                         disabled={option().disabled}
-                        onClick={() => props.setWorld(option().value)}
+                        onClick={() => world.edit({ world: option().value })}
                       >
                         {option().value === "all"
                           ? t("auction-history-world-all")
@@ -202,97 +230,76 @@ export function PriceHistoryFilters(props: {
                     )}
                   </For>
                 </div>
+                <HistoryFieldError feedback={world} />
               </fieldset>
             </Show>
             <HistoryDateFilter
-              fieldName="from"
+              feedback={from}
               label={t("history-filter-from")}
               monthLabel={t("history-filter-from-month")}
               yearLabel={t("history-filter-from-year")}
-              month={props.fromMonth}
-              year={props.fromYear}
-              error={fromDateError()}
-              setMonth={props.setFromMonth}
-              setYear={props.setFromYear}
-              setFilterError={props.setFilterError}
+              month={draft().fromMonth}
+              year={draft().fromYear}
+              setMonth={(fromMonth) => from.edit({ fromMonth })}
+              setYear={(fromYear) => from.edit({ fromYear })}
             />
             <HistoryDateFilter
-              fieldName="to"
+              feedback={to}
               label={t("history-filter-to")}
               monthLabel={t("history-filter-to-month")}
               yearLabel={t("history-filter-to-year")}
-              month={props.toMonth}
-              year={props.toYear}
-              error={toDateError()}
-              setMonth={props.setToMonth}
-              setYear={props.setToYear}
-              setFilterError={props.setFilterError}
+              month={draft().toMonth}
+              year={draft().toYear}
+              setMonth={(toMonth) => to.edit({ toMonth })}
+              setYear={(toYear) => to.edit({ toYear })}
             />
             <HistoryPriceFilter
+              feedback={minimum}
               fieldName="minimum_price"
               label={t("history-filter-min-price")}
               valueLabel={t("history-filter-min-price-value")}
               unitLabel={t("history-filter-min-price-unit")}
-              priceValue={props.minimumPrice}
-              priceUnit={props.minimumPriceUnit}
-              error={minimumPriceError()}
-              setPriceValue={props.setMinimumPrice}
-              setPriceUnit={props.setMinimumPriceUnit}
-              setFilterError={props.setFilterError}
+              priceValue={draft().minimumPrice}
+              priceUnit={draft().minimumPriceUnit}
+              setPriceValue={(minimumPrice) => minimum.edit({ minimumPrice })}
+              setPriceUnit={(minimumPriceUnit) => minimum.edit({ minimumPriceUnit })}
             />
             <HistoryPriceFilter
+              feedback={maximum}
               fieldName="maximum_price"
               label={t("history-filter-max-price")}
               valueLabel={t("history-filter-max-price-value")}
               unitLabel={t("history-filter-max-price-unit")}
-              priceValue={props.maximumPrice}
-              priceUnit={props.maximumPriceUnit}
-              error={maximumPriceError()}
-              setPriceValue={props.setMaximumPrice}
-              setPriceUnit={props.setMaximumPriceUnit}
-              setFilterError={props.setFilterError}
+              priceValue={draft().maximumPrice}
+              priceUnit={draft().maximumPriceUnit}
+              setPriceValue={(maximumPrice) => maximum.edit({ maximumPrice })}
+              setPriceUnit={(maximumPriceUnit) => maximum.edit({ maximumPriceUnit })}
             />
-            <label class="public-history-filter-cell">
-              <span>{t("history-filter-buyer")}</span>
-              <input
-                name="buyer"
-                type="search"
-                enterkeyhint="search"
-                autocapitalize="none"
-                spellcheck="false"
-                value={props.buyer}
-                maxlength="256"
-                onInput={(event) => {
-                  props.setBuyer(event.currentTarget.value);
-                  props.setFilterError(null);
-                }}
-              />
-            </label>
-            <label class="public-history-filter-cell">
-              <span>{t("history-filter-seller")}</span>
-              <input
-                name="seller"
-                type="search"
-                enterkeyhint="search"
-                autocapitalize="none"
-                spellcheck="false"
-                value={props.seller}
-                maxlength="256"
-                onInput={(event) => {
-                  props.setSeller(event.currentTarget.value);
-                  props.setFilterError(null);
-                }}
-              />
-            </label>
+            <HistoryPlayerFilter
+              feedback={buyer}
+              label={t("history-filter-buyer")}
+              value={draft().buyer}
+              setValue={(value) => buyer.edit({ buyer: value })}
+            />
+            <HistoryPlayerFilter
+              feedback={seller}
+              label={t("history-filter-seller")}
+              value={draft().seller}
+              setValue={(value) => seller.edit({ seller: value })}
+            />
           </div>
           <p class="public-history-price-hint">{t("history-filter-price-hint")}</p>
-          <p class="public-history-player-hint">{t("history-filter-player-hint")}</p>
+          <p id="public-history-player-hint" class="public-history-player-hint">
+            {t("history-filter-player-hint")}
+          </p>
           <div class="public-history-filter-actions">
-            {/* 同步清除已应用的筛选条件（含世界，回到全部世界），并移除旧结果。 */}
             <button
               type="button"
               class="public-history-filter-actions__clear"
-              onClick={() => props.onReset()}
+              onClick={() => {
+                clearAnnouncement();
+                filters.reset();
+              }}
             >
               {t("history-filter-clear")}
             </button>
@@ -304,34 +311,79 @@ export function PriceHistoryFilters(props: {
   );
 }
 
-/** 渲染一个年月组合筛选字段。 */
+function HistoryFieldError(props: { readonly feedback: FieldFeedback }): JSX.Element {
+  return (
+    <Show when={props.feedback.message() !== null}>
+      <p id={props.feedback.id} class="public-history-field-error">
+        {props.feedback.message()}
+        <Show when={props.feedback.original()}>
+          {(raw) => (
+            <>
+              {" "}
+              <bdi>{raw()}</bdi>
+            </>
+          )}
+        </Show>
+      </p>
+    </Show>
+  );
+}
+
+function HistoryPlayerFilter(props: {
+  readonly feedback: FieldFeedback;
+  readonly label: string;
+  readonly value: string;
+  readonly setValue: (value: string) => void;
+}): JSX.Element {
+  const id = `public-history-${props.feedback.field}`;
+  return (
+    <div class="public-history-filter-cell">
+      <label for={id}>{props.label}</label>
+      <input
+        id={id}
+        data-history-field={props.feedback.field}
+        name={props.feedback.field}
+        type="search"
+        enterkeyhint="search"
+        autocapitalize="none"
+        spellcheck="false"
+        value={props.value}
+        aria-invalid={props.feedback.invalid()}
+        aria-describedby={
+          props.feedback.message() === null
+            ? "public-history-player-hint"
+            : `public-history-player-hint ${props.feedback.id}`
+        }
+        onInput={(event) => props.setValue(event.currentTarget.value)}
+        onBlur={() => props.feedback.blur()}
+      />
+      <HistoryFieldError feedback={props.feedback} />
+    </div>
+  );
+}
+
 function HistoryDateFilter(props: {
-  readonly fieldName: string;
+  readonly feedback: FieldFeedback;
   readonly label: string;
   readonly monthLabel: string;
   readonly yearLabel: string;
   readonly month: string;
   readonly year: string;
-  readonly error: string | null;
   readonly setMonth: (month: string) => void;
   readonly setYear: (year: string) => void;
-  readonly setFilterError: (error: HistoryFilterError | null) => void;
 }): JSX.Element {
-  const errorId = `public-history-${props.fieldName}-error`;
   return (
     <fieldset class="public-history-filter-cell">
       <legend>{props.label}</legend>
       <div class="public-history-compound public-history-date">
         <select
-          name={`${props.fieldName}_month`}
-          aria-describedby={props.error === null ? undefined : errorId}
+          name={`${props.feedback.field}_month`}
+          aria-describedby={props.feedback.description()}
           aria-label={props.monthLabel}
-          aria-invalid={props.error !== null ? "true" : "false"}
+          aria-invalid={props.feedback.invalid()}
           value={props.month}
-          onChange={(event) => {
-            props.setMonth(event.currentTarget.value);
-            props.setFilterError(null);
-          }}
+          onChange={(event) => props.setMonth(event.currentTarget.value)}
+          onBlur={() => props.feedback.blur()}
         >
           <option value="">{t("history-filter-month")}</option>
           <For each={HISTORY_MONTHS} keyed={false}>
@@ -343,83 +395,67 @@ function HistoryDateFilter(props: {
           </For>
         </select>
         <input
-          name={`${props.fieldName}_year`}
-          aria-describedby={props.error === null ? undefined : errorId}
-          type="number"
-          min="1"
-          max="9999"
+          name={`${props.feedback.field}_year`}
+          data-history-field={props.feedback.field}
+          aria-describedby={props.feedback.description()}
+          type="text"
           inputmode="numeric"
           aria-label={props.yearLabel}
-          aria-invalid={props.error !== null ? "true" : "false"}
+          aria-invalid={props.feedback.invalid()}
           placeholder={t("history-filter-year")}
           value={props.year}
-          onInput={(event) => {
-            props.setYear(event.currentTarget.value);
-            props.setFilterError(null);
-          }}
+          onInput={(event) => props.setYear(event.currentTarget.value)}
+          onBlur={() => props.feedback.blur()}
         />
       </div>
-      <Show when={props.error !== null}>
-        <span id={errorId} class="public-history-field-error" role="alert">
-          {props.error}
-        </span>
-      </Show>
+      <HistoryFieldError feedback={props.feedback} />
     </fieldset>
   );
 }
 
-/** 渲染一个带 K/M 单位选择的价格字段。 */
 function HistoryPriceFilter(props: {
+  readonly feedback: FieldFeedback;
   readonly fieldName: string;
   readonly label: string;
   readonly valueLabel: string;
   readonly unitLabel: string;
   readonly priceValue: string;
   readonly priceUnit: HistoryPriceUnit;
-  readonly error: string | null;
   readonly setPriceValue: (price: string) => void;
   readonly setPriceUnit: (unit: HistoryPriceUnit) => void;
-  readonly setFilterError: (error: HistoryFilterError | null) => void;
 }): JSX.Element {
-  const errorId = `public-history-${props.fieldName}-error`;
   return (
     <fieldset class="public-history-filter-cell">
       <legend>{props.label}</legend>
       <div class="public-history-compound public-history-price-control">
         <input
           name={props.fieldName}
-          aria-describedby={props.error === null ? undefined : errorId}
+          data-history-field={props.feedback.field}
+          aria-describedby={props.feedback.description()}
           type="text"
           inputmode={props.priceUnit === "C" ? "numeric" : "decimal"}
-          maxlength="32"
           aria-label={props.valueLabel}
-          aria-invalid={props.error !== null ? "true" : "false"}
+          aria-invalid={props.feedback.invalid()}
           value={props.priceValue}
-          onInput={(event) => {
-            props.setPriceValue(event.currentTarget.value);
-            props.setFilterError(null);
-          }}
+          onInput={(event) => props.setPriceValue(event.currentTarget.value)}
+          onBlur={() => props.feedback.blur()}
         />
         <select
           name={`${props.fieldName}_unit`}
-          aria-describedby={props.error === null ? undefined : errorId}
+          aria-describedby={props.feedback.description()}
           aria-label={props.unitLabel}
           value={historyPriceUnitAsStr(props.priceUnit)}
-          onChange={(event) => {
-            props.setPriceUnit(historyPriceUnitFromStr(event.currentTarget.value));
-            props.setFilterError(null);
-          }}
+          onChange={(event) =>
+            props.setPriceUnit(historyPriceUnitFromStr(event.currentTarget.value))
+          }
+          onBlur={() => props.feedback.blur()}
         >
           <option value="C">C</option>
           <option value="K">K</option>
           <option value="M">M</option>
         </select>
       </div>
-      <Show when={props.error !== null}>
-        <span id={errorId} class="public-history-field-error" role="alert">
-          {props.error}
-        </span>
-      </Show>
+      <HistoryFieldError feedback={props.feedback} />
     </fieldset>
   );
 }
