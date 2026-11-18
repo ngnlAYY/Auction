@@ -276,3 +276,49 @@ fn error(status: StatusCode, code: &'static str, message: &'static str) -> Respo
     )
         .into_response()
 }
+
+#[cfg(test)]
+mod tests {
+    use auction_contracts::AdminMailTemplateUpdateRequest;
+    use axum::{
+        Router,
+        body::{Body, to_bytes},
+        http::{Request, StatusCode, header},
+        middleware, routing,
+    };
+    use tower::ServiceExt;
+
+    use super::{enforce, put};
+
+    #[tokio::test]
+    async fn oversized_mail_template_matches_the_shared_error_receipt() {
+        let router = Router::new()
+            .route("/", routing::put(|| async { StatusCode::NO_CONTENT }))
+            .layer(middleware::from_fn_with_state(put(96 << 10), enforce));
+        let request = |body| {
+            let payload = AdminMailTemplateUpdateRequest {
+                command_id: "18a0b123-9dfe-4d62-9c11-ba321129ef1c".to_owned(),
+                expected_revision: 5,
+                body: Some(body),
+            };
+            Request::put("/")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(serde_json::to_vec(&payload).unwrap()))
+                .unwrap()
+        };
+
+        let oversized = router.clone().oneshot(request("\"".repeat(50_000))).await.unwrap();
+        assert_eq!(oversized.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        let body = to_bytes(oversized.into_body(), 4 << 10).await.unwrap();
+        let fixture = include_str!(
+            "../../../auction-contracts/tests/fixtures/admin/mail-template-body-too-large.json"
+        );
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
+            serde_json::from_str::<serde_json::Value>(fixture).unwrap(),
+        );
+
+        let within_limit = router.oneshot(request("x".repeat(64 << 10))).await.unwrap();
+        assert_eq!(within_limit.status(), StatusCode::NO_CONTENT);
+    }
+}

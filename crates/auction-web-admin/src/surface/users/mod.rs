@@ -2,8 +2,11 @@
 //! 页面只维护筛选、表单和安全用户投影；页级命令宿主冻结完整负载和 command_id，
 //! 原样重试并使用返回的 state_version，一次性 Key 由稳定页面接收。
 
+#[cfg(test)]
+use std::{cell::Cell, rc::Rc};
+
 use auction_web_shared::t;
-use auction_web_shared::{AsyncState, AsyncStateKind};
+use auction_web_shared::{AsyncState, AsyncStateKind, use_popstate_revision};
 use dioxus::prelude::*;
 
 use super::pagination::{use_admin_page, use_admin_pagination};
@@ -16,30 +19,40 @@ use crate::api::{AdminUserStatusFilter, fetch_admin_users};
 
 mod create;
 mod dialogs;
+pub(super) mod fields;
 mod row;
 mod table;
 
-use create::{
-    AdminUserCreateForm, AdminUserCreated, AdminUserGeneratedKey, AdminUserGeneratedKeyDialog,
-};
-use table::AdminUserTable;
+use create::{AdminUserCreateForm, AdminUserGeneratedKeyDialog, UserKeyDelivery};
+use table::{AdminUserFilters, AdminUserTable};
+
+#[cfg(test)]
+pub(super) struct UsersPageFixture {
+    pub fetch: Box<dyn Fn(String, i64, i64) -> crate::api::AdminUserPage>,
+    pub retry_correction: Cell<Option<EventHandler<()>>>,
+}
 
 /// 加载并展示 Admin 用户管理页面。
 pub(super) fn page() -> Element {
     // 已应用的名称筛选、状态筛选与分页跟地址栏双向同步；名称输入框草稿只在提交时入 URL。
     let query = use_users_query_state();
     let query_state = query.state;
+    let history_revision = use_signal(|| 0_u64);
+    use_popstate_revision(history_revision);
     let requested_query = use_memo(move || {
         let current = query_state.read();
         (current.name.clone(), current.status, current.page)
     });
-    // 草稿初值取自地址栏恢复的已应用筛选，刷新后表单与列表保持一致；之后的编辑不落 URL。
-    let name_draft = use_signal(move || query_state.peek().name.clone());
+    // 主动排序与翻页保留草稿；历史导航用独立版本恢复地址里的文本，即使筛选内容相同。
+    let applied_filter = use_memo(move || {
+        let current = query_state.read();
+        (current.name.clone(), current.status)
+    });
     let mut reload_generation = use_signal(|| 0_u64);
     let mut create_open = use_signal(|| false);
-    let mut generated_key = use_signal(|| None::<AdminUserGeneratedKey>);
     let mut action_busy = use_signal(|| false);
     let command_gate = use_pending_command_gate();
+    let delivery = UserKeyDelivery { gate: command_gate, generated: use_signal(|| None) };
     let pending = use_pending_commands_with_gate(reload_generation, Some(command_gate));
     // effect 仅用于既有控件的忙态展示；首次提交/重试在执行边界同步占用同一门禁。
     use_effect(move || action_busy.set(pending.any_busy() || command_gate.blocked()));
@@ -52,11 +65,49 @@ pub(super) fn page() -> Element {
             let _ = reload_generation();
             requested_query()
         },
-        |(name, status, page), size| fetch_admin_users(name, status, page, size),
+        |(name, status, page), size| async move {
+            #[cfg(test)]
+            if let Some(fixture) = try_consume_context::<Rc<UsersPageFixture>>() {
+                return Ok((fixture.fetch)(name, page, size));
+            }
+            fetch_admin_users(name, status, page, size).await
+        },
     );
 
-    let state = users.read_unchecked().clone();
+    let mut correction_failed = use_signal(|| false);
+    let mut correct_page = move || {
+        let failed = match users.read().as_ref() {
+            Some(Ok(page)) => !query_state().correct_page(query_state, &page.pagination),
+            _ => false,
+        };
+        correction_failed.set(failed);
+    };
+    use_effect(correct_page);
+    let retry_correction = use_callback(move |()| correct_page());
+    // 用户页先按权威页数纠偏，避免旧页交给仍把纠偏当作翻页的 AdminPager 包装。
+    let result = users.read_unchecked();
+    let needs_correction = result.as_ref().is_some_and(|result| {
+        result
+            .as_ref()
+            .is_ok_and(|page| query_state.read().page_correction(&page.pagination).is_some())
+    });
+    let state = result.as_ref().filter(|_| !needs_correction).cloned();
     let content = match state {
+        None if needs_correction && correction_failed() => {
+            #[cfg(test)]
+            if let Some(fixture) = try_consume_context::<Rc<UsersPageFixture>>() {
+                fixture.retry_correction.set(Some(retry_correction));
+            }
+            rsx! {
+                AsyncState {
+                    kind: AsyncStateKind::Error,
+                    title: t!("admin-users-page-correction-failed"),
+                    detail: "",
+                    retry_label: t!("admin-retry"),
+                    on_retry: retry_correction,
+                }
+            }
+        }
         None => rsx! {
             AsyncState {
                 kind: AsyncStateKind::Loading,
@@ -74,49 +125,28 @@ pub(super) fn page() -> Element {
             }
         },
         Some(Ok(page)) => {
-            let mut on_name_apply = query.clone();
-            let mut on_status_change = query.clone();
-            let mut on_page_change = query.clone();
-            let mut on_sort_change = query;
             rsx! {
             AdminUserTable {
                 page,
                 pagination,
-                name_draft,
-                status: query_state().status,
                 sort: query_state().sort,
                 direction: query_state().direction,
-                on_name_apply: move |name: String| {
-                    let mut next = query_state();
-                    next.name = name;
-                    next.page = 1;
-                    on_name_apply.push(next);
-                },
-                on_status_change: move |status: AdminUserStatusFilter| {
-                    let mut next = query_state();
-                    next.status = status;
-                    next.page = 1;
-                    on_status_change.push(next);
-                },
                 on_page_change: move |next_page| {
                     let mut next = query_state();
                     next.page = next_page;
-                    on_page_change.push(next);
+                    next.apply(query_state);
                 },
                 on_sort_change: move |(sort, direction)| {
                     let mut next = query_state();
                     next.sort = sort;
                     next.direction = direction;
-                    on_sort_change.push(next);
+                    next.apply(query_state);
                 },
                 reload_generation,
                 action_busy,
                 action_feedback,
                 create_notice,
-                on_generated_key: move |key| {
-                    command_gate.hold_result();
-                    generated_key.set(Some(key));
-                },
+                delivery,
             }
             }
         }
@@ -144,31 +174,38 @@ pub(super) fn page() -> Element {
             }
             if create_open() {
                 AdminUserCreateForm {
-                    command_gate,
-                    on_created: move |created: AdminUserCreated| {
-                        create_notice.set(Some(t!(
-                            "admin-users-created",
-                            username: created.username
-                        )));
-                        if let Some(key) = created.generated_key {
-                            command_gate.hold_result();
-                            generated_key.set(Some(key));
-                        }
-                        create_open.set(false);
-                    },
-                    on_close: move |_| create_open.set(false),
+                    delivery,
+                    open: create_open,
+                    notice: create_notice,
                 }
             }
             PendingCommandPanel { owner: pending }
+            AdminUserFilters {
+                applied: applied_filter,
+                history_revision,
+                on_name_apply: move |name: String| {
+                    let mut next = query_state();
+                    if next.name == name && next.page == 1 {
+                        reload_generation.set(reload_generation().saturating_add(1));
+                    } else {
+                        next.name = name;
+                        next.page = 1;
+                        next.apply(query_state);
+                    }
+                },
+                on_status_change: move |status: AdminUserStatusFilter| {
+                    let mut next = query_state();
+                    next.status = status;
+                    next.page = 1;
+                    next.apply(query_state);
+                },
+            }
             {content}
         }
-        if let Some(key) = generated_key() {
+        if let Some(key) = (delivery.generated)() {
             AdminUserGeneratedKeyDialog {
                 generated: key,
-                on_close: move |_| {
-                    generated_key.set(None);
-                    command_gate.acknowledge();
-                },
+                on_close: move |_| delivery.acknowledge(),
             }
         }
     }

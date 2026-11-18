@@ -6,8 +6,10 @@ use auction_contracts::{AdminRulesCandidateRequest, AdminRulesPublishRequest, Ap
 pub(crate) use auction_contracts::{
     AdminRulesCandidateResponse as AdminRulesCandidate, AdminRulesResponse as AdminRules,
 };
-use gloo_net::http::Request;
+use gloo_net::http::{Method, Request};
 
+use super::failure::AdminWriteEndpoint;
+use super::transport::send_json_write;
 use super::{
     AdminApiFailure, MAX_JSON_SAFE_INTEGER, fetch_csrf_token, invalid_request_error,
     invalid_response_error, response_failure, send_get, send_request, valid_admin_time,
@@ -111,20 +113,13 @@ pub(crate) async fn publish_admin_rules(
 ) -> Result<AdminRules, AdminRulesApiError> {
     let request =
         AdminRulesPublishRequest { command_id, expected_revision, locale, title, markdown };
-    let csrf_token =
-        fetch_csrf_token().await.map_err(|code| AdminApiFailure { status: None, code })?;
-    let response = send_request(|abort_signal| {
-        Request::put(kind.api_path())
-            .abort_signal(abort_signal)
-            .header("x-csrf-token", &csrf_token)
-            .json(&request)
-            .map_err(invalid_request_error)
-    })
-    .await
-    .map_err(AdminApiFailure::client)?;
-    if !response.ok() {
-        return Err(response_failure(response).await);
-    }
+    let endpoint = match kind {
+        AdminDocumentKind::Rules => AdminWriteEndpoint::RulesPublish,
+        AdminDocumentKind::About => AdminWriteEndpoint::AboutPublish,
+    };
+    let response = send_json_write(kind.api_path(), Method::PUT, &request)
+        .await
+        .map_err(|failure| failure.at_write_endpoint(endpoint))?;
     let payload: ApiResponse<AdminRules> = response
         .json()
         .await

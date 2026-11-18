@@ -7,6 +7,7 @@ use auction_contracts::{
 use gloo_net::http::Request;
 use uuid::Uuid;
 
+use super::failure::AdminWriteEndpoint;
 use super::{
     AdminApiFailure, fetch_csrf_token, invalid_request_error, invalid_response_error,
     response_error, response_failure, send_get, send_request,
@@ -14,6 +15,9 @@ use super::{
 
 /// 单个模板正文的字节上限，与服务端一致。
 const MAX_TEMPLATE_BODY_BYTES: usize = 64 * 1024;
+const MAX_WATCH_BODY_BYTES: usize = 16 * 1024;
+// 镜像 auction-http 的 server/surfaces.rs 中 PUT /api/v1/admin/mail-templates/{template_key}。
+const MAX_TEMPLATE_REQUEST_BYTES: usize = 96 * 1024;
 
 pub(crate) async fn fetch_mail_templates() -> Result<Vec<AdminMailTemplateDto>, String> {
     let response = send_get("/api/v1/admin/mail-templates").await?;
@@ -70,6 +74,36 @@ pub(crate) struct MailTemplateAttempt {
     pub(crate) body: Option<String>,
 }
 
+#[cfg(test)]
+type MailTemplateSubmitStub =
+    std::rc::Rc<dyn Fn(&str) -> Result<AdminMailTemplateDto, AdminApiFailure>>;
+
+#[cfg(test)]
+impl MailTemplateAttempt {
+    pub(crate) fn stub_submit(
+        submit: impl Fn(&str) -> Result<AdminMailTemplateDto, AdminApiFailure> + 'static,
+    ) {
+        dioxus::prelude::provide_context(std::rc::Rc::new(submit) as MailTemplateSubmitStub);
+    }
+}
+
+fn encode_template_request(
+    command_id: Uuid,
+    expected_revision: i64,
+    body: Option<String>,
+) -> Result<String, String> {
+    let command = AdminMailTemplateUpdateRequest {
+        command_id: command_id.to_string(),
+        expected_revision,
+        body,
+    };
+    let encoded = serde_json::to_string(&command).map_err(invalid_request_error)?;
+    if encoded.len() > MAX_TEMPLATE_REQUEST_BYTES {
+        return Err("body_too_large".to_owned());
+    }
+    Ok(encoded)
+}
+
 /// 提交保存或恢复默认；只接受与命令一致的已接受结果。
 pub(crate) async fn submit_mail_template(
     attempt: &MailTemplateAttempt,
@@ -81,24 +115,33 @@ pub(crate) async fn submit_mail_template(
     {
         return Err(AdminApiFailure::client("invalid_request"));
     }
-    let command = AdminMailTemplateUpdateRequest {
-        command_id: attempt.command_id.to_string(),
-        expected_revision: attempt.expected_revision,
-        body: attempt.body.clone(),
-    };
+    let body = encode_template_request(
+        attempt.command_id,
+        attempt.expected_revision,
+        attempt.body.clone(),
+    )
+    .map_err(AdminApiFailure::client)?;
+    #[cfg(test)]
+    if let Some(submit) = dioxus::prelude::try_consume_context::<MailTemplateSubmitStub>() {
+        return submit(&body)
+            .map_err(|failure| failure.at_write_endpoint(AdminWriteEndpoint::MailTemplate));
+    }
     let url = format!("/api/v1/admin/mail-templates/{}", attempt.key);
     let csrf_token = fetch_csrf_token().await.map_err(AdminApiFailure::client)?;
     let response = send_request(|abort_signal| {
         Request::put(&url)
             .abort_signal(abort_signal)
             .header("x-csrf-token", &csrf_token)
-            .json(&command)
+            .header("Content-Type", "application/json")
+            .body(body)
             .map_err(invalid_request_error)
     })
     .await
     .map_err(AdminApiFailure::client)?;
     if !response.ok() {
-        return Err(response_failure(response).await);
+        return Err(response_failure(response)
+            .await
+            .at_write_endpoint(AdminWriteEndpoint::MailTemplate));
     }
     let payload: ApiResponse<AdminMailTemplateUpdateResponse> = response
         .json()
@@ -128,9 +171,22 @@ pub(crate) enum MailTemplateBodyProblem {
     UnknownPlaceholder,
     /// 缺少必需占位符。
     MissingPlaceholder,
+    /// 装备拒收原因缺失。
+    MissingRejectionReason,
+    /// 私信缺少与发送证明绑定的固定句。
+    MissingNotificationIdentity,
+    /// 被超提醒超过冻结投递正文的字节上限。
+    WatchBodyTooLong,
+    /// 完整编码后的写请求超出路由的请求体上限。
+    RequestTooLarge,
 }
 
-/// 按模板的占位符规则检查草稿正文。各模板的专属要求（如私信必须保留身份句）由服务端判断。
+impl MailTemplateBodyProblem {
+    /// 私信发送证明绑定的固定句，与服务端逐字一致。
+    pub(crate) const NOTIFICATION_IDENTITY: &'static str = "Notification: {notification_id}.";
+}
+
+/// 按正文格式、占位符及模板专属要求检查草稿；旧的不可用正文也可读取并修正。
 pub(crate) fn mail_template_body_problem(
     template: &AdminMailTemplateDto,
     body: &str,
@@ -168,7 +224,28 @@ pub(crate) fn mail_template_body_problem(
     if template.required_placeholders.iter().any(|name| !seen.contains(&name.as_str())) {
         return Some(MailTemplateBodyProblem::MissingPlaceholder);
     }
-    None
+    let problem = match template.key.as_str() {
+        "auction_equipment_rejected"
+            if !seen.contains(&"reason_code") && !seen.contains(&"reason_text") =>
+        {
+            Some(MailTemplateBodyProblem::MissingRejectionReason)
+        }
+        "lot_watch_pm" if !body.contains(MailTemplateBodyProblem::NOTIFICATION_IDENTITY) => {
+            Some(MailTemplateBodyProblem::MissingNotificationIdentity)
+        }
+        "lot_watch" | "lot_watch_pm" if body.len() > MAX_WATCH_BODY_BYTES => {
+            Some(MailTemplateBodyProblem::WatchBodyTooLong)
+        }
+        _ => None,
+    };
+    problem.or_else(|| {
+        // UUID 的规范文本固定为 36 字节。确认前用等长值预检，HTTP 发送复用同一个编码器。
+        match encode_template_request(Uuid::nil(), template.revision, Some(body.to_owned())) {
+            Ok(_) => None,
+            Err(code) if code == "body_too_large" => Some(MailTemplateBodyProblem::RequestTooLarge),
+            Err(_error) => Some(MailTemplateBodyProblem::Format),
+        }
+    })
 }
 
 #[cfg(test)]
@@ -231,6 +308,56 @@ mod tests {
                 "{body:?}"
             );
         }
+    }
+
+    #[test]
+    fn template_specific_content_is_required() {
+        let mut rejected = payout();
+        rejected.key = "auction_equipment_rejected".to_owned();
+        rejected.required_placeholders.clear();
+        rejected.allowed_placeholders = vec!["reason_code".to_owned(), "reason_text".to_owned()];
+        assert!(mail_template_body_problem(&rejected, "Rejected").is_some());
+        for body in ["{reason_code}", "{reason_text}"] {
+            assert_eq!(mail_template_body_problem(&rejected, body), None);
+        }
+
+        let mut pm = payout();
+        pm.key = "lot_watch_pm".to_owned();
+        pm.required_placeholders = vec!["item_name".into(), "lot_code".into(), "amount".into()];
+        pm.allowed_placeholders = pm.required_placeholders.clone();
+        pm.allowed_placeholders.push("notification_id".into());
+        assert!(
+            mail_template_body_problem(&pm, "{item_name} {lot_code} {amount} {notification_id}")
+                .is_some()
+        );
+        assert_eq!(
+            mail_template_body_problem(
+                &pm,
+                "{item_name} {lot_code} {amount}\nNotification: {notification_id}."
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn notification_template_limit_counts_utf8_bytes() {
+        let mut template = payout();
+        template.key = "lot_watch".to_owned();
+        let prefix = "{item_name} {amount} {reference} ";
+        let remaining = (16 << 10) - prefix.len();
+        let limit = format!("{prefix}{}{}", "界".repeat(remaining / 3), "x".repeat(remaining % 3));
+        assert_eq!(mail_template_body_problem(&template, &limit), None);
+        assert!(mail_template_body_problem(&template, &(limit + "x")).is_some());
+    }
+
+    #[test]
+    fn template_check_counts_json_escapes_without_reducing_the_body_limit() {
+        let mut template = payout();
+        template.key = "auction_no_attachments".into();
+        template.required_placeholders.clear();
+        template.allowed_placeholders.clear();
+        assert!(mail_template_body_problem(&template, &"\"".repeat(50_000)).is_some());
+        assert_eq!(mail_template_body_problem(&template, &"x".repeat(64 * 1024)), None);
     }
 
     #[test]

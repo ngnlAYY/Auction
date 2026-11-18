@@ -41,6 +41,7 @@ pub fn lot_status_label(status: &str) -> String {
 /// 分类顺序：先匹配 Admin 业务码（含被基础层归入 Unauthenticated 的 `invalid_credentials`），
 /// 未命中再走共享基础层 [`base_api_error_message`] 的通用码 / `http_*` 兜底，最后落到通用兜底译文。
 pub fn admin_api_error_message(code: &str) -> String {
+    let code = crate::api::AdminApiFailure::display_code(code);
     match code {
         "admin_pagination_bounds" => return t!("admin-pagination-bounds"),
         "invalid_auction_command" => return t!("admin-error-invalid-auction-command"),
@@ -212,5 +213,49 @@ impl Drop for UnloadWarning {
             "beforeunload",
             self.callback.as_ref().unchecked_ref(),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use auction_web_shared::i18n::{DEFAULT_ADMIN_LOCALE, build_bundle};
+    use auction_web_shared::t;
+    use dioxus::prelude::*;
+    use dioxus_i18n::prelude::try_use_init_i18n_from_bundle;
+
+    use super::admin_api_error_message;
+    use crate::surface::ADMIN_LOCALE_CATALOG;
+
+    fn with_admin_i18n() -> Element {
+        try_use_init_i18n_from_bundle(|| {
+            build_bundle(
+                &DEFAULT_ADMIN_LOCALE,
+                ADMIN_LOCALE_CATALOG.default_ftl,
+                &DEFAULT_ADMIN_LOCALE,
+                None,
+            )
+        })
+        .unwrap();
+        rsx! { div {} }
+    }
+
+    #[test]
+    fn error_copy_uses_the_stable_code_for_each_prefix() {
+        let mut dom = VirtualDom::new(with_admin_i18n);
+        dom.rebuild_in_place();
+        dom.in_scope(ScopeId::APP, || {
+            assert_eq!(
+                admin_api_error_message("not_sent:request_timeout"),
+                t!("admin-error-request-timeout"),
+            );
+            assert_eq!(
+                admin_api_error_message("write_endpoint:rules-publish:409:state_conflict"),
+                t!("admin-error-conflict"),
+            );
+            assert_eq!(
+                admin_api_error_message("invalid_mail_template"),
+                t!("admin-error-invalid-mail-template"),
+            );
+        });
     }
 }

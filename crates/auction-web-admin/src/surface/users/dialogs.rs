@@ -4,8 +4,8 @@ use auction_web_shared::t;
 use dioxus::prelude::*;
 use uuid::Uuid;
 
-use super::create::AdminUserGeneratedKey;
-use crate::api::AdminUserStatusFilter;
+use super::create::UserKeyDelivery;
+use crate::api::{AdminApiFailure, AdminUserStatusFilter};
 use crate::surface::AdminActionFeedback;
 use crate::surface::pending::{PendingCommands, set_if_alive};
 
@@ -58,14 +58,14 @@ pub(super) fn AdminUserDialogActions(
     }
 }
 
-/// 一次性 Key 直接交付 users 页面持有的回调，不缓存到未决集合或行 Scope。
+/// 一次性 Key 直接交付用户页持有的状态，行与弹窗卸载不影响交付。
 pub(super) fn run_user_action<F>(
     owner: PendingCommands,
     entity: String,
     action: String,
     feedback: Signal<Option<AdminActionFeedback>>,
     reload_generation: Signal<u64>,
-    on_generated_key: EventHandler<AdminUserGeneratedKey>,
+    delivery: UserKeyDelivery,
     operation: impl Fn(Uuid) -> F + 'static,
 ) -> bool
 where
@@ -76,12 +76,11 @@ where
         action,
         operation,
         move |key| {
-            if let Some(key) = key {
-                on_generated_key.call(AdminUserGeneratedKey { key });
-            }
+            delivery.deliver(key);
             set_if_alive(feedback, Some(AdminActionFeedback::Success));
         },
         move |code| {
+            let code = AdminApiFailure::display_code(&code).to_owned();
             set_if_alive(feedback, Some(AdminActionFeedback::Error(code)));
             // 成功由 owner 刷新；拒绝或未知也保留原用户页的重读行为。
             let mut reload = reload_generation;

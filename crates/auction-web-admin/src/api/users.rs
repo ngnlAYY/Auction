@@ -7,13 +7,16 @@ use auction_contracts::{
     AdminUserBlacklistRequest, AdminUserCreateRequest, AdminUserMutationRequest,
     AdminUserPaginationResponse, AdminUserResponse, AdminUserUnblacklistRequest, ApiResponse,
 };
-use gloo_net::http::Request;
+use gloo_net::http::{Method, Request};
 use serde::Deserialize;
 use uuid::Uuid;
 
+use super::failure::AdminWriteEndpoint;
+use super::transport::send_json_write;
 use super::{
     MAX_JSON_SAFE_INTEGER, invalid_request_error, invalid_response_error, parse_admin_time,
-    response_error, send_get, send_request, valid_admin_time, valid_safe_text, valid_uuid,
+    response_error, response_failure, send_get, send_request, valid_admin_time, valid_safe_text,
+    valid_uuid,
 };
 
 // 保留镜像的理由：contracts 的 `AdminUserResponse` 被 `AdminUserListItemResponse` 以
@@ -244,7 +247,6 @@ pub(crate) async fn mutate_admin_user(
     forum_account_id: Option<String>,
 ) -> Result<AdminUserMutationResult, String> {
     let user_id = Uuid::parse_str(&user.id).map_err(|_| "invalid_request".to_owned())?;
-    let csrf_token = super::fetch_csrf_token().await?;
     let command = AdminUserMutationRequest {
         command_id: command_id.to_string(),
         user_id: user_id.to_string(),
@@ -253,17 +255,9 @@ pub(crate) async fn mutate_admin_user(
         username,
         forum_account_id,
     };
-    let response = send_request(|abort_signal| {
-        Request::patch("/api/v1/admin/users")
-            .abort_signal(abort_signal)
-            .header("x-csrf-token", &csrf_token)
-            .json(&command)
-            .map_err(invalid_request_error)
-    })
-    .await?;
-    if !response.ok() {
-        return Err(response_error(response).await);
-    }
+    let response = send_json_write("/api/v1/admin/users", Method::PATCH, &command)
+        .await
+        .map_err(|failure| failure.at_write_endpoint(AdminWriteEndpoint::UserMutation).code)?;
     decode_user_mutation(response, action == "reissue_key").await
 }
 
@@ -290,7 +284,10 @@ pub(crate) async fn blacklist_admin_user(
     })
     .await?;
     if !response.ok() {
-        return Err(response_error(response).await);
+        return Err(response_failure(response)
+            .await
+            .at_write_endpoint(AdminWriteEndpoint::UserMutation)
+            .code);
     }
     decode_user_mutation(response, false).await.map(|result| result.user)
 }
@@ -316,7 +313,10 @@ pub(crate) async fn unblacklist_admin_user(
     })
     .await?;
     if !response.ok() {
-        return Err(response_error(response).await);
+        return Err(response_failure(response)
+            .await
+            .at_write_endpoint(AdminWriteEndpoint::UserMutation)
+            .code);
     }
     decode_user_mutation(response, false).await.map(|result| result.user)
 }

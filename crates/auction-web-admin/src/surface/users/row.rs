@@ -5,11 +5,13 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use auction_web_shared::{Dialog, Time, TruncatedText, t};
 use dioxus::prelude::*;
 
-use super::create::AdminUserGeneratedKey;
+use super::create::UserKeyDelivery;
 use super::dialogs::{AdminUserDialogActions, AdminUserDialogKind, run_user_action};
+use super::fields::{UserFieldError, UserFieldIssue, blacklist_reason_issue, forum_account_issue};
 use crate::api::{AdminUser, blacklist_admin_user, mutate_admin_user, unblacklist_admin_user};
 use crate::surface::AdminActionFeedback;
 use crate::surface::pending::PendingCommands;
+use crate::surface::validation::focus_field;
 
 static NEXT_HISTORY_TOOLTIP_ID: AtomicUsize = AtomicUsize::new(1);
 
@@ -28,12 +30,13 @@ pub(super) fn AdminUserRow(
     reload_generation: Signal<u64>,
     busy: Signal<bool>,
     feedback: Signal<Option<AdminActionFeedback>>,
-    on_generated_key: EventHandler<AdminUserGeneratedKey>,
+    delivery: UserKeyDelivery,
 ) -> Element {
     let mut forum_account_id_value =
         use_signal(|| user.forum_account_id.clone().unwrap_or_default());
     let mut dialog = use_signal(|| None::<AdminUserDialogKind>);
     let mut dialog_reason = use_signal(String::new);
+    let mut field_issue = use_signal(|| None::<UserFieldIssue>);
     let owner = use_context::<PendingCommands>();
     let blocked = owner.contains(&format!("user:{}", user.id));
     let user_for_forum_dialog = user.clone();
@@ -81,6 +84,7 @@ pub(super) fn AdminUserRow(
                         onclick: move |_| {
                             forum_account_id_value
                                 .set(user.forum_account_id.clone().unwrap_or_default());
+                            field_issue.set(None);
                             dialog.set(Some(AdminUserDialogKind::ForumAccountId));
                         },
                         {t!("admin-users-action-set-forum-account-id")}
@@ -112,6 +116,7 @@ pub(super) fn AdminUserRow(
                             disabled: busy() || blocked,
                             onclick: move |_| {
                                 dialog_reason.set(String::new());
+                                field_issue.set(None);
                                 dialog.set(Some(AdminUserDialogKind::Blacklist));
                             },
                             {t!("admin-users-action-blacklist")}
@@ -130,6 +135,10 @@ pub(super) fn AdminUserRow(
                         on_close: move |_| dialog.set(None),
                         if kind == AdminUserDialogKind::ForumAccountId {
                                 form {
+                                    method: "post",
+                                    action: "/api/v1/admin/users",
+                                    aria_label: t!("admin-users-action-set-forum-account-id"),
+                                    novalidate: true,
                                     onsubmit: move |event| {
                                         event.prevent_default();
                                         if busy() {
@@ -137,9 +146,15 @@ pub(super) fn AdminUserRow(
                                         }
                                         let user = user_for_forum_dialog.clone();
                                         let value = forum_account_id_value();
+                                        let issue = forum_account_issue(&value, true);
+                                        field_issue.set(issue);
+                                        if issue.is_some() {
+                                            focus_field("admin-user-edit-forum-account");
+                                            return;
+                                        }
                                         if run_user_action(
                                             owner, format!("user:{}", user.id), t!("admin-users-action-set-forum-account-id"),
-                                            feedback, reload_generation, on_generated_key,
+                                            feedback, reload_generation, delivery,
                                             move |command_id| {
                                                 let user = user.clone();
                                                 let value = value.clone();
@@ -148,20 +163,30 @@ pub(super) fn AdminUserRow(
                                         ) { dialog.set(None); }
                                     },
                                     label {
-                                        r#for: format!("forum-account-{}", user.id),
+                                        r#for: "admin-user-edit-forum-account",
                                         {t!("admin-users-forum-account-id")}
+                                        span { aria_hidden: "true", " *" }
                                     }
                                     input {
-                                        id: format!("forum-account-{}", user.id),
+                                        id: "admin-user-edit-forum-account",
+                                        name: "forum_account_id",
                                         r#type: "text",
                                         inputmode: "numeric",
-                                        pattern: "[1-9][0-9]*",
                                         autofocus: true,
                                         required: true,
                                         disabled: busy(),
+                                        aria_invalid: field_issue().is_some().to_string(),
+                                        aria_describedby: field_issue().is_some().then_some("admin-user-edit-forum-account-error"),
                                         value: forum_account_id_value(),
-                                        oninput: move |event| forum_account_id_value.set(event.value()),
+                                        oninput: move |event| {
+                                            let value = event.value();
+                                            if field_issue.peek().is_some() {
+                                                field_issue.set(forum_account_issue(&value, true));
+                                            }
+                                            forum_account_id_value.set(value);
+                                        },
                                     }
+                                    UserFieldError { id: "admin-user-edit-forum-account-error", issue: field_issue() }
                                     AdminUserDialogActions {
                                         busy,
                                         blocked,
@@ -172,16 +197,26 @@ pub(super) fn AdminUserRow(
                                 }
                             } else if kind == AdminUserDialogKind::Blacklist {
                                 form {
+                                    method: "post",
+                                    action: format!("/api/v1/admin/users/{}/blacklist", user.id),
+                                    aria_label: t!("admin-users-action-blacklist"),
+                                    novalidate: true,
                                     onsubmit: move |event| {
                                         event.prevent_default();
-                                        if busy() || dialog_reason().trim().is_empty() {
+                                        if busy() {
                                             return;
                                         }
                                         let user = user_for_blacklist.clone();
                                         let reason = dialog_reason();
+                                        let issue = blacklist_reason_issue(&reason);
+                                        field_issue.set(issue);
+                                        if issue.is_some() {
+                                            focus_field("admin-user-blacklist-reason");
+                                            return;
+                                        }
                                         if run_user_action(
                                             owner, format!("user:{}", user.id), t!("admin-users-action-blacklist"),
-                                            feedback, reload_generation, on_generated_key,
+                                            feedback, reload_generation, delivery,
                                             move |command_id| {
                                                 let user = user.clone();
                                                 let reason = reason.clone();
@@ -191,18 +226,27 @@ pub(super) fn AdminUserRow(
                                     },
                                     p { {t!("admin-users-blacklist-warning")} }
                                     label {
-                                        r#for: format!("reason-{}", user.id),
+                                        r#for: "admin-user-blacklist-reason",
                                         {t!("admin-users-blacklist-reason")}
                                     }
                                     textarea {
-                                        id: format!("reason-{}", user.id),
+                                        id: "admin-user-blacklist-reason",
+                                        name: "public_reason",
                                         autofocus: true,
                                         required: true,
                                         disabled: busy(),
-                                        maxlength: "512",
+                                        aria_invalid: field_issue().is_some().to_string(),
+                                        aria_describedby: field_issue().is_some().then_some("admin-user-blacklist-reason-error"),
                                         value: dialog_reason(),
-                                        oninput: move |event| dialog_reason.set(event.value()),
+                                        oninput: move |event| {
+                                            let value = event.value();
+                                            if field_issue.peek().is_some() {
+                                                field_issue.set(blacklist_reason_issue(&value));
+                                            }
+                                            dialog_reason.set(value);
+                                        },
                                     }
+                                    UserFieldError { id: "admin-user-blacklist-reason-error", issue: field_issue() }
                                     AdminUserDialogActions {
                                         busy,
                                         blocked,
@@ -249,7 +293,7 @@ pub(super) fn AdminUserRow(
                                             };
                                             if run_user_action(
                                                 owner, format!("user:{}", user.id), kind.title(&user.username),
-                                                feedback, reload_generation, on_generated_key,
+                                                feedback, reload_generation, delivery,
                                                 move |command_id| {
                                                     let user = user.clone();
                                                     async move {

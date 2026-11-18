@@ -9,6 +9,7 @@ use dioxus::{core::Runtime, prelude::*};
 use uuid::Uuid;
 
 use super::admin_api_error_message;
+use crate::api::AdminApiFailure;
 
 type Attempt = Pin<Box<dyn Future<Output = Result<(), String>>>>;
 type CommandFactory = Rc<dyn Fn(Uuid) -> Attempt>;
@@ -20,7 +21,13 @@ struct PendingCommand {
     busy: bool,
     unknown: bool,
     error: Option<String>,
-    factory: CommandFactory,
+    factory: Option<CommandFactory>,
+}
+
+impl PendingCommand {
+    fn occupies_entity(&self) -> bool {
+        self.busy || self.unknown
+    }
 }
 
 /// 只在稳定 owner 安装，子组件只消费该句柄；一个实体同时最多保留一个已提交意图。
@@ -118,9 +125,9 @@ pub(crate) fn use_owned_pending_commands(
 }
 
 impl PendingCommands {
-    /// 同实体的未知、忙碌及待确认拒绝都阻止新意图；读信号使行按钮随集合变化更新。
+    /// 同实体只有发送中或结果未知时阻止新意图。
     pub(crate) fn contains(self, entity: &str) -> bool {
-        self.entries.read().iter().any(|entry| entry.entity == entity)
+        self.entries.read().iter().any(|entry| entry.entity == entity && entry.occupies_entity())
     }
 
     /// 区分正在发送与已停止但未决；浏览筛选可在请求结束后恢复，实体的新意图仍被封锁。
@@ -134,7 +141,7 @@ impl PendingCommands {
     }
 
     /// 只登记已经确认的命令。成功结果直接交给回调，不进入未决集合；回调中的行 Signal
-    /// 必须 try_write，EventHandler 只能来自稳定页面（例如用户一次性 Key 的交付）。
+    /// 必须 try_write，一次性结果只交给稳定页面持有的状态。
     pub(crate) fn submit<T, F>(
         mut self,
         entity: String,
@@ -167,21 +174,25 @@ impl PendingCommands {
                         Ok(())
                     }
                     Err(code) => {
-                        on_failure(code.clone());
+                        on_failure(AdminApiFailure::display_code(&code).to_owned());
                         Err(code)
                     }
                 }
             })
         });
-        self.entries.write().push(PendingCommand {
+        let mut entries = self.entries.write();
+        // 未决意图已被守卫挡住，同实体仅可能剩下上一条拒绝通知。
+        entries.retain(|entry| entry.entity != entity);
+        entries.push(PendingCommand {
             entity,
             action,
             command_id,
             busy: false,
             unknown: false,
             error: None,
-            factory,
+            factory: Some(factory),
         });
+        drop(entries);
         self.retry(command_id);
         true
     }
@@ -197,6 +208,9 @@ impl PendingCommands {
         if entry.busy {
             return;
         }
+        let Some(factory) = entry.factory.clone() else {
+            return;
+        };
         let guard = if let Some(gate) = self.gate {
             let Some(guard) = gate.try_acquire() else {
                 return;
@@ -207,7 +221,6 @@ impl PendingCommands {
         };
         // busy 属于稀疏条目；逐次创建页级 Signal 会一直保留到离开页面，即使命令早已完成。
         entry.busy = true;
-        let factory = entry.factory.clone();
         drop(entries);
         // 任务归稳定的集合宿主，不随行卸载取消；页面销毁同时释放条目与请求。
         Runtime::current().in_scope(self.entries.origin_scope(), || {
@@ -233,8 +246,13 @@ impl PendingCommands {
                             entries.iter_mut().find(|entry| entry.command_id == command_id)
                         {
                             entry.busy = false;
-                            // 未知是累计事实：后续401/429或其他拒绝不能证明先前请求未提交。
-                            entry.unknown |= !definite_rejection(&code);
+                            // 只有查过同 ID 账本的拒绝能排除更早的尝试已提交。其余未知必须保留原 UUID 与负载。
+                            entry.unknown = !definite_rejection(&code)
+                                || (entry.unknown
+                                    && !AdminApiFailure::rejection_after_replay_check(&code));
+                            if !entry.unknown {
+                                entry.factory = None;
+                            }
                             entry.error = Some(code);
                         }
                     }
@@ -245,7 +263,7 @@ impl PendingCommands {
 
     fn dismiss(mut self, command_id: Uuid) {
         self.entries.write().retain(|entry| {
-            entry.command_id != command_id || entry.busy || entry.unknown || entry.error.is_none()
+            entry.command_id != command_id || entry.occupies_entity() || entry.error.is_none()
         });
     }
 }
@@ -257,69 +275,9 @@ pub(crate) fn set_if_alive<T: 'static>(mut signal: Signal<T>, value: T) {
     }
 }
 
-/// 只认明确无写入的拒绝码；超时、断连、无效响应、服务端故障和未识别码保守保留。
+/// 只认能排除本次命令效果的拒绝码；不据此推断较早的尝试。
 pub(crate) fn definite_rejection(code: &str) -> bool {
-    matches!(
-        code,
-        "invalid_request"
-            | "unauthenticated"
-            | "forbidden"
-            | "rate_limited"
-            | "http_400"
-            | "http_401"
-            | "http_403"
-            | "http_429"
-            | "stale_state_version"
-            | "stale_user_state"
-            | "stale_credential_state"
-            | "stale_delivery_state"
-            | "stale_world_state"
-            | "rename_not_revertable"
-            | "user_conflict"
-            | "world_not_found"
-            | "invalid_user_command"
-            | "invalid_delivery_command"
-            | "delivery_sent_sighted"
-            | "settlement_obligation_ineligible"
-            | "invalid_mail_request"
-            | "poll_rejected"
-            | "invalid_locale"
-            | "invalid_rule_document"
-            | "invalid_runtime_config"
-            | "invalid_replay"
-            | "state_conflict"
-            | "conflict"
-            | "command_conflict"
-            | "not_found"
-            | "invalid_auction_state"
-            | "invalid_lifecycle"
-            | "equipment_conflict"
-            | "seller_blacklisted"
-            | "auction_intake_player_blacklisted"
-            // 告警命令参数非法（HTTP 层在进入命令账本前拒绝）、重放检查后发现 signal 已非活动
-            // （400 invalid_alert_command）或告警状态已变化（409 alert_stale）：都未追加任何
-            // 确认/静默事实。
-            | "invalid_alert_command"
-            | "alert_stale"
-            // 结算退件命令：参数、路径或案件不存在在进入命令账本前拒绝；版本、来源、绑定、资产、
-            // 状态、证明、补寄上限、义务资格、原发送未核实与再次领回缺少观察证明的冲突都在命令事务
-            // 内回滚，没有写入任何事实。
-            | "invalid_settlement_return_command"
-            | "invalid_settlement_return_id"
-            | "settlement_return_not_found"
-            | "stale_settlement_return_state"
-            | "settlement_return_untrusted"
-            | "settlement_return_unbound"
-            | "settlement_return_assets_mismatch"
-            | "settlement_return_action_conflict"
-            | "settlement_return_proof_required"
-            | "settlement_return_resend_limit"
-            | "settlement_return_obligation_ineligible"
-            | "settlement_return_send_unresolved"
-            | "settlement_return_observation_required"
-            // 恢复确认的发送归属阻断：退件不能把原投递的发送逐一归属，确认事务整体回滚。
-            | "recovery_send_unattributed"
-    )
+    AdminApiFailure::definite_rejection(code)
 }
 
 /// 常驻操作区只展示实体、动作、命令 ID 与结果类别，不展示冻结负载或成功结果。
@@ -337,8 +295,10 @@ pub(crate) fn PendingCommandPanel(
         if !entries.is_empty() {
             section { class: "admin-panel admin-pending", aria_label: t!("admin-pending-title"),
                 h2 { {t!("admin-pending-title")} }
-                p { class: "admin-panel__note",
-                    if session_scoped { {t!("admin-pending-session-help")} } else { {t!("admin-pending-help")} }
+                if entries.iter().any(PendingCommand::occupies_entity) {
+                    p { class: "admin-panel__note",
+                        if session_scoped { {t!("admin-pending-session-help")} } else { {t!("admin-pending-help")} }
+                    }
                 }
                 ul { class: "admin-pending__list",
                     for (command_id, entry) in rows {
@@ -357,17 +317,21 @@ pub(crate) fn PendingCommandPanel(
                                 }
                                 if let Some(code) = entry.error.as_deref() {
                                     p { class: "action-feedback action-feedback--error",
-                                        {admin_api_error_message(code)}
+                                        {match AdminApiFailure::display_code(code) {
+                                            "body_too_large" => t!("admin-error-body-too-large"),
+                                            code => admin_api_error_message(code),
+                                        }}
                                     }
                                 }
                             }
                             div { class: "admin-pending__actions",
-                                button { r#type: "button",
-                                    disabled: entry.busy || writes_blocked,
-                                    onclick: move |_| owner.retry(command_id),
-                                    {t!("admin-pending-retry")}
-                                }
-                                if !entry.busy && !entry.unknown {
+                                if entry.unknown {
+                                    button { r#type: "button",
+                                        disabled: entry.busy || writes_blocked,
+                                        onclick: move |_| owner.retry(command_id),
+                                        {t!("admin-pending-retry")}
+                                    }
+                                } else if !entry.busy {
                                     button { r#type: "button",
                                         onclick: move |_| owner.dismiss(command_id),
                                         {t!("admin-pending-dismiss")}
@@ -384,12 +348,455 @@ pub(crate) fn PendingCommandPanel(
 
 #[cfg(test)]
 mod tests {
-    use super::definite_rejection;
+    use std::{
+        cell::Cell,
+        cell::RefCell,
+        future::{Future, ready},
+        rc::Rc,
+    };
 
-    /// 恢复确认因退件不能唯一归属到一次发送而被拒绝时，确认事务整体回滚、没有写入任何事实：
-    /// 页面按确定拒绝展示明确原因，不把它当作结果未知而保留重试。
+    use dioxus::prelude::*;
+    use gloo_net::http::Method;
+    use uuid::Uuid;
+
+    use super::{PendingCommands, definite_rejection, use_pending_commands};
+    use crate::api::{
+        AdminApiFailure, AdminDocumentKind, AdminSessionWritePermission, AdminUser,
+        mutate_admin_user, publish_admin_rules,
+    };
+
+    #[derive(Default)]
+    struct CommandHarness {
+        pending: Cell<Option<PendingCommands>>,
+    }
+
+    fn test_page() -> Element {
+        let control = consume_context::<Rc<CommandHarness>>();
+        let permission = use_memo(|| true);
+        use_context_provider(|| AdminSessionWritePermission(permission));
+        let reload = use_signal(|| 0);
+        control.pending.set(Some(use_pending_commands(reload)));
+        rsx! { div {} }
+    }
+
     #[test]
-    fn recovery_send_attribution_block_is_a_definite_rejection() {
-        assert!(definite_rejection("recovery_send_unattributed"));
+    fn discarded_auxiliary_actions_and_ledger_conflicts_are_definite_rejections() {
+        for code in [
+            "command_conflict",
+            "not_found",
+            "stale_credential_state",
+            "credential_conflict",
+            "credential_login_rejected",
+            "credential_login_challenge",
+            "credential_login_busy",
+            "invalid_auction_intake",
+            "unsupported_equipment_source",
+            "auction_intake_unavailable",
+            "seller_blacklisted",
+            "equipment_conflict",
+        ] {
+            assert!(definite_rejection(code), "{code}");
+        }
+    }
+
+    #[test]
+    fn errors_that_can_follow_a_committed_command_are_kept_pending() {
+        for code in [
+            "state_conflict",
+            "storage_unavailable",
+            "reconciliation_required",
+            "outcome_unknown",
+            "internal_error",
+            "invalid_credentials",
+        ] {
+            assert!(!definite_rejection(code), "{code}");
+        }
+    }
+
+    #[test]
+    fn clean_rejections_include_rolled_back_transactions_and_transient_guards() {
+        for code in [
+            "invalid_json",
+            "invalid_replay",
+            "rate_limited",
+            "invalid_runtime_config",
+            "invalid_runtime_switch",
+            "stale_recovery_state",
+            "recovery_send_unattributed",
+            "recovery_not_confirmable",
+            "recovery_evidence_unresolved",
+            "stale_auction_state",
+            "stale_lot_state",
+            "stale_delivery_state",
+            "sent_proof_rejected",
+            "world_has_active_auction",
+            "world_not_found",
+            "delivery_not_found",
+            "not_acknowledgeable",
+            "rename_name_taken",
+            "user_conflict",
+            "alert_stale",
+            "invalid_alert_command",
+            "invalid_delivery_command",
+            "delivery_sent_sighted",
+            "settlement_obligation_ineligible",
+            "invalid_auction_state",
+            "invalid_lot_state",
+            "manual_early_settlement_disabled",
+            "invalid_credential_request",
+            "invalid_credential_secret",
+            "external_access_paused",
+            "invalid_mail_request",
+            "poll_rejected",
+            "conflict",
+        ] {
+            assert!(definite_rejection(code), "{code}");
+        }
+    }
+
+    #[test]
+    fn pre_write_validation_is_a_definite_rejection() {
+        for code in [
+            "invalid_request_id",
+            "invalid_query",
+            "unsupported_media_type",
+            "body_too_large",
+            "method_not_allowed",
+            "origin_forbidden",
+            "csrf_invalid",
+            "invalid_command_id",
+            "invalid_auction_id",
+            "invalid_auction_command",
+            "invalid_auction_schedule",
+            "invalid_lot_id",
+            "invalid_lot_action",
+            "invalid_lot_command",
+            "invalid_recovery_command",
+            "invalid_world",
+            "invalid_world_command",
+            "invalid_delivery_id",
+            "invalid_user_id",
+            "invalid_rename_id",
+            "invalid_rename_command",
+            "invalid_credential_action",
+            "invalid_credential_kind",
+            "invalid_credential_label",
+            "invalid_credential_player_name",
+            "invalid_credential_status",
+            "invalid_credential_world",
+            "invalid_mail_template",
+            "mail_template_not_found",
+            "mail_template_conflict",
+            "runtime_switch_conflict",
+            "already_disposed",
+        ] {
+            assert!(definite_rejection(code), "{code}");
+        }
+    }
+
+    #[test]
+    fn an_unreadable_error_response_does_not_prove_rejection() {
+        for code in ["invalid_response", "http_400", "http_413", "http_503", "new_error"] {
+            assert!(!definite_rejection(code), "{code}");
+        }
+    }
+
+    #[test]
+    fn rejections_without_a_replay_check_cannot_clear_an_earlier_unknown_attempt() {
+        let control = Rc::new(CommandHarness::default());
+        let mut dom = VirtualDom::new(test_page).with_root_context(control.clone());
+        dom.rebuild_in_place();
+        let commands = control.pending.get().unwrap();
+
+        let command_ids = Rc::new(RefCell::new(Vec::new()));
+        dom.in_scope(ScopeId::APP, || {
+            let seen_ids = command_ids.clone();
+            assert!(commands.submit(
+                "first".into(),
+                "test".into(),
+                move |command_id| {
+                    let mut seen = seen_ids.borrow_mut();
+                    seen.push(command_id);
+                    ready(match seen.len() {
+                        1 => Err("request_timeout".to_owned()),
+                        2 => Err(AdminApiFailure::not_sent_code("alert_stale")),
+                        3 => Err("rate_limited".to_owned()),
+                        4 => Err("unauthenticated".to_owned()),
+                        5 => Err("rename_name_taken".to_owned()),
+                        _ => Ok(()),
+                    })
+                },
+                |()| {},
+                |_| {}
+            ));
+        });
+        dom.process_events();
+        let command_id = command_ids.borrow()[0];
+        assert!(commands.entries.peek()[0].unknown);
+
+        for _ in 0..4 {
+            dom.in_scope(ScopeId::APP, || commands.retry(command_id));
+            dom.process_events();
+            assert!(commands.entries.peek()[0].unknown);
+            dom.in_scope(ScopeId::APP, || {
+                commands.dismiss(command_id);
+                assert!(!commands.submit(
+                    "first".into(),
+                    "new".into(),
+                    |_| ready(Ok(())),
+                    |()| {},
+                    |_| {},
+                ));
+            });
+            assert!(commands.contains("first"));
+        }
+
+        dom.in_scope(ScopeId::APP, || commands.retry(command_id));
+        dom.process_events();
+        assert!(!commands.contains("first"));
+        assert_eq!(command_ids.borrow().as_slice(), &[command_id; 6]);
+    }
+
+    #[test]
+    fn a_replay_checked_alert_rejection_clears_an_earlier_unknown_attempt() {
+        let control = Rc::new(CommandHarness::default());
+        let mut dom = VirtualDom::new(test_page).with_root_context(control.clone());
+        dom.rebuild_in_place();
+        let commands = control.pending.get().unwrap();
+
+        let command_ids = Rc::new(RefCell::new(Vec::new()));
+        dom.in_scope(ScopeId::APP, || {
+            let seen_ids = command_ids.clone();
+            assert!(commands.submit(
+                "alert".into(),
+                "silence".into(),
+                move |command_id| {
+                    let mut seen = seen_ids.borrow_mut();
+                    seen.push(command_id);
+                    ready(Err::<(), _>(
+                        if seen.len() == 1 { "request_timeout" } else { "alert_stale" }.to_owned(),
+                    ))
+                },
+                |()| {},
+                |_| {},
+            ));
+        });
+        dom.process_events();
+        let command_id = command_ids.borrow()[0];
+        assert!(commands.entries.peek()[0].unknown);
+
+        dom.in_scope(ScopeId::APP, || commands.retry(command_id));
+        dom.process_events();
+        assert_eq!(command_ids.borrow().as_slice(), &[command_id; 2]);
+        assert_eq!(commands.entries.peek()[0].error.as_deref(), Some("alert_stale"));
+        assert!(!commands.entries.peek()[0].unknown);
+        assert!(!commands.contains("alert"));
+
+        dom.in_scope(ScopeId::APP, || {
+            commands.dismiss(command_id);
+            assert!(commands.entries.peek().is_empty());
+            assert!(commands.submit(
+                "alert".into(),
+                "new".into(),
+                |_| ready(Ok(())),
+                |()| {},
+                |_| {}
+            ));
+        });
+        dom.process_events();
+        assert!(commands.entries.peek().is_empty());
+    }
+
+    #[test]
+    fn a_new_command_replaces_the_rejected_notice_for_its_entity() {
+        let control = Rc::new(CommandHarness::default());
+        let mut dom = VirtualDom::new(test_page).with_root_context(control.clone());
+        dom.rebuild_in_place();
+        let commands = control.pending.get().unwrap();
+        let failures = Rc::new(RefCell::new(Vec::new()));
+        dom.in_scope(ScopeId::APP, || {
+            let observed = failures.clone();
+            assert!(commands.submit(
+                "first".into(),
+                "old".into(),
+                |_| ready(Err::<(), _>("rate_limited".into())),
+                |()| {},
+                move |code| observed.borrow_mut().push(code),
+            ));
+            assert!(commands.contains("first"));
+            assert!(commands.is_busy("first"));
+            assert!(!commands.submit(
+                "first".into(),
+                "new".into(),
+                |_| ready(Ok(())),
+                |()| {},
+                |_| {},
+            ));
+            assert!(commands.submit(
+                "other".into(),
+                "other".into(),
+                |_| ready(Err::<(), _>("invalid_json".into())),
+                |()| {},
+                |_| {},
+            ));
+        });
+        dom.process_events();
+        let rejected_id = commands.entries.peek()[0].command_id;
+        assert_eq!(failures.borrow().as_slice(), &["rate_limited"]);
+        assert!(!commands.contains("first"));
+        assert_eq!(commands.entries.peek().len(), 2);
+
+        dom.in_scope(ScopeId::APP, || {
+            commands.retry(rejected_id);
+            assert!(commands.submit(
+                "first".into(),
+                "new".into(),
+                |_| ready(Err::<(), _>("invalid_json".into())),
+                |()| {},
+                |_| {},
+            ));
+        });
+        dom.process_events();
+        let entries = commands.entries.peek();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].entity, "other");
+        assert_eq!(entries[1].entity, "first");
+        assert_ne!(entries[1].command_id, rejected_id);
+        assert_eq!(entries[1].error.as_deref(), Some("invalid_json"));
+        assert_eq!(failures.borrow().as_slice(), &["rate_limited"]);
+    }
+
+    #[test]
+    fn a_first_definite_failure_can_be_dismissed() {
+        for code in [AdminApiFailure::not_sent_code("network_error"), "stale_lot_state".to_owned()]
+        {
+            let control = Rc::new(CommandHarness::default());
+            let mut dom = VirtualDom::new(test_page).with_root_context(control.clone());
+            dom.rebuild_in_place();
+            let commands = control.pending.get().unwrap();
+            dom.in_scope(ScopeId::APP, || {
+                assert!(commands.submit(
+                    "first".into(),
+                    "test".into(),
+                    move |_| ready(Err::<(), _>(code.clone())),
+                    |()| {},
+                    |_| {}
+                ));
+            });
+            dom.process_events();
+            let command_id = commands.entries.peek()[0].command_id;
+            assert!(!commands.entries.peek()[0].unknown);
+            dom.in_scope(ScopeId::APP, || commands.dismiss(command_id));
+            assert!(commands.entries.peek().is_empty());
+        }
+    }
+
+    #[test]
+    fn an_unsent_error_reaches_the_initiator_as_a_display_code() {
+        let control = Rc::new(CommandHarness::default());
+        let mut dom = VirtualDom::new(test_page).with_root_context(control.clone());
+        dom.rebuild_in_place();
+        let commands = control.pending.get().unwrap();
+        let displayed = Rc::new(RefCell::new(None));
+        dom.in_scope(ScopeId::APP, || {
+            let displayed = displayed.clone();
+            assert!(commands.submit(
+                "first".into(),
+                "test".into(),
+                |_| ready(Err::<(), _>(AdminApiFailure::not_sent_code("network_error"))),
+                |()| {},
+                move |code| *displayed.borrow_mut() = Some(code),
+            ));
+        });
+        dom.process_events();
+        assert_eq!(displayed.borrow().as_deref(), Some("network_error"));
+        assert_eq!(commands.entries.peek()[0].error.as_deref(), Some("not_sent:network_error"));
+        assert!(!commands.contains("first"));
+    }
+
+    fn assert_first_version_conflict_releases_entity<F>(
+        url: &'static str,
+        method: Method,
+        body: &'static str,
+        send: impl Fn(Uuid) -> F + 'static,
+    ) where
+        F: Future<Output = Result<(), String>> + 'static,
+    {
+        let control = Rc::new(CommandHarness::default());
+        let mut dom = VirtualDom::new(test_page).with_root_context(control.clone());
+        dom.rebuild_in_place();
+        let commands = control.pending.get().unwrap();
+        let displayed = Rc::new(RefCell::new(None));
+        dom.in_scope(ScopeId::APP, || {
+            AdminApiFailure::stub_write_response(url, method, 409, body);
+            let displayed = displayed.clone();
+            assert!(commands.submit(
+                "first".into(),
+                "test".into(),
+                send,
+                |()| panic!("版本冲突不能交付成功结果"),
+                move |code| *displayed.borrow_mut() = Some(code),
+            ));
+            assert!(commands.contains("first"));
+        });
+        dom.process_events();
+        assert_eq!(displayed.borrow().as_deref(), Some("state_conflict"));
+        assert!(!commands.contains("first"));
+    }
+
+    #[test]
+    fn a_first_user_api_version_conflict_leaves_the_entity_available() {
+        let user = AdminUser {
+            id: Uuid::new_v4().to_string(),
+            username: "玩家甲".to_owned(),
+            forum_account_id: None,
+            status: "active".to_owned(),
+            key_status: "active".to_owned(),
+            state_version: 5,
+            created_at: "2026-11-01T00:00:00Z".to_owned(),
+            updated_at: "2026-11-01T00:00:00Z".to_owned(),
+            blacklist_count: 0,
+            blacklist_history: Vec::new(),
+        };
+        assert_first_version_conflict_releases_entity(
+            "/api/v1/admin/users",
+            Method::PATCH,
+            r#"{"code":"state_conflict","message":"用户版本已变化","data":{"current_state_version":6},"request_id":null}"#,
+            move |command_id| {
+                let user = user.clone();
+                async move {
+                    mutate_admin_user(command_id, &user, "rename", Some("玩家乙".to_owned()), None)
+                        .await
+                        .map(|_| ())
+                }
+            },
+        );
+    }
+
+    #[test]
+    fn first_rules_and_about_api_version_conflicts_leave_the_entity_available() {
+        for (kind, url) in [
+            (AdminDocumentKind::Rules, "/api/v1/admin/rules"),
+            (AdminDocumentKind::About, "/api/v1/admin/about"),
+        ] {
+            assert_first_version_conflict_releases_entity(
+                url,
+                Method::PUT,
+                r#"{"code":"state_conflict","message":"文档版本已变化","data":{"current_revision":6},"request_id":null}"#,
+                move |command_id| async move {
+                    publish_admin_rules(
+                        kind,
+                        command_id,
+                        5,
+                        "zh-CN".to_owned(),
+                        "标题".to_owned(),
+                        "正文".to_owned(),
+                    )
+                    .await
+                    .map(|_| ())
+                    .map_err(|failure| failure.code)
+                },
+            );
+        }
     }
 }

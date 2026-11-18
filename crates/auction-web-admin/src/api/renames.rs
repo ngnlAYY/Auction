@@ -10,10 +10,12 @@ use gloo_net::http::Request;
 use serde::Deserialize;
 use uuid::Uuid;
 
+use super::failure::AdminWriteEndpoint;
 use super::users::decode_user_mutation;
 use super::{
-    AdminUser, MAX_JSON_SAFE_INTEGER, invalid_request_error, invalid_response_error,
-    response_error, send_get, valid_admin_time, valid_trimmed_text, valid_uuid,
+    AdminApiFailure, AdminUser, MAX_JSON_SAFE_INTEGER, invalid_request_error,
+    invalid_response_error, response_error, send_get, valid_admin_time, valid_trimmed_text,
+    valid_uuid,
 };
 
 /// 改名命令准备阶段读取历史的固定数量；可见列表数量由页面显式传入。
@@ -118,18 +120,8 @@ pub(crate) async fn prepare_admin_rename_revert(
     if command_id.is_nil() || rename_id.is_nil() || user_id.is_nil() {
         return Err("invalid_request".to_owned());
     }
-    let history =
-        fetch_admin_renames(user_id.to_string(), String::new(), 1, TABLE_PAGE_SIZE).await?;
-    // 每行的版本来自同一次事务中 JOIN 的当前用户；任一改名行都能提供该用户的版本。
-    let expected_state_version = history
-        .renames
-        .first()
-        .map(|record| record.user_state_version)
-        .filter(|version| *version > 0)
-        .ok_or_else(|| "invalid_response".to_owned())?;
-    if history.renames.iter().any(|record| record.user_state_version != expected_state_version) {
-        return Err("invalid_response".to_owned());
-    }
+    let history = fetch_admin_renames(user_id.to_string(), String::new(), 1, TABLE_PAGE_SIZE).await;
+    let expected_state_version = prepare_revert_version(history)?;
     Ok(AdminRenameRevertCommand {
         rename_id,
         user_id,
@@ -138,6 +130,20 @@ pub(crate) async fn prepare_admin_rename_revert(
             expected_state_version,
         },
     })
+}
+
+fn prepare_revert_version(history: Result<AdminRenamePage, String>) -> Result<i64, String> {
+    // 此阶段只有读取；写入尚未发出。准备成功后冻结版本，重试必须沿用同一命令 ID 与请求体。
+    let history = history.map_err(|code| AdminApiFailure::not_sent_code(&code))?;
+    // 每行的版本来自同一次事务中 JOIN 的当前用户；任一改名行都能提供该用户的版本。
+    history
+        .renames
+        .first()
+        .map(|record| record.user_state_version)
+        .filter(|version| {
+            *version > 0 && history.renames.iter().all(|row| row.user_state_version == *version)
+        })
+        .ok_or_else(|| AdminApiFailure::not_sent_code("invalid_response"))
 }
 
 /// 发送已冻结的回滚命令；响应丢失后的重试直接进入服务端命令账本重放。
@@ -155,7 +161,10 @@ pub(crate) async fn revert_admin_rename(
     })
     .await?;
     if !response.ok() {
-        return Err(response_error(response).await);
+        return Err(super::response_failure(response)
+            .await
+            .at_write_endpoint(AdminWriteEndpoint::RenameRevert)
+            .code);
     }
     let user = decode_user_mutation(response, false).await?.user;
     if user.id != command.user_id.to_string()
@@ -233,7 +242,8 @@ fn decode_rename_pagination(
 mod tests {
     use serde_json::{Value, json};
 
-    use super::{StrictRenameList, decode_rename_list};
+    use super::{AdminRenamePage, StrictRenameList, decode_rename_list, prepare_revert_version};
+    use crate::api::AdminApiFailure;
 
     fn rename() -> Value {
         json!({
@@ -269,5 +279,31 @@ mod tests {
         let mut missing = rename();
         missing.as_object_mut().expect("测试载荷必须是对象").remove("reverted_at");
         assert!(serde_json::from_value::<StrictRenameList>(list(vec![missing])).is_err());
+    }
+
+    #[test]
+    fn rename_preparation_requires_a_consistent_version_and_marks_failures_unsent() {
+        let row = serde_json::from_value(rename()).unwrap();
+        let history = AdminRenamePage { renames: vec![row], page: 1, page_size: 10, total: 1 };
+        assert_eq!(prepare_revert_version(Ok(history.clone())), Ok(3));
+
+        for code in ["network_error", "request_timeout", "invalid_response", "http_503"] {
+            let failure = prepare_revert_version(Err(code.to_owned())).unwrap_err();
+            assert!(AdminApiFailure::definite_rejection(&failure));
+            assert_eq!(AdminApiFailure::display_code(&failure), code);
+            assert!(!AdminApiFailure::definite_rejection(code));
+        }
+
+        let mut missing_version = history.clone();
+        missing_version.renames[0].user_state_version = 0;
+        let mut inconsistent = history.clone();
+        inconsistent.renames.push(history.renames[0].clone());
+        inconsistent.renames[1].user_state_version = 2;
+        let empty = AdminRenamePage { renames: Vec::new(), total: 0, ..history };
+        for history in [missing_version, inconsistent, empty] {
+            let failure = prepare_revert_version(Ok(history)).unwrap_err();
+            assert!(AdminApiFailure::definite_rejection(&failure));
+            assert_eq!(AdminApiFailure::display_code(&failure), "invalid_response");
+        }
     }
 }
