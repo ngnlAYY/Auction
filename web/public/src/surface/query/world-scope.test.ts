@@ -228,21 +228,43 @@ test("world_switch_options_fall_back_before_the_world_catalog_loads：目录未�
   expect(worldSwitchCurrent(pendingSingle)).toBe("isekai");
 });
 
-test("world_scope_href_carries_only_the_inherited_world：导航继承显式世界且不传播自动回退", () => {
-  expect(worldScopeNavigationWorld(null, true)).toBeNull();
-  expect(worldScopeNavigationWorld("main", true)).toBe("main");
-  expect(worldScopeNavigationWorld("isekai", true)).toBe("isekai");
-  // 目录已加载但只有一个可选世界时，导航不携带自动回退值。
-  expect(worldScopeNavigationWorld("main", false)).toBeNull();
+test("world_scope_navigation_world_carries_only_the_inherited_world：其他路由仍只继承显式世界", () => {
+  for (const routeName of [null, "AuctionList", "BidLog", "Fulfillment", "Rules"] as const) {
+    expect(worldScopeNavigationWorld(routeName, null, true)).toBeNull();
+    expect(worldScopeNavigationWorld(routeName, "main", true)).toBe("main");
+    expect(worldScopeNavigationWorld(routeName, "isekai", true)).toBe("isekai");
+    // 目录已加载但只有一个可选世界时，导航不携带自动回退值。
+    expect(worldScopeNavigationWorld(routeName, "main", false)).toBeNull();
+    expect(worldScopeNavigationWorld(routeName, "isekai", false)).toBeNull();
+  }
+});
 
-  expect(worldScopeHref("/history", null)).toBe("/history");
-  expect(worldScopeHref("/history", "main")).toBe("/history?world=main");
+test("world_scope_navigation_world_never_inherits_history：历史成交价的世界只是本页筛选条件", () => {
+  for (const world of [null, "main", "isekai"] as const) {
+    for (const selectable of [true, false]) {
+      expect(worldScopeNavigationWorld("History", world, selectable)).toBeNull();
+    }
+  }
+  // 从 /history?world=main 离开时，出价记录与拍卖首页都不带世界。
+  const historyWorld = worldScopeNavigationWorld("History", "main", true);
+  expect(worldScopeHref("/bidlog", historyWorld)).toBe("/bidlog");
+  expect(worldScopeHref("/", historyWorld)).toBe("/");
+});
+
+test("world_scope_href_omits_world_for_history：指向历史成交价的链接不携带世界", () => {
+  for (const world of [null, "main", "isekai"] as const) {
+    expect(worldScopeHref("/history", world)).toBe("/history");
+  }
   expect(worldScopeHref("/", "isekai")).toBe("/?world=isekai");
   // 手机首页与同页重置查询消费同一份导航范围：两个世界时保留显式主世界，
   // 只有一个开放世界时不把自动回退写成参数。
-  expect(worldScopeHref("/", worldScopeNavigationWorld("main", true))).toBe("/?world=main");
-  expect(worldScopeHref("/", worldScopeNavigationWorld(null, false))).toBe("/");
-  expect(publicAuctionHomeQuery(worldScopeNavigationWorld("main", true)).world).toBe("main");
+  expect(worldScopeHref("/", worldScopeNavigationWorld("BidLog", "main", true))).toBe(
+    "/?world=main",
+  );
+  expect(worldScopeHref("/", worldScopeNavigationWorld("BidLog", null, false))).toBe("/");
+  expect(publicAuctionHomeQuery(worldScopeNavigationWorld("BidLog", "main", true)).world).toBe(
+    "main",
+  );
 });
 
 test("public_auction_home_query_keeps_the_explicit_navigation_world：首页查询保留显式主世界", () => {

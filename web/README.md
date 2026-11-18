@@ -202,7 +202,7 @@ export function Blacklist(): JSX.Element {
   | `web/public/src/styles/mobile-topbar.css` | 手机顶栏改为两行应用栏：第一行是当前场次与所在世界，第二行是状态标签与倒计时（放不下时截断）；不显示品牌名，语言与主题移到设置页，顶栏没有任何切换器；菜单与刷新是无边框图标 |
   | `web/public/src/styles/round-pages.css` | 出价记录与履约进度的场次区：场次下拉框就是场次标题；手机上去掉卡片，下拉框与搜索框共两行。历史成交价的主筛选行少了世界一列 |
   | `web/public/src/styles/mobile-catalog-filters.css` | 手机上看板筛选区排成带标签的三行（分组按钮、窄等级输入框与复选项、类型下拉框与列设置）；列设置面板改为整宽多列网格 |
-  | `web/public/src/surface/query/world-scope.ts`、`surface/board/world.tsx`、`styles/world-tabs.css` | 世界切换是页面里的按钮组（`WorldTabs`，“世界 [全部世界][主世界][异世界]”），顶栏与页面里都没有世界下拉框；状态与写回逻辑在外壳的控制器里。按钮只列配置里开放的世界，只有一个可选时整组不显示；关闭的世界不作为选项，但它的历史在跨世界页仍可见。往期拍卖、历史成交价、出价记录、履约进度是跨世界页：有「全部世界」，`world` 缺省 = 全部（出价记录与履约进度在 Rust 版缺省是主世界）；看板与论坛同步只有各个世界，缺省 = 主世界。导航链接把显式选择的世界带到目标页 |
+  | `web/public/src/surface/query/world-scope.ts`、`surface/board/world.tsx`、`styles/world-tabs.css` | 世界切换是页面里的按钮组（`WorldTabs`，“世界 [全部世界][主世界][异世界]”），顶栏与页面里都没有世界下拉框；状态与写回逻辑在外壳的控制器里。按钮只列配置里开放的世界，只有一个可选时整组不显示；关闭的世界不作为选项，但它的历史在跨世界页仍可见。往期拍卖、出价记录、履约进度是跨世界页：有「全部世界」，`world` 缺省 = 全部（出价记录与履约进度在 Rust 版缺省是主世界）；看板与论坛同步只有各个世界，缺省 = 主世界。导航链接把显式选择的世界带到目标页。历史成交价是例外：世界是该页“筛选条件”面板里的一项搜索条件（默认全部世界，点「应用」生效），不参与导航继承，进入该页默认不发起搜索 |
   | `web/public/src/surface/pages/history.tsx` | 往期拍卖没有状态筛选，只列已结算；地址栏里的 `status` 读到后即移除 |
   | `web/public/src/surface/reads/bid-log/`、`reads/fulfillment/` | 场次下拉框并入场次标题（全部世界时按世界分组），页面上方不再有单独的控件行；出价记录的选项只显示期数，状态由旁边的标签给出 |
   | `web/public/src/surface/query/category.ts`、`presentation/desktop.tsx`、`presentation/mobile.tsx` | 装备分类多选：地址栏 `type` 与接口 `category` 是逗号分隔的分类键列表；桌面是可多选的开关按钮，手机是多选下拉面板，面板里的勾选是草稿、关闭面板时一次生效（Rust 版单选） |

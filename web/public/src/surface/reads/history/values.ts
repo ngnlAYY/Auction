@@ -1,10 +1,11 @@
 // 价格历史筛选值的规范化、查询门槛与校验。
-// 世界由页面顶部的世界按钮组控制，不参与本页筛选计数；Rust 版把表单里的世界选择计入筛选数。
+// 世界是“筛选条件”面板里的一项，只有具体世界计入筛选数；Rust 版也把表单里的世界选择计入。
 
+import { structuralEquals } from "@auction/web-shared/reactive/equality";
 import { compareText } from "@auction/web-shared/text";
 
 import type { PriceHistoryQuery } from "../../../api/model";
-import type { PublicBoardQuery } from "../../query";
+import type { PublicBoardQuery, WorldSwitchOption } from "../../query";
 import type { HistoryFilterError, HistoryPriceUnit } from "./filters/model";
 import { historyNameValue } from "./filters/validation";
 
@@ -219,7 +220,34 @@ export function historyDaysInMonth(year: number, month: number): number {
   return 31;
 }
 
-/** 统计本页筛选表单里的已应用条件数量；世界由世界按钮组控制，不计入。 */
+/** 世界缺省或显式的“全部”都不构成条件；具体世界计一项。 */
+function historyWorldFilterActive(world: string | null): boolean {
+  return world !== null && world !== "all";
+}
+
+/** 世界草稿是否可提交：全部世界、目录中未禁用的世界，或地址栏已经应用的世界。 */
+export function historyWorldDraftValid(
+  world: string,
+  options: readonly WorldSwitchOption[],
+  appliedWorld: string | null,
+): boolean {
+  return (
+    world === "all" ||
+    world === appliedWorld ||
+    options.some((option) => option.value === world && !option.disabled)
+  );
+}
+
+/** 实际采用的世界草稿：有效草稿保留，目录收窄等原因失效时回到已应用值。 */
+export function historyWorldDraftForApply(
+  world: string,
+  options: readonly WorldSwitchOption[],
+  appliedWorld: string | null,
+): string {
+  return historyWorldDraftValid(world, options, appliedWorld) ? world : (appliedWorld ?? "all");
+}
+
+/** 统计本页筛选表单里的已应用条件数量；具体世界与其余字段一样计一项。 */
 export function historyActiveFilterCount(query: PriceHistoryQuery): number {
   const values = [
     query.name,
@@ -230,22 +258,37 @@ export function historyActiveFilterCount(query: PriceHistoryQuery): number {
     query.buyer,
     query.seller,
   ];
-  return values.filter((value) => value !== null && value !== "").length;
+  return (
+    (historyWorldFilterActive(query.world) ? 1 : 0) +
+    values.filter((value) => value !== null && value !== "").length
+  );
 }
 
-/** 是否具备发起历史读取的条件；具体世界不算筛选条件，但单独选择时仍须查询。 */
+/** 是否具备发起历史读取的条件；具体世界单独选择时也计入筛选数并触发读取。 */
 export function historyHasRequestCondition(query: PriceHistoryQuery): boolean {
-  return historyActiveFilterCount(query) > 0 || (query.world !== null && query.world !== "all");
+  return historyActiveFilterCount(query) > 0;
 }
 
-/** 已应用查询中属于本页表单的部分；世界由世界按钮组控制，切换范围不能覆盖未提交的草稿。 */
+/** 已应用查询中属于本页表单的部分；世界也是表单字段，须随前进后退和跨页进入同步草稿。 */
 export function historyFormFilters(query: PriceHistoryQuery): PriceHistoryQuery {
-  return { ...query, world: null, sort: "", page: 1 };
+  return { ...query, sort: "", page: 1 };
 }
 
-/** `resetFilters` 是否确实会改变地址栏的已应用状态；世界、页长与透传参数不由本页清除。 */
+/** 本次提交是否会改变已应用状态；只比较规范化后的筛选与目标页，排序、分组和页长不属于本表单。 */
+export function historyApplyChangesQuery(
+  applied: PriceHistoryQuery,
+  candidate: PriceHistoryQuery,
+): boolean {
+  return (
+    applied.page !== candidate.page ||
+    !structuralEquals(historyFormFilters(applied), historyFormFilters(candidate))
+  );
+}
+
+/** `resetFilters` 是否确实会改变地址栏的已应用状态；页长与透传参数不由本页清除。 */
 export function historyResetChangesQuery(query: PublicBoardQuery): boolean {
   return (
+    historyWorldFilterActive(query.world) ||
     query.historyName !== null ||
     query.historyFrom !== null ||
     query.historyTo !== null ||

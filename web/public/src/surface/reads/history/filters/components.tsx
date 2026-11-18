@@ -1,12 +1,15 @@
 // 价格历史筛选器的表单和字段控件。
-// 世界由页面顶部的世界按钮组（WorldTabs）切换，本表单不提供世界下拉框；Rust 版的筛选表单仍包含世界选择。
+// 世界是“筛选条件”面板里的一项，按钮只改草稿，点「应用」才生效，缺省为全部世界；Rust 版把
+// 世界下拉框放在表单的主筛选行。
 
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
 import { For, onSettled, Show } from "solid-js";
 
+import { worldLabel } from "../../../board/world";
 import { HistoryApply } from "../../../presentation/mobile";
+import type { WorldSwitchOption } from "../../../query";
 import type { HistoryFilterError, HistoryPriceUnit } from "./model";
 import { historyPriceUnitAsStr, historyPriceUnitFromStr } from "./model";
 import {
@@ -21,6 +24,8 @@ const HISTORY_MONTHS = Object.freeze(Array.from({ length: 12 }, (_, index) => in
 
 /** 渲染价格历史的主筛选表单。 */
 export function PriceHistoryFilters(props: {
+  readonly world: string;
+  readonly worldOptions: readonly WorldSwitchOption[];
   readonly name: string;
   readonly fromMonth: string;
   readonly fromYear: string;
@@ -35,6 +40,7 @@ export function PriceHistoryFilters(props: {
   readonly activeFilterCount: number;
   readonly settingsOpen: boolean;
   readonly filterError: HistoryFilterError | null;
+  readonly setWorld: (world: string) => void;
   readonly setName: (name: string) => void;
   readonly setFromMonth: (month: string) => void;
   readonly setFromYear: (year: string) => void;
@@ -52,6 +58,14 @@ export function PriceHistoryFilters(props: {
   readonly onReset: () => void;
 }): JSX.Element {
   const currentError = createValueMemo(() => props.filterError);
+  // 与顶部按钮组相同的条件：至少两个开放世界，或地址正指向一个已关闭世界的禁用项。
+  const worldFilterVisible = createValueMemo(() => {
+    const options = props.worldOptions;
+    return (
+      options.filter((option) => !option.disabled).length > 1 ||
+      options.some((option) => option.disabled)
+    );
+  });
   const nameError = createValueMemo(() => historyNameError(currentError()));
   const nameDescription = createValueMemo(() =>
     nameError() !== null
@@ -168,6 +182,28 @@ export function PriceHistoryFilters(props: {
             </button>
           </div>
           <div class="public-history-settings-grid">
+            <Show when={worldFilterVisible()}>
+              <fieldset class="public-history-filter-cell public-history-filter-world">
+                <legend>{t("history-filter-world")}</legend>
+                <div class="public-history-world-options">
+                  <For each={props.worldOptions} keyed={(option) => option.value}>
+                    {(option) => (
+                      <button
+                        type="button"
+                        class="public-auction-filter__tab"
+                        aria-pressed={props.world === option().value ? "true" : "false"}
+                        disabled={option().disabled}
+                        onClick={() => props.setWorld(option().value)}
+                      >
+                        {option().value === "all"
+                          ? t("auction-history-world-all")
+                          : worldLabel(option().value)}
+                      </button>
+                    )}
+                  </For>
+                </div>
+              </fieldset>
+            </Show>
             <HistoryDateFilter
               fieldName="from"
               label={t("history-filter-from")}
@@ -252,7 +288,7 @@ export function PriceHistoryFilters(props: {
           <p class="public-history-price-hint">{t("history-filter-price-hint")}</p>
           <p class="public-history-player-hint">{t("history-filter-player-hint")}</p>
           <div class="public-history-filter-actions">
-            {/* 同步清除已应用的筛选条件（保留世界范围与顶部搜索），并移除旧结果。 */}
+            {/* 同步清除已应用的筛选条件（含世界，回到全部世界），并移除旧结果。 */}
             <button
               type="button"
               class="public-history-filter-actions__clear"

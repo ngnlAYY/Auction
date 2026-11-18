@@ -120,13 +120,16 @@ function PublicShellContent(props: { readonly locationGeneration: Cell<number> }
     selectedWorld,
     shellQueryState: worldQuerySignal,
   });
-  // Solid 版导航继承地址里显式选择的世界；Rust 版没有这层统一的世界范围。
-  const navigationWorld = createValueMemo(() =>
-    worldScopeNavigationWorld(
+  // Solid 版导航继承地址里显式选择的世界；历史成交价页的世界只是该页筛选条件，
+  // 由纯函数按当前路由排除，Rust 版没有这层统一的世界范围。
+  const navigationWorld = createValueMemo(() => {
+    const route = currentRoute();
+    return worldScopeNavigationWorld(
+      route.kind === "matched" ? route.name : null,
       normalizedWorldQuery(worldQuerySignal().world),
       worldSwitch.selectable(),
-    ),
-  );
+    );
+  });
   const scopedHref = (path: string): string => worldScopeHref(path, navigationWorld());
   // 看板首页冷启动时与当前场次读取并行预取上次场次的 lots；只在首次渲染执行一次。
   if (auctionPageOwnsInitialBoot()) {

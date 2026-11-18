@@ -1,9 +1,11 @@
 /*
  * Solid 版专属：出价记录与履约进度两页的场次区，以及历史成交价的主筛选行。
- * Solid 版把页面里的世界下拉框全部移除（世界由顶栏下拉框控制），并把“场次下拉框”与“场次标题”
- * 合并成一个控件——Rust 版没有这些改动，所以这里的规则只对 Solid 版的结构成立：
+ * Solid 版把页面里的世界下拉框全部移除（出价记录、履约进度用页面顶部的世界按钮组，
+ * 历史成交价的世界在“筛选条件”面板里），并把“场次下拉框”与“场次标题”合并成一个控件——
+ * Rust 版没有这些改动，所以这里的规则只对 Solid 版的结构成立：
  * - 场次下拉框就是场次标题：加粗、与其他字段同高，后面跟着世界、结算时间等说明。
- * - 历史成交价的主筛选行少了世界一列，装备名称占满剩余宽度。
+ * - 历史成交价的主筛选行没有世界一列，装备名称占满剩余宽度；世界是“筛选条件”面板里的第一项，
+ *   画成一组相连的按钮，选中项用强调色（面板里的选择点「应用」才生效）。
  * - 手机上两页去掉卡片与边框，控件直接落在页面背景上：第一行是浅底的场次下拉框和说明，
  *   第二行是带放大镜的搜索框；搜索框的标签只对读屏保留。
  * 手机上字段字号保持 16px：小于它时 iOS 在聚焦时会放大整个页面。
@@ -37,6 +39,55 @@
 
 .public-history-page .public-history-primary-filters {
   grid-template-columns: minmax(15rem, 1fr) auto;
+}
+
+/* “筛选条件”里的世界：独占一行，按钮连成一组，高度与同面板的输入框一致。 */
+.public-history-page .public-history-filter-world {
+  grid-column: 1 / -1;
+}
+
+.public-history-page .public-history-world-options {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.public-history-page .public-history-world-options .public-auction-filter__tab {
+  min-block-size: var(--size-control-compact);
+  margin: 0 0 0 calc(-1 * var(--border-width));
+  padding: 0 var(--space-3);
+  border: var(--border-width) solid var(--color-border-control);
+  border-radius: 0;
+  background: var(--color-surface-raised);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.public-history-page .public-history-world-options .public-auction-filter__tab:first-of-type {
+  margin-inline-start: 0;
+  border-start-start-radius: var(--radius-sm);
+  border-end-start-radius: var(--radius-sm);
+}
+
+.public-history-page .public-history-world-options .public-auction-filter__tab:last-of-type {
+  border-start-end-radius: var(--radius-sm);
+  border-end-end-radius: var(--radius-sm);
+}
+
+.public-history-page
+  .public-history-world-options
+  .public-auction-filter__tab[aria-pressed="true"] {
+  position: relative;
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-accent-contrast);
+  font-weight: 600;
+}
+
+/* 已关闭的世界只在地址正指向它时出现，不可点。 */
+.public-history-page .public-history-world-options .public-auction-filter__tab:disabled {
+  cursor: default;
 }
 
 @media screen and (max-width: 48rem) {

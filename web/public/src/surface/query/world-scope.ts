@@ -142,19 +142,32 @@ export function worldSwitchCurrent(input: WorldSwitchInput): string {
 }
 
 /**
- * 导航实际继承的世界。当前地址没有 world 参数、或目录已加载但没有第二个可选世界时
- * 不传播世界，避免把隐式缺省或自动回退变成显式选择。
+ * 导航实际继承的世界。历史成交价页的世界只是该页自己的筛选条件，不属于全站导航范围；
+ * 离开该页时不能把已应用的条件带给其他页面，因此当前路由是 History 时一律返回 null。
+ * 其余路由在当前地址没有 world 参数、或目录已加载但没有第二个可选世界时不传播世界，
+ * 避免把隐式缺省或自动回退变成显式选择。
  */
 export function worldScopeNavigationWorld(
+  routeName: string | null,
   currentWorld: NormalizedWorldQuery,
   selectable: boolean,
 ): NormalizedWorldQuery {
+  if (routeName === "History") {
+    return null;
+  }
   return selectable ? currentWorld : null;
 }
 
-/** 导航链接只携带导航实际继承的显式世界；目标页类别不影响取值。 */
+/**
+ * 导航链接只携带导航实际继承的显式世界。历史成交价页的世界是页面自己的搜索条件，
+ * 进入该页时带 world 会被当成已应用条件并自动搜索；因此指向 /history 的链接
+ * 无论当前导航范围如何都不追加 world。其他目标不受影响。
+ */
 export function worldScopeHref(path: string, world: NormalizedWorldQuery): string {
-  return world === null ? path : `${path}?world=${world}`;
+  if (world === null || path === "/history") {
+    return path;
+  }
+  return `${path}?world=${world}`;
 }
 
 /**
