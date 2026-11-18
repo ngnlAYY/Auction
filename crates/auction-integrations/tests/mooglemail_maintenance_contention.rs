@@ -23,7 +23,7 @@ use auction_application::delivery::{
 };
 use auction_application::mail::{
     MailLoginKey, MailLoginKeyReader, MailScanPageObservation, MailboxMaintenanceReport,
-    MailboxMaintenanceService, MoogleMailboxEvidenceStore, MoogleMailboxSweepCandidate,
+    MailboxMaintenanceService, MoogleMailboxEvidenceStore, MoogleMailboxSweepBatch,
 };
 use auction_application::operations::ExternalWriteActivity;
 use auction_integrations::mooglemail::{
@@ -64,8 +64,8 @@ impl MoogleMailboxEvidenceStore for EmptyEvidence {
         &'a self,
         _world_id: &'a str,
         _limit: i64,
-    ) -> ApplicationFuture<'a, Vec<MoogleMailboxSweepCandidate>> {
-        Box::pin(async { Ok(Vec::new()) })
+    ) -> ApplicationFuture<'a, MoogleMailboxSweepBatch> {
+        Box::pin(async { Ok(MoogleMailboxSweepBatch::default()) })
     }
     fn record_sweep_attempt<'a>(
         &'a self,
@@ -94,7 +94,7 @@ impl MoogleMailboxEvidenceStore for EmptyEvidence {
         _delivery_id: Uuid,
         _fencing_version: i64,
         _observation: serde_json::Value,
-    ) -> ApplicationFuture<'a, ()> {
+    ) -> ApplicationFuture<'a, bool> {
         Box::pin(async { unreachable!("no sweep candidates") })
     }
     fn record_sent_sighting<'a>(
@@ -103,7 +103,7 @@ impl MoogleMailboxEvidenceStore for EmptyEvidence {
         _fencing_version: i64,
         _external_mail_id: &'a str,
         _observation: serde_json::Value,
-    ) -> ApplicationFuture<'a, ()> {
+    ) -> ApplicationFuture<'a, bool> {
         Box::pin(async { unreachable!("no sweep candidates") })
     }
     fn record_compose_discard<'a>(

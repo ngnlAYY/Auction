@@ -23,7 +23,8 @@ use axum::{
 use uuid::Uuid;
 
 use super::{feature_unavailable, map_sent_proof_preview, map_sent_proof_result};
-use crate::errors::{CAPABILITY_NOT_PROVIDED, api_error};
+use crate::errors::{CAPABILITY_NOT_PROVIDED, api_error, invalid_query};
+use crate::query::parse_query;
 use crate::session::{authenticated_admin_mutation, no_store_headers};
 use crate::state::AdminApiState;
 
@@ -39,10 +40,10 @@ pub(crate) async fn preview(
     if let Err(response) = authenticated_admin_mutation(&state, &headers, address).await {
         return *response;
     }
-    if uri.query().is_some_and(|query| !query.is_empty()) {
-        return api_error(StatusCode::BAD_REQUEST, "invalid_query", "交付命令不接受查询参数")
-            .into_response();
-    }
+    let include_responsibility_reasons = match preview_projection(&uri) {
+        Ok(include) => include,
+        Err(message) => return invalid_query(message),
+    };
     let Ok(delivery_id) = parse_delivery_id(&delivery_id) else {
         return invalid_delivery_id();
     };
@@ -65,9 +66,21 @@ pub(crate) async fn preview(
     (
         StatusCode::OK,
         no_store_headers(),
-        Json(ApiResponse::ok("人工 Sent 证明预览", map_sent_proof_preview(preview))),
+        Json(ApiResponse::ok(
+            "人工 Sent 证明预览",
+            map_sent_proof_preview(preview, include_responsibility_reasons),
+        )),
     )
         .into_response()
+}
+
+fn preview_projection(uri: &Uri) -> Result<bool, &'static str> {
+    let mut query = parse_query(uri, &["include"]).map_err(|()| "人工 Sent 预览查询参数无效")?;
+    match query.remove("include").as_deref() {
+        None => Ok(false),
+        Some("responsibility_reasons") => Ok(true),
+        Some(_) => Err("附加字段无效"),
+    }
 }
 
 /// 确认：`command_id` 与同参 CLI 命令共享摘要，重放返回原结果。
@@ -181,10 +194,12 @@ fn map_sent_proof_error(error: ApplicationError) -> Response {
         ApplicationError::DeliveryAdmin(DeliveryAdminError::NotFound) => {
             api_error(StatusCode::NOT_FOUND, "not_found", "交付不存在").into_response()
         }
-        ApplicationError::DeliveryAdmin(DeliveryAdminError::Stale) => {
-            api_error(StatusCode::CONFLICT, "stale_delivery_state", "交付状态或版本已变化")
-                .into_response()
-        }
+        ApplicationError::DeliveryAdmin(DeliveryAdminError::Stale) => api_error(
+            StatusCode::CONFLICT,
+            "stale_delivery_state",
+            "投递状态或 Sent 证据已变化，请刷新详情并重新选择证据",
+        )
+        .into_response(),
         ApplicationError::DeliveryAdmin(DeliveryAdminError::CommandConflict) => {
             api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
                 .into_response()
@@ -198,6 +213,66 @@ fn map_sent_proof_error(error: ApplicationError) -> Response {
         _ => {
             api_error(StatusCode::SERVICE_UNAVAILABLE, "temporarily_unavailable", "服务暂时不可用")
                 .into_response()
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use auction_application::core::ApplicationError;
+    use auction_application::delivery::DeliveryAdminError;
+    use axum::body::to_bytes;
+    use axum::http::StatusCode;
+    use axum::http::Uri;
+
+    use super::map_sent_proof_error;
+    use super::preview_projection;
+
+    #[tokio::test]
+    async fn stale_sent_evidence_uses_the_existing_conflict_code() {
+        let invalid_time = serde_json::from_str::<String>("null").expect_err("时间字段无效");
+        for (error, expected_status, expected_code) in [
+            (
+                DeliveryAdminError::Invalid.into(),
+                StatusCode::BAD_REQUEST,
+                "invalid_delivery_command",
+            ),
+            (DeliveryAdminError::Stale.into(), StatusCode::CONFLICT, "stale_delivery_state"),
+            (
+                DeliveryAdminError::Unavailable.into(),
+                StatusCode::SERVICE_UNAVAILABLE,
+                "temporarily_unavailable",
+            ),
+            (
+                ApplicationError::Serialization(invalid_time),
+                StatusCode::SERVICE_UNAVAILABLE,
+                "temporarily_unavailable",
+            ),
+        ] {
+            let response = map_sent_proof_error(error);
+            assert_eq!(response.status(), expected_status);
+            let bytes = to_bytes(response.into_body(), usize::MAX).await.expect("错误响应体");
+            let body: serde_json::Value = serde_json::from_slice(&bytes).expect("错误信封");
+            assert_eq!(body["code"], expected_code);
+        }
+    }
+
+    #[test]
+    fn preview_reasons_require_the_exact_projection() {
+        let parse = |query| {
+            let uri: Uri = format!("/sent-proof/preview{query}").parse().expect("预览 URI");
+            preview_projection(&uri)
+        };
+        assert_eq!(parse(""), Ok(false));
+        assert_eq!(parse("?include=responsibility_reasons"), Ok(true));
+        for query in [
+            "?include=",
+            "?include=sent_proof",
+            "?include=responsibility_reasons,settlement_returns",
+            "?include=responsibility_reasons&include=responsibility_reasons",
+            "?fields=all",
+        ] {
+            assert!(parse(query).is_err(), "{query}");
         }
     }
 }

@@ -2,7 +2,7 @@
 //!
 //! Admin 只能复用维护流程已写入投递的 Sent 证据；命令本身与运维 CLI 共用
 //! `SentConfirmationCommand` 与同一幂等摘要，因此同 ID 同参重放仍返回原结果。
-//! 证据引用只用于准入核对，不进入命令摘要或数据库事实。
+//! 证据引用用于锁内选取观察，不进入命令摘要。
 
 use std::sync::Arc;
 
@@ -36,7 +36,9 @@ impl DeliverySentProofService {
         evidence_reference: &str,
     ) -> Result<SentConfirmationPreview, ApplicationError> {
         self.require_recorded_evidence(delivery_id, &evidence, evidence_reference).await?;
-        self.confirmation.preview_sent_confirmation(delivery_id, evidence).await
+        self.confirmation
+            .preview_sent_confirmation(delivery_id, evidence, Some(evidence_reference))
+            .await
     }
 
     /// 提交与 CLI 同一命令；同 `command_id` 同参由原确认事务重放原结果。
@@ -46,12 +48,12 @@ impl DeliverySentProofService {
         evidence_reference: &str,
     ) -> Result<SentConfirmationResult, ApplicationError> {
         command.validate()?;
-        self.require_recorded_evidence(command.delivery_id, &command.evidence, evidence_reference)
-            .await?;
-        self.confirmation.confirm_sent(command).await
+        validate_reference(evidence_reference, &command.evidence.external_mail_id)?;
+        // 先由确认事务查命令账本，再锁定投递查观察；观察被覆盖也不能阻断同参重放（不变量 1、2）。
+        self.confirmation.confirm_sent(command, Some(evidence_reference)).await
     }
 
-    /// 证据必须真实存在于该投递的维护记录，且 MID 与提交观察逐字一致。
+    /// 证据必须仍是该投递的同一份维护观察，匹配 MID 与详情中的观察时刻。
     /// 该检查只缩小可选项，不把观察升级为发送证明。
     async fn require_recorded_evidence(
         &self,
@@ -59,11 +61,8 @@ impl DeliverySentProofService {
         evidence: &ManualSentEvidence,
         evidence_reference: &str,
     ) -> Result<(), ApplicationError> {
-        if delivery_id.is_nil()
-            || evidence_reference.is_empty()
-            || evidence_reference != evidence_reference.trim()
-            || evidence_reference.len() > 128
-        {
+        validate_reference(evidence_reference, &evidence.external_mail_id)?;
+        if delivery_id.is_nil() {
             return Err(DeliveryAdminError::Invalid.into());
         }
         let detail = self.deliveries.detail(delivery_id).await?;
@@ -73,12 +72,26 @@ impl DeliverySentProofService {
             matches!(item.kind.as_str(), "mailbox_sweep" | "sent_reference_sighting")
                 && item.reference == evidence_reference
                 && item.external_mail_id.as_deref() == Some(evidence.external_mail_id.as_str())
+                && evidence.matches_observation_time(item.observed_at)
         });
         if !matched {
-            return Err(DeliveryAdminError::Invalid.into());
+            return Err(DeliveryAdminError::Stale.into());
         }
         Ok(())
     }
+}
+
+fn validate_reference(reference: &str, external_mail_id: &str) -> Result<(), ApplicationError> {
+    let Some((kind, mid)) = reference.split_once(':') else {
+        return Err(DeliveryAdminError::Invalid.into());
+    };
+    if !matches!(kind, "mailbox_sweep" | "sent_reference_sighting")
+        || mid != external_mail_id
+        || !auction_domain::valid_positive_decimal(mid, 64)
+    {
+        return Err(DeliveryAdminError::Invalid.into());
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -148,15 +161,16 @@ mod tests {
     }
 
     struct FakeConfirmation {
-        submitted: Mutex<Option<SentConfirmationCommand>>,
+        submitted: Mutex<Option<(SentConfirmationCommand, String)>>,
     }
 
     impl DeliverySentConfirmationPort for FakeConfirmation {
-        fn preview_sent_confirmation(
-            &self,
+        fn preview_sent_confirmation<'a>(
+            &'a self,
             delivery_id: Uuid,
             _evidence: ManualSentEvidence,
-        ) -> ApplicationFuture<'_, SentConfirmationPreview> {
+            _evidence_reference: Option<&'a str>,
+        ) -> ApplicationFuture<'a, SentConfirmationPreview> {
             Box::pin(async move {
                 Ok(SentConfirmationPreview {
                     eligible: true,
@@ -166,22 +180,26 @@ mod tests {
                     external_reference: "mooglemail:main:send:7000001".to_owned(),
                     requires_collected_asset_acceptance: false,
                     requires_attempt_history_acceptance: false,
+                    prior_unbound_attempts: false,
+                    sent_before_current_attempt: false,
                     corrects_admin_failure: false,
                 })
             })
         }
 
-        fn confirm_sent(
-            &self,
+        fn confirm_sent<'a>(
+            &'a self,
             command: SentConfirmationCommand,
-        ) -> ApplicationFuture<'_, SentConfirmationResult> {
+            evidence_reference: Option<&'a str>,
+        ) -> ApplicationFuture<'a, SentConfirmationResult> {
             let result = SentConfirmationResult {
                 command_id: command.command_id,
                 delivery_id: command.delivery_id,
                 external_reference: "mooglemail:main:send:7000001".to_owned(),
                 replayed: false,
             };
-            *self.submitted.lock().expect("test mutex") = Some(command);
+            *self.submitted.lock().expect("test mutex") =
+                Some((command, evidence_reference.expect("Admin 证据引用").to_owned()));
             Box::pin(async move { Ok(result) })
         }
     }
@@ -251,6 +269,8 @@ mod tests {
             cod_pending: Some(0),
             remaining_credits: Some(0),
             remaining_equipment_count: Some(0),
+            remaining_equipment_ids: Some(Vec::new()),
+            pre_collection_equipment_ids: None,
             receipt: None,
         }
     }
@@ -289,11 +309,18 @@ mod tests {
     }
 
     #[test]
-    fn confirm_requires_recorded_evidence_reference() {
+    fn confirm_requires_well_formed_evidence_reference() {
         let (service, confirmation) = service();
         let delivery_id = Uuid::from_u128(9);
-        let error = block_on(service.confirm(command(delivery_id), "mailbox_sweep:999"));
-        assert!(matches!(error, Err(ApplicationError::DeliveryAdmin(DeliveryAdminError::Invalid))));
+        for invalid in
+            ["", "compose_discard:7000001", "mailbox_sweep:999", "mailbox_sweep:7000001 "]
+        {
+            let error = block_on(service.confirm(command(delivery_id), invalid));
+            assert!(matches!(
+                error,
+                Err(ApplicationError::DeliveryAdmin(DeliveryAdminError::Invalid))
+            ));
+        }
         assert!(confirmation.submitted.lock().expect("test mutex").is_none());
     }
 
@@ -305,21 +332,47 @@ mod tests {
         let expected_digest = expected.request_digest().expect("digest");
         let result =
             block_on(service.confirm(expected.clone(), "mailbox_sweep:7000001")).expect("confirm");
-        let submitted =
+        let (submitted, reference) =
             confirmation.submitted.lock().expect("test mutex").clone().expect("command");
         assert_eq!(submitted.command_id, expected.command_id);
         assert_eq!(submitted.request_digest().expect("digest"), expected_digest);
+        assert_eq!(reference, "mailbox_sweep:7000001");
         assert_eq!(result.command_id, expected.command_id);
     }
 
     #[test]
-    fn preview_with_unrecorded_mid_is_rejected_before_the_port() {
+    fn preview_with_overwritten_evidence_reports_stale() {
         let (service, _confirmation) = service();
         let delivery_id = Uuid::from_u128(9);
         let mut wrong = evidence();
         wrong.external_mail_id = "999".to_owned();
         let error = block_on(service.preview(delivery_id, wrong, "mailbox_sweep:999"));
-        assert!(matches!(error, Err(ApplicationError::DeliveryAdmin(DeliveryAdminError::Invalid))));
+        assert!(matches!(error, Err(ApplicationError::DeliveryAdmin(DeliveryAdminError::Stale))));
+    }
+
+    #[test]
+    fn preview_rejects_the_old_time_when_the_same_mid_is_observed_after_collection() {
+        let delivery_id = Uuid::from_u128(9);
+        let before = evidence();
+        let mut collected = recorded(&before.external_mail_id);
+        let observed_at = Timestamp::parse_from_rfc3339("2026-11-02T01:21:00.123456789Z")
+            .expect("Worker 观测时刻");
+        collected.observed_at = Some(observed_at);
+        collected.collected = Some(true);
+        let confirmation = Arc::new(FakeConfirmation { submitted: Mutex::new(None) });
+        let service = DeliverySentProofService::new(
+            Arc::new(FakeDeliveries { evidence: vec![collected] }),
+            confirmation,
+        );
+        let reference = "mailbox_sweep:7000001";
+        let stale = block_on(service.preview(delivery_id, before.clone(), reference));
+        assert!(matches!(stale, Err(ApplicationError::DeliveryAdmin(DeliveryAdminError::Stale))));
+
+        let mut current = before;
+        current.collected = true;
+        current.observed_at = Timestamp::from_timestamp_micros(observed_at.timestamp_micros())
+            .expect("详情采用微秒精度");
+        assert!(block_on(service.preview(delivery_id, current, reference)).is_ok());
     }
 
     #[test]

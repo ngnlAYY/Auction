@@ -9,9 +9,11 @@ use auction_application::delivery::{
     DeliverySendCredentialBinding, DeliverySendExpectation, DeliveryTakeExpectation,
 };
 use auction_application::mail::{
-    MailScanPageObservation, MoogleMailboxEvidenceStore, MoogleMailboxSweepCandidate,
+    MailScanPageObservation, MoogleMailboxEvidenceStore, MoogleMailboxFailedSendSlot,
+    MoogleMailboxSentEntry, MoogleMailboxSweepBatch, MoogleMailboxSweepPosition,
 };
 use auction_domain::SettlementReturnTakeUnknownReason;
+use auction_time::Timestamp;
 use serde_json::Value;
 use sqlx::Postgres;
 use uuid::Uuid;
@@ -22,11 +24,12 @@ use crate::database::{DatabaseStore, TrackedPool};
 
 mod candidates;
 mod error;
+mod failed_sent;
 mod observation;
 mod recovery;
 mod transition;
 
-use candidates::unproven_sends;
+use candidates::{record_sweep_attempt, unproven_sends};
 use error::RecoveryError;
 pub(in crate::database) use recovery::resume_settlement_send;
 use transition::{RecoveryUpdate, persist_transition};
@@ -36,7 +39,7 @@ impl MoogleMailboxEvidenceStore for DatabaseStore {
         &'a self,
         world_id: &'a str,
         limit: i64,
-    ) -> ApplicationFuture<'a, Vec<MoogleMailboxSweepCandidate>> {
+    ) -> ApplicationFuture<'a, MoogleMailboxSweepBatch> {
         Box::pin(async move {
             if !matches!(world_id, "main" | "isekai") || !(1..=500).contains(&limit) {
                 return Err(storage_error("MoogleMail 维护查询参数无效"));
@@ -54,7 +57,40 @@ impl MoogleMailboxEvidenceStore for DatabaseStore {
             if !matches!(world_id, "main" | "isekai") || delivery_id.is_nil() {
                 return Err(storage_error("MoogleMail 维护轮转参数无效"));
             }
-            record_sweep_attempt(self.pool(), world_id, delivery_id).await
+            record_sweep_attempt(self.pool(), world_id, delivery_id, None).await
+        })
+    }
+
+    fn failed_sent_slots(
+        &self,
+        start: Option<MoogleMailboxSweepPosition>,
+        oldest_visible: Timestamp,
+        limit: i64,
+    ) -> ApplicationFuture<'_, Vec<MoogleMailboxFailedSendSlot>> {
+        Box::pin(async move {
+            if !(1..=200).contains(&limit) {
+                return Err(storage_error("MoogleMail 失败投递取证查询参数无效"));
+            }
+            failed_sent::read_slots(self.pool(), start, oldest_visible, limit).await
+        })
+    }
+
+    fn begin_failed_sent_detail<'a>(
+        &'a self,
+        delivery_id: Uuid,
+        fencing_version: i64,
+        entry: Option<&'a MoogleMailboxSentEntry>,
+    ) -> ApplicationFuture<'a, bool> {
+        Box::pin(async move {
+            if delivery_id.is_nil()
+                || fencing_version <= 0
+                || entry.is_some_and(|entry| {
+                    !auction_domain::valid_positive_decimal(&entry.external_mail_id, 64)
+                })
+            {
+                return Err(storage_error("MoogleMail 失败投递详情登记参数无效"));
+            }
+            failed_sent::begin_detail(self.pool(), delivery_id, fencing_version, entry).await
         })
     }
 
@@ -112,7 +148,7 @@ impl MoogleMailboxEvidenceStore for DatabaseStore {
         delivery_id: Uuid,
         fencing_version: i64,
         observation: Value,
-    ) -> ApplicationFuture<'a, ()> {
+    ) -> ApplicationFuture<'a, bool> {
         Box::pin(async move {
             if delivery_id.is_nil() || fencing_version <= 0 || !observation.is_object() {
                 return Err(storage_error("MoogleMail Sent 观察参数无效"));
@@ -123,6 +159,7 @@ impl MoogleMailboxEvidenceStore for DatabaseStore {
                 fencing_version,
                 "mailbox_sweep",
                 observation,
+                None,
             )
             .await
         })
@@ -134,7 +171,7 @@ impl MoogleMailboxEvidenceStore for DatabaseStore {
         fencing_version: i64,
         external_mail_id: &'a str,
         observation: Value,
-    ) -> ApplicationFuture<'a, ()> {
+    ) -> ApplicationFuture<'a, bool> {
         Box::pin(async move {
             if delivery_id.is_nil()
                 || fencing_version <= 0
@@ -143,12 +180,13 @@ impl MoogleMailboxEvidenceStore for DatabaseStore {
             {
                 return Err(storage_error("MoogleMail Sent 目击参数无效"));
             }
-            record_sighting(
+            record_observation(
                 self.pool(),
                 delivery_id,
                 fencing_version,
-                external_mail_id,
+                "sent_reference_sighting",
                 observation,
+                Some(external_mail_id),
             )
             .await
         })
@@ -170,8 +208,10 @@ impl MoogleMailboxEvidenceStore for DatabaseStore {
                 fencing_version,
                 "compose_discard",
                 observation,
+                None,
             )
             .await
+            .map(|_| ())
         })
     }
 
@@ -299,32 +339,6 @@ impl MoogleMailboxEvidenceStore for DatabaseStore {
     }
 }
 
-async fn record_sweep_attempt(
-    pool: &TrackedPool<Postgres>,
-    world_id: &str,
-    delivery_id: Uuid,
-) -> Result<bool, auction_application::core::ApplicationError> {
-    // 只推进当前一条；取消或提交应答丢失最多消费本条机会，后缀位置不受影响。
-    // 排序键来自原 delivery，不接受调用方伪造时间，也不锁住远端读取期间的业务行。
-    let result = sqlx::query(
-        "INSERT INTO public.mailbox_sweep_cursors (world_id, last_created_at, last_delivery_id)
-         SELECT $1, created_at, id FROM public.deliveries
-         WHERE id = $2 AND COALESCE(payload_world, 'main') = $1
-           AND status = 'manual_reconcile' AND external_reference IS NULL
-           AND payload_operation IN ('send', 'take')
-           AND sending_at IS NOT NULL AND completed_at IS NOT NULL
-         ON CONFLICT (world_id) DO UPDATE
-         SET last_created_at = EXCLUDED.last_created_at,
-             last_delivery_id = EXCLUDED.last_delivery_id",
-    )
-    .bind(world_id)
-    .bind(delivery_id)
-    .execute(pool)
-    .await
-    .map_err(|error| storage_error_from(error, "MoogleMail 维护轮转提交未确认"))?;
-    Ok(result.rows_affected() == 1)
-}
-
 async fn begin_compose_discard(
     pool: &TrackedPool<Postgres>,
     delivery_id: Uuid,
@@ -389,55 +403,69 @@ async fn record_observation(
     fencing_version: i64,
     key: &str,
     observation: Value,
-) -> Result<(), auction_application::core::ApplicationError> {
-    // 只记录当前尝试的安全观察；旧响应不能附着到管理员重试后的新 fence。
-    sqlx::query(
-        "UPDATE public.deliveries
-         SET result_metadata = COALESCE(result_metadata, '{}'::jsonb)
-             || jsonb_build_object($2::text, $3::jsonb)
-         WHERE id = $1 AND fencing_version=$4 AND status = 'manual_reconcile'",
+    sighting_mid: Option<&str>,
+) -> Result<bool, auction_application::core::ApplicationError> {
+    // 覆盖与保留实见附件在同一 UPDATE 内完成；旧响应不能附着到新 fence，
+    // 同一 MID 清空后也不能丢掉此前可用于核对装备身份的编号（不变量 6）。
+    let result = sqlx::query(
+        "UPDATE public.deliveries AS delivery
+         SET result_metadata = COALESCE(delivery.result_metadata, '{}'::jsonb)
+             || jsonb_build_object($2::text, $3::jsonb || COALESCE((
+                 SELECT jsonb_build_object('pre_collection_equipment_ids', previous.ids)
+                 FROM (VALUES
+                     (delivery.result_metadata -> $2::text, 0),
+                     (delivery.result_metadata -> CASE $2::text
+                         WHEN 'mailbox_sweep' THEN 'sent_reference_sighting'
+                         WHEN 'sent_reference_sighting' THEN 'mailbox_sweep' END, 1)
+                 ) AS history(observation, priority)
+                 CROSS JOIN LATERAL (SELECT COALESCE(
+                     NULLIF(NULLIF(history.observation->'remaining_equipment_ids', '[]'::jsonb),
+                            'null'::jsonb),
+                     history.observation->'pre_collection_equipment_ids') AS ids) AS previous
+                 WHERE $2::text IN ('mailbox_sweep', 'sent_reference_sighting')
+                   AND $3::jsonb->'collected' = 'true'::jsonb
+                   AND COALESCE(history.observation->>'mid', history.observation->>'external_mail_id')
+                       = $3::jsonb->>'mid'
+                   AND jsonb_typeof(previous.ids) = 'array' AND previous.ids <> '[]'::jsonb
+                 ORDER BY history.priority LIMIT 1
+             ), '{}'::jsonb))
+         WHERE delivery.id = $1 AND delivery.fencing_version = $4
+           AND (delivery.status = 'manual_reconcile' OR (
+               delivery.status = 'failed' AND $5::text IS NOT NULL
+               AND EXISTS (SELECT 1 FROM public.audit_records AS attempt
+                   WHERE attempt.id = $6 AND attempt.action = $7
+                     AND attempt.entity_id = delivery.id::text
+                     AND attempt.metadata->>'mid' = $5
+                     AND attempt.metadata->'fencing_version' = to_jsonb($4::bigint))))
+           AND ($5::text IS NULL OR (
+               delivery.origin_kind = 'settlement' AND delivery.payload_operation = 'send'
+               AND NOT EXISTS (SELECT 1 FROM public.delivery_sent_bindings binding
+                   WHERE binding.world_id = COALESCE(delivery.payload_world, 'main')
+                     AND binding.external_mail_id = $5 AND binding.delivery_id <> delivery.id)
+               AND NOT EXISTS (SELECT 1 FROM public.deliveries other
+                   WHERE other.id <> delivery.id
+                     AND other.external_reference =
+                         'mooglemail:' || COALESCE(delivery.payload_world, 'main') || ':send:' || $5)))",
     )
     .bind(delivery_id)
     .bind(key)
     .bind(observation)
     .bind(fencing_version)
+    .bind(sighting_mid)
+    .bind(sighting_mid.map(|mid| failed_sent::detail_attempt_id(delivery_id, mid)))
+    .bind(failed_sent::DETAIL_ATTEMPT_ACTION)
     .execute(pool)
     .await
-    .map_err(|error| storage_error_from(error, "MoogleMail 维护证据写入失败"))?;
-    Ok(())
-}
-
-/// 目击只写入仍在人工核对的结算发送，且 MID 未绑定或引用于其他投递；重复写入以最新观察覆盖。
-async fn record_sighting(
-    pool: &TrackedPool<Postgres>,
-    delivery_id: Uuid,
-    fencing_version: i64,
-    external_mail_id: &str,
-    observation: Value,
-) -> Result<(), auction_application::core::ApplicationError> {
-    sqlx::query(
-        "UPDATE public.deliveries AS delivery
-         SET result_metadata = COALESCE(delivery.result_metadata, '{}'::jsonb)
-             || jsonb_build_object('sent_reference_sighting', $3::jsonb)
-         WHERE delivery.id = $1 AND delivery.fencing_version = $2
-           AND delivery.status = 'manual_reconcile' AND delivery.origin_kind = 'settlement'
-           AND delivery.payload_operation = 'send'
-           AND NOT EXISTS (SELECT 1 FROM public.delivery_sent_bindings binding
-               WHERE binding.world_id = COALESCE(delivery.payload_world, 'main')
-                 AND binding.external_mail_id = $4 AND binding.delivery_id <> delivery.id)
-           AND NOT EXISTS (SELECT 1 FROM public.deliveries other
-               WHERE other.id <> delivery.id
-                 AND other.external_reference =
-                     'mooglemail:' || COALESCE(delivery.payload_world, 'main') || ':send:' || $4)",
-    )
-    .bind(delivery_id)
-    .bind(fencing_version)
-    .bind(observation)
-    .bind(external_mail_id)
-    .execute(pool)
-    .await
-    .map_err(|error| storage_error_from(error, "MoogleMail Sent 目击写入失败"))?;
-    Ok(())
+    .map_err(|error| {
+        let message = if sighting_mid.is_some() {
+            "MoogleMail Sent 目击写入失败"
+        } else {
+            "MoogleMail 维护证据写入失败"
+        };
+        storage_error_from(error, message)
+    })?;
+    // 已换 fence 的迟到观察影响零行，不能计为本轮已取得的证据（不变量 6）。
+    Ok(result.rows_affected() == 1)
 }
 
 async fn bind_recovered_send(

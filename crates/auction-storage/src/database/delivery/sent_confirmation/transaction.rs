@@ -1,7 +1,9 @@
 //! 追加命令事实、唯一 MID 与 succeeded 投递；原始未知结果或被更正的 Admin 失败结论保持在
 //! 不可变快照、原命令账本与旧审计中。
 
-use auction_application::delivery::{SentConfirmationCommand, SentConfirmationResult};
+use auction_application::delivery::{
+    DeliveryAdminError, SentConfirmationCommand, SentConfirmationResult,
+};
 use serde_json::json;
 use sqlx::{Postgres, Row};
 
@@ -35,7 +37,18 @@ pub(super) async fn replay(
 pub(super) async fn apply(
     tx: &mut Transaction<'_, Postgres>,
     command: &SentConfirmationCommand,
+    evidence_reference: Option<&str>,
 ) -> Result<SentConfirmationResult, Error> {
+    // 账本先重放。此处在同一 Serializable 快照区分旧 fence 与缺失冻结尝试，锁序和写入围栏照常复核（不变量 1、2、6）。
+    let current_fencing_version: i64 =
+        sqlx::query_scalar("SELECT fencing_version FROM public.deliveries WHERE id=$1")
+            .bind(command.delivery_id)
+            .fetch_optional(&mut **tx)
+            .await?
+            .ok_or(Error::Rejected)?;
+    if current_fencing_version != command.expected_fencing_version {
+        return Err(Error::Application(DeliveryAdminError::Stale.into()));
+    }
     // 人工观察不借用当前网络 owner；仍遵循 generation→world→funding→业务→credential→delivery 的锁序。
     lock_mail_runtime_generation_row(tx).await?;
     funding::lock_funding_worlds(tx).await?;
@@ -46,19 +59,25 @@ pub(super) async fn apply(
         return Err(Error::Rejected);
     }
     funding::lock_liabilities_before_credentials(tx).await?;
-    let initial = snapshot::load(tx, command.delivery_id, &command.evidence).await?;
-    let expected = initial.expectation.as_ref().ok_or(Error::Rejected)?;
-    if !attempts::lock_credential(tx, expected).await? {
+    let Some((_, Some(initial_expectation))) =
+        attempts::load_current(tx, command.delivery_id, command.expected_fencing_version).await?
+    else {
+        return Err(Error::Rejected);
+    };
+    if !attempts::lock_credential(tx, &initial_expectation).await? {
         return Err(Error::Rejected);
     }
     funding::lock_liabilities_after_credentials(tx).await?;
-    let snapshot = snapshot::load(tx, command.delivery_id, &command.evidence).await?;
+    // 实见附件、责任原因与最终写入基于同一份已锁定投递（不变量 2、6）。
+    let snapshot =
+        snapshot::load(tx, command.delivery_id, &command.evidence, evidence_reference).await?;
     let p = &snapshot.preview;
     if !p.eligible
         || p.expected_fencing_version != command.expected_fencing_version
         || (p.requires_collected_asset_acceptance && !command.accept_collected_assets)
-        || (p.requires_attempt_history_acceptance && !command.accept_attempt_history)
-        || snapshot.expectation != initial.expectation
+        || ((p.prior_unbound_attempts || p.sent_before_current_attempt)
+            && !command.accept_attempt_history)
+        || snapshot.expectation.as_ref() != Some(&initial_expectation)
     {
         return Err(Error::Rejected);
     }
@@ -91,6 +110,7 @@ pub(super) async fn apply(
         external_reference: p.external_reference.clone(),
         replayed: false,
     };
+    // 追加确认时采用的观察与编号一并封存，后续邮箱维护不能改写这份证据（不变量 8）。
     sqlx::query("INSERT INTO public.delivery_sent_confirmations(command_id,delivery_id,
         expected_fencing_version,sending_fencing_version,world_id,external_mail_id,request_digest,
         actor,reason,command,evidence,accept_collected_assets,accept_attempt_history,original_snapshot,result)

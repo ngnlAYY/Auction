@@ -10,7 +10,7 @@ use auction_application::delivery::{
     DeliveryAdminAttempt, DeliveryAdminCustody, DeliveryAdminDetail, DeliveryAdminDisposition,
     DeliveryAdminError, DeliveryAdminGuardBlocker, DeliveryAdminGuardSnapshot,
     DeliveryAdminObligation, DeliveryAdminRecovery, DeliveryAdminSentEvidence,
-    DeliverySendExpectation, DeliveryTakeExpectation,
+    DeliverySendExpectation, DeliveryTakeExpectation, SentObservedAttachments,
 };
 use auction_time::Timestamp;
 use serde_json::Value;
@@ -20,6 +20,9 @@ use uuid::Uuid;
 use super::eligibility::read_guard;
 use super::map_storage_error;
 use super::mapping::{decode_result_payload, snapshot, stored_snapshot};
+use crate::database::delivery::sent_confirmation::{
+    SENT_OBSERVATION_KINDS, decode_sent_observation,
+};
 use crate::database::{TrackedPool, TrackedTransaction as Transaction};
 
 pub(crate) async fn detail(
@@ -81,7 +84,8 @@ async fn read_detail(
     let attempts = attempts(transaction, delivery_id).await?;
     let confirmation_rows = confirmations(transaction, delivery_id).await?;
     let mut dispositions = admin_commands(transaction, delivery_id).await?;
-    let custody = custody(&result_metadata, &confirmation_rows);
+    let observations = observations(&result_metadata)?;
+    let custody = custody(&observations, &confirmation_rows);
     dispositions.extend(confirmation_rows.iter().map(confirmation_disposition));
     let mut seen: HashSet<Uuid> = dispositions.iter().map(|item| item.command_id).collect();
     dispositions.extend(
@@ -90,7 +94,7 @@ async fn read_detail(
             .into_iter()
             .filter(|item| seen.insert(item.command_id)),
     );
-    let evidence = evidence(&result_metadata, &confirmation_rows);
+    let evidence = evidence(observations, &confirmation_rows);
     let (obligation, recovery) = origin_chain(transaction, delivery_id).await?;
     dispositions.sort_by(|left, right| {
         right.occurred_at.cmp(&left.occurred_at).then(right.command_id.cmp(&left.command_id))
@@ -318,8 +322,10 @@ fn confirmation_disposition(row: &ConfirmationRow) -> DeliveryAdminDisposition {
 }
 
 /// 最近一次观测决定展示的领取状态；缺失保持 `None`，绝不推断未领取。
-fn custody(metadata: &Value, confirmations: &[ConfirmationRow]) -> DeliveryAdminCustody {
-    let observations = observations(metadata);
+fn custody(
+    observations: &[DeliveryAdminSentEvidence],
+    confirmations: &[ConfirmationRow],
+) -> DeliveryAdminCustody {
     let latest = observations.first();
     let operator_confirmed_collected = confirmations.iter().any(|row| row.collected);
     DeliveryAdminCustody {
@@ -340,8 +346,10 @@ fn custody(metadata: &Value, confirmations: &[ConfirmationRow]) -> DeliveryAdmin
     }
 }
 
-fn evidence(metadata: &Value, confirmations: &[ConfirmationRow]) -> Vec<DeliveryAdminSentEvidence> {
-    let mut items = observations(metadata);
+fn evidence(
+    mut items: Vec<DeliveryAdminSentEvidence>,
+    confirmations: &[ConfirmationRow],
+) -> Vec<DeliveryAdminSentEvidence> {
     items.extend(confirmations.iter().map(|row| DeliveryAdminSentEvidence {
         reference: format!("sent_operator_confirmed:{}", row.external_mail_id),
         kind: "sent_operator_confirmed".to_owned(),
@@ -356,6 +364,8 @@ fn evidence(metadata: &Value, confirmations: &[ConfirmationRow]) -> Vec<Delivery
         cod_pending: None,
         remaining_credits: None,
         remaining_equipment_count: None,
+        remaining_equipment_ids: None,
+        pre_collection_equipment_ids: None,
         receipt: (!row.receipt.is_empty()).then(|| row.receipt.clone()),
     }));
     items.sort_by_key(|item| std::cmp::Reverse(item.observed_at));
@@ -363,21 +373,25 @@ fn evidence(metadata: &Value, confirmations: &[ConfirmationRow]) -> Vec<Delivery
 }
 
 /// 从 `result_metadata` 提取维护流程写入的三类观察；未知键不解释成证据。
-fn observations(metadata: &Value) -> Vec<DeliveryAdminSentEvidence> {
+fn observations(metadata: &Value) -> Result<Vec<DeliveryAdminSentEvidence>, DeliveryAdminError> {
     let mut items = Vec::new();
-    for (key, kind) in [
-        ("mailbox_sweep", "mailbox_sweep"),
-        ("sent_reference_sighting", "sent_reference_sighting"),
-        ("compose_discard", "compose_discard"),
-    ] {
-        let Some(observation) = metadata.get(key).filter(|value| value.is_object()) else {
-            continue;
+    for kind in SENT_OBSERVATION_KINDS.into_iter().chain(["compose_discard"]) {
+        let Some(observation) = metadata.get(kind) else { continue };
+        let (external_mail_id, observed_at, attachments) = if kind == "compose_discard" {
+            if !observation.is_object() {
+                continue;
+            }
+            let mid = observation.get("mid").or_else(|| observation.get("external_mail_id"));
+            (
+                text(mid),
+                timestamp(observation.get("observed_at")),
+                SentObservedAttachments::default(),
+            )
+        } else {
+            let decoded = decode_sent_observation(observation)
+                .map_err(|error| map_storage_error(sqlx::Error::Decode(Box::new(error))))?;
+            (Some(decoded.mid.to_owned()), decoded.observed_at, decoded.attachments)
         };
-        let external_mail_id = observation
-            .get("mid")
-            .or_else(|| observation.get("external_mail_id"))
-            .and_then(Value::as_str)
-            .map(str::to_owned);
         let reference = match external_mail_id.as_deref() {
             Some(mail_id) => format!("{kind}:{mail_id}"),
             None => kind.to_owned(),
@@ -386,7 +400,7 @@ fn observations(metadata: &Value) -> Vec<DeliveryAdminSentEvidence> {
             reference,
             kind: kind.to_owned(),
             external_mail_id,
-            observed_at: timestamp(observation.get("observed_at")),
+            observed_at,
             sent_at: timestamp(observation.get("sent_at")),
             recipient: text(observation.get("recipient")),
             subject: text(observation.get("subject")),
@@ -403,11 +417,13 @@ fn observations(metadata: &Value) -> Vec<DeliveryAdminSentEvidence> {
                         .and_then(Value::as_array)
                         .map(|ids| ids.len() as i64)
                 }),
+            remaining_equipment_ids: attachments.remaining_equipment_ids,
+            pre_collection_equipment_ids: attachments.pre_collection_equipment_ids,
             receipt: text(observation.get("receipt")),
         });
     }
     items.sort_by_key(|item| std::cmp::Reverse(item.observed_at));
-    items
+    Ok(items)
 }
 
 fn timestamp(value: Option<&Value>) -> Option<Timestamp> {
@@ -517,4 +533,51 @@ async fn origin_chain(
         }),
     };
     Ok((obligation, recovery))
+}
+
+#[cfg(test)]
+mod tests {
+    use auction_application::delivery::DeliveryAdminError;
+    use serde_json::json;
+
+    use super::observations;
+
+    #[test]
+    fn legacy_observation_projects_missing_ids_as_none() {
+        let metadata = json!({
+            "mailbox_sweep": {"external_mail_id": "7000001", "remaining_equipment_count": 1},
+            "sent_reference_sighting": {"mid": "7000002", "remaining_equipment_ids": []},
+        });
+        let projected = observations(&metadata).expect("历史与实见记录均可读取");
+        assert_eq!(projected[0].reference, "mailbox_sweep:7000001");
+        assert_eq!(projected[0].observed_at, None);
+        assert_eq!(projected[0].remaining_equipment_ids, None);
+        assert_eq!(projected[0].pre_collection_equipment_ids, None);
+        assert_eq!(projected[1].remaining_equipment_ids, Some(Vec::new()));
+    }
+
+    #[test]
+    fn corrupt_observation_fails_the_detail_projection() {
+        for malformed in [
+            json!("broken"),
+            json!({"mid": "7000001", "remaining_equipment_ids": [300753957]}),
+            json!({"mid": "7000001", "remaining_equipment_ids": ["0300753957"]}),
+            json!({"mid": "7000001", "remaining_equipment_ids": ["20", "10"]}),
+            json!({"mid": "7000001", "remaining_equipment_count": 1, "remaining_equipment_ids": []}),
+            json!({"mid": "7000001", "pre_collection_equipment_ids": []}),
+        ] {
+            let metadata = json!({"mailbox_sweep": malformed});
+            assert!(matches!(observations(&metadata), Err(DeliveryAdminError::Unavailable)));
+        }
+    }
+
+    #[test]
+    fn corrupt_observation_time_fails_the_detail_projection() {
+        for kind in ["mailbox_sweep", "sent_reference_sighting"] {
+            for time in [json!("2026-11-31T01:20:00Z"), json!(12), json!(null)] {
+                let metadata = json!({kind: {"mid": "7000001", "observed_at": time}});
+                assert!(matches!(observations(&metadata), Err(DeliveryAdminError::Unavailable)));
+            }
+        }
+    }
 }

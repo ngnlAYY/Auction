@@ -1,0 +1,291 @@
+[
+  {
+    "code": "ok",
+    "data": {
+      "actions": {
+        "acknowledge": {
+          "reason": "status_mismatch",
+          "state": "blocked"
+        },
+        "reconcile_failed": {
+          "reason": "sent_sighted",
+          "state": "blocked"
+        },
+        "reconcile_retry": {
+          "reason": "sent_sighted",
+          "state": "blocked"
+        },
+        "reconcile_succeeded": {
+          "reason": "reconcile_succeeded_for_send",
+          "state": "blocked"
+        },
+        "release": {
+          "reason": "status_mismatch",
+          "state": "blocked"
+        },
+        "retry_failed": {
+          "reason": "status_mismatch",
+          "state": "blocked"
+        }
+      },
+      "detail": {
+        "attempts": [
+          {
+            "body_digest": "abababababababababababababababababababababababababababababababab",
+            "cod": 0,
+            "credits": 0,
+            "equipment_ids": [
+              "300753957"
+            ],
+            "fencing_version": 4,
+            "operation": "send",
+            "recipient": "Sample",
+            "sending_at": "2026-11-02T01:14:00.000000Z",
+            "subject": "Payment",
+            "world_id": "main"
+          }
+        ],
+        "custody": {
+          "cod_pending": 0,
+          "collected": false,
+          "observed_at": "2026-11-02T01:14:00.000000Z",
+          "remaining_credits": 0
+        },
+        "delivery": {
+          "attempt_count": 1,
+          "category": "settlement",
+          "claimed_at": "2026-11-02T01:14:00.000000Z",
+          "cod": 0,
+          "completed_at": "2026-11-02T01:14:00.000000Z",
+          "created_at": "2026-11-02T01:14:00.000000Z",
+          "external_reference": null,
+          "failure_code": "write_unknown",
+          "fencing_version": 4,
+          "id": "0f8fad5b-d9cb-469f-a165-70867728950e",
+          "lease_expires_at": null,
+          "origin_id": "00000000-0000-0000-0000-000000000002",
+          "origin_kind": "settlement",
+          "recipient": "Sample",
+          "sending_at": "2026-11-02T01:14:00.000000Z",
+          "status": "manual_reconcile",
+          "template": "settlement_equipment_handoff",
+          "updated_at": "2026-11-02T01:14:00.000000Z",
+          "world": "main"
+        },
+        "dispositions": [],
+        "evidence": [
+          {
+            "body_digest": "abababababababababababababababababababababababababababababababab",
+            "cod_pending": 0,
+            "collected": false,
+            "external_mail_id": "7000001",
+            "kind": "mailbox_sweep",
+            "observed_at": "2026-11-02T01:14:00.000000Z",
+            "pre_collection_equipment_ids": null,
+            "recipient": "Sample",
+            "reference": "mailbox_sweep:7000001",
+            "remaining_credits": 0,
+            "remaining_equipment_count": 1,
+            "remaining_equipment_ids": [
+              "300753957"
+            ],
+            "subject": "Payment"
+          }
+        ]
+      }
+    },
+    "message": "交付详情已加载"
+  },
+  {
+    "code": "ok",
+    "data": {
+      "actions": {
+        "acknowledge": {
+          "reason": "status_mismatch",
+          "state": "blocked"
+        },
+        "reconcile_failed": {
+          "reason": "sent_sighted",
+          "state": "blocked"
+        },
+        "reconcile_retry": {
+          "reason": "sent_sighted",
+          "state": "blocked"
+        },
+        "reconcile_succeeded": {
+          "reason": "reconcile_succeeded_for_send",
+          "state": "blocked"
+        },
+        "release": {
+          "reason": "status_mismatch",
+          "state": "blocked"
+        },
+        "retry_failed": {
+          "reason": "status_mismatch",
+          "state": "blocked"
+        }
+      },
+      "detail": {
+        "attempts": [
+          {
+            "body_digest": "abababababababababababababababababababababababababababababababab",
+            "cod": 0,
+            "credits": 0,
+            "equipment_ids": [
+              "300753957"
+            ],
+            "fencing_version": 4,
+            "operation": "send",
+            "recipient": "Sample",
+            "sending_at": "2026-11-02T01:14:00.000000Z",
+            "subject": "Payment",
+            "world_id": "main"
+          }
+        ],
+        "custody": {
+          "cod_pending": 0,
+          "collected": false,
+          "observed_at": "2026-11-02T01:14:00.000000Z",
+          "remaining_credits": 0
+        },
+        "delivery": {
+          "attempt_count": 1,
+          "category": "settlement",
+          "claimed_at": "2026-11-02T01:14:00.000000Z",
+          "cod": 0,
+          "completed_at": "2026-11-02T01:14:00.000000Z",
+          "created_at": "2026-11-02T01:14:00.000000Z",
+          "external_reference": null,
+          "failure_code": "write_unknown",
+          "fencing_version": 4,
+          "id": "0f8fad5b-d9cb-469f-a165-70867728950e",
+          "lease_expires_at": null,
+          "origin_id": "00000000-0000-0000-0000-000000000002",
+          "origin_kind": "settlement",
+          "recipient": "Sample",
+          "sending_at": "2026-11-02T01:14:00.000000Z",
+          "status": "manual_reconcile",
+          "template": "settlement_equipment_handoff",
+          "updated_at": "2026-11-02T01:14:00.000000Z",
+          "world": "main"
+        },
+        "dispositions": [],
+        "evidence": [
+          {
+            "body_digest": "abababababababababababababababababababababababababababababababab",
+            "cod_pending": 0,
+            "collected": false,
+            "external_mail_id": "7000001",
+            "kind": "mailbox_sweep",
+            "observed_at": "2026-11-02T01:14:00.000000Z",
+            "pre_collection_equipment_ids": null,
+            "recipient": "Sample",
+            "reference": "mailbox_sweep:7000001",
+            "remaining_credits": 0,
+            "remaining_equipment_count": 1,
+            "remaining_equipment_ids": null,
+            "subject": "Payment"
+          }
+        ]
+      }
+    },
+    "message": "交付详情已加载"
+  },
+  {
+    "code": "ok",
+    "data": {
+      "actions": {
+        "acknowledge": {
+          "reason": "status_mismatch",
+          "state": "blocked"
+        },
+        "reconcile_failed": {
+          "reason": "sent_sighted",
+          "state": "blocked"
+        },
+        "reconcile_retry": {
+          "reason": "sent_sighted",
+          "state": "blocked"
+        },
+        "reconcile_succeeded": {
+          "reason": "reconcile_succeeded_for_send",
+          "state": "blocked"
+        },
+        "release": {
+          "reason": "status_mismatch",
+          "state": "blocked"
+        },
+        "retry_failed": {
+          "reason": "status_mismatch",
+          "state": "blocked"
+        }
+      },
+      "detail": {
+        "attempts": [
+          {
+            "body_digest": "abababababababababababababababababababababababababababababababab",
+            "cod": 0,
+            "credits": 0,
+            "equipment_ids": [
+              "300753957"
+            ],
+            "fencing_version": 4,
+            "operation": "send",
+            "recipient": "Sample",
+            "sending_at": "2026-11-02T01:14:00.000000Z",
+            "subject": "Payment",
+            "world_id": "main"
+          }
+        ],
+        "custody": {
+          "cod_pending": 0,
+          "collected": true,
+          "observed_at": "2026-11-02T01:14:00.000000Z",
+          "remaining_credits": 0
+        },
+        "delivery": {
+          "attempt_count": 1,
+          "category": "settlement",
+          "claimed_at": "2026-11-02T01:14:00.000000Z",
+          "cod": 0,
+          "completed_at": "2026-11-02T01:14:00.000000Z",
+          "created_at": "2026-11-02T01:14:00.000000Z",
+          "external_reference": null,
+          "failure_code": "write_unknown",
+          "fencing_version": 4,
+          "id": "0f8fad5b-d9cb-469f-a165-70867728950e",
+          "lease_expires_at": null,
+          "origin_id": "00000000-0000-0000-0000-000000000002",
+          "origin_kind": "settlement",
+          "recipient": "Sample",
+          "sending_at": "2026-11-02T01:14:00.000000Z",
+          "status": "manual_reconcile",
+          "template": "settlement_equipment_handoff",
+          "updated_at": "2026-11-02T01:14:00.000000Z",
+          "world": "main"
+        },
+        "dispositions": [],
+        "evidence": [
+          {
+            "body_digest": "abababababababababababababababababababababababababababababababab",
+            "cod_pending": 0,
+            "collected": true,
+            "external_mail_id": "7000001",
+            "kind": "mailbox_sweep",
+            "observed_at": "2026-11-02T01:14:00.000000Z",
+            "pre_collection_equipment_ids": [
+              "300753957"
+            ],
+            "recipient": "Sample",
+            "reference": "mailbox_sweep:7000001",
+            "remaining_credits": 0,
+            "remaining_equipment_count": 0,
+            "remaining_equipment_ids": [],
+            "subject": "Payment"
+          }
+        ]
+      }
+    },
+    "message": "交付详情已加载"
+  }
+]

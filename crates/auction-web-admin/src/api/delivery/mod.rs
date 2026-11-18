@@ -39,9 +39,9 @@ const MAX_PLAYER_SUPPORT_ROWS: usize = 50;
 /// 服务端缺省投影只输出升级前页面认识的值。
 const DELIVERY_PROJECTION_INCLUDE: &str = "settlement_returns";
 
-/// 详情显式请求当前 fence 上的处置判定，同时包含结算退件 Take。
+/// 详情在同一快照读取处置准入与 Sent 实见附件，供证明对话框直接使用。
 fn delivery_detail_url(delivery_id: &str) -> String {
-    format!("/api/v1/admin/deliveries/{delivery_id}?include=disposition_actions")
+    format!("/api/v1/admin/deliveries/{delivery_id}?include=sent_proof")
 }
 
 /// 读取单条投递的完整证据详情；响应必须精确对应请求的投递 ID。
@@ -57,7 +57,7 @@ pub(crate) async fn fetch_delivery_detail(
     }
     let payload: StrictDeliveryEnvelope<AdminDeliveryDetailWithActionsResponse> =
         response.json().await.map_err(invalid_response_error)?;
-    decode_detail_with_actions(payload, &delivery_id)
+    decode_detail_with_actions(payload, &delivery_id, true)
         .map_err(|_| invalid_response_error("delivery_detail"))
 }
 
@@ -70,7 +70,9 @@ pub(crate) async fn preview_delivery_sent_proof(
     if !valid_uuid(&delivery_id) || !valid_safe_text(&evidence_reference, 128) {
         return Err(AdminApiFailure::client("invalid_delivery_command"));
     }
-    let url = format!("/api/v1/admin/deliveries/{delivery_id}/sent-proof/preview");
+    let url = format!(
+        "/api/v1/admin/deliveries/{delivery_id}/sent-proof/preview?include=responsibility_reasons"
+    );
     let request = AdminDeliverySentProofPreviewRequest { evidence_reference, evidence };
     let csrf_token = fetch_csrf_token().await.map_err(AdminApiFailure::client)?;
     let response = send_request(|abort_signal| {

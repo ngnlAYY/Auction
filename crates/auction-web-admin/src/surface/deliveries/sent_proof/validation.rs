@@ -6,27 +6,28 @@ use auction_time::SecondsFormat;
 
 use super::evidence::{SELECTABLE_EVIDENCE_KINDS, decode_hex_digest, latest_send_attempt};
 use super::state::{SentProofDraft, SentProofIssue};
-use crate::api::{DeliveryDetail, DeliverySentEvidence, MAX_JSON_SAFE_INTEGER};
+use crate::api::{
+    DeliveryAttempt, DeliveryDetail, DeliveryEvidence, DeliverySentEvidence, LocalTimeError,
+    MAX_JSON_SAFE_INTEGER,
+};
 
 /// 把 `datetime-local` 输入换算为带 `Z` 的整分钟；秒或小数非零时不猜测。
-pub(super) fn sent_minute_from_input(value: &str) -> Option<String> {
-    if value.is_empty() {
-        return None;
-    }
-    let parsed = crate::api::parse_local_datetime(value).ok()?;
+pub(super) fn sent_minute_from_input(value: &str) -> Result<String, LocalTimeError> {
+    let parse = crate::api::parse_local_datetime;
+    #[cfg(test)]
+    let parse = super::tests::local_time_parser().unwrap_or(parse);
+    let parsed = parse(value)?;
     if parsed.to_utc_datetime().second() != 0 || parsed.timestamp_subsec_nanos() != 0 {
-        return None;
+        return Err(LocalTimeError::Invalid);
     }
-    Some(sent_minute_text(parsed))
+    Ok(sent_minute_text(parsed))
 }
 
-/// 证据里的发送时间戳按整分钟截断；服务端只接受秒与小数均为零的分钟。
+/// 未编辑时直接提交证据已记录的 UTC 分钟，保留服务端文本。
 pub(super) fn sent_minute_from_timestamp(value: &str) -> Option<String> {
-    let parsed = auction_time::Timestamp::parse_from_rfc3339(value)
-        .ok()?
-        .with_second(0)?
-        .with_nanosecond(0)?;
-    Some(sent_minute_text(parsed))
+    let parsed = auction_time::Timestamp::parse_from_rfc3339(value).ok()?;
+    (parsed.to_utc_datetime().second() == 0 && parsed.timestamp_subsec_nanos() == 0)
+        .then(|| value.to_owned())
 }
 
 /// 发送分钟统一使用带 `Z` 的 UTC 整分钟文本（`YYYY-MM-DDTHH:MM:00Z`）；入参的秒与小数已为零。
@@ -63,6 +64,16 @@ fn parse_amount(value: &str) -> Option<i64> {
     (0..=MAX_JSON_SAFE_INTEGER).contains(&parsed).then_some(parsed)
 }
 
+/// 只有已领取的装备可走缺少旧清单的回执路径。
+pub(super) fn missing_observed_ids(
+    evidence: &DeliveryEvidence,
+    attempt: &DeliveryAttempt,
+    collected: bool,
+) -> bool {
+    evidence.remaining_equipment_ids().is_none()
+        && (!collected || evidence.collected == Some(false) || attempt.equipment_ids.is_empty())
+}
+
 /// 组合冻结尝试与已采集证据；任一必需字段缺失都返回本地问题码，不提交半成品。
 pub(super) fn build_evidence(
     detail: &DeliveryDetail,
@@ -77,6 +88,9 @@ pub(super) fn build_evidence(
         })
         .ok_or(SentProofIssue::Evidence)?;
     let attempt = latest_send_attempt(detail).ok_or(SentProofIssue::Attempt)?;
+    if missing_observed_ids(evidence, attempt, draft.collected) {
+        return Err(SentProofIssue::MissingObservedEquipmentIds);
+    }
     let external_mail_id = evidence.external_mail_id.clone().ok_or(SentProofIssue::Evidence)?;
     let observed_at = evidence.observed_at.clone().ok_or(SentProofIssue::Evidence)?;
     let observed_body_digest = evidence
@@ -96,20 +110,37 @@ pub(super) fn build_evidence(
         .clone()
         .or_else(|| attempt.subject.clone())
         .ok_or(SentProofIssue::Subject)?;
-    let sent_minute = match draft.sent_minute.trim() {
-        "" => evidence.sent_at.as_deref().and_then(sent_minute_from_timestamp),
-        value => sent_minute_from_input(value),
+    let sent_minute = if draft.sent_minute_edited {
+        sent_minute_from_input(draft.sent_minute.trim())
+    } else {
+        evidence
+            .sent_at
+            .as_deref()
+            .and_then(sent_minute_from_timestamp)
+            .ok_or(LocalTimeError::Invalid)
     }
-    .ok_or(SentProofIssue::SentMinute)?;
+    .map_err(SentProofIssue::SentMinute)?;
     let sender_name = valid_sender_name(&draft.sender_name).ok_or(SentProofIssue::SenderName)?;
     let sender_uid = valid_sender_uid(&draft.sender_uid).ok_or(SentProofIssue::SenderUid)?;
-    let remaining_credits = parse_amount(&draft.remaining_credits).ok_or(SentProofIssue::Amount)?;
-    let cod_pending = parse_amount(&draft.cod_pending).ok_or(SentProofIssue::Amount)?;
-    if draft.receipt.len() > 2048 {
-        return Err(SentProofIssue::Receipt);
-    }
-    // 已领取时附件不在 Sent 中，冻结 EID 不能作为剩余观察；未领取才沿用冻结清单。
-    let equipment_ids = if draft.collected { Vec::new() } else { attempt.equipment_ids.clone() };
+    let remaining_credits =
+        parse_amount(&draft.remaining_credits).ok_or(SentProofIssue::RemainingCredits)?;
+    let cod_pending = parse_amount(&draft.cod_pending).ok_or(SentProofIssue::CodPending)?;
+    let receipt = if draft.collected {
+        if draft.receipt.len() > 2048 {
+            return Err(SentProofIssue::Receipt);
+        }
+        draft.receipt.trim().to_owned()
+    } else {
+        String::new()
+    };
+    let equipment_ids = if draft.collected {
+        Vec::new()
+    } else {
+        evidence
+            .remaining_equipment_ids()
+            .ok_or(SentProofIssue::MissingObservedEquipmentIds)?
+            .to_vec()
+    };
     Ok(DeliverySentEvidence {
         schema_version: 1,
         world_id: attempt.world_id.clone(),
@@ -126,6 +157,6 @@ pub(super) fn build_evidence(
         cod_pending,
         equipment_ids,
         collected: draft.collected,
-        receipt: draft.receipt.trim().to_owned(),
+        receipt,
     })
 }

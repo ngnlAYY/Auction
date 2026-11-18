@@ -19,13 +19,14 @@ pub(super) fn decode_detail(
     if !valid_success_code(&payload.code) || payload.message.is_empty() {
         return Err(());
     }
-    validate_detail(&payload.data)?;
+    validate_detail(&payload.data, false)?;
     Ok(payload.data)
 }
 
 pub(super) fn decode_detail_with_actions(
     payload: StrictDeliveryEnvelope<AdminDeliveryDetailWithActionsResponse>,
     delivery_id: &str,
+    include_sent_proof: bool,
 ) -> Result<AdminDeliveryDetailWithActionsResponse, ()> {
     let data = payload.data;
     if data.detail.delivery.id != delivery_id
@@ -34,14 +35,18 @@ pub(super) fn decode_detail_with_actions(
     {
         return Err(());
     }
-    validate_detail(&data.detail)?;
+    validate_detail(&data.detail, include_sent_proof)?;
     Ok(data)
 }
 
-fn validate_detail(data: &AdminDeliveryDetailResponse) -> Result<(), ()> {
+fn validate_detail(data: &AdminDeliveryDetailResponse, include_sent_proof: bool) -> Result<(), ()> {
     decode_delivery(data.delivery.clone())?;
     if data.attempts.iter().any(|attempt| !valid_attempt(attempt))
-        || data.evidence.iter().any(|evidence| !valid_evidence(evidence))
+        || data.evidence.iter().any(|evidence| {
+            !valid_evidence(evidence)
+                || evidence.remaining_equipment_ids.is_some() != include_sent_proof
+                || evidence.pre_collection_equipment_ids.is_some() != include_sent_proof
+        })
         || !valid_custody(&data.custody)
         || data.dispositions.iter().any(|item| !valid_disposition(item))
         || data.obligation.as_ref().is_some_and(|item| !valid_obligation(item))
@@ -60,17 +65,44 @@ pub(super) fn decode_preview(
         return Err(());
     }
     let preview = payload.data;
+    let (Some(prior_attempts), Some(before_current)) =
+        (preview.prior_unbound_attempts, preview.sent_before_current_attempt)
+    else {
+        return Err(());
+    };
     // 只接受本次请求的投递身份与正版本；blockers 是服务端闭集，不能由浏览器补全。
     if preview.delivery_id != delivery_id
         || !(1..=MAX_JSON_SAFE_INTEGER).contains(&preview.expected_fencing_version)
         || !valid_trimmed_text(&preview.external_reference)
         || preview.blockers.len() > 32
-        || preview.blockers.iter().any(|blocker| !valid_safe_text(blocker, 96))
-        || (preview.eligible && !preview.blockers.is_empty())
+        || preview.blockers.iter().any(|blocker| !valid_preview_blocker(blocker))
+        || preview.eligible != preview.blockers.is_empty()
+        || preview.requires_attempt_history_acceptance != (prior_attempts || before_current)
+        || (before_current && !preview.corrects_admin_failure)
     {
         return Err(());
     }
     Ok(preview)
+}
+
+fn valid_preview_blocker(blocker: &str) -> bool {
+    matches!(
+        blocker,
+        "delivery_not_found"
+            | "unsupported_delivery_scope"
+            | "requires_unclaimed_write_unknown_or_admin_failure"
+            | "fulfillment_identity_or_claim_conflict"
+            | "conflicting_recovery_disposition"
+            | "existing_binding_retirement_or_conflicting_attempt"
+            | "requires_unique_ready_sender_funding_account"
+            | "sender_player_name_mismatch"
+            | "frozen_credential_retired_or_changed"
+            | "sent_minute_outside_frozen_window"
+            | "requires_exact_unknown_seller_reservation"
+            | "frozen_identity_body_money_or_assets_mismatch"
+            | "missing_observed_equipment_ids"
+            | "observed_equipment_ids_mismatch"
+    )
 }
 
 pub(super) fn decode_confirmation(
@@ -141,7 +173,20 @@ pub(super) fn valid_evidence(value: &auction_contracts::AdminDeliveryEvidenceRes
         && value.cod_pending.is_none_or(valid_count)
         && value.remaining_credits.is_none_or(valid_count)
         && value.remaining_equipment_count.is_none_or(valid_count)
+        && value.remaining_equipment_ids().is_none_or(|ids| {
+            valid_observed_ids(ids)
+                && value
+                    .remaining_equipment_count
+                    .is_none_or(|count| usize::try_from(count).ok() == Some(ids.len()))
+        })
+        && value
+            .pre_collection_equipment_ids()
+            .is_none_or(|ids| !ids.is_empty() && valid_observed_ids(ids))
         && value.receipt.as_deref().is_none_or(|text| text.len() <= 2048)
+}
+
+fn valid_observed_ids(ids: &[String]) -> bool {
+    ids.iter().all(|id| valid_positive_decimal(id)) && ids.windows(2).all(|pair| pair[0] < pair[1])
 }
 
 pub(super) fn valid_custody(value: &auction_contracts::AdminDeliveryCustodyResponse) -> bool {

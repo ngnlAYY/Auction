@@ -2,15 +2,25 @@
 
 use std::time::Instant;
 
+use auction_time::Timestamp;
+use serde_json::{Value, json};
+
 use super::MailboxMaintenanceReport;
 use super::MailboxMaintenanceService;
 use super::diagnostics::{check_deadline, record_unpersisted_error, repository_error};
+use super::matching::notice_subject_matches;
 use crate::errors::ApplicationError;
-use crate::ports::mail::MoogleMailboxSweepCandidate;
+use crate::ports::mail::{
+    MoogleMailboxFailedSend, MoogleMailboxSentEntries, MoogleMailboxSentEntry,
+    MoogleMailboxSentState, MoogleMailboxSweepCandidate, MoogleMailboxSweepPosition,
+    mail_recipient_is_list_projection,
+};
 use crate::ports::operations::ExternalWriteActivity;
 
 /// 单轮最多核对的投递数。
 const RECOVERY_PER_SWEEP: usize = 20;
+/// 普通候选占用原有位置，失败取证只使用本轮剩余位置。
+const CANDIDATES_PER_SWEEP: usize = 200;
 
 impl MailboxMaintenanceService {
     /// Worker 以同一总截止点包住完整 future；DB、凭据排队与所有远端操作均计入维护预算。
@@ -27,24 +37,41 @@ impl MailboxMaintenanceService {
         }
         check_deadline(deadline)?;
         let mut report = MailboxMaintenanceReport::default();
-        let candidates = self.store.unproven_sends(world_id, 200).await?;
-        self.recover_sent(world_id, &candidates, deadline, &mut report).await?;
+        let batch = self.store.unproven_sends(world_id, CANDIDATES_PER_SWEEP as i64).await?;
+        let entries = self.read_sent_entries(world_id, &mut report).await;
+        let remaining = self
+            .recover_sent(world_id, &batch.candidates, entries.as_ref(), deadline, &mut report)
+            .await?;
         check_deadline(deadline)?;
-        self.clean_compose(world_id, &candidates, deadline, activity, &mut report).await?;
+        self.clean_compose(world_id, &batch.candidates, deadline, activity, &mut report).await?;
+        let slots_left = CANDIDATES_PER_SWEEP.saturating_sub(batch.candidates.len());
+        // 补采只用原路径剩下的时间和额度，轮转仍以同一次持久读取为起点（不变量 5）。
+        if world_id == "main"
+            && remaining > 0
+            && slots_left > 0
+            && let Some(coverage) = entries.as_ref().filter(|coverage| coverage.complete)
+        {
+            self.observe_failed_sends(
+                coverage,
+                batch.position,
+                slots_left,
+                remaining,
+                deadline,
+                &mut report,
+            )
+            .await?;
+        }
         Ok(report)
     }
 
-    /// Sent/Take 统计按字段直接累加进本轮报告，不经位置元组回填；返回错误时整轮报告随之丢弃。
-    async fn recover_sent(
+    async fn read_sent_entries(
         &self,
         world_id: &str,
-        candidates: &[MoogleMailboxSweepCandidate],
-        deadline: Instant,
         report: &mut MailboxMaintenanceReport,
-    ) -> Result<(), ApplicationError> {
+    ) -> Option<MoogleMailboxSentEntries> {
         // Sent 每日完整校验与页数告警必须独立于是否存在未知发送候选，因此每轮都读取；
         // 前缀轮仍只读增量。
-        let entries = match self.maintenance.sent_entries(world_id).await {
+        match self.maintenance.sent_entries(world_id).await {
             Ok(entries) => {
                 if let Some(observation) = entries.page_observation.as_ref()
                     && let Err(error) = self.store.record_sent_pages(observation).await
@@ -58,7 +85,18 @@ impl MailboxMaintenanceService {
                 report.sent_state_failed += 1;
                 None
             }
-        };
+        }
+    }
+
+    /// Sent/Take 统计按字段直接累加进本轮报告，不经位置元组回填；返回错误时整轮报告随之丢弃。
+    async fn recover_sent(
+        &self,
+        world_id: &str,
+        candidates: &[MoogleMailboxSweepCandidate],
+        entries: Option<&MoogleMailboxSentEntries>,
+        deadline: Instant,
+        report: &mut MailboxMaintenanceReport,
+    ) -> Result<usize, ApplicationError> {
         // 按已读取的稳定环形批次逐条开始；候选批次本身不推进持久游标。
         let mut recovery_budget = RECOVERY_PER_SWEEP;
         for slot in candidates {
@@ -83,7 +121,7 @@ impl MailboxMaintenanceService {
             }
             let step = match candidate.operation.as_str() {
                 "send" => {
-                    let Some(coverage) = entries.as_ref() else { continue };
+                    let Some(coverage) = entries else { continue };
                     // 前缀只覆盖水位之后的时间窗；更旧候选留给每日完整校验或其他证明路径。
                     if !coverage.covers(candidate.sending_at) {
                         continue;
@@ -155,16 +193,133 @@ impl MailboxMaintenanceService {
                 report.sweep_requeued += 1;
             }
         }
+        Ok(recovery_budget)
+    }
+
+    async fn observe_failed_sends(
+        &self,
+        coverage: &MoogleMailboxSentEntries,
+        start: Option<MoogleMailboxSweepPosition>,
+        slots_left: usize,
+        mut budget: usize,
+        deadline: Instant,
+        report: &mut MailboxMaintenanceReport,
+    ) -> Result<(), ApplicationError> {
+        let Some(oldest) = coverage.entries.iter().map(|entry| entry.sent_at).min() else {
+            return Ok(());
+        };
+        check_deadline(deadline)?;
+        let slots = self.store.failed_sent_slots(start, oldest, slots_left as i64).await?;
+        for slot in slots {
+            if budget == 0 {
+                break;
+            }
+            check_deadline(deadline)?;
+            let entry =
+                slot.target.as_ref().and_then(|target| unique_failed_entry(coverage, target));
+            report.sent_candidates += usize::from(slot.target.is_some());
+            report.sent_matched += usize::from(entry.is_some());
+            // 只有持久登记成功才使用一个剩余额度。失败、取消和未知提交都不能重新授权读取（不变量 5）。
+            if !self
+                .store
+                .begin_failed_sent_detail(slot.delivery_id, slot.fencing_version, entry)
+                .await?
+            {
+                continue;
+            }
+            let (Some(entry), Some(target)) = (entry, slot.target.as_ref()) else {
+                continue;
+            };
+            budget -= 1;
+            check_deadline(deadline)?;
+            let state = match self.maintenance.sent_state("main", entry, self.clock.now()).await {
+                Ok(state) => state,
+                Err(error) => {
+                    record_unpersisted_error("read_failed_sent_state", "main", &error);
+                    report.sent_state_failed += 1;
+                    continue;
+                }
+            };
+            let credential_matches = target
+                .expectation
+                .credential
+                .as_ref()
+                .zip(state.observation_credential.as_ref())
+                .is_some_and(|(expected, observed)| {
+                    expected.credential_id == observed.credential_id
+                        && expected.credential_version == observed.credential_version
+                });
+            if !credential_matches
+                || state.external_mail_id != entry.external_mail_id
+                || !state.recipient.eq_ignore_ascii_case(&target.expectation.recipient)
+                || state.subject != target.expectation.subject
+            {
+                continue;
+            }
+            // 留下实际看见的资产，包括错号和已领取。取证不推进投递、履约或外写（不变量 4、6）。
+            let written = self
+                .store
+                .record_sent_sighting(
+                    slot.delivery_id,
+                    slot.fencing_version,
+                    &state.external_mail_id,
+                    sent_metadata(&state, self.clock.now(), Some(entry.sent_at)),
+                )
+                .await?;
+            report.sent_observed += usize::from(written);
+        }
         Ok(())
     }
+}
+
+fn unique_failed_entry<'a>(
+    coverage: &'a MoogleMailboxSentEntries,
+    target: &MoogleMailboxFailedSend,
+) -> Option<&'a MoogleMailboxSentEntry> {
+    let mut hits = coverage.entries.iter().filter(|entry| {
+        coverage.covers(entry.sent_at)
+            && (target.not_before..=target.not_after).contains(&entry.sent_at)
+            && mail_recipient_is_list_projection(&entry.recipient, &target.expectation.recipient)
+            && notice_subject_matches(&target.expectation.subject, &entry.subject)
+    });
+    let entry = hits.next()?;
+    (hits.next().is_none() && auction_domain::valid_positive_decimal(&entry.external_mail_id, 64))
+        .then_some(entry)
+}
+
+pub(super) fn sent_metadata(
+    state: &MoogleMailboxSentState,
+    at: Timestamp,
+    sent: Option<Timestamp>,
+) -> Value {
+    // 编号无效时保留目击门，但不能补全附件身份或把它记为空清单（不变量 6）。
+    let ids = state.canonical_remaining_equipment_ids();
+    let mut observation = json!({
+        "observed_at": at,
+        "mid": state.external_mail_id,
+        "recipient": state.recipient,
+        "subject": state.subject,
+        "body_digest": state.body_digest,
+        "collected": state.collected,
+        "cod_pending": state.cod_pending,
+        "remaining_credits": state.remaining_credits,
+        "remaining_equipment_count": ids.as_ref().map_or_else(|| state.remaining_equipment_ids.len(), Vec::len),
+        "remaining_equipment_ids": ids,
+    });
+    if let Some(sent_at) = sent {
+        observation["sent_at"] = json!(sent_at);
+        observation["sent_time_precision"] = json!("minute");
+    }
+    observation
 }
 
 #[cfg(test)]
 mod tests {
     use std::{
+        collections::HashSet,
         sync::{
-            Arc,
-            atomic::{AtomicBool, Ordering},
+            Arc, Mutex,
+            atomic::{AtomicBool, AtomicUsize, Ordering},
         },
         time::Instant,
     };
@@ -174,7 +329,7 @@ mod tests {
     use uuid::Uuid;
 
     use super::super::ComposeCleanupFailure;
-    use super::{MailboxMaintenanceReport, MailboxMaintenanceService};
+    use super::{MailboxMaintenanceReport, MailboxMaintenanceService, RECOVERY_PER_SWEEP};
     use crate::errors::ApplicationError;
     use crate::ports::core::ApplicationFuture;
     use crate::ports::core::Clock;
@@ -183,11 +338,12 @@ mod tests {
     };
     use crate::ports::mail::{
         MailScanPageObservation, MoogleMailboxComposeState, MoogleMailboxDiscard,
-        MoogleMailboxEvidenceStore, MoogleMailboxInboxAssets, MoogleMailboxInboxObservation,
-        MoogleMailboxMaintenance, MoogleMailboxNoticeExpectation, MoogleMailboxReturnTake,
-        MoogleMailboxReturnTakeIdentity, MoogleMailboxReturnTakeObservation,
-        MoogleMailboxSentEntries, MoogleMailboxSentEntry, MoogleMailboxSentState,
-        MoogleMailboxSweepCandidate, MoogleMailboxUnprovenSend,
+        MoogleMailboxEvidenceStore, MoogleMailboxFailedSend, MoogleMailboxFailedSendSlot,
+        MoogleMailboxInboxAssets, MoogleMailboxInboxObservation, MoogleMailboxMaintenance,
+        MoogleMailboxNoticeExpectation, MoogleMailboxReturnTake, MoogleMailboxReturnTakeIdentity,
+        MoogleMailboxReturnTakeObservation, MoogleMailboxSentEntries, MoogleMailboxSentEntry,
+        MoogleMailboxSentState, MoogleMailboxSweepBatch, MoogleMailboxSweepCandidate,
+        MoogleMailboxSweepPosition, MoogleMailboxUnprovenSend,
     };
     use crate::ports::operations::ExternalWriteActivity;
 
@@ -212,6 +368,11 @@ mod tests {
 
     struct FixtureMaintenance {
         coverage: MoogleMailboxSentEntries,
+        list_reads: AtomicUsize,
+        compose_reads: AtomicUsize,
+        detail_reads: AtomicUsize,
+        sent_state: Option<MoogleMailboxSentState>,
+        sent_state_fails: bool,
         /// 置位时 Sent 列表与 compose 读取都失败，用于核对部分失败的报告口径。
         reads_fail: bool,
         /// 未清空的草稿；`None` 表示 compose 已干净。
@@ -226,6 +387,11 @@ mod tests {
         fn new(coverage: MoogleMailboxSentEntries, reads_fail: bool) -> Self {
             Self {
                 coverage,
+                list_reads: AtomicUsize::new(0),
+                compose_reads: AtomicUsize::new(0),
+                detail_reads: AtomicUsize::new(0),
+                sent_state: None,
+                sent_state_fails: false,
                 reads_fail,
                 dirty_compose: None,
                 discard_fails: false,
@@ -242,6 +408,7 @@ mod tests {
             &'a self,
             _world_id: &'a str,
         ) -> ApplicationFuture<'a, MoogleMailboxComposeState> {
+            self.compose_reads.fetch_add(1, Ordering::SeqCst);
             let reads_fail = self.reads_fail;
             let dirty = self.dirty_compose.clone();
             Box::pin(async move {
@@ -282,6 +449,7 @@ mod tests {
             &'a self,
             _world_id: &'a str,
         ) -> ApplicationFuture<'a, MoogleMailboxSentEntries> {
+            self.list_reads.fetch_add(1, Ordering::SeqCst);
             let coverage = self.coverage.clone();
             let reads_fail = self.reads_fail;
             Box::pin(async move {
@@ -300,7 +468,8 @@ mod tests {
             entry: &'a MoogleMailboxSentEntry,
             _observed_at: auction_time::Timestamp,
         ) -> ApplicationFuture<'a, MoogleMailboxSentState> {
-            let state = MoogleMailboxSentState {
+            self.detail_reads.fetch_add(1, Ordering::SeqCst);
+            let state = self.sent_state.clone().unwrap_or_else(|| MoogleMailboxSentState {
                 external_mail_id: entry.external_mail_id.clone(),
                 recipient: entry.recipient.clone(),
                 subject: entry.subject.clone(),
@@ -310,8 +479,13 @@ mod tests {
                 remaining_equipment_ids: Vec::new(),
                 body_digest: [0; 32],
                 observation_credential: None,
-            };
-            Box::pin(async move { Ok(state) })
+            });
+            Box::pin(async move {
+                if self.sent_state_fails {
+                    return Err(ApplicationError::CapabilityUnavailable("测试 Sent 详情读取失败"));
+                }
+                Ok(state)
+            })
         }
         fn notice_expectation<'a>(
             &'a self,
@@ -346,10 +520,32 @@ mod tests {
         /// 一次性 discard 围栏是否授权。
         fence_granted: bool,
         take_calls: TakeCalls,
+        candidates: Vec<MoogleMailboxSweepCandidate>,
+        regular_attempts: AtomicUsize,
+        failed_slots: Vec<MoogleMailboxFailedSendSlot>,
+        failed_queries: AtomicUsize,
+        suspend_failed_queries: bool,
+        detail_attempts: Mutex<HashSet<(Uuid, String)>>,
+        sightings: Mutex<Vec<(Uuid, Value)>>,
+        write_observations: bool,
+        observation_attempts: AtomicUsize,
     }
     impl FixtureStore {
         fn new(bind_called: Arc<AtomicBool>, fence_granted: bool) -> Self {
-            Self { bind_called, fence_granted, take_calls: Arc::default() }
+            Self {
+                bind_called,
+                fence_granted,
+                take_calls: Arc::default(),
+                candidates: Vec::new(),
+                regular_attempts: AtomicUsize::new(0),
+                failed_slots: Vec::new(),
+                failed_queries: AtomicUsize::new(0),
+                suspend_failed_queries: false,
+                detail_attempts: Mutex::default(),
+                sightings: Mutex::default(),
+                write_observations: true,
+                observation_attempts: AtomicUsize::new(0),
+            }
         }
     }
     impl MoogleMailboxEvidenceStore for FixtureStore {
@@ -357,14 +553,44 @@ mod tests {
             &'a self,
             _world_id: &'a str,
             _limit: i64,
-        ) -> ApplicationFuture<'a, Vec<MoogleMailboxSweepCandidate>> {
-            Box::pin(async { Ok(Vec::new()) })
+        ) -> ApplicationFuture<'a, MoogleMailboxSweepBatch> {
+            Box::pin(async {
+                Ok(MoogleMailboxSweepBatch { candidates: self.candidates.clone(), position: None })
+            })
+        }
+        fn failed_sent_slots(
+            &self,
+            _start: Option<MoogleMailboxSweepPosition>,
+            _oldest_visible: Timestamp,
+            _limit: i64,
+        ) -> ApplicationFuture<'_, Vec<MoogleMailboxFailedSendSlot>> {
+            self.failed_queries.fetch_add(1, Ordering::SeqCst);
+            if self.suspend_failed_queries {
+                return Box::pin(std::future::pending());
+            }
+            Box::pin(async { Ok(self.failed_slots.clone()) })
+        }
+        fn begin_failed_sent_detail<'a>(
+            &'a self,
+            delivery_id: Uuid,
+            _fencing_version: i64,
+            entry: Option<&'a MoogleMailboxSentEntry>,
+        ) -> ApplicationFuture<'a, bool> {
+            Box::pin(async move {
+                Ok(entry.is_some_and(|entry| {
+                    self.detail_attempts
+                        .lock()
+                        .expect("读取机会")
+                        .insert((delivery_id, entry.external_mail_id.clone()))
+                }))
+            })
         }
         fn record_sweep_attempt<'a>(
             &'a self,
             _world_id: &'a str,
             _delivery_id: Uuid,
         ) -> ApplicationFuture<'a, bool> {
+            self.regular_attempts.fetch_add(1, Ordering::SeqCst);
             Box::pin(async { Ok(true) })
         }
         fn record_sent_pages<'a>(
@@ -387,17 +613,21 @@ mod tests {
             _delivery_id: Uuid,
             _fencing_version: i64,
             _observation: Value,
-        ) -> ApplicationFuture<'a, ()> {
-            Box::pin(async { Ok(()) })
+        ) -> ApplicationFuture<'a, bool> {
+            self.observation_attempts.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async { Ok(self.write_observations) })
         }
         fn record_sent_sighting<'a>(
             &'a self,
-            _delivery_id: Uuid,
+            delivery_id: Uuid,
             _fencing_version: i64,
             _external_mail_id: &'a str,
-            _observation: Value,
-        ) -> ApplicationFuture<'a, ()> {
-            Box::pin(async { Ok(()) })
+            observation: Value,
+        ) -> ApplicationFuture<'a, bool> {
+            if self.write_observations {
+                self.sightings.lock().expect("观察记录").push((delivery_id, observation));
+            }
+            Box::pin(async { Ok(self.write_observations) })
         }
         fn record_compose_discard<'a>(
             &'a self,
@@ -500,9 +730,11 @@ mod tests {
         );
         let delivery_id = candidate.delivery_id;
         let mut report = MailboxMaintenanceReport::default();
+        let entries = block_on(service.read_sent_entries("main", &mut report));
         block_on(service.recover_sent(
             "main",
             &[MoogleMailboxSweepCandidate { delivery_id, send: Some(candidate) }],
+            entries.as_ref(),
             Instant::now() + std::time::Duration::from_secs(60),
             &mut report,
         ))
@@ -559,6 +791,243 @@ mod tests {
             &ExternalWriteActivity::default(),
         ))
         .expect("远端读取失败只记入报告，不中断本轮")
+    }
+
+    fn failed_equipment() -> (FixtureMaintenance, FixtureStore) {
+        let at = NoopClock.now() - auction_time::Duration::minutes(1);
+        let entry = MoogleMailboxSentEntry {
+            external_mail_id: "75001".to_owned(),
+            recipient: "Buyer001".to_owned(),
+            subject: "Auction equipment delivery [reference]".to_owned(),
+            sent_at: at,
+        };
+        let credential = DeliverySendCredentialBinding {
+            credential_id: Uuid::new_v4(),
+            credential_version: 1,
+            runtime_generation: 1,
+        };
+        let mut maintenance = FixtureMaintenance::new(
+            MoogleMailboxSentEntries {
+                entries: vec![entry.clone()],
+                covered_from: Some(at),
+                complete: true,
+                page_observation: None,
+            },
+            false,
+        );
+        maintenance.sent_state = Some(MoogleMailboxSentState {
+            external_mail_id: entry.external_mail_id,
+            recipient: entry.recipient.clone(),
+            subject: entry.subject.clone(),
+            collected: false,
+            cod_pending: 100,
+            remaining_credits: 0,
+            remaining_equipment_ids: vec!["00300".to_owned()],
+            body_digest: [7; 32],
+            observation_credential: Some(credential.clone()),
+        });
+        let mut store = FixtureStore::new(Arc::new(AtomicBool::new(false)), false);
+        store.failed_slots.push(MoogleMailboxFailedSendSlot {
+            delivery_id: Uuid::new_v4(),
+            fencing_version: 4,
+            target: Some(MoogleMailboxFailedSend {
+                expectation: DeliverySendExpectation {
+                    world_id: "main".to_owned(),
+                    recipient: entry.recipient,
+                    subject: entry.subject,
+                    body_digest: [7; 32],
+                    cod: 100,
+                    credits: 0,
+                    equipment_ids: vec!["300".to_owned()],
+                    credential: Some(credential),
+                },
+                not_before: at,
+                not_after: NoopClock.now(),
+            }),
+        });
+        (maintenance, store)
+    }
+
+    fn run_sweep(service: &MailboxMaintenanceService) -> MailboxMaintenanceReport {
+        block_on(service.sweep(
+            "main",
+            Instant::now() + std::time::Duration::from_secs(60),
+            &ExternalWriteActivity::default(),
+        ))
+        .expect("完成测试巡检")
+    }
+
+    #[test]
+    fn failed_sent_records_only_actual_attachments_and_attempts_each_mid_once() {
+        for observed in [Some("00300"), Some("301"), None] {
+            let (mut maintenance, store) = failed_equipment();
+            if let Some(eid) = observed {
+                maintenance.sent_state.as_mut().expect("详情夹具").remaining_equipment_ids =
+                    vec![eid.to_owned()];
+            } else {
+                maintenance.sent_state_fails = true;
+            }
+            let maintenance = Arc::new(maintenance);
+            let store = Arc::new(store);
+            let service = MailboxMaintenanceService::new(
+                maintenance.clone(),
+                store.clone(),
+                Arc::new(NoopClock),
+            );
+            let first = run_sweep(&service);
+            assert_eq!(first.sent_recovered, 0);
+            assert_eq!(first.sent_observed, usize::from(observed.is_some()));
+            assert_eq!(first.sent_state_failed, usize::from(observed.is_none()));
+            assert_eq!(run_sweep(&service).sent_observed, 0);
+            assert_eq!(maintenance.list_reads.load(Ordering::SeqCst), 2);
+            assert_eq!(maintenance.detail_reads.load(Ordering::SeqCst), 1);
+            assert!(!store.bind_called.load(Ordering::SeqCst));
+            let sightings = store.sightings.lock().expect("观察记录");
+            if let Some(eid) = observed {
+                assert_eq!(sightings.len(), 1);
+                assert_eq!(sightings[0].0, store.failed_slots[0].delivery_id);
+                let observation = &sightings[0].1;
+                assert_eq!(observation["collected"], false);
+                assert_eq!(
+                    observation["remaining_equipment_ids"],
+                    serde_json::json!([eid.trim_start_matches('0')])
+                );
+            } else {
+                assert!(sightings.is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn failed_sent_skips_missing_list_and_ambiguous_or_ineligible_matches() {
+        for case in ["list_failed", "ambiguous", "ineligible"] {
+            let (mut maintenance, mut store) = failed_equipment();
+            match case {
+                "list_failed" => maintenance.reads_fail = true,
+                "ambiguous" => {
+                    let mut other = maintenance.coverage.entries[0].clone();
+                    other.external_mail_id = "75002".to_owned();
+                    maintenance.coverage.entries.push(other);
+                }
+                _ => store.failed_slots[0].target = None,
+            }
+            let maintenance = Arc::new(maintenance);
+            let store = Arc::new(store);
+            let service = MailboxMaintenanceService::new(
+                maintenance.clone(),
+                store.clone(),
+                Arc::new(NoopClock),
+            );
+            let report = run_sweep(&service);
+            assert_eq!(report.sent_observed, 0, "{case}");
+            assert_eq!(maintenance.list_reads.load(Ordering::SeqCst), 1, "{case}");
+            assert_eq!(maintenance.detail_reads.load(Ordering::SeqCst), 0, "{case}");
+            assert!(store.detail_attempts.lock().expect("读取机会").is_empty(), "{case}");
+            if case == "list_failed" {
+                assert_eq!(store.failed_queries.load(Ordering::SeqCst), 0);
+            }
+        }
+    }
+
+    #[test]
+    fn manual_reconcile_sends_use_the_recovery_budget_before_failed_sends() {
+        let (maintenance, mut store) = failed_equipment();
+        let at = maintenance.coverage.entries[0].sent_at;
+        for _ in 0..RECOVERY_PER_SWEEP {
+            let send = candidate(at, "unrelated");
+            store.candidates.push(MoogleMailboxSweepCandidate {
+                delivery_id: send.delivery_id,
+                send: Some(send),
+            });
+        }
+        let maintenance = Arc::new(maintenance);
+        let store = Arc::new(store);
+        let service =
+            MailboxMaintenanceService::new(maintenance.clone(), store.clone(), Arc::new(NoopClock));
+        let report = run_sweep(&service);
+        assert_eq!(report.sent_candidates, RECOVERY_PER_SWEEP);
+        assert_eq!(store.failed_queries.load(Ordering::SeqCst), 0);
+        assert_eq!(maintenance.list_reads.load(Ordering::SeqCst), 1);
+        assert_eq!(maintenance.detail_reads.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn slow_failed_sends_query_waits_until_regular_recovery_and_compose_finish() {
+        let (maintenance, mut store) = failed_equipment();
+        let send = candidate(maintenance.coverage.entries[0].sent_at, "unrelated");
+        store
+            .candidates
+            .push(MoogleMailboxSweepCandidate { delivery_id: send.delivery_id, send: Some(send) });
+        store.suspend_failed_queries = true;
+        let maintenance = Arc::new(maintenance);
+        let store = Arc::new(store);
+        let service =
+            MailboxMaintenanceService::new(maintenance.clone(), store.clone(), Arc::new(NoopClock));
+        let activity = ExternalWriteActivity::default();
+        let mut sweep = Box::pin(service.sweep(
+            "main",
+            Instant::now() + std::time::Duration::from_secs(60),
+            &activity,
+        ));
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        assert!(std::future::Future::poll(sweep.as_mut(), &mut context).is_pending());
+        assert_eq!(store.regular_attempts.load(Ordering::SeqCst), 1);
+        assert_eq!(maintenance.compose_reads.load(Ordering::SeqCst), 1);
+        assert_eq!(store.failed_queries.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn failed_sent_detail_counts_only_a_persisted_sighting() {
+        for write_observations in [false, true] {
+            let (maintenance, mut store) = failed_equipment();
+            store.write_observations = write_observations;
+            let maintenance = Arc::new(maintenance);
+            let store = Arc::new(store);
+            let service = MailboxMaintenanceService::new(
+                maintenance.clone(),
+                store.clone(),
+                Arc::new(NoopClock),
+            );
+            let report = run_sweep(&service);
+            assert_eq!(maintenance.detail_reads.load(Ordering::SeqCst), 1);
+            assert_eq!(report.sent_observed, usize::from(write_observations));
+            assert_eq!(store.sightings.lock().expect("观察记录").len(), report.sent_observed);
+        }
+    }
+
+    #[test]
+    fn regular_sent_detail_counts_only_a_persisted_observation() {
+        for write_observations in [false, true] {
+            let (mut maintenance, mut store) = failed_equipment();
+            let target = store.failed_slots.pop().expect("观察夹具").target.expect("冻结夹具");
+            let mut send = candidate(maintenance.coverage.entries[0].sent_at, "reference");
+            send.recipient.clone_from(&target.expectation.recipient);
+            send.cod = target.expectation.cod;
+            send.attachment_ids.clone_from(&target.expectation.equipment_ids);
+            maintenance
+                .sent_state
+                .as_mut()
+                .expect("详情夹具")
+                .remaining_equipment_ids
+                .clone_from(&target.expectation.equipment_ids);
+            send.send_expectation = Some(target.expectation);
+            store.candidates.push(MoogleMailboxSweepCandidate {
+                delivery_id: send.delivery_id,
+                send: Some(send),
+            });
+            store.write_observations = write_observations;
+            let maintenance = Arc::new(maintenance);
+            let store = Arc::new(store);
+            let service = MailboxMaintenanceService::new(
+                maintenance.clone(),
+                store.clone(),
+                Arc::new(NoopClock),
+            );
+            let report = run_sweep(&service);
+            assert_eq!(maintenance.detail_reads.load(Ordering::SeqCst), 1);
+            assert_eq!(store.observation_attempts.load(Ordering::SeqCst), 1);
+            assert_eq!(report.sent_observed, usize::from(write_observations));
+        }
     }
 
     /// 报告只带闭集阶段与计数，不带错误原文；Worker 据此把部分失败记为 Error。
@@ -695,9 +1164,11 @@ mod tests {
         );
         let delivery_id = send.delivery_id;
         let mut report = MailboxMaintenanceReport::default();
+        let entries = block_on(service.read_sent_entries("main", &mut report));
         block_on(service.recover_sent(
             "main",
             &[MoogleMailboxSweepCandidate { delivery_id, send: Some(send) }],
+            entries.as_ref(),
             Instant::now() + std::time::Duration::from_secs(60),
             &mut report,
         ))
@@ -870,9 +1341,11 @@ mod tests {
         );
         let delivery_id = intake.delivery_id;
         let mut report = MailboxMaintenanceReport::default();
+        let entries = block_on(service.read_sent_entries("main", &mut report));
         block_on(service.recover_sent(
             "main",
             &[MoogleMailboxSweepCandidate { delivery_id, send: Some(intake) }],
+            entries.as_ref(),
             Instant::now() + std::time::Duration::from_secs(60),
             &mut report,
         ))

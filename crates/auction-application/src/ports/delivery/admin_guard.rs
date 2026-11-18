@@ -166,8 +166,12 @@ const fn checks_lot_eligibility(action: DeliveryAdminAction) -> bool {
 }
 
 /// 是否需要在 Sent 目击时失败关闭的动作。
-const fn checks_sent_sighting(action: DeliveryAdminAction) -> bool {
-    matches!(action, DeliveryAdminAction::ReconcileRetry | DeliveryAdminAction::ReconcileFailed)
+fn checks_sent_sighting(action: DeliveryAdminAction, status: &str) -> bool {
+    matches!(
+        (action, status),
+        (DeliveryAdminAction::RetryFailed, "failed")
+            | (DeliveryAdminAction::ReconcileRetry | DeliveryAdminAction::ReconcileFailed, _)
+    )
 }
 
 impl DeliveryAdminGuardSnapshot {
@@ -213,7 +217,7 @@ impl DeliveryAdminGuardSnapshot {
         if self.fencing_version <= 0 || self.fencing_version != self.expected_fencing_version {
             blockers.push(DeliveryAdminGuardBlocker::StaleFencingVersion);
         }
-        if checks_sent_sighting(self.action)
+        if checks_sent_sighting(self.action, &self.status)
             && self.origin_kind == "settlement"
             && self.payload_operation.as_deref() == Some("send")
             && self.sent_reference_sighted

@@ -30,7 +30,7 @@ pub(super) async fn run(config_dir: &ConfigDir, args: ConfirmSentArgs) -> anyhow
         async |_, store| {
             if let Some(command) = command {
                 // 不用最新预览阻断原命令重放；端口负责幂等、CAS 与全部匹配规则。
-                let result = store.confirm_sent(command).await.context(
+                let result = store.confirm_sent(command, None).await.context(
                     "人工 Sent 确认未确认完成；结果未知时保留原 command-id、证据与全部参数重放核对",
                 )?;
                 print_json(&json!({
@@ -39,7 +39,7 @@ pub(super) async fn run(config_dir: &ConfigDir, args: ConfirmSentArgs) -> anyhow
                 }))
             } else {
                 let preview = store
-                    .preview_sent_confirmation(delivery_id, evidence)
+                    .preview_sent_confirmation(delivery_id, evidence, None)
                     .await
                     .context("读取人工 Sent 确认预览失败")?;
                 print_preview(&args, &preview, &evidence_sha256)

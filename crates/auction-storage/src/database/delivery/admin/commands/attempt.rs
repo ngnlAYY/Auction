@@ -133,8 +133,8 @@ pub(super) async fn execute_transaction(
     let retired = permanently_retired(transaction.transaction_mut()?, &current)
         .await
         .map_err(DeliveryAdminTransactionError::Sqlx)?;
-    // Worker 已在完整 Sent 中目击同一结算义务主题时，重试可能重复寄出现金或装备，判失败会
-    // 把已成交误记为未发；目击只由当前人工核对行的维护写入，动作准入在领域闭集中判定。
+    // Worker 从 Sent 为当前人工核对或仍可更正的失败投递记录目击。重试可能重复寄出现金或装备，
+    // 判失败会把已寄出误记为未发；动作准入在领域闭集中判定。
     let result_metadata: serde_json::Value =
         row.try_get("result_metadata").map_err(DeliveryAdminTransactionError::Sqlx)?;
     let sent_reference_sighted = result_metadata.get("sent_reference_sighting").is_some();

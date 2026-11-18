@@ -263,11 +263,11 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | POST | `/api/v1/admin/mail/polls:trigger` | 经 Worker control 唤醒全部已装配的邮件轮询器。202 `accepted` 返回 `data.command_id` 与 `data.pollers`，表示请求已接受及将唤醒的轮询器数 |
 | GET | `/api/v1/admin/deliveries` | 投递 outbox（`page`、`page_size`、`status`、`recipient`、`reference`、`template`、`category`、`world`、`created_from`、`created_to`、`include`）；`reference` 接受投递、结算义务或玩家通知的规范 UUID；筛选都是精确匹配且失败关闭；列表附带 `template`、`category`、`world`、`retirement_reason` 与 `suppression_reason`。缺省投影保持已发布页面能解码的投递：结算退件 Take（来源 `settlement_return_action`）与被恢复终结的原结算投递（`failed/recovery_superseded`，从未进入发送围栏、没有发送时间）不列出、不计入 `total`，按 `reference` 定位也查不到；`include=settlement_returns`（现行页面总是携带）才列出它们。`include` 的其他取值（含空值、大小写不同与逗号列表）为 `400 invalid_query`（附加字段无效），重复出现或未登记的键为 `400 invalid_query`（查询参数无效）；回滚到不认识该参数的服务端后，新页面这次读取为 `400 invalid_query`，按构建号提示刷新后恢复 |
 | GET | `/api/v1/admin/player-support` | 玩家支持只读汇总；`user`（用户名或用户 UUID）与 `reference`（规范 UUID）必须恰好提供一个，另可带 `include`。用户名可含连字符；能解析为 UUID 的 `user` 必须使用小写、带连字符的非零规范形式，明显残缺的 UUID 返回 400 `invalid_query`；返回出价、成交、义务、投递与通知各最多 50 行，`truncated` 表示达到上限。按参考编号补入的投递或通知排在分区最前，分区已满时让出最旧的一行并置 `truncated`。投递分区与投递列表同一投影：缺省不含结算退件 Take（来源 `settlement_return_action`）与被恢复终结的原结算投递（`failed/recovery_superseded`），行数上限与 `truncated` 按排除后的行计算；参考编号指向这类投递时，缺省投影既不补入，也不列为参考种类、不据以推导关联用户；`include=settlement_returns`（现行页面总是携带）才包含它们。`include` 的其他取值（含空值、大小写不同与逗号列表）为 `400 invalid_query`（附加字段无效），重复出现或未登记的键为 `400 invalid_query`（查询参数无效）；回滚到不认识该参数的服务端后，新页面这次读取为 `400 invalid_query`，按构建号提示刷新后恢复 |
-| GET | `/api/v1/admin/deliveries/{delivery_id}` | 投递详情包含冻结 Send/Take 尝试的安全摘要、可引用的 Sent 观察和目击证据、领取状态、追加式处置、来源义务与恢复。缺省投影与列表同一口径。带 `include=settlement_returns` 可读取结算退件 Take 和被恢复终结的原投递，并追加装备收回处置 `recovery_equipment_recovered`。带 `include=disposition_actions` 同时返回详情与当前 fence 的处置准入，形状见下文 |
-| POST | `/api/v1/admin/deliveries/{delivery_id}/sent-proof/preview` | 人工 Sent 证明预览；必须选择该投递已写入的维护证据 `evidence_reference`，只返回闭集 blockers，不写事实 |
+| GET | `/api/v1/admin/deliveries/{delivery_id}` | 投递详情包含冻结 Send/Take 尝试的安全摘要、可引用的 Sent 观察和目击证据、领取状态、追加式处置、来源义务与恢复。缺省投影与列表同一口径。带 `include=settlement_returns` 可读取结算退件 Take 和被恢复终结的原投递，并追加装备收回处置 `recovery_equipment_recovered`。带 `include=disposition_actions` 同时返回详情与当前 fence 的处置准入。带 `include=sent_proof` 再附带实见装备编号，形状见下文 |
+| POST | `/api/v1/admin/deliveries/{delivery_id}/sent-proof/preview` | 人工 Sent 证明的只读预览，必须选择该投递已写入的维护证据 `evidence_reference`，返回准入与闭集 blockers。带 `include=responsibility_reasons` 时附带历史尝试责任原因 |
 | POST | `/api/v1/admin/deliveries/{delivery_id}/sent-proof/confirm` | 人工 Sent 证明确认；复用 CLI 的稳定命令 ID 与幂等摘要，`command_id` 同参重放返回原结果；证据引用不进入摘要 |
 | POST | `/api/v1/admin/deliveries/{delivery_id}/release` | 释放投递；结算投递的来源义务已不可执行（成交已撤销）、该投递已不是义务的当前派发，或恢复流程已接管该义务被退回的邮件（已消费退件、持有收回证明或系统退件已到达待消费，重寄只归恢复流程）时返回 `409 settlement_obligation_ineligible`，不改任何状态 |
-| POST | `/api/v1/admin/deliveries/{delivery_id}/retry` | 重试失败投递；结算来源资格不满足时同样返回 `409 settlement_obligation_ineligible` |
+| POST | `/api/v1/admin/deliveries/{delivery_id}/retry` | 重试失败投递；Worker 已在 Sent 目击该结算投递时返回 `409 delivery_sent_sighted`；结算来源资格不满足时返回 `409 settlement_obligation_ineligible` |
 | POST | `/api/v1/admin/deliveries/{delivery_id}/reconcile` | 人工对账结果未知的投递（成功/失败/重试）；主动 Send 禁止仅凭手填外部引用确认成功。判失败的 `failure_code` 只接受 `verified_not_sent`、`recipient_invalid`、`no_longer_needed`；Worker 已在 Sent 目击同一结算义务主题时，重试与判失败返回 `409 delivery_sent_sighted`；对账重试在结算来源资格不满足时返回 `409 settlement_obligation_ineligible` |
 | POST | `/api/v1/admin/deliveries/{delivery_id}/acknowledge` | 操作者确认无资金/资产影响的历史失败已处置；请求 `command_id`、`expected_fencing_version`、必填 `reason`；只追加 `delivery_dispositions` 的 `operator_acknowledged` 事实并解除失败告警，不改投递状态、资金或资产；同命令 ID 同参重放返回原结果 |
 | GET | `/api/v1/admin/realtime/events` | 事件元数据（`stream_key`、`kind`、`page`、`page_size`） |
@@ -298,7 +298,7 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 
 ### 投递处置投影
 
-缺省详情在投递超出缺省投影时返回 404 `delivery_projection_excluded`。详情接受一个可选的 `include`，取值为 `settlement_returns` 或 `disposition_actions`。未知取值、重复参数和未登记的键返回 400 `invalid_query`。回滚到尚未支持 `disposition_actions` 的服务端时，新页面按构建号提示刷新。
+缺省详情在投递超出缺省投影时返回 404 `delivery_projection_excluded`。详情接受一个可选的 `include`，取值为 `settlement_returns`、`disposition_actions` 或 `sent_proof`。未知取值、重复参数和未登记的键返回 400 `invalid_query`。回滚到尚未支持当前请求投影的服务端时，新页面按构建号提示刷新。
 
 `include=disposition_actions` 返回 `data.detail` 与 `data.actions`。前者沿用 `settlement_returns` 的详情形状，后者含 `release`、`retry_failed`、`reconcile_retry`、`reconcile_succeeded`、`reconcile_failed` 与 `acknowledge` 六个必填字段。每项形状为 `{"state":"eligible"}` 或 `{"state":"blocked","reason":"<原因码>"}`。原因码闭集为 `settlement_return_action_owned`、`settlement_ineligible`、`funded_delivery`、`retired_delivery`、`stale_fencing_version`、`sent_sighted`、`reconcile_succeeded_for_send`、`delivery_not_eligible`、`status_mismatch`、`quarantined_mail_action_not_allowed`、`missing_reconcile_reference`、`recipient_renamed`、`already_disposed`、`not_acknowledgeable`、`recovery_retry_ineligible`、`settlement_fulfillment_state`、`missing_sending_fence` 和 `delivery_command_snapshot_unreadable`。
 
@@ -307,6 +307,16 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 投递行可安全展示但完整命令快照无法读取时，详情继续返回状态、尝试、证据与处置历史。释放、重排与对账在预览和锁内提交共用完整快照校验，阻断码均为 `delivery_command_snapshot_unreadable`，提交返回 409。确认已处置独立判断当前 fence 与无资产影响资格。
 
 携带登录 key 的 `mail_intake` 回信（`register_key`、`rekey_key`）发现收件角色已换绑时按 v0.1.8 已支持的 `failed` 形状收口。围栏前的 `failure_code` 为 `invalid_payload`，进入围栏后为 `preflight_blocked` 并保留真实的 `sending_at`。释放或重排时实时复核绑定，不匹配返回 `409 delivery_recipient_renamed`。已有投递、证据与命令账本保持原样。符合无资金和资产影响条件的失败可以确认已处置。
+
+### 人工 Sent 证明投影
+
+`include=sent_proof` 沿用 `disposition_actions` 的详情与处置信封。每个 `data.detail.evidence` 条目都额外包含 `remaining_equipment_ids` 和 `pre_collection_equipment_ids`，其值为规范正十进制字符串数组或 `null`。前者是当前实见清单，`[]` 表示看到没有装备附件。后者记录同一 MID 领取前实见的清单。无对应记录时为 `null`。其余详情投影省略这两个字段。
+
+预览可带一个 `include=responsibility_reasons`，给出两个必填布尔字段。存在其他未绑定的历史尝试时 `prior_unbound_attempts` 为真。更正 Admin 判失败结论且邮件发送分钟早于当前尝试时 `sent_before_current_attempt` 为真。两项可同时触发，已有的 `requires_attempt_history_acceptance` 等于两项的逻辑或。缺省预览保持既有字段集合。其它取值、重复参数与未知键返回 400 `invalid_query`。
+
+预览按选择的证据对照 Worker 实见的装备编号。需要完整清单而缺失时，`blockers` 包含 `missing_observed_equipment_ids`。实见清单、冻结清单或请求声明的编号不符合准入时包含 `observed_equipment_ids_mismatch`。提交在锁定投递后按同一规则复核附件、fence 和所需责任，准入拒绝返回 409 `sent_proof_rejected`。确认请求继续使用 `accept_attempt_history` 表示已接受全部适用的历史尝试责任。同一命令的重放先查账本，以已提交的原结果为准。
+
+证据引用须为 `mailbox_sweep:<MID>` 或 `sent_reference_sighting:<MID>`，其中 MID 须与请求中的 `external_mail_id` 一致。引用格式错误返回 400 `invalid_delivery_command`。所选观察已移除、被替换，或同一引用的 `observed_at` 按详情契约的微秒精度已变化时，预览和确认返回 409 `stale_delivery_state`。确认在账本重放之后发现 `expected_fencing_version` 已过期也返回该码。详情页收到该码后重新读取投递详情，提示重选证据。库内 Sent 观察格式错误时，详情读取和证明复核返回 503 `temporarily_unavailable`，包括有 `observed_at` 但无法解析的情况。历史观察缺 `observed_at` 时仍省略该字段，缺实见编号时按可空字段投影。
 
 ### 告警处置
 

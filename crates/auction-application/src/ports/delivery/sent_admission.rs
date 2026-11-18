@@ -8,7 +8,9 @@ use auction_time::Timestamp;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::ports::delivery::{DeliverySendExpectation, ManualSentEvidence};
+use crate::ports::delivery::{
+    DeliverySendExpectation, ManualSentEvidence, SentObservedAttachments,
+};
 
 /// 冻结载荷的装备 secret 引用。
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -225,6 +227,9 @@ pub struct SentAdmissionSnapshot {
     pub sending_fencing_version: i64,
     /// 由 `delivery_current_send_attempt` 冻结的期待；缺失时失败关闭。
     pub expectation: Option<DeliverySendExpectation>,
+    /// 存储层从本次所选的 Worker 观察提取，不能由请求填入。
+    #[serde(skip)]
+    pub observed_attachments: SentObservedAttachments,
 }
 
 /// 准入阻断项闭集。
@@ -241,6 +246,8 @@ pub enum SentAdmissionBlocker {
     SentMinuteOutsideFrozenWindow,
     RequiresExactUnknownSellerReservation,
     FrozenIdentityBodyMoneyOrAssetsMismatch,
+    MissingObservedEquipmentIds,
+    ObservedEquipmentIdsMismatch,
 }
 
 impl SentAdmissionBlocker {
@@ -267,6 +274,8 @@ impl SentAdmissionBlocker {
             Self::FrozenIdentityBodyMoneyOrAssetsMismatch => {
                 "frozen_identity_body_money_or_assets_mismatch"
             }
+            Self::MissingObservedEquipmentIds => "missing_observed_equipment_ids",
+            Self::ObservedEquipmentIdsMismatch => "observed_equipment_ids_mismatch",
         }
     }
 }
@@ -278,10 +287,16 @@ pub struct SentAdmission {
     pub blockers: Vec<SentAdmissionBlocker>,
     pub expected_fencing_version: i64,
     pub requires_attempt_history_acceptance: bool,
+    pub prior_unbound_attempts: bool,
+    pub sent_before_current_attempt: bool,
     pub corrects_admin_failure: bool,
 }
 
-fn check(blockers: &mut Vec<SentAdmissionBlocker>, condition: bool, blocker: SentAdmissionBlocker) {
+pub(super) fn check(
+    blockers: &mut Vec<SentAdmissionBlocker>,
+    condition: bool,
+    blocker: SentAdmissionBlocker,
+) {
     if !condition {
         blockers.push(blocker);
     }
@@ -291,109 +306,16 @@ impl SentAdmissionSnapshot {
     /// 计算准入结论；同一快照、证据与事务读取时刻的结论唯一。
     pub fn evaluate(&self, evidence: &ManualSentEvidence, now: Timestamp) -> SentAdmission {
         let delivery = &self.delivery;
-        let metadata = &delivery.result_metadata;
-        // 准入一：发送结果未知且已开始写出。
-        let write_unknown = delivery.status == "manual_reconcile"
-            && delivery.failure_code.as_deref() == Some("write_unknown")
-            && metadata.write_started == Some(true);
-        // 准入二：Admin 已把该投递对账为失败，且失败命令的结果 fence 仍等于当前投递行。
-        let admin_failed = delivery.status == "failed"
-            && metadata.resolution.as_deref() == Some("admin_reconciled_failed")
-            && delivery.failure_code.is_some()
-            && self.admin_failure.as_ref().is_some_and(|failure| {
-                failure.command_kind == "reconcile"
-                    && failure.status.as_deref() == Some("failed")
-                    && failure.fencing_version == Some(delivery.fencing_version)
-                    && failure.failure_code == delivery.failure_code
-            });
+        let admin_failed = self.current_admin_failure();
         // 被判失败的邮件可能早于当前冻结尝试；早于当前尝试即须显式接受旧尝试关联。
-        let requires_attempt_history_acceptance = self.prior_unbound
-            || (admin_failed
-                && delivery.sending_at.is_some_and(|start| {
-                    evidence
-                        .sent_minute
-                        .checked_add_signed(auction_time::Duration::minutes(1))
-                        .is_none_or(|upper| upper <= start)
-                }));
-        let mut blockers = Vec::new();
-        check(
-            &mut blockers,
-            delivery.origin_kind == "settlement"
-                && delivery
-                    .payload
-                    .as_ref()
-                    .is_some_and(|payload| payload.world == "main" && payload.operation == "send")
-                && self.obligation.as_ref().is_some_and(|obligation| {
-                    obligation.world_id == "main"
-                        && matches!(
-                            obligation.obligation_kind.as_str(),
-                            "winner_equipment_cod"
-                                | "unsold_return"
-                                | "withdrawn_return"
-                                | "seller_payout"
-                        )
-                }),
-            SentAdmissionBlocker::UnsupportedDeliveryScope,
-        );
-        check(
-            &mut blockers,
-            (write_unknown || admin_failed)
-                && delivery.external_reference.is_none()
-                && delivery.lease_token.is_none()
-                && delivery.lease_expires_at.is_none()
-                && metadata.retired != Some(true),
-            SentAdmissionBlocker::RequiresUnclaimedWriteUnknownOrAdminFailure,
-        );
-        let fulfillment_state_matches = self.fulfillment.as_ref().is_some_and(|fulfillment| {
-            if admin_failed {
-                fulfillment.execution_state == "failed"
-                    && fulfillment.last_error_code == delivery.failure_code
-            } else {
-                fulfillment.execution_state == "manual_reconcile"
-            }
-        });
-        check(
-            &mut blockers,
-            fulfillment_state_matches
-                && self.fulfillment.as_ref().is_some_and(|fulfillment| {
-                    fulfillment.delivery_id == Some(delivery.id)
-                        && fulfillment.delivery_operation == "send"
-                        && fulfillment.dispatch_world == "main"
-                        && fulfillment.claim_token.is_none()
-                        && fulfillment.claim_expires_at.is_none()
-                        && fulfillment.proof_kind.is_none()
-                        && fulfillment.proof_reference.is_none()
-                        && fulfillment.proof_digest.is_none()
-                        && fulfillment.proof_observed_at.is_none()
-                        && Some(delivery.command_id) == fulfillment.prepare_command_id
-                        && delivery.request_digest.is_some()
-                        && delivery.request_digest == fulfillment.prepare_request_digest
-                        && delivery.activation_command_id == fulfillment.activate_command_id
-                        && delivery.activation_request_digest == fulfillment.activate_request_digest
-                })
-                && self
-                    .obligation
-                    .as_ref()
-                    .is_some_and(|obligation| obligation.business_state == "ready"),
-            SentAdmissionBlocker::FulfillmentIdentityOrClaimConflict,
-        );
-        // 逾期只表示截止已过并发过提醒，不改变付款或资产事实；提醒以外的恢复动作仍冲突。
-        check(
-            &mut blockers,
-            self.recovery.as_ref().is_none_or(|recovery| {
-                matches!(recovery.stage.as_deref(), Some("awaiting_payment" | "payment_overdue"))
-                    && recovery.resolution.is_none()
-                    && recovery.blocking_code.is_none()
-                    && recovery.manual_reconcile_delivery_id.is_none()
-                    && recovery.claim_token.is_none()
-            }),
-            SentAdmissionBlocker::ConflictingRecoveryDisposition,
-        );
-        check(
-            &mut blockers,
-            !self.conflict,
-            SentAdmissionBlocker::ExistingBindingRetirementOrConflictingAttempt,
-        );
+        let sent_before_current_attempt = admin_failed
+            && delivery.sending_at.is_some_and(|start| {
+                evidence
+                    .sent_minute
+                    .checked_add_signed(auction_time::Duration::minutes(1))
+                    .is_none_or(|upper| upper <= start)
+            });
+        let mut blockers = self.delivery_blockers(admin_failed);
         check(
             &mut blockers,
             self.accounts.len() == 1
@@ -409,48 +331,24 @@ impl SentAdmissionSnapshot {
         );
         check(
             &mut blockers,
-            self.expectation.as_ref().is_some_and(|expected| {
-                expected.credential.as_ref().is_some_and(|binding| {
-                    self.credential.as_ref().is_some_and(|credential| {
-                        credential.id == Some(binding.credential_id)
-                            && credential.kind.as_deref() == Some("mail_cookie")
-                            && credential.status.as_deref() == Some("active")
-                            && credential.version == Some(binding.credential_version)
-                            && matches!(
-                                credential.scope.as_deref(),
-                                Some("mooglemail:main" | "mooglemail:shared")
-                            )
-                    })
-                })
-            }),
+            self.frozen_credential_matches(),
             SentAdmissionBlocker::FrozenCredentialRetiredOrChanged,
         );
-        // 结果未知只认当前尝试时窗；Admin 失败更正从投递激活所在分钟起至失败结论落定。
-        let window_start = if admin_failed {
-            delivery.activated_at.map(crate::ports::mail::sent_list_minute_start)
-        } else {
-            delivery.sending_at
-        };
         check(
             &mut blockers,
-            match (window_start, delivery.sending_at, delivery.completed_at) {
-                (Some(start), Some(sending), Some(end)) => {
-                    start <= sending
-                        && sending <= end
-                        && evidence.sent_minute <= end
-                        && (if admin_failed {
-                            evidence.sent_minute >= start
-                        } else {
-                            evidence
-                                .sent_minute
-                                .checked_add_signed(auction_time::Duration::minutes(1))
-                                .is_some_and(|upper| upper > start)
-                        })
-                        && evidence.observed_at >= end
-                        && evidence.observed_at <= now
-                }
-                _ => false,
-            },
+            self.sent_window(admin_failed).is_some_and(|(start, end)| {
+                evidence.sent_minute <= end
+                    && (if admin_failed {
+                        evidence.sent_minute >= start
+                    } else {
+                        evidence
+                            .sent_minute
+                            .checked_add_signed(auction_time::Duration::minutes(1))
+                            .is_some_and(|upper| upper > start)
+                    })
+                    && evidence.observed_at >= end
+                    && evidence.observed_at <= now
+            }),
             SentAdmissionBlocker::SentMinuteOutsideFrozenWindow,
         );
         if self.obligation.as_ref().is_some_and(|o| o.obligation_kind == "seller_payout") {
@@ -466,11 +364,18 @@ impl SentAdmissionSnapshot {
             self.frozen_identity_matches(evidence) && self.sending_fencing_version > 0,
             SentAdmissionBlocker::FrozenIdentityBodyMoneyOrAssetsMismatch,
         );
+        if let Some(blocker) = self.expectation.as_ref().and_then(|expected| {
+            self.observed_attachments.blocker(evidence, &expected.equipment_ids)
+        }) {
+            blockers.push(blocker);
+        }
         SentAdmission {
             eligible: blockers.is_empty(),
             blockers,
             expected_fencing_version: delivery.fencing_version,
-            requires_attempt_history_acceptance,
+            requires_attempt_history_acceptance: self.prior_unbound || sent_before_current_attempt,
+            prior_unbound_attempts: self.prior_unbound,
+            sent_before_current_attempt,
             corrects_admin_failure: admin_failed,
         }
     }

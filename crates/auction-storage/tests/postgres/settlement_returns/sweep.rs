@@ -347,7 +347,8 @@ async fn postgres_return_take_unknown_completed_observation_settles_like_take_pr
     // 巡检候选：结算退件 Take 经原会话冻结身份成为可恢复候选，资产取自 Take 载荷。
     let candidates = MoogleMailboxEvidenceStore::unproven_sends(&store, "main", 200)
         .await
-        .expect("读取巡检候选");
+        .expect("读取巡检候选")
+        .candidates;
     let candidate = candidates
         .iter()
         .find(|slot| slot.delivery_id == take.take_delivery)

@@ -251,6 +251,7 @@ async fn postgres_return_take_receipt_html_settles_through_sweep() {
     let candidate = MoogleMailboxEvidenceStore::unproven_sends(&store, "main", 200)
         .await
         .expect("读取巡检候选")
+        .candidates
         .into_iter()
         .find(|slot| slot.delivery_id == take.take_delivery)
         .and_then(|slot| slot.send)

@@ -252,8 +252,41 @@ pub struct AdminDeliveryEvidenceResponse {
     pub remaining_credits: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remaining_equipment_count: Option<i64>,
+    /// 仅 `include=sent_proof` 输出。外层 None 表示省略，内层 None 表示历史记录缺失。
+    #[serde(
+        default,
+        deserialize_with = "present_equipment_ids",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub remaining_equipment_ids: Option<Option<Vec<String>>>,
+    /// 仅 `include=sent_proof` 输出。存在时为同一 MID 在领取前实见的清单。
+    #[serde(
+        default,
+        deserialize_with = "present_equipment_ids",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub pre_collection_equipment_ids: Option<Option<Vec<String>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub receipt: Option<String>,
+}
+
+fn present_equipment_ids<'de, D>(deserializer: D) -> Result<Option<Option<Vec<String>>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<Vec<String>>::deserialize(deserializer).map(Some)
+}
+
+impl AdminDeliveryEvidenceResponse {
+    /// 返回 Worker 实见的当前装备清单。
+    pub fn remaining_equipment_ids(&self) -> Option<&[String]> {
+        self.remaining_equipment_ids.as_ref()?.as_deref()
+    }
+
+    /// 返回同一 MID 领取前的实见清单。
+    pub fn pre_collection_equipment_ids(&self) -> Option<&[String]> {
+        self.pre_collection_equipment_ids.as_ref()?.as_deref()
+    }
 }
 
 /// 领取状态；`collected` 缺失表示尚未观测，不等于未领取。
@@ -390,6 +423,12 @@ pub struct AdminDeliverySentProofPreviewResponse {
     pub external_reference: String,
     pub requires_collected_asset_acceptance: bool,
     pub requires_attempt_history_acceptance: bool,
+    /// 仅 `include=responsibility_reasons` 输出。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prior_unbound_attempts: Option<bool>,
+    /// 仅 `include=responsibility_reasons` 输出。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sent_before_current_attempt: Option<bool>,
     /// 目标是被 Admin 对账为失败的投递；确认即以 Sent 证据追加更正事实。
     pub corrects_admin_failure: bool,
 }

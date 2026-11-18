@@ -5,9 +5,11 @@ use dioxus::prelude::*;
 
 use super::evidence::{latest_send_attempt, selectable_evidence};
 use super::preview::{preview_panel, run_preview, submit_proof};
-use super::state::{SentProofDraft, SentProofSubmission};
-use super::validation::valid_reason;
-use crate::api::{DeliveryDetail, DeliverySentProofPreview};
+use super::state::{
+    SentProofDraft, SentProofIssue, SentProofPreviewError, SentProofReview, SentProofSubmission,
+};
+use super::validation::{missing_observed_ids, valid_reason};
+use crate::api::DeliveryDetail;
 use crate::surface::admin_world_label;
 
 /// 证据种类译文；未知种类原样显示。
@@ -28,43 +30,33 @@ pub(crate) fn SentProofDialog(
     busy: bool,
     on_submit: EventHandler<SentProofSubmission>,
     on_cancel: EventHandler<()>,
+    on_stale: EventHandler<()>,
 ) -> Element {
     let candidates = selectable_evidence(&detail);
     let draft = use_signal(|| SentProofDraft::for_evidence(candidates.first().copied()));
-    let mut preview = use_signal(|| None::<Result<DeliverySentProofPreview, String>>);
-    let previewing = use_signal(|| false);
-    let accept_collected = use_signal(|| false);
-    let accept_attempts = use_signal(|| false);
+    let mut review = use_signal(SentProofReview::default);
+    use_effect(use_reactive((&detail,), move |_| review.write().clear()));
+    #[cfg(test)]
+    super::tests::capture_dialog_controls(draft, review);
 
     let current = draft();
     let selected =
         candidates.iter().copied().find(|item| item.reference == current.evidence_reference);
     let attempt = latest_send_attempt(&detail);
-    let preview_state = preview();
-    let requires_collected = matches!(
-        preview_state.as_ref(),
-        Some(Ok(preview)) if preview.requires_collected_asset_acceptance
-    );
-    let requires_attempts = matches!(
-        preview_state.as_ref(),
-        Some(Ok(preview)) if preview.requires_attempt_history_acceptance
-    );
-    let eligible = matches!(preview_state.as_ref(), Some(Ok(preview)) if preview.eligible);
-    let can_confirm = !busy
-        && eligible
-        && (!requires_collected || accept_collected())
-        && (!requires_attempts || accept_attempts())
-        && valid_reason(&current.reason);
+    let review_state = review();
+    let local_issue = match review_state.outcome.as_ref() {
+        Some(Err(SentProofPreviewError::Local(issue))) => Some(*issue),
+        _ => None,
+    };
+    let fence = detail.delivery.fencing_version;
+    let can_confirm = matches!(
+        review_state.outcome.as_ref(),
+        Some(Ok(proof)) if proof.can_confirm(&detail.delivery.id, fence)
+    ) && valid_reason(&current.reason);
 
     let preview_detail = detail.clone();
-    let preview_draft = draft;
-    let trigger_preview =
-        move || run_preview(&preview_detail, busy, preview_draft, preview, previewing);
-
-    let submit_detail = detail.clone();
-    let submit_draft = draft;
-    let submit_accept_collected = accept_collected;
-    let submit_accept_attempts = accept_attempts;
+    let trigger_preview = move || run_preview(&preview_detail, busy, draft, review, on_stale);
+    let submit_delivery_id = detail.delivery.id.clone();
 
     let world = attempt.map(|attempt| admin_world_label(&attempt.world_id));
     let mid = selected.and_then(|item| item.external_mail_id.clone());
@@ -76,6 +68,24 @@ pub(crate) fn SentProofDialog(
         .or_else(|| attempt.and_then(|attempt| attempt.subject.clone()));
     let original_digest = attempt.and_then(|attempt| attempt.body_digest.clone());
     let observed_digest = selected.and_then(|item| item.body_digest.clone());
+    let frozen_ids = attempt.map(|attempt| attempt.equipment_ids.as_slice());
+    let observed_ids = selected.and_then(|item| item.remaining_equipment_ids());
+    let before_collection = selected.and_then(|item| item.pre_collection_equipment_ids());
+    let missing_ids = selected.zip(attempt).is_some_and(|(evidence, attempt)| {
+        missing_observed_ids(evidence, attempt, current.collected)
+    });
+    let ids_match = frozen_ids.and_then(|frozen| {
+        let observed_for_comparison = if current.collected && !frozen.is_empty() {
+            before_collection.or_else(|| observed_ids.filter(|ids| !ids.is_empty()))
+        } else {
+            observed_ids
+        };
+        observed_for_comparison.map(|ids| {
+            ids == frozen
+                && before_collection.is_none_or(|ids| ids == frozen)
+                && observed_ids.is_none_or(|ids| ids.is_empty() || ids == frozen)
+        })
+    });
     let select_detail = detail.clone();
     let mut select_draft = draft;
     let mut sender_name_draft = draft;
@@ -93,18 +103,17 @@ pub(crate) fn SentProofDialog(
             close_label: t!("delivery-cancel"),
             busy,
             on_close: move |_| on_cancel.call(()),
-            form { class: "admin-delivery-sent-proof",
+            form { class: "admin-delivery-sent-proof", method: "post",
                 onsubmit: move |event| {
                     event.prevent_default();
                     if busy {
                         return;
                     }
                     submit_proof(
-                        &submit_detail,
-                        submit_draft,
-                        submit_accept_collected,
-                        submit_accept_attempts,
-                        can_confirm,
+                        &submit_delivery_id,
+                        fence,
+                        draft,
+                        review,
                         on_submit,
                     );
                 },
@@ -112,7 +121,14 @@ pub(crate) fn SentProofDialog(
                 label { r#for: "delivery-sent-evidence", {t!("delivery-sent-proof-evidence")} }
                 select {
                     id: "delivery-sent-evidence",
+                    name: "evidence_reference",
                     disabled: busy,
+                    aria_invalid: field_is_invalid(local_issue, "delivery-sent-evidence").to_string(),
+                    aria_describedby: if missing_ids {
+                        Some("delivery-sent-evidence-missing-ids".to_owned())
+                    } else {
+                        field_error_id(local_issue, "delivery-sent-evidence")
+                    },
                     value: current.evidence_reference.clone(),
                     onchange: move |event| {
                         let next_reference = event.value();
@@ -121,7 +137,7 @@ pub(crate) fn SentProofDialog(
                             .iter()
                             .find(|item| item.reference == next_reference);
                         select_draft.set(select_draft().with_evidence(evidence));
-                        preview.set(None);
+                        review.write().clear();
                     },
                     option {
                         value: "",
@@ -138,7 +154,16 @@ pub(crate) fn SentProofDialog(
                         }
                     }
                 }
+                {field_error(local_issue, "delivery-sent-evidence")}
+                if missing_ids {
+                    p { id: "delivery-sent-evidence-missing-ids", class: "admin-panel__note",
+                        {t!("delivery-sent-proof-missing-observed-ids")}
+                    }
+                }
                 dl { class: "admin-delivery-sent-proof__grid",
+                    id: "delivery-sent-evidence-summary",
+                    tabindex: "-1",
+                    aria_describedby: field_error_id(local_issue, "delivery-sent-evidence-summary"),
                     dt { {t!("delivery-sent-proof-world")} }
                     dd { "{world.clone().unwrap_or_else(|| t!(\"value-empty\"))}" }
                     dt { {t!("delivery-sent-proof-mid")} }
@@ -156,89 +181,141 @@ pub(crate) fn SentProofDialog(
                         code { "{observed_digest.clone().unwrap_or_else(|| t!(\"value-empty\"))}" }
                     }
                 }
+                {field_error(local_issue, "delivery-sent-evidence-summary")}
+                div { class: "admin-delivery-sent-proof__grid",
+                    dl {
+                        dt { {t!("delivery-sent-proof-frozen-ids")} }
+                        dd { {equipment_ids_text(frozen_ids)} }
+                    }
+                    dl {
+                        dt { {t!("delivery-sent-proof-observed-ids")} }
+                        dd { {equipment_ids_text(observed_ids)} }
+                        if current.collected || before_collection.is_some() {
+                            dt { {t!("delivery-sent-proof-pre-collection-ids")} }
+                            dd { {equipment_ids_text(before_collection)} }
+                        }
+                    }
+                }
+                dl { class: "admin-delivery-sent-proof__grid",
+                    dt { {t!("delivery-sent-proof-ids-comparison")} }
+                    dd {
+                        {match ids_match {
+                            Some(true) => t!("delivery-sent-proof-ids-match"),
+                            Some(false) => t!("delivery-sent-proof-ids-mismatch"),
+                            None => t!("delivery-sent-proof-ids-unrecorded"),
+                        }}
+                    }
+                }
                 label { r#for: "delivery-sent-sender-name", {t!("delivery-sent-proof-sender-name")} }
                 input {
                     id: "delivery-sent-sender-name",
+                    name: "sender_name",
                     r#type: "text",
                     required: true,
                     disabled: busy,
+                    aria_invalid: field_is_invalid(local_issue, "delivery-sent-sender-name").to_string(),
+                    aria_describedby: field_error_id(local_issue, "delivery-sent-sender-name"),
                     value: current.sender_name.clone(),
                     oninput: move |event| {
                         let mut next = sender_name_draft();
                         next.sender_name = event.value();
                         sender_name_draft.set(next);
-                        preview.set(None);
+                        review.write().clear();
                     },
                 }
+                {field_error(local_issue, "delivery-sent-sender-name")}
                 label { r#for: "delivery-sent-sender-uid", {t!("delivery-sent-proof-sender-uid")} }
                 input {
                     id: "delivery-sent-sender-uid",
+                    name: "sender_uid",
                     r#type: "text",
                     inputmode: "numeric",
                     required: true,
                     disabled: busy,
+                    aria_invalid: field_is_invalid(local_issue, "delivery-sent-sender-uid").to_string(),
+                    aria_describedby: field_error_id(local_issue, "delivery-sent-sender-uid"),
                     value: current.sender_uid.clone(),
                     oninput: move |event| {
                         let mut next = sender_uid_draft();
                         next.sender_uid = event.value();
                         sender_uid_draft.set(next);
-                        preview.set(None);
+                        review.write().clear();
                     },
                 }
+                {field_error(local_issue, "delivery-sent-sender-uid")}
                 label { r#for: "delivery-sent-minute", {t!("delivery-sent-proof-sent-minute")} }
                 input {
                     id: "delivery-sent-minute",
+                    name: "sent_minute",
                     r#type: "datetime-local",
                     required: true,
                     disabled: busy,
+                    aria_invalid: field_is_invalid(local_issue, "delivery-sent-minute").to_string(),
+                    aria_describedby: field_error_id(local_issue, "delivery-sent-minute"),
                     value: current.sent_minute.clone(),
                     oninput: move |event| {
                         let mut next = minute_draft();
-                        next.sent_minute = event.value();
+                        let value = event.value();
+                        if next.sent_minute == value {
+                            return;
+                        }
+                        next.sent_minute = value;
+                        next.sent_minute_edited = true;
                         minute_draft.set(next);
-                        preview.set(None);
+                        review.write().clear();
                     },
                 }
+                {field_error(local_issue, "delivery-sent-minute")}
                 label { r#for: "delivery-sent-remaining-credits", {t!("delivery-sent-proof-remaining-credits")} }
                 input {
                     id: "delivery-sent-remaining-credits",
+                    name: "remaining_credits",
                     r#type: "number",
                     min: "0",
                     required: true,
                     disabled: busy,
+                    aria_invalid: field_is_invalid(local_issue, "delivery-sent-remaining-credits").to_string(),
+                    aria_describedby: field_error_id(local_issue, "delivery-sent-remaining-credits"),
                     value: current.remaining_credits.clone(),
                     oninput: move |event| {
                         let mut next = credits_draft();
                         next.remaining_credits = event.value();
                         credits_draft.set(next);
-                        preview.set(None);
+                        review.write().clear();
                     },
                 }
+                {field_error(local_issue, "delivery-sent-remaining-credits")}
                 label { r#for: "delivery-sent-cod-pending", {t!("delivery-sent-proof-cod-pending")} }
                 input {
                     id: "delivery-sent-cod-pending",
+                    name: "cod_pending",
                     r#type: "number",
                     min: "0",
                     required: true,
                     disabled: busy,
+                    aria_invalid: field_is_invalid(local_issue, "delivery-sent-cod-pending").to_string(),
+                    aria_describedby: field_error_id(local_issue, "delivery-sent-cod-pending"),
                     value: current.cod_pending.clone(),
                     oninput: move |event| {
                         let mut next = cod_draft();
                         next.cod_pending = event.value();
                         cod_draft.set(next);
-                        preview.set(None);
+                        review.write().clear();
                     },
                 }
-                label { class: "admin-delivery-sent-proof__check",
+                {field_error(local_issue, "delivery-sent-cod-pending")}
+                label { class: "admin-delivery-sent-proof__check", r#for: "delivery-sent-collected",
                     input {
+                        id: "delivery-sent-collected",
                         r#type: "checkbox",
+                        name: "collected",
                         disabled: busy,
                         checked: current.collected,
                         onchange: move |event| {
                             let mut next = collected_draft();
                             next.collected = event.checked();
                             collected_draft.set(next);
-                            preview.set(None);
+                            review.write().clear();
                         },
                     }
                     {t!("delivery-sent-proof-collected")}
@@ -247,20 +324,25 @@ pub(crate) fn SentProofDialog(
                     label { r#for: "delivery-sent-receipt", {t!("delivery-sent-proof-receipt")} }
                     textarea {
                         id: "delivery-sent-receipt",
+                        name: "receipt",
                         rows: "3",
                         disabled: busy,
+                        aria_invalid: field_is_invalid(local_issue, "delivery-sent-receipt").to_string(),
+                        aria_describedby: field_error_id(local_issue, "delivery-sent-receipt"),
                         value: current.receipt.clone(),
                         oninput: move |event| {
                             let mut next = receipt_draft();
                             next.receipt = event.value();
                             receipt_draft.set(next);
-                            preview.set(None);
+                            review.write().clear();
                         },
                     }
+                    {field_error(local_issue, "delivery-sent-receipt")}
                 }
                 label { r#for: "delivery-sent-reason", {t!("delivery-sent-proof-reason")} }
                 textarea {
                     id: "delivery-sent-reason",
+                    name: "reason",
                     rows: "3",
                     required: true,
                     disabled: busy,
@@ -275,9 +357,9 @@ pub(crate) fn SentProofDialog(
                 div { class: "admin-shell__dialog-actions",
                     button {
                         r#type: "button",
-                        disabled: busy || previewing(),
+                        disabled: busy || review_state.pending || missing_ids,
                         onclick: move |_| trigger_preview(),
-                        if previewing() {
+                        if review_state.pending {
                             {t!("delivery-sent-proof-previewing")}
                         } else {
                             {t!("delivery-sent-proof-preview")}
@@ -300,9 +382,33 @@ pub(crate) fn SentProofDialog(
                         }
                     }
                 }
-                if let Some(result) = preview_state {
-                    {preview_panel(result, busy, accept_collected, accept_attempts)}
-                }
+                {preview_panel(&review_state, busy, review)}
+            }
+        }
+    }
+}
+
+fn equipment_ids_text(ids: Option<&[String]>) -> String {
+    match ids {
+        None => t!("delivery-sent-proof-ids-unrecorded"),
+        Some([]) => t!("delivery-sent-proof-ids-empty"),
+        Some(ids) => ids.join(", "),
+    }
+}
+
+fn field_is_invalid(issue: Option<SentProofIssue>, field: &str) -> bool {
+    issue.is_some_and(|issue| issue.field_id() == field)
+}
+
+fn field_error_id(issue: Option<SentProofIssue>, field: &str) -> Option<String> {
+    field_is_invalid(issue, field).then(|| format!("{field}-error"))
+}
+
+fn field_error(issue: Option<SentProofIssue>, field: &str) -> Element {
+    rsx! {
+        if let Some(issue) = issue.filter(|issue| issue.field_id() == field) {
+            p { id: "{field}-error", class: "action-feedback action-feedback--error",
+                {issue.message()}
             }
         }
     }

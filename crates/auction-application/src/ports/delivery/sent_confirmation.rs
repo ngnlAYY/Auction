@@ -10,7 +10,159 @@ use uuid::Uuid;
 use crate::errors::ApplicationError;
 use crate::ports::core::ApplicationFuture;
 use crate::ports::core::RequestHash;
-use crate::ports::delivery::DeliverySendExpectation;
+use crate::ports::delivery::sent_admission::check;
+use crate::ports::delivery::{
+    DeliverySendExpectation, SentAdmissionBlocker, SentAdmissionSnapshot,
+};
+
+impl SentAdmissionSnapshot {
+    /// 失败更正可在读取详情前核对的条件与时窗。附件、回执和操作者身份仍由确认复核。
+    pub fn failed_sent_observation_window(&self) -> Option<(Timestamp, Timestamp)> {
+        if !self.current_admin_failure()
+            || !self.delivery_blockers(true).is_empty()
+            || !self.frozen_credential_matches()
+            || !matches!(self.accounts.as_slice(), [account] if account.status == "ready")
+            || self.sending_fencing_version <= 0
+            || !self.expectation.as_ref().is_some_and(DeliverySendExpectation::validate)
+        {
+            return None;
+        }
+        self.sent_window(true)
+    }
+
+    pub(super) fn current_admin_failure(&self) -> bool {
+        let delivery = &self.delivery;
+        let metadata = &delivery.result_metadata;
+        // 准入二：Admin 已把该投递对账为失败，且失败命令的结果 fence 仍等于当前投递行。
+        delivery.status == "failed"
+            && metadata.resolution.as_deref() == Some("admin_reconciled_failed")
+            && delivery.failure_code.is_some()
+            && self.admin_failure.as_ref().is_some_and(|failure| {
+                failure.command_kind == "reconcile"
+                    && failure.status.as_deref() == Some("failed")
+                    && failure.fencing_version == Some(delivery.fencing_version)
+                    && failure.failure_code == delivery.failure_code
+            })
+    }
+
+    pub(super) fn delivery_blockers(&self, admin_failed: bool) -> Vec<SentAdmissionBlocker> {
+        let delivery = &self.delivery;
+        let metadata = &delivery.result_metadata;
+        // 准入一：发送结果未知且已开始写出。
+        let write_unknown = delivery.status == "manual_reconcile"
+            && delivery.failure_code.as_deref() == Some("write_unknown")
+            && metadata.write_started == Some(true);
+        let mut blockers = Vec::new();
+        check(
+            &mut blockers,
+            delivery.origin_kind == "settlement"
+                && delivery
+                    .payload
+                    .as_ref()
+                    .is_some_and(|payload| payload.world == "main" && payload.operation == "send")
+                && self.obligation.as_ref().is_some_and(|obligation| {
+                    obligation.world_id == "main"
+                        && matches!(
+                            obligation.obligation_kind.as_str(),
+                            "winner_equipment_cod"
+                                | "unsold_return"
+                                | "withdrawn_return"
+                                | "seller_payout"
+                        )
+                }),
+            SentAdmissionBlocker::UnsupportedDeliveryScope,
+        );
+        check(
+            &mut blockers,
+            (write_unknown || admin_failed)
+                && delivery.external_reference.is_none()
+                && delivery.lease_token.is_none()
+                && delivery.lease_expires_at.is_none()
+                && metadata.retired != Some(true),
+            SentAdmissionBlocker::RequiresUnclaimedWriteUnknownOrAdminFailure,
+        );
+        let fulfillment_state_matches = self.fulfillment.as_ref().is_some_and(|fulfillment| {
+            if admin_failed {
+                fulfillment.execution_state == "failed"
+                    && fulfillment.last_error_code == delivery.failure_code
+            } else {
+                fulfillment.execution_state == "manual_reconcile"
+            }
+        });
+        check(
+            &mut blockers,
+            fulfillment_state_matches
+                && self.fulfillment.as_ref().is_some_and(|fulfillment| {
+                    fulfillment.delivery_id == Some(delivery.id)
+                        && fulfillment.delivery_operation == "send"
+                        && fulfillment.dispatch_world == "main"
+                        && fulfillment.claim_token.is_none()
+                        && fulfillment.claim_expires_at.is_none()
+                        && fulfillment.proof_kind.is_none()
+                        && fulfillment.proof_reference.is_none()
+                        && fulfillment.proof_digest.is_none()
+                        && fulfillment.proof_observed_at.is_none()
+                        && Some(delivery.command_id) == fulfillment.prepare_command_id
+                        && delivery.request_digest.is_some()
+                        && delivery.request_digest == fulfillment.prepare_request_digest
+                        && delivery.activation_command_id == fulfillment.activate_command_id
+                        && delivery.activation_request_digest == fulfillment.activate_request_digest
+                })
+                && self
+                    .obligation
+                    .as_ref()
+                    .is_some_and(|obligation| obligation.business_state == "ready"),
+            SentAdmissionBlocker::FulfillmentIdentityOrClaimConflict,
+        );
+        // 逾期只表示截止已过并发过提醒，不改变付款或资产事实；提醒以外的恢复动作仍冲突。
+        check(
+            &mut blockers,
+            self.recovery.as_ref().is_none_or(|recovery| {
+                matches!(recovery.stage.as_deref(), Some("awaiting_payment" | "payment_overdue"))
+                    && recovery.resolution.is_none()
+                    && recovery.blocking_code.is_none()
+                    && recovery.manual_reconcile_delivery_id.is_none()
+                    && recovery.claim_token.is_none()
+            }),
+            SentAdmissionBlocker::ConflictingRecoveryDisposition,
+        );
+        check(
+            &mut blockers,
+            !self.conflict,
+            SentAdmissionBlocker::ExistingBindingRetirementOrConflictingAttempt,
+        );
+        blockers
+    }
+
+    pub(super) fn frozen_credential_matches(&self) -> bool {
+        self.expectation.as_ref().is_some_and(|expected| {
+            expected.credential.as_ref().is_some_and(|binding| {
+                self.credential.as_ref().is_some_and(|credential| {
+                    credential.id == Some(binding.credential_id)
+                        && credential.kind.as_deref() == Some("mail_cookie")
+                        && credential.status.as_deref() == Some("active")
+                        && credential.version == Some(binding.credential_version)
+                        && matches!(
+                            credential.scope.as_deref(),
+                            Some("mooglemail:main" | "mooglemail:shared")
+                        )
+                })
+            })
+        })
+    }
+
+    pub(super) fn sent_window(&self, admin_failed: bool) -> Option<(Timestamp, Timestamp)> {
+        let sending = self.delivery.sending_at?;
+        let end = self.delivery.completed_at?;
+        // 更正可追溯至投递激活所在分钟，结果未知仅检查当前尝试。
+        let start = if admin_failed {
+            crate::ports::mail::sent_list_minute_start(self.delivery.activated_at?)
+        } else {
+            sending
+        };
+        (start <= sending && sending <= end).then_some((start, end))
+    }
+}
 
 /// 操作者保存的实际观察；已收取附件必须保持为空，不能填入期待 EID。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,6 +187,13 @@ pub struct ManualSentEvidence {
 }
 
 impl ManualSentEvidence {
+    /// Admin 以详情契约的微秒精度核对证据版本，Worker 的 JSON 可能保留纳秒。
+    pub fn matches_observation_time(&self, observed_at: Option<Timestamp>) -> bool {
+        observed_at.is_some_and(|recorded| {
+            recorded.timestamp_micros() == self.observed_at.timestamp_micros()
+        })
+    }
+
     /// 仅验证规范形状；冻结身份、资金 UID 和分钟交集由最终事务核验。
     pub fn validate(&self) -> Result<(), ApplicationError> {
         if self.schema_version != 1
@@ -136,6 +295,41 @@ fn grouped_credits(amount: i64) -> String {
     grouped
 }
 
+/// 所选 Worker 观察的实见附件；未知和实见空数组含义不同。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+pub struct SentObservedAttachments {
+    pub collected: Option<bool>,
+    pub remaining_equipment_ids: Option<Vec<String>>,
+    pub pre_collection_equipment_ids: Option<Vec<String>>,
+}
+
+impl SentObservedAttachments {
+    pub(super) fn blocker(
+        &self,
+        evidence: &ManualSentEvidence,
+        expected: &[String],
+    ) -> Option<SentAdmissionBlocker> {
+        let remaining = self.remaining_equipment_ids.as_deref();
+        let before_collection = self.pre_collection_equipment_ids.as_deref();
+        if expected.is_empty() || !evidence.collected || self.collected == Some(false) {
+            let Some(remaining) = remaining else {
+                return Some(SentAdmissionBlocker::MissingObservedEquipmentIds);
+            };
+            if remaining != expected || (!evidence.collected && remaining != evidence.equipment_ids)
+            {
+                return Some(SentAdmissionBlocker::ObservedEquipmentIdsMismatch);
+            }
+        }
+        // 操作者声明已领取也不能豁免 Worker 已经实见的不符编号（不变量 6）。
+        if before_collection.is_some_and(|ids| ids != expected)
+            || remaining.is_some_and(|ids| !ids.is_empty() && ids != expected)
+        {
+            return Some(SentAdmissionBlocker::ObservedEquipmentIdsMismatch);
+        }
+        None
+    }
+}
+
 /// 稳定命令绑定原观察、当前 fence 和两项独立人工责任。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -184,6 +378,11 @@ pub struct SentConfirmationPreview {
     pub external_reference: String,
     pub requires_collected_asset_acceptance: bool,
     pub requires_attempt_history_acceptance: bool,
+    /// 供 HTTP 的显式投影使用，保留 CLI 预览的既有字段。
+    #[serde(skip_serializing)]
+    pub prior_unbound_attempts: bool,
+    #[serde(skip_serializing)]
+    pub sent_before_current_attempt: bool,
     /// 目标是被 Admin 对账为失败的投递；确认即以 Sent 证据更正该人工失败结论。
     pub corrects_admin_failure: bool,
 }
@@ -197,15 +396,17 @@ pub struct SentConfirmationResult {
     pub replayed: bool,
 }
 
-/// 只向正式运维 CLI 开放；Admin 原始手填成功禁止保持不变。
+/// Admin 按证据引用选观察，CLI 按证据 MID 选观察；二者都以同一存储准入为准。
 pub trait DeliverySentConfirmationPort: Send + Sync {
-    fn preview_sent_confirmation(
-        &self,
+    fn preview_sent_confirmation<'a>(
+        &'a self,
         delivery_id: Uuid,
         evidence: ManualSentEvidence,
-    ) -> ApplicationFuture<'_, SentConfirmationPreview>;
-    fn confirm_sent(
-        &self,
+        evidence_reference: Option<&'a str>,
+    ) -> ApplicationFuture<'a, SentConfirmationPreview>;
+    fn confirm_sent<'a>(
+        &'a self,
         command: SentConfirmationCommand,
-    ) -> ApplicationFuture<'_, SentConfirmationResult>;
+        evidence_reference: Option<&'a str>,
+    ) -> ApplicationFuture<'a, SentConfirmationResult>;
 }

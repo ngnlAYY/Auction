@@ -24,6 +24,7 @@ use auction_application::delivery::{
     DeliverySentConfirmationPort, DeliveryTakeExpectation, DeliveryTransportError,
     DeliveryWorkClaim, DeliveryWorkStore, ManualSentEvidence, SentConfirmationCommand,
 };
+use auction_application::mail::MoogleMailboxEvidenceStore;
 use auction_application::recovery::RecoveryWorkStore;
 use auction_application::settlement::{
     INTERNAL_EVIDENCE_PROTOCOL, InternalEvidencePurpose, MailAccountEvidenceBinding,
@@ -741,7 +742,7 @@ async fn postgres_old_dispatch_cannot_mutate_new_funding() {
     // 旧派发的人工 Sent 准入：预览给出阻断项，确认失败关闭。
     let manual = manual_evidence(&resending, pool, resending.original).await;
     let preview = store
-        .preview_sent_confirmation(resending.original, manual.clone())
+        .preview_sent_confirmation(resending.original, manual.clone(), None)
         .await
         .expect("旧派发预览");
     assert!(!preview.eligible, "旧派发不具备人工 Sent 准入");
@@ -753,17 +754,20 @@ async fn postgres_old_dispatch_cannot_mutate_new_funding() {
             .expect("读取旧派发 fence");
     assert!(
         store
-            .confirm_sent(SentConfirmationCommand {
-                command_id: Uuid::new_v4(),
-                delivery_id: resending.original,
-                expected_fencing_version: fence,
-                actor: "returns-operator".to_owned(),
-                operator_identity: None,
-                reason: "late Sent observation".to_owned(),
-                evidence: manual,
-                accept_collected_assets: false,
-                accept_attempt_history: false,
-            })
+            .confirm_sent(
+                SentConfirmationCommand {
+                    command_id: Uuid::new_v4(),
+                    delivery_id: resending.original,
+                    expected_fencing_version: fence,
+                    actor: "returns-operator".to_owned(),
+                    operator_identity: None,
+                    reason: "late Sent observation".to_owned(),
+                    evidence: manual,
+                    accept_collected_assets: false,
+                    accept_attempt_history: false,
+                },
+                None
+            )
             .await
             .is_err()
     );
@@ -876,7 +880,7 @@ async fn manual_evidence(
 }
 
 /// 补寄派发写出结果未知：履约转人工对账后，人工 Sent 准入按补寄的冻结身份与履约命令 ID 成立，
-/// 确认把未知占用收为 spent，并以冻结证明结束本案。
+/// 确认按锁内 Worker 清单核对，只有正确证据把未知占用收为 spent，并以冻结证明结束本案。
 #[tokio::test]
 async fn postgres_return_resend_manual_sent_admission() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
@@ -913,25 +917,97 @@ async fn postgres_return_resend_manual_sent_admission() {
     .expect("履约转人工对账");
 
     let evidence = manual_evidence(&resending, pool, resending.resend).await;
+    let fence: i64 =
+        sqlx::query_scalar("SELECT fencing_version FROM public.deliveries WHERE id = $1")
+            .bind(resending.resend)
+            .fetch_one(pool)
+            .await
+            .expect("读取当前 fence");
+    let reference = format!("sent_reference_sighting:{}", evidence.external_mail_id);
+    let mut observation = json!({
+        "mid": evidence.external_mail_id,
+        "observed_at": evidence.observed_at,
+        "collected": false,
+        "remaining_equipment_count": 1,
+        "remaining_equipment_ids": ["300753958"],
+    });
+    store
+        .record_sent_sighting(
+            resending.resend,
+            fence,
+            &evidence.external_mail_id,
+            observation.clone(),
+        )
+        .await
+        .expect("Worker 写入与冻结清单不符的目击");
+    let command = SentConfirmationCommand {
+        command_id: Uuid::new_v4(),
+        delivery_id: resending.resend,
+        expected_fencing_version: fence,
+        actor: "returns-operator".to_owned(),
+        operator_identity: None,
+        reason: "manual Sent observation for resend".to_owned(),
+        evidence: evidence.clone(),
+        accept_collected_assets: false,
+        accept_attempt_history: false,
+    };
+    for selected in [Some(reference.as_str()), None] {
+        let blocked = store
+            .preview_sent_confirmation(resending.resend, evidence.clone(), selected)
+            .await
+            .expect("预览从库内读取实见编号");
+        assert!(!blocked.eligible);
+        assert_eq!(blocked.blockers, ["observed_equipment_ids_mismatch"]);
+        store
+            .confirm_sent(command.clone(), selected)
+            .await
+            .expect_err("自报空附件不能覆盖实见编号");
+        assert_eq!(
+            allocation_state(pool, resending.allocation).await,
+            ("unknown".to_owned(), AMOUNT, Some(resending.resend))
+        );
+    }
+    observation["remaining_equipment_count"] = json!(0);
+    observation["remaining_equipment_ids"] = json!([]);
+    store
+        .record_sent_sighting(resending.resend, fence, &evidence.external_mail_id, observation)
+        .await
+        .expect("Worker 写入实见空清单");
     let preview = store
-        .preview_sent_confirmation(resending.resend, evidence.clone())
+        .preview_sent_confirmation(resending.resend, evidence, Some(&reference))
         .await
         .expect("补寄预览");
     assert!(preview.eligible, "补寄派发可经人工 Sent 准入：{:?}", preview.blockers);
+    let absent_reference = format!("mailbox_sweep:{}", command.evidence.external_mail_id);
     store
-        .confirm_sent(SentConfirmationCommand {
-            command_id: Uuid::new_v4(),
-            delivery_id: resending.resend,
-            expected_fencing_version: preview.expected_fencing_version,
-            actor: "returns-operator".to_owned(),
-            operator_identity: None,
-            reason: "manual Sent observation for resend".to_owned(),
-            evidence,
-            accept_collected_assets: false,
-            accept_attempt_history: false,
-        })
+        .confirm_sent(command.clone(), Some(&absent_reference))
         .await
-        .expect("人工 Sent 确认");
+        .expect_err("锁内按所选来源取证，不能替换为同 MID 的其它观察");
+    let confirmed =
+        store.confirm_sent(command.clone(), Some(&reference)).await.expect("人工 Sent 确认");
+    assert!(!confirmed.replayed);
+    let snapshot: Value = sqlx::query_scalar(
+        "SELECT original_snapshot FROM public.delivery_sent_confirmations WHERE command_id = $1",
+    )
+    .bind(command.command_id)
+    .fetch_one(pool)
+    .await
+    .expect("读取追加的确认快照");
+    assert_eq!(snapshot["sent_observation_reference"], reference);
+    assert_eq!(
+        snapshot["delivery"]["result_metadata"]["sent_reference_sighting"]["remaining_equipment_ids"],
+        json!([])
+    );
+
+    sqlx::query("UPDATE public.deliveries SET result_metadata = result_metadata - 'sent_reference_sighting' WHERE id = $1")
+        .bind(resending.resend)
+        .execute(pool)
+        .await
+        .expect("模拟确认后可变观察消失");
+    let replay = store.confirm_sent(command, Some(&reference)).await.expect("同参原样重放");
+    assert!(replay.replayed);
+    assert_eq!(replay.command_id, confirmed.command_id);
+    assert_eq!(replay.external_reference, confirmed.external_reference);
     assert_eq!(
         allocation_state(pool, resending.allocation).await,
         ("spent".to_owned(), AMOUNT, Some(resending.resend))

@@ -11,6 +11,7 @@ use super::matching::{
     frozen_entry_matches, frozen_state_matches, notice_subject_matches, recovered_state_matches,
     return_take_assets_match, same_send_content, sent_matches, take_assets_match,
 };
+use super::sweep::sent_metadata;
 use crate::errors::ApplicationError;
 use crate::ports::delivery::{
     DeliverySendCredentialBinding, DeliverySendExpectation, DeliveryTakeExpectation,
@@ -113,8 +114,7 @@ impl MailboxMaintenanceService {
         }) {
             return Ok(step);
         }
-        self.record_observation(candidate, &state).await?;
-        step.observed = true;
+        step.observed = self.record_observation(candidate, &state).await?;
         step.recovered = self
             .store
             .bind_recovered_send(
@@ -188,22 +188,10 @@ impl MailboxMaintenanceService {
                         candidate.delivery_id,
                         candidate.fencing_version,
                         &state.external_mail_id,
-                        json!({
-                            "observed_at": now,
-                            "mid": state.external_mail_id,
-                            "sent_at": entry.sent_at,
-                            "sent_time_precision": "minute",
-                            // 详情页安全摘要：Admin 可据此核对人工证明身份，但不接触正文。
-                            "recipient": state.recipient,
-                            "subject": state.subject,
-                            "body_digest": state.body_digest,
-                            "collected": state.collected,
-                            "cod_pending": state.cod_pending,
-                            "remaining_credits": state.remaining_credits,
-                            "remaining_equipment_count": state.remaining_equipment_ids.len(),
-                        }),
+                        sent_metadata(&state, now, Some(entry.sent_at)),
                     )
-                    .await;
+                    .await
+                    .map(|_| ());
             }
         }
         Ok(())
@@ -235,8 +223,7 @@ impl MailboxMaintenanceService {
         {
             return Ok(step);
         }
-        self.record_observation(candidate, &state).await?;
-        step.observed = true;
+        step.observed = self.record_observation(candidate, &state).await?;
         if !recovered_state_matches(candidate, &state) {
             return Ok(step);
         }
@@ -314,8 +301,7 @@ impl MailboxMaintenanceService {
         {
             return Ok(step);
         }
-        self.record_observation(candidate, &state).await?;
-        step.observed = true;
+        step.observed = self.record_observation(candidate, &state).await?;
         step.recovered = self
             .store
             .bind_recovered_send(
@@ -543,27 +529,17 @@ impl MailboxMaintenanceService {
         Ok(RecoveryStep { requeued, ..RecoveryStep::default() })
     }
 
-    /// 记录 Sent 详情的观测快照；恢复证明是否成立由调用方随后判定。
+    /// 只有当前 fence 接受观察才计数；是否能恢复仍由原证明事务复核（不变量 6）。
     async fn record_observation(
         &self,
         candidate: &MoogleMailboxUnprovenSend,
         state: &MoogleMailboxSentState,
-    ) -> Result<(), ApplicationError> {
+    ) -> Result<bool, ApplicationError> {
         self.store
             .record_sent_observation(
                 candidate.delivery_id,
                 candidate.fencing_version,
-                json!({
-                    "observed_at": self.clock.now(),
-                    "mid": state.external_mail_id,
-                    "recipient": state.recipient,
-                    "subject": state.subject,
-                    "body_digest": state.body_digest,
-                    "collected": state.collected,
-                    "cod_pending": state.cod_pending,
-                    "remaining_credits": state.remaining_credits,
-                    "remaining_equipment_count": state.remaining_equipment_ids.len(),
-                }),
+                sent_metadata(state, self.clock.now(), None),
             )
             .await
     }
@@ -593,4 +569,46 @@ pub(super) struct RecoveryStep {
     pub(super) recovered: bool,
     pub(super) requeued: bool,
     pub(super) failed: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use auction_time::Timestamp;
+    use serde_json::json;
+
+    use super::super::sweep::sent_metadata;
+    use crate::ports::mail::MoogleMailboxSentState;
+
+    #[test]
+    fn both_worker_observations_encode_the_complete_seen_manifest() {
+        let now = Timestamp::from_ymd_hms(2026, 11, 2, 1, 14, 0).expect("观察时间");
+        let mut state = MoogleMailboxSentState {
+            external_mail_id: "7000001".to_owned(),
+            recipient: "Buyer".to_owned(),
+            subject: "Settlement".to_owned(),
+            collected: false,
+            cod_pending: 0,
+            remaining_credits: 0,
+            remaining_equipment_ids: ["0100", "20", "100", "2"].map(str::to_owned).to_vec(),
+            body_digest: [1; 32],
+            observation_credential: None,
+        };
+        for sent_at in [None, Some(now)] {
+            let observed = sent_metadata(&state, now, sent_at);
+            assert_eq!(observed["remaining_equipment_ids"], json!(["100", "2", "20"]));
+            assert_eq!(observed["remaining_equipment_count"], 3);
+            assert_eq!(observed.get("sent_at").is_some(), sent_at.is_some());
+        }
+        state.collected = true;
+        state.remaining_equipment_ids.clear();
+        let observed = sent_metadata(&state, now, Some(now));
+        assert_eq!(observed["remaining_equipment_ids"], json!([]));
+        assert_eq!(observed["remaining_equipment_count"], 0);
+
+        state.collected = false;
+        state.remaining_equipment_ids = vec!["0".to_owned()];
+        let observed = sent_metadata(&state, now, Some(now));
+        assert!(observed["remaining_equipment_ids"].is_null());
+        assert_eq!(observed["remaining_equipment_count"], 1);
+    }
 }

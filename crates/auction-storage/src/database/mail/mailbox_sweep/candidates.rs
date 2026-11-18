@@ -1,13 +1,15 @@
-//! 未证明 MoogleMail 发送的只读投影：冻结尝试身份优先，旧行只保留安全恢复所需字段。
+//! 未证明 MoogleMail 发送的投影与持久轮转：冻结尝试身份优先，旧行只保留安全恢复所需字段。
 
 use auction_application::delivery::{DeliverySendExpectation, DeliveryTakeExpectation};
 use auction_application::mail::{
-    MoogleMailboxReturnTakeIdentity, MoogleMailboxSweepCandidate, MoogleMailboxUnprovenSend,
+    MoogleMailboxReturnTakeIdentity, MoogleMailboxSweepBatch, MoogleMailboxSweepCandidate,
+    MoogleMailboxSweepPosition, MoogleMailboxUnprovenSend,
 };
 use auction_application::settlement::settlement_return_original_body;
 use auction_time::Timestamp;
 use serde_json::Value;
-use sqlx::Postgres;
+use sqlx::postgres::PgRow;
+use sqlx::{FromRow, Postgres, Row};
 use uuid::Uuid;
 
 use crate::database::TrackedPool;
@@ -49,19 +51,24 @@ pub(super) async fn unproven_sends(
     pool: &TrackedPool<Postgres>,
     world_id: &str,
     limit: i64,
-) -> Result<Vec<MoogleMailboxSweepCandidate>, auction_application::core::ApplicationError> {
+) -> Result<MoogleMailboxSweepBatch, auction_application::core::ApplicationError> {
     // 所有 Send 来源共享冻结身份；不按 origin 白名单漏掉 watch、alert 或恢复发送。
     // 仅旧结算解析既有装备引用；正文和登录 key 不进入维护投影。
     // 先物化轮转前缀，再解析冻结尝试和旧装备引用，避免为本批未处理的后缀执行关联查询。
-    let rows: Vec<UnprovenSendRow> = sqlx::query_as(
+    // 轮首游标与候选取自同一快照。即便没有常规候选，补采仍需用该游标回绕（不变量 5）。
+    sqlx::query(
         concat!(
-            "WITH candidates AS MATERIALIZED (
+            "WITH sweep AS (
+            SELECT saved.last_created_at, saved.last_delivery_id
+            FROM (VALUES ($1::text)) AS world(id)
+            LEFT JOIN public.mailbox_sweep_cursors saved ON saved.world_id=world.id
+         ), candidates AS MATERIALIZED (
             SELECT d.id, d.created_at,
                    CASE WHEN sweep.last_created_at IS NULL
                               OR (d.created_at, d.id) > (sweep.last_created_at, sweep.last_delivery_id)
                         THEN 0 ELSE 1 END AS sweep_order
             FROM public.deliveries d
-            LEFT JOIN public.mailbox_sweep_cursors sweep ON sweep.world_id = $1
+            CROSS JOIN sweep
             WHERE d.status = 'manual_reconcile'
               AND d.payload_operation IN ('send', 'take')
               AND d.external_reference IS NULL
@@ -70,8 +77,10 @@ pub(super) async fn unproven_sends(
               AND COALESCE(d.payload_world, 'main') = $1
             ORDER BY sweep_order, d.created_at, d.id
             LIMIT $2
-         )
+         ), projection AS (
          SELECT d.id AS delivery_id,
+                candidates.sweep_order,
+                candidates.created_at,
                 d.origin_kind,
                 d.recipient,
                 COALESCE((d.payload->>'cod')::bigint, 0) AS cod,
@@ -136,22 +145,40 @@ pub(super) async fn unproven_sends(
              JOIN public.inbound_mail AS inbound ON inbound.id = action.return_mail_id
              WHERE d.origin_kind = 'settlement_return_action' AND action.delivery_id = d.id
          ) AS returned ON true
-         ORDER BY candidates.sweep_order, candidates.created_at, candidates.id",
+         )
+         SELECT projection.*, sweep.last_created_at, sweep.last_delivery_id
+         FROM sweep LEFT JOIN projection ON true
+         ORDER BY projection.sweep_order, projection.created_at, projection.delivery_id",
         ),
     )
     .bind(world_id)
     .bind(limit)
     .fetch_all(pool)
     .await
-    .map_err(|error| storage_error_from(error, "MoogleMail 未证明投递查询失败"))?;
-    // 不可重建行仍返回轮转身份，避免固定坏前缀永久隐藏后缀。
-    Ok(rows
-        .into_iter()
-        .map(|row| MoogleMailboxSweepCandidate {
-            delivery_id: row.delivery_id,
-            send: recoverable_send(world_id, row),
+    .and_then(|rows| decode_batch(world_id, rows))
+    .map_err(|error| storage_error_from(error, "MoogleMail 未证明投递查询失败"))
+}
+
+fn decode_batch(world_id: &str, rows: Vec<PgRow>) -> Result<MoogleMailboxSweepBatch, sqlx::Error> {
+    let position = if let Some(first) = rows.first()
+        && let Some(delivery_id) = first.try_get("last_delivery_id")?
+    {
+        Some(MoogleMailboxSweepPosition {
+            created_at: first.try_get("last_created_at")?,
+            delivery_id,
         })
-        .collect())
+    } else {
+        None
+    };
+    let mut candidates = Vec::with_capacity(rows.len());
+    for row in rows {
+        if let Some(delivery_id) = row.try_get("delivery_id")? {
+            // 不可重建行仍返回轮转身份，避免固定坏前缀永久隐藏后缀。
+            let send = recoverable_send(world_id, UnprovenSendRow::from_row(&row)?);
+            candidates.push(MoogleMailboxSweepCandidate { delivery_id, send });
+        }
+    }
+    Ok(MoogleMailboxSweepBatch { candidates, position })
 }
 
 fn recoverable_send(world_id: &str, row: UnprovenSendRow) -> Option<MoogleMailboxUnprovenSend> {
@@ -294,4 +321,35 @@ fn recoverable_send(world_id: &str, row: UnprovenSendRow) -> Option<MoogleMailbo
         take_expectation,
         return_take,
     })
+}
+
+pub(super) async fn record_sweep_attempt<'e>(
+    executor: impl sqlx::Executor<'e, Database = Postgres>,
+    world_id: &str,
+    delivery_id: Uuid,
+    failed_fence: Option<i64>,
+) -> Result<bool, auction_application::core::ApplicationError> {
+    // 只推进当前一条；取消或提交应答丢失最多消费本条机会，后缀位置不受影响。
+    // 排序键来自原 delivery，不接受调用方伪造时间，也不锁住远端读取期间的业务行。
+    let result = sqlx::query(
+        "INSERT INTO public.mailbox_sweep_cursors (world_id, last_created_at, last_delivery_id)
+         SELECT $1, created_at, id FROM public.deliveries
+         WHERE id = $2 AND COALESCE(payload_world, 'main') = $1
+           AND external_reference IS NULL
+           AND (($3::bigint IS NULL AND status = 'manual_reconcile'
+                 AND payload_operation IN ('send', 'take'))
+                OR ($3::bigint IS NOT NULL AND status = 'failed' AND fencing_version = $3
+                    AND origin_kind = 'settlement' AND payload_operation = 'send'))
+           AND sending_at IS NOT NULL AND completed_at IS NOT NULL
+         ON CONFLICT (world_id) DO UPDATE
+         SET last_created_at = EXCLUDED.last_created_at,
+             last_delivery_id = EXCLUDED.last_delivery_id",
+    )
+    .bind(world_id)
+    .bind(delivery_id)
+    .bind(failed_fence)
+    .execute(executor)
+    .await
+    .map_err(|error| storage_error_from(error, "MoogleMail 维护轮转提交未确认"))?;
+    Ok(result.rows_affected() == 1)
 }

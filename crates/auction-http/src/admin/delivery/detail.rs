@@ -1,7 +1,7 @@
 //! Admin 投递详情读取：聚合尝试、Sent 证据、领取、处置与来源义务的安全投影。
 //!
 //! 缺省响应是已发布页面能按闭集解码的投影；结算退件 Take 投递与本版本新增的处置种类只在
-//! `include=settlement_returns` 时输出，规则见 `projection` 模块。
+//! 扩展投影包含，规则见 `projection` 模块。实见附件只随 `include=sent_proof` 输出。
 
 use std::net::SocketAddr;
 
@@ -36,7 +36,7 @@ pub(crate) async fn detail(
     if let Err(response) = authenticated_admin_session(&state, &headers).await {
         return *response;
     }
-    let projection = match detail_projection(&uri) {
+    let (projection, include_sent_proof) = match detail_projection(&uri) {
         Ok(projection) => projection,
         Err(response) => return *response,
     };
@@ -56,7 +56,7 @@ pub(crate) async fn detail(
             Ok(projected) => projected,
             Err(error) => return map_delivery_error(error),
         };
-        let detail = match projection.project_detail(map_detail(detail)) {
+        let detail = match projection.project_detail(map_detail(detail, include_sent_proof)) {
             Ok(detail) => detail,
             Err(response) => return *response,
         };
@@ -75,7 +75,7 @@ pub(crate) async fn detail(
         Ok(detail) => detail,
         Err(error) => return map_delivery_error(error),
     };
-    let response = match projection.project_detail(map_detail(detail)) {
+    let response = match projection.project_detail(map_detail(detail, false)) {
         Ok(response) => response,
         Err(response) => return *response,
     };
@@ -84,13 +84,14 @@ pub(crate) async fn detail(
 }
 
 /// 详情的查询参数只有可选的 `include`。未登记的键或重复出现为“投递详情查询参数无效”，`include`
-/// 的取值由 [`DeliveryProjection::parse`] 判定，都不静默退回缺省投影。
-fn detail_projection(uri: &Uri) -> Result<DeliveryProjection, Box<Response>> {
+/// 可选择处置准入或附加 Sent 证据字段。其余取值按 [`DeliveryProjection::parse`] 判定。
+fn detail_projection(uri: &Uri) -> Result<(DeliveryProjection, bool), Box<Response>> {
     let mut query = parse_query(uri, &["include"])
         .map_err(|()| Box::new(invalid_query("投递详情查询参数无效")))?;
     match query.remove("include").as_deref() {
-        Some("disposition_actions") => Ok(DeliveryProjection::DispositionActions),
-        include => DeliveryProjection::parse(include),
+        Some("disposition_actions") => Ok((DeliveryProjection::DispositionActions, false)),
+        Some("sent_proof") => Ok((DeliveryProjection::DispositionActions, true)),
+        include => DeliveryProjection::parse(include).map(|projection| (projection, false)),
     }
 }
 
@@ -103,7 +104,7 @@ mod tests {
     use super::detail_projection;
     use crate::admin::delivery::projection::DeliveryProjection;
 
-    async fn parse(query: &str) -> Result<DeliveryProjection, (StatusCode, Value)> {
+    async fn parse(query: &str) -> Result<(DeliveryProjection, bool), (StatusCode, Value)> {
         let uri: Uri = format!("/api/v1/admin/deliveries/x{query}").parse().expect("测试 URI");
         match detail_projection(&uri) {
             Ok(projection) => Ok(projection),
@@ -121,21 +122,26 @@ mod tests {
     /// 退回缺省投影。
     #[tokio::test]
     async fn include_is_opt_in_and_fails_closed() {
-        assert_eq!(parse("").await, Ok(DeliveryProjection::Published));
-        assert_eq!(parse("?").await, Ok(DeliveryProjection::Published));
+        assert_eq!(parse("").await, Ok((DeliveryProjection::Published, false)));
+        assert_eq!(parse("?").await, Ok((DeliveryProjection::Published, false)));
         assert_eq!(
             parse("?include=settlement_returns").await,
-            Ok(DeliveryProjection::SettlementReturns)
+            Ok((DeliveryProjection::SettlementReturns, false))
         );
         assert_eq!(
             parse("?include=disposition_actions").await,
-            Ok(DeliveryProjection::DispositionActions)
+            Ok((DeliveryProjection::DispositionActions, false))
+        );
+        assert_eq!(
+            parse("?include=sent_proof").await,
+            Ok((DeliveryProjection::DispositionActions, true))
         );
         for (query, message) in [
             ("?include=", "附加字段无效"),
             ("?include=SETTLEMENT_RETURNS", "附加字段无效"),
             ("?include=recovery_equipment_recovered", "附加字段无效"),
             ("?include=settlement_returns,recovery_equipment_recovered", "附加字段无效"),
+            ("?include=sent_proof,disposition_actions", "附加字段无效"),
             ("?include=settlement_returns&include=settlement_returns", "投递详情查询参数无效"),
             ("?fields=all", "投递详情查询参数无效"),
         ] {

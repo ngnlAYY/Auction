@@ -44,22 +44,25 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
     let acknowledged = use_signal(|| false);
 
     let detail = use_resource(use_reactive((&delivery_id,), move |(delivery_id,)| {
-        let _ = refresh();
+        let revision = refresh();
         async move {
             let result = fetch_delivery_detail(delivery_id.clone()).await;
-            (delivery_id, result)
+            (delivery_id, revision, result)
         }
     }));
     let loading = detail.state().cloned() != UseResourceState::Ready;
-    // 切换投递或刷新期间不展示上一轮结果，避免把旧证据挂在新投递下。
+    let revision = refresh();
+    // 刷新信号变化即使旧详情失效，避免资源尚未重启时重新打开旧证据。
     let loaded = if loading {
         None
     } else {
         detail
             .read()
             .as_ref()
-            .filter(|(loaded_id, _)| loaded_id == &delivery_id)
-            .map(|(_, result)| result.clone())
+            .filter(|(loaded_id, loaded_revision, _)| {
+                loaded_id == &delivery_id && *loaded_revision == revision
+            })
+            .map(|(_, _, result)| result.clone())
     };
 
     let confirm_delivery_id = delivery_id.clone();
@@ -244,6 +247,13 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
                     busy: commands.any_busy(),
                     on_submit: confirm_sent_proof,
                     on_cancel: move |_| sent_open.set(false),
+                    on_stale: move |_| {
+                        // 预览已核对请求序号。关闭旧证据的对话框后，重开的入口只使用新详情。
+                        sent_open.set(false);
+                        notice.set(Some(AdminActionFeedback::Error("stale_delivery_state".to_owned())));
+                        let next = refresh.peek().saturating_add(1);
+                        refresh.set(next);
+                    },
                 }
             }
         }

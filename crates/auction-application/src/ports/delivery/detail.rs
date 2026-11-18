@@ -52,6 +52,10 @@ pub struct DeliveryAdminSentEvidence {
     pub cod_pending: Option<i64>,
     pub remaining_credits: Option<i64>,
     pub remaining_equipment_count: Option<i64>,
+    /// Worker 实见清单，旧记录缺失时为 None。
+    pub remaining_equipment_ids: Option<Vec<String>>,
+    /// 同一 MID 领取前实见的装备，缺失时为 None。
+    pub pre_collection_equipment_ids: Option<Vec<String>>,
     /// 领取回执摘要；只有人工证明证据携带，自动观察没有回执。
     pub receipt: Option<String>,
 }

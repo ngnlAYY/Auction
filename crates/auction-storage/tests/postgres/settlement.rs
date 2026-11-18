@@ -869,7 +869,7 @@ async fn postgres_manual_sent_confirmation_rejects_inadmissible_delivery_as_runt
 
     // 不存在的投递：只给出阻断项。
     let missing = service
-        .preview_sent_confirmation(Uuid::new_v4(), manual_evidence())
+        .preview_sent_confirmation(Uuid::new_v4(), manual_evidence(), None)
         .await
         .expect("不存在的投递预览");
     assert!(!missing.eligible);
@@ -883,7 +883,7 @@ async fn postgres_manual_sent_confirmation_rejects_inadmissible_delivery_as_runt
     .await
     .expect("读取结算后的投递");
     let preview = service
-        .preview_sent_confirmation(delivery_id, manual_evidence())
+        .preview_sent_confirmation(delivery_id, manual_evidence(), None)
         .await
         .expect("真实投递预览");
     assert!(!preview.eligible, "未进入发送围栏的投递不得准入：{:?}", preview.blockers);
@@ -913,7 +913,7 @@ async fn postgres_manual_sent_confirmation_rejects_inadmissible_delivery_as_runt
         accept_collected_assets: false,
         accept_attempt_history: false,
     };
-    service.confirm_sent(command).await.expect_err("不满足准入时必须失败关闭");
+    service.confirm_sent(command, None).await.expect_err("不满足准入时必须失败关闭");
 
     let (status_after, fence_after): (String, i64) =
         sqlx::query_as("SELECT status, fencing_version FROM public.deliveries WHERE id = $1")

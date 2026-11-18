@@ -4,7 +4,10 @@
 
 use auction_web_shared::t;
 
-use crate::api::{DeliveryEvidence, DeliverySentEvidence, datetime_local_value};
+use crate::api::{
+    AdminApiFailure, DeliveryEvidence, DeliverySentEvidence, DeliverySentProofPreview,
+    LocalTimeError, datetime_local_value,
+};
 
 /// 详情页转交的一次性提交；`command_id` 由命令宿主生成并在重试间保持。
 #[derive(Debug, Clone, PartialEq)]
@@ -24,6 +27,7 @@ pub(super) struct SentProofDraft {
     pub(super) sender_name: String,
     pub(super) sender_uid: String,
     pub(super) sent_minute: String,
+    pub(super) sent_minute_edited: bool,
     pub(super) remaining_credits: String,
     pub(super) cod_pending: String,
     pub(super) collected: bool,
@@ -37,13 +41,12 @@ impl SentProofDraft {
             evidence_reference: evidence.map(|item| item.reference.clone()).unwrap_or_default(),
             sender_name: String::new(),
             sender_uid: String::new(),
-            // `datetime-local` 只接受不带时区偏移的本地时间；带 `Z` 或 `+08:00` 之类偏移的值会被
-            // 浏览器净化为空串，必填约束随即拦下提交。预填只保留到分钟，提交时再经
-            // `normalize_datetime` 换回 UTC 整分钟。
+            // 本地值只供展示；时钟回拨时不能拿它反推原 UTC 分钟。
             sent_minute: evidence
                 .and_then(|item| item.sent_at.as_deref())
                 .and_then(datetime_local_value)
                 .unwrap_or_default(),
+            sent_minute_edited: false,
             remaining_credits: evidence
                 .and_then(|item| item.remaining_credits)
                 .map(|value| value.to_string())
@@ -76,11 +79,13 @@ pub(super) enum SentProofIssue {
     Digest,
     Recipient,
     Subject,
-    SentMinute,
+    SentMinute(LocalTimeError),
     SenderName,
     SenderUid,
-    Amount,
+    RemainingCredits,
+    CodPending,
     Receipt,
+    MissingObservedEquipmentIds,
 }
 
 impl SentProofIssue {
@@ -91,11 +96,160 @@ impl SentProofIssue {
             Self::Digest => t!("delivery-sent-proof-issue-digest"),
             Self::Recipient => t!("delivery-sent-proof-issue-recipient"),
             Self::Subject => t!("delivery-sent-proof-issue-subject"),
-            Self::SentMinute => t!("delivery-sent-proof-issue-sent-minute"),
+            Self::SentMinute(LocalTimeError::Invalid) => {
+                t!("delivery-sent-proof-issue-sent-minute")
+            }
+            Self::SentMinute(LocalTimeError::Nonexistent) => {
+                t!("admin-auctions-nonexistent-local-time")
+            }
+            Self::SentMinute(LocalTimeError::Ambiguous) => {
+                t!("admin-auctions-ambiguous-local-time")
+            }
             Self::SenderName => t!("delivery-sent-proof-issue-sender-name"),
             Self::SenderUid => t!("delivery-sent-proof-issue-sender-uid"),
-            Self::Amount => t!("delivery-sent-proof-issue-amount"),
+            Self::RemainingCredits | Self::CodPending => t!("delivery-sent-proof-issue-amount"),
             Self::Receipt => t!("delivery-sent-proof-issue-receipt"),
+            Self::MissingObservedEquipmentIds => t!("delivery-sent-proof-missing-observed-ids"),
         }
+    }
+
+    pub(super) fn field_id(self) -> &'static str {
+        match self {
+            Self::Evidence | Self::MissingObservedEquipmentIds => "delivery-sent-evidence",
+            Self::Attempt | Self::Digest | Self::Recipient | Self::Subject => {
+                "delivery-sent-evidence-summary"
+            }
+            Self::SentMinute(_) => "delivery-sent-minute",
+            Self::SenderName => "delivery-sent-sender-name",
+            Self::SenderUid => "delivery-sent-sender-uid",
+            Self::RemainingCredits => "delivery-sent-remaining-credits",
+            Self::CodPending => "delivery-sent-cod-pending",
+            Self::Receipt => "delivery-sent-receipt",
+        }
+    }
+}
+
+/// 发送到预览的请求和预览时的详情 fence。
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct SentProofRequest {
+    pub(super) delivery_id: String,
+    pub(super) fencing_version: i64,
+    pub(super) evidence_reference: String,
+    pub(super) evidence: DeliverySentEvidence,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(super) struct AcceptedResponsibilities {
+    pub(super) collected_assets: bool,
+    pub(super) prior_unbound_attempts: bool,
+    pub(super) sent_before_current_attempt: bool,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct ReviewedSentProof {
+    request: SentProofRequest,
+    pub(super) preview: DeliverySentProofPreview,
+    pub(super) accepted: AcceptedResponsibilities,
+}
+
+impl ReviewedSentProof {
+    pub(super) fn can_confirm(&self, delivery_id: &str, fencing_version: i64) -> bool {
+        self.request.delivery_id == delivery_id
+            && self.request.fencing_version == fencing_version
+            && self.preview.eligible
+            && (!self.preview.requires_collected_asset_acceptance || self.accepted.collected_assets)
+            && (self.preview.prior_unbound_attempts == Some(false)
+                || self.accepted.prior_unbound_attempts)
+            && (self.preview.sent_before_current_attempt == Some(false)
+                || self.accepted.sent_before_current_attempt)
+    }
+
+    /// 已发布命令用一个历史责任位；分别确认实际触发的所有理由后才可组装。
+    pub(super) fn submission(&self, reason: &str) -> SentProofSubmission {
+        SentProofSubmission {
+            evidence_reference: self.request.evidence_reference.clone(),
+            evidence: self.request.evidence.clone(),
+            reason: reason.trim().to_owned(),
+            expected_fencing_version: self.request.fencing_version,
+            accept_collected_assets: self.preview.requires_collected_asset_acceptance
+                && self.accepted.collected_assets,
+            accept_attempt_history: self.preview.requires_attempt_history_acceptance,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(super) enum SentProofPreviewError {
+    Local(SentProofIssue),
+    Api(AdminApiFailure),
+}
+
+/// 点选、编辑或详情更新都使正在进行的预览和相关勾选失效。
+#[derive(Debug, Clone, Default)]
+pub(super) struct SentProofReview {
+    revision: u64,
+    pub(super) pending: bool,
+    pub(super) outcome: Option<Result<ReviewedSentProof, SentProofPreviewError>>,
+}
+
+impl SentProofReview {
+    pub(super) fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    pub(super) fn acceptance(&mut self, revision: u64) -> Option<&mut AcceptedResponsibilities> {
+        if revision != self.revision {
+            return None;
+        }
+        self.outcome.as_mut()?.as_mut().ok().map(|proof| &mut proof.accepted)
+    }
+
+    pub(super) fn clear(&mut self) {
+        self.revision = self.revision.wrapping_add(1);
+        self.pending = false;
+        self.outcome = None;
+    }
+
+    pub(super) fn begin(&mut self) -> u64 {
+        self.clear();
+        self.pending = true;
+        self.revision
+    }
+
+    /// 返回当前预览是否要求重读详情。只有仍被等待的请求可以使投递详情失效。
+    pub(super) fn complete(
+        &mut self,
+        revision: u64,
+        request: SentProofRequest,
+        result: Result<DeliverySentProofPreview, AdminApiFailure>,
+    ) -> bool {
+        // 迟到响应不能恢复旧责任，也不能清除另一份证据正在请求的加载状态。
+        if revision != self.revision || !self.pending {
+            return false;
+        }
+        self.pending = false;
+        self.outcome = Some(result.map_err(SentProofPreviewError::Api).and_then(|preview| {
+            if preview.expected_fencing_version != request.fencing_version
+                || preview.delivery_id != request.delivery_id
+                || preview.external_reference
+                    != format!(
+                        "mooglemail:{}:send:{}",
+                        request.evidence.world_id, request.evidence.external_mail_id
+                    )
+            {
+                return Err(SentProofPreviewError::Api(AdminApiFailure::client(
+                    "stale_delivery_state",
+                )));
+            }
+            Ok(ReviewedSentProof {
+                request,
+                preview,
+                accepted: AcceptedResponsibilities::default(),
+            })
+        }));
+        matches!(
+            self.outcome.as_ref(),
+            Some(Err(SentProofPreviewError::Api(error))) if error.code == "stale_delivery_state"
+        )
     }
 }

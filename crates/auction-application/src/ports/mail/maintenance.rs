@@ -140,11 +140,29 @@ pub struct MoogleMailboxSentState {
     pub collected: bool,
     pub cod_pending: i64,
     pub remaining_credits: i64,
+    /// 详情实见的完整装备编号。
     pub remaining_equipment_ids: Vec<String>,
     /// 详情正文的规范摘要；用于通知类恢复证明的逐字比对。
     pub body_digest: [u8; 32],
     /// 本次详情读取的持久凭据身份；普通观察不产生内部资金或库存授权。
     pub observation_credential: Option<crate::ports::delivery::DeliverySendCredentialBinding>,
+}
+
+impl MoogleMailboxSentState {
+    /// 记录附件身份时去除前导零，按字典序去重。无效编号使整份清单不可用。
+    pub(crate) fn canonical_remaining_equipment_ids(&self) -> Option<Vec<&str>> {
+        let mut ids = self
+            .remaining_equipment_ids
+            .iter()
+            .map(|raw| {
+                let id = raw.trim_start_matches('0');
+                auction_domain::valid_positive_decimal(id, 64).then_some(id)
+            })
+            .collect::<Option<Vec<_>>>()?;
+        ids.sort_unstable();
+        ids.dedup();
+        Some(ids)
+    }
 }
 
 /// 入站邮件当前仍挂着的资产；用于 take 动作是否已生效。
@@ -264,6 +282,36 @@ pub struct MoogleMailboxSweepCandidate {
     pub send: Option<MoogleMailboxUnprovenSend>,
 }
 
+/// 本轮开始时的持久游标，供分批处理的候选使用同一个轮转起点。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MoogleMailboxSweepPosition {
+    pub created_at: Timestamp,
+    pub delivery_id: Uuid,
+}
+
+/// 原候选与同一条查询读到的轮首游标，空批次也须保留该位置。
+#[derive(Debug, Default)]
+pub struct MoogleMailboxSweepBatch {
+    pub candidates: Vec<MoogleMailboxSweepCandidate>,
+    pub position: Option<MoogleMailboxSweepPosition>,
+}
+
+/// 与原候选共用持久轮转的失败投递。只有仍可更正的投递带取证目标。
+#[derive(Debug, Clone)]
+pub struct MoogleMailboxFailedSendSlot {
+    pub delivery_id: Uuid,
+    pub fencing_version: i64,
+    pub target: Option<MoogleMailboxFailedSend>,
+}
+
+/// 取证只按冻结身份与可更正时窗匹配当前 Sent 列表。
+#[derive(Debug, Clone)]
+pub struct MoogleMailboxFailedSend {
+    pub expectation: crate::ports::delivery::DeliverySendExpectation,
+    pub not_before: Timestamp,
+    pub not_after: Timestamp,
+}
+
 /// 远端 compose、Sent、Read Mail 与收件箱读取端口；只有 `discard_compose` 写远端。
 pub trait MoogleMailboxMaintenance: Send + Sync {
     fn compose<'a>(&'a self, world_id: &'a str)
@@ -320,12 +368,12 @@ pub trait MoogleMailboxMaintenance: Send + Sync {
 /// 本地观察与受证明恢复端口；状态变更必须与资金、履约及追加审计原子提交。
 /// Take 恢复与重排必须锁验原冻结尝试、当前候选 fence 及观察凭据的有效 generation，不能只相信调用方比对。
 pub trait MoogleMailboxEvidenceStore: Send + Sync {
-    /// 按持久游标稳定回绕读取候选；读取本身不推进，未处理后缀必须留给下一轮。
+    /// 同时读取轮首游标和按它回绕的原候选；未开始处理的后缀继续留给下一轮。
     fn unproven_sends<'a>(
         &'a self,
         world_id: &'a str,
         limit: i64,
-    ) -> ApplicationFuture<'a, Vec<MoogleMailboxSweepCandidate>>;
+    ) -> ApplicationFuture<'a, MoogleMailboxSweepBatch>;
 
     /// 单条开始核对前推进游标；提交不确定时停止，不把尝试位置当作业务完成证明。
     fn record_sweep_attempt<'a>(
@@ -333,6 +381,26 @@ pub trait MoogleMailboxEvidenceStore: Send + Sync {
         world_id: &'a str,
         delivery_id: Uuid,
     ) -> ApplicationFuture<'a, bool>;
+
+    /// 主世界中可能命中本轮可见 Sent 的失败投递，使用同一个持久游标。
+    fn failed_sent_slots(
+        &self,
+        _start: Option<MoogleMailboxSweepPosition>,
+        _oldest_visible: Timestamp,
+        _limit: i64,
+    ) -> ApplicationFuture<'_, Vec<MoogleMailboxFailedSendSlot>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+
+    /// 推进失败投递的轮转位置。只有唯一匹配并持久登记了该投递与 MID 的首次读取才返回 true。
+    fn begin_failed_sent_detail<'a>(
+        &'a self,
+        _delivery_id: Uuid,
+        _fencing_version: i64,
+        _entry: Option<&'a MoogleMailboxSentEntry>,
+    ) -> ApplicationFuture<'a, bool> {
+        Box::pin(async { Ok(false) })
+    }
 
     /// 记录最近一次完整 Sent 枚举的页数观察；失败只影响告警观察，不阻断恢复。
     fn record_sent_pages<'a>(
@@ -348,22 +416,23 @@ pub trait MoogleMailboxEvidenceStore: Send + Sync {
         expectation: Option<&'a crate::ports::delivery::DeliverySendExpectation>,
     ) -> ApplicationFuture<'a, bool>;
 
+    /// 按原 fence 保存实见附件，空数组表示详情明确没有装备。返回 `true` 表示实际落库。
     fn record_sent_observation<'a>(
         &'a self,
         delivery_id: Uuid,
         fencing_version: i64,
         observation: Value,
-    ) -> ApplicationFuture<'a, ()>;
+    ) -> ApplicationFuture<'a, bool>;
 
-    /// 记录结算发送在完整 Sent 中任意时间的同主题目击；只阻止 Admin 重试或判失败，
-    /// 不构成发送证明。MID 已绑定或引用于其他投递时不记录。
+    /// 按当前 fence 记录结算发送的 Sent 目击。只阻止 Admin 重试或判失败，不构成发送证明。
+    /// MID 已绑定或引用于其他投递时不记录。返回 `true` 表示实际落库。
     fn record_sent_sighting<'a>(
         &'a self,
         delivery_id: Uuid,
         fencing_version: i64,
         external_mail_id: &'a str,
         observation: Value,
-    ) -> ApplicationFuture<'a, ()>;
+    ) -> ApplicationFuture<'a, bool>;
 
     fn record_compose_discard<'a>(
         &'a self,

@@ -100,6 +100,7 @@ pub(crate) fn map_snapshot(snapshot: DeliveryAdminSnapshot) -> AdminDeliveryResp
 /// 将投递详情投影转换为管理端 DTO；摘要转小写 hex，绝不返回正文或凭据秘密。
 pub(crate) fn map_detail(
     detail: auction_application::delivery::DeliveryAdminDetail,
+    include_sent_proof: bool,
 ) -> auction_contracts::AdminDeliveryDetailResponse {
     auction_contracts::AdminDeliveryDetailResponse {
         delivery: map_snapshot(detail.delivery),
@@ -150,6 +151,9 @@ pub(crate) fn map_detail(
                 cod_pending: item.cod_pending,
                 remaining_credits: item.remaining_credits,
                 remaining_equipment_count: item.remaining_equipment_count,
+                remaining_equipment_ids: include_sent_proof.then_some(item.remaining_equipment_ids),
+                pre_collection_equipment_ids: include_sent_proof
+                    .then_some(item.pre_collection_equipment_ids),
                 receipt: item.receipt,
             })
             .collect(),
@@ -296,6 +300,7 @@ pub(crate) fn map_player_support(
 /// 将人工证明预览映射为管理端 DTO；`blockers` 保持闭集字符串，浏览器不推导新结论。
 pub(crate) fn map_sent_proof_preview(
     preview: auction_application::delivery::SentConfirmationPreview,
+    include_responsibility_reasons: bool,
 ) -> auction_contracts::AdminDeliverySentProofPreviewResponse {
     auction_contracts::AdminDeliverySentProofPreviewResponse {
         eligible: preview.eligible,
@@ -305,6 +310,10 @@ pub(crate) fn map_sent_proof_preview(
         external_reference: preview.external_reference,
         requires_collected_asset_acceptance: preview.requires_collected_asset_acceptance,
         requires_attempt_history_acceptance: preview.requires_attempt_history_acceptance,
+        prior_unbound_attempts: include_responsibility_reasons
+            .then_some(preview.prior_unbound_attempts),
+        sent_before_current_attempt: include_responsibility_reasons
+            .then_some(preview.sent_before_current_attempt),
         corrects_admin_failure: preview.corrects_admin_failure,
     }
 }
@@ -397,6 +406,8 @@ mod tests {
                 cod_pending: Some(0),
                 remaining_credits: Some(0),
                 remaining_equipment_count: Some(0),
+                remaining_equipment_ids: None,
+                pre_collection_equipment_ids: None,
                 receipt: None,
             }],
             custody: DeliveryAdminCustody {
@@ -443,7 +454,7 @@ mod tests {
 
     #[test]
     fn detail_dto_is_a_redacted_projection() {
-        let value = serde_json::to_value(map_detail(detail())).expect("serialize");
+        let value = serde_json::to_value(map_detail(detail(), false)).expect("serialize");
         let encoded = serde_json::to_string(&value).expect("encode");
         // 详情不得泄露 payload 原文、lease token、Cookie、登录 key 或命令摘要。
         for forbidden in [
@@ -473,7 +484,7 @@ mod tests {
         let mut collected = detail();
         collected.custody.operator_confirmed_collected = true;
         assert_eq!(
-            serde_json::to_value(map_detail(collected)).expect("serialize")["custody"]["operator_confirmed_collected"],
+            serde_json::to_value(map_detail(collected, false)).expect("serialize")["custody"]["operator_confirmed_collected"],
             true
         );
     }
@@ -483,7 +494,7 @@ mod tests {
         let mut input = detail();
         input.obligation = None;
         input.recovery = None;
-        let value = serde_json::to_value(map_detail(input)).expect("serialize");
+        let value = serde_json::to_value(map_detail(input, false)).expect("serialize");
         assert!(value.get("obligation").is_none());
         assert!(value.get("recovery").is_none());
     }
@@ -549,7 +560,7 @@ mod tests {
                 "交付详情已加载",
                 AdminDeliveryDetailWithActionsResponse {
                     detail: DeliveryProjection::DispositionActions
-                        .project_detail(map_detail(detail))
+                        .project_detail(map_detail(detail, false))
                         .expect("详情投影"),
                     actions: map_actions(&guard, acknowledge),
                 },
@@ -584,6 +595,119 @@ mod tests {
             let fixture: serde_json::Value = serde_json::from_str(fixture).expect("浏览器回归样本");
             assert_eq!(serde_json::to_value(&mapped).expect("序列化详情"), fixture);
         }
+    }
+
+    #[test]
+    fn sent_proof_detail_serialization_matches_browser_fixture() {
+        use auction_contracts::{AdminDeliveryDetailWithActionsResponse, ApiResponse};
+
+        use crate::admin::delivery::projection::DeliveryProjection;
+
+        let mut input = detail();
+        input.delivery.id =
+            uuid::Uuid::parse_str("0f8fad5b-d9cb-469f-a165-70867728950e").expect("投递 UUID");
+        input.delivery.template = Some("settlement_equipment_handoff".to_owned());
+        input.delivery.claimed_at = Some(time());
+        input.attempts[0].credits = Some(0);
+        input.attempts[0].credential = None;
+        input.attempts[0].bound_sent_mail_id = None;
+        input.dispositions.clear();
+        input.obligation = None;
+        input.recovery = None;
+        let guard = DeliveryAdminGuardSnapshot {
+            action: DeliveryAdminAction::Release,
+            expected_fencing_version: 4,
+            fencing_version: 4,
+            status: "manual_reconcile".to_owned(),
+            reason_code: None,
+            has_sending_fence: true,
+            origin_kind: "settlement".to_owned(),
+            payload_operation: Some("send".to_owned()),
+            sent_reference_sighted: true,
+            funded_delivery: false,
+            command_snapshot_readable: true,
+            retired: false,
+            lot_eligible: None,
+            settlement_eligible: Some(true),
+            settlement_fulfillment_state: Some("manual_reconcile".to_owned()),
+            has_reconcile_reference: false,
+            mail_handed_over: false,
+            recipient_renamed: false,
+            recovery_retry_eligible: false,
+        };
+        let ids = || vec!["300753957".to_owned()];
+        let actual = [
+            (false, Some(ids()), None),
+            (false, None, None),
+            (true, Some(Vec::new()), Some(ids())),
+        ]
+        .map(|(collected, remaining, before_collection)| {
+            let evidence = &mut input.evidence[0];
+            evidence.collected = Some(collected);
+            evidence.remaining_equipment_count = Some(i64::from(!collected));
+            evidence.remaining_equipment_ids = remaining;
+            evidence.pre_collection_equipment_ids = before_collection;
+            input.custody.collected = Some(collected);
+            let projected = |include| {
+                DeliveryProjection::DispositionActions
+                    .project_detail(map_detail(input.clone(), include))
+                    .expect("投递详情投影")
+            };
+            let extended = projected(true);
+            let mut without_ids = extended.clone();
+            for evidence in &mut without_ids.evidence {
+                evidence.remaining_equipment_ids = None;
+                evidence.pre_collection_equipment_ids = None;
+            }
+            assert_eq!(without_ids, projected(false));
+            ApiResponse::ok(
+                "交付详情已加载",
+                AdminDeliveryDetailWithActionsResponse {
+                    detail: extended,
+                    actions: map_actions(&guard, Some(DeliveryAdminGuardBlocker::StatusMismatch)),
+                },
+            )
+        });
+        let actual = serde_json::to_value(actual).expect("序列化详情");
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../auction-contracts/tests/fixtures/admin/delivery-sent-proof-detail.json"
+        ))
+        .expect("详情样本");
+        assert_eq!(actual, fixture, "生产序列化结果\n{actual:#}");
+    }
+
+    #[test]
+    fn sent_proof_preview_serialization_adds_reasons_only_on_request() {
+        let preview = auction_application::delivery::SentConfirmationPreview {
+            eligible: true,
+            blockers: Vec::new(),
+            delivery_id: uuid::Uuid::parse_str("0f8fad5b-d9cb-469f-a165-70867728950e")
+                .expect("投递 UUID"),
+            expected_fencing_version: 4,
+            external_reference: "mooglemail:main:send:7000001".to_owned(),
+            requires_collected_asset_acceptance: false,
+            requires_attempt_history_acceptance: true,
+            prior_unbound_attempts: true,
+            sent_before_current_attempt: true,
+            corrects_admin_failure: true,
+        };
+        let response = |include| {
+            auction_contracts::ApiResponse::ok(
+                "人工 Sent 证明预览",
+                map_sent_proof_preview(preview.clone(), include),
+            )
+        };
+        let actual = serde_json::to_value(response(true)).expect("序列化预览");
+        let mut without_reasons = actual.clone();
+        let fields = without_reasons["data"].as_object_mut().expect("预览字段");
+        assert_eq!(fields.remove("prior_unbound_attempts"), Some(true.into()));
+        assert_eq!(fields.remove("sent_before_current_attempt"), Some(true.into()));
+        assert_eq!(without_reasons, serde_json::to_value(response(false)).expect("缺省预览"));
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../auction-contracts/tests/fixtures/admin/delivery-sent-proof-preview.json"
+        ))
+        .expect("预览样本");
+        assert_eq!(actual, fixture, "生产序列化结果\n{actual:#}");
     }
 
     #[test]

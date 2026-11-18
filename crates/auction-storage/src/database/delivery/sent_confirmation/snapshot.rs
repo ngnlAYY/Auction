@@ -1,17 +1,21 @@
 //! 人工证明准入与原 owner 快照；预览不返回邮件正文或历史私有快照。
 
-use auction_application::delivery::SentAdmissionSnapshot;
 use auction_application::delivery::{
-    DeliverySendExpectation, ManualSentEvidence, SentConfirmationPreview,
+    DeliveryAdminError, DeliverySendExpectation, ManualSentEvidence, SentAdmissionSnapshot,
+    SentConfirmationPreview, SentObservedAttachments,
 };
 use auction_time::Timestamp;
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{Value, json};
 use sqlx::Postgres;
+use sqlx::postgres::PgArguments;
+use sqlx::query::QueryScalar;
 use uuid::Uuid;
 
 use crate::database::TrackedTransaction as Transaction;
-use crate::database::delivery::sent_confirmation::Error;
+use crate::database::delivery::sent_confirmation::{
+    Error, SENT_OBSERVATION_KINDS, decode_sent_observation,
+};
 
 pub(super) struct Snapshot {
     /// 原始事实：随命令永久保存为 `original_snapshot`，不通过预览或 CLI 泄露。
@@ -30,12 +34,13 @@ impl Snapshot {
     }
 }
 
-pub(super) async fn load(
-    tx: &mut Transaction<'_, Postgres>,
-    delivery_id: Uuid,
-    evidence: &ManualSentEvidence,
-) -> Result<Snapshot, Error> {
-    let data: Option<Value> = sqlx::query_scalar(
+/// 读取确认的持久准入投影。取证候选在尚未选定 MID 时只核对本地条件。
+pub(in crate::database) fn admission_rows<'a>(
+    delivery_ids: &'a [Uuid],
+    world_id: &'a str,
+    mid: Option<&'a str>,
+) -> QueryScalar<'a, Postgres, Value, PgArguments> {
+    sqlx::query_scalar(
         "SELECT jsonb_build_object('delivery',to_jsonb(d),'obligation',to_jsonb(o),
           'fulfillment',to_jsonb(f),'equipment',to_jsonb(e),'recovery',to_jsonb(r),
           'expectation',a.expectation,'sending_fencing_version',COALESCE(a.sending_fencing_version,0),
@@ -101,14 +106,23 @@ pub(super) async fn load(
          LEFT JOIN public.settlement_recoveries r ON r.payment_obligation_id=o.id
          LEFT JOIN LATERAL public.delivery_current_send_attempt(d.id) a ON true
          LEFT JOIN public.credential_keys c ON c.id::text=a.expectation->'credential'->>'credential_id'
-         WHERE d.id=$1",
+         WHERE d.id=ANY($1)",
     )
-    .bind(delivery_id)
-    .bind(&evidence.world_id)
-    .bind(&evidence.external_mail_id)
-    .bind(format!("mooglemail:{}:send:{}", evidence.world_id, evidence.external_mail_id))
-    .fetch_optional(&mut **tx)
-    .await?;
+    .bind(delivery_ids)
+    .bind(world_id)
+    .bind(mid)
+    .bind(mid.map(|mid| format!("mooglemail:{world_id}:send:{mid}")))
+}
+
+pub(super) async fn load(
+    tx: &mut Transaction<'_, Postgres>,
+    delivery_id: Uuid,
+    evidence: &ManualSentEvidence,
+    evidence_reference: Option<&str>,
+) -> Result<Snapshot, Error> {
+    let data = admission_rows(&[delivery_id], &evidence.world_id, Some(&evidence.external_mail_id))
+        .fetch_optional(&mut **tx)
+        .await?;
     let mut preview = SentConfirmationPreview {
         eligible: false,
         blockers: Vec::new(),
@@ -120,9 +134,11 @@ pub(super) async fn load(
         ),
         requires_collected_asset_acceptance: evidence.collected,
         requires_attempt_history_acceptance: false,
+        prior_unbound_attempts: false,
+        sent_before_current_attempt: false,
         corrects_admin_failure: false,
     };
-    let Some(data) = data else {
+    let Some(mut data) = data else {
         preview.blockers.push("delivery_not_found".into());
         return Ok(Snapshot {
             data: Value::Null,
@@ -137,15 +153,134 @@ pub(super) async fn load(
     // 准入判定在应用层完成；这里只把锁定行投影成结构体并翻译阻断项。从未进入发送尝试的投递
     // 没有当前 fence：投影为不存在的 0（fence 从 1 开始），冻结期待同时为空，准入因此给出
     // 阻断项而不是以反序列化错误中止。
-    let admission = SentAdmissionSnapshot::deserialize(&data)?;
+    let mut admission = SentAdmissionSnapshot::deserialize(&data)?;
+    let recorded = recorded_observation(
+        &data["delivery"]["result_metadata"],
+        &evidence.external_mail_id,
+        evidence_reference,
+    )?;
+    // 同一 kind:MID 也能被覆盖。确认先重放账本，随后在锁定投递的快照中核对观察版本（不变量 1、2、6）。
+    if evidence_reference.is_some()
+        && recorded
+            .as_ref()
+            .is_none_or(|record| !evidence.matches_observation_time(record.observed_at))
+    {
+        return Err(Error::Application(DeliveryAdminError::Stale.into()));
+    }
+    if let Some(record) = recorded {
+        admission.observed_attachments = record.attachments;
+        data["sent_observation_reference"] =
+            json!(format!("{}:{}", record.kind, evidence.external_mail_id));
+    }
     let decision = admission.evaluate(evidence, now);
     preview.blockers =
         decision.blockers.iter().map(|blocker| blocker.as_str().to_owned()).collect();
     preview.eligible = decision.eligible;
     preview.expected_fencing_version = decision.expected_fencing_version;
     preview.requires_attempt_history_acceptance = decision.requires_attempt_history_acceptance;
+    preview.prior_unbound_attempts = decision.prior_unbound_attempts;
+    preview.sent_before_current_attempt = decision.sent_before_current_attempt;
     preview.corrects_admin_failure = decision.corrects_admin_failure;
     let expectation = admission.expectation.clone();
     let sending_fencing_version = admission.sending_fencing_version;
     Ok(Snapshot { data, admission: Some(admission), preview, expectation, sending_fencing_version })
+}
+
+struct RecordedObservation {
+    kind: &'static str,
+    observed_at: Option<Timestamp>,
+    attachments: SentObservedAttachments,
+}
+
+fn recorded_observation(
+    metadata: &Value,
+    mid: &str,
+    reference: Option<&str>,
+) -> Result<Option<RecordedObservation>, serde_json::Error> {
+    let mut selected: Option<RecordedObservation> = None;
+    for kind in SENT_OBSERVATION_KINDS {
+        if reference.is_some_and(|reference| reference != format!("{kind}:{mid}")) {
+            continue;
+        }
+        let Some(observation) = metadata.get(kind) else { continue };
+        let decoded = decode_sent_observation(observation)?;
+        if decoded.mid != mid {
+            continue;
+        }
+        // CLI 的请求没有引用字段，以同 MID 最近一次 Worker 观察为准。
+        if selected.as_ref().is_none_or(|current| decoded.observed_at >= current.observed_at) {
+            selected = Some(RecordedObservation {
+                kind,
+                observed_at: decoded.observed_at,
+                attachments: decoded.attachments,
+            });
+        }
+    }
+    Ok(selected)
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::recorded_observation;
+
+    #[test]
+    fn admin_uses_the_referenced_kind_and_cli_uses_the_latest_matching_mid() {
+        let metadata = json!({
+            "mailbox_sweep": {
+                "mid": "7000001",
+                "observed_at": "2026-11-02T01:20:00Z",
+                "remaining_equipment_ids": ["300753957"],
+            },
+            "sent_reference_sighting": {
+                "mid": "7000001",
+                "observed_at": "2026-11-02T01:22:00Z",
+                "remaining_equipment_ids": [],
+                "pre_collection_equipment_ids": ["300753957"],
+            },
+            "compose_discard": {"mid": "7000001"},
+        });
+        let selected = recorded_observation(&metadata, "7000001", Some("mailbox_sweep:7000001"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(selected.attachments.remaining_equipment_ids.unwrap(), ["300753957"]);
+        let latest = recorded_observation(&metadata, "7000001", None).unwrap().unwrap();
+        assert_eq!(latest.attachments.pre_collection_equipment_ids.unwrap(), ["300753957"]);
+        assert!(recorded_observation(&metadata, "7000002", None).unwrap().is_none());
+        assert!(
+            recorded_observation(&metadata, "7000001", Some("compose_discard:7000001"))
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn recorded_observation_distinguishes_legacy_missing_ids_and_corrupt_records() {
+        for kind in ["mailbox_sweep", "sent_reference_sighting"] {
+            let reference = format!("{kind}:7000001");
+            let mut metadata = json!({kind: {"mid": "7000001", "remaining_equipment_count": 1}});
+            let legacy =
+                recorded_observation(&metadata, "7000001", Some(&reference)).unwrap().unwrap();
+            assert_eq!(legacy.attachments.remaining_equipment_ids, None);
+            assert_eq!(legacy.observed_at, None);
+
+            metadata[kind]["remaining_equipment_ids"] = json!([300753957]);
+            assert!(recorded_observation(&metadata, "7000001", Some(&reference)).is_err());
+            metadata[kind] = json!("broken");
+            assert!(recorded_observation(&metadata, "7000001", Some(&reference)).is_err());
+        }
+    }
+
+    #[test]
+    fn corrupt_observation_time_rejects_the_selected_assets_for_admin_and_cli() {
+        for time in [json!("2026-11-31T01:20:00Z"), json!(12), json!(null)] {
+            let metadata = json!({"mailbox_sweep": {
+                "mid": "7000001", "observed_at": time, "remaining_equipment_ids": ["300753957"],
+            }});
+            for reference in [Some("mailbox_sweep:7000001"), None] {
+                assert!(recorded_observation(&metadata, "7000001", reference).is_err());
+            }
+        }
+    }
 }

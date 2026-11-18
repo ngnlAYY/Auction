@@ -89,6 +89,8 @@ fn detail() -> AdminDeliveryDetailResponse {
             cod_pending: Some(0),
             remaining_credits: Some(300_000),
             remaining_equipment_count: Some(0),
+            remaining_equipment_ids: None,
+            pre_collection_equipment_ids: None,
             receipt: None,
         }],
         custody: AdminDeliveryCustodyResponse {
@@ -229,9 +231,12 @@ fn delivery_decodes_actual_http_failure_and_action_projection() {
     // HTTP 的映射测试对照同一个序列化样本，保护详情/列表共用的安全投影与准入闭集。
     let fixture: Value =
         serde_json::from_str(include_str!("blocked_registration_reply.json")).unwrap();
-    let decoded =
-        decode_detail_with_actions(serde_json::from_value(fixture.clone()).unwrap(), DELIVERY_ID)
-            .unwrap();
+    let decoded = decode_detail_with_actions(
+        serde_json::from_value(fixture.clone()).unwrap(),
+        DELIVERY_ID,
+        false,
+    )
+    .unwrap();
     assert_eq!(
         decoded.actions.retry_failed.blocker(),
         Some(AdminDeliveryActionBlocker::RecipientRenamed)
@@ -239,8 +244,12 @@ fn delivery_decodes_actual_http_failure_and_action_projection() {
     assert_eq!(decoded.actions.acknowledge.blocker(), None);
     check_before_send_projection(fixture["data"]["detail"]["delivery"].clone(), true);
     assert!(
-        decode_detail_with_actions(serde_json::from_value(fixture.clone()).unwrap(), OTHER_ID)
-            .is_err()
+        decode_detail_with_actions(
+            serde_json::from_value(fixture.clone()).unwrap(),
+            OTHER_ID,
+            false
+        )
+        .is_err()
     );
 
     for (field, invalid) in [
@@ -252,7 +261,7 @@ fn delivery_decodes_actual_http_failure_and_action_projection() {
         let mut malformed = fixture.clone();
         malformed["data"]["actions"][field] = invalid;
         let result = serde_json::from_value(malformed)
-            .map(|payload| decode_detail_with_actions(payload, DELIVERY_ID));
+            .map(|payload| decode_detail_with_actions(payload, DELIVERY_ID, false));
         assert!(result.is_err(), "必须拒绝损坏的动作投影 {field}");
     }
 }
@@ -269,7 +278,8 @@ fn delivery_decodes_new_blockers_serialized_by_http() {
     fixture["data"]["actions"]["reconcile_failed"] = blockers[1].clone();
     fixture["data"]["actions"]["release"] = blockers[2].clone();
     let decoded =
-        decode_detail_with_actions(serde_json::from_value(fixture).unwrap(), DELIVERY_ID).unwrap();
+        decode_detail_with_actions(serde_json::from_value(fixture).unwrap(), DELIVERY_ID, false)
+            .unwrap();
     assert_eq!(
         decoded.actions.retry_failed.blocker(),
         Some(AdminDeliveryActionBlocker::SettlementFulfillmentState)
@@ -368,7 +378,8 @@ fn login_key_reply_failure_shapes_keep_v018_list_compatibility() {
         let fixture: Value = serde_json::from_str(fixture).unwrap();
         let delivery = fixture["data"]["detail"]["delivery"].clone();
         check_before_send_projection(delivery.clone(), true);
-        decode_detail_with_actions(serde_json::from_value(fixture).unwrap(), DELIVERY_ID).unwrap();
+        decode_detail_with_actions(serde_json::from_value(fixture).unwrap(), DELIVERY_ID, false)
+            .unwrap();
         let row = serde_json::from_value(delivery).unwrap();
         assert!(v018_accepts_mail_intake_failure(&row));
         row
@@ -722,6 +733,71 @@ fn rejects_take_attempt_with_send_fields_only() {
 }
 
 #[test]
+fn decodes_http_sent_proof_details_with_required_nullable_id_lists() {
+    let fixtures: [Value; 3] = serde_json::from_str(include_str!(
+        "../../../../auction-contracts/tests/fixtures/admin/delivery-sent-proof-detail.json"
+    ))
+    .unwrap();
+    let decode = |fixture| {
+        decode_detail_with_actions(serde_json::from_value(fixture).unwrap(), DELIVERY_ID, true)
+    };
+    let [attached, historical, collected] =
+        fixtures.clone().map(|fixture| decode(fixture).expect("后端实际详情投影"));
+    let ids = ["300753957"];
+    assert_eq!(attached.detail.evidence[0].remaining_equipment_ids().unwrap(), ids);
+    assert_eq!(attached.detail.evidence[0].pre_collection_equipment_ids, Some(None));
+    assert_eq!(historical.detail.evidence[0].remaining_equipment_ids, Some(None));
+    assert_eq!(historical.detail.evidence[0].pre_collection_equipment_ids, Some(None));
+    assert!(collected.detail.evidence[0].remaining_equipment_ids().unwrap().is_empty());
+    assert_eq!(collected.detail.evidence[0].pre_collection_equipment_ids().unwrap(), ids);
+
+    for field in ["remaining_equipment_ids", "pre_collection_equipment_ids"] {
+        let mut missing = fixtures[1].clone();
+        missing["data"]["detail"]["evidence"][0].as_object_mut().unwrap().remove(field);
+        assert!(decode(missing).is_err(), "扩展投影必须包含 {field}");
+    }
+    let mut malformed = fixtures[0].clone();
+    malformed["data"]["detail"]["evidence"][0]["remaining_equipment_ids"] = json!(["0300753957"]);
+    assert!(decode(malformed).is_err(), "装备 ID 必须是规范正十进制");
+    let mut extra = fixtures[0].clone();
+    extra["data"]["detail"]["evidence"][0]["future_field"] = Value::Null;
+    assert!(
+        serde_json::from_value::<
+            StrictDeliveryEnvelope<auction_contracts::AdminDeliveryDetailWithActionsResponse>,
+        >(extra)
+        .is_err()
+    );
+    assert!(
+        decode_detail_with_actions(
+            serde_json::from_value(fixtures[0].clone()).unwrap(),
+            DELIVERY_ID,
+            false,
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn decodes_http_sent_proof_preview_with_both_responsibility_reasons() {
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../../../auction-contracts/tests/fixtures/admin/delivery-sent-proof-preview.json"
+    ))
+    .unwrap();
+    let decode = |fixture| decode_preview(serde_json::from_value(fixture).unwrap(), DELIVERY_ID);
+    let decoded = decode(fixture.clone()).expect("后端实际预览投影");
+    assert_eq!(decoded.prior_unbound_attempts, Some(true));
+    assert_eq!(decoded.sent_before_current_attempt, Some(true));
+    for field in ["prior_unbound_attempts", "sent_before_current_attempt"] {
+        let mut missing = fixture.clone();
+        missing["data"].as_object_mut().unwrap().remove(field);
+        assert!(decode(missing).is_err(), "扩展预览必须包含 {field}");
+    }
+    let mut inconsistent = fixture;
+    inconsistent["data"]["requires_attempt_history_acceptance"] = json!(false);
+    assert!(decode(inconsistent).is_err(), "旧责任位必须等于两项原因的并集");
+}
+
+#[test]
 fn rejects_preview_for_other_delivery_or_eligible_with_blockers() {
     let preview = |delivery_id: &str, eligible: bool, blockers: Vec<&str>| {
         AdminDeliverySentProofPreviewResponse {
@@ -732,6 +808,8 @@ fn rejects_preview_for_other_delivery_or_eligible_with_blockers() {
             external_reference: "mooglemail:main:send:7000001".to_owned(),
             requires_collected_asset_acceptance: false,
             requires_attempt_history_acceptance: false,
+            prior_unbound_attempts: Some(false),
+            sent_before_current_attempt: Some(false),
             corrects_admin_failure: true,
         }
     };
@@ -770,13 +848,12 @@ fn confirmation_must_echo_command_and_delivery() {
     assert!(decode_confirmation(envelope(), command_id, OTHER_ID).is_err());
 }
 
-/// 本页面认识结算退件 Take 来源与装备收回处置，详情必须显式请求扩展投影；缺省响应留给升级前的
-/// 页面。
+/// Sent 证据与当前 fence 的处置准入来自同一详情快照。
 #[test]
-fn detail_url_requests_the_settlement_returns_projection() {
+fn detail_url_requests_sent_proof_and_disposition_actions() {
     assert_eq!(
         delivery_detail_url(DELIVERY_ID),
-        format!("/api/v1/admin/deliveries/{DELIVERY_ID}?include=disposition_actions")
+        format!("/api/v1/admin/deliveries/{DELIVERY_ID}?include=sent_proof")
     );
 }
 

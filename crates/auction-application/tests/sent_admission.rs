@@ -7,7 +7,8 @@ use auction_application::delivery::{
     DeliverySendCredentialBinding, DeliverySendExpectation, ManualSentEvidence, SentAdminFailure,
     SentAdmissionBlocker, SentAdmissionSnapshot, SentCredential, SentDelivery, SentEquipment,
     SentFulfillment, SentFundingAccount, SentFundingAllocation, SentFundingLot, SentLot,
-    SentObligation, SentPayload, SentPayloadVariables, SentResultMetadata, SentSettlement,
+    SentObligation, SentObservedAttachments, SentPayload, SentPayloadVariables, SentResultMetadata,
+    SentSecretRef, SentSettlement,
 };
 use auction_time::Timestamp;
 use uuid::Uuid;
@@ -190,6 +191,11 @@ fn snapshot() -> SentAdmissionSnapshot {
         conflict: false,
         sending_fencing_version: 4,
         expectation: Some(expectation()),
+        observed_attachments: SentObservedAttachments {
+            collected: None,
+            remaining_equipment_ids: Some(Vec::new()),
+            pre_collection_equipment_ids: None,
+        },
     }
 }
 
@@ -200,12 +206,12 @@ fn write_unknown_seller_payout_admits() {
     assert!(admission.eligible);
     assert_eq!(admission.expected_fencing_version, 4);
     assert!(!admission.requires_attempt_history_acceptance);
+    assert!(!admission.prior_unbound_attempts);
+    assert!(!admission.sent_before_current_attempt);
     assert!(!admission.corrects_admin_failure);
 }
 
-#[test]
-fn admin_failure_correction_admits_with_attempt_history_acceptance() {
-    let mut snapshot = snapshot();
+fn mark_admin_failed(snapshot: &mut SentAdmissionSnapshot) {
     snapshot.delivery.status = "failed".to_owned();
     snapshot.delivery.failure_code = Some("not_observed".to_owned());
     snapshot.delivery.result_metadata = SentResultMetadata {
@@ -228,6 +234,12 @@ fn admin_failure_correction_admits_with_attempt_history_acceptance() {
         fencing_version: Some(4),
         failure_code: Some("not_observed".to_owned()),
     });
+}
+
+#[test]
+fn admin_failure_correction_admits_with_attempt_history_acceptance() {
+    let mut snapshot = snapshot();
+    mark_admin_failed(&mut snapshot);
     let mut evidence = evidence();
     evidence.sent_minute = at(2);
     evidence.observed_at = at(6);
@@ -236,6 +248,17 @@ fn admin_failure_correction_admits_with_attempt_history_acceptance() {
     assert!(admission.corrects_admin_failure);
     // 人工证据早于当前尝试：必须显式接受旧尝试关联。
     assert!(admission.requires_attempt_history_acceptance);
+    assert!(!admission.prior_unbound_attempts);
+    assert!(admission.sent_before_current_attempt);
+
+    snapshot.prior_unbound = true;
+    let both = snapshot.evaluate(&evidence, at(7));
+    assert!(both.eligible && both.prior_unbound_attempts && both.sent_before_current_attempt);
+
+    evidence.sent_minute = at(3);
+    let history_only = snapshot.evaluate(&evidence, at(7));
+    assert!(history_only.eligible && history_only.prior_unbound_attempts);
+    assert!(!history_only.sent_before_current_attempt);
 }
 
 #[test]
@@ -316,6 +339,138 @@ fn named_payout_snapshot() -> SentAdmissionSnapshot {
 
 fn payload_of(snapshot: &mut SentAdmissionSnapshot) -> &mut SentPayload {
     snapshot.delivery.payload.as_mut().unwrap_or_else(|| panic!("货款载荷夹具必须存在"))
+}
+
+const EID: &str = "300753957";
+
+fn equipment_case() -> (SentAdmissionSnapshot, ManualSentEvidence) {
+    let mut snapshot = snapshot();
+    let obligation = snapshot.obligation.as_mut().expect("装备义务");
+    obligation.obligation_kind = "unsold_return".to_owned();
+    obligation.amount = 0;
+    let equipment_id = obligation.equipment_id;
+    let payload = payload_of(&mut snapshot);
+    payload.template = "settlement_equipment_handoff".to_owned();
+    payload.credits = 0;
+    payload.variables.item_name = Some(EQUIPMENT_NAME.to_owned());
+    payload.equipment_secret_refs =
+        vec![SentSecretRef { kind: "auction_equipment_key".to_owned(), id: equipment_id }];
+    snapshot.expectation = Some(DeliverySendExpectation {
+        credits: 0,
+        equipment_ids: vec![EID.to_owned()],
+        ..expectation()
+    });
+    snapshot.observed_attachments = SentObservedAttachments::default();
+    (
+        snapshot,
+        ManualSentEvidence {
+            remaining_credits: 0,
+            equipment_ids: vec![EID.to_owned()],
+            ..evidence()
+        },
+    )
+}
+
+#[test]
+fn failed_equipment_correction_requires_a_current_failure_and_matching_worker_ids() {
+    let (mut snapshot, mut evidence) = equipment_case();
+    mark_admin_failed(&mut snapshot);
+    evidence.sent_minute = at(3);
+    assert_eq!(snapshot.failed_sent_observation_window(), Some((at(0), at(5))));
+    assert_eq!(
+        snapshot.evaluate(&evidence, at(7)).blockers,
+        [SentAdmissionBlocker::MissingObservedEquipmentIds],
+    );
+
+    snapshot.observed_attachments.remaining_equipment_ids = Some(vec!["300753958".to_owned()]);
+    assert_eq!(
+        snapshot.evaluate(&evidence, at(7)).blockers,
+        [SentAdmissionBlocker::ObservedEquipmentIdsMismatch],
+    );
+    snapshot.observed_attachments.remaining_equipment_ids = Some(vec![EID.to_owned()]);
+    let admission = snapshot.evaluate(&evidence, at(7));
+    assert!(admission.eligible && admission.corrects_admin_failure);
+
+    let mut superseded = snapshot.clone();
+    superseded.fulfillment.as_mut().expect("原履约").delivery_id = Some(uuid(70));
+    assert_eq!(superseded.failed_sent_observation_window(), None);
+    snapshot.delivery.fencing_version += 1;
+    assert_eq!(snapshot.failed_sent_observation_window(), None);
+    assert!(!snapshot.evaluate(&evidence, at(7)).eligible);
+}
+
+#[test]
+fn uncollected_equipment_without_recorded_ids_is_blocked() {
+    let (snapshot, evidence) = equipment_case();
+    let admission = snapshot.evaluate(&evidence, at(7));
+    assert!(!admission.eligible, "同一冻结 EID 不能替代历史观察缺失的实见编号");
+    assert_eq!(admission.blockers, [SentAdmissionBlocker::MissingObservedEquipmentIds]);
+}
+
+#[test]
+fn uncollected_equipment_requires_both_lists_to_match_recorded_ids() {
+    let (mut snapshot, mut evidence) = equipment_case();
+    let other_eid = vec!["300753958".to_owned()];
+    snapshot.observed_attachments.remaining_equipment_ids = Some(other_eid.clone());
+    let admission = snapshot.evaluate(&evidence, at(7));
+    assert_eq!(admission.blockers, [SentAdmissionBlocker::ObservedEquipmentIdsMismatch]);
+    assert!(!admission.eligible);
+
+    snapshot.observed_attachments.remaining_equipment_ids = Some(vec![EID.to_owned()]);
+    assert!(snapshot.evaluate(&evidence, at(7)).eligible);
+
+    evidence.equipment_ids = other_eid;
+    let admission = snapshot.evaluate(&evidence, at(7));
+    assert!(admission.blockers.contains(&SentAdmissionBlocker::ObservedEquipmentIdsMismatch));
+    assert!(!admission.eligible);
+}
+
+#[test]
+fn collected_equipment_keeps_receipt_path_and_checks_any_recorded_ids() {
+    let (mut snapshot, mut evidence) = equipment_case();
+    evidence.collected = true;
+    evidence.equipment_ids.clear();
+    evidence.observed_body_digest = [8; 32];
+    evidence.receipt = format!("Removed attachment: {EQUIPMENT_NAME}");
+    assert!(snapshot.evaluate(&evidence, at(7)).eligible);
+    snapshot.observed_attachments.collected = Some(false);
+    assert_eq!(
+        snapshot.evaluate(&evidence, at(7)).blockers,
+        [SentAdmissionBlocker::MissingObservedEquipmentIds]
+    );
+    snapshot.observed_attachments.collected = Some(true);
+
+    snapshot.observed_attachments.remaining_equipment_ids = Some(Vec::new());
+    snapshot.observed_attachments.pre_collection_equipment_ids = Some(vec!["300753958".to_owned()]);
+    let admission = snapshot.evaluate(&evidence, at(7));
+    assert_eq!(admission.blockers, [SentAdmissionBlocker::ObservedEquipmentIdsMismatch]);
+    assert!(!admission.eligible);
+
+    snapshot.observed_attachments.pre_collection_equipment_ids = Some(vec![EID.to_owned()]);
+    assert!(snapshot.evaluate(&evidence, at(7)).eligible);
+
+    snapshot.observed_attachments.pre_collection_equipment_ids = None;
+    snapshot.observed_attachments.remaining_equipment_ids = Some(vec!["300753958".to_owned()]);
+    assert!(!snapshot.evaluate(&evidence, at(7)).eligible);
+}
+
+#[test]
+fn payout_requires_an_observed_empty_equipment_list() {
+    let mut snapshot = snapshot();
+    for evidence in [evidence(), collected_evidence()] {
+        snapshot.observed_attachments.remaining_equipment_ids = Some(vec![EID.to_owned()]);
+        let admission = snapshot.evaluate(&evidence, at(7));
+        assert_eq!(admission.blockers, [SentAdmissionBlocker::ObservedEquipmentIdsMismatch]);
+        assert!(!admission.eligible);
+
+        snapshot.observed_attachments.remaining_equipment_ids = None;
+        let admission = snapshot.evaluate(&evidence, at(7));
+        assert_eq!(admission.blockers, [SentAdmissionBlocker::MissingObservedEquipmentIds]);
+        assert!(!admission.eligible);
+
+        snapshot.observed_attachments.remaining_equipment_ids = Some(Vec::new());
+        assert!(snapshot.evaluate(&evidence, at(7)).eligible);
+    }
 }
 
 /// 附件现金已被卖家领取后的原生 Sent 观察：剩余为零、正文带领取回执。
