@@ -4,7 +4,7 @@
 
 use std::future::Future;
 
-use auction_domain::{AuctionId, CommandId, LotId, valid_text};
+use auction_domain::{AuctionId, CommandId, LotId, MAX_BID_AMOUNT, valid_text};
 use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -55,9 +55,12 @@ pub struct AdminLotUpdateCommand {
 impl AdminLotUpdateCommand {
     /// 校验 action 专属字段、版本 fence 和审计身份。
     pub fn validate(&self) -> Result<(), AdminLotUpdateError> {
+        // 新起拍价须能被合法出价达到；修正旧价格时只校验本次提交的值。
         let action_fields_valid = match self.action {
             AdminLotAction::Withdraw => self.start_price.is_none(),
-            AdminLotAction::SetStartPrice => self.start_price.is_some_and(|value| value > 0),
+            AdminLotAction::SetStartPrice => {
+                self.start_price.is_some_and(|value| (1..=MAX_BID_AMOUNT).contains(&value))
+            }
         };
         if self.command_id.is_nil()
             || self.lot_id.is_nil()
@@ -155,4 +158,35 @@ pub trait AdminLotUpdateTransaction: Send {
 pub enum AdminLotUpdateError {
     #[error("后台 lot 修改命令无效")]
     InvalidCommand,
+}
+
+#[cfg(test)]
+mod tests {
+    use auction_domain::MAX_BID_AMOUNT;
+    use uuid::Uuid;
+
+    use super::{AdminLotAction, AdminLotUpdateCommand, AdminLotUpdateError};
+    use crate::ports::core::RequestHash;
+
+    #[test]
+    fn lot_update_accepts_only_reachable_new_start_prices() {
+        let mut command = AdminLotUpdateCommand {
+            command_id: Uuid::new_v4().into(),
+            lot_id: Uuid::new_v4().into(),
+            expected_state_version: 1,
+            action: AdminLotAction::SetStartPrice,
+            start_price: Some(MAX_BID_AMOUNT),
+            actor_id: "operator".to_owned(),
+            request_id: None,
+            request_hash: RequestHash::new([1; 32]),
+        };
+        assert_eq!(command.validate(), Ok(()));
+        for price in [None, Some(0), Some(MAX_BID_AMOUNT + 1)] {
+            command.start_price = price;
+            assert_eq!(command.validate(), Err(AdminLotUpdateError::InvalidCommand));
+        }
+        command.action = AdminLotAction::Withdraw;
+        command.start_price = None;
+        assert_eq!(command.validate(), Ok(()));
+    }
 }

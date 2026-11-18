@@ -44,7 +44,7 @@ where
         Ok(snapshot)
     }
 
-    /// 严格校验候选文档且不触碰文件、数据库或外部服务。
+    /// 严格校验候选文档；可读取部署配置，不写文件、命令账本或调用外部服务。
     pub fn validate(
         &self,
         document: AdminRuntimeDocument,
@@ -86,8 +86,6 @@ where
             return self.finish_existing(&guard, stored).await;
         }
 
-        // 新命令在写 durable intent 前完成部署格式校验；已接受命令仍返回原有幂等结果。
-        self.files.validate_candidate(&command.document, self.clock.now())?;
         let current = self.files.current_locked(&guard).await?;
         current.validate().map_err(ApplicationError::from)?;
         if current.fingerprint != command.expected_fingerprint {
@@ -101,6 +99,8 @@ where
         candidate.validate().map_err(ApplicationError::from)?;
 
         let now = self.clock.now();
+        // 写 durable intent 前按锁内回读的当前文件校验最终候选；已接受命令仍按账本重放。
+        self.files.validate_candidate(&candidate, now)?;
         let stored = self
             .commands
             .insert_pending(AdminRuntimeStoredCommand {

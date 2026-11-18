@@ -1,25 +1,53 @@
 //! 把 runtime 文档的业务区块投影到 Worker 启动配置。
 
-use auction_application::admin::AdminRuntimeDocument;
+use auction_application::admin::{AdminRuntimeDocument, AdminRuntimeWorldsConfig};
 
+use super::auction::WorkerConfig;
 use super::forum::ForumSyncWorkerConfig;
 use super::mooglemail::{
     MoogleMailEquipmentFilterConfig, MoogleMailWorkerConfig, MoogleMailWorldConfig,
 };
+use crate::settings::operations::apply_alerts;
 
 /// 将 Admin 管理的旧版业务区块投影到 Worker 的 MoogleMail 启动快照。
 /// transport endpoint、凭据来源和全局 `enabled` 仍由 Worker 主配置拥有；调度可由 operations/mail
 /// 独立接管。转移已校验 runtime 的 world、发件人和装备过滤，避免复制后立即丢弃原文档。
 /// 邮箱标识优先沿用主配置中同 world 的值，避免一次运营更新意外切换 durable cursor。
 pub(in crate::settings) fn apply_runtime_document(
-    config: &mut MoogleMailWorkerConfig,
+    worker: &mut WorkerConfig,
     document: AdminRuntimeDocument,
 ) {
-    let (Some(worlds), Some(equipment_filter)) = (document.worlds, document.equipment_filter)
-    else {
+    let (worlds, equipment_filter) = document.worlds.zip(document.equipment_filter).unzip();
+    let config = &mut worker.mooglemail;
+    if let Some(operations) = document.operations {
+        apply_alerts(&mut worker.operations_alert, &operations.alerts);
+    }
+    if let Some(worlds) = worlds {
+        apply_runtime_mail_worlds(config, worlds);
+    }
+    let Some(equipment_filter) = equipment_filter else {
         return;
     };
+    config.equipment_filter = MoogleMailEquipmentFilterConfig {
+        enabled: equipment_filter.enabled,
+        qualities: if equipment_filter.qualities.is_empty() {
+            auction_application::mail::default_accepted_qualities()
+        } else {
+            equipment_filter.qualities
+        },
+        prefixes: equipment_filter.prefixes,
+        suffixes: equipment_filter.suffixes,
+        categories: equipment_filter.categories,
+        equipment_types: equipment_filter.equipment_types,
+        level_min: equipment_filter.level.min,
+        level_max: equipment_filter.level.max,
+    };
+}
 
+fn apply_runtime_mail_worlds(
+    config: &mut MoogleMailWorkerConfig,
+    worlds: AdminRuntimeWorldsConfig,
+) {
     let mut enabled_worlds = Vec::with_capacity(2);
     for (world_id, runtime) in [("main", worlds.main), ("isekai", worlds.isekai)] {
         if !runtime.enabled {
@@ -55,20 +83,6 @@ pub(in crate::settings) fn apply_runtime_document(
     config.sender_allowlist = primary.sender_allowlist;
     config.sender_allowlist_disabled = primary.sender_allowlist_disabled;
     config.additional_worlds = enabled_worlds.collect();
-    config.equipment_filter = MoogleMailEquipmentFilterConfig {
-        enabled: equipment_filter.enabled,
-        qualities: if equipment_filter.qualities.is_empty() {
-            auction_application::mail::default_accepted_qualities()
-        } else {
-            equipment_filter.qualities
-        },
-        prefixes: equipment_filter.prefixes,
-        suffixes: equipment_filter.suffixes,
-        categories: equipment_filter.categories,
-        equipment_types: equipment_filter.equipment_types,
-        level_min: equipment_filter.level.min,
-        level_max: equipment_filter.level.max,
-    };
 }
 
 /// 将 Admin runtime 的论坛装备标色规则投影到 Worker 论坛启动快照。

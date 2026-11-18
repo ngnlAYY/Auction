@@ -22,7 +22,7 @@ pub(crate) fn validate_restricted_https_url(
         || url.host_str().is_none()
         || !url.username().is_empty()
         || url.password().is_some()
-        || authority.is_some_and(|authority| authority.contains('@'))
+        || authority.is_none_or(|authority| authority.contains('@'))
         || url.fragment().is_some()
     {
         return Err(error());
@@ -48,6 +48,7 @@ mod tests {
         let oversized = format!("https://hc.example.invalid/{}", "a".repeat(4096));
         for value in [
             "http://hc.example.invalid/ping/secret-token",
+            "https:hc.example.invalid/ping/secret-token",
             "https://user@hc.example.invalid/ping/secret-token",
             // 空 userinfo 经解析器规范化后会消失，必须按原文拒绝。
             "https://@hc.example.invalid/ping/secret-token",

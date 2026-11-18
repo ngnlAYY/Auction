@@ -15,7 +15,7 @@ use auction_application::core::{
 use auction_contracts::{
     AdminCanonicalEquipmentRequest, AdminIntakeRequest, AdminIntakeResponse, ApiResponse,
 };
-use auction_domain::CommandId;
+use auction_domain::{CommandId, MAX_BID_AMOUNT};
 use axum::{
     Json,
     body::Bytes,
@@ -84,6 +84,9 @@ pub(crate) async fn add_item(
         Some(_) => return invalid_command(),
     };
     let expected_start_price = input.start_price;
+    if !(1..=MAX_BID_AMOUNT).contains(&expected_start_price) {
+        return map_error(AdminIntakeError::InvalidCommand.into());
+    }
     let expected_player_id = input.player_id.trim().to_owned();
     let Some(port) = state.admin_intake() else {
         return feature_unavailable(EQUIPMENT_DATA_KEY_MISSING);
@@ -272,4 +275,42 @@ fn map_error(error: ApplicationError) -> Response {
 fn temporarily_unavailable() -> Response {
     api_error(StatusCode::SERVICE_UNAVAILABLE, "temporarily_unavailable", "服务暂时不可用")
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use auction_domain::MAX_BID_AMOUNT;
+    use axum::body::Bytes;
+    use axum::extract::{ConnectInfo, Path};
+    use axum::http::{StatusCode, Uri};
+    use serde_json::json;
+
+    use super::add_item;
+    use crate::admin::auctions::command_test_support::{VALID_UUID, assert_code, headers, state};
+
+    #[tokio::test]
+    async fn intake_start_price_http_admission_rejects_unreachable_prices() {
+        let address = ConnectInfo("127.0.0.1:1234".parse().unwrap());
+        for (price, status, code) in [
+            (MAX_BID_AMOUNT, StatusCode::NOT_IMPLEMENTED, "feature_not_supported"),
+            (MAX_BID_AMOUNT + 1, StatusCode::BAD_REQUEST, "invalid_auction_intake"),
+        ] {
+            let body = json!({
+                "command_id": VALID_UUID,
+                "equipment_url": "https://example.invalid/equip/123/0123456789",
+                "player_id": "Player",
+                "start_price": price,
+            });
+            let response = add_item(
+                state(),
+                address,
+                Path("main".to_owned()),
+                headers(),
+                Uri::default(),
+                Bytes::from(body.to_string()),
+            )
+            .await;
+            assert_code(response, status, code).await;
+        }
+    }
 }

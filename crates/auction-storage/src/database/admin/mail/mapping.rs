@@ -80,7 +80,7 @@ pub(super) fn map_mail_poller(
 pub(super) fn map_intake_summary(
     row: &sqlx::postgres::PgRow,
 ) -> Result<AdminMailIntakeSummary, ApplicationError> {
-    let summary = AdminMailIntakeSummary {
+    let mut summary = AdminMailIntakeSummary {
         id: row.try_get("id").map_err(|error| storage_error_from(error, "读取邮件入站标识失败"))?,
         mailbox_key: row
             .try_get("mailbox_key")
@@ -117,6 +117,9 @@ pub(super) fn map_intake_summary(
             .map_err(|error| storage_error_from(error, "读取邮件原始信息状态失败"))?,
     };
     if summary.validate() {
+        if let Some((sender, subject)) = summary.sender.as_deref().zip(summary.subject.as_deref()) {
+            summary.subject = Some(MailDisplaySnapshot::redact_subject(sender, subject, &[]));
+        }
         Ok(summary)
     } else {
         Err(storage_error("邮件入站摘要安全投影无效"))
@@ -203,9 +206,13 @@ pub(super) fn decode_metadata(value: Value) -> Result<AdminMailIntakeMetadata, A
 pub(super) fn decode_message_display(
     value: Value,
 ) -> Result<MailDisplaySnapshot, ApplicationError> {
-    let display = serde_json::from_value::<MailDisplaySnapshot>(value)
+    let mut display = serde_json::from_value::<MailDisplaySnapshot>(value)
         .map_err(|_| storage_error("邮件原始信息格式无效"))?;
-    display.validate().then_some(display).ok_or_else(|| storage_error("邮件原始信息安全投影无效"))
+    if !display.validate() {
+        return Err(storage_error("邮件原始信息安全投影无效"));
+    }
+    display.body = MailDisplaySnapshot::redact_stored_body(&display.body);
+    Ok(display)
 }
 
 pub(super) fn decode_equipment_diagnostic(

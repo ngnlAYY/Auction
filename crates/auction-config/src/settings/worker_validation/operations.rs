@@ -2,11 +2,14 @@
 
 use auction_domain::valid_text;
 
-use super::super::{ConfigError, MoogleMailWorkerConfig, OperationsAlertWorkerConfig};
+use super::super::{ConfigError, MoogleMailWorkerConfig, OperationsAlertWorkerConfig, Role};
+use crate::settings::secrets::AppSecrets;
 
 pub(crate) fn validate_operations_alert_worker(
+    role: Role,
     config: &OperationsAlertWorkerConfig,
     mooglemail: &MoogleMailWorkerConfig,
+    secrets: &AppSecrets,
 ) -> Result<(), ConfigError> {
     if config.scan_interval_seconds == 0 || config.scan_interval_seconds > 86_400 {
         return Err(ConfigError::InvalidOperationsAlertConfig(
@@ -23,9 +26,6 @@ pub(crate) fn validate_operations_alert_worker(
         return Err(ConfigError::InvalidOperationsAlertConfig(
             "时间、阈值、批次数量或正文大小超出允许范围",
         ));
-    }
-    if !matches!(config.world_id.as_str(), "main" | "isekai") {
-        return Err(ConfigError::InvalidOperationsAlertConfig("world_id 只能是 main 或 isekai"));
     }
     if config.enabled.is_some()
         && (config.scan_enabled.is_some() || config.notify_enabled.is_some())
@@ -48,9 +48,16 @@ pub(crate) fn validate_operations_alert_worker(
             "启用 webhook 通知时必须同时启用扫描",
         ));
     }
+    if !matches!(config.world_id.as_str(), "main" | "isekai") {
+        return Err(ConfigError::InvalidOperationsAlertConfig("world_id 只能是 main 或 isekai"));
+    }
+    if role == Role::Worker && config.notify_enabled() && !mooglemail.enabled {
+        return Err(ConfigError::InvalidOperationsAlertConfig(
+            "启用告警主动通知时必须启用 worker.mooglemail.enabled",
+        ));
+    }
     if config.notify_enabled()
-        && config.world_id != mooglemail.world_id
-        && !mooglemail.additional_worlds.iter().any(|world| world.world_id == config.world_id)
+        && !mooglemail.configured_mailboxes().any(|(world, _)| world == config.world_id)
     {
         return Err(ConfigError::InvalidOperationsAlertConfig(
             "启用告警通知时 world_id 必须位于已启用的 MoogleMail worlds",
@@ -64,24 +71,45 @@ pub(crate) fn validate_operations_alert_worker(
     if !config.recipient.is_empty() && !valid_text(&config.recipient, 256) {
         return Err(ConfigError::InvalidOperationsAlertConfig("recipient 无效"));
     }
+    if role != Role::Worker {
+        return Ok(());
+    }
+    if (config.notify_enabled() || config.webhook_enabled()) && secrets.database_url.is_none() {
+        return Err(ConfigError::InvalidOperationsAlertConfig(
+            "启用告警通知时必须配置 PostgreSQL database_url",
+        ));
+    }
+    if config.webhook_enabled() && secrets.operations_alert_webhook_url.is_none() {
+        return Err(ConfigError::InvalidOperationsAlertConfig(
+            "启用告警 webhook 时必须配置 operations_alert_webhook_url",
+        ));
+    }
+    if config.notify_enabled() {
+        super::mooglemail::validate_notification_mail_credentials(mooglemail, secrets)?;
+    }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::super::super::{ConfigError, MoogleMailWorkerConfig, OperationsAlertWorkerConfig};
     use super::validate_operations_alert_worker;
+    use crate::settings::secrets::{AppSecrets, SecretString};
+    use crate::settings::{ConfigError, MoogleMailWorkerConfig, OperationsAlertWorkerConfig, Role};
 
     /// 长期未领取阈值与其他年龄阈值同一范围：1 秒至 30 天，越界在加载期失败关闭。
     #[test]
     fn collection_overdue_threshold_is_bounded() {
-        let mooglemail = MoogleMailWorkerConfig::default();
+        let mail = MoogleMailWorkerConfig::default();
+        let secrets = AppSecrets::default();
         for accepted in [1, 259_200, 2_592_000] {
             let config = OperationsAlertWorkerConfig {
                 fulfillment_collection_overdue_age_seconds: accepted,
                 ..OperationsAlertWorkerConfig::default()
             };
-            assert!(validate_operations_alert_worker(&config, &mooglemail).is_ok(), "{accepted}");
+            assert!(
+                validate_operations_alert_worker(Role::Worker, &config, &mail, &secrets).is_ok(),
+                "{accepted}"
+            );
         }
         for rejected in [0, 2_592_001] {
             let config = OperationsAlertWorkerConfig {
@@ -90,11 +118,48 @@ mod tests {
             };
             assert!(
                 matches!(
-                    validate_operations_alert_worker(&config, &mooglemail),
+                    validate_operations_alert_worker(Role::Worker, &config, &mail, &secrets),
                     Err(ConfigError::InvalidOperationsAlertConfig(_))
                 ),
                 "{rejected}"
             );
         }
+    }
+
+    #[test]
+    fn webhook_requires_database_and_address_only_when_enabled() {
+        let mut config = OperationsAlertWorkerConfig {
+            webhook_enabled: true,
+            ..OperationsAlertWorkerConfig::default()
+        };
+        let mail = MoogleMailWorkerConfig::default();
+        let mut secrets = AppSecrets::default();
+        let check = |config: &OperationsAlertWorkerConfig, secrets: &AppSecrets| {
+            validate_operations_alert_worker(Role::Worker, config, &mail, secrets)
+        };
+        assert!(
+            matches!(check(&config, &secrets), Err(ConfigError::InvalidOperationsAlertConfig(reason))
+            if reason.contains("database_url"))
+        );
+        secrets.database_url = Some(
+            SecretString::new("database_url", "postgresql://localhost/fixture".to_owned()).unwrap(),
+        );
+        assert!(
+            matches!(check(&config, &secrets), Err(ConfigError::InvalidOperationsAlertConfig(reason))
+            if reason.contains("operations_alert_webhook_url"))
+        );
+        secrets.operations_alert_webhook_url = Some(
+            SecretString::new(
+                "operations_alert_webhook_url",
+                "https://example.invalid/hook".to_owned(),
+            )
+            .unwrap(),
+        );
+        assert!(check(&config, &secrets).is_ok());
+        config.webhook_enabled = false;
+        assert!(
+            validate_operations_alert_worker(Role::Worker, &config, &mail, &AppSecrets::default())
+                .is_ok()
+        );
     }
 }

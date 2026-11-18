@@ -1,5 +1,6 @@
 //! 敏感快照、runtime 覆盖和全部配置不变量的最终构建。
 
+use auction_application::admin::AdminRuntimeDocument;
 use auction_application::log_filter::parse_log_filter;
 use auction_domain::DataKeyDomain;
 
@@ -24,7 +25,11 @@ use crate::settings::worker_validation::{
 use crate::settings::{HttpListenMode, HttpSecurityConfig, MetricsConfig, Role, RoleSessionConfig};
 
 impl AppConfig {
-    pub(super) fn build(role: Role, input: BuildInput) -> Result<Self, ConfigError> {
+    pub(super) fn build(
+        role: Role,
+        input: BuildInput,
+        runtime_override: Option<AdminRuntimeDocument>,
+    ) -> Result<Self, ConfigError> {
         let BuildInput {
             config_path,
             common_config_path,
@@ -54,8 +59,11 @@ impl AppConfig {
             secrets_path.as_deref().map(load_secret_file).transpose()?.unwrap_or_default();
         let secrets = AppSecrets::from_file(secret_file)?;
 
-        let mut runtime_document =
-            runtime_config_path.as_deref().map(load_admin_runtime_file).transpose()?;
+        // 保存前替换的是启动加载的 runtime 输入，合并、部署依赖与校验保持同一条路径。
+        let mut runtime_document = match runtime_override {
+            Some(runtime) => Some(runtime),
+            None => runtime_config_path.as_deref().map(load_admin_runtime_file).transpose()?,
+        };
         let equipment_colors = runtime_document
             .as_ref()
             .and_then(|runtime| runtime.equipment_colors.as_ref())
@@ -82,7 +90,7 @@ impl AppConfig {
             && let Some(runtime) = runtime_document.take()
         {
             apply_equipment_colors(&mut worker.forum, &runtime);
-            apply_runtime_document(&mut worker.mooglemail, runtime);
+            apply_runtime_document(&mut worker, runtime);
         }
         // 投影完成后转移完整文档，避免 Admin 启动时复制全部模板、名单和规则。
         let admin_runtime = if role == Role::Admin { runtime_document } else { None };
@@ -179,7 +187,12 @@ impl AppConfig {
             ));
         }
         validate_forum_worker(&worker.forum)?;
-        validate_operations_alert_worker(&worker.operations_alert, &worker.mooglemail)?;
+        validate_operations_alert_worker(
+            role,
+            &worker.operations_alert,
+            &worker.mooglemail,
+            &secrets,
+        )?;
         validate_realtime(&realtime)?;
         let tracing_headers = match role {
             Role::Public => secrets.public_otlp_headers.as_ref(),

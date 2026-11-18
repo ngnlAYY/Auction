@@ -4,12 +4,95 @@ use std::collections::{BTreeSet, HashSet};
 
 use auction_application::mail::{EquipmentFilterBoundsError, validate_equipment_filter_bounds};
 use auction_application::scheduling::RecurringSchedule;
-use auction_domain::valid_text;
+use auction_domain::{DataKeyDomain, valid_key_id, valid_text};
 use auction_time::Timestamp;
 use url::Url;
 
 use super::super::{ConfigError, MoogleMailEquipmentFilterConfig, MoogleMailWorkerConfig};
 use crate::StandardCronSchedule;
+use crate::settings::secrets::{AppSecrets, SecretString, load_mooglemail_keyenv};
+
+/// 主动告警依赖完整的邮件 transport；配置校验只检查本地凭据来源，不探测外部账号。
+pub(super) fn validate_notification_mail_credentials(
+    config: &MoogleMailWorkerConfig,
+    secrets: &AppSecrets,
+) -> Result<(), ConfigError> {
+    if secrets.equipment_data_key.is_none() {
+        return Err(ConfigError::InvalidMoogleMailConfig(
+            "启用告警主动通知时 MoogleMail 需要 equipment_data_key",
+        ));
+    }
+    if secrets.user_login_data_key.is_none() {
+        return Err(ConfigError::MissingMoogleMailUserLoginDataKey);
+    }
+    let keyrings = [
+        (
+            DataKeyDomain::Equipment,
+            &secrets.equipment_data_key_id,
+            &secrets.equipment_data_key,
+            &secrets.equipment_previous_data_keys,
+        ),
+        (
+            DataKeyDomain::UserLogin,
+            &secrets.user_login_data_key_id,
+            &secrets.user_login_data_key,
+            &secrets.user_login_previous_data_keys,
+        ),
+        (
+            DataKeyDomain::Credential,
+            &secrets.credential_data_key_id,
+            &secrets.credential_data_key,
+            &secrets.credential_previous_data_keys,
+        ),
+        (
+            DataKeyDomain::MailDiagnostics,
+            &secrets.mail_diagnostics_data_key_id,
+            &secrets.mail_diagnostics_data_key,
+            &secrets.mail_diagnostics_previous_data_keys,
+        ),
+    ];
+    for (domain, id, material, previous) in keyrings {
+        if domain == DataKeyDomain::MailDiagnostics && !config.diagnostics.enabled {
+            continue;
+        }
+        if id.as_ref().is_some_and(|id| !valid_key_id(id.expose_secret()))
+            || material.as_ref().is_some_and(|key| !valid_data_key_material(key.expose_secret()))
+            || previous.iter().any(|key| !valid_data_key_material(key.material()))
+        {
+            return Err(ConfigError::InvalidDataKeyRing {
+                domain: domain.as_str(),
+                reason: "MoogleMail 需要合法标识和标准 Base64 编码的 32 字节密钥".to_owned(),
+            });
+        }
+    }
+    // 凭据密钥环优先于 keyenv 或静态 Cookie，数据库记录由运行时检查。
+    if secrets.credential_data_key.is_some() {
+        return Ok(());
+    }
+    if let Some(path) = &config.keyenv_file {
+        load_mooglemail_keyenv(path)?;
+    } else {
+        let cookie = secrets
+            .mooglemail_cookie
+            .as_ref()
+            .map(SecretString::expose_secret)
+            .ok_or(ConfigError::MissingMoogleMailCredentials)?;
+        if !valid_text(cookie.trim(), 4096) {
+            return Err(ConfigError::InvalidMoogleMailConfig("mooglemail_cookie 格式无效"));
+        }
+    }
+    Ok(())
+}
+
+fn valid_data_key_material(value: &str) -> bool {
+    let [prefix @ .., last, b'='] = value.as_bytes() else {
+        return false;
+    };
+    // 32 字节的标准 Base64 末尾有一个补位符，末个有效字符的低两位必须为零。
+    prefix.len() == 42
+        && prefix.iter().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'/'))
+        && b"AEIMQUYcgkosw048".contains(last)
+}
 
 pub(crate) fn validate_mooglemail_worker(
     config: &MoogleMailWorkerConfig,
@@ -34,9 +117,12 @@ pub(crate) fn validate_mooglemail_worker(
     }
     if config.diagnostics.directory.as_os_str().is_empty()
         || config.diagnostics.directory.to_string_lossy().chars().any(char::is_control)
+        || config.enabled
+            && config.diagnostics.enabled
+            && config.diagnostics.directory.file_name().is_none()
     {
         return Err(ConfigError::InvalidMoogleMailConfig(
-            "diagnostics.directory 必须是非空且不含控制字符的路径",
+            "diagnostics.directory 必须是非空且不含控制字符的路径，启用时必须指向具名目录",
         ));
     }
     if !(60..=604_800).contains(&config.account_reply_window_seconds) {
@@ -288,6 +374,55 @@ mod tests {
     use super::*;
 
     #[test]
+    fn diagnostic_directory_needs_a_name_when_mail_uses_it() {
+        let mut config = MoogleMailWorkerConfig::default();
+        config.diagnostics.enabled = true;
+        config.diagnostics.directory = "/".into();
+        assert!(validate_mooglemail_worker(&config).is_ok());
+        config.enabled = true;
+        assert!(matches!(
+            validate_mooglemail_worker(&config),
+            Err(ConfigError::InvalidMoogleMailConfig(reason))
+                if reason.contains("diagnostics.directory")
+        ));
+    }
+
+    #[test]
+    fn notification_requires_usable_mail_keys_and_cookie() {
+        let config = MoogleMailWorkerConfig::default();
+        let mut secrets = AppSecrets::from_file(
+            toml::from_str(
+                r#"mooglemail_cookie = "fixture=value"
+equipment_data_key_id = "equipment-fixture"
+equipment_data_key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+user_login_data_key_id = "login-fixture"
+user_login_data_key = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBE="
+"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(validate_notification_mail_credentials(&config, &secrets).is_ok());
+        secrets.mooglemail_cookie =
+            Some(SecretString::new("mooglemail_cookie", "a".repeat(4097)).unwrap());
+        assert!(matches!(
+            validate_notification_mail_credentials(&config, &secrets),
+            Err(ConfigError::InvalidMoogleMailConfig("mooglemail_cookie 格式无效"))
+        ));
+        secrets.equipment_data_key = Some(
+            SecretString::new(
+                "equipment_data_key",
+                "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB=".to_owned(),
+            )
+            .unwrap(),
+        );
+        assert!(matches!(
+            validate_notification_mail_credentials(&config, &secrets),
+            Err(ConfigError::InvalidDataKeyRing { domain: "equipment", .. })
+        ));
+    }
+
+    #[test]
     fn removed_mail_template_section_is_rejected_with_an_actionable_message() {
         // 通知模板已迁入数据库：Worker 配置里的旧区块不再读取，出现即拒绝并指明处理办法，
         // 不让运营误以为文件里的正文仍在生效。
@@ -335,6 +470,7 @@ mod tests {
         };
 
         use crate::runtime::validate_runtime_document;
+        use crate::settings::WorkerConfig;
         use crate::settings::worker::apply_runtime_document;
 
         // 契约：Admin 保存 runtime 文档时接受的装备过滤 token，投影到 Worker 后必须通过启动校验，
@@ -349,9 +485,9 @@ mod tests {
             ..AdminRuntimeDocument::default()
         };
         let worker_accepts = |document: AdminRuntimeDocument| {
-            let mut config = MoogleMailWorkerConfig::default();
-            apply_runtime_document(&mut config, document);
-            validate_mooglemail_worker(&config).is_ok()
+            let mut worker = WorkerConfig::default();
+            apply_runtime_document(&mut worker, document);
+            validate_mooglemail_worker(&worker.mooglemail).is_ok()
         };
         let now = Timestamp::now();
         assert!(validate_runtime_document(&document("Savage"), now).is_ok());

@@ -10,6 +10,8 @@ mod mapping;
 mod schedule;
 
 pub(crate) use commands::create;
+#[cfg(test)]
+pub(super) use commands::tests as command_test_support;
 pub(crate) use errors::{feature_unavailable, invalid_create_command, map_create_error, map_error};
 pub(crate) use list::list;
 pub(crate) use mapping::{map_auction, map_auction_command};

@@ -5,10 +5,10 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use auction_application::admin::AdminRuntimeDocument;
-use auction_application::admin::AdminRuntimeMailDeliveryBudget;
 use auction_application::forum::EquipmentColorRule;
 use serde::Deserialize;
 
+use super::load::RuntimeWorkerConfigSource;
 use crate::settings::backup::BackupConfig;
 use crate::settings::errors::ConfigError;
 use crate::settings::secrets::AppSecrets;
@@ -47,7 +47,7 @@ pub(super) struct FileConfig<Session> {
     /// 装备分组规则，Worker 投影邮件业务、论坛规则及 bot 内部履约名单。
     #[serde(default)]
     pub(super) runtime_config_file: Option<PathBuf>,
-    /// Admin 可选的 Worker 角色非敏感 TOML 路径；只读取预算与 runtime 引用，不读取其 secrets。
+    /// Admin 可选的 Worker 角色非敏感 TOML 路径；读取校验基值与 runtime 引用，不读取其 secrets。
     #[serde(default)]
     pub(super) worker_config_file: Option<PathBuf>,
     /// 可选 Worker 区块；省略时并发为 8，轮询为 60 秒。
@@ -134,7 +134,7 @@ pub(super) struct BuildInput {
     pub(super) secrets_path: Option<PathBuf>,
     pub(super) runtime_config_path: Option<PathBuf>,
     pub(super) worker_config_path: Option<PathBuf>,
-    pub(super) runtime_worker_budget: Option<AdminRuntimeMailDeliveryBudget>,
+    pub(super) runtime_worker_budget: Option<RuntimeWorkerConfigSource>,
 }
 
 #[derive(Clone)]
@@ -178,8 +178,8 @@ pub struct AppConfig {
     pub runtime_config_path: Option<PathBuf>,
     /// Admin 引用的真实 Worker 角色配置路径；其 runtime 必须与 Admin 同源。
     pub worker_config_path: Option<PathBuf>,
-    /// Admin 启动时冻结的 Worker 部署预算基值；不包含 runtime 覆盖或敏感配置。
-    pub runtime_worker_budget: Option<AdminRuntimeMailDeliveryBudget>,
+    /// Admin runtime 文件存储的 Worker 部署校验来源，不包含敏感配置。
+    pub runtime_worker_budget: Option<RuntimeWorkerConfigSource>,
     /// 已校验并应用到 Admin 进程的 runtime 文档；Public/Worker 只保留窄投影，因此为 None。
     pub admin_runtime: Option<AdminRuntimeDocument>,
     /// 三角色同源的装备规则启动快照；Public 判定稀有/融合，Worker 用于论坛名称标色。

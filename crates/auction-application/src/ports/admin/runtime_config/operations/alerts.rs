@@ -45,7 +45,7 @@ pub struct AdminRuntimeAlertsConfig {
     pub recovery_overdue_age_seconds: u64,
     /// 通知使用的游戏世界，只允许 main 或 isekai。
     pub world_id: String,
-    /// 通知收件人，启用并接管告警时必填。
+    /// 通知收件人，合并 Worker 部署基值后启用主动邮件通知时必填。
     pub recipient: String,
 }
 
@@ -82,6 +82,18 @@ impl Default for AdminRuntimeAlertsConfig {
 }
 
 impl AdminRuntimeAlertsConfig {
+    /// 部署缺少 Worker 基值时允许在 HTTP 错误中公开的固定指引。
+    pub const WORKER_CONFIG_REQUIRED_HINT: &'static str =
+        "修改告警配置或覆盖的邮件世界前，须在 Admin 配置 worker_config_file 并重启";
+
+    /// 已配置的 Worker 角色文件无法加载时允许公开的固定指引。
+    pub const WORKER_CONFIG_UNREADABLE_HINT: &'static str =
+        "无法加载 Worker 部署配置，请检查 Admin 的 worker_config_file 指向的文件是否可读";
+
+    /// Worker 角色文件指纹变化时允许公开的固定指引。
+    pub const WORKER_CONFIG_CHANGED_HINT: &'static str =
+        "Worker 部署配置已变更，请重启 Admin 后再保存";
+
     /// 生效的长期未领取阈值秒数；省略时为默认 72 小时。
     pub fn collection_overdue_age_seconds(&self) -> u64 {
         self.fulfillment_collection_overdue_age_seconds

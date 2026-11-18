@@ -19,7 +19,9 @@ pub trait AdminRuntimeFileStore: Send + Sync {
 
     fn acquire_workflow_lock(&self) -> ApplicationFuture<'_, Self::WorkflowGuard>;
 
-    /// 校验本地语法及启动时冻结的非敏感部署约束；不得读取文件、写命令账本或访问外部服务。
+    /// 校验本地语法及非敏感部署约束；不得写文件、写命令账本或访问外部服务。
+    /// 候选会改变生效的告警配置时，实现可以有界重读 Worker 部署配置，并用 Worker 启动时的
+    /// 同一套校验核对；该文件读不到或已与启动时冻结的内容不同，必须明确拒绝。
     /// cron 与有效 Worker 预算仍由配置 owner 提供；新候选缺少必要部署上下文时必须明确拒绝。
     fn validate_candidate(
         &self,

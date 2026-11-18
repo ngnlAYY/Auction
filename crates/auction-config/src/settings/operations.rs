@@ -1,10 +1,12 @@
 //! 把 Admin 管理的公开参数投影为各角色启动配置；接管必须显式启用，部署专属字段不在此覆盖。
 
-use auction_application::admin::{AdminRuntimeDocument, AdminRuntimeOperationsConfig};
+use auction_application::admin::{
+    AdminRuntimeAlertsConfig, AdminRuntimeDocument, AdminRuntimeOperationsConfig,
+};
 
 use super::{
     AuctionConfig, AuctionEconomicsConfig, AuctionScheduleConfig, DeliveryWorkerConfig,
-    FulfillmentWorkerConfig, RecoveryWorkerConfig, Role, WorkerConfig,
+    FulfillmentWorkerConfig, OperationsAlertWorkerConfig, RecoveryWorkerConfig, Role, WorkerConfig,
 };
 
 pub(super) fn apply_runtime_operations(
@@ -51,11 +53,10 @@ pub(super) fn apply_runtime_operations(
     if role == Role::Worker {
         apply_mail(worker, operations);
         apply_forum(worker, operations);
-        apply_alerts(worker, operations);
         apply_worker(worker, operations);
     } else if role == Role::Admin {
         // Dashboard 必须使用与 Worker 扫描器相同的有效阈值；Admin 不读取邮件/论坛执行配置。
-        apply_alerts(worker, operations);
+        apply_alerts(&mut worker.operations_alert, &operations.alerts);
     }
 }
 
@@ -105,47 +106,44 @@ fn apply_forum(worker: &mut WorkerConfig, operations: &AdminRuntimeOperationsCon
     worker.forum.lease_duration_seconds = candidate.lease_duration_seconds;
 }
 
-fn apply_alerts(worker: &mut WorkerConfig, operations: &AdminRuntimeOperationsConfig) {
-    let candidate = &operations.alerts;
+pub(super) fn apply_alerts(
+    alerts: &mut OperationsAlertWorkerConfig,
+    candidate: &AdminRuntimeAlertsConfig,
+) {
     if !candidate.managed {
         return;
     }
     // Admin runtime 的 `enabled` 只控制扫描/告警台；主动 MoogleMail 通知仍由
     // worker.toml 的 notify_enabled 独立控制，避免打开告警台就发送邮件。
     // 清除旧版兼容别名，避免“enabled 与 scan_enabled 同时出现”的配置冲突。
-    worker.operations_alert.enabled = None;
-    worker.operations_alert.scan_enabled = Some(candidate.enabled);
+    alerts.enabled = None;
+    alerts.scan_enabled = Some(candidate.enabled);
     if !candidate.enabled {
         // 扫描关闭时主动通知不能继续独立存在；下次启用由 TOML 重新决定。
-        worker.operations_alert.notify_enabled = Some(false);
-        worker.operations_alert.webhook_enabled = false;
+        alerts.notify_enabled = Some(false);
+        alerts.webhook_enabled = false;
     }
-    worker.operations_alert.scan_interval_seconds = candidate.scan_interval_seconds;
-    worker.operations_alert.jitter_seconds = candidate.jitter_seconds;
-    worker.operations_alert.source_timeout_seconds = candidate.source_timeout_seconds;
-    worker.operations_alert.batch_window_seconds = candidate.batch_window_seconds;
-    worker.operations_alert.cooldown_seconds = candidate.cooldown_seconds;
-    worker.operations_alert.claim_lease_seconds = candidate.claim_lease_seconds;
-    worker.operations_alert.retry_delay_seconds = candidate.retry_delay_seconds;
-    worker.operations_alert.max_signals_per_scan = candidate.max_signals_per_scan;
-    worker.operations_alert.max_batch_items = candidate.max_batch_items;
-    worker.operations_alert.max_body_bytes = candidate.max_body_bytes;
-    worker.operations_alert.delivery_pending_count_threshold =
-        candidate.delivery_pending_count_threshold;
-    worker.operations_alert.delivery_pending_age_seconds = candidate.delivery_pending_age_seconds;
-    worker.operations_alert.delivery_manual_reconcile_count_threshold =
+    alerts.scan_interval_seconds = candidate.scan_interval_seconds;
+    alerts.jitter_seconds = candidate.jitter_seconds;
+    alerts.source_timeout_seconds = candidate.source_timeout_seconds;
+    alerts.batch_window_seconds = candidate.batch_window_seconds;
+    alerts.cooldown_seconds = candidate.cooldown_seconds;
+    alerts.claim_lease_seconds = candidate.claim_lease_seconds;
+    alerts.retry_delay_seconds = candidate.retry_delay_seconds;
+    alerts.max_signals_per_scan = candidate.max_signals_per_scan;
+    alerts.max_batch_items = candidate.max_batch_items;
+    alerts.max_body_bytes = candidate.max_body_bytes;
+    alerts.delivery_pending_count_threshold = candidate.delivery_pending_count_threshold;
+    alerts.delivery_pending_age_seconds = candidate.delivery_pending_age_seconds;
+    alerts.delivery_manual_reconcile_count_threshold =
         candidate.delivery_manual_reconcile_count_threshold;
-    worker.operations_alert.fulfillment_backlog_count_threshold =
-        candidate.fulfillment_backlog_count_threshold;
-    worker.operations_alert.fulfillment_backlog_age_seconds =
-        candidate.fulfillment_backlog_age_seconds;
-    worker.operations_alert.fulfillment_collection_overdue_age_seconds =
-        candidate.collection_overdue_age_seconds();
-    worker.operations_alert.recovery_overdue_count_threshold =
-        candidate.recovery_overdue_count_threshold;
-    worker.operations_alert.recovery_overdue_age_seconds = candidate.recovery_overdue_age_seconds;
-    worker.operations_alert.world_id = candidate.world_id.clone();
-    worker.operations_alert.recipient = candidate.recipient.clone();
+    alerts.fulfillment_backlog_count_threshold = candidate.fulfillment_backlog_count_threshold;
+    alerts.fulfillment_backlog_age_seconds = candidate.fulfillment_backlog_age_seconds;
+    alerts.fulfillment_collection_overdue_age_seconds = candidate.collection_overdue_age_seconds();
+    alerts.recovery_overdue_count_threshold = candidate.recovery_overdue_count_threshold;
+    alerts.recovery_overdue_age_seconds = candidate.recovery_overdue_age_seconds;
+    alerts.world_id = candidate.world_id.clone();
+    alerts.recipient = candidate.recipient.clone();
 }
 
 fn apply_worker(worker: &mut WorkerConfig, operations: &AdminRuntimeOperationsConfig) {

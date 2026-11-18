@@ -2,7 +2,9 @@
 
 use std::collections::HashSet;
 
-use auction_application::mail::{MailPollClaim, MailPollIntake, MailProcessingDecision};
+use auction_application::mail::{
+    MailDisplaySnapshot, MailPollClaim, MailPollIntake, MailProcessingDecision,
+};
 use auction_time::Timestamp;
 use serde_json::json;
 use uuid::Uuid;
@@ -66,11 +68,18 @@ pub(super) fn valid_page(
         })
 }
 
+pub(super) fn intake_subject(message: &MailPollFetchedMessage) -> Option<String> {
+    let sender = message.sender.as_deref()?;
+    let attachments = message.business.as_ref().map_or(&[][..], |mail| mail.attachments.as_slice());
+    Some(MailDisplaySnapshot::redact_subject(sender, &message.subject, attachments))
+}
+
 pub(super) fn intake_from_message(
     mailbox_key: &str,
     message: MailPollFetchedMessage,
     decision: MailProcessingDecision,
     processed_at: Timestamp,
+    subject: Option<String>,
 ) -> MailPollIntake {
     let mail_kind = decision.mail_kind;
     let id = Uuid::new_v5(
@@ -101,7 +110,7 @@ pub(super) fn intake_from_message(
         external_mail_id: message.external_mail_id,
         world_id: message.world_id,
         sender: message.sender.filter(|_| headers_present),
-        subject: headers_present.then_some(message.subject),
+        subject,
         message_display: headers_present.then_some(message.message_display).flatten(),
         equipment_diagnostic,
         mail_kind,
@@ -151,7 +160,65 @@ fn delivery_subject(subject: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::classify_kind;
+    use auction_time::Timestamp;
+
+    use super::{classify_kind, intake_from_message, intake_subject, pending_decision};
+    use crate::worker::mail::poll::MailPollFetchedMessage;
+
+    #[test]
+    fn intake_subject_redacts_keys_and_keeps_protocol_labels() {
+        let now = Timestamp::from_timestamp(1_800_000_000, 0).unwrap();
+        let padded_key_subject = "补充说明：登录 key  中 abcdefghijklmnopqrstuvwxyz!";
+        let padded_key = padded_key_subject.strip_prefix("补充说明：登录 key ").unwrap();
+        assert_eq!(padded_key.len(), 32);
+        assert_eq!(padded_key.trim_start().len(), 31);
+        let colon_key_subject = format!("补充说明：登录 key {}:", " ".repeat(31));
+        let whitespace_key_subject = format!("补充说明：登录 key {}", " ".repeat(32));
+        for (raw, safe, kind) in [
+            (colon_key_subject.as_str(), "补充说明：登录 key[REDACTED]", "unknown"),
+            (whitespace_key_subject.as_str(), "补充说明：登录 key[REDACTED]", "unknown"),
+            ("补充说明：LoGiN KeY =短 值", "补充说明：LoGiN KeY[REDACTED]", "unknown"),
+            ("登录 AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "登录 [REDACTED]", "unknown"),
+            (
+                "https://example.invalid/equip/123/0123abcdef",
+                "https://example.invalid/equip/123/[REDACTED]",
+                "unknown",
+            ),
+            (padded_key_subject, "补充说明：登录 key[REDACTED]", "unknown"),
+            ("补充说明：LoGiN KeY 短 值", "补充说明：LoGiN KeY[REDACTED]", "unknown"),
+            ("补充说明：登录 key", "补充说明：登录 key", "unknown"),
+            ("key abc", "key abc", "unknown"),
+            ("拍卖问题", "拍卖问题", "unknown"),
+            ("rekey", "rekey", "rekey"),
+            (
+                "[RTS] Auction payment request [5b1c2a9e-1f0d-4c6b-9a7e-3d2f1e0c9b8a]",
+                "[RTS] Auction payment request [5b1c2a9e-1f0d-4c6b-9a7e-3d2f1e0c9b8a]",
+                "delivery",
+            ),
+        ] {
+            let message = MailPollFetchedMessage {
+                external_mail_id: "9001".to_owned(),
+                world_id: "main".to_owned(),
+                received_at: now,
+                sender: Some("Player".to_owned()),
+                subject: raw.to_owned(),
+                message_display: None,
+                content_digest: [1; 32],
+                attachment_count: 0,
+                credits: 0,
+                cod: 0,
+                returnable: false,
+                claimable: false,
+                business: None,
+            };
+            let decision = pending_decision(&message);
+            let safe_subject = intake_subject(&message);
+            let intake = intake_from_message("main", message, decision, now, safe_subject);
+            assert_eq!(intake.subject.as_deref(), Some(safe));
+            assert_eq!(intake.mail_kind, kind);
+            assert!(intake.validate());
+        }
+    }
 
     #[test]
     fn returned_settlement_mail_keeps_the_delivery_label() {

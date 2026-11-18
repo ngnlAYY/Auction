@@ -3,16 +3,22 @@
 //! 新页面显式 include 时输出，缺省投影保持已发布闭集。
 
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 use auction_application::admin::{
-    AdminRuntimeDocument, AdminRuntimeEquipmentFilterConfig, AdminRuntimeSnapshot,
+    AdminRuntimeConfigError, AdminRuntimeConfigPort, AdminRuntimeDocument,
+    AdminRuntimeEquipmentFilterConfig, AdminRuntimeSnapshot, AdminRuntimeUpdateCommand,
     AdminRuntimeWorldsConfig,
 };
-use axum::body::to_bytes;
+use auction_application::core::{ApplicationError, ApplicationFuture};
+use axum::body::{Bytes, to_bytes};
+use axum::extract::ConnectInfo;
 use axum::http::{StatusCode, Uri};
+use axum::response::Response;
 use serde_json::{Value, json};
 
-use super::{RuntimeProjection, map_snapshot, runtime_projection};
+use super::{RuntimeProjection, map_error, map_snapshot, runtime_projection, update, validate};
+use crate::admin::auctions::command_test_support::{VALID_UUID, headers, state_with_runtime};
 
 /// 已发布页面（基线 b2300b46）`valid_alerts` 严格校验的告警区块闭集：缺省投影必须恰好是它。
 const BASELINE_ALERT_KEYS: [&str; 21] = [
@@ -293,5 +299,159 @@ async fn runtime_projection_accepts_only_registered_includes() {
         "?fields=summary",
     ] {
         assert_eq!(parse(query).await, Err(StatusCode::BAD_REQUEST), "{query}");
+    }
+}
+
+const WORKER_FILE_HINT: &str =
+    "修改告警配置或覆盖的邮件世界前，须在 Admin 配置 worker_config_file 并重启";
+const UNREADABLE_WORKER_FILE_HINT: &str =
+    "无法加载 Worker 部署配置，请检查 Admin 的 worker_config_file 指向的文件是否可读";
+const CHANGED_WORKER_FILE_HINT: &str = "Worker 部署配置已变更，请重启 Admin 后再保存";
+
+struct RuntimeWithWorkerError {
+    current: AdminRuntimeDocument,
+    worker_error: &'static str,
+}
+
+impl AdminRuntimeConfigPort for RuntimeWithWorkerError {
+    fn current(&self) -> ApplicationFuture<'_, AdminRuntimeSnapshot> {
+        Box::pin(async {
+            Ok(AdminRuntimeSnapshot {
+                fingerprint: self.current.fingerprint(),
+                document: self.current.clone(),
+                restart_required: false,
+            })
+        })
+    }
+
+    fn validate(
+        &self,
+        document: AdminRuntimeDocument,
+    ) -> Result<AdminRuntimeSnapshot, ApplicationError> {
+        // 覆盖不变时无需部署基值；模拟文件适配器接收落成候选的检查边界。
+        if document.operations.as_ref().map(|operations| &operations.alerts)
+            != self.current.operations.as_ref().map(|operations| &operations.alerts)
+        {
+            return Err(
+                AdminRuntimeConfigError::InvalidDocument(self.worker_error.to_owned()).into()
+            );
+        }
+        Ok(AdminRuntimeSnapshot {
+            fingerprint: document.fingerprint(),
+            document,
+            restart_required: false,
+        })
+    }
+
+    fn update(
+        &self,
+        command: AdminRuntimeUpdateCommand,
+    ) -> ApplicationFuture<'_, AdminRuntimeSnapshot> {
+        Box::pin(async move {
+            assert_eq!(command.expected_fingerprint, self.current.fingerprint());
+            self.validate(command.document.resolve_update(&self.current))
+        })
+    }
+}
+
+async fn json_response(response: Response) -> (StatusCode, Value) {
+    let status = response.status();
+    let body = to_bytes(response.into_body(), 96 * 1024).await.unwrap();
+    (status, serde_json::from_slice(&body).unwrap())
+}
+
+#[tokio::test]
+async fn legacy_threshold_request_has_the_same_preview_and_save_result() {
+    let current = document(json!({"operations": {"alerts": {
+        "managed": true,
+        "fulfillment_collection_overdue_age_seconds": 86_400
+    }}}));
+    let fingerprint = current.fingerprint();
+    let port: Arc<dyn AdminRuntimeConfigPort> =
+        Arc::new(RuntimeWithWorkerError { current, worker_error: WORKER_FILE_HINT });
+    let address = ConnectInfo("127.0.0.1:1234".parse().unwrap());
+    let candidate =
+        json!({"operations": {"alerts": {"managed": true}}, "allow_manual_early_open": true});
+    let save = update(
+        state_with_runtime(Some(port.clone())), address, headers(),
+        "/api/v1/admin/config".parse().unwrap(),
+        Bytes::from(json!({"expected_fingerprint": fingerprint, "command_id": VALID_UUID, "document": candidate}).to_string()),
+    ).await;
+    let (status, save) = json_response(save).await;
+    assert_eq!(status, StatusCode::OK);
+
+    for query in ["", "?include=fulfillment_collection_overdue_age_seconds"] {
+        let preview = validate(
+            state_with_runtime(Some(port.clone())),
+            address,
+            headers(),
+            format!("/api/v1/admin/config:validate{query}").parse().unwrap(),
+            Bytes::from(json!({"document": candidate}).to_string()),
+        )
+        .await;
+        let (status, preview) = json_response(preview).await;
+        assert_eq!(status, StatusCode::OK, "{query}");
+        assert_eq!(preview["data"]["fingerprint"], save["data"]["fingerprint"], "{query}");
+        let alerts = &preview["data"]["document"]["operations"]["alerts"];
+        if query.is_empty() {
+            assert!(
+                !alerts
+                    .as_object()
+                    .unwrap()
+                    .contains_key("fulfillment_collection_overdue_age_seconds")
+            );
+        } else {
+            assert_eq!(alerts["fulfillment_collection_overdue_age_seconds"], 86_400);
+        }
+    }
+}
+
+#[tokio::test]
+async fn invalid_runtime_response_exposes_only_fixed_worker_file_hints() {
+    let address = ConnectInfo("127.0.0.1:1234".parse().unwrap());
+    let candidate = json!({"operations":{"alerts":{"managed":true}}});
+    for hint in [WORKER_FILE_HINT, UNREADABLE_WORKER_FILE_HINT, CHANGED_WORKER_FILE_HINT] {
+        let current = AdminRuntimeDocument::default();
+        let fingerprint = current.fingerprint();
+        let state = state_with_runtime(Some(Arc::new(RuntimeWithWorkerError {
+            current,
+            worker_error: hint,
+        })));
+        let preview = validate(
+            state.clone(),
+            address,
+            headers(),
+            "/api/v1/admin/config:validate".parse().unwrap(),
+            Bytes::from(json!({"document": candidate}).to_string()),
+        )
+        .await;
+        let save = update(
+            state,
+            address,
+            headers(),
+            "/api/v1/admin/config".parse().unwrap(),
+            Bytes::from(
+                json!({
+                    "expected_fingerprint": fingerprint,
+                    "command_id": VALID_UUID,
+                    "document": candidate,
+                })
+                .to_string(),
+            ),
+        )
+        .await;
+        for response in [preview, save] {
+            let (status, body) = json_response(response).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST);
+            assert_eq!(body["code"], "invalid_runtime_config");
+            assert_eq!(body["message"], hint);
+        }
+
+        let reason = format!("{hint} /fixture/private.toml");
+        let response = map_error(AdminRuntimeConfigError::InvalidDocument(reason).into());
+        let (status, body) = json_response(response).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["code"], "invalid_runtime_config");
+        assert_eq!(body["message"], "runtime 配置文档无效");
     }
 }

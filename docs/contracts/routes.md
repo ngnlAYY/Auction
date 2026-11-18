@@ -232,7 +232,7 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | GET | `/api/v1/admin/pending-counts` | 导航待办数：`delivery_manual_reconcile`（不含运维告警投递与结算退件 Take 投递 `settlement_return_action`，后者归所属案件，计入 `settlement_returns`）、`recovery_confirmation`（reclaiming 且证据齐全、恰好一个候选结果；需要拉黑的确认须已完成拉黑——main `reclaimed` 始终需要，isekai `cancelled` 只在退回次数达到冻结上限时需要）、`active_alerts`。查询参数只有可选的 `include`，且只接受 `settlement_returns`：带它时追加未结案结算退件案件数 `settlement_returns`（`closed_at` 为空的案件，含隔离、待重新核验与 Take 结果未知，与两类退件告警合计同一口径，不要求存在义务），Admin 页面始终携带；不带时保持已发布的三字段集合，已打开的旧页面照常解码。其他取值（含空值、大小写不同与逗号列表）为 400 `invalid_query`（附加字段无效），重复出现或其他查询键为 400 `invalid_query`（告警查询参数无效）；回滚到不认识该参数的服务端后，新页面的导航待办数这次读取失败、不显示徽标，按构建号提示刷新后恢复 |
 | GET | `/api/v1/admin/worlds` | 业务世界及启用状态 |
 | PATCH | `/api/v1/admin/worlds/{world_id}` | 启用/停用业务世界（即时生效） |
-| GET / POST | `/api/v1/admin/auctions` | 场次列表（`world_id`、`status`、`page`、`page_size`）/ 新建场次 |
+| GET / POST | `/api/v1/admin/auctions` | 场次列表（`world_id`、`status`、`page`、`page_size`）/ 新建场次。新建的 `auction_id` 须为规范小写、RFC 4122 变体的 v1–v5 UUID，`sequence` 须为 1–9,007,199,254,740,991；不合规为 `400 invalid_auction_command` |
 | PATCH | `/api/v1/admin/auctions/{auction_id}/schedule` | 修改排期 |
 | POST | `/api/v1/admin/auctions/{auction_id}/preview` | 进入预览 |
 | POST | `/api/v1/admin/auctions/{auction_id}/open` | 开拍 |
@@ -240,9 +240,9 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | POST | `/api/v1/admin/auctions/{auction_id}/early-settlement` | 提前结算 |
 | POST | `/api/v1/admin/auctions/{auction_id}/cancel` | 取消（仅开拍前） |
 | GET | `/api/v1/admin/auctions/{auction_id}/lots` | lot 列表（`page`、`page_size`）；响应头 `x-auction-capability-manual-intake` 声明手工录入是否可用 |
-| PATCH | `/api/v1/admin/lots/{lot_id}` | 草稿 lot：`withdraw` 撤下或 `set_start_price` 修改起拍价 |
+| PATCH | `/api/v1/admin/lots/{lot_id}` | 草稿 lot：`withdraw` 撤下或 `set_start_price` 修改起拍价。新起拍价须为 1–1,000,000,000 Credits；超界为 `400 invalid_lot_command` |
 | GET | `/api/v1/admin/lots/{lot_id}/proxy-events` | 代理事件历史（`page`、`page_size`、`cursor`） |
-| POST | `/api/v1/admin/worlds/{world_id}/auction-intake/items` | 手工录入装备到该世界当前接收投稿的 Draft 或 Preview 场次；无接收目标或尚未到冻结的最早收件时刻时返回 `409 auction_intake_unavailable`；`source_kind=url` 的装备页面由 Worker control 代为读取，Worker 不可用或装备页暂时读不到（Bot 战斗中、远端限流、同账号忙碌窗口）时返回 `503 equipment_source_unavailable`，外部访问暂停时返回 `409 external_access_paused` |
+| POST | `/api/v1/admin/worlds/{world_id}/auction-intake/items` | 手工录入装备到该世界当前接收投稿的 Draft 或 Preview 场次。起拍价须为 1–1,000,000,000 Credits；超界为 `400 invalid_auction_intake`。无接收目标或尚未到冻结的最早收件时刻时返回 `409 auction_intake_unavailable`；`source_kind=url` 的装备页面由 Worker control 代为读取，Worker 不可用或装备页暂时读不到（Bot 战斗中、远端限流、同账号忙碌窗口）时返回 `503 equipment_source_unavailable`，外部访问暂停时返回 `409 external_access_paused` |
 | GET | `/api/v1/admin/forum/sync-status` | 论坛同步状态 |
 | GET | `/api/v1/admin/auctions/{auction_id}/forum` | 该场论坛主题与诊断的本地安全投影；刷新不请求论坛，也不触发或授权重写 |
 | GET | `/api/v1/admin/auctions/{auction_id}/settlement-report` | 结算报告 |
@@ -255,7 +255,7 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | POST | `/api/v1/admin/settlement-returns/{return_id}/handle` | 处理动作：请求 `command_id`、`expected_version` 与 `action`——`reclaim_and_resend`（领回并补寄）、`reclaim_and_hold`（领回后代管）、`resend_from_custody`（从代管补寄）、`close_inbox`（留箱结案）、`acknowledge`（隔离记录标记已核对）、`retry_take`（Take 结果未知且当前 fence 上最近一次观察为 `assets_claimable` 时再次领回同一 Take）；`recheck` 只走上一条路由。资产、金额与收件人只取服务端冻结事实，补寄只寄原冻结收件人；领回只在本地提交持久 Take，外部 Take 由 Worker 执行；`retry_take` 只重新排队同一 Take 投递，不消耗也不重置自动重排预算，仍由原冻结的数据库凭据身份执行，观察证明只由邮箱维护写入，请求不能携带资产或结果声明。成功返回 `command_id`、`return_id`、`action`、提交后的 `case_version` 与 `status` |
 | GET | `/api/v1/admin/mail` | 邮箱轮询状态（`mailbox_key`、`include_diagnostics`） |
 | GET | `/api/v1/admin/mail/intake` | 入站邮件处理记录（`mailbox_key`、`world_id`、`kind`、`status`、`decision`、`from`、`to`、`page`、`page_size`） |
-| GET | `/api/v1/admin/mail/intake/{intake_id}` | 单封入站邮件详情 |
+| GET | `/api/v1/admin/mail/intake/{intake_id}` | 单封入站邮件详情。列表和详情的 `subject` 均为脱敏展示值，包括历史记录 |
 | PUT | `/api/v1/admin/mail/polling` | 暂停/恢复收件轮询 |
 | POST | `/api/v1/admin/mail/polls:trigger` | 经 Worker control 立即触发一次轮询 |
 | GET | `/api/v1/admin/deliveries` | 投递 outbox（`page`、`page_size`、`status`、`recipient`、`reference`、`template`、`category`、`world`、`created_from`、`created_to`、`include`）；`reference` 接受投递、结算义务或玩家通知的规范 UUID；筛选都是精确匹配且失败关闭；列表附带 `template`、`category`、`world`、`retirement_reason` 与 `suppression_reason`。缺省投影保持已发布页面能解码的投递：结算退件 Take（来源 `settlement_return_action`）与被恢复终结的原结算投递（`failed/recovery_superseded`，从未进入发送围栏、没有发送时间）不列出、不计入 `total`，按 `reference` 定位也查不到；`include=settlement_returns`（现行页面总是携带）才列出它们。`include` 的其他取值（含空值、大小写不同与逗号列表）为 `400 invalid_query`（附加字段无效），重复出现或未登记的键为 `400 invalid_query`（查询参数无效）；回滚到不认识该参数的服务端后，新页面这次读取为 `400 invalid_query`，按构建号提示刷新后恢复 |
@@ -278,7 +278,7 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | POST | `/api/v1/admin/runtime-switches/external-access-paused` | 暂停或恢复全部外部访问（唯一开放给 Admin 写入的开关） |
 | GET | `/api/v1/admin/mail-templates` | 全部出站通知模板的当前正文、内置默认正文、版本与占位符规则 |
 | PUT | `/api/v1/admin/mail-templates/{template_key}` | 保存一个模板的正文，或恢复内置默认正文 |
-| POST | `/api/v1/admin/config:validate` | 只校验 runtime 配置候选，不写文件或命令账本；查询参数同 `/api/v1/admin/config`。带 `include=fulfillment_collection_overdue_age_seconds` 时候选先按保存规则对当前文件落成（省略的阈值沿用当前值），响应给出保存后的生效阈值 |
+| POST | `/api/v1/admin/config:validate` | 只校验 runtime 配置候选，不写文件或命令账本；查询参数同 `/api/v1/admin/config`。两种投影都按保存规则沿用请求省略的阈值，带 `include=fulfillment_collection_overdue_age_seconds` 时响应包含落成后的生效阈值。预校验与保存均按[部署基值校验告警](../../ops/config/README.md#operations-接管)，失败为 `400 invalid_runtime_config`。缺少 `worker_config_file` 时，`message` 提示配置并重启 Admin。Worker 角色文件无法读取时提示检查文件可读性，文件内容已变更时在 TOML 解析前提示重启 Admin 后再保存 |
 | GET / POST / PATCH | `/api/v1/admin/users` | 用户列表（`name`、`status`、`page`、`page_size`）/ 创建 / 修改（改名、签发/重签/吊销 key、绑定论坛 ID） |
 | PUT / DELETE | `/api/v1/admin/users/{user_id}/blacklist` | 拉黑 / 解除 |
 | GET | `/api/v1/admin/renames` | 改名历史（`user_id`、`name`、`page`、`page_size`） |
@@ -288,6 +288,8 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | GET | `/api/v1/admin/audit` | 审计记录（`actor`、`actor_type`、`action`、`entity`、`source`、`result`、`request_id`、`occurred_from`、`occurred_to`、`page`、`page_size`、`cursor`、`before_time`、`before_id`） |
 
 结算退件两条命令路由按[写命令](#写命令)外壳幂等：同一 `command_id` 原样重试返回首次结果，参数不同为 409 `command_conflict`。其余错误：400 `invalid_json`、`invalid_query`（命令不接受查询参数）、`invalid_settlement_return_id`、`invalid_settlement_return_command`（命令 ID 为零、版本不为正或动作不在该路由的闭集）；404 `settlement_return_not_found`；409 `stale_settlement_return_state`（案件版本已变化，重读后再决定）、`settlement_return_untrusted`、`settlement_return_unbound`、`settlement_return_assets_mismatch`、`settlement_return_action_conflict`（当前状态不允许该动作，或同一邮件已有其他领取/退回意图）、`settlement_return_proof_required`、`settlement_return_resend_limit`（补寄次数已达建案时冻结的上限 3，不含首寄，只能代管）、`settlement_return_obligation_ineligible`（原义务已不可补寄：成交撤销、已满足或终结、退回的已不是当前派发、种类归恢复流程，或历史现金没有原资金分配）、`settlement_return_send_unresolved`（原派发占用过资金分配但发送结果仍未知，须先经 Sent 恢复或人工 Sent 证明收口原发送，才能领回、补寄或留箱）、`settlement_return_observation_required`（案件是 `take_unknown`，但缺少当前 Take fence 上最近一次 `assets_claimable` 观察，不能再次领回；状态、资产与资金阻断按各自的错误码返回）。这些拒绝都不改任何状态，也不会映射为 503；503 `temporarily_unavailable` 只表示依赖暂不可用或持久化结果损坏，结果未知时用同一 `command_id` 与同一请求体重试。Take 结果未知（`take_unknown`）的案件没有人工声明结果或手工领取的入口：只认系统可验证的领取证明，由 Worker 的邮箱维护在原 Take 会话里观察后自动收口或重新排队；自动重排用满后，当前 Take fence 上最近一次观察为 `assets_claimable` 时详情才出现 `retry_take`，它只重新排队同一 Take、不消耗也不重置自动重排预算，仍由原冻结数据库凭据执行，请求不能携带资产或结果声明。投递台也拒绝对该 Take 投递人工释放、重试或对账；同一邮件已交接给结算退件 Take 后，投递台同样拒绝释放、重试或对账重试入站与恢复的原领取/退回意图（400，与拒绝 Take 投递同一错误）。
+
+新建场次、手工录入和草稿调价的 UUID、期号与起拍价准入在查询命令账本之前执行。升级前已接受的超界命令原样重试会收到对应的参数非法错误。
 
 请求体大小上限按路由冻结：多数命令 4–16 KiB，realtime 重放 64 KiB，凭据 128 KiB（在线校验 4 KiB），装备录入 72 KiB，出站通知模板 96 KiB，规则与关于 1 MiB，runtime 配置 4 MiB。
 

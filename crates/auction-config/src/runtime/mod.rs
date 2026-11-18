@@ -8,15 +8,20 @@ use std::{
     fs::{self, File, OpenOptions},
     io::{self, Read, Write},
     path::{Component, Path, PathBuf},
+    sync::Mutex,
 };
 
 use auction_application::admin::{
-    AdminRuntimeDocument, AdminRuntimeFileError, AdminRuntimeFileStore,
-    AdminRuntimeMailDeliveryBudget, AdminRuntimeReplacement, AdminRuntimeSnapshot,
-    MAX_ADMIN_RUNTIME_DOCUMENT_BYTES,
+    AdminRuntimeAlertsConfig, AdminRuntimeConfigError, AdminRuntimeDocument, AdminRuntimeFileError,
+    AdminRuntimeFileStore, AdminRuntimeMailDeliveryBudget, AdminRuntimeReplacement,
+    AdminRuntimeSnapshot, MAX_ADMIN_RUNTIME_DOCUMENT_BYTES,
 };
 use auction_application::core::ApplicationError;
 use auction_application::core::ApplicationFuture;
+use auction_application::core::RequestHash;
+
+use self::validation::RuntimeAlertOverrides;
+use crate::settings::{ConfigError, RuntimeWorkerConfigSource};
 
 mod hot;
 mod validation;
@@ -58,15 +63,22 @@ pub struct TomlRuntimeFileStore {
     path: PathBuf,
     lock_path: PathBuf,
     tracing_headers_configured: bool,
-    worker_budget: Option<AdminRuntimeMailDeliveryBudget>,
+    worker: Option<RuntimeWorkerBaseline>,
+    current_alerts: Mutex<Option<RuntimeAlertOverrides>>,
+}
+
+struct RuntimeWorkerBaseline {
+    source: RuntimeWorkerConfigSource,
+    fingerprint: RequestHash,
+    mail_delivery: AdminRuntimeMailDeliveryBudget,
 }
 
 impl TomlRuntimeFileStore {
-    /// 校验规范化绝对路径和受信任的父目录；只保留 OTLP 头存在性与 Worker 非敏感预算快照。
+    /// 校验规范化绝对路径和受信任的父目录；只保留 OTLP 头存在性与 Worker 非敏感校验基值。
     pub fn new(
         path: impl AsRef<Path>,
         tracing_headers_configured: bool,
-        worker_budget: Option<AdminRuntimeMailDeliveryBudget>,
+        worker_source: Option<RuntimeWorkerConfigSource>,
     ) -> Result<Self, RuntimeFileStoreError> {
         let path = path.as_ref().to_owned();
         if !path.is_absolute()
@@ -82,11 +94,27 @@ impl TomlRuntimeFileStore {
         }
         let directory = path.parent().ok_or(RuntimeFileStoreError::InvalidPath)?;
         validate_directory(directory)?;
+        let worker = worker_source
+            .map(|source| {
+                let file = source.read()?;
+                let fingerprint = file.fingerprint();
+                let deployment = file.parse(&path)?;
+                Ok(RuntimeWorkerBaseline {
+                    source,
+                    fingerprint,
+                    mail_delivery: deployment.mail_delivery_budget(),
+                })
+            })
+            .transpose()
+            .map_err(|error: ConfigError| {
+                RuntimeFileStoreError::InvalidDocument(error.to_string())
+            })?;
         Ok(Self {
             lock_path: directory.join(".admin-runtime-config.lock"),
             path,
             tracing_headers_configured,
-            worker_budget,
+            worker,
+            current_alerts: Mutex::new(None),
         })
     }
 
@@ -151,6 +179,12 @@ impl TomlRuntimeFileStore {
             toml::from_str(&contents).map_err(|_| RuntimeFileStoreError::Parse)?;
         self.validate_document(&document, auction_time::Timestamp::now())
             .map_err(|error| RuntimeFileStoreError::InvalidDocument(error.to_string()))?;
+        let alerts = RuntimeAlertOverrides::from_document(&document);
+        // 保存每次在 workflow 锁与指纹 fence 内回读当前文件，校验不得用上一次写入的状态。
+        let mut current_alerts = self.current_alerts.lock().map_err(|error| {
+            RuntimeFileStoreError::Io(format!("runtime 告警校验快照锁失败：{error}"))
+        })?;
+        *current_alerts = Some(alerts);
         Ok(AdminRuntimeSnapshot {
             fingerprint: document.fingerprint(),
             document,
@@ -162,11 +196,11 @@ impl TomlRuntimeFileStore {
         &self,
         document: &AdminRuntimeDocument,
         now: auction_time::Timestamp,
-    ) -> Result<(), auction_application::admin::AdminRuntimeConfigError> {
+    ) -> Result<(), AdminRuntimeConfigError> {
         validate_runtime_document(document, now)?;
         // headers 只由敏感部署文件拥有；不能保存一个重启后必因遗留 headers 而失败的关闭候选。
         if !document.tracing.enabled && self.tracing_headers_configured {
-            return Err(auction_application::admin::AdminRuntimeConfigError::InvalidDocument(
+            return Err(AdminRuntimeConfigError::InvalidDocument(
                 "关闭 tracing 前须先移除敏感 TOML 的 admin_otlp_headers 并重启 Admin".to_owned(),
             ));
         }
@@ -285,11 +319,44 @@ impl AdminRuntimeFileStore for TomlRuntimeFileStore {
         now: auction_time::Timestamp,
     ) -> Result<(), ApplicationError> {
         self.validate_document(document, now).map_err(ApplicationError::from)?;
-        // 保存只使用启动时冻结的真实部署基值，不在同步候选校验路径读取文件或猜测 defaults。
         if let Some(operations) = &document.operations {
-            operations.validate_mail_delivery_budget(self.worker_budget)?;
+            operations.validate_mail_delivery_budget(
+                self.worker.as_ref().map(|base| base.mail_delivery),
+            )?;
         }
-        Ok(())
+        let candidate = RuntimeAlertOverrides::from_document(document);
+        let changes_alerts = self
+            .current_alerts
+            .lock()
+            .map_err(|error| {
+                AdminRuntimeFileError::Unavailable(format!("runtime 告警校验快照锁失败：{error}"))
+            })?
+            .as_ref()
+            != Some(&candidate);
+        if !changes_alerts {
+            return Ok(());
+        }
+        let invalid = |reason: &str| AdminRuntimeConfigError::InvalidDocument(reason.to_owned());
+        let worker = self
+            .worker
+            .as_ref()
+            .ok_or_else(|| invalid(AdminRuntimeAlertsConfig::WORKER_CONFIG_REQUIRED_HINT))?;
+        // 登记命令前先核对原文指纹；内容损坏也属于部署变更，解析使用刚通过 fence 的同一份原文。
+        let Ok(file) = worker.source.read() else {
+            return Err(invalid(AdminRuntimeAlertsConfig::WORKER_CONFIG_UNREADABLE_HINT).into());
+        };
+        if file.fingerprint() != worker.fingerprint {
+            return Err(invalid(AdminRuntimeAlertsConfig::WORKER_CONFIG_CHANGED_HINT).into());
+        }
+        file.parse(&self.path)
+            .and_then(|deployment| deployment.validate_runtime(document.clone()))
+            .map_err(|error| {
+                invalid(match error {
+                    ConfigError::InvalidOperationsAlertConfig(reason) => reason,
+                    _ => "候选未通过 Worker 启动配置校验",
+                })
+                .into()
+            })
     }
 
     fn current(&self) -> ApplicationFuture<'_, AdminRuntimeSnapshot> {

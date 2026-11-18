@@ -1,13 +1,18 @@
 //! 详情读取恢复队列：短事务锁定邮箱租约，GET 前提交摘要；入站提交原子删除完成前缀。
 
 use auction_application::core::ApplicationError;
+use auction_application::core::lower_hex;
 use auction_application::mail::{MailPollClaim, MailPollReadSummary};
+use sha2::{Digest, Sha256};
 use sqlx::{Postgres, Row};
 
 use crate::database::TrackedPool;
 use crate::database::TrackedTransaction as Transaction;
 use crate::database::storage_error;
 use crate::database::storage_error_from;
+
+// Inbox 解析会折叠空白。用两个空格区分新摘要与历史原主题，同时保留旧 Worker 可读的单行形状。
+const SUBJECT_DIGEST_PREFIX: &str = "sha256:  ";
 
 pub(super) async fn pending(
     pool: &TrackedPool<Postgres>,
@@ -63,11 +68,21 @@ pub(super) async fn stage(
     world_id: &str,
     summaries: &[MailPollReadSummary],
 ) -> Result<(), ApplicationError> {
-    // 入口已校验批次上限及 MID 唯一性；数组只借用原摘要，固定 SQL 不随批次大小膨胀。
+    if summaries.iter().any(|summary| summary.subject.starts_with(SUBJECT_DIGEST_PREFIX)) {
+        return Err(storage_error("MoogleMail 待读主题包含保留前缀"));
+    }
+    // 入口已校验批次上限及 MID 唯一性；使用固定 SQL 批量登记。
     let external_mail_ids =
         summaries.iter().map(|summary| summary.external_mail_id.as_str()).collect::<Vec<_>>();
     let senders = summaries.iter().map(|summary| summary.sender.as_str()).collect::<Vec<_>>();
-    let subjects = summaries.iter().map(|summary| summary.subject.as_str()).collect::<Vec<_>>();
+    // 恢复按 MID 取详情，重复登记仍须核对完整主题身份；只持久化摘要，避免明文凭据入库。
+    let subjects = summaries
+        .iter()
+        .map(|summary| {
+            let digest = Sha256::digest(summary.subject.as_bytes());
+            format!("{SUBJECT_DIGEST_PREFIX}{}", lower_hex(&digest))
+        })
+        .collect::<Vec<_>>();
     let received_at = summaries.iter().map(|summary| summary.received_at).collect::<Vec<_>>();
     let mut transaction = pool
         .begin()
@@ -87,7 +102,10 @@ pub(super) async fn stage(
          SET external_mail_id = EXCLUDED.external_mail_id
          WHERE mail_poll_pending_reads.world_id = EXCLUDED.world_id
            AND mail_poll_pending_reads.sender = EXCLUDED.sender
-           AND mail_poll_pending_reads.subject = EXCLUDED.subject
+           AND (CASE WHEN starts_with(mail_poll_pending_reads.subject, $7)
+                     THEN mail_poll_pending_reads.subject
+                     ELSE $7 || encode(sha256(convert_to(mail_poll_pending_reads.subject, 'UTF8')), 'hex')
+                END) COLLATE \"C\" = EXCLUDED.subject
            AND mail_poll_pending_reads.received_at = EXCLUDED.received_at",
     )
     .bind(&claim.mailbox_key)
@@ -96,6 +114,7 @@ pub(super) async fn stage(
     .bind(&senders)
     .bind(&subjects)
     .bind(&received_at)
+    .bind(SUBJECT_DIGEST_PREFIX)
     .execute(&mut *transaction)
     .await
     .map_err(|error| storage_error_from(error, "登记 MoogleMail 待读身份失败"))?;

@@ -5,8 +5,9 @@
 use std::net::SocketAddr;
 
 use auction_application::admin::{
-    AdminRuntimeCommandError, AdminRuntimeConfigError, AdminRuntimeDocument, AdminRuntimeFileError,
-    AdminRuntimeMailConfig, AdminRuntimeSnapshot, AdminRuntimeUpdateCommand,
+    AdminRuntimeAlertsConfig, AdminRuntimeCommandError, AdminRuntimeConfigError,
+    AdminRuntimeDocument, AdminRuntimeFileError, AdminRuntimeMailConfig, AdminRuntimeSnapshot,
+    AdminRuntimeUpdateCommand,
 };
 use auction_application::core::ApplicationError;
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
@@ -103,15 +104,10 @@ pub(crate) async fn validate(
     let Some(port) = state.admin_runtime() else {
         return feature_unavailable(RUNTIME_CONFIG_FILE_MISSING);
     };
-    // 扩展投影要给出保存后的生效阈值：候选按与保存相同的规则对当前文件落成（省略的兼容字段
-    // 沿用当前值），只读当前文件，不写文件或命令账本。缺省投影不显示该字段，保持原行为。
-    let document = if projection.collection_overdue_threshold {
-        match port.current().await {
-            Ok(current) => document.resolve_update(&current.document),
-            Err(error) => return map_error(error),
-        }
-    } else {
-        document
+    // 两种投影都校验同一份落成候选；省略的兼容字段沿用当前值。
+    let document = match port.current().await {
+        Ok(current) => document.resolve_update(&current.document),
+        Err(error) => return map_error(error),
     };
     let snapshot = match port.validate(document) {
         Ok(snapshot) => snapshot,
@@ -330,10 +326,28 @@ fn map_error(error: ApplicationError) -> Response {
     let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
     let body = || match error {
         ApplicationError::AdminRuntime(
-            AdminRuntimeConfigError::InvalidDocument(_)
-            | AdminRuntimeConfigError::InvalidCommand(_),
-        ) => api_error(StatusCode::BAD_REQUEST, "invalid_runtime_config", "runtime 配置文档无效")
-            .into_response(),
+            error @ (AdminRuntimeConfigError::InvalidDocument(_)
+            | AdminRuntimeConfigError::InvalidCommand(_)),
+        ) => {
+            // 只匹配固定指引，避免将配置错误的底层细节或路径带进 DTO。
+            let hint = if let AdminRuntimeConfigError::InvalidDocument(reason) = error {
+                [
+                    AdminRuntimeAlertsConfig::WORKER_CONFIG_REQUIRED_HINT,
+                    AdminRuntimeAlertsConfig::WORKER_CONFIG_UNREADABLE_HINT,
+                    AdminRuntimeAlertsConfig::WORKER_CONFIG_CHANGED_HINT,
+                ]
+                .into_iter()
+                .find(|hint| *hint == reason.as_str())
+            } else {
+                None
+            };
+            api_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_runtime_config",
+                hint.unwrap_or("runtime 配置文档无效"),
+            )
+            .into_response()
+        }
         ApplicationError::AdminRuntime(AdminRuntimeConfigError::StaleFingerprint)
         | ApplicationError::AdminRuntime(AdminRuntimeConfigError::CommandConflict)
         | ApplicationError::AdminRuntimeFile(AdminRuntimeFileError::Conflict)

@@ -6,4 +6,5 @@ mod build;
 mod load;
 mod model;
 
+pub use load::RuntimeWorkerConfigSource;
 pub use model::AppConfig;

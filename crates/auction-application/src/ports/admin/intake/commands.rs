@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use auction_domain::{CommandId, valid_text};
+use auction_domain::{CommandId, MAX_BID_AMOUNT, valid_text};
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -52,9 +52,10 @@ impl AdminIntakeCommand {
 
     /// 校验不依赖数据库状态的命令字段。
     pub fn validate(&self) -> Result<(), AdminIntakeError> {
+        // 起拍价超过合法出价上限时拒绝录入，避免持久化无法竞价的拍品。
         if self.command_id.is_nil()
             || !matches!(self.world_id.as_str(), "main" | "isekai")
-            || self.start_price <= 0
+            || !(1..=MAX_BID_AMOUNT).contains(&self.start_price)
             || !valid_text(&self.player_id, 256)
             || !valid_text(&self.actor_id, 128)
             || self.request_id.as_deref().is_some_and(|value| !valid_text(value, 128))
@@ -108,5 +109,34 @@ impl AdminIntakeCommand {
                 actor_id: &self.actor_id,
             },
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use auction_domain::MAX_BID_AMOUNT;
+    use uuid::Uuid;
+
+    use super::AdminIntakeCommand;
+    use crate::ports::admin::AdminIntakeError;
+
+    #[test]
+    fn manual_intake_accepts_only_reachable_new_start_prices() {
+        let mut command = AdminIntakeCommand {
+            command_id: Uuid::new_v4().into(),
+            world_id: "main".to_owned(),
+            source_kind: None,
+            equipment_url: Some("https://example.invalid/equip/123/0123456789".to_owned()),
+            equipment: None,
+            start_price: MAX_BID_AMOUNT,
+            player_id: "Player".to_owned(),
+            actor_id: "operator".to_owned(),
+            request_id: None,
+        };
+        assert_eq!(command.validate(), Ok(()));
+        for price in [0, MAX_BID_AMOUNT + 1] {
+            command.start_price = price;
+            assert_eq!(command.validate(), Err(AdminIntakeError::InvalidCommand));
+        }
     }
 }

@@ -8,13 +8,18 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::ports::mail::processing::MailMessage;
+use crate::ports::mail::processing::{MailEquipmentAttachment, MailMessage};
+use crate::ports::settlement::system_returned_settlement_obligation_id;
 
 pub const MAIL_DISPLAY_SCHEMA_VERSION: u8 = 1;
 pub const MAIL_DISPLAY_REDACTION_VERSION: u8 = 1;
+const MAX_SUBJECT_BYTES: usize = 512;
 const MAX_BODY_BYTES: usize = 64 * 1024;
 const MAX_JSON_BYTES: usize = 128 * 1024;
 const MAX_ATTACHMENT_IDS: usize = 1000;
+const LOGIN_KEY_TEXT_LENGTH: usize = 43;
+const MANUAL_KEY_MIN_BYTES: usize = 32;
+const REDACTED: &str = "[REDACTED]";
 
 /// 可持久化到 Admin 审查详情的 MoogleMail 原始信息安全投影。
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -57,14 +62,7 @@ impl MailDisplaySnapshot {
         let body = if authentication_subject(&message.subject) {
             "[REDACTED: authentication message]".to_owned()
         } else {
-            let mut keys = HashSet::with_capacity(message.attachments.len());
-            let hash_state = RandomState::new();
-            for attachment in &message.attachments {
-                let fingerprint =
-                    attachment.key.with_bytes(|key| key_fingerprint(key, &hash_state)).ok()?;
-                keys.insert(fingerprint);
-            }
-            redact_body(&message.body, &keys, &hash_state)
+            redact_message_text(&message.body, &message.attachments, MAX_BODY_BYTES)?
         };
         let snapshot = Self {
             schema_version: MAIL_DISPLAY_SCHEMA_VERSION,
@@ -75,6 +73,26 @@ impl MailDisplaySnapshot {
             cod: message.cod,
         };
         snapshot.validate().then_some(snapshot)
+    }
+
+    /// 在入站展示字段与 Admin 投影中遮蔽主题里的认证 key 和装备 key。
+    pub fn redact_subject(
+        sender: &str,
+        subject: &str,
+        attachments: &[MailEquipmentAttachment],
+    ) -> String {
+        // 恢复与领取核验会重读规范系统退件主题。其闭集格式只有固定文案与义务 UUID，
+        // 即使 UUID 的一段恰好与附件 key 重合，也须原样保留来源证据。
+        if system_returned_settlement_obligation_id(sender, subject).is_some() {
+            return subject.to_owned();
+        }
+        redact_message_text(subject, attachments, MAX_SUBJECT_BYTES)
+            .unwrap_or_else(|| REDACTED.to_owned())
+    }
+
+    /// 对历史展示正文重新应用当前脱敏规则，此时可用的附件信息只有 ID。
+    pub fn redact_stored_body(body: &str) -> String {
+        redact_text(body, None, MAX_BODY_BYTES)
     }
 
     /// 校验展示投影边界和版本闭集。
@@ -114,11 +132,36 @@ fn key_fingerprint(key: &[u8], state: &RandomState) -> u64 {
     hasher.finish()
 }
 
-fn redact_body(source: &str, keys: &HashSet<u64>, hash_state: &RandomState) -> String {
-    let mut ranges = url_key_ranges(source).collect::<Vec<_>>();
-    // 原始 key 不离开同步借用；集合仅保留本次随机盐指纹，碰撞最多额外屏蔽正文。
+fn redact_message_text(
+    source: &str,
+    attachments: &[MailEquipmentAttachment],
+    maximum_bytes: usize,
+) -> Option<String> {
+    if attachments.is_empty() {
+        return Some(redact_text(source, None, maximum_bytes));
+    }
+    let mut keys = HashSet::with_capacity(attachments.len());
+    let hash_state = RandomState::new();
+    for attachment in attachments {
+        let fingerprint =
+            attachment.key.with_bytes(|key| key_fingerprint(key, &hash_state)).ok()?;
+        keys.insert(fingerprint);
+    }
+    Some(redact_text(source, Some((&keys, &hash_state)), maximum_bytes))
+}
+
+fn redact_text(
+    source: &str,
+    attachment_keys: Option<(&HashSet<u64>, &RandomState)>,
+    maximum_bytes: usize,
+) -> String {
+    let mut ranges = url_key_ranges(source)
+        .chain(credential_token_ranges(source, attachment_keys.is_none()))
+        .chain(labeled_key_ranges(source))
+        .collect::<Vec<_>>();
+    // 原始 key 不离开同步借用；集合仅保留本次随机盐指纹，碰撞最多额外屏蔽展示文本。
     // 附件 key 固定十字节；一次扫描同时匹配全部 key，成本不随附件数乘倍增长。
-    if !keys.is_empty() {
+    if let Some((keys, hash_state)) = attachment_keys {
         for (start, window) in source.as_bytes().windows(10).enumerate() {
             if keys.contains(&key_fingerprint(window, hash_state))
                 && source.is_char_boundary(start)
@@ -144,11 +187,87 @@ fn redact_body(source: &str, keys: &HashSet<u64>, hash_state: &RandomState) -> S
     let mut offset = 0;
     for (start, end) in merged {
         redacted.push_str(&source[offset..start]);
-        redacted.push_str("[REDACTED]");
+        redacted.push_str(REDACTED);
         offset = end;
     }
     redacted.push_str(&source[offset..]);
-    redacted
+    // 短凭据替换后仍须满足展示字段上限，避免脱敏阻断入站提交。
+    if redacted.len() <= maximum_bytes { redacted } else { REDACTED.to_owned() }
+}
+
+fn credential_token_ranges(
+    text: &str,
+    redact_bare_equipment: bool,
+) -> impl Iterator<Item = (usize, usize)> + '_ {
+    let mut start = 0;
+    text.as_bytes()
+        .split(|byte| !byte.is_ascii_alphanumeric() && !matches!(*byte, b'-' | b'_'))
+        .filter_map(move |token| {
+            let end = start + token.len();
+            let range = (start, end);
+            start = end + 1;
+            // 历史投影没有附件明文，保守遮蔽所有独立的十位十六进制值。
+            (token.len() == LOGIN_KEY_TEXT_LENGTH
+                || redact_bare_equipment
+                    && token.len() == 10
+                    && token.iter().all(u8::is_ascii_hexdigit))
+            .then_some(range)
+        })
+}
+
+fn labeled_key_ranges(text: &str) -> impl Iterator<Item = (usize, usize)> + '_ {
+    let mut line_offset = 0;
+    text.split_inclusive(['\r', '\n']).filter_map(move |line| {
+        let offset = line_offset;
+        line_offset += line.len();
+        let line = line.trim_end_matches(['\r', '\n']);
+        let value = labeled_key_value(line)?;
+        Some((offset + line.len() - value.len(), offset + line.len()))
+    })
+}
+
+fn labeled_key_value(line: &str) -> Option<&str> {
+    let line = line.trim_start();
+    // 单独的 key 只在行首或有赋值分隔符时视作标签，以免遮蔽普通行文。
+    line.as_bytes().windows(3).enumerate().find_map(|(start, marker)| {
+        if !marker.eq_ignore_ascii_case(b"key") {
+            return None;
+        }
+        let before = &line[..start];
+        if before.chars().next_back().is_some_and(label_word_character) {
+            return None;
+        }
+        let tail = &line[start + 3..];
+        let prefix = before.trim_end();
+        if ends_with_login_label(prefix) && !tail.starts_with(char::is_alphanumeric) {
+            // 明确的 login key / 登录 key 标签后，只要到行尾还有任何字符（含空白与标点），
+            // 就遮蔽整段原文，不裁剪、不找分隔符、不设长度门槛。
+            return (!tail.is_empty()).then_some(tail);
+        }
+        let value = tail.trim_start();
+        if let Some(value) = value.strip_prefix([':', '：', '=']) {
+            let value = value.trim_start();
+            return (!value.is_empty()).then_some(value);
+        }
+        (prefix.is_empty() && tail.len() > value.len() && value.len() >= MANUAL_KEY_MIN_BYTES)
+            .then_some(value)
+    })
+}
+
+fn ends_with_login_label(prefix: &str) -> bool {
+    ["login", "登录"].into_iter().any(|label| {
+        let Some(start) = prefix.len().checked_sub(label.len()) else {
+            return false;
+        };
+        prefix.get(start..).is_some_and(|tail| {
+            tail.eq_ignore_ascii_case(label)
+                && !prefix[..start].chars().next_back().is_some_and(label_word_character)
+        })
+    })
+}
+
+fn label_word_character(ch: char) -> bool {
+    ch.is_alphanumeric() || matches!(ch, '_' | '-')
 }
 
 fn url_key_ranges(text: &str) -> impl Iterator<Item = (usize, usize)> + '_ {
@@ -164,4 +283,108 @@ fn url_key_ranges(text: &str) -> impl Iterator<Item = (usize, usize)> + '_ {
             && text.is_char_boundary(end))
         .then_some((slash + 1, end))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use auction_domain::{EquipmentKey, SettlementObligationKind};
+    use auction_time::Timestamp;
+    use uuid::Uuid;
+
+    use super::MailDisplaySnapshot;
+    use crate::ports::mail::processing::{MailEquipmentAttachment, MailMessage};
+    use crate::ports::settlement::{SYSTEM_RETURN_SENDER, system_return_matches_obligation};
+
+    #[test]
+    fn message_text_redacts_login_urls_and_known_attachment_keys() {
+        let text = "凭据(AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA) https://example.invalid/equip/123/0123abcdef 3D2F1E0C9B";
+        let safe = "凭据([REDACTED]) https://example.invalid/equip/123/[REDACTED] [REDACTED]";
+        let mut message = MailMessage {
+            mailbox_key: "main".to_owned(),
+            external_mail_id: "9001".to_owned(),
+            world_id: "main".to_owned(),
+            received_at: Timestamp::from_timestamp(1_800_000_000, 0).unwrap(),
+            sender: "Player".to_owned(),
+            subject: text.to_owned(),
+            body: text.to_owned(),
+            credits: 0,
+            cod: 0,
+            attachments: vec![MailEquipmentAttachment {
+                external_equipment_id: "123".to_owned(),
+                key: EquipmentKey::new("3d2f1e0c9b").unwrap(),
+            }],
+            returnable: false,
+            claimable: true,
+            content_digest: [1; 32],
+        };
+        assert_eq!(MailDisplaySnapshot::from_message(&message).unwrap().body, safe);
+        assert_eq!(
+            MailDisplaySnapshot::redact_subject(
+                &message.sender,
+                &message.subject,
+                &message.attachments
+            ),
+            safe,
+        );
+        let manual = "补充说明：登录 key 多字节 夹杂 空格 与标点! 这不是可通过形态识别的值";
+        message.subject = manual.to_owned();
+        message.body = format!("正常正文\n{manual}\n保留的下一行");
+        assert_eq!(
+            MailDisplaySnapshot::redact_subject(
+                &message.sender,
+                &message.subject,
+                &message.attachments
+            ),
+            "补充说明：登录 key[REDACTED]",
+        );
+        // 主题本身没有认证标记时，正文仍须遮蔽带标签的手工 key。
+        message.subject = "拍卖问题".to_owned();
+        assert_eq!(
+            MailDisplaySnapshot::from_message(&message).unwrap().body,
+            "正常正文\n补充说明：登录 key[REDACTED]\n保留的下一行",
+        );
+        message.body = format!(
+            "补充说明：登录 key {}\n补充说明：登录 key \n补充说明：登录 key",
+            " ".repeat(32)
+        );
+        assert_eq!(
+            MailDisplaySnapshot::from_message(&message).unwrap().body,
+            "补充说明：登录 key[REDACTED]\n补充说明：登录 key[REDACTED]\n补充说明：登录 key",
+        );
+        message.subject = "rekey".to_owned();
+        assert_eq!(
+            MailDisplaySnapshot::from_message(&message).unwrap().body,
+            "[REDACTED: authentication message]"
+        );
+    }
+
+    #[test]
+    fn subject_redaction_preserves_only_canonical_return_proof() {
+        let obligation_id = Uuid::parse_str("5b1c2a9e-1f0d-4c6b-9a7e-3d2f1e0c9b8a").unwrap();
+        let subject = format!("[RTS] Auction payment request [{obligation_id}]");
+        let attachments = [MailEquipmentAttachment {
+            external_equipment_id: "123".to_owned(),
+            key: EquipmentKey::new("3d2f1e0c9b").unwrap(),
+        }];
+        let safe =
+            MailDisplaySnapshot::redact_subject(SYSTEM_RETURN_SENDER, &subject, &attachments);
+        assert_eq!(safe, subject);
+        assert!(system_return_matches_obligation(
+            SYSTEM_RETURN_SENDER,
+            &safe,
+            SettlementObligationKind::WinnerPaymentCarrierCod,
+            obligation_id
+        ));
+
+        let extended = format!("{subject} https://example.invalid/equip/123/0123abcdef");
+        let safe =
+            MailDisplaySnapshot::redact_subject(SYSTEM_RETURN_SENDER, &extended, &attachments);
+        assert!(!safe.contains("0123abcdef"));
+        assert!(!system_return_matches_obligation(
+            SYSTEM_RETURN_SENDER,
+            &safe,
+            SettlementObligationKind::WinnerPaymentCarrierCod,
+            obligation_id
+        ));
+    }
 }

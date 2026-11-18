@@ -178,6 +178,12 @@ fn parse_time(value: Option<&String>) -> Result<Option<Timestamp>, ()> {
 }
 
 fn map_summary(summary: AdminMailIntakeSummary) -> AdminMailIntakeSummaryResponse {
+    // 列表和详情复用同一读时投影，避免把旧行的原主题送到客户端。
+    let subject = summary
+        .sender
+        .as_deref()
+        .zip(summary.subject.as_deref())
+        .map(|(sender, subject)| MailDisplaySnapshot::redact_subject(sender, subject, &[]));
     AdminMailIntakeSummaryResponse {
         id: summary.id.to_string(),
         mailbox_key: summary.mailbox_key,
@@ -189,7 +195,7 @@ fn map_summary(summary: AdminMailIntakeSummary) -> AdminMailIntakeSummaryRespons
         received_at: timestamp(summary.received_at),
         processed_at: timestamp(summary.processed_at),
         sender: summary.sender,
-        subject: summary.subject,
+        subject,
         has_message_display: summary.has_message_display,
     }
 }
@@ -233,7 +239,7 @@ fn map_display(display: MailDisplaySnapshot) -> AdminMailDisplayResponse {
     AdminMailDisplayResponse {
         schema_version: display.schema_version,
         redaction_version: display.redaction_version,
-        body: display.body,
+        body: MailDisplaySnapshot::redact_stored_body(&display.body),
         attachment_ids: display.attachment_ids,
         credits: display.credits,
         cod: display.cod,
@@ -271,5 +277,101 @@ fn map_metadata(metadata: AdminMailIntakeMetadata) -> AdminMailIntakeMetadataRes
         reason_code: metadata.reason_code,
         warning_codes: metadata.warning_codes,
         delivery_ids: metadata.delivery_ids,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use auction_application::admin::{
+        AdminMailIntakeDetail, AdminMailIntakeMetadata, AdminMailIntakeSummary,
+    };
+    use auction_application::mail::MailDisplaySnapshot;
+    use auction_contracts::{AdminMailIntakeDetailResponse, AdminMailIntakeSummaryResponse};
+    use auction_time::Timestamp;
+    use uuid::Uuid;
+
+    use super::{map_detail, map_summary};
+
+    #[test]
+    fn admin_mail_list_and_detail_serialize_only_safe_subjects() {
+        let now = Timestamp::from_timestamp(1_800_000_000, 0).unwrap();
+        let colon_key_subject = format!("补充说明：登录 key {}:", " ".repeat(31));
+        let whitespace_key_subject = format!("补充说明：登录 key {}", " ".repeat(32));
+        for (raw, expected) in [
+            (colon_key_subject.as_str(), "补充说明：登录 key[REDACTED]"),
+            (whitespace_key_subject.as_str(), "补充说明：登录 key[REDACTED]"),
+            ("补充说明：LoGiN KeY =短 值", "补充说明：LoGiN KeY[REDACTED]"),
+            ("key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "key: [REDACTED]"),
+            (
+                "https://example.invalid/equip/123/0123abcdef",
+                "https://example.invalid/equip/123/[REDACTED]",
+            ),
+            ("登录 key = 手工 凭据可含空格! 并非系统签发的密钥形态", "登录 key[REDACTED]"),
+            ("附件 3D2F1E0C9B", "附件 [REDACTED]"),
+            (
+                "补充说明：LoGiN KeY 多字节 夹杂 空格 与标点! 这不是可通过形态识别的值",
+                "补充说明：LoGiN KeY[REDACTED]",
+            ),
+            ("补充说明：登录 key 多字节 夹杂 空格 与标点!", "补充说明：登录 key[REDACTED]"),
+            ("补充说明：登录 key  中 abcdefghijklmnopqrstuvwxyz!", "补充说明：登录 key[REDACTED]"),
+            ("补充说明：LoGiN KeY 短 值", "补充说明：LoGiN KeY[REDACTED]"),
+            ("补充说明：登录 key", "补充说明：登录 key"),
+            (
+                "买家在看 xlogin key 文档和说明 这是一句普通主题",
+                "买家在看 xlogin key 文档和说明 这是一句普通主题",
+            ),
+            ("如何修复 login keyboard", "如何修复 login keyboard"),
+            ("拍卖问题", "拍卖问题"),
+        ] {
+            let summary = AdminMailIntakeSummary {
+                id: Uuid::new_v4(),
+                mailbox_key: "main".to_owned(),
+                external_mail_id: "9001".to_owned(),
+                world_id: "main".to_owned(),
+                kind: "unknown".to_owned(),
+                status: "accepted".to_owned(),
+                decision_code: "ignored".to_owned(),
+                received_at: now,
+                processed_at: now,
+                sender: Some("Player".to_owned()),
+                subject: Some(raw.to_owned()),
+                has_message_display: true,
+            };
+            let list_json = serde_json::to_vec(&map_summary(summary.clone())).unwrap();
+            let list: AdminMailIntakeSummaryResponse = serde_json::from_slice(&list_json).unwrap();
+            assert_eq!(list.subject.as_deref(), Some(expected));
+
+            let detail_json = serde_json::to_vec(&map_detail(AdminMailIntakeDetail {
+                summary,
+                metadata: AdminMailIntakeMetadata {
+                    auction_id: String::new(),
+                    submission_id: String::new(),
+                    user_id: String::new(),
+                    added_count: 0,
+                    existing_count: 0,
+                    preview_revision: 0,
+                    attachment_count: 0,
+                    owner_result_code: String::new(),
+                    reason_code: String::new(),
+                    warning_codes: Vec::new(),
+                    delivery_ids: Vec::new(),
+                },
+                deliveries: Vec::new(),
+                message_display: Some(MailDisplaySnapshot {
+                    schema_version: 1,
+                    redaction_version: 1,
+                    body: raw.to_owned(),
+                    attachment_ids: vec!["123".to_owned()],
+                    credits: 0,
+                    cod: 0,
+                }),
+                equipment_diagnostic: None,
+            }))
+            .unwrap();
+            let detail: AdminMailIntakeDetailResponse =
+                serde_json::from_slice(&detail_json).unwrap();
+            assert_eq!(detail.subject.as_deref(), Some(expected));
+            assert_eq!(detail.message_display.unwrap().body, expected);
+        }
     }
 }

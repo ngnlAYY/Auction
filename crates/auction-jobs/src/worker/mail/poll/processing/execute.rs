@@ -19,7 +19,9 @@ use crate::worker::mail::poll::failure::{
     MailPollFailureContext, MailPollMetricContext, record_failure, record_failure_with_prefix,
     safe_failure_code, safe_failure_detail,
 };
-use crate::worker::mail::poll::mapping::{intake_from_message, pending_decision, valid_page};
+use crate::worker::mail::poll::mapping::{
+    intake_from_message, intake_subject, pending_decision, valid_page,
+};
 
 pub(super) async fn process_claim_inner<C>(
     context: MailPollProcessContext<C>,
@@ -235,6 +237,8 @@ where
             budget_exhausted = true;
             break;
         };
+        // 在业务 envelope 释放附件 key 前生成安全主题。分类与协议匹配继续使用原主题。
+        let subject = intake_subject(&message);
         let decision = match (processor.as_ref(), message.business.take()) {
             (Some(processor), Some(business)) => {
                 let diagnostic =
@@ -322,7 +326,7 @@ where
             (None, Some(_)) | (None, None) => pending_decision(&message),
         };
         let external_mail_id = message.external_mail_id.clone();
-        items.push(intake_from_message(&claim.mailbox_key, message, decision, polled_at));
+        items.push(intake_from_message(&claim.mailbox_key, message, decision, polled_at, subject));
         last_completed_external_mail_id = Some(external_mail_id);
     }
     if let Some((code, detail)) = suffix_failure {

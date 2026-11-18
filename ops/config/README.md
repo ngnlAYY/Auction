@@ -194,6 +194,12 @@ runtime 文件让运营人员在 Admin 页面修改部分参数。Admin 是唯�
 
 `[operations.<组>]` 的 `managed = true` 时覆盖部署配置，`false`（默认）沿用 common 与角色文件。组：`economics`、`schedule`（重启 Admin 与 Worker）；`forum`、`alerts`、`worker`（含 delivery/fulfillment/recovery）、`mail`（含 send_intervals/send_classes；不含全局开关、endpoint、凭据、邮箱身份与诊断路径）。即时生效字段见下表，其余重启 Worker。启用接管时 `config check` 核对 Admin 与 Worker 的有效模板与排期一致。
 
+更改生效的告警配置或邮件世界时（包括撤销 `operations.alerts` 接管或移除 `worlds` 覆盖），Admin 须配置 `worker_config_file`，指向引用同一 runtime 文件的 Worker 角色 TOML。预校验与保存有界重读该角色文件，确认与 Admin 启动时的版本一致，再用实际的 Worker 启动配置加载器校验候选。此路径要求 Admin 能读取该角色文件及其引用的公共与敏感配置。无法读取或角色文件内容已变更时拒绝该变更。修改 Worker 角色文件后重启 Admin，以刷新部署基值。告警接管参数与启用的邮件世界相同的候选无需读取 Worker 配置。
+
+保存校验覆盖告警相关的启动前提，其余装配条件仍由 Worker 在启动时检查，能否启动以实际装配结果为准。修改邮件世界、白名单或轮询计划后，重启前运行 `auction-cli config check` 核对配置。
+
+仅扫描可留空收件人。启用主动发信或 webhook 需要 PostgreSQL；主动发信还需启用 `worker.mooglemail.enabled`、配置邮件凭据与有效的目标世界及收件人。启用 webhook 须提供 `operations_alert_webhook_url`。
+
 ### Worker 热读取字段
 
 Worker 每 30 秒检查 runtime 文件长度与修改时间；变化时先完整校验再原子替换节奏与循环参数，失败保留旧值并告警。热读取只改变节奏、预算与反压，不决定金额、资格、幂等、租约、审计或业务状态。

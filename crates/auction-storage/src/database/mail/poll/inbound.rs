@@ -1,7 +1,7 @@
 //! MoogleMail 入站事实与邮件命令账本的幂等写入。
 
 use auction_application::core::ApplicationError;
-use auction_application::mail::MailPollIntake;
+use auction_application::mail::{MailDisplaySnapshot, MailPollIntake};
 use auction_time::Timestamp;
 use serde_json::Value;
 use sqlx::{Row, types::Json};
@@ -109,6 +109,12 @@ pub(crate) async fn insert_or_verify_intake(
     mailbox_key: &str,
     item: &MailPollIntake,
 ) -> Result<(), ApplicationError> {
+    // 展示字段不得持久化明文凭据。规范系统退件主题仍用于来源证明，幂等只比较原内容摘要。
+    let subject = item
+        .sender
+        .as_deref()
+        .zip(item.subject.as_deref())
+        .map(|(sender, subject)| MailDisplaySnapshot::redact_subject(sender, subject, &[]));
     sqlx::query(
         "INSERT INTO public.inbound_mail
             (id, mailbox_key, external_mail_id, world_id, mail_kind, content_digest,
@@ -129,7 +135,7 @@ pub(crate) async fn insert_or_verify_intake(
     .bind(Json(&item.decision_metadata))
     .bind(item.processed_at)
     .bind(&item.sender)
-    .bind(&item.subject)
+    .bind(subject)
     .bind(item.message_display.as_ref().map(Json))
     .bind(item.equipment_diagnostic.as_ref().map(Json))
     .execute(&mut **transaction)

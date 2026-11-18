@@ -79,9 +79,6 @@ pub(crate) async fn update(
             return internal_error();
         }
     };
-    let Some(port) = state.admin_lot_update() else {
-        return feature_unavailable(DATABASE_NOT_CONFIGURED);
-    };
     let command = AdminLotUpdateCommand {
         command_id: CommandId::from_uuid(input.command_id),
         lot_id: LotId::from_uuid(lot_uuid),
@@ -91,6 +88,12 @@ pub(crate) async fn update(
         actor_id: identity.actor,
         request_id: request_id(&headers),
         request_hash,
+    };
+    if let Err(error) = command.validate() {
+        return map_error(error.into());
+    }
+    let Some(port) = state.admin_lot_update() else {
+        return feature_unavailable(DATABASE_NOT_CONFIGURED);
     };
     let result = match port.update(command).await {
         Ok(result) => result,
@@ -146,4 +149,42 @@ fn map_error(error: ApplicationError) -> Response {
     };
     let response = body();
     diagnostics::mapped_response("admin_lots", "respond_update_failure", diagnostic_kind, response)
+}
+
+#[cfg(test)]
+mod tests {
+    use auction_domain::MAX_BID_AMOUNT;
+    use axum::body::Bytes;
+    use axum::extract::{ConnectInfo, Path};
+    use axum::http::{StatusCode, Uri};
+    use serde_json::json;
+
+    use super::update;
+    use crate::admin::auctions::command_test_support::{VALID_UUID, assert_code, headers, state};
+
+    #[tokio::test]
+    async fn lot_start_price_http_admission_rejects_unreachable_prices() {
+        let address = ConnectInfo("127.0.0.1:1234".parse().unwrap());
+        for (price, status, code) in [
+            (MAX_BID_AMOUNT, StatusCode::NOT_IMPLEMENTED, "feature_not_supported"),
+            (MAX_BID_AMOUNT + 1, StatusCode::BAD_REQUEST, "invalid_lot_command"),
+        ] {
+            let body = json!({
+                "command_id": VALID_UUID,
+                "expected_state_version": 1,
+                "action": "set_start_price",
+                "start_price": price,
+            });
+            let response = update(
+                state(),
+                address,
+                Path(VALID_UUID.to_owned()),
+                headers(),
+                Uri::default(),
+                Bytes::from(body.to_string()),
+            )
+            .await;
+            assert_code(response, status, code).await;
+        }
+    }
 }
