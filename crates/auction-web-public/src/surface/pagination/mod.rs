@@ -1,4 +1,6 @@
 //! Public 列表的统一分页选项、译文和查询状态更新；不改变 Admin 分页策略。
+//! 回调属性须为非可选类型，避免更新时拷入会随临时 VNode 释放的句柄
+//! （Dioxus 0.7.10 的 `dioxus-core-macro/src/props/mod.rs:694–715` 与 `dioxus-core/src/events.rs:555–556`）。
 
 use auction_contracts::MAX_PUBLIC_PAGE_SIZE;
 use auction_web_shared::{Pager, QueryWriteMode, t};
@@ -84,7 +86,7 @@ pub(crate) fn PublicPager(
     max_page_size: Option<i64>,
     label: String,
     on_page_change: EventHandler<i64>,
-    #[props(default)] on_page_clamp: Option<EventHandler<i64>>,
+    #[props(default)] on_page_clamp: Callback<i64, bool>,
     #[props(default)] on_page_size_change: EventHandler<i64>,
 ) -> Element {
     let page_size = page_size.max(1);
@@ -104,18 +106,19 @@ pub(crate) fn PublicPager(
             jump_label: jump_label.unwrap_or_else(|| t!("pagination-jump")),
             jump_button_label: t!("catalog-page-go"),
             total_summary: total.map(|count| t!("pagination-total", count: count)).unwrap_or_default(),
-            range_summary: Some(Callback::new(|(start, end, total_count): (i64, i64, i64)| {
+            show_range_summary: true,
+            range_summary: move |(start, end, total_count): (i64, i64, i64)| {
                 t!(
                     "pagination-range",
                     start: start.to_string(),
                     end: end.to_string(),
                     total: total_count.to_string()
                 )
-            })),
+            },
             page_size_options: if show_size_picker { PUBLIC_PAGE_SIZES.to_vec() } else { Vec::new() },
             page_size_label: t!("pagination-size"),
             // 数量用字符串插值，避免 Fluent 浮点格式化舍入较大的合法 i64。
-            page_size_option_label: Callback::new(move |count: i64| t!("pagination-size-option", count: count.to_string())),
+            page_size_option_label: move |count: i64| t!("pagination-size-option", count: count.to_string()),
             // 自定义输入超过上限时由共享组件提示错误且不提交，不会发出必然 400 的请求。
             max_page_size: Some(maximum),
             allow_custom_page_size: true,
@@ -123,7 +126,7 @@ pub(crate) fn PublicPager(
             page_size_apply_label: t!("pagination-apply"),
             page_size_invalid_label: t!("pagination-size-limit", maximum: maximum.to_string()),
             on_page_change,
-            on_page_clamp,
+            on_page_clamp: move |page| on_page_clamp.call(page),
             on_page_size_change: move |size| {
                 // 共享分页器已拒绝超出上限的数量；这里再守一次，不把它写进地址栏与偏好。
                 if accepted_public_page_size(size).is_none_or(|size| size > maximum) {
@@ -156,12 +159,72 @@ pub(crate) fn PublicPager(
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        cell::{Cell, RefCell},
+        rc::Rc,
+    };
+
     use auction_contracts::MAX_PUBLIC_PAGE_SIZE;
+    use auction_web_shared::i18n::{DEFAULT_PUBLIC_LOCALE, build_bundle};
+    use dioxus::prelude::*;
+    use dioxus_i18n::prelude::try_use_init_i18n_from_bundle;
 
     use super::{
-        DEFAULT_PAGE_SIZE, PUBLIC_PAGE_SIZES, accepted_public_page_size,
-        normalize_public_page_size, parse_public_page_size,
+        DEFAULT_PAGE_SIZE, PUBLIC_PAGE_SIZES, PublicPager, PublicPagerProps,
+        accepted_public_page_size, normalize_public_page_size, parse_public_page_size,
     };
+    use crate::surface::router::PUBLIC_LOCALE_CATALOG;
+
+    #[derive(Default)]
+    struct ClampFixture {
+        revision: Cell<i64>,
+        calls: RefCell<Vec<(i64, i64)>>,
+    }
+
+    fn clamp_fixture() -> Element {
+        try_use_init_i18n_from_bundle(|| {
+            build_bundle(
+                &DEFAULT_PUBLIC_LOCALE,
+                PUBLIC_LOCALE_CATALOG.default_ftl,
+                &DEFAULT_PUBLIC_LOCALE,
+                None,
+            )
+        })
+        .expect("加载公开端英文译文");
+        let fixture = consume_context::<Rc<ClampFixture>>();
+        let revision = fixture.revision.get();
+        let fallback = fixture.clone();
+        let props = PublicPagerProps::builder()
+            .page(if matches!(revision, 1 | 2 | 5) { 2 } else { 10 + revision })
+            .page_size(10)
+            .total(Some(40))
+            .label("翻页".to_owned())
+            .on_page_change(move |page| fallback.calls.borrow_mut().push((-revision, page)));
+        let props = if (1..=3).contains(&revision) {
+            props
+                .on_page_clamp(move |page| fixture.calls.borrow_mut().push((revision, page)))
+                .build()
+        } else {
+            props.build()
+        };
+        rsx! { PublicPager { ..props } }
+    }
+
+    #[test]
+    fn public_clamp_uses_the_latest_callback_and_defaults_to_page_change() {
+        let fixture = Rc::new(ClampFixture::default());
+        let mut dom = VirtualDom::new(clamp_fixture).with_root_context(fixture.clone());
+        dom.rebuild_to_vec();
+        dom.render_immediate_to_vec();
+        assert_eq!(&*fixture.calls.borrow(), &[(0, 4)]);
+        for revision in 1..=5 {
+            fixture.revision.set(revision);
+            dom.mark_dirty(ScopeId::APP);
+            dom.render_immediate_to_vec();
+            dom.render_immediate_to_vec();
+        }
+        assert_eq!(&*fixture.calls.borrow(), &[(0, 4), (3, 4), (-4, 4)]);
+    }
 
     #[test]
     fn page_size_choices_stop_at_the_contract_maximum() {

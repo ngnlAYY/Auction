@@ -2,12 +2,36 @@
 //! 文案一律由调用方经 props 传入，本 crate 不持有任何 i18n key；DOM class
 //! 保持 `ui-pager*` 契约不变。调用方显式提供每页数量选项时才启用数字页码布局。
 //! 页码导航位于数量和跳页之前；数字组独立换行，响应式样式不复制或重挂载表单。
+//! 回调属性须为非可选类型，避免更新时拷入会随临时 VNode 释放的句柄
+//! （Dioxus 0.7.10 的 `dioxus-core-macro/src/props/mod.rs:694–715` 与 `dioxus-core/src/events.rs:555–556`）。
 
+use dioxus::dioxus_core::{SpawnIfAsync, SuperFrom};
 use dioxus::prelude::*;
 
 mod size;
 
 use size::PageSizePicker;
+
+/// 标记分页调用方给出的单位返回值，保留现有闭包与 EventHandler 传参。
+#[doc(hidden)]
+pub struct PaginationCallbackHandled;
+
+impl SpawnIfAsync<PaginationCallbackHandled, bool> for () {
+    fn spawn(self) -> bool {
+        true
+    }
+}
+
+impl<Args: 'static> SuperFrom<EventHandler<Args>, PaginationCallbackHandled>
+    for Callback<Args, bool>
+{
+    fn super_from(handler: EventHandler<Args>) -> Self {
+        Callback::new(move |args| {
+            handler.call(args);
+            true
+        })
+    }
+}
 
 /// 展示长列表分页，并把目标页交给调用页面更新 URL 或查询状态。
 /// - `total: Some(total)`：后端返回总数的稳定分页；
@@ -36,14 +60,14 @@ pub fn Pager(
     jump_label: String,
     jump_button_label: String,
     on_page_change: EventHandler<i64>,
-    /// 非用户操作的页码纠偏；URL 调用方可替换历史记录，省略时沿用 `on_page_change`。
+    /// 非用户操作的页码纠偏。默认回调返回 false，沿用 `on_page_change`；返回 true 表示已纠偏。
     #[props(default)]
-    on_page_clamp: Option<EventHandler<i64>>,
+    on_page_clamp: Callback<i64, bool>,
     /// 非空时启用数字分页与原生数量选择器；选项和文案归调用方。
     #[props(default)]
     page_size_options: Vec<i64>,
     #[props(default)] page_size_label: String,
-    #[props(default)] page_size_option_label: Option<Callback<i64, String>>,
+    #[props(default = |size: i64| size.to_string())] page_size_option_label: Callback<i64, String>,
     /// 可选业务数量上限；默认无限制，保持 Public 既有语义。
     #[props(default)]
     max_page_size: Option<i64>,
@@ -56,10 +80,12 @@ pub fn Pager(
     /// 仅有权威 total 时由调用方提供总数文案，不把当前页长度当总数。
     #[props(default)]
     total_summary: String,
-    /// 数字页码布局左端的条目范围文案；参数为 (起始序号, 结束序号, 总数)。
-    /// 提供后替代 `total_summary`，避免同一工具条重复显示总数。
+    /// 数字页码布局有权威总数时用范围文案替代 `total_summary`，避免重复显示总数。
     #[props(default)]
-    range_summary: Option<Callback<(i64, i64, i64), String>>,
+    show_range_summary: bool,
+    /// 条目范围文案，参数为 (起始序号, 结束序号, 总数)。
+    #[props(default)]
+    range_summary: Callback<(i64, i64, i64), String>,
     #[props(default)] on_page_size_change: EventHandler<i64>,
 ) -> Element {
     let page_size = page_size.max(1);
@@ -78,8 +104,8 @@ pub fn Pager(
     }));
     // 普通 props 不会被 effect 自动追踪；总量收缩后也须让父级重新读取有效页。
     use_effect(use_reactive((&page, &valid_page), move |(page, valid_page)| {
-        if page != valid_page {
-            on_page_clamp.unwrap_or(on_page_change).call(valid_page);
+        if page != valid_page && !on_page_clamp.call(valid_page) {
+            on_page_change.call(valid_page);
         }
     }));
 
@@ -94,7 +120,7 @@ pub fn Pager(
     let can_jump = jump_target.is_some();
     let numbered = !page_size_options.is_empty();
     // 范围按钳制后的有效页计算，总数收缩的瞬间不会显示越界序号；空列表固定为 0–0。
-    let item_range = total.map(|total_items| {
+    let item_range = total.filter(|_| numbered && show_range_summary).map(|total_items| {
         if total_items <= 0 {
             (0, 0, 0)
         } else {
@@ -103,16 +129,13 @@ pub fn Pager(
             (start, end, total_items)
         }
     });
-    let range_rendered = numbered && item_range.is_some() && range_summary.is_some();
 
     rsx! {
         nav {
             class: if numbered { "ui-pager ui-pager--numbered" } else { "ui-pager" },
             aria_label: label,
-            if numbered {
-                if let (Some((start, end, count)), Some(template)) = (item_range, range_summary) {
-                    span { class: "ui-pager__range", {template.call((start, end, count))} }
-                }
+            if let Some(range) = item_range {
+                span { class: "ui-pager__range", {range_summary.call(range)} }
             }
             div { class: "ui-pager__controls",
                 button {
@@ -167,14 +190,15 @@ pub fn Pager(
                 }
             }
             if numbered {
-                if !range_rendered && total.is_some() && !total_summary.is_empty() {
+                if item_range.is_none() && total.is_some() && !total_summary.is_empty() {
                     span { class: "ui-pager__total", "{total_summary}" }
                 }
                 PageSizePicker {
                     page_size,
                     options: page_size_options,
                     label: page_size_label,
-                    option_label: page_size_option_label,
+                    // 选择器持有独立属性槽，格式闭包更新时会重新渲染选项文本。
+                    option_label: move |size| page_size_option_label.call(size),
                     allow_custom: allow_custom_page_size,
                     max_page_size,
                     custom_label: page_size_custom_label,
@@ -234,4 +258,170 @@ fn numbered_pages(page: i64, total_pages: i64) -> impl Iterator<Item = Option<i6
         [Some(1), None, Some(page - 1), Some(page), Some(page + 1), None, Some(total_pages)]
     };
     pages.into_iter().take(total_pages.clamp(0, 7) as usize)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        cell::{Cell, RefCell},
+        rc::Rc,
+    };
+
+    use dioxus::dioxus_core::{Mutation, Mutations};
+    use dioxus::prelude::*;
+
+    use super::size::{PageSizePicker, PageSizePickerProps};
+    use super::{Pager, PagerProps};
+
+    enum PagerCallback {
+        Clamp,
+        SizeLabel,
+        Range,
+    }
+
+    struct Fixture {
+        callback: PagerCallback,
+        revision: Cell<i64>,
+        page_calls: RefCell<Vec<(i64, i64)>>,
+    }
+
+    fn pager_fixture() -> Element {
+        let fixture = consume_context::<Rc<Fixture>>();
+        let revision = fixture.revision.get();
+        let fallback = fixture.clone();
+        let props = PagerProps::builder()
+            .page(if matches!(revision, 1 | 2 | 5) { 4 } else { 10 + revision })
+            .page_size(10)
+            .total(Some(40))
+            .label("翻页".to_owned())
+            .previous_label("上一页".to_owned())
+            .status(|(page, pages)| format!("{page}/{pages}"))
+            .next_label("下一页".to_owned())
+            .jump_label("页码".to_owned())
+            .jump_button_label("跳转".to_owned())
+            .on_page_change(move |page| fallback.page_calls.borrow_mut().push((-revision, page)))
+            .page_size_options(vec![20])
+            .total_summary("共 40 条".to_owned());
+        let props = match (&fixture.callback, revision) {
+            (PagerCallback::Clamp, 1..=3) => props
+                .on_page_clamp(move |page| fixture.page_calls.borrow_mut().push((revision, page)))
+                .build(),
+            (PagerCallback::SizeLabel, 1..=3) => props
+                .page_size_option_label(move |size| format!("{revision}：每页 {size} 条"))
+                .build(),
+            (PagerCallback::Range, 1..=3) => props
+                .show_range_summary(true)
+                .range_summary(move |(start, end, total)| {
+                    format!("{revision}：{start}–{end} / {total}")
+                })
+                .build(),
+            (PagerCallback::Range, 4) => props
+                .range_summary(|_| -> String {
+                    panic!("未启用范围时不能调用范围回调")
+                })
+                .build(),
+            _ => props.build(),
+        };
+        rsx! { Pager { ..props } }
+    }
+
+    fn size_picker_fixture() -> Element {
+        let revision = consume_context::<Rc<Cell<i64>>>().get();
+        let props = PageSizePickerProps::builder()
+            .page_size(10)
+            .options(vec![20])
+            .label("每页数量".to_owned())
+            .allow_custom(false)
+            .custom_label("自定义数量".to_owned())
+            .apply_label("应用".to_owned())
+            .invalid_label("数量无效".to_owned())
+            .on_change(|_| {});
+        let props = if (1..=3).contains(&revision) {
+            props.option_label(move |size| format!("{revision}：每页 {size} 条")).build()
+        } else {
+            props.build()
+        };
+        rsx! { PageSizePicker { ..props } }
+    }
+
+    fn render_at(dom: &mut VirtualDom, revision: &Cell<i64>, value: i64) -> Mutations {
+        revision.set(value);
+        dom.mark_dirty(ScopeId::APP);
+        dom.render_immediate_to_vec()
+    }
+
+    fn has_text(mutations: &Mutations, expected: &str) -> bool {
+        mutations.edits.iter().any(|edit| {
+            matches!(edit, Mutation::CreateTextNode { value, .. } | Mutation::SetText { value, .. }
+                if value == expected)
+        })
+    }
+
+    fn mount_pager(callback: PagerCallback) -> (VirtualDom, Rc<Fixture>, Mutations) {
+        let fixture = Rc::new(Fixture {
+            callback,
+            revision: Cell::new(0),
+            page_calls: RefCell::new(Vec::new()),
+        });
+        let mut dom = VirtualDom::new(pager_fixture).with_root_context(fixture.clone());
+        let initial = dom.rebuild_to_vec();
+        (dom, fixture, initial)
+    }
+
+    #[test]
+    fn clamp_uses_the_latest_callback_and_defaults_to_page_change() {
+        let (mut dom, fixture, _) = mount_pager(PagerCallback::Clamp);
+        dom.render_immediate_to_vec();
+        assert_eq!(&*fixture.page_calls.borrow(), &[(0, 4)]);
+        for revision in 1..=5 {
+            render_at(&mut dom, &fixture.revision, revision);
+            dom.render_immediate_to_vec();
+        }
+        assert_eq!(&*fixture.page_calls.borrow(), &[(0, 4), (3, 4), (-4, 4)]);
+    }
+
+    #[test]
+    fn pager_size_label_updates_and_defaults_to_decimal() {
+        let (mut dom, fixture, initial) = mount_pager(PagerCallback::SizeLabel);
+        assert!(has_text(&initial, "20"));
+        assert!(has_text(&initial, "10"));
+        for revision in 1..=2 {
+            render_at(&mut dom, &fixture.revision, revision);
+        }
+        let latest = render_at(&mut dom, &fixture.revision, 3);
+        assert!(has_text(&latest, "3：每页 20 条"));
+        assert!(has_text(&latest, "3：每页 10 条"));
+        let fallback = render_at(&mut dom, &fixture.revision, 4);
+        assert!(has_text(&fallback, "20"));
+        assert!(has_text(&fallback, "10"));
+    }
+
+    #[test]
+    fn range_summary_updates_and_defaults_to_total_summary() {
+        let (mut dom, fixture, initial) = mount_pager(PagerCallback::Range);
+        assert!(has_text(&initial, "共 40 条"));
+        for revision in 1..=3 {
+            let current = render_at(&mut dom, &fixture.revision, revision);
+            assert!(has_text(&current, &format!("{revision}：31–40 / 40")));
+            assert!(!has_text(&current, "共 40 条"));
+        }
+        assert!(has_text(&render_at(&mut dom, &fixture.revision, 4), "共 40 条"));
+    }
+
+    #[test]
+    fn picker_option_label_updates_and_defaults_to_decimal() {
+        let revision = Rc::new(Cell::new(0));
+        let mut dom = VirtualDom::new(size_picker_fixture).with_root_context(revision.clone());
+        let initial = dom.rebuild_to_vec();
+        assert!(has_text(&initial, "20"));
+        assert!(has_text(&initial, "10"));
+        for value in 1..=3 {
+            let current = render_at(&mut dom, &revision, value);
+            assert!(has_text(&current, &format!("{value}：每页 20 条")));
+            assert!(has_text(&current, &format!("{value}：每页 10 条")));
+        }
+        let fallback = render_at(&mut dom, &revision, 4);
+        assert!(has_text(&fallback, "20"));
+        assert!(has_text(&fallback, "10"));
+    }
 }

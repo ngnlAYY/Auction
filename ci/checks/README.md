@@ -2,7 +2,7 @@
 
 [ci/README.md](../README.md) · [docs/development.md](../../docs/development.md)
 
-[ci/checks/check.sh](check.sh) 是本地与 CI 的共同入口。`all` 包含仓库契约、公开仓库脱敏、目录布局、配置示例、systemd 模板、翻译键、装备诊断闭集、源码计数棘轮、审计写入失败分类、模块层级、Markdown 链接、迁移兼容登记、已发布迁移不可变和 Web 输入依赖闭包检查；完整清单见 [ci/README.md#静态门禁cicheckschecksh](../README.md#静态门禁cicheckschecksh)。`mise run verify` 等价于 `bash ci/checks/check.sh all fmt check dependency-versions lint wasm rustdoc`：先运行 `all`，再依次执行格式、宿主默认 feature 编译、依赖版本、宿主全 feature Clippy、Public/Admin 两组 wasm32 Clippy 与 rustdoc 检查，不运行行为测试。
+[ci/checks/check.sh](check.sh) 是本地与 CI 的共同入口。`all` 包含仓库契约、公开仓库脱敏、目录布局、配置示例、systemd 模板、翻译键、装备诊断闭集、源码计数棘轮、审计写入失败分类、模块层级、Markdown 链接、迁移兼容登记、已发布迁移不可变、Web 输入依赖闭包和 Web 回调属性检查。入口与构型见 [ci/README.md#静态门禁cicheckschecksh](../README.md#静态门禁cicheckschecksh)。`mise run verify` 等价于 `bash ci/checks/check.sh all fmt check dependency-versions lint wasm rustdoc`：先运行 `all`，再依次执行格式、宿主默认 feature 编译、依赖版本、宿主全 feature Clippy、Public/Admin 两组 wasm32 Clippy 与 rustdoc 检查，不运行行为测试。
 
 ## 公开仓库脱敏
 
@@ -58,6 +58,19 @@ bash ci/checks/web-payload-test.sh
 ```
 
 自测在临时目录验证[发布清单门禁](../release/build-identity.sh)接受普通文件和压缩副本，拒绝源码映射、点文件和点目录下的文件，并检查失败时的文件路径诊断。
+
+## Web 回调属性
+
+```bash
+bash ci/checks/check.sh web-callback-props
+bash ci/checks/web-callback-props-test.sh
+```
+
+检查 `auction-web-shared`、`auction-web-public` 与 `auction-web-admin` 的 `src/`。带 `#[component]` 的函数参数和带 `#[derive(Props)]` 的结构体字段拒绝 `Option<EventHandler<…>>` 与 `Option<Callback<…>>`，含限定路径、跨行与省略类型参数的写法。属性识别支持 `r#component`、`r#Props` 及嵌套 `cfg_attr` 中直接声明的这些属性，检查覆盖各构型。结构体的 `where` 子句按配对方括号跳过数组约束。
+
+扫描源码声明并跳过注释、字符串和函数体，类型别名和宏展开需要人工审查。失败按文件和字段或参数的行号报告。
+
+Dioxus 0.7.10 从 `None` 更新可选回调时会复制临时 VNode 的句柄，下一次 diff 释放该句柄的所有者。可省略的回调用非可选类型和属性默认值，使 Dioxus 在原属性槽内更新闭包。相关上游实现位于 `dioxus-core-macro/src/props/mod.rs:694–715` 和 `dioxus-core/src/events.rs:555–556`。
 
 ## unwrap/expect 门禁
 

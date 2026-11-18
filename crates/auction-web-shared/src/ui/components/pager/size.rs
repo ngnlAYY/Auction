@@ -1,4 +1,6 @@
 //! 分页数量预设与正整数输入；只提交可表示的合法整数，不截断或静默修正用户输入。
+//! 回调属性须为非可选类型，避免更新时拷入会随临时 VNode 释放的句柄
+//! （Dioxus 0.7.10 的 `dioxus-core-macro/src/props/mod.rs:694–715` 与 `dioxus-core/src/events.rs:555–556`）。
 
 use dioxus::prelude::*;
 
@@ -8,7 +10,7 @@ pub(super) fn PageSizePicker(
     page_size: i64,
     options: Vec<i64>,
     label: String,
-    option_label: Option<Callback<i64, String>>,
+    #[props(default = |size: i64| size.to_string())] option_label: Callback<i64, String>,
     allow_custom: bool,
     max_page_size: Option<i64>,
     custom_label: String,
@@ -60,12 +62,12 @@ pub(super) fn PageSizePicker(
                         value: size.to_string(),
                         selected: size == page_size,
                         disabled: size <= 0 || max_page_size.is_some_and(|maximum| size > maximum),
-                        {option_label.map_or_else(|| size.to_string(), |label| label.call(size))}
+                        {option_label.call(size)}
                     }
                 }
                 if custom_selected {
                     option { value: page_size.to_string(), selected: true,
-                        {option_label.map_or_else(|| page_size.to_string(), |label| label.call(page_size))}
+                        {option_label.call(page_size)}
                     }
                 }
             }

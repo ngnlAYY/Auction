@@ -38,6 +38,7 @@ bash ci/checks/check.sh <检查项>...
 | `migration-compatibility` | 075 起每个迁移末尾恰好登记自身一次，闭集等级、版本及事务规范见[ci/checks/README.md#迁移兼容登记](checks/README.md#迁移兼容登记) |
 | `published-migrations` | 每个发布 tag（`v<版本>`）中存在的 `migrations/postgres/*.up.sql` 必须在当前工作树逐字节不变；禁止修改、重命名或删除已发布文件，只允许追加新编号 |
 | `web-build-inputs` | 离线核对 Web 指纹清单与浏览器 crate 的工作区路径依赖闭包，见[ci/checks/README.md#web-输入依赖闭包](checks/README.md#web-输入依赖闭包) |
+| `web-callback-props` | 检查三个 Rust Web crate 的组件参数和 `Props` 字段（含 `cfg_attr` 条件声明），拒绝可选的 `EventHandler` 和 `Callback`，见[ci/checks/README.md#web-回调属性](checks/README.md#web-回调属性) |
 | `all` | `repository public-redaction layout import-groups module-docs hot-fields config systemd-templates i18n equipment-contract ratchet audit-writes test-module-paths work-item-ids markdown-links migration-compatibility published-migrations web-build-inputs` |
 | `fmt` | `cargo fmt --all -- --check` |
 | `check` | `cargo check --locked --workspace --all-targets` |

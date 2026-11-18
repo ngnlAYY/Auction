@@ -1,4 +1,6 @@
 //! Admin 分页 owner：数量 URL、独立本地偏好、共享控件与请求身份门禁。
+//! 回调属性须为非可选类型，避免更新时拷入会随临时 VNode 释放的句柄
+//! （Dioxus 0.7.10 的 `dioxus-core-macro/src/props/mod.rs:694–715` 与 `dioxus-core/src/events.rs:555–556`）。
 
 use std::{future::Future, rc::Rc};
 
@@ -132,8 +134,9 @@ pub(crate) fn AdminPager(
     #[props(default)]
     local: bool,
     /// 目录数量变化只重置目录页，不清除其他独立报告分页或命令上下文。
+    /// 返回 true 表示已重置，缺省回调返回 false，由常规翻页动作回到首页。
     #[props(default)]
-    on_size_reset: Option<EventHandler<()>>,
+    on_size_reset: Callback<(), bool>,
 ) -> Element {
     let max_page =
         pagination.max_offset.checked_div(page_size.max(1)).unwrap_or(0).saturating_add(1);
@@ -151,17 +154,18 @@ pub(crate) fn AdminPager(
             jump_label: t!("admin-pagination-input"),
             jump_button_label: t!("admin-pagination-go"),
             total_summary: total.map(|count| t!("admin-pagination-total", count: count.to_string())).unwrap_or_default(),
-            range_summary: Some(Callback::new(|(start, end, total_count): (i64, i64, i64)| {
+            show_range_summary: true,
+            range_summary: move |(start, end, total_count): (i64, i64, i64)| {
                 t!(
                     "admin-pagination-range",
                     start: start.to_string(),
                     end: end.to_string(),
                     total: total_count.to_string()
                 )
-            })),
+            },
             page_size_options: vec![10, 20, 50, 100],
             page_size_label: t!("admin-pagination-size"),
-            page_size_option_label: Callback::new(move |count: i64| t!("admin-pagination-size-option", count: count.to_string())),
+            page_size_option_label: move |count: i64| t!("admin-pagination-size-option", count: count.to_string()),
             allow_custom_page_size: true,
             page_size_custom_label: t!("admin-pagination-custom"),
             page_size_apply_label: t!("admin-pagination-apply"),
@@ -178,9 +182,7 @@ pub(crate) fn AdminPager(
                 // 先固定离开历史项的旧数量，随后由原页面 push 首页，再 replace 新数量。
                 // 各 hook 只写自己拥有的键，保留筛选、排序及未知参数。
                 write_query_pairs(pagination.keys, &[(pagination.keys[0].to_owned(), pagination.size().to_string())], QueryWriteMode::Replace);
-                if let Some(reset) = on_size_reset {
-                    reset.call(());
-                } else {
+                if !on_size_reset.call(()) {
                     on_page_change.call(1);
                 }
                 let mut query = pagination.query.clone();
@@ -188,5 +190,93 @@ pub(crate) fn AdminPager(
                 preferences::save(pagination.scope, size);
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::{Cell, RefCell};
+    use std::rc::Rc;
+
+    use auction_web_shared::i18n::{DEFAULT_ADMIN_LOCALE, build_bundle};
+    use dioxus::dioxus_core::{ElementId, Mutation};
+    use dioxus::prelude::*;
+    use dioxus_i18n::prelude::try_use_init_i18n_from_bundle;
+
+    use super::{AdminPager, AdminPagerProps, use_admin_pagination};
+    use crate::surface::ADMIN_LOCALE_CATALOG;
+    use crate::surface::test_events::dispatch_form_event;
+
+    #[derive(Default)]
+    struct ResetFixture {
+        revision: Cell<i64>,
+        calls: RefCell<Vec<(i64, i64)>>,
+    }
+
+    fn reset_fixture() -> Element {
+        try_use_init_i18n_from_bundle(|| {
+            build_bundle(
+                &DEFAULT_ADMIN_LOCALE,
+                ADMIN_LOCALE_CATALOG.default_ftl,
+                &DEFAULT_ADMIN_LOCALE,
+                None,
+            )
+        })
+        .expect("加载管理端中文译文");
+        let fixture = consume_context::<Rc<ResetFixture>>();
+        let revision = fixture.revision.get();
+        let pagination = use_admin_pagination("test", &["page_size"], None, 10_000);
+        let page_size = pagination.size();
+        let fallback = fixture.clone();
+        let props = AdminPagerProps::builder()
+            .pagination(pagination)
+            .page(1)
+            .page_size(page_size)
+            .total(Some(100))
+            .label(format!("分页 {revision}"))
+            .on_page_change(move |page| fallback.calls.borrow_mut().push((-revision, page)));
+        let props = if (1..=3).contains(&revision) {
+            props.on_size_reset(move |()| fixture.calls.borrow_mut().push((revision, 1))).build()
+        } else {
+            props.build()
+        };
+        rsx! { AdminPager { ..props } }
+    }
+
+    fn choose_size(dom: &VirtualDom, select: ElementId, value: &str) {
+        // Dioxus 的事件转换器是进程级状态，与其他表单回归共用同一处注册。
+        dispatch_form_event(dom, select, "change", value);
+    }
+
+    #[test]
+    fn size_reset_uses_the_latest_callback_and_defaults_to_first_page() {
+        let fixture = Rc::new(ResetFixture::default());
+        let mut dom = VirtualDom::new(reset_fixture).with_root_context(fixture.clone());
+        let select = dom
+            .rebuild_to_vec()
+            .edits
+            .into_iter()
+            .find_map(|edit| match edit {
+                Mutation::NewEventListener { name, id } if name == "change" => Some(id),
+                _ => None,
+            })
+            .expect("每页数量选择器已挂载");
+        choose_size(&dom, select, "20");
+        dom.render_immediate_to_vec();
+        assert_eq!(&*fixture.calls.borrow(), &[(0, 1)]);
+
+        for revision in 1..=3 {
+            fixture.revision.set(revision);
+            dom.mark_dirty(ScopeId::APP);
+            dom.render_immediate_to_vec();
+        }
+        choose_size(&dom, select, "50");
+        assert_eq!(&*fixture.calls.borrow(), &[(0, 1), (3, 1)]);
+
+        fixture.revision.set(4);
+        dom.mark_dirty(ScopeId::APP);
+        dom.render_immediate_to_vec();
+        choose_size(&dom, select, "100");
+        assert_eq!(&*fixture.calls.borrow(), &[(0, 1), (3, 1), (-4, 1)]);
     }
 }

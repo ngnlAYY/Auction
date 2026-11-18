@@ -626,6 +626,12 @@ check_web_build_inputs() (
 		perl ci/checks/web-build-inputs.pl "${web_workspace_dependency_paths[@]}"
 )
 
+# 回调的属性槽须能由 Dioxus 在原位置更新，避免复制会随临时节点释放的句柄。
+check_web_callback_props() {
+	rg --files --null crates/auction-web-{shared,public,admin}/src -g '*.rs' |
+		perl ci/checks/web-callback-props.pl
+}
+
 # 本地 mise 任务与 CI 共用命令定义，避免编译参数在两处漂移。
 run_checks() {
 	local check
@@ -649,6 +655,7 @@ run_checks() {
 		migration-compatibility) check_migration_compatibility ;;
 		published-migrations) check_published_migrations ;;
 		web-build-inputs) check_web_build_inputs ;;
+		web-callback-props) check_web_callback_props ;;
 		dependency-versions) check_dependency_versions ;;
 		repository) check_repository_contracts ;;
 		public-redaction) check_public_redaction ;;
@@ -668,7 +675,7 @@ run_checks() {
 		dependency-audit) bash ci/checks/dependency-audit.sh Cargo.lock ;;
 		release-dependency-audit) bash ci/checks/release-dependency-audit.sh ;;
 		dependency-unused) cargo machete ;;
-		all) run_checks repository public-redaction layout import-groups module-docs hot-fields config systemd-templates i18n equipment-contract ratchet audit-writes test-module-paths work-item-ids markdown-links migration-compatibility published-migrations web-build-inputs ;;
+		all) run_checks repository public-redaction layout import-groups module-docs hot-fields config systemd-templates i18n equipment-contract ratchet audit-writes test-module-paths work-item-ids markdown-links migration-compatibility published-migrations web-build-inputs web-callback-props ;;
 		rust) run_checks fmt check dependency-versions lint wasm rustdoc ;;
 		*)
 			printf '未知静态检查：%s\n' "$check" >&2
