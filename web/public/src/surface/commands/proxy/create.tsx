@@ -34,6 +34,7 @@ export function ProxyCreateForm(props: {
   readonly allowSlow: boolean;
   /** 该场冻结策略的代理默认模式；未知时表单失败关闭。 */
   readonly defaultMode: string | null;
+  readonly canSubmit: boolean;
   readonly blocked: boolean;
   readonly blockedReason: string;
   readonly savedAuthorization: Cell<ProxyCommandAuthorization | null>;
@@ -64,6 +65,7 @@ export function ProxyCreateForm(props: {
   const biddingOpen = () => props.lotStatus === "live" && initialMode() !== null;
   const limitReached = () => props.initialMinimum > MAX_PUBLIC_BID_AMOUNT;
   const blocked = () => props.blocked || !biddingOpen() || limitReached();
+  const submitDisabled = () => submitting() || blocked() || !props.canSubmit;
   const blockedReason = () => {
     if (!biddingOpen()) {
       return t("bid-unavailable");
@@ -96,7 +98,7 @@ export function ProxyCreateForm(props: {
       <form
         onSubmit={(event) => {
           event.preventDefault();
-          if (submitting() || blocked()) {
+          if (submitDisabled()) {
             return;
           }
           const currentCommand = props.command;
@@ -306,7 +308,7 @@ export function ProxyCreateForm(props: {
             // 确认视图的首选焦点是确认按钮；否则焦点陷阱会落到弹窗右上角的关闭按钮，
             // 再按一次 Enter 就成了关闭弹窗。编辑态的首选焦点仍是上限框。
             autofocus={confirming()}
-            disabled={submitting() || blocked()}
+            disabled={submitDisabled()}
             aria-describedby={confirming() ? confirmationId() : ""}
           >
             {submitting()

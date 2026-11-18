@@ -35,6 +35,7 @@ export function ProxyAuthorizationForm(props: {
   readonly nextBid: number;
   readonly lotStatus: string;
   readonly proxy: OwnedProxy;
+  readonly canSubmit: boolean;
   readonly savedAuthorization: Cell<ProxyCommandAuthorization | null>;
   /** 由弹窗宿主注入的两阶段确认命令 hook（降低上限实例；见 ProxyFormInput）。 */
   readonly command: ProxyConfirmCommand;
@@ -54,6 +55,7 @@ export function ProxyAuthorizationForm(props: {
   const biddingOpen = () => props.lotStatus === "live";
   const limitReached = () => lowerBound() > MAX_PUBLIC_BID_AMOUNT;
   const canLower = () => props.proxy.capabilities.can_lower && biddingOpen() && !limitReached();
+  const submitDisabled = () => submitting() || !canLower() || !props.canSubmit;
   const blockedReason = () => {
     if (!biddingOpen()) {
       return t("bid-unavailable");
@@ -95,7 +97,7 @@ export function ProxyAuthorizationForm(props: {
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            if (submitting() || !canLower()) {
+            if (submitDisabled()) {
               return;
             }
             const currentCommand = props.command;
@@ -271,7 +273,7 @@ export function ProxyAuthorizationForm(props: {
               type="submit"
               // 确认视图的首选焦点是确认按钮，而不是弹窗右上角的关闭按钮。
               autofocus={confirming()}
-              disabled={submitting()}
+              disabled={submitDisabled()}
               aria-describedby={confirming() ? confirmationId() : ""}
             >
               {submitting()

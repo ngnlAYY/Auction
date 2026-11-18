@@ -3,9 +3,7 @@
 import type { CurrentAuctionItemResponse } from "@auction/contracts/dto/public/catalog/auction";
 import type { PublicLotEnvelopeResponse } from "@auction/contracts/dto/public/catalog/lot";
 import { type BaseErrorKind, baseApiErrorMessage } from "@auction/web-shared/net/errors";
-import { useSecondTick } from "@auction/web-shared/platform/clock";
-import type { PageVisibility } from "@auction/web-shared/platform/visibility";
-import { createCell } from "@auction/web-shared/reactive/cell";
+import { type Cell, createCell } from "@auction/web-shared/reactive/cell";
 import { structuralEquals } from "@auction/web-shared/reactive/equality";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import { createTaskResource } from "@auction/web-shared/reactive/resource";
@@ -16,36 +14,36 @@ import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
 import { createEffect, Match, Show, Switch, useContext } from "solid-js";
 
-import { estimatedNow } from "../../api/clock";
 import { type CatalogRow, catalogLevelFilterParse, lotEnvelopeTakeRows } from "../../api/model";
 import { fetchCurrentAuction } from "../../api/queries/current";
 import { fetchAuctionList } from "../../api/queries/directory";
 import { fetchCurrentLots } from "../../api/queries/lots";
-import { parseStrictRfc3339 } from "../../api/session";
+import { PublicSessionResourceContext, PublicSessionView } from "..";
 import { disposeLotView, LotViewRequestContext } from "../catalog/detail/deep-link";
 import { LotDetailLookupContext } from "../catalog/detail/lookup";
 import { CatalogGroupFilters } from "../catalog/filters";
 import { CatalogTable } from "../catalog/tables";
-import { PublicSessionResourceContext, PublicSessionView } from "../index";
 import { useContentLoading } from "../loading";
 import { publicPageMatches, updatePublicPageSize } from "../pagination";
-import type { PreviewHistoryLoad } from "../query";
-import { catalogCategoryKeys, updatePublicQueryState, usePublicQueryState } from "../query";
-import { PageVisibilityContext } from "../shell/contexts";
+import {
+  catalogCategoryKeys,
+  type PreviewHistoryLoad,
+  type PublicBoardQuery,
+  updatePublicQueryState,
+} from "../query";
 import { useAlignmentReread } from "./alignment";
 import { previewHistorySwitch } from "./navigation";
-import { PublicRefreshGenerationContext, refreshPublicReads, useBidRefresh } from "./refresh";
+import {
+  PublicRefreshGenerationContext,
+  refreshPublicReads,
+  useAuctionOpeningRefresh,
+  useBidRefresh,
+} from "./refresh";
 
-/** 目录读取与展示的上下文；预览修订号不属于上下文，允许同场后台更新时保留已确认目录。 */
-interface CatalogScope {
+/** 公开目录读取的作用域。 */
+interface CatalogReadScope {
   auctionId: string;
   world: string;
-  historical: boolean;
-  status: string;
-  presentationMode: string;
-  biddingOpen: boolean;
-  sessionReady: boolean;
-  userId: string | null;
   category: string;
   equipmentGroup: string;
   maxLevel: string | null;
@@ -54,25 +52,161 @@ interface CatalogScope {
   pageSize: number;
 }
 
+/** 预览可保留的上下文；同一身份和阶段的预览修订更新允许沿用已确认目录。 */
+interface CatalogPreviewScope {
+  read: CatalogReadScope | null;
+  historical: boolean;
+  status: string;
+  presentationMode: string;
+  biddingOpen: boolean;
+  userId: string | null;
+}
+
 /** 行、数量及分页来自同一次权威响应，后台更新不能混用不同修订的字段。 */
 interface CatalogSnapshot {
   page: PublicLotEnvelopeResponse;
   rows: CatalogRow[];
 }
 
+/** 目录资源、对齐代号与已消费的竞价修订号共用看板生命周期。 */
+function useCatalogLots(readScope: () => CatalogReadScope | null, refreshGeneration: () => number) {
+  const lotsRefreshGeneration = createCell(0);
+  const request = createValueMemo(() => {
+    const scope = readScope();
+    return scope === null
+      ? null
+      : { scope, refresh: refreshGeneration(), generation: lotsRefreshGeneration() };
+  });
+  const lots = createTaskResource(request, async (requested, context) => {
+    if (requested === null) {
+      return null;
+    }
+    const { generation, scope } = requested;
+    // Solid 版分类可为集合；空集合不发送 category 参数，Rust 版仍只发送单个分类。
+    const category = catalogCategoryKeys(scope.category).length === 0 ? null : scope.category;
+    const equipmentGroup = scope.equipmentGroup !== "all" ? scope.equipmentGroup : null;
+    const levels = catalogLevelFilterParse(scope.maxLevel ?? "", scope.includeUnleveled);
+    if (!levels.ok) {
+      return [scope, generation, err("invalid_level_filter")] as const;
+    }
+    const page = await fetchCurrentLots(
+      scope.auctionId,
+      category,
+      equipmentGroup,
+      levels.value,
+      scope.page,
+      scope.pageSize,
+      context.signal,
+    );
+    if (!context.alive()) {
+      return [scope, generation, err("network_error")] as const;
+    }
+    const result: Result<CatalogSnapshot, string> = page.ok
+      ? ok({ rows: lotEnvelopeTakeRows(page.value), page: page.value })
+      : page;
+    return [scope, generation, result] as const;
+  });
+  useBidRefresh(lots, () => readScope() !== null);
+  return { lots, lotsRefreshGeneration };
+}
+
+/** 由公开看板装配权威目录和对齐重读；身份子树只消费读取结果。 */
+export function useAuctionCatalog(
+  auction: () => CurrentAuctionItemResponse | null,
+  historical: () => boolean,
+  auctionReading: () => boolean,
+  queryState: Cell<PublicBoardQuery>,
+) {
+  const refreshGeneration = useContext(PublicRefreshGenerationContext);
+  useAuctionOpeningRefresh(auction, historical, refreshGeneration);
+  const catalogScope = createValueMemo((): CatalogReadScope | null => {
+    const round = auction();
+    if (round === null) {
+      return null;
+    }
+    const query = queryState();
+    return {
+      auctionId: round.id,
+      world: round.world,
+      category: query.category ?? "all",
+      equipmentGroup: query.equipmentGroup ?? "all",
+      maxLevel: query.maxLevel,
+      includeUnleveled: query.includeUnleveled,
+      page: Math.max(query.page, 1),
+      pageSize: query.pageSize,
+    };
+  });
+  const { lots, lotsRefreshGeneration } = useCatalogLots(catalogScope, refreshGeneration);
+  const current = createValueMemo((): readonly [number, Result<CatalogSnapshot, string>] | null => {
+    const loaded = lots();
+    if (loaded == null || !structuralEquals(loaded[0], catalogScope())) {
+      return null;
+    }
+    return [loaded[1], loaded[2]];
+  });
+  const aligned = createValueMemo(() => {
+    const round = auction();
+    const loaded = current();
+    if (round === null || loaded === null || !loaded[1].ok) {
+      return true;
+    }
+    const page = loaded[1].value.page;
+    return (
+      page.auction_id === round.id &&
+      page.auction_status === round.status &&
+      page.presentation_mode === round.presentation_mode &&
+      page.bidding_open === round.bidding_open &&
+      page.preview_revision === round.preview_revision
+    );
+  });
+  const alignmentKey = createValueMemo(() => {
+    const round = auction();
+    return round === null
+      ? ""
+      : `${round.id}:${round.status}:${round.presentation_mode}:${round.bidding_open}:${round.preview_revision}`;
+  });
+  const loadedGeneration = createValueMemo(() => {
+    const loaded = current();
+    return loaded?.[1].ok ? loaded[0] : null;
+  });
+  // 场次或目录仍有读取在途时等两侧返回，避免对齐补读取消正在进行的读取。
+  const alignment = useAlignmentReread(
+    aligned,
+    alignmentKey,
+    loadedGeneration,
+    () => auctionReading() || lots.state() === "pending",
+    lotsRefreshGeneration,
+    refreshGeneration,
+  );
+  const readySnapshot = createValueMemo((): CatalogSnapshot | null => {
+    const loaded = current();
+    const scope = catalogScope();
+    if (scope === null || loaded === null || !loaded[1].ok) {
+      return null;
+    }
+    const snapshot = loaded[1].value;
+    return aligned() &&
+      publicPageMatches(snapshot.page.page, snapshot.page.page_size, scope.page, scope.pageSize)
+      ? snapshot
+      : null;
+  });
+  const retry = () => {
+    lotsRefreshGeneration.update((generation) => Math.min(generation + 1, Number.MAX_SAFE_INTEGER));
+    refreshPublicReads(refreshGeneration);
+  };
+  return { scope: catalogScope, current, readySnapshot, alignment, retry };
+}
+
 export interface AuctionDataProps {
   readonly auction: CurrentAuctionItemResponse;
   readonly historical: boolean;
-  /** 提供 `auction` 的当前场次（或历史场次）读取仍在进行；对齐重读据此等待本轮读完再判定用尽。 */
-  readonly auctionReading: boolean;
+  readonly catalog: ReturnType<typeof useAuctionCatalog>;
+  readonly query: Cell<PublicBoardQuery>;
   readonly bootPrerequisitesReady: boolean;
 }
 
 export function AuctionData(props: AuctionDataProps): JSX.Element {
-  // 开场检查只在 effect 中读取共享秒针；倒计时由叶子组件订阅，目录不随每秒重渲染。
-  const tick = useSecondTick();
-  const queryState = usePublicQueryState();
-  const queryStateSignal = queryState.state;
+  const queryStateSignal = props.query;
   const activeCategory = createValueMemo(() => queryStateSignal().category ?? "all");
   // 手机分类面板应用新分类会让目录重新读取并卸载承载工具栏的目录表。请求必须放在始终挂载的
   // 看板层，下一次工具栏挂载后才能把焦点还给分类开关；面板自身随目录表一起不存在。
@@ -82,64 +216,23 @@ export function AuctionData(props: AuctionDataProps): JSX.Element {
   const activeIncludeUnleveled = createValueMemo(() => queryStateSignal().includeUnleveled);
   const pageNumber = createValueMemo(() => Math.max(queryStateSignal().page, 1));
   const requestedPageSize = createValueMemo(() => queryStateSignal().pageSize);
-  const visibility = useContext<PageVisibility>(PageVisibilityContext);
   const refreshGeneration = useContext(PublicRefreshGenerationContext);
-  const shouldRefreshAtOpen = () => !props.historical && props.auction.presentation_mode !== "live";
-  const openingAt = createValueMemo(() => parseStrictRfc3339(props.auction.opens_at));
-  const openingKey = createValueMemo(() => `${props.auction.id}:${props.auction.opens_at}`);
-  const openingRefreshKey = createCell<string | null>(null);
-  const openingRefreshed = createCell(false);
-  createEffect(
-    () => ({
-      tick: tick(),
-      key: openingKey(),
-      opensAt: openingAt(),
-      should: shouldRefreshAtOpen(),
-    }),
-    (current) => {
-      if (openingRefreshKey.peek() !== current.key) {
-        openingRefreshKey.set(current.key);
-        openingRefreshed.set(false);
-      }
-      // 预览不建立 WebSocket，不能用 Live 连接态作为开场补读前提；这里只失效权威读取。
-      if (
-        current.should &&
-        !openingRefreshed.peek() &&
-        visibility.isVisible() &&
-        current.opensAt !== null &&
-        BigInt(estimatedNow()) * 1_000_000n >= current.opensAt
-      ) {
-        openingRefreshed.set(true);
-        // 开场是一次已确认的生命周期迁移：TTL 内的预览快照可能仍标着 preview，
-        // 必须先失效公开读缓存，否则开场补读会命中旧值并拖到下一次轮询才切换 live。
-        refreshPublicReads(refreshGeneration);
-      }
-    },
-  );
   const session = useContext(PublicSessionResourceContext);
   const sessionView = createValueMemo(() => PublicSessionView.fromSnapshot(session()));
   const viewerPlayerId = () => sessionView().viewerPlayerId;
   const sessionReady = () => sessionView().ready;
   const sessionError = () => sessionView().error;
   const authenticated = () => sessionView().authenticated;
-  const catalogScope = createValueMemo((): CatalogScope => {
+  const previewScope = createValueMemo((): CatalogPreviewScope => {
     const snapshot = session();
     const identity = snapshot?.ok === true ? snapshot.value : null;
     return {
-      auctionId: props.auction.id,
-      world: props.auction.world,
+      read: props.catalog.scope(),
       historical: props.historical,
       status: props.auction.status,
       presentationMode: props.auction.presentation_mode,
       biddingOpen: props.auction.bidding_open,
-      sessionReady: snapshot?.ok === true,
       userId: identity?.authenticated === true ? identity.user_id : null,
-      category: activeCategory(),
-      equipmentGroup: activeEquipmentGroup(),
-      maxLevel: activeMaxLevel(),
-      includeUnleveled: activeIncludeUnleveled(),
-      page: pageNumber(),
-      pageSize: requestedPageSize(),
     };
   });
   const historySwitchWorld = createValueMemo(() =>
@@ -165,104 +258,20 @@ export function AuctionData(props: AuctionDataProps): JSX.Element {
       return [world, rounds.ok ? ok([current.value, rounds.value] as const) : rounds] as const;
     },
   );
-  const lotsRefreshGeneration = createCell(0);
-  const lots = createTaskResource(
-    () => [refreshGeneration(), lotsRefreshGeneration(), catalogScope()] as const,
-    async ([, generation, scope], context) => {
-      // Solid 版分类可为集合；空集合不发送 category 参数，Rust 版仍只发送单个分类。
-      const category = catalogCategoryKeys(scope.category).length === 0 ? null : scope.category;
-      const equipmentGroup = scope.equipmentGroup !== "all" ? scope.equipmentGroup : null;
-      const levels = catalogLevelFilterParse(scope.maxLevel ?? "", scope.includeUnleveled);
-      if (!levels.ok) {
-        return [scope, generation, err("invalid_level_filter")] as const;
-      }
-      const page = await fetchCurrentLots(
-        scope.auctionId,
-        category,
-        equipmentGroup,
-        levels.value,
-        scope.page,
-        scope.pageSize,
-        context.signal,
-      );
-      if (!context.alive()) {
-        return [scope, generation, err("network_error")] as const;
-      }
-      const result: Result<CatalogSnapshot, string> = page.ok
-        ? ok({ rows: lotEnvelopeTakeRows(page.value), page: page.value })
-        : page;
-      return [scope, generation, result] as const;
-    },
-  );
-  useBidRefresh(lots, () => true);
-  const current = createValueMemo((): readonly [number, Result<CatalogSnapshot, string>] | null => {
-    const loaded = lots();
-    if (loaded === undefined || !structuralEquals(loaded[0], catalogScope())) {
-      return null;
-    }
-    return [loaded[1], loaded[2]];
-  });
-  const aligned = createValueMemo(() => {
-    const loaded = current();
-    if (loaded === null || !loaded[1].ok) {
-      return true;
-    }
-    const page = loaded[1].value.page;
-    return (
-      page.auction_id === props.auction.id &&
-      page.auction_status === props.auction.status &&
-      page.presentation_mode === props.auction.presentation_mode &&
-      page.bidding_open === props.auction.bidding_open &&
-      page.preview_revision === props.auction.preview_revision
-    );
-  });
+  const current = () => props.catalog.current();
   // 首次揭示要等主要目录已有成功或失败结果；辅助视图切换继续局部异步，避免拖慢整页。
   useAppBootReady(() => props.bootPrerequisitesReady && current() !== null);
-  const alignmentKey = createValueMemo(
-    () =>
-      `${props.auction.id}:${props.auction.status}:${props.auction.presentation_mode}:${props.auction.bidding_open}:${props.auction.preview_revision}`,
-  );
-  const loadedGeneration = createValueMemo(() => {
-    const loaded = current();
-    return loaded?.[1].ok ? loaded[0] : null;
-  });
-  // 场次或目录仍有读取在途（轮询、实时刷新或上一轮对齐重读）：返回后可能就对齐。
-  const reading = createValueMemo(() => props.auctionReading || lots.state() === "pending");
-  const alignment = useAlignmentReread(
-    () => aligned(),
-    () => alignmentKey(),
-    () => loadedGeneration(),
-    () => reading(),
-    lotsRefreshGeneration,
-    refreshGeneration,
-  );
-  const alignmentExhausted = alignment.exhausted;
-  const alignmentAttempt = alignment.attempt;
+  const alignmentExhausted = () => props.catalog.alignment.exhausted();
   const isLivePresentation = () => props.auction.presentation_mode === "live";
   const quietPreview = createValueMemo(
-    () => catalogScope().sessionReady && catalogScope().presentationMode === "preview",
+    () => sessionReady() && props.auction.presentation_mode === "preview",
   );
-  const readySnapshot = createValueMemo((): CatalogSnapshot | null => {
-    const loaded = current();
-    if (loaded === null || !loaded[1].ok) {
-      return null;
-    }
-    const snapshot = loaded[1].value;
-    return aligned() &&
-      publicPageMatches(
-        snapshot.page.page,
-        snapshot.page.page_size,
-        catalogScope().page,
-        catalogScope().pageSize,
-      )
-      ? snapshot
-      : null;
-  });
+  const readySnapshot = () => props.catalog.readySnapshot();
   // 只缓存当前上下文已对齐的预览；明确失败、切换上下文或离开预览立即清除。
-  let retainedPreview: { scope: CatalogScope; snapshot: CatalogSnapshot } | null = null;
+  let retainedPreview: { scope: CatalogPreviewScope; snapshot: CatalogSnapshot } | null = null;
   const retainedPreviewSnapshot = createValueMemo((): CatalogSnapshot | null => {
     const quiet = quietPreview();
-    const scopeNow = catalogScope();
+    const scopeNow = previewScope();
     const loaded = current();
     const ready = readySnapshot();
     if (
@@ -333,12 +342,8 @@ export function AuctionData(props: AuctionDataProps): JSX.Element {
   );
 
   const levelFiltered = () => {
-    const scope = catalogScope();
-    return (scope.maxLevel !== null && scope.maxLevel !== "") || scope.includeUnleveled !== "true";
-  };
-  const retryCatalog = (): void => {
-    lotsRefreshGeneration.update((generation) => Math.min(generation + 1, Number.MAX_SAFE_INTEGER));
-    refreshPublicReads(refreshGeneration);
+    const maxLevel = activeMaxLevel();
+    return (maxLevel !== null && maxLevel !== "") || activeIncludeUnleveled() !== "true";
   };
   const catalog = (): JSX.Element => (
     <Switch fallback={null}>
@@ -348,7 +353,7 @@ export function AuctionData(props: AuctionDataProps): JSX.Element {
           title={t("data-error")}
           detail={lotListErrorMessage(currentError() ?? "")}
           retryLabel={t("data-retry")}
-          onRetry={retryCatalog}
+          onRetry={() => props.catalog.retry()}
         />
       </Match>
       <Match when={visibleSnapshot() === null && alignmentExhausted()}>
@@ -357,7 +362,7 @@ export function AuctionData(props: AuctionDataProps): JSX.Element {
           title={t("data-error")}
           detail={lotListErrorMessage("temporarily_unavailable")}
           retryLabel={t("data-retry")}
-          onRetry={() => alignmentAttempt.set(null)}
+          onRetry={() => props.catalog.alignment.attempt.set(null)}
         />
       </Match>
       <Match when={visibleSnapshot()}>

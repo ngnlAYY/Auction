@@ -11,7 +11,7 @@ import type { Result } from "@auction/web-shared/result";
 import { compareText } from "@auction/web-shared/text";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
-import { createContext, For, Show, untrack, useContext } from "solid-js";
+import { createContext, For, Show, useContext } from "solid-js";
 import type { CommandError } from "../../api/commands";
 import { commandErrorOutcomeUncertain } from "../../api/commands";
 import { setLotWatch } from "../../api/watches";
@@ -160,9 +160,6 @@ function submitCommand(
   lotCode: string,
   payload: PublicSetLotWatchRequest,
 ): void {
-  if (!ownerIdentityMatches(owner)) {
-    return;
-  }
   const userId = owner.userId;
   if (userId === null) {
     return;
@@ -173,6 +170,7 @@ function submitCommand(
   const pending = current.get(lotId);
   if (pending !== undefined) {
     if (
+      !ownerIdentityMatches(owner) ||
       pending.busy ||
       !pending.uncertain ||
       pending.auctionId !== auctionId ||
@@ -184,7 +182,7 @@ function submitCommand(
     frozen = structuredClone(pending.payload);
     uncertain = pending.uncertain;
   } else {
-    if (owner.session.state() !== "ready" || currentUser(owner.session()) !== userId) {
+    if (!canStartWatchCommand(owner)) {
       return;
     }
     frozen = structuredClone(payload);
@@ -244,8 +242,21 @@ function submitCommand(
   });
 }
 
-function ownerIdentityMatches(owner: WatchCommandOwner): boolean {
-  return owner.userId !== null && untrack(owner.identity) === owner.userId;
+type WatchCommandIdentity = Pick<WatchCommandOwner, "userId" | "identity">;
+
+function ownerIdentityMatches(owner: WatchCommandIdentity): boolean {
+  return owner.userId !== null && owner.identity() === owner.userId;
+}
+
+/** 新标记只允许使用当前已就绪的同身份会话；按钮和提交入口共用这道守卫。 */
+export function canStartWatchCommand(
+  owner: WatchCommandIdentity & Pick<WatchCommandOwner, "session">,
+): boolean {
+  return (
+    ownerIdentityMatches(owner) &&
+    owner.session.state() === "ready" &&
+    currentUser(owner.session()) === owner.userId
+  );
 }
 
 export function currentUser(

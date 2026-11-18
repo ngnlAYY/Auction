@@ -1,25 +1,48 @@
 // Public 竞价与代理竞价操作面板。
 
 import { MAX_PUBLIC_BID_AMOUNT } from "@auction/contracts/dto/public/commands";
+import { type Cell, createCell } from "@auction/web-shared/reactive/cell";
 import { structuralEquals } from "@auction/web-shared/reactive/equality";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import { createTaskResource } from "@auction/web-shared/reactive/resource";
-import { ok, type Result } from "@auction/web-shared/result";
+import type { Result } from "@auction/web-shared/result";
 import { Link } from "@auction/web-shared/router";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
-import { createEffect, Match, onCleanup, Show, Switch, useContext } from "solid-js";
+import {
+  createComponent,
+  createContext,
+  createEffect,
+  Match,
+  onCleanup,
+  Show,
+  Switch,
+  useContext,
+} from "solid-js";
 
 import { fetchMyProxy, type OwnedProxy } from "../../api/account";
+import { PublicCommandOwnerContext, PublicSessionResourceContext } from "..";
 import { PublicRefreshGenerationContext, useBidRefresh } from "../board/refresh";
 import { PublicCommandIdentityContext } from "../commands/pending";
+import { activeOwnedProxy } from "../commands/proxy";
 import { loginHrefForCurrentLocation } from "../session";
 import type { CatalogAction, CommandDialogInput } from "./command-scope";
-import { CommandDialogContext } from "./command-scope";
+import { CommandDialogContext, catalogIdentityMatches } from "./command-scope";
 import type { CatalogDetailBid, CatalogDetailBidSlot } from "./detail";
 import { CatalogDetailDialogContext } from "./detail";
 
-const NIL_UUID = "00000000-0000-0000-0000-000000000000";
+type ProxyRead = Result<OwnedProxy | null, string>;
+const CatalogProxySnapshotsContext = createContext<Cell<ReadonlyMap<string, ProxyRead>>>();
+
+/** 在按身份和场次建键的看板子树内保存已读取的授权，目录行卸载后仍可复用。 */
+export function CatalogProxyScope(props: { readonly children: JSX.Element }): JSX.Element {
+  return createComponent(CatalogProxySnapshotsContext, {
+    value: createCell<ReadonlyMap<string, ProxyRead>>(new Map()),
+    get children() {
+      return props.children;
+    },
+  });
+}
 
 /** 目录行的出价与代理入口；行内按钮与详情抽屉共享同一份资格判定。 */
 export function LiveCatalogActions(props: {
@@ -43,7 +66,10 @@ export function LiveCatalogActions(props: {
 }): JSX.Element {
   const refreshGeneration = useContext(PublicRefreshGenerationContext);
   const identity = useContext(PublicCommandIdentityContext);
+  const confirmedOwner = useContext(PublicCommandOwnerContext);
+  const session = useContext(PublicSessionResourceContext);
   const dialog = useContext(CommandDialogContext);
+  const snapshots = useContext(CatalogProxySnapshotsContext);
   const droppedLot = props.lotId;
   const activeAction = createValueMemo((): CatalogAction | null => {
     const current = dialog?.();
@@ -58,61 +84,51 @@ export function LiveCatalogActions(props: {
     const current = detailDialog();
     return current !== null && current.row.lotId === props.lotId;
   });
+  const identityConfirmed = createValueMemo(() =>
+    catalogIdentityMatches(session(), identity.userId, confirmedOwner()),
+  );
   const proxyViewActive = createValueMemo(
-    () => props.authenticated && (activeAction() === "proxy" || detailOpen()),
+    () => (activeAction() === "proxy" || detailOpen()) && identityConfirmed(),
   );
   const proxyDependencies = createValueMemo(() => {
-    const active = activeAction() === "proxy" || detailOpen();
-    // 目录里每行都挂载本资源。若常驻订阅全局 refresh_generation，一次刷新会调度
-    // 与行数相同的资源任务（100 行 = 100 个任务）。闭合状态下资源恒为 Ok(None)，
-    // 跟随刷新不产生任何可见变化；因此只在本行代理视图激活（代理弹窗或本拍品的
-    // 详情抽屉打开）时才订阅刷新节拍，闭合时自动退订。API 没有批量代理查询端点，
-    // 逐个预取会改变网络行为，故不做目录级一次性加载。
-    const refresh = active ? refreshGeneration() : 0;
-    return {
-      lotId: props.lotId,
-      userId: identity.userId,
-      authenticated: props.authenticated,
-      active,
-      refresh,
-    };
+    // 只在本拍品的详情或代理页签打开时跟随刷新代号，避免闭合行随刷新调度空读取。
+    return proxyViewActive() ? { lotId: props.lotId, refresh: refreshGeneration() } : null;
   });
   const proxyState = createTaskResource(proxyDependencies, async (dependencies, context) => {
-    // fetched 区分“真实读取的授权”与闭合状态的占位 Ok(None)。
-    const fetched =
-      dependencies.authenticated && dependencies.userId !== NIL_UUID && dependencies.active;
-    const result = fetched
-      ? await fetchMyProxy(dependencies.userId, dependencies.lotId, context.signal)
-      : ok(null);
-    return { lotId: dependencies.lotId, fetched, result };
+    if (dependencies === null) {
+      return null;
+    }
+    const result = await fetchMyProxy(identity.userId, dependencies.lotId, context.signal);
+    return context.alive() ? { lotId: dependencies.lotId, result } : null;
   });
   // enabled 用访问器传入：代理视图关闭后必须立即退订刷新节拍。
   useBidRefresh(proxyState, proxyViewActive);
-  // 代理视图保持打开期间的刷新（任意拍品的竞价事件都会触发）沿用上一次真实读取的快照，
-  // 新结果到达后整体替换：否则表单会被“加载中”顶替而卸载，丢掉已输入的上限、模式与焦点。
-  const proxyReady = () => proxyState.state() === "ready";
-  const proxySnapshot = (): Result<OwnedProxy | null, string> | null => {
-    const snapshot = proxyState();
-    if (snapshot === undefined || snapshot.lotId !== props.lotId) {
-      return null;
-    }
-    if (
-      !proxySnapshotUsable(proxyReady(), snapshot.fetched, proxyViewActive(), snapshot.result.ok)
-    ) {
-      return null;
-    }
-    return snapshot.result;
-  };
-  const activeProxy = (): OwnedProxy | null => {
-    const snapshot = proxySnapshot();
-    return snapshot?.ok && snapshot.value !== null && snapshot.value.status === "active"
-      ? snapshot.value
-      : null;
-  };
+  createEffect(
+    () => {
+      const read = proxyState();
+      return read != null && read.lotId === props.lotId && identityConfirmed() ? read : null;
+    },
+    (read) => {
+      // 同一身份、场次的实际读取才可替换快照；关闭时的空任务不代表授权不存在。
+      if (read !== null && !structuralEquals(snapshots.peek().get(read.lotId), read.result)) {
+        const next = new Map(snapshots.peek());
+        next.set(read.lotId, read.result);
+        snapshots.set(next);
+      }
+    },
+  );
+  const proxySnapshot = createValueMemo(() => {
+    const snapshot = snapshots().get(props.lotId) ?? null;
+    return snapshot === null
+      ? null
+      : usableProxySnapshot(snapshot, identityConfirmed(), proxyState.state() === "ready");
+  });
+  const activeProxy = () => activeOwnedProxy(proxySnapshot());
   const proxyLeading = () => activeProxy()?.bid?.leading === true;
   const effectiveLeading = () => props.leading || proxyLeading();
   const limitReached = () => props.nextBid > MAX_PUBLIC_BID_AMOUNT;
-  const ordinaryBlocked = () => limitReached() || effectiveLeading();
+  const ordinaryBlocked = () =>
+    ordinaryBidBlocked(effectiveLeading(), limitReached(), activeProxy());
   // 无法新增出价时，仍允许持有者把已有授权降低到有效绑定价格。
   const proxyActionEnabled = () => {
     const proxy = activeProxy();
@@ -126,11 +142,11 @@ export function LiveCatalogActions(props: {
     if (!props.canBid) {
       return t("bid-unavailable");
     }
+    if (activeProxy() !== null) {
+      return t("proxy-active-exists");
+    }
     if (limitReached()) {
       return t("bid-limit-note");
-    }
-    if (activeProxy() !== null && !effectiveLeading()) {
-      return t("proxy-active");
     }
     if (effectiveLeading()) {
       return t("bid-leading");
@@ -142,7 +158,8 @@ export function LiveCatalogActions(props: {
   };
   // 领先由装备高亮表达，行自身已带“正在领先”的描述，不再重复说明；超过金额上限等
   // 其余原因必须可见。不显示说明时按钮不引用它。
-  const showActionReason = () => !(props.canBid && effectiveLeading() && !limitReached());
+  const showActionReason = () =>
+    activeProxy() !== null || !(props.canBid && effectiveLeading() && !limitReached());
   const actionReasonId = () =>
     showActionReason() ? `public-auction-action-reason-${props.lotId}` : "";
   const input = createValueMemo(
@@ -184,7 +201,12 @@ export function LiveCatalogActions(props: {
   const bidDisabled = () => !props.canBid || ordinaryBlocked();
   const detailProjection = createValueMemo((): CatalogDetailBid => {
     if (commandEntry()) {
-      const entryAction = detailEntryAction(bidDisabled(), props.canBid, effectiveLeading());
+      const entryAction = detailEntryAction(
+        bidDisabled(),
+        props.canBid,
+        effectiveLeading(),
+        activeProxy() !== null,
+      );
       const detailInput = {
         ...input(),
         action: entryAction ?? "bid",
@@ -269,38 +291,51 @@ export function LiveCatalogActions(props: {
   );
 }
 
+/** 已确认的本人活动授权期间，普通出价由代理管理入口接替。 */
+export function ordinaryBidBlocked(
+  leading: boolean,
+  limitReached: boolean,
+  activeProxy: OwnedProxy | null,
+): boolean {
+  return leading || limitReached || activeProxy !== null;
+}
+
 /** 详情抽屉命令入口打开的页签；null 表示入口禁用。
  *
- * 抽屉是目录里管理代理授权的唯一去处。普通出价可用时进
- * 直接出价（代理由弹窗页签切换）。领先者不能再出价，但可能持有需要降低的代理授权：目录行
- * 不预取授权，无法在这里判断，入口改进代理页签，由弹窗读取后给出降低表单或受阻说明。
- * 仅供测试使用。 */
+ * 普通出价可用时进直接出价。已知有活动授权的玩家进入代理管理；领先者也可以进入代理页签，
+ * 由弹窗读取后给出降低表单或受阻说明。 */
 export function detailEntryAction(
   ordinaryDisabled: boolean,
   canBid: boolean,
   leading: boolean,
+  hasActiveProxy = false,
 ): CatalogAction | null {
   if (!ordinaryDisabled) {
     return "bid";
   }
-  if (canBid && leading) {
+  if (canBid && (leading || hasActiveProxy)) {
     return "proxy";
   }
   return null;
 }
 
-/** 代理授权读取结果能否用于渲染。
- *
- * 读取完成（ready）的结果总是可用。刷新进行中只沿用上一次真实读取成功的结果，且代理
- * 视图必须仍然打开：闭合状态的占位值与读取失败的结果不沿用，首次读取完成前保持加载，
- * 不把未确认的“没有授权”当成事实，也不让旧错误盖住正在进行的重试。仅供测试使用。 */
-export function proxySnapshotUsable(
+/** 代理入口可用时，抽屉仍显示本拍品已禁止普通出价的原因。 */
+export function detailBidReason(bid: CatalogDetailBid): string {
+  if (bid.kind !== "command") {
+    return "";
+  }
+  return bid.disabled || (bid.input.ordinaryBlocked && activeOwnedProxy(bid.input.proxy) !== null)
+    ? bid.input.blockedReason
+    : "";
+}
+
+/** 同身份沿用已读取的结果，重试期间暂时收起上一次读取错误。 */
+export function usableProxySnapshot(
+  snapshot: ProxyRead | null,
+  identityConfirmed: boolean,
   ready: boolean,
-  fetched: boolean,
-  viewActive: boolean,
-  succeeded: boolean,
-): boolean {
-  return ready || (fetched && viewActive && succeeded);
+): ProxyRead | null {
+  return identityConfirmed && snapshot !== null && (ready || snapshot.ok) ? snapshot : null;
 }
 
 /** 目录行操作图标；1.5px stroke 与侧栏图标一致，只表达查看、出价语义。 */

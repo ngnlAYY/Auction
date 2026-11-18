@@ -9,7 +9,6 @@ import { onSettled, Show, useContext } from "solid-js";
 
 import { commandErrorOutcomeUncertain, placeBid } from "../../api/commands";
 import { PublicRefreshGenerationContext } from "../board/refresh";
-import { rustTrim } from "../query/text";
 import {
   type BidConfirmCommand,
   bidErrorMessage,
@@ -19,6 +18,12 @@ import {
 } from "./pending";
 
 const CREDIT_K = 1_000;
+const BID_WHITESPACE = String.raw`[ \x09-\x0D]`;
+const BID_CONFIRMATION_ID = "public-bid-confirmation";
+const BID_BLOCKED_REASON_ID = "public-bid-blocked-reason";
+
+/** 普通出价输入的原生词法约束。 */
+export const BID_UNITS_PATTERN = `${BID_WHITESPACE}*[0-9]*${BID_WHITESPACE}*`;
 
 /** 普通竞价成功后的浏览器展示投影；只保留成功提示所需字段。 */
 export interface BidSuccess {
@@ -32,6 +37,7 @@ export interface BidFormInput {
   readonly nextBid: number;
   readonly lotStatus: string;
   readonly canBid: boolean;
+  readonly canSubmit: boolean;
   readonly blocked: boolean;
   readonly blockedReason: string;
   /** 由弹窗宿主注入的两阶段确认命令 hook；宿主据其 `submitting` 在提交中禁用遮罩/Escape/关闭按钮。 */
@@ -48,8 +54,8 @@ function defaultBidUnits(nextBid: number): string {
 }
 
 /** 普通出价只接受纯数字 K 单位，避免把代理表单保留的 M/K 缩写规则扩散到确认流程。 */
-function parseBidUnits(input: string): number | null {
-  const units = rustTrim(input);
+export function parseBidUnits(input: string): number | null {
+  const units = trimBidAmount(input);
   if (units === "" || !isAsciiDigits(units)) {
     return null;
   }
@@ -63,8 +69,25 @@ function parseBidUnits(input: string): number | null {
     : null;
 }
 
+function trimBidAmount(value: string): string {
+  let start = 0;
+  let end = value.length;
+  // 只检查两端；数字中间的空白保留给词法校验拒绝。
+  while (start < end && isBidWhitespace(value.charCodeAt(start))) {
+    start += 1;
+  }
+  while (end > start && isBidWhitespace(value.charCodeAt(end - 1))) {
+    end -= 1;
+  }
+  return value.slice(start, end);
+}
+
+function isBidWhitespace(code: number): boolean {
+  return code === 0x20 || (code >= 0x09 && code <= 0x0d);
+}
+
 function bidAmountHint(value: string): JSX.Element {
-  if (rustTrim(value) === "") {
+  if (trimBidAmount(value) === "") {
     // biome-ignore lint/complexity/noUselessFragments: 源码在空值时不渲染任何节点。
     return <></>;
   }
@@ -97,6 +120,14 @@ function isAsciiDigits(value: string): boolean {
   return true;
 }
 
+/** 二次确认时关联金额面板，并在显示禁用原因时附上该说明。 */
+function bidSubmitDescriptionIds(confirming: boolean, blocked: boolean): string | undefined {
+  if (!confirming) {
+    return undefined;
+  }
+  return blocked ? `${BID_CONFIRMATION_ID} ${BID_BLOCKED_REASON_ID}` : BID_CONFIRMATION_ID;
+}
+
 /** 为表单建立独立组件作用域，避免弹窗开关改变父组件的 Hook 顺序。 */
 export function BidForm(props: { readonly input: BidFormInput }): JSX.Element {
   return bidForm(() => props.input);
@@ -115,6 +146,7 @@ function bidForm(input: () => BidFormInput): JSX.Element {
   const biddingOpen = () => input().canBid && input().lotStatus === "live";
   const limitReached = () => input().nextBid > MAX_PUBLIC_BID_AMOUNT;
   const blocked = () => input().blocked || !biddingOpen() || limitReached();
+  const submitDisabled = () => submitting() || blocked() || !input().canSubmit;
   const blockedReason = () => {
     if (!biddingOpen()) {
       return t("bid-unavailable");
@@ -136,7 +168,7 @@ function bidForm(input: () => BidFormInput): JSX.Element {
       aria-busy={submitting() ? "true" : "false"}
       onSubmit={(event) => {
         event.preventDefault();
-        if (submitting() || blocked()) {
+        if (submitDisabled()) {
           return;
         }
         const current = input();
@@ -211,7 +243,7 @@ function bidForm(input: () => BidFormInput): JSX.Element {
               autofocus={true}
               inputmode="numeric"
               enterkeyhint="done"
-              pattern="[0-9]*"
+              pattern={BID_UNITS_PATTERN}
               autocomplete="off"
               spellcheck="false"
               aria-invalid={validation() !== null ? "true" : "false"}
@@ -237,7 +269,7 @@ function bidForm(input: () => BidFormInput): JSX.Element {
       >
         {(pending) => (
           <ConfirmPanel
-            id="public-bid-confirmation"
+            id={BID_CONFIRMATION_ID}
             typeLabel={t("bid-tab-direct")}
             amount={formatCreditAmount(pending().amount)}
             note={t("bid-binding-note")}
@@ -245,7 +277,7 @@ function bidForm(input: () => BidFormInput): JSX.Element {
         )}
       </Show>
       <Show when={blocked()}>
-        <p class="action-feedback action-feedback--notice" role="note">
+        <p id={BID_BLOCKED_REASON_ID} class="action-feedback action-feedback--notice" role="note">
           {blockedReason()}
         </p>
       </Show>
@@ -280,8 +312,8 @@ function bidForm(input: () => BidFormInput): JSX.Element {
           // 用 Enter 提交金额后输入框被确认面板替换；确认视图的首选焦点是确认按钮，
           // 而不是弹窗右上角的关闭按钮。编辑态的首选焦点仍是金额框。
           autofocus={confirming()}
-          disabled={submitting() || blocked()}
-          aria-describedby={confirming() ? "public-bid-confirmation" : ""}
+          disabled={submitDisabled()}
+          aria-describedby={bidSubmitDescriptionIds(confirming(), blocked())}
         >
           {submitting()
             ? t("bid-working")

@@ -4,11 +4,11 @@
 
 import type { Cell } from "@auction/web-shared/reactive/cell";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
-import type { Result } from "@auction/web-shared/result";
+import type { Ok, Result } from "@auction/web-shared/result";
 import { AsyncState } from "@auction/web-shared/ui/components/async-state";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
-import { type Accessor, Match, Switch } from "solid-js";
+import { type Accessor, Match, Show, Switch } from "solid-js";
 
 import type { OwnedProxy } from "../../../api/account";
 import type { ProxyCommandAuthorization } from "../../../api/commands";
@@ -21,7 +21,9 @@ import { ProxySuccessPanel } from "./success";
 /** 公开 lot 的代理授权表单参数；账户状态由服务端投影，不在浏览器端复制代理状态机。 */
 export interface ProxyFormInput {
   readonly lotId: string;
+  readonly authenticated: boolean;
   readonly canBid: boolean;
+  readonly canSubmit: boolean;
   readonly currentPrice: number;
   readonly nextBid: number;
   readonly lotStatus: string;
@@ -55,25 +57,17 @@ export function ProxyForm(props: { readonly input: ProxyFormInput }): JSX.Elemen
     return null;
   });
   const proxy = () => input().proxy;
-  const proxyError = () => {
-    const result = proxy();
-    return result !== null && !result.ok ? result.error : null;
-  };
-  const proxyNone = () => {
-    const result = proxy();
-    return result?.ok === true && result.value === null;
-  };
-  const activeProxy = (): OwnedProxy | null => {
-    const result = proxy();
-    return result?.ok === true && result.value !== null && result.value.status === "active"
-      ? result.value
-      : null;
-  };
-  const inactiveProxy = (): OwnedProxy | null => {
-    const result = proxy();
-    return result?.ok === true && result.value !== null && result.value.status !== "active"
-      ? result.value
-      : null;
+  const proxyRead = useProxyDraftRead(proxy);
+  const proxyError = () => proxyRead().error;
+  const confirmed = () => proxyRead().confirmed;
+  const activeProxy = () => activeOwnedProxy(confirmed());
+  // 草稿沿用上次授权快照。新的写入仍需当前授权读取和会话许可，失败时不能使用旧上限。
+  const canSubmit = () => input().canBid && input().canSubmit && proxyRead().canSubmit;
+  const initialMinimum = () => {
+    const previous = confirmed()?.value;
+    return previous == null
+      ? input().nextBid
+      : Math.max(input().nextBid, saturatingAddOne(previous.maximum_amount));
   };
   const retryProxy = () => {
     const generation = input().refreshGeneration;
@@ -81,7 +75,61 @@ export function ProxyForm(props: { readonly input: ProxyFormInput }): JSX.Elemen
   };
 
   return (
-    <Switch fallback={null}>
+    <Switch
+      fallback={
+        <>
+          <Show when={!input().canBid}>
+            <p role="status">{t("bid-unavailable")}</p>
+          </Show>
+          <Show when={input().canBid && proxy() === null}>
+            <p role="status">{t("proxy-loading")}</p>
+          </Show>
+          <Show when={proxyError() !== null}>
+            <AsyncState
+              kind="error"
+              title={t("catalog-proxy")}
+              detail={t("proxy-load-error")}
+              retryLabel={t("data-retry")}
+              onRetry={retryProxy}
+            />
+          </Show>
+          <Switch fallback={null}>
+            <Match when={activeProxy()}>
+              {(proxy) => (
+                <ProxyAuthorizationForm
+                  lotId={input().lotId}
+                  currentPrice={input().currentPrice}
+                  nextBid={input().nextBid}
+                  lotStatus={input().lotStatus}
+                  proxy={proxy()}
+                  canSubmit={canSubmit()}
+                  savedAuthorization={input().savedAuthorization}
+                  command={input().lowerCommand}
+                  peerSubmitting={input().createCommand.submitting}
+                  onClose={input().onClose}
+                />
+              )}
+            </Match>
+            <Match when={confirmed() !== null}>
+              <ProxyCreateForm
+                lotId={input().lotId}
+                initialMinimum={initialMinimum()}
+                lotStatus={input().lotStatus}
+                allowSlow={input().allowSlow}
+                defaultMode={input().defaultMode}
+                canSubmit={canSubmit()}
+                blocked={input().leading}
+                blockedReason={input().blockedReason}
+                savedAuthorization={input().savedAuthorization}
+                command={input().createCommand}
+                peerSubmitting={input().lowerCommand.submitting}
+                onClose={input().onClose}
+              />
+            </Match>
+          </Switch>
+        </>
+      }
+    >
       <Match when={savedAuthorization()}>
         {(authorization) => (
           <ProxySuccessPanel authorization={authorization()} onClose={input().onClose} />
@@ -97,70 +145,34 @@ export function ProxyForm(props: { readonly input: ProxyFormInput }): JSX.Elemen
           />
         )}
       </Match>
-      <Match when={!input().canBid}>
+      <Match when={!input().authenticated || (!input().canBid && confirmed() === null)}>
         <p role="status">{t("bid-unavailable")}</p>
-      </Match>
-      <Match when={proxy() === null}>
-        <p role="status">{t("proxy-loading")}</p>
-      </Match>
-      <Match when={proxyError() !== null}>
-        <AsyncState
-          kind="error"
-          title={t("catalog-proxy")}
-          detail={t("proxy-load-error")}
-          retryLabel={t("data-retry")}
-          onRetry={retryProxy}
-        />
-      </Match>
-      <Match when={proxyNone()}>
-        <ProxyCreateForm
-          lotId={input().lotId}
-          initialMinimum={input().nextBid}
-          lotStatus={input().lotStatus}
-          allowSlow={input().allowSlow}
-          defaultMode={input().defaultMode}
-          blocked={input().leading}
-          blockedReason={input().blockedReason}
-          savedAuthorization={input().savedAuthorization}
-          command={input().createCommand}
-          peerSubmitting={input().lowerCommand.submitting}
-          onClose={input().onClose}
-        />
-      </Match>
-      <Match when={activeProxy()}>
-        {(proxy) => (
-          <ProxyAuthorizationForm
-            lotId={input().lotId}
-            currentPrice={input().currentPrice}
-            nextBid={input().nextBid}
-            lotStatus={input().lotStatus}
-            proxy={proxy()}
-            savedAuthorization={input().savedAuthorization}
-            command={input().lowerCommand}
-            peerSubmitting={input().createCommand.submitting}
-            onClose={input().onClose}
-          />
-        )}
-      </Match>
-      <Match when={inactiveProxy()}>
-        {(proxy) => (
-          <ProxyCreateForm
-            lotId={input().lotId}
-            initialMinimum={Math.max(input().nextBid, saturatingAddOne(proxy().maximum_amount))}
-            lotStatus={input().lotStatus}
-            allowSlow={input().allowSlow}
-            defaultMode={input().defaultMode}
-            blocked={input().leading}
-            blockedReason={input().blockedReason}
-            savedAuthorization={input().savedAuthorization}
-            command={input().createCommand}
-            peerSubmitting={input().lowerCommand.submitting}
-            onClose={input().onClose}
-          />
-        )}
       </Match>
     </Switch>
   );
+}
+
+/** 弹窗按已确认身份挂载，沿用这一份表单投影，直到新的权威授权结果替换它。 */
+export function useProxyDraftRead(snapshot: () => Result<OwnedProxy | null, string> | null) {
+  let confirmed: Ok<OwnedProxy | null> | null = null;
+  return createValueMemo(() => {
+    const current = snapshot();
+    if (current?.ok === true) {
+      confirmed = current;
+    }
+    return {
+      confirmed,
+      error: current?.ok === false ? current.error : null,
+      canSubmit: current?.ok === true,
+    };
+  });
+}
+
+/** 只使用已读取的本人活动授权；是否生效由服务端投影决定。 */
+export function activeOwnedProxy(
+  snapshot: Result<OwnedProxy | null, string> | null,
+): OwnedProxy | null {
+  return snapshot?.ok === true && snapshot.value?.status === "active" ? snapshot.value : null;
 }
 
 /** 辅助函数适配访问器调用点；组件本身只接收普通输入值。 */

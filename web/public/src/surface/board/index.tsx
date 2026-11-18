@@ -3,6 +3,7 @@
 // 归档到子模块，使用方直接从定义模块导入。
 
 import type { CurrentAuctionItemResponse } from "@auction/contracts/dto/public/catalog/auction";
+import type { Cell } from "@auction/web-shared/reactive/cell";
 import { structuralEquals } from "@auction/web-shared/reactive/equality";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import { createTaskResource } from "@auction/web-shared/reactive/resource";
@@ -11,9 +12,20 @@ import { useAppBootReady } from "@auction/web-shared/ui/bootstrap";
 import { AsyncState } from "@auction/web-shared/ui/components/async-state";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
-import { createEffect, Match, onCleanup, Switch, useContext } from "solid-js";
+import {
+  createComponent,
+  createEffect,
+  For,
+  Match,
+  onCleanup,
+  Switch,
+  untrack,
+  useContext,
+} from "solid-js";
 
 import { fetchHistoricalAuction } from "../../api/queries/current";
+import { PublicCommandOwnerContext, PublicSessionResourceContext } from "..";
+import { CatalogProxyScope } from "../catalog/actions";
 import { CatalogCommandScope } from "../catalog/command-scope";
 import { LotViewRequestContext } from "../catalog/detail/deep-link";
 import { CatalogDetailHost } from "../catalog/detail/drawer";
@@ -22,10 +34,10 @@ import {
   LotDetailLookupHost,
   useLotDetailLookup,
 } from "../catalog/detail/lookup";
-import { PublicSessionResourceContext } from "../index";
 import { useContentLoading } from "../loading";
 import {
   normalizeWorldQuery,
+  type PublicBoardQuery,
   redirectPublicAlias,
   updatePublicQueryState,
   usePublicQueryState,
@@ -36,7 +48,7 @@ import {
   SelectedWorldContext,
 } from "../shell/contexts";
 import { LotWatchScope } from "../watches";
-import { AuctionData } from "./data";
+import { AuctionData, useAuctionCatalog } from "./data";
 import {
   PublicDisplayedAuctionContext,
   PublicPageRealtimeTargetContext,
@@ -57,9 +69,7 @@ export function AuctionIndex(): JSX.Element {
   });
   return (
     <LotDetailLookupContext value={lookup}>
-      <CatalogCommandScope>
-        <AuctionBoard />
-      </CatalogCommandScope>
+      <AuctionBoard />
       <LotDetailLookupHost lookup={lookup} />
     </LotDetailLookupContext>
   );
@@ -71,12 +81,31 @@ export function AuctionPage(): JSX.Element {
 
 /** 拍卖看板；首屏从同源 Public API 读取当前拍卖，不渲染示例数据。 */
 export function AuctionBoard(): JSX.Element {
+  return mountAuctionBoard(usePublicQueryState().state);
+}
+
+interface AuctionBoardViewProps {
+  readonly userId: string | null;
+  readonly failed: boolean;
+  readonly empty: boolean;
+  readonly auction: CurrentAuctionItemResponse | null;
+  readonly historical: boolean;
+  readonly bootPrerequisitesReady: boolean;
+  readonly catalog: ReturnType<typeof useAuctionCatalog>;
+  readonly query: Cell<PublicBoardQuery>;
+  readonly onRetry: () => void;
+}
+
+/** 先装配看板的公开读取，再挂载随身份更换的正文与命令宿主。 */
+export function mountAuctionBoard(
+  queryStateSignal: Cell<PublicBoardQuery>,
+  View = AuctionBoardView,
+): JSX.Element {
   const selectedWorld = useContext(SelectedWorldContext);
   const refreshGeneration = useContext(PublicRefreshGenerationContext);
-  const queryState = usePublicQueryState();
-  const queryStateSignal = queryState.state;
   const readiness = useContext(PublicReadinessContext);
   const session = useContext(PublicSessionResourceContext);
+  const owner = useContext(PublicCommandOwnerContext);
   const currentAuction = useContext(CurrentAuctionContext);
   // 同路径的历史/当前切换也必须订阅查询，不能仅在 popstate 或首页按钮时重读。
   const requestedAuction = createValueMemo(() => queryStateSignal().auctionId);
@@ -201,56 +230,94 @@ export function AuctionBoard(): JSX.Element {
     const loaded = current();
     return loaded?.ok ? loaded.value : null;
   });
+  // 公开读与补读游标早于身份子树建立，换号只替换私有展示和命令宿主。
+  const catalog = useAuctionCatalog(auction, historical, auctionReading, queryStateSignal);
 
+  return For({
+    get each() {
+      return [owner()];
+    },
+    keyed: (userId) => userId,
+    children: (userId) =>
+      createComponent(View, {
+        userId: untrack(userId),
+        get failed() {
+          return failed();
+        },
+        get empty() {
+          return empty();
+        },
+        get auction() {
+          return auction();
+        },
+        get historical() {
+          return historical();
+        },
+        get bootPrerequisitesReady() {
+          return bootPrerequisitesReady();
+        },
+        catalog,
+        query: queryStateSignal,
+        onRetry: () => refreshPublicReads(refreshGeneration),
+      }),
+  });
+}
+
+function AuctionBoardView(props: AuctionBoardViewProps): JSX.Element {
   return (
-    <Switch
-      fallback={
-        // 新世界的当前场次仍在读取时，三个终态分支都不命中；按钮组必须仍在页面上，
-        // 否则用户切到另一个世界后要等待读取结束才能切回。
-        <div class="public-auction-group-toolbar public-world-toolbar">
-          <WorldTabs />
-        </div>
-      }
-    >
-      {/* 读取失败或该世界没有场次时看板的筛选工具栏不存在：世界按钮组单独成行，
+    <CatalogCommandScope userId={props.userId}>
+      <Switch
+        fallback={
+          // 新世界的当前场次仍在读取时，三个终态分支都不命中；按钮组必须仍在页面上，
+          // 否则用户切到另一个世界后要等待读取结束才能切回。
+          <div class="public-auction-group-toolbar public-world-toolbar">
+            <WorldTabs />
+          </div>
+        }
+      >
+        {/* 读取失败或该世界没有场次时看板的筛选工具栏不存在：世界按钮组单独成行，
           否则切到没有场次的世界之后就没有入口切回来。 */}
-      <Match when={failed()}>
-        <div class="public-auction-group-toolbar public-world-toolbar">
-          <WorldTabs />
-        </div>
-        <AsyncState
-          kind="error"
-          title={t("page-auctions-title")}
-          detail={t("data-error")}
-          retryLabel={t("data-retry")}
-          // 与对齐重读、恢复可见共用刷新入口：先失效公开读缓存，重试才真正回到服务端。
-          onRetry={() => refreshPublicReads(refreshGeneration)}
-        />
-      </Match>
-      <Match when={empty()}>
-        <div class="public-auction-group-toolbar public-world-toolbar">
-          <WorldTabs />
-        </div>
-        <AsyncState
-          kind="empty"
-          title={t("auction-empty-no-auction")}
-          detail={t("auction-empty-no-auction-hint")}
-        />
-      </Match>
-      <Match when={auction()}>
-        {(loaded) => (
-          <LotWatchScope auctionId={loaded().id}>
-            <AuctionData
-              auction={loaded()}
-              historical={historical()}
-              auctionReading={auctionReading()}
-              bootPrerequisitesReady={bootPrerequisitesReady()}
-            />
-            {/* 详情抽屉挂在标记作用域内（底部标记按钮需要它），并与目录共存亡。 */}
-            <CatalogDetailHost auctionId={loaded().id} />
-          </LotWatchScope>
-        )}
-      </Match>
-    </Switch>
+        <Match when={props.failed}>
+          <div class="public-auction-group-toolbar public-world-toolbar">
+            <WorldTabs />
+          </div>
+          <AsyncState
+            kind="error"
+            title={t("page-auctions-title")}
+            detail={t("data-error")}
+            retryLabel={t("data-retry")}
+            // 与对齐重读、恢复可见共用刷新入口：先失效公开读缓存，重试才真正回到服务端。
+            onRetry={() => props.onRetry()}
+          />
+        </Match>
+        <Match when={props.empty}>
+          <div class="public-auction-group-toolbar public-world-toolbar">
+            <WorldTabs />
+          </div>
+          <AsyncState
+            kind="empty"
+            title={t("auction-empty-no-auction")}
+            detail={t("auction-empty-no-auction-hint")}
+          />
+        </Match>
+        <Match when={props.auction}>
+          {(loaded) => (
+            <LotWatchScope auctionId={loaded().id}>
+              <CatalogProxyScope>
+                <AuctionData
+                  auction={loaded()}
+                  historical={props.historical}
+                  catalog={props.catalog}
+                  query={props.query}
+                  bootPrerequisitesReady={props.bootPrerequisitesReady}
+                />
+              </CatalogProxyScope>
+              {/* 详情抽屉挂在标记作用域内（底部标记按钮需要它），并与目录共存亡。 */}
+              <CatalogDetailHost auctionId={loaded().id} />
+            </LotWatchScope>
+          )}
+        </Match>
+      </Switch>
+    </CatalogCommandScope>
   );
 }

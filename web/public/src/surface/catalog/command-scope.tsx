@@ -9,10 +9,15 @@ import { Dialog } from "@auction/web-shared/ui/components/dialog";
 import { formatCreditAmount } from "@auction/web-shared/ui/format";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
-import { createContext, For, Match, Show, Switch, useContext } from "solid-js";
+import { createContext, Match, Show, Switch, useContext } from "solid-js";
 
 import type { OwnedProxy } from "../../api/account";
 import type { CommandError, ProxyCommandAuthorization } from "../../api/commands";
+import {
+  PublicCommandOwnerContext,
+  PublicSessionResourceContext,
+  type PublicSessionResult,
+} from "..";
 import { PublicRefreshGenerationContext } from "../board/refresh";
 import { BidForm, type BidSuccess } from "../commands/bid";
 import {
@@ -20,10 +25,10 @@ import {
   type PendingProxyCommand,
   PublicCommandIdentityContext,
 } from "../commands/pending";
-import { type ProxyFormInput, proxyForm } from "../commands/proxy";
+import { activeOwnedProxy, type ProxyFormInput, proxyForm } from "../commands/proxy";
 import { BidRetry } from "../commands/retry";
-import { PublicCommandOwnerContext, PublicSessionResourceContext } from "../index";
 import {
+  currentUser,
   useWatchCommandOwner,
   WatchCommandOwnerContext,
   WatchCommandStatus,
@@ -59,22 +64,36 @@ export interface CommandDialogInput {
 export const CommandDialogContext = createContext<Cell<CommandDialogInput | null> | null>(null);
 
 const NIL_UUID = "00000000-0000-0000-0000-000000000000";
+const ACTIVE_PROXY_HINT_ID = "public-bid-active-proxy";
 
-/** 身份由外壳明确确认；暂时 GET 错误或 Pending 不改变宿主身份。 */
-export function CatalogCommandScope(props: { readonly children: JSX.Element }): JSX.Element {
-  const owner = useContext(PublicCommandOwnerContext);
-  const userId = () => owner();
-  // 单元素 keyed 列表建立真正的身份生命周期；静态子组件的 key 不会替换 scope。
+/** 当前快照无新确认时，由外壳最后确认的宿主继续持有草稿。 */
+export function catalogIdentityMatches(
+  snapshot: PublicSessionResult | undefined,
+  hostedUserId: string,
+  confirmedUserId: string | null,
+): boolean {
+  const hosted = canonicalUuid(hostedUserId);
   return (
-    <For each={[userId()]} keyed={(value) => value}>
-      {(current) => (
-        <IdentityCommandScope userId={current()}>{props.children}</IdentityCommandScope>
-      )}
-    </For>
+    hosted !== null &&
+    hosted !== NIL_UUID &&
+    canonicalUuid(confirmedUserId) === hosted &&
+    (snapshot?.ok !== true || canonicalUuid(currentUser(snapshot)) === hosted)
   );
 }
 
-function IdentityCommandScope(props: {
+/** 新写入只允许经当前已就绪的同身份会话，避免把未复核的草稿提交到另一账号。 */
+export function catalogCommandSession(
+  snapshot: PublicSessionResult | undefined,
+  ready: boolean,
+  hostedUserId: string,
+  confirmedUserId: string | null,
+): { authenticated: boolean; canSubmit: boolean } {
+  const authenticated = catalogIdentityMatches(snapshot, hostedUserId, confirmedUserId);
+  return { authenticated, canSubmit: authenticated && ready && snapshot?.ok === true };
+}
+
+/** 看板按已确认用户建键；单个宿主只持有本身份的命令与抽屉。 */
+export function CatalogCommandScope(props: {
   readonly userId: string | null;
   readonly children: JSX.Element;
 }): JSX.Element {
@@ -116,20 +135,10 @@ function CatalogCommandDialog(props: {
   const input = () => props.input;
   const refreshGeneration = useContext(PublicRefreshGenerationContext);
   const session = useContext(PublicSessionResourceContext);
+  const owner = useContext(PublicCommandOwnerContext);
   const identity = useContext(PublicCommandIdentityContext);
-  const authenticated = () => {
-    if (session.state() !== "ready") {
-      return false;
-    }
-    const snapshot = session();
-    if (snapshot === undefined || !snapshot.ok || snapshot.value === null) {
-      return false;
-    }
-    return (
-      snapshot.value.authenticated &&
-      canonicalUuid(snapshot.value.user_id) === canonicalUuid(identity.userId)
-    );
-  };
+  const commandSession = () =>
+    catalogCommandSession(session(), session.state() === "ready", identity.userId, owner());
   const toasts = useContext(CatalogToastContext);
   // 代理成功投影与命令状态都由稳定宿主持有；表单替换不能取消任务或丢失结果。
   const proxySuccess = createCell<ProxyCommandAuthorization | null>(null);
@@ -186,10 +195,13 @@ function CatalogCommandDialog(props: {
       : input().action === "bid"
         ? t("bid-dialog-title", { code: input().lotCode })
         : t("proxy-dialog-title", { code: input().lotCode });
-  const canBid = () => input().canBid && authenticated();
+  const canBid = () => input().canBid && commandSession().authenticated;
+  const activeProxy = () => activeOwnedProxy(input().proxy) !== null;
   const proxyInput = (): ProxyFormInput => ({
     lotId: input().lotId,
+    authenticated: commandSession().authenticated,
     canBid: canBid(),
+    canSubmit: commandSession().canSubmit,
     currentPrice: input().currentPrice,
     nextBid: input().nextBid,
     lotStatus: input().lotStatus,
@@ -257,8 +269,13 @@ function CatalogCommandDialog(props: {
                     }
                     type="button"
                     aria-pressed={input().action === "bid" ? "true" : "false"}
-                    disabled={busy()}
-                    onClick={() => switchTab("bid")}
+                    disabled={busy() || activeProxy()}
+                    aria-describedby={activeProxy() ? ACTIVE_PROXY_HINT_ID : undefined}
+                    onClick={() => {
+                      if (!activeProxy()) {
+                        switchTab("bid");
+                      }
+                    }}
                   >
                     {t("bid-tab-direct")}
                   </button>
@@ -276,6 +293,15 @@ function CatalogCommandDialog(props: {
                     {t("bid-tab-proxy")}
                   </button>
                 </div>
+                <Show when={activeProxy()}>
+                  <p
+                    id={ACTIVE_PROXY_HINT_ID}
+                    class="action-feedback action-feedback--notice"
+                    role="note"
+                  >
+                    {t("proxy-active-exists")}
+                  </p>
+                </Show>
               </Show>
             </>
           }
@@ -298,6 +324,7 @@ function CatalogCommandDialog(props: {
                     nextBid: input().nextBid,
                     lotStatus: input().lotStatus,
                     canBid: canBid(),
+                    canSubmit: commandSession().canSubmit,
                     blocked: input().ordinaryBlocked,
                     blockedReason: input().blockedReason,
                     command: bidCommand,

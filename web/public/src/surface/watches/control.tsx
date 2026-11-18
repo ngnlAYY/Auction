@@ -9,7 +9,19 @@ import { Match, Show, Switch } from "solid-js";
 
 import { loginHrefForCurrentLocation } from "../session";
 import { tryUseWatchContext, useWatchContext } from ".";
-import { requireWatchCommandOwner } from "./commands";
+import { canStartWatchCommand, requireWatchCommandOwner, type WatchCommandOwner } from "./commands";
+
+/** 保持标记按钮和点击事件使用同一份可写的标记版本。 */
+export function watchToggleState(
+  owner: Pick<WatchCommandOwner, "userId" | "identity" | "session">,
+  snapshot: readonly [boolean, number] | null,
+  hasPending: boolean,
+): { disabled: true } | { disabled: false; snapshot: readonly [boolean, number] } {
+  if (snapshot === null || hasPending || !canStartWatchCommand(owner)) {
+    return { disabled: true };
+  }
+  return { disabled: false, snapshot };
+}
 
 /** 目录行的“已标记”展示状态，用于行首色条。与标记按钮读取同一份整场状态，不发请求；
  * 匿名、身份不匹配或不在标记作用域内时为 false。 */
@@ -31,7 +43,8 @@ export function LotWatchButton(props: {
 }): JSX.Element {
   const iconOnly = () => props.iconOnly ?? false;
   const context = useWatchContext();
-  const submit = requireWatchCommandOwner().submit;
+  const owner = requireWatchCommandOwner();
+  const submit = owner.submit;
   const session = context.session;
   const snapshot = () => session();
   const identityMatches = () => context.identityMatches();
@@ -43,8 +56,9 @@ export function LotWatchButton(props: {
     const current = snapshot();
     return current?.ok === false;
   };
-  const authoritative = () => context.authoritative(props.lotId);
   const pending = () => context.commands().get(props.lotId) ?? null;
+  const toggleState = () =>
+    watchToggleState(owner, context.authoritative(props.lotId), pending() !== null);
   const watched = () => context.displayed(props.lotId);
   const busy = () => pending()?.busy === true;
   const error = () => pending()?.error ?? null;
@@ -55,13 +69,11 @@ export function LotWatchButton(props: {
   const errorId = () => `public-lot-watch-error-${props.lotId}`;
 
   const toggle = () => {
-    if (!context.identityMatches() || context.commands.peek().has(props.lotId)) {
+    const state = toggleState();
+    if (state.disabled) {
       return;
     }
-    const current = context.authoritative(props.lotId);
-    if (current === null) {
-      return;
-    }
+    const current = state.snapshot;
     const request: PublicSetLotWatchRequest = {
       command_id: createUuidV4(),
       watched: !current[0],
@@ -106,7 +118,7 @@ export function LotWatchButton(props: {
             aria-pressed={watched() ? "true" : "false"}
             aria-label={t("watch-toggle", { code: props.lotCode })}
             aria-describedby={error() !== null ? errorId() : ""}
-            disabled={authoritative() === null || pending() !== null}
+            disabled={toggleState().disabled}
             onClick={toggle}
           >
             <span class="public-lot-watch__icon" aria-hidden="true">

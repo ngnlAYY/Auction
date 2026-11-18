@@ -5,6 +5,8 @@
 // 随机窗口后重读自己的权威接口。事件负载中的价格、领先者或版本都不参与页面结果，因此取消
 // 合并或丢弃通知只会多读或少读一次快照，不会产生第二种竞价状态。
 
+import type { CurrentAuctionItemResponse } from "@auction/contracts/dto/public/catalog/auction";
+import { useSecondTick } from "@auction/web-shared/platform/clock";
 import { sleep } from "@auction/web-shared/platform/timer";
 import { type Cell, createCell } from "@auction/web-shared/reactive/cell";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
@@ -12,7 +14,10 @@ import type { TaskResource } from "@auction/web-shared/reactive/resource";
 import { createTaskScope } from "@auction/web-shared/reactive/tasks";
 import { createContext, createEffect, untrack, useContext } from "solid-js";
 
+import { estimatedNow } from "../../api/clock";
+import { parseStrictRfc3339 } from "../../api/session";
 import { invalidateAll } from "../../api/swr-cache";
+import { PageVisibilityContext } from "../shell/contexts";
 
 /**
  * 合并窗口的基础时长：从首次待处理通知起至少合并 100 毫秒；后续竞价不延后截止时间。
@@ -51,6 +56,52 @@ export function refreshPublicReads(refreshGeneration: Cell<number>): void {
   invalidateAll();
   const nextGeneration = Math.min(refreshGeneration.peek() + 1, Number.MAX_SAFE_INTEGER);
   refreshGeneration.set(nextGeneration);
+}
+
+/** 同一场次的开场补读归公开看板持有，账号切换不重新触发。 */
+export function useAuctionOpeningRefresh(
+  auction: () => CurrentAuctionItemResponse | null,
+  historical: () => boolean,
+  refreshGeneration: Cell<number>,
+): void {
+  const tick = useSecondTick();
+  const visibility = useContext(PageVisibilityContext);
+  const opening = createValueMemo(() => {
+    const round = auction();
+    return round === null
+      ? null
+      : {
+          key: `${round.id}:${round.opens_at}`,
+          opensAt: parseStrictRfc3339(round.opens_at),
+          shouldRefresh: !historical() && round.presentation_mode !== "live",
+        };
+  });
+  let openingKey: string | null = null;
+  let refreshed = false;
+  createEffect(
+    () => {
+      const current = opening();
+      return { current, tick: current?.shouldRefresh ? tick() : null };
+    },
+    ({ current }) => {
+      const key = current?.key ?? null;
+      if (key !== openingKey) {
+        openingKey = key;
+        refreshed = false;
+      }
+      // 预览没有 WebSocket，开场时先失效 TTL 内的旧快照，再推进权威读取代号。
+      if (
+        current?.shouldRefresh &&
+        !refreshed &&
+        visibility.isVisible() &&
+        current.opensAt !== null &&
+        BigInt(estimatedNow()) * 1_000_000n >= current.opensAt
+      ) {
+        refreshed = true;
+        refreshPublicReads(refreshGeneration);
+      }
+    },
+  );
 }
 
 /** Public 外壳持有的竞价失效修订号，与生命周期和人工刷新的全局修订号分离。 */
@@ -106,7 +157,7 @@ export function planBidRefresh(
 /**
  * 仅刷新已挂载且启用的竞价资源；进行中的读取先完成，再补读尚未消费的通知。
  * 竞价修订号不能直接成为资源的依赖，否则持续竞价会反复取消慢请求。
- * 延后任务由消费组件拥有：卸载会取消任务，新挂载的资源自行读取最新权威快照。
+ * 与资源在同一作用域调用：延后任务与已消费修订号一起存活，卸载时由新资源自行读取权威快照。
  */
 export function useBidRefresh<T>(resource: TaskResource<T>, enabled: () => boolean): void {
   const refresh = useContext(PublicBidRefreshContext);

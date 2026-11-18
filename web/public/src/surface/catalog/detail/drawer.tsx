@@ -16,6 +16,7 @@ import { For, Match, onCleanup, Show, Switch, useContext } from "solid-js";
 import { fetchLotDetail, LOT_DETAIL_FETCH_ERROR } from "../../../api/queries/lots";
 import { loginHrefForCurrentLocation } from "../../session";
 import { LotWatchButton } from "../../watches/control";
+import { detailBidReason } from "../actions";
 import { CommandDialogContext } from "../command-scope";
 import {
   catalogCategoryKey,
@@ -116,10 +117,7 @@ export function CatalogDetailDrawer(props: {
   // 本人对该拍品的代理授权（上限、已用次数）；抽屉是它在目录里唯一的展示位置。
   const ownProxyValue = createValueMemo(() => ownProxy(bid()));
   // 出价入口三态与行内操作栏一致：命令按钮（可禁用并说明原因）、登录链接或不渲染。
-  const bidReason = createValueMemo(() => {
-    const current = bid();
-    return current.kind === "command" && current.disabled ? current.input.blockedReason : "";
-  });
+  const bidReason = createValueMemo(() => detailBidReason(bid()));
   const commandBid = createValueMemo(() => {
     const current = bid();
     return current.kind === "command" ? current : null;
