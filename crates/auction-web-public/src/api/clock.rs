@@ -119,7 +119,7 @@ pub(crate) async fn send_get(url: &str) -> Result<Response, TransportError> {
 }
 
 /// 发送 SWR 缓存层的公开 GET：有 ETag 时携带 `If-None-Match`，没有时要求浏览器向服务端再验证。
-/// 304 与 200 一样在共享预算内读完响应头，正文与缓存判定由调用方处理。
+/// 响应头已到时保留状态码，即使共享传输未能在预算内读完整个正文。
 ///
 /// 这两种请求都不会由浏览器 HTTP 缓存直接应答：脚本自带条件头的请求按 Fetch 规范绕过它，
 /// 过期或被失效（实时事件、命令结果）的条目都走这条路；无 ETag 的读取发生在缓存未命中或旧
@@ -127,11 +127,12 @@ pub(crate) async fn send_get(url: &str) -> Result<Response, TransportError> {
 /// `max-age=2, stale-while-revalidate=5`，默认缓存模式下 7 秒内的第二次读取会原样拿回旧正文，
 /// 并被 SWR 层当作新快照保留到 TTL 结束；`no-cache` 模式仍让浏览器用自己的验证器做条件请求，
 /// 未变化时只传回 304。
-pub(crate) async fn send_get_conditional(
+pub(super) async fn send_get_conditional(
     url: &str,
     etag: Option<&str>,
-) -> Result<Response, TransportError> {
-    auction_web_shared::send_request_observed(
+) -> Result<Response, (TransportError, Option<u16>)> {
+    let mut status = None;
+    let result = auction_web_shared::send_request_observed(
         |abort_signal| {
             let request = Request::get(url).abort_signal(abort_signal);
             let request = match etag {
@@ -140,9 +141,15 @@ pub(crate) async fn send_get_conditional(
             };
             request.build().map_err(|_| TransportError::Network(None))
         },
-        observe_revalidated_date,
+        |response| {
+            let response_status = response.status();
+            status = Some(response_status);
+            super::swr_cache::observe_response_status(url, response_status);
+            observe_revalidated_date(response);
+        },
     )
-    .await
+    .await;
+    result.map_err(|error| (error, status))
 }
 
 /// 在响应头到达时校时，并在共享总预算内完整读取命令响应正文。

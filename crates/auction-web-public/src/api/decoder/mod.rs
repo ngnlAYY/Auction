@@ -37,10 +37,8 @@ pub(crate) use catalog::{
 #[cfg(test)]
 pub(crate) use fulfillment::FULFILLMENT_STATUSES;
 pub(crate) use fulfillment::decode_fulfillment_page;
-pub(crate) use lot::{
-    decode_bid_command, decode_create_proxy_command, decode_lot_detail, decode_lot_list,
-    decode_lower_proxy_command,
-};
+pub(super) use lot::{decode_bid_command, decode_create_proxy_command, decode_lower_proxy_command};
+pub(crate) use lot::{decode_lot_detail, decode_lot_list};
 #[cfg(target_arch = "wasm32")]
 pub(crate) use realtime::{decode_auction_realtime_page, decode_realtime_event};
 
@@ -50,15 +48,27 @@ where
     T: DeserializeOwned,
     F: FnOnce(&Value) -> bool,
 {
-    let payload = response.json::<Value>().await.map_err(|_| {
-        report_browser_error(BrowserErrorClass::DtoDecode);
-        "invalid_response".to_owned()
-    })?;
-    let decoded = decode_success_value(payload, validate);
-    if decoded.is_err() {
-        report_browser_error(BrowserErrorClass::DtoDecode);
-    }
-    decoded
+    decode_success_payload(response.json::<Value>().await.ok(), validate)
+}
+
+/// 已缓冲的命令正文沿用成功 envelope 与 data 校验。
+fn decode_success_text<T, F>(body: Option<&str>, validate: F) -> Result<T, String>
+where
+    T: DeserializeOwned,
+    F: FnOnce(&Value) -> bool,
+{
+    decode_success_payload(body.and_then(|text| serde_json::from_str(text).ok()), validate)
+}
+
+fn decode_success_payload<T, F>(payload: Option<Value>, validate: F) -> Result<T, String>
+where
+    T: DeserializeOwned,
+    F: FnOnce(&Value) -> bool,
+{
+    payload
+        .ok_or_else(|| "invalid_response".to_owned())
+        .and_then(|payload| decode_success_value(payload, validate))
+        .inspect_err(|_| report_browser_error(BrowserErrorClass::DtoDecode))
 }
 
 /// 解析旧共享 client 接受的错误 envelope；顶层扩展允许存在，但三项基础字段必须显式出现。

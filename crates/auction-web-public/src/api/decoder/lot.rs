@@ -14,8 +14,8 @@ use serde_json::{Map, Value};
 use super::super::{CatalogLevelFilter, LotEnvelope, ProxyCommandAuthorization};
 use super::account::{valid_quota, valid_transitions};
 use super::{
-    bool_value, decode_success, game_url, int, nonempty, nonnegative, object, optional_bool,
-    optional_finite, optional_int, optional_nonempty, optional_nonnegative,
+    bool_value, decode_success, decode_success_text, game_url, int, nonempty, nonnegative, object,
+    optional_bool, optional_finite, optional_int, optional_nonempty, optional_nonnegative,
     optional_primary_attribute_initials, optional_string, positive, positive_page_size, proxy_mode,
     raw_nonempty_str, revision, string, time, trimmed_nonempty_str,
 };
@@ -41,37 +41,36 @@ pub(crate) async fn decode_lot_detail(
 }
 
 /// 先完成严格解码，再核对命令目标；错 lot 的成功响应仍属于未知结果。
-pub(crate) async fn decode_bid_command(
-    response: Response,
+pub(in crate::api) fn decode_bid_command(
+    body: Option<&str>,
     lot_id: &str,
 ) -> Result<BidResult, String> {
-    let result = decode_success::<PlaceBidResponse, _>(response, valid_bid_command).await?.bid;
+    let result = decode_success_text::<PlaceBidResponse, _>(body, valid_bid_command)?.bid;
     if result.lot_id != lot_id {
         return Err("invalid_response".to_owned());
     }
     Ok(result)
 }
 
-pub(crate) async fn decode_create_proxy_command(
-    response: Response,
+pub(in crate::api) fn decode_create_proxy_command(
+    body: Option<&str>,
     lot_id: &str,
     maximum_amount: i64,
     mode: &str,
 ) -> Result<ProxyCommandAuthorization, String> {
-    decode_success::<PublicProxyCommandResponse, _>(response, |value| {
+    decode_success_text::<PublicProxyCommandResponse, _>(body, |value| {
         valid_proxy_command(value, lot_id, Some(maximum_amount), Some(mode), false)
     })
-    .await
     .map(|response| response.authorization)
 }
 
-pub(crate) async fn decode_lower_proxy_command(
-    response: Response,
+pub(in crate::api) fn decode_lower_proxy_command(
+    body: Option<&str>,
     lot_id: &str,
     authorization_id: &str,
     maximum_amount: i64,
 ) -> Result<ProxyCommandAuthorization, String> {
-    decode_success::<PublicProxyCommandResponse, _>(response, |value| {
+    decode_success_text::<PublicProxyCommandResponse, _>(body, |value| {
         valid_proxy_command(value, lot_id, Some(maximum_amount), None, true)
             && object(value)
                 .and_then(|value| value.get("authorization"))
@@ -79,7 +78,6 @@ pub(crate) async fn decode_lower_proxy_command(
                 .and_then(|value| string(value.get("authorization_id")))
                 == Some(authorization_id)
     })
-    .await
     .map(|response| response.authorization)
 }
 

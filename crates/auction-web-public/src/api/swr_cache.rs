@@ -7,23 +7,21 @@
 //!
 //! 语义：TTL 内且未被失效的条目直接返回；过期或被失效后携带 ETag 条件请求，304 刷新写入时间
 //! 并恢复新鲜。传输失败（网络/超时）与服务端暂时拒绝（429 读闸繁忙或来源超额、503 依赖暂不
-//! 可用、源站不可达时的网关 502/504 与 CDN 520–524）在已有条目时回退旧值（stale-while-revalidate）并标明这是回退及该快照最近一次被
-//! 服务端确认的时刻，没有条目时照常返回错误；其他 4xx/5xx 与正文校验失败失败关闭，既不写入也不回退。旧快照只用于读视图展示：命令
-//! 仍由服务端权威校验，过期的下一口价只会被服务端拒绝。失效只把全部条目标为过期（保留正文与
-//! ETag）并推进修订号。
-//! 同一 URL 的读取经在途登记串行：已有请求在途时，后到的读取等它结束再按上述规则查缓存，不并发
-//! 发出相同请求，因此成功响应不会比已有条目旧，总是替换其正文与 ETag。请求期间发生过失效时，
-//! 响应只作为过期条目保留，供条件请求与暂时性失败回退，不作为新鲜命中；在途请求失败、被取消或
-//! 期间失效时，等待方自行请求。
+//! 可用、源站不可达时的网关 502/504 与 CDN 520–524）在已有可回退条目时返回旧值，并标记其最近
+//! 被服务端确认的时刻。404/410 驱逐该 URL 的旧条目。其他 4xx/5xx 与正文校验失败直接返回错误。
+//! 旧快照只用于读视图展示，命令仍由服务端权威校验。普通失效把全部条目标为过期（保留正文与 ETag）
+//! 并推进修订号。
+//! 同一 URL 合并在途请求，等待方醒来后重新检查缓存。普通失效期间完成的响应作为过期条目保留，
+//! 供条件请求与暂时性失败回退。命令失效和 404/410 驱逐都会解除相应的在途登记。旧请求的成功
+//! 结果只交给自己的调用方，后续读取须向服务端重新验证。
 //!
 //! 本层是这些读取唯一的客户端新鲜度来源：未命中（或旧条目没有 ETag）时的请求要求浏览器向服务端
 //! 再验证，不接受 HTTP 缓存按 `max-age`/`stale-while-revalidate` 给出的旧副本，否则旧正文会
 //! 被当作新快照保留到 TTL 结束；带 `If-None-Match` 的条件请求按 Fetch 规范同样绕过 HTTP 缓存。
 //! 失效时机是实时事件、开场迁移、外壳权威轮询（非 Live 每 60 秒，Live 约每 5 分钟兜底）、页面
-//! 恢复可见、看板对齐重读与错误重试、会话变化，以及竞价与代理命令得到服务端答复（成功或被拒绝）；
-//! 只推进页面刷新代号而不失效时，TTL 内的读取直接命中新鲜条目，不会回到服务端。命令答复后的失效另把回退下限推进到
-//! 新修订号：用户刚提交的命令之后，读视图只显示权威结果或错误，不退回命令之前的价格与领先者；
-//! 回退资格在失败返回时按当时最新的下限判定，命令答复发生在重读在途期间同样生效。他人竞价等
+//! 恢复可见、看板对齐重读与错误重试、会话变化，以及已发出的竞价与代理命令结束（含结果未知）。
+//! 只推进页面刷新代号时，TTL 内的读取直接命中新鲜条目。命令结束后把回退下限推进到新修订号，
+//! 防止权威重读失败时退回命令之前的价格与领先者。回退资格按失败返回时的下限判定。他人竞价等
 //! 事件触发的普通失效仍允许繁忙时先显示最后已知快照。
 
 use std::any::Any;
@@ -84,20 +82,16 @@ struct Entry {
 #[derive(Default)]
 struct Store {
     entries: HashMap<String, Entry>,
-    /// 每次失效递增，已有条目随之全部过期；请求开始后发生过失效时，响应仍写入但保留请求开始时
-    /// 的修订号，只作为过期条目。
+    /// 每次失效递增，已有条目随之全部过期。
     revision: u64,
-    /// 同一 URL 正在进行的请求。
+    /// 同一 URL 可供合并和更新缓存的在途请求。
     pending: HashMap<String, Rc<Pending>>,
-    /// 暂时性失败回退的修订号下限：命令答复后推进到当时的修订号。修订号低于下限的条目（命令前
-    /// 写入，或命令前已在途、之后才写回）仍可带 ETag 条件请求，但不再用于回退。修订号按 u64
-    /// 逐次递增，实际不会回绕。
+    /// 最近一次命令失效的修订号。更早的条目只可带 ETag 再验证，更早发出的请求也不得写回缓存。
+    /// 修订号按 u64 逐次递增，实际不会回绕。
     fallback_floor: u64,
 }
 
-/// 在途请求的完成通知；只表示“该请求已结束”，不携带结果。等待方结束后仍按缓存规则重新读取：
-/// 首个请求失败、被取消或期间发生失效（只留下过期条目）时，等待方自行请求；是否新鲜完全由
-/// 条目记录的修订号决定。
+/// 在途请求结束或被驱逐的通知。等待方醒来后重新检查条目及在途登记。
 #[derive(Default)]
 struct Pending {
     done: Cell<bool>,
@@ -141,17 +135,17 @@ impl PendingGuard {
         });
         Self { url: url.to_owned(), pending }
     }
+
+    fn is_registered(&self, store: &Store) -> bool {
+        store.pending.get(&self.url).is_some_and(|current| Rc::ptr_eq(current, &self.pending))
+    }
 }
 
 impl Drop for PendingGuard {
     fn drop(&mut self) {
         STORE.with(|store| {
             let mut store = store.borrow_mut();
-            if store
-                .pending
-                .get(&self.url)
-                .is_some_and(|current| Rc::ptr_eq(current, &self.pending))
-            {
+            if self.is_registered(&store) {
                 store.pending.remove(&self.url);
             }
         });
@@ -263,15 +257,14 @@ where
     let fresh = |entry: &CachedEntry<T>| {
         entry.current && now_millis().saturating_sub(entry.stored_at_millis) < ttl_millis
     };
-    // 同一 URL 已有请求在途（例如启动预取）：等它结束再按同一规则读缓存。单线程内“检查—登记”
-    // 之间没有 await，因此不会有两个请求同时登记同一 URL。
+    // 命令失效与驱逐都会解除旧请求的登记，后发的权威重读可直接发起请求。
     while let Some(pending) = pending_for(url) {
         WaitPending(pending).await;
         if let Some(entry) = lookup::<T>(url).filter(fresh) {
             return Ok(current(entry.value));
         }
     }
-    let _pending = PendingGuard::register(url);
+    let request = PendingGuard::register(url);
     let revision = current_revision();
     if let Some(entry) = lookup::<T>(url) {
         if fresh(&entry) {
@@ -280,21 +273,20 @@ where
         // 过期与已被失效的条目同样带旧 ETag 再验证：正文未变时 304 直接复用，不重传整页。
         return match fetch(entry.etag.clone()).await {
             FetchOutcome::Changed { value, etag } => {
-                store(url, &value, etag, now_millis(), revision);
+                store(&request, &value, etag, now_millis(), revision);
                 Ok(current(value))
             }
             FetchOutcome::NotModified => {
                 // 304 表示正文在本次请求时仍未变：期间没有再发生失效时，前移写入时间并标回
                 // 当前修订号。
-                touch(url, now_millis(), revision);
+                touch(&request, now_millis(), revision);
                 Ok(current(entry.value))
             }
             // 传输失败或服务端暂时拒绝时，旧值仍是最近一次已验证投影：继续展示并标明是回退及其
             // 确认时刻，由调用方决定是否稍后再读或提示；不刷新写入时间，也不把条目标回新鲜。
-            // 条目早于最近一次命令答复时不回退，按失败返回，避免命令之后显示命令之前的快照；
-            // 下限可能在本次请求在途期间被命令答复推进，必须在此刻重新判定，不能沿用请求前的结论。
+            // 响应期间可能收到命令结果或 404/410，回退资格按完成时的登记和下限判定。
             FetchOutcome::Transport(error) | FetchOutcome::Busy(error) => {
-                if fallback_allowed(entry.revision) {
+                if fallback_allowed(&request, entry.revision) {
                     Ok(CacheRead {
                         value: entry.value,
                         stale_fallback: Some(entry.stored_at_millis),
@@ -308,7 +300,7 @@ where
     }
     match fetch(None).await {
         FetchOutcome::Changed { value, etag } => {
-            store(url, &value, etag, now_millis(), revision);
+            store(&request, &value, etag, now_millis(), revision);
             Ok(current(value))
         }
         FetchOutcome::Transport(error)
@@ -328,24 +320,28 @@ pub(crate) fn invalidate_all() {
     });
 }
 
-/// 用户命令（竞价、代理创建与降额）得到服务端答复后调用：与 [`invalidate_all`] 一样使全部条目
-/// 过期，另把回退下限推进到新修订号。之前的条目仍可带 ETag 做条件请求，但暂时性失败时不再回退
-/// 到命令之前的快照，读视图只显示权威结果或错误。
+/// 可能已发出的用户命令结束后调用。使条目过期并解除旧请求的在途登记。
+/// 之前的条目可带 ETag 再验证，暂时性失败时禁止回退到命令之前的快照。
 pub(crate) fn invalidate_after_command() {
     STORE.with(|store| {
         let mut store = store.borrow_mut();
         store.revision = store.revision.wrapping_add(1);
         store.fallback_floor = store.revision;
+        store.pending.clear();
     });
 }
 
-fn current_revision() -> u64 {
+/// 记录请求发出时的失效修订号。
+pub(super) fn current_revision() -> u64 {
     STORE.with(|store| store.borrow().revision)
 }
 
-/// 修订号为 `revision` 的条目此刻能否作为暂时性失败的回退值：不早于最近一次命令答复推进的下限。
-fn fallback_allowed(revision: u64) -> bool {
-    STORE.with(|store| revision >= store.borrow().fallback_floor)
+/// 发生驱逐或命令失效后，已失去登记资格的请求不能回退到其持有的旧条目。
+fn fallback_allowed(request: &PendingGuard, revision: u64) -> bool {
+    STORE.with(|store| {
+        let store = store.borrow();
+        request.is_registered(&store) && revision >= store.fallback_floor
+    })
 }
 
 fn lookup<T: Clone + 'static>(url: &str) -> Option<CachedEntry<T>> {
@@ -363,8 +359,23 @@ fn lookup<T: Clone + 'static>(url: &str) -> Option<CachedEntry<T>> {
     })
 }
 
+/// 响应头确认 URL 不可用时立即驱逐。请求发出顺序不能用来判断服务端处理顺序。
+pub(super) fn observe_response_status(url: &str, status: u16) {
+    if !matches!(status, 404 | 410) {
+        return;
+    }
+    let pending = STORE.with(|store| {
+        let mut store = store.borrow_mut();
+        store.entries.remove(url);
+        store.pending.remove(url)
+    });
+    if let Some(pending) = pending {
+        pending.finish();
+    }
+}
+
 fn store<T: Clone + 'static>(
-    url: &str,
+    request: &PendingGuard,
     value: &T,
     etag: Option<String>,
     stored_at_millis: u64,
@@ -372,9 +383,12 @@ fn store<T: Clone + 'static>(
 ) {
     STORE.with(|store| {
         let mut store = store.borrow_mut();
-        // 同一 URL 的请求经在途登记串行，响应不会比已有条目旧，因此总是替换正文与 ETag：页面已
-        // 展示这份响应，之后的条件请求与暂时性失败回退都不能退回更早的快照。`revision` 是请求
-        // 开始时的修订号，期间发生过失效时条目随即落后于当前修订号，只作过期条目，不成为新鲜命中。
+        // 驱逐或命令失效前发出的旧请求已解除登记，禁止其恢复或覆盖条目。
+        if revision < store.fallback_floor || !request.is_registered(&store) {
+            return;
+        }
+        let url = &request.url;
+        // 普通失效保留旧请求的修订号，下一次读取仍会验证这份快照。
         if !store.entries.contains_key(url) && store.entries.len() >= MAX_ENTRIES {
             // 淘汰最早写入的条目；过期条目仍可能用于 SWR 回退，因此只在超限时清理。
             if let Some(oldest) =
@@ -385,19 +399,19 @@ fn store<T: Clone + 'static>(
             }
         }
         store.entries.insert(
-            url.to_owned(),
+            url.clone(),
             Entry { value: Rc::new(value.clone()), etag, stored_at_millis, revision },
         );
     });
 }
 
-fn touch(url: &str, stored_at_millis: u64, revision: u64) {
+fn touch(request: &PendingGuard, stored_at_millis: u64, revision: u64) {
     STORE.with(|store| {
         let mut store = store.borrow_mut();
-        if store.revision != revision {
+        if store.revision != revision || !request.is_registered(&store) {
             return;
         }
-        if let Some(entry) = store.entries.get_mut(url) {
+        if let Some(entry) = store.entries.get_mut(&request.url) {
             entry.stored_at_millis = stored_at_millis;
             entry.revision = revision;
         }
@@ -414,7 +428,8 @@ mod tests {
 
     use super::{
         CATALOG_TTL_MILLIS, FetchOutcome, LIVE_TTL_MILLIS, MAX_ENTRIES, STORE, Store, get_or_fetch,
-        invalidate_after_command, invalidate_all, is_cacheable_url, read_or_fetch,
+        invalidate_after_command, invalidate_all, is_cacheable_url, lookup,
+        observe_response_status, read_or_fetch,
     };
 
     /// 只轮询立即就绪的 mock fetch；不为此引入异步运行时依赖。
@@ -808,8 +823,12 @@ mod tests {
         assert_eq!(call(url, &now, LIVE_TTL_MILLIS, &calls, |_| changed("v1", None)), Ok("v1"));
         invalidate_all();
         assert_eq!(
-            call(url, &now, LIVE_TTL_MILLIS, &calls, |_| FetchOutcome::Rejected("not_found")),
-            Err("not_found")
+            call(url, &now, LIVE_TTL_MILLIS, &calls, |_| FetchOutcome::Rejected("forbidden")),
+            Err("forbidden")
+        );
+        assert_eq!(
+            call(url, &now, LIVE_TTL_MILLIS, &calls, |_| FetchOutcome::Transport("offline")),
+            Ok("v1")
         );
     }
 
@@ -930,9 +949,8 @@ mod tests {
         }
     }
 
-    /// 命令前已在途、命令答复后才写回的响应早于回退下限：仍可条件请求，但不作为回退值。
     #[test]
-    fn inflight_response_from_before_a_command_is_not_a_fallback() {
+    fn inflight_200_from_before_a_command_only_reaches_its_original_caller() {
         reset();
         let url = "/api/v1/auctions/00000000-0000-0000-0000-00000000000d/lots?page=1&page_size=20";
         let now = Cell::new(95_000);
@@ -944,14 +962,253 @@ mod tests {
             }),
             Ok("v-before-command")
         );
+        assert_eq!(entry_count(), 0);
         assert_eq!(
             call(url, &now, LIVE_TTL_MILLIS, &calls, |etag| {
-                assert_eq!(etag.as_deref(), Some("etag-before"));
+                assert_eq!(etag, None);
                 FetchOutcome::Busy("read_busy")
             }),
             Err("read_busy")
         );
         assert_eq!(calls.get(), 2);
+    }
+
+    #[test]
+    fn inflight_304_from_before_a_command_cannot_refresh_the_cached_snapshot() {
+        reset();
+        let url = "/api/v1/lots/lot?command_fence_304";
+        let now = Cell::new(1_000);
+        let calls = Cell::new(0);
+        assert_eq!(
+            call(url, &now, LIVE_TTL_MILLIS, &calls, |_| changed("before", Some("etag-before"))),
+            Ok("before")
+        );
+        now.set(1_000 + LIVE_TTL_MILLIS);
+        assert_eq!(
+            call(url, &now, LIVE_TTL_MILLIS, &calls, |etag| {
+                assert_eq!(etag.as_deref(), Some("etag-before"));
+                invalidate_after_command();
+                FetchOutcome::NotModified
+            }),
+            Ok("before")
+        );
+        let cached = lookup::<&str>(url).expect("命令后仍可用原 ETag 再验证");
+        assert!(!cached.current);
+        assert_eq!(cached.stored_at_millis, 1_000);
+        assert_eq!(
+            call(url, &now, LIVE_TTL_MILLIS, &calls, |etag| {
+                assert_eq!(etag.as_deref(), Some("etag-before"));
+                changed("after", None)
+            }),
+            Ok("after")
+        );
+        assert_eq!(calls.get(), 3);
+    }
+
+    #[test]
+    fn post_command_get_bypasses_the_old_inflight_get_and_keeps_its_own_snapshot() {
+        for (previous_response, previous_value) in [
+            (changed("old-response", Some("old-response-etag")), "old-response"),
+            (FetchOutcome::NotModified, "cached-before"),
+        ] {
+            reset();
+            let url = "/api/v1/lots/lot?command_fence_concurrent";
+            let now = Cell::new(1_000);
+            let calls = Cell::new(0);
+            assert_eq!(
+                call(url, &now, LIVE_TTL_MILLIS, &calls, |_| {
+                    changed("cached-before", Some("cached-before-etag"))
+                }),
+                Ok("cached-before")
+            );
+            now.set(1_000 + LIVE_TTL_MILLIS);
+            let gate = Rc::new(RefCell::new(None));
+            let mut before = Box::pin(get_or_fetch(
+                url,
+                LIVE_TTL_MILLIS,
+                || now.get(),
+                |etag| {
+                    assert_eq!(etag.as_deref(), Some("cached-before-etag"));
+                    Gate(Rc::clone(&gate))
+                },
+            ));
+            assert!(poll_once(before.as_mut()).is_pending());
+
+            invalidate_after_command();
+            let mut after = Box::pin(get_or_fetch(
+                url,
+                LIVE_TTL_MILLIS,
+                || now.get(),
+                |etag| {
+                    assert_eq!(etag.as_deref(), Some("cached-before-etag"));
+                    std::future::ready(changed("confirmed-after", Some("after-etag")))
+                },
+            ));
+            assert_eq!(poll_once(after.as_mut()), Poll::Ready(Ok("confirmed-after")));
+
+            *gate.borrow_mut() = Some(previous_response);
+            assert_eq!(poll_once(before.as_mut()), Poll::Ready(Ok(previous_value)));
+            assert_eq!(
+                call(url, &now, LIVE_TTL_MILLIS, &calls, |_| panic!("应命中命令后确认的新条目")),
+                Ok("confirmed-after")
+            );
+            assert_eq!(lookup::<&str>(url).unwrap().etag.as_deref(), Some("after-etag"));
+        }
+    }
+
+    #[test]
+    fn missing_headers_evict_before_a_cancelled_body_can_leave_a_fallback() {
+        for (status, expected) in [(404, Err("offline")), (410, Err("offline")), (503, Ok("v1"))] {
+            reset();
+            let url = "/api/v1/lots/lot?cancel_body";
+            let now = Cell::new(1_000);
+            let calls = Cell::new(0);
+            assert_eq!(
+                call(url, &now, LIVE_TTL_MILLIS, &calls, |_| changed("v1", Some("etag-1"))),
+                Ok("v1")
+            );
+            invalidate_all();
+            let mut read = Box::pin(get_or_fetch(
+                url,
+                LIVE_TTL_MILLIS,
+                || now.get(),
+                |etag| {
+                    assert_eq!(etag.as_deref(), Some("etag-1"));
+                    observe_response_status(url, status);
+                    std::future::pending::<FetchOutcome<&'static str, &'static str>>()
+                },
+            ));
+            assert!(poll_once(read.as_mut()).is_pending());
+            assert_eq!(lookup::<&str>(url).is_some(), expected.is_ok(), "{status}");
+            drop(read);
+            assert_eq!(
+                call(url, &now, LIVE_TTL_MILLIS, &calls, |_| FetchOutcome::Transport("offline")),
+                expected,
+                "{status}"
+            );
+            let kept_etag = lookup::<&str>(url).and_then(|entry| entry.etag);
+            assert_eq!(kept_etag.as_deref(), expected.ok().map(|_| "etag-1"));
+        }
+    }
+
+    #[test]
+    fn late_missing_headers_evict_a_newer_confirmed_snapshot() {
+        for status in [404, 410] {
+            reset();
+            let url = "/api/v1/lots/lot?late_missing";
+            let now = Cell::new(1_000);
+            let calls = Cell::new(0);
+            let gate = Rc::new(RefCell::new(None));
+            let mut before = Box::pin(get_or_fetch(
+                url,
+                LIVE_TTL_MILLIS,
+                || now.get(),
+                |_| Gate(Rc::clone(&gate)),
+            ));
+            assert!(poll_once(before.as_mut()).is_pending());
+
+            invalidate_after_command();
+            assert_eq!(
+                call(url, &now, LIVE_TTL_MILLIS, &calls, |_| changed("after", Some("after-etag"))),
+                Ok("after"),
+            );
+            observe_response_status(url, status);
+
+            assert_eq!(
+                call(url, &now, LIVE_TTL_MILLIS, &calls, |etag| {
+                    assert_eq!(etag, None);
+                    FetchOutcome::Transport("offline")
+                }),
+                Err("offline"),
+                "{status}",
+            );
+            // 正文仍在途时，请求已可重新确认可见的条目。
+            assert_eq!(
+                call(url, &now, LIVE_TTL_MILLIS, &calls, |_| changed("restored", Some("new-etag"))),
+                Ok("restored"),
+            );
+            *gate.borrow_mut() = Some(FetchOutcome::Rejected("not_found"));
+            assert_eq!(poll_once(before.as_mut()), Poll::Ready(Err("not_found")));
+            assert_eq!(lookup::<&str>(url).unwrap().etag.as_deref(), Some("new-etag"));
+        }
+    }
+
+    #[test]
+    fn missing_headers_prevent_an_inflight_200_from_restoring_the_snapshot() {
+        reset();
+        let url = "/api/v1/lots/lot?inflight_eviction";
+        let now = Cell::new(1_000);
+        let calls = Cell::new(0);
+        invalidate_after_command();
+        let gate = Rc::new(RefCell::new(None));
+        let mut inflight =
+            Box::pin(get_or_fetch(url, LIVE_TTL_MILLIS, || now.get(), |_| Gate(Rc::clone(&gate))));
+        assert!(poll_once(inflight.as_mut()).is_pending());
+        observe_response_status(url, 404);
+
+        let mut offline = Box::pin(get_or_fetch(
+            url,
+            LIVE_TTL_MILLIS,
+            || now.get(),
+            |etag| {
+                assert_eq!(etag, None);
+                std::future::ready(FetchOutcome::<&str, _>::Transport("offline"))
+            },
+        ));
+        assert_eq!(poll_once(offline.as_mut()), Poll::Ready(Err("offline")));
+
+        *gate.borrow_mut() = Some(changed("own-response", Some("old-etag")));
+        assert_eq!(poll_once(inflight.as_mut()), Poll::Ready(Ok("own-response")));
+        assert_eq!(
+            call(url, &now, LIVE_TTL_MILLIS, &calls, |_| FetchOutcome::Transport("offline")),
+            Err("offline"),
+        );
+    }
+
+    #[test]
+    fn inflight_304_and_transport_failures_cannot_reuse_an_evicted_cache_entry() {
+        for (outcome, original_result) in [
+            (FetchOutcome::NotModified, Ok("before")),
+            (FetchOutcome::Transport("offline"), Err("offline")),
+            (FetchOutcome::Busy("busy"), Err("busy")),
+        ] {
+            reset();
+            let url = "/api/v1/lots/lot?evicted_validation";
+            let now = Cell::new(1_000);
+            let calls = Cell::new(0);
+            assert_eq!(
+                call(url, &now, LIVE_TTL_MILLIS, &calls, |_| changed("before", Some("old-etag"))),
+                Ok("before"),
+            );
+            let restored_at = now.get() + LIVE_TTL_MILLIS;
+            now.set(restored_at);
+            let gate = Rc::new(RefCell::new(None));
+            let mut inflight = Box::pin(get_or_fetch(
+                url,
+                LIVE_TTL_MILLIS,
+                || now.get(),
+                |etag| {
+                    assert_eq!(etag.as_deref(), Some("old-etag"));
+                    Gate(Rc::clone(&gate))
+                },
+            ));
+            assert!(poll_once(inflight.as_mut()).is_pending());
+
+            observe_response_status(url, 410);
+            assert_eq!(
+                call(url, &now, LIVE_TTL_MILLIS, &calls, |etag| {
+                    assert_eq!(etag, None);
+                    changed("restored", Some("new-etag"))
+                }),
+                Ok("restored"),
+            );
+            now.set(restored_at + 1);
+            *gate.borrow_mut() = Some(outcome);
+            assert_eq!(poll_once(inflight.as_mut()), Poll::Ready(original_result));
+            let entry = lookup::<&str>(url).unwrap();
+            assert_eq!(entry.stored_at_millis, restored_at);
+            assert_eq!(entry.value, "restored");
+        }
     }
 
     #[test]

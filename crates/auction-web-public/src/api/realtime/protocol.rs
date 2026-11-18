@@ -16,6 +16,8 @@ pub(crate) struct RealtimePage {
     pub next_after: i64,
     pub has_more: bool,
     pub refetch_required: bool,
+    /// HTTP 回放由服务端核对底层连续性，WebSocket 单帧仍须紧接已确认游标。
+    pub(super) from_websocket: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,6 +34,7 @@ pub(crate) struct RealtimePageMerge {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RealtimeError {
     kind: RealtimeErrorKind,
+    close_code: Option<u16>,
     /// 失败明细只用于诊断日志，不参与重连决策。
     detail: String,
 }
@@ -41,18 +44,24 @@ enum RealtimeErrorKind {
     /// 重连无法自愈：游标或拍卖 ID 无效、认证/权限被拒绝、目标拍卖不存在。
     Permanent,
     /// 网络抖动、服务端瞬时故障、毒帧超限或握手超时等可重试失败。
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(any(target_arch = "wasm32", test))]
     Transient,
 }
 
 impl RealtimeError {
     pub(super) fn permanent(detail: impl Into<String>) -> Self {
-        Self { kind: RealtimeErrorKind::Permanent, detail: detail.into() }
+        Self { kind: RealtimeErrorKind::Permanent, close_code: None, detail: detail.into() }
     }
 
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(any(target_arch = "wasm32", test))]
     pub(super) fn transient(detail: impl Into<String>) -> Self {
-        Self { kind: RealtimeErrorKind::Transient, detail: detail.into() }
+        Self { kind: RealtimeErrorKind::Transient, close_code: None, detail: detail.into() }
+    }
+
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub(super) fn with_close_code(mut self, code: u16) -> Self {
+        self.close_code = Some(code);
+        self
     }
 
     pub(crate) const fn is_permanent(&self) -> bool {
@@ -61,6 +70,11 @@ impl RealtimeError {
 
     pub(crate) fn detail(&self) -> &str {
         &self.detail
+    }
+
+    /// 浏览器交付的 WebSocket 关闭码。
+    pub(crate) const fn close_code(&self) -> Option<u16> {
+        self.close_code
     }
 }
 
@@ -80,7 +94,7 @@ pub(super) fn websocket_url(auction_id: &str) -> Result<String, String> {
     Ok(format!("{websocket_protocol}//{host}/api/v1/ws?{}", query.finish()))
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", test))]
 pub(super) fn validate_realtime_page_sequence(
     page: &RealtimePage,
     after: i64,

@@ -47,11 +47,32 @@ pub(crate) async fn fetch_bid_log_auctions(
     )?;
     auctions.extend(final_auctions);
     auctions.extend(settled_auctions);
+    Ok(order_bid_log_auctions(auctions))
+}
+
+fn order_bid_log_auctions(
+    mut auctions: Vec<super::super::HistoricalAuction>,
+) -> Vec<super::super::HistoricalAuction> {
+    // 各状态独立读取，场次在查询之间迁移时只采用已确认的最高版本。
     auctions.sort_by(|left, right| {
-        right.sequence.cmp(&left.sequence).then_with(|| right.id.cmp(&left.id))
+        left.id.cmp(&right.id).then_with(|| right.state_version.cmp(&left.state_version))
     });
     auctions.dedup_by(|left, right| left.id == right.id);
-    Ok(auctions)
+    auctions.sort_by(|left, right| {
+        bid_log_world_rank(&left.world_id)
+            .cmp(&bid_log_world_rank(&right.world_id))
+            .then_with(|| right.sequence.cmp(&left.sequence))
+            .then_with(|| right.id.cmp(&left.id))
+    });
+    auctions
+}
+
+fn bid_log_world_rank(world_id: &str) -> u8 {
+    match world_id {
+        "main" => 0,
+        "isekai" => 1,
+        _ => 2,
+    }
 }
 
 /// 按编号顺序逐页读完单一状态的公开拍卖目录；竞价日志与履约进度的场次选择共用。
@@ -101,4 +122,58 @@ pub(crate) async fn fetch_lot_bid_log(
         decoder::decode_bid_log_page(response).await
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::order_bid_log_auctions;
+    use crate::api::HistoricalAuction;
+
+    fn auction(
+        id: &str,
+        world_id: &str,
+        sequence: i64,
+        status: &str,
+        version: i64,
+    ) -> HistoricalAuction {
+        HistoricalAuction {
+            id: id.to_owned(),
+            world_id: world_id.to_owned(),
+            sequence,
+            status: status.to_owned(),
+            scheduled_open_at: "2026-11-14T12:00:00Z".to_owned(),
+            opened_at: None,
+            final_phase_at: None,
+            effective_end_at: None,
+            settled_at: None,
+            lot_count: 0,
+            sold_count: 0,
+            unsold_count: 0,
+            sold_amount: 0,
+            state_version: version,
+        }
+    }
+
+    #[test]
+    fn bid_log_directory_keeps_the_highest_version_in_either_input_order() {
+        let live = auction("same", "main", 8, "live", 2);
+        let final_phase = auction("same", "main", 8, "final", 3);
+        for input in [vec![live.clone(), final_phase.clone()], vec![final_phase.clone(), live]] {
+            assert_eq!(
+                order_bid_log_auctions(input).as_slice(),
+                std::slice::from_ref(&final_phase)
+            );
+        }
+    }
+
+    #[test]
+    fn bid_log_directory_orders_worlds_then_descending_sequences() {
+        let main_older = auction("main-older", "main", 7, "settled", 9);
+        let main_newer = auction("main-newer", "main", 8, "live", 2);
+        let isekai = auction("isekai", "isekai", 9, "live", 2);
+        assert_eq!(
+            order_bid_log_auctions(vec![isekai.clone(), main_older.clone(), main_newer.clone()]),
+            [main_newer, main_older, isekai],
+        );
+    }
 }

@@ -9,14 +9,18 @@ use std::pin::Pin;
 use auction_web_shared::timer::TimeoutFuture;
 #[cfg(target_arch = "wasm32")]
 use auction_web_shared::{BrowserErrorClass, report_browser_error};
+#[cfg(any(target_arch = "wasm32", test))]
+use futures_util::{FutureExt, Stream, StreamExt};
 #[cfg(target_arch = "wasm32")]
 use futures_util::{
-    Sink, StreamExt,
+    Sink,
     future::{Either, poll_fn, select},
     pin_mut,
 };
 #[cfg(target_arch = "wasm32")]
-use gloo_net::websocket::{Message, State as WebSocketState, futures::WebSocket};
+use gloo_net::websocket::futures::WebSocket;
+#[cfg(any(target_arch = "wasm32", test))]
+use gloo_net::websocket::{Message, State as WebSocketState, WebSocketError};
 #[cfg(target_arch = "wasm32")]
 use url::form_urlencoded;
 
@@ -71,6 +75,7 @@ async fn fetch_realtime_page(after: i64, auction_id: &str) -> Result<RealtimePag
         next_after: payload.next_after,
         has_more: payload.has_more,
         refetch_required: payload.refetch_required,
+        from_websocket: false,
     };
     validate_realtime_page_sequence(&page, after).map_err(RealtimeError::transient)?;
     Ok(page)
@@ -85,7 +90,7 @@ pub(crate) async fn subscribe_auction_realtime<F>(
     after: i64,
     auction_id: String,
     world: String,
-    mut on_page: F,
+    on_page: F,
 ) -> Result<(), RealtimeError>
 where
     F: FnMut(RealtimePage) -> bool,
@@ -97,9 +102,26 @@ where
     let url = websocket_url(&auction_id).map_err(RealtimeError::permanent)?;
     let mut socket =
         WebSocket::open(&url).map_err(|error| RealtimeError::transient(error.to_string()))?;
+    run_subscription(&mut socket, async |socket| {
+        listen_realtime(socket, after, &auction_id, &world, on_page).await
+    })
+    .await
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn listen_realtime<F>(
+    socket: &mut WebSocket,
+    after: i64,
+    auction_id: &str,
+    world: &str,
+    mut on_page: F,
+) -> Result<(), RealtimeError>
+where
+    F: FnMut(RealtimePage) -> bool,
+{
     {
         let connected =
-            poll_fn(|context| Sink::<Message>::poll_ready(Pin::new(&mut socket), context));
+            poll_fn(|context| Sink::<Message>::poll_ready(Pin::new(&mut *socket), context));
         let deadline = TimeoutFuture::new(REALTIME_CONNECT_TIMEOUT_MILLIS);
         pin_mut!(connected, deadline);
         match select(connected, deadline).await {
@@ -111,21 +133,13 @@ where
             }
         }
     }
-    if !matches!(socket.state(), WebSocketState::Open) {
-        return Err(RealtimeError::transient("实时 WebSocket 建立失败"));
-    }
-    let (_write, mut read) = socket.split();
+    check_websocket_open(socket.state())?;
     let mut expected_after = after;
-    catch_up_realtime(&auction_id, &mut expected_after, &mut on_page).await?;
+    catch_up_realtime(auction_id, &mut expected_after, &mut on_page).await?;
     let mut consecutive_bad_frames = 0_u32;
     // 存活检查由服务端 Ping/Pong 拥有；静默拍卖保持连接，关闭/错误才触发恢复。
-    while let Some(message) = read.next().await {
-        let message = match message {
-            Ok(message) => message,
-            Err(error) => {
-                return Err(RealtimeError::transient(format!("实时 WebSocket 读取失败：{error}")));
-            }
-        };
+    while let Some(message) = socket.next().await {
+        let message = message.map_err(websocket_read_error)?;
         let Message::Text(message) = message else {
             // 二进制帧同样按毒帧计数，不直接终止订阅。
             report_browser_error(BrowserErrorClass::RealtimeProtocol);
@@ -140,7 +154,7 @@ where
             auction_web_shared::observe_server_build_id(&server_build);
             continue;
         }
-        let decoded = crate::api::decoder::decode_realtime_event(&message, &auction_id, &world);
+        let decoded = crate::api::decoder::decode_realtime_event(&message, auction_id, world);
         let event = match decoded {
             Ok(event) => event,
             Err(error) => {
@@ -162,7 +176,7 @@ where
             return Err(RealtimeError::permanent("实时事件序列超过可表示范围"));
         };
         if event.stream_sequence != next_sequence {
-            catch_up_realtime(&auction_id, &mut expected_after, &mut on_page).await?;
+            catch_up_realtime(auction_id, &mut expected_after, &mut on_page).await?;
         }
         if event.stream_sequence <= expected_after {
             continue;
@@ -180,10 +194,59 @@ where
             next_after: expected_after,
             has_more: false,
             refetch_required: false,
+            from_websocket: true,
         };
         let _ = on_page(page);
     }
     Err(RealtimeError::transient("实时 WebSocket 已关闭"))
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn check_websocket_open(state: WebSocketState) -> Result<(), RealtimeError> {
+    if matches!(state, WebSocketState::Open) {
+        Ok(())
+    } else {
+        Err(RealtimeError::transient("实时 WebSocket 建立失败"))
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+async fn run_subscription<S>(
+    socket: &mut S,
+    listen: impl AsyncFnOnce(&mut S) -> Result<(), RealtimeError>,
+) -> Result<(), RealtimeError>
+where
+    S: Stream<Item = Result<Message, WebSocketError>> + Unpin,
+{
+    listen(socket).await.map_err(|error| with_queued_close_code(error, socket))
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn with_queued_close_code(
+    error: RealtimeError,
+    read: &mut (impl Stream<Item = Result<Message, WebSocketError>> + Unpin),
+) -> RealtimeError {
+    if error.close_code().is_some() {
+        return error;
+    }
+    // 每次连接结束只交付一个错误。退出时仅检查已排队的帧，普通事件可由下次回放补齐。
+    while let Some(Some(message)) = read.next().now_or_never() {
+        if let Err(WebSocketError::ConnectionClose(event)) = message {
+            return error.with_close_code(event.code);
+        }
+    }
+    error
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn websocket_read_error(error: WebSocketError) -> RealtimeError {
+    let detail = format!("实时 WebSocket 读取失败：{error}");
+    match error {
+        WebSocketError::ConnectionClose(event) => {
+            RealtimeError::transient(detail).with_close_code(event.code)
+        }
+        _ => RealtimeError::transient(detail),
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -227,6 +290,7 @@ where
                 next_after: *expected_after,
                 has_more: false,
                 refetch_required: true,
+                from_websocket: false,
             };
             let _ = on_page(degraded_page);
             return Ok(());
@@ -245,4 +309,101 @@ where
     F: FnMut(RealtimePage) -> bool,
 {
     Err(RealtimeError::permanent("实时 WebSocket 仅在 wasm32 浏览器目标可用"))
+}
+
+#[cfg(test)]
+mod tests {
+    use futures_util::{FutureExt, StreamExt, stream};
+    use gloo_net::websocket::{
+        Message, State as WebSocketState, WebSocketError, events::CloseEvent,
+    };
+
+    use super::super::protocol::RealtimeError;
+    use super::{check_websocket_open, run_subscription, websocket_read_error};
+
+    #[test]
+    fn websocket_close_keeps_the_code_and_the_transient_retry_policy() {
+        for code in [1008, 1013, 1001] {
+            let error = websocket_read_error(WebSocketError::ConnectionClose(CloseEvent {
+                code,
+                reason: String::new(),
+                was_clean: true,
+            }));
+            assert_eq!(error.close_code(), Some(code));
+            assert!(!error.is_permanent());
+        }
+        let network_error = websocket_read_error(WebSocketError::ConnectionError);
+        assert_eq!(network_error.close_code(), None);
+        assert!(!network_error.is_permanent());
+    }
+
+    #[test]
+    fn failed_catch_up_preserves_already_buffered_close_codes() {
+        for code in [1008, 1013] {
+            let mut read = stream::iter([
+                Ok(Message::Text("buffered event".to_owned())),
+                Err(WebSocketError::ConnectionError),
+                Err(WebSocketError::ConnectionClose(CloseEvent {
+                    code,
+                    reason: String::new(),
+                    was_clean: true,
+                })),
+            ])
+            .chain(stream::pending());
+            let error =
+                run_subscription(&mut read, async |_| Err(RealtimeError::permanent("HTTP 404")))
+                    .now_or_never()
+                    .unwrap()
+                    .unwrap_err();
+            assert_eq!(error.close_code(), Some(code));
+            assert!(error.is_permanent());
+            assert_eq!(error.detail(), "HTTP 404");
+        }
+    }
+
+    #[test]
+    fn failed_catch_up_without_a_buffered_close_keeps_its_http_error() {
+        let mut read =
+            stream::iter([Ok(Message::Text("buffered event".to_owned()))]).chain(stream::pending());
+        let http_error = RealtimeError::transient("HTTP 503");
+        let error = run_subscription(&mut read, async |_| Err(http_error.clone()))
+            .now_or_never()
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(error, http_error);
+    }
+
+    #[test]
+    fn connection_error_exit_recovers_the_queued_close_code() {
+        let close = CloseEvent { code: 1008, reason: String::new(), was_clean: true };
+        let mut read = stream::iter([
+            Err(WebSocketError::ConnectionError),
+            Ok(Message::Text("buffered event".to_owned())),
+            Err(WebSocketError::ConnectionClose(close)),
+        ]);
+        let error = run_subscription(&mut read, async |socket| {
+            socket.next().await.unwrap().map(drop).map_err(websocket_read_error)
+        })
+        .now_or_never()
+        .unwrap()
+        .unwrap_err();
+        let connection_error = websocket_read_error(WebSocketError::ConnectionError);
+        assert_eq!(error.close_code(), Some(1008));
+        assert_eq!(error.is_permanent(), connection_error.is_permanent());
+        assert_eq!(error.detail(), connection_error.detail());
+    }
+
+    #[test]
+    fn socket_closed_after_handshake_recovers_the_queued_close_code() {
+        let close = CloseEvent { code: 1008, reason: String::new(), was_clean: true };
+        let mut read = stream::iter([Err(WebSocketError::ConnectionClose(close))]);
+        let error =
+            run_subscription(&mut read, async |_| check_websocket_open(WebSocketState::Closed))
+                .now_or_never()
+                .unwrap()
+                .unwrap_err();
+        assert_eq!(error.close_code(), Some(1008));
+        assert!(!error.is_permanent());
+        assert_eq!(error.detail(), "实时 WebSocket 建立失败");
+    }
 }

@@ -109,7 +109,7 @@ impl RealtimeCache {
         let mut refresh_required = false;
         let mut bids_changed = false;
         for event in &page.events {
-            match self.merge_event(event) {
+            match self.merge_event(event, page.from_websocket) {
                 EventMerge::Ignored => {}
                 EventMerge::Applied { refresh } => refresh_required |= refresh,
                 EventMerge::BidApplied => bids_changed = true,
@@ -135,11 +135,12 @@ impl RealtimeCache {
         }
     }
 
-    fn merge_event(&mut self, event: &RealtimeEvent) -> EventMerge {
+    fn merge_event(&mut self, event: &RealtimeEvent, from_websocket: bool) -> EventMerge {
         if event.stream_sequence <= self.after || self.seen.contains(&event.event_id) {
             return EventMerge::Ignored;
         }
-        if self.after.checked_add(1) != Some(event.stream_sequence) {
+        // HTTP 回放的原始流已在过滤前校验。实时单帧的跳号仍须从权威回放补齐。
+        if from_websocket && self.after.checked_add(1) != Some(event.stream_sequence) {
             return EventMerge::Gap;
         }
         if event.kind == "lot.bid_accepted" {

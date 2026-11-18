@@ -3,7 +3,7 @@
 
 use serde_json::{Value, json};
 
-use super::protocol::RealtimeEvent;
+use super::protocol::{RealtimeEvent, validate_realtime_page_sequence};
 use super::{RealtimeCache, RealtimePage};
 
 fn event(sequence: i64, event_id: &str, kind: &str, payload: Value) -> RealtimeEvent {
@@ -18,7 +18,13 @@ fn event(sequence: i64, event_id: &str, kind: &str, payload: Value) -> RealtimeE
 }
 
 fn page(events: Vec<RealtimeEvent>, next_after: i64) -> RealtimePage {
-    RealtimePage { events, next_after, has_more: false, refetch_required: false }
+    RealtimePage {
+        events,
+        next_after,
+        has_more: false,
+        refetch_required: false,
+        from_websocket: false,
+    }
 }
 
 fn preview_update(sequence: i64, revision: i64) -> RealtimeEvent {
@@ -74,14 +80,53 @@ fn newer_revision_refreshes_and_duplicate_event_is_ignored() {
 }
 
 #[test]
-fn sequence_gap_requests_refetch_and_keeps_the_page_cursor() {
+fn healthy_replay_merges_bids_across_hidden_sequences_and_keeps_the_page_cursor() {
     let mut cache = RealtimeCache::new("auction-1".to_owned(), 0);
-    let merge = cache.merge_page(&page(vec![preview_update(2, 9)], 4));
+    let mut replay = page(
+        vec![
+            bid(2, "bid-event-2", "bid-2", 1, 1, 1_500),
+            bid(4, "bid-event-4", "bid-4", 2, 2, 2_000),
+        ],
+        5,
+    );
+    replay.has_more = true;
+    assert!(validate_realtime_page_sequence(&replay, 0).is_ok());
+    let merge = cache.merge_page(&replay);
 
-    assert!(merge.refresh_required);
+    assert!(merge.bids_changed);
+    assert!(!merge.refresh_required);
+    assert!(!merge.degraded);
+    assert!(merge.continue_catch_up);
+    assert_eq!(cache.after(), 5);
+}
+
+#[test]
+fn replay_sequences_must_increase_and_stay_within_the_page_cursor() {
+    for (events, next_after) in [
+        (vec![preview_update(2, 8), preview_update(2, 9)], 2),
+        (vec![preview_update(3, 8), preview_update(2, 9)], 3),
+        (vec![preview_update(3, 8)], 2),
+        (vec![preview_update(1, 8)], 2),
+        (vec![], 0),
+    ] {
+        assert!(validate_realtime_page_sequence(&page(events, next_after), 1).is_err());
+    }
+}
+
+#[test]
+fn websocket_frame_must_follow_the_cursor_without_a_gap() {
+    let mut cache = RealtimeCache::new("auction-1".to_owned(), 0);
+    let mut frame = page(vec![preview_update(1, 8)], 1);
+    frame.from_websocket = true;
+    assert!(!cache.merge_page(&frame).degraded);
+    assert_eq!(cache.after(), 1);
+
+    let mut skipped = page(vec![preview_update(3, 9)], 3);
+    skipped.from_websocket = true;
+    let merge = cache.merge_page(&skipped);
     assert!(merge.degraded);
+    assert!(merge.refresh_required);
     assert!(!merge.continue_catch_up);
-    assert_eq!(cache.after(), 4);
 }
 
 #[test]
@@ -137,6 +182,7 @@ fn refetch_page_advances_the_baseline_for_new_lots() {
         next_after: 9,
         has_more: false,
         refetch_required: true,
+        from_websocket: false,
     };
     let merge = cache.merge_page(&refetch);
     assert!(merge.refresh_required);

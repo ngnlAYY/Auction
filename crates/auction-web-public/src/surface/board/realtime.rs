@@ -7,7 +7,10 @@ use auction_web_shared::{PageVisibility, sleep_while_visible};
 use dioxus::prelude::*;
 
 use super::refresh::PublicBidRefresh;
-use crate::api::{CurrentAuction, RealtimeCache, estimated_now, subscribe_auction_realtime};
+use crate::api::{
+    CurrentAuction, PublicSessionCheckTrigger, RealtimeCache, SessionRefreshReason, estimated_now,
+    subscribe_auction_realtime,
+};
 use crate::surface::LiveConnectionState;
 
 /// Public 页头的 readiness 有限状态；只决定外层连接徽章，不改写核心实时四态。
@@ -148,6 +151,16 @@ fn reconnect_delay_millis(failures: u32) -> u32 {
     half + (js_sys::Math::random() * f64::from(base - half)) as u32
 }
 
+fn refresh_session_on_socket_close(
+    close_code: Option<u16>,
+    refresh: impl FnOnce(SessionRefreshReason),
+) {
+    if close_code == Some(1008) {
+        // 当前身份由权威会话读取决定，关闭码只触发复核。
+        refresh(SessionRefreshReason::Refresh);
+    }
+}
+
 /// 根据共享 session/current 快照建立唯一实时连接；目标或用户变化时取消旧任务并重新握手。
 /// 只有竞价期场次目标建立连接，其余目标只写入连接状态：开拍切换与预览目录更新由外壳的
 /// 权威轮询发现。
@@ -161,6 +174,7 @@ pub(crate) fn PublicRealtimeOwner(
 ) -> Element {
     let page_visibility = use_context::<PageVisibility>();
     let bid_refresh = use_context::<PublicBidRefresh>();
+    let session_check = use_context::<PublicSessionCheckTrigger>();
     // 身份必须进入资源依赖；单独修改静态组件的 key 不会使相等的 target 重启订阅。
     let _stream = use_resource(use_reactive((&target, &user_id), move |(target, _)| {
         let page_visibility = page_visibility.clone();
@@ -246,8 +260,11 @@ pub(crate) fn PublicRealtimeOwner(
                 let result =
                     subscribe_auction_realtime(after, auction_id.clone(), world.clone(), on_page)
                         .await;
-                match &result {
-                    Err(error) if error.is_permanent() => {
+                if let Err(error) = result {
+                    refresh_session_on_socket_close(error.close_code(), |reason| {
+                        session_check.0.call(reason);
+                    });
+                    if error.is_permanent() {
                         // 重连不能自愈：页头降级为手动刷新，不再自动重连。
                         tracing::warn!(
                             detail = error.detail(),
@@ -256,10 +273,7 @@ pub(crate) fn PublicRealtimeOwner(
                         realtime_state.set(LiveConnectionState::Manual);
                         return;
                     }
-                    Err(error) => {
-                        tracing::debug!(detail = error.detail(), "实时订阅结束，按退避策略重连");
-                    }
-                    Ok(()) => {}
+                    tracing::debug!(detail = error.detail(), "实时订阅结束，按退避策略重连");
                 }
                 let survived_millis = estimated_now().timestamp_millis() - attempt_started_millis;
                 if survived_millis >= RECONNECT_HEALTHY_MILLIS {
@@ -340,10 +354,24 @@ pub(crate) fn public_connection_state(
 mod tests {
     use super::{
         LiveConnectionState, PublicConnectionState, PublicReadinessState, PublicRealtimePageKey,
-        PublicRealtimeTarget, TickerCountdown, public_connection_state, ticker_auction,
-        ticker_countdown,
+        PublicRealtimeTarget, TickerCountdown, public_connection_state,
+        refresh_session_on_socket_close, ticker_auction, ticker_countdown,
     };
-    use crate::api::CurrentAuction;
+    use crate::api::{CurrentAuction, SessionRefreshReason};
+
+    #[test]
+    fn only_websocket_policy_violation_triggers_one_authoritative_session_refresh() {
+        for code in [Some(1008), Some(1013), Some(1001), None] {
+            let mut reasons = Vec::new();
+            refresh_session_on_socket_close(code, |reason| reasons.push(reason));
+            if code == Some(1008) {
+                assert_eq!(reasons, [SessionRefreshReason::Refresh]);
+                assert!(!reasons[0].invalidates());
+            } else {
+                assert!(reasons.is_empty());
+            }
+        }
+    }
 
     fn auction(id: &str, number: i64, status: &str) -> CurrentAuction {
         CurrentAuction {

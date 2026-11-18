@@ -9,6 +9,7 @@ use super::super::swr_cache::{self, CacheRead, FetchOutcome};
 use super::super::{CatalogLevelFilter, LotEnvelope, decoder};
 use super::cached_get::{
     ConditionalResponse, cached_public_read, conditional_get, failure_outcome,
+    transport_failure_outcome,
 };
 
 const PUBLIC_QUERY_RETRY_DELAY_MILLIS: u32 = 1_000;
@@ -146,7 +147,7 @@ pub(crate) async fn fetch_lot_detail(lot_id: String) -> Result<LotEnvelope, LotD
         swr_cache::now_millis,
         move |etag| async move {
             match conditional_get(&request_url, etag.as_deref()).await {
-                Err(_) => FetchOutcome::Transport(LotDetailFetchError),
+                Err((_, status)) => transport_failure_outcome(status, LotDetailFetchError),
                 Ok(ConditionalResponse::NotModified) => FetchOutcome::NotModified,
                 Ok(ConditionalResponse::Failure(response)) => {
                     failure_outcome(response.status(), LotDetailFetchError)

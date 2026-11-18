@@ -93,6 +93,7 @@ WebSocket 每帧是一个 JSON 对象；HTTP 回放的 `events` 数组元素形�
 ```
 
 - `next_after` 是下次请求应使用的游标，即使本页有事件被跳过也会推进。
+- `refetch_required=false` 时，服务端已在投影前校验本页的原始序号连续。HTTP 回放隐藏 `auction.created` 并保留游标，因此返回的事件序号可以跳号。客户端从请求的 `after` 起检查事件序号严格递增且不超过 `next_after`，合并后将游标推进到 `next_after`。
 - `has_more` 为 true 时继续翻页。
 - `refetch_required` 为 true 表示序列出现缺口或遇到不符合注册表的事件——客户端必须丢弃本地推导，重新读取权威快照。
 - 拍卖不存在时返回 404。
@@ -121,7 +122,7 @@ WebSocket 每帧是一个 JSON 对象；HTTP 回放的 `events` 数组元素形�
 
 1. 建立 WebSocket，缓冲到达的帧。
 2. 用最后确认的游标调用 `GET /api/v1/events` 补齐（`has_more` 时翻页），再按 `stream_sequence` 合并缓冲帧，以 `event_id` 去重。
-3. 发现序列跳号或 `refetch_required` 时重新读取权威快照并重新补齐。
+3. WebSocket 单事件帧跳过已确认游标的下一序号时，先用 HTTP 回放补齐。收到 `refetch_required=true` 时重新读取权威快照。
 4. 断线后指数退避重连（Public 前端：基数 1 秒起步、翻倍至 30 秒，实际等待取基数的 1/2 至 1 倍）；连接存活 30 秒后重置失败计数，连续 8 次快速失败转为手动刷新。页面隐藏时暂停重连退避与后台轮询，已建立的 WebSocket 不因隐藏而主动关闭。
 
 

@@ -6,6 +6,7 @@ use auction_contracts::{
     PublicCompensationResponse, PublicPriceHistoryListResponse, PublicRulesResponse,
     WorldsResponse,
 };
+use auction_time::Timestamp;
 use auction_web_shared::valid_uuid;
 use auction_web_shared::wire::json_keys_only;
 use gloo_net::http::Response;
@@ -240,34 +241,24 @@ fn valid_bid_log_page(value: &Value) -> bool {
 }
 
 fn valid_ordered_bid_log(values: &[Value]) -> bool {
-    if !values.iter().all(valid_bid_log_entry) {
-        return false;
+    let mut previous = None;
+    for value in values {
+        let Some(current) = bid_log_order_key(value) else { return false };
+        if previous.is_some_and(|previous| previous <= current) {
+            return false;
+        }
+        previous = Some(current);
     }
-    values.windows(2).all(|pair| {
-        let Some(previous) = object(&pair[0]) else { return false };
-        let Some(current) = object(&pair[1]) else { return false };
-        for key in ["created_at", "lot_id"] {
-            let previous_value = string(previous.get(key)).unwrap_or_default();
-            let current_value = string(current.get(key)).unwrap_or_default();
-            if previous_value != current_value {
-                return previous_value > current_value;
-            }
-        }
-        for key in ["accepted_state_version", "fact_index"] {
-            let previous_value = int(previous.get(key)).unwrap_or_default();
-            let current_value = int(current.get(key)).unwrap_or_default();
-            if previous_value != current_value {
-                return previous_value > current_value;
-            }
-        }
-        string(previous.get("id")).unwrap_or_default()
-            > string(current.get("id")).unwrap_or_default()
-    })
+    true
 }
 
-fn valid_bid_log_entry(value: &Value) -> bool {
-    let Some(value) = object(value) else { return false };
-    json_keys_only(
+fn bid_log_order_key(value: &Value) -> Option<(Timestamp, &str, i64, i64, &str)> {
+    let value = object(value)?;
+    let bid_id = string(value.get("id"))?;
+    let lot_id = string(value.get("lot_id"))?;
+    let state_version = int(value.get("accepted_state_version"))?;
+    let fact_index = int(value.get("fact_index"))?;
+    if !json_keys_only(
         value,
         &[
             "id",
@@ -285,21 +276,26 @@ fn valid_bid_log_entry(value: &Value) -> bool {
             "created_at",
         ],
         &["source", "source_post_number", "source_post_url", "defeated_proxy"],
-    ) && valid_uuid(string(value.get("id")).unwrap_or_default())
-        && valid_uuid(string(value.get("auction_id")).unwrap_or_default())
-        && valid_uuid(string(value.get("lot_id")).unwrap_or_default())
-        && positive(value.get("lot_number"))
-        && positive(value.get("amount"))
-        && nonempty(value.get("equipment_name"))
-        && nonempty(value.get("equipment_category"))
-        && nonempty(value.get("bidder_name"))
-        && bool_value(value.get("valid")).is_some()
-        && positive(value.get("accepted_state_version"))
-        && positive(value.get("fact_index"))
-        && matches!(string(value.get("mechanism")), Some("ordinary" | "proxy"))
-        && valid_bid_log_source(value)
-        && valid_bid_log_defeated_proxy(value)
-        && time(value.get("created_at"))
+    ) || !valid_uuid(bid_id)
+        || !valid_uuid(string(value.get("auction_id")).unwrap_or_default())
+        || !valid_uuid(lot_id)
+        || !positive(value.get("lot_number"))
+        || !positive(value.get("amount"))
+        || !nonempty(value.get("equipment_name"))
+        || !nonempty(value.get("equipment_category"))
+        || !nonempty(value.get("bidder_name"))
+        || bool_value(value.get("valid")).is_none()
+        || state_version <= 0
+        || fact_index <= 0
+        || !matches!(string(value.get("mechanism")), Some("ordinary" | "proxy"))
+        || !valid_bid_log_source(value)
+        || !valid_bid_log_defeated_proxy(value)
+    {
+        return None;
+    }
+    // Public 时间省略小数尾零，排序须使用保留纳秒精度的时刻。
+    let created_at = Timestamp::parse_from_rfc3339(string(value.get("created_at"))?).ok()?;
+    Some((created_at, lot_id, state_version, fact_index, bid_id))
 }
 
 /// 落败代理只随代理竞争的那一条胜者代理事实下发，且不会是胜者本人。
@@ -532,7 +528,7 @@ fn valid_numbered_page(value: &Map<String, Value>) -> bool {
 mod tests {
     use serde_json::{Value, json};
 
-    use super::{valid_bid_log_entry, valid_current_auction_response};
+    use super::{bid_log_order_key, valid_current_auction_response, valid_ordered_bid_log};
 
     fn current(proxy_default_mode: Option<Value>) -> Value {
         let mut auction = json!({
@@ -596,13 +592,57 @@ mod tests {
         bid
     }
 
+    #[test]
+    fn bid_log_orders_fractional_times_by_instant() {
+        for (later, earlier) in
+            [("00.11Z", "00.1Z"), ("05.5Z", "05Z"), ("10.000000002Z", "10.000000001Z")]
+        {
+            let mut later_bid = proxy_bid(None);
+            later_bid["created_at"] = json!(format!("2026-11-14T12:57:{later}"));
+            let mut earlier_bid = proxy_bid(None);
+            earlier_bid["created_at"] = json!(format!("2026-11-14T12:57:{earlier}"));
+            earlier_bid["accepted_state_version"] = json!(12);
+
+            assert!(valid_ordered_bid_log(&[later_bid.clone(), earlier_bid.clone()]), "{later}");
+            assert!(!valid_ordered_bid_log(&[earlier_bid, later_bid]), "{earlier}");
+        }
+    }
+
+    #[test]
+    fn equal_bid_log_instants_use_the_remaining_sort_keys() {
+        let mut short_time = proxy_bid(None);
+        short_time["created_at"] = json!("2026-11-14T12:57:00.1Z");
+        let mut long_time = proxy_bid(None);
+        long_time["created_at"] = json!("2026-11-14T12:57:00.10Z");
+
+        for (key, higher) in [
+            ("lot_id", json!("6f1c2a5e-1b2c-4d3e-8f4a-000000000004")),
+            ("accepted_state_version", json!(12)),
+            ("fact_index", json!(2)),
+            ("id", json!("6f1c2a5e-1b2c-4d3e-8f4a-000000000011")),
+        ] {
+            let mut higher_bid = long_time.clone();
+            higher_bid[key] = higher;
+            assert!(valid_ordered_bid_log(&[higher_bid.clone(), short_time.clone()]), "{key}");
+            assert!(!valid_ordered_bid_log(&[short_time.clone(), higher_bid]), "{key}");
+        }
+        assert!(!valid_ordered_bid_log(&[short_time, long_time]));
+    }
+
+    #[test]
+    fn bid_log_rejects_an_unparseable_timestamp_even_on_a_single_row() {
+        let mut bid = proxy_bid(None);
+        bid["created_at"] = json!("2026-11-31T12:57:00Z");
+        assert!(!valid_ordered_bid_log(&[bid]));
+    }
+
     /// 落败代理只有出价人与正的上限两个键，不带模式；只能挂在新建代理命令的第 1 条代理事实上，
     /// 且不是胜者本人。任一不符整条拒绝。
     #[test]
     fn bid_log_entry_accepts_a_defeated_proxy_only_on_the_winning_proxy_fact() {
         let defeated = json!({ "bidder_name": "challenger", "maximum_amount": 15_000_000 });
-        assert!(valid_bid_log_entry(&proxy_bid(None)));
-        assert!(valid_bid_log_entry(&proxy_bid(Some(defeated.clone()))));
+        assert!(bid_log_order_key(&proxy_bid(None)).is_some());
+        assert!(bid_log_order_key(&proxy_bid(Some(defeated.clone()))).is_some());
         for invalid in [
             Value::Null,
             json!({ "bidder_name": "challenger" }),
@@ -611,16 +651,16 @@ mod tests {
             json!({ "bidder_name": "challenger", "maximum_amount": 15_000_000, "mode": "slow" }),
             json!({ "bidder_name": "winner", "maximum_amount": 15_000_000 }),
         ] {
-            assert!(!valid_bid_log_entry(&proxy_bid(Some(invalid.clone()))), "{invalid}");
+            assert!(bid_log_order_key(&proxy_bid(Some(invalid.clone()))).is_none(), "{invalid}");
         }
         let mut second_fact = proxy_bid(Some(defeated.clone()));
         second_fact["fact_index"] = json!(2);
-        assert!(!valid_bid_log_entry(&second_fact), "只随第 1 条事实返回");
+        assert!(bid_log_order_key(&second_fact).is_none(), "只随第 1 条事实返回");
         let mut ordinary = proxy_bid(Some(defeated));
         ordinary["mechanism"] = json!("ordinary");
         if let Some(fields) = ordinary.as_object_mut() {
             fields.remove("source");
         }
-        assert!(!valid_bid_log_entry(&ordinary), "普通出价不带落败代理");
+        assert!(bid_log_order_key(&ordinary).is_none(), "普通出价不带落败代理");
     }
 }
