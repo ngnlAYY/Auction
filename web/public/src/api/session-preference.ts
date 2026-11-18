@@ -114,7 +114,7 @@ function decode(
 ): Result<PublicSessionPreferenceResponse, CommandError> {
   const status = response.status;
   if (!responseOk(response)) {
-    return err(failure(decodeErrorCode(response), status));
+    return err(failure(decodeErrorCode(response), status, command === null ? undefined : userId));
   }
   const result = decodeIdentitySuccess(response, PublicSessionPreferenceResponseSchema, (value) => {
     const envelope = object(value);
@@ -161,7 +161,7 @@ function responseOk(response: TransportResponse): boolean {
   return response.status >= 200 && response.status <= 299;
 }
 
-function failure(code: string, status: number): CommandError {
-  observePublicSessionFailure(status, code);
+function failure(code: string, status: number, expectedUser?: string): CommandError {
+  observePublicSessionFailure(status, code, expectedUser);
   return { code, status };
 }

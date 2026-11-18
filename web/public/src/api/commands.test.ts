@@ -4,7 +4,12 @@ import { expect, jest, spyOn, test } from "bun:test";
 import { DEFAULT_REQUEST_TIMEOUT_MILLIS } from "@auction/web-shared/net/transport";
 import { err, ok, type Result } from "@auction/web-shared/result";
 
-import { createProxyAuthorization, lowerProxyAuthorization, placeBid } from "./commands";
+import {
+  COMMAND_NOT_SENT,
+  createProxyAuthorization,
+  lowerProxyAuthorization,
+  placeBid,
+} from "./commands";
 import { cachedPublicGet } from "./queries/cached-get";
 import { logoutPublic } from "./session";
 import { LIVE_TTL_MILLIS, resetStoreForTest } from "./swr-cache";
@@ -206,7 +211,7 @@ test("pre_aborted_commands_and_lock_failure_leave_the_cached_snapshot_freshï¼šå
     async (read, requests) => {
       const controller = new AbortController();
       controller.abort();
-      expect(await bid(controller.signal)).toEqual(err({ code: "network_error", status: 0 }));
+      expect(await bid(controller.signal)).toEqual(err(COMMAND_NOT_SENT));
       expect(await logoutPublic(USER_ID, new AbortController().signal)).toEqual(
         err("session_lock_unavailable"),
       );

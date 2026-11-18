@@ -1,7 +1,8 @@
-// 页面级竞价弹窗宿主；读取分支与目录阶段只更新能力，不拥有已提交命令。
+// 页面级竞价弹窗与确认草稿；已发出的命令只归外壳。
 
+import type { CurrentAuctionItemResponse } from "@auction/contracts/dto/public/catalog/auction";
 import { MAX_PUBLIC_BID_AMOUNT } from "@auction/contracts/dto/public/commands";
-import { type ConfirmCommand, useConfirmCommand } from "@auction/web-shared/net/commands";
+import { useConfirmCommand } from "@auction/web-shared/net/commands";
 import type { Cell } from "@auction/web-shared/reactive/cell";
 import { createCell } from "@auction/web-shared/reactive/cell";
 import type { Result } from "@auction/web-shared/result";
@@ -9,24 +10,36 @@ import { Dialog } from "@auction/web-shared/ui/components/dialog";
 import { formatCreditAmount } from "@auction/web-shared/ui/format";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
-import { createContext, Match, Show, Switch, useContext } from "solid-js";
+import {
+  createContext,
+  createEffect,
+  Match,
+  onCleanup,
+  Show,
+  Switch,
+  untrack,
+  useContext,
+} from "solid-js";
 
 import type { OwnedProxy } from "../../api/account";
-import type { CommandError, ProxyCommandAuthorization } from "../../api/commands";
+import type { CommandError } from "../../api/commands";
+import type { CatalogRow } from "../../api/model";
 import {
   PublicCommandOwnerContext,
   PublicSessionResourceContext,
   type PublicSessionResult,
 } from "..";
 import { PublicRefreshGenerationContext } from "../board/refresh";
-import { BidForm, type BidSuccess } from "../commands/bid";
+import { BidForm } from "../commands/bid";
+import { CompetitionCommandsContext } from "../commands/host";
 import {
   type PendingBidCommand,
   type PendingProxyCommand,
   PublicCommandIdentityContext,
 } from "../commands/pending";
 import { activeOwnedProxy, type ProxyFormInput, proxyForm } from "../commands/proxy";
-import { BidRetry } from "../commands/retry";
+import { type CommandPayload, type CommandReceipt, commandBusy } from "../commands/request";
+import { CommandRecovery, commandReceiptMessage } from "../commands/retry";
 import { readPublicQuery } from "../query";
 import {
   currentUser,
@@ -41,7 +54,7 @@ import { CatalogToastContext, CatalogToastHost, useCatalogToastProvider } from "
 /** 目录命令弹窗的两种动作；切换只替换表单，不新建命令状态。 */
 export type CatalogAction = "bid" | "proxy";
 
-/** 这里只保存弹窗展示输入；UUID、冻结负载和未知结果仍由共享 ConfirmCommand 唯一管理。 */
+/** 这里只保存弹窗展示输入；已发送的负载与结果由外壳唯一管理。 */
 export interface CommandDialogInput {
   readonly lotId: string;
   readonly lotCode: string;
@@ -61,8 +74,28 @@ export interface CommandDialogInput {
   readonly proxy: Result<OwnedProxy | null, string> | null;
 }
 
-/** 页面级弹窗信号；只读入口不在身份宿主之下时为 null，调用方按“没有提供方”处理。 */
+/** 页面级弹窗信号；目录外的只读入口没有提供方。 */
 export const CommandDialogContext = createContext<Cell<CommandDialogInput | null> | null>(null);
+
+/** 恢复入口可在拍品结束时挂载，输入不具备发出新命令的资格。 */
+export function recoveryDialogInput(row: CatalogRow): CommandDialogInput {
+  return {
+    lotId: row.lotId,
+    lotCode: row.code,
+    lotName: row.name,
+    action: "bid",
+    canBid: false,
+    currentPrice: row.currentPrice,
+    nextBid: row.nextBid,
+    lotStatus: row.status,
+    allowSlow: false,
+    proxyDefaultMode: null,
+    ordinaryBlocked: true,
+    leading: false,
+    blockedReason: "",
+    proxy: null,
+  };
+}
 
 const NIL_UUID = "00000000-0000-0000-0000-000000000000";
 const ACTIVE_PROXY_HINT_ID = "public-bid-active-proxy";
@@ -97,25 +130,10 @@ export function catalogCommandSession(
   };
 }
 
-/** 发送时再核对地址目标；恢复路径只重放宿主已冻结且发出过的命令。 */
-function useCatalogConfirmCommand<P>(
-  targetAllowsBid: () => boolean,
-): ConfirmCommand<P, CommandError> {
-  const command = useConfirmCommand<P, CommandError>();
-  return {
-    ...command,
-    submit(pending, action, outcomeUncertain, onSuccess, onFailure) {
-      // 非法场次禁止产生新的提交，已经发出的未知命令仍由原宿主使用原 command_id 恢复。
-      if (command.uncertain.peek() || targetAllowsBid()) {
-        command.submit(pending, action, outcomeUncertain, onSuccess, onFailure);
-      }
-    },
-  };
-}
-
-/** 看板按已确认用户建键；单个宿主只持有本身份的命令与抽屉。 */
+/** 看板按已确认用户建键，仅保存本页的草稿、标记与抽屉。 */
 export function CatalogCommandScope(props: {
   readonly userId: string | null;
+  readonly auction: CurrentAuctionItemResponse | null;
   readonly auctionInvalid: boolean;
   readonly children: JSX.Element;
 }): JSX.Element {
@@ -142,6 +160,7 @@ export function CatalogCommandScope(props: {
                   <CatalogCommandDialog
                     input={current()}
                     dialog={dialog}
+                    auction={props.auction}
                     auctionInvalid={props.auctionInvalid}
                   />
                 )}
@@ -158,6 +177,7 @@ export function CatalogCommandScope(props: {
 function CatalogCommandDialog(props: {
   readonly input: CommandDialogInput;
   readonly dialog: Cell<CommandDialogInput | null>;
+  readonly auction: CurrentAuctionItemResponse | null;
   readonly auctionInvalid: boolean;
 }): JSX.Element {
   const input = () => props.input;
@@ -165,8 +185,24 @@ function CatalogCommandDialog(props: {
   const session = useContext(PublicSessionResourceContext);
   const owner = useContext(PublicCommandOwnerContext);
   const identity = useContext(PublicCommandIdentityContext);
-  // popstate 已改地址时，事件处理不能沿用仍显示上一场的表单能力。
-  const targetAllowsBid = () => !props.auctionInvalid && readPublicQuery().invalidAuction === null;
+  const competition = useContext(CompetitionCommandsContext);
+  const store = () => competition?.current() ?? null;
+  const origin = Symbol("command-dialog");
+  let mounted = true;
+  const openedAuction = props.auction;
+  // popstate 已改地址时，不能用新场次或世界替换打开弹窗时的目标。
+  const targetAllowsBid = () => {
+    const query = readPublicQuery();
+    return (
+      !props.auctionInvalid &&
+      query.invalidAuction === null &&
+      openedAuction !== null &&
+      props.auction?.id === openedAuction.id &&
+      props.auction.world === openedAuction.world &&
+      (query.auctionId === null || query.auctionId === openedAuction.id) &&
+      (query.world ?? "main") === openedAuction.world
+    );
+  };
   const commandSession = () =>
     catalogCommandSession(
       session(),
@@ -176,23 +212,75 @@ function CatalogCommandDialog(props: {
       targetAllowsBid(),
     );
   const toasts = useContext(CatalogToastContext);
-  // 代理成功投影与命令状态都由稳定宿主持有；表单替换不能取消任务或丢失结果。
-  const proxySuccess = createCell<ProxyCommandAuthorization | null>(null);
-  // 身份宿主销毁会连带丢弃结果未知的冻结命令；这是与 Rust 实现一致的行为，
-  // 如需保留恢复记录，必须两套实现同时调整。
-  const bidCommand = useCatalogConfirmCommand<PendingBidCommand>(targetAllowsBid);
-  const proxyCreateCommand = useCatalogConfirmCommand<PendingProxyCommand>(targetAllowsBid);
-  const proxyLowerCommand = useCatalogConfirmCommand<PendingProxyCommand>(targetAllowsBid);
-  const busy = () =>
-    bidCommand.submitting() || proxyCreateCommand.submitting() || proxyLowerCommand.submitting();
-  // 二次确认是确认视图的唯一状态来源；不复制到本地信号，避免命令被替换后
-  // 仍显示旧确认行。结果未知时同样隐藏切换条，恢复入口不能被换成另一类命令。
+  const feedback = createCell<CommandReceipt | null>(null);
+  const bidCommand = useConfirmCommand<PendingBidCommand, CommandError>();
+  const proxyCreateCommand = useConfirmCommand<PendingProxyCommand, CommandError>();
+  const proxyLowerCommand = useConfirmCommand<PendingProxyCommand, CommandError>();
+  const pending = () => store()?.command(input().lotId) ?? null;
+  const busy = () => {
+    const current = pending();
+    return current !== null && commandBusy(current);
+  };
+  const proxySaved = () => feedback()?.error === null;
+  const canSubmit = () =>
+    mounted && pending() === null && !proxySaved() && commandSession().canSubmit;
   const confirming = () =>
-    bidCommand.confirmation() !== null ||
-    proxyCreateCommand.confirmation() !== null ||
-    proxyLowerCommand.confirmation() !== null;
-  const recovering = () =>
-    bidCommand.uncertain() || proxyCreateCommand.uncertain() || proxyLowerCommand.uncertain();
+    pending() === null &&
+    (bidCommand.confirmation() !== null ||
+      proxyCreateCommand.confirmation() !== null ||
+      proxyLowerCommand.confirmation() !== null);
+  createEffect(
+    () => store()?.dialogReceipt(origin),
+    (receipt) => {
+      if (receipt == null) return;
+      const taken = competition?.current.peek()?.takeDialogReceipt(origin);
+      if (taken == null) return;
+      if (taken.error === null && taken.kind === "bid") {
+        toasts.show(
+          taken.target.lotCode,
+          untrack(() => commandReceiptMessage(taken)),
+          null,
+        );
+        props.dialog.set(null);
+      } else {
+        feedback.set(taken);
+      }
+    },
+  );
+  onCleanup(() => {
+    mounted = false;
+    competition?.current.peek()?.detach(origin);
+  });
+  const submit = (payload: CommandPayload) => {
+    const current = input();
+    if (
+      !mounted ||
+      openedAuction === null ||
+      !targetAllowsBid() ||
+      !current.canBid ||
+      props.dialog.peek()?.lotId !== current.lotId
+    )
+      return;
+    if (
+      store()?.submit(
+        {
+          world: openedAuction.world,
+          auctionId: openedAuction.id,
+          lotId: current.lotId,
+          lotCode: current.lotCode,
+          lotName: current.lotName,
+        },
+        payload,
+        origin,
+      )
+    ) {
+      // 外壳接管后清理未发送的副本；原样重试只能从外壳读取冻结负载。
+      bidCommand.reset();
+      proxyCreateCommand.reset();
+      proxyLowerCommand.reset();
+      feedback.set(null);
+    }
+  };
   const close = () => {
     if (busy()) {
       return;
@@ -207,20 +295,10 @@ function CatalogCommandDialog(props: {
     // 显式关闭沿用原有取消契约；自动重读绝不走这个路径。
     props.dialog.set(null);
   };
-  // 普通出价被接受后直接收起弹窗，结果改由页面右下角的提示条回显。此时命令状态
-  // 已由 ConfirmCommand 清空（成功即终态），关闭不会丢弃冻结的 command_id 或未知结果；
-  // 出价事实来自服务端响应，提示条只回显它，目录行随后由权威投影刷新。
-  const bidSucceeded = (success: BidSuccess) => {
-    const price = formatCreditAmount(success.currentPrice);
-    const message = success.leading ? t("bid-success-leading", { price }) : t("bid-success");
-    const detail = success.leading ? null : t("bid-current-price", { price });
-    toasts.show(input().lotCode, message, detail);
-    props.dialog.set(null);
-  };
   // 切换 tab 走同一弹窗快照：actions.rs 的代理资源与刷新订阅据此激活，不另建状态。
   const switchTab = (action: CatalogAction) => {
     const next = props.dialog.peek();
-    if (next === null || next.action === action || !targetAllowsBid()) {
+    if (next === null || next.action === action || pending() !== null || !targetAllowsBid()) {
       return;
     }
     props.dialog.set({ ...next, action });
@@ -228,16 +306,16 @@ function CatalogCommandDialog(props: {
   const title = () =>
     confirming()
       ? t("bid-confirm-title")
-      : input().action === "bid"
+      : pending() !== null || input().action === "bid"
         ? t("bid-dialog-title", { code: input().lotCode })
         : t("proxy-dialog-title", { code: input().lotCode });
-  const canBid = () => !props.auctionInvalid && input().canBid && commandSession().authenticated;
+  const canBid = () => targetAllowsBid() && input().canBid && commandSession().authenticated;
   const activeProxy = () => activeOwnedProxy(input().proxy) !== null;
   const proxyInput = (): ProxyFormInput => ({
     lotId: input().lotId,
     authenticated: commandSession().authenticated,
     canBid: canBid(),
-    canSubmit: commandSession().canSubmit,
+    canSubmit: canSubmit(),
     currentPrice: input().currentPrice,
     nextBid: input().nextBid,
     lotStatus: input().lotStatus,
@@ -247,9 +325,9 @@ function CatalogCommandDialog(props: {
     blockedReason: input().blockedReason,
     proxy: input().proxy,
     refreshGeneration,
-    savedAuthorization: proxySuccess,
     createCommand: proxyCreateCommand,
     lowerCommand: proxyLowerCommand,
+    onSubmit: submit,
     onClose: close,
   });
   const currentPrice = () => formatCreditAmount(input().currentPrice);
@@ -272,112 +350,130 @@ function CatalogCommandDialog(props: {
     >
       {/* 焦点管理由 PublicShell 统一提供。 */}
       <Dialog title={title()} closeLabel={t("catalog-close")} busy={busy()} onClose={close}>
-        <Show
-          when={confirming()}
-          fallback={
-            <>
-              {/* 拍品摘要块：编号、装备名与两个价格在表单之前一次可见。 */}
-              <div class="public-bid-dialog__lot">
-                <div class="public-bid-dialog__lot-name">
-                  <span class="public-bid-dialog__lot-code">{input().lotCode}</span>
-                  <span class="public-bid-dialog__lot-title">{input().lotName}</span>
-                </div>
-                <div class="public-bid-dialog__lot-facts">
-                  <div>
-                    <span>{t("catalog-current")}</span>
-                    <b>{currentPrice()}</b>
+        <Show when={pending() === null}>
+          <Show
+            when={confirming()}
+            fallback={
+              <>
+                {/* 拍品摘要块：编号、装备名与两个价格在表单之前一次可见。 */}
+                <div class="public-bid-dialog__lot">
+                  <div class="public-bid-dialog__lot-name">
+                    <span class="public-bid-dialog__lot-code">{input().lotCode}</span>
+                    <span class="public-bid-dialog__lot-title">{input().lotName}</span>
                   </div>
-                  <div>
-                    <span>{t("catalog-next-bid")}</span>
-                    <b>{nextBid()}</b>
+                  <div class="public-bid-dialog__lot-facts">
+                    <div>
+                      <span>{t("catalog-current")}</span>
+                      <b>{currentPrice()}</b>
+                    </div>
+                    <div>
+                      <span>{t("catalog-next-bid")}</span>
+                      <b>{nextBid()}</b>
+                    </div>
                   </div>
                 </div>
-              </div>
-              <Show when={!recovering() && !props.auctionInvalid}>
-                {/* 直接出价/代理出价共用同一弹窗；切换只替换表单内容，不新建命令状态。 */}
-                {/* biome-ignore lint/a11y/useSemanticElements: 源码使用 div role=group 保持 DOM 结构。 */}
-                <div class="public-bid-dialog__tabs" role="group" aria-label={t("bid-type-label")}>
-                  <button
-                    class={
-                      input().action === "bid"
-                        ? "public-bid-dialog__tab public-bid-dialog__tab--active"
-                        : "public-bid-dialog__tab"
-                    }
-                    type="button"
-                    aria-pressed={input().action === "bid" ? "true" : "false"}
-                    disabled={busy() || activeProxy()}
-                    aria-describedby={activeProxy() ? ACTIVE_PROXY_HINT_ID : undefined}
-                    onClick={() => {
-                      if (!activeProxy()) {
-                        switchTab("bid");
+                <Show when={!proxySaved() && !props.auctionInvalid}>
+                  {/* 直接出价/代理出价共用同一弹窗；切换只替换表单内容，不新建命令状态。 */}
+                  {/* biome-ignore lint/a11y/useSemanticElements: 源码使用 div role=group 保持 DOM 结构。 */}
+                  <div
+                    class="public-bid-dialog__tabs"
+                    role="group"
+                    aria-label={t("bid-type-label")}
+                  >
+                    <button
+                      class={
+                        input().action === "bid"
+                          ? "public-bid-dialog__tab public-bid-dialog__tab--active"
+                          : "public-bid-dialog__tab"
                       }
-                    }}
-                  >
-                    {t("bid-tab-direct")}
-                  </button>
-                  <button
-                    class={
-                      input().action === "proxy"
-                        ? "public-bid-dialog__tab public-bid-dialog__tab--active"
-                        : "public-bid-dialog__tab"
-                    }
-                    type="button"
-                    aria-pressed={input().action === "proxy" ? "true" : "false"}
-                    disabled={busy()}
-                    onClick={() => switchTab("proxy")}
-                  >
-                    {t("bid-tab-proxy")}
-                  </button>
-                </div>
-                <Show when={activeProxy()}>
-                  <p
-                    id={ACTIVE_PROXY_HINT_ID}
-                    class="action-feedback action-feedback--notice"
-                    role="note"
-                  >
-                    {t("proxy-active-exists")}
-                  </p>
+                      type="button"
+                      aria-pressed={input().action === "bid" ? "true" : "false"}
+                      disabled={busy() || activeProxy()}
+                      aria-describedby={activeProxy() ? ACTIVE_PROXY_HINT_ID : undefined}
+                      onClick={() => {
+                        if (!activeProxy()) {
+                          switchTab("bid");
+                        }
+                      }}
+                    >
+                      {t("bid-tab-direct")}
+                    </button>
+                    <button
+                      class={
+                        input().action === "proxy"
+                          ? "public-bid-dialog__tab public-bid-dialog__tab--active"
+                          : "public-bid-dialog__tab"
+                      }
+                      type="button"
+                      aria-pressed={input().action === "proxy" ? "true" : "false"}
+                      disabled={busy()}
+                      onClick={() => switchTab("proxy")}
+                    >
+                      {t("bid-tab-proxy")}
+                    </button>
+                  </div>
+                  <Show when={activeProxy()}>
+                    <p
+                      id={ACTIVE_PROXY_HINT_ID}
+                      class="action-feedback action-feedback--notice"
+                      role="note"
+                    >
+                      {t("proxy-active-exists")}
+                    </p>
+                  </Show>
                 </Show>
-              </Show>
-            </>
-          }
-        >
-          {/* 确认态：紧凑拍品行代替摘要块与切换条；类型、金额与约束说明
+              </>
+            }
+          >
+            {/* 确认态：紧凑拍品行代替摘要块与切换条；类型、金额与约束说明
           由当前表单的确认面板给出。 */}
-          <div class="public-bid-confirm__lot">
-            <span class="public-bid-confirm__lot-code">{input().lotCode}</span>
-            <b class="public-bid-confirm__lot-title">{input().lotName}</b>
-          </div>
+            <div class="public-bid-confirm__lot">
+              <span class="public-bid-confirm__lot-code">{input().lotCode}</span>
+              <b class="public-bid-confirm__lot-title">{input().lotName}</b>
+            </div>
+          </Show>
         </Show>
+        <div role="status" aria-atomic="true">
+          <Show when={feedback()}>
+            {(receipt) => (
+              <p
+                class={
+                  proxySaved()
+                    ? "action-feedback action-feedback--success"
+                    : "action-feedback action-feedback--error"
+                }
+              >
+                {commandReceiptMessage(receipt())}
+              </p>
+            )}
+          </Show>
+        </div>
         <Switch fallback={null}>
+          <Match when={pending()}>
+            {(command) => <CommandRecovery command={command()} origin={origin} />}
+          </Match>
+          <Match when={proxySaved()}>
+            <div class="public-auction-bid-form__actions">
+              <button type="button" autofocus={true} onClick={close}>
+                {t("catalog-close")}
+              </button>
+            </div>
+          </Match>
           <Match when={input().action === "bid"}>
-            <Show
-              when={bidCommand.uncertain()}
-              fallback={
-                <BidForm
-                  input={{
-                    lotId: input().lotId,
-                    nextBid: input().nextBid,
-                    lotStatus: input().lotStatus,
-                    canBid: canBid(),
-                    canSubmit: commandSession().canSubmit,
-                    blocked: input().ordinaryBlocked,
-                    blockedReason: input().blockedReason,
-                    command: bidCommand,
-                    onSuccess: bidSucceeded,
-                    onClose: close,
-                  }}
-                />
-              }
-            >
-              <BidRetry
-                lotId={input().lotId}
-                lotCode={input().lotCode}
-                command={bidCommand}
-                onSuccess={bidSucceeded}
-                onClose={close}
-              />
-            </Show>
+            <BidForm
+              input={{
+                lotId: input().lotId,
+                nextBid: input().nextBid,
+                lotStatus: input().lotStatus,
+                canBid: canBid(),
+                canSubmit: canSubmit(),
+                blocked: input().ordinaryBlocked,
+                blockedReason: input().blockedReason,
+                command: bidCommand,
+                onSubmit: (payload) => submit({ ...payload, kind: "bid" }),
+                onClose: close,
+              }}
+            />
           </Match>
           <Match when={input().action === "proxy"}>{proxyForm(proxyInput)}</Match>
         </Switch>

@@ -28,6 +28,7 @@ import {
 } from "..";
 import { PublicDisplayedAuctionContext, PublicPageRealtimeTargetContext } from "../board/realtime";
 import { PublicBidRefreshContext, PublicRefreshGenerationContext } from "../board/refresh";
+import { CompetitionCommandsContext, createCompetitionCommands } from "../commands/host";
 import { usePublicQueryState } from "../query";
 import {
   CurrentAuctionContext,
@@ -35,7 +36,7 @@ import {
   PublicReadinessContext,
   SelectedWorldContext,
 } from "../shell/contexts";
-import { findElement, loadCommandScopeFixture } from "./command-scope-fixture.test";
+import { findElement, loadCommandScopeFixture, TEST_AUCTION } from "./command-scope-fixture.test";
 
 const {
   board: { mountAuctionBoard },
@@ -82,6 +83,9 @@ function mountBidBoard() {
         if (typeof url === "string" && url.startsWith("/api/v1/browser-errors?")) {
           return Promise.resolve(new Response(null, { status: 204 }));
         }
+        if (typeof url === "string" && url.startsWith("/api/v1/auctions/")) {
+          return Promise.resolve(new Response(null, { status: 503 }));
+        }
         const signal = init?.signal;
         if (
           url !== `/api/v1/lots/${LOT_ID}/bids` ||
@@ -117,17 +121,20 @@ function mountBidBoard() {
       },
     );
     const refresh = createCell(0);
+    const commands = createCompetitionCommands(session, refresh);
+    commands.replaceIdentity(USER_ID);
     const providers = [
       provide(RouterContext, opened.router),
       provide(PublicSessionResourceContext, session),
       provide(PublicCommandOwnerContext, createCell<string | null>(USER_ID)),
+      provide(CompetitionCommandsContext, commands),
       provide(PublicContentLoadingContext, createCell<ReadonlySet<number>>(new Set())),
       provide(SelectedWorldContext, createCell("main")),
       provide(
         CurrentAuctionContext,
         createTaskResource(
           () => null,
-          async () => ["main", ok(null)] as const,
+          async () => ["main", ok(TEST_AUCTION)] as const,
         ),
       ),
       provide(
@@ -182,6 +189,13 @@ function mountBidBoard() {
       dispose,
       open: () => open(),
       form: () => findElement(tree(), (element) => element.tag === "form"),
+      retry: () =>
+        findElement(
+          tree(),
+          (element) =>
+            element.tag === "button" &&
+            String(element.attributes["aria-describedby"]).includes("public-command-dialog-"),
+        ),
       refresh,
     };
   });
@@ -191,8 +205,9 @@ function mountBidBoard() {
     get refreshes() {
       return mounted.refresh.peek();
     },
-    openFromCurrent() {
+    async openFromCurrent() {
       opened.router.push("/");
+      await Bun.sleep(0);
       flush();
       mounted.open();
       flush();
@@ -207,6 +222,7 @@ function mountBidBoard() {
       flush();
     },
     form: mounted.form,
+    retry: mounted.retry,
     close() {
       mounted.dispose();
       flush();
@@ -217,10 +233,10 @@ function mountBidBoard() {
   };
 }
 
-test("合法地址打开实际竞价弹窗，后退到非法场次后旧确认不能发请求", () => {
+test("合法地址打开实际竞价弹窗，后退到非法场次后旧确认不能发请求", async () => {
   const mounted = mountBidBoard();
   try {
-    const form = mounted.openFromCurrent();
+    const form = await mounted.openFromCurrent();
     form.submit();
     flush();
     expect(mounted.requests).toHaveLength(0);
@@ -245,10 +261,11 @@ test("合法地址打开实际竞价弹窗，后退到非法场次后旧确认�
 test("实际宿主跨后退保留在途竞价和原样重试入口", async () => {
   const mounted = mountBidBoard();
   try {
-    const form = mounted.openFromCurrent();
+    const form = await mounted.openFromCurrent();
     form.submit();
     flush();
     form.submit();
+    await Bun.sleep(0);
     const first = mounted.requests[0];
     expect(first?.body).toMatch(/"command_id":"[0-9a-f-]+"/u);
     expect(first?.body).toContain('"amount":2000');
@@ -260,11 +277,12 @@ test("实际宿主跨后退保留在途竞价和原样重试入口", async () =>
     flush();
     expect(mounted.refreshes).toBe(1);
 
-    const retry = mounted.form();
-    if (retry === null || retry === form) {
-      throw new Error("非法场次的实际命令宿主丢失了重试表单");
+    const retry = mounted.retry();
+    if (retry === null) {
+      throw new Error("非法场次的实际命令宿主丢失了重试按钮");
     }
-    retry.submit();
+    retry.click();
+    await Bun.sleep(0);
     const replayed = mounted.requests[1];
     expect(mounted.requests).toHaveLength(2);
     expect(replayed?.body).toBe(first?.body);

@@ -19,7 +19,12 @@ import {
   registerPublicSessionCheckTrigger,
 } from "../../api/session";
 import { PublicRefreshGenerationContext } from "../board/refresh";
-import { findElement, loadCommandScopeFixture } from "../catalog/command-scope-fixture.test";
+import {
+  findElement,
+  loadCommandScopeFixture,
+  TEST_AUCTION,
+} from "../catalog/command-scope-fixture.test";
+import { CompetitionCommandsContext } from "../commands/host";
 import { PublicCommandOwnerContext, PublicSessionResourceContext } from "../index";
 import { load, save } from "../watches/cache";
 import { ALICE, BOB, fixture, loginReceipt, reject } from "./session-fixture";
@@ -45,40 +50,46 @@ function mountBid(mounted: ReturnType<typeof fixture>) {
           return createComponent(PublicCommandOwnerContext, {
             value: mounted.commandOwner,
             get children() {
-              return createComponent(PublicRefreshGenerationContext, {
-                value: mounted.refreshGeneration,
+              return createComponent(CompetitionCommandsContext, {
+                value: mounted.competition,
                 get children() {
-                  return For({
-                    get each() {
-                      return [mounted.commandOwner()];
-                    },
-                    keyed: (userId) => userId,
-                    children: (userId) => {
-                      const hosted = untrack(userId);
-                      return createComponent(CatalogCommandScope, {
-                        userId: hosted,
-                        auctionInvalid: false,
-                        get children() {
-                          const dialog = useContext(CommandDialogContext);
-                          if (dialog !== null && hosted === ALICE.user_id) {
-                            dialog.set({
-                              lotId: LOT_ID,
-                              lotCode: "One12",
-                              lotName: "测试装备",
-                              action: "bid",
-                              canBid: true,
-                              currentPrice: 1000,
-                              nextBid: 2000,
-                              lotStatus: "live",
-                              allowSlow: true,
-                              proxyDefaultMode: "fast",
-                              ordinaryBlocked: false,
-                              leading: false,
-                              blockedReason: "",
-                              proxy: null,
-                            });
-                          }
-                          return null;
+                  return createComponent(PublicRefreshGenerationContext, {
+                    value: mounted.refreshGeneration,
+                    get children() {
+                      return For({
+                        get each() {
+                          return [mounted.commandOwner()];
+                        },
+                        keyed: (userId) => userId,
+                        children: (userId) => {
+                          const hosted = untrack(userId);
+                          return createComponent(CatalogCommandScope, {
+                            userId: hosted,
+                            auction: TEST_AUCTION,
+                            auctionInvalid: false,
+                            get children() {
+                              const dialog = useContext(CommandDialogContext);
+                              if (dialog !== null && hosted === ALICE.user_id) {
+                                dialog.set({
+                                  lotId: LOT_ID,
+                                  lotCode: "One12",
+                                  lotName: "测试装备",
+                                  action: "bid",
+                                  canBid: true,
+                                  currentPrice: 1000,
+                                  nextBid: 2000,
+                                  lotStatus: "live",
+                                  allowSlow: true,
+                                  proxyDefaultMode: "fast",
+                                  ordinaryBlocked: false,
+                                  leading: false,
+                                  blockedReason: "",
+                                  proxy: null,
+                                });
+                              }
+                              return null;
+                            },
+                          });
                         },
                       });
                     },
@@ -92,7 +103,17 @@ function mountBid(mounted: ReturnType<typeof fixture>) {
     );
     createEffect(tree, () => {});
     flush();
-    return { dispose, form: () => findElement(tree(), (element) => element.tag === "form") };
+    return {
+      dispose,
+      form: () => findElement(tree(), (element) => element.tag === "form"),
+      retry: () =>
+        findElement(
+          tree(),
+          (element) =>
+            element.tag === "button" &&
+            String(element.attributes["aria-describedby"]).includes("public-command-dialog-"),
+        ),
+    };
   });
 }
 
@@ -108,7 +129,7 @@ async function submitUncertainBid(bid: ReturnType<typeof mountBid>) {
   flush();
   form.submit();
   await settle();
-  const retry = bid.form();
+  const retry = bid.retry();
   expect(retry).not.toBeNull();
   expect(retry).not.toBe(form);
   return retry;
@@ -149,15 +170,15 @@ test.each([false, true])(
         }
         await settle();
         expect(mounted.owners).toEqual([null, ALICE.user_id]);
-        expect(bid.form()).toBe(retry);
-        bid.form()?.submit();
+        expect(bid.retry()).toBe(retry);
+        bid.retry()?.click();
         await settle();
         expect(bodies).toEqual([first, first]);
 
         mounted.server.identity = otherTab ? null : BOB;
         mounted.checkSession("refresh");
         await settle();
-        expect(bid.form()).toBeNull();
+        expect(bid.retry()).toBeNull();
       } finally {
         bid.dispose();
       }
@@ -209,14 +230,14 @@ test.each([
         firstMethod === "POST" ? ["POST", "GET"] : ["GET", "PUT"],
       );
       expect(mounted.commandOwner()).toBe(next.user_id);
-      expect(bid.form()).toBe(next === ALICE ? retry : null);
+      expect(bid.retry()).toBe(next === ALICE ? retry : null);
       expect(load(ALICE.user_id, AUCTION_ID)).toEqual(expectedCache);
 
       failed.resolve(unavailable());
       await settle();
       expect(mounted.session()).toEqual(err("storage_unavailable"));
       expect(mounted.commandOwner()).toBe(next.user_id);
-      expect(bid.form()).toBe(next === ALICE ? retry : null);
+      expect(bid.retry()).toBe(next === ALICE ? retry : null);
       expect(load(ALICE.user_id, AUCTION_ID)).toEqual(expectedCache);
     } finally {
       bid.dispose();

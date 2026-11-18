@@ -18,8 +18,13 @@ import {
   PublicRefreshGenerationContext,
 } from "../board/refresh";
 import type { WorldSwitch } from "../board/world";
-import type { LotViewTarget } from "../catalog/detail/deep-link";
-import { LotViewRequestContext } from "../catalog/detail/deep-link";
+import {
+  type LotLinkLocation,
+  LotLinkLocationContext,
+  type LotViewRequest,
+  LotViewRequestContext,
+} from "../catalog/detail/deep-link";
+import { type CompetitionCommands, CompetitionCommandsContext } from "../commands/host";
 import type {
   CurrentAuctionResource,
   PublicReadinessResource,
@@ -43,9 +48,11 @@ export interface PublicShellProvidersProps {
   readonly bidRefresh: PublicBidRefresh;
   readonly pageRealtimeTarget: Cell<readonly [PublicRealtimePageKey, PublicRealtimeTarget] | null>;
   readonly displayedAuction: Cell<CurrentAuctionItemResponse | null>;
-  readonly lotViewRequest: Cell<LotViewTarget | null>;
+  readonly lotViewRequest: Cell<LotViewRequest | null>;
+  readonly lotLinkLocation: Cell<LotLinkLocation | null>;
   readonly session: PublicSessionResource;
   readonly commandOwner: Cell<string | null>;
+  readonly competition: CompetitionCommands;
   readonly contentLoading: Cell<ReadonlySet<number>>;
   readonly readiness: PublicReadinessResource;
   readonly currentAuction: CurrentAuctionResource;
@@ -70,7 +77,11 @@ export function PublicShellProviders(props: PublicShellProvidersProps): JSX.Elem
                           <PublicReadinessContext value={props.readiness}>
                             <CurrentAuctionContext value={props.currentAuction}>
                               <PageVisibilityContext value={props.pageVisibility}>
-                                {props.children}
+                                <LotLinkLocationContext value={props.lotLinkLocation}>
+                                  <CompetitionCommandsContext value={props.competition}>
+                                    {props.children}
+                                  </CompetitionCommandsContext>
+                                </LotLinkLocationContext>
                               </PageVisibilityContext>
                             </CurrentAuctionContext>
                           </PublicReadinessContext>

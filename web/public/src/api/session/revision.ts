@@ -29,10 +29,11 @@ export type SessionRefreshReason =
 /** 外壳会话重读入口。 */
 export type PublicSessionCheckTrigger = (reason: SessionRefreshReason) => void;
 
-/** 会话响应提供完整快照，私有响应只证明服务端实际使用的用户。 */
+/** 权威成功响应确认当前身份；带预期用户的 409 只否定这一次请求的预期归属。 */
 export type SessionIdentity =
   | { readonly kind: "session"; readonly session: PublicSession | null }
-  | { readonly kind: "user"; readonly userId: string };
+  | { readonly kind: "user"; readonly userId: string }
+  | { readonly kind: "expected-user-rejected"; readonly userId: string };
 
 export type SessionIdentityEvidence = SessionIdentity & {
   readonly revisions: SessionRevisions;

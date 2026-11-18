@@ -279,6 +279,7 @@ function mountActions() {
       provide(RouterContext, {
         current: () => ({ kind: "not-found", segments: [] }),
         currentLocationString: () => "/",
+        currentEntryKey: () => "test-entry",
         push: () => {},
         replace: () => {},
         goBack: () => {},

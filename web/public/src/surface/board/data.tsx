@@ -12,15 +12,13 @@ import { useAppBootReady } from "@auction/web-shared/ui/bootstrap";
 import { AsyncState } from "@auction/web-shared/ui/components/async-state";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
-import { createEffect, Match, Show, Switch, useContext } from "solid-js";
+import { Match, Show, Switch, useContext } from "solid-js";
 
 import { type CatalogRow, catalogLevelFilterParse, lotEnvelopeTakeRows } from "../../api/model";
 import { fetchCurrentAuction } from "../../api/queries/current";
 import { fetchAuctionList } from "../../api/queries/directory";
 import { fetchCurrentLots } from "../../api/queries/lots";
 import { PublicSessionResourceContext, PublicSessionView } from "..";
-import { disposeLotView, LotViewRequestContext } from "../catalog/detail/deep-link";
-import { LotDetailLookupContext } from "../catalog/detail/lookup";
 import { CatalogGroupFilters } from "../catalog/filters";
 import { CatalogTable } from "../catalog/tables";
 import { useContentLoading } from "../loading";
@@ -194,7 +192,9 @@ export function useAuctionCatalog(
     lotsRefreshGeneration.update((generation) => Math.min(generation + 1, Number.MAX_SAFE_INTEGER));
     refreshPublicReads(refreshGeneration);
   };
-  return { scope: catalogScope, current, readySnapshot, alignment, retry };
+  const reading = () =>
+    current() === null || lots.state() === "pending" || (!aligned() && !alignment.exhausted());
+  return { scope: catalogScope, current, readySnapshot, alignment, retry, reading };
 }
 
 export interface AuctionDataProps {
@@ -290,39 +290,6 @@ export function AuctionData(props: AuctionDataProps): JSX.Element {
     const retained = retainedPreviewSnapshot();
     return readySnapshot() ?? retained;
   });
-  // 拍品直达链接：目录当前页有这一行时由行自己打开抽屉；看板展示的不是它所在的场次，或
-  // 这一页没有它时，在这里退回只读抽屉。请求只处置一次，不写 URL。
-  const viewRequest = useContext(LotViewRequestContext);
-  const lotLookup = useContext(LotDetailLookupContext);
-  if (lotLookup === null) {
-    throw new Error("AuctionData 必须在 LotDetailLookupContext 内渲染");
-  }
-  const readOnlyView = createValueMemo(() => {
-    const target = viewRequest();
-    if (target === null) {
-      return null;
-    }
-    const ready = readySnapshot();
-    const pageLots = ready === null ? null : ready.rows.map((row) => row.lotId);
-    return disposeLotView(
-      target,
-      queryStateSignal().world ?? "main",
-      props.auction.world,
-      props.auction.id,
-      pageLots,
-    ) === "read_only"
-      ? target
-      : null;
-  });
-  createEffect(
-    () => readOnlyView(),
-    (target) => {
-      if (target !== null) {
-        viewRequest.set(null);
-        lotLookup.view(target.auctionId, target.lotId);
-      }
-    },
-  );
   const currentError = createValueMemo(() => {
     const loaded = current();
     return loaded !== null && !loaded[1].ok ? loaded[1].error : null;

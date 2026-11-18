@@ -12,8 +12,17 @@ const { publicBoardQueryDefault } = await import("../../query");
 const { catalogPage, catalogPosition, currentWorld, disposeLotView } = await import("./deep-link");
 
 function target(): LotViewTarget {
-  return { lotId: "lot-16", auctionId: "auction-7" };
+  return {
+    lotId: "lot-16",
+    auctionId: "auction-7",
+    world: "main",
+    row: row("Clo16", "Cloth"),
+    refreshGeneration: 0,
+    rowReady: false,
+  };
 }
+
+const DISPLAYED = { world: "main", id: "auction-7" };
 
 function row(code: string, category: string): CatalogRow {
   return {
@@ -118,18 +127,21 @@ test("unfilterable_category_keeps_the_first_unfiltered_page：不可筛选分类
 
 test("request_waits_until_the_board_shows_the_target_world_and_page：看板未落到目标世界与页面时等待", () => {
   // 外壳的世界选择还没跟上地址栏：展示的是另一个世界的场次，不下结论。
-  expect(disposeLotView(target(), "isekai", "main", "auction-1", ["lot-1"])).toBe("wait");
+  expect(disposeLotView(target(), "isekai", DISPLAYED, true, ["lot-1"])).toBe("wait");
   // 目录页尚未读出。
-  expect(disposeLotView(target(), "main", "main", "auction-7", null)).toBe("wait");
+  expect(disposeLotView(target(), "main", DISPLAYED, true, [])).toBe("wait");
 });
 
 test("row_opens_the_drawer_when_it_is_on_the_page：目录当前页有这一行时交给行打开抽屉", () => {
-  expect(disposeLotView(target(), "main", "main", "auction-7", ["lot-15", "lot-16"])).toBe("row");
+  expect(disposeLotView(target(), "main", DISPLAYED, false, ["lot-15", "lot-16"])).toBe("row");
 });
 
 test("falls_back_to_the_read_only_drawer_when_the_row_is_not_there：这一页没有它时退回只读抽屉", () => {
   // 页码因撤拍空号偏后：这一页没有它。
-  expect(disposeLotView(target(), "main", "main", "auction-7", ["lot-21"])).toBe("read_only");
+  expect(disposeLotView(target(), "main", DISPLAYED, false, ["lot-21"])).toBe("read_only");
   // 场次已经轮换：看板展示的是同一世界的另一场，不必等目录读完。
-  expect(disposeLotView(target(), "main", "main", "auction-8", null)).toBe("read_only");
+  expect(disposeLotView(target(), "main", { ...DISPLAYED, id: "auction-8" }, true, [])).toBe(
+    "read_only",
+  );
+  expect(disposeLotView(target(), "main", null, false, [])).toBe("read_only");
 });

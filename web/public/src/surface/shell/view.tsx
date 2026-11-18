@@ -11,11 +11,12 @@ import type { JSX } from "@solidjs/web";
 import { Show } from "solid-js";
 
 import { PublicRealtimeOwner, type PublicRealtimeTarget } from "../board/realtime";
+import { CompetitionNotices } from "../commands/notice";
 import { ConsoleCountdown, ConsoleSidebar } from "../presentation/console";
 import { Navigation } from "../presentation/mobile";
 import type { LiveConnectionState } from "../query";
 import { PUBLIC_LOCALE_CATALOG } from "../router/locale-catalog";
-import { PUBLIC_PAGES } from "../router/route";
+import { NotFoundPage, PUBLIC_PAGES } from "../router/route";
 import { SessionMenu } from "../session";
 
 export interface PublicShellViewProps {
@@ -46,6 +47,7 @@ export interface PublicShellViewProps {
   } | null;
   readonly realtimeUserId: () => string | null;
   readonly realtimeTarget: () => PublicRealtimeTarget;
+  readonly onRouteLoadFailure: () => void;
   readonly onToggleNavigation: () => void;
   readonly onCloseNavigation: () => void;
   readonly onHome: () => void;
@@ -206,10 +208,12 @@ export function PublicShellView(props: PublicShellViewProps): JSX.Element {
           onNavigate={props.onCloseNavigation}
         />
         <main id="public-content" class="console-main" tabindex="-1">
+          <CompetitionNotices />
           <RouteOutlet
             pages={PUBLIC_PAGES}
-            notFound={null}
+            notFound={<NotFoundPage />}
             onLoadError={(error) => {
+              props.onRouteLoadFailure();
               // 页面代码加载失败多半是部署后旧标签页引用的分块已不存在：先整页重载一次，
               // 同一地址短时间内已经重载过才显示错误横幅。
               if (!reloadAfterPageLoadError()) {

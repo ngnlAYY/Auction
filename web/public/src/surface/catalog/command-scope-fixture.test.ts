@@ -2,6 +2,7 @@
 
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import type { CurrentAuctionItemResponse } from "@auction/contracts/dto/public/catalog/auction";
 import { Dialog } from "@auction/web-shared/ui/components/dialog";
 import { transform } from "@solidjs/compiler";
 import { createMemo, type Element, createComponent as mountComponent, untrack } from "solid-js";
@@ -9,6 +10,18 @@ import { createMemo, type Element, createComponent as mountComponent, untrack } 
 export { createEffect as effect, createMemo as memo } from "solid-js";
 
 const NAMESPACE = "public-command-test";
+export const TEST_AUCTION: CurrentAuctionItemResponse = {
+  id: "00000000-0000-4000-8000-000000000021",
+  world: "main",
+  number: 12,
+  status: "live",
+  opens_at: "2026-11-01T00:00:00Z",
+  scheduled_ends_at: "2037-12-01T00:00:00Z",
+  presentation_mode: "live",
+  bidding_open: true,
+  preview_revision: 0,
+  proxy_default_mode: "fast",
+};
 const SOURCES = new Set(
   ["../board/index.tsx", "./command-scope.tsx", "../commands/bid.tsx", "../commands/retry.tsx"].map(
     (path) => resolve(import.meta.dir, path),
@@ -70,6 +83,12 @@ export class TestElement {
       throw new Error("竞价表单没有绑定提交处理器");
     }
     submit({ preventDefault() {} });
+  }
+
+  click(): void {
+    const click = this.attributes.onClick;
+    if (typeof click !== "function") throw new Error("控件没有绑定点击处理器");
+    click(new Event("click", { cancelable: true }));
   }
 }
 

@@ -132,7 +132,7 @@ test("二次确认时晚到的活动授权禁用确认按钮，并关联两个�
           blocked: blockedReason.peek() !== null,
           blockedReason: blockedReason.peek() ?? "",
           command,
-          onSuccess: () => {},
+          onSubmit: () => {},
           onClose: () => {},
         });
       const isSubmitButton = (node: CapturedElement) =>

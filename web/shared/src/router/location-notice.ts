@@ -14,8 +14,8 @@ export function watchLocationWritten(listener: LocationWrittenListener): () => v
 
 /**
  * 历史模块在地址写入成功后通知 Router。
- * Router 收到通知后只重读 pathname + search + hash 并刷新 currentLocationString()；
- * 不重新匹配路由、不改变 current()，也不触发滚动处理。已销毁的 Router 不会再收到通知。
+ * Router 收到通知后刷新地址快照与当前历史条目标识，保留当前路由匹配和滚动处理。
+ * 已销毁的 Router 不会再收到通知。
  */
 export function notifyLocationWritten(): void {
   for (const listener of [...listeners]) {

@@ -7,11 +7,8 @@ import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
 import { onSettled, Show, useContext } from "solid-js";
 
-import { commandErrorOutcomeUncertain, placeBid } from "../../api/commands";
-import { PublicRefreshGenerationContext } from "../board/refresh";
 import {
   type BidConfirmCommand,
-  bidErrorMessage,
   ConfirmPanel,
   type PendingBidCommand,
   PublicCommandIdentityContext,
@@ -25,13 +22,7 @@ const BID_BLOCKED_REASON_ID = "public-bid-blocked-reason";
 /** 普通出价输入的原生词法约束。 */
 export const BID_UNITS_PATTERN = `${BID_WHITESPACE}*[0-9]*${BID_WHITESPACE}*`;
 
-/** 普通竞价成功后的浏览器展示投影；只保留成功提示所需字段。 */
-export interface BidSuccess {
-  readonly leading: boolean;
-  readonly currentPrice: number;
-}
-
-/** 普通竞价表单参数；关闭与成功动作分开表达，避免调用方误用弹窗生命周期。 */
+/** 普通竞价表单参数；已确认的输入交给外壳，关闭只清理当前界面。 */
 export interface BidFormInput {
   readonly lotId: string;
   readonly nextBid: number;
@@ -40,10 +31,8 @@ export interface BidFormInput {
   readonly canSubmit: boolean;
   readonly blocked: boolean;
   readonly blockedReason: string;
-  /** 由弹窗宿主注入的两阶段确认命令 hook；宿主据其 `submitting` 在提交中禁用遮罩/Escape/关闭按钮。 */
   readonly command: BidConfirmCommand;
-  /** 命令成功后把结果交给弹窗宿主：宿主关闭弹窗并显示页面级提示条。 */
-  readonly onSuccess: (success: BidSuccess) => void;
+  readonly onSubmit: (pending: PendingBidCommand) => void;
   readonly onClose: () => void;
 }
 
@@ -140,13 +129,11 @@ function bidForm(input: () => BidFormInput): JSX.Element {
   const amount = createCell(defaultBidUnits(input().nextBid));
   const validation = createCell<string | null>(null);
   const command = () => input().command;
-  const submitting = () => command().submitting();
-  const refreshGeneration = useContext(PublicRefreshGenerationContext);
   const confirming = () => command().confirmation() !== null;
   const biddingOpen = () => input().canBid && input().lotStatus === "live";
   const limitReached = () => input().nextBid > MAX_PUBLIC_BID_AMOUNT;
   const blocked = () => input().blocked || !biddingOpen() || limitReached();
-  const submitDisabled = () => submitting() || blocked() || !input().canSubmit;
+  const submitDisabled = () => blocked() || !input().canSubmit;
   const blockedReason = () => {
     if (!biddingOpen()) {
       return t("bid-unavailable");
@@ -165,7 +152,6 @@ function bidForm(input: () => BidFormInput): JSX.Element {
   return (
     <form
       class="public-auction-bid-form"
-      aria-busy={submitting() ? "true" : "false"}
       onSubmit={(event) => {
         event.preventDefault();
         if (submitDisabled()) {
@@ -180,13 +166,13 @@ function bidForm(input: () => BidFormInput): JSX.Element {
           if (confirmation.amount > MAX_PUBLIC_BID_AMOUNT) {
             currentCommand.cancelConfirmation();
             validation.set(t("bid-invalid-amount"));
-            currentCommand.failure.set(null);
+
             return;
           }
           if (confirmation.amount < current.nextBid) {
             currentCommand.cancelConfirmation();
             validation.set(t("bid-below-minimum", { price: formatCreditAmount(current.nextBid) }));
-            currentCommand.failure.set(null);
+
             return;
           }
           pending = confirmation;
@@ -194,12 +180,12 @@ function bidForm(input: () => BidFormInput): JSX.Element {
           const value = parseBidUnits(amount());
           if (value === null) {
             validation.set(t("bid-invalid-amount"));
-            currentCommand.failure.set(null);
+
             return;
           }
           if (value < current.nextBid) {
             validation.set(t("bid-below-minimum", { price: formatCreditAmount(current.nextBid) }));
-            currentCommand.failure.set(null);
+
             return;
           }
           currentCommand.begin(value.toString(), (commandId) => ({
@@ -211,23 +197,7 @@ function bidForm(input: () => BidFormInput): JSX.Element {
           return;
         }
         validation.set(null);
-        const lotId = current.lotId;
-        currentCommand.submit(
-          pending,
-          (submitted, signal) =>
-            placeBid(submitted.userId, lotId, submitted.amount, submitted.commandId, signal),
-          commandErrorOutcomeUncertain,
-          (result) => {
-            // 先重读权威价格与领先者，再把结果交给宿主；宿主随即关闭弹窗，
-            // 所以这里之后不能再依赖表单自身的状态。
-            refreshGeneration.set(nextRefreshGeneration(refreshGeneration()));
-            current.onSuccess({ leading: result.leading, currentPrice: result.current_price });
-          },
-          () => {
-            // 失败也重读权威价格与领先者。
-            refreshGeneration.set(nextRefreshGeneration(refreshGeneration()));
-          },
-        );
+        current.onSubmit(pending);
       }}
     >
       <Show
@@ -252,7 +222,7 @@ function bidForm(input: () => BidFormInput): JSX.Element {
                   ? "public-bid-amount-hint public-bid-unit-hint public-bid-error"
                   : "public-bid-amount-hint public-bid-unit-hint"
               }
-              disabled={submitting() || blocked()}
+              disabled={blocked()}
               value={amount()}
               ref={focusAmount}
               onInput={(event) => {
@@ -286,17 +256,9 @@ function bidForm(input: () => BidFormInput): JSX.Element {
           {validation()}
         </p>
       </Show>
-      <Show when={command().failure()}>
-        {(error) => (
-          <p class="action-feedback action-feedback--error" role="alert">
-            {bidErrorMessage(error(), input().nextBid)}
-          </p>
-        )}
-      </Show>
       <div class="public-auction-bid-form__actions">
         <button
           type="button"
-          disabled={submitting()}
           onClick={() => {
             if (command().confirmation() !== null) {
               command().cancelConfirmation();
@@ -315,17 +277,9 @@ function bidForm(input: () => BidFormInput): JSX.Element {
           disabled={submitDisabled()}
           aria-describedby={bidSubmitDescriptionIds(confirming(), blocked())}
         >
-          {submitting()
-            ? t("bid-working")
-            : confirming()
-              ? t("bid-confirm-submit")
-              : t("bid-submit")}
+          {confirming() ? t("bid-confirm-submit") : t("bid-submit")}
         </button>
       </div>
     </form>
   );
-}
-
-function nextRefreshGeneration(value: number): number {
-  return value >= Number.MAX_SAFE_INTEGER ? Number.MAX_SAFE_INTEGER : value + 1;
 }

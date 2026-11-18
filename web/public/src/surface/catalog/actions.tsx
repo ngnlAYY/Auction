@@ -23,8 +23,10 @@ import {
 import { fetchMyProxy, type OwnedProxy } from "../../api/account";
 import { PublicCommandOwnerContext, PublicSessionResourceContext } from "..";
 import { PublicRefreshGenerationContext, useBidRefresh } from "../board/refresh";
+import { CompetitionCommandsContext } from "../commands/host";
 import { PublicCommandIdentityContext } from "../commands/pending";
 import { activeOwnedProxy } from "../commands/proxy";
+import { commandEntryMessage } from "../commands/request";
 import { loginHrefForCurrentLocation } from "../session";
 import type { CatalogAction, CommandDialogInput } from "./command-scope";
 import { CommandDialogContext, catalogIdentityMatches } from "./command-scope";
@@ -42,6 +44,41 @@ export function CatalogProxyScope(props: { readonly children: JSX.Element }): JS
       return props.children;
     },
   });
+}
+
+/** 已结束的拍品也能打开未结命令，入口从不启用新的写入。 */
+export function CatalogRecoveryEntry(props: { readonly input: CommandDialogInput }): JSX.Element {
+  const competition = useContext(CompetitionCommandsContext);
+  const dialog = useContext(CommandDialogContext);
+  const pending = () => competition?.current()?.command(props.input.lotId) ?? null;
+  const reasonId = () => `public-auction-command-recovery-${props.input.lotId}`;
+  const label = () => t("command-recovery-open", { code: props.input.lotCode });
+  return (
+    <Show when={dialog !== null && pending()}>
+      {(command) => (
+        <span class="public-auction-catalog__actions-list">
+          <button
+            class="public-auction-catalog__icon-action"
+            type="button"
+            aria-haspopup="dialog"
+            aria-describedby={reasonId()}
+            aria-label={label()}
+            title={label()}
+            onClick={() => {
+              if (dialog?.peek() === null && pending() !== null) {
+                dialog.set({ ...props.input, canBid: false });
+              }
+            }}
+          >
+            <CatalogActionIcon kind="gavel" />
+          </button>
+          <span id={reasonId()} class="public-auction-catalog__leading-reason" role="note">
+            {commandEntryMessage(command())}
+          </span>
+        </span>
+      )}
+    </Show>
+  );
 }
 
 /** 目录行的出价与代理入口；行内按钮与详情抽屉共享同一份资格判定。 */
@@ -69,6 +106,9 @@ export function LiveCatalogActions(props: {
   const confirmedOwner = useContext(PublicCommandOwnerContext);
   const session = useContext(PublicSessionResourceContext);
   const dialog = useContext(CommandDialogContext);
+  const competition = useContext(CompetitionCommandsContext);
+  const pending = () => competition?.current()?.command(props.lotId) ?? null;
+  const hasPending = () => pending() !== null;
   const snapshots = useContext(CatalogProxySnapshotsContext);
   const droppedLot = props.lotId;
   const activeAction = createValueMemo((): CatalogAction | null => {
@@ -139,6 +179,10 @@ export function LiveCatalogActions(props: {
     return proxy.capabilities.can_lower && lowerBound <= MAX_PUBLIC_BID_AMOUNT;
   };
   const actionReason = () => {
+    const command = pending();
+    if (command !== null) {
+      return commandEntryMessage(command);
+    }
     if (!props.canBid) {
       return t("bid-unavailable");
     }
@@ -159,7 +203,9 @@ export function LiveCatalogActions(props: {
   // 领先由装备高亮表达，行自身已带“正在领先”的描述，不再重复说明；超过金额上限等
   // 其余原因必须可见。不显示说明时按钮不引用它。
   const showActionReason = () =>
-    activeProxy() !== null || !(props.canBid && effectiveLeading() && !limitReached());
+    hasPending() ||
+    activeProxy() !== null ||
+    !(props.canBid && effectiveLeading() && !limitReached());
   const actionReasonId = () =>
     showActionReason() ? `public-auction-action-reason-${props.lotId}` : "";
   const input = createValueMemo(
@@ -196,17 +242,19 @@ export function LiveCatalogActions(props: {
     },
   );
   // 行内三个分支与抽屉入口共用同一组判定：已登录走命令弹窗，匿名且可出价走登录链接。
-  const commandEntry = () => props.authenticated && props.canBid;
+  const commandEntry = () => hasPending() || (props.authenticated && props.canBid);
   const loginEntry = () => !commandEntry() && props.canBid && props.sessionReady && !limitReached();
-  const bidDisabled = () => !props.canBid || ordinaryBlocked();
+  const bidDisabled = () => !hasPending() && (!props.canBid || ordinaryBlocked());
   const detailProjection = createValueMemo((): CatalogDetailBid => {
     if (commandEntry()) {
-      const entryAction = detailEntryAction(
-        bidDisabled(),
-        props.canBid,
-        effectiveLeading(),
-        activeProxy() !== null,
-      );
+      const entryAction = hasPending()
+        ? "bid"
+        : detailEntryAction(
+            bidDisabled(),
+            props.canBid,
+            effectiveLeading(),
+            activeProxy() !== null,
+          );
       const detailInput = {
         ...input(),
         action: entryAction ?? "bid",
@@ -243,8 +291,6 @@ export function LiveCatalogActions(props: {
     detailSlot.set({ kind: "unavailable" });
   });
   const bidLabel = () => t("catalog-bid-lot", { code: props.lotCode });
-  const bidInput = () => input();
-
   return (
     <span class="public-auction-catalog__actions-list">
       {/* 目录行使用「查看 / 出价 / 标记」三个图标：查看入口属于行（任何阶段都有），
@@ -260,11 +306,12 @@ export function LiveCatalogActions(props: {
             // 图标按钮的可访问名称带拍品编号，逐行可区分；悬停提示保持简短动作名。
             aria-label={bidLabel()}
             title={t("catalog-bid")}
-            aria-describedby={bidDisabled() ? actionReasonId() : ""}
+            aria-describedby={bidDisabled() || hasPending() ? actionReasonId() : ""}
             onClick={() => {
               // 已打开的模态命令不接受另一个入口替换负载或目标。
-              if (dialog !== null && dialog.peek() === null) {
-                dialog.set({ ...bidInput(), action: "bid" });
+              if (!bidDisabled() && dialog !== null && dialog.peek() === null) {
+                // 恢复视图只看外壳记录。放弃后直接沿用本行的最新资格。
+                dialog.set(input());
               }
             }}
           >
@@ -282,7 +329,9 @@ export function LiveCatalogActions(props: {
           </Link>
         </Match>
       </Switch>
-      <Show when={showActionReason() && (ordinaryBlocked() || !proxyActionEnabled())}>
+      <Show
+        when={showActionReason() && (hasPending() || ordinaryBlocked() || !proxyActionEnabled())}
+      >
         <span id={actionReasonId()} class="public-auction-catalog__leading-reason" role="note">
           {actionReason()}
         </span>

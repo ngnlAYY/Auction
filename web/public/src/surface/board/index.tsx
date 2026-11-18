@@ -8,7 +8,7 @@ import { structuralEquals } from "@auction/web-shared/reactive/equality";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import { createTaskResource } from "@auction/web-shared/reactive/resource";
 import { err, ok } from "@auction/web-shared/result";
-import { Link } from "@auction/web-shared/router";
+import { Link, useRouter } from "@auction/web-shared/router";
 import { useAppBootReady } from "@auction/web-shared/ui/bootstrap";
 import { AsyncState } from "@auction/web-shared/ui/components/async-state";
 import { t } from "@auction/web-shared/ui/i18n";
@@ -29,9 +29,10 @@ import { fetchHistoricalAuction } from "../../api/queries/current";
 import { PublicCommandOwnerContext, PublicSessionResourceContext } from "..";
 import { CatalogProxyScope } from "../catalog/actions";
 import { CatalogCommandScope } from "../catalog/command-scope";
-import { LotViewRequestContext } from "../catalog/detail/deep-link";
+import { disposeLotView, LotViewRequestContext } from "../catalog/detail/deep-link";
 import { CatalogDetailHost } from "../catalog/detail/drawer";
 import {
+  BoardLotDetailFailure,
   LotDetailLookupContext,
   LotDetailLookupHost,
   useLotDetailLookup,
@@ -68,12 +69,13 @@ export function AuctionIndex(): JSX.Element {
   const lookup = useLotDetailLookup();
   const viewRequest = useContext(LotViewRequestContext);
   onCleanup(() => {
-    // 离开看板即放弃尚未处置的直达请求，之后再回到看板不会突然弹出抽屉。
+    // 即使 replace 仍在同一历史条目，离开看板也放弃尚未交付的请求。
     viewRequest.set(null);
   });
   return (
     <LotDetailLookupContext value={lookup}>
       <AuctionBoard />
+      <BoardLotDetailFailure lookup={lookup} />
       <LotDetailLookupHost lookup={lookup} />
     </LotDetailLookupContext>
   );
@@ -263,11 +265,14 @@ export function mountAuctionBoard(
     children: (userId) =>
       createComponent(CatalogCommandScope, {
         userId: untrack(userId),
+        get auction() {
+          return auction();
+        },
         get auctionInvalid() {
           return invalid();
         },
         get children() {
-          // 目录分支可以卸载，身份宿主须继续持有已发出的命令与恢复入口。
+          // 目录分支可以卸载，页面宿主只保留未发送草稿与抽屉。
           return createComponent(View, {
             userId: untrack(userId),
             get invalid() {
@@ -298,6 +303,41 @@ export function mountAuctionBoard(
 }
 
 function AuctionBoardView(props: AuctionBoardViewProps): JSX.Element {
+  const router = useRouter();
+  const request = useContext(LotViewRequestContext);
+  const lookup = useContext(LotDetailLookupContext);
+  createEffect(
+    () => {
+      const queued = request();
+      if (queued === null || queued.entryKey !== router.currentEntryKey()) return null;
+      const ready = props.catalog.readySnapshot();
+      const reading =
+        !props.invalid &&
+        !props.failed &&
+        !props.empty &&
+        (props.auction === null || (ready === null && props.catalog.reading()));
+      const disposition = disposeLotView(
+        queued.target,
+        props.query().world ?? "main",
+        props.auction,
+        reading,
+        ready?.rows.map((row) => row.lotId) ?? [],
+      );
+      return { queued, disposition };
+    },
+    (delivery) => {
+      if (delivery === null) return;
+      const { queued, disposition } = delivery;
+      if (request.peek() !== queued || queued.entryKey !== untrack(router.currentEntryKey)) return;
+      // 空场和最终读取失败都在本层收口，只有对齐的目录行允许接手请求。
+      if (disposition === "row" && !queued.target.rowReady) {
+        request.set({ ...queued, target: { ...queued.target, rowReady: true } });
+      } else if (disposition === "read_only") {
+        request.set(null);
+        lookup?.view(queued.target);
+      }
+    },
+  );
   return (
     <Switch
       fallback={

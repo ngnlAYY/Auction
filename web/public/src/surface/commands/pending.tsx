@@ -1,4 +1,4 @@
-// 竞价命令组件共用的短生命周期状态和安全错误映射。
+// 竞价表单的未发送确认输入和命令回执的安全错误映射。
 
 import { MAX_PUBLIC_BID_AMOUNT } from "@auction/contracts/dto/public/commands";
 import type { ConfirmCommand } from "@auction/web-shared/net/commands";
@@ -45,14 +45,20 @@ export interface PublicCommandIdentity {
 /** 当前身份宿主的固定用户；发送与重试不得替换成新会话的用户。 */
 export const PublicCommandIdentityContext = createContext<PublicCommandIdentity>();
 
-/** 普通竞价的两阶段确认命令 hook。由弹窗宿主持有，表单经 prop 共享。 */
-export type BidConfirmCommand = ConfirmCommand<PendingBidCommand, CommandError>;
+/** 表单只冻结确认草稿；实际写入由外壳单独持有。 */
+type CommandDraft<P> = Pick<
+  ConfirmCommand<P, CommandError>,
+  "begin" | "confirmation" | "cancelConfirmation" | "reset"
+>;
+
+/** 普通竞价的两阶段确认草稿。 */
+export type BidConfirmCommand = CommandDraft<PendingBidCommand>;
 
 /** 代理授权（创建/降低上限各持有一份实例）的两阶段确认命令 hook。 */
-export type ProxyConfirmCommand = ConfirmCommand<PendingProxyCommand, CommandError>;
+export type ProxyConfirmCommand = CommandDraft<PendingProxyCommand>;
 
 /** 二次确认面板的公共骨架：类型与金额两行，加约束性命令说明。
- * 面板只负责展示；命令冻结、校验与提交仍由各表单持有，组件替换不能取消已提交命令。
+ * 表单冻结未发送的确认输入，发送后的命令归外壳。
  * 文案通过普通值 props 传入，由本组件的 JSX 读取，语言或确认数据变化时同步更新。 */
 export function ConfirmPanel(props: {
   readonly id: string;

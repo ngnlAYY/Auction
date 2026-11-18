@@ -10,9 +10,10 @@ import { For, Show } from "solid-js";
 
 import type { CatalogRow } from "../../../api/model";
 import { LotWatchButton, useLotWatched } from "../../watches/control";
-import { LiveCatalogActions } from "../actions";
+import { CatalogRecoveryEntry, LiveCatalogActions } from "../actions";
 import type { CatalogLayout, CatalogVisibility } from "../columns/state";
 import { catalogVisibilityContains, catalogVisibilityWidths } from "../columns/state";
+import { recoveryDialogInput } from "../command-scope";
 import { CatalogViewButton, useCatalogDetailEntry } from "../detail/entry";
 import {
   type CountdownDisplay,
@@ -311,7 +312,10 @@ export function LiveCatalogRow(props: {
           }
         >
           <CatalogViewButton lotCode={props.row.code} onOpen={() => detail.open()} />
-          <Show when={commands()}>
+          <Show
+            when={commands()}
+            fallback={<CatalogRecoveryEntry input={recoveryDialogInput(props.row)} />}
+          >
             <LiveCatalogActions
               lotId={props.row.lotId}
               lotCode={props.row.code}

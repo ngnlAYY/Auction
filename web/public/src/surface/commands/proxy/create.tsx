@@ -1,7 +1,6 @@
 // 代理授权创建表单及其提交状态。
 
 import { MAX_PUBLIC_BID_AMOUNT } from "@auction/contracts/dto/public/commands";
-import type { Cell } from "@auction/web-shared/reactive/cell";
 import { createCell } from "@auction/web-shared/reactive/cell";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import { formatCreditAmount } from "@auction/web-shared/ui/format";
@@ -9,12 +8,6 @@ import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
 import { onSettled, Show, useContext } from "solid-js";
 
-import {
-  commandErrorOutcomeUncertain,
-  createProxyAuthorization,
-  type ProxyCommandAuthorization,
-} from "../../../api/commands";
-import { PublicRefreshGenerationContext } from "../../board/refresh";
 import { parseCreditAmount } from "../../catalog/presentation";
 import {
   amountHint,
@@ -23,7 +16,6 @@ import {
   type PendingProxyCommand,
   type ProxyConfirmCommand,
   PublicCommandIdentityContext,
-  proxyErrorMessage,
 } from "../pending";
 
 /** 代理授权创建表单；新建模式与上限只按冻结策略和当前 lot 状态计算。 */
@@ -37,11 +29,9 @@ export function ProxyCreateForm(props: {
   readonly canSubmit: boolean;
   readonly blocked: boolean;
   readonly blockedReason: string;
-  readonly savedAuthorization: Cell<ProxyCommandAuthorization | null>;
   /** 由弹窗宿主注入的两阶段确认命令 hook（创建实例；见 ProxyFormInput）。 */
   readonly command: ProxyConfirmCommand;
-  /** 另一代理命令的在飞状态；实时快照切换表单后仍必须保持同一宿主互斥。 */
-  readonly peerSubmitting: Cell<boolean>;
+  readonly onSubmit: (pending: PendingProxyCommand) => void;
   readonly onClose: () => void;
 }): JSX.Element {
   const identity = useContext(PublicCommandIdentityContext);
@@ -59,13 +49,11 @@ export function ProxyCreateForm(props: {
   // 策略未知时整张表单禁用（见下方 `blocked`），占位选项不会被提交。
   const mode = createCell(initialMode() ?? "fast");
   const validation = createCell<string | null>(null);
-  const submitting = () => props.command.submitting() || props.peerSubmitting();
-  const refreshGeneration = useContext(PublicRefreshGenerationContext);
   // 冻结策略的默认模式未知（只有往期目录拼装的已结算场次）时不提供新建，不替玩家假设模式。
   const biddingOpen = () => props.lotStatus === "live" && initialMode() !== null;
   const limitReached = () => props.initialMinimum > MAX_PUBLIC_BID_AMOUNT;
   const blocked = () => props.blocked || !biddingOpen() || limitReached();
-  const submitDisabled = () => submitting() || blocked() || !props.canSubmit;
+  const submitDisabled = () => blocked() || !props.canSubmit;
   const blockedReason = () => {
     if (!biddingOpen()) {
       return t("bid-unavailable");
@@ -94,7 +82,7 @@ export function ProxyCreateForm(props: {
   };
 
   return (
-    <section class="public-auction-bid-form" aria-busy={submitting() ? "true" : "false"}>
+    <section class="public-auction-bid-form">
       <form
         onSubmit={(event) => {
           event.preventDefault();
@@ -112,7 +100,7 @@ export function ProxyCreateForm(props: {
             if (currentConfirmation.amount > MAX_PUBLIC_BID_AMOUNT) {
               currentCommand.cancelConfirmation();
               validation.set(t("proxy-invalid-amount"));
-              currentCommand.failure.set(null);
+
               return;
             }
             if (currentConfirmation.amount < props.initialMinimum) {
@@ -122,13 +110,13 @@ export function ProxyCreateForm(props: {
                   price: formatCreditAmount(props.initialMinimum),
                 }),
               );
-              currentCommand.failure.set(null);
+
               return;
             }
             if (currentConfirmation.mode === "slow" && !props.allowSlow) {
               currentCommand.cancelConfirmation();
               validation.set(t("proxy-slow-forbidden"));
-              currentCommand.failure.set(null);
+
               return;
             }
             pending = currentConfirmation;
@@ -136,7 +124,7 @@ export function ProxyCreateForm(props: {
             const value = parseCreditAmount(maximumAmount());
             if (value === null) {
               validation.set(t("proxy-invalid-amount"));
-              currentCommand.failure.set(null);
+
               return;
             }
             if (value < props.initialMinimum) {
@@ -145,13 +133,13 @@ export function ProxyCreateForm(props: {
                   price: formatCreditAmount(props.initialMinimum),
                 }),
               );
-              currentCommand.failure.set(null);
+
               return;
             }
             const selectedMode = mode();
             if (selectedMode === "slow" && !props.allowSlow) {
               validation.set(t("proxy-slow-forbidden"));
-              currentCommand.failure.set(null);
+
               return;
             }
             currentCommand.begin(`${value}:${selectedMode}`, (commandId) => ({
@@ -169,22 +157,7 @@ export function ProxyCreateForm(props: {
           if (pending.kind !== "create") {
             return;
           }
-          const { userId, amount, mode: pendingMode, commandId } = pending;
-          const lotId = props.lotId;
-          currentCommand.submit(
-            pending,
-            (_submitted, signal) =>
-              createProxyAuthorization(userId, lotId, amount, pendingMode, commandId, signal),
-            commandErrorOutcomeUncertain,
-            (authorization) => {
-              props.savedAuthorization.set(authorization);
-              refreshGeneration.set(nextRefreshGeneration(refreshGeneration()));
-            },
-            () => {
-              // 失败也重读权威价格与代理状态。
-              refreshGeneration.set(nextRefreshGeneration(refreshGeneration()));
-            },
-          );
+          props.onSubmit(pending);
         }}
       >
         <Show
@@ -210,7 +183,7 @@ export function ProxyCreateForm(props: {
                     ? "public-proxy-amount-hint public-proxy-error"
                     : "public-proxy-amount-hint"
                 }
-                disabled={submitting() || blocked()}
+                disabled={blocked()}
                 value={maximumAmount()}
                 ref={focusMaximum}
                 onInput={(event) => {
@@ -221,7 +194,7 @@ export function ProxyCreateForm(props: {
               {amountHint(maximumAmount(), "public-proxy-amount-hint", "proxy-invalid-amount")}
               <p class="public-auction-bid-form__meta">{t("proxy-maximum-hint")}</p>
               <p class="public-auction-bid-form__hint">{t("proxy-shorthand-hint")}</p>
-              <fieldset disabled={submitting() || blocked()}>
+              <fieldset disabled={blocked()}>
                 <legend>{t("proxy-create-mode-label")}</legend>
                 <div class="public-auction-bid-form__mode">
                   <input
@@ -282,17 +255,9 @@ export function ProxyCreateForm(props: {
             {validation()}
           </p>
         </Show>
-        <Show when={props.command.failure()}>
-          {(error) => (
-            <p class="action-feedback action-feedback--error" role="alert">
-              {proxyErrorMessage(error(), props.initialMinimum)}
-            </p>
-          )}
-        </Show>
         <div class="public-auction-bid-form__actions">
           <button
             type="button"
-            disabled={submitting()}
             onClick={() => {
               if (props.command.confirmation() !== null) {
                 props.command.cancelConfirmation();
@@ -311,11 +276,7 @@ export function ProxyCreateForm(props: {
             disabled={submitDisabled()}
             aria-describedby={confirming() ? confirmationId() : ""}
           >
-            {submitting()
-              ? t("proxy-working")
-              : confirming()
-                ? t("proxy-create-confirm-submit")
-                : t("proxy-create-submit")}
+            {confirming() ? t("proxy-create-confirm-submit") : t("proxy-create-submit")}
           </button>
         </div>
       </form>
@@ -341,8 +302,4 @@ export function initialProxyMode(
     default:
       return null;
   }
-}
-
-function nextRefreshGeneration(value: number): number {
-  return value >= Number.MAX_SAFE_INTEGER ? Number.MAX_SAFE_INTEGER : value + 1;
 }

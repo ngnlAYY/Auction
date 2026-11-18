@@ -230,12 +230,20 @@ export function sendGetConditional(
   );
 }
 
-/** 在响应头到达时校时，并在共享总预算内完整读取命令响应正文。 */
+/** 在响应头到达时校时并通知调用方，再在共享预算内读完正文。 */
 export function sendRequest(
   build: TransportRequestBuilder,
   signal: AbortSignal,
+  observeStatus?: (status: number) => void,
 ): Promise<Result<TransportResponse, TransportError>> {
-  return sendRequestObserved(build, observeResponseDate, signal);
+  return sendRequestObserved(
+    build,
+    (response) => {
+      observeResponseDate(response);
+      observeStatus?.(response.status);
+    },
+    signal,
+  );
 }
 
 /** 解析 IMF-fixdate；形状、取值范围或星期与日期不符时返回 `null`。 */

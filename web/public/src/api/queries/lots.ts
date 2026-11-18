@@ -15,11 +15,12 @@ const PUBLIC_QUERY_RETRY_DELAY_MILLIS = 1_000;
 /** lot 外壳/列表的缓存投影标识。 */
 const LOT_ENVELOPE_CACHE_TYPE = "public_lot_envelope";
 
-/** lot 详情读取失败。详情只在页内抽屉展示：失败统一提示并可重试，不区分状态码，也不把服务端
- * message、响应正文或底层网络错误带进组件。 */
-export type LotDetailFetchError = { readonly kind: "lot_detail_fetch_error" };
+/** 详情只区分 HTTP 明确不存在与暂时读不到，不带入错误正文。 */
+export type LotDetailFetchError = {
+  readonly kind: "lot_detail_fetch_error" | "not_found";
+};
 
-/** 唯一的 lot 详情失败值；组件只读取 `Result.ok` 的失败分支。 */
+/** 暂时未取得有效详情。 */
 export const LOT_DETAIL_FETCH_ERROR: LotDetailFetchError = { kind: "lot_detail_fetch_error" };
 
 /** 读取当前场次目录的一页；首次没拿到权威值时按旧实现等待一秒后再读一次。 */
@@ -160,7 +161,9 @@ export async function fetchLotDetail(
         case "failure":
           return failureOutcome<PublicLotEnvelopeResponse, LotDetailFetchError>(
             outcome.status,
-            LOT_DETAIL_FETCH_ERROR,
+            outcome.status === 404 || outcome.status === 410
+              ? { kind: "not_found" }
+              : LOT_DETAIL_FETCH_ERROR,
           );
         case "success": {
           const decoded = decodeLotDetail(outcome.response, null, lotId);

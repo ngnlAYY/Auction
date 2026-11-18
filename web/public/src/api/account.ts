@@ -128,7 +128,7 @@ async function accountResponse(
   if (!responseOk(response)) {
     const status = response.status;
     const code = decodeErrorCode(response);
-    observePublicSessionFailure(status, code);
+    observePublicSessionFailure(status, code, userId);
     return err(code);
   }
   return ok(response);

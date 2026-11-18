@@ -7,7 +7,14 @@ import { createRouter, RouterContext } from "@auction/web-shared/router";
 import { installFakeWindow } from "@auction/web-shared/router/test-window";
 import { type LocaleSession, LocaleSessionContext } from "@auction/web-shared/ui/i18n";
 import { transform } from "@solidjs/compiler";
-import { children, createEffect, createRoot, flush, createComponent as mount } from "solid-js";
+import {
+  children,
+  createEffect,
+  createRoot,
+  type Element,
+  flush,
+  createComponent as mount,
+} from "solid-js";
 import { createComponent, findElement, TestElement } from "../catalog/command-scope-fixture.test";
 import { InitialPublicLocationContext, initialPublicLocation } from "../query";
 import { PUBLIC_ROUTES } from "../router/route";
@@ -27,10 +34,31 @@ const SOURCES = new Set(
     "../presentation/mobile.tsx",
     "../session/index.ts",
     "../session/menu.tsx",
+    "../router/index.tsx",
     "../router/route.ts",
     "../board/index.tsx",
+    "../board/data.tsx",
     "../board/world.tsx",
+    "../catalog/actions.tsx",
     "../catalog/command-scope.tsx",
+    "../catalog/detail/drawer.tsx",
+    "../catalog/detail/entry.tsx",
+    "../catalog/detail/lookup.tsx",
+    "../catalog/detail/deep-link.tsx",
+    "../catalog/tables/index.tsx",
+    "../catalog/tables/live.tsx",
+    "../catalog/toast.tsx",
+    "../commands/bid.tsx",
+    "../commands/notice.tsx",
+    "../commands/pending.tsx",
+    "../commands/retry.tsx",
+    "../commands/proxy/index.tsx",
+    "../commands/proxy/create.tsx",
+    "../commands/proxy/authorization.tsx",
+    "../session/login.tsx",
+    "../watches/index.tsx",
+    "../watches/commands.tsx",
+    "../watches/control.tsx",
     "../account/index.tsx",
     "../account/watches/index.tsx",
     "../reads/history/index.tsx",
@@ -38,6 +66,8 @@ const SOURCES = new Set(
     "../../../../shared/src/router/index.tsx",
     "../../../../shared/src/router/link.tsx",
     "../../../../shared/src/router/outlet.tsx",
+    "../../../../shared/src/ui/components/async-state.tsx",
+    "../../../../shared/src/ui/components/dialog.tsx",
   ].map((path) => resolve(import.meta.dir, path)),
 );
 const stripTypes = new Bun.Transpiler({ loader: "ts" });
@@ -75,6 +105,10 @@ export class DomElement extends TestElement {
     const value = this.attributes[key];
     return typeof value === "string" ? value : null;
   }
+
+  focus(): void {
+    this.attributes.focused = true;
+  }
 }
 
 export function createElement(tag: string, attributes: Record<string, unknown> = {}): DomElement {
@@ -95,10 +129,37 @@ export function spread(element: DomElement, sources: readonly Record<string, unk
 }
 
 const shellModule = `${NAMESPACE}:${resolve(import.meta.dir, "index.tsx")}`;
+const appModule = `${NAMESPACE}:${resolve(import.meta.dir, "../router/index.tsx")}`;
+const routeModule = `${NAMESPACE}:${resolve(import.meta.dir, "../router/route.ts")}`;
 
-/** 实际 PublicShell 及其 RouteOutlet 共用同一窗口替身和路由。 */
-export async function mountNavigation(initialUrl: string) {
-  const { PublicShell }: typeof import(".") = await import(shellModule);
+/** 延迟生产详情分块的交付，独立于其他用例已加载的模块和路由缓存。 */
+export async function deferLotPage() {
+  const { PUBLIC_PAGES }: typeof import("../router/route") = await import(routeModule);
+  const page = PUBLIC_PAGES.LotDetail;
+  if (page?.kind !== "lazy") throw new Error("拍品详情必须经按需路由加载");
+  const started = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  Object.assign(PUBLIC_PAGES, {
+    LotDetail: {
+      kind: page.kind,
+      async load() {
+        started.resolve();
+        await release.promise;
+        return page.load();
+      },
+    },
+  });
+  return {
+    started: started.promise,
+    release: release.resolve,
+    restore() {
+      release.resolve();
+      Object.assign(PUBLIC_PAGES, { LotDetail: page });
+    },
+  };
+}
+
+function installNavigationWindow(initialUrl: string) {
   const installed = installFakeWindow(initialUrl);
   const storage = new Map<string, string>();
   Object.assign(installed.fake, {
@@ -106,6 +167,7 @@ export async function mountNavigation(initialUrl: string) {
     localStorage: {
       getItem: (key: string) => storage.get(key) ?? null,
       setItem: (key: string, value: string) => storage.set(key, value),
+      removeItem: (key: string) => storage.delete(key),
     },
     setInterval: () => 0,
     clearInterval() {},
@@ -123,6 +185,69 @@ export async function mountNavigation(initialUrl: string) {
       },
     },
   });
+  return {
+    fake: installed.fake,
+    storage,
+    restore() {
+      installed.restore();
+      if (navigatorDescriptor === undefined) Reflect.deleteProperty(globalThis, "navigator");
+      else Object.defineProperty(globalThis, "navigator", navigatorDescriptor);
+    },
+  };
+}
+
+function observeNodes(render: () => Element) {
+  const tree = children(render);
+  // 追踪实际挂载的子树，模拟 DOM 插槽消费动态子节点。
+  createEffect(
+    () => findElement(tree(), () => false),
+    () => {},
+  );
+  flush();
+  return (match: (element: DomElement) => boolean, parent?: DomElement): DomElement | null => {
+    const node = findElement(
+      parent ?? tree(),
+      (element) => element instanceof DomElement && match(element),
+    );
+    return node instanceof DomElement ? node : null;
+  };
+}
+
+/** 挂载生产入口，历史替身驱动真实路由匹配与兜底。 */
+export async function mountPublicApp(initialUrl: string) {
+  const { App }: typeof import("../router") = await import(appModule);
+  const installed = installNavigationWindow(initialUrl);
+  const mounted = createRoot((dispose) => ({ dispose, find: observeNodes(() => mount(App, {})) }));
+  return {
+    find: mounted.find,
+    storage: installed.storage,
+    location: installed.fake.location,
+    go(href: string) {
+      installed.fake.history.pushState(null, "", href);
+      installed.fake.dispatchEvent(new Event("popstate"));
+      flush();
+    },
+    back() {
+      installed.fake.history.back();
+      flush();
+    },
+    forward() {
+      installed.fake.history.forward();
+      flush();
+    },
+    focus: () => installed.fake.dispatchEvent(new Event("focus")),
+    dispose() {
+      mounted.dispose();
+      flush();
+      installed.restore();
+    },
+  };
+}
+
+/** 实际 PublicShell 及其 RouteOutlet 共用同一窗口替身和路由。 */
+export async function mountNavigation(initialUrl: string) {
+  const { PublicShell }: typeof import(".") = await import(shellModule);
+  const installed = installNavigationWindow(initialUrl);
   const initial = initialPublicLocation();
   const mounted = createRoot((dispose) => {
     const router = createRouter({ routes: PUBLIC_ROUTES });
@@ -135,7 +260,7 @@ export async function mountNavigation(initialUrl: string) {
       switch() {},
     };
     const theme = useThemeEffects();
-    const tree = children(() =>
+    const find = observeNodes(() =>
       mount(LocaleSessionContext, {
         value: locale,
         get children() {
@@ -158,36 +283,17 @@ export async function mountNavigation(initialUrl: string) {
         },
       }),
     );
-    // 追踪实际挂载的子树，模拟 DOM 插槽消费动态子节点。
-    createEffect(
-      () => findElement(tree(), () => false),
-      () => {},
-    );
-    flush();
     initial.expire();
-    return { dispose, router, tree };
+    return { dispose, router, find };
   });
-  const find = (
-    match: (element: DomElement) => boolean,
-    parent?: DomElement,
-  ): DomElement | null => {
-    const node = findElement(
-      parent ?? mounted.tree(),
-      (element) => element instanceof DomElement && match(element),
-    );
-    return node instanceof DomElement ? node : null;
-  };
   return {
     ...mounted,
     location: installed.fake.location,
-    find,
     focus: () => installed.fake.dispatchEvent(new Event("focus")),
     dispose() {
       mounted.dispose();
       flush();
       installed.restore();
-      if (navigatorDescriptor === undefined) Reflect.deleteProperty(globalThis, "navigator");
-      else Object.defineProperty(globalThis, "navigator", navigatorDescriptor);
     },
   };
 }

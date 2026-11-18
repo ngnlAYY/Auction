@@ -95,7 +95,7 @@ export async function setLotWatch(
   }
   const status = response.value.status;
   if (!responseOk(response.value)) {
-    return err(failure(decodeErrorCode(response.value), status));
+    return err(failure(decodeErrorCode(response.value), status, userId));
   }
   const result = decodeIdentitySuccess(response.value, PublicSetLotWatchResponseSchema, (value) => {
     const envelope = object(value);
@@ -165,7 +165,7 @@ function responseOk(response: TransportResponse): boolean {
   return response.status >= 200 && response.status <= 299;
 }
 
-function failure(code: string, status: number): CommandError {
-  observePublicSessionFailure(status, code);
+function failure(code: string, status: number, expectedUser?: string): CommandError {
+  observePublicSessionFailure(status, code, expectedUser);
   return { code, status };
 }

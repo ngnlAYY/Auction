@@ -1,5 +1,5 @@
-// 路由对象与上下文：维护当前匹配和实际地址快照，并提供 push/replace/goBack。
-// 查询写入同步实际地址快照，路由导航和历史遍历另行更新路由匹配。
+// 路由对象与上下文：维护当前匹配、地址快照与历史条目标识，并提供 push/replace/goBack。
+// 查询写入同步地址和条目标识，路由导航和历史遍历另行更新路由匹配。
 
 import { createContext, onCleanup, useContext } from "solid-js";
 
@@ -18,6 +18,8 @@ export interface Router {
    * 路由初始化、浏览器导航以及成功的路由和查询写入都会刷新本值。
    */
   currentLocationString(): string;
+  /** 响应式读取当前历史条目标识；replace 保留标识，push 分配新标识。 */
+  currentEntryKey(): string;
   /** 新增历史记录并同步当前路由。 */
   push(href: string): void;
   /** 替换当前历史记录并同步当前路由。 */
@@ -72,16 +74,22 @@ export function createRouter(options: RouterOptions): Router {
   }
   const currentMatch = createCell(resolveRoute(routes, browserHistory.currentRoute()).match);
   const currentLocation = createCell(browserHistory.currentRoute());
+  const currentEntryKey = createCell(browserHistory.currentEntryKey());
+  const syncLocation = (location = browserHistory.currentRoute()): void => {
+    const entryKey = browserHistory.currentEntryKey();
+    if (entryKey !== currentEntryKey.peek()) {
+      currentEntryKey.set(entryKey);
+    }
+    currentLocation.set(location);
+  };
   // 路由和查询共用写入通知，查询变化时可保留已经挂载的页面。
-  const stopWatchingLocation = watchLocationWritten(() => {
-    currentLocation.set(browserHistory.currentRoute());
-  });
+  const stopWatchingLocation = watchLocationWritten(syncLocation);
   onCleanup(stopWatchingLocation);
 
   const updateFromLocation = (): void => {
     const location = browserHistory.currentRoute();
     currentMatch.set(resolveRoute(routes, location).match);
-    currentLocation.set(location);
+    syncLocation(location);
   };
 
   const navigate = (href: string, mode: "push" | "replace"): void => {
@@ -97,6 +105,7 @@ export function createRouter(options: RouterOptions): Router {
   return {
     current: () => currentMatch(),
     currentLocationString: () => currentLocation(),
+    currentEntryKey: () => currentEntryKey(),
     push: (href) => navigate(href, "push"),
     replace: (href) => navigate(href, "replace"),
     goBack: () => browserHistory.goBack(),

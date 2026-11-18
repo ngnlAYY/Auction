@@ -1,7 +1,6 @@
 // 已有代理授权的降低上限表单及其提交状态。
 
 import { MAX_PUBLIC_BID_AMOUNT } from "@auction/contracts/dto/public/commands";
-import type { Cell } from "@auction/web-shared/reactive/cell";
 import { createCell } from "@auction/web-shared/reactive/cell";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import { formatCreditAmount } from "@auction/web-shared/ui/format";
@@ -10,12 +9,6 @@ import type { JSX } from "@solidjs/web";
 import { onSettled, Show, useContext } from "solid-js";
 
 import type { OwnedProxy } from "../../../api/account";
-import {
-  commandErrorOutcomeUncertain,
-  lowerProxyAuthorization,
-  type ProxyCommandAuthorization,
-} from "../../../api/commands";
-import { PublicRefreshGenerationContext } from "../../board/refresh";
 import { parseCreditAmount } from "../../catalog/presentation";
 import { proxyStatusLabel } from "../../proxy";
 import {
@@ -25,7 +18,6 @@ import {
   type PendingProxyCommand,
   type ProxyConfirmCommand,
   PublicCommandIdentityContext,
-  proxyErrorMessage,
 } from "../pending";
 
 /** 已有代理授权的降低上限表单；授权标识与下限由服务端投影决定。 */
@@ -36,11 +28,9 @@ export function ProxyAuthorizationForm(props: {
   readonly lotStatus: string;
   readonly proxy: OwnedProxy;
   readonly canSubmit: boolean;
-  readonly savedAuthorization: Cell<ProxyCommandAuthorization | null>;
   /** 由弹窗宿主注入的两阶段确认命令 hook（降低上限实例；见 ProxyFormInput）。 */
   readonly command: ProxyConfirmCommand;
-  /** 创建请求未完成时，即使快照已显示活动授权，也不能开始第二个降低命令。 */
-  readonly peerSubmitting: Cell<boolean>;
+  readonly onSubmit: (pending: PendingProxyCommand) => void;
   readonly onClose: () => void;
 }): JSX.Element {
   const identity = useContext(PublicCommandIdentityContext);
@@ -50,12 +40,10 @@ export function ProxyAuthorizationForm(props: {
   );
   const maximumAmount = createCell(initialProxyAmount(lowerBound()));
   const validation = createCell<string | null>(null);
-  const submitting = () => props.command.submitting() || props.peerSubmitting();
-  const refreshGeneration = useContext(PublicRefreshGenerationContext);
   const biddingOpen = () => props.lotStatus === "live";
   const limitReached = () => lowerBound() > MAX_PUBLIC_BID_AMOUNT;
   const canLower = () => props.proxy.capabilities.can_lower && biddingOpen() && !limitReached();
-  const submitDisabled = () => submitting() || !canLower() || !props.canSubmit;
+  const submitDisabled = () => !canLower() || !props.canSubmit;
   const blockedReason = () => {
     if (!biddingOpen()) {
       return t("bid-unavailable");
@@ -82,7 +70,7 @@ export function ProxyAuthorizationForm(props: {
   };
 
   return (
-    <section class="public-auction-bid-form" aria-busy={submitting() ? "true" : "false"}>
+    <section class="public-auction-bid-form">
       <h2>{t("proxy-current")}</h2>
       <p>{t("proxy-status", { status: proxyStatusLabel(props.proxy.status) })}</p>
       <p>{t("proxy-maximum", { maximum: formatCreditAmount(props.proxy.maximum_amount) })}</p>
@@ -111,7 +99,7 @@ export function ProxyAuthorizationForm(props: {
               if (currentConfirmation.amount > MAX_PUBLIC_BID_AMOUNT) {
                 currentCommand.cancelConfirmation();
                 validation.set(t("proxy-invalid-amount"));
-                currentCommand.failure.set(null);
+
                 return;
               }
               if (currentConfirmation.authorizationId !== props.proxy.authorization_id) {
@@ -123,7 +111,7 @@ export function ProxyAuthorizationForm(props: {
               if (currentConfirmation.amount >= props.proxy.maximum_amount) {
                 currentCommand.cancelConfirmation();
                 validation.set(t("proxy-not-lower"));
-                currentCommand.failure.set(null);
+
                 return;
               }
               if (currentConfirmation.amount < lowerBound()) {
@@ -133,7 +121,7 @@ export function ProxyAuthorizationForm(props: {
                     price: formatCreditAmount(lowerBound()),
                   }),
                 );
-                currentCommand.failure.set(null);
+
                 return;
               }
               pending = currentConfirmation;
@@ -141,12 +129,12 @@ export function ProxyAuthorizationForm(props: {
               const value = parseCreditAmount(maximumAmount());
               if (value === null) {
                 validation.set(t("proxy-invalid-amount"));
-                currentCommand.failure.set(null);
+
                 return;
               }
               if (value >= props.proxy.maximum_amount) {
                 validation.set(t("proxy-not-lower"));
-                currentCommand.failure.set(null);
+
                 return;
               }
               if (value < lowerBound()) {
@@ -155,7 +143,7 @@ export function ProxyAuthorizationForm(props: {
                     price: formatCreditAmount(lowerBound()),
                   }),
                 );
-                currentCommand.failure.set(null);
+
                 return;
               }
               const authorizationId = props.proxy.authorization_id;
@@ -174,22 +162,7 @@ export function ProxyAuthorizationForm(props: {
             if (pending.kind !== "lower") {
               return;
             }
-            const { userId, amount, authorizationId, commandId } = pending;
-            const lotId = props.lotId;
-            currentCommand.submit(
-              pending,
-              (_submitted, signal) =>
-                lowerProxyAuthorization(userId, lotId, authorizationId, amount, commandId, signal),
-              commandErrorOutcomeUncertain,
-              (authorization) => {
-                props.savedAuthorization.set(authorization);
-                refreshGeneration.set(nextRefreshGeneration(refreshGeneration()));
-              },
-              () => {
-                // 降低失败也要刷新权威 lot/代理状态；hook 保留可重试命令。
-                refreshGeneration.set(nextRefreshGeneration(refreshGeneration()));
-              },
-            );
+            props.onSubmit(pending);
           }}
         >
           <Show
@@ -217,7 +190,6 @@ export function ProxyAuthorizationForm(props: {
                       ? "public-proxy-lower-hint public-proxy-lower-error"
                       : "public-proxy-lower-hint"
                   }
-                  disabled={submitting()}
                   value={maximumAmount()}
                   ref={focusMaximum}
                   onInput={(event) => {
@@ -248,17 +220,9 @@ export function ProxyAuthorizationForm(props: {
               {validation()}
             </p>
           </Show>
-          <Show when={props.command.failure()}>
-            {(error) => (
-              <p class="action-feedback action-feedback--error" role="alert">
-                {proxyErrorMessage(error(), lowerBound())}
-              </p>
-            )}
-          </Show>
           <div class="public-auction-bid-form__actions">
             <button
               type="button"
-              disabled={submitting()}
               onClick={() => {
                 if (props.command.confirmation() !== null) {
                   props.command.cancelConfirmation();
@@ -276,19 +240,11 @@ export function ProxyAuthorizationForm(props: {
               disabled={submitDisabled()}
               aria-describedby={confirming() ? confirmationId() : ""}
             >
-              {submitting()
-                ? t("proxy-working")
-                : confirming()
-                  ? t("proxy-lower-confirm-submit")
-                  : t("proxy-lower-submit")}
+              {confirming() ? t("proxy-lower-confirm-submit") : t("proxy-lower-submit")}
             </button>
           </div>
         </form>
       </Show>
     </section>
   );
-}
-
-function nextRefreshGeneration(value: number): number {
-  return value >= Number.MAX_SAFE_INTEGER ? Number.MAX_SAFE_INTEGER : value + 1;
 }

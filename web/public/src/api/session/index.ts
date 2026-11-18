@@ -55,8 +55,15 @@ export type { PublicSession };
 export { parseStrictRfc3339 };
 
 /** 认证失败或身份前置条件冲突时，重新读取当前 Cookie 对应的权威身份。 */
-export function observePublicSessionFailure(status: number, code: string): void {
-  if (status === 401 || code === "session_changed") {
+export function observePublicSessionFailure(
+  status: number,
+  code: string,
+  expectedUser?: string,
+): void {
+  if (status === 409 && code === "session_changed" && expectedUser !== undefined) {
+    publishPublicSessionIdentity({ kind: "expected-user-rejected", userId: expectedUser });
+  }
+  if (status === 401 || (status === 409 && code === "session_changed")) {
     notifyPublicSessionChange("authentication_failed");
   }
 }
@@ -370,6 +377,9 @@ async function synchronizePublicCookie(
   }
   const synchronized = decodeCurrentSession(response.value);
   if (!synchronized.ok) {
+    if (response.value.status === 409) {
+      observePublicSessionFailure(409, synchronized.error, current.user_id);
+    }
     return synchronized;
   }
   const identity = synchronized.value;
@@ -499,7 +509,7 @@ export async function logoutPublic(
     (response) => {
       if (!responseOk(response)) {
         const code = decodeErrorCode(response);
-        observePublicSessionFailure(response.status, code);
+        observePublicSessionFailure(response.status, code, userId);
         return err(code);
       }
       const decoded = decodeIdentitySuccess(response, jsonValue, (value) => value === null);

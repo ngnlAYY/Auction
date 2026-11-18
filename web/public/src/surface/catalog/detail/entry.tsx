@@ -4,10 +4,11 @@
 import { createCell } from "@auction/web-shared/reactive/cell";
 import { structuralEquals } from "@auction/web-shared/reactive/equality";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
+import { useRouter } from "@auction/web-shared/router";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
 import type { Accessor } from "solid-js";
-import { createEffect, onCleanup, useContext } from "solid-js";
+import { createEffect, onCleanup, untrack, useContext } from "solid-js";
 
 import type { CatalogRow } from "../../../api/model";
 import { CatalogActionIcon } from "../actions";
@@ -121,13 +122,19 @@ export function useCatalogDetailEntry(
   };
   // 拍品直达链接：请求指向本行时由本行打开抽屉并清空请求。行是抽屉快照的唯一写入方，
   // 这样打开的抽屉与点击本行完全一样，出价入口照常跟随操作栏投影。
+  const router = useRouter();
   const viewRequest = useContext(LotViewRequestContext);
   createEffect(
     () => ({ request: viewRequest(), lotId: currentLotId() }),
     ({ request, lotId }) => {
-      if (request !== null && request.lotId === lotId) {
+      if (
+        request?.target.rowReady === true &&
+        request.target.lotId === lotId &&
+        viewRequest.peek() === request &&
+        request.entryKey === untrack(router.currentEntryKey)
+      ) {
         viewRequest.set(null);
-        open();
+        untrack(open);
       }
     },
   );

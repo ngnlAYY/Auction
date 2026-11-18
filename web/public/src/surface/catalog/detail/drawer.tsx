@@ -14,10 +14,12 @@ import type { JSX } from "@solidjs/web";
 import { For, Match, onCleanup, Show, Switch, useContext } from "solid-js";
 
 import { fetchLotDetail, LOT_DETAIL_FETCH_ERROR } from "../../../api/queries/lots";
+import { CompetitionCommandsContext } from "../../commands/host";
+import { commandEntryMessage } from "../../commands/request";
 import { loginHrefForCurrentLocation } from "../../session";
 import { LotWatchButton } from "../../watches/control";
 import { detailBidReason } from "../actions";
-import { CommandDialogContext } from "../command-scope";
+import { CommandDialogContext, recoveryDialogInput } from "../command-scope";
 import {
   catalogCategoryKey,
   catalogCategoryLabel,
@@ -80,6 +82,7 @@ export function CatalogDetailDrawer(props: {
   // 只读入口不在命令宿主之下，此时出价入口必为 `unavailable`，命令弹窗信号不会被用到。
   // `CommandDialogContext` 按 `try_use_context` 的口径以 null 作为“没有提供方”。
   const commandDialog = useContext(CommandDialogContext);
+  const competition = useContext(CompetitionCommandsContext);
   const focus = createCell<DetailFocus>("close");
   const historyOpen = createCell(false);
   const priceHistoryOpen = createCell(false);
@@ -117,9 +120,20 @@ export function CatalogDetailDrawer(props: {
   // 本人对该拍品的代理授权（上限、已用次数）；抽屉是它在目录里唯一的展示位置。
   const ownProxyValue = createValueMemo(() => ownProxy(bid()));
   // 出价入口三态与行内操作栏一致：命令按钮（可禁用并说明原因）、登录链接或不渲染。
-  const bidReason = createValueMemo(() => detailBidReason(bid()));
+  const pending = () => competition?.current()?.command(row().lotId) ?? null;
+  const bidReason = createValueMemo(() => {
+    const command = pending();
+    return command === null ? detailBidReason(bid()) : commandEntryMessage(command);
+  });
   const commandBid = createValueMemo(() => {
     const current = bid();
+    if (
+      commandDialog !== null &&
+      pending() !== null &&
+      (current.kind !== "command" || current.disabled)
+    ) {
+      return { kind: "command", input: recoveryDialogInput(row()), disabled: false } as const;
+    }
     return current.kind === "command" ? current : null;
   });
   const entryLabel = createValueMemo(() => {
@@ -301,7 +315,7 @@ export function CatalogDetailDrawer(props: {
                   </button>
                 )}
               </Match>
-              <Match when={bid().kind === "login"}>
+              <Match when={bid().kind === "login" && pending() === null}>
                 <Link class="public-catalog-detail__bid" href={loginHrefForCurrentLocation()}>
                   {t("catalog-login-to-bid")}
                 </Link>

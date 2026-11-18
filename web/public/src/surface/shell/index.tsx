@@ -15,7 +15,7 @@ import { createTaskScope } from "@auction/web-shared/reactive/tasks";
 import { useRouter } from "@auction/web-shared/router";
 import { useAppBootReady } from "@auction/web-shared/ui/bootstrap";
 import type { JSX } from "@solidjs/web";
-import { createEffect, onSettled, useContext } from "solid-js";
+import { createEffect, onSettled, untrack, useContext } from "solid-js";
 import { fetchCurrentAuction } from "../../api/queries/current";
 import { fetchPublicReadiness } from "../../api/status";
 import { prefetchBoardLots, rememberCurrentAuction } from "../board/prefetch";
@@ -29,7 +29,7 @@ import {
 } from "../board/realtime";
 import { type PublicBidRefresh, refreshPublicReads } from "../board/refresh";
 import { createWorldSwitch } from "../board/world";
-import type { LotViewTarget } from "../catalog/detail/deep-link";
+import type { LotLinkLocation, LotViewRequest } from "../catalog/detail/deep-link";
 import { PublicSessionView, type PublicSessionView as PublicSessionViewType } from "../index";
 import {
   InitialPublicLocationContext,
@@ -84,7 +84,7 @@ export function PublicShell(): JSX.Element {
 }
 
 function PublicShellContent(props: { readonly locationGeneration: Cell<number> }): JSX.Element {
-  useDialogFocusTrap(true);
+  useDialogFocusTrap(true, "public-content");
   // 秒级共享时钟在外壳根提供；看板与 lot 详情的倒计时通过 use_second_tick 订阅同一节拍。
   const secondTicker = useSecondTicker();
   const router = useRouter();
@@ -148,7 +148,7 @@ function PublicShellContent(props: { readonly locationGeneration: Cell<number> }
     () => readinessGeneration(),
     async (_generation, context) => fetchPublicReadiness(context.signal),
   );
-  const { session, sessionEndedElsewhere, commandOwner, checkSession } =
+  const { session, sessionEndedElsewhere, commandOwner, checkSession, competition } =
     createPublicShellSession(refreshGeneration);
   const currentAuction = createTaskResource(
     () => [refreshGeneration(), selectedWorld()] as const,
@@ -195,7 +195,20 @@ function PublicShellContent(props: { readonly locationGeneration: Cell<number> }
   // 默认拍卖页还要等待首屏 lots；其他路由在三项外壳请求都有结果后即可接管静态骨架。
   useAppBootReady(() => bootPrerequisitesReady() && !auctionPageOwnsInitialBoot());
   const displayedAuction = createCell<CurrentAuctionItemResponse | null>(null);
-  const lotViewRequest = createCell<LotViewTarget | null>(null);
+  const lotViewRequest = createCell<LotViewRequest | null>(null);
+  createEffect(router.currentEntryKey, () => {
+    // 同路径后退会复用看板。离开目标条目后，前进也不能恢复未交付的打开请求。
+    const pending = lotViewRequest.peek();
+    if (pending !== null && pending.entryKey !== untrack(router.currentEntryKey)) {
+      lotViewRequest.set(null);
+    }
+  });
+  const lotLinkLocation = createCell<LotLinkLocation | null>(null);
+  createEffect(currentRoute, () => {
+    // 导航可能先于详情分块交付而结束。外壳按路由实例回收冻结位置。
+    const frozen = lotLinkLocation.peek();
+    if (frozen !== null && frozen.route !== untrack(currentRoute)) lotLinkLocation.set(null);
+  });
   const contentLoading = createCell<ReadonlySet<number>>(new Set());
   usePopstateRevision(locationGeneration);
   const readinessState = createValueMemo((): PublicReadinessState => {
@@ -389,8 +402,10 @@ function PublicShellContent(props: { readonly locationGeneration: Cell<number> }
       pageRealtimeTarget={pageRealtimeTarget}
       displayedAuction={displayedAuction}
       lotViewRequest={lotViewRequest}
+      lotLinkLocation={lotLinkLocation}
       session={session}
       commandOwner={commandOwner}
+      competition={competition}
       contentLoading={contentLoading}
       readiness={readiness}
       currentAuction={currentAuction}
@@ -420,6 +435,7 @@ function PublicShellContent(props: { readonly locationGeneration: Cell<number> }
         tickerCountdown={tickerLabels.countdown}
         realtimeUserId={realtimeUserId}
         realtimeTarget={realtimeTarget}
+        onRouteLoadFailure={() => lotLinkLocation.set(null)}
         onToggleNavigation={() => navigationOpen.set(!navigationOpen())}
         onCloseNavigation={() => navigationOpen.set(false)}
         onHome={goHome}

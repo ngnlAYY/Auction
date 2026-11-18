@@ -31,7 +31,7 @@ import {
 } from "../session/login-return";
 import { PublicShell } from "../shell";
 import { PUBLIC_LOCALE_CATALOG } from "./locale-catalog";
-import { NotFoundPage, PUBLIC_ROUTES } from "./route";
+import { PUBLIC_ROUTES } from "./route";
 
 export { PUBLIC_LOCALE_CATALOG } from "./locale-catalog";
 
@@ -109,9 +109,7 @@ function RouterHost(): JSX.Element {
   const router = createRouter({ routes: PUBLIC_ROUTES });
   return (
     <RouterContext value={router}>
-      <Show when={router.current().kind === "matched"} fallback={<NotFoundPage />}>
-        <PublicShell />
-      </Show>
+      <PublicShell />
     </RouterContext>
   );
 }

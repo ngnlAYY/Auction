@@ -37,6 +37,7 @@ const queryWriters = new WeakMap<Window, (route: string, mode: WriteMode) => boo
 /** 浏览器历史适配器。 */
 export interface WebHistory {
   currentRoute(): string;
+  currentEntryKey(): string;
   navigate(route: string, mode: WriteMode): boolean;
   goBack(): void;
   restoreScrollAfterCommit(): void;
@@ -355,6 +356,7 @@ export function createWebHistory(options: WebHistoryOptions): WebHistory {
 
   return {
     currentRoute: currentWindowRoute,
+    currentEntryKey: () => active.key,
     navigate(route, mode) {
       const fragment = fragmentInRoute(route);
       if (!navigateTo(route, mode, fragment ?? positionTarget(TOP), fragment !== null)) {

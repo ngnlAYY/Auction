@@ -53,6 +53,7 @@ test("首次来源失效后，登录链接随站内导航使用真实地址栏",
     RouterContext.defaultValue = {
       current: () => ({ kind: "matched", name: "Home", params: {}, query: {} }),
       currentLocationString: () => `${location.pathname}${location.search}`,
+      currentEntryKey: () => "test-entry",
       push() {},
       replace() {},
       goBack() {},

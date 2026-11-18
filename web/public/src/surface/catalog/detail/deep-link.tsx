@@ -4,36 +4,54 @@
 // 目录里有这一行时由行自己打开抽屉（出价入口照常由行内操作栏投影），找不到时退回只读抽屉。
 
 import type { CurrentAuctionItemResponse } from "@auction/contracts/dto/public/catalog/auction";
-import type { Cell } from "@auction/web-shared/reactive/cell";
-import { createValueMemo } from "@auction/web-shared/reactive/memo";
-import { createTaskScope } from "@auction/web-shared/reactive/tasks";
-import type { Result } from "@auction/web-shared/result";
-import { useRouter } from "@auction/web-shared/router";
+import { type Cell, createCell } from "@auction/web-shared/reactive/cell";
+import { createTaskResource } from "@auction/web-shared/reactive/resource";
+import { err, ok, type Result } from "@auction/web-shared/result";
+import { type RouteMatch, useRouter } from "@auction/web-shared/router";
+import { AsyncState } from "@auction/web-shared/ui/components/async-state";
+import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
-import { createContext, createEffect, useContext } from "solid-js";
+import { createContext, createEffect, Match, Switch, untrack, useContext } from "solid-js";
 
 import type { CatalogRow } from "../../../api/model";
 import { catalogRowFromDetail } from "../../../api/model";
 import { fetchCurrentAuction, fetchHistoricalAuction } from "../../../api/queries/current";
-import { fetchLotDetail } from "../../../api/queries/lots";
+import { fetchLotDetail, type LotDetailFetchError } from "../../../api/queries/lots";
+import { PublicRefreshGenerationContext } from "../../board/refresh";
 import { useContentLoading } from "../../loading";
 import type { PublicBoardQuery } from "../../query";
 import { normalizeWorldQuery, publicBoardQueryDefault, publicHref } from "../../query";
 import { catalogCategoryKey } from "../presentation";
 
-/** 一次直达请求要查看的拍品。`auctionId` 来自拍品响应本身，是看板判断“当前展示的是不是
- * 这件拍品所在场次”的依据。 */
+/** 一次直达请求携带已读详情，只有对齐后的目录行可以接管它。 */
 export interface LotViewTarget {
   readonly lotId: string;
   readonly auctionId: string;
+  readonly world: string | null;
+  readonly row: CatalogRow;
+  readonly refreshGeneration: number;
+  readonly rowReady: boolean;
 }
 
-/** 外壳持有的直达请求：解析页写入，看板处置一次后清空。它跨路由存活，但不进入 URL，
- * 刷新或后退都不会重新弹出抽屉。 */
-export type LotViewRequest = Cell<LotViewTarget | null>;
+/** 外壳内存中的直达请求，只能由解析后落到的看板历史条目消费一次。 */
+export interface LotViewRequest {
+  readonly entryKey: string;
+  readonly target: LotViewTarget;
+}
 
 /** 直达请求所在上下文；没有提供方时 useContext 会直接报错。 */
-export const LotViewRequestContext = createContext<LotViewRequest>();
+export const LotViewRequestContext = createContext<Cell<LotViewRequest | null>>();
+
+/** “查看拍品”此次解析所用的冻结位置，只在外壳内存里交接。 */
+export interface LotLinkLocation {
+  readonly lotId: string;
+  readonly auctionId: string;
+  readonly world: string;
+  readonly route: RouteMatch;
+}
+
+/** 冻结位置绑定到发起解析的导航，允许同次解析失败后重试。 */
+export const LotLinkLocationContext = createContext<Cell<LotLinkLocation | null>>();
 
 /** 看板对直达请求的处置。 */
 export type LotViewDisposition =
@@ -46,61 +64,100 @@ export type LotViewDisposition =
 
 /** 判定当前看板如何处置直达请求。
  *
- * `urlWorld` 与 `displayedWorld` 不一致说明外壳的世界选择还没跟上地址栏，此时展示的是
- * 上一个世界的场次，不能据此下结论。`pageLots` 是已与当前筛选、页码对齐的目录页；
- * 读出之前一律等待。
+ * 仍在切换世界或等待对齐目录时留给看板；读取终止后没有对应行时复用已读详情。
  */
 export function disposeLotView(
   target: LotViewTarget,
   urlWorld: string,
-  displayedWorld: string,
-  displayedAuctionId: string,
-  pageLots: Iterable<string> | null,
+  displayed: { readonly world: string; readonly id: string } | null,
+  reading: boolean,
+  pageLots: Iterable<string>,
 ): LotViewDisposition {
-  if (urlWorld !== displayedWorld) {
-    return "wait";
+  if (target.world === null) return "read_only";
+  if (target.world !== urlWorld || (displayed !== null && displayed.world !== urlWorld)) {
+    return reading ? "wait" : "read_only";
   }
-  if (target.auctionId !== displayedAuctionId) {
+  if (displayed !== null && displayed.id !== target.auctionId) {
     return "read_only";
-  }
-  if (pageLots === null) {
-    return "wait";
   }
   for (const lotId of pageLots) {
     if (lotId === target.lotId) {
       return "row";
     }
   }
-  return "read_only";
+  return reading ? "wait" : "read_only";
 }
 
-/** `/lots/{拍品 UUID}` 的解析页：读出拍品所在位置后无历史记录地跳到看板。
- * 读取失败（拍品不存在、网络错误）同样回到看板，只是不带直达请求。 */
+/** 读出拍品所在位置后跳到看板；临时失败时允许在原解析范围内重试。 */
 export function LotDeepLink(props: { readonly lotId: string }): JSX.Element {
   const request = useContext(LotViewRequestContext);
+  const location = useContext(LotLinkLocationContext);
+  const refreshGeneration = useContext(PublicRefreshGenerationContext);
   const router = useRouter();
-  // 解析期间正文为空，加载提示交给顶栏。
-  useContentLoading(() => true);
-  const tasks = createTaskScope();
-  const lotId = createValueMemo(() => props.lotId);
-  // 以拍品为依赖：同一组件实例换了参数时重新解析，而不是沿用上一件的结果。
+  // 同一 UUID 的普通深链也有独立的路由实例，不能沿用上次冻结位置。
+  const lotId = props.lotId;
+  const details = createTaskResource(
+    () => {
+      const frozen = location();
+      return frozen?.lotId === lotId && frozen.route === router.current() ? frozen : null;
+    },
+    // 目录定位可能等多次请求。代号按详情开始读取时取样。
+    (frozen, context) => resolve(lotId, frozen, refreshGeneration.peek(), context.signal),
+  );
+  const navigationFailed = createCell(false);
+  useContentLoading(() => details.state() === "pending");
   createEffect(
-    () => lotId(),
-    (lotId) => {
-      tasks.spawn(async (context) => {
-        const resolved = await resolve(lotId, context.signal);
-        if (!context.alive()) {
-          return;
-        }
-        const href = resolved === null ? "/" : publicHref("/", resolved.query);
-        if (resolved !== null) {
-          request.set(resolved.target);
-        }
-        router.replace(href);
-      });
+    () => (details.state() === "ready" ? details() : undefined),
+    (resolved) => {
+      if (resolved?.ok !== true) return;
+      const { target, query } = resolved.value;
+      const href = publicHref("/", query);
+      router.replace(href);
+      if (untrack(router.currentLocationString) !== href) {
+        navigationFailed.set(true);
+        return;
+      }
+      // 只有看板落点写入成功后才交接；同一路径的其他历史条目不能打开它。
+      request.set({ entryKey: untrack(router.currentEntryKey), target });
     },
   );
-  return null;
+  const failure = () => {
+    const detail = details();
+    if (navigationFailed()) return "lot_detail_fetch_error";
+    return details.state() === "ready" && detail?.ok === false ? detail.error.kind : null;
+  };
+  return (
+    <Switch>
+      <Match when={failure() === "not_found"}>
+        <AsyncState
+          kind="empty"
+          title={t("catalog-detail")}
+          detail={t("catalog-detail-not-found")}
+        />
+      </Match>
+      <Match when={failure() === "lot_detail_fetch_error"}>
+        <AsyncState
+          kind="error"
+          title={t("catalog-detail")}
+          detail={t("data-error")}
+          retryLabel={t("data-retry")}
+          onRetry={() => {
+            navigationFailed.set(false);
+            details.restart();
+          }}
+        />
+      </Match>
+    </Switch>
+  );
+}
+
+async function readLot(lotId: string, signal: AbortSignal) {
+  const page = await fetchLotDetail(lotId, signal);
+  if (!page.ok) return page;
+  const { auction_id: auctionId, lot } = page.value;
+  return lot === null
+    ? err({ kind: "lot_detail_fetch_error" } satisfies LotDetailFetchError)
+    : ok({ auctionId, row: catalogRowFromDetail(lot) });
 }
 
 /** 读出拍品及其场次，算出看板应当落到的目录位置。
@@ -109,42 +166,59 @@ export function LotDeepLink(props: { readonly lotId: string }): JSX.Element {
  * （当前场次经缓存层与外壳的在途读取合并），命中即可定位，不再串行查场次目录。 */
 async function resolve(
   lotId: string,
+  frozen: LotLinkLocation | null,
+  refreshGeneration: number,
   signal: AbortSignal,
-): Promise<{ readonly target: LotViewTarget; readonly query: PublicBoardQuery } | null> {
+): Promise<
+  Result<{ readonly target: LotViewTarget; readonly query: PublicBoardQuery }, LotDetailFetchError>
+> {
+  if (frozen !== null) {
+    const lot = await readLot(lotId, signal);
+    if (!lot.ok) return lot;
+    const { auctionId, row } = lot.value;
+    if (frozen.auctionId !== auctionId) return err({ kind: "lot_detail_fetch_error" });
+    return ok({
+      target: { lotId, auctionId, world: frozen.world, row, refreshGeneration, rowReady: false },
+      query: catalogPosition(row, frozen.world, auctionId, publicBoardQueryDefault()),
+    });
+  }
   const [page, main, isekai] = await Promise.all([
-    fetchLotDetail(lotId, signal),
+    readLot(lotId, signal),
     fetchCurrentAuction("main", signal),
     fetchCurrentAuction("isekai", signal),
   ]);
-  if (signal.aborted || !page.ok) {
-    return null;
-  }
-  const auctionId = page.value.auction_id;
-  const item = page.value.lot;
-  if (item === null) {
-    return null;
-  }
-  const row = catalogRowFromDetail(item);
-  const target: LotViewTarget = { lotId, auctionId };
+  if (!page.ok) return page;
+  if (signal.aborted) return err({ kind: "lot_detail_fetch_error" });
+  const { auctionId, row } = page.value;
   // 进行中的场次落到该世界的首页（不带场次参数），与用户平时看到的看板一致。
   const world = currentWorld(auctionId, [main, isekai]);
   if (world !== null) {
-    return { target, query: catalogPosition(row, world, null, publicBoardQueryDefault()) };
+    return ok({
+      target: { lotId, auctionId, world, row, refreshGeneration, rowReady: false },
+      query: catalogPosition(row, world, null, publicBoardQueryDefault()),
+    });
   }
   // 不是当前场次，或当前场次读取失败：按往期场次处理，指定场次的看板同样可以出价。
   // 拍品响应不带世界。读不出场次时仍回到看板并保留请求：看板展示的不会是这个场次，
   // 于是按只读抽屉打开，链接不至于落空。
   const auction = await fetchHistoricalAuction(auctionId, signal);
-  if (signal.aborted) {
-    return null;
-  }
   if (!auction.ok) {
-    return { target, query: publicBoardQueryDefault() };
+    return ok({
+      target: { lotId, auctionId, world: null, row, refreshGeneration, rowReady: false },
+      query: publicBoardQueryDefault(),
+    });
   }
-  return {
-    target,
+  return ok({
+    target: {
+      lotId,
+      auctionId,
+      world: auction.value.world,
+      row,
+      refreshGeneration,
+      rowReady: false,
+    },
     query: catalogPosition(row, auction.value.world, auctionId, publicBoardQueryDefault()),
-  };
+  });
 }
 
 /** 拍品所在场次是哪个世界的当前场次。读取失败的世界不参与判定；都不命中（含读取失败）时

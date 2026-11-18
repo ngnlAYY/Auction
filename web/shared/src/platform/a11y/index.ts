@@ -158,6 +158,7 @@ function synchronizeDialogState(
   document: Document,
   state: DialogFocusTrapState,
   lockBackgroundScroll: boolean,
+  fallbackFocusId?: string,
 ): void {
   const nextDialog = topDialog(document);
   const unchanged =
@@ -230,13 +231,16 @@ function synchronizeDialogState(
   }
   // 先快照 opener，再聚焦；focusin 监听器可以安全写回同一字段。
   const opener = state.opener;
-  if (opener?.isConnected === true) {
+  if (opener !== null && isFocusable(opener)) {
     focusElement(opener);
+  } else if (fallbackFocusId !== undefined) {
+    // 目录行可能在弹窗打开时被刷新移除，焦点仍须回到有效的页面入口。
+    focusElementById(fallbackFocusId);
   }
 }
 
 /** 管理当前 surface 的模态焦点循环、触发控件恢复和可选的背景滚动锁定。 */
-export function useDialogFocusTrap(lockBackgroundScroll: boolean): void {
+export function useDialogFocusTrap(lockBackgroundScroll: boolean, fallbackFocusId?: string): void {
   onSettled(() => {
     if (typeof document === "undefined") {
       return;
@@ -338,12 +342,12 @@ export function useDialogFocusTrap(lockBackgroundScroll: boolean): void {
     documentElement.addEventListener("focusin", onFocusIn);
     documentElement.addEventListener("click", onClick, true);
     documentElement.addEventListener("keydown", onKeyDown);
-    synchronizeDialogState(documentElement, state, lockBackgroundScroll);
+    synchronizeDialogState(documentElement, state, lockBackgroundScroll, fallbackFocusId);
 
     let observer: MutationObserver | null = null;
     try {
       observer = new MutationObserver(() => {
-        synchronizeDialogState(documentElement, state, lockBackgroundScroll);
+        synchronizeDialogState(documentElement, state, lockBackgroundScroll, fallbackFocusId);
       });
     } catch {
       observer = null;

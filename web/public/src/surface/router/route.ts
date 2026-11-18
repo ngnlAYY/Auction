@@ -10,7 +10,7 @@ import type {
 } from "@auction/web-shared/router";
 import { lazyPage } from "@auction/web-shared/router";
 import type { JSX } from "@solidjs/web";
-import { type Accessor, createComponent, Show } from "solid-js";
+import { createComponent, Show } from "solid-js";
 
 import { redirectPublicAlias } from "../query";
 
@@ -100,21 +100,16 @@ const loadLotDetail: RoutePageLoader = () =>
           const canonical = canonicalUuid(props.params.lot_code ?? "");
           return canonical === NIL_UUID ? null : canonical;
         });
-        const children = (value: Accessor<unknown>): JSX.Element => {
-          return createComponent(deepLink.LotDeepLink, {
-            get lotId() {
-              return String(value());
-            },
-          });
-        };
-        return createComponent(Show, {
+        return Show({
+          keyed: true,
           get when() {
             return lotId();
           },
           get fallback() {
             return createComponent(board.AuctionPage, {});
           },
-          children,
+          children: (id: string): JSX.Element =>
+            createComponent(deepLink.LotDeepLink, { lotId: id }),
         });
       },
   );

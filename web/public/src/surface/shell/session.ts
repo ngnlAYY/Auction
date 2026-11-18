@@ -1,4 +1,4 @@
-// 外壳会话资源与路由焦点标识，按权威身份隔离私有读取和命令宿主。
+// 外壳会话资源与路由焦点标识。旧宿主在确认 Cookie 不再属于它时销毁，不等待后续请求。
 
 import { type Cell, createCell } from "@auction/web-shared/reactive/cell";
 import { createTaskResource } from "@auction/web-shared/reactive/resource";
@@ -19,6 +19,7 @@ import {
   publicSessionRevisions,
   type SessionIdentityEvidence,
 } from "../../api/session/revision";
+import { createCompetitionCommands } from "../commands/host";
 import type { PublicSessionResource, PublicSessionResult } from "../index";
 import { usePublicSessionExpiry, usePublicSessionSync } from "../session/lifecycle";
 import { invalidateLotWatches } from "../watches/cache";
@@ -56,6 +57,7 @@ export function createPublicShellSession(refreshGeneration: Cell<number>) {
     lastIdentity.set(null);
     snapshot.set(undefined);
     commandOwner.set(userId);
+    competition.replaceIdentity(userId);
     return true;
   };
   const clearSession = (): void => {
@@ -113,8 +115,13 @@ export function createPublicShellSession(refreshGeneration: Cell<number>) {
     cancel: resource.cancel,
     clear: clearSession,
   });
+  const competition = createCompetitionCommands(session, refreshGeneration);
 
   const applyIdentity = (evidence: SessionIdentityEvidence): boolean => {
+    if (evidence.kind === "expected-user-rejected") {
+      // 迟到的冲突只否定该请求的预期用户，不得撤销随后确认的另一个账号。
+      return commandOwner.peek() === evidence.userId && setCommandOwner(null);
+    }
     const previous = lastIdentity.peek();
     const { revisions, cookieWritten } = evidence;
     const confirmedLocally =
@@ -189,7 +196,7 @@ export function createPublicShellSession(refreshGeneration: Cell<number>) {
   onCleanup(registerPublicSessionCheckTrigger(checkSession, applyIdentity));
   usePublicSessionSync(checkSession);
   usePublicSessionExpiry(lastIdentity, onExpiry);
-  return { session, sessionEndedElsewhere, commandOwner, checkSession };
+  return { session, sessionEndedElsewhere, commandOwner, checkSession, competition };
 }
 
 export function routeFocusToken(route: RouteMatch): string {

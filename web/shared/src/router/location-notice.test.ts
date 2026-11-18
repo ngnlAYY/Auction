@@ -32,6 +32,31 @@ test("查询 push 同步地址快照并复用当前路由匹配", () => {
   }
 });
 
+test("历史条目标识随 push 和前进后退切换，replace 保留标识", () => {
+  const { router, fake, disposeRouter, restore } = openRouter("/");
+  try {
+    const original = router.currentEntryKey();
+    const match = router.current();
+    writeQueryPairs(["page"], [["page", "2"]], "push");
+    const pushed = router.currentEntryKey();
+    expect(pushed).not.toBe(original);
+    expect(router.current()).toBe(match);
+
+    writeQueryPairs(["page"], [], "replace");
+    expect(router.currentLocationString()).toBe("/");
+    expect(router.currentEntryKey()).toBe(pushed);
+
+    fake.history.back();
+    expect(router.currentLocationString()).toBe("/");
+    expect(router.currentEntryKey()).toBe(original);
+    fake.history.forward();
+    expect(router.currentEntryKey()).toBe(pushed);
+  } finally {
+    disposeRouter();
+    restore();
+  }
+});
+
 test("路由销毁后通知不再生效", () => {
   const opened = openRouter("/");
   try {

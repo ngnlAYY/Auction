@@ -1,6 +1,6 @@
 // Public 代理命令组件的稳定出口。
 // 入口只负责根据服务端投影选择创建、降低上限或成功反馈视图；各表单自己的状态和
-// 提交逻辑放在子模块中，命令 ID 与 API 调用仍由对应表单独占。
+// 确认逻辑放在各表单，已确认的负载交给外壳。
 
 import type { Cell } from "@auction/web-shared/reactive/cell";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
@@ -11,12 +11,9 @@ import type { JSX } from "@solidjs/web";
 import { type Accessor, Match, Show, Switch } from "solid-js";
 
 import type { OwnedProxy } from "../../../api/account";
-import type { ProxyCommandAuthorization } from "../../../api/commands";
-import type { ProxyConfirmCommand } from "../pending";
-import { ProxyRetry } from "../retry";
+import type { PendingProxyCommand, ProxyConfirmCommand } from "../pending";
 import { ProxyAuthorizationForm } from "./authorization";
 import { ProxyCreateForm } from "./create";
-import { ProxySuccessPanel } from "./success";
 
 /** 公开 lot 的代理授权表单参数；账户状态由服务端投影，不在浏览器端复制代理状态机。 */
 export interface ProxyFormInput {
@@ -34,28 +31,16 @@ export interface ProxyFormInput {
   readonly blockedReason: string;
   readonly proxy: Result<OwnedProxy | null, string> | null;
   readonly refreshGeneration: Cell<number>;
-  readonly savedAuthorization: Cell<ProxyCommandAuthorization | null>;
-  /** 由弹窗宿主注入的两阶段确认命令 hook（创建/降低上限各一份）；宿主据其 `submitting`
-   * 接线 Dialog 的 busy 关闭守卫，避免弹窗 scope 销毁导致成功后的刷新回调丢失。 */
+  /** 由弹窗持有的创建和降低上限的确认草稿。 */
   readonly createCommand: ProxyConfirmCommand;
   readonly lowerCommand: ProxyConfirmCommand;
+  readonly onSubmit: (pending: PendingProxyCommand) => void;
   readonly onClose: () => void;
 }
 
 /** 公开 lot 的代理授权入口；输入以普通值传入，响应式读取留在组件内部。 */
 export function ProxyForm(props: { readonly input: ProxyFormInput }): JSX.Element {
   const input = () => props.input;
-  const savedAuthorization = () => input().savedAuthorization();
-  // 不确定结果必须优先于新快照的 create/lower 分支，避免已生效操作失去幂等重试入口。
-  const uncertainCommand = createValueMemo((): ProxyConfirmCommand | null => {
-    if (input().createCommand.uncertain()) {
-      return input().createCommand;
-    }
-    if (input().lowerCommand.uncertain()) {
-      return input().lowerCommand;
-    }
-    return null;
-  });
   const proxy = () => input().proxy;
   const proxyRead = useProxyDraftRead(proxy);
   const proxyError = () => proxyRead().error;
@@ -103,9 +88,8 @@ export function ProxyForm(props: { readonly input: ProxyFormInput }): JSX.Elemen
                   lotStatus={input().lotStatus}
                   proxy={proxy()}
                   canSubmit={canSubmit()}
-                  savedAuthorization={input().savedAuthorization}
                   command={input().lowerCommand}
-                  peerSubmitting={input().createCommand.submitting}
+                  onSubmit={input().onSubmit}
                   onClose={input().onClose}
                 />
               )}
@@ -120,9 +104,8 @@ export function ProxyForm(props: { readonly input: ProxyFormInput }): JSX.Elemen
                 canSubmit={canSubmit()}
                 blocked={input().leading}
                 blockedReason={input().blockedReason}
-                savedAuthorization={input().savedAuthorization}
                 command={input().createCommand}
-                peerSubmitting={input().lowerCommand.submitting}
+                onSubmit={input().onSubmit}
                 onClose={input().onClose}
               />
             </Match>
@@ -130,21 +113,6 @@ export function ProxyForm(props: { readonly input: ProxyFormInput }): JSX.Elemen
         </>
       }
     >
-      <Match when={savedAuthorization()}>
-        {(authorization) => (
-          <ProxySuccessPanel authorization={authorization()} onClose={input().onClose} />
-        )}
-      </Match>
-      <Match when={uncertainCommand()}>
-        {(command) => (
-          <ProxyRetry
-            lotId={input().lotId}
-            command={command()}
-            savedAuthorization={input().savedAuthorization}
-            onClose={input().onClose}
-          />
-        )}
-      </Match>
       <Match when={!input().authenticated || (!input().canBid && confirmed() === null)}>
         <p role="status">{t("bid-unavailable")}</p>
       </Match>
