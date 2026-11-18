@@ -42,4 +42,6 @@ pub(crate) use lifecycle::{
 };
 pub(crate) use recovery::admin_confirm_recovery;
 pub(crate) use reports::{admin_recovery_report, admin_settlement_report};
-pub(crate) use session::{current_admin_session, login_admin_session, logout_admin_session};
+pub(crate) use session::{
+    current_admin_session, login_admin_session, logout_admin_session, renew_admin_session,
+};

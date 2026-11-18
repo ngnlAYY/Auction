@@ -1,4 +1,4 @@
-//! Public 固定期限/永久登录、偏好与只读复核；Admin 保持滑动刷新和撤销。
+//! Public 固定期限/永久登录、偏好与只读复核；Admin 校验、人工操作续期与撤销。
 
 use std::sync::Arc;
 
@@ -170,6 +170,27 @@ impl AdminSessionService {
         digest.update(&token_hash);
         digest.finalize().into_bytes().into()
     }
+
+    async fn authenticate_session(
+        &self,
+        raw_token: &str,
+        raw_csrf_token: &str,
+        now: Timestamp,
+        renew: bool,
+    ) -> Result<AdminSessionIdentity, ApplicationError> {
+        let token_hash = self.scoped_token_hash(hash_token(raw_token)?);
+        let csrf_hash = hash_token(raw_csrf_token)?;
+        let identity = if renew {
+            let next_expires_at = next_session_expiration(now, self.config.idle_ttl)?;
+            self.store.touch_admin(token_hash, csrf_hash, now, next_expires_at).await?
+        } else {
+            self.store.inspect_admin(token_hash, csrf_hash, now).await?
+        };
+        if identity.actor != self.expected_actor {
+            return Err(SessionError::Unauthenticated.into());
+        }
+        Ok(identity)
+    }
 }
 
 impl AdminSessionPort for AdminSessionService {
@@ -223,18 +244,20 @@ impl AdminSessionPort for AdminSessionService {
         raw_csrf_token: String,
         now: Timestamp,
     ) -> ApplicationFuture<'_, AdminSessionIdentity> {
-        Box::pin(async move {
-            let (token_hash, next_expires_at) =
-                prepare_session_token(&raw_token, now, self.config.idle_ttl)?;
-            let token_hash = self.scoped_token_hash(token_hash);
-            let csrf_hash = hash_token(&raw_csrf_token)?;
-            let identity =
-                self.store.touch_admin(token_hash, csrf_hash, now, next_expires_at).await?;
-            if identity.actor != self.expected_actor {
-                return Err(SessionError::Unauthenticated.into());
-            }
-            Ok(identity)
-        })
+        Box::pin(
+            async move { self.authenticate_session(&raw_token, &raw_csrf_token, now, false).await },
+        )
+    }
+
+    fn touch(
+        &self,
+        raw_token: String,
+        raw_csrf_token: String,
+        now: Timestamp,
+    ) -> ApplicationFuture<'_, AdminSessionIdentity> {
+        Box::pin(
+            async move { self.authenticate_session(&raw_token, &raw_csrf_token, now, true).await },
+        )
     }
 
     fn logout(&self, raw_token: String, now: Timestamp) -> ApplicationFuture<'_, ()> {
@@ -256,15 +279,6 @@ fn session_expiration_window(
 
 fn next_session_expiration(now: Timestamp, ttl: Duration) -> Result<Timestamp, ApplicationError> {
     now.checked_add_signed(ttl).ok_or_else(|| SessionError::InvalidConfiguration.into())
-}
-
-/// 把 Admin 原始 session token 转为摘要并计算滑动过期时间；Public 活动不延长期限。
-fn prepare_session_token(
-    raw_token: &str,
-    now: Timestamp,
-    idle_ttl: Duration,
-) -> Result<([u8; 32], Timestamp), ApplicationError> {
-    Ok((hash_token(raw_token)?, next_session_expiration(now, idle_ttl)?))
 }
 
 fn validate_login_key(key: &[u8]) -> Result<(), ApplicationError> {
@@ -337,4 +351,166 @@ fn hash_token(raw_token: &str) -> Result<[u8; 32], ApplicationError> {
         return Err(SessionError::Unauthenticated.into());
     }
     Ok(Sha256::digest(decoded).into())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::future::Future;
+    use std::sync::{Arc, Mutex};
+    use std::task::{Context, Poll, Waker};
+
+    use auction_time::{Duration, Timestamp};
+
+    use super::{AdminSessionService, generate_token};
+    use crate::errors::{ApplicationError, SessionError};
+    use crate::ports::core::ApplicationFuture;
+    use crate::ports::public::{
+        AdminSessionConfig, AdminSessionIdentity, AdminSessionPort, AdminSessionRecord,
+        AdminSessionStore,
+    };
+
+    #[derive(Default)]
+    struct MemorySession(Mutex<Option<AdminSessionRecord>>);
+
+    impl MemorySession {
+        fn authenticate(
+            &self,
+            token_hash: [u8; 32],
+            csrf_hash: [u8; 32],
+            now: Timestamp,
+            next_expires_at: Option<Timestamp>,
+        ) -> Result<AdminSessionIdentity, ApplicationError> {
+            let mut row = self.0.lock().unwrap();
+            let row = row.as_mut().ok_or(SessionError::Unauthenticated)?;
+            if row.token_hash != token_hash
+                || row.csrf_hash != csrf_hash
+                || now >= row.expires_at.min(row.absolute_expires_at)
+            {
+                return Err(SessionError::Unauthenticated.into());
+            }
+            if let Some(next_expires_at) = next_expires_at {
+                row.expires_at = row.expires_at.max(next_expires_at).min(row.absolute_expires_at);
+            }
+            Ok(identity(row))
+        }
+    }
+
+    impl AdminSessionStore for MemorySession {
+        fn revoke_all_admin(&self, _now: Timestamp) -> ApplicationFuture<'_, ()> {
+            Box::pin(async move {
+                self.0.lock().unwrap().take();
+                Ok(())
+            })
+        }
+
+        fn create_admin(
+            &self,
+            record: AdminSessionRecord,
+        ) -> ApplicationFuture<'_, AdminSessionIdentity> {
+            Box::pin(async move {
+                let identity = identity(&record);
+                self.0.lock().unwrap().replace(record);
+                Ok(identity)
+            })
+        }
+
+        fn inspect_admin(
+            &self,
+            token_hash: [u8; 32],
+            csrf_hash: [u8; 32],
+            now: Timestamp,
+        ) -> ApplicationFuture<'_, AdminSessionIdentity> {
+            Box::pin(async move { self.authenticate(token_hash, csrf_hash, now, None) })
+        }
+
+        fn touch_admin(
+            &self,
+            token_hash: [u8; 32],
+            csrf_hash: [u8; 32],
+            now: Timestamp,
+            next_expires_at: Timestamp,
+        ) -> ApplicationFuture<'_, AdminSessionIdentity> {
+            Box::pin(
+                async move { self.authenticate(token_hash, csrf_hash, now, Some(next_expires_at)) },
+            )
+        }
+
+        fn revoke_admin(&self, token_hash: [u8; 32], _now: Timestamp) -> ApplicationFuture<'_, ()> {
+            Box::pin(async move {
+                let mut row = self.0.lock().unwrap();
+                if row.as_ref().is_some_and(|session| session.token_hash == token_hash) {
+                    row.take();
+                }
+                Ok(())
+            })
+        }
+    }
+
+    fn identity(row: &AdminSessionRecord) -> AdminSessionIdentity {
+        AdminSessionIdentity {
+            actor: row.actor.clone(),
+            expires_at: row.expires_at,
+            absolute_expires_at: row.absolute_expires_at,
+        }
+    }
+
+    fn unauthenticated(result: Result<AdminSessionIdentity, ApplicationError>) -> bool {
+        matches!(result, Err(ApplicationError::Session(SessionError::Unauthenticated)))
+    }
+
+    #[test]
+    fn admin_session_checks_and_renewals_share_validity_but_only_touch_changes_deadline() {
+        let mut test = std::pin::pin!(check_admin_session());
+        assert_eq!(test.as_mut().poll(&mut Context::from_waker(Waker::noop())), Poll::Ready(()));
+    }
+
+    async fn check_admin_session() {
+        let now = Timestamp::now();
+        let at = |seconds| now.checked_add_signed(Duration::seconds(seconds)).unwrap();
+        let actor = "operator".to_owned();
+        let secret = vec![b'a'; 32];
+        let store = Arc::new(MemorySession::default());
+        let service = AdminSessionService::new(
+            store,
+            actor.clone(),
+            secret.clone(),
+            AdminSessionConfig {
+                idle_ttl: Duration::seconds(60),
+                absolute_ttl: Duration::seconds(90),
+            },
+            now,
+        )
+        .await
+        .unwrap();
+        let login = service.login(actor.clone(), secret.clone(), now).await.unwrap();
+        let read = service.current(login.token.clone(), login.csrf_token.clone(), at(45));
+        assert_eq!(read.await.unwrap().expires_at, at(60));
+        let touch = service.touch(login.token.clone(), login.csrf_token.clone(), at(45));
+        assert_eq!(touch.await.unwrap().expires_at, at(90));
+        let read = service.current(login.token.clone(), login.csrf_token.clone(), at(60));
+        assert_eq!(read.await.unwrap().expires_at, at(90));
+
+        let wrong_csrf = generate_token().0;
+        assert!(unauthenticated(
+            service.current(login.token.clone(), wrong_csrf.clone(), at(50)).await
+        ));
+        assert!(unauthenticated(service.touch(login.token.clone(), wrong_csrf, at(50)).await));
+        assert!(unauthenticated(
+            service.current(login.token.clone(), login.csrf_token.clone(), at(90)).await
+        ));
+        assert!(unauthenticated(service.touch(login.token, login.csrf_token, at(90)).await));
+
+        let idle = service.login(actor, secret, now).await.unwrap();
+        assert!(unauthenticated(
+            service.current(idle.token.clone(), idle.csrf_token.clone(), at(60)).await
+        ));
+        assert!(unauthenticated(
+            service.touch(idle.token.clone(), idle.csrf_token.clone(), at(60)).await
+        ));
+        service.logout(idle.token.clone(), at(1)).await.unwrap();
+        assert!(unauthenticated(
+            service.current(idle.token.clone(), idle.csrf_token.clone(), at(2)).await
+        ));
+        assert!(unauthenticated(service.touch(idle.token, idle.csrf_token, at(2)).await));
+    }
 }

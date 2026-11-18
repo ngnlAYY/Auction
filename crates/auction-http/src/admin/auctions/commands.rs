@@ -161,6 +161,16 @@ pub(crate) mod tests {
             })
         }
 
+        // 写请求的守卫会续期；替身的续期与校验返回同一份身份。
+        fn touch(
+            &self,
+            token: String,
+            csrf: String,
+            now: Timestamp,
+        ) -> ApplicationFuture<'_, AdminSessionIdentity> {
+            self.current(token, csrf, now)
+        }
+
         fn logout(&self, _token: String, _now: Timestamp) -> ApplicationFuture<'_, ()> {
             unreachable!("测试只使用已有会话");
         }

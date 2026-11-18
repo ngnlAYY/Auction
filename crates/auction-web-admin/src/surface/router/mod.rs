@@ -21,50 +21,85 @@ use super::{
     renames, returns, rules, settlement, status, support, users,
 };
 
-/// 仅在冷启动含 query 时保存一次原始相对地址，不持久化或记录查询值。
+/// 冷启动的查询和片段只保存在当前页面内存。
 #[cfg(target_arch = "wasm32")]
 #[derive(Clone)]
-struct InitialAdminLocation(Option<Rc<RefCell<Option<String>>>>);
+struct InitialAdminLocation(Rc<RefCell<Option<AdminLocationSuffix>>>);
 
-/// 与 Public 相同，在 Router 规范化地址前保留未在 Routable 声明的查询。
+#[cfg(any(target_arch = "wasm32", test))]
+struct AdminLocationSuffix {
+    pathname: String,
+    search: String,
+    hash: String,
+}
+
+/// 在 Router 规范化地址前保留未在 Routable 声明的查询与片段。
 pub(super) fn use_initial_admin_location() {
     #[cfg(target_arch = "wasm32")]
     use_context_provider(|| {
         let initial = web_sys::window().and_then(|window| {
             let location = window.location();
             let search = location.search().ok()?;
-            if search.is_empty() {
-                return None;
-            }
-            let mut url = location.pathname().ok()?;
+            let pathname = location.pathname().ok()?;
             let hash = location.hash().ok()?;
-            url.reserve(search.len() + hash.len());
-            url.push_str(&search);
-            url.push_str(&hash);
-            Some(url)
+            capture_initial_admin_location(&pathname, &search, &hash)
         });
-        InitialAdminLocation(initial.map(|url| Rc::new(RefCell::new(Some(url)))))
+        InitialAdminLocation(Rc::new(RefCell::new(initial)))
     });
 }
 
-/// 认证请求前恢复当前路径的首次 query；只消费一次，不覆盖后来导航或已有的新查询。
+#[cfg(any(target_arch = "wasm32", test))]
+fn capture_initial_admin_location(
+    pathname: &str,
+    search: &str,
+    hash: &str,
+) -> Option<AdminLocationSuffix> {
+    if (search.is_empty() && hash.is_empty())
+        || !pathname.starts_with('/')
+        || pathname.starts_with("//")
+        || pathname.contains('\\')
+    {
+        return None;
+    }
+    Some(AdminLocationSuffix {
+        pathname: pathname.to_owned(),
+        search: search.to_owned(),
+        hash: hash.to_owned(),
+    })
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn initial_admin_url(
+    initial: &AdminLocationSuffix,
+    pathname: &str,
+    search: &str,
+    hash: &str,
+) -> Option<String> {
+    // 仅补回 Router 去掉的后缀，已有的新查询、片段或导航优先。
+    if (pathname != initial.pathname && initial.pathname.strip_suffix('/') != Some(pathname))
+        || (!search.is_empty() && search != initial.search)
+        || (!hash.is_empty() && hash != initial.hash)
+        || (search == initial.search && hash == initial.hash)
+    {
+        return None;
+    }
+    Some(format!("{pathname}{}{}", initial.search, initial.hash))
+}
+
+/// 认证请求前恢复一次冷启动 URL，保留 Router 已写入的历史状态。
 pub(super) fn restore_initial_admin_location() {
     #[cfg(target_arch = "wasm32")]
     {
-        let Some(initial) =
-            try_consume_context::<InitialAdminLocation>().and_then(|location| location.0)
+        let Some(initial) = try_consume_context::<InitialAdminLocation>() else { return };
+        let Some(initial) = initial.0.borrow_mut().take() else { return };
+        let Some(window) = web_sys::window() else { return };
+        let location = window.location();
+        let (Ok(pathname), Ok(search), Ok(hash)) =
+            (location.pathname(), location.search(), location.hash())
         else {
             return;
         };
-        let Some(url) = initial.borrow_mut().take() else { return };
-        let Some((pathname, _)) = url.split_once('?') else { return };
-        let Some(window) = web_sys::window() else { return };
-        let location = window.location();
-        if location.pathname().ok().as_deref() != Some(pathname)
-            || location.search().ok().as_deref() != Some("")
-        {
-            return;
-        }
+        let Some(url) = initial_admin_url(&initial, &pathname, &search, &hash) else { return };
         if let Ok(history) = window.history() {
             let state = history.state().unwrap_or(wasm_bindgen::JsValue::NULL);
             let _ = history.replace_state_with_url(&state, "", Some(&url));
@@ -250,5 +285,36 @@ fn NotFound(segments: Vec<String>) -> Element {
             h1 { id: "admin-not-found-title", {t!("not-found-title")} }
             p { class: "admin-panel__note", {t!("not-found-note")} }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{capture_initial_admin_location, initial_admin_url};
+
+    #[test]
+    fn admin_bookmark_keeps_query_and_fragment_independently() {
+        let bookmark =
+            capture_initial_admin_location("/dashboard", "", "#dashboard-title").unwrap();
+        assert_eq!(
+            initial_admin_url(&bookmark, "/dashboard", "", "").as_deref(),
+            Some("/dashboard#dashboard-title")
+        );
+        let bookmark = capture_initial_admin_location("/audit", "?page=2", "").unwrap();
+        assert_eq!(
+            initial_admin_url(&bookmark, "/audit", "", "").as_deref(),
+            Some("/audit?page=2")
+        );
+        let bookmark = capture_initial_admin_location("/audit/", "?page=2", "#audit").unwrap();
+        assert_eq!(
+            initial_admin_url(&bookmark, "/audit", "?page=2", "").as_deref(),
+            Some("/audit?page=2#audit")
+        );
+        assert!(capture_initial_admin_location("/audit", "", "").is_none());
+        assert!(capture_initial_admin_location("//example.test", "?page=2", "").is_none());
+        assert!(initial_admin_url(&bookmark, "/users", "", "").is_none());
+        assert!(initial_admin_url(&bookmark, "/audit", "?page=3", "").is_none());
+        assert!(initial_admin_url(&bookmark, "/audit", "", "#other").is_none());
+        assert!(initial_admin_url(&bookmark, "/audit", "?page=2", "#audit").is_none());
     }
 }

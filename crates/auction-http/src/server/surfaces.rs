@@ -207,6 +207,7 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
                 .layer(DefaultBodyLimit::max(4 << 10))
                 .strict_methods("DELETE, GET, POST"),
         )
+        .route("/api/v1/admin/session/activity", post(admin_handlers::renew_admin_session))
         .route("/api/v1/admin/dashboard", get(admin_handlers::dashboard::get))
         .route("/api/v1/admin/worlds", get(admin_handlers::worlds::list))
         .route("/api/v1/admin/worlds/{world_id}", patch(admin_handlers::worlds::set_enabled))

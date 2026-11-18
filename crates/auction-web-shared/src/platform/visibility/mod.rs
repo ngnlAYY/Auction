@@ -1,4 +1,4 @@
-//! 页面可见性共享原语：隐藏期间轮询与重连退避挂起而非重置，恢复可见后继续。
+//! 页面生命周期与可见性原语：隐藏期间轮询与重连退避挂起，恢复可见后继续。
 //! Public 外壳与 Admin 自动轮询共用；是否在恢复可见时补偿刷新由调用方回调决定。
 
 use std::{
@@ -11,6 +11,10 @@ use std::{
 use wasm_bindgen::{JsCast, closure::Closure};
 
 use crate::timer::TimeoutFuture;
+
+#[cfg(target_arch = "wasm32")]
+pub mod activity;
+pub mod broadcast;
 
 type WakerSlot = RefCell<Option<Waker>>;
 type WakerRegistry = RefCell<Vec<Weak<WakerSlot>>>;

@@ -1,0 +1,12 @@
+{
+  "code": "ok",
+  "message": "会话有效",
+  "data": {
+    "authenticated": true,
+    "actor": "operator",
+    "csrf_token": "fixture-csrf-placeholder",
+    "expires_at": "2026-11-18T01:17:03.456789Z",
+    "absolute_expires_at": "2026-11-18T09:02:03.456789Z",
+    "server_time": "2026-11-18T01:02:03.456789Z"
+  }
+}

@@ -126,7 +126,7 @@
 | --- | --- |
 | `[listener]` | `mode = "tcp"`（`address`，默认 Public 8090、Admin 8091）或 `"unix"`（运行目录、socket 路径、组）；Unix 运行目录须归 root 或运行账号、禁止 group/other 写入、无符号链接 |
 | `[http_security]` | origin allowlist（≤16 个精确 origin）、登录/写请求限流、匿名读限流与并发（仅 Public，IPv6 按 /64）、`cookie_secure`（生产必须 true）、请求超时、`trusted_proxy_cidrs`（≤64）、`trusted_unix_proxy` |
-| `[session]` | Public `max_public_sessions`（默认 10，满额注销最久未活动会话）；Admin `idle_ttl_seconds`（900）与 `absolute_ttl_seconds`（28800）。Admin 角色文件写 `max_public_sessions` 会被拒绝 |
+| `[session]` | Public `max_public_sessions`（默认 10，满额注销最久未活动会话）；Admin `idle_ttl_seconds`（默认 900，人工活动或通过守卫的写入推进空闲截止）与 `absolute_ttl_seconds`（默认 28800，自登录起算）。GET 只校验会话。Admin 角色文件写 `max_public_sessions` 会被拒绝 |
 | `[tracing]` | OTLP/HTTP 导出（开关、endpoint、批量与超时、队列容量、采样百万分率） |
 | `[realtime]`（Public） | `consumer_key`（每实例唯一）、轮询间隔、每页流数与事件数、每连接缓冲 |
 

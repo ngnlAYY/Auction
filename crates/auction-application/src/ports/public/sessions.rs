@@ -192,6 +192,15 @@ pub trait AdminSessionStore: Send + Sync {
         record: AdminSessionRecord,
     ) -> ApplicationFuture<'_, AdminSessionIdentity>;
 
+    /// 锁内校验两个凭据摘要、撤销状态与双截止，不修改会话记录。
+    fn inspect_admin(
+        &self,
+        token_hash: [u8; 32],
+        csrf_hash: [u8; 32],
+        now: Timestamp,
+    ) -> ApplicationFuture<'_, AdminSessionIdentity>;
+
+    /// 沿用只读校验的锁内门禁，成功后才更新活动时间与空闲截止。
     fn touch_admin(
         &self,
         token_hash: [u8; 32],
@@ -247,7 +256,16 @@ pub trait AdminSessionPort: Send + Sync {
         now: Timestamp,
     ) -> ApplicationFuture<'_, AdminLoginResult>;
 
+    /// 校验当前会话。页面读取与轮询不能推迟空闲截止。
     fn current(
+        &self,
+        raw_token: String,
+        raw_csrf_token: String,
+        now: Timestamp,
+    ) -> ApplicationFuture<'_, AdminSessionIdentity>;
+
+    /// 校验并续期。只供已经通过写入门禁的人工操作使用。
+    fn touch(
         &self,
         raw_token: String,
         raw_csrf_token: String,

@@ -3,12 +3,12 @@
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
-use crate::api::{AdminReadinessState, login_admin};
+use crate::api::{AdminReadinessState, AdminSession, login_admin};
 use crate::surface::admin_api_error_message;
 
 /// Admin 登录表单；secret 只在提交时进入一次 Basic Auth 请求。
 #[component]
-pub(crate) fn AdminLogin(mut reload_generation: Signal<u64>) -> Element {
+pub(crate) fn AdminLogin(on_login: EventHandler<AdminSession>) -> Element {
     let mut actor = use_signal(String::new);
     let mut secret = use_signal(String::new);
     let mut submitting = use_signal(|| false);
@@ -57,9 +57,7 @@ pub(crate) fn AdminLogin(mut reload_generation: Signal<u64>) -> Element {
                             let result = login_admin(submitted_actor, submitted_secret).await;
                             submitting.set(false);
                             match result {
-                                Ok(_) => {
-                                    reload_generation.set(reload_generation().saturating_add(1));
-                                }
+                                Ok(session) => on_login.call(session),
                                 Err(code) => error_code.set(Some(code)),
                             }
                         });

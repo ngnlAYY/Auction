@@ -25,6 +25,17 @@ impl AdminSessionStore for DatabaseStore {
         Box::pin(async move { admin::create_postgres(self, record).await })
     }
 
+    fn inspect_admin(
+        &self,
+        token_hash: [u8; 32],
+        csrf_hash: [u8; 32],
+        now: Timestamp,
+    ) -> ApplicationFuture<'_, AdminSessionIdentity> {
+        Box::pin(async move {
+            admin::authenticate_postgres(self, token_hash, csrf_hash, now, None).await
+        })
+    }
+
     fn touch_admin(
         &self,
         token_hash: [u8; 32],
@@ -33,7 +44,8 @@ impl AdminSessionStore for DatabaseStore {
         next_expires_at: Timestamp,
     ) -> ApplicationFuture<'_, AdminSessionIdentity> {
         Box::pin(async move {
-            admin::touch_postgres(self, token_hash, csrf_hash, now, next_expires_at).await
+            admin::authenticate_postgres(self, token_hash, csrf_hash, now, Some(next_expires_at))
+                .await
         })
     }
 

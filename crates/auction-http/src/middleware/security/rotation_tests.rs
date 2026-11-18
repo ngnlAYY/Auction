@@ -36,6 +36,20 @@ impl AdminSessionStore for MemorySessions {
         })
     }
 
+    fn inspect_admin(
+        &self,
+        token_hash: [u8; 32],
+        csrf_hash: [u8; 32],
+        now: Timestamp,
+    ) -> ApplicationFuture<'_, AdminSessionIdentity> {
+        Box::pin(async move {
+            let rows = self.0.lock().unwrap();
+            let row = rows.get(&token_hash).ok_or(SessionError::Unauthenticated)?;
+            check_session(row, csrf_hash, now)?;
+            Ok(identity(row))
+        })
+    }
+
     fn touch_admin(
         &self,
         token_hash: [u8; 32],
@@ -46,11 +60,8 @@ impl AdminSessionStore for MemorySessions {
         Box::pin(async move {
             let mut rows = self.0.lock().unwrap();
             let row = rows.get_mut(&token_hash).ok_or(SessionError::Unauthenticated)?;
-            if row.csrf_hash != csrf_hash || row.expires_at <= now || row.absolute_expires_at <= now
-            {
-                return Err(SessionError::Unauthenticated.into());
-            }
-            row.expires_at = next_expires_at.min(row.absolute_expires_at);
+            check_session(row, csrf_hash, now)?;
+            row.expires_at = row.expires_at.max(next_expires_at).min(row.absolute_expires_at);
             Ok(identity(row))
         })
     }
@@ -61,6 +72,17 @@ impl AdminSessionStore for MemorySessions {
             Ok(())
         })
     }
+}
+
+fn check_session(
+    row: &AdminSessionRecord,
+    csrf_hash: [u8; 32],
+    now: Timestamp,
+) -> Result<(), SessionError> {
+    if row.csrf_hash != csrf_hash || row.expires_at.min(row.absolute_expires_at) <= now {
+        return Err(SessionError::Unauthenticated);
+    }
+    Ok(())
 }
 
 fn identity(record: &AdminSessionRecord) -> AdminSessionIdentity {
@@ -81,6 +103,17 @@ async fn service(store: Arc<MemorySessions>, secret: u8) -> AdminSessionService 
     )
     .await
     .unwrap()
+}
+
+#[tokio::test]
+async fn reading_admin_session_keeps_idle_deadline() {
+    let store = Arc::new(MemorySessions::default());
+    let service = service(store, b'a').await;
+    let now = Timestamp::now();
+    let login = service.login("operator".to_owned(), vec![b'a'; 32], now).await.unwrap();
+    let later = now.checked_add_signed(Duration::minutes(1)).unwrap();
+    let read = service.current(login.token, login.csrf_token, later).await.unwrap();
+    assert_eq!(read.expires_at, login.identity.expires_at);
 }
 
 #[tokio::test]

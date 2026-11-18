@@ -40,7 +40,7 @@
 
 ### 写命令
 
-持久化业务命令通常带客户端生成的 `command_id`（UUID）。服务端以“命令种类 + 聚合 + 请求摘要”记账：同一 ID 同一请求重放原结果；同一 ID 不同请求返回 `409 command_conflict`（部分 owner 使用专属冲突码）。客户端在结果不确定（超时、断网）时必须用**同一 ID 与同一请求体**重试。多数业务命令还要求携带服务端投影给出的期望版本（`expected_version`、`expected_state_version`、`expected_fencing_version`），版本不匹配时返回 409，需重新读取后再决定。登录、退出、空 PUT 会话同步、规则/关于/runtime 候选校验、人工 Sent 证明预览、凭据在线校验与首次设置不使用该命令外壳；realtime 重放兼容省略 ID，由服务端按请求确定生成稳定 ID。
+持久化业务命令通常带客户端生成的 `command_id`（UUID）。服务端以“命令种类 + 聚合 + 请求摘要”记账：同一 ID 同一请求重放原结果；同一 ID 不同请求返回 `409 command_conflict`（部分 owner 使用专属冲突码）。客户端在结果不确定（超时、断网）时必须用**同一 ID 与同一请求体**重试。多数业务命令还要求携带服务端投影给出的期望版本（`expected_version`、`expected_state_version`、`expected_fencing_version`），版本不匹配时返回 409，需重新读取后再决定。登录、退出、Admin 人工活动续期、空 PUT 会话同步、规则/关于/runtime 候选校验、人工 Sent 证明预览、凭据在线校验与首次设置不使用该命令外壳；realtime 重放兼容省略 ID，由服务端按请求确定生成稳定 ID。
 
 浏览器解除“结果未知”必须依据该路由可识别的确定响应，不能只依据 HTTP 409。标记、提醒渠道偏好与登录时长偏好的确定冲突分别为 `409 watch_conflict`、`409 watch_preference_conflict`、`409 session_preference_conflict`；无法解码或不符合该路由契约的 409 不解除此前累计的未知状态，仍须保留原命令与请求重试。
 
@@ -219,11 +219,14 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 
 ## Admin API
 
-除 `POST /api/v1/admin/session` 外全部需要 Admin 会话 Cookie `auction_admin_session` 与 CSRF Cookie `auction_admin_csrf`；写请求还须在 `x-csrf-token` 头回传相同 CSRF token。登录及当前会话 DTO 也返回 `csrf_token`，供浏览器持于内存。全部业务响应 `no-store`。
+除 `POST /api/v1/admin/session` 外全部需要 Admin 会话 Cookie `auction_admin_session` 与 CSRF Cookie `auction_admin_csrf`。已认证的 GET 只校验会话。写请求按限流、Origin、CSRF、会话的顺序检查，在 `x-csrf-token` 头回传与 CSRF Cookie 相同的 token，通过后更新空闲截止，最多到绝对截止。全部业务响应 `no-store`。
+
+登录和会话读取的缺省 `data` 保留 `authenticated: true`、`actor`、`csrf_token`、`expires_at`、`absolute_expires_at` 五个已发布的字段。请求 `include=server_time` 时只追加 `server_time`，活动续期始终包含该字段。时刻均为 UTC RFC 3339 微秒格式，`server_time` 是生成本次响应时的服务端时刻。新页面显式请求该投影并据此计算剩余时长，旧页面可继续解码缺省投影。
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET / POST / DELETE | `/api/v1/admin/session` | 读取会话 / Basic 认证登录（actor:secret）/ 退出 |
+| GET / POST / DELETE | `/api/v1/admin/session` | 读取会话 / Basic 认证登录（actor:secret）/ 退出。GET 和 POST 接受可选的 `include=server_time`，其他取值、重复参数或未知查询键返回 400 `invalid_query` |
+| POST | `/api/v1/admin/session/activity` | 上报人工活动并续期。空请求体，无需 `Content-Type`，使用 Admin 写入限流，成功时返回带 `server_time` 的会话 DTO。无需 `command_id`，不追加审计 |
 | GET | `/api/v1/admin/dashboard` | 仪表盘聚合快照（健康、Worker、进程、邮件、外部账号、realtime、凭据、投递、履约、恢复、告警、资产对账）。查询参数只有可选的 `include`，且只接受 `collection_wait`：其他取值（含空值、大小写不同与逗号列表）为 400 `invalid_query`（附加字段无效），重复出现或其他查询键为 400 `invalid_query`（查询参数无效）。不带 `include` 时保持已发布的字段集合与口径，已打开的旧页面照常解码（兼容规则见[crates/auction-contracts/README.md#变更规则](../../crates/auction-contracts/README.md#变更规则)）：履约分区含可推进积压（`pending`）、受阻、失败、人工核对、等待买家付款与等待前置分类，已寄出、只等收件人领取的 Send 义务仍计入 `pending` 与 `oldest_backlog_age_seconds` 并参与分区降级，不评估长期未领取；`reconciliation` 分区各 world 只含缺失件数 `custody_missing_count` 与待付缺口 `solvency_shortfall_credits`。带 `include=collection_wait`（Admin 页面始终携带）时：履约分区按等待领取口径，已寄出的 Send 义务不计入 `pending`、积压年龄与 `fulfillment_backlog`，单列“等待领取”分组——总等待数 `awaiting_collection`、其中最近一次 Sent 读取失败的 `awaiting_collection_unreadable`、按投递完成时刻计的 `oldest_awaiting_collection_age_seconds`、按 Admin 生效的告警策略阈值计的超期件数 `collection_overdue_count`（大于 0 时分区降级，与 `fulfillment_collection_overdue` 告警同一计数），以及与之同一只读快照的长期未领取清单 `collection_overdue_items`：只列寄出时长达到阈值的等待领取，寄出最早优先，最多 20 条，每项含 `obligation_id`、`obligation_kind`（`seller_payout`/`buyer_refund`/`unsold_return`/`withdrawn_return`/`winner_equipment_handoff`）、场次 `world` 与 `auction_sequence`、`lot_number`（分类内编号，与 `equipment_category` 组成拍品代码）、`equipment_category`、`equipment_name`、收件人 `recipient`、寄出时刻 `sent_at`、已等待秒数 `age_seconds` 与 `last_read_failed`（最近一次 Sent 读取失败；`false` 只表示没有记录读取失败）；没有告警策略时不评估超期，计数为 0、清单为空；COD/载体付款仍按等待买家付款口径；原投递本轮的系统退件已被恢复流程消费（交付被退回、恢复记录当前退件指向已消费的本义务退件，常见于 Take 已完成、Admin 尚未确认 `equipment_recovered`）的义务不计入等待领取、超期件数与清单，也不回落 `pending`，由恢复流程承担；`reconciliation` 分区各 world 追加只展示、不参与降级的在途装备件数 `custody_in_transit_count` 与在途货款/退款笔数和金额 `solvency_in_transit_count`/`solvency_in_transit_credits`。回滚到不认识该参数的服务端后，新页面这次读取为 400 `invalid_query`，按构建号提示刷新后恢复。两种投影共有：审计失败计数汇总 Public、Admin 与 Worker 的有效心跳，`missing_services` 标记缺测角色；凭据分区的活跃数是数据库记录，`restart_required` 为 `true` 表示 Worker 待重启，为 `null` 表示无法确认。`realtime.failure.oldest_at` 是未解决失败的最早发生时刻，无未解决失败时为 `null`。告警分区含 Webhook 待重试/发送中/失败/人工核对计数；对账报告缺失时 `reconciliation` 为 `unknown`；`external_accounts` 分区只在 Worker control 快照不可用时为 `unknown`，否则含忙碌时长、请求门等待、维护轮次与论坛状态，并嵌套 `pollers`/`credentials` 投影（各自带 `available|unavailable`），缺失的投影不冒充空列表；Admin 页面默认每 30 秒自动轮询（`poll=0` 关闭，10/30/60 秒可选） |
 | GET | `/api/v1/admin/alerts` | 告警台列表（`status=active|resolved|all`，默认 `active`；`source`；`page`、`page_size` ≤100）；`total` 只计所选状态，`active_total`/`resolved_total` 是不随状态筛选变化的两类计数；返回来源、范围、首次/最近时间、计数、确认/静默投影与处置手册锚点 `runbook_anchor` |
 | GET | `/api/v1/admin/alerts/webhooks` | 最近 webhook 投递安全投影（`limit` 1–100，默认 50）；返回状态、kind/source/scope、尝试次数、下次尝试/发送/完成时间与失败码，不含冻结 JSON、收件人或凭据；只读 |

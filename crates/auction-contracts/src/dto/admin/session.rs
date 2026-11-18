@@ -11,6 +11,9 @@ pub struct AdminSessionResponse {
     pub csrf_token: String,
     pub expires_at: String,
     pub absolute_expires_at: String,
+    /// 读取与登录仅在 `include=server_time` 时输出。活动续期始终输出。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_time: Option<String>,
 }
 
 impl std::fmt::Debug for AdminSessionResponse {
@@ -22,6 +25,7 @@ impl std::fmt::Debug for AdminSessionResponse {
             .field("csrf_token", &"[REDACTED]")
             .field("expires_at", &self.expires_at)
             .field("absolute_expires_at", &self.absolute_expires_at)
+            .field("server_time", &self.server_time)
             .finish()
     }
 }

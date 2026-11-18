@@ -3,7 +3,6 @@
 use auction_application::core::{ApplicationError, SessionError};
 use auction_application::public::{AdminSessionIdentity, AdminSessionRecord};
 use auction_time::Timestamp;
-use sqlx::Row;
 
 use crate::database::DatabaseStore;
 use crate::database::storage_error_from;
@@ -86,50 +85,63 @@ pub(super) async fn create_postgres(
     ).await
 }
 
-pub(super) async fn touch_postgres(
+// 先物化带锁的行，再用数据库实时钟判断双截止。排队到过期或撤销之后的请求不能续活。
+macro_rules! valid_admin_session {
+    ($lock:literal, $sql:literal) => {
+        concat!(
+            "WITH locked AS MATERIALIZED (
+                SELECT token_hash, actor, expires_at, absolute_expires_at
+                FROM public.admin_sessions
+                WHERE token_hash = $1 AND csrf_hash = $2 AND revoked_at IS NULL
+                FOR ",
+            $lock,
+            "
+             ), valid AS MATERIALIZED (
+                SELECT * FROM locked
+                WHERE LEAST(expires_at, absolute_expires_at) > GREATEST($3, clock_timestamp())
+             ) ",
+            $sql
+        )
+    };
+}
+
+pub(super) async fn authenticate_postgres(
     store: &DatabaseStore,
     token_hash: [u8; 32],
     csrf_hash: [u8; 32],
     now: Timestamp,
-    next_expires_at: Timestamp,
+    next_expires_at: Option<Timestamp>,
 ) -> Result<AdminSessionIdentity, ApplicationError> {
-    // 物化锁定行后再判断截止；只在 UPDATE 谓词换用实时钟，仍可能先判断再等待行锁。
-    let row = sqlx::query(
-        "WITH locked AS MATERIALIZED (
-            SELECT token_hash, expires_at
-            FROM public.admin_sessions
-            WHERE token_hash = $3 AND csrf_hash = $4 AND revoked_at IS NULL
-            FOR UPDATE
-         )
-         UPDATE public.admin_sessions AS session
-         SET last_activity_at = GREATEST(session.last_activity_at, $1),
-             expires_at = LEAST(session.absolute_expires_at, GREATEST(session.expires_at, $2))
-         FROM locked
-         WHERE session.token_hash = locked.token_hash
-           AND locked.expires_at > GREATEST($1, clock_timestamp())
-         RETURNING session.actor, session.expires_at, session.absolute_expires_at",
-    )
-    .bind(now)
-    .bind(next_expires_at)
-    .bind(token_hash.as_slice())
-    .bind(csrf_hash.as_slice())
-    .fetch_optional(store.pool())
-    .await
-    .map_err(|error| storage_error_from(error, "刷新 Admin 会话失败"))?;
-    let Some(row) = row else {
+    const INSPECT: &str =
+        valid_admin_session!("SHARE", "SELECT actor, expires_at, absolute_expires_at FROM valid");
+    // 较晚获得锁的旧请求不能倒退截止，续期也不能越过绝对截止。
+    const TOUCH: &str = valid_admin_session!(
+        "UPDATE",
+        "UPDATE public.admin_sessions AS session
+         SET last_activity_at = GREATEST(session.last_activity_at, $3),
+             expires_at = LEAST(session.absolute_expires_at, GREATEST(session.expires_at, $4))
+         FROM valid
+         WHERE session.token_hash = valid.token_hash
+         RETURNING session.actor, session.expires_at, session.absolute_expires_at"
+    );
+    let sql = if next_expires_at.is_some() { TOUCH } else { INSPECT };
+    let query = sqlx::query_as::<_, (String, Timestamp, Timestamp)>(sql)
+        .bind(token_hash.as_slice())
+        .bind(csrf_hash.as_slice())
+        .bind(now);
+    let query = match next_expires_at {
+        Some(deadline) => query.bind(deadline),
+        None => query,
+    };
+    let Some((actor, expires_at, absolute_expires_at)) =
+        query
+            .fetch_optional(store.pool())
+            .await
+            .map_err(|error| storage_error_from(error, "校验或续期 Admin 会话失败"))?
+    else {
         return Err(SessionError::Unauthenticated.into());
     };
-    Ok(AdminSessionIdentity {
-        actor: row
-            .try_get("actor")
-            .map_err(|error| storage_error_from(error, "读取 Admin 会话主体失败"))?,
-        expires_at: row
-            .try_get("expires_at")
-            .map_err(|error| storage_error_from(error, "读取 Admin 会话过期时间失败"))?,
-        absolute_expires_at: row
-            .try_get("absolute_expires_at")
-            .map_err(|error| storage_error_from(error, "读取 Admin 会话绝对过期时间失败"))?,
-    })
+    Ok(AdminSessionIdentity { actor, expires_at, absolute_expires_at })
 }
 
 pub(super) async fn revoke_postgres(

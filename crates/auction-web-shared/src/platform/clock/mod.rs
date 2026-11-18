@@ -9,6 +9,25 @@ use dioxus::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::{JsCast, closure::Closure};
 
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = performance, js_name = now)]
+    fn performance_now() -> f64;
+}
+
+/// 当前页面的单调毫秒，只用于计时；宿主构建没有浏览器时钟。
+pub fn monotonic_millis() -> f64 {
+    #[cfg(target_arch = "wasm32")]
+    {
+        performance_now()
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        0.0
+    }
+}
+
 /// 外壳持有的秒级时钟句柄，由 [`use_second_ticker`] 创建并提供给子树。
 #[derive(Clone)]
 pub struct SecondTicker {

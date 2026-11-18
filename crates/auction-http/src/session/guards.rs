@@ -135,11 +135,11 @@ pub(crate) async fn authenticated_admin_session(
     authenticated_admin_session_with_csrf(state, headers, None).await
 }
 
-// 写守卫复用已经解析并核对请求头的 CSRF Cookie，保持 session 能力及 token 的错误顺序。
+// 只有已核对写请求 CSRF 的调用方才传入 Cookie 并续期，后台读取只校验会话。
 async fn authenticated_admin_session_with_csrf(
     state: &AdminApiState,
     headers: &HeaderMap,
-    raw_csrf: Option<String>,
+    checked_write_csrf: Option<String>,
 ) -> Result<(String, AdminSessionIdentity), Box<Response>> {
     let Some(session) = state.session() else {
         return Err(Box::new(session_unavailable()));
@@ -147,10 +147,19 @@ async fn authenticated_admin_session_with_csrf(
     let Some(raw_token) = read_admin_cookie(headers, ADMIN_SESSION_COOKIE) else {
         return Err(Box::new(authentication_error()));
     };
-    let Some(raw_csrf) = raw_csrf.or_else(|| read_admin_cookie(headers, ADMIN_CSRF_COOKIE)) else {
+    let renew = checked_write_csrf.is_some();
+    let Some(raw_csrf) =
+        checked_write_csrf.or_else(|| read_admin_cookie(headers, ADMIN_CSRF_COOKIE))
+    else {
         return Err(Box::new(authentication_error()));
     };
-    match session.current(raw_token, raw_csrf.clone(), Timestamp::now()).await {
+    let now = Timestamp::now();
+    let result = if renew {
+        session.touch(raw_token, raw_csrf.clone(), now).await
+    } else {
+        session.current(raw_token, raw_csrf.clone(), now).await
+    };
+    match result {
         Ok(identity) => Ok((raw_csrf, identity)),
         Err(error) if is_unauthenticated(&error) => Err(Box::new(authentication_error())),
         Err(diagnostic_cause) => {

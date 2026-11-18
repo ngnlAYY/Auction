@@ -6,8 +6,10 @@
 //! `support` 负责临时集群、模板库迁移与逐测试克隆库；测试本身只使用公开的存储入口。
 
 use auction_application::auction::{PublicPriceHistoryReader, WorldReader};
+use auction_application::core::{ApplicationError, SessionError};
+use auction_application::public::{AdminSessionRecord, AdminSessionStore};
 use auction_storage::postgres_expected_migration_version;
-use auction_time::Timestamp;
+use auction_time::{Duration, Timestamp};
 
 use crate::support;
 
@@ -83,6 +85,110 @@ async fn postgres_clones_migrated_template_per_test() {
         .expect("读取克隆库场次行数");
     assert_eq!(auctions, 0, "克隆库只包含模板库的 schema 与迁移种子");
 
+    store.postgres_pool().close().await;
+}
+
+#[tokio::test]
+async fn postgres_admin_session_inspect_leaves_activity_unchanged_and_touch_caps_at_absolute() {
+    let database = support::TestDatabase::create().await.unwrap();
+    let store = database.store().await.unwrap();
+    let token_hash = [1; 32];
+    let csrf_hash = [2; 32];
+    let now = Timestamp::from_timestamp_micros(Timestamp::now().timestamp_micros()).unwrap();
+    let at = |seconds| now.checked_add_signed(Duration::seconds(seconds)).unwrap();
+    store
+        .create_admin(AdminSessionRecord {
+            token_hash,
+            csrf_hash,
+            actor: "operator".to_owned(),
+            created_at: now,
+            expires_at: at(900),
+            absolute_expires_at: at(1_000),
+        })
+        .await
+        .unwrap();
+    let activity = || {
+        sqlx::query_scalar::<_, Timestamp>(
+            "SELECT last_activity_at FROM public.admin_sessions WHERE token_hash = $1",
+        )
+        .bind(token_hash.as_slice())
+        .fetch_one(store.postgres_pool())
+    };
+    let checked = store.inspect_admin(token_hash, csrf_hash, at(200)).await.unwrap();
+    assert_eq!(checked.expires_at, at(900));
+    assert_eq!(activity().await.unwrap(), now);
+
+    let renewed = store.touch_admin(token_hash, csrf_hash, at(200), at(1_100)).await.unwrap();
+    assert_eq!(renewed.expires_at, at(1_000));
+    assert_eq!(renewed.absolute_expires_at, at(1_000));
+    assert_eq!(activity().await.unwrap(), at(200));
+    let older = store.touch_admin(token_hash, csrf_hash, at(50), at(950)).await.unwrap();
+    assert_eq!(older.expires_at, renewed.expires_at);
+    assert_eq!(activity().await.unwrap(), at(200));
+
+    for (csrf_hash, now) in [([3; 32], at(300)), (csrf_hash, at(1_000))] {
+        let checked = store.inspect_admin(token_hash, csrf_hash, now).await;
+        let touched = store.touch_admin(token_hash, csrf_hash, now, at(1_200)).await;
+        assert!(matches!(checked, Err(ApplicationError::Session(SessionError::Unauthenticated))));
+        assert!(matches!(touched, Err(ApplicationError::Session(SessionError::Unauthenticated))));
+    }
+    store.revoke_admin(token_hash, at(400)).await.unwrap();
+    let checked = store.inspect_admin(token_hash, csrf_hash, at(450)).await;
+    let touched = store.touch_admin(token_hash, csrf_hash, at(450), at(1_300)).await;
+    assert!(matches!(checked, Err(ApplicationError::Session(SessionError::Unauthenticated))));
+    assert!(matches!(touched, Err(ApplicationError::Session(SessionError::Unauthenticated))));
+    assert_eq!(activity().await.unwrap(), at(200));
+    store.postgres_pool().close().await;
+}
+
+#[tokio::test]
+async fn postgres_admin_session_cannot_be_validated_or_renewed_after_waiting_past_deadline() {
+    let database = support::TestDatabase::create().await.unwrap();
+    let store = database.store().await.unwrap();
+    for renew in [false, true] {
+        let token_hash = [u8::from(renew) + 1; 32];
+        let csrf_hash = [3; 32];
+        let now = Timestamp::now();
+        let expires_at = now.checked_add_signed(Duration::seconds(2)).unwrap();
+        let absolute_expires_at = now.checked_add_signed(Duration::minutes(5)).unwrap();
+        store
+            .create_admin(AdminSessionRecord {
+                token_hash,
+                csrf_hash,
+                actor: "operator".to_owned(),
+                created_at: now,
+                expires_at,
+                absolute_expires_at,
+            })
+            .await
+            .unwrap();
+        let mut transaction = store.postgres_pool().begin().await.unwrap();
+        sqlx::query(
+            "SELECT token_hash FROM public.admin_sessions WHERE token_hash = $1 FOR UPDATE",
+        )
+        .bind(token_hash.as_slice())
+        .fetch_one(&mut *transaction)
+        .await
+        .unwrap();
+        let operation = async {
+            if renew {
+                store.touch_admin(token_hash, csrf_hash, now, absolute_expires_at).await
+            } else {
+                store.inspect_admin(token_hash, csrf_hash, now).await
+            }
+        };
+        let release = async move {
+            // 以数据库时间跨过截止，再释放另一连接上的会话行锁。
+            sqlx::query("SELECT pg_sleep_until($1)")
+                .bind(expires_at.checked_add_signed(Duration::milliseconds(10)).unwrap())
+                .execute(&mut *transaction)
+                .await
+                .unwrap();
+            transaction.commit().await.unwrap();
+        };
+        let (result, ()) = tokio::join!(operation, release);
+        assert!(matches!(result, Err(ApplicationError::Session(SessionError::Unauthenticated))));
+    }
     store.postgres_pool().close().await;
 }
 
