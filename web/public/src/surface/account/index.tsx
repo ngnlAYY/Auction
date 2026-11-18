@@ -310,6 +310,11 @@ interface BidSectionProps {
   readonly onPageClamp: (page: number) => void;
 }
 
+/** 同一拍品的多笔出价分别标识，刷新时查看按钮随各自的记录保留。 */
+export function ownedBidRowKey(bid: Pick<OwnedBid, "id">): string {
+  return bid.id;
+}
+
 function BidSection(props: BidSectionProps): JSX.Element {
   return (
     <section class="public-account-section" aria-labelledby="account-bids-title">
@@ -335,7 +340,7 @@ function BidSection(props: BidSectionProps): JSX.Element {
               </tr>
             </thead>
             <tbody>
-              <For each={props.bids} keyed={false}>
+              <For each={props.bids} keyed={ownedBidRowKey}>
                 {(bid) => <BidRow bid={bid()} />}
               </For>
             </tbody>
@@ -407,6 +412,11 @@ interface ProxySectionProps {
   readonly onPageClamp: (page: number) => void;
 }
 
+/** 代理状态变化可更新原行，授权更换后使用新的行。 */
+export function ownedProxyRowKey(proxy: Pick<OwnedProxy, "authorization_id">): string {
+  return proxy.authorization_id;
+}
+
 function ProxySection(props: ProxySectionProps): JSX.Element {
   return (
     <section class="public-account-section" aria-labelledby="account-proxies-title">
@@ -434,7 +444,7 @@ function ProxySection(props: ProxySectionProps): JSX.Element {
               </tr>
             </thead>
             <tbody>
-              <For each={props.proxies} keyed={false}>
+              <For each={props.proxies} keyed={ownedProxyRowKey}>
                 {(proxy) => <ProxyRow proxy={proxy()} />}
               </For>
             </tbody>

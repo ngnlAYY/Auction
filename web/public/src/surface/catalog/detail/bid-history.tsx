@@ -1,7 +1,10 @@
 // 详情抽屉里的竞价历史：最近几条紧凑记录，以及按页浏览全部记录的弹窗。
 // 两者都只读公开竞价记录；出价成功与实时竞价通知触发同一刷新节拍。
 
-import type { PublicBidLogListResponse } from "@auction/contracts/dto/public/catalog/history";
+import type {
+  PublicBidLogEntryResponse,
+  PublicBidLogListResponse,
+} from "@auction/contracts/dto/public/catalog/history";
 import { createCell } from "@auction/web-shared/reactive/cell";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import { createTaskResource } from "@auction/web-shared/reactive/resource";
@@ -22,6 +25,11 @@ import { BidHistoryParticipant, bidHistoryRows } from "../rows";
 const LATEST_BIDS = 4;
 /** 完整历史弹窗的固定页长。弹窗不提供页长选择，也不读写地址栏分页参数。 */
 const HISTORY_PAGE_SIZE = 10;
+
+/** 展开后的落败代理已有独立 id，与胜出记录各自保留行。 */
+export function bidHistoryRowKey(bid: PublicBidLogEntryResponse): string {
+  return bid.id;
+}
 
 /** 最近出价。`returnFocus` 为真时“查看全部”带 autofocus：完整历史弹窗关闭后焦点回到它。 */
 export function DetailLatestBids(props: {
@@ -100,7 +108,7 @@ export function DetailLatestBids(props: {
         <Match when={nonEmptyPage()}>
           {(current) => (
             <ol class="public-catalog-detail__bids">
-              <For each={bidHistoryRows(current().bids)} keyed={(bid) => bid.id}>
+              <For each={bidHistoryRows(current().bids)} keyed={bidHistoryRowKey}>
                 {(bid) => (
                   <li
                     class={
@@ -244,7 +252,7 @@ function BidHistoryTable(props: { readonly page: PublicBidLogListResponse }): JS
           </tr>
         </thead>
         <tbody>
-          <For each={bidHistoryRows(props.page.bids)} keyed={false}>
+          <For each={bidHistoryRows(props.page.bids)} keyed={bidHistoryRowKey}>
             {(bid) => (
               <tr
                 class={bid().valid ? "public-auction-lot__leading" : ""}

@@ -2,12 +2,13 @@
 // 页面不保存或回显服务端 session token；登录成功后只展示安全身份投影。登录 key 只用于一次
 // 请求，提交后立即从表单状态清空，不进入日志、本地存储或 URL。
 
+import type { PublicRegistrationInfoResponse } from "@auction/contracts/dto/public/account";
 import { useFocusElementByIdAfterRender } from "@auction/web-shared/platform/a11y";
 import { createCell } from "@auction/web-shared/reactive/cell";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
-import { createTaskResource } from "@auction/web-shared/reactive/resource";
+import { createTaskResource, type ResourceState } from "@auction/web-shared/reactive/resource";
 import { createTaskScope } from "@auction/web-shared/reactive/tasks";
-import { ok } from "@auction/web-shared/result";
+import { ok, type Result } from "@auction/web-shared/result";
 import { useRouter } from "@auction/web-shared/router";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
@@ -27,6 +28,37 @@ import { rustTrim, safeReturnPath } from "./login-return";
 type LoginState =
   | { readonly kind: "success"; readonly session: PublicSession }
   | { readonly kind: "failure"; readonly error: PublicSessionApiError };
+
+type RegistrationView =
+  | { readonly kind: "loading" }
+  | { readonly kind: "error" }
+  | { readonly kind: "ready"; readonly accounts: string };
+
+/** 名单重读挂起时优先显示加载态，即使资源仍保留上一次的结果。 */
+function registrationView(
+  state: ResourceState,
+  result: Result<PublicRegistrationInfoResponse, string> | undefined,
+): RegistrationView {
+  if (state === "pending") {
+    return { kind: "loading" };
+  }
+  if (result?.ok !== true) {
+    return { kind: "error" };
+  }
+  return { kind: "ready", accounts: result.value.bot_players.join(", ") };
+}
+
+/** 注册名单只通过自己的匿名读取与重试入口更新。 */
+export function useRegistrationAccounts() {
+  const accounts = createTaskResource(
+    () => null,
+    (_dependencies, context) => fetchRegistrationInfo(context.signal),
+  );
+  return {
+    view: createValueMemo(() => registrationView(accounts.state(), accounts())),
+    retry: accounts.restart,
+  };
+}
 
 /** 登录页的路由 props；返回地址保持响应式，查询变化后必须重算。 */
 export interface LoginProps {
@@ -57,25 +89,22 @@ export function login(input: LoginProps | string | null = null): JSX.Element {
     { defer: true },
   );
   const sessionResource = useContext(PublicSessionResourceContext);
-  const registrationAccounts = createTaskResource(
-    () => null,
-    async (_dependencies, context) => {
-      const info = await fetchRegistrationInfo(context.signal);
-      if (!context.alive()) {
-        return { ok: false as const, error: "network_error" };
-      }
-      return info.ok ? ok(info.value.bot_players.join(", ")) : info;
-    },
-  );
+  const registration = useRegistrationAccounts();
   const router = useRouter();
   const tasks = createTaskScope();
   const returnPath = createValueMemo(() => safeReturnPath(returnTo()));
-  const botAccount = () => {
-    const accounts = registrationAccounts();
-    if (accounts === undefined || !accounts.ok || accounts.value === "") {
-      return "";
+  const registrationFailed = () => registration.view().kind === "error";
+  const registrationHint = () => {
+    const view = registration.view();
+    if (view.kind === "loading") {
+      return t("data-loading");
     }
-    return t("login-bot-account", { accounts: accounts.value });
+    if (view.kind === "error") {
+      return t("data-error");
+    }
+    const botAccount =
+      view.accounts === "" ? "" : t("login-bot-account", { accounts: view.accounts });
+    return t("login-hint", { bot_account: botAccount });
   };
   const failed = () => result()?.kind === "failure";
   const failure = () => {
@@ -173,9 +202,19 @@ export function login(input: LoginProps | string | null = null): JSX.Element {
           {submitting() ? t("login-working") : t("login-submit")}
         </button>
       </form>
-      <p id="public-login-hint" class="public-account-login-hint">
-        {t("login-hint", { bot_account: botAccount() })}
+      <p
+        id="public-login-hint"
+        class="public-account-login-hint"
+        role={registrationFailed() ? "alert" : "status"}
+      >
+        {registrationHint()}
       </p>
+      <Show when={registrationFailed()}>
+        {/* 名单重试只重启匿名读取，不能重提登录或清空已输入的 key。 */}
+        <button type="button" onClick={() => registration.retry()}>
+          {t("data-retry")}
+        </button>
+      </Show>
       <Show when={success()}>
         {(session) => (
           <p class="action-feedback action-feedback--success" role="status">

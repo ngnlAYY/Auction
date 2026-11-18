@@ -217,11 +217,19 @@
     .public-catalog-category-menu__toggle[aria-expanded="true"] {
     border-color: var(--color-accent);
   }
+}
 
+/* 共用 mobile.css 在触控平板也切换到手机控件，面板和遮罩必须覆盖同一范围才能点外部提交。 */
+@media screen and (max-width: 48rem), screen and (max-width: 64rem) and (pointer: coarse) {
+  .public-auction-live .public-auction-type-toolbar {
+    position: relative;
+  }
+
+  /* 遮罩位于吸顶栏之上、分类面板之下；两者都在拍品抽屉和弹窗下方。 */
   .public-auction-live .public-auction-type-toolbar .public-catalog-category-menu__backdrop {
     position: fixed;
     inset: 0;
-    z-index: 60;
+    z-index: calc(var(--z-dialog) - 4);
   }
 
   /* 面板与筛选区等宽：“全部”独占第一行，七个分类排成两列，计数靠右。 */
@@ -229,7 +237,7 @@
     position: absolute;
     inset-block-start: calc(100% - var(--space-1));
     inset-inline: var(--space-3);
-    z-index: 61;
+    z-index: calc(var(--z-dialog) - 3);
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0 var(--space-2);
@@ -295,15 +303,13 @@
     font-size: var(--text-sm);
     font-weight: 600;
   }
+}
 
+@media screen and (max-width: 48rem) {
   /*
    * 列设置面板：定位基准从图标按钮换成整条工具栏，面板与筛选区等宽；
    * 标题与“全选”占第一行，各列的勾选项按可用宽度排成两到三列。
    */
-  .public-auction-live .public-auction-type-toolbar {
-    position: relative;
-  }
-
   .public-auction-live .public-auction-type-toolbar .public-catalog-columns-menu {
     position: static;
   }

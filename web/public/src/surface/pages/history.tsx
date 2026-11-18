@@ -16,9 +16,10 @@ import { Time } from "@auction/web-shared/ui/components/time";
 import { formatCreditAmount } from "@auction/web-shared/ui/format";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
-import { createEffect, For, Match, Show, Switch } from "solid-js";
+import { type Accessor, createEffect, For, Match, Show, Switch, useContext } from "solid-js";
 
 import { fetchAuctionHistoryPage } from "../../api/queries/directory";
+import { PublicRefreshGenerationContext } from "../board/refresh";
 import { WorldTabs, worldLabel } from "../board/world";
 import {
   auctionStatusClass,
@@ -39,46 +40,16 @@ interface LoadedHistory {
   readonly result: Result<AuctionListResponse<AuctionSummaryV2Response>, string>;
 }
 
-/** 历史拍卖列表入口；本页只列已结算场次，状态筛选已移除。页面里没有世界下拉框，世界范围由
- * 页面顶部的世界按钮组（WorldTabs）写入地址栏；Rust 版页面内有世界与状态两个下拉框。 */
-export function AuctionList(): JSX.Element {
-  // 世界范围与页码仍来自地址栏；状态不再读取查询参数。
-  const queryState = usePublicQueryState();
-  const queryStateSignal = queryState.state;
-  const worldFilter = createValueMemo(() => queryStateSignal().world ?? "all");
-  const pageNumber = createValueMemo(() => Math.max(queryStateSignal().page, 1));
-  const pageSize = createValueMemo(() => queryStateSignal().pageSize);
-  const refreshGeneration = createCell(0);
-  const routeStillOnPage = usePageRouteGuard("AuctionList");
-  // 旧链接里的 status 不再生效；含解析器未接受的未知取值在内，读入后无历史地移除一次。
-  createEffect(
-    () => {
-      const query = queryStateSignal();
-      return query.status ?? query.passthrough.find(([key]) => key === "status")?.[1] ?? null;
-    },
-    (status) => {
-      if (status === null) {
-        return;
-      }
-      // 前进/后退换页时旧页面可能在新地址下被唤醒；纠偏只能写回仍属于本页的地址。
-      if (!routeStillOnPage()) {
-        return;
-      }
-      updatePublicQueryState(
-        queryStateSignal,
-        (query) => {
-          query.status = null;
-          query.passthrough = query.passthrough.filter(([key]) => key !== "status");
-        },
-        "replace",
-      );
-    },
-  );
-  const requested = createValueMemo(
-    () => [worldFilter(), "settled", pageNumber(), pageSize()] as const,
-  );
+/** 往期列表读取只展示当前查询的快照，页内重试与外壳刷新各自触发重读。 */
+export function useAuctionHistory(requested: Accessor<HistoryRequest>) {
+  const refreshGeneration = useContext(PublicRefreshGenerationContext);
+  const retryGeneration = createCell(0);
   const auctions = createTaskResource(
-    () => ({ generation: refreshGeneration(), requested: requested() }),
+    () => ({
+      refreshGeneration: refreshGeneration(),
+      retryGeneration: retryGeneration(),
+      requested: requested(),
+    }),
     async (dependencies, context): Promise<LoadedHistory | null> => {
       const [world, status, page, size] = dependencies.requested;
       const result = await fetchAuctionHistoryPage(
@@ -114,6 +85,51 @@ export function AuctionList(): JSX.Element {
       return loaded.result;
     },
   );
+  const retry = (): void => {
+    const generation = retryGeneration.peek();
+    retryGeneration.set(Math.min(generation + 1, Number.MAX_SAFE_INTEGER));
+  };
+  return { currentResult, retry };
+}
+
+/** 历史拍卖列表入口；本页只列已结算场次，状态筛选已移除。页面里没有世界下拉框，世界范围由
+ * 页面顶部的世界按钮组（WorldTabs）写入地址栏；Rust 版页面内有世界与状态两个下拉框。 */
+export function AuctionList(): JSX.Element {
+  // 世界范围与页码仍来自地址栏；状态不再读取查询参数。
+  const queryState = usePublicQueryState();
+  const queryStateSignal = queryState.state;
+  const worldFilter = createValueMemo(() => queryStateSignal().world ?? "all");
+  const pageNumber = createValueMemo(() => Math.max(queryStateSignal().page, 1));
+  const pageSize = createValueMemo(() => queryStateSignal().pageSize);
+  const routeStillOnPage = usePageRouteGuard("AuctionList");
+  // 旧链接里的 status 不再生效；含解析器未接受的未知取值在内，读入后无历史地移除一次。
+  createEffect(
+    () => {
+      const query = queryStateSignal();
+      return query.status ?? query.passthrough.find(([key]) => key === "status")?.[1] ?? null;
+    },
+    (status) => {
+      if (status === null) {
+        return;
+      }
+      // 前进/后退换页时旧页面可能在新地址下被唤醒；纠偏只能写回仍属于本页的地址。
+      if (!routeStillOnPage()) {
+        return;
+      }
+      updatePublicQueryState(
+        queryStateSignal,
+        (query) => {
+          query.status = null;
+          query.passthrough = query.passthrough.filter(([key]) => key !== "status");
+        },
+        "replace",
+      );
+    },
+  );
+  const requested = createValueMemo(
+    () => [worldFilter(), "settled", pageNumber(), pageSize()] as const,
+  );
+  const { currentResult, retry } = useAuctionHistory(requested);
   const currentPage = createValueMemo(() => {
     const result = currentResult();
     if (result === null || !result.ok) {
@@ -131,10 +147,6 @@ export function AuctionList(): JSX.Element {
     return result.ok ? currentPage() === null : false;
   });
   useContentLoading(contentLoading);
-  const retry = (): void => {
-    const generation = refreshGeneration.peek();
-    refreshGeneration.set(Math.min(generation + 1, Number.MAX_SAFE_INTEGER));
-  };
 
   return (
     <section class="public-auction-rounds" aria-label={t("page-auctions-title")}>

@@ -9,15 +9,12 @@
 // 地址栏，`world` 缺省表示全部世界；期次下拉框与场次标题合并在标题区，Rust 版是页面内的下拉框。
 
 import type { AuctionSummaryResponse } from "@auction/contracts/dto/public/catalog/auction";
-import { sleep } from "@auction/web-shared/platform/timer";
-import { createCell } from "@auction/web-shared/reactive/cell";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import { createTaskResource } from "@auction/web-shared/reactive/resource";
-import { createTaskScope } from "@auction/web-shared/reactive/tasks";
 import { ok, type Result } from "@auction/web-shared/result";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
-import { createEffect, For, Match, Show, Switch, untrack, useContext } from "solid-js";
+import { createEffect, For, Match, Show, Switch, useContext } from "solid-js";
 
 import type { FulfillmentRead } from "../../../api/fulfillment";
 import {
@@ -37,7 +34,6 @@ import { formatAuctionTime } from "../../catalog/presentation";
 import { useContentLoading } from "../../loading";
 import { publicPageMatches, updatePublicPageSize } from "../../pagination";
 import {
-  currentPublicPathname,
   normalizedWorldQuery,
   updatePublicQueryState,
   usePublicQueryState,
@@ -46,7 +42,7 @@ import {
 } from "../../query";
 import { usePageRouteGuard } from "../../query/route-page";
 import { rustTrim } from "../../query/text";
-import { applyLotFilter, resetLotDraft, validLotFilter } from "../bid-log";
+import { useLotFilterDraft, validLotFilter } from "../bid-log/lots";
 import { createScopeSelection, sameScopeSelection } from "../bid-log/scope-selection";
 import type {
   FulfillmentAuctionsSnapshot,
@@ -107,30 +103,11 @@ export function Fulfillment(): JSX.Element {
     Math.min(queryStateSignal().pageSize, MAX_FULFILLMENT_PAGE_SIZE),
   );
   const lotFilter = createValueMemo(() => queryStateSignal().bidLogLot ?? "");
-  // 输入框绑定草稿；合法草稿在输入停顿后才成为已应用筛选（地址栏的 `lot`）。
-  const lotDraft = createCell(lotFilter());
-  const lotWriteGeneration = createCell(0);
-  const tasks = createTaskScope();
-
-  let draftSelection = untrack(scopeSelection);
-  createEffect(
-    () => ({ applied: lotFilter(), selection: scopeSelection() }),
-    ({ applied, selection }) => {
-      // 世界范围选择变化时，旧计时器必须作废并丢弃未提交草稿；同一范围内的后台刷新不改变
-      // 选择身份，草稿保持不变。新范围没有已应用筛选时也要清空纯空白等输入，因此用已应用值
-      // 重置，避免把旧范围的输入带到新范围。
-      if (!sameScopeSelection(selection, draftSelection)) {
-        draftSelection = selection;
-        resetLotDraft(lotDraft, lotWriteGeneration, applied);
-        return;
-      }
-      // 地址栏（前进、后退或清除筛选）变更时同步输入框；用户正在输入的空格保留，
-      // 否则每次回写都会把尚未提交的边缘空白抹掉。
-      if (rustTrim(lotDraft.peek()) !== applied) {
-        resetLotDraft(lotDraft, lotWriteGeneration, applied);
-      }
-    },
-  );
+  const {
+    draft: lotDraft,
+    input: submitLotFilter,
+    clear: clearLotFilter,
+  } = useLotFilterDraft(queryStateSignal, "/fulfillment", LOT_FILTER_WRITE_DEBOUNCE_MILLIS);
 
   const auctions = createTaskResource(
     // 外壳轮询与人工刷新先重读已结算目录；进度请求随后只消费本轮确认的场次。
@@ -350,26 +327,6 @@ export function Fulfillment(): JSX.Element {
   const lookup = useLotDetailLookup();
   const invalidDraft = createValueMemo(() => !validLotFilter(rustTrim(lotDraft())));
 
-  const submitLotFilter = (value: string): void => {
-    // 草稿立即跟随输入；非法草稿不发请求，合法草稿停顿后才应用并写回地址栏。
-    const lot = rustTrim(value);
-    resetLotDraft(lotDraft, lotWriteGeneration, value);
-    if (!validLotFilter(lot)) {
-      return;
-    }
-    const generation = lotWriteGeneration.peek();
-    tasks.spawn(async (context) => {
-      await sleep(LOT_FILTER_WRITE_DEBOUNCE_MILLIS, context.signal);
-      if (!context.alive()) {
-        return;
-      }
-      // 仅提交最新草稿；清空按钮、场次切换与已经离开页面的输入都作废本次任务。
-      if (lotWriteGeneration.peek() === generation && currentPublicPathname() === "/fulfillment") {
-        applyLotFilter(queryStateSignal, lot);
-      }
-    });
-  };
-
   return (
     <LotDetailLookupContext value={lookup}>
       <section class="public-fulfillment" aria-label={t("page-fulfillment-title")}>
@@ -389,7 +346,6 @@ export function Fulfillment(): JSX.Element {
               disabled={auctionOptions().length === 0}
               onChange={(event) => {
                 const auctionId = event.currentTarget.value;
-                resetLotDraft(lotDraft, lotWriteGeneration, "");
                 updatePublicQueryState(
                   queryStateSignal,
                   (query) => {
@@ -467,14 +423,7 @@ export function Fulfillment(): JSX.Element {
               }}
             />
             <Show when={lotDraft() !== ""}>
-              {/* 清除立即生效，不等防抖。 */}
-              <button
-                type="button"
-                onClick={() => {
-                  resetLotDraft(lotDraft, lotWriteGeneration, "");
-                  applyLotFilter(queryStateSignal, "");
-                }}
-              >
+              <button type="button" onClick={() => clearLotFilter()}>
                 {t("fulfillment-filter-clear")}
               </button>
             </Show>

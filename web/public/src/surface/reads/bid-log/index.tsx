@@ -3,15 +3,12 @@
 
 import type { AuctionSummaryResponse } from "@auction/contracts/dto/public/catalog/auction";
 import type { PublicBidLogListResponse } from "@auction/contracts/dto/public/catalog/history";
-import { sleep } from "@auction/web-shared/platform/timer";
-import { createCell } from "@auction/web-shared/reactive/cell";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import { createTaskResource } from "@auction/web-shared/reactive/resource";
-import { createTaskScope } from "@auction/web-shared/reactive/tasks";
 import { ok, type Result } from "@auction/web-shared/result";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
-import { createEffect, For, Match, Show, Switch, untrack, useContext } from "solid-js";
+import { createEffect, For, Match, Show, Switch, useContext } from "solid-js";
 
 import { fetchBidLogAuctions, fetchBidLogPage } from "../../../api/queries/bid-log";
 import { PublicRefreshGenerationContext, useBidRefresh } from "../../board/refresh";
@@ -24,7 +21,6 @@ import {
 import { useContentLoading } from "../../loading";
 import { publicPageMatches, updatePublicPageSize } from "../../pagination";
 import {
-  currentPublicPathname,
   normalizedWorldQuery,
   updatePublicQueryState,
   usePublicQueryState,
@@ -33,7 +29,7 @@ import {
 } from "../../query";
 import { usePageRouteGuard } from "../../query/route-page";
 import { rustTrim } from "../../query/text";
-import { applyLotFilter, resetLotDraft, validLotFilter } from "./lots";
+import { applyLotFilter, resetLotDraft, useLotFilterDraft, validLotFilter } from "./lots";
 import { createScopeSelection, type ScopeSelection, sameScopeSelection } from "./scope-selection";
 import { BidLogRow, BidLogTable, bidLogStatusClass, bidLogStatusLabel } from "./table";
 
@@ -101,7 +97,6 @@ function BidLogRoundOption(props: {
 
 /** 公开竞价日志页。 */
 export function BidLog(): JSX.Element {
-  const tasks = createTaskScope();
   const refreshGeneration = useContext(PublicRefreshGenerationContext);
   const routeStillOnPage = usePageRouteGuard("BidLog");
   // 世界/拍卖/页码/lot 筛选与地址栏双向同步。
@@ -118,33 +113,11 @@ export function BidLog(): JSX.Element {
   const pageNumber = createValueMemo(() => queryStateSignal().page);
   const pageSize = createValueMemo(() => queryStateSignal().pageSize);
   const lotFilter = createValueMemo(() => queryStateSignal().bidLogLot ?? "");
-  // 输入框绑定草稿；合法草稿在输入停顿后才成为已应用筛选（地址栏的 `lot`），记录请求只读后者。
-  const lotDraft = createCell(untrack(lotFilter));
-  const lotWriteGeneration = createCell(0);
-  // 选择身份保护“只消费当前这次范围选择确认过的目录”：切回曾经访问的范围也不复用上一轮
-  // 快照；同一范围内的后台刷新仍保留旧目录展示。世界变化时无条件重置草稿并作废旧任务，
-  // 即使草稿去空白后等于已应用值，也要清除纯空白输入。
-  let appliedSelection = untrack(scopeSelection);
-  createEffect(
-    () => scopeSelection(),
-    (selection) => {
-      if (sameScopeSelection(selection, appliedSelection)) {
-        return;
-      }
-      appliedSelection = selection;
-      resetLotDraft(lotDraft, lotWriteGeneration, untrack(lotFilter));
-    },
-  );
-  // 同一范围内，前进/后退等外部导航改变已应用筛选时才同步草稿；本页写入的值与草稿去空白后
-  // 相同，不覆盖仍在编辑的原文。
-  createEffect(
-    () => lotFilter(),
-    (applied) => {
-      if (rustTrim(lotDraft.peek()) !== applied) {
-        resetLotDraft(lotDraft, lotWriteGeneration, applied);
-      }
-    },
-  );
+  const {
+    draft: lotDraft,
+    input: onLotFilterInput,
+    clear: clearLotFilter,
+  } = useLotFilterDraft(queryStateSignal, "/bidlog", LOT_FILTER_WRITE_DEBOUNCE_MILLIS);
   // 迁移期间曾写出 `bidlog_page`；读取后立即无历史记录地收敛回旧版 `page`。
   createEffect(
     () => queryStateSignal(),
@@ -320,27 +293,6 @@ export function BidLog(): JSX.Element {
   const currentPage = createValueMemo(() => pageNumber());
   const currentLotFilter = createValueMemo(() => lotFilter());
   const draftInvalid = createValueMemo(() => !validLotFilter(rustTrim(lotDraft())));
-  const onLotFilterInput = (value: string): void => {
-    // 草稿立即跟随输入，工具条不随请求结果卸载，以保留焦点。非法草稿不发请求，列表保留
-    // 已应用筛选的结果，由行内提示说明格式；合法草稿停顿后才应用并写回地址栏。
-    const lot = rustTrim(value);
-    resetLotDraft(lotDraft, lotWriteGeneration, value);
-    if (!validLotFilter(lot)) {
-      return;
-    }
-    const generation = lotWriteGeneration.peek();
-    tasks.spawn(async (context) => {
-      await sleep(LOT_FILTER_WRITE_DEBOUNCE_MILLIS, context.signal);
-      // 迟到任务不能改写已经离开的页面或更新的输入。
-      if (
-        context.alive() &&
-        lotWriteGeneration.peek() === generation &&
-        currentPublicPathname() === "/bidlog"
-      ) {
-        applyLotFilter(queryStateSignal, lot);
-      }
-    });
-  };
   // 同查询后台刷新保留完成快照；目录确认场次已不可见后，迟到记录也不能恢复旧行和分页。
   const currentResult = createValueMemo(() => {
     const snapshot = bidLog();
@@ -413,7 +365,6 @@ export function BidLog(): JSX.Element {
               disabled={auctionOptions().length === 0}
               onChange={(event) => {
                 const auctionId = event.currentTarget.value;
-                resetLotDraft(lotDraft, lotWriteGeneration, "");
                 updatePublicQueryState(
                   queryStateSignal,
                   (query) => {
@@ -484,14 +435,7 @@ export function BidLog(): JSX.Element {
               onInput={(event) => onLotFilterInput(event.currentTarget.value)}
             />
             <Show when={lotDraft() !== ""}>
-              <button
-                type="button"
-                onClick={() => {
-                  // 清除立即生效，不等防抖。
-                  resetLotDraft(lotDraft, lotWriteGeneration, "");
-                  applyLotFilter(queryStateSignal, "");
-                }}
-              >
+              <button type="button" onClick={() => clearLotFilter()}>
                 {t("bidlog-filter-clear")}
               </button>
             </Show>

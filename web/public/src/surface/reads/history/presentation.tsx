@@ -63,12 +63,11 @@ export function historyGroups(
   grouping: string,
 ): readonly HistoryGroup[] {
   if (grouping !== "equipment" && grouping !== "buyer" && grouping !== "seller") {
-    const first = rows[0];
-    if (first === undefined) {
+    if (rows.length === 0) {
       return [];
     }
     // 平铺直接移交原页缓冲，不逐行搬运到新数组或创建无意义的分组索引。
-    return [{ key: first.lot_id, label: "", rows }];
+    return [{ key: "flat", label: "", rows }];
   }
   const positions = new Map<string, number>();
   const groups: { key: string; label: string; rows: PublicPriceHistoryEntryResponse[] }[] = [];
@@ -86,7 +85,8 @@ export function historyGroups(
       groups[existing]?.rows.push(row);
     } else {
       positions.set(label, groups.length);
-      groups.push({ key: row.lot_id, label, rows: [row] });
+      // 同一字段值标识同一个组，刷新改变组首时保留折叠状态和组头焦点。
+      groups.push({ key: `${grouping}:${label}`, label, rows: [row] });
     }
   }
   return groups;

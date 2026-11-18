@@ -42,7 +42,7 @@ export function PriceHistoryTable(props: {
   // 避免 keyed 在比较新旧项时读取到切换后的分组方式而复用错误面板。
   const groupEntries = createValueMemo(() =>
     groups().map((group) => ({
-      key: `${props.grouping}:${props.currentPage}:${pageSize()}:${group.key}`,
+      key: `${props.currentPage}:${pageSize()}:${group.key}`,
       group,
     })),
   );

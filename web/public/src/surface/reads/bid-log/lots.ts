@@ -1,11 +1,87 @@
 // 竞价日志 lot 筛选的草稿、地址栏写回与字段校验；履约进度沿用同一校验口径。
 
-import type { Cell } from "@auction/web-shared/reactive/cell";
+import { sleep } from "@auction/web-shared/platform/timer";
+import { type Cell, createCell } from "@auction/web-shared/reactive/cell";
+import { createValueMemo } from "@auction/web-shared/reactive/memo";
+import { createTaskScope } from "@auction/web-shared/reactive/tasks";
 import { utf8ByteLength } from "@auction/web-shared/text";
+import { createEffect } from "solid-js";
 
-import { type PublicBoardQuery, updatePublicQueryState } from "../../query";
+import {
+  currentPublicPathname,
+  type PublicBoardQuery,
+  readPublicQuery,
+  updatePublicQueryState,
+} from "../../query";
+import { rustTrim } from "../../query/text";
 
 const NIL_UUID = "00000000-0000-0000-0000-000000000000";
+
+type LotFilterScope = Pick<PublicBoardQuery, "world" | "auctionId">;
+
+function sameLotFilterScope(left: LotFilterScope, right: LotFilterScope): boolean {
+  return left.world === right.world && left.auctionId === right.auctionId;
+}
+
+/** 出价记录与履约共用草稿；延时写入只属于输入时已应用的世界、场次与 lot 筛选。 */
+export function useLotFilterDraft(
+  queryState: Cell<PublicBoardQuery>,
+  pathname: string,
+  debounceMillis: number,
+): {
+  readonly draft: Cell<string>;
+  input(value: string): void;
+  clear(): void;
+} {
+  const tasks = createTaskScope();
+  let appliedScope: LotFilterScope = queryState.peek();
+  const draft = createCell(queryState.peek().bidLogLot ?? "");
+  const generation = createCell(0);
+  const selection = createValueMemo(() => {
+    const query = queryState();
+    return { world: query.world, auctionId: query.auctionId, lot: query.bidLogLot ?? "" };
+  });
+  createEffect(selection, (applied) => {
+    const scopeChanged = !sameLotFilterScope(applied, appliedScope);
+    appliedScope = applied;
+    // 换场或换世界必须作废旧输入，即使两边都没有已应用的 lot 筛选。
+    // 同范围写回后的值与草稿去空白后相同时，保留用户正在编辑的原文。
+    if (scopeChanged || rustTrim(draft.peek()) !== applied.lot) {
+      resetLotDraft(draft, generation, applied.lot);
+    }
+  });
+  return {
+    draft,
+    input(value) {
+      const lot = rustTrim(value);
+      resetLotDraft(draft, generation, value);
+      if (!validLotFilter(lot)) {
+        return;
+      }
+      const requested = queryState.peek();
+      const requestedGeneration = generation.peek();
+      tasks.spawn(async (context) => {
+        await sleep(debounceMillis, context.signal);
+        if (
+          !context.alive() ||
+          generation.peek() !== requestedGeneration ||
+          currentPublicPathname() !== pathname
+        ) {
+          return;
+        }
+        // 地址可能先于查询状态更新；旧草稿不能覆盖另一世界、场次或已应用的 lot。
+        const current = readPublicQuery();
+        if (sameLotFilterScope(requested, current) && requested.bidLogLot === current.bidLogLot) {
+          applyLotFilter(queryState, lot);
+        }
+      });
+    },
+    clear() {
+      resetLotDraft(draft, generation, "");
+      applyLotFilter(queryState, "");
+    },
+  };
+}
 
 /** 去空白后的 lot 筛选能否被公开竞价日志接口接受：空（不筛选）、不超过 32 个 ASCII 字母数字
  * 的编号，或规范小写连字符形式的非 nil UUID。口径与服务端一致，其余取值只会得到 400；
