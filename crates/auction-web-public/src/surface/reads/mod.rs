@@ -3,6 +3,8 @@
 mod bid_log;
 mod fulfillment;
 mod history;
+mod lot_filter;
+mod query;
 
 pub(crate) use bid_log::bid_log;
 pub(crate) use fulfillment::fulfillment;

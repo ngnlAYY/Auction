@@ -357,8 +357,9 @@ pub(crate) fn use_public_query_state() -> QueryState<PublicBoardQuery> {
 }
 
 /// 把完整查询状态按既有序列化规则写回地址栏（只替换本 crate 管理的键，其余键原样保留）。
-pub(crate) fn write_public_query(query: &PublicBoardQuery, mode: QueryWriteMode) {
-    write_query_pairs(PUBLIC_QUERY_KEYS, &managed_public_query_pairs(query), mode);
+/// 返回地址栏写入是否成功。
+pub(crate) fn write_public_query(query: &PublicBoardQuery, mode: QueryWriteMode) -> bool {
+    write_query_pairs(PUBLIC_QUERY_KEYS, &managed_public_query_pairs(query), mode)
 }
 
 /// 原地写回时未知参数由共享层保留一次；完整链接仍通过 `public_query_pairs` 携带 passthrough。

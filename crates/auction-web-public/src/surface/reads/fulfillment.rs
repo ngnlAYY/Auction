@@ -5,24 +5,21 @@
 //! 次数只在服务端给出时显示。世界/场次选择、目录门禁与请求身份绑定沿用竞价日志页。重读失败时
 //! 缓存层回退的旧快照会连同其确认时刻一起提示，不把旧状态当作当前结果静默显示。
 
-use auction_web_shared::timer::TimeoutFuture;
 use auction_web_shared::{QueryWriteMode, TruncatedText, format_credit_amount, t};
 use dioxus::prelude::*;
 
-use super::bid_log::{apply_lot_filter, reset_lot_draft, valid_lot_filter};
+use super::lot_filter::{use_lot_filter_draft, valid_lot_filter};
+use super::query::{ReadSelection, commit_read_query, update_read_query};
 use crate::api::{
     FulfillmentLot, FulfillmentPage, FulfillmentRead, MAX_FULFILLMENT_PAGE_SIZE,
     fetch_fulfillment_auctions, fetch_fulfillment_page, fetch_worlds, lot_code_for,
 };
 use crate::surface::{
-    LotDetailLookupButton, LotDetailLookupHost, PublicPager, current_public_pathname,
-    format_auction_time, normalize_public_page_size, public_page_matches, refresh_public_reads,
-    supported_worlds, update_public_query_state, use_content_loading, use_lot_detail_lookup,
-    use_public_query_state, world_label, write_public_query,
+    LotDetailLookupButton, LotDetailLookupHost, PublicPager, format_auction_time,
+    normalize_public_page_size, public_page_matches, refresh_public_reads, supported_worlds,
+    use_content_loading, use_lot_detail_lookup, use_public_query_state, world_label,
 };
 
-/// lot 筛选生效的防抖窗口：输入停顿后才应用筛选并无历史记录地写回地址栏。
-const LOT_FILTER_WRITE_DEBOUNCE_MILLIS: u32 = 300;
 /// lot 筛选格式提示的元素 ID，供输入框 `aria-describedby` 引用。
 const LOT_FILTER_ERROR_ID: &str = "public-fulfillment-filter-error";
 
@@ -30,7 +27,7 @@ pub(crate) fn fulfillment() -> Element {
     let refresh_generation = use_context::<Signal<u64>>();
     // 世界/场次/页码/lot 筛选与地址栏双向同步，键与竞价日志共用。
     let query_state = use_public_query_state();
-    let mut query_state_signal = query_state.state;
+    let query_state_signal = query_state.state;
     let world_filter = use_memo(move || {
         query_state_signal
             .read()
@@ -47,16 +44,7 @@ pub(crate) fn fulfillment() -> Element {
         use_memo(move || query_state_signal.read().page_size.min(MAX_FULFILLMENT_PAGE_SIZE));
     let lot_filter =
         use_memo(move || query_state_signal.read().bid_log_lot.clone().unwrap_or_default());
-    // 输入框绑定草稿；合法草稿在输入停顿后才成为已应用筛选（地址栏的 `lot`）。
-    let lot_draft = use_signal(|| lot_filter.peek().clone());
-    let lot_write_generation = use_signal(|| 0_u64);
-    // 前进/后退等外部导航改变已应用筛选时，草稿随之同步并作废在途的防抖写入。
-    use_effect(move || {
-        let applied = lot_filter();
-        if lot_draft.peek().trim() != applied {
-            reset_lot_draft(lot_draft, lot_write_generation, applied);
-        }
-    });
+    let lot_draft = use_lot_filter_draft(query_state_signal, "/fulfillment");
     let worlds = use_resource(fetch_worlds);
     let world_options = match &*worlds.read_unchecked() {
         Some(Ok(worlds)) => supported_worlds(worlds),
@@ -89,7 +77,7 @@ pub(crate) fn fulfillment() -> Element {
             .map(|auction| auction.id.clone())
             .unwrap_or_default();
         if selected != next_auction_id {
-            update_public_query_state(
+            update_read_query(
                 query_state_signal,
                 |query| {
                     query.auction_id =
@@ -144,25 +132,8 @@ pub(crate) fn fulfillment() -> Element {
     let lookup = use_lot_detail_lookup();
     let current_page = page_number();
     let current_lot_filter = lot_filter();
-    let draft_invalid = !valid_lot_filter(lot_draft().trim());
-    let on_lot_filter_input = use_callback(move |value: String| {
-        // 草稿立即跟随输入；非法草稿不发请求，合法草稿停顿后才应用并写回地址栏。
-        let lot = value.trim().to_owned();
-        reset_lot_draft(lot_draft, lot_write_generation, value);
-        if !valid_lot_filter(&lot) {
-            return;
-        }
-        let generation = *lot_write_generation.peek();
-        spawn(async move {
-            TimeoutFuture::new(LOT_FILTER_WRITE_DEBOUNCE_MILLIS).await;
-            // 迟到任务不能改写已经离开的页面或更新的输入。
-            if *lot_write_generation.peek() == generation
-                && current_public_pathname() == "/fulfillment"
-            {
-                apply_lot_filter(query_state_signal, lot);
-            }
-        });
-    });
+    let draft_value = lot_draft.value();
+    let draft_invalid = !valid_lot_filter(draft_value.trim());
     let progress_state = progress.read_unchecked();
     // 同查询后台刷新保留完成快照；目录确认场次已不可见后，迟到结果也不能恢复旧行和分页。
     let current_result = progress_state
@@ -202,19 +173,7 @@ pub(crate) fn fulfillment() -> Element {
             if public_page_matches(page.page, page.page_size, current_page, page_size()) =>
         {
             rsx! {
-                // 重读遇到网络失败或服务暂时繁忙时，缓存层回退旧快照：标明它的确认时刻。播报区域
-                // 随表格常驻、只更新内容，读屏才会可靠朗读首次出现的提示。
-                div {
-                    class: "public-fulfillment__stale-region",
-                    role: "status",
-                    aria_live: "polite",
-                    aria_atomic: "true",
-                    if let Some(stale_since) = stale_since.as_deref() {
-                        p { class: "public-fulfillment__stale",
-                            {t!("fulfillment-stale", time: format_auction_time(stale_since))}
-                        }
-                    }
-                }
+                {fulfillment_stale_notice(stale_since.as_deref())}
                 FulfillmentTable {
                     page: page.clone(),
                     current_page,
@@ -223,22 +182,19 @@ pub(crate) fn fulfillment() -> Element {
                         // 从当前状态提交：仍在防抖中的筛选草稿不随翻页提交。
                         let mut next = query_state_signal.peek().clone();
                         next.page = next_page;
-                        write_public_query(&next, QueryWriteMode::Push);
-                        query_state_signal.set(next);
+                        commit_read_query(query_state_signal, next, QueryWriteMode::Push);
                     },
                     on_page_clamp: move |next_page: i64| {
                         // 纠偏无历史记录写回，不建立可返回的无效页条目。
                         let mut next = query_state_signal.peek().clone();
                         next.page = next_page;
-                        write_public_query(&next, QueryWriteMode::Replace);
-                        query_state_signal.set(next);
+                        commit_read_query(query_state_signal, next, QueryWriteMode::Replace);
                     },
                     on_page_size_change: move |size| {
                         let mut next = query_state_signal.peek().clone();
                         next.page_size = normalize_public_page_size(size);
                         next.page = 1;
-                        write_public_query(&next, QueryWriteMode::Push);
-                        query_state_signal.set(next);
+                        commit_read_query(query_state_signal, next, QueryWriteMode::Push);
                     },
                 }
             }
@@ -261,22 +217,7 @@ pub(crate) fn fulfillment() -> Element {
                         autocomplete: "off",
                         value: world_filter(),
                         disabled: world_options.is_empty(),
-                        onchange: move |event| {
-                            let world = event.value();
-                            // 切换世界清除场次与 lot 筛选：草稿一并清空，在途的防抖写入作废。
-                            reset_lot_draft(lot_draft, lot_write_generation, String::new());
-                            update_public_query_state(
-                                query_state_signal,
-                                |query| {
-                                    // 主世界使用缺省 URL，非主世界才写入 `world`。
-                                    query.world = (world != "main").then_some(world.clone());
-                                    query.auction_id = None;
-                                    query.bid_log_lot = None;
-                                    query.page = 1;
-                                },
-                                QueryWriteMode::Push,
-                            );
-                        },
+                        onchange: move |event| ReadSelection::World(event.value()).select(query_state_signal),
                         for world in &world_options {
                             option { value: world.clone(), {world_label(world)} }
                         }
@@ -290,19 +231,7 @@ pub(crate) fn fulfillment() -> Element {
                         autocomplete: "off",
                         value: selected,
                         disabled: auction_options.is_empty(),
-                        onchange: move |event| {
-                            let auction_id = event.value();
-                            reset_lot_draft(lot_draft, lot_write_generation, String::new());
-                            update_public_query_state(
-                                query_state_signal,
-                                |query| {
-                                    query.auction_id = Some(auction_id.clone());
-                                    query.bid_log_lot = None;
-                                    query.page = 1;
-                                },
-                                QueryWriteMode::Push,
-                            );
-                        },
+                        onchange: move |event| ReadSelection::Auction(event.value()).select(query_state_signal),
                         for auction in auction_options {
                             option {
                                 value: auction.id.clone(),
@@ -338,20 +267,16 @@ pub(crate) fn fulfillment() -> Element {
                         enterkeyhint: "search",
                         autocapitalize: "none",
                         spellcheck: "false",
-                        value: lot_draft(),
+                        value: draft_value,
                         placeholder: t!("fulfillment-filter-placeholder"),
                         aria_invalid: draft_invalid.to_string(),
                         aria_describedby: draft_invalid.then_some(LOT_FILTER_ERROR_ID),
-                        oninput: move |event| on_lot_filter_input.call(event.value()),
+                        oninput: move |event| lot_draft.edit(event.value()),
                     }
-                    if !lot_draft().is_empty() {
+                    if !draft_value.is_empty() || !current_lot_filter.is_empty() {
                         button {
                             r#type: "button",
-                            onclick: move |_| {
-                                // 清除立即生效，不等防抖。
-                                reset_lot_draft(lot_draft, lot_write_generation, String::new());
-                                apply_lot_filter(query_state_signal, String::new());
-                            },
+                            onclick: move |_| lot_draft.clear(),
                             {t!("fulfillment-filter-clear")}
                         }
                     }
@@ -373,6 +298,23 @@ pub(crate) fn fulfillment() -> Element {
             }
             // 抽屉宿主在进度读取分支之外：翻页、筛选或后台重读替换表格时，已打开的详情不被卸载。
             LotDetailLookupHost { lookup }
+        }
+    }
+}
+
+fn fulfillment_stale_notice(stale_since: Option<&str>) -> Element {
+    rsx! {
+        // 播报区域随表格常驻，读屏才会可靠朗读首次出现的旧快照确认时间。
+        div {
+            class: "public-fulfillment__stale-region",
+            role: "status",
+            aria_live: "polite",
+            aria_atomic: "true",
+            if let Some(stale_since) = stale_since {
+                p { class: "public-fulfillment__stale",
+                    {t!("fulfillment-stale", time: format_auction_time(stale_since))}
+                }
+            }
         }
     }
 }
@@ -570,11 +512,57 @@ fn status_tone(status: &str) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{status_key, status_tone};
+    use std::cell::Cell;
+    use std::collections::BTreeSet;
+    use std::rc::Rc;
+
+    use auction_web_shared::i18n::{DEFAULT_PUBLIC_LOCALE, LocaleSession, build_bundle};
+    use dioxus::dioxus_core::Mutation;
+    use dioxus::prelude::*;
+    use dioxus_i18n::prelude::try_use_init_i18n_from_bundle;
+
+    use super::{fulfillment_stale_notice, status_key, status_tone};
     use crate::api::FULFILLMENT_STATUSES;
+    use crate::surface::{PublicContentLoading, use_content_loading};
 
     /// 英文译文在编译期内嵌，其余语言的键集合由 i18n 门禁核对与英文一致。
     const ENGLISH: &str = include_str!("../../../i18n/en.ftl");
+
+    type StaleControl = Rc<Cell<Option<Signal<bool>>>>;
+
+    #[component]
+    fn StaleNoticeHarness() -> Element {
+        let bundle = try_use_init_i18n_from_bundle(|| {
+            build_bundle(&DEFAULT_PUBLIC_LOCALE, ENGLISH, &DEFAULT_PUBLIC_LOCALE, None)
+        })
+        .expect("初始化英文译文");
+        use_context_provider(|| LocaleSession::new(bundle, DEFAULT_PUBLIC_LOCALE));
+        use_context_provider(|| PublicContentLoading(Signal::new(BTreeSet::new())));
+        let stale = use_signal(|| false);
+        consume_context::<StaleControl>().set(Some(stale));
+        let notice = fulfillment_stale_notice(stale().then_some("2026-01-02T03:04:05Z"));
+        use_content_loading(false);
+        notice
+    }
+
+    #[test]
+    fn stale_notice_can_appear_and_disappear_on_the_same_render_scope() {
+        let control = StaleControl::default();
+        let mut dom = VirtualDom::new(StaleNoticeHarness).with_root_context(control.clone());
+        dom.rebuild_in_place();
+        let mut stale = control.get().expect("挂载履约提示");
+        dom.in_runtime(|| stale.set(true));
+        let edits = dom.render_immediate_to_vec().edits;
+        assert!(edits.iter().any(|edit| matches!(
+            edit,
+            Mutation::CreateTextNode { value, .. } if value.contains("02 Jan 2026, 11:04:05")
+        )));
+
+        dom.in_runtime(|| stale.set(false));
+        let edits = dom.render_immediate_to_vec().edits;
+        assert!(edits.iter().any(|edit| matches!(edit, Mutation::ReplaceWith { .. })));
+        assert_eq!(control.get(), Some(stale));
+    }
 
     #[test]
     fn every_status_maps_to_its_own_translated_label() {

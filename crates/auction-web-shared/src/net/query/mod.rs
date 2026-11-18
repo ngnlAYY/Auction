@@ -40,15 +40,15 @@ pub fn read_query_pairs() -> Vec<(String, String)> {
 
 /// 把 `pairs` 合并写回当前地址的 query 段。
 /// `keys` 声明本次写回管理的键：这些键的旧值整体替换为 `pairs`，其余键原样保留。
-/// 非 WASM 构建为空操作。
-pub fn write_query_pairs(keys: &[&str], pairs: &[(String, String)], mode: QueryWriteMode) {
+/// 返回浏览器 History API 是否写入成功。非 WASM 构建返回 `false`。
+pub fn write_query_pairs(keys: &[&str], pairs: &[(String, String)], mode: QueryWriteMode) -> bool {
     #[cfg(target_arch = "wasm32")]
     {
         let Some(window) = web_sys::window() else {
-            return;
+            return false;
         };
         let Ok(history) = window.history() else {
-            return;
+            return false;
         };
         let location = window.location();
         let mut serializer = url::form_urlencoded::Serializer::new(String::new());
@@ -71,17 +71,18 @@ pub fn write_query_pairs(keys: &[&str], pairs: &[(String, String)], mode: QueryW
         // 保留既有 history state（Router 可能在其中记录滚动位置等信息）。
         let state = history.state().unwrap_or(JsValue::NULL);
         match mode {
-            QueryWriteMode::Push => {
-                let _ = history.push_state_with_url(&state, "", Some(&url));
-            }
+            QueryWriteMode::Push => history.push_state_with_url(&state, "", Some(&url)).is_ok(),
             QueryWriteMode::Replace => {
-                let _ = history.replace_state_with_url(&state, "", Some(&url));
+                history.replace_state_with_url(&state, "", Some(&url)).is_ok()
             }
         }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    let _ = (keys, pairs, mode);
+    {
+        let _ = (keys, pairs, mode);
+        false
+    }
 }
 
 /// 状态 → 写回键值对的序列化器（省略等于默认值的键）。

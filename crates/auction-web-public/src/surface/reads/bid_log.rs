@@ -2,26 +2,22 @@
 
 use auction_web_shared::TruncatedText;
 use auction_web_shared::t;
-use auction_web_shared::timer::TimeoutFuture;
 use auction_web_shared::{QueryWriteMode, Time, format_credit_amount};
 use dioxus::prelude::*;
-use uuid::Uuid;
 
+use super::lot_filter::{use_lot_filter_draft, valid_lot_filter};
+use super::query::{ReadSelection, commit_read_query, update_read_query};
 use crate::api::{
     BidLogEntry, BidLogPage, fetch_bid_log_auctions, fetch_bid_log_page, fetch_worlds, lot_code_for,
 };
 use crate::surface::{
-    BidHistoryParticipant, PublicBoardQuery, PublicPager, bid_history_rows,
-    current_public_pathname, public_page_matches, supported_worlds, update_public_query_state,
-    use_content_loading, use_public_query_state, world_label, write_public_query,
+    BidHistoryParticipant, PublicPager, bid_history_rows, public_page_matches, supported_worlds,
+    use_content_loading, use_public_query_state, world_label,
 };
 use crate::surface::{
     LotDetailLookupButton, LotDetailLookupHost, use_bid_refresh, use_lot_detail_lookup,
 };
 
-/// lot 筛选生效的防抖窗口：输入停顿后才应用筛选并无历史记录地写回地址栏，连续输入只发一次
-/// 记录请求。
-const LOT_FILTER_WRITE_DEBOUNCE_MILLIS: u32 = 300;
 /// lot 筛选格式提示的元素 ID，供输入框 `aria-describedby` 引用。
 const LOT_FILTER_ERROR_ID: &str = "public-auction-bid-log-filter-error";
 
@@ -29,7 +25,7 @@ pub(crate) fn bid_log() -> Element {
     let mut refresh_generation = use_context::<Signal<u64>>();
     // 世界/拍卖/页码/lot 筛选与地址栏双向同步。
     let query_state = use_public_query_state();
-    let mut query_state_signal = query_state.state;
+    let query_state_signal = query_state.state;
     let world_filter = use_memo(move || {
         query_state_signal
             .read()
@@ -44,24 +40,13 @@ pub(crate) fn bid_log() -> Element {
     let page_size = use_memo(move || query_state_signal.read().page_size);
     let lot_filter =
         use_memo(move || query_state_signal.read().bid_log_lot.clone().unwrap_or_default());
-    // 输入框绑定草稿；合法草稿在输入停顿后才成为已应用筛选（地址栏的 `lot`），记录请求只读后者。
-    let lot_draft = use_signal(|| lot_filter.peek().clone());
-    let lot_write_generation = use_signal(|| 0_u64);
-    // 前进/后退等外部导航改变已应用筛选时，草稿随之同步并作废在途的防抖写入；本页写入的值与
-    // 草稿去空白后相同，不覆盖仍在编辑的原文。
-    use_effect(move || {
-        let applied = lot_filter();
-        if lot_draft.peek().trim() != applied {
-            reset_lot_draft(lot_draft, lot_write_generation, applied);
-        }
-    });
+    let lot_draft = use_lot_filter_draft(query_state_signal, "/bidlog");
     // 迁移期间曾写出 `bidlog_page`；读取后立即无历史记录地收敛回旧版 `page`。
     use_effect(move || {
         if query_state_signal().bid_log_page_alias {
             let mut next = query_state_signal.peek().clone();
             next.bid_log_page_alias = false;
-            write_public_query(&next, QueryWriteMode::Replace);
-            query_state_signal.set(next);
+            commit_read_query(query_state_signal, next, QueryWriteMode::Replace);
         }
     });
     let worlds = use_resource(fetch_worlds);
@@ -96,7 +81,7 @@ pub(crate) fn bid_log() -> Element {
             .map(|auction| auction.id.clone());
         let next_auction_id = next_auction_id.unwrap_or_default();
         if selected != next_auction_id {
-            update_public_query_state(
+            update_read_query(
                 query_state_signal,
                 |query| {
                     query.auction_id =
@@ -156,25 +141,8 @@ pub(crate) fn bid_log() -> Element {
     let lookup = use_lot_detail_lookup();
     let current_page = page_number();
     let current_lot_filter = lot_filter();
-    let draft_invalid = !valid_lot_filter(lot_draft().trim());
-    let on_lot_filter_input = use_callback(move |value: String| {
-        // 草稿立即跟随输入，工具条不随请求结果卸载，以保留焦点。非法草稿不发请求，列表保留
-        // 已应用筛选的结果，由行内提示说明格式；合法草稿停顿后才应用并写回地址栏。
-        let lot = value.trim().to_owned();
-        reset_lot_draft(lot_draft, lot_write_generation, value);
-        if !valid_lot_filter(&lot) {
-            return;
-        }
-        let generation = *lot_write_generation.peek();
-        spawn(async move {
-            TimeoutFuture::new(LOT_FILTER_WRITE_DEBOUNCE_MILLIS).await;
-            // 迟到任务不能改写已经离开的页面或更新的输入。
-            if *lot_write_generation.peek() == generation && current_public_pathname() == "/bidlog"
-            {
-                apply_lot_filter(query_state_signal, lot);
-            }
-        });
-    });
+    let draft_value = lot_draft.value();
+    let draft_invalid = !valid_lot_filter(draft_value.trim());
     let bid_log_state = bid_log.read_unchecked();
     // 同查询后台刷新保留完成快照；目录确认场次已不可见后，迟到记录也不能恢复旧行和分页。
     let current_result = bid_log_state
@@ -223,22 +191,19 @@ pub(crate) fn bid_log() -> Element {
                         // 不随翻页提交。
                         let mut next = query_state_signal.peek().clone();
                         next.page = next_page;
-                        write_public_query(&next, QueryWriteMode::Push);
-                        query_state_signal.set(next);
+                        commit_read_query(query_state_signal, next, QueryWriteMode::Push);
                     },
                     on_page_clamp: move |next_page: i64| {
                         // 纠偏无历史记录写回，不建立可返回的无效页条目。
                         let mut next = query_state_signal.peek().clone();
                         next.page = next_page;
-                        write_public_query(&next, QueryWriteMode::Replace);
-                        query_state_signal.set(next);
+                        commit_read_query(query_state_signal, next, QueryWriteMode::Replace);
                     },
                     on_page_size_change: move |size| {
                         let mut next = query_state_signal.peek().clone();
                         next.page_size = super::super::normalize_public_page_size(size);
                         next.page = 1;
-                        write_public_query(&next, QueryWriteMode::Push);
-                        query_state_signal.set(next);
+                        commit_read_query(query_state_signal, next, QueryWriteMode::Push);
                     },
                 }
             }
@@ -261,22 +226,7 @@ pub(crate) fn bid_log() -> Element {
                         autocomplete: "off",
                         value: world_filter(),
                         disabled: world_options.is_empty(),
-                        onchange: move |event| {
-                            let world = event.value();
-                            // 切换世界清除 lot 筛选：草稿一并清空，在途的防抖写入作废。
-                            reset_lot_draft(lot_draft, lot_write_generation, String::new());
-                            update_public_query_state(
-                                query_state_signal,
-                                |query| {
-                                    // 旧版 Main 使用缺省 URL，非 Main 世界才写入 `world`。
-                                    query.world = (world != "main").then_some(world.clone());
-                                    query.auction_id = None;
-                                    query.bid_log_lot = None;
-                                    query.page = 1;
-                                },
-                                QueryWriteMode::Push,
-                            );
-                        },
+                        onchange: move |event| ReadSelection::World(event.value()).select(query_state_signal),
                         for world in &world_options {
                             option { value: world.clone(), {world_label(world)} }
                         }
@@ -290,19 +240,7 @@ pub(crate) fn bid_log() -> Element {
                         autocomplete: "off",
                         value: selected,
                         disabled: auction_options.is_empty(),
-                        onchange: move |event| {
-                            let auction_id = event.value();
-                            reset_lot_draft(lot_draft, lot_write_generation, String::new());
-                            update_public_query_state(
-                                query_state_signal,
-                                |query| {
-                                    query.auction_id = Some(auction_id.clone());
-                                    query.bid_log_lot = None;
-                                    query.page = 1;
-                                },
-                                QueryWriteMode::Push,
-                            );
-                        },
+                        onchange: move |event| ReadSelection::Auction(event.value()).select(query_state_signal),
                         for auction in auction_options {
                             option {
                                 value: auction.id.clone(),
@@ -337,20 +275,16 @@ pub(crate) fn bid_log() -> Element {
                         enterkeyhint: "search",
                         autocapitalize: "none",
                         spellcheck: "false",
-                        value: lot_draft(),
+                        value: draft_value,
                         placeholder: t!("bidlog-filter-placeholder"),
                         aria_invalid: draft_invalid.to_string(),
                         aria_describedby: draft_invalid.then_some(LOT_FILTER_ERROR_ID),
-                        oninput: move |event| on_lot_filter_input.call(event.value()),
+                        oninput: move |event| lot_draft.edit(event.value()),
                     }
-                    if !lot_draft().is_empty() {
+                    if !draft_value.is_empty() || !current_lot_filter.is_empty() {
                         button {
                             r#type: "button",
-                            onclick: move |_| {
-                                // 清除立即生效，不等防抖。
-                                reset_lot_draft(lot_draft, lot_write_generation, String::new());
-                                apply_lot_filter(query_state_signal, String::new());
-                            },
+                            onclick: move |_| lot_draft.clear(),
                             {t!("bidlog-filter-clear")}
                         }
                     }
@@ -496,72 +430,5 @@ pub(crate) fn bid_log_status_class(status: &str) -> &'static str {
         "live" => "public-auction-bid-log-round-status public-auction-bid-log-round-status-live",
         "final" => "public-auction-bid-log-round-status public-auction-bid-log-round-status-final",
         _ => "public-auction-bid-log-round-status",
-    }
-}
-
-/// 去空白后的 lot 筛选能否被公开竞价日志接口接受：空（不筛选）、不超过 32 个 ASCII 字母数字
-/// 的编号，或规范小写连字符形式的非 nil UUID。口径与服务端一致，其余取值只会得到 400；
-/// 履约进度接口沿用同一口径。
-pub(super) fn valid_lot_filter(value: &str) -> bool {
-    if value.len() <= 32 && value.bytes().all(|byte| byte.is_ascii_alphanumeric()) {
-        return true;
-    }
-    Uuid::parse_str(value).is_ok_and(|lot_id| {
-        let mut buffer = Uuid::encode_buffer();
-        let canonical: &str = lot_id.hyphenated().encode_lower(&mut buffer);
-        !lot_id.is_nil() && canonical == value
-    })
-}
-
-/// 把输入草稿换成新值，并作废在途的防抖写入。
-pub(super) fn reset_lot_draft(
-    mut draft: Signal<String>,
-    mut generation: Signal<u64>,
-    value: String,
-) {
-    let next = generation.peek().saturating_add(1);
-    generation.set(next);
-    draft.set(value);
-}
-
-/// 把合法的 lot 筛选同时写入已应用状态与地址栏（无历史记录）并回到第一页；筛选未变时
-/// 不改动，保留当前页码。
-pub(super) fn apply_lot_filter(mut query_state: Signal<PublicBoardQuery>, lot: String) {
-    let lot = (!lot.is_empty()).then_some(lot);
-    if query_state.peek().bid_log_lot == lot {
-        return;
-    }
-    let mut next = query_state.peek().clone();
-    next.bid_log_lot = lot;
-    next.page = 1;
-    write_public_query(&next, QueryWriteMode::Replace);
-    query_state.set(next);
-}
-
-#[cfg(test)]
-mod tests {
-    use super::valid_lot_filter;
-
-    #[test]
-    fn lot_filter_accepts_what_the_bid_log_endpoint_accepts() {
-        assert!(valid_lot_filter(""));
-        assert!(valid_lot_filter("One12"));
-        assert!(valid_lot_filter(&"a".repeat(32)));
-        assert!(valid_lot_filter("67e55044-10b1-426f-9247-bb680e5fe0c8"));
-    }
-
-    #[test]
-    fn lot_filter_rejects_values_the_endpoint_answers_with_400() {
-        assert!(!valid_lot_filter(&"a".repeat(33)));
-        assert!(!valid_lot_filter("One 12"));
-        assert!(!valid_lot_filter("One-12"));
-        assert!(!valid_lot_filter("拍品12"));
-        // 地址栏原样保留的超长或含控制字符的值同样落到字段错误，不发请求。
-        assert!(!valid_lot_filter(&"a".repeat(129)));
-        assert!(!valid_lot_filter("One\u{7}12"));
-        // 服务端只接受规范小写连字符形式的非 nil UUID。
-        assert!(!valid_lot_filter("67E55044-10B1-426F-9247-BB680E5FE0C8"));
-        assert!(!valid_lot_filter("{67e55044-10b1-426f-9247-bb680e5fe0c8}"));
-        assert!(!valid_lot_filter("00000000-0000-0000-0000-000000000000"));
     }
 }

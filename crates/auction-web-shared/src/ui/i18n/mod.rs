@@ -3,6 +3,7 @@
 //! 语言偏好不丢失：`localStorage` 键固定为 `hv.lang`，存储值非法时回退到该 surface 的
 //! 默认语言。各 surface 自己拥有译文资源与默认语言（Public 英文、Admin 简体中文）。
 
+use dioxus::dioxus_core::Runtime;
 use dioxus::prelude::*;
 use dioxus_i18n::prelude::*;
 use unic_langid::{LanguageIdentifier, langid};
@@ -255,13 +256,57 @@ pub fn build_bundle(
     Ok(bundle)
 }
 
-/// 语言会话状态：当前语言、进行中的目标与最近一次失败的可见提示键。
+/// 语言会话状态：已生效语言、最近一次选择的代次、在途目标与可见错误。
 #[derive(Clone, PartialEq)]
 struct LocaleState {
     current: LanguageIdentifier,
+    generation: u64,
     pending: Option<LanguageIdentifier>,
     ready: bool,
     error: Option<&'static str>,
+}
+
+impl LocaleState {
+    fn new(current: LanguageIdentifier) -> Self {
+        Self { current, generation: 0, pending: None, ready: false, error: None }
+    }
+
+    fn picker_language(&self) -> &LanguageIdentifier {
+        self.pending.as_ref().unwrap_or(&self.current)
+    }
+
+    fn select(&mut self, target: LanguageIdentifier) -> Option<LocaleRequest> {
+        // 即使回选当前语言，也要使此前的加载失去更新译文和偏好的资格。
+        self.generation = self.generation.wrapping_add(1);
+        self.error = None;
+        if self.current == target {
+            self.pending = None;
+            self.ready = true;
+            return None;
+        }
+        self.pending = Some(target.clone());
+        Some(LocaleRequest { target, generation: self.generation })
+    }
+
+    fn finish_load(&mut self, request: &LocaleRequest, succeeded: bool) -> bool {
+        if request.generation != self.generation {
+            return false;
+        }
+        self.pending = None;
+        self.ready = true;
+        if succeeded {
+            self.current.clone_from(&request.target);
+            self.error = None;
+        } else {
+            self.error = Some("language-switch-failed");
+        }
+        true
+    }
+}
+
+struct LocaleRequest {
+    target: LanguageIdentifier,
+    generation: u64,
 }
 
 /// 按需语言会话：持有 bundle 句柄与当前语言信号；根组件创建一次并经 context 提供。
@@ -273,15 +318,7 @@ pub struct LocaleSession {
 
 impl LocaleSession {
     pub fn new(bundle: I18nBundle, default: LanguageIdentifier) -> Self {
-        Self {
-            bundle: Signal::new(bundle),
-            state: Signal::new(LocaleState {
-                current: default,
-                pending: None,
-                ready: false,
-                error: None,
-            }),
-        }
+        Self { bundle: Signal::new(bundle), state: Signal::new(LocaleState::new(default)) }
     }
 
     pub fn current(&self) -> LanguageIdentifier {
@@ -292,7 +329,7 @@ impl LocaleSession {
         self.state.read().ready
     }
 
-    /// 最近一次加载失败的提示键；下一次成功切换清空。
+    /// 最近一次加载失败的提示键；再次选择语言时清空。
     pub fn error(&self) -> Option<&'static str> {
         self.state.read().error
     }
@@ -300,12 +337,10 @@ impl LocaleSession {
     /// 首屏加载：默认语言直接就绪；已保存的非默认语言先取回再渲染，失败回退默认。
     pub fn bootstrap(&mut self, catalog: &'static LocaleCatalog) {
         let target = initial_language(catalog.default_locale.clone());
-        if target == catalog.default_locale {
-            let mut state = self.state.write();
-            state.ready = true;
-            return;
+        let request = self.state.write().select(target);
+        if let Some(request) = request {
+            self.load(catalog, request, false);
         }
-        self.load(catalog, target, false);
     }
 
     /// 切换语言并持久化；非法语言码回退默认语言。
@@ -314,53 +349,41 @@ impl LocaleSession {
             Some(language) => language,
             None => catalog.default_locale.clone(),
         };
-        if target == self.current() {
-            let _ = crate::storage::set_item(LANGUAGE_STORAGE_KEY, code);
-            return;
+        let request = self.state.write().select(target.clone());
+        if let Some(request) = request {
+            self.load(catalog, request, true);
+        } else {
+            let _ = crate::storage::set_item(LANGUAGE_STORAGE_KEY, &target.to_string());
         }
-        self.load(catalog, target, true);
     }
 
-    fn load(&mut self, catalog: &'static LocaleCatalog, target: LanguageIdentifier, persist: bool) {
+    fn load(&self, catalog: &'static LocaleCatalog, request: LocaleRequest, persist: bool) {
         let mut session = *self;
-        {
-            let mut state = self.state.write();
-            state.pending = Some(target.clone());
-            state.error = None;
-        }
-        spawn(async move {
-            let fetched = if target == catalog.default_locale {
+        // 在途目标由语言会话收尾，选择器卸载时会话仍能应用结果或清除目标。
+        Runtime::current().spawn(self.state.origin_scope(), async move {
+            let target = &request.target;
+            let fetched = if target == &catalog.default_locale {
                 Ok(None)
             } else {
-                match catalog.source(&target) {
+                match catalog.source(target) {
                     Some(source) => fetch_locale_text(source.asset).await.map(Some),
                     None => Err("unsupported locale".to_owned()),
                 }
             };
             let built = fetched.and_then(|text| {
-                build_bundle(&catalog.default_locale, catalog.default_ftl, &target, text.as_deref())
+                build_bundle(&catalog.default_locale, catalog.default_ftl, target, text.as_deref())
             });
-            let mut state = session.state.write();
-            // 连续切换只应用最后一次选择：被更新目标替换的加载结果直接丢弃。
-            if state.pending.as_ref() != Some(&target) {
+            let mut next = session.state.peek().clone();
+            if !next.finish_load(&request, built.is_ok()) {
                 return;
             }
-            state.pending = None;
-            state.ready = true;
-            match built {
-                Ok(bundle) => {
-                    state.current = target.clone();
-                    state.error = None;
-                    drop(state);
-                    session.bundle.write().set_bundle(bundle);
-                    if persist {
-                        let _ = crate::storage::set_item(
-                            LANGUAGE_STORAGE_KEY,
-                            target.to_string().as_str(),
-                        );
-                    }
+            // 代次校验、译文与偏好更新之间没有 await，迟到请求不能部分提交。
+            session.state.set(next);
+            if let Ok(bundle) = built {
+                session.bundle.write().set_bundle(bundle);
+                if persist {
+                    let _ = crate::storage::set_item(LANGUAGE_STORAGE_KEY, &target.to_string());
                 }
-                Err(_) => state.error = Some("language-switch-failed"),
             }
         });
     }
@@ -386,9 +409,9 @@ async fn fetch_locale_text(asset: dioxus::prelude::Asset) -> Result<String, Stri
     }
 }
 
-/// 当前语言；组件内读取会订阅变化。
+/// 当前语言；直接读取上下文，不占 hook 槽位，渲染期间仍订阅语言信号。
 pub fn current_language() -> LanguageIdentifier {
-    use_context::<LocaleSession>().current()
+    consume_context::<LocaleSession>().current()
 }
 
 /// 把当前语言同步到 `<html lang>`。
@@ -414,7 +437,7 @@ pub fn use_locale_effects(session: LocaleSession) {
 #[component]
 pub fn LanguagePicker(label: String, catalog: &'static LocaleCatalog) -> Element {
     let mut session = use_context::<LocaleSession>();
-    let current = session.current().to_string();
+    let selected = session.state.read().picker_language().to_string();
     let error = session.error();
 
     rsx! {
@@ -424,16 +447,16 @@ pub fn LanguagePicker(label: String, catalog: &'static LocaleCatalog) -> Element
                 id: "language",
                 name: "language",
                 class: "language-picker__select",
-                value: "{current}",
+                value: "{selected}",
                 onchange: move |event| {
                     session.switch(catalog, &event.value());
                 },
                 for locale in SUPPORTED_LOCALES {
-                    // Dioxus 首轮挂载动态 option 时不会可靠地把 select.value 投影为原生
-                    // selected；逐项声明可确保刷新后下拉值与 hv.lang、<html lang> 一致。
+                    // Dioxus 首轮挂载动态 option 时不会可靠地投影 select.value，逐项标记
+                    // selected 以跟踪可回选的在途目标或已生效语言。
                     option {
                         value: locale.code,
-                        selected: current == locale.code,
+                        selected: selected == locale.code,
                         "{locale.label}"
                     }
                 }
@@ -455,9 +478,64 @@ pub const DEFAULT_ADMIN_LOCALE: LanguageIdentifier = langid!("zh-CN");
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    use dioxus::dioxus_core::{AttributeValue, Mutation};
+    use dioxus::prelude::*;
+    use dioxus_i18n::prelude::try_use_init_i18n_from_bundle;
     use unic_langid::langid;
 
-    use super::{build_bundle, translation_failed};
+    use super::translation_failed;
+    use super::{
+        LanguagePicker, LocaleCatalog, LocaleSession, LocaleState, build_bundle, current_language,
+    };
+
+    #[test]
+    fn only_the_latest_request_can_finish_when_the_language_repeats() {
+        let mut state = LocaleState::new(langid!("en"));
+        let old_ja = state.select(langid!("ja")).expect("发起第一次日语读取");
+        let ko = state.select(langid!("ko")).expect("发起韩语读取");
+        let new_ja = state.select(langid!("ja")).expect("发起第二次日语读取");
+
+        assert!(!state.finish_load(&old_ja, false));
+        assert!(!state.finish_load(&ko, true));
+        assert_eq!(state.current, langid!("en"));
+        assert_eq!(state.picker_language(), &langid!("ja"));
+        assert_eq!(state.error, None);
+        assert!(state.finish_load(&new_ja, true));
+        assert_eq!(state.current, langid!("ja"));
+        assert!(state.ready);
+    }
+
+    #[test]
+    fn selecting_the_active_language_cancels_a_pending_load() {
+        let mut state = LocaleState::new(langid!("en"));
+        assert_eq!(state.picker_language(), &langid!("en"));
+        let pending = state.select(langid!("ja")).expect("发起日语读取");
+        assert_eq!(state.picker_language(), &langid!("ja"));
+        assert_eq!(state.current, langid!("en"));
+
+        assert!(state.select(langid!("en")).is_none());
+        assert_eq!(state.picker_language(), &langid!("en"));
+        assert!(!state.finish_load(&pending, true));
+        assert_eq!(state.picker_language(), &langid!("en"));
+        assert_eq!(state.current, langid!("en"));
+        assert!(state.ready);
+    }
+
+    #[test]
+    fn selecting_the_active_language_clears_the_latest_load_error() {
+        let mut state = LocaleState::new(langid!("en"));
+        let pending = state.select(langid!("ja")).expect("发起日语读取");
+        assert_eq!(state.picker_language(), &langid!("ja"));
+        assert!(state.finish_load(&pending, false));
+        assert_eq!(state.error, Some("language-switch-failed"));
+        assert_eq!(state.picker_language(), &langid!("en"));
+
+        assert!(state.select(langid!("en")).is_none());
+        assert_eq!(state.error, None);
+    }
 
     #[test]
     #[should_panic(expected = "翻译 missing-key 失败")]
@@ -467,6 +545,140 @@ mod tests {
     }
 
     const DEFAULT_FTL: &str = "greeting = Hello\nfallback-only = Default fallback\n";
+    static TEST_CATALOG: LocaleCatalog =
+        LocaleCatalog { default_locale: langid!("en"), default_ftl: DEFAULT_FTL, sources: &[] };
+
+    type SessionControl = Rc<Cell<Option<LocaleSession>>>;
+
+    fn use_test_locale_session(initial: unic_langid::LanguageIdentifier) -> LocaleSession {
+        let bundle = try_use_init_i18n_from_bundle(|| {
+            build_bundle(&langid!("en"), DEFAULT_FTL, &initial, None)
+        })
+        .expect("初始化译文");
+        use_context_provider(|| LocaleSession::new(bundle, initial))
+    }
+
+    #[component]
+    fn LanguageHarness(initial: unic_langid::LanguageIdentifier, show_picker: bool) -> Element {
+        let session = use_test_locale_session(initial);
+        consume_context::<SessionControl>().set(Some(session));
+        rsx! {
+            CurrentLanguageText {}
+            if show_picker {
+                LanguagePicker { label: "语言".to_owned(), catalog: &TEST_CATALOG }
+            }
+        }
+    }
+
+    #[component]
+    fn CurrentLanguageText() -> Element {
+        let language = current_language();
+        rsx! { "{language}" }
+    }
+
+    #[test]
+    fn reading_language_in_a_render_subscribes_to_switches() {
+        let control = SessionControl::default();
+        let props = LanguageHarnessProps { initial: langid!("ja"), show_picker: false };
+        let mut dom =
+            VirtualDom::new_with_props(LanguageHarness, props).with_root_context(control.clone());
+        assert!(dom.rebuild_to_vec().edits.iter().any(|edit| matches!(
+            edit,
+            Mutation::CreateTextNode { value, .. } if value == "ja"
+        )));
+
+        let mut session = control.get().expect("挂载语言会话");
+        dom.in_scope(ScopeId::APP, || session.switch(&TEST_CATALOG, "en"));
+        assert!(dom.render_immediate_to_vec().edits.iter().any(|edit| matches!(
+            edit,
+            Mutation::SetText { value, .. } if value == "en"
+        )));
+    }
+
+    #[test]
+    fn language_picker_renders_the_pending_choice_and_the_return_to_active_language() {
+        let control = SessionControl::default();
+        let props = LanguageHarnessProps { initial: langid!("en"), show_picker: true };
+        let mut dom =
+            VirtualDom::new_with_props(LanguageHarness, props).with_root_context(control.clone());
+        let initial = dom.rebuild_to_vec();
+        let picker = initial
+            .edits
+            .iter()
+            .find_map(|edit| match edit {
+                Mutation::NewEventListener { name, id } if name == "change" => Some(*id),
+                _ => None,
+            })
+            .expect("挂载语言选择器");
+        let picker_has_value = |edits: &[Mutation], expected: &str| {
+            edits.iter().any(|edit| matches!(
+                edit,
+                Mutation::SetAttribute { id, name: "value", value: AttributeValue::Text(value), .. }
+                    if *id == picker && value == expected
+            ))
+        };
+        assert!(picker_has_value(&initial.edits, "en"));
+
+        let mut session = control.get().expect("挂载语言会话");
+        let pending =
+            dom.in_runtime(|| session.state.write().select(langid!("ja"))).expect("日语尚在加载");
+        assert!(picker_has_value(&dom.render_immediate_to_vec().edits, "ja"));
+        assert_eq!(session.current(), langid!("en"));
+
+        dom.in_scope(ScopeId::APP, || session.switch(&TEST_CATALOG, "en"));
+        assert!(picker_has_value(&dom.render_immediate_to_vec().edits, "en"));
+        assert!(!dom.in_runtime(|| session.state.write().finish_load(&pending, true)));
+    }
+
+    #[derive(Default)]
+    struct LocaleOwnerControl {
+        session: Cell<Option<LocaleSession>>,
+        show_picker: Cell<Option<Signal<bool>>>,
+        picker_scope: Cell<Option<ScopeId>>,
+    }
+
+    #[component]
+    fn LocaleOwnerHarness() -> Element {
+        let control = consume_context::<Rc<LocaleOwnerControl>>();
+        let session = use_test_locale_session(langid!("ja"));
+        let show_picker = use_signal(|| true);
+        control.session.set(Some(session));
+        control.show_picker.set(Some(show_picker));
+        rsx! {
+            if show_picker() {
+                LocalePickerScope {}
+            }
+        }
+    }
+
+    #[component]
+    fn LocalePickerScope() -> Element {
+        consume_context::<Rc<LocaleOwnerControl>>()
+            .picker_scope
+            .set(Some(dioxus::dioxus_core::current_scope_id()));
+        rsx! {}
+    }
+
+    #[test]
+    fn language_loading_remains_owned_by_the_session_when_the_picker_unmounts() {
+        let control = Rc::new(LocaleOwnerControl::default());
+        let mut dom = VirtualDom::new(LocaleOwnerHarness).with_root_context(control.clone());
+        dom.rebuild_in_place();
+        let mut session = control.session.get().expect("挂载语言会话");
+        let mut show_picker = control.show_picker.get().expect("挂载选择器显示信号");
+        let scope = control.picker_scope.get().expect("挂载选择器子作用域");
+
+        dom.in_scope(scope, || session.switch(&TEST_CATALOG, "en"));
+        assert_eq!(session.state.peek().picker_language(), &langid!("en"));
+        assert_eq!(session.current(), langid!("ja"));
+        dom.in_runtime(|| show_picker.set(false));
+        dom.render_immediate(&mut dioxus::dioxus_core::NoOpMutations);
+        dom.process_events();
+
+        assert!(dom.get_scope(scope).is_none());
+        assert_eq!(session.current(), langid!("en"));
+        assert!(session.state.peek().pending.is_none());
+    }
 
     fn translate(
         bundle: &dioxus_i18n::fluent::FluentBundle<dioxus_i18n::fluent::FluentResource>,

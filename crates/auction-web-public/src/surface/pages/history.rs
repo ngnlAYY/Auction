@@ -1,5 +1,7 @@
 //! Public 历史拍卖列表。
 
+use std::future::Future;
+
 use auction_web_shared::{
     AsyncState, AsyncStateKind, QueryWriteMode, Time, format_credit_amount, t,
 };
@@ -41,8 +43,7 @@ pub(crate) fn AuctionList() -> Element {
     if selected_world != "all" && !world_options.contains(&selected_world) {
         world_options.push(selected_world.clone());
     }
-    let auctions = use_resource(move || {
-        let _ = refresh_generation();
+    let auctions = use_auction_list_read(refresh_generation, move || {
         let world = world_filter();
         let status = status_filter();
         let page = page_number();
@@ -168,6 +169,19 @@ pub(crate) fn AuctionList() -> Element {
     }
 }
 
+fn use_auction_list_read<F: Future + 'static>(
+    retry_generation: Signal<u64>,
+    mut read: impl FnMut() -> F + 'static,
+) -> Resource<F::Output> {
+    let shell_generation = use_context::<Signal<u64>>();
+    use_resource(move || {
+        // 外壳使目录缓存失效后，同一查询也须重读。页内重试独立推进本页代号。
+        let _ = shell_generation();
+        let _ = retry_generation();
+        read()
+    })
+}
+
 #[component]
 pub(crate) fn AuctionHistoryPage(
     page: AuctionListPage<HistoricalAuctionWithForum>,
@@ -279,5 +293,57 @@ pub(crate) fn AuctionHistoryTable(rows: Vec<HistoricalAuctionWithForum>) -> Elem
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::{Cell, RefCell};
+    use std::future::ready;
+    use std::rc::Rc;
+
+    use dioxus::prelude::*;
+
+    use super::use_auction_list_read;
+
+    #[derive(Default)]
+    struct ReadControl {
+        shell: Cell<Option<Signal<u64>>>,
+        retry: Cell<Option<Signal<u64>>>,
+        requests: RefCell<Vec<&'static str>>,
+    }
+
+    #[component]
+    fn ReadHarness() -> Element {
+        let control = consume_context::<Rc<ReadControl>>();
+        let shell = use_context_provider(|| Signal::new(0_u64));
+        let retry = use_signal(|| 0_u64);
+        let status = use_signal(|| "live");
+        control.shell.set(Some(shell));
+        control.retry.set(Some(retry));
+        let _list = use_auction_list_read(retry, move || {
+            control.requests.borrow_mut().push(status());
+            ready(())
+        });
+        rsx! {}
+    }
+
+    #[test]
+    fn auction_list_rereads_the_same_query_for_shell_refresh_and_local_retry() {
+        let control = Rc::new(ReadControl::default());
+        let mut dom = VirtualDom::new(ReadHarness).with_root_context(control.clone());
+        dom.rebuild_in_place();
+        dom.process_events();
+        assert_eq!(&*control.requests.borrow(), &["live"]);
+
+        let mut retry = control.retry.get().expect("挂载重试信号");
+        dom.in_runtime(|| retry.set(1));
+        dom.process_events();
+        assert_eq!(&*control.requests.borrow(), &["live", "live"]);
+
+        let mut shell = control.shell.get().expect("挂载外壳信号");
+        dom.in_runtime(|| shell.set(1));
+        dom.process_events();
+        assert_eq!(&*control.requests.borrow(), &["live", "live", "live"]);
     }
 }

@@ -149,6 +149,7 @@ pub(crate) fn historical_fulfillment_href(auction_id: &str, world_id: &str) -> S
     public_href("/fulfillment", &query)
 }
 
+/// 订阅渲染作用域的语言信号，允许在按条件出现的时间字段里使用。
 pub(crate) fn format_auction_time(value: &str) -> String {
     format_localized_time_for_language(value, &current_language().to_string())
 }

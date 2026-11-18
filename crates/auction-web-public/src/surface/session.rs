@@ -58,12 +58,6 @@ pub(super) fn login(return_to: Option<String>) -> Element {
     let registration_accounts = use_resource(|| async move {
         fetch_registration_info().await.map(|info| info.bot_players.join(", "))
     });
-    let bot_account = match &*registration_accounts.read() {
-        Some(Ok(accounts)) if !accounts.is_empty() => {
-            t!("login-bot-account", accounts: accounts.as_str())
-        }
-        _ => String::new(),
-    };
     let navigator = use_navigator();
     let return_path = safe_return_path(return_to.as_deref());
     let result_snapshot = result.read();
@@ -150,7 +144,7 @@ pub(super) fn login(return_to: Option<String>) -> Element {
                     if submitting() { {t!("login-working")} } else { {t!("login-submit")} }
                 }
             }
-            p { id: "public-login-hint", class: "public-account-login-hint", {t!("login-hint", bot_account: bot_account)} }
+            {registration_hint(registration_accounts)}
             if let Some(LoginState::Success(session)) = result_snapshot.as_ref() {
                 p { class: "action-feedback action-feedback--success", role: "status",
                     {t!("login-success", username: session.username.as_str())}
@@ -158,6 +152,41 @@ pub(super) fn login(return_to: Option<String>) -> Element {
             }
         }
     }
+}
+
+type RegistrationAccounts = Resource<Result<String, String>>;
+
+fn registration_hint(accounts: RegistrationAccounts) -> Element {
+    let snapshot = accounts.read();
+    let (hint, role) = match snapshot.as_ref() {
+        None => (t!("data-loading"), Some("status")),
+        Some(Ok(names)) => {
+            let bot_account = if names.is_empty() {
+                String::new()
+            } else {
+                t!("login-bot-account", accounts: names.as_str())
+            };
+            (t!("login-hint", bot_account: bot_account), None)
+        }
+        Some(Err(_error)) => (t!("data-error"), Some("alert")),
+    };
+    rsx! {
+        p { id: "public-login-hint", class: "public-account-login-hint", role, "{hint}" }
+        if matches!(snapshot.as_ref(), Some(Err(_error))) {
+            button {
+                class: "public-state-retry",
+                r#type: "button",
+                onclick: move |_| retry_registration(accounts),
+                {t!("data-retry")}
+            }
+        }
+    }
+}
+
+fn retry_registration(mut accounts: RegistrationAccounts) {
+    // 先清除上一次失败，让界面回到加载态。重试只启动名单读取。
+    accounts.clear();
+    accounts.restart();
 }
 
 /// 为需要认证的 CTA 保存当前 pathname 与 search；直接登录入口不携带返回地址。
@@ -503,5 +532,119 @@ impl Drop for PublicSessionSync {
         let _ = self
             .window
             .remove_event_listener_with_callback("focus", self.focus.as_ref().unchecked_ref());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::{Cell, RefCell};
+    use std::future::poll_fn;
+    use std::rc::Rc;
+    use std::task::{Poll, Waker};
+
+    use auction_web_shared::i18n::{DEFAULT_PUBLIC_LOCALE, build_bundle};
+    use dioxus::dioxus_core::Mutation;
+    use dioxus::prelude::*;
+    use dioxus_i18n::prelude::try_use_init_i18n_from_bundle;
+
+    use super::{RegistrationAccounts, registration_hint, retry_registration};
+
+    #[derive(Default)]
+    struct RegistrationControl {
+        reads: Cell<u8>,
+        empty: bool,
+        accounts: Cell<Option<RegistrationAccounts>>,
+        retry_ready: Cell<bool>,
+        retry_waker: RefCell<Option<Waker>>,
+    }
+
+    #[component]
+    fn RegistrationHarness() -> Element {
+        let control = consume_context::<Rc<RegistrationControl>>();
+        try_use_init_i18n_from_bundle(|| {
+            build_bundle(
+                &DEFAULT_PUBLIC_LOCALE,
+                include_str!("../../i18n/en.ftl"),
+                &DEFAULT_PUBLIC_LOCALE,
+                None,
+            )
+        })
+        .expect("初始化英文译文");
+        let script = control.clone();
+        let accounts = use_resource(move || {
+            let attempt = script.reads.get() + 1;
+            script.reads.set(attempt);
+            let script = script.clone();
+            async move {
+                if script.empty {
+                    Ok(String::new())
+                } else if attempt == 1 {
+                    Err("configuration_unavailable".to_owned())
+                } else {
+                    poll_fn(|context| {
+                        if script.retry_ready.get() {
+                            Poll::Ready(())
+                        } else {
+                            *script.retry_waker.borrow_mut() = Some(context.waker().clone());
+                            Poll::Pending
+                        }
+                    })
+                    .await;
+                    Ok("Auction Bot".to_owned())
+                }
+            }
+        });
+        control.accounts.set(Some(accounts));
+        registration_hint(accounts)
+    }
+
+    fn has_text(edits: &[Mutation], text: &str) -> bool {
+        edits.iter().any(|edit| match edit {
+            Mutation::CreateTextNode { value, .. } | Mutation::SetText { value, .. } => {
+                value.contains(text)
+            }
+            _ => false,
+        })
+    }
+
+    #[test]
+    fn empty_registration_response_is_a_success_after_loading() {
+        let control =
+            Rc::new(RegistrationControl { empty: true, ..RegistrationControl::default() });
+        let mut dom = VirtualDom::new(RegistrationHarness).with_root_context(control.clone());
+        let loading = dom.rebuild_to_vec();
+        assert!(has_text(&loading.edits, "Loading…"));
+        assert!(!has_text(&loading.edits, "MoogleMail"));
+
+        dom.process_events();
+        let loaded = dom.render_immediate_to_vec();
+        assert!(has_text(&loaded.edits, "MoogleMail"));
+        assert!(!has_text(&loaded.edits, "Retry"));
+        assert_eq!(control.reads.get(), 1);
+    }
+
+    #[test]
+    fn registration_failure_can_retry_the_list_and_show_the_recipient() {
+        let control = Rc::new(RegistrationControl::default());
+        let mut dom = VirtualDom::new(RegistrationHarness).with_root_context(control.clone());
+        dom.rebuild_in_place();
+        dom.process_events();
+        let failed = dom.render_immediate_to_vec();
+        assert!(has_text(&failed.edits, "temporarily unavailable"));
+        assert!(!has_text(&failed.edits, "MoogleMail"));
+        assert!(failed.edits.iter().any(|edit| matches!(
+            edit,
+            Mutation::NewEventListener { name, .. } if name == "click"
+        )));
+        let accounts = control.accounts.get().expect("挂载名单资源");
+        dom.in_runtime(|| retry_registration(accounts));
+        let loading = dom.render_immediate_to_vec();
+        assert!(has_text(&loading.edits, "Loading…"));
+        control.retry_ready.set(true);
+        control.retry_waker.borrow_mut().take().expect("名单读取正在等待响应").wake();
+        dom.process_events();
+        let loaded = dom.render_immediate_to_vec();
+        assert!(has_text(&loaded.edits, "Auction Bot"));
+        assert_eq!(control.reads.get(), 2);
     }
 }
