@@ -380,6 +380,7 @@ Public/Admin/Worker 可在业务 listener、control socket 之外启用独立出
 | `/compensation-pool`、`/compensation` | 补偿池 |
 | `/forum` | 论坛同步 |
 | `/status` | 服务说明 |
+| `/settings` | 设置（语言与主题，只保存在浏览器本机）。只有 Solid 实现提供这个页面；Rust 实现没有对应路由，进入后按未匹配路径回到拍卖看板 |
 
 | Admin 路径 | 页面 |
 | --- | --- |

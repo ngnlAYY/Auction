@@ -36,15 +36,20 @@ export {
 } from "./session";
 export { formatLocalizedTimeForLanguage } from "./time";
 
-/** 原生 `<select>` 自带键盘、屏幕阅读器语义与移动端选择面板。 */
-export function LanguagePicker(props: { label: string; catalog: LocaleCatalog }): JSX.Element {
+/** 原生 `<select>` 自带键盘、屏幕阅读器语义与移动端选择面板。
+ * 同一页面渲染第二个实例时（如设置页与顶栏并存）用 `id` 区分，缺省为 `language`。 */
+export function LanguagePicker(props: {
+  label: string;
+  catalog: LocaleCatalog;
+  id?: string;
+}): JSX.Element {
   const session = useLocaleSession();
   return (
     <>
       <label class="language-picker">
         <span class="language-picker__label">{props.label}</span>
         <select
-          id="language"
+          id={props.id ?? "language"}
           name="language"
           class="language-picker__select"
           value={session.current()}

@@ -199,12 +199,13 @@ export function Blacklist(): JSX.Element {
 
   | 位置 | 差别 |
   | --- | --- |
-  | `web/public/src/styles/mobile-topbar.css` | 手机顶栏改为单行应用栏：品牌作眉标、当前场次作主标题，菜单与刷新是无边框图标 |
+  | `web/public/src/styles/mobile-topbar.css` | 手机顶栏改为两行应用栏：第一行是当前场次与状态标签，第二行是世界切换与倒计时；不显示品牌名，语言与主题移到设置页；菜单与刷新是无边框图标 |
   | `web/public/src/styles/mobile-bid-log.css` | 手机上出价记录的筛选区去掉卡片，下拉框与搜索框共两行 |
   | `web/public/src/styles/mobile-catalog-filters.css` | 手机上看板筛选区排成带标签的三行（分组按钮、窄等级输入框与复选项、类型下拉框与列设置）；列设置面板改为整宽多列网格 |
   | `web/public/src/styles/auction-rounds-links.css` | 往期拍卖的“查看”入口等分整列；桌面端该列是刚好容纳四个入口的固定宽度，手机卡片上画成四个等宽按钮 |
   | `web/public/src/styles/pinned-pager.css` | 页面级分页条固定在内容区最下方，内容超过一屏时停在视口底部（账户页除外） |
   | `web/public/src/surface/pages/history.tsx` | 往期拍卖表格其余列的比例随“查看”列改为固定宽度而调整 |
+  | `web/public/src/surface/settings.tsx`、`styles/settings-page.css` | 设置页 `/settings`（语言与主题）：Rust 版没有这个页面；入口只在手机导航里，桌面顶栏仍保留两个切换器 |
 - 译文是各应用 `i18n/` 下的五个 `.ftl` 文件（en、zh-CN、zh-TW、ja、ko），键集合一致，键名用连字符。译文只使用 Fluent 的平铺子集：每条消息占一行，写成 `键 = 文本`，文本里的占位只有 `{ $变量 }` 与字符串字面量 `{"…"}` 两种；加载器遇到子集之外的写法会拒绝整份译文。Public 默认 en，Admin 默认 zh-CN；偏好键 `hv.lang` 与 `hv.theme` 是固定契约。
 
 ## 禁止事项

@@ -2,6 +2,7 @@
 
 import { EQUIPMENT_CATEGORY_CODES } from "@auction/contracts/dto/public/catalog/lot";
 import { focusElementById } from "@auction/web-shared/platform/a11y";
+import { Link } from "@auction/web-shared/router";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
 import { For } from "solid-js";
@@ -62,6 +63,8 @@ export function Navigation(props: {
           resetHomeQuery={props.resetHomeQuery}
           onHome={props.onHome}
         />
+        {/* Solid 版专属：语言与主题在手机上移到设置页，入口只出现在手机导航里。 */}
+        <Link href="/settings">{t("page-settings-title")}</Link>
       </nav>
     </>
   );

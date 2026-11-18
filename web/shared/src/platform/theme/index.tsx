@@ -77,11 +77,13 @@ export function useThemeEffects(): ThemeState {
   return { theme };
 }
 
-/** 主题切换器；写入偏好失败只影响下次启动恢复，不影响本次切换。 */
+/** 主题切换器；写入偏好失败只影响下次启动恢复，不影响本次切换。
+ * 同一页面渲染第二个实例时（如设置页与顶栏并存）用 `id` 区分，缺省为 `theme`。 */
 export function ThemePicker(props: {
   label: string;
   darkLabel: string;
   lightLabel: string;
+  id?: string;
 }): JSX.Element {
   const state = useContext(ThemeStateContext);
   const current = () => state.theme();
@@ -89,7 +91,7 @@ export function ThemePicker(props: {
     <label class="theme-picker">
       <span class="theme-picker__label">{props.label}</span>
       <select
-        id="theme"
+        id={props.id ?? "theme"}
         name="theme"
         class="theme-picker__select"
         value={themeCode(current())}

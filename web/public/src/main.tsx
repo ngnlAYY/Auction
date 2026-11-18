@@ -11,6 +11,7 @@ import "./styles/mobile-bid-log.css";
 import "./styles/mobile-catalog-filters.css";
 import "./styles/auction-rounds-links.css";
 import "./styles/pinned-pager.css";
+import "./styles/settings-page.css";
 
 import { installErrorHook } from "@auction/web-shared/ui/bootstrap";
 import { render } from "@solidjs/web";

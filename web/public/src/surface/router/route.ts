@@ -55,6 +55,8 @@ export const PUBLIC_ROUTES: readonly RouteDefinition[] = [
   { name: "Compensation", pattern: "/compensation" },
   { name: "Forum", pattern: "/forum" },
   { name: "Status", pattern: "/status" },
+  // Solid 版专属：语言与主题的设置页，Rust 版没有对应路由。
+  { name: "Settings", pattern: "/settings" },
 ];
 // Dioxus 的 `/:..segments` 未匹配路由由共享路由器直接返回 not-found，不重复登记 catch-all。
 
@@ -87,6 +89,7 @@ const loadCompensation: RoutePageLoader = () =>
   import("../query").then((module) => () => module.redirectPublicAlias("/compensation-pool"));
 const loadForum: RoutePageLoader = () => import("../forum").then((module) => module.page);
 const loadStatus: RoutePageLoader = () => import("../realtime").then((module) => module.page);
+const loadSettings: RoutePageLoader = () => import("../settings").then((module) => module.page);
 
 /** 拍品直达链接：UUID 解析成目录位置并打开详情抽屉，其余取值回到拍卖页。 */
 const loadLotDetail: RoutePageLoader = () =>
@@ -134,6 +137,7 @@ export const PUBLIC_PAGES: Readonly<Record<string, RoutePage>> = {
   Compensation: lazyPage(loadCompensation),
   Forum: lazyPage(loadForum),
   Status: lazyPage(loadStatus),
+  Settings: lazyPage(loadSettings),
 };
 
 /** 未匹配任何已冻结路由时回到公开端首页，保留旧 URL 中的筛选查询。 */

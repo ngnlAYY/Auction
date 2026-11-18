@@ -1,6 +1,8 @@
 //! 后端批准提供 SPA 入口的浏览器路由清单。
-//! 这里与两个 Dioxus `Route` 枚举共同冻结浏览器路径。新增或删除页面时必须同步修改对应枚举、
-//! 本清单和 `docs/contracts/routes.md`；未知路径不能自动获得 `index.html`。
+//! 这里与两个 Dioxus `Route` 枚举、Solid 实现的路由表（`web/*/src/surface/router/route.ts`）
+//! 共同冻结浏览器路径。新增或删除页面时必须同步修改对应枚举或路由表、本清单和
+//! `docs/contracts/routes.md`；未知路径不能自动获得 `index.html`。
+//! 只有一套实现提供的页面（如 Public 的 `/settings`）在另一套实现里落到未匹配路由，回到首页。
 
 const PUBLIC_EXACT_ROUTES: &[&str] = &[
     "/",
@@ -18,6 +20,7 @@ const PUBLIC_EXACT_ROUTES: &[&str] = &[
     "/login",
     "/me",
     "/rules",
+    "/settings",
     "/status",
 ];
 
@@ -83,6 +86,14 @@ fn valid_parameter(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{Surface, browser_route};
+
+    /// `/settings` 只有 Public 的 Solid 实现提供页面；Admin 没有这个入口，带尾随斜杠的写法也不给入口。
+    #[test]
+    fn settings_page_is_a_public_only_browser_route() {
+        assert!(browser_route(Surface::Public, "/settings"));
+        assert!(!browser_route(Surface::Admin, "/settings"));
+        assert!(!browser_route(Surface::Public, "/settings/"));
+    }
 
     /// 结算退件列表与详情只给 Admin SPA 入口；参数段为空、含路径分隔或穿越时不给入口。
     #[test]

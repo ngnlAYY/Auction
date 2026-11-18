@@ -1,0 +1,71 @@
+/*
+ * Solid 版专属：设置页（surface/settings.tsx）。Rust 版没有这个页面。
+ * 一张卡片里每行一项：左边是名称，右边是下拉框；手机上占满整宽。
+ * 下拉框字号在触控断点由共用样式提升到 16px，这里不改。
+ */
+.public-settings-page {
+  display: grid;
+  gap: var(--space-3);
+  max-inline-size: 32rem;
+}
+
+.public-settings-page__title {
+  margin: 0;
+  color: var(--color-text);
+  font-size: var(--text-lg);
+  font-weight: 700;
+}
+
+.public-settings-page__list {
+  display: grid;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.public-settings-page__list > :is(.language-picker, .theme-picker) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-block-size: 3.25rem;
+  padding: var(--space-2) var(--space-3);
+}
+
+.public-settings-page__list
+  > :is(.language-picker, .theme-picker)
+  + :is(.language-picker, .theme-picker) {
+  border-block-start: var(--border-width) solid var(--color-border);
+}
+
+/* 共用样式把这两个名称对视觉隐藏（顶栏里只显示下拉框）；设置页里要显示出来。 */
+.public-settings-page__list :is(.language-picker__label, .theme-picker__label) {
+  position: static;
+  inline-size: auto;
+  block-size: auto;
+  margin: 0;
+  overflow: visible;
+  clip: auto;
+  clip-path: none;
+  color: var(--color-text);
+  font-size: var(--text-base);
+  white-space: nowrap;
+}
+
+.public-settings-page__list :is(.language-picker__select, .theme-picker__select) {
+  inline-size: 11rem;
+  max-inline-size: 60%;
+  min-block-size: 2.25rem;
+  border-radius: var(--radius-sm);
+}
+
+.public-settings-page__list > .language-picker__error {
+  margin: 0;
+  padding: 0 var(--space-3) var(--space-2);
+}
+
+.public-settings-page__hint {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}

@@ -381,7 +381,7 @@ fluent_ids() {
 }
 
 check_i18n() {
-	local actual_locales base candidate directory dotted duplicates expected_locales missing referenced repeated
+	local actual_locales base candidate directory dotted duplicates expected_locales missing referenced repeated web_directory
 	expected_locales=$(printf '%s\n' en.ftl ja.ftl ko.ftl zh-CN.ftl zh-TW.ftl)
 
 	for surface in auction-web-public auction-web-admin; do
@@ -404,10 +404,18 @@ check_i18n() {
 
 		# $1 是 Perl 捕获组，不是 Shell 参数，必须保留单引号避免 Shell 展开。
 		# shellcheck disable=SC2016
+		# Solid 实现（web/<surface>）与 Rust 实现共用同一份译文；它的 t("键") 调用同样必须指向已存在的键。
+		web_directory="web/${surface#auction-web-}/src"
 		referenced=$(
-			rg --files "crates/$surface/src" -g '*.rs' |
-				xargs perl -0777 -ne 'while (/\bt!\(\s*"([A-Za-z0-9_.-]+)"/g) { print "$1\n" }' |
-				sort -u
+			{
+				rg --files "crates/$surface/src" -g '*.rs' |
+					xargs perl -0777 -ne 'while (/\bt!\(\s*"([A-Za-z0-9_.-]+)"/g) { print "$1\n" }'
+				# 尚未编写的 surface 目录里没有源码：rg 以 1 退出，xargs -r 不启动 perl。
+				if [[ -d "$web_directory" ]]; then
+					{ rg --files "$web_directory" -g '*.ts' -g '*.tsx' || true; } |
+						xargs -r perl -0777 -ne 'while (/\bt\(\s*"([A-Za-z0-9_.-]+)"/g) { print "$1\n" }'
+				fi
+			} | sort -u
 		)
 		missing=$(comm -23 <(printf '%s\n' "$referenced") <(fluent_ids "$base" | uniq))
 		if [[ -n "$missing" ]]; then
@@ -442,10 +450,15 @@ check_i18n() {
 	fi
 
 	# FTL 键必须在同一 surface 源码的字符串字面量中可达；动态拼接规则见脚本头部说明。
+	# 两套实现共用译文：键在 Rust 实现或 Solid 实现（web/<surface>、web/shared）任一处可达即可。
 	for surface in auction-web-public auction-web-admin; do
+		web_directory="web/${surface#auction-web-}/src"
 		{
 			rg --files "crates/$surface/src" -g '*.rs' --null
 			rg --files crates/auction-web-shared/src -g '*.rs' --null
+			if [[ -d "$web_directory" ]]; then
+				rg --files "$web_directory" web/shared/src -g '*.ts' -g '*.tsx' --null || true
+			fi
 		} | perl ci/checks/i18n-unused-keys.pl "crates/$surface/i18n/en.ftl" || return 1
 	done
 
