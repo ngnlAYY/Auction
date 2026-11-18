@@ -5,7 +5,6 @@ use std::collections::BTreeMap;
 use auction_application::auction::{PublicAuctionProjection, PublicLotListRequest, PublicLotPage};
 use auction_application::core::ApplicationError;
 use auction_application::forum::EquipmentColorRule;
-use auction_domain::equipment::taxonomy::EquipmentCategory;
 use uuid::Uuid;
 
 use super::mapping::{
@@ -15,12 +14,23 @@ use crate::database::DatabaseStore;
 use crate::database::storage_error;
 use crate::database::storage_error_from;
 
-/// 列表页过滤：$2 规范装备大类名（由公开分类键在 Rust 侧解析）、$5 预筛选 lot 集合，
-/// 按全局 lot 序号稳定排序后以 $3/$4 分页。
+/// 零个或一个分类的列表页过滤：$2 规范装备大类名（由公开分类键在 Rust 侧解析）、
+/// $5 预筛选 lot 集合，按全局 lot 序号稳定排序后以 $3/$4 分页。既有热路径的文本与绑定保持不变。
 macro_rules! lot_page_filter_sql {
     () => {
         "l.auction_id = $1
                AND ($2::text IS NULL OR e.category = $2::text)
+               AND ($5::uuid[] IS NULL OR l.id = ANY($5))
+             ORDER BY l.lot_number, l.id
+             LIMIT $3 OFFSET $4"
+    };
+}
+
+/// 多分类列表页过滤：$2 为规范装备大类名数组，其余参数与单分类片段相同。
+macro_rules! lot_page_filter_sql_multi {
+    () => {
+        "l.auction_id = $1
+               AND e.category = ANY($2::text[])
                AND ($5::uuid[] IS NULL OR l.id = ANY($5))
              ORDER BY l.lot_number, l.id
              LIMIT $3 OFFSET $4"
@@ -52,6 +62,7 @@ async fn list_postgres_transaction(
     request: PublicLotListRequest,
     colors: &[EquipmentColorRule],
 ) -> Result<Option<PublicLotPage>, ApplicationError> {
+    let selected_categories = request.category_selection.as_slice();
     let Some((projection, status_counts)) =
         postgres_list_projection(transaction, auction_id).await?
     else {
@@ -70,19 +81,25 @@ async fn list_postgres_transaction(
         (status_counts, None)
     };
     let query_offset = if page_ids.is_some() { 0 } else { request.offset };
-    // 公开键只经领域映射转换为规范名；未知键失败关闭，不能退化为“不过滤”。
-    let category_name = match request.category.as_deref() {
-        None => None,
-        Some(key) => Some(
-            EquipmentCategory::from_public_key(key)
-                .ok_or_else(|| storage_error("公开 lot 分类参数无效"))?
-                .as_str(),
-        ),
+    // 零/一个分类继续绑定单个规范名；多分类改用静态数组片段，避免改变既有热路径的查询计划。
+    // 多分类的计数与分页共用同一个只读快照，查询次数不随所选分类数量增加，也不按分类拆页。
+    let category_name = match selected_categories {
+        [category] => Some(category.as_str()),
+        _ => None,
     };
-    let total = request.category.as_deref().map_or_else(
-        || counts.get("all").copied().unwrap_or_default(),
-        |category| counts.get(category).copied().unwrap_or_default(),
-    );
+    let category_names = (selected_categories.len() > 1).then(|| {
+        selected_categories.iter().map(|category| category.as_str().to_owned()).collect::<Vec<_>>()
+    });
+    let total = if selected_categories.is_empty() {
+        counts.get("all").copied().unwrap_or_default()
+    } else {
+        selected_categories
+            .iter()
+            .try_fold(0_i64, |total, category| {
+                total.checked_add(counts.get(category.public_key()).copied().unwrap_or_default())
+            })
+            .ok_or_else(|| storage_error("公开 lot 分类统计溢出"))?
+    };
 
     let mut page = PublicLotPage {
         projection,
@@ -93,36 +110,62 @@ async fn list_postgres_transaction(
         offset: request.offset,
         category_counts: counts,
     };
-    if page.projection.projection_kind == "preview" {
-        let rows = sqlx::query(preview_lot_sql!(lot_page_filter_sql!()))
-            .bind(auction_id)
-            .bind(category_name)
-            .bind(request.limit)
-            .bind(query_offset)
-            .bind(page_ids.as_deref())
-            .fetch_all(&mut **transaction)
-            .await
-            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 预览 lot 列表失败"))?;
+    let preview = page.projection.projection_kind == "preview";
+    let rows = if preview {
+        match category_names.as_deref() {
+            None => sqlx::query(preview_lot_sql!(lot_page_filter_sql!()))
+                .bind(auction_id)
+                .bind(category_name)
+                .bind(request.limit)
+                .bind(query_offset)
+                .bind(page_ids.as_deref())
+                .fetch_all(&mut **transaction)
+                .await
+                .map_err(|error| storage_error_from(error, "读取 PostgreSQL 预览 lot 列表失败"))?,
+            Some(categories) => sqlx::query(preview_lot_sql!(lot_page_filter_sql_multi!()))
+                .bind(auction_id)
+                .bind(categories)
+                .bind(request.limit)
+                .bind(query_offset)
+                .bind(page_ids.as_deref())
+                .fetch_all(&mut **transaction)
+                .await
+                .map_err(|error| storage_error_from(error, "读取 PostgreSQL 预览 lot 列表失败"))?,
+        }
+    } else {
+        match category_names.as_deref() {
+            None => sqlx::query(live_lot_sql!(lot_page_filter_sql!()))
+                .bind(auction_id)
+                .bind(category_name)
+                .bind(request.limit)
+                .bind(query_offset)
+                .bind(page_ids.as_deref())
+                .fetch_all(&mut **transaction)
+                .await
+                .map_err(|error| storage_error_from(error, "读取 PostgreSQL 正式 lot 列表失败"))?,
+            Some(categories) => sqlx::query(live_lot_sql!(lot_page_filter_sql_multi!()))
+                .bind(auction_id)
+                .bind(categories)
+                .bind(request.limit)
+                .bind(query_offset)
+                .bind(page_ids.as_deref())
+                .fetch_all(&mut **transaction)
+                .await
+                .map_err(|error| storage_error_from(error, "读取 PostgreSQL 正式 lot 列表失败"))?,
+        }
+    };
+    if preview {
         page.preview = rows
             .into_iter()
             .map(|row| map_postgres_preview(row, &page.projection.world_id, colors))
             .collect::<Result<_, _>>()?;
     } else {
-        let rows = sqlx::query(live_lot_sql!(lot_page_filter_sql!()))
-            .bind(auction_id)
-            .bind(category_name)
-            .bind(request.limit)
-            .bind(query_offset)
-            .bind(page_ids.as_deref())
-            .fetch_all(&mut **transaction)
-            .await
-            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 正式 lot 列表失败"))?;
         page.live = rows
             .into_iter()
             .map(|row| map_postgres_live(row, &page.projection.world_id, colors))
             .collect::<Result<_, _>>()?;
     }
-    page.validate(auction_id, request.category.as_deref()).map_err(storage_error)?;
+    page.validate(auction_id, &request).map_err(storage_error)?;
     page.validate_filters(&request).map_err(storage_error)?;
     Ok(Some(page))
 }

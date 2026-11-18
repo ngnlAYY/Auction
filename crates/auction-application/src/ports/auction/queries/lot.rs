@@ -14,7 +14,6 @@ use crate::ports::forum::EquipmentGroup;
 
 /// 公开 lot 读取允许的最大 legacy offset，防止深分页拖垮数据库。
 pub const MAX_PUBLIC_LOT_OFFSET: i64 = 10_000;
-
 /// 公开 lot 分类统计的稳定 JSON key：`all` 后按领域大类顺序排列各大类的公开键。
 pub const PUBLIC_LOT_CATEGORIES: [&str; 8] = {
     let mut keys = ["all"; 8];
@@ -26,20 +25,64 @@ pub const PUBLIC_LOT_CATEGORIES: [&str; 8] = {
     keys
 };
 
+/// 公开 lot 列表已经校验的分类集合：无重复，按 `EquipmentCategory::ALL` 排序；空集合表示不筛选。
+/// 内部字段私有，只能经 [`PublicLotCategorySelection::from_public_keys`] 取得合法集合。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PublicLotCategorySelection {
+    categories: Vec<EquipmentCategory>,
+}
+impl PublicLotCategorySelection {
+    /// 按借用的公开分类键逐项校验；空项、未知键（含 `all`）、重复键或超过闭集数量时失败关闭。
+    pub fn from_public_keys<'a>(
+        keys: impl IntoIterator<Item = &'a str>,
+    ) -> Result<Self, &'static str> {
+        let mut selected = [false; EquipmentCategory::ALL.len()];
+        for (count, key) in keys.into_iter().enumerate() {
+            // 闭集共有七个值；第 N+1 项不可能带来新分类，立即失败而不继续消费输入。
+            if count == EquipmentCategory::ALL.len() {
+                return Err("公开 lot 分类参数无效");
+            }
+            let category =
+                EquipmentCategory::from_public_key(key).ok_or("公开 lot 分类参数无效")?;
+            let index = EquipmentCategory::ALL
+                .iter()
+                .position(|known| *known == category)
+                .ok_or("公开 lot 分类参数无效")?;
+            if selected[index] {
+                return Err("公开 lot 分类参数无效");
+            }
+            selected[index] = true;
+        }
+        Ok(Self {
+            categories: EquipmentCategory::ALL
+                .into_iter()
+                .enumerate()
+                .filter(|(index, _)| selected[*index])
+                .map(|(_, category)| category)
+                .collect(),
+        })
+    }
+
+    /// 返回按闭集顺序排列的只读分类集合；空切片表示不筛选。
+    pub fn as_slice(&self) -> &[EquipmentCategory] {
+        &self.categories
+    }
+}
+/// 公开 lot 列表请求；分类集合为空表示不按装备分类筛选。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicLotListRequest {
-    pub category: Option<String>,
+    /// 构造时已校验并按领域大类顺序规范化的分类集合。
+    pub category_selection: PublicLotCategorySelection,
     pub equipment_group: Option<EquipmentGroup>,
-    /// 数字等级的包含式上限；None 不限制数字等级，不把无等级装备视为零级。
+    /// 数字等级的包含式上限；None 不限制，不把无等级装备视为零级。
     pub max_level: Option<i64>,
     /// 无数字等级装备独立控制；未指定上限时也生效。
     pub include_unleveled: bool,
     pub limit: i64,
     pub offset: i64,
 }
-
 impl PublicLotListRequest {
-    /// 在应用端口边界拒绝未定义分类、非正页大小和深 offset；数量不设业务上限。
+    /// 在应用端口边界拒绝非正页大小和深 offset；分类集合已由构造类型保证合法。
     pub fn validate(&self) -> Result<(), &'static str> {
         if self.limit < 1 || self.offset < 0 {
             return Err("公开 lot 分页参数无效");
@@ -47,19 +90,11 @@ impl PublicLotListRequest {
         if self.offset > MAX_PUBLIC_LOT_OFFSET {
             return Err("公开 lot 分页 offset 超出上限");
         }
-        if self
-            .category
-            .as_deref()
-            .is_some_and(|category| EquipmentCategory::from_public_key(category).is_none())
-        {
-            return Err("公开 lot 分类参数无效");
-        }
         if self.max_level.is_some_and(|level| level < 0) {
             return Err("公开 lot 等级上限无效");
         }
         Ok(())
     }
-
     /// 目录筛选不改变装备事实或出价资格；无等级是否保留由独立选项决定。
     pub fn matches_level(&self, level: Option<i64>) -> bool {
         match level {
@@ -68,7 +103,6 @@ impl PublicLotListRequest {
         }
     }
 }
-
 #[derive(Debug, Clone)]
 pub struct PublicAuctionProjection {
     pub auction_id: Uuid,
@@ -427,13 +461,18 @@ pub struct PublicLotPage {
 }
 
 impl PublicLotPage {
-    /// 分组及等级筛选必须先于统计和分页；返回页的两种投影复核同一请求条件。
+    /// 分类、分组及等级筛选必须先于统计和分页；返回页的两种投影复核同一请求条件。
     pub fn validate_filters(&self, request: &PublicLotListRequest) -> Result<(), &'static str> {
+        let selected_categories = request.category_selection.as_slice();
         if self.preview.iter().any(|lot| {
-            request.equipment_group.is_some_and(|group| lot.equipment_group != group)
+            !matches_selected_category(selected_categories, &lot.equipment_category)
+                || request.equipment_group.is_some_and(|group| lot.equipment_group != group)
                 || !request.matches_level(lot.equipment_level)
         }) || self.live.iter().any(|lot| {
-            request.equipment_group.is_some_and(|group| lot.equipment.equipment_group != group)
+            !matches_selected_category(selected_categories, &lot.equipment.category)
+                || request
+                    .equipment_group
+                    .is_some_and(|group| lot.equipment.equipment_group != group)
                 || !request.matches_level(lot.equipment.level)
         }) {
             return Err("公开 lot 页装备筛选无效");
@@ -441,8 +480,13 @@ impl PublicLotPage {
         Ok(())
     }
 
-    /// 校验列表的完整投影、分页、分类统计和筛选归属。
-    pub fn validate(&self, auction_id: Uuid, category: Option<&str>) -> Result<(), &'static str> {
+    /// 校验列表的完整投影、分页、分类统计和请求所选分类归属。
+    pub fn validate(
+        &self,
+        auction_id: Uuid,
+        request: &PublicLotListRequest,
+    ) -> Result<(), &'static str> {
+        let selected_categories = request.category_selection.as_slice();
         if auction_id.is_nil()
             || self.projection.validate().is_err()
             || self.projection.auction_id != auction_id
@@ -455,11 +499,6 @@ impl PublicLotPage {
         {
             return Err("公开 lot 页无效");
         }
-        let expected_category = match category.map(EquipmentCategory::from_public_key) {
-            None => None,
-            Some(Some(category)) => Some(category.as_str()),
-            Some(None) => return Err("公开 lot 页分类无效"),
-        };
         if self.category_counts.len() != PUBLIC_LOT_CATEGORIES.len()
             || PUBLIC_LOT_CATEGORIES
                 .iter()
@@ -468,6 +507,14 @@ impl PublicLotPage {
             return Err("公开 lot 页分类统计无效");
         }
         let counts = &self.category_counts;
+        let expected_total = if selected_categories.is_empty() {
+            counts["all"]
+        } else {
+            selected_categories
+                .iter()
+                .try_fold(0_i64, |total, category| total.checked_add(counts[category.public_key()]))
+                .ok_or("公开 lot 页分类统计溢出")?
+        };
         let Some(known) = PUBLIC_LOT_CATEGORIES[1..]
             .iter()
             .try_fold(0_i64, |total, key| total.checked_add(counts[*key]))
@@ -477,7 +524,6 @@ impl PublicLotPage {
         if known > counts["all"] || self.total > counts["all"] {
             return Err("公开 lot 页分类统计不一致");
         }
-        let expected_total = category.map_or(counts["all"], |key| counts[key]);
         if self.total != expected_total {
             return Err("公开 lot 页总数与分类统计不一致");
         }
@@ -487,7 +533,7 @@ impl PublicLotPage {
             }
             for lot in &self.preview {
                 if lot.auction_id != auction_id
-                    || expected_category.is_some_and(|value| lot.equipment_category != value)
+                    || !matches_selected_category(selected_categories, &lot.equipment_category)
                 {
                     return Err("公开预览 lot 页归属或分类无效");
                 }
@@ -499,7 +545,7 @@ impl PublicLotPage {
             }
             for lot in &self.live {
                 if lot.auction_id != auction_id
-                    || expected_category.is_some_and(|value| lot.equipment.category != value)
+                    || !matches_selected_category(selected_categories, &lot.equipment.category)
                 {
                     return Err("公开正式 lot 页归属或分类无效");
                 }
@@ -508,6 +554,11 @@ impl PublicLotPage {
         }
         Ok(())
     }
+}
+
+fn matches_selected_category(selected_categories: &[EquipmentCategory], category: &str) -> bool {
+    selected_categories.is_empty()
+        || selected_categories.iter().any(|selected| selected.as_str() == category)
 }
 
 fn valid_primary_attribute_initials(value: &str) -> bool {
@@ -545,4 +596,234 @@ pub trait PublicLotReader: Send + Sync {
     ) -> ApplicationFuture<'_, Option<PublicLotPage>>;
 
     fn public_lot(&self, lot_id: Uuid) -> ApplicationFuture<'_, Option<PublicLotDetail>>;
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use auction_domain::EquipmentId;
+    use auction_domain::equipment::taxonomy::EquipmentCategory;
+    use auction_time::Timestamp;
+    use uuid::Uuid;
+
+    use super::{
+        PUBLIC_LOT_CATEGORIES, PublicAuctionProjection, PublicEquipment, PublicLiveLotSummary,
+        PublicLotCategorySelection, PublicLotListRequest, PublicLotPage, PublicPreviewLotSummary,
+    };
+    use crate::ports::forum::EquipmentGroup;
+
+    const AUCTION_ID: Uuid = Uuid::from_u128(0x0190_f2b4_1c2d_4e5f_8a6b_7c8d_9e0f_1a2b);
+    const LOT_ID: Uuid = Uuid::from_u128(0x0190_f2b4_1c2d_4e5f_8a6b_7c8d_9e0f_1a2c);
+    const EQUIPMENT_ID: Uuid = Uuid::from_u128(0x0190_f2b4_1c2d_4e5f_8a6b_7c8d_9e0f_1a2d);
+
+    fn selection(category_keys: &[&str]) -> PublicLotCategorySelection {
+        PublicLotCategorySelection::from_public_keys(category_keys.iter().copied())
+            .expect("测试分类应合法")
+    }
+
+    fn request(category_keys: &[&str]) -> PublicLotListRequest {
+        PublicLotListRequest {
+            category_selection: selection(category_keys),
+            equipment_group: None,
+            max_level: None,
+            include_unleveled: true,
+            limit: 20,
+            offset: 0,
+        }
+    }
+
+    #[test]
+    fn public_lot_category_selection_validates_and_normalizes_in_domain_order() {
+        assert!(selection(&[]).as_slice().is_empty());
+        assert_eq!(
+            selection(&["sta", "one"]).as_slice(),
+            &[EquipmentCategory::OneHanded, EquipmentCategory::Staff]
+        );
+        for category_keys in [&[""][..], &["one", ""], &["all"], &["unknown"], &["one", "one"]] {
+            assert_eq!(
+                PublicLotCategorySelection::from_public_keys(category_keys.iter().copied()),
+                Err("公开 lot 分类参数无效"),
+                "{category_keys:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn public_lot_category_selection_stops_reading_after_an_invalid_item() {
+        let mut yielded = 0;
+        let keys = std::iter::from_fn(move || {
+            yielded += 1;
+            assert!(yielded <= 2, "非法项之后不应继续读取分类键");
+            Some(if yielded == 1 { "one" } else { "unknown" })
+        });
+        assert_eq!(
+            PublicLotCategorySelection::from_public_keys(keys),
+            Err("公开 lot 分类参数无效")
+        );
+    }
+
+    #[test]
+    fn public_lot_category_selection_stops_at_the_eighth_item() {
+        let mut yielded = 0;
+        let keys = std::iter::from_fn(move || {
+            yielded += 1;
+            assert!(yielded <= 8, "超过闭集数量的第 N+1 项之后不应继续读取分类键");
+            Some(["one", "two", "sta", "shd", "clo", "lig", "hea", "one"][yielded - 1])
+        });
+        assert_eq!(
+            PublicLotCategorySelection::from_public_keys(keys),
+            Err("公开 lot 分类参数无效")
+        );
+    }
+
+    #[test]
+    fn public_lot_page_total_is_the_checked_sum_of_selected_category_counts() {
+        let page = page(Vec::new(), 5, &[("all", 8), ("one", 2), ("sta", 3)]);
+        assert_eq!(page.validate(AUCTION_ID, &request(&["one", "sta"])), Ok(()));
+        assert_eq!(
+            page.validate(AUCTION_ID, &request(&["one"])),
+            Err("公开 lot 页总数与分类统计不一致")
+        );
+    }
+
+    #[test]
+    fn public_lot_page_rows_belong_to_the_selected_category_set() {
+        let request = request(&["one"]);
+        let matching_page = page(vec![preview("One-Handed")], 1, &[("all", 1), ("one", 1)]);
+        assert_eq!(matching_page.validate(AUCTION_ID, &request), Ok(()));
+        assert_eq!(matching_page.validate_filters(&request), Ok(()));
+        let wrong_page = page(vec![preview("Staff")], 0, &[("all", 1), ("sta", 1)]);
+        assert_eq!(wrong_page.validate(AUCTION_ID, &request), Err("公开预览 lot 页归属或分类无效"));
+        assert_eq!(wrong_page.validate_filters(&request), Err("公开 lot 页装备筛选无效"));
+
+        let matching_live = live_page(vec![live("One-Handed")], 1, &[("all", 1), ("one", 1)]);
+        assert_eq!(matching_live.validate(AUCTION_ID, &request), Ok(()));
+        assert_eq!(matching_live.validate_filters(&request), Ok(()));
+        let wrong_live = live_page(vec![live("Staff")], 0, &[("all", 1), ("sta", 1)]);
+        assert_eq!(wrong_live.validate(AUCTION_ID, &request), Err("公开正式 lot 页归属或分类无效"));
+        assert_eq!(wrong_live.validate_filters(&request), Err("公开 lot 页装备筛选无效"));
+    }
+
+    #[test]
+    fn public_lot_page_fails_closed_when_selected_category_counts_overflow() {
+        let page = page(Vec::new(), 0, &[("all", i64::MAX), ("one", i64::MAX), ("two", i64::MAX)]);
+        assert_eq!(
+            page.validate(AUCTION_ID, &request(&["one", "two"])),
+            Err("公开 lot 页分类统计溢出")
+        );
+    }
+
+    fn projection() -> PublicAuctionProjection {
+        PublicAuctionProjection {
+            auction_id: AUCTION_ID,
+            world_id: "main".to_owned(),
+            sequence: 1,
+            auction_status: "preview".to_owned(),
+            projection_kind: "preview".to_owned(),
+            presentation_mode: "preview".to_owned(),
+            bidding_open: false,
+            opens_at: Timestamp::from_timestamp(1_763_200_000, 0).expect("fixture time"),
+            scheduled_ends_at: None,
+            preview_revision: 0,
+            final_restriction: None,
+        }
+    }
+
+    fn preview(category: &str) -> PublicPreviewLotSummary {
+        PublicPreviewLotSummary {
+            id: LOT_ID,
+            equipment_id: EquipmentId::from_uuid(EQUIPMENT_ID),
+            auction_id: AUCTION_ID,
+            code: "Lot01".to_owned(),
+            status: "pending".to_owned(),
+            seller_name: "seller".to_owned(),
+            start_price: 1_000,
+            equipment_name: "fixture equipment".to_owned(),
+            equipment_category: category.to_owned(),
+            equipment_group: EquipmentGroup::Rare,
+            equipment_level: Some(100),
+            primary_attribute_initials: None,
+            avg_roll: None,
+            game_equipment_url: "https://hentaiverse.org/equip/123456".to_owned(),
+        }
+    }
+
+    fn live(category: &str) -> PublicLiveLotSummary {
+        PublicLiveLotSummary {
+            id: LOT_ID,
+            equipment_id: EquipmentId::from_uuid(EQUIPMENT_ID),
+            auction_id: AUCTION_ID,
+            lot_number: 1,
+            status: "live".to_owned(),
+            seller_name: "seller".to_owned(),
+            start_price: 1_000,
+            current_price: 1_000,
+            next_bid: 1_000,
+            has_leader: false,
+            leader_name: None,
+            effective_end_at: Some(
+                Timestamp::from_timestamp(1_763_300_000, 0).expect("fixture time"),
+            ),
+            state_version: 1,
+            equipment: PublicEquipment {
+                name: "fixture equipment".to_owned(),
+                category: category.to_owned(),
+                equipment_group: EquipmentGroup::Rare,
+                level: Some(100),
+                info_summary: String::new(),
+                stats: BTreeMap::new(),
+                avg_roll: None,
+                game_equipment_url: "https://hentaiverse.org/equip/123456".to_owned(),
+                attributes: serde_json::json!({}),
+            },
+        }
+    }
+
+    fn live_projection() -> PublicAuctionProjection {
+        PublicAuctionProjection {
+            auction_status: "live".to_owned(),
+            projection_kind: "live".to_owned(),
+            presentation_mode: "live".to_owned(),
+            bidding_open: true,
+            scheduled_ends_at: Some(
+                Timestamp::from_timestamp(1_763_372_800, 0).expect("fixture time"),
+            ),
+            ..projection()
+        }
+    }
+
+    fn live_page(
+        live: Vec<PublicLiveLotSummary>,
+        total: i64,
+        counts: &[(&str, i64)],
+    ) -> PublicLotPage {
+        let mut page = page(Vec::new(), total, counts);
+        page.projection = live_projection();
+        page.live = live;
+        page
+    }
+
+    fn page(
+        preview: Vec<PublicPreviewLotSummary>,
+        total: i64,
+        counts: &[(&str, i64)],
+    ) -> PublicLotPage {
+        let mut category_counts = PUBLIC_LOT_CATEGORIES
+            .iter()
+            .map(|key| ((*key).to_owned(), 0))
+            .collect::<BTreeMap<_, _>>();
+        for (key, value) in counts {
+            category_counts.insert((*key).to_owned(), *value);
+        }
+        PublicLotPage {
+            projection: projection(),
+            preview,
+            live: Vec::new(),
+            total,
+            limit: 20,
+            offset: 0,
+            category_counts,
+        }
+    }
 }

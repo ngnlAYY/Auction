@@ -16,6 +16,33 @@ use crate::database::public::lots::mapping::matches_equipment_filters;
 use crate::database::storage_error;
 use crate::database::storage_error_from;
 
+/// 零个或一个分类的候选扫描原文；必须与改动前的公开请求逐字节一致，避免改变既有查询计划。
+const LEGACY_CANDIDATE_SQL: &str =
+    "SELECT l.id, e.name, e.category, e.attributes - 'stats' AS identity_attributes
+         FROM public.lots AS l
+         JOIN public.auctions AS a ON a.id = l.auction_id
+         JOIN public.worlds AS w ON w.id = a.world_id AND (w.enabled OR a.status = 'settled')
+         JOIN public.equipment AS e ON e.id = l.equipment_id
+         WHERE l.auction_id = $1
+           AND ((a.status = 'preview' AND l.status = 'pending')
+             OR (a.status IN ('live', 'final', 'settling') AND l.status IN ('live', 'sold', 'unsold'))
+             OR (a.status = 'settled' AND l.status IN ('sold', 'unsold')))
+         ORDER BY l.lot_number, l.id";
+
+/// 多分类候选扫描；额外返回当前行是否属于所选集合，其余扫描规则与旧路径一致。
+const MULTI_CATEGORY_CANDIDATE_SQL: &str =
+    "SELECT l.id, e.name, e.category, e.attributes - 'stats' AS identity_attributes,
+            e.category = ANY($2::text[]) AS category_selected
+     FROM public.lots AS l
+     JOIN public.auctions AS a ON a.id = l.auction_id
+     JOIN public.worlds AS w ON w.id = a.world_id AND (w.enabled OR a.status = 'settled')
+     JOIN public.equipment AS e ON e.id = l.equipment_id
+     WHERE l.auction_id = $1
+       AND ((a.status = 'preview' AND l.status = 'pending')
+         OR (a.status IN ('live', 'final', 'settling') AND l.status IN ('live', 'sold', 'unsold'))
+         OR (a.status = 'settled' AND l.status IN ('sold', 'unsold')))
+     ORDER BY l.lot_number, l.id";
+
 pub(super) struct FilteredPageSelection {
     pub category_counts: BTreeMap<String, i64>,
     pub lot_ids: Vec<Uuid>,
@@ -29,20 +56,19 @@ pub(super) async fn select_filtered_page(
     request: &PublicLotListRequest,
     colors: &[EquipmentColorRule],
 ) -> Result<FilteredPageSelection, ApplicationError> {
-    let mut rows = sqlx::query(
-        "SELECT l.id, e.name, e.category, e.attributes - 'stats' AS identity_attributes
-         FROM public.lots AS l
-         JOIN public.auctions AS a ON a.id = l.auction_id
-         JOIN public.worlds AS w ON w.id = a.world_id AND (w.enabled OR a.status = 'settled')
-         JOIN public.equipment AS e ON e.id = l.equipment_id
-         WHERE l.auction_id = $1
-           AND ((a.status = 'preview' AND l.status = 'pending')
-             OR (a.status IN ('live', 'final', 'settling') AND l.status IN ('live', 'sold', 'unsold'))
-             OR (a.status = 'settled' AND l.status IN ('sold', 'unsold')))
-         ORDER BY l.lot_number, l.id",
-    )
-    .bind(auction_id)
-    .fetch(&mut **transaction);
+    let selected_categories = request.category_selection.as_slice();
+    let multi_category_names = (selected_categories.len() > 1).then(|| {
+        selected_categories.iter().map(|category| category.as_str().to_owned()).collect::<Vec<_>>()
+    });
+    // 分组与等级规则留在应用层，统计仍须覆盖全部分类。多分类与单分类一样在同一个只读快照
+    // 事务内完成；查询次数不随所选分类数量增加，也不按分类多次查询后在内存里合并分页。
+    let mut rows = match multi_category_names.as_deref() {
+        None => sqlx::query(LEGACY_CANDIDATE_SQL).bind(auction_id).fetch(&mut **transaction),
+        Some(categories) => sqlx::query(MULTI_CATEGORY_CANDIDATE_SQL)
+            .bind(auction_id)
+            .bind(categories)
+            .fetch(&mut **transaction),
+    };
     let mut counts = [0_i64; 8];
     let mut matched_count = 0_i64;
     let mut lot_ids = Vec::new();
@@ -71,9 +97,14 @@ pub(super) async fn select_filtered_page(
         {
             counts[index + 1] = increment_count(counts[index + 1])?;
         }
-        if request.category.as_deref().is_some_and(|requested| {
-            category.is_none_or(|category| category.public_key() != requested)
-        }) {
+        let selected = if multi_category_names.is_some() {
+            row.try_get("category_selected")
+                .map_err(|error| storage_error_from(error, "读取公开 lot 分类筛选结果失败"))?
+        } else {
+            selected_categories.is_empty()
+                || category.is_some_and(|category| selected_categories.contains(&category))
+        };
+        if !selected {
             continue;
         }
         if matched_count >= request.offset && (lot_ids.len() as u64) < request.limit as u64 {

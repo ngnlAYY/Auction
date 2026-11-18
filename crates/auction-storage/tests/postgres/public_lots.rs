@@ -2,18 +2,18 @@
 //!
 //! 计数用例的页码取在全部拍品之后，当前页为空，只校验投影、分类计数、总数与它们的一致性
 //! （`PublicLotPage::validate` 全部执行），不依赖装备展示映射。分类用例给各大类种互不相同的
-//! 件数，另外核对 SQL 中的分类统计、分类筛选与竞价日志 lot 代码搜索，与领域大类映射及 Rust
-//! 生成的 lot 代码逐项一致（含未知分类）。当前场次快照另核对冻结策略的代理默认模式与缺值时的
-//! 失败关闭。维护账号写入种子，运行账号经公开端口读取。仅在 `test-db` feature 下编译，入口见
-//! `mise run test-db`。
+//! 件数，另外核对 SQL 中的分类统计、分类筛选、多分类数组筛选与竞价日志 lot 代码搜索，与领域
+//! 大类映射及 Rust 生成的 lot 代码逐项一致（含未知分类）。当前场次快照另核对冻结策略的代理
+//! 默认模式与缺值时的失败关闭。维护账号写入种子，运行账号经公开端口读取。仅在 `test-db`
+//! feature 下编译，入口见 `mise run test-db`。
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use auction_application::auction::{
-    AuctionReader, PublicBidLogListRequest, PublicBidLogReader, PublicLotListRequest,
-    PublicLotReader, PublicPreviewLotSummary,
+    AuctionReader, PublicBidLogListRequest, PublicBidLogReader, PublicLotCategorySelection,
+    PublicLotListRequest, PublicLotReader, PublicPreviewLotSummary,
 };
 use auction_application::public::lot_code;
 use auction_domain::ProxyMode;
@@ -26,7 +26,7 @@ use uuid::Uuid;
 use crate::support;
 use crate::support::fixtures::{policy_snapshot, seed_user, stable_id};
 
-/// 写入一场指定状态的场次与若干（装备分类, lot 状态）拍品。
+/// 写入一场指定状态的场次与若干（装备分类, lot 状态）拍品；装备默认 300 级。
 async fn seed_auction(
     pool: &PgPool,
     seed: &str,
@@ -34,6 +34,20 @@ async fn seed_auction(
     sequence: i32,
     status: &str,
     lots: &[(&str, &str)],
+) -> Uuid {
+    let lots: Vec<(&str, &str, Option<i64>)> =
+        lots.iter().map(|(category, lot_status)| (*category, *lot_status, Some(300))).collect();
+    seed_auction_with_levels(pool, seed, world, sequence, status, &lots).await
+}
+
+/// 同 `seed_auction`，但可指定每件装备的等级；None 表示无数字等级。
+async fn seed_auction_with_levels(
+    pool: &PgPool,
+    seed: &str,
+    world: &str,
+    sequence: i32,
+    status: &str,
+    lots: &[(&str, &str, Option<i64>)],
 ) -> Uuid {
     let now = Timestamp::now();
     // 预览场次的开拍时间在将来，其余场次已开拍。
@@ -73,26 +87,34 @@ async fn seed_auction(
         .expect("写入预览收件目标");
     }
     transaction.commit().await.expect("提交种子事务");
-    for (index, (category, lot_status)) in lots.iter().enumerate() {
+    for (index, (category, lot_status, level)) in lots.iter().enumerate() {
         let equipment_id = stable_id(seed, &format!("equipment-{index}"));
-        // 带等级与品质的最小属性，使分类用例可以完整映射公开装备投影。
+        // 带品质的最小属性；等级由用例决定，缺省或超出上限的行用于核对预筛选。
+        let attributes = match level {
+            Some(level) => json!({"quality": "Legendary", "level": level}),
+            None => json!({"quality": "Legendary"}),
+        };
         sqlx::query(
             "INSERT INTO public.equipment
                 (id, world_id, external_equipment_id, name, category, attributes, collected_at)
-             VALUES ($1, $2, $3, $4, $5, '{\"quality\": \"Legendary\", \"level\": 300}', $6)",
+             VALUES ($1, $2, $3, $4, $5, $6, $7)",
         )
         .bind(equipment_id)
         .bind(world)
         .bind(format!("{}{index}", 1_000 + sequence * 100))
         .bind(format!("{seed} equipment {index}"))
         .bind(*category)
+        .bind(attributes)
         .bind(now - Duration::days(1))
         .execute(pool)
         .await
         .expect("写入测试装备");
         let number = i32::try_from(index + 1).expect("lot number");
-        // 待定拍品必须挂在一条投稿上（`lots_pending_submission_check`），投稿又引用命令账本。
-        let submission_id = if *lot_status == "pending" {
+        // 待定拍品必须挂在一条投稿上（`lots_pending_submission_check`），投稿又引用命令账本；
+        // 进行中场次的正式行映射要求卖家，因此 live 场次也为所有 lot 写入投稿。邮箱按场次
+        // 实际世界取值，邮件号再编入 world、sequence 与下标；`auctions(world_id, sequence)`
+        // 唯一，因此同一测试库内多场次不会共用 `(mailbox_key, external_mail_id)`。
+        let submission_id = if *lot_status == "pending" || status == "live" {
             let command_id = stable_id(seed, &format!("submission-command-{index}"));
             let mut request_hash = [0_u8; 32];
             request_hash[..16].copy_from_slice(command_id.as_bytes());
@@ -112,12 +134,13 @@ async fn seed_auction(
                 "INSERT INTO public.auction_submissions
                     (id, source_command_id, auction_id, mailbox_key, external_mail_id, seller,
                      received_at)
-                 VALUES ($1, $2, $3, 'mooglemail:main', $4, 'seller', $5)",
+                 VALUES ($1, $2, $3, $4, $5, 'seller', $6)",
             )
             .bind(submission_id)
             .bind(command_id)
             .bind(auction_id)
-            .bind(format!("{}{index}", 2_000 + sequence * 100))
+            .bind(format!("mooglemail:{world}"))
+            .bind(format!("{}-{world}-{index}", 2_000 + sequence * 100))
             .bind(now - Duration::days(1))
             .execute(pool)
             .await
@@ -148,14 +171,29 @@ async fn seed_auction(
 }
 
 /// 只要计数，不要拍品：offset 落在全部拍品之后。
-fn counts_only(category: Option<&str>) -> PublicLotListRequest {
+fn counts_only(categories: &[&str]) -> PublicLotListRequest {
+    filtered_request(categories, true, None, 20, 1_000)
+}
+
+fn category_selection(categories: &[&str]) -> PublicLotCategorySelection {
+    PublicLotCategorySelection::from_public_keys(categories.iter().copied())
+        .expect("测试分类应合法")
+}
+
+fn filtered_request(
+    categories: &[&str],
+    include_unleveled: bool,
+    max_level: Option<i64>,
+    limit: i64,
+    offset: i64,
+) -> PublicLotListRequest {
     PublicLotListRequest {
-        category: category.map(str::to_owned),
+        category_selection: category_selection(categories),
         equipment_group: None,
-        max_level: None,
-        include_unleveled: true,
-        limit: 20,
-        offset: 1_000,
+        max_level,
+        include_unleveled,
+        limit,
+        offset,
     }
 }
 
@@ -216,23 +254,29 @@ async fn postgres_public_lot_counts_follow_the_auction_status_in_one_query() {
     let store = database.store().await.expect("运行账号连接");
     let reader = store.public_lot_reader(Vec::new());
 
-    let page = reader.list_public_lots(live, counts_only(None)).await.expect("读取").expect("可见");
+    let page = reader.list_public_lots(live, counts_only(&[])).await.expect("读取").expect("可见");
     assert_eq!(page.projection.projection_kind, "live");
     assert_eq!(page.category_counts, expected(&[("all", 3), ("one", 2), ("clo", 1)]));
     assert_eq!(page.total, 3);
     assert!(page.live.is_empty() && page.preview.is_empty());
     let one =
-        reader.list_public_lots(live, counts_only(Some("one"))).await.expect("读取").expect("可见");
+        reader.list_public_lots(live, counts_only(&["one"])).await.expect("读取").expect("可见");
     assert_eq!(one.total, 2, "分类总数取对应分类计数");
+    let combined = reader
+        .list_public_lots(live, counts_only(&["clo", "one"]))
+        .await
+        .expect("读取")
+        .expect("可见");
+    assert_eq!(combined.total, 3, "多分类总数取所选分类计数之和");
 
     let page =
-        reader.list_public_lots(preview, counts_only(None)).await.expect("读取").expect("可见");
+        reader.list_public_lots(preview, counts_only(&[])).await.expect("读取").expect("可见");
     assert_eq!(page.projection.projection_kind, "preview");
     assert_eq!(page.category_counts, expected(&[("all", 2), ("sta", 1), ("shd", 1)]));
     assert_eq!(page.total, 2);
 
     let page =
-        reader.list_public_lots(settled, counts_only(None)).await.expect("读取").expect("可见");
+        reader.list_public_lots(settled, counts_only(&[])).await.expect("读取").expect("可见");
     assert_eq!(page.projection.auction_status, "settled");
     assert_eq!(page.category_counts, expected(&[("all", 2), ("two", 1), ("hea", 1)]));
     assert_eq!(page.total, 2);
@@ -240,10 +284,54 @@ async fn postgres_public_lot_counts_follow_the_auction_status_in_one_query() {
     // 不存在的场次不可见，不返回投影或计数。
     assert!(
         reader
-            .list_public_lots(stable_id("missing", "auction"), counts_only(None))
+            .list_public_lots(stable_id("missing", "auction"), counts_only(&[]))
             .await
             .expect("读取")
             .is_none()
+    );
+}
+
+#[tokio::test]
+async fn postgres_public_live_lot_multi_category_first_page_filters_before_paging() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let seed_store = database.maintenance_store().await.expect("维护账号连接");
+    let live = seed_auction(
+        seed_store.postgres_pool(),
+        "multi-category-live",
+        "main",
+        1,
+        "live",
+        &[
+            ("One-Handed", "live"),
+            ("Cloth", "live"),
+            ("Staff", "live"),
+            ("Two-Handed", "live"),
+            ("One-Handed", "live"),
+            ("Staff", "live"),
+        ],
+    )
+    .await;
+    let store = database.store().await.expect("运行账号连接");
+    let reader = store.public_lot_reader(Vec::new());
+
+    let page = reader
+        .list_public_lots(live, filtered_request(&["sta", "one"], true, None, 2, 0))
+        .await
+        .expect("读取")
+        .expect("可见");
+    assert_eq!(page.projection.projection_kind, "live");
+    assert_eq!(page.total, 4, "多分类总数取所选分类计数之和");
+    assert_eq!(
+        page.category_counts,
+        expected(&[("all", 6), ("one", 2), ("two", 1), ("sta", 2), ("clo", 1)])
+    );
+    let lot_id = |index: usize| stable_id("multi-category-live", &format!("lot-{index}"));
+    let ids: Vec<Uuid> = page.live.iter().map(|lot| lot.id).collect();
+    assert_eq!(ids, [lot_id(0), lot_id(2)], "未选中的 Cloth 行不得进入分页结果");
+    assert!(
+        page.live
+            .iter()
+            .all(|lot| matches!(lot.equipment.category.as_str(), "One-Handed" | "Staff"))
     );
 }
 
@@ -308,16 +396,18 @@ fn category_samples() -> Vec<&'static str> {
     samples
 }
 
-fn page_request(category: Option<&str>, include_unleveled: bool) -> PublicLotListRequest {
-    PublicLotListRequest {
-        category: category.map(str::to_owned),
-        equipment_group: None,
-        max_level: None,
-        include_unleveled,
-        // 大于种子总数：分页不截掉任何一行，筛选漏掉的多余行也不会被 LIMIT 掩盖。
-        limit: 50,
-        offset: 0,
-    }
+fn page_request(categories: &[&str], include_unleveled: bool) -> PublicLotListRequest {
+    paged_request(categories, include_unleveled, 50, 0)
+}
+
+fn paged_request(
+    categories: &[&str],
+    include_unleveled: bool,
+    limit: i64,
+    offset: i64,
+) -> PublicLotListRequest {
+    // 由调用方给出页大小；全量用例传大于种子总数的值，分页用例显式验证跨分类页边界。
+    filtered_request(categories, include_unleveled, None, limit, offset)
 }
 
 /// 按 lot UUID 找回种子行，核对装备分类与 Rust 生成的 lot 代码。
@@ -361,7 +451,7 @@ async fn postgres_public_lot_categories_follow_the_domain_mapping() {
     // 两条路径都要核对：包含无等级时由 SQL 统计与筛选，排除无等级时由 Rust 预筛选后按 UUID 取页。
     for include_unleveled in [true, false] {
         let page = reader
-            .list_public_lots(auction_id, page_request(None, include_unleveled))
+            .list_public_lots(auction_id, page_request(&[], include_unleveled))
             .await
             .expect("读取")
             .expect("可见");
@@ -376,7 +466,7 @@ async fn postgres_public_lot_categories_follow_the_domain_mapping() {
         for (index, category) in EquipmentCategory::ALL.iter().enumerate() {
             let key = category.public_key();
             let page = reader
-                .list_public_lots(auction_id, page_request(Some(key), include_unleveled))
+                .list_public_lots(auction_id, page_request(&[key], include_unleveled))
                 .await
                 .expect("读取")
                 .expect("可见");
@@ -389,6 +479,144 @@ async fn postgres_public_lot_categories_follow_the_domain_mapping() {
                 assert_seeded_lot(&seeded, lot);
             }
         }
+    }
+}
+
+#[tokio::test]
+async fn postgres_public_lot_multi_category_pages_stay_continuous() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let seed_store = database.maintenance_store().await.expect("维护账号连接");
+    // 所选分类在全局顺序里交错，另混入未选分类；无等级与超过等级上限各一件，确保预筛选真的排除行。
+    let lots: &[(&str, Option<i64>)] = &[
+        ("One-Handed", Some(300)),
+        ("Cloth", Some(300)),
+        ("Staff", Some(300)),
+        ("Two-Handed", Some(300)),
+        ("One-Handed", Some(300)),
+        ("Staff", Some(300)),
+        ("One-Handed", None),
+        ("Cloth", Some(300)),
+        ("Staff", Some(450)),
+        ("Shield", Some(300)),
+        ("One-Handed", Some(300)),
+        ("Staff", Some(300)),
+    ];
+    let seed_lots: Vec<(&str, &str, Option<i64>)> =
+        lots.iter().map(|(category, level)| (*category, "pending", *level)).collect();
+    let auction_id = seed_auction_with_levels(
+        seed_store.postgres_pool(),
+        "multi-categories",
+        "main",
+        1,
+        "preview",
+        &seed_lots,
+    )
+    .await;
+    let store = database.store().await.expect("运行账号连接");
+    let reader = store.public_lot_reader(Vec::new());
+    let lot_id = |index: usize| stable_id("multi-categories", &format!("lot-{index}"));
+    let cases = [
+        (
+            true,
+            None,
+            vec![
+                lot_id(0),
+                lot_id(2),
+                lot_id(4),
+                lot_id(5),
+                lot_id(6),
+                lot_id(8),
+                lot_id(10),
+                lot_id(11),
+            ],
+            expected(&[("all", 12), ("one", 4), ("sta", 4), ("clo", 2), ("two", 1), ("shd", 1)]),
+        ),
+        (
+            false,
+            None,
+            vec![lot_id(0), lot_id(2), lot_id(4), lot_id(5), lot_id(8), lot_id(10), lot_id(11)],
+            expected(&[("all", 11), ("one", 3), ("sta", 4), ("clo", 2), ("two", 1), ("shd", 1)]),
+        ),
+        (
+            true,
+            Some(300),
+            vec![lot_id(0), lot_id(2), lot_id(4), lot_id(5), lot_id(6), lot_id(10), lot_id(11)],
+            expected(&[("all", 11), ("one", 4), ("sta", 3), ("clo", 2), ("two", 1), ("shd", 1)]),
+        ),
+        (
+            false,
+            Some(300),
+            vec![lot_id(0), lot_id(2), lot_id(4), lot_id(5), lot_id(10), lot_id(11)],
+            expected(&[("all", 10), ("one", 3), ("sta", 3), ("clo", 2), ("two", 1), ("shd", 1)]),
+        ),
+    ];
+    for (include_unleveled, max_level, expected_ids, expected_counts) in cases {
+        let context = format!("include_unleveled={include_unleveled}, max_level={max_level:?}");
+        let all = reader
+            .list_public_lots(
+                auction_id,
+                filtered_request(&["one", "sta"], include_unleveled, max_level, 50, 0),
+            )
+            .await
+            .expect("读取")
+            .expect("可见");
+        assert_eq!(all.total, i64::try_from(expected_ids.len()).expect("总数"), "{context}");
+        assert_eq!(all.category_counts, expected_counts, "{context}");
+        let all_ids: Vec<Uuid> = all.preview.iter().map(|lot| lot.id).collect();
+        assert_eq!(all_ids, expected_ids, "{context}");
+        assert!(
+            all.preview
+                .iter()
+                .all(|lot| matches!(lot.equipment_category.as_str(), "One-Handed" | "Staff"))
+        );
+
+        // 逐页对照全局顺序；按分类拼页会让第一页变成同一分类的多件。
+        for offset in (0..expected_ids.len()).step_by(2) {
+            let page = reader
+                .list_public_lots(
+                    auction_id,
+                    filtered_request(
+                        &["sta", "one"],
+                        include_unleveled,
+                        max_level,
+                        2,
+                        i64::try_from(offset).expect("offset"),
+                    ),
+                )
+                .await
+                .expect("读取")
+                .expect("可见");
+            let end = (offset + 2).min(expected_ids.len());
+            let page_ids: Vec<Uuid> = page.preview.iter().map(|lot| lot.id).collect();
+            assert_eq!(
+                page.total,
+                i64::try_from(expected_ids.len()).expect("总数"),
+                "{context} offset={offset}"
+            );
+            assert_eq!(page_ids, expected_ids[offset..end], "{context} offset={offset}");
+        }
+
+        // 单分类结果的并集必须与多分类成员一致，分类顺序不影响并集。
+        let mut single_ids = BTreeSet::new();
+        let mut single_total = 0_i64;
+        for (key, category) in [("one", "One-Handed"), ("sta", "Staff")] {
+            let page = reader
+                .list_public_lots(
+                    auction_id,
+                    filtered_request(&[key], include_unleveled, max_level, 50, 0),
+                )
+                .await
+                .expect("读取")
+                .expect("可见");
+            assert_eq!(page.total, expected_counts[key], "{context} category={key}");
+            single_total += page.total;
+            for lot in &page.preview {
+                assert_eq!(lot.equipment_category, category, "{context} category={key}");
+                single_ids.insert(lot.id);
+            }
+        }
+        assert_eq!(single_total, all.total, "{context}");
+        assert_eq!(single_ids, all_ids.iter().copied().collect::<BTreeSet<_>>(), "{context}");
     }
 }
 

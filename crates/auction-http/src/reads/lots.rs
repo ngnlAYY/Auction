@@ -1,6 +1,8 @@
 //! 公开 lot 列表与详情的处理器。
 
-use auction_application::auction::{MAX_PUBLIC_LOT_OFFSET, PublicLotListRequest};
+use auction_application::auction::{
+    MAX_PUBLIC_LOT_OFFSET, PublicLotCategorySelection, PublicLotListRequest,
+};
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError, SafeErrorKind};
 use auction_application::public::PublicEquipmentLinkTarget;
 use auction_contracts::{ApiErrorResponse, ApiResponse};
@@ -47,7 +49,6 @@ pub(crate) async fn list_lots(
         parse_public_page_size(query.get("page_size"), 20).map_err(|()| query_rejection())?;
     let offset =
         page_offset(page, page_size, Some(MAX_PUBLIC_LOT_OFFSET)).ok_or_else(query_rejection)?;
-    let category = query.get("category").cloned();
     let equipment_group = query
         .get("equipment_group")
         .map(|value| {
@@ -81,15 +82,23 @@ pub(crate) async fn list_lots(
         Some("summary") => LotListFields::Summary,
         _ => return Err(api_error(StatusCode::BAD_REQUEST, "invalid_query", "字段投影无效")),
     };
+    // 省略参数传入零项得到“不限分类”，显式空串仍是单个空项并失败关闭；
+    // 按借用的分段逐项校验，不先收集 String，非法项或第 8 项由构造器立即拒绝。
+    let category_selection = PublicLotCategorySelection::from_public_keys(
+        query.get("category").into_iter().flat_map(|value| value.split(',')),
+    )
+    .map_err(|_| query_rejection())?;
     let request = PublicLotListRequest {
-        category,
+        category_selection,
         equipment_group,
         max_level,
         include_unleveled,
         limit: page_size,
         offset,
     };
-    request.validate().map_err(|_| query_rejection())?;
+    if request.validate().is_err() {
+        return Err(query_rejection());
+    }
 
     let Some(reader) = state.lots() else {
         return Err(lot_dependency_unavailable());
@@ -107,7 +116,7 @@ pub(crate) async fn list_lots(
     let Some(mut page_result) = page_result else {
         return Err(not_found_error());
     };
-    if page_result.validate(auction_id, query.get("category").map(String::as_str)).is_err()
+    if page_result.validate(auction_id, &request).is_err()
         || page_result.validate_filters(&request).is_err()
         || page_result.limit != page_size
         || page_result.offset != offset
@@ -252,18 +261,49 @@ mod tests {
     const AUCTION_ID: Uuid = Uuid::from_u128(0x0190_f2b4_1c2d_4e5f_8a6b_7c8d_9e0f_1a2b);
     const LOT_ID: Uuid = Uuid::from_u128(0x0190_f2b4_1c2d_4e5f_8a6b_7c8d_9e0f_1a2c);
     const EQUIPMENT_ID: Uuid = Uuid::from_u128(0x0190_f2b4_1c2d_4e5f_8a6b_7c8d_9e0f_1a2d);
+    const STAFF_LOT_ID: Uuid = Uuid::from_u128(0x0190_f2b4_1c2d_4e5f_8a6b_7c8d_9e0f_1a2e);
+    const STAFF_EQUIPMENT_ID: Uuid = Uuid::from_u128(0x0190_f2b4_1c2d_4e5f_8a6b_7c8d_9e0f_1a2f);
     const PROJECTED_URL: &str = "https://hentaiverse.org/equip/123456";
 
-    /// 原样返回固定投影；分页与筛选都按缺省请求构造，满足处理器的投影复核。
-    struct FixedLots(PublicLotPage);
+    /// 返回固定投影，并核对处理器确实把请求中的分类集合传到了读端口。
+    struct FixedLots {
+        page: PublicLotPage,
+        expected_category_keys: Vec<String>,
+    }
+
+    impl FixedLots {
+        fn new(page: PublicLotPage) -> Self {
+            Self { page, expected_category_keys: Vec::new() }
+        }
+
+        fn expecting(page: PublicLotPage, expected_category_keys: &[&str]) -> Self {
+            Self {
+                page,
+                expected_category_keys: expected_category_keys
+                    .iter()
+                    .map(|key| (*key).to_owned())
+                    .collect(),
+            }
+        }
+    }
 
     impl PublicLotReader for FixedLots {
         fn list_public_lots(
             &self,
             _auction_id: Uuid,
-            _request: PublicLotListRequest,
+            request: PublicLotListRequest,
         ) -> ApplicationFuture<'_, Option<PublicLotPage>> {
-            let page = self.0.clone();
+            let received_category_keys: Vec<String> = request
+                .category_selection
+                .as_slice()
+                .iter()
+                .map(|category| category.public_key().to_owned())
+                .collect();
+            assert_eq!(
+                received_category_keys, self.expected_category_keys,
+                "读端口收到的分类集合不一致"
+            );
+            let page = self.page.clone();
             Box::pin(async move { Ok(Some(page)) })
         }
 
@@ -375,6 +415,55 @@ mod tests {
         page
     }
 
+    fn live_lot(
+        lot_id: Uuid,
+        equipment_id: Uuid,
+        lot_number: i64,
+        category: &str,
+        name: &str,
+    ) -> PublicLiveLotSummary {
+        PublicLiveLotSummary {
+            id: lot_id,
+            equipment_id: EquipmentId::from_uuid(equipment_id),
+            auction_id: AUCTION_ID,
+            lot_number,
+            status: "live".to_owned(),
+            seller_name: "seller".to_owned(),
+            start_price: 1_000,
+            current_price: 1_500,
+            next_bid: 1_600,
+            has_leader: true,
+            leader_name: Some("leader".to_owned()),
+            effective_end_at: Some(opens_at() + Duration::days(1)),
+            state_version: 3,
+            equipment: PublicEquipment {
+                name: name.to_owned(),
+                category: category.to_owned(),
+                equipment_group: EquipmentGroup::Rare,
+                level: Some(450),
+                info_summary: String::new(),
+                stats: BTreeMap::new(),
+                avg_roll: None,
+                game_equipment_url: PROJECTED_URL.to_owned(),
+                attributes: json!({}),
+            },
+        }
+    }
+
+    fn multi_category_live_page() -> PublicLotPage {
+        let mut page = page(projection("live"));
+        page.total = 2;
+        page.category_counts.insert("all".to_owned(), 3);
+        page.category_counts.insert("one".to_owned(), 1);
+        page.category_counts.insert("sta".to_owned(), 1);
+        page.category_counts.insert("clo".to_owned(), 1);
+        page.live = vec![
+            live_lot(LOT_ID, EQUIPMENT_ID, 1, "One-Handed", "One-Handed fixture"),
+            live_lot(STAFF_LOT_ID, STAFF_EQUIPMENT_ID, 2, "Staff", "Staff fixture"),
+        ];
+        page
+    }
+
     fn preview_page() -> PublicLotPage {
         let mut page = page(projection("preview"));
         page.preview.push(PublicPreviewLotSummary {
@@ -396,7 +485,7 @@ mod tests {
         page
     }
 
-    async fn request(page: PublicLotPage, query: &str) -> (StatusCode, Vec<u8>) {
+    async fn request_with_lots(lots: FixedLots, query: &str) -> (StatusCode, Vec<u8>) {
         let state = PublicApiState::new(
             None,
             None,
@@ -404,7 +493,7 @@ mod tests {
             None,
             None,
             None,
-            Some(Arc::new(FixedLots(page))),
+            Some(Arc::new(lots)),
             Some(Arc::new(KeyedLinks)),
             None,
             None,
@@ -428,9 +517,17 @@ mod tests {
         (status, body.to_vec())
     }
 
-    async fn request_json(page: PublicLotPage, query: &str) -> (StatusCode, Value) {
-        let (status, body) = request(page, query).await;
+    async fn request(page: PublicLotPage, query: &str) -> (StatusCode, Vec<u8>) {
+        request_with_lots(FixedLots::new(page), query).await
+    }
+
+    async fn request_json_with_lots(lots: FixedLots, query: &str) -> (StatusCode, Value) {
+        let (status, body) = request_with_lots(lots, query).await;
         (status, serde_json::from_slice(&body).expect("json body"))
+    }
+
+    async fn request_json(page: PublicLotPage, query: &str) -> (StatusCode, Value) {
+        request_json_with_lots(FixedLots::new(page), query).await
     }
 
     #[tokio::test]
@@ -492,6 +589,70 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         // 预览行本来只有摘要字段；同一投影两种请求的正文逐字节一致。
         assert_eq!(summary, full);
+    }
+
+    #[tokio::test]
+    async fn category_accepts_single_and_multiple_public_keys() {
+        let mut single = live_page();
+        single.category_counts.insert("clo".to_owned(), 1);
+        let (status, body) =
+            request_json_with_lots(FixedLots::expecting(single, &["clo"]), "category=clo").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["data"]["total"], 1);
+        assert_eq!(body["data"]["category_counts"]["clo"], 1);
+
+        let multiple = multi_category_live_page();
+        for query in ["category=one,sta", "category=sta,one"] {
+            let (status, body) = request_json_with_lots(
+                FixedLots::expecting(multiple.clone(), &["one", "sta"]),
+                query,
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{query}");
+            assert_eq!(body["data"]["total"], 2, "{query}");
+            // 未选的 Cloth 计入 all，确认总数不是直接把 all 当作所选计数之和。
+            assert_eq!(body["data"]["category_counts"]["all"], 3, "{query}");
+            assert_eq!(body["data"]["category_counts"]["one"], 1, "{query}");
+            assert_eq!(body["data"]["category_counts"]["sta"], 1, "{query}");
+            assert_eq!(body["data"]["category_counts"]["clo"], 1, "{query}");
+            let lots = body["data"]["lots"].as_array().expect("lots array");
+            assert_eq!(lots.len(), 2, "{query}");
+            assert_eq!(lots[0]["equipment"]["category"], "One-Handed", "{query}");
+            assert_eq!(lots[1]["equipment"]["category"], "Staff", "{query}");
+        }
+    }
+
+    #[tokio::test]
+    async fn unselected_live_category_is_rejected_as_dependency_mismatch() {
+        let mut page = page(projection("live"));
+        page.total = 0;
+        page.category_counts.insert("clo".to_owned(), 1);
+        page.live = vec![live_lot(LOT_ID, EQUIPMENT_ID, 1, "Cloth", "Cloth fixture")];
+        let (status, body) =
+            request_json_with_lots(FixedLots::expecting(page, &["one", "sta"]), "category=one,sta")
+                .await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["code"], "temporarily_unavailable");
+    }
+
+    #[tokio::test]
+    async fn invalid_category_lists_use_the_invalid_query_path() {
+        for query in [
+            "category=",
+            "category=one,,sta",
+            "category=,one",
+            "category=one,",
+            "category=all",
+            "category=one,all",
+            "category=one,one",
+            "category=one,unknown",
+            "category=one&category=sta",
+        ] {
+            let (status, body) = request_json(live_page(), query).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{query}");
+            assert_eq!(body["code"], "invalid_query", "{query}");
+            assert_eq!(body["message"], "查询参数无效", "{query}");
+        }
     }
 
     #[tokio::test]
