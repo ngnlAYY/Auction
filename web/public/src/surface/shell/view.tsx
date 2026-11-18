@@ -1,5 +1,6 @@
 //! 外壳的展示树：只读取外壳传入的状态与回调，不建立资源或业务副作用。
 
+import { focusElementById } from "@auction/web-shared/platform/a11y";
 import { ThemePicker } from "@auction/web-shared/platform/theme";
 import type { Cell } from "@auction/web-shared/reactive/cell";
 import { Link, type RouteMatch, RouteOutlet } from "@auction/web-shared/router";
@@ -169,26 +170,33 @@ export function PublicShellView(props: PublicShellViewProps): JSX.Element {
           </div>
           <span class="console-ticker__sep" aria-hidden="true" />
           <div class="console-ticker__session">
-            <SessionMenu />
+            <SessionMenu scopedHref={props.scopedHref} />
           </div>
         </div>
       </header>
-      <Show when={props.sessionEndedElsewhere()}>
-        <div class="public-shell__session-ended-banner" role="status">
-          <span class="public-shell__session-ended-text">{t("session-ended-elsewhere")}</span>
-          <Link class="public-shell__session-ended-login" href="/login">
+      <div class={props.sessionEndedElsewhere() ? "public-shell__session-ended-banner" : ""}>
+        <span class="public-shell__session-ended-text" role="status">
+          {props.sessionEndedElsewhere() ? t("session-ended-elsewhere") : ""}
+        </span>
+        <Show when={props.sessionEndedElsewhere()}>
+          <Link class="public-shell__session-ended-login" href={props.scopedHref("/login")}>
             {t("session-ended-relogin")}
           </Link>
           <button
             class="public-shell__session-ended-dismiss"
             type="button"
             aria-label={t("catalog-close")}
-            onClick={() => props.sessionEndedElsewhere.set(false)}
+            onClick={(event) => {
+              if (document.activeElement === event.currentTarget) {
+                focusElementById("public-content");
+              }
+              props.sessionEndedElsewhere.set(false);
+            }}
           >
             ✕
           </button>
-        </div>
-      </Show>
+        </Show>
+      </div>
       <div class="console-body">
         <ConsoleSidebar
           currentRoute={props.currentRoute()}

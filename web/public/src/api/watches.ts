@@ -15,8 +15,9 @@ import { err, ok, type Result } from "@auction/web-shared/result";
 import { validUuid } from "@auction/web-shared/ui/validation";
 import { sendGet, sendRequest } from "./clock";
 import type { CommandError } from "./commands";
-import { boolValue, decodeErrorCode, decodeSuccess, int, object } from "./decoder";
-import { observePublicSessionFailure } from "./session";
+import { boolValue, decodeErrorCode, int, object } from "./decoder";
+import { decodeIdentitySuccess, observePublicSessionFailure } from "./session";
+import { startPublicSessionIdentityObservation } from "./session/revision";
 
 const MAX_WATCHES = 10_000;
 
@@ -27,6 +28,7 @@ export async function fetchLotWatches(
   signal: AbortSignal,
 ): Promise<Result<PublicLotWatchesResponse, CommandError>> {
   const query = new URLSearchParams({ auction_id: auctionId }).toString();
+  const publish = startPublicSessionIdentityObservation();
   const response = await sendGet(`/api/v1/me/lot-watches?${query}`, signal);
   if (signal.aborted) {
     return err({ code: "network_error", status: 0 });
@@ -38,7 +40,7 @@ export async function fetchLotWatches(
   if (!responseOk(response.value)) {
     return err(failure(decodeErrorCode(response.value), status));
   }
-  const page = decodeSuccess(response.value, PublicLotWatchesResponseSchema, (value) => {
+  const page = decodeIdentitySuccess(response.value, PublicLotWatchesResponseSchema, (value) => {
     const envelope = object(value);
     if (envelope === null || !jsonHasExactKeys(envelope, ["user_id", "auction_id", "watches"])) {
       return false;
@@ -48,10 +50,12 @@ export async function fetchLotWatches(
       Array.isArray(watches) && watches.length <= MAX_WATCHES && watches.every(validWatchValue)
     );
   });
-  if (!page.ok || !validWatchCollection(page.value, userId, auctionId)) {
+  if (!page.ok || !validWatchCollection(page.value, page.value.user_id, auctionId)) {
     return err(failure("invalid_response", status));
   }
-  return ok(page.value);
+  // 读取用服务端投影确认 Cookie 归属；集合仍只能交给请求绑定的账号。
+  publish({ kind: "user", userId: page.value.user_id });
+  return page.value.user_id === userId ? page : err(failure("invalid_response", status));
 }
 
 /** 重试直接复用原 DTO，不重新生成 ID、目标状态或 CAS 版本。 */
@@ -62,6 +66,7 @@ export async function setLotWatch(
   command: PublicSetLotWatchRequest,
   signal: AbortSignal,
 ): Promise<Result<PublicSetLotWatchResponse, CommandError>> {
+  const publish = startPublicSessionIdentityObservation();
   const response = await sendRequest(
     () =>
       ok({
@@ -92,7 +97,7 @@ export async function setLotWatch(
   if (!responseOk(response.value)) {
     return err(failure(decodeErrorCode(response.value), status));
   }
-  const result = decodeSuccess(response.value, PublicSetLotWatchResponseSchema, (value) => {
+  const result = decodeIdentitySuccess(response.value, PublicSetLotWatchResponseSchema, (value) => {
     const envelope = object(value);
     return (
       envelope !== null &&
@@ -103,6 +108,7 @@ export async function setLotWatch(
   if (
     !result.ok ||
     result.value.user_id !== userId ||
+    !validUuid(result.value.user_id) ||
     result.value.auction_id !== auctionId ||
     result.value.watch.lot_id !== lotId ||
     !validWatch(result.value.watch) ||
@@ -111,7 +117,8 @@ export async function setLotWatch(
   ) {
     return err(failure("invalid_response", status));
   }
-  return ok(result.value);
+  publish({ kind: "user", userId: result.value.user_id });
+  return result;
 }
 
 /** 缓存与 HTTP 共用校验；重复 lot、跨身份、超限和无效墓碑都失败关闭。 */

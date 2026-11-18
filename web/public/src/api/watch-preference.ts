@@ -13,8 +13,9 @@ import { validUuid } from "@auction/web-shared/ui/validation";
 import { sendGet, sendRequest } from "./clock";
 
 import type { CommandError } from "./commands";
-import { decodeErrorCode, decodeSuccess, int, object } from "./decoder";
-import { observePublicSessionFailure } from "./session";
+import { decodeErrorCode, int, object } from "./decoder";
+import { decodeIdentitySuccess, observePublicSessionFailure } from "./session";
+import { type SessionIdentity, startPublicSessionIdentityObservation } from "./session/revision";
 
 const PATH = "/api/v1/me/lot-watch-preference";
 /** 权威响应必须恰好包含契约字段；漏掉 `pm_available` 会让整页退化为“无法读取偏好”。
@@ -59,6 +60,7 @@ export async function fetchLotWatchPreference(
   userId: string,
   signal: AbortSignal,
 ): Promise<Result<PublicLotWatchPreferenceResponse, CommandError>> {
+  const observe = startPublicSessionIdentityObservation();
   const response = await sendGet(PATH, signal);
   if (signal.aborted) {
     return err({ code: "network_error", status: 0 });
@@ -66,7 +68,7 @@ export async function fetchLotWatchPreference(
   if (!response.ok) {
     return err(failure(transportErrorCode(response.error), 0));
   }
-  return decode(response.value, userId, null);
+  return decode(response.value, userId, null, observe);
 }
 
 /** 未知结果重试必须传入原 DTO，不能改写命令 ID、渠道或 CAS 版本。 */
@@ -75,6 +77,7 @@ export async function setLotWatchPreference(
   command: PublicSetLotWatchPreferenceRequest,
   signal: AbortSignal,
 ): Promise<Result<PublicLotWatchPreferenceResponse, CommandError>> {
+  const observe = startPublicSessionIdentityObservation();
   const response = await sendRequest(
     () =>
       ok({
@@ -100,40 +103,47 @@ export async function setLotWatchPreference(
   if (!response.ok) {
     return err(failure(transportErrorCode(response.error), 0));
   }
-  return decode(response.value, userId, command);
+  return decode(response.value, userId, command, observe);
 }
 
 function decode(
   response: TransportResponse,
   userId: string,
   command: PublicSetLotWatchPreferenceRequest | null,
+  publish: (identity: SessionIdentity) => void,
 ): Result<PublicLotWatchPreferenceResponse, CommandError> {
   const status = response.status;
   if (!responseOk(response)) {
     return err(failure(decodeErrorCode(response), status));
   }
-  const result = decodeSuccess(response, PublicLotWatchPreferenceResponseSchema, (value) => {
-    const envelope = object(value);
-    return (
-      envelope !== null &&
-      jsonHasExactKeys(envelope, RESPONSE_KEYS) &&
-      // 已知差异：JSON.parse 已把 `1.0000000000000001` 舍入成 1，JS 无法还原原始写法；
-      // 后端只输出整数版本，这里仍按安全整数失败关闭。
-      (int(envelope.version) ?? 0) > 0
-    );
-  });
+  const result = decodeIdentitySuccess(
+    response,
+    PublicLotWatchPreferenceResponseSchema,
+    (value) => {
+      const envelope = object(value);
+      return (
+        envelope !== null &&
+        jsonHasExactKeys(envelope, RESPONSE_KEYS) &&
+        // 已知差异：JSON.parse 已把 `1.0000000000000001` 舍入成 1，JS 无法还原原始写法；
+        // 后端只输出整数版本，这里仍按安全整数失败关闭。
+        (int(envelope.version) ?? 0) > 0
+      );
+    },
+  );
   if (
     !result.ok ||
-    result.value.user_id !== userId ||
     !validUuid(result.value.user_id) ||
     channelFlags(result.value.channel) === null ||
     (command !== null &&
-      (result.value.channel !== command.channel ||
+      (result.value.user_id !== userId ||
+        result.value.channel !== command.channel ||
         result.value.version <= command.expected_version))
   ) {
     return err(failure("invalid_response", status));
   }
-  return ok(result.value);
+  // 无预期用户约束的 GET 仍能确认 Cookie 归属，但不能向旧账号交付数据。
+  publish({ kind: "user", userId: result.value.user_id });
+  return result.value.user_id === userId ? result : err(failure("invalid_response", status));
 }
 
 function responseOk(response: TransportResponse): boolean {

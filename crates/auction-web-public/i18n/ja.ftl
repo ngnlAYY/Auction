@@ -436,8 +436,8 @@ session-menu-label = アカウントセッション
 session-login = ログイン
 logout = ログアウト
 logout-error = ログアウトを確認できませんでした。現在のログイン状態を確認してから再試行してください。
-session-ended-elsewhere = このアカウントが別の端末でログインしたため、現在のセッションは終了しました。
-session-ended-relogin = 元のログインキーで再ログイン
+session-ended-elsewhere = 現在のセッションは別の場所で終了しました。再ログインしてください。ログイン端末数が上限に達して最後の利用から最も時間が経ったセッションが終了した、ログインキーが変更された、または管理者がセッションを取り消した可能性があります。
+session-ended-relogin = 再ログイン
 
 session-duration-title = ログイン期間
 session-duration-permanent = 無期限（既定）

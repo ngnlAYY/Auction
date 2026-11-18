@@ -1,5 +1,5 @@
 // 会话外部变化监听与有限会话截止检查。
-// 同源认证广播与窗口聚焦只触发权威重读；账号真正改变后才销毁旧确认宿主。
+// 聚焦与同源通知由外壳安排权威重读，截止计时独立于页面展示的读取结果。
 
 import { sleep } from "@auction/web-shared/platform/timer";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
@@ -9,19 +9,19 @@ import { onCleanup } from "solid-js";
 import { estimatedNow } from "../../api/clock";
 import {
   PUBLIC_SESSION_CHANGE_STORAGE_KEY,
+  type PublicSession,
   parseStrictRfc3339,
   type SessionRefreshReason,
 } from "../../api/session";
-import type { PublicSessionResource } from "../index";
 
 export function usePublicSessionSync(checkSession: (reason: SessionRefreshReason) => void): void {
   if (typeof window === "undefined") {
     return;
   }
   const storage = (event: StorageEvent): void => {
-    if (event.key === PUBLIC_SESSION_CHANGE_STORAGE_KEY) {
-      // 随机修订只表示认证操作发生，同账号重登仍须保留原未知命令及 ID。
-      checkSession("refresh");
+    if (event.key === PUBLIC_SESSION_CHANGE_STORAGE_KEY && event.newValue !== null) {
+      // 修订不证明身份；另一标签页刚写过 Cookie，只读一次当前会话。
+      checkSession("cookie_changed");
     }
   };
   const focus = (): void => {
@@ -37,17 +37,13 @@ export function usePublicSessionSync(checkSession: (reason: SessionRefreshReason
 
 /** 有限会话只在真实截止后复核一次；永久会话不建立计时器，也不把远期日期当永久。 */
 export function usePublicSessionExpiry(
-  session: PublicSessionResource,
-  checkSession: (reason: SessionRefreshReason) => void,
+  confirmedIdentity: () => PublicSession | null,
+  onExpiry: () => void,
 ): void {
   // 同一身份及截止的重复快照不重启已完成的任务，避免服务端时钟误差造成忙轮询。
   const deadline = createValueMemo((): readonly [string, bigint] | null => {
-    const snapshot = session();
-    if (snapshot === undefined || !snapshot.ok || snapshot.value === null) {
-      return null;
-    }
-    const identity = snapshot.value;
-    if (!identity.authenticated || identity.expires_at === null) {
+    const identity = confirmedIdentity();
+    if (identity === null || identity.expires_at === null) {
       return null;
     }
     const expiry = parseStrictRfc3339(identity.expires_at);
@@ -62,7 +58,7 @@ export function usePublicSessionExpiry(
       // Date 头只有秒精度；给出一秒余量，长截止分段等待以免浏览器 i32 超时溢出。
       const remaining = (expiry - BigInt(estimatedNow()) * 1_000_000n) / 1_000_000n + 1_000n;
       if (remaining <= 0n) {
-        checkSession("refresh");
+        onExpiry();
         return;
       }
       const wait = remaining > 2_147_483_647n ? 2_147_483_647 : Number(remaining);

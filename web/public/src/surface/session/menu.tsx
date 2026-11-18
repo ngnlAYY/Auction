@@ -4,7 +4,6 @@ import { focusElementById } from "@auction/web-shared/platform/a11y";
 import { type Cell, createCell } from "@auction/web-shared/reactive/cell";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import { createTaskScope } from "@auction/web-shared/reactive/tasks";
-import { ok } from "@auction/web-shared/result";
 import { Link } from "@auction/web-shared/router";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
@@ -24,7 +23,7 @@ type SessionMenuState =
   | { readonly kind: "authenticated"; readonly userId: string; readonly username: string };
 
 /** 页头账号菜单：头像下拉，集中账户、退出与匿名登录入口。 */
-export function SessionMenu(): JSX.Element {
+export function SessionMenu(props: { readonly scopedHref: (path: string) => string }): JSX.Element {
   const session = useContext(PublicSessionResourceContext);
   const logoutError = createCell<string | null>(null);
   const logoutBusy = createCell(false);
@@ -78,7 +77,7 @@ export function SessionMenu(): JSX.Element {
         </Match>
         <Match when={sessionState().kind === "anonymous"}>
           {/* 顶栏保留唯一登录入口；目录的查看/出价/标记图标也可引导登录。 */}
-          <Link class="public-account-session-login" href="/login">
+          <Link class="public-account-session-login" href={props.scopedHref("/login")}>
             {t("session-login")}
           </Link>
         </Match>
@@ -139,7 +138,7 @@ export function SessionMenu(): JSX.Element {
                     {/* “我的”与退出不把焦点还给入口：路由切换接管焦点，退出后入口随会话卸载。 */}
                     <Link
                       class="public-account-session-item"
-                      href="/me"
+                      href={props.scopedHref("/me")}
                       onClick={() => menuOpen.set(false)}
                     >
                       {t("nav-my-bids")}
@@ -161,9 +160,7 @@ export function SessionMenu(): JSX.Element {
                           if (!context.alive()) {
                             return;
                           }
-                          if (result.ok) {
-                            session.set(ok(null));
-                          } else {
+                          if (!result.ok) {
                             logoutError.set(result.error);
                           }
                           logoutBusy.set(false);

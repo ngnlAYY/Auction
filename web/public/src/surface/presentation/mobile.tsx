@@ -82,7 +82,7 @@ export function Navigation(props: {
         />
         {/* Solid 版专属：语言与主题在手机上移到设置页，入口只出现在手机导航里。 */}
         <Link
-          href="/settings"
+          href={props.scopedHref("/settings")}
           aria-current={
             props.currentRoute.kind === "matched" && props.currentRoute.name === "Settings"
               ? "page"

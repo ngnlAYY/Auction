@@ -8,11 +8,11 @@ import { createCell } from "@auction/web-shared/reactive/cell";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import { createTaskResource, type ResourceState } from "@auction/web-shared/reactive/resource";
 import { createTaskScope } from "@auction/web-shared/reactive/tasks";
-import { ok, type Result } from "@auction/web-shared/result";
+import type { Result } from "@auction/web-shared/result";
 import { useRouter } from "@auction/web-shared/router";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
-import { createEffect, Show, useContext } from "solid-js";
+import { createEffect, Show } from "solid-js";
 
 import { fetchRegistrationInfo } from "../../api/registration";
 import {
@@ -21,7 +21,6 @@ import {
   type PublicSessionApiError,
   publicSessionApiErrorLocal,
 } from "../../api/session";
-import { PublicSessionResourceContext } from "../index";
 import { loginBlacklistedReason, loginErrorMessage } from "./error-message";
 import { rustTrim, safeReturnPath } from "./login-return";
 
@@ -88,7 +87,6 @@ export function login(input: LoginProps | string | null = null): JSX.Element {
     },
     { defer: true },
   );
-  const sessionResource = useContext(PublicSessionResourceContext);
   const registration = useRegistrationAccounts();
   const router = useRouter();
   const tasks = createTaskScope();
@@ -148,7 +146,6 @@ export function login(input: LoginProps | string | null = null): JSX.Element {
             if (loginResult.ok) {
               const session = loginResult.value;
               result.set({ kind: "success", session });
-              sessionResource.set(ok(session));
               router.replace(returnPathValue);
               return;
             }

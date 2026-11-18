@@ -13,14 +13,20 @@ import { validUuid } from "@auction/web-shared/ui/validation";
 import { sendGet, sendRequest } from "./clock";
 
 import type { CommandError } from "./commands";
-import { decodeErrorCode, decodeSuccess, int, object } from "./decoder";
+import { decodeErrorCode, int, object } from "./decoder";
 import {
+  decodeIdentitySuccess,
   invalidateCookieSync,
   notifyPublicSessionChange,
   observePublicSessionFailure,
   parseStrictRfc3339,
 } from "./session";
 import { lock as lockCookie } from "./session/cookie";
+import {
+  publishPublicSessionIdentity,
+  type SessionIdentity,
+  startPublicSessionIdentityObservation,
+} from "./session/revision";
 
 const PATH = "/api/v1/me/session-preference";
 
@@ -40,6 +46,7 @@ export async function fetchSessionPreference(
   userId: string,
   signal: AbortSignal,
 ): Promise<Result<PublicSessionPreferenceResponse, CommandError>> {
+  const observe = startPublicSessionIdentityObservation();
   const response = await sendGet(PATH, signal);
   if (signal.aborted) {
     return err({ code: "network_error", status: 0 });
@@ -47,7 +54,7 @@ export async function fetchSessionPreference(
   if (!response.ok) {
     return err(failure(transportErrorCode(response.error), 0));
   }
-  return decode(response.value, userId, null);
+  return decode(response.value, userId, null, observe);
 }
 
 /** 未知结果只重发原始命令及 CAS 版本；响应成功后通过外壳重读身份，不伪造登录结果。 */
@@ -85,11 +92,14 @@ export async function setSessionPreference(
       if (!response.ok) {
         return err(failure(transportErrorCode(response.error), 0));
       }
+      const decoded = decode(response.value, userId, command, (identity) =>
+        publishPublicSessionIdentity(identity, { cookieWritten: true }),
+      );
       if (responseOk(response.value)) {
         // 即使正文损坏，Cookie 和服务端截止也可能已经更新，仍须通知本页及其他标签页。
         notifyPublicSessionChange("refresh");
       }
-      return decode(response.value, userId, command);
+      return decoded;
     },
     (code) => failure(code, 0),
     signal,
@@ -100,12 +110,13 @@ function decode(
   response: TransportResponse,
   userId: string,
   command: PublicSetSessionPreferenceRequest | null,
+  publish: (identity: SessionIdentity) => void,
 ): Result<PublicSessionPreferenceResponse, CommandError> {
   const status = response.status;
   if (!responseOk(response)) {
     return err(failure(decodeErrorCode(response), status));
   }
-  const result = decodeSuccess(response, PublicSessionPreferenceResponseSchema, (value) => {
+  const result = decodeIdentitySuccess(response, PublicSessionPreferenceResponseSchema, (value) => {
     const envelope = object(value);
     return (
       envelope !== null &&
@@ -118,15 +129,17 @@ function decode(
   });
   if (
     !result.ok ||
-    result.value.user_id !== userId ||
     !validUuid(result.value.user_id) ||
     !validSessionDuration(result.value.duration_seconds) ||
     (result.value.expires_at !== null && parseStrictRfc3339(result.value.expires_at) === null) ||
-    (command !== null && !matchesCommand(result.value, command))
+    (command !== null &&
+      (result.value.user_id !== userId || !matchesCommand(result.value, command)))
   ) {
     return err(failure("invalid_response", status));
   }
-  return ok(result.value);
+  // GET 的归属证据可先结束旧宿主，数据仍须匹配调用方的预期用户才可交给它。
+  publish({ kind: "user", userId: result.value.user_id });
+  return result.value.user_id === userId ? result : err(failure("invalid_response", status));
 }
 
 function matchesCommand(

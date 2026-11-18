@@ -436,8 +436,8 @@ session-menu-label = 帳戶工作階段
 session-login = 登入
 logout = 登出
 logout-error = 未能確認已登出。請核對目前的工作階段後重試。
-session-ended-elsewhere = 此帳號已在其他裝置登入，目前的工作階段已結束。
-session-ended-relogin = 用原登入 key 重新登入
+session-ended-elsewhere = 目前的登入狀態已在別處結束，請重新登入。可能的情況包括登入裝置數已達上限而登出最久未活動的工作階段、登入 key 已更換，或管理員撤銷了工作階段。
+session-ended-relogin = 重新登入
 
 session-duration-title = 登入時長
 session-duration-permanent = 永久（預設）

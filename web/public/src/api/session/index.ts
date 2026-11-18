@@ -10,90 +10,55 @@ import {
 } from "@auction/contracts/dto/public/account";
 import { PUBLIC_EXPECTED_USER_ID_HEADER } from "@auction/contracts/dto/public/commands";
 import { jsonValue } from "@auction/contracts/wire";
-import { type TransportResponse, transportErrorCode } from "@auction/web-shared/net/transport";
+import {
+  type TransportError,
+  type TransportRequestBuilder,
+  type TransportResponse,
+  transportErrorCode,
+} from "@auction/web-shared/net/transport";
 import { jsonHasExactKeys } from "@auction/web-shared/net/wire";
-import { setItem } from "@auction/web-shared/platform/storage";
-import { createUuidV4 } from "@auction/web-shared/platform/uuid";
 import type { Result } from "@auction/web-shared/result";
 import { err, ok } from "@auction/web-shared/result";
 import { utf8ByteLength } from "@auction/web-shared/text";
+import { reportBrowserError } from "@auction/web-shared/ui/bootstrap";
 import { validUuid } from "@auction/web-shared/ui/validation";
 import * as v from "valibot";
-import { sendGet, sendRequest } from "../clock";
+import { sendRequest } from "../clock";
 import { decodeError, decodeErrorCode, decodeSuccess, object, string } from "../decoder";
-import { invalidateAll } from "../swr-cache";
-import { invalidate, lock as lockCookie, needsSync, record } from "./cookie";
+import { invalidate, needsSync, record, withCookieLock } from "./cookie";
+import {
+  type LogoutReason,
+  markPublicLogout,
+  notifyPublicSessionChange,
+  type PublicSessionIdentityTrigger,
+  publicSessionIdentityRevision,
+  publicSessionRevisions,
+  publishPublicSessionIdentity,
+  type SessionRevisions,
+  startPublicSessionIdentityObservation,
+} from "./revision";
 import { parseStrictRfc3339 } from "./rfc3339";
 
+const SESSION_PATH = "/api/v1/session";
+
+export {
+  notifyPublicSessionChange,
+  PUBLIC_SESSION_CHANGE_STORAGE_KEY,
+  type PublicSessionCheckTrigger,
+  registerPublicSessionCheckTrigger,
+  requestPublicSessionCheck,
+  type SessionRefreshReason,
+} from "./revision";
 /** Public 会话的稳定身份投影；认证凭据只存在于服务端设置的 HttpOnly Cookie。 */
 export type { PublicSession };
-
 /** 严格 RFC3339 解析也供论坛与偏好响应复用，保持历史上从会话模块导入的路径。 */
 export { parseStrictRfc3339 };
-
-/** 标签页间只广播随机修订，不保存用户身份或凭据。 */
-export const PUBLIC_SESSION_CHANGE_STORAGE_KEY = "hv.public.session-revision";
-
-/** 会话重读原因。认证失败要先失效旧身份并提示服务端撤销；本浏览器主动退出只同步为匿名。 */
-export type SessionRefreshReason = "refresh" | "authentication_failed" | "logged_out";
-
-/** 已知认证变化必须先卸载旧用户命令，阻止继续使用旧确认宿主。 */
-export function sessionRefreshReasonInvalidates(reason: SessionRefreshReason): boolean {
-  return reason !== "refresh";
-}
-
-/** 未到期却失效的认证会话只可能来自服务端撤销；主动退出与普通重读不提示。 */
-export function sessionRefreshReasonShowsEndedElsewhere(reason: SessionRefreshReason): boolean {
-  return reason === "authentication_failed";
-}
-
-/** 外壳会话重读入口。 */
-export type PublicSessionCheckTrigger = (reason: SessionRefreshReason) => void;
-
-interface SessionCheckRegistration {
-  trigger: PublicSessionCheckTrigger;
-}
-
-/** 当前页登记的唯一会话检查入口；后登记的替换先登记的。 */
-let registeredSessionCheckTrigger: SessionCheckRegistration | null = null;
-
-/**
- * 登记当前页的会话检查入口，返回注销函数。
- *
- * API 可能由事件处理器启动的任务调用，当时没有组件 owner；因此由会话外壳在挂载时登记，
- * 卸载时注销，不能依赖调用瞬间的响应式上下文。
- */
-export function registerPublicSessionCheckTrigger(trigger: PublicSessionCheckTrigger): () => void {
-  const registration: SessionCheckRegistration = { trigger };
-  registeredSessionCheckTrigger = registration;
-  return () => {
-    // 后登记的入口已经替换自己时，旧注销函数不得清掉新入口。
-    if (registeredSessionCheckTrigger === registration) {
-      registeredSessionCheckTrigger = null;
-    }
-  };
-}
 
 /** 认证失败或身份前置条件冲突时，重新读取当前 Cookie 对应的权威身份。 */
 export function observePublicSessionFailure(status: number, code: string): void {
   if (status === 401 || code === "session_changed") {
     notifyPublicSessionChange("authentication_failed");
   }
-}
-
-/** 由当前页外壳按 Cookie 重读权威会话。 */
-export function requestPublicSessionCheck(reason: SessionRefreshReason): void {
-  registeredSessionCheckTrigger?.trigger(reason);
-}
-
-/** 通知本页外壳与其他标签页重新读取权威会话；修订值只用于唤醒，不携带身份。 */
-export function notifyPublicSessionChange(reason: SessionRefreshReason): void {
-  const registration = registeredSessionCheckTrigger;
-  if (registration !== null) {
-    registration.trigger(reason);
-  }
-  const revision = createUuidV4();
-  setItem(PUBLIC_SESSION_CHANGE_STORAGE_KEY, revision);
 }
 
 /** Public 登录失败的稳定投影；界面只根据错误码和安全公开原因选择本地化文案。 */
@@ -241,7 +206,7 @@ function validPublicReason(value: unknown): string | null {
     : null;
 }
 
-async function parseApiError(response: TransportResponse): Promise<PublicSessionApiError> {
+function parseApiError(response: TransportResponse): PublicSessionApiError {
   const status = response.status;
   const decoded = decodeError(response);
   if (!decoded.ok) {
@@ -253,14 +218,26 @@ async function parseApiError(response: TransportResponse): Promise<PublicSession
   return { status, code, publicReason };
 }
 
-async function decodeCurrentSession(
+/** 能证明当前归属的响应必须是约定的 200 / ok，再按路由严格解码投影。 */
+export function decodeIdentitySuccess<TSchema extends v.GenericSchema>(
   response: TransportResponse,
-): Promise<Result<PublicSession | null, string>> {
-  if (!responseOk(response)) {
-    const code = decodeErrorCode(response);
-    return code === "unauthenticated" ? ok(null) : err(code);
+  schema: TSchema,
+  validate: (value: unknown) => boolean,
+): Result<v.InferOutput<TSchema>, string> {
+  const payload = response.json();
+  if (response.status !== 200 || !payload.ok || object(payload.value)?.code !== "ok") {
+    reportBrowserError("dto_decode");
+    return err("invalid_response");
   }
-  const decoded = decodeSuccess(
+  // 复用共享信封解码，整场标记等正文只解析一次。
+  return decodeSuccess({ ...response, json: () => payload }, schema, validate);
+}
+
+function decodeCurrentSession(response: TransportResponse): Result<PublicSession | null, string> {
+  if (!responseOk(response)) {
+    return err(decodeErrorCode(response));
+  }
+  const decoded = decodeIdentitySuccess(
     response,
     v.nullable(PublicSessionCurrentResponseSchema),
     validCurrentSessionValue,
@@ -278,7 +255,10 @@ async function decodeCurrentSession(
 async function fetchPublicSessionOnce(
   signal: AbortSignal,
 ): Promise<Result<PublicSession | null, string>> {
-  const response = await sendGet("/api/v1/session", signal);
+  const response = await sendRequest(
+    () => ok({ url: SESSION_PATH, init: { method: "GET", cache: "no-store" } }),
+    signal,
+  );
   if (signal.aborted) {
     return err("network_error");
   }
@@ -288,133 +268,199 @@ async function fetchPublicSessionOnce(
   return decodeCurrentSession(response.value);
 }
 
-/** 在 Cookie 同步锁内执行调用体；锁名称和超时由 cookie 模块唯一拥有。 */
-export function lockCookieMutation<T>(
-  body: (lockSignal: AbortSignal) => Promise<Result<T, string>>,
-  signal: AbortSignal,
-): Promise<Result<T, string>> {
-  return lockCookie(body, (code) => code, signal);
-}
-
 /** 偏好写入可能只提交数据库、未收到响应；下次权威读取须重新核对浏览器持久期。 */
 export function invalidateCookieSync(): void {
   invalidate();
 }
 
-/**
- * 普通读取不写 Cookie；只有首次读取、截止变化或持久期同步到期时进入显式串行化写路径。
- */
+interface SessionObservation {
+  readonly result: Result<PublicSession | null, string>;
+  readonly revisions: SessionRevisions;
+  readonly identityRevision: number | null;
+}
+
+/** 在同一锁内取得当前身份和退出修订；普通复核需要同步时复用锁内的 GET。 */
 export async function fetchPublicSession(
   signal: AbortSignal,
-): Promise<Result<PublicSession | null, string>> {
+  synchronizeCookie: boolean,
+  applyIdentity: PublicSessionIdentityTrigger,
+): Promise<SessionObservation> {
+  // 等锁失败也是本轮对账的结束，须交回排队时已经观察到的退出修订供外壳消费。
+  const queuedRevisions = publicSessionRevisions();
+  const queuedIdentityRevision = publicSessionIdentityRevision();
+  const locked = await withCookieLock(async (lockSignal): Promise<SessionObservation> => {
+    const revisions = publicSessionRevisions();
+    let identityRevision = publicSessionIdentityRevision();
+    const publish = (session: PublicSession | null, cookieWritten: boolean): void => {
+      identityRevision = publishPublicSessionIdentity(
+        { kind: "session", session },
+        { revisions, cookieWritten, apply: applyIdentity },
+      );
+    };
+    const current = await fetchPublicSessionOnce(lockSignal);
+    if (lockSignal.aborted) {
+      return { result: err("network_error"), revisions, identityRevision };
+    }
+    if (current.ok) {
+      // GET 已证明 Cookie 归属，后续持久期同步即使失败也不能保留旧用户宿主。
+      publish(current.value, false);
+      if (current.value === null) {
+        invalidate();
+      }
+    }
+    // 等锁期间 Cookie 可能被其他标签页替换，只能用锁内刚读到的身份同步持久期。
+    const result =
+      synchronizeCookie && current.ok && current.value !== null && needsSync(current.value)
+        ? await synchronizePublicCookie(current.value, lockSignal, publish)
+        : current;
+    return { result, revisions, identityRevision };
+  }, signal);
+  if (signal.aborted) {
+    return { result: err("network_error"), revisions: queuedRevisions, identityRevision: null };
+  }
+  if (locked.ok) {
+    return locked.value;
+  }
+  if (locked.error !== "session_lock_unavailable") {
+    return {
+      result: err(locked.error),
+      revisions: queuedRevisions,
+      identityRevision: queuedIdentityRevision,
+    };
+  }
+  // 无 Web Locks 时仍可确认匿名；需要同步的身份继续失败关闭。
+  const revisions = publicSessionRevisions();
+  const startedRevision = publicSessionIdentityRevision();
+  const observe = startPublicSessionIdentityObservation();
   const current = await fetchPublicSessionOnce(signal);
+  if (signal.aborted) {
+    return { result: err("network_error"), revisions, identityRevision: null };
+  }
+  const identityRevision = current.ok
+    ? observe({ kind: "session", session: current.value }, { revisions, apply: applyIdentity })
+    : startedRevision;
+  if (identityRevision !== null && current.ok && current.value === null) {
+    invalidate();
+  }
+  const result =
+    synchronizeCookie && current.ok && current.value !== null && needsSync(current.value)
+      ? err(locked.error)
+      : current;
+  return { result, revisions, identityRevision };
+}
+
+async function synchronizePublicCookie(
+  current: PublicSession,
+  signal: AbortSignal,
+  publish: (session: PublicSession | null, cookieWritten: boolean) => void,
+): Promise<Result<PublicSession | null, string>> {
+  const response = await sendRequest(
+    () =>
+      ok({
+        url: SESSION_PATH,
+        init: { method: "PUT", headers: { [PUBLIC_EXPECTED_USER_ID_HEADER]: current.user_id } },
+      }),
+    signal,
+  );
   if (signal.aborted) {
     return err("network_error");
   }
-  if (!current.ok) {
-    return current;
+  if (!response.ok) {
+    return err(transportErrorCode(response.error));
   }
-  if (current.value === null) {
-    invalidate();
-    return ok(null);
+  const synchronized = decodeCurrentSession(response.value);
+  if (!synchronized.ok) {
+    return synchronized;
   }
-  if (!needsSync(current.value)) {
-    return ok(current.value);
-  }
-  return lockCookieMutation(async (lockSignal) => {
-    // 等锁期间另一标签页可能已经登录 B；必须重读现 Cookie，不能把外层旧 A 投影交给 UI。
-    const lockedCurrent = await fetchPublicSessionOnce(lockSignal);
-    if (lockSignal.aborted) {
-      return err("network_error");
-    }
-    if (!lockedCurrent.ok) {
-      return lockedCurrent;
-    }
-    if (lockedCurrent.value === null) {
-      invalidate();
-      return ok(null);
-    }
-    if (!needsSync(lockedCurrent.value)) {
-      return ok(lockedCurrent.value);
-    }
-    const currentSession = lockedCurrent.value;
-    const response = await sendRequest(
-      () =>
-        ok({
-          url: "/api/v1/session",
-          init: {
-            method: "PUT",
-            headers: { [PUBLIC_EXPECTED_USER_ID_HEADER]: currentSession.user_id },
-          },
-        }),
-      lockSignal,
-    );
-    if (lockSignal.aborted) {
-      return err("network_error");
-    }
-    if (!response.ok) {
-      return err(transportErrorCode(response.error));
-    }
-    const successful = responseOk(response.value);
-    const synchronized = await decodeCurrentSession(response.value);
-    if (lockSignal.aborted) {
-      return err("network_error");
-    }
-    if (!synchronized.ok) {
-      return synchronized;
-    }
-    const identity = synchronized.value;
-    if (identity !== null && identity.user_id === currentSession.user_id) {
-      record(identity);
-      return ok(identity);
-    }
-    if (identity === null && !successful) {
-      invalidate();
-      return ok(null);
-    }
+  const identity = synchronized.value;
+  if (identity === null || identity.user_id !== current.user_id) {
     return err("invalid_response");
-  }, signal);
+  }
+  record(identity);
+  publish(identity, true);
+  return synchronized;
 }
 
-/** 使用登录 key 登录；成功后在锁内失效公开读取缓存、解码身份并记录 Cookie 生命周期。 */
+function mayHaveChangedCookie(response: Result<TransportResponse, TransportError>): boolean {
+  if (response.ok) {
+    return responseOk(response.value) || response.value.status >= 500;
+  }
+  const error = response.error;
+  return (
+    error.kind !== "network" || error.status === null || error.status < 400 || error.status >= 500
+  );
+}
+
+async function sendCookieMutation<T, E>(
+  build: TransportRequestBuilder,
+  signal: AbortSignal,
+  method: "POST" | "DELETE",
+  mapError: (code: string) => E,
+  decodeReceipt: (response: TransportResponse) => Result<T, E>,
+): Promise<Result<T, E>> {
+  const change: { reason: "cookie_changed" | LogoutReason | null } = { reason: null };
+  const locked = await withCookieLock(async (lockSignal) => {
+    if (lockSignal.aborted) {
+      return err(mapError("network_error"));
+    }
+    invalidate();
+    const response = await sendRequest(build, lockSignal);
+    // 请求可能已改变 Cookie，表单卸载也须由常驻外壳对账。对账只读，不能重发原命令。
+    if (mayHaveChangedCookie(response)) {
+      if (method === "POST") {
+        change.reason = "cookie_changed";
+      } else {
+        // 完整成功回执才确认退出，取消页面任务也不能撤销已确认的 Cookie 变化。
+        const receipt =
+          response.ok && responseOk(response.value) ? decodeReceipt(response.value) : null;
+        change.reason = receipt?.ok === true ? "logged_out" : "logout_unknown";
+        markPublicLogout(change.reason);
+        if (receipt?.ok === true) {
+          publishPublicSessionIdentity({ kind: "session", session: null }, { cookieWritten: true });
+        }
+        if (receipt !== null && !lockSignal.aborted) {
+          return receipt;
+        }
+      }
+    }
+    if (lockSignal.aborted) {
+      return err(mapError("network_error"));
+    }
+    return response.ok
+      ? decodeReceipt(response.value)
+      : err(mapError(transportErrorCode(response.error)));
+  }, signal);
+  if (change.reason !== null) {
+    // 复核在写锁作用域结束后另取同一锁；读取缓存由各自的 owner 按作用域管理。
+    notifyPublicSessionChange(change.reason);
+  }
+  return locked.ok ? locked.value : err(mapError(locked.error));
+}
+
+/** 使用登录 key 登录一次；完整回执才记录 Cookie 生命周期。 */
 export async function loginPublic(
   key: string,
   signal: AbortSignal,
 ): Promise<Result<PublicSession, PublicSessionApiError>> {
-  return lockCookie(
-    async (lockSignal) => {
-      invalidate();
-      const response = await sendRequest(
-        () =>
-          ok({
-            url: "/api/v1/session",
-            init: {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({ key }),
-            },
-          }),
-        lockSignal,
-      );
-      if (lockSignal.aborted) {
-        return err(publicSessionApiErrorLocal("network_error"));
+  return sendCookieMutation(
+    () =>
+      ok({
+        url: SESSION_PATH,
+        init: {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ key }),
+        },
+      }),
+    signal,
+    "POST",
+    publicSessionApiErrorLocal,
+    (response) => {
+      if (!responseOk(response)) {
+        return err(parseApiError(response));
       }
-      if (!response.ok) {
-        return err(publicSessionApiErrorLocal(transportErrorCode(response.error)));
-      }
-      if (!responseOk(response.value)) {
-        const parsed = await parseApiError(response.value);
-        if (lockSignal.aborted) {
-          return err(publicSessionApiErrorLocal("network_error"));
-        }
-        return err(parsed);
-      }
-      // Cookie 已由响应写入；即使正文解码失败也重读。重登同账号不能清除原未决命令。
-      notifyPublicSessionChange("refresh");
-      // 响应成功即可能已换身份；公开读取缓存必须在正文校验前失效。
-      invalidateAll();
-      const decoded = decodeSuccess(
-        response.value,
+      const decoded = decodeIdentitySuccess(
+        response,
         PublicLoginResponseSchema,
         validLoginSessionValue,
       );
@@ -430,55 +476,34 @@ export async function loginPublic(
         absolute_expires_at: payload.absolute_expires_at,
       };
       record(session);
+      publishPublicSessionIdentity({ kind: "session", session }, { cookieWritten: true });
       return ok(session);
     },
-    (code) => publicSessionApiErrorLocal(code),
-    signal,
   );
 }
 
-/** 退出当前浏览器会话；服务器失败时按会话错误通知其他页面，成功时清除全部公开缓存。 */
+/** 确认退出在锁内结束旧归属，锁释放后仍须读回当前 Cookie。 */
 export async function logoutPublic(
   userId: string,
   signal: AbortSignal,
 ): Promise<Result<null, string>> {
-  return lockCookie(
-    async (lockSignal) => {
-      invalidate();
-      const response = await sendRequest(
-        () =>
-          ok({
-            url: "/api/v1/session",
-            init: {
-              method: "DELETE",
-              headers: { [PUBLIC_EXPECTED_USER_ID_HEADER]: userId },
-            },
-          }),
-        lockSignal,
-      );
-      if (lockSignal.aborted) {
-        return err("network_error");
-      }
-      if (!response.ok) {
-        return err(transportErrorCode(response.error));
-      }
-      if (!responseOk(response.value)) {
-        const status = response.value.status;
-        const code = decodeErrorCode(response.value);
-        observePublicSessionFailure(status, code);
+  return sendCookieMutation(
+    () =>
+      ok({
+        url: SESSION_PATH,
+        init: { method: "DELETE", headers: { [PUBLIC_EXPECTED_USER_ID_HEADER]: userId } },
+      }),
+    signal,
+    "DELETE",
+    (code) => code,
+    (response) => {
+      if (!responseOk(response)) {
+        const code = decodeErrorCode(response);
+        observePublicSessionFailure(response.status, code);
         return err(code);
       }
-      // 主动退出：其他标签页同步为匿名，但不提示被其他设备挤下线。
-      notifyPublicSessionChange("logged_out");
-      const decoded = decodeSuccess(response.value, jsonValue, (value) => value === null);
-      if (!decoded.ok) {
-        return err(decoded.error);
-      }
-      // 身份变化后登录期间的公开读取缓存全部过期：下一次读取先向服务端再验证。
-      invalidateAll();
-      return ok(null);
+      const decoded = decodeIdentitySuccess(response, jsonValue, (value) => value === null);
+      return decoded.ok ? ok(null) : err(decoded.error);
     },
-    (code) => code,
-    signal,
   );
 }

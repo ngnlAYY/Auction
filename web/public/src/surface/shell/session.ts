@@ -1,13 +1,196 @@
-//! 外壳会话资源与路由焦点标识的构造辅助；会话撤销判断保持与后端截止语义一致。
+// 外壳会话资源与路由焦点标识，按权威身份隔离私有读取和命令宿主。
 
-import { createCell } from "@auction/web-shared/reactive/cell";
+import { type Cell, createCell } from "@auction/web-shared/reactive/cell";
 import { createTaskResource } from "@auction/web-shared/reactive/resource";
+import { err, ok } from "@auction/web-shared/result";
 import type { RouteMatch } from "@auction/web-shared/router";
-import { createEffect } from "solid-js";
+import { createEffect, onCleanup, untrack } from "solid-js";
 
 import { estimatedNow } from "../../api/clock";
-import { fetchPublicSession, type PublicSession, parseStrictRfc3339 } from "../../api/session";
+import {
+  fetchPublicSession,
+  type PublicSession,
+  parseStrictRfc3339,
+  registerPublicSessionCheckTrigger,
+  type SessionRefreshReason,
+} from "../../api/session";
+import {
+  publicSessionIdentityRevision,
+  publicSessionRevisions,
+  type SessionIdentityEvidence,
+} from "../../api/session/revision";
 import type { PublicSessionResource, PublicSessionResult } from "../index";
+import { usePublicSessionExpiry, usePublicSessionSync } from "../session/lifecycle";
+import { invalidateLotWatches } from "../watches/cache";
+
+type SessionRead = "refresh" | "reconcile" | "cookie_changed" | "expiry";
+
+/** 外壳常驻的会话读取、命令宿主与重新登录提示。 */
+export function createPublicShellSession(refreshGeneration: Cell<number>) {
+  const readKind = createCell<SessionRead>("refresh");
+  const resource = createTaskResource(readKind, async (kind, context) => {
+    const previousUser = commandOwner.peek();
+    const observation = await fetchPublicSession(context.signal, kind === "refresh", applyIdentity);
+    if (!context.alive()) {
+      return null;
+    }
+    return { kind, previousUser, ...observation };
+  });
+  const snapshot = createCell<PublicSessionResult | undefined>(undefined);
+  const sessionEndedElsewhere = createCell(false);
+  const commandOwner = createCell<string | null>(null);
+  const lastIdentity = createCell<PublicSession | null>(null);
+  let consumed = publicSessionRevisions();
+  let localLogoutUnknown = false;
+  let expiryPending = false;
+
+  const setCommandOwner = (userId: string | null): boolean => {
+    const previous = commandOwner.peek();
+    if (previous === userId) {
+      return false;
+    }
+    // 先失效离开账号的快照，再替换宿主；旧会话的截止和展示也不能沿用。
+    if (previous !== null) {
+      invalidateLotWatches(previous);
+    }
+    lastIdentity.set(null);
+    snapshot.set(undefined);
+    commandOwner.set(userId);
+    return true;
+  };
+  const clearSession = (): void => {
+    snapshot.set(undefined);
+    resource.clear();
+  };
+  const restart = (kind: SessionRead): void => {
+    if (readKind.peek() !== kind) {
+      readKind.set(kind);
+    }
+    resource.restart();
+  };
+  const checkPendingExpiry = (): void => {
+    if (expiryPending && untrack(resource.state) !== "pending") {
+      restart("expiry");
+    }
+  };
+  const onExpiry = (): void => {
+    // 截止可能发生在对账读取之后、收完正文之前；到期检查不能被普通刷新去重吞掉。
+    expiryPending = true;
+    snapshot.set(undefined);
+    checkPendingExpiry();
+  };
+  const consumeConfirmedLogout = (revision: string | null, confirmedLocally = false): boolean => {
+    if (!confirmedLocally && (revision === null || revision === consumed.confirmed)) {
+      return false;
+    }
+    consumed = { ...consumed, confirmed: revision ?? consumed.confirmed };
+    // 成功退出已经终止旧会话。读回失败也不能继续保留私有子树或旧写命令。
+    setCommandOwner(null);
+    snapshot.set(ok(null));
+    return true;
+  };
+  const checkSession = (reason: SessionRefreshReason): void => {
+    if (reason === "refresh" && readKind.peek() !== "refresh" && resource.state() === "pending") {
+      // 聚焦与可见性通知不能把正在进行的对账或到期复核换成 Cookie 写入。
+      return;
+    }
+    if (reason === "authentication_failed") {
+      // 停止使用未经复核的会话提交新命令，冻结命令仍归最后确认的账号。
+      clearSession();
+    }
+    if (reason === "logout_unknown") {
+      localLogoutUnknown = true;
+    }
+    const revisions = publicSessionRevisions();
+    if (consumeConfirmedLogout(revisions.confirmed)) {
+      resource.clear();
+    }
+    restart(reason === "refresh" || reason === "cookie_changed" ? reason : "reconcile");
+  };
+  const session: PublicSessionResource = Object.assign(snapshot, {
+    state: resource.state,
+    restart: () => checkSession("refresh"),
+    cancel: resource.cancel,
+    clear: clearSession,
+  });
+
+  const applyIdentity = (evidence: SessionIdentityEvidence): boolean => {
+    const previous = lastIdentity.peek();
+    const { revisions, cookieWritten } = evidence;
+    const confirmedLocally =
+      cookieWritten && evidence.kind === "session" && evidence.session === null;
+    const confirmedLogout = consumeConfirmedLogout(revisions.confirmed, confirmedLocally);
+    const userId = evidence.kind === "user" ? evidence.userId : (evidence.session?.user_id ?? null);
+    const changed = setCommandOwner(userId);
+    if (userId !== null && sessionEndedElsewhere.peek()) {
+      sessionEndedElsewhere.set(false);
+    }
+    if (evidence.kind === "user") {
+      // 只有账号的读回能确定归属，完整会话由独立读取确认。持锁的偏好写入已有通知。
+      if (changed && !cookieWritten) {
+        checkSession("cookie_changed");
+      }
+    } else if (evidence.session !== null) {
+      if (sessionWasStillValid(evidence.session)) {
+        lastIdentity.set(evidence.session);
+      } else if (readKind.peek() !== "expiry") {
+        // 即使随后的持久期同步失败，也要对已经越过截止的会话复核一次。
+        expiryPending = true;
+      }
+    } else {
+      const browserLogout =
+        confirmedLogout ||
+        localLogoutUnknown ||
+        (revisions.unknown !== null && revisions.unknown !== consumed.unknown);
+      if (!browserLogout && previous !== null && sessionWasStillValid(previous)) {
+        sessionEndedElsewhere.set(true);
+      }
+    }
+    return changed || confirmedLogout;
+  };
+
+  createEffect(resource, (observation) => {
+    if (observation == null) {
+      return;
+    }
+    // 归属在解码时提交；异步任务晚交付的展示结果不能盖掉新证据。
+    if (observation.identityRevision !== publicSessionIdentityRevision()) {
+      checkPendingExpiry();
+      return;
+    }
+    const { kind, result, revisions, previousUser } = observation;
+    consumeConfirmedLogout(revisions.confirmed);
+    // 这轮对账即使读取失败也消耗未知退出提示；下次例行复核仍能报告真正的非本地结束。
+    localLogoutUnknown = false;
+    consumed = {
+      ...consumed,
+      unknown: revisions.unknown ?? consumed.unknown,
+    };
+
+    const identity = result.ok ? result.value : null;
+    const expired = identity !== null && !sessionWasStillValid(identity);
+    if (kind === "expiry") {
+      expiryPending = false;
+    } else if (expired) {
+      expiryPending = true;
+    }
+    if (expired) {
+      // 迟到的正文不能恢复过期身份。到期复核仍返回已过期身份时显示错误，避免循环读取。
+      snapshot.set(kind === "expiry" ? err("invalid_response") : undefined);
+    } else {
+      snapshot.set(result);
+      // Cookie 变更后同一账号的读取就地重验；复核结果不改变已由证据确认的归属。
+      if (kind === "cookie_changed" && identity !== null && previousUser === identity.user_id) {
+        refreshGeneration.update((value) => Math.min(value + 1, Number.MAX_SAFE_INTEGER));
+      }
+    }
+    checkPendingExpiry();
+  });
+  onCleanup(registerPublicSessionCheckTrigger(checkSession, applyIdentity));
+  usePublicSessionSync(checkSession);
+  usePublicSessionExpiry(lastIdentity, onExpiry);
+  return { session, sessionEndedElsewhere, commandOwner, checkSession };
+}
 
 export function routeFocusToken(route: RouteMatch): string {
   if (route.kind === "not-found") {
@@ -31,58 +214,11 @@ function rustDebugString(value: string): string {
   return JSON.stringify(value);
 }
 
-export function createPublicSessionResource(): PublicSessionResource {
-  const resource = createTaskResource(
-    () => null,
-    async (_dependencies, context) => fetchPublicSession(context.signal),
-  );
-  const override = createCell<PublicSessionResult | undefined>(undefined);
-  const session = (() => override() ?? resource()) as PublicSessionResource;
-  session.peek = () => override.peek() ?? resource.peek();
-  // Resource::set 只写值，不改变任务阶段；覆盖值不能把 pending 伪装成 ready。
-  session.state = () => resource.state();
-  session.restart = () => {
-    resource.restart();
-  };
-  session.cancel = () => resource.cancel();
-  session.clear = () => {
-    override.set(undefined);
-    resource.clear();
-  };
-  session.set = (value) => {
-    if (value === undefined) {
-      override.set(undefined);
-      resource.clear();
-    } else {
-      override.set(value);
-    }
-  };
-  // Resource::set 写入的值会被下一次资源结果覆盖；覆盖值也必须在该结果到达时让位。
-  let previousResourceValue = resource.peek();
-  createEffect(
-    () => resource(),
-    (value) => {
-      if (value !== previousResourceValue) {
-        previousResourceValue = value;
-        if (override.peek() !== undefined) {
-          override.set(undefined);
-        }
-      }
-    },
-  );
-  return session;
-}
-
-/** 未到期却失效的认证会话只来自服务端撤销；自然到期不显示“已在其他设备登录”。 */
-export function sessionEndedByRevocation(identity: PublicSession): boolean {
-  if (!identity.authenticated) {
-    return false;
-  }
-  // 永久会话没有截止字段，不可能自然到期。
+/** 依据上次确认的有效截止区分自然到期。 */
+function sessionWasStillValid(identity: PublicSession): boolean {
   if (identity.expires_at === null) {
     return true;
   }
-  // 截止字符串不可解析时保守地不提示，避免把未知状态当作撤销。
   const expiry = parseStrictRfc3339(identity.expires_at);
   return expiry !== null && expiry > BigInt(estimatedNow()) * 1_000_000n;
 }

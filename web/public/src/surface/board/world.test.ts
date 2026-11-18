@@ -1,15 +1,28 @@
 // Public 世界目录辅助与切换控制器：历史筛选保留关闭世界，按钮只消费配置开放的世界。
 
-import { expect, test } from "bun:test";
+import { expect, jest, test } from "bun:test";
 import type { WorldsResponse } from "@auction/contracts/dto/public/account";
-import { type Cell, createCell } from "@auction/web-shared/reactive/cell";
-import type { RouteMatch, Router } from "@auction/web-shared/router";
-import { RouterContext } from "@auction/web-shared/router";
+import { createPageVisibility } from "@auction/web-shared/platform/visibility";
+import { createCell } from "@auction/web-shared/reactive/cell";
+import { ok } from "@auction/web-shared/result";
+import { createRouter, Link, RouterContext } from "@auction/web-shared/router";
+import { installFakeWindow } from "@auction/web-shared/router/test-window";
 import { createEffect, createRoot, flush } from "solid-js";
 
-import type { PublicBoardQuery } from "../query/board";
-import { readPublicQuery } from "../query/location";
-import { createWorldSwitch, supportedWorlds, type WorldSwitch } from "./world";
+import {
+  type PublicSessionResource,
+  PublicSessionResourceContext,
+  type PublicSessionResult,
+} from "../index";
+import { NavigationLinks } from "../presentation";
+import {
+  readPublicQuery,
+  usePublicQueryState,
+  worldScopeHref,
+  worldScopeNavigationWorld,
+} from "../query";
+import { PUBLIC_PAGES, PUBLIC_ROUTES } from "../router/route";
+import { createWorldSwitch, supportedWorlds } from "./world";
 
 function worldsResponse(entries: readonly (readonly [string, boolean])[]): WorldsResponse {
   return {
@@ -37,156 +50,98 @@ test("supported_worlds_still_returns_disabled_supported_worlds：全部受支持
   ).toEqual(["main", "isekai"]);
 });
 
-interface FakeHistory {
-  readonly state: unknown;
-  pushState(state: unknown, title: string, url?: string | null): void;
-  replaceState(state: unknown, title: string, url?: string | null): void;
+function worldsReply(worlds: WorldsResponse): Response {
+  return Response.json({ code: "ok", message: "ok", data: worlds });
 }
 
-interface FakeWindow {
-  readonly location: { pathname: string; search: string; hash: string };
-  readonly history: FakeHistory;
-  failHistoryWrites(fail: boolean): void;
+function worldsUnavailable(): Response {
+  return Response.json({ code: "storage_unavailable", message: "", data: null }, { status: 503 });
 }
 
-function createFakeWindow(initialUrl: string): FakeWindow {
-  const location = { pathname: "/", search: "", hash: "" };
-  let state: unknown = null;
-  let failWrites = false;
-  const applyUrl = (url: string | null | undefined): void => {
-    if (url === undefined || url === null) {
-      return;
-    }
-    const parsed = new URL(url, "https://auction.test");
-    location.pathname = parsed.pathname;
-    location.search = parsed.search;
-    location.hash = parsed.hash;
-  };
-  applyUrl(initialUrl);
-  return {
-    location,
-    history: {
-      get state() {
-        return state;
-      },
-      pushState(nextState, _title, url) {
-        if (failWrites) {
-          throw new Error("history.pushState 被测试拒绝");
-        }
-        state = nextState;
-        applyUrl(url);
-      },
-      replaceState(nextState, _title, url) {
-        if (failWrites) {
-          throw new Error("history.replaceState 被测试拒绝");
-        }
-        state = nextState;
-        applyUrl(url);
-      },
-    },
-    failHistoryWrites(fail) {
-      failWrites = fail;
-    },
-  };
-}
-
-function fakeRouter(routeName: string): Router {
-  const matched: RouteMatch = { kind: "matched", name: routeName, params: {}, query: {} };
-  return {
-    current: () => matched,
-    currentLocationString: () => "/",
-    push() {},
-    replace() {},
-    goBack() {},
-    restoreScrollAfterCommit() {},
-  };
-}
-
-function installWorldsFetch(worlds: WorldsResponse): () => void {
-  const previous = globalThis.fetch;
-  globalThis.fetch = Object.assign(
-    async () =>
-      new Response(JSON.stringify({ code: "ok", message: "ok", data: worlds }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      }),
-    { preconnect: previous.preconnect },
-  );
-  return () => {
-    globalThis.fetch = previous;
-  };
-}
-
-interface MountedWorldSwitch {
-  readonly controller: WorldSwitch;
-  readonly selected: Cell<string>;
-  readonly query: Cell<PublicBoardQuery>;
-  selectedUpdates(): number;
-  browserSearch(): string;
-  failHistoryWrites(fail: boolean): void;
-  dispose(): void;
-}
-
-interface MountOptions {
-  readonly routeName: string;
+function mountWorldSwitch(options: {
   readonly worlds: WorldsResponse;
   readonly initialUrl?: string;
   readonly failHistoryWrites?: boolean;
-}
-
-function mountWorldSwitch(options: MountOptions): MountedWorldSwitch {
-  const fakeWindow = createFakeWindow(options.initialUrl ?? "/");
-  if (options.failHistoryWrites === true) {
-    fakeWindow.failHistoryWrites(true);
-  }
-  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
-  Object.defineProperty(globalThis, "window", {
+  readonly firstReadFails?: boolean;
+}) {
+  const { fake, restore } = installFakeWindow(options.initialUrl ?? "/");
+  const visibilityDocument = Object.assign(new EventTarget(), {
+    hidden: false,
+    scrollingElement: null,
+    getElementById: () => null,
+  });
+  const previousDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+  Object.defineProperty(globalThis, "document", {
     configurable: true,
-    writable: true,
-    value: fakeWindow,
+    value: visibilityDocument,
   });
-  const restoreFetch = installWorldsFetch(options.worlds);
+  const previousFetch = globalThis.fetch;
+  const requests: (RequestCache | undefined)[] = [];
+  let respond =
+    options.firstReadFails === true ? worldsUnavailable : () => worldsReply(options.worlds);
+  globalThis.fetch = Object.assign(
+    async (input: URL | RequestInfo, init?: RequestInit) => {
+      expect(input).toBe("/api/v1/worlds");
+      requests.push(init?.cache);
+      return respond();
+    },
+    { preconnect: previousFetch.preconnect },
+  );
   const previousRouterDefault = RouterContext.defaultValue;
-  RouterContext.defaultValue = fakeRouter(options.routeName);
-  const initialQuery = readPublicQuery();
-  const selected = createCell(initialQuery.world === "isekai" ? "isekai" : "main");
-  const query = createCell(initialQuery);
-  let selectedUpdates = 0;
-  let controller!: WorldSwitch;
-  let disposeRoot = (): void => {};
-  createRoot((dispose) => {
-    disposeRoot = dispose;
-    controller = createWorldSwitch({ selectedWorld: selected, shellQueryState: query });
-    createEffect(
-      () => selected(),
-      () => {
-        selectedUpdates += 1;
-      },
-    );
+  const mounted = createRoot((disposeRoot) => {
+    const router = createRouter({ routes: PUBLIC_ROUTES });
+    RouterContext.defaultValue = router;
+    fake.rejectWrites(options.failHistoryWrites === true);
+    const query = usePublicQueryState().state;
+    const selected = createCell(readPublicQuery().world === "isekai" ? "isekai" : "main");
+    const pageVisibility = createPageVisibility();
+    const controller = createWorldSwitch({
+      selectedWorld: selected,
+      shellQueryState: query,
+      pageVisibility,
+    });
+    pageVisibility.install(controller.revalidateIfNeeded);
+    let selectedUpdates = 0;
+    createEffect(selected, () => {
+      selectedUpdates += 1;
+    });
+    flush();
+    return {
+      router,
+      controller,
+      selected,
+      query,
+      selectedUpdates: () => selectedUpdates,
+      disposeRoot,
+      pageVisibility,
+    };
   });
-  flush();
-  let closed = false;
   return {
-    controller,
-    selected,
-    query,
-    selectedUpdates: () => selectedUpdates,
-    browserSearch: () => fakeWindow.location.search,
-    failHistoryWrites: (fail) => fakeWindow.failHistoryWrites(fail),
+    ...mounted,
+    requests,
+    location: fake.location,
+    browserSearch: () => fake.location.search,
+    failHistoryWrites: fake.rejectWrites,
+    show(visible: boolean) {
+      visibilityDocument.hidden = !visible;
+      visibilityDocument.dispatchEvent(new Event("visibilitychange"));
+      flush();
+    },
+    respondWith(reply: () => Response) {
+      respond = reply;
+    },
     dispose() {
-      if (closed) {
-        return;
-      }
-      closed = true;
-      disposeRoot();
+      mounted.pageVisibility.cleanup();
+      mounted.disposeRoot();
       flush();
       RouterContext.defaultValue = previousRouterDefault;
-      restoreFetch();
-      if (previousWindow === undefined) {
-        Reflect.deleteProperty(globalThis, "window");
+      globalThis.fetch = previousFetch;
+      if (previousDocument === undefined) {
+        Reflect.deleteProperty(globalThis, "document");
       } else {
-        Object.defineProperty(globalThis, "window", previousWindow);
+        Object.defineProperty(globalThis, "document", previousDocument);
       }
+      restore();
     },
   };
 }
@@ -211,7 +166,6 @@ async function flushWorlds(): Promise<void> {
 
 test("world_switch_controller_filters_disabled_worlds_and_orders_main_first：控制器按配置过滤并固定主世界在前", async () => {
   const onlyMain = mountWorldSwitch({
-    routeName: "AuctionIndex",
     worlds: {
       worlds: {
         isekai: { enabled: false },
@@ -227,7 +181,6 @@ test("world_switch_controller_filters_disabled_worlds_and_orders_main_first：�
   }
 
   const both = mountWorldSwitch({
-    routeName: "AuctionIndex",
     worlds: {
       worlds: {
         isekai: { enabled: true },
@@ -249,7 +202,6 @@ test("world_switch_controller_filters_disabled_worlds_and_orders_main_first：�
 
 test("world_switch_choose_keeps_the_old_world_when_history_write_fails：写入失败不提交选择且可重试", async () => {
   const mounted = mountWorldSwitch({
-    routeName: "AuctionIndex",
     worlds: {
       worlds: {
         main: { enabled: true },
@@ -286,7 +238,7 @@ test("非法场次的地址不会被自动改成开放世界", async () => {
     ["isekai", false],
   ]);
   const search = "?world=isekai&auction=truncated&page=3";
-  const invalid = mountWorldSwitch({ routeName: "AuctionIndex", worlds, initialUrl: `/${search}` });
+  const invalid = mountWorldSwitch({ worlds, initialUrl: `/${search}` });
   try {
     await flushWorlds();
     expect(invalid.browserSearch()).toBe(search);
@@ -296,7 +248,6 @@ test("非法场次的地址不会被自动改成开放世界", async () => {
   }
 
   const current = mountWorldSwitch({
-    routeName: "AuctionIndex",
     worlds,
     initialUrl: "/?world=isekai",
   });
@@ -310,7 +261,7 @@ test("非法场次的地址不会被自动改成开放世界", async () => {
 
 test("world_switch_choose_does_not_notify_an_unchanged_single_world：全部与主世界之间切换不重复通知", async () => {
   const mounted = mountWorldSwitch({
-    routeName: "History",
+    initialUrl: "/history",
     worlds: {
       worlds: {
         main: { enabled: true },
@@ -344,7 +295,6 @@ test("forum_correction_failure_can_retry_on_the_same_controller：论坛纠偏�
     },
   };
   const mounted = mountWorldSwitch({
-    routeName: "Forum",
     worlds,
     initialUrl,
     failHistoryWrites: true,
@@ -369,10 +319,237 @@ test("forum_correction_failure_can_retry_on_the_same_controller：论坛纠偏�
     mounted.controller.choose("main");
     await waitFor(() => mounted.controller.current() === "main");
     expect(mounted.selected.peek()).toBe("main");
-    expect(mounted.query.peek().world).toBeNull();
-    expect(new URLSearchParams(mounted.browserSearch()).get("world")).toBeNull();
-    // 纠偏成功后恢复“只有一个可选项时隐藏”的规则。
+    expect(mounted.query.peek().world).toBe("main");
+    expect(new URLSearchParams(mounted.browserSearch()).get("world")).toBe("main");
+    // 主动选回开放世界后恢复“只有一个可选项时隐藏”的规则。
     expect(mounted.controller.options()).toEqual([{ value: "main", disabled: false }]);
+  } finally {
+    mounted.dispose();
+  }
+});
+
+const ONLY_MAIN = worldsResponse([
+  ["main", true],
+  ["isekai", false],
+]);
+const BOTH_WORLDS = worldsResponse([
+  ["main", true],
+  ["isekai", true],
+]);
+const DIRECTORY_TTL = 300_000;
+
+test("可见时世界目录新鲜期内不取数，周期到达后再验证并更新选项", async () => {
+  jest.useFakeTimers();
+  const mounted = mountWorldSwitch({ worlds: ONLY_MAIN });
+  try {
+    await waitFor(() => !mounted.controller.selectable());
+    mounted.respondWith(() => worldsReply(BOTH_WORLDS));
+    jest.advanceTimersByTime(DIRECTORY_TTL - 1);
+    mounted.show(false);
+    mounted.show(true);
+    await flushWorlds();
+    expect(mounted.requests).toHaveLength(1);
+    expect(mounted.controller.options()).toEqual([{ value: "main", disabled: false }]);
+
+    jest.advanceTimersByTime(1);
+    await flushWorlds();
+    expect(mounted.requests).toHaveLength(2);
+    expect(mounted.requests.at(-1)).toBe("no-cache");
+    expect(mounted.controller.options()).toEqual([
+      { value: "main", disabled: false },
+      { value: "isekai", disabled: false },
+    ]);
+  } finally {
+    mounted.dispose();
+    jest.useRealTimers();
+  }
+});
+
+test("世界目录在后台超过周期时，恢复可见只补读一次", async () => {
+  jest.useFakeTimers();
+  const mounted = mountWorldSwitch({ worlds: ONLY_MAIN });
+  try {
+    await waitFor(() => !mounted.controller.selectable());
+    mounted.respondWith(() => worldsReply(BOTH_WORLDS));
+    mounted.show(false);
+    jest.advanceTimersByTime(DIRECTORY_TTL);
+    await flushWorlds();
+    expect(mounted.requests).toHaveLength(1);
+
+    mounted.show(true);
+    mounted.show(true);
+    await flushWorlds();
+    expect(mounted.requests).toHaveLength(2);
+    expect(mounted.requests.at(-1)).toBe("no-cache");
+    expect(mounted.controller.selectable()).toBe(true);
+  } finally {
+    mounted.dispose();
+    jest.useRealTimers();
+  }
+});
+
+test.each([true, false])(
+  "失败的世界目录恢复可见时提前重读（首次失败 %s）",
+  async (firstReadFails) => {
+    jest.useFakeTimers();
+    const mounted = mountWorldSwitch({ worlds: ONLY_MAIN, firstReadFails });
+    try {
+      await flushWorlds();
+      expect(mounted.requests).toHaveLength(1);
+      if (!firstReadFails) {
+        mounted.respondWith(worldsUnavailable);
+        jest.advanceTimersByTime(DIRECTORY_TTL);
+        await flushWorlds();
+        expect(mounted.requests).toHaveLength(2);
+        expect(mounted.controller.options()).toEqual([{ value: "main", disabled: false }]);
+      }
+      const beforeVisible = mounted.requests.length;
+      mounted.respondWith(() => worldsReply(firstReadFails ? ONLY_MAIN : BOTH_WORLDS));
+      mounted.show(false);
+      mounted.show(true);
+      await flushWorlds();
+      expect(mounted.requests).toHaveLength(beforeVisible + 1);
+      expect(mounted.requests.at(-1)).toBe("no-cache");
+      expect(mounted.controller.options()).toHaveLength(firstReadFails ? 1 : 2);
+    } finally {
+      mounted.dispose();
+      jest.useRealTimers();
+    }
+  },
+);
+
+function mobileHref(mounted: ReturnType<typeof mountWorldSwitch>, target: string): string {
+  const jsx = Object.getOwnPropertyDescriptor(globalThis, "jsx");
+  if (jsx === undefined) {
+    throw new Error("测试 JSX 转译未装配");
+  }
+  const links: string[] = [];
+  Object.defineProperty(globalThis, "jsx", {
+    ...jsx,
+    value(tag: unknown, attrs: Record<string, unknown> | null) {
+      if (tag === Link && typeof attrs?.href === "string") {
+        links.push(attrs.href);
+      }
+      return null;
+    },
+  });
+  const previousSession = PublicSessionResourceContext.defaultValue;
+  try {
+    createRoot((dispose) => {
+      try {
+        const snapshot = createCell<PublicSessionResult | undefined>(
+          ok({
+            authenticated: true,
+            user_id: "00000000-0000-4000-8000-000000000031",
+            username: "viewer",
+            expires_at: null,
+            absolute_expires_at: null,
+          }),
+        );
+        const session: PublicSessionResource = Object.assign(snapshot, {
+          state: (): "ready" => "ready",
+          restart() {},
+          cancel() {},
+          clear: () => snapshot.set(undefined),
+        });
+        PublicSessionResourceContext.defaultValue = session;
+        const route = mounted.router.current();
+        const world = worldScopeNavigationWorld(
+          mounted.query.peek(),
+          route.kind === "matched" ? route.name : null,
+        );
+        NavigationLinks({
+          auctionHomeHref: worldScopeHref("/", world),
+          currentRoute: route,
+          scopedHref: (path) => worldScopeHref(path, world),
+          resetHomeQuery: false,
+          onHome() {},
+        });
+      } finally {
+        dispose();
+      }
+    });
+  } finally {
+    PublicSessionResourceContext.defaultValue = previousSession;
+    Object.defineProperty(globalThis, "jsx", jsx);
+  }
+  const href = links.find((link) => new URL(link, mounted.location).pathname === target);
+  if (href === undefined) {
+    throw new Error(`手机导航缺少链接 ${target}`);
+  }
+  return href;
+}
+
+test.each([
+  "/forum?world=isekai",
+  "/?world=isekai&auction=67e55044-10b1-426f-9247-bb680e5fe0c8&page=3",
+])("主动从异世界切回主世界后，进入出价记录时保留范围 %s", async (initialUrl) => {
+  const mounted = mountWorldSwitch({ initialUrl, worlds: BOTH_WORLDS });
+  try {
+    await flushWorlds();
+    mounted.controller.choose("main");
+    flush();
+    expect(mounted.location.searchParams.get("world")).toBe("main");
+    expect(mounted.query.peek().auctionId).toBeNull();
+    expect(mounted.query.peek().page).toBe(1);
+    mounted.router.push(mobileHref(mounted, "/bidlog"));
+    flush();
+    expect(mounted.router.currentLocationString()).toBe("/bidlog?world=main");
+    expect(mounted.controller.current()).toBe("main");
+  } finally {
+    mounted.dispose();
+  }
+});
+
+test("手机从显式异世界进入我的及账户别名，再进入履约进度时继承世界", async () => {
+  const mounted = mountWorldSwitch({ initialUrl: "/forum?world=isekai", worlds: BOTH_WORLDS });
+  try {
+    await flushWorlds();
+    mounted.router.push(mobileHref(mounted, "/account"));
+    flush();
+    expect(mounted.router.currentLocationString()).toBe("/account?world=isekai");
+    const account = PUBLIC_PAGES.Account;
+    if (account?.kind !== "lazy") {
+      throw new Error("账户别名路由未装配");
+    }
+    const renderAlias = await account.load();
+    createRoot((dispose) => {
+      try {
+        renderAlias({ params: {}, query: {} });
+        flush();
+      } finally {
+        dispose();
+      }
+    });
+    expect(mounted.router.currentLocationString()).toBe("/me?world=isekai");
+    mounted.router.push(mobileHref(mounted, "/fulfillment"));
+    flush();
+    expect(mounted.router.currentLocationString()).toBe("/fulfillment?world=isekai");
+    expect(mounted.controller.current()).toBe("isekai");
+  } finally {
+    mounted.dispose();
+  }
+});
+
+test.each([
+  ["main", "isekai"],
+  ["isekai", "main"],
+] as const)("关闭当前世界后自动回退到 %s，下一跳不继承回退值", async (enabled, disabled) => {
+  const mounted = mountWorldSwitch({
+    initialUrl: `/forum?world=${disabled}`,
+    worlds: worldsResponse([
+      [enabled, true],
+      [disabled, false],
+    ]),
+  });
+  try {
+    await waitFor(() => mounted.selected.peek() === enabled);
+    expect(mounted.location.pathname).toBe("/forum");
+    expect(mounted.location.searchParams.has("world")).toBe(false);
+    mounted.router.push(mobileHref(mounted, "/bidlog"));
+    flush();
+    expect(mounted.router.currentLocationString()).toBe("/bidlog");
+    expect(mounted.query.peek().world).toBeNull();
   } finally {
     mounted.dispose();
   }

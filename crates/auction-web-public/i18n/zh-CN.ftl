@@ -436,8 +436,8 @@ session-menu-label = 账户会话
 session-login = 登录
 logout = 退出登录
 logout-error = 未能确认已退出。请核对当前会话后重试。
-session-ended-elsewhere = 该账号已在其他设备登录，当前会话已结束。
-session-ended-relogin = 用原登录 key 重新登录
+session-ended-elsewhere = 当前登录状态已在别处结束，请重新登录。可能的情形包括登录设备数已满时最久未活动的会话被注销、登录 key 已更换，或管理员撤销了会话。
+session-ended-relogin = 重新登录
 
 session-duration-title = 登录时长
 session-duration-permanent = 永久（默认）

@@ -5,6 +5,7 @@ import { DEFAULT_REQUEST_TIMEOUT_MILLIS } from "@auction/web-shared/net/transpor
 import { withBrowserLock } from "@auction/web-shared/net/transport/browser-lock";
 import type { Result } from "@auction/web-shared/result";
 import { err, unreachable } from "@auction/web-shared/result";
+import { notifyPublicSessionChange } from "./revision";
 
 const LOCK_NAME = "hv.public.session-cookie";
 const SYNC_INTERVAL_MILLIS = 24 * 60 * 60 * 1_000;
@@ -35,16 +36,31 @@ function lockErrorCode(error: "unavailable" | "timeout"): string {
  * 浏览器的锁只提供闭包作用域，因此这里把调用体放进锁内执行，等价于
  * Rust 中持有 `BrowserLock` 守卫直到调用方离开作用域。
  */
-export async function lock<T, E>(
+export async function withCookieLock<T>(
+  body: (lockSignal: AbortSignal) => Promise<T>,
+  signal: AbortSignal,
+): Promise<Result<T, string>> {
+  const acquired = await withBrowserLock(LOCK_NAME, DEFAULT_REQUEST_TIMEOUT_MILLIS, signal, body);
+  return acquired.ok ? acquired : err(lockErrorCode(acquired.error));
+}
+
+/** 登录时长命令经此入口持锁；传输失败只核对 Cookie，保留调用方的原命令结果和重试规则。 */
+export async function lock<T, E extends { readonly status: number }>(
   body: (lockSignal: AbortSignal) => Promise<Result<T, E>>,
   mapLockError: (code: string) => E,
   signal: AbortSignal,
 ): Promise<Result<T, E>> {
-  const acquired = await withBrowserLock(LOCK_NAME, DEFAULT_REQUEST_TIMEOUT_MILLIS, signal, body);
+  const acquired = await withCookieLock(body, signal);
   if (!acquired.ok) {
-    return err(mapLockError(lockErrorCode(acquired.error)));
+    return err(mapLockError(acquired.error));
   }
-  return acquired.value;
+  const result = acquired.value;
+  // 命令体在取得锁后直接发送。0 表示发出后无完整传输结果，5xx 也不能否定已提交的修改。
+  // 完整的 2xx 由命令体通知（包括解码失败），避免同一次写入唤醒两次会话读取。
+  if (!result.ok && (result.error.status === 0 || result.error.status >= 500)) {
+    notifyPublicSessionChange("cookie_changed");
+  }
+  return result;
 }
 
 /**

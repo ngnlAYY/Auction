@@ -2,16 +2,20 @@
 // Solid 版的世界切换位于各页面，Rust 版仍保留各页面自己的世界选择器。
 
 import type { WorldsResponse } from "@auction/contracts/dto/public/account";
-import type { Cell } from "@auction/web-shared/reactive/cell";
+import { sleep } from "@auction/web-shared/platform/timer";
+import type { PageVisibility } from "@auction/web-shared/platform/visibility";
+import { type Cell, createCell } from "@auction/web-shared/reactive/cell";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import { createTaskResource } from "@auction/web-shared/reactive/resource";
+import { createTaskScope } from "@auction/web-shared/reactive/tasks";
 import type { RouteMatch } from "@auction/web-shared/router";
 import { useRouter } from "@auction/web-shared/router";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
 import { createEffect, For, Show, untrack, useContext } from "solid-js";
 
-import { fetchWorlds } from "../../api/queries/current";
+import { decodeWorlds } from "../../api/decoder/catalog";
+import { cachedPublicRead } from "../../api/queries/cached-get";
 import {
   normalizedWorldQuery,
   type PublicBoardQuery,
@@ -32,6 +36,9 @@ import { WorldSwitchContext } from "../shell/contexts";
 
 export type { WorldSwitchOption };
 
+// 与 /api/v1/worlds 的低频 HTTP 缓存档一致。
+const WORLD_DIRECTORY_TTL_MILLIS = 300_000;
+
 /** 页面按钮组可读的世界切换接口；写地址栏的动作只经 `choose`。 */
 export interface WorldSwitch {
   readonly options: () => readonly WorldSwitchOption[];
@@ -41,10 +48,16 @@ export interface WorldSwitch {
   readonly selectable: () => boolean;
 }
 
+interface WorldSwitchController extends WorldSwitch {
+  /** 恢复可见时补读过期目录或重试失败的读取。 */
+  readonly revalidateIfNeeded: () => void;
+}
+
 /** 控制器依赖外壳已有的选中世界与查询状态；两者都由外壳创建并常驻。 */
 export interface CreateWorldSwitchOptions {
   readonly selectedWorld: Cell<string>;
   readonly shellQueryState: Cell<PublicBoardQuery>;
+  readonly pageVisibility: PageVisibility;
 }
 
 interface WorldCatalog {
@@ -52,25 +65,76 @@ interface WorldCatalog {
   readonly loaded: boolean;
 }
 
+function createWorldCatalog(pageVisibility: PageVisibility) {
+  const current = createCell<WorldCatalog>({ enabled: ["main", "isekai"], loaded: false });
+  const tasks = createTaskScope();
+  const worlds = createTaskResource(
+    () => null,
+    async (_dependencies, context) => {
+      // 控制器持有目录的快照和新鲜期。复用公开条件 GET 的 no-cache 路径，避免浏览器重放旧副本。
+      const read = await cachedPublicRead(
+        "/api/v1/worlds",
+        WORLD_DIRECTORY_TTL_MILLIS,
+        "public_worlds",
+        decodeWorlds,
+        context.signal,
+      );
+      if (!context.alive()) {
+        return null;
+      }
+      const confirmed = read.ok && read.value.staleFallback === null ? read.value.value : null;
+      return { confirmed, checkedAt: Date.now() };
+    },
+  );
+
+  const restartWhileVisible = (): void => {
+    // 可见性恢复和周期到达可能同时发生，在途读取只由同一资源持有。
+    if (pageVisibility.isVisible() && untrack(worlds.state) !== "pending") {
+      worlds.restart();
+    }
+  };
+  const revalidateIfNeeded = (): void => {
+    const previous = worlds.peek();
+    const now = Date.now();
+    if (
+      previous?.confirmed == null ||
+      now < previous.checkedAt ||
+      now - previous.checkedAt >= WORLD_DIRECTORY_TTL_MILLIS
+    ) {
+      restartWhileVisible();
+    }
+  };
+
+  createEffect(worlds, (checked) => {
+    if (checked == null) {
+      return;
+    }
+    // 临时失败保留最后确认的选项，恢复可见时仍按本轮读取失败处理。
+    if (checked.confirmed !== null) {
+      current.set({ enabled: headerWorlds(checked.confirmed), loaded: true });
+    }
+    const timer = tasks.spawn(async (context) => {
+      await sleep(WORLD_DIRECTORY_TTL_MILLIS, context.signal);
+      if (!context.alive()) {
+        return;
+      }
+      if (worlds.peek() === checked) {
+        restartWhileVisible();
+      }
+    });
+    return () => timer.cancel();
+  });
+  return { catalog: createValueMemo(current), revalidateIfNeeded };
+}
+
 /**
  * 创建随外壳常驻的世界切换控制器。
  * 目录同步、单世界页失效纠偏与地址写回都不依赖页面是否渲染按钮组；关闭世界的历史仍由
  * 跨世界页面按不带 `world` 的全部范围读取。
  */
-export function createWorldSwitch(props: CreateWorldSwitchOptions): WorldSwitch {
+export function createWorldSwitch(props: CreateWorldSwitchOptions): WorldSwitchController {
   const router = useRouter();
-  const worlds = createTaskResource(
-    () => null,
-    async (_dependencies, context) => fetchWorlds(context.signal),
-  );
-  const catalog = createValueMemo((): WorldCatalog => {
-    const snapshot = worlds();
-    if (snapshot?.ok === true) {
-      return { enabled: headerWorlds(snapshot.value), loaded: true };
-    }
-    // 目录未返回或读取失败时沿用旧版回退：两个冻结世界都开放。
-    return { enabled: ["main", "isekai"], loaded: false };
-  });
+  const { catalog, revalidateIfNeeded } = createWorldCatalog(props.pageVisibility);
   const routeName = createValueMemo(() => routeNameOf(router.current()));
   const family = createValueMemo(() => worldScopeFamily(routeName()));
   const queryWorld = createValueMemo(() => normalizedWorldQuery(props.shellQueryState().world));
@@ -133,14 +197,15 @@ export function createWorldSwitch(props: CreateWorldSwitchOptions): WorldSwitch 
       const shouldRewrite =
         routeUsesSingleWorld(latestRouteName) &&
         !preserveWorld &&
-        state.catalog.enabled.length > 0 &&
+        latestWorld !== null &&
         latestActive !== requestedWorld;
       if (shouldRewrite) {
         // 仅实际使用单一世界的路由纠偏；写入失败时保持原地址和选中世界，等待下一次重试。
         const written = updatePublicQueryState(
           props.shellQueryState,
           (query) => {
-            query.world = latestActive !== "main" ? latestActive : null;
+            // 自动回退只清掉不可用的显式值，实际世界由目录选出，不传给下一跳。
+            query.world = null;
           },
           "replace",
         );
@@ -180,19 +245,18 @@ export function createWorldSwitch(props: CreateWorldSwitchOptions): WorldSwitch 
       setSelectedWorld(nextSelected);
     }
   };
-  return { options, current, choose, selectable };
+  return { options, current, choose, selectable, revalidateIfNeeded };
 }
 
 /** 页面内的世界按钮组；没有可切换项时整组不渲染，也不建立资源或 effect。 */
 export function WorldTabs(): JSX.Element {
   const worldSwitch = useContext(WorldSwitchContext);
-  const enabledCount = () => worldSwitch.options().filter((option) => !option.disabled).length;
   const disabledCurrent = () =>
     worldSwitch
       .options()
       .some((option) => option.disabled && option.value === worldSwitch.current());
   return (
-    <Show when={enabledCount() > 1 || disabledCurrent()}>
+    <Show when={worldSwitch.selectable() || disabledCurrent()}>
       <nav class="public-auction-filter public-world-filter" aria-label={t("world-label")}>
         <span class="public-auction-filter__label">{t("world-label")}</span>
         <For each={worldSwitch.options()} keyed={(option) => option.value}>

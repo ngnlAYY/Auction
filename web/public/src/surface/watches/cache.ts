@@ -53,6 +53,22 @@ export function save(page: PublicLotWatchesResponse): void {
   }
 }
 
+/** 已确认身份离开时丢弃该用户各场快照，避免重新登录沿用上一段会话的标记。 */
+export function invalidateLotWatches(userId: string): void {
+  const prefix = `${KEY_PREFIX}${userId}:`;
+  // 直接枚举条目，索引缺失或不完整时也能丢弃旧快照。
+  for (const entry of keys()) {
+    if (entry.startsWith(prefix)) {
+      removeItem(entry);
+    }
+  }
+  const recent = recentKeys();
+  const retained = recent.filter((entry) => !entry.startsWith(prefix));
+  if (retained.length !== recent.length) {
+    setItem(INDEX_KEY, retained.join("\n"));
+  }
+}
+
 /** 读取最近保存的条目键；索引缺失、损坏或来自旧版本时按空索引处理。 */
 function recentKeys(): string[] {
   const index = getItem(INDEX_KEY);

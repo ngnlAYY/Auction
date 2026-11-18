@@ -15,14 +15,8 @@ import { createTaskScope } from "@auction/web-shared/reactive/tasks";
 import { useRouter } from "@auction/web-shared/router";
 import { useAppBootReady } from "@auction/web-shared/ui/bootstrap";
 import type { JSX } from "@solidjs/web";
-import { createEffect, onCleanup, onSettled, useContext } from "solid-js";
+import { createEffect, onSettled, useContext } from "solid-js";
 import { fetchCurrentAuction } from "../../api/queries/current";
-import {
-  registerPublicSessionCheckTrigger,
-  type SessionRefreshReason,
-  sessionRefreshReasonInvalidates,
-  sessionRefreshReasonShowsEndedElsewhere,
-} from "../../api/session";
 import { fetchPublicReadiness } from "../../api/status";
 import { prefetchBoardLots, rememberCurrentAuction } from "../board/prefetch";
 import {
@@ -40,7 +34,6 @@ import { PublicSessionView, type PublicSessionView as PublicSessionViewType } fr
 import {
   InitialPublicLocationContext,
   type LiveConnectionState,
-  normalizedWorldQuery,
   PublicLocationRevisionContext,
   publicAuctionHomeQuery,
   readPublicQuery,
@@ -54,7 +47,6 @@ import {
   publicConnectionMessage,
   publicConnectionStateName,
 } from "../realtime";
-import { usePublicSessionExpiry, usePublicSessionSync } from "../session";
 import {
   CurrentAuctionContext,
   PageVisibilityContext,
@@ -63,12 +55,7 @@ import {
   WorldSwitchContext,
 } from "./contexts";
 import { PublicShellProviders } from "./providers";
-import {
-  createPublicSessionResource,
-  routeFocusToken,
-  selectedWorldFromQuery,
-  sessionEndedByRevocation,
-} from "./session";
+import { createPublicShellSession, routeFocusToken, selectedWorldFromQuery } from "./session";
 import { createPublicTickerLabels } from "./ticker";
 import { PublicShellView } from "./view";
 
@@ -115,19 +102,18 @@ function PublicShellContent(props: { readonly locationGeneration: Cell<number> }
   const worldQuerySignal = worldQueryState.state;
   const initialLocation = useContext(InitialPublicLocationContext);
   const selectedWorld = createCell(selectedWorldFromQuery(readPublicQuery(initialLocation).world));
+  const pageVisibility = createPageVisibility();
   // 世界目录同步、单世界页纠偏与切换动作随外壳常驻；页面只渲染按钮组。
   const worldSwitch = createWorldSwitch({
     selectedWorld,
     shellQueryState: worldQuerySignal,
+    pageVisibility,
   });
-  // Solid 版导航继承地址里显式选择的世界；历史成交价页的世界只是该页筛选条件，
-  // 由纯函数按当前路由排除，Rust 版没有这层统一的世界范围。
   const navigationWorld = createValueMemo(() => {
     const route = currentRoute();
     return worldScopeNavigationWorld(
+      worldQuerySignal(),
       route.kind === "matched" ? route.name : null,
-      normalizedWorldQuery(worldQuerySignal().world),
-      worldSwitch.selectable(),
     );
   });
   const scopedHref = (path: string): string => worldScopeHref(path, navigationWorld());
@@ -162,49 +148,8 @@ function PublicShellContent(props: { readonly locationGeneration: Cell<number> }
     () => readinessGeneration(),
     async (_generation, context) => fetchPublicReadiness(context.signal),
   );
-  const session = createPublicSessionResource();
-  // 满额登录时服务端注销最久未活动的会话；被注销的设备在这里看到提示。
-  const sessionEndedElsewhere = createCell(false);
-  const commandOwner = createCell<string | null>(null);
-  createEffect(
-    () => session(),
-    (snapshot) => {
-      if (snapshot?.ok === true) {
-        const identity = snapshot.value;
-        const next = identity?.authenticated === true ? identity.user_id : null;
-        if (commandOwner.peek() !== next) {
-          commandOwner.set(next);
-        }
-        if (identity?.authenticated === true) {
-          // 重新登录成功后提示自动失效；不保留旧提示继续指向已恢复会话语义。
-          sessionEndedElsewhere.set(false);
-        }
-      }
-    },
-  );
-  const checkSession = (reason: SessionRefreshReason): void => {
-    if (sessionRefreshReasonInvalidates(reason)) {
-      // 未到期却失效的认证会话只可能来自服务端撤销：满额登录腾出的名额、换钥或管理员撤销。
-      if (sessionRefreshReasonShowsEndedElsewhere(reason)) {
-        const snapshot = session();
-        if (
-          snapshot?.ok === true &&
-          snapshot.value !== null &&
-          sessionEndedByRevocation(snapshot.value)
-        ) {
-          sessionEndedElsewhere.set(true);
-        }
-      }
-      // 已知认证变化先卸载旧用户命令；普通 focus 重读保留原快照，避免打断同身份提交。
-      commandOwner.set(null);
-      session.set(undefined);
-    }
-    session.restart();
-  };
-  const unregisterSessionCheck = registerPublicSessionCheckTrigger(checkSession);
-  onCleanup(unregisterSessionCheck);
-  usePublicSessionSync(checkSession);
-  usePublicSessionExpiry(session, checkSession);
+  const { session, sessionEndedElsewhere, commandOwner, checkSession } =
+    createPublicShellSession(refreshGeneration);
   const currentAuction = createTaskResource(
     () => [refreshGeneration(), selectedWorld()] as const,
     async ([, world], context) => {
@@ -217,7 +162,6 @@ function PublicShellContent(props: { readonly locationGeneration: Cell<number> }
   );
   // 页面可见性在轮询与实时重连退避之间共享；隐藏时全部挂起（不重置周期），
   // 恢复可见时立即补偿一次刷新并恢复各自节奏。
-  const pageVisibility = createPageVisibility();
   tasks.spawn(async (context) => {
     let skippedWhileLive = 0;
     while (context.alive()) {
@@ -239,6 +183,7 @@ function PublicShellContent(props: { readonly locationGeneration: Cell<number> }
     // 恢复可见时立即补偿一次 readiness 与权威 current 重读，快速回到同步。隐藏期间读到
     // 的条目可能仍在 TTL 内：补读与轮询一样先失效公开读缓存，否则只会原样返回旧快照。
     pageVisibility.install(() => {
+      worldSwitch.revalidateIfNeeded();
       readinessGeneration.update((value) => Math.min(value + 1, Number.MAX_SAFE_INTEGER));
       refreshPublicReads(refreshGeneration);
       checkSession("refresh");

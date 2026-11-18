@@ -436,8 +436,8 @@ session-menu-label = 계정 세션
 session-login = 로그인
 logout = 로그아웃
 logout-error = 로그아웃을 확인하지 못했어요. 현재 로그인 상태를 확인한 뒤 다시 시도해 주세요.
-session-ended-elsewhere = 이 계정이 다른 기기에서 로그인되어 현재 세션이 종료되었습니다.
-session-ended-relogin = 원래 로그인 키로 다시 로그인
+session-ended-elsewhere = 현재 로그인 세션이 다른 곳에서 종료되었습니다. 다시 로그인해 주세요. 로그인 기기 수가 한도에 도달해 가장 오래 활동이 없었던 세션이 종료되었거나, 로그인 키가 변경되었거나, 관리자가 세션을 취소했을 수 있습니다.
+session-ended-relogin = 다시 로그인
 
 session-duration-title = 로그인 유지 기간
 session-duration-permanent = 무기한(기본값)

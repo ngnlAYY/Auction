@@ -141,33 +141,21 @@ export function worldSwitchCurrent(input: WorldSwitchInput): string {
   return worldScopeFromQuery("single", input.world);
 }
 
-/**
- * 导航实际继承的世界。历史成交价页的世界只是该页自己的筛选条件，不属于全站导航范围；
- * 离开该页时不能把已应用的条件带给其他页面，因此当前路由是 History 时一律返回 null。
- * 其余路由在当前地址没有 world 参数、或目录已加载但没有第二个可选世界时不传播世界，
- * 避免把隐式缺省或自动回退变成显式选择。
- */
+/** 历史成交价的显式世界属于本页筛选；其他路由只从地址取显式世界。 */
 export function worldScopeNavigationWorld(
+  query: { readonly world: string | null },
   routeName: string | null,
-  currentWorld: NormalizedWorldQuery,
-  selectable: boolean,
 ): NormalizedWorldQuery {
-  if (routeName === "History") {
-    return null;
-  }
-  return selectable ? currentWorld : null;
+  return routeName === "History" ? null : normalizedWorldQuery(query.world);
 }
 
-/**
- * 导航链接只携带导航实际继承的显式世界。历史成交价页的世界是页面自己的搜索条件，
- * 进入该页时带 world 会被当成已应用条件并自动搜索；因此指向 /history 的链接
- * 无论当前导航范围如何都不追加 world。其他目标不受影响。
- */
+/** 历史成交价的导航入口省略世界，避免把导航范围当成已应用的搜索条件。 */
 export function worldScopeHref(path: string, world: NormalizedWorldQuery): string {
   if (world === null || path === "/history") {
     return path;
   }
-  return `${path}?world=${world}`;
+  const separator = path.endsWith("?") ? "" : "?";
+  return `${path}${separator}world=${world}`;
 }
 
 /**
@@ -201,24 +189,21 @@ export function worldScopeSwitchQuery(
       page: 1,
     };
   }
-  return worldSwitchQuery(scopedWorld(scope), historicalBoard);
+  // 主动选择要保留显式世界，使后续跨世界页能区分主世界和缺省范围。
+  return worldSwitchQuery(scope === "all" ? null : scope, historicalBoard);
 }
 
 /** 单世界页面切换世界后的查询。看板正在展示往期场次时回到目标世界的首页（清除场次、筛选与页码，
  * 每页条数取本地偏好），与首页入口一致，避免所选世界与正文场次不一致；
  * 其余情况只改世界。 */
 export function worldSwitchQuery(
-  world: string,
+  world: NormalizedWorldQuery,
   historicalBoard: boolean,
 ): Partial<PublicQueryWrite> {
   if (historicalBoard) {
-    // 单世界页的主世界沿用无参数缺省；只有导航显式继承时才写 `world=main`。
-    return publicAuctionHomeQuery(world === "main" ? null : world);
+    return publicAuctionHomeQuery(world);
   }
-  return {
-    // 主世界沿用旧版无参数 URL。
-    world: world !== "main" ? world : null,
-  };
+  return { world };
 }
 
 function effectiveEnabledWorlds(input: WorldSwitchInput): readonly string[] {

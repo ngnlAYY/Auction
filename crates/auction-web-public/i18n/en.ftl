@@ -437,8 +437,8 @@ session-menu-label = Account session
 session-login = Log in
 logout = Log out
 logout-error = Sign-out could not be confirmed. Check your current session and try again.
-session-ended-elsewhere = This account was signed in on another device, so this session ended.
-session-ended-relogin = Sign in again with your original login key
+session-ended-elsewhere = Your session ended elsewhere. Sign in again. The device limit may have been reached and the least recently active session signed out, your login key may have changed, or an administrator may have revoked the session.
+session-ended-relogin = Sign in again
 
 session-duration-title = Login duration
 session-duration-permanent = Permanent (default)
