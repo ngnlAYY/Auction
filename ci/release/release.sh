@@ -10,10 +10,100 @@ cd "$repository_root"
 # 工具选择与身份共用同一入口；任一发布工具缺失时不进入任何发布操作。
 source ci/release/build-identity.sh
 command_name=${1:-}
-# Solid 版尚未接入发布制品；只读的体积检查是唯一允许选择 Solid 的入口。
-if [[ "$command_name" != verify-web-size ]] && web_stack_uses_solid; then
-	printf 'Solid 版页面尚未接入发布构建：%s\n' "$command_name" >&2
-	exit 1
+# 正式发行只由发布 tag 触发的 CI 运行代表；本地命令与 workflow_dispatch 都是候选构建。
+# 判定只读触发上下文，必须在任何工具、临时目录或制品目录操作之前完成。
+is_formal_release() {
+	[[ ${GITHUB_ACTIONS-} == true && ${GITHUB_REF_TYPE-} == tag ]]
+}
+
+reject_solid_formal_release() {
+	if ! is_formal_release || ! web_stack_uses_solid; then
+		return 0
+	fi
+	printf '正式发行只产出 Rust 版页面；Solid 版页面只允许本地构建与手动候选构建。\n' >&2
+	return 1
+}
+
+# 只打印信息的入口不参与正式发行构建判定；运行任务仍受守卫约束。
+case "$command_name" in
+web-feature | web-build-id | verify-web-size | source-fingerprint) ;;
+*) reject_solid_formal_release || exit 1 ;;
+esac
+# 本地运行任务按实际技术栈取当前包的 feature 名；这里不解析发布工具，也不产生任何制品。
+if [[ "$command_name" == web-feature ]]; then
+	case "${2:-}" in
+	public | admin) ;;
+	*)
+		printf '用法：ci/release/release.sh web-feature public|admin\n' >&2
+		exit 2
+		;;
+	esac
+	if [[ $# -ne 2 ]]; then
+		printf '用法：ci/release/release.sh web-feature public|admin\n' >&2
+		exit 2
+	fi
+	feature=$(web_cargo_features "$2-api") || exit 2
+	printf '%s\n' "${feature#auction-"$2"-api/}"
+	exit 0
+fi
+# 本地运行任务从稳定页面回执取构建号，避免 Solid 页面与服务端编译时的构建号不一致。
+if [[ "$command_name" == web-build-id ]]; then
+	case "${2:-}" in
+	public | admin) ;;
+	*)
+		printf '用法：ci/release/release.sh web-build-id public|admin\n' >&2
+		exit 2
+		;;
+	esac
+	if [[ $# -ne 2 ]]; then
+		printf '用法：ci/release/release.sh web-build-id public|admin\n' >&2
+		exit 2
+	fi
+	surface=$2
+	stack=$(web_surface_stack "$surface") || exit 2
+	if [[ "$stack" == dioxus ]]; then
+		exit 0
+	fi
+	stable_root=$(web_surface_root "$surface" "$repository_root") || exit 2
+	web_build_info="$stable_root/WEB-BUILD-INFO"
+	if [[ ! -f "$web_build_info" || -L "$web_build_info" ]]; then
+		printf '%s 页面缺少 WEB-BUILD-INFO：请先运行 AUCTION_WEB_STACK=solid mise run web-build\n' \
+			"$surface" >&2
+		exit 1
+	fi
+	build_id=$(read_build_info "$web_build_info" build_id) || {
+		printf '%s 页面构建号无法读取：%s\n' "$surface" "$web_build_info" >&2
+		exit 1
+	}
+	if [[ ! "$build_id" =~ ^[0-9a-f]{32}$ ]]; then
+		printf '%s 页面构建号无效：%s\n' "$surface" "$web_build_info" >&2
+		exit 1
+	fi
+	printf '%s\n' "$build_id"
+	exit 0
+fi
+# 本地运行：先取 feature，失败时不把缺值传给 cargo；Solid 还要注入页面构建号。
+if [[ "$command_name" == run-web ]]; then
+	case "${2:-}" in
+	public | admin) ;;
+	*)
+		printf '用法：ci/release/release.sh run-web public|admin\n' >&2
+		exit 2
+		;;
+	esac
+	if [[ $# -ne 2 ]]; then
+		printf '用法：ci/release/release.sh run-web public|admin\n' >&2
+		exit 2
+	fi
+	surface=$2
+	feature=$(web_cargo_features "$surface-api") || exit 2
+	feature=${feature#auction-"$surface"-api/}
+	stack=$(web_surface_stack "$surface") || exit 2
+	if [[ "$stack" == solid ]]; then
+		build_id=$(bash ci/release/release.sh web-build-id "$surface") || exit 1
+		export AUCTION_BUILD_ID=$build_id
+	fi
+	exec cargo run --locked -p "auction-$surface-api" --features "$feature"
 fi
 # 只读的 payload 体积检查不需要 dx/rustc，也不解析发布工具；其余入口仍先确认工具齐全。
 if [[ "$command_name" != verify-web-size ]]; then
@@ -34,10 +124,11 @@ api_only_admin_root="$repository_root/target/dist/api-only-assets/admin"
 # 体积预算的基线是刻意维护的数据文件；发布门禁只读取，不写回。
 web_size_budget_file="$repository_root/ci/release/web-size-budget.v1"
 assets_missing_message="web assets are not included in this binary; run \`mise run build-release\`"
-# 发布 feature 的唯一来源：PostgreSQL 无条件编译，变体之间只差是否内嵌页面。
+# 发布 feature 的唯一来源：PostgreSQL 无条件编译，变体之间只差是否内嵌页面；
+# 内嵌 feature 由两端实际技术栈得出，缺省组合与原有常量逐字符相同。
 api_only_features=''
-embedded_features='auction-public-api/web-embed,auction-admin-api/web-embed'
-single_features='auction-server/web-embed'
+embedded_features="$(web_cargo_features public-api),$(web_cargo_features admin-api)"
+single_features=$(web_cargo_features server)
 
 binaries=(
 	auction-public-api
@@ -64,9 +155,13 @@ require_command() {
 if [[ "$command_name" == verify-web-size ]]; then
 	for required in find git sha256sum; do require_command "$required"; done
 else
-	for required in cargo date diff dx find git gzip install sha256sum sort stat tar; do
+	for required in cargo date diff find git gzip install sha256sum sort stat tar; do
 		require_command "$required"
 	done
+	# dx 只在仍有 Dioxus surface 时需要；纯 Solid 组合由 bun 承担页面构建。
+	if web_stack_uses_dioxus; then
+		require_command dx
+	fi
 fi
 
 worktree_state() {
@@ -82,6 +177,7 @@ worktree_state() {
 write_build_info() {
 	local destination=$1 variant=$2 features=$3
 	local commit state fingerprint lock_sha inputs_sha environment_sha
+	local -a stack_fields=()
 	commit=$(git rev-parse --verify 'HEAD^{commit}') || return 1
 	state=$(worktree_state) || return 1
 	fingerprint=$(source_fingerprint) || return 1
@@ -89,6 +185,13 @@ write_build_info() {
 	# printf 的成功不能覆盖命令替换的失败；所有身份读取成功后才写入回执。
 	inputs_sha=$(build_inputs_fingerprint) || return 1
 	environment_sha=$(build_env_fingerprint) || return 1
+	# 两端的实际技术栈是复用身份的一部分；缺省全 Dioxus 时不写字段，保持既有回执形状。
+	if web_stack_uses_solid; then
+		stack_fields=(
+			"web_stack_public=$(web_surface_stack public)"
+			"web_stack_admin=$(web_surface_stack admin)"
+		)
+	fi
 	printf '%s\n' \
 		'schema=auction-release-build/1' \
 		"variant=$variant" \
@@ -97,6 +200,7 @@ write_build_info() {
 		"source_fingerprint=$fingerprint" \
 		"cargo_lock_sha256=$lock_sha" \
 		"features=$features" \
+		"${stack_fields[@]}" \
 		"build_inputs_sha256=$inputs_sha" \
 		"build_env_sha256=$environment_sha" \
 		>"$destination"
@@ -178,7 +282,7 @@ artifacts_reusable() {
 	done
 
 	# 内嵌或合并变体另需可解析的 payload 标记，避免把删过资源的目录当作可复用制品。
-	local marker payload_sha
+	local marker payload_sha current_public_sha current_admin_sha
 	if [[ "$variant" == embedded || "$variant" == single ]]; then
 		for marker in "$artifact_directory/WEB-PUBLIC-MANIFEST.v1" "$artifact_directory/WEB-ADMIN-MANIFEST.v1"; do
 			payload_sha=$(read_build_info "$marker" payload_sha256)
@@ -187,6 +291,21 @@ artifacts_reusable() {
 				return 1
 			fi
 		done
+		# 稳定页面目录可能被独立的 web-build 以另一套构建号重写；只比较原生回执会把
+		# 与当前页面不一致的旧二进制当作可复用制品。payload 摘要缺失或不一致都必须重建。
+		current_public_sha=$(web_payload_sha public 2>/dev/null) || {
+			printf '%s 当前 Public 页面 payload 缺失或无效，重新构建：%s\n' "$variant" "$artifact_directory" >&2
+			return 1
+		}
+		current_admin_sha=$(web_payload_sha admin 2>/dev/null) || {
+			printf '%s 当前 Admin 页面 payload 缺失或无效，重新构建：%s\n' "$variant" "$artifact_directory" >&2
+			return 1
+		}
+		if [[ "$current_public_sha" != "$(read_build_info "$artifact_directory/WEB-PUBLIC-MANIFEST.v1" payload_sha256)" ||
+			"$current_admin_sha" != "$(read_build_info "$artifact_directory/WEB-ADMIN-MANIFEST.v1" payload_sha256)" ]]; then
+			printf '%s 当前页面 payload 与制品不一致，重新构建：%s\n' "$variant" "$artifact_directory" >&2
+			return 1
+		fi
 	fi
 	return 0
 }
@@ -252,17 +371,20 @@ build_variant() (
 		install -m 0755 "$build_root/release/$binary" "$next/bin/$binary"
 	done
 	if [[ "$variant" == embedded || "$variant" == single ]]; then
+		local public_root admin_root
+		public_root=$(web_surface_root public "$repository_root") || return 1
+		admin_root=$(web_surface_root admin "$repository_root") || return 1
 		install -m 0644 \
-			target/dx/build/auction-web-public/web/PAYLOAD-SHA256 \
+			"$public_root/PAYLOAD-SHA256" \
 			"$next/WEB-PUBLIC-SHA256"
 		install -m 0644 \
-			target/dx/build/auction-web-admin/web/PAYLOAD-SHA256 \
+			"$admin_root/PAYLOAD-SHA256" \
 			"$next/WEB-ADMIN-SHA256"
 		install -m 0644 \
-			target/dx/build/auction-web-public/web/public/auction-web-manifest.v1 \
+			"$public_root/public/auction-web-manifest.v1" \
 			"$next/WEB-PUBLIC-MANIFEST.v1"
 		install -m 0644 \
-			target/dx/build/auction-web-admin/web/public/auction-web-manifest.v1 \
+			"$admin_root/public/auction-web-manifest.v1" \
 			"$next/WEB-ADMIN-MANIFEST.v1"
 	fi
 
@@ -275,9 +397,9 @@ build_variant() (
 
 # 已构建的稳定 Web payload 通过完整门禁后输出其哈希。
 web_payload_sha() {
-	local package
-	package=$(web_surface_package "$1") || return 2
-	verify_web_payload "$1" "$repository_root/target/dx/build/$package/web"
+	local stable_root
+	stable_root=$(web_surface_root "$1" "$repository_root") || return 2
+	verify_web_payload "$1" "$stable_root"
 }
 
 # 发布与独立检查共用的体积预算入口：先按稳定目录解析 surface，再读取统一的预算文件。
@@ -336,7 +458,11 @@ verify_build_info() {
 		printf '缺少发布构建信息：%s\n' "$info" >&2
 		return 1
 	fi
-	local current_lock current_inputs current_environment
+	local current_lock current_inputs current_environment current_public_stack='' current_admin_stack=''
+	if web_stack_uses_solid; then
+		current_public_stack=$(web_surface_stack public) || return 1
+		current_admin_stack=$(web_surface_stack admin) || return 1
+	fi
 	current_lock=$(sha256_file Cargo.lock) || return 1
 	current_inputs=$(build_inputs_fingerprint) || return 1
 	current_environment=$(build_env_fingerprint) || return 1
@@ -346,18 +472,22 @@ verify_build_info() {
 	$(read_build_info "$info" variant) != "$expected_variant" ||
 	$(read_build_info "$info" build_inputs_sha256) != "$current_inputs" ||
 	$(read_build_info "$info" cargo_lock_sha256) != "$current_lock" ||
-	$(read_build_info "$info" build_env_sha256) != "$current_environment" ]]; then
+	$(read_build_info "$info" build_env_sha256) != "$current_environment" ||
+	$(read_build_info "$info" web_stack_public) != "$current_public_stack" ||
+	$(read_build_info "$info" web_stack_admin) != "$current_admin_stack" ]]; then
 		printf '发布构建信息与当前构建输入不一致，请重新构建：%s\n' "$root" >&2
 		return 1
 	fi
 }
 
 verify_dependency_boundaries() {
-	local worker_tree public_tree admin_tree
+	local worker_tree public_tree admin_tree public_features admin_features
+	public_features=$(web_cargo_features public-api) || return 1
+	admin_features=$(web_cargo_features admin-api) || return 1
 	# 依赖边界必须覆盖实际发布 feature，未内嵌页面的图会漏查条件依赖。
 	worker_tree=$(cargo tree --locked -e normal,build -p auction-worker --no-default-features)
-	public_tree=$(cargo tree --locked -e normal,build -p auction-public-api --no-default-features --features web-embed)
-	admin_tree=$(cargo tree --locked -e normal,build -p auction-admin-api --no-default-features --features web-embed)
+	public_tree=$(cargo tree --locked -e normal,build -p auction-public-api --no-default-features --features "$public_features")
+	admin_tree=$(cargo tree --locked -e normal,build -p auction-admin-api --no-default-features --features "$admin_features")
 	if grep -Eq 'auction-web-(public|admin|shared)' <<<"$worker_tree"; then
 		printf 'Worker 依赖图不得包含浏览器 crate\n' >&2
 		return 1
@@ -492,9 +622,18 @@ first_version_line() {
 
 write_dependencies() {
 	local destination=$1 commit=$2 epoch=$3 state=$4 fingerprint=$5 version=$6
-	local public_web_sha admin_web_sha dependency_list
+	local public_web_sha admin_web_sha dependency_list bun_lock_sha bun_version
 	public_web_sha=$(read_build_info "$embedded_artifact_root/WEB-PUBLIC-MANIFEST.v1" payload_sha256)
 	admin_web_sha=$(read_build_info "$embedded_artifact_root/WEB-ADMIN-MANIFEST.v1" payload_sha256)
+	if web_stack_uses_solid; then
+		# printf 的成功不能覆盖命令替换的失败；摘要和版本都先取到再写入依赖清单。
+		bun_lock_sha=$(sha256_file web/bun.lock) || return 1
+		bun_version=$(first_version_line bun --version) || return 1
+		if [[ -z "$bun_lock_sha" || -z "$bun_version" ]]; then
+			printf '无法读取 web/bun.lock 摘要或 bun 版本；请先运行 mise install\n' >&2
+			return 1
+		fi
+	fi
 	dependency_list=$(mktemp)
 	cargo tree --locked --workspace --all-features --prefix none --format '{p}' |
 		sed "s# (${repository_root}[^)]*)# (workspace)#" |
@@ -512,15 +651,28 @@ write_dependencies() {
 		printf -- "- Source fingerprint：\`%s\`\n" "$fingerprint"
 		printf -- "- SOURCE_DATE_EPOCH：\`%s\`\n" "$epoch"
 		printf -- "- Cargo.lock SHA-256：\`%s\`\n" "$(sha256_file Cargo.lock)"
+		if web_stack_uses_solid; then
+			printf -- "- web/bun.lock SHA-256：\`%s\`\n" "$bun_lock_sha"
+		fi
 		printf -- "- Public Web payload SHA-256：\`%s\`\n" "$public_web_sha"
 		printf -- "- Admin Web payload SHA-256：\`%s\`\n" "$admin_web_sha"
 		printf -- "- 数据库发布档位：\`PostgreSQL full\`\n"
-		printf -- "- 浏览器交付：\`Public/Admin 独立 RustEmbed\`\n\n"
+		printf -- "- 浏览器交付：\`Public/Admin 独立 RustEmbed\`\n"
+		if web_stack_uses_solid; then
+			printf -- "- Web 技术栈：\`public=%s, admin=%s\`\n" \
+				"$(web_surface_stack public)" "$(web_surface_stack admin)"
+		fi
+		printf '\n'
 		printf '## 工具链\n\n'
 		printf -- "- \`%s\`\n" "$(first_version_line git --version)"
 		printf -- "- \`%s\`\n" "$(first_version_line rustc --version --verbose)"
 		printf -- "- \`%s\`\n" "$(first_version_line cargo --version --verbose)"
-		printf -- "- \`%s\`\n" "$(first_version_line dx --version)"
+		if web_stack_uses_dioxus; then
+			printf -- "- \`%s\`\n" "$(first_version_line dx --version)"
+		fi
+		if web_stack_uses_solid; then
+			printf -- "- \`%s\`\n" "$bun_version"
+		fi
 		printf -- "- \`%s\`\n" "$(first_version_line tar --version)"
 		printf -- "- \`%s\`\n\n" "$(first_version_line gzip --version)"
 		printf '## Cargo 解析依赖\n\n'
@@ -959,7 +1111,10 @@ usage() {
 		'      ci/release/release.sh package [--single-binary] [--allow-dirty]' \
 		'      ci/release/release.sh build-api | build-embedded | verify-artifacts' \
 		'      ci/release/release.sh build-single | verify-single' \
-		'      ci/release/release.sh verify-web-size | source-fingerprint' >&2
+		'      ci/release/release.sh verify-web-size | source-fingerprint' \
+		'      ci/release/release.sh web-feature public|admin' \
+		'      ci/release/release.sh web-build-id public|admin' \
+		'      ci/release/release.sh run-web public|admin' >&2
 }
 
 case "$command_name" in

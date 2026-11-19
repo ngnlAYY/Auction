@@ -795,6 +795,35 @@ web_surface_root() {
 	fi
 }
 
+# 发布构建使用的 cargo feature：分体 API 直接选择自己的内嵌实现；合并服务先内嵌，
+# 再按两端各自的实际技术栈追加 selector。缺省组合与改动前的常量逐字符相同。
+web_cargo_features() {
+	local target=$1 surface stack features
+	case "$target" in
+	public-api) surface='public' ;;
+	admin-api) surface='admin' ;;
+	server) ;;
+	*) return 2 ;;
+	esac
+	if [[ "$target" == server ]]; then
+		features=auction-server/web-embed
+		for surface in public admin; do
+			stack=$(web_surface_stack "$surface") || return 2
+			if [[ "$stack" == solid ]]; then
+				features+=",auction-server/web-solid-$surface"
+			fi
+		done
+		printf '%s\n' "$features"
+		return 0
+	fi
+	stack=$(web_surface_stack "$surface") || return 2
+	if [[ "$stack" == solid ]]; then
+		printf 'auction-%s-api/web-solid\n' "$surface"
+	else
+		printf 'auction-%s-api/web-embed\n' "$surface"
+	fi
+}
+
 # Solid 首屏 JS：唯一入口模块脚本与入口文档声明的 modulepreload JS 原始字节合计，重复路径只算一次。
 web_payload_initial_js_bytes() (
 	local stable_root=$1

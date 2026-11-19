@@ -23,6 +23,8 @@
 
 首次设置需要 `web-embed` 构建，流程见[crates/auction-setup/README.md](../../crates/auction-setup/README.md)；其他参数一律拒绝。`ops/config/admin.toml` 与 `auction-config/admin.toml` 是相对工作目录的运行配置位置，仓库模板位于 [ops/config/examples](../../ops/config/examples)。
 
+本地运行可用 `mise run run-admin`：缺省使用 `web-embed`（Dioxus），过渡期 `AUCTION_WEB_STACK=solid` 也仍为 Admin 选择 Dioxus；任务按实际技术栈选择 feature，Solid surface 会注入页面构建号。
+
 ## 正常启动
 
 1. 加载 Admin 配置；角色文件还通过 `worker_config_file` 读取 Worker 配置（control 客户端与仪表盘的世界/邮箱投影）。

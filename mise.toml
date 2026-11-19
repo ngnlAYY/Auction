@@ -132,11 +132,11 @@ description = "不包含浏览器资源的 API-only 对照制品"
 run = "bash ci/release/release.sh build-api"
 
 [tasks.build-release]
-description = "双端 web-embed 完整制品；源码身份未变时复用已有制品"
+description = "按实际技术栈构建双端页面与完整制品；源码身份未变时复用已有制品"
 run = "bash ci/release/release.sh build-embedded"
 
 [tasks.build-single]
-description = "可选合并服务；先保留分体制品与资源隔离证明，再构建并核对 auction-server 与独立 auction-cli"
+description = "可选合并服务；按两端实际技术栈先保留分体制品与资源隔离证明，再构建并核对 auction-server 与独立 auction-cli"
 # 两项前置构建共用 target，必须依次执行；depends 会并行启动它们。
 run = [
   { task = "build-api" },
@@ -146,19 +146,23 @@ run = [
 ]
 
 [tasks.verify-artifacts]
-description = "核对 API-only/嵌入式制品、依赖边界与资源隔离"
+description = "核对 API-only/嵌入式制品、依赖边界与资源隔离；按两端实际技术栈"
 run = "bash ci/release/release.sh verify-artifacts"
+
+[tasks.verify-single]
+description = "核对已构建的合并制品、双 surface 标记与依赖边界；按两端实际技术栈"
+run = "bash ci/release/release.sh verify-single"
 
 [tasks.web-size]
 description = "按实际技术栈只核对两端 Web payload 体积预算，不构建、不读取原生制品"
 run = "bash ci/release/release.sh verify-web-size"
 
 [tasks.release-check]
-description = "完整构建、制品门禁与发布装配；不加参数不运行测试。额外参数原样转发"
+description = "完整构建、制品门禁与候选装配；正式发行（发布 tag）只产出 Rust 版页面。额外参数原样转发"
 run = "bash ci/release/release.sh release-check"
 
 [tasks.package]
-description = "只装配已构建制品；正式发布要求干净工作树。额外参数原样转发"
+description = "只装配已构建制品；正式发行要求 Rust 版页面与干净工作树。额外参数原样转发"
 run = "bash ci/release/release.sh package"
 
 [tasks.verify-package]
@@ -168,12 +172,12 @@ run = "bash ci/release/verify-deployment-package.sh"
 # ---- 本地运行 ----
 
 [tasks.run-public]
-description = "本地启动 Public，内嵌页面走 PostgreSQL"
-run = "cargo run --locked -p auction-public-api --features web-embed"
+description = "本地启动 Public，内嵌页面走 PostgreSQL；页面按 AUCTION_WEB_STACK 选择 Dioxus 或 Solid，Solid 使用当前页面构建号"
+run = "bash ci/release/release.sh run-web public"
 
 [tasks.run-admin]
-description = "本地启动 Admin，内嵌页面走 PostgreSQL"
-run = "cargo run --locked -p auction-admin-api --features web-embed"
+description = "本地启动 Admin，内嵌页面走 PostgreSQL；过渡期 Admin 仍为 Dioxus，按实际技术栈选择 feature 与构建号"
+run = "bash ci/release/release.sh run-web admin"
 
 [tasks.run-worker]
 description = "本地启动 Worker，不内嵌页面"

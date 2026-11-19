@@ -4,7 +4,7 @@
 
 单文件合并部署：一个可执行文件、一个 systemd unit，在本机以子进程监管 Worker、Admin、Public 三个角色。适合单主机、小规模部署；分体部署（三个 unit + `auction-cli service` 编排）见[ops/README.md](../../ops/README.md)。两种方式不能同时用于同一套配置。
 
-发布构建需要内嵌 feature（发布脚本的 single 变体：`mise run build-single`）。
+发布构建需要内嵌 feature（发布脚本的 single 变体：`mise run build-single`）。`AUCTION_WEB_STACK=solid` 时 Public 用 Solid、Admin 仍用 Dioxus，合并服务按 `web-embed,web-solid-public` 构建；正式发行仍只产出 Rust 版页面。
 
 ## feature
 

@@ -95,26 +95,31 @@ bash ci/release/release.sh package [--single-binary] [--allow-dirty]         # �
 bash ci/release/release.sh build-api | build-embedded | verify-artifacts
 bash ci/release/release.sh build-single | verify-single
 bash ci/release/release.sh verify-web-size | source-fingerprint
+bash ci/release/release.sh web-feature | web-build-id | run-web public|admin
 bash ci/release/verify-deployment-package.sh <*.tar.gz> --tag <v版本>        # 部署前来源校验
 ```
 
-对应的 mise 任务：`mise run build-api`、`mise run build-release`、`mise run build-single`、`mise run verify-artifacts`、`mise run web-size`、`mise run release-check`、`mise run package`、`mise run verify-package`。
+对应的 mise 任务：`mise run build-api`、`mise run build-release`、`mise run build-single`、`mise run verify-artifacts`、`mise run verify-single`、`mise run web-size`、`mise run release-check`、`mise run package`、`mise run verify-package`。
 
 ### 制品变体
 
 | 变体 | feature | 程序 | 用途 |
 | --- | --- | --- | --- |
 | API-only | （无） | Public、Admin | 不发布；证明未启用 `web-embed` 时二进制不含任何页面（资源目录固定为空，页面路由 503） |
-| embedded | 两端 `web-embed` | Public、Admin、Worker、auction-cli | 分体部署发布包 |
-| single | `auction-server/web-embed` | auction-server、auction-cli | 合并部署发布包（`-single` 后缀） |
+| embedded | 两端按实际技术栈取 `web-embed` 或 `web-solid` | Public、Admin、Worker、auction-cli | 分体部署发布包 |
+| single | `auction-server/web-embed`，再按两端实际技术栈追加 `web-solid-public`/`web-solid-admin` | auction-server、auction-cli | 合并部署发布包（`-single` 后缀） |
+
+feature、产物目录、工具、体积预算、构建回执与复用身份全部由 `ci/release/build-identity.sh` 的逐 surface 技术栈选择得出，cargo feature 由其中的 `web_cargo_features` 汇总。缺省与显式 `AUCTION_WEB_STACK=dioxus` 得到原来的 `auction-public-api/web-embed,auction-admin-api/web-embed` 与 `auction-server/web-embed`；过渡期 `solid` 表示 Public 用 Solid、Admin 仍用 Dioxus，因此 embedded 为 `auction-public-api/web-solid,auction-admin-api/web-embed`，single 为 `auction-server/web-embed,auction-server/web-solid-public`。三种合法组合（API-only、Dioxus、Solid Public + Dioxus Admin）都可用于本地构建与手动候选构建。
+
+**正式发行（`v<版本>` tag 触发的 Release）仍然只产出 Rust 版页面。** 发布脚本以 CI 的显式触发上下文判定正式发行：`GITHUB_ACTIONS=true` 且 `GITHUB_REF_TYPE=tag`；此时任一端为 Solid 会在任何工具、临时目录、构建或装包步骤之前以“正式发行只产出 Rust 版页面”拒绝。本地构建与手动触发（`workflow_dispatch`，`GITHUB_REF_TYPE=branch`）的候选构建不受此限制；`--allow-dirty` 不会改变正式发行判定。`build-api`、`build-embedded`、`build-single`、`verify-artifacts`、`verify-single` 与候选性质的 `release-check`/`package` 在 Solid 下可用。候选包仍不可部署。
 
 ### 门禁
 
 - **页面 payload**：`ci/release/web-bundle.sh` 按 `AUCTION_WEB_STACK` 与每个 surface 的实际技术栈构建 Dioxus 或 Solid payload；默认与显式 `dioxus` 走原来的 `dx bundle` 路径。`verify_web_payload` 对 Dioxus 保持入口页标题（“Auction 公开站点” / “Auction 管理站点”）、跨端隔离、只含普通文件与唯一一组 JS/WASM、payload 清单与哈希的现有规则；Solid 分支要求 `profile=solid-release`，入口文档不得含注释、`template`/`base`/`iframe`/`object`/`embed`，且所有 `<script>`/`<link>` 必须整体匹配真实 Vite 产物固定的四种写法（属性顺序固定、大小写敏感、双引号、同行闭合），恰好一个模块入口、至多一个图标；引用资源必须存在于 payload，`assets/` 文件名带 Vite 风格的 8 位内容指纹，并沿用标题判定排除另一端入口。目录遍历或摘要生成失败即拒绝复用，不把失败留下的部分输出当作有效清单。
 - **体积预算**：两端 payload 的体积按 [ci/release/web-size-budget.v1](release/web-size-budget.v1) 的基线比较；Dioxus 统计 WASM 与总量，Solid 统计总量与入口首屏 JS；明显增长只告警，超过硬上限使发布失败。见 [Web payload 体积预算](#web-payload-体积预算)。
 - **二进制标记**：Public 只含 Public payload 的标记与哈希，Admin 只含 Admin 的，Worker 与 auction-cli 不含任何页面标记；API-only 二进制含“资源缺失”提示而不含 payload。
-- **依赖边界**（`cargo tree`）：Worker 不依赖任何前端 crate；Public 不依赖 Admin 前端；Admin 不依赖 Public 前端；`auction-server` 不依赖 `auction-cli`。
-- **BUILD-INFO 与校验和**：每个制品目录记录源码身份、构建输入与环境指纹、feature 和文件摘要；工具链经发布工具的字节身份绑定。复用判定比较这些指纹、锁文件、feature 和制品摘要；仅仓库提交或不在构建输入范围内的文档变化，不必重新编译。
+- **依赖边界**（`cargo tree`）：Worker 不依赖任何前端 crate；Public 不依赖 Admin 前端；Admin 不依赖 Public 前端；`auction-server` 不依赖 `auction-cli`。分体 API 的图按各自实际 feature 检查，合并服务按 `web_cargo_features server` 的结果检查。
+- **BUILD-INFO 与校验和**：每个制品目录记录源码身份、构建输入与环境指纹、feature 和文件摘要；工具链经发布工具的字节身份绑定。任一端为 Solid 时回执另记 `web_stack_public` / `web_stack_admin`，缺省全 Dioxus 的字段与顺序保持不变。复用判定比较这些指纹、锁文件、feature、两端技术栈和制品摘要；仅仓库提交或不在构建输入范围内的文档变化，不必重新编译。
 - **已发布迁移**：发布 tag 中存在的 `migrations/postgres/*.up.sql` 必须在当前工作树逐字节不变；修改、重命名或删除已发布文件使 `published-migrations` 与发布工作流失败，只允许追加新编号。
 - **装包**：文件白名单与权限固定（程序 755、文档 644、配置示例 640、敏感示例 600），禁止符号链接、日志与真实敏感文件名；归档确定性生成（固定排序、mtime、owner），解包复核后输出 `SHA256SUMS` 与 `DEPENDENCIES.md`。正式发布要求干净工作树（`--allow-dirty` 只用于本地证据，包名带 `-dirty`）。
 
@@ -174,7 +179,7 @@ Solid 路径不联网：`mise run web-prepare` 在 `bun install --frozen-lockfil
 
 `WEB-BUILD-INFO` 记录单端输入指纹、构建环境指纹、构建工具版本与实际编译进 payload 的构建号（`build_id`）；Dioxus 记录 dx/rustc/brotli，Solid 记录 bun/brotli 与 `stack=solid`。复用要求回执全部字段匹配，且现有 payload 再次通过完整门禁。任一端的变更使共享构建号变化时，两端都要重建。缺少该字段的旧回执同样触发重建。构建结束后重新计算单端输入指纹、环境指纹与共享构建号，全部与构建前匹配才原子发布回执。
 
-发布入口 `ci/release/release.sh` 除只读的 `verify-web-size` 外，只要任一端实际使用 Solid 就在任何有副作用的步骤之前失败，并提示“Solid 版页面尚未接入发布构建”；缺省 Dioxus 的行为不变。
+发布入口 `ci/release/release.sh` 的 `build-api`、`build-embedded`、`build-single`、`verify-artifacts`、`verify-single`、`verify-web-size` 与 `release-check`/`package` 都接受三种组合：API-only、缺省 Dioxus、过渡期 Solid（Public 用 Solid、Admin 仍用 Dioxus）。正式发行路径见[制品变体](#制品变体)：`GITHUB_ACTIONS=true` 且 `GITHUB_REF_TYPE=tag` 的 CI 运行中，任一端为 Solid 会在任何有副作用的步骤之前以“正式发行只产出 Rust 版页面”拒绝；本地与手动候选不受限制。复用原生制品前还会核对两端稳定页面目录的当前 payload 摘要，缺失或与制品回执不一致时先重建页面。`DEPENDENCIES.md` 任一端为 Solid 时附带 `web/bun.lock` 的 SHA-256 与两端技术栈，缺省输出不变。
 
 `verify_web_payload` 的 Solid 分支要求入口文档只允许带 `src` 的模块脚本恰好一个、入口引用的资源都存在于 payload、入口恰好有一个 `<link rel="icon" href="/favicon.ico">` 且 `assets/` 下恰好有一个 `favicon-*.svg`、`assets/` 下每个文件名都带 Vite 风格的内容指纹（`<name>-<8 位 base64url 字符>.<扩展名>`，压缩副本的 `.br` 不改变此判定），profile 固定为 `solid-release`。入口 HTML 不做通用解析：出现 HTML 注释起始符（`<!` 后接 `--`）直接失败；`template`、`base`、`iframe`、`object`、`embed` 出现即失败；每个 `<script>`/`<link>` 必须整体匹配 Vite 产物固定的四种写法（属性顺序固定、大小写敏感、双引号、同行闭合），入口、样式表、预加载和图标共用这一份引用清单。单引号、无引号、未知 link 类型或无法执行的枚举命令都会失败关闭。入口模块与 `modulepreload` 声明的 JS 计入首屏 JS。
 

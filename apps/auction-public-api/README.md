@@ -19,6 +19,7 @@
 ```bash
 AUCTION_CONFIG_FILE=/etc/auction/public.toml auction-public-api
 cargo run --locked -p auction-public-api --features web-embed   # 需先准备默认运行配置 ops/config/public.toml
+mise run run-public                                             # 等价的 mise 入口，按 AUCTION_WEB_STACK 选择 web-embed 或 web-solid；Solid 会注入页面构建号
 ```
 
 1. 按 `AUCTION_CONFIG_FILE` 或 `ops/config/public.toml` 加载并校验配置（见 [crates/auction-config/README.md](../../crates/auction-config/README.md)）；后者是相对工作目录的默认运行配置位置，仓库模板在 [ops/config/examples](../../ops/config/examples)，不会自动生成该文件。`auction-server` 以显式路径调用 `run_from_path`。
