@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use crate::errors::ApplicationError;
@@ -45,17 +46,32 @@ where
     }
 
     /// 严格校验候选文档；可读取部署配置，不写文件、命令账本或调用外部服务。
-    pub fn validate(
+    pub async fn validate(
         &self,
         document: AdminRuntimeDocument,
     ) -> Result<AdminRuntimeSnapshot, ApplicationError> {
-        document.validate().map_err(ApplicationError::from)?;
-        self.files.validate_candidate(&document, self.clock.now())?;
+        let guard = self.files.acquire_workflow_lock().await?;
+        let current = self.files.current_locked(&guard).await?;
+        current.validate().map_err(ApplicationError::from)?;
+        // 省略字段和 Worker 部署覆盖比较使用同一个锁内快照，避免并发请求混用文件版本。
+        let document = self.validate_candidate(&current, document, self.clock.now())?;
         Ok(AdminRuntimeSnapshot {
             fingerprint: document.fingerprint(),
             document,
             restart_required: false,
         })
+    }
+
+    fn validate_candidate(
+        &self,
+        current: &AdminRuntimeSnapshot,
+        document: AdminRuntimeDocument,
+        now: Timestamp,
+    ) -> Result<AdminRuntimeDocument, ApplicationError> {
+        let candidate = document.resolve_update(&current.document);
+        candidate.validate().map_err(ApplicationError::from)?;
+        self.files.validate_candidate_against(current, &candidate, now)?;
+        Ok(candidate)
     }
 
     /// 在 Admin surface 对外就绪前恢复尚未收口的 runtime 命令。
@@ -95,12 +111,10 @@ where
         // 它们。命令身份是原始请求的摘要，落成候选的指纹另算、另存为 new_fingerprint；补回后的
         // 候选不充当请求身份，否则同 ID 的省略请求会被已存候选补成显式请求而误判为重放。
         let request_hash = command.request_hash;
-        let candidate = command.document.resolve_update(&current.document);
-        candidate.validate().map_err(ApplicationError::from)?;
 
         let now = self.clock.now();
         // 写 durable intent 前按锁内回读的当前文件校验最终候选；已接受命令仍按账本重放。
-        self.files.validate_candidate(&candidate, now)?;
+        let candidate = self.validate_candidate(&current, command.document, now)?;
         let stored = self
             .commands
             .insert_pending(AdminRuntimeStoredCommand {
@@ -339,8 +353,8 @@ where
     fn validate(
         &self,
         document: AdminRuntimeDocument,
-    ) -> Result<AdminRuntimeSnapshot, ApplicationError> {
-        AdminRuntimeConfigService::validate(self, document)
+    ) -> ApplicationFuture<'_, AdminRuntimeSnapshot> {
+        Box::pin(async move { AdminRuntimeConfigService::validate(self, document).await })
     }
 
     fn update(
@@ -355,7 +369,9 @@ where
 mod tests {
     use std::sync::Arc;
     use std::sync::Mutex;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
+    use std::time::Duration;
 
     use auction_domain::CommandId;
     use auction_time::Timestamp;
@@ -366,8 +382,8 @@ mod tests {
     use crate::ports::admin::{
         ADMIN_RUNTIME_LEGACY_DIGEST_VERSION, AdminRuntimeAuditRecord, AdminRuntimeCommandState,
         AdminRuntimeCommandStore, AdminRuntimeConfigError, AdminRuntimeDocument,
-        AdminRuntimeFileStore, AdminRuntimeReplacement, AdminRuntimeSnapshot,
-        AdminRuntimeStoredCommand, AdminRuntimeUpdateCommand,
+        AdminRuntimeFileError, AdminRuntimeFileStore, AdminRuntimeReplacement,
+        AdminRuntimeSnapshot, AdminRuntimeStoredCommand, AdminRuntimeUpdateCommand,
     };
     use crate::ports::core::{ApplicationFuture, Clock, RequestHash};
 
@@ -383,6 +399,22 @@ mod tests {
     struct MemoryFiles {
         document: Mutex<AdminRuntimeDocument>,
         writes: AtomicUsize,
+        locked: Arc<AtomicBool>,
+        lock_acquisitions: AtomicUsize,
+        validation_pause: Mutex<Option<ValidationPause>>,
+    }
+
+    struct ValidationPause {
+        entered: SyncSender<String>,
+        resume: Receiver<()>,
+    }
+
+    struct MemoryWorkflowGuard(Arc<AtomicBool>);
+
+    impl Drop for MemoryWorkflowGuard {
+        fn drop(&mut self) {
+            self.0.store(false, Ordering::SeqCst);
+        }
     }
 
     impl MemoryFiles {
@@ -401,10 +433,18 @@ mod tests {
     }
 
     impl AdminRuntimeFileStore for MemoryFiles {
-        type WorkflowGuard = ();
+        type WorkflowGuard = MemoryWorkflowGuard;
 
-        fn acquire_workflow_lock(&self) -> ApplicationFuture<'_, ()> {
-            Box::pin(async { Ok(()) })
+        fn acquire_workflow_lock(&self) -> ApplicationFuture<'_, MemoryWorkflowGuard> {
+            Box::pin(async {
+                if self.locked.swap(true, Ordering::SeqCst) {
+                    return Err(
+                        AdminRuntimeFileError::Unavailable("workflow 已加锁".to_owned()).into()
+                    );
+                }
+                self.lock_acquisitions.fetch_add(1, Ordering::SeqCst);
+                Ok(MemoryWorkflowGuard(Arc::clone(&self.locked)))
+            })
         }
 
         fn validate_candidate(
@@ -415,20 +455,39 @@ mod tests {
             Ok(())
         }
 
+        fn validate_candidate_against(
+            &self,
+            current: &AdminRuntimeSnapshot,
+            _document: &AdminRuntimeDocument,
+            _now: Timestamp,
+        ) -> Result<(), ApplicationError> {
+            let pause = self.validation_pause.lock().unwrap().take();
+            if let Some(ValidationPause { entered, resume }) = pause {
+                entered.send(current.fingerprint.clone()).unwrap();
+                resume.recv_timeout(Duration::from_secs(10)).unwrap();
+            }
+            assert!(self.locked.load(Ordering::SeqCst));
+            assert_eq!(current.fingerprint, self.snapshot().fingerprint);
+            Ok(())
+        }
+
         fn current(&self) -> ApplicationFuture<'_, AdminRuntimeSnapshot> {
-            Box::pin(async { Ok(self.snapshot()) })
+            Box::pin(async {
+                let guard = self.acquire_workflow_lock().await?;
+                self.current_locked(&guard).await
+            })
         }
 
         fn current_locked<'a>(
             &'a self,
-            _guard: &'a (),
+            _guard: &'a MemoryWorkflowGuard,
         ) -> ApplicationFuture<'a, AdminRuntimeSnapshot> {
             Box::pin(async { Ok(self.snapshot()) })
         }
 
         fn replace_locked<'a>(
             &'a self,
-            _guard: &'a (),
+            _guard: &'a MemoryWorkflowGuard,
             expected_fingerprint: String,
             document: AdminRuntimeDocument,
         ) -> ApplicationFuture<'a, AdminRuntimeReplacement> {
@@ -623,8 +682,13 @@ mod tests {
     fn service(
         current: AdminRuntimeDocument,
     ) -> (MemoryService, Arc<MemoryFiles>, Arc<MemoryCommands>) {
-        let files =
-            Arc::new(MemoryFiles { document: Mutex::new(current), writes: AtomicUsize::new(0) });
+        let files = Arc::new(MemoryFiles {
+            document: Mutex::new(current),
+            writes: AtomicUsize::new(0),
+            locked: Arc::new(AtomicBool::new(false)),
+            lock_acquisitions: AtomicUsize::new(0),
+            validation_pause: Mutex::new(None),
+        });
         let commands = Arc::new(MemoryCommands::default());
         let clock = Timestamp::from_ymd_hms(2026, 11, 16, 0, 0, 0).expect("固定时刻");
         let service = AdminRuntimeConfigService::new(
@@ -650,6 +714,50 @@ mod tests {
                 std::task::Poll::Pending => std::hint::spin_loop(),
             }
         }
+    }
+
+    #[test]
+    fn preview_resolves_omitted_fields_from_the_current_file() {
+        let (service, files, _) = service(document_with_threshold(Some(86_400)));
+        let preview = block_on(service.validate(edited_request(None))).unwrap();
+        assert_eq!(threshold(&preview.document), Some(86_400));
+        assert_eq!(preview.fingerprint, preview.document.fingerprint());
+        assert_eq!(files.writes(), 0);
+    }
+
+    #[test]
+    fn preview_holds_one_snapshot_until_validation_finishes() {
+        let (service, files, commands) = service(document_with_threshold(Some(86_400)));
+        let original = files.snapshot().fingerprint;
+        let command_id = CommandId::from_uuid(Uuid::from_u128(1));
+        let save = || command(command_id, &original, edited_request(Some(3_600)));
+        let (entered, validating) = sync_channel(1);
+        let (resume, resumed) = sync_channel(1);
+        *files.validation_pause.lock().unwrap() =
+            Some(ValidationPause { entered, resume: resumed });
+
+        let (preview, competing_save, seen_fingerprint) = std::thread::scope(|scope| {
+            let preview = scope.spawn(|| block_on(service.validate(edited_request(None))));
+            let seen_fingerprint = validating.recv_timeout(Duration::from_secs(10)).unwrap();
+            let competing_save = block_on(service.update(save()));
+            resume.send(()).unwrap();
+            (preview.join().unwrap().unwrap(), competing_save, seen_fingerprint)
+        });
+        assert_eq!(seen_fingerprint, original);
+        assert_eq!(threshold(&preview.document), Some(86_400));
+        assert_eq!(files.lock_acquisitions.load(Ordering::SeqCst), 1);
+        assert!(matches!(
+            competing_save,
+            Err(ApplicationError::AdminRuntimeFile(AdminRuntimeFileError::Unavailable(_)))
+        ));
+        assert_eq!(files.writes(), 0);
+        assert!(block_on(commands.find(command_id)).unwrap().is_none());
+
+        let saved = block_on(service.update(save())).unwrap();
+        let next = block_on(service.validate(edited_request(None))).unwrap();
+        assert_eq!(threshold(&next.document), Some(3_600));
+        assert_eq!(next.fingerprint, saved.fingerprint);
+        assert_eq!(files.writes(), 1);
     }
 
     /// 升级前的页面不认识长期未领取阈值：它保存的旧形状文档省略该键，保存不失败，也不把文件里

@@ -9,6 +9,7 @@ use auction_time::Duration;
 use serde::{Deserialize, Serialize};
 
 use super::super::ConfigError;
+use crate::settings::MoogleMailWorkerConfig;
 
 /// 拍卖创建时冻结的非敏感策略配置。
 /// 该区块对应旧版共享配置中的 `auction.economics` 与 `auction.settlement`。所有字段都可
@@ -57,6 +58,31 @@ impl Default for AuctionScheduleConfig {
             worlds: vec!["main".to_owned(), "isekai".to_owned()],
             early_bird: AuctionEarlyBirdConfig::default(),
         }
+    }
+}
+
+impl AuctionScheduleConfig {
+    /// 使用合并后的邮箱配置，按排期顺序返回 Worker 可装配的世界；关闭排期时无需交集。
+    pub fn worker_worlds(
+        &self,
+        mail: &MoogleMailWorkerConfig,
+    ) -> Result<Option<Vec<String>>, ConfigError> {
+        if !self.enabled {
+            return Ok(None);
+        }
+        let mailboxes = mail.configured_mailboxes();
+        let worlds = self
+            .worlds
+            .iter()
+            .filter(|world| mailboxes.clone().any(|(configured, _)| configured == world.as_str()))
+            .cloned()
+            .collect::<Vec<_>>();
+        if worlds.is_empty() {
+            return Err(ConfigError::InvalidAuctionConfig(
+                "auction.schedule.worlds 与 runtime 启用世界没有交集",
+            ));
+        }
+        Ok(Some(worlds))
     }
 }
 

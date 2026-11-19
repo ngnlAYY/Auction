@@ -97,7 +97,12 @@ fn valid_data_key_material(value: &str) -> bool {
 pub(crate) fn validate_mooglemail_worker(
     config: &MoogleMailWorkerConfig,
 ) -> Result<(), ConfigError> {
-    validate_mooglemail_world(&config.world_id, &config.mailbox_key, &config.sender_allowlist)?;
+    validate_mooglemail_world(
+        &config.world_id,
+        &config.mailbox_key,
+        &config.sender_allowlist,
+        config.enabled,
+    )?;
     if !config.send_intervals.is_valid() {
         return Err(ConfigError::InvalidMoogleMailConfig(
             "send_intervals 各业务组必须位于 0 至 86400 秒",
@@ -171,11 +176,7 @@ pub(crate) fn validate_mooglemail_worker(
             "request_timeout_seconds 必须位于 1 至 300",
         ));
     }
-    let schedule = StandardCronSchedule::parse(&config.schedule).map_err(|_| {
-        ConfigError::InvalidMoogleMailConfig(
-            "schedule 必须是标准五字段 cron、受支持描述符或 @every duration",
-        )
-    })?;
+    let schedule = config.receive_schedule()?;
     if schedule.next_after(Timestamp::now()).is_none() {
         return Err(ConfigError::InvalidMoogleMailConfig("schedule 必须存在可计算的未来触发时刻"));
     }
@@ -261,7 +262,12 @@ pub(crate) fn validate_mooglemail_worker(
     let mut worlds = BTreeSet::new();
     worlds.insert(config.world_id.as_str());
     for world in &config.additional_worlds {
-        validate_mooglemail_world(&world.world_id, &world.mailbox_key, &world.sender_allowlist)?;
+        validate_mooglemail_world(
+            &world.world_id,
+            &world.mailbox_key,
+            &world.sender_allowlist,
+            config.enabled,
+        )?;
         if !worlds.insert(world.world_id.as_str()) {
             return Err(ConfigError::InvalidMoogleMailConfig(
                 "additional_worlds 不得重复配置同一 world_id",
@@ -347,6 +353,7 @@ pub(crate) fn validate_mooglemail_world(
     world_id: &str,
     mailbox_key: &str,
     sender_allowlist: &[String],
+    gateway_enabled: bool,
 ) -> Result<(), ConfigError> {
     if !valid_text(mailbox_key, 256) {
         return Err(ConfigError::InvalidMoogleMailConfig("mailbox_key 无效"));
@@ -357,16 +364,24 @@ pub(crate) fn validate_mooglemail_world(
     if sender_allowlist.len() > 1000 {
         return Err(ConfigError::InvalidMoogleMailConfig("sender_allowlist 最多 1000 项"));
     }
-    // 借用原文建索引，避免千项名单逐项扫描前缀；不归一化、重排或复制发件人。
-    let mut seen = HashSet::with_capacity(sender_allowlist.len());
-    for sender in sender_allowlist {
-        if !valid_text(sender, 128) || !seen.insert(sender.as_str()) {
-            return Err(ConfigError::InvalidMoogleMailConfig(
-                "sender_allowlist 含有重复或无效发件人",
-            ));
-        }
+    // 邮件关闭时沿用原文判重，避免未装配 gateway 的旧部署升级后无法启动。
+    let has_duplicates = if gateway_enabled {
+        sender_allowlist_has_case_duplicates(sender_allowlist)
+    } else {
+        let mut seen = HashSet::with_capacity(sender_allowlist.len());
+        sender_allowlist.iter().any(|sender| !seen.insert(sender.as_str()))
+    };
+    if has_duplicates || sender_allowlist.iter().any(|sender| !valid_text(sender, 128)) {
+        return Err(ConfigError::InvalidMoogleMailConfig("sender_allowlist 含有重复或无效发件人"));
     }
     Ok(())
+}
+
+/// 比较键不进入配置、指纹或 DTO。
+pub(crate) fn sender_allowlist_has_case_duplicates(senders: &[String]) -> bool {
+    let mut keys = HashSet::with_capacity(senders.len());
+    // 与 gateway 装配时的判重同为 ASCII 忽略大小写，修改任一处须同步另一处。
+    senders.iter().any(|sender| !keys.insert(sender.to_ascii_lowercase()))
 }
 
 #[cfg(test)]

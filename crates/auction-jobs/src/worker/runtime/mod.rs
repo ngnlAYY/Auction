@@ -20,7 +20,7 @@ pub use forum_sync::{ForumSyncPorts, ForumSyncRuntime};
 pub use mail_poll::{
     MailPollFetchRequest, MailPollFetchedMessage, MailPollGateway, MailPollGatewayError,
     MailPollPage, MailPollRuntime, MailPollRuntimeBindings, MailPollRuntimeConfig,
-    MailPollSchedules, PhasedMailSchedule, mail_world_phase,
+    MailPollSchedules,
 };
 pub use operations_alert::{OperationsAlertRuntime, OperationsAlertRuntimeConfig};
 pub use player_notifications::{PlayerNotificationRuntime, PlayerNotificationRuntimeConfig};

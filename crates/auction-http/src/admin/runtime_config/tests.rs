@@ -10,7 +10,7 @@ use auction_application::admin::{
     AdminRuntimeEquipmentFilterConfig, AdminRuntimeSnapshot, AdminRuntimeUpdateCommand,
     AdminRuntimeWorldsConfig,
 };
-use auction_application::core::{ApplicationError, ApplicationFuture};
+use auction_application::core::ApplicationFuture;
 use axum::body::{Bytes, to_bytes};
 use axum::extract::ConnectInfo;
 use axum::http::{StatusCode, Uri};
@@ -305,10 +305,10 @@ async fn runtime_projection_accepts_only_registered_includes() {
 }
 
 const WORKER_FILE_HINT: &str =
-    "修改告警配置或覆盖的邮件世界前，须在 Admin 配置 worker_config_file 并重启";
+    "修改告警、邮件世界、收件日程或排期世界前，须在 Admin 配置 worker_config_file 并重启";
 const UNREADABLE_WORKER_FILE_HINT: &str =
     "无法加载 Worker 部署配置，请检查 Admin 的 worker_config_file 指向的文件是否可读";
-const CHANGED_WORKER_FILE_HINT: &str = "Worker 部署配置已变更，请重启 Admin 后再保存";
+const CHANGED_WORKER_FILE_HINT: &str = "Worker 部署配置已变更，请确认文件有效并重启 Admin 后再保存";
 
 struct RuntimeWithWorkerError {
     current: AdminRuntimeDocument,
@@ -329,19 +329,22 @@ impl AdminRuntimeConfigPort for RuntimeWithWorkerError {
     fn validate(
         &self,
         document: AdminRuntimeDocument,
-    ) -> Result<AdminRuntimeSnapshot, ApplicationError> {
-        // 覆盖不变时无需部署基值；模拟文件适配器接收落成候选的检查边界。
-        if document.operations.as_ref().map(|operations| &operations.alerts)
-            != self.current.operations.as_ref().map(|operations| &operations.alerts)
-        {
-            return Err(
-                AdminRuntimeConfigError::InvalidDocument(self.worker_error.to_owned()).into()
-            );
-        }
-        Ok(AdminRuntimeSnapshot {
-            fingerprint: document.fingerprint(),
-            document,
-            restart_required: false,
+    ) -> ApplicationFuture<'_, AdminRuntimeSnapshot> {
+        Box::pin(async move {
+            let document = document.resolve_update(&self.current);
+            // 覆盖不变时无需部署基值；模拟文件适配器接收落成候选的检查边界。
+            if document.operations.as_ref().map(|operations| &operations.alerts)
+                != self.current.operations.as_ref().map(|operations| &operations.alerts)
+            {
+                return Err(
+                    AdminRuntimeConfigError::InvalidDocument(self.worker_error.to_owned()).into()
+                );
+            }
+            Ok(AdminRuntimeSnapshot {
+                fingerprint: document.fingerprint(),
+                document,
+                restart_required: false,
+            })
         })
     }
 
@@ -351,7 +354,7 @@ impl AdminRuntimeConfigPort for RuntimeWithWorkerError {
     ) -> ApplicationFuture<'_, AdminRuntimeSnapshot> {
         Box::pin(async move {
             assert_eq!(command.expected_fingerprint, self.current.fingerprint());
-            self.validate(command.document.resolve_update(&self.current))
+            self.validate(command.document).await
         })
     }
 }

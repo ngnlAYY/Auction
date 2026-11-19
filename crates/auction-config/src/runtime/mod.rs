@@ -8,7 +8,6 @@ use std::{
     fs::{self, File, OpenOptions},
     io::{self, Read, Write},
     path::{Component, Path, PathBuf},
-    sync::Mutex,
 };
 
 use auction_application::admin::{
@@ -20,7 +19,7 @@ use auction_application::core::ApplicationError;
 use auction_application::core::ApplicationFuture;
 use auction_application::core::RequestHash;
 
-use self::validation::RuntimeAlertOverrides;
+use self::validation::{RuntimeWorkerOverrides, validate_sender_allowlists};
 use crate::settings::{ConfigError, RuntimeWorkerConfigSource};
 
 mod hot;
@@ -64,7 +63,6 @@ pub struct TomlRuntimeFileStore {
     lock_path: PathBuf,
     tracing_headers_configured: bool,
     worker: Option<RuntimeWorkerBaseline>,
-    current_alerts: Mutex<Option<RuntimeAlertOverrides>>,
 }
 
 struct RuntimeWorkerBaseline {
@@ -114,7 +112,6 @@ impl TomlRuntimeFileStore {
             path,
             tracing_headers_configured,
             worker,
-            current_alerts: Mutex::new(None),
         })
     }
 
@@ -179,12 +176,6 @@ impl TomlRuntimeFileStore {
             toml::from_str(&contents).map_err(|_| RuntimeFileStoreError::Parse)?;
         self.validate_document(&document, auction_time::Timestamp::now())
             .map_err(|error| RuntimeFileStoreError::InvalidDocument(error.to_string()))?;
-        let alerts = RuntimeAlertOverrides::from_document(&document);
-        // 保存每次在 workflow 锁与指纹 fence 内回读当前文件，校验不得用上一次写入的状态。
-        let mut current_alerts = self.current_alerts.lock().map_err(|error| {
-            RuntimeFileStoreError::Io(format!("runtime 告警校验快照锁失败：{error}"))
-        })?;
-        *current_alerts = Some(alerts);
         Ok(AdminRuntimeSnapshot {
             fingerprint: document.fingerprint(),
             document,
@@ -318,45 +309,62 @@ impl AdminRuntimeFileStore for TomlRuntimeFileStore {
         document: &AdminRuntimeDocument,
         now: auction_time::Timestamp,
     ) -> Result<(), ApplicationError> {
+        let _lock = self.open_lock().map_err(map_file_error)?;
+        let current = self.read_snapshot().map_err(map_file_error)?;
+        self.validate_candidate_against(&current, document, now)
+    }
+
+    fn validate_candidate_against(
+        &self,
+        current: &AdminRuntimeSnapshot,
+        document: &AdminRuntimeDocument,
+        now: auction_time::Timestamp,
+    ) -> Result<(), ApplicationError> {
         self.validate_document(document, now).map_err(ApplicationError::from)?;
+        validate_sender_allowlists(document)?;
         if let Some(operations) = &document.operations {
             operations.validate_mail_delivery_budget(
                 self.worker.as_ref().map(|base| base.mail_delivery),
             )?;
         }
-        let candidate = RuntimeAlertOverrides::from_document(document);
-        let changes_alerts = self
-            .current_alerts
-            .lock()
-            .map_err(|error| {
-                AdminRuntimeFileError::Unavailable(format!("runtime 告警校验快照锁失败：{error}"))
-            })?
-            .as_ref()
-            != Some(&candidate);
-        if !changes_alerts {
-            return Ok(());
-        }
         let invalid = |reason: &str| AdminRuntimeConfigError::InvalidDocument(reason.to_owned());
-        let worker = self
-            .worker
-            .as_ref()
-            .ok_or_else(|| invalid(AdminRuntimeAlertsConfig::WORKER_CONFIG_REQUIRED_HINT))?;
+        // 有可信部署基值时，登记命令前总要验证最终候选，避免无关编辑把已知的启动错误再次写入。
+        // 只有拿不到基值时，才按同一锁内快照判断能否沿用无关编辑的兼容路径。
+        let unavailable = |reason: &str| {
+            if RuntimeWorkerOverrides::from_document(&current.document)
+                == RuntimeWorkerOverrides::from_document(document)
+            {
+                Ok(())
+            } else {
+                Err(invalid(reason).into())
+            }
+        };
+        let Some(worker) = &self.worker else {
+            return unavailable(AdminRuntimeAlertsConfig::WORKER_CONFIG_REQUIRED_HINT);
+        };
         // 登记命令前先核对原文指纹；内容损坏也属于部署变更，解析使用刚通过 fence 的同一份原文。
         let Ok(file) = worker.source.read() else {
-            return Err(invalid(AdminRuntimeAlertsConfig::WORKER_CONFIG_UNREADABLE_HINT).into());
+            return unavailable(AdminRuntimeAlertsConfig::WORKER_CONFIG_UNREADABLE_HINT);
         };
         if file.fingerprint() != worker.fingerprint {
-            return Err(invalid(AdminRuntimeAlertsConfig::WORKER_CONFIG_CHANGED_HINT).into());
+            return unavailable(AdminRuntimeAlertsConfig::WORKER_CONFIG_CHANGED_HINT);
         }
-        file.parse(&self.path)
-            .and_then(|deployment| deployment.validate_runtime(document.clone()))
-            .map_err(|error| {
-                invalid(match error {
-                    ConfigError::InvalidOperationsAlertConfig(reason) => reason,
-                    _ => "候选未通过 Worker 启动配置校验",
-                })
-                .into()
+        let result = file
+            .parse(&self.path)
+            .and_then(|deployment| deployment.validate_runtime(document.clone(), now));
+        match result {
+            Ok(()) => Ok(()),
+            Err(ConfigError::Read { .. } | ConfigError::SecretRead { .. }) => {
+                unavailable("候选未通过 Worker 启动配置校验")
+            }
+            Err(error) => Err(invalid(match error {
+                ConfigError::InvalidOperationsAlertConfig(reason)
+                | ConfigError::InvalidMoogleMailConfig(reason)
+                | ConfigError::InvalidAuctionConfig(reason) => reason,
+                _ => "候选未通过 Worker 启动配置校验",
             })
+            .into()),
+        }
     }
 
     fn current(&self) -> ApplicationFuture<'_, AdminRuntimeSnapshot> {

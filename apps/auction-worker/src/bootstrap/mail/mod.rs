@@ -71,10 +71,7 @@ pub(super) async fn configure_mail_poll(
     }
 
     let world_configs = mail_config.configured_worlds();
-    let schedule: Arc<dyn RecurringSchedule> = Arc::new(
-        StandardCronSchedule::parse(&mail_config.schedule)
-            .context("解析 MoogleMail 标准 cron 日程失败")?,
-    );
+    let schedule: Arc<dyn RecurringSchedule> = Arc::new(mail_config.receive_schedule()?);
     // AppConfig 已应用 Admin 托管覆盖；省略维护日程时跟随最终生效的收件日程。
     // 即使基线关闭也解析并校验显式维护日程，在线切回隔离时不能暴露启动时未发现的错误。
     let maintenance_schedule: Arc<dyn RecurringSchedule> = match &mail_config.maintenance_schedule {

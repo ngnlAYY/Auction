@@ -194,9 +194,9 @@ runtime 文件让运营人员在 Admin 页面修改部分参数。Admin 是唯�
 
 `[operations.<组>]` 的 `managed = true` 时覆盖部署配置，`false`（默认）沿用 common 与角色文件。组：`economics`、`schedule`（重启 Admin 与 Worker）；`forum`、`alerts`、`worker`（含 delivery/fulfillment/recovery）、`mail`（含 send_intervals/send_classes；不含全局开关、endpoint、凭据、邮箱身份与诊断路径）。即时生效字段见下表，其余重启 Worker。启用接管时 `config check` 核对 Admin 与 Worker 的有效模板与排期一致。
 
-更改生效的告警配置或邮件世界时（包括撤销 `operations.alerts` 接管或移除 `worlds` 覆盖），Admin 须配置 `worker_config_file`，指向引用同一 runtime 文件的 Worker 角色 TOML。预校验与保存有界重读该角色文件，确认与 Admin 启动时的版本一致，再用实际的 Worker 启动配置加载器校验候选。此路径要求 Admin 能读取该角色文件及其引用的公共与敏感配置。无法读取或角色文件内容已变更时拒绝该变更。修改 Worker 角色文件后重启 Admin，以刷新部署基值。告警接管参数与启用的邮件世界相同的候选无需读取 Worker 配置。
+更改生效的告警覆盖、启用的邮件世界、接管的收件日程或周排期开关与世界时（含撤销接管），Admin 须配置 `worker_config_file`，指向引用同一 runtime 文件的 Worker 角色 TOML。每次预校验与保存都会尝试取得可信的 Worker 部署基值。有基值时，预校验与保存均用 Worker 启动加载器合并并校验最终候选，即使只编辑无关字段。读取角色文件时限制大小、先核对原始字节指纹，再严格解码同一份内容，并读取它引用的公共与敏感配置。角色文件找不到、读不了或超过 4 MiB 时检查文件可读性与大小；内容变更（包括出现非法 UTF-8）时确认文件有效并重启 Admin，以刷新部署基值。无法取得可信基值时，只有上述覆盖项保持原样的编辑可以继续。
 
-保存校验覆盖告警相关的启动前提，其余装配条件仍由 Worker 在启动时检查，能否启动以实际装配结果为准。修改邮件世界、白名单或轮询计划后，重启前运行 `auction-cli config check` 核对配置。
+新候选的发件人白名单在每个世界独立按 ASCII 大小写折叠判重，读回保留原拼写；已存在的大小写重复可打开并修正。邮件关闭的 Worker 仍可加载仅大小写不同的旧名单。邮件轮询启用时，部署校验按启动时的世界相位和隔离基线计算各邮箱的首次到期点，要求到期点在未来且符合持久状态的 Unix 纳秒范围。周排期启用时，合并后的排期世界与已配置邮件世界必须存在交集。预校验与保存仍使用各自读取时的配置快照，服务的最终可用性以实际启动结果为准。
 
 仅扫描可留空收件人。启用主动发信或 webhook 需要 PostgreSQL；主动发信还需启用 `worker.mooglemail.enabled`、配置邮件凭据与有效的目标世界及收件人。启用 webhook 须提供 `operations_alert_webhook_url`。
 

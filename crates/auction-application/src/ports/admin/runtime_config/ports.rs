@@ -20,14 +20,23 @@ pub trait AdminRuntimeFileStore: Send + Sync {
     fn acquire_workflow_lock(&self) -> ApplicationFuture<'_, Self::WorkflowGuard>;
 
     /// 校验本地语法及非敏感部署约束；不得写文件、写命令账本或访问外部服务。
-    /// 候选会改变生效的告警配置时，实现可以有界重读 Worker 部署配置，并用 Worker 启动时的
-    /// 同一套校验核对；该文件读不到或已与启动时冻结的内容不同，必须明确拒绝。
-    /// cron 与有效 Worker 预算仍由配置 owner 提供；新候选缺少必要部署上下文时必须明确拒绝。
     fn validate_candidate(
         &self,
         document: &AdminRuntimeDocument,
         now: Timestamp,
     ) -> Result<(), ApplicationError>;
+
+    /// 使用同一次加锁读取的快照校验落成候选。可取得可信 Worker 部署基值时总要校验候选；
+    /// 无法取得时，只有未改变相关 Worker 覆盖的编辑可以继续。
+    /// 不依赖当前文件的适配器可沿用本地校验。
+    fn validate_candidate_against(
+        &self,
+        _current: &AdminRuntimeSnapshot,
+        document: &AdminRuntimeDocument,
+        now: Timestamp,
+    ) -> Result<(), ApplicationError> {
+        self.validate_candidate(document, now)
+    }
 
     fn current(&self) -> ApplicationFuture<'_, AdminRuntimeSnapshot>;
 
@@ -89,7 +98,7 @@ pub trait AdminRuntimeConfigPort: Send + Sync {
     fn validate(
         &self,
         document: AdminRuntimeDocument,
-    ) -> Result<AdminRuntimeSnapshot, ApplicationError>;
+    ) -> ApplicationFuture<'_, AdminRuntimeSnapshot>;
 
     fn update(
         &self,

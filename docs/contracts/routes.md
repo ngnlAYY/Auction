@@ -296,7 +296,7 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | POST | `/api/v1/admin/runtime-switches/external-access-paused` | 暂停或恢复全部外部访问（唯一开放给 Admin 写入的开关） |
 | GET | `/api/v1/admin/mail-templates` | 全部出站通知模板的当前正文、内置默认正文、版本与占位符规则 |
 | PUT | `/api/v1/admin/mail-templates/{template_key}` | 保存一个模板的正文，或恢复内置默认正文 |
-| POST | `/api/v1/admin/config:validate` | 只校验 runtime 配置候选，不写文件或命令账本；查询参数同 `/api/v1/admin/config`。两种投影都按保存规则沿用请求省略的阈值，带 `include=fulfillment_collection_overdue_age_seconds` 时响应包含落成后的生效阈值。预校验与保存均按[部署基值校验告警](../../ops/config/README.md#operations-接管)，失败为 `400 invalid_runtime_config`。缺少 `worker_config_file` 时，`message` 提示配置并重启 Admin。Worker 角色文件无法读取时提示检查文件可读性，文件内容已变更时在 TOML 解析前提示重启 Admin 后再保存 |
+| POST | `/api/v1/admin/config:validate` | 只校验 runtime 配置候选，不写配置文件或命令账本；查询参数同 `/api/v1/admin/config`。一次取得工作流锁，从同一份文件快照补回省略的字段并比较 Worker 覆盖项。带 `include=fulfillment_collection_overdue_age_seconds` 时响应包含落成后的生效阈值。预校验结果对应本次读取的版本，保存仍须核对自己的 `expected_fingerprint`。新候选的[部署校验规则](../../ops/config/README.md#operations-接管)同保存，文档无效为 `400 invalid_runtime_config`。缺少所需的 `worker_config_file` 时提示配置并重启 Admin；文件无法读取时提示检查可读性，内容变更（包括非法 UTF-8）时提示确认文件有效并重启 Admin |
 | GET / POST / PATCH | `/api/v1/admin/users` | 用户列表（`name`、`status`、`page`、`page_size`）/ 创建 / 修改（改名、签发/重签/吊销 key、绑定论坛 ID） |
 | PUT / DELETE | `/api/v1/admin/users/{user_id}/blacklist` | 拉黑 / 解除 |
 | GET | `/api/v1/admin/renames` | 改名历史（`user_id`、`name`、`page`、`page_size`） |

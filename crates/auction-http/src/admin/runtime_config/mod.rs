@@ -104,12 +104,7 @@ pub(crate) async fn validate(
     let Some(port) = state.admin_runtime() else {
         return feature_unavailable(RUNTIME_CONFIG_FILE_MISSING);
     };
-    // 两种投影都校验同一份落成候选；省略的兼容字段沿用当前值。
-    let document = match port.current().await {
-        Ok(current) => document.resolve_update(&current.document),
-        Err(error) => return map_error(error),
-    };
-    let snapshot = match port.validate(document) {
+    let snapshot = match port.validate(document).await {
         Ok(snapshot) => snapshot,
         Err(error) => return map_error(error),
     };

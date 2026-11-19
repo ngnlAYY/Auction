@@ -8,7 +8,6 @@ pub(super) mod processing;
 pub(super) mod types;
 
 pub(crate) use super::maintenance::run_loop as run_maintenance_loop;
-pub use super::schedule::{PhasedMailSchedule, mail_world_phase};
 pub(crate) use cycle::run_loop;
 pub use types::{
     MailPollFetchRequest, MailPollFetchedMessage, MailPollGateway, MailPollGatewayError,

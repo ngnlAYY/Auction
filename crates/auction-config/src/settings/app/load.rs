@@ -7,9 +7,10 @@ use std::{env, fs, io};
 
 use auction_application::admin::{AdminRuntimeDocument, AdminRuntimeMailDeliveryBudget};
 use auction_application::core::RequestHash;
+use auction_time::Timestamp;
 
 use super::model::{AppConfig, BuildInput, CommonFileConfig, FileConfig, PublicSessionFileConfig};
-use crate::reader::read_toml_file;
+use crate::reader::{read_toml_bytes, read_toml_file};
 use crate::settings::backup::BackupConfig;
 use crate::settings::errors::ConfigError;
 use crate::settings::shutdown::ShutdownFileConfig;
@@ -40,7 +41,7 @@ impl RuntimeWorkerConfigSource {
 /// 角色文件的一次有界读取，指纹和配置解析使用同一份原文。
 pub(crate) struct RuntimeWorkerConfigFile<'a> {
     path: &'a Path,
-    contents: String,
+    contents: Vec<u8>,
 }
 
 /// 通过同源检查的 Worker 角色配置，用于装配候选。
@@ -54,15 +55,27 @@ impl RuntimeWorkerDeployment {
         self.file.worker.mail_delivery_budget()
     }
 
-    pub(crate) fn validate_runtime(self, runtime: AdminRuntimeDocument) -> Result<(), ConfigError> {
-        AppConfig::from_file(
+    pub(crate) fn validate_runtime(
+        self,
+        runtime: AdminRuntimeDocument,
+        now: Timestamp,
+    ) -> Result<(), ConfigError> {
+        let config = AppConfig::from_file(
             Role::Worker,
             Some(self.path),
             self.file,
             RoleSessionConfig::for_role(Role::Worker),
             Some(runtime),
-        )
-        .map(|_| ())
+        )?;
+        let mail = &config.worker.mooglemail;
+        config.auction.schedule.worker_worlds(mail)?;
+        if mail.enabled {
+            let schedule = mail.receive_schedule()?;
+            for world in mail.poll_startup(&schedule, now)? {
+                world.first_due(&schedule, now)?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -279,21 +292,23 @@ fn load_runtime_worker_source(
 
 impl<'a> RuntimeWorkerConfigFile<'a> {
     fn read(path: &'a Path) -> Result<Self, ConfigError> {
-        let contents = read_toml_file(path)
+        let contents = read_toml_bytes(path)
             .map_err(|source| ConfigError::Read { path: path.to_owned(), source })?;
         Ok(Self { path, contents })
     }
 
     pub(crate) fn fingerprint(&self) -> RequestHash {
-        RequestHash::from_canonical_bytes(self.contents.as_bytes())
+        RequestHash::from_canonical_bytes(&self.contents)
     }
 
     /// 从已读取的内容解析角色文件，并核对双方的 runtime 引用。
     pub(crate) fn parse(self, runtime_path: &Path) -> Result<RuntimeWorkerDeployment, ConfigError> {
         let Self { path, contents } = self;
-        reject_unsupported_role_sections(Role::Worker, &contents)?;
+        let contents = std::str::from_utf8(&contents)
+            .map_err(|_| ConfigError::Parse { path: path.to_owned() })?;
+        reject_unsupported_role_sections(Role::Worker, contents)?;
         let file: FileConfig<SessionConfig> =
-            toml::from_str(&contents).map_err(|_| ConfigError::Parse { path: path.to_owned() })?;
+            toml::from_str(contents).map_err(|_| ConfigError::Parse { path: path.to_owned() })?;
         if file.worker_config_file.is_some() {
             return Err(ConfigError::InvalidRuntimeWorkerConfig(
                 "worker_config_file 必须指向 Worker 角色文件，不能包含另一个 worker_config_file",
@@ -323,13 +338,18 @@ mod tests {
     use std::fs;
     use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
     use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
     use std::task::{Context, Poll, Waker};
 
     use auction_application::admin::{
-        AdminRuntimeAlertsConfig, AdminRuntimeConfigError, AdminRuntimeDocument,
-        AdminRuntimeFileStore, AdminRuntimeOperationsConfig, AdminRuntimeWorldsConfig,
+        AdminRuntimeAlertsConfig, AdminRuntimeAuditRecord, AdminRuntimeCommandState,
+        AdminRuntimeCommandStore, AdminRuntimeConfigError, AdminRuntimeConfigService,
+        AdminRuntimeDocument, AdminRuntimeFileStore, AdminRuntimeMailConfig,
+        AdminRuntimeOperationsConfig, AdminRuntimeSnapshot, AdminRuntimeStoredCommand,
+        AdminRuntimeUpdateCommand, AdminRuntimeWorldsConfig,
     };
-    use auction_application::core::ApplicationError;
+    use auction_application::core::{ApplicationError, ApplicationFuture, Clock, RequestHash};
+    use auction_domain::CommandId;
     use auction_time::Timestamp;
     use uuid::Uuid;
 
@@ -397,13 +417,109 @@ user_login_data_key = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBE="
         }
     }
 
-    fn read_current(store: &TomlRuntimeFileStore) -> String {
+    fn ready<F: Future>(future: F) -> F::Output {
         let Poll::Ready(result) =
-            store.current().as_mut().poll(&mut Context::from_waker(Waker::noop()))
+            std::pin::pin!(future).poll(&mut Context::from_waker(Waker::noop()))
         else {
-            panic!("本地文件读取不挂起");
+            panic!("本地文件操作不挂起");
         };
-        result.unwrap().fingerprint
+        result
+    }
+
+    struct FixtureClock;
+
+    impl Clock for FixtureClock {
+        fn now(&self) -> Timestamp {
+            Timestamp::from_ymd_hms(2026, 11, 18, 0, 0, 0).unwrap()
+        }
+    }
+
+    /// 让服务走真实 TOML 适配器和保存流程；夹具只需记录一个新命令。
+    #[derive(Default)]
+    struct FixtureCommands(Mutex<Option<AdminRuntimeStoredCommand>>);
+
+    impl AdminRuntimeCommandStore for FixtureCommands {
+        fn find(
+            &self,
+            command_id: CommandId,
+        ) -> ApplicationFuture<'_, Option<AdminRuntimeStoredCommand>> {
+            Box::pin(async move {
+                Ok(self
+                    .0
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .filter(|row| row.command_id == command_id)
+                    .cloned())
+            })
+        }
+
+        fn list_unresolved(&self) -> ApplicationFuture<'_, Vec<AdminRuntimeStoredCommand>> {
+            Box::pin(async {
+                Ok(self
+                    .0
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|row| row.state != AdminRuntimeCommandState::Applied)
+                    .cloned()
+                    .collect())
+            })
+        }
+
+        fn insert_pending(
+            &self,
+            command: AdminRuntimeStoredCommand,
+        ) -> ApplicationFuture<'_, AdminRuntimeStoredCommand> {
+            Box::pin(async move {
+                assert!(self.0.lock().unwrap().replace(command.clone()).is_none());
+                Ok(command)
+            })
+        }
+
+        fn apply(
+            &self,
+            command_id: CommandId,
+            request_hash: RequestHash,
+            audit: AdminRuntimeAuditRecord,
+            applied_at: Timestamp,
+        ) -> ApplicationFuture<'_, AdminRuntimeStoredCommand> {
+            Box::pin(async move {
+                let mut stored = self.0.lock().unwrap();
+                let row = stored.as_mut().unwrap();
+                assert_eq!(row.command_id, command_id);
+                assert_eq!(row.request_hash, request_hash);
+                assert_eq!(row.audit_id, audit.id);
+                row.state = AdminRuntimeCommandState::Applied;
+                row.result_document = Some(row.candidate_document.clone());
+                row.updated_at = applied_at;
+                row.applied_at = Some(applied_at);
+                Ok(row.clone())
+            })
+        }
+
+        fn mark_unknown(
+            &self,
+            _command_id: CommandId,
+            _request_hash: RequestHash,
+            _category: String,
+            _updated_at: Timestamp,
+        ) -> ApplicationFuture<'_, AdminRuntimeStoredCommand> {
+            panic!("夹具不模拟结果未知")
+        }
+
+        fn reopen(
+            &self,
+            _command_id: CommandId,
+            _request_hash: RequestHash,
+            _updated_at: Timestamp,
+        ) -> ApplicationFuture<'_, AdminRuntimeStoredCommand> {
+            panic!("夹具不模拟重开命令")
+        }
+    }
+
+    fn read_current(store: &TomlRuntimeFileStore) -> AdminRuntimeSnapshot {
+        ready(store.current()).unwrap()
     }
 
     fn managed_alerts(enabled: bool, recipient: &str) -> AdminRuntimeDocument {
@@ -425,7 +541,7 @@ user_login_data_key = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBE="
     }
 
     #[test]
-    fn alert_candidate_requires_fresh_worker_role_file_only_for_alert_changes() {
+    fn only_unrelated_edits_can_proceed_without_a_trusted_worker_baseline() {
         let fixture = AlertFixture::new();
         let current = managed_alerts(true, "Operator");
         fixture.write_runtime(&current);
@@ -466,6 +582,11 @@ user_login_data_key = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBE="
             AdminRuntimeAlertsConfig::WORKER_CONFIG_UNREADABLE_HINT,
         );
         assert!(store.validate_candidate(&unrelated, Timestamp::now()).is_ok());
+
+        fixture.write_worker(true, false, true, "main");
+        fs::remove_file(fixture.directory.join("common.toml")).unwrap();
+        assert!(store.validate_candidate(&unrelated, Timestamp::now()).is_ok());
+        assert_eq!(rejection(&store, &candidate), "候选未通过 Worker 启动配置校验");
     }
 
     #[test]
@@ -524,7 +645,7 @@ user_login_data_key = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBE="
         assert!(initial.worker.operations_alert.notify_enabled());
         let store = fixture.store();
         let without_worker = TomlRuntimeFileStore::new(&fixture.runtime_path, false, None).unwrap();
-        assert_eq!(read_current(&without_worker), current.fingerprint());
+        assert_eq!(read_current(&without_worker).fingerprint, current.fingerprint());
 
         let mut candidate = current.clone();
         candidate.worlds.as_mut().unwrap().isekai.enabled = false;
@@ -548,6 +669,220 @@ user_login_data_key = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBE="
         unrelated.worlds.as_mut().unwrap().isekai.sender_allowlist.push("Operator".to_owned());
         assert!(without_worker.validate_candidate(&unrelated, Timestamp::now()).is_ok());
         assert!(store.validate_candidate(&unrelated, Timestamp::now()).is_ok());
+    }
+
+    #[test]
+    fn legacy_sender_case_duplicates_can_be_read_and_corrected() {
+        let fixture = AlertFixture::new();
+        let mut current = AdminRuntimeDocument {
+            worlds: Some(AdminRuntimeWorldsConfig::default()),
+            equipment_filter: Some(Default::default()),
+            ..Default::default()
+        };
+        let worlds = current.worlds.as_mut().unwrap();
+        worlds.main.sender_allowlist = vec!["Alice".into(), "alice".into()];
+        worlds.isekai.sender_allowlist = vec!["alice".into()];
+        fixture.write_runtime(&current);
+        let store = TomlRuntimeFileStore::new(&fixture.runtime_path, false, None).unwrap();
+        let read = read_current(&store);
+        assert_eq!(read.document, current);
+        assert!(rejection(&store, &current).contains("sender_allowlist"));
+
+        current.worlds.as_mut().unwrap().main.sender_allowlist.pop();
+        let guard = ready(store.acquire_workflow_lock()).unwrap();
+        assert!(store.validate_candidate_against(&read, &current, Timestamp::now()).is_ok());
+        let result =
+            ready(store.replace_locked(&guard, read.fingerprint, current.clone())).unwrap();
+        assert_eq!(result.new_fingerprint, current.fingerprint());
+        assert_eq!(ready(store.current_locked(&guard)).unwrap().document, current);
+    }
+
+    #[test]
+    fn worker_only_checks_ascii_case_duplicates_when_mail_is_enabled() {
+        let fixture = AlertFixture::new();
+        let mut current = AdminRuntimeDocument {
+            worlds: Some(AdminRuntimeWorldsConfig::default()),
+            equipment_filter: Some(Default::default()),
+            ..Default::default()
+        };
+        let worlds = current.worlds.as_mut().unwrap();
+        worlds.main.sender_allowlist = vec!["Alice".into(), "alice".into()];
+        worlds.isekai.sender_allowlist = vec!["Bob".into(), "bob".into()];
+        fixture.write_runtime(&current);
+        fixture.write_worker(false, false, false, "main");
+        assert!(AppConfig::load_from_path(Role::Worker, &fixture.worker_path).is_ok());
+        assert!(rejection(&fixture.store(), &current).contains("sender_allowlist"));
+
+        fixture.write_worker(false, false, true, "main");
+        for world in ["main", "isekai"] {
+            assert_matches!(
+                AppConfig::load_from_path(Role::Worker, &fixture.worker_path),
+                Err(ConfigError::InvalidMoogleMailConfig(reason)) if reason.contains("sender_allowlist")
+            );
+            let worlds = current.worlds.as_mut().unwrap();
+            if world == "main" {
+                worlds.main.sender_allowlist.pop();
+            } else {
+                worlds.isekai.sender_allowlist.pop();
+            }
+            fixture.write_runtime(&current);
+        }
+        assert!(AppConfig::load_from_path(Role::Worker, &fixture.worker_path).is_ok());
+    }
+
+    fn assert_invalid_legacy_document_must_be_fixed(
+        fixture: &AlertFixture,
+        current: AdminRuntimeDocument,
+        reason: &str,
+        fix: impl FnOnce(&mut AdminRuntimeDocument),
+    ) {
+        fixture.write_runtime(&current);
+        let files = Arc::new(fixture.store());
+        let commands = Arc::new(FixtureCommands::default());
+        let service = AdminRuntimeConfigService::new(
+            Arc::clone(&commands),
+            Arc::clone(&files),
+            Arc::new(FixtureClock),
+        );
+        let expected_fingerprint = current.fingerprint();
+        let command = |document: AdminRuntimeDocument| AdminRuntimeUpdateCommand {
+            command_id: CommandId::from_uuid(Uuid::new_v4()),
+            request_hash: document.request_hash(&expected_fingerprint).unwrap(),
+            expected_fingerprint: expected_fingerprint.clone(),
+            document,
+            actor_id: "operator".into(),
+            request_id: None,
+        };
+        let mut candidate = current.clone();
+        candidate.allow_manual_early_open = true;
+        let preview = ready(service.validate(candidate.clone()));
+        let save = ready(service.update(command(candidate.clone())));
+        for result in [preview, save] {
+            assert_matches!(
+                result,
+                Err(ApplicationError::AdminRuntime(AdminRuntimeConfigError::InvalidDocument(message)))
+                    if message.contains(reason)
+            );
+        }
+        assert!(commands.0.lock().unwrap().is_none());
+        assert_eq!(read_current(&files).document, current);
+
+        fix(&mut candidate);
+        let preview = ready(service.validate(candidate.clone())).unwrap();
+        let save = ready(service.update(command(candidate.clone()))).unwrap();
+        assert_eq!(preview.fingerprint, save.fingerprint);
+        assert_eq!(read_current(&files).document, candidate);
+    }
+
+    #[test]
+    fn legacy_out_of_range_poll_due_blocks_unrelated_preview_and_save() {
+        let fixture = AlertFixture::new();
+        fixture.write_worker(false, false, true, "main");
+        let operations = AdminRuntimeOperationsConfig {
+            mail: Some(AdminRuntimeMailConfig {
+                managed: true,
+                schedule: "@every 2500000h".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let current = AdminRuntimeDocument { operations: Some(operations), ..Default::default() };
+        assert_invalid_legacy_document_must_be_fixed(&fixture, current, "轮询", |document| {
+            document.operations.as_mut().unwrap().mail.as_mut().unwrap().schedule =
+                "@every 5m".into();
+        });
+    }
+
+    #[test]
+    fn legacy_disjoint_schedule_worlds_block_unrelated_preview_and_save() {
+        let fixture = AlertFixture::new();
+        fixture.write_worker(false, false, false, "main");
+        let mut operations = AdminRuntimeOperationsConfig::default();
+        operations.schedule.managed = true;
+        operations.schedule.enabled = true;
+        operations.schedule.worlds = vec!["isekai".into()];
+        let current = AdminRuntimeDocument { operations: Some(operations), ..Default::default() };
+        assert_invalid_legacy_document_must_be_fixed(
+            &fixture,
+            current,
+            "没有交集",
+            |document| {
+                document.operations.as_mut().unwrap().schedule.worlds = vec!["main".into()];
+            },
+        );
+    }
+
+    #[test]
+    fn managed_mail_schedule_must_have_a_persistable_first_due() {
+        let fixture = AlertFixture::new();
+        let current = AdminRuntimeDocument::default();
+        fixture.write_runtime(&current);
+        fixture.write_worker(false, false, true, "main");
+        let store = fixture.store();
+        let mut candidate = current;
+        let operations = candidate.operations.get_or_insert_with(Default::default);
+        operations.mail = Some(AdminRuntimeMailConfig {
+            managed: true,
+            schedule: "@every 2500000h".into(),
+            ..Default::default()
+        });
+        assert!(rejection(&store, &candidate).contains("轮询"));
+
+        candidate.operations.as_mut().unwrap().mail.as_mut().unwrap().schedule = "@every 5m".into();
+        assert!(store.validate_candidate(&candidate, Timestamp::now()).is_ok());
+
+        fixture.write_worker(false, false, false, "main");
+        let disabled = fixture.store();
+        candidate.operations.as_mut().unwrap().mail.as_mut().unwrap().schedule =
+            "@every 2500000h".into();
+        assert!(disabled.validate_candidate(&candidate, Timestamp::now()).is_ok());
+    }
+
+    #[test]
+    fn managed_auction_schedule_needs_an_effective_mail_world() {
+        let fixture = AlertFixture::new();
+        let current = AdminRuntimeDocument::default();
+        fixture.write_runtime(&current);
+        fixture.write_worker(false, false, false, "main");
+        let store = fixture.store();
+        let mut candidate = current;
+        let schedule = &mut candidate.operations.get_or_insert_with(Default::default).schedule;
+        schedule.managed = true;
+        schedule.enabled = true;
+        schedule.worlds = vec!["isekai".into()];
+        assert!(rejection(&store, &candidate).contains("没有交集"));
+        let without_worker = TomlRuntimeFileStore::new(&fixture.runtime_path, false, None).unwrap();
+        assert_eq!(
+            rejection(&without_worker, &candidate),
+            AdminRuntimeAlertsConfig::WORKER_CONFIG_REQUIRED_HINT,
+        );
+
+        let schedule = &mut candidate.operations.as_mut().unwrap().schedule;
+        schedule.enabled = false;
+        assert!(store.validate_candidate(&candidate, Timestamp::now()).is_ok());
+        let schedule = &mut candidate.operations.as_mut().unwrap().schedule;
+        schedule.enabled = true;
+        schedule.worlds.push("main".into());
+        assert!(store.validate_candidate(&candidate, Timestamp::now()).is_ok());
+    }
+
+    #[test]
+    fn non_utf8_worker_role_file_is_reported_as_changed() {
+        let fixture = AlertFixture::new();
+        fixture.write_runtime(&AdminRuntimeDocument::default());
+        fixture.write_worker(false, false, false, "main");
+        let store = fixture.store();
+        let candidate = managed_alerts(true, "");
+        fs::write(&fixture.worker_path, b"secret-fixture\xff").unwrap();
+        assert_eq!(
+            rejection(&store, &candidate),
+            AdminRuntimeAlertsConfig::WORKER_CONFIG_CHANGED_HINT,
+        );
+        fs::File::create(&fixture.worker_path).unwrap().set_len(4 * 1024 * 1024 + 1).unwrap();
+        assert_eq!(
+            rejection(&store, &candidate),
+            AdminRuntimeAlertsConfig::WORKER_CONFIG_UNREADABLE_HINT,
+        );
     }
 
     #[test]

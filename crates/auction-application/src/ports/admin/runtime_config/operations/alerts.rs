@@ -84,7 +84,7 @@ impl Default for AdminRuntimeAlertsConfig {
 impl AdminRuntimeAlertsConfig {
     /// 部署缺少 Worker 基值时允许在 HTTP 错误中公开的固定指引。
     pub const WORKER_CONFIG_REQUIRED_HINT: &'static str =
-        "修改告警配置或覆盖的邮件世界前，须在 Admin 配置 worker_config_file 并重启";
+        "修改告警、邮件世界、收件日程或排期世界前，须在 Admin 配置 worker_config_file 并重启";
 
     /// 已配置的 Worker 角色文件无法加载时允许公开的固定指引。
     pub const WORKER_CONFIG_UNREADABLE_HINT: &'static str =
@@ -92,7 +92,7 @@ impl AdminRuntimeAlertsConfig {
 
     /// Worker 角色文件指纹变化时允许公开的固定指引。
     pub const WORKER_CONFIG_CHANGED_HINT: &'static str =
-        "Worker 部署配置已变更，请重启 Admin 后再保存";
+        "Worker 部署配置已变更，请确认文件有效并重启 Admin 后再保存";
 
     /// 生效的长期未领取阈值秒数；省略时为默认 72 小时。
     pub fn collection_overdue_age_seconds(&self) -> u64 {

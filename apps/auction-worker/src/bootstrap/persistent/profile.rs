@@ -10,22 +10,13 @@ pub(super) fn configure_schedule_runtime(
     mail: Option<Arc<dyn AdminMailPort>>,
 ) -> anyhow::Result<Option<auction_jobs::AuctionScheduleRuntimeConfig>> {
     let schedule = &config.auction.schedule;
-    if !schedule.enabled {
+    let Some(worlds) = schedule.worker_worlds(&config.worker.mooglemail)? else {
         return Ok(None);
-    }
-    let runtime_mailboxes = config.worker.mooglemail.configured_mailboxes();
-    let worlds = schedule
-        .worlds
-        .iter()
-        .filter(|world_id| {
-            runtime_mailboxes
-                .clone()
-                .any(|(configured_world, _)| configured_world == world_id.as_str())
-        })
-        .cloned()
-        .collect::<Vec<_>>();
-    anyhow::ensure!(!worlds.is_empty(), "auction.schedule.worlds 与 runtime 启用世界没有交集");
-    let mailboxes = runtime_mailboxes
+    };
+    let mailboxes = config
+        .worker
+        .mooglemail
+        .configured_mailboxes()
         .map(|(world_id, mailbox_key)| (world_id.to_owned(), mailbox_key.to_owned()))
         .collect();
     // 周计划与早鸟日历都取自生命周期后继使用的同一日历投影（领域解析器是唯一 owner），

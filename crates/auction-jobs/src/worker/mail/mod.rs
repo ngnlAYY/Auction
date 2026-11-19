@@ -3,7 +3,6 @@
 
 pub(super) mod maintenance;
 pub(super) mod poll;
-pub(super) mod schedule;
 
 use tokio::sync::{MutexGuard, OwnedSemaphorePermit};
 

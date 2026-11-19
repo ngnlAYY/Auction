@@ -19,10 +19,10 @@ pub use worker::{
     FulfillmentWorkerRuntimeConfig, MailPollFetchRequest, MailPollFetchedMessage, MailPollGateway,
     MailPollGatewayError, MailPollPage, MailPollRuntime, MailPollRuntimeBindings,
     MailPollRuntimeConfig, MailPollSchedules, OperationsAlertRuntime, OperationsAlertRuntimeConfig,
-    OperationsAlertWebhookRuntime, PersistentWorker, PhasedMailSchedule, PlayerNotificationRuntime,
+    OperationsAlertWebhookRuntime, PersistentWorker, PlayerNotificationRuntime,
     PlayerNotificationRuntimeConfig, RecoveryHealthRuntime, RecoveryWorkerRuntimeConfig,
     WorkerConnectionQuota, WorkerError, WorkerHotBaseline, WorkerHotGroup, WorkerHotRuntime,
-    mail_world_phase, run_persistent_with_settlement_until_shutdown, run_until_shutdown,
+    run_persistent_with_settlement_until_shutdown, run_until_shutdown,
 };
 
 mod mail_templates;

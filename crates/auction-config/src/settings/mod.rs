@@ -20,6 +20,7 @@ mod worker;
 mod worker_validation;
 
 pub(crate) use self::secrets::validate_runtime_startup;
+pub(crate) use self::worker_validation::sender_allowlist_has_case_duplicates;
 
 pub use app::*;
 pub use auction::*;
