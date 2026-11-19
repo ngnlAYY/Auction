@@ -187,28 +187,27 @@ fn CommandReceipts(host: PendingCommandHost) -> Element {
         if visible.clone().next().is_some() {
             section { class: "admin-panel admin-pending admin-command-notices", aria_label: t!("admin-pending-receipts"),
                 ul { class: "admin-pending__list",
-                    for notice in visible {
-                        {
-                            let command_id = notice.identity.command_id;
-                            rsx! {
-                                li { class: "admin-command-notices__receipt", key: "{command_id}",
-                                    p { {receipt_message(&notice.identity, &notice.result)} }
-                                    if let Ok(Some(CommandReceipt::Text(message))) = &notice.result {
-                                        p { class: "admin-panel__note", "{message}" }
+                    // 直接生成同级回执，让关闭前一项时后续回执保留原按钮及焦点。
+                    {visible.map(|notice| {
+                        let command_id = notice.identity.command_id;
+                        rsx! {
+                            li { class: "admin-command-notices__receipt", key: "{command_id}",
+                                p { {receipt_message(&notice.identity, &notice.result)} }
+                                if let Ok(Some(CommandReceipt::Text(message))) = &notice.result {
+                                    p { class: "admin-panel__note", "{message}" }
+                                }
+                                if matches!(notice.result, Ok(Some(CommandReceipt::GeneratedKey(_)))) {
+                                    button { id: record_button_id(command_id, "receipt"), r#type: "button", onclick: move |_| open_key.set(Some(command_id)),
+                                        {t!("admin-pending-view-key")}
                                     }
-                                    if matches!(notice.result, Ok(Some(CommandReceipt::GeneratedKey(_)))) {
-                                        button { id: record_button_id(command_id, "receipt"), r#type: "button", onclick: move |_| open_key.set(Some(command_id)),
-                                            {t!("admin-pending-view-key")}
-                                        }
-                                    } else {
-                                        button { id: record_button_id(command_id, "receipt"), r#type: "button", onclick: move |_| close_receipt(host, command_id),
-                                            {t!("admin-pending-close-receipt")}
-                                        }
+                                } else {
+                                    button { id: record_button_id(command_id, "receipt"), r#type: "button", onclick: move |_| close_receipt(host, command_id),
+                                        {t!("admin-pending-close-receipt")}
                                     }
                                 }
                             }
                         }
-                    }
+                    })}
                 }
             }
         }
@@ -319,12 +318,54 @@ fn receipt_message(
 mod tests {
     use std::future::ready;
 
+    use dioxus::core::Mutation;
     use dioxus::prelude::*;
+    use uuid::Uuid;
 
-    use super::{FocusTargets, PendingCommandNotices, record_button_id};
+    use super::{CommandReceipts, FocusTargets, PendingCommandNotices, record_button_id};
     use crate::api::AdminApiFailure;
     use crate::surface::auctions::draft_page_tests::{button, click_button, mount_writer};
-    use crate::surface::pending::{CommandDelivery, PendingCommandHost, use_pending_commands};
+    use crate::surface::pending::{
+        CommandDelivery, CommandIdentity, CommandNotice, PendingCommandHost, use_pending_commands,
+    };
+    use crate::surface::realtime::text_attributes;
+
+    #[test]
+    fn keyed_receipts_keep_the_remaining_button_when_the_first_is_closed() {
+        let second = Uuid::from_u128(2);
+        let (mut page, initial) = mount_writer(move || {
+            let mut host = use_context::<PendingCommandHost>();
+            use_hook(move || {
+                host.notices.set(
+                    [Uuid::from_u128(1), second]
+                        .into_iter()
+                        .map(|command_id| CommandNotice {
+                            identity: CommandIdentity {
+                                entity: command_id.to_string(),
+                                action: "测试操作".to_owned(),
+                                command_id,
+                            },
+                            result: Ok(None),
+                            key_source: None,
+                        })
+                        .collect(),
+                );
+            });
+            rsx! { CommandReceipts { host } }
+        });
+        let second_button_id = record_button_id(second, "receipt");
+        let second_button = text_attributes(&initial, "id")
+            .find_map(|(id, value)| (value == second_button_id).then_some(id))
+            .expect("第二条回执按钮已挂载");
+        let dismissed = click_button(&mut page, "关闭回执");
+        assert_eq!(button(&page, "关闭回执").unwrap().0, second_button);
+        assert!(
+            !dismissed.iter().any(|edit| matches!(
+                edit, Mutation::NewEventListener { name, id } if name == "click" && *id == second_button
+            )),
+            "保留第二条回执节点，不能复用元素编号重新挂载按钮"
+        );
+    }
 
     #[test]
     fn explicit_removal_moves_focus_to_the_next_record_then_back_to_main() {

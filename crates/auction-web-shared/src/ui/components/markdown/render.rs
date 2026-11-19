@@ -197,19 +197,18 @@ fn collect_text(nodes: &[Inline], output: &mut String) {
 #[component]
 fn MarkdownInline(nodes: Vec<Inline>) -> Element {
     rsx! {
-        for (index, node) in nodes.into_iter().enumerate() {
+        for node in nodes {
             match node {
-                Inline::Text(value) => rsx! { span { key: "{index}", "{value}" } },
-                Inline::Strong(nodes) => rsx! { strong { key: "{index}", MarkdownInline { nodes } } },
-                Inline::Emphasis(nodes) => rsx! { em { key: "{index}", MarkdownInline { nodes } } },
-                Inline::Strike(nodes) => rsx! { del { key: "{index}", MarkdownInline { nodes } } },
-                Inline::Code(value) => rsx! { code { key: "{index}", translate: "no", "{value}" } },
+                Inline::Text(value) => rsx! { span { "{value}" } },
+                Inline::Strong(nodes) => rsx! { strong { MarkdownInline { nodes } } },
+                Inline::Emphasis(nodes) => rsx! { em { MarkdownInline { nodes } } },
+                Inline::Strike(nodes) => rsx! { del { MarkdownInline { nodes } } },
+                Inline::Code(value) => rsx! { code { translate: "no", "{value}" } },
                 Inline::Link { label, target } => {
                     // 站内链接在当前页跳转，避免整页刷新打断 SPA；外链才开新页并加 noreferrer。
                     if is_internal_target(&target) {
                         rsx! {
                             a {
-                                key: "{index}",
                                 href: target,
                                 MarkdownInline { nodes: label }
                             }
@@ -217,7 +216,6 @@ fn MarkdownInline(nodes: Vec<Inline>) -> Element {
                     } else {
                         rsx! {
                             a {
-                                key: "{index}",
                                 href: target,
                                 target: "_blank",
                                 rel: "noreferrer",
@@ -227,7 +225,7 @@ fn MarkdownInline(nodes: Vec<Inline>) -> Element {
                     }
                 }
                 Inline::Image { alt, source } => rsx! {
-                    img { key: "{index}", src: source, alt, loading: "lazy" }
+                    img { src: source, alt, loading: "lazy" }
                 },
             }
         }

@@ -344,26 +344,29 @@ fn RuntimeConfigDocument() -> Element {
                         if !issues.read().is_empty() {
                             validation::ErrorSummary { issues: issues() }
                         }
-                        RuntimeConfigFields {
-                            key: "{editor_key}",
-                            form,
-                            disabled: frozen(),
-                            on_dirty: move |_| {
-                                if frozen() { return; }
-                                checked_signature.set(String::new());
-                                command.set(None);
-                                notice.set(None);
-                                if !issues.peek().is_empty() {
-                                    // 输入可以纠正已报告的错误，新错误等离焦或再次提交。
-                                    let remaining = {
-                                        let previous = issues.peek();
-                                        validation::collect_issues(&form.read()).into_iter()
-                                            .filter(|issue| previous.iter().any(|old| old.path == issue.path))
-                                            .collect()
-                                    };
-                                    issues.set(remaining);
-                                }
-                            },
+                        // 以已接受的快照指纹重建字段控件，避免继承上一份配置的本地编辑与播报状态。
+                        for editor_key in [editor_key] {
+                            RuntimeConfigFields {
+                                key: "{editor_key}",
+                                form,
+                                disabled: frozen(),
+                                on_dirty: move |_| {
+                                    if frozen() { return; }
+                                    checked_signature.set(String::new());
+                                    command.set(None);
+                                    notice.set(None);
+                                    if !issues.peek().is_empty() {
+                                        // 输入可以纠正已报告的错误，新错误等离焦或再次提交。
+                                        let remaining = {
+                                            let previous = issues.peek();
+                                            validation::collect_issues(&form.read()).into_iter()
+                                                .filter(|issue| previous.iter().any(|old| old.path == issue.path))
+                                                .collect()
+                                        };
+                                        issues.set(remaining);
+                                    }
+                                },
+                            }
                         }
                         if let Some(current_notice) = notice().filter(|notice| *notice != ConfigNotice::Saved) {
                             p {
@@ -610,6 +613,7 @@ mod tests {
     };
     use crate::surface::config::model::RuntimeConfigForm;
     use crate::surface::config::review::{ConfigChange, changes};
+    use crate::surface::realtime::text_attributes;
 
     fn draft_harness() -> Element {
         use_config_draft();
@@ -646,6 +650,67 @@ mod tests {
             response.restart_required = true;
             response
         }
+    }
+
+    #[test]
+    fn keyed_config_editor_reports_a_new_snapshot_historical_number_immediately() {
+        const PATH: &str = "operations.worker.poll_interval_seconds";
+        let mut response: ApiResponse<AdminRuntimeConfigResponse> =
+            serde_json::from_str(include_str!(
+                "../../../../auction-contracts/tests/fixtures/admin/runtime-config-default.json"
+            ))
+            .unwrap();
+        response.data.document["operations"]["worker"]["managed"] = json!(true);
+        let snapshot = Rc::new(RefCell::new(response.data));
+        let (mut page, initial) = mount_writer({
+            let snapshot = snapshot.clone();
+            move || {
+                use_config_draft();
+                use_hook({
+                    let snapshot = snapshot.clone();
+                    move || {
+                        stub_runtime_config(
+                            move || Ok(snapshot.borrow().clone()),
+                            |_| panic!("只重读配置"),
+                        );
+                    }
+                });
+                let mut refresh = use_context::<ConfigDraft>().refresh;
+                rsx! {
+                    button { onclick: move |_| refresh.set(refresh() + 1),
+                        {"重读测试快照".to_owned()}
+                    }
+                    RuntimeConfigDocument {}
+                }
+            }
+        });
+        let input = text_attributes(&initial, "data-runtime-number")
+            .find_map(|(id, path)| (path == PATH).then_some(id))
+            .unwrap();
+        page.dispatch("input", input, "0");
+        let blurred = page.dispatch("blur", input, "");
+        assert!(text_attributes(&blurred, "aria-invalid").any(|entry| entry == (input, "true")));
+        let corrected = page.dispatch("input", input, "60");
+        assert!(text_attributes(&corrected, "aria-invalid").any(|entry| entry == (input, "false")));
+
+        {
+            let mut next = snapshot.borrow_mut();
+            next.fingerprint = format!("sha256:{}", "2".repeat(64));
+            next.document["operations"]["worker"]["poll_interval_seconds"] = json!(0);
+        }
+        // 同一编辑页后台重读，不走主动丢弃草稿后卸载编辑器的路径。
+        let refreshed = click_button(&mut page, "重读测试快照");
+        let rebuilt = text_attributes(&refreshed, "data-runtime-number")
+            .find_map(|(id, path)| (path == PATH).then_some(id))
+            .expect("新指纹须重建数字字段");
+        assert!(text_attributes(&refreshed, "value").any(|entry| entry == (rebuilt, "0")));
+        assert!(
+            text_attributes(&refreshed, "aria-invalid").any(|entry| entry == (rebuilt, "true"))
+        );
+        let description = text_attributes(&refreshed, "aria-describedby")
+            .find_map(|(id, value)| (id == rebuilt).then_some(value))
+            .expect("历史越界值须立即关联字段旁错误");
+        assert!(text_attributes(&refreshed, "id").any(|(_, id)| id == description));
     }
 
     #[test]

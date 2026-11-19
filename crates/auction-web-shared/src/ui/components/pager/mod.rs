@@ -187,25 +187,30 @@ pub fn Pager(
                 }
                 if numbered {
                     div { class: "ui-pager__pages",
-                        for target in numbered_pages(valid_page, total_pages) {
+                        // 同一页码改变窗口位置时仍复用按钮，保留键盘焦点。
+                        {numbered_pages(valid_page, total_pages).enumerate().map(|(index, target)| {
                             if let Some(target) = target {
-                                button {
-                                    key: "page-{target}",
-                                    r#type: "button",
-                                    class: "ui-pager__page",
-                                    aria_label: status.call((target, total_pages)),
-                                    aria_current: if target == applied_page { "page" } else { "false" },
-                                    onclick: move |_| {
-                                        if target != applied_page {
-                                            change_page.call(target);
-                                        }
-                                    },
-                                    "{target}"
+                                rsx! {
+                                    button {
+                                        key: "page-{target}",
+                                        r#type: "button",
+                                        class: "ui-pager__page",
+                                        aria_label: status.call((target, total_pages)),
+                                        aria_current: if target == applied_page { "page" } else { "false" },
+                                        onclick: move |_| {
+                                            if target != applied_page {
+                                                change_page.call(target);
+                                            }
+                                        },
+                                        "{target}"
+                                    }
                                 }
                             } else {
-                                span { class: "ui-pager__ellipsis", aria_hidden: "true", "…" }
+                                rsx! {
+                                    span { key: "ellipsis-{index}", class: "ui-pager__ellipsis", aria_hidden: "true", "…" }
+                                }
                             }
-                        }
+                        })}
                     }
                 }
                 span {
@@ -317,7 +322,7 @@ mod tests {
         rc::Rc,
     };
 
-    use dioxus::dioxus_core::{Mutation, Mutations};
+    use dioxus::dioxus_core::{AttributeValue, Mutation, Mutations};
     use dioxus::prelude::*;
 
     use super::size::{PageSizePicker, PageSizePickerProps};
@@ -328,6 +333,7 @@ mod tests {
         ClampRejected,
         SizeLabel,
         Range,
+        Window,
     }
 
     struct Fixture {
@@ -340,10 +346,15 @@ mod tests {
         let fixture = consume_context::<Rc<Fixture>>();
         let revision = fixture.revision.get();
         let fallback = fixture.clone();
+        let (page, total) = if matches!(fixture.callback, PagerCallback::Window) {
+            (4 + revision, 100)
+        } else {
+            (if matches!(revision, 1 | 2 | 5) { 4 } else { 10 + revision }, 40)
+        };
         let props = PagerProps::builder()
-            .page(if matches!(revision, 1 | 2 | 5) { 4 } else { 10 + revision })
+            .page(page)
             .page_size(10)
-            .total(Some(40))
+            .total(Some(total))
             .label("翻页".to_owned())
             .previous_label("上一页".to_owned())
             .status(|(page, pages)| format!("{page}/{pages}"))
@@ -424,6 +435,30 @@ mod tests {
         let mut dom = VirtualDom::new(pager_fixture).with_root_context(fixture.clone());
         let initial = dom.rebuild_to_vec();
         (dom, fixture, initial)
+    }
+
+    #[test]
+    fn keyed_page_buttons_keep_their_node_when_the_window_shifts() {
+        let (mut dom, fixture, initial) = mount_pager(PagerCallback::Window);
+        let page_five = initial
+            .edits
+            .iter()
+            .find_map(|edit| match edit {
+                Mutation::SetAttribute {
+                    id,
+                    name: "aria-label",
+                    value: AttributeValue::Text(label),
+                    ..
+                } if label == "5/10" => Some(*id),
+                _ => None,
+            })
+            .expect("第 5 页按钮存在");
+        let shifted = render_at(&mut dom, &fixture.revision, 1);
+        assert!(shifted.edits.iter().any(|edit| matches!(
+            edit,
+            Mutation::SetAttribute { id, name: "aria-current", value: AttributeValue::Text(value), .. }
+                if *id == page_five && value == "page"
+        )), "窗口移动后原来的第 5 页按钮须保留，避免焦点丢失");
     }
 
     #[test]

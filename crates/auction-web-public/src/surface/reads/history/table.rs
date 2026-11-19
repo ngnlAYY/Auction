@@ -40,17 +40,20 @@ pub(crate) fn PriceHistoryTable(
                 }
             } else {
                 div { class: "public-history-result-groups",
-                    for group in groups {
-                        if grouping == "flat" {
+                    if grouping == "flat" {
+                        for group in groups {
                             PriceHistoryRowsTable {
                                 rows: group.rows,
                                 title: t!("page-history-title"),
                                 on_buyer_filter,
                                 on_seller_filter,
                             }
-                        } else {
+                        }
+                    } else {
+                        // 用分组值维持折叠身份，后台重读可调整各组位置和组内首行。
+                        for group in groups {
                             PriceHistoryGroupPanel {
-                                key: "{grouping}:{current_page}:{page_size}:{group.key}",
+                                key: "{grouping}:{current_page}:{page_size}:{group.label}",
                                 label: group.label,
                                 rows: group.rows,
                                 on_buyer_filter,
@@ -243,4 +246,135 @@ pub(crate) fn history_auction_href(auction_id: &str, world_id: &str) -> String {
         query.append_pair("world", world_id);
     }
     format!("/?{}", query.finish())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    use dioxus::core::{AttributeValue, DynamicNode};
+    use dioxus::prelude::*;
+
+    use super::PriceHistoryTable;
+    use crate::api::{PriceHistoryEntry, PriceHistoryPage};
+    use crate::surface::pagination::{
+        dispatch_page_event, page_test_contexts, rendered_event_target, run_page_events,
+    };
+    use crate::surface::use_lot_detail_lookup;
+
+    #[derive(Clone, Debug, PartialEq, Routable)]
+    enum HistoryTestRoute {
+        #[route("/")]
+        GroupHistory {},
+    }
+
+    #[component]
+    fn GroupHistory() -> Element {
+        page_test_contexts();
+        use_lot_detail_lookup();
+        let reversed = use_signal(|| false);
+        consume_context::<Rc<Cell<Option<Signal<bool>>>>>().set(Some(reversed));
+        let row = |number: i64, buyer: &str| PriceHistoryEntry {
+            lot_id: number.to_string(),
+            auction_id: "auction-1".to_owned(),
+            world_id: "main".to_owned(),
+            auction_sequence: 1,
+            lot_number: number,
+            equipment_name: "装备".to_owned(),
+            equipment_category: "1H".to_owned(),
+            equipment_level: None,
+            buyer_name: buyer.to_owned(),
+            seller_name: "卖家".to_owned(),
+            price: 1_000,
+            closed_at: "2026-11-18T00:00:00Z".to_owned(),
+        };
+        let mut rows = vec![row(1, "甲"), row(2, "甲"), row(3, "乙")];
+        if reversed() {
+            rows.reverse();
+        }
+        let page = PriceHistoryPage {
+            rows,
+            stats: None,
+            page: Some(1),
+            page_size: 10,
+            total: Some(3),
+            cursor: None,
+            next_cursor: None,
+            has_more: None,
+        };
+        rsx! {
+            PriceHistoryTable {
+                page, grouping: "buyer", current_page: 1,
+                on_buyer_filter: |_| {}, on_seller_filter: |_| {},
+                on_page_change: |_| true, on_page_clamp: |_| true, on_page_size_change: |_| true,
+            }
+        }
+    }
+
+    fn group_states(dom: &VirtualDom) -> Vec<(String, bool)> {
+        fn collect(dom: &VirtualDom, node: &VNode, states: &mut Vec<(String, bool)>) {
+            let text = |name| {
+                node.dynamic_attrs.iter().flatten().find_map(|attr| match &attr.value {
+                    AttributeValue::Text(value) if attr.name == name => Some(value.as_str()),
+                    _ => None,
+                })
+            };
+            if let Some(label @ ("甲" | "乙")) = text("aria-label")
+                && let Some(expanded) = text("aria-expanded")
+            {
+                states.push((label.to_owned(), expanded == "true"));
+            }
+            for (index, child) in node.dynamic_nodes.iter().enumerate() {
+                match child {
+                    DynamicNode::Component(component) => {
+                        if let Some(root) = component
+                            .mounted_scope(index, node, dom)
+                            .and_then(|scope| scope.try_root_node())
+                        {
+                            collect(dom, root, states);
+                        }
+                    }
+                    DynamicNode::Fragment(nodes) => {
+                        for child in nodes {
+                            collect(dom, child, states);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let mut states = Vec::new();
+        collect(dom, dom.base_scope().root_node(), &mut states);
+        states
+    }
+
+    #[test]
+    fn keyed_history_groups_keep_expansion_when_results_reorder() {
+        run_page_events(
+            module_path!(),
+            "keyed_history_groups_keep_expansion_when_results_reorder",
+            || {
+                let control = Rc::new(Cell::<Option<Signal<bool>>>::new(None));
+                let mut dom = VirtualDom::new(|| rsx! { Router::<HistoryTestRoute> {} })
+                    .with_root_context(control.clone());
+                dom.rebuild_to_vec();
+                let first = rendered_event_target(
+                    &dom,
+                    "button",
+                    "class",
+                    "public-history-group-toggle",
+                    "onclick",
+                );
+                dispatch_page_event(&dom, "click", first, "");
+                dom.render_immediate_to_vec();
+                assert_eq!(group_states(&dom), [("甲".to_owned(), false), ("乙".to_owned(), true)]);
+
+                let mut reversed = control.get().unwrap();
+                dom.in_runtime(|| reversed.set(true));
+                dom.render_immediate_to_vec();
+                assert_eq!(group_states(&dom), [("乙".to_owned(), true), ("甲".to_owned(), false)]);
+            },
+        );
+    }
 }

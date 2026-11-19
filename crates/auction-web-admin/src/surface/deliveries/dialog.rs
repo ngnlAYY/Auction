@@ -201,9 +201,9 @@ fn ReconcileForm(
     ];
     if options.iter().all(|(_, _, decision)| decision.blocker().is_some()) {
         return rsx! {
-            for (value, label, decision) in options {
+            for (_, label, decision) in options {
                 if let Some(blocker) = decision.blocker() {
-                    p { key: "{value}", class: "admin-panel__note", "{label} · {action_blocker_label(blocker)}" }
+                    p { class: "admin-panel__note", "{label} · {action_blocker_label(blocker)}" }
                 }
             }
         };
@@ -249,13 +249,13 @@ fn ReconcileForm(
                 option { value: "", disabled: true, selected: selected.is_none(), {t!("delivery-reconcile-action-placeholder")} }
                 for (value, label, decision) in &options {
                     if decision.blocker().is_none() {
-                        option { key: "{value}", value: *value, selected: selection == *value, "{label}" }
+                        option { value: *value, selected: selection == *value, "{label}" }
                     }
                 }
             }
-            for (value, label, decision) in options {
+            for (_, label, decision) in options {
                 if let Some(blocker) = decision.blocker() {
-                    p { key: "{value}", class: "admin-panel__note", "{label} · {action_blocker_label(blocker)}" }
+                    p { class: "admin-panel__note", "{label} · {action_blocker_label(blocker)}" }
                 }
             }
             if selected == Some(DeliveryAction::ReconcileSucceeded) {

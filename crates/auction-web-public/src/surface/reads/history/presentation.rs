@@ -53,7 +53,6 @@ pub(super) fn HistoryResultControls(
 
 /// 分组只持有当前页的真实行；顺序沿用各组在全局排序页中的首次出现位置。
 pub(super) struct HistoryGroup {
-    pub key: String,
     pub label: String,
     pub rows: Vec<PriceHistoryEntry>,
 }
@@ -61,10 +60,11 @@ pub(super) struct HistoryGroup {
 /// 按本页已有字段收集分组，不补查其他分页或推算全结果组数。
 pub(super) fn history_groups(rows: Vec<PriceHistoryEntry>, grouping: &str) -> Vec<HistoryGroup> {
     if !matches!(grouping, "equipment" | "buyer" | "seller") {
-        let Some(first) = rows.first() else { return Vec::new() };
-        let key = first.lot_id.clone();
+        if rows.is_empty() {
+            return Vec::new();
+        }
         // 平铺直接移交原页缓冲，不逐行搬运到新 Vec 或创建无意义的分组索引。
-        return vec![HistoryGroup { key, label: String::new(), rows }];
+        return vec![HistoryGroup { label: String::new(), rows }];
     }
     let mut positions = BTreeMap::<String, usize>::new();
     let mut groups = Vec::<HistoryGroup>::new();
@@ -80,7 +80,7 @@ pub(super) fn history_groups(rows: Vec<PriceHistoryEntry>, grouping: &str) -> Ve
         } else {
             let label = label.to_owned();
             positions.insert(label.clone(), groups.len());
-            groups.push(HistoryGroup { key: row.lot_id.clone(), label, rows: vec![row] });
+            groups.push(HistoryGroup { label, rows: vec![row] });
         }
     }
     groups
