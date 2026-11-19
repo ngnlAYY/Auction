@@ -14,9 +14,11 @@ mod taxonomy;
 pub(crate) use auction_contracts::AdminRuntimeConfigResponse as AdminRuntimeConfig;
 
 use auction_contracts::{
-    AdminRuntimeConfigUpdateRequest, AdminRuntimeConfigValidateRequest, ApiResponse,
+    AdminRuntimeConfigUpdateRequest, AdminRuntimeConfigValidateRequest, AdminWorkerRestartStateDto,
+    ApiResponse,
 };
 use gloo_net::http::Request;
+use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 
 use self::document::valid_runtime_document;
@@ -55,30 +57,78 @@ pub(crate) fn stub_runtime_config(
 
 pub(crate) async fn fetch_admin_runtime_config()
 -> Result<AdminRuntimeConfig, AdminRuntimeConfigApiError> {
-    #[cfg(test)]
-    if let Some(stub) = dioxus::prelude::try_consume_context::<RuntimeConfigStub>() {
-        return decode_runtime_config((stub.read)()?, false).map_err(invalid_runtime_response);
-    }
-    let payload = fetch_runtime_config_response().await?;
-    decode_runtime_config(payload.data, false).map_err(invalid_runtime_response)
+    read_runtime_config(fetch_runtime_config_body).await
 }
 
-async fn fetch_runtime_config_response()
--> Result<ApiResponse<AdminRuntimeConfig>, AdminRuntimeConfigApiError> {
+async fn read_runtime_config(
+    mut get: impl AsyncFnMut(&str) -> Result<String, AdminRuntimeConfigApiError>,
+) -> Result<AdminRuntimeConfig, AdminRuntimeConfigApiError> {
+    let base = format!("/api/v1/admin/config?{RUNTIME_CONFIG_QUERY}");
+    let extended = format!("{base}&include_worker_restart_state=true");
+    let (body, include_worker) = match get(&extended).await {
+        // 只对明确拒绝新投影的只读请求回退一次，保留编辑器所需的既有投影。
+        Err(error) if error.status == Some(400) && error.code == "invalid_query" => {
+            (get(&base).await?, false)
+        }
+        result => (result?, true),
+    };
+    let value = decode_runtime_config_read_response(&body, include_worker)?;
+    decode_runtime_config(value, false).map_err(invalid_runtime_response)
+}
+
+async fn fetch_runtime_config_body(url: &str) -> Result<String, AdminRuntimeConfigApiError> {
     // 表单回归以完整响应替代 Fetch，后续仍走正常读取的解码路径。
     #[cfg(test)]
-    if let Some(payload) = dioxus::prelude::try_consume_context::<ApiResponse<AdminRuntimeConfig>>()
     {
-        return Ok(payload);
+        use dioxus::prelude::try_consume_context;
+
+        let payload = if let Some(stub) = try_consume_context::<RuntimeConfigStub>() {
+            Some(ApiResponse::ok("runtime 配置已加载", (stub.read)()?))
+        } else {
+            try_consume_context::<ApiResponse<AdminRuntimeConfig>>()
+        };
+        if let Some(mut payload) = payload {
+            payload.data.worker_restart_state.get_or_insert(AdminWorkerRestartStateDto::Unknown);
+            return Ok(serde_json::to_string(&payload).expect("运行配置测试投影可序列化"));
+        }
     }
 
-    let response = send_get(&format!("/api/v1/admin/config?{RUNTIME_CONFIG_QUERY}"))
-        .await
-        .map_err(AdminApiFailure::client)?;
+    let response = send_get(url).await.map_err(AdminApiFailure::client)?;
     if !response.ok() {
         return Err(response_failure(response).await);
     }
-    response.json().await.map_err(|error| AdminApiFailure::client(invalid_response_error(error)))
+    response.text().await.map_err(|error| AdminApiFailure::client(invalid_response_error(error)))
+}
+
+fn decode_runtime_config_read_response(
+    body: &str,
+    include_worker: bool,
+) -> Result<AdminRuntimeConfig, AdminRuntimeConfigApiError> {
+    let projection: ApiResponse<WorkerRestartProjection> = serde_json::from_str(body)
+        .map_err(|error| AdminApiFailure::client(invalid_response_error(error)))?;
+    if projection.data.worker_restart_state.is_some() != include_worker {
+        return Err(invalid_runtime_response("worker_restart_state"));
+    }
+
+    let mut payload: ApiResponse<AdminRuntimeConfig> = serde_json::from_str(body)
+        .map_err(|error| AdminApiFailure::client(invalid_response_error(error)))?;
+    if !include_worker {
+        payload.data.worker_restart_state = Some(AdminWorkerRestartStateDto::Unknown);
+    }
+    Ok(payload.data)
+}
+
+// 只检查投影键是否如约出现，不复制配置文档。共享 DTO 的 Option 与枚举还可接收 null 和带标签的对象。
+#[derive(Deserialize)]
+struct WorkerRestartProjection {
+    #[serde(default, deserialize_with = "deserialize_worker_restart_string")]
+    worker_restart_state: Option<String>,
+}
+
+fn deserialize_worker_restart_string<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    String::deserialize(deserializer).map(Some)
 }
 
 pub(crate) async fn validate_admin_runtime_config(
@@ -153,10 +203,18 @@ fn decode_runtime_config(
 
 #[cfg(test)]
 mod tests {
-    use auction_contracts::ApiResponse;
-    use serde_json::json;
+    use std::pin::pin;
+    use std::task::{Context, Poll, Waker};
 
-    use super::{AdminRuntimeConfig, RUNTIME_CONFIG_QUERY, decode_runtime_config};
+    use auction_contracts::AdminWorkerRestartStateDto;
+    use auction_contracts::ApiResponse;
+    use serde_json::{Value, json};
+
+    use super::{
+        AdminRuntimeConfig, RUNTIME_CONFIG_QUERY, decode_runtime_config,
+        decode_runtime_config_read_response, read_runtime_config,
+    };
+    use crate::api::AdminApiFailure;
 
     // 夹具来自带 RUNTIME_CONFIG_QUERY 的 Admin GET 响应，由 HTTP 测试
     // runtime_config_get_matches_browser_fixtures 用相同输入逐字段核对。
@@ -170,6 +228,11 @@ mod tests {
     const DISABLED_ORIGINS_PROJECTION: &str = include_str!(
         "../../../../auction-contracts/tests/fixtures/admin/runtime-config-disabled-origins.json"
     );
+    const WORKER_PROJECTION: &str = include_str!(
+        "../../../../auction-contracts/tests/fixtures/admin/runtime-config-worker-restart-state.json"
+    );
+    const BASE_URL: &str = "/api/v1/admin/config?include_equipment_taxonomy=true&include=fulfillment_collection_overdue_age_seconds";
+    const EXTENDED_URL: &str = "/api/v1/admin/config?include_equipment_taxonomy=true&include=fulfillment_collection_overdue_age_seconds&include_worker_restart_state=true";
 
     fn response(body: &str) -> AdminRuntimeConfig {
         serde_json::from_str::<ApiResponse<AdminRuntimeConfig>>(body).unwrap().data
@@ -186,6 +249,102 @@ mod tests {
             RUNTIME_CONFIG_QUERY,
             "include_equipment_taxonomy=true&include=fulfillment_collection_overdue_age_seconds"
         );
+    }
+
+    #[test]
+    fn decodes_only_known_worker_restart_states_from_the_backend_projection() {
+        assert_eq!(
+            decode_runtime_config_read_response(WORKER_PROJECTION, true)
+                .unwrap()
+                .worker_restart_state,
+            Some(AdminWorkerRestartStateDto::Unknown)
+        );
+        let mut body: Value = serde_json::from_str(WORKER_PROJECTION).unwrap();
+        for (wire, state) in [
+            ("restart_required", AdminWorkerRestartStateDto::RestartRequired),
+            ("consistent", AdminWorkerRestartStateDto::Consistent),
+        ] {
+            body["data"]["worker_restart_state"] = json!(wire);
+            assert_eq!(
+                decode_runtime_config_read_response(&body.to_string(), true)
+                    .unwrap()
+                    .worker_restart_state,
+                Some(state)
+            );
+        }
+
+        body["data"].as_object_mut().unwrap().remove("worker_restart_state");
+        let missing = decode_runtime_config_read_response(&body.to_string(), true).unwrap_err();
+        assert_eq!(missing.code, "invalid_response");
+        for invalid in [json!("outdated"), json!(false), json!({"unknown": null}), json!(null)] {
+            body["data"]["worker_restart_state"] = invalid;
+            let failure = decode_runtime_config_read_response(&body.to_string(), true).unwrap_err();
+            assert_eq!(failure.code, "invalid_response");
+        }
+        assert!(decode_runtime_config_read_response(&body.to_string(), false).is_err());
+    }
+
+    fn read_with_replies<'a>(
+        replies: impl IntoIterator<Item = (&'a str, Result<&'a str, AdminApiFailure>)>,
+    ) -> Result<AdminRuntimeConfig, AdminApiFailure> {
+        let mut replies = replies.into_iter();
+        let result = {
+            let mut read = pin!(read_runtime_config(async |url| {
+                let (expected_url, result) = replies.next().expect("收到意外的配置 GET");
+                assert_eq!(url, expected_url);
+                result.map(str::to_owned)
+            }));
+            let Poll::Ready(result) = read.as_mut().poll(&mut Context::from_waker(Waker::noop()))
+            else {
+                panic!("替身 GET 应立即完成");
+            };
+            result
+        };
+        assert!(replies.next().is_none(), "配置 GET 次数不足");
+        result
+    }
+
+    #[test]
+    fn editor_reads_worker_state_alongside_the_existing_projections() {
+        let worker: Value = serde_json::from_str(WORKER_PROJECTION).unwrap();
+        let mut combined: Value = serde_json::from_str(DEFAULT_PROJECTION).unwrap();
+        combined["data"]["worker_restart_state"] = worker["data"]["worker_restart_state"].clone();
+        let value = read_with_replies([(EXTENDED_URL, Ok(combined.to_string().as_str()))]).unwrap();
+        assert!(value.equipment_taxonomy.is_some());
+        assert_eq!(value.worker_restart_state, Some(AdminWorkerRestartStateDto::Unknown));
+        let missing_state = read_with_replies([(EXTENDED_URL, Ok(DEFAULT_PROJECTION))]);
+        assert_eq!(missing_state.unwrap_err().code, "invalid_response");
+        let missing_editor_projections = read_with_replies([(EXTENDED_URL, Ok(WORKER_PROJECTION))]);
+        assert_eq!(missing_editor_projections.unwrap_err().code, "invalid_response");
+    }
+
+    #[test]
+    fn editor_falls_back_once_only_on_http_400_invalid_query() {
+        const INVALID_QUERY: &str =
+            r#"{"code":"invalid_query","message":"不支持查询参数","data":null,"request_id":null}"#;
+        let invalid_query = || AdminApiFailure::from_http_body(400, INVALID_QUERY);
+        let value = read_with_replies([
+            (EXTENDED_URL, Err(invalid_query())),
+            (BASE_URL, Ok(DEFAULT_PROJECTION)),
+        ])
+        .unwrap();
+        assert!(value.equipment_taxonomy.is_some());
+        assert_eq!(value.worker_restart_state, Some(AdminWorkerRestartStateDto::Unknown));
+        let rejected = read_with_replies([
+            (EXTENDED_URL, Err(invalid_query())),
+            (BASE_URL, Err(invalid_query())),
+        ])
+        .unwrap_err();
+        assert_eq!((rejected.status, rejected.code.as_str()), (Some(400), "invalid_query"));
+
+        for error in [
+            AdminApiFailure::from_http_body(400, ""),
+            AdminApiFailure::from_http_body(503, INVALID_QUERY),
+            AdminApiFailure::client("invalid_query"),
+        ] {
+            let actual = read_with_replies([(EXTENDED_URL, Err(error.clone()))]).unwrap_err();
+            assert_eq!((actual.status, actual.code), (error.status, error.code));
+        }
     }
 
     #[test]
@@ -366,7 +525,6 @@ mod tests {
     }
     #[test]
     fn runtime_config_validate_contract_fixtures() {
-        use crate::api::AdminApiFailure;
         use crate::api::contract_fixtures::{admin_fixture, decode};
 
         for (body, taxonomy, threshold) in [

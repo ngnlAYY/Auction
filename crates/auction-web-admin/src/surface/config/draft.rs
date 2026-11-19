@@ -60,7 +60,7 @@ impl ConfigDraft {
     }
 
     pub(super) fn remember_restart_notice(self, required: bool) {
-        // GET 只读取文件，不能证明进程已加载配置。没有重启确认时提醒随当前页面会话保留。
+        // 通用重启提醒涵盖所有受影响的进程，Worker 冷配置状态不能清除它。
         if required {
             set_if_alive(self.restart_required, true);
         }

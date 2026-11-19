@@ -1,6 +1,7 @@
 //! 运行配置读取世代与表单快照装配。
 
 use auction_contracts::AdminRuntimeConfigResponse;
+use auction_contracts::AdminWorkerRestartStateDto;
 use dioxus::prelude::*;
 
 use super::draft::ConfigDraft;
@@ -22,6 +23,7 @@ pub(super) struct CompletedConfigRead {
     pub(super) generation: u64,
     pub(super) status: ConfigReadStatus,
     pub(super) restart_required: bool,
+    pub(super) worker_restart_state: Option<AdminWorkerRestartStateDto>,
 }
 
 impl CompletedConfigRead {
@@ -39,7 +41,7 @@ pub(super) fn use_config_read(
     issues: Signal<Vec<FieldIssue>>,
 ) -> (Signal<bool>, Signal<Option<CompletedConfigRead>>) {
     let mut editor_mounted = use_signal(|| false);
-    let mut completed = use_signal(|| None);
+    let mut completed = use_signal(|| None::<CompletedConfigRead>);
     let config = use_resource(move || {
         let generation = (draft.refresh)();
         async move {
@@ -65,14 +67,28 @@ pub(super) fn use_config_read(
         if *loaded_generation != generation {
             return;
         }
-        let (status, restart_required) = match result {
-            Ok(value) => (apply_config_read(draft, pending, issues, value), value.restart_required),
-            Err(error) => (ConfigReadStatus::Error(error.code.clone()), false),
+        let (status, restart_required, worker_restart_state) = match result {
+            Ok(value) => (
+                apply_config_read(draft, pending, issues, value),
+                value.restart_required,
+                value.worker_restart_state,
+            ),
+            // 失败不能替换最近一次成功读取的 Worker 状态。
+            Err(error) => (
+                ConfigReadStatus::Error(error.code.clone()),
+                false,
+                completed.peek().as_ref().and_then(|read| read.worker_restart_state),
+            ),
         };
         if matches!(status, ConfigReadStatus::Ready(_) | ConfigReadStatus::Conflict) {
             editor_mounted.set(true);
         }
-        completed.set(Some(CompletedConfigRead { generation, status, restart_required }));
+        completed.set(Some(CompletedConfigRead {
+            generation,
+            status,
+            restart_required,
+            worker_restart_state,
+        }));
     });
 
     (editor_mounted, completed)

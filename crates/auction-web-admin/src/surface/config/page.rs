@@ -1,5 +1,6 @@
 //! 运行配置页面：草稿、校验、保存与事实展示。
 
+use auction_contracts::AdminWorkerRestartStateDto;
 use auction_web_shared::{AsyncState, AsyncStateKind, Dialog, t};
 use dioxus::prelude::*;
 use serde_json::Value;
@@ -95,6 +96,7 @@ fn RuntimeConfigDocument() -> Element {
     let current = completed.as_ref().filter(|read| read.generation == read_generation);
     let read_status = current.map(|read| &read.status);
     let read_requires_restart = current.is_some_and(|read| read.restart_required);
+    let worker_restart_state = completed.as_ref().and_then(|read| read.worker_restart_state);
     let read_feedback = match read_status {
         Some(ConfigReadStatus::Ready(_)) => None,
         Some(ConfigReadStatus::Conflict) => {
@@ -448,6 +450,22 @@ fn RuntimeConfigDocument() -> Element {
                     }
                 }
             }
+            div { role: "status",
+                if let Some(state) = worker_restart_state {
+                    p {
+                        class: if state == AdminWorkerRestartStateDto::RestartRequired {
+                            "admin-panel__note admin-runtime-config__restart"
+                        } else {
+                            "admin-panel__note"
+                        },
+                        {match state {
+                            AdminWorkerRestartStateDto::RestartRequired => t!("admin-runtime-worker-restart-required"),
+                            AdminWorkerRestartStateDto::Consistent => t!("admin-runtime-worker-restart-consistent"),
+                            AdminWorkerRestartStateDto::Unknown => t!("admin-runtime-worker-restart-unknown"),
+                        }}
+                    }
+                }
+            }
             {content}
             {read_panel}
             if reload_confirm_open() {
@@ -518,10 +536,11 @@ mod tests {
     use std::rc::Rc;
 
     use auction_contracts::{
-        AdminRuntimeConfigResponse, AdminRuntimeConfigUpdateRequest, ApiResponse,
+        AdminRuntimeConfigResponse, AdminRuntimeConfigUpdateRequest, AdminWorkerRestartStateDto,
+        ApiResponse,
     };
     use dioxus::core::{
-        AttributeValue, DynamicNode, ElementId, ScopeId, TemplateAttribute, TemplateNode,
+        AttributeValue, DynamicNode, ElementId, Mutation, ScopeId, TemplateAttribute, TemplateNode,
         VirtualDom,
     };
     use dioxus::prelude::*;
@@ -627,6 +646,77 @@ mod tests {
         .is_some()
     }
 
+    fn template_text_attribute<'a>(
+        node: &'a VNode,
+        attrs: &[TemplateAttribute],
+        name: &str,
+    ) -> Option<&'a str> {
+        attrs.iter().find_map(|attr| match attr {
+            TemplateAttribute::Static { name: key, value, .. } if *key == name => Some(*value),
+            TemplateAttribute::Dynamic { id } => {
+                node.dynamic_attrs[*id].iter().find_map(|attr| match &attr.value {
+                    AttributeValue::Text(value) if attr.name == name => Some(value.as_str()),
+                    _ => None,
+                })
+            }
+            _ => None,
+        })
+    }
+
+    fn worker_status_region(page: &TestPage, expected: &str, warning: bool) -> ElementId {
+        let dom = page.dom();
+        find_in_tree(dom, dom.base_scope().root_node(), &|node| {
+            node.template.roots.iter().enumerate().find_map(|(index, root)| {
+                let TemplateNode::Element { attrs, children, .. } = root else { return None };
+                if template_text_attribute(node, attrs, "role") != Some("status") {
+                    return None;
+                }
+                let classes = children.iter().find_map(|child| {
+                    let TemplateNode::Dynamic { id } = child else { return None };
+                    let DynamicNode::Fragment(lines) = &node.dynamic_nodes[*id] else {
+                        return None;
+                    };
+                    lines.iter().find_map(|line| {
+                        let [TemplateNode::Element { attrs, children, .. }] = line.template.roots
+                        else {
+                            return None;
+                        };
+                        let contains_text = children.iter().any(|child| {
+                            matches!(child, TemplateNode::Dynamic { id }
+                                if matches!(&line.dynamic_nodes[*id],
+                                    DynamicNode::Text(text) if text.value == expected))
+                        });
+                        contains_text.then(|| {
+                            template_text_attribute(line, attrs, "class").unwrap_or_default()
+                        })
+                    })
+                })?;
+                assert!(classes.split_ascii_whitespace().any(|class| class == "admin-panel__note"));
+                assert_eq!(
+                    classes
+                        .split_ascii_whitespace()
+                        .any(|class| class == "admin-runtime-config__restart"),
+                    warning,
+                    "Worker 状态行的重启警示样式应与状态一致",
+                );
+                node.mounted_root(index, dom)
+            })
+        })
+        .unwrap_or_else(|| panic!("状态播报容器缺少文本「{expected}」"))
+    }
+
+    fn assert_status_region_kept(region: ElementId, edits: &[Mutation]) {
+        // 挂载 ID 可以复用，须同时确认渲染指令没有移除或重新挂载原容器。
+        assert!(
+            edits.iter().all(|edit| !matches!(edit,
+                Mutation::Remove { id } | Mutation::ReplaceWith { id, .. }
+                    | Mutation::LoadTemplate { id, .. } | Mutation::AssignId { id, .. }
+                    if *id == region
+            )),
+            "后台读取须保留原状态播报容器"
+        );
+    }
+
     struct ConfigRequests {
         projection: RefCell<AdminRuntimeConfigResponse>,
         reads: Cell<usize>,
@@ -655,6 +745,7 @@ mod tests {
             saved.fingerprint = format!("sha256:{}", "1".repeat(64));
             let mut response = saved.clone();
             response.restart_required = true;
+            response.worker_restart_state = None;
             response
         }
     }
@@ -758,6 +849,9 @@ mod tests {
         let input = text_attributes(&initial, "data-runtime-number")
             .find_map(|(id, path)| (path == PATH).then_some(id))
             .unwrap();
+        let unknown = "无法确认运行中的 Worker 是否已采用当前配置（没有可比较的在线 Worker，或其版本不提供这项信息）。";
+        let consistent = "运行中的 Worker 已采用当前配置文件里需要重启才生效的设置。";
+        let region = worker_status_region(&page, unknown, false);
         page.dispatch("input", input, "0");
         let blurred = page.dispatch("blur", input, "");
         assert!(text_attributes(&blurred, "aria-invalid").any(|entry| entry == (input, "true")));
@@ -765,15 +859,24 @@ mod tests {
         let description = text_attributes(&blurred, "aria-describedby")
             .find_map(|(id, value)| (id == input).then_some(value))
             .expect("离焦后数值错误须关联到输入控件");
-        click_button(&mut page, "后台重读");
+        let pending = click_button(&mut page, "后台重读");
         assert_eq!(gate.started(), 1);
         assert!(has_live_text(&page, "正在加载运行时配置……"));
+        assert_eq!(worker_status_region(&page, unknown, false), region);
+        assert_status_region_kept(region, &pending);
         assert_field(&page, input, "0", false);
         assert_invalid_field(&page, input, description);
         assert_eq!(submit_button_disabled(&page, "校验候选配置"), Some(true));
-        snapshot.borrow_mut().equipment_taxonomy.as_mut().unwrap().revision = "test-2".to_owned();
+        {
+            let mut next = snapshot.borrow_mut();
+            next.equipment_taxonomy.as_mut().unwrap().revision = "test-2".to_owned();
+            next.worker_restart_state = Some(AdminWorkerRestartStateDto::Consistent);
+        }
         gate.respond(Ok(()));
         let same = settle_writer(&mut page);
+        assert!(!has_live_text(&page, unknown));
+        assert_eq!(worker_status_region(&page, consistent, false), region);
+        assert_status_region_kept(region, &same);
         assert!(!text_attributes(&same, "data-runtime-number").any(|(_, path)| path == PATH));
         assert_field(&page, input, "0", false);
         assert_invalid_field(&page, input, description);
@@ -785,9 +888,13 @@ mod tests {
         });
 
         snapshot.borrow_mut().fingerprint = format!("sha256:{}", "2".repeat(64));
-        click_button(&mut page, "后台重读");
+        let pending = click_button(&mut page, "后台重读");
+        assert_eq!(worker_status_region(&page, consistent, false), region);
+        assert_status_region_kept(region, &pending);
         gate.respond(Ok(()));
         let changed = settle_writer(&mut page);
+        assert_eq!(worker_status_region(&page, consistent, false), region);
+        assert_status_region_kept(region, &changed);
         assert!(!text_attributes(&changed, "data-runtime-number").any(|(_, path)| path == PATH));
         let conflict = "配置已经变化，请重新加载后再次校验。";
         assert!(has_live_text(&page, conflict));
@@ -1021,6 +1128,7 @@ mod tests {
                 "../../../../auction-contracts/tests/fixtures/admin/runtime-config-default.json"
             ))
             .unwrap();
+        response.data.worker_restart_state = Some(AdminWorkerRestartStateDto::RestartRequired);
         let forum = &mut response.data.document["operations"]["forum"];
         forum["managed"] = json!(true);
         forum["lease_duration_seconds"] = json!(300);
@@ -1056,23 +1164,34 @@ mod tests {
         });
         let saved = "运行时配置已写入 TOML 文件。";
         let restart = "请重启受影响的进程，以应用尚未生效的配置。";
+        let worker_restart =
+            "当前配置文件里有尚未被运行中的 Worker 采用的设置，重启 Worker 后生效。";
+        let worker_consistent = "运行中的 Worker 已采用当前配置文件里需要重启才生效的设置。";
         let error = "所需服务暂时不可用。请稍后再试。";
         assert!(!has_live_text(&page, saved));
         assert!(!has_live_text(&page, restart));
+        let region = worker_status_region(&page, worker_restart, true);
         click_button(&mut page, "准备已校验的候选");
         click_button(&mut page, "写入配置");
-        click_button(&mut page, "确认");
+        let failed_read = click_button(&mut page, "确认");
         assert_eq!(requests.writes.get(), 1);
         assert_eq!(requests.reads.get(), 2);
         assert!(has_live_text(&page, error));
         assert!(button(&page, "写入配置").is_some_and(|(_, disabled)| disabled));
         assert!(has_live_text(&page, saved));
         assert!(has_live_text(&page, restart));
-        click_button(&mut page, "重试");
+        assert_eq!(worker_status_region(&page, worker_restart, true), region);
+        assert_status_region_kept(region, &failed_read);
+        requests.projection.borrow_mut().worker_restart_state =
+            Some(AdminWorkerRestartStateDto::Consistent);
+        let retried = click_button(&mut page, "重试");
         assert_eq!(requests.reads.get(), 3);
         assert!(!has_live_text(&page, error));
         assert!(has_live_text(&page, saved));
         assert!(has_live_text(&page, restart));
+        assert_eq!(worker_status_region(&page, worker_consistent, false), region);
+        assert_status_region_kept(region, &retried);
+        assert!(!has_live_text(&page, worker_restart));
     }
 
     #[test]
