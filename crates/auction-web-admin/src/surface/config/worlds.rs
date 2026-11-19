@@ -334,11 +334,11 @@ mod tests {
                     "world:main".to_owned(), "关闭业务世界".to_owned(),
                     move |_| {
                         let previous = writes.replace(writes.get() + 1);
-                        ready(if previous == 0 {
-                            Err(AdminApiFailure::from_http_body(
+                        ready((previous != 0).ok_or_else(|| {
+                            AdminApiFailure::from_http_body(
                                 503, r#"{"code":"storage_unavailable","message":"暂不可用","data":null,"request_id":null}"#,
-                            ).code)
-                        } else { Ok(()) })
+                            ).code
+                        }))
                     }, |()| {}, |_| {},
                 ));
             }, {"从原先的卡片发起命令".to_owned()} }

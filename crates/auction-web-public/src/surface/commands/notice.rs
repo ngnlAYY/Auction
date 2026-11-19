@@ -107,17 +107,19 @@ fn receipt_focus(receipts: &[CommandReceipt], index: usize, has_unknown: bool) -
 }
 
 fn focus_after_dismiss(target: &str) {
-    #[cfg(target_arch = "wasm32")]
-    if let Some(document) = web_sys::window().and_then(|window| window.document())
-        && let Some(element) = document
-            .get_element_by_id(target)
-            .or_else(|| document.get_element_by_id(CONTENT))
-            .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
-    {
-        let _ = element.focus();
+    cfg_select! {
+        target_arch = "wasm32" => {
+            if let Some(document) = web_sys::window().and_then(|window| window.document())
+                && let Some(element) = document
+                    .get_element_by_id(target)
+                    .or_else(|| document.get_element_by_id(CONTENT))
+                    .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
+            {
+                let _ = element.focus();
+            }
+        }
+        _ => { let _ = target; }
     }
-    #[cfg(not(target_arch = "wasm32"))]
-    let _ = target;
 }
 
 #[cfg(test)]

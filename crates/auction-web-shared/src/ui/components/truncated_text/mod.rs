@@ -185,12 +185,12 @@ pub fn TruncatedText(
     });
     // 固定宽度文本变化不触发 ResizeObserver；内容提交到 DOM 后重测，且不保留旧 portal 正文。
     use_effect(use_reactive((&value, &display), move |_| {
-        #[cfg(target_arch = "wasm32")]
-        let element = mounted_element.peek().clone();
-        #[cfg(not(target_arch = "wasm32"))]
-        let element = document::current().and_then(|document| {
-            document.get_element_by_id(&format!("{}-trigger", tooltip_id.peek()))
-        });
+        let element = cfg_select! {
+            target_arch = "wasm32" => mounted_element.peek().clone(),
+            _ => document::current().and_then(|document| {
+                document.get_element_by_id(&format!("{}-trigger", tooltip_id.peek()))
+            }),
+        };
         if let Some(element) = element {
             interaction.close_programmatically(&tooltip_id.peek());
             update_truncated_state(

@@ -260,20 +260,19 @@ fn redirect_admin_alias(path: &'static str) -> Element {
     rsx! {}
 }
 
-#[cfg(target_arch = "wasm32")]
 fn current_browser_suffix() -> String {
-    let Some(window) = web_sys::window() else {
-        return String::new();
-    };
-    let location = window.location();
-    let search = location.search().unwrap_or_default();
-    let hash = location.hash().unwrap_or_default();
-    format!("{search}{hash}")
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn current_browser_suffix() -> String {
-    String::new()
+    cfg_select! {
+        target_arch = "wasm32" => {
+            let Some(window) = web_sys::window() else {
+                return String::new();
+            };
+            let location = window.location();
+            let search = location.search().unwrap_or_default();
+            let hash = location.hash().unwrap_or_default();
+            format!("{search}{hash}")
+        }
+        _ => String::new(),
+    }
 }
 
 /// 宿主测试可在真实的认证 Outlet 注入本地命令夹具。

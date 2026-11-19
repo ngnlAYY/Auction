@@ -8,26 +8,28 @@ pub(super) fn parse(value: &str, maximum: Option<i64>) -> Option<i64> {
 }
 
 pub(super) fn load(scope: &str, maximum: Option<i64>) -> i64 {
-    #[cfg(target_arch = "wasm32")]
-    {
-        auction_web_shared::storage::get_item(&format!("hv.admin.page-size:{scope}"))
-            .as_deref()
-            .and_then(|value| parse(value, maximum))
-            .unwrap_or(10)
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let _ = (scope, maximum);
-        10
+    cfg_select! {
+        target_arch = "wasm32" => {
+            auction_web_shared::storage::get_item(&format!("hv.admin.page-size:{scope}"))
+                .as_deref()
+                .and_then(|value| parse(value, maximum))
+                .unwrap_or(10)
+        }
+        _ => {
+            let _ = (scope, maximum);
+            10
+        }
     }
 }
 
 pub(super) fn save(scope: &str, size: i64) {
-    #[cfg(target_arch = "wasm32")]
-    let _ = auction_web_shared::storage::set_item(
-        &format!("hv.admin.page-size:{scope}"),
-        &size.to_string(),
-    );
-    #[cfg(not(target_arch = "wasm32"))]
-    let _ = (scope, size);
+    cfg_select! {
+        target_arch = "wasm32" => {
+            let _ = auction_web_shared::storage::set_item(
+                &format!("hv.admin.page-size:{scope}"),
+                &size.to_string(),
+            );
+        }
+        _ => { let _ = (scope, size); }
+    }
 }

@@ -1,5 +1,6 @@
 //! 排期和生命周期对话框使用真实的页级草稿、行入口与读取逻辑，列表响应由测试控制。
 
+use std::assert_matches;
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -177,7 +178,7 @@ impl AuctionCommandTest {
         assert!(self.test.drafts.get().unwrap().auction_id().is_none());
         assert_eq!(self.test.reads.started(), 2, "冲突后的读取已完成");
         assert_eq!(self.test.displayed_version.get(), Some(version));
-        assert!(matches!(button(&self.page, entry), Some((_, false))));
+        assert_matches!(button(&self.page, entry), Some((_, false)));
     }
 
     fn accept_new_command(&mut self, form: ElementId, response: AdminAuction) -> CapturedWrite {

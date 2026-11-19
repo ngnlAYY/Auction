@@ -116,15 +116,14 @@ impl PublicBoardQuery {
 }
 
 pub(crate) fn read_public_query() -> PublicBoardQuery {
-    #[cfg(any(target_arch = "wasm32", test))]
-    {
-        let location = current_public_location();
-        let (path, search, _) = location_parts(&location);
-        parse_public_query(path, search)
+    cfg_select! {
+        any(target_arch = "wasm32", test) => {
+            let location = current_public_location();
+            let (path, search, _) = location_parts(&location);
+            parse_public_query(path, search)
+        }
+        _ => PublicBoardQuery::default(),
     }
-
-    #[cfg(not(any(target_arch = "wasm32", test)))]
-    PublicBoardQuery::default()
 }
 
 fn current_public_location() -> String {
@@ -319,6 +318,8 @@ pub(crate) fn redirect_public_alias_if(path: &'static str, may_redirect: fn() ->
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use super::*;
 
     fn pairs(values: &[(&str, &str)]) -> Vec<(String, String)> {
@@ -474,7 +475,7 @@ mod tests {
         }
 
         let duplicate = parse_public_query("/", &format!("?auction={AUCTION}&auction={AUCTION}"));
-        assert!(matches!(duplicate.auction_parameter(), AuctionParameter::Invalid(_)));
+        assert_matches!(duplicate.auction_parameter(), AuctionParameter::Invalid(_));
         assert_eq!(
             public_query_pairs(&duplicate).into_iter().filter(|(key, _)| key == "auction").count(),
             2

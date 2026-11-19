@@ -455,6 +455,7 @@ mod tests {
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod form_tests {
+    use std::assert_matches;
     use std::rc::Rc;
 
     use auction_web_shared::i18n::{DEFAULT_ADMIN_LOCALE, build_bundle};
@@ -625,18 +626,24 @@ mod form_tests {
         dispatch(&dom, label, "input", "账号一");
         dispatch(&dom, submit, "submit", "");
         let invalid_cookie = dom.render_immediate_to_vec().edits;
-        assert!(matches!(attribute(&invalid_cookie, cookie, "aria-invalid"),
-            Some(AttributeValue::Text(value)) if value == "true"));
+        assert_matches!(
+            attribute(&invalid_cookie, cookie, "aria-invalid"),
+            Some(AttributeValue::Text(value)) if value == "true"
+        );
 
         dispatch(&dom, label, "input", " ");
         dispatch(&dom, label, "blur", "");
         let invalid_label = dom.render_immediate_to_vec().edits;
-        assert!(matches!(attribute(&invalid_label, label, "aria-invalid"),
-            Some(AttributeValue::Text(value)) if value == "true"));
+        assert_matches!(
+            attribute(&invalid_label, label, "aria-invalid"),
+            Some(AttributeValue::Text(value)) if value == "true"
+        );
         dispatch(&dom, cookie, "input", "example=value");
         let corrected_cookie = dom.render_immediate_to_vec().edits;
-        assert!(matches!(attribute(&corrected_cookie, cookie, "aria-invalid"),
-            Some(AttributeValue::Text(value)) if value == "false"));
+        assert_matches!(
+            attribute(&corrected_cookie, cookie, "aria-invalid"),
+            Some(AttributeValue::Text(value)) if value == "false"
+        );
         browser.fire_timer();
         assert!(dom.render_immediate_to_vec().edits.iter().any(|edit| matches!(edit,
             Mutation::SetText { value, .. } if value == "请填写此字段。"

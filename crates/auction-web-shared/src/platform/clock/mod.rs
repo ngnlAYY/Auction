@@ -18,13 +18,9 @@ extern "C" {
 
 /// 当前页面的单调毫秒，只用于计时；宿主构建没有浏览器时钟。
 pub fn monotonic_millis() -> f64 {
-    #[cfg(target_arch = "wasm32")]
-    {
-        performance_now()
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        0.0
+    cfg_select! {
+        target_arch = "wasm32" => performance_now(),
+        _ => 0.0,
     }
 }
 

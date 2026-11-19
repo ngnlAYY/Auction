@@ -172,16 +172,12 @@ async fn move_reason_focus(input: Option<&MountedData>, has_focus: impl Fn() -> 
 }
 
 fn reason_has_focus() -> bool {
-    #[cfg(target_arch = "wasm32")]
-    {
-        web_sys::window()
+    cfg_select! {
+        target_arch = "wasm32" => web_sys::window()
             .and_then(|window| window.document())
             .and_then(|document| document.active_element())
-            .is_some_and(|element| element.id() == REASON_INPUT_ID)
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        false
+            .is_some_and(|element| element.id() == REASON_INPUT_ID),
+        _ => false,
     }
 }
 

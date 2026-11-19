@@ -7,31 +7,31 @@ use wasm_bindgen::JsCast;
 
 /// 原生 change 已改变选项。提交被拒时显式恢复 DOM，原 props 不变时虚拟 DOM 不会重写它。
 pub fn restore_select_value(event: &FormEvent, applied: &str) {
-    #[cfg(target_arch = "wasm32")]
-    if let Some(select) = event
-        .data()
-        .downcast::<web_sys::Event>()
-        .and_then(web_sys::Event::target)
-        .and_then(|target| target.dyn_into::<web_sys::HtmlSelectElement>().ok())
-    {
-        select.set_value(applied);
+    cfg_select! {
+        target_arch = "wasm32" => if let Some(select) = event
+            .data()
+            .downcast::<web_sys::Event>()
+            .and_then(web_sys::Event::target)
+            .and_then(|target| target.dyn_into::<web_sys::HtmlSelectElement>().ok())
+        {
+            select.set_value(applied);
+        },
+        _ => { let _ = (event, applied); }
     }
-    #[cfg(not(target_arch = "wasm32"))]
-    let _ = (event, applied);
 }
 
 /// 显式恢复尚未提交的输入值，保留原控件及焦点。
 pub(crate) fn restore_input_value(event: &MountedEvent, applied: &str) {
-    #[cfg(target_arch = "wasm32")]
-    if let Some(input) = event
-        .data()
-        .downcast::<web_sys::Element>()
-        .and_then(|element| element.dyn_ref::<web_sys::HtmlInputElement>())
-    {
-        input.set_value(applied);
+    cfg_select! {
+        target_arch = "wasm32" => if let Some(input) = event
+            .data()
+            .downcast::<web_sys::Element>()
+            .and_then(|element| element.dyn_ref::<web_sys::HtmlInputElement>())
+        {
+            input.set_value(applied);
+        },
+        _ => { let _ = (event, applied); }
     }
-    #[cfg(not(target_arch = "wasm32"))]
-    let _ = (event, applied);
 }
 
 /// 单行输入会剔除换行，必要时提供可读的转义原文。

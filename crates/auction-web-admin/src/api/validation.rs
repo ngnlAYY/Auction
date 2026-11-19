@@ -43,17 +43,14 @@ pub(crate) fn parse_admin_time(value: &str) -> Option<f64> {
         return None;
     }
 
-    #[cfg(target_arch = "wasm32")]
-    {
-        let timestamp = js_sys::Date::parse(value);
-        timestamp.is_finite().then_some(timestamp)
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        auction_time::Timestamp::parse_from_rfc3339(value)
+    cfg_select! {
+        target_arch = "wasm32" => {
+            let timestamp = js_sys::Date::parse(value);
+            timestamp.is_finite().then_some(timestamp)
+        }
+        _ => auction_time::Timestamp::parse_from_rfc3339(value)
             .ok()
-            .map(|value| value.timestamp_millis() as f64)
+            .map(|value| value.timestamp_millis() as f64),
     }
 }
 

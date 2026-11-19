@@ -203,6 +203,7 @@ pub(in crate::surface) fn focus_draft_field_after_render(_field_id: String) {
 
 #[cfg(test)]
 pub(in crate::surface) mod tests {
+    use std::assert_matches;
     use std::cell::{Cell, RefCell};
     use std::collections::VecDeque;
     use std::future::poll_fn;
@@ -326,7 +327,7 @@ pub(in crate::surface) mod tests {
                 })
             })
         };
-        assert!(matches!(attribute("value"), Some(AttributeValue::Text(text)) if text == value));
+        assert_matches!(attribute("value"), Some(AttributeValue::Text(text)) if text == value);
         assert_eq!(matches!(attribute("readonly"), Some(AttributeValue::Bool(true))), read_only);
         assert!(!matches!(attribute("disabled"), Some(AttributeValue::Bool(true))));
         if read_only && let Some(AttributeValue::Text(kind)) = attribute("type") {

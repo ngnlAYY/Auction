@@ -248,6 +248,7 @@ fn submit_lot_update(
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
     use std::cell::Cell;
     use std::rc::Rc;
 
@@ -469,7 +470,7 @@ mod tests {
         test.editing_price();
         click_button(&mut test.page, DIALOG_TITLE_CLOSE);
         assert!(test.controls.draft.peek().is_none());
-        assert!(matches!(button(&test.page, REPRICE), Some((_, false))));
+        assert_matches!(button(&test.page, REPRICE), Some((_, false)));
         test.open_price("100");
     }
 
@@ -515,7 +516,7 @@ mod tests {
         click_button(&mut test.page, DIALOG_TITLE_CLOSE);
         assert!(test.controls.draft.peek().is_none());
         assert_eq!(test.test.reads.started(), 2, "应等待已在途的读取");
-        assert!(matches!(button(&test.page, REPRICE), Some((_, true))));
+        assert_matches!(button(&test.page, REPRICE), Some((_, true)));
         test.test.reads.respond(Ok(lot(8, 100, "withdrawn")));
         settle_writer(&mut test.page);
         assert!(button(&test.page, REPRICE).is_none());
@@ -534,7 +535,7 @@ mod tests {
         click_button(&mut test.page, CLOSE_AND_REFRESH);
         assert!(test.controls.draft.peek().is_none());
         assert_eq!(test.test.reads.started(), 3);
-        assert!(matches!(button(&test.page, REPRICE), Some((_, true))));
+        assert_matches!(button(&test.page, REPRICE), Some((_, true)));
         test.test.reads.respond(Ok(lot(8, 200, "pending")));
         settle_writer(&mut test.page);
         test.open_price("200");
@@ -553,10 +554,10 @@ mod tests {
             test.submit(form);
             let first = test.take_request();
             assert!(test.occupied());
-            assert!(matches!(
+            assert_matches!(
                 command_button(&test.page, first.command_id(), "原样重试"),
                 Some((_, false))
-            ));
+            );
             assert!(button(&test.page, CLOSE_AND_REFRESH).is_none());
             assert!(!has_live_text(&test.page, "这条记录已被其他操作更新，本次修改没有生效。"));
             assert_eq!(test.controls.draft.peek().as_ref().unwrap().price, EDITED_PRICE);

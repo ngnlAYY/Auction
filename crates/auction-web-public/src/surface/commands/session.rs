@@ -1009,6 +1009,7 @@ mod tests {
     }
 
     mod form {
+        use std::assert_matches;
         use std::cell::{Cell, RefCell};
         use std::rc::Rc;
 
@@ -1338,10 +1339,10 @@ mod tests {
                         error: CommandError { code: error.code().to_owned(), status: 401 },
                     });
                     assert_eq!(status, expected);
-                    assert!(matches!(
+                    assert_matches!(
                         store.command(RECEIPT_LOT).unwrap().status,
                         CommandStatus::Unknown { retrying: false, .. }
-                    ));
+                    );
                 });
 
                 read.release();

@@ -306,6 +306,7 @@ fn apply_lot_filter(
 }
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
     use std::cell::{Cell, RefCell};
     use std::future::{Future, poll_fn, ready};
     use std::pin::pin;
@@ -409,7 +410,7 @@ mod tests {
         }
 
         fn write(&self, query: &PublicBoardQuery, mode: QueryWriteMode) -> bool {
-            assert!(matches!(mode, QueryWriteMode::Replace));
+            assert_matches!(mode, QueryWriteMode::Replace);
             self.try_write(query)
         }
 
@@ -465,7 +466,7 @@ mod tests {
         let address = history.query.borrow().clone();
         dom.in_scope(ScopeId::APP, || {
             selection.select_with(query, address, |next, mode| {
-                assert!(matches!(mode, QueryWriteMode::Push));
+                assert_matches!(mode, QueryWriteMode::Push);
                 history.try_write(next)
             })
         })

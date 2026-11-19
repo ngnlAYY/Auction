@@ -140,7 +140,7 @@ impl AdminApiFailure {
 
     /// 取适用于既有界面文案的码，去掉浏览器内部的阶段标记。
     pub(crate) fn display_code(code: &str) -> &str {
-        let code = code.strip_prefix(NOT_SENT_PREFIX).unwrap_or(code);
+        let code = code.trim_prefix(NOT_SENT_PREFIX);
         Self::write_endpoint_code(code).map_or(code, |(_, _, display)| display)
     }
 

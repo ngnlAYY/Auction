@@ -89,16 +89,15 @@ fn browser_path_and_search() -> Option<String> {
         let (path, search, _) = location_parts(&location);
         return Some(format!("{path}{search}"));
     }
-    #[cfg(target_arch = "wasm32")]
-    {
-        let location = web_sys::window()?.location();
-        let pathname = location.pathname().ok()?;
-        let search = location.search().unwrap_or_default();
-        Some(format!("{pathname}{search}"))
+    cfg_select! {
+        target_arch = "wasm32" => {
+            let location = web_sys::window()?.location();
+            let pathname = location.pathname().ok()?;
+            let search = location.search().unwrap_or_default();
+            Some(format!("{pathname}{search}"))
+        }
+        _ => None,
     }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    None
 }
 
 #[cfg(test)]

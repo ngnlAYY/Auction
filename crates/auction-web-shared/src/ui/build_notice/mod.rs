@@ -168,6 +168,7 @@ fn reload_page() {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
     use std::{
         pin::Pin,
         task::{Context, Poll},
@@ -217,21 +218,21 @@ mod tests {
         assert!(!build_is_stale());
         {
             let mut wait = wait_for_build_drift();
-            assert!(matches!(poll(&mut wait), Poll::Pending));
+            assert_matches!(poll(&mut wait), Poll::Pending);
         }
 
         let mut wait = wait_for_build_drift();
-        assert!(matches!(poll(&mut wait), Poll::Pending));
+        assert_matches!(poll(&mut wait), Poll::Pending);
         assert!(observe_server_build_id("build_other"));
         assert!(build_is_stale());
-        assert!(matches!(poll(&mut wait), Poll::Ready(())));
+        assert_matches!(poll(&mut wait), Poll::Ready(()));
         // 已置位后新登记的等待立即就绪，重复报告保持同一状态。
-        assert!(matches!(poll(&mut wait_for_build_drift()), Poll::Ready(())));
+        assert_matches!(poll(&mut wait_for_build_drift()), Poll::Ready(()));
         assert!(observe_server_build_id("build_other"));
         assert!(build_is_stale());
         reset_for_tests();
         assert!(!build_is_stale());
-        assert!(matches!(poll(&mut wait_for_build_drift()), Poll::Pending));
+        assert_matches!(poll(&mut wait_for_build_drift()), Poll::Pending);
         reset_for_tests();
     }
 }

@@ -23,12 +23,10 @@ pub(super) use web_sys::{Document, Element, HtmlElement as PortalElement};
 pub(super) type Document = Rc<TooltipBrowserFixture>;
 
 pub(super) fn current() -> Option<Document> {
-    #[cfg(target_arch = "wasm32")]
-    {
-        web_sys::window()?.document()
+    cfg_select! {
+        target_arch = "wasm32" => web_sys::window()?.document(),
+        _ => try_consume_context(),
     }
-    #[cfg(not(target_arch = "wasm32"))]
-    try_consume_context()
 }
 
 pub(super) fn top_dialog(document: &Document) -> Option<Element> {
@@ -51,12 +49,10 @@ pub(super) fn top_dialog(document: &Document) -> Option<Element> {
 }
 
 pub(super) fn contains(parent: &Element, element: &Element) -> bool {
-    #[cfg(target_arch = "wasm32")]
-    {
-        parent.contains(Some(element.as_ref()))
+    cfg_select! {
+        target_arch = "wasm32" => parent.contains(Some(element.as_ref())),
+        _ => parent.contains(element),
     }
-    #[cfg(not(target_arch = "wasm32"))]
-    parent.contains(element)
 }
 
 pub(super) fn focus_trigger(document: &Document, trigger: &Element) {
@@ -66,10 +62,10 @@ pub(super) fn focus_trigger(document: &Document, trigger: &Element) {
 }
 
 fn focus(_document: &Document, element: Element) {
-    #[cfg(target_arch = "wasm32")]
-    crate::a11y::focus_control(element);
-    #[cfg(not(target_arch = "wasm32"))]
-    _document.focus(&element);
+    cfg_select! {
+        target_arch = "wasm32" => { crate::a11y::focus_control(element); }
+        _ => { _document.focus(&element); }
+    }
 }
 
 pub(super) fn portal_parent(document: &Document, trigger: &Element) -> Option<Element> {
@@ -83,12 +79,10 @@ pub(super) fn portal_parent(document: &Document, trigger: &Element) -> Option<El
 }
 
 fn body(document: &Document) -> Option<Element> {
-    #[cfg(target_arch = "wasm32")]
-    {
-        document.body().map(Into::into)
+    cfg_select! {
+        target_arch = "wasm32" => document.body().map(Into::into),
+        _ => document.body(),
     }
-    #[cfg(not(target_arch = "wasm32"))]
-    document.body()
 }
 
 pub(super) fn mount_portal(
@@ -130,32 +124,30 @@ pub(super) fn mount_portal(
 }
 
 pub(super) fn remove_portal(element: PortalElement) {
-    #[cfg(target_arch = "wasm32")]
-    if let Some(parent) = element.parent_node() {
-        let _ = parent.remove_child(&element);
+    cfg_select! {
+        target_arch = "wasm32" => if let Some(parent) = element.parent_node() {
+            let _ = parent.remove_child(&element);
+        },
+        _ => { element.remove(); }
     }
-    #[cfg(not(target_arch = "wasm32"))]
-    element.remove();
 }
 
 pub(super) fn listen_escape(
     document: Document,
     on_escape: impl Fn() -> bool + 'static,
 ) -> Option<EscapeUnsubscribe> {
-    #[cfg(target_arch = "wasm32")]
-    {
-        crate::a11y::bind_document_escape(document, true, on_escape)
+    cfg_select! {
+        target_arch = "wasm32" => crate::a11y::bind_document_escape(document, true, on_escape),
+        _ => Some(document.listen_escape(on_escape)),
     }
-    #[cfg(not(target_arch = "wasm32"))]
-    Some(document.listen_escape(on_escape))
 }
 
 pub(super) fn anchor_left_top_bottom(element: &Element) -> (f64, f64, f64) {
-    #[cfg(target_arch = "wasm32")]
-    {
-        let rectangle = element.get_bounding_client_rect();
-        (rectangle.left(), rectangle.top(), rectangle.bottom())
+    cfg_select! {
+        target_arch = "wasm32" => {
+            let rectangle = element.get_bounding_client_rect();
+            (rectangle.left(), rectangle.top(), rectangle.bottom())
+        }
+        _ => element.bounding_box(),
     }
-    #[cfg(not(target_arch = "wasm32"))]
-    element.bounding_box()
 }

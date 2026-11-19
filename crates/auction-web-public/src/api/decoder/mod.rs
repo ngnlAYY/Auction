@@ -245,29 +245,24 @@ fn raw_nonempty_str(value: &str) -> bool {
     !value.is_empty()
 }
 
-#[cfg(target_arch = "wasm32")]
 fn time(value: Option<&Value>) -> bool {
-    string(value).is_some_and(|value| !value.is_empty() && !js_sys::Date::parse(value).is_nan())
+    cfg_select! {
+        target_arch = "wasm32" => string(value)
+            .is_some_and(|value| !value.is_empty() && !js_sys::Date::parse(value).is_nan()),
+        _ => string(value).is_some_and(|value| Timestamp::parse_from_rfc3339(value).is_ok()),
+    }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-fn time(value: Option<&Value>) -> bool {
-    string(value).is_some_and(|value| Timestamp::parse_from_rfc3339(value).is_ok())
-}
-
-#[cfg(target_arch = "wasm32")]
 fn time_value(value: Option<&Value>) -> Option<f64> {
-    string(value).and_then(|value| {
-        let timestamp = js_sys::Date::parse(value);
-        (!timestamp.is_nan()).then_some(timestamp)
-    })
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn time_value(value: Option<&Value>) -> Option<f64> {
-    string(value)
-        .and_then(|value| Timestamp::parse_from_rfc3339(value).ok())
-        .map(|value| value.timestamp_millis() as f64)
+    cfg_select! {
+        target_arch = "wasm32" => string(value).and_then(|value| {
+            let timestamp = js_sys::Date::parse(value);
+            (!timestamp.is_nan()).then_some(timestamp)
+        }),
+        _ => string(value)
+            .and_then(|value| Timestamp::parse_from_rfc3339(value).ok())
+            .map(|value| value.timestamp_millis() as f64),
+    }
 }
 
 #[cfg(any(test, target_arch = "wasm32"))]

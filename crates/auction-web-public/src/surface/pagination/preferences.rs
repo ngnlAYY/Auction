@@ -21,18 +21,18 @@ pub(crate) fn parse_public_page_size(value: &str) -> Option<i64> {
 
 /// 所有主列表共享偏好，补偿流水独立保存；损坏或受限存储回退默认值而非阻止页面加载。
 pub(crate) fn stored_public_page_size(movement: bool) -> i64 {
-    #[cfg(target_arch = "wasm32")]
-    {
-        let key = if movement { MOVEMENT_PAGE_SIZE_KEY } else { PAGE_SIZE_KEY };
-        auction_web_shared::storage::get_item(key)
-            .as_deref()
-            .and_then(parse_public_page_size)
-            .unwrap_or(DEFAULT_PAGE_SIZE)
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let _ = movement;
-        DEFAULT_PAGE_SIZE
+    cfg_select! {
+        target_arch = "wasm32" => {
+            let key = if movement { MOVEMENT_PAGE_SIZE_KEY } else { PAGE_SIZE_KEY };
+            auction_web_shared::storage::get_item(key)
+                .as_deref()
+                .and_then(parse_public_page_size)
+                .unwrap_or(DEFAULT_PAGE_SIZE)
+        }
+        _ => {
+            let _ = movement;
+            DEFAULT_PAGE_SIZE
+        }
     }
 }
 
@@ -46,11 +46,11 @@ pub(super) fn save_public_page_size(size: i64, movement: bool) {
         browser.save_size(size, movement);
         return;
     }
-    #[cfg(target_arch = "wasm32")]
-    {
-        let key = if movement { MOVEMENT_PAGE_SIZE_KEY } else { PAGE_SIZE_KEY };
-        let _ = auction_web_shared::storage::set_item(key, &size.to_string());
+    cfg_select! {
+        target_arch = "wasm32" => {
+            let key = if movement { MOVEMENT_PAGE_SIZE_KEY } else { PAGE_SIZE_KEY };
+            let _ = auction_web_shared::storage::set_item(key, &size.to_string());
+        }
+        _ => { let _ = movement; }
     }
-    #[cfg(not(target_arch = "wasm32"))]
-    let _ = movement;
 }

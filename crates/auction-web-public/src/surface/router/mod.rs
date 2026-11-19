@@ -195,6 +195,7 @@ pub(crate) fn provide_test_public_history<R: Routable>(
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
     use std::cell::{Cell, RefCell};
     use std::rc::Rc;
 
@@ -460,10 +461,10 @@ mod tests {
         let original = "/bidlog?auction=&auction=bad&ref=x&bidlog_page=4&lot=One12";
         let mut mounted = Mounted::new(original);
         for new_target in [Some(AUCTION), None] {
-            assert!(matches!(
+            assert_matches!(
                 mounted.view.query.borrow().auction_parameter(),
                 AuctionParameter::Invalid(_)
-            ));
+            );
             let result = mounted.dom.in_runtime(|| {
                 mounted
                     .actions()

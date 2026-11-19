@@ -19,14 +19,14 @@ pub struct BrowserLock {
 impl BrowserLock {
     /// 只使用浏览器原生 `navigator.locks`；不支持时明确失败，非 WASM 也不返回假锁。
     pub async fn acquire(name: &str, timeout_millis: u32) -> Result<Self, BrowserLockError> {
-        #[cfg(target_arch = "wasm32")]
-        {
-            native::acquire(name, timeout_millis).await.map(|native| Self { _native: native })
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let _ = (name, timeout_millis);
-            Err(BrowserLockError::Unavailable)
+        cfg_select! {
+            target_arch = "wasm32" => {
+                native::acquire(name, timeout_millis).await.map(|native| Self { _native: native })
+            }
+            _ => {
+                let _ = (name, timeout_millis);
+                Err(BrowserLockError::Unavailable)
+            }
         }
     }
 }

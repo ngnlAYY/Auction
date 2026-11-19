@@ -343,9 +343,12 @@ mod tests {
                                 for entity in ["world:one", "world:two"] {
                                     assert!(owner.submit_with_receipt(
                                         entity.to_owned(), "测试操作".to_owned(), move |_| {
-                                            ready(if unknown {
-                                                Err(AdminApiFailure::from_http_body(503, r#"{"code":"storage_unavailable","message":"暂不可用","data":null,"request_id":null}"#).code)
-                                            } else { Ok(()) })
+                                            ready((!unknown).ok_or_else(|| {
+                                                AdminApiFailure::from_http_body(
+                                                    503,
+                                                    r#"{"code":"storage_unavailable","message":"暂不可用","data":null,"request_id":null}"#,
+                                                ).code
+                                            }))
                                         },
                                         |(), _| CommandDelivery::Receipt(None), |_| {},
                                     ));

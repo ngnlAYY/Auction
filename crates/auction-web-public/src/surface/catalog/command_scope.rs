@@ -463,6 +463,7 @@ fn CatalogCommandDialog(
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
     use std::cell::{Cell, RefCell};
     use std::future::ready;
     use std::rc::Rc;
@@ -704,7 +705,7 @@ mod tests {
 
     #[component]
     fn TestBoard(world: Option<String>, auction: Option<String>) -> Element {
-        use_drop(|| BOARD_DROPS.set(BOARD_DROPS.get() + 1));
+        use_drop(|| BOARD_DROPS.update(|drops| drops + 1));
         let view = use_context::<LotViewRequest>();
         let arriving = use_hook(|| view.0.peek().is_some());
         if arriving {
@@ -985,7 +986,7 @@ mod tests {
         assert_eq!(original.user, USER);
         let shown = retry(&mut dom);
         assert!(contains_text(&shown, "Retrying the original command"));
-        assert!(matches!(status(&dom, LOT), Some(CommandStatus::Unknown { retrying: true, .. })));
+        assert_matches!(status(&dom, LOT), Some(CommandStatus::Unknown { retrying: true, .. }));
         let replay = requests().pop().unwrap();
         assert_eq!(replay.url, original.url);
         assert_eq!(replay.user, original.user);
@@ -1057,7 +1058,7 @@ mod tests {
         settle(&mut dom);
         submit_bid(&mut dom);
         assert_eq!(status(&dom, OTHER_LOT), Some(CommandStatus::Submitting));
-        assert!(matches!(status(&dom, LOT), Some(CommandStatus::Unknown { retrying: false, .. })));
+        assert_matches!(status(&dom, LOT), Some(CommandStatus::Unknown { retrying: false, .. }));
         assert_eq!(requests().len(), 2);
     }
 
@@ -1108,10 +1109,10 @@ mod tests {
             )));
             retry(&mut dom);
             assert_eq!(requests().len(), 1);
-            assert!(matches!(
+            assert_matches!(
                 status(&dom, LOT),
                 Some(CommandStatus::Unknown { retrying: false, .. })
-            ));
+            );
 
             change_session(&mut dom, Session::Ready(Some(USER)));
             retry(&mut dom);
@@ -1199,7 +1200,7 @@ mod tests {
         }
         show_unknown(&mut dom);
         go_away(&mut dom);
-        assert!(matches!(status(&dom, LOT), Some(CommandStatus::Unknown { .. })));
+        assert_matches!(status(&dom, LOT), Some(CommandStatus::Unknown { .. }));
 
         retry(&mut dom);
         let replay = requests().pop().unwrap();
@@ -1302,18 +1303,15 @@ mod tests {
         show_unknown(&mut dom);
         for refresh in 2..=3 {
             retry(&mut dom);
-            assert!(matches!(
-                status(&dom, LOT),
-                Some(CommandStatus::Unknown { retrying: true, .. })
-            ));
+            assert_matches!(status(&dom, LOT), Some(CommandStatus::Unknown { retrying: true, .. }));
             let replay = requests().pop().unwrap();
             assert_eq!(replay.body, original.body);
             replay.complete(Err(CommandError { status: 409, code: "command_conflict".to_owned() }));
             let shown = settle(&mut dom);
-            assert!(matches!(
+            assert_matches!(
                 status(&dom, LOT),
                 Some(CommandStatus::Unknown { retrying: false, .. })
-            ));
+            );
             assert!(contains_text(&shown, "The server could not replay this command unchanged."));
             assert_eq!((CONTROLS.get().unwrap().refresh)(), refresh);
         }
@@ -1349,17 +1347,17 @@ mod tests {
                 .unwrap()
                 .complete(Err(CommandError { status: http_status, code: code.to_owned() }));
             let shown = settle(&mut dom);
-            assert!(matches!(&*checking.peek(), Some(Err(error)) if error == "network_error"));
+            assert_matches!(&*checking.peek(), Some(Err(error)) if error == "network_error");
             if http_status == 409 {
                 assert!(status(&dom, LOT).is_none());
                 assert!(status(&dom, OTHER_LOT).is_none());
                 assert!(!other.in_flight(), "证实换号立即取消其他任务");
                 assert!(contains_text(&shown, "Unknown command results: 0"));
             } else {
-                assert!(matches!(
+                assert_matches!(
                     status(&dom, LOT),
                     Some(CommandStatus::Unknown { retrying: false, .. })
-                ));
+                );
                 assert!(other.in_flight());
                 assert!(contains_text(&shown, "Retry is paused"));
             }
@@ -1394,10 +1392,10 @@ mod tests {
                 assert!(status(&dom, LOT).is_none());
             } else {
                 assert_session_error(code);
-                assert!(matches!(
+                assert_matches!(
                     status(&dom, LOT),
                     Some(CommandStatus::Unknown { retrying: false, .. })
-                ));
+                );
                 assert!(other.in_flight());
                 assert!(!removed(&shown, receipt));
                 assert!(contains_text(&shown, "Retry is paused"));
@@ -1448,7 +1446,7 @@ mod tests {
 
     fn assert_session_error(expected: &str) {
         let session = CONTROLS.get().unwrap().checked_session;
-        assert!(matches!(&*session.peek(), Some(Err(error)) if error == expected));
+        assert_matches!(&*session.peek(), Some(Err(error)) if error == expected);
     }
 
     #[test]
@@ -1588,8 +1586,10 @@ mod tests {
         sync.release();
         settle(&mut dom);
         assert_eq!(confirmed_owner().as_deref(), Some(OTHER_USER));
-        assert!(matches!(&*CONTROLS.get().unwrap().checked_session.peek(),
-            Some(Ok(Some(identity))) if identity.user_id == OTHER_USER));
+        assert_matches!(
+            &*CONTROLS.get().unwrap().checked_session.peek(),
+            Some(Ok(Some(identity))) if identity.user_id == OTHER_USER
+        );
         assert!(session_fixture::take_requests().is_empty());
         assert!(status(&dom, LOT).is_none());
     }
@@ -1602,7 +1602,7 @@ mod tests {
         let shown = session_refresh(&mut dom);
         session_fixture::assert_consumed();
         assert_eq!(session_fixture::take_requests(), ["GET"]);
-        assert!(matches!(&*CONTROLS.get().unwrap().checked_session.peek(), Some(Ok(None))));
+        assert_matches!(&*CONTROLS.get().unwrap().checked_session.peek(), Some(Ok(None)));
         assert_commands_discarded(&dom, &shown, &other, receipt);
         session_fixture::script([session_fixture::reply(
             SessionRequest::Read,
@@ -1626,10 +1626,10 @@ mod tests {
             let shown = session_refresh(&mut dom);
             session_fixture::assert_consumed();
             assert_session_error(code);
-            assert!(matches!(
+            assert_matches!(
                 status(&dom, LOT),
                 Some(CommandStatus::Unknown { retrying: false, .. })
-            ));
+            );
             assert!(other.in_flight());
             assert!(!removed(&shown, receipt));
             assert!(contains_text(&shown, "Retry is paused"));

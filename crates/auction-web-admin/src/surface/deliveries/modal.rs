@@ -64,15 +64,15 @@ pub(crate) fn DeliveryModal(
 
 /// 明确关闭让浏览器把焦点交还打开弹窗的控件。
 pub(crate) fn close_delivery_modal(dialog_id: &str) {
-    #[cfg(target_arch = "wasm32")]
-    if let Some(element) = web_sys::window()
-        .and_then(|window| window.document())
-        .and_then(|document| document.get_element_by_id(dialog_id))
-    {
-        invoke_dialog(&element, "close");
+    cfg_select! {
+        target_arch = "wasm32" => if let Some(element) = web_sys::window()
+            .and_then(|window| window.document())
+            .and_then(|document| document.get_element_by_id(dialog_id))
+        {
+            invoke_dialog(&element, "close");
+        },
+        _ => { let _ = dialog_id; }
     }
-    #[cfg(not(target_arch = "wasm32"))]
-    let _ = dialog_id;
 }
 
 #[cfg(target_arch = "wasm32")]

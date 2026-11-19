@@ -8,6 +8,9 @@ mod browser_lock;
 pub use browser_lock::{BrowserLock, BrowserLockError};
 
 #[cfg(target_arch = "wasm32")]
+use std::mem::DropGuard;
+
+#[cfg(target_arch = "wasm32")]
 use futures_util::{
     future::{Either, select},
     pin_mut,
@@ -108,10 +111,12 @@ async fn send_request_observed_with_timeout(
 ) -> Result<Response, TransportError> {
     #[cfg(target_arch = "wasm32")]
     {
-        let controller = AbortOnDrop(
+        // 资源重启或组件卸载会丢弃 future；此时也须取消仍在读取的浏览器请求。
+        let controller = DropGuard::new(
             web_sys::AbortController::new().map_err(|_| TransportError::Network(None))?,
+            |controller| controller.abort(),
         );
-        let signal = controller.0.signal();
+        let signal = controller.signal();
         let request = build(Some(&signal))?;
         let send = async move {
             let response = request.send().await.map_err(|_| TransportError::Network(None))?;
@@ -135,7 +140,7 @@ async fn send_request_observed_with_timeout(
         return match select(send, timeout).await {
             Either::Left((response, _)) => response,
             Either::Right((_, send)) => {
-                controller.0.abort();
+                controller.abort();
                 // 取消后消费 fetch/body 的终止结果，再允许外层跨标签页锁释放。
                 let _ = send.await;
                 Err(TransportError::Timeout)
@@ -163,16 +168,5 @@ fn observe_response_build(response: &Response) {
     }
     if let Some(build) = headers.get(crate::build_notice::SERVER_BUILD_HEADER) {
         crate::observe_server_build_id(&build);
-    }
-}
-
-/// 资源重启或组件卸载会丢弃 future；此时也须取消仍在读取的浏览器请求。
-#[cfg(target_arch = "wasm32")]
-struct AbortOnDrop(web_sys::AbortController);
-
-#[cfg(target_arch = "wasm32")]
-impl Drop for AbortOnDrop {
-    fn drop(&mut self) {
-        self.0.abort();
     }
 }

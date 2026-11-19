@@ -127,6 +127,8 @@ fn LocalizedApp() -> Element {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use dioxus::core::TemplateNode;
     use dioxus::prelude::*;
 
@@ -144,7 +146,7 @@ mod tests {
             let [TemplateNode::Element { tag: "div", children, .. }] = root.template.roots else {
                 panic!("译文初始化失败时应渲染错误容器");
             };
-            assert!(matches!(children, [TemplateNode::Text { text: "无法初始化界面译文。" }]));
+            assert_matches!(children, [TemplateNode::Text { text: "无法初始化界面译文。" }]);
             assert!(root.dynamic_nodes.is_empty());
             dom.mark_dirty(ScopeId::APP);
             dom.render_immediate_to_vec();

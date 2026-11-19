@@ -387,15 +387,13 @@ pub(super) fn SessionEndedNotice(ended: Signal<bool>) -> Element {
 }
 
 fn session_ended_dismiss_is_focused() -> bool {
-    #[cfg(target_arch = "wasm32")]
-    {
-        web_sys::window()
+    cfg_select! {
+        target_arch = "wasm32" => web_sys::window()
             .and_then(|window| window.document())
             .and_then(|document| document.active_element())
-            .is_some_and(|element| element.id() == SESSION_ENDED_DISMISS_ID)
+            .is_some_and(|element| element.id() == SESSION_ENDED_DISMISS_ID),
+        _ => false,
     }
-    #[cfg(not(target_arch = "wasm32"))]
-    false
 }
 
 fn dismiss_session_ended(mut ended: Signal<bool>, owns_focus: bool, focus_content: impl FnOnce()) {

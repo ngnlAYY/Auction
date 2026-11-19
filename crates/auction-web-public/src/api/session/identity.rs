@@ -166,21 +166,23 @@ fn get_revision(key: &str) -> Option<String> {
 }
 
 fn set_revision(key: &str) {
-    #[cfg(not(test))]
-    write_storage_revision(key);
-    #[cfg(test)]
-    if let Some(fixture) = current_context::<super::transport::SessionHttpFixture>() {
-        (fixture.set_revision)(key);
-    } else {
-        write_storage_revision(key);
+    cfg_select! {
+        test => if let Some(fixture) = current_context::<super::transport::SessionHttpFixture>() {
+            (fixture.set_revision)(key);
+        } else {
+            write_storage_revision(key);
+        },
+        _ => { write_storage_revision(key); }
     }
 }
 
 fn write_storage_revision(key: &str) {
-    #[cfg(target_arch = "wasm32")]
-    let _ = auction_web_shared::storage::set_item(key, &uuid::Uuid::new_v4().to_string());
-    #[cfg(not(target_arch = "wasm32"))]
-    let _ = key;
+    cfg_select! {
+        target_arch = "wasm32" => {
+            let _ = auction_web_shared::storage::set_item(key, &uuid::Uuid::new_v4().to_string());
+        }
+        _ => { let _ = key; }
+    }
 }
 
 fn current_context<T: Clone + 'static>() -> Option<T> {

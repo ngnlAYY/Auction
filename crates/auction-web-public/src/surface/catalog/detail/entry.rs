@@ -32,18 +32,18 @@ pub(in crate::surface::catalog) struct CatalogDetailEntry {
 impl CatalogDetailEntry {
     /// 整行点击：落在行内控件上的点击与结束文本拖选的点击都不打开抽屉。
     pub(in crate::surface::catalog) fn click(self, event: &Event<MouseData>) {
-        #[cfg(target_arch = "wasm32")]
-        {
-            let on_row = event
-                .data()
-                .downcast::<web_sys::MouseEvent>()
-                .is_some_and(|event| targets_row(event.target()));
-            if !on_row || selecting_text() {
-                return;
+        cfg_select! {
+            target_arch = "wasm32" => {
+                let on_row = event
+                    .data()
+                    .downcast::<web_sys::MouseEvent>()
+                    .is_some_and(|event| targets_row(event.target()));
+                if !on_row || selecting_text() {
+                    return;
+                }
             }
+            _ => { let _ = event; }
         }
-        #[cfg(not(target_arch = "wasm32"))]
-        let _ = event;
         self.open.call(());
     }
 

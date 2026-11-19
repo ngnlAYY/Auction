@@ -55,17 +55,16 @@ pub fn read_query_pairs() -> Vec<(String, String)> {
     if let Some(location) = query_location() {
         return owned_query_pairs(location_parts(&location.current()).1);
     }
-    #[cfg(target_arch = "wasm32")]
-    {
-        let Some(window) = web_sys::window() else {
-            return Vec::new();
-        };
-        let search = window.location().search().unwrap_or_default();
-        owned_query_pairs(&search)
+    cfg_select! {
+        target_arch = "wasm32" => {
+            let Some(window) = web_sys::window() else {
+                return Vec::new();
+            };
+            let search = window.location().search().unwrap_or_default();
+            owned_query_pairs(&search)
+        }
+        _ => Vec::new(),
     }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    Vec::new()
 }
 
 fn owned_query_pairs(search: &str) -> Vec<(String, String)> {

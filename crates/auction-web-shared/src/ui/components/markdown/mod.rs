@@ -36,7 +36,7 @@ pub fn MarkdownBlocks(markdown: String) -> Element {
 
 /// 移除正文首行的一级标题，避免页面标题与 Markdown 标题重复显示。
 pub fn without_leading_title(markdown: &str) -> String {
-    let markdown = markdown.strip_prefix('\u{feff}').unwrap_or(markdown);
+    let markdown = markdown.trim_prefix('\u{feff}');
     let mut lines = markdown.lines();
     let Some(first) = lines.next() else {
         return String::new();

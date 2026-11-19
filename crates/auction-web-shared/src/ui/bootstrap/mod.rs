@@ -60,17 +60,15 @@ pub fn report_browser_error(class: BrowserErrorClass) {
 
 /// 供测试或显式构建号调用；非法构建号降级为 `unknown`，避免把任意文本拼进 URL。
 fn report_browser_error_with_build_id(class: BrowserErrorClass, build_id: &str) {
-    #[cfg(target_arch = "wasm32")]
-    {
-        let build_id = if build_id_is_valid(build_id) { build_id } else { "unknown" };
-        let url = format!("{BROWSER_ERROR_ROUTE}?class={}&build={build_id}", class.as_str());
-        js_sys::futures::spawn_local(async move {
-            let _ = gloo_net::http::Request::post(&url).send().await;
-        });
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let _ = (class, build_id);
+    cfg_select! {
+        target_arch = "wasm32" => {
+            let build_id = if build_id_is_valid(build_id) { build_id } else { "unknown" };
+            let url = format!("{BROWSER_ERROR_ROUTE}?class={}&build={build_id}", class.as_str());
+            js_sys::futures::spawn_local(async move {
+                let _ = gloo_net::http::Request::post(&url).send().await;
+            });
+        }
+        _ => { let _ = (class, build_id); }
     }
 }
 

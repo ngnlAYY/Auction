@@ -4,7 +4,7 @@ use super::inline::parse_inline;
 use super::model::MarkdownBlock;
 
 pub(super) fn parse_blocks(markdown: &str) -> Vec<MarkdownBlock> {
-    let markdown = markdown.strip_prefix('\u{feff}').unwrap_or(markdown);
+    let markdown = markdown.trim_prefix('\u{feff}');
     let lines = markdown.lines().collect::<Vec<_>>();
     let mut blocks = Vec::new();
     let mut index = 0;
@@ -76,7 +76,7 @@ pub(super) fn parse_blocks(markdown: &str) -> Vec<MarkdownBlock> {
                 let Some(value) = candidate.strip_prefix('>') else {
                     break;
                 };
-                quote.push(value.strip_prefix(' ').unwrap_or(value).trim());
+                quote.push(value.trim_prefix(' ').trim());
                 index += 1;
             }
             blocks.push(MarkdownBlock::Quote(parse_inline(&quote.join("\n"))));
@@ -189,8 +189,8 @@ fn is_table_separator(value: &str) -> bool {
 
 fn split_table_row(value: &str) -> impl Iterator<Item = &str> {
     let value = value.trim();
-    let value = value.strip_prefix('|').unwrap_or(value);
-    let value = value.strip_suffix('|').unwrap_or(value);
+    let value = value.trim_prefix('|');
+    let value = value.trim_suffix('|');
     value.split('|').map(str::trim)
 }
 

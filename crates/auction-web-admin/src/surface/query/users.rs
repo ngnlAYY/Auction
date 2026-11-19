@@ -86,14 +86,12 @@ impl UsersQuery {
         if let Some(history) = tests::History::from_context() {
             return history.borrow_mut().write(serialize_query(self), mode);
         }
-        #[cfg(target_arch = "wasm32")]
-        {
-            write_query_pairs(USERS_KEYS, &serialize_query(self), mode)
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let _ = (self, mode);
-            true
+        cfg_select! {
+            target_arch = "wasm32" => write_query_pairs(USERS_KEYS, &serialize_query(self), mode),
+            _ => {
+                let _ = (self, mode);
+                true
+            }
         }
     }
 }

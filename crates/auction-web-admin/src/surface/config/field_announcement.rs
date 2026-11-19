@@ -94,15 +94,15 @@ impl FieldAnnouncer {
     ) {
         self.clear();
         self.field.set(field_id.map(str::to_owned));
-        #[cfg(any(target_arch = "wasm32", test))]
-        {
-            self.task.set(Some(spawn(async move {
-                wait_for_announcement(_delay_millis).await;
-                self.message.set(message());
-            })));
+        cfg_select! {
+            any(target_arch = "wasm32", test) => {
+                self.task.set(Some(spawn(async move {
+                    wait_for_announcement(_delay_millis).await;
+                    self.message.set(message());
+                })));
+            }
+            _ => { self.message.set(message()); }
         }
-        #[cfg(not(any(target_arch = "wasm32", test)))]
-        self.message.set(message());
     }
 }
 

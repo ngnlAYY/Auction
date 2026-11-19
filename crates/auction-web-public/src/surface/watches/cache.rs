@@ -18,18 +18,18 @@ pub(in crate::surface) fn load(
     user_id: &str,
     auction_id: &str,
 ) -> Option<PublicLotWatchesResponse> {
-    #[cfg(any(target_arch = "wasm32", test))]
-    {
-        let page: PublicLotWatchesResponse = storage::get_parsed(&key(user_id, auction_id))?;
-        #[cfg(target_arch = "wasm32")]
-        let page =
-            crate::api::valid_watch_collection(&page, user_id, auction_id).then_some(page)?;
-        Some(page)
-    }
-    #[cfg(not(any(target_arch = "wasm32", test)))]
-    {
-        let _ = (user_id, auction_id);
-        None
+    cfg_select! {
+        any(target_arch = "wasm32", test) => {
+            let page: PublicLotWatchesResponse = storage::get_parsed(&key(user_id, auction_id))?;
+            #[cfg(target_arch = "wasm32")]
+            let page =
+                crate::api::valid_watch_collection(&page, user_id, auction_id).then_some(page)?;
+            Some(page)
+        }
+        _ => {
+            let _ = (user_id, auction_id);
+            None
+        }
     }
 }
 

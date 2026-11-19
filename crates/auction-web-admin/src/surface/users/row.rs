@@ -362,15 +362,17 @@ fn BlacklistHistoryCell(user: AdminUser) -> Element {
                     count: user.blacklist_count
                 ),
                 onmounted: move |event| {
-                    #[cfg(target_arch = "wasm32")]
-                    {
-                        let Some(element) = event.data().downcast::<web_sys::Element>().cloned() else {
-                            return;
-                        };
-                        mounted_element.set(Some(element));
+                    cfg_select! {
+                        target_arch = "wasm32" => {
+                            let Some(element) =
+                                event.data().downcast::<web_sys::Element>().cloned()
+                            else {
+                                return;
+                            };
+                            mounted_element.set(Some(element));
+                        }
+                        _ => { let _ = event; }
                     }
-                    #[cfg(not(target_arch = "wasm32"))]
-                    let _ = event;
                 },
                 onmouseenter: move |_| {
                     #[cfg(target_arch = "wasm32")]

@@ -122,10 +122,10 @@ impl Default for CatalogVisibility {
 
 impl CatalogVisibility {
     pub(crate) fn load() -> Self {
-        #[cfg(target_arch = "wasm32")]
-        let stored = auction_web_shared::storage::get_item(STORAGE_KEY);
-        #[cfg(not(target_arch = "wasm32"))]
-        let stored = None::<String>;
+        let stored = cfg_select! {
+            target_arch = "wasm32" => auction_web_shared::storage::get_item(STORAGE_KEY),
+            _ => None::<String>,
+        };
 
         stored.as_deref().and_then(Self::from_stored).unwrap_or_default()
     }

@@ -19,30 +19,22 @@ pub(super) fn admin_auction_status_label(status: &str) -> String {
 }
 
 pub(super) fn current_time_millis() -> i64 {
-    #[cfg(target_arch = "wasm32")]
-    {
-        js_sys::Date::new_0().get_time() as i64
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        auction_time::Timestamp::now().timestamp_millis()
+    cfg_select! {
+        target_arch = "wasm32" => js_sys::Date::new_0().get_time() as i64,
+        _ => auction_time::Timestamp::now().timestamp_millis(),
     }
 }
 
 pub(super) fn scheduled_time_millis(value: &str) -> Option<i64> {
-    #[cfg(target_arch = "wasm32")]
-    {
-        let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_str(value));
-        let milliseconds = date.get_time();
-        milliseconds.is_finite().then_some(milliseconds as i64)
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        auction_time::Timestamp::parse_from_rfc3339(value)
+    cfg_select! {
+        target_arch = "wasm32" => {
+            let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_str(value));
+            let milliseconds = date.get_time();
+            milliseconds.is_finite().then_some(milliseconds as i64)
+        }
+        _ => auction_time::Timestamp::parse_from_rfc3339(value)
             .ok()
-            .map(auction_time::Timestamp::timestamp_millis)
+            .map(auction_time::Timestamp::timestamp_millis),
     }
 }
 

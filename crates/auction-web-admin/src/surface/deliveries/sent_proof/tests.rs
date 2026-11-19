@@ -1,3 +1,4 @@
+use std::assert_matches;
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::future::poll_fn;
@@ -377,10 +378,10 @@ fn invalid_field_leaves_preview_idle_with_a_local_issue() {
     dom.in_scope(scope, || {
         run_preview(&detail(), false, draft, review, EventHandler::new(|_| ()));
         assert!(!review.peek().pending);
-        assert!(matches!(
+        assert_matches!(
             review.peek().outcome,
             Some(Err(SentProofPreviewError::Local(SentProofIssue::SenderUid)))
-        ));
+        );
     });
 }
 
@@ -516,11 +517,11 @@ fn edited_dst_gap_and_fold_render_time_field_errors_without_a_preview_request() 
         dom.in_scope(scope, || {
             assert!(draft.peek().sent_minute_edited);
             run_preview(&detail, false, draft, review, EventHandler::new(|_| ()));
-            assert!(matches!(
+            assert_matches!(
                 review.peek().outcome,
                 Some(Err(SentProofPreviewError::Local(SentProofIssue::SentMinute(error))))
                     if error == expected
-            ));
+            );
         });
         let edits = dom.render_immediate_to_vec().edits;
         assert!(edits.iter().any(|edit| matches!(
@@ -700,10 +701,10 @@ fn preview_with_changed_fence_cannot_be_used_for_confirmation() {
     let mut review = SentProofReview::default();
     let revision = review.begin();
     review.complete(revision, request, Ok(preview));
-    assert!(matches!(
+    assert_matches!(
         review.outcome,
         Some(Err(SentProofPreviewError::Api(error))) if error.code == "stale_delivery_state"
-    ));
+    );
 }
 
 #[test]

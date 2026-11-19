@@ -1,5 +1,6 @@
 use std::cell::Cell;
 use std::future::{pending, ready};
+use std::mem::DropGuard;
 use std::rc::Rc;
 
 use auction_time::{Duration, Timestamp};
@@ -481,14 +482,6 @@ struct CommandRequests {
     navigation: Cell<Option<Navigator>>,
 }
 
-struct WaitingRequest(Rc<CommandRequests>);
-
-impl Drop for WaitingRequest {
-    fn drop(&mut self) {
-        self.0.cancelled.set(true);
-    }
-}
-
 #[component]
 fn AuthenticatedCommands() -> Element {
     let reload = use_signal(|| 0);
@@ -522,7 +515,9 @@ fn AuthenticatedCommands() -> Element {
                     let delayed = delayed.clone();
                     async move {
                         delayed.sent.set(delayed.sent.get() + 1);
-                        let _request = WaitingRequest(delayed);
+                        let _request = DropGuard::new(delayed, |requests| {
+                            requests.cancelled.set(true);
+                        });
                         pending::<Result<(), String>>().await
                     }
                 },
