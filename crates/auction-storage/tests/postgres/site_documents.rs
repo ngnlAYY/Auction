@@ -5,6 +5,7 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::assert_matches;
 use std::sync::Arc;
 
 use auction_application::admin::{
@@ -203,8 +204,9 @@ async fn postgres_site_document_command_replays_only_within_its_kind() {
         .publish(command(SiteDocumentKind::Rules, command_id, 0, "About", "hello"))
         .await
         .expect_err("跨文档种类重放必须冲突");
-    assert!(
-        matches!(crossed, ApplicationError::AdminRules(AdminRulesError::CommandConflict)),
+    assert_matches!(
+        crossed,
+        ApplicationError::AdminRules(AdminRulesError::CommandConflict),
         "实际：{crossed:?}"
     );
     // 规则仍是预置的版本 1，没有被这次冲突的命令改写。

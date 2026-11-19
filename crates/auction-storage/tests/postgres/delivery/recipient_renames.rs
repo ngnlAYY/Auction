@@ -5,6 +5,8 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::assert_matches;
+
 use auction_application::core::ApplicationError;
 use auction_application::delivery::{
     DeliveryAdminAction, DeliveryAdminCommand, DeliveryAdminError, DeliveryAdminGuardBlocker,
@@ -224,10 +226,10 @@ async fn postgres_admin_retry_cannot_revive_retired_player_notices_after_name_re
             })
             .await;
         if retired {
-            assert!(matches!(
+            assert_matches!(
                 result,
                 Err(ApplicationError::DeliveryAdmin(DeliveryAdminError::Invalid))
-            ));
+            );
             assert_eq!(store.detail(delivery_id).await.unwrap(), detail);
         } else {
             assert_eq!(result.unwrap().snapshot.status, "pending");

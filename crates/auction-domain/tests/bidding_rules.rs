@@ -6,6 +6,8 @@
 // 集成测试目标只含测试代码，断言直接解包。
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use std::assert_matches;
+
 use auction_domain::{
     AuctionRules, BidAmount, BidId, BidMechanism, CommandId, CompetitionPlan, CompetitionTrigger,
     DEFAULT_START_PRICE, DomainError, LotBidState, LotId, MAX_BID_AMOUNT, PROXY_LAST_INCREMENT,
@@ -120,20 +122,20 @@ fn increments_follow_frozen_v1_and_v2_rules() {
 
 #[test]
 fn invalid_rules_and_bid_amounts_fail_closed() {
-    assert!(matches!(
+    assert_matches!(
         AuctionRules { bid_increment_ppm: 0, minimum_increment: 0, ..rules(2) }.validate(),
         Err(DomainError::InvalidRules(_))
-    ));
-    assert!(matches!(
+    );
+    assert_matches!(
         AuctionRules { bid_increment_ppm: 0, minimum_increment: 500, ..rules(2) }.validate(),
         Err(DomainError::InvalidRules(_))
-    ));
-    assert!(matches!(
+    );
+    assert_matches!(
         AuctionRules { bidding_version: 3, ..rules(2) }.validate(),
         Err(DomainError::InvalidRules(_))
-    ));
+    );
 
-    assert!(matches!(BidAmount::new(1_500), Err(DomainError::InvalidAmount { .. })));
+    assert_matches!(BidAmount::new(1_500), Err(DomainError::InvalidAmount { .. }));
     assert_eq!(BidAmount::from_persisted_positive(1_500).unwrap().value(), 1_500);
     let ceiling = BidAmount::from_persisted_positive(MAX_BID_AMOUNT + 1_500).unwrap();
     assert_eq!(ceiling.bid_ceiling().value(), MAX_BID_AMOUNT);
@@ -229,7 +231,7 @@ fn bids_reject_wrong_actor_low_amounts_same_price_and_closed_lots() {
     let other = UserId::new();
     let state = lot_state(lot_id, Some(amount(100_000)), Some(leader), at(12, 0, 0));
 
-    assert!(matches!(
+    assert_matches!(
         CompetitionPlan::plan(
             rules(2),
             state,
@@ -237,7 +239,7 @@ fn bids_reject_wrong_actor_low_amounts_same_price_and_closed_lots() {
             ordinary_bid(leader, amount(110_000), at(10, 0, 0), 1),
         ),
         Err(DomainError::AlreadyLeading)
-    ));
+    );
 
     let mut empty = lot_state(lot_id, None, None, at(12, 0, 0));
     empty.start_price = amount(10_000);
@@ -252,7 +254,7 @@ fn bids_reject_wrong_actor_low_amounts_same_price_and_closed_lots() {
     );
 
     // v2 普通出价与当前价相同不构成严格反超。
-    assert!(matches!(
+    assert_matches!(
         CompetitionPlan::plan(
             rules(2),
             state,
@@ -260,9 +262,9 @@ fn bids_reject_wrong_actor_low_amounts_same_price_and_closed_lots() {
             ordinary_bid(other, amount(100_000), at(10, 0, 0), 1),
         ),
         Err(DomainError::BidTooLow { .. })
-    ));
+    );
 
-    assert!(matches!(
+    assert_matches!(
         CompetitionPlan::plan(
             rules(2),
             state,
@@ -270,7 +272,7 @@ fn bids_reject_wrong_actor_low_amounts_same_price_and_closed_lots() {
             ordinary_bid(other, amount(105_000), at(12, 0, 1), 1),
         ),
         Err(DomainError::AuctionClosed)
-    ));
+    );
 }
 
 /// 论坛 `start` 以首口出价提交普通出价：未被出价的 lot 按起拍价（历史非整千起拍价向上取整到网格）
@@ -298,7 +300,7 @@ fn opening_bid_only_wins_a_lot_without_bids() {
 
             let mut bid = lot_state(lot_id, Some(start_price), Some(UserId::new()), at(12, 0, 0));
             bid.start_price = start_price;
-            assert!(matches!(
+            assert_matches!(
                 CompetitionPlan::plan(
                     rules(version),
                     bid,
@@ -306,7 +308,7 @@ fn opening_bid_only_wins_a_lot_without_bids() {
                     ordinary_bid(bidder, opening_bid, at(10, 0, 0), 1),
                 ),
                 Err(DomainError::BidTooLow { .. })
-            ));
+            );
         }
     }
 }

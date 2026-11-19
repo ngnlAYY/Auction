@@ -397,7 +397,7 @@ fn pg_version(dir: Option<&PathBuf>) -> Option<String> {
     if !output.status.success() {
         return None;
     }
-    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let stdout = String::from_utf8_lossy_owned(output.stdout);
     // 形如 `initdb (PostgreSQL) 18.6 (Debian 18.6-1.pgdg13+2)`；取括号后的首个版本字段。
     let version = stdout.split(')').nth(1)?.split_whitespace().next()?;
     Some(version.to_owned())

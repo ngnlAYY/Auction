@@ -23,11 +23,7 @@ fn stream_label(stream: MailScanStream) -> Option<&'static str> {
 }
 
 fn validate_key(key: &MailScanCheckpointKey) -> Result<(), ApplicationError> {
-    if key.validate() {
-        Ok(())
-    } else {
-        Err(storage_error("MoogleMail 扫描检查点作用域无效"))
-    }
+    key.validate().ok_or_else(|| storage_error("MoogleMail 扫描检查点作用域无效"))
 }
 
 fn validate_checkpoint(checkpoint: &MailScanCheckpoint) -> Result<(), ApplicationError> {

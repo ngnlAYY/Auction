@@ -39,8 +39,7 @@ pub fn postgres_connect_options(
     }
     let address = options
         .get_host()
-        .strip_prefix('[')
-        .and_then(|host| host.strip_suffix(']'))
+        .strip_circumfix('[', ']')
         .and_then(|host| host.parse::<std::net::Ipv6Addr>().ok());
     let Some(address) = address else {
         return Ok(options);
@@ -143,10 +142,7 @@ fn supported_postgres_query_key(key: &str, allow_options: bool) -> bool {
             | "application_name"
     ) || (allow_options
         && (key == "options"
-            || key
-                .strip_prefix("options[")
-                .and_then(|name| name.strip_suffix(']'))
-                .is_some_and(|name| !name.is_empty())))
+            || key.strip_circumfix("options[", ']').is_some_and(|name| !name.is_empty())))
 }
 
 /// 适配器也守住显式目标边界，不能依赖调用方一定经过配置 loader 或部署预检。

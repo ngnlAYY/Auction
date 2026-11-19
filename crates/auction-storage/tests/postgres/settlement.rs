@@ -24,6 +24,7 @@
 //! 仅在 `test-db` feature 下编译，入口见 `mise run test-db`。
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::assert_matches;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
@@ -974,8 +975,9 @@ async fn postgres_equipment_loss_takes_funding_lock_order_then_rejects_inadmissi
     };
     let error =
         service.resolve_equipment_loss(command).await.expect_err("不满足准入时必须失败关闭");
-    assert!(
-        matches!(error, ApplicationError::FulfillmentDependencyMismatch),
+    assert_matches!(
+        error,
+        ApplicationError::FulfillmentDependencyMismatch,
         "锁定阶段不得以数据库失败中止：{error:?}"
     );
     let losses: i64 = sqlx::query_scalar(

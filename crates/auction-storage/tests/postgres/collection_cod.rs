@@ -18,6 +18,7 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::assert_matches;
 use std::sync::Arc;
 use std::time::{Duration as StdDuration, Instant};
 
@@ -677,7 +678,7 @@ async fn send_through_fence(
         }
     }
     .expect("发送围栏必须确定完成");
-    assert!(matches!(outcome, DeliveryFenceOutcome::Sending), "合法冻结身份必须进入 sending");
+    assert_matches!(outcome, DeliveryFenceOutcome::Sending, "合法冻结身份必须进入 sending");
     store
         .succeed(
             claim.clone(),

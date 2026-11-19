@@ -14,6 +14,7 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::assert_matches;
 use std::sync::Arc;
 use std::time::{Duration as StdDuration, Instant};
 
@@ -403,7 +404,7 @@ pub(super) async fn send_through_cash_gate(
         )
         .await
         .expect("现金门必须确定完成");
-    assert!(matches!(outcome, DeliveryFenceOutcome::Sending), "现金门预留并进入 sending");
+    assert_matches!(outcome, DeliveryFenceOutcome::Sending, "现金门预留并进入 sending");
     (claim, expectation)
 }
 

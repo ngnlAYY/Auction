@@ -12,6 +12,7 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::assert_matches;
 use std::sync::Arc;
 
 use auction_application::core::diagnostics::SafeErrorKind;
@@ -141,7 +142,7 @@ async fn fence(store: &DatabaseStore, claim: &DeliveryWorkClaim) -> Arc<Delivery
         .start_sending_authorized(claim.clone(), Timestamp::now(), None, Some(&prepared))
         .await
         .expect("发送围栏必须确定完成");
-    assert!(matches!(outcome, DeliveryFenceOutcome::Sending), "合法冻结身份必须进入 sending");
+    assert_matches!(outcome, DeliveryFenceOutcome::Sending, "合法冻结身份必须进入 sending");
     expectation
 }
 

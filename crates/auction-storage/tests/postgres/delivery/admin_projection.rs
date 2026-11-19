@@ -10,6 +10,8 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::assert_matches;
+
 use auction_application::core::ApplicationError;
 use auction_application::delivery::{
     DeliveryAcknowledgementCommand, DeliveryAdminAction, DeliveryAdminCommand, DeliveryAdminError,
@@ -152,8 +154,7 @@ async fn postgres_admin_reconcile_projects_missing_sending_fence_before_transiti
             })
             .await;
         if let Some(blocker) = blocker {
-            assert!(
-                matches!(result, Err(ApplicationError::DeliveryAdmin(error)) if error == blocker.error())
+            assert_matches!(result, Err(ApplicationError::DeliveryAdmin(error)) if error == blocker.error()
             );
             assert_eq!(store.detail(delivery_id).await.unwrap(), before);
         } else {
@@ -186,7 +187,7 @@ async fn postgres_delivery_action_preview_checks_command_snapshot_shape() {
 
     let claim = claim_for(&claim_due(&store).await, delivery_id);
     let fence = claim.fencing_version;
-    assert!(matches!(fence_outcome(&store, &claim).await, DeliveryFenceOutcome::Sending));
+    assert_matches!(fence_outcome(&store, &claim).await, DeliveryFenceOutcome::Sending);
     let completed_at = Timestamp::now();
     store.fail(claim, DeliveryTransportError {
         failure_code: "verified_not_sent".to_owned(),
@@ -230,10 +231,10 @@ async fn postgres_delivery_action_preview_checks_command_snapshot_shape() {
     }
     let blocker = guard.projected_blocker(DeliveryAdminAction::RetryFailed).unwrap();
     assert_eq!(blocker.error(), DeliveryAdminError::CommandSnapshotUnreadable);
-    assert!(matches!(
+    assert_matches!(
         store.execute(command(DeliveryAdminAction::RetryFailed, fence)).await,
         Err(ApplicationError::DeliveryAdmin(error)) if error == blocker.error()
-    ));
+    );
     assert_eq!(store.detail(delivery_id).await.unwrap(), before);
 
     let reason = "核对未寄出证据，确认已处置";

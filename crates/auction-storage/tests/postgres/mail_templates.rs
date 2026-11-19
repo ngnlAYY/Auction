@@ -5,6 +5,7 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::assert_matches;
 use std::sync::Arc;
 
 use auction_application::mail_templates::{
@@ -88,12 +89,12 @@ async fn postgres_mail_template_revisions_are_append_only_replayable_and_version
     );
 
     // 不满足模板规则的正文与未知模板键在写入前被拒绝，不留下任何事实。
-    assert!(matches!(
+    assert_matches!(
         store
             .write_mail_template(command(3, PAYOUT_KEY, 1, Some("Payout: {amount} Credits")))
             .await,
         Err(MailTemplateStoreError::InvalidBody(_))
-    ));
+    );
     assert_eq!(
         store
             .write_mail_template(command(4, "no_such_template", 0, Some(PAYOUT)))

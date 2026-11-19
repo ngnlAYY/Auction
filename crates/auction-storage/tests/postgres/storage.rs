@@ -5,6 +5,8 @@
 //!
 //! `support` 负责临时集群、模板库迁移与逐测试克隆库；测试本身只使用公开的存储入口。
 
+use std::assert_matches;
+
 use auction_application::auction::{PublicPriceHistoryReader, WorldReader};
 use auction_application::core::{ApplicationError, SessionError};
 use auction_application::public::{AdminSessionRecord, AdminSessionStore};
@@ -129,14 +131,14 @@ async fn postgres_admin_session_inspect_leaves_activity_unchanged_and_touch_caps
     for (csrf_hash, now) in [([3; 32], at(300)), (csrf_hash, at(1_000))] {
         let checked = store.inspect_admin(token_hash, csrf_hash, now).await;
         let touched = store.touch_admin(token_hash, csrf_hash, now, at(1_200)).await;
-        assert!(matches!(checked, Err(ApplicationError::Session(SessionError::Unauthenticated))));
-        assert!(matches!(touched, Err(ApplicationError::Session(SessionError::Unauthenticated))));
+        assert_matches!(checked, Err(ApplicationError::Session(SessionError::Unauthenticated)));
+        assert_matches!(touched, Err(ApplicationError::Session(SessionError::Unauthenticated)));
     }
     store.revoke_admin(token_hash, at(400)).await.unwrap();
     let checked = store.inspect_admin(token_hash, csrf_hash, at(450)).await;
     let touched = store.touch_admin(token_hash, csrf_hash, at(450), at(1_300)).await;
-    assert!(matches!(checked, Err(ApplicationError::Session(SessionError::Unauthenticated))));
-    assert!(matches!(touched, Err(ApplicationError::Session(SessionError::Unauthenticated))));
+    assert_matches!(checked, Err(ApplicationError::Session(SessionError::Unauthenticated)));
+    assert_matches!(touched, Err(ApplicationError::Session(SessionError::Unauthenticated)));
     assert_eq!(activity().await.unwrap(), at(200));
     store.postgres_pool().close().await;
 }
@@ -187,7 +189,7 @@ async fn postgres_admin_session_cannot_be_validated_or_renewed_after_waiting_pas
             transaction.commit().await.unwrap();
         };
         let (result, ()) = tokio::join!(operation, release);
-        assert!(matches!(result, Err(ApplicationError::Session(SessionError::Unauthenticated))));
+        assert_matches!(result, Err(ApplicationError::Session(SessionError::Unauthenticated)));
     }
     store.postgres_pool().close().await;
 }
@@ -434,7 +436,7 @@ async fn postgres_rekey_revokes_old_key_and_sessions_as_runtime_account() {
     assert_eq!(result.user_id, Some(user_id));
 
     let rejected = store.authenticate(old_key.clone()).await.expect_err("旧 key 不能再登录");
-    assert!(matches!(rejected, ApplicationError::Session(SessionError::InvalidCredentials)));
+    assert_matches!(rejected, ApplicationError::Session(SessionError::InvalidCredentials));
     assert_eq!(store.authenticate(new_key.clone()).await.expect("新 key 可登录").user_id, user_id);
     for token in sessions {
         assert!(store.inspect_public(token, Timestamp::now()).await.is_err(), "旧会话必须全部失效");

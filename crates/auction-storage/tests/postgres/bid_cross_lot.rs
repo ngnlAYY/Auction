@@ -12,6 +12,7 @@
 //! 仅在 `test-db` feature 下编译，入口见 `mise run test-db`。
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::assert_matches;
 use std::time::Duration as StdDuration;
 use std::{
     sync::{
@@ -645,11 +646,9 @@ async fn postgres_bid_fails_closed_when_frozen_policy_field_is_null() {
         );
         let command_uuid = command.command_id.as_uuid();
         let error = commands.place_bid(command).await.expect_err("策略字段缺值时出价必须失败");
-        assert!(
-            matches!(
-                error,
-                ApplicationError::CompetitionTransaction(CompetitionTransactionError::Failed(_))
-            ),
+        assert_matches!(
+            error,
+            ApplicationError::CompetitionTransaction(CompetitionTransactionError::Failed(_)),
             "{field} 缺值必须是事务失败而不是领域拒绝：{error:?}"
         );
         let bids: i64 = sqlx::query_scalar("SELECT count(*) FROM public.bids WHERE lot_id = $1")
@@ -1237,7 +1236,7 @@ async fn postgres_bid_queue_releases_after_rejected_command() {
         BASE_PRICE,
     );
     let error = commands.place_bid(rejected).await.expect_err("未超过当前价的出价必须被拒绝");
-    assert!(matches!(error, ApplicationError::Domain(_)), "拒绝必须来自领域规则：{error:?}");
+    assert_matches!(error, ApplicationError::Domain(_), "拒绝必须来自领域规则：{error:?}");
     assert!(
         wait_for_condition(StdDuration::from_secs(5), || async {
             advisory_lock_count(pool).await == 0

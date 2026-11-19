@@ -7,6 +7,7 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::assert_matches;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Instant;
@@ -187,11 +188,9 @@ async fn assert_blocked_until_send_proven(store: &DatabaseStore, returned: &Unre
             detail.blockers
         );
         let rejected = try_handle(store, returned.case, 1, action).await;
-        assert!(
-            matches!(
-                rejected,
-                Err(ApplicationError::SettlementReturn(SettlementReturnError::SendUnresolved))
-            ),
+        assert_matches!(
+            rejected,
+            Err(ApplicationError::SettlementReturn(SettlementReturnError::SendUnresolved)),
             "{action:?}: {rejected:?}"
         );
     }
@@ -626,10 +625,10 @@ async fn postgres_manual_sent_confirmation_after_admin_failed_reports_stale_fenc
         .expect("另一位管理员判失败");
     assert_eq!(failure.snapshot.status, "failed");
     assert_eq!(failure.snapshot.fencing_version, preview.expected_fencing_version + 1);
-    assert!(matches!(
+    assert_matches!(
         store.confirm_sent(command, Some(&reference)).await,
         Err(ApplicationError::DeliveryAdmin(DeliveryAdminError::Stale))
-    ));
+    );
     let current = store.detail(delivery_id).await.expect("读取判失败后的详情");
     assert_eq!(current.delivery.status, "failed");
     assert_eq!(current.delivery.fencing_version, failure.snapshot.fencing_version);
@@ -672,19 +671,19 @@ async fn postgres_corrupt_sent_observed_at_is_unavailable_for_detail_and_confirm
             .await
             .expect("模拟库内时间字段损坏")
     );
-    assert!(matches!(
+    assert_matches!(
         store.detail_with_guard(delivery_id).await,
         Err(ApplicationError::DeliveryAdmin(DeliveryAdminError::Unavailable))
-    ));
+    );
     for selected in [Some(reference.as_str()), None] {
-        assert!(matches!(
+        assert_matches!(
             store.preview_sent_confirmation(delivery_id, command.evidence.clone(), selected).await,
             Err(ApplicationError::Serialization(_))
-        ));
-        assert!(matches!(
+        );
+        assert_matches!(
             store.confirm_sent(command.clone(), selected).await,
             Err(ApplicationError::Serialization(_))
-        ));
+        );
     }
     assert_eq!(delivery_status(pool, delivery_id).await, "manual_reconcile");
     pool.close().await;
@@ -744,16 +743,16 @@ async fn postgres_manual_sent_equipment_rejects_overwritten_evidence_and_same_co
             .await
             .expect("Worker 同一 MID 覆盖为已领取")
     );
-    assert!(matches!(
+    assert_matches!(
         store
             .preview_sent_confirmation(delivery_id, command.evidence.clone(), Some(&reference))
             .await,
         Err(ApplicationError::DeliveryAdmin(DeliveryAdminError::Stale))
-    ));
-    assert!(matches!(
+    );
+    assert_matches!(
         store.confirm_sent(command.clone(), Some(&reference)).await,
         Err(ApplicationError::DeliveryAdmin(DeliveryAdminError::Stale))
-    ));
+    );
 
     let new_mid = "781023";
     let wrong_ids = vec!["1".to_owned()];
@@ -763,10 +762,10 @@ async fn postgres_manual_sent_equipment_rejects_overwritten_evidence_and_same_co
         .record_sent_sighting(delivery_id, fence, new_mid, sighting(new_mid, &wrong_ids, wrong_at))
         .await
         .expect("同一位置覆盖为另一封同数量错号的观察");
-    assert!(matches!(
+    assert_matches!(
         store.confirm_sent(command.clone(), Some(&reference)).await,
         Err(ApplicationError::DeliveryAdmin(DeliveryAdminError::Stale))
-    ));
+    );
 
     command.command_id = Uuid::new_v4();
     command.evidence.external_mail_id = new_mid.to_owned();
@@ -777,10 +776,10 @@ async fn postgres_manual_sent_equipment_rejects_overwritten_evidence_and_same_co
         .await
         .expect("预览错号观察");
     assert_eq!(preview.blockers, ["observed_equipment_ids_mismatch"]);
-    assert!(matches!(
+    assert_matches!(
         store.confirm_sent(command, Some(&reference)).await,
         Err(ApplicationError::FulfillmentDependencyMismatch)
-    ));
+    );
 
     let state: (String, i64, Option<String>) = sqlx::query_as(
         "SELECT status, fencing_version, external_reference FROM public.deliveries WHERE id=$1",
@@ -1071,7 +1070,7 @@ async fn postgres_failed_sent_sweep_records_once_and_corrects_matching_equipment
             assert_eq!(delivery_status(pool, command.delivery_id).await, "succeeded");
         } else {
             assert_eq!(preview.blockers, ["observed_equipment_ids_mismatch"]);
-            assert!(matches!(confirmed, Err(ApplicationError::FulfillmentDependencyMismatch)));
+            assert_matches!(confirmed, Err(ApplicationError::FulfillmentDependencyMismatch));
             unchanged().await;
             let bound: bool = sqlx::query_scalar(
                 "SELECT EXISTS(SELECT 1 FROM public.delivery_sent_bindings WHERE delivery_id=$1)",
@@ -1081,7 +1080,7 @@ async fn postgres_failed_sent_sweep_records_once_and_corrects_matching_equipment
             .await
             .expect("核对没有 MID 绑定");
             assert!(!bound);
-            assert!(matches!(
+            assert_matches!(
                 store
                     .execute(equipment_admin_action(
                         &command,
@@ -1090,7 +1089,7 @@ async fn postgres_failed_sent_sweep_records_once_and_corrects_matching_equipment
                     ))
                     .await,
                 Err(ApplicationError::DeliveryAdmin(DeliveryAdminError::SentSighted)),
-            ));
+            );
         }
         pool.close().await;
     }

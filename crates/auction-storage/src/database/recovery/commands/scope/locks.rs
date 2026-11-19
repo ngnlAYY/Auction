@@ -45,7 +45,7 @@ pub(in crate::database::recovery::commands) async fn lock_world(
         .await
         .map_err(map_sql_error)?
         .is_some();
-    if exists { Ok(()) } else { Err(RecoveryCommandError::NotFound) }
+    exists.ok_or(RecoveryCommandError::NotFound)
 }
 
 pub(in crate::database::recovery::commands) async fn lock_auction(

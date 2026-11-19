@@ -12,6 +12,7 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::assert_matches;
 use std::sync::Arc;
 use std::time::Duration as StdDuration;
 
@@ -124,7 +125,7 @@ pub(super) async fn take_into_sending(
         .start_sending_authorized(claim.clone(), Timestamp::now(), None, Some(&prepared))
         .await
         .expect("Take 发送围栏必须确定完成");
-    assert!(matches!(outcome, DeliveryFenceOutcome::Sending), "原会话 Take 身份进入 sending");
+    assert_matches!(outcome, DeliveryFenceOutcome::Sending, "原会话 Take 身份进入 sending");
     claim
 }
 

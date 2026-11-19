@@ -1,6 +1,8 @@
 //! isekai 载体 COD 被退回、载体收回证明成立后，Admin 可直接取消。退回次数未达冻结上限时
 //! 不要求拉黑，达到上限仍要求既定拉黑完成；确认按钮、待办计数与确认事务共用同一规则。
 
+use std::assert_matches;
+
 use auction_application::core::ApplicationError;
 use auction_application::operations::OperationsAlertConsole;
 use auction_application::recovery::{
@@ -185,8 +187,9 @@ async fn postgres_confirmation_rules_outside_the_isekai_relaxation_are_unchanged
         )
         .expect("确认请求摘要");
     let error = store.confirm_recovery(command).await.expect_err("过期版本必须拒绝");
-    assert!(
-        matches!(error, ApplicationError::RecoveryCommand(RecoveryCommandError::StaleState)),
+    assert_matches!(
+        error,
+        ApplicationError::RecoveryCommand(RecoveryCommandError::StaleState),
         "{error:?}"
     );
     assert_eq!(fulfillment(pool, stale.payment).await.0, "enqueued");

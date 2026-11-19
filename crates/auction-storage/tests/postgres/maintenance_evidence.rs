@@ -6,6 +6,8 @@
 //! 仅在 `test-db` feature 下编译，入口见 `mise run test-db`。
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::assert_matches;
+
 use auction_storage::{DatabaseStore, RecoveryPreflightError, RetentionInventoryError};
 
 use crate::support;
@@ -46,14 +48,14 @@ async fn postgres_maintenance_evidence_reads_schema_identity_and_current_history
         .execute(store.postgres_pool())
         .await
         .expect("改写 schema 身份");
-    assert!(matches!(
+    assert_matches!(
         store.collect_retention_inventory(&name).await,
         Err(RetentionInventoryError::SchemaIdentityInvalid)
-    ));
-    assert!(matches!(
+    );
+    assert_matches!(
         store.collect_recovery_preflight(&name).await,
         Err(RecoveryPreflightError::SchemaIdentityInvalid)
-    ));
+    );
 
     store.postgres_pool().close().await;
 }
@@ -64,10 +66,10 @@ async fn postgres_maintenance_evidence_reports_missing_migration_history_on_empt
     let store = database.maintenance_store().await.expect("以维护账号连接");
     let name = database_name(&store).await;
 
-    assert!(matches!(
+    assert_matches!(
         store.collect_retention_inventory(&name).await,
         Err(RetentionInventoryError::MigrationHistoryMissing)
-    ));
+    );
     let preflight = store.collect_recovery_preflight(&name).await.expect("空库恢复预检");
     assert!(!preflight.schema_identity_present && preflight.schema_identity.is_none());
     assert!(!preflight.migration_history_present && preflight.migration.is_none());

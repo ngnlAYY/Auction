@@ -224,7 +224,7 @@ impl DeliveryDispositionSource {
             DeliveryDispositionKind::OperatorAcknowledged => self.audit_id.is_some(),
             DeliveryDispositionKind::PreflightRetired => true,
         };
-        if matches_kind { Ok(()) } else { Err(DeliveryDispositionError::InvalidSource) }
+        matches_kind.ok_or(DeliveryDispositionError::InvalidSource)
     }
 }
 
@@ -249,7 +249,7 @@ pub fn validate_disposition_reason_code(
 
 /// 操作者标识：非空、最多 128 字节、无首尾空白与控制字符。
 pub fn validate_disposition_actor(actor_id: &str) -> Result<(), DeliveryDispositionError> {
-    if valid_text(actor_id, 128) { Ok(()) } else { Err(DeliveryDispositionError::InvalidActor) }
+    valid_text(actor_id, 128).ok_or(DeliveryDispositionError::InvalidActor)
 }
 
 /// 处置原因：必须填写时不得为空；已填写时必须规范且不超过 2048 字节。

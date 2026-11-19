@@ -7,6 +7,7 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::assert_matches;
 use std::sync::Arc;
 
 use auction_application::delivery::{
@@ -527,7 +528,7 @@ async fn postgres_lot_watch_mail_reminder_fence_starts_sending_before_the_deadli
 
     let started_at = Timestamp::now();
     let outcome = fence_mail(&store, &claims[0], started_at).await;
-    assert!(matches!(outcome, DeliveryFenceOutcome::Sending), "截止前的合法围栏必须进入 sending");
+    assert_matches!(outcome, DeliveryFenceOutcome::Sending, "截止前的合法围栏必须进入 sending");
 
     let (status, failure, sending_at, fencing) = mail_state(&store, delivery_id).await;
     assert_eq!(status, "sending");
@@ -565,7 +566,7 @@ async fn postgres_lot_watch_mail_reminder_fence_rejects_a_claim_that_outlived_th
     // persist_sending 的围栏谓词里，确定拒绝回滚整个事务，返回 Deferred 而不是 Err。
     expire_lot(&store, fixture.lot_id).await;
     let outcome = fence_mail(&store, &claims[0], Timestamp::now()).await;
-    assert!(matches!(outcome, DeliveryFenceOutcome::Deferred), "截止后 sending 围栏必须确定拒绝");
+    assert_matches!(outcome, DeliveryFenceOutcome::Deferred, "截止后 sending 围栏必须确定拒绝");
 
     let (status, failure, sending_at, _) = mail_state(&store, delivery_id).await;
     assert_eq!(status, "claimed", "围栏拒绝不改写未发送的领取状态");
@@ -622,7 +623,7 @@ async fn postgres_lot_watch_mail_reminder_fence_defers_when_watch_lapses_during_
         }
 
         let outcome = fence_mail(&store, &claims[0], Timestamp::now()).await;
-        assert!(matches!(outcome, DeliveryFenceOutcome::Deferred), "{case}: 围栏必须确定拒绝");
+        assert_matches!(outcome, DeliveryFenceOutcome::Deferred, "{case}: 围栏必须确定拒绝");
         let (status, failure, sending_at, _) = mail_state(&store, delivery_id).await;
         assert_eq!(status, "claimed", "{case}: 围栏拒绝不改写未发送的领取状态");
         assert!(failure.is_none(), "{case}");
@@ -1218,10 +1219,10 @@ async fn postgres_lot_watch_preference_accepts_the_channel_set() {
     // 测试库没有 Worker 心跳与论坛绑定，PM 不可用：单独或与 MM 同时启用都被拒绝，偏好不变。
     for channel in ["pm", "both"] {
         let rejected = LotWatchPreferencePort::set(&store, command(channel, 2)).await;
-        assert!(matches!(rejected, Err(LotWatchError::PmUnavailable)), "{channel} 应被拒绝");
+        assert_matches!(rejected, Err(LotWatchError::PmUnavailable), "{channel} 应被拒绝");
     }
     let invalid = LotWatchPreferencePort::set(&store, command("all", 2)).await;
-    assert!(matches!(invalid, Err(LotWatchError::Invalid)));
+    assert_matches!(invalid, Err(LotWatchError::Invalid));
     let stored = LotWatchPreferencePort::get(&store, watcher).await.expect("重读偏好");
     assert_eq!((stored.channel.as_str(), stored.version), ("none", 2));
     store.postgres_pool().close().await;

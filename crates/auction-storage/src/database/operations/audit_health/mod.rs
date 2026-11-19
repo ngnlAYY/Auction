@@ -56,10 +56,8 @@ pub fn install_audit_shadow_recorder(
 }
 
 fn increment(counter: &AtomicI64) {
-    // MSRV 1.94.1 尚未稳定 try_update；饱和计数不能回绕为负或被成功写入清零。
-    #[allow(deprecated)]
-    let _ = counter
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |count| Some(count.saturating_add(1)));
+    // 饱和计数不能回绕为负或被成功写入清零。
+    counter.update(Ordering::Relaxed, Ordering::Relaxed, |count| count.saturating_add(1));
 }
 
 /// 为原始审计 SQL 的结果附加分类；不得吞错或扩大事务自动重试范围。

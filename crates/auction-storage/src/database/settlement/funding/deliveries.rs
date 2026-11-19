@@ -329,11 +329,7 @@ pub async fn finish_funded_delivery(
         .fetch_one(&mut **tx)
         .await
         .map_err(storage)?;
-        return if returned && outcome == FundingDeliveryOutcome::Sent {
-            Ok(())
-        } else {
-            Err(FundingError::Conflict)
-        };
+        return (returned && outcome == FundingDeliveryOutcome::Sent).ok_or(FundingError::Conflict);
     };
     let previous: String = row.try_get("state").map_err(storage)?;
     if previous == state {

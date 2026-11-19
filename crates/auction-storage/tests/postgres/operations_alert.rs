@@ -5,6 +5,7 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::assert_matches;
 use std::time::Duration;
 
 use auction_application::admin::AdminMailReader;
@@ -1851,12 +1852,12 @@ async fn postgres_operations_alert_acknowledge_replays_and_rejects_identity_reus
         "another reason",
     )
     .expect("构造换参确认命令");
-    assert!(matches!(
+    assert_matches!(
         store.acknowledge_alert(changed).await,
         Err(auction_application::core::ApplicationError::OperationsAlert(
             auction_application::operations::OperationsAlertError::IdentityConflict
         ))
-    ));
+    );
     let silence = auction_application::operations::OperationsAlertSilenceCommand::new(
         command_id,
         fingerprint,
@@ -1866,12 +1867,12 @@ async fn postgres_operations_alert_acknowledge_replays_and_rejects_identity_reus
         "investigating",
     )
     .expect("构造同 ID 静默命令");
-    assert!(matches!(
+    assert_matches!(
         store.silence_alert(silence).await,
         Err(auction_application::core::ApplicationError::OperationsAlert(
             auction_application::operations::OperationsAlertError::IdentityConflict
         ))
-    ));
+    );
 
     let (acknowledged_by, silenced_until, next_notify_after): (
         Option<String>,
@@ -2020,11 +2021,9 @@ async fn postgres_operations_alert_actions_bind_to_the_observed_incident() {
         store.acknowledge_alert(acknowledge(Uuid::new_v4(), generation)).await,
         store.silence_alert(silence(Uuid::new_v4(), generation)).await,
     ] {
-        assert!(
-            matches!(
-                result,
-                Err(ApplicationError::OperationsAlert(OperationsAlertError::StaleClaim))
-            ),
+        assert_matches!(
+            result,
+            Err(ApplicationError::OperationsAlert(OperationsAlertError::StaleClaim)),
             "旧页面不能处置复发告警：{result:?}"
         );
     }
@@ -2048,11 +2047,9 @@ async fn postgres_operations_alert_actions_bind_to_the_observed_incident() {
             .await,
         store.silence_alert(silence(first_silence.command_id, current_generation)).await,
     ] {
-        assert!(
-            matches!(
-                result,
-                Err(ApplicationError::OperationsAlert(OperationsAlertError::IdentityConflict))
-            ),
+        assert_matches!(
+            result,
+            Err(ApplicationError::OperationsAlert(OperationsAlertError::IdentityConflict)),
             "同命令 ID 换代数必须冲突：{result:?}"
         );
     }

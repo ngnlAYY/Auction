@@ -537,6 +537,8 @@ async fn origin_chain(
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use auction_application::delivery::DeliveryAdminError;
     use serde_json::json;
 
@@ -567,7 +569,7 @@ mod tests {
             json!({"mid": "7000001", "pre_collection_equipment_ids": []}),
         ] {
             let metadata = json!({"mailbox_sweep": malformed});
-            assert!(matches!(observations(&metadata), Err(DeliveryAdminError::Unavailable)));
+            assert_matches!(observations(&metadata), Err(DeliveryAdminError::Unavailable));
         }
     }
 
@@ -576,7 +578,7 @@ mod tests {
         for kind in ["mailbox_sweep", "sent_reference_sighting"] {
             for time in [json!("2026-11-31T01:20:00Z"), json!(12), json!(null)] {
                 let metadata = json!({kind: {"mid": "7000001", "observed_at": time}});
-                assert!(matches!(observations(&metadata), Err(DeliveryAdminError::Unavailable)));
+                assert_matches!(observations(&metadata), Err(DeliveryAdminError::Unavailable));
             }
         }
     }

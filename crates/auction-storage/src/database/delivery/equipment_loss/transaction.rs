@@ -182,5 +182,5 @@ pub(super) async fn apply(
 }
 
 fn require_one(changed: u64) -> Result<(), Error> {
-    if changed == 1 { Ok(()) } else { Err(Error::Rejected) }
+    (changed == 1).ok_or(Error::Rejected)
 }

@@ -11,6 +11,7 @@
 //! - 锁序：确认与 Admin 判失败都先锁原付款投递、再锁履约，排在同一投递行锁上的确认不持有履约行，
 //!   两者不形成锁环。
 
+use std::assert_matches;
 use std::time::Duration as StdDuration;
 
 use auction_application::core::ApplicationError;
@@ -246,8 +247,7 @@ async fn postgres_admin_retry_projection_matches_recovery_owner_at_same_fence() 
             .execute(admin_command(delivery_id, fence, action))
             .await
             .expect_err("实际提交应按同一谓词拒绝");
-        assert!(
-            matches!(error, ApplicationError::DeliveryAdmin(error) if error == blocker.error())
+        assert_matches!(error, ApplicationError::DeliveryAdmin(error) if error == blocker.error()
         );
         assert_eq!(delivery_state(pool, delivery_id).await, ("failed".to_owned(), fence));
     }
@@ -307,10 +307,10 @@ async fn postgres_admin_delivery_actions_follow_fulfillment_state_at_the_same_fe
             guard.projected_blocker(action),
             Some(DeliveryAdminGuardBlocker::SettlementFulfillmentState)
         );
-        assert!(matches!(
+        assert_matches!(
             store.execute(command.clone()).await,
             Err(ApplicationError::DeliveryAdmin(DeliveryAdminError::Stale))
-        ));
+        );
         assert_eq!(store.detail(delivery_id).await.unwrap(), before);
         assert_eq!(fulfillment(pool, sale.payment).await.0, "enqueued");
 

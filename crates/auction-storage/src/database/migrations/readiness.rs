@@ -64,11 +64,7 @@ pub(in crate::database) async fn check_postgres_readiness(
         }
         MigrationCompatibilityMode::Compatible => assessment.compatible,
     };
-    if ready {
-        Ok(())
-    } else {
-        Err(storage_error("数据库迁移历史不满足 readiness 策略"))
-    }
+    ready.ok_or_else(|| storage_error("数据库迁移历史不满足 readiness 策略"))
 }
 
 /// 有界预算内的饱和/取消是暂时不可用，不是仓储故障；schema 与其他驱动错误保留原诊断。

@@ -11,6 +11,8 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::assert_matches;
+
 use auction_application::core::CliOperatorIdentity;
 use auction_storage::{
     DatabaseStore, RETENTION_DRY_RUN_FORMAT, RetentionDryRunReport, RetentionPurgeApproval,
@@ -490,26 +492,26 @@ async fn postgres_retention_purge_rejects_invalid_approvals_before_mutation() {
     // 错误令牌。
     let mut wrong = valid.clone();
     wrong.approval_token = "0".repeat(64);
-    assert!(matches!(
+    assert_matches!(
         postgres.execute_retention_purge(request(&report, &database_name, vec![wrong])).await,
         Err(RetentionPurgeError::ApprovalTokenMismatch)
-    ));
+    );
 
     // 过期回执。
     let mut stale = request(&report, &database_name, vec![valid.clone()]);
     stale.dry_run_created_at = now - TimeDelta::seconds(901);
-    assert!(matches!(
+    assert_matches!(
         postgres.execute_retention_purge(stale).await,
         Err(RetentionPurgeError::ReceiptStale)
-    ));
+    );
 
     // 回执时间与快照时间不配套。
     let mut incoherent = request(&report, &database_name, vec![valid.clone()]);
     incoherent.dry_run_collected_at = incoherent.dry_run_created_at - TimeDelta::seconds(700);
-    assert!(matches!(
+    assert_matches!(
         postgres.execute_retention_purge(incoherent).await,
         Err(RetentionPurgeError::InvalidRequest)
-    ));
+    );
 
     // retain_forever 族：审计族永不清理。
     let audit_family = RetentionPurgeApproval {
@@ -519,12 +521,12 @@ async fn postgres_retention_purge_rejects_invalid_approvals_before_mutation() {
         candidate_bytes: None,
         tables: Vec::new(),
     };
-    assert!(matches!(
+    assert_matches!(
         postgres
             .execute_retention_purge(request(&report, &database_name, vec![audit_family]))
             .await,
         Err(RetentionPurgeError::RetainForeverFamily)
-    ));
+    );
 
     // 非闭集表：即使伪造令牌也在校验阶段拒绝。
     let mut substituted = valid.clone();
@@ -533,10 +535,10 @@ async fn postgres_retention_purge_rejects_invalid_approvals_before_mutation() {
         rule_ids: vec!["service_heartbeat_expired_grace".to_owned()],
         candidate_rows: 1,
     }];
-    assert!(matches!(
+    assert_matches!(
         postgres.execute_retention_purge(request(&report, &database_name, vec![substituted])).await,
         Err(RetentionPurgeError::ApprovalInvalid | RetentionPurgeError::TableNotPurgeable)
-    ));
+    );
 
     // 全部拒绝路径都不改变数据、不追加审计。
     assert_eq!(count(&store, "SELECT COUNT(*)::bigint FROM public.service_heartbeats").await, 1);

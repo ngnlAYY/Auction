@@ -164,6 +164,7 @@ impl Auction {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
     use std::time::SystemTime;
 
     use auction_time::{Duration, Timestamp};
@@ -241,24 +242,24 @@ mod tests {
 
         // 预览不能跳过开拍直接进入 Final。
         let mut preview = snapshot(AuctionStatus::Preview);
-        assert!(matches!(
+        assert_matches!(
             preview.enter_final(now),
             Err(DomainError::InvalidTransition {
                 from: AuctionStatus::Preview,
                 to: AuctionStatus::Final
             })
-        ));
+        );
         assert_eq!(preview.state_version, 1);
 
         // 已开拍的场次不能经取消命令绕过竞价收口与结算。
         let mut live = snapshot(AuctionStatus::Live);
-        assert!(matches!(
+        assert_matches!(
             live.cancel_before_open_with_metadata(now, "operator reason", "admin"),
             Err(DomainError::InvalidTransition {
                 from: AuctionStatus::Live,
                 to: AuctionStatus::Cancelled
             })
-        ));
+        );
         assert_eq!((live.state_version, live.cancelled_at.is_none()), (1, true));
 
         preview.cancel_before_open_with_metadata(now, "operator reason", "admin")?;

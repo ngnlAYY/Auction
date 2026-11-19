@@ -155,6 +155,8 @@ pub fn retention_policy_identity() -> Option<(i64, String)> {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use super::*;
 
     #[test]
@@ -170,7 +172,7 @@ mod tests {
     fn rejects_unknown_database_urls_without_echoing_credentials() {
         let error = DatabaseBackend::from_url("mysql://user:secret@example/db").unwrap_err();
 
-        assert!(matches!(error, StorageError::UnsupportedScheme(ref scheme) if scheme == "mysql"));
+        assert_matches!(error, StorageError::UnsupportedScheme(ref scheme) if scheme == "mysql");
         assert!(!error.to_string().contains("secret"));
     }
 }

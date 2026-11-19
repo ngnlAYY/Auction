@@ -7,6 +7,7 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::assert_matches;
 use std::sync::Arc;
 
 use auction_application::core::{ApplicationError, RequestHash};
@@ -269,7 +270,7 @@ async fn assert_key_reply_can_send(store: &DatabaseStore, claim: DeliveryWorkCla
         .start_sending_authorized(claim.clone(), Timestamp::now(), None, Some(&prepared))
         .await
         .unwrap();
-    assert!(matches!(outcome, DeliveryFenceOutcome::Sending));
+    assert_matches!(outcome, DeliveryFenceOutcome::Sending);
     let now = Timestamp::now();
     DeliveryWorkStore::renew(store, claim.clone(), now, now + Duration::minutes(2))
         .await
@@ -385,7 +386,7 @@ async fn assert_binding_rejected(store: &DatabaseStore, claim: &DeliveryWorkClai
     let error = DeliveryWorkStore::renew(store, claim.clone(), now, now + Duration::minutes(2))
         .await
         .unwrap_err();
-    assert!(matches!(error, ApplicationError::DeliveryAdmin(DeliveryAdminError::RecipientRenamed)));
+    assert_matches!(error, ApplicationError::DeliveryAdmin(DeliveryAdminError::RecipientRenamed));
     let current = store.detail(claim.delivery_id).await.unwrap();
     assert_eq!(current.delivery.status, status, "续租只返回拒绝，终态由 Worker 结果路径写入");
     assert_eq!(current.delivery.fencing_version, claim.fencing_version);
@@ -437,7 +438,7 @@ async fn postgres_login_key_reply_fails_after_sending_fence_on_last_renewal() {
         .start_sending_authorized(claim.clone(), Timestamp::now(), None, Some(&prepared))
         .await
         .unwrap();
-    assert!(matches!(outcome, DeliveryFenceOutcome::Sending));
+    assert_matches!(outcome, DeliveryFenceOutcome::Sending);
     rename(&store, user_id).await;
     assert_binding_rejected(&store, &claim, "sending").await;
 }
@@ -453,7 +454,7 @@ async fn postgres_admin_login_key_retry_rejects_rebind_without_changing_failed_o
             .start_sending_authorized(claim.clone(), Timestamp::now(), None, Some(&prepared))
             .await
             .unwrap();
-        assert!(matches!(outcome, DeliveryFenceOutcome::Sending));
+        assert_matches!(outcome, DeliveryFenceOutcome::Sending);
         DeliveryWorkStore::fail(
             &store,
             claim.clone(),
@@ -494,10 +495,10 @@ async fn postgres_admin_login_key_retry_rejects_rebind_without_changing_failed_o
             external_reference: None,
             failure_code: None,
         };
-        assert!(matches!(
+        assert_matches!(
             store.execute(command.clone()).await,
             Err(ApplicationError::DeliveryAdmin(DeliveryAdminError::RecipientRenamed))
-        ));
+        );
         assert_eq!(store.detail(claim.delivery_id).await.unwrap(), before);
         let ledger_entries: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM public.delivery_admin_commands WHERE command_id = $1",

@@ -115,11 +115,7 @@ impl AuctionScheduleSource {
             && SUPPORTED_YEARS.contains(&self.open_local.year())
             && SUPPORTED_YEARS.contains(&self.end_local.year())
             && self.early_bird.is_none_or(|slot| SUPPORTED_YEARS.contains(&slot.season.year()));
-        if supported {
-            Ok(())
-        } else {
-            Err(DomainError::InvalidSchedule("周排期日期超出支持范围"))
-        }
+        supported.ok_or(DomainError::InvalidSchedule("周排期日期超出支持范围"))
     }
 
     /// Admin 改期只更新实际改变的钟点；不把未改的跳时原始钟点替换成归一化后的时间。

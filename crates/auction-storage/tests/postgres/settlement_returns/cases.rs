@@ -13,6 +13,8 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::assert_matches;
+
 use auction_application::core::ApplicationError;
 use auction_application::recovery::RecoveryWorkStore;
 use auction_application::settlement::{
@@ -313,10 +315,10 @@ async fn postgres_return_cases_include_quarantined_and_terminal_evidence() {
         unbound.allowed_actions,
         [SettlementReturnAction::Acknowledge, SettlementReturnAction::Recheck]
     );
-    assert!(matches!(
+    assert_matches!(
         store.settlement_return_detail(Uuid::new_v4()).await,
         Err(ApplicationError::SettlementReturn(SettlementReturnError::NotFound))
-    ));
+    );
 
     pool.close().await;
 }

@@ -9,6 +9,7 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::assert_matches;
 use std::time::Duration as StdDuration;
 
 use auction_application::delivery::{
@@ -369,13 +370,11 @@ async fn postgres_return_take_conflict_hands_over_after_unexecuted_failure() {
         },
     )
     .await;
-    assert!(
-        matches!(
-            retried,
-            Err(auction_application::core::ApplicationError::DeliveryAdmin(
-                auction_application::delivery::DeliveryAdminError::Invalid
-            ))
-        ),
+    assert_matches!(
+        retried,
+        Err(auction_application::core::ApplicationError::DeliveryAdmin(
+            auction_application::delivery::DeliveryAdminError::Invalid
+        )),
         "已交接的意图不能被重试复活：{retried:?}"
     );
     let status: String = sqlx::query_scalar("SELECT status FROM public.deliveries WHERE id = $1")

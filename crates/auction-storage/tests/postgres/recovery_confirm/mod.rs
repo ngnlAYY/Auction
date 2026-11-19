@@ -27,6 +27,8 @@ mod migration;
 mod reconciliation;
 mod recovered;
 
+use std::assert_matches;
+
 use auction_application::auction::{AuctionLifecycleActor, AuctionLifecycleActorType};
 use auction_application::operations::{
     AuditFailureMode, DispositionReadMode, OperationsAlertCollectionOverdueRead,
@@ -284,12 +286,10 @@ async fn postgres_reclaim_confirmation_rejects_unresolved_writes() {
             .confirm_recovery(confirmation(&sale, RecoveryConfirmationAction::Reclaimed))
             .await
             .expect_err("存在未解决外部写入时不能自动收口");
-        assert!(
-            matches!(
-                error,
-                auction_application::core::ApplicationError::RecoveryCommand(
-                    RecoveryCommandError::NotConfirmable
-                )
+        assert_matches!(
+            error,
+            auction_application::core::ApplicationError::RecoveryCommand(
+                RecoveryCommandError::NotConfirmable
             ),
             "{error:?}"
         );

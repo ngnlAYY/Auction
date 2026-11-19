@@ -140,7 +140,7 @@ pub(super) async fn health_postgres(
         let Some(scope_row) = scopes.iter_mut().find(|item: &&mut AdminCredentialHealthScope| {
             item.kind == kind && item.world == world
         }) else {
-            scopes.push(AdminCredentialHealthScope {
+            let scope_row = scopes.push_mut(AdminCredentialHealthScope {
                 kind,
                 world,
                 active_count: 0,
@@ -148,9 +148,6 @@ pub(super) async fn health_postgres(
                 invalid_count: 0,
                 updated_at,
             });
-            let scope_row = scopes
-                .last_mut()
-                .ok_or_else(|| admin_error(AdminCredentialError::StoredResultCorrupt))?;
             add_health_count(scope_row, status, count)?;
             continue;
         };

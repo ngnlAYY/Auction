@@ -17,6 +17,7 @@
 //! 仅在 `test-db` feature 下编译，入口见 `mise run test-db`。
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::assert_matches;
 use std::time::Duration as StdDuration;
 use std::{
     sync::{
@@ -834,12 +835,10 @@ async fn postgres_admin_lot_queue_shares_auction_key_with_bids() {
         .expect("门释放后 Admin 修改必须结束")
         .expect("Admin 任务不得 panic")
         .expect_err("live 场次的 lot 不得被 Admin 修改");
-    assert!(
-        matches!(
-            error,
-            ApplicationError::CompetitionTransaction(
-                CompetitionTransactionError::InvalidState | CompetitionTransactionError::StaleState
-            )
+    assert_matches!(
+        error,
+        ApplicationError::CompetitionTransaction(
+            CompetitionTransactionError::InvalidState | CompetitionTransactionError::StaleState
         ),
         "同场次 Admin 修改必须按状态/版本门禁失败：{error:?}"
     );

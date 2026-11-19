@@ -7,6 +7,8 @@
 //! 确定没有外写（`failed` 且明确记录 `write_started=false`、`outcome_unknown=false`）；缺键、null
 //! 或错误类型都按可能已外达计数。多轮 COD 重寄时每轮一次发送对应一封已消费的退件，照常确认。
 
+use std::assert_matches;
+
 use auction_application::core::ApplicationError;
 use auction_application::recovery::{
     RecoveryCommandError, RecoveryCommandRepository, RecoveryConfirmationAction,
@@ -196,8 +198,9 @@ async fn assert_rejected(store: &DatabaseStore, sale: &Sale, action: RecoveryCon
         .confirm_recovery(confirmation(sale, action))
         .await
         .expect_err("退件不能唯一归属到一次发送时不能确认");
-    assert!(
-        matches!(error, ApplicationError::RecoveryCommand(RecoveryCommandError::SendUnattributed)),
+    assert_matches!(
+        error,
+        ApplicationError::RecoveryCommand(RecoveryCommandError::SendUnattributed),
         "{action:?}: {error:?}"
     );
     assert_eq!(recovery_state(pool, sale.recovery_id).await, ("reclaiming".to_owned(), None));
@@ -472,11 +475,9 @@ async fn postgres_equipment_recovered_rejects_unattributable_sends() {
             ))
             .await
             .expect_err("交付的发送不能唯一归属时不能确认装备收回");
-        assert!(
-            matches!(
-                error,
-                ApplicationError::RecoveryCommand(RecoveryCommandError::SendUnattributed)
-            ),
+        assert_matches!(
+            error,
+            ApplicationError::RecoveryCommand(RecoveryCommandError::SendUnattributed),
             "{case}: {error:?}"
         );
         assert_eq!(

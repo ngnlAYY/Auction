@@ -6,6 +6,8 @@
 // 集成测试目标只含测试代码，断言直接解包。
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use std::assert_matches;
+
 use auction_domain::{
     AdjustmentAnchor, COMPENSATION_REVERSAL_RULE_VERSION, CompensationReversal, DomainError,
     EquipmentId, LotId, SETTLEMENT_PPM, SettlementAmount, SettlementFact, SettlementMode,
@@ -217,10 +219,10 @@ fn proportional_floor_keeps_remainders_in_the_pool() {
         (0..3).map(|_| proportional_floor(available, demand, total).unwrap().value()).sum();
     assert_eq!(sum, 99);
 
-    assert!(matches!(
+    assert_matches!(
         proportional_floor(available, demand, SettlementAmount::zero()),
         Err(DomainError::InvalidSettlementFacts(_))
-    ));
+    );
 }
 
 #[test]
@@ -228,21 +230,21 @@ fn floor_ppm_and_amount_helpers_fail_closed() {
     let amount = SettlementAmount::new(1_999).unwrap();
     assert_eq!(floor_ppm(amount, 500_000).unwrap().value(), 999);
     assert_eq!(floor_ppm(amount, SETTLEMENT_PPM).unwrap(), amount);
-    assert!(matches!(
+    assert_matches!(
         floor_ppm(amount, SETTLEMENT_PPM + 1),
         Err(DomainError::InvalidSettlementFacts(_))
-    ));
-    assert!(matches!(SettlementAmount::new(-1), Err(DomainError::InvalidSettlementFacts(_))));
-    assert!(matches!(
+    );
+    assert_matches!(SettlementAmount::new(-1), Err(DomainError::InvalidSettlementFacts(_)));
+    assert_matches!(
         SettlementAmount::new(1).unwrap().checked_sub(SettlementAmount::new(2).unwrap()),
         Err(DomainError::SettlementAmountOverflow)
-    ));
+    );
 }
 
 #[test]
 fn settlement_plan_rejects_invalid_windows_facts_and_policy_shapes() {
     let policy = SettlementPolicy::default();
-    assert!(matches!(
+    assert_matches!(
         SettlementPlan::calculate(
             &policy,
             window_open(),
@@ -251,8 +253,8 @@ fn settlement_plan_rejects_invalid_windows_facts_and_policy_shapes() {
             &[],
         ),
         Err(DomainError::InvalidSettlementFacts(_))
-    ));
-    assert!(matches!(
+    );
+    assert_matches!(
         SettlementPlan::calculate(
             &policy,
             window_end(),
@@ -261,11 +263,11 @@ fn settlement_plan_rejects_invalid_windows_facts_and_policy_shapes() {
             &[winning_fact(1_000, 0)],
         ),
         Err(DomainError::InvalidSettlementFacts(_))
-    ));
+    );
 
     let mut missing_held = winning_fact(1_000, 0);
     missing_held.leader_held_nanos = None;
-    assert!(matches!(
+    assert_matches!(
         SettlementPlan::calculate(
             &policy,
             window_open(),
@@ -274,12 +276,12 @@ fn settlement_plan_rejects_invalid_windows_facts_and_policy_shapes() {
             &[missing_held],
         ),
         Err(DomainError::InvalidSettlementFacts(_))
-    ));
+    );
 
     let mut contradictory = unsold_fact();
     contradictory.leader_id = Some(UserId::new());
     contradictory.leader_since = Some(window_open());
-    assert!(matches!(
+    assert_matches!(
         SettlementPlan::calculate(
             &policy,
             window_open(),
@@ -288,7 +290,7 @@ fn settlement_plan_rejects_invalid_windows_facts_and_policy_shapes() {
             &[contradictory],
         ),
         Err(DomainError::InvalidSettlementFacts(_))
-    ));
+    );
 
     // 锚点必须严格递增，且首尾固定为 0 / 1e6。
     let non_monotonic = SettlementPolicy {
@@ -300,20 +302,20 @@ fn settlement_plan_rejects_invalid_windows_facts_and_policy_shapes() {
         ],
         ..SettlementPolicy::default()
     };
-    assert!(matches!(non_monotonic.validate(), Err(DomainError::InvalidSettlementPolicy(_))));
+    assert_matches!(non_monotonic.validate(), Err(DomainError::InvalidSettlementPolicy(_)));
 
     let legacy_mismatch = SettlementPolicy {
         version: 2,
         mode: SettlementMode::LegacyZeroV0,
         ..SettlementPolicy::default()
     };
-    assert!(matches!(legacy_mismatch.validate(), Err(DomainError::InvalidSettlementPolicy(_))));
+    assert_matches!(legacy_mismatch.validate(), Err(DomainError::InvalidSettlementPolicy(_)));
 
     // v1 仅供历史快照读取，新拍卖模板必须拒绝。
-    assert!(matches!(
+    assert_matches!(
         v1_policy().validate_for_new_auction(),
         Err(DomainError::InvalidSettlementPolicy(_))
-    ));
+    );
 }
 
 #[test]

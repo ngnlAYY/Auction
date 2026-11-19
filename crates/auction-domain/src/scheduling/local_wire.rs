@@ -33,7 +33,7 @@ fn parse(text: &str) -> Option<civil::DateTime> {
     // 年份可带符号（公元 0–9999 年之外的写法），其余日期字段以 `-` 分隔。
     let (negative, unsigned) = match date.strip_prefix('-') {
         Some(rest) => (true, rest),
-        None => (false, date.strip_prefix('+').unwrap_or(date)),
+        None => (false, date.trim_prefix('+')),
     };
     let mut date_fields = unsigned.split('-');
     let year = digits(date_fields.next()?)?;

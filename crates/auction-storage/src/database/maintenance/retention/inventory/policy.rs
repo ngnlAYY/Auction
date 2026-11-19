@@ -314,6 +314,8 @@ pub(crate) fn build_policy_family_inventory(
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use super::{RETENTION_POLICY_JSON, RetentionInventoryError, parse_retention_policy};
 
     fn policy_value() -> serde_json::Value {
@@ -389,10 +391,10 @@ mod tests {
     fn rejects_a_duration_that_diverges_from_the_decisions() {
         let mut value = policy_value();
         set_rule_duration(&mut value, "service_heartbeat_expired_grace", 31);
-        assert!(matches!(
+        assert_matches!(
             parse_retention_policy(&value.to_string()),
             Err(RetentionInventoryError::PolicyInvalid)
-        ));
+        );
     }
 
     #[test]
@@ -410,10 +412,10 @@ mod tests {
             "basis": "expires_at",
             "duration_days": 0
         }));
-        assert!(matches!(
+        assert_matches!(
             parse_retention_policy(&value.to_string()),
             Err(RetentionInventoryError::PolicyInvalid)
-        ));
+        );
     }
 
     #[test]
@@ -430,19 +432,19 @@ mod tests {
             .iter_mut()
             .find(|family| family["dataset_family"] == "audit")
             .expect("audit family")["retention"] = audit_retention;
-        assert!(matches!(
+        assert_matches!(
             parse_retention_policy(&value.to_string()),
             Err(RetentionInventoryError::PolicyInvalid)
-        ));
+        );
     }
 
     #[test]
     fn rejects_a_missing_dry_run_requirement() {
         let mut value = policy_value();
         value["deletion_requires_dry_run_and_operator_approval"] = serde_json::json!(false);
-        assert!(matches!(
+        assert_matches!(
             parse_retention_policy(&value.to_string()),
             Err(RetentionInventoryError::PolicyInvalid)
-        ));
+        );
     }
 }

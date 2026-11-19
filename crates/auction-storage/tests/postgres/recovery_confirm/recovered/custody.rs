@@ -5,6 +5,7 @@
 //! 领取、prepare、activate 进入发送队列，经资金门寄出并以 Sent 证明收口，案件结案为已补寄。
 //! 外部 MoogleMail 不参与：发送围栏之后的结果由测试按生产形状写回，不代表真实远端行为。
 
+use std::assert_matches;
 use std::sync::Arc;
 use std::time::{Duration as StdDuration, Instant};
 
@@ -124,7 +125,7 @@ async fn send_refund(store: &DatabaseStore, credential: Uuid, delivery: Uuid, mi
         )
         .await
         .expect("资金门必须确定完成");
-    assert!(matches!(outcome, DeliveryFenceOutcome::Sending), "退款进入 sending");
+    assert_matches!(outcome, DeliveryFenceOutcome::Sending, "退款进入 sending");
     store
         .succeed(
             claim.clone(),

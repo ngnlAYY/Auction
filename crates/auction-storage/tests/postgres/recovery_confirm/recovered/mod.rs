@@ -13,6 +13,7 @@
 mod custody;
 pub(crate) mod fixture;
 
+use std::assert_matches;
 use std::time::Duration as StdDuration;
 
 use auction_application::core::{ApplicationError, RequestHash};
@@ -399,11 +400,9 @@ async fn postgres_equipment_recovered_rejects_conflicting_delivery() {
             .confirm_recovery(confirmation(sale, RecoveryConfirmationAction::EquipmentRecovered))
             .await
             .expect_err(label);
-        assert!(
-            matches!(
-                error,
-                ApplicationError::RecoveryCommand(RecoveryCommandError::NotConfirmable)
-            ),
+        assert_matches!(
+            error,
+            ApplicationError::RecoveryCommand(RecoveryCommandError::NotConfirmable),
             "{label}: {error:?}"
         );
         assert_eq!(recovery_state(pool, sale.recovery_id).await, ("reclaiming".to_owned(), None));

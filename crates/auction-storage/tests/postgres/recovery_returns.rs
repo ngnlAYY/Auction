@@ -15,6 +15,7 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::assert_matches;
 use std::sync::Arc;
 use std::time::Duration as StdDuration;
 
@@ -1051,8 +1052,9 @@ async fn postgres_delivery_worker_never_sends_a_cod_whose_return_recovery_owns()
     .await
     .expect("写入尚未消费的系统退件");
 
-    assert!(
-        matches!(fence_cod(&store, &owned_claim).await, DeliveryFenceOutcome::Deferred),
+    assert_matches!(
+        fence_cod(&store, &owned_claim).await,
+        DeliveryFenceOutcome::Deferred,
         "恢复流程已接管退件，通用路径不能再发送原 COD"
     );
     let (status, attempts): (String, i64) = sqlx::query_as(
@@ -1065,8 +1067,9 @@ async fn postgres_delivery_worker_never_sends_a_cod_whose_return_recovery_owns()
     .await
     .expect("读取被拒绝的投递");
     assert_eq!((status.as_str(), attempts), ("claimed", 0), "拒绝时不冻结发送尝试");
-    assert!(
-        matches!(fence_cod(&store, &control_claim).await, DeliveryFenceOutcome::Sending),
+    assert_matches!(
+        fence_cod(&store, &control_claim).await,
+        DeliveryFenceOutcome::Sending,
         "对照组照常进入 sending"
     );
 

@@ -18,6 +18,7 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::assert_matches;
 use std::collections::{BTreeMap, BTreeSet};
 
 use auction_storage::{
@@ -184,8 +185,9 @@ async fn postgres_compatible_declarations_preserve_previous_version_contract() {
         let level = registration_level(pool, version).await.unwrap_or_else(|| {
             panic!("迁移 {version} 缺少兼容登记（缺行即 breaking，但不能缺登记）")
         });
-        assert!(
-            matches!(level.as_str(), "compatible" | "breaking"),
+        assert_matches!(
+            level.as_str(),
+            "compatible" | "breaking",
             "迁移 {version} 登记等级 {level} 不在闭集内"
         );
 

@@ -177,7 +177,7 @@ fn amount(value: Option<&Value>) -> Option<i64> {
     };
     value.as_i64().or_else(|| {
         let text = value.as_str()?;
-        let digits = text.strip_prefix('-').unwrap_or(text);
+        let digits = text.trim_prefix('-');
         if (1..=18).contains(&digits.len()) && digits.bytes().all(|byte| byte.is_ascii_digit()) {
             text.parse().ok()
         } else {

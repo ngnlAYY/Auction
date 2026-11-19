@@ -8,6 +8,8 @@
 // 集成测试目标只含测试代码，断言直接解包。
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use std::assert_matches;
+
 use auction_domain::{
     AuctionRules, AuctionStatus, BidAmount, BidId, BidMechanism, CommandId, CompetitionPlan,
     CompetitionTrigger, DEFAULT_START_PRICE, DomainError, LotBidState, LotId, ProxyAuthorization,
@@ -343,14 +345,14 @@ fn reentry_requires_quota_consistent_history_and_a_higher_ceiling() {
     assert!(plan_with(AuctionRules { proxy_max_outbid_uses: 0, ..rules(2) }, fourth()).is_ok());
 
     // 使用次数必须与上一份授权是否存在一致。
-    assert!(matches!(
+    assert_matches!(
         plan_with(rules(2), reentry(1, Some((125_000, ProxyStatus::Exhausted)), 130_000)),
         Err(DomainError::InvalidBidState(_))
-    ));
-    assert!(matches!(
+    );
+    assert_matches!(
         plan_with(rules(2), reentry(2, None, 130_000)),
         Err(DomainError::InvalidBidState(_))
-    ));
+    );
 
     // 上一份仍生效时不能重设，竞争已关闭时不能再建。
     for status in [ProxyStatus::Active, ProxyStatus::FinalFast] {
@@ -538,10 +540,10 @@ fn slow_proxy_rejects_stale_or_early_due_triggers() {
         slow_due(ProxyAuthorizationId::new(), 1, due_at, due_at),
         slow_due(waiting.id, 1, due_at, at(10, 9)),
     ] {
-        assert!(matches!(
+        assert_matches!(
             CompetitionPlan::plan(rules(2), state, Some(waiting), trigger),
             Err(DomainError::InvalidBidState(_))
-        ));
+        );
     }
 }
 
@@ -597,10 +599,10 @@ fn entering_final_converts_waiting_slow_proxies_to_final_fast() {
     assert!(plan.public_bids.is_empty());
     assert_eq!(transitions(&plan), vec![(leading.id, ProxyTransitionKind::FinalFast, None)]);
     assert_eq!(plan.final_lot.current_price, Some(amount(120_000)));
-    assert!(matches!(
+    assert_matches!(
         CompetitionPlan::plan(rules(2), state, Some(leading), final_proxy(leading.id, 1)),
         Err(DomainError::InvalidBidState(_))
-    ));
+    );
 
     // 无法严格反超的等待代理只耗尽，不再转换为 FinalFast。
     let rival = UserId::new();
@@ -624,7 +626,7 @@ fn entering_final_converts_waiting_slow_proxies_to_final_fast() {
 
     // 原有 Fast 代理保持 Fast，不能经 FinalProxy 转换。
     let fast = proxy(lot_id, holder, 150_000, ProxyMode::Fast);
-    assert!(matches!(
+    assert_matches!(
         CompetitionPlan::plan(
             rules(2),
             lot_state(lot_id, Some(120_000), Some(holder)),
@@ -632,7 +634,7 @@ fn entering_final_converts_waiting_slow_proxies_to_final_fast() {
             final_proxy(fast.id, 0),
         ),
         Err(DomainError::InvalidBidState(_))
-    ));
+    );
 }
 
 #[test]
@@ -678,7 +680,7 @@ fn freezing_and_closing_end_the_proxy_and_clear_its_schedule() {
         assert_schedule_cleared(&plan, state);
 
         // 授权不符或没有活动授权时不能终止任何代理。
-        assert!(matches!(
+        assert_matches!(
             CompetitionPlan::plan(
                 rules(2),
                 state,
@@ -686,8 +688,8 @@ fn freezing_and_closing_end_the_proxy_and_clear_its_schedule() {
                 terminal(freeze, ProxyAuthorizationId::new())
             ),
             Err(DomainError::InvalidProxyTransition { .. })
-        ));
-        assert!(matches!(
+        );
+        assert_matches!(
             CompetitionPlan::plan(
                 rules(2),
                 lot_state(lot_id, Some(120_000), Some(rival)),
@@ -695,6 +697,6 @@ fn freezing_and_closing_end_the_proxy_and_clear_its_schedule() {
                 terminal(freeze, waiting.id)
             ),
             Err(DomainError::InvalidProxyTransition { .. })
-        ));
+        );
     }
 }

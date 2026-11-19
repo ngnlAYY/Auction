@@ -84,7 +84,7 @@ pub(super) async fn publish_postgres(
     .await
     .map_err(|error| storage_error_from(error, "写入 PostgreSQL 服务心跳失败"))?;
 
-    if returned.is_some() { Ok(()) } else { Err(HealthError::StaleObservation) }
+    returned.is_some().ok_or(HealthError::StaleObservation)
 }
 
 pub(super) async fn list_postgres(store: &DatabaseStore) -> Result<Vec<Heartbeat>, HealthError> {

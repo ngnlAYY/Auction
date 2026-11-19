@@ -157,7 +157,7 @@ fn ensure_complete(row: &PgRow, columns: &[&str]) -> Result<(), SliSnapshotError
 /// `invalid` 列统计无法关联到业务事实的候选；出现即拒绝整个快照。
 fn ensure_valid(row: &PgRow) -> Result<(), SliSnapshotError> {
     let invalid: i64 = row.try_get("invalid").map_err(storage)?;
-    if invalid > 0 { Err(SliSnapshotError::InvalidData) } else { Ok(()) }
+    (invalid <= 0).ok_or(SliSnapshotError::InvalidData)
 }
 
 fn world_index(row: &PgRow) -> Result<usize, SliSnapshotError> {

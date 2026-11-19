@@ -3,6 +3,8 @@
 // 集成测试目标只含测试代码，断言直接解包。
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use std::assert_matches;
+
 use auction_domain::{
     AuctionEarlyBirdConfig, AuctionEarlyBirdSlot, AuctionScheduleSource, AuctionScheduleTimes,
     DomainError,
@@ -95,11 +97,11 @@ fn frozen_source_rejects_invalid_timezone_and_non_increasing_times() {
         naive(2026, 1, 1, 2, 0),
         naive(2026, 1, 1, 3, 0),
     );
-    assert!(matches!(invalid_zone.resolve(), Err(DomainError::InvalidSchedule(_))));
+    assert_matches!(invalid_zone.resolve(), Err(DomainError::InvalidSchedule(_)));
 
     let unordered =
         source("UTC", naive(2026, 1, 1, 2, 0), naive(2026, 1, 1, 2, 0), naive(2026, 1, 1, 3, 0));
-    assert!(matches!(unordered.resolve(), Err(DomainError::InvalidSchedule(_))));
+    assert_matches!(unordered.resolve(), Err(DomainError::InvalidSchedule(_)));
 }
 
 #[test]
@@ -124,7 +126,7 @@ fn early_bird_sessions_cover_window_pre_season_and_intake_boundaries() {
     assert_eq!(pre.times.scheduled_end_at, utc(2026, 10, 30, 18, 0));
     assert!(pre.source.early_bird.unwrap().is_pre_season());
     assert_eq!(calendar.intake_opens_at(pre.source.early_bird.unwrap()).unwrap(), None);
-    assert!(matches!(calendar.session(season, 99), Err(DomainError::InvalidSchedule(_))));
+    assert_matches!(calendar.session(season, 99), Err(DomainError::InvalidSchedule(_)));
 
     assert!(calendar.window_contains("isekai", utc(2026, 11, 2, 0, 0)));
     assert!(!calendar.window_contains("main", utc(2026, 11, 2, 0, 0)));
@@ -206,7 +208,7 @@ fn early_bird_slot_is_not_a_weekly_series() {
     let slot =
         config.active_calendar().unwrap().unwrap().session(civil::date(2026, 11, 1), 1).unwrap();
 
-    assert!(matches!(slot.source.next_week(), Err(DomainError::InvalidSchedule(_))));
+    assert_matches!(slot.source.next_week(), Err(DomainError::InvalidSchedule(_)));
 }
 
 /// 排期日期限定在公元 1–9999 年：这之外的年份，日期与身份文本的写法与已持久化的格式不一致，
@@ -224,18 +226,18 @@ fn schedule_source_rejects_years_outside_the_supported_range() {
         (naive(-1, 6, 1, 0, 0), naive(-1, 6, 1, 3, 0), naive(-1, 6, 2, 3, 0)),
     ] {
         let rejected = source("UTC", preview, open, end);
-        assert!(matches!(rejected.resolve(), Err(DomainError::InvalidSchedule(_))));
+        assert_matches!(rejected.resolve(), Err(DomainError::InvalidSchedule(_)));
     }
     // 顺延的结果同样受限：从公元 1 年初往回推一周落到公元 0 年，被拒绝。
-    assert!(matches!(valid.shifted_local_days(-7), Err(DomainError::InvalidSchedule(_))));
+    assert_matches!(valid.shifted_local_days(-7), Err(DomainError::InvalidSchedule(_)));
     // 越界的来源也不能靠顺延回到支持范围：公元 0 年末的来源推进一周会落进公元 1 年，仍被拒绝。
     let before_range =
         source("UTC", naive(0, 12, 25, 0, 0), naive(0, 12, 26, 0, 0), naive(0, 12, 27, 0, 0));
-    assert!(matches!(before_range.next_week(), Err(DomainError::InvalidSchedule(_))));
-    assert!(matches!(before_range.shifted_local_days(7), Err(DomainError::InvalidSchedule(_))));
+    assert_matches!(before_range.next_week(), Err(DomainError::InvalidSchedule(_)));
+    assert_matches!(before_range.shifted_local_days(7), Err(DomainError::InvalidSchedule(_)));
 
     let mut early_bird = valid;
     early_bird.early_bird =
         Some(AuctionEarlyBirdSlot { season: civil::date(-1, 11, 1), session: 1 });
-    assert!(matches!(early_bird.resolve(), Err(DomainError::InvalidSchedule(_))));
+    assert_matches!(early_bird.resolve(), Err(DomainError::InvalidSchedule(_)));
 }

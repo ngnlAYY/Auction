@@ -56,7 +56,7 @@ impl PostgresCompetitionTransaction {
             .await
             .map_err(map_competition_error)?
             .ok_or_else(|| invalid("结算命令冲突后无法读取账本"))?;
-        if existing == command { Ok(()) } else { Err(CommandLedgerError::Conflict.into()) }
+        (existing == command).ok_or_else(|| CommandLedgerError::Conflict.into())
     }
 
     pub(super) async fn load_settlement_for_update(

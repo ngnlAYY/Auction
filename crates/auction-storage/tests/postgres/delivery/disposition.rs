@@ -4,6 +4,8 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::assert_matches;
+
 use auction_application::delivery::DeliveryAdminGuardBlocker;
 use auction_application::delivery::{
     DeliveryAcknowledgementCommand, DeliveryAdminPort, DeliveryDispositionCommandError,
@@ -131,12 +133,12 @@ async fn postgres_acknowledge_appends_disposition_and_is_visible_in_detail() {
             "different reason",
         ),
     };
-    assert!(matches!(
+    assert_matches!(
         store.acknowledge(conflicting).await,
         Err(auction_application::core::ApplicationError::DeliveryDisposition(
             DeliveryDispositionCommandError::CommandConflict
         ))
-    ));
+    );
 
     // 模拟重排推进 fence 后再次失败，历史确认不能挡住新的失败处置。
     sqlx::query("UPDATE public.deliveries SET fencing_version = fencing_version + 1 WHERE id = $1")
@@ -184,10 +186,10 @@ async fn postgres_acknowledge_rejects_funded_or_obligation_delivery() {
             reason,
         ),
     };
-    assert!(matches!(
+    assert_matches!(
         store.acknowledge(command).await,
         Err(auction_application::core::ApplicationError::DeliveryDisposition(
             DeliveryDispositionCommandError::NotAcknowledgeable
         ))
-    ));
+    );
 }

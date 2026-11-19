@@ -7,6 +7,8 @@
 //!   卖家时，恢复 owner 同事务把它终结为 `failed/recovery_superseded`，`cod_returned` 处置落在
 //!   终结后的 fence 上；已进入发送围栏的投递仍按未解决外部写入拒绝。
 
+use std::assert_matches;
+
 use auction_application::core::ApplicationError;
 use auction_application::delivery::{DeliveryAdminListRequest, DeliveryAdminPort};
 use auction_application::operations::{
@@ -362,8 +364,9 @@ async fn postgres_sending_original_still_blocks_confirmation() {
         .confirm_recovery(confirmation(&sale, RecoveryConfirmationAction::Reclaimed))
         .await
         .expect_err("发送中的原投递不能收口");
-    assert!(
-        matches!(error, ApplicationError::RecoveryCommand(RecoveryCommandError::NotConfirmable)),
+    assert_matches!(
+        error,
+        ApplicationError::RecoveryCommand(RecoveryCommandError::NotConfirmable),
         "{error:?}"
     );
     assert_eq!(delivery_state(pool, sale.payment_delivery).await.0, "sending");
