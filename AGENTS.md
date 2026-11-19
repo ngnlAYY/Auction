@@ -145,6 +145,7 @@ mise run verify     # bash ci/checks/check.sh all fmt check dependency-versions 
 | 入口 | 范围 |
 | --- | --- |
 | `mise run test` | 纯逻辑、单元与本地替身测试；不要求数据库，不连接真实外部账号 |
+| `mise run test-wasm` | 浏览器里的收包接线测试。需要本机已安装 Firefox，测试不连接应用或外部账号 |
 | `mise run test-db` | 真实 PostgreSQL 18 上的锁、隔离级别、幂等与迁移语义；未设置 `AUCTION_TEST_DATABASE_URL` 时用本机 PG18 二进制启动临时集群 |
 | `mise run test-db-compat` | 只验证迁移兼容声明 |
 | `cargo test --locked -p auction-storage --features test-db --test postgres -- --ignored perf` | 数据库热点基准；改动热路径查询、索引或通知提交路径时运行 |

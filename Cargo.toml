@@ -95,6 +95,7 @@ web-sys = { version = "0.3.107", features = [
     "RequestInit",
 ] }
 wasm-bindgen = "0.2.130"
+wasm-bindgen-test = "0.3.80"
 
 # 持久化基础能力；PostgreSQL 18 驱动与 rustls 传输由 auction-storage 无条件启用。
 sqlx = { version = "0.9.0", default-features = false, features = [

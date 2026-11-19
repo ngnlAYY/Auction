@@ -22,6 +22,8 @@ sccache = "0.19.0"
 "cargo:dioxus-cli" = { version = "0.7.10", default-features = false, features = ["disable-telemetry", "no-downloads"], bin = "dx" }
 # wasm-bindgen 必须与工作区 Cargo.toml 的同名依赖同步升级。
 "github:wasm-bindgen/wasm-bindgen" = "0.2.130"
+# 浏览器内的 wasm 测试（mise run test-wasm）经 WebDriver 驱动本机的 Firefox；浏览器本身不由 mise 管理。
+"github:mozilla/geckodriver" = "0.37.1"
 # binaryen 的发布 tag 形如 version_129，提供 wasm-opt。
 "github:WebAssembly/binaryen" = { version = "129", version_prefix = "version_" }
 # esbuild 直接取 npm 上的原生二进制包，运行时不需要 Node。
@@ -54,6 +56,18 @@ run = "bash ci/checks/check.sh wasm"
 [tasks.test]
 description = "纯逻辑、单元与本地替身测试；不连接数据库，数据库测试必须独立隔离"
 run = "cargo test --locked --workspace --all-targets"
+
+[tasks.test-wasm]
+description = "浏览器内的 WASM 收包接线测试，需要本机已安装 Firefox"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER="$(mise which wasm-bindgen-test-runner)"
+GECKODRIVER="$(mise which geckodriver)"
+export CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER GECKODRIVER
+cargo test --locked --target wasm32-unknown-unknown -p auction-web-shared --test transport_browser
+cargo test --locked --target wasm32-unknown-unknown -p auction-web-public --bin auction-web-public -- conditional_get_tests
+'''
 
 [tasks.test-db]
 description = "PostgreSQL 18 测试；设置 AUCTION_TEST_DATABASE_URL 时复用该服务器，否则用本机 PG18 二进制启动并清理临时集群"

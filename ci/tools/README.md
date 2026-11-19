@@ -26,6 +26,7 @@ mise run verify      # 运行某个入口
 - 首次 `mise install` 会从源码编译三个 Cargo 工具（其中 `dx` 最慢），需要 C 编译器、CMake、`pkg-config` 与 OpenSSL 开发文件。
 - 只支持 Linux x86_64，锁文件只记录这一个平台。
 - PostgreSQL 18、Perl、brotli、bash 与 git 由系统包提供，不经 mise。
+- `mise run test-wasm` 使用本机已安装的 Firefox。用例范围见[开发文档的测试入口](../../docs/development.md#测试)。
 
 ## 工具清单
 
@@ -37,7 +38,8 @@ mise run verify      # 运行某个入口
 | `cargo-audit` | crates.io 源码，按发布包自带的 `Cargo.lock` 构建 | `dependency-audit`（联网读取 RustSec） |
 | `cargo-machete` | 同上 | `dependency-unused` |
 | `dx`（dioxus-cli） | 同上；关闭默认 feature，启用 `disable-telemetry` 与 `no-downloads` | 页面构建 |
-| `wasm-bindgen` | GitHub 发布包 | `dx` 的配套工具；必须与工作区 `Cargo.toml` 的同名依赖同步升级 |
+| `wasm-bindgen`、`wasm-bindgen-test-runner` | 同一个 GitHub 发布包 | 分别供 `dx` 和 `mise run test-wasm` 使用。发布包版本必须与工作区 `Cargo.toml` 的 `wasm-bindgen` 依赖同步升级 |
+| `geckodriver` | GitHub 发布包 | `mise run test-wasm` 用它驱动本机 Firefox |
 | `wasm-opt`（binaryen） | GitHub 发布包 | `dx` 的配套工具 |
 | `esbuild` | npm 上的 `@esbuild/linux-x64` 原生二进制包 | `dx` 的配套工具，运行时不需要 Node |
 | `bun` | GitHub 发布包 | `web/` 下 TypeScript 实现的依赖安装、类型检查、测试与构建（依赖版本由 `web/bun.lock` 固定）；Rust 版页面的构建与发布不使用它 |

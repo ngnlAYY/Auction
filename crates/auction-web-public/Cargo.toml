@@ -29,6 +29,9 @@ uuid.workspace = true
 # 公开读缓存未命中时的 GET 用 `RequestCache` 要求浏览器再验证，不接受 HTTP 缓存的旧副本。
 web-sys = { workspace = true, features = ["Document", "Element", "Event", "EventTarget", "HtmlElement", "KeyboardEvent", "MouseEvent", "RequestCache", "Selection", "Storage", "StorageEvent", "Window"] }
 
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test.workspace = true
+
 [lints]
 # 可选：继承工作区统一 lint 策略，不在单包放宽。
 workspace = true

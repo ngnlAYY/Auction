@@ -8,6 +8,8 @@ mod blacklist;
 mod clock;
 mod commands;
 mod compensation;
+#[cfg(all(test, target_arch = "wasm32"))]
+mod conditional_get_tests;
 mod decoder;
 mod forum;
 mod fulfillment;

@@ -62,7 +62,7 @@ bash ci/checks/check.sh <检查项>...
 | --- | --- | --- |
 | `docs` | 所有分支 push / PR / 手动 | 策略门禁与格式（`ci/checks/check.sh all fmt`）；完整历史与 tag 用于 `published-migrations`；同一提交已有 PR 时跳过重复的分支 push。tag 推送只运行发布工作流，不重复普通 CI |
 | `verify` | push / PR / 手动，`docs` 通过后 | `ci/checks/check.sh check dependency-versions lint wasm rustdoc`（工具链 1.100.0） |
-| `test` | push / PR / 手动，`docs` 通过后 | 安装 PostgreSQL 18 后依次执行 `mise run test`、`mise run test-db`（PostgreSQL 18 集成测试）与 `mise run test-db-compat`（迁移兼容声明验证）；不并入默认 `mise run verify`。`just` 二进制按版本单独缓存；测试构建以 `CARGO_PROFILE_DEV_DEBUG=0` 关闭调试信息，缩小构建缓存 |
+| `test` | push / PR / 手动，`docs` 通过后 | 安装 PostgreSQL 18 后依次执行 `mise run test`、`mise run test-db`（PostgreSQL 18 集成测试）、`mise run test-db-compat`（迁移兼容声明验证）与 `mise run test-wasm`（使用运行器自带的 Firefox 验证浏览器收包接线）；测试构建以 `CARGO_PROFILE_DEV_DEBUG=0` 关闭调试信息，缩小构建缓存 |
 | `security-audit` | push / PR / 手动中 `docs` 通过后；每周一 04:17 UTC 独立调度 | `dependency-audit`（cargo-audit 由 mise 安装）；定时与手动运行另以完整历史执行 `release-dependency-audit`；非定时事件另执行 `dependency-unused`，见[ci/checks/README.md#每周依赖审计](checks/README.md#每周依赖审计) |
 | `msrv` | push / PR / 手动，`docs` 通过后 | `ci/checks/check.sh rust-version`：MSRV 等于固定工具链，编译已由 `verify` 覆盖，这里只核对版本声明；作业名是 `main` 的必需检查 |
 | `artifacts` | 仅手动（`workflow_dispatch`） | 调用可复用工作流 `.github/workflows/release-build.yml`：由 mise 安装发布工具，`ci/release/release.sh release-check` 构建并校验完整发布包，上传 1 天候选包；候选包不可部署，默认分支推送不再运行 |
@@ -76,7 +76,7 @@ bash ci/checks/check.sh <检查项>...
 只由 `v<版本>` 形式的 tag 推送触发（tag 必须等于 `Cargo.toml` 的 workspace version）。流程：
 
 1. `guard`：校验 tag 名与工作区版本一致；完整 checkout 后确认 tag 提交是 `origin/main` 的祖先；运行 `published-migrations`，任何已发布迁移被改写或删除都拒绝发布。
-2. `verify`：在 tag 上重跑 `ci/checks/check.sh all fmt check dependency-versions lint wasm rustdoc`、`mise run test`、PostgreSQL 18 `mise run test-db` 与 `mise run test-db-compat`，测试入口与 PostgreSQL 18 准备方式和 `ci.yml` 的 `test` 作业一致，不依赖分支保护的历史运行记录。
+2. `verify`：在 tag 上重跑 `ci/checks/check.sh all fmt check dependency-versions lint wasm rustdoc`、`mise run test`、PostgreSQL 18 `mise run test-db` 与 `mise run test-db-compat`，PostgreSQL 18 准备方式与 `ci.yml` 的 `test` 作业一致。浏览器收包接线测试由普通 CI 的 `test` 作业运行。
 3. `build`：复用 `.github/workflows/release-build.yml`，与普通 CI 完全相同的发布构建、缓存与门禁，产出候选包。
 4. `publish`：复核候选包 SHA-256，用 `actions/attest-build-provenance` 生成绑定本仓库、本工作流、tag 与构建提交的 SLSA 来源证明，再用部署端同一脚本自检，最后 `gh release create --verify-tag` 创建 GitHub Release 并附带 `*.tar.gz`、`SHA256SUMS`、`DEPENDENCIES.md`。
 

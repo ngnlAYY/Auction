@@ -122,10 +122,13 @@ AUCTION_CONFIG_FILE=$dir/public.toml mise run run-public
 
 ```bash
 mise run test        # cargo test --locked --workspace --all-targets（默认 feature）
-mise run test-db     # 真实 PostgreSQL 18 集成测试，见下文
+mise run test-wasm   # Firefox 中的 WASM 收包接线测试
+mise run test-db     # 真实 PostgreSQL 18 集成测试
 ```
 
 `mise run test` 运行单元测试及无需数据库的集成测试（包括本地替身）；不运行文档测试，不要求 PostgreSQL，不连接真实游戏或论坛账号，也不得隐式启动数据库集群。可按改动所属 owner 缩小范围，例如 `cargo test --locked -p auction-domain --lib`；交付说明写出实际命令及未覆盖范围。
+
+`mise run test-wasm` 需要本机已安装 Firefox，由 mise 提供的 `wasm-bindgen-test-runner` 和 `geckodriver` 以无头模式运行。入口依次运行 `auction-web-shared` 的 `transport_browser` 集成测试和 `auction-web-public` 的 `api::conditional_get_tests` 模块。前者验证共享传输的状态、响应头与正文读取顺序，后者验证 Public 拍品详情的条件 GET 和缓存驱逐。Fetch 替身提供浏览器的 `Response`，不连接应用或外部账号。日常运行 `mise run test` 无需浏览器。
 
 `mise run test-db` 启用 `auction-storage` 的 `test-db` feature，断言涉及锁、隔离级别、幂等或迁移时必须在真实 PG18 上执行。`crates/auction-storage/src` 内另有少量以 `postgres_` 命名、标注 `#[ignore]` 的用例：它们只在事务内写连接私有临时表，设置了 `AUCTION_TEST_DATABASE_URL` 时由同一入口追加运行，未设置时明确跳过。设置 `AUCTION_TEST_DATABASE_URL` 时复用该 URL 所在服务器，只创建与删除夹具自己的模板库和测试库，不改写 URL 指向的库；该维护角色需要 `CREATEDB` 与 `CREATEROLE`（CI 显式授予，生产运行账号不授予）。未设置时依次用 `AUCTION_TEST_PG_BIN`、`PATH`、`/usr/lib/postgresql/18/bin` 的二进制在临时目录启动一次性集群。URL 只经环境传入，不写入文档、日志或提交的配置。该入口不得并入 `mise run verify` 或 `mise run test`：需要真实 PostgreSQL 语义的断言只能在这里运行，并保持独立数据库、独立角色与清理后的临时集群。
 

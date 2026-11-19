@@ -137,8 +137,8 @@ jobs:
       # 测试构建不生成调试信息：target 与构建缓存更小，链接更快。panic 消息里的源码位置
       # 不依赖调试信息，失败时只有 backtrace 缺少行号。
       CARGO_PROFILE_DEV_DEBUG: "0"
-      # 测试入口是 mise 任务；只启用 Rust，mise run 不会顺带安装其余工具。
-      MISE_ENABLE_TOOLS: rust
+      # 浏览器接线测试使用运行器自带的 Firefox；驱动与 wasm 测试运行器由 mise 提供。
+      MISE_ENABLE_TOOLS: rust,github:wasm-bindgen/wasm-bindgen,github:mozilla/geckodriver
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -185,6 +185,8 @@ jobs:
       # 不与其它集成测试的失败混在一起。`mise run test-db` 已包含同一组测试。
       - name: Verify migration compatibility declarations
         run: mise run test-db-compat
+      - name: Run browser transport tests
+        run: mise run test-wasm
 
   security-audit:
     needs: docs

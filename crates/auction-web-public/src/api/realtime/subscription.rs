@@ -343,6 +343,8 @@ where
 }
 
 #[cfg(test)]
+// 字段只由宿主测试读取，wasm 测试构型仍会编译此夹具。
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub(crate) struct ReplayFixture {
     pub(crate) status: u16,
     pub(crate) close_code: u16,

@@ -29,3 +29,7 @@ wasm-bindgen.workspace = true
 [lints]
 # 可选：继承工作区统一 lint 策略，不在单包放宽。
 workspace = true
+
+# 只有浏览器内的收包接线测试使用，见 tests/transport_browser.rs。
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test.workspace = true
