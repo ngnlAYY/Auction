@@ -4,6 +4,7 @@ use std::{fs, io::ErrorKind, net::IpAddr, path::PathBuf, sync::Arc, time::Durati
 
 use auction_config::{FirstRunConfig, FirstRunError, PostgresConnectionConfig};
 use auction_contracts::{SetupErrorResponse, SetupRequest, SetupResponse};
+use auction_http::WebScriptPolicy;
 use auction_storage::{DatabaseStore, postgres_connect_options};
 use axum::{
     Json, Router,
@@ -70,6 +71,29 @@ struct FirstRunState {
     operation: Mutex<SetupOperation>,
 }
 
+/// 门禁中间件与处理 handler 共享同一份只读策略；脚本 CSP 由装配根按 surface 显式选择。
+#[derive(Clone)]
+struct SetupBoundary {
+    policy: Arc<FirstRunPolicy>,
+    web_script_policy: WebScriptPolicy,
+}
+
+/// 首次设置路由的唯一装配入口；测试与运行期共用，避免测试绕过门禁或策略接线。
+fn first_run_router<A: RustEmbed + 'static>(
+    state: Arc<FirstRunState>,
+    web_script_policy: WebScriptPolicy,
+) -> Router {
+    let boundary = SetupBoundary { policy: Arc::clone(&state.policy), web_script_policy };
+    Router::new()
+        .route("/api/v1/setup/verify", post(verify))
+        .route("/api/v1/setup/validate", post(validate))
+        .route("/api/v1/setup/complete", post(complete))
+        .fallback(auction_http::serve_admin_setup_asset::<A>)
+        .layer(DefaultBodyLimit::max(8 * 1024))
+        .layer(axum::middleware::from_fn_with_state(boundary, access::enforce))
+        .with_state(state)
+}
+
 /// 终态与完成通知由同一操作锁拥有，避免发布后为发送通知再次异步取锁。
 struct SetupOperation {
     status: SetupStatus,
@@ -87,10 +111,14 @@ type SetupFailure = (StatusCode, Json<SetupErrorResponse>);
 type SetupResult = Result<Json<SetupResponse>, SetupFailure>;
 
 /// 启动仅绑定 127.0.0.1 的初始化进程；完成写入后退出，不自动进入正式 Admin 模式。
+/// `web_script_policy` 由装配根按设置页实际使用的前端技术栈显式给出。
 pub async fn run_first_run<A: RustEmbed + 'static>(
     options: FirstRunServerOptions,
+    web_script_policy: WebScriptPolicy,
 ) -> Result<(), &'static str> {
-    match run_first_run_with_policy::<A>(options, FirstRunPolicy::default()).await? {
+    match run_first_run_with_policy::<A>(options, FirstRunPolicy::default(), web_script_policy)
+        .await?
+    {
         FirstRunOutcome::Completed { .. } => Ok(()),
         FirstRunOutcome::Interrupted => Err("setup was interrupted"),
         FirstRunOutcome::OutcomeUnknown => Err("setup output requires manual verification"),
@@ -98,9 +126,11 @@ pub async fn run_first_run<A: RustEmbed + 'static>(
 }
 
 /// 通过独立策略启用受信 HTTPS 代理或合并入口的初始化确认，不挂载普通 Admin 写接口。
+/// `web_script_policy` 与其他绑定参数一样在启动时确定，并作用于所有首次设置响应。
 pub async fn run_first_run_with_policy<A: RustEmbed + 'static>(
     options: FirstRunServerOptions,
     policy: FirstRunPolicy,
+    web_script_policy: WebScriptPolicy,
 ) -> Result<FirstRunOutcome, &'static str> {
     policy.validate()?;
     let policy = Arc::new(policy);
@@ -124,14 +154,7 @@ pub async fn run_first_run_with_policy<A: RustEmbed + 'static>(
             shutdown: Some(shutdown_sender),
         }),
     });
-    let app = Router::new()
-        .route("/api/v1/setup/verify", post(verify))
-        .route("/api/v1/setup/validate", post(validate))
-        .route("/api/v1/setup/complete", post(complete))
-        .fallback(auction_http::serve_admin_setup_asset::<A>)
-        .layer(DefaultBodyLimit::max(8 * 1024))
-        .layer(axum::middleware::from_fn_with_state(Arc::clone(&policy), access::enforce))
-        .with_state(Arc::clone(&state));
+    let app = first_run_router::<A>(Arc::clone(&state), web_script_policy);
 
     let origin = policy
         .remote
@@ -361,27 +384,181 @@ fn error(status: StatusCode, code: &'static str) -> (StatusCode, Json<SetupError
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::{borrow::Cow, net::SocketAddr, sync::Arc, time::Duration};
 
     use auction_contracts::{SetupDatabaseRequest, SetupRequest, SetupScheduleRequest};
+    use auction_http::WebScriptPolicy;
     use axum::{
         Json,
         body::to_bytes,
         extract::{Request, State},
         http::StatusCode,
         response::IntoResponse,
+        serve::{Listener, ListenerExt},
     };
+    use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, duplex};
     use tokio::sync::Mutex;
 
     use super::{
-        FirstRunPolicy, FirstRunServerOptions, FirstRunState, SetupOperation, SetupStatus, complete,
+        FirstRunPolicy, FirstRunServerOptions, FirstRunState, SetupOperation, SetupStatus,
+        complete, first_run_router,
     };
 
     const DATABASE_TARGET: &str = "host=%3A%3A1&port=5432&name=%E6%8B%8D%E5%8D%96+%26+%25";
+    const DIOXUS_CSP: &str = "default-src 'self'; script-src 'self' 'unsafe-eval' \
+                              'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; \
+                              object-src 'none'; base-uri 'self'; form-action 'self'; \
+                              frame-ancestors 'none'";
+    const SOLID_CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self' \
+                             'unsafe-inline'; object-src 'none'; base-uri 'self'; \
+                             form-action 'self'; frame-ancestors 'none'";
     const TARGET_MISMATCH_RESPONSE: &str = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../auction-contracts/tests/fixtures/admin/setup-confirm-target-mismatch.json"
     ));
+
+    struct NoAssets;
+
+    impl rust_embed::RustEmbed for NoAssets {
+        fn get(_path: &str) -> Option<rust_embed::EmbeddedFile> {
+            None
+        }
+
+        fn iter() -> impl Iterator<Item = Cow<'static, str>> {
+            std::iter::empty()
+        }
+    }
+
+    /// 生产路由需要真实监听器；测试用一次性内存管道替代套接字，仍经 axum::serve 与连接信息注入。
+    struct MemoryListener<I> {
+        io: Option<I>,
+        addr: SocketAddr,
+    }
+
+    impl<I> Listener for MemoryListener<I>
+    where
+        I: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    {
+        type Io = I;
+        type Addr = SocketAddr;
+
+        async fn accept(&mut self) -> (Self::Io, Self::Addr) {
+            match self.io.take() {
+                Some(io) => (io, self.addr),
+                None => std::future::pending().await,
+            }
+        }
+
+        fn local_addr(&self) -> std::io::Result<Self::Addr> {
+            Ok(self.addr)
+        }
+    }
+
+    fn setup_state() -> Arc<FirstRunState> {
+        Arc::new(FirstRunState {
+            options: FirstRunServerOptions {
+                output_dir: std::env::temp_dir().join(uuid::Uuid::new_v4().to_string()),
+                control_group: "auction".to_owned(),
+                control_uid: 1000,
+            },
+            token: "fixture-token".to_owned(),
+            policy: Arc::new(FirstRunPolicy::default()),
+            operation: Mutex::new(SetupOperation { status: SetupStatus::Pending, shutdown: None }),
+        })
+    }
+
+    async fn setup_response(
+        state: Arc<FirstRunState>,
+        web_script_policy: WebScriptPolicy,
+        host: &str,
+    ) -> String {
+        let app = first_run_router::<NoAssets>(state, web_script_policy);
+        let request = format!(
+            "POST /api/v1/setup/verify HTTP/1.1\r\nhost: {host}\r\nx-setup-token: fixture-token\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+        );
+        let (mut client, server) = duplex(4096);
+        let listener =
+            MemoryListener { io: Some(server), addr: SocketAddr::from(([127, 0, 0, 1], 12345)) }
+                .tap_io(|_io| {});
+        let server = tokio::spawn(async move {
+            let _ = axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
+                .await;
+        });
+        client.write_all(request.as_bytes()).await.expect("setup request write");
+
+        let response = tokio::time::timeout(Duration::from_secs(1), async {
+            let mut response = Vec::new();
+            let mut buffer = [0; 1024];
+            loop {
+                let length = client.read(&mut buffer).await.expect("setup response read");
+                if length == 0 {
+                    break;
+                }
+                response.extend_from_slice(&buffer[..length]);
+                if response.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            response
+        })
+        .await
+        .expect("setup response timeout");
+        server.abort();
+        String::from_utf8(response).expect("utf-8 setup response")
+    }
+
+    fn response_status(response: &str) -> u16 {
+        response
+            .split_whitespace()
+            .nth(1)
+            .and_then(|status| status.parse().ok())
+            .expect("http status")
+    }
+
+    fn response_header<'a>(response: &'a str, name: &str) -> Option<&'a str> {
+        response.lines().skip(1).take_while(|line| !line.is_empty()).find_map(|line| {
+            let (header, value) = line.split_once(':')?;
+            header.eq_ignore_ascii_case(name).then(|| value.trim())
+        })
+    }
+
+    #[tokio::test]
+    async fn setup_router_uses_the_selected_script_policy_for_allowed_and_rejected_requests() {
+        for (web_script_policy, expected) in
+            [(WebScriptPolicy::Dioxus, DIOXUS_CSP), (WebScriptPolicy::Solid, SOLID_CSP)]
+        {
+            let allowed = setup_response(setup_state(), web_script_policy, "127.0.0.1:8091").await;
+            assert_eq!(response_status(&allowed), StatusCode::OK.as_u16(), "{web_script_policy:?}");
+            assert_eq!(
+                response_header(&allowed, "content-security-policy"),
+                Some(expected),
+                "{web_script_policy:?}"
+            );
+            assert_eq!(
+                response_header(&allowed, "cache-control"),
+                Some("no-store"),
+                "{web_script_policy:?}"
+            );
+
+            let rejected =
+                setup_response(setup_state(), web_script_policy, "evil.example:8091").await;
+            assert_eq!(
+                response_status(&rejected),
+                StatusCode::FORBIDDEN.as_u16(),
+                "{web_script_policy:?}"
+            );
+            assert_eq!(
+                response_header(&rejected, "content-security-policy"),
+                Some(expected),
+                "{web_script_policy:?}"
+            );
+            assert_eq!(
+                response_header(&rejected, "cache-control"),
+                Some("no-store"),
+                "{web_script_policy:?}"
+            );
+        }
+    }
 
     fn form() -> SetupRequest {
         SetupRequest {

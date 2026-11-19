@@ -9,6 +9,6 @@ pub(crate) mod strict_json;
 
 pub use boundary::HttpBoundary;
 pub use security::{
-    AdminHttpSecurity, AnonymousReadGate, HttpSecurityOptions, PublicHttpSecurity,
+    AdminHttpSecurity, AnonymousReadGate, HttpSecurityOptions, PublicHttpSecurity, WebScriptPolicy,
     apply_browser_security_headers,
 };

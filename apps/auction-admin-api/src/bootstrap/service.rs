@@ -105,11 +105,13 @@ async fn run_service(
         heartbeat.as_ref().map(Arc::clone).map(state::spawn_heartbeat).map(TaskGuard::new);
     // 传入本二进制的版本，健康检查才能报告运行进程的版本而非契约 crate 的版本。
     let boundary = state.http_boundary();
-    let app = auction_http::admin_router::<crate::web_assets::AdminWebAssets>(
-        env!("CARGO_PKG_VERSION"),
-        boundary,
-    )
-    .with_state(state);
+    let app =
+        auction_http::admin_router_with_web_script_policy::<crate::web_assets::AdminWebAssets>(
+            env!("CARGO_PKG_VERSION"),
+            boundary,
+            auction_http::WebScriptPolicy::Dioxus,
+        )
+        .with_state(state);
 
     tracing::info!(
         listener = %bound_listener.description(),

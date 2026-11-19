@@ -24,3 +24,5 @@ PostgreSQL 首次部署的一次性设置服务：在没有任何配置时提供
 默认只监听 loopback，推荐经 SSH 隧道访问。本地请求的 `Host` 必须精确匹配监听 IP 或 `localhost` 及端口；可省略 `Origin`，提供时必须匹配同一 HTTP origin（80 端口允许显式或省略）。Origin 校验只比较借用的 scheme 与 authority，不为每次请求重新拼接两个候选 URL。
 
 远程访问须显式提供精确的 HTTPS origin 与唯一受信代理 IP（`auction-server --allow-remote-setup --setup-origin … --setup-proxy-ip …`），只有来自该代理且证明为 HTTPS 的请求才被接受；完成后应立即撤除临时代理站点。
+
+首次设置页属于 Admin surface。`run_first_run` 与 `run_first_run_with_policy` 要求装配根显式传入 `WebScriptPolicy`，让设置页的 CSP 随 Admin 实际使用的前端技术栈（Dioxus 或 Solid）选择；门禁拒绝、框架错误与超时响应也经过同一个安全头出口。

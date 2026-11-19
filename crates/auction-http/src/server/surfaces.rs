@@ -14,7 +14,7 @@ use crate::admin::{
 };
 use crate::assets as web_assets;
 use crate::middleware::boundary::HttpBoundary;
-use crate::middleware::security::AnonymousReadGate;
+use crate::middleware::security::{AnonymousReadGate, WebScriptPolicy};
 use crate::middleware::{boundary, method_strict, read_gate, response_cache, strict_json};
 use crate::public::browser_errors;
 use crate::public::{
@@ -34,10 +34,31 @@ use crate::{admin as admin_handlers, public as public_handlers};
 /// 健康检查路径沿用已冻结的旧契约；其余路径交给内嵌的公开端 SPA 产物处理。
 /// `version` 由装配根传入自身的 `CARGO_PKG_VERSION`：契约 crate 内展开该宏只会得到契约
 /// 自己的版本，而健康检查要报告的是运行进程的版本。
+///
+/// 测试专用的兼容入口：正式构建只导出要求显式策略的构造函数。
+#[cfg(test)]
 pub fn public_router<A>(
     version: &'static str,
     boundary: HttpBoundary,
     anonymous_read_gate: AnonymousReadGate,
+) -> Router<PublicApiState>
+where
+    A: rust_embed::RustEmbed + Send + Sync + 'static,
+{
+    public_router_with_web_script_policy::<A>(
+        version,
+        boundary,
+        anonymous_read_gate,
+        WebScriptPolicy::Dioxus,
+    )
+}
+
+/// 公开端路由，并显式选择本 surface 的浏览器脚本策略。
+pub fn public_router_with_web_script_policy<A>(
+    version: &'static str,
+    boundary: HttpBoundary,
+    anonymous_read_gate: AnonymousReadGate,
+    web_script_policy: WebScriptPolicy,
 ) -> Router<PublicApiState>
 where
     A: rust_embed::RustEmbed + Send + Sync + 'static,
@@ -54,12 +75,30 @@ where
         anonymous_read_gate,
     )
     .fallback(web_assets::serve_public_asset::<A>)
-    .layer(middleware::from_fn_with_state(boundary, boundary::enforce))
+    .layer(middleware::from_fn_with_state(
+        boundary.with_web_script_policy(web_script_policy),
+        boundary::enforce,
+    ))
 }
 
 /// 管理端路由。
 /// 管理端与公开端由各自装配根传入不同资源类型，避免任一二进制引用另一端产物。
+///
+/// 测试专用的兼容入口：正式构建只导出要求显式策略的构造函数。
+#[cfg(test)]
 pub fn admin_router<A>(version: &'static str, boundary: HttpBoundary) -> Router<AdminApiState>
+where
+    A: rust_embed::RustEmbed + Send + Sync + 'static,
+{
+    admin_router_with_web_script_policy::<A>(version, boundary, WebScriptPolicy::Dioxus)
+}
+
+/// 管理端路由，并显式选择本 surface 的浏览器脚本策略。
+pub fn admin_router_with_web_script_policy<A>(
+    version: &'static str,
+    boundary: HttpBoundary,
+    web_script_policy: WebScriptPolicy,
+) -> Router<AdminApiState>
 where
     A: rust_embed::RustEmbed + Send + Sync + 'static,
 {
@@ -74,7 +113,10 @@ where
             .route("/metrics", axum::routing::any(metrics::admin)),
     )
     .fallback(web_assets::serve_admin_asset::<A>)
-    .layer(middleware::from_fn_with_state(boundary, boundary::enforce))
+    .layer(middleware::from_fn_with_state(
+        boundary.with_web_script_policy(web_script_policy),
+        boundary::enforce,
+    ))
 }
 
 /// 注册已冻结的 Public 路径。
@@ -514,11 +556,12 @@ mod tests {
     use std::sync::Arc;
 
     use auction_application::auction::{
-        PublicAccountReader, PublicAuctionCursor, PublicAuctionProjection, PublicEquipment,
-        PublicLiveLotDetail, PublicLiveLotSummary, PublicLotDetail, PublicLotListRequest,
-        PublicLotPage, PublicLotReader, PublicMyBid, PublicMyBidsPage, PublicMyBidsRequest,
-        PublicOwnedProxy, PublicProxyBid, PublicProxyCapabilities, PublicProxyTransition,
-        WorldReader, WorldSnapshot,
+        AuctionReader, CurrentAuctionSnapshot, PublicAccountReader, PublicAuctionCountdown,
+        PublicAuctionCursor, PublicAuctionListRequest, PublicAuctionPage, PublicAuctionProjection,
+        PublicEquipment, PublicLiveLotDetail, PublicLiveLotSummary, PublicLotDetail,
+        PublicLotListRequest, PublicLotPage, PublicLotReader, PublicMyBid, PublicMyBidsPage,
+        PublicMyBidsRequest, PublicOwnedProxy, PublicProxyBid, PublicProxyCapabilities,
+        PublicProxyTransition, PublicRealtimeAuctionStatus, WorldReader, WorldSnapshot,
     };
     use auction_application::core::{ApplicationError, ApplicationFuture};
     use auction_application::forum::{EquipmentGroup, PublicForumReader, PublicForumThread};
@@ -548,12 +591,16 @@ mod tests {
     use tower::ServiceExt;
     use uuid::Uuid;
 
-    use super::{public_feature_routes, public_router};
+    use super::{
+        admin_router_with_web_script_policy, public_feature_routes, public_router,
+        public_router_with_web_script_policy,
+    };
+    use crate::WebScriptPolicy;
     use crate::mapping::encode_public_cursor;
     use crate::middleware::response_cache::SETTLED_CACHE_CONTROL;
     use crate::middleware::security::PublicHttpSecurity;
     use crate::server::contract_fixtures::{AUCTION_ID, assert_http, response_json};
-    use crate::state::PublicApiState;
+    use crate::state::{AdminApiState, PublicApiState};
 
     fn app() -> Router {
         let gate = PublicHttpSecurity::default().anonymous_read_gate();
@@ -568,16 +615,6 @@ mod tests {
             .expect("response")
     }
 
-    #[tokio::test]
-    async fn auction_summary_route_reports_missing_storage_without_the_state_port() {
-        let response =
-            summary_response(&format!("{AUCTION_ID}/summary"), PublicApiState::default(), None)
-                .await;
-        assert_no_summary_cache(&response);
-        let body = response_json(StatusCode::SERVICE_UNAVAILABLE, response).await;
-        assert_eq!(body["code"], "storage_unavailable");
-    }
-
     struct NoAssets;
 
     impl rust_embed::RustEmbed for NoAssets {
@@ -588,6 +625,211 @@ mod tests {
         fn iter() -> impl Iterator<Item = Cow<'static, str>> {
             std::iter::empty()
         }
+    }
+
+    /// 只提供倒计时快照，用于验证 SVG 覆盖发生在通用脚本策略之后。
+    struct CountdownAuctions(Uuid);
+
+    impl AuctionReader for CountdownAuctions {
+        fn list_public_auctions(
+            &self,
+            _request: PublicAuctionListRequest,
+        ) -> ApplicationFuture<'_, PublicAuctionPage> {
+            Box::pin(async {
+                Err(ApplicationError::CapabilityUnavailable("测试不提供目录"))
+            })
+        }
+
+        fn current_auction(
+            &self,
+            _world_id: String,
+        ) -> ApplicationFuture<'_, Option<CurrentAuctionSnapshot>> {
+            Box::pin(async { Ok(None) })
+        }
+
+        fn public_auction_countdown(
+            &self,
+            auction_id: Uuid,
+        ) -> ApplicationFuture<'_, Option<PublicAuctionCountdown>> {
+            let expected = self.0;
+            Box::pin(async move {
+                let observed_at = Timestamp::from_timestamp(1_800_000_000, 0).expect("valid time");
+                Ok((auction_id == expected).then(|| PublicAuctionCountdown {
+                    auction_id,
+                    intake_closes_at: observed_at + Duration::seconds(3_600),
+                    scheduled_end_at: Some(observed_at + Duration::seconds(7_200)),
+                    observed_at,
+                }))
+            })
+        }
+
+        fn public_realtime_auction_status(
+            &self,
+            _auction_id: Uuid,
+        ) -> ApplicationFuture<'_, Option<PublicRealtimeAuctionStatus>> {
+            Box::pin(async { Ok(None) })
+        }
+    }
+
+    const COUNTDOWN_SVG_CSP: &str = "default-src 'none'; script-src 'none'; style-src \
+                                     'unsafe-inline'; object-src 'none'; base-uri 'none'; \
+                                     frame-ancestors 'none'";
+    const DIOXUS_CSP: &str = "default-src 'self'; script-src 'self' 'unsafe-eval' \
+                              'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; \
+                              object-src 'none'; base-uri 'self'; form-action 'self'; \
+                              frame-ancestors 'none'";
+    const SOLID_CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self' \
+                             'unsafe-inline'; object-src 'none'; base-uri 'self'; \
+                             form-action 'self'; frame-ancestors 'none'";
+
+    fn csp(response: &Response) -> &str {
+        response
+            .headers()
+            .get(header::CONTENT_SECURITY_POLICY)
+            .and_then(|value| value.to_str().ok())
+            .expect("csp")
+    }
+
+    async fn public_health(web_script_policy: WebScriptPolicy) -> Response {
+        let state = PublicApiState::default();
+        let boundary = state.http_boundary();
+        let gate = state.anonymous_read_gate();
+        public_router_with_web_script_policy::<NoAssets>(
+            env!("CARGO_PKG_VERSION"),
+            boundary,
+            gate,
+            web_script_policy,
+        )
+        .with_state(state)
+        .oneshot(Request::builder().uri("/health").body(Body::empty()).expect("request"))
+        .await
+        .expect("response")
+    }
+
+    async fn admin_health(web_script_policy: WebScriptPolicy) -> Response {
+        let state = AdminApiState::default();
+        let boundary = state.http_boundary();
+        admin_router_with_web_script_policy::<NoAssets>(
+            env!("CARGO_PKG_VERSION"),
+            boundary,
+            web_script_policy,
+        )
+        .with_state(state)
+        .oneshot(Request::builder().uri("/health").body(Body::empty()).expect("request"))
+        .await
+        .expect("response")
+    }
+
+    #[tokio::test]
+    async fn health_responses_use_the_route_script_policy() {
+        for (web_script_policy, expected) in
+            [(WebScriptPolicy::Dioxus, DIOXUS_CSP), (WebScriptPolicy::Solid, SOLID_CSP)]
+        {
+            let public = public_health(web_script_policy).await;
+            assert_eq!(public.status(), StatusCode::OK, "public {web_script_policy:?}");
+            assert_eq!(csp(&public), expected, "public {web_script_policy:?}");
+
+            let admin = admin_health(web_script_policy).await;
+            assert_eq!(admin.status(), StatusCode::OK, "admin {web_script_policy:?}");
+            assert_eq!(csp(&admin), expected, "admin {web_script_policy:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn invalid_request_id_uses_the_route_script_policy() {
+        for (web_script_policy, expected) in
+            [(WebScriptPolicy::Dioxus, DIOXUS_CSP), (WebScriptPolicy::Solid, SOLID_CSP)]
+        {
+            let state = PublicApiState::default();
+            let boundary = state.http_boundary();
+            let gate = state.anonymous_read_gate();
+            let app = public_router_with_web_script_policy::<NoAssets>(
+                env!("CARGO_PKG_VERSION"),
+                boundary,
+                gate,
+                web_script_policy,
+            )
+            .with_state(state);
+            let response = app
+                .oneshot(
+                    Request::builder()
+                        .uri("/health")
+                        .header("x-request-id", "bad id")
+                        .body(Body::empty())
+                        .expect("request"),
+                )
+                .await
+                .expect("response");
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            assert_eq!(csp(&response), expected, "{web_script_policy:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn countdown_svg_overrides_each_surface_script_policy_last() {
+        let auction_id = Uuid::from_u128(0x018f_4c8e_7b2a_7c3d_8e4f_0123_4567_89ab);
+        for web_script_policy in [WebScriptPolicy::Dioxus, WebScriptPolicy::Solid] {
+            let state = PublicApiState::new(
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(Arc::new(CountdownAuctions(auction_id))),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                PublicHttpSecurity::default(),
+            );
+            let gate = state.anonymous_read_gate();
+            let boundary = state.http_boundary();
+            let app = public_router_with_web_script_policy::<NoAssets>(
+                env!("CARGO_PKG_VERSION"),
+                boundary,
+                gate,
+                web_script_policy,
+            )
+            .with_state(state);
+            let response = app
+                .oneshot(
+                    Request::builder()
+                        .uri(format!("/api/v1/auctions/{auction_id}/countdown/list.svg"))
+                        .body(Body::empty())
+                        .expect("request"),
+                )
+                .await
+                .expect("response");
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(
+                response
+                    .headers()
+                    .get(header::CONTENT_SECURITY_POLICY)
+                    .and_then(|value| value.to_str().ok()),
+                Some(COUNTDOWN_SVG_CSP)
+            );
+            assert_eq!(
+                response
+                    .headers()
+                    .get("cross-origin-resource-policy")
+                    .and_then(|value| value.to_str().ok()),
+                Some("cross-origin")
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn auction_summary_route_reports_missing_storage_without_the_state_port() {
+        let response =
+            summary_response(&format!("{AUCTION_ID}/summary"), PublicApiState::default(), None)
+                .await;
+        assert_no_summary_cache(&response);
+        let body = response_json(StatusCode::SERVICE_UNAVAILABLE, response).await;
+        assert_eq!(body["code"], "storage_unavailable");
     }
 
     struct SummaryReader {

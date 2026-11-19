@@ -189,6 +189,7 @@ async fn setup(cli: &Cli, output: &Path) -> anyhow::Result<FirstRunOutcome> {
             remote,
             initialize_and_start: true,
         },
+        auction_setup::FirstRunPolicy::DIOXUS_WEB_SCRIPT_POLICY,
     )
     .await
     .map_err(anyhow::Error::msg)

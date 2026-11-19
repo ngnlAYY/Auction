@@ -18,7 +18,7 @@ mod headers;
 #[cfg(test)]
 mod rotation_tests;
 use admin_login::AdminLoginDefense;
-pub use headers::apply_browser_security_headers;
+pub use headers::{WebScriptPolicy, apply_browser_security_headers};
 
 const MAX_RATE_LIMIT_ENTRIES: usize = 4096;
 

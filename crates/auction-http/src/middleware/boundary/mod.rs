@@ -25,6 +25,7 @@ use tracing::Instrument;
 use uuid::Uuid;
 
 use crate::diagnostics;
+use crate::middleware::security::WebScriptPolicy;
 
 const REQUEST_ID_HEADER: &str = "x-request-id";
 const FORWARDED_FOR_HEADER: &str = "x-forwarded-for";
@@ -37,6 +38,7 @@ pub struct HttpBoundary {
     // 策略在启动后只读；middleware 和 surface state 克隆时只共享这一份已校验网段。
     trusted_proxy_cidrs: Arc<[IpCidr]>,
     trusted_unix_proxy: bool,
+    web_script_policy: WebScriptPolicy,
     metrics: HttpRecorder,
     runtime_switches: Option<auction_application::runtime_switches::RuntimeSwitches>,
 }
@@ -47,6 +49,8 @@ impl Default for HttpBoundary {
             request_timeout: Duration::from_secs(15),
             trusted_proxy_cidrs: Arc::default(),
             trusted_unix_proxy: false,
+            // 未显式选择时保持现有 Dioxus 页面的行为；装配根应经路由入口显式传入策略。
+            web_script_policy: WebScriptPolicy::Dioxus,
             metrics: HttpRecorder::default(),
             runtime_switches: None,
         }
@@ -98,6 +102,12 @@ impl HttpBoundary {
         self.metrics = metrics;
         self
     }
+
+    /// 选择本 surface 的脚本 CSP；只由路由装配根按实际前端技术栈调用。
+    pub(crate) fn with_web_script_policy(mut self, web_script_policy: WebScriptPolicy) -> Self {
+        self.web_script_policy = web_script_policy;
+        self
+    }
 }
 
 /// 执行 Public/Admin 共用的协议边界。
@@ -136,7 +146,12 @@ async fn enforce_request(boundary: &HttpBoundary, mut request: Request, next: Ne
         let request_id = match request_id {
             Ok(request_id) | Err(request_id) => request_id,
         };
-        return finish_response(StatusCode::NOT_FOUND.into_response(), &request_id, hsts);
+        return finish_response(
+            StatusCode::NOT_FOUND.into_response(),
+            &request_id,
+            hsts,
+            boundary.web_script_policy,
+        );
     }
     let request_id = match request_id {
         Ok(request_id) => request_id,
@@ -150,6 +165,7 @@ async fn enforce_request(boundary: &HttpBoundary, mut request: Request, next: Ne
                 ),
                 &generated,
                 hsts,
+                boundary.web_script_policy,
             );
         }
     };
@@ -226,7 +242,7 @@ async fn enforce_request(boundary: &HttpBoundary, mut request: Request, next: Ne
         duration_ms = started.elapsed().as_millis() as u64,
         "HTTP request completed"
     );
-    finish_response(response, &request_id, hsts)
+    finish_response(response, &request_id, hsts, boundary.web_script_policy)
 }
 
 /// 仅业务 API 路由使用：把 Path/Bytes 等默认纯文本拒绝收敛为稳定 JSON 外壳。
@@ -429,7 +445,12 @@ fn error_response(
         .into_response()
 }
 
-fn finish_response(mut response: Response, request_id: &str, hsts: bool) -> Response {
+fn finish_response(
+    mut response: Response,
+    request_id: &str,
+    hsts: bool,
+    web_script_policy: WebScriptPolicy,
+) -> Response {
     let cdn_policy = crate::assets::cdn_cache_policy(&response);
     // 共享缓存可以保存并重放的响应不带构建号：重放的副本只能说明生成它的那个进程，部署之后
     // 它会让已经是新版本的页面误判成“版本过期”。
@@ -452,7 +473,7 @@ fn finish_response(mut response: Response, request_id: &str, hsts: bool) -> Resp
             HeaderValue::from_static(crate::server::build_identity::build_id()),
         );
     }
-    super::security::apply_browser_security_headers(headers, hsts);
+    super::security::apply_browser_security_headers(headers, hsts, web_script_policy);
     // `Date` 由 Hyper 的 HTTP/1 与 HTTP/2 编码器按秒缓存后统一补齐，这里无需逐响应格式化。
     crate::public::countdown::apply_security_headers(&mut response);
     response

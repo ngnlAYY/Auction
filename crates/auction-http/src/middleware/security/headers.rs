@@ -2,7 +2,27 @@
 
 use axum::http::{HeaderMap, HeaderValue, header};
 
-/// 两端页面共用的 CSP。两处已知放宽是经过复核的结论，不是遗漏：
+/// 浏览器脚本策略的闭集。装配根按 surface 的实际技术栈显式选择；合并服务里 Public 与
+/// Admin 可以不同，因此不能从 `auction-http` 的全局 Cargo feature 推断。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WebScriptPolicy {
+    /// Dioxus/WASM CSR：`script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'`，因为 WASM
+    /// 编译与解释器执行需要这两项放宽；其余指令与 Solid 相同。
+    Dioxus,
+    /// SolidJS：`script-src 'self'`；其余指令与 Dioxus 相同，保留两者的内联样式例外。
+    Solid,
+}
+
+impl WebScriptPolicy {
+    fn content_security_policy(self) -> &'static str {
+        match self {
+            Self::Dioxus => DIOXUS_CONTENT_SECURITY_POLICY,
+            Self::Solid => SOLID_CONTENT_SECURITY_POLICY,
+        }
+    }
+}
+
+/// Dioxus 页面的 CSP。两处已知放宽是经过复核的结论，不是遗漏：
 ///
 /// - `script-src 'unsafe-eval' 'wasm-unsafe-eval'`：Dioxus 0.7 的 CSR 启动依赖
 ///   `WebAssembly.instantiate` 编译权限，其解释器在执行事件处理时还会走 `new Function`。
@@ -13,9 +33,20 @@ use axum::http::{HeaderMap, HeaderValue, header};
 /// - `style-src 'unsafe-inline'`：`index.html` 的首屏防闪样式与组件 `style` 属性是内联
 ///   样式，CSP 无法用 nonce 覆盖 Dioxus 运行时写入的属性。内联样式不能执行脚本，
 ///   风险限于视觉伪装，且页面不引入第三方样式源。
-const CONTENT_SECURITY_POLICY: &str = concat!(
+const DIOXUS_CONTENT_SECURITY_POLICY: &str = concat!(
     "default-src 'self'; ",
     "script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; ",
+    "style-src 'self' 'unsafe-inline'; ",
+    "object-src 'none'; ",
+    "base-uri 'self'; ",
+    "form-action 'self'; ",
+    "frame-ancestors 'none'",
+);
+
+/// SolidJS 页面的 CSP：脚本只允许同源，保留与 Dioxus 相同的内联样式例外。
+const SOLID_CONTENT_SECURITY_POLICY: &str = concat!(
+    "default-src 'self'; ",
+    "script-src 'self'; ",
     "style-src 'self' 'unsafe-inline'; ",
     "object-src 'none'; ",
     "base-uri 'self'; ",
@@ -34,9 +65,15 @@ const HSTS_VALUE: &str = "max-age=31536000";
 ///
 /// `hsts` 由调用方根据请求的实际协议决定：只有确认浏览器经 HTTPS 访问时才为 true，
 /// 反向代理后只能采信可信上游写入的 `X-Forwarded-Proto`。
-pub fn apply_browser_security_headers(headers: &mut HeaderMap, hsts: bool) {
-    headers
-        .insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static(CONTENT_SECURITY_POLICY));
+pub fn apply_browser_security_headers(
+    headers: &mut HeaderMap,
+    hsts: bool,
+    web_script_policy: WebScriptPolicy,
+) {
+    headers.insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static(web_script_policy.content_security_policy()),
+    );
     if hsts {
         headers.insert(header::STRICT_TRANSPORT_SECURITY, HeaderValue::from_static(HSTS_VALUE));
     }
@@ -54,27 +91,37 @@ mod tests {
     use super::*;
 
     #[test]
-    fn csp_keeps_documented_exceptions_and_blocks_form_actions() {
-        let mut headers = HeaderMap::new();
-        apply_browser_security_headers(&mut headers, false);
-        let policy = headers
-            .get(header::CONTENT_SECURITY_POLICY)
-            .and_then(|value| value.to_str().ok())
-            .expect("csp");
-        assert!(policy.contains("form-action 'self'"));
-        assert!(policy.contains("script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'"));
-        assert!(policy.contains("frame-ancestors 'none'"));
-        assert!(!policy.contains("script-src 'self' 'unsafe-inline'"));
+    fn both_script_policies_write_their_exact_csp() {
+        for (policy, expected) in [
+            (
+                WebScriptPolicy::Dioxus,
+                "default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; \
+                 style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; \
+                 form-action 'self'; frame-ancestors 'none'",
+            ),
+            (
+                WebScriptPolicy::Solid,
+                "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
+                 object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
+            ),
+        ] {
+            let mut headers = HeaderMap::new();
+            apply_browser_security_headers(&mut headers, false, policy);
+            assert_eq!(
+                headers.get(header::CONTENT_SECURITY_POLICY).and_then(|value| value.to_str().ok()),
+                Some(expected)
+            );
+        }
     }
 
     #[test]
     fn hsts_is_only_written_when_the_request_was_https() {
         let mut plain = HeaderMap::new();
-        apply_browser_security_headers(&mut plain, false);
+        apply_browser_security_headers(&mut plain, false, WebScriptPolicy::Dioxus);
         assert!(!plain.contains_key(header::STRICT_TRANSPORT_SECURITY));
 
         let mut secure = HeaderMap::new();
-        apply_browser_security_headers(&mut secure, true);
+        apply_browser_security_headers(&mut secure, true, WebScriptPolicy::Dioxus);
         assert_eq!(
             secure.get(header::STRICT_TRANSPORT_SECURITY).and_then(|value| value.to_str().ok()),
             Some("max-age=31536000")
@@ -91,7 +138,7 @@ mod tests {
     #[test]
     fn other_browser_headers_are_unchanged() {
         let mut headers = HeaderMap::new();
-        apply_browser_security_headers(&mut headers, true);
+        apply_browser_security_headers(&mut headers, true, WebScriptPolicy::Dioxus);
         assert_eq!(headers.get("x-frame-options").unwrap(), "DENY");
         assert_eq!(headers.get(header::X_CONTENT_TYPE_OPTIONS).unwrap(), "nosniff");
         assert_eq!(headers.get(header::REFERRER_POLICY).unwrap(), "no-referrer");

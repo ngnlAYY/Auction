@@ -120,12 +120,14 @@ async fn run_service(
     // 静默落到 no-op 记录器。
     let boundary = state.http_boundary();
     let anonymous_read_gate = state.anonymous_read_gate();
-    let app = auction_http::public_router::<crate::web_assets::PublicWebAssets>(
-        env!("CARGO_PKG_VERSION"),
-        boundary,
-        anonymous_read_gate,
-    )
-    .with_state(state);
+    let app =
+        auction_http::public_router_with_web_script_policy::<crate::web_assets::PublicWebAssets>(
+            env!("CARGO_PKG_VERSION"),
+            boundary,
+            anonymous_read_gate,
+            auction_http::WebScriptPolicy::Dioxus,
+        )
+        .with_state(state);
 
     tracing::info!(listener = %listener_description, "public-api 开始监听");
     let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();

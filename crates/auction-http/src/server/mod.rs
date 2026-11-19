@@ -12,7 +12,9 @@ mod unix_listener;
 
 pub use metrics::spawn_metrics_listener;
 pub use readiness::HttpReadinessProbe;
+#[cfg(test)]
 pub use surfaces::{admin_router, public_router};
+pub use surfaces::{admin_router_with_web_script_policy, public_router_with_web_script_policy};
 #[cfg(target_os = "linux")]
 pub use unix_listener::{UnixHttpListener, UnixListenerOptions};
 

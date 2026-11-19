@@ -100,6 +100,7 @@ pub(super) async fn run(options: SetupOptions) -> anyhow::Result<()> {
                 control_group: options.control_group,
                 control_uid: options.control_uid,
             },
+            auction_http::WebScriptPolicy::Dioxus,
         )
         .await
         .map_err(|reason| anyhow::anyhow!(reason))

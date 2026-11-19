@@ -1,5 +1,21 @@
 use super::*;
 
+const DIOXUS_CSP: &str = "default-src 'self'; script-src 'self' 'unsafe-eval' \
+                          'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; \
+                          object-src 'none'; base-uri 'self'; form-action 'self'; \
+                          frame-ancestors 'none'";
+const SOLID_CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self' \
+                         'unsafe-inline'; object-src 'none'; base-uri 'self'; \
+                         form-action 'self'; frame-ancestors 'none'";
+
+fn csp(response: &Response) -> &str {
+    response
+        .headers()
+        .get(header::CONTENT_SECURITY_POLICY)
+        .and_then(|value| value.to_str().ok())
+        .expect("csp")
+}
+
 fn headers(value: &'static str) -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(FORWARDED_FOR_HEADER, HeaderValue::from_static(value));
@@ -80,13 +96,13 @@ async fn boundary_sets_hsts_only_for_proxied_https_requests() {
     let secure = app.clone().oneshot(build("127.0.0.1:5000", Some("https"))).await.unwrap();
     assert_eq!(secure.status(), StatusCode::OK);
     assert!(secure.headers().contains_key(header::STRICT_TRANSPORT_SECURITY));
-    assert!(secure.headers().contains_key(header::CONTENT_SECURITY_POLICY));
+    assert_eq!(csp(&secure), DIOXUS_CSP);
 
     // 开发/测试与未经代理的明文请求没有协议证明，不能下发 HSTS。
     let plain = app.clone().oneshot(build("127.0.0.1:5000", None)).await.unwrap();
     assert_eq!(plain.status(), StatusCode::OK);
     assert!(!plain.headers().contains_key(header::STRICT_TRANSPORT_SECURITY));
-    assert!(plain.headers().contains_key(header::CONTENT_SECURITY_POLICY));
+    assert_eq!(csp(&plain), DIOXUS_CSP);
 
     let untrusted = app.oneshot(build("203.0.113.9:5000", Some("https"))).await.unwrap();
     assert_eq!(untrusted.status(), StatusCode::OK);
@@ -101,7 +117,7 @@ fn replayable_responses_do_not_report_the_process_build_id() {
         response
             .headers_mut()
             .insert(header::CACHE_CONTROL, HeaderValue::from_static(cache_control));
-        let response = finish_response(response, "request-1", false);
+        let response = finish_response(response, "request-1", false, WebScriptPolicy::Dioxus);
         assert!(
             !response.headers().contains_key(crate::server::build_identity::BUILD_ID_HEADER),
             "cache_control={cache_control}"
@@ -112,27 +128,37 @@ fn replayable_responses_do_not_report_the_process_build_id() {
     response
         .headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("private, max-age=2"));
-    let response = finish_response(response, "request-1", false);
+    let response = finish_response(response, "request-1", false, WebScriptPolicy::Dioxus);
     assert!(response.headers().contains_key(crate::server::build_identity::BUILD_ID_HEADER));
 }
 
 #[test]
 fn non_replayable_responses_report_the_process_build_id() {
-    let response = finish_response(StatusCode::NO_CONTENT.into_response(), "request-1", false);
+    let response = finish_response(
+        StatusCode::NO_CONTENT.into_response(),
+        "request-1",
+        false,
+        WebScriptPolicy::Dioxus,
+    );
     let reported = response
         .headers()
         .get(crate::server::build_identity::BUILD_ID_HEADER)
         .and_then(|value| value.to_str().ok());
     assert_eq!(reported, Some(crate::server::build_identity::build_id()));
     // 安全头是每个响应的固定部分；构建号随所有不可重放的响应出现，不限于成功正文。
-    assert!(response.headers().contains_key(header::CONTENT_SECURITY_POLICY));
+    assert_eq!(csp(&response), DIOXUS_CSP);
     // 开发与测试默认是明文 HTTP：没有协议证明时不能写 HSTS。
     assert!(!response.headers().contains_key(header::STRICT_TRANSPORT_SECURITY));
 }
 
 #[test]
 fn https_responses_receive_hsts() {
-    let response = finish_response(StatusCode::NO_CONTENT.into_response(), "request-1", true);
+    let response = finish_response(
+        StatusCode::NO_CONTENT.into_response(),
+        "request-1",
+        true,
+        WebScriptPolicy::Dioxus,
+    );
     assert_eq!(
         response
             .headers()
@@ -140,6 +166,59 @@ fn https_responses_receive_hsts() {
             .and_then(|value| value.to_str().ok()),
         Some("max-age=31536000")
     );
+}
+
+#[test]
+fn normal_responses_use_the_selected_script_policy() {
+    for (policy, expected) in
+        [(WebScriptPolicy::Dioxus, DIOXUS_CSP), (WebScriptPolicy::Solid, SOLID_CSP)]
+    {
+        let response = finish_response(StatusCode::OK.into_response(), "request-1", false, policy);
+        assert_eq!(csp(&response), expected);
+    }
+}
+
+#[tokio::test]
+async fn rejected_responses_use_the_selected_script_policy() {
+    use axum::{Router, middleware, routing::get};
+    use tower::ServiceExt;
+
+    // `/metrics` 带转发头时在业务路由前被边界拒绝，覆盖提前返回的拒绝出口。
+    let boundary = HttpBoundary::default().with_web_script_policy(WebScriptPolicy::Solid);
+    let app = Router::new()
+        .route("/metrics", get(|| async { "ok" }))
+        .layer(middleware::from_fn_with_state(boundary, enforce));
+    let request = Request::builder()
+        .uri("/metrics")
+        .header(FORWARDED_FOR_HEADER, "198.51.100.7")
+        .body(Body::empty())
+        .expect("request");
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(csp(&response), SOLID_CSP);
+}
+
+#[tokio::test]
+async fn timed_out_responses_use_the_selected_script_policy() {
+    use axum::{Router, middleware, routing::get};
+    use tower::ServiceExt;
+
+    let boundary = HttpBoundary::new(Duration::from_millis(5), &[], false)
+        .unwrap()
+        .with_web_script_policy(WebScriptPolicy::Solid);
+    let app = Router::new()
+        .route("/slow", get(|| async { std::future::pending::<()>().await }))
+        .layer(middleware::from_fn_with_state(boundary, enforce));
+    // 外层上限只防测试挂死；handler 永不完成，内层超时必然先触发。
+    let response = tokio::time::timeout(
+        Duration::from_secs(1),
+        app.oneshot(Request::builder().uri("/slow").body(Body::empty()).expect("request")),
+    )
+    .await
+    .expect("boundary timeout did not return")
+    .unwrap();
+    assert_eq!(response.status(), StatusCode::GATEWAY_TIMEOUT);
+    assert_eq!(csp(&response), SOLID_CSP);
 }
 
 fn proto_request(peer: Option<&str>, values: &[&str]) -> Request {

@@ -2,10 +2,10 @@
 
 use std::{
     net::{IpAddr, SocketAddr},
-    sync::Arc,
     time::Duration,
 };
 
+use auction_http::WebScriptPolicy;
 use axum::{
     extract::{ConnectInfo, Request, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
@@ -41,6 +41,9 @@ pub struct RemoteSetupAccess {
 }
 
 impl FirstRunPolicy {
+    /// 供不直接依赖 `auction-http` 的合并装配根显式选择 Rust 版首次设置页的 CSP。
+    pub const DIOXUS_WEB_SCRIPT_POLICY: WebScriptPolicy = WebScriptPolicy::Dioxus;
+
     pub(super) fn validate(&self) -> Result<(), &'static str> {
         if self.listen.port() == 0 {
             return Err("setup listener must use a fixed port");
@@ -68,12 +71,13 @@ impl FirstRunPolicy {
 }
 
 pub(super) async fn enforce(
-    State(policy): State<Arc<FirstRunPolicy>>,
+    State(boundary): State<super::SetupBoundary>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     request: Request,
     next: Next,
 ) -> Response {
-    let mut response = if !permitted(&policy, peer, request.headers(), request.method()) {
+    let policy = &boundary.policy;
+    let response = if !permitted(policy, peer, request.headers(), request.method()) {
         super::error(StatusCode::FORBIDDEN, "setup_origin").into_response()
     } else {
         // 同时限制正文读取与异步处理；complete 的发布与终态确认之间没有可取消的 await。
@@ -82,9 +86,21 @@ pub(super) async fn enforce(
             Err(_) => super::error(StatusCode::GATEWAY_TIMEOUT, "request_timeout").into_response(),
         }
     };
-    // 门禁拒绝、框架错误和超时也必须经过同一出口，不能跳过禁止缓存与防嵌入策略。
+    finish_setup_response(response, policy, boundary.web_script_policy)
+}
+
+/// 门禁拒绝、框架错误和超时也必须经过同一出口，不能跳过禁止缓存与防嵌入策略。
+fn finish_setup_response(
+    mut response: Response,
+    policy: &FirstRunPolicy,
+    web_script_policy: WebScriptPolicy,
+) -> Response {
     // 远程模式已在 permitted 中要求可信代理与 `x-forwarded-proto: https`；本地回环明文不发 HSTS。
-    auction_http::apply_browser_security_headers(response.headers_mut(), setup_is_https(&policy));
+    auction_http::apply_browser_security_headers(
+        response.headers_mut(),
+        setup_is_https(policy),
+        web_script_policy,
+    );
     response.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     response
 }

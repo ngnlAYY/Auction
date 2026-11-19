@@ -25,13 +25,15 @@ mod state;
 pub use assets::serve_admin_setup_asset;
 pub use middleware::{
     AdminHttpSecurity, AnonymousReadGate, HttpBoundary, HttpSecurityOptions, PublicHttpSecurity,
-    apply_browser_security_headers,
+    WebScriptPolicy, apply_browser_security_headers,
 };
 pub use realtime_hub::{RealtimeHub, RealtimeHubSink, RealtimeSubscriptionError};
 pub use server::{
-    HttpListener, HttpReadinessProbe, admin_router, public_router, serve_http,
-    spawn_metrics_listener,
+    HttpListener, HttpReadinessProbe, admin_router_with_web_script_policy,
+    public_router_with_web_script_policy, serve_http, spawn_metrics_listener,
 };
+#[cfg(test)]
+pub use server::{admin_router, public_router};
 pub use state::{AdminApiState, PublicApiState};
 
 #[cfg(target_os = "linux")]
