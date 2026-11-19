@@ -213,6 +213,7 @@ export async function mountCompetition(
     currentEmpty,
     readCurrent: initial?.readCurrent ?? ((_url: URL): Response | Promise<Response> | null => null),
     readRounds: (_url: URL, _init?: RequestInit): Response | Promise<Response> | null => null,
+    readSummary: (): Response | Promise<Response> => reject("not_found", 404),
     readEvents: (_url: URL): Response | Promise<Response> | null => null,
     readBidLog: (_url: URL): Response | Promise<Response> | null => null,
     readPage: (_url: URL, _init?: RequestInit): Response | Promise<Response> | null => null,
@@ -305,6 +306,8 @@ export async function mountCompetition(
           case `/api/v1/lots/${LOT_ID}`:
           case `/api/v1/lots/${SECOND_LOT_ID}`:
             return server.readLot(url.pathname.split("/").at(-1) ?? "", init?.signal);
+          case `/api/v1/auctions/${AUCTION_ID}/summary`:
+            return server.readSummary();
           case "/api/v1/auctions":
             return (
               server.readRounds(url, init) ??

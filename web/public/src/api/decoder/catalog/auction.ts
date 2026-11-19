@@ -9,6 +9,7 @@ import { type JsonObject, jsonKeysOnly } from "@auction/web-shared/net/wire";
 import { validUuid } from "@auction/web-shared/ui/validation";
 
 import { validForumUrl } from "../../forum";
+import { parseStrictRfc3339 } from "../../session/rfc3339";
 import {
   accountNonempty,
   boolValue,
@@ -23,6 +24,7 @@ import {
   revision,
   string,
   time,
+  world,
 } from "..";
 
 export const AUCTION_LIST_SCHEMA = auctionListResponseSchema(AuctionSummaryResponseSchema);
@@ -101,6 +103,22 @@ function validCurrentAuction(value: unknown, worldId: string): boolean {
     );
   }
   return false;
+}
+
+/** 长缓存摘要只接受与请求 ID 相符的公开场次数据。 */
+export function validSettledAuctionSummary(value: unknown, auctionId: string): boolean {
+  const summary = object(value);
+  if (summary === null) return false;
+  const endsAt = string(summary.effective_end_at);
+  return (
+    jsonKeysOnly(summary, ["id", "world", "sequence", "effective_end_at"], []) &&
+    string(summary.id) === auctionId &&
+    validUuid(auctionId) &&
+    world(summary.world) &&
+    positive(summary.sequence) &&
+    (summary.effective_end_at === null ||
+      (endsAt?.endsWith("Z") === true && parseStrictRfc3339(endsAt) !== null))
+  );
 }
 
 /** 校验拍卖目录编号页及逐项响应绑定。 */

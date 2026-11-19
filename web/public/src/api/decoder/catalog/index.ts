@@ -13,6 +13,8 @@ import {
   type AuctionSummaryV2Response,
   type CurrentAuctionResponse,
   CurrentAuctionResponseSchema,
+  type SettledAuctionSummaryResponse,
+  SettledAuctionSummaryResponseSchema,
 } from "@auction/contracts/dto/public/catalog/auction";
 import {
   type PublicCompensationLotPageResponse,
@@ -35,6 +37,7 @@ import {
   AUCTION_LIST_V2_SCHEMA,
   validAuctionList,
   validCurrentAuctionResponse,
+  validSettledAuctionSummary,
   validWorlds,
 } from "./auction";
 import { validBidLogPage } from "./bid-log";
@@ -55,6 +58,16 @@ export function decodeCurrentAuction(
 ): Result<CurrentAuctionResponse, string> {
   return decodeSuccess(response, CurrentAuctionResponseSchema, (value) =>
     validCurrentAuctionResponse(value, worldId),
+  );
+}
+
+/** 解码按 ID 请求的已结算场次摘要，并拒绝错场响应。 */
+export function decodeSettledAuctionSummary(
+  response: TransportResponse,
+  auctionId: string,
+): Result<SettledAuctionSummaryResponse, string> {
+  return decodeSuccess(response, SettledAuctionSummaryResponseSchema, (value) =>
+    validSettledAuctionSummary(value, auctionId),
   );
 }
 

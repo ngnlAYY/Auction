@@ -28,29 +28,11 @@ export async function fetchAuctionPage(
   pageSize: number,
   signal: AbortSignal,
 ): Promise<Result<AuctionListResponse, string>> {
-  return fetchAuctionPageWithTtl(worldId, status, page, pageSize, CATALOG_TTL_MILLIS, signal);
-}
-
-/** 拍品已结算却不在目录时，仅跳过浏览器端的新鲜期复核第一页。 */
-export function revalidateRecentSettled(
-  signal: AbortSignal,
-): Promise<Result<AuctionListResponse, string>> {
-  return fetchAuctionPageWithTtl(null, "settled", 1, SUMMARY_PAGE_SIZE, 0, signal);
-}
-
-async function fetchAuctionPageWithTtl(
-  worldId: string | null,
-  status: string,
-  page: number,
-  pageSize: number,
-  ttlMillis: number,
-  signal: AbortSignal,
-): Promise<Result<AuctionListResponse, string>> {
   const world = normalizedWorld(worldId);
   const url = auctionPageUrl("/api/v1/auctions", world, status, page, pageSize);
   const read = await cachedPublicGet(
     url,
-    ttlMillis,
+    CATALOG_TTL_MILLIS,
     AUCTION_LIST_CACHE_TYPE,
     (response) => {
       const decoded = decodeAuctionList(response, world, status);

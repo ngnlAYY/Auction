@@ -2,20 +2,23 @@
 
 import type { WorldsResponse } from "@auction/contracts/dto/public/account";
 import type {
-  AuctionListResponse,
-  AuctionSummaryResponse,
   CurrentAuctionItemResponse,
+  SettledAuctionSummaryResponse,
 } from "@auction/contracts/dto/public/catalog/auction";
 import { transportErrorCode } from "@auction/web-shared/net/transport";
 import { err, ok, type Result } from "@auction/web-shared/result";
 import { compareText } from "@auction/web-shared/text";
 import { sendGet } from "../clock";
 import { decodeErrorCode } from "../decoder";
-import { decodeCurrentAuction, decodeWorlds } from "../decoder/catalog";
+import {
+  decodeCurrentAuction,
+  decodeSettledAuctionSummary,
+  decodeWorlds,
+} from "../decoder/catalog";
 import { catalogLevelFilterDefault } from "../model";
 import { LIVE_TTL_MILLIS } from "../swr-cache";
 import { cachedPublicGet } from "./cached-get";
-import { fetchAuctionPage, revalidateRecentSettled, SUMMARY_PAGE_SIZE } from "./directory";
+import { fetchAuctionPage, SUMMARY_PAGE_SIZE } from "./directory";
 import { fetchCurrentLots } from "./lots";
 
 /** 当前场次投影的缓存类型标识；同一 URL 不得被其他查询类型复用。 */
@@ -65,17 +68,12 @@ export function currentAuctionUrl(worldId: string): string {
   return `/api/v1/auctions/current?${query.toString()}`;
 }
 
-/** 读取指定历史拍卖的公开投影。
- * 旧 v1 lot wire 不包含世界、场次号和计划结束时间；这些展示上下文必须从拍卖目录读取，不能
- * 通过扩张 lot 响应破坏旧客户端的严格字段闭集。 */
+/** 读取指定历史拍卖的公开投影；世界、场次号和有效结束时间由目录或已结算摘要提供。 */
 export async function fetchHistoricalAuction(
   auctionId: string,
   signal: AbortSignal,
 ): Promise<Result<CurrentAuctionItemResponse, string>> {
-  // 目录与看板默认目录共用同一 URL（page_size=20），命中 SWR 缓存，避免点击详情时额外触发
-  // 一次 10 条目录请求并在返回时闪现加载态。按场次 ID 打开的页面绝大多数是已结算场次：已结算
-  // 目录第一页与 lot 目录同时发出，省去“等状态再查摘要”的一轮串行往返；该 URL 是公开低频缓存
-  // 档，状态不是 settled 时丢弃预取结果、按实际状态查找。
+  // 结算目录沿用可复用的第一页缓存键，与 lots 并发读取，使目录命中时无需再等待一轮往返。
   const settledFirstPage = fetchAuctionPage(null, "settled", 1, SUMMARY_PAGE_SIZE, signal);
   const envelopeResult = await fetchCurrentLots(
     auctionId,
@@ -95,34 +93,36 @@ export async function fetchHistoricalAuction(
   const envelope = envelopeResult.value;
   const status = envelope.auction_status;
   // 未结算的场次（含仍可出价的 live/final）是所在世界唯一的活动场次，从当前场次接口取得完整
-  // 上下文，其中的冻结代理默认模式决定代理新建表单的初始选项；已结算场次不再竞价，只从往期
-  // 目录拼装，没有该值。
+  // 上下文，其中的冻结代理默认模式决定代理新建表单的初始选项；已结算场次不再竞价，没有该值。
   if (status !== "settled") {
     return fetchMatchingCurrentAuction(envelope.auction_id, status, signal);
   }
-  const summaryResult = await fetchAuctionSummary(
-    envelope.auction_id,
-    await settledFirstPage,
-    signal,
-  );
+  const firstPage = await settledFirstPage;
+  if (signal.aborted) {
+    return err("network_error");
+  }
+  if (!firstPage.ok) {
+    return firstPage;
+  }
+  // lots 与目录各有缓存新鲜期，目录缺席不能证明已结算的场次不存在。
+  const entry = firstPage.value.auctions.find((auction) => auction.id === envelope.auction_id);
+  const summaryResult = entry
+    ? ok({
+        world: entry.world_id,
+        sequence: entry.sequence,
+        effective_end_at: entry.effective_end_at,
+      })
+    : await fetchSettledAuctionSummary(envelope.auction_id, signal);
   if (signal.aborted) {
     return err("network_error");
   }
   if (!summaryResult.ok) {
     return summaryResult;
   }
-  let summary = summaryResult.value;
-  if (summary === null) {
-    // 拍品与目录有独立的新鲜期。缺席只允许一次近期目录再验证，不能用旧目录推断场次归属。
-    const recent = await revalidateRecentSettled(signal);
-    if (signal.aborted) return err("network_error");
-    if (!recent.ok) return recent;
-    summary = recent.value.auctions.find((auction) => auction.id === envelope.auction_id) ?? null;
-    if (summary === null) return err("拍卖目录中不存在目标拍卖");
-  }
+  const summary = summaryResult.value;
   return ok({
     id: envelope.auction_id,
-    world: summary.world_id,
+    world: summary.world,
     number: summary.sequence,
     status,
     opens_at: envelope.opens_at,
@@ -134,67 +134,30 @@ export async function fetchHistoricalAuction(
   });
 }
 
-/** 在结算场次目录中查找摘要；firstPage 是调用方已并行取得的第一页。 */
-async function fetchAuctionSummary(
+async function fetchSettledAuctionSummary(
   auctionId: string,
-  firstPage: Result<AuctionListResponse, string>,
   signal: AbortSignal,
-): Promise<Result<AuctionSummaryResponse | null, string>> {
+): Promise<Result<SettledAuctionSummaryResponse, string>> {
+  // 成功摘要由 HTTP 缓存复用。仅明确的 404 表示不存在，失败时交还错误供调用方重试。
+  let missing = false;
+  const sent = await sendGet(`/api/v1/auctions/${auctionId}/summary`, signal, (status) => {
+    missing = status === 404;
+  });
   if (signal.aborted) {
     return err("network_error");
   }
-  let pageNumber = 1;
-  let first: Result<AuctionListResponse, string> | null = firstPage;
-  for (;;) {
-    let page: AuctionListResponse;
-    if (first !== null) {
-      const firstResult = first;
-      first = null;
-      if (!firstResult.ok) {
-        return firstResult;
-      }
-      page = firstResult.value;
-    } else {
-      if (signal.aborted) {
-        return err("network_error");
-      }
-      const fetched = await fetchAuctionPage(
-        null,
-        "settled",
-        pageNumber,
-        SUMMARY_PAGE_SIZE,
-        signal,
-      );
-      if (signal.aborted) {
-        return err("network_error");
-      }
-      if (!fetched.ok) {
-        return fetched;
-      }
-      page = fetched.value;
-    }
-    const rowCount = page.auctions.length;
-    // Rust 的数组长度转换不可能失败；保留该分支的失败关闭语义，拒绝异常的宿主结果。
-    if (!Number.isSafeInteger(rowCount)) {
-      return err("拍卖目录页过大");
-    }
-    const total = page.total;
-    const auction = page.auctions.find((candidate) => candidate.id === auctionId);
-    if (auction !== undefined) {
-      return ok(auction);
-    }
-    if (
-      rowCount < SUMMARY_PAGE_SIZE ||
-      (total !== null && saturatingMultiply(pageNumber, SUMMARY_PAGE_SIZE) >= total)
-    ) {
-      return ok(null);
-    }
-    const nextPage = pageNumber + 1;
-    if (!Number.isSafeInteger(nextPage)) {
-      return err("拍卖目录页码溢出");
-    }
-    pageNumber = nextPage;
+  if (missing) {
+    return err("拍卖目录中不存在目标拍卖");
   }
+  if (!sent.ok) {
+    return err(transportErrorCode(sent.error));
+  }
+  const response = sent.value;
+  if (response.status !== 200) {
+    const code = decodeErrorCode(response);
+    return err(code === "not_found" ? "invalid_response" : code);
+  }
+  return decodeSettledAuctionSummary(response, auctionId);
 }
 
 async function fetchMatchingCurrentAuction(
@@ -253,9 +216,4 @@ export function isTargetCurrent(
 
 function responseOk(response: { readonly status: number }): boolean {
   return response.status >= 200 && response.status < 300;
-}
-
-function saturatingMultiply(left: number, right: number): number {
-  const value = left * right;
-  return Number.isSafeInteger(value) ? value : Number.MAX_SAFE_INTEGER;
 }

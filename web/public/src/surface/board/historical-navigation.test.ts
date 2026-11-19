@@ -1,6 +1,7 @@
-// 显式场次的世界纠偏、生产外壳交付与近期结算目录再验证。
+// 显式场次的世界纠偏、生产外壳交付与已结算场次的按 ID 摘要读取。
 
 import { expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { EQUIPMENT_CATEGORY_CODES } from "@auction/contracts/dto/public/catalog/lot";
 import { t } from "@auction/web-shared/ui/i18n";
 import {
@@ -16,6 +17,16 @@ import {
 import { reject, success } from "../shell/session-fixture";
 
 const OPEN_AT = "2025-11-15T08:00:00Z";
+const SUMMARY_FIXTURE = new URL(
+  "../../../../../crates/auction-contracts/tests/fixtures/public/auction-summary.json",
+  import.meta.url,
+);
+
+function summaryResponse(): Response {
+  return new Response(readFileSync(SUMMARY_FIXTURE, "utf8"), {
+    headers: { "Content-Type": "application/json" },
+  });
+}
 
 test("生产外壳等到 world 写入成功才发布场次与筛选目录", async () => {
   const query = `auction=${AUCTION_ID}&%74ype=%63lo&keep=%2b%20x`;
@@ -87,12 +98,14 @@ test("生产外壳等到 world 写入成功才发布场次与筛选目录", asyn
   }
 });
 
-test.each(["listed", "revalidated", "missing", "unavailable"] as const)(
-  "已结算深链只在正常目录缺席时再验证近期结算（%s）",
+test.each(["listed", "summary", "missing", "unavailable"] as const)(
+  "已结算深链只在目录第一页缺席时按 ID 读取摘要（%s）",
   async (status) => {
     const page = await mountCompetition("main", true);
-    const headers: (string | null)[] = [];
-    const path = "/api/v1/auctions?page=1&page_size=200&status=settled";
+    const directoryPath = "/api/v1/auctions?page=1&page_size=200&status=settled";
+    const summaryPath = `/api/v1/auctions/${AUCTION_ID}/summary`;
+    const summaryReads = () => page.reads.filter((url) => url === summaryPath);
+    const listed = status === "listed";
     const summary = {
       id: AUCTION_ID,
       world_id: "main",
@@ -125,39 +138,51 @@ test.each(["listed", "revalidated", "missing", "unavailable"] as const)(
             ...Object.fromEntries(EQUIPMENT_CATEGORY_CODES.map(([key]) => [key, 0])),
           },
         });
-      page.server.readRounds = (url, init) => {
-        if (url.pathname + url.search !== path) return null;
-        headers.push(new Headers(init?.headers).get("If-None-Match"));
-        if (headers.length === 2) {
-          if (status === "missing") return new Response(null, { status: 304 });
-          if (status === "unavailable") return reject("storage_unavailable", 503);
-        }
-        const listed = status === "listed" || (status === "revalidated" && headers.length === 2);
-        return Response.json(
-          {
-            code: "ok",
-            message: "ok",
-            data: {
-              auctions: listed ? [summary] : [],
-              page: 1,
-              page_size: 200,
-              total: listed ? 1 : 0,
-            },
-          },
-          { headers: { ETag: '"recent-settled"' } },
-        );
+      page.server.readRounds = (url) => {
+        if (url.pathname + url.search !== directoryPath) return null;
+        return success({
+          auctions: listed ? [summary] : [],
+          page: 1,
+          page_size: 200,
+          total: listed ? 1 : 0,
+        });
       };
+      if (status === "summary") page.server.readSummary = summaryResponse;
+      if (status === "unavailable") {
+        page.server.readSummary = () => reject("storage_unavailable", 503);
+      }
       const target = `/?auction=${AUCTION_ID}&world=main`;
       page.go(target);
       const board = () => page.find((element) => hasClass(element, "public-auction-page"));
       const error = () => page.find((element) => hasClass(element, "ui-async-state--error"));
       await waitFor(() => board() !== null || error() !== null);
-      expect(headers).toEqual(status === "listed" ? [null] : [null, '"recent-settled"']);
-      expect(page.reads.filter((url) => url === path)).toHaveLength(status === "listed" ? 1 : 2);
-      const hasRound = status === "listed" || status === "revalidated";
+      expect(page.reads.filter((url) => url.startsWith("/api/v1/auctions?"))).toEqual([
+        directoryPath,
+      ]);
+      expect(summaryReads()).toHaveLength(listed ? 0 : 1);
+      const hasRound = listed || status === "summary";
       expect(board() !== null).toBe(hasRound);
       expect(error() !== null).toBe(!hasRound);
       expect(page.location.pathname + page.location.search).toBe(target);
+      if (hasRound) {
+        expect(board()?.getAttribute("aria-label")).toBe(
+          t("auction-header-title", { number: listed ? 12 : 5 }),
+        );
+      } else {
+        expect(error()?.getAttribute("role")).toBe("alert");
+        expect(renderedText(error())).toContain(t("data-error"));
+      }
+      if (status === "unavailable") {
+        const feedback = page.need((element) => hasClass(element, "ui-async-state--error"));
+        const retry = page.need((element) => hasClass(element, "ui-async-state__retry"), feedback);
+        expect(renderedText(retry)).toBe(t("data-retry"));
+        page.server.readSummary = summaryResponse;
+        dispatch(retry, "Click");
+        await waitFor(() => board() !== null);
+        expect(error()).toBeNull();
+        expect(summaryReads()).toHaveLength(2);
+        expect(page.location.pathname + page.location.search).toBe(target);
+      }
     } finally {
       page.dispose();
     }

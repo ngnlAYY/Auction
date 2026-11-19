@@ -1,24 +1,38 @@
-// 当前拍卖与目录解码的回归断言：显式请求的冻结代理默认模式必须存在且在闭集内；未限定世界
-// 的 v2 目录沿用原有世界字段规则。
+// 当前拍卖、目录与已结算摘要的闭集及字段规则回归。
 
 import { expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 
 import type { TransportResponse } from "@auction/web-shared/net/transport";
-import type { JsonObject } from "@auction/web-shared/net/wire";
-import { ok } from "@auction/web-shared/result";
+import { type JsonObject, parseJson } from "@auction/web-shared/net/wire";
+import { err, ok } from "@auction/web-shared/result";
+import { object } from "..";
 
 const { validCurrentAuctionResponse } = await import("./auction");
-const { decodeAuctionListV2 } = await import("./index");
+const { decodeAuctionListV2, decodeSettledAuctionSummary } = await import("./index");
 
-function responseWith(payload: JsonObject): TransportResponse {
+const AUCTION_ID = "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b";
+const SUMMARY_FIXTURE = new URL(
+  "../../../../../../crates/auction-contracts/tests/fixtures/public/auction-summary.json",
+  import.meta.url,
+);
+
+function responseWithText(text: string): TransportResponse {
   return {
     status: 200,
     statusText: "OK",
     headers: new Headers(),
     body: null,
-    text: () => "",
-    json: () => ok(payload),
+    text: () => text,
+    json(policy) {
+      const result = parseJson(text, policy);
+      return result.ok ? result : err({ kind: "decode" });
+    },
   };
+}
+
+function responseWith(payload: JsonObject): TransportResponse {
+  return responseWithText(JSON.stringify(payload));
 }
 
 function historyEnvelope(worldId: string): JsonObject {
@@ -82,4 +96,50 @@ test("v2_history_directory_keeps_unknown_worlds_without_a_world_filter：未限�
     throw new Error(decoded.error);
   }
   expect(decoded.value.auctions.map((entry) => entry.world_id)).toEqual(["other"]);
+});
+
+function sharedSummary() {
+  const text = readFileSync(SUMMARY_FIXTURE, "utf8");
+  const parsed = parseJson(text);
+  const envelope = parsed.ok ? object(parsed.value) : null;
+  const data = object(envelope?.data);
+  if (envelope === null || data === null) throw new Error("缺少已结算场次摘要样本");
+  return { text, envelope, data };
+}
+
+test("已结算场次摘要解码接受后端序列化样本和显式 null 截止时间", () => {
+  const { text, envelope, data } = sharedSummary();
+  const decoded = decodeSettledAuctionSummary(responseWithText(text), AUCTION_ID);
+  if (!decoded.ok) throw new Error(decoded.error);
+  const actual: JsonObject = decoded.value;
+  expect(actual).toEqual(data);
+  const isekai = { ...decoded.value, world: "isekai", effective_end_at: null };
+  expect(
+    decodeSettledAuctionSummary(responseWith({ ...envelope, data: isekai }), AUCTION_ID),
+  ).toEqual(ok(isekai));
+});
+
+test("已结算场次摘要解码拒绝字段缺失、多余、身份错误及非法字段", () => {
+  const { envelope, data } = sharedSummary();
+  for (const key of Object.keys(data)) {
+    const missing = { ...data };
+    delete missing[key];
+    expect(
+      decodeSettledAuctionSummary(responseWith({ ...envelope, data: missing }), AUCTION_ID),
+    ).toEqual(err("invalid_response"));
+  }
+  for (const change of [
+    { status: "settled" },
+    { id: "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2c" },
+    { world: "main/isekai" },
+    { sequence: 1.5 },
+    { sequence: 0 },
+    { sequence: Number.MAX_SAFE_INTEGER + 1 },
+    { effective_end_at: "2025-11-17" },
+    { effective_end_at: "2025-02-30T09:46:40Z" },
+    { effective_end_at: "2025-11-17T09:46:40+08:00" },
+  ]) {
+    const response = responseWith({ ...envelope, data: { ...data, ...change } });
+    expect(decodeSettledAuctionSummary(response, AUCTION_ID)).toEqual(err("invalid_response"));
+  }
 });

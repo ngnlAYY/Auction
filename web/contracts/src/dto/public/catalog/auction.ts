@@ -1,7 +1,7 @@
 // Public 拍卖历史列表和当前拍卖 DTO。
 
 import * as v from "valibot";
-import { integer, optionalNullable, struct } from "../../../wire";
+import { integer, optionalNullable, requiredNullable, strictStruct, struct } from "../../../wire";
 
 /** Public 拍卖历史列表中的稳定摘要。 */
 export const AuctionSummaryResponseEntries = {
@@ -33,6 +33,19 @@ export const AuctionSummaryV2ResponseSchema = struct({
 });
 
 export type AuctionSummaryV2Response = v.InferOutput<typeof AuctionSummaryV2ResponseSchema>;
+
+/** 按 ID 读取的已结算场次摘要。 */
+export const SettledAuctionSummaryResponseSchema = strictStruct({
+  id: v.string(),
+  world: v.string(),
+  sequence: integer,
+  effective_end_at: requiredNullable(v.string()),
+});
+
+/** 已结算场次摘要的响应数据。 */
+export type SettledAuctionSummaryResponse = v.InferOutput<
+  typeof SettledAuctionSummaryResponseSchema
+>;
 
 /** Public 历史拍卖分页信封；默认条目维持 v1 契约，v2 显式选择扩展摘要。 */
 export function auctionListResponseSchema<const TSchema extends v.GenericSchema>(
