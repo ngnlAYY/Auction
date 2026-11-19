@@ -1,0 +1,134 @@
+[
+  {
+    "code": "ok",
+    "data": {
+      "decision_code": "[REDACTED]",
+      "deliveries": [],
+      "equipment_diagnostic": null,
+      "external_mail_id": "[REDACTED]",
+      "id": "00000000-0000-4000-8000-000000000027",
+      "kind": "unknown",
+      "mailbox_key": "[REDACTED]",
+      "message_display": null,
+      "metadata": {
+        "added_count": 0,
+        "attachment_count": 0,
+        "auction_id": "",
+        "delivery_ids": [],
+        "existing_count": 0,
+        "owner_result_code": "",
+        "preview_revision": 0,
+        "reason_code": "",
+        "submission_id": "",
+        "user_id": "",
+        "warning_codes": []
+      },
+      "processed_at": "2025-11-15T09:46:40.110000Z",
+      "received_at": "2025-11-15T09:46:40.110000Z",
+      "sender": "[REDACTED]",
+      "status": "rejected",
+      "subject": "[REDACTED]",
+      "world_id": "[REDACTED]"
+    },
+    "message": "邮件入站详情已加载"
+  },
+  {
+    "code": "ok",
+    "data": {
+      "decision_code": "unknown_subject",
+      "deliveries": [],
+      "equipment_diagnostic": null,
+      "external_mail_id": "9019",
+      "id": "00000000-0000-4000-8000-000000000019",
+      "kind": "unknown",
+      "mailbox_key": "main",
+      "message_display": null,
+      "metadata": {
+        "added_count": 0,
+        "attachment_count": 0,
+        "auction_id": "",
+        "delivery_ids": [],
+        "existing_count": 0,
+        "owner_result_code": "",
+        "preview_revision": 0,
+        "reason_code": "",
+        "submission_id": "",
+        "user_id": "",
+        "warning_codes": []
+      },
+      "processed_at": "2025-11-15T09:46:40.110000Z",
+      "received_at": "2025-11-15T09:46:40.110000Z",
+      "sender": "Player",
+      "status": "rejected",
+      "subject": "补充说明：登录 key[REDACTED]",
+      "world_id": "main"
+    },
+    "message": "邮件入站详情已加载"
+  },
+  {
+    "code": "ok",
+    "data": {
+      "decision_code": "unknown_subject",
+      "deliveries": [],
+      "equipment_diagnostic": null,
+      "external_mail_id": "9026",
+      "id": "00000000-0000-4000-8000-000000000026",
+      "kind": "unknown",
+      "mailbox_key": "main",
+      "message_display": null,
+      "metadata": {
+        "added_count": 0,
+        "attachment_count": 0,
+        "auction_id": "",
+        "delivery_ids": [],
+        "existing_count": 0,
+        "owner_result_code": "",
+        "preview_revision": 0,
+        "reason_code": "",
+        "submission_id": "",
+        "user_id": "",
+        "warning_codes": []
+      },
+      "processed_at": "2025-11-15T09:46:40.110000Z",
+      "received_at": "2025-11-15T09:46:40.110000Z",
+      "sender": "Player",
+      "status": "rejected",
+      "subject": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx login key[REDACTED]",
+      "world_id": "main"
+    },
+    "message": "邮件入站详情已加载"
+  },
+  {
+    "code": "ok",
+    "data": {
+      "decision_code": "unknown_subject",
+      "deliveries": [],
+      "equipment_diagnostic": null,
+      "external_mail_id": "9018",
+      "id": "00000000-0000-4000-8000-000000000018",
+      "kind": "unknown",
+      "mailbox_key": "main",
+      "message_display": null,
+      "metadata": {
+        "added_count": 0,
+        "attachment_count": 0,
+        "auction_id": "",
+        "delivery_ids": [],
+        "existing_count": 0,
+        "owner_result_code": "",
+        "preview_revision": 0,
+        "reason_code": "",
+        "submission_id": "",
+        "user_id": "",
+        "warning_codes": []
+      },
+      "processed_at": "2025-11-15T09:46:40.110000Z",
+      "received_at": "2025-11-15T09:46:40.110000Z",
+      "sender": "Player",
+      "status": "rejected",
+      "subject": "拍卖问题",
+      "world_id": "main"
+    },
+    "message": "邮件入站详情已加载"
+  }
+]

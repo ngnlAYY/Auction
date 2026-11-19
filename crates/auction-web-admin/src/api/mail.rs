@@ -585,6 +585,68 @@ mod tests {
         assert_eq!(detail.kind, "rekey");
         assert!(detail.subject.is_none());
     }
+
+    #[test]
+    fn legacy_mail_intake_page_decodes_projected_text_at_the_byte_limit() {
+        use super::{AdminMailIntakePage, AdminMailIntakeQuery, decode_mail_intake_page};
+        use crate::api::contract_fixtures::admin_fixture;
+
+        let payload: ApiResponse<AdminMailIntakePage> =
+            serde_json::from_str(admin_fixture!("mail-intake-legacy")).expect("历史入站邮件样本");
+        let query = AdminMailIntakeQuery::default();
+        let mut page =
+            decode_mail_intake_page(payload.data, &query, 1, 20).expect("历史入站邮件页");
+        assert_eq!(page.intakes.len(), 9);
+
+        let subject = page
+            .intakes
+            .iter_mut()
+            .find(|row| row.external_mail_id == "9026")
+            .and_then(|row| row.subject.as_mut())
+            .expect("边界主题");
+        assert_eq!(subject.len(), 512);
+        assert!(subject.ends_with(" login key[REDACTED]"));
+        subject.push('x');
+        assert_eq!(decode_mail_intake_page(page, &query, 1, 20), Err("mail_intake"));
+    }
+
+    #[test]
+    fn legacy_mail_intake_detail_decodes_projected_text_and_rejects_control_text() {
+        use super::{AdminMailIntakeDetail, decode_mail_intake_detail};
+        use crate::api::contract_fixtures::admin_fixture;
+
+        let fixtures: [ApiResponse<AdminMailIntakeDetail>; 4] =
+            serde_json::from_str(admin_fixture!("mail-intake-legacy-detail"))
+                .expect("四种历史入站邮件详情样本");
+        let [all_redacted, partial, at_limit, trimmed_sender] =
+            fixtures.map(|payload| decode_mail_intake_detail(payload.data).expect("历史邮件详情"));
+        assert_eq!(
+            [
+                all_redacted.mailbox_key.as_str(),
+                all_redacted.external_mail_id.as_str(),
+                all_redacted.world_id.as_str(),
+                all_redacted.decision_code.as_str(),
+                all_redacted.sender.as_deref().unwrap(),
+                all_redacted.subject.as_deref().unwrap(),
+            ],
+            ["[REDACTED]"; 6]
+        );
+        assert_eq!(partial.subject.as_deref(), Some("补充说明：登录 key[REDACTED]"));
+        let subject = at_limit.subject.as_deref().expect("边界主题");
+        assert_eq!(subject.len(), 512);
+        assert!(subject.ends_with(" login key[REDACTED]"));
+        assert_eq!(trimmed_sender.sender.as_deref(), Some("Player"));
+        assert_eq!(trimmed_sender.subject.as_deref(), Some("拍卖问题"));
+
+        let mut invalid = all_redacted.clone();
+        invalid.subject = Some("多行\n主题".to_owned());
+        assert_eq!(decode_mail_intake_detail(invalid), Err("mail_intake"));
+
+        let mut invalid = all_redacted;
+        invalid.external_mail_id = "9001\t9002".to_owned();
+        assert_eq!(decode_mail_intake_detail(invalid), Err("mail_intake"));
+    }
+
     #[test]
     fn mail_poll_contract_fixtures() {
         use super::{ApiResponse, StrictMailState, decode_mail_state};

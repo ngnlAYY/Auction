@@ -1,0 +1,139 @@
+{
+  "code": "ok",
+  "data": {
+    "intakes": [
+      {
+        "decision_code": "[REDACTED]",
+        "external_mail_id": "[REDACTED]",
+        "has_message_display": false,
+        "id": "00000000-0000-4000-8000-000000000027",
+        "kind": "unknown",
+        "mailbox_key": "[REDACTED]",
+        "processed_at": "2025-11-15T09:46:40.110000Z",
+        "received_at": "2025-11-15T09:46:40.110000Z",
+        "sender": "[REDACTED]",
+        "status": "rejected",
+        "subject": "[REDACTED]",
+        "world_id": "[REDACTED]"
+      },
+      {
+        "decision_code": "unknown_subject",
+        "external_mail_id": "9026",
+        "has_message_display": false,
+        "id": "00000000-0000-4000-8000-000000000026",
+        "kind": "unknown",
+        "mailbox_key": "main",
+        "processed_at": "2025-11-15T09:46:40.110000Z",
+        "received_at": "2025-11-15T09:46:40.110000Z",
+        "sender": "Player",
+        "status": "rejected",
+        "subject": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx login key[REDACTED]",
+        "world_id": "main"
+      },
+      {
+        "decision_code": "unknown_subject",
+        "external_mail_id": "9025",
+        "has_message_display": false,
+        "id": "00000000-0000-4000-8000-000000000025",
+        "kind": "unknown",
+        "mailbox_key": "main",
+        "processed_at": "2025-11-15T09:46:40.110000Z",
+        "received_at": "2025-11-15T09:46:40.110000Z",
+        "sender": "Player",
+        "status": "rejected",
+        "subject": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx login key[REDACTED]",
+        "world_id": "main"
+      },
+      {
+        "decision_code": "unknown_subject",
+        "external_mail_id": "9024",
+        "has_message_display": false,
+        "id": "00000000-0000-4000-8000-000000000024",
+        "kind": "unknown",
+        "mailbox_key": "main",
+        "processed_at": "2025-11-15T09:46:40.110000Z",
+        "received_at": "2025-11-15T09:46:40.110000Z",
+        "sender": "[REDACTED]",
+        "status": "rejected",
+        "subject": "[RTS] Auction payment request [5b1c2a9e-1f0d-4c6b-9a7e-3d2f1e0c9b8a]",
+        "world_id": "main"
+      },
+      {
+        "decision_code": "unknown_subject",
+        "external_mail_id": "9023",
+        "has_message_display": false,
+        "id": "00000000-0000-4000-8000-000000000023",
+        "kind": "unknown",
+        "mailbox_key": "main",
+        "processed_at": "2025-11-15T09:46:40.110000Z",
+        "received_at": "2025-11-15T09:46:40.110000Z",
+        "sender": "MoogleMail",
+        "status": "rejected",
+        "subject": "[REDACTED]",
+        "world_id": "main"
+      },
+      {
+        "decision_code": "unknown_subject",
+        "external_mail_id": "9022",
+        "has_message_display": false,
+        "id": "00000000-0000-4000-8000-000000000022",
+        "kind": "unknown",
+        "mailbox_key": "main",
+        "processed_at": "2025-11-15T09:46:40.110000Z",
+        "received_at": "2025-11-15T09:46:40.110000Z",
+        "sender": "MoogleMail",
+        "status": "rejected",
+        "subject": "[RTS] Auction payment request [5b1c2a9e-1f0d-4c6b-9a7e-3d2f1e0c9b8a]",
+        "world_id": "main"
+      },
+      {
+        "decision_code": "unknown_subject",
+        "external_mail_id": "9019",
+        "has_message_display": false,
+        "id": "00000000-0000-4000-8000-000000000019",
+        "kind": "unknown",
+        "mailbox_key": "main",
+        "processed_at": "2025-11-15T09:46:40.110000Z",
+        "received_at": "2025-11-15T09:46:40.110000Z",
+        "sender": "Player",
+        "status": "rejected",
+        "subject": "补充说明：登录 key[REDACTED]",
+        "world_id": "main"
+      },
+      {
+        "decision_code": "unknown_subject",
+        "external_mail_id": "9018",
+        "has_message_display": false,
+        "id": "00000000-0000-4000-8000-000000000018",
+        "kind": "unknown",
+        "mailbox_key": "main",
+        "processed_at": "2025-11-15T09:46:40.110000Z",
+        "received_at": "2025-11-15T09:46:40.110000Z",
+        "sender": "Player",
+        "status": "rejected",
+        "subject": "拍卖问题",
+        "world_id": "main"
+      },
+      {
+        "decision_code": "unknown_subject",
+        "external_mail_id": "9012",
+        "has_message_display": false,
+        "id": "00000000-0000-4000-8000-000000000012",
+        "kind": "unknown",
+        "mailbox_key": "main",
+        "processed_at": "2025-11-15T09:46:40.110000Z",
+        "received_at": "2025-11-15T09:46:40.110000Z",
+        "sender": "Player",
+        "status": "rejected",
+        "subject": "附件 [REDACTED]",
+        "world_id": "main"
+      }
+    ],
+    "pagination": {
+      "page": 1,
+      "page_size": 20,
+      "total": 9
+    }
+  },
+  "message": "邮件入站列表已加载"
+}

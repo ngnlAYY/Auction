@@ -384,8 +384,8 @@ mod tests {
     }
 
     struct FixtureIntakes {
-        registration: AdminMailIntakeSummary,
-        rekey: AdminMailIntakeDetail,
+        items: Vec<AdminMailIntakeSummary>,
+        details: Vec<AdminMailIntakeDetail>,
     }
 
     impl AdminMailReader for FixtureIntakes {
@@ -417,8 +417,9 @@ mod tests {
             request: AdminMailIntakeFilter,
         ) -> ApplicationFuture<'_, AdminMailIntakePage> {
             Box::pin(async move {
-                let items = [&self.rekey.summary, &self.registration]
-                    .into_iter()
+                let items = self
+                    .items
+                    .iter()
                     .filter(|row| request.kind.as_ref().is_none_or(|kind| kind == &row.kind))
                     .cloned()
                     .collect::<Vec<_>>();
@@ -436,9 +437,9 @@ mod tests {
             &self,
             intake_id: Uuid,
         ) -> ApplicationFuture<'_, Option<AdminMailIntakeDetail>> {
-            Box::pin(
-                async move { Ok((intake_id == self.rekey.summary.id).then(|| self.rekey.clone())) },
-            )
+            Box::pin(async move {
+                Ok(self.details.iter().find(|detail| detail.summary.id == intake_id).cloned())
+            })
         }
     }
 
@@ -485,8 +486,103 @@ mod tests {
             ..registration.clone()
         };
         let detail_url = format!("/api/v1/admin/mail/intake/{}", rekey.id);
-        let rekey = AdminMailIntakeDetail {
-            summary: rekey,
+        let state = AdminFixturePorts {
+            mail: Some(Arc::new(FixtureIntakes {
+                items: vec![rekey.clone(), registration],
+                details: vec![intake_detail_without_message(rekey)],
+            })),
+            ..Default::default()
+        }
+        .state();
+        polling_contract_fixtures(state.clone()).await;
+        for (name, url) in [
+            ("admin/mail-intake", "/api/v1/admin/mail/intake?page_size=50"),
+            ("admin/mail-intake-rekey", "/api/v1/admin/mail/intake?kind=rekey&page_size=50"),
+            ("admin/mail-intake-detail", &detail_url),
+        ] {
+            assert_http(name, StatusCode::OK, admin_get(state.clone(), url).await).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn legacy_intake_display_contract_fixtures() {
+        use crate::server::contract_fixtures::{response_json, wire_fixture};
+
+        let redacted = "[REDACTED]";
+        let intake_id = |suffix: u128| Uuid::from_u128(0x4000_8000_0000_0000_0000 + suffix);
+        let returned_subject =
+            "[RTS] Auction payment request [5b1c2a9e-1f0d-4c6b-9a7e-3d2f1e0c9b8a]";
+        let near_limit = format!("          {} login key ", "x".repeat(491));
+        let at_limit = format!("         {} login key ", "x".repeat(492));
+        let padded_return = format!("{returned_subject} ");
+        // 替身交付已完成的存储投影。原始字段取自 B3 的数据库用例，512 字节边界沿用其脱敏再裁剪的构造。
+        let mut items = [
+            (0x26, "9026", "Player", "Player", at_limit.as_str()),
+            (0x25, "9025", "Player", "Player", near_limit.as_str()),
+            (0x24, "9024", "MoogleMail ", redacted, returned_subject),
+            (0x23, "9023", "MoogleMail", "MoogleMail", padded_return.as_str()),
+            (0x22, "9022", "MoogleMail", "MoogleMail", returned_subject),
+            (0x19, "9019", "Player", "Player", "补充说明：登录 key   "),
+            (0x18, "9018", "Player ", "Player", "拍卖问题 \u{3000}"),
+            (0x12, "9012", "Player", "Player", "附件 3D2F1E0C9B"),
+        ]
+        .into_iter()
+        .map(|(id, mid, sender, display_sender, subject)| AdminMailIntakeSummary {
+            id: intake_id(id),
+            mailbox_key: "main".to_owned(),
+            external_mail_id: mid.to_owned(),
+            world_id: "main".to_owned(),
+            kind: "unknown".to_owned(),
+            status: "rejected".to_owned(),
+            decision_code: "unknown_subject".to_owned(),
+            received_at: time(),
+            processed_at: time(),
+            sender: Some(display_sender.to_owned()),
+            subject: Some(MailDisplaySnapshot::display_stored_subject(sender, subject)),
+            has_message_display: false,
+        })
+        .collect::<Vec<_>>();
+        // 无关联投递的历史行可以同时含有这六个展示占位。
+        let all_redacted = AdminMailIntakeSummary {
+            id: intake_id(0x27),
+            mailbox_key: redacted.to_owned(),
+            external_mail_id: redacted.to_owned(),
+            world_id: redacted.to_owned(),
+            decision_code: redacted.to_owned(),
+            sender: Some(redacted.to_owned()),
+            subject: Some(MailDisplaySnapshot::display_stored_subject("\t\u{3000}", "多行\n主题")),
+            ..items[0].clone()
+        };
+        items.insert(0, all_redacted);
+        let detail_ids = [0x27, 0x19, 0x26, 0x18].map(intake_id);
+        let details = detail_ids
+            .iter()
+            .map(|id| {
+                let summary = items.iter().find(|row| row.id == *id).expect("详情对应的列表记录");
+                intake_detail_without_message(summary.clone())
+            })
+            .collect();
+        let state = AdminFixturePorts {
+            mail: Some(Arc::new(FixtureIntakes { items, details })),
+            ..Default::default()
+        }
+        .state();
+        let list = admin_get(state.clone(), "/api/v1/admin/mail/intake?page_size=20").await;
+        assert_http("admin/mail-intake-legacy", StatusCode::OK, list).await;
+
+        let expected: [serde_json::Value; 4] =
+            serde_json::from_value(wire_fixture("admin/mail-intake-legacy-detail"))
+                .expect("四种历史入站邮件详情样本");
+        for (id, expected) in detail_ids.into_iter().zip(expected) {
+            let path = format!("/api/v1/admin/mail/intake/{id}");
+            let response = admin_get(state.clone(), &path).await;
+            assert_eq!(response_json(StatusCode::OK, response).await, expected, "{path}");
+        }
+    }
+
+    fn intake_detail_without_message(summary: AdminMailIntakeSummary) -> AdminMailIntakeDetail {
+        AdminMailIntakeDetail {
+            summary,
             metadata: AdminMailIntakeMetadata {
                 auction_id: String::new(),
                 submission_id: String::new(),
@@ -503,19 +599,6 @@ mod tests {
             deliveries: Vec::new(),
             message_display: None,
             equipment_diagnostic: None,
-        };
-        let state = AdminFixturePorts {
-            mail: Some(Arc::new(FixtureIntakes { registration, rekey })),
-            ..Default::default()
-        }
-        .state();
-        polling_contract_fixtures(state.clone()).await;
-        for (name, url) in [
-            ("admin/mail-intake", "/api/v1/admin/mail/intake?page_size=50"),
-            ("admin/mail-intake-rekey", "/api/v1/admin/mail/intake?kind=rekey&page_size=50"),
-            ("admin/mail-intake-detail", &detail_url),
-        ] {
-            assert_http(name, StatusCode::OK, admin_get(state.clone(), url).await).await;
         }
     }
 
