@@ -1,8 +1,13 @@
+# 必填：构建与脚本不自动加载工作目录的 .env*，构建号只经调用方环境注入。
+env = false
+
 # 必填：依赖一律取 npm 官方源，锁文件记录的下载地址不随本机镜像设置变化。
 [install]
 registry = "https://registry.npmjs.org"
 # 必填：新增依赖写入精确版本，升级只经显式修改 package.json 与 bun.lock。
 exact = true
+# 必填：运行期缺依赖时立即失败，不在构建阶段自动下载。
+auto = "disable"
 
 # 必填：测试启动前先装配构建期常量与 .tsx 的测试转译，见 tooling/test-runtime.ts。
 [test]

@@ -4,7 +4,7 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { build, type Plugin } from "vite";
 
-import { surfaceConfig } from "./vite-config";
+import { handleDevFavicon, surfaceConfig } from "./vite-config";
 
 const MODULE_SCRIPT_ELEMENT = /<script(?=\s)[^>]*\stype="module"[^>]*><\/script>/;
 
@@ -23,7 +23,7 @@ async function buildPublic(added?: Plugin) {
   return result.output;
 }
 
-test("生产入口保留 Rocket Loader 豁免并引用带指纹的共享图标", async () => {
+test("生产入口保留 Rocket Loader 豁免，图标链接固定为 /favicon.ico", async () => {
   const output = await buildPublic();
   const index = output.find((item) => item.fileName === "index.html");
   if (index?.type !== "asset" || typeof index.source !== "string") {
@@ -33,17 +33,49 @@ test("生产入口保留 Rocket Loader 豁免并引用带指纹的共享图标",
   expect(scripts).toHaveLength(1);
   expect(scripts?.[0]).toMatch(/\sdata-cfasync="false"[^>]*\ssrc="\/assets\/[^"]+\.js"/);
 
-  const iconPath = index.source.match(
-    /<link rel="icon"[^>]*\shref="\/(assets\/favicon-[\w-]+\.svg)"/,
-  )?.[1];
-  const icon = output.find((item) => item.fileName === iconPath);
+  expect(index.source).toContain('<link rel="icon" href="/favicon.ico">');
+  expect(index.source).not.toContain("/assets/favicon-");
+
+  const icons = output.filter(
+    (item) =>
+      item.type === "asset" &&
+      item.fileName.startsWith("assets/favicon-") &&
+      item.fileName.endsWith(".svg"),
+  );
+  expect(icons).toHaveLength(1);
+  const icon = icons[0];
   if (icon?.type !== "asset") {
-    throw new Error("Public 入口应当引用带指纹的图标文件");
+    throw new Error("Public 产物应当包含唯一的指纹图标文件");
   }
   const sourceIcon = readFileSync(
     new URL("../../crates/auction-web-shared/assets/favicon.svg", import.meta.url),
   );
   expect(Buffer.from(icon.source)).toEqual(sourceIcon);
+}, 30_000);
+
+test("开发服务器把 /favicon.ico 映射到共享 SVG", () => {
+  const sourceIcon = readFileSync(
+    new URL("../../crates/auction-web-shared/assets/favicon.svg", import.meta.url),
+  );
+  const headers = new Map<string, string>();
+  let body: Buffer | undefined;
+  const response = {
+    statusCode: 0,
+    setHeader(name: string, value: string) {
+      headers.set(name, value);
+    },
+    end(value?: Buffer) {
+      body = value;
+    },
+  };
+
+  expect(handleDevFavicon({ method: "GET", url: "/favicon.ico" }, response)).toBe(true);
+  expect(response.statusCode).toBe(200);
+  expect(headers.get("Content-Type")).toBe("image/svg+xml");
+  expect(body).toEqual(sourceIcon);
+
+  expect(handleDevFavicon({ method: "GET", url: "/index.html" }, response)).toBe(false);
+  expect(handleDevFavicon({ method: "POST", url: "/favicon.ico" }, response)).toBe(false);
 });
 
 test("入口前的注释含同名脚本时，只为实际入口添加豁免", async () => {
@@ -59,7 +91,7 @@ test("入口前的注释含同名脚本时，只为实际入口添加豁免", as
   expect(index?.type === "asset" ? index.source : null).toMatch(
     /<!--\n<script type="module"[^>]*><\/script>\n-->\n<script data-cfasync="false" type="module"/,
   );
-});
+}, 30_000);
 
 test.each([
   {
@@ -78,11 +110,15 @@ test.each([
     transform: (html: string) => html.replace(MODULE_SCRIPT_ELEMENT, "<!-- $& -->"),
     error: "恰好包含一个带 src 的模块脚本",
   },
-])("最终 HTML $name 时拒绝构建", async ({ transform, error }) => {
-  await expect(
-    buildPublic({
-      name: "test-change-final-html",
-      transformIndexHtml: { order: "post", handler: transform },
-    }),
-  ).rejects.toThrow(error);
-});
+])(
+  "最终 HTML $name 时拒绝构建",
+  async ({ transform, error }) => {
+    await expect(
+      buildPublic({
+        name: "test-change-final-html",
+        transformIndexHtml: { order: "post", handler: transform },
+      }),
+    ).rejects.toThrow(error);
+  },
+  30_000,
+);

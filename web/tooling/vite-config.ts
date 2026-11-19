@@ -21,6 +21,35 @@ const MODULE_TYPE = /\stype\s*=\s*(?:"module"|'module'|module)(?=\s|>)/i;
 const SCRIPT_SOURCE = /\ssrc="[^"]+"/;
 const CF_ASYNC_ATTRIBUTE = /\sdata-cfasync(?=[\s=>])/gi;
 const ROCKET_LOADER_OPT_OUT = 'data-cfasync="false"';
+const DEV_FAVICON_PATH = "/favicon.ico";
+const DEV_FAVICON_SOURCE = resolve(REPOSITORY_ROOT, "crates/auction-web-shared/assets/favicon.svg");
+
+interface DevFaviconRequest {
+  method?: string | undefined;
+  url?: string | undefined;
+}
+
+interface DevFaviconResponse {
+  statusCode: number;
+  setHeader(name: string, value: string): void;
+  end(body?: Buffer): void;
+}
+
+/** 开发服务器把 /favicon.ico 映射到共享 SVG；生产由后端做同样的映射。 */
+export function handleDevFavicon(
+  request: DevFaviconRequest,
+  response: DevFaviconResponse,
+): boolean {
+  const path = request.url?.split("?", 1)[0];
+  if (path !== DEV_FAVICON_PATH || (request.method !== "GET" && request.method !== "HEAD")) {
+    return false;
+  }
+  response.statusCode = 200;
+  response.setHeader("Content-Type", "image/svg+xml");
+  response.setHeader("Cache-Control", "no-cache");
+  response.end(request.method === "HEAD" ? undefined : readFileSync(DEV_FAVICON_SOURCE));
+  return true;
+}
 
 function entryModuleScript(html: string): { tag: string; offset: number } {
   // 注释里的示例脚本不会执行。等长屏蔽注释可保留入口在原 HTML 中的位置。
@@ -68,6 +97,21 @@ function rocketLoaderOptOut(): Plugin {
   };
 }
 
+/** 只在开发服务器补上生产后端提供的 /favicon.ico 映射，构建路径不挂载。 */
+function devFavicon(): Plugin {
+  return {
+    name: "auction-dev-favicon",
+    apply: "serve",
+    configureServer(server) {
+      server.middlewares.use((request, response, next) => {
+        if (!handleDevFavicon(request, response)) {
+          next();
+        }
+      });
+    },
+  };
+}
+
 /** 读取根 Cargo.toml 的 workspace.package.version；前后端共用同一个版本号。 */
 function workspaceVersion(): string {
   const manifest = readFileSync(resolve(REPOSITORY_ROOT, "Cargo.toml"), "utf8");
@@ -91,7 +135,9 @@ export function surfaceConfig(surface: Surface): UserConfig {
   return {
     root: resolve(WEB_ROOT, surface),
     publicDir: false,
-    plugins: [solid(), rocketLoaderOptOut()],
+    // 构建输入只来自仓库与 AUCTION_BUILD_ID；Vite 8 用 envDir: false 关闭 .env* 加载（envFile 已弃用）。
+    envDir: false,
+    plugins: [solid(), rocketLoaderOptOut(), devFavicon()],
     resolve: {
       alias: [
         { find: /^@auction\/contracts\//, replacement: `${resolve(WEB_ROOT, "contracts/src")}/` },

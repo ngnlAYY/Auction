@@ -5,6 +5,8 @@ import "../../../crates/auction-web-public/assets/public.css";
 import "../../../crates/auction-web-public/assets/desktop.css";
 import "../../../crates/auction-web-public/assets/mobile.css";
 import "../../../crates/auction-web-shared/style/console.css";
+// 只为让构建产出站点图标；入口 HTML 的 /favicon.ico 由后端映射到这个带指纹的文件。
+import "../../../crates/auction-web-shared/assets/favicon.svg?url";
 // Solid 版专属的手机样式，排在共用样式之后；Rust 版不加载。
 import "./styles/mobile-topbar.css";
 import "./styles/round-pages.css";
