@@ -546,4 +546,43 @@ mod tests {
         intake.kind = "other_kind".to_owned();
         assert!(!valid_mail_intake(&intake));
     }
+
+    #[test]
+    fn rekey_reads_decode_backend_contract_fixtures() {
+        use auction_contracts::ApiResponse;
+
+        use super::{
+            AdminMailIntakeDetail, AdminMailIntakePage, AdminMailIntakeQuery,
+            decode_mail_intake_detail, decode_mail_intake_page,
+        };
+
+        for (body, kind, count) in [
+            (
+                include_str!("../../../auction-contracts/tests/fixtures/admin/mail-intake.json"),
+                "",
+                2,
+            ),
+            (
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/admin/mail-intake-rekey.json"
+                ),
+                "rekey",
+                1,
+            ),
+        ] {
+            let payload: ApiResponse<AdminMailIntakePage> =
+                serde_json::from_str(body).expect("收件样本");
+            let query = AdminMailIntakeQuery { kind: kind.to_owned(), ..Default::default() };
+            let page = decode_mail_intake_page(payload.data, &query, 1, 50).expect("入站邮件页");
+            assert_eq!(page.intakes.len(), count);
+            assert_eq!(page.intakes[0].kind, "rekey");
+        }
+        let payload: ApiResponse<AdminMailIntakeDetail> = serde_json::from_str(include_str!(
+            "../../../auction-contracts/tests/fixtures/admin/mail-intake-detail.json"
+        ))
+        .expect("收件详情样本");
+        let detail = decode_mail_intake_detail(payload.data).expect("rekey 详情");
+        assert_eq!(detail.kind, "rekey");
+        assert!(detail.subject.is_none());
+    }
 }

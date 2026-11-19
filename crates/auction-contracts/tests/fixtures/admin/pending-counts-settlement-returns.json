@@ -1,0 +1,10 @@
+{
+  "code": "ok",
+  "data": {
+    "active_alerts": 2,
+    "delivery_manual_reconcile": 1,
+    "recovery_confirmation": 0,
+    "settlement_returns": 3
+  },
+  "message": "ok"
+}

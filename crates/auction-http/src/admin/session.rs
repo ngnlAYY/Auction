@@ -484,6 +484,19 @@ mod tests {
         let body = to_bytes(response.into_body(), 4096).await.unwrap();
         let expected: Value = serde_json::from_str(SESSION_FIXTURE).unwrap();
         assert_eq!(serde_json::from_slice::<Value>(&body).unwrap(), expected);
+        let baseline = session_response(
+            "会话有效",
+            no_store_headers(),
+            "fixture-csrf-placeholder".to_owned(),
+            session_identity(server_time, Duration::minutes(15)),
+            None,
+        );
+        crate::server::contract_fixtures::assert_http(
+            "admin/session-default",
+            StatusCode::OK,
+            baseline,
+        )
+        .await;
     }
 
     async fn assert_error(response: Response, status: StatusCode, code: &str) {

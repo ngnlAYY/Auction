@@ -1,0 +1,6 @@
+{
+  "code": "alert_stale",
+  "data": null,
+  "message": "告警状态已变化，请刷新后重试",
+  "request_id": null
+}

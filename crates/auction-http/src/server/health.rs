@@ -59,3 +59,21 @@ fn health_ready_response(ready: bool) -> Response {
     )
         .into_response()
 }
+
+#[cfg(test)]
+mod tests {
+    use axum::http::StatusCode;
+
+    use super::health_ready_response;
+    use crate::server::contract_fixtures::assert_http;
+
+    #[tokio::test]
+    async fn readiness_contract_fixtures() {
+        for (name, status, ready) in [
+            ("public/readiness", StatusCode::OK, true),
+            ("public/readiness-unavailable", StatusCode::SERVICE_UNAVAILABLE, false),
+        ] {
+            assert_http(name, status, health_ready_response(ready)).await;
+        }
+    }
+}

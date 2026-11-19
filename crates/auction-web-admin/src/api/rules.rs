@@ -208,3 +208,29 @@ fn valid_locale(value: &str) -> bool {
 fn invalid_rules_response(_error: &'static str) -> AdminRulesApiError {
     AdminApiFailure::client("invalid_response")
 }
+
+#[cfg(test)]
+mod tests {
+    use auction_contracts::ApiResponse;
+
+    use super::{AdminRules, decode_read_document};
+
+    #[test]
+    fn site_documents_decode_backend_contract_fixtures() {
+        for (body, locale) in [
+            (include_str!("../../../auction-contracts/tests/fixtures/admin/rules.json"), "en"),
+            (
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/admin/rules-legacy-locale.json"
+                ),
+                "fr",
+            ),
+            (include_str!("../../../auction-contracts/tests/fixtures/admin/about.json"), "zh-CN"),
+        ] {
+            let payload: ApiResponse<AdminRules> = serde_json::from_str(body).expect("文档样本");
+            let document = decode_read_document(payload.data, locale).expect("已发布文档");
+            assert_eq!(document.locale, locale);
+            assert_eq!(document.revision, 6);
+        }
+    }
+}

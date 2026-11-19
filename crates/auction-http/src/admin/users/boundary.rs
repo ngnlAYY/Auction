@@ -154,3 +154,33 @@ fn dependency_unavailable() -> Response {
     api_error(StatusCode::SERVICE_UNAVAILABLE, "temporarily_unavailable", "服务暂时不可用")
         .into_response()
 }
+
+#[cfg(test)]
+mod tests {
+    use auction_application::admin::AdminUserError;
+    use axum::http::StatusCode;
+
+    use super::{map_error, map_revert_error};
+    use crate::server::contract_fixtures::assert_http;
+
+    #[tokio::test]
+    async fn user_and_rename_error_contract_fixtures() {
+        for (name, response) in [
+            (
+                "admin/error-stale-user-state",
+                map_revert_error(AdminUserError::VersionConflict { current_version: 6 }.into()),
+            ),
+            (
+                "admin/error-user-state-conflict",
+                map_error(AdminUserError::VersionConflict { current_version: 6 }.into()),
+            ),
+            (
+                "admin/error-rename-not-revertable",
+                map_revert_error(AdminUserError::RenameNotRevertable.into()),
+            ),
+            ("admin/error-rename-name-taken", map_revert_error(AdminUserError::Conflict.into())),
+        ] {
+            assert_http(name, StatusCode::CONFLICT, response).await;
+        }
+    }
+}

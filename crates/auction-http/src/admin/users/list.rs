@@ -76,3 +76,94 @@ pub(crate) async fn list(
     (StatusCode::OK, no_store_headers(), Json(ApiResponse::ok("用户列表已加载", response)))
         .into_response()
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use auction_application::admin::{
+        AdminRenameRevertCommand, AdminUser, AdminUserBlacklistHistoryEntry,
+        AdminUserCreateCommand, AdminUserKeyStatus, AdminUserListItem, AdminUserListRequest,
+        AdminUserMutationCommand, AdminUserMutationResult, AdminUserPage, AdminUserPort,
+        AdminUserStatus,
+    };
+    use auction_application::core::ApplicationFuture;
+    use axum::http::StatusCode;
+    use uuid::Uuid;
+
+    use crate::server::contract_fixtures::{AdminFixturePorts, admin_get, assert_http, time};
+
+    struct FixtureUsers;
+
+    impl AdminUserPort for FixtureUsers {
+        fn list(&self, request: AdminUserListRequest) -> ApplicationFuture<'_, AdminUserPage> {
+            let status = request.status.unwrap_or(AdminUserStatus::Active);
+            let blacklisted = status == AdminUserStatus::Blacklisted;
+            let entry = AdminUserListItem {
+                user: AdminUser {
+                    id: Uuid::from_u128(0x4000_8000_0000_0000_0024),
+                    username: "ExamplePlayer".to_owned(),
+                    forum_account_id: blacklisted.then(|| "12345".to_owned()),
+                    status,
+                    key_status: if blacklisted {
+                        AdminUserKeyStatus::Revoked
+                    } else {
+                        AdminUserKeyStatus::Active
+                    },
+                    state_version: if blacklisted { 3 } else { 1 },
+                    created_at: time(),
+                    updated_at: time(),
+                },
+                blacklist_count: i64::from(blacklisted),
+                blacklist_history: blacklisted
+                    .then(|| AdminUserBlacklistHistoryEntry {
+                        public_reason: "示例原因".to_owned(),
+                        blacklisted_at: time(),
+                    })
+                    .into_iter()
+                    .collect(),
+            };
+            Box::pin(async move {
+                Ok(AdminUserPage {
+                    users: vec![entry],
+                    total: 1,
+                    limit: request.limit,
+                    offset: request.offset,
+                })
+            })
+        }
+
+        fn create(
+            &self,
+            _command: AdminUserCreateCommand,
+        ) -> ApplicationFuture<'_, AdminUserMutationResult> {
+            panic!("用户列表样本不创建用户")
+        }
+
+        fn mutate(
+            &self,
+            _command: AdminUserMutationCommand,
+        ) -> ApplicationFuture<'_, AdminUserMutationResult> {
+            panic!("用户列表样本不修改用户")
+        }
+
+        fn revert_rename(
+            &self,
+            _command: AdminRenameRevertCommand,
+        ) -> ApplicationFuture<'_, AdminUserMutationResult> {
+            panic!("用户列表样本不撤销改名")
+        }
+    }
+
+    #[tokio::test]
+    async fn user_list_contract_fixtures() {
+        let state =
+            AdminFixturePorts { users: Some(Arc::new(FixtureUsers)), ..Default::default() }.state();
+        for (name, url) in [
+            ("admin/users", "/api/v1/admin/users"),
+            ("admin/users-blacklisted", "/api/v1/admin/users?status=blacklisted"),
+        ] {
+            assert_http(name, StatusCode::OK, admin_get(state.clone(), url).await).await;
+        }
+    }
+}

@@ -327,4 +327,41 @@ mod tests {
             assert!(decode_runtime_config(response, false).is_err(), "{path}");
         }
     }
+
+    #[test]
+    fn runtime_config_read_projections_require_both_opt_ins_in_the_editor() {
+        for (body, taxonomy, threshold) in [
+            (
+                include_str!(
+                    "../../../../auction-contracts/tests/fixtures/admin/runtime-config-unextended.json"
+                ),
+                false,
+                false,
+            ),
+            (
+                include_str!(
+                    "../../../../auction-contracts/tests/fixtures/admin/runtime-config-taxonomy.json"
+                ),
+                true,
+                false,
+            ),
+            (
+                include_str!(
+                    "../../../../auction-contracts/tests/fixtures/admin/runtime-config-collection-threshold.json"
+                ),
+                false,
+                true,
+            ),
+        ] {
+            let data = response(body);
+            assert_eq!(data.equipment_taxonomy.is_some(), taxonomy);
+            assert_eq!(
+                data.document["operations"]["alerts"]
+                    .get("fulfillment_collection_overdue_age_seconds")
+                    .is_some(),
+                threshold,
+            );
+            assert!(decode_runtime_config(data, false).is_err());
+        }
+    }
 }

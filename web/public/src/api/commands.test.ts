@@ -136,12 +136,12 @@ test.each([
   ],
   ['{"code":"version_conflict","message":"","data":{"a":1,"a":2}}', "version_conflict", false],
   [
-    `{"code":"version_conflict","message":"","data":${"[".repeat(127)}0${"]".repeat(127)}}`,
+    `{"code":"version_conflict","message":"","data":{"a":${"[".repeat(126)}0${"]".repeat(126)}}}`,
     "invalid_response",
     true,
   ],
   [
-    `{"code":"version_conflict","message":"","data":${"[".repeat(126)}0${"]".repeat(126)}}`,
+    `{"code":"version_conflict","message":"","data":{"a":${"[".repeat(125)}0${"]".repeat(125)}}}`,
     "version_conflict",
     false,
   ],

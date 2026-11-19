@@ -1,0 +1,121 @@
+{
+  "code": "ok",
+  "data": {
+    "alerting": {
+      "error_code": "source_unavailable",
+      "status": "unknown"
+    },
+    "credentials": {
+      "error_code": "source_unavailable",
+      "status": "unknown"
+    },
+    "delivery": {
+      "error_code": "source_unavailable",
+      "status": "unknown"
+    },
+    "external_accounts": {
+      "error_code": "source_unavailable",
+      "status": "unknown"
+    },
+    "fulfillment": {
+      "data": {
+        "awaiting_collection": 3,
+        "awaiting_collection_unreadable": 1,
+        "blocked": 0,
+        "collection_overdue_count": 1,
+        "collection_overdue_items": [
+          {
+            "age_seconds": 180,
+            "auction_sequence": 5,
+            "equipment_category": "Staff",
+            "equipment_name": "Legendary Staff",
+            "last_read_failed": true,
+            "lot_number": 12,
+            "obligation_id": "00000000-0000-4000-8000-000000000032",
+            "obligation_kind": "winner_equipment_handoff",
+            "recipient": "ExamplePlayer",
+            "sent_at": "2025-11-15T09:46:40.110000Z",
+            "world": "main"
+          }
+        ],
+        "failed": 0,
+        "manual_reconcile": 0,
+        "observed_at": "2025-11-15T09:46:40.110000Z",
+        "oldest_awaiting_collection_age_seconds": 180,
+        "oldest_backlog_age_seconds": 45,
+        "oldest_prerequisite_wait_age_seconds": 0,
+        "pending": 2,
+        "waiting_payment": 1,
+        "waiting_prerequisite": 0
+      },
+      "observed_at": "2025-11-15T09:46:40.110000Z",
+      "status": "degraded"
+    },
+    "health": {
+      "audit_failure_count": 0,
+      "missing_services": [
+        "public",
+        "admin",
+        "worker"
+      ],
+      "readiness": false,
+      "status": "degraded"
+    },
+    "mail": {
+      "error_code": "source_unavailable",
+      "status": "unknown"
+    },
+    "process": {
+      "data": {
+        "observed_at": "0001-01-01T00:00:00Z",
+        "processes": [],
+        "summary": {
+          "audit_failure_count": 0,
+          "missing_services": [
+            "public",
+            "admin",
+            "worker"
+          ],
+          "readiness": false,
+          "status": "degraded"
+        }
+      },
+      "status": "degraded"
+    },
+    "realtime": {
+      "error_code": "source_unavailable",
+      "status": "unknown"
+    },
+    "reconciliation": {
+      "data": {
+        "custody_report_age_seconds": 15,
+        "observed_at": "2025-11-15T09:46:40.110000Z",
+        "solvency_report_age_seconds": 25,
+        "worlds": [
+          {
+            "custody_in_transit_count": 3,
+            "custody_missing_count": 0,
+            "solvency_in_transit_count": 1,
+            "solvency_in_transit_credits": 25000,
+            "solvency_shortfall_credits": 0,
+            "world": "main"
+          }
+        ]
+      },
+      "observed_at": "2025-11-15T09:46:40.110000Z",
+      "status": "ok"
+    },
+    "recovery": {
+      "error_code": "source_unavailable",
+      "status": "unknown"
+    },
+    "worker": {
+      "condition": "unavailable",
+      "mail_pollers": 0,
+      "ready": false,
+      "state": "",
+      "version": ""
+    }
+  },
+  "message": "管理概览已加载"
+}

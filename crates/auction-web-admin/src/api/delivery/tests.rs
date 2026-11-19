@@ -890,3 +890,117 @@ fn player_support_url_requests_the_settlement_returns_projection() {
         format!("/api/v1/admin/player-support?reference={DELIVERY_ID}&include=settlement_returns")
     );
 }
+
+#[test]
+fn delivery_lists_decode_backend_contract_fixtures() {
+    for (body, count) in [
+        (include_str!("../../../../auction-contracts/tests/fixtures/admin/deliveries.json"), 2),
+        (
+            include_str!(
+                "../../../../auction-contracts/tests/fixtures/admin/deliveries-settlement-returns.json"
+            ),
+            4,
+        ),
+    ] {
+        let payload = serde_json::from_str(body).expect("投递列表样本");
+        let page = decode_delivery_list(payload, 1, 50).expect("投递列表");
+        assert_eq!(page.deliveries.len(), count);
+        assert!(
+            page.deliveries
+                .iter()
+                .any(|row| row.failure_code.as_deref() == Some("preflight_blocked"))
+        );
+        assert!(
+            page.deliveries
+                .iter()
+                .any(|row| row.failure_code.as_deref() == Some("invalid_payload"))
+        );
+        assert_eq!(
+            page.deliveries
+                .iter()
+                .any(|row| row.failure_code.as_deref() == Some("recovery_superseded")),
+            count == 4
+        );
+        assert_eq!(
+            page.deliveries.iter().any(|row| row.origin_kind == "settlement_return_action"),
+            count == 4
+        );
+    }
+}
+
+#[test]
+fn delivery_details_decode_backend_contract_fixtures() {
+    for (body, failure, has_fence) in [
+        (
+            include_str!(
+                "../../../../auction-contracts/tests/fixtures/admin/delivery-invalid-payload.json"
+            ),
+            "invalid_payload",
+            false,
+        ),
+        (
+            include_str!(
+                "../../../../auction-contracts/tests/fixtures/admin/delivery-preflight-blocked.json"
+            ),
+            "preflight_blocked",
+            true,
+        ),
+        (
+            include_str!(
+                "../../../../auction-contracts/tests/fixtures/admin/delivery-settlement-returns.json"
+            ),
+            "recovery_superseded",
+            false,
+        ),
+    ] {
+        let payload = serde_json::from_str(body).expect("投递详情样本");
+        let detail = decode_detail(payload).expect("投递详情");
+        assert_eq!(detail.delivery.failure_code.as_deref(), Some(failure));
+        assert_eq!(detail.delivery.sending_at.is_some(), has_fence);
+    }
+    let body = include_str!(
+        "../../../../auction-contracts/tests/fixtures/admin/delivery-disposition-actions.json"
+    );
+    let take = include_str!(
+        "../../../../auction-contracts/tests/fixtures/admin/delivery-return-take.json"
+    );
+    let take =
+        decode_detail(serde_json::from_str(take).expect("Take 详情样本")).expect("Take 详情");
+    assert_eq!(take.delivery.origin_kind, "settlement_return_action");
+    assert_eq!(take.delivery.status, "pending");
+    let excluded = include_str!(
+        "../../../../auction-contracts/tests/fixtures/admin/error-delivery-projection-excluded.json"
+    );
+    let failure = crate::api::AdminApiFailure::from_http_body(404, excluded);
+    assert_eq!(failure.code, "delivery_projection_excluded");
+    let id = "00000000-0000-4000-8000-00000000002b";
+    let payload = serde_json::from_str(body).expect("处置准入样本");
+    assert!(decode_detail_with_actions(payload, id, false).is_ok());
+    let wrong_target = serde_json::from_str(body).expect("处置准入样本");
+    assert!(decode_detail_with_actions(wrong_target, OTHER_ID, false).is_err());
+}
+
+#[test]
+fn player_support_bids_decode_backend_contract_fixtures() {
+    use super::player_support::decode_player_support;
+
+    for (body, count, mechanism) in [
+        (
+            include_str!("../../../../auction-contracts/tests/fixtures/admin/player-support.json"),
+            1,
+            "ordinary",
+        ),
+        (
+            include_str!(
+                "../../../../auction-contracts/tests/fixtures/admin/player-support-settlement-returns.json"
+            ),
+            2,
+            "proxy",
+        ),
+    ] {
+        let payload = serde_json::from_str(body).expect("玩家支持样本");
+        let support = decode_player_support(payload).expect("出价与投递分区");
+        assert_eq!(support.deliveries.len(), count);
+        assert_eq!(support.bids[0].mechanism, mechanism);
+    }
+}

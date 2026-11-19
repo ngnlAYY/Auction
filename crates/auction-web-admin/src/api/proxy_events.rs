@@ -91,3 +91,45 @@ fn decode_proxy_event(
 
     Ok(event)
 }
+
+#[cfg(test)]
+mod tests {
+    use auction_contracts::ApiResponse;
+
+    use super::{AdminProxyEventPage, decode_proxy_event_page};
+
+    #[test]
+    fn proxy_events_decode_backend_contract_fixtures() {
+        let lot_id = "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2c";
+        for (body, mode) in [
+            (
+                include_str!("../../../auction-contracts/tests/fixtures/admin/proxy-events.json"),
+                "slow",
+            ),
+            (
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/admin/proxy-events-final.json"
+                ),
+                "fast",
+            ),
+        ] {
+            let payload: ApiResponse<AdminProxyEventPage> =
+                serde_json::from_str(body).expect("代理历史样本");
+            let page = decode_proxy_event_page(payload.data, lot_id, 1, 50).expect("代理历史列表");
+            assert_eq!(page.proxy_events[0].status, "active");
+            assert_eq!(page.proxy_events[0].mode, mode);
+        }
+    }
+
+    #[test]
+    fn proxy_cursor_wire_stays_distinct_from_browser_numbered_pages() {
+        let body = include_str!(
+            "../../../auction-contracts/tests/fixtures/admin/proxy-events-cursor.json"
+        );
+        let payload: ApiResponse<AdminProxyEventPage> =
+            serde_json::from_str(body).expect("代理历史游标 DTO");
+        assert_eq!(payload.data.pagination.cursor.as_deref(), Some("start"));
+        let lot_id = "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2c";
+        assert!(decode_proxy_event_page(payload.data, lot_id, 1, 50).is_err());
+    }
+}

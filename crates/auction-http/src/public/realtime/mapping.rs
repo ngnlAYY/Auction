@@ -65,3 +65,30 @@ pub(super) fn map_event(event: PublicRealtimeEvent) -> PublicRealtimeEventRespon
         created_at: public_timestamp(event.created_at),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use auction_application::realtime::PublicRealtimeEvent;
+    use serde_json::{Value, json};
+    use uuid::Uuid;
+
+    use super::encode_websocket_frame;
+    use crate::server::contract_fixtures::{AUCTION_ID, assert_wire, time};
+
+    #[test]
+    fn websocket_event_contract_fixture() {
+        let event = PublicRealtimeEvent {
+            event_id: Uuid::from_u128(0x4000_8000_0000_0000_0015),
+            stream_key: format!("auction:{AUCTION_ID}"),
+            stream_sequence: 2,
+            kind: "auction.final_phase_entered".to_owned(),
+            schema_version: 1,
+            payload: json!({"auction_id": AUCTION_ID.to_string(), "state_version": 12}),
+            created_at: time(),
+        };
+        event.validate().expect("已登记的实时事件");
+        let frame = encode_websocket_frame(event).expect("生产 WS 帧");
+        let body: Value = serde_json::from_str(frame.as_str()).expect("WS JSON");
+        assert_wire("public/websocket-event", body);
+    }
+}

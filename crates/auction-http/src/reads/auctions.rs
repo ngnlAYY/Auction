@@ -178,9 +178,10 @@ mod tests {
 
     use auction_application::auction::{
         AuctionReader, CurrentAuctionSnapshot, PublicAuctionCountdown, PublicAuctionListRequest,
-        PublicAuctionPage, PublicRealtimeAuctionStatus,
+        PublicAuctionPage, PublicAuctionSummary, PublicRealtimeAuctionStatus,
     };
-    use auction_application::core::{ApplicationError, ApplicationFuture};
+    use auction_application::core::ApplicationFuture;
+    use auction_application::forum::PublicForumLink;
     use auction_domain::ProxyMode;
     use auction_time::{Duration, Timestamp};
     use axum::Router;
@@ -191,22 +192,55 @@ mod tests {
     use tower::ServiceExt;
     use uuid::Uuid;
 
-    use super::current_auction;
+    use super::{current_auction, list_auctions, list_auctions_v2};
     use crate::middleware::security::PublicHttpSecurity;
+    use crate::server::contract_fixtures::{assert_http, assert_wire};
     use crate::state::PublicApiState;
 
     const AUCTION_ID: Uuid = Uuid::from_u128(0x0190_f2b4_1c2d_4e5f_8a6b_7c8d_9e0f_1a2b);
 
-    /// 只回答当前场次读取；目录、倒计时与实时预检不属于该处理器。
+    /// 提供可固定的当前场次与目录投影；倒计时与实时预检不参与此处的读取。
     struct FixedCurrent(Option<CurrentAuctionSnapshot>);
 
     impl AuctionReader for FixedCurrent {
         fn list_public_auctions(
             &self,
-            _request: PublicAuctionListRequest,
+            request: PublicAuctionListRequest,
         ) -> ApplicationFuture<'_, PublicAuctionPage> {
-            Box::pin(async {
-                Err(ApplicationError::CapabilityUnavailable("测试替身不提供目录"))
+            Box::pin(async move {
+                let opened = Timestamp::from_timestamp(1_763_200_000, 0).expect("开拍时刻");
+                let settled = request.status == "settled";
+                Ok(PublicAuctionPage {
+                    entries: vec![PublicAuctionSummary {
+                        id: AUCTION_ID,
+                        world_id: "main".to_owned(),
+                        sequence: 5,
+                        status: request.status,
+                        scheduled_open_at: opened,
+                        opened_at: Some(opened),
+                        final_phase_at: settled.then(|| opened + Duration::days(1)),
+                        effective_end_at: Some(opened + Duration::days(2)),
+                        settled_at: settled.then(|| opened + Duration::days(2)),
+                        lot_count: 2,
+                        sold_count: i64::from(settled),
+                        unsold_count: i64::from(settled),
+                        sold_amount: if settled { 2_000 } else { 0 },
+                        state_version: if settled { 8 } else { 3 },
+                        forum_link: (settled && request.include_forum_thread_url).then(|| {
+                            PublicForumLink::new(
+                                "https://forums.e-hentai.org/index.php?showtopic=123".to_owned(),
+                                1,
+                                Some(opened),
+                            )
+                            .expect("公开论坛地址")
+                        }),
+                    }],
+                    total: request.cursor.is_none().then_some(1),
+                    limit: request.limit,
+                    offset: request.offset,
+                    next_cursor: None,
+                    has_more: false,
+                })
             })
         }
 
@@ -249,8 +283,8 @@ mod tests {
         }
     }
 
-    async fn request(auction: Option<CurrentAuctionSnapshot>, query: &str) -> (StatusCode, Value) {
-        let state = PublicApiState::new(
+    fn state(auction: Option<CurrentAuctionSnapshot>) -> PublicApiState {
+        PublicApiState::new(
             None,
             None,
             None,
@@ -266,9 +300,13 @@ mod tests {
             None,
             None,
             PublicHttpSecurity::default(),
-        );
-        let app =
-            Router::new().route("/api/v1/auctions/current", get(current_auction)).with_state(state);
+        )
+    }
+
+    async fn request(auction: Option<CurrentAuctionSnapshot>, query: &str) -> (StatusCode, Value) {
+        let app = Router::new()
+            .route("/api/v1/auctions/current", get(current_auction))
+            .with_state(state(auction));
         let separator = if query.is_empty() { "" } else { "?" };
         let uri = format!("/api/v1/auctions/current{separator}{query}");
         let response = app
@@ -344,6 +382,48 @@ mod tests {
             assert_eq!(status, StatusCode::BAD_REQUEST, "{query}");
             assert_eq!(body["code"], "invalid_query", "{query}");
             assert_eq!(body["message"], message, "{query}");
+        }
+    }
+
+    #[tokio::test]
+    async fn auction_read_contract_fixtures() {
+        let mut preview = live(ProxyMode::Fast);
+        preview.status = "preview".to_owned();
+        preview.presentation_mode = "opening".to_owned();
+        preview.bidding_open = false;
+        preview.scheduled_ends_at = None;
+        preview.preview_revision = 2;
+        for (name, auction, query) in [
+            ("auction-current", Some(live(ProxyMode::Slow)), ""),
+            (
+                "auction-current-proxy-mode",
+                Some(live(ProxyMode::Slow)),
+                "include=proxy_default_mode",
+            ),
+            ("auction-current-opening", Some(preview), "include=proxy_default_mode"),
+            ("auction-current-empty", None, "include=proxy_default_mode"),
+        ] {
+            let (status, body) = request(auction, query).await;
+            assert_eq!(status, StatusCode::OK);
+            assert_wire(&format!("public/{name}"), body);
+        }
+
+        for (name, uri, v2) in [
+            ("auctions-v1", "/api/v1/auctions", false),
+            ("auctions-v1-live", "/api/v1/auctions?status=live", false),
+            ("auctions-v2", "/api/v2/auctions", true),
+            ("auctions-v2-live", "/api/v2/auctions?status=live", true),
+            ("auctions-v1-cursor", "/api/v1/auctions?cursor=start", false),
+            ("auctions-v2-cursor", "/api/v2/auctions?cursor=start", true),
+        ] {
+            let query = uri.parse().expect("目录 URI");
+            let response = if v2 {
+                list_auctions_v2(axum::extract::State(state(None)), query).await
+            } else {
+                list_auctions(axum::extract::State(state(None)), query).await
+            };
+            assert_http(&format!("public/{name}"), StatusCode::OK, response.expect("场次目录"))
+                .await;
         }
     }
 }

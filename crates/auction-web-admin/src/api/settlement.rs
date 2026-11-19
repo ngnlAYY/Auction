@@ -288,4 +288,30 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn settlement_reports_decode_backend_contract_fixtures() {
+        use auction_contracts::ApiResponse;
+
+        for (body, sold) in [
+            (
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/admin/settlement-report.json"
+                ),
+                true,
+            ),
+            (
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/admin/settlement-report-unsold.json"
+                ),
+                false,
+            ),
+        ] {
+            let payload: ApiResponse<StrictSettlementReport> =
+                serde_json::from_str(body).expect("结算报告样本");
+            let report = decode_settlement_report(payload.data).expect("结算报告");
+            assert_eq!(report.auction.status, "settled");
+            assert_eq!(report.lots[0].winner.is_some(), sold);
+        }
+    }
 }

@@ -158,3 +158,27 @@ fn watch_error(error: LotWatchError) -> Response {
     let response = body();
     diagnostics::mapped_response("lot_watch", "respond_command_failure", diagnostic_kind, response)
 }
+
+#[cfg(test)]
+mod tests {
+    use auction_application::public::LotWatchError;
+    use axum::http::StatusCode;
+
+    use super::watch_error;
+    use crate::server::contract_fixtures::assert_http;
+
+    #[tokio::test]
+    async fn watch_error_contract_fixtures() {
+        for (name, status, error) in [
+            (
+                "public/error-invalid-watch",
+                StatusCode::UNPROCESSABLE_ENTITY,
+                LotWatchError::Invalid,
+            ),
+            ("public/error-watch-conflict", StatusCode::CONFLICT, LotWatchError::Conflict),
+            ("public/error-not-found", StatusCode::NOT_FOUND, LotWatchError::NotFound),
+        ] {
+            assert_http(name, status, watch_error(error)).await;
+        }
+    }
+}

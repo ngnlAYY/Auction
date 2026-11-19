@@ -239,4 +239,16 @@ mod tests {
             );
         }
     }
+
+    #[tokio::test]
+    async fn stale_delivery_error_contract_fixture() {
+        use crate::server::contract_fixtures::assert_http;
+
+        assert_http(
+            "admin/error-stale-delivery-state",
+            StatusCode::CONFLICT,
+            map_delivery_error(DeliveryAdminError::Stale.into()),
+        )
+        .await;
+    }
 }

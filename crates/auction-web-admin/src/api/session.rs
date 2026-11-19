@@ -282,4 +282,16 @@ mod tests {
             assert_eq!(retry_after_millis(value, Some(sent)), None);
         }
     }
+
+    #[test]
+    fn default_admin_session_fixture_keeps_the_published_fields() {
+        use auction_contracts::{AdminSessionResponse, ApiResponse};
+
+        let body =
+            include_str!("../../../auction-contracts/tests/fixtures/admin/session-default.json");
+        let legacy: ApiResponse<AdminSessionResponse> =
+            serde_json::from_str(body).expect("缺省会话");
+        assert!(legacy.data.server_time.is_none());
+        assert!(decode_admin_session(body).is_err());
+    }
 }

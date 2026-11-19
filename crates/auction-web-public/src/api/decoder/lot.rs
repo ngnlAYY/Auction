@@ -396,10 +396,11 @@ fn valid_attributes(value: Option<&Value>) -> bool {
         &["quality"],
         &["type", "prefix", "suffix", "level", "tradeable", "stats"],
     ) && nonempty(value.get("quality"))
-        && optional_nonempty(value, "type")
-        && optional_nonempty(value, "prefix")
-        && optional_nonempty(value, "suffix")
-        && optional_nonnegative(value, "level")
+        // 已存装备允许缺省的词缀为空串，无等级以 null 保存。
+        && ["type", "prefix", "suffix"]
+            .into_iter()
+            .all(|key| value.get(key).is_none_or(Value::is_string))
+        && (value.get("level") == Some(&Value::Null) || optional_nonnegative(value, "level"))
         && optional_bool(value, "tradeable")
         && optional_attribute_stats(value, "stats")
 }
@@ -411,7 +412,7 @@ fn valid_attribute_stats(value: Option<&Value>) -> bool {
             let Some(stat) = object(stat) else { return false };
             json_keys_only(stat, &["value"], &["base"])
                 && nonempty(stat.get("value"))
-                && optional_finite(stat, "base")
+                && (stat.get("base") == Some(&Value::Null) || optional_finite(stat, "base"))
         }
     })
 }
@@ -642,5 +643,62 @@ mod tests {
         assert_eq!(summary_rows, full_rows);
         assert_eq!(summary_rows[0].primary_attribute_initials.as_deref(), Some("IW"));
         assert_eq!(summary_rows[0].avg_roll, Some(70.0));
+    }
+
+    #[test]
+    fn lot_list_and_detail_decode_backend_contract_fixtures() {
+        use super::super::decode_success_text;
+        use super::{decode_lot_detail, valid_lot_list};
+
+        let auction = "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b";
+        let lot = "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2c";
+        for (body, status) in [
+            (include_str!("../../../../auction-contracts/tests/fixtures/public/lots.json"), "live"),
+            (
+                include_str!(
+                    "../../../../auction-contracts/tests/fixtures/public/lots-summary.json"
+                ),
+                "live",
+            ),
+            (
+                include_str!(
+                    "../../../../auction-contracts/tests/fixtures/public/lots-preview.json"
+                ),
+                "preview",
+            ),
+            (
+                include_str!("../../../../auction-contracts/tests/fixtures/public/lots-final.json"),
+                "final",
+            ),
+        ] {
+            let page: super::LotEnvelope = decode_success_text(Some(body), |data| {
+                valid_lot_list(data, auction, None, None, Default::default())
+            })
+            .expect("lot 目录");
+            assert_eq!(page.auction_status, status);
+        }
+        for body in [
+            include_str!("../../../../auction-contracts/tests/fixtures/public/lot.json"),
+            include_str!("../../../../auction-contracts/tests/fixtures/public/lot-unleveled.json"),
+            include_str!("../../../../auction-contracts/tests/fixtures/public/lot-preview.json"),
+        ] {
+            assert!(decode_lot_detail(Some(body), Some(auction), lot).is_ok());
+            assert!(decode_lot_detail(Some(body), Some(auction), auction).is_err());
+        }
+    }
+    #[test]
+    fn lot_detail_rejects_unknown_or_wrong_typed_stored_attributes() {
+        let body =
+            include_str!("../../../../auction-contracts/tests/fixtures/public/lot-unleveled.json");
+        let auction = "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b";
+        let lot = "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2c";
+        for (name, invalid) in
+            [("prefix", json!(false)), ("level", json!("450")), ("extra", Value::Null)]
+        {
+            let mut payload: Value = serde_json::from_str(body).expect("契约样本");
+            payload["data"]["lot"]["equipment"]["attributes"][name] = invalid;
+            let body = payload.to_string();
+            assert!(super::decode_lot_detail(Some(&body), Some(auction), lot).is_err(), "{name}");
+        }
     }
 }

@@ -1050,4 +1050,38 @@ mod tests {
             assert!(decode_dashboard_response(rejected).is_err(), "{key} 越界必须拒绝");
         }
     }
+
+    #[test]
+    fn dashboard_decodes_backend_fixture_with_no_live_heartbeats() {
+        use auction_contracts::{AdminDashboardResponse, ApiResponse};
+
+        let baseline: ApiResponse<Value> = serde_json::from_str(include_str!(
+            "../../../../auction-contracts/tests/fixtures/admin/dashboard.json"
+        ))
+        .expect("缺省看板");
+        let wire: AdminDashboardResponse =
+            serde_json::from_value(baseline.data.clone()).expect("缺省响应外壳");
+        let fulfillment = wire.fulfillment.data.expect("履约水位");
+        assert_eq!(fulfillment["pending"], 5);
+        assert!(fulfillment.get("awaiting_collection").is_none());
+        assert!(decode_dashboard_response(baseline.data).is_err());
+
+        let extended: ApiResponse<Value> = serde_json::from_str(include_str!(
+            "../../../../auction-contracts/tests/fixtures/admin/dashboard-collection-wait.json"
+        ))
+        .expect("等待领取看板");
+        let snapshot = decode_dashboard_response(extended.data).expect("等待领取看板解码");
+        assert!(snapshot.process.observed_at.is_none());
+        assert!(snapshot.process.data.expect("降级进程分区").processes.is_empty());
+        let fulfillment = snapshot.fulfillment.data.expect("等待领取履约");
+        assert_eq!((fulfillment.pending, fulfillment.awaiting_collection), (2, 3));
+        assert_eq!(fulfillment.collection_overdue_count, 1);
+        let [item] = fulfillment.collection_overdue_items.as_slice() else {
+            panic!("应有一条长期未领取记录");
+        };
+        assert_eq!((item.lot_number, item.age_seconds), (12, 180));
+        assert!(item.last_read_failed);
+        let reconciliation = snapshot.reconciliation.data.expect("对账分区");
+        assert_eq!(reconciliation.worlds[0].solvency_in_transit_count, 1);
+    }
 }

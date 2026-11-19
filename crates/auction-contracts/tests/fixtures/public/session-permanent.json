@@ -1,0 +1,11 @@
+{
+  "code": "ok",
+  "data": {
+    "absolute_expires_at": null,
+    "authenticated": true,
+    "expires_at": null,
+    "user_id": "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b",
+    "username": "page-size-reader"
+  },
+  "message": "会话有效"
+}

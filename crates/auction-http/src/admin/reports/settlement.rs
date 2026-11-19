@@ -305,3 +305,116 @@ fn valid_report_optional_time(value: Option<Timestamp>) -> bool {
 fn valid_report_cancellation_reason(value: &str) -> bool {
     valid_report_text(value, 1024) && !value.chars().any(char::is_control)
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use auction_application::core::ApplicationFuture;
+    use auction_application::settlement::{
+        SettlementAdjustment, SettlementAuctionSnapshot, SettlementLotReport, SettlementReport,
+        SettlementReportReader, SettlementSummary,
+    };
+    use auction_domain::{AuctionId, LotId};
+    use auction_time::Duration;
+    use axum::http::StatusCode;
+    use uuid::Uuid;
+
+    use crate::server::contract_fixtures::{
+        AUCTION_ID, AdminFixturePorts, admin_get, assert_http, time,
+    };
+
+    struct FixtureSettlementReport(SettlementReport);
+
+    impl SettlementReportReader for FixtureSettlementReport {
+        fn settlement_report(
+            &self,
+            auction_id: AuctionId,
+        ) -> ApplicationFuture<'_, Option<SettlementReport>> {
+            Box::pin(async move { Ok((auction_id == self.0.auction.id).then(|| self.0.clone())) })
+        }
+    }
+
+    #[tokio::test]
+    async fn settlement_report_contract_fixtures() {
+        let opened = time();
+        let settled = opened + Duration::days(1);
+        let sold = SettlementLotReport {
+            id: LotId::from_uuid(Uuid::from_u128(0x4000_8000_0000_0000_0023)),
+            lot_number: 1,
+            status: "sold".to_owned(),
+            equipment_name: "Legendary Staff".to_owned(),
+            equipment_category: "Staff".to_owned(),
+            external_equipment_id: "123".to_owned(),
+            seller: Some("ExampleSeller".to_owned()),
+            winner: Some("ExampleBuyer".to_owned()),
+            final_price: 2_000,
+            listed_price: 2_000,
+            buyer_amount: 2_000,
+            seller_amount: 2_000,
+            tax_amount: 0,
+            compensation_amount: 0,
+            hold_ppm: 0,
+            adjustment_ppm: 0,
+            leader_held_nanos: 3_600_000_000_000,
+            adjustment: SettlementAdjustment { policy: Some("legacy_zero_v0".to_owned()) },
+        };
+        let mut report = SettlementReport {
+            auction: SettlementAuctionSnapshot {
+                id: AuctionId::from_uuid(AUCTION_ID),
+                world_id: "main".to_owned(),
+                sequence: 5,
+                status: "settled".to_owned(),
+                preview_scheduled_at: opened - Duration::days(1),
+                scheduled_open_at: opened,
+                preview_opened_at: Some(opened - Duration::days(1)),
+                preview_manual_open: false,
+                preview_revision: 2,
+                opened_at: Some(opened),
+                final_phase_at: Some(settled - Duration::hours(1)),
+                settled_at: Some(settled),
+                cancelled_at: None,
+                cancelled_reason: None,
+                cancelled_by: None,
+                state_version: 8,
+                scheduled_end_at: Some(settled),
+                effective_end_at: Some(settled),
+                created_at: opened - Duration::days(2),
+                updated_at: settled,
+            },
+            settlement: Some(SettlementSummary {
+                opening_balance: 1000,
+                tax_income: 0,
+                discount_demand: 0,
+                compensation_out: 0,
+                closing_balance: 1000,
+                movement_count: 2,
+                settled_at: settled,
+            }),
+            lots: vec![sold.clone()],
+        };
+        let sold_report = report.clone();
+        report.lots = vec![SettlementLotReport {
+            status: "unsold".to_owned(),
+            winner: None,
+            final_price: 0,
+            listed_price: 0,
+            buyer_amount: 0,
+            seller_amount: 0,
+            leader_held_nanos: 0,
+            adjustment: SettlementAdjustment { policy: None },
+            ..sold
+        }];
+        let url = format!("/api/v1/admin/auctions/{AUCTION_ID}/settlement-report");
+        for (name, report) in
+            [("admin/settlement-report", sold_report), ("admin/settlement-report-unsold", report)]
+        {
+            let state = AdminFixturePorts {
+                settlement_report: Some(Arc::new(FixtureSettlementReport(report))),
+                ..Default::default()
+            }
+            .state();
+            assert_http(name, StatusCode::OK, admin_get(state, &url).await).await;
+        }
+    }
+}

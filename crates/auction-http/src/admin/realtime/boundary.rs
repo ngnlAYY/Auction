@@ -114,3 +114,22 @@ pub(crate) fn feature_unavailable() -> Response {
 pub(crate) fn invalid_query() -> Response {
     query_rejection().into_response()
 }
+
+#[cfg(test)]
+mod tests {
+    use auction_application::realtime::RealtimeAdminError;
+    use axum::http::StatusCode;
+
+    use super::map_replay_error;
+    use crate::server::contract_fixtures::assert_http;
+
+    #[tokio::test]
+    async fn stale_realtime_replay_error_contract_fixture() {
+        assert_http(
+            "admin/error-realtime-conflict",
+            StatusCode::CONFLICT,
+            map_replay_error(RealtimeAdminError::AlreadyResolved.into()),
+        )
+        .await;
+    }
+}

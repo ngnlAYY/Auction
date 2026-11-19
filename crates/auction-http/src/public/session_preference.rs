@@ -167,3 +167,57 @@ fn failure(error: ApplicationError) -> Response {
         response,
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use auction_application::public::{
+        PublicSessionIdentity, PublicSessionPreference, PublicSessionPreferenceResult,
+    };
+    use auction_time::Timestamp;
+    use axum::http::StatusCode;
+    use uuid::Uuid;
+
+    use super::{success, valid};
+    use crate::server::contract_fixtures::assert_http;
+
+    #[tokio::test]
+    async fn timed_session_preference_contract_fixture() {
+        let user_id = Uuid::from_u128(0x0190_f2b4_1c2d_4e5f_8a6b_7c8d_9e0f_1a2b);
+        let expires_at = Timestamp::from_timestamp(1_763_200_000, 0).expect("截止时刻");
+        let value = PublicSessionPreferenceResult {
+            preference: PublicSessionPreference {
+                user_id,
+                duration_seconds: Some(3600),
+                version: 2,
+            },
+            identity: PublicSessionIdentity {
+                user_id,
+                username: "ExamplePlayer".to_owned(),
+                expires_at: Some(expires_at),
+                absolute_expires_at: Some(expires_at),
+            },
+        };
+        assert!(valid(&value));
+        assert_http("public/session-preference-timed", StatusCode::OK, success(value)).await;
+    }
+
+    #[tokio::test]
+    async fn session_preference_error_contract_fixtures() {
+        use auction_application::core::{ApplicationError, SessionError};
+
+        for (name, status, error) in [
+            (
+                "public/error-invalid-session-preference",
+                StatusCode::UNPROCESSABLE_ENTITY,
+                SessionError::InvalidPreference,
+            ),
+            (
+                "public/error-session-preference-conflict",
+                StatusCode::CONFLICT,
+                SessionError::PreferenceConflict,
+            ),
+        ] {
+            assert_http(name, status, super::failure(ApplicationError::Session(error))).await;
+        }
+    }
+}

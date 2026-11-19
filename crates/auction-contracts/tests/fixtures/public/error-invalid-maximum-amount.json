@@ -1,0 +1,6 @@
+{
+  "code": "invalid_maximum_amount",
+  "data": null,
+  "message": "代理上限无效",
+  "request_id": null
+}

@@ -1,0 +1,6 @@
+{
+  "code": "invalid_session_preference",
+  "data": null,
+  "message": "登录时长或版本无效",
+  "request_id": null
+}

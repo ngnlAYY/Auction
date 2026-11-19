@@ -39,3 +39,20 @@ pub(crate) async fn fetch_site_document(
     }
     decoder::decode_rules(response).await
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::Value;
+
+    use super::DOCUMENT_UNPUBLISHED;
+    use crate::api::decoder::decode_error_body;
+
+    #[test]
+    fn unpublished_about_decodes_backend_contract_fixture() {
+        let body =
+            include_str!("../../../auction-contracts/tests/fixtures/public/about-unpublished.json");
+        let (code, data) = decode_error_body(body).expect("未发布的关于文档");
+        assert_eq!(code, DOCUMENT_UNPUBLISHED);
+        assert_eq!(data, Value::Null);
+    }
+}

@@ -304,4 +304,23 @@ mod tests {
         let missing_request_id = page(vec![without(record(), "request_id")]);
         assert!(serde_json::from_value::<StrictAuditPage>(missing_request_id).is_err());
     }
+
+    #[test]
+    fn numbered_audit_decodes_backend_fixture_and_keeps_cursor_mode_distinct() {
+        use auction_contracts::{AdminAuditResponse, ApiResponse};
+
+        let numbered: ApiResponse<StrictAuditPage> = serde_json::from_str(include_str!(
+            "../../../auction-contracts/tests/fixtures/admin/audit.json"
+        ))
+        .expect("审计编号页样本");
+        let page = decode_audit_page(numbered.data, 1, 50).expect("审计编号页");
+        assert_eq!(page.records[0].request_id.as_deref(), Some("fixture-request"));
+
+        let cursor =
+            include_str!("../../../auction-contracts/tests/fixtures/admin/audit-cursor.json");
+        let wire: ApiResponse<AdminAuditResponse> =
+            serde_json::from_str(cursor).expect("审计游标 DTO");
+        assert!(wire.data.next_cursor.is_some());
+        assert!(serde_json::from_str::<ApiResponse<StrictAuditPage>>(cursor).is_err());
+    }
 }

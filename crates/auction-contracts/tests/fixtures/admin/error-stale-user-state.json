@@ -1,0 +1,8 @@
+{
+  "code": "stale_user_state",
+  "data": {
+    "current_state_version": 6
+  },
+  "message": "用户版本已变化",
+  "request_id": null
+}

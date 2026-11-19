@@ -1,0 +1,21 @@
+{
+  "code": "ok",
+  "data": {
+    "events": [
+      {
+        "created_at": "2025-11-15T09:46:40.110000Z",
+        "event_id": "00000000-0000-4000-8000-000000000026",
+        "kind": "lot.bid_accepted",
+        "schema_version": 2,
+        "stream_key": "auction:0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b",
+        "stream_sequence": 14
+      }
+    ],
+    "pagination": {
+      "page": 1,
+      "page_size": 50,
+      "total": 1
+    }
+  },
+  "message": "实时事件元数据已加载"
+}

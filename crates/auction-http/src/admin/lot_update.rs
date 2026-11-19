@@ -187,4 +187,20 @@ mod tests {
             assert_code(response, status, code).await;
         }
     }
+
+    #[tokio::test]
+    async fn stale_lot_error_contract_fixture() {
+        use auction_application::core::{ApplicationError, CompetitionTransactionError};
+
+        use crate::server::contract_fixtures::assert_http;
+
+        assert_http(
+            "admin/error-stale-lot-state",
+            StatusCode::CONFLICT,
+            super::map_error(ApplicationError::CompetitionTransaction(
+                CompetitionTransactionError::StaleState,
+            )),
+        )
+        .await;
+    }
 }

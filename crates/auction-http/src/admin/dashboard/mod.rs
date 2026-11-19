@@ -276,3 +276,193 @@ fn map_error(error: HealthError) -> Response {
         response,
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use auction_application::core::ApplicationFuture;
+    use auction_application::operations::{
+        OperationsAlertCollectionOverdueItem, OperationsAlertCollectionOverdueRead,
+        OperationsAlertFulfillmentSnapshot, OperationsAlertPolicy,
+        OperationsAlertReconciliationSnapshot, OperationsAlertReconciliationWorld,
+        OperationsAlertSnapshot, OperationsAlertSourceReader,
+    };
+    use auction_domain::SettlementObligationKind;
+    use auction_observability::{
+        AdminDashboardSnapshot, DashboardSection, DashboardStatus, HealthFuture, HealthReader,
+        HealthSummary, HeartbeatStatus, ProcessSnapshot, ServiceName,
+    };
+    use auction_time::Timestamp;
+    use axum::http::StatusCode;
+    use serde_json::Value;
+    use uuid::Uuid;
+
+    use crate::server::contract_fixtures::{
+        AdminFixturePorts, admin_get, response_json, time, wire_fixture,
+    };
+
+    const COLLECTION_THRESHOLD: Duration = Duration::from_secs(120);
+
+    struct MissingHeartbeats;
+
+    impl HealthReader for MissingHeartbeats {
+        fn snapshot(&self) -> HealthFuture<'_, AdminDashboardSnapshot> {
+            let missing_services =
+                vec![ServiceName::Public, ServiceName::Admin, ServiceName::Worker];
+            let health = HealthSummary {
+                status: HeartbeatStatus::Degraded,
+                readiness: false,
+                audit_failure_count: 0,
+                missing_services: missing_services.clone(),
+            };
+            Box::pin(async move {
+                Ok(AdminDashboardSnapshot {
+                    health: health.clone(),
+                    process: DashboardSection {
+                        status: DashboardStatus::Degraded,
+                        observed_at: None,
+                        error_code: None,
+                        data: Some(ProcessSnapshot {
+                            processes: Vec::new(),
+                            summary: health,
+                            observed_at: None,
+                            missing_services,
+                        }),
+                    },
+                })
+            })
+        }
+    }
+
+    struct FixtureOperations(OperationsAlertCollectionOverdueRead);
+
+    impl OperationsAlertSourceReader for FixtureOperations {
+        fn snapshot(
+            &self,
+            _now: Timestamp,
+            collection: OperationsAlertCollectionOverdueRead,
+        ) -> ApplicationFuture<'_, OperationsAlertSnapshot> {
+            assert_eq!(collection, self.0);
+            let overdue = collection.with_items();
+            let collection_overdue_items = if overdue {
+                vec![OperationsAlertCollectionOverdueItem {
+                    obligation_id: Uuid::from_u128(0x4000_8000_0000_0000_0032),
+                    obligation_kind: SettlementObligationKind::WinnerEquipmentHandoff,
+                    auction_world: "main".to_owned(),
+                    auction_sequence: 5,
+                    lot_number: 12,
+                    equipment_category: "Staff".to_owned(),
+                    equipment_name: "Legendary Staff".to_owned(),
+                    recipient: "ExamplePlayer".to_owned(),
+                    sent_at: time(),
+                    age_seconds: 180,
+                    last_read_failed: true,
+                }]
+            } else {
+                Vec::new()
+            };
+            Box::pin(async move {
+                Ok(OperationsAlertSnapshot {
+                    fulfillment: Some(OperationsAlertFulfillmentSnapshot {
+                        pending: 2,
+                        awaiting_collection: 3,
+                        awaiting_collection_unreadable: 1,
+                        oldest_backlog_age_seconds: 45,
+                        oldest_awaiting_collection_age_seconds: 180,
+                        oldest_awaiting_collection_backlog_age_seconds: 200,
+                        blocked: 0,
+                        failed: 0,
+                        manual_reconcile: 0,
+                        waiting_payment: 1,
+                        waiting_prerequisite: 0,
+                        oldest_prerequisite_wait_age_seconds: 0,
+                        collection_overdue: i64::from(overdue),
+                        settlement_return_pending: 0,
+                        oldest_settlement_return_pending_age_seconds: 0,
+                        settlement_return_quarantined: 0,
+                        oldest_settlement_return_quarantined_age_seconds: 0,
+                        settlement_return_take_unknown: Default::default(),
+                    }),
+                    collection_overdue_items,
+                    reconciliation: Some(OperationsAlertReconciliationSnapshot {
+                        custody_report_age_seconds: Some(15),
+                        solvency_report_age_seconds: Some(25),
+                        worlds: vec![OperationsAlertReconciliationWorld {
+                            world: "main",
+                            custody_missing_count: 0,
+                            custody_in_transit_count: 3,
+                            solvency_shortfall_credits: 0,
+                            solvency_in_transit_count: 1,
+                            solvency_in_transit_credits: 25_000,
+                        }],
+                    }),
+                    ..Default::default()
+                })
+            })
+        }
+    }
+
+    fn alert_policy() -> OperationsAlertPolicy {
+        OperationsAlertPolicy {
+            source_timeout: Duration::from_secs(5),
+            batch_window: Duration::from_secs(120),
+            cooldown: Duration::from_secs(1_800),
+            claim_lease: Duration::from_secs(120),
+            retry_delay: Duration::from_secs(300),
+            max_signals_per_scan: 64,
+            max_batch_items: 20,
+            max_body_bytes: 4_096,
+            delivery_pending_count_threshold: 1,
+            delivery_pending_age_threshold: Duration::from_secs(900),
+            delivery_manual_reconcile_count_threshold: 1,
+            fulfillment_backlog_count_threshold: 100,
+            fulfillment_backlog_age_threshold: Duration::from_secs(900),
+            fulfillment_collection_overdue_age_threshold: COLLECTION_THRESHOLD,
+            recovery_overdue_count_threshold: 1,
+            recovery_overdue_age_threshold: Duration::from_secs(900),
+        }
+    }
+
+    #[tokio::test]
+    async fn dashboard_contract_fixtures() {
+        use OperationsAlertCollectionOverdueRead::{CountWithItems, Skip};
+
+        for (name, url, collection) in [
+            ("admin/dashboard", "/api/v1/admin/dashboard", Skip),
+            (
+                "admin/dashboard-collection-wait",
+                "/api/v1/admin/dashboard?include=collection_wait",
+                CountWithItems(COLLECTION_THRESHOLD),
+            ),
+        ] {
+            let state = AdminFixturePorts {
+                health: Some(Arc::new(MissingHeartbeats)),
+                alert_source: Some(Arc::new(FixtureOperations(collection))),
+                ..Default::default()
+            }
+            .state()
+            .with_operations_alert_policy(alert_policy());
+            let started = Timestamp::now().trunc_subsecs(6);
+            let actual = response_json(StatusCode::OK, admin_get(state, url).await).await;
+            let observed_window = started..=Timestamp::now();
+            let mut expected = wire_fixture(name);
+            for section in ["fulfillment", "reconciliation"] {
+                let observed = &actual["data"][section]["observed_at"];
+                let parsed = Timestamp::parse_from_rfc3339(observed.as_str().expect("观测时刻"))
+                    .expect("RFC 3339 观测时刻");
+                assert!(observed_window.contains(&parsed));
+                assert_eq!(&actual["data"][section]["data"]["observed_at"], observed);
+                // 核对生产时钟和两处字段一致后，只替换期望样本中的时间占位值。
+                let expected_section = &mut expected["data"][section];
+                let fixed = Value::String(crate::mapping::timestamp(time()));
+                assert_eq!(expected_section["observed_at"], fixed);
+                assert_eq!(expected_section["data"]["observed_at"], fixed);
+                expected_section["observed_at"] = observed.clone();
+                expected_section["data"]["observed_at"] = observed.clone();
+            }
+            assert_eq!(actual, expected, "{name}");
+        }
+    }
+}

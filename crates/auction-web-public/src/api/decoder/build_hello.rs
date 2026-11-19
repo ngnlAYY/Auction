@@ -55,4 +55,12 @@ mod tests {
         let event = r#"{"event_id":"1f0c","stream_sequence":2,"kind":"auction.opened","schema_version":1,"payload":{},"created_at":"2026-10-30T12:00:00Z"}"#;
         assert!(decode_build_hello(event).is_none());
     }
+
+    #[test]
+    fn hello_decoder_reads_backend_contract_fixture() {
+        let body = include_str!(
+            "../../../../auction-contracts/tests/fixtures/public/websocket-hello.json"
+        );
+        assert_eq!(decode_build_hello(body).as_deref(), Some("fixture-build"));
+    }
 }

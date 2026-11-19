@@ -1,0 +1,6 @@
+{
+  "code": "bid_too_low",
+  "data": null,
+  "message": "出价未达到当前最低价",
+  "request_id": null
+}

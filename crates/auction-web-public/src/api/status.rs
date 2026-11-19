@@ -30,3 +30,31 @@ pub(crate) async fn fetch_public_readiness() -> Result<bool, String> {
     })?;
     Ok(response_ok && payload.data.ready)
 }
+
+#[cfg(test)]
+mod tests {
+    use auction_contracts::{HealthProbeResponse, HealthReadyData};
+
+    #[test]
+    fn readiness_decodes_backend_contract_fixtures() {
+        for (body, code, ready) in [
+            (
+                include_str!("../../../auction-contracts/tests/fixtures/public/readiness.json"),
+                "ready",
+                true,
+            ),
+            (
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/public/readiness-unavailable.json"
+                ),
+                "not_ready",
+                false,
+            ),
+        ] {
+            let response: HealthProbeResponse<HealthReadyData> =
+                serde_json::from_str(body).expect("就绪探针");
+            assert_eq!(response.code, code);
+            assert_eq!(response.data.ready, ready);
+        }
+    }
+}

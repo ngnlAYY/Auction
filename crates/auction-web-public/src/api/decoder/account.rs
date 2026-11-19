@@ -342,3 +342,61 @@ fn valid_capabilities(value: Option<&Value>) -> bool {
             && (bool_value(value.get("can_lower")) == Some(true)
                 || bool_value(value.get("waiting")) == Some(true)))
 }
+
+#[cfg(test)]
+mod tests {
+    use auction_contracts::{PublicMyBidsResponse, PublicMyProxyResponse};
+
+    use super::super::decode_success_text;
+    use super::{valid_my_bids, valid_my_proxy};
+
+    #[test]
+    fn owned_reads_decode_backend_contract_fixtures() {
+        for (body, mode, version) in [
+            (
+                include_str!("../../../../auction-contracts/tests/fixtures/public/my-bids.json"),
+                "slow",
+                1,
+            ),
+            (
+                include_str!(
+                    "../../../../auction-contracts/tests/fixtures/public/my-bids-final.json"
+                ),
+                "fast",
+                2,
+            ),
+        ] {
+            let page: PublicMyBidsResponse =
+                decode_success_text(Some(body), valid_my_bids).expect("账户出价");
+            assert_eq!(page.bids.len(), 1);
+            let proxy = &page.proxies[0];
+            assert_eq!((proxy.mode.as_str(), proxy.state_version), (mode, version));
+        }
+        for (body, lot_id, mode) in [
+            (
+                include_str!("../../../../auction-contracts/tests/fixtures/public/my-proxy.json"),
+                "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2c",
+                Some("slow"),
+            ),
+            (
+                include_str!(
+                    "../../../../auction-contracts/tests/fixtures/public/my-proxy-final.json"
+                ),
+                "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2c",
+                Some("fast"),
+            ),
+            (
+                include_str!(
+                    "../../../../auction-contracts/tests/fixtures/public/my-proxy-empty.json"
+                ),
+                "00000000-0000-4000-8000-000000000016",
+                None,
+            ),
+        ] {
+            let response: PublicMyProxyResponse =
+                decode_success_text(Some(body), |data| valid_my_proxy(data, lot_id))
+                    .expect("本人授权");
+            assert_eq!(response.authorization.as_ref().map(|proxy| proxy.mode.as_str()), mode);
+        }
+    }
+}

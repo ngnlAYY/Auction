@@ -1,0 +1,38 @@
+{
+  "code": "ok",
+  "data": {
+    "cursor": "start",
+    "has_more": false,
+    "page_size": 50,
+    "rows": [
+      {
+        "auction_id": "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b",
+        "auction_sequence": 5,
+        "buyer_name": "buyer",
+        "closed_at": "2025-11-14T12:50:40.11Z",
+        "equipment_category": "Staff",
+        "equipment_level": 450,
+        "equipment_name": "Legendary Staff",
+        "lot_id": "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2c",
+        "lot_number": 1,
+        "price": 2000,
+        "seller_name": "seller",
+        "world_id": "main"
+      },
+      {
+        "auction_id": "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b",
+        "auction_sequence": 5,
+        "buyer_name": "buyer",
+        "closed_at": "2025-11-14T12:50:40.11Z",
+        "equipment_category": "Staff",
+        "equipment_name": "Legendary Staff",
+        "lot_id": "00000000-0000-4000-8000-000000000003",
+        "lot_number": 2,
+        "price": 2001,
+        "seller_name": "seller",
+        "world_id": "main"
+      }
+    ]
+  },
+  "message": "价格历史已加载"
+}

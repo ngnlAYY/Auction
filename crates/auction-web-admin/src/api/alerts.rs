@@ -485,4 +485,35 @@ mod tests {
         assert!(silence_request(command_id, 1, 60, "").is_ok());
         assert!(silence_request(command_id, 1, 7 * 24 * 3_600, "").is_ok());
     }
+
+    #[test]
+    fn alert_and_pending_counts_fixtures_preserve_opt_in_projections() {
+        use auction_contracts::ApiResponse;
+
+        let baseline = include_str!(
+            "../../../auction-contracts/tests/fixtures/admin/alerts-list-default.json"
+        );
+        let payload: ApiResponse<AdminAlertPage> =
+            serde_json::from_str(baseline).expect("告警缺省投影");
+        assert!(payload.data.alerts.iter().all(|alert| alert.incident_generation.is_none()));
+        assert!(decode_alert_page(baseline, "active", 1, 50).is_err());
+
+        for (body, count) in [
+            (
+                include_str!("../../../auction-contracts/tests/fixtures/admin/pending-counts.json"),
+                None,
+            ),
+            (
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/admin/pending-counts-settlement-returns.json"
+                ),
+                Some(3),
+            ),
+        ] {
+            let payload: ApiResponse<AdminPendingCounts> =
+                serde_json::from_str(body).expect("待办计数");
+            assert_eq!(payload.data.settlement_returns, count);
+            assert_eq!(valid_pending_counts(&payload.data), count.is_some());
+        }
+    }
 }

@@ -282,15 +282,23 @@ fn map_metadata(metadata: AdminMailIntakeMetadata) -> AdminMailIntakeMetadataRes
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use auction_application::admin::{
-        AdminMailIntakeDetail, AdminMailIntakeMetadata, AdminMailIntakeSummary,
+        AdminMailCommandPort, AdminMailDashboardSnapshot, AdminMailIntakeDetail,
+        AdminMailIntakeFilter, AdminMailIntakeMetadata, AdminMailIntakePage,
+        AdminMailIntakeSummary, AdminMailPollState, AdminMailPollStateRequest,
+        AdminMailPollTriggerCommand, AdminMailPollingCommand, AdminMailReader,
     };
+    use auction_application::core::ApplicationFuture;
     use auction_application::mail::MailDisplaySnapshot;
     use auction_contracts::{AdminMailIntakeDetailResponse, AdminMailIntakeSummaryResponse};
     use auction_time::Timestamp;
+    use axum::http::StatusCode;
     use uuid::Uuid;
 
     use super::{map_detail, map_summary};
+    use crate::server::contract_fixtures::{AdminFixturePorts, admin_get, assert_http, time};
 
     #[test]
     fn admin_mail_list_and_detail_serialize_only_safe_subjects() {
@@ -372,6 +380,129 @@ mod tests {
                 serde_json::from_slice(&detail_json).unwrap();
             assert_eq!(detail.subject.as_deref(), Some(expected));
             assert_eq!(detail.message_display.unwrap().body, expected);
+        }
+    }
+
+    struct FixtureIntakes {
+        registration: AdminMailIntakeSummary,
+        rekey: AdminMailIntakeDetail,
+    }
+
+    impl AdminMailReader for FixtureIntakes {
+        fn dashboard_snapshot(&self) -> ApplicationFuture<'_, AdminMailDashboardSnapshot> {
+            panic!("入站样本不查询仪表盘")
+        }
+
+        fn poll_state(
+            &self,
+            _request: AdminMailPollStateRequest,
+        ) -> ApplicationFuture<'_, AdminMailPollState> {
+            panic!("入站样本不查询轮询状态")
+        }
+
+        fn list_intakes(
+            &self,
+            request: AdminMailIntakeFilter,
+        ) -> ApplicationFuture<'_, AdminMailIntakePage> {
+            Box::pin(async move {
+                let items = [&self.rekey.summary, &self.registration]
+                    .into_iter()
+                    .filter(|row| request.kind.as_ref().is_none_or(|kind| kind == &row.kind))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let total = i64::try_from(items.len()).expect("记录数");
+                Ok(AdminMailIntakePage {
+                    items,
+                    total,
+                    page: request.page,
+                    page_size: request.page_size,
+                })
+            })
+        }
+
+        fn intake_detail(
+            &self,
+            intake_id: Uuid,
+        ) -> ApplicationFuture<'_, Option<AdminMailIntakeDetail>> {
+            Box::pin(
+                async move { Ok((intake_id == self.rekey.summary.id).then(|| self.rekey.clone())) },
+            )
+        }
+    }
+
+    impl AdminMailCommandPort for FixtureIntakes {
+        fn set_polling_paused(
+            &self,
+            _command: AdminMailPollingCommand,
+        ) -> ApplicationFuture<'_, AdminMailPollState> {
+            panic!("入站样本不执行轮询命令")
+        }
+
+        fn trigger_poll(
+            &self,
+            _command: AdminMailPollTriggerCommand,
+        ) -> ApplicationFuture<'_, AdminMailPollState> {
+            panic!("入站样本不执行轮询命令")
+        }
+    }
+
+    #[tokio::test]
+    async fn intake_rekey_contract_fixtures() {
+        let registration = AdminMailIntakeSummary {
+            id: Uuid::from_u128(0x4000_8000_0000_0000_0021),
+            mailbox_key: "main".to_owned(),
+            external_mail_id: "9001".to_owned(),
+            world_id: "main".to_owned(),
+            kind: "registration".to_owned(),
+            status: "accepted".to_owned(),
+            decision_code: "registration_accepted".to_owned(),
+            received_at: time(),
+            processed_at: time(),
+            sender: Some("ExamplePlayer".to_owned()),
+            subject: Some("register".to_owned()),
+            has_message_display: true,
+        };
+        let rekey = AdminMailIntakeSummary {
+            id: Uuid::from_u128(0x4000_8000_0000_0000_0022),
+            external_mail_id: "9002".to_owned(),
+            kind: "rekey".to_owned(),
+            decision_code: "rekey_accepted".to_owned(),
+            sender: None,
+            subject: None,
+            has_message_display: false,
+            ..registration.clone()
+        };
+        let detail_url = format!("/api/v1/admin/mail/intake/{}", rekey.id);
+        let rekey = AdminMailIntakeDetail {
+            summary: rekey,
+            metadata: AdminMailIntakeMetadata {
+                auction_id: String::new(),
+                submission_id: String::new(),
+                user_id: String::new(),
+                added_count: 0,
+                existing_count: 0,
+                preview_revision: 0,
+                attachment_count: 0,
+                owner_result_code: String::new(),
+                reason_code: String::new(),
+                warning_codes: Vec::new(),
+                delivery_ids: Vec::new(),
+            },
+            deliveries: Vec::new(),
+            message_display: None,
+            equipment_diagnostic: None,
+        };
+        let state = AdminFixturePorts {
+            mail: Some(Arc::new(FixtureIntakes { registration, rekey })),
+            ..Default::default()
+        }
+        .state();
+        for (name, url) in [
+            ("admin/mail-intake", "/api/v1/admin/mail/intake?page_size=50"),
+            ("admin/mail-intake-rekey", "/api/v1/admin/mail/intake?kind=rekey&page_size=50"),
+            ("admin/mail-intake-detail", &detail_url),
+        ] {
+            assert_http(name, StatusCode::OK, admin_get(state.clone(), url).await).await;
         }
     }
 }

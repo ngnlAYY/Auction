@@ -30,8 +30,8 @@ use uuid::Uuid;
 #[cfg(not(test))]
 use super::send_get;
 use super::{
-    MAX_JSON_SAFE_INTEGER, OptionalField, invalid_request_error, invalid_response_error,
-    response_error, valid_admin_time, valid_count, valid_safe_text, valid_trimmed_text, valid_uuid,
+    MAX_JSON_SAFE_INTEGER, invalid_request_error, invalid_response_error, response_error,
+    valid_admin_time, valid_count, valid_safe_text, valid_trimmed_text, valid_uuid,
 };
 
 /// 宿主页测试记录实际序列化后的 GET，把响应留在等待态，只观测发送时机。
@@ -97,8 +97,8 @@ struct StrictFailure {
     failed_at: String,
     id: String,
     resolved: bool,
-    #[serde(default)]
-    resolved_at: OptionalField<String>,
+    // 未解决记录由服务端序列化为 null，保留旧响应省略该键的兼容。
+    resolved_at: Option<String>,
     safe_detail: String,
     stream_key: String,
 }
@@ -437,8 +437,8 @@ fn decode_failure(value: StrictFailure) -> Result<RealtimeFailure, &'static str>
         || !valid_trimmed_text(&value.code)
         || !valid_safe_text(&value.safe_detail, 2_048)
         || !valid_admin_time(&value.failed_at)
-        || value.resolved_at.0.as_deref().is_some_and(|time| !valid_admin_time(time))
-        || value.resolved != value.resolved_at.0.is_some()
+        || value.resolved_at.as_deref().is_some_and(|time| !valid_admin_time(time))
+        || value.resolved != value.resolved_at.is_some()
     {
         return Err("realtime_failure");
     }
@@ -450,7 +450,7 @@ fn decode_failure(value: StrictFailure) -> Result<RealtimeFailure, &'static str>
         code: value.code,
         safe_detail: value.safe_detail,
         failed_at: value.failed_at,
-        resolved_at: value.resolved_at.0,
+        resolved_at: value.resolved_at,
         resolved: value.resolved,
     })
 }
@@ -483,4 +483,85 @@ fn decode_pagination(
         page_size: value.page_size,
         total: value.total,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use auction_contracts::ApiResponse;
+
+    use super::{
+        StrictEventPage, StrictFailurePage, StrictLagPage, decode_event_page, decode_failure_page,
+        decode_lag_page,
+    };
+
+    #[test]
+    fn realtime_reads_decode_backend_contract_fixtures() {
+        let events: ApiResponse<StrictEventPage> = serde_json::from_str(include_str!(
+            "../../../auction-contracts/tests/fixtures/admin/realtime-events.json"
+        ))
+        .expect("事件样本");
+        assert_eq!(
+            decode_event_page(events.data, 1, 50, "", "lot.bid_accepted").expect("事件列表").events
+                [0]
+            .schema_version,
+            2
+        );
+        let lag: ApiResponse<StrictLagPage> = serde_json::from_str(include_str!(
+            "../../../auction-contracts/tests/fixtures/admin/realtime-lag.json"
+        ))
+        .expect("滞后样本");
+        assert_eq!(
+            decode_lag_page(lag.data, 1, 50, "auction:", "public-realtime").expect("滞后列表").lags
+                [0]
+            .lag,
+            2
+        );
+        for (body, resolved, page_size, has_more) in [
+            (
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/admin/realtime-failures.json"
+                ),
+                false,
+                1,
+                true,
+            ),
+            (
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/admin/realtime-failures-resolved.json"
+                ),
+                true,
+                50,
+                false,
+            ),
+        ] {
+            let payload: ApiResponse<StrictFailurePage> =
+                serde_json::from_str(body).expect("失败样本");
+            let page = decode_failure_page(
+                payload.data,
+                1,
+                page_size,
+                "",
+                "public-realtime",
+                "",
+                Some(resolved),
+            )
+            .expect("失败列表");
+            assert_eq!(page.failures[0].resolved_at.is_some(), resolved);
+            assert_eq!(page.pagination.has_more, has_more);
+        }
+    }
+
+    #[test]
+    fn realtime_failure_rejects_invalid_resolution_fields() {
+        let body =
+            include_str!("../../../auction-contracts/tests/fixtures/admin/realtime-failures.json");
+        let mut payload: serde_json::Value = serde_json::from_str(body).expect("未解决失败样本");
+        payload["data"]["failures"][0]["resolved"] = serde_json::Value::Bool(true);
+        let inconsistent: ApiResponse<StrictFailurePage> =
+            serde_json::from_value(payload.clone()).expect("字段类型合法");
+        assert!(decode_failure_page(inconsistent.data, 1, 1, "", "", "", None).is_err());
+
+        payload["data"]["failures"][0]["resolved_at"] = serde_json::json!(17);
+        assert!(serde_json::from_value::<ApiResponse<StrictFailurePage>>(payload).is_err());
+    }
 }

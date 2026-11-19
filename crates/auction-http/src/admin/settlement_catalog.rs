@@ -126,3 +126,81 @@ pub(crate) async fn list(
     )
         .into_response()
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use auction_application::admin::{
+        SettlementCatalogEntry, SettlementCatalogPage, SettlementCatalogReader,
+        SettlementCatalogRequest,
+    };
+    use auction_application::core::ApplicationFuture;
+    use auction_domain::AuctionId;
+    use auction_time::Duration;
+    use axum::extract::State;
+    use axum::http::StatusCode;
+    use uuid::Uuid;
+
+    use super::list;
+    use crate::server::contract_fixtures::{
+        AUCTION_ID, admin_address, admin_headers, admin_state, assert_http, time,
+    };
+
+    struct FixtureCatalog;
+
+    impl SettlementCatalogReader for FixtureCatalog {
+        fn list_settlement_catalog(
+            &self,
+            request: SettlementCatalogRequest,
+        ) -> ApplicationFuture<'_, SettlementCatalogPage> {
+            Box::pin(async move {
+                let entries = [
+                    SettlementCatalogEntry {
+                        auction_id: AuctionId::from_uuid(AUCTION_ID),
+                        world_id: "main".to_owned(),
+                        sequence: 5,
+                        settled_at: time() + Duration::microseconds(1),
+                    },
+                    SettlementCatalogEntry {
+                        auction_id: AuctionId::from_uuid(Uuid::from_u128(
+                            0x4000_8000_0000_0000_0020,
+                        )),
+                        world_id: "isekai".to_owned(),
+                        sequence: 6,
+                        settled_at: time(),
+                    },
+                ]
+                .into_iter()
+                .filter(|entry| {
+                    request.world_id.as_ref().is_none_or(|world| world == &entry.world_id)
+                })
+                .collect::<Vec<_>>();
+                Ok(SettlementCatalogPage {
+                    total: i64::try_from(entries.len()).expect("场次数"),
+                    entries,
+                    limit: request.limit,
+                    offset: request.offset,
+                })
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn settlement_catalog_contract_fixtures() {
+        let state = admin_state().with_settlement_catalog(Arc::new(FixtureCatalog));
+        for (name, uri) in [
+            ("admin/settlement-catalog", "/api/v1/admin/settlement-catalog"),
+            ("admin/settlement-catalog-world", "/api/v1/admin/settlement-catalog?world_id=isekai"),
+        ] {
+            let response = list(
+                State(state.clone()),
+                admin_address(),
+                admin_headers(),
+                uri.parse().expect("目录 URI"),
+            )
+            .await;
+            assert_http(name, StatusCode::OK, response).await;
+        }
+    }
+}

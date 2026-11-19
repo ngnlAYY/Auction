@@ -63,4 +63,16 @@ mod tests {
         assert!(!is_valid("a/b"));
         assert!(!is_valid(&"a".repeat(65)));
     }
+
+    #[test]
+    fn websocket_hello_contract_fixture() {
+        use serde_json::{Value, json};
+
+        let frame: Value = serde_json::from_str(&build_hello_frame()).expect("首帧 JSON");
+        let mut expected = crate::server::contract_fixtures::wire_fixture("public/websocket-hello");
+        assert_eq!(expected["build"], "fixture-build");
+        // 期望构建号取本制品的发布值，实际帧保留生产编码的完整字段。
+        expected["build"] = json!(build_id());
+        assert_eq!(frame, expected);
+    }
 }

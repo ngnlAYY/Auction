@@ -1,0 +1,6 @@
+{
+  "code": "stale_delivery_state",
+  "data": null,
+  "message": "交付状态或版本已变化",
+  "request_id": null
+}

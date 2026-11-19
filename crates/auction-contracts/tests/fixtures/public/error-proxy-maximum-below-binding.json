@@ -1,0 +1,6 @@
+{
+  "code": "proxy_maximum_below_binding",
+  "data": null,
+  "message": "新的代理上限低于当前绑定价格",
+  "request_id": null
+}

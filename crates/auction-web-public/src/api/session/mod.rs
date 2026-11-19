@@ -415,4 +415,77 @@ mod tests {
         dom.process_events();
         assert!(PASSED.get());
     }
+
+    #[test]
+    fn current_session_decodes_backend_contract_fixtures() {
+        for (body, authenticated, timed) in [
+            (
+                include_str!("../../../../auction-contracts/tests/fixtures/public/session.json"),
+                true,
+                true,
+            ),
+            (
+                include_str!(
+                    "../../../../auction-contracts/tests/fixtures/public/session-permanent.json"
+                ),
+                true,
+                false,
+            ),
+            (
+                include_str!(
+                    "../../../../auction-contracts/tests/fixtures/public/session-anonymous.json"
+                ),
+                false,
+                false,
+            ),
+        ] {
+            let session = super::decode_identity_response::<Option<super::PublicSession>>(
+                200,
+                Some(body),
+                super::valid_current_session_value,
+            )
+            .expect("当前会话");
+            assert_eq!(session.is_some(), authenticated);
+            if let Some(session) = session {
+                assert!(super::valid_current_session(&session));
+                assert_eq!(session.expires_at.is_some(), timed);
+            }
+        }
+    }
+
+    #[test]
+    fn login_errors_decode_backend_contract_fixtures() {
+        for (status, code, body) in [
+            (
+                400,
+                "invalid_key",
+                include_str!(
+                    "../../../../auction-contracts/tests/fixtures/public/error-invalid-key.json"
+                ),
+            ),
+            (
+                401,
+                "invalid_credentials",
+                include_str!(
+                    "../../../../auction-contracts/tests/fixtures/public/error-invalid-credentials.json"
+                ),
+            ),
+            (
+                403,
+                "account_blacklisted",
+                include_str!(
+                    "../../../../auction-contracts/tests/fixtures/public/error-account-blacklisted.json"
+                ),
+            ),
+        ] {
+            let error = super::decode_identity_response::<auction_contracts::PublicLoginResponse>(
+                status,
+                Some(body),
+                super::valid_login_session_value,
+            )
+            .expect_err("登录已被拒绝");
+            assert_eq!(error.code.as_deref(), Some(code));
+            assert_eq!(error.public_reason.as_deref(), (status == 403).then_some("示例封禁原因"));
+        }
+    }
 }

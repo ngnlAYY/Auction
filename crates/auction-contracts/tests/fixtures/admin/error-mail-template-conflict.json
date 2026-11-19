@@ -1,0 +1,6 @@
+{
+  "code": "mail_template_conflict",
+  "data": null,
+  "message": "版本已变化或命令 ID 参数不一致；刷新后用新命令重试",
+  "request_id": null
+}

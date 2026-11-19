@@ -272,3 +272,65 @@ fn map_error(error: ApplicationError) -> Response {
     let response = body();
     diagnostics::mapped_response("admin_audit", "respond_read_failure", diagnostic_kind, response)
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use auction_application::admin::{
+        AdminAuditCursor, AdminAuditListRequest, AdminAuditPage, AdminAuditPort, AdminAuditRecord,
+    };
+    use auction_application::core::ApplicationFuture;
+    use axum::http::StatusCode;
+    use serde_json::json;
+    use uuid::Uuid;
+
+    use crate::server::contract_fixtures::{
+        AUCTION_ID, AdminFixturePorts, admin_get, assert_http, time,
+    };
+
+    struct FixtureAudit;
+
+    impl AdminAuditPort for FixtureAudit {
+        fn list(&self, request: AdminAuditListRequest) -> ApplicationFuture<'_, AdminAuditPage> {
+            let cursor_mode = request.page.is_none();
+            let record = AdminAuditRecord {
+                id: Uuid::from_u128(0x4000_8000_0000_0000_002a),
+                occurred_at: time(),
+                actor_type: "admin".to_owned(),
+                actor_id: "fixture-admin".to_owned(),
+                action: "auction.opened".to_owned(),
+                entity_type: "auction".to_owned(),
+                entity_id: AUCTION_ID.to_string(),
+                result: "success".to_owned(),
+                source: "admin".to_owned(),
+                request_id: (!cursor_mode).then(|| "fixture-request".to_owned()),
+                metadata: json!({"state_version": 4}),
+            };
+            let next = cursor_mode
+                .then_some(AdminAuditCursor { occurred_at: record.occurred_at, id: record.id });
+            Box::pin(async move {
+                Ok(AdminAuditPage {
+                    entries: vec![record],
+                    page: request.page,
+                    page_size: request.page_size,
+                    total: (!cursor_mode).then_some(1),
+                    next_cursor: next,
+                    has_more: cursor_mode,
+                })
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn audit_contract_fixtures() {
+        let state =
+            AdminFixturePorts { audit: Some(Arc::new(FixtureAudit)), ..Default::default() }.state();
+        for (name, url) in [
+            ("admin/audit", "/api/v1/admin/audit?page=1"),
+            ("admin/audit-cursor", "/api/v1/admin/audit?page_size=1"),
+        ] {
+            assert_http(name, StatusCode::OK, admin_get(state.clone(), url).await).await;
+        }
+    }
+}

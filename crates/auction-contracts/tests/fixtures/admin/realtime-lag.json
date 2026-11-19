@@ -1,0 +1,20 @@
+{
+  "code": "ok",
+  "data": {
+    "lags": [
+      {
+        "consumer_key": "public-realtime",
+        "lag": 2,
+        "latest_sequence": 14,
+        "offset": 12,
+        "stream_key": "auction:0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b"
+      }
+    ],
+    "pagination": {
+      "page": 1,
+      "page_size": 50,
+      "total": 1
+    }
+  },
+  "message": "实时消费延迟已加载"
+}

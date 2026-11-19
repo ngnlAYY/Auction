@@ -1,0 +1,6 @@
+{
+  "code": "rename_not_revertable",
+  "data": null,
+  "message": "改名记录不能回滚",
+  "request_id": null
+}

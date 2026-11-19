@@ -1,0 +1,25 @@
+{
+  "code": "ok",
+  "data": {
+    "pagination": {
+      "page": 1,
+      "page_size": 50,
+      "total": 1
+    },
+    "users": [
+      {
+        "blacklist_count": 0,
+        "blacklist_history": [],
+        "created_at": "2025-11-15T09:46:40.110000Z",
+        "forum_account_id": null,
+        "id": "00000000-0000-4000-8000-000000000024",
+        "key_status": "active",
+        "state_version": 1,
+        "status": "active",
+        "updated_at": "2025-11-15T09:46:40.110000Z",
+        "username": "ExamplePlayer"
+      }
+    ]
+  },
+  "message": "用户列表已加载"
+}

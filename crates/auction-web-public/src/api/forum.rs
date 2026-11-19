@@ -84,3 +84,45 @@ pub(super) fn valid_forum_url(value: &str) -> bool {
             && url.password().is_none()
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use auction_contracts::{ApiResponse, PublicForumResponse, PublicForumSyncStatusResponse};
+
+    use super::valid_forum_thread;
+
+    #[test]
+    fn forum_reads_decode_backend_contract_fixtures() {
+        for (body, status) in [
+            (
+                include_str!("../../../auction-contracts/tests/fixtures/public/forum.json"),
+                "published",
+            ),
+            (
+                include_str!("../../../auction-contracts/tests/fixtures/public/forum-pending.json"),
+                "pending",
+            ),
+        ] {
+            let thread: ApiResponse<PublicForumResponse> =
+                serde_json::from_str(body).expect("论坛镜像");
+            assert!(valid_forum_thread(&thread.data, "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b"));
+            assert_eq!(thread.data.status, status);
+        }
+        for (body, enabled) in [
+            (
+                include_str!("../../../auction-contracts/tests/fixtures/public/forum-sync.json"),
+                true,
+            ),
+            (
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/public/forum-sync-disabled.json"
+                ),
+                false,
+            ),
+        ] {
+            let sync: ApiResponse<PublicForumSyncStatusResponse> =
+                serde_json::from_str(body).expect("论坛开关");
+            assert_eq!(sync.data.enabled, enabled);
+        }
+    }
+}

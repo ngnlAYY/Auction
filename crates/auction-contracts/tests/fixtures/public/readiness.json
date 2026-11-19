@@ -1,0 +1,7 @@
+{
+  "code": "ready",
+  "data": {
+    "ready": true
+  },
+  "message": "进程已就绪"
+}

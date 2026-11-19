@@ -70,7 +70,8 @@ struct AdminApiErrorResponse {
     code: String,
     message: String,
     #[serde(deserialize_with = "auction_contracts::deserialize_required_option")]
-    data: Option<serde_json::Value>,
+    // 只有对象或 null 是错误契约；异常 data 不能作为清除未知命令的证据。
+    data: Option<serde_json::Map<String, serde_json::Value>>,
     #[serde(deserialize_with = "auction_contracts::deserialize_required_option")]
     request_id: Option<String>,
 }
@@ -372,8 +373,6 @@ pub(crate) fn invalid_response_error(_error: impl ToString) -> String {
 
 #[cfg(test)]
 mod tests {
-    use auction_contracts::{ApiErrorResponse, ApiErrorResponseWithData};
-
     use super::{AdminApiFailure, AdminWriteEndpoint};
 
     #[test]
@@ -510,21 +509,25 @@ mod tests {
         assert!(!AdminApiFailure::definite_rejection(&unavailable.code));
     }
 
-    fn version_conflict_receipt(status: u16, field: &str) -> AdminApiFailure {
-        let envelope = ApiErrorResponseWithData {
-            code: "state_conflict".to_owned(),
-            message: "版本已变化".to_owned(),
-            data: serde_json::json!({ field: 6 }),
-            request_id: None,
+    fn version_conflict_receipt(status: u16, endpoint: AdminWriteEndpoint) -> AdminApiFailure {
+        let body = match endpoint {
+            AdminWriteEndpoint::UserMutation => include_str!(
+                "../../../auction-contracts/tests/fixtures/admin/error-user-state-conflict.json"
+            ),
+            AdminWriteEndpoint::RulesPublish | AdminWriteEndpoint::AboutPublish => include_str!(
+                "../../../auction-contracts/tests/fixtures/admin/error-document-state-conflict.json"
+            ),
+            _ => panic!("没有该端点的版本冲突样本"),
         };
-        AdminApiFailure::from_http_body(status, &serde_json::to_string(&envelope).unwrap())
+        AdminApiFailure::from_http_body(status, body)
     }
 
     #[test]
     fn a_first_user_mutation_version_conflict_is_definite() {
-        let receipt = version_conflict_receipt(409, "current_state_version");
+        let receipt = version_conflict_receipt(409, AdminWriteEndpoint::UserMutation);
         let rejection = receipt.clone().at_write_endpoint(AdminWriteEndpoint::UserMutation);
         assert!(!rejection.outcome_unknown());
+        assert!(rejection.resolves_prior_attempt());
         assert!(AdminApiFailure::definite_rejection(&rejection.code));
         assert_eq!(AdminApiFailure::display_code(&rejection.code), "state_conflict");
         assert!(receipt.outcome_unknown());
@@ -533,13 +536,13 @@ mod tests {
     #[test]
     fn a_first_rules_or_about_publication_version_conflict_is_definite() {
         for endpoint in [AdminWriteEndpoint::RulesPublish, AdminWriteEndpoint::AboutPublish] {
-            let rejection =
-                version_conflict_receipt(409, "current_revision").at_write_endpoint(endpoint);
+            let rejection = version_conflict_receipt(409, endpoint).at_write_endpoint(endpoint);
             assert!(!rejection.outcome_unknown());
+            assert!(rejection.resolves_prior_attempt());
             assert!(AdminApiFailure::definite_rejection(&rejection.code));
             for status in [400, 500] {
-                let mismatch = version_conflict_receipt(status, "current_revision")
-                    .at_write_endpoint(endpoint);
+                let mismatch =
+                    version_conflict_receipt(status, endpoint).at_write_endpoint(endpoint);
                 assert!(mismatch.outcome_unknown());
                 assert!(!AdminApiFailure::definite_rejection(&mismatch.code));
             }
@@ -577,8 +580,26 @@ mod tests {
             assert!(AdminApiFailure::definite_rejection(code), "{code}");
             assert!(!AdminApiFailure::rejection_after_replay_check(code), "{code}");
         }
-        let conflict = AdminApiFailure::from_http(409, "rename_name_taken".to_owned())
-            .at_write_endpoint(AdminWriteEndpoint::RenameRevert);
+        for body in [
+            include_str!(
+                "../../../auction-contracts/tests/fixtures/admin/error-stale-delivery-state.json"
+            ),
+            include_str!(
+                "../../../auction-contracts/tests/fixtures/admin/error-stale-delivery-disposition.json"
+            ),
+        ] {
+            let failure = AdminApiFailure::from_http_body(409, body);
+            assert_eq!(failure.code, "stale_delivery_state");
+            assert!(!failure.outcome_unknown());
+            assert!(!failure.resolves_prior_attempt());
+        }
+        let conflict = AdminApiFailure::from_http_body(
+            409,
+            include_str!(
+                "../../../auction-contracts/tests/fixtures/admin/error-rename-name-taken.json"
+            ),
+        )
+        .at_write_endpoint(AdminWriteEndpoint::RenameRevert);
         assert!(!conflict.outcome_unknown());
         assert!(!AdminApiFailure::rejection_after_replay_check(&conflict.code));
     }
@@ -618,19 +639,109 @@ mod tests {
 
     #[test]
     fn only_verified_replay_checked_rejections_can_clear_unknown_history() {
-        let envelope = ApiErrorResponse {
-            code: "alert_stale".to_owned(),
-            message: "告警状态已变化，请刷新后重试".to_owned(),
-            data: None,
-            request_id: None,
-        };
-        let rejection =
-            AdminApiFailure::from_http_body(409, &serde_json::to_string(&envelope).unwrap());
-        assert!(!rejection.outcome_unknown());
-        assert!(rejection.resolves_prior_attempt());
-        assert!(AdminApiFailure::rejection_after_replay_check(&rejection.code));
-        assert!(!AdminApiFailure::client(&rejection.code).resolves_prior_attempt());
+        for (code, body) in [
+            (
+                "alert_stale",
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/admin/error-alert-stale.json"
+                ),
+            ),
+            (
+                "stale_auction_state",
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/admin/error-stale-auction-state.json"
+                ),
+            ),
+            (
+                "stale_lot_state",
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/admin/error-stale-lot-state.json"
+                ),
+            ),
+            (
+                "stale_user_state",
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/admin/error-stale-user-state.json"
+                ),
+            ),
+            (
+                "rename_not_revertable",
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/admin/error-rename-not-revertable.json"
+                ),
+            ),
+            (
+                "mail_template_conflict",
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/admin/error-mail-template-conflict.json"
+                ),
+            ),
+            (
+                "runtime_switch_conflict",
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/admin/error-runtime-switch-conflict.json"
+                ),
+            ),
+            (
+                "already_disposed",
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/admin/error-already-disposed.json"
+                ),
+            ),
+            (
+                "stale_settlement_return_state",
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/admin/error-stale-settlement-return-state.json"
+                ),
+            ),
+            (
+                "settlement_return_untrusted",
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/admin/error-settlement-return-untrusted.json"
+                ),
+            ),
+            (
+                "settlement_return_unbound",
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/admin/error-settlement-return-unbound.json"
+                ),
+            ),
+            (
+                "settlement_return_assets_mismatch",
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/admin/error-settlement-return-assets-mismatch.json"
+                ),
+            ),
+            (
+                "settlement_return_proof_required",
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/admin/error-settlement-return-proof-required.json"
+                ),
+            ),
+            (
+                "conflict",
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/admin/error-realtime-conflict.json"
+                ),
+            ),
+        ] {
+            let rejection = AdminApiFailure::from_http_body(409, body);
+            assert_eq!(rejection.code, code);
+            assert!(!rejection.outcome_unknown(), "{code}");
+            assert!(rejection.resolves_prior_attempt(), "{code}");
+            assert!(AdminApiFailure::rejection_after_replay_check(&rejection.code));
+            assert!(!AdminApiFailure::client(&rejection.code).resolves_prior_attempt());
+            for status in [400, 503] {
+                let mismatch = AdminApiFailure::from_http_body(status, body);
+                assert!(mismatch.outcome_unknown(), "{code} {status}");
+                assert!(!mismatch.resolves_prior_attempt());
+            }
+        }
 
+        let rejection = AdminApiFailure::from_http_body(
+            409,
+            include_str!("../../../auction-contracts/tests/fixtures/admin/error-alert-stale.json"),
+        );
         let not_sent = AdminApiFailure::not_sent_code(&rejection.code);
         assert!(AdminApiFailure::definite_rejection(&not_sent));
         assert_eq!(AdminApiFailure::display_code(&not_sent), "alert_stale");
@@ -655,6 +766,22 @@ mod tests {
             assert_eq!(AdminApiFailure::display_code(&not_sent), code);
             assert!(AdminApiFailure::client(code).outcome_unknown());
             assert!(AdminApiFailure::from_http(400, not_sent).outcome_unknown());
+        }
+    }
+
+    #[test]
+    fn a_rejection_with_non_object_data_cannot_clear_unknown_history() {
+        let body = include_str!(
+            "../../../auction-contracts/tests/fixtures/admin/error-mail-template-conflict.json"
+        );
+        let valid = AdminApiFailure::from_http_body(409, body);
+        assert!(valid.resolves_prior_attempt());
+        let mut envelope: serde_json::Value = serde_json::from_str(body).expect("错误信封");
+        for data in [serde_json::json!(true), serde_json::json!(["fixture"])] {
+            envelope["data"] = data;
+            let failure = AdminApiFailure::from_http_body(409, &envelope.to_string());
+            assert!(failure.outcome_unknown());
+            assert!(!failure.resolves_prior_attempt());
         }
     }
 }

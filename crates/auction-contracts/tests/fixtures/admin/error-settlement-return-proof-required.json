@@ -1,0 +1,6 @@
+{
+  "code": "settlement_return_proof_required",
+  "data": null,
+  "message": "缺少已持久化的领回证明",
+  "request_id": null
+}

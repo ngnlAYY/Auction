@@ -540,4 +540,211 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn competition_rejections_decode_backend_contract_fixtures() {
+        use super::read_command_error;
+
+        for (status, code, body) in [
+            (
+                400,
+                "invalid_maximum_amount",
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/public/error-invalid-maximum-amount.json"
+                ),
+            ),
+            (
+                400,
+                "invalid_proxy_mode",
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/public/error-invalid-proxy-mode.json"
+                ),
+            ),
+            (
+                400,
+                "invalid_amount",
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/public/error-invalid-amount.json"
+                ),
+            ),
+            (
+                409,
+                "bid_too_low",
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/public/error-bid-too-low.json"
+                ),
+            ),
+            (
+                409,
+                "already_leading",
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/public/error-already-leading.json"
+                ),
+            ),
+            (
+                409,
+                "active_proxy_exists",
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/public/error-active-proxy-exists.json"
+                ),
+            ),
+            (
+                409,
+                "auction_not_open",
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/public/error-auction-not-open.json"
+                ),
+            ),
+            (
+                403,
+                "bidder_ineligible",
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/public/error-bidder-ineligible.json"
+                ),
+            ),
+            (
+                409,
+                "proxy_disabled",
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/public/error-proxy-disabled.json"
+                ),
+            ),
+            (
+                409,
+                "proxy_slow_final",
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/public/error-proxy-slow-final.json"
+                ),
+            ),
+            (
+                409,
+                "proxy_outbid_limit",
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/public/error-proxy-outbid-limit.json"
+                ),
+            ),
+            (
+                409,
+                "proxy_reentry_maximum_not_higher",
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/public/error-proxy-reentry-maximum-not-higher.json"
+                ),
+            ),
+            (
+                409,
+                "proxy_maximum_not_lower",
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/public/error-proxy-maximum-not-lower.json"
+                ),
+            ),
+            (
+                409,
+                "proxy_maximum_below_binding",
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/public/error-proxy-maximum-below-binding.json"
+                ),
+            ),
+            (
+                409,
+                "proxy_authorization_not_active",
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/public/error-proxy-authorization-not-active.json"
+                ),
+            ),
+            (
+                409,
+                "invalid_policy",
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/public/error-invalid-policy.json"
+                ),
+            ),
+            (
+                503,
+                "temporarily_unavailable",
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/public/error-temporarily-unavailable.json"
+                ),
+            ),
+            (
+                409,
+                "command_conflict",
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/public/error-command-conflict.json"
+                ),
+            ),
+            (
+                409,
+                "session_changed",
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/public/error-session-changed.json"
+                ),
+            ),
+            (
+                401,
+                "unauthenticated",
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/public/error-unauthenticated.json"
+                ),
+            ),
+        ] {
+            let error = read_command_error(status, Some(body));
+            assert_eq!((error.code.as_str(), error.status), (code, status));
+            assert_eq!(error.outcome_uncertain(), status == 503);
+        }
+    }
+
+    #[test]
+    fn watch_rejections_decode_backend_contract_fixtures() {
+        use crate::api::session::decode_identity_response;
+
+        for (status, code, body) in [
+            (
+                422,
+                "invalid_watch",
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/public/error-invalid-watch.json"
+                ),
+            ),
+            (
+                409,
+                "watch_conflict",
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/public/error-watch-conflict.json"
+                ),
+            ),
+            (
+                404,
+                "not_found",
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/public/error-not-found.json"
+                ),
+            ),
+            (
+                422,
+                "invalid_watch_preference",
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/public/error-invalid-watch-preference.json"
+                ),
+            ),
+            (
+                409,
+                "watch_preference_conflict",
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/public/error-watch-preference-conflict.json"
+                ),
+            ),
+            (
+                422,
+                "pm_channel_unavailable",
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/public/error-pm-channel-unavailable.json"
+                ),
+            ),
+        ] {
+            let error =
+                decode_identity_response::<()>(status, Some(body), serde_json::Value::is_null)
+                    .expect_err("标记命令已被拒绝");
+            assert_eq!(error.into_read_code(), code);
+        }
+    }
 }

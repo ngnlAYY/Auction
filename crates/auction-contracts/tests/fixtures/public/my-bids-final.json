@@ -1,0 +1,103 @@
+{
+  "code": "ok",
+  "data": {
+    "bid_page": 1,
+    "bid_total": 1,
+    "bids": [
+      {
+        "accepted_state_version": 12,
+        "amount": 2000,
+        "auction_id": "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b",
+        "created_at": "2025-11-15T09:46:40.11Z",
+        "equipment": {
+          "category": "Staff",
+          "name": "Legendary Staff"
+        },
+        "fact_index": 1,
+        "id": "00000000-0000-4000-8000-000000000011",
+        "leading": false,
+        "lot_id": "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2c",
+        "lot_number": 1,
+        "mechanism": "ordinary"
+      }
+    ],
+    "page": 1,
+    "page_size": 20,
+    "proxies": [
+      {
+        "auction_id": "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b",
+        "authorization_id": "00000000-0000-4000-8000-000000000012",
+        "authorization_sequence": 1,
+        "bid": {
+          "accepted_state_version": 13,
+          "amount": 3000,
+          "auction_id": "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b",
+          "created_at": "2025-11-15T09:46:40.11Z",
+          "equipment": {
+            "category": "Staff",
+            "name": "Legendary Staff"
+          },
+          "fact_index": 1,
+          "id": "00000000-0000-4000-8000-000000000013",
+          "leading": true,
+          "lot_id": "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2c",
+          "lot_number": 1,
+          "mechanism": "proxy"
+        },
+        "capabilities": {
+          "at_maximum": false,
+          "can_lower": true,
+          "waiting": false
+        },
+        "created_at": "2025-11-15T09:46:40.11Z",
+        "equipment": {
+          "category": "Staff",
+          "name": "Legendary Staff"
+        },
+        "lot_id": "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2c",
+        "lot_number": 1,
+        "maximum_amount": 5000,
+        "mode": "fast",
+        "quota": {
+          "limit": 3,
+          "used": 1
+        },
+        "state_version": 2,
+        "status": "active",
+        "transitions": [
+          {
+            "created_at": "2025-11-15T09:46:40.11Z",
+            "kind": "created",
+            "new_maximum_amount": 5000,
+            "new_mode": "slow",
+            "new_status": "active",
+            "old_maximum_amount": null,
+            "old_mode": null,
+            "old_status": null,
+            "reason": null,
+            "resulting_state_version": 1,
+            "transition_number": 1
+          },
+          {
+            "created_at": "2025-11-15T09:46:40.11Z",
+            "kind": "final_fast",
+            "new_maximum_amount": 5000,
+            "new_mode": "fast",
+            "new_status": "active",
+            "old_maximum_amount": 5000,
+            "old_mode": "slow",
+            "old_status": "active",
+            "reason": null,
+            "resulting_state_version": 2,
+            "transition_number": 2
+          }
+        ],
+        "updated_at": "2025-11-15T09:46:40.11Z",
+        "usage_number": 1
+      }
+    ],
+    "proxy_page": 1,
+    "proxy_total": 1
+  },
+  "message": "账户竞价已加载"
+}

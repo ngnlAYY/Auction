@@ -454,3 +454,28 @@ fn append_query(url: &mut String, name: &str, value: &str) {
     url.push('=');
     url.push_str(&url::form_urlencoded::byte_serialize(value.as_bytes()).collect::<String>());
 }
+
+#[cfg(test)]
+mod tests {
+    use auction_contracts::ApiResponse;
+
+    use super::{StrictUserList, decode_user_list};
+
+    #[test]
+    fn users_decode_backend_contract_fixtures() {
+        for (body, count) in [
+            (include_str!("../../../auction-contracts/tests/fixtures/admin/users.json"), 0),
+            (
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/admin/users-blacklisted.json"
+                ),
+                1,
+            ),
+        ] {
+            let payload: ApiResponse<StrictUserList> =
+                serde_json::from_str(body).expect("用户样本");
+            let page = decode_user_list(payload.data).expect("用户列表");
+            assert_eq!(page.users[0].blacklist_history.len(), count);
+        }
+    }
+}

@@ -1,0 +1,14 @@
+{
+  "code": "ok",
+  "data": {
+    "worlds": {
+      "isekai": {
+        "enabled": false
+      },
+      "main": {
+        "enabled": true
+      }
+    }
+  },
+  "message": "世界状态已加载"
+}

@@ -29,7 +29,7 @@ export function decodeSuccess<TSchema extends v.GenericSchema>(
   return decoded;
 }
 
-/** 解析旧共享 client 接受的错误 envelope；顶层扩展允许存在，但三项基础字段必须显式出现。 */
+/** 解析错误 envelope；顶层扩展允许存在，但三项基础字段必须显式出现。 */
 export function decodeError(
   response: TransportResponse,
 ): Result<readonly [string, unknown], string> {
@@ -83,10 +83,12 @@ function decodeErrorValue(payload: unknown): Result<readonly [string, unknown], 
   if (code === null || string(envelope.message) === null) {
     return err("invalid_response");
   }
-  if (!Object.hasOwn(envelope, "data")) {
+  const data = envelope.data;
+  // 损坏的错误数据无法证明拒绝，结果未知时须保留原命令。
+  if (!Object.hasOwn(envelope, "data") || (data !== null && object(data) === null)) {
     return err("invalid_response");
   }
-  const decoded: readonly [string, unknown] = [code, envelope.data];
+  const decoded: readonly [string, unknown] = [code, data];
   return ok(decoded);
 }
 

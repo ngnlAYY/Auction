@@ -1,0 +1,51 @@
+{
+  "code": "ok",
+  "data": {
+    "active_total": 2,
+    "alerts": [
+      {
+        "acknowledged_at": null,
+        "acknowledged_by": null,
+        "active": true,
+        "age_seconds": 0,
+        "count": 1,
+        "first_seen_at": "2026-11-18T12:00:00.000000Z",
+        "id": "abababababababababababababababababababababababababababababababab",
+        "kind": "service_missing",
+        "last_notified_at": null,
+        "last_seen_at": "2026-11-18T12:00:00.000000Z",
+        "next_notify_at": "2026-11-18T12:02:00.000000Z",
+        "resolved_at": null,
+        "runbook_anchor": "alert-runbook-process",
+        "scope": "worker",
+        "severity": "urgent",
+        "silenced_until": null,
+        "source": "process"
+      },
+      {
+        "acknowledged_at": "2026-11-18T12:00:00.000000Z",
+        "acknowledged_by": "operator",
+        "active": true,
+        "age_seconds": 60,
+        "count": 1,
+        "first_seen_at": "2026-11-18T11:58:00.000000Z",
+        "id": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+        "kind": "service_missing",
+        "last_notified_at": "2026-11-18T11:58:00.000000Z",
+        "last_seen_at": "2026-11-18T11:59:00.000000Z",
+        "next_notify_at": "2026-11-18T13:00:00.000000Z",
+        "resolved_at": null,
+        "runbook_anchor": "alert-runbook-process",
+        "scope": "admin",
+        "severity": "urgent",
+        "silenced_until": "2026-11-18T13:00:00.000000Z",
+        "source": "process"
+      }
+    ],
+    "page": 1,
+    "page_size": 50,
+    "resolved_total": 0,
+    "total": 2
+  },
+  "message": "ok"
+}

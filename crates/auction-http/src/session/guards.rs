@@ -285,3 +285,24 @@ pub(crate) fn check_public_expected_user(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use axum::http::{HeaderMap, HeaderValue, StatusCode};
+    use uuid::Uuid;
+
+    use super::check_public_expected_user;
+    use crate::server::contract_fixtures::assert_http;
+
+    #[tokio::test]
+    async fn public_session_changed_contract_fixture() {
+        let headers = HeaderMap::from_iter([(
+            axum::http::HeaderName::from_static(auction_contracts::PUBLIC_EXPECTED_USER_ID_HEADER),
+            HeaderValue::from_static("00000000-0000-4000-8000-000000000001"),
+        )]);
+        let response =
+            check_public_expected_user(&headers, Uuid::from_u128(0x4000_8000_0000_0000_0002))
+                .expect_err("当前身份与请求绑定不一致");
+        assert_http("public/error-session-changed", StatusCode::CONFLICT, *response).await;
+    }
+}

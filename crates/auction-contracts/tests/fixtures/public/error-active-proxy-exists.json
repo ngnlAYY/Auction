@@ -1,0 +1,6 @@
+{
+  "code": "active_proxy_exists",
+  "data": null,
+  "message": "当前账户已有生效中的代理授权",
+  "request_id": null
+}

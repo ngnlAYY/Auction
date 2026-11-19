@@ -1,0 +1,17 @@
+{
+  "code": "ok",
+  "data": {
+    "auction_id": "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b",
+    "body": "Example first post",
+    "content_last_success_at": "2025-11-15T09:46:40.11Z",
+    "content_revision": 2,
+    "content_synced_at": "2025-11-15T09:46:40.11Z",
+    "processed_through_post_number": 8,
+    "source_revision": 4,
+    "status": "published",
+    "thread_url": "https://forums.e-hentai.org/index.php?showtopic=123",
+    "title": "Example auction",
+    "updated_at": "2025-11-15T09:46:40.11Z"
+  },
+  "message": "论坛拍卖帖子同步状态已加载"
+}

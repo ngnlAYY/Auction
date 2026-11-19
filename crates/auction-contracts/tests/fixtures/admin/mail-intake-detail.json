@@ -1,0 +1,33 @@
+{
+  "code": "ok",
+  "data": {
+    "decision_code": "rekey_accepted",
+    "deliveries": [],
+    "equipment_diagnostic": null,
+    "external_mail_id": "9002",
+    "id": "00000000-0000-4000-8000-000000000022",
+    "kind": "rekey",
+    "mailbox_key": "main",
+    "message_display": null,
+    "metadata": {
+      "added_count": 0,
+      "attachment_count": 0,
+      "auction_id": "",
+      "delivery_ids": [],
+      "existing_count": 0,
+      "owner_result_code": "",
+      "preview_revision": 0,
+      "reason_code": "",
+      "submission_id": "",
+      "user_id": "",
+      "warning_codes": []
+    },
+    "processed_at": "2025-11-15T09:46:40.110000Z",
+    "received_at": "2025-11-15T09:46:40.110000Z",
+    "sender": null,
+    "status": "accepted",
+    "subject": null,
+    "world_id": "main"
+  },
+  "message": "邮件入站详情已加载"
+}

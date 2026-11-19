@@ -182,6 +182,7 @@ mod tests {
     use uuid::Uuid;
 
     use super::list;
+    use crate::server::contract_fixtures::assert_wire;
     use crate::state::PublicApiState;
 
     const AUCTION_ID: Uuid = Uuid::from_u128(0x0190_f2b4_1c2d_4e5f_8a6b_7c8d_9e0f_1a2b);
@@ -227,7 +228,7 @@ mod tests {
     ) -> PublicFulfillmentLot {
         let sold = lot_status == "sold";
         PublicFulfillmentLot {
-            lot_id: Uuid::from_u128(id),
+            lot_id: Uuid::from_u128(0x4000_8000_0000_0000_0000 + id),
             lot_number: i32::try_from(id).expect("序号"),
             equipment_name: format!("Equipment {id}"),
             equipment_category: "Cloth".to_owned(),
@@ -486,5 +487,17 @@ mod tests {
         let reader = FakeReader::new(Ok(Some(entries())));
         let (status, _, _) = call(Some(reader), "lot=0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2c").await;
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "返回页含筛选之外的 lot");
+    }
+
+    #[tokio::test]
+    async fn fulfillment_contract_fixtures() {
+        for (name, entries) in [
+            ("public/fulfillment", vec![entries().remove(1)]),
+            ("public/fulfillment-recovery", entries()),
+        ] {
+            let (status, _, body) = call(Some(FakeReader::new(Ok(Some(entries)))), "").await;
+            assert_eq!(status, StatusCode::OK, "{name}");
+            assert_wire(name, body);
+        }
     }
 }

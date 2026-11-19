@@ -1,0 +1,74 @@
+{
+  "code": "ok",
+  "data": {
+    "bids": [
+      {
+        "amount": 3000,
+        "auction_id": "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b",
+        "bid_id": "00000000-0000-4000-8000-000000000011",
+        "created_at": "2026-11-02T01:14:00.000000Z",
+        "lot_id": "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2c",
+        "lot_number": 1,
+        "lot_status": "sold",
+        "mechanism": "proxy",
+        "world_id": "main"
+      }
+    ],
+    "deals": [],
+    "deliveries": [
+      {
+        "attempt_count": 1,
+        "category": "account",
+        "claimed_at": "2026-11-02T01:14:00.000000Z",
+        "cod": 0,
+        "completed_at": "2026-11-02T01:14:00.000000Z",
+        "created_at": "2026-11-02T01:14:00.000000Z",
+        "external_reference": null,
+        "failure_code": "invalid_payload",
+        "fencing_version": 4,
+        "id": "00000000-0000-4000-8000-00000000002b",
+        "lease_expires_at": null,
+        "origin_id": "main:4243:send",
+        "origin_kind": "mail_intake",
+        "recipient": "Sample",
+        "sending_at": null,
+        "status": "failed",
+        "suppression_reason": "invalid_payload",
+        "template": "register_key",
+        "updated_at": "2026-11-02T01:14:00.000000Z",
+        "world": "main"
+      },
+      {
+        "attempt_count": 1,
+        "category": "settlement",
+        "claimed_at": "2026-11-02T01:14:00.000000Z",
+        "cod": 0,
+        "completed_at": "2026-11-02T01:14:00.000000Z",
+        "created_at": "2026-11-02T01:14:00.000000Z",
+        "external_reference": null,
+        "failure_code": "recovery_superseded",
+        "fencing_version": 4,
+        "id": "00000000-0000-4000-8000-00000000002d",
+        "lease_expires_at": null,
+        "origin_id": "00000000-0000-4000-8000-00000000002e",
+        "origin_kind": "settlement",
+        "recipient": "Sample",
+        "sending_at": null,
+        "status": "failed",
+        "template": "settlement_seller_payout",
+        "updated_at": "2026-11-02T01:14:00.000000Z",
+        "world": "main"
+      }
+    ],
+    "notifications": [],
+    "obligations": [],
+    "references": [],
+    "truncated": false,
+    "user": {
+      "id": "00000000-0000-4000-8000-000000000024",
+      "status": "active",
+      "username": "Sample"
+    }
+  },
+  "message": "玩家支持汇总已加载"
+}

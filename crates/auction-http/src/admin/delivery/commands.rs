@@ -347,3 +347,22 @@ fn reconcile_action(value: &str) -> Option<DeliveryAdminAction> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use auction_application::delivery::DeliveryDispositionCommandError;
+    use axum::http::StatusCode;
+
+    use super::disposition_error;
+    use crate::server::contract_fixtures::assert_http;
+
+    #[tokio::test]
+    async fn delivery_disposition_error_contract_fixtures() {
+        for (name, error) in [
+            ("admin/error-already-disposed", DeliveryDispositionCommandError::AlreadyDisposed),
+            ("admin/error-stale-delivery-disposition", DeliveryDispositionCommandError::Stale),
+        ] {
+            assert_http(name, StatusCode::CONFLICT, disposition_error(error)).await;
+        }
+    }
+}

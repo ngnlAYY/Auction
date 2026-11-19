@@ -9,6 +9,7 @@
 use auction_web_shared::wire::{JSON_MAX_SAFE_INTEGER, JSON_MAX_SAFE_INTEGER_F64};
 use auction_web_shared::{BrowserErrorClass, report_browser_error};
 use gloo_net::http::Response;
+use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
 
@@ -23,7 +24,7 @@ mod build_hello;
 mod catalog;
 mod fulfillment;
 mod lot;
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(test, target_arch = "wasm32"))]
 mod realtime;
 
 pub(crate) use account::{decode_my_bids, decode_my_proxy};
@@ -71,21 +72,29 @@ where
         .inspect_err(|_| report_browser_error(BrowserErrorClass::DtoDecode))
 }
 
-/// 解析旧共享 client 接受的错误 envelope；顶层扩展允许存在，但三项基础字段必须显式出现。
+/// 解析错误 envelope；顶层扩展允许存在，但三项基础字段必须显式出现。
 pub(crate) async fn decode_error(response: Response) -> Result<(String, Value), String> {
-    decode_error_value(response)
-        .await
-        .inspect_err(|_| report_browser_error(BrowserErrorClass::DtoDecode))
+    response.text().await.ok().as_deref().and_then(decode_error_body).ok_or_else(|| {
+        report_browser_error(BrowserErrorClass::DtoDecode);
+        "invalid_response".to_owned()
+    })
 }
 
-async fn decode_error_value(response: Response) -> Result<(String, Value), String> {
-    let mut payload = response.json::<Value>().await.map_err(|_| "invalid_response".to_owned())?;
-    let envelope = payload.as_object_mut().ok_or_else(|| "invalid_response".to_owned())?;
-    let code =
-        string(envelope.get("code")).ok_or_else(|| "invalid_response".to_owned())?.to_owned();
-    string(envelope.get("message")).ok_or_else(|| "invalid_response".to_owned())?;
-    let data = envelope.remove("data").ok_or_else(|| "invalid_response".to_owned())?;
-    Ok((code, data))
+#[derive(Deserialize)]
+struct ErrorEnvelope {
+    code: String,
+    #[serde(rename = "message")]
+    _message: String,
+    #[serde(deserialize_with = "auction_contracts::deserialize_required_option")]
+    data: Option<Map<String, Value>>,
+}
+
+pub(super) fn decode_error_body(body: &str) -> Option<(String, Value)> {
+    // 信封整体必须是 JSON 对象，兼容的扩展字段也须能解码为 JSON 值。
+    serde_json::from_str::<Map<String, Value>>(body).ok()?;
+    // 原文中重复的信封键或非对象的错误数据不能证明拒绝，结果未知时须保留原命令。
+    let envelope = serde_json::from_str::<ErrorEnvelope>(body).ok()?;
+    Some((envelope.code, envelope.data.map_or(Value::Null, Value::Object)))
 }
 
 /// 错误 envelope 无效时统一返回旧 client 的 `invalid_response`。
@@ -261,7 +270,7 @@ fn time_value(value: Option<&Value>) -> Option<f64> {
         .map(|value| value.timestamp_millis() as f64)
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(test, target_arch = "wasm32"))]
 fn world(value: Option<&Value>) -> bool {
     string(value).is_some_and(|value| {
         !value.is_empty()
@@ -338,4 +347,17 @@ fn game_url(value: Option<&Value>) -> bool {
         && key.len() == 10
         && key.bytes().all(|byte| byte.is_ascii_hexdigit())
         && parts.next().is_none()
+}
+
+#[cfg(test)]
+pub(crate) mod contract_fixtures {
+    use serde::de::DeserializeOwned;
+    use serde_json::Value;
+
+    pub(crate) fn decode<T: DeserializeOwned>(
+        body: &str,
+        validate: impl FnOnce(&Value) -> bool,
+    ) -> T {
+        super::decode_success_text(Some(body), validate).expect("后端契约样本")
+    }
 }

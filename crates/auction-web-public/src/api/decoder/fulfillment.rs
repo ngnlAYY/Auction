@@ -426,4 +426,42 @@ mod tests {
         assert!(valid_lot(&overdue));
         assert!(valid_lot(&with_returns("payment_on_hold", json!(2), json!(3))));
     }
+
+    #[test]
+    fn fulfillment_decodes_backend_contract_fixtures() {
+        use auction_contracts::PublicFulfillmentPageResponse;
+
+        use super::super::decode_success_text;
+
+        for (body, statuses) in [
+            (
+                include_str!(
+                    "../../../../auction-contracts/tests/fixtures/public/fulfillment.json"
+                ),
+                ["awaiting_payment"].as_slice(),
+            ),
+            (
+                include_str!(
+                    "../../../../auction-contracts/tests/fixtures/public/fulfillment-recovery.json"
+                ),
+                ["unsold_return_pending", "awaiting_payment", "cod_resend_pending"].as_slice(),
+            ),
+        ] {
+            let auction_id = "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b";
+            let page: PublicFulfillmentPageResponse = decode_success_text(Some(body), |data| {
+                super::valid_fulfillment_page(data, auction_id, "main", 1, 50)
+            })
+            .expect("履约进度");
+            assert_eq!(
+                page.lots.iter().map(|lot| lot.status.as_str()).collect::<Vec<_>>(),
+                statuses
+            );
+            assert!(
+                decode_success_text::<PublicFulfillmentPageResponse, _>(Some(body), |data| {
+                    super::valid_fulfillment_page(data, auction_id, "isekai", 1, 50)
+                })
+                .is_err()
+            );
+        }
+    }
 }

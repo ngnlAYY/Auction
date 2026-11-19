@@ -1,0 +1,28 @@
+{
+  "code": "ok",
+  "data": {
+    "balance": 1000,
+    "page": 1,
+    "page_size": 25,
+    "rounds": [
+      {
+        "auction_id": "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b",
+        "auction_sequence": 5,
+        "closing_balance": 1025,
+        "compensation_out": 100,
+        "discount_demand": 100,
+        "movement_count": 4,
+        "opening_balance": 1000,
+        "policy_mode": "hold_curve_v2",
+        "reversal_amount": -25,
+        "reversal_count": 1,
+        "settled_at": "2025-11-15T09:46:40Z",
+        "tax_income": 125,
+        "world_id": "main"
+      }
+    ],
+    "total": 1,
+    "updated_at": "2025-11-15T09:46:40Z"
+  },
+  "message": "补偿池批次已加载"
+}

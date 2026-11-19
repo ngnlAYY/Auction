@@ -511,13 +511,31 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
 mod tests {
     use std::sync::Arc;
 
-    use auction_application::auction::PublicAuctionCursor;
+    use auction_application::auction::{
+        PublicAccountReader, PublicAuctionCursor, PublicAuctionProjection, PublicEquipment,
+        PublicLiveLotDetail, PublicLiveLotSummary, PublicLotDetail, PublicLotListRequest,
+        PublicLotPage, PublicLotReader, PublicMyBid, PublicMyBidsPage, PublicMyBidsRequest,
+        PublicOwnedProxy, PublicProxyBid, PublicProxyCapabilities, PublicProxyTransition,
+        WorldReader, WorldSnapshot,
+    };
     use auction_application::core::{ApplicationError, ApplicationFuture};
+    use auction_application::forum::{EquipmentGroup, PublicForumReader, PublicForumThread};
+    use auction_application::public::{
+        LotWatch, LotWatchError, LotWatchFuture, LotWatchPort, LotWatchPreference,
+        LotWatchPreferencePort, PublicBlacklistEntry, PublicBlacklistPage, PublicBlacklistReader,
+        PublicBlacklistRequest, PublicRulesDocument, PublicRulesReader, PublicRulesRequest,
+        PublicSessionPreference, SetLotWatchCommand, SetLotWatchPreferenceCommand,
+        SetLotWatchResult, SiteDocumentKind,
+    };
     use auction_application::public::{
         PublicLoginResult, PublicSessionIdentity, PublicSessionPort, PublicSessionPreferenceResult,
         SetPublicSessionPreferenceCommand,
     };
+    use auction_application::realtime::{
+        PublicRealtimeEvent, PublicRealtimePage, PublicRealtimeReader, PublicRealtimeRequest,
+    };
     use auction_contracts::ApiErrorResponse;
+    use auction_domain::EquipmentId;
     use auction_time::Timestamp;
     use axum::{
         Router,
@@ -530,6 +548,7 @@ mod tests {
     use super::public_feature_routes;
     use crate::mapping::encode_public_cursor;
     use crate::middleware::security::PublicHttpSecurity;
+    use crate::server::contract_fixtures::assert_http;
     use crate::state::PublicApiState;
 
     fn app() -> Router {
@@ -677,10 +696,20 @@ mod tests {
 
         fn get_preference(
             &self,
-            _raw_token: String,
-            _now: Timestamp,
+            raw_token: String,
+            now: Timestamp,
         ) -> ApplicationFuture<'_, PublicSessionPreferenceResult> {
-            unused_session_call()
+            Box::pin(async move {
+                let identity = self.current(raw_token, now).await?;
+                Ok(PublicSessionPreferenceResult {
+                    preference: PublicSessionPreference {
+                        user_id: identity.user_id,
+                        duration_seconds: None,
+                        version: 1,
+                    },
+                    identity,
+                })
+            })
         }
 
         fn set_preference(
@@ -801,6 +830,573 @@ mod tests {
             let (status, code) = page_size_response(&format!("{route}&page_size=201")).await;
             assert_eq!(status, StatusCode::BAD_REQUEST, "route={route}");
             assert_eq!(code.as_deref(), Some("invalid_query"), "route={route}");
+        }
+    }
+
+    const CONTRACT_AUCTION: &str = "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b";
+    const CONTRACT_LOT: Uuid = Uuid::from_u128(0x0190_f2b4_1c2d_4e5f_8a6b_7c8d_9e0f_1a2c);
+
+    fn contract_time() -> Timestamp {
+        Timestamp::from_timestamp(1_763_200_000, 110_000_000).expect("样本时刻")
+    }
+
+    struct PublicContent {
+        alternate: bool,
+    }
+
+    impl WorldReader for PublicContent {
+        fn list_worlds(&self) -> ApplicationFuture<'_, Vec<WorldSnapshot>> {
+            Box::pin(async {
+                Ok([("main", true), ("isekai", false)]
+                    .into_iter()
+                    .map(|(id, enabled)| WorldSnapshot {
+                        id: id.to_owned(),
+                        enabled,
+                        availability: if enabled { "available" } else { "unavailable" }.to_owned(),
+                        policy_revision: 2,
+                    })
+                    .collect())
+            })
+        }
+    }
+
+    impl PublicBlacklistReader for PublicContent {
+        fn list_public_blacklist(
+            &self,
+            request: PublicBlacklistRequest,
+        ) -> ApplicationFuture<'_, PublicBlacklistPage> {
+            Box::pin(async move {
+                Ok(PublicBlacklistPage {
+                    entries: if self.alternate {
+                        Vec::new()
+                    } else {
+                        vec![PublicBlacklistEntry {
+                            username: "ExamplePlayer".to_owned(),
+                            public_reason: "示例封禁原因".to_owned(),
+                            blacklisted_at: contract_time(),
+                        }]
+                    },
+                    total: i64::from(!self.alternate),
+                    limit: request.limit,
+                    offset: request.offset,
+                })
+            })
+        }
+    }
+
+    impl PublicRulesReader for PublicContent {
+        fn get_public_rules(
+            &self,
+            request: PublicRulesRequest,
+        ) -> ApplicationFuture<'_, Option<PublicRulesDocument>> {
+            Box::pin(async move {
+                if request.locale != "en"
+                    || (self.alternate && request.kind == SiteDocumentKind::About)
+                {
+                    return Ok(None);
+                }
+                let title = match request.kind {
+                    SiteDocumentKind::Rules => "Auction rules",
+                    SiteDocumentKind::About => "About the auction",
+                };
+                Ok(Some(PublicRulesDocument {
+                    locale: request.locale,
+                    title: title.to_owned(),
+                    markdown: format!("# {title}\n\nExample document."),
+                    revision: 2,
+                    published_at: contract_time(),
+                }))
+            })
+        }
+    }
+
+    impl PublicForumReader for PublicContent {
+        fn public_forum_sync_enabled(&self) -> ApplicationFuture<'_, Option<bool>> {
+            Box::pin(async { Ok(Some(!self.alternate)) })
+        }
+
+        fn public_forum_thread(
+            &self,
+            auction_id: Uuid,
+        ) -> ApplicationFuture<'_, Option<PublicForumThread>> {
+            Box::pin(async move {
+                let published = !self.alternate;
+                let at = contract_time();
+                Ok(Some(PublicForumThread {
+                    auction_id,
+                    status: if published { "published" } else { "pending" }.to_owned(),
+                    source_revision: 4,
+                    thread_url: published
+                        .then(|| "https://forums.e-hentai.org/index.php?showtopic=123".to_owned()),
+                    title: published.then(|| "Example auction".to_owned()),
+                    body: published.then(|| "Example first post".to_owned()),
+                    content_revision: if published { 2 } else { 0 },
+                    processed_through_post_number: if published { 8 } else { 2 },
+                    content_synced_at: published.then_some(at),
+                    content_last_success_at: published.then_some(at),
+                    content_last_error_at: None,
+                    content_last_error_code: None,
+                    updated_at: at,
+                }))
+            })
+        }
+    }
+
+    impl LotWatchPort for PublicContent {
+        fn list(&self, _user_id: Uuid, _auction_id: Uuid) -> LotWatchFuture<'_, Vec<LotWatch>> {
+            Box::pin(async {
+                Ok(vec![LotWatch {
+                    lot_id: CONTRACT_LOT,
+                    watched: !self.alternate,
+                    channel: "mm".to_owned(),
+                    version: if self.alternate { 2 } else { 1 },
+                }])
+            })
+        }
+
+        fn set(&self, _command: SetLotWatchCommand) -> LotWatchFuture<'_, SetLotWatchResult> {
+            Box::pin(async { Err(LotWatchError::Unavailable) })
+        }
+    }
+
+    impl LotWatchPreferencePort for PublicContent {
+        fn get(&self, user_id: Uuid) -> LotWatchFuture<'_, LotWatchPreference> {
+            Box::pin(async move {
+                Ok(LotWatchPreference {
+                    user_id,
+                    channel: if self.alternate { "both" } else { "mm" }.to_owned(),
+                    version: if self.alternate { 2 } else { 1 },
+                })
+            })
+        }
+
+        fn set(
+            &self,
+            _command: SetLotWatchPreferenceCommand,
+        ) -> LotWatchFuture<'_, LotWatchPreference> {
+            Box::pin(async { Err(LotWatchError::Unavailable) })
+        }
+
+        fn pm_available(&self, _user_id: Uuid) -> LotWatchFuture<'_, bool> {
+            Box::pin(async { Ok(self.alternate) })
+        }
+    }
+
+    async fn fixture_read(
+        app: &Router,
+        uri: &str,
+        authenticated: bool,
+    ) -> axum::response::Response {
+        let mut request = Request::builder().uri(uri);
+        if authenticated {
+            request = request.header(header::COOKIE, "auction_public_session=fixture-placeholder");
+        }
+        app.clone().oneshot(request.body(Body::empty()).expect("请求")).await.expect("响应")
+    }
+
+    #[tokio::test]
+    async fn public_content_contract_fixtures() {
+        for alternate in [false, true] {
+            let port = Arc::new(PublicContent { alternate });
+            let state = PublicApiState::new(
+                Some(port.clone()),
+                Some(port.clone()),
+                Some(port.clone()),
+                None,
+                Some(port.clone()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(Arc::new(AnyCookieSession)),
+                PublicHttpSecurity::default(),
+            )
+            .with_registration_info(if alternate {
+                Vec::new()
+            } else {
+                vec!["ExampleBot".to_owned()]
+            })
+            .with_lot_watches(port.clone())
+            .with_lot_watch_preference(port);
+            let app =
+                public_feature_routes(Router::<PublicApiState>::new(), state.anonymous_read_gate())
+                    .with_state(state);
+            let forum_uri = format!("/api/v1/auctions/{CONTRACT_AUCTION}/forum");
+            let watch_uri = format!("/api/v1/me/lot-watches?auction_id={CONTRACT_AUCTION}");
+
+            let cases = if alternate {
+                [
+                    ("public/blacklist-empty", "/api/v1/blacklist", false, StatusCode::OK),
+                    ("public/about-unpublished", "/api/v1/about", false, StatusCode::NOT_FOUND),
+                    (
+                        "public/forum-sync-disabled",
+                        "/api/v1/forum/sync-status",
+                        false,
+                        StatusCode::OK,
+                    ),
+                    ("public/forum-pending", &forum_uri, false, StatusCode::OK),
+                    (
+                        "public/registration-info-empty",
+                        "/api/v1/registration-info",
+                        false,
+                        StatusCode::OK,
+                    ),
+                    ("public/lot-watches-removed", &watch_uri, true, StatusCode::OK),
+                    (
+                        "public/lot-watch-preference-both",
+                        "/api/v1/me/lot-watch-preference",
+                        true,
+                        StatusCode::OK,
+                    ),
+                    ("public/session-anonymous", "/api/v1/session", false, StatusCode::OK),
+                ]
+            } else {
+                [
+                    ("public/worlds", "/api/v1/worlds", false, StatusCode::OK),
+                    ("public/blacklist", "/api/v1/blacklist", false, StatusCode::OK),
+                    ("public/about", "/api/v1/about?lang=ja", false, StatusCode::OK),
+                    ("public/forum", &forum_uri, false, StatusCode::OK),
+                    (
+                        "public/registration-info",
+                        "/api/v1/registration-info",
+                        false,
+                        StatusCode::OK,
+                    ),
+                    ("public/lot-watches", &watch_uri, true, StatusCode::OK),
+                    (
+                        "public/lot-watch-preference",
+                        "/api/v1/me/lot-watch-preference",
+                        true,
+                        StatusCode::OK,
+                    ),
+                    ("public/session-permanent", "/api/v1/session", true, StatusCode::OK),
+                ]
+            };
+            for (name, uri, authenticated, status) in cases {
+                assert_http(name, status, fixture_read(&app, uri, authenticated).await).await;
+            }
+            if !alternate {
+                for (name, uri, authenticated) in [
+                    ("public/rules", "/api/v1/rules", false),
+                    ("public/forum-sync", "/api/v1/forum/sync-status", false),
+                    ("public/session-preference", "/api/v1/me/session-preference", true),
+                ] {
+                    assert_http(name, StatusCode::OK, fixture_read(&app, uri, authenticated).await)
+                        .await;
+                }
+            }
+        }
+    }
+
+    impl PublicAccountReader for PublicContent {
+        fn list_public_user_bids(
+            &self,
+            user_id: Uuid,
+            _request: PublicMyBidsRequest,
+        ) -> ApplicationFuture<'_, PublicMyBidsPage> {
+            Box::pin(async move {
+                let proxy = self.public_user_proxy(CONTRACT_LOT, user_id).await?;
+                Ok(PublicMyBidsPage {
+                    bids: vec![PublicMyBid {
+                        id: Uuid::from_u128(0x4000_8000_0000_0000_0011),
+                        auction_id: CONTRACT_AUCTION.parse().expect("场次 ID"),
+                        lot_id: CONTRACT_LOT,
+                        lot_number: 1,
+                        amount: 2_000,
+                        accepted_state_version: 12,
+                        fact_index: 1,
+                        mechanism: "ordinary".to_owned(),
+                        created_at: contract_time(),
+                        equipment_name: "Legendary Staff".to_owned(),
+                        equipment_category: "Staff".to_owned(),
+                        leading: false,
+                    }],
+                    bid_total: 1,
+                    proxy_total: i64::from(proxy.is_some()),
+                    proxies: proxy.into_iter().collect(),
+                })
+            })
+        }
+
+        fn public_user_proxy(
+            &self,
+            lot_id: Uuid,
+            user_id: Uuid,
+        ) -> ApplicationFuture<'_, Option<PublicOwnedProxy>> {
+            Box::pin(async move {
+                if lot_id != CONTRACT_LOT {
+                    return Ok(None);
+                }
+                let auction_id = CONTRACT_AUCTION.parse().expect("场次 ID");
+                let at = contract_time();
+                let mut transitions = vec![PublicProxyTransition {
+                    transition_number: 1,
+                    kind: "created".to_owned(),
+                    old_maximum_amount: None,
+                    new_maximum_amount: 5_000,
+                    old_mode: None,
+                    new_mode: "slow".to_owned(),
+                    old_status: None,
+                    new_status: "active".to_owned(),
+                    reason: None,
+                    resulting_state_version: 1,
+                    created_at: at,
+                }];
+                if self.alternate {
+                    transitions.push(PublicProxyTransition {
+                        transition_number: 2,
+                        kind: "final_fast".to_owned(),
+                        old_maximum_amount: Some(5_000),
+                        new_maximum_amount: 5_000,
+                        old_mode: Some("slow".to_owned()),
+                        new_mode: "fast".to_owned(),
+                        old_status: Some("active".to_owned()),
+                        new_status: "active".to_owned(),
+                        reason: None,
+                        resulting_state_version: 2,
+                        created_at: at,
+                    });
+                }
+                Ok(Some(PublicOwnedProxy {
+                    authorization_id: Uuid::from_u128(0x4000_8000_0000_0000_0012),
+                    auction_id,
+                    lot_id,
+                    user_id,
+                    lot_number: 1,
+                    authorization_sequence: 1,
+                    usage_number: 1,
+                    quota_used: 1,
+                    quota_limit: 3,
+                    mode: if self.alternate { "fast" } else { "slow" }.to_owned(),
+                    maximum_amount: 5_000,
+                    status: "active".to_owned(),
+                    terminal_reason: None,
+                    state_version: if self.alternate { 2 } else { 1 },
+                    transitions,
+                    created_at: at,
+                    updated_at: at,
+                    equipment_name: "Legendary Staff".to_owned(),
+                    equipment_category: "Staff".to_owned(),
+                    bid: Some(PublicProxyBid {
+                        id: Uuid::from_u128(0x4000_8000_0000_0000_0013),
+                        auction_id,
+                        lot_id,
+                        lot_number: 1,
+                        amount: 3_000,
+                        accepted_state_version: 13,
+                        fact_index: 1,
+                        mechanism: "proxy".to_owned(),
+                        created_at: at,
+                        leading: true,
+                    }),
+                    invalid_reason: None,
+                    capabilities: PublicProxyCapabilities {
+                        can_lower: true,
+                        waiting: false,
+                        at_maximum: false,
+                    },
+                }))
+            })
+        }
+    }
+
+    impl PublicLotReader for PublicContent {
+        fn list_public_lots(
+            &self,
+            _auction_id: Uuid,
+            _request: PublicLotListRequest,
+        ) -> ApplicationFuture<'_, Option<PublicLotPage>> {
+            Box::pin(async {
+                Err(ApplicationError::CapabilityUnavailable("样本不查询 lot 目录"))
+            })
+        }
+
+        fn public_lot(&self, lot_id: Uuid) -> ApplicationFuture<'_, Option<PublicLotDetail>> {
+            Box::pin(async move {
+                let auction_id = CONTRACT_AUCTION.parse().expect("场次 ID");
+                let equipment_id =
+                    EquipmentId::from_uuid(Uuid::from_u128(0x4000_8000_0000_0000_0014));
+                let at = contract_time();
+                Ok(Some(PublicLotDetail {
+                    equipment_id,
+                    projection: PublicAuctionProjection {
+                        auction_id,
+                        world_id: "main".to_owned(),
+                        sequence: 5,
+                        auction_status: "live".to_owned(),
+                        projection_kind: "live".to_owned(),
+                        presentation_mode: "live".to_owned(),
+                        bidding_open: true,
+                        opens_at: at,
+                        scheduled_ends_at: Some(at + auction_time::Duration::days(1)),
+                        preview_revision: 0,
+                        final_restriction: None,
+                    },
+                    preview: None,
+                    live: Some(PublicLiveLotDetail {
+                        summary: PublicLiveLotSummary {
+                            id: lot_id,
+                            equipment_id,
+                            auction_id,
+                            lot_number: 1,
+                            status: "live".to_owned(),
+                            seller_name: "ExampleSeller".to_owned(),
+                            start_price: 1_000,
+                            current_price: 3_000,
+                            next_bid: 4_000,
+                            has_leader: true,
+                            leader_name: Some("page-size-reader".to_owned()),
+                            effective_end_at: Some(at + auction_time::Duration::days(1)),
+                            state_version: 13,
+                            equipment: PublicEquipment {
+                                name: "Legendary Staff".to_owned(),
+                                category: "Staff".to_owned(),
+                                equipment_group: EquipmentGroup::Rare,
+                                level: None,
+                                info_summary: "Staff".to_owned(),
+                                stats: Default::default(),
+                                avg_roll: None,
+                                game_equipment_url: "https://hentaiverse.org/equip/123".to_owned(),
+                                attributes: serde_json::json!({"quality": "Legendary"}),
+                            },
+                        },
+                    }),
+                }))
+            })
+        }
+    }
+
+    impl PublicRealtimeReader for PublicContent {
+        fn list_public_events(
+            &self,
+            request: PublicRealtimeRequest,
+        ) -> ApplicationFuture<'_, Option<PublicRealtimePage>> {
+            Box::pin(async move {
+                let events = if self.alternate {
+                    Vec::new()
+                } else {
+                    vec![PublicRealtimeEvent {
+                        event_id: Uuid::from_u128(0x4000_8000_0000_0000_0015),
+                        stream_key: format!("auction:{}", request.auction_id),
+                        stream_sequence: 2,
+                        kind: "auction.final_phase_entered".to_owned(),
+                        schema_version: 1,
+                        payload: serde_json::json!({
+                            "auction_id": request.auction_id.to_string(), "state_version": 12
+                        }),
+                        created_at: contract_time(),
+                    }]
+                };
+                Ok(Some(PublicRealtimePage {
+                    events,
+                    next_after: 2,
+                    has_more: false,
+                    refetch_required: self.alternate,
+                }))
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn account_and_realtime_contract_fixtures() {
+        for alternate in [false, true] {
+            let port = Arc::new(PublicContent { alternate });
+            let state = PublicApiState::new(
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(port.clone()),
+                None,
+                None,
+                None,
+                Some(port.clone()),
+                Some(port),
+                None,
+                Some(Arc::new(AnyCookieSession)),
+                PublicHttpSecurity::default(),
+            );
+            let app =
+                public_feature_routes(Router::<PublicApiState>::new(), state.anonymous_read_gate())
+                    .with_state(state);
+            let proxy_uri = format!("/api/v1/lots/{CONTRACT_LOT}/proxy-authorizations/mine");
+            let events_uri = format!("/api/v1/events?auction_id={CONTRACT_AUCTION}");
+            let bids_name = if alternate { "public/my-bids-final" } else { "public/my-bids" };
+            let proxy_name = if alternate { "public/my-proxy-final" } else { "public/my-proxy" };
+            let events_name =
+                if alternate { "public/realtime-events-refetch" } else { "public/realtime-events" };
+            for (name, uri) in [
+                (bids_name, "/api/v1/me/bids"),
+                (proxy_name, &proxy_uri),
+                (events_name, &events_uri),
+            ] {
+                assert_http(name, StatusCode::OK, fixture_read(&app, uri, true).await).await;
+            }
+            if !alternate {
+                let other = Uuid::from_u128(0x4000_8000_0000_0000_0016);
+                let uri = format!("/api/v1/lots/{other}/proxy-authorizations/mine");
+                assert_http(
+                    "public/my-proxy-empty",
+                    StatusCode::OK,
+                    fixture_read(&app, &uri, true).await,
+                )
+                .await;
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn proxy_request_error_contract_fixtures() {
+        use axum::extract::ConnectInfo;
+        use axum::http::Method;
+
+        let state = PublicApiState::new(
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(Arc::new(AnyCookieSession)),
+            PublicHttpSecurity::default(),
+        );
+        let app =
+            public_feature_routes(Router::<PublicApiState>::new(), state.anonymous_read_gate())
+                .with_state(state);
+        let uri = format!("/api/v1/lots/{CONTRACT_LOT}/proxy-authorizations");
+        for (name, maximum_amount, mode) in [
+            ("public/error-invalid-maximum-amount", 0, "fast"),
+            ("public/error-invalid-proxy-mode", 2_000, "other"),
+        ] {
+            let body = serde_json::json!({
+                "command_id": "00000000-0000-4000-8000-000000000030", "maximum_amount": maximum_amount,
+                "mode": mode,
+            });
+            let mut request = Request::builder()
+                .method(Method::POST)
+                .uri(&uri)
+                .header(header::COOKIE, "auction_public_session=fixture-placeholder")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_string()))
+                .expect("代理命令");
+            request
+                .extensions_mut()
+                .insert(ConnectInfo(std::net::SocketAddr::from(([192, 0, 2, 21], 3000))));
+            let response = app.clone().oneshot(request).await.expect("代理响应");
+            assert_http(name, StatusCode::BAD_REQUEST, response).await;
         }
     }
 }

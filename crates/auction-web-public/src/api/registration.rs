@@ -37,3 +37,32 @@ fn valid_registration_info(value: &Value) -> bool {
             })
         })
 }
+
+#[cfg(test)]
+mod tests {
+    use auction_contracts::PublicRegistrationInfoResponse;
+
+    use super::valid_registration_info;
+    use crate::api::decoder::contract_fixtures::decode;
+
+    #[test]
+    fn registration_info_decodes_backend_contract_fixtures() {
+        for (body, count) in [
+            (
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/public/registration-info.json"
+                ),
+                1,
+            ),
+            (
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/public/registration-info-empty.json"
+                ),
+                0,
+            ),
+        ] {
+            let response: PublicRegistrationInfoResponse = decode(body, valid_registration_info);
+            assert_eq!(response.bot_players.len(), count);
+        }
+    }
+}

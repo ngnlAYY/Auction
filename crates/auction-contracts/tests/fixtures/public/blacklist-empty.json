@@ -1,0 +1,10 @@
+{
+  "code": "ok",
+  "data": {
+    "page": 1,
+    "page_size": 50,
+    "total": 0,
+    "users": []
+  },
+  "message": "黑名单已加载"
+}

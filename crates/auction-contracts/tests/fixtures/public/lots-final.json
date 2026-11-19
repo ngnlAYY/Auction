@@ -1,0 +1,55 @@
+{
+  "code": "ok",
+  "data": {
+    "auction_id": "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b",
+    "auction_status": "final",
+    "bidding_open": true,
+    "category_counts": {
+      "all": 1,
+      "clo": 0,
+      "hea": 0,
+      "lig": 0,
+      "one": 0,
+      "shd": 0,
+      "sta": 0,
+      "two": 0
+    },
+    "final_restriction": {
+      "existing_slow_proxy_converted": true,
+      "new_slow_proxy_allowed": false
+    },
+    "lots": [
+      {
+        "auction_id": "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b",
+        "current_price": 1500,
+        "effective_end_at": "2025-11-16T09:46:40Z",
+        "equipment": {
+          "avg_roll": 70.0,
+          "category": "Cloth",
+          "equipment_group": "rare",
+          "game_equipment_url": "https://hentaiverse.org/equip/123456/0123456789",
+          "level": 450,
+          "name": "Legendary Cotton Robe of Heimdall",
+          "primary_attribute_initials": "IW"
+        },
+        "has_leader": true,
+        "id": "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2c",
+        "leader_name": "leader",
+        "lot_number": 1,
+        "next_bid": 1600,
+        "seller_name": "seller",
+        "start_price": 1000,
+        "state_version": 12,
+        "status": "live"
+      }
+    ],
+    "opens_at": "2025-11-15T09:46:40Z",
+    "page": 1,
+    "page_size": 20,
+    "presentation_mode": "live",
+    "preview_revision": 0,
+    "projection_kind": "live",
+    "total": 1
+  },
+  "message": "拍卖批次已加载"
+}

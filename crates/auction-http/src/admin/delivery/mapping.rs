@@ -332,14 +332,31 @@ pub(crate) fn map_sent_proof_result(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use auction_application::admin::DeliverySentProofService;
+    use auction_application::core::ApplicationFuture;
     use auction_application::delivery::{
         DeliveryAdminAttempt, DeliveryAdminCustody, DeliveryAdminDetail, DeliveryAdminDisposition,
         DeliveryAdminObligation, DeliveryAdminRecovery, DeliveryAdminSentEvidence,
-        DeliveryAdminSnapshot, DeliverySendCredentialBinding,
+        DeliveryAdminSnapshot, DeliverySendCredentialBinding, DeliverySentConfirmationPort,
+        ManualSentEvidence, SentConfirmationCommand, SentConfirmationPreview,
+        SentConfirmationResult,
+    };
+    use auction_contracts::{
+        AdminDeliverySentEvidenceRequest, AdminDeliverySentProofPreviewRequest,
     };
     use auction_time::Timestamp;
+    use axum::extract::{Path, State};
+    use axum::http::StatusCode;
+    use uuid::Uuid;
 
     use super::*;
+    use crate::admin::delivery::sent_proof_preview;
+    use crate::server::contract_fixtures::{
+        AdminFixturePorts, admin_address, admin_get, admin_headers, admin_state, assert_http,
+        response_json, wire_fixture,
+    };
 
     fn time() -> auction_time::Timestamp {
         Timestamp::from_ymd_hms(2026, 11, 2, 1, 14, 0).expect("timestamp")
@@ -499,12 +516,8 @@ mod tests {
         assert!(value.get("recovery").is_none());
     }
 
-    #[test]
-    fn delivery_serialized_blocked_registration_reply_matches_browser_fixture() {
-        use auction_contracts::{AdminDeliveryDetailWithActionsResponse, ApiResponse};
-
-        use crate::admin::delivery::projection::DeliveryProjection;
-
+    #[tokio::test]
+    async fn delivery_serialized_blocked_registration_reply_matches_browser_fixture() {
         let mut input = detail();
         let delivery = &mut input.delivery;
         delivery.id = uuid::Uuid::parse_str("0f8fad5b-d9cb-469f-a165-70867728950e").expect("uuid");
@@ -551,24 +564,9 @@ mod tests {
         input.custody.cod_pending = None;
         input.custody.remaining_credits = None;
         input.custody.observed_at = None;
-        let projected = |detail: DeliveryAdminDetail, acknowledge| {
-            let guard = DeliveryAdminGuardSnapshot {
-                has_sending_fence: detail.delivery.sending_at.is_some(),
-                ..guard.clone()
-            };
-            ApiResponse::ok(
-                "交付详情已加载",
-                AdminDeliveryDetailWithActionsResponse {
-                    detail: DeliveryProjection::DispositionActions
-                        .project_detail(map_detail(detail, false))
-                        .expect("详情投影"),
-                    actions: map_actions(&guard, acknowledge),
-                },
-            )
-        };
-        let blocked = projected(input.clone(), Some(DeliveryAdminGuardBlocker::AlreadyDisposed));
+        let blocked = map_actions(&guard, Some(DeliveryAdminGuardBlocker::AlreadyDisposed));
         assert_eq!(
-            blocked.data.actions.retry_failed.blocker(),
+            blocked.retry_failed.blocker(),
             Some(AdminDeliveryActionBlocker::RecipientRenamed)
         );
         let mut before_fence = input.clone();
@@ -590,22 +588,27 @@ mod tests {
                 ),
             ),
         ] {
-            let mapped = projected(detail, None);
-            assert!(mapped.data.actions.acknowledge.blocker().is_none());
-            let fixture: serde_json::Value = serde_json::from_str(fixture).expect("浏览器回归样本");
-            assert_eq!(serde_json::to_value(&mapped).expect("序列化详情"), fixture);
+            let guard = DeliveryAdminGuardSnapshot {
+                has_sending_fence: detail.delivery.sending_at.is_some(),
+                ..guard.clone()
+            };
+            let path = format!(
+                "/api/v1/admin/deliveries/{}?include=disposition_actions",
+                detail.delivery.id
+            );
+            let state =
+                fixture_delivery_state(FixtureDeliveryDetail { detail, guard, acknowledge: None });
+            let response = admin_get(state, &path).await;
+            let actual = response_json(StatusCode::OK, response).await;
+            let expected: serde_json::Value =
+                serde_json::from_str(fixture).expect("浏览器回归样本");
+            assert_eq!(actual, expected);
         }
     }
 
-    #[test]
-    fn sent_proof_detail_serialization_matches_browser_fixture() {
-        use auction_contracts::{AdminDeliveryDetailWithActionsResponse, ApiResponse};
-
-        use crate::admin::delivery::projection::DeliveryProjection;
-
+    fn sent_proof_detail() -> FixtureDeliveryDetail {
         let mut input = detail();
-        input.delivery.id =
-            uuid::Uuid::parse_str("0f8fad5b-d9cb-469f-a165-70867728950e").expect("投递 UUID");
+        input.delivery.id = SENT_PROOF_DELIVERY_ID;
         input.delivery.template = Some("settlement_equipment_handoff".to_owned());
         input.delivery.claimed_at = Some(time());
         input.attempts[0].credits = Some(0);
@@ -635,79 +638,131 @@ mod tests {
             recipient_renamed: false,
             recovery_retry_eligible: false,
         };
+        FixtureDeliveryDetail {
+            detail: input,
+            guard,
+            acknowledge: Some(DeliveryAdminGuardBlocker::StatusMismatch),
+        }
+    }
+
+    #[tokio::test]
+    async fn sent_proof_detail_serialization_matches_browser_fixture() {
+        let mut input = sent_proof_detail();
         let ids = || vec!["300753957".to_owned()];
-        let actual = [
-            (false, Some(ids()), None),
-            (false, None, None),
-            (true, Some(Vec::new()), Some(ids())),
-        ]
-        .map(|(collected, remaining, before_collection)| {
-            let evidence = &mut input.evidence[0];
+        let expected: [serde_json::Value; 3] =
+            serde_json::from_value(wire_fixture("admin/delivery-sent-proof-detail"))
+                .expect("三种 Sent 证据样本");
+        let path = format!("/api/v1/admin/deliveries/{SENT_PROOF_DELIVERY_ID}");
+        for ((collected, remaining, before_collection), extended) in
+            [(false, Some(ids()), None), (false, None, None), (true, Some(Vec::new()), Some(ids()))]
+                .into_iter()
+                .zip(expected)
+        {
+            let evidence = &mut input.detail.evidence[0];
             evidence.collected = Some(collected);
             evidence.remaining_equipment_count = Some(i64::from(!collected));
             evidence.remaining_equipment_ids = remaining;
             evidence.pre_collection_equipment_ids = before_collection;
-            input.custody.collected = Some(collected);
-            let projected = |include| {
-                DeliveryProjection::DispositionActions
-                    .project_detail(map_detail(input.clone(), include))
-                    .expect("投递详情投影")
-            };
-            let extended = projected(true);
-            let mut without_ids = extended.clone();
-            for evidence in &mut without_ids.evidence {
-                evidence.remaining_equipment_ids = None;
-                evidence.pre_collection_equipment_ids = None;
+            input.detail.custody.collected = Some(collected);
+            let state = fixture_delivery_state(input.clone());
+            let response = admin_get(state.clone(), &format!("{path}?include=sent_proof")).await;
+            assert_eq!(response_json(StatusCode::OK, response).await, extended);
+
+            let mut baseline = extended;
+            for evidence in
+                baseline["data"]["detail"]["evidence"].as_array_mut().expect("Sent 证据")
+            {
+                let evidence = evidence.as_object_mut().expect("证据对象");
+                evidence.remove("remaining_equipment_ids");
+                evidence.remove("pre_collection_equipment_ids");
             }
-            assert_eq!(without_ids, projected(false));
-            ApiResponse::ok(
-                "交付详情已加载",
-                AdminDeliveryDetailWithActionsResponse {
-                    detail: extended,
-                    actions: map_actions(&guard, Some(DeliveryAdminGuardBlocker::StatusMismatch)),
-                },
-            )
-        });
-        let actual = serde_json::to_value(actual).expect("序列化详情");
-        let fixture: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../../auction-contracts/tests/fixtures/admin/delivery-sent-proof-detail.json"
-        ))
-        .expect("详情样本");
-        assert_eq!(actual, fixture, "生产序列化结果\n{actual:#}");
+            let response = admin_get(state, &format!("{path}?include=disposition_actions")).await;
+            assert_eq!(response_json(StatusCode::OK, response).await, baseline);
+        }
     }
 
-    #[test]
-    fn sent_proof_preview_serialization_adds_reasons_only_on_request() {
-        let preview = auction_application::delivery::SentConfirmationPreview {
-            eligible: true,
-            blockers: Vec::new(),
-            delivery_id: uuid::Uuid::parse_str("0f8fad5b-d9cb-469f-a165-70867728950e")
-                .expect("投递 UUID"),
-            expected_fencing_version: 4,
-            external_reference: "mooglemail:main:send:7000001".to_owned(),
-            requires_collected_asset_acceptance: false,
-            requires_attempt_history_acceptance: true,
-            prior_unbound_attempts: true,
-            sent_before_current_attempt: true,
-            corrects_admin_failure: true,
+    struct FixtureSentPreview;
+
+    impl DeliverySentConfirmationPort for FixtureSentPreview {
+        fn preview_sent_confirmation<'a>(
+            &'a self,
+            delivery_id: Uuid,
+            _evidence: ManualSentEvidence,
+            reference: Option<&'a str>,
+        ) -> ApplicationFuture<'a, SentConfirmationPreview> {
+            assert_eq!(reference, Some("mailbox_sweep:7000001"));
+            Box::pin(async move {
+                Ok(SentConfirmationPreview {
+                    eligible: true,
+                    blockers: Vec::new(),
+                    delivery_id,
+                    expected_fencing_version: 4,
+                    external_reference: "mooglemail:main:send:7000001".to_owned(),
+                    requires_collected_asset_acceptance: false,
+                    requires_attempt_history_acceptance: true,
+                    prior_unbound_attempts: true,
+                    sent_before_current_attempt: true,
+                    corrects_admin_failure: true,
+                })
+            })
+        }
+
+        fn confirm_sent<'a>(
+            &'a self,
+            _command: SentConfirmationCommand,
+            _reference: Option<&'a str>,
+        ) -> ApplicationFuture<'a, SentConfirmationResult> {
+            panic!("预览样本不提交 Sent 证明")
+        }
+    }
+
+    #[tokio::test]
+    async fn sent_proof_preview_serialization_adds_reasons_only_on_request() {
+        let state =
+            admin_state().with_delivery_sent_proof(Arc::new(DeliverySentProofService::new(
+                Arc::new(FixtureDeliveries { detail: Some(sent_proof_detail()) }),
+                Arc::new(FixtureSentPreview),
+            )));
+        let input = AdminDeliverySentProofPreviewRequest {
+            evidence_reference: "mailbox_sweep:7000001".to_owned(),
+            evidence: AdminDeliverySentEvidenceRequest {
+                schema_version: 1,
+                world_id: "main".to_owned(),
+                external_mail_id: "7000001".to_owned(),
+                sender_uid: "1".to_owned(),
+                sender_name: "Auction".to_owned(),
+                recipient: "Sample".to_owned(),
+                subject: "Payment".to_owned(),
+                sent_minute: crate::mapping::timestamp(time()),
+                observed_at: crate::mapping::timestamp(time()),
+                original_body_digest: [0xab; 32],
+                observed_body_digest: [0xab; 32],
+                remaining_credits: 0,
+                cod_pending: 0,
+                equipment_ids: Vec::new(),
+                collected: false,
+                receipt: String::new(),
+            },
         };
-        let response = |include| {
-            auction_contracts::ApiResponse::ok(
-                "人工 Sent 证明预览",
-                map_sent_proof_preview(preview.clone(), include),
+        let bytes = axum::body::Bytes::from(serde_json::to_vec(&input).expect("预览请求"));
+        let path = format!("/api/v1/admin/deliveries/{SENT_PROOF_DELIVERY_ID}/sent-proof/preview");
+        let request = |query| {
+            sent_proof_preview(
+                State(state.clone()),
+                admin_address(),
+                Path(SENT_PROOF_DELIVERY_ID.to_string()),
+                admin_headers(),
+                format!("{path}{query}").parse().expect("预览 URI"),
+                bytes.clone(),
             )
         };
-        let actual = serde_json::to_value(response(true)).expect("序列化预览");
-        let mut without_reasons = actual.clone();
-        let fields = without_reasons["data"].as_object_mut().expect("预览字段");
+        let name = "admin/delivery-sent-proof-preview";
+        assert_http(name, StatusCode::OK, request("?include=responsibility_reasons").await).await;
+        let mut baseline = wire_fixture(name);
+        let fields = baseline["data"].as_object_mut().expect("预览字段");
         assert_eq!(fields.remove("prior_unbound_attempts"), Some(true.into()));
         assert_eq!(fields.remove("sent_before_current_attempt"), Some(true.into()));
-        assert_eq!(without_reasons, serde_json::to_value(response(false)).expect("缺省预览"));
-        let fixture: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../../auction-contracts/tests/fixtures/admin/delivery-sent-proof-preview.json"
-        ))
-        .expect("预览样本");
-        assert_eq!(actual, fixture, "生产序列化结果\n{actual:#}");
+        assert_eq!(response_json(StatusCode::OK, request("").await).await, baseline);
     }
 
     #[test]
@@ -722,5 +777,335 @@ mod tests {
         ))
         .expect("浏览器回归样本");
         assert_eq!(serde_json::to_value(response).expect("序列化阻断原因"), fixture);
+    }
+
+    fn preflight_reply(failure: &str) -> DeliveryAdminDetail {
+        use uuid::Uuid;
+
+        let mut input = detail();
+        let before_fence = failure == "invalid_payload";
+        let delivery = &mut input.delivery;
+        delivery.id = Uuid::from_u128(if before_fence {
+            0x4000_8000_0000_0000_002b
+        } else {
+            0x4000_8000_0000_0000_002c
+        });
+        delivery.origin_kind = "mail_intake".to_owned();
+        delivery.origin_id =
+            if before_fence { "main:4243:send" } else { "main:4242:send" }.to_owned();
+        delivery.status = "failed".to_owned();
+        delivery.template = Some("register_key".to_owned());
+        delivery.category = Some("account".to_owned());
+        delivery.claimed_at = Some(time());
+        delivery.failure_code = Some(failure.to_owned());
+        if before_fence {
+            delivery.sending_at = None;
+            delivery.suppression_reason = delivery.failure_code.clone();
+            input.attempts.clear();
+        } else {
+            let attempt = &mut input.attempts[0];
+            attempt.subject = Some("Fixture".to_owned());
+            attempt.credits = Some(0);
+            attempt.equipment_ids.clear();
+            attempt.credential = None;
+            attempt.bound_sent_mail_id = None;
+        }
+        input.evidence.clear();
+        input.dispositions.clear();
+        input.obligation = None;
+        input.recovery = None;
+        input.custody.collected = None;
+        input.custody.cod_pending = None;
+        input.custody.remaining_credits = None;
+        input.custody.observed_at = None;
+        input
+    }
+
+    fn superseded_settlement() -> DeliveryAdminDetail {
+        use uuid::Uuid;
+
+        let mut input = preflight_reply("invalid_payload");
+        let delivery = &mut input.delivery;
+        delivery.id = Uuid::from_u128(0x4000_8000_0000_0000_002d);
+        delivery.origin_kind = "settlement".to_owned();
+        delivery.origin_id = Uuid::from_u128(0x4000_8000_0000_0000_002e).to_string();
+        delivery.template = Some("settlement_seller_payout".to_owned());
+        delivery.category = Some("settlement".to_owned());
+        delivery.failure_code = Some("recovery_superseded".to_owned());
+        delivery.suppression_reason = None;
+        input
+    }
+
+    fn settlement_return_take() -> DeliveryAdminDetail {
+        use auction_application::settlement::SYSTEM_RETURN_SENDER;
+        use uuid::Uuid;
+
+        let mut input = superseded_settlement();
+        let delivery = &mut input.delivery;
+        delivery.id = Uuid::from_u128(0x4000_8000_0000_0000_0031);
+        delivery.origin_kind = "settlement_return_action".to_owned();
+        delivery.origin_id =
+            format!("settlement_return:{}", Uuid::from_u128(0x4000_8000_0000_0000_0032));
+        delivery.recipient = SYSTEM_RETURN_SENDER.to_owned();
+        delivery.status = "pending".to_owned();
+        delivery.template = None;
+        delivery.fencing_version = 0;
+        delivery.attempt_count = 0;
+        delivery.claimed_at = None;
+        delivery.completed_at = None;
+        delivery.failure_code = None;
+        input
+    }
+
+    const SENT_PROOF_DELIVERY_ID: uuid::Uuid =
+        uuid::Uuid::from_u128(0x0f8f_ad5b_d9cb_469f_a165_7086_7728_950e);
+
+    #[derive(Clone)]
+    struct FixtureDeliveryDetail {
+        detail: DeliveryAdminDetail,
+        guard: DeliveryAdminGuardSnapshot,
+        acknowledge: Option<DeliveryAdminGuardBlocker>,
+    }
+
+    #[derive(Default)]
+    struct FixtureDeliveries {
+        detail: Option<FixtureDeliveryDetail>,
+    }
+
+    fn fixture_delivery_state(detail: FixtureDeliveryDetail) -> crate::state::AdminApiState {
+        AdminFixturePorts {
+            deliveries: Some(Arc::new(FixtureDeliveries { detail: Some(detail) })),
+            ..Default::default()
+        }
+        .state()
+    }
+
+    impl auction_application::delivery::DeliveryAdminPort for FixtureDeliveries {
+        fn list(
+            &self,
+            request: auction_application::delivery::DeliveryAdminListRequest,
+        ) -> auction_application::core::ApplicationFuture<
+            '_,
+            auction_application::delivery::DeliveryAdminPage,
+        > {
+            Box::pin(async move {
+                let mut entries = vec![
+                    preflight_reply("preflight_blocked").delivery,
+                    preflight_reply("invalid_payload").delivery,
+                ];
+                if request.include_settlement_return_actions {
+                    entries.insert(0, superseded_settlement().delivery);
+                    entries.insert(0, settlement_return_take().delivery);
+                }
+                Ok(auction_application::delivery::DeliveryAdminPage {
+                    total: i64::try_from(entries.len()).expect("交付数量"),
+                    entries,
+                    limit: request.limit,
+                    offset: request.offset,
+                })
+            })
+        }
+
+        fn detail(
+            &self,
+            id: uuid::Uuid,
+        ) -> auction_application::core::ApplicationFuture<'_, DeliveryAdminDetail> {
+            Box::pin(async move {
+                if let Some(input) = &self.detail
+                    && input.detail.delivery.id == id
+                {
+                    return Ok(input.detail.clone());
+                }
+                [
+                    preflight_reply("invalid_payload"),
+                    preflight_reply("preflight_blocked"),
+                    superseded_settlement(),
+                    settlement_return_take(),
+                ]
+                .into_iter()
+                .find(|detail| detail.delivery.id == id)
+                .ok_or_else(|| auction_application::delivery::DeliveryAdminError::NotFound.into())
+            })
+        }
+
+        fn detail_with_guard(
+            &self,
+            id: uuid::Uuid,
+        ) -> auction_application::core::ApplicationFuture<
+            '_,
+            (DeliveryAdminDetail, DeliveryAdminGuardSnapshot, Option<DeliveryAdminGuardBlocker>),
+        > {
+            Box::pin(async move {
+                if let Some(input) = &self.detail
+                    && input.detail.delivery.id == id
+                {
+                    return Ok((input.detail.clone(), input.guard.clone(), input.acknowledge));
+                }
+                let detail = self.detail(id).await?;
+                let delivery = &detail.delivery;
+                let guard = DeliveryAdminGuardSnapshot {
+                    action: DeliveryAdminAction::Release,
+                    expected_fencing_version: delivery.fencing_version,
+                    fencing_version: delivery.fencing_version,
+                    status: delivery.status.clone(),
+                    reason_code: None,
+                    has_sending_fence: delivery.sending_at.is_some(),
+                    origin_kind: delivery.origin_kind.clone(),
+                    payload_operation: Some("send".to_owned()),
+                    sent_reference_sighted: false,
+                    funded_delivery: false,
+                    command_snapshot_readable: true,
+                    retired: false,
+                    lot_eligible: Some(true),
+                    settlement_eligible: None,
+                    settlement_fulfillment_state: None,
+                    has_reconcile_reference: false,
+                    mail_handed_over: false,
+                    recipient_renamed: true,
+                    recovery_retry_eligible: true,
+                };
+                Ok((detail, guard, None))
+            })
+        }
+
+        fn execute(
+            &self,
+            _command: auction_application::delivery::DeliveryAdminCommand,
+        ) -> auction_application::core::ApplicationFuture<
+            '_,
+            auction_application::delivery::DeliveryAdminResult,
+        > {
+            Box::pin(async {
+                Err(auction_application::core::ApplicationError::CapabilityUnavailable(
+                    "样本不写投递",
+                ))
+            })
+        }
+
+        fn player_support(
+            &self,
+            request: auction_application::delivery::PlayerSupportRequest,
+        ) -> auction_application::core::ApplicationFuture<
+            '_,
+            auction_application::delivery::PlayerSupportBundle,
+        > {
+            use auction_application::delivery::{
+                PlayerSupportBid, PlayerSupportBundle, PlayerSupportUser,
+            };
+            use uuid::Uuid;
+
+            Box::pin(async move {
+                let extended = request.include_settlement_return_actions;
+                let mut deliveries = vec![preflight_reply("invalid_payload").delivery];
+                if extended {
+                    deliveries.push(superseded_settlement().delivery);
+                }
+                Ok(PlayerSupportBundle {
+                    user: Some(PlayerSupportUser {
+                        id: Uuid::from_u128(0x4000_8000_0000_0000_0024),
+                        username: "Sample".to_owned(),
+                        status: "active".to_owned(),
+                        game_player_id: None,
+                    }),
+                    bids: vec![PlayerSupportBid {
+                        bid_id: Uuid::from_u128(0x4000_8000_0000_0000_0011),
+                        lot_id: Uuid::from_u128(0x0190_f2b4_1c2d_4e5f_8a6b_7c8d_9e0f_1a2c),
+                        auction_id: crate::server::contract_fixtures::AUCTION_ID,
+                        lot_number: 1,
+                        world_id: "main".to_owned(),
+                        amount: if extended { 3_000 } else { 2_000 },
+                        mechanism: if extended { "proxy" } else { "ordinary" }.to_owned(),
+                        lot_status: if extended { "sold" } else { "live" }.to_owned(),
+                        created_at: time(),
+                    }],
+                    deliveries,
+                    ..Default::default()
+                })
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn delivery_read_contract_fixtures() {
+        use crate::admin::delivery::{detail, list, player_support};
+
+        let state = AdminFixturePorts {
+            deliveries: Some(Arc::new(FixtureDeliveries::default())),
+            ..Default::default()
+        }
+        .state();
+        for (name, uri) in [
+            ("admin/deliveries", "/api/v1/admin/deliveries"),
+            (
+                "admin/deliveries-settlement-returns",
+                "/api/v1/admin/deliveries?include=settlement_returns",
+            ),
+        ] {
+            let response = list(
+                State(state.clone()),
+                admin_address(),
+                admin_headers(),
+                uri.parse().expect("列表 URI"),
+            )
+            .await;
+            assert_http(name, StatusCode::OK, response).await;
+        }
+
+        for (name, uri) in [
+            ("admin/player-support", "/api/v1/admin/player-support?user=Sample"),
+            (
+                "admin/player-support-settlement-returns",
+                "/api/v1/admin/player-support?user=Sample&include=settlement_returns",
+            ),
+        ] {
+            let response = player_support(
+                State(state.clone()),
+                admin_address(),
+                admin_headers(),
+                uri.parse().expect("玩家支持 URI"),
+            )
+            .await;
+            assert_http(name, StatusCode::OK, response).await;
+        }
+
+        for (name, item, include) in [
+            ("admin/delivery-invalid-payload", preflight_reply("invalid_payload"), ""),
+            ("admin/delivery-preflight-blocked", preflight_reply("preflight_blocked"), ""),
+            (
+                "admin/delivery-disposition-actions",
+                preflight_reply("invalid_payload"),
+                "?include=disposition_actions",
+            ),
+            (
+                "admin/delivery-settlement-returns",
+                superseded_settlement(),
+                "?include=settlement_returns",
+            ),
+            ("admin/delivery-return-take", settlement_return_take(), "?include=settlement_returns"),
+        ] {
+            let id = item.delivery.id.to_string();
+            let uri = format!("/api/v1/admin/deliveries/{id}{include}");
+            let response = detail(
+                State(state.clone()),
+                admin_address(),
+                Path(id),
+                admin_headers(),
+                uri.parse().expect("详情 URI"),
+            )
+            .await;
+            assert_http(name, StatusCode::OK, response).await;
+        }
+        let take_id = settlement_return_take().delivery.id.to_string();
+        let uri = format!("/api/v1/admin/deliveries/{take_id}");
+        let omitted = detail(
+            State(state),
+            admin_address(),
+            Path(take_id),
+            admin_headers(),
+            uri.parse().expect("详情 URI"),
+        )
+        .await;
+        assert_http("admin/error-delivery-projection-excluded", StatusCode::NOT_FOUND, omitted)
+            .await;
     }
 }

@@ -144,4 +144,39 @@ mod tests {
         let missing = json!({"user_id": "u", "channel": "mm", "version": 1});
         assert!(!json_has_exact_keys(&missing, &RESPONSE_KEYS));
     }
+
+    #[test]
+    fn watch_preference_decodes_backend_contract_fixtures() {
+        use auction_contracts::PublicLotWatchPreferenceResponse;
+
+        for (body, channel, pm_available) in [
+            (
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/public/lot-watch-preference.json"
+                ),
+                "mm",
+                false,
+            ),
+            (
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/public/lot-watch-preference-both.json"
+                ),
+                "both",
+                true,
+            ),
+        ] {
+            let preference: PublicLotWatchPreferenceResponse =
+                super::super::session::decode_identity_response(200, Some(body), |value| {
+                    json_has_exact_keys(value, &RESPONSE_KEYS)
+                        && value
+                            .get("version")
+                            .and_then(serde_json::Value::as_i64)
+                            .is_some_and(|version| version > 0)
+                })
+                .expect("标记偏好");
+            assert_eq!(preference.channel, channel);
+            assert_eq!(preference.pm_available, pm_available);
+            assert!(channel_flags(&preference.channel).is_some());
+        }
+    }
 }

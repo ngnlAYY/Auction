@@ -1,0 +1,99 @@
+{
+  "code": "ok",
+  "data": {
+    "alerting": {
+      "error_code": "source_unavailable",
+      "status": "unknown"
+    },
+    "credentials": {
+      "error_code": "source_unavailable",
+      "status": "unknown"
+    },
+    "delivery": {
+      "error_code": "source_unavailable",
+      "status": "unknown"
+    },
+    "external_accounts": {
+      "error_code": "source_unavailable",
+      "status": "unknown"
+    },
+    "fulfillment": {
+      "data": {
+        "blocked": 0,
+        "failed": 0,
+        "manual_reconcile": 0,
+        "observed_at": "2025-11-15T09:46:40.110000Z",
+        "oldest_backlog_age_seconds": 200,
+        "oldest_prerequisite_wait_age_seconds": 0,
+        "pending": 5,
+        "waiting_payment": 1,
+        "waiting_prerequisite": 0
+      },
+      "observed_at": "2025-11-15T09:46:40.110000Z",
+      "status": "ok"
+    },
+    "health": {
+      "audit_failure_count": 0,
+      "missing_services": [
+        "public",
+        "admin",
+        "worker"
+      ],
+      "readiness": false,
+      "status": "degraded"
+    },
+    "mail": {
+      "error_code": "source_unavailable",
+      "status": "unknown"
+    },
+    "process": {
+      "data": {
+        "observed_at": "0001-01-01T00:00:00Z",
+        "processes": [],
+        "summary": {
+          "audit_failure_count": 0,
+          "missing_services": [
+            "public",
+            "admin",
+            "worker"
+          ],
+          "readiness": false,
+          "status": "degraded"
+        }
+      },
+      "status": "degraded"
+    },
+    "realtime": {
+      "error_code": "source_unavailable",
+      "status": "unknown"
+    },
+    "reconciliation": {
+      "data": {
+        "custody_report_age_seconds": 15,
+        "observed_at": "2025-11-15T09:46:40.110000Z",
+        "solvency_report_age_seconds": 25,
+        "worlds": [
+          {
+            "custody_missing_count": 0,
+            "solvency_shortfall_credits": 0,
+            "world": "main"
+          }
+        ]
+      },
+      "observed_at": "2025-11-15T09:46:40.110000Z",
+      "status": "ok"
+    },
+    "recovery": {
+      "error_code": "source_unavailable",
+      "status": "unknown"
+    },
+    "worker": {
+      "condition": "unavailable",
+      "mail_pollers": 0,
+      "ready": false,
+      "state": "",
+      "version": ""
+    }
+  },
+  "message": "管理概览已加载"
+}

@@ -1,0 +1,6 @@
+{
+  "code": "settlement_return_unbound",
+  "data": null,
+  "message": "退件未绑定原派发，只能标记已核对或重新核验",
+  "request_id": null
+}

@@ -264,3 +264,124 @@ pub(crate) async fn list_failures(
     )
         .into_response()
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use auction_application::core::ApplicationFuture;
+    use auction_application::realtime::{
+        RealtimeAdminPort, RealtimeDashboardSnapshot, RealtimeEventListRequest, RealtimeEventPage,
+        RealtimeEventSnapshot, RealtimeFailureListRequest, RealtimeFailurePage,
+        RealtimeFailureSnapshot, RealtimeLagListRequest, RealtimeLagPage, RealtimeLagSnapshot,
+        RealtimeReplayCommand, RealtimeReplayResult,
+    };
+    use auction_time::Duration;
+    use axum::http::StatusCode;
+    use uuid::Uuid;
+
+    use crate::server::contract_fixtures::{
+        AUCTION_ID, AdminFixturePorts, admin_get, assert_http, time,
+    };
+
+    const EVENT_ID: Uuid = Uuid::from_u128(0x4000_8000_0000_0000_0026);
+
+    struct FixtureRealtime;
+
+    impl RealtimeAdminPort for FixtureRealtime {
+        fn dashboard_snapshot(&self) -> ApplicationFuture<'_, RealtimeDashboardSnapshot> {
+            panic!("实时列表样本不读取仪表盘")
+        }
+
+        fn list_events(
+            &self,
+            request: RealtimeEventListRequest,
+        ) -> ApplicationFuture<'_, RealtimeEventPage> {
+            Box::pin(async move {
+                Ok(RealtimeEventPage {
+                    entries: vec![RealtimeEventSnapshot {
+                        event_id: EVENT_ID,
+                        stream_key: format!("auction:{AUCTION_ID}"),
+                        stream_sequence: 14,
+                        kind: "lot.bid_accepted".to_owned(),
+                        schema_version: 2,
+                        created_at: time(),
+                    }],
+                    total: 1,
+                    limit: request.limit,
+                    offset: request.offset,
+                })
+            })
+        }
+
+        fn list_lag(
+            &self,
+            request: RealtimeLagListRequest,
+        ) -> ApplicationFuture<'_, RealtimeLagPage> {
+            Box::pin(async move {
+                Ok(RealtimeLagPage {
+                    entries: vec![RealtimeLagSnapshot {
+                        stream_key: format!("auction:{AUCTION_ID}"),
+                        consumer_key: "public-realtime".to_owned(),
+                        offset: 12,
+                        latest_sequence: 14,
+                        lag: 2,
+                        last_advanced_at: Some(time()),
+                    }],
+                    total: 1,
+                    limit: request.limit,
+                    offset: request.offset,
+                })
+            })
+        }
+
+        fn list_failures(
+            &self,
+            request: RealtimeFailureListRequest,
+        ) -> ApplicationFuture<'_, RealtimeFailurePage> {
+            let resolved = request.resolved.expect("按解决状态筛选");
+            Box::pin(async move {
+                Ok(RealtimeFailurePage {
+                    entries: vec![RealtimeFailureSnapshot {
+                        id: Uuid::from_u128(0x4000_8000_0000_0000_0027),
+                        event_id: EVENT_ID,
+                        stream_key: format!("auction:{AUCTION_ID}"),
+                        consumer_key: "public-realtime".to_owned(),
+                        code: "invalid_event".to_owned(),
+                        safe_detail: "示例失败".to_owned(),
+                        failed_at: time(),
+                        resolved_at: resolved.then(|| time() + Duration::minutes(1)),
+                    }],
+                    total: if resolved { 1 } else { 2 },
+                    limit: request.limit,
+                    offset: request.offset,
+                })
+            })
+        }
+
+        fn replay(
+            &self,
+            _command: RealtimeReplayCommand,
+        ) -> ApplicationFuture<'_, RealtimeReplayResult> {
+            panic!("实时列表样本不重放事件")
+        }
+    }
+
+    #[tokio::test]
+    async fn realtime_operations_contract_fixtures() {
+        let state =
+            AdminFixturePorts { realtime: Some(Arc::new(FixtureRealtime)), ..Default::default() }
+                .state();
+        for (name, url) in [
+            ("admin/realtime-events", "/api/v1/admin/realtime/events"),
+            ("admin/realtime-lag", "/api/v1/admin/realtime/lag"),
+            (
+                "admin/realtime-failures",
+                "/api/v1/admin/realtime/failures?resolved=false&page_size=1",
+            ),
+            ("admin/realtime-failures-resolved", "/api/v1/admin/realtime/failures?resolved=true"),
+        ] {
+            assert_http(name, StatusCode::OK, admin_get(state.clone(), url).await).await;
+        }
+    }
+}

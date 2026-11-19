@@ -125,3 +125,61 @@ fn decode(
 fn failure(code: &str, status: u16) -> CommandError {
     CommandError { code: code.to_owned(), status }
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn session_preference_decodes_backend_contract_fixtures() {
+        for (body, duration) in [
+            (
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/public/session-preference.json"
+                ),
+                None,
+            ),
+            (
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/public/session-preference-timed.json"
+                ),
+                Some(3600),
+            ),
+        ] {
+            let user = "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b";
+            let preference = super::decode(200, Some(body), user, None).expect("会话偏好");
+            assert_eq!(preference.user_id, user);
+            assert_eq!(preference.duration_seconds, duration);
+        }
+    }
+
+    #[test]
+    fn session_preference_errors_decode_backend_contract_fixtures() {
+        use auction_contracts::PublicSetSessionPreferenceRequest;
+
+        let user = "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b";
+        let command = PublicSetSessionPreferenceRequest {
+            command_id: "00000000-0000-4000-8000-000000000001".to_owned(),
+            duration_seconds: Some(3600),
+            expected_version: 5,
+        };
+        for (status, code, body) in [
+            (
+                409,
+                "session_preference_conflict",
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/public/error-session-preference-conflict.json"
+                ),
+            ),
+            (
+                422,
+                "invalid_session_preference",
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/public/error-invalid-session-preference.json"
+                ),
+            ),
+        ] {
+            let error = super::decode(status, Some(body), user, Some(&command))
+                .expect_err("偏好命令已被拒绝");
+            assert_eq!((error.code.as_str(), error.status), (code, status));
+        }
+    }
+}

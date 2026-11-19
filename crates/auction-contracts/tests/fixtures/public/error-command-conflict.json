@@ -1,0 +1,6 @@
+{
+  "code": "command_conflict",
+  "data": null,
+  "message": "请求与既有命令冲突",
+  "request_id": null
+}

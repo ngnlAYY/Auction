@@ -1,0 +1,6 @@
+{
+  "code": "bidder_ineligible",
+  "data": null,
+  "message": "当前账户没有竞价资格",
+  "request_id": null
+}

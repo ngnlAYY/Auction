@@ -1,0 +1,19 @@
+{
+  "code": "ok",
+  "data": {
+    "auctions": [
+      {
+        "auction_id": "00000000-0000-4000-8000-000000000020",
+        "sequence": 6,
+        "settled_at": "2025-11-15T09:46:40.110000Z",
+        "world_id": "isekai"
+      }
+    ],
+    "pagination": {
+      "page": 1,
+      "page_size": 50,
+      "total": 1
+    }
+  },
+  "message": "结算报表目录已加载"
+}

@@ -353,4 +353,46 @@ mod tests {
         let too_skewed = now + MAX_ADMIN_PAUSE + auction_time::TimeDelta::minutes(6);
         assert!(pause_command(request(true, Some(too_skewed)), "admin".to_owned(), now).is_err());
     }
+
+    #[tokio::test]
+    async fn runtime_switch_conflict_contract_fixture() {
+        use std::sync::Arc;
+
+        use auction_application::runtime_switches::{
+            RuntimeSwitchEvent, RuntimeSwitchFuture, RuntimeSwitchRead, RuntimeSwitchStore,
+            RuntimeSwitches,
+        };
+
+        use crate::server::contract_fixtures::{
+            admin_address, admin_headers, admin_state, assert_http,
+        };
+
+        struct ConflictingStore;
+
+        impl RuntimeSwitchStore for ConflictingStore {
+            fn read(&self) -> RuntimeSwitchFuture<'_, RuntimeSwitchRead> {
+                Box::pin(async { Err(RuntimeSwitchError::Unavailable) })
+            }
+
+            fn write(
+                &self,
+                _command: RuntimeSwitchCommand,
+            ) -> RuntimeSwitchFuture<'_, RuntimeSwitchEvent> {
+                Box::pin(async { Err(RuntimeSwitchError::Conflict) })
+            }
+        }
+
+        let state = admin_state()
+            .with_runtime_switches(Arc::new(ConflictingStore), RuntimeSwitches::default());
+        let body = serde_json::to_vec(&request(false, None)).expect("开关命令");
+        let response = pause_external_access(
+            State(state),
+            admin_address(),
+            admin_headers(),
+            "/api/v1/admin/runtime-switches/external-access-paused".parse().expect("开关 URI"),
+            Bytes::from(body),
+        )
+        .await;
+        assert_http("admin/error-runtime-switch-conflict", StatusCode::CONFLICT, response).await;
+    }
 }

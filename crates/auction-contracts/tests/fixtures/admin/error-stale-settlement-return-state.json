@@ -1,0 +1,6 @@
+{
+  "code": "stale_settlement_return_state",
+  "data": null,
+  "message": "结算退件案件版本已变化，请刷新后再操作",
+  "request_id": null
+}

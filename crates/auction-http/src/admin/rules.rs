@@ -350,12 +350,20 @@ fn map_error(error: ApplicationError) -> Response {
 
 #[cfg(test)]
 mod tests {
-    use auction_application::admin::AdminRulesCandidate;
+    use std::sync::Arc;
+
+    use auction_application::admin::{
+        AdminRulesCandidate, AdminRulesDocument, AdminRulesPort, AdminRulesPublishCommand,
+        AdminRulesRequest,
+    };
+    use auction_application::core::ApplicationFuture;
+    use auction_application::public::SiteDocumentKind;
     use auction_contracts::ApiErrorResponse;
     use axum::body::to_bytes;
     use axum::http::StatusCode;
 
     use super::map_error;
+    use crate::server::contract_fixtures::{AdminFixturePorts, admin_get, assert_http, time};
 
     #[tokio::test]
     async fn unsupported_publication_locale_keeps_the_invalid_locale_response() {
@@ -370,5 +378,66 @@ mod tests {
         let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let error: ApiErrorResponse = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(error.code, "invalid_locale");
+    }
+
+    struct FixtureDocuments;
+
+    impl AdminRulesPort for FixtureDocuments {
+        fn get(
+            &self,
+            request: AdminRulesRequest,
+        ) -> ApplicationFuture<'_, Option<AdminRulesDocument>> {
+            let (title, markdown) = match (request.kind, request.locale.as_str()) {
+                (SiteDocumentKind::Rules, "en") => {
+                    ("Auction rules", "# Auction rules\n\nExample document.")
+                }
+                (SiteDocumentKind::Rules, "fr") => ("Règles", ""),
+                (SiteDocumentKind::About, "zh-CN") => ("关于拍卖", "# 关于拍卖"),
+                other => panic!("非预期的文档请求：{other:?}"),
+            };
+            Box::pin(async move {
+                Ok(Some(AdminRulesDocument {
+                    locale: request.locale,
+                    title: title.to_owned(),
+                    markdown: markdown.to_owned(),
+                    published_by: "fixture-admin".to_owned(),
+                    revision: 6,
+                    published_at: time(),
+                }))
+            })
+        }
+
+        fn publish(
+            &self,
+            _command: AdminRulesPublishCommand,
+        ) -> ApplicationFuture<'_, AdminRulesDocument> {
+            panic!("文档读取样本不发布文档")
+        }
+    }
+
+    #[tokio::test]
+    async fn admin_rules_and_about_contract_fixtures() {
+        let state =
+            AdminFixturePorts { rules: Some(Arc::new(FixtureDocuments)), ..Default::default() }
+                .state();
+        for (name, url) in [
+            ("admin/rules", "/api/v1/admin/rules"),
+            ("admin/rules-legacy-locale", "/api/v1/admin/rules?lang=fr"),
+            ("admin/about", "/api/v1/admin/about?lang=zh-CN"),
+        ] {
+            assert_http(name, StatusCode::OK, admin_get(state.clone(), url).await).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn rules_version_error_contract_fixture() {
+        use auction_application::admin::AdminRulesError;
+
+        assert_http(
+            "admin/error-document-state-conflict",
+            StatusCode::CONFLICT,
+            map_error(AdminRulesError::RevisionConflict { current_revision: 6 }.into()),
+        )
+        .await;
     }
 }

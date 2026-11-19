@@ -1,0 +1,8 @@
+{
+  "code": "account_blacklisted",
+  "data": {
+    "public_reason": "示例封禁原因"
+  },
+  "message": "账号已被封禁",
+  "request_id": null
+}

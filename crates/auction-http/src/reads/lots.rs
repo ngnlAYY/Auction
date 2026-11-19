@@ -236,8 +236,9 @@ mod tests {
 
     use auction_application::auction::{
         PUBLIC_LOT_CATEGORIES, PublicAuctionProjection, PublicEquipment, PublicEquipmentStat,
-        PublicLiveLotSummary, PublicLotDetail, PublicLotListRequest, PublicLotPage,
-        PublicLotReader, PublicPreviewLotSummary,
+        PublicFinalRestriction, PublicLiveLotDetail, PublicLiveLotSummary, PublicLotDetail,
+        PublicLotListRequest, PublicLotPage, PublicLotReader, PublicPreviewLotDetail,
+        PublicPreviewLotSummary,
     };
     use auction_application::core::ApplicationFuture;
     use auction_application::forum::EquipmentGroup;
@@ -254,8 +255,9 @@ mod tests {
     use tower::ServiceExt;
     use uuid::Uuid;
 
-    use super::list_lots;
+    use super::{list_lots, lot_detail};
     use crate::middleware::security::PublicHttpSecurity;
+    use crate::server::contract_fixtures::{assert_http, assert_wire};
     use crate::state::PublicApiState;
 
     const AUCTION_ID: Uuid = Uuid::from_u128(0x0190_f2b4_1c2d_4e5f_8a6b_7c8d_9e0f_1a2b);
@@ -307,8 +309,22 @@ mod tests {
             Box::pin(async move { Ok(Some(page)) })
         }
 
-        fn public_lot(&self, _lot_id: Uuid) -> ApplicationFuture<'_, Option<PublicLotDetail>> {
-            Box::pin(async { Ok(None) })
+        fn public_lot(&self, lot_id: Uuid) -> ApplicationFuture<'_, Option<PublicLotDetail>> {
+            let page = self.page.clone();
+            Box::pin(async move {
+                let live = page.live.into_iter().find(|row| row.id == lot_id);
+                let preview = page.preview.into_iter().find(|row| row.id == lot_id);
+                let live_equipment = || live_page().live.remove(0).equipment;
+                Ok(Some(PublicLotDetail {
+                    equipment_id: EquipmentId::from_uuid(EQUIPMENT_ID),
+                    projection: page.projection,
+                    live: live.map(|summary| PublicLiveLotDetail { summary }),
+                    preview: preview.map(|summary| PublicPreviewLotDetail {
+                        summary,
+                        equipment: live_equipment(),
+                    }),
+                }))
+            })
         }
     }
 
@@ -485,8 +501,8 @@ mod tests {
         page
     }
 
-    async fn request_with_lots(lots: FixedLots, query: &str) -> (StatusCode, Vec<u8>) {
-        let state = PublicApiState::new(
+    fn state(lots: FixedLots) -> PublicApiState {
+        PublicApiState::new(
             None,
             None,
             None,
@@ -502,10 +518,13 @@ mod tests {
             None,
             None,
             PublicHttpSecurity::default(),
-        );
+        )
+    }
+
+    async fn request_with_lots(lots: FixedLots, query: &str) -> (StatusCode, Vec<u8>) {
         let app = Router::new()
             .route("/api/v1/auctions/{auction_id}/lots", get(list_lots))
-            .with_state(state);
+            .with_state(state(lots));
         let separator = if query.is_empty() { "" } else { "?" };
         let uri = format!("/api/v1/auctions/{AUCTION_ID}/lots{separator}{query}");
         let response = app
@@ -668,6 +687,52 @@ mod tests {
             assert_eq!(status, StatusCode::BAD_REQUEST, "{query}");
             assert_eq!(body["code"], "invalid_query", "{query}");
             assert_eq!(body["message"], message, "{query}");
+        }
+    }
+
+    #[tokio::test]
+    async fn lot_read_contract_fixtures() {
+        let mut final_page = live_page();
+        final_page.projection.auction_status = "final".to_owned();
+        final_page.projection.final_restriction = Some(PublicFinalRestriction {
+            new_slow_proxy_allowed: false,
+            existing_slow_proxy_converted: true,
+        });
+        final_page.live[0].state_version = 12;
+
+        for (name, page, query) in [
+            ("lots", live_page(), ""),
+            ("lots-summary", live_page(), "fields=summary"),
+            ("lots-preview", preview_page(), ""),
+            ("lots-final", final_page, "fields=summary"),
+        ] {
+            let (status, body) = request_json(page, query).await;
+            assert_eq!(status, StatusCode::OK, "{name}: {body}");
+            assert_wire(&format!("public/{name}"), body);
+        }
+        let mut live = live_page();
+        live.live[0].equipment.attributes = json!({
+            "quality": "Legendary", "type": "Robe", "prefix": "Cotton", "level": 450
+        });
+        let mut unleveled = live.clone();
+        unleveled.live[0].equipment.level = None;
+        unleveled.live[0].equipment.info_summary = "Robe".to_owned();
+        unleveled.live[0].equipment.attributes = json!({
+            "quality": "Legendary", "type": "Robe", "prefix": "", "suffix": "", "level": null,
+            "stats": {"Holy EDB": {"value": "+20%", "base": null}}
+        });
+        for (name, page) in
+            [("lot", live), ("lot-unleveled", unleveled), ("lot-preview", preview_page())]
+        {
+            let state = state(FixedLots::new(page));
+            let response = lot_detail(
+                axum::extract::State(state),
+                axum::extract::Path(LOT_ID.to_string()),
+                "/".parse().expect("详情 URI"),
+            )
+            .await
+            .expect("详情投影");
+            assert_http(&format!("public/{name}"), StatusCode::OK, response).await;
         }
     }
 }

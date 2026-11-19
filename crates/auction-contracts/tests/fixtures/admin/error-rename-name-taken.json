@@ -1,0 +1,6 @@
+{
+  "code": "rename_name_taken",
+  "data": null,
+  "message": "原用户名已被占用",
+  "request_id": null
+}

@@ -525,7 +525,12 @@ mod tests {
         }
 
         fn pending_counts(&self) -> ApplicationFuture<'_, AdminPendingCounts> {
-            panic!("告警路由测试无需读取待办计数")
+            Box::pin(ready(Ok(AdminPendingCounts {
+                delivery_manual_reconcile: 1,
+                recovery_confirmation: 0,
+                active_alerts: 2,
+                settlement_returns: 3,
+            })))
         }
 
         fn list_webhook_deliveries(
@@ -706,6 +711,7 @@ mod tests {
         let (status, body) = request(&app, Method::GET, "/api/v1/admin/alerts", vec![]).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body, expected, "缺省投影应保留旧字段闭集");
+        crate::server::contract_fixtures::assert_wire("admin/alerts-list-default", body);
     }
 
     #[tokio::test]
@@ -817,6 +823,42 @@ mod tests {
             assert_eq!(status, StatusCode::BAD_REQUEST, "{query}");
             assert_eq!(body["code"], "invalid_query", "{query}");
             assert_eq!(body["message"], message, "{query}");
+        }
+    }
+
+    #[tokio::test]
+    async fn alert_error_contract_fixture() {
+        use auction_application::core::ApplicationError;
+        use auction_application::operations::OperationsAlertError;
+
+        use crate::server::contract_fixtures::assert_http;
+
+        assert_http(
+            "admin/error-alert-stale",
+            StatusCode::CONFLICT,
+            super::map_error(
+                "acknowledge",
+                ApplicationError::OperationsAlert(OperationsAlertError::StaleClaim),
+            ),
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn pending_count_contract_fixtures() {
+        use crate::server::contract_fixtures::assert_wire;
+
+        let app = test_router();
+        for (name, uri) in [
+            ("admin/pending-counts", "/api/v1/admin/pending-counts"),
+            (
+                "admin/pending-counts-settlement-returns",
+                "/api/v1/admin/pending-counts?include=settlement_returns",
+            ),
+        ] {
+            let (status, body) = request(&app, Method::GET, uri, vec![]).await;
+            assert_eq!(status, StatusCode::OK, "{name}");
+            assert_wire(name, body);
         }
     }
 }

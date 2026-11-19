@@ -476,10 +476,28 @@ fn map_reader_error(error: ApplicationError) -> (StatusCode, Json<ApiErrorRespon
 
 #[cfg(test)]
 mod tests {
-    use auction_application::core::ApplicationError;
-    use axum::http::StatusCode;
+    use std::sync::Arc;
 
-    use super::map_reader_error;
+    use auction_application::core::{ApplicationError, ApplicationFuture};
+    use auction_application::public::{
+        PublicCompensationCursor, PublicCompensationListRequest, PublicCompensationLot,
+        PublicCompensationLotPage, PublicCompensationLotRequest, PublicCompensationLotReversal,
+        PublicCompensationMovement, PublicCompensationMovementKind, PublicCompensationMovementPage,
+        PublicCompensationMovementRequest, PublicCompensationPage, PublicCompensationReader,
+        PublicCompensationRound, PublicEquipmentGameLink, PublicEquipmentLinkResolver,
+        PublicEquipmentLinkTarget,
+    };
+    use auction_domain::{EquipmentId, SettlementMode};
+    use auction_time::Timestamp;
+    use axum::extract::{Path, State};
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+    use uuid::Uuid;
+
+    use super::{lots, map_reader_error, movements, pool};
+    use crate::middleware::security::PublicHttpSecurity;
+    use crate::server::contract_fixtures::assert_http;
+    use crate::state::PublicApiState;
 
     #[test]
     fn reader_failures_collapse_to_storage_unavailable() {
@@ -491,5 +509,237 @@ mod tests {
             assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
             assert_eq!(body.0.code, "storage_unavailable");
         }
+    }
+
+    const AUCTION_ID: Uuid = Uuid::from_u128(0x0190_f2b4_1c2d_4e5f_8a6b_7c8d_9e0f_1a2b);
+    const LOT_ID: Uuid = Uuid::from_u128(0x0190_f2b4_1c2d_4e5f_8a6b_7c8d_9e0f_1a2c);
+    const EQUIPMENT_ID: Uuid = Uuid::from_u128(0x4000_8000_0000_0000_0017);
+    const EQUIPMENT_PREFIX: &str = "https://hentaiverse.org/equip/123";
+
+    fn round(voided: bool) -> PublicCompensationRound {
+        PublicCompensationRound {
+            auction_id: AUCTION_ID,
+            world_id: "main".to_owned(),
+            auction_sequence: 5,
+            policy_mode: SettlementMode::HoldCurveV2,
+            opening_balance: 1_000,
+            tax_income: 125,
+            discount_demand: 100,
+            compensation_out: 100,
+            closing_balance: 1_025,
+            movement_count: 4,
+            reversal_count: i64::from(voided),
+            reversal_amount: if voided { -25 } else { 0 },
+            settled_at: Timestamp::from_timestamp(1_763_200_000, 0).expect("结算时刻"),
+        }
+    }
+
+    struct FixtureCompensation {
+        voided: bool,
+        held_nanos: i64,
+    }
+
+    impl PublicCompensationReader for FixtureCompensation {
+        fn list_public_compensation(
+            &self,
+            request: PublicCompensationListRequest,
+        ) -> ApplicationFuture<'_, PublicCompensationPage> {
+            let round = round(self.voided);
+            let cursor_mode = request.cursor.is_some();
+            Box::pin(async move {
+                Ok(PublicCompensationPage {
+                    balance: round.closing_balance + round.reversal_amount,
+                    updated_at: round.settled_at,
+                    total: (!cursor_mode).then_some(1),
+                    limit: request.limit,
+                    offset: request.offset,
+                    next_cursor: cursor_mode.then_some(PublicCompensationCursor::Boundary {
+                        sequence: round.auction_sequence,
+                        id: round.auction_id,
+                    }),
+                    has_more: cursor_mode,
+                    entries: vec![round],
+                })
+            })
+        }
+
+        fn list_public_compensation_lots(
+            &self,
+            auction_id: Uuid,
+            request: PublicCompensationLotRequest,
+        ) -> ApplicationFuture<'_, Option<PublicCompensationLotPage>> {
+            assert_eq!(auction_id, AUCTION_ID);
+            let voided = self.voided;
+            let round = round(voided);
+            let page = PublicCompensationLotPage {
+                entries: vec![PublicCompensationLot {
+                    lot_id: LOT_ID,
+                    lot_number: 1,
+                    equipment_name: "Legendary Staff".to_owned(),
+                    equipment_category: "Staff".to_owned(),
+                    equipment_id: EquipmentId::from_uuid(EQUIPMENT_ID),
+                    projected_game_equipment_url: EQUIPMENT_PREFIX.to_owned(),
+                    end_price: 2_000,
+                    hold_ppm: 500_000,
+                    adjustment_ppm: 50_000,
+                    leader_held_nanos: self.held_nanos,
+                    tax_amount: 125,
+                    discount_amount: 100,
+                    compensation_amount: 100,
+                    buyer_amount: 2_025,
+                    seller_amount: 2_000,
+                    buyer_name: "ExampleBuyer".to_owned(),
+                    seller_name: "ExampleSeller".to_owned(),
+                    voided,
+                    reversal: voided.then_some(PublicCompensationLotReversal {
+                        amount: -25,
+                        tax_shortfall: 0,
+                        balance_after: 1_000,
+                        created_at: round.settled_at + auction_time::Duration::days(1),
+                    }),
+                }],
+                round,
+                total: 1,
+                limit: request.limit,
+                offset: request.offset,
+            };
+            Box::pin(async move { Ok(Some(page)) })
+        }
+
+        fn list_public_compensation_movements(
+            &self,
+            auction_id: Uuid,
+            request: PublicCompensationMovementRequest,
+        ) -> ApplicationFuture<'_, Option<PublicCompensationMovementPage>> {
+            use PublicCompensationMovementKind::{Closing, Compensation, Opening, Tax};
+
+            assert_eq!(auction_id, AUCTION_ID);
+            let round = round(self.voided);
+            let entries = [
+                (1, Opening, 1_000, 1_000),
+                (2, Tax, 125, 1_125),
+                (3, Compensation, -100, 1_025),
+                (4, Closing, 0, 1_025),
+            ]
+            .into_iter()
+            .map(|(sequence, kind, amount, balance_after)| {
+                let has_lot = matches!(kind, Tax | Compensation);
+                PublicCompensationMovement {
+                    auction_id: AUCTION_ID,
+                    sequence,
+                    lot_id: has_lot.then_some(LOT_ID),
+                    lot_number: has_lot.then_some(1),
+                    equipment_name: has_lot.then(|| "Legendary Staff".to_owned()),
+                    equipment_category: has_lot.then(|| "Staff".to_owned()),
+                    equipment_id: has_lot.then(|| EquipmentId::from_uuid(EQUIPMENT_ID)),
+                    projected_game_equipment_url: has_lot.then(|| EQUIPMENT_PREFIX.to_owned()),
+                    hold_ppm: has_lot.then_some(500_000),
+                    adjustment_ppm: has_lot.then_some(50_000),
+                    leader_held_nanos: has_lot.then_some(3_600_000_000_000),
+                    kind,
+                    amount,
+                    balance_after,
+                    created_at: round.settled_at,
+                }
+            })
+            .collect();
+            Box::pin(async move {
+                Ok(Some(PublicCompensationMovementPage {
+                    round,
+                    entries,
+                    total: 4,
+                    limit: request.limit,
+                    offset: request.offset,
+                }))
+            })
+        }
+    }
+
+    struct FixtureEquipmentLinks;
+
+    impl PublicEquipmentLinkResolver for FixtureEquipmentLinks {
+        fn resolve_public_equipment_links<'a>(
+            &'a self,
+            targets: &'a [PublicEquipmentLinkTarget],
+        ) -> ApplicationFuture<'a, Vec<PublicEquipmentGameLink>> {
+            Box::pin(async move {
+                Ok(targets
+                    .iter()
+                    .map(|target| {
+                        assert_eq!(target.lot_id, LOT_ID);
+                        PublicEquipmentGameLink::new(format!(
+                            "{}/0123456789",
+                            target.projected_game_equipment_url
+                        ))
+                        .expect("样本装备链接")
+                    })
+                    .collect())
+            })
+        }
+    }
+
+    fn state(voided: bool, held_nanos: i64) -> State<PublicApiState> {
+        State(PublicApiState::new(
+            None,
+            None,
+            None,
+            Some(Arc::new(FixtureCompensation { voided, held_nanos })),
+            None,
+            None,
+            None,
+            Some(Arc::new(FixtureEquipmentLinks)),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            PublicHttpSecurity::default(),
+        ))
+    }
+
+    #[tokio::test]
+    async fn compensation_contract_fixtures() {
+        const ONE_HOUR_NANOS: i64 = 3_600_000_000_000;
+        for (name, url, voided) in [
+            ("public/compensation-pool", "/api/v1/compensation-pool", false),
+            ("public/compensation-pool-reversed", "/api/v1/compensation-pool", true),
+            (
+                "public/compensation-pool-cursor",
+                "/api/v1/compensation-pool?cursor=start&page_size=1",
+                false,
+            ),
+        ] {
+            let response = pool(state(voided, ONE_HOUR_NANOS), url.parse().expect("补偿池 URI"))
+                .await
+                .into_response();
+            assert_http(name, StatusCode::OK, response).await;
+        }
+
+        let lots_url = format!("/api/v1/compensation-pool/{AUCTION_ID}/lots");
+        for (name, voided, held_nanos) in [
+            ("public/compensation-lots", false, ONE_HOUR_NANOS),
+            ("public/compensation-lots-reversed", true, 0),
+            ("public/compensation-lots-long-hold", false, 9_072_000_000_000_000),
+        ] {
+            let response = lots(
+                state(voided, held_nanos),
+                Path(AUCTION_ID.to_string()),
+                lots_url.parse().expect("逐件明细 URI"),
+            )
+            .await
+            .into_response();
+            assert_http(name, StatusCode::OK, response).await;
+        }
+
+        let movements_url = format!("/api/v1/compensation-pool/{AUCTION_ID}/movements");
+        let response = movements(
+            state(false, ONE_HOUR_NANOS),
+            Path(AUCTION_ID.to_string()),
+            movements_url.parse().expect("流水 URI"),
+        )
+        .await
+        .into_response();
+        assert_http("public/compensation-movements", StatusCode::OK, response).await;
     }
 }

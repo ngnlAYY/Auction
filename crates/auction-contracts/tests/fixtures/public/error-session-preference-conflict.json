@@ -1,0 +1,6 @@
+{
+  "code": "session_preference_conflict",
+  "data": null,
+  "message": "登录时长命令或版本冲突",
+  "request_id": null
+}

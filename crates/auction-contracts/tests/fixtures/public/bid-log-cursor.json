@@ -1,0 +1,62 @@
+{
+  "code": "ok",
+  "data": {
+    "bids": [
+      {
+        "accepted_state_version": 14,
+        "amount": 18000000,
+        "auction_id": "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b",
+        "bidder_name": "later",
+        "created_at": "2025-11-14T12:50:40.11Z",
+        "equipment_category": "Staff",
+        "equipment_name": "Legendary Staff",
+        "fact_index": 1,
+        "id": "00000000-0000-4000-8000-000000000003",
+        "lot_id": "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2c",
+        "lot_number": 1,
+        "mechanism": "ordinary",
+        "valid": true
+      },
+      {
+        "accepted_state_version": 13,
+        "amount": 15750000,
+        "auction_id": "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b",
+        "bidder_name": "winner",
+        "created_at": "2025-11-14T12:50:40.1Z",
+        "defeated_proxy": {
+          "bidder_name": "challenger",
+          "maximum_amount": 15000000
+        },
+        "equipment_category": "Staff",
+        "equipment_name": "Legendary Staff",
+        "fact_index": 1,
+        "id": "00000000-0000-4000-8000-000000000002",
+        "lot_id": "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2c",
+        "lot_number": 1,
+        "mechanism": "proxy",
+        "source": "proxy",
+        "valid": false
+      },
+      {
+        "accepted_state_version": 12,
+        "amount": 10500000,
+        "auction_id": "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b",
+        "bidder_name": "winner",
+        "created_at": "2025-11-14T12:50:40.1Z",
+        "equipment_category": "Staff",
+        "equipment_name": "Legendary Staff",
+        "fact_index": 1,
+        "id": "00000000-0000-4000-8000-000000000001",
+        "lot_id": "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2c",
+        "lot_number": 1,
+        "mechanism": "proxy",
+        "source": "proxy",
+        "valid": false
+      }
+    ],
+    "cursor": "start",
+    "has_more": false,
+    "page_size": 20
+  },
+  "message": "竞价日志已加载"
+}

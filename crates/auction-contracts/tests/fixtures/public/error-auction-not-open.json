@@ -1,0 +1,6 @@
+{
+  "code": "auction_not_open",
+  "data": null,
+  "message": "当前拍卖不接受竞价",
+  "request_id": null
+}

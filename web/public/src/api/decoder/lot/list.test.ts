@@ -1,13 +1,15 @@
 // lot 目录摘要投影的回归断言：完整与精简装备投影得到相同目录行。
 
 import { expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 
 import type { TransportResponse } from "@auction/web-shared/net/transport";
-import { JSON_MAX_SAFE_INTEGER, type JsonObject } from "@auction/web-shared/net/wire";
-import { ok } from "@auction/web-shared/result";
+import { JSON_MAX_SAFE_INTEGER, type JsonObject, parseJson } from "@auction/web-shared/net/wire";
+import { err, ok } from "@auction/web-shared/result";
+import { object } from "..";
 
 const { catalogLevelFilterDefault, lotEnvelopeTakeRows } = await import("../../model");
-const { decodeLotList } = await import(".");
+const { decodeLotDetail, decodeLotList } = await import(".");
 
 const AUCTION_ID = "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b";
 const LOT_ID = "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2c";
@@ -216,4 +218,49 @@ test("preview_category_membership_is_checked_against_equipment_category：预览
   expect(decodeCatalog(previewListEnvelope(null, 1, counts), null).ok).toBe(true);
   // 缺少分类的旧预览行不能证明属于所选集合。
   expect(decodeCatalog(previewListEnvelope(null, 1, counts), "clo").ok).toBe(false);
+});
+
+function fixturePayload(name: string): JsonObject {
+  const path = new URL(
+    `../../../../../../crates/auction-contracts/tests/fixtures/public/${name}.json`,
+    import.meta.url,
+  );
+  const parsed = parseJson(readFileSync(path, "utf8"));
+  const payload = parsed.ok ? object(parsed.value) : null;
+  if (payload === null) throw new Error("lot 契约样本必须是 JSON 对象");
+  return payload;
+}
+
+test("lot 目录和详情接受服务端的 live、预览及 Final 投影", () => {
+  for (const [name, status] of [
+    ["lots", "live"],
+    ["lots-summary", "live"],
+    ["lots-preview", "preview"],
+    ["lots-final", "final"],
+  ] as const) {
+    const page = decodeCatalog(fixturePayload(name));
+    expect(page.ok && page.value.auction_status).toBe(status);
+  }
+  for (const name of ["lot", "lot-unleveled", "lot-preview"]) {
+    const response = responseWith(fixturePayload(name));
+    expect(decodeLotDetail(response, AUCTION_ID, LOT_ID).ok).toBe(true);
+    expect(decodeLotDetail(response, AUCTION_ID, AUCTION_ID)).toEqual(err("invalid_response"));
+  }
+});
+
+test("lot 详情拒绝存储属性中的额外键及错误类型", () => {
+  for (const [key, value] of [
+    ["prefix", false],
+    ["level", "450"],
+    ["extra", null],
+  ] as const) {
+    const payload = fixturePayload("lot-unleveled");
+    const lot = object(object(payload.data)?.lot);
+    const attributes = object(object(lot?.equipment)?.attributes);
+    if (attributes === null) throw new Error("缺少存储属性对象");
+    attributes[key] = value;
+    expect(decodeLotDetail(responseWith(payload), AUCTION_ID, LOT_ID)).toEqual(
+      err("invalid_response"),
+    );
+  }
 });

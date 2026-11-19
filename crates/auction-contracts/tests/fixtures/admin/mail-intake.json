@@ -1,0 +1,41 @@
+{
+  "code": "ok",
+  "data": {
+    "intakes": [
+      {
+        "decision_code": "rekey_accepted",
+        "external_mail_id": "9002",
+        "has_message_display": false,
+        "id": "00000000-0000-4000-8000-000000000022",
+        "kind": "rekey",
+        "mailbox_key": "main",
+        "processed_at": "2025-11-15T09:46:40.110000Z",
+        "received_at": "2025-11-15T09:46:40.110000Z",
+        "sender": null,
+        "status": "accepted",
+        "subject": null,
+        "world_id": "main"
+      },
+      {
+        "decision_code": "registration_accepted",
+        "external_mail_id": "9001",
+        "has_message_display": true,
+        "id": "00000000-0000-4000-8000-000000000021",
+        "kind": "registration",
+        "mailbox_key": "main",
+        "processed_at": "2025-11-15T09:46:40.110000Z",
+        "received_at": "2025-11-15T09:46:40.110000Z",
+        "sender": "ExamplePlayer",
+        "status": "accepted",
+        "subject": "register",
+        "world_id": "main"
+      }
+    ],
+    "pagination": {
+      "page": 1,
+      "page_size": 50,
+      "total": 2
+    }
+  },
+  "message": "邮件入站列表已加载"
+}

@@ -1,0 +1,6 @@
+{
+  "code": "proxy_maximum_not_lower",
+  "data": null,
+  "message": "新的代理上限必须严格降低",
+  "request_id": null
+}

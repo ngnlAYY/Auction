@@ -203,4 +203,26 @@ mod tests {
         catalog.auctions.swap(0, 1);
         assert!(decode_catalog(catalog, "all", None, 1, 10).is_ok());
     }
+
+    #[test]
+    fn catalog_decodes_backend_contract_fixtures_at_microsecond_precision() {
+        use auction_contracts::ApiResponse;
+
+        let all: ApiResponse<AdminSettlementCatalogResponse> = serde_json::from_str(include_str!(
+            "../../../auction-contracts/tests/fixtures/admin/settlement-catalog.json"
+        ))
+        .expect("跨世界目录样本");
+        let mut reversed = all.data.clone();
+        reversed.auctions.reverse();
+        let catalog = decode_catalog(all.data, "all", None, 1, 50).expect("跨世界结算目录");
+        assert_eq!(catalog.auctions[0].world_id, "main");
+        assert!(decode_catalog(reversed, "all", None, 1, 50).is_err());
+
+        let one: ApiResponse<AdminSettlementCatalogResponse> = serde_json::from_str(include_str!(
+            "../../../auction-contracts/tests/fixtures/admin/settlement-catalog-world.json"
+        ))
+        .expect("单世界目录样本");
+        let catalog = decode_catalog(one.data, "isekai", None, 1, 50).expect("单世界目录");
+        assert_eq!(catalog.auctions[0].world_id, "isekai");
+    }
 }

@@ -142,3 +142,35 @@ fn failure(error: LotWatchError) -> Response {
         response,
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use auction_application::public::LotWatchError;
+    use axum::http::StatusCode;
+
+    use super::failure;
+    use crate::server::contract_fixtures::assert_http;
+
+    #[tokio::test]
+    async fn watch_preference_error_contract_fixtures() {
+        for (name, status, error) in [
+            (
+                "public/error-invalid-watch-preference",
+                StatusCode::UNPROCESSABLE_ENTITY,
+                LotWatchError::Invalid,
+            ),
+            (
+                "public/error-watch-preference-conflict",
+                StatusCode::CONFLICT,
+                LotWatchError::Conflict,
+            ),
+            (
+                "public/error-pm-channel-unavailable",
+                StatusCode::UNPROCESSABLE_ENTITY,
+                LotWatchError::PmUnavailable,
+            ),
+        ] {
+            assert_http(name, status, failure(error)).await;
+        }
+    }
+}

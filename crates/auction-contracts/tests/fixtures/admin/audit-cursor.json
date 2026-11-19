@@ -1,0 +1,30 @@
+{
+  "code": "ok",
+  "data": {
+    "has_more": true,
+    "next_cursor": {
+      "before_id": "00000000-0000-4000-8000-00000000002a",
+      "before_time": "2025-11-15T09:46:40.110000Z"
+    },
+    "next_cursor_token": "eyJ2IjoxLCJhdCI6IjIwMjUtMTEtMTVUMDk6NDY6NDAuMTEwWiIsImlkIjoiMDAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDJhIn0",
+    "page_size": 1,
+    "records": [
+      {
+        "action": "auction.opened",
+        "actor_id": "fixture-admin",
+        "actor_type": "admin",
+        "entity_id": "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b",
+        "entity_type": "auction",
+        "id": "00000000-0000-4000-8000-00000000002a",
+        "metadata": {
+          "state_version": 4
+        },
+        "occurred_at": "2025-11-15T09:46:40.110000Z",
+        "request_id": null,
+        "result": "success",
+        "source": "admin"
+      }
+    ]
+  },
+  "message": "审计记录已加载"
+}

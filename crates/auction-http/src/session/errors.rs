@@ -339,3 +339,119 @@ pub(crate) fn competition_unavailable() -> Response {
 pub(crate) fn internal_error() -> Response {
     api_error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", "服务内部错误").into_response()
 }
+
+#[cfg(test)]
+mod tests {
+    use auction_application::auction::AuctionLifecycleAction;
+    use auction_application::core::{
+        ApplicationError, CommandLedgerError, CompetitionTransactionError, SessionError,
+    };
+    use auction_domain::{BidAmount, DomainError};
+    use axum::http::StatusCode;
+
+    use super::{
+        authentication_error, map_admin_lifecycle_error, map_competition_error, map_login_error,
+    };
+    use crate::server::contract_fixtures::assert_http;
+
+    #[tokio::test]
+    async fn admin_lifecycle_error_contract_fixture() {
+        assert_http(
+            "admin/error-stale-auction-state",
+            StatusCode::CONFLICT,
+            map_admin_lifecycle_error(
+                AuctionLifecycleAction::Open,
+                ApplicationError::CompetitionTransaction(CompetitionTransactionError::StaleState),
+            ),
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn public_competition_error_contract_fixtures() {
+        for (name, status, error) in [
+            ("invalid-amount", StatusCode::BAD_REQUEST, DomainError::InvalidAmount { value: 0 }),
+            (
+                "bid-too-low",
+                StatusCode::CONFLICT,
+                DomainError::BidTooLow { minimum: BidAmount::new(2_000).expect("最低价") },
+            ),
+            ("already-leading", StatusCode::CONFLICT, DomainError::AlreadyLeading),
+            ("active-proxy-exists", StatusCode::CONFLICT, DomainError::ActiveProxyExists),
+            ("auction-not-open", StatusCode::CONFLICT, DomainError::AuctionClosed),
+            ("proxy-disabled", StatusCode::CONFLICT, DomainError::ProxyDisabled),
+            ("proxy-slow-final", StatusCode::CONFLICT, DomainError::ProxySlowFinal),
+            ("proxy-outbid-limit", StatusCode::CONFLICT, DomainError::ProxyOutbidLimit),
+            (
+                "proxy-reentry-maximum-not-higher",
+                StatusCode::CONFLICT,
+                DomainError::ProxyReentryMaximumNotHigher,
+            ),
+            ("proxy-maximum-not-lower", StatusCode::CONFLICT, DomainError::ProxyMaximumNotLower),
+            (
+                "proxy-maximum-below-binding",
+                StatusCode::CONFLICT,
+                DomainError::ProxyMaximumBelowBinding,
+            ),
+            (
+                "proxy-authorization-not-active",
+                StatusCode::CONFLICT,
+                DomainError::ProxyAuthorizationNotActive,
+            ),
+            ("invalid-policy", StatusCode::CONFLICT, DomainError::InvalidRules("样本")),
+            (
+                "temporarily-unavailable",
+                StatusCode::SERVICE_UNAVAILABLE,
+                DomainError::InvalidBidState("样本"),
+            ),
+        ] {
+            assert_http(
+                &format!("public/error-{name}"),
+                status,
+                map_competition_error(ApplicationError::Domain(error)),
+            )
+            .await;
+        }
+        assert_http(
+            "public/error-bidder-ineligible",
+            StatusCode::FORBIDDEN,
+            map_competition_error(ApplicationError::CompetitionTransaction(
+                CompetitionTransactionError::BidderIneligible,
+            )),
+        )
+        .await;
+        assert_http(
+            "public/error-command-conflict",
+            StatusCode::CONFLICT,
+            map_competition_error(ApplicationError::CommandLedger(CommandLedgerError::Conflict)),
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn public_session_error_contract_fixtures() {
+        for (name, status, error) in [
+            ("public/error-invalid-key", StatusCode::BAD_REQUEST, SessionError::InvalidLoginKey),
+            (
+                "public/error-invalid-credentials",
+                StatusCode::UNAUTHORIZED,
+                SessionError::InvalidCredentials,
+            ),
+            (
+                "public/error-account-blacklisted",
+                StatusCode::FORBIDDEN,
+                SessionError::AccountInactive {
+                    public_reason: Some("示例封禁原因".to_owned())
+                },
+            ),
+        ] {
+            assert_http(name, status, map_login_error(ApplicationError::Session(error))).await;
+        }
+        assert_http(
+            "public/error-unauthenticated",
+            StatusCode::UNAUTHORIZED,
+            authentication_error(),
+        )
+        .await;
+    }
+}

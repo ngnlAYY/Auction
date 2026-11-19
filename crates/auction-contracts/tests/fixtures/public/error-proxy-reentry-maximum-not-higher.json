@@ -1,0 +1,6 @@
+{
+  "code": "proxy_reentry_maximum_not_higher",
+  "data": null,
+  "message": "重新建立授权时必须提高上一次上限",
+  "request_id": null
+}

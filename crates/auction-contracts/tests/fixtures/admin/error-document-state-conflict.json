@@ -1,0 +1,8 @@
+{
+  "code": "state_conflict",
+  "data": {
+    "current_revision": 6
+  },
+  "message": "文档版本已变化",
+  "request_id": null
+}

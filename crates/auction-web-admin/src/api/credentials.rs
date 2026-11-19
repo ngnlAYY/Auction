@@ -455,4 +455,35 @@ mod tests {
             decode_credential_check(serde_json::from_value(payload).unwrap(), &credential).is_err()
         );
     }
+
+    #[test]
+    fn credentials_decode_backend_contract_fixtures() {
+        use auction_contracts::{AdminCredentialListResponse, ApiResponse};
+
+        use super::decode_credential_list;
+
+        for (body, kind, world, status) in [
+            (
+                include_str!("../../../auction-contracts/tests/fixtures/admin/credentials.json"),
+                "mail_cookie",
+                "main",
+                "active",
+            ),
+            (
+                include_str!(
+                    "../../../auction-contracts/tests/fixtures/admin/credentials-forum.json"
+                ),
+                "forum_cookie",
+                "shared",
+                "disabled",
+            ),
+        ] {
+            let payload: ApiResponse<AdminCredentialListResponse> =
+                serde_json::from_str(body).expect("凭据样本");
+            let page =
+                decode_credential_list(payload.data, kind, world, status, 1, 50).expect("凭据列表");
+            assert_eq!(page.credentials[0].player_name.is_some(), kind == "mail_cookie");
+            assert!(page.restart_required);
+        }
+    }
 }

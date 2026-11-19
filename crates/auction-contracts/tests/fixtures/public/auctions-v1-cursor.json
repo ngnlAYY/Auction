@@ -1,0 +1,27 @@
+{
+  "code": "ok",
+  "data": {
+    "auctions": [
+      {
+        "effective_end_at": "2025-11-17T09:46:40Z",
+        "final_phase_at": "2025-11-16T09:46:40Z",
+        "id": "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b",
+        "lot_count": 2,
+        "opened_at": "2025-11-15T09:46:40Z",
+        "scheduled_open_at": "2025-11-15T09:46:40Z",
+        "sequence": 5,
+        "settled_at": "2025-11-17T09:46:40Z",
+        "sold_amount": 2000,
+        "sold_count": 1,
+        "state_version": 8,
+        "status": "settled",
+        "unsold_count": 1,
+        "world_id": "main"
+      }
+    ],
+    "cursor": "start",
+    "has_more": false,
+    "page_size": 20
+  },
+  "message": "拍卖列表已加载"
+}

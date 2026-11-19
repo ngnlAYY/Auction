@@ -1,0 +1,6 @@
+{
+  "code": "proxy_authorization_not_active",
+  "data": null,
+  "message": "代理授权当前不可降低",
+  "request_id": null
+}

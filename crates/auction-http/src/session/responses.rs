@@ -39,3 +39,26 @@ pub(crate) fn no_store_headers() -> HeaderMap {
     headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     headers
 }
+
+#[cfg(test)]
+mod tests {
+    use auction_application::public::PublicSessionIdentity;
+    use auction_time::{Duration, Timestamp};
+    use axum::http::StatusCode;
+    use uuid::Uuid;
+
+    use super::current_session_response;
+    use crate::server::contract_fixtures::assert_http;
+
+    #[tokio::test]
+    async fn timed_session_contract_fixture() {
+        let expires_at = Timestamp::from_timestamp(1_763_200_000, 0).expect("截止时刻");
+        let response = current_session_response(Some(PublicSessionIdentity {
+            user_id: Uuid::from_u128(0x0190_f2b4_1c2d_4e5f_8a6b_7c8d_9e0f_1a2b),
+            username: "ExamplePlayer".to_owned(),
+            expires_at: Some(expires_at),
+            absolute_expires_at: Some(expires_at + Duration::hours(1)),
+        }));
+        assert_http("public/session", StatusCode::OK, response).await;
+    }
+}

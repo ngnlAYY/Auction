@@ -1,0 +1,6 @@
+{
+  "code": "session_changed",
+  "data": null,
+  "message": "会话身份已变化，请重新确认操作",
+  "request_id": null
+}

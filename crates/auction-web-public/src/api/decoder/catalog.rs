@@ -679,4 +679,338 @@ mod tests {
         }
         assert!(bid_log_order_key(&ordinary).is_none(), "普通出价不带落败代理");
     }
+
+    #[test]
+    fn numbered_catalogs_decode_backend_contract_fixtures() {
+        use auction_contracts::{
+            AuctionListResponse, AuctionSummaryV2Response, PublicBidLogListResponse,
+            PublicPriceHistoryListResponse,
+        };
+
+        use super::super::decode_success_text;
+
+        for (body, status) in [
+            (
+                include_str!(
+                    "../../../../auction-contracts/tests/fixtures/public/auctions-v1.json"
+                ),
+                "settled",
+            ),
+            (
+                include_str!(
+                    "../../../../auction-contracts/tests/fixtures/public/auctions-v1-live.json"
+                ),
+                "live",
+            ),
+        ] {
+            let page: AuctionListResponse = decode_success_text(Some(body), |data| {
+                super::valid_auction_list(data, Some("main"), status, false)
+            })
+            .expect("v1 场次目录");
+            assert_eq!(page.auctions[0].status, status);
+        }
+        for (body, status, linked) in [
+            (
+                include_str!(
+                    "../../../../auction-contracts/tests/fixtures/public/auctions-v2.json"
+                ),
+                "settled",
+                true,
+            ),
+            (
+                include_str!(
+                    "../../../../auction-contracts/tests/fixtures/public/auctions-v2-live.json"
+                ),
+                "live",
+                false,
+            ),
+        ] {
+            let page: AuctionListResponse<AuctionSummaryV2Response> =
+                decode_success_text(Some(body), |data| {
+                    super::valid_auction_list(data, Some("main"), status, true)
+                })
+                .expect("v2 场次目录");
+            assert_eq!(page.auctions[0].forum_thread_url.is_some(), linked);
+            if linked {
+                assert!(
+                    decode_success_text::<AuctionListResponse, _>(Some(body), |data| {
+                        super::valid_auction_list(data, Some("main"), status, false)
+                    })
+                    .is_err()
+                );
+            }
+        }
+
+        let default =
+            include_str!("../../../../auction-contracts/tests/fixtures/public/bid-log.json");
+        let included = include_str!(
+            "../../../../auction-contracts/tests/fixtures/public/bid-log-defeated-proxy.json"
+        );
+        let page: PublicBidLogListResponse =
+            decode_success_text(Some(default), super::valid_bid_log_page).expect("缺省竞价日志");
+        assert!(page.bids.iter().all(|bid| bid.defeated_proxy.is_none()));
+        let page: PublicBidLogListResponse =
+            decode_success_text(Some(included), super::valid_bid_log_page).expect("Final 竞价日志");
+        assert_eq!(page.bids[0].accepted_state_version, 14);
+        assert_eq!(page.bids[1].accepted_state_version, 13);
+        assert_ne!(page.bids[0].created_at, page.bids[1].created_at);
+        assert_eq!(page.bids[1].created_at, page.bids[2].created_at);
+        assert_eq!(page.bids[2].accepted_state_version, 12);
+        assert!(page.bids[0].valid);
+        assert!(!page.bids[1].valid);
+        assert!(!page.bids[2].valid);
+        assert!(page.bids[1].defeated_proxy.is_some());
+
+        for (body, level) in [
+            (
+                include_str!(
+                    "../../../../auction-contracts/tests/fixtures/public/price-history.json"
+                ),
+                Some(450),
+            ),
+            (
+                include_str!(
+                    "../../../../auction-contracts/tests/fixtures/public/price-history-unleveled.json"
+                ),
+                None,
+            ),
+        ] {
+            let page: PublicPriceHistoryListResponse =
+                decode_success_text(Some(body), super::valid_price_history_page).expect("成交历史");
+            assert_eq!(page.rows[0].equipment_level, level);
+        }
+    }
+
+    #[test]
+    fn current_auction_contract_fixtures_keep_the_requested_projection() {
+        use auction_contracts::CurrentAuctionResponse;
+
+        use super::super::decode_success_text;
+
+        for (body, presentation) in [
+            (
+                include_str!(
+                    "../../../../auction-contracts/tests/fixtures/public/auction-current-proxy-mode.json"
+                ),
+                Some("live"),
+            ),
+            (
+                include_str!(
+                    "../../../../auction-contracts/tests/fixtures/public/auction-current-opening.json"
+                ),
+                Some("opening"),
+            ),
+            (
+                include_str!(
+                    "../../../../auction-contracts/tests/fixtures/public/auction-current-empty.json"
+                ),
+                None,
+            ),
+        ] {
+            let result: CurrentAuctionResponse = decode_success_text(Some(body), |data| {
+                super::valid_current_auction_response(data, "main")
+            })
+            .expect("请求代理默认模式后的当前场次");
+            assert_eq!(
+                result.auction.as_ref().map(|auction| auction.presentation_mode.as_str()),
+                presentation
+            );
+        }
+        let default = include_str!(
+            "../../../../auction-contracts/tests/fixtures/public/auction-current.json"
+        );
+        let legacy: CurrentAuctionResponse =
+            decode_success_text(Some(default), serde_json::Value::is_object)
+                .expect("缺省 wire DTO");
+        assert!(legacy.auction.expect("当前场次").proxy_default_mode.is_none());
+        assert!(
+            decode_success_text::<CurrentAuctionResponse, _>(Some(default), |data| {
+                super::valid_current_auction_response(data, "main")
+            })
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn content_reads_decode_backend_contract_fixtures() {
+        use auction_contracts::{PublicBlacklistResponse, PublicRulesResponse, WorldsResponse};
+
+        use super::super::decode_success_text;
+
+        let worlds: WorldsResponse = decode_success_text(
+            Some(include_str!("../../../../auction-contracts/tests/fixtures/public/worlds.json")),
+            super::valid_worlds,
+        )
+        .expect("世界目录");
+        assert!(worlds.worlds["main"].enabled);
+        assert!(!worlds.worlds["isekai"].enabled);
+        for (body, count) in [
+            (include_str!("../../../../auction-contracts/tests/fixtures/public/blacklist.json"), 1),
+            (
+                include_str!(
+                    "../../../../auction-contracts/tests/fixtures/public/blacklist-empty.json"
+                ),
+                0,
+            ),
+        ] {
+            let page: PublicBlacklistResponse =
+                decode_success_text(Some(body), super::valid_blacklist_page).expect("黑名单");
+            assert_eq!(page.users.len(), count);
+        }
+        for (body, title) in [
+            (
+                include_str!("../../../../auction-contracts/tests/fixtures/public/rules.json"),
+                "Auction rules",
+            ),
+            (
+                include_str!("../../../../auction-contracts/tests/fixtures/public/about.json"),
+                "About the auction",
+            ),
+        ] {
+            let document: PublicRulesResponse =
+                decode_success_text(Some(body), super::valid_rules).expect("站点文档");
+            assert_eq!(document.locale, "en");
+            assert_eq!(document.title, title);
+        }
+    }
+
+    #[test]
+    fn compensation_reads_decode_backend_contract_fixtures() {
+        use auction_contracts::{PublicCompensationLotPageResponse, PublicCompensationResponse};
+
+        use super::super::decode_success_text;
+
+        for (body, reversal_count) in [
+            (
+                include_str!(
+                    "../../../../auction-contracts/tests/fixtures/public/compensation-pool.json"
+                ),
+                0,
+            ),
+            (
+                include_str!(
+                    "../../../../auction-contracts/tests/fixtures/public/compensation-pool-reversed.json"
+                ),
+                1,
+            ),
+        ] {
+            let pool: PublicCompensationResponse =
+                decode_success_text(Some(body), super::valid_compensation_pool).expect("补偿池");
+            assert_eq!(pool.rounds[0].reversal_count, reversal_count);
+        }
+        for (body, voided) in [
+            (
+                include_str!(
+                    "../../../../auction-contracts/tests/fixtures/public/compensation-lots.json"
+                ),
+                false,
+            ),
+            (
+                include_str!(
+                    "../../../../auction-contracts/tests/fixtures/public/compensation-lots-reversed.json"
+                ),
+                true,
+            ),
+        ] {
+            let page: PublicCompensationLotPageResponse =
+                decode_success_text(Some(body), super::valid_compensation_lots).expect("补偿明细");
+            assert_eq!(page.lots[0].reversal.is_some(), voided);
+        }
+        // 该已发布数值字段可以超过 JavaScript 安全整数上限。保持失败关闭，待 wire 表达统一。
+        let long_hold = include_str!(
+            "../../../../auction-contracts/tests/fixtures/public/compensation-lots-long-hold.json"
+        );
+        assert!(
+            decode_success_text::<PublicCompensationLotPageResponse, _>(
+                Some(long_hold),
+                super::valid_compensation_lots
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn server_cursor_contract_fixtures_cannot_be_used_as_numbered_pages() {
+        use auction_contracts::{
+            ApiResponse, AuctionListResponse, AuctionSummaryV2Response, PublicBidLogListResponse,
+            PublicCompensationResponse, PublicPriceHistoryListResponse,
+        };
+
+        use super::super::decode_success_text;
+
+        let v1 = include_str!(
+            "../../../../auction-contracts/tests/fixtures/public/auctions-v1-cursor.json"
+        );
+        let v2 = include_str!(
+            "../../../../auction-contracts/tests/fixtures/public/auctions-v2-cursor.json"
+        );
+        let v1_wire: ApiResponse<AuctionListResponse> =
+            serde_json::from_str(v1).expect("v1 游标 DTO");
+        let v2_wire: ApiResponse<AuctionListResponse<AuctionSummaryV2Response>> =
+            serde_json::from_str(v2).expect("v2 游标 DTO");
+        assert_eq!(v1_wire.data.cursor.as_deref(), Some("start"));
+        assert_eq!(v2_wire.data.cursor.as_deref(), Some("start"));
+        for (body, with_forum) in [(v1, false), (v2, true)] {
+            assert!(
+                decode_success_text::<serde_json::Value, _>(Some(body), |data| {
+                    super::valid_auction_list(data, Some("main"), "settled", with_forum)
+                })
+                .is_err()
+            );
+        }
+
+        let log =
+            include_str!("../../../../auction-contracts/tests/fixtures/public/bid-log-cursor.json");
+        let log_wire: ApiResponse<PublicBidLogListResponse> =
+            serde_json::from_str(log).expect("竞价游标 DTO");
+        assert_eq!(log_wire.data.cursor.as_deref(), Some("start"));
+        assert!(
+            decode_success_text::<PublicBidLogListResponse, _>(
+                Some(log),
+                super::valid_bid_log_page
+            )
+            .is_err()
+        );
+
+        let history = include_str!(
+            "../../../../auction-contracts/tests/fixtures/public/price-history-cursor.json"
+        );
+        let history_wire: ApiResponse<PublicPriceHistoryListResponse> =
+            serde_json::from_str(history).expect("成交游标 DTO");
+        assert!(history_wire.data.stats.is_none());
+        assert!(
+            decode_success_text::<PublicPriceHistoryListResponse, _>(
+                Some(history),
+                super::valid_price_history_page
+            )
+            .is_err()
+        );
+
+        let pool = include_str!(
+            "../../../../auction-contracts/tests/fixtures/public/compensation-pool-cursor.json"
+        );
+        let pool_wire: ApiResponse<PublicCompensationResponse> =
+            serde_json::from_str(pool).expect("补偿游标 DTO");
+        assert!(pool_wire.data.next_cursor.is_some());
+        assert!(
+            decode_success_text::<PublicCompensationResponse, _>(
+                Some(pool),
+                super::valid_compensation_pool
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn compensation_movement_dto_reads_backend_contract_fixture() {
+        let result: auction_contracts::ApiResponse<
+            auction_contracts::PublicCompensationMovementPageResponse,
+        > = serde_json::from_str(include_str!(
+            "../../../../auction-contracts/tests/fixtures/public/compensation-movements.json"
+        ))
+        .expect("补偿流水 DTO");
+        assert_eq!(result.data.movements.len(), 4);
+        assert!(result.data.movements[0].lot_id.is_none());
+        assert!(result.data.movements[1].lot_id.is_some());
+    }
 }

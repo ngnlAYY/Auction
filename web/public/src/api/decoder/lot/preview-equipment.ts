@@ -147,10 +147,11 @@ function validAttributes(value: unknown): boolean {
       ["type", "prefix", "suffix", "level", "tradeable", "stats"],
     ) &&
     nonempty(decoded.quality) &&
-    optionalNonempty(decoded, "type") &&
-    optionalNonempty(decoded, "prefix") &&
-    optionalNonempty(decoded, "suffix") &&
-    optionalNonnegative(decoded, "level") &&
+    // 已存装备允许缺省的词缀为空串，无等级以 null 保存。
+    ["type", "prefix", "suffix"].every(
+      (key) => !Object.hasOwn(decoded, key) || typeof decoded[key] === "string",
+    ) &&
+    (decoded.level === null || optionalNonnegative(decoded, "level")) &&
     optionalBool(decoded, "tradeable") &&
     optionalAttributeStats(decoded, "stats")
   );
@@ -166,7 +167,7 @@ function validAttributeStats(value: unknown): boolean {
       statObject === null ||
       !jsonKeysOnly(statObject, ["value"], ["base"]) ||
       !nonempty(statObject.value) ||
-      !optionalFinite(statObject, "base")
+      (statObject.base !== null && !optionalFinite(statObject, "base"))
     ) {
       return false;
     }

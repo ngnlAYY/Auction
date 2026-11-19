@@ -1,0 +1,25 @@
+{
+  "code": "ok",
+  "data": {
+    "failures": [
+      {
+        "code": "invalid_event",
+        "consumer_key": "public-realtime",
+        "event_id": "00000000-0000-4000-8000-000000000026",
+        "failed_at": "2025-11-15T09:46:40.110000Z",
+        "id": "00000000-0000-4000-8000-000000000027",
+        "resolved": false,
+        "resolved_at": null,
+        "safe_detail": "示例失败",
+        "stream_key": "auction:0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b"
+      }
+    ],
+    "pagination": {
+      "has_more": true,
+      "page": 1,
+      "page_size": 1,
+      "total": 2
+    }
+  },
+  "message": "实时消费失败列表已加载"
+}

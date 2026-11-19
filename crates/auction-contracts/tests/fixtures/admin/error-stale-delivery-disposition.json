@@ -1,0 +1,6 @@
+{
+  "code": "stale_delivery_state",
+  "data": null,
+  "message": "交付已被其他命令推进",
+  "request_id": null
+}

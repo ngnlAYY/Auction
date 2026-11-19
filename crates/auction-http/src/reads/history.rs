@@ -356,7 +356,8 @@ mod tests {
 
     use auction_application::auction::{
         PublicBidLogEntry, PublicBidLogListRequest, PublicBidLogPage, PublicBidLogReader,
-        PublicDefeatedProxy,
+        PublicDefeatedProxy, PublicPriceHistoryEntry, PublicPriceHistoryListRequest,
+        PublicPriceHistoryPage, PublicPriceHistoryReader, PublicPriceHistoryStats,
     };
     use auction_application::core::ApplicationFuture;
     use auction_time::Timestamp;
@@ -368,8 +369,9 @@ mod tests {
     use tower::ServiceExt;
     use uuid::Uuid;
 
-    use super::list_bid_log;
+    use super::{list_bid_log, list_price_history};
     use crate::middleware::security::PublicHttpSecurity;
+    use crate::server::contract_fixtures::{assert_http, assert_wire};
     use crate::state::PublicApiState;
 
     const AUCTION_ID: Uuid = Uuid::from_u128(0x0190_f2b4_1c2d_4e5f_8a6b_7c8d_9e0f_1a2b);
@@ -383,7 +385,7 @@ mod tests {
         defeated_proxy: Option<PublicDefeatedProxy>,
     ) -> PublicBidLogEntry {
         PublicBidLogEntry {
-            id: Uuid::from_u128(bid),
+            id: Uuid::from_u128(0x4000_8000_0000_0000_0000 + bid),
             auction_id: AUCTION_ID,
             lot_id: LOT_ID,
             lot_number: 1,
@@ -405,25 +407,49 @@ mod tests {
     }
 
     /// 一页两条代理事实：较新的一条在代理竞争中击败了另一份授权。
-    struct FixedBidLog;
+    struct FixedBidLog {
+        final_phase: bool,
+    }
 
     impl PublicBidLogReader for FixedBidLog {
         fn list_public_bid_log(
             &self,
             request: PublicBidLogListRequest,
         ) -> ApplicationFuture<'_, Option<PublicBidLogPage>> {
+            let final_phase = self.final_phase;
             Box::pin(async move {
                 let defeated = PublicDefeatedProxy {
                     bidder_name: "challenger".to_owned(),
                     maximum_amount: 15_000_000,
                 };
+                let mut entries = vec![
+                    entry(2, "winner", 15_750_000, 11, Some(defeated)),
+                    entry(1, "winner", 10_500_000, 10, None),
+                ];
+                if final_phase {
+                    // 同时刻由版本与事实序号打破平局；Final 之后的新版本仍保留原事实。
+                    entries[0].created_at =
+                        Timestamp::from_timestamp(1_763_124_640, 100_000_000).expect("出价时刻");
+                    entries[1].created_at = entries[0].created_at;
+                    entries[0].accepted_state_version = 13;
+                    entries[1].accepted_state_version = 12;
+                    // 当前领先人与价格才产生 valid，历史事实仍保留其击败的代理。
+                    entries[0].valid = false;
+                    let mut later = entry(3, "later", 18_000_000, 14, None);
+                    later.mechanism = "ordinary".to_owned();
+                    later.source = None;
+                    later.created_at =
+                        Timestamp::from_timestamp(1_763_124_640, 110_000_000).expect("出价时刻");
+                    later.valid = true;
+                    entries.insert(0, later);
+                }
                 Ok(Some(PublicBidLogPage {
-                    auction_status: "live".to_owned(),
-                    entries: vec![
-                        entry(2, "winner", 15_750_000, 11, Some(defeated)),
-                        entry(1, "winner", 10_500_000, 10, None),
-                    ],
-                    total: Some(2),
+                    auction_status: if final_phase { "final" } else { "live" }.to_owned(),
+                    total: request
+                        .cursor
+                        .is_none()
+                        .then(|| i64::try_from(entries.len()).expect("出价数量")),
+                    entries,
                     limit: request.limit,
                     offset: request.offset,
                     next_cursor: None,
@@ -434,6 +460,10 @@ mod tests {
     }
 
     async fn request(query: &str) -> (StatusCode, Value) {
+        request_bid_log(query, false).await
+    }
+
+    async fn request_bid_log(query: &str, final_phase: bool) -> (StatusCode, Value) {
         let state = PublicApiState::new(
             None,
             None,
@@ -443,7 +473,7 @@ mod tests {
             None,
             None,
             None,
-            Some(Arc::new(FixedBidLog)),
+            Some(Arc::new(FixedBidLog { final_phase })),
             None,
             None,
             None,
@@ -526,6 +556,119 @@ mod tests {
             assert_eq!(status, StatusCode::BAD_REQUEST, "{query}");
             assert_eq!(body["code"], "invalid_query", "{query}");
             assert_eq!(body["message"], message, "{query}");
+        }
+    }
+
+    struct FixedPriceHistory;
+
+    impl PublicPriceHistoryReader for FixedPriceHistory {
+        fn list_public_price_history(
+            &self,
+            request: PublicPriceHistoryListRequest,
+        ) -> ApplicationFuture<'_, PublicPriceHistoryPage> {
+            Box::pin(async move {
+                let at = Timestamp::from_timestamp(1_763_124_640, 110_000_000).expect("成交时刻");
+                let row = PublicPriceHistoryEntry {
+                    lot_id: LOT_ID,
+                    auction_id: AUCTION_ID,
+                    world_id: "main".to_owned(),
+                    auction_sequence: 5,
+                    ordering_lot_number: 2,
+                    lot_number: 1,
+                    equipment_name: "Legendary Staff".to_owned(),
+                    equipment_category: "Staff".to_owned(),
+                    equipment_level: Some(450),
+                    buyer_name: "buyer".to_owned(),
+                    seller_name: "seller".to_owned(),
+                    price: 2_000,
+                    closed_at: at,
+                };
+                let older = PublicPriceHistoryEntry {
+                    lot_id: Uuid::from_u128(0x4000_8000_0000_0000_0003),
+                    ordering_lot_number: 1,
+                    lot_number: 2,
+                    equipment_level: None,
+                    price: 2_001,
+                    ..row.clone()
+                };
+                if request.world_id.as_deref() == Some("isekai") {
+                    let row = PublicPriceHistoryEntry { world_id: "isekai".to_owned(), ..older };
+                    return Ok(PublicPriceHistoryPage {
+                        entries: vec![row],
+                        total: Some(1),
+                        stats: Some(PublicPriceHistoryStats {
+                            count: 1,
+                            minimum: 2_001,
+                            maximum: 2_001,
+                            median: 2_001,
+                            median_exact: Some("2001".to_owned()),
+                        }),
+                        limit: request.limit,
+                        offset: request.offset,
+                        next_cursor: None,
+                        has_more: false,
+                    });
+                }
+                Ok(PublicPriceHistoryPage {
+                    entries: vec![row, older],
+                    total: request.cursor.is_none().then_some(2),
+                    stats: request.cursor.is_none().then(|| PublicPriceHistoryStats {
+                        count: 2,
+                        minimum: 2_000,
+                        maximum: 2_001,
+                        median: 2_000,
+                        median_exact: Some("2000.5".to_owned()),
+                    }),
+                    limit: request.limit,
+                    offset: request.offset,
+                    next_cursor: None,
+                    has_more: false,
+                })
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn history_read_contract_fixtures() {
+        for (name, query, final_phase) in [
+            ("bid-log", "", false),
+            ("bid-log-defeated-proxy", "include=defeated_proxy", true),
+            ("bid-log-cursor", "cursor=start&include=defeated_proxy", true),
+        ] {
+            let (status, body) = request_bid_log(query, final_phase).await;
+            assert_eq!(status, StatusCode::OK, "{name}: {body}");
+            assert_wire(&format!("public/{name}"), body);
+        }
+
+        let state = PublicApiState::new(
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(Arc::new(FixedPriceHistory)),
+            None,
+            None,
+            None,
+            None,
+            PublicHttpSecurity::default(),
+        );
+        for (name, uri) in [
+            ("price-history", "/api/v1/price-history"),
+            ("price-history-cursor", "/api/v1/price-history?cursor=start"),
+            ("price-history-unleveled", "/api/v1/price-history?world=isekai"),
+        ] {
+            let response = list_price_history(
+                axum::extract::State(state.clone()),
+                uri.parse().expect("成交历史 URI"),
+            )
+            .await
+            .expect("成交历史");
+            assert_http(&format!("public/{name}"), StatusCode::OK, response).await;
         }
     }
 }

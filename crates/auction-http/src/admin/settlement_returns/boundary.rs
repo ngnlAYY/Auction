@@ -230,4 +230,27 @@ mod tests {
             assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{invalid}");
         }
     }
+
+    #[tokio::test]
+    async fn settlement_return_error_contract_fixtures() {
+        use crate::server::contract_fixtures::assert_http;
+
+        for (name, error) in [
+            ("admin/error-stale-settlement-return-state", SettlementReturnError::Stale),
+            ("admin/error-settlement-return-untrusted", SettlementReturnError::Untrusted),
+            ("admin/error-settlement-return-unbound", SettlementReturnError::Unbound),
+            (
+                "admin/error-settlement-return-assets-mismatch",
+                SettlementReturnError::AssetsMismatch,
+            ),
+            ("admin/error-settlement-return-proof-required", SettlementReturnError::ProofRequired),
+        ] {
+            assert_http(
+                name,
+                StatusCode::CONFLICT,
+                map_settlement_return_error("handle", error.into()),
+            )
+            .await;
+        }
+    }
 }

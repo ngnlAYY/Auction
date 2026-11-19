@@ -183,3 +183,83 @@ fn map_error(error: ApplicationError) -> Response {
         response,
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use auction_application::admin::{
+        AdminProxyEvent, AdminProxyEventCursor, AdminProxyEventListRequest, AdminProxyEventPage,
+        AdminProxyEventReader, UNKNOWN_ADMIN_PROXY_EVENT_TOTAL,
+    };
+    use auction_application::core::ApplicationFuture;
+    use auction_domain::LotId;
+    use axum::http::StatusCode;
+    use uuid::Uuid;
+
+    use crate::mapping::encode_admin_proxy_event_cursor;
+    use crate::server::contract_fixtures::{AdminFixturePorts, admin_get, assert_http, time};
+
+    const LOT_ID: Uuid = Uuid::from_u128(0x0190_f2b4_1c2d_4e5f_8a6b_7c8d_9e0f_1a2c);
+
+    struct FixtureProxyEvents {
+        finalized: bool,
+    }
+
+    impl AdminProxyEventReader for FixtureProxyEvents {
+        fn list_admin_proxy_events(
+            &self,
+            request: AdminProxyEventListRequest,
+        ) -> ApplicationFuture<'_, Option<AdminProxyEventPage>> {
+            let lot_id = LotId::from_uuid(LOT_ID);
+            assert_eq!(request.lot_id, lot_id);
+            let cursor_mode = request.cursor.is_some();
+            let mode = if self.finalized || cursor_mode { "fast" } else { "slow" };
+            let event = AdminProxyEvent {
+                command_id: Uuid::from_u128(0x4000_8000_0000_0000_0028),
+                authorization_id: Uuid::from_u128(0x4000_8000_0000_0000_0029),
+                authorization_sequence: 1,
+                usage_number: 1,
+                lot_id,
+                user_id: Uuid::from_u128(0x4000_8000_0000_0000_0024),
+                username: "ExamplePlayer".to_owned(),
+                mode: mode.to_owned(),
+                maximum_amount: 5_000,
+                status: if self.finalized { "final_fast" } else { "active" }.to_owned(),
+                state_version: if self.finalized { 2 } else { 1 },
+                created_at: time(),
+            };
+            Box::pin(async move {
+                Ok(Some(AdminProxyEventPage {
+                    lot_id,
+                    entries: vec![event],
+                    total: if cursor_mode { UNKNOWN_ADMIN_PROXY_EVENT_TOTAL } else { 1 },
+                    limit: request.limit,
+                    offset: request.offset,
+                    cursor: request.cursor,
+                    next_cursor: None,
+                    has_more: false,
+                }))
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn proxy_events_contract_fixtures() {
+        let path = format!("/api/v1/admin/lots/{LOT_ID}/proxy-events");
+        let cursor = encode_admin_proxy_event_cursor(AdminProxyEventCursor::Start);
+        let cursor_path = format!("{path}?cursor={cursor}");
+        for (name, url, finalized) in [
+            ("admin/proxy-events", &path, false),
+            ("admin/proxy-events-final", &path, true),
+            ("admin/proxy-events-cursor", &cursor_path, false),
+        ] {
+            let state = AdminFixturePorts {
+                proxy_events: Some(Arc::new(FixtureProxyEvents { finalized })),
+                ..Default::default()
+            }
+            .state();
+            assert_http(name, StatusCode::OK, admin_get(state, url).await).await;
+        }
+    }
+}

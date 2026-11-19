@@ -1,0 +1,18 @@
+{
+  "code": "ok",
+  "data": {
+    "auction": {
+      "bidding_open": false,
+      "id": "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b",
+      "number": 5,
+      "opens_at": "2025-11-15T09:46:40Z",
+      "presentation_mode": "opening",
+      "preview_revision": 2,
+      "proxy_default_mode": "fast",
+      "scheduled_ends_at": null,
+      "status": "preview",
+      "world": "main"
+    }
+  },
+  "message": "当前拍卖已加载"
+}

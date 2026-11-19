@@ -1,0 +1,9 @@
+{
+  "code": "ok",
+  "data": {
+    "bot_players": [
+      "ExampleBot"
+    ]
+  },
+  "message": "注册说明已加载"
+}

@@ -510,3 +510,32 @@ async fn runtime_config_get_matches_browser_fixtures() {
         assert_eq!(actual, expected, "{name}");
     }
 }
+
+#[tokio::test]
+async fn runtime_config_read_contract_fixtures() {
+    use crate::server::contract_fixtures::assert_wire;
+
+    for (name, path) in [
+        ("admin/runtime-config-unextended", "/api/v1/admin/config"),
+        ("admin/runtime-config-taxonomy", "/api/v1/admin/config?include_equipment_taxonomy=true"),
+        (
+            "admin/runtime-config-collection-threshold",
+            "/api/v1/admin/config?include=fulfillment_collection_overdue_age_seconds",
+        ),
+    ] {
+        let state = state_with_runtime(Some(Arc::new(RuntimeWithWorkerError {
+            current: document(json!({})),
+            worker_error: WORKER_FILE_HINT,
+        })));
+        let response = get(
+            state,
+            ConnectInfo("127.0.0.1:20123".parse().unwrap()),
+            headers(),
+            path.parse().unwrap(),
+        )
+        .await;
+        let (status, actual) = json_response(response).await;
+        assert_eq!(status, StatusCode::OK, "{name}");
+        assert_wire(name, actual);
+    }
+}

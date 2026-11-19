@@ -348,4 +348,19 @@ mod tests {
         assert_eq!((unusable.customized, unusable.usable), (true, false));
         assert_eq!(unusable.body, "Payout only");
     }
+
+    #[tokio::test]
+    async fn mail_template_error_contract_fixture() {
+        use auction_application::mail_templates::MailTemplateStoreError;
+        use axum::http::StatusCode;
+
+        use crate::server::contract_fixtures::assert_http;
+
+        assert_http(
+            "admin/error-mail-template-conflict",
+            StatusCode::CONFLICT,
+            super::store_error(MailTemplateStoreError::Conflict),
+        )
+        .await;
+    }
 }

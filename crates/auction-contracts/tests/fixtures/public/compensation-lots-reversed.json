@@ -1,0 +1,51 @@
+{
+  "code": "ok",
+  "data": {
+    "lots": [
+      {
+        "adjustment_ppm": 50000,
+        "buyer_amount": 2025,
+        "buyer_name": "ExampleBuyer",
+        "compensation_amount": 100,
+        "discount_amount": 100,
+        "end_price": 2000,
+        "equipment_category": "Staff",
+        "equipment_name": "Legendary Staff",
+        "game_equipment_url": "https://hentaiverse.org/equip/123/0123456789",
+        "hold_ppm": 500000,
+        "leader_held_nanos": 0,
+        "lot_id": "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2c",
+        "lot_number": 1,
+        "reversal": {
+          "amount": -25,
+          "balance_after": 1000,
+          "reversed_at": "2025-11-16T09:46:40Z",
+          "tax_shortfall": 0
+        },
+        "seller_amount": 2000,
+        "seller_name": "ExampleSeller",
+        "tax_amount": 125,
+        "voided": true
+      }
+    ],
+    "page": 1,
+    "page_size": 50,
+    "round": {
+      "auction_id": "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b",
+      "auction_sequence": 5,
+      "closing_balance": 1025,
+      "compensation_out": 100,
+      "discount_demand": 100,
+      "movement_count": 4,
+      "opening_balance": 1000,
+      "policy_mode": "hold_curve_v2",
+      "reversal_amount": -25,
+      "reversal_count": 1,
+      "settled_at": "2025-11-15T09:46:40Z",
+      "tax_income": 125,
+      "world_id": "main"
+    },
+    "total": 1
+  },
+  "message": "逐件结算明细已加载"
+}

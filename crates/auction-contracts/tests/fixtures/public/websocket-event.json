@@ -1,0 +1,11 @@
+{
+  "created_at": "2025-11-15T09:46:40.11Z",
+  "event_id": "00000000-0000-4000-8000-000000000015",
+  "kind": "auction.final_phase_entered",
+  "payload": {
+    "auction_id": "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b",
+    "state_version": 12
+  },
+  "schema_version": 1,
+  "stream_sequence": 2
+}
