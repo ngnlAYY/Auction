@@ -175,11 +175,12 @@ impl DatabaseStore {
                 .await
                 .map_err(|_| CredentialRuntimeOwnershipError::Unavailable)?;
             let generation = sqlx::query_scalar::<_, i64>(
-                "INSERT INTO public.mail_runtime_generation (scope, generation, activated_at)
-                     VALUES ('mail_cookie', 1, clock_timestamp())
+                "WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
+                     INSERT INTO public.mail_runtime_generation (scope, generation, activated_at)
+                     VALUES ('mail_cookie', 1, (SELECT at FROM sql_clock))
                      ON CONFLICT (scope) DO UPDATE
                      SET generation = public.mail_runtime_generation.generation + 1,
-                         activated_at = clock_timestamp()
+                         activated_at = (SELECT at FROM sql_clock)
                      RETURNING generation",
             )
             .fetch_one(&mut *transaction)

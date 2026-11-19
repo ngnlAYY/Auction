@@ -387,16 +387,19 @@ async fn postgres_return_take_unknown_completed_observation_settles_like_take_pr
     assert_eq!(kind, "take_proven");
     assert_eq!(details["proof"], "action_recovered_inbox_v1");
     assert_eq!(details["next"], "resend");
-    let (reference, failure): (Option<String>, Option<String>) = sqlx::query_as(
-        "SELECT d.external_reference, a.failure_code FROM public.settlement_return_actions a
+    let (reference, failure, shared_clock): (Option<String>, Option<String>, bool) =
+        sqlx::query_as(
+            "SELECT d.external_reference, a.failure_code, (d.completed_at = d.updated_at) IS TRUE
+         FROM public.settlement_return_actions a
          JOIN public.deliveries d ON d.id = a.delivery_id WHERE a.return_mail_id = $1",
-    )
-    .bind(take.returned.case)
-    .fetch_one(pool)
-    .await
-    .expect("读取 Take 投递引用");
+        )
+        .bind(take.returned.case)
+        .fetch_one(pool)
+        .await
+        .expect("读取 Take 投递引用");
     assert_eq!(reference, Some(format!("mooglemail:main:take:{}", take.mid)));
     assert_eq!(failure, None);
+    assert!(shared_clock, "恢复 Take 的完成与更新必须共用一个时刻");
 
     // 同一观察重放：投递已不在人工核对，不再改写；正常收口也没有到期项。
     assert!(
@@ -462,6 +465,15 @@ async fn postgres_return_take_unknown_still_present_requeues_without_double_take
     );
     assert_eq!((requeued.takes, requeued.funding_returns), (0, 0), "重新排队不记领回");
     assert_eq!(requeued.allocation_state, "spent", "重新排队不动资金");
+    let requeue_clock: bool = sqlx::query_scalar(
+        "SELECT ((result_metadata->>'sweep_requeued_at')::timestamptz = updated_at) IS TRUE
+         FROM public.deliveries WHERE id = $1",
+    )
+    .bind(take.take_delivery)
+    .fetch_one(pool)
+    .await
+    .expect("读取扫描重排时间");
+    assert!(requeue_clock, "重排证据与更新必须共用一个时刻");
     let (kind, details) = last_event(pool, take.returned.case).await;
     assert_eq!(kind, "take_activated");
     assert_eq!(

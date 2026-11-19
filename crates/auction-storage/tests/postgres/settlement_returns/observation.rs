@@ -338,6 +338,15 @@ async fn postgres_return_take_retry_requires_claimable_observation_each_time() {
     let command_id = Uuid::new_v4();
     let result = retry(&store, case, version, command_id).await.expect("再次领回");
     assert_eq!(result.status, SettlementReturnCaseStatus::TakePending);
+    let retake_clock: bool = sqlx::query_scalar(
+        "SELECT ((result_metadata->>'retake_requested_at')::timestamptz = updated_at) IS TRUE
+         FROM public.deliveries WHERE id = $1",
+    )
+    .bind(take.take_delivery)
+    .fetch_one(pool)
+    .await
+    .expect("读取再次领回的请求时间");
+    assert!(retake_clock, "再次领回的请求与更新必须共用一个时刻");
     let requeued = facts(pool, &take).await;
     assert_eq!(
         (

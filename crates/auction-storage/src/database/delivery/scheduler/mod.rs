@@ -109,14 +109,16 @@ macro_rules! recipient_renamed_fact {
 /// 换季提醒：冻结边界已过、不可解析或已无未完成义务时不得发送；边界只从冻结载荷读取。
 /// 投稿接收回执：原场次已开拍或撤场后不得补寄。
 macro_rules! delivery_notice_eligibility_gate {
-    () => {
+    ($clock:literal) => {
         concat!(
             r#"(
     deliveries.origin_kind <> 'season_reminder'
     OR (
         COALESCE("#,
             season_reminder_boundary!(),
-            r#" > clock_timestamp(), false)
+            " > ",
+            $clock,
+            r#", false)
         AND "#,
             season_reminder_outstanding_gate!(),
             r#"
@@ -172,9 +174,9 @@ macro_rules! delivery_recovery_return_gate {
 /// 已录入拍卖的邮件不能退回，相反资产意图也不能同时发送；该门禁覆盖升级前已 pending/claimed 的
 /// 冲突记录，保留原账本供人工核对，不能靠重放命令重新获得发送授权。
 /// 通知类资格（换季提醒边界/未完成义务、投稿回执原场次状态）与结算义务的恢复接管同样在此复核，
-/// 领取与发送共用。
+/// 领取与发送共用。两个时限条件引用外层物化的同一墙钟读数。
 macro_rules! delivery_completion_gate {
-    () => {
+    ($clock:literal) => {
         concat!(
             r#"(
     deliveries.origin_kind <> 'mail_intake'
@@ -202,9 +204,9 @@ macro_rules! delivery_completion_gate {
             " AND ",
             delivery_mail_disposition_gate!(),
             " AND ",
-            crate::database::lot_watch::delivery_watch_gate!(),
+            crate::database::lot_watch::delivery_watch_gate!($clock),
             " AND ",
-            delivery_notice_eligibility_gate!(),
+            delivery_notice_eligibility_gate!($clock),
             " AND ",
             delivery_recovery_return_gate!()
         )
@@ -634,9 +636,11 @@ mod notice_gate_tests {
         let mut connection = sqlx::PgConnection::connect(&url).await?;
         let mut tx = connection.begin().await?;
         tx.execute(FIXTURE).await?;
-        let gate = delivery_completion_gate!().replace("public.", "pg_temp.");
+        let gate =
+            delivery_completion_gate!("(SELECT at FROM sql_clock)").replace("public.", "pg_temp.");
         let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
-            "SELECT deliveries.id::text AS id, {gate} AS eligible
+            "WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
+             SELECT deliveries.id::text AS id, {gate} AS eligible
              FROM pg_temp.deliveries AS deliveries
              ORDER BY deliveries.id::text"
         )))

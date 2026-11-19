@@ -152,15 +152,16 @@ pub(super) async fn inspect_postgres(
 ) -> Result<PublicSessionIdentity, ApplicationError> {
     // 查询可能在连接池中等过截止；读取时取实时钟，同时保留请求时间作为保守下界。
     let row = sqlx::query(
-        "SELECT session.user_id, account.username,
+        "WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
+                SELECT session.user_id, account.username,
                 session.expires_at, session.absolute_expires_at
          FROM public.public_sessions AS session
          JOIN public.users AS account ON account.id = session.user_id
          WHERE session.token_hash = $1
            AND session.revoked_at IS NULL
            AND ((session.expires_at IS NULL AND session.absolute_expires_at IS NULL)
-             OR (session.expires_at > GREATEST($2, clock_timestamp())
-               AND session.absolute_expires_at > GREATEST($2, clock_timestamp())))
+             OR (session.expires_at > GREATEST($2, (SELECT at FROM sql_clock))
+               AND session.absolute_expires_at > GREATEST($2, (SELECT at FROM sql_clock))))
            AND account.status = 'active' AND account.key_status = 'active'",
     )
     .bind(token_hash.as_slice())
@@ -181,7 +182,8 @@ pub(super) async fn touch_postgres(
     // Public 期限不随活动续期，`last_activity_at` 只供运维观察：距上次记录不足 60 秒时不写入，
     // 普通读取因此不再逐请求持有会话行锁；需要写入时仍只向前推进且不早于创建时间。
     let row = sqlx::query(
-        "WITH current_session AS MATERIALIZED (
+        "WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at),
+            current_session AS MATERIALIZED (
             SELECT session.token_hash, session.user_id, account.username,
                    session.expires_at, session.absolute_expires_at,
                    (session.last_activity_at < $1 - interval '60 seconds') AS activity_due
@@ -189,8 +191,8 @@ pub(super) async fn touch_postgres(
             JOIN public.users AS account ON account.id = session.user_id
             WHERE session.token_hash = $2 AND session.revoked_at IS NULL
               AND ((session.expires_at IS NULL AND session.absolute_expires_at IS NULL)
-                OR (session.expires_at > GREATEST($1, clock_timestamp())
-                  AND session.absolute_expires_at > GREATEST($1, clock_timestamp())))
+                OR (session.expires_at > GREATEST($1, (SELECT at FROM sql_clock))
+                  AND session.absolute_expires_at > GREATEST($1, (SELECT at FROM sql_clock))))
               AND account.status = 'active' AND account.key_status = 'active'
          ), recorded_activity AS (
             UPDATE public.public_sessions AS session

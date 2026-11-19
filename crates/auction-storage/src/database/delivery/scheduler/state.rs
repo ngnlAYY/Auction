@@ -79,7 +79,8 @@ pub(super) async fn renew_postgres(
     let mut transaction = pool.begin().await.map_err(map_storage_error)?;
     lock_delivery_lease(&mut transaction, claim.delivery_id).await?;
     let renewed = sqlx::query(
-        r#"UPDATE public.deliveries
+        r#"WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
+           UPDATE public.deliveries
            SET lease_expires_at = GREATEST(lease_expires_at, $3),
                updated_at = CURRENT_TIMESTAMP
            WHERE id = $1
@@ -87,9 +88,9 @@ pub(super) async fn renew_postgres(
              AND lease_token = $4
              AND fencing_version = $5
              AND lease_expires_at > $2
-             AND lease_expires_at > clock_timestamp()
+             AND lease_expires_at > (SELECT at FROM sql_clock)
              AND $3 > $2
-             AND $3 > clock_timestamp()"#,
+             AND $3 > (SELECT at FROM sql_clock)"#,
     )
     .bind(claim.delivery_id)
     .bind(renewed_at)

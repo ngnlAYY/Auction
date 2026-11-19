@@ -17,14 +17,15 @@ pub(in crate::database) async fn restart_unstarted_take_in_transaction(
     restarts: i64,
 ) -> Result<bool, sqlx::Error> {
     let restarted: Option<(auction_time::Timestamp, i64)> = sqlx::query_as(
-        "UPDATE public.deliveries
+        "WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
+         UPDATE public.deliveries
          SET status = 'pending', lease_token = NULL, lease_expires_at = NULL, claimed_at = NULL,
              sending_at = NULL, completed_at = NULL, failure_code = NULL,
              result_metadata = COALESCE(result_metadata, '{}'::jsonb)
                  || jsonb_build_object('not_started_restarts', $2::bigint,
-                                       'not_started_restarted_at', clock_timestamp()),
+                                       'not_started_restarted_at', (SELECT at FROM sql_clock)),
              fencing_version = fencing_version + 1,
-             updated_at = clock_timestamp()
+             updated_at = (SELECT at FROM sql_clock)
          WHERE id = $1 AND status = 'failed'
            AND origin_kind = 'settlement_return_action' AND payload_operation = 'take'
            AND external_reference IS NULL

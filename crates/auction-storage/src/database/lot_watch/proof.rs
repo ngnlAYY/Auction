@@ -7,8 +7,9 @@ use crate::database::TrackedTransaction as Transaction;
 
 // SQL 片段只在本 owner 定义，由 delivery 的领取和 sending fence 共用。
 macro_rules! delivery_watch_gate {
-    () => {
-        r#"(
+    ($clock:literal) => {
+        concat!(
+            r#"(
         (deliveries.origin_kind <> 'lot_watch' AND
          COALESCE(deliveries.payload_template, '') <> 'lot_watch')
         OR (
@@ -32,10 +33,13 @@ macro_rules! delivery_watch_gate {
               AND watch.version >= notification.watch_version
               AND lot.leader_user_id IS DISTINCT FROM notification.user_id
               AND lot.effective_end_at IS NOT NULL
-              AND lot.effective_end_at > clock_timestamp()
+              AND lot.effective_end_at > "#,
+            $clock,
+            r#"
           )
         )
     )"#
+        )
     };
 }
 pub(crate) use delivery_watch_gate;
@@ -80,7 +84,7 @@ pub(crate) async fn delivery_eligible(
 ) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar(concat!(
         "SELECT ",
-        delivery_watch_gate!(),
+        delivery_watch_gate!("clock_timestamp()"),
         " AND NOT ",
         delivery_watch_renamed!(),
         " FROM public.deliveries AS deliveries WHERE deliveries.id = $1"

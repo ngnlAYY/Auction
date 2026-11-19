@@ -781,6 +781,18 @@ async fn satisfy_by_legacy_entry(
         .map(|result| result.status)
 }
 
+async fn assert_fulfillment_completion_clock(pool: &PgPool, obligation: Uuid) {
+    let shared: bool = sqlx::query_scalar(
+        "SELECT (completed_at = updated_at) IS TRUE
+         FROM public.settlement_obligation_fulfillments WHERE obligation_id = $1",
+    )
+    .bind(obligation)
+    .fetch_one(pool)
+    .await
+    .expect("读取付款履约完成时间");
+    assert!(shared, "付款履约的完成与更新必须共用一个时刻");
+}
+
 /// 以真实资金化入口执行一次实收；结果类型不实现 Debug，转成稳定标签再断言。
 async fn fund_collected(
     store: &DatabaseStore,
@@ -1053,6 +1065,7 @@ async fn postgres_collection_cod_collected_payment_is_funded_through_satisfy_col
             ),
             "{payment:?} 付款以领取证明满足"
         );
+        assert_fulfillment_completion_clock(pool, case.payment).await;
         let state = |kind: SettlementObligationKind| {
             after
                 .obligations

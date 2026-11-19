@@ -239,10 +239,11 @@ async fn claim_events(
         .await
         .map_err(|error| storage_error_from(error, "开启标记事件领取事务失败"))?;
     let rows = sqlx::query(
-        r#"UPDATE public.lot_watch_events AS event
+        r#"WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
+           UPDATE public.lot_watch_events AS event
            SET status = 'processing',
                lease_owner = $1,
-               lease_expires_at = clock_timestamp() + make_interval(secs => $2),
+               lease_expires_at = (SELECT at FROM sql_clock) + make_interval(secs => $2),
                attempts = event.attempts + 1,
                last_error_code = NULL
            FROM (
@@ -251,10 +252,10 @@ async fn claim_events(
                WHERE (
                        (
                            candidate.status = 'pending'
-                           AND candidate.next_attempt_at <= clock_timestamp()
+                           AND candidate.next_attempt_at <= (SELECT at FROM sql_clock)
                        ) OR (
                            candidate.status = 'processing'
-                           AND candidate.lease_expires_at <= clock_timestamp()
+                           AND candidate.lease_expires_at <= (SELECT at FROM sql_clock)
                        )
                      )
                  AND ($3::uuid[] IS NULL OR candidate.lot_id = ANY($3::uuid[]))

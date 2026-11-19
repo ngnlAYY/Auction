@@ -60,12 +60,13 @@ pub(super) async fn requeue_retried_take(
     // 只改观察所在 fence 上仍停在人工核对、没有远端引用的这条投递；任何一项变化都按状态冲突
     // 整体回滚。保留自动重排计数，下一次未知不会被当作“确定未外写”或重新获得自动重排。
     let requeued: Option<auction_time::Timestamp> = sqlx::query_scalar(
-        r#"UPDATE public.deliveries
+        r#"WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
+           UPDATE public.deliveries
            SET status = 'pending', completed_at = NULL, failure_code = NULL, lease_token = NULL,
                lease_expires_at = NULL, claimed_at = NULL, sending_at = NULL,
-               updated_at = clock_timestamp(),
+               updated_at = (SELECT at FROM sql_clock),
                result_metadata = COALESCE(result_metadata, '{}'::jsonb)
-                   || jsonb_build_object('retake_requested_at', clock_timestamp(),
+                   || jsonb_build_object('retake_requested_at', (SELECT at FROM sql_clock),
                                          'retake_command_id', $3::uuid)
            WHERE id = $1 AND fencing_version = $2 AND status = 'manual_reconcile'
              AND origin_kind = 'settlement_return_action' AND payload_operation = 'take'

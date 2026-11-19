@@ -26,15 +26,16 @@ pub(in crate::database::accounts::sessions) async fn get_postgres(
 ) -> Result<PublicSessionPreferenceResult, ApplicationError> {
     // 与只读 inspect 共用池等待后的截止门禁，不能按请求开始时间返回过期身份。
     let row = sqlx::query(
-        "SELECT session.user_id, account.username,
+        "WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
+                SELECT session.user_id, account.username,
                 account.public_session_duration_seconds, account.public_session_preference_version,
                 session.expires_at, session.absolute_expires_at
          FROM public.public_sessions AS session
          JOIN public.users AS account ON account.id = session.user_id
          WHERE session.token_hash = $1 AND session.revoked_at IS NULL
            AND ((session.expires_at IS NULL AND session.absolute_expires_at IS NULL)
-             OR (session.expires_at > GREATEST($2, clock_timestamp())
-               AND session.absolute_expires_at > GREATEST($2, clock_timestamp())))
+             OR (session.expires_at > GREATEST($2, (SELECT at FROM sql_clock))
+               AND session.absolute_expires_at > GREATEST($2, (SELECT at FROM sql_clock))))
            AND account.status = 'active' AND account.key_status = 'active'",
     )
     .bind(token_hash.as_slice())
@@ -144,12 +145,13 @@ async fn set_locked(
         return Err(SessionError::PreferenceConflict.into());
     }
     let updated = sqlx::query(
-        "UPDATE public.public_sessions
+        "WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
+         UPDATE public.public_sessions
          SET expires_at = $3, absolute_expires_at = $3,
              last_activity_at = GREATEST(last_activity_at, $4)
          WHERE token_hash = $1 AND user_id = $2 AND revoked_at IS NULL
            AND ((expires_at IS NULL AND absolute_expires_at IS NULL)
-             OR (expires_at > clock_timestamp() AND absolute_expires_at > clock_timestamp()))
+             OR (expires_at > (SELECT at FROM sql_clock) AND absolute_expires_at > (SELECT at FROM sql_clock)))
          RETURNING expires_at, absolute_expires_at",
     )
     .bind(token_hash.as_slice())

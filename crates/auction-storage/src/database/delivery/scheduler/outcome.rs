@@ -253,14 +253,15 @@ async fn persist_once(
     }
     // 传输结果替换旧证明，但必须保留自动维护已消费的重排预算及其原始 JSON 类型。
     let updated = sqlx::query(
-        "UPDATE public.deliveries SET status=$2,lease_token=NULL,lease_expires_at=NULL,
+        "WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
+         UPDATE public.deliveries SET status=$2,lease_token=NULL,lease_expires_at=NULL,
          completed_at=$3,external_reference=$4,failure_code=$5,
          result_metadata=$6::jsonb || CASE WHEN result_metadata ? 'sweep_retries'
              THEN jsonb_build_object('sweep_retries',result_metadata->'sweep_retries')
              ELSE '{}'::jsonb END,
-         updated_at=clock_timestamp()
+         updated_at=(SELECT at FROM sql_clock)
          WHERE id=$1 AND status=$15 AND lease_token=$7 AND fencing_version=$8
-         AND lease_expires_at>$3 AND lease_expires_at>clock_timestamp()
+         AND lease_expires_at>$3 AND lease_expires_at>(SELECT at FROM sql_clock)
          AND command_id=$9 AND request_digest=$10 AND origin_kind=$11 AND origin_id=$12
          AND recipient=$13 AND payload=$14
          AND (NOT $16 OR (sending_at IS NULL AND external_reference IS NULL))",

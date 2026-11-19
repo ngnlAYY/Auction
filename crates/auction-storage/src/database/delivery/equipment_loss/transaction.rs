@@ -94,27 +94,31 @@ pub(super) async fn apply(
         .bind(command.expected_delivery_fencing_version).bind(split.buyer.value()).bind(split.compensation.value())
         .bind(split.seller.value()).bind(split.tax.value()).bind(digest.as_slice()).bind(&snapshot.data)
         .bind(serde_json::to_value(&result)?).execute(&mut **tx).await?;
-    let changed=sqlx::query("UPDATE public.deliveries SET status='failed',failure_code='equipment_destroyed',
-        fencing_version=fencing_version+1,completed_at=clock_timestamp(),updated_at=clock_timestamp(),
+    // 同一语句的时间列共享读数，完成时刻不得晚于更新时间；状态与版本仍由原围栏校验。
+    let changed=sqlx::query("WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
+        UPDATE public.deliveries SET status='failed',failure_code='equipment_destroyed',
+        fencing_version=fencing_version+1,completed_at=(SELECT at FROM sql_clock),updated_at=(SELECT at FROM sql_clock),
         result_metadata=result_metadata || jsonb_build_object('equipment_loss_command_id',$3::text,'retired',true)
         WHERE id=$1 AND fencing_version=$2 AND status='manual_reconcile' AND lease_token IS NULL")
         .bind(delivery_id).bind(command.expected_delivery_fencing_version).bind(command.command_id)
         .execute(&mut **tx).await?;
     require_one(changed.rows_affected())?;
-    let changed=sqlx::query("UPDATE public.settlement_obligation_fulfillments SET execution_state='satisfied',
+    let changed=sqlx::query("WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
+        UPDATE public.settlement_obligation_fulfillments SET execution_state='satisfied',
         state_version=state_version+1,proof_kind='operator_equipment_loss_v1',proof_reference=$3,
-        proof_digest=$4,proof_observed_at=clock_timestamp(),last_error_code=NULL,next_attempt_at=NULL,
-        completed_at=clock_timestamp(),updated_at=clock_timestamp()
+        proof_digest=$4,proof_observed_at=(SELECT at FROM sql_clock),last_error_code=NULL,next_attempt_at=NULL,
+        completed_at=(SELECT at FROM sql_clock),updated_at=(SELECT at FROM sql_clock)
         WHERE obligation_id=$1 AND state_version=$2 AND execution_state='manual_reconcile' AND claim_token IS NULL")
         .bind(payment_id).bind(i64::try_from(command.expected_payment_version).map_err(|_|Error::Rejected)?)
         .bind(&reference).bind(digest.as_slice()).execute(&mut **tx).await?;
     require_one(changed.rows_affected())?;
     // 外部补偿是操作者承担的责任，不能把 refund 标记为已发送或已付款。退款义务仍是 contingent，
     // 但履约已收口为 failed、须由处置事实证明已处置，因此清除或有未激活标记、回到活动入口。
-    let changed=sqlx::query("UPDATE public.settlement_obligation_fulfillments SET execution_state='failed',
+    let changed=sqlx::query("WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
+        UPDATE public.settlement_obligation_fulfillments SET execution_state='failed',
         dormant=false,state_version=state_version+1,last_error_code='operator_external_buyer_compensation',
         proof_kind='operator_equipment_loss_v1',proof_reference=$2,proof_digest=$3,
-        proof_observed_at=clock_timestamp(),next_attempt_at=NULL,completed_at=clock_timestamp(),updated_at=clock_timestamp()
+        proof_observed_at=(SELECT at FROM sql_clock),next_attempt_at=NULL,completed_at=(SELECT at FROM sql_clock),updated_at=(SELECT at FROM sql_clock)
         WHERE obligation_id=$1 AND execution_state='pending' AND state_version=1 AND delivery_id IS NULL AND claim_token IS NULL")
         .bind(refund_id).bind(&reference).bind(digest.as_slice()).execute(&mut **tx).await?;
     require_one(changed.rows_affected())?;
@@ -129,9 +133,10 @@ pub(super) async fn apply(
         updated_at=clock_timestamp() WHERE id=$1 AND business_state='blocked' AND amount=$2")
         .bind(seller_id).bind(split.seller.value()).execute(&mut **tx).await?;
     require_one(changed.rows_affected())?;
-    let changed=sqlx::query("UPDATE public.settlement_recoveries SET stage='completed',resolution=NULL,
+    let changed=sqlx::query("WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
+        UPDATE public.settlement_recoveries SET stage='completed',resolution=NULL,
         state_version=state_version+1,next_attempt_at=NULL,blocking_code=NULL,manual_reconcile_delivery_id=NULL,
-        completed_at=clock_timestamp(),updated_at=clock_timestamp()
+        completed_at=(SELECT at FROM sql_clock),updated_at=(SELECT at FROM sql_clock)
         WHERE id=$1 AND state_version=$2 AND stage='awaiting_payment' AND resolution IS NULL")
         .bind(recovery_id).bind(i64::try_from(command.expected_recovery_version).map_err(|_|Error::Rejected)?)
         .execute(&mut **tx).await?;

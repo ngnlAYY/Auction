@@ -23,21 +23,22 @@ pub(super) async fn apply_delivery_action(
         _ => None,
     };
     let result = sqlx::query(
-        r#"UPDATE public.deliveries
+        r#"WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
+           UPDATE public.deliveries
            SET status = $2,
                lease_token = NULL,
                lease_expires_at = NULL,
                claimed_at = CASE WHEN $2 = 'pending' THEN NULL ELSE claimed_at END,
                sending_at = CASE WHEN $2 = 'pending' THEN NULL ELSE sending_at END,
                completed_at = CASE
-                   WHEN $2 IN ('succeeded', 'failed') THEN clock_timestamp()
+                   WHEN $2 IN ('succeeded', 'failed') THEN (SELECT at FROM sql_clock)
                    ELSE NULL
                END,
                external_reference = $3,
                failure_code = $4,
                result_metadata = $5,
                fencing_version = fencing_version + 1,
-               updated_at = clock_timestamp()
+               updated_at = (SELECT at FROM sql_clock)
            WHERE id = $1
              AND status = $6
              AND fencing_version = $7"#,

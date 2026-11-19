@@ -227,18 +227,19 @@ async fn detail_once(
 ///
 /// 最近一次心跳处于停止中（正常停止或重启时旧实例最后发布 `stopping`）、未声明该世界或该键，或
 /// 已超出宽限窗口时都不可用（失败关闭：显示能力不可用，不改变案件）。
-const WORKER_CAPABILITY_SQL: &str = r#"WITH workers AS (
+const WORKER_CAPABILITY_SQL: &str = r#"WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at),
+    workers AS (
     SELECT instance_id, status, observed_at, expires_at,
            COALESCE(jsonb_typeof(details -> $2::text) = 'array'
                     AND details -> $2::text ? $1, false) AS declares
     FROM public.service_heartbeats
     WHERE service_name = 'auction-worker' AND process_role = 'worker'
-      AND clock_timestamp() < expires_at + (expires_at - observed_at)
+      AND (SELECT at FROM sql_clock) < expires_at + (expires_at - observed_at)
 )
 SELECT EXISTS (
            SELECT 1 FROM workers
            WHERE declares AND status IN ('starting', 'ready', 'degraded')
-             AND expires_at > clock_timestamp()
+             AND expires_at > (SELECT at FROM sql_clock)
        )
        OR COALESCE((
            SELECT declares AND status IN ('starting', 'ready', 'degraded')

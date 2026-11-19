@@ -1200,6 +1200,31 @@ async fn postgres_equipment_loss_closes_dormant_refund_into_the_active_entry() {
         .await
         .expect("装备损失收口带标记的退款");
 
+    let recovery_clock: bool = sqlx::query_scalar(
+        "SELECT (completed_at = updated_at) IS TRUE
+         FROM public.settlement_recoveries WHERE lot_id = $1",
+    )
+    .bind(seeded.sold_lot)
+    .fetch_one(pool)
+    .await
+    .expect("读取损失处置的恢复时间");
+    assert!(recovery_clock, "恢复完成与更新必须共用一个时刻");
+
+    let (fulfillment_clock, delivery_clock): (bool, bool) = sqlx::query_as(
+        "SELECT (f.completed_at = f.updated_at AND f.proof_observed_at = f.updated_at) IS TRUE,
+                (d.completed_at = d.updated_at) IS TRUE
+         FROM public.settlement_obligations AS o
+         JOIN public.settlement_obligation_fulfillments AS f ON f.obligation_id = o.id
+         JOIN public.deliveries AS d ON d.id = f.delivery_id
+         WHERE o.lot_id = $1 AND o.obligation_kind = 'winner_equipment_cod'",
+    )
+    .bind(seeded.sold_lot)
+    .fetch_one(pool)
+    .await
+    .expect("读取付款履约与 COD 投递的收口时间");
+    assert!(fulfillment_clock, "付款履约的证明、完成与更新必须共用一个时刻");
+    assert!(delivery_clock, "COD 投递完成与更新必须共用一个时刻");
+
     let (state, execution, error_code, dormant): (String, String, Option<String>, bool) =
         sqlx::query_as(
             "SELECT obligation.business_state, fulfillment.execution_state,
@@ -1218,6 +1243,15 @@ async fn postgres_equipment_loss_closes_dormant_refund_into_the_active_entry() {
         ("contingent", "failed", Some("operator_external_buyer_compensation"), false),
         "退款义务仍是 contingent，履约收口为 failed 并清除标记"
     );
+    let refund_clock: bool = sqlx::query_scalar(
+        "SELECT (completed_at = updated_at AND proof_observed_at = updated_at) IS TRUE
+         FROM public.settlement_obligation_fulfillments WHERE obligation_id = $1",
+    )
+    .bind(refund)
+    .fetch_one(pool)
+    .await
+    .expect("读取或有退款的收口时间");
+    assert!(refund_clock, "退款履约的证明、完成与更新必须共用一个时刻");
     crate::alert_entry_equivalence::assert_alert_reads_match_full_scan(pool).await;
 
     service.postgres_pool().close().await;

@@ -118,7 +118,8 @@ pub(super) async fn satisfy(
     let digest = external.map_or(evidence.digest, |p| p.digest);
     let observed = external.map_or(evidence.observed_from, |p| p.observed_at);
     let updated = sqlx::query(
-        r#"UPDATE public.settlement_obligation_fulfillments
+        r#"WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
+           UPDATE public.settlement_obligation_fulfillments
            SET execution_state='satisfied',
                proof_kind=$2,
                proof_reference=$3,
@@ -127,8 +128,8 @@ pub(super) async fn satisfy(
                claim_token=NULL,
                claimed_at=NULL,
                claim_expires_at=NULL,
-               completed_at=clock_timestamp(),
-               updated_at=clock_timestamp(),
+               completed_at=(SELECT at FROM sql_clock),
+               updated_at=(SELECT at FROM sql_clock),
                state_version=state_version+1,
                next_attempt_at=NULL,
                last_error_code=NULL
@@ -137,7 +138,7 @@ pub(super) async fn satisfy(
              AND state_version=$7
              AND claim_token=$8
              AND claim_fencing=$9
-             AND claim_expires_at>clock_timestamp()"#,
+             AND claim_expires_at>(SELECT at FROM sql_clock)"#,
     )
     .bind(command.claim.obligation_id.as_uuid())
     .bind(kind)

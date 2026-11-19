@@ -27,17 +27,18 @@ pub(super) async fn start(
     if locked.is_none() {
         return Err(LotWatchError::Unavailable);
     }
-    let row = sqlx::query("SELECT q.notification_id,n.command_id,n.payload,n.request_digest,n.recipient,
+    let row = sqlx::query("WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
+        SELECT q.notification_id,n.command_id,n.payload,n.request_digest,n.recipient,
         (n.lot_id=$4 AND n.channel='pm' AND n.delivery_id IS NULL AND n.preference_version > 0
         AND n.invalidated_at IS NULL AND w.watched AND w.channel='mm' AND w.version >= n.watch_version
         AND lot.leader_user_id IS DISTINCT FROM n.user_id
-        AND lot.effective_end_at IS NOT NULL AND lot.effective_end_at > clock_timestamp()) AS eligible
+        AND lot.effective_end_at IS NOT NULL AND lot.effective_end_at > (SELECT at FROM sql_clock)) AS eligible
         FROM public.lot_watch_pm_deliveries q JOIN public.lot_watch_notifications n ON n.id=q.notification_id
         JOIN public.lot_watches w ON w.user_id=n.user_id AND w.lot_id=n.lot_id
         JOIN public.lots lot ON lot.id=n.lot_id
         WHERE q.notification_id=$1 AND q.lease_token=$2 AND q.fencing_version=$3
         AND q.status='claimed' AND q.sending_at IS NULL AND q.lease_kind='send'
-        AND q.lease_expires_at > clock_timestamp() FOR UPDATE OF q")
+        AND q.lease_expires_at > (SELECT at FROM sql_clock) FOR UPDATE OF q")
         .bind(claim.message.notification_id).bind(claim.token).bind(claim.fence).bind(claim.lot_id)
         .fetch_optional(&mut *tx).await.map_err(sql_error)?;
     let Some(row) = row else {
@@ -50,10 +51,11 @@ pub(super) async fn start(
     }
     let eligible: bool = row.try_get("eligible").map_err(sql_error)?;
     if !eligible {
-        let count = sqlx::query("UPDATE public.lot_watch_pm_deliveries SET status='suppressed',failure_code='source_invalid',
-            lease_token=NULL,lease_expires_at=NULL,lease_kind=NULL,worker_id=NULL,completed_at=clock_timestamp(),updated_at=clock_timestamp()
+        let count = sqlx::query("WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
+            UPDATE public.lot_watch_pm_deliveries SET status='suppressed',failure_code='source_invalid',
+            lease_token=NULL,lease_expires_at=NULL,lease_kind=NULL,worker_id=NULL,completed_at=(SELECT at FROM sql_clock),updated_at=(SELECT at FROM sql_clock)
             WHERE notification_id=$1 AND lease_token=$2 AND fencing_version=$3 AND sending_at IS NULL
-            AND lease_expires_at > clock_timestamp()")
+            AND lease_expires_at > (SELECT at FROM sql_clock)")
             .bind(claim.message.notification_id).bind(claim.token).bind(claim.fence)
             .execute(&mut *tx).await.map_err(sql_error)?.rows_affected();
         if count != 1 {
@@ -63,10 +65,11 @@ pub(super) async fn start(
         return Ok(false);
     }
     let count = sqlx::query(
-        "UPDATE public.lot_watch_pm_deliveries SET status='sending',sending_at=clock_timestamp(),
-        sender_forum_account_id=$4,failure_code=NULL,updated_at=clock_timestamp()
+        "WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
+        UPDATE public.lot_watch_pm_deliveries SET status='sending',sending_at=(SELECT at FROM sql_clock),
+        sender_forum_account_id=$4,failure_code=NULL,updated_at=(SELECT at FROM sql_clock)
         WHERE notification_id=$1 AND lease_token=$2 AND fencing_version=$3 AND status='claimed'
-        AND sending_at IS NULL AND lease_kind='send' AND lease_expires_at > clock_timestamp()",
+        AND sending_at IS NULL AND lease_kind='send' AND lease_expires_at > (SELECT at FROM sql_clock)",
     )
     .bind(claim.message.notification_id)
     .bind(claim.token)
@@ -93,10 +96,11 @@ pub(super) async fn release(
     }
     let mut tx = store.pool().begin().await.map_err(sql_error)?;
     lock_delivery(&mut tx, claim.message.notification_id).await?;
-    let count = sqlx::query("UPDATE public.lot_watch_pm_deliveries SET status='pending',failure_code='prepare_unavailable',
-        lease_token=NULL,lease_expires_at=NULL,lease_kind=NULL,worker_id=NULL,updated_at=clock_timestamp()
+    let count = sqlx::query("WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
+        UPDATE public.lot_watch_pm_deliveries SET status='pending',failure_code='prepare_unavailable',
+        lease_token=NULL,lease_expires_at=NULL,lease_kind=NULL,worker_id=NULL,updated_at=(SELECT at FROM sql_clock)
         WHERE notification_id=$1 AND lease_token=$2 AND fencing_version=$3 AND status='claimed'
-        AND sending_at IS NULL AND lease_kind='send' AND lease_expires_at > clock_timestamp()")
+        AND sending_at IS NULL AND lease_kind='send' AND lease_expires_at > (SELECT at FROM sql_clock)")
         .bind(claim.message.notification_id).bind(claim.token).bind(claim.fence).execute(&mut *tx).await.map_err(sql_error)?.rows_affected();
     if count != 1 {
         return Err(LotWatchError::Conflict);
@@ -129,14 +133,15 @@ pub(super) async fn finish(
     let mut tx = store.pool().begin().await.map_err(sql_error)?;
     lock_delivery(&mut tx, claim.message.notification_id).await?;
     // 完成不再检查 watch，发送后的取消不能擦除已发生的远端结果。
-    let count = sqlx::query("UPDATE public.lot_watch_pm_deliveries q SET status=CASE WHEN $5::text IS NULL THEN 'manual_reconcile' ELSE 'succeeded' END,
+    let count = sqlx::query("WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
+        UPDATE public.lot_watch_pm_deliveries q SET status=CASE WHEN $5::text IS NULL THEN 'manual_reconcile' ELSE 'succeeded' END,
         external_reference=$5,failure_code=CASE WHEN $5::text IS NOT NULL THEN NULL WHEN $6 THEN 'evidence_missing' ELSE 'outcome_unknown' END,
-        completed_at=CASE WHEN $5::text IS NULL THEN NULL ELSE clock_timestamp() END,
-        reconcile_requested_at=CASE WHEN $5::text IS NULL AND NOT $6 THEN clock_timestamp() ELSE NULL END,
-        lease_token=NULL,lease_expires_at=NULL,lease_kind=NULL,worker_id=NULL,updated_at=clock_timestamp()
+        completed_at=CASE WHEN $5::text IS NULL THEN NULL ELSE (SELECT at FROM sql_clock) END,
+        reconcile_requested_at=CASE WHEN $5::text IS NULL AND NOT $6 THEN (SELECT at FROM sql_clock) ELSE NULL END,
+        lease_token=NULL,lease_expires_at=NULL,lease_kind=NULL,worker_id=NULL,updated_at=(SELECT at FROM sql_clock)
         FROM public.lot_watch_notifications n WHERE q.notification_id=$1 AND q.lease_token=$2 AND q.fencing_version=$3
         AND q.sender_forum_account_id=$4 AND q.sending_at IS NOT NULL
-        AND q.lease_expires_at > clock_timestamp()
+        AND q.lease_expires_at > (SELECT at FROM sql_clock)
         AND (($6 AND q.status='manual_reconcile' AND q.lease_kind='reconcile') OR (NOT $6 AND q.status='sending' AND q.lease_kind='send'))
         AND n.id=q.notification_id AND n.channel='pm' AND n.request_digest=$7 AND n.payload=$8 AND n.recipient=$9")
         .bind(claim.message.notification_id).bind(claim.token).bind(claim.fence).bind(sender).bind(external).bind(claim.reconcile)

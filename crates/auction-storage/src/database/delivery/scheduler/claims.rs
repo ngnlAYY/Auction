@@ -79,7 +79,8 @@ pub(super) async fn claim_postgres(
     let (suppressed_origins, suppressed_templates) =
         exclusions.suppressed_classes.suppressed_delivery_patterns();
     let rows = sqlx::query(concat!(
-        r#"SELECT id, command_id, request_digest, origin_kind, origin_id,
+        r#"WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
+           SELECT id, command_id, request_digest, origin_kind, origin_id,
                   recipient, payload, fencing_version, attempt_count, created_at
            FROM public.deliveries AS deliveries
            WHERE (
@@ -110,7 +111,7 @@ pub(super) async fn claim_postgres(
                    )
                  )
              AND "#,
-        delivery_completion_gate!(),
+        delivery_completion_gate!("(SELECT at FROM sql_clock)"),
         r#"
              AND NOT EXISTS (
                  SELECT 1
@@ -201,7 +202,8 @@ pub(super) async fn claim_postgres(
             .map_err(|_| repository_error("delivery 尝试次数超出数据库范围"))?;
         // 自动领取只清理上次结果证明；维护重排次数属于跨尝试预算，不能随领取归零。
         let updated = sqlx::query(concat!(
-            r#"UPDATE public.deliveries AS deliveries
+            r#"WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
+               UPDATE public.deliveries AS deliveries
                SET status = 'claimed',
                    lease_token = $2,
                    lease_expires_at = $3,
@@ -245,7 +247,7 @@ pub(super) async fn claim_postgres(
                        )
                  )
                  AND "#,
-            delivery_completion_gate!()
+            delivery_completion_gate!("(SELECT at FROM sql_clock)")
         ))
         .bind(delivery_id)
         .bind(lease_token)

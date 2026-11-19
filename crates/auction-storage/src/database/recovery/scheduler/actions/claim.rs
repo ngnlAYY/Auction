@@ -46,7 +46,8 @@ async fn claim_action_in_transaction(
     claim_token: Uuid,
 ) -> Result<Option<RecoveryActionClaim>, RecoveryActionTransactionError> {
     let Some(row) = sqlx::query(
-        r#"SELECT action.id,
+        r#"WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
+                  SELECT action.id,
                   action.recovery_id,
                   action.kind,
                   action.execution_state,
@@ -99,8 +100,8 @@ async fn claim_action_in_transaction(
                        AND prerequisite.execution_state = 'satisfied'
                  )
              )
-             AND (action.claim_token IS NULL OR action.claim_expires_at <= clock_timestamp())
-             AND (action.next_attempt_at IS NULL OR action.next_attempt_at <= clock_timestamp())
+             AND (action.claim_token IS NULL OR action.claim_expires_at <= (SELECT at FROM sql_clock))
+             AND (action.next_attempt_at IS NULL OR action.next_attempt_at <= (SELECT at FROM sql_clock))
            ORDER BY COALESCE(action.next_attempt_at, action.created_at),
                     action.recovery_id,
                     action.ordinal,

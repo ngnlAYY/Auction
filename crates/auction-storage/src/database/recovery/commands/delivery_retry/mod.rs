@@ -18,12 +18,12 @@ pub(crate) enum RecoveryDeliveryRetry {
 
 // 详情和实际重排都依赖同一份冻结命令、未消费证明与租约约束。NULL 按不具资格处理。
 macro_rules! retryable_action {
-    () => {
-        "action.prepare_command_id IS NOT NULL AND octet_length(action.prepare_request_digest) = 32
+    ($clock:literal) => {
+        concat!("action.prepare_command_id IS NOT NULL AND octet_length(action.prepare_request_digest) = 32
          AND action.activate_command_id IS NOT NULL AND octet_length(action.activate_request_digest) = 32
          AND action.proof_kind IS NULL AND action.proof_reference IS NULL
          AND action.proof_digest IS NULL AND action.proof_observed_at IS NULL
-         AND (action.claim_token IS NULL OR action.claim_expires_at <= clock_timestamp())"
+         AND (action.claim_token IS NULL OR action.claim_expires_at <= ", $clock, ")")
     };
 }
 
@@ -39,7 +39,7 @@ pub(crate) async fn reset_after_delivery_retry(
                 action.last_error_code, recovery.blocking_code,
                 recovery.manual_reconcile_delivery_id, recovery.stage, recovery.resolution,
                 COALESCE(",
-        retryable_action!(),
+        retryable_action!("clock_timestamp()"),
         ", false) AS retryable_action,
           EXISTS (
               SELECT 1 FROM public.settlement_recovery_actions AS other
@@ -108,15 +108,16 @@ impl RecoveryDeliveryRetry {
             return Ok(self.eligible());
         };
         let reset = sqlx::query(concat!(
-            "UPDATE public.settlement_recovery_actions AS action
+            "WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
+             UPDATE public.settlement_recovery_actions AS action
              SET execution_state = 'enqueued', last_error_code = NULL,
                  claim_token = NULL, claimed_at = NULL, claim_expires_at = NULL,
                  claim_fencing = claim_fencing + 1, retry_count = 0,
                  next_attempt_at = NULL, completed_at = NULL,
-                 state_version = state_version + 1, updated_at = clock_timestamp()
+                 state_version = state_version + 1, updated_at = (SELECT at FROM sql_clock)
              WHERE action.id = $1 AND action.delivery_id = $2 AND action.execution_state = $3
                AND ",
-            retryable_action!(),
+            retryable_action!("(SELECT at FROM sql_clock)"),
         ))
         .bind(action_id)
         .bind(delivery_id)

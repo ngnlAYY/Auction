@@ -77,10 +77,11 @@ impl LotWatchPmOperations for DatabaseStore {
                     if current.fencing_version != command.expected_fencing_version || current.status != "manual_reconcile" { return Err(LotWatchError::Conflict); }
                     let next = current.fencing_version.checked_add(1).ok_or(LotWatchError::Unavailable)?;
                     let tx = transaction.transaction_mut()?;
-                    let changed = sqlx::query("UPDATE public.lot_watch_pm_deliveries SET fencing_version=$2,reconcile_requested_at=clock_timestamp(),
-                        lease_token=NULL,lease_expires_at=NULL,lease_kind=NULL,worker_id=NULL,updated_at=clock_timestamp()
+                    let changed = sqlx::query("WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
+                        UPDATE public.lot_watch_pm_deliveries SET fencing_version=$2,reconcile_requested_at=(SELECT at FROM sql_clock),
+                        lease_token=NULL,lease_expires_at=NULL,lease_kind=NULL,worker_id=NULL,updated_at=(SELECT at FROM sql_clock)
                         WHERE notification_id=$1 AND status='manual_reconcile' AND sending_at IS NOT NULL
-                        AND (lease_expires_at IS NULL OR lease_expires_at <= clock_timestamp())")
+                        AND (lease_expires_at IS NULL OR lease_expires_at <= (SELECT at FROM sql_clock))")
                         .bind(command.notification_id).bind(next).execute(&mut **tx).await.map_err(sql_error)?.rows_affected();
                     if changed != 1 { return Err(LotWatchError::Conflict); }
                     audit_request(tx,&command,next).await?;

@@ -27,6 +27,7 @@ PostgreSQL 18 适配器：实现应用层的仓储、事务与命令端口，拥
 
 ## 实现约定
 
+- **SQL 时钟**：同一条语句最多显式调用一次 `clock_timestamp()`。多个位置需要墙钟时，用 `WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)` 并以 `(SELECT at FROM sql_clock)` 复用。INSERT 依赖墙钟默认值时也要核对时间列之间的先后约束，存在求值顺序风险就显式复用读数。各列沿用原有时间来源，事务时间和语句时间可直接重复使用，租约围栏继续按墙钟判断。
 - **事务**：竞价与关键生命周期在 Serializable 事务内完成，40001/40P01 由 owner 有界重试（`is_serialization_conflict` 统一判定）；独立 Serializable 写入共用 `retry_conflicts`（默认 `SERIALIZABLE_ATTEMPTS` 次，每次重开事务，只重跑明确中止，结果未知的提交不重试）。claim、进度与部分账本写入用默认隔离事务并按 owner 取行锁或校验租约/fencing；同一命令 ID 经事务级 advisory 锁协调（`lock_command_id`）。
 - **场次写队列**：会写 `lots`/`auctions` 的场次级命令在进入 Serializable 事务前按场次排队（进程内互斥 + 会话 advisory lock）：只知道 lot 的用 `run_in_auction_lot_queue`，已知场次的用 `run_in_auction_queue`；两者必须落到同一把门。排队预算用尽返回可重试的 `QueueWaitTimeout`，取消/panic 由凭证 `Drop` 归还，绝不把可能仍持锁的连接放回池。
 - **幂等账本与追加事实**：命令表保存命令 ID、请求摘要与结果；同 ID 同摘要重放，异摘要冲突。竞价、代理转换、黑名单历史、审计与投递尝试证明由触发器拒绝改写；审计 `INSERT` 失败仍传播并回滚，进程内另记分类失败数。

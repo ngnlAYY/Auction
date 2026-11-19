@@ -58,6 +58,55 @@ async fn claim(store: &DatabaseStore) -> MailPollClaim {
     .expect("强制领取必须返回邮箱租约")
 }
 
+#[tokio::test]
+async fn postgres_mail_poll_renewal_rejects_a_lease_expired_by_database_time() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接克隆测试数据库");
+    let pool = store.postgres_pool();
+    initialize_mailbox(&store, Timestamp::now()).await;
+    let original = claim(&store).await;
+    let renewed_at = Timestamp::now();
+    let lease_until = original.lease_until + auction_time::Duration::minutes(1);
+    let renewed = MailPollStore::renew(&store, original, renewed_at, lease_until)
+        .await
+        .expect("有效租约可以续期");
+    assert_eq!(renewed.lease_until, lease_until);
+
+    let expired_at = renewed_at - auction_time::Duration::minutes(1);
+    sqlx::query(
+        "UPDATE public.mail_poll_state SET claim_expires_at = $2
+         WHERE mailbox_key = $1",
+    )
+    .bind(MAILBOX)
+    .bind(expired_at)
+    .execute(pool)
+    .await
+    .expect("使轮询租约过期");
+    assert!(
+        MailPollStore::renew(
+            &store,
+            renewed,
+            expired_at - auction_time::Duration::seconds(1),
+            lease_until + auction_time::Duration::minutes(1)
+        )
+        .await
+        .is_err(),
+        "调用方时刻早于租约截止，也不能续期在数据库时钟下已过期的租约"
+    );
+    let matches: bool = sqlx::query_scalar(
+        "SELECT (claim_expires_at = $2 AND updated_at = $3) IS TRUE
+         FROM public.mail_poll_state WHERE mailbox_key = $1",
+    )
+    .bind(MAILBOX)
+    .bind(expired_at)
+    .bind(renewed_at)
+    .fetch_one(pool)
+    .await
+    .expect("核对续租与拒绝后的时间");
+    assert!(matches, "续期使用调用方时间，拒绝的续期不得改写租约");
+    pool.close().await;
+}
+
 fn batch(
     claim: &MailPollClaim,
     external_mail_id: &str,

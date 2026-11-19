@@ -41,7 +41,7 @@ bash ci/checks/check.sh <检查项>...
 | `web-build-inputs` | 离线核对 Web 指纹清单与浏览器 crate 的工作区路径依赖闭包，见[ci/checks/README.md#web-输入依赖闭包](checks/README.md#web-输入依赖闭包) |
 | `web-callback-props` | 检查三个 Rust Web crate 的组件参数和 `Props` 字段（含 `cfg_attr` 条件声明），拒绝可选的 `EventHandler` 和 `Callback`，见[ci/checks/README.md#web-回调属性](checks/README.md#web-回调属性) |
 | `web` | 在 `web/` 下运行 `bun run typecheck`、`bun run lint` 与包边界检查（`web/tooling/check-boundaries.ts`，用 TypeScript 编译器解析语法树；说明符按闭集分类，退出码 1 为越界、2 为工具/配置/依赖/解析失败；别名只能在 `web/tsconfig.base.json` 登记，源码与目标符号链接失败关闭）；调用 Bun 前确认本地 `tsc` 与 `biome` 是普通可执行文件，`web/node_modules` 缺失或不完整时立即失败并提示 `mise run web-prepare`，门禁自己不安装依赖、不联网。不在 `all`/`rust` 组内，由 `mise run verify` 末尾显式运行，见[ci/checks/README.md#web-包边界](checks/README.md#web-包边界) |
-| `all` | `repository rust-version public-redaction layout import-groups module-docs hot-fields config systemd-templates i18n equipment-contract ratchet audit-writes test-module-paths work-item-ids markdown-links migration-compatibility published-migrations web-build-inputs web-callback-props` |
+| `all` | `repository rust-version public-redaction layout import-groups module-docs hot-fields config systemd-templates i18n equipment-contract ratchet audit-writes sql-clock test-module-paths work-item-ids markdown-links migration-compatibility published-migrations web-build-inputs web-callback-props`，重复墙钟调用检查见[ci/checks/README.md#sql-时钟](checks/README.md#sql-时钟) |
 | `fmt` | `cargo fmt --all -- --check` |
 | `check` | `cargo check --locked --workspace --all-targets` |
 | `lint` | `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`；再以 `--features web-embed` 单独 Clippy 两个 API 与合并服务，覆盖 `--all-features`（等于两端 Solid）看不到的 Dioxus 内嵌分支 |

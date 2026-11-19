@@ -155,12 +155,13 @@ async fn persist_transition_once(
     let (origin_kind, origin_id, completed_at): (String, String, Timestamp) = match update {
         RecoveryUpdate::Requeue(retries, reason, fencing_version, _, _) => {
             let updated: Option<(String, Timestamp)> = sqlx::query_as(
-                "UPDATE public.deliveries
+                "WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
+                 UPDATE public.deliveries
                  SET status='pending', completed_at=NULL, failure_code=NULL, lease_token=NULL,
-                     lease_expires_at=NULL, claimed_at=NULL, sending_at=NULL, updated_at=clock_timestamp(),
+                     lease_expires_at=NULL, claimed_at=NULL, sending_at=NULL, updated_at=(SELECT at FROM sql_clock),
                      result_metadata=COALESCE(result_metadata, '{}'::jsonb)
                          || jsonb_build_object('sweep_retries',$2::bigint,
-                             'sweep_requeued_at',clock_timestamp(),'sweep_requeue_reason',$3::text)
+                             'sweep_requeued_at',(SELECT at FROM sql_clock),'sweep_requeue_reason',$3::text)
                  WHERE id=$1 AND status='manual_reconcile' AND origin_kind=$5
                    AND payload_operation='take' AND external_reference IS NULL
                    AND COALESCE((result_metadata->>'sweep_retries')::bigint,0)=$2-1
@@ -218,9 +219,10 @@ async fn persist_transition_once(
             let world = &expectation.world_id;
             let reference = format!("mooglemail:{world}:take:{mid}");
             let updated: Option<(String, Timestamp)> = sqlx::query_as(
-                "UPDATE public.deliveries
+                "WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
+                 UPDATE public.deliveries
                  SET external_reference=$2,status='succeeded',failure_code=NULL,
-                     completed_at=clock_timestamp(),updated_at=clock_timestamp(),
+                     completed_at=(SELECT at FROM sql_clock),updated_at=(SELECT at FROM sql_clock),
                      lease_token=NULL,lease_expires_at=NULL,
                      result_metadata=COALESCE(result_metadata,'{}'::jsonb)||$3::jsonb
                  WHERE id=$1 AND status='manual_reconcile' AND origin_kind=$7

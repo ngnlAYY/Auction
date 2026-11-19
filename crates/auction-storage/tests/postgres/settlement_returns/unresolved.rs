@@ -114,6 +114,15 @@ async fn unresolved_return(
     )
     .await
     .expect("履约转人工对账");
+    let shared_clock: bool = sqlx::query_scalar(
+        "SELECT (completed_at = updated_at) IS TRUE
+         FROM public.settlement_obligation_fulfillments WHERE obligation_id = $1",
+    )
+    .bind(obligation)
+    .fetch_one(pool)
+    .await
+    .expect("读取履约人工对账时间");
+    assert!(shared_clock, "人工对账的完成与更新必须共用一个语句时刻");
     assert_eq!(
         allocation_state(pool, allocation).await,
         ("unknown".to_owned(), kind.amount(), Some(original))
@@ -170,6 +179,17 @@ async fn delivery_status(pool: &PgPool, delivery: Uuid) -> String {
         .fetch_one(pool)
         .await
         .expect("读取投递")
+}
+
+async fn assert_delivery_completion_clock(pool: &PgPool, delivery: Uuid) {
+    let clock_shared: bool = sqlx::query_scalar(
+        "SELECT (completed_at = updated_at) IS TRUE FROM public.deliveries WHERE id = $1",
+    )
+    .bind(delivery)
+    .fetch_one(pool)
+    .await
+    .expect("读取投递完成时间");
+    assert!(clock_shared, "投递完成与更新必须共用一个时刻");
 }
 
 /// 未核实期间：详情把三种处置都列为 `send_unresolved`，命令以同一错误拒绝且不改写任何事实。
@@ -325,6 +345,7 @@ async fn postgres_unknown_original_send_requires_auto_sent_recovery_before_dispo
             .expect("自动 Sent 恢复必须确定提交");
         assert!(recovered, "{kind:?}: 案件接管后自动 Sent 恢复仍能收口原发送");
         assert_eq!(delivery_status(pool, returned.original).await, "succeeded");
+        assert_delivery_completion_clock(pool, returned.original).await;
         assert_eq!(
             allocation_state(pool, returned.allocation).await,
             ("spent".to_owned(), kind.amount(), Some(returned.original)),
@@ -415,6 +436,7 @@ async fn postgres_unknown_original_send_manual_sent_keeps_case_ownership() {
         .await
         .expect("人工 Sent 确认");
     assert_eq!(delivery_status(pool, returned.original).await, "succeeded");
+    assert_delivery_completion_clock(pool, returned.original).await;
     assert_eq!(
         allocation_state(pool, returned.allocation).await,
         ("spent".to_owned(), kind.amount(), Some(returned.original))
@@ -1000,6 +1022,7 @@ async fn postgres_failed_sent_sweep_records_once_and_corrects_matching_equipment
         let store = Arc::new(database.store().await.expect("以运行账号连接"));
         let pool = store.postgres_pool();
         let (mut command, expectation) = seed_admin_failed_equipment(&store).await;
+        assert_delivery_completion_clock(pool, command.delivery_id).await;
         let missing = store
             .preview_sent_confirmation(command.delivery_id, command.evidence.clone(), None)
             .await
@@ -1068,6 +1091,16 @@ async fn postgres_failed_sent_sweep_records_once_and_corrects_matching_equipment
                 format!("mooglemail:main:send:{}", mailbox.entry.external_mail_id)
             );
             assert_eq!(delivery_status(pool, command.delivery_id).await, "succeeded");
+            assert_delivery_completion_clock(pool, command.delivery_id).await;
+            let resumed_clock: bool = sqlx::query_scalar(
+                "SELECT (next_attempt_at = updated_at) IS TRUE
+                 FROM public.settlement_obligation_fulfillments WHERE delivery_id = $1",
+            )
+            .bind(command.delivery_id)
+            .fetch_one(pool)
+            .await
+            .expect("读取恢复后的履约时间");
+            assert!(resumed_clock, "恢复履约的下次尝试与更新必须共用一个时刻");
         } else {
             assert_eq!(preview.blockers, ["observed_equipment_ids_mismatch"]);
             assert_matches!(confirmed, Err(ApplicationError::FulfillmentDependencyMismatch));

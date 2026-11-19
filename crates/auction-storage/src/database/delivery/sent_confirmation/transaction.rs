@@ -143,8 +143,9 @@ pub(super) async fn apply(
     }
     // 状态门与快照准入一致：更正只作用于仍停在原 Admin 失败结论上的行，失败标记随成功移除，
     // 原结论保留在命令账本、审计与 confirmation 快照中。
-    let changed = sqlx::query("UPDATE public.deliveries SET status='succeeded',external_reference=$3,
-        failure_code=NULL,completed_at=clock_timestamp(),updated_at=clock_timestamp(),
+    let changed = sqlx::query("WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
+        UPDATE public.deliveries SET status='succeeded',external_reference=$3,
+        failure_code=NULL,completed_at=(SELECT at FROM sql_clock),updated_at=(SELECT at FROM sql_clock),
         result_metadata=(result_metadata-CASE WHEN $5 THEN ARRAY['sent_verified','sent_recovered','resolution']
                                               ELSE ARRAY['sent_verified','sent_recovered'] END::text[]) || $4::jsonb
         WHERE id=$1 AND fencing_version=$2

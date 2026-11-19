@@ -144,6 +144,15 @@ async fn postgres_return_take_not_started_restarts_and_settles() {
         ("take_pending", "enqueued", "pending")
     );
     assert!(fence > fence_before, "重启使用新 fence");
+    let restart_clock: bool = sqlx::query_scalar(
+        "SELECT ((result_metadata->>'not_started_restarted_at')::timestamptz = updated_at) IS TRUE
+         FROM public.deliveries WHERE id = $1",
+    )
+    .bind(take)
+    .fetch_one(pool)
+    .await
+    .expect("读取未发出 Take 的重启时间");
+    assert!(restart_clock, "重启记录与更新必须共用一个时刻");
     let (kind, details) = last_event(pool, returned.case).await;
     assert_eq!(kind, "take_activated");
     assert_eq!(

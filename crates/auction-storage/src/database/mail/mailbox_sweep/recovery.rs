@@ -188,9 +188,10 @@ pub(super) async fn bind_send(
     }
     let reference = format!("mooglemail:{}:send:{mid}", delivery.world_id);
     let completed_at = sqlx::query_scalar(
-        "UPDATE public.deliveries
+        "WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
+         UPDATE public.deliveries
          SET external_reference=$2,status='succeeded',failure_code=NULL,
-             completed_at=clock_timestamp(),updated_at=clock_timestamp(),
+             completed_at=(SELECT at FROM sql_clock),updated_at=(SELECT at FROM sql_clock),
              lease_token=NULL,lease_expires_at=NULL,
              result_metadata=COALESCE(result_metadata,'{}'::jsonb)||$3::jsonb
                  || CASE WHEN $5::jsonb IS NULL THEN '{}'::jsonb
@@ -294,11 +295,12 @@ pub(in crate::database) async fn resume_settlement_send(
         return Ok(());
     }
     let enqueued = sqlx::query(
-        "UPDATE public.settlement_obligation_fulfillments
+        "WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
+         UPDATE public.settlement_obligation_fulfillments
          SET execution_state='enqueued',state_version=state_version+1,delivery_id=$2,
              claim_token=NULL,claimed_at=NULL,claim_expires_at=NULL,
-             next_attempt_at=clock_timestamp(),last_error_code=NULL,completed_at=NULL,
-             updated_at=clock_timestamp()
+             next_attempt_at=(SELECT at FROM sql_clock),last_error_code=NULL,completed_at=NULL,
+             updated_at=(SELECT at FROM sql_clock)
          WHERE obligation_id=$1 AND execution_state=$3
            AND delivery_operation='send' AND delivery_id=$2",
     )

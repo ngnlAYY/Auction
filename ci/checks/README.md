@@ -180,6 +180,15 @@ bash ci/checks/check.sh audit-writes
 
 语句边界取字面量之后第一个语句级 `;`，或离开字面量所在调用后遇到的包围块 `}`；注释中的示例不计。因此审计 INSERT 必须内联在执行语句中（可用多行原始字符串或 `concat!`），并在 `.await` 处直接接入；放进 `const`、返回未执行查询的函数或宏定义的写法无法证明已接入，一律失败关闭，需改为内联。门禁不展开宏、不解析完整 Rust 语法，也不证明错误随后被正确传播；一次也没有扫描到写入时失败，防止扫描范围失效后静默通过。
 
+## SQL 时钟
+
+```bash
+bash ci/checks/check.sh sql-clock
+bash ci/checks/sql-clock-test.sh
+```
+
+[ci/checks/sql-clock.pl](sql-clock.pl) 扫描 `crates/auction-storage/src` 的 Rust 普通与 raw 字符串，忽略 Rust 注释和字符字面量。每个字面量最多调用一次 `clock_timestamp()`，超出时报告文件与字面量起始行号。检测按字面量计数，跨行有效。事务时间（`now()`、`transaction_timestamp()`、`CURRENT_TIMESTAMP`）和语句时间（`statement_timestamp()`）可以重复使用。审阅时按片段宏、`concat!`、`format!` 拼接后的 SQL 检查墙钟调用，另核对列默认值与时间约束。多个位置需要同一墙钟读数时，复用 `MATERIALIZED` CTE 的结果。详见[存储实现约定](../../crates/auction-storage/README.md#实现约定)。
+
 ## 模块层级门禁
 
 ```bash

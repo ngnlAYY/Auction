@@ -629,6 +629,11 @@ check_audit_writes() {
 		perl ci/checks/audit-writes.pl
 }
 
+check_sql_clock() {
+	rg --files --null crates/auction-storage/src -g '*.rs' |
+		perl ci/checks/sql-clock.pl
+}
+
 # 导入按 std → 外部 crate → 本 crate 三组排列，模块级私有 use 只出现在模块开头的导入区；稳定版
 # rustfmt 只排序不分组，口径见 import-groups.pl。
 check_import_groups() {
@@ -801,6 +806,7 @@ run_checks() {
 		ratchet) check_source_ratchet ;;
 		ratchet-counts) check_source_ratchet --counts ;;
 		audit-writes) check_audit_writes ;;
+		sql-clock) check_sql_clock ;;
 		import-groups) check_import_groups ;;
 		test-module-paths) check_test_module_paths ;;
 		work-item-ids) check_work_item_ids ;;
@@ -843,7 +849,7 @@ run_checks() {
 		web-dependency-audit) check_web_dependency_audit ;;
 		release-dependency-audit) bash ci/checks/release-dependency-audit.sh ;;
 		dependency-unused) cargo machete ;;
-		all) run_checks repository rust-version public-redaction layout import-groups module-docs hot-fields config systemd-templates i18n equipment-contract ratchet audit-writes test-module-paths work-item-ids markdown-links migration-compatibility published-migrations web-build-inputs web-callback-props ;;
+		all) run_checks repository rust-version public-redaction layout import-groups module-docs hot-fields config systemd-templates i18n equipment-contract ratchet audit-writes sql-clock test-module-paths work-item-ids markdown-links migration-compatibility published-migrations web-build-inputs web-callback-props ;;
 		rust) run_checks fmt check dependency-versions lint wasm rustdoc ;;
 		*)
 			printf '未知静态检查：%s\n' "$check" >&2

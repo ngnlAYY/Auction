@@ -84,12 +84,13 @@ pub(crate) async fn renew(
     lock_mailbox(&mut transaction, &claim.mailbox_key).await?;
     // 手动触发可以持有 paused 快照；续租仍必须匹配该快照，避免改变自动调度语义。
     let updated = sqlx::query(
-        "UPDATE public.mail_poll_state
+        "WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
+         UPDATE public.mail_poll_state
          SET claim_expires_at = $4, updated_at = $3
          WHERE mailbox_key = $1 AND claim_token = $2 AND claim_owner = $5
                AND state_version = $6 AND paused = $7
                AND claim_expires_at > $3 AND claim_expires_at < $4
-               AND claim_expires_at > clock_timestamp() AND $4 > clock_timestamp()",
+               AND claim_expires_at > (SELECT at FROM sql_clock) AND $4 > (SELECT at FROM sql_clock)",
     )
     .bind(&claim.mailbox_key)
     .bind(claim.claim_token)

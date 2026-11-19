@@ -30,27 +30,29 @@ pub(super) async fn claim(
         .collect::<Vec<_>>();
     let mut tx = store.pool().begin().await.map_err(sql_error)?;
     // 每轮最多恢复一项；不把未知写入误当成可再次发送。
-    sqlx::query("UPDATE public.lot_watch_pm_deliveries SET status='manual_reconcile', failure_code='outcome_unknown',
+    sqlx::query("WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
+        UPDATE public.lot_watch_pm_deliveries SET status='manual_reconcile', failure_code='outcome_unknown',
         lease_token=NULL,lease_expires_at=NULL,lease_kind=NULL,worker_id=NULL,
-        fencing_version=fencing_version+1,reconcile_requested_at=clock_timestamp(),updated_at=clock_timestamp()
+        fencing_version=fencing_version+1,reconcile_requested_at=(SELECT at FROM sql_clock),updated_at=(SELECT at FROM sql_clock)
         WHERE notification_id IN (SELECT notification_id FROM public.lot_watch_pm_deliveries
-        WHERE status='sending' AND lease_expires_at <= clock_timestamp() ORDER BY lease_expires_at LIMIT 1 FOR UPDATE SKIP LOCKED)")
+        WHERE status='sending' AND lease_expires_at <= (SELECT at FROM sql_clock) ORDER BY lease_expires_at LIMIT 1 FOR UPDATE SKIP LOCKED)")
         .execute(&mut *tx).await.map_err(sql_error)?;
     // 提醒资格随 lot 有效截止结束：截止后尚未开始发送的 PM 按预检退役语义收口，
     // 与 MoogleMail 投递同一规则；已 sending 的行不动，其外部结果只由原 sender 对账。
     let retired = sqlx::query_scalar::<_, Uuid>(
-        "WITH retired AS (
+        "WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at),
+        retired AS (
         SELECT q.notification_id FROM public.lot_watch_pm_deliveries q
         JOIN public.lot_watch_notifications n ON n.id=q.notification_id AND n.channel='pm'
         JOIN public.lots lot ON lot.id=n.lot_id
         WHERE q.status IN ('pending','claimed') AND q.sending_at IS NULL
-        AND lot.effective_end_at IS NOT NULL AND lot.effective_end_at <= clock_timestamp()
+        AND lot.effective_end_at IS NOT NULL AND lot.effective_end_at <= (SELECT at FROM sql_clock)
         ORDER BY q.created_at,q.notification_id LIMIT 100 FOR UPDATE OF q SKIP LOCKED
     )
     UPDATE public.lot_watch_pm_deliveries q SET status='suppressed',failure_code='source_invalid',
         lease_token=NULL,lease_expires_at=NULL,lease_kind=NULL,worker_id=NULL,
         fencing_version=q.fencing_version+1,
-        completed_at=clock_timestamp(),updated_at=clock_timestamp()
+        completed_at=(SELECT at FROM sql_clock),updated_at=(SELECT at FROM sql_clock)
     FROM retired WHERE q.notification_id=retired.notification_id
     RETURNING q.notification_id",
     )
@@ -61,7 +63,8 @@ pub(super) async fn claim(
     // 持久领取时间把失败或超时的准备任务排到其他已等待任务之后；UUID 稳定打破并列。
     // release 不清空 claimed_at，重启也不能让最早创建的坏收件人独占每轮名额。
     // 来源世界来自不可变的 lot→auction 绑定；先按真实凭据 scope 筛选，避免不可用世界占用名额。
-    let row = sqlx::query("WITH candidate AS (
+    let row = sqlx::query("WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at),
+        candidate AS (
         SELECT q.notification_id FROM public.lot_watch_pm_deliveries q
         JOIN public.lot_watch_notifications n ON n.id=q.notification_id AND n.channel='pm'
         JOIN public.lots lot ON lot.id=n.lot_id
@@ -69,16 +72,16 @@ pub(super) async fn claim(
         WHERE (($1 AND q.status='manual_reconcile' AND q.reconcile_requested_at IS NOT NULL)
             OR (NOT $1 AND q.status IN ('pending','claimed') AND q.sending_at IS NULL))
         AND auction.world_id=ANY($5::text[])
-        AND (q.lease_expires_at IS NULL OR q.lease_expires_at <= clock_timestamp())
+        AND (q.lease_expires_at IS NULL OR q.lease_expires_at <= (SELECT at FROM sql_clock))
         ORDER BY COALESCE(q.claimed_at,q.created_at),q.created_at,q.notification_id
         LIMIT 1 FOR UPDATE OF q SKIP LOCKED
     ), claimed AS (
         UPDATE public.lot_watch_pm_deliveries q SET
         status=CASE WHEN $1 THEN 'manual_reconcile' ELSE 'claimed' END,
         fencing_version=fencing_version+1, lease_token=$2,
-        lease_expires_at=clock_timestamp()+make_interval(secs => $3::bigint::double precision),
+        lease_expires_at=(SELECT at FROM sql_clock)+make_interval(secs => $3::bigint::double precision),
         lease_kind=CASE WHEN $1 THEN 'reconcile' ELSE 'send' END,worker_id=$4,
-        claimed_at=clock_timestamp(),updated_at=clock_timestamp(),
+        claimed_at=(SELECT at FROM sql_clock),updated_at=(SELECT at FROM sql_clock),
         attempt_count=attempt_count+CASE WHEN $1 THEN 0 ELSE 1 END,
         reconcile_attempt_count=reconcile_attempt_count+CASE WHEN $1 THEN 1 ELSE 0 END
         FROM candidate WHERE q.notification_id=candidate.notification_id

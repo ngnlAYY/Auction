@@ -32,7 +32,8 @@ pub(crate) async fn link_action_postgres(
         Box::pin(async move {
             lock_action(transaction, action_id.as_uuid()).await?;
             let result = sqlx::query(
-                r#"UPDATE public.settlement_recovery_actions
+                r#"WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
+                   UPDATE public.settlement_recovery_actions
                    SET execution_state = 'prepared',
                        delivery_id = $1,
                        prepare_command_id = $2,
@@ -40,14 +41,14 @@ pub(crate) async fn link_action_postgres(
                        last_error_code = NULL,
                        next_attempt_at = NULL,
                        state_version = state_version + 1,
-                       updated_at = clock_timestamp()
+                       updated_at = (SELECT at FROM sql_clock)
                    WHERE id = $4
                      AND recovery_id = $5
                      AND execution_state = 'pending'
                      AND state_version = $6
                      AND claim_token = $7
                      AND claim_fencing = $8
-                     AND claim_expires_at > clock_timestamp()
+                     AND claim_expires_at > (SELECT at FROM sql_clock)
                      AND delivery_id IS NULL"#,
             )
             .bind(delivery_id)

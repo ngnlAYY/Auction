@@ -408,21 +408,22 @@ pub(super) async fn fail_postgres(
         .await
         .map_err(map_storage_error)?;
     let result = sqlx::query(
-        r#"UPDATE public.settlement_obligation_fulfillments
+        r#"WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
+           UPDATE public.settlement_obligation_fulfillments
            SET claim_token = NULL,
                claimed_at = NULL,
                claim_expires_at = NULL,
                retry_count = retry_count + 1,
                state_version = state_version + 1,
-               next_attempt_at = clock_timestamp() + $2::bigint * interval '1 microsecond',
+               next_attempt_at = (SELECT at FROM sql_clock) + $2::bigint * interval '1 microsecond',
                last_error_code = $3,
-               updated_at = clock_timestamp()
+               updated_at = (SELECT at FROM sql_clock)
            WHERE obligation_id = $1
              AND execution_state = $4
              AND state_version = $5
              AND claim_token = $6
              AND claim_fencing = $7
-             AND claim_expires_at > clock_timestamp()"#,
+             AND claim_expires_at > (SELECT at FROM sql_clock)"#,
     )
     .bind(claim.obligation_id.as_uuid())
     .bind(retry_microseconds)

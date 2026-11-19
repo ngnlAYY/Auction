@@ -14,6 +14,7 @@ use auction_application::delivery::{
     DeliveryClaimExclusions, DeliveryFenceOutcome, DeliveryPreparedExpectation,
     DeliverySendExpectation, DeliveryWorkClaim, DeliveryWorkStore,
 };
+use auction_application::forum::ForumPmReceipt;
 use auction_application::lot_watch_pm::{LotWatchPmClaimRequest, LotWatchPmWorkStore};
 use auction_application::lot_watch_reminders::LotWatchReminderStore;
 use auction_application::mail::MailNotificationTemplate;
@@ -680,13 +681,50 @@ async fn postgres_lot_watch_pm_reminder_parity_before_and_after_the_deadline() {
             .await;
     let claim = pm_claim(&store).await.expect("截止前的 PM 提醒应可领取");
     assert_eq!(claim.message.notification_id, before.notification_id);
-    let started = LotWatchPmWorkStore::start_sending(&store, claim, PM_SENDER.to_owned())
+    let claim_clock: bool = sqlx::query_scalar(
+        "SELECT (claimed_at = updated_at AND lease_expires_at = claimed_at + interval '120 seconds') IS TRUE
+         FROM public.lot_watch_pm_deliveries WHERE notification_id = $1",
+    )
+    .bind(before.notification_id)
+    .fetch_one(store.postgres_pool())
+    .await
+    .expect("读取 PM 领取时间");
+    assert!(claim_clock, "PM 领取时间和租约截止必须使用同一基准");
+    let started = LotWatchPmWorkStore::start_sending(&store, claim.clone(), PM_SENDER.to_owned())
         .await
         .expect("开始 PM 发送");
     assert!(started, "截止前 PM 发送围栏应通过");
     let (status, _, sending_at) = pm_state(&store, before.notification_id).await;
     assert_eq!(status, "sending");
     assert!(sending_at.is_some());
+    let sending_clock: bool = sqlx::query_scalar(
+        "SELECT (sending_at = updated_at) IS TRUE
+         FROM public.lot_watch_pm_deliveries WHERE notification_id = $1",
+    )
+    .bind(before.notification_id)
+    .fetch_one(store.postgres_pool())
+    .await
+    .expect("读取 PM 发送时间");
+    assert!(sending_clock, "PM 开始发送与更新必须共用一个时刻");
+
+    let mut claim = claim;
+    claim.sender = Some(PM_SENDER.to_owned());
+    let receipt = ForumPmReceipt {
+        message: claim.message.clone(),
+        sender_forum_account_id: PM_SENDER.to_owned(),
+        sent_message_id: "424243".to_owned(),
+    };
+    LotWatchPmWorkStore::finish(&store, claim, Some(receipt)).await.expect("保存 PM 发送证明");
+    let (status, completed_clock): (String, bool) = sqlx::query_as(
+        "SELECT status, (completed_at = updated_at) IS TRUE
+         FROM public.lot_watch_pm_deliveries WHERE notification_id = $1",
+    )
+    .bind(before.notification_id)
+    .fetch_one(store.postgres_pool())
+    .await
+    .expect("读取 PM 完成时间");
+    assert_eq!(status, "succeeded");
+    assert!(completed_clock, "PM 完成与更新必须共用一个时刻");
 
     // 截止后尚未发送的 PM 按同一预检语义退役为 suppressed/source_invalid。
     let after =
@@ -697,6 +735,15 @@ async fn postgres_lot_watch_pm_reminder_parity_before_and_after_the_deadline() {
     assert_eq!(status, "suppressed");
     assert_eq!(failure.as_deref(), Some("source_invalid"));
     assert!(sending_at.is_none(), "退役不得伪造 PM 发送围栏");
+    let retired_clock: bool = sqlx::query_scalar(
+        "SELECT (completed_at = updated_at) IS TRUE
+         FROM public.lot_watch_pm_deliveries WHERE notification_id = $1",
+    )
+    .bind(after.notification_id)
+    .fetch_one(store.postgres_pool())
+    .await
+    .expect("读取 PM 退役时间");
+    assert!(retired_clock, "截止后退役的完成与更新必须共用一个时刻");
 }
 
 #[tokio::test]
@@ -717,6 +764,15 @@ async fn postgres_lot_watch_pm_reminder_fence_and_fenced_send_ignore_the_expired
     assert_eq!(status, "suppressed");
     assert_eq!(failure.as_deref(), Some("source_invalid"));
     assert!(sending_at.is_none());
+    let rejected_clock: bool = sqlx::query_scalar(
+        "SELECT (completed_at = updated_at) IS TRUE
+         FROM public.lot_watch_pm_deliveries WHERE notification_id = $1",
+    )
+    .bind(fixture.notification_id)
+    .fetch_one(store.postgres_pool())
+    .await
+    .expect("读取 PM 围栏拒绝时间");
+    assert!(rejected_clock, "围栏拒绝后的退役完成与更新必须共用一个时刻");
 
     // 已经 sending 的 PM 结果不受退役影响，也不回发送队列。
     let fenced =
