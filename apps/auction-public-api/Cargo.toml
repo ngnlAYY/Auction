@@ -23,8 +23,12 @@ tracing.workspace = true
 uuid.workspace = true
 
 [features]
+# 可选：都不启用时只提供 API，不内嵌任何页面资源。
 default = []
+# 可选：内嵌 Dioxus 版的 Public 页面（默认技术栈），产物由 `mise run web-build` 生成。
 web-embed = []
+# 可选：内嵌 Solid 版的 Public 页面；`web-solid` 蕴含 `web-embed`，两者同时启用时以 Solid 为准。
+web-solid = ["web-embed"]
 
 [lints]
 # 可选：继承工作区统一 lint 策略，不在单包放宽。

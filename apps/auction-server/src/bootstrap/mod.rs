@@ -189,7 +189,7 @@ async fn setup(cli: &Cli, output: &Path) -> anyhow::Result<FirstRunOutcome> {
             remote,
             initialize_and_start: true,
         },
-        auction_setup::FirstRunPolicy::DIOXUS_WEB_SCRIPT_POLICY,
+        auction_admin_api::web_script_policy(),
     )
     .await
     .map_err(anyhow::Error::msg)
@@ -267,6 +267,19 @@ mod tests {
         }
         let supervisor = runtime_builder(None).enable_all().build().unwrap();
         assert_eq!(supervisor.handle().runtime_flavor(), RuntimeFlavor::CurrentThread);
+    }
+
+    /// 回归：直接启用依赖的 `auction-admin-api/web-solid` 时，首次设置必须取 Admin 的 Solid 策略。
+    ///
+    /// 该组合下本 crate 的 `web-solid-admin` 并未启用，无法用 cfg 选择期望值；默认 Dioxus 构建会失败，
+    /// 因此只按文档中的固定 feature 组合显式运行。
+    #[test]
+    #[ignore = "显式运行：cargo test -p auction-server --features web-embed,auction-admin-api/web-solid -- --ignored"]
+    fn setup_policy_is_solid_when_admin_assets_are_solid() {
+        assert_ne!(
+            auction_admin_api::web_script_policy(),
+            auction_setup::FirstRunPolicy::DIOXUS_WEB_SCRIPT_POLICY
+        );
     }
 
     #[tokio::test]

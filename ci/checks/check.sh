@@ -800,7 +800,12 @@ run_checks() {
 		public-redaction) check_public_redaction ;;
 		fmt) cargo fmt --all -- --check ;;
 		check) cargo check --locked --workspace --all-targets ;;
-		lint) cargo clippy --locked --workspace --all-targets --all-features -- -D warnings ;;
+		lint)
+			cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+			# `--all-features` 已含 `web-solid`；只启用 `web-embed` 才能覆盖 Dioxus 内嵌分支。
+			cargo clippy --locked -p auction-public-api -p auction-admin-api -p auction-server \
+				--all-targets --features web-embed -- -D warnings
+			;;
 		wasm)
 			# cfg(target_arch = "wasm32") 代码只在该目标下编译，宿主 lint 覆盖不到；两端分开调用以保留各自的 feature 图。
 			cargo clippy --locked --target wasm32-unknown-unknown \

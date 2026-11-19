@@ -53,10 +53,13 @@ pub(crate) async fn serve_admin_asset<A: rust_embed::RustEmbed>(
 
 /// 只向一次性初始化进程提供 Admin 的 `/setup` 页面和必要静态资源。
 ///
-/// `first_run_router` 已按装配根传入的 `WebScriptPolicy` 选择 CSP；这个静态资源回退在 Admin
-/// 接入 Solid 前固定使用 Dioxus。Admin 接入 Solid 时，把同一个策略也传到这里。
-pub async fn serve_admin_setup_asset<A: rust_embed::RustEmbed>(request: Request) -> Response {
-    let mut response = serve::<A>(Surface::Admin, request, true, WebScriptPolicy::Dioxus);
+/// 首次设置页属于 Admin surface，CSP、入口 `Link` 与静态资源指纹判定都必须使用装配根传入的
+/// 同一策略，否则 Solid 产物会拿到 Dioxus 的缓存与预加载规则。
+pub async fn serve_admin_setup_asset<A: rust_embed::RustEmbed>(
+    request: Request,
+    web_script_policy: WebScriptPolicy,
+) -> Response {
+    let mut response = serve::<A>(Surface::Admin, request, true, web_script_policy);
     // 首次设置不属于正式 CDN 表面，连静态资源也不允许边缘保存。
     response.extensions_mut().remove::<StaticCachePolicy>();
     response.headers_mut().insert("cdn-cache-control", HeaderValue::from_static("no-store"));

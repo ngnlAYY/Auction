@@ -41,6 +41,10 @@ async fn admin_asset<A: RustEmbed + Send + Sync + 'static>(request: Request<Body
     serve_admin_asset::<A>(request, WebScriptPolicy::Dioxus).await
 }
 
+async fn setup_asset<A: RustEmbed + Send + Sync + 'static>(request: Request<Body>) -> Response {
+    serve_admin_setup_asset::<A>(request, WebScriptPolicy::Dioxus).await
+}
+
 async fn listen() -> (SocketAddr, oneshot::Sender<()>, JoinHandle<io::Result<()>>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind loopback");
     let address = listener.local_addr().unwrap();
@@ -353,7 +357,7 @@ async fn http1_identity_only_favicon_varies_on_success_revalidation_and_rejectio
 async fn http1_entry_aliases_and_favicon_negotiate_existing_copies() {
     let public = Router::new().fallback(public_asset::<NegotiationAssets>);
     let admin = Router::new().fallback(admin_asset::<NegotiationAssets>);
-    let setup = Router::new().fallback(serve_admin_setup_asset::<NegotiationAssets>);
+    let setup = Router::new().fallback(setup_asset::<NegotiationAssets>);
     let headers = "Accept-Encoding: *;q=1\r\nAccept-Encoding: identity;q=0\r\n";
     let preload = "</assets/app.css>; rel=preload; as=style";
     for (app, path, copy, mime, link) in [

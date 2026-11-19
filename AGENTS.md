@@ -20,8 +20,8 @@
 - HentaiVerse 装备拍卖系统：玩家经网站与论坛出价，经游戏内 MoogleMail 寄售装备、付款与收货。
 - `apps/` 下五个可部署程序：`auction-public-api`（Public 竞价站点）、`auction-admin-api`（Admin 后台与分体部署首次设置）、`auction-worker`（生命周期、结算履约、MoogleMail、论坛、告警等全部后台任务）、`auction-cli`（配置检查、部署编排、迁移、备份恢复与业务运维），以及可选的 `auction-server`（单主机上以子进程监管前三个角色）。
 - 工具与命令入口由 [mise](https://mise.jdx.dev) 管理：版本在 `mise.toml`、校验和在 `mise.lock`，一律取上游原始版本，不携带补丁；命令入口是 `mise run <任务>`。清单见[ci/tools/README.md](ci/tools/README.md)。
-- Rust 工作区，语言版次（edition）为 2024——这是 Rust 的版次编号，不是年份：工具链固定为 1.100.0（`rust-toolchain.toml`，mise 读取该文件），MSRV（`Cargo.toml` 的 `rust-version`）等于工具链版本，不为更旧的 Rust 保留兼容，新稳定的语言特性与标准库接口可以直接使用（`rust-version` 门禁核对两处一致）。后端用 axum 与 sqlx；前端是两个 Dioxus 0.7 CSR 单页应用，编译到 `wasm32-unknown-unknown`，由后端以 `web-embed` 内嵌。
-- 页面另有一套进行中的 TypeScript 7 + SolidJS 2.0 实现，放在 `web/`（bun 管理依赖），目前只写了 Public，尚未接入 `web-embed` 与发布构建：构建、发布与部署的仍然只有 Rust 版。
+- Rust 工作区，语言版次（edition）为 2024——这是 Rust 的版次编号，不是年份：工具链固定为 1.100.0（`rust-toolchain.toml`，mise 读取该文件），MSRV（`Cargo.toml` 的 `rust-version`）等于工具链版本，不为更旧的 Rust 保留兼容，新稳定的语言特性与标准库接口可以直接使用（`rust-version` 门禁核对两处一致）。后端用 axum 与 sqlx；前端是两个 Dioxus 0.7 CSR 单页应用，编译到 `wasm32-unknown-unknown`，由后端以 `web-embed` 内嵌；同一内嵌能力加 `web-solid` 时改嵌 Solid 产物。
+- 页面另有一套进行中的 TypeScript 7 + SolidJS 2.0 实现，放在 `web/`（bun 管理依赖），目前只写了 Public，已通过 `web-solid` 接入内嵌；正式发布与部署仍只有 Rust 版。
 - 原生程序只支持 Linux x86_64，装配根在其他平台编译期报错；通用制品不使用 `target-cpu=native`。
 - PostgreSQL 18 是唯一数据库后端与唯一事实来源，没有独立缓存进程。未配置数据库时进程以运行期骨架模式启动，相关接口返回“能力不可用”；不存在“无数据库”的编译形态。
 - 普通启动从不隐式迁移。迁移只经 `auction-cli db migrate`、`auction-cli service start/restart`（停机门禁后）与合并部署首次初始化（网页明确确认后的专用空库）执行。
@@ -122,7 +122,7 @@
 
 - Public/Admin 是独立的 Dioxus CSR SPA，各自拥有路由、译文与资源。不启用 SSR、hydration 或 fullstack；Rust 实现不引入 JavaScript 框架、TypeScript 或 npm 运行时依赖，`dx` 构建时使用的 esbuild 是唯一例外。
 - `web/` 是第二套实现（TypeScript + SolidJS，同样是纯客户端渲染），规则以[web/README.md](web/README.md)为准，运行期依赖限于该文件列出的几项。两套实现共用样式表（`crates/auction-web-shared/style`、各 surface 的 `assets/`）与译文（`i18n/*.ftl`）：改这些共用文件会同时影响两套实现，改完两边都要核对。Solid 版与 Rust 版有意不同的地方逐项登记在 web/README.md 的差异表里，没有登记的行为应保持一致。
-- `mise run web-build` 用 `dx bundle` 以 `wasm-release` profile 构建，复制到稳定目录后由后端 `web-embed` 内嵌。未构建时后端仍可编译，页面路由返回 503。只有显式 `web-embed` 才内嵌资源；Public 二进制不得包含 Admin 资源，反之亦然。
+- `mise run web-build` 用 `dx bundle` 以 `wasm-release` profile 构建默认的 Dioxus 产物，复制到稳定目录后由后端 `web-embed` 内嵌；Solid 产物由 `AUCTION_WEB_STACK=solid` 构建，由 `web-solid` 内嵌。未构建时后端仍可编译，页面路由返回 503。只有显式内嵌 feature（`web-embed` 或 `web-solid`）才内嵌资源，两者都未启用时使用固定空资源目录；Public 二进制不得包含 Admin 资源，反之亦然。
 - 浏览器只消费 `auction-contracts` DTO；改变状态的动作携带 `command_id`，结果未知时只允许原样重试。不在浏览器重建业务状态机。
 - 浏览器支持口径（两套实现与共用样式都适用）：各主流浏览器多年来都支持的特性直接用；较新、主流浏览器已全部支持的特性（如 Popover API、`:has()`）先做特性检测（`@supports` 或接口存在性判断），不支持时退回现有的手写实现或保持原有外观；不引入 polyfill，不从第三方源加载脚本。时间换算沿用仓库现有实现，不使用 Temporal。
 - 所有界面文案走各自的 `i18n/*.ftl`：五种语言（en、zh-CN、zh-TW、ja、ko）键集合一致，键名用连字符、不含点号（`i18n` 门禁，同时检查两套实现的引用）。Public 默认 en，Admin 默认 zh-CN；偏好键 `hv.lang`、`hv.theme` 是固定契约。

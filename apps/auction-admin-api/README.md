@@ -2,13 +2,15 @@
 
 [docs/README.md](../../docs/README.md) · [docs/contracts/routes.md](../../docs/contracts/routes.md) · [crates/auction-web-admin/README.md](../../crates/auction-web-admin/README.md) · [ops/config/README.md](../../ops/config/README.md)
 
-管理后台的 HTTP 进程：Admin 会话、拍卖生命周期与排期、lot 修改与手工录入、凭据与用户管理、投递与恢复人工处置、规则发布、runtime 配置编辑、审计与仪表盘，并在 `web-embed` 构建中同源提供 Admin 页面；另外承担分体部署的首次设置入口。
+管理后台的 HTTP 进程：Admin 会话、拍卖生命周期与排期、lot 修改与手工录入、凭据与用户管理、投递与恢复人工处置、规则发布、runtime 配置编辑、审计与仪表盘，并在启用内嵌 feature 的构建中同源提供 Admin 页面（`web-embed` 为 Dioxus，`web-solid` 为 Solid）；另外承担分体部署的首次设置入口。
 
 ## feature
 
 | feature | 作用 |
 | --- | --- |
-| `web-embed` | 内嵌 Admin 页面产物；首次设置页面也依赖它 |
+| （都不启用） | 只提供 API；不内嵌 Admin 页面，首次设置入口不可用 |
+| `web-embed` | 内嵌 Dioxus 版 Admin 页面产物，首次设置也依赖它 |
+| `web-solid` | 内嵌 Solid 版 `target/web/admin/public` 的产物（蕴含 `web-embed`），首次设置页随 Admin 一起切换；目前尚无 Admin 的 Solid 产物，未构建时页面路由返回 503 |
 
 ## 启动模式
 

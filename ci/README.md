@@ -44,7 +44,7 @@ bash ci/checks/check.sh <检查项>...
 | `all` | `repository rust-version public-redaction layout import-groups module-docs hot-fields config systemd-templates i18n equipment-contract ratchet audit-writes test-module-paths work-item-ids markdown-links migration-compatibility published-migrations web-build-inputs web-callback-props` |
 | `fmt` | `cargo fmt --all -- --check` |
 | `check` | `cargo check --locked --workspace --all-targets` |
-| `lint` | `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` |
+| `lint` | `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`；再以 `--features web-embed` 单独 Clippy 两个 API 与合并服务，覆盖 `--all-features`（等于两端 Solid）看不到的 Dioxus 内嵌分支 |
 | `dependency-versions` | `auction-server` 正常依赖图只能包含一个 `tungstenite` 版本；Axum 的 WebSocket 错误按版本 downcast，跨版本并存会静默丢失 1009 close 契约 |
 | `wasm` | 以 `wasm32-unknown-unknown` 目标运行 `cargo clippy -D warnings`：Public（连同 `auction-web-shared`、`auction-contracts`）与 Admin 分开检查，各自保留独立 feature 图；`cfg(target_arch = "wasm32")` 代码只在此项被 lint。随后以发布页面所用的 `wasm-release` profile 对两端各运行一次 `cargo check`，并用 `build.warnings=deny` 拒绝本仓库成员的 rustc 告警：只在发布构型出现的告警在 dev 构型里看不到。这一步不链接，也不运行 `dx` 与 `wasm-opt` |
 | `rustdoc` | `cargo doc` 全工作区（含私有项与全部 feature）以 `-D rustdoc::all` 构建：文档注释里的符号链接、HTML 标签与代码块属性必须可解析，失效链接即过期注释 |

@@ -10,6 +10,9 @@ use std::{
 
 use anyhow::{Context, bail};
 
+#[cfg(feature = "web-embed")]
+use crate::web_assets::web_script_policy;
+
 pub(super) enum StartMode {
     Normal(Option<PathBuf>),
     Setup(SetupOptions),
@@ -100,7 +103,7 @@ pub(super) async fn run(options: SetupOptions) -> anyhow::Result<()> {
                 control_group: options.control_group,
                 control_uid: options.control_uid,
             },
-            auction_http::WebScriptPolicy::Dioxus,
+            web_script_policy(),
         )
         .await
         .map_err(|reason| anyhow::anyhow!(reason))

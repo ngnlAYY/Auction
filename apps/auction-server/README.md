@@ -4,7 +4,18 @@
 
 单文件合并部署：一个可执行文件、一个 systemd unit，在本机以子进程监管 Worker、Admin、Public 三个角色。适合单主机、小规模部署；分体部署（三个 unit + `auction-cli service` 编排）见[ops/README.md](../../ops/README.md)。两种方式不能同时用于同一套配置。
 
-需要 `web-embed` feature（发布脚本的 single 变体：`mise run build-single`）。
+发布构建需要内嵌 feature（发布脚本的 single 变体：`mise run build-single`）。
+
+## feature
+
+| feature | 作用 |
+| --- | --- |
+| （都不启用） | 只提供 API；不内嵌页面，首次设置被拒绝 |
+| `web-embed` | Public 与 Admin 都内嵌 Dioxus 版页面（发布脚本的 single 变体） |
+| `web-solid-public` | 只把 Public 切到 Solid 版；Admin 仍为 Dioxus（蕴含 `web-embed`） |
+| `web-solid-admin` | 只把 Admin 与首次设置切到 Solid 版；Public 仍为 Dioxus（蕴含 `web-embed`） |
+
+合并服务里两个 surface 可以不同技术栈，两个 `web-solid-*` feature 也可同时启用。
 
 ## 用法
 

@@ -22,8 +22,14 @@ libc.workspace = true
 tokio = { workspace = true, features = ["process"] }
 
 [features]
+# 可选：都不启用时只提供 API，不内嵌任何页面资源。
 default = []
+# 可选：Public 与 Admin 都内嵌 Dioxus 版页面（默认技术栈）。
 web-embed = ["auction-public-api/web-embed", "auction-admin-api/web-embed"]
+# 可选：只把 Public 切到 Solid 版；Admin 仍由 `web-embed` 决定，两端可以不同。
+web-solid-public = ["web-embed", "auction-public-api/web-solid"]
+# 可选：只把 Admin 与首次设置切到 Solid 版；Public 仍由 `web-embed` 决定。
+web-solid-admin = ["web-embed", "auction-admin-api/web-solid"]
 
 [lints]
 # 可选：继承工作区统一 lint 策略，不在单包放宽。

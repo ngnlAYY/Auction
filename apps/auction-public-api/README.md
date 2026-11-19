@@ -2,13 +2,17 @@
 
 [docs/README.md](../../docs/README.md) · [docs/contracts/routes.md](../../docs/contracts/routes.md) · [docs/contracts/realtime.md](../../docs/contracts/realtime.md) · [ops/config/README.md](../../ops/config/README.md)
 
-公开站点的 HTTP 进程：提供玩家读接口、竞价/代理/标记命令、登录会话、WebSocket 实时推送，并在 `web-embed` 构建中同源提供 Public 浏览器页面。本 crate 只做装配——读取配置、连接数据库、把存储适配器注入 `auction-http` 的 `PublicApiState`，业务规则在应用层与领域层。
+公开站点的 HTTP 进程：提供玩家读接口、竞价/代理/标记命令、登录会话、WebSocket 实时推送，并在启用内嵌 feature 的构建中同源提供 Public 浏览器页面（`web-embed` 为 Dioxus，`web-solid` 为 Solid）。本 crate 只做装配——读取配置、连接数据库、把存储适配器注入 `auction-http` 的 `PublicApiState`，业务规则在应用层与领域层。
 
 ## feature
 
 | feature | 作用 |
 | --- | --- |
-| `web-embed` | 内嵌 `target/dx/build/auction-web-public/web/public` 的页面产物；未启用时使用固定空资源目录（页面路由返回 503） |
+| （都不启用） | 只提供 API；两套产物目录都不读取，页面路由返回 503 |
+| `web-embed` | 内嵌 Dioxus 版 `target/dx/build/auction-web-public/web/public` 的页面产物；未构建时页面路由返回 503 |
+| `web-solid` | 内嵌 Solid 版 `target/web/public/public` 的页面产物（蕴含 `web-embed`）；未构建时页面路由返回 503 |
+
+本地生成 Solid 产物：先运行 `mise run web-prepare` 安装依赖，再运行 `AUCTION_WEB_STACK=solid mise run web-build`；Public 产物写入 `target/web/public/public`，由 `web-solid` 内嵌。两种内嵌 feature 在产物缺失时页面路由都返回 503。
 
 ## 启动
 

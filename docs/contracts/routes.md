@@ -392,7 +392,7 @@ Worker 实际值应核对其指标，不能把 Admin 显示的数据库意图当
 | POST | `/api/v1/setup/validate` | 校验表单并试连数据库 |
 | POST | `/api/v1/setup/complete` | 生成并发布配置目录 |
 
-浏览器入口为 `/setup`，仅另提供存在的 `/index.html`、`/favicon.ico` 与 `/assets/` 下资源；其余路径返回 404。`/assets/` 下另有带指纹的 Fluent 译文资源（`<lang>-dxh<hash>.ftl`）：浏览器只内嵌各 surface 的默认语言，其余语言按 `hv.lang` 按需取回，加载失败保持当前语言并提示。静态资源编码协商遵循[缓存头](#缓存头)中的规则。首次设置的 CSP 已按装配根传入的 `WebScriptPolicy` 选择；其静态资源回退在 Admin 接入 Solid 前固定使用 Dioxus，届时把同一个策略也传入该回退。首次设置使用独立的 `SetupResponse` / `SetupErrorResponse`，成功字段为 `status` 与 `initialize_and_start`；正式 Admin 不挂载这三个写接口。
+浏览器入口为 `/setup`，仅另提供存在的 `/index.html`、`/favicon.ico` 与 `/assets/` 下资源；其余路径返回 404。`/assets/` 下另有带指纹的 Fluent 译文资源（`<lang>-dxh<hash>.ftl`）：浏览器只内嵌各 surface 的默认语言，其余语言按 `hv.lang` 按需取回，加载失败保持当前语言并提示。静态资源编码协商遵循[缓存头](#缓存头)中的规则。首次设置的 CSP、入口 `Link` 与静态资源回退都随 Admin 的实际技术栈（由装配根传入的 `WebScriptPolicy` 选择）；首次设置的全部响应仍然禁止缓存。首次设置使用独立的 `SetupResponse` / `SetupErrorResponse`，成功字段为 `status` 与 `initialize_and_start`；正式 Admin 不挂载这三个写接口。
 
 合并部署的 `complete` 要求 `confirm_initialize = true` 和恰好一个 `x-setup-confirm-target` 请求头。该头按 `application/x-www-form-urlencoded` 编码确认时的三项，依次为 `host`、十进制 `port` 和 `name`，例如 `host=127.0.0.1&port=5432&name=auction`。改变其中任一项须重新确认。试连及写配置前，服务端将头值与提交正文中三项按同一格式编码的值核对。缺失、重复、格式错误或目标不一致时返回 400 `setup_confirmation_required`。确认只包含这三项，账号和口令仍仅随配置正文提交。配置发布后，服务端把确认的目标随完成结果交给监管进程。监管进程须再次比对重读的服务配置和实际用于迁移的 owner 连接目标，匹配后才初始化专用空库并启动角色。
 

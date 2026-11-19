@@ -11,4 +11,4 @@ mod bootstrap;
 mod web_assets;
 
 pub use bootstrap::{run, run_from_path};
-pub use web_assets::AdminWebAssets;
+pub use web_assets::{AdminWebAssets, web_script_policy};

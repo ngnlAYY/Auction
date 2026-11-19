@@ -88,7 +88,9 @@ fn first_run_router<A: RustEmbed + 'static>(
         .route("/api/v1/setup/verify", post(verify))
         .route("/api/v1/setup/validate", post(validate))
         .route("/api/v1/setup/complete", post(complete))
-        .fallback(auction_http::serve_admin_setup_asset::<A>)
+        .fallback(move |request| {
+            auction_http::serve_admin_setup_asset::<A>(request, web_script_policy)
+        })
         .layer(DefaultBodyLimit::max(8 * 1024))
         .layer(axum::middleware::from_fn_with_state(boundary, access::enforce))
         .with_state(state)
@@ -390,12 +392,13 @@ mod tests {
     use auction_http::WebScriptPolicy;
     use axum::{
         Json,
-        body::to_bytes,
+        body::{Body, to_bytes},
         extract::{Request, State},
         http::StatusCode,
         response::IntoResponse,
         serve::{Listener, ListenerExt},
     };
+    use rust_embed::{EmbeddedFile, Metadata, RustEmbed};
     use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, duplex};
     use tokio::sync::Mutex;
 
@@ -419,13 +422,48 @@ mod tests {
 
     struct NoAssets;
 
-    impl rust_embed::RustEmbed for NoAssets {
-        fn get(_path: &str) -> Option<rust_embed::EmbeddedFile> {
+    impl RustEmbed for NoAssets {
+        fn get(_path: &str) -> Option<EmbeddedFile> {
             None
         }
 
         fn iter() -> impl Iterator<Item = Cow<'static, str>> {
             std::iter::empty()
+        }
+    }
+
+    const SOLID_INDEX: &[u8] = br#"<!doctype html><html lang="en"><head><meta charset="utf-8"><link rel="modulepreload" href="/assets/index-B2UikXgQ.js" crossorigin><link rel="modulepreload" href="/assets/rolldown-runtime-DK3Fl9T5.js" crossorigin><link rel="stylesheet" href="/assets/index-ZX7NKpK-.css" crossorigin></head><body><div id="app"></div><script type="module" src="/assets/index-B2UikXgQ.js" crossorigin></script></body></html>"#;
+    const SOLID_INDEX_JS: &[u8] = b"console.log('solid');";
+    const SOLID_RUNTIME_JS: &[u8] = b"console.log('runtime');";
+    const SOLID_STYLE_CSS: &[u8] = b"body {}";
+
+    /// Solid 产物的最小替身：文件名是构建侧保证的 `名字-8位指纹.扩展名` 形状。
+    struct SolidSetupAssets;
+
+    impl RustEmbed for SolidSetupAssets {
+        fn get(path: &str) -> Option<EmbeddedFile> {
+            let (data, mime) = match path {
+                "index.html" => (SOLID_INDEX, "text/html"),
+                "assets/index-B2UikXgQ.js" => (SOLID_INDEX_JS, "text/javascript"),
+                "assets/rolldown-runtime-DK3Fl9T5.js" => (SOLID_RUNTIME_JS, "text/javascript"),
+                "assets/index-ZX7NKpK-.css" => (SOLID_STYLE_CSS, "text/css"),
+                _ => return None,
+            };
+            Some(EmbeddedFile {
+                data: Cow::Borrowed(data),
+                metadata: Metadata::__rust_embed_new([0; 32], None, None, mime),
+            })
+        }
+
+        fn iter() -> impl Iterator<Item = Cow<'static, str>> {
+            [
+                "index.html",
+                "assets/index-B2UikXgQ.js",
+                "assets/index-ZX7NKpK-.css",
+                "assets/rolldown-runtime-DK3Fl9T5.js",
+            ]
+            .into_iter()
+            .map(Cow::Borrowed)
         }
     }
 
@@ -472,10 +510,18 @@ mod tests {
         web_script_policy: WebScriptPolicy,
         host: &str,
     ) -> String {
-        let app = first_run_router::<NoAssets>(state, web_script_policy);
         let request = format!(
             "POST /api/v1/setup/verify HTTP/1.1\r\nhost: {host}\r\nx-setup-token: fixture-token\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
         );
+        raw_setup_response::<NoAssets>(state, web_script_policy, &request).await
+    }
+
+    async fn raw_setup_response<A: RustEmbed + 'static>(
+        state: Arc<FirstRunState>,
+        web_script_policy: WebScriptPolicy,
+        request: &str,
+    ) -> String {
+        let app = first_run_router::<A>(state, web_script_policy);
         let (mut client, server) = duplex(4096);
         let listener =
             MemoryListener { io: Some(server), addr: SocketAddr::from(([127, 0, 0, 1], 12345)) }
@@ -556,6 +602,69 @@ mod tests {
                 response_header(&rejected, "cache-control"),
                 Some("no-store"),
                 "{web_script_policy:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn setup_router_serves_solid_assets_without_cache_and_with_modulepreload() {
+        let request = "GET /setup HTTP/1.1\r\nhost: 127.0.0.1:8091\r\nconnection: close\r\n\r\n";
+        let solid =
+            raw_setup_response::<SolidSetupAssets>(setup_state(), WebScriptPolicy::Solid, request)
+                .await;
+        assert_eq!(response_status(&solid), StatusCode::OK.as_u16());
+        let link = response_header(&solid, "link").expect("Solid 入口必须声明 modulepreload");
+        assert!(
+            link.contains("</assets/index-B2UikXgQ.js>; rel=modulepreload; crossorigin"),
+            "{link}"
+        );
+        assert!(
+            link.contains("</assets/rolldown-runtime-DK3Fl9T5.js>; rel=modulepreload; crossorigin"),
+            "{link}"
+        );
+        // 首次设置的所有响应都由门禁出口改为 no-store，静态资源也不能被边缘或浏览器复用。
+        assert_eq!(response_header(&solid, "cache-control"), Some("no-store"));
+
+        let asset_request = "GET /assets/index-B2UikXgQ.js HTTP/1.1\r\nhost: 127.0.0.1:8091\r\nconnection: close\r\n\r\n";
+        let asset = raw_setup_response::<SolidSetupAssets>(
+            setup_state(),
+            WebScriptPolicy::Solid,
+            asset_request,
+        )
+        .await;
+        assert_eq!(response_status(&asset), StatusCode::OK.as_u16());
+        for header in ["cache-control", "cdn-cache-control", "cloudflare-cdn-cache-control"] {
+            assert_eq!(response_header(&asset, header), Some("no-store"), "{header}");
+        }
+
+        let dioxus =
+            raw_setup_response::<SolidSetupAssets>(setup_state(), WebScriptPolicy::Dioxus, request)
+                .await;
+        assert_eq!(response_status(&dioxus), StatusCode::OK.as_u16());
+        // Dioxus 策略只转写 `<link>`，同一份入口文档据此只能得到样式表预加载。
+        assert_eq!(
+            response_header(&dioxus, "link"),
+            Some("</assets/index-ZX7NKpK-.css>; rel=preload; as=style; crossorigin")
+        );
+    }
+
+    #[tokio::test]
+    async fn setup_asset_fallback_fingerprints_follow_the_selected_policy() {
+        for (policy, expected) in [
+            (WebScriptPolicy::Solid, "public, max-age=31536000, immutable"),
+            (WebScriptPolicy::Dioxus, "no-cache"),
+        ] {
+            let request = Request::builder()
+                .uri("/assets/index-B2UikXgQ.js")
+                .body(Body::empty())
+                .expect("setup asset request");
+            let response =
+                auction_http::serve_admin_setup_asset::<SolidSetupAssets>(request, policy).await;
+            assert_eq!(response.status(), StatusCode::OK, "{policy:?}");
+            assert_eq!(
+                response.headers()[axum::http::header::CACHE_CONTROL],
+                expected,
+                "{policy:?}"
             );
         }
     }

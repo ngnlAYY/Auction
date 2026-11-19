@@ -25,9 +25,12 @@ uuid.workspace = true
 libc.workspace = true
 
 [features]
+# 可选：都不启用时只提供 API，不内嵌 Admin 页面，首次设置入口不可用。
 default = []
 # 可选：内嵌 Admin 页面；首次设置入口只在此构建中可用，auction-setup 随之启用。
 web-embed = ["dep:auction-setup"]
+# 可选：内嵌 Solid 版的 Admin 页面；`web-solid` 蕴含 `web-embed`，首次设置随 Admin 一起切换。
+web-solid = ["web-embed"]
 
 [lints]
 # 可选：继承工作区统一 lint 策略，不在单包放宽。

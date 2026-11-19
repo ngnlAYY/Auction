@@ -13,6 +13,7 @@ use auction_process::{
 use tokio::sync::oneshot;
 
 use super::{listener, state};
+use crate::web_assets::web_script_policy;
 
 pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
     let config = match config_path {
@@ -109,7 +110,7 @@ async fn run_service(
         auction_http::admin_router_with_web_script_policy::<crate::web_assets::AdminWebAssets>(
             env!("CARGO_PKG_VERSION"),
             boundary,
-            auction_http::WebScriptPolicy::Dioxus,
+            web_script_policy(),
         )
         .with_state(state);
 

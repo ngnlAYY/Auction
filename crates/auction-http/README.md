@@ -15,7 +15,7 @@ Public 与 Admin 两个 HTTP 表面的适配器：路由表、请求边界、会
 | `HttpListener` / `serve_http` / `UnixHttpListener` | TCP/Unix 已绑定 listener 与连接服务（5 秒请求头读取超时、优雅关闭）；Unix 变体只在 Linux 编译。Worker control socket 也用 `UnixHttpListener` 绑定，实例锁与 peer 过滤、路由见[crates/auction-jobs/README.md](../auction-jobs/README.md) |
 | `spawn_metrics_listener` | 三角色附加指标出口；只持有同一 `ProcessMetrics` 与 `RuntimeSwitches`，绑定/服务失败只降级采集 |
 | `RealtimeHub` | Public 进程内 WebSocket 广播 Hub，每连接有界缓冲，慢连接被淘汰 |
-| `serve_admin_setup_asset` | 首次设置页面复用 Admin 内嵌资源；CSP 已按装配根传入的策略，静态资源回退在 Admin 接入 Solid 前固定 Dioxus |
+| `serve_admin_setup_asset` | 首次设置页面复用 Admin 内嵌资源；CSP、入口 `Link` 与静态资源回退随 Admin 的实际技术栈（装配根传入策略），全部响应禁止缓存 |
 
 监听器归属、`TaskGuard` 生命周期与关闭顺序由装配根决定；`serve_http` 不解析配置、不做认证或限流。
 

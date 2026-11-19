@@ -12,6 +12,7 @@ use auction_process::{
 use tokio::sync::oneshot;
 
 use super::{listener, state};
+use crate::web_assets::web_script_policy;
 
 pub async fn run() -> anyhow::Result<()> {
     let config = AppConfig::load(Role::Public).context("加载 public-api 配置失败")?;
@@ -120,14 +121,10 @@ async fn run_service(
     // 静默落到 no-op 记录器。
     let boundary = state.http_boundary();
     let anonymous_read_gate = state.anonymous_read_gate();
-    let app =
-        auction_http::public_router_with_web_script_policy::<crate::web_assets::PublicWebAssets>(
-            env!("CARGO_PKG_VERSION"),
-            boundary,
-            anonymous_read_gate,
-            auction_http::WebScriptPolicy::Dioxus,
-        )
-        .with_state(state);
+    let app = auction_http::public_router_with_web_script_policy::<
+        crate::web_assets::PublicWebAssets,
+    >(env!("CARGO_PKG_VERSION"), boundary, anonymous_read_gate, web_script_policy())
+    .with_state(state);
 
     tracing::info!(listener = %listener_description, "public-api 开始监听");
     let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
