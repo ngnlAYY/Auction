@@ -113,6 +113,8 @@ fn invalid_retired_key(domain: DataKeyDomain, reason: &str) -> ConfigError {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use auction_time::{Duration, Timestamp};
 
     use super::*;
@@ -148,37 +150,37 @@ mod tests {
     #[test]
     fn future_or_malformed_retirement_is_rejected() {
         let future = Timestamp::now() + Duration::days(1);
-        assert!(matches!(
+        assert_matches!(
             retired_keys(
                 DataKeyDomain::Credential,
                 Some("credential-2026-11"),
                 vec![entry("credential-2025-11", future)],
             ),
             Err(ConfigError::InvalidDataKeyRing { .. })
-        ));
+        );
         let malformed = PreviousDataKeyConfig {
             id: "credential-2025-11".to_owned(),
             key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".to_owned(),
             retired_at: "2025-11-02".to_owned(),
         };
-        assert!(matches!(
+        assert_matches!(
             retired_keys(DataKeyDomain::Credential, Some("credential-2026-11"), vec![malformed]),
             Err(ConfigError::InvalidDataKeyRing { .. })
-        ));
+        );
     }
 
     #[test]
     fn duplicate_or_current_key_is_rejected() {
         let retired_at = Timestamp::now() - Duration::days(1);
-        assert!(matches!(
+        assert_matches!(
             retired_keys(
                 DataKeyDomain::UserLogin,
                 Some("user_login-2026-11"),
                 vec![entry("user_login-2026-11", retired_at)],
             ),
             Err(ConfigError::InvalidDataKeyRing { .. })
-        ));
-        assert!(matches!(
+        );
+        assert_matches!(
             retired_keys(
                 DataKeyDomain::UserLogin,
                 Some("user_login-2026-11"),
@@ -188,14 +190,14 @@ mod tests {
                 ],
             ),
             Err(ConfigError::InvalidDataKeyRing { .. })
-        ));
-        assert!(matches!(
+        );
+        assert_matches!(
             retired_keys(
                 DataKeyDomain::UserLogin,
                 Some("user_login-2026-11"),
                 vec![entry("bad key id", retired_at)],
             ),
             Err(ConfigError::InvalidDataKeyRing { .. })
-        ));
+        );
     }
 }

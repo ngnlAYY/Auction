@@ -154,11 +154,9 @@ impl HeartbeatPublisher {
         audit_failure_count: i64,
         tracing: TracingHealth,
     ) -> Result<(), HealthError> {
-        // Rust 1.99 将此 API 更名为 try_update；MSRV 1.94.1 尚未稳定新名，保留原子语义。
-        #[allow(deprecated)]
         let previous = self
             .observation_sequence
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |value| value.checked_add(1))
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |value| value.checked_add(1))
             .map_err(|_| HealthError::InvalidCommand)?;
         let observation_sequence = previous.checked_add(1).ok_or(HealthError::InvalidCommand)?;
         let details =
@@ -293,6 +291,7 @@ pub trait HeartbeatStore: Send + Sync {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
     use std::sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
@@ -473,7 +472,7 @@ mod tests {
         publisher.publish_current().await.expect("valid heartbeat publishes");
         assert!(publisher.external_heartbeat_ready());
         valid.store(false, Ordering::SeqCst);
-        assert!(matches!(publisher.publish_current().await, Err(HealthError::InvalidCommand)));
+        assert_matches!(publisher.publish_current().await, Err(HealthError::InvalidCommand));
         assert_eq!(
             store.commands.lock().unwrap().len(),
             1,

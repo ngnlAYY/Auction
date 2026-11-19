@@ -264,6 +264,7 @@ async fn publish(
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
     use std::{
         ffi::OsString,
         fs,
@@ -354,7 +355,7 @@ mod tests {
         )
         .await
         .expect("首次归档成功");
-        assert!(matches!(first.status, ArchiveStatus::Archived));
+        assert_matches!(first.status, ArchiveStatus::Archived);
         assert_eq!(first.cipher_bytes, b"wal-segment-bytes".len() as u64);
         assert_eq!(
             fs::read(cipher_path(&fixture.staging(), SEGMENT)).expect("读取密文"),
@@ -369,7 +370,7 @@ mod tests {
         assert_eq!(record.cipher_bytes, b"wal-segment-bytes".len() as u64);
 
         let again = run(&fixture.request(&source, SEGMENT)).await.expect("重复归档成功退出");
-        assert!(matches!(again.status, ArchiveStatus::AlreadyArchived));
+        assert_matches!(again.status, ArchiveStatus::AlreadyArchived);
         assert_eq!(again.cipher_bytes, first.cipher_bytes);
     }
 
@@ -462,7 +463,7 @@ mod tests {
         )
         .await
         .expect("重新归档成功");
-        assert!(matches!(outcome.status, ArchiveStatus::Archived));
+        assert_matches!(outcome.status, ArchiveStatus::Archived);
         assert_eq!(fs::read(&cipher).expect("读取密文"), b"new-bytes");
         assert!(manifest_path(&fixture.staging(), SEGMENT).exists());
     }

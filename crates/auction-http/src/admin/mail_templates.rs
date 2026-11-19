@@ -248,6 +248,8 @@ fn error(status: StatusCode, code: &'static str, message: &'static str) -> Respo
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use auction_time::Timestamp;
     use uuid::Uuid;
 
@@ -311,10 +313,10 @@ mod tests {
             MailTemplateStoreError::Invalid
         );
         // 正文缺必需占位符；未知模板键。
-        assert!(matches!(
+        assert_matches!(
             update_command(key, request(Some("Payout only")), "admin".to_owned(), None),
             Err(MailTemplateStoreError::InvalidBody(_))
-        ));
+        );
         assert_eq!(
             update_command("no_such".to_owned(), request(Some(PAYOUT)), "admin".to_owned(), None)
                 .unwrap_err(),

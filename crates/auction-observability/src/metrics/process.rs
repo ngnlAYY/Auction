@@ -352,6 +352,8 @@ impl ProcessMetrics {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use auction_application::external_metrics::{
         ExternalMetricsEvent, MailOperation, MailRequestCategory, MailWorld,
     };
@@ -372,7 +374,7 @@ mod tests {
         });
         assert!(accounts.snapshot().expect("忙碌快照").mail.busy, "观测端口与快照共享状态");
         // 快照不等于开启 exporter：关闭时仍不注册、不导出任何指标族。
-        assert!(matches!(metrics.encode(), Err(MetricsError::Disabled)));
+        assert_matches!(metrics.encode(), Err(MetricsError::Disabled));
     }
 
     #[test]

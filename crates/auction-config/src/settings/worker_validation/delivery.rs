@@ -53,6 +53,8 @@ pub(crate) fn validate_delivery_worker(config: &DeliveryWorkerConfig) -> Result<
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use super::*;
 
     #[test]
@@ -60,8 +62,9 @@ mod tests {
         let legacy: DeliveryWorkerConfig =
             toml::from_str("concurrency = 8").expect("旧字段仍可解析");
         let error = validate_delivery_worker(&legacy).expect_err("旧字段必须被拒绝");
-        assert!(
-            matches!(error, ConfigError::InvalidDeliveryWorkerConfig(message) if message.contains("已移除"))
+        assert_matches!(
+            error,
+            ConfigError::InvalidDeliveryWorkerConfig(message) if message.contains("已移除")
         );
 
         let current: DeliveryWorkerConfig =

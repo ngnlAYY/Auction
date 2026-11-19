@@ -32,6 +32,8 @@ pub(crate) fn validate_restricted_https_url(
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use super::validate_restricted_https_url;
     use crate::settings::errors::ConfigError;
 
@@ -60,8 +62,9 @@ mod tests {
             oversized.as_str(),
         ] {
             let error = check(value).expect_err(value);
-            assert!(
-                matches!(error, ConfigError::InvalidBackupHeartbeatUrl { field: "probe_url" }),
+            assert_matches!(
+                error,
+                ConfigError::InvalidBackupHeartbeatUrl { field: "probe_url" },
                 "{value}"
             );
             assert!(!error.to_string().contains("secret-token"), "{value}");

@@ -115,6 +115,7 @@ fn stamp(len: u64, modified_nanos: Option<u128>) -> RuntimeFileStamp {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
     use std::{
         fs,
         os::unix::fs::{DirBuilderExt, PermissionsExt},
@@ -203,10 +204,10 @@ mod tests {
         // batch_size 越界，属于热字段；完整候选校验必须在提取前拒绝。
         mail.batch_size = 0;
         let path = write_document(&directory, &document);
-        assert!(matches!(
+        assert_matches!(
             load_worker_hot_config(&path, &current()),
             Err(ConfigError::InvalidRuntimeConfig { .. })
-        ));
+        );
 
         // 非热字段无效同样拒绝，证明没有“只校验热字段”的捷径。
         let mut document = managed_mail();
@@ -222,10 +223,10 @@ mod tests {
         let path = directory.join("admin.toml");
         fs::write(&path, "operations = [\n").unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
-        assert!(matches!(
+        assert_matches!(
             load_worker_hot_config(&path, &current()),
             Err(ConfigError::RuntimeParse { .. })
-        ));
+        );
         fs::remove_dir_all(directory).unwrap();
     }
 

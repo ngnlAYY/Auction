@@ -124,7 +124,7 @@ pub(crate) fn plan(config: &AppConfig) -> anyhow::Result<Option<Plan>> {
     }
     if scope.mail_diagnostics {
         let directory = config.worker.mooglemail.diagnostics.directory.clone();
-        if directory.as_os_str().is_empty() {
+        if directory.is_empty() {
             anyhow::bail!("备份范围要包含邮件诊断证据，但诊断目录未配置");
         }
         validate_absolute(&directory)?;
@@ -134,7 +134,7 @@ pub(crate) fn plan(config: &AppConfig) -> anyhow::Result<Option<Plan>> {
             missing_ok: true,
         });
     }
-    if !scope.deployment_receipts_dir.as_os_str().is_empty() {
+    if !scope.deployment_receipts_dir.is_empty() {
         validate_absolute(&scope.deployment_receipts_dir)?;
         sources.push(SourceSpec::Directory {
             kind: SourceKind::DeploymentReceipts,

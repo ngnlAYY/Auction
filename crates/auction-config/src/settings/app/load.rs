@@ -319,6 +319,7 @@ impl<'a> RuntimeWorkerConfigFile<'a> {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
     use std::fs;
     use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
     use std::path::PathBuf;
@@ -439,20 +440,20 @@ user_login_data_key = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBE="
             AdminRuntimeAlertsConfig::WORKER_CONFIG_CHANGED_HINT,
         );
         fixture.write_runtime(&candidate);
-        assert!(matches!(
+        assert_matches!(
             AppConfig::load_from_path(Role::Worker, &fixture.worker_path),
             Err(ConfigError::InvalidOperationsAlertConfig(reason)) if reason.contains("recipient")
-        ));
+        );
         fixture.write_runtime(&current);
         let mut unrelated = current;
         unrelated.allow_manual_early_open = true;
         assert!(store.validate_candidate(&unrelated, Timestamp::now()).is_ok());
 
         fs::write(&fixture.worker_path, "[worker.operations_alert\n").unwrap();
-        assert!(matches!(
+        assert_matches!(
             AppConfig::load_from_path(Role::Worker, &fixture.worker_path),
             Err(ConfigError::Parse { .. })
-        ));
+        );
         assert_eq!(
             rejection(&store, &candidate),
             AdminRuntimeAlertsConfig::WORKER_CONFIG_CHANGED_HINT,
@@ -482,8 +483,9 @@ user_login_data_key = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBE="
 
         fixture.write_runtime(&candidate);
         let error = AppConfig::load_from_path(Role::Worker, &fixture.worker_path).unwrap_err();
-        assert!(
-            matches!(error, ConfigError::InvalidOperationsAlertConfig(message) if message == reason)
+        assert_matches!(
+            error,
+            ConfigError::InvalidOperationsAlertConfig(message) if message == reason
         );
     }
 
@@ -562,9 +564,10 @@ user_login_data_key = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBE="
             let contents = format!("common_file = \"common.toml\"\n[{section}]\n");
             let error = reject_unsupported_role_sections(role, &contents)
                 .expect_err("该角色从不读取此区块，必须失败关闭");
-            assert!(
-                matches!(error, ConfigError::UnsupportedRoleSection { role: rejected, section: rejected_section }
-                    if rejected == role.name() && rejected_section == section),
+            assert_matches!(
+                error,
+                ConfigError::UnsupportedRoleSection { role: rejected, section: rejected_section }
+                    if rejected == role.name() && rejected_section == section,
                 "{role:?} [{section}] 的错误必须指明角色与区块"
             );
         }
@@ -597,7 +600,7 @@ user_login_data_key = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBE="
         let contents = "common_file = \"common.toml\"\n[session]\nidle_ttl_seconds = 900\nmax_public_sessions = 10\n";
         let error = reject_unsupported_role_sections(Role::Admin, contents)
             .expect_err("Admin 不消费公开会话上限");
-        assert!(matches!(error, ConfigError::AdminSessionLimitNotApplied));
+        assert_matches!(error, ConfigError::AdminSessionLimitNotApplied);
 
         // Public 与 runtime 仍拥有该字段，不能被同一条规则误伤。
         assert!(reject_unsupported_role_sections(Role::Public, contents).is_ok());

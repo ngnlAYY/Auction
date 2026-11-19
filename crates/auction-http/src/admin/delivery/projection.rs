@@ -110,6 +110,8 @@ impl DeliveryProjection {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use auction_contracts::{
         AdminDeliveryCustodyResponse, AdminDeliveryDetailResponse,
         AdminDeliveryDispositionResponse, AdminDeliveryResponse,
@@ -310,11 +312,11 @@ mod tests {
     /// 400 `invalid_query` 拒绝，不静默退回缺省投影。
     #[tokio::test]
     async fn include_is_opt_in_and_fails_closed() {
-        assert!(matches!(DeliveryProjection::parse(None), Ok(DeliveryProjection::Published)));
-        assert!(matches!(
+        assert_matches!(DeliveryProjection::parse(None), Ok(DeliveryProjection::Published));
+        assert_matches!(
             DeliveryProjection::parse(Some("settlement_returns")),
             Ok(DeliveryProjection::SettlementReturns)
-        ));
+        );
         for include in [
             "",
             "SETTLEMENT_RETURNS",

@@ -163,6 +163,7 @@ fn detail_line(run_id: Uuid, stage: Stage, error: &anyhow::Error) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::mem::DropGuard;
     use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf};
 
     use uuid::Uuid;
@@ -171,19 +172,13 @@ mod tests {
     use crate::backup::scheduled::model::Stage;
     use crate::config_dir::ConfigDir;
 
-    struct TempRoot(PathBuf);
-
-    impl Drop for TempRoot {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
-
-    fn temp_root() -> TempRoot {
+    fn temp_root() -> DropGuard<PathBuf, impl FnOnce(PathBuf)> {
         let root = std::env::temp_dir().join(format!("auction-scheduled-run-{}", Uuid::new_v4()));
         fs::create_dir(&root).expect("建立临时目录");
         fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).expect("设置权限");
-        TempRoot(root)
+        DropGuard::new(root, |root| {
+            let _ = fs::remove_dir_all(root);
+        })
     }
 
     #[test]
@@ -216,13 +211,13 @@ mod tests {
     #[tokio::test]
     async fn config_failure_reports_one_detail_line_outside_the_receipt() {
         let root = temp_root();
-        let config = root.0.join("config");
+        let config = root.join("config");
         fs::create_dir(&config).expect("建立空配置目录");
         let config_dir = ConfigDir::new(&config).expect("配置目录");
-        let state = root.0.join("state");
+        let state = root.join("state");
         let mut lines = Vec::new();
         let result =
-            run_reporting(&config_dir, "auction", &root.0.join("out"), &state, &mut |line| {
+            run_reporting(&config_dir, "auction", &root.join("out"), &state, &mut |line| {
                 lines.push(line);
             })
             .await;

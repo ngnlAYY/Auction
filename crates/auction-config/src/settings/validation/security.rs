@@ -61,10 +61,9 @@ pub(crate) fn validate_http_security(config: &HttpSecurityConfig) -> Result<(), 
             let parsed = Url::parse(origin).map_err(|_| {
                 ConfigError::InvalidHttpSecurity("allowed_origins 必须是有效的 HTTP(S) origin")
             })?;
-            let normalized_origin = origin.strip_suffix('/').unwrap_or(origin);
+            let normalized_origin = origin.trim_suffix('/');
             let serialized_origin = parsed.as_str();
-            let serialized_origin =
-                serialized_origin.strip_suffix('/').unwrap_or(serialized_origin);
+            let serialized_origin = serialized_origin.trim_suffix('/');
             if !matches!(parsed.scheme(), "http" | "https")
                 || parsed.host_str().is_none()
                 || parsed.username() != ""
@@ -73,9 +72,9 @@ pub(crate) fn validate_http_security(config: &HttpSecurityConfig) -> Result<(), 
                 || parsed.query().is_some()
                 || parsed.fragment().is_some()
                 || serialized_origin != normalized_origin
-                || config.allowed_origins[..index].iter().any(|existing| {
-                    existing.strip_suffix('/').unwrap_or(existing) == normalized_origin
-                })
+                || config.allowed_origins[..index]
+                    .iter()
+                    .any(|existing| existing.trim_suffix('/') == normalized_origin)
             {
                 return Err(ConfigError::InvalidHttpSecurity(
                     "allowed_origins 只能包含唯一的精确 scheme+host",

@@ -92,6 +92,8 @@ pub(crate) fn validate_operations_alert_worker(
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use super::validate_operations_alert_worker;
     use crate::settings::secrets::{AppSecrets, SecretString};
     use crate::settings::{ConfigError, MoogleMailWorkerConfig, OperationsAlertWorkerConfig, Role};
@@ -116,11 +118,9 @@ mod tests {
                 fulfillment_collection_overdue_age_seconds: rejected,
                 ..OperationsAlertWorkerConfig::default()
             };
-            assert!(
-                matches!(
-                    validate_operations_alert_worker(Role::Worker, &config, &mail, &secrets),
-                    Err(ConfigError::InvalidOperationsAlertConfig(_))
-                ),
+            assert_matches!(
+                validate_operations_alert_worker(Role::Worker, &config, &mail, &secrets),
+                Err(ConfigError::InvalidOperationsAlertConfig(_)),
                 "{rejected}"
             );
         }
@@ -137,16 +137,17 @@ mod tests {
         let check = |config: &OperationsAlertWorkerConfig, secrets: &AppSecrets| {
             validate_operations_alert_worker(Role::Worker, config, &mail, secrets)
         };
-        assert!(
-            matches!(check(&config, &secrets), Err(ConfigError::InvalidOperationsAlertConfig(reason))
-            if reason.contains("database_url"))
+        assert_matches!(
+            check(&config, &secrets),
+            Err(ConfigError::InvalidOperationsAlertConfig(reason)) if reason.contains("database_url")
         );
         secrets.database_url = Some(
             SecretString::new("database_url", "postgresql://localhost/fixture".to_owned()).unwrap(),
         );
-        assert!(
-            matches!(check(&config, &secrets), Err(ConfigError::InvalidOperationsAlertConfig(reason))
-            if reason.contains("operations_alert_webhook_url"))
+        assert_matches!(
+            check(&config, &secrets),
+            Err(ConfigError::InvalidOperationsAlertConfig(reason))
+                if reason.contains("operations_alert_webhook_url")
         );
         secrets.operations_alert_webhook_url = Some(
             SecretString::new(

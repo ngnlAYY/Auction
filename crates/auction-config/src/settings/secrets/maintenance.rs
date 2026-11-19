@@ -57,7 +57,7 @@ fn load_privileged_secret_file<T: DeserializeOwned>(
     }
     let parent = path
         .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
+        .filter(|parent| !parent.is_empty())
         .ok_or_else(|| ConfigError::InvalidMaintenanceSecretPath { path: path.clone() })?;
     let parent_metadata = fs::symlink_metadata(parent)
         .map_err(|source| ConfigError::SecretRead { path: parent.to_owned(), source })?;

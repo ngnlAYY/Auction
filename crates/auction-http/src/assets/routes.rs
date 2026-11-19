@@ -65,10 +65,7 @@ pub(super) fn browser_route(surface: Surface, path: &str) -> bool {
         }
         Surface::Admin => {
             ADMIN_EXACT_ROUTES.contains(&path)
-                || path
-                    .strip_prefix("/auctions/")
-                    .and_then(|value| value.strip_suffix("/lots"))
-                    .is_some_and(valid_parameter)
+                || path.strip_circumfix("/auctions/", "/lots").is_some_and(valid_parameter)
                 || path.strip_prefix("/deliveries/").is_some_and(valid_parameter)
                 || path.strip_prefix("/settlement-returns/").is_some_and(valid_parameter)
         }

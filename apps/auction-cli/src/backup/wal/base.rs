@@ -358,6 +358,7 @@ async fn forward_and_capture(
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
     use std::{
         ffi::OsString,
         fs,
@@ -436,7 +437,7 @@ mod tests {
         let tools = tools(&source, "/bin/cat");
         let outcome =
             super::publish(&tools, &fixture.staging(), BACKUP_ID, 1_000).await.expect("创建成功");
-        assert!(matches!(outcome.status, CreateStatus::Created));
+        assert_matches!(outcome.status, CreateStatus::Created);
         assert_eq!(outcome.plaintext_bytes, b"tar-stream-bytes".len() as u64);
         let cipher = base_cipher_path(&fixture.staging(), BACKUP_ID);
         assert_eq!(fs::read(&cipher).expect("读取密文"), b"tar-stream-bytes");
@@ -451,7 +452,7 @@ mod tests {
         let existing = resolve_existing(&fixture.staging(), BACKUP_ID)
             .expect("判定既有身份")
             .expect("必须命中既有基础备份");
-        assert!(matches!(existing.status, CreateStatus::AlreadyCreated));
+        assert_matches!(existing.status, CreateStatus::AlreadyCreated);
         assert_eq!(existing.cipher_sha256, record.cipher_sha256);
     }
 

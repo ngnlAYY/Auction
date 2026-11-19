@@ -288,9 +288,9 @@ impl OriginPolicy {
         for value in values {
             let parsed =
                 Url::parse(value).map_err(|_: url::ParseError| "allowed_origins 格式无效")?;
-            let normalized_value = value.strip_suffix('/').unwrap_or(value);
+            let normalized_value = value.trim_suffix('/');
             let serialized_value = parsed.as_str();
-            let serialized_value = serialized_value.strip_suffix('/').unwrap_or(serialized_value);
+            let serialized_value = serialized_value.trim_suffix('/');
             if !matches!(parsed.scheme(), "http" | "https")
                 || parsed.host_str().is_none()
                 || parsed.username() != ""

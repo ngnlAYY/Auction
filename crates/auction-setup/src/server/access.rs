@@ -123,19 +123,14 @@ fn permitted(
         }
         peer.ip().is_loopback()
             && header("host").is_some_and(|host| {
-                let host =
-                    if default_port { host.strip_suffix(":80").unwrap_or(host) } else { host };
+                let host = if default_port { host.trim_suffix(":80") } else { host };
                 host == address || host == localhost
             })
             && origin.is_none_or(|origin| {
                 let Some(origin) = origin.strip_prefix("http://") else {
                     return false;
                 };
-                let origin = if default_port {
-                    origin.strip_suffix(":80").unwrap_or(origin)
-                } else {
-                    origin
-                };
+                let origin = if default_port { origin.trim_suffix(":80") } else { origin };
                 origin == address || origin == localhost
             })
     }

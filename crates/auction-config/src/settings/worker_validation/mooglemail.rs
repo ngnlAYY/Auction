@@ -115,7 +115,7 @@ pub(crate) fn validate_mooglemail_worker(
             "diagnostics.maximum_total_bytes 必须位于 16 MiB 至 1 GiB",
         ));
     }
-    if config.diagnostics.directory.as_os_str().is_empty()
+    if config.diagnostics.directory.is_empty()
         || config.diagnostics.directory.to_string_lossy().chars().any(char::is_control)
         || config.enabled
             && config.diagnostics.enabled
@@ -371,6 +371,8 @@ pub(crate) fn validate_mooglemail_world(
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use super::*;
 
     #[test]
@@ -380,11 +382,11 @@ mod tests {
         config.diagnostics.directory = "/".into();
         assert!(validate_mooglemail_worker(&config).is_ok());
         config.enabled = true;
-        assert!(matches!(
+        assert_matches!(
             validate_mooglemail_worker(&config),
             Err(ConfigError::InvalidMoogleMailConfig(reason))
                 if reason.contains("diagnostics.directory")
-        ));
+        );
     }
 
     #[test]
@@ -405,10 +407,10 @@ user_login_data_key = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBE="
         assert!(validate_notification_mail_credentials(&config, &secrets).is_ok());
         secrets.mooglemail_cookie =
             Some(SecretString::new("mooglemail_cookie", "a".repeat(4097)).unwrap());
-        assert!(matches!(
+        assert_matches!(
             validate_notification_mail_credentials(&config, &secrets),
             Err(ConfigError::InvalidMoogleMailConfig("mooglemail_cookie 格式无效"))
-        ));
+        );
         secrets.equipment_data_key = Some(
             SecretString::new(
                 "equipment_data_key",
@@ -416,10 +418,10 @@ user_login_data_key = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBE="
             )
             .unwrap(),
         );
-        assert!(matches!(
+        assert_matches!(
             validate_notification_mail_credentials(&config, &secrets),
             Err(ConfigError::InvalidDataKeyRing { domain: "equipment", .. })
-        ));
+        );
     }
 
     #[test]
@@ -432,8 +434,11 @@ user_login_data_key = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBE="
         .expect("旧区块本身必须能解析，才能给出明确的错误");
         assert!(config.removed_mail_templates);
         let error = validate_mooglemail_worker(&config).expect_err("旧区块必须被拒绝");
-        assert!(matches!(error, ConfigError::InvalidMoogleMailConfig(message)
-                if message.contains("mail_templates") && message.contains("数据库")));
+        assert_matches!(
+            error,
+            ConfigError::InvalidMoogleMailConfig(message)
+                if message.contains("mail_templates") && message.contains("数据库")
+        );
         // 没有该区块的配置不受影响；区块里的内容也不保留。
         assert!(!MoogleMailWorkerConfig::default().removed_mail_templates);
     }
@@ -457,8 +462,10 @@ user_login_data_key = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBE="
                 ..MoogleMailWorkerConfig::default()
             };
             let error = validate_mooglemail_worker(&config).expect_err("越界间隔必须被拒绝");
-            assert!(
-                matches!(error, ConfigError::InvalidMoogleMailConfig(message) if message.contains("mail_scan_daily_full_interval_seconds"))
+            assert_matches!(
+                error,
+                ConfigError::InvalidMoogleMailConfig(message)
+                    if message.contains("mail_scan_daily_full_interval_seconds")
             );
         }
     }

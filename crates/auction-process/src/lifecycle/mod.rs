@@ -64,21 +64,21 @@ impl TerminationSignals {
 
     /// 等待下一次终止信号；可连续调用以实现 drain 期间二次信号强制收口。
     pub async fn recv(&mut self) -> io::Result<TerminationSignal> {
-        #[cfg(unix)]
-        {
-            tokio::select! {
-                value = self.interrupt.recv() => value
-                    .map(|()| TerminationSignal::Interrupt)
-                    .ok_or_else(signal_stream_closed),
-                value = self.terminate.recv() => value
-                    .map(|()| TerminationSignal::Terminate)
-                    .ok_or_else(signal_stream_closed),
+        cfg_select! {
+            unix => {
+                tokio::select! {
+                    value = self.interrupt.recv() => value
+                        .map(|()| TerminationSignal::Interrupt)
+                        .ok_or_else(signal_stream_closed),
+                    value = self.terminate.recv() => value
+                        .map(|()| TerminationSignal::Terminate)
+                        .ok_or_else(signal_stream_closed),
+                }
             }
-        }
-        #[cfg(not(unix))]
-        {
-            tokio::signal::ctrl_c().await?;
-            Ok(TerminationSignal::Interrupt)
+            _ => {
+                tokio::signal::ctrl_c().await?;
+                Ok(TerminationSignal::Interrupt)
+            }
         }
     }
 }

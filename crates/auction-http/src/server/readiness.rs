@@ -132,11 +132,8 @@ impl ProcessReadinessPort for HttpReadinessProbe {
             }
             // 旧策略任务仅发布到自己的 channel；改变策略或期限后不能复用其缓存或成功结果。
             let ready = self.cached_ready(policy).await;
-            if ready && self.switches.readiness_policy() == policy {
-                Ok(())
-            } else {
-                Err(RepositoryError::Failed("进程 readiness 检查失败".to_owned()).into())
-            }
+            (ready && self.switches.readiness_policy() == policy)
+                .ok_or_else(|| RepositoryError::Failed("进程 readiness 检查失败".to_owned()).into())
         })
     }
 }

@@ -55,7 +55,7 @@ pub(super) fn validate(scope: &BackupScopeConfig, age_recipient: &str) -> Result
     if !(MIN_MAXIMUM_TOTAL_BYTES..=MAX_MAXIMUM_TOTAL_BYTES).contains(&scope.maximum_total_bytes) {
         return Err(ConfigError::InvalidBackupScope("maximum_total_bytes 必须为 1 MiB–1 GiB"));
     }
-    if !scope.deployment_receipts_dir.as_os_str().is_empty() {
+    if !scope.deployment_receipts_dir.is_empty() {
         let path = &scope.deployment_receipts_dir;
         if !path.is_absolute()
             || path.components().any(|part| matches!(part, std::path::Component::ParentDir))
@@ -74,7 +74,7 @@ pub(super) fn validate(scope: &BackupScopeConfig, age_recipient: &str) -> Result
     if scope.enabled
         && !scope.runtime_config
         && !scope.mail_diagnostics
-        && scope.deployment_receipts_dir.as_os_str().is_empty()
+        && scope.deployment_receipts_dir.is_empty()
     {
         return Err(ConfigError::InvalidBackupScope("启用备份范围时至少要选择一个来源"));
     }

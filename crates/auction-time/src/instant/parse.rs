@@ -182,7 +182,7 @@ fn two_digits(fixed: &[u8; 19], index: usize) -> ParseResult<i64> {
 }
 
 fn expect_byte(fixed: &[u8; 19], index: usize, expected: u8) -> ParseResult<()> {
-    if fixed[index] == expected { Ok(()) } else { Err(INVALID) }
+    (fixed[index] == expected).ok_or(INVALID)
 }
 
 /// 读取 `min` 到 `max` 位十进制数字，遇到第一个非数字停止。

@@ -161,7 +161,7 @@ pub(super) fn backup_projection(config: &AppConfig) -> Value {
             "mail_diagnostics": config.backup.scope.mail_diagnostics,
             // 只投影是否配置，不输出部署回执目录的绝对路径。
             "deployment_receipts_configured":
-                !config.backup.scope.deployment_receipts_dir.as_os_str().is_empty(),
+                !config.backup.scope.deployment_receipts_dir.is_empty(),
             "max_files": config.backup.scope.max_files,
             "maximum_total_bytes": config.backup.scope.maximum_total_bytes,
         },

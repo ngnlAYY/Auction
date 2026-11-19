@@ -54,10 +54,9 @@ pub(super) fn entry_preload_links(document: &[u8]) -> Option<HeaderValue> {
 
 /// 读取 `name="value"` 形式的属性值；dx 生成的入口文档只使用双引号。
 pub(super) fn link_attribute<'a>(attributes: &'a str, name: &str) -> Option<&'a str> {
-    attributes.split_ascii_whitespace().find_map(|attribute| {
-        let value = attribute.strip_prefix(name)?.strip_prefix("=\"")?;
-        value.strip_suffix('"')
-    })
+    attributes
+        .split_ascii_whitespace()
+        .find_map(|attribute| attribute.strip_prefix(name)?.strip_circumfix("=\"", '"'))
 }
 
 /// 只接受 `assets/` 下的带指纹文件，并去掉 dx 写入的 `/./` 前缀。
