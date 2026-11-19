@@ -165,7 +165,7 @@ impl AuctionConfig {
 }
 
 /// 拍卖经济参数；创建拍卖时冻结到策略快照，并由竞价领域在运行时使用。
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AuctionEconomicsConfig {
     /// 默认起始价，必须为正且按 1000 信用网格对齐；省略时沿用旧版共享配置的 1000。
@@ -209,7 +209,7 @@ impl Default for AuctionEconomicsConfig {
 }
 
 /// 结算策略配置；锚点顺序和闭集模式由应用/领域校验。
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AuctionSettlementConfig {
     /// 新模板结算策略版本为 0 或 2，省略时为 2；1 仅用于历史快照解码。
@@ -247,7 +247,7 @@ impl Default for AuctionSettlementConfig {
 }
 
 /// 结算曲线中的一个整数锚点。
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AuctionAdjustmentAnchorConfig {
     /// 已连续领先时长的百万分比。
@@ -257,7 +257,7 @@ pub struct AuctionAdjustmentAnchorConfig {
 }
 
 /// 恢复策略配置；领域只接受一次提醒的 remind_v1，版本 1 为七天、版本 2 为 24 小时付款期限。
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AuctionRecoveryPolicyConfig {
     /// 恢复策略版本；省略时为 1。

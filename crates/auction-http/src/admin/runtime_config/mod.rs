@@ -7,13 +7,13 @@ use std::net::SocketAddr;
 use auction_application::admin::{
     AdminRuntimeAlertsConfig, AdminRuntimeCommandError, AdminRuntimeConfigError,
     AdminRuntimeDocument, AdminRuntimeFileError, AdminRuntimeMailConfig, AdminRuntimeSnapshot,
-    AdminRuntimeUpdateCommand,
+    AdminRuntimeUpdateCommand, WorkerRestartState,
 };
 use auction_application::core::ApplicationError;
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_contracts::{
     AdminRuntimeConfigResponse, AdminRuntimeConfigUpdateRequest, AdminRuntimeConfigValidateRequest,
-    ApiResponse,
+    AdminWorkerRestartStateDto, ApiResponse,
 };
 use auction_domain::CommandId;
 use axum::{
@@ -52,21 +52,34 @@ pub(crate) async fn get(
     if let Err(response) = authenticated_admin_session(&state, &headers).await {
         return *response;
     }
-    let projection = match runtime_projection(&uri) {
+    let projection = match runtime_projection(&uri, true) {
         Ok(value) => value,
         Err(response) => return *response,
     };
     let Some(port) = state.admin_runtime() else {
         return feature_unavailable(RUNTIME_CONFIG_FILE_MISSING);
     };
-    let snapshot = match port.current().await {
-        Ok(snapshot) => snapshot,
+    let result = if projection.worker_restart_state {
+        port.current_with_worker_restart_state().await.map(|(snapshot, state)| {
+            let state = match state {
+                WorkerRestartState::RestartRequired => AdminWorkerRestartStateDto::RestartRequired,
+                WorkerRestartState::Consistent => AdminWorkerRestartStateDto::Consistent,
+                WorkerRestartState::Unknown => AdminWorkerRestartStateDto::Unknown,
+            };
+            (snapshot, Some(state))
+        })
+    } else {
+        port.current().await.map(|snapshot| (snapshot, None))
+    };
+    let (snapshot, worker_restart_state) = match result {
+        Ok(result) => result,
         Err(error) => return map_error(error),
     };
-    let response = match map_snapshot(snapshot, projection) {
+    let mut response = match map_snapshot(snapshot, projection) {
         Ok(response) => response,
         Err(response) => return *response,
     };
+    response.worker_restart_state = worker_restart_state;
     (
         StatusCode::OK,
         no_store_headers(),
@@ -86,7 +99,7 @@ pub(crate) async fn validate(
     if let Err(response) = authenticated_admin_mutation(&state, &headers, address).await {
         return *response;
     }
-    let projection = match runtime_projection(&uri) {
+    let projection = match runtime_projection(&uri, false) {
         Ok(value) => value,
         Err(response) => return *response,
     };
@@ -132,7 +145,7 @@ pub(crate) async fn update(
         Ok(result) => result,
         Err(response) => return *response,
     };
-    let projection = match runtime_projection(&uri) {
+    let projection = match runtime_projection(&uri, false) {
         Ok(value) => value,
         Err(response) => return *response,
     };
@@ -273,6 +286,7 @@ fn map_snapshot(
         fingerprint: snapshot.fingerprint,
         restart_required: snapshot.restart_required,
         equipment_taxonomy,
+        worker_restart_state: None,
     })
 }
 
@@ -286,24 +300,37 @@ struct RuntimeProjection {
     equipment_taxonomy: bool,
     /// `include=fulfillment_collection_overdue_age_seconds`：告警区块附带长期未领取阈值。
     collection_overdue_threshold: bool,
+    /// `include_worker_restart_state=true`：读取此快照对应的 Worker 冷配置状态。
+    worker_restart_state: bool,
 }
 
 // 只扩展明确选择的响应投影；旧客户端不带参数，仍收到原字段集合。未登记的键、重复出现或其他
 // 取值都为 400 invalid_query，不静默退回缺省投影。
-fn runtime_projection(uri: &Uri) -> Result<RuntimeProjection, Box<Response>> {
+fn runtime_projection(
+    uri: &Uri,
+    allow_worker_state: bool,
+) -> Result<RuntimeProjection, Box<Response>> {
     let invalid = || {
-        Box::new(
-            api_error(
-                StatusCode::BAD_REQUEST,
-                "invalid_query",
-                "runtime 配置只接受 include_equipment_taxonomy=true 与 \
-                 include=fulfillment_collection_overdue_age_seconds",
-            )
-            .into_response(),
-        )
+        let message = if allow_worker_state {
+            "runtime 配置读取只接受 include_equipment_taxonomy=true、\
+             include=fulfillment_collection_overdue_age_seconds 与 include_worker_restart_state=true"
+        } else {
+            "runtime 配置只接受 include_equipment_taxonomy=true 与 \
+             include=fulfillment_collection_overdue_age_seconds"
+        };
+        Box::new(api_error(StatusCode::BAD_REQUEST, "invalid_query", message).into_response())
     };
-    let query =
-        parse_query(uri, &["include_equipment_taxonomy", "include"]).map_err(|()| invalid())?;
+    let allowed: &[&str] = if allow_worker_state {
+        &["include_equipment_taxonomy", "include", "include_worker_restart_state"]
+    } else {
+        &["include_equipment_taxonomy", "include"]
+    };
+    let query = parse_query(uri, allowed).map_err(|()| invalid())?;
+    let worker_restart_state = match query.get("include_worker_restart_state").map(String::as_str) {
+        None => false,
+        Some("true") => true,
+        Some(_) => return Err(invalid()),
+    };
     let equipment_taxonomy = match query.get("include_equipment_taxonomy").map(String::as_str) {
         None => false,
         Some("true") => true,
@@ -314,7 +341,7 @@ fn runtime_projection(uri: &Uri) -> Result<RuntimeProjection, Box<Response>> {
         Some(COLLECTION_OVERDUE_AGE_KEY) => true,
         Some(_) => return Err(invalid()),
     };
-    Ok(RuntimeProjection { equipment_taxonomy, collection_overdue_threshold })
+    Ok(RuntimeProjection { equipment_taxonomy, collection_overdue_threshold, worker_restart_state })
 }
 
 fn map_error(error: ApplicationError) -> Response {

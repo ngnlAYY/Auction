@@ -1,5 +1,6 @@
 //! Worker 心跳详情：Admin 据此说明停在待重新核验或待领回的结算退件为何不前进。
 
+use auction_application::admin::{WORKER_COLD_CONFIG_HEARTBEAT_KEY, WorkerColdConfigDigest};
 use serde_json::Value;
 
 /// 结算退件 Take 可能发生的世界闭集，按名称排序。
@@ -13,6 +14,7 @@ const TAKE_WORLDS: [&str; 2] = ["isekai", "main"];
 pub(super) fn details(
     forum_sync_enabled: bool,
     recheck_worlds: &[&str],
+    cold_config: &WorkerColdConfigDigest,
     take_identity_available: impl Fn(&str) -> bool,
 ) -> Value {
     let take_worlds =
@@ -21,12 +23,15 @@ pub(super) fn details(
         "forum_sync_enabled": forum_sync_enabled,
         "settlement_return_recheck_worlds": recheck_worlds,
         "settlement_return_take_worlds": take_worlds,
+        (WORKER_COLD_CONFIG_HEARTBEAT_KEY): cold_config,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
+
+    use auction_application::admin::WorkerColdConfigDigest;
 
     use super::details;
 
@@ -40,18 +45,21 @@ mod tests {
             _ => false,
         };
 
-        let before = details(true, &["isekai", "main"], available);
+        let startup_digest = WorkerColdConfigDigest::from_projection(1, &"启动配置").unwrap();
+        let before = details(true, &["isekai", "main"], &startup_digest, available);
         assert_eq!(
             before,
             serde_json::json!({
                 "forum_sync_enabled": true,
                 "settlement_return_recheck_worlds": ["isekai", "main"],
                 "settlement_return_take_worlds": ["isekai", "main"],
+                "worker_cold_config": startup_digest,
             })
         );
 
         isekai_available.store(false, Ordering::SeqCst);
-        let after = details(true, &["isekai", "main"], available);
+        let after = details(true, &["isekai", "main"], &startup_digest, available);
+        assert_eq!(after["worker_cold_config"], before["worker_cold_config"]);
         assert_eq!(after["settlement_return_take_worlds"], serde_json::json!(["main"]));
         // 只读核验能力来自配置的读取 gateway，不随 Take 身份变化。
         assert_eq!(
@@ -63,7 +71,8 @@ mod tests {
     /// 未启用 MoogleMail 或只配置 Cookie 时没有任何世界能冻结身份。
     #[test]
     fn no_identity_declares_no_take_world() {
-        let none = details(false, &[], |_| false);
+        let startup_digest = WorkerColdConfigDigest::from_projection(1, &"启动配置").unwrap();
+        let none = details(false, &[], &startup_digest, |_| false);
         assert_eq!(none["settlement_return_take_worlds"], serde_json::json!([]));
         assert_eq!(none["settlement_return_recheck_worlds"], serde_json::json!([]));
     }

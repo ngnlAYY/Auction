@@ -12,7 +12,7 @@ mod recovery;
 pub(super) use auction::validate_auction_worker;
 pub(super) use control::validate_worker_control;
 pub(super) use delivery::validate_delivery_worker;
-pub(super) use forum::validate_forum_worker;
+pub(super) use forum::{parse_public_base_url, validate_forum_worker};
 pub(super) use fulfillment::validate_fulfillment_worker;
 pub(crate) use mooglemail::sender_allowlist_has_case_duplicates;
 pub(super) use mooglemail::validate_mooglemail_worker;

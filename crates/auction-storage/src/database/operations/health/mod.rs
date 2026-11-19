@@ -8,6 +8,7 @@ use crate::database::DatabaseStore;
 
 mod mapping;
 mod postgres;
+mod restart;
 
 impl HeartbeatStore for DatabaseStore {
     fn publish(&self, command: HeartbeatCommand) -> HealthFuture<'_, ()> {

@@ -418,3 +418,117 @@ async fn postgres_admin_runtime_replay_identity_survives_the_ledger() {
 
     pool.close().await;
 }
+
+#[tokio::test]
+async fn postgres_admin_worker_cold_config_reads_live_instances_and_fences_old_heartbeats() {
+    use auction_application::admin::{WorkerColdConfigDigest, WorkerColdConfigReader};
+    use auction_observability::{
+        HealthError, HeartbeatCommand, HeartbeatStatus, HeartbeatStore, ProcessRole, ServiceName,
+        TracingHealth, TracingStatus,
+    };
+    use serde_json::json;
+
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("以运行账号连接");
+    let now: Timestamp = sqlx::query_scalar("SELECT clock_timestamp()")
+        .fetch_one(store.postgres_pool())
+        .await
+        .unwrap();
+    let older = WorkerColdConfigDigest::from_projection(1, &"old").unwrap();
+    let newer = WorkerColdConfigDigest::from_projection(1, &"new").unwrap();
+    let command = |instance_id: &str, sequence, details| HeartbeatCommand {
+        service_name: ServiceName::Worker,
+        process_role: ProcessRole::Worker,
+        instance_id: instance_id.to_owned(),
+        version: "0.1.8".to_owned(),
+        started_at: now - Duration::minutes(1),
+        status: HeartbeatStatus::Ready,
+        readiness: true,
+        audit_failure_count: 0,
+        tracing: TracingHealth {
+            status: TracingStatus::Disabled,
+            dropped_span_count: 0,
+            export_failure_count: 0,
+            last_success_at: None,
+            last_failure_at: None,
+            last_error_code: String::new(),
+        },
+        observation_sequence: sequence,
+        ttl: Duration::minutes(1),
+        details,
+    };
+    let old_details = json!({ "worker_cold_config": &older, "forum_sync_enabled": true });
+    let new_details = json!({ "worker_cold_config": &newer, "forum_sync_enabled": true });
+    assert!(store.live_worker_cold_configs().await.unwrap().is_empty());
+
+    // starting 保留占位，已写入的冷摘要不能证明实例已完成装配。
+    store
+        .publish(HeartbeatCommand {
+            status: HeartbeatStatus::Starting,
+            readiness: false,
+            ..command("a-worker", 1, old_details.clone())
+        })
+        .await
+        .unwrap();
+    assert_eq!(store.live_worker_cold_configs().await.unwrap(), vec![None]);
+    store.publish(command("a-worker", 2, old_details.clone())).await.unwrap();
+    assert_eq!(store.live_worker_cold_configs().await.unwrap(), vec![Some(older.clone())]);
+    store
+        .publish(HeartbeatCommand {
+            status: HeartbeatStatus::Degraded,
+            readiness: false,
+            ..command("a-worker", 3, new_details)
+        })
+        .await
+        .unwrap();
+    assert!(matches!(
+        store.publish(command("a-worker", 2, old_details.clone())).await,
+        Err(HealthError::StaleObservation)
+    ));
+    store.publish(command("a-worker", 3, old_details.clone())).await.unwrap();
+
+    store.publish(command("z-old-worker", 1, old_details.clone())).await.unwrap();
+    assert_eq!(
+        store.live_worker_cold_configs().await.unwrap(),
+        vec![Some(newer.clone()), Some(older)],
+    );
+    store
+        .publish(HeartbeatCommand {
+            status: HeartbeatStatus::Stopping,
+            readiness: false,
+            ..command("z-old-worker", 2, old_details.clone())
+        })
+        .await
+        .unwrap();
+    assert_eq!(store.live_worker_cold_configs().await.unwrap(), vec![Some(newer.clone())]);
+
+    let public = HeartbeatCommand {
+        service_name: ServiceName::Public,
+        process_role: ProcessRole::Public,
+        ..command("public", 1, old_details.clone())
+    };
+    store.publish(public).await.unwrap();
+    store.publish(command("b-legacy-worker", 1, json!({}))).await.unwrap();
+    store
+        .publish(command("c-malformed-worker", 1, json!({ "worker_cold_config": [] })))
+        .await
+        .unwrap();
+
+    // 固定历史时刻，保留 expires_at > observed_at >= started_at；无需等待 TTL。
+    sqlx::query(
+        "INSERT INTO public.service_heartbeats (
+             service_name, process_role, instance_id, version, status, readiness, started_at,
+             audit_failure_count, observation_sequence, observed_at, expires_at, details
+         ) VALUES (
+             'auction-worker', 'worker', 'd-expired-worker', '0.1.8', 'ready', true,
+             $1::timestamptz - interval '3 minutes', 0, 1, $1::timestamptz - interval '2 minutes',
+             $1::timestamptz - interval '1 minute', $2
+         )",
+    )
+    .bind(now)
+    .bind(old_details)
+    .execute(store.postgres_pool())
+    .await
+    .unwrap();
+    assert_eq!(store.live_worker_cold_configs().await.unwrap(), vec![Some(newer), None, None]);
+}

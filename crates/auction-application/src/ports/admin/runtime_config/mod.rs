@@ -8,6 +8,7 @@ mod hot;
 mod mail_templates;
 mod operations;
 mod ports;
+mod restart;
 mod validation;
 
 pub use business::{
@@ -38,4 +39,8 @@ pub use operations::{
     AdminRuntimeScheduleConfig, AdminRuntimeWorkerConfig,
 };
 pub use ports::{AdminRuntimeCommandStore, AdminRuntimeConfigPort, AdminRuntimeFileStore};
+pub use restart::{
+    WORKER_COLD_CONFIG_HEARTBEAT_KEY, WorkerColdConfigDigest, WorkerColdConfigReader,
+    WorkerRestartState,
+};
 pub use validation::{valid_allowlist_host, valid_allowlist_path_prefix, valid_listener_group};

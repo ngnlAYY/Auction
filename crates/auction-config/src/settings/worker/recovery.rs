@@ -1,12 +1,12 @@
 //! Recovery Worker 的调度与批次配置。
 
 use auction_application::admin::AdminRuntimeRecoveryConfig;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Recovery Worker 的独立调度和批次边界。
 /// `batch_limit` 与 `concurrency` 不复用拍卖主循环的全局并发，否则一个高峰期会同时放大
 /// 退回、action、重列和退款处理量。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct RecoveryWorkerConfig {
     /// 每个 recovery phase 单轮最多领取的记录数；范围 1-1000，默认 100。

@@ -3,6 +3,7 @@
 use auction_domain::CommandId;
 use auction_time::Timestamp;
 
+use super::restart::{WorkerColdConfigDigest, WorkerRestartState};
 use super::{
     commands::{AdminRuntimeAuditRecord, AdminRuntimeReplacement, AdminRuntimeStoredCommand},
     document::{AdminRuntimeDocument, AdminRuntimeSnapshot},
@@ -39,6 +40,14 @@ pub trait AdminRuntimeFileStore: Send + Sync {
     }
 
     fn current(&self) -> ApplicationFuture<'_, AdminRuntimeSnapshot>;
+
+    /// 用已读取的文档计算启动摘要；部署基值不可用时返回 None。
+    fn worker_cold_config_target(
+        &self,
+        _snapshot: &AdminRuntimeSnapshot,
+    ) -> Option<WorkerColdConfigDigest> {
+        None
+    }
 
     /// 在调用方已经持有 workflow guard 时读取当前文件，避免递归获取文件锁。
     fn current_locked<'a>(
@@ -94,6 +103,13 @@ pub trait AdminRuntimeCommandStore: Send + Sync {
 
 pub trait AdminRuntimeConfigPort: Send + Sync {
     fn current(&self) -> ApplicationFuture<'_, AdminRuntimeSnapshot>;
+
+    /// 使用返回给请求方的同一份文件快照比较 Worker 摘要。
+    fn current_with_worker_restart_state(
+        &self,
+    ) -> ApplicationFuture<'_, (AdminRuntimeSnapshot, WorkerRestartState)> {
+        Box::pin(async move { Ok((self.current().await?, WorkerRestartState::Unknown)) })
+    }
 
     fn validate(
         &self,

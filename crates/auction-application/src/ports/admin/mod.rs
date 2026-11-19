@@ -111,8 +111,10 @@ pub use runtime_config::{
     AdminRuntimeStoredCommand, AdminRuntimeTracingConfig, AdminRuntimeUpdateCommand,
     AdminRuntimeWorkerConfig, AdminRuntimeWorkerControlConfig, AdminRuntimeWorldConfig,
     AdminRuntimeWorldsConfig, MAX_ADMIN_RUNTIME_DOCUMENT_BYTES, MailTemplateError,
-    WORKER_HOT_FIELD_PATHS, WorkerDeliveryHotConfig, WorkerForumHotConfig, WorkerHotConfig,
-    WorkerMailHotConfig, valid_allowlist_host, valid_allowlist_path_prefix, valid_listener_group,
+    WORKER_COLD_CONFIG_HEARTBEAT_KEY, WORKER_HOT_FIELD_PATHS, WorkerColdConfigDigest,
+    WorkerColdConfigReader, WorkerDeliveryHotConfig, WorkerForumHotConfig, WorkerHotConfig,
+    WorkerMailHotConfig, WorkerRestartState, valid_allowlist_host, valid_allowlist_path_prefix,
+    valid_listener_group,
 };
 pub use settlement_catalog::{
     MAX_SETTLEMENT_CATALOG_OFFSET, MAX_SETTLEMENT_CATALOG_PAGE_SIZE, SettlementCatalogEntry,

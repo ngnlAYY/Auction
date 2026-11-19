@@ -255,6 +255,8 @@ pub(crate) async fn run_worker(
     // Admin 详情据此说明待领回的案件为何不前进。
     let heartbeat_transport = delivery_transport.clone();
     let forum_sync_enabled = config.worker.forum.enabled;
+    // 持久心跳记录本进程实际装配的启动值（不变量 5）；热重载和能力变化不得改写它。
+    let cold_config = config.worker_cold_config_digest()?;
     let heartbeat = Arc::new(
         HeartbeatPublisher::new(
             heartbeat_store,
@@ -270,11 +272,16 @@ pub(crate) async fn run_worker(
             tracing_health,
         )
         .with_live_details(move || {
-            heartbeat::details(forum_sync_enabled, &settlement_return_recheck_worlds, |world| {
-                heartbeat_transport
-                    .as_ref()
-                    .is_some_and(|transport| transport.frozen_take_identity_available(world))
-            })
+            heartbeat::details(
+                forum_sync_enabled,
+                &settlement_return_recheck_worlds,
+                &cold_config,
+                |world| {
+                    heartbeat_transport
+                        .as_ref()
+                        .is_some_and(|transport| transport.frozen_take_identity_available(world))
+                },
+            )
         }),
     );
     if let Err(error) = heartbeat.publish_starting().await {
@@ -349,15 +356,31 @@ pub(crate) async fn run_worker(
     )?);
     let asset_reconciliation =
         asset_reconciliation_runtime(config, &store, mail_inventory_reader, &recovery_worlds)?;
-    if let Err(error) = heartbeat.publish_current().await {
-        tracing::warn!(error = %error, "发布 Worker ready 心跳失败");
-    }
-    // 装配等待可能跨过外层停止信号；不能先启动 PM 再让主循环补发 drain。
+    let poll_interval_seconds = config.worker_poll_interval_seconds();
+    let lease_duration_seconds = poll_interval_seconds
+        .checked_mul(3)
+        .ok_or_else(|| anyhow::anyhow!("Worker claim lease 派生时长超出可表示范围"))?
+        .max(30);
+    let auction_poll_interval = std::time::Duration::from_secs(poll_interval_seconds);
+    let auction_lease_duration = std::time::Duration::from_secs(lease_duration_seconds);
+    // 批量与维护循环共享的连接配额。关键循环（生命周期、慢速代理、独立结算、履约）
+    // 从不获取许可，因此始终保留配额之外的连接；配额来源是同一服务池上限，不新增配置项。
+    let bulk_quota = auction_jobs::WorkerConnectionQuota::new(
+        config.database_pool.worker_bulk_connection_budget(),
+    )
+    .map(Arc::new)
+    .context("Worker 批量连接配额必须大于 0")?;
+    // 只有启动门禁全部通过才发布可比较的心跳；等待期间收到停机请求时不启动循环。
     let mut shutdown = shutdown;
     let stopping = tokio::select! {
         biased;
         () = &mut shutdown => true,
-        () = std::future::ready(()) => false,
+        result = heartbeat.publish_current() => {
+            if let Err(error) = result {
+                tracing::warn!(error = %error, "发布 Worker ready 心跳失败");
+            }
+            false
+        }
     };
     if stopping {
         control.mark_draining();
@@ -370,13 +393,6 @@ pub(crate) async fn run_worker(
                 .map(|url| TaskGuard::new(spawn_external_heartbeat(Arc::clone(&heartbeat), url)))
         })
         .flatten();
-    let poll_interval_seconds = config.worker_poll_interval_seconds();
-    let lease_duration_seconds = poll_interval_seconds
-        .checked_mul(3)
-        .ok_or_else(|| anyhow::anyhow!("Worker claim lease 派生时长超出可表示范围"))?
-        .max(30);
-    let auction_poll_interval = std::time::Duration::from_secs(poll_interval_seconds);
-    let auction_lease_duration = std::time::Duration::from_secs(lease_duration_seconds);
     let (pm_drain, pm_receiver) = tokio::sync::watch::channel(stopping);
     let write_lifecycle_for_pm = write_lifecycle.clone();
     let metrics_for_pm = metrics.worker();
@@ -408,13 +424,6 @@ pub(crate) async fn run_worker(
         pm_drain.send_replace(true);
     };
     let fatal_wakeup = control.fatal_wakeup();
-    // 批量与维护循环共享的连接配额。关键循环（生命周期、慢速代理、独立结算、履约）
-    // 从不获取许可，因此始终保留配额之外的连接；配额来源是同一服务池上限，不新增配置项。
-    let bulk_quota = auction_jobs::WorkerConnectionQuota::new(
-        config.database_pool.worker_bulk_connection_budget(),
-    )
-    .map(Arc::new)
-    .context("Worker 批量连接配额必须大于 0")?;
     let worker = auction_jobs::PersistentWorker {
         schedule,
         worlds: Some(store.clone()),

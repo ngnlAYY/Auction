@@ -291,12 +291,12 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | POST | `/api/v1/admin/realtime/failures/{failure_id}/replay` | 重放失败事件（追加新事件并解决原失败） |
 | GET / POST / PUT | `/api/v1/admin/rules` | 读取（`lang`，缺省 en）/ 校验 / 发布规则文档。读取也接受符合原语言标签规则的历史语言，所选语言尚未建立时直接返回 404，编辑器据此从版本 0 新建。本版起校验和发布只接受 `en`、`zh-CN`、`zh-TW`、`ja`、`ko`，其他值返回 400 `invalid_locale`。发布时先校验语言，再查命令账本 |
 | GET / POST / PUT | `/api/v1/admin/about` | 读取（`lang`）/ 校验 / 发布“关于”文档；请求、响应、错误码、版本 CAS 与幂等语义同规则文档，两种文档按（种类，语言）各自独立 |
-| GET / PUT | `/api/v1/admin/config` | 读取 / 更新 runtime 配置（带 fingerprint 与 `command_id`）。可选查询参数：`include_equipment_taxonomy=true` 附带装备分类词典；`include=fulfillment_collection_overdue_age_seconds` 让 `operations.alerts` 附带长期未领取阈值的生效值（文件省略时为默认 259200）。两者之外的键、其他取值或重复出现为 400 `invalid_query`。不带 `include` 时告警区块保持已发布的字段集合，不输出该阈值（文件里写了非默认值也不输出），已打开的旧页面照常解码。更新请求的 `operations.alerts` 可以省略该阈值：省略表示保持当前文件的值（在指纹 fence 内补回），旧页面保存不会失败也不会把它重置为默认；显式写出的默认值按省略写入文件。命令身份按原始请求计算：省略该阈值与显式写出（含显式写出默认值）是不同请求，同一 `command_id` 只有原样重试才返回原结果（已应用的不再写文件），请求不同返回 409 `state_conflict`；新指纹按补回后落成的候选计算。升级前记下的命令仍按原口径（以已存候选补回省略的字段后比较）重放 |
+| GET / PUT | `/api/v1/admin/config` | 读取 / 更新 runtime 配置（带 fingerprint 与 `command_id`）。可选查询参数：`include_equipment_taxonomy=true` 附带装备分类词典；`include=fulfillment_collection_overdue_age_seconds` 让 `operations.alerts` 附带长期未领取阈值的生效值（文件省略时为默认 259200）。GET 还接受 `include_worker_restart_state=true`，见[Worker 冷配置状态](#worker-冷配置状态)。未登记的键、其他取值或重复出现为 400 `invalid_query`。不带 `include` 时告警区块保持已发布的字段集合，不输出该阈值（文件里写了非默认值也不输出），已打开的旧页面照常解码。更新请求的 `operations.alerts` 可以省略该阈值：省略表示保持当前文件的值（在指纹 fence 内补回），旧页面保存不会失败也不会把它重置为默认；显式写出的默认值按省略写入文件。命令身份按原始请求计算：省略该阈值与显式写出（含显式写出默认值）是不同请求，同一 `command_id` 只有原样重试才返回原结果（已应用的不再写文件），请求不同返回 409 `state_conflict`；新指纹按补回后落成的候选计算。升级前记下的命令仍按原口径（以已存候选补回省略的字段后比较）重放 |
 | GET | `/api/v1/admin/runtime-switches` | 认证只读数据库意图与 Admin 自身实际快照，不依赖 runtime 文件 |
 | POST | `/api/v1/admin/runtime-switches/external-access-paused` | 暂停或恢复全部外部访问（唯一开放给 Admin 写入的开关） |
 | GET | `/api/v1/admin/mail-templates` | 全部出站通知模板的当前正文、内置默认正文、版本与占位符规则 |
 | PUT | `/api/v1/admin/mail-templates/{template_key}` | 保存一个模板的正文，或恢复内置默认正文 |
-| POST | `/api/v1/admin/config:validate` | 只校验 runtime 配置候选，不写配置文件或命令账本；查询参数同 `/api/v1/admin/config`。一次取得工作流锁，从同一份文件快照补回省略的字段并比较 Worker 覆盖项。带 `include=fulfillment_collection_overdue_age_seconds` 时响应包含落成后的生效阈值。预校验结果对应本次读取的版本，保存仍须核对自己的 `expected_fingerprint`。新候选的[部署校验规则](../../ops/config/README.md#operations-接管)同保存，文档无效为 `400 invalid_runtime_config`。缺少所需的 `worker_config_file` 时提示配置并重启 Admin；文件无法读取时提示检查可读性，内容变更（包括非法 UTF-8）时提示确认文件有效并重启 Admin |
+| POST | `/api/v1/admin/config:validate` | 只校验 runtime 配置候选，不写配置文件或命令账本；查询参数同配置 PUT。一次取得工作流锁，从同一份文件快照补回省略的字段并比较 Worker 覆盖项。带 `include=fulfillment_collection_overdue_age_seconds` 时响应包含落成后的生效阈值。预校验结果对应本次读取的版本，保存仍须核对自己的 `expected_fingerprint`。新候选的[部署校验规则](../../ops/config/README.md#operations-接管)同保存，文档无效为 `400 invalid_runtime_config`。缺少所需的 `worker_config_file` 时提示配置并重启 Admin；文件无法读取时提示检查可读性，内容变更（包括非法 UTF-8）时提示确认文件有效并重启 Admin |
 | GET / POST / PATCH | `/api/v1/admin/users` | 用户列表（`name`、`status`、`page`、`page_size`）/ 创建 / 修改（改名、签发/重签/吊销 key、绑定论坛 ID） |
 | PUT / DELETE | `/api/v1/admin/users/{user_id}/blacklist` | 拉黑 / 解除 |
 | GET | `/api/v1/admin/renames` | 改名历史（`user_id`、`name`、`page`、`page_size`） |
@@ -310,6 +310,20 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 新建场次、手工录入和草稿调价的 UUID、期号与起拍价准入在查询命令账本之前执行。升级前已接受的超界命令原样重试会收到对应的参数非法错误。
 
 请求体大小上限按路由冻结：多数命令 4–16 KiB，realtime 重放 64 KiB，凭据 128 KiB（在线校验 4 KiB），装备录入 72 KiB，出站通知模板 96 KiB，规则与关于 1 MiB，runtime 配置 4 MiB。
+
+### Worker 冷配置状态
+
+认证的 `GET /api/v1/admin/config?include_worker_restart_state=true` 在成功响应的 `data` 中额外返回必有的字符串 `worker_restart_state`，并保留 `Cache-Control: no-store`。它可与两个既有投影组合；该参数只接受 `true` 且只用于 GET。未请求时继续返回原有字段集合。普通 `data` 为 `document`、`fingerprint`、`restart_required`，显式请求装备分类词典时再含 `equipment_taxonomy`。完整扩展样本见 [crates/auction-contracts/tests/fixtures/admin/runtime-config-worker-restart-state.json](../../crates/auction-contracts/tests/fixtures/admin/runtime-config-worker-restart-state.json)。
+
+目标值须由本次 `fingerprint` 对应的文件和可信 Worker 部署基值通过启动的非敏感配置校验后得出。过期记录和 `stopping` 实例不参与判断。
+
+| `worker_restart_state` | 判定 |
+| --- | --- |
+| `restart_required` | 有有效目标值，且至少一个未过期的 `ready` 或 `degraded` 实例带有同版本、格式有效且与目标不同的摘要。明确的不一致仍可在其他实例证据不全时成立。 |
+| `consistent` | 有有效目标值，至少有一个未过期的 `ready` 或 `degraded` 实例，本次所见的未过期、未停止实例均可比较且全部与目标一致。只要仍有未过期的 `starting`，便不能给出此结论。 |
+| `unknown` | 目标不可用或启动校验未通过，心跳读取失败，或没有明确不一致且证据不全。证据不全包括没有未过期的运行实例、存在 `starting`、摘要缺失、格式无效或版本不可比较。 |
+
+GET 的既有 `restart_required` 仍为 `false`；PUT 和预校验沿用既有响应与历史回执语义。新客户端遇到尚不识别该参数的服务端时，`400 invalid_query` 表示扩展不可用，可按缺省形状读取配置并将此状态视为未知。状态仅涵盖 [Worker 启动业务冷配置](../../ops/config/README.md#worker-冷配置状态)，热重载结果和其他角色的生效状态各有独立语义。
 
 ### 投递处置投影
 

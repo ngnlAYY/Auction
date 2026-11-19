@@ -3,6 +3,7 @@
 
 mod accessors;
 mod build;
+mod cold;
 mod load;
 mod model;
 

@@ -5,10 +5,13 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::{env, fs, io};
 
-use auction_application::admin::{AdminRuntimeDocument, AdminRuntimeMailDeliveryBudget};
+use auction_application::admin::{
+    AdminRuntimeDocument, AdminRuntimeMailDeliveryBudget, WorkerColdConfigDigest,
+};
 use auction_application::core::RequestHash;
 use auction_time::Timestamp;
 
+use super::build::BuildMode;
 use super::model::{AppConfig, BuildInput, CommonFileConfig, FileConfig, PublicSessionFileConfig};
 use crate::reader::{read_toml_bytes, read_toml_file};
 use crate::settings::backup::BackupConfig;
@@ -19,8 +22,8 @@ use crate::settings::validation::{
 };
 use crate::settings::{
     AuctionConfig, CONFIG_FILE_ENV, DatabasePoolConfig, DatabaseProfilesConfig,
-    DatabaseRolesConfig, MetricsConfig, ReadinessConfig, RealtimeConfig, Role, RoleSessionConfig,
-    SessionConfig, TracingSettings, WorkerConfig,
+    DatabaseRolesConfig, MetricsConfig, MoogleMailWorkerConfig, ReadinessConfig, RealtimeConfig,
+    Role, RoleSessionConfig, SessionConfig, TracingSettings, WorkerConfig,
 };
 
 /// 同源 Worker 角色文件的非敏感路径，供 Admin 装配 runtime 文件存储时加载部署基值。
@@ -55,28 +58,58 @@ impl RuntimeWorkerDeployment {
         self.file.worker.mail_delivery_budget()
     }
 
+    /// 读取同源部署的非敏感基值，用启动合并路径比较本次读到的 runtime 文档。
+    pub(crate) fn cold_config_target(
+        self,
+        runtime: AdminRuntimeDocument,
+    ) -> Result<WorkerColdConfigDigest, ConfigError> {
+        let config = self.load_config_with_runtime(runtime, BuildMode::WorkerColdTarget)?;
+        validate_worker_runtime_schedule(
+            &config.auction,
+            &config.worker.mooglemail,
+            Timestamp::now(),
+        )?;
+        config.worker_cold_config_digest()
+    }
+
     pub(crate) fn validate_runtime(
         self,
         runtime: AdminRuntimeDocument,
         now: Timestamp,
     ) -> Result<(), ConfigError> {
-        let config = AppConfig::from_file(
+        let config = self.load_config_with_runtime(runtime, BuildMode::Startup)?;
+        validate_worker_runtime_schedule(&config.auction, &config.worker.mooglemail, now)
+    }
+
+    fn load_config_with_runtime(
+        self,
+        runtime: AdminRuntimeDocument,
+        mode: BuildMode,
+    ) -> Result<AppConfig, ConfigError> {
+        AppConfig::from_file(
             Role::Worker,
             Some(self.path),
             self.file,
             RoleSessionConfig::for_role(Role::Worker),
             Some(runtime),
-        )?;
-        let mail = &config.worker.mooglemail;
-        config.auction.schedule.worker_worlds(mail)?;
-        if mail.enabled {
-            let schedule = mail.receive_schedule()?;
-            for world in mail.poll_startup(&schedule, now)? {
-                world.first_due(&schedule, now)?;
-            }
-        }
-        Ok(())
+            mode,
+        )
     }
+}
+
+fn validate_worker_runtime_schedule(
+    auction: &AuctionConfig,
+    mail: &MoogleMailWorkerConfig,
+    now: Timestamp,
+) -> Result<(), ConfigError> {
+    auction.schedule.worker_worlds(mail)?;
+    if mail.enabled {
+        let schedule = mail.receive_schedule()?;
+        for world in mail.poll_startup(&schedule, now)? {
+            world.first_due(&schedule, now)?;
+        }
+    }
+    Ok(())
 }
 
 impl AppConfig {
@@ -119,6 +152,7 @@ impl AppConfig {
                 runtime_worker_budget: None,
             },
             None,
+            BuildMode::Startup,
         )
     }
 
@@ -138,7 +172,7 @@ impl AppConfig {
                 // 在加载公共文件或敏感文件前拒绝旧时限，错误只包含固定迁移说明。
                 let session =
                     RoleSessionConfig::Public(file.session.take().unwrap_or_default().resolve()?);
-                Self::from_file(role, Some(path), file, session, None)
+                Self::from_file(role, Some(path), file, session, None, BuildMode::Startup)
             }
             Role::Admin | Role::Worker => {
                 let mut file: FileConfig<SessionConfig> = toml::from_str(&contents)
@@ -147,7 +181,7 @@ impl AppConfig {
                     .session
                     .take()
                     .map_or_else(|| RoleSessionConfig::for_role(role), RoleSessionConfig::Timed);
-                Self::from_file(role, Some(path), file, session, None)
+                Self::from_file(role, Some(path), file, session, None, BuildMode::Startup)
             }
         }
     }
@@ -158,6 +192,7 @@ impl AppConfig {
         file: FileConfig<Session>,
         session: RoleSessionConfig,
         runtime_override: Option<AdminRuntimeDocument>,
+        mode: BuildMode,
     ) -> Result<Self, ConfigError> {
         let FileConfig {
             common_file,
@@ -228,6 +263,7 @@ impl AppConfig {
                 runtime_worker_budget,
             },
             runtime_override,
+            mode,
         )
     }
 }
@@ -343,10 +379,11 @@ mod tests {
 
     use auction_application::admin::{
         AdminRuntimeAlertsConfig, AdminRuntimeAuditRecord, AdminRuntimeCommandState,
-        AdminRuntimeCommandStore, AdminRuntimeConfigError, AdminRuntimeConfigService,
-        AdminRuntimeDocument, AdminRuntimeFileStore, AdminRuntimeMailConfig,
-        AdminRuntimeOperationsConfig, AdminRuntimeSnapshot, AdminRuntimeStoredCommand,
-        AdminRuntimeUpdateCommand, AdminRuntimeWorldsConfig,
+        AdminRuntimeCommandStore, AdminRuntimeConfigError, AdminRuntimeConfigPort,
+        AdminRuntimeConfigService, AdminRuntimeDocument, AdminRuntimeFileStore,
+        AdminRuntimeMailConfig, AdminRuntimeOperationsConfig, AdminRuntimeSnapshot,
+        AdminRuntimeStoredCommand, AdminRuntimeUpdateCommand, AdminRuntimeWorldsConfig,
+        WorkerColdConfigDigest, WorkerColdConfigReader, WorkerRestartState,
     };
     use auction_application::core::{ApplicationError, ApplicationFuture, Clock, RequestHash};
     use auction_domain::CommandId;
@@ -598,11 +635,27 @@ user_login_data_key = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBE="
         let active = AppConfig::load_from_path(Role::Worker, &fixture.worker_path).unwrap();
         assert!(!active.worker.operations_alert.notify_enabled());
         let store = fixture.store();
+        let active_digest = active.worker_cold_config_digest().unwrap();
+        assert_eq!(
+            store.worker_cold_config_target(&read_current(&store)).as_ref(),
+            Some(&active_digest),
+        );
         let candidate = AdminRuntimeDocument::default();
         let reason = rejection(&store, &candidate);
         assert!(reason.contains("mooglemail.enabled"), "{reason}");
-
+        let service = AdminRuntimeConfigService::new(
+            Arc::new(FixtureCommands::default()),
+            Arc::new(store),
+            Arc::new(FixtureClock),
+        )
+        .with_worker_cold_configs(Arc::new(WorkerHeartbeats(Mutex::new(vec![Some(
+            active_digest,
+        )]))));
         fixture.write_runtime(&candidate);
+        let (snapshot, state) = ready(service.current_with_worker_restart_state()).unwrap();
+        assert_eq!(snapshot.fingerprint, candidate.fingerprint());
+        assert_eq!(state, WorkerRestartState::Unknown);
+
         let error = AppConfig::load_from_path(Role::Worker, &fixture.worker_path).unwrap_err();
         assert_matches!(
             error,
@@ -730,6 +783,83 @@ user_login_data_key = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBE="
         assert!(AppConfig::load_from_path(Role::Worker, &fixture.worker_path).is_ok());
     }
 
+    struct WorkerHeartbeats(Mutex<Vec<Option<WorkerColdConfigDigest>>>);
+
+    impl WorkerColdConfigReader for WorkerHeartbeats {
+        fn live_worker_cold_configs(
+            &self,
+        ) -> ApplicationFuture<'_, Vec<Option<WorkerColdConfigDigest>>> {
+            Box::pin(async { Ok(self.0.lock().unwrap().clone()) })
+        }
+    }
+
+    #[test]
+    fn worker_digest_and_admin_target_share_effective_values_and_the_read_snapshot() {
+        let fixture = AlertFixture::new();
+        let mut current = AdminRuntimeDocument::default();
+        fixture.write_runtime(&current);
+        fixture.write_worker(true, false, true, "main");
+        let store = Arc::new(fixture.store());
+        let before = read_current(&store);
+        let startup = AppConfig::load_from_path(Role::Worker, &fixture.worker_path)
+            .unwrap()
+            .worker_cold_config_digest()
+            .unwrap();
+        assert_eq!(store.worker_cold_config_target(&before).as_ref(), Some(&startup));
+        let heartbeats = Arc::new(WorkerHeartbeats(Mutex::new(vec![Some(startup.clone())])));
+        let service = AdminRuntimeConfigService::new(
+            Arc::new(FixtureCommands::default()),
+            store.clone(),
+            Arc::new(FixtureClock),
+        )
+        .with_worker_cold_configs(heartbeats.clone());
+        let read = || ready(service.current_with_worker_restart_state()).unwrap();
+        assert_eq!(read(), (before.clone(), WorkerRestartState::Consistent));
+
+        // 关闭接管时仍用部署基值，Admin 自身监听、tracing 不参与 Worker 摘要。
+        current.operations = Some(AdminRuntimeOperationsConfig::default());
+        let operations = current.operations.as_mut().unwrap();
+        operations.worker.concurrency = 5;
+        current.listener.address = "127.0.0.1:9023".into();
+        current.tracing.export_timeout_seconds = 6;
+        fixture.write_runtime(&current);
+        let same = read_current(&store);
+        assert_ne!(same.fingerprint, before.fingerprint);
+        assert_eq!(store.worker_cold_config_target(&same).as_ref(), Some(&startup));
+
+        current.operations.as_mut().unwrap().worker.managed = true;
+        fixture.write_runtime(&current);
+        let changed = read_current(&store);
+        let target = store.worker_cold_config_target(&changed).unwrap();
+        assert_ne!(target, startup);
+        assert_eq!(store.worker_cold_config_target(&before), Some(startup));
+        assert_eq!(read(), (changed.clone(), WorkerRestartState::RestartRequired));
+
+        // Worker 凭据随部署独立变化，摘要不能由它们派生。
+        let secrets_path = fixture.directory.join("secrets.toml");
+        let contents = fs::read_to_string(&secrets_path).unwrap();
+        fs::write(&secrets_path, contents.replace("fixture=value", "fixture=other")).unwrap();
+        let after_restart = AppConfig::load_from_path(Role::Worker, &fixture.worker_path)
+            .unwrap()
+            .worker_cold_config_digest()
+            .unwrap();
+        assert_eq!(target, after_restart);
+        fs::remove_file(secrets_path).unwrap();
+        assert_eq!(store.worker_cold_config_target(&changed), Some(after_restart.clone()));
+        *heartbeats.0.lock().unwrap() = vec![Some(after_restart)];
+        assert_eq!(read(), (changed.clone(), WorkerRestartState::Consistent));
+
+        let deployment = fs::read_to_string(&fixture.worker_path).unwrap();
+        fs::write(&fixture.worker_path, format!("{deployment}\n# changed")).unwrap();
+        assert_eq!(read(), (changed.clone(), WorkerRestartState::Unknown));
+        fs::write(&fixture.worker_path, deployment).unwrap();
+
+        fs::remove_file(fixture.directory.join("common.toml")).unwrap();
+        assert_eq!(read(), (changed.clone(), WorkerRestartState::Unknown));
+        fs::remove_file(&fixture.worker_path).unwrap();
+        assert_eq!(store.worker_cold_config_target(&changed), None);
+    }
+
     fn assert_invalid_legacy_document_must_be_fixed(
         fixture: &AlertFixture,
         current: AdminRuntimeDocument,
@@ -738,6 +868,7 @@ user_login_data_key = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBE="
     ) {
         fixture.write_runtime(&current);
         let files = Arc::new(fixture.store());
+        assert_eq!(files.worker_cold_config_target(&read_current(&files)), None);
         let commands = Arc::new(FixtureCommands::default());
         let service = AdminRuntimeConfigService::new(
             Arc::clone(&commands),
@@ -771,7 +902,9 @@ user_login_data_key = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBE="
         let preview = ready(service.validate(candidate.clone())).unwrap();
         let save = ready(service.update(command(candidate.clone()))).unwrap();
         assert_eq!(preview.fingerprint, save.fingerprint);
-        assert_eq!(read_current(&files).document, candidate);
+        let saved = read_current(&files);
+        assert_eq!(saved.document, candidate);
+        assert!(files.worker_cold_config_target(&saved).is_some());
     }
 
     #[test]

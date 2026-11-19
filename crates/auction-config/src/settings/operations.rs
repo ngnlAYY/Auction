@@ -8,6 +8,18 @@ use super::{
     AuctionConfig, AuctionEconomicsConfig, AuctionScheduleConfig, DeliveryWorkerConfig,
     FulfillmentWorkerConfig, OperationsAlertWorkerConfig, RecoveryWorkerConfig, Role, WorkerConfig,
 };
+use crate::settings::worker::{apply_equipment_colors, apply_runtime_document};
+
+/// Worker 启动和 Admin 目标摘要共用同一套 runtime 覆盖顺序。
+pub(super) fn apply_worker_runtime(
+    auction: &mut AuctionConfig,
+    worker: &mut WorkerConfig,
+    document: AdminRuntimeDocument,
+) {
+    apply_runtime_operations(auction, worker, Role::Worker, &document);
+    apply_equipment_colors(&mut worker.forum, &document);
+    apply_runtime_document(worker, document);
+}
 
 pub(super) fn apply_runtime_operations(
     auction: &mut AuctionConfig,

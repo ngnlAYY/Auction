@@ -16,6 +16,7 @@ use crate::ports::admin::{
     AdminRuntimeAuditRecord, AdminRuntimeCommandState, AdminRuntimeCommandStore,
     AdminRuntimeConfigError, AdminRuntimeConfigPort, AdminRuntimeDocument, AdminRuntimeFileStore,
     AdminRuntimeSnapshot, AdminRuntimeStoredCommand, AdminRuntimeUpdateCommand,
+    WorkerColdConfigDigest, WorkerColdConfigReader, WorkerRestartState,
 };
 use crate::ports::core::ApplicationFuture;
 use crate::ports::core::Clock;
@@ -24,6 +25,7 @@ pub struct AdminRuntimeConfigService<R, F, C> {
     commands: Arc<R>,
     files: Arc<F>,
     clock: Arc<C>,
+    worker_cold_configs: Option<Arc<dyn WorkerColdConfigReader>>,
 }
 
 impl<R, F, C> AdminRuntimeConfigService<R, F, C>
@@ -34,7 +36,34 @@ where
 {
     /// 建立绑定 durable 命令账本、TOML 文件适配器和时钟的服务。
     pub fn new(commands: Arc<R>, files: Arc<F>, clock: Arc<C>) -> Self {
-        Self { commands, files, clock }
+        Self { commands, files, clock, worker_cold_configs: None }
+    }
+
+    /// 装配 Worker 摘要只读端口；普通 GET 和历史命令回执不依赖此端口。
+    pub fn with_worker_cold_configs(mut self, reader: Arc<dyn WorkerColdConfigReader>) -> Self {
+        self.worker_cold_configs = Some(reader);
+        self
+    }
+
+    async fn worker_restart_state(&self, snapshot: &AdminRuntimeSnapshot) -> WorkerRestartState {
+        let Some((reader, target)) =
+            self.worker_cold_configs.as_ref().zip(self.files.worker_cold_config_target(snapshot))
+        else {
+            return WorkerRestartState::Unknown;
+        };
+        match reader.live_worker_cold_configs().await {
+            Ok(live) => compare_worker_cold_configs(&target, &live),
+            Err(error) => {
+                record_error(
+                    DiagnosticLevel::Warn,
+                    error.diagnostic_kind(),
+                    "admin_runtime_config",
+                    "read_worker_cold_configs",
+                    DiagnosticContext::default(),
+                );
+                WorkerRestartState::Unknown
+            }
+        }
     }
 
     /// 读取当前文件快照；GET 不把重启要求伪装成热更新成功。
@@ -340,6 +369,21 @@ where
     }
 }
 
+fn compare_worker_cold_configs(
+    target: &WorkerColdConfigDigest,
+    live: &[Option<WorkerColdConfigDigest>],
+) -> WorkerRestartState {
+    let mut complete = !live.is_empty();
+    for digest in live {
+        match digest.as_ref().filter(|digest| digest.comparable_to(target)) {
+            Some(digest) if digest != target => return WorkerRestartState::RestartRequired,
+            Some(_) => {}
+            None => complete = false,
+        }
+    }
+    if complete { WorkerRestartState::Consistent } else { WorkerRestartState::Unknown }
+}
+
 impl<R, F, C> AdminRuntimeConfigPort for AdminRuntimeConfigService<R, F, C>
 where
     R: AdminRuntimeCommandStore + 'static,
@@ -348,6 +392,17 @@ where
 {
     fn current(&self) -> ApplicationFuture<'_, AdminRuntimeSnapshot> {
         Box::pin(async move { AdminRuntimeConfigService::current(self).await })
+    }
+
+    fn current_with_worker_restart_state(
+        &self,
+    ) -> ApplicationFuture<'_, (AdminRuntimeSnapshot, WorkerRestartState)> {
+        Box::pin(async move {
+            let snapshot = self.current().await?;
+            // 比较与响应始终使用同一份文档和指纹；无需持有文件锁等待数据库。
+            let state = self.worker_restart_state(&snapshot).await;
+            Ok((snapshot, state))
+        })
     }
 
     fn validate(
@@ -377,7 +432,7 @@ mod tests {
     use auction_time::Timestamp;
     use uuid::Uuid;
 
-    use super::AdminRuntimeConfigService;
+    use super::{AdminRuntimeConfigService, compare_worker_cold_configs};
     use crate::errors::ApplicationError;
     use crate::ports::admin::{
         ADMIN_RUNTIME_LEGACY_DIGEST_VERSION, AdminRuntimeAuditRecord, AdminRuntimeCommandState,
@@ -386,6 +441,32 @@ mod tests {
         AdminRuntimeSnapshot, AdminRuntimeStoredCommand, AdminRuntimeUpdateCommand,
     };
     use crate::ports::core::{ApplicationFuture, Clock, RequestHash};
+
+    #[test]
+    fn worker_restart_state_requires_complete_comparable_evidence() {
+        use crate::ports::admin::{WorkerColdConfigDigest, WorkerRestartState};
+
+        let target = WorkerColdConfigDigest::from_projection(1, &"new").unwrap();
+        let older = WorkerColdConfigDigest::from_projection(1, &"old").unwrap();
+        let future = WorkerColdConfigDigest::from_projection(2, &"new").unwrap();
+        let malformed =
+            serde_json::from_value(serde_json::json!({"version": 1, "sha256": "invalid"})).unwrap();
+
+        for (live, expected) in [
+            (vec![], WorkerRestartState::Unknown),
+            (vec![None], WorkerRestartState::Unknown),
+            (vec![Some(future), Some(target.clone())], WorkerRestartState::Unknown),
+            (vec![Some(malformed)], WorkerRestartState::Unknown),
+            (vec![Some(target.clone()), None], WorkerRestartState::Unknown),
+            (vec![Some(older.clone())], WorkerRestartState::RestartRequired),
+            (vec![Some(target.clone())], WorkerRestartState::Consistent),
+            (vec![Some(target.clone()), Some(target.clone())], WorkerRestartState::Consistent),
+            (vec![Some(target.clone()), Some(older.clone())], WorkerRestartState::RestartRequired),
+            (vec![None, Some(older), Some(target.clone())], WorkerRestartState::RestartRequired),
+        ] {
+            assert_eq!(compare_worker_cold_configs(&target, &live), expected, "{live:?}");
+        }
+    }
 
     struct FixedClock(Timestamp);
 

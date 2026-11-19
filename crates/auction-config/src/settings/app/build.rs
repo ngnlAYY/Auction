@@ -7,7 +7,7 @@ use auction_domain::DataKeyDomain;
 use super::accessors::{DEFAULT_WORKER_CONCURRENCY, DEFAULT_WORKER_POLL_INTERVAL_SECONDS};
 use super::model::{AppConfig, BuildInput};
 use crate::settings::errors::ConfigError;
-use crate::settings::operations::apply_runtime_operations;
+use crate::settings::operations::{apply_runtime_operations, apply_worker_runtime};
 use crate::settings::secrets::{
     AppSecrets, SecretString, admin_runtime_listener, load_admin_runtime_file, load_secret_file,
     runtime_http_security, runtime_session, runtime_tracing,
@@ -16,19 +16,28 @@ use crate::settings::validation::{
     resolve_http_listener, resolve_http_security_origins, validate_auction, validate_http_security,
     validate_metrics_listener, validate_realtime, validate_role_session, validate_tracing,
 };
-use crate::settings::worker::{apply_equipment_colors, apply_runtime_document};
 use crate::settings::worker_validation::{
     validate_auction_worker, validate_delivery_worker, validate_forum_worker,
     validate_fulfillment_worker, validate_mooglemail_worker, validate_operations_alert_worker,
     validate_recovery_worker, validate_worker_control,
 };
-use crate::settings::{HttpListenMode, HttpSecurityConfig, MetricsConfig, Role, RoleSessionConfig};
+use crate::settings::{
+    HttpListenMode, HttpSecurityConfig, MetricsConfig, Role, RoleSessionConfig, WorkerConfig,
+};
+
+/// 冷配置目标沿用启动校验，但 Admin 无需打开 Worker 的敏感文件。
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum BuildMode {
+    Startup,
+    WorkerColdTarget,
+}
 
 impl AppConfig {
     pub(super) fn build(
         role: Role,
         input: BuildInput,
         runtime_override: Option<AdminRuntimeDocument>,
+        mode: BuildMode,
     ) -> Result<Self, ConfigError> {
         let BuildInput {
             config_path,
@@ -55,9 +64,14 @@ impl AppConfig {
             runtime_worker_budget,
         } = input;
         let shutdown = shutdown.resolve(role)?;
-        let secret_file =
-            secrets_path.as_deref().map(load_secret_file).transpose()?.unwrap_or_default();
-        let secrets = AppSecrets::from_file(secret_file)?;
+        let load_secrets = mode == BuildMode::Startup;
+        let secrets = if load_secrets {
+            let file =
+                secrets_path.as_deref().map(load_secret_file).transpose()?.unwrap_or_default();
+            AppSecrets::from_file(file)?
+        } else {
+            AppSecrets::default()
+        };
 
         // 保存前替换的是启动加载的 runtime 输入，合并、部署依赖与校验保持同一条路径。
         let mut runtime_document = match runtime_override {
@@ -81,7 +95,7 @@ impl AppConfig {
         let mut auction = auction;
         let mut worker = worker;
         // Public 仅展示装备分组和 bot 名单；创建者模板与 Worker 运行参数仍由原角色拥有。
-        if matches!(role, Role::Admin | Role::Worker)
+        if role == Role::Admin
             && let Some(runtime) = &runtime_document
         {
             apply_runtime_operations(&mut auction, &mut worker, role, runtime);
@@ -89,8 +103,7 @@ impl AppConfig {
         if role == Role::Worker
             && let Some(runtime) = runtime_document.take()
         {
-            apply_equipment_colors(&mut worker.forum, &runtime);
-            apply_runtime_document(&mut worker, runtime);
+            apply_worker_runtime(&mut auction, &mut worker, runtime);
         }
         // 投影完成后转移完整文档，避免 Admin 启动时复制全部模板、名单和规则。
         let admin_runtime = if role == Role::Admin { runtime_document } else { None };
@@ -191,7 +204,7 @@ impl AppConfig {
             role,
             &worker.operations_alert,
             &worker.mooglemail,
-            &secrets,
+            load_secrets.then_some(&secrets),
         )?;
         validate_realtime(&realtime)?;
         let tracing_headers = match role {
@@ -200,26 +213,8 @@ impl AppConfig {
             Role::Worker => secrets.worker_otlp_headers.as_ref(),
         };
         validate_tracing(&tracing, tracing_headers.map(SecretString::expose_secret))?;
-        if role == Role::Worker
-            && worker.mooglemail.enabled
-            && worker.mooglemail.keyenv_file.is_none()
-            && secrets.mooglemail_cookie.is_none()
-            && secrets.credential_data_key_id.is_none()
-        {
-            return Err(ConfigError::MissingMoogleMailCredentials);
-        }
-        if role == Role::Worker
-            && worker.mooglemail.enabled
-            && (secrets.user_login_data_key_id.is_none() || secrets.user_login_data_key.is_none())
-        {
-            return Err(ConfigError::MissingMoogleMailUserLoginDataKey);
-        }
-        if role == Role::Worker
-            && worker.forum.enabled
-            && secrets.ehentai_cookie.is_none()
-            && secrets.credential_data_key_id.is_none()
-        {
-            return Err(ConfigError::MissingEhentaiCredentials);
+        if role == Role::Worker && load_secrets {
+            validate_worker_credentials(&worker, &secrets)?;
         }
         // 即使 Admin runtime 随后覆盖该区块，也拒绝主配置中无法解析的备用安全策略。
         resolve_http_security_origins(&mut http_security, main_listen_addr)?;
@@ -323,4 +318,29 @@ impl AppConfig {
             secrets,
         })
     }
+}
+
+fn validate_worker_credentials(
+    worker: &WorkerConfig,
+    secrets: &AppSecrets,
+) -> Result<(), ConfigError> {
+    if worker.mooglemail.enabled
+        && worker.mooglemail.keyenv_file.is_none()
+        && secrets.mooglemail_cookie.is_none()
+        && secrets.credential_data_key_id.is_none()
+    {
+        return Err(ConfigError::MissingMoogleMailCredentials);
+    }
+    if worker.mooglemail.enabled
+        && (secrets.user_login_data_key_id.is_none() || secrets.user_login_data_key.is_none())
+    {
+        return Err(ConfigError::MissingMoogleMailUserLoginDataKey);
+    }
+    if worker.forum.enabled
+        && secrets.ehentai_cookie.is_none()
+        && secrets.credential_data_key_id.is_none()
+    {
+        return Err(ConfigError::MissingEhentaiCredentials);
+    }
+    Ok(())
 }

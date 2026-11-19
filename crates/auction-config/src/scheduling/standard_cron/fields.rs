@@ -44,6 +44,11 @@ pub(super) struct ParsedField {
 }
 
 impl ParsedField {
+    /// 展开后的取值集合；保留 day 字段的通配语义由日历投影负责。
+    pub(super) const fn bits(self) -> u64 {
+        self.bits
+    }
+
     pub(super) const fn is_wildcard(self) -> bool {
         self.wildcard
     }

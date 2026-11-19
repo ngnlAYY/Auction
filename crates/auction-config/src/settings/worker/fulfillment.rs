@@ -1,9 +1,9 @@
 //! 结算履约 Worker 配置。
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Settlement fulfillment Worker 的独立领取与处理边界。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct FulfillmentWorkerConfig {
     /// 单轮最多处理的 fulfillment 数量；范围 1-1000，默认 100。

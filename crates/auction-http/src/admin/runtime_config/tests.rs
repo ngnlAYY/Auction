@@ -4,11 +4,12 @@
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use auction_application::admin::{
     AdminRuntimeConfigError, AdminRuntimeConfigPort, AdminRuntimeDocument,
     AdminRuntimeEquipmentFilterConfig, AdminRuntimeSnapshot, AdminRuntimeUpdateCommand,
-    AdminRuntimeWorldsConfig,
+    AdminRuntimeWorldsConfig, WorkerRestartState,
 };
 use auction_application::core::ApplicationFuture;
 use axum::body::{Bytes, to_bytes};
@@ -48,12 +49,18 @@ const BASELINE_ALERT_KEYS: [&str; 21] = [
 ];
 
 /// 缺省投影：旧页面不带 include。
-const DEFAULT_PROJECTION: RuntimeProjection =
-    RuntimeProjection { equipment_taxonomy: false, collection_overdue_threshold: false };
+const DEFAULT_PROJECTION: RuntimeProjection = RuntimeProjection {
+    equipment_taxonomy: false,
+    collection_overdue_threshold: false,
+    worker_restart_state: false,
+};
 
 /// 新页面带 `include=fulfillment_collection_overdue_age_seconds`。
-const THRESHOLD_PROJECTION: RuntimeProjection =
-    RuntimeProjection { equipment_taxonomy: false, collection_overdue_threshold: true };
+const THRESHOLD_PROJECTION: RuntimeProjection = RuntimeProjection {
+    equipment_taxonomy: false,
+    collection_overdue_threshold: true,
+    worker_restart_state: false,
+};
 
 /// 管理端 `crates/auction-web-admin/src/api/runtime_config/operations.rs` 的 `valid_mail` 严格校验
 /// 的邮件区块闭集；`AdminRuntimeMailConfig` 新增字段时投影随之变化，本表与浏览器闭集须一起同步。
@@ -265,7 +272,7 @@ fn threshold_projection_shows_the_effective_threshold() {
 
 async fn parse(query: &str) -> Result<RuntimeProjection, StatusCode> {
     let uri: Uri = format!("/api/v1/admin/config{query}").parse().expect("测试 URI");
-    match runtime_projection(&uri) {
+    match runtime_projection(&uri, true) {
         Ok(projection) => Ok(projection),
         Err(response) => {
             let status = response.status();
@@ -290,7 +297,11 @@ async fn runtime_projection_accepts_only_registered_includes() {
             "?include_equipment_taxonomy=true&include=fulfillment_collection_overdue_age_seconds"
         )
         .await,
-        Ok(RuntimeProjection { equipment_taxonomy: true, collection_overdue_threshold: true })
+        Ok(RuntimeProjection {
+            equipment_taxonomy: true,
+            collection_overdue_threshold: true,
+            worker_restart_state: false
+        })
     );
     for query in [
         "?include=",
@@ -541,6 +552,112 @@ async fn runtime_config_read_contract_fixtures() {
         assert_eq!(status, StatusCode::OK, "{name}");
         assert_wire(name, actual);
     }
+}
+
+struct RuntimeWithRestartState {
+    runtime: RuntimeWithWorkerError,
+    state: WorkerRestartState,
+    reads: AtomicUsize,
+}
+
+impl AdminRuntimeConfigPort for RuntimeWithRestartState {
+    fn current(&self) -> ApplicationFuture<'_, AdminRuntimeSnapshot> {
+        self.runtime.current()
+    }
+
+    fn current_with_worker_restart_state(
+        &self,
+    ) -> ApplicationFuture<'_, (AdminRuntimeSnapshot, WorkerRestartState)> {
+        self.reads.fetch_add(1, Ordering::Relaxed);
+        Box::pin(async { Ok((self.runtime.current().await?, self.state)) })
+    }
+
+    fn validate(
+        &self,
+        document: AdminRuntimeDocument,
+    ) -> ApplicationFuture<'_, AdminRuntimeSnapshot> {
+        self.runtime.validate(document)
+    }
+
+    fn update(
+        &self,
+        command: AdminRuntimeUpdateCommand,
+    ) -> ApplicationFuture<'_, AdminRuntimeSnapshot> {
+        self.runtime.update(command)
+    }
+}
+
+#[tokio::test]
+async fn worker_restart_state_is_an_opt_in_no_store_get_projection() {
+    let address = ConnectInfo("127.0.0.1:20123".parse().unwrap());
+    let request = |query: &str| format!("/api/v1/admin/config{query}").parse().unwrap();
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../../../auction-contracts/tests/fixtures/admin/runtime-config-worker-restart-state.json"
+    ))
+    .unwrap();
+
+    for (restart_state, wire) in [
+        (WorkerRestartState::Unknown, "unknown"),
+        (WorkerRestartState::Consistent, "consistent"),
+        (WorkerRestartState::RestartRequired, "restart_required"),
+    ] {
+        let port = Arc::new(RuntimeWithRestartState {
+            runtime: RuntimeWithWorkerError {
+                current: AdminRuntimeDocument::default(),
+                worker_error: WORKER_FILE_HINT,
+            },
+            state: restart_state,
+            reads: AtomicUsize::new(0),
+        });
+        let state = state_with_runtime(Some(port.clone()));
+        let baseline = get(state.clone(), address, headers(), request("")).await;
+        assert_eq!(baseline.headers()["cache-control"], "no-store");
+        assert_eq!(port.reads.load(Ordering::Relaxed), 0, "普通 GET 不读 Worker 摘要");
+        let (status, baseline) = json_response(baseline).await;
+        assert_eq!(status, StatusCode::OK);
+
+        let response =
+            get(state, address, headers(), request("?include_worker_restart_state=true")).await;
+        assert_eq!(response.headers()["cache-control"], "no-store");
+        let (status, mut actual) = json_response(response).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(port.reads.load(Ordering::Relaxed), 1, "扩展 GET 读取一次 Worker 状态");
+        let mut expected = fixture.clone();
+        if restart_state != WorkerRestartState::Unknown {
+            expected["data"]["worker_restart_state"] = json!(wire);
+        }
+        assert_eq!(actual, expected);
+        assert_eq!(
+            actual["data"].as_object_mut().unwrap().remove("worker_restart_state"),
+            Some(json!(wire)),
+        );
+        assert_eq!(actual, baseline);
+    }
+
+    let state = state_with_runtime(Some(Arc::new(RuntimeWithWorkerError {
+        current: AdminRuntimeDocument::default(),
+        worker_error: WORKER_FILE_HINT,
+    })));
+    for query in [
+        "?include_worker_restart_state=false",
+        "?include_worker_restart_state=true&include_worker_restart_state=true",
+    ] {
+        let (status, body) =
+            json_response(get(state.clone(), address, headers(), request(query)).await).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["code"], "invalid_query");
+    }
+    let response = validate(
+        state,
+        address,
+        headers(),
+        "/api/v1/admin/config:validate?include_worker_restart_state=true".parse().unwrap(),
+        Bytes::from_static(br#"{"document":{}}"#),
+    )
+    .await;
+    let (status, body) = json_response(response).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], "invalid_query");
 }
 
 #[tokio::test]

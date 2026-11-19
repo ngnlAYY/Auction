@@ -72,4 +72,16 @@ pub struct AdminRuntimeConfigResponse {
     /// 仅显式请求词典投影时返回；省略时保持原 v1 响应字段集合。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub equipment_taxonomy: Option<EquipmentTaxonomyDto>,
+    /// 仅显式请求 Worker 冷配置状态时返回三态之一。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker_restart_state: Option<AdminWorkerRestartStateDto>,
+}
+
+/// Worker 冷配置与当前文件的比较结果；仅由显式请求的 GET 返回。
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AdminWorkerRestartStateDto {
+    RestartRequired,
+    Consistent,
+    Unknown,
 }

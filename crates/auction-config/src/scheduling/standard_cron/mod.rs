@@ -3,6 +3,7 @@
 use auction_application::scheduling::RecurringSchedule;
 use auction_time::{TimeDelta, Timestamp};
 use jiff::tz::TimeZone;
+use serde::Serialize;
 use thiserror::Error;
 
 mod calendar;
@@ -66,6 +67,64 @@ impl StandardCronSchedule {
             expression => calendar_kind(expression, timezone)?,
         };
         Ok(Self { kind })
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+enum CronProjection {
+    Every {
+        delay_seconds: u64,
+    },
+    Calendar {
+        timezone: String,
+        minutes: u64,
+        hours: u64,
+        days_of_month: u64,
+        months: u64,
+        days_of_week: u64,
+    },
+}
+
+impl StandardCronSchedule {
+    /// 按已解析的匹配语义投影；不读取系统当前时区或采样下一次触发时间。
+    pub(crate) fn cold_projection(&self) -> impl Serialize + use<> {
+        match &self.kind {
+            StandardCronKind::Every { delay_seconds } => {
+                CronProjection::Every { delay_seconds: *delay_seconds }
+            }
+            StandardCronKind::Calendar { calendar, timezone } => {
+                let timezone = match timezone {
+                    ScheduleTimezone::Local => "Local",
+                    ScheduleTimezone::Utc => "UTC",
+                    ScheduleTimezone::Named(zone) => zone.iana_name().unwrap_or("UTC"),
+                };
+                // 日字段取并集；通配时按原匹配器忽略该字段，空的规范键表示每日都匹配。
+                let day_of_month = calendar.days_of_month;
+                let day_of_week = calendar.days_of_week;
+                let (days_of_month, days_of_week) =
+                    match (day_of_month.is_wildcard(), day_of_week.is_wildcard()) {
+                        (true, true) => (0, 0),
+                        (true, false) => (0, day_of_week.bits()),
+                        (false, true) => (day_of_month.bits(), 0),
+                        (false, false) => (day_of_month.bits(), day_of_week.bits()),
+                    };
+                let (days_of_month, days_of_week) =
+                    if days_of_month == u64::from(u32::MAX - 1) || days_of_week == 0b111_1111 {
+                        (0, 0)
+                    } else {
+                        (days_of_month, days_of_week)
+                    };
+                CronProjection::Calendar {
+                    timezone: timezone.to_owned(),
+                    minutes: calendar.minutes.bits(),
+                    hours: calendar.hours.bits(),
+                    days_of_month,
+                    months: calendar.months.bits(),
+                    days_of_week,
+                }
+            }
+        }
     }
 }
 

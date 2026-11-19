@@ -9,7 +9,7 @@ pub(crate) fn validate_operations_alert_worker(
     role: Role,
     config: &OperationsAlertWorkerConfig,
     mooglemail: &MoogleMailWorkerConfig,
-    secrets: &AppSecrets,
+    secrets: Option<&AppSecrets>,
 ) -> Result<(), ConfigError> {
     if config.scan_interval_seconds == 0 || config.scan_interval_seconds > 86_400 {
         return Err(ConfigError::InvalidOperationsAlertConfig(
@@ -71,9 +71,9 @@ pub(crate) fn validate_operations_alert_worker(
     if !config.recipient.is_empty() && !valid_text(&config.recipient, 256) {
         return Err(ConfigError::InvalidOperationsAlertConfig("recipient 无效"));
     }
-    if role != Role::Worker {
+    let Some(secrets) = secrets.filter(|_| role == Role::Worker) else {
         return Ok(());
-    }
+    };
     if (config.notify_enabled() || config.webhook_enabled()) && secrets.database_url.is_none() {
         return Err(ConfigError::InvalidOperationsAlertConfig(
             "启用告警通知时必须配置 PostgreSQL database_url",
@@ -109,7 +109,8 @@ mod tests {
                 ..OperationsAlertWorkerConfig::default()
             };
             assert!(
-                validate_operations_alert_worker(Role::Worker, &config, &mail, &secrets).is_ok(),
+                validate_operations_alert_worker(Role::Worker, &config, &mail, Some(&secrets))
+                    .is_ok(),
                 "{accepted}"
             );
         }
@@ -119,7 +120,7 @@ mod tests {
                 ..OperationsAlertWorkerConfig::default()
             };
             assert_matches!(
-                validate_operations_alert_worker(Role::Worker, &config, &mail, &secrets),
+                validate_operations_alert_worker(Role::Worker, &config, &mail, Some(&secrets)),
                 Err(ConfigError::InvalidOperationsAlertConfig(_)),
                 "{rejected}"
             );
@@ -135,7 +136,7 @@ mod tests {
         let mail = MoogleMailWorkerConfig::default();
         let mut secrets = AppSecrets::default();
         let check = |config: &OperationsAlertWorkerConfig, secrets: &AppSecrets| {
-            validate_operations_alert_worker(Role::Worker, config, &mail, secrets)
+            validate_operations_alert_worker(Role::Worker, config, &mail, Some(secrets))
         };
         assert_matches!(
             check(&config, &secrets),
@@ -159,8 +160,13 @@ mod tests {
         assert!(check(&config, &secrets).is_ok());
         config.webhook_enabled = false;
         assert!(
-            validate_operations_alert_worker(Role::Worker, &config, &mail, &AppSecrets::default())
-                .is_ok()
+            validate_operations_alert_worker(
+                Role::Worker,
+                &config,
+                &mail,
+                Some(&AppSecrets::default())
+            )
+            .is_ok()
         );
     }
 }

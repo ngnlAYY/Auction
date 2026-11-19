@@ -103,24 +103,30 @@ pub(crate) fn validate_forum_worker(config: &ForumSyncWorkerConfig) -> Result<()
         }
     }
     if let Some(public_base_url) = &config.public_base_url {
-        let parsed = Url::parse(public_base_url)
-            .map_err(|_| ConfigError::InvalidForumConfig("public_base_url 不是有效 URL"))?;
-        let path_is_root = parsed.path().is_empty() || parsed.path() == "/";
-        if !(parsed.scheme() == "https"
-            || (parsed.scheme() == "http"
-                && matches!(parsed.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"))))
-            || parsed.host_str().is_none()
-            || !parsed.username().is_empty()
-            || parsed.password().is_some()
-            || !path_is_root
-            || parsed.query().is_some()
-            || parsed.fragment().is_some()
-            || public_base_url.trim() != public_base_url
-        {
-            return Err(ConfigError::InvalidForumConfig(
-                "public_base_url 必须是无凭据、无路径和无查询的 HTTPS origin 或回环 HTTP origin",
-            ));
-        }
+        parse_public_base_url(public_base_url)?;
     }
     Ok(())
+}
+
+/// 公开链接的 origin 门禁由启动校验和冷配置投影共用。
+pub(crate) fn parse_public_base_url(value: &str) -> Result<Url, ConfigError> {
+    let parsed = Url::parse(value)
+        .map_err(|_| ConfigError::InvalidForumConfig("public_base_url 不是有效 URL"))?;
+    let path_is_root = parsed.path().is_empty() || parsed.path() == "/";
+    if !(parsed.scheme() == "https"
+        || (parsed.scheme() == "http"
+            && matches!(parsed.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"))))
+        || parsed.host_str().is_none()
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || !path_is_root
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+        || value.trim() != value
+    {
+        return Err(ConfigError::InvalidForumConfig(
+            "public_base_url 必须是无凭据、无路径和无查询的 HTTPS origin 或回环 HTTP origin",
+        ));
+    }
+    Ok(parsed)
 }

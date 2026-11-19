@@ -116,8 +116,10 @@ pub(super) async fn configure_state(
             .map_err(|error| anyhow::Error::msg(error.to_string()))?,
         );
         let commands = Arc::new(DatabaseAdminRuntimeCommands::new(Arc::clone(&store)));
-        let service =
-            Arc::new(AdminRuntimeConfigService::new(commands, files, Arc::new(SystemClock)));
+        let service = Arc::new(
+            AdminRuntimeConfigService::new(commands, files, Arc::new(SystemClock))
+                .with_worker_cold_configs(store.clone()),
+        );
         // 恢复失败可能发生在候选文件已经替换之后；结果未知时不得带旧安全配置监听。
         service
             .recover()

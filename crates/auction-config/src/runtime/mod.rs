@@ -13,7 +13,7 @@ use std::{
 use auction_application::admin::{
     AdminRuntimeAlertsConfig, AdminRuntimeConfigError, AdminRuntimeDocument, AdminRuntimeFileError,
     AdminRuntimeFileStore, AdminRuntimeMailDeliveryBudget, AdminRuntimeReplacement,
-    AdminRuntimeSnapshot, MAX_ADMIN_RUNTIME_DOCUMENT_BYTES,
+    AdminRuntimeSnapshot, MAX_ADMIN_RUNTIME_DOCUMENT_BYTES, WorkerColdConfigDigest,
 };
 use auction_application::core::ApplicationError;
 use auction_application::core::ApplicationFuture;
@@ -365,6 +365,19 @@ impl AdminRuntimeFileStore for TomlRuntimeFileStore {
             })
             .into()),
         }
+    }
+
+    fn worker_cold_config_target(
+        &self,
+        snapshot: &AdminRuntimeSnapshot,
+    ) -> Option<WorkerColdConfigDigest> {
+        let worker = self.worker.as_ref()?;
+        let file = worker.source.read().ok()?;
+        // 沿用候选校验的部署指纹围栏；目标计算只消费 GET 本次读到的文档，不打开 Worker 密钥文件。
+        if file.fingerprint() != worker.fingerprint {
+            return None;
+        }
+        file.parse(&self.path).ok()?.cold_config_target(snapshot.document.clone()).ok()
     }
 
     fn current(&self) -> ApplicationFuture<'_, AdminRuntimeSnapshot> {
