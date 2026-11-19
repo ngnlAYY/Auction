@@ -195,10 +195,6 @@ test("补偿池与逐件明细接受冲正；流水使用契约 DTO", () => {
     if (!page.ok) throw new Error(page.error);
     expect(page.value.lots[0]?.voided).toBe(voided);
   }
-  // 已发布的纳秒数超过安全整数时仍失败关闭，避免舍入后继续展示。
-  expect(decodeCompensationLots(fixtureResponse("compensation-lots-long-hold"))).toEqual(
-    err("invalid_response"),
-  );
   const movements = decodeSuccess(
     fixtureResponse("compensation-movements"),
     PublicCompensationMovementPageResponseSchema,

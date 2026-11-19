@@ -1,7 +1,7 @@
 // Public 补偿池及账本 DTO。
 
 import * as v from "valibot";
-import { int32, integer, optionalNullable, struct } from "../../../wire";
+import { displayDurationNanos, int32, integer, optionalNullable, struct } from "../../../wire";
 
 /** Public 补偿池批次的稳定响应。 */
 export const PublicCompensationRoundResponseSchema = struct({
@@ -37,7 +37,7 @@ export const PublicCompensationMovementResponseSchema = struct({
   game_equipment_url: optionalNullable(v.string()),
   hold_ppm: optionalNullable(int32),
   adjustment_ppm: optionalNullable(int32),
-  leader_held_nanos: optionalNullable(integer),
+  leader_held_nanos: optionalNullable(displayDurationNanos),
   kind: v.string(),
   amount: integer,
   balance_after: integer,
@@ -101,7 +101,7 @@ export const PublicCompensationLotResponseSchema = struct({
   end_price: integer,
   hold_ppm: int32,
   adjustment_ppm: int32,
-  leader_held_nanos: integer,
+  leader_held_nanos: displayDurationNanos,
   tax_amount: integer,
   /** 名义优惠需求：按调整比例计算、尚未按池余额缩放的优惠。 */
   discount_amount: integer,

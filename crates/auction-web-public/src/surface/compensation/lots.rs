@@ -244,3 +244,51 @@ fn lot_column_widths(show_reversal: bool) -> Vec<u16> {
         vec![51, 113, 50, 75, 77, 87, 109, 80, 90, 138, 130, 40]
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use auction_contracts::ApiResponse;
+    use dioxus::dioxus_core::Mutation;
+    use dioxus::prelude::*;
+
+    use super::CompensationLotRow;
+    use crate::api::CompensationLotPage;
+    use crate::surface::{page_test_contexts, use_lot_detail_lookup};
+
+    fn lot_row(held_nanos: Option<i64>) -> Element {
+        page_test_contexts();
+        use_lot_detail_lookup();
+        let payload: ApiResponse<CompensationLotPage> = serde_json::from_str(include_str!(
+            "../../../../auction-contracts/tests/fixtures/public/compensation-lots-long-hold.json"
+        ))
+        .expect("105 天的逐件明细样本");
+        let page = payload.data;
+        let mut lot = page.lots.into_iter().next().expect("单件拍品");
+        if let Some(nanos) = held_nanos {
+            lot.leader_held_nanos = nanos;
+        }
+        rsx! { CompensationLotRow {
+            lot,
+            auction_id: page.round.auction_id,
+            world_id: page.round.world_id,
+            show_reversal: false,
+        } }
+    }
+
+    #[test]
+    fn held_duration_truncates_at_the_minute_boundary() {
+        for (nanos, expected) in [
+            (Some(9_071_999_999_999_999), "104d 23h 59m"),
+            (None, "105d 00h 00m"),
+            (Some(i64::MAX), "106751d 23h 47m"),
+        ] {
+            let edits = VirtualDom::new_with_props(lot_row, nanos).rebuild_to_vec().edits;
+            assert!(
+                edits.iter().any(|edit| matches!(edit,
+                    Mutation::CreateTextNode { value, .. } if value == expected
+                )),
+                "应显示 {expected}"
+            );
+        }
+    }
+}

@@ -394,6 +394,15 @@ mod tests {
             lots: vec![sold.clone()],
         };
         let sold_report = report.clone();
+        let mut long_hold_report = sold_report.clone();
+        let long_settled = opened + Duration::days(106);
+        long_hold_report.auction.final_phase_at = Some(long_settled - Duration::hours(1));
+        long_hold_report.auction.settled_at = Some(long_settled);
+        long_hold_report.auction.scheduled_end_at = Some(long_settled);
+        long_hold_report.auction.effective_end_at = Some(long_settled);
+        long_hold_report.auction.updated_at = long_settled;
+        long_hold_report.settlement.as_mut().expect("结算摘要").settled_at = long_settled;
+        long_hold_report.lots[0].leader_held_nanos = 9_072_000_000_000_000;
         report.lots = vec![SettlementLotReport {
             status: "unsold".to_owned(),
             winner: None,
@@ -406,9 +415,11 @@ mod tests {
             ..sold
         }];
         let url = format!("/api/v1/admin/auctions/{AUCTION_ID}/settlement-report");
-        for (name, report) in
-            [("admin/settlement-report", sold_report), ("admin/settlement-report-unsold", report)]
-        {
+        for (name, report) in [
+            ("admin/settlement-report", sold_report),
+            ("admin/settlement-report-unsold", report),
+            ("admin/settlement-report-long-hold", long_hold_report),
+        ] {
             let state = AdminFixturePorts {
                 settlement_report: Some(Arc::new(FixtureSettlementReport(report))),
                 ..Default::default()

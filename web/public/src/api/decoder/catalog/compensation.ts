@@ -83,7 +83,6 @@ function validCompensationLot(value: unknown): boolean {
     adjustmentPpm === null ||
     adjustmentPpm < -1_000_000 ||
     adjustmentPpm > 1_000_000 ||
-    !nonnegative(lot.leader_held_nanos) ||
     !nonnegative(lot.tax_amount) ||
     !nonnegative(lot.discount_amount) ||
     !nonnegative(lot.compensation_amount) ||

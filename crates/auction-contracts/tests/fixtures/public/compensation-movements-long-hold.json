@@ -1,0 +1,70 @@
+{
+  "code": "ok",
+  "data": {
+    "movements": [
+      {
+        "amount": 1000,
+        "balance_after": 1000,
+        "created_at": "2025-11-15T09:46:40Z",
+        "kind": "opening",
+        "sequence": 1
+      },
+      {
+        "adjustment_ppm": 50000,
+        "amount": 125,
+        "balance_after": 1125,
+        "created_at": "2025-11-15T09:46:40Z",
+        "equipment_category": "Staff",
+        "equipment_name": "Legendary Staff",
+        "game_equipment_url": "https://hentaiverse.org/equip/123/0123456789",
+        "hold_ppm": 500000,
+        "kind": "tax",
+        "leader_held_nanos": 9072000000000000,
+        "lot_id": "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2c",
+        "lot_number": 1,
+        "sequence": 2
+      },
+      {
+        "adjustment_ppm": 50000,
+        "amount": -100,
+        "balance_after": 1025,
+        "created_at": "2025-11-15T09:46:40Z",
+        "equipment_category": "Staff",
+        "equipment_name": "Legendary Staff",
+        "game_equipment_url": "https://hentaiverse.org/equip/123/0123456789",
+        "hold_ppm": 500000,
+        "kind": "compensation",
+        "leader_held_nanos": 9072000000000000,
+        "lot_id": "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2c",
+        "lot_number": 1,
+        "sequence": 3
+      },
+      {
+        "amount": 0,
+        "balance_after": 1025,
+        "created_at": "2025-11-15T09:46:40Z",
+        "kind": "closing",
+        "sequence": 4
+      }
+    ],
+    "page": 1,
+    "page_size": 50,
+    "round": {
+      "auction_id": "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b",
+      "auction_sequence": 5,
+      "closing_balance": 1025,
+      "compensation_out": 100,
+      "discount_demand": 100,
+      "movement_count": 4,
+      "opening_balance": 1000,
+      "policy_mode": "hold_curve_v2",
+      "reversal_amount": 0,
+      "reversal_count": 0,
+      "settled_at": "2025-11-15T09:46:40Z",
+      "tax_income": 125,
+      "world_id": "main"
+    },
+    "total": 4
+  },
+  "message": "补偿池流水已加载"
+}

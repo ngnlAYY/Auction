@@ -634,7 +634,7 @@ mod tests {
                     projected_game_equipment_url: has_lot.then(|| EQUIPMENT_PREFIX.to_owned()),
                     hold_ppm: has_lot.then_some(500_000),
                     adjustment_ppm: has_lot.then_some(50_000),
-                    leader_held_nanos: has_lot.then_some(3_600_000_000_000),
+                    leader_held_nanos: has_lot.then_some(self.held_nanos),
                     kind,
                     amount,
                     balance_after,
@@ -732,13 +732,18 @@ mod tests {
         }
 
         let movements_url = format!("/api/v1/compensation-pool/{AUCTION_ID}/movements");
-        let response = movements(
-            state(false, ONE_HOUR_NANOS),
-            Path(AUCTION_ID.to_string()),
-            movements_url.parse().expect("流水 URI"),
-        )
-        .await
-        .into_response();
-        assert_http("public/compensation-movements", StatusCode::OK, response).await;
+        for (name, held_nanos) in [
+            ("public/compensation-movements", ONE_HOUR_NANOS),
+            ("public/compensation-movements-long-hold", 9_072_000_000_000_000),
+        ] {
+            let response = movements(
+                state(false, held_nanos),
+                Path(AUCTION_ID.to_string()),
+                movements_url.parse().expect("流水 URI"),
+            )
+            .await
+            .into_response();
+            assert_http(name, StatusCode::OK, response).await;
+        }
     }
 }

@@ -55,6 +55,7 @@ struct StrictSettlementLot {
     listed_price: i64,
     hold_ppm: i32,
     adjustment_ppm: i32,
+    // 只用于展示的纳秒时长按完整 i64 读取，解码时检查非负。
     leader_held_nanos: i64,
     id: String,
     lot_number: i32,
@@ -313,5 +314,38 @@ mod tests {
             assert_eq!(report.auction.status, "settled");
             assert_eq!(report.lots[0].winner.is_some(), sold);
         }
+    }
+
+    #[test]
+    fn settlement_report_decodes_full_nonnegative_i64_held_duration() {
+        use auction_contracts::ApiResponse;
+        use auction_web_shared::format_held_duration;
+
+        let body = include_str!(
+            "../../../auction-contracts/tests/fixtures/admin/settlement-report-long-hold.json"
+        );
+        let decode = |body: &str| {
+            let payload: ApiResponse<StrictSettlementReport> = serde_json::from_str(body).ok()?;
+            decode_settlement_report(payload.data).ok()
+        };
+        let report = decode(body).expect("105 天的结算报告");
+        assert_eq!(report.auction.status, "settled");
+        assert_eq!(report.lots[0].leader_held_nanos, 9_072_000_000_000_000);
+        assert_eq!(format_held_duration(report.lots[0].leader_held_nanos), "105d 00h 00m");
+
+        let mut payload: Value = serde_json::from_str(body).expect("结算报告样本");
+        for (nanos, expected) in [(1_i64 << 53, "104d 05h 59m"), (i64::MAX, "106751d 23h 47m")] {
+            payload["data"]["lots"][0]["leader_held_nanos"] = json!(nanos);
+            let report = decode(&payload.to_string()).expect("非负 i64 时长");
+            assert_eq!(report.lots[0].leader_held_nanos, nanos);
+            assert_eq!(format_held_duration(nanos), expected);
+        }
+        for invalid in [json!(-1), json!(1.5), json!("1"), json!(1_u64 << 63)] {
+            payload["data"]["lots"][0]["leader_held_nanos"] = invalid;
+            assert!(decode(&payload.to_string()).is_none());
+        }
+        payload["data"]["lots"][0]["leader_held_nanos"] = json!(0);
+        payload["data"]["lots"][0]["buyer_amount"] = json!(1_i64 << 53);
+        assert!(decode(&payload.to_string()).is_none());
     }
 }

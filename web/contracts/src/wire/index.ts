@@ -9,6 +9,18 @@ export const JSON_MAX_SAFE_INTEGER = 9_007_199_254_740_991;
 /** i64、isize：有限、无小数且在安全整数范围内。 */
 export const integer = v.pipe(v.number(), v.safeInteger());
 
+/**
+ * 只用于展示的非负 i64 纳秒时长。超过 2^53 纳秒（约 104 天）时，Solid 版的 number 是近似值，
+ * 整分钟前 1–2 纳秒的值可能舍入并显示为下一分钟。Rust 版按整数精确截断。
+ * 接受 2^63，因为 JSON.parse 会将 i64::MAX 舍入到该值。
+ */
+export const displayDurationNanos = v.pipe(
+  v.number(),
+  v.integer(),
+  v.minValue(0),
+  v.maxValue(2 ** 63),
+);
+
 /** 无符号整数（u64、usize）：安全整数且不小于 0。 */
 export const unsignedInteger = v.pipe(v.number(), v.safeInteger(), v.minValue(0));
 

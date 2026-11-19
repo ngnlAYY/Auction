@@ -124,8 +124,8 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | GET | `/api/v1/about` | — | `lang`：“关于”文档，响应形状与缓存策略同规则文档；请求语言缺失时回退到 en，尚未发布为 `404 about_unpublished`（确定的空状态，不是故障） |
 | GET | `/api/v1/blacklist` | — | `page`、`page_size` |
 | GET | `/api/v1/compensation-pool` | — | `page`、`page_size`、`cursor`：已结算场次的补偿池批次（含结算策略与冲正净额），以及两个世界共用补偿池的当前余额 `balance` 与更新时间 `updated_at` |
-| GET | `/api/v1/compensation-pool/{auction_id}/movements` | — | `page`、`page_size`：单场补偿账本流水 |
-| GET | `/api/v1/compensation-pool/{auction_id}/lots` | — | `page`、`page_size`：单场已售 lot 的逐件结算明细（成交价、比例、税收、折扣需求、补偿、实付/所得、买家 `buyer_name` 与卖家 `seller_name`，取名口径同成交历史）与成交撤销冲正 |
+| GET | `/api/v1/compensation-pool/{auction_id}/movements` | — | `page`、`page_size`：单场补偿账本流水。带拍品的流水包含累计领先时长 `leader_held_nanos`，为非负 `i64` 纳秒数，可能超过 JavaScript 安全整数上限。两套浏览器实现目前只有 DTO 定义，没有读取这条路由的页面 |
+| GET | `/api/v1/compensation-pool/{auction_id}/lots` | — | `page`、`page_size`：单场已售 lot 的逐件结算明细（成交价、比例、税收、折扣需求、补偿、实付/所得、买家 `buyer_name` 与卖家 `seller_name`，取名口径同成交历史）与成交撤销冲正。只用于展示的累计领先时长 `leader_held_nanos` 为非负 `i64` 纳秒数，可能超过 JavaScript 安全整数上限。Rust 按整数精确截断，Solid 按近似时长展示 |
 | GET | `/api/v1/auctions` | — | `world`、`status`、`page`、`page_size`、`cursor` |
 | GET | `/api/v2/auctions` | — | 同上，另含每场的论坛主题地址 |
 | GET | `/api/v1/auctions/current` | — | `world`、`include`：当前（预览/进行中）场次。`include` 可选且只接受 `proxy_default_mode`：条目追加 `proxy_default_mode`（`fast`\|`slow`），即该场冻结策略的代理默认模式，Public 代理新建表单以它为初始选项（Final 阶段不能新建 Slow 时为 Fast），代理授权接口仍要求显式 `mode`。不带 `include` 时保持原字段集合，已打开的旧页面照常解码（兼容规则见[crates/auction-contracts/README.md#变更规则](../../crates/auction-contracts/README.md#变更规则)）；其他取值或重复出现为 400 `invalid_query`。无论是否带 `include`，冻结策略缺少该值或取值不在闭集内时整条读取失败关闭 |
@@ -248,7 +248,7 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | POST | `/api/v1/admin/worlds/{world_id}/auction-intake/items` | 手工录入装备到该世界当前接收投稿的 Draft 或 Preview 场次。起拍价须为 1–1,000,000,000 Credits；超界为 `400 invalid_auction_intake`。无接收目标或尚未到冻结的最早收件时刻时返回 `409 auction_intake_unavailable`；`source_kind=url` 的装备页面由 Worker control 代为读取，Worker 不可用或装备页暂时读不到（Bot 战斗中、远端限流、同账号忙碌窗口）时返回 `503 equipment_source_unavailable`，外部访问暂停时返回 `409 external_access_paused` |
 | GET | `/api/v1/admin/forum/sync-status` | 论坛同步状态 |
 | GET | `/api/v1/admin/auctions/{auction_id}/forum` | 该场论坛主题与诊断的本地安全投影；刷新不请求论坛，也不触发或授权重写 |
-| GET | `/api/v1/admin/auctions/{auction_id}/settlement-report` | 结算报告 |
+| GET | `/api/v1/admin/auctions/{auction_id}/settlement-report` | 结算报告。逐件明细中只用于展示的累计领先时长 `leader_held_nanos` 为非负 `i64` 纳秒数，可能超过 JavaScript 安全整数上限。Rust 按整数精确截断 |
 | GET | `/api/v1/admin/auctions/{auction_id}/recovery-report` | 恢复报告，含 `payment_deadline_at`、`blocking_code` 与 `allowed_commands`（与确认事务共用同一准入：isekai `cancelled` 在退回次数未达冻结上限时不要求拉黑）；旧赛季装备的永久重列阻断对外映射为 `recovery_relist_unavailable`，Worker 自动重寄或退回卖家时退件不能逐一归属到原 COD 的发送而写下的阻断对外映射为 `recovery_evidence_mismatch`。查询参数只有可选的 `include=send_attribution`（现行页面总是携带）：此时等待确认或自动推进的 `reclaiming` 记录在发送归属不成立时多输出 `send_attribution_blocker`（闭集 `return_not_current`、`send_in_flight`、`sends_exceed_returns`、`send_without_sent_mid`、`send_records_incomplete`、`send_after_return`，与确认、Worker 推进同一判定，口径见[docs/contracts/database.md](database.md#结算资金恢复与投递)），归属成立时不输出该键；缺省响应保持已发布的字段集合。`include` 的其他取值、重复出现或其他键为 `400 invalid_query`（恢复报告查询参数无效）；回滚到不认识该参数的服务端后新页面的这次读取被拒绝，按构建号提示刷新后恢复 |
 | GET | `/api/v1/admin/settlement-catalog` | 已结算场次目录（`world_id`、`sequence`、`page`、`page_size`） |
 | POST | `/api/v1/admin/recoveries/{recovery_id}/confirm` | 人工确认恢复动作（带期望版本与原因）。已消费的系统退件不能把原付款（收回/取消）或原交付（装备收回）每一次可能已到达远端的发送逐一归属时返回 `409 recovery_send_unattributed`：退件之前有多次可能外达的发送（同一分钟或时钟偏差下都早于截止）、或当前退件之后又有发送且没有完整的 Sent 远端 MID 可以一一归属，确认整体回滚、什么都不改，具体原因见恢复报告的 `send_attribution_blocker`；原付款投递在退件之前被重新排队、因恢复接管而停在待发（当前 fence 从未进入发送围栏）时不阻挡确认，确认事务把它终结为 `failed/recovery_superseded`；判定口径见[docs/contracts/database.md](database.md#结算资金恢复与投递) |

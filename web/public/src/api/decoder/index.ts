@@ -68,7 +68,7 @@ function decodeSuccessValue<TSchema extends v.GenericSchema>(
   if (!validate(data)) {
     return err("invalid_response");
   }
-  // JS 无法区分 1 与 1.0，也不接受超出安全范围的整数；旧整数规范化在这里是空操作。
+  // JSON.parse 无法区分 1 与 1.0；整数范围由各字段的 schema 保证。
   // `decode` 用 ok 标记成败，`null` 本身可以是合法输出（例如匿名会话读取）。
   const decoded = decode(schema, data);
   return decoded.ok ? ok(decoded.value) : err("invalid_response");

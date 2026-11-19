@@ -179,6 +179,7 @@ export function Blacklist(): JSX.Element {
 | 后端字段 | 原语 | 读到的类型 |
 | --- | --- | --- |
 | `i64`、`isize` | `integer` | `number` |
+| 只用于展示的非负 `i64` 纳秒时长 | `displayDurationNanos` | `number` |
 | `u64`、`usize` | `unsignedInteger` | `number` |
 | `i32`、`u32`、`i16`、`u16`、`u8` | `int32`、`uint32`、`int16`、`uint16`、`uint8` | `number` |
 | `f64` | `float` | `number` |
@@ -189,6 +190,8 @@ export function Blacklist(): JSX.Element {
 | `deserialize_null_default` | `nullAsDefault(T, value)` | `T` |
 | `BTreeMap<String, T>`、`HashMap<String, T>` | `stringMap(T)` | `Readonly<Record<string, T>>` |
 | `serde_json::Value` | `jsonValue` | `unknown` |
+
+整数默认必须在 JavaScript 安全整数范围内。唯一例外是只用于展示的非负 `i64` 纳秒时长，目前用于 Public 补偿逐件明细、补偿流水 DTO 的 `leader_held_nanos`。`displayDurationNanos` 接受有限的非负整数 `number`，上界为 `2^63`（`i64::MAX` 解析后会舍入到该值）。展示精度差异见下方差异表。金额、计数、版本、身份、分页、排序和其他判定继续使用各自的原语。
 
 映射字段不用 `v.record`：它会接受数组，并丢弃 `__proto__`、`constructor` 等键名。
 
@@ -205,6 +208,7 @@ export function Blacklist(): JSX.Element {
 
   | 位置 | 差别 |
   | --- | --- |
+  | `web/contracts/src/wire/index.ts`、Public 补偿逐件明细 | 超过 `2^53` 纳秒（约 104 天）的展示时长在 Solid 版是近似值，整分钟前 1–2 纳秒的值可能舍入并显示为下一分钟。Rust 版按整数精确截断。 |
   | `web/public/src/styles/mobile-topbar.css` | 手机顶栏改为两行应用栏：第一行是当前场次与所在世界，第二行是状态标签与倒计时（放不下时截断）；不显示品牌名，语言与主题移到设置页，顶栏没有任何切换器；菜单与刷新是无边框图标 |
   | `web/public/src/styles/round-pages.css` | 出价记录与履约进度的场次区：场次下拉框就是场次标题；手机上去掉卡片，下拉框与搜索框共两行。历史成交价的主筛选行少了世界一列 |
   | `web/public/src/styles/mobile-catalog-filters.css` | 手机上看板筛选区排成带标签的三行（分组按钮、窄等级输入框与复选项、类型下拉框与列设置）；列设置面板改为整宽多列网格 |

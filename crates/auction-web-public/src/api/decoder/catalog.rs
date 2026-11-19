@@ -499,7 +499,8 @@ fn valid_compensation_lot(value: &Value) -> bool {
         && int(value.get("hold_ppm")).is_some_and(|value| (0..=1_000_000).contains(&value))
         && int(value.get("adjustment_ppm"))
             .is_some_and(|value| (-1_000_000..=1_000_000).contains(&value))
-        && nonnegative(value.get("leader_held_nanos"))
+        // 领先时长只用于展示，保留后端非负 i64 的精度与范围。
+        && value.get("leader_held_nanos").and_then(Value::as_i64).is_some_and(|nanos| nanos >= 0)
         && nonnegative(value.get("tax_amount"))
         && nonnegative(value.get("discount_amount"))
         && nonnegative(value.get("compensation_amount"))
@@ -916,17 +917,42 @@ mod tests {
                 decode_success_text(Some(body), super::valid_compensation_lots).expect("补偿明细");
             assert_eq!(page.lots[0].reversal.is_some(), voided);
         }
-        // 该已发布数值字段可以超过 JavaScript 安全整数上限。保持失败关闭，待 wire 表达统一。
-        let long_hold = include_str!(
+    }
+
+    #[test]
+    fn compensation_lots_decode_full_nonnegative_i64_held_duration() {
+        use auction_contracts::PublicCompensationLotPageResponse;
+        use auction_web_shared::format_held_duration;
+
+        use super::super::decode_success_text;
+
+        let body = include_str!(
             "../../../../auction-contracts/tests/fixtures/public/compensation-lots-long-hold.json"
         );
-        assert!(
+        let decode = |body: &str| {
             decode_success_text::<PublicCompensationLotPageResponse, _>(
-                Some(long_hold),
-                super::valid_compensation_lots
+                Some(body),
+                super::valid_compensation_lots,
             )
-            .is_err()
-        );
+        };
+        let page = decode(body).expect("105 天的逐件明细");
+        assert_eq!(page.lots[0].leader_held_nanos, 9_072_000_000_000_000);
+        assert_eq!(format_held_duration(page.lots[0].leader_held_nanos), "105d 00h 00m");
+
+        let mut payload: Value = serde_json::from_str(body).expect("逐件明细样本");
+        for (nanos, expected) in [(1_i64 << 53, "104d 05h 59m"), (i64::MAX, "106751d 23h 47m")] {
+            payload["data"]["lots"][0]["leader_held_nanos"] = json!(nanos);
+            let page = decode(&payload.to_string()).expect("非负 i64 时长");
+            assert_eq!(page.lots[0].leader_held_nanos, nanos);
+            assert_eq!(format_held_duration(nanos), expected);
+        }
+        for invalid in [json!(-1), json!(1.5), json!("1"), json!(1_u64 << 63)] {
+            payload["data"]["lots"][0]["leader_held_nanos"] = invalid;
+            assert!(decode(&payload.to_string()).is_err());
+        }
+        payload["data"]["lots"][0]["leader_held_nanos"] = json!(0);
+        payload["data"]["lots"][0]["buyer_amount"] = json!(1_i64 << 53);
+        assert!(decode(&payload.to_string()).is_err());
     }
 
     #[test]
@@ -1002,15 +1028,31 @@ mod tests {
     }
 
     #[test]
-    fn compensation_movement_dto_reads_backend_contract_fixture() {
-        let result: auction_contracts::ApiResponse<
-            auction_contracts::PublicCompensationMovementPageResponse,
-        > = serde_json::from_str(include_str!(
-            "../../../../auction-contracts/tests/fixtures/public/compensation-movements.json"
-        ))
-        .expect("补偿流水 DTO");
-        assert_eq!(result.data.movements.len(), 4);
-        assert!(result.data.movements[0].lot_id.is_none());
-        assert!(result.data.movements[1].lot_id.is_some());
+    fn compensation_movement_contract_dto_deserializes_backend_fixtures() {
+        use auction_contracts::{ApiResponse, PublicCompensationMovementPageResponse};
+
+        // 补偿流水只有契约 DTO，此处直接反序列化后端样本。
+        for (body, nanos) in [
+            (
+                include_str!(
+                    "../../../../auction-contracts/tests/fixtures/public/compensation-movements.json"
+                ),
+                3_600_000_000_000,
+            ),
+            (
+                include_str!(
+                    "../../../../auction-contracts/tests/fixtures/public/compensation-movements-long-hold.json"
+                ),
+                9_072_000_000_000_000,
+            ),
+        ] {
+            let result: ApiResponse<PublicCompensationMovementPageResponse> =
+                serde_json::from_str(body).expect("补偿流水契约 DTO");
+            assert_eq!(result.data.movements.len(), 4);
+            assert!(result.data.movements[0].lot_id.is_none());
+            assert!(result.data.movements[1].lot_id.is_some());
+            assert_eq!(result.data.movements[0].leader_held_nanos, None);
+            assert_eq!(result.data.movements[1].leader_held_nanos, Some(nanos));
+        }
     }
 }

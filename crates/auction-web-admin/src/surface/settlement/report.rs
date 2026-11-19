@@ -269,7 +269,7 @@ mod tests {
             "game_equipment_url": "https://example.invalid/equip/123", "seller": "seller", "winner": "winner",
             "final_price": 300000, "listed_price": 298800, "buyer_amount": 300000,
             "seller_amount": 300000, "tax_amount": 0, "compensation_amount": 0,
-            "hold_ppm": 300000, "adjustment_ppm": -4000, "leader_held_nanos": 1000000000,
+            "hold_ppm": 300000, "adjustment_ppm": -4000, "leader_held_nanos": 9_071_999_999_999_999_i64,
             "adjustment": { "policy": "hold_curve_v2" }
         })).unwrap();
         rsx! { AdminSettlementLotRow { lot } }
@@ -319,5 +319,6 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(text.iter().any(|value| value.contains("名义折扣 −1,200")));
         assert_eq!(text.iter().filter(|value| **value == "300K").count(), 3);
+        assert!(text.contains(&"104d 23h 59m"));
     }
 }

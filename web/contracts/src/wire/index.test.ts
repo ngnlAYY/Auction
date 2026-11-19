@@ -4,6 +4,7 @@ import { expect, test } from "bun:test";
 import * as v from "valibot";
 import {
   decode,
+  displayDurationNanos,
   int32,
   integer,
   nullAsDefault,
@@ -75,6 +76,24 @@ test("整数只接受安全整数并按宽度限定范围", () => {
   expect(accepts(int32, -2_147_483_649)).toBe(false);
   expect(accepts(uint8, 255)).toBe(true);
   expect(accepts(uint8, 256)).toBe(false);
+});
+
+test("展示时长接受非负整值及舍入后的 i64 上界", () => {
+  for (const nanos of [0, 2 ** 53, 2 ** 63]) {
+    expect(decode(displayDurationNanos, nanos)).toEqual({ ok: true, value: nanos });
+  }
+  for (const invalid of [
+    -1,
+    0.5,
+    "1",
+    null,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    2 ** 63 + 2048,
+  ]) {
+    expect(accepts(displayDurationNanos, invalid)).toBe(false);
+  }
+  expect(accepts(integer, 2 ** 53)).toBe(false);
 });
 
 test("结构体只接受 JSON 对象，数组与 null 一律拒绝", () => {
