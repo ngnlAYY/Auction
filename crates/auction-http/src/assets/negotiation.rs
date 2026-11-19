@@ -87,30 +87,140 @@ pub(super) fn static_method(method: &Method) -> bool {
     matches!(*method, Method::GET | Method::HEAD)
 }
 
-/// 解析 Accept-Encoding：任一 `br` 项的 q 值大于 0 即接受；非法 q 值按接受处理（宽容）。
-pub(super) fn accepts_brotli(headers: &HeaderMap) -> bool {
-    headers.get_all(header::ACCEPT_ENCODING).iter().filter_map(|value| value.to_str().ok()).any(
-        |value| {
-            value.split(',').any(|item| {
-                let mut parts = item.split(';');
-                let coding = parts.next().unwrap_or_default().trim();
-                if !coding.eq_ignore_ascii_case("br") {
-                    return false;
-                }
-                parts.all(|parameter| {
-                    let parameter = parameter.trim();
-                    match parameter.strip_prefix("q=").or_else(|| parameter.strip_prefix("Q=")) {
-                        Some(weight) => {
-                            weight.trim().parse::<f32>().map_or(true, |weight| weight > 0.0)
-                        }
-                        None => true,
-                    }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum AssetEncoding {
+    Brotli,
+    Identity,
+}
+
+/// 只选择实际存在且客户端接受的表示。原文始终存在，`None` 表示两种表示均不可用。
+pub(super) fn negotiate_encoding(headers: &HeaderMap, has_brotli: bool) -> Option<AssetEncoding> {
+    let (mut brotli, mut identity, mut wildcard) = (None, None, None);
+    for value in headers.get_all(header::ACCEPT_ENCODING) {
+        // 一个无效项不能遮蔽同一行上其他项的显式拒绝。
+        let value = String::from_utf8_lossy(value.as_bytes());
+        for item in value.split(',') {
+            let mut parts = item.split(';');
+            let coding = parts.next().unwrap_or_default().trim_ascii();
+            let current = if coding.eq_ignore_ascii_case("br") {
+                &mut brotli
+            } else if coding.eq_ignore_ascii_case("identity") {
+                &mut identity
+            } else if coding == "*" {
+                &mut wildcard
+            } else {
+                continue;
+            };
+            let quality = parts
+                .filter_map(|parameter| {
+                    let (name, value) = parameter.split_once('=').unwrap_or((parameter, ""));
+                    name.trim_ascii()
+                        .eq_ignore_ascii_case("q")
+                        .then(|| encoding_quality(value.trim_ascii()).unwrap_or_default())
                 })
-            })
-        },
-    )
+                .min()
+                .unwrap_or(1000);
+            // 重复项的较高权重不能覆盖拒绝，结果也不能依赖头行的顺序。
+            *current = Some(current.unwrap_or(quality).min(quality));
+        }
+    }
+
+    let accepts_identity = identity.map_or_else(|| wildcard != Some(0), |quality| quality > 0);
+    // 原文可接受时沿用旧版选择，只有原文被排除才用通配匹配 Brotli。
+    let brotli_quality = if accepts_identity { brotli } else { brotli.or(wildcard) };
+    if has_brotli && brotli_quality.is_some_and(|quality| quality > 0) {
+        Some(AssetEncoding::Brotli)
+    } else if accepts_identity {
+        Some(AssetEncoding::Identity)
+    } else {
+        None
+    }
+}
+
+/// 权重使用千分数。只接受 HTTP `qvalue` 的十进制写法。
+fn encoding_quality(value: &str) -> Option<u16> {
+    let (whole, fraction) = value.split_once('.').unwrap_or((value, ""));
+    let whole = match whole {
+        "0" => 0,
+        "1" => 1000,
+        _ => return None,
+    };
+    if fraction.len() > 3 || !fraction.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let fractional = fraction
+        .bytes()
+        .zip([100, 10, 1])
+        .map(|(byte, place)| u16::from(byte - b'0') * place)
+        .sum::<u16>();
+    let quality = whole + fractional;
+    (quality <= 1000).then_some(quality)
 }
 
 pub(super) fn reserved_json_path(path: &str) -> bool {
     path == "/api" || path.starts_with("/api/") || path == "/health" || path.starts_with("/health/")
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::http::{HeaderMap, HeaderValue, header};
+
+    use super::{AssetEncoding, negotiate_encoding};
+
+    #[test]
+    fn encoding_selection_combines_all_lines_and_available_copies() {
+        let br = Some(AssetEncoding::Brotli);
+        let identity = Some(AssetEncoding::Identity);
+        for (lines, has_brotli, expected) in [
+            (&[][..], true, identity),
+            (&[""][..], true, identity),
+            (&["", " , "], true, identity),
+            (&["gzip, br"], true, br),
+            (&["gzip, BR;q=0.5"], true, br),
+            (&["br;q=0"], true, identity),
+            (&["br;Q=0.000"], true, identity),
+            (&["gzip, deflate"], true, identity),
+            (&["*;q=0.2"], true, identity),
+            (&["*;q=0"], true, None),
+            (&["*;q=0", "identity;q=0.001"], true, identity),
+            (&["*;q=0", "br;q=0.001"], true, br),
+            (&["*;q=1", "br;q=0"], true, identity),
+            (&["*;q=1", "identity;q=0"], true, br),
+            (&["*;q=1", "identity;q=0"], false, None),
+            (&["*;q=1", "br;q=0", "identity;q=0"], true, None),
+            (&["br;q=0.2, identity;q=0.3"], true, br),
+            (&["br;q=0.3, identity;q=0.3"], true, br),
+            (&["br;q=0.4, identity;q=0.3"], true, br),
+            (&["br;q=0.4, identity;q=0.3"], false, identity),
+        ] {
+            let mut headers = HeaderMap::new();
+            for line in lines {
+                headers.append(header::ACCEPT_ENCODING, HeaderValue::from_static(line));
+            }
+            assert_eq!(negotiate_encoding(&headers, has_brotli), expected, "{lines:?}");
+        }
+    }
+
+    #[test]
+    fn malformed_or_conflicting_weights_cannot_enable_a_representation() {
+        for line in [
+            "*;q=1, br;q=bad, identity;q=0",
+            "*;q=1, br;q=1.001, identity;q=0",
+            "*;q=1, br;q=0.0001, identity;q=0",
+            "*;q=1, br;q, identity;q=0",
+            "*;q=1, br;q=1;q=0, identity;q=0",
+        ] {
+            let mut headers = HeaderMap::new();
+            headers.insert(header::ACCEPT_ENCODING, HeaderValue::from_static(line));
+            assert_eq!(negotiate_encoding(&headers, true), None, "{line}");
+        }
+
+        let mut headers = HeaderMap::new();
+        headers.append(header::ACCEPT_ENCODING, HeaderValue::from_static("br; q = 1"));
+        headers.append(
+            header::ACCEPT_ENCODING,
+            HeaderValue::from_bytes(b"br;q=0, identity;q=0, \xff").unwrap(),
+        );
+        assert_eq!(negotiate_encoding(&headers, true), None);
+    }
 }

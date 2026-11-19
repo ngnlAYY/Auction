@@ -1,5 +1,6 @@
 //! 静态资源与 CDN 的缓存策略。
 
+use std::borrow::Cow;
 use std::path::Path;
 
 use axum::http::{HeaderMap, HeaderValue, header};
@@ -121,10 +122,12 @@ pub(super) fn exact_asset_cache(relative_path: &str) -> CachePolicy {
     if fingerprinted { CachePolicy::Immutable } else { CachePolicy::NoCache }
 }
 
-pub(super) fn favicon_file<A: rust_embed::RustEmbed>() -> Option<EmbeddedFile> {
+pub(super) fn favicon_file<A: rust_embed::RustEmbed>() -> Option<(Cow<'static, str>, EmbeddedFile)>
+{
     let path = A::iter().find(|path| {
         let path = path.as_ref();
         path.starts_with("assets/favicon-") && path.ends_with(".svg")
     })?;
-    A::get(path.as_ref())
+    let file = A::get(path.as_ref())?;
+    Some((path, file))
 }

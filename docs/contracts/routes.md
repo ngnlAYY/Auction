@@ -59,7 +59,15 @@
 
 静态资源携带由所选表示的 SHA-256 摘要生成的强 `ETag`。只有 `assets/` 下文件名带内容指纹的资源使用 `public, max-age=31536000, immutable` 并保留 `Last-Modified`。SPA 入口文档、HTML 和稳定文件名的资源（包括 `assets/` 下的原名文件）使用 `no-cache`，其中 `/favicon.ico` 使用 `public, max-age=86400`。入口和其他稳定 URL 按内容 ETag 再验证，因为不同内容的构建可能共享同一个时间戳。
 
-`If-None-Match` 支持精确匹配、弱比较匹配与 `*`。缺少该头时，指纹资源仍可在 `If-Modified-Since` 与 `Last-Modified` 同秒时返回 304。稳定 URL 的日期请求返回完整的当前表示。再验证命中的 304 保留缓存头并在响应头处结束。若传送 `Content-Length`，其值等于对应 200 表示的字节数。SPA 入口另带 `Link`，逐项列出文档引用的带指纹样式表、脚本与 WASM（`rel=preload`，属性与文档内的 `<link>` 一致），供 CDN 在等待源站时先发 103 Early Hints。
+Public、Admin 与首次设置的静态文件、SPA 入口别名及 `/favicon.ico` 共用 `Accept-Encoding` 协商。合并全部头行，同一编码的显式项优先于 `*`，重复权重取较小值，非法权重按零处理。按以下顺序选择表示。
+
+1. 客户端显式接受 `br`（权重大于零）且有 Brotli 副本时，返回副本和 `Content-Encoding: br`。
+2. 否则，只要客户端接受原文（`identity`）就发送原文。缺头、空头和单独出现的正权重通配均发送原文。
+3. `identity;q=0` 或无显式 `identity` 例外的 `*;q=0` 会排除原文。此时若有 Brotli 副本且 `br` 可按正权重通配匹配，返回副本和 `Content-Encoding: br`。其余情况对 GET 与 HEAD 返回空正文的 406，附 `Vary: Accept-Encoding` 和 `Cache-Control: no-store`。
+
+参与协商的成功响应和 304 一律带 `Vary: Accept-Encoding`。只有原文的资源也新增这个响应头，防止缓存把原文交给明确拒绝它的客户端。404、405 与缺少入口产物时的 503 优先于编码协商。直接访问 `.br` 静态文件返回 404。
+
+`If-None-Match` 支持精确匹配、弱比较匹配与 `*`。缺少该头时，指纹资源仍可在 `If-Modified-Since` 与 `Last-Modified` 同秒时返回 304。稳定 URL 的日期请求返回完整的当前表示。再验证命中的 304 保留缓存头并在响应头处结束。GET、HEAD 和 304 若传送 `Content-Length`，其值等于对应 200 表示的字节数。SPA 入口别名另带 `Link`，逐项列出原始 HTML 引用的带指纹样式表、脚本与 WASM（`rel=preload`，属性与文档内的 `<link>` 一致），供 CDN 在等待源站时先发 103 Early Hints。
 
 CDN 专用头（`CDN-Cache-Control` 与 `Cloudflare-CDN-Cache-Control`，每个响应都带）跟随响应语义：静态响应使用同一缓存指令；动态响应中 `no-store` 与 `private` 映射为 `no-store`，`no-cache` 映射为 `no-cache`；`public` 且带有效 `max-age`/`s-maxage` 的公开读取获得边缘缓存资格，指令按边缘语义重写为 `public, max-age=<s-maxage，缺省取 max-age>`，并照搬 `stale-while-revalidate` 与 `stale-if-error`（Cloudflare 在指令含 `s-maxage` 时不提供过期后先回旧值、后台刷新，所以不原样复制）；其余（缺失缓存头、无 `public`、无新鲜度或新鲜度写坏）一律 `no-store`。`no-store` 永不因 CDN 映射被放宽。前置 CDN 需要的缓存规则见[ops/README.md#cdncloudflare](../../ops/README.md#cdncloudflare)。
 
@@ -363,7 +371,7 @@ Worker 实际值应核对其指标，不能把 Admin 显示的数据库意图当
 | POST | `/api/v1/setup/validate` | 校验表单并试连数据库 |
 | POST | `/api/v1/setup/complete` | 生成并发布配置目录 |
 
-浏览器入口为 `/setup`，仅另提供存在的 `/index.html`、`/favicon.ico` 与 `/assets/` 下资源；其余路径返回 404。`/assets/` 下另有带指纹的 Fluent 译文资源（`<lang>-dxh<hash>.ftl`）：浏览器只内嵌各 surface 的默认语言，其余语言按 `hv.lang` 按需取回，加载失败保持当前语言并提示。可压缩的静态资源同时带构建期生成的高等级 brotli 副本：请求 `Accept-Encoding` 接受 `br` 时返回副本并附 `Content-Encoding: br`，有副本的资源始终带 `Vary: Accept-Encoding`；以 `.br` 结尾的路径不对外提供（404）。首次设置使用独立的 `SetupResponse` / `SetupErrorResponse`，成功字段为 `status` 与 `initialize_and_start`；正式 Admin 不挂载这三个写接口。
+浏览器入口为 `/setup`，仅另提供存在的 `/index.html`、`/favicon.ico` 与 `/assets/` 下资源；其余路径返回 404。`/assets/` 下另有带指纹的 Fluent 译文资源（`<lang>-dxh<hash>.ftl`）：浏览器只内嵌各 surface 的默认语言，其余语言按 `hv.lang` 按需取回，加载失败保持当前语言并提示。静态资源编码协商遵循[缓存头](#缓存头)中的规则。首次设置使用独立的 `SetupResponse` / `SetupErrorResponse`，成功字段为 `status` 与 `initialize_and_start`；正式 Admin 不挂载这三个写接口。
 
 合并部署的 `complete` 要求 `confirm_initialize = true` 和恰好一个 `x-setup-confirm-target` 请求头。该头按 `application/x-www-form-urlencoded` 编码确认时的三项，依次为 `host`、十进制 `port` 和 `name`，例如 `host=127.0.0.1&port=5432&name=auction`。改变其中任一项须重新确认。试连及写配置前，服务端将头值与提交正文中三项按同一格式编码的值核对。缺失、重复、格式错误或目标不一致时返回 400 `setup_confirmation_required`。确认只包含这三项，账号和口令仍仅随配置正文提交。配置发布后，服务端把确认的目标随完成结果交给监管进程。监管进程须再次比对重读的服务配置和实际用于迁移的 owner 连接目标，匹配后才初始化专用空库并启动角色。
 

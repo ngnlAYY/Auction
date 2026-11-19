@@ -10,19 +10,13 @@ mod routes;
 #[cfg(test)]
 mod wire_tests;
 
-use axum::{
-    extract::Request,
-    http::{HeaderValue, header},
-    response::Response,
-};
+use axum::{extract::Request, http::HeaderValue, response::Response};
 
 use self::cache::{CachePolicy, StaticCachePolicy, exact_asset_cache, favicon_file};
-use self::negotiation::{
-    accepts_brotli, entry_preload_links, exact_asset_path, reserved_json_path, static_method,
-};
+use self::negotiation::{entry_preload_links, exact_asset_path, reserved_json_path, static_method};
 use self::response::{
-    asset_response, assets_missing, canonical_page_redirect, json_not_found, method_not_allowed,
-    not_found,
+    assets_missing, canonical_page_redirect, json_not_found, method_not_allowed,
+    negotiated_asset_response, not_found,
 };
 use self::routes::Surface;
 
@@ -86,17 +80,13 @@ fn serve<A: rust_embed::RustEmbed>(
             return method_not_allowed(request_headers);
         }
         return match favicon_file::<A>() {
-            Some(file) => {
-                let content_type = file.metadata.mimetype().to_owned();
-                asset_response(
-                    file,
-                    method,
-                    request_headers,
-                    CachePolicy::Favicon,
-                    &content_type,
-                    None,
-                )
-            }
+            Some((relative_path, file)) => negotiated_asset_response::<A>(
+                file,
+                &relative_path,
+                &request,
+                CachePolicy::Favicon,
+                None,
+            ),
             None => not_found(surface, method, request_headers),
         };
     }
@@ -111,29 +101,13 @@ fn serve<A: rust_embed::RustEmbed>(
         if !static_method(method) {
             return method_not_allowed(request_headers);
         }
-        // 构建期生成的高等级 brotli 副本按 Accept-Encoding 协商；没有副本的资源不受影响。
-        // Content-Type 始终取原始表示，副本只是同一资源的压缩编码。
-        let content_type = file.metadata.mimetype().to_owned();
-        let compressed = A::get(&format!("{relative_path}.br"));
-        let vary = compressed.is_some();
-        let (file, encoding) = match compressed {
-            Some(compressed) if accepts_brotli(request_headers) => (compressed, Some("br")),
-            _ => (file, None),
-        };
-        let mut response = asset_response(
+        return negotiated_asset_response::<A>(
             file,
-            method,
-            request_headers,
+            relative_path,
+            &request,
             exact_asset_cache(relative_path),
-            &content_type,
-            encoding,
+            None,
         );
-        if vary {
-            response
-                .headers_mut()
-                .insert(header::VARY, HeaderValue::from_static("Accept-Encoding"));
-        }
-        return response;
     }
 
     if (setup_only && path == "/setup") || (!setup_only && routes::browser_route(surface, path)) {
@@ -142,20 +116,14 @@ fn serve<A: rust_embed::RustEmbed>(
         }
         return match A::get(INDEX_HTML) {
             Some(index) => {
-                let content_type = index.metadata.mimetype().to_owned();
                 let preload_links = entry_preload_links(&index.data);
-                let mut response = asset_response(
+                negotiated_asset_response::<A>(
                     index,
-                    method,
-                    request_headers,
+                    INDEX_HTML,
+                    &request,
                     CachePolicy::NoCache,
-                    &content_type,
-                    None,
-                );
-                if let Some(preload_links) = preload_links {
-                    response.headers_mut().insert(header::LINK, preload_links);
-                }
-                response
+                    preload_links,
+                )
             }
             None => assets_missing(method),
         };
@@ -181,7 +149,7 @@ mod tests {
     use tower::ServiceExt;
 
     use super::cache::{CachePolicy, cdn_cache_policy, exact_asset_cache};
-    use super::negotiation::{accepts_brotli, entry_preload_links};
+    use super::negotiation::entry_preload_links;
     use super::response::{asset_response, parse_http_date};
     use super::routes::Surface;
     use super::{IMF_FIXDATE, serve_admin_asset, serve_public_asset};
@@ -201,33 +169,6 @@ mod tests {
     async fn body_text(response: Response) -> String {
         let bytes = to_bytes(response.into_body(), 4096).await.expect("body");
         String::from_utf8(bytes.to_vec()).expect("utf8")
-    }
-
-    #[test]
-    fn accepts_brotli_parses_quality() {
-        let cases = [
-            (Some("br"), true),
-            (Some("gzip, br;q=0.5"), true),
-            (Some("br;q=0"), false),
-            (Some("br;Q=0.000"), false),
-            (Some("gzip, deflate"), false),
-            (Some(""), false),
-            (None, false),
-        ];
-        for (value, expected) in cases {
-            let headers = match value {
-                Some(value) => {
-                    let mut headers = HeaderMap::new();
-                    headers.insert(
-                        header::ACCEPT_ENCODING,
-                        HeaderValue::from_str(value).expect("header"),
-                    );
-                    headers
-                }
-                None => HeaderMap::new(),
-            };
-            assert_eq!(accepts_brotli(&headers), expected, "value={value:?}");
-        }
     }
 
     #[tokio::test]
@@ -267,6 +208,40 @@ mod tests {
                 "Accept-Encoding"
             );
             assert_eq!(body_text(response).await, "body{color:red}\n");
+        }
+    }
+
+    #[tokio::test]
+    async fn wildcard_selects_brotli_when_identity_is_excluded() {
+        let wildcard = HeaderValue::from_static("*;q=1");
+        let identity = HeaderValue::from_static("identity;q=0");
+        let response = serve_public_asset::<TestAssets>(conditional(
+            "/assets/app.css",
+            &[(header::ACCEPT_ENCODING, &wildcard), (header::ACCEPT_ENCODING, &identity)],
+        ))
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::CONTENT_ENCODING),
+            Some(&HeaderValue::from_static("br"))
+        );
+        assert_eq!(body_text(response).await, "compressed-css\n");
+    }
+
+    #[tokio::test]
+    async fn existing_assets_with_no_acceptable_representation_return_406() {
+        for (path, accept) in [
+            ("/assets/app.css", "*;q=1, br;q=0, identity;q=0"),
+            ("/assets/app.js", "br, identity;q=0"),
+            ("/", "*;q=0"),
+        ] {
+            let response = serve_public_asset::<TestAssets>(request(path, Some(accept))).await;
+            assert_eq!(response.status(), StatusCode::NOT_ACCEPTABLE, "{path}");
+            assert_eq!(response.headers()[header::VARY], "Accept-Encoding");
+            assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+            assert_eq!(cdn_cache_policy(&response), "no-store");
+            assert!(!response.headers().contains_key(header::ETAG));
+            assert!(body_text(response).await.is_empty());
         }
     }
 
@@ -453,12 +428,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn resource_without_copy_has_no_vary_or_encoding() {
+    async fn resource_without_copy_varies_without_content_encoding() {
         let response =
             serve_public_asset::<TestAssets>(request("/assets/app.js", Some("br"))).await;
         assert_eq!(response.status(), StatusCode::OK);
         assert!(response.headers().get(header::CONTENT_ENCODING).is_none());
-        assert!(response.headers().get(header::VARY).is_none());
+        assert_eq!(response.headers()[header::VARY], "Accept-Encoding");
     }
 
     #[tokio::test]

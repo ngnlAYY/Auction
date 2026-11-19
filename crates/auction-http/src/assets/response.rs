@@ -6,12 +6,13 @@ use auction_contracts::ApiErrorResponse;
 use auction_time::Timestamp;
 use axum::Json;
 use axum::body::Body;
+use axum::extract::Request;
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
-use rust_embed::EmbeddedFile;
+use rust_embed::{EmbeddedFile, RustEmbed};
 
 use super::cache::{CachePolicy, StaticCachePolicy};
-use super::negotiation::static_method;
+use super::negotiation::{AssetEncoding, negotiate_encoding, static_method};
 use super::routes::{Surface, browser_route};
 use super::{
     ADMIN_NOT_FOUND_HTML, ASSETS_MISSING_BODY, IMF_FIXDATE, OBSOLETE_HTTP_DATES,
@@ -19,6 +20,50 @@ use super::{
 };
 use crate::middleware::boundary::request_id;
 use crate::middleware::response_cache::etag_matches;
+
+const VARY_ACCEPT_ENCODING: &str = "Accept-Encoding";
+
+/// 路径与方法检查通过后，才按实际副本协商并构造静态响应。
+pub(super) fn negotiated_asset_response<A: RustEmbed>(
+    file: EmbeddedFile,
+    relative_path: &str,
+    request: &Request,
+    cache_policy: CachePolicy,
+    preload_links: Option<HeaderValue>,
+) -> Response {
+    let compressed = A::get(&format!("{relative_path}.br"));
+    let selection = negotiate_encoding(request.headers(), compressed.is_some());
+    // 压缩副本沿用原文的媒体类型，验证器与长度取实际发出的表示。
+    let content_type = file.metadata.mimetype().to_owned();
+    let (file, encoding) = match (selection, compressed) {
+        (Some(AssetEncoding::Brotli), Some(compressed)) => (compressed, Some("br")),
+        (Some(AssetEncoding::Identity), _) => (file, None),
+        _ => {
+            return (
+                StatusCode::NOT_ACCEPTABLE,
+                [
+                    (header::VARY, HeaderValue::from_static(VARY_ACCEPT_ENCODING)),
+                    (header::CACHE_CONTROL, HeaderValue::from_static("no-store")),
+                ],
+            )
+                .into_response();
+        }
+    };
+    let mut response = asset_response(
+        file,
+        request.method(),
+        request.headers(),
+        cache_policy,
+        &content_type,
+        encoding,
+    );
+    // 即使只有原文，缓存的 200 与 304 也不能被拒绝原文的请求复用。
+    response.headers_mut().insert(header::VARY, HeaderValue::from_static(VARY_ACCEPT_ENCODING));
+    if let Some(preload_links) = preload_links {
+        response.headers_mut().insert(header::LINK, preload_links);
+    }
+    response
+}
 
 pub(super) fn asset_response(
     file: EmbeddedFile,
@@ -59,8 +104,6 @@ pub(super) fn asset_response(
     }
     if let Some(encoding) = encoding {
         headers.insert(header::CONTENT_ENCODING, HeaderValue::from_static(encoding));
-        // 压缩表示依赖请求头协商；有副本的资源两个方向都必须声明 Vary。
-        headers.insert(header::VARY, HeaderValue::from_static("Accept-Encoding"));
     }
     if let Ok(value) = HeaderValue::from_str(&content_length.to_string()) {
         headers.insert(header::CONTENT_LENGTH, value);
