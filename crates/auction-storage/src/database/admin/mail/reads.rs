@@ -205,6 +205,13 @@ pub(super) async fn get_intake_postgres(
     let deliveries = if delivery_ids.is_empty() {
         Vec::new()
     } else {
+        // 原行标识才是关联依据，摘要里的占位不能匹配其他邮件的投递。
+        let world_id: &str = row
+            .try_get("world_id")
+            .map_err(|error| storage_error_from(error, "读取邮件世界标识失败"))?;
+        let external_mail_id: &str = row
+            .try_get("external_mail_id")
+            .map_err(|error| storage_error_from(error, "读取外部邮件标识失败"))?;
         let rows = sqlx::query(
             "SELECT id, payload_operation AS operation, recipient, status,
                     fencing_version, attempt_count, failure_code, external_reference,
@@ -227,8 +234,8 @@ pub(super) async fn get_intake_postgres(
              ORDER BY id",
         )
         .bind(delivery_ids)
-        .bind(&summary.world_id)
-        .bind(&summary.external_mail_id)
+        .bind(world_id)
+        .bind(external_mail_id)
         .fetch_all(store.pool())
         .await
         .map_err(|error| storage_error_from(error, "读取邮件关联 delivery 失败"))?;

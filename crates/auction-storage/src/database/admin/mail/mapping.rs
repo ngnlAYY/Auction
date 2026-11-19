@@ -2,10 +2,13 @@
 
 use auction_application::admin::{
     AdminMailIntakeDelivery, AdminMailIntakeMetadata, AdminMailIntakeSummary, AdminMailPollState,
-    AdminMailPollerSnapshot, AdminMailTransactionError,
+    AdminMailPollerSnapshot, AdminMailTransactionError, MAX_ADMIN_MAIL_DECISION_BYTES,
+    MAX_ADMIN_MAILBOX_KEY_BYTES,
 };
 use auction_application::core::ApplicationError;
 use auction_application::mail::MailDisplaySnapshot;
+use auction_application::settlement::SYSTEM_RETURN_SENDER;
+use auction_domain::valid_text;
 use serde::Deserialize;
 use serde_json::Value;
 use sqlx::Row;
@@ -13,6 +16,8 @@ use sqlx::Row;
 use crate::database::storage_error_from;
 
 pub(super) use crate::database::storage_error;
+
+const REDACTED: &str = "[REDACTED]";
 
 pub(super) fn map_sql_error(error: sqlx::Error) -> AdminMailTransactionError {
     match &error {
@@ -80,50 +85,67 @@ pub(super) fn map_mail_poller(
 pub(super) fn map_intake_summary(
     row: &sqlx::postgres::PgRow,
 ) -> Result<AdminMailIntakeSummary, ApplicationError> {
-    let mut summary = AdminMailIntakeSummary {
+    let sender: Option<String> =
+        row.try_get("sender").map_err(|error| storage_error_from(error, "读取邮件发件人失败"))?;
+    let raw_subject: Option<String> =
+        row.try_get("subject").map_err(|error| storage_error_from(error, "读取邮件标题失败"))?;
+    let subject = raw_subject.as_deref().map(|subject| {
+        MailDisplaySnapshot::display_stored_subject(sender.as_deref().unwrap_or_default(), subject)
+    });
+    let summary = AdminMailIntakeSummary {
         id: row.try_get("id").map_err(|error| storage_error_from(error, "读取邮件入站标识失败"))?,
-        mailbox_key: row
-            .try_get("mailbox_key")
-            .map_err(|error| storage_error_from(error, "读取邮件邮箱标识失败"))?,
-        external_mail_id: row
-            .try_get("external_mail_id")
-            .map_err(|error| storage_error_from(error, "读取外部邮件标识失败"))?,
-        world_id: row
-            .try_get("world_id")
-            .map_err(|error| storage_error_from(error, "读取邮件世界标识失败"))?,
+        mailbox_key: display_intake_text(
+            row.try_get("mailbox_key")
+                .map_err(|error| storage_error_from(error, "读取邮件邮箱标识失败"))?,
+            MAX_ADMIN_MAILBOX_KEY_BYTES,
+        ),
+        external_mail_id: display_intake_text(
+            row.try_get("external_mail_id")
+                .map_err(|error| storage_error_from(error, "读取外部邮件标识失败"))?,
+            512,
+        ),
+        world_id: display_intake_text(
+            row.try_get("world_id")
+                .map_err(|error| storage_error_from(error, "读取邮件世界标识失败"))?,
+            256,
+        ),
         kind: row
             .try_get("mail_kind")
             .map_err(|error| storage_error_from(error, "读取邮件类型失败"))?,
         status: row
             .try_get("status")
             .map_err(|error| storage_error_from(error, "读取邮件状态失败"))?,
-        decision_code: row
-            .try_get("decision_code")
-            .map_err(|error| storage_error_from(error, "读取邮件决定码失败"))?,
+        decision_code: display_intake_text(
+            row.try_get("decision_code")
+                .map_err(|error| storage_error_from(error, "读取邮件决定码失败"))?,
+            MAX_ADMIN_MAIL_DECISION_BYTES,
+        ),
         received_at: row
             .try_get("received_at")
             .map_err(|error| storage_error_from(error, "读取邮件接收时间失败"))?,
         processed_at: row
             .try_get("processed_at")
             .map_err(|error| storage_error_from(error, "读取邮件处理时间失败"))?,
-        sender: row
-            .try_get("sender")
-            .map_err(|error| storage_error_from(error, "读取邮件发件人失败"))?,
-        subject: row
-            .try_get("subject")
-            .map_err(|error| storage_error_from(error, "读取邮件标题失败"))?,
+        sender: sender.as_deref().map(display_intake_sender),
+        subject,
         has_message_display: row
             .try_get("has_message_display")
             .map_err(|error| storage_error_from(error, "读取邮件原始信息状态失败"))?,
     };
-    if summary.validate() {
-        if let Some((sender, subject)) = summary.sender.as_deref().zip(summary.subject.as_deref()) {
-            summary.subject = Some(MailDisplaySnapshot::redact_subject(sender, subject, &[]));
-        }
-        Ok(summary)
-    } else {
-        Err(storage_error("邮件入站摘要安全投影无效"))
+    summary.validate().then_some(summary).ok_or_else(|| storage_error("邮件入站摘要安全投影无效"))
+}
+
+fn display_intake_sender(sender: &str) -> String {
+    let trimmed = sender.trim();
+    // 展示值也不能把未认证的发件人变成系统身份。
+    if trimmed == SYSTEM_RETURN_SENDER && trimmed != sender {
+        return REDACTED.to_owned();
     }
+    display_intake_text(trimmed, 256)
+}
+
+fn display_intake_text(text: &str, maximum_bytes: usize) -> String {
+    if valid_text(text, maximum_bytes) { text.to_owned() } else { REDACTED.to_owned() }
 }
 
 pub(super) fn map_intake_delivery(
@@ -229,4 +251,25 @@ pub(super) fn decode_equipment_diagnostic(
 
 fn to_i32(value: i64) -> Result<i32, ApplicationError> {
     i32::try_from(value).map_err(|_| storage_error("邮件决定计数超出安全范围"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{display_intake_sender, display_intake_text};
+
+    #[test]
+    fn intake_sender_trims_whitespace_without_creating_system_identity() {
+        assert_eq!(display_intake_sender("Player "), "Player");
+        assert_eq!(display_intake_sender("MoogleMail"), "MoogleMail");
+        assert_eq!(display_intake_sender("MoogleMail "), "[REDACTED]");
+        assert_eq!(display_intake_sender("Player\nName"), "[REDACTED]");
+        assert_eq!(display_intake_sender("\t\u{3000}"), "[REDACTED]");
+    }
+
+    #[test]
+    fn intake_text_replaces_invalid_identifiers_without_rewriting_them() {
+        assert_eq!(display_intake_text("9001", 4), "9001");
+        assert_eq!(display_intake_text("9001\t", 8), "[REDACTED]");
+        assert_eq!(display_intake_text("90010", 4), "[REDACTED]");
+    }
 }

@@ -6,6 +6,7 @@ use std::{
     hash::{BuildHasher, Hasher},
 };
 
+use auction_domain::valid_text;
 use serde::{Deserialize, Serialize};
 
 use crate::ports::mail::processing::{MailEquipmentAttachment, MailMessage};
@@ -62,7 +63,10 @@ impl MailDisplaySnapshot {
         let body = if authentication_subject(&message.subject) {
             "[REDACTED: authentication message]".to_owned()
         } else {
-            redact_message_text(&message.body, &message.attachments, MAX_BODY_BYTES)?
+            limit_redacted_text(
+                redact_message_text(&message.body, &message.attachments)?,
+                MAX_BODY_BYTES,
+            )
         };
         let snapshot = Self {
             schema_version: MAIL_DISPLAY_SCHEMA_VERSION,
@@ -86,13 +90,32 @@ impl MailDisplaySnapshot {
         if system_returned_settlement_obligation_id(sender, subject).is_some() {
             return subject.to_owned();
         }
-        redact_message_text(subject, attachments, MAX_SUBJECT_BYTES)
-            .unwrap_or_else(|| REDACTED.to_owned())
+        redact_message_text(subject, attachments).map_or_else(
+            || REDACTED.to_owned(),
+            |text| limit_redacted_text(text, MAX_SUBJECT_BYTES),
+        )
+    }
+
+    /// 使用原始发件人核验退件，生成历史主题的唯一安全展示值。
+    pub fn display_stored_subject(sender: &str, subject: &str) -> String {
+        if system_returned_settlement_obligation_id(sender, subject).is_some() {
+            return subject.to_owned();
+        }
+        // 脱敏必须读到完整原文，裁剪会抹掉登录 key 标签后仅由空白组成的尾串。
+        let redacted = redact_text(subject, None);
+        let trimmed = redacted.trim();
+        // 裁剪不能把非规范退件主题变成可被识别为来源证据的主题。
+        if !valid_text(trimmed, MAX_SUBJECT_BYTES)
+            || system_returned_settlement_obligation_id(sender, trimmed).is_some()
+        {
+            return REDACTED.to_owned();
+        }
+        if trimmed.len() == redacted.len() { redacted } else { trimmed.to_owned() }
     }
 
     /// 对历史展示正文重新应用当前脱敏规则，此时可用的附件信息只有 ID。
     pub fn redact_stored_body(body: &str) -> String {
-        redact_text(body, None, MAX_BODY_BYTES)
+        limit_redacted_text(redact_text(body, None), MAX_BODY_BYTES)
     }
 
     /// 校验展示投影边界和版本闭集。
@@ -132,13 +155,9 @@ fn key_fingerprint(key: &[u8], state: &RandomState) -> u64 {
     hasher.finish()
 }
 
-fn redact_message_text(
-    source: &str,
-    attachments: &[MailEquipmentAttachment],
-    maximum_bytes: usize,
-) -> Option<String> {
+fn redact_message_text(source: &str, attachments: &[MailEquipmentAttachment]) -> Option<String> {
     if attachments.is_empty() {
-        return Some(redact_text(source, None, maximum_bytes));
+        return Some(redact_text(source, None));
     }
     let mut keys = HashSet::with_capacity(attachments.len());
     let hash_state = RandomState::new();
@@ -147,14 +166,10 @@ fn redact_message_text(
             attachment.key.with_bytes(|key| key_fingerprint(key, &hash_state)).ok()?;
         keys.insert(fingerprint);
     }
-    Some(redact_text(source, Some((&keys, &hash_state)), maximum_bytes))
+    Some(redact_text(source, Some((&keys, &hash_state))))
 }
 
-fn redact_text(
-    source: &str,
-    attachment_keys: Option<(&HashSet<u64>, &RandomState)>,
-    maximum_bytes: usize,
-) -> String {
+fn redact_text(source: &str, attachment_keys: Option<(&HashSet<u64>, &RandomState)>) -> String {
     let mut ranges = url_key_ranges(source)
         .chain(credential_token_ranges(source, attachment_keys.is_none()))
         .chain(labeled_key_ranges(source))
@@ -191,6 +206,10 @@ fn redact_text(
         offset = end;
     }
     redacted.push_str(&source[offset..]);
+    redacted
+}
+
+fn limit_redacted_text(redacted: String, maximum_bytes: usize) -> String {
     // 短凭据替换后仍须满足展示字段上限，避免脱敏阻断入站提交。
     if redacted.len() <= maximum_bytes { redacted } else { REDACTED.to_owned() }
 }
@@ -386,5 +405,44 @@ mod tests {
             SettlementObligationKind::WinnerPaymentCarrierCod,
             obligation_id
         ));
+    }
+
+    #[test]
+    fn stored_subject_normalizes_only_after_redaction() {
+        let display = MailDisplaySnapshot::display_stored_subject;
+        assert_eq!(display("Player", "拍卖问题 \u{3000}"), "拍卖问题");
+        assert_eq!(display("Player", "补充说明：登录 key   "), "补充说明：登录 key[REDACTED]");
+        assert_eq!(display("Player", "补充说明：登录 key"), "补充说明：登录 key");
+        assert_eq!(display("Player", "\t\u{3000}"), "[REDACTED]");
+        assert_eq!(display("Player", "多行\n主题"), "[REDACTED]");
+    }
+
+    #[test]
+    fn stored_subject_checks_length_after_trimming_redacted_text() {
+        let text = "x".repeat(491);
+        let padded = format!("          {text} login key ");
+        assert_eq!(padded.len(), 512);
+        let expected = format!("{text} login key[REDACTED]");
+        assert_eq!(expected.len(), 511);
+        let safe = MailDisplaySnapshot::display_stored_subject("Player", &padded);
+        assert_eq!(safe, expected);
+        assert_eq!(MailDisplaySnapshot::redact_subject("Player", &safe, &[]), expected);
+        assert_eq!(MailDisplaySnapshot::redact_subject("Player", &padded, &[]), "[REDACTED]");
+
+        let still_too_long = format!("{text}xx login key ");
+        assert_eq!(
+            MailDisplaySnapshot::display_stored_subject("Player", &still_too_long),
+            "[REDACTED]",
+        );
+    }
+
+    #[test]
+    fn stored_subject_does_not_reconstruct_canonical_return_proof() {
+        let display = MailDisplaySnapshot::display_stored_subject;
+        let canonical = "[RTS] Auction payment request [5b1c2a9e-1f0d-4c6b-9a7e-3d2f1e0c9b8a]";
+        let padded = format!("{canonical} ");
+        assert_eq!(display(SYSTEM_RETURN_SENDER, canonical), canonical);
+        assert_eq!(display(SYSTEM_RETURN_SENDER, &padded), "[REDACTED]");
+        assert_eq!(display("MoogleMail ", &padded), canonical);
     }
 }

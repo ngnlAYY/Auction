@@ -13,6 +13,7 @@ use auction_application::mail::{
     MailPollBatch, MailPollClaim, MailPollCompletion, MailPollIntake, MailPollReadJournal,
     MailPollReadSummary, MailPollStore,
 };
+use auction_application::settlement::SYSTEM_RETURN_SENDER;
 use auction_storage::DatabaseStore;
 use auction_time::Timestamp;
 use uuid::Uuid;
@@ -234,28 +235,44 @@ async fn postgres_admin_mail_reads_scrub_legacy_subjects() {
     let store = database.store().await.expect("连接克隆测试数据库");
     let now = Timestamp::now();
     let colon_key_subject = format!("补充说明：登录 key {}:", " ".repeat(31));
+    let returned_subject = "[RTS] Auction payment request [5b1c2a9e-1f0d-4c6b-9a7e-3d2f1e0c9b8a]";
+    let padded_returned_subject = format!("{returned_subject} ");
+    let long_text = "x".repeat(491);
+    let long_subject = format!("          {long_text} login key ");
+    let safe_long_subject = format!("{long_text} login key[REDACTED]");
+    let player = ("Player", "Player");
+    let system = (SYSTEM_RETURN_SENDER, SYSTEM_RETURN_SENDER);
     let cases = [
-        ("9011", MANUAL_KEY_SUBJECT, REDACTED_MANUAL_KEY_SUBJECT),
-        ("9012", ATTACHMENT_KEY_SUBJECT, "附件 [REDACTED]"),
-        ("9013", "拍卖问题", "拍卖问题"),
-        ("9014", PADDED_MANUAL_KEY_SUBJECT, REDACTED_MANUAL_KEY_SUBJECT),
-        ("9015", SHORT_LABELED_KEY_SUBJECT, REDACTED_SHORT_LABELED_KEY_SUBJECT),
-        ("9016", colon_key_subject.as_str(), REDACTED_MANUAL_KEY_SUBJECT),
-        ("9017", EQUALS_KEY_SUBJECT, REDACTED_SHORT_LABELED_KEY_SUBJECT),
+        ("9011", player, MANUAL_KEY_SUBJECT, REDACTED_MANUAL_KEY_SUBJECT),
+        ("9012", player, ATTACHMENT_KEY_SUBJECT, "附件 [REDACTED]"),
+        ("9013", player, "拍卖问题", "拍卖问题"),
+        ("9014", player, PADDED_MANUAL_KEY_SUBJECT, REDACTED_MANUAL_KEY_SUBJECT),
+        ("9015", player, SHORT_LABELED_KEY_SUBJECT, REDACTED_SHORT_LABELED_KEY_SUBJECT),
+        ("9016", player, colon_key_subject.as_str(), REDACTED_MANUAL_KEY_SUBJECT),
+        ("9017", player, EQUALS_KEY_SUBJECT, REDACTED_SHORT_LABELED_KEY_SUBJECT),
+        ("9018", ("Player ", "Player"), "拍卖问题 \u{3000}", "拍卖问题"),
+        ("9019", player, "补充说明：登录 key   ", REDACTED_MANUAL_KEY_SUBJECT),
+        ("9020", ("\t\u{3000}", "[REDACTED]"), "\t\u{3000}", "[REDACTED]"),
+        ("9021", player, "多行\n主题", "[REDACTED]"),
+        ("9022", system, returned_subject, returned_subject),
+        ("9023", system, padded_returned_subject.as_str(), "[REDACTED]"),
+        ("9024", ("MoogleMail ", "[REDACTED]"), returned_subject, returned_subject),
+        ("9025", player, long_subject.as_str(), safe_long_subject.as_str()),
     ];
-    for (mid, raw, _) in cases {
+    for (mid, (sender, _), raw, _) in cases {
         sqlx::query(
             "INSERT INTO public.inbound_mail
                  (id, mailbox_key, external_mail_id, world_id, mail_kind, content_digest,
                   received_at, status, decision_code, processed_at, sender, subject)
              VALUES ($1, $2, $3, 'main', 'unknown', $4, $5, 'rejected',
-                     'unknown_subject', $5, 'Player', $6)",
+                     'unknown_subject', $5, $6, $7)",
         )
         .bind(Uuid::new_v4())
         .bind(MAILBOX)
         .bind(mid)
         .bind([1_u8; 32].as_slice())
         .bind(now)
+        .bind(sender)
         .bind(raw)
         .execute(store.postgres_pool())
         .await
@@ -271,23 +288,101 @@ async fn postgres_admin_mail_reads_scrub_legacy_subjects() {
             received_from: None,
             received_to: None,
             page: 1,
-            page_size: 10,
+            page_size: 20,
         })
         .await
         .unwrap();
     assert_eq!(page.items.len(), cases.len());
-    for (mid, raw, safe) in cases {
+    assert_eq!(page.total, i64::try_from(cases.len()).unwrap());
+    for (mid, (sender, safe_sender), raw, safe) in cases {
         let summary = page.items.iter().find(|item| item.external_mail_id == mid).unwrap();
+        assert_eq!(summary.sender.as_deref(), Some(safe_sender));
         assert_eq!(summary.subject.as_deref(), Some(safe));
         let detail = store.intake_detail(summary.id).await.unwrap().unwrap();
+        assert_eq!(detail.summary.sender.as_deref(), Some(safe_sender));
         assert_eq!(detail.summary.subject.as_deref(), Some(safe));
-        let stored: String =
-            sqlx::query_scalar("SELECT subject FROM public.inbound_mail WHERE id = $1")
-                .bind(summary.id)
-                .fetch_one(store.postgres_pool())
-                .await
-                .unwrap();
-        assert_eq!(stored, raw);
+        let (stored_sender, stored_subject, content_digest): (String, String, Vec<u8>) =
+            sqlx::query_as(
+                "SELECT sender, subject, content_digest FROM public.inbound_mail WHERE id = $1",
+            )
+            .bind(summary.id)
+            .fetch_one(store.postgres_pool())
+            .await
+            .unwrap();
+        assert_eq!(stored_sender, sender);
+        assert_eq!(stored_subject, raw);
+        assert_eq!(content_digest, [1; 32]);
     }
     store.postgres_pool().close().await;
+}
+
+#[tokio::test]
+async fn postgres_admin_mail_reads_replace_invalid_legacy_display_fields() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接克隆测试数据库");
+    let pool = store.postgres_pool();
+    let mailbox = "m".repeat(257);
+    let mid = "9001\t";
+    let world = "legacy\tworld";
+    let decision = "d".repeat(257);
+    let intake_id = Uuid::new_v4();
+    let maintenance = database.maintenance_store().await.expect("以维护账号写入历史世界夹具");
+    sqlx::query("INSERT INTO public.worlds (id) VALUES ($1)")
+        .bind(world)
+        .execute(maintenance.postgres_pool())
+        .await
+        .unwrap();
+    maintenance.postgres_pool().close().await;
+    // btrim 约束只处理 ASCII 空格，原始标识仍用于数据库筛选和关联。
+    sqlx::query(
+        "INSERT INTO public.inbound_mail
+             (id, mailbox_key, external_mail_id, world_id, mail_kind, content_digest,
+              received_at, status, decision_code, processed_at)
+         VALUES ($1, $2, $3, $4, 'unknown', $5, $6, 'rejected', $7, $6)",
+    )
+    .bind(intake_id)
+    .bind(&mailbox)
+    .bind(mid)
+    .bind(world)
+    .bind([1_u8; 32].as_slice())
+    .bind(Timestamp::now())
+    .bind(&decision)
+    .execute(pool)
+    .await
+    .unwrap();
+    let page = store
+        .list_intakes(AdminMailIntakeFilter {
+            mailbox_key: None,
+            world_id: None,
+            kind: Some("unknown".to_owned()),
+            status: Some("rejected".to_owned()),
+            decision: None,
+            received_from: None,
+            received_to: None,
+            page: 1,
+            page_size: 20,
+        })
+        .await
+        .unwrap();
+    let summary = page.items.iter().find(|item| item.id == intake_id).unwrap();
+    assert_eq!(summary.mailbox_key, "[REDACTED]");
+    assert_eq!(summary.external_mail_id, "[REDACTED]");
+    assert_eq!(summary.world_id, "[REDACTED]");
+    assert_eq!(summary.decision_code, "[REDACTED]");
+    assert_eq!(summary.kind, "unknown");
+    assert_eq!(summary.status, "rejected");
+    assert_eq!(summary.sender, None);
+    assert_eq!(summary.subject, None);
+    let detail = store.intake_detail(intake_id).await.unwrap().unwrap();
+    assert_eq!(&detail.summary, summary);
+    let stored: (String, String, String, String) = sqlx::query_as(
+        "SELECT mailbox_key, external_mail_id, world_id, decision_code
+         FROM public.inbound_mail WHERE id = $1",
+    )
+    .bind(intake_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(stored, (mailbox, mid.to_owned(), world.to_owned(), decision));
+    pool.close().await;
 }
