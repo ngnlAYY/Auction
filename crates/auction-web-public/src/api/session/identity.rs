@@ -23,39 +23,69 @@ pub(crate) enum SessionIdentityEvidence {
 pub(crate) struct PublicSessionEvidenceTrigger {
     pub apply: EventHandler<SessionIdentityEvidence>,
     pub revision: Signal<u64>,
+    pub owner_revision: Signal<u64>,
 }
 
 /// 不修改 Cookie 的请求绑定发出时的修订，避免迟到的响应覆盖更新的 Cookie 归属。
-pub(in crate::api) struct SessionIdentityObservation {
-    source: Option<(PublicSessionEvidenceTrigger, u64)>,
+pub(crate) struct SessionIdentityObservation {
+    source: Option<(EventHandler<SessionIdentityEvidence>, Signal<u64>, u64)>,
     session_revision: Option<String>,
     confirmed_logout: Option<String>,
+    login_revision: Option<String>,
 }
 
 impl SessionIdentityObservation {
     pub(in crate::api) fn start() -> Self {
+        Self::observe(|trigger| trigger.revision)
+    }
+
+    /// 同一身份的例行会话读取不淘汰同代在途标记集合。
+    pub(in crate::api) fn watch_collection() -> Self {
+        Self::observe(|trigger| trigger.owner_revision)
+    }
+
+    fn observe(select_revision: impl FnOnce(PublicSessionEvidenceTrigger) -> Signal<u64>) -> Self {
         let source = current_context::<PublicSessionEvidenceTrigger>().map(|trigger| {
-            let revision = *trigger.revision.peek();
-            (trigger, revision)
+            let revision = select_revision(trigger);
+            (trigger.apply, revision, *revision.peek())
         });
         Self {
             source,
             session_revision: get_revision(PUBLIC_SESSION_CHANGE_STORAGE_KEY),
             confirmed_logout: get_revision(LOGOUT_REVISION_KEY),
+            login_revision: PublicSessionCheckTrigger::login_revision(),
         }
     }
 
-    pub(in crate::api) fn publish(self, identity: SessionIdentity) -> bool {
-        if let Some((trigger, revision)) = self.source {
-            if *trigger.revision.peek() != revision
-                || self.session_revision != get_revision(PUBLIC_SESSION_CHANGE_STORAGE_KEY)
-                || self.confirmed_logout != get_revision(LOGOUT_REVISION_KEY)
-            {
-                return false;
-            }
-            trigger
-                .apply
-                .call(SessionIdentityEvidence::Current { identity, cookie_written: false });
+    /// 状态交付与缓存写入采用同一份请求发起时的身份观察。
+    pub(crate) fn current(&self) -> bool {
+        self.source.is_none_or(|(_, revision, observed)| *revision.peek() == observed)
+            && self.cookie_current()
+    }
+
+    /// 例行会话复核可以推进本页证据，但偏好读回仍须绑定发起时的 Cookie 代次。
+    pub(in crate::api) fn cookie_current(&self) -> bool {
+        self.session_revision == PublicSessionCheckTrigger::session_revision()
+            && self.confirmed_logout == get_revision(LOGOUT_REVISION_KEY)
+            && self.login_revision == PublicSessionCheckTrigger::login_revision()
+    }
+
+    /// 与 Solid 共用主修订的十进制表示。
+    pub(crate) fn cache_revision(&self) -> Option<String> {
+        watch_cache_revision(self.session_revision.as_deref())
+    }
+
+    /// 主修订绑定发起的 HTTP 与其可用于 CAS 的集合。
+    pub(crate) fn primary_revision(&self) -> Option<&str> {
+        self.session_revision.as_deref()
+    }
+
+    pub(in crate::api) fn publish(&self, identity: SessionIdentity) -> bool {
+        if !self.current() {
+            return false;
+        }
+        if let Some((apply, _, _)) = self.source {
+            apply.call(SessionIdentityEvidence::Current { identity, cookie_written: false });
         }
         true
     }
@@ -107,12 +137,55 @@ impl PublicSessionCheckTrigger {
     pub(crate) fn logout_revisions() -> (Option<String>, Option<String>) {
         (get_revision(LOGOUT_REVISION_KEY), get_revision(LOGOUT_UNKNOWN_REVISION_KEY))
     }
+
+    /// 主修订只广播 Cookie 操作，不提供身份归属。
+    pub(crate) fn session_revision() -> Option<String> {
+        get_revision(PUBLIC_SESSION_CHANGE_STORAGE_KEY)
+    }
+
+    /// 成功解码的登录标记仍须由权威会话确认；存储失败时仅通知本标签页。
+    pub(crate) fn login_revision() -> Option<String> {
+        #[cfg(target_arch = "wasm32")]
+        if let Some(revision) = LOCAL_LOGIN_REVISION.with_borrow(Clone::clone) {
+            return Some(revision);
+        }
+        get_revision(LOGIN_REVISION_KEY)
+    }
+
+    /// 持久标记快照只接受当前主修订，缺省修订编码为十进制 0。
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub(crate) fn watch_cache_revision() -> Option<String> {
+        watch_cache_revision(Self::session_revision().as_deref())
+    }
 }
 
 /// 标签页间只广播随机修订，不保存用户身份或凭据。
 pub(crate) const PUBLIC_SESSION_CHANGE_STORAGE_KEY: &str = "hv.public.session-revision";
 const LOGOUT_REVISION_KEY: &str = "hv.public.session-logout-revision";
 const LOGOUT_UNKNOWN_REVISION_KEY: &str = "hv.public.session-logout-unknown-revision";
+const LOGIN_REVISION_KEY: &str = "hv.public.session-login-revision";
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static LOCAL_LOGIN_REVISION: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+pub(super) fn mark_public_login() {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let revision = uuid::Uuid::new_v4().to_string();
+        let shared = auction_web_shared::storage::set_item(LOGIN_REVISION_KEY, &revision);
+        LOCAL_LOGIN_REVISION.with_borrow_mut(|local| *local = (!shared).then_some(revision));
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    set_revision(LOGIN_REVISION_KEY);
+}
+
+fn watch_cache_revision(revision: Option<&str>) -> Option<String> {
+    let Some(revision) = revision else { return Some("0".to_owned()) };
+    let uuid = uuid::Uuid::parse_str(revision).ok()?;
+    (uuid.hyphenated().to_string() == revision).then(|| uuid.as_u128().to_string())
+}
 
 pub(super) fn mark_public_logout(confirmed: bool) {
     // 先在写锁内记录。排队中的权威 GET 可能早于跨页唤醒收到 Cookie 的变化。
@@ -148,12 +221,17 @@ pub(super) fn observe_expected_user_rejection(
 
 pub(in crate::api) fn notify_public_session_change(reason: SessionRefreshReason) {
     broadcast_session_change();
+    request_public_session_check(reason);
+}
+
+/// 未发送的命令只复核本页；Cookie 未改变，无需广播新的主修订。
+pub(in crate::api) fn request_public_session_check(reason: SessionRefreshReason) {
     if let Some(trigger) = current_context::<PublicSessionCheckTrigger>() {
         trigger.0.call(reason);
     }
 }
 
-fn broadcast_session_change() {
+pub(in crate::api) fn broadcast_session_change() {
     set_revision(PUBLIC_SESSION_CHANGE_STORAGE_KEY);
 }
 

@@ -27,6 +27,7 @@ use crate::surface::{
 const DEFAULT_ACCOUNT_PAGE_SIZE: i64 = 10;
 const ACCOUNT_PATH: &str = "/me";
 
+pub(super) mod preference_reload;
 mod watches;
 
 pub(super) fn page() -> Element {

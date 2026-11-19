@@ -9,6 +9,8 @@ use dioxus::prelude::*;
 
 use self::duration::DurationUnit;
 use self::state::{PreferenceOwner, PreferenceState};
+use crate::surface::account::preference_reload::{PreferenceRead, PreferenceReload};
+use crate::surface::commands::SessionAuthority;
 use crate::surface::session::SessionCommandScope;
 use crate::surface::{PublicCommandOwner, PublicSessionResource, use_content_loading};
 
@@ -25,10 +27,19 @@ pub(super) fn SessionPreference(user_id: String) -> Element {
         state,
         form_scope: current_scope_id(),
         commands: use_context::<SessionCommandScope>(),
+        reload: PreferenceReload::use_tracking(),
+        authority: SessionAuthority::use_context(),
     };
     use_effect({
         let mut owner = owner.clone();
-        move || owner.load(false)
+        move || {
+            if let Some(read) = owner.reload.pending_read()
+                && owner.session_ready()
+                && !owner.state.read().reload_blocked()
+            {
+                owner.load(read);
+            }
+        }
     });
     let current_expiry = use_memo(move || {
         session
@@ -172,7 +183,7 @@ pub(super) fn SessionPreference(user_id: String) -> Element {
                             button {
                                 r#type: "button", disabled: busy,
                                 aria_describedby: "session-duration-feedback",
-                                onclick: move |_| refresh.load(false),
+                                onclick: move |_| refresh.load(PreferenceRead::Refresh),
                                 {t!("session-duration-refresh")}
                             }
                         }
@@ -201,6 +212,8 @@ fn feedback(state: &PreferenceState) -> Option<String> {
         t!("session-duration-conflict")
     } else if state.pending_uncertain {
         t!("session-duration-unknown")
+    } else if error.not_sent() {
+        t!("command-not-sent")
     } else if error.code == "session_lock_unavailable" {
         t!("session-lock-unavailable")
     } else if error.code == "session_lock_timeout" {

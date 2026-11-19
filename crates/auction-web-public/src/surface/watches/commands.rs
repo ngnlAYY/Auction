@@ -7,15 +7,20 @@ use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use super::{WatchCommand, WatchRevision, WatchSubmit};
-use crate::api::set_lot_watch;
+use crate::api::{
+    CommandError, PublicSessionCheckTrigger, PublicSessionEvidenceTrigger, SessionRefreshReason,
+    set_lot_watch,
+};
 use crate::surface::PublicCommandOwner;
-use crate::surface::commands::CommandSession;
+use crate::surface::commands::{CommandSession, SessionAuthority};
 
 #[derive(Clone)]
 struct WatchCommandOwner {
     user_id: Option<String>,
     identity: Signal<Option<String>>,
     session: CommandSession,
+    authority: SessionAuthority,
+    evidence: Option<PublicSessionEvidenceTrigger>,
     revision: Signal<u64>,
     commands: Signal<BTreeMap<String, WatchCommand>>,
 }
@@ -28,9 +33,12 @@ pub(crate) fn use_watch_command_owner(user_id: Option<String>) -> Element {
         user_id,
         identity: use_context::<PublicCommandOwner>().0,
         session: use_context::<CommandSession>(),
+        authority: SessionAuthority::use_context(),
+        evidence: try_use_context::<PublicSessionEvidenceTrigger>(),
         revision,
         commands: use_signal(BTreeMap::new),
     };
+    let ready = owner.session.can_submit_new();
     let commands = owner.commands;
     use_context_provider(|| commands);
     let submit = use_context_provider(|| {
@@ -56,6 +64,7 @@ pub(crate) fn use_watch_command_owner(user_id: Option<String>) -> Element {
                     p { {t!("watch-unknown")} }
                     button {
                         r#type: "button",
+                        disabled: !ready,
                         onclick: move |_| submit.0.call((
                             command.auction_id.clone(),
                             lot_id.clone(),
@@ -75,7 +84,7 @@ impl WatchCommandOwner {
         self.user_id.is_some() && *self.identity.read() == self.user_id
     }
 
-    /// 重试只使用稳定宿主冻结的完整负载；新命令还要求当前会话读取成功。
+    /// 首次提交与原样重放都要求当前会话读取成功，重放只能使用冻结的完整负载。
     fn submit(
         &mut self,
         auction_id: String,
@@ -83,46 +92,64 @@ impl WatchCommandOwner {
         lot_code: String,
         payload: PublicSetLotWatchRequest,
     ) {
-        if !self.identity_matches() {
+        if !self.identity_matches() || !self.session.can_submit_new() {
             return;
         }
         let Some(user_id) = self.user_id.clone() else { return };
-        let (payload, uncertain) = {
-            let commands = self.commands.peek();
-            match commands.get(&lot_id) {
-                Some(pending) => {
-                    if pending.busy
-                        || !pending.uncertain
-                        || pending.auction_id != auction_id
-                        || pending.payload.command_id != payload.command_id
-                    {
-                        return;
-                    }
-                    // 不接受调用方替换版本或新意图。
-                    (pending.payload.clone(), pending.uncertain)
+        let previous = self.commands.peek().get(&lot_id).cloned();
+        let (payload, uncertain) = match &previous {
+            Some(pending) if !pending.not_sent() => {
+                if pending.busy
+                    || !pending.uncertain
+                    || pending.auction_id != auction_id
+                    || pending.payload.command_id != payload.command_id
+                {
+                    return;
                 }
-                None => {
-                    if !self.session.can_submit_new() {
-                        return;
-                    }
-                    (payload, false)
-                }
+                // 不接受调用方替换版本或新意图。
+                (pending.payload.clone(), true)
             }
+            _ => (payload, false),
         };
-        self.commands.write().insert(
-            lot_id.clone(),
-            WatchCommand {
-                auction_id: auction_id.clone(),
-                lot_code: lot_code.clone(),
-                payload: payload.clone(),
-                busy: true,
-                uncertain,
-                error: None,
-                awaiting_refresh: None,
-            },
-        );
+        let confirmation = self.authority.current();
+        let evidence_revision = self.evidence_revision();
+        let attempt = WatchCommand {
+            auction_id: auction_id.clone(),
+            lot_code: lot_code.clone(),
+            payload: payload.clone(),
+            busy: true,
+            uncertain,
+            error: None,
+            awaiting_refresh: None,
+        };
+        self.commands.write().insert(lot_id.clone(), attempt.clone());
         let mut context = self.clone();
         spawn(async move {
+            if !context.identity_matches() {
+                return;
+            }
+            let current = context.authority.current();
+            let revision_changed = confirmation.is_none() || current != confirmation;
+            if revision_changed
+                || evidence_revision != context.evidence_revision()
+                || !context.session.can_submit_new()
+            {
+                // 未发送的首次提交可手动重新提交；原先未知的命令保留原条目。
+                let entry =
+                    previous.filter(|pending| pending.uncertain).unwrap_or_else(|| WatchCommand {
+                        busy: false,
+                        error: Some(CommandError::before_send()),
+                        ..attempt
+                    });
+                context.commands.write().insert(lot_id, entry);
+                if current.is_none()
+                    && context.session.can_submit_new()
+                    && let Some(check) = try_consume_context::<PublicSessionCheckTrigger>()
+                {
+                    check.0.call(SessionRefreshReason::CookieChanged);
+                }
+                return;
+            }
             let result = set_lot_watch(&user_id, &auction_id, &lot_id, &payload).await;
             if !context.identity_matches() {
                 return;
@@ -166,5 +193,9 @@ impl WatchCommandOwner {
                 }
             }
         });
+    }
+
+    fn evidence_revision(&self) -> Option<u64> {
+        self.evidence.map(|evidence| *evidence.revision.peek())
     }
 }

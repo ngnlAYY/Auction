@@ -11,46 +11,78 @@ use auction_web_shared::wire::json_has_exact_keys as exact_fields;
 use gloo_net::http::Request;
 use serde_json::Value;
 
+use super::clock::send_response;
 use super::session::{
     SessionIdentity, SessionIdentityObservation, decode_account_identity_response,
+    decode_observed_account_read,
 };
-use super::{CommandError, TransportError, send_get, send_request};
+use super::{CommandError, TransportError};
 
 /// 整场集合有界且不能截断；缺项只有在完整权威读取后才表示 false/version 0。
 pub(crate) async fn fetch_lot_watches(
     user_id: &str,
     auction_id: &str,
-) -> Result<PublicLotWatchesResponse, CommandError> {
+) -> Result<(PublicLotWatchesResponse, SessionIdentityObservation), CommandError> {
+    let observation = SessionIdentityObservation::watch_collection();
     #[cfg(test)]
-    if let Some(fixture) =
-        crate::surface::PageReadFixture::response((user_id.to_owned(), auction_id.to_owned()))
+    if let Some(fixture) = crate::surface::PageReadFixture::<
+        _,
+        Result<PublicLotWatchesResponse, CommandError>,
+    >::response((user_id.to_owned(), auction_id.to_owned()))
     {
-        return fixture;
+        return accept_collection(fixture?, observation, user_id, auction_id, 200);
     }
-    let observation = SessionIdentityObservation::start();
     let query = url::form_urlencoded::Serializer::new(String::new())
         .append_pair("auction_id", auction_id)
         .finish();
-    let response = send_get(&format!("/api/v1/me/lot-watches?{query}"))
-        .await
-        .map_err(|error| failure(error.code(), 0))?;
+    let path = format!("/api/v1/me/lot-watches?{query}");
+    let response = send_response(
+        |abort_signal| {
+            Request::get(&path)
+                .abort_signal(abort_signal)
+                .build()
+                .map_err(|_error| TransportError::Network(None))
+        },
+        #[cfg(test)]
+        crate::surface::PageReadFixture::response((user_id.to_owned(), auction_id.to_owned())),
+    )
+    .await;
+    if !observation.current() {
+        return Err(failure("session_observation_stale", 0));
+    }
+    let response = response.map_err(|error| failure(error.code(), 0))?;
     let status = response.status();
-    let page: PublicLotWatchesResponse =
-        decode_account_identity_response(response, None, |value| {
+    let page: PublicLotWatchesResponse = decode_observed_account_read(
+        response,
+        || observation.current(),
+        |value| {
             exact_fields(value, &["user_id", "auction_id", "watches"])
                 && value.get("watches").and_then(Value::as_array).is_some_and(|watches| {
                     watches.len() <= 10_000 && watches.iter().all(valid_watch_value)
                 })
-        })
-        .await?;
+        },
+    )
+    .await?;
+    accept_collection(page, observation, user_id, auction_id, status)
+}
+
+fn accept_collection(
+    page: PublicLotWatchesResponse,
+    observation: SessionIdentityObservation,
+    user_id: &str,
+    auction_id: &str,
+    status: u16,
+) -> Result<(PublicLotWatchesResponse, SessionIdentityObservation), CommandError> {
     if !valid_watch_collection(&page, &page.user_id, auction_id) {
         return Err(failure("invalid_response", status));
     }
-    observation.publish(SessionIdentity::UserId(page.user_id.clone()));
+    if !observation.publish(SessionIdentity::UserId(page.user_id.clone())) {
+        return Err(failure("session_observation_stale", 0));
+    }
     if page.user_id != user_id {
         return Err(failure("invalid_response", status));
     }
-    Ok(page)
+    Ok((page, observation))
 }
 
 /// 重试直接复用原 DTO，不重新生成 ID、目标状态或 CAS 版本。
@@ -61,7 +93,7 @@ pub(crate) async fn set_lot_watch(
     command: &PublicSetLotWatchRequest,
 ) -> Result<PublicSetLotWatchResponse, CommandError> {
     #[cfg(test)]
-    if let Some((status, body)) = crate::surface::PageReadFixture::<
+    let fixture = crate::surface::PageReadFixture::<
         (String, String, String, PublicSetLotWatchRequest),
         (u16, String),
     >::response((
@@ -69,20 +101,23 @@ pub(crate) async fn set_lot_watch(
         auction_id.to_owned(),
         lot_id.to_owned(),
         command.clone(),
-    )) {
-        let error =
-            super::session::decode_identity_response::<()>(status, Some(&body), Value::is_null)
-                .expect_err("标记宿主的传输替身只返回失败");
-        return Err(failure(&error.into_read_code(), status));
-    }
+    ))
+    .map(|(status, body)| {
+        let response = super::clock::HttpResponseFixture { status, etag: None, body: Some(body) };
+        Box::pin(std::future::ready(Ok(response))) as super::clock::HttpFixtureFuture
+    });
     let observation = SessionIdentityObservation::start();
-    let response = send_request(|abort_signal| {
-        Request::put(&format!("/api/v1/lots/{lot_id}/watch"))
-            .abort_signal(abort_signal)
-            .header(auction_contracts::PUBLIC_EXPECTED_USER_ID_HEADER, user_id)
-            .json(command)
-            .map_err(|_| TransportError::Network(None))
-    })
+    let response = send_response(
+        |abort_signal| {
+            Request::put(&format!("/api/v1/lots/{lot_id}/watch"))
+                .abort_signal(abort_signal)
+                .header(auction_contracts::PUBLIC_EXPECTED_USER_ID_HEADER, user_id)
+                .json(command)
+                .map_err(|_| TransportError::Network(None))
+        },
+        #[cfg(test)]
+        fixture,
+    )
     .await
     .map_err(|error| failure(error.code(), 0))?;
     let status = response.status();
@@ -137,7 +172,7 @@ fn failure(code: &str, status: u16) -> CommandError {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
     use std::rc::Rc;
 
     use auction_contracts::{
@@ -165,6 +200,11 @@ mod tests {
         include_str!("../../../auction-contracts/tests/fixtures/public/lot-watches.json");
     const AUCTION: &str = "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b";
     const LOT: &str = "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2c";
+
+    thread_local! {
+        static WATCH_SESSION: Cell<Option<(PublicSessionResource, Signal<bool>)>> =
+            const { Cell::new(None) };
+    }
 
     #[test]
     fn lot_watches_decode_backend_contract_fixtures() {
@@ -230,13 +270,18 @@ mod tests {
         use_context_provider(|| LotViewRequest(Signal::new(None)));
         let ready: PublicReadinessResource = use_resource(|| async { Ok(true) });
         use_context_provider(|| ready);
-        let session: PublicSessionResource = use_resource(|| async {
+        let hold_session = use_signal(|| false);
+        let session: PublicSessionResource = use_resource(move || async move {
+            if hold_session() {
+                std::future::pending::<()>().await;
+            }
             let response: ApiResponse<Option<PublicSession>> = serde_json::from_str(include_str!(
                 "../../../auction-contracts/tests/fixtures/public/session-permanent.json"
             ))
             .expect("当前会话样本");
             Ok(response.data)
         });
+        WATCH_SESSION.set(Some((session, hold_session)));
         use_context_provider(|| session);
         let current: CurrentAuctionResource = use_resource(|| async {
             let response: ApiResponse<CurrentAuctionResponse> = serde_json::from_str(include_str!(
@@ -325,6 +370,16 @@ mod tests {
                     })
                     .expect("损坏冲突响应后仍可原样重试");
                 assert_eq!(requests.borrow().len(), 1);
+                let (_, mut hold) = WATCH_SESSION.get().unwrap();
+                hold.set(true);
+                settle_page(&mut dom);
+                assert!(WATCH_SESSION.get().unwrap().0.pending());
+                click_watch_control(&dom, retry);
+                settle_page(&mut dom);
+                assert_eq!(requests.borrow().len(), 1, "复核期间重试不得发送");
+                hold.set(false);
+                settle_page(&mut dom);
+                assert_eq!(requests.borrow().len(), 1, "恢复后不得自动重放");
                 click_watch_control(&dom, retry);
                 settle_page(&mut dom);
                 assert_eq!(requests.borrow().len(), 2);

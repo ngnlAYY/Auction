@@ -36,7 +36,7 @@ pub(super) async fn load(user_id: &str, world: &str) -> Result<Option<WatchedAuc
     let Some(auction) = fetch_current_auction(world.to_owned()).await.map_err(|_| ())? else {
         return Ok(None);
     };
-    let watches = fetch_lot_watches(user_id, &auction.id).await.map_err(|_| ())?;
+    let (watches, observation) = fetch_lot_watches(user_id, &auction.id).await.map_err(|_| ())?;
     let expected = watch_versions(&watches);
     let watched = watches
         .watches
@@ -52,8 +52,12 @@ pub(super) async fn load(user_id: &str, world: &str) -> Result<Option<WatchedAuc
         fetch_lot_watches(user_id, &auction.id),
     );
     let current = current.map_err(|_| ())?;
-    let current_watches = current_watches.map_err(|_| ())?;
-    if current.as_ref() != Some(&auction) || watch_versions(&current_watches) != expected {
+    let (current_watches, current_observation) = current_watches.map_err(|_| ())?;
+    if !observation.current()
+        || !current_observation.current()
+        || current.as_ref() != Some(&auction)
+        || watch_versions(&current_watches) != expected
+    {
         return Err(());
     }
     Ok(Some(WatchedAuction { auction, rows }))

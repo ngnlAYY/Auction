@@ -6,6 +6,7 @@ use dioxus::prelude::*;
 use uuid::Uuid;
 
 use super::{WatchContext, WatchSubmit};
+use crate::api::{PublicSessionCheckTrigger, SessionRefreshReason};
 use crate::surface::commands::CommandSession;
 use crate::surface::login_href_for_current_location;
 
@@ -23,6 +24,7 @@ pub(crate) fn LotWatchButton(lot_id: String, lot_code: String, icon_only: Option
     let context = use_context::<WatchContext>();
     let submit = use_context::<WatchSubmit>();
     let command_session = use_context::<CommandSession>();
+    let mut blocked_before_submit = use_signal(|| false);
     let session = context.session;
     if !context.identity_matches() {
         let snapshot = session.read();
@@ -62,9 +64,16 @@ pub(crate) fn LotWatchButton(lot_id: String, lot_code: String, icon_only: Option
     let busy = pending.as_ref().is_some_and(|pending| pending.busy);
     let error = pending.as_ref().and_then(|pending| pending.error.as_ref());
     let uncertain = pending.as_ref().is_some_and(|pending| pending.uncertain);
+    let not_sent = match error {
+        Some(error) => error.not_sent(),
+        None => blocked_before_submit(),
+    };
+    let has_error = error.is_some() || not_sent;
     let conflict = error.is_some_and(|error| error.status == 409 && error.code == "watch_conflict");
     let error_message = if uncertain {
         t!("watch-unknown")
+    } else if not_sent {
+        t!("command-not-sent")
     } else if conflict {
         t!("watch-conflict")
     } else {
@@ -86,14 +95,21 @@ pub(crate) fn LotWatchButton(lot_id: String, lot_code: String, icon_only: Option
                 r#type: "button",
                 aria_pressed: watched.to_string(),
                 aria_label: t!("watch-toggle", code: lot_code),
-                aria_describedby: if error.is_some() { error_id } else { String::new() },
+                aria_describedby: if has_error { error_id } else { String::new() },
                 disabled: !toggle_enabled,
                 onclick: move |_| {
                     let Some((watched, version)) =
                         click_context.toggle_baseline(&command_session, &click_lot)
                     else {
+                        if command_session.can_submit_new() && click_context.authority.current().is_none() {
+                            blocked_before_submit.set(true);
+                            if let Some(check) = try_consume_context::<PublicSessionCheckTrigger>() {
+                                check.0.call(SessionRefreshReason::CookieChanged);
+                            }
+                        }
                         return;
                     };
+                    blocked_before_submit.set(false);
                     submit.0.call((click_context.auction_id.clone(), click_lot.clone(), click_code.clone(), PublicSetLotWatchRequest {
                         command_id: Uuid::new_v4().to_string(),
                         watched: !watched,
@@ -118,11 +134,12 @@ pub(crate) fn LotWatchButton(lot_id: String, lot_code: String, icon_only: Option
                     else { {t!("watch-off")} }
                 }
             }
-            if error.is_some() {
+            if has_error {
                 span { id: error_id.clone(), class: "public-lot-watch__error", role: "alert", "{error_message}" }
                 if uncertain {
                     button {
                         r#type: "button",
+                        disabled: busy || !command_session.can_submit_new(),
                         onclick: move |_| {
                             if !retry_context.identity_matches() { return; }
                             let pending = retry_context.commands.read().get(&retry_lot).cloned();
@@ -148,6 +165,7 @@ pub(crate) fn LotWatchButton(lot_id: String, lot_code: String, icon_only: Option
                                 }
                                 commands.remove(&lot_id);
                             }
+                            blocked_before_submit.set(false);
                             refresh_context.invalidate();
                         },
                         {t!("watch-refresh")}

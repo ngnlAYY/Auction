@@ -73,6 +73,7 @@ pub(in crate::surface) fn use_session_fixture(user: &'static str) -> Signal<Sess
         set_revision: |key| {
             let key = match key {
                 "hv.public.session-revision" => "hv.public.session-revision",
+                "hv.public.session-login-revision" => "hv.public.session-login-revision",
                 "hv.public.session-logout-revision" => "hv.public.session-logout-revision",
                 "hv.public.session-logout-unknown-revision" => {
                     "hv.public.session-logout-unknown-revision"
@@ -116,8 +117,11 @@ pub(in crate::surface) fn take_revision_writes() -> Vec<(&'static str, bool)> {
 }
 
 pub(in crate::surface) fn mark_external_logout(key: &str) {
-    REVISIONS
-        .with_borrow_mut(|values| values.insert(key.to_owned(), uuid::Uuid::new_v4().to_string()));
+    set_external_revision(key, &uuid::Uuid::new_v4().to_string());
+}
+
+pub(in crate::surface) fn set_external_revision(key: &str, revision: &str) {
+    REVISIONS.with_borrow_mut(|values| values.insert(key.to_owned(), revision.to_owned()));
 }
 
 /// 记录请求在写锁之后重新取锁；旧 H1 脚本仍可模拟不经过此锁的外部身份变化。

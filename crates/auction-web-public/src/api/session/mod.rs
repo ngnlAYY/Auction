@@ -17,16 +17,20 @@ pub(crate) use self::identity::{
     SessionIdentityEvidence, SessionRefreshReason,
 };
 pub(super) use self::identity::{
-    SessionIdentityObservation, notify_public_session_change, observe_public_session_failure,
-    publish_cookie_identity,
+    SessionIdentityObservation, broadcast_session_change, notify_public_session_change,
+    observe_public_session_failure, publish_cookie_identity, request_public_session_check,
 };
-use self::identity::{mark_public_logout, observe_expected_user_rejection, publish_read_identity};
+use self::identity::{
+    mark_public_login, mark_public_logout, observe_expected_user_rejection, publish_read_identity,
+};
 #[cfg(not(test))]
 pub(super) use self::transport::SessionRequest;
 pub(super) use self::transport::send_session_request;
 #[cfg(test)]
 pub(crate) use self::transport::{SessionHttpFixture, SessionRequest};
-pub(super) use self::transport::{decode_account_identity_response, decode_identity_response};
+pub(super) use self::transport::{
+    decode_account_identity_response, decode_identity_response, decode_observed_account_read,
+};
 
 /// 所有可能写入 Public Cookie 的请求必须先持有同一原生跨标签页锁。
 pub(super) use self::cookie::lock as lock_cookie_mutation;
@@ -66,31 +70,42 @@ impl PublicSessionApiError {
 }
 
 /// 会话读取排在 Cookie 写锁之后，读取匿名时能观察到主动退出的结论。
+#[derive(Default)]
+pub(crate) struct SessionReadRevisions {
+    pub primary: Option<String>,
+    pub unknown_logout: Option<String>,
+    pub login: Option<String>,
+}
+
+/// 权威会话绑定取得锁后、发出 GET 前观察的共享主修订。
 pub(crate) async fn fetch_public_session(
     reason: SessionRefreshReason,
     observe_confirmed_logout: impl Fn(Option<String>),
-) -> (Result<Option<PublicSession>, PublicSessionApiError>, Option<String>) {
-    let mut observed_unknown = None;
+) -> (Result<Option<PublicSession>, PublicSessionApiError>, SessionReadRevisions) {
+    let mut revisions = SessionReadRevisions::default();
     let result = fetch_session(reason, || {
         let (confirmed, unknown) = PublicSessionCheckTrigger::logout_revisions();
         observe_confirmed_logout(confirmed);
-        observed_unknown = unknown;
+        revisions.unknown_logout = unknown;
+        revisions.login = PublicSessionCheckTrigger::login_revision();
+        revisions.primary = PublicSessionCheckTrigger::session_revision();
+        revisions.primary.clone()
     })
     .await;
-    (result, observed_unknown)
+    (result, revisions)
 }
 
 async fn fetch_session(
     reason: SessionRefreshReason,
-    mut observe_logout_revisions: impl FnMut(),
+    observe_revisions: impl FnOnce() -> Option<String>,
 ) -> Result<Option<PublicSession>, PublicSessionApiError> {
     let lock = lock_cookie_mutation().await;
-    observe_logout_revisions();
+    let revision = observe_revisions();
     let _cookie_lock = match lock {
         Ok(lock) => lock,
         Err("session_lock_unavailable") => {
             // 旧浏览器仍能读取；没有原生锁时不能以本地顺序冒充跨页独占写入。
-            let current = read_session_identity(false).await?;
+            let current = read_session_identity(false, revision.as_deref()).await?;
             if reason.synchronizes_cookie() && current.as_ref().is_some_and(cookie::needs_sync) {
                 return Err(PublicSessionApiError::local("session_lock_unavailable"));
             }
@@ -99,7 +114,7 @@ async fn fetch_session(
         Err(code) => return Err(PublicSessionApiError::local(code)),
     };
     // 等锁期间 Cookie 可能已经换号。首次锁内读回的身份是 PUT 前置条件，锁持有到响应收口。
-    let current = read_session_identity(true).await?;
+    let current = read_session_identity(true, revision.as_deref()).await?;
     match current {
         Some(current) if reason.synchronizes_cookie() && cookie::needs_sync(&current) => {
             synchronize_cookie(current).await.map(Some)
@@ -133,9 +148,13 @@ async fn synchronize_cookie(
 
 async fn read_session_identity(
     locked: bool,
+    revision: Option<&str>,
 ) -> Result<Option<PublicSession>, PublicSessionApiError> {
     let observation = (!locked).then(SessionIdentityObservation::start);
     let current = request_current_session(SessionRequest::Read).await?;
+    if revision != PublicSessionCheckTrigger::session_revision().as_deref() {
+        return Err(PublicSessionApiError::local("invalid_response"));
+    }
     let evidence = SessionIdentity::Snapshot(current.clone());
     if let Some(observation) = observation {
         if !observation.publish(evidence) {
@@ -177,9 +196,12 @@ pub(crate) async fn login_public(key: String) -> Result<PublicSession, PublicSes
     let response = match response {
         Ok(response) => response,
         Err(failure) => {
+            if failure.needs_reconciliation() {
+                broadcast_session_change();
+            }
             drop(cookie_lock);
             if failure.needs_reconciliation() {
-                notify_public_session_change(SessionRefreshReason::CookieChanged);
+                request_public_session_check(SessionRefreshReason::CookieChanged);
             }
             return Err(PublicSessionApiError::local(failure.transport.code()));
         }
@@ -203,20 +225,25 @@ pub(crate) async fn login_public(key: String) -> Result<PublicSession, PublicSes
             absolute_expires_at: payload.absolute_expires_at,
         })
     });
-    if let Ok(identity) = &result {
-        cookie::record(identity);
-        publish_cookie_identity(SessionIdentity::Snapshot(Some(identity.clone())));
-    }
-    drop(cookie_lock);
-    if (200..300).contains(&status)
+    let recheck = (200..300).contains(&status)
         || status >= 500
         || (status == 409
             && result
                 .as_ref()
-                .is_err_and(|error| error.code.as_deref() == Some("invalid_response")))
-    {
+                .is_err_and(|error| error.code.as_deref() == Some("invalid_response")));
+    if recheck {
+        // 下一个写者取得锁后必须能看见本次 Cookie 写入的修订。
+        broadcast_session_change();
+    }
+    if let Ok(identity) = &result {
+        cookie::record(identity);
+        mark_public_login();
+        publish_cookie_identity(SessionIdentity::Snapshot(Some(identity.clone())));
+    }
+    drop(cookie_lock);
+    if recheck {
         // 只对账当前 Cookie。失败不能证明换号，也不能再次提交登录 key 或失效公开读缓存。
-        notify_public_session_change(SessionRefreshReason::CookieChanged);
+        request_public_session_check(SessionRefreshReason::CookieChanged);
     }
     result
 }
@@ -229,8 +256,9 @@ pub(crate) async fn logout_public(user_id: String) -> Result<(), String> {
         Err(failure) => {
             if failure.needs_reconciliation() {
                 mark_public_logout(false);
+                broadcast_session_change();
                 drop(cookie_lock);
-                notify_public_session_change(SessionRefreshReason::LogoutUnknown);
+                request_public_session_check(SessionRefreshReason::LogoutUnknown);
             }
             return Err(failure.transport.code().to_owned());
         }
@@ -256,15 +284,19 @@ pub(crate) async fn logout_public(user_id: String) -> Result<(), String> {
     } else {
         None
     };
-    drop(cookie_lock);
     if let Some(reason) = reason {
-        notify_public_session_change(reason);
-    } else if let Err(error) = &result {
-        observe_public_session_failure(
-            status,
-            error.code.as_deref().unwrap_or("invalid_response"),
-            Some(&user_id),
-        );
+        broadcast_session_change();
+        drop(cookie_lock);
+        request_public_session_check(reason);
+    } else {
+        drop(cookie_lock);
+        if let Err(error) = &result {
+            observe_public_session_failure(
+                status,
+                error.code.as_deref().unwrap_or("invalid_response"),
+                Some(&user_id),
+            );
+        }
     }
     result.map_err(PublicSessionApiError::into_read_code)
 }

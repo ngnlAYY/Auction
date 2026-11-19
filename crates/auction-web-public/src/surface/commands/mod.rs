@@ -28,7 +28,7 @@ pub(super) use proxy::{ProxyAuthorizationRead, ProxyForm, ProxyFormInput};
 pub(super) use request::CommandStatus;
 pub(super) use request::{CommandKind, CommandPayload, CommandReceipt, CommandTarget};
 pub(super) use retry::CommandRecovery;
-pub(super) use session::{CommandSession, use_command_session_provider};
+pub(super) use session::{CommandSession, SessionAuthority, use_command_session_provider};
 pub(super) use session::{PublicSessionChecks, use_public_session_checks};
 #[cfg(test)]
 pub(super) use tests::test_support;

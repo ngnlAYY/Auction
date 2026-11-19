@@ -45,6 +45,7 @@ impl DurationUnit {
     }
 }
 
+#[derive(PartialEq, Eq)]
 pub(super) struct DurationDraft {
     pub(super) permanent: bool,
     pub(super) amount: String,

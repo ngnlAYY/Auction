@@ -9,6 +9,7 @@ use serde_json::Value;
 use super::clock::{HttpResponse, send_response};
 use super::session::{
     SessionIdentity, SessionIdentityObservation, decode_account_identity_response,
+    decode_observed_account_read,
 };
 use super::{CommandError, TransportError};
 
@@ -87,12 +88,15 @@ async fn decode(
     observation: SessionIdentityObservation,
 ) -> Result<PublicLotWatchPreferenceResponse, CommandError> {
     let status = response.status();
-    let result: PublicLotWatchPreferenceResponse =
-        decode_account_identity_response(response, command.map(|_| user_id), |value| {
-            json_has_exact_keys(value, &RESPONSE_KEYS)
-                && value.get("version").and_then(Value::as_i64).is_some_and(|version| version > 0)
-        })
-        .await?;
+    let valid = |value: &Value| {
+        json_has_exact_keys(value, &RESPONSE_KEYS)
+            && value.get("version").and_then(Value::as_i64).is_some_and(|version| version > 0)
+    };
+    let result: PublicLotWatchPreferenceResponse = if command.is_some() {
+        decode_account_identity_response(response, Some(user_id), valid).await?
+    } else {
+        decode_observed_account_read(response, || observation.cookie_current(), valid).await?
+    };
     if !valid_uuid(&result.user_id)
         || channel_flags(&result.channel).is_none()
         || command.is_some_and(|command| {

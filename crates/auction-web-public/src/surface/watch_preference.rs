@@ -12,6 +12,7 @@ use crate::api::{
     set_lot_watch_preference,
 };
 use crate::surface::PublicCommandOwner;
+use crate::surface::account::preference_reload::{PreferenceRead, PreferenceReload};
 
 #[derive(Default)]
 struct PreferenceState {
@@ -24,12 +25,33 @@ struct PreferenceState {
     confirmed: bool,
 }
 
+impl PreferenceState {
+    fn reload_blocked(&self) -> bool {
+        self.busy || self.pending_uncertain
+    }
+
+    fn accept_read(&mut self, preference: PublicLotWatchPreferenceResponse, preserve_draft: bool) {
+        if preserve_draft
+            && self
+                .authoritative
+                .as_ref()
+                .is_some_and(|current| self.selected.as_deref() != Some(current.channel.as_str()))
+        {
+            // 保留本页的渠道意图及原 CAS 版本，另一页的更新只能由显式冲突处理覆盖。
+            return;
+        }
+        self.selected = Some(preference.channel.clone());
+        self.authoritative = Some(preference);
+    }
+}
+
 #[derive(Clone)]
 struct PreferenceOwner {
     user_id: String,
     identity: Signal<Option<String>>,
     session: PublicSessionResource,
     state: Signal<PreferenceState>,
+    reload: PreferenceReload,
 }
 
 impl PreferenceOwner {
@@ -47,18 +69,22 @@ impl PreferenceOwner {
             })
     }
 
-    /// 只有首次读取、确定性失败后的显式刷新或已确认写入才重读；未知命令不得丢弃。
-    fn load(&mut self, confirmed: bool) {
+    /// 重登后台读取保留脏草稿；显式刷新与确认写入则重新建立基线。
+    fn load(&mut self, read: PreferenceRead) {
+        let confirmed = read == PreferenceRead::Confirmed;
+        let preserve_draft = read == PreferenceRead::Background;
         if !self.identity_matches() {
             return;
         }
-        if !confirmed {
-            let state = self.state.peek();
-            if state.busy || state.pending_uncertain {
-                return;
-            }
+        if !confirmed && self.state.peek().reload_blocked() {
+            return;
         }
-        self.state.set(PreferenceState { busy: true, ..Default::default() });
+        self.reload.mark_started();
+        if preserve_draft {
+            self.state.write().busy = true;
+        } else {
+            self.state.set(PreferenceState { busy: true, ..Default::default() });
+        }
         let mut owner = self.clone();
         spawn(async move {
             if !owner.identity_matches() {
@@ -72,11 +98,16 @@ impl PreferenceOwner {
             state.busy = false;
             match result {
                 Ok(preference) => {
-                    state.selected = Some(preference.channel.clone());
-                    state.authoritative = Some(preference);
-                    state.confirmed = confirmed;
+                    state.accept_read(preference, preserve_draft);
+                    if !preserve_draft || state.pending.is_none() {
+                        state.error = None;
+                        state.confirmed = confirmed;
+                    }
                 }
-                Err(error) => state.error = Some(error),
+                Err(error) if !preserve_draft || state.pending.is_none() => {
+                    state.error = Some(error);
+                }
+                Err(_error) => {}
             }
         });
     }
@@ -123,7 +154,7 @@ impl PreferenceOwner {
             }
             match result {
                 // 幂等重放可以返回历史结果，必须 GET 后才展示当前渠道及下一次 CAS 版本。
-                Ok(_) => owner.load(true),
+                Ok(_) => owner.load(PreferenceRead::Confirmed),
                 Err(error) => {
                     let mut state = owner.state.write();
                     state.busy = false;
@@ -148,10 +179,23 @@ pub(super) fn OutbidNotifications(user_id: String) -> Element {
     let session = use_context::<PublicSessionResource>();
     let mut state = use_signal(PreferenceState::default);
     let identity = use_context::<PublicCommandOwner>().0;
-    let owner = PreferenceOwner { user_id, identity, session, state };
+    let owner = PreferenceOwner {
+        user_id,
+        identity,
+        session,
+        state,
+        reload: PreferenceReload::use_tracking(),
+    };
     use_effect({
         let mut owner = owner.clone();
-        move || owner.load(false)
+        move || {
+            if let Some(read) = owner.reload.pending_read()
+                && owner.session_ready()
+                && !owner.state.read().reload_blocked()
+            {
+                owner.load(read);
+            }
+        }
     });
     let snapshot = state.read();
     let busy = snapshot.busy;
@@ -259,7 +303,7 @@ pub(super) fn OutbidNotifications(user_id: String) -> Element {
                             r#type: "button", disabled: busy,
                             aria_describedby: "outbid-feedback",
                             onclick: move |_| {
-                                if !refresh.state.peek().busy { refresh.load(false); }
+                                if !refresh.state.peek().busy { refresh.load(PreferenceRead::Refresh); }
                             },
                             {t!("outbid-refresh")}
                         }
@@ -294,6 +338,7 @@ mod tests {
 
     use super::OutbidNotifications;
     use crate::api::{HttpFixtureFuture, HttpResponseFixture, PublicSession, TransportError};
+    use crate::surface::account::preference_reload::PreferenceReloadRevision;
     use crate::surface::commands::session_fixture::ResponseGate;
     use crate::surface::{
         PageReadFixture, PublicCommandOwner, PublicSessionResource, dispatch_page_event,
@@ -306,9 +351,24 @@ mod tests {
         "PM needs forum sync to be enabled and a forum account linked to this account.";
     const UNKNOWN: &str = "The save result is unknown. Your original request is retained; retry that exact request to confirm the result.";
 
+    #[derive(Clone, Default)]
+    struct ReloadProbe(Rc<Cell<Option<Signal<u64>>>>);
+
+    impl ReloadProbe {
+        fn relogin(&self, revision: u64) {
+            let mut signal = self.0.get().unwrap();
+            signal.set(revision);
+        }
+    }
+
     fn preferences() -> Element {
         page_test_contexts();
         use_context_provider(|| PublicCommandOwner(Signal::new(Some(USER.to_owned()))));
+        let revision = use_signal(|| 0_u64);
+        use_context_provider(|| PreferenceReloadRevision(revision));
+        if let Some(probe) = try_use_context::<ReloadProbe>() {
+            probe.0.set(Some(revision));
+        }
         let session: PublicSessionResource = use_resource(|| async {
             Ok(Some(PublicSession {
                 authenticated: true,
@@ -320,6 +380,88 @@ mod tests {
         });
         use_context_provider(|| session);
         rsx! { OutbidNotifications { user_id: USER.to_owned() } }
+    }
+
+    #[test]
+    fn relogin_read_updates_only_the_clean_channel_draft_and_version() {
+        run_page_events(
+            module_path!(),
+            "relogin_read_updates_only_the_clean_channel_draft_and_version",
+            || {
+                for dirty in [false, true] {
+                    let probe = ReloadProbe::default();
+                    let reads = Rc::new(Cell::new(0));
+                    let read = PageReadFixture::new({
+                        let reads = reads.clone();
+                        move |(_, user_id): (&'static str, String)| {
+                            let initial = reads.get() == 0;
+                            reads.set(reads.get() + 1);
+                            reply(
+                                200,
+                                ApiResponse::ok(
+                                    "已读取",
+                                    PublicLotWatchPreferenceResponse {
+                                        user_id,
+                                        channel: if initial { "mm" } else { "none" }.to_owned(),
+                                        version: if initial { 1 } else { 8 },
+                                        pm_available: true,
+                                    },
+                                ),
+                            )
+                        }
+                    });
+                    let writes = Rc::new(RefCell::new(Vec::new()));
+                    let write = PageReadFixture::new({
+                        let writes = writes.clone();
+                        move |(_, _, command): (
+                            &'static str,
+                            String,
+                            PublicSetLotWatchPreferenceRequest,
+                        )| {
+                            writes.borrow_mut().push(command);
+                            rejection(422, "invalid_request")
+                        }
+                    });
+                    let mut dom = VirtualDom::new(preferences)
+                        .with_root_context(read)
+                        .with_root_context(write)
+                        .with_root_context(probe.clone());
+                    dom.rebuild_in_place();
+                    settle_page(&mut dom);
+                    if dirty {
+                        let pm = rendered_event_target(
+                            &dom,
+                            "input",
+                            "id",
+                            "outbid-channel-pm",
+                            "onchange",
+                        );
+                        dispatch_page_event(&dom, "change", pm, "true");
+                        settle_page(&mut dom);
+                    }
+                    probe.relogin(1);
+                    settle_page(&mut dom);
+                    assert_eq!(reads.get(), 2);
+                    let save = rendered_event_target(
+                        &dom,
+                        "button",
+                        "id",
+                        "public-outbid-save",
+                        "onclick",
+                    );
+                    dispatch_page_event(&dom, "click", save, "");
+                    settle_page(&mut dom);
+                    let writes = writes.borrow();
+                    let [command] = writes.as_slice() else {
+                        panic!("必须发送一次手动提交")
+                    };
+                    assert_eq!(
+                        (command.channel.as_str(), command.expected_version),
+                        if dirty { ("both", 1) } else { ("none", 8) }
+                    );
+                }
+            },
+        );
     }
 
     #[test]
@@ -422,13 +564,28 @@ mod tests {
                     (422, "invalid_request", false),
                     (503, "pm_channel_unavailable", false),
                 ] {
-                    exercise_unknown_retry(status, code, ends_uncertainty);
+                    exercise_unknown_retry(status, code, ends_uncertainty, false);
                 }
             },
         );
     }
 
-    fn exercise_unknown_retry(status: u16, code: &'static str, ends_uncertainty: bool) {
+    #[test]
+    fn relogins_coalesce_until_the_unknown_channel_write_is_resolved() {
+        run_page_events(
+            module_path!(),
+            "relogins_coalesce_until_the_unknown_channel_write_is_resolved",
+            || exercise_unknown_retry(422, "pm_channel_unavailable", true, true),
+        );
+    }
+
+    fn exercise_unknown_retry(
+        status: u16,
+        code: &'static str,
+        ends_uncertainty: bool,
+        coalesce: bool,
+    ) {
+        let probe = ReloadProbe::default();
         let requests = Rc::new(RefCell::new(Vec::new()));
         let retry_response = Rc::new(ResponseGate::default());
         let read = PageReadFixture::new({
@@ -464,13 +621,23 @@ mod tests {
                 }
             }
         });
-        let mut dom = VirtualDom::new(preferences).with_root_context(read).with_root_context(write);
+        let mut dom = VirtualDom::new(preferences)
+            .with_root_context(read)
+            .with_root_context(write)
+            .with_root_context(probe.clone());
         dom.rebuild_in_place();
         settle_page(&mut dom);
         let save = rendered_event_target(&dom, "button", "id", "public-outbid-save", "onclick");
         dispatch_page_event(&dom, "click", save, "");
         let uncertain = settle_page(&mut dom);
         assert!(has_text(&uncertain, UNKNOWN));
+        if coalesce {
+            for revision in [1, 2] {
+                probe.relogin(revision);
+                settle_page(&mut dom);
+                assert_eq!(requests.borrow().len(), 2, "结果未知时只登记待重读");
+            }
+        }
         let retry = rendered_event_target(&dom, "button", "id", "public-outbid-retry", "onclick");
         dispatch_page_event(&dom, "click", retry, "");
         settle_page(&mut dom);
@@ -484,6 +651,9 @@ mod tests {
         }
         retry_response.release();
         let retried = settle_page(&mut dom);
+        if coalesce {
+            assert_eq!(&requests.borrow()[3..], [None], "恢复后合并为一次重读");
+        }
         if ends_uncertainty {
             assert!(has_text(&retried, PM_REASON));
             assert!(!has_text(&retried, UNKNOWN));
@@ -492,7 +662,7 @@ mod tests {
             dispatch_page_event(&dom, "click", refresh, "");
             settle_page(&mut dom);
             let requests = requests.borrow();
-            assert_eq!(&requests[3..], [None]);
+            assert_eq!(&requests[3..], if coalesce { &[None, None][..] } else { &[None][..] });
         } else {
             assert!(has_text(&retried, UNKNOWN));
             assert!(!has_text(&retried, PM_REASON));

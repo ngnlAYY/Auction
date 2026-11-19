@@ -11,6 +11,7 @@ use crate::api::{
     PublicSession, PublicSessionApiError, PublicSessionCheckTrigger, PublicSessionEvidenceTrigger,
     SessionIdentity, SessionIdentityEvidence, SessionRefreshReason, fetch_public_session,
 };
+use crate::surface::account::preference_reload::PreferenceReloadRevision;
 use crate::surface::session::SessionCommandScope;
 use crate::surface::watches::{WatchSessionRevision, invalidate_lot_watches};
 use crate::surface::{PublicCommandOwner, PublicSessionResource};
@@ -31,7 +32,10 @@ struct ConfirmedIdentity {
     last_session: Signal<Option<PublicSession>>,
     ended_elsewhere: Signal<bool>,
     revision: Signal<u64>,
+    authority: SessionAuthority,
     watches: WatchSessionRevision,
+    preference_reload: PreferenceReloadRevision,
+    consumed_login: Signal<Option<String>>,
     confirmed_logout: Signal<Option<String>>,
     unknown_logout: Signal<Option<String>>,
     local_logout_unknown: Signal<bool>,
@@ -50,6 +54,8 @@ impl ConfirmedIdentity {
         self.commands.discard_identity();
         advance_revision(self.revision);
         advance_revision(self.watches.boundary);
+        self.authority.clear();
+        self.consumed_login.set(PublicSessionCheckTrigger::login_revision());
         self.last_session.set(None);
         self.owner.set(next);
         true
@@ -160,7 +166,10 @@ pub(in crate::surface) fn use_public_session_checks(
         last_session: use_signal(|| None),
         ended_elsewhere: use_signal(|| false),
         revision: use_signal(|| 0),
+        authority: SessionAuthority(use_signal(|| None)),
         watches: WatchSessionRevision { boundary: use_signal(|| 0), refresh: use_signal(|| 0) },
+        preference_reload: PreferenceReloadRevision(use_signal(|| 0)),
+        consumed_login: use_signal(PublicSessionCheckTrigger::login_revision),
         confirmed_logout: use_signal(|| PublicSessionCheckTrigger::logout_revisions().0),
         unknown_logout: use_signal(|| PublicSessionCheckTrigger::logout_revisions().1),
         local_logout_unknown: use_signal(|| false),
@@ -172,7 +181,7 @@ pub(in crate::surface) fn use_public_session_checks(
         let reason = *read_reason.peek();
         async move {
             let previous_user = identity.owner.peek().clone();
-            let (result, unknown_revision) = fetch_public_session(reason, |confirmed| {
+            let (result, revisions) = fetch_public_session(reason, |confirmed| {
                 let mut identity = identity;
                 if identity.observe_confirmed_logout(confirmed) {
                     let mut session = consume_context::<PublicSessionResource>();
@@ -180,20 +189,35 @@ pub(in crate::surface) fn use_public_session_checks(
                 }
             })
             .await;
-            identity.finish_reconciliation(unknown_revision);
+            identity.finish_reconciliation(revisions.unknown_logout);
             read_reason.set(SessionRefreshReason::Refresh);
             let current = result.map_err(PublicSessionApiError::into_read_code)?;
+            if revisions.primary != PublicSessionCheckTrigger::session_revision() {
+                return Err("invalid_response".to_owned());
+            }
             if let Some(current) = &current {
                 if !session_is_unexpired(current) {
                     return Err("invalid_response".to_owned());
                 }
-                if matches!(
-                    reason,
-                    SessionRefreshReason::CookieChanged | SessionRefreshReason::LogoutUnknown
-                ) && previous_user.as_deref() == Some(current.user_id.as_str())
-                {
-                    // 同账号保留可展示快照，重读标记用独立修订，不影响公开缓存。
-                    advance_revision(identity.watches.refresh);
+                let mut authority = identity.authority;
+                authority.confirm(revisions.primary);
+                if previous_user.as_deref() == Some(current.user_id.as_str()) {
+                    if matches!(
+                        reason,
+                        SessionRefreshReason::CookieChanged | SessionRefreshReason::LogoutUnknown
+                    ) {
+                        // 同账号保留可展示快照，重读标记用独立修订，不影响公开缓存。
+                        advance_revision(identity.watches.refresh);
+                    }
+                    if revisions.login.is_some()
+                        && revisions.login != *identity.consumed_login.peek()
+                        && revisions.login == PublicSessionCheckTrigger::login_revision()
+                    {
+                        // 只有锁内观察的登录标记与权威读回都确认同账号，才重读偏好。
+                        let mut consumed = identity.consumed_login;
+                        consumed.set(revisions.login);
+                        advance_revision(identity.preference_reload.0);
+                    }
                 }
             }
             Ok(current)
@@ -203,6 +227,7 @@ pub(in crate::surface) fn use_public_session_checks(
         if reason.invalidates() {
             // 普通 401 与到期计时只暂停重试；是否改变归属由 GET 确认。
             session.clear();
+            identity.authority.clear();
         }
         if reason == SessionRefreshReason::Expiry {
             expiry_waiting.set(session.pending());
@@ -239,10 +264,16 @@ pub(in crate::surface) fn use_public_session_checks(
         }
     });
     use_context_provider(|| PublicSessionCheckTrigger(check));
-    use_context_provider(|| PublicSessionEvidenceTrigger { apply, revision: identity.revision });
+    use_context_provider(|| PublicSessionEvidenceTrigger {
+        apply,
+        revision: identity.revision,
+        owner_revision: identity.watches.boundary,
+    });
     use_context_provider(|| session);
     use_context_provider(|| SessionCommandScope(current_scope_id()));
     use_context_provider(|| identity.watches);
+    use_context_provider(|| identity.authority);
+    use_context_provider(|| identity.preference_reload);
     use_public_session_expiry(identity.last_session, check);
     PublicSessionChecks {
         session,
@@ -250,6 +281,54 @@ pub(in crate::surface) fn use_public_session_checks(
         competition_owner: identity.owner,
         ended_elsewhere: identity.ended_elsewhere,
         check,
+    }
+}
+
+/// 只有已交付的权威读取可以提供发送基准，缺省共享键仍可被明确确认。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::surface) struct SessionConfirmation {
+    pub primary_revision: Option<String>,
+}
+
+#[derive(Clone, Copy)]
+pub(in crate::surface) struct SessionAuthority(Signal<Option<SessionConfirmation>>);
+
+impl SessionAuthority {
+    pub(in crate::surface) fn use_context() -> Self {
+        #[cfg(test)]
+        {
+            // 独立页面替身没有真实外壳，固定模拟一次默认主修订的权威确认。
+            use_hook(|| {
+                try_consume_context().unwrap_or_else(|| {
+                    Self(Signal::new(Some(SessionConfirmation { primary_revision: None })))
+                })
+            })
+        }
+        #[cfg(not(test))]
+        use_context()
+    }
+
+    pub(in crate::surface) fn confirmed(self) -> Option<SessionConfirmation> {
+        self.0.read().clone()
+    }
+
+    pub(in crate::surface) fn current(self) -> Option<SessionConfirmation> {
+        self.confirmed().filter(|confirmed| {
+            confirmed.primary_revision == PublicSessionCheckTrigger::session_revision()
+        })
+    }
+
+    fn confirm(&mut self, primary_revision: Option<String>) {
+        let confirmed = Some(SessionConfirmation { primary_revision });
+        if *self.0.peek() != confirmed {
+            self.0.set(confirmed);
+        }
+    }
+
+    fn clear(&mut self) {
+        if self.0.peek().is_some() {
+            self.0.set(None);
+        }
     }
 }
 
@@ -407,31 +486,37 @@ fn can_submit_new(
 
 #[cfg(test)]
 mod tests {
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
     use std::rc::Rc;
     use std::sync::LazyLock;
 
     use auction_contracts::{
-        PublicLotWatchResponse, PublicLotWatchesResponse, PublicSetSessionPreferenceRequest,
+        ApiResponse, PublicLotWatchResponse, PublicLotWatchesResponse, PublicSetLotWatchRequest,
+        PublicSetLotWatchResponse, PublicSetSessionPreferenceRequest,
     };
     use auction_time::Timestamp;
+    use dioxus::core::{ElementId, Mutation};
     use dioxus::prelude::*;
 
     use super::{
         PublicSessionChecks, can_submit_new, identity_confirmed, use_public_session_checks,
     };
     use crate::api::{
-        PublicSession, PublicSessionApiError, SessionRefreshReason, SessionRequest, TransportError,
-        login_public, logout_public, set_session_preference,
+        HttpFixtureFuture, PublicSession, PublicSessionApiError, SessionRefreshReason,
+        SessionRequest, TransportError, login_public, logout_public, set_session_preference,
     };
-    use crate::surface::PublicCommandOwner;
+    use crate::surface::account::preference_reload::PreferenceReloadRevision;
     use crate::surface::commands::session_fixture::{self, ExpiryClock, ResponseGate};
     use crate::surface::commands::{
         use_command_session_provider, use_competition_commands_provider,
     };
     use crate::surface::watches::{
-        LotWatchScope, SkipWatchReads, WatchSessionRevision, load_watch_cache, save_watch_cache,
-        use_lot_watched, use_watch_command_owner,
+        LotWatchButton, LotWatchScope, SkipWatchReads, WatchSessionRevision, load_watch_cache,
+        save_watch_cache, use_lot_watched, use_watch_command_owner,
+    };
+    use crate::surface::{
+        PageReadFixture, PublicCommandOwner, dispatch_page_event, page_test_contexts,
+        rendered_event_target, rendered_role_contains, run_page_events, settle_page,
     };
 
     const USER: &str = "018f4c8e-7b2a-4c3d-8e4f-000000000001";
@@ -439,6 +524,7 @@ mod tests {
     const AUCTION: &str = "018f4c8e-7b2a-4c3d-8e4f-000000000005";
     const LOT: &str = "018f4c8e-7b2a-4c3d-8e4f-000000000006";
     const REVISION: &str = "hv.public.session-revision";
+    const LOGIN_REVISION: &str = "hv.public.session-login-revision";
     const CONFIRMED_LOGOUT: &str = "hv.public.session-logout-revision";
     const UNKNOWN_LOGOUT: &str = "hv.public.session-logout-unknown-revision";
     const EXPIRES: &str = "2090-01-01T12:00:00Z";
@@ -463,10 +549,12 @@ mod tests {
         mutate: EventHandler<SessionRequest<'static>>,
         result: Signal<Option<Result<(), String>>>,
         watch_refresh: Signal<u64>,
+        preference_reload: Signal<u64>,
     }
 
     #[component]
     fn SessionHarness() -> Element {
+        page_test_contexts();
         session_fixture::use_session_fixture(USER);
         let commands = use_competition_commands_provider();
         let PublicSessionChecks {
@@ -486,10 +574,17 @@ mod tests {
                         .map_err(PublicSessionApiError::into_read_code),
                     SessionRequest::Logout(user_id) => logout_public(user_id.to_owned()).await,
                     SessionRequest::SetPreference(user_id, command) => {
-                        set_session_preference(user_id, command)
-                            .await
-                            .map(|_| ())
-                            .map_err(|error| error.code)
+                        set_session_preference(user_id, command, || {
+                            can_submit_new(
+                                Some(user_id),
+                                owner.peek().as_deref(),
+                                *session.state().peek(),
+                                session.peek().as_ref(),
+                            )
+                        })
+                        .await
+                        .map(|_| ())
+                        .map_err(|error| error.code)
                     }
                     _ => panic!("测试只提交会话命令"),
                 };
@@ -497,12 +592,16 @@ mod tests {
             });
         });
         let watch_refresh = use_context::<WatchSessionRevision>().refresh;
+        let preference_reload = use_context::<PreferenceReloadRevision>().0;
         let state = use_hook(|| session.state());
-        let observe_watches = try_use_context::<Rc<WatchProjection>>().is_some();
+        let watch_projection = try_use_context::<Rc<WatchProjection>>();
+        let observe_watches = watch_projection.is_some();
         let refresh = use_signal(|| 0_u64);
         use_context_provider(|| refresh);
         use_context_provider(|| PublicCommandOwner(owner));
-        use_context_provider(|| SkipWatchReads);
+        if watch_projection.is_none_or(|projection| !projection.read_enabled) {
+            provide_context(SkipWatchReads);
+        }
         CONTROLS.set(Some(Controls {
             session,
             state,
@@ -512,6 +611,7 @@ mod tests {
             mutate,
             result,
             watch_refresh,
+            preference_reload,
         }));
         rsx! {
             if observe_watches {
@@ -523,7 +623,11 @@ mod tests {
     }
 
     #[derive(Default)]
-    struct WatchProjection(Cell<bool>);
+    struct WatchProjection {
+        marked: Cell<bool>,
+        read_enabled: bool,
+        control_enabled: bool,
+    }
 
     #[component]
     fn MarkedAuction(user_id: String) -> Element {
@@ -540,10 +644,14 @@ mod tests {
         let view = use_context::<Rc<WatchProjection>>();
         use_drop({
             let view = view.clone();
-            move || view.0.set(false)
+            move || view.marked.set(false)
         });
-        view.0.set(use_lot_watched(LOT));
-        rsx! {}
+        view.marked.set(use_lot_watched(LOT));
+        rsx! {
+            if view.control_enabled {
+                LotWatchButton { lot_id: LOT.to_owned(), lot_code: "Clo16".to_owned() }
+            }
+        }
     }
 
     fn settle(dom: &mut VirtualDom) {
@@ -613,7 +721,7 @@ mod tests {
         dom.in_runtime(|| controls.mutate.call(request));
         settle(&mut dom);
         assert_eq!(session_fixture::take_requests(), ["POST", "GET"]);
-        assert_eq!(session_fixture::take_revision_writes(), [(REVISION, false)]);
+        assert_eq!(session_fixture::take_revision_writes(), [(REVISION, true)]);
         assert_eq!(controls.owner.peek().as_deref(), Some(OTHER_USER));
         assert_eq!(controls.current_user().as_deref(), Some(OTHER_USER));
         assert_eq!(*controls.result.peek(), Some(Err("network_error".to_owned())));
@@ -658,7 +766,7 @@ mod tests {
         assert_eq!(session_fixture::take_requests(), ["DELETE", "GET"]);
         assert_eq!(
             session_fixture::take_revision_writes(),
-            [(UNKNOWN_LOGOUT, true), (REVISION, false),]
+            [(UNKNOWN_LOGOUT, true), (REVISION, true),]
         );
         assert_eq!(*controls.result.peek(), Some(Err("network_error".to_owned())));
         assert_eq!(*controls.session.peek(), Some(Ok(None)));
@@ -749,6 +857,44 @@ mod tests {
     }
 
     #[test]
+    fn queued_session_preference_rechecks_the_owner_and_revision_without_sending() {
+        for (change_revision, current_user) in [(true, USER), (true, OTHER_USER), (false, USER)] {
+            let (mut dom, controls) = mount();
+            session_fixture::serialize_cookie_lock();
+            let login = Rc::new(ResponseGate::default());
+            let request = SessionRequest::Login("fixture");
+            session_fixture::script([login
+                .hold(request, session_fixture::rejection(401, "invalid_credentials"))
+                .under_lock()]);
+            dom.in_runtime(|| controls.mutate.call(request));
+            settle(&mut dom);
+            assert!(login.waiting());
+            dom.in_runtime(|| {
+                controls.mutate.call(SessionRequest::SetPreference(USER, &PREFERENCE));
+            });
+            settle(&mut dom);
+            assert_eq!(session_fixture::take_requests(), ["POST"]);
+
+            if change_revision {
+                session_fixture::mark_external_logout(REVISION);
+            } else {
+                // 复核期间暂失权威快照，即使共享修订没有推进也不能发送。
+                let mut session = controls.session;
+                dom.in_runtime(|| session.clear());
+            }
+            session_fixture::script([session_fixture::read(Some(current_user)).under_lock()]);
+            login.release();
+            settle(&mut dom);
+            assert_eq!(session_fixture::take_requests(), ["GET"]);
+            assert!(session_fixture::take_preference_commands().is_empty());
+            assert_eq!(*controls.result.peek(), Some(Err("command_not_sent".to_owned())));
+            assert!(session_fixture::take_revision_writes().is_empty());
+            assert_eq!(controls.owner.peek().as_deref(), Some(current_user));
+            assert_eq!(controls.can_retry(), current_user == USER);
+        }
+    }
+
+    #[test]
     fn preference_body_failure_pauses_retries_and_reads_current_identity_once() {
         for failure in [TransportError::Network(Some(200)), TransportError::Timeout] {
             let (mut dom, controls) = mount();
@@ -778,7 +924,7 @@ mod tests {
             read.release();
             settle(&mut dom);
             assert_eq!(session_fixture::take_requests(), ["PUT preference", "GET"]);
-            assert_eq!(session_fixture::take_revision_writes(), [(REVISION, false)]);
+            assert_eq!(session_fixture::take_revision_writes(), [(REVISION, true)]);
             assert_eq!(controls.current_user().as_deref(), Some(USER));
             assert!(controls.can_retry());
             let snapshot = controls.session.peek();
@@ -941,18 +1087,17 @@ mod tests {
 
     fn mount_with_watch_snapshot() -> (VirtualDom, Controls, Rc<WatchProjection>) {
         session_fixture::reset();
-        save_watch_cache(&watch_snapshot(USER));
+        save_watch_cache(&watch_snapshot(USER), Some("0"));
         let displayed = Rc::new(WatchProjection::default());
         let (dom, controls) =
             mount_harness(VirtualDom::new(SessionHarness).with_root_context(displayed.clone()));
-        assert!(displayed.0.get());
+        assert!(displayed.marked.get());
         (dom, controls, displayed)
     }
 
     #[test]
     fn same_account_login_keeps_the_watch_snapshot_and_requests_private_revalidation() {
         let (mut dom, controls, displayed) = mount_with_watch_snapshot();
-        let mark = watch_snapshot(USER);
         let request = SessionRequest::Login("fixture");
         let read = Rc::new(ResponseGate::default());
         session_fixture::script([
@@ -962,23 +1107,359 @@ mod tests {
         dom.in_runtime(|| controls.mutate.call(request));
         settle(&mut dom);
         assert!(read.waiting());
-        assert!(displayed.0.get());
-        assert_eq!(load_watch_cache(USER, AUCTION), Some(mark.clone()));
+        assert!(displayed.marked.get());
+        assert_eq!(dom.in_scope(ScopeId::APP, || load_watch_cache(USER, AUCTION)), None);
         assert_eq!(*controls.watch_refresh.peek(), 0);
+        assert_eq!(*controls.preference_reload.peek(), 0);
         read.release();
         settle(&mut dom);
-        assert_eq!(load_watch_cache(USER, AUCTION), Some(mark));
-        assert!(displayed.0.get());
+        assert_eq!(dom.in_scope(ScopeId::APP, || load_watch_cache(USER, AUCTION)), None);
+        assert!(displayed.marked.get());
         assert_eq!(*controls.watch_refresh.peek(), 1);
+        assert_eq!(*controls.preference_reload.peek(), 1);
         assert_eq!(controls.current_user().as_deref(), Some(USER));
         assert_eq!(session_fixture::take_requests(), ["POST", "GET"]);
+        assert_eq!(
+            session_fixture::take_revision_writes(),
+            [(REVISION, true), (LOGIN_REVISION, true)]
+        );
+    }
+
+    #[test]
+    fn only_a_confirmed_same_account_relogin_advances_the_preference_revision() {
+        let (mut dom, controls) = mount();
+        session_fixture::script([session_fixture::read(Some(USER)).under_lock()]);
+        dom.in_runtime(|| controls.check.call(SessionRefreshReason::CookieChanged));
+        settle(&mut dom);
+        assert_eq!(*controls.preference_reload.peek(), 0, "例行 Cookie 对账无需重读偏好");
+
+        session_fixture::mark_external_logout(LOGIN_REVISION);
+        session_fixture::script([session_fixture::reply(
+            SessionRequest::Read,
+            Err(TransportError::Timeout),
+        )
+        .under_lock()]);
+        dom.in_runtime(|| controls.check.call(SessionRefreshReason::CookieChanged));
+        settle(&mut dom);
+        assert_eq!(*controls.preference_reload.peek(), 0, "读取失败不确认同账号重登");
+        assert_eq!(controls.owner.peek().as_deref(), Some(USER));
+
+        for expected in [1, 1] {
+            session_fixture::script([session_fixture::read(Some(USER)).under_lock()]);
+            dom.in_runtime(|| controls.check.call(SessionRefreshReason::CookieChanged));
+            settle(&mut dom);
+            assert_eq!(*controls.preference_reload.peek(), expected);
+        }
+
+        session_fixture::mark_external_logout(LOGIN_REVISION);
+        for user in [OTHER_USER, OTHER_USER] {
+            session_fixture::script([session_fixture::read(Some(user)).under_lock()]);
+            dom.in_runtime(|| controls.check.call(SessionRefreshReason::CookieChanged));
+            settle(&mut dom);
+            assert_eq!(controls.owner.peek().as_deref(), Some(OTHER_USER));
+            assert_eq!(*controls.preference_reload.peek(), 1, "换号只初始化新的表单");
+        }
+    }
+
+    #[test]
+    fn delayed_watch_get_does_not_deliver_or_cache_the_old_session_collection() {
+        session_fixture::reset();
+        let view = Rc::new(WatchProjection { read_enabled: true, ..Default::default() });
+        let response = Rc::new(ResponseGate::default());
+        let reads = Rc::new(Cell::new(0));
+        let fixture = PageReadFixture::new({
+            let response = response.clone();
+            let reads = reads.clone();
+            move |(user_id, auction_id): (String, String)| -> HttpFixtureFuture {
+                assert_eq!((user_id.as_str(), auction_id.as_str()), (USER, AUCTION));
+                let first = reads.get() == 0;
+                reads.set(reads.get() + 1);
+                let response = response.clone();
+                let body = serde_json::to_string(&ApiResponse::ok("已读取", watch_snapshot(USER)))
+                    .unwrap();
+                Box::pin(async move {
+                    if first {
+                        response.wait().await;
+                    }
+                    Ok(session_fixture::response(200, body))
+                })
+            }
+        });
+        let (mut dom, controls) = mount_harness(
+            VirtualDom::new(SessionHarness)
+                .with_root_context(view.clone())
+                .with_root_context(fixture),
+        );
+        assert!(response.waiting() && !view.marked.get());
+        session_fixture::mark_external_logout(REVISION);
+        response.release();
+        settle(&mut dom);
+        assert!(!view.marked.get(), "晚到的响应不得进入页面或内存缓存");
+        assert!(load_watch_cache(USER, AUCTION).is_none(), "不得写入带旧修订的快照");
+        assert!(dom.in_scope(ScopeId::APP, || load_watch_cache(USER, AUCTION)).is_none());
+
+        session_fixture::script([session_fixture::read(Some(USER)).under_lock()]);
+        dom.in_runtime(|| controls.check.call(SessionRefreshReason::CookieChanged));
+        settle(&mut dom);
+        assert_eq!(reads.get(), 2);
+        assert!(view.marked.get());
+        assert_eq!(
+            dom.in_scope(ScopeId::APP, || load_watch_cache(USER, AUCTION)),
+            Some(watch_snapshot(USER))
+        );
+    }
+
+    fn mount_watch_control(
+        read: impl Fn() -> HttpFixtureFuture + 'static,
+        write: impl Fn(PublicSetLotWatchRequest) -> (u16, String) + 'static,
+    ) -> (VirtualDom, Controls, Rc<WatchProjection>) {
+        session_fixture::reset();
+        let view = Rc::new(WatchProjection {
+            read_enabled: true,
+            control_enabled: true,
+            ..Default::default()
+        });
+        let (dom, controls) = mount_harness(
+            VirtualDom::new(SessionHarness)
+                .with_root_context(view.clone())
+                .with_root_context(PageReadFixture::new(
+                    move |(user, auction): (String, String)| {
+                        assert_eq!((user.as_str(), auction.as_str()), (USER, AUCTION));
+                        read()
+                    },
+                ))
+                .with_root_context(PageReadFixture::new(
+                    move |(user, auction, lot, command): (
+                        String,
+                        String,
+                        String,
+                        PublicSetLotWatchRequest,
+                    )| {
+                        assert_eq!(
+                            (user.as_str(), auction.as_str(), lot.as_str()),
+                            (USER, AUCTION, LOT)
+                        );
+                        write(command)
+                    },
+                )),
+        );
+        (dom, controls, view)
+    }
+
+    fn watch_collection_reply(
+        version: i64,
+        watched: bool,
+        gate: Option<Rc<ResponseGate>>,
+    ) -> HttpFixtureFuture {
+        let mut page = watch_snapshot(USER);
+        page.watches[0].version = version;
+        page.watches[0].watched = watched;
+        let body = serde_json::to_string(&ApiResponse::ok("已读取标记", page)).unwrap();
+        Box::pin(async move {
+            if let Some(gate) = gate {
+                gate.wait().await;
+            }
+            Ok(session_fixture::response(200, body))
+        })
+    }
+
+    const WATCH_CONFLICT: &str = include_str!(
+        "../../../../auction-contracts/tests/fixtures/public/error-watch-conflict.json"
+    );
+
+    fn watch_toggle(dom: &VirtualDom) -> ElementId {
+        rendered_event_target(dom, "button", "class", "public-lot-watch__toggle", "onclick")
+    }
+
+    #[test]
+    fn stale_ready_snapshot_blocks_the_first_watch_write_and_cas_until_new_collection() {
+        run_page_events(
+            module_path!(),
+            "stale_ready_snapshot_blocks_the_first_watch_write_and_cas_until_new_collection",
+            || {
+                let fresh = Rc::new(ResponseGate::default());
+                let reads = Rc::new(Cell::new(0));
+                let writes = Rc::new(RefCell::new(Vec::new()));
+                let (mut dom, controls, view) = mount_watch_control(
+                    {
+                        let fresh = fresh.clone();
+                        move || {
+                            let previous = reads.replace(reads.get() + 1);
+                            if previous == 0 {
+                                watch_collection_reply(1, true, None)
+                            } else {
+                                watch_collection_reply(9, true, Some(fresh.clone()))
+                            }
+                        }
+                    },
+                    {
+                        let writes = writes.clone();
+                        move |command| {
+                            writes.borrow_mut().push(command);
+                            (409, WATCH_CONFLICT.to_owned())
+                        }
+                    },
+                );
+                let toggle = watch_toggle(&dom);
+                assert!(view.marked.get() && controls.can_retry());
+
+                // 存储已换代，但故意还没有投递 storage 事件。
+                session_fixture::mark_external_logout(REVISION);
+                let check = Rc::new(ResponseGate::default());
+                session_fixture::script([check.hold_read(Some(USER)).under_lock()]);
+                dispatch_page_event(&dom, "click", toggle, "");
+                settle(&mut dom);
+                assert!(writes.borrow().is_empty());
+                assert!(rendered_role_contains(
+                    &dom,
+                    "alert",
+                    "This attempt was not sent. You can submit again once your session is confirmed.",
+                ));
+                assert_eq!(session_fixture::take_requests(), ["GET"]);
+
+                check.release();
+                settle(&mut dom);
+                assert!(fresh.waiting() && view.marked.get());
+                assert!(controls.can_retry());
+                dispatch_page_event(&dom, "click", watch_toggle(&dom), "");
+                settle(&mut dom);
+                assert!(writes.borrow().is_empty(), "旧展示快照不提供 CAS");
+                fresh.release();
+                settle(&mut dom);
+                assert!(writes.borrow().is_empty(), "恢复后不补发");
+                dispatch_page_event(&dom, "click", watch_toggle(&dom), "");
+                settle(&mut dom);
+                let writes = writes.borrow();
+                assert_eq!(writes.len(), 1);
+                assert_eq!(writes[0].expected_version, 9);
+            },
+        );
+    }
+
+    #[test]
+    fn stale_ready_snapshot_blocks_watch_replay_without_replacing_the_frozen_command() {
+        run_page_events(
+            module_path!(),
+            "stale_ready_snapshot_blocks_watch_replay_without_replacing_the_frozen_command",
+            || {
+                let writes = Rc::new(RefCell::new(Vec::new()));
+                let (mut dom, controls, _) =
+                    mount_watch_control(|| watch_collection_reply(1, true, None), {
+                        let writes = writes.clone();
+                        move |command| {
+                            writes.borrow_mut().push(serde_json::to_string(&command).unwrap());
+                            (
+                                409,
+                                if writes.borrow().len() == 1 {
+                                    "损坏正文"
+                                } else {
+                                    WATCH_CONFLICT
+                                }
+                                .to_owned(),
+                            )
+                        }
+                    });
+                dispatch_page_event(&dom, "click", watch_toggle(&dom), "");
+                let edits = settle_page(&mut dom);
+                let retry = edits
+                    .iter()
+                    .find_map(|edit| match edit {
+                        Mutation::NewEventListener { name, id } if name == "click" => Some(*id),
+                        _ => None,
+                    })
+                    .expect("结果未知时有原样重试入口");
+                assert_eq!(writes.borrow().len(), 1);
+                assert!(controls.can_retry());
+
+                session_fixture::mark_external_logout(REVISION);
+                let check = Rc::new(ResponseGate::default());
+                session_fixture::script([check.hold_read(Some(USER)).under_lock()]);
+                dispatch_page_event(&dom, "click", retry, "");
+                settle(&mut dom);
+                assert_eq!(session_fixture::take_requests(), ["GET"]);
+                assert_eq!(writes.borrow().len(), 1);
+                check.release();
+                settle(&mut dom);
+                assert_eq!(writes.borrow().len(), 1);
+                dispatch_page_event(&dom, "click", retry, "");
+                settle(&mut dom);
+                let writes = writes.borrow();
+                assert_eq!(writes.len(), 2);
+                assert_eq!(writes[0], writes[1]);
+            },
+        );
+    }
+
+    #[test]
+    fn routine_session_read_cannot_discard_the_watch_get_that_unlocks_a_successful_write() {
+        run_page_events(
+            module_path!(),
+            "routine_session_read_cannot_discard_the_watch_get_that_unlocks_a_successful_write",
+            || {
+                let after_write = Rc::new(ResponseGate::default());
+                let reads = Rc::new(Cell::new(0));
+                let writes = Rc::new(RefCell::new(Vec::new()));
+                let (mut dom, controls, _) = mount_watch_control(
+                    {
+                        let (after_write, reads) = (after_write.clone(), reads.clone());
+                        move || {
+                            let previous = reads.replace(reads.get() + 1);
+                            if previous == 0 {
+                                watch_collection_reply(1, true, None)
+                            } else {
+                                watch_collection_reply(2, false, Some(after_write.clone()))
+                            }
+                        }
+                    },
+                    {
+                        let writes = writes.clone();
+                        move |command| {
+                            writes.borrow_mut().push(command);
+                            if writes.borrow().len() != 1 {
+                                return (409, WATCH_CONFLICT.to_owned());
+                            }
+                            let mut page = watch_snapshot(USER);
+                            let mut watch = page.watches.remove(0);
+                            watch.version = 2;
+                            watch.watched = false;
+                            let body = ApiResponse::ok(
+                                "已更新标记",
+                                PublicSetLotWatchResponse {
+                                    user_id: page.user_id,
+                                    auction_id: page.auction_id,
+                                    watch,
+                                },
+                            );
+                            (200, serde_json::to_string(&body).unwrap())
+                        }
+                    },
+                );
+                let toggle = watch_toggle(&dom);
+                dispatch_page_event(&dom, "click", toggle, "");
+                settle(&mut dom);
+                assert!(after_write.waiting());
+                dom.in_runtime(|| controls.check.call(SessionRefreshReason::Refresh));
+                settle(&mut dom);
+                assert!(controls.can_retry());
+                assert_eq!(session_fixture::take_requests(), ["GET", "PUT"]);
+                after_write.release();
+                settle(&mut dom);
+                assert_eq!(reads.get(), 2);
+                dispatch_page_event(&dom, "click", watch_toggle(&dom), "");
+                settle(&mut dom);
+                let writes = writes.borrow();
+                assert_eq!(writes.len(), 2, "权威集合到达后控件应解锁");
+                assert_eq!(writes[1].expected_version, 2);
+                assert!(writes[1].watched);
+            },
+        );
     }
 
     #[test]
     fn confirmed_logout_clears_only_the_departing_account_watches_before_read_back() {
         let (mut dom, controls, displayed) = mount_with_watch_snapshot();
         let other = watch_snapshot(OTHER_USER);
-        save_watch_cache(&other);
+        save_watch_cache(&other, Some("0"));
         let request = SessionRequest::Logout(USER);
         let read = Rc::new(ResponseGate::default());
         session_fixture::script([
@@ -995,14 +1476,14 @@ mod tests {
         settle(&mut dom);
         assert!(read.waiting());
         assert!(controls.owner.peek().is_none());
-        assert!(!displayed.0.get());
+        assert!(!displayed.marked.get());
         assert_eq!(load_watch_cache(USER, AUCTION), None);
         assert_eq!(load_watch_cache(OTHER_USER, AUCTION), Some(other));
         read.release();
         settle(&mut dom);
         assert_eq!(
             session_fixture::take_revision_writes(),
-            [(CONFIRMED_LOGOUT, true), (REVISION, false),]
+            [(CONFIRMED_LOGOUT, true), (REVISION, true),]
         );
         assert!(!*controls.ended.peek());
         assert_eq!(load_watch_cache(USER, AUCTION), None);
@@ -1015,14 +1496,17 @@ mod tests {
 
         use auction_contracts::{ApiResponse, PublicSessionPreferenceResponse};
         use auction_web_shared::i18n::{DEFAULT_PUBLIC_LOCALE, build_bundle};
-        use dioxus::dioxus_core::{Mutation, Mutations};
+        use dioxus::dioxus_core::{AttributeValue, Mutation, Mutations};
         use dioxus::html::PlatformEventData;
         use dioxus::prelude::*;
         use dioxus_i18n::prelude::try_use_init_i18n_from_bundle;
         use uuid::Uuid;
 
-        use super::{AUCTION, LOT, OTHER_USER, PREFERENCE, REVISION, USER};
-        use crate::api::{CommandError, HttpBodyFixtureFuture, SessionRequest, TransportError};
+        use super::{AUCTION, LOGIN_REVISION, LOT, OTHER_USER, PREFERENCE, REVISION, USER};
+        use crate::api::{
+            CommandError, HttpBodyFixtureFuture, HttpResponseFixture, SessionRefreshReason,
+            SessionRequest, TransportError,
+        };
         use crate::surface::commands::form_fixture;
         use crate::surface::commands::host::{CompetitionCommandHost, CompetitionCommands};
         use crate::surface::commands::pending::PendingBidCommand;
@@ -1056,6 +1540,7 @@ mod tests {
             away: EventHandler<()>,
             preferences: EventHandler<()>,
             can_submit: Callback<(), bool>,
+            check: EventHandler<SessionRefreshReason>,
         }
 
         thread_local! {
@@ -1143,6 +1628,7 @@ mod tests {
                 away,
                 preferences,
                 can_submit,
+                check: checks.check,
             }));
             rsx! {
                 CompetitionCommandHost { owner: checks.competition_owner }
@@ -1175,6 +1661,83 @@ mod tests {
             mutations
         }
 
+        fn duration_response(duration_seconds: i64, version: i64) -> HttpResponseFixture {
+            let preference = PublicSessionPreferenceResponse {
+                user_id: USER.to_owned(),
+                duration_seconds: Some(duration_seconds),
+                version,
+                expires_at: None,
+            };
+            let payload =
+                serde_json::to_string(&ApiResponse::ok("已读取偏好", preference)).unwrap();
+            session_fixture::response(200, payload)
+        }
+
+        #[test]
+        fn relogin_during_the_first_duration_read_discards_it_and_coalesces_the_refresh() {
+            session_fixture::reset();
+            let key = Rc::new(Cell::new(None));
+            let mut dom = VirtualDom::new(SessionRouter).with_root_context(LoginFormFixture(key));
+            dom.rebuild_in_place();
+            settle(&mut dom);
+            session_fixture::take_requests();
+            let controls = SHELL.get().unwrap();
+            let first = Rc::new(ResponseGate::default());
+            session_fixture::script([
+                first.hold(SessionRequest::ReadPreference, Ok(duration_response(900, 17)))
+            ]);
+            controls.preferences.call(());
+            let mounted = settle(&mut dom);
+            let form = mounted
+                .edits
+                .iter()
+                .find_map(|edit| match edit {
+                    Mutation::NewEventListener { name, id } if name == "submit" => Some(*id),
+                    _ => None,
+                })
+                .expect("登录时长表单已挂载");
+            assert!(first.waiting());
+            assert_eq!(session_fixture::take_requests(), ["GET preference"]);
+
+            for _ in 0..2 {
+                session_fixture::mark_external_logout(LOGIN_REVISION);
+                session_fixture::mark_external_logout(REVISION);
+                session_fixture::script([session_fixture::read(Some(USER)).under_lock()]);
+                controls.check.call(SessionRefreshReason::CookieChanged);
+                settle(&mut dom);
+                assert_eq!(session_fixture::take_requests(), ["GET"]);
+            }
+            let fresh = Rc::new(ResponseGate::default());
+            session_fixture::script([
+                fresh.hold(SessionRequest::ReadPreference, Ok(duration_response(7_200, 31)))
+            ]);
+            first.release();
+            let old_delivery = settle(&mut dom);
+            assert!(fresh.waiting());
+            assert_eq!(session_fixture::take_requests(), ["GET preference"]);
+            assert!(!old_delivery.edits.iter().any(|edit| matches!(
+                edit,
+                Mutation::SetAttribute { name: "value", value: AttributeValue::Text(value), .. } if value == "15"
+            )), "不可把旧响应的 15 分钟交付给表单");
+            form_fixture::submit(&dom, form);
+            settle(&mut dom);
+            assert!(session_fixture::take_requests().is_empty());
+
+            fresh.release();
+            settle(&mut dom);
+            session_fixture::script([session_fixture::reply(
+                SessionRequest::SetPreference(USER, &PREFERENCE),
+                session_fixture::rejection(409, "session_preference_conflict"),
+            )
+            .under_lock()]);
+            form_fixture::submit(&dom, form);
+            settle(&mut dom);
+            assert_eq!(session_fixture::take_requests(), ["PUT preference"]);
+            let sent = session_fixture::take_preference_commands();
+            assert_eq!(sent.len(), 1);
+            assert_eq!((sent[0].duration_seconds, sent[0].expected_version), (Some(7_200), 31));
+        }
+
         #[test]
         fn session_preference_form_retries_the_identical_command_after_unknown_conflict() {
             session_fixture::reset();
@@ -1184,17 +1747,9 @@ mod tests {
             settle(&mut dom);
             session_fixture::take_requests();
 
-            let preference = PublicSessionPreferenceResponse {
-                user_id: USER.to_owned(),
-                duration_seconds: Some(900),
-                version: 17,
-                expires_at: None,
-            };
-            let payload =
-                serde_json::to_string(&ApiResponse::ok("已读取偏好", preference)).unwrap();
             session_fixture::script([session_fixture::reply(
                 SessionRequest::ReadPreference,
-                Ok(session_fixture::response(200, payload)),
+                Ok(duration_response(900, 17)),
             )]);
             SHELL.get().unwrap().preferences.call(());
             let mounted = settle(&mut dom);
@@ -1220,6 +1775,17 @@ mod tests {
                     session_fixture::read(Some(USER)).under_lock(),
                 ]
             };
+            // 已更新共享修订、尚未投递 storage 事件，Ready 的旧表单也不能发 PUT。
+            session_fixture::mark_external_logout(REVISION);
+            session_fixture::script([session_fixture::read(Some(USER)).under_lock()]);
+            form_fixture::submit(&dom, form);
+            let rejected = settle(&mut dom);
+            assert_eq!(session_fixture::take_requests(), ["GET"]);
+            assert!(session_fixture::take_preference_commands().is_empty());
+            assert!(rejected.edits.iter().any(|edit| matches!(
+                edit, Mutation::CreateTextNode { value, .. } | Mutation::SetText { value, .. }
+                    if value.starts_with("This attempt was not sent.")
+            )));
             session_fixture::script(unknown());
             form_fixture::submit(&dom, form);
             let failed = settle(&mut dom);
@@ -1240,6 +1806,25 @@ mod tests {
                 })
                 .expect("结果未知已显示原样重试按钮");
 
+            session_fixture::mark_external_logout(REVISION);
+            let check = Rc::new(ResponseGate::default());
+            session_fixture::script([check.hold_read(Some(USER)).under_lock()]);
+            let click = Event::new(Rc::new(PlatformEventData::new(Box::new(()))), true);
+            dom.runtime().handle_event("click", click.into_any(), retry);
+            let paused = settle(&mut dom);
+            assert!(check.waiting());
+            assert_eq!(session_fixture::take_requests(), ["GET"]);
+            let retry = paused
+                .edits
+                .iter()
+                .find_map(|edit| match edit {
+                    Mutation::NewEventListener { name, id } if name == "click" => Some(*id),
+                    _ => None,
+                })
+                .unwrap_or(retry);
+            check.release();
+            settle(&mut dom);
+            assert!(session_fixture::take_requests().is_empty());
             session_fixture::script(unknown());
             let click = Event::new(Rc::new(PlatformEventData::new(Box::new(()))), true);
             dom.runtime().handle_event("click", click.into_any(), retry);

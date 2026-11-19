@@ -8,9 +8,9 @@ use serde_json::Value;
 use super::CommandError;
 use super::session::{
     PublicSessionApiError, SessionIdentity, SessionIdentityObservation, SessionRefreshReason,
-    SessionRequest, decode_identity_response, invalidate_cookie_sync, lock_cookie_mutation,
-    notify_public_session_change, observe_public_session_failure, publish_cookie_identity,
-    send_session_request,
+    SessionRequest, broadcast_session_change, decode_identity_response, invalidate_cookie_sync,
+    lock_cookie_mutation, observe_public_session_failure, publish_cookie_identity,
+    request_public_session_check, send_session_request,
 };
 
 pub(super) const PATH: &str = "/api/v1/me/session-preference";
@@ -30,6 +30,9 @@ pub(crate) async fn fetch_session_preference(
         .map_err(|error| failure(error.transport.code(), 0))?;
     let status = response.status();
     let body = response.text().await;
+    if !observation.cookie_current() {
+        return Err(failure("invalid_response", status));
+    }
     let preference = decode(status, body.as_deref(), user_id, None).inspect_err(|error| {
         observe_public_session_failure(status, &error.code, None);
     })?;
@@ -44,17 +47,32 @@ pub(crate) async fn fetch_session_preference(
 pub(crate) async fn set_session_preference(
     user_id: &str,
     command: &PublicSetSessionPreferenceRequest,
+    ready: impl Fn() -> bool,
 ) -> Result<PublicSessionPreferenceResponse, CommandError> {
+    if !ready() {
+        request_public_session_check(SessionRefreshReason::CookieChanged);
+        return Err(CommandError::before_send());
+    }
+    let queued = SessionIdentityObservation::start();
     // 成功、重放和未知结果的重发都须与登录共用原生锁，防止迟到 Set-Cookie 换回旧身份。
     let cookie_lock = lock_cookie_mutation().await.map_err(|code| failure(code, 0))?;
+    if !queued.current() || !ready() {
+        // 复核会申请同一把锁。本次未发送，先退出锁，调用方保留此前的未知命令。
+        drop(cookie_lock);
+        request_public_session_check(SessionRefreshReason::CookieChanged);
+        return Err(CommandError::before_send());
+    }
     invalidate_cookie_sync();
     let response = match send_session_request(SessionRequest::SetPreference(user_id, command)).await
     {
         Ok(response) => response,
         Err(error) => {
+            if error.needs_reconciliation() {
+                broadcast_session_change();
+            }
             drop(cookie_lock);
             if error.needs_reconciliation() {
-                notify_public_session_change(SessionRefreshReason::CookieChanged);
+                request_public_session_check(SessionRefreshReason::CookieChanged);
             }
             return Err(failure(error.transport.code(), 0));
         }
@@ -65,20 +83,18 @@ pub(crate) async fn set_session_preference(
     if let Ok(preference) = &result {
         publish_cookie_identity(SessionIdentity::UserId(preference.user_id.clone()));
     }
-    if (200..300).contains(&status) {
-        // 完整 2xx 在锁内广播。接收方取得同一把锁后才 GET，且解码失败仍须复核。
-        notify_public_session_change(SessionRefreshReason::CookieChanged);
-    } else {
-        drop(cookie_lock);
-        if status >= 500
-            || (status == 409
-                && result.as_ref().is_err_and(|error| error.code == "invalid_response"))
-        {
-            // 无法确认提交时只读回 Cookie；偏好命令自己的冻结 ID 与 CAS 版本仍由表单保留。
-            notify_public_session_change(SessionRefreshReason::CookieChanged);
-        } else if let Err(error) = &result {
-            observe_public_session_failure(status, &error.code, Some(user_id));
-        }
+    let recheck = (200..300).contains(&status)
+        || status >= 500
+        || (status == 409 && result.as_ref().is_err_and(|error| error.code == "invalid_response"));
+    if recheck {
+        // 先在锁内发布修订，再释放锁复核，避免排队的写入沿用旧 Cookie 代次。
+        broadcast_session_change();
+    }
+    drop(cookie_lock);
+    if recheck {
+        request_public_session_check(SessionRefreshReason::CookieChanged);
+    } else if let Err(error) = &result {
+        observe_public_session_failure(status, &error.code, Some(user_id));
     }
     result
 }
