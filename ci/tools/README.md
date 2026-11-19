@@ -42,7 +42,7 @@ mise run verify      # 运行某个入口
 | `geckodriver` | GitHub 发布包 | `mise run test-wasm` 用它驱动本机 Firefox |
 | `wasm-opt`（binaryen） | GitHub 发布包 | `dx` 的配套工具 |
 | `esbuild` | npm 上的 `@esbuild/linux-x64` 原生二进制包 | `dx` 的配套工具，运行时不需要 Node |
-| `bun` | GitHub 发布包 | `web/` 下 TypeScript 实现的依赖安装、类型检查、Biome、测试与构建（依赖版本由 `web/bun.lock` 固定）；`mise run web-prepare` 安装依赖，`mise run verify` 的 `web` 项运行类型检查、Biome 与包边界，`mise run web-test` 运行行为测试；包边界由 `web/tooling/check-boundaries.ts` 使用 `web/` 的 TypeScript 编译器检查，Rust 版页面的构建与发布不使用它 |
+| `bun` | GitHub 发布包 | `web/` 下 TypeScript 实现的依赖安装、类型检查、Biome、测试与构建（依赖版本由 `web/bun.lock` 固定）；`mise run web-prepare` 安装依赖，`mise run verify` 的 `web` 项运行类型检查、Biome 与包边界，`mise run web-test` 运行行为测试；包边界由 `web/tooling/check-boundaries.ts` 使用 `web/` 的 TypeScript 编译器检查。Rust 版页面不经过 bun；Solid 发布构建直接调用本地 `web/node_modules/.bin/vite`，不自动安装依赖 |
 
 升级工具：改 `mise.toml` 里的版本，运行 `mise install` 与 `mise lock`，把两个文件一并提交。`mise.lock` 也记录 Rust 的版本、组件与目标，所以改 `rust-toolchain.toml` 后同样要重新 `mise lock`；CI 以 `--locked` 安装，锁文件与请求不一致时直接失败。升级 mise 自身时，同步 `mise.toml` 的 `min_version` 与工作流里 `jdx/mise-action` 的 `version`。
 
@@ -54,6 +54,7 @@ mise run verify      # 运行某个入口
 - 把这些路径放到 `PATH` 前部并设置 `NO_DOWNLOADS=1`，`dx` 不会在构建时自行下载工具；同时把 `DX_HOME` 指到 `target/dx-home`，`dx` 因此不会改用它在用户目录里缓存过的旧工具，也不读取用户级 `dx` 设置。
 - 这五个二进制的 SHA-256 构成工具身份，参与构建环境指纹；`mise.lock` 参与构建输入指纹。同版本工具重装后字节变化也会让已有制品失效。
 - `sccache` 只在环境变量显式设置 `RUSTC_WRAPPER=sccache` 时启用，并换成 mise 安装的版本；Cargo 配置文件里的包装器一律清空。
+- 任一 surface 使用 Solid 时，工具闭集加入 mise 提供的 `bun`（版本与二进制摘要），发布路径直接调用 `web/node_modules/.bin/vite`，不执行 `bun x` 或临时下载。依赖只能经 `mise run web-prepare` 安装；该任务把 `web/bun.lock` 的 SHA-256 与 bun 版本写入 `web/node_modules/.auction-prepared`，`web-bundle.sh` 的 Solid 构建阶段核对该凭据而不扫描安装树，不联网。
 
 ## 依赖审计的范围
 

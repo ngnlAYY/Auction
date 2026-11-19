@@ -621,7 +621,7 @@ web_asset_fingerprint_pattern='^[A-Za-z0-9][A-Za-z0-9._-]*-[A-Za-z0-9_-]{8}\.[A-
 verify_solid_web_payload() (
 	local surface=$1 root=$2
 	local document="$root/index.html"
-	local references kind ref lookup path favicon_count file base assets_file
+	local references kind ref lookup path favicon_count favicon_link_count=0 file base assets_file
 	[[ -f "$document" && ! -L "$document" ]] || {
 		printf '%s Web payload 缺少普通入口文档：%s\n' "$surface" "$document" >&2
 		return 1
@@ -636,6 +636,9 @@ verify_solid_web_payload() (
 	}
 	while IFS=$'\t' read -r kind ref; do
 		[[ -n "$kind" ]] || continue
+		if [[ "$kind" == icon ]]; then
+			favicon_link_count=$((favicon_link_count + 1))
+		fi
 		lookup=${ref%%[?#]*}
 		if [[ -z "$lookup" || "$ref" == \#* ]]; then continue; fi
 		case "$lookup" in
@@ -645,14 +648,6 @@ verify_solid_web_payload() (
 			;;
 		/favicon.ico)
 			# /favicon.ico 由后端映射到 assets/ 里唯一的带指纹 SVG，不是 payload 中的文件。
-			favicon_count=$(web_count_files "$root/assets" -maxdepth 1 -type f -name 'favicon-*.svg') || {
-				printf '%s Web payload 无法枚举站点图标\n' "$surface" >&2
-				return 1
-			}
-			if [[ "$favicon_count" -ne 1 ]]; then
-				printf '%s Web payload 必须包含唯一的带指纹站点图标\n' "$surface" >&2
-				return 1
-			fi
 			continue
 			;;
 		esac
@@ -665,6 +660,18 @@ verify_solid_web_payload() (
 			return 1
 		fi
 	done <<<"$references"
+	if ((favicon_link_count != 1)); then
+		printf '%s Web 入口必须恰好包含一个站点图标\n' "$surface" >&2
+		return 1
+	fi
+	favicon_count=$(web_count_files "$root/assets" -maxdepth 1 -type f -name 'favicon-*.svg') || {
+		printf '%s Web payload 无法枚举站点图标\n' "$surface" >&2
+		return 1
+	}
+	if [[ "$favicon_count" -ne 1 ]]; then
+		printf '%s Web payload 必须包含唯一的带指纹站点图标\n' "$surface" >&2
+		return 1
+	fi
 	assets_file=$(mktemp) || {
 		printf '%s Web payload 无法创建 assets 清单\n' "$surface" >&2
 		return 1

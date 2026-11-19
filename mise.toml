@@ -52,8 +52,27 @@ description = "以 wasm32 Clippy 检查 Public/Admin 浏览器目标及共享层
 run = "bash ci/checks/check.sh wasm"
 
 [tasks.web-prepare]
-description = "按 web/bun.lock 安装 web/ 依赖；CI 也通过此任务准备依赖，这是唯一允许联网的 Web 入口"
-run = "cd web && bun install --frozen-lockfile"
+description = "按 web/bun.lock 安装 web/ 依赖并写入构建凭据；这是唯一允许联网的 Web 入口"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+cd web
+rm -f -- node_modules/.auction-prepared
+bun install --frozen-lockfile
+lock_digest=$(sha256sum bun.lock)
+lock_sha256=${lock_digest%% *}
+bun_version=$(bun --version)
+[[ "$lock_sha256" =~ ^[0-9a-f]{64}$ && -n "$bun_version" ]] || {
+	printf '无法生成 web/ 依赖准备凭据\n' >&2
+	exit 1
+}
+prepared=$(mktemp node_modules/.auction-prepared.next.XXXXXX)
+trap 'rm -f -- "$prepared"' EXIT
+printf 'lock_sha256=%s\nbun_version=%s\n' "$lock_sha256" "$bun_version" >"$prepared"
+chmod 0644 "$prepared"
+mv -f -- "$prepared" node_modules/.auction-prepared
+trap - EXIT
+'''
 
 [tasks.web-check]
 description = "web/ 静态检查：TypeScript 类型检查、Biome 与包边界；包含在 mise run verify 中"
@@ -102,7 +121,7 @@ run = "cd web && bun run test"
 # ---- 构建与发布 ----
 
 [tasks.web-build]
-description = "构建双端页面并生成固定 payload；输入未变时复用已有产物"
+description = "按 AUCTION_WEB_STACK 构建双端页面并生成固定 payload；输入未变时复用已有产物"
 run = [
   "bash ci/release/web-bundle.sh public",
   "bash ci/release/web-bundle.sh admin",
@@ -131,7 +150,7 @@ description = "核对 API-only/嵌入式制品、依赖边界与资源隔离"
 run = "bash ci/release/release.sh verify-artifacts"
 
 [tasks.web-size]
-description = "只核对两端 Web payload 体积预算，不构建、不读取原生制品"
+description = "按实际技术栈只核对两端 Web payload 体积预算，不构建、不读取原生制品"
 run = "bash ci/release/release.sh verify-web-size"
 
 [tasks.release-check]

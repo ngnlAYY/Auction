@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2030,SC2031,SC2032
 # 在临时目录验证发布清单生成前的文件筛查、Solid 门禁与栈相关身份。
 
 set -euo pipefail
@@ -258,6 +259,19 @@ sed -i 's#<link rel="icon" href="/favicon.ico">#<link rel="icon" href="/favicon.
 	"$two_icons/public/index.html"
 write_payload_marker "$two_icons/public" "$two_icons" public solid-release
 expect_solid_failure "$two_icons" '最多只能包含一个站点图标'
+
+missing_favicon="$fixture/solid-missing-favicon"
+cp -a "$solid_root" "$missing_favicon"
+sed -i '/rel="icon"/d' "$missing_favicon/public/index.html"
+rm -- "$missing_favicon/public/assets/favicon-YZabcdef.svg"
+write_payload_marker "$missing_favicon/public" "$missing_favicon" public solid-release
+expect_solid_failure "$missing_favicon" '入口必须恰好包含一个站点图标'
+
+missing_favicon_file="$fixture/solid-missing-favicon-file"
+cp -a "$solid_root" "$missing_favicon_file"
+rm -- "$missing_favicon_file/public/assets/favicon-YZabcdef.svg"
+write_payload_marker "$missing_favicon_file/public" "$missing_favicon_file" public solid-release
+expect_solid_failure "$missing_favicon_file" '必须包含唯一的带指纹站点图标'
 
 missing_resource="$fixture/solid-missing-resource"
 cp -a "$solid_root" "$missing_resource"

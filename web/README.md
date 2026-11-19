@@ -20,11 +20,11 @@ Public 与 Admin 两个浏览器应用的 TypeScript 源码、构建配置与编
 
 ## 命令
 
-工具版本由仓库根的 `mise.toml` 固定，依赖由 `web/bun.lock` 固定。下表命令除注明“仓库根”外均在 `web/` 下执行。门禁使用已安装的 `web/node_modules`，自身不安装依赖、不联网；首次或锁文件变化后先在仓库根运行 `mise run web-prepare`。
+工具版本由仓库根的 `mise.toml` 固定，依赖由 `web/bun.lock` 固定。下表命令除注明“仓库根”外均在 `web/` 下执行。门禁使用已安装的 `web/node_modules`，自身不安装依赖、不联网；首次或锁文件变化后先在仓库根运行 `mise run web-prepare`。该任务安装成功后写入 `web/node_modules/.auction-prepared` 凭据，发布构建只接受凭据相符的依赖；直接运行 `bun install` 不会写凭据，随后的构建会被拒绝。
 
 | 命令 | 作用 |
 | --- | --- |
-| `mise run web-prepare`（仓库根） | 按锁文件执行 `bun install --frozen-lockfile`，是唯一会安装 Web 依赖的入口 |
+| `mise run web-prepare`（仓库根） | 按锁文件执行 `bun install --frozen-lockfile` 并写入依赖准备凭据，是唯一会安装 Web 依赖的入口 |
 | `mise run web-check`（仓库根） | 依次运行 `bun run typecheck`、`bun run lint` 与包边界检查，已包含在 `mise run verify` 中 |
 | `mise run web-test`（仓库根） | 在 `web/` 下运行 `bun run test`，不并入默认门禁；CI 的 `test` 作业运行它 |
 | `bun run typecheck` | 检查四个包、Vite 构建配置和测试。`typecheck:contracts`、`typecheck:shared`、`typecheck:public`、`typecheck:admin` 只查单个包 |
@@ -40,9 +40,11 @@ Public 与 Admin 两个浏览器应用的 TypeScript 源码、构建配置与编
 
 除 `test` 外，脚本用 bun 直接执行 `node_modules/.bin/` 下的 `tsc`、`biome` 与 `vite`；本地工具缺失时立即以“找不到模块”失败，不经 `bun x` 临时解析或下载，也不额外要求 Node。`bunfig.toml` 的 `install.auto = "disable"` 关闭自动安装，工具或其传递依赖缺失时都不会联网补装。
 
-生产构建的输入只有仓库源码、样式与译文，根 `Cargo.toml` 的 `workspace.package.version`，以及调用方显式传入的 `AUCTION_BUILD_ID`（取值合法时作为构建号，否则退回工作区版本）。构建不读取 `.env*`：`bunfig.toml` 的 `env = false` 同时关闭外层 `bun run` 与脚本内层 Bun 的自动加载，Vite 配置再以 `envDir: false` 关闭 Vite 自己的加载（Vite 8 中 `envFile: false` 已弃用）；环境文件里的 `AUCTION_BUILD_ID` 与 `VITE_` 变量都不会进入产物。
+生产构建的输入只有仓库源码、样式与译文，根 `Cargo.toml` 的 `workspace.package.version`，以及调用方显式传入的 `AUCTION_BUILD_ID`（取值合法时作为构建号，否则退回工作区版本）。构建不读取 `.env*`：`bunfig.toml` 的 `env = false` 同时关闭外层 `bun run` 与脚本内层 Bun 的自动加载，Vite 配置再以 `envDir: false` 关闭 Vite 自己的加载（Vite 8 中 `envFile: false` 已弃用）；环境文件里的 `AUCTION_BUILD_ID` 与 `VITE_` 变量都不会进入产物。发布入口固定以 `NODE_ENV=production` 调用 Vite，外部同名变量不能改变 `import.meta.env.DEV`。
 
-生产构建校验最终 HTML 恰有一个模块入口脚本，且 `data-cfasync="false"` 位于 `src` 之前。Public 入口以 `?url` 引入[共享 SVG](../crates/auction-web-shared/assets/favicon.svg)，产物因此有唯一的 `assets/favicon-<指纹>.svg`；入口 HTML 的图标链接固定为 `/favicon.ico`，生产由后端映射到该文件，开发服务器则由仅对 `serve` 生效的插件提供同样的映射。
+发布构建经 `ci/release/web-bundle.sh` 选择 Solid 时，会核对 `mise run web-prepare` 留下的 `web/node_modules/.auction-prepared` 凭据（锁文件摘要与 bun 版本），再直接调用本地 `web/node_modules/.bin/vite` 构建到临时目录，校验通过后换入 `target/web/<surface>/public`；该阶段不联网，也不自动安装依赖。首次、锁文件变化或 bun 版本变化后先运行 `mise run web-prepare`。`AUCTION_WEB_STACK=solid` 当前只切换 Public，Admin 仍是 Rust 版；发布入口除 `verify-web-size` 外仍会拒绝 Solid。
+
+生产构建校验最终 HTML 恰有一个模块入口脚本，且 `data-cfasync="false"` 位于 `src` 之前。Public 入口以 `?url` 引入[共享 SVG](../crates/auction-web-shared/assets/favicon.svg)，产物因此有唯一的 `assets/favicon-<指纹>.svg`；入口 HTML 的图标链接固定为 `/favicon.ico`，生产由后端映射到该文件，开发服务器则由仅对 `serve` 生效的插件提供同样的映射。发布校验要求入口恰好有一个该图标链接、`assets/` 恰好有一个带指纹的 `favicon-*.svg`，两者缺一即失败。
 
 ## 文件与命名
 

@@ -9,8 +9,13 @@ cd "$repository_root"
 
 # 工具选择与身份共用同一入口；任一发布工具缺失时不进入任何发布操作。
 source ci/release/build-identity.sh
-# 只读的 payload 体积检查不需要 dx/rustc，也不解析发布工具；其余入口仍先确认工具齐全。
 command_name=${1:-}
+# Solid 版尚未接入发布制品；只读的体积检查是唯一允许选择 Solid 的入口。
+if [[ "$command_name" != verify-web-size ]] && web_stack_uses_solid; then
+	printf 'Solid 版页面尚未接入发布构建：%s\n' "$command_name" >&2
+	exit 1
+fi
+# 只读的 payload 体积检查不需要 dx/rustc，也不解析发布工具；其余入口仍先确认工具齐全。
 if [[ "$command_name" != verify-web-size ]]; then
 	configure_build_tools
 fi
@@ -284,7 +289,7 @@ verify_surface_size_budget() {
 
 # 独立体积检查：不构建、不读取原生制品；成功时打印实测值，供刻意刷新基线时抄录。
 verify_web_size() {
-	local surface stable_root sizes
+	local surface stable_root sizes stack
 	for surface in public admin; do
 		stable_root=$(web_surface_root "$surface" "$repository_root") || return 1
 		verify_web_payload "$surface" "$stable_root" >/dev/null || return 1
@@ -294,8 +299,14 @@ verify_web_size() {
 			printf '无法测量 %s Web payload 体积：%s\n' "$surface" "$stable_root" >&2
 			return 1
 		fi
-		printf '%s payload 体积：wasm=%s bytes payload=%s bytes\n' \
-			"$surface" "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+		stack=$(web_surface_stack "$surface") || return 1
+		if [[ "$stack" == solid ]]; then
+			printf '%s payload 体积：initial_js=%s bytes payload=%s bytes\n' \
+				"$surface" "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+		else
+			printf '%s payload 体积：wasm=%s bytes payload=%s bytes\n' \
+				"$surface" "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+		fi
 	done
 	printf 'Public/Admin Web payload 体积未超出硬上限。\n'
 }

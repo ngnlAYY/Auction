@@ -110,7 +110,7 @@ bash ci/release/verify-deployment-package.sh <*.tar.gz> --tag <v版本>        #
 
 ### 门禁
 
-- **页面 payload**：`ci/release/web-bundle.sh` 目前构建 Dioxus payload。`verify_web_payload` 对 Dioxus 保持入口页标题（“Auction 公开站点” / “Auction 管理站点”）、跨端隔离、只含普通文件与唯一一组 JS/WASM、payload 清单与哈希的现有规则；Solid 分支要求 `profile=solid-release`，入口文档不得含注释、`template`/`base`/`iframe`/`object`/`embed`，且所有 `<script>`/`<link>` 必须整体匹配真实 Vite 产物固定的四种写法（属性顺序固定、大小写敏感、双引号、同行闭合），恰好一个模块入口、至多一个图标；引用资源必须存在于 payload，`assets/` 文件名带 Vite 风格的 8 位内容指纹，并沿用标题判定排除另一端入口。目录遍历或摘要生成失败即拒绝复用，不把失败留下的部分输出当作有效清单。
+- **页面 payload**：`ci/release/web-bundle.sh` 按 `AUCTION_WEB_STACK` 与每个 surface 的实际技术栈构建 Dioxus 或 Solid payload；默认与显式 `dioxus` 走原来的 `dx bundle` 路径。`verify_web_payload` 对 Dioxus 保持入口页标题（“Auction 公开站点” / “Auction 管理站点”）、跨端隔离、只含普通文件与唯一一组 JS/WASM、payload 清单与哈希的现有规则；Solid 分支要求 `profile=solid-release`，入口文档不得含注释、`template`/`base`/`iframe`/`object`/`embed`，且所有 `<script>`/`<link>` 必须整体匹配真实 Vite 产物固定的四种写法（属性顺序固定、大小写敏感、双引号、同行闭合），恰好一个模块入口、至多一个图标；引用资源必须存在于 payload，`assets/` 文件名带 Vite 风格的 8 位内容指纹，并沿用标题判定排除另一端入口。目录遍历或摘要生成失败即拒绝复用，不把失败留下的部分输出当作有效清单。
 - **体积预算**：两端 payload 的体积按 [ci/release/web-size-budget.v1](release/web-size-budget.v1) 的基线比较；Dioxus 统计 WASM 与总量，Solid 统计总量与入口首屏 JS；明显增长只告警，超过硬上限使发布失败。见 [Web payload 体积预算](#web-payload-体积预算)。
 - **二进制标记**：Public 只含 Public payload 的标记与哈希，Admin 只含 Admin 的，Worker 与 auction-cli 不含任何页面标记；API-only 二进制含“资源缺失”提示而不含 payload。
 - **依赖边界**（`cargo tree`）：Worker 不依赖任何前端 crate；Public 不依赖 Admin 前端；Admin 不依赖 Public 前端；`auction-server` 不依赖 `auction-cli`。
@@ -164,13 +164,19 @@ bash ci/release/web-bundle.sh public
 bash ci/release/web-bundle.sh admin
 ```
 
-以 `wasm-release` profile 运行 `dx bundle`（工具由 mise 按固定版本提供），复制到稳定目录 `target/dx/build/<包名>/web/public`（后端 `web-embed` 从这里内嵌），写入 payload 清单与哈希。生成清单前依次完成四步改写：在入口 `index.html` 的脚本预加载之前声明带指纹的 WASM 预加载（`<link rel="preload" as="fetch" type="application/wasm" crossorigin>`），让 WASM 与加载器 JS 并行下载；给入口模块脚本加 `data-cfasync="false"`，让 Cloudflare Rocket Loader 不改写它（见[ops/README.md#cdncloudflare](../ops/README.md#cdncloudflare)）；把 dx 按源码路径排列的静态样式表改排为 base → surface → desktop → mobile → console（样式只由静态 head 声明，运行时不再插入第二份；同一 `@layer` 内同特异度的规则靠加载先后覆盖）；再为 `assets/` 下可压缩资源生成 brotli 副本（`*.br`）。找不到唯一的 WASM、唯一的脚本预加载锚点或唯一的模块脚本，或样式表不是恰好这五份且首尾相连时构建失败，不产出未完成改写的 payload。预压缩要求 PATH 中有 `brotli`（release 构建工作流已安装）。
+入口先打印两端实际技术栈。`AUCTION_WEB_STACK` 缺省为 `dioxus`；当前 `solid` 只切换 Public，Admin 仍是 Dioxus。每次进入脚本都同时检查两端：当前批次不支持的组合（如 Admin 被标成 Solid）会在任何清理或构建之前拒绝，即使本次只请求 Public，稳定目录里的旧 payload 也不受影响。
+
+Dioxus 路径以 `wasm-release` profile 运行 `dx bundle`（工具由 mise 按固定版本提供），复制到稳定目录 `target/dx/build/<包名>/web/public`（后端 `web-embed` 从这里内嵌），写入 payload 清单与哈希。生成清单前依次完成四步改写：在入口 `index.html` 的脚本预加载之前声明带指纹的 WASM 预加载（`<link rel="preload" as="fetch" type="application/wasm" crossorigin>`），让 WASM 与加载器 JS 并行下载；给入口模块脚本加 `data-cfasync="false"`，让 Cloudflare Rocket Loader 不改写它（见[ops/README.md#cdncloudflare](../ops/README.md#cdncloudflare)）；把 dx 按源码路径排列的静态样式表改排为 base → surface → desktop → mobile → console（样式只由静态 head 声明，运行时不再插入第二份；同一 `@layer` 内同特异度的规则靠加载先后覆盖）；再为 `assets/` 下可压缩资源生成 brotli 副本（`*.br`）。找不到唯一的 WASM、唯一的脚本预加载锚点或唯一的模块脚本，或样式表不是恰好这五份且首尾相连时构建失败，不产出未完成改写的 payload。预压缩要求 PATH 中有 `brotli`（release 构建工作流已安装）。
+
+Solid 路径不联网：`mise run web-prepare` 在 `bun install --frozen-lockfile` 成功后把 `web/bun.lock` 的 SHA-256 与 bun 版本写进 `web/node_modules/.auction-prepared`；构建阶段只核对这份凭据、`web/node_modules`、可执行的 `web/node_modules/.bin/vite` 与当前工具版本，不再解析安装树。凭据缺失、摘要或版本不符时提示先运行 `mise run web-prepare`，直接运行 `bun install` 不会生成凭据、构建会被拒绝。随后用本地 Vite 按统一 `AUCTION_BUILD_ID` 构建到 `target/web/<surface>.next.*` 临时目录，并固定 `NODE_ENV=production`，外部环境不能改变 `import.meta.env.DEV`；只校验入口 HTML 的唯一模块脚本带 `data-cfasync="false"`（不改写 HTML）。封存与 Dioxus 相同：brotli 副本、`profile=solid-release` 的 `auction-web-manifest.v1`、统一权限与 mtime、`WEB-BUILD-INFO`（记录 `stack=solid`、bun 版本与构建号）。新 payload 通过 `verify_web_payload` 后才换入稳定目录 `target/web/<surface>`，失败时保留旧目录。输入未变且回执的技术栈与构建号一致时直接复用，不重新运行 Vite。
 
 生成和复核文件摘要前均检查可发布路径，发现 `*.map` 或路径中有以点开头的段即报告文件并失败。自测见 [Web 发布清单](checks/README.md#web-发布清单)。
 
-`WEB-BUILD-INFO` 记录单端输入指纹、构建环境指纹、dx/rustc/brotli 版本与实际编译进 WASM 的构建号（`build_id`）。复用要求回执全部字段匹配，且现有 payload 再次通过完整门禁。任一端的变更使共享构建号变化时，两端都要重建。缺少该字段的旧回执同样触发重建。构建结束后重新计算单端输入指纹、环境指纹与共享构建号，全部与构建前匹配才原子发布回执。
+`WEB-BUILD-INFO` 记录单端输入指纹、构建环境指纹、构建工具版本与实际编译进 payload 的构建号（`build_id`）；Dioxus 记录 dx/rustc/brotli，Solid 记录 bun/brotli 与 `stack=solid`。复用要求回执全部字段匹配，且现有 payload 再次通过完整门禁。任一端的变更使共享构建号变化时，两端都要重建。缺少该字段的旧回执同样触发重建。构建结束后重新计算单端输入指纹、环境指纹与共享构建号，全部与构建前匹配才原子发布回执。
 
-`verify_web_payload` 的 Solid 分支要求入口文档只允许带 `src` 的模块脚本恰好一个、入口引用的资源都存在于 payload、`assets/` 下每个文件名都带 Vite 风格的内容指纹（`<name>-<8 位 base64url 字符>.<扩展名>`，压缩副本的 `.br` 不改变此判定），profile 固定为 `solid-release`。入口 HTML 不做通用解析：出现 HTML 注释起始符（`<!` 后接 `--`）直接失败；`template`、`base`、`iframe`、`object`、`embed` 出现即失败；每个 `<script>`/`<link>` 必须整体匹配 Vite 产物固定的四种写法（属性顺序固定、大小写敏感、双引号、同行闭合），入口、样式表、预加载和图标共用这一份引用清单。单引号、无引号、未知 link 类型或无法执行的枚举命令都会失败关闭。入口模块与 `modulepreload` 声明的 JS 计入首屏 JS；`web-bundle.sh` 的 Solid 构建路径尚未接入，本批只提供这些身份函数。
+发布入口 `ci/release/release.sh` 除只读的 `verify-web-size` 外，只要任一端实际使用 Solid 就在任何有副作用的步骤之前失败，并提示“Solid 版页面尚未接入发布构建”；缺省 Dioxus 的行为不变。
+
+`verify_web_payload` 的 Solid 分支要求入口文档只允许带 `src` 的模块脚本恰好一个、入口引用的资源都存在于 payload、入口恰好有一个 `<link rel="icon" href="/favicon.ico">` 且 `assets/` 下恰好有一个 `favicon-*.svg`、`assets/` 下每个文件名都带 Vite 风格的内容指纹（`<name>-<8 位 base64url 字符>.<扩展名>`，压缩副本的 `.br` 不改变此判定），profile 固定为 `solid-release`。入口 HTML 不做通用解析：出现 HTML 注释起始符（`<!` 后接 `--`）直接失败；`template`、`base`、`iframe`、`object`、`embed` 出现即失败；每个 `<script>`/`<link>` 必须整体匹配 Vite 产物固定的四种写法（属性顺序固定、大小写敏感、双引号、同行闭合），入口、样式表、预加载和图标共用这一份引用清单。单引号、无引号、未知 link 类型或无法执行的枚举命令都会失败关闭。入口模块与 `modulepreload` 声明的 JS 计入首屏 JS。
 
 ### Web payload 体积预算
 
@@ -184,11 +190,11 @@ mise run web-size                                # 同上
 - `<surface>_wasm_baseline_bytes` / `<surface>_payload_baseline_bytes`：基线实测值。
 - `<surface>_wasm_max_bytes` / `<surface>_payload_max_bytes`：硬上限。
 
-当前数值只记录在该数据文件中。体积按原始表示统计：构建期 brotli 副本（`*.br`）不计入 `wasm`/`payload`/`initial_js`，只影响实际传输量。Dioxus 的 `payload` 取 `target/dx/build/<包名>/web/public` 下全部普通文件（含内嵌标记 `auction-web-manifest.v1`）的字节合计，`wasm` 取其中唯一一组 `auction-web-<surface>_bg*.wasm`；Solid 的 `payload` 取 `target/web/<surface>/public` 下全部普通文件，`initial_js` 取入口模块脚本与入口文档声明的 `modulepreload` JS 原始字节合计（重复路径只算一次）。测量前的 payload 必须先通过完整门禁，测量失败（目录缺失、摘要或体积无法计算）同样失败关闭。Solid 使用 `solid_<surface>_payload_*` 与 `solid_<surface>_initial_js_*` 键；预算文件尚未加入这些键时明确失败，待实测后由后续批次加入。
+当前数值只记录在该数据文件中。体积按原始表示统计：构建期 brotli 副本（`*.br`）不计入 `wasm`/`payload`/`initial_js`，只影响实际传输量。Dioxus 的 `payload` 取 `target/dx/build/<包名>/web/public` 下全部普通文件（含内嵌标记 `auction-web-manifest.v1`）的字节合计，`wasm` 取其中唯一一组 `auction-web-<surface>_bg*.wasm`；Solid 的 `payload` 取 `target/web/<surface>/public` 下全部普通文件，`initial_js` 取入口模块脚本与入口文档声明的 `modulepreload` JS 原始字节合计（重复路径只算一次）。测量前的 payload 必须先通过完整门禁，测量失败（目录缺失、摘要或体积无法计算）同样失败关闭。Solid 使用 `solid_<surface>_payload_*` 与 `solid_<surface>_initial_js_*` 键；本次已在 2026-11-19 实测加入 Solid Public 键，Admin 仍使用原有 Dioxus 键。
 
 判定：超过 `baseline × (1 + warn_growth_basis_points/10000)`（当前 `warn_growth_basis_points=500`，即 5%）只打印 `WARN`，发布继续；超过 `_max_bytes` 打印实测值、基线与上限并使命令失败。检查点在 `build-embedded`/`release-check`（Web payload 生成后、链接原生程序前）、`verify-artifacts`/`verify-single`（复用制品同样受限）与独立的 `verify-web-size`。该检查只读既有文件，不改变运行时行为，也不写入基线。
 
-刷新基线必须刻意进行：先确认体积增长来自有意的前端改动，运行 `mise run web-build`（或 `mise run build-release`）得到新 payload，再运行 `mise run web-size` 抄录输出的 `wasm=` 与 `payload=` 实测字节，只更新对应 surface 的 baseline；按预期余量调整 `_max_bytes` 时不能低于 baseline。基线改动与引起增长的前端改动同批提交；预算失败应先排查体积回归，不得直接把上限抬到实测值以上来让发布通过。
+刷新基线必须刻意进行：先确认体积增长来自有意的前端改动，运行 `mise run web-build`（或 `mise run build-release`）得到新 payload，再运行 `mise run web-size` 抄录对应技术栈输出的实测字节（Dioxus 为 `wasm=`/`payload=`，Solid 为 `initial_js=`/`payload=`），只更新对应 surface 的 baseline；按预期余量调整 `_max_bytes` 时不能低于 baseline。基线改动与引起增长的前端改动同批提交；预算失败应先排查体积回归，不得直接把上限抬到实测值以上来让发布通过。
 
 ### 构建身份：`ci/release/build-identity.sh`
 

@@ -11,6 +11,13 @@ public_wasm_baseline_bytes=3201271
 public_wasm_max_bytes=3360000
 public_payload_baseline_bytes=3561755
 public_payload_max_bytes=3740000
+# 2026-11-19：在双栈构建车道的沙箱内实跑 `AUCTION_WEB_STACK=solid ci/release/web-bundle.sh public`
+# 后按 `web_payload_sizes` 实测刷新 Solid Public 基线；initial_js 是入口模块与 modulepreload 脚本的
+# 原始字节去重和，payload 是全部普通文件（不含 brotli 副本）之和。上限保持在基线约 +5%。
+solid_public_initial_js_baseline_bytes=333953
+solid_public_initial_js_max_bytes=351000
+solid_public_payload_baseline_bytes=950484
+solid_public_payload_max_bytes=999000
 # 2026-11-17：v0.1.7 发布构建实测刷新 Admin 基线（结算退件页面等约 4,472 行前端新增）；
 # 上限保持在基线约 +5%，继续拦截进一步明显增长。
 admin_wasm_baseline_bytes=4520796

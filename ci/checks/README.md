@@ -47,7 +47,7 @@ bash ci/checks/check.sh web-build-inputs
 bash ci/checks/web-build-inputs-test.sh
 ```
 
-`web-build-inputs` 从 `cargo metadata --format-version 1 --no-deps --locked --offline` 的结果读取依赖声明，以 `auction-web-public`、`auction-web-admin` 与 `auction-web-shared` 为入口，递归收集指向工作区成员的路径依赖。目标条件、可选 feature、构建和测试依赖的声明都计入。检查将闭包与两种 Web 指纹共用的清单比较，分别列出缺少与多出的依赖目录。清单不一致时退出 1。相关实现见 [ci/checks/web-build-inputs.pl](web-build-inputs.pl) 与 [ci/release/build-identity.sh](../release/build-identity.sh)。
+`web-build-inputs` 从 `cargo metadata --format-version 1 --no-deps --locked --offline` 的结果读取依赖声明，以 `auction-web-public`、`auction-web-admin` 与 `auction-web-shared` 为入口，递归收集指向工作区成员的路径依赖。目标条件、可选 feature、构建和测试依赖的声明都计入。检查将闭包与两种 Web 指纹共用的清单比较，分别列出缺少与多出的依赖目录。清单不一致时退出 1。两种 Web 指纹经 `path_fingerprint` 计算，并用 `--exclude-dir web/node_modules --exclude-dir web/.tmp` 排除安装与临时目录；缺省 `path_fingerprint` 仍包含这些目录。相关实现见 [ci/checks/web-build-inputs.pl](web-build-inputs.pl) 与 [ci/release/build-identity.sh](../release/build-identity.sh)。
 
 Cargo 只需读取工作区清单，下载缓存为空时也可运行，因此该门禁纳入 `all`。独立的回归脚本使用临时工作区验证传递依赖、指纹、复用和构建结束复核。
 
@@ -57,7 +57,15 @@ Cargo 只需读取工作区清单，下载缓存为空时也可运行，因此�
 bash ci/checks/web-payload-test.sh
 ```
 
-自测在临时目录验证[发布清单门禁](../release/build-identity.sh)接受普通文件和压缩副本，拒绝源码映射、点文件和点目录下的文件，并检查失败时的文件路径诊断。
+自测在临时目录验证[发布清单门禁](../release/build-identity.sh)接受普通文件和压缩副本，拒绝源码映射、点文件和点目录下的文件，并检查失败时的文件路径诊断；Solid 用例还覆盖入口引用闭包、入口标签的闭集语法（固定属性顺序与同行闭合、单引号/无引号/注释/禁用标签拒绝）、唯一的图标链接与带指纹 favicon、首屏 JS 计量、体积预算键与失败诊断。
+
+## Web 双栈构建入口
+
+```bash
+bash ci/checks/web-bundle-test.sh
+```
+
+自测覆盖 `ci/release/web-bundle.sh` 的双栈分支：从 Public 开始请求时，只要 Admin 被标成 Solid 也在清理任何稳定目录之前失败，Public 与 Admin 的哨兵都保持不变；`web/node_modules` 缺失、准备凭据缺失/摘要不符/bun 版本不符、`node_modules/.bin/vite` 缺失时分别失败并提示 `mise run web-prepare`，凭据相符的正例通过；缺省与显式 `dioxus` 得到相同回执并通过替身 `dx` 走原 `bundle` 路径；Solid 回执记录 `profile=solid-release` 与 `stack=solid`；稳定目录用精确目标整体替换；brotli 的枚举、临时清单、`stat`、压缩与副本写入失败都会传播；`ci/release/release.sh` 的非 `verify-web-size` 入口在选择 Solid 时明确拒绝，缺省入口仍可运行只读 `source-fingerprint`。
 
 ## Web 回调属性
 
