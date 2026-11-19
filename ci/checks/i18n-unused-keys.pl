@@ -8,6 +8,10 @@ use warnings;
 use utf8;
 use open qw(:std :encoding(UTF-8));
 
+use FindBin qw($Bin);
+use lib $Bin;
+use I18nSource qw(parse_typescript);
+
 my $ftl = shift // die "用法：i18n-unused-keys.pl <en.ftl>（源文件列表从 STDIN 以 NUL 分隔）\n";
 my @files = sort split /\0/, do { local $/; <STDIN> // '' };
 die "$ftl: 未收到源码文件列表\n" unless @files;
@@ -24,8 +28,20 @@ my %lits;
 for my $file (@files) {
     open my $src, '<', $file or die "$file: $!\n";
     my $code = do { local $/; <$src> };
-    while ($code =~ /"([A-Za-z][A-Za-z0-9_-]*)"/g) {
-        $lits{$1} = 1;
+    close $src;
+    if ($file =~ /\.tsx?$/) {
+        my $parsed = parse_typescript($code);
+        die "$file:1: $parsed->{error}\n" if $parsed->{error};
+        for my $call (@{ $parsed->{calls} }) {
+            $lits{$call->{key}} = 1 if defined $call->{key};
+        }
+        for my $literal (@{ $parsed->{literals} }) {
+            $lits{$literal->{value}} = 1 if $literal->{value} =~ /^[A-Za-z][A-Za-z0-9_-]*$/;
+        }
+    } else {
+        while ($code =~ /"([A-Za-z][A-Za-z0-9_-]*)"/g) {
+            $lits{$1} = 1;
+        }
     }
 }
 

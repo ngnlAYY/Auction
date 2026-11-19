@@ -681,10 +681,7 @@ admin-mail-loading = Loading mail data…
 admin-mail-mailbox = Mailbox key
 admin-mail-load = Confirm
 admin-mail-trigger = Wake all mail pollers
-admin-mail-trigger-accepted = { $pollers ->
-    [one] Request accepted. It will wake { $pollers } poller.
-   *[other] Request accepted. It will wake { $pollers } pollers.
-    }
+admin-mail-trigger-accepted = Request accepted. It will wake { $pollers } poller(s).
 admin-mail-action-success = Mail polling state updated.
 admin-mail-polling-title = Scheduled poll
 admin-mail-polling-state = State

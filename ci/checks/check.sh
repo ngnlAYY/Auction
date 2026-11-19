@@ -380,14 +380,118 @@ fluent_ids() {
 	sed -nE 's/^([A-Za-z][A-Za-z0-9_-]*)[[:space:]]*=.*$/\1/p' "$1" | sort
 }
 
+# i18n 的三项源码检查共用先枚举、逐条核对退出码的清单。`rg` 在目录为空时以 1 退出、
+# 读取失败时以 2 退出；两者都必须变成带目录名的诊断，不能让后面的命令把失败盖掉。
+i18n_enumerate_files() {
+	local -n target=$1
+	local label=$2
+	shift 2
+	local directory file part status
+	target=()
+	if ! part=$(mktemp); then
+		printf '%s\n' "i18n $label源码枚举失败：无法创建临时文件" >&2
+		return 1
+	fi
+	for directory in "$@"; do
+		if [[ ! -d "$directory" ]]; then
+			printf 'i18n %s源码枚举失败：目录 %s 不存在\n' "$label" "$directory" >&2
+			rm -f "$part"
+			return 1
+		fi
+		if rg --files "$directory" -g '*.rs' -g '*.ts' -g '*.tsx' --null >"$part"; then
+			:
+		else
+			status=$?
+			if [[ $status -eq 1 ]]; then
+				printf 'i18n %s源码枚举失败：目录 %s 没有 .rs/.ts/.tsx 源文件\n' "$label" "$directory" >&2
+			else
+				printf 'i18n %s源码枚举失败：无法读取目录 %s（rg 退出码 %s）\n' "$label" "$directory" "$status" >&2
+			fi
+			rm -f "$part"
+			return 1
+		fi
+		while IFS= read -r -d '' file; do
+			target+=("$file")
+		done <"$part"
+	done
+	rm -f "$part"
+	if [[ ${#target[@]} -eq 0 ]]; then
+		printf 'i18n %s源码枚举失败：没有受支持的源文件\n' "$label" >&2
+		return 1
+	fi
+}
+
+i18n_enumerate_ftl() {
+	local -n target_ftl=$1
+	local label=$2
+	shift 2
+	local directory file part status
+	target_ftl=()
+	if ! part=$(mktemp); then
+		printf '%s\n' "i18n $label枚举失败：无法创建临时文件" >&2
+		return 1
+	fi
+	for directory in "$@"; do
+		if [[ ! -d "$directory" ]]; then
+			printf 'i18n %s枚举失败：目录 %s 不存在\n' "$label" "$directory" >&2
+			rm -f "$part"
+			return 1
+		fi
+		if rg --files "$directory" -g '*.ftl' --null >"$part"; then
+			:
+		else
+			status=$?
+			if [[ $status -eq 1 ]]; then
+				printf 'i18n %s枚举失败：目录 %s 没有 .ftl 译文文件\n' "$label" "$directory" >&2
+			else
+				printf 'i18n %s枚举失败：无法读取目录 %s（rg 退出码 %s）\n' "$label" "$directory" "$status" >&2
+			fi
+			rm -f "$part"
+			return 1
+		fi
+		while IFS= read -r -d '' file; do
+			target_ftl+=("$file")
+		done <"$part"
+	done
+	rm -f "$part"
+	if [[ ${#target_ftl[@]} -eq 0 ]]; then
+		printf 'i18n %s枚举失败：没有译文文件\n' "$label" >&2
+		return 1
+	fi
+}
+
 check_i18n() {
-	local actual_locales base candidate directory dotted duplicates expected_locales missing referenced repeated web_directory
+	local actual_locales base candidate directory dotted duplicates expected_locales repeated root surface
+	local dotted_status=0
+	local -a admin_all admin_surface flat_files locale_files public_all public_surface shared_sources
+	root=${AUCTION_I18N_ROOT:-$PWD}
 	expected_locales=$(printf '%s\n' en.ftl ja.ftl ko.ftl zh-CN.ftl zh-TW.ftl)
 
+	# 源码清单只枚举一次；三项检查与两套实现都复用它。`web/admin/src` 尚未创建时允许缺失，
+	# 其余目录缺失、读取失败或意外为空都终止。
+	i18n_enumerate_files public_surface "Public " "$root/crates/auction-web-public/src" "$root/web/public/src" || return 1
+	if [[ -e "$root/web/admin/src" ]]; then
+		if [[ ! -d "$root/web/admin/src" ]]; then
+			printf 'i18n Admin 源码枚举失败：%s 存在但不是目录\n' "$root/web/admin/src" >&2
+			return 1
+		fi
+		i18n_enumerate_files admin_surface "Admin " "$root/crates/auction-web-admin/src" "$root/web/admin/src" || return 1
+	else
+		i18n_enumerate_files admin_surface "Admin " "$root/crates/auction-web-admin/src" || return 1
+	fi
+	i18n_enumerate_files shared_sources "共享层" "$root/crates/auction-web-shared/src" "$root/web/shared/src" || return 1
+	public_all=("${public_surface[@]}" "${shared_sources[@]}")
+	admin_all=("${admin_surface[@]}" "${shared_sources[@]}")
+
 	for surface in auction-web-public auction-web-admin; do
-		directory="crates/$surface/i18n"
+		directory="$root/crates/$surface/i18n"
 		base="$directory/en.ftl"
-		actual_locales=$(rg --files "$directory" -g '*.ftl' | sed 's|.*/||' | sort)
+		i18n_enumerate_ftl locale_files "$directory " "$directory" || return 1
+		actual_locales=$(
+			for file in "${locale_files[@]}"; do
+				printf '%s\n' "${file##*/}"
+			done | sort
+		)
 		if [[ "$actual_locales" != "$expected_locales" ]]; then
 			printf '%s\n' "$directory 必须且只能包含五种受支持语言：" >&2
 			diff -u <(printf '%s\n' "$expected_locales") <(printf '%s\n' "$actual_locales") || true
@@ -401,32 +505,21 @@ check_i18n() {
 				return 1
 			fi
 		done
-
-		# $1 是 Perl 捕获组，不是 Shell 参数，必须保留单引号避免 Shell 展开。
-		# shellcheck disable=SC2016
-		# Solid 实现（web/<surface>）与 Rust 实现共用同一份译文；它的 t("键") 调用同样必须指向已存在的键。
-		web_directory="web/${surface#auction-web-}/src"
-		referenced=$(
-			{
-				rg --files "crates/$surface/src" -g '*.rs' |
-					xargs perl -0777 -ne 'while (/\bt!\(\s*"([A-Za-z0-9_.-]+)"/g) { print "$1\n" }'
-				# 尚未编写的 surface 目录里没有源码：rg 以 1 退出，xargs -r 不启动 perl。
-				if [[ -d "$web_directory" ]]; then
-					{ rg --files "$web_directory" -g '*.ts' -g '*.tsx' || true; } |
-						xargs -r perl -0777 -ne 'while (/\bt\(\s*"([A-Za-z0-9_.-]+)"/g) { print "$1\n" }'
-				fi
-			} | sort -u
-		)
-		missing=$(comm -23 <(printf '%s\n' "$referenced") <(fluent_ids "$base" | uniq))
-		if [[ -n "$missing" ]]; then
-			printf '%s\n' "$surface 引用了不存在的 Fluent 消息 ID：" >&2
-			printf '%s\n' "$missing" >&2
-			return 1
-		fi
 	done
 
-	dotted=$(rg -n '^[A-Za-z][A-Za-z0-9_-]*\.[A-Za-z0-9_.-]*[[:space:]]*=' \
-		crates/auction-web-public/i18n crates/auction-web-admin/i18n || true)
+	# 缺键：Rust 的 t! 与 TypeScript 的 t("…") 都必须指向本 surface 的译文。
+	# 共享层被两端共用；它的测试夹具使用不属于任何 surface 的假键，只扫描生产源码。
+	printf '%s\0' "${public_surface[@]}" | perl ci/checks/i18n-referenced-keys.pl "$root/crates/auction-web-public/i18n/en.ftl" || return 1
+	printf '%s\0' "${shared_sources[@]}" | perl ci/checks/i18n-referenced-keys.pl "$root/crates/auction-web-public/i18n/en.ftl" --skip-tests || return 1
+	printf '%s\0' "${admin_surface[@]}" | perl ci/checks/i18n-referenced-keys.pl "$root/crates/auction-web-admin/i18n/en.ftl" || return 1
+	printf '%s\0' "${shared_sources[@]}" | perl ci/checks/i18n-referenced-keys.pl "$root/crates/auction-web-admin/i18n/en.ftl" --skip-tests || return 1
+
+	i18n_enumerate_ftl flat_files "译文" "$root/crates/auction-web-public/i18n" "$root/crates/auction-web-admin/i18n" || return 1
+	dotted=$(rg -n '^[A-Za-z][A-Za-z0-9_-]*\.[A-Za-z0-9_.-]*[[:space:]]*=' "${flat_files[@]}") || dotted_status=$?
+	if [[ $dotted_status -gt 1 ]]; then
+		printf '%s\n' "i18n 译文枚举失败：无法读取平铺检查的译文清单" >&2
+		return 1
+	fi
 	if [[ -n "$dotted" ]]; then
 		printf '%s\n' "Fluent 消息 ID 不得包含点号：" >&2
 		printf '%s\n' "$dotted" >&2
@@ -434,14 +527,14 @@ check_i18n() {
 	fi
 
 	duplicates=$(
-		while IFS= read -r file; do
+		for file in "${flat_files[@]}"; do
 			repeated=$(fluent_ids "$file" | uniq -d)
 			if [[ -n "$repeated" ]]; then
 				while IFS= read -r key; do
 					printf '%s: %s\n' "$file" "$key"
 				done <<<"$repeated"
 			fi
-		done < <(rg --files crates/auction-web-public/i18n crates/auction-web-admin/i18n -g '*.ftl' | sort)
+		done
 	)
 	if [[ -n "$duplicates" ]]; then
 		printf '%s\n' "Fluent 消息 ID 不得重复：" >&2
@@ -451,26 +544,21 @@ check_i18n() {
 
 	# FTL 键必须在同一 surface 源码的字符串字面量中可达；动态拼接规则见脚本头部说明。
 	# 两套实现共用译文：键在 Rust 实现或 Solid 实现（web/<surface>、web/shared）任一处可达即可。
-	for surface in auction-web-public auction-web-admin; do
-		web_directory="web/${surface#auction-web-}/src"
-		{
-			rg --files "crates/$surface/src" -g '*.rs' --null
-			rg --files crates/auction-web-shared/src -g '*.rs' --null
-			if [[ -d "$web_directory" ]]; then
-				rg --files "$web_directory" web/shared/src -g '*.ts' -g '*.tsx' --null || true
-			fi
-		} | perl ci/checks/i18n-unused-keys.pl "crates/$surface/i18n/en.ftl" || return 1
-	done
+	printf '%s\0' "${public_all[@]}" | perl ci/checks/i18n-unused-keys.pl "$root/crates/auction-web-public/i18n/en.ftl" || return 1
+	printf '%s\0' "${admin_all[@]}" | perl ci/checks/i18n-unused-keys.pl "$root/crates/auction-web-admin/i18n/en.ftl" || return 1
 
-	# 译文变量与调用参数一致：其他语言只能引用英文译文的变量，字面量键调用须传入全部变量。
-	for surface in auction-web-public auction-web-admin; do
-		directory="crates/$surface/i18n"
-		{
-			rg --files "crates/$surface/src" -g '*.rs' --null
-			rg --files crates/auction-web-shared/src -g '*.rs' --null
-		} | perl ci/checks/i18n-placeholders.pl "$directory/en.ftl" "$directory/ja.ftl" \
-			"$directory/ko.ftl" "$directory/zh-CN.ftl" "$directory/zh-TW.ftl" || return 1
-	done
+	# 译文变量与调用参数一致：五种语言引用同一组变量，字面量键调用须传入且只能传入这些变量。
+	printf '%s\0' "${public_all[@]}" | perl ci/checks/i18n-placeholders.pl \
+		"$root/crates/auction-web-public/i18n/en.ftl" "$root/crates/auction-web-public/i18n/ja.ftl" \
+		"$root/crates/auction-web-public/i18n/ko.ftl" "$root/crates/auction-web-public/i18n/zh-CN.ftl" \
+		"$root/crates/auction-web-public/i18n/zh-TW.ftl" || return 1
+	printf '%s\0' "${admin_all[@]}" | perl ci/checks/i18n-placeholders.pl \
+		"$root/crates/auction-web-admin/i18n/en.ftl" "$root/crates/auction-web-admin/i18n/ja.ftl" \
+		"$root/crates/auction-web-admin/i18n/ko.ftl" "$root/crates/auction-web-admin/i18n/zh-CN.ftl" \
+		"$root/crates/auction-web-admin/i18n/zh-TW.ftl" || return 1
+
+	# TypeScript 加载器只接受平铺 Fluent 子集；两套实现共用译文，Rust 侧能解析的写法也要拦下。
+	perl ci/checks/i18n-flat-subset.pl "${flat_files[@]}" || return 1
 }
 
 # MSRV 等于固定工具链：项目不为更旧的 Rust 保留兼容，升级工具链时 rust-version 一起提高。

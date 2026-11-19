@@ -1,0 +1,68 @@
+[
+  {
+    "name": "lf",
+    "text": "key = plain\n",
+    "valid": true,
+    "line": null
+  },
+  {
+    "name": "crlf",
+    "text": "key = plain\r\n",
+    "valid": true,
+    "line": null
+  },
+  {
+    "name": "cr",
+    "text": "key = plain\r",
+    "valid": true,
+    "line": null
+  },
+  {
+    "name": "comment-u2028",
+    "text": "# 注释\u2028仍在注释里\nkey = plain\n",
+    "valid": true,
+    "line": null
+  },
+  {
+    "name": "continuation-lf",
+    "text": "key = first\n    second\n",
+    "valid": false,
+    "line": 2
+  },
+  {
+    "name": "continuation-crlf",
+    "text": "key = first\r\n    second\r\n",
+    "valid": false,
+    "line": 2
+  },
+  {
+    "name": "continuation-cr",
+    "text": "key = first\r    second\r",
+    "valid": false,
+    "line": 2
+  },
+  {
+    "name": "u2028",
+    "text": "key = first\u2028second\n",
+    "valid": false,
+    "line": 1
+  },
+  {
+    "name": "u2029",
+    "text": "key = first\u2029second\n",
+    "valid": false,
+    "line": 1
+  },
+  {
+    "name": "string-dollar",
+    "text": "key = 花费 {\"$USD\"}\n",
+    "valid": true,
+    "line": null
+  },
+  {
+    "name": "variable",
+    "text": "key = 你好 { $name }\n",
+    "valid": true,
+    "line": null
+  }
+]

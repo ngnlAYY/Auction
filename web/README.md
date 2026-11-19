@@ -229,7 +229,7 @@ export function Blacklist(): JSX.Element {
   | `web/public/src/surface/query/category.ts`、`presentation/desktop.tsx`、`presentation/mobile.tsx` | 装备分类多选：地址栏 `type` 与接口 `category` 是逗号分隔的分类键列表；桌面是可多选的开关按钮，手机是多选下拉面板，面板里的勾选是草稿、关闭面板时一次生效（Rust 版单选） |
   | `web/shared/src/router/outlet.tsx`、`ui/bootstrap/page-load-recovery.ts` | 目标页面的代码尚未加载时立即卸载上一个页面。页面分块加载失败时，用当前标签页在 `sessionStorage` 保留的最近 8 条路径与时间判断是否重载，路径不含查询与片段。30 秒内已重载过同一路径或存储不可用时显示错误横幅。Rust 版是单个 WASM 包，无需分块恢复 |
   | `web/public/src/surface/settings.tsx`、`styles/settings-page.css` | 设置页 `/settings`（语言与主题）：Rust 版没有这个页面；入口只在手机导航里，桌面顶栏仍保留两个切换器 |
-- 译文是各应用 `i18n/` 下的五个 `.ftl` 文件（en、zh-CN、zh-TW、ja、ko），键集合一致，键名用连字符。译文只使用 Fluent 的平铺子集：每条消息占一行，写成 `键 = 文本`，文本里的占位只有 `{ $变量 }` 与字符串字面量 `{"…"}` 两种；加载器遇到子集之外的写法会拒绝整份译文。Public 默认 en，Admin 默认 zh-CN；偏好键 `hv.lang` 与 `hv.theme` 是固定契约。
+- 译文是各应用 `i18n/` 下的五个 `.ftl` 文件（en、zh-CN、zh-TW、ja、ko），键集合一致，键名用连字符。译文只使用 Fluent 的平铺子集：每条消息占一行，写成 `键 = 文本`，文本里的占位只有 `{ $变量 }` 与字符串字面量 `{"…"}` 两种；加载器遇到子集之外的写法会拒绝整份译文。该子集由 `i18n` 门禁的 [`i18n-flat-subset.pl`](../ci/checks/i18n-flat-subset.pl) 静态核对，扩展加载器语法时两边一起改。Public 默认 en，Admin 默认 zh-CN；偏好键 `hv.lang` 与 `hv.theme` 是固定契约。
 
 ## Public 竞价命令恢复
 

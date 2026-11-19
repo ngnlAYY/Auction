@@ -89,6 +89,22 @@ bash ci/checks/web-boundaries-test.sh
 
 动态导入只接受字符串字面量或无插值模板字面量；带插值或非字面量参数报错（无法静态判定）。唯一例外是 [web/tooling/boundary-rules.ts](../../web/tooling/boundary-rules.ts) 的 `VIRTUAL_MODULE_TEST_FILES` 点名的几个测试夹具里的非字面量 `import()`（Bun 测试插件的虚拟模块）；新增同类夹具要把完整路径加进这张清单；其他文件的非字面量 `import()` 与所有非字面量 `require()` 都报错，调用目标外面套任意层括号不影响 `require()` 识别。新增同类夹具必须修改检查器里的点名清单。读取 `web/admin/src` 不存在时只豁免这一个已知的尚未并入情况；其他源码目录读取失败、`package.json`/tsconfig 解析失败、配置不一致、实现模块加载失败或扫描结果为空都以退出码 2 失败。退出码 1 仅表示发现越界导入。`ci/checks/web-boundaries-test.sh` 用临时仓库覆盖允许、拒绝与退出码 2 用例；启用 TypeScript 解析器的整体用例在能运行解析器的环境中执行。
 
+## 译文门禁（i18n）
+
+```bash
+bash ci/checks/check.sh i18n
+bash ci/checks/i18n-test.sh
+```
+
+逐个 surface 读取 `crates/auction-web-<surface>/i18n` 的五个 `.ftl`，再对 Rust 与 `web/` 两套实现运行下列检查。只有 `web/admin/src` 允许暂不存在；其余源码目录缺失、读取失败或没有受支持的源文件都以带目录名的诊断终止。三项源码检查共用一份先枚举、逐条核对 `rg` 退出码的清单，`web/shared/src` 与 `crates/auction-web-shared/src` 始终参与。
+
+- 缺键：[`i18n-referenced-keys.pl`](i18n-referenced-keys.pl) 要求字面量键调用 `t!("…")` 与 `t("…")`（单引号、双引号或无插值模板字面量）指向当前 surface 的键。TypeScript 先从词法上去掉注释，跳过字符串与模板字面量的正文；模板插值 `${…}` 里的代码仍继续扫描，再提取调用。`t` 可以来自导入、解构或函数参数。非字面量键与 Rust 的现口径一样跳过，由闭集映射与字符串字面量可达性兜底。共享层的测试夹具含有不属于任何 surface 的假键，因此共享层以 `--skip-tests` 调用：跳过 `*.test.ts(x)`、独立的 Rust `tests.rs` / `tests/` 测试模块，并只去掉 Rust 文件里顶层 `#[cfg(test)] mod … { … }` 自身的范围，保留模块之后的代码与原始行号；surface 自身的测试源码仍全部扫描。
+- 未引用键：[`i18n-unused-keys.pl`](i18n-unused-keys.pl) 要求 `en.ftl` 的每个键在同一 surface 的 Rust 或 TypeScript 源码字符串字面量中可达；两套实现任一处引用即可，设置表单的 `{id}-help` 拼接规则照旧。
+- 变量与参数：[`i18n-placeholders.pl`](i18n-placeholders.pl) 先要求同一个键在五种语言里引用的变量集合完全相同（诊断带语言文件与行号），再核对字面量键调用传入的参数集合：少传与多传都报。变量只从 `{ $变量 }` 收集，`{"$USD"}` 是字符串字面量而不是变量。TypeScript 的完整形态只有 `t(键)` 与 `t(键, { 名字: 值, 简写名, … })`（允许尾逗号与换行）；对象里出现展开属性、计算属性名、第二实参不是对象字面量、第二实参为空或还有第三实参时，报“调用形态无法静态核对”并给出行号，不再跳过。
+- 平铺子集：[`i18n-flat-subset.pl`](i18n-flat-subset.pl) 要求每条消息是单行的 `键 = 文本`；占位只允许 `{ $变量 }` 与 `{"…"}`（含 `\\`、`\"`、`\uXXXX`、`\UXXXXXX` 转义）。续行、选择表达式、属性、术语定义与引用、消息引用、函数调用、裸右花括号和空正文按文件与行号报错；注释行与空行跳过。分行与加载器一致：LF、CRLF、裸 CR 都是换行，U+2028/U+2029 留在行内并报错。这份子集必须与 [`web/shared/src/ui/i18n/resource.ts`](../../web/shared/src/ui/i18n/resource.ts) 的加载器同步；扩展加载器语法时也要扩展本检查。两边共用 [`i18n-subset-samples.json`](i18n-subset-samples.json) 的边界样本，加载器一侧由 `web/shared/src/ui/i18n/resource-subset.test.ts` 读取。`ci/checks/i18n-test.sh` 在临时仓库骨架上运行真实的 `bash ci/checks/check.sh i18n`，覆盖共享层错误、缺失目录、枚举失败与各反例的文件行号。
+
+`ci/checks/i18n-test.sh` 用临时目录为上述每一项跑正例与反例，并核对诊断中的文件与行号；改动检查器或 `check.sh` 的 `i18n` 项后运行它。`check.sh` 的 `i18n` 项接受 `AUCTION_I18N_ROOT` 指向另一份仓库根，默认使用当前仓库；自测用它把真实入口指向临时骨架。
+
 ## unwrap/expect 门禁
 
 根 [Cargo.toml](../../Cargo.toml) 的 workspace Clippy 将 `unwrap_used`、`expect_used` 设为 `deny`；所有成员继承统一策略。`lint` 检查 native 全工作区、全部 target 与 feature，`wasm` 分别检查 Public/Admin 浏览器及共享依赖，覆盖只在 `wasm32` 编译的分支；它还以 `wasm-release` profile 对两个页面 crate 运行 `cargo check` 并拒绝 rustc 告警，覆盖只在发布构型出现的告警（Clippy 规则仍只在 dev 构型检查）。构建脚本随所属成员检查；Clippy 会跳过部分宏展开，因此新增或修改本仓库宏时仍须核对定义中的 `unwrap`/`expect`，不能只依靠调用点的 Clippy 结果。
