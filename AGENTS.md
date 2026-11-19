@@ -182,4 +182,6 @@ mise run verify     # bash ci/checks/check.sh all fmt check dependency-versions 
 - 批量改导入或模块名时，`cargo fix` 只看非测试构建，会删掉只被测试模块使用的父模块导入；完成后编译测试目标，并在测试模块补上显式导入。
 - `mise run web-build` 在构建前后各计算一次输入指纹，构建期间修改输入文件会以“Web 构建期间输入发生变化”失败；构建时不要并行编辑仓库。
 - 改 `mise.toml` 里的工具版本、构建选项或 `rust-toolchain.toml` 后，运行 `mise install` 与 `mise lock`，把 `mise.lock` 一并提交；升级 Rust 工具链时同时把 `Cargo.toml` 的 `rust-version` 改成同一版本：CI 按锁文件安装，`mise.lock` 还参与构建输入指纹，变化会让已有页面与发布制品失效。
+- Dioxus 0.7 的 `rsx!` 只认模板**第一个根节点**上的 `key`：写在嵌套节点上的 key 被忽略，写在 `if` / `match` 分支或内层 `rsx!` 里、而外层是循环的 key 只标识内层片段，外层仍按位置比较。调试构建没有任何告警，测试与 Clippy 都发现不了。列表项的 key 直接写在循环体的第一个节点上；需要按身份重建单个组件时用单元素的带 key 循环（如 `for id in [id] { Detail { key: "{id}", id } }`）。
+- 默认门禁用 dev profile 编译，只在发布构建（`wasm-release`）里出现的告警不会被 `mise run verify` 发现；`mise run web-build` 的输出里出现 `warning` 时要查明原因，它可能指向只在发布构建里失效的代码。
 - 本机编译加速（sccache、mold 等）只配置在用户级 `~/.cargo/config.toml`，不改仓库 profile；发布脚本会清空 Cargo 配置中的 rustc 包装器，不影响发布构建身份。多个工作树并行构建时各用独立的 target 目录。
