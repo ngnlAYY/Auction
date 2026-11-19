@@ -171,8 +171,7 @@ impl MoogleMailParser {
         }
         let text = normalize_text(count.text().collect::<String>());
         let available = text
-            .strip_prefix("Selected 0 of ")
-            .and_then(|value| value.strip_suffix(" matching equipment available to organize"))
+            .strip_circumfix("Selected 0 of ", " matching equipment available to organize")
             .and_then(|value| value.parse::<usize>().ok())
             .ok_or_else(fail)?;
         if text != format!("Selected 0 of {available} matching equipment available to organize") {
@@ -199,11 +198,9 @@ impl MoogleMailParser {
                     node.value().name() == "fieldset" && node.attr("disabled").is_some()
                 })
                 || input.attr("id").and_then(|id| id.strip_prefix('e')) != Some(eid)
-                || row
-                    .attr("onclick")
-                    .and_then(|handler| handler.strip_prefix("return select_equip("))
-                    .and_then(|handler| handler.strip_suffix(",event,this)"))
-                    != Some(eid)
+                || row.attr("onclick").and_then(|handler| {
+                    handler.strip_circumfix("return select_equip(", ",event,this)")
+                }) != Some(eid)
                 || !seen.insert(eid)
             {
                 return Err(fail());

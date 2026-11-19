@@ -69,6 +69,7 @@ impl MoogleMailGateway {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -173,7 +174,7 @@ mod tests {
             .require_clean_compose(&session, MoogleMailWorld::Main, &mut clean)
             .await
             .expect_err("撤销后不得沿用证明");
-        assert!(matches!(error, InternalEvidenceError::Revoked));
+        assert_matches!(error, InternalEvidenceError::Revoked);
         assert_eq!(compose_reads(&server), 3);
     }
 }

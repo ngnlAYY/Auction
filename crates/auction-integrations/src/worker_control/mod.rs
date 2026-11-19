@@ -211,6 +211,7 @@ fn classify_request_error(error: reqwest::Error) -> WorkerRemoteReadError {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
     use std::path::PathBuf;
 
     use auction_application::operations::WorkerRemoteReadPort;
@@ -337,8 +338,9 @@ mod tests {
         let (path, listener) = socket_path();
         let server = tokio::spawn(serve_once(listener, "HTTP/1.1 200 OK", "ok", Some("{}"), "v2"));
         let error = client(path).read_equipment(equipment_request()).await;
-        assert!(
-            matches!(error, Err(WorkerRemoteReadError::Incompatible)),
+        assert_matches!(
+            error,
+            Err(WorkerRemoteReadError::Incompatible),
             "unexpected result: {error:?}"
         );
         server.await.expect("server task");
@@ -347,7 +349,7 @@ mod tests {
         let (path, listener) = socket_path();
         let server = tokio::spawn(serve_once(listener, "HTTP/1.1 200 OK", "ok", Some("{}"), "v1"));
         let error = client(path).read_equipment(equipment_request()).await;
-        assert!(matches!(error, Err(WorkerRemoteReadError::Incompatible)));
+        assert_matches!(error, Err(WorkerRemoteReadError::Incompatible));
         server.await.expect("server task");
     }
 

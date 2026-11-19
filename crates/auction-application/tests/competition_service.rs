@@ -7,6 +7,7 @@
 // 测试夹具的固定值失败即测试失败；不对测试装配伪造回退。
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::assert_matches;
 use std::collections::HashMap;
 use std::future::ready;
 use std::sync::{Arc, Mutex};
@@ -382,7 +383,7 @@ fn replays_return_the_original_result_and_conflicting_requests_fail() {
 
     // 同一命令 ID 换了金额就是另一份请求：返回冲突，不能覆盖或追加事实。
     let conflict = block_on(service.place_bid(place_bid(command_id, lot_id, bidder, 110_000)));
-    assert!(matches!(conflict, Err(ApplicationError::CommandLedger(CommandLedgerError::Conflict))));
+    assert_matches!(conflict, Err(ApplicationError::CommandLedger(CommandLedgerError::Conflict)));
 
     let world = shared.lock().unwrap();
     assert_eq!(world.applied.len(), 1, "重放与冲突都不得再次应用计划");
@@ -615,9 +616,9 @@ fn slow_proxy_request_hash_must_match_the_stored_command() {
     assert_eq!(replayed, plan);
     // 同 ID 不同摘要是冲突。
     let forged = ExecuteSlowProxyCommand { request_hash: RequestHash::new([9; 32]), ..command };
-    assert!(matches!(
+    assert_matches!(
         block_on(service.execute_slow_proxy(forged)),
         Err(ApplicationError::CommandLedger(CommandLedgerError::Conflict))
-    ));
+    );
     assert_eq!(shared.lock().unwrap().slow_applied.len(), 1);
 }

@@ -110,7 +110,7 @@ impl EhentaiClient {
                 );
             })?;
         }
-        cookie.is_active().then_some(()).ok_or(())
+        cookie.is_active().ok_or(())
     }
 }
 

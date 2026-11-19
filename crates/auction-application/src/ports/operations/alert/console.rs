@@ -458,6 +458,8 @@ pub(crate) fn valid_alert_reason(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use super::*;
 
     #[test]
@@ -510,7 +512,7 @@ mod tests {
                 "维护窗口"
             )
         );
-        assert!(matches!(
+        assert_matches!(
             OperationsAlertSilenceCommand::new(
                 Uuid::new_v4(),
                 fingerprint,
@@ -520,8 +522,8 @@ mod tests {
                 ""
             ),
             Err(OperationsAlertError::Invalid)
-        ));
-        assert!(matches!(
+        );
+        assert_matches!(
             OperationsAlertSilenceCommand::new(
                 Uuid::new_v4(),
                 fingerprint,
@@ -531,19 +533,19 @@ mod tests {
                 ""
             ),
             Err(OperationsAlertError::Invalid)
-        ));
+        );
     }
 
     #[test]
     fn acknowledge_rejects_empty_actor_and_zero_fingerprint() {
-        assert!(matches!(
+        assert_matches!(
             OperationsAlertAcknowledgeCommand::new(Uuid::new_v4(), [0; 32], 1, "admin", ""),
             Err(OperationsAlertError::Invalid)
-        ));
-        assert!(matches!(
+        );
+        assert_matches!(
             OperationsAlertAcknowledgeCommand::new(Uuid::new_v4(), [2; 32], 1, "", ""),
             Err(OperationsAlertError::Invalid)
-        ));
+        );
     }
 
     #[test]

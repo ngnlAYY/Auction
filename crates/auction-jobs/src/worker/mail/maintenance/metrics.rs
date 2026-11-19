@@ -76,6 +76,7 @@ pub(super) fn mail_world(world_id: &str) -> Option<MailWorld> {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
     use std::sync::{Arc, Mutex};
 
     use auction_application::external_metrics::{
@@ -104,10 +105,10 @@ mod tests {
     fn recorded_outcome(observer: &RecordingObserver) -> MailMaintenanceOutcome {
         let events = observer.0.lock().expect("lock");
         assert_eq!(events.len(), 2);
-        assert!(matches!(
+        assert_matches!(
             events[0],
             ExternalMetricsEvent::MailMaintenanceStarted { world: MailWorld::Main }
-        ));
+        );
         match events[1] {
             ExternalMetricsEvent::MailMaintenanceFinished { world: MailWorld::Main, outcome } => {
                 outcome

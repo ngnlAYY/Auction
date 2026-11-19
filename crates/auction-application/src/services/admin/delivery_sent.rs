@@ -96,6 +96,7 @@ fn validate_reference(reference: &str, external_mail_id: &str) -> Result<(), App
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
     use std::sync::Mutex;
 
     use auction_time::Timestamp;
@@ -316,10 +317,10 @@ mod tests {
             ["", "compose_discard:7000001", "mailbox_sweep:999", "mailbox_sweep:7000001 "]
         {
             let error = block_on(service.confirm(command(delivery_id), invalid));
-            assert!(matches!(
+            assert_matches!(
                 error,
                 Err(ApplicationError::DeliveryAdmin(DeliveryAdminError::Invalid))
-            ));
+            );
         }
         assert!(confirmation.submitted.lock().expect("test mutex").is_none());
     }
@@ -347,7 +348,7 @@ mod tests {
         let mut wrong = evidence();
         wrong.external_mail_id = "999".to_owned();
         let error = block_on(service.preview(delivery_id, wrong, "mailbox_sweep:999"));
-        assert!(matches!(error, Err(ApplicationError::DeliveryAdmin(DeliveryAdminError::Stale))));
+        assert_matches!(error, Err(ApplicationError::DeliveryAdmin(DeliveryAdminError::Stale)));
     }
 
     #[test]
@@ -366,7 +367,7 @@ mod tests {
         );
         let reference = "mailbox_sweep:7000001";
         let stale = block_on(service.preview(delivery_id, before.clone(), reference));
-        assert!(matches!(stale, Err(ApplicationError::DeliveryAdmin(DeliveryAdminError::Stale))));
+        assert_matches!(stale, Err(ApplicationError::DeliveryAdmin(DeliveryAdminError::Stale)));
 
         let mut current = before;
         current.collected = true;

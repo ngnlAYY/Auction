@@ -49,7 +49,7 @@ pub(crate) fn parse_equipment_url(
 fn normalize_equipment_url(value: &str) -> Option<&str> {
     let value = value.trim_end_matches(equipment_url_sentence_punctuation);
     let value = if value.starts_with('<') || value.ends_with('>') {
-        value.strip_prefix('<')?.strip_suffix('>')?
+        value.strip_circumfix('<', '>')?
     } else {
         value
     };

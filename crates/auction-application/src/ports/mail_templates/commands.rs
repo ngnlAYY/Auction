@@ -190,6 +190,8 @@ fn invalid<T>(_: T) -> MailTemplateStoreError {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use auction_time::Timestamp;
     use uuid::Uuid;
 
@@ -251,14 +253,14 @@ mod tests {
     #[test]
     fn body_is_checked_against_the_template_rules_before_it_is_accepted() {
         // 缺必需占位符、带未登记占位符、未知模板键都在写入前被拒绝。
-        assert!(matches!(
+        assert_matches!(
             set(0, "Payout: {amount} Credits").accept(None, now()),
             Err(MailTemplateStoreError::InvalidBody(_))
-        ));
-        assert!(matches!(
+        );
+        assert_matches!(
             set(0, "{item_name} {amount} {reference} {login_key}").accept(None, now()),
             Err(MailTemplateStoreError::InvalidBody(_))
-        ));
+        );
         let unknown =
             MailTemplateCommand { template_key: "no_such_template".to_owned(), ..set(0, PAYOUT) };
         assert_eq!(unknown.accept(None, now()), Err(MailTemplateStoreError::UnknownTemplate));

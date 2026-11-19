@@ -82,6 +82,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
@@ -252,9 +253,9 @@ mod tests {
             status: AdminCredentialCheckStatus::Valid,
         }];
         let (service, _) = service(vec![active.clone(), active], isekai);
-        assert!(matches!(
+        assert_matches!(
             block_on(service.check(CREDENTIAL, 4)),
             Err(ApplicationError::AdminCredential(AdminCredentialError::StoredResultCorrupt))
-        ));
+        );
     }
 }

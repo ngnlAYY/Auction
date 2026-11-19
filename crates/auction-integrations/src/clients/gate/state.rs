@@ -136,6 +136,7 @@ impl PriorityGateState {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
     use std::time::{Duration, Instant};
 
     use super::{GateClass, GatePoll, LOW_PRIORITY_FLOOR_AFTER, PriorityGateState};
@@ -182,7 +183,7 @@ mod tests {
         }
         // 保底把第四个令牌留给仍在等待的后台，前台不能再插队。
         let extra_foreground = gate.register(GateClass::Foreground);
-        assert!(matches!(gate.poll(extra_foreground, at), GatePoll::WaitUntil(_)));
+        assert_matches!(gate.poll(extra_foreground, at), GatePoll::WaitUntil(_));
         assert_eq!(gate.poll(background, at), GatePoll::Granted);
         grants.push(GateClass::Background);
         assert_eq!(

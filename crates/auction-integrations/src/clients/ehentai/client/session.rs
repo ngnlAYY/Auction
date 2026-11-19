@@ -70,6 +70,6 @@ impl EhentaiClient {
                 && pairs.iter().filter(|(key, _)| key == "CODE").count() == 1
                 && pairs.iter().any(|(key, value)| key == "CODE" && value == "03");
         }
-        if profile && logout { Ok(()) } else { Err(EhentaiError::protocol(operation, false)) }
+        (profile && logout).ok_or_else(|| EhentaiError::protocol(operation, false))
     }
 }

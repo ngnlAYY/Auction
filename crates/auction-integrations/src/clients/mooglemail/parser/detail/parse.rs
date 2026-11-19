@@ -233,7 +233,7 @@ pub(crate) fn parse_attachment_manifest(
 
 pub(crate) fn parse_credits_text(value: &str) -> Option<i64> {
     let value = value.strip_suffix(" Credits")?;
-    let value = value.strip_suffix('x').unwrap_or(value);
+    let value = value.trim_suffix('x');
     let amount = parse_canonical_credits(value)?;
     (amount > 0).then_some(amount)
 }

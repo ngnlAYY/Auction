@@ -378,6 +378,8 @@ fn returned_receipt_matches(
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use auction_application::mail::{MoogleMailboxReturnTake, MoogleMailboxReturnTakeIdentity};
 
     use super::returned_take_state;
@@ -513,11 +515,9 @@ mod tests {
         assert_eq!((assets.sender.as_str(), assets.credits, assets.cod), ("MoogleMail", 90, 0));
         assert!(assets.equipment_ids.is_empty());
         state.claimable = false;
-        assert!(
-            matches!(
-                returned_take_state(&state, &identity()),
-                MoogleMailboxReturnTake::Present { claimable: false, .. }
-            ),
+        assert_matches!(
+            returned_take_state(&state, &identity()),
+            MoogleMailboxReturnTake::Present { claimable: false, .. },
             "仍挂资产但没有领取入口时如实报告不可领取"
         );
     }

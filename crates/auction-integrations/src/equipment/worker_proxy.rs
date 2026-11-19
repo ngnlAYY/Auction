@@ -60,6 +60,8 @@ impl AdminIntakeSourceReader for WorkerEquipmentSourceReader {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use auction_application::operations::{
         WorkerEquipmentReadRequest, WorkerEquipmentReadResponse, WorkerRemoteReadError,
         WorkerRemoteReadFuture, WorkerSentLookupRequest, WorkerSentLookupResponse,
@@ -131,18 +133,15 @@ mod tests {
     async fn pause_and_unavailable_map_to_admin_intake_errors() {
         let paused = WorkerEquipmentSourceReader::new(Stub::failing(WorkerRemoteReadError::Paused));
         let error = paused.read_url("main".to_owned(), url()).await.expect_err("paused");
-        assert!(matches!(
+        assert_matches!(
             error,
             ApplicationError::AdminIntake(AdminIntakeError::ExternalAccessPaused)
-        ));
+        );
 
         let unavailable =
             WorkerEquipmentSourceReader::new(Stub::failing(WorkerRemoteReadError::Unavailable));
         let error = unavailable.read_url("main".to_owned(), url()).await.expect_err("unavailable");
-        assert!(matches!(
-            error,
-            ApplicationError::AdminIntake(AdminIntakeError::SourceUnavailable)
-        ));
+        assert_matches!(error, ApplicationError::AdminIntake(AdminIntakeError::SourceUnavailable));
     }
 
     #[tokio::test]
@@ -152,6 +151,6 @@ mod tests {
             .read_url("shared".to_owned(), url())
             .await
             .expect_err("invalid world must fail before the worker call");
-        assert!(matches!(error, ApplicationError::AdminIntake(AdminIntakeError::InvalidCommand)));
+        assert_matches!(error, ApplicationError::AdminIntake(AdminIntakeError::InvalidCommand));
     }
 }

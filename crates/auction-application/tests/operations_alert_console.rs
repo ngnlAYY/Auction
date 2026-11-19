@@ -3,6 +3,7 @@
 //! 告警台投影与命令边界：只验证纯应用层闭集、分页校验和幂等摘要，
 //! 不连接数据库、不发送通知。
 
+use std::assert_matches;
 use std::collections::BTreeSet;
 
 use auction_application::operations::{
@@ -130,12 +131,12 @@ fn silence_hash_binds_action_duration_actor_and_reason() {
         assert_ne!(base, other);
     }
 
-    assert!(matches!(
+    assert_matches!(
         OperationsAlertSilenceCommand::new(Uuid::new_v4(), [0; 32], 1, 3_600, "admin", ""),
         Err(OperationsAlertError::Invalid)
-    ));
-    assert!(matches!(
+    );
+    assert_matches!(
         OperationsAlertSilenceCommand::new(Uuid::nil(), fingerprint, 1, 3_600, "admin", ""),
         Err(OperationsAlertError::Invalid)
-    ));
+    );
 }

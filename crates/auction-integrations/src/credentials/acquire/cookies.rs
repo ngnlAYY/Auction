@@ -230,7 +230,7 @@ fn validate_attributes<'a>(
 }
 
 fn valid_domain(value: &str, endpoint: &Url) -> bool {
-    let value = value.strip_prefix('.').unwrap_or(value);
+    let value = value.trim_prefix('.');
     endpoint.host_str().is_some_and(|host| {
         value.eq_ignore_ascii_case(host)
             || (host == "forums.e-hentai.org" && value.eq_ignore_ascii_case("e-hentai.org"))

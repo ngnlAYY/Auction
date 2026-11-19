@@ -153,6 +153,7 @@ pub(crate) mod fixture {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -183,7 +184,7 @@ mod tests {
 
         let started = tokio::time::Instant::now();
         let error = probe_owner(&owner).await.expect_err("挂起的探测必须超时");
-        assert!(matches!(error, OwnerProbeError::Timeout(..)));
+        assert_matches!(error, OwnerProbeError::Timeout(..));
         assert_eq!(error.phase("timeout", "failed"), "timeout");
         assert!(started.elapsed() >= OWNER_PROBE_TIMEOUT);
         assert!(!owner.is_valid(), "超过探测上限仍按原设计撤销 owner");
@@ -195,7 +196,7 @@ mod tests {
         let owner: Arc<dyn AdminCredentialRuntimeOwnership> = Arc::new(GatedOwnership::failing());
 
         let error = probe_owner(&owner).await.expect_err("owner 失效必须失败关闭");
-        assert!(matches!(error, OwnerProbeError::Failed(..)));
+        assert_matches!(error, OwnerProbeError::Failed(..));
         assert_eq!(error.phase("timeout", "failed"), "failed");
     }
 }

@@ -201,22 +201,11 @@ impl EhentaiClient {
         })? {
             if body.0.len().saturating_add(chunk.len()) > self.maximum_response_bytes
                 || budget.is_some_and(|budget| {
-                    // MSRV 尚未稳定 try_update，而新工具链已弃用 fetch_update；用同一 CAS 语义扣减。
-                    let mut remaining = budget.load(Ordering::Relaxed);
-                    loop {
-                        let Some(next) = remaining.checked_sub(chunk.len()) else {
-                            return true;
-                        };
-                        match budget.compare_exchange_weak(
-                            remaining,
-                            next,
-                            Ordering::Relaxed,
-                            Ordering::Relaxed,
-                        ) {
-                            Ok(_) => return false,
-                            Err(current) => remaining = current,
-                        }
-                    }
+                    budget
+                        .try_update(Ordering::Relaxed, Ordering::Relaxed, |remaining| {
+                            remaining.checked_sub(chunk.len())
+                        })
+                        .is_err()
                 })
             {
                 return Err(if write_started {

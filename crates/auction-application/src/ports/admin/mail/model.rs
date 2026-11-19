@@ -105,7 +105,6 @@ impl AdminMailPollStateRequest {
     /// 校验邮箱标识，防止空值或控制字符穿过应用边界。
     pub fn validate(&self) -> Result<(), AdminMailError> {
         valid_text(&self.mailbox_key, MAX_ADMIN_MAILBOX_KEY_BYTES)
-            .then_some(())
             .ok_or(AdminMailError::InvalidRequest)
     }
 }

@@ -7,6 +7,7 @@
 //! 覆盖限制：已采集的 Sent 详情都带附件，替身无法回放附件写入后的读回，因此不在这里跑完整的
 //! `send()` 成功证明；候选详情的逐字段比对由 `verify_candidates` 的既有路径负责。
 
+use std::assert_matches;
 use std::{
     collections::HashSet,
     sync::{Arc, Mutex},
@@ -212,8 +213,8 @@ async fn watermark_baseline_fails_closed_when_sent_cannot_be_read() {
     // 边界失败后回退完整枚举，同样失败才返回；回退本身留下闭集事件。
     let fallbacks = recorder.fallbacks();
     assert_eq!(fallbacks.len(), 1, "只回退一次");
-    assert!(matches!(
+    assert_matches!(
         fallbacks[0],
         (SentBaselinePhase::BeforeSend, SentBaselineReason::ReadUnavailable)
-    ));
+    );
 }

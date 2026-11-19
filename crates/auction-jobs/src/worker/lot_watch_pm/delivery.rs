@@ -154,7 +154,7 @@ pub(super) async fn process(
 
 /// timeout 可能先 poll 出迟到回执；每次阶段交接都复核原截止，过期后只保留持久 claim。
 fn check_deadline(deadline: tokio::time::Instant) -> Result<(), LotWatchError> {
-    if tokio::time::Instant::now() >= deadline { Err(LotWatchError::Unavailable) } else { Ok(()) }
+    (tokio::time::Instant::now() < deadline).ok_or(LotWatchError::Unavailable)
 }
 
 fn check_claim_deadline(

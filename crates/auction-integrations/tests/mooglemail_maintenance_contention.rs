@@ -13,6 +13,7 @@
 // 测试夹具的固定值失败即测试失败；不对测试装配伪造回退。
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::assert_matches;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -260,7 +261,7 @@ async fn isolated_maintenance_completes_within_the_same_budget() {
         service.observe_read_mail("main", observation_deadline.into_std()),
     )
     .await;
-    assert!(matches!(observed, Ok(Ok(rows)) if rows > 0), "{observed:?}");
+    assert_matches!(observed, Ok(Ok(rows)) if rows > 0, "{observed:?}");
     let requests = server.requests();
     assert_eq!(
         requests[2..],

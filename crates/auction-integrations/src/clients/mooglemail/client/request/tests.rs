@@ -4,6 +4,7 @@
 //! 仍在处理的请求重叠，被放弃的写入也不补发；不被放弃的请求节奏与串行不变。替身 `DetachedDelay`
 //! 不随客户端断开停止处理，在途计数保持到延迟结束，重叠会体现在 `max_concurrent_requests` 上。
 
+use std::assert_matches;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -430,11 +431,9 @@ async fn uncancelled_writes_keep_the_gate_pace_and_their_results() {
     other.expect("读取成功");
     for written in [first, second, third] {
         let body = written.expect("写入成功");
-        assert!(
-            matches!(
-                MoogleMailParser.inspect_send_response(&body, MoogleMailWorld::Main),
-                (Ok(None), Ok(None))
-            ),
+        assert_matches!(
+            MoogleMailParser.inspect_send_response(&body, MoogleMailWorld::Main),
+            (Ok(None), Ok(None)),
             "写入的回应正文须原样交给调用方"
         );
     }

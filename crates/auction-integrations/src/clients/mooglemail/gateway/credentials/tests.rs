@@ -1,5 +1,6 @@
 //! 凭据会话的 owner 探测回归：外层预算取消只放弃等待，不撤销邮件运行时所有权。
 
+use std::assert_matches;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -78,7 +79,7 @@ async fn internal_probe_deadline_expires_without_revoking_the_owner() {
 
     let deadline = Instant::now() + Duration::from_millis(20);
     let error = session.check_internal_current(deadline).await.expect_err("探测挂起时预算先到期");
-    assert!(matches!(error, InternalEvidenceError::Expired));
+    assert_matches!(error, InternalEvidenceError::Expired);
     assert!(owner.is_valid(), "证据预算到期不得撤销 owner");
 
     gated.release_and_wait().await;
@@ -99,5 +100,5 @@ async fn internal_probe_failure_is_reported_as_revoked() {
         .check_internal_current(Instant::now() + Duration::from_secs(5))
         .await
         .expect_err("owner 失效必须失败关闭");
-    assert!(matches!(error, InternalEvidenceError::Revoked));
+    assert_matches!(error, InternalEvidenceError::Revoked);
 }

@@ -36,8 +36,7 @@ pub fn recovery_buyer_blacklist_reason(return_count: u32) -> String {
 pub fn is_recovery_buyer_blacklist_reason(value: &str) -> bool {
     value == RECOVERY_BUYER_BLACKLIST_LEGACY_PUBLIC_REASON
         || value
-            .strip_prefix("连续")
-            .and_then(|value| value.strip_suffix("次退回COD邮件"))
+            .strip_circumfix("连续", "次退回COD邮件")
             .is_some_and(|numeral| RECOVERY_RETURN_COUNT_NUMERALS.contains(&numeral))
 }
 /// recovery 代 Users owner 写入黑名单时使用的固定 actor。

@@ -113,6 +113,8 @@ fn failed(http_status: Option<u16>) -> BackupHeartbeatResult {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use tokio::net::TcpListener;
 
     use super::{BackupHeartbeat, BackupHeartbeatStatus, send_heartbeat};
@@ -120,16 +122,16 @@ mod tests {
     #[tokio::test]
     async fn unconfigured_worker_heartbeat_is_a_noop() {
         let result = send_heartbeat(None).await;
-        assert!(matches!(result.status, BackupHeartbeatStatus::NotConfigured));
+        assert_matches!(result.status, BackupHeartbeatStatus::NotConfigured);
         assert!(result.http_status.is_none());
         let empty = BackupHeartbeat::new(Some("")).send().await;
-        assert!(matches!(empty.status, BackupHeartbeatStatus::NotConfigured));
+        assert_matches!(empty.status, BackupHeartbeatStatus::NotConfigured);
     }
 
     #[tokio::test]
     async fn invalid_worker_heartbeat_address_fails_without_network() {
         let result = send_heartbeat(Some("http://example.invalid/heartbeat")).await;
-        assert!(matches!(result.status, BackupHeartbeatStatus::Failed));
+        assert_matches!(result.status, BackupHeartbeatStatus::Failed);
         assert!(result.http_status.is_none());
     }
 
@@ -143,7 +145,7 @@ mod tests {
         assert_eq!(format!("{heartbeat:?}"), "BackupHeartbeat([REDACTED])");
         for _ in 0..2 {
             let result = heartbeat.send().await;
-            assert!(matches!(result.status, BackupHeartbeatStatus::Failed));
+            assert_matches!(result.status, BackupHeartbeatStatus::Failed);
             assert!(result.http_status.is_none());
         }
     }

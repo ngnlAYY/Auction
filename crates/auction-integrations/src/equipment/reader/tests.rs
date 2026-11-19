@@ -2,6 +2,7 @@
 //! 且不占用探测额度、与邮件请求的物理请求不重叠；被放弃的装备读取在许可上排队时撤销登记，已发出
 //! 时在途锁持有到远端回应或本次读取预算结束。
 
+use std::assert_matches;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::time::Duration;
@@ -116,10 +117,10 @@ async fn battle_page_defers_the_mail_item_and_opens_the_shared_breaker() {
     // 邮件处理只在来源明确无效时退件；战斗页必须是暂时不可用，留给 Jobs 重试。
     match adapter.read_diagnostic(context, attachment).await {
         MailEquipmentReadOutcome::Failed { error, observation } => {
-            assert!(matches!(
+            assert_matches!(
                 error,
                 ApplicationError::AdminIntake(AdminIntakeError::SourceUnavailable)
-            ));
+            );
             assert_eq!(observation.category, MailEquipmentDiagnosticCategory::RateLimited);
         }
         MailEquipmentReadOutcome::Loaded { .. } => panic!("battle page must not load"),
@@ -168,7 +169,7 @@ async fn breaker_window_refuses_equipment_reads_without_network_or_probe() {
 
     // 窗口内的装备读取不发网络，按暂时不可用返回。
     let result = adapter.read_url_inner("main".to_owned(), equipment_url(&server)).await;
-    assert!(matches!(result, Err(AdminIntakeError::SourceUnavailable)));
+    assert_matches!(result, Err(AdminIntakeError::SourceUnavailable));
     assert_eq!(server.read_requests(), 1);
 
     // 装备读取没有占用窗口唯一的探测：下一次邮件读取仍作为探测发出。
@@ -176,7 +177,7 @@ async fn breaker_window_refuses_equipment_reads_without_network_or_probe() {
     assert_eq!(error.category, MoogleMailErrorCategory::AccountBusy);
     assert_eq!(server.read_requests(), 2);
     let result = adapter.read_url_inner("main".to_owned(), equipment_url(&server)).await;
-    assert!(matches!(result, Err(AdminIntakeError::SourceUnavailable)));
+    assert_matches!(result, Err(AdminIntakeError::SourceUnavailable));
     assert_eq!(server.read_requests(), 2);
 }
 
@@ -188,10 +189,10 @@ async fn equipment_page_opened_window_blocks_the_next_equipment_read() {
     server.set_fault(Some(Fault::AccountBusy));
 
     let result = adapter.read_url_inner("main".to_owned(), equipment_url(&server)).await;
-    assert!(matches!(result, Err(AdminIntakeError::SourceUnavailable)));
+    assert_matches!(result, Err(AdminIntakeError::SourceUnavailable));
     assert_eq!(server.read_requests(), 1);
     let result = adapter.read_url_inner("main".to_owned(), equipment_url(&server)).await;
-    assert!(matches!(result, Err(AdminIntakeError::SourceUnavailable)));
+    assert_matches!(result, Err(AdminIntakeError::SourceUnavailable));
     assert_eq!(server.read_requests(), 1);
 }
 
@@ -203,7 +204,7 @@ async fn state_lock_limiter_on_equipment_page_is_temporary_without_opening_the_b
     for fault in [Fault::StateLockLimited, Fault::StateLockLimitedTooManyRequests] {
         server.set_fault(Some(fault));
         let result = adapter.read_url_inner("main".to_owned(), equipment_url(&server)).await;
-        assert!(matches!(result, Err(AdminIntakeError::SourceUnavailable)), "{fault:?}");
+        assert_matches!(result, Err(AdminIntakeError::SourceUnavailable), "{fault:?}");
     }
     // 限流不是账号忙：不打开熔断窗口。
     assert!(client.permits_write(MoogleMailWorld::Main));

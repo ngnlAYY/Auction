@@ -53,7 +53,7 @@ fn split_posts(input: &str) -> Vec<ParsedPost> {
 #[cfg(test)]
 fn post_separator(line: &str) -> Option<(String, Option<String>)> {
     let trimmed = line.trim();
-    let inner = trimmed.strip_prefix("=====")?.strip_suffix("=====")?.trim();
+    let inner = trimmed.strip_circumfix("=====", "=====")?.trim();
     let mut fields = inner.split_whitespace();
     let id = fields.next()?.strip_prefix("post-")?.to_owned();
     if id.is_empty() {

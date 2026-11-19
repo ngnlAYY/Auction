@@ -148,7 +148,7 @@ fn classify_kind(subject: &str) -> &'static str {
         "rebind" => "rebind",
         "rekey" => "rekey",
         // 系统退回的结算邮件以 `[RTS] ` + 原主题送回，标签与原结算邮件一致。
-        value if delivery_subject(value.strip_prefix("[rts] ").unwrap_or(value)) => "delivery",
+        value if delivery_subject(value.trim_prefix("[rts] ")) => "delivery",
         _ => "unknown",
     }
 }

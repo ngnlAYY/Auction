@@ -347,7 +347,7 @@ impl MoogleMailClient {
                 ));
             }
             if target.inventory_metadata {
-                let script = body.strip_prefix(b"\xef\xbb\xbf").unwrap_or(body);
+                let script = body.trim_prefix(b"\xef\xbb\xbf");
                 if status != StatusCode::OK
                     || !is_javascript
                     || script

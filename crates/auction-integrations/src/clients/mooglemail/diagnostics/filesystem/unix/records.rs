@@ -20,7 +20,7 @@ pub(super) const HARD_MAX_FILES: usize = 1024;
 
 pub(super) fn managed_name(name: &str, temporary: bool) -> Option<Uuid> {
     let raw = if temporary {
-        name.strip_prefix('.')?.strip_suffix(".tmp")?
+        name.strip_circumfix('.', ".tmp")?
     } else {
         name.strip_suffix(".evidence")?
     };

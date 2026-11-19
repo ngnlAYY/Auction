@@ -139,11 +139,7 @@ fn valid_equipment_id(value: &Option<String>) -> bool {
     })
 }
 pub fn validate_status(status: Option<u16>) -> Result<(), MailDiagnosticError> {
-    if status.is_some_and(|s| !(100..=599).contains(&s)) {
-        Err(MailDiagnosticError::InvalidContext)
-    } else {
-        Ok(())
-    }
+    status.is_none_or(|s| (100..=599).contains(&s)).ok_or(MailDiagnosticError::InvalidContext)
 }
 pub fn parsed_message(message: &MailMessage) -> Result<SensitiveBytes, MailDiagnosticError> {
     let mut value = ParsedMessagePayload {

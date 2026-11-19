@@ -218,8 +218,7 @@ mod tests {
         ];
         for (group, accepted) in cases {
             assert_eq!(valid_listener_group(group), accepted, "监听属组 {group:?}");
-            let expected =
-                if accepted { Ok(()) } else { Err(WorkerControlBindingError::InvalidGroup) };
+            let expected = accepted.ok_or(WorkerControlBindingError::InvalidGroup);
             assert_eq!(
                 check(SOCKET, RUNTIME, group, &[1], &[], true),
                 expected,

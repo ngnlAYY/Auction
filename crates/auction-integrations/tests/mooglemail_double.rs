@@ -3,6 +3,7 @@
 // 测试夹具的固定值失败即测试失败；不对测试装配伪造回退。
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::assert_matches;
 use std::{collections::HashSet, time::Duration};
 
 use auction_integrations::mooglemail::{
@@ -237,15 +238,15 @@ async fn write_faults_preserve_unknown_and_explicit_rejections() {
             }
             // 识别出明确拒绝即不做成功证明；拒绝页对成功证明的独立断言见 writer 单测。
             Fault::InsufficientPostage => {
-                assert!(matches!(failure, Some(MoogleMailSendResponseFailure::Rejected)));
-                assert!(matches!(confirmation, Ok(None)));
+                assert_matches!(failure, Some(MoogleMailSendResponseFailure::Rejected));
+                assert_matches!(confirmation, Ok(None));
             }
             Fault::MissingRecipient => {
-                assert!(matches!(
+                assert_matches!(
                     failure,
                     Some(MoogleMailSendResponseFailure::RecipientNotFound { .. })
-                ));
-                assert!(matches!(confirmation, Ok(None)));
+                );
+                assert_matches!(confirmation, Ok(None));
             }
             _ => unreachable!(),
         }
@@ -256,7 +257,7 @@ async fn write_faults_preserve_unknown_and_explicit_rejections() {
     server.set_fault(Some(Fault::WriteSucceeded));
     let form = MoogleMailForm::send(state.token(), &fields).unwrap();
     let bytes = client.post(&target, &cookie, form).await.unwrap();
-    assert!(matches!(MoogleMailParser.inspect_send_response(&bytes, world), (Ok(None), Ok(None))));
+    assert_matches!(MoogleMailParser.inspect_send_response(&bytes, world), (Ok(None), Ok(None)));
 }
 
 #[tokio::test]
@@ -497,7 +498,7 @@ async fn state_lock_limiter_is_rate_limited_on_reads_and_unproven_on_writes() {
     let form = MoogleMailForm::send(state.token(), &fields).unwrap();
     let bytes = client.post(&compose, &cookie, form).await.unwrap();
     let (failure, confirmation) = MoogleMailParser.inspect_send_response(&bytes, world);
-    assert!(matches!(failure, Ok(None)));
+    assert_matches!(failure, Ok(None));
     assert!(confirmation.is_err());
     assert_eq!(server.write_requests(), 1);
 }
@@ -573,10 +574,10 @@ async fn queued_foreground_write_overtakes_queued_background_read() {
     );
     slow.unwrap();
     queued.unwrap();
-    assert!(matches!(
+    assert_matches!(
         MoogleMailParser.inspect_send_response(&write.unwrap(), world),
         (Ok(None), Ok(None))
-    ));
+    );
     let requests = server.requests();
     assert_eq!(requests.len(), 4, "{requests:?}");
     assert!(requests[2].starts_with("POST "), "前台写入必须先于已排队的后台读取：{requests:?}");

@@ -284,15 +284,13 @@ impl auction_application::operations::ProcessReadinessPort for FixedReadiness {
     fn check(&self) -> auction_application::core::ApplicationFuture<'_, ()> {
         let ready = self.0;
         Box::pin(async move {
-            if ready {
-                Ok(())
-            } else {
-                Err(auction_application::core::ApplicationError::Repository(
+            ready.ok_or_else(|| {
+                auction_application::core::ApplicationError::Repository(
                     auction_application::core::RepositoryError::Failed(
                         "database not ready".to_owned(),
                     ),
-                ))
-            }
+                )
+            })
         })
     }
 }

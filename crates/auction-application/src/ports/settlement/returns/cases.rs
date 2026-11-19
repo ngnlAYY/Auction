@@ -377,6 +377,8 @@ pub trait SettlementReturnAdminPort: Send + Sync {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use auction_domain::{CommandId, SettlementReturnAction, SettlementReturnCaseStatus};
     use auction_time::Timestamp;
     use uuid::Uuid;
@@ -401,7 +403,7 @@ mod tests {
         assert_ne!(base, build(3, SettlementReturnAction::CloseInbox, "admin"));
         assert_ne!(base, build(3, SettlementReturnAction::ReclaimAndHold, "other"));
         for (version, actor) in [(0, "admin"), (1, " admin"), (1, "")] {
-            assert!(matches!(
+            assert_matches!(
                 SettlementReturnCommand::new(
                     command_id,
                     case,
@@ -413,7 +415,7 @@ mod tests {
                 Err(crate::errors::ApplicationError::SettlementReturn(
                     SettlementReturnError::Invalid
                 ))
-            ));
+            );
         }
     }
 

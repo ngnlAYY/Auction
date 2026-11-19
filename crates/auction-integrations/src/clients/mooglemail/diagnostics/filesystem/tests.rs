@@ -1,3 +1,4 @@
+use std::mem::DropGuard;
 use std::{
     path::PathBuf,
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -129,17 +130,12 @@ fn retention_snapshot_counts_ordinary_and_held_evidence() {
     };
     use uuid::Uuid;
 
-    struct Guard(std::path::PathBuf);
-    impl Drop for Guard {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
-
     let directory = std::env::temp_dir().join(format!("auction-retention-{}", Uuid::new_v4()));
     fs::DirBuilder::new().mode(0o700).create(&directory).expect("创建私有目录");
     fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).expect("目录权限");
-    let _guard = Guard(directory.clone());
+    let _guard = DropGuard::new(directory.clone(), |path| {
+        let _ = fs::remove_dir_all(path);
+    });
 
     let write = |name: Uuid, failure_code: &str, modified: SystemTime| {
         let path = directory.join(format!("{name}.evidence"));
@@ -205,17 +201,12 @@ fn purge_deletes_only_approved_ordinary_evidence_and_is_idempotent() {
     };
     use uuid::Uuid;
 
-    struct Guard(std::path::PathBuf);
-    impl Drop for Guard {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
-
     let directory = std::env::temp_dir().join(format!("auction-purge-{}", Uuid::new_v4()));
     fs::DirBuilder::new().mode(0o700).create(&directory).expect("创建私有目录");
     fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).expect("目录权限");
-    let _guard = Guard(directory.clone());
+    let _guard = DropGuard::new(directory.clone(), |path| {
+        let _ = fs::remove_dir_all(path);
+    });
 
     let write = |failure_code: &str, modified: SystemTime, padding: &str| {
         let path = directory.join(format!("{}.evidence", Uuid::new_v4()));

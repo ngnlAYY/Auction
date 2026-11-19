@@ -117,7 +117,7 @@ where
 }
 
 fn require(valid: bool, field: &str) -> Result<(), AdminRuntimeConfigError> {
-    if valid { Ok(()) } else { Err(invalid(field)) }
+    valid.ok_or_else(|| invalid(field))
 }
 
 fn invalid(field: &str) -> AdminRuntimeConfigError {

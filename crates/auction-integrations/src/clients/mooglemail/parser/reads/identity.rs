@@ -100,9 +100,8 @@ pub(super) fn verify_main_url(
     let value = declaration_value(&script, "MAIN_URL", &["let", "const", "var"])
         .ok_or_else(|| protocol(operation, world))?;
     let literal = value
-        .strip_prefix('"')
-        .and_then(|value| value.strip_suffix('"'))
-        .or_else(|| value.strip_prefix('\'').and_then(|value| value.strip_suffix('\'')))
+        .strip_circumfix('"', '"')
+        .or_else(|| value.strip_circumfix('\'', '\''))
         .ok_or_else(|| protocol(operation, world))?;
     let expected = format!("https://hentaiverse.org{}", world.path());
     if literal != expected {

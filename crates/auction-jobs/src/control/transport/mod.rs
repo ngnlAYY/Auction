@@ -223,28 +223,25 @@ impl WorkerControlHandle {
 
     /// 标记 Worker 已经可以接受控制请求。
     pub fn mark_serving(&self) {
-        // Rust 1.99 的新名 try_update 在 MSRV 1.94.1 尚未稳定；保留单次原子状态迁移。
-        #[allow(deprecated)]
-        let _ = self.inner.state.fetch_update(
+        // 在同一次原子更新中保留排空位。
+        self.inner.state.update(
             std::sync::atomic::Ordering::AcqRel,
             std::sync::atomic::Ordering::Acquire,
-            |state| Some((state & CONTROL_DRAINING) | CONTROL_STARTED),
+            |state| (state & CONTROL_DRAINING) | CONTROL_STARTED,
         );
     }
 
     /// 记录论坛循环最近一轮健康状态；成功轮次可以恢复该依赖造成的降级。
     pub fn mark_forum_cycle(&self, healthy: bool) {
-        // 与其他原子更新点一致，MSRV 1.94.1 仍须使用 fetch_update。
-        #[allow(deprecated)]
-        let _ = self.inner.state.fetch_update(
+        self.inner.state.update(
             std::sync::atomic::Ordering::AcqRel,
             std::sync::atomic::Ordering::Acquire,
             |state| {
-                Some(if healthy {
+                if healthy {
                     (state | CONTROL_STARTED) & !CONTROL_FORUM_DEGRADED
                 } else {
                     state | CONTROL_STARTED | CONTROL_FORUM_DEGRADED
-                })
+                }
             },
         );
     }

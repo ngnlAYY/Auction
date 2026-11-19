@@ -74,6 +74,7 @@ pub(crate) fn for_each_legacy_go_json_segment(encoded: &[u8], mut consume: impl 
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
     use std::borrow::Cow;
 
     use super::{lower_hex, strict_percent_decode};
@@ -86,8 +87,8 @@ mod tests {
 
     #[test]
     fn plain_text_is_borrowed_and_plus_is_literal() {
-        assert!(matches!(strict_percent_decode("a+b c"), Some(Cow::Borrowed("a+b c"))));
-        assert!(matches!(strict_percent_decode(""), Some(Cow::Borrowed(""))));
+        assert_matches!(strict_percent_decode("a+b c"), Some(Cow::Borrowed("a+b c")));
+        assert_matches!(strict_percent_decode(""), Some(Cow::Borrowed("")));
     }
 
     #[test]

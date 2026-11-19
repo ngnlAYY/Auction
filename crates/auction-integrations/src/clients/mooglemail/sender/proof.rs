@@ -184,7 +184,7 @@ pub(super) fn check_deadline(
     deadline: Instant,
     world: MoogleMailWorld,
 ) -> Result<(), MoogleMailError> {
-    if Instant::now() >= deadline { Err(scan_timeout(world)) } else { Ok(()) }
+    (Instant::now() < deadline).ok_or_else(|| scan_timeout(world))
 }
 
 pub(super) fn scan_timeout(world: MoogleMailWorld) -> MoogleMailError {

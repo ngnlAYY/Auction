@@ -118,6 +118,7 @@ impl AdminCredentialVerifier for CredentialVerifier {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
     use std::sync::{Arc, Mutex};
 
     use auction_application::admin::{
@@ -234,11 +235,9 @@ mod tests {
             .verify(mail_record(AdminCredentialStatus::Active))
             .await
             .expect_err("Worker 不可用");
-        assert!(
-            matches!(
-                error,
-                ApplicationError::AdminCredential(AdminCredentialError::CheckUnavailable)
-            ),
+        assert_matches!(
+            error,
+            ApplicationError::AdminCredential(AdminCredentialError::CheckUnavailable),
             "{error:?}"
         );
 
@@ -250,13 +249,11 @@ mod tests {
             .verify(mail_record(AdminCredentialStatus::Active))
             .await
             .expect_err("版本已变化");
-        assert!(
-            matches!(
-                error,
-                ApplicationError::AdminCredential(AdminCredentialError::VersionConflict {
-                    current_version: 7
-                })
-            ),
+        assert_matches!(
+            error,
+            ApplicationError::AdminCredential(AdminCredentialError::VersionConflict {
+                current_version: 7
+            }),
             "{error:?}"
         );
     }

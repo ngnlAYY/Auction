@@ -26,7 +26,7 @@ where
         return Ok(());
     }
     let now = clock.now();
-    let unscoped_code = failure_code.strip_prefix("reconcile_").unwrap_or(&failure_code);
+    let unscoped_code = failure_code.trim_prefix("reconcile_");
     let delay = if matches!(unscoped_code, "write_unknown" | "publish_proof_failed") {
         // 带 reconcile_ 的未知结果同样只能 GET 对账，不能误用一年退避使已成功的编辑永久搁置。
         RETRY_DELAY
@@ -77,7 +77,7 @@ fn is_manual_failure(error: &ApplicationError, failure_code: &str) -> bool {
         error,
         ApplicationError::ForumRemote(remote) if remote.write_started() || !remote.retryable()
     ) || matches!(
-        failure_code.strip_prefix("reconcile_").unwrap_or(failure_code),
+        failure_code.trim_prefix("reconcile_"),
         "invalid_snapshot"
             | "body_too_large"
             | "equipment_links_failed"

@@ -245,6 +245,7 @@ impl AdminCredentialVerifier for WorkerMailCredentialVerifier {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -543,21 +544,19 @@ mod tests {
         };
         let (first, second) = tokio::join!(first, second);
         assert!(first.is_ok());
-        assert!(
-            matches!(
-                second,
-                Err(ApplicationError::AdminCredential(AdminCredentialError::CheckBusy))
-            ),
+        assert_matches!(
+            second,
+            Err(ApplicationError::AdminCredential(AdminCredentialError::CheckBusy)),
             "重叠检查立即拒绝"
         );
         assert_eq!(fixture.server.read_requests(), 1);
 
         let mut forum = record(&fixture, AdminCredentialWorld::Shared);
         forum.credential.kind = AdminCredentialKind::ForumCookie;
-        assert!(matches!(
+        assert_matches!(
             fixture.verifier.verify(forum).await,
             Err(ApplicationError::AdminCredential(AdminCredentialError::InvalidRequest))
-        ));
+        );
 
         pause_external_access(&fixture.switches);
         let reads = fixture.server.read_requests();

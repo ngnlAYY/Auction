@@ -363,9 +363,7 @@ fn database_now(
 
 fn increment(counter: &AtomicU64) {
     // 饱和累计不因成功刷新清零，也不回绕。
-    #[allow(deprecated)]
-    let _ = counter
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| Some(value.saturating_add(1)));
+    counter.update(Ordering::Relaxed, Ordering::Relaxed, |value| value.saturating_add(1));
 }
 
 /// 审计模式的稳定字符串，配置、指标和安全展示共用。

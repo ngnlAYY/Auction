@@ -360,7 +360,7 @@ fn strip_start_price_comment(value: &str) -> &str {
 fn parse_start_equipment_reference(value: &str) -> Option<(&str, &str)> {
     let value = value.trim_end_matches(equipment_reference_sentence_punctuation);
     let value = if value.starts_with('<') || value.ends_with('>') {
-        value.strip_prefix('<')?.strip_suffix('>')?
+        value.strip_circumfix('<', '>')?
     } else {
         value
     };

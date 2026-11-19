@@ -110,7 +110,7 @@ fn validate_retention_parameters(
     retention: Duration,
     hold: Duration,
 ) -> Result<(), MailDiagnosticError> {
-    if directory.as_os_str().is_empty()
+    if directory.is_empty()
         || directory.file_name().is_none()
         || directory.to_string_lossy().chars().any(char::is_control)
         || matches!(
@@ -221,7 +221,7 @@ pub(super) fn validate_config(
 
 /// 目录与保留预算校验；离线导出在读取头部前还不知道写入域，因此不校验 `key_source`。
 fn validate_layout(config: &MoogleMailDiagnosticArchiveConfig) -> Result<(), MailDiagnosticError> {
-    if config.directory.as_os_str().is_empty()
+    if config.directory.is_empty()
         || config.directory.file_name().is_none()
         || config.directory.to_string_lossy().chars().any(char::is_control)
         || matches!(

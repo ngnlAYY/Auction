@@ -237,8 +237,7 @@ fn is_reply_action(value: &str, world: MoogleMailWorld) -> bool {
     let compact = value.chars().filter(|character| !character.is_whitespace()).collect::<String>();
     let Some(literal) = compact
         .strip_prefix("document.location=")
-        .and_then(|rest| rest.strip_prefix('\''))
-        .and_then(|rest| rest.strip_suffix('\''))
+        .and_then(|rest| rest.strip_circumfix('\'', '\''))
     else {
         return false;
     };

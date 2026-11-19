@@ -144,7 +144,7 @@ fn equipment_label(
     let fail = || protocol(MoogleMailOperation::Inventory, world);
     let label = input.parent().and_then(ElementRef::wrap).ok_or_else(fail)?;
     let hook = row.attr("onmouseover").ok_or_else(fail)?.trim();
-    let hook = hook.strip_suffix(';').unwrap_or(hook).trim_end();
+    let hook = hook.trim_suffix(';').trim_end();
     let hover_id = hook
         .strip_prefix("hover_equip(")
         .or_else(|| hook.strip_prefix("equips.set("))
