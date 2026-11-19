@@ -29,10 +29,7 @@ pub(crate) async fn fetch_bid_log_page(
         query.append_pair("lot", &lot_id);
     }
     let url = format!("/api/v1/auctions/{auction_id}/bid-log?{}", query.finish());
-    cached_public_get(&url, swr_cache::LIVE_TTL_MILLIS, |response| async move {
-        decoder::decode_bid_log_page(response).await
-    })
-    .await
+    cached_public_get(&url, swr_cache::LIVE_TTL_MILLIS, decoder::decode_bid_log_page).await
 }
 
 /// 读取场次选择器某个状态的一页，并告诉页面是否已到目录末尾。
@@ -86,8 +83,5 @@ pub(crate) async fn fetch_lot_bid_log(
         .append_pair("include", BID_LOG_INCLUDE)
         .finish();
     let url = format!("/api/v1/auctions/{auction_id}/bid-log?{query}");
-    cached_public_get(&url, swr_cache::LIVE_TTL_MILLIS, |response| async move {
-        decoder::decode_bid_log_page(response).await
-    })
-    .await
+    cached_public_get(&url, swr_cache::LIVE_TTL_MILLIS, decoder::decode_bid_log_page).await
 }

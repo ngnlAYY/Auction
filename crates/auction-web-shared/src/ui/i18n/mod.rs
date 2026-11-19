@@ -8,6 +8,9 @@ use dioxus::prelude::*;
 use dioxus_i18n::prelude::*;
 use unic_langid::{LanguageIdentifier, langid};
 
+mod translation;
+pub use translation::translate_without_args;
+
 /// 按旧版 i18next 约定翻译消息，不保留 Fluent 自动添加的双向文本隔离外框。
 /// `dioxus-i18n` 无公开 `set_use_isolating` 入口，默认会在每个动态变量外插入
 /// U+2068/U+2069；这里移除最外层隔离对，变量内部的嵌套对仍保留。
@@ -25,10 +28,7 @@ macro_rules! t {
 
     ($id:expr) => {{
         let id: &str = $id;
-        match dioxus_i18n::te!(id) {
-            Ok(translated) => $crate::i18n::without_fluent_isolation(translated),
-            Err(error) => $crate::i18n::translation_failed(id, &error),
-        }
+        $crate::i18n::translate_without_args(id)
     }};
 }
 
@@ -675,6 +675,78 @@ mod tests {
             edit,
             Mutation::SetText { value, .. } if value == "en"
         )));
+    }
+
+    #[component]
+    fn TranslationLabel(with_args: bool) -> Element {
+        let text = if with_args {
+            crate::t!("greeting", extra: "unused")
+        } else {
+            let key = "greeting".to_owned();
+            crate::t!(&key)
+        };
+        rsx! { "{text}" }
+    }
+
+    fn translation_harness() -> Element {
+        let initial = langid!("ja");
+        let bundle = try_use_init_i18n_from_bundle(|| {
+            build_bundle(
+                &TEST_CATALOG.default_locale,
+                DEFAULT_FTL,
+                &initial,
+                Some("greeting = \u{2068}こんにちは\u{2069}\n"),
+            )
+        })
+        .expect("初始化译文");
+        let session = use_context_provider(|| LocaleSession::new(bundle, initial));
+        consume_context::<SessionControl>().set(Some(session));
+        rsx! {
+            TranslationLabel { with_args: false }
+            TranslationLabel { with_args: true }
+        }
+    }
+
+    #[test]
+    fn translation_paths_follow_language_switches_and_report_missing_keys() {
+        let control = SessionControl::default();
+        let mut dom = VirtualDom::new(translation_harness).with_root_context(control.clone());
+        let initial = dom.rebuild_to_vec();
+        let initial_text: Vec<_> = initial
+            .edits
+            .iter()
+            .filter_map(|edit| match edit {
+                Mutation::CreateTextNode { value, .. } => Some(value.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(initial_text, ["こんにちは", "こんにちは"]);
+
+        let mut session = control.get().expect("挂载语言会话");
+        dom.in_scope(ScopeId::APP, || session.switch(&TEST_CATALOG, "en"));
+        let updated = dom.render_immediate_to_vec();
+        let updated_text: Vec<_> = updated
+            .edits
+            .iter()
+            .filter_map(|edit| match edit {
+                Mutation::SetText { value, .. } => Some(value.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(updated_text, ["Hello", "Hello"]);
+
+        let missing =
+            dom.in_scope(ScopeId::APP, || std::panic::catch_unwind(|| crate::t!("missing-key")));
+        if cfg!(debug_assertions) {
+            let error = missing.expect_err("调试构建报告缺键");
+            assert!(
+                error
+                    .downcast_ref::<String>()
+                    .is_some_and(|text| { text.starts_with("翻译 missing-key 失败") })
+            );
+        } else {
+            assert_eq!(missing.expect("发布构建显示键名"), "missing-key");
+        }
     }
 
     #[test]
