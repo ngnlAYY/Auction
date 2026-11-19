@@ -74,7 +74,7 @@ where
             .route("/metrics", axum::routing::any(metrics::public)),
         anonymous_read_gate,
     )
-    .fallback(web_assets::serve_public_asset::<A>)
+    .fallback(move |request| web_assets::serve_public_asset::<A>(request, web_script_policy))
     .layer(middleware::from_fn_with_state(
         boundary.with_web_script_policy(web_script_policy),
         boundary::enforce,
@@ -112,7 +112,7 @@ where
             .route("/health/ready", get(health::admin_health_ready))
             .route("/metrics", axum::routing::any(metrics::admin)),
     )
-    .fallback(web_assets::serve_admin_asset::<A>)
+    .fallback(move |request| web_assets::serve_admin_asset::<A>(request, web_script_policy))
     .layer(middleware::from_fn_with_state(
         boundary.with_web_script_policy(web_script_policy),
         boundary::enforce,

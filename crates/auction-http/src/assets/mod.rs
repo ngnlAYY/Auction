@@ -19,6 +19,7 @@ use self::response::{
     negotiated_asset_response, not_found,
 };
 use self::routes::Surface;
+use crate::WebScriptPolicy;
 
 pub(crate) use cache::cdn_cache_policy;
 
@@ -34,19 +35,28 @@ const ASSETS_MISSING_BODY: &str =
 const PUBLIC_NOT_FOUND_HTML: &str = "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>404</title></head><body><main><h1>404</h1></main></body></html>";
 const ADMIN_NOT_FOUND_HTML: &str = "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>404</title></head><body><main><h1>404</h1></main></body></html>";
 
-/// 处理公开端的静态产物与显式浏览器路由。
-pub(crate) async fn serve_public_asset<A: rust_embed::RustEmbed>(request: Request) -> Response {
-    serve::<A>(Surface::Public, request, false)
+/// 处理公开端的静态产物与显式浏览器路由；缓存判定按本 surface 的实际技术栈。
+pub(crate) async fn serve_public_asset<A: rust_embed::RustEmbed>(
+    request: Request,
+    web_script_policy: WebScriptPolicy,
+) -> Response {
+    serve::<A>(Surface::Public, request, false, web_script_policy)
 }
 
-/// 处理管理端的静态产物与显式浏览器路由。
-pub(crate) async fn serve_admin_asset<A: rust_embed::RustEmbed>(request: Request) -> Response {
-    serve::<A>(Surface::Admin, request, false)
+/// 处理管理端的静态产物与显式浏览器路由；缓存判定按本 surface 的实际技术栈。
+pub(crate) async fn serve_admin_asset<A: rust_embed::RustEmbed>(
+    request: Request,
+    web_script_policy: WebScriptPolicy,
+) -> Response {
+    serve::<A>(Surface::Admin, request, false, web_script_policy)
 }
 
 /// 只向一次性初始化进程提供 Admin 的 `/setup` 页面和必要静态资源。
+///
+/// `first_run_router` 已按装配根传入的 `WebScriptPolicy` 选择 CSP；这个静态资源回退在 Admin
+/// 接入 Solid 前固定使用 Dioxus。Admin 接入 Solid 时，把同一个策略也传到这里。
 pub async fn serve_admin_setup_asset<A: rust_embed::RustEmbed>(request: Request) -> Response {
-    let mut response = serve::<A>(Surface::Admin, request, true);
+    let mut response = serve::<A>(Surface::Admin, request, true, WebScriptPolicy::Dioxus);
     // 首次设置不属于正式 CDN 表面，连静态资源也不允许边缘保存。
     response.extensions_mut().remove::<StaticCachePolicy>();
     response.headers_mut().insert("cdn-cache-control", HeaderValue::from_static("no-store"));
@@ -61,6 +71,7 @@ fn serve<A: rust_embed::RustEmbed>(
     surface: Surface,
     request: Request,
     setup_only: bool,
+    web_script_policy: WebScriptPolicy,
 ) -> Response {
     let method = request.method();
     let path = request.uri().path();
@@ -105,7 +116,7 @@ fn serve<A: rust_embed::RustEmbed>(
             file,
             relative_path,
             &request,
-            exact_asset_cache(relative_path),
+            exact_asset_cache(relative_path, web_script_policy),
             None,
         );
     }
@@ -116,7 +127,7 @@ fn serve<A: rust_embed::RustEmbed>(
         }
         return match A::get(INDEX_HTML) {
             Some(index) => {
-                let preload_links = entry_preload_links(&index.data);
+                let preload_links = entry_preload_links(&index.data, web_script_policy);
                 negotiated_asset_response::<A>(
                     index,
                     INDEX_HTML,
@@ -153,10 +164,185 @@ mod tests {
     use super::response::{asset_response, parse_http_date};
     use super::routes::Surface;
     use super::{IMF_FIXDATE, serve_admin_asset, serve_public_asset};
+    use crate::{
+        AdminApiState, PublicApiState, WebScriptPolicy, admin_router_with_web_script_policy,
+        public_router_with_web_script_policy,
+    };
 
     #[derive(rust_embed::Embed)]
     #[folder = "tests/assets-fixture"]
     pub(super) struct TestAssets;
+
+    async fn serve_public_fixture(request: Request) -> Response {
+        serve_public_asset::<TestAssets>(request, WebScriptPolicy::Dioxus).await
+    }
+
+    async fn serve_admin_fixture(request: Request) -> Response {
+        serve_admin_asset::<TestAssets>(request, WebScriptPolicy::Dioxus).await
+    }
+
+    const DIOXUS_INDEX: &[u8] = concat!(
+        "<link rel=\"stylesheet\" href=\"/./assets/public-dxh1.css\" type=\"text/css\">",
+        "<link rel=\"preload\" as=\"fetch\" type=\"application/wasm\" ",
+        "href=\"/./assets/app_bg-dxh2.wasm\" crossorigin>",
+        "<link rel=\"preload\" as=\"script\" href=\"/./assets/app-dxh3.js\" crossorigin>",
+        "<script type=\"module\" async src=\"/./assets/app-dxh3.js\"></script>",
+    )
+    .as_bytes();
+    const SOLID_INDEX: &[u8] = concat!(
+        "<link rel=\"icon\" href=\"/favicon.ico\">\n",
+        "<script data-cfasync=\"false\" type=\"module\" crossorigin ",
+        "src=\"/assets/index-B2UikXgQ.js\"></script>\n",
+        "<link rel=\"modulepreload\" crossorigin ",
+        "href=\"/assets/rolldown-runtime-DK3Fl9T5.js\">\n",
+        "<link rel=\"stylesheet\" crossorigin href=\"/assets/index-ZX7NKpK-.css\">\n",
+    )
+    .as_bytes();
+    const DIOXUS_LINK_INDEX: &[u8] = concat!(
+        "<script type=\"module\" src=\"/assets/script-only-dxh12345678.js\"></script>",
+        "<link rel=\"preload\" as=\"fetch\" href=\"/assets/shared-dxh12345678.js\">",
+        "<script type=\"module\" src=\"/assets/entry-dxh12345678.js\"></script>",
+        "<link rel=\"preload\" as=\"script\" href=\"/assets/shared-dxh12345678.js\">",
+        "<link rel=\"preload\" as=\"script\" href=\"/assets/entry-dxh12345678.js\">",
+    )
+    .as_bytes();
+    const SOLID_FAVICON: &[u8] = b"<svg xmlns=\"http://www.w3.org/2000/svg\"/>";
+
+    fn fixture_file(data: &'static [u8], mime: &'static str) -> EmbeddedFile {
+        EmbeddedFile {
+            data: Cow::Borrowed(data),
+            metadata: Metadata::__rust_embed_new(Sha256::digest(data).into(), None, None, mime),
+        }
+    }
+
+    struct DioxusAssets;
+
+    impl rust_embed::RustEmbed for DioxusAssets {
+        fn get(path: &str) -> Option<EmbeddedFile> {
+            Some(fixture_file(
+                match path {
+                    "index.html" => DIOXUS_INDEX,
+                    "assets/public-dxh1.css" | "assets/index-B2UikXgQ.js" | "assets/app.css" => {
+                        b"body{color:red}"
+                    }
+                    "assets/app_bg-dxh2.wasm"
+                    | "assets/app-dxh3.js"
+                    | "assets/app-dxh01234567.js" => b"asset",
+                    "assets/favicon-dxh01234567.svg" => SOLID_FAVICON,
+                    _ => return None,
+                },
+                if path.ends_with(".html") {
+                    "text/html"
+                } else if path.ends_with(".css") {
+                    "text/css"
+                } else if path.ends_with(".svg") {
+                    "image/svg+xml"
+                } else {
+                    "application/octet-stream"
+                },
+            ))
+        }
+
+        fn iter() -> impl Iterator<Item = Cow<'static, str>> + 'static {
+            [
+                "index.html",
+                "assets/public-dxh1.css",
+                "assets/app_bg-dxh2.wasm",
+                "assets/app-dxh3.js",
+                "assets/app-dxh01234567.js",
+                "assets/index-B2UikXgQ.js",
+                "assets/app.css",
+                "assets/favicon-dxh01234567.svg",
+            ]
+            .into_iter()
+            .map(Cow::Borrowed)
+        }
+    }
+
+    struct DioxusLinkAssets;
+
+    impl rust_embed::RustEmbed for DioxusLinkAssets {
+        fn get(path: &str) -> Option<EmbeddedFile> {
+            (path == "index.html").then(|| fixture_file(DIOXUS_LINK_INDEX, "text/html"))
+        }
+
+        fn iter() -> impl Iterator<Item = Cow<'static, str>> + 'static {
+            ["index.html"].into_iter().map(Cow::Borrowed)
+        }
+    }
+
+    struct SolidAssets;
+
+    impl rust_embed::RustEmbed for SolidAssets {
+        fn get(path: &str) -> Option<EmbeddedFile> {
+            Some(fixture_file(
+                match path {
+                    "index.html" => SOLID_INDEX,
+                    "assets/index-B2UikXgQ.js"
+                    | "assets/rolldown-runtime-DK3Fl9T5.js"
+                    | "assets/app-dxh01234567.js"
+                    | "assets/chunks/index-B2UikXgQ.js"
+                    | "assets/chunks/index.js" => b"asset",
+                    "assets/index-ZX7NKpK-.css" | "assets/app.css" => b"body{color:red}",
+                    "assets/favicon-B2UikXgQ.svg" => SOLID_FAVICON,
+                    _ => return None,
+                },
+                if path.ends_with(".html") {
+                    "text/html"
+                } else if path.ends_with(".css") {
+                    "text/css"
+                } else if path.ends_with(".svg") {
+                    "image/svg+xml"
+                } else {
+                    "application/octet-stream"
+                },
+            ))
+        }
+
+        fn iter() -> impl Iterator<Item = Cow<'static, str>> + 'static {
+            [
+                "index.html",
+                "assets/index-B2UikXgQ.js",
+                "assets/rolldown-runtime-DK3Fl9T5.js",
+                "assets/index-ZX7NKpK-.css",
+                "assets/app-dxh01234567.js",
+                "assets/chunks/index-B2UikXgQ.js",
+                "assets/chunks/index.js",
+                "assets/app.css",
+                "assets/favicon-B2UikXgQ.svg",
+            ]
+            .into_iter()
+            .map(Cow::Borrowed)
+        }
+    }
+
+    fn public_app<A: rust_embed::RustEmbed + Send + Sync + 'static>(
+        web_script_policy: WebScriptPolicy,
+    ) -> Router {
+        let state = PublicApiState::default();
+        let boundary = state.http_boundary();
+        let gate = state.anonymous_read_gate();
+        public_router_with_web_script_policy::<A>(
+            env!("CARGO_PKG_VERSION"),
+            boundary,
+            gate,
+            web_script_policy,
+        )
+        .with_state(state)
+    }
+
+    fn admin_app<A: rust_embed::RustEmbed + Send + Sync + 'static>(
+        web_script_policy: WebScriptPolicy,
+    ) -> Router {
+        let state = AdminApiState::default();
+        let boundary = state.http_boundary();
+        admin_router_with_web_script_policy::<A>(
+            env!("CARGO_PKG_VERSION"),
+            boundary,
+            web_script_policy,
+        )
+        .with_state(state)
+    }
 
     fn request(uri: &str, accept_encoding: Option<&str>) -> Request {
         let mut builder = Request::builder().method("GET").uri(uri);
@@ -173,8 +359,7 @@ mod tests {
 
     #[tokio::test]
     async fn brotli_copy_is_served_when_accepted() {
-        let response =
-            serve_public_asset::<TestAssets>(request("/assets/app.css", Some("gzip, br"))).await;
+        let response = serve_public_fixture(request("/assets/app.css", Some("gzip, br"))).await;
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(
             response
@@ -199,8 +384,7 @@ mod tests {
     #[tokio::test]
     async fn raw_copy_is_served_with_vary_and_zero_quality_is_respected() {
         for accept in [None, Some("br;q=0")] {
-            let response =
-                serve_public_asset::<TestAssets>(request("/assets/app.css", accept)).await;
+            let response = serve_public_fixture(request("/assets/app.css", accept)).await;
             assert_eq!(response.status(), StatusCode::OK);
             assert!(response.headers().get(header::CONTENT_ENCODING).is_none());
             assert_eq!(
@@ -215,7 +399,7 @@ mod tests {
     async fn wildcard_selects_brotli_when_identity_is_excluded() {
         let wildcard = HeaderValue::from_static("*;q=1");
         let identity = HeaderValue::from_static("identity;q=0");
-        let response = serve_public_asset::<TestAssets>(conditional(
+        let response = serve_public_fixture(conditional(
             "/assets/app.css",
             &[(header::ACCEPT_ENCODING, &wildcard), (header::ACCEPT_ENCODING, &identity)],
         ))
@@ -235,7 +419,7 @@ mod tests {
             ("/assets/app.js", "br, identity;q=0"),
             ("/", "*;q=0"),
         ] {
-            let response = serve_public_asset::<TestAssets>(request(path, Some(accept))).await;
+            let response = serve_public_fixture(request(path, Some(accept))).await;
             assert_eq!(response.status(), StatusCode::NOT_ACCEPTABLE, "{path}");
             assert_eq!(response.headers()[header::VARY], "Accept-Encoding");
             assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
@@ -272,7 +456,7 @@ mod tests {
     }
 
     async fn etag(uri: &str) -> HeaderValue {
-        let response = serve_public_asset::<TestAssets>(request(uri, None)).await;
+        let response = serve_public_fixture(request(uri, None)).await;
         assert_eq!(response.status(), StatusCode::OK);
         response.headers().get(header::ETAG).cloned().expect("etag")
     }
@@ -299,7 +483,7 @@ mod tests {
 
     #[tokio::test]
     async fn matching_etag_revalidates_without_body() {
-        let app = Router::new().fallback(serve_public_asset::<TestAssets>);
+        let app = Router::new().fallback(serve_public_fixture);
         for (uri, encoding) in [("/", None), ("/assets/app.css", Some("br"))] {
             let mut request = request(uri, encoding);
             *request.version_mut() = Version::HTTP_2;
@@ -336,15 +520,12 @@ mod tests {
         let wildcard = HeaderValue::from_static("*");
         let stale = HeaderValue::from_static("\"stale\"");
         for candidate in [&weak, &wildcard] {
-            let response = serve_public_asset::<TestAssets>(conditional(
-                "/",
-                &[(header::IF_NONE_MATCH, candidate)],
-            ))
-            .await;
+            let response =
+                serve_public_fixture(conditional("/", &[(header::IF_NONE_MATCH, candidate)])).await;
             assert_eq!(response.status(), StatusCode::NOT_MODIFIED);
         }
         // 列表字段允许拆成多行；任一行命中即可。
-        let response = serve_public_asset::<TestAssets>(conditional(
+        let response = serve_public_fixture(conditional(
             "/",
             &[(header::IF_NONE_MATCH, &stale), (header::IF_NONE_MATCH, &etag)],
         ))
@@ -393,12 +574,12 @@ mod tests {
         headers.insert(header::IF_MODIFIED_SINCE, date.clone());
         for (policy, status, last_modified) in [
             (
-                exact_asset_cache("assets/style-dxh01234567.css"),
+                exact_asset_cache("assets/style-dxh01234567.css", WebScriptPolicy::Dioxus),
                 StatusCode::NOT_MODIFIED,
                 Some(&date),
             ),
-            (exact_asset_cache("assets/app.css"), StatusCode::OK, None),
-            (exact_asset_cache("robots.txt"), StatusCode::OK, None),
+            (exact_asset_cache("assets/app.css", WebScriptPolicy::Dioxus), StatusCode::OK, None),
+            (exact_asset_cache("robots.txt", WebScriptPolicy::Dioxus), StatusCode::OK, None),
             (CachePolicy::Favicon, StatusCode::OK, None),
         ] {
             let response = asset_response(
@@ -414,23 +595,45 @@ mod tests {
         }
     }
 
+    #[test]
+    fn solid_immutable_names_match_the_build_fingerprint_pattern() {
+        const IMMUTABLE: &str = "public, max-age=31536000, immutable";
+        for (path, immutable) in [
+            ("assets/index-B2UikXgQ.js", true),
+            ("assets/rolldown-runtime-DK3Fl9T5.js", true),
+            ("assets/a-b_c-D2E3F4G5.css", true),
+            ("assets/a-________.js", true),
+            ("assets/chunks/index-B2UikXgQ.js", true),
+            ("assets/index-B2UikXg.js", false),
+            ("assets/-B2UikXgQ.js", false),
+            ("assets/index-B2UikXgQ", false),
+            ("assets/index-B2UikXgQ!.js", false),
+            ("assets/index-B2UikXgQ.js.map", false),
+            ("assets/chunks/index.js", false),
+            ("index-B2UikXgQ.js", false),
+            ("assets/app-dxh01234567.js", false),
+        ] {
+            assert_eq!(
+                exact_asset_cache(path, WebScriptPolicy::Solid).value() == IMMUTABLE,
+                immutable,
+                "{path}"
+            );
+        }
+    }
+
     /// CDN 只转发旧日期时，回滚也必须返回当前入口。
     #[tokio::test]
     async fn later_if_modified_since_after_rollback_returns_the_current_entry() {
         let later = HeaderValue::from_static("Fri, 31 Dec 2100 23:59:59 GMT");
-        let response = serve_public_asset::<TestAssets>(conditional(
-            "/",
-            &[(header::IF_MODIFIED_SINCE, &later)],
-        ))
-        .await;
+        let response =
+            serve_public_fixture(conditional("/", &[(header::IF_MODIFIED_SINCE, &later)])).await;
         assert_eq!(response.status(), StatusCode::OK);
         assert!(body_text(response).await.contains("fixture"));
     }
 
     #[tokio::test]
     async fn resource_without_copy_varies_without_content_encoding() {
-        let response =
-            serve_public_asset::<TestAssets>(request("/assets/app.js", Some("br"))).await;
+        let response = serve_public_fixture(request("/assets/app.js", Some("br"))).await;
         assert_eq!(response.status(), StatusCode::OK);
         assert!(response.headers().get(header::CONTENT_ENCODING).is_none());
         assert_eq!(response.headers()[header::VARY], "Accept-Encoding");
@@ -438,8 +641,7 @@ mod tests {
 
     #[tokio::test]
     async fn direct_br_path_is_rejected() {
-        let response =
-            serve_public_asset::<TestAssets>(request("/assets/app.css.br", Some("br"))).await;
+        let response = serve_public_fixture(request("/assets/app.css.br", Some("br"))).await;
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
@@ -504,8 +706,8 @@ mod tests {
         let mut request = request(path, None);
         *request.method_mut() = method;
         match surface {
-            Surface::Public => serve_public_asset::<TestAssets>(request).await,
-            Surface::Admin => serve_admin_asset::<TestAssets>(request).await,
+            Surface::Public => serve_public_fixture(request).await,
+            Surface::Admin => serve_admin_fixture(request).await,
         }
     }
 
@@ -590,7 +792,10 @@ mod tests {
             "<script type=\"module\" async src=\"/./assets/app-dxh3.js\"></script>",
         );
         assert_eq!(
-            entry_preload_links(document.as_bytes()).expect("links").to_str().expect("ascii"),
+            entry_preload_links(document.as_bytes(), WebScriptPolicy::Dioxus)
+                .expect("links")
+                .to_str()
+                .expect("ascii"),
             concat!(
                 "</assets/public-dxh1.css>; rel=preload; as=style, ",
                 "</assets/app_bg-dxh2.wasm>; rel=preload; as=fetch; ",
@@ -612,20 +817,167 @@ mod tests {
             "<link rel=\"stylesheet\" href=\"/assets/x.css\"",
             "",
         ] {
-            assert!(entry_preload_links(document.as_bytes()).is_none(), "document={document}");
+            assert!(
+                entry_preload_links(document.as_bytes(), WebScriptPolicy::Dioxus).is_none(),
+                "document={document}"
+            );
         }
+    }
+
+    #[test]
+    fn solid_entry_document_preserves_modulepreload_and_entry_module() {
+        assert_eq!(
+            entry_preload_links(SOLID_INDEX, WebScriptPolicy::Solid)
+                .expect("links")
+                .to_str()
+                .expect("ascii"),
+            concat!(
+                "</assets/index-B2UikXgQ.js>; rel=modulepreload; crossorigin, ",
+                "</assets/rolldown-runtime-DK3Fl9T5.js>; rel=modulepreload; crossorigin, ",
+                "</assets/index-ZX7NKpK-.css>; rel=preload; as=style; crossorigin",
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn entry_aliases_add_links_but_exact_index_documents_do_not() {
+        let dioxus = public_app::<DioxusAssets>(WebScriptPolicy::Dioxus);
+        let response = dioxus.clone().oneshot(request("/", None)).await.expect("dioxus entry");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers()[header::LINK],
+            concat!(
+                "</assets/public-dxh1.css>; rel=preload; as=style, ",
+                "</assets/app_bg-dxh2.wasm>; rel=preload; as=fetch; ",
+                "type=\"application/wasm\"; crossorigin, ",
+                "</assets/app-dxh3.js>; rel=preload; as=script; crossorigin",
+            )
+        );
+        let exact = dioxus.oneshot(request("/index.html", None)).await.expect("dioxus index");
+        assert_eq!(exact.status(), StatusCode::OK);
+        assert!(!exact.headers().contains_key(header::LINK));
+
+        let solid = public_app::<SolidAssets>(WebScriptPolicy::Solid);
+        let response = solid.clone().oneshot(request("/", None)).await.expect("solid entry");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-cache");
+        assert_eq!(
+            response.headers()[header::LINK],
+            concat!(
+                "</assets/index-B2UikXgQ.js>; rel=modulepreload; crossorigin, ",
+                "</assets/rolldown-runtime-DK3Fl9T5.js>; rel=modulepreload; crossorigin, ",
+                "</assets/index-ZX7NKpK-.css>; rel=preload; as=style; crossorigin",
+            )
+        );
+        let exact = solid.oneshot(request("/index.html", None)).await.expect("solid index");
+        assert_eq!(exact.status(), StatusCode::OK);
+        assert!(!exact.headers().contains_key(header::LINK));
+    }
+
+    /// Dioxus 必须保持旧的 `<link>` 逐条转写：同一 URL 的不同 `as` 都保留，入口脚本不参与。
+    #[tokio::test]
+    async fn dioxus_entry_links_keep_the_legacy_link_semantics() {
+        let response = public_app::<DioxusLinkAssets>(WebScriptPolicy::Dioxus)
+            .oneshot(request("/", None))
+            .await
+            .expect("dioxus link entry");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers()[header::LINK],
+            concat!(
+                "</assets/shared-dxh12345678.js>; rel=preload; as=fetch, ",
+                "</assets/shared-dxh12345678.js>; rel=preload; as=script, ",
+                "</assets/entry-dxh12345678.js>; rel=preload; as=script",
+            )
+        );
+    }
+
+    async fn assert_asset_cache<A: rust_embed::RustEmbed + Send + Sync + 'static>(
+        web_script_policy: WebScriptPolicy,
+        immutable: &str,
+        not_immutable: &[&str],
+    ) {
+        let app = public_app::<A>(web_script_policy);
+        let response =
+            app.clone().oneshot(request(immutable, None)).await.expect("immutable asset");
+        assert_eq!(response.status(), StatusCode::OK, "{immutable}");
+        assert_eq!(
+            response.headers()[header::CACHE_CONTROL],
+            "public, max-age=31536000, immutable",
+            "{immutable}"
+        );
+        for path in not_immutable {
+            let response = app.clone().oneshot(request(path, None)).await.expect("stable asset");
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(response.headers()[header::CACHE_CONTROL], "no-cache", "{path}");
+        }
+    }
+
+    /// 不可变判定必须按装配根传入的技术栈；另一套产物的指纹命名不能获得长期缓存。
+    #[tokio::test]
+    async fn immutable_cache_follows_the_surface_web_script_policy() {
+        assert_asset_cache::<SolidAssets>(
+            WebScriptPolicy::Solid,
+            "/assets/index-B2UikXgQ.js",
+            &["/assets/app-dxh01234567.js", "/assets/app.css", "/index.html"],
+        )
+        .await;
+        assert_asset_cache::<SolidAssets>(
+            WebScriptPolicy::Solid,
+            "/assets/chunks/index-B2UikXgQ.js",
+            &["/assets/chunks/index.js"],
+        )
+        .await;
+        assert_asset_cache::<DioxusAssets>(
+            WebScriptPolicy::Dioxus,
+            "/assets/app-dxh01234567.js",
+            &["/assets/index-B2UikXgQ.js", "/assets/app.css", "/index.html"],
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn admin_immutable_cache_follows_the_supplied_web_script_policy() {
+        let app = admin_app::<SolidAssets>(WebScriptPolicy::Solid);
+        let response = app
+            .clone()
+            .oneshot(request("/assets/index-B2UikXgQ.js", None))
+            .await
+            .expect("admin solid asset");
+        assert_eq!(
+            response.headers()[header::CACHE_CONTROL],
+            "public, max-age=31536000, immutable"
+        );
+        let response = app
+            .oneshot(request("/assets/app-dxh01234567.js", None))
+            .await
+            .expect("admin dioxus-named asset");
+        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-cache");
+    }
+
+    #[tokio::test]
+    async fn solid_fingerprinted_favicon_is_found_by_the_stable_alias() {
+        let response = public_app::<SolidAssets>(WebScriptPolicy::Solid)
+            .oneshot(request("/favicon.ico", None))
+            .await
+            .expect("favicon");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()[header::CONTENT_TYPE], "image/svg+xml");
+        assert_eq!(response.headers()[header::CACHE_CONTROL], "public, max-age=86400");
+        let body = to_bytes(response.into_body(), 4096).await.expect("favicon body");
+        assert_eq!(body.as_ref(), SOLID_FAVICON);
     }
 
     #[tokio::test]
     async fn cdn_policy_prefers_static_cache_extension() {
-        let response = serve_public_asset::<TestAssets>(request("/assets/app.css", None)).await;
+        let response = serve_public_fixture(request("/assets/app.css", None)).await;
         assert_eq!(cdn_cache_policy(&response), "no-cache");
 
         let fingerprinted = asset_response(
             embedded_at_build_second(b"body{color:red}", "text/css"),
             &Method::GET,
             &HeaderMap::new(),
-            exact_asset_cache("assets/app-dxh0123456789abcdef.css"),
+            exact_asset_cache("assets/app-dxh0123456789abcdef.css", WebScriptPolicy::Dioxus),
             "text/css",
             None,
         );

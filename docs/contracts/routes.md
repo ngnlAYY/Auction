@@ -57,7 +57,7 @@
 
 低频档 5 分钟内直接使用缓存；之后一小时内缓存先回旧副本并在后台刷新，下一次请求拿到新内容；超过一小时无人访问则同步回源。运营修改或新结算最迟在“5 分钟后的第二次访问”可见，单次访问看到的内容最多旧约 65 分钟；需要立即生效时清除对应 URL 的 CDN 缓存（见[ops/README.md#cdncloudflare](../../ops/README.md#cdncloudflare)）。已结算档 1 天内直接使用缓存，之后 7 天内先回旧副本并在后台刷新：账号改名（管理端改名或回滚、`rebind` 换绑、论坛身份同步）后，这三类响应最迟在“1 天后的第二次访问”显示新名字，单次访问看到的名字最多旧约 8 天；需要立即生效时按前缀清除 `/api/v1/auctions/` 与 `/api/v1/lots/` 的 CDN 缓存，浏览器已保存的副本不受清除影响，仍按 1 天到期。准入与金额从不读取这些缓存：世界停用、黑名单与规则的效力都由服务端在命令事务内即时判定。论坛同步开关取自 Worker 的最新观测，心跳缺失时要立刻反映，保持 `no-store`。两档响应都附带内容 ETag；进行中场次继续使用 2 秒目录缓存。
 
-静态资源携带由所选表示的 SHA-256 摘要生成的强 `ETag`。只有 `assets/` 下文件名带内容指纹的资源使用 `public, max-age=31536000, immutable` 并保留 `Last-Modified`。SPA 入口文档、HTML 和稳定文件名的资源（包括 `assets/` 下的原名文件）使用 `no-cache`，其中 `/favicon.ico` 使用 `public, max-age=86400`。入口和其他稳定 URL 按内容 ETag 再验证，因为不同内容的构建可能共享同一个时间戳。
+静态资源携带由所选表示的 SHA-256 摘要生成的强 `ETag`。只有 `assets/` 下符合本 surface 实际技术栈指纹命名的资源使用 `public, max-age=31536000, immutable` 并保留 `Last-Modified`：Dioxus 产物在扩展名前带 `-dxh` 与 8–16 位十六进制（如 `app-dxh01234567.js`），Solid 产物对 `assets/` 下（含子目录）每个文件的最后一级文件名匹配 `^[A-Za-z0-9][A-Za-z0-9._-]*-[A-Za-z0-9_-]{8}\.[A-Za-z0-9]+$`（如 `chunks/index-B2UikXgQ.js`）。技术栈与 CSP 一样由装配根经 `WebScriptPolicy` 显式传入，不按文件名猜测；另一套产物的命名不享受不可变缓存。SPA 入口文档、HTML 和稳定文件名的资源（包括 `assets/` 下的原名文件）使用 `no-cache`，其中 `/favicon.ico` 映射到内嵌目录里唯一的 `assets/favicon-*.svg`，并使用 `public, max-age=86400`。入口和其他稳定 URL 按内容 ETag 再验证，因为不同内容的构建可能共享同一个时间戳。
 
 Public、Admin 与首次设置的静态文件、SPA 入口别名及 `/favicon.ico` 共用 `Accept-Encoding` 协商。合并全部头行，同一编码的显式项优先于 `*`，重复权重取较小值，非法权重按零处理。按以下顺序选择表示。
 
@@ -67,7 +67,7 @@ Public、Admin 与首次设置的静态文件、SPA 入口别名及 `/favicon.ic
 
 参与协商的成功响应和 304 一律带 `Vary: Accept-Encoding`。只有原文的资源也新增这个响应头，防止缓存把原文交给明确拒绝它的客户端。404、405 与缺少入口产物时的 503 优先于编码协商。直接访问 `.br` 静态文件返回 404。
 
-`If-None-Match` 支持精确匹配、弱比较匹配与 `*`。缺少该头时，指纹资源仍可在 `If-Modified-Since` 与 `Last-Modified` 同秒时返回 304。稳定 URL 的日期请求返回完整的当前表示。再验证命中的 304 保留缓存头并在响应头处结束。GET、HEAD 和 304 若传送 `Content-Length`，其值等于对应 200 表示的字节数。SPA 入口别名另带 `Link`，逐项列出原始 HTML 引用的带指纹样式表、脚本与 WASM（`rel=preload`，属性与文档内的 `<link>` 一致），供 CDN 在等待源站时先发 103 Early Hints。
+`If-None-Match` 支持精确匹配、弱比较匹配与 `*`。缺少该头时，指纹资源仍可在 `If-Modified-Since` 与 `Last-Modified` 同秒时返回 304。稳定 URL 的日期请求返回完整的当前表示。再验证命中的 304 保留缓存头并在响应头处结束。GET、HEAD 和 304 若传送 `Content-Length`，其值等于对应 200 表示的字节数。批准的浏览器路由回退到入口文档时，响应另带 `Link`，供 CDN 在等待源站时先发 103 Early Hints。Dioxus 入口只扫描 `<link>`，逐条写 `rel=preload; as=…`，不读取 `<script>`、不按 URL 去重，因此同一 URL 的不同 `as` 都保留，头部与旧实现逐字节相同。Solid 入口按文档顺序处理 `<link>` 与 `<script>`：样式表与 `<link rel="preload">` 按现有规则写 `rel=preload; as=…`，`<link rel="modulepreload">` 与入口 `<script type="module" src>` 写 `rel=modulepreload`，保留 `crossorigin`，同一 URL 以文档中首次出现的声明为准。精确请求 `/index.html` 不添加该头。
 
 CDN 专用头（`CDN-Cache-Control` 与 `Cloudflare-CDN-Cache-Control`，每个响应都带）跟随响应语义：静态响应使用同一缓存指令；动态响应中 `no-store` 与 `private` 映射为 `no-store`，`no-cache` 映射为 `no-cache`；`public` 且带有效 `max-age`/`s-maxage` 的公开读取获得边缘缓存资格，指令按边缘语义重写为 `public, max-age=<s-maxage，缺省取 max-age>`，并照搬 `stale-while-revalidate` 与 `stale-if-error`（Cloudflare 在指令含 `s-maxage` 时不提供过期后先回旧值、后台刷新，所以不原样复制）；其余（缺失缓存头、无 `public`、无新鲜度或新鲜度写坏）一律 `no-store`。`no-store` 永不因 CDN 映射被放宽。前置 CDN 需要的缓存规则见[ops/README.md#cdncloudflare](../../ops/README.md#cdncloudflare)。
 
@@ -392,7 +392,7 @@ Worker 实际值应核对其指标，不能把 Admin 显示的数据库意图当
 | POST | `/api/v1/setup/validate` | 校验表单并试连数据库 |
 | POST | `/api/v1/setup/complete` | 生成并发布配置目录 |
 
-浏览器入口为 `/setup`，仅另提供存在的 `/index.html`、`/favicon.ico` 与 `/assets/` 下资源；其余路径返回 404。`/assets/` 下另有带指纹的 Fluent 译文资源（`<lang>-dxh<hash>.ftl`）：浏览器只内嵌各 surface 的默认语言，其余语言按 `hv.lang` 按需取回，加载失败保持当前语言并提示。静态资源编码协商遵循[缓存头](#缓存头)中的规则。首次设置使用独立的 `SetupResponse` / `SetupErrorResponse`，成功字段为 `status` 与 `initialize_and_start`；正式 Admin 不挂载这三个写接口。
+浏览器入口为 `/setup`，仅另提供存在的 `/index.html`、`/favicon.ico` 与 `/assets/` 下资源；其余路径返回 404。`/assets/` 下另有带指纹的 Fluent 译文资源（`<lang>-dxh<hash>.ftl`）：浏览器只内嵌各 surface 的默认语言，其余语言按 `hv.lang` 按需取回，加载失败保持当前语言并提示。静态资源编码协商遵循[缓存头](#缓存头)中的规则。首次设置的 CSP 已按装配根传入的 `WebScriptPolicy` 选择；其静态资源回退在 Admin 接入 Solid 前固定使用 Dioxus，届时把同一个策略也传入该回退。首次设置使用独立的 `SetupResponse` / `SetupErrorResponse`，成功字段为 `status` 与 `initialize_and_start`；正式 Admin 不挂载这三个写接口。
 
 合并部署的 `complete` 要求 `confirm_initialize = true` 和恰好一个 `x-setup-confirm-target` 请求头。该头按 `application/x-www-form-urlencoded` 编码确认时的三项，依次为 `host`、十进制 `port` 和 `name`，例如 `host=127.0.0.1&port=5432&name=auction`。改变其中任一项须重新确认。试连及写配置前，服务端将头值与提交正文中三项按同一格式编码的值核对。缺失、重复、格式错误或目标不一致时返回 400 `setup_confirmation_required`。确认只包含这三项，账号和口令仍仅随配置正文提交。配置发布后，服务端把确认的目标随完成结果交给监管进程。监管进程须再次比对重读的服务配置和实际用于迁移的 owner 连接目标，匹配后才初始化专用空库并启动角色。
 

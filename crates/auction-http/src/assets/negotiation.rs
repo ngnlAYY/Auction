@@ -2,13 +2,43 @@
 
 use axum::http::{HeaderMap, HeaderValue, Method, header};
 
-/// 把入口文档引用的样式表与预加载资源写成 `Link` 响应头。
+use crate::WebScriptPolicy;
+
+/// 入口文档里会转写成 `Link` 的两种标签。
+#[derive(Clone, Copy)]
+enum EntryTag {
+    Link,
+    Script,
+}
+
+impl EntryTag {
+    const fn marker(self) -> &'static str {
+        match self {
+            Self::Link => "<link ",
+            Self::Script => "<script ",
+        }
+    }
+}
+
+/// 把入口文档引用的样式表、预加载资源与模块脚本写成 `Link` 响应头。
 ///
 /// 入口文档每次都要回源再验证；前置 CDN 可以据这个头在等待源站期间先发 103 Early Hints，
 /// 浏览器提前取回带指纹的 WASM、脚本与样式。没有 Early Hints 时它与文档内的 `<link>` 等价，
 /// 浏览器按 URL 与请求模式去重，不会重复下载。只转写 `assets/` 下、字符受限的同源路径，
-/// 属性沿用文档里的写法，保证预加载与真正的请求匹配。
-pub(super) fn entry_preload_links(document: &[u8]) -> Option<HeaderValue> {
+/// 属性沿用文档里的写法，保证预加载与真正的请求匹配。两套产物的入口形状不同：Dioxus 沿用
+/// 只看 `<link>` 的逐条转写；Solid 还要识别入口模块脚本与 `modulepreload`。
+pub(super) fn entry_preload_links(
+    document: &[u8],
+    web_script_policy: WebScriptPolicy,
+) -> Option<HeaderValue> {
+    match web_script_policy {
+        WebScriptPolicy::Dioxus => dioxus_entry_preload_links(document),
+        WebScriptPolicy::Solid => solid_entry_preload_links(document),
+    }
+}
+
+/// Dioxus 的入口文档只使用 `<link>`；必须保留逐条转写，不能按 URL 去重或读取 `<script>`。
+fn dioxus_entry_preload_links(document: &[u8]) -> Option<HeaderValue> {
     let document = std::str::from_utf8(document).ok()?;
     let mut links = Vec::new();
     let mut rest = document;
@@ -50,6 +80,100 @@ pub(super) fn entry_preload_links(document: &[u8]) -> Option<HeaderValue> {
         return None;
     }
     HeaderValue::from_str(&links.join(", ")).ok()
+}
+
+/// Solid 产物按文档顺序处理 `<link>` 与入口模块脚本；同一 URL 只声明一次。
+fn solid_entry_preload_links(document: &[u8]) -> Option<HeaderValue> {
+    let document = std::str::from_utf8(document).ok()?;
+    let mut links = Vec::new();
+    let mut seen = Vec::new();
+    let mut rest = document;
+    while let Some((start, tag)) = next_entry_tag(rest) {
+        let tag_body = &rest[start + tag.marker().len()..];
+        let Some(end) = tag_body.find('>') else {
+            break;
+        };
+        let attributes = &tag_body[..end];
+        rest = &tag_body[end..];
+        let Some(link) = entry_link(tag, attributes) else {
+            continue;
+        };
+        if seen.contains(&link.path) {
+            continue;
+        }
+        seen.push(link.path);
+        links.push(link.header);
+    }
+    if links.is_empty() {
+        return None;
+    }
+    HeaderValue::from_str(&links.join(", ")).ok()
+}
+
+struct EntryLink {
+    path: String,
+    header: String,
+}
+
+/// 找文档顺序里的下一个入口标签；入口脚本与模块预加载都要保持与文档一致的顺序。
+fn next_entry_tag(rest: &str) -> Option<(usize, EntryTag)> {
+    let link = rest.find(EntryTag::Link.marker()).map(|index| (index, EntryTag::Link));
+    let script = rest.find(EntryTag::Script.marker()).map(|index| (index, EntryTag::Script));
+    match (link, script) {
+        (Some(link), Some(script)) => Some(if link.0 <= script.0 { link } else { script }),
+        (link, script) => link.or(script),
+    }
+}
+
+fn entry_link(tag: EntryTag, attributes: &str) -> Option<EntryLink> {
+    let (path, header) = match tag {
+        EntryTag::Link => {
+            let path = link_attribute(attributes, "href").and_then(fingerprinted_asset_path)?;
+            let mut header = match link_attribute(attributes, "rel") {
+                Some("stylesheet") => format!("<{path}>; rel=preload; as=style"),
+                Some("preload") => {
+                    let destination = match link_attribute(attributes, "as") {
+                        Some(destination @ ("script" | "fetch" | "style" | "font")) => destination,
+                        _ => return None,
+                    };
+                    let mut header = format!("<{path}>; rel=preload; as={destination}");
+                    if let Some(media_type) = link_attribute(attributes, "type").filter(|value| {
+                        value
+                            .bytes()
+                            .all(|byte| byte.is_ascii_alphanumeric() || b"/+-.".contains(&byte))
+                    }) && destination != "style"
+                    {
+                        header.push_str(&format!("; type=\"{media_type}\""));
+                    }
+                    header
+                }
+                Some("modulepreload") => format!("<{path}>; rel=modulepreload"),
+                _ => return None,
+            };
+            if has_crossorigin(attributes) {
+                header.push_str("; crossorigin");
+            }
+            (path, header)
+        }
+        EntryTag::Script => {
+            if link_attribute(attributes, "type") != Some("module") {
+                return None;
+            }
+            let path = link_attribute(attributes, "src").and_then(fingerprinted_asset_path)?;
+            let mut header = format!("<{path}>; rel=modulepreload");
+            if has_crossorigin(attributes) {
+                header.push_str("; crossorigin");
+            }
+            (path, header)
+        }
+    };
+    Some(EntryLink { path, header })
+}
+
+fn has_crossorigin(attributes: &str) -> bool {
+    attributes
+        .split_ascii_whitespace()
+        .any(|attribute| attribute == "crossorigin" || attribute.starts_with("crossorigin="))
 }
 
 /// 读取 `name="value"` 形式的属性值；dx 生成的入口文档只使用双引号。

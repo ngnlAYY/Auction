@@ -8,14 +8,14 @@ Public 与 Admin 两个 HTTP 表面的适配器：路由表、请求边界、会
 
 | 入口 | 用途 |
 | --- | --- |
-| `public_router_with_web_script_policy::<Assets>(version, boundary, anonymous_read_gate, policy)` / `admin_router_with_web_script_policy::<Assets>(version, boundary, policy)` | 构建两个表面的 axum `Router`，并由装配根按 surface 的实际前端技术栈显式传入 `WebScriptPolicy`；`Assets` 为装配根选择的 `RustEmbed` 类型，匿名读闸门句柄取自 `PublicApiState::anonymous_read_gate` |
+| `public_router_with_web_script_policy::<Assets>(version, boundary, anonymous_read_gate, policy)` / `admin_router_with_web_script_policy::<Assets>(version, boundary, policy)` | 构建两个表面的 axum `Router`，并由装配根按 surface 的实际前端技术栈显式传入 `WebScriptPolicy`，同一策略用于 CSP 与静态资源的指纹命名判定；`Assets` 为装配根选择的 `RustEmbed` 类型，匿名读闸门句柄取自 `PublicApiState::anonymous_read_gate` |
 | `WebScriptPolicy::{Dioxus, Solid}` | 闭集脚本策略：Dioxus 为 `script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'`，Solid 为 `script-src 'self'`；两者都保留 `style-src 'self' 'unsafe-inline'` |
 | `PublicApiState` / `AdminApiState` | 端口集合（`Option<Arc<dyn …>>`），以 builder 追加可选能力 |
 | `PublicHttpSecurity` / `AdminHttpSecurity` | origin、Cookie、限流、可信代理与请求超时策略，启动时校验 |
 | `HttpListener` / `serve_http` / `UnixHttpListener` | TCP/Unix 已绑定 listener 与连接服务（5 秒请求头读取超时、优雅关闭）；Unix 变体只在 Linux 编译。Worker control socket 也用 `UnixHttpListener` 绑定，实例锁与 peer 过滤、路由见[crates/auction-jobs/README.md](../auction-jobs/README.md) |
 | `spawn_metrics_listener` | 三角色附加指标出口；只持有同一 `ProcessMetrics` 与 `RuntimeSwitches`，绑定/服务失败只降级采集 |
 | `RealtimeHub` | Public 进程内 WebSocket 广播 Hub，每连接有界缓冲，慢连接被淘汰 |
-| `serve_admin_setup_asset` | 首次设置页面复用 Admin 内嵌资源 |
+| `serve_admin_setup_asset` | 首次设置页面复用 Admin 内嵌资源；CSP 已按装配根传入的策略，静态资源回退在 Admin 接入 Solid 前固定 Dioxus |
 
 监听器归属、`TaskGuard` 生命周期与关闭顺序由装配根决定；`serve_http` 不解析配置、不做认证或限流。
 
@@ -40,7 +40,7 @@ Public 与 Admin 两个 HTTP 表面的适配器：路由表、请求边界、会
 
 ## 浏览器资源与健康
 
-`web-embed` 构建的资源来自 `dx bundle`（含默认语言之外、带内容指纹的 FTL 译文）；可压缩资源带构建期 brotli 副本，按 `Accept-Encoding` 协商并声明 `Vary`，`.br` 路径不对外提供。API-only 构建使用固定空资源目录。除精确静态资源外，只有 [crates/auction-http/src/assets/routes.rs](src/assets/routes.rs) 登记的参数路径返回 `index.html`，未知路径 404，资源缺失时页面路由 503。新增或删除页面时同步前端 `Route`、该清单与[docs/contracts/routes.md](../../docs/contracts/routes.md)。
+`web-embed` 构建的资源来自 `dx bundle`（含默认语言之外、带内容指纹的 FTL 译文）；接入另一套技术栈时，静态资源层按装配根传入的 `WebScriptPolicy` 判定指纹命名与不可变缓存，不按文件名猜测。Dioxus 使用 `-dxh<8–16 位十六进制>` 命名；Solid 对 `assets/` 下每个文件（含子目录）的最后一级文件名匹配 `名字-8位指纹.扩展名`。另一套产物的命名不会获得长期缓存。两套产物都须产出唯一的 `assets/favicon-*.svg` 供 `/favicon.ico` 映射。可压缩资源带构建期 brotli 副本，按 `Accept-Encoding` 协商并声明 `Vary`，`.br` 路径不对外提供。API-only 构建使用固定空资源目录。除精确静态资源外，只有 [crates/auction-http/src/assets/routes.rs](src/assets/routes.rs) 登记的参数路径返回 `index.html`，未知路径 404，资源缺失时页面路由 503；入口回退的 `Link` 中，Dioxus 保持旧的 `<link>` 逐条 `rel=preload` 转写，Solid 另识别 `modulepreload` 与入口模块脚本，精确 `/index.html` 不添加。新增或删除页面时同步前端 `Route`、该清单与[docs/contracts/routes.md](../../docs/contracts/routes.md)。
 
 | 路径 | 含义 |
 | --- | --- |

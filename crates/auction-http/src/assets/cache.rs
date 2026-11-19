@@ -7,6 +7,8 @@ use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::Response;
 use rust_embed::EmbeddedFile;
 
+use crate::WebScriptPolicy;
+
 #[derive(Clone, Copy)]
 pub(super) enum CachePolicy {
     NoCache,
@@ -108,18 +110,52 @@ pub(super) fn delta_seconds(value: &str) -> Option<&str> {
     (!value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit())).then_some(value)
 }
 
-pub(super) fn exact_asset_cache(relative_path: &str) -> CachePolicy {
-    // assets/ 也可包含原名发布的文件；只有 dx 的内容指纹文件名才能获得不可变缓存策略。
+pub(super) fn exact_asset_cache(
+    relative_path: &str,
+    web_script_policy: WebScriptPolicy,
+) -> CachePolicy {
+    // assets/ 也可包含原名发布的文件；只有当前技术栈产物的内容指纹文件名才能获得不可变缓存。
     let fingerprinted = relative_path.starts_with("assets/")
-        && Path::new(relative_path)
-            .file_stem()
-            .and_then(|name| name.to_str())
-            .and_then(|name| name.rsplit_once("-dxh"))
-            .is_some_and(|(_, hash)| {
-                // dx 逐字节输出 8 个哈希字节的十六进制，每字节 1 至 2 位。
-                (8..=16).contains(&hash.len()) && hash.bytes().all(|byte| byte.is_ascii_hexdigit())
-            });
+        && match web_script_policy {
+            WebScriptPolicy::Dioxus => dioxus_fingerprinted_name(relative_path),
+            WebScriptPolicy::Solid => solid_fingerprinted_name(relative_path),
+        };
     if fingerprinted { CachePolicy::Immutable } else { CachePolicy::NoCache }
+}
+
+/// dx 逐字节输出 8 个哈希字节的十六进制，每字节 1 至 2 位。
+fn dioxus_fingerprinted_name(relative_path: &str) -> bool {
+    Path::new(relative_path)
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .and_then(|name| name.rsplit_once("-dxh"))
+        .is_some_and(|(_, hash)| {
+            (8..=16).contains(&hash.len()) && hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+        })
+}
+
+/// 构建侧递归枚举 `assets/`，按最后一级文件名保证形如 `名字-8位指纹.扩展名`。
+fn solid_fingerprinted_name(relative_path: &str) -> bool {
+    let Some(path_in_assets) = relative_path.strip_prefix("assets/") else {
+        return false;
+    };
+    let Some(file_name) = path_in_assets.rsplit('/').next().filter(|name| !name.is_empty()) else {
+        return false;
+    };
+    let Some((stem, extension)) = file_name.rsplit_once('.') else {
+        return false;
+    };
+    !extension.is_empty()
+        && extension.bytes().all(|byte| byte.is_ascii_alphanumeric())
+        && stem.len() >= 10
+        && stem.as_bytes()[0].is_ascii_alphanumeric()
+        && stem
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+        && stem.as_bytes()[stem.len() - 9] == b'-'
+        && stem[stem.len() - 8..]
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
 }
 
 pub(super) fn favicon_file<A: rust_embed::RustEmbed>() -> Option<(Cow<'static, str>, EmbeddedFile)>

@@ -14,6 +14,7 @@ use axum::{
     Router,
     body::{Body, to_bytes},
     http::{Request, StatusCode, header},
+    response::Response,
 };
 use hyper_util::{
     rt::{TokioExecutor, TokioIo},
@@ -29,13 +30,22 @@ use tokio::{
 };
 
 use super::{serve_admin_asset, serve_admin_setup_asset, serve_public_asset, tests::TestAssets};
+use crate::WebScriptPolicy;
 use crate::server::serve_http;
+
+async fn public_asset<A: RustEmbed + Send + Sync + 'static>(request: Request<Body>) -> Response {
+    serve_public_asset::<A>(request, WebScriptPolicy::Dioxus).await
+}
+
+async fn admin_asset<A: RustEmbed + Send + Sync + 'static>(request: Request<Body>) -> Response {
+    serve_admin_asset::<A>(request, WebScriptPolicy::Dioxus).await
+}
 
 async fn listen() -> (SocketAddr, oneshot::Sender<()>, JoinHandle<io::Result<()>>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind loopback");
     let address = listener.local_addr().unwrap();
     let (stop, stopped) = oneshot::channel();
-    let app = Router::new().fallback(serve_public_asset::<TestAssets>);
+    let app = Router::new().fallback(public_asset::<TestAssets>);
     let server = tokio::spawn(serve_http(listener, app, async move {
         stopped.await.expect("stop listener");
     }));
@@ -58,7 +68,7 @@ async fn http2_not_modified_ends_in_headers() {
 async fn http2_not_modified_has_the_same_framing_over_duplex() {
     tokio::time::timeout(Duration::from_secs(5), async {
         let (client, server) = tokio::io::duplex(8192);
-        let app = Router::new().fallback(serve_public_asset::<TestAssets>);
+        let app = Router::new().fallback(public_asset::<TestAssets>);
         let server = tokio::spawn(async move {
             hyper::server::conn::http2::Builder::new(TokioExecutor::new())
                 .serve_connection(TokioIo::new(server), TowerToHyperService::new(app))
@@ -275,7 +285,7 @@ async fn http1_asset(app: &Router, method: &str, path: &str, headers: &str) -> (
 
 #[tokio::test]
 async fn http1_asset_encoding_preserves_legacy_representations() {
-    let app = Router::new().fallback(serve_public_asset::<TestAssets>);
+    let app = Router::new().fallback(public_asset::<TestAssets>);
     for (accept, expected_encoding) in [
         (None, None),
         (Some(""), None),
@@ -315,7 +325,7 @@ async fn http1_asset_encoding_preserves_legacy_representations() {
 
 #[tokio::test]
 async fn http1_identity_only_favicon_varies_on_success_revalidation_and_rejection() {
-    let app = Router::new().fallback(serve_public_asset::<NegotiationAssets<false>>);
+    let app = Router::new().fallback(public_asset::<NegotiationAssets<false>>);
     let path = "/favicon.ico";
     let (head, body) = http1_asset(&app, "GET", path, "").await;
     assert!(head.starts_with("HTTP/1.1 200 "), "{head}");
@@ -341,8 +351,8 @@ async fn http1_identity_only_favicon_varies_on_success_revalidation_and_rejectio
 
 #[tokio::test]
 async fn http1_entry_aliases_and_favicon_negotiate_existing_copies() {
-    let public = Router::new().fallback(serve_public_asset::<NegotiationAssets>);
-    let admin = Router::new().fallback(serve_admin_asset::<NegotiationAssets>);
+    let public = Router::new().fallback(public_asset::<NegotiationAssets>);
+    let admin = Router::new().fallback(admin_asset::<NegotiationAssets>);
     let setup = Router::new().fallback(serve_admin_setup_asset::<NegotiationAssets>);
     let headers = "Accept-Encoding: *;q=1\r\nAccept-Encoding: identity;q=0\r\n";
     let preload = "</assets/app.css>; rel=preload; as=style";
@@ -365,7 +375,7 @@ async fn http1_entry_aliases_and_favicon_negotiate_existing_copies() {
 
 #[tokio::test]
 async fn http1_head_and_304_describe_the_negotiated_copy() {
-    let app = Router::new().fallback(serve_public_asset::<NegotiationAssets>);
+    let app = Router::new().fallback(public_asset::<NegotiationAssets>);
     let (identity, body) = http1_asset(&app, "GET", "/", "").await;
     assert!(identity.starts_with("HTTP/1.1 200 "));
     assert_eq!(body, ENTRY_HTML);
@@ -404,8 +414,8 @@ async fn http1_head_and_304_describe_the_negotiated_copy() {
 
 #[tokio::test]
 async fn http1_negotiates_only_after_route_and_method_checks() {
-    let app = Router::new().fallback(serve_public_asset::<NegotiationAssets>);
-    let missing = Router::new().fallback(serve_public_asset::<MissingAssets>);
+    let app = Router::new().fallback(public_asset::<NegotiationAssets>);
+    let missing = Router::new().fallback(public_asset::<MissingAssets>);
     let accept = "Accept-Encoding: br;q=0, identity;q=0\r\nIf-None-Match: *\r\n";
     for (app, method, path, status) in [
         (&app, "GET", "/assets/app.css", 406),
