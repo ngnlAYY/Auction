@@ -83,7 +83,7 @@
 
 ## 代码风格
 
-- 使用仓库 rustfmt。Clippy 以 `-D warnings` 运行；workspace lint 把 `unwrap_used`、`expect_used`、`dbg_macro`、`todo`、`unimplemented` 设为 deny；测试豁免是各 crate 根的 `#![cfg_attr(test, allow(...))]` 与集成测试根的 `#![allow(...)]`，仓库不使用 `clippy.toml`。不用关闭 lint 掩盖设计问题，必要的例外只加在单个条目上并用中文写明原因。
+- 使用仓库 rustfmt。Clippy 以 `-D warnings` 运行；workspace lint 把 `unwrap_used`、`expect_used`、`dbg_macro`、`todo`、`unimplemented` 设为 deny；测试豁免是各 crate 根的 `#![cfg_attr(test, allow(...))]` 与集成测试根的 `#![allow(...)]`，仓库不使用 `clippy.toml`。二进制 crate 的入口另对非测试构建打开 `dead_code_pub_in_binary`（从未使用的 `pub` 条目），未使用的依赖由 `[workspace.lints.cargo]` 在编译时拒绝。不用关闭 lint 掩盖设计问题，必要的例外只加在单个条目上并用中文写明原因。
 - 函数单一职责，优先早返回与明确错误；库用 `thiserror`，只有装配根使用 `anyhow`。生产代码显式传播错误或处理 `None`；不可恢复的启动不变量要给出可行动的错误。
 - 使用结构化 tracing 字段；完整凭据、密码、Cookie 与密钥不得进入日志或错误信息。
 - DTO、数据库记录与领域聚合分离，在边界映射。

@@ -181,6 +181,12 @@ opt-level = "z"
 # 可选：浏览器保持 abort；install_panic_hook 在 trap 前展示静态错误横幅。
 panic = "abort"
 
+[workspace.lints.cargo]
+# 可选：Cargo 1.100 内置的未使用依赖检查，提升为错误。它按实际编译的构型判断：
+# 普通依赖在 check/clippy 时报告，开发依赖在编译测试时报告；没被编译到的构型仍由 cargo machete 兜底。
+unused_dependencies = "deny"
+unused_workspace_dependencies = "deny"
+
 [workspace.lints.rust]
 # 可选：把编译器默认 warn 的 must_use 忽略提升为错误，避免悄悄丢弃 Result/Guard。
 unused_must_use = "deny"

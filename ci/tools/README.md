@@ -57,7 +57,7 @@ mise run verify      # 运行某个入口
 
 CI 的 `security-audit` 只审计应用 `Cargo.lock`（默认分支与最近一个发布 tag）。工具自身的依赖由各上游发布包的 `Cargo.lock` 或预编译包决定，仓库不再逐项处理其中的公告；需要时升级到上游修复后的版本。
 
-应用的直接依赖由 CI 的 `dependency-unused`（`cargo machete`）检查。上游分别要求不同版本的传递依赖时，不为减少锁文件条目而跨不兼容版本替换。
+应用的直接依赖有两层检查：Cargo 内置的 `unused_dependencies` 与 `unused_workspace_dependencies`（`Cargo.toml` 的 `[workspace.lints.cargo]`，设为 `deny`）在每次编译时按实际编译的构型报错——普通依赖在 `check`/Clippy 时、开发依赖在编译测试时；CI 的 `dependency-unused`（`cargo machete`）按清单文本检查，覆盖没被编译到的构型。上游分别要求不同版本的传递依赖时，不为减少锁文件条目而跨不兼容版本替换。
 
 ## rustup.sh
 

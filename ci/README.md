@@ -50,7 +50,7 @@ bash ci/checks/check.sh <检查项>...
 | `rust` | `fmt check dependency-versions lint wasm rustdoc` |
 | `dependency-audit` | [ci/checks/dependency-audit.sh](checks/dependency-audit.sh) 以 `cargo audit --deny warnings` 审计 `Cargo.lock`（需要 mise 安装的 cargo-audit，联网读取 RustSec）；例外登记在 [ci/checks/dependency-audit.ignore](checks/dependency-audit.ignore)，只收两类：已核实不进入编译图的公告，以及没有已知漏洞、本仓库不直接依赖、只经某个上游最新版本传递引入的“无人维护”类公告；每条写明原因、影响范围与解除条件，逐条以 `--ignore` 传入，定时审计复查 |
 | `release-dependency-audit` | 取最高版本的发布 tag（`v<semver>`，口径同发布守卫），把其中的 `Cargo.lock` 读到临时目录后以同样参数审计；没有发布 tag 时提示并通过。需要该 tag 的提交对象，见[ci/checks/README.md#每周依赖审计](checks/README.md#每周依赖审计) |
-| `dependency-unused` | `cargo machete`（0.10.1） |
+| `dependency-unused` | `cargo machete`（0.10.1）；编译期另有 Cargo 内置的 `unused_dependencies`（`[workspace.lints.cargo]`，`deny`），见[ci/tools/README.md](tools/README.md) |
 
 `mise run verify` = `all fmt check dependency-versions lint wasm rustdoc`。默认门禁不运行测试。
 
