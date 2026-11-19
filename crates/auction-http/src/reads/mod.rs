@@ -8,7 +8,7 @@ mod lots;
 mod mapping;
 mod world;
 
-pub(crate) use auctions::{current_auction, list_auctions, list_auctions_v2};
+pub(crate) use auctions::{auction_summary, current_auction, list_auctions, list_auctions_v2};
 pub(crate) use history::{list_bid_log, list_price_history};
 pub(crate) use lots::{list_lots, lot_detail};
 pub(crate) use world::list_worlds;

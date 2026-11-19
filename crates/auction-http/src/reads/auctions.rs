@@ -1,10 +1,13 @@
-//! 公开拍卖列表与当前场次的处理器。
+//! 公开拍卖目录、已结算场次摘要与当前场次的处理器。
 
 use auction_application::auction::{PublicAuctionListRequest, PublicAuctionSummary};
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
-use auction_contracts::{ApiErrorResponse, ApiResponse, CurrentAuctionResponse};
+use auction_application::public::settled_auction_summary;
+use auction_contracts::{
+    ApiErrorResponse, ApiResponse, CurrentAuctionResponse, SettledAuctionSummaryResponse,
+};
 use axum::Json;
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::{HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 
@@ -12,10 +15,12 @@ use super::mapping::{
     map_auction_page, map_auction_summary, map_auction_summary_v2, map_current_auction,
 };
 use crate::diagnostics;
-use crate::errors::{api_error, query_rejection};
-use crate::mapping::decode_public_cursor;
-use crate::middleware::response_cache::LOW_FREQUENCY_CACHE_CONTROL;
-use crate::query::{page_offset, parse_positive_i64, parse_public_page_size, parse_query};
+use crate::errors::{api_error, not_found_error, query_rejection};
+use crate::mapping::{decode_public_cursor, public_timestamp};
+use crate::middleware::response_cache::{LOW_FREQUENCY_CACHE_CONTROL, SETTLED_CACHE_CONTROL};
+use crate::query::{
+    page_offset, parse_positive_i64, parse_public_page_size, parse_public_uuid, parse_query,
+};
 use crate::state::PublicApiState;
 
 /// 保留 v1 字段闭集，已打开的旧页面无需接受新的摘要字段。
@@ -121,6 +126,46 @@ where
             .headers_mut()
             .insert(header::CACHE_CONTROL, HeaderValue::from_static(LOW_FREQUENCY_CACHE_CONTROL));
     }
+    Ok(response)
+}
+
+/// 独立于分页目录，按 ID 读取可长期缓存的已结算场次摘要。
+pub(crate) async fn auction_summary(
+    State(state): State<PublicApiState>,
+    Path(auction_id): Path<String>,
+    uri: Uri,
+) -> Result<Response, (StatusCode, Json<ApiErrorResponse>)> {
+    let auction_id = parse_public_uuid(&auction_id)
+        .map_err(|()| api_error(StatusCode::BAD_REQUEST, "invalid_auction_id", "拍卖 ID 无效"))?;
+    if uri.query().is_some_and(|query| !query.is_empty()) {
+        return Err(query_rejection());
+    }
+    let unavailable =
+        || api_error(StatusCode::SERVICE_UNAVAILABLE, "storage_unavailable", "场次摘要暂不可用");
+    let reader = state.auction_summary().ok_or_else(unavailable)?;
+    let summary = settled_auction_summary(reader, auction_id)
+        .await
+        .map_err(|diagnostic_cause| {
+            diagnostics::warn(
+                "public_catalog",
+                "read_settled_auction_summary",
+                diagnostic_cause.diagnostic_kind(),
+                DiagnosticContext::default(),
+            );
+            unavailable()
+        })?
+        .ok_or_else(not_found_error)?;
+    let data = SettledAuctionSummaryResponse {
+        id: summary.id.to_string(),
+        world: summary.world_id,
+        sequence: summary.sequence,
+        effective_end_at: summary.effective_end_at.map(public_timestamp),
+    };
+    // 只给已结算的成功结果长缓存；404 由 HTTP 边界禁止存储，结算后同一 URL 可立即读取。
+    let mut response = Json(ApiResponse::ok("已结算场次摘要已加载", data)).into_response();
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static(SETTLED_CACHE_CONTROL));
     Ok(response)
 }
 

@@ -1,5 +1,6 @@
 //! public 上下文。
 
+pub(crate) mod auction_summary;
 pub(crate) mod blacklist;
 pub(crate) mod compensation;
 pub(crate) mod equipment_link;
@@ -10,6 +11,7 @@ pub(crate) mod sessions;
 pub(crate) mod watch;
 pub(crate) mod watch_preference;
 
+pub use auction_summary::{PublicAuctionSummaryReader, SettledAuctionSummary};
 pub use blacklist::{
     MAX_PUBLIC_BLACKLIST_OFFSET, PublicBlacklistEntry, PublicBlacklistPage, PublicBlacklistReader,
     PublicBlacklistRequest,

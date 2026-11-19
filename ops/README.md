@@ -221,7 +221,7 @@ Cloudflare 默认只按**文件扩展名**决定能否缓存：`.js`、`.css`、
 | 白名单页面的尾斜杠重定向 | `no-cache` | 每次回源获取当前重定向 |
 | 补偿池汇总（含当前余额）、履约进度 | `no-cache` | `REVALIDATED`：每次向源站做条件请求，未变化时源站只回 304，正文由边缘给出 |
 | 低频内容：世界目录、规则、关于、黑名单、注册说明、已结算拍卖列表、价格历史、补偿池流水与明细 | `public, max-age=300, stale-while-revalidate=3600` | `HIT`；过期后一小时内 `UPDATING`/`STALE`（先回旧值，后台刷新） |
-| 已结算批次的 lots、lot 详情与竞价日志 | `public, max-age=86400, stale-while-revalidate=604800` | `HIT`；过期后 7 天内 `UPDATING`/`STALE`（先回旧值，后台刷新） |
+| 已结算场次的 `/api/v1/auctions/{auction_id}/summary`、已结算批次的 lots、lot 详情与竞价日志 | `public, max-age=86400, stale-while-revalidate=604800` | `HIT`；过期后 7 天内 `UPDATING`/`STALE`（先回旧值，后台刷新） |
 | 倒计时图片（仍倒数或未排期） | `public, max-age=5` | `HIT`，5 秒后 `EXPIRED` |
 | 倒计时图片（计时目标已过去） | 低频档（5 分钟，`stale-while-revalidate` 1 小时） | `HIT`，过期后先回旧图再后台刷新 |
 | 进行中场次的读取、会话、`/api/v1/me/*`、论坛同步开关与镜像、就绪检查、全部写入与错误 | `no-store` | `BYPASS` 或 `DYNAMIC` |

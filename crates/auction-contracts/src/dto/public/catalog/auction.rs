@@ -35,6 +35,18 @@ pub struct AuctionSummaryV2Response {
     pub forum_thread_url: Option<String>,
 }
 
+/// 按 ID 读取的已结算场次摘要。
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SettledAuctionSummaryResponse {
+    pub id: String,
+    pub world: String,
+    pub sequence: i64,
+    /// 与目录使用同一截止时刻；没有有效截止时刻时返回 null。
+    #[serde(deserialize_with = "crate::dto::response::deserialize_required_option")]
+    pub effective_end_at: Option<String>,
+}
+
 /// Public 历史拍卖分页信封；默认条目维持 v1 契约，v2 显式选择扩展摘要。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AuctionListResponse<T = AuctionSummaryResponse> {
@@ -75,4 +87,37 @@ pub struct CurrentAuctionItemResponse {
     /// 响应省略该键，保持旧页面按闭集解码的原字段集合；浏览器按往期目录拼装的已结算场次没有该值。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proxy_default_mode: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::Value;
+
+    use super::SettledAuctionSummaryResponse;
+    use crate::ApiResponse;
+
+    #[test]
+    fn settled_auction_summary_has_a_closed_field_set() {
+        let mut wire: Value = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/public/auction-summary.json"
+        ))
+        .unwrap();
+        let parsed: ApiResponse<SettledAuctionSummaryResponse> =
+            serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(parsed.data.effective_end_at.as_deref(), Some("2025-11-17T09:46:40Z"));
+        wire["data"]["effective_end_at"] = Value::Null;
+        let parsed: ApiResponse<SettledAuctionSummaryResponse> =
+            serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(parsed.data.effective_end_at, None);
+
+        let mut extra = wire.clone();
+        extra["data"]["status"] = Value::String("settled".to_owned());
+        assert!(
+            serde_json::from_value::<ApiResponse<SettledAuctionSummaryResponse>>(extra).is_err()
+        );
+        wire["data"].as_object_mut().unwrap().remove("effective_end_at");
+        assert!(
+            serde_json::from_value::<ApiResponse<SettledAuctionSummaryResponse>>(wire).is_err()
+        );
+    }
 }

@@ -5,6 +5,8 @@ use auction_application::auction::{
     PublicRealtimeAuctionStatus,
 };
 use auction_application::core::ApplicationError;
+use auction_application::public::SettledAuctionSummary;
+use auction_time::Timestamp;
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -14,6 +16,20 @@ use super::mapping::{
 };
 use crate::database::DatabaseStore;
 use crate::database::storage_error_from;
+
+/// 目录和按 ID 摘要对停用世界采用同一门禁，已结算历史仍可公开读取。
+macro_rules! public_auction_world_visibility_sql {
+    () => {
+        "(w.enabled OR a.status = 'settled')"
+    };
+}
+
+/// 以公开 lot 的实际截止为准，空场次保留 NULL。
+macro_rules! public_auction_effective_end_sql {
+    () => {
+        "MAX(l.effective_end_at) FILTER (WHERE l.status IN ('live', 'sold', 'unsold'))"
+    };
+}
 
 /// 当前场次快照在公开投影之外读取的冻结策略列，由 `map_postgres_current` 按名解码；只用于
 /// 当前场次与实时预检两条单场查询，目录 lot 查询不读取。
@@ -45,14 +61,15 @@ pub(super) async fn list(
         None
     } else {
         Some(
-            sqlx::query_scalar::<_, i64>(
+            sqlx::query_scalar::<_, i64>(concat!(
                 "SELECT COUNT(*)
                  FROM public.auctions AS a
                  JOIN public.worlds AS w ON w.id = a.world_id
                  WHERE a.status = $1
-                   AND (w.enabled OR a.status = 'settled')
-                   AND ($2::text IS NULL OR a.world_id = $2)",
-            )
+                   AND ",
+                public_auction_world_visibility_sql!(),
+                " AND ($2::text IS NULL OR a.world_id = $2)"
+            ))
             .bind(&request.status)
             .bind(request.world_id.as_deref())
             .fetch_one(&mut *transaction)
@@ -63,14 +80,15 @@ pub(super) async fn list(
     // 先确定当前页拍卖，再聚合其 lot；历史页不必为页外场次重复扫描和汇总全部装备。
     // 聚合本页后一次关联论坛地址与内容证明；v1 禁用关联，不读取论坛正文。
     // 未对账历史主题不参与 LEFT JOIN；已声明证明的损坏数据留给映射层明确报错。
-    let rows = sqlx::query(
+    let rows = sqlx::query(concat!(
         "WITH page_auctions AS MATERIALIZED (
             SELECT a.id
             FROM public.auctions AS a
             JOIN public.worlds AS w ON w.id = a.world_id
             WHERE a.status = $1
-              AND (w.enabled OR a.status = 'settled')
-              AND ($2::text IS NULL OR a.world_id = $2)
+              AND ",
+        public_auction_world_visibility_sql!(),
+        " AND ($2::text IS NULL OR a.world_id = $2)
               AND (
                    NOT $3::boolean
                    OR a.sequence < $4
@@ -86,9 +104,9 @@ pub(super) async fn list(
             a.status,
             a.scheduled_open_at,
             a.opened_at,
-            a.final_phase_at,
-            MAX(l.effective_end_at) FILTER (WHERE l.status IN ('live', 'sold', 'unsold'))
-                AS effective_end_at,
+            a.final_phase_at, ",
+        public_auction_effective_end_sql!(),
+        " AS effective_end_at,
             a.settled_at,
             COUNT(l.id) FILTER (WHERE l.status IN ('live', 'sold', 'unsold'))::bigint AS lot_count,
             COUNT(l.id) FILTER (WHERE l.status = 'sold')::bigint AS sold_count,
@@ -112,8 +130,8 @@ pub(super) async fn list(
          LEFT JOIN public.auction_forum_sync AS f
            ON $8::boolean AND f.auction_id = a.id AND f.status = 'published'
           AND f.content_revision > 0 AND f.content_synced_at IS NOT NULL
-         ORDER BY a.sequence DESC, a.id DESC",
-    )
+         ORDER BY a.sequence DESC, a.id DESC"
+    ))
     .bind(&request.status)
     .bind(request.world_id.as_deref())
     .bind(use_boundary)
@@ -153,6 +171,45 @@ pub(super) async fn list(
         next_cursor,
         has_more,
     })
+}
+
+pub(super) async fn settled_summary(
+    store: &DatabaseStore,
+    auction_id: Uuid,
+) -> Result<Option<SettledAuctionSummary>, ApplicationError> {
+    let mut transaction = store
+        .pool()
+        .begin_read_snapshot()
+        .await
+        .map_err(|error| storage_error_from(error, "开始公开结算场次摘要快照失败"))?;
+    let row = sqlx::query_as::<_, (Uuid, String, i64, Option<Timestamp>)>(concat!(
+        "SELECT a.id, a.world_id, a.sequence, ",
+        public_auction_effective_end_sql!(),
+        "
+         FROM public.auctions AS a
+         JOIN public.worlds AS w ON w.id = a.world_id
+         LEFT JOIN public.lots AS l ON l.auction_id = a.id
+         WHERE a.id = $1
+           AND a.status = 'settled'
+           AND ",
+        public_auction_world_visibility_sql!(),
+        "
+         GROUP BY a.id"
+    ))
+    .bind(auction_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(|error| storage_error_from(error, "读取公开结算场次摘要失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "结束公开结算场次摘要快照失败"))?;
+    Ok(row.map(|(id, world_id, sequence, effective_end_at)| SettledAuctionSummary {
+        id,
+        world_id,
+        sequence,
+        effective_end_at,
+    }))
 }
 
 pub(super) async fn current(

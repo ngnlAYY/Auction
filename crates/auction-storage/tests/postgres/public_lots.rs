@@ -12,10 +12,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use auction_application::auction::{
-    AuctionReader, PublicBidLogListRequest, PublicBidLogReader, PublicLotCategorySelection,
-    PublicLotListRequest, PublicLotReader, PublicPreviewLotSummary,
+    AuctionReader, PublicAuctionListRequest, PublicBidLogListRequest, PublicBidLogReader,
+    PublicLotCategorySelection, PublicLotListRequest, PublicLotReader, PublicPreviewLotSummary,
 };
-use auction_application::public::lot_code;
+use auction_application::public::{PublicAuctionSummaryReader, SettledAuctionSummary, lot_code};
 use auction_domain::ProxyMode;
 use auction_domain::equipment::taxonomy::EquipmentCategory;
 use auction_time::{Duration, Timestamp};
@@ -207,6 +207,83 @@ fn expected(pairs: &[(&str, i64)]) -> BTreeMap<String, i64> {
         counts.insert((*key).to_owned(), *value);
     }
     counts
+}
+
+#[tokio::test]
+async fn postgres_public_settled_auction_summary_uses_directory_visibility_and_deadline() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let seed_store = database.maintenance_store().await.expect("维护账号连接");
+    let pool = seed_store.postgres_pool();
+    let settled = seed_auction(
+        pool,
+        "summary-settled",
+        "main",
+        1,
+        "settled",
+        &[("Staff", "unsold"), ("Cloth", "unsold"), ("Light", "withdrawn")],
+    )
+    .await;
+    let disabled = seed_auction(pool, "summary-disabled", "isekai", 2, "settled", &[]).await;
+    let live = seed_auction(pool, "summary-live", "main", 3, "live", &[]).await;
+    sqlx::query("UPDATE public.worlds SET enabled = false WHERE id = 'isekai'")
+        .execute(pool)
+        .await
+        .expect("停用异世界");
+
+    let scheduled: Timestamp =
+        sqlx::query_scalar("SELECT scheduled_end_at FROM public.auctions WHERE id = $1")
+            .bind(settled)
+            .fetch_one(pool)
+            .await
+            .expect("场次计划截止时间");
+    let deadline = scheduled + Duration::hours(1);
+    // 撤拍 lot 的截止更晚，场次表的截止也与公开 lot 不同。
+    sqlx::query(
+        "UPDATE public.lots
+         SET effective_end_at = $2::timestamptz + (lot_number - 2) * interval '1 hour'
+         WHERE auction_id = $1",
+    )
+    .bind(settled)
+    .bind(deadline)
+    .execute(pool)
+    .await
+    .expect("设置各 lot 的不同截止时间");
+
+    let store = database.store().await.expect("运行账号连接");
+    let directory = store
+        .list_public_auctions(PublicAuctionListRequest {
+            world_id: None,
+            status: "settled".to_owned(),
+            limit: 20,
+            offset: 0,
+            cursor: None,
+            include_forum_thread_url: false,
+        })
+        .await
+        .expect("读取结算目录");
+    assert_eq!(directory.total, Some(2));
+    for (id, world, sequence, end) in
+        [(settled, "main", 1, Some(deadline)), (disabled, "isekai", 2, None)]
+    {
+        let summary = store.read_settled_auction_summary(id).await.expect("读取摘要");
+        assert_eq!(
+            summary,
+            Some(SettledAuctionSummary {
+                id,
+                world_id: world.to_owned(),
+                sequence,
+                effective_end_at: end,
+            })
+        );
+        let entry = directory.entries.iter().find(|entry| entry.id == id).expect("可见的结算场次");
+        assert_eq!(
+            (entry.world_id.as_str(), entry.sequence, entry.effective_end_at),
+            (world, sequence, end)
+        );
+    }
+    for id in [live, stable_id("summary", "missing")] {
+        assert_eq!(store.read_settled_auction_summary(id).await.expect("读取摘要"), None);
+    }
 }
 
 #[tokio::test]

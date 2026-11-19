@@ -24,8 +24,8 @@ use crate::public::{
     set_session_preference, set_watch_preference,
 };
 use crate::reads::{
-    current_auction, list_auctions, list_auctions_v2, list_bid_log, list_lots, list_price_history,
-    list_worlds, lot_detail,
+    auction_summary, current_auction, list_auctions, list_auctions_v2, list_bid_log, list_lots,
+    list_price_history, list_worlds, lot_detail,
 };
 use crate::state::{AdminApiState, PublicApiState};
 use crate::{admin as admin_handlers, public as public_handlers};
@@ -106,6 +106,7 @@ fn public_feature_routes(
         .route("/api/v1/auctions", get(list_auctions))
         .route("/api/v2/auctions", get(list_auctions_v2))
         .route("/api/v1/auctions/current", get(current_auction))
+        .route("/api/v1/auctions/{auction_id}/summary", get(auction_summary))
         .route("/api/v1/auctions/{auction_id}/lots", get(list_lots))
         .route("/api/v1/lots/{lot_id}", get(lot_detail))
         .route("/api/v1/auctions/{auction_id}/bid-log", get(list_bid_log))
@@ -509,6 +510,7 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
 
 #[cfg(test)]
 mod tests {
+    use std::borrow::Cow;
     use std::sync::Arc;
 
     use auction_application::auction::{
@@ -528,27 +530,29 @@ mod tests {
         SetLotWatchResult, SiteDocumentKind,
     };
     use auction_application::public::{
-        PublicLoginResult, PublicSessionIdentity, PublicSessionPort, PublicSessionPreferenceResult,
-        SetPublicSessionPreferenceCommand,
+        PublicAuctionSummaryReader, PublicLoginResult, PublicSessionIdentity, PublicSessionPort,
+        PublicSessionPreferenceResult, SetPublicSessionPreferenceCommand, SettledAuctionSummary,
     };
     use auction_application::realtime::{
         PublicRealtimeEvent, PublicRealtimePage, PublicRealtimeReader, PublicRealtimeRequest,
     };
     use auction_contracts::ApiErrorResponse;
     use auction_domain::EquipmentId;
-    use auction_time::Timestamp;
+    use auction_time::{Duration, Timestamp};
     use axum::{
         Router,
         body::{Body, to_bytes},
-        http::{Request, StatusCode, header},
+        http::{HeaderValue, Request, StatusCode, header},
+        response::Response,
     };
     use tower::ServiceExt;
     use uuid::Uuid;
 
-    use super::public_feature_routes;
+    use super::{public_feature_routes, public_router};
     use crate::mapping::encode_public_cursor;
+    use crate::middleware::response_cache::SETTLED_CACHE_CONTROL;
     use crate::middleware::security::PublicHttpSecurity;
-    use crate::server::contract_fixtures::assert_http;
+    use crate::server::contract_fixtures::{AUCTION_ID, assert_http, response_json};
     use crate::state::PublicApiState;
 
     fn app() -> Router {
@@ -562,6 +566,154 @@ mod tests {
             .oneshot(Request::builder().uri(uri).body(Body::empty()).expect("request"))
             .await
             .expect("response")
+    }
+
+    #[tokio::test]
+    async fn auction_summary_route_reports_missing_storage_without_the_state_port() {
+        let response =
+            summary_response(&format!("{AUCTION_ID}/summary"), PublicApiState::default(), None)
+                .await;
+        assert_no_summary_cache(&response);
+        let body = response_json(StatusCode::SERVICE_UNAVAILABLE, response).await;
+        assert_eq!(body["code"], "storage_unavailable");
+    }
+
+    struct NoAssets;
+
+    impl rust_embed::RustEmbed for NoAssets {
+        fn get(_path: &str) -> Option<rust_embed::EmbeddedFile> {
+            None
+        }
+
+        fn iter() -> impl Iterator<Item = Cow<'static, str>> {
+            std::iter::empty()
+        }
+    }
+
+    struct SummaryReader {
+        status: Option<&'static str>,
+        effective_end_at: Option<Timestamp>,
+    }
+
+    impl PublicAuctionSummaryReader for SummaryReader {
+        fn read_settled_auction_summary(
+            &self,
+            auction_id: Uuid,
+        ) -> ApplicationFuture<'_, Option<SettledAuctionSummary>> {
+            assert_eq!(auction_id, AUCTION_ID);
+            Box::pin(async move {
+                Ok((self.status == Some("settled")).then(|| SettledAuctionSummary {
+                    id: auction_id,
+                    world_id: "main".to_owned(),
+                    sequence: 5,
+                    effective_end_at: self.effective_end_at,
+                }))
+            })
+        }
+    }
+
+    async fn summary_response(
+        path: &str,
+        state: PublicApiState,
+        validator: Option<HeaderValue>,
+    ) -> Response {
+        let app = public_router::<NoAssets>(
+            "fixture",
+            state.http_boundary(),
+            state.anonymous_read_gate(),
+        )
+        .with_state(state);
+        let mut request =
+            Request::get(format!("/api/v1/auctions/{path}")).body(Body::empty()).unwrap();
+        if let Some(validator) = validator {
+            request.headers_mut().insert(header::IF_NONE_MATCH, validator);
+        }
+        app.oneshot(request).await.unwrap()
+    }
+
+    fn assert_no_summary_cache(response: &Response) {
+        for name in ["cache-control", "cdn-cache-control", "cloudflare-cdn-cache-control"] {
+            assert_eq!(response.headers()[name], "no-store");
+        }
+        assert!(!response.headers().contains_key(header::ETAG));
+    }
+
+    #[tokio::test]
+    async fn settled_auction_summary_matches_the_fixture_and_supports_revalidation() {
+        const CDN_CACHE: &str = "public, max-age=86400, stale-while-revalidate=604800";
+        let path = format!("{AUCTION_ID}/summary");
+        let reader = SummaryReader {
+            status: Some("settled"),
+            effective_end_at: Some(
+                Timestamp::from_timestamp(1_763_200_000, 0).unwrap() + Duration::days(2),
+            ),
+        };
+        let state = PublicApiState::default().with_auction_summary(Arc::new(reader));
+        let response = summary_response(&path, state.clone(), None).await;
+        assert_eq!(response.headers()[header::CACHE_CONTROL], SETTLED_CACHE_CONTROL);
+        assert_eq!(response.headers()["cdn-cache-control"], CDN_CACHE);
+        assert_eq!(response.headers()["cloudflare-cdn-cache-control"], CDN_CACHE);
+        let etag = response.headers()[header::ETAG].clone();
+        assert_http("public/auction-summary", StatusCode::OK, response).await;
+
+        let response = summary_response(&path, state, Some(etag.clone())).await;
+        assert_eq!(response.status(), StatusCode::NOT_MODIFIED);
+        assert_eq!(response.headers()[header::ETAG], etag);
+        assert_eq!(response.headers()[header::CACHE_CONTROL], SETTLED_CACHE_CONTROL);
+        assert_eq!(response.headers()["cdn-cache-control"], CDN_CACHE);
+        assert_eq!(response.headers()["cloudflare-cdn-cache-control"], CDN_CACHE);
+        assert!(!response.headers().contains_key(header::CONTENT_LENGTH));
+        assert!(to_bytes(response.into_body(), usize::MAX).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn auction_summary_preserves_a_null_effective_end() {
+        let reader = SummaryReader { status: Some("settled"), effective_end_at: None };
+        let state = PublicApiState::default().with_auction_summary(Arc::new(reader));
+        let response = summary_response(&format!("{AUCTION_ID}/summary"), state, None).await;
+        let body = response_json(StatusCode::OK, response).await;
+        assert_eq!(body["data"].get("effective_end_at"), Some(&serde_json::Value::Null));
+    }
+
+    #[tokio::test]
+    async fn auction_summary_does_not_cache_unsettled_or_missing_auctions() {
+        for status in [Some("live"), None] {
+            let reader = SummaryReader { status, effective_end_at: None };
+            let state = PublicApiState::default().with_auction_summary(Arc::new(reader));
+            let response = summary_response(
+                &format!("{AUCTION_ID}/summary"),
+                state,
+                Some(HeaderValue::from_static("*")),
+            )
+            .await;
+            assert_no_summary_cache(&response);
+            let actual = response_json(StatusCode::NOT_FOUND, response).await;
+            assert_eq!(
+                actual,
+                serde_json::json!({
+                    "code": "not_found",
+                    "message": "请求的资源不存在",
+                    "data": null,
+                    "request_id": null,
+                })
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn auction_summary_rejects_invalid_ids_and_query_keys_before_reading() {
+        for (path, code) in [
+            ("bad/summary".to_owned(), "invalid_auction_id"),
+            ("00000000-0000-0000-0000-000000000000/summary".to_owned(), "invalid_auction_id"),
+            (format!("{}/summary", AUCTION_ID.to_string().to_uppercase()), "invalid_auction_id"),
+            ("%FF/summary".to_owned(), "invalid_query"),
+            (format!("{AUCTION_ID}/summary?world=main"), "invalid_query"),
+        ] {
+            let response = summary_response(&path, PublicApiState::default(), None).await;
+            assert_no_summary_cache(&response);
+            let body = response_json(StatusCode::BAD_REQUEST, response).await;
+            assert_eq!(body["code"], code);
+        }
     }
 
     #[tokio::test]

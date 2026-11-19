@@ -9,8 +9,8 @@ use auction_application::auction::{
 use auction_application::forum::PublicForumReader;
 use auction_application::operations::ProcessReadinessPort;
 use auction_application::public::{
-    PublicBlacklistReader, PublicCompensationReader, PublicEquipmentLinkResolver,
-    PublicFulfillmentReader, PublicRulesReader, PublicSessionPort,
+    PublicAuctionSummaryReader, PublicBlacklistReader, PublicCompensationReader,
+    PublicEquipmentLinkResolver, PublicFulfillmentReader, PublicRulesReader, PublicSessionPort,
 };
 use auction_application::realtime::PublicRealtimeReader;
 use auction_contracts::PublicRegistrationInfoResponse;
@@ -33,6 +33,7 @@ pub struct PublicApiState {
     fulfillment: Option<Arc<dyn PublicFulfillmentReader>>,
     forum: Option<Arc<dyn PublicForumReader>>,
     auctions: Option<Arc<dyn AuctionReader>>,
+    auction_summary: Option<Arc<dyn PublicAuctionSummaryReader>>,
     lots: Option<Arc<dyn PublicLotReader>>,
     equipment_links: Option<Arc<dyn PublicEquipmentLinkResolver>>,
     bid_log: Option<Arc<dyn PublicBidLogReader>>,
@@ -62,6 +63,7 @@ impl Default for PublicApiState {
             fulfillment: None,
             forum: None,
             auctions: None,
+            auction_summary: None,
             lots: None,
             equipment_links: None,
             bid_log: None,
@@ -112,6 +114,7 @@ impl PublicApiState {
             fulfillment: None,
             forum,
             auctions,
+            auction_summary: None,
             lots,
             equipment_links,
             bid_log,
@@ -145,6 +148,12 @@ impl PublicApiState {
     /// 注入已结算场次的履约进度只读端口；缺失时接口明确返回 503。
     pub fn with_fulfillment(mut self, fulfillment: Arc<dyn PublicFulfillmentReader>) -> Self {
         self.fulfillment = Some(fulfillment);
+        self
+    }
+
+    /// 注入已结算场次摘要的只读端口；缺失时接口返回 503。
+    pub fn with_auction_summary(mut self, reader: Arc<dyn PublicAuctionSummaryReader>) -> Self {
+        self.auction_summary = Some(reader);
         self
     }
 
@@ -239,6 +248,10 @@ impl PublicApiState {
 
     pub(crate) fn auctions(&self) -> Option<&dyn AuctionReader> {
         self.auctions.as_deref()
+    }
+
+    pub(crate) fn auction_summary(&self) -> Option<&dyn PublicAuctionSummaryReader> {
+        self.auction_summary.as_deref()
     }
 
     pub(crate) fn rules(&self) -> Option<&dyn PublicRulesReader> {

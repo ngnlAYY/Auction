@@ -53,7 +53,7 @@
 | 档位 | `Cache-Control` | 内容 | 何时变化 |
 | --- | --- | --- | --- |
 | 低频 | `public, max-age=300, s-maxage=300, stale-while-revalidate=3600` | 世界目录、规则、关于、黑名单、注册说明；已结算拍卖列表、价格历史、补偿池流水与逐件明细 | 运营在管理端修改或重启生效；场次结算、成交撤销冲正时追加 |
-| 已结算 | `public, max-age=86400, s-maxage=86400, stale-while-revalidate=604800` | 已结算批次的 lots、lot 详情与竞价日志 | 状态、金额与来源事实不再变化；领先者与出价人显示账号当前用户名，随改名更新 |
+| 已结算 | `public, max-age=86400, s-maxage=86400, stale-while-revalidate=604800` | 已结算场次摘要（`/api/v1/auctions/{auction_id}/summary`）、已结算批次的 lots、lot 详情与竞价日志 | 状态、金额与来源事实不再变化；领先者与出价人显示账号当前用户名，随改名更新 |
 
 低频档 5 分钟内直接使用缓存；之后一小时内缓存先回旧副本并在后台刷新，下一次请求拿到新内容；超过一小时无人访问则同步回源。运营修改或新结算最迟在“5 分钟后的第二次访问”可见，单次访问看到的内容最多旧约 65 分钟；需要立即生效时清除对应 URL 的 CDN 缓存（见[ops/README.md#cdncloudflare](../../ops/README.md#cdncloudflare)）。已结算档 1 天内直接使用缓存，之后 7 天内先回旧副本并在后台刷新：账号改名（管理端改名或回滚、`rebind` 换绑、论坛身份同步）后，这三类响应最迟在“1 天后的第二次访问”显示新名字，单次访问看到的名字最多旧约 8 天；需要立即生效时按前缀清除 `/api/v1/auctions/` 与 `/api/v1/lots/` 的 CDN 缓存，浏览器已保存的副本不受清除影响，仍按 1 天到期。准入与金额从不读取这些缓存：世界停用、黑名单与规则的效力都由服务端在命令事务内即时判定。论坛同步开关取自 Worker 的最新观测，心跳缺失时要立刻反映，保持 `no-store`。两档响应都附带内容 ETag；进行中场次继续使用 2 秒目录缓存。
 
@@ -137,6 +137,7 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | GET | `/api/v1/auctions` | — | `world`、`status`、`page`、`page_size`、`cursor` |
 | GET | `/api/v2/auctions` | — | 同上，另含每场的论坛主题地址 |
 | GET | `/api/v1/auctions/current` | — | `world`、`include`：当前（预览/进行中）场次。`include` 可选且只接受 `proxy_default_mode`：条目追加 `proxy_default_mode`（`fast`\|`slow`），即该场冻结策略的代理默认模式，Public 代理新建表单以它为初始选项（Final 阶段不能新建 Slow 时为 Fast），代理授权接口仍要求显式 `mode`。不带 `include` 时保持原字段集合，已打开的旧页面照常解码（兼容规则见[crates/auction-contracts/README.md#变更规则](../../crates/auction-contracts/README.md#变更规则)）；其他取值或重复出现为 400 `invalid_query`。无论是否带 `include`，冻结策略缺少该值或取值不在闭集内时整条读取失败关闭 |
+| GET | `/api/v1/auctions/{auction_id}/summary` | — | [已结算场次摘要](#已结算场次摘要)，按场次 ID 读取 |
 | GET | `/api/v1/auctions/{auction_id}/lots` | — | `category`、`equipment_group`（rare/fusion）、`max_level`、`include_unleveled`、`page`、`page_size`、`fields`。`category` 可选，接受一个或用英文逗号分隔的多个公开分类键（`one`、`two`、`sta`、`shd`、`clo`、`lig`、`hea`）；服务端按该闭集顺序规范化，参数顺序不影响结果，列表沿用既有 lot 排序，筛选分页始终由服务端完成，单分类写法及不传分类的既有行为与响应不变。空项（空串、首尾或连续逗号）、未知键（含 `all`）、重复键与重复参数均为 400 `invalid_query`。`category_counts` 始终为各分类计数加 `all`，`total` 为所选分类计数之和（未选分类时为 `all`）；传入 `category` 时返回行只属于所选集合，省略该参数时返回全部符合其他条件的行。`fields` 可选且只接受 `summary`：正式（live）行省略 `equipment.stats` 与 `equipment.info_summary`，`primary_attribute_initials`、`avg_roll` 与完整游戏链接照常返回，属性明细由 lot 详情提供；预览行不变。不带 `fields` 时保持原字段集合；其他取值或重复出现为 400 `invalid_query`。两种投影的 URL 不同，ETag 与缓存条目各自独立 |
 | GET | `/api/v1/lots/{lot_id}` | — | lot 详情（装备、价格、截止与领先状态；完整竞价历史另读 bid-log） |
 | GET | `/api/v1/auctions/{auction_id}/bid-log` | — | `world`、`lot`、`page`、`page_size`、`cursor`、`include`。`include` 可选且只接受 `defeated_proxy`：代理对代理竞争中胜者的那条代理出价追加 `defeated_proxy`（`bidder_name`、`maximum_amount`），即被它排位击败的授权，快慢模式一样且不公开模式；Public 页面把它按一次代理出价排在该出价之前，不计入 `total` 与分页。被普通出价击败的代理没有此字段。不带 `include` 时保持原字段集合，已打开的旧页面照常解码；其他取值或重复出现为 400 `invalid_query` |
@@ -146,6 +147,12 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | GET | `/api/v1/forum/sync-status` | — | 论坛同步开关与摘要 |
 | GET | `/api/v1/auctions/{auction_id}/forum` | — | 该场论坛主题的公开镜像 |
 | GET, HEAD | `/api/v1/auctions/{auction_id}/countdown/{timer}` | — | 论坛帖内嵌的倒计时 SVG 图片 |
+
+### 已结算场次摘要
+
+成功响应为 `200 ok`，`data` 固定含 `id`（规范小写 UUID 字符串）、`world`（目录的 `world_id`）、`sequence`（整数）及 `effective_end_at`（与目录一致的 RFC 3339 UTC 字符串）。有效结束时刻取状态为 `live`、`sold` 或 `unsold` 的 lot 中最晚的有效结束时刻，无值时固定返回 `null`。停用世界中的已结算场次仍可读。
+
+成功响应走[已结算缓存档](#缓存头)，带内容 ETag，`If-None-Match` 命中返回空正文的 304。场次不存在、不可见或尚未结算均为 `404 not_found`，浏览器与 CDN 均收到 `no-store`。路径段解码为字符串后不符合规范 UUID 要求时返回 `400 invalid_auction_id`。百分号解码后为非法 UTF-8（如 `%FF`）或请求带非空查询串时返回 `400 invalid_query`。存储端口未装配或读取失败返回 `503 storage_unavailable`。
 
 ### 履约进度
 

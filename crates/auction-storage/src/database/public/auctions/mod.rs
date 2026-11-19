@@ -5,6 +5,7 @@ use auction_application::auction::{
     PublicAuctionPage, PublicRealtimeAuctionStatus,
 };
 use auction_application::core::ApplicationFuture;
+use auction_application::public::{PublicAuctionSummaryReader, SettledAuctionSummary};
 use uuid::Uuid;
 
 use crate::database::DatabaseStore;
@@ -43,5 +44,14 @@ impl AuctionReader for DatabaseStore {
         auction_id: Uuid,
     ) -> ApplicationFuture<'_, Option<PublicRealtimeAuctionStatus>> {
         Box::pin(async move { postgres::realtime_status(self, auction_id).await })
+    }
+}
+
+impl PublicAuctionSummaryReader for DatabaseStore {
+    fn read_settled_auction_summary(
+        &self,
+        auction_id: Uuid,
+    ) -> ApplicationFuture<'_, Option<SettledAuctionSummary>> {
+        Box::pin(async move { postgres::settled_summary(self, auction_id).await })
     }
 }

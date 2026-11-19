@@ -24,6 +24,7 @@ DTO 只描述线上形状，不含业务规则；从应用投影到 DTO 的映�
 - 浏览器默认按 JavaScript 安全整数范围校验整数。唯一例外是只用于展示的非负 `i64` 纳秒时长（Public 补偿逐件明细、补偿流水与 Admin 结算报告的 `leader_held_nanos`）。Rust 浏览器精确解码并按整数截断展示，Solid 按 `number` 近似解码并接受舍入后的上界 `2^63`。金额、计数、版本、身份、分页、排序和其他判定仍按各自原有契约校验。
 - 部分字段为兼容已发布的 JSON 契约（沿用 Go `encoding/json` 的解码语义）保留了“必须出现但可为 null”或“null 视为零值”的反序列化语义，相关辅助函数在 [crates/auction-contracts/src/dto/response.rs](src/dto/response.rs) 中显式标注，新增字段不要随意放宽。`deserialize_required_option` 公开给 Admin 的严格镜像使用，只能经 `#[serde(deserialize_with = …)]` 生效（包装类型无法让字段成为必填）。
 - 标有 `deny_unknown_fields` 的 DTO 在浏览器解码时拒绝额外字段；该约束不改变服务端序列化的字段集合。
+- `SettledAuctionSummaryResponse` 对应[已结算场次摘要](../../docs/contracts/routes.md#已结算场次摘要)，四个键均须出现，`effective_end_at` 可为 `null`。完整响应样本见 [crates/auction-contracts/tests/fixtures/public/auction-summary.json](tests/fixtures/public/auction-summary.json)。
 - 提供 `Debug` 的敏感 DTO 会隐藏登录 key、凭据 Cookie、Admin 口令及 CSRF token；首次设置凭据请求不实现 `Debug`。
 
 ## 变更规则

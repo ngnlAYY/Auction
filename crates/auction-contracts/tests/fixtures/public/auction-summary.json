@@ -1,0 +1,10 @@
+{
+  "code": "ok",
+  "message": "已结算场次摘要已加载",
+  "data": {
+    "id": "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b",
+    "world": "main",
+    "sequence": 5,
+    "effective_end_at": "2025-11-17T09:46:40Z"
+  }
+}

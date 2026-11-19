@@ -306,6 +306,7 @@ pub(super) async fn configure_state(
         security,
     )
     .with_fulfillment(fulfillment)
+    .with_auction_summary(store.clone())
     .with_lot_watches(store.clone())
     .with_lot_watch_preference(store.clone())
     .with_realtime_hub(hub)
