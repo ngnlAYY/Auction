@@ -549,12 +549,21 @@ mod discarded_sql_error_tests {
     fn discarded_sql_error_logs_safe_projection_only() {
         let events = Arc::new(Mutex::new(Vec::new()));
         let error = sqlx::Error::Database(Box::new(PermissionDenied));
-        tracing::subscriber::with_default(Capture(Arc::clone(&events)), || {
+        let log = || {
             log_discarded_sql_error(
                 &error,
                 "delivery_admin_storage_failed",
                 "delivery Admin 读取失败",
             );
+        };
+        tracing::subscriber::with_default(Capture(Arc::clone(&events)), || {
+            // 回调点的兴趣是进程级缓存：并行用例若先在没有订阅者的线程里触发这个回调点，而此刻进程
+            // 里只登记了本订阅者，tracing 会按那个线程的缺省把兴趣缓存成 never，本线程的事件随之被
+            // 丢弃。先触发一次让回调点完成登记，再从本线程重建缓存；之后登记的订阅者只会让兴趣变宽。
+            log();
+            tracing::callsite::rebuild_interest_cache();
+            events.lock().expect("清空预热事件").clear();
+            log();
         });
         let events = events.lock().expect("读取捕获事件");
         assert_eq!(events.len(), 1, "{events:?}");
