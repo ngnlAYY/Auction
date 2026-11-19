@@ -482,7 +482,7 @@ mod tests {
     };
     use crate::api::{
         AdminApiFailure, AdminDocumentKind, AdminSessionWritePermission, AdminUser,
-        mutate_admin_user, publish_admin_rules,
+        MailTemplateAttempt, mutate_admin_user, publish_admin_rules, submit_mail_template,
     };
     use crate::surface::auctions::draft_page_tests::{
         RecordRead, button, click_button, has_live_text, has_text, mount_writer, settle_writer,
@@ -493,11 +493,14 @@ mod tests {
     #[derive(Default)]
     struct CommandHarness {
         pending: Cell<Option<PendingCommands>>,
+        writes_allowed: Cell<Option<Signal<bool>>>,
     }
 
     fn test_page() -> Element {
         let control = consume_context::<Rc<CommandHarness>>();
-        let permission = use_memo(|| true);
+        let writes_allowed = use_signal(|| true);
+        control.writes_allowed.set(Some(writes_allowed));
+        let permission = use_memo(move || *writes_allowed.read());
         use_context_provider(|| AdminSessionWritePermission(permission));
         use_pending_command_host();
         let reload = use_signal(|| 0);
@@ -717,6 +720,90 @@ mod tests {
         dom.process_events();
         assert!(!commands.contains("first"));
         assert_eq!(command_ids.borrow().as_slice(), &[command_id; 6]);
+    }
+
+    #[test]
+    fn malformed_utf8_preserves_a_mail_template_command_until_a_valid_rejection() {
+        let control = Rc::new(CommandHarness::default());
+        let mut dom = VirtualDom::new(test_page).with_root_context(control.clone());
+        dom.rebuild_in_place();
+        let commands = control.pending.get().unwrap();
+        let requests = Rc::new(RefCell::new(Vec::new()));
+        let entity = "mail-template:auction_no_attachments";
+
+        dom.in_scope(ScopeId::APP, || {
+            let requests = requests.clone();
+            MailTemplateAttempt::stub_submit(move |request| {
+                let mut requests = requests.borrow_mut();
+                requests.push(request.to_owned());
+                let receipt: &[u8] = match requests.len() {
+                    1 => return Err(AdminApiFailure::client("request_timeout")),
+                    2 => b"{\"code\":\"mail_template_conflict\",\"message\":\"\xff\",\"data\":null,\"request_id\":null}",
+                    3 => b"{\"code\":\"mail_template_conflict\",\"message\":\"\xef\xbf\xbd\",\"data\":null,\"request_id\":null}",
+                    _ => panic!("出现额外的模板写入"),
+                };
+                Err(AdminApiFailure::from_http_bytes(409, receipt))
+            });
+            assert!(commands.submit(
+                entity.to_owned(),
+                "保存模板".to_owned(),
+                move |command_id| async move {
+                    submit_mail_template(&MailTemplateAttempt {
+                        command_id,
+                        key: "auction_no_attachments".to_owned(),
+                        expected_revision: 5,
+                        body: Some("首次确认的正文".to_owned()),
+                    })
+                    .await
+                    .map_err(|failure| failure.code)
+                },
+                |_| panic!("冲突不能交付成功回执"),
+                |_| {},
+            ));
+        });
+        dom.process_events();
+        let command_id = commands.host.entries.peek()[0].identity.command_id;
+        assert!(commands.host.entries.peek()[0].unknown);
+
+        dom.in_scope(ScopeId::APP, || commands.host.retry(command_id));
+        dom.process_events();
+        assert!(commands.contains(entity));
+        assert!(commands.host.entries.peek()[0].unknown);
+        assert_eq!(commands.host.entries.peek()[0].error.as_deref(), Some("http_409"));
+        assert!(rejections(commands).peek().is_empty());
+
+        let mut writes_allowed = control.writes_allowed.get().unwrap();
+        // 复核失败时只暂停写许可；恢复后仍从原记录取请求。
+        dom.in_scope(ScopeId::APP, || {
+            writes_allowed.set(false);
+            commands.host.retry(command_id);
+        });
+        dom.process_events();
+        assert_eq!(requests.borrow().len(), 2);
+        assert!(commands.host.entries.peek()[0].unknown);
+
+        dom.in_scope(ScopeId::APP, || {
+            writes_allowed.set(true);
+            commands.host.retry(command_id);
+        });
+        dom.process_events();
+        assert!(commands.host.entries.peek().is_empty());
+        assert_eq!(
+            rejections(commands).peek()[0].result.as_ref().err().unwrap(),
+            "mail_template_conflict"
+        );
+        let requests = requests.borrow();
+        assert_eq!(requests.len(), 3);
+        assert_eq!(requests[1], requests[0]);
+        assert_eq!(requests[2], requests[0]);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&requests[2]).unwrap(),
+            serde_json::json!({
+                "command_id": command_id,
+                "expected_revision": 5,
+                "body": "首次确认的正文",
+            }),
+        );
     }
 
     #[test]

@@ -90,6 +90,15 @@ impl AdminApiFailure {
         Self { status: None, code: code.to_string() }
     }
 
+    /// 从原始字节解码错误回执，编码损坏时只保留 HTTP 状态。
+    pub(crate) fn from_http_bytes(status: u16, body: &[u8]) -> Self {
+        // Fetch 的文本解码会替换坏字节。损坏的回执不能清除须按原 ID 与负载重试的命令。
+        match std::str::from_utf8(body) {
+            Ok(body) => Self::from_http_body(status, body),
+            Err(_error) => Self::invalid_http_body(status),
+        }
+    }
+
     /// 解码失败回执。无法读出契约错误码时，只有 HTTP 状态可用于展示。
     pub(crate) fn from_http_body(status: u16, body: &str) -> Self {
         // Serde 也能按字段顺序解码结构体，错误回执只接受具名的 JSON 对象。
@@ -346,11 +355,11 @@ pub(crate) async fn response_failure(response: Response) -> AdminApiFailure {
     failure
 }
 
-/// 只读取错误 envelope 的稳定码与 HTTP 状态；认证副作用由唯一调用方 [`response_failure`] 触发。
-async fn read_response_failure(response: Response) -> AdminApiFailure {
+/// 读取错误信封的稳定码与 HTTP 状态，供会话复核使用，避免再触发一次复核。
+pub(super) async fn read_response_failure(response: Response) -> AdminApiFailure {
     let status = response.status();
-    match response.text().await {
-        Ok(body) => AdminApiFailure::from_http_body(status, &body),
+    match response.binary().await {
+        Ok(body) => AdminApiFailure::from_http_bytes(status, &body),
         Err(_error) => AdminApiFailure::invalid_http_body(status),
     }
 }

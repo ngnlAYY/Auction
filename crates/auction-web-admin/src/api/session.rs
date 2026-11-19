@@ -2,7 +2,7 @@
 //! 浏览器只持有服务端返回的 actor、CSRF token 和过期时间；Admin secret 只用于一次 Basic
 //! Auth 请求，不进入组件之外的状态，也不写入日志或 DTO。
 
-use auction_contracts::{AdminSessionResponse, ApiErrorResponse, ApiResponse};
+use auction_contracts::{AdminSessionResponse, ApiResponse};
 use auction_time::Timestamp;
 use auction_web_shared::clock::monotonic_millis;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
@@ -13,10 +13,8 @@ use dioxus::{
 use gloo_net::http::{Request, Response};
 use serde_json::Value;
 
-use super::{
-    AdminApiFailure, invalid_response_error, response_error, response_failure, send_get,
-    send_request,
-};
+use super::failure::read_response_failure;
+use super::{AdminApiFailure, invalid_response_error, response_error, send_get, send_request};
 
 const SESSION_WITH_SERVER_TIME: &str = "/api/v1/admin/session?include=server_time";
 
@@ -93,7 +91,7 @@ impl AdminSession {
                 headers.get("retry-after").as_deref(),
                 headers.get("date").as_deref(),
             );
-            let failure = session_failure(response).await;
+            let failure = read_response_failure(response).await;
             return Err(AdminSessionRenewalFailure { failure, retry_after_millis });
         }
         decode_session_response(response).await.map_err(client_failure)
@@ -155,28 +153,20 @@ async fn decode_session_response(response: Response) -> Result<AdminSession, Str
     decode_admin_session(&body)
 }
 
-// 会话 owner 负责认证转换。识别服务端的 401 时不调用会再次触发会话 GET 的业务错误适配。
-async fn session_failure(response: Response) -> AdminApiFailure {
-    if response.status() != 401 {
-        return response_failure(response).await;
+fn session_read_failure(failure: AdminApiFailure) -> Result<Option<AdminSession>, String> {
+    // 只有完整回执能确认会话结束。复核失败暂停写入，保留原命令供会话重新确认后原样重试。
+    if failure.status == Some(401) && failure.code == "unauthenticated" {
+        Ok(None)
+    } else {
+        Err(failure.code)
     }
-    let code = response
-        .json::<ApiErrorResponse>()
-        .await
-        .map_or_else(|_error| "http_401".to_owned(), |payload| payload.code);
-    AdminApiFailure { status: Some(401), code }
 }
 
 /// 只读校验当前 Admin 会话；由可信的未认证响应确认会话结束。
 pub(crate) async fn fetch_admin_session() -> Result<Option<AdminSession>, String> {
     let response = send_get(SESSION_WITH_SERVER_TIME).await?;
     if !response.ok() {
-        let failure = session_failure(response).await;
-        return if failure.status == Some(401) && failure.code == "unauthenticated" {
-            Ok(None)
-        } else {
-            Err(failure.code)
-        };
+        return session_read_failure(read_response_failure(response).await);
     }
     decode_session_response(response).await.map(Some)
 }
@@ -211,7 +201,7 @@ pub(crate) async fn logout_admin(csrf_token: String) -> Result<(), AdminApiFailu
     .await
     .map_err(AdminApiFailure::client)?;
     if !response.ok() {
-        return Err(session_failure(response).await);
+        return Err(read_response_failure(response).await);
     }
     let payload: ApiResponse<Value> = response
         .json()
@@ -228,12 +218,29 @@ mod tests {
     use auction_time::{Duration, Timestamp};
     use serde_json::{Value, json};
 
-    use super::{decode_admin_session, retry_after_millis};
+    use super::{AdminApiFailure, decode_admin_session, retry_after_millis, session_read_failure};
 
     const SESSION_FIXTURE: &str = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../auction-contracts/tests/fixtures/admin/session.json"
     ));
+
+    #[test]
+    fn only_a_complete_utf8_401_with_unauthenticated_confirms_session_end() {
+        let valid =
+            br#"{"code":"unauthenticated","message":"expired","data":null,"request_id":null}"#;
+        let bad_utf8 = b"{\"code\":\"unauthenticated\",\"message\":\"\xff\",\"data\":null,\"request_id\":null}";
+        let incomplete = br#"{"code":"unauthenticated","message":"expired","data":null}"#;
+        let wrong_code =
+            br#"{"code":"unknown_code","message":"expired","data":null,"request_id":null}"#;
+        let failed_read =
+            |status, body| session_read_failure(AdminApiFailure::from_http_bytes(status, body));
+        assert_eq!(failed_read(401, valid), Ok(None));
+        assert_eq!(failed_read(401, bad_utf8), Err("http_401".to_owned()));
+        assert_eq!(failed_read(401, incomplete), Err("http_401".to_owned()));
+        assert_eq!(failed_read(401, wrong_code), Err("unknown_code".to_owned()));
+        assert_eq!(failed_read(503, valid), Err("http_503".to_owned()));
+    }
 
     #[test]
     fn decodes_server_session_projection_with_server_time() {
