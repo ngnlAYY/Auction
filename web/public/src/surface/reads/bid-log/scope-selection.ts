@@ -8,13 +8,16 @@ import type { WorldScope } from "../../query";
 
 /** 一次世界范围选择的身份；`generation` 只在范围变化时推进。 */
 export interface ScopeSelection {
-  readonly scope: WorldScope;
+  readonly scope: WorldScope | null;
   readonly generation: number;
 }
 
 /** 与上一次选择比较：范围不变时原样返回同一个值，范围变化时序号加一。纯函数，调用方持有
  * 上一次的值；派生函数里不写其他响应式状态。 */
-export function nextScopeSelection(previous: ScopeSelection, scope: WorldScope): ScopeSelection {
+export function nextScopeSelection(
+  previous: ScopeSelection,
+  scope: WorldScope | null,
+): ScopeSelection {
   if (scope === previous.scope) {
     return previous;
   }
@@ -39,7 +42,7 @@ export function directoryForScope<T extends { readonly selection: ScopeSelection
 
 /** 由世界范围派生选择身份；上一次选择只保存在闭包中。范围不变时返回同一个值，下游不会
  * 重跑；范围变化时一次更新同时带出新范围与新序号。 */
-export function createScopeSelection(scope: Accessor<WorldScope>): Accessor<ScopeSelection> {
+export function createScopeSelection(scope: Accessor<WorldScope | null>): Accessor<ScopeSelection> {
   let previous: ScopeSelection = { scope: untrack(scope), generation: 0 };
   return createValueMemo(() => {
     previous = nextScopeSelection(previous, scope());

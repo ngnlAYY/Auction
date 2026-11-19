@@ -22,7 +22,7 @@ import {
   refreshPublicReads,
   useBidRefresh,
 } from "../../board/refresh";
-import { WorldTabs, worldLabel } from "../../board/world";
+import { worldLabel } from "../../board/world";
 import {
   LotDetailLookupContext,
   LotDetailLookupHost,
@@ -32,19 +32,17 @@ import { useContentLoading } from "../../loading";
 import { publicPageMatches, updatePublicPage, updatePublicPageSize } from "../../pagination";
 import { usePublicPageBounds } from "../../pagination/bounds";
 import { updatePublicQueryPairs } from "../../pagination/location";
-import {
-  normalizedWorldQuery,
-  usePublicQueryState,
-  type WorldScope,
-  worldScopeFromQuery,
-} from "../../query";
+import { usePublicQueryState } from "../../query";
+import { readPublicQueryForState } from "../../query/location";
 import { usePageRouteGuard } from "../../query/route-page";
 import { rustTrim } from "../../query/text";
+import { roundReadWorldScope } from "../../query/world-scope";
 import { INVALID_READ_AUCTION_ERROR_ID, InvalidReadAuction } from "../invalid-auction";
 import { useReadRoundDirectory } from "./directory";
 import { applyLotFilter, resetLotDraft, useLotFilterDraft, validLotFilter } from "./lots";
 import { createScopeSelection, type ScopeSelection, sameScopeSelection } from "./scope-selection";
 import { BidLogRow, BidLogTable, bidLogStatusClass, bidLogStatusLabel } from "./table";
+import { RoundWorldFilter } from "./world-filter";
 
 export {
   applyLotFilter,
@@ -111,30 +109,36 @@ export function BidLog(): JSX.Element {
   // 世界/拍卖/页码/lot 筛选与地址栏双向同步。
   const queryState = usePublicQueryState();
   const queryStateSignal = queryState.state;
-  // 跨世界页：缺省或非法 `world` 表示全部世界，显式值限定单个世界。
-  const worldScope = createValueMemo(
-    (): WorldScope => worldScopeFromQuery("multi", normalizedWorldQuery(queryStateSignal().world)),
-  );
+  const worldScope = createValueMemo(() => roundReadWorldScope(queryStateSignal()));
   // 世界范围与本次选择的序号一起变化；目录资源只依赖这一个值，避免“新范围 + 旧代际”
   // 先启动一轮读取再被下一轮取消。目录纠偏、记录读取门禁与实时重读都只接受这次选择确认的目录。
   const scopeSelection = createScopeSelection(worldScope);
   const pageNumber = createValueMemo(() => queryStateSignal().page);
   const pageSize = createValueMemo(() => queryStateSignal().pageSize);
-  const lot = useLotFilterDraft(queryStateSignal, "/bidlog", LOT_FILTER_WRITE_DEBOUNCE_MILLIS);
+  const lot = useLotFilterDraft(queryStateSignal, "BidLog", LOT_FILTER_WRITE_DEBOUNCE_MILLIS);
   // 缺省场次会和第一页一起写址，先纠偏页码会生成另一次无意义的 replace。
   const bounds = usePublicPageBounds(queryStateSignal, "BidLog", (query) =>
-    query.auction.kind !== "selected" ? [] : [["page", query.pageSize]],
+    query.invalidWorld !== null || query.auction.kind !== "selected"
+      ? []
+      : [["page", query.pageSize]],
   );
   // 已有场次时只替换迁移期的分页别名，保留仍需修正的原始筛选。
   createEffect(
     () =>
       [
-        queryStateSignal().auction.kind === "selected" && queryStateSignal().bidLogPageAlias,
+        worldScope() !== null &&
+          queryStateSignal().auction.kind === "selected" &&
+          queryStateSignal().bidLogPageAlias,
         pageNumber(),
         bounds.blocked("page"),
       ] as const,
     ([alias, page, blocked]) => {
-      if (alias && !blocked && routeStillOnPage()) {
+      if (
+        alias &&
+        !blocked &&
+        routeStillOnPage() &&
+        readPublicQueryForState(queryStateSignal).invalidWorld === null
+      ) {
         updatePublicQueryPairs(
           queryStateSignal,
           ["page", "bidlog_page"],
@@ -162,12 +166,15 @@ export function BidLog(): JSX.Element {
       failed: rounds.failed(),
       correctionFailed: rounds.correctionFailed(),
       empty: rounds.empty(),
+      invalidWorld: worldScope() === null,
     }),
-    ({ key, auction, failed, correctionFailed, empty }) => {
+    ({ key, auction, failed, correctionFailed, empty, invalidWorld }) => {
       if (!routeStillOnPage()) return;
       // 只有目录确认的活动场次可订阅，回放也按该场的真实世界校验。
       let target: PublicRealtimeTarget | null = { kind: "checking" };
-      if (key.invalidAuction) {
+      if (invalidWorld) {
+        target = { kind: "no_target", reason: "selection_error" };
+      } else if (key.invalidAuction) {
         target = { kind: "no_target", reason: "invalid_auction" };
       } else if (auction !== null && auction.id === key.id) {
         const world = auction.world_id;
@@ -221,7 +228,12 @@ export function BidLog(): JSX.Element {
   const bidLog = createTaskResource(
     readRequest,
     async (dependencies, context): Promise<BidLogSnapshot | null> => {
-      if (dependencies === null || !routeStillOnPage()) {
+      if (
+        dependencies === null ||
+        !routeStillOnPage() ||
+        roundReadWorldScope(readPublicQueryForState(queryStateSignal)) !==
+          dependencies.requested[1].scope
+      ) {
         return bidLog.peek() ?? null;
       }
       const [auctionId, , world, lotId, page, size] = dependencies.requested;
@@ -265,6 +277,7 @@ export function BidLog(): JSX.Element {
   });
   // 目录或当前查询的记录还没有结果时由顶栏提示加载，正文留空。
   const bodyState = createValueMemo((): BidLogBody => {
+    if (worldScope() === null) return { kind: "invalid" };
     if (rounds.invalidAuction()) return { kind: "invalid-auction" };
     const resultNow = currentResult();
     if (bounds.failed("page") || rounds.failed() || resultNow?.ok === false) {
@@ -297,10 +310,7 @@ export function BidLog(): JSX.Element {
   return (
     <LotDetailLookupContext value={lookup}>
       <section class="public-auction-bid-log-page" aria-label={t("page-bidlog-title")}>
-        {/* 世界切换：页面顶部的按钮组（WorldTabs，Solid 版专属）；Rust 版用页面内的下拉框。 */}
-        <div class="public-auction-group-toolbar public-world-toolbar">
-          <WorldTabs />
-        </div>
+        <RoundWorldFilter state={queryStateSignal} routeStillOnPage={routeStillOnPage} />
         <div class="public-auction-bid-log-heading">
           <div class="public-auction-bid-log-round-header">
             <select
@@ -380,6 +390,7 @@ export function BidLog(): JSX.Element {
               autocapitalize="none"
               spellcheck="false"
               value={lot.draft()}
+              disabled={worldScope() === null}
               placeholder={t("bidlog-filter-placeholder")}
               aria-invalid={lot.interacted() && lot.draftError() !== null ? "true" : "false"}
               aria-describedby={lot.draftError() === null ? undefined : LOT_FILTER_ERROR_ID}
@@ -387,7 +398,7 @@ export function BidLog(): JSX.Element {
               onBlur={lot.blur}
             />
             <Show when={lot.draft() !== "" || !lot.appliedValid()}>
-              <button type="button" onClick={lot.clear}>
+              <button type="button" disabled={worldScope() === null} onClick={lot.clear}>
                 {t("bidlog-filter-clear")}
               </button>
             </Show>

@@ -16,6 +16,7 @@ import { mountReadPage } from "../../pagination/browser-fixture";
 import { success } from "../../shell/session-fixture";
 import { Fulfillment } from "../fulfillment";
 import { BidLog } from ".";
+import { mountRoundPage } from "./page-tree-fixture.test";
 
 function settledAuction(sequence: number) {
   return {
@@ -92,6 +93,98 @@ const pages = [
   ["/bidlog", "bid-log", BidLog],
   ["/fulfillment", "fulfillment", Fulfillment],
 ] as const;
+
+test.each(
+  pages.flatMap((entry) =>
+    ["world=bad", "world=main&world=isekai"].map((world) => [...entry, world] as const),
+  ),
+)("%s 尾斜杠地址在规范化拒写与历史恢复时阻断读取（%s）", async (path, api, render, world) => {
+  const reads = mockReadRequests([{ ...LATEST, world_id: "isekai" }], undefined, 1);
+  const href = `${path}/?${world}&auction=${LATEST.id}&bidlog_page=2`;
+  const mounted = mountReadPage(href, render, undefined, true);
+  const expectBlocked = () => {
+    expect(`${mounted.location.pathname}${mounted.location.search}`).toBe(href);
+    expect(
+      reads.urls.filter(
+        (url) => url.pathname === "/api/v1/auctions" || url.pathname.endsWith(`/${api}`),
+      ),
+    ).toEqual([]);
+    expect(mounted.loading.peek().size).toBe(0);
+  };
+  try {
+    await settleRead();
+    expectBlocked();
+    mounted.rejectWrites(false);
+    mounted.router.push(`${path}?world=also-bad`);
+    expect(mounted.location.pathname).toBe(path);
+    mounted.rejectWrites(true);
+    mounted.back();
+    await settleRead();
+    expectBlocked();
+  } finally {
+    mounted.dispose();
+    reads.dispose();
+  }
+});
+
+test.each(
+  pages.flatMap(
+    ([path, api]) =>
+      [
+        [path, api, "world=bad", null, "auction-history-world-all"],
+        [path, api, "world=main&w%6Frld=main", "main", "auction-world-main"],
+        [path, api, "world=%20isekai", "isekai", "auction-world-isekai"],
+      ] as const,
+  ),
+)("%s 在世界修正成功前不读取目录或正文（%s，%s）", async (path, api, world, selected, label) => {
+  const search = `?${world}&auction=${LATEST.id}&page=9223372036854775807&keep=%2b%20x`;
+  const reads = mockReadRequests([{ ...LATEST, world_id: selected ?? "main" }], undefined, 1);
+  const page = await mountRoundPage(`${path}${search}`, path === "/bidlog");
+  const directory = () => reads.urls.filter((url) => url.pathname === "/api/v1/auctions");
+  const body = () => reads.urls.filter((url) => url.pathname.endsWith(`/${api}`));
+  try {
+    await settleRead();
+    const error = () => page.find(({ attributes }) => attributes.id === "public-read-world-error");
+    expect(renderedText(error())).toContain(
+      t(world.includes("&") ? "filter-error-duplicate" : "world-invalid-link"),
+    );
+    expect(error()?.attributes.role).toBe("alert");
+    expect(directory()).toEqual([]);
+    expect(body()).toEqual([]);
+    expect(page.loading.peek().size).toBe(0);
+    expect(page.location.search).toBe(search);
+    const choose = page.find(
+      (node) =>
+        node.tag === "button" &&
+        node.attributes["aria-describedby"] === "public-read-world-error" &&
+        renderedText(node) === t(label),
+    );
+    if (choose === null) throw new Error("未挂载世界修正按钮");
+    page.rejectWrites(true);
+    choose.click();
+    await settleRead();
+    expect(directory()).toEqual([]);
+    expect(body()).toEqual([]);
+    expect(page.location.search).toBe(search);
+    expect(error()?.attributes.role).toBe("alert");
+
+    page.rejectWrites(false);
+    choose.click();
+    await settleRead();
+    expect(error()).toBeNull();
+    expect(page.location.searchParams.getAll("world")).toEqual(selected === null ? [] : [selected]);
+    expect(page.location.search).toContain("keep=%2b%20x");
+    expect(directory().map((url) => url.searchParams.get("world"))).toEqual(
+      path === "/bidlog" ? [selected, selected, selected] : [selected],
+    );
+    expect(
+      body().map((url) => [url.searchParams.get("world"), url.searchParams.get("page")]),
+    ).toEqual([[selected ?? "main", "1"]]);
+  } finally {
+    page.dispose();
+    reads.dispose();
+  }
+});
 
 test.each(
   pages.flatMap(
@@ -369,6 +462,13 @@ test.each(pages)(
       continuation.resolve(directoryPage([OLDER], 2, 201));
       await settleRead();
       expect(reads.urls.filter((url) => url.pathname === body)).toHaveLength(1);
+      focus();
+      await settleRead();
+      expect(
+        reads.urls.filter(
+          (url) => url.pathname === "/api/v1/auctions" && url.searchParams.get("page") === "2",
+        ),
+      ).toHaveLength(1);
     } finally {
       continuation.resolve(directoryPage([OLDER], 2, 201));
       mounted.dispose();
@@ -395,6 +495,29 @@ test("全部世界中的异世界首页不能提前确认为默认场次", async
     expect(body?.searchParams.get("world")).toBe("main");
   } finally {
     continuation.resolve(directoryPage([OLDER], 2, 201));
+    mounted.dispose();
+    reads.dispose();
+  }
+});
+
+test.each(pages)("%s 切换到非法世界后，旧目录迟到也不续读或写回场次", async (path, api, render) => {
+  const latePage = Promise.withResolvers<Response>();
+  const reads = mockReadRequests(FIRST_PAGE, () => latePage.promise);
+  const mounted = mountReadPage(`${path}?world=main&auction=${OLDER.id}`, render);
+  try {
+    await settleRead();
+    const before = reads.urls.filter((url) => url.pathname === "/api/v1/auctions").length;
+    expect(reads.urls.some((url) => url.searchParams.get("page") === "2")).toBe(true);
+    const search = `?world=bad&auction=${OLDER.id}`;
+    mounted.router.push(`${path}${search}`);
+    await settleRead();
+    latePage.resolve(directoryPage([OLDER], 2, 201));
+    await settleRead();
+    expect(mounted.location.search).toBe(search);
+    expect(reads.urls.filter((url) => url.pathname === "/api/v1/auctions")).toHaveLength(before);
+    expect(reads.urls.some((url) => url.pathname.endsWith(`/${api}`))).toBe(false);
+  } finally {
+    latePage.resolve(directoryPage([OLDER], 2, 201));
     mounted.dispose();
     reads.dispose();
   }

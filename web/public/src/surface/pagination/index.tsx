@@ -10,7 +10,7 @@ import type { JSX } from "@solidjs/web";
 import { Show } from "solid-js";
 
 import { type PublicBoardQuery, readPublicQuery } from "../query";
-import { currentBrowserSearch, currentPublicPathname } from "../query/location";
+import { currentBrowserSearch, publicQueryPage } from "../query/location";
 import { MAX_PUBLIC_PAGE_OFFSET, publicOffsetLastPage } from "./bounds";
 import { updatePublicQueryPairs, writePublicQueryPatch } from "./location";
 import { savePublicPageSize } from "./preferences";
@@ -42,7 +42,7 @@ export function normalizePublicPageSize(size: number): number {
 export function updatePublicPageSize(state: Cell<PublicBoardQuery>, size: number): boolean {
   return updatePublicQueryPairs(
     state,
-    [...pageKeys(), "page_size"],
+    [...pageKeys(state), "page_size"],
     [["page_size", String(normalizePublicPageSize(size))]],
     "push",
   );
@@ -54,11 +54,16 @@ export function updatePublicPage(
   page: number,
   mode: QueryWriteMode,
 ): boolean {
-  return updatePublicQueryPairs(state, pageKeys(), page > 1 ? [["page", String(page)]] : [], mode);
+  return updatePublicQueryPairs(
+    state,
+    pageKeys(state),
+    page > 1 ? [["page", String(page)]] : [],
+    mode,
+  );
 }
 
-function pageKeys(): readonly string[] {
-  return currentPublicPathname() === "/bidlog" ? ["page", "bidlog_page"] : ["page"];
+function pageKeys(state: Cell<PublicBoardQuery>): readonly string[] {
+  return publicQueryPage(state) === "BidLog" ? ["page", "bidlog_page"] : ["page"];
 }
 
 /** 资源重读期间不能把旧页总数用于新分页状态的纠偏；可选字段沿用旧 DTO 兼容语义。 */

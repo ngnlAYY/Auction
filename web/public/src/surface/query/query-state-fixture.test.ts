@@ -41,6 +41,7 @@ export function mountQueryStates(initialUrl = "/"): MountedQueryStates {
         { name: "Home", pattern: "/" },
         { name: "BidLog", pattern: "/bidlog" },
         { name: "Fulfillment", pattern: "/fulfillment" },
+        { name: "Me", pattern: "/me" },
         { name: "CompensationPool", pattern: "/compensation-pool" },
         { name: "History", pattern: "/history" },
       ],

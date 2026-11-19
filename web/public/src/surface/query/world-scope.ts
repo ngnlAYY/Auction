@@ -2,6 +2,7 @@
 // Solid 版由外壳提供控制器、页面内按钮组切换世界；Rust 版仍保留各页面自己的世界选择器。
 
 import { auctionParameter } from "./auction";
+import type { PublicBoardQuery } from "./board";
 import { publicAuctionHomeQuery } from "./links";
 import type { PublicQueryWrite } from "./state";
 
@@ -70,6 +71,13 @@ export function worldScopeFromQuery(
     return "all";
   }
   return world === "isekai" ? "isekai" : "main";
+}
+
+/** 读取页缺省为全部世界；地址世界非法时没有可读范围。 */
+export function roundReadWorldScope(query: PublicBoardQuery): WorldScope | null {
+  return query.invalidWorld === null
+    ? worldScopeFromQuery("multi", normalizedWorldQuery(query.world))
+    : null;
 }
 
 /** 把世界范围写成该类页面的地址栏取值；跨世界页的主世界必须显式写 `main`。

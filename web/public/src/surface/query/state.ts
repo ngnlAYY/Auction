@@ -14,16 +14,18 @@ import { createEffect, useContext } from "solid-js";
 import { type AuctionParameter, auctionParameter } from "./auction";
 import type { PublicBoardQuery } from "./board";
 import {
+  bindPublicQueryRouter,
   currentBrowserHash,
   currentBrowserSearch,
   currentPublicPathname,
   InitialPublicLocationContext,
   type InitialPublicSearch,
   PublicLocationRevisionContext,
+  publicQueryPage,
   readPublicQuery,
+  readPublicQueryForState,
   updatePublicQueryPairs,
 } from "./location";
-import { parsePublicQuery } from "./parse";
 import {
   managedPublicQueryPairs,
   PUBLIC_QUERY_KEYS,
@@ -50,11 +52,13 @@ const initialSearchByState = new WeakMap<Cell<PublicBoardQuery>, InitialPublicSe
 /** 挂载与地址栏双向同步的查询状态；写回只替换本 crate 管理的键。 */
 export function usePublicQueryState(): PublicQueryState {
   const initial = useContext(InitialPublicLocationContext);
+  const router = useRouter();
   const query = useQueryState(
     PUBLIC_QUERY_KEYS,
-    () => readPublicQuery(initial),
+    () => readPublicQuery(initial, router),
     managedPublicQueryPairs,
   );
+  bindPublicQueryRouter(query.state, router, initial);
   if (initial !== null) {
     initialSearchByState.set(query.state, initial);
   }
@@ -73,13 +77,12 @@ export function usePublicQueryState(): PublicQueryState {
     },
   };
   const locationRevision = useContext(PublicLocationRevisionContext);
-  const router = useRouter();
   createEffect(
     // 同路径查询成功写入也会更新快照，各挂载实例从同一地址读取已应用查询。
-    () => [router.currentLocationString(), locationRevision?.revision()] as const,
+    () => [router.current(), router.currentLocationString(), locationRevision?.revision()] as const,
     () => {
       // 地址栏读取含首次 query 恢复，属于 effect 的副作用阶段。
-      const current = readPublicQuery(initial);
+      const current = readPublicQuery(initial, router);
       if (!structuralEquals(query.state.peek(), current)) {
         query.state.set(current);
       }
@@ -103,13 +106,14 @@ function persistQuery(
   query: PublicQueryWrite,
   mode: QueryWriteMode,
   replaceAll: boolean,
+  state?: Cell<PublicBoardQuery>,
 ): PublicBoardQuery | null {
   if (typeof window === "undefined") {
     return null;
   }
   const pathname = currentPublicPathname();
   const search = currentBrowserSearch();
-  const current = parsePublicQuery(pathname, search);
+  const current = state === undefined ? readPublicQuery() : readPublicQueryForState(state);
   const next = { ...query, auction: query.auction ?? current.auction };
   // 重复应用当前筛选不创建可返回的条目，也不把省略的默认值写入地址。
   if (!replaceAll && mode === "push" && structuralEquals(next, current)) {
@@ -137,7 +141,7 @@ function commitQuery(
   query: PublicQueryWrite,
   mode: QueryWriteMode,
 ): boolean {
-  const next = persistQuery(query, mode, false);
+  const next = persistQuery(query, mode, false, state);
   if (next === null) {
     return false;
   }
@@ -181,7 +185,7 @@ export function commitAuctionSelection(
   const auction = auctionParameter(id);
   if (
     auction.kind === "invalid" ||
-    (mode === "replace" && readPublicQuery().auction.kind === "invalid")
+    (mode === "replace" && readPublicQueryForState(state).auction.kind === "invalid")
   ) {
     return false;
   }
@@ -202,10 +206,10 @@ function updateFullQuery(
   mode: QueryWriteMode,
   selection?: AuctionParameter,
 ): boolean {
-  const current = readPublicQuery(initialSearchByState.get(state) ?? null);
+  const current = readPublicQueryForState(state, initialSearchByState.get(state) ?? null);
   const { auction, ...draft } = current;
   update(draft);
-  if (selection === undefined && currentPublicPathname() === "/me") {
+  if (selection === undefined && publicQueryPage(state) === "Me") {
     const next = { ...draft, auction };
     const keys = changedAccountPageKeys(current, next);
     if (keys.length !== 0) {

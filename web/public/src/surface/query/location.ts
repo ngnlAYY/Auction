@@ -2,8 +2,8 @@
 
 import type { QueryPair, QueryWriteMode } from "@auction/web-shared/net/query";
 import { type Cell, createCell } from "@auction/web-shared/reactive/cell";
-import { writeLocationPreservingScroll } from "@auction/web-shared/router";
-import { createContext } from "solid-js";
+import { type Router, writeLocationPreservingScroll } from "@auction/web-shared/router";
+import { createContext, untrack } from "solid-js";
 
 import { type PublicBoardQuery, publicBoardQueryDefault } from "./board";
 import { parsePublicQuery } from "./parse";
@@ -14,13 +14,47 @@ export interface InitialPublicSearch {
   searchFor(pathname: string): string | null;
 }
 
+// 事件与 await 后的地址读写可能已不在组件作用域；查询实例仍从挂载时所属的 Router 读取匹配。
+const routerByQuery = new WeakMap<Cell<PublicBoardQuery> | InitialPublicSearch, Router>();
+
+/** 将查询实例绑定到自身的路由，供异步工作和事件处理使用。 */
+export function bindPublicQueryRouter(
+  state: Cell<PublicBoardQuery>,
+  router: Router,
+  initial: InitialPublicSearch | null,
+): void {
+  routerByQuery.set(state, router);
+  if (initial !== null) routerByQuery.set(initial, router);
+}
+
+function matchedPage(router: Router | null): string | null {
+  const match = untrack(() => router?.current());
+  return match?.kind === "matched" ? match.name : null;
+}
+
+/** 当前查询实例所属路由匹配出的页面名。 */
+export function publicQueryPage(state: Cell<PublicBoardQuery>): string | null {
+  return matchedPage(routerByQuery.get(state) ?? null);
+}
+
+/** 从查询实例所属路由读取最新地址，适用于事件及异步任务。 */
+export function readPublicQueryForState(
+  state: Cell<PublicBoardQuery>,
+  initial: InitialPublicSearch | null = null,
+): PublicBoardQuery {
+  return readPublicQuery(initial, routerByQuery.get(state));
+}
+
 /** 读取当前地址栏查询；首次规范化期间查询暂时为空时可恢复快照。
  *
  * 恢复只在地址替换成功后才采用初始 search：写地址失败时解析到的仍是当前空查询，
  * 不能把未真正恢复的参数当成地址栏状态。首次地址快照由调用方在自己的组件上下文取得并显式
  * 传入；模块级“最近创建的快照”会让多个宿主或重新挂载的实例互相串用。
  */
-export function readPublicQuery(initial: InitialPublicSearch | null = null): PublicBoardQuery {
+export function readPublicQuery(
+  initial: InitialPublicSearch | null = null,
+  router: Router | null = (initial === null ? null : routerByQuery.get(initial)) ?? null,
+): PublicBoardQuery {
   if (typeof window === "undefined") {
     return publicBoardQueryDefault();
   }
@@ -45,7 +79,7 @@ export function readPublicQuery(initial: InitialPublicSearch | null = null): Pub
       search = initialSearch;
     }
   }
-  return parsePublicQuery(pathname, search);
+  return parsePublicQuery(matchedPage(router), search);
 }
 
 /** Router 首次规范化期间的公开端查询回退。 */
@@ -233,6 +267,6 @@ export function updatePublicQueryPairs(
   if (!writePublicQueryPatch(keys, pairs, mode)) {
     return false;
   }
-  state.set(readPublicQuery());
+  state.set(readPublicQueryForState(state));
   return true;
 }

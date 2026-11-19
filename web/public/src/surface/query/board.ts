@@ -13,6 +13,8 @@ import { rustTrim } from "./text";
 /** 公开拍卖看板的 URL 状态；筛选和分页必须能被刷新、分享和返回操作恢复。 */
 export interface PublicBoardQuery {
   world: string | null;
+  /** 读取页只允许玩家显式修正非法或重复的世界。 */
+  invalidWorld: readonly string[] | null;
   auction: AuctionParameter;
   category: string | null;
   /** 分类原文只有在玩家修正后才能从地址移除。 */
@@ -49,6 +51,7 @@ export interface PublicBoardQuery {
 export function publicBoardQueryDefault(): PublicBoardQuery {
   return {
     world: null,
+    invalidWorld: null,
     auction: auctionParameter(null),
     category: null,
     invalidCategory: null,

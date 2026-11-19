@@ -10,21 +10,24 @@ import { escapedSingleLineInput } from "@auction/web-shared/ui/validation";
 import { createEffect } from "solid-js";
 
 import { usePublicQuerySearch } from "../../pagination/location";
+import { currentBrowserSearch, type PublicBoardQuery } from "../../query";
 import {
-  currentBrowserSearch,
-  currentPublicPathname,
-  type PublicBoardQuery,
-  readPublicQuery,
-} from "../../query";
-import { updatePublicQueryPairs } from "../../query/location";
+  publicQueryPage,
+  readPublicQueryForState,
+  updatePublicQueryPairs,
+} from "../../query/location";
 import { rustTrim } from "../../query/text";
 
 const NIL_UUID = "00000000-0000-0000-0000-000000000000";
 
-type LotFilterScope = Pick<PublicBoardQuery, "world" | "auction">;
+type LotFilterScope = Pick<PublicBoardQuery, "world" | "invalidWorld" | "auction">;
 
 function sameLotFilterScope(left: LotFilterScope, right: LotFilterScope): boolean {
-  return left.world === right.world && structuralEquals(left.auction, right.auction);
+  return (
+    left.world === right.world &&
+    structuralEquals(left.invalidWorld, right.invalidWorld) &&
+    structuralEquals(left.auction, right.auction)
+  );
 }
 
 function readLotValues(search: string): string[] {
@@ -38,7 +41,7 @@ function validLotDraft(value: string): boolean {
 /** 出价记录与履约共用草稿；延时写入只属于输入时已应用的世界、场次与 lot 筛选。 */
 export function useLotFilterDraft(
   queryState: Cell<PublicBoardQuery>,
-  pathname: string,
+  routeName: "BidLog" | "Fulfillment",
   debounceMillis: number,
 ) {
   const tasks = createTaskScope();
@@ -59,7 +62,12 @@ export function useLotFilterDraft(
   const interacted = createCell(false);
   const selection = createValueMemo(() => {
     const query = queryState();
-    return { world: query.world, auction: query.auction, values: appliedValues() };
+    return {
+      world: query.world,
+      invalidWorld: query.invalidWorld,
+      auction: query.auction,
+      values: appliedValues(),
+    };
   });
   const restore = (value: string) => {
     edited.set(false);
@@ -109,6 +117,7 @@ export function useLotFilterDraft(
       if (edited.peek()) interacted.set(true);
     },
     input(value: string) {
+      if (queryState.peek().invalidWorld !== null) return;
       const lot = rustTrim(value);
       resetLotDraft(draft, generation, value);
       edited.set(true);
@@ -123,14 +132,15 @@ export function useLotFilterDraft(
         if (
           !context.alive() ||
           generation.peek() !== requestedGeneration ||
-          currentPublicPathname() !== pathname
+          publicQueryPage(queryState) !== routeName
         ) {
           return;
         }
         // 地址可能先于查询状态更新；旧草稿不能覆盖另一世界、场次或已应用的 lot。
-        const current = readPublicQuery();
+        const current = readPublicQueryForState(queryState);
         if (
           sameLotFilterScope(requested, current) &&
+          current.invalidWorld === null &&
           structuralEquals(rawValues, readLotValues(currentBrowserSearch())) &&
           !applyLotFilter(
             queryState,
@@ -146,7 +156,9 @@ export function useLotFilterDraft(
       // 清除与普通输入共用 URL 提交点；失败时恢复未被改写的已应用值。
       const values = readLotValues(currentBrowserSearch());
       const written =
-        currentPublicPathname() === pathname && applyLotFilter(queryState, "", values.length > 0);
+        publicQueryPage(queryState) === routeName &&
+        readPublicQueryForState(queryState).invalidWorld === null &&
+        applyLotFilter(queryState, "", values.length > 0);
       restore(written ? "" : (values[0] ?? ""));
     },
   };
@@ -182,7 +194,7 @@ export function applyLotFilter(
     return true;
   }
   const keys =
-    currentPublicPathname() === "/bidlog" ? ["lot", "page", "bidlog_page"] : ["lot", "page"];
+    publicQueryPage(queryState) === "BidLog" ? ["lot", "page", "bidlog_page"] : ["lot", "page"];
   return updatePublicQueryPairs(
     queryState,
     keys,

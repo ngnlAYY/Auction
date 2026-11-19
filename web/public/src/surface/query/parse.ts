@@ -4,13 +4,13 @@
 import { parseQuerySearch } from "@auction/web-shared/net/query";
 import { utf8ByteLength } from "@auction/web-shared/text";
 
+import { MAX_FULFILLMENT_PAGE_SIZE } from "../../api/fulfillment";
 import { DEFAULT_PAGE_SIZE, parsePublicPageSize } from "../pagination";
+import { publicOffsetLastPage, readPublicPageParameters } from "../pagination/parameters";
 import { parseAuctionParameter } from "./auction";
 import { normalizeWorldQuery, type PublicBoardQuery, publicBoardQueryDefault } from "./board";
 import { normalizeCatalogCategories } from "./category";
 import { rustTrim } from "./text";
-
-const INT64_MAX = 9_223_372_036_854_775_807n;
 
 /** Rust `char::is_control` 对应 Unicode Cc：C0、DEL 与 C1。 */
 function hasUnicodeControl(value: string): boolean {
@@ -23,21 +23,10 @@ function hasUnicodeControl(value: string): boolean {
   return false;
 }
 
-/** 解析 i64 十进制；不能用 `Number`，否则会接受十六进制、指数与空白。 */
-function parsePositivePage(value: string): number | null {
-  if (!/^[+-]?[0-9]+$/u.test(value)) {
-    return null;
-  }
-  const parsed = BigInt(value);
-  if (parsed <= 0n || parsed > INT64_MAX) {
-    return null;
-  }
-  // 已知差异：页面状态用 JS number 保存，超过 2^53−1 的合法 i64 页码无法精确表示，
-  // 这里按非法值处理并回到默认页；请求与 URL 契约仍以 Rust 的 i64 范围为准。
-  if (parsed > BigInt(Number.MAX_SAFE_INTEGER)) {
-    return null;
-  }
-  return Number(parsed);
+/** 只交给页面可表示的有界页码；超限的原值仍由分页门禁从同一地址取值并写回。 */
+function boundedPage(page: bigint | null, maximum: number): number {
+  if (page === null) return 1;
+  return page > BigInt(maximum) ? maximum : Number(page);
 }
 
 function isHistoryStatus(value: string): boolean {
@@ -58,10 +47,21 @@ function retainedQueryValue(value: string): string | null {
   return trimmed === "" ? null : trimmed;
 }
 
-export function parsePublicQuery(pathname: string, search: string): PublicBoardQuery {
+/** 解析已匹配页面的查询；页面名由路由提供，原始地址只用于取参数。 */
+export function parsePublicQuery(routeName: string | null, search: string): PublicBoardQuery {
   const query = publicBoardQueryDefault();
   const params = parseQuerySearch(search.startsWith("?") ? search : "");
   query.auction = parseAuctionParameter(params.getAll("auction"));
+  const roundPage = routeName === "BidLog" || routeName === "Fulfillment";
+  if (roundPage) {
+    const worlds = params.getAll("world");
+    const [world] = worlds;
+    if (worlds.length === 1 && (world === "main" || world === "isekai")) {
+      query.world = world;
+    } else if (worlds.length > 0) {
+      query.invalidWorld = worlds;
+    }
+  }
   const types = params.getAll("type");
   const [type] = types;
   if (type !== undefined) {
@@ -70,12 +70,10 @@ export function parsePublicQuery(pathname: string, search: string): PublicBoardQ
       query.invalidCategory = types;
     }
   }
-  let canonicalPage: number | null = null;
-  let legacyBidLogPage: number | null = null;
   for (const [key, value] of params) {
     switch (key) {
       case "world":
-        query.world = normalizeWorldQuery(value);
+        if (!roundPage) query.world = normalizeWorldQuery(value);
         break;
       case "auction":
         break;
@@ -137,48 +135,34 @@ export function parsePublicQuery(pathname: string, search: string): PublicBoardQ
         query.bidLogLot = retainedQueryValue(value);
         break;
       case "page":
-        canonicalPage = parsePositivePage(value) ?? canonicalPage;
+      case "movement_page":
+      case "bidlog_page":
+      case "bid_page":
+      case "proxy_page":
         break;
       case "page_size":
         query.pageSize = parsePublicPageSize(value) ?? DEFAULT_PAGE_SIZE;
         break;
-      case "movement_page": {
-        const page = parsePositivePage(value);
-        if (page !== null) {
-          query.movementPage = page;
-        }
-        break;
-      }
       case "movement_page_size":
         query.movementPageSize = parsePublicPageSize(value) ?? DEFAULT_PAGE_SIZE;
         break;
-      case "bidlog_page": {
-        const page = parsePositivePage(value);
-        if (page !== null) {
-          legacyBidLogPage = page;
-        }
-        break;
-      }
-      case "bid_page": {
-        const page = parsePositivePage(value);
-        if (page !== null) {
-          query.bidPage = page;
-        }
-        break;
-      }
-      case "proxy_page": {
-        const page = parsePositivePage(value);
-        if (page !== null) {
-          query.proxyPage = page;
-        }
-        break;
-      }
       default:
         query.passthrough.push([key, value]);
     }
   }
-  query.page =
-    canonicalPage ?? (pathname === "/bidlog" && legacyBidLogPage !== null ? legacyBidLogPage : 1);
-  query.bidLogPageAlias = pathname === "/bidlog" && legacyBidLogPage !== null;
+  const blacklist = routeName === "Blacklist";
+  const pages = readPublicPageParameters(params, routeName === "BidLog", blacklist);
+  const size =
+    routeName === "Fulfillment"
+      ? Math.min(query.pageSize, MAX_FULFILLMENT_PAGE_SIZE)
+      : query.pageSize;
+  // 黑名单沿用原来的安全整数筛选及分页边界，不参加拍卖列表的偏移纠偏。
+  const maximum = (size: number) =>
+    blacklist ? Number.MAX_SAFE_INTEGER : publicOffsetLastPage(size);
+  query.page = boundedPage(pages.page, maximum(size));
+  query.movementPage = boundedPage(pages.movementPage, maximum(query.movementPageSize));
+  query.bidPage = boundedPage(pages.bidPage, maximum(10));
+  query.proxyPage = boundedPage(pages.proxyPage, maximum(10));
+  query.bidLogPageAlias = pages.bidLogPageAlias;
   return query;
 }

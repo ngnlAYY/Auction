@@ -75,7 +75,11 @@ function mountLotDraft(initialUrl: string) {
     RouterContext.defaultValue = router;
     InitialPublicLocationContext.defaultValue = initial;
     const query = usePublicQueryState();
-    const lot = useLotFilterDraft(query.state, fake.location.pathname, DEBOUNCE_MILLIS);
+    const match = router.current();
+    if (match.kind !== "matched" || (match.name !== "BidLog" && match.name !== "Fulfillment")) {
+      throw new Error("测试必须挂载读取页");
+    }
+    const lot = useLotFilterDraft(query.state, match.name, DEBOUNCE_MILLIS);
     flush();
     initial.expire();
     return { dispose, router, query, lot };

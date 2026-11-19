@@ -13,12 +13,9 @@ import {
   fetchBidLogAuctions,
   orderBidLogAuctions,
 } from "../../../api/queries/bid-log";
-import {
-  commitAuctionSelection,
-  type PublicBoardQuery,
-  queryAuctionId,
-  readPublicQuery,
-} from "../../query";
+import { commitAuctionSelection, type PublicBoardQuery, queryAuctionId } from "../../query";
+import { readPublicQueryForState } from "../../query/location";
+import { roundReadWorldScope } from "../../query/world-scope";
 import { directoryForScope, type ScopeSelection, sameScopeSelection } from "./scope-selection";
 
 interface StatusProgress {
@@ -106,6 +103,17 @@ export function useReadRoundDirectory(
 
   const dependencies = createValueMemo(() => [selection(), refreshGeneration()] as const);
   createEffect(dependencies, ([selectedScope, generation]) => {
+    const scope = selectedScope.scope;
+    // 地址范围无效或已切换时，不能启动目录或沿用旧范围已确认的场次。
+    if (
+      scope === null ||
+      !routeStillOnPage() ||
+      roundReadWorldScope(readPublicQueryForState(queryState)) !== scope
+    ) {
+      wantedOptions.set(false);
+      snapshot.set(null);
+      return;
+    }
     const previous = snapshot.peek();
     if (previous !== null && !sameScopeSelection(previous.selection, selectedScope)) {
       wantedOptions.set(false);
@@ -161,7 +169,11 @@ export function useReadRoundDirectory(
                 (current.statuses.size === statuses.length &&
                   thisStatus !== undefined &&
                   couldPrecede(thisStatus, preferred, selectedScope)));
-            if (signal.aborted || wantedOptions.peek() || needed) {
+            if (
+              signal.aborted ||
+              ((wantedOptions.peek() || needed) &&
+                roundReadWorldScope(readPublicQueryForState(queryState)) === scope)
+            ) {
               signal.removeEventListener("abort", check);
               waiters.delete(check);
               resolve();
@@ -172,7 +184,7 @@ export function useReadRoundDirectory(
           check();
         });
       };
-      const world = selectedScope.scope === "all" ? null : selectedScope.scope;
+      const world = scope === "all" ? null : scope;
       const result = await (mode === "bidlog"
         ? fetchBidLogAuctions(world, context.signal, observe)
         : fetchBidLogAuctionStatus(world, "settled", context.signal, observe));
@@ -219,11 +231,11 @@ export function useReadRoundDirectory(
     if (change === null || !routeStillOnPage()) {
       return;
     }
-    const current = readPublicQuery();
+    const current = readPublicQueryForState(queryState);
     if (
       current.auction.kind === "invalid" ||
       (queryAuctionId(current) ?? "") !== change.expected ||
-      current.world !== queryState.peek().world
+      roundReadWorldScope(current) !== change.selection.scope
     ) {
       return;
     }
@@ -253,7 +265,9 @@ export function useReadRoundDirectory(
       : null;
   });
   const commitSelection = (id: string | null) =>
-    routeStillOnPage() && commitAuctionSelection(queryState, id, "push", selectionKeys);
+    routeStillOnPage() &&
+    readPublicQueryForState(queryState).invalidWorld === null &&
+    commitAuctionSelection(queryState, id, "push", selectionKeys);
   return {
     options,
     selected,

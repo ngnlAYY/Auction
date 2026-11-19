@@ -34,8 +34,7 @@ export function prefetchBoardLots(world: string, query: PublicBoardQuery): void 
   if (
     query.auction.kind !== "unspecified" ||
     query.invalidCategory !== null ||
-    publicPageCorrections(query, currentBrowserSearch(), [["page", query.pageSize]], false).length >
-      0
+    publicPageCorrections(currentBrowserSearch(), [["page", query.pageSize]], false).length > 0
   ) {
     // 越界地址交给正文先 replace；写入失败时，预取也不能以其他页码发起读取。
     return;

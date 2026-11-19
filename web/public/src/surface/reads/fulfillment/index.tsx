@@ -19,7 +19,7 @@ import { For, Match, Show, Switch, useContext } from "solid-js";
 import type { FulfillmentRead } from "../../../api/fulfillment";
 import { fetchFulfillmentPage, MAX_FULFILLMENT_PAGE_SIZE } from "../../../api/fulfillment";
 import { PublicRefreshGenerationContext, refreshPublicReads } from "../../board/refresh";
-import { WorldTabs, worldLabel } from "../../board/world";
+import { worldLabel } from "../../board/world";
 import {
   LotDetailLookupContext,
   LotDetailLookupHost,
@@ -29,17 +29,15 @@ import { formatAuctionTime } from "../../catalog/presentation";
 import { useContentLoading } from "../../loading";
 import { publicPageMatches, updatePublicPage, updatePublicPageSize } from "../../pagination";
 import { usePublicPageBounds } from "../../pagination/bounds";
-import {
-  normalizedWorldQuery,
-  usePublicQueryState,
-  type WorldScope,
-  worldScopeFromQuery,
-} from "../../query";
+import { usePublicQueryState } from "../../query";
+import { readPublicQueryForState } from "../../query/location";
 import { usePageRouteGuard } from "../../query/route-page";
 import { rustTrim } from "../../query/text";
+import { roundReadWorldScope } from "../../query/world-scope";
 import { useReadRoundDirectory } from "../bid-log/directory";
 import { useLotFilterDraft } from "../bid-log/lots";
 import { createScopeSelection, sameScopeSelection } from "../bid-log/scope-selection";
+import { RoundWorldFilter } from "../bid-log/world-filter";
 import { INVALID_READ_AUCTION_ERROR_ID, InvalidReadAuction } from "../invalid-auction";
 import type {
   FulfillmentBodyState,
@@ -68,10 +66,7 @@ export function Fulfillment(): JSX.Element {
   const queryStateSignal = queryState.state;
   const refreshGeneration = useContext(PublicRefreshGenerationContext);
   const routeStillOnPage = usePageRouteGuard("Fulfillment");
-  // 跨世界页：缺省 `world` 表示全部世界，显式 `main`/`isekai` 限定单个世界。
-  const worldScope = createValueMemo(
-    (): WorldScope => worldScopeFromQuery("multi", normalizedWorldQuery(queryStateSignal().world)),
-  );
+  const worldScope = createValueMemo(() => roundReadWorldScope(queryStateSignal()));
   // 世界范围与本次选择的序号一起变化；目录资源只依赖这一个值，避免“新范围 + 旧代际”
   // 先启动一轮读取再被下一轮取消。
   const scopeSelection = createScopeSelection(worldScope);
@@ -81,11 +76,11 @@ export function Fulfillment(): JSX.Element {
     Math.min(queryStateSignal().pageSize, MAX_FULFILLMENT_PAGE_SIZE),
   );
   const bounds = usePublicPageBounds(queryStateSignal, "Fulfillment", (query) =>
-    query.auction.kind !== "selected"
+    query.invalidWorld !== null || query.auction.kind !== "selected"
       ? []
       : [["page", Math.min(query.pageSize, MAX_FULFILLMENT_PAGE_SIZE)]],
   );
-  const lot = useLotFilterDraft(queryStateSignal, "/fulfillment", LOT_FILTER_WRITE_DEBOUNCE_MILLIS);
+  const lot = useLotFilterDraft(queryStateSignal, "Fulfillment", LOT_FILTER_WRITE_DEBOUNCE_MILLIS);
   const lotFilter = lot.appliedLot;
   const rounds = useReadRoundDirectory(
     "fulfillment",
@@ -131,7 +126,12 @@ export function Fulfillment(): JSX.Element {
   const progress = createTaskResource(
     readRequest,
     async (dependencies, context): Promise<FulfillmentProgressSnapshot | null> => {
-      if (dependencies === null || !routeStillOnPage()) {
+      if (
+        dependencies === null ||
+        !routeStillOnPage() ||
+        roundReadWorldScope(readPublicQueryForState(queryStateSignal)) !==
+          dependencies.request[1].scope
+      ) {
         return progress.peek() ?? null;
       }
       const [auctionId, , world, lotId, page, size] = dependencies.request;
@@ -175,6 +175,7 @@ export function Fulfillment(): JSX.Element {
 
   // 目录或当前查询还没有结果时由顶栏提示加载，正文留空。
   const body = createValueMemo((): FulfillmentBodyState => {
+    if (worldScope() === null) return { kind: "invalid-filter" };
     if (rounds.invalidAuction()) return { kind: "invalid-auction" };
     const progressResult = currentResult();
     if (bounds.failed("page") || rounds.failed() || progressResult?.ok === false) {
@@ -215,10 +216,7 @@ export function Fulfillment(): JSX.Element {
   return (
     <LotDetailLookupContext value={lookup}>
       <section class="public-fulfillment" aria-label={t("page-fulfillment-title")}>
-        {/* 世界切换：页面顶部的按钮组（WorldTabs，Solid 版专属）；Rust 版用页面内的下拉框。 */}
-        <div class="public-auction-group-toolbar public-world-toolbar">
-          <WorldTabs />
-        </div>
+        <RoundWorldFilter state={queryStateSignal} routeStillOnPage={routeStillOnPage} />
         <div class="public-fulfillment__heading">
           <div class="public-fulfillment__round">
             <select
@@ -303,6 +301,7 @@ export function Fulfillment(): JSX.Element {
               autocapitalize="none"
               spellcheck="false"
               value={lot.draft()}
+              disabled={worldScope() === null}
               placeholder={t("fulfillment-filter-placeholder")}
               aria-invalid={lot.interacted() && lot.draftError() !== null ? "true" : "false"}
               aria-describedby={lot.draftError() === null ? undefined : LOT_FILTER_ERROR_ID}
@@ -310,7 +309,7 @@ export function Fulfillment(): JSX.Element {
               onBlur={lot.blur}
             />
             <Show when={lot.draft() !== "" || !lot.appliedValid()}>
-              <button type="button" onClick={lot.clear}>
+              <button type="button" disabled={worldScope() === null} onClick={lot.clear}>
                 {t("fulfillment-filter-clear")}
               </button>
             </Show>

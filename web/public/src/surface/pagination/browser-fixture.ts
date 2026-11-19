@@ -27,8 +27,10 @@ export function mountReadPage(
   initialUrl: string,
   render: () => void,
   mountElement?: (element: ReadPageElement) => void,
+  rejectInitialWrites = false,
 ) {
   const { fake, restore } = installFakeWindow(initialUrl);
+  fake.rejectWrites(rejectInitialWrites);
   const { location, writes } = fake;
   const storage = new Map<string, string>();
   Object.assign(fake, {
