@@ -12,7 +12,7 @@ import { documentIsVisible } from "@auction/web-shared/platform/visibility";
 import { type Cell, createCell } from "@auction/web-shared/reactive/cell";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import type { TaskResource } from "@auction/web-shared/reactive/resource";
-import { createTaskScope } from "@auction/web-shared/reactive/tasks";
+import { createTaskScope, type TaskHandle } from "@auction/web-shared/reactive/tasks";
 import { createContext, createEffect, untrack, useContext } from "solid-js";
 
 import { estimatedNow } from "../../api/clock";
@@ -189,12 +189,13 @@ export function useBidRefresh<T>(
   const refresh = useContext(PublicBidRefreshContext);
   // 与源码的 use_reactive 一样按值去重；关闭后必须立即退订，不再随每次竞价执行空刷新。
   const enabledValue = createValueMemo(enabled);
+  const selectedAuction = createValueMemo(() => auctionId?.() ?? null);
   const consumed = createCell(refresh.revision.peek());
-  const scheduled = createCell(false);
+  let scheduled: { readonly auctionId: string | null; readonly task: TaskHandle } | null = null;
   const tasks = createTaskScope();
   const revision = createValueMemo(() => {
-    const selected = auctionId?.();
-    if (selected === undefined) return refresh.revision();
+    if (auctionId === undefined) return refresh.revision();
+    const selected = selectedAuction();
     return selected === null ? 0 : refresh.revisionFor(selected);
   });
 
@@ -205,12 +206,18 @@ export function useBidRefresh<T>(
       }
       return {
         enabled: true,
+        auctionId: selectedAuction(),
         revision: revision(),
         // 先读资源状态以订阅它就绪/重新挂起的变化，再按纯函数决定是否排定。
         state: resource.state(),
       } as const;
     },
     (current) => {
+      if (scheduled !== null && (!current.enabled || scheduled.auctionId !== current.auctionId)) {
+        // 换场只取消本资源的旧窗口。仍读取原场次的其他资源各自消费其通知。
+        scheduled.task.cancel();
+        scheduled = null;
+      }
       if (!current.enabled) {
         // 闭合的代理面板不订阅竞价或资源状态，避免每行随通知执行空刷新。
         consumed.set(refresh.revision.peek());
@@ -224,21 +231,22 @@ export function useBidRefresh<T>(
       const decision = planBidRefresh(
         current.revision,
         consumed.peek(),
-        scheduled.peek(),
+        scheduled !== null,
         current.state === "ready",
       );
       if (decision === "idle" || decision === "coalescing" || decision === "wait_for_ready") {
         return;
       }
-      scheduled.set(true);
       // 每个窗口各取一次随机样本；抖动只改变重读时刻，不改变合并与消费规则。
       const windowMillis = coalesceWindowMillis(Math.random());
-      tasks.spawn(async (context) => {
+      const task = tasks.spawn(async (context) => {
         await sleep(windowMillis, context.signal);
         if (!context.alive()) {
           return;
         }
-        scheduled.set(false);
+        scheduled = null;
+        // 到期时再核对场次，避免响应式切换尚未提交就消费新场通知。
+        if (untrack(selectedAuction) !== current.auctionId) return;
         const latest = untrack(revision);
         if (!documentIsVisible()) {
           consumed.set(refresh.revision.peek());
@@ -254,6 +262,7 @@ export function useBidRefresh<T>(
           resource.restart();
         }
       });
+      scheduled = { auctionId: current.auctionId, task };
     },
   );
 }

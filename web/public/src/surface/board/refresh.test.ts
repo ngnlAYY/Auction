@@ -56,6 +56,7 @@ const {
 } = await loadCommandScopeFixture();
 
 interface LotRequest {
+  readonly auctionId: string;
   readonly page: number;
   readonly category: string | null;
   readonly signal: AbortSignal;
@@ -74,6 +75,7 @@ const AUCTION: CurrentAuctionItemResponse = {
   preview_revision: 1,
   proxy_default_mode: "fast",
 };
+const NEXT_AUCTION = { ...AUCTION, id: "00000000-0000-4000-8000-000000000004", number: 2 };
 const FIRST_USER = "00000000-0000-4000-8000-000000000002";
 const SECOND_USER = "00000000-0000-4000-8000-000000000003";
 const EMPTY_CATEGORY_COUNTS = {
@@ -109,7 +111,10 @@ function interceptLots(): LotRequest[] {
       (input: RequestInfo | URL, init?: RequestInit) => {
         const url = new URL(input instanceof Request ? input.url : input, "http://localhost");
         const signal = init?.signal;
-        if (url.pathname !== `/api/v1/auctions/${AUCTION.id}/lots` || signal == null) {
+        const auction = [AUCTION, NEXT_AUCTION].find(
+          (round) => url.pathname === `/api/v1/auctions/${round.id}/lots`,
+        );
+        if (auction === undefined || signal == null) {
           throw new Error(`意外的看板请求 ${url.pathname}`);
         }
         const page = Number(url.searchParams.get("page"));
@@ -118,6 +123,7 @@ function interceptLots(): LotRequest[] {
         const abort = () => reject(signal.reason);
         signal.addEventListener("abort", abort, { once: true });
         requests.push({
+          auctionId: auction.id,
           page,
           category,
           signal,
@@ -128,13 +134,13 @@ function interceptLots(): LotRequest[] {
                 code: "ok",
                 message: "ok",
                 data: {
-                  auction_id: AUCTION.id,
-                  auction_status: AUCTION.status,
+                  auction_id: auction.id,
+                  auction_status: auction.status,
                   projection_kind: "live",
-                  presentation_mode: AUCTION.presentation_mode,
-                  bidding_open: AUCTION.bidding_open,
-                  opens_at: AUCTION.opens_at,
-                  preview_revision: AUCTION.preview_revision,
+                  presentation_mode: auction.presentation_mode,
+                  bidding_open: auction.bidding_open,
+                  opens_at: auction.opens_at,
+                  preview_revision: auction.preview_revision,
                   lots: [],
                   page,
                   page_size: Number(url.searchParams.get("page_size")),
@@ -173,10 +179,11 @@ function mountCatalog(initialQuery = publicBoardQueryDefault()) {
     const commandOwner = createValueMemo(() => currentUser(session()));
     const bidRefresh = createPublicBidRefresh();
     const refresh = createCell(0);
+    const auction = createCell(AUCTION);
     const query = createCell({ ...initialQuery, pageSize: 100 });
     const notify = () => {
       invalidateAll();
-      bidRefresh.notify(AUCTION.id);
+      bidRefresh.notify(auction.peek().id);
     };
     const providers = [
       provide(RouterContext, {
@@ -194,10 +201,7 @@ function mountCatalog(initialQuery = publicBoardQueryDefault()) {
       provide(SelectedWorldContext, createCell(AUCTION.world)),
       provide(
         CurrentAuctionContext,
-        createTaskResource(
-          () => null,
-          async () => [AUCTION.world, ok(AUCTION)] as const,
-        ),
+        createTaskResource(auction, async (round) => [round.world, ok(round)] as const),
       ),
       provide(
         PublicReadinessContext,
@@ -229,6 +233,7 @@ function mountCatalog(initialQuery = publicBoardQueryDefault()) {
       lotsReady,
       session,
       notify,
+      changeAuction: auction.set,
       query,
       refresh,
     };
@@ -348,6 +353,49 @@ test("换号保留已排定的竞价补读，换号后的单条通知也只补�
     jest.advanceTimersByTime(window);
     await settleCatalog();
     expect(board.requests).toHaveLength(3);
+  } finally {
+    board.dispose();
+  }
+});
+
+test("看板目录换场时取消旧窗口，并等新场目录就绪后再排定补读", async () => {
+  jest.useFakeTimers();
+  const random = spyOn(Math, "random").mockReturnValue(0);
+  onTestFinished(() => {
+    random.mockRestore();
+    jest.useRealTimers();
+  });
+  const board = mountCatalog();
+  const requestedAuctions = () => board.requests.map(({ auctionId }) => auctionId);
+  try {
+    await settleCatalog();
+    board.requests[0]?.complete();
+    await settleCatalog();
+    board.notify();
+    flush();
+    expect(jest.getTimerCount()).toBe(1);
+
+    jest.advanceTimersByTime(90);
+    board.changeAuction(NEXT_AUCTION);
+    await settleCatalog();
+    expect(requestedAuctions()).toEqual([AUCTION.id, NEXT_AUCTION.id]);
+    // 首次目录 GET 未返回时，通知只留修订号，不取消该请求。
+    board.notify();
+    await settleCatalog();
+    expect(board.requests[1]?.signal.aborted).toBe(false);
+    board.requests[1]?.complete();
+    await settleCatalog();
+    expect(board.lotsReady.peek()).toBe(true);
+
+    jest.advanceTimersByTime(10);
+    await settleCatalog();
+    expect(requestedAuctions()).toEqual([AUCTION.id, NEXT_AUCTION.id]);
+    jest.advanceTimersByTime(89);
+    await settleCatalog();
+    expect(requestedAuctions()).toEqual([AUCTION.id, NEXT_AUCTION.id]);
+    jest.advanceTimersByTime(1);
+    await settleCatalog();
+    expect(requestedAuctions()).toEqual([AUCTION.id, NEXT_AUCTION.id, NEXT_AUCTION.id]);
   } finally {
     board.dispose();
   }

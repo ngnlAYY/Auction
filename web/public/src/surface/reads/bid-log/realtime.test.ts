@@ -1,6 +1,6 @@
 // 出价记录与看板经过真实外壳和 WebSocket 入口，观察普通竞价触发的 GET。
 
-import { expect, jest, onTestFinished, test } from "bun:test";
+import { expect, jest, onTestFinished, spyOn, test } from "bun:test";
 import { flush } from "solid-js";
 import { SocketStub } from "../../../api/realtime/subscription-fixture";
 import {
@@ -50,7 +50,7 @@ test.each([
   }
 });
 
-test("切到另一场的竞价流后，仍消费抽屉所属场次已排定的通知", async () => {
+test("换场后的日志合并新场通知，旧场抽屉仍按自己的窗口补读", async () => {
   const sockets = installSockets();
   const focus = installDialogFocus();
   const page = await mountCompetition();
@@ -107,9 +107,14 @@ test("切到另一场的竞价流后，仍消费抽屉所属场次已排定的�
     expect(reads()).toEqual([1, 1, 1]);
 
     jest.useFakeTimers();
-    onTestFinished(() => jest.useRealTimers());
+    const random = spyOn(Math, "random").mockReturnValue(0);
+    onTestFinished(() => {
+      jest.useRealTimers();
+      random.mockRestore();
+    });
     sockets.need(AUCTION_ID).bid(1);
     await flushRequests();
+    jest.advanceTimersByTime(90);
     page.go(`/bidlog?auction=${OTHER_WORLD}`);
     await flushRequests();
     expect(page.find(hasClass("public-catalog-history"))).not.toBeNull();
@@ -119,10 +124,27 @@ test("切到另一场的竞价流后，仍消费抽屉所属场次已排定的�
     nextSocket.bid(1);
     await flushRequests();
     expect(reads()).toEqual([1, 1, 1]);
-    jest.advanceTimersByTime(250);
+
+    // A 场在 100 ms 到期，B 场自己的 100 ms 窗口从 90 ms 开始。
+    jest.advanceTimersByTime(10);
     await flushRequests();
     expect(reads()).toEqual([2, 2, 2]);
+    expect(bidLog(AUCTION_ID, 20, null)).toBe(1);
+    expect(bidLog(OTHER_WORLD, 20, null)).toBe(1);
+
+    jest.advanceTimersByTime(10);
+    nextSocket.bid(2);
+    await flushRequests();
+    jest.advanceTimersByTime(79);
+    await flushRequests();
+    expect(bidLog(OTHER_WORLD, 20, null)).toBe(1);
+    jest.advanceTimersByTime(1);
+    await flushRequests();
     expect(bidLog(OTHER_WORLD, 20, null)).toBe(2);
+    jest.advanceTimersByTime(250);
+    await flushRequests();
+    expect(bidLog(OTHER_WORLD, 20, null)).toBe(2);
+    expect(reads()).toEqual([2, 2, 2]);
   } finally {
     page.dispose();
     focus.restore();
