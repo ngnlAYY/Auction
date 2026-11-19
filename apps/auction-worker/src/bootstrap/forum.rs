@@ -22,7 +22,6 @@ use auction_integrations::{
     build_keyring,
 };
 use auction_storage::{DatabaseCompetitionCommands, DatabaseStore};
-use url::Url;
 
 pub(super) async fn configure_forum(
     config: &AppConfig,
@@ -109,13 +108,7 @@ pub(super) async fn configure_forum(
     }
     .map_err(|error| anyhow::Error::msg(error.to_string()))?;
 
-    let endpoint = forum_config
-        .endpoint
-        .as_deref()
-        .map(Url::parse)
-        .transpose()
-        .context("解析 E-Hentai 论坛 endpoint 失败")?
-        .unwrap_or(Url::parse(auction_integrations::ehentai::PRODUCTION_ENDPOINT)?);
+    let endpoint = forum_config.endpoint_url()?;
     let client = Arc::new(
         EhentaiClient::with_config(EhentaiClientConfig {
             endpoint,

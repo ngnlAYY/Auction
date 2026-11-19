@@ -315,7 +315,7 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 
 认证的 `GET /api/v1/admin/config?include_worker_restart_state=true` 在成功响应的 `data` 中额外返回必有的字符串 `worker_restart_state`，并保留 `Cache-Control: no-store`。它可与两个既有投影组合；该参数只接受 `true` 且只用于 GET。未请求时继续返回原有字段集合。普通 `data` 为 `document`、`fingerprint`、`restart_required`，显式请求装备分类词典时再含 `equipment_taxonomy`。完整扩展样本见 [crates/auction-contracts/tests/fixtures/admin/runtime-config-worker-restart-state.json](../../crates/auction-contracts/tests/fixtures/admin/runtime-config-worker-restart-state.json)。
 
-目标值须由本次 `fingerprint` 对应的文件和可信 Worker 部署基值通过启动的非敏感配置校验后得出。过期记录和 `stopping` 实例不参与判断。
+目标值须由本次 `fingerprint` 对应的文件和可信 Worker 部署基值通过启动的非敏感配置校验后得出。过期记录和 `stopping` 实例不参与判断。Worker 只在 runner 通过校验并处于控制层 `serving` 时随心跳带上摘要。启动校验前与进入排空后的新心跳均省略摘要。
 
 | `worker_restart_state` | 判定 |
 | --- | --- |

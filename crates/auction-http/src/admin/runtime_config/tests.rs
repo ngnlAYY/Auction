@@ -661,6 +661,39 @@ async fn worker_restart_state_is_an_opt_in_no_store_get_projection() {
 }
 
 #[tokio::test]
+async fn runtime_config_get_combines_taxonomy_threshold_and_worker_state() {
+    let port = Arc::new(RuntimeWithRestartState {
+        runtime: RuntimeWithWorkerError {
+            current: document(json!({
+                "operations": {"alerts": {"fulfillment_collection_overdue_age_seconds": 86_400}},
+            })),
+            worker_error: WORKER_FILE_HINT,
+        },
+        state: WorkerRestartState::Consistent,
+        reads: AtomicUsize::new(0),
+    });
+    let response = get(
+        state_with_runtime(Some(port.clone())),
+        ConnectInfo("127.0.0.1:20123".parse().unwrap()),
+        headers(),
+        "/api/v1/admin/config?include_equipment_taxonomy=true&include=fulfillment_collection_overdue_age_seconds&include_worker_restart_state=true"
+            .parse()
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.headers()["cache-control"], "no-store");
+    let (status, actual) = json_response(response).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(port.reads.load(Ordering::Relaxed), 1);
+    assert!(actual["data"]["equipment_taxonomy"].is_object());
+    assert_eq!(
+        actual["data"]["document"]["operations"]["alerts"]["fulfillment_collection_overdue_age_seconds"],
+        json!(86_400),
+    );
+    assert_eq!(actual["data"]["worker_restart_state"], "consistent");
+}
+
+#[tokio::test]
 async fn runtime_config_validate_contract_fixtures() {
     use crate::server::contract_fixtures::assert_http;
 

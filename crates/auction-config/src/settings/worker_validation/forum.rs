@@ -83,7 +83,17 @@ pub(crate) fn validate_forum_worker(config: &ForumSyncWorkerConfig) -> Result<()
             "item_timeout_seconds 必须小于 lease_duration_seconds",
         ));
     }
-    if let Some(endpoint) = &config.endpoint {
+    config.endpoint_url()?;
+    if let Some(public_base_url) = &config.public_base_url {
+        parse_public_base_url(public_base_url)?;
+    }
+    Ok(())
+}
+
+impl ForumSyncWorkerConfig {
+    /// 返回论坛启动装配与冷配置投影共用的无凭据 origin。
+    pub fn endpoint_url(&self) -> Result<Url, ConfigError> {
+        let endpoint = self.endpoint.as_deref().unwrap_or("https://forums.e-hentai.org");
         let parsed = Url::parse(endpoint)
             .map_err(|_| ConfigError::InvalidForumConfig("endpoint 不是有效 URL"))?;
         let path_is_root = parsed.path().is_empty() || parsed.path() == "/";
@@ -101,11 +111,8 @@ pub(crate) fn validate_forum_worker(config: &ForumSyncWorkerConfig) -> Result<()
                 "endpoint 必须是无凭据的 HTTPS origin 或回环 HTTP origin",
             ));
         }
+        Ok(parsed)
     }
-    if let Some(public_base_url) = &config.public_base_url {
-        parse_public_base_url(public_base_url)?;
-    }
-    Ok(())
 }
 
 /// 公开链接的 origin 门禁由启动校验和冷配置投影共用。

@@ -257,7 +257,7 @@ pub(crate) async fn run_worker(
     let forum_sync_enabled = config.worker.forum.enabled;
     // 持久心跳记录本进程实际装配的启动值（不变量 5）；热重载和能力变化不得改写它。
     let cold_config = config.worker_cold_config_digest()?;
-    let heartbeat = Arc::new(
+    let heartbeat = Arc::new(heartbeat::with_cold_config(
         HeartbeatPublisher::new(
             heartbeat_store,
             HeartbeatPublisherConfig {
@@ -268,22 +268,19 @@ pub(crate) async fn run_worker(
                 started_at: Timestamp::now(),
                 ttl: auction_time::Duration::seconds(30),
             },
-            Arc::clone(&heartbeat_health),
+            heartbeat_health,
             tracing_health,
-        )
-        .with_live_details(move || {
-            heartbeat::details(
-                forum_sync_enabled,
-                &settlement_return_recheck_worlds,
-                &cold_config,
-                |world| {
-                    heartbeat_transport
-                        .as_ref()
-                        .is_some_and(|transport| transport.frozen_take_identity_available(world))
-                },
-            )
-        }),
-    );
+        ),
+        control.clone(),
+        cold_config,
+        move || {
+            heartbeat::details(forum_sync_enabled, &settlement_return_recheck_worlds, |world| {
+                heartbeat_transport
+                    .as_ref()
+                    .is_some_and(|transport| transport.frozen_take_identity_available(world))
+            })
+        },
+    ));
     if let Err(error) = heartbeat.publish_starting().await {
         tracing::warn!(error = %error, "发布 Worker starting 心跳失败");
     }
@@ -370,7 +367,7 @@ pub(crate) async fn run_worker(
     )
     .map(Arc::new)
     .context("Worker 批量连接配额必须大于 0")?;
-    // 只有启动门禁全部通过才发布可比较的心跳；等待期间收到停机请求时不启动循环。
+    // 首次就绪探测仍在 runner 启动前发布；详情在 runner 标记 Serving 前省略冷配置摘要。
     let mut shutdown = shutdown;
     let stopping = tokio::select! {
         biased;

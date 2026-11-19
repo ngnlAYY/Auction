@@ -154,11 +154,7 @@ pub(crate) fn validate_mooglemail_worker(
     if config.maximum_pages == 0 || config.maximum_pages > 100 {
         return Err(ConfigError::InvalidMoogleMailConfig("maximum_pages 必须位于 1 至 100"));
     }
-    if !valid_mooglemail_endpoint(&config.endpoint) {
-        return Err(ConfigError::InvalidMoogleMailConfig(
-            "endpoint 必须是固定生产 HTTPS origin 或无附加字段的回环 HTTP(S) origin",
-        ));
-    }
+    config.endpoint_url()?;
     if config.maximum_response_bytes == 0 || config.maximum_response_bytes > 8 * 1024 * 1024 {
         return Err(ConfigError::InvalidMoogleMailConfig(
             "maximum_response_bytes 必须位于 1 至 8 MiB",
@@ -286,13 +282,20 @@ pub(crate) fn validate_mooglemail_worker(
     Ok(())
 }
 
-pub(crate) fn valid_mooglemail_endpoint(value: &str) -> bool {
-    if !valid_text(value, 2048) {
-        return false;
+impl MoogleMailWorkerConfig {
+    /// 用 Worker 启动校验的边界解析邮件 origin，供冷配置投影使用。
+    pub(crate) fn endpoint_url(&self) -> Result<Url, ConfigError> {
+        parse_mooglemail_endpoint(&self.endpoint).ok_or(ConfigError::InvalidMoogleMailConfig(
+            "endpoint 必须是固定生产 HTTPS origin 或无附加字段的回环 HTTP(S) origin",
+        ))
     }
-    let Ok(endpoint) = Url::parse(value) else {
-        return false;
-    };
+}
+
+fn parse_mooglemail_endpoint(value: &str) -> Option<Url> {
+    if !valid_text(value, 2048) {
+        return None;
+    }
+    let endpoint = Url::parse(value).ok()?;
     let path_is_root = endpoint.path().is_empty() || endpoint.path() == "/";
     let common = endpoint.host_str().is_some()
         && endpoint.username().is_empty()
@@ -301,23 +304,24 @@ pub(crate) fn valid_mooglemail_endpoint(value: &str) -> bool {
         && endpoint.query().is_none()
         && endpoint.fragment().is_none();
     if !common {
-        return false;
+        return None;
     }
     if endpoint.scheme() == "https"
         && endpoint.host_str().is_some_and(|host| host.eq_ignore_ascii_case("hentaiverse.org"))
         && endpoint.port().is_none()
     {
-        return true;
+        return Some(endpoint);
     }
     if !matches!(endpoint.scheme(), "http" | "https") {
-        return false;
+        return None;
     }
-    match endpoint.host() {
+    let loopback = match endpoint.host() {
         Some(url::Host::Domain(host)) => host.eq_ignore_ascii_case("localhost"),
         Some(url::Host::Ipv4(address)) => address.is_loopback(),
         Some(url::Host::Ipv6(address)) => address.is_loopback(),
         None => false,
-    }
+    };
+    loopback.then_some(endpoint)
 }
 
 /// 边界规则由应用层唯一持有，Admin 保存 runtime 文档时使用同一函数，避免两侧再次分叉。

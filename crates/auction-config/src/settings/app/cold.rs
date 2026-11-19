@@ -34,7 +34,7 @@ fn digest(
     worker: &WorkerConfig,
     bot_players: &[String],
 ) -> Result<WorkerColdConfigDigest, ConfigError> {
-    // 只接收显式选定的已解析业务字段，不序列化部署原文、凭据来源或传输地址。
+    // 只接收显式选定的已解析业务字段，通道地址只取通过校验的无凭据 origin。
     #[derive(Serialize)]
     struct Projection<E, S, M, F, A, L> {
         version: u32,
@@ -52,7 +52,7 @@ fn digest(
         economy: (&auction.economics, &auction.settlement),
         schedule: schedule(auction, &worker.mooglemail)?,
         mail: mail(&worker.mooglemail)?,
-        forum: forum(&worker.forum),
+        forum: forum(&worker.forum)?,
         // 被超提醒也使用公开地址，论坛同步关闭时仍然生效。
         public_base_origin: worker
             .forum
@@ -131,6 +131,7 @@ fn schedule<'a>(
 fn mail(config: &MoogleMailWorkerConfig) -> Result<Option<impl Serialize>, ConfigError> {
     #[derive(Serialize)]
     struct Mail<C, F> {
+        endpoint_origin: String,
         worlds: Vec<MailWorld>,
         receive_schedule: C,
         maintenance_schedule: C,
@@ -170,6 +171,7 @@ fn mail(config: &MoogleMailWorkerConfig) -> Result<Option<impl Serialize>, Confi
         SentBaselineMode::Watermark => "watermark",
     };
     Ok(Some(Mail {
+        endpoint_origin: config.endpoint_url()?.origin().ascii_serialization(),
         worlds: config
             .configured_worlds()
             .into_iter()
@@ -225,9 +227,10 @@ fn equipment_filter(config: &MoogleMailEquipmentFilterConfig) -> impl Serialize 
     (qualities, filters)
 }
 
-fn forum(config: &ForumSyncWorkerConfig) -> Option<impl Serialize> {
+fn forum(config: &ForumSyncWorkerConfig) -> Result<Option<impl Serialize>, ConfigError> {
     #[derive(Serialize)]
     struct Forum<'a, R> {
+        endpoint_origin: String,
         verify_post_body: bool,
         credential_world: &'a str,
         board_ids: (i32, i32),
@@ -238,7 +241,11 @@ fn forum(config: &ForumSyncWorkerConfig) -> Option<impl Serialize> {
         lease_duration_seconds: u64,
         equipment_colors: Vec<R>,
     }
-    config.enabled.then(|| Forum {
+    if !config.enabled {
+        return Ok(None);
+    }
+    Ok(Some(Forum {
+        endpoint_origin: config.endpoint_url()?.origin().ascii_serialization(),
         verify_post_body: config.verify_post_body,
         credential_world: &config.credential_world,
         board_ids: if config.test_board_mode {
@@ -252,7 +259,7 @@ fn forum(config: &ForumSyncWorkerConfig) -> Option<impl Serialize> {
         request_timeout_seconds: config.request_timeout_seconds,
         lease_duration_seconds: config.lease_duration_seconds,
         equipment_colors: config.equipment_colors.iter().map(color_rule).collect(),
-    })
+    }))
 }
 
 fn alerts(config: &OperationsAlertWorkerConfig) -> Option<impl Serialize> {
@@ -562,5 +569,31 @@ mod tests {
         let enabled = digest(&auction, &worker, &[]).unwrap();
         worker.operations_alert.webhook_template = r#"{"format":"other"}"#.into();
         assert_ne!(digest(&auction, &worker, &[]).unwrap(), enabled);
+    }
+
+    #[test]
+    fn cold_endpoints_follow_enabled_channels_and_normalize_defaults() {
+        let auction = AuctionConfig::default();
+        let mut worker = WorkerConfig::default();
+        let disabled = digest(&auction, &worker, &[]).unwrap();
+        worker.mooglemail.endpoint = "http://127.0.0.1:8080".into();
+        worker.forum.endpoint = Some("http://127.0.0.1:8081".into());
+        assert_eq!(digest(&auction, &worker, &[]).unwrap(), disabled);
+
+        worker.mooglemail.enabled = true;
+        let mail_loopback = digest(&auction, &worker, &[]).unwrap();
+        worker.mooglemail.endpoint = WorkerConfig::default().mooglemail.endpoint;
+        let mail_default = digest(&auction, &worker, &[]).unwrap();
+        assert_ne!(mail_loopback, mail_default);
+        worker.mooglemail.endpoint = "HTTPS://HENTAIVERSE.ORG:443/".into();
+        assert_eq!(digest(&auction, &worker, &[]).unwrap(), mail_default);
+
+        worker.forum.enabled = true;
+        let forum_loopback = digest(&auction, &worker, &[]).unwrap();
+        worker.forum.endpoint = None;
+        let forum_default = digest(&auction, &worker, &[]).unwrap();
+        assert_ne!(forum_loopback, forum_default);
+        worker.forum.endpoint = Some("HTTPS://FORUMS.E-HENTAI.ORG:443/".into());
+        assert_eq!(digest(&auction, &worker, &[]).unwrap(), forum_default);
     }
 }
