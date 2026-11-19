@@ -151,7 +151,6 @@ pub(super) fn page() -> Element {
                 loaded_generation,
                 action_busy,
                 action_feedback,
-                create_notice,
             }
             }
         }
@@ -185,6 +184,20 @@ pub(super) fn page() -> Element {
                 }
             }
             PendingCommandPanel { owner: pending }
+            // 用户列表可以读失败，已交付的写入结果跟随页面。
+            div { role: "status",
+                if matches!(action_feedback(), Some(AdminActionFeedback::Success)) {
+                    p { class: "action-feedback action-feedback--success", {t!("admin-users-updated")} }
+                }
+                if let Some(username) = create_notice() {
+                    p { class: "action-feedback action-feedback--success", {t!("admin-users-created", username: username)} }
+                }
+            }
+            if let Some(AdminActionFeedback::Error(code)) = action_feedback() {
+                p { class: "action-feedback action-feedback--error", role: "alert",
+                    {admin_api_error_message(&code)}
+                }
+            }
             AdminUserFilters {
                 applied: applied_filter,
                 history_revision,

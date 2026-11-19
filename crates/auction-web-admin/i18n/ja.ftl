@@ -337,6 +337,7 @@ admin-field-required = この項目は必須です。
 admin-field-max-utf8-bytes = UTF-8 で { $max } バイト以内で入力してください。
 admin-field-no-control-characters = 改行やタブなどの制御文字を取り除いてください。
 admin-record-stale = 別の操作でこのレコードが更新されました。今回の変更は反映されていません。
+admin-record-close = 閉じる
 admin-record-close-and-refresh = 閉じて一覧を更新
 admin-record-refresh = 最新の記録を取得
 admin-record-refresh-loading = 最新の記録を取得しています…

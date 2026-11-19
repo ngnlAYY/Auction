@@ -3,7 +3,7 @@
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
-use super::super::{AdminActionFeedback, admin_api_error_message, format_admin_time};
+use super::super::{admin_api_error_message, format_admin_time};
 use super::mailbox_command_entity;
 use super::progress::MailPollingProgress;
 use crate::api::{AdminMailPolling, set_mail_paused, trigger_mail_poll};
@@ -30,6 +30,12 @@ pub(super) fn MailPollingCommands(
         {children}
     }
 }
+
+#[cfg(test)]
+#[derive(Clone)]
+pub(super) struct PollingReply(
+    pub(super) std::rc::Rc<crate::surface::auctions::draft_page_tests::RecordRead<AdminMailPolling>>,
+);
 
 #[component]
 pub(super) fn MailTriggerButton() -> Element {
@@ -80,8 +86,7 @@ pub(super) fn MailPollingCard(
     refresh: Signal<u64>,
     loaded_generation: u64,
 ) -> Element {
-    // 反馈属于按邮箱重挂载的卡片；旧命令仍由稳定宿主持有，不能写到后来选择的邮箱。
-    let mut notice = use_signal(|| None::<AdminActionFeedback>);
+    let mut error_code = use_signal(|| None::<String>);
     let desired_paused = !polling.paused;
     let label = if polling.paused { t!("admin-mail-resume") } else { t!("admin-mail-pause") };
     let state_label =
@@ -123,7 +128,7 @@ pub(super) fn MailPollingCard(
                 disabled: blocked || !read_is_current(),
                 onclick: move |_| {
                     if !read_is_current() || owner.contains(&entity) { return; }
-                    notice.set(None);
+                    error_code.set(None);
                     // 卡片随邮箱切换卸载，已提交暂停/恢复仍由会话宿主保留原负载和结果。
                     let polling = pause_polling.clone();
                     owner.submit_with_receipt(
@@ -133,7 +138,7 @@ pub(super) fn MailPollingCard(
                             let polling = polling.clone();
                             async move {
                                 #[cfg(test)]
-                                if let Some(reply) = try_consume_context::<tests::PollingReply>() {
+                                if let Some(reply) = try_consume_context::<PollingReply>() {
                                     return reply.0.fetch().await;
                                 }
                                 set_mail_paused(command_id, polling, desired_paused)
@@ -141,21 +146,23 @@ pub(super) fn MailPollingCard(
                                     .map_err(|error| error.code)
                             }
                         },
-                        move |_, source_alive| CommandDelivery::reported(source_alive && try_set_if_alive(notice, Some(AdminActionFeedback::Success)), || None),
-                        move |code| set_if_alive(notice, Some(AdminActionFeedback::Error(code))),
+                        move |_, source_alive| {
+                            if source_alive {
+                                set_if_alive(error_code, None);
+                            }
+                            // 成功与邮箱绑定，由会话交付，卡片读取失败或切换邮箱都可以卸载卡片。
+                            CommandDelivery::Receipt(Some(CommandReceipt::Text(t!("admin-mail-action-success"))))
+                        },
+                        move |code| set_if_alive(error_code, Some(code)),
                     );
                 },
                 "{button_label}"
             }
-            if let Some(feedback) = notice() {
+            if let Some(code) = error_code() {
                 p {
-                    class: if feedback.is_success() {
-                        "admin-panel__note action-feedback action-feedback--success"
-                    } else {
-                        "admin-panel__note action-feedback action-feedback--error"
-                    },
-                    role: if feedback.is_success() { "status" } else { "alert" },
-                    {feedback.message(t!("admin-mail-action-success"))}
+                    class: "admin-panel__note action-feedback action-feedback--error",
+                    role: "alert",
+                    {admin_api_error_message(&code)}
                 }
             }
         }
@@ -168,15 +175,12 @@ mod tests {
 
     use dioxus::prelude::*;
 
-    use super::{MailPollingCard, MailPollingCommands};
+    use super::{MailPollingCard, MailPollingCommands, PollingReply};
     use crate::api::AdminMailPolling;
     use crate::surface::auctions::draft_page_tests::{
         RecordRead, button, click_button, has_live_text, init_i18n, mount_writer, settle_writer,
     };
     use crate::surface::pending::{PendingCommandHost, PendingCommandNotices};
-
-    #[derive(Clone)]
-    pub(super) struct PollingReply(pub(super) Rc<RecordRead<AdminMailPolling>>);
 
     fn polling(mailbox_key: String) -> AdminMailPolling {
         AdminMailPolling {
@@ -224,13 +228,13 @@ mod tests {
             accepted.state_version = 2;
             reply.respond(Ok(accepted));
             settle_writer(&mut page);
-            assert_eq!(button(&page, "关闭回执").is_some(), switch);
+            assert!(button(&page, "关闭回执").is_some());
+            assert!(has_live_text(&page, "邮件轮询状态已更新。"));
             if switch {
                 assert!(has_live_text(&page, "轮询世代 0"));
                 assert!(!button(&page, "暂停轮询").unwrap().1);
             } else {
                 assert!(has_live_text(&page, "轮询世代 1"));
-                assert!(has_live_text(&page, "邮件轮询状态已更新。"));
                 let (pause, disabled) = button(&page, "暂停轮询").unwrap();
                 assert!(disabled);
                 page.dispatch("click", pause, "");

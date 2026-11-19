@@ -78,6 +78,19 @@ fn ReturnDetailPage(return_id: String) -> Element {
                 }
             }
             PendingCommandPanel { owner: commands }
+            // 案件详情重读会卸载动作区，处理回执仍须保留。
+            div { role: "status",
+                if matches!(notice(), Some(AdminActionFeedback::Success)) {
+                    p { class: "action-feedback action-feedback--success",
+                        {t!("settlement-return-action-success")}
+                    }
+                }
+            }
+            if let Some(AdminActionFeedback::Error(code)) = notice() {
+                p { class: "action-feedback action-feedback--error", role: "alert",
+                    {admin_api_error_message(&code)}
+                }
+            }
             match loaded {
                 None if !valid_uuid(&return_id) => rsx! {
                     AsyncState {

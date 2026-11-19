@@ -4,7 +4,7 @@ use auction_web_shared::t;
 use auction_web_shared::{AsyncState, AsyncStateKind};
 use dioxus::prelude::*;
 
-use super::draft::{missing_rules_document, to_draft};
+use super::draft::{missing_rules_document, notice_text, to_draft};
 use super::model::{DocumentDrafts, RuleNotice, RulesBaseline, RulesDraft};
 use super::workspace::AdminRulesWorkspace;
 use crate::api::{AdminDocumentKind, fetch_admin_rules};
@@ -29,6 +29,12 @@ pub fn page(kind: AdminDocumentKind) -> Element {
         let generation = reload_generation();
         let locale = target();
         async move {
+            #[cfg(test)]
+            if let Some(error) = try_consume_context::<std::rc::Rc<tests::Publication>>()
+                .and_then(|publication| publication.take_read_error())
+            {
+                return ((locale, generation), Err(error));
+            }
             let result = fetch_admin_rules(kind, locale.clone()).await;
             ((locale, generation), result)
         }
@@ -163,6 +169,12 @@ pub fn page(kind: AdminDocumentKind) -> Element {
                 }
             }
             PendingCommandPanel { owner: pending }
+            // 发布清理草稿后编辑器会卸载，已接受的发布仍由文档页面播报。
+            div { role: "status",
+                if matches!(notice(), Some(RuleNotice::Published)) {
+                    p { class: "admin-rules-ok", {notice_text(&RuleNotice::Published)} }
+                }
+            }
             {content}
         }
     }
@@ -196,10 +208,17 @@ mod tests {
     };
     use crate::surface::rules::model::DocumentDrafts;
 
-    struct Publication {
+    pub(super) struct Publication {
         document: RefCell<AdminRules>,
         reply: RecordRead<AdminRules>,
         reads: Cell<usize>,
+        read_error: RefCell<Option<crate::api::AdminApiFailure>>,
+    }
+
+    impl Publication {
+        pub(super) fn take_read_error(&self) -> Option<crate::api::AdminApiFailure> {
+            self.read_error.take()
+        }
     }
 
     #[component]
@@ -207,7 +226,7 @@ mod tests {
         page(kind)
     }
 
-    fn check_completion_after_return(kind: AdminDocumentKind) {
+    fn check_publication_read(kind: AdminDocumentKind, remount: bool) {
         let publication = Rc::new(Publication {
             document: RefCell::new(AdminRules {
                 locale: "en".to_owned(),
@@ -219,12 +238,14 @@ mod tests {
             }),
             reply: RecordRead::new(),
             reads: Cell::new(0),
+            read_error: RefCell::new(None),
         });
         let (mut mounted, mut edits) = mount_writer({
             let publication = publication.clone();
             move || {
                 init_i18n();
                 super::super::model::use_rules_draft();
+                use_context_provider(|| publication.clone());
                 let current = use_context::<DocumentDrafts>().get(kind);
                 let read = publication.clone();
                 let write = publication.clone();
@@ -274,9 +295,16 @@ mod tests {
             .unwrap();
         click_button(&mut mounted, "准备已校验草稿");
         mounted.dispatch("click", publish, "");
-        click_button(&mut mounted, "切换测试路由");
-        click_button(&mut mounted, "切换测试路由");
-        assert_eq!(publication.reads.get(), 2);
+        if remount {
+            click_button(&mut mounted, "切换测试路由");
+            click_button(&mut mounted, "切换测试路由");
+            assert_eq!(publication.reads.get(), 2);
+        } else {
+            publication.read_error.replace(Some(crate::api::AdminApiFailure::from_http_body(
+                503,
+                r#"{"code":"storage_unavailable","message":"暂不可用","data":null,"request_id":null}"#,
+            )));
+        }
         assert!(has_live_text(&mounted, "保存并发布"));
 
         let document = {
@@ -288,18 +316,38 @@ mod tests {
         };
         publication.reply.respond(Ok(document));
         settle_writer(&mut mounted);
-        assert_eq!(publication.reads.get(), 3);
+        if remount {
+            assert_eq!(publication.reads.get(), 3);
+        } else {
+            assert!(!has_live_text(&mounted, "保存并发布"));
+            assert!(has_live_text(&mounted, "所需服务暂时不可用。请稍后再试。"));
+            let receipt = mounted.dom().in_scope(dioxus::core::ScopeId::APP, || {
+                crate::surface::rules::draft::notice_text(
+                    &crate::surface::rules::model::RuleNotice::Published,
+                )
+            });
+            assert!(has_live_text(&mounted, &receipt));
+            click_button(&mut mounted, "重试");
+            assert!(has_live_text(&mounted, &receipt));
+        }
         assert!(has_live_text(&mounted, "保存并发布"));
         assert!(!has_live_text(&mounted, "正在加载文档……"));
     }
 
     #[test]
     fn rules_reload_after_returning_before_publication_settles() {
-        check_completion_after_return(AdminDocumentKind::Rules);
+        check_publication_read(AdminDocumentKind::Rules, true);
     }
 
     #[test]
     fn about_reloads_after_returning_before_publication_settles() {
-        check_completion_after_return(AdminDocumentKind::About);
+        check_publication_read(AdminDocumentKind::About, true);
+    }
+
+    #[test]
+    fn publication_receipts_survive_a_failed_read_for_both_document_kinds() {
+        for kind in [AdminDocumentKind::Rules, AdminDocumentKind::About] {
+            check_publication_read(kind, false);
+        }
     }
 }

@@ -8,9 +8,7 @@ use serde_json::Value;
 
 use super::lots::{MAX_START_PRICE, parse_start_price};
 use crate::api::{AdminIntakeResult, add_admin_intake};
-use crate::surface::pending::{
-    CommandDelivery, CommandReceipt, PendingCommands, set_if_alive, try_set_if_alive,
-};
+use crate::surface::pending::{CommandDelivery, CommandReceipt, PendingCommands, set_if_alive};
 use crate::surface::validation::{FieldError, focus_field};
 use crate::surface::{admin_api_error_message, admin_world_label};
 
@@ -77,7 +75,6 @@ pub(super) fn AdminIntakeForm(world_id: String) -> Element {
     let mut equipment_json = use_signal(String::new);
     let mut start_price = use_signal(String::new);
     let mut player_id = use_signal(String::new);
-    let mut result = use_signal(|| None::<AdminIntakeResult>);
     // 服务端返回的错误码；输入层校验错误由各字段信号承担，不走整页提示。
     let mut failure = use_signal(|| None::<String>);
     let mut field_errors = use_signal(IntakeFieldErrors::default);
@@ -139,15 +136,14 @@ pub(super) fn AdminIntakeForm(world_id: String) -> Element {
                             source_kind_value.clone(), equipment_url_value.clone(), equipment_json_value.clone(),
                             start_price, player_id_value.clone()),
                         move |value, source_alive| {
-                            let delivered = source_alive && try_set_if_alive(result, Some(value.clone()));
-                            if delivered {
+                            if source_alive {
                                 set_if_alive(failure, None);
                                 set_if_alive(field_errors, IntakeFieldErrors::default());
                             }
-                            CommandDelivery::reported(delivered, || Some(CommandReceipt::Text(intake_result_message(&value))))
+                            // 场次或拍品的重读可以卸载录入表单，已接受的录入由会话交付。
+                            CommandDelivery::Receipt(Some(CommandReceipt::Text(intake_result_message(&value))))
                         },
                         move |code| {
-                            set_if_alive(result, None);
                             let mut errors = IntakeFieldErrors::default();
                             match code.as_str() {
                                 "seller_blacklisted" | "auction_intake_player_blacklisted" => errors.player = Some(IntakeFieldIssue::PlayerBlacklisted),
@@ -170,7 +166,6 @@ pub(super) fn AdminIntakeForm(world_id: String) -> Element {
                         value: source_kind(),
                         onchange: move |event| {
                             source_kind.set(event.value());
-                            result.set(None);
                             failure.set(None);
                             field_errors.write().source = None;
                         },
@@ -198,7 +193,6 @@ pub(super) fn AdminIntakeForm(world_id: String) -> Element {
                             value: equipment_url(),
                             oninput: move |event| {
                                 equipment_url.set(event.value());
-                                result.set(None);
                                 failure.set(None);
                                 field_errors.write().source = None;
                             },
@@ -234,7 +228,6 @@ pub(super) fn AdminIntakeForm(world_id: String) -> Element {
                             value: equipment_json(),
                             oninput: move |event| {
                                 equipment_json.set(event.value());
-                                result.set(None);
                                 failure.set(None);
                                 field_errors.write().source = None;
                             },
@@ -264,7 +257,6 @@ pub(super) fn AdminIntakeForm(world_id: String) -> Element {
                         value: start_price(),
                         oninput: move |event| {
                             start_price.set(event.value());
-                            result.set(None);
                             failure.set(None);
                             field_errors.write().price = None;
                         },
@@ -292,7 +284,6 @@ pub(super) fn AdminIntakeForm(world_id: String) -> Element {
                         value: player_id(),
                         oninput: move |event| {
                             player_id.set(event.value());
-                            result.set(None);
                             failure.set(None);
                             field_errors.write().player = None;
                         },
@@ -316,11 +307,6 @@ pub(super) fn AdminIntakeForm(world_id: String) -> Element {
                     strong { {t!("admin-intake-error")} }
                     br {}
                     span { {admin_api_error_message(&code)} }
-                }
-            }
-            if let Some(value) = result() {
-                p { class: "action-feedback action-feedback--success", role: "status",
-                    {intake_result_message(&value)}
                 }
             }
         }

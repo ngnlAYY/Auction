@@ -86,17 +86,6 @@ pub(super) fn ActionSection(
                     }
                 }
             }
-            if let Some(feedback) = notice() {
-                p {
-                    class: if feedback.is_success() {
-                        "action-feedback action-feedback--success"
-                    } else {
-                        "action-feedback action-feedback--error"
-                    },
-                    role: if feedback.is_success() { "status" } else { "alert" },
-                    {feedback.message(t!("settlement-return-action-success"))}
-                }
-            }
             if let Some(pending) = confirming() {
                 ConfirmDialog { summary, pending, confirming, notice, refresh, loaded_generation }
             }

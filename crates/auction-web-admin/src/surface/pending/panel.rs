@@ -176,7 +176,12 @@ fn CommandReceipts(host: PendingCommandHost) -> Element {
     rsx! {
         div { class: "admin-command-notices__status", role: "status", aria_atomic: "false", aria_relevant: "additions text",
             for notice in visible.clone() {
-                p { key: "{notice.identity.command_id}", {receipt_message(&notice.identity, &notice.result)} }
+                p { key: "{notice.identity.command_id}",
+                    {receipt_message(&notice.identity, &notice.result)}
+                    if let Ok(Some(CommandReceipt::Text(message))) = &notice.result {
+                        " {message}"
+                    }
+                }
             }
         }
         if visible.clone().next().is_some() {

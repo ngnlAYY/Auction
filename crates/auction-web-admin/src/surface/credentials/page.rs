@@ -1,5 +1,8 @@
 //! 凭据页面的数据加载、删除编排和顶层布局。
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+use std::rc::Rc;
+
 use auction_web_shared::t;
 use auction_web_shared::{AsyncState, AsyncStateKind};
 use dioxus::prelude::*;
@@ -8,7 +11,11 @@ use super::super::admin_api_error_message;
 use super::super::query::use_page_query_state;
 use super::labels::CredentialFeedback;
 use super::{CredentialCreateForm, CredentialDeleteDialog, CredentialTable};
+#[cfg(all(test, not(target_arch = "wasm32")))]
+use crate::api::AdminCredentialPage;
 use crate::api::{AdminCredential, delete_admin_credential, fetch_admin_credentials};
+#[cfg(all(test, not(target_arch = "wasm32")))]
+use crate::surface::auctions::draft_page_tests::RecordRead;
 use crate::surface::pagination::{AdminPager, use_admin_pagination, use_versioned_admin_page};
 use crate::surface::pending::{
     CommandDelivery, CommandReceipt, PendingCommandPanel, set_if_alive, try_set_if_alive,
@@ -32,8 +39,12 @@ pub fn page() -> Element {
         pagination.clone(),
         reload_generation,
         move || *requested_page.read(),
-        |page, size| {
-            fetch_admin_credentials(String::new(), String::new(), String::new(), page, size)
+        |page, size| async move {
+            #[cfg(all(test, not(target_arch = "wasm32")))]
+            if let Some(reads) = try_consume_context::<Rc<RecordRead<AdminCredentialPage>>>() {
+                return reads.fetch().await;
+            }
+            fetch_admin_credentials(String::new(), String::new(), String::new(), page, size).await
         },
     );
 

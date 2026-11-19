@@ -337,6 +337,7 @@ admin-field-required = 請填寫此欄位。
 admin-field-max-utf8-bytes = 請輸入不超過 { $max } 個 UTF-8 位元組的內容。
 admin-field-no-control-characters = 請移除換行、定位字元等控制字元。
 admin-record-stale = 這筆記錄已被其他操作更新，本次變更未生效。
+admin-record-close = 關閉
 admin-record-close-and-refresh = 關閉並重新整理清單
 admin-record-refresh = 重新讀取記錄
 admin-record-refresh-loading = 正在重新讀取記錄……

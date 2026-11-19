@@ -171,7 +171,6 @@ pub(super) fn AdminUserTable(
     loaded_generation: u64,
     action_busy: Signal<bool>,
     action_feedback: Signal<Option<AdminActionFeedback>>,
-    create_notice: Signal<Option<String>>,
 ) -> Element {
     let is_empty = page.users.is_empty();
     let mut users = page.users;
@@ -235,20 +234,6 @@ pub(super) fn AdminUserTable(
                 title: t!("admin-users-no-results"),
                 detail: "",
             }
-        }
-        if let Some(feedback) = action_feedback() {
-            p {
-                class: if feedback.is_success() {
-                    "action-feedback action-feedback--success"
-                } else {
-                    "action-feedback action-feedback--error"
-                },
-                role: if feedback.is_success() { "status" } else { "alert" },
-                {feedback.message(t!("admin-users-updated"))}
-            }
-        }
-        if let Some(username) = create_notice() {
-            p { class: "action-feedback action-feedback--success", role: "status", {t!("admin-users-created", username: username)} }
         }
         Pager {
             pagination,

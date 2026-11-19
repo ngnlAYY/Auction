@@ -18,9 +18,7 @@ use super::{
 };
 use crate::api::{AdminCredential, AdminCredentialPage, mutate_admin_credential};
 use crate::surface::config::{FieldLiveRegion, use_field_announcer};
-use crate::surface::pending::{
-    CommandDelivery, CommandReceipt, PendingCommands, set_if_alive, try_set_if_alive,
-};
+use crate::surface::pending::{CommandDelivery, CommandReceipt, PendingCommands, set_if_alive};
 use crate::surface::sort::{MobileSortControl, SortDirection, SortableTh, sort_rows};
 
 #[component]
@@ -133,7 +131,7 @@ pub fn CredentialRow(
     let busy = use_signal(|| false);
     let feedback = use_signal(|| None::<CredentialFeedback>);
     let owner = use_context::<PendingCommands>();
-    // 保留当前行与回执，写操作必须等待了结后的新凭据版本。
+    // 重读期间的旧行只供展示，写操作必须等待新凭据版本。
     let read_is_current = move || reload_generation() == loaded_generation;
     let blocked = !read_is_current() || owner.contains(&format!("credential:{}", credential.id));
     let credential_for_rename_submit = credential.clone();
@@ -214,12 +212,8 @@ pub fn CredentialRow(
                     if let Some(feedback) = feedback() {
                         span {
                             id: feedback_id.clone(),
-                            class: if feedback.is_success() {
-                                "admin-credentials__feedback admin-credentials__feedback--success"
-                            } else {
-                                "admin-credentials__feedback admin-credentials__feedback--error"
-                            },
-                            role: if feedback.is_success() { "status" } else { "alert" },
+                            class: "admin-credentials__feedback admin-credentials__feedback--error",
+                            role: "alert",
                             aria_label: format!(
                                 "{}: {}",
                                 credential.label,
@@ -369,16 +363,12 @@ fn submit_credential(
             }
         },
         move |result, source_alive| {
-            let delivered = source_alive
-                && try_set_if_alive(
-                    feedback,
-                    Some(CredentialFeedback::Success { restart_required: result.restart_required }),
-                );
-            CommandDelivery::reported(delivered, || {
-                result
-                    .restart_required
-                    .then(|| CommandReceipt::Text(t!("admin-credentials-action-restart")))
-            })
+            if source_alive {
+                set_if_alive(feedback, None);
+            }
+            // 写入后的列表重读可能卸载这一行，重启提示必须随独立的命令回执保留。
+            let message = CredentialFeedback::Success { restart_required: result.restart_required };
+            CommandDelivery::Receipt(Some(CommandReceipt::Text(message.message())))
         },
         move |code| set_if_alive(feedback, Some(CredentialFeedback::Error(code))),
     );
@@ -413,13 +403,14 @@ mod tests {
     use dioxus_i18n::prelude::try_use_init_i18n_from_bundle;
 
     use super::{CredentialRenameDialog, CredentialRow, submit_credential};
-    use crate::api::AdminCredential;
+    use crate::api::{AdminCredential, AdminCredentialPage};
     use crate::surface::ADMIN_LOCALE_CATALOG;
     use crate::surface::auctions::draft_page_tests::{
         RecordRead, button, click_button, has_live_text, init_i18n, mount_writer, settle_writer,
     };
     use crate::surface::config::test_form::{dispatch, listener};
     use crate::surface::credentials::labels::CredentialFeedback;
+    use crate::surface::credentials::page::page;
     use crate::surface::pagination::{use_admin_pagination, use_versioned_admin_page};
     use crate::surface::pending::{
         PendingCommandHost, PendingCommandNotices, PendingCommands, use_pending_commands,
@@ -441,6 +432,59 @@ mod tests {
             rotated_at: None,
             updated_at: "2026-11-18T00:00:00Z".to_owned(),
         }
+    }
+
+    #[test]
+    fn credential_restart_receipt_survives_the_failed_list_read() {
+        let reads = Rc::new(RecordRead::<AdminCredentialPage>::new());
+        let write = Rc::new(RecordRead::new());
+        let (mut dom, _) = mount_writer({
+            let reads = reads.clone();
+            let write = write.clone();
+            move || {
+                init_i18n();
+                use_context_provider(|| reads.clone());
+                use_context_provider(|| CredentialReply(write.clone()));
+                let host = use_context::<PendingCommandHost>();
+                rsx! {
+                    PendingCommandNotices { host }
+                    {page()}
+                }
+            }
+        });
+        let projection = |credential| AdminCredentialPage {
+            credentials: vec![credential],
+            page: 1,
+            page_size: 10,
+            total: 1,
+            restart_required: false,
+        };
+        reads.respond(Ok(projection(credential())));
+        settle_writer(&mut dom);
+        click_button(&mut dom, "停用");
+        let mut accepted = credential();
+        accepted.status = "disabled".to_owned();
+        accepted.state_version = 2;
+        write.respond(Ok(AdminCredentialMutationResponse {
+            credential: accepted.clone(),
+            restart_required: true,
+        }));
+        settle_writer(&mut dom);
+        let receipt = "操作已完成。请重启 Worker 以应用凭据变更。";
+        assert!(has_live_text(&dom, receipt));
+        reads.respond_unavailable();
+        settle_writer(&mut dom);
+        assert!(button(&dom, "停用").is_none());
+        assert!(has_live_text(&dom, "所需服务暂时不可用。请稍后再试。"));
+        assert!(has_live_text(&dom, receipt));
+        assert!(button(&dom, "关闭回执").is_some());
+        click_button(&mut dom, "重试");
+        assert_eq!(reads.started(), 3);
+        assert_eq!(write.started(), 1);
+        reads.respond(Ok(projection(accepted)));
+        settle_writer(&mut dom);
+        assert!(button(&dom, "启用").is_some());
+        assert!(has_live_text(&dom, receipt));
     }
 
     #[test]
@@ -537,7 +581,7 @@ mod tests {
             }));
             settle_writer(&mut page);
             assert!(has_live_text(&page, "操作已完成。请重启 Worker 以应用凭据变更。"));
-            assert_eq!(button(&page, "关闭回执").is_some(), unload_row);
+            assert!(button(&page, "关闭回执").is_some());
         }
     }
 

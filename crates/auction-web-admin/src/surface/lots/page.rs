@@ -9,6 +9,7 @@ use super::super::auctions::use_draft_page;
 use super::super::query::use_lots_query_state;
 use super::super::router::Route;
 use super::edit::{AdminLotEditDialog, LotEdit};
+use super::presentation::lot_update_notice_label;
 use super::state::LotUpdateNotice;
 use crate::api::fetch_admin_lots;
 use crate::surface::pagination::use_admin_pagination;
@@ -105,6 +106,11 @@ fn AdminAuctionLotsPage(auction_id: String) -> Element {
     rsx! {
         if !pending_in_dialog {
             PendingCommandPanel { owner: pending }
+        }
+        div { role: "status",
+            if let Some(receipt) = notice() {
+                p { class: "action-feedback action-feedback--success", {lot_update_notice_label(receipt)} }
+            }
         }
         {content}
         if editing {

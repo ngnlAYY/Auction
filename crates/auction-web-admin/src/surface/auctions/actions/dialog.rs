@@ -204,7 +204,8 @@ pub(super) fn AdminAuctionActionDialog(
         && !blocked
         && !conflict
         && latest_version == Some(draft.target.state_version);
-    let on_close = move |()| close_edit_draft(pending, reload_generation, conflict);
+    let retry_after_close = read.retry_after_close(conflict);
+    let on_close = move |()| close_edit_draft(pending, reload_generation, retry_after_close);
     let action_reason_id = format!("action-reason-{auction_id}");
     let focus_id = action_reason_id.clone();
     let hint_id = format!("{action_reason_id}-hint");

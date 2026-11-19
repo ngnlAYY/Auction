@@ -2,6 +2,8 @@
 
 use auction_web_shared::{QueryState, use_query_state};
 
+#[cfg(test)]
+use super::super::realtime::use_test_history;
 use super::primitives::parse_poll_seconds_with_default;
 
 const DASHBOARD_KEYS: &[&str] = &["poll"];
@@ -12,16 +14,18 @@ pub(crate) struct DashboardQuery {
 }
 
 pub(crate) fn use_dashboard_query_state() -> QueryState<DashboardQuery> {
-    use_query_state(
-        DASHBOARD_KEYS,
-        |pairs| DashboardQuery {
-            // 仪表盘默认开启 30 秒自动轮询；显式 `poll=0` 才关闭。
-            poll_seconds: parse_poll_seconds_with_default(pairs, 30),
-        },
-        |query| {
-            // 仪表盘默认值也是 30 秒，因此必须显式写入当前值（含 0），否则关闭后刷新
-            // 会被解析回默认开启。
-            vec![("poll".to_owned(), query.poll_seconds.to_string())]
-        },
-    )
+    let query = use_query_state(DASHBOARD_KEYS, parse_query, query_pairs);
+    #[cfg(test)]
+    use_test_history(query.state, parse_query, query_pairs);
+    query
+}
+
+fn parse_query(pairs: &[(String, String)]) -> DashboardQuery {
+    // 显式 `poll=0` 才关闭默认轮询。
+    DashboardQuery { poll_seconds: parse_poll_seconds_with_default(pairs, 30) }
+}
+
+fn query_pairs(query: &DashboardQuery) -> Vec<(String, String)> {
+    // 也保存 0，避免刷新把关闭状态解析回默认开启。
+    vec![("poll".to_owned(), query.poll_seconds.to_string())]
 }

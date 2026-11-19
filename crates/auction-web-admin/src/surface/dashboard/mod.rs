@@ -25,7 +25,13 @@ pub(super) fn page() -> Element {
     });
     let dashboard = use_resource(move || {
         let generation = refresh();
-        async move { (generation, fetch_dashboard().await) }
+        async move {
+            #[cfg(test)]
+            if let Some(reads) = try_consume_context::<tests::DashboardReads>() {
+                return (generation, reads.fetch().await);
+            }
+            (generation, fetch_dashboard().await)
+        }
     });
     // 自动轮询开关与间隔入 URL（`poll` 键），默认 30 秒；页面隐藏时轮询挂起。
     // 轮询只重取当前快照，不额外写地址栏。
@@ -123,10 +129,30 @@ mod tests {
     use std::cell::Cell;
     use std::rc::Rc;
 
+    use auction_web_shared::t;
+    use dioxus::core::ScopeId;
     use dioxus::prelude::*;
 
-    use super::use_manual_refresh;
+    use super::{page, use_manual_refresh};
+    use crate::api::{AdminDashboardSnapshot, AdminMailPolling};
     use crate::surface::AdminReadinessResource;
+    use crate::surface::auctions::draft_page_tests::{
+        RecordRead, button, click_button, has_live_text, init_i18n, mount_writer_at, settle_writer,
+    };
+    use crate::surface::pending::{PendingCommandHost, PendingCommandNotices};
+
+    pub(super) type DashboardReads = Rc<RecordRead<AdminDashboardSnapshot>>;
+
+    #[derive(Clone, Debug, PartialEq, Routable)]
+    enum TestRoute {
+        #[route("/")]
+        Fixture {},
+    }
+
+    #[component]
+    fn Fixture() -> Element {
+        page()
+    }
 
     type RefreshHandles = (Signal<u64>, AdminReadinessResource, Callback<()>);
 
@@ -168,5 +194,76 @@ mod tests {
         dom.render_immediate_to_vec();
         assert_eq!(*refresh.peek(), 2);
         assert_eq!(readiness.peek().as_ref(), Some(&Ok(false)));
+    }
+
+    #[test]
+    fn dashboard_poll_receipt_survives_the_failed_aggregate_read() {
+        let reads = Rc::new(RecordRead::new());
+        let write = Rc::new(RecordRead::<AdminMailPolling>::new());
+        let (mut dom, _) = mount_writer_at("poll=0", {
+            let reads = reads.clone();
+            let write = write.clone();
+            move || {
+                init_i18n();
+                use_context_provider(|| reads.clone());
+                use_context_provider(|| write.clone());
+                let readiness: AdminReadinessResource = use_resource(|| async { Ok(true) });
+                use_context_provider(|| readiness);
+                let host = use_context::<PendingCommandHost>();
+                rsx! {
+                    PendingCommandNotices { host }
+                    Router::<TestRoute> {}
+                }
+            }
+        });
+        let mut polling = AdminMailPolling {
+            mailbox_key: "main".to_owned(),
+            paused: false,
+            state_version: 1,
+            consecutive_failures: 0,
+            last_poll_at: "2026-11-18T00:00:00Z".to_owned(),
+            next_poll_at: "2026-11-18T00:01:00Z".to_owned(),
+            updated_at: "2026-11-18T00:00:00Z".to_owned(),
+            diagnostics: None,
+        };
+        let dashboard = |polling: &AdminMailPolling| {
+            AdminDashboardSnapshot::test_fixture(|snapshot| {
+                snapshot["mail"] = serde_json::json!({
+                    "status": "ok",
+                    "observed_at": polling.updated_at,
+                    "data": { "observed_at": polling.updated_at, "pollers": [polling] },
+                });
+            })
+        };
+        reads.respond(Ok(dashboard(&polling)));
+        settle_writer(&mut dom);
+        let label = |action_key| {
+            dom.dom().in_scope(
+                ScopeId::APP,
+                || t!("dashboard-legacy-poller-action", action: t!(action_key), mailbox: "main"),
+            )
+        };
+        let pause = label("dashboard-legacy-pause-poll");
+        let resume = label("dashboard-legacy-resume-poll");
+        click_button(&mut dom, &pause);
+        polling.paused = true;
+        polling.state_version = 2;
+        write.respond(Ok(polling.clone()));
+        settle_writer(&mut dom);
+        let receipt = "轮询状态已更新。";
+        assert!(has_live_text(&dom, receipt));
+        reads.respond_unavailable();
+        settle_writer(&mut dom);
+        assert!(button(&dom, &pause).is_none());
+        assert!(has_live_text(&dom, "所需服务暂时不可用。请稍后再试。"));
+        assert!(has_live_text(&dom, receipt));
+        assert!(button(&dom, "关闭回执").is_some());
+        click_button(&mut dom, "重试");
+        assert_eq!(reads.started(), 3);
+        assert_eq!(write.started(), 1);
+        reads.respond(Ok(dashboard(&polling)));
+        settle_writer(&mut dom);
+        assert!(button(&dom, &resume).is_some());
+        assert!(has_live_text(&dom, receipt));
     }
 }

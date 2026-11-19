@@ -394,14 +394,17 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        PAUSE_REASON_ID, RuntimeSwitchCard, pause_refresh_millis, pause_state, reason_error_text,
+        ExternalAccessPauseControl, PAUSE_ENTITY, PAUSE_REASON_ID, PauseControlState,
+        RuntimeSwitchCard, pause_refresh_millis, pause_state, reason_error_text,
     };
     use crate::api::{AdminApiFailure, ExternalAccessPauseAttempt};
     use crate::surface::auctions::draft_page_tests::{
         RecordRead, assert_field, button, click_button, has_live_text, mount_writer, settle_writer,
         submit_button_disabled, writer_form,
     };
-    use crate::surface::pending::{PendingCommandHost, PendingCommandNotices};
+    use crate::surface::pending::{
+        PendingCommandHost, PendingCommandNotices, use_pending_commands,
+    };
     use crate::surface::realtime::{TestPage, text_attributes};
 
     pub(super) struct PauseRequests {
@@ -484,6 +487,44 @@ mod tests {
             .find_map(|(id, value)| (value == PAUSE_REASON_ID).then_some(id))
             .unwrap();
         (page, writer_form(&edits), reason)
+    }
+
+    #[test]
+    fn an_open_pause_confirmation_rejects_clicks_until_its_read_is_current() {
+        let requests = Rc::new(PauseRequests::new());
+        let (mut page, initial) = mount_writer({
+            let requests = requests.clone();
+            move || {
+                requests.install();
+                let mut command_refresh = use_signal(|| 0);
+                let mut loaded_generation = use_signal(|| 0);
+                let state = PauseControlState {
+                    pending: use_pending_commands(command_refresh, |entity| entity == PAUSE_ENTITY),
+                    confirmation: use_signal(|| None),
+                    hours: use_signal(|| 2),
+                    reason: use_signal(|| "演练".to_owned()),
+                    accepted: use_signal(|| false),
+                };
+                rsx! {
+                    button { onclick: move |_| command_refresh.set(1), {"开始命令后重读".to_owned()} }
+                    button { onclick: move |_| loaded_generation.set(1), {"完成命令后重读".to_owned()} }
+                    ExternalAccessPauseControl {
+                        state, revision: 7, paused: false, paused_until: None,
+                        command_refresh, loaded_generation: loaded_generation(),
+                    }
+                }
+            }
+        });
+        page.dispatch("submit", writer_form(&initial), "");
+        assert!(!button(&page, "确认").unwrap().1);
+        click_button(&mut page, "开始命令后重读");
+        let (confirm, disabled) = button(&page, "确认").unwrap();
+        page.dispatch("click", confirm, "");
+        assert!(requests.writes.borrow().is_empty());
+        assert!(disabled);
+        click_button(&mut page, "完成命令后重读");
+        click_button(&mut page, "确认");
+        assert_eq!(requests.writes.borrow().len(), 1);
     }
 
     #[test]

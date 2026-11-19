@@ -88,7 +88,8 @@ pub(super) fn AdminLotEditDialog(
             || read.version_changed(edit.base.state_version, latest_version));
     let can_submit =
         read.is_ready() && !frozen && !conflict && latest_version == Some(edit.base.state_version);
-    let on_close = move |()| close_edit_draft(draft, reload_generation, conflict);
+    let retry_after_close = read.retry_after_close(conflict);
+    let on_close = move |()| close_edit_draft(draft, reload_generation, retry_after_close);
     let reprice = edit.kind == LotDialog::Reprice;
     let code = edit.base.code.clone();
     let price_input_id = format!("price-{}", edit.lot_id());
@@ -271,6 +272,7 @@ mod tests {
     const EDITED_PRICE: &str = "777";
     const REPRICE: &str = "改起拍价";
     const CLOSE_AND_REFRESH: &str = "关闭并刷新列表";
+    const CLOSE_CONFLICT: &str = "关闭";
 
     struct LotsPageTest {
         reads: RecordRead<AdminLot>,
@@ -406,22 +408,19 @@ mod tests {
             assert!(!self.occupied());
             assert!(has_text(updates, "本次修改没有生效"));
             assert!(!has_live_text(&self.page, "保存"));
-            assert!(matches!(button(&self.page, CLOSE_AND_REFRESH), Some((_, false))));
             assert_field(&self.page, input, EDITED_PRICE, true);
         }
 
-        fn close_and_refresh(&mut self, close_label: &str, current: AdminLot) {
-            click_button(&mut self.page, close_label);
-            assert!(self.controls.draft.peek().is_none());
-            assert!(button(&self.page, CLOSE_AND_REFRESH).is_none());
-            assert_eq!(self.test.displayed_version.get(), Some(7));
-            assert!(
-                matches!(button(&self.page, REPRICE), Some((_, true))),
-                "{close_label}关闭后须重读列表"
-            );
+        fn close_after_conflict_read(&mut self, close_label: &str, current: AdminLot) {
+            assert_eq!(self.test.reads.started(), 2);
             let version = current.state_version;
             self.test.reads.respond(Ok(current));
             settle_writer(&mut self.page);
+            assert_eq!(self.test.displayed_version.get(), Some(version));
+            assert_eq!(self.test.reads.started(), 2);
+            click_button(&mut self.page, close_label);
+            assert!(self.controls.draft.peek().is_none());
+            assert_eq!(self.test.reads.started(), 2, "冲突后的读取已完成");
             assert_eq!(self.test.displayed_version.get(), Some(version));
         }
     }
@@ -459,7 +458,7 @@ mod tests {
 
     #[test]
     fn stale_price_closes_and_the_fresh_row_opens_a_new_draft() {
-        for close_label in [CLOSE_AND_REFRESH, DIALOG_TITLE_CLOSE] {
+        for close_label in [DIALOG_TITLE_CLOSE, CLOSE_CONFLICT] {
             price_close_scenario(close_label);
         }
     }
@@ -485,7 +484,7 @@ mod tests {
         test.submit(form);
         assert!(test.writes.take_writes().is_empty());
 
-        test.close_and_refresh(close_label, lot(8, 200, "pending"));
+        test.close_after_conflict_read(close_label, lot(8, 200, "pending"));
         let (new_form, new_input) = test.open_price("200");
         test.page.dispatch("input", new_input, "333");
         test.writes.reply_http(
@@ -512,9 +511,34 @@ mod tests {
         assert!(has_text(&rejected, "本次修改没有生效"));
         assert!(!test.occupied());
         assert_lot_request(&test.take_request(), 7, "withdraw", None);
-        test.close_and_refresh(CLOSE_AND_REFRESH, lot(8, 100, "withdrawn"));
+        assert_eq!(test.test.reads.started(), 2);
+        click_button(&mut test.page, DIALOG_TITLE_CLOSE);
+        assert!(test.controls.draft.peek().is_none());
+        assert_eq!(test.test.reads.started(), 2, "应等待已在途的读取");
+        assert!(matches!(button(&test.page, REPRICE), Some((_, true))));
+        test.test.reads.respond(Ok(lot(8, 100, "withdrawn")));
+        settle_writer(&mut test.page);
         assert!(button(&test.page, REPRICE).is_none());
         assert!(button(&test.page, "撤拍").is_none());
+    }
+
+    #[test]
+    fn closing_after_a_failed_conflict_read_requests_a_fresh_version() {
+        let mut test = LotCommandTest::mount();
+        let (form, _) = test.editing_price();
+        test.writes.reply_conflict("stale_lot_state");
+        test.submit(form);
+        test.test.reads.respond_unavailable();
+        settle_writer(&mut test.page);
+        assert_eq!(test.test.reads.started(), 2);
+        click_button(&mut test.page, CLOSE_AND_REFRESH);
+        assert!(test.controls.draft.peek().is_none());
+        assert_eq!(test.test.reads.started(), 3);
+        assert!(matches!(button(&test.page, REPRICE), Some((_, true))));
+        test.test.reads.respond(Ok(lot(8, 200, "pending")));
+        settle_writer(&mut test.page);
+        test.open_price("200");
+        assert_eq!(test.controls.draft.peek().as_ref().unwrap().base.state_version, 8);
     }
 
     #[test]

@@ -19,7 +19,7 @@ use crate::surface::pending::{PendingCommands, use_pending_commands};
 use crate::surface::realtime::{TestPage, text_attributes};
 
 const AUCTION_ID: &str = "20f99cb5-7b75-4853-bc49-9c71df78381c";
-const CLOSE_AND_REFRESH: &str = "关闭并刷新列表";
+const CLOSE_CONFLICT: &str = "关闭";
 const SCHEDULE: &str = "修改拍卖时间";
 const SAVE_SCHEDULE: &str = "保存拍卖时间";
 const END: &str = "schedule-scheduled_end_at";
@@ -160,26 +160,24 @@ impl AuctionCommandTest {
         submit_label: &str,
     ) {
         assert!(has_text(updates, "本次修改没有生效"));
-        assert!(matches!(button(&self.page, CLOSE_AND_REFRESH), Some((_, false))));
         assert!(!has_live_text(&self.page, submit_label));
         assert!(!self.test.owner.get().unwrap().contains(&format!("auction:{AUCTION_ID}")));
         assert_eq!(self.test.drafts.get().unwrap().auction_id().as_deref(), Some(AUCTION_ID));
         assert_field(&self.page, input, draft, true);
     }
 
-    fn close_and_refresh(&mut self, close_label: &str, entry: &str, latest: AdminAuction) {
-        click_button(&mut self.page, close_label);
-        assert!(self.test.drafts.get().unwrap().auction_id().is_none());
-        assert!(button(&self.page, CLOSE_AND_REFRESH).is_none());
-        assert_eq!(self.test.displayed_version.get(), Some(7));
-        assert!(
-            matches!(button(&self.page, entry), Some((_, true))),
-            "{close_label}关闭后须重读列表"
-        );
+    fn close_after_conflict_read(&mut self, close_label: &str, entry: &str, latest: AdminAuction) {
+        assert_eq!(self.test.reads.started(), 2);
         let version = latest.state_version;
         self.test.reads.respond(Ok(latest));
         settle_writer(&mut self.page);
         assert_eq!(self.test.displayed_version.get(), Some(version));
+        assert_eq!(self.test.reads.started(), 2);
+        click_button(&mut self.page, close_label);
+        assert!(self.test.drafts.get().unwrap().auction_id().is_none());
+        assert_eq!(self.test.reads.started(), 2, "冲突后的读取已完成");
+        assert_eq!(self.test.displayed_version.get(), Some(version));
+        assert!(matches!(button(&self.page, entry), Some((_, false))));
     }
 
     fn accept_new_command(&mut self, form: ElementId, response: AdminAuction) -> CapturedWrite {
@@ -246,7 +244,7 @@ fn assert_schedule_body(
 
 #[test]
 fn stale_schedule_closes_and_reopens_with_the_latest_schedule() {
-    for close_label in [CLOSE_AND_REFRESH, DIALOG_TITLE_CLOSE] {
+    for close_label in [DIALOG_TITLE_CLOSE, CLOSE_CONFLICT] {
         schedule_close_scenario(close_label);
     }
 }
@@ -270,7 +268,7 @@ fn schedule_close_scenario(close_label: &str) {
         scheduled_ends_at: Some("2099-04-01T13:30:00Z".to_owned()),
         ..auction()
     };
-    test.close_and_refresh(close_label, SCHEDULE, latest.clone());
+    test.close_after_conflict_read(close_label, SCHEDULE, latest.clone());
     let (new_form, new_input) = test.open(SCHEDULE, END, "2099-04-01T13:30");
     test.page.dispatch("input", new_input, "2099-04-01T15:00");
     let second = test.accept_new_command(
@@ -297,7 +295,7 @@ fn assert_cancel_body(request: &CapturedWrite, version: i64, reason: &str) {
 
 #[test]
 fn stale_lifecycle_confirmation_closes_and_reopens_with_a_blank_reason() {
-    for close_label in [CLOSE_AND_REFRESH, DIALOG_TITLE_CLOSE] {
+    for close_label in [DIALOG_TITLE_CLOSE, CLOSE_CONFLICT] {
         lifecycle_close_scenario(close_label);
     }
 }
@@ -313,7 +311,7 @@ fn lifecycle_close_scenario(close_label: &str) {
     test.assert_conflict(&updates, input, EDITED_REASON, CONFIRM_CANCEL);
 
     let latest = AdminAuction { state_version: 8, ..auction() };
-    test.close_and_refresh(close_label, CANCEL, latest.clone());
+    test.close_after_conflict_read(close_label, CANCEL, latest.clone());
     let (new_form, new_input) = test.open(CANCEL, REASON, "");
     let reason = "重新确认后的原因";
     test.page.dispatch("input", new_input, reason);

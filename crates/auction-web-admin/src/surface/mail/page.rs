@@ -1,5 +1,8 @@
 //! Admin 邮件页面加载、筛选和整体布局。
 
+#[cfg(test)]
+use std::rc::Rc;
+
 use auction_web_shared::t;
 use auction_web_shared::{AsyncState, AsyncStateKind, QueryState};
 use dioxus::prelude::*;
@@ -7,7 +10,11 @@ use dioxus::prelude::*;
 use super::super::deliveries::labels::action_feedback_message;
 use super::super::query::{MailQuery, use_mail_query_state};
 use super::super::{AdminActionFeedback, admin_api_error_message, admin_world_label};
+#[cfg(test)]
+use crate::api::{AdminMailIntakePage, AdminMailPolling};
 use crate::api::{fetch_mail_intake_detail, fetch_mail_intakes, fetch_mail_state};
+#[cfg(test)]
+use crate::surface::auctions::draft_page_tests::RecordRead;
 use crate::surface::pagination::{use_admin_page, use_admin_pagination};
 use crate::surface::pending::{PendingCommandPanel, use_pending_commands};
 
@@ -33,6 +40,12 @@ pub fn page() -> Element {
         let generation = polling_refresh();
         let mailbox = active_mailbox();
         async move {
+            #[cfg(test)]
+            if !mailbox.is_empty()
+                && let Some(reads) = try_consume_context::<Rc<RecordRead<AdminMailPolling>>>()
+            {
+                return (mailbox, generation, reads.fetch().await.map(Some));
+            }
             let result = if mailbox.is_empty() {
                 Ok(None)
             } else {
@@ -48,7 +61,13 @@ pub fn page() -> Element {
             let _ = refresh();
             requested_query()
         },
-        |(query, page), size| fetch_mail_intakes(query, page, size),
+        |(query, page), size| async move {
+            #[cfg(test)]
+            if let Some(intakes) = try_consume_context::<AdminMailIntakePage>() {
+                return Ok(intakes);
+            }
+            fetch_mail_intakes(query, page, size).await
+        },
     );
     let detail = use_resource(move || {
         let _ = refresh();
@@ -345,4 +364,87 @@ fn apply_mail_filter(
     next.page = 1;
     query.push(next);
     selected_intake.set(None);
+}
+
+#[cfg(test)]
+mod tests {
+    use std::rc::Rc;
+
+    use auction_contracts::AdminMailPaginationResponse;
+    use dioxus::core::Mutation;
+    use dioxus::prelude::*;
+
+    use super::page;
+    use crate::api::{AdminMailIntakePage, AdminMailPolling};
+    use crate::surface::auctions::draft_page_tests::{
+        RecordRead, button, click_button, has_live_text, init_i18n, mount_writer, settle_writer,
+        writer_form,
+    };
+    use crate::surface::mail::actions::PollingReply;
+    use crate::surface::pending::{PendingCommandHost, PendingCommandNotices};
+
+    #[test]
+    fn mail_poll_receipt_survives_the_failed_mailbox_read() {
+        let reads = Rc::new(RecordRead::new());
+        let write = Rc::new(RecordRead::new());
+        let (mut dom, edits) = mount_writer({
+            let reads = reads.clone();
+            let write = write.clone();
+            move || {
+                init_i18n();
+                use_context_provider(|| reads.clone());
+                use_context_provider(|| PollingReply(write.clone()));
+                use_context_provider(|| AdminMailIntakePage {
+                    intakes: Vec::new(),
+                    pagination: AdminMailPaginationResponse { page: 1, page_size: 10, total: 0 },
+                });
+                let host = use_context::<PendingCommandHost>();
+                rsx! {
+                    PendingCommandNotices { host }
+                    {page()}
+                }
+            }
+        });
+        let mailbox = edits
+            .iter()
+            .find_map(|edit| match edit {
+                Mutation::NewEventListener { name, id } if name == "input" => Some(*id),
+                _ => None,
+            })
+            .unwrap();
+        dom.dispatch("input", mailbox, "mail-a");
+        dom.dispatch("submit", writer_form(&edits), "");
+        let mut polling = AdminMailPolling {
+            mailbox_key: "mail-a".to_owned(),
+            paused: false,
+            state_version: 1,
+            consecutive_failures: 0,
+            last_poll_at: "2026-11-18T00:00:00Z".to_owned(),
+            next_poll_at: "2026-11-18T00:01:00Z".to_owned(),
+            updated_at: "2026-11-18T00:00:00Z".to_owned(),
+            diagnostics: None,
+        };
+        reads.respond(Ok(polling.clone()));
+        settle_writer(&mut dom);
+        click_button(&mut dom, "暂停轮询");
+        polling.paused = true;
+        polling.state_version = 2;
+        write.respond(Ok(polling.clone()));
+        settle_writer(&mut dom);
+        let receipt = "邮件轮询状态已更新。";
+        assert!(has_live_text(&dom, receipt));
+        reads.respond_unavailable();
+        settle_writer(&mut dom);
+        assert!(button(&dom, "暂停轮询").is_none());
+        assert!(has_live_text(&dom, "所需服务暂时不可用。请稍后再试。"));
+        assert!(has_live_text(&dom, receipt));
+        assert!(button(&dom, "关闭回执").is_some());
+        click_button(&mut dom, "重试");
+        assert_eq!(reads.started(), 3);
+        assert_eq!(write.started(), 1);
+        reads.respond(Ok(polling));
+        settle_writer(&mut dom);
+        assert!(button(&dom, "恢复轮询").is_some());
+        assert!(has_live_text(&dom, receipt));
+    }
 }

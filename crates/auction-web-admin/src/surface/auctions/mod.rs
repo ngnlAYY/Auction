@@ -31,7 +31,7 @@ pub(super) fn page() -> Element {
     // 世界筛选与分页跟地址栏双向同步：刷新、分享链接和浏览器前进/后退都能恢复视图。
     let query = use_auctions_query_state();
     let query_state = query.state;
-    let reload_generation = use_signal(|| 0_u64);
+    let mut reload_generation = use_signal(|| 0_u64);
     let pending = use_pending_commands(reload_generation, |entity| {
         entity == "create-auction"
             || entity.starts_with("auction:")
@@ -81,6 +81,7 @@ pub(super) fn page() -> Element {
             sort: query_state().sort,
             direction: query_state().direction,
             on_query_change: move |next: AuctionsQuery| on_query_change.push(next),
+            on_retry: move |_| reload_generation.set(reload_generation().saturating_add(1)),
             on_sort_change: move |(sort, direction)| {
                 let mut next = query_state();
                 next.sort = sort;

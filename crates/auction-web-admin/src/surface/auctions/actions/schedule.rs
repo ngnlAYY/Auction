@@ -42,7 +42,8 @@ pub(super) fn AdminAuctionScheduleDialog(
         && !blocked
         && !conflict
         && latest_version == Some(open_draft.state_version);
-    let on_close = move |()| close_edit_draft(draft, reload_generation, conflict);
+    let retry_after_close = read.retry_after_close(conflict);
+    let on_close = move |()| close_edit_draft(draft, reload_generation, retry_after_close);
     let auction_id = open_draft.auction_id.clone();
     rsx! {
         Dialog {

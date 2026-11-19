@@ -2,14 +2,17 @@
 //! 命令由认证会话持有，后台快照失败卸载控件时仍保留原参数与 UUID；
 //! 暂停冲突会刷新唯一 Dashboard 快照，但不会把 stale 结果伪装成成功。
 
+#[cfg(test)]
+use std::rc::Rc;
+
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use crate::api::{AdminMailPolling, set_mail_paused, trigger_mail_poll};
+#[cfg(test)]
+use crate::surface::auctions::draft_page_tests::RecordRead;
 use crate::surface::mail::{MAILBOX_ENTITY_PREFIX, mailbox_command_entity};
-use crate::surface::pending::{
-    CommandDelivery, CommandReceipt, PendingCommands, set_if_alive, try_set_if_alive,
-};
+use crate::surface::pending::{CommandDelivery, CommandReceipt, PendingCommands, set_if_alive};
 
 #[component]
 pub(super) fn MailPollerControls(
@@ -18,7 +21,6 @@ pub(super) fn MailPollerControls(
     loaded_generation: u64,
 ) -> Element {
     let owner = use_context::<PendingCommands>();
-    let mut notice = use_signal(|| None::<String>);
     let mut error_code = use_signal(|| None::<String>);
     // 暂停与恢复携带邮箱版本，快照被命令失效后先读同一邮箱的新版本。
     let read_is_current = move || refresh() == loaded_generation;
@@ -49,7 +51,6 @@ pub(super) fn MailPollerControls(
                         if owner.contains("mail-poll-trigger") {
                             return;
                         }
-                        notice.set(None);
                         error_code.set(None);
                         owner.submit_with_receipt(
                             "mail-poll-trigger".to_owned(),
@@ -58,8 +59,10 @@ pub(super) fn MailPollerControls(
                                 trigger_mail_poll(command_id).await.map_err(|error| error.code)
                             },
                             move |count, source_alive| {
-                                let message = t!("dashboard-legacy-poll-triggered", count: count);
-                                CommandDelivery::reported(source_alive && try_set_if_alive(notice, Some(message.clone())), || Some(CommandReceipt::Text(message)))
+                                if source_alive {
+                                    set_if_alive(error_code, None);
+                                }
+                                CommandDelivery::Receipt(Some(CommandReceipt::Text(t!("dashboard-legacy-poll-triggered", count: count))))
                             },
                             move |code| set_if_alive(error_code, Some(code)),
                         );
@@ -76,7 +79,6 @@ pub(super) fn MailPollerControls(
                             if !read_is_current() || owner.contains(&entity) || owner.contains_local(MAILBOX_ENTITY_PREFIX) {
                                 return;
                             }
-                            notice.set(None);
                             error_code.set(None);
                             let polling = polling.clone();
                             let desired_paused = !polling.paused;
@@ -87,6 +89,10 @@ pub(super) fn MailPollerControls(
                                 move |command_id| {
                                     let polling = polling.clone();
                                     async move {
+                                        #[cfg(test)]
+                                        if let Some(reply) = try_consume_context::<Rc<RecordRead<AdminMailPolling>>>() {
+                                            return reply.fetch().await;
+                                        }
                                         let result = set_mail_paused(command_id, polling, desired_paused).await;
                                         let mut refresh = refresh;
                                         if result.as_ref().is_err_and(crate::api::AdminApiFailure::is_conflict)
@@ -97,7 +103,13 @@ pub(super) fn MailPollerControls(
                                         result.map_err(|error| error.code)
                                     }
                                 },
-                                move |_, source_alive| CommandDelivery::reported(source_alive && try_set_if_alive(notice, Some(t!("dashboard-legacy-poll-updated"))), || None),
+                                move |_, source_alive| {
+                                    if source_alive {
+                                        set_if_alive(error_code, None);
+                                    }
+                                    // 聚合读取失败会卸载轮询控件，已接受的回执由会话交付。
+                                    CommandDelivery::Receipt(Some(CommandReceipt::Text(t!("dashboard-legacy-poll-updated"))))
+                                },
                                 move |code| set_if_alive(error_code, Some(code)),
                             );
                         },
@@ -109,9 +121,6 @@ pub(super) fn MailPollerControls(
                 p { class: "action-feedback action-feedback--error", role: "alert",
                     {super::super::admin_api_error_message(&code)}
                 }
-            }
-            if let Some(message) = notice() {
-                p { class: "action-feedback action-feedback--success", role: "status", "{message}" }
             }
         }
     }

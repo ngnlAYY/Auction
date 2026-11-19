@@ -10,7 +10,6 @@ use super::super::intake::AdminIntakeForm;
 use super::super::router::Route;
 use super::super::sort::{MobileSortControl, SortDirection, SortableTh, sort_rows};
 use super::edit::LotEdit;
-use super::presentation::lot_update_notice_label;
 use super::proxy::AdminProxyHistory;
 use super::row::AdminLotRow;
 use super::state::LotUpdateNotice;
@@ -45,11 +44,6 @@ pub(super) fn AdminLotTable(
             }
             p { class: "admin-auction-intro",
                 Link { to: Route::Auctions {}, {t!("admin-lots-back")} }
-            }
-            if let Some(notice) = notice() {
-                p { class: "action-feedback action-feedback--success", role: "status",
-                    {lot_update_notice_label(notice)}
-                }
             }
             section {
                 if matches!(page.auction.status.as_str(), "draft" | "preview")

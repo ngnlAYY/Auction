@@ -15,8 +15,8 @@ use crate::api::{
     DeliverySentProofResult, SentProofCommand, acknowledge_delivery, confirm_delivery_sent_proof,
     fetch_delivery_detail, valid_uuid,
 };
+use crate::surface::admin_api_error_message;
 use crate::surface::pending::{PendingCommandPanel, set_if_alive, use_pending_commands};
-use crate::surface::{AdminActionFeedback, admin_api_error_message};
 
 mod sections;
 
@@ -45,7 +45,7 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
     let occupied = commands.contains(&entity);
     let blocked_note = occupied.then_some("admin-delivery-command-occupied");
     let busy = commands.any_busy();
-    let mut notice = use_signal(|| None::<AdminActionFeedback>);
+    let mut action_error = use_signal(|| None::<String>);
     let mut sent_open = use_signal(|| false);
     let mut sent_submitted = use_signal(|| false);
     let acknowledge_reason = use_signal(String::new);
@@ -55,6 +55,8 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
         let revision = refresh();
         async move {
             let result = fetch_delivery_detail(delivery_id.clone()).await;
+            #[cfg(test)]
+            let result = tests::apply_detail_get_failure(result);
             (delivery_id, revision, result)
         }
     }));
@@ -79,7 +81,7 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
         if commands.any_busy() || commands.contains(&delivery_command_entity(&entity)) {
             return;
         }
-        notice.set(None);
+        action_error.set(None);
         sent_submitted.set(false);
         let submitted = commands.submit(
             delivery_command_entity(&entity),
@@ -90,7 +92,7 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
                 async move {
                     #[cfg(test)]
                     if let Some(requests) = try_consume_context::<tests::SentConfirmRequests>() {
-                        return requests.reject();
+                        return requests.fetch().await;
                     }
                     confirm_delivery_sent_proof(SentProofCommand {
                         command_id,
@@ -107,7 +109,6 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
                 }
             },
             move |_: DeliverySentProofResult| {
-                set_if_alive(notice, Some(AdminActionFeedback::Success));
                 set_if_alive(sent_open, false);
                 set_if_alive(sent_submitted, true);
             },
@@ -116,7 +117,7 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
                     let mut refresh = refresh;
                     refresh.set(refresh().saturating_add(1));
                 }
-                set_if_alive(notice, Some(AdminActionFeedback::Error(code)));
+                set_if_alive(action_error, Some(code));
             },
         );
         if submitted {
@@ -142,7 +143,7 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
         {
             return;
         }
-        notice.set(None);
+        action_error.set(None);
         commands.submit(
             delivery_command_entity(&entity),
             t!("delivery-detail-acknowledge-submit"),
@@ -172,7 +173,7 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
                     let mut refresh = refresh;
                     refresh.set(refresh().saturating_add(1));
                 }
-                set_if_alive(notice, Some(AdminActionFeedback::Error(code)));
+                set_if_alive(action_error, Some(code));
             },
         );
     };
@@ -236,7 +237,7 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
                             if commands.contains(&entity) || commands.any_busy() {
                                 return;
                             }
-                            notice.set(None);
+                            action_error.set(None);
                             sent_open.set(true);
                         },
                         {t!("delivery-detail-sent-proof-open")}
@@ -245,22 +246,6 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
                     p { class: "admin-panel__note", {t!("delivery-detail-sent-proof-no-evidence")} }
                 } else {
                     p { class: "admin-panel__note", {t!("delivery-detail-sent-proof-not-applicable")} }
-                }
-            }
-            if sent_submitted() {
-                p { class: "action-feedback action-feedback--success", role: "status",
-                    {t!("delivery-sent-proof-submitted")}
-                }
-            }
-            if let Some(feedback) = notice() {
-                p {
-                    class: if feedback.is_success() {
-                        "action-feedback action-feedback--success"
-                    } else {
-                        "action-feedback action-feedback--error"
-                    },
-                    role: if feedback.is_success() { "status" } else { "alert" },
-                    {feedback.message(t!("delivery-sent-proof-submitted"))}
                 }
             }
             if sent_open() {
@@ -273,7 +258,7 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
                     on_stale: move |_| {
                         // 预览已核对请求序号。关闭旧证据的对话框后，重开的入口只使用新详情。
                         sent_open.set(false);
-                        notice.set(Some(AdminActionFeedback::Error("stale_delivery_state".to_owned())));
+                        action_error.set(Some("stale_delivery_state".to_owned()));
                         let next = refresh.peek().saturating_add(1);
                         refresh.set(next);
                     },
@@ -330,9 +315,22 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
                     }
                 },
             }
-            if acknowledged() {
-                p { class: "action-feedback action-feedback--success", role: "status",
-                    {t!("delivery-detail-acknowledge-success")}
+            // 详情与证明入口随读取卸载，已接受的写入仍由投递页面交付。
+            div { role: "status",
+                if acknowledged() {
+                    p { class: "action-feedback action-feedback--success",
+                        {t!("delivery-detail-acknowledge-success")}
+                    }
+                }
+                if sent_submitted() {
+                    p { class: "action-feedback action-feedback--success",
+                        {t!("delivery-sent-proof-submitted")}
+                    }
+                }
+            }
+            if let Some(code) = action_error() {
+                p { class: "action-feedback action-feedback--error", role: "alert",
+                    {admin_api_error_message(&code)}
                 }
             }
             {acknowledge_entry}
@@ -343,12 +341,12 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::{Cell, RefCell};
+    use std::cell::RefCell;
     use std::future::ready;
     use std::rc::Rc;
 
     use auction_contracts::AdminDeliveryDetailWithActionsResponse;
-    use dioxus::core::Mutation;
+    use dioxus::core::{ElementId, Mutation};
     use dioxus::prelude::*;
     use gloo_net::http::Method;
     use serde_json::{Value, json};
@@ -356,12 +354,13 @@ mod tests {
     use super::DeliveryDetailPage;
     use crate::api::{AdminApiFailure, DeliveryDetailGetFixture, DeliverySentProofResult};
     use crate::surface::auctions::draft_page_tests::{
-        button, click_button, has_live_text, init_i18n, mount_writer, submit_button_disabled,
-        writer_form,
+        RecordRead, button, click_button, has_live_text, init_i18n, mount_writer, settle_writer,
+        submit_button_disabled, writer_form,
     };
     use crate::surface::deliveries::delivery_command_entity;
     use crate::surface::deliveries::sent_proof::use_preview_stub;
     use crate::surface::pending::use_pending_commands;
+    use crate::surface::realtime::TestPage;
 
     #[derive(Clone)]
     struct DetailFixture {
@@ -391,19 +390,26 @@ mod tests {
         });
     }
 
-    #[derive(Clone, Default)]
-    pub(super) struct SentConfirmRequests(Rc<Cell<usize>>);
-
-    impl SentConfirmRequests {
-        pub(super) fn reject(&self) -> Result<DeliverySentProofResult, String> {
-            self.0.set(self.0.get() + 1);
-            Err(AdminApiFailure::from_http_body(
-                429,
-                r#"{"code":"rate_limited","message":"请求过多","data":null,"request_id":null}"#,
-            )
-            .code)
-        }
+    #[derive(Clone)]
+    struct DetailGetFailure {
+        request_number: usize,
+        code: String,
     }
+
+    pub(super) fn apply_detail_get_failure(
+        result: Result<AdminDeliveryDetailWithActionsResponse, String>,
+    ) -> Result<AdminDeliveryDetailWithActionsResponse, String> {
+        // 详情夹具先登记实际 GET，再让指定的读取失败。
+        if let Some(failure) = try_consume_context::<DetailGetFailure>()
+            && let Some(fixture) = try_consume_context::<DetailFixture>()
+            && fixture.requests.borrow().len() == failure.request_number
+        {
+            return Err(failure.code);
+        }
+        result
+    }
+
+    pub(super) type SentConfirmRequests = Rc<RecordRead<DeliverySentProofResult>>;
 
     #[derive(Clone, Debug, PartialEq, Routable)]
     enum TestRoute {
@@ -417,19 +423,39 @@ mod tests {
         rsx! { DeliveryDetailPage { delivery_id: fixture.initial.detail.delivery.id } }
     }
 
-    #[test]
-    fn another_sources_pending_delivery_blocks_detail_entries_and_the_open_dialog() {
+    fn fixture() -> DetailFixture {
         let [mut projection, _, _]: [Value; 3] = serde_json::from_str(include_str!(
             "../../../../../auction-contracts/tests/fixtures/admin/delivery-sent-proof-detail.json"
         ))
         .unwrap();
         projection["data"]["actions"]["acknowledge"] = json!({"state":"eligible"});
-        let fixture = DetailFixture {
+        DetailFixture {
             initial: serde_json::from_value(projection["data"].take()).unwrap(),
             refreshed: None,
             requests: Rc::default(),
-        };
-        let confirms = SentConfirmRequests::default();
+        }
+    }
+
+    fn open_reviewed_proof(page: &mut TestPage) -> ElementId {
+        let opened = click_button(page, "打开人工 Sent 证明");
+        let mut inputs = opened.iter().filter_map(|edit| match edit {
+            Mutation::NewEventListener { name, id } if name == "input" => Some(*id),
+            _ => None,
+        });
+        page.dispatch("input", inputs.next().unwrap(), "Sample");
+        page.dispatch("input", inputs.next().unwrap(), "12345");
+        page.dispatch("input", inputs.next().unwrap(), "2026-11-02T01:14");
+        page.dispatch("input", inputs.next_back().unwrap(), "已核对 Sent 实见");
+        click_button(page, "预览准入");
+        assert!(has_live_text(page, "准入通过。确认时仍会重新核验快照。"));
+        assert_eq!(submit_button_disabled(page, "确认证明"), Some(false));
+        writer_form(&opened)
+    }
+
+    #[test]
+    fn another_sources_pending_delivery_blocks_detail_entries_and_the_open_dialog() {
+        let fixture = fixture();
+        let confirms = Rc::new(RecordRead::<DeliverySentProofResult>::new());
         let (mut page, edits) = mount_writer({
             let confirms = confirms.clone();
             move || {
@@ -460,31 +486,68 @@ mod tests {
             .unwrap();
         page.dispatch("input", reason, "已核对");
         assert!(!button(&page, "确认已处置").unwrap().1);
-        let opened = click_button(&mut page, "打开人工 Sent 证明");
-        let form = writer_form(&opened);
-        let mut inputs = opened.iter().filter_map(|edit| match edit {
-            Mutation::NewEventListener { name, id } if name == "input" => Some(*id),
-            _ => None,
-        });
-        page.dispatch("input", inputs.next().unwrap(), "Sample");
-        page.dispatch("input", inputs.next().unwrap(), "12345");
-        page.dispatch("input", inputs.next().unwrap(), "2026-11-02T01:14");
-        page.dispatch("input", inputs.next_back().unwrap(), "已核对 Sent 实见");
-        click_button(&mut page, "预览准入");
-        assert!(has_live_text(&page, "准入通过。确认时仍会重新核验快照。"));
-        assert_eq!(submit_button_disabled(&page, "确认证明"), Some(false));
+        let form = open_reviewed_proof(&mut page);
         click_button(&mut page, "列表提交同一投递");
         assert!(has_live_text(&page, "这条投递还有未了结的操作，请先在未决区核对。"));
         assert!(has_live_text(&page, "准入通过。确认时仍会重新核验快照。"));
         assert!(button(&page, "确认已处置").unwrap().1);
         assert_eq!(submit_button_disabled(&page, "确认证明"), Some(true));
         page.dispatch("submit", form, "");
-        assert_eq!(confirms.0.get(), 0);
+        assert_eq!(confirms.started(), 0);
         assert!(button(&page, "打开人工 Sent 证明").unwrap().1);
         click_button(&mut page, "取消");
         let (sent, _) = button(&page, "打开人工 Sent 证明").unwrap();
         page.dispatch("click", sent, "");
         assert!(submit_button_disabled(&page, "确认证明").is_none());
+    }
+
+    #[test]
+    fn sent_proof_receipt_survives_the_failed_delivery_read() {
+        let fixture = fixture();
+        let requests = fixture.requests.clone();
+        let delivery_id = fixture.initial.detail.delivery.id.clone();
+        let detail_url = format!("/api/v1/admin/deliveries/{delivery_id}?include=sent_proof");
+        let confirms = Rc::new(RecordRead::new());
+        let (mut page, _) = mount_writer({
+            let confirms = confirms.clone();
+            move || {
+                init_i18n();
+                use_preview_stub();
+                use_detail_fixture(&fixture);
+                use_context_provider(|| confirms.clone());
+                use_context_provider(|| {
+                    let failure = AdminApiFailure::from_http_body(
+                        503,
+                        r#"{"code":"storage_unavailable","message":"暂不可用","data":null,"request_id":null}"#,
+                    );
+                    DetailGetFailure { request_number: 2, code: failure.code }
+                });
+                rsx! { Router::<TestRoute> {} }
+            }
+        });
+        assert_eq!(requests.borrow().as_slice(), [detail_url.as_str()]);
+        let form = open_reviewed_proof(&mut page);
+        page.dispatch("submit", form, "");
+        assert_eq!(requests.borrow().as_slice(), [detail_url.as_str()]);
+        confirms.respond(Ok(DeliverySentProofResult {
+            command_id: uuid::Uuid::from_bytes([1; 16]).to_string(),
+            delivery_id,
+            external_reference: "mooglemail:main:send:7000001".to_owned(),
+            replayed: false,
+        }));
+        settle_writer(&mut page);
+        assert_eq!(requests.borrow().as_slice(), [detail_url.as_str(); 2]);
+        assert!(has_live_text(&page, "所需服务暂时不可用。请稍后再试。"));
+        let receipt = page.dom().in_scope(dioxus::core::ScopeId::APP, || {
+            auction_web_shared::t!("delivery-sent-proof-submitted")
+        });
+        assert!(has_live_text(&page, &receipt));
+        assert!(button(&page, "打开人工 Sent 证明").is_none());
+        click_button(&mut page, "重试");
+        assert_eq!(requests.borrow().as_slice(), [detail_url.as_str(); 3]);
+        assert_eq!(confirms.started(), 1);
+        assert!(!has_live_text(&page, "所需服务暂时不可用。请稍后再试。"));
+        assert!(has_live_text(&page, &receipt));
     }
 
     #[test]

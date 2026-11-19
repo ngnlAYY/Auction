@@ -254,20 +254,14 @@ pub(super) fn AdminRulesWorkspace(
                         AdminRulesPreview { draft: value.clone() }
                     }
 
-                    if let Some(current_notice) = notice() {
+                    if let Some(current_notice) = notice().filter(|notice| !matches!(notice, RuleNotice::Published)) {
                         p {
-                            class: if matches!(
-                                &current_notice,
-                                RuleNotice::Validated | RuleNotice::Published
-                            ) {
+                            class: if matches!(&current_notice, RuleNotice::Validated) {
                                 "admin-rules-ok"
                             } else {
                                 "admin-rules-error"
                             },
-                            role: if matches!(
-                                &current_notice,
-                                RuleNotice::Validated | RuleNotice::Published
-                            ) { "status" } else { "alert" },
+                            role: if matches!(&current_notice, RuleNotice::Validated) { "status" } else { "alert" },
                             {notice_text(&current_notice)}
                         }
                     }

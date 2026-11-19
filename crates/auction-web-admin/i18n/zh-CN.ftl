@@ -279,6 +279,7 @@ admin-field-required = 请填写此字段。
 admin-field-max-utf8-bytes = 请输入不超过 { $max } 个 UTF-8 字节的内容。
 admin-field-no-control-characters = 请删除换行、制表符等控制字符。
 admin-record-stale = 这条记录已被其他操作更新，本次修改没有生效。
+admin-record-close = 关闭
 admin-record-close-and-refresh = 关闭并刷新列表
 admin-record-refresh = 刷新记录
 admin-record-refresh-loading = 正在刷新记录……

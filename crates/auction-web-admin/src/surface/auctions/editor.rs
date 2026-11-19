@@ -24,6 +24,11 @@ impl DraftRead {
         matches!(self, Self::Ready)
     }
 
+    /// 冲突触发的读取已经在途或完成时，关闭只丢弃旧草稿。
+    pub(in crate::surface) const fn retry_after_close(&self, conflict: bool) -> bool {
+        conflict && matches!(self, Self::Failed(_))
+    }
+
     /// 冻结的版本只用于核对；列表换页而未找到实体不能证明其版本变化。
     pub(in crate::surface) fn version_changed(&self, opened: i64, latest: Option<i64>) -> bool {
         self.is_ready() && latest.is_some_and(|version| version != opened)
@@ -126,8 +131,10 @@ pub(in crate::surface) fn DraftRefreshButton(
     on_close: EventHandler<()>,
 ) -> Element {
     let loading = !conflict && read == DraftRead::Loading;
-    let label = if conflict {
+    let label = if read.retry_after_close(conflict) {
         t!("admin-record-close-and-refresh")
+    } else if conflict {
+        t!("admin-record-close")
     } else if matches!(read, DraftRead::Failed(_)) {
         t!("admin-retry")
     } else {
@@ -151,14 +158,14 @@ pub(in crate::surface) fn DraftRefreshButton(
     }
 }
 
-/// 关闭冲突草稿时使旧列表快照失效，避免下一份草稿沿用已知过期的版本。
+/// 冲突后的权威读取失败才在关闭时重试，未完成的读取继续约束新草稿。
 pub(in crate::surface) fn close_edit_draft<T: 'static>(
     mut draft: Signal<Option<T>>,
     mut reload: Signal<u64>,
-    conflict: bool,
+    retry: bool,
 ) {
     draft.set(None);
-    if conflict {
+    if retry {
         reload.set(reload().saturating_add(1));
     }
 }
@@ -196,7 +203,7 @@ pub(in crate::surface) fn focus_draft_field_after_render(_field_id: String) {
 
 #[cfg(test)]
 pub(in crate::surface) mod tests {
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
     use std::collections::VecDeque;
     use std::future::poll_fn;
     use std::rc::Rc;
@@ -229,8 +236,15 @@ pub(in crate::surface) mod tests {
     pub(in crate::surface) fn mount_writer(
         root: impl Fn() -> Element + 'static,
     ) -> (TestPage, Vec<Mutation>) {
+        mount_writer_at("", root)
+    }
+
+    pub(in crate::surface) fn mount_writer_at(
+        bookmark: &str,
+        root: impl Fn() -> Element + 'static,
+    ) -> (TestPage, Vec<Mutation>) {
         WRITE_ROOT.with(|slot| assert!(slot.replace(Some(Rc::new(root))).is_none()));
-        TestPage::mount(writer_root, "")
+        TestPage::mount(writer_root, bookmark)
     }
 
     fn writer_root() -> Element {
@@ -443,16 +457,22 @@ pub(in crate::surface) mod tests {
     }
 
     pub(in crate::surface) struct RecordRead<T> {
+        started: Cell<usize>,
         result: RefCell<Option<Result<T, String>>>,
         waiting: RefCell<Option<Waker>>,
     }
 
     impl<T> RecordRead<T> {
         pub(in crate::surface) fn new() -> Self {
-            Self { result: RefCell::new(None), waiting: RefCell::new(None) }
+            Self { started: Cell::new(0), result: RefCell::new(None), waiting: RefCell::new(None) }
+        }
+
+        pub(in crate::surface) fn started(&self) -> usize {
+            self.started.get()
         }
 
         pub(in crate::surface) async fn fetch(&self) -> Result<T, String> {
+            self.started.set(self.started.get() + 1);
             poll_fn(|context| {
                 if let Some(result) = self.result.borrow_mut().take() {
                     Poll::Ready(result)
@@ -467,6 +487,13 @@ pub(in crate::surface) mod tests {
         pub(in crate::surface) fn respond(&self, result: Result<T, String>) {
             assert!(self.result.replace(Some(result)).is_none());
             self.waiting.borrow_mut().take().expect("读取已启动").wake();
+        }
+
+        pub(in crate::surface) fn respond_unavailable(&self) {
+            self.respond(Err(AdminApiFailure::from_http_body(
+                503,
+                r#"{"code":"storage_unavailable","message":"暂不可用","data":null,"request_id":null}"#,
+            ).code));
         }
     }
 

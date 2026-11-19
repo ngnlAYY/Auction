@@ -279,6 +279,7 @@ admin-field-required = This field is required.
 admin-field-max-utf8-bytes = Enter no more than { $max } UTF-8 bytes.
 admin-field-no-control-characters = Remove control characters such as line breaks and tabs.
 admin-record-stale = Another operation updated this record. Your change was not applied.
+admin-record-close = Close
 admin-record-close-and-refresh = Close and refresh the list
 admin-record-refresh = Refresh record
 admin-record-refresh-loading = Refreshing record…

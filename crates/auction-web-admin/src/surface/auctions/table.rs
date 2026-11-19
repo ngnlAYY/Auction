@@ -28,6 +28,7 @@ pub(super) fn AdminAuctionTable(
     sort: String,
     direction: SortDirection,
     on_query_change: EventHandler<AuctionsQuery>,
+    on_retry: EventHandler<()>,
     on_sort_change: EventHandler<(String, SortDirection)>,
     notice: Signal<Option<AdminAuctionNotice>>,
 ) -> Element {
@@ -50,6 +51,8 @@ pub(super) fn AdminAuctionTable(
                 kind: AsyncStateKind::Error,
                 title: detail,
                 detail: "",
+                retry_label: t!("admin-retry"),
+                on_retry,
             }
         },
         Some(Ok(page)) => {

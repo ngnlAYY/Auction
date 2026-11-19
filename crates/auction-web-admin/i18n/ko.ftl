@@ -337,6 +337,7 @@ admin-field-required = 이 필드는 필수입니다.
 admin-field-max-utf8-bytes = UTF-8 기준 { $max }바이트 이내로 입력하세요.
 admin-field-no-control-characters = 줄 바꿈이나 탭과 같은 제어 문자를 제거하세요.
 admin-record-stale = 다른 작업에서 이 기록을 변경했습니다. 이번 변경 사항은 적용되지 않았습니다.
+admin-record-close = 닫기
 admin-record-close-and-refresh = 닫고 목록 새로고침
 admin-record-refresh = 기록 새로고침
 admin-record-refresh-loading = 기록을 새로 불러오는 중…
