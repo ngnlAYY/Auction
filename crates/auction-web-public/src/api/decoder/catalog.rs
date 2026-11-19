@@ -4,7 +4,7 @@ use auction_contracts::{
     AuctionListResponse, AuctionSummaryV2Response, CurrentAuctionResponse,
     PublicBidLogListResponse, PublicBlacklistResponse, PublicCompensationLotPageResponse,
     PublicCompensationResponse, PublicPriceHistoryListResponse, PublicRulesResponse,
-    WorldsResponse,
+    SettledAuctionSummaryResponse, WorldsResponse,
 };
 use auction_time::Timestamp;
 use auction_web_shared::valid_uuid;
@@ -13,9 +13,9 @@ use gloo_net::http::Response;
 use serde_json::{Map, Value};
 
 use super::{
-    account_nonempty, bool_value, decode_success, forum_post_url, game_url, int, nonempty,
-    nonnegative, object, optional_nonnegative, optional_time, positive, positive_page_size,
-    proxy_mode, raw_nonempty_str, revision, string, time,
+    account_nonempty, bool_value, decode_success, decode_success_text, forum_post_url, game_url,
+    int, nonempty, nonnegative, object, optional_nonnegative, optional_time, positive,
+    positive_page_size, proxy_mode, raw_nonempty_str, revision, string, time, world,
 };
 /// 解码世界目录；世界 ID 是动态 key，但每个 value 的字段闭集固定。
 pub(crate) async fn decode_worlds(response: Response) -> Result<WorldsResponse, String> {
@@ -29,6 +29,27 @@ pub(crate) async fn decode_current_auction(
     world: &str,
 ) -> Result<CurrentAuctionResponse, String> {
     decode_success(response, |value| valid_current_auction_response(value, world)).await
+}
+
+/// 解码已结算场次摘要并绑定请求 ID。
+pub(crate) fn decode_settled_auction_summary(
+    body: Option<&str>,
+    auction_id: &str,
+) -> Result<SettledAuctionSummaryResponse, String> {
+    decode_success_text(body, |value| {
+        let Some(summary) = object(value) else { return false };
+        json_keys_only(summary, &["id", "world", "sequence", "effective_end_at"], &[])
+            && string(summary.get("id")) == Some(auction_id)
+            && valid_uuid(auction_id)
+            && world(summary.get("world"))
+            && positive(summary.get("sequence"))
+            && summary.get("effective_end_at").is_some_and(|value| {
+                value.is_null()
+                    || string(Some(value)).is_some_and(|value| {
+                        value.ends_with('Z') && Timestamp::parse_from_rfc3339(value).is_ok()
+                    })
+            })
+    })
 }
 
 /// 解码拍卖目录编号页，并恢复旧浏览器对 status/world 查询条件的响应绑定。
@@ -530,8 +551,48 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        bid_log_order_key, valid_current_auction_response, valid_ordered_bid_log, valid_worlds,
+        bid_log_order_key, decode_settled_auction_summary, valid_current_auction_response,
+        valid_ordered_bid_log, valid_worlds,
     };
+
+    #[test]
+    fn settled_auction_summary_decodes_the_backend_fixture_and_rejects_invalid_projections() {
+        const AUCTION_ID: &str = "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b";
+        let body = include_str!(
+            "../../../../auction-contracts/tests/fixtures/public/auction-summary.json"
+        );
+        let summary = decode_settled_auction_summary(Some(body), AUCTION_ID).unwrap();
+        assert_eq!(summary.id, AUCTION_ID);
+        assert_eq!(summary.world, "main");
+        assert_eq!(summary.sequence, 5);
+        assert_eq!(summary.effective_end_at.as_deref(), Some("2025-11-17T09:46:40Z"));
+
+        let fixture: Value = serde_json::from_str(body).unwrap();
+        let decode = |payload: &Value| {
+            decode_settled_auction_summary(Some(&payload.to_string()), AUCTION_ID)
+        };
+        let mut nullable = fixture.clone();
+        nullable["data"]["effective_end_at"] = Value::Null;
+        assert_eq!(decode(&nullable).unwrap().effective_end_at, None);
+
+        for key in ["id", "world", "sequence", "effective_end_at"] {
+            let mut missing = fixture.clone();
+            missing["data"].as_object_mut().unwrap().remove(key);
+            assert_eq!(decode(&missing), Err("invalid_response".to_owned()), "{key}");
+        }
+        for (key, value) in [
+            ("status", json!("settled")),
+            ("world", json!("Main!")),
+            ("sequence", json!(0)),
+            ("id", json!("0190f2b4-1c2d-4e5f-8a6b-000000000000")),
+            ("effective_end_at", json!("2025-11-17")),
+            ("effective_end_at", json!("2025-11-17T09:46:40+01:00")),
+        ] {
+            let mut invalid = fixture.clone();
+            invalid["data"][key] = value;
+            assert_eq!(decode(&invalid), Err("invalid_response".to_owned()), "{key}");
+        }
+    }
 
     #[test]
     fn world_directory_requires_the_closed_projection() {

@@ -33,7 +33,7 @@ pub(crate) use build_hello::decode_build_hello;
 pub(crate) use catalog::{
     decode_auction_list, decode_auction_list_v2, decode_bid_log_page, decode_blacklist,
     decode_compensation_lots, decode_compensation_pool, decode_current_auction,
-    decode_price_history_page, decode_rules, decode_worlds,
+    decode_price_history_page, decode_rules, decode_settled_auction_summary, decode_worlds,
 };
 #[cfg(test)]
 pub(crate) use fulfillment::FULFILLMENT_STATUSES;
@@ -265,7 +265,6 @@ fn time_value(value: Option<&Value>) -> Option<f64> {
     }
 }
 
-#[cfg(any(test, target_arch = "wasm32"))]
 fn world(value: Option<&Value>) -> bool {
     string(value).is_some_and(|value| {
         !value.is_empty()

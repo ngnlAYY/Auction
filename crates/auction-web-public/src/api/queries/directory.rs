@@ -15,26 +15,10 @@ pub(super) async fn fetch_auction_page(
     page: i64,
     page_size: i64,
 ) -> Result<AuctionListPage, String> {
-    fetch_auction_page_with_ttl(world_id, status, page, page_size, swr_cache::CATALOG_TTL_MILLIS)
-        .await
-}
-
-/// lot 已结算但目录未见时，跳过浏览器端 SWR 新鲜期再核对近期结算场次。
-pub(super) async fn revalidate_recent_settled() -> Result<AuctionListPage, String> {
-    fetch_auction_page_with_ttl(None, "settled".to_owned(), 1, SUMMARY_PAGE_SIZE, 0).await
-}
-
-async fn fetch_auction_page_with_ttl(
-    world_id: Option<String>,
-    status: String,
-    page: i64,
-    page_size: i64,
-    ttl_millis: u64,
-) -> Result<AuctionListPage, String> {
     let world =
         world_id.as_deref().filter(|world| !world.is_empty() && *world != "all").map(str::to_owned);
     let url = auction_page_url("/api/v1/auctions", world.as_deref(), &status, page, page_size);
-    cached_public_get(&url, ttl_millis, move |response| async move {
+    cached_public_get(&url, swr_cache::CATALOG_TTL_MILLIS, move |response| async move {
         let decoded = decoder::decode_auction_list(response, world.as_deref(), &status).await?;
         bind_auction_page(decoded, page, page_size)
     })
