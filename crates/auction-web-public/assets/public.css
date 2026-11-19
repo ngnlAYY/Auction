@@ -944,6 +944,12 @@
   font: inherit;
 }
 
+/* 次要文字色区分占位与已输入值，显式不透明以满足字段底色上的对比度。 */
+:is(.public-auction-bid-log-toolbar, .public-fulfillment__toolbar, .public-history-primary-filters, .public-history-filter-cell) input::placeholder {
+  color: var(--color-text-muted);
+  opacity: 1;
+}
+
 .public-history-primary-filters input:focus-visible,
 .public-history-primary-filters select:focus-visible,
 .public-history-view-controls select:focus-visible,
@@ -1744,7 +1750,7 @@
   inline-size: 100%;
   min-block-size: var(--size-control-compact);
   padding-inline: var(--space-2);
-  border: var(--border-width) solid var(--color-border);
+  border: var(--border-width) solid var(--color-border-control);
   border-radius: var(--radius-sm);
   color: var(--color-text-muted);
   background: var(--color-surface-raised);
@@ -1974,7 +1980,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* 领先只用整行底色表达；左缘色条在拍卖目录里专指“已标记”，这里不再复用。 */
 .public-account-leading {
   background: color-mix(in srgb, var(--color-live) 12%, var(--color-surface));
 }
@@ -2350,10 +2355,24 @@
   background: color-mix(in srgb, var(--color-live) 8%, transparent);
 }
 
+/* 竖条挂在首格上并相对整行定位，避免在表格行里生成匿名单元格。 */
+:is(.public-account-leading, .public-auction-bid-log-leading, .public-auction-lot__leading) {
+  position: relative;
+}
+
+:is(.public-account-leading, .public-auction-bid-log-leading, .public-auction-lot__leading) > :first-child::after {
+  position: absolute;
+  inset-block: var(--space-1);
+  inset-inline-start: var(--border-width);
+  inline-size: var(--space-1);
+  box-shadow: inset 0 0 0 var(--space-1) var(--color-live);
+  pointer-events: none;
+  content: "";
+}
+
 @media (forced-colors: active) {
-  .public-auction-bid-log-table > tbody > .public-auction-bid-log-leading {
-    outline: calc(2 * var(--border-width)) solid CanvasText;
-    outline-offset: calc(-2 * var(--border-width));
+  :is(.public-account-leading, .public-auction-bid-log-leading, .public-auction-lot__leading) > :first-child::after {
+    border-inline-start: var(--space-1) solid CanvasText;
   }
 }
 
@@ -2582,6 +2601,9 @@
 }
 
 .public-lot-view[aria-busy="true"] {
+  /* 忙碌时仍可聚焦，图标与焦点环叠加透明度后仍需可辨。 */
+  color: var(--color-text);
+  outline-color: currentColor;
   cursor: progress;
   opacity: 0.55;
 }

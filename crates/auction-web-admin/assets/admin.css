@@ -8,9 +8,8 @@
   /* 危险按钮底色与错误文字色分离；白字在此深红底上的对比度约为 5.70:1。 */
   --color-text-on-danger: #fff;
   --color-danger-button: #b93838;
-  /* 表单控件中性灰边框/底色：沿用旧版管理端表单视觉契约，刻意区别于 base 蓝灰系
-     （--color-border-strong / --color-surface-raised），改动会破坏表单观感，admin 专属保留。 */
-  --color-input-border: #747474;
+  /* 管理端表单沿用中性灰边框；边界在控件内侧与面板一侧均需满足 3:1。 */
+  --color-input-border: #868686;
   --color-login-input-border: #858585;
   --color-input-bg: #3b3b3b;
   /* 状态徽章三色系：比 base 语义色（--color-success/--color-warning/--color-danger）更高明度，
@@ -56,6 +55,7 @@
 /* 浅色主题下的 admin 专属 token：位于 surface 层，必须在这里覆盖，base 的 foundation 层覆盖不到。
    输入框边框 #747474 / #858585 与危险按钮在浅色底上仍满足 3:1 与 4.5:1，沿用原值。 */
 :root[data-theme="light"] {
+  --color-input-border: #747474;
   --color-input-bg: #ffffff;
   --color-status-ok: #17733a;
   --color-status-warn: #895b00;
@@ -253,7 +253,7 @@
 
 .admin-login-card input:focus-visible {
   border-color: var(--color-accent);
-  outline: 2px solid var(--color-accent-muted);
+  outline: 2px solid var(--color-accent);
   outline-offset: 1px;
 }
 
@@ -2184,7 +2184,7 @@
 
 .admin-quick-link:focus-visible {
   border-color: var(--color-accent);
-  outline: 2px solid var(--color-accent-muted);
+  outline: 2px solid var(--color-accent);
   outline-offset: 1px;
   text-decoration: none;
 }
