@@ -36,6 +36,7 @@ const SOURCES = new Set(
     "../session/menu.tsx",
     "../router/index.tsx",
     "../router/route.ts",
+    "../pages/status.tsx",
     "../board/index.tsx",
     "../board/data.tsx",
     "../board/world.tsx",
@@ -163,28 +164,33 @@ const shellModule = `${NAMESPACE}:${resolve(import.meta.dir, "index.tsx")}`;
 const appModule = `${NAMESPACE}:${resolve(import.meta.dir, "../router/index.tsx")}`;
 const routeModule = `${NAMESPACE}:${resolve(import.meta.dir, "../router/route.ts")}`;
 
-/** 延迟生产详情分块的交付，独立于其他用例已加载的模块和路由缓存。 */
+/** 控制首次详情分块的交付，独立于其他用例已加载的模块和路由缓存。 */
 export async function deferLotPage() {
   const { PUBLIC_PAGES }: typeof import("../router/route") = await import(routeModule);
   const page = PUBLIC_PAGES.LotDetail;
   if (page?.kind !== "lazy") throw new Error("拍品详情必须经按需路由加载");
   const started = Promise.withResolvers<void>();
-  const release = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<boolean>();
+  let loadingStarted = false;
   Object.assign(PUBLIC_PAGES, {
     LotDetail: {
       kind: page.kind,
       async load() {
-        started.resolve();
-        await release.promise;
+        if (!loadingStarted) {
+          loadingStarted = true;
+          started.resolve();
+          if (!(await release.promise)) throw new Error("测试拒绝拍品路由分块");
+        }
         return page.load();
       },
     },
   });
   return {
     started: started.promise,
-    release: release.resolve,
+    release: () => release.resolve(true),
+    fail: () => release.resolve(false),
     restore() {
-      release.resolve();
+      release.resolve(true);
       Object.assign(PUBLIC_PAGES, { LotDetail: page });
     },
   };

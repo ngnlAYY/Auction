@@ -32,8 +32,8 @@ import { PublicRefreshGenerationContext, useBidRefresh } from "../../board/refre
 import { CatalogActionIcon } from "../actions";
 import type { CatalogDetailBid, DetailWorld } from ".";
 import { catalogDetailBidDefault } from ".";
-import type { LotViewRequest, LotViewTarget } from "./deep-link";
 import { CatalogDetailDrawer } from "./drawer";
+import type { LotViewRequest, LotViewTarget } from "./lot-view";
 
 /** 一次查看请求指向的拍品。`auctionId` 用于抽屉内的竞价历史读取；`world` 是入口已知的
  * 拍品所在世界，未知时价格历史按拍卖读取。仅供测试使用。 */

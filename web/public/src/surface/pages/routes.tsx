@@ -13,9 +13,9 @@ import { redirectPublicAlias } from "../query";
 import { BidLog as BidLogPage } from "../reads/bid-log";
 import { Fulfillment as FulfillmentPage } from "../reads/fulfillment";
 import { History as HistoryPage } from "../reads/history";
-import { page as realtimePage } from "../realtime";
 import { page as rulesPage } from "../rules";
 import { login as sessionLogin } from "../session/login";
+import { page as realtimePage } from "./status";
 
 const NIL_UUID = "00000000-0000-0000-0000-000000000000";
 

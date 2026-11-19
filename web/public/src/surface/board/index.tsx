@@ -29,13 +29,13 @@ import { fetchHistoricalAuction } from "../../api/queries/current";
 import { PublicCommandOwnerContext, PublicSessionResourceContext } from "..";
 import { CatalogProxyScope } from "../catalog/actions";
 import { CatalogCommandScope } from "../catalog/command-scope";
-import { disposeLotView, LotViewRequestContext } from "../catalog/detail/deep-link";
 import { CatalogDetailHost } from "../catalog/detail/drawer";
 import {
   LotDetailLookupContext,
   LotDetailLookupHost,
   useLotDetailLookup,
 } from "../catalog/detail/lookup";
+import { disposeLotView, LotViewRequestContext } from "../catalog/detail/lot-view";
 import { useContentLoading } from "../loading";
 import { usePublicPageBounds } from "../pagination/bounds";
 import {

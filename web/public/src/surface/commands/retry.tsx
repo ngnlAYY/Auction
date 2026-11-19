@@ -8,7 +8,7 @@ import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
 import { Show, useContext } from "solid-js";
 import { type CommandError, commandNotSent } from "../../api/commands";
-import { LotLinkLocationContext } from "../catalog/detail/deep-link";
+import { LotLinkLocationContext } from "../catalog/detail/lot-view";
 import { type CommandDialogOrigin, CompetitionCommandsContext } from "./host";
 import { bidErrorMessage, proxyErrorMessage } from "./pending";
 import {

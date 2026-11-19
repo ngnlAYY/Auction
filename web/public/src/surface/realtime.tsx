@@ -1,10 +1,7 @@
-//! Public 静态服务说明页。
-//! 旧版 `/status` 只说明 Public surface 的用途；健康检查和实时事件仍由机器 API 与页头连接
-//! 状态承担，不在这里重复暴露诊断表或建立第二条订阅。
+//! Public 顶栏的实时连接徽章文案与样式投影。
 
 import { unreachable } from "@auction/web-shared/result";
 import { t } from "@auction/web-shared/ui/i18n";
-import type { JSX } from "@solidjs/web";
 
 import type { PublicConnectionState } from "./board/realtime";
 
@@ -63,12 +60,4 @@ export function publicConnectionClass(state: PublicConnectionState): string {
     default:
       return unreachable(state);
   }
-}
-
-export function page(): JSX.Element {
-  return (
-    <section class="public-status-page" aria-label={t("page-status-title")}>
-      <p>{t("page-status-note")}</p>
-    </section>
-  );
 }

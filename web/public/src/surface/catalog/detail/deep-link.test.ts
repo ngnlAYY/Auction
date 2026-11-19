@@ -6,10 +6,10 @@ import { err, ok, type Result } from "@auction/web-shared/result";
 import type { CatalogRow } from "../../../api/model";
 import type { PublicBoardQuery } from "../../query";
 import { queryAuctionId } from "../../query";
-import type { LotViewTarget } from "./deep-link";
+import { disposeLotView, type LotViewTarget } from "./lot-view";
 
 const { publicBoardQueryDefault } = await import("../../query");
-const { catalogPage, catalogPosition, currentWorld, disposeLotView } = await import("./deep-link");
+const { catalogPage, catalogPosition, currentWorld } = await import("./deep-link");
 
 function target(): LotViewTarget {
   return {

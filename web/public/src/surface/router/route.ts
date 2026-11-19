@@ -76,8 +76,8 @@ const loadLogin: RoutePageLoader = () =>
       }),
   );
 const loadMe: RoutePageLoader = () => import("../account").then((module) => module.page);
-const loadAccount: RoutePageLoader = () =>
-  import("../query").then((module) => () => module.redirectPublicAlias("/me"));
+// 别名沿用异步路由交付，跳转使用入口已加载的查询模块。
+const loadAccount: RoutePageLoader = async () => () => redirectPublicAlias("/me");
 const loadRules: RoutePageLoader = () =>
   import("../rules").then((module) => () => module.page("rules"));
 const loadAbout: RoutePageLoader = () =>
@@ -85,10 +85,10 @@ const loadAbout: RoutePageLoader = () =>
 const loadBlacklist: RoutePageLoader = () => import("../blacklist").then((module) => module.page);
 const loadCompensationPool: RoutePageLoader = () =>
   import("../compensation").then((module) => module.poolPage);
-const loadCompensation: RoutePageLoader = () =>
-  import("../query").then((module) => () => module.redirectPublicAlias("/compensation-pool"));
+const loadCompensation: RoutePageLoader = async () => () =>
+  redirectPublicAlias("/compensation-pool");
 const loadForum: RoutePageLoader = () => import("../forum").then((module) => module.page);
-const loadStatus: RoutePageLoader = () => import("../realtime").then((module) => module.page);
+const loadStatus: RoutePageLoader = () => import("../pages/status").then((module) => module.page);
 const loadSettings: RoutePageLoader = () => import("../settings").then((module) => module.page);
 
 /** 拍品直达链接：UUID 解析成目录位置并打开详情抽屉，其余取值回到拍卖页。 */

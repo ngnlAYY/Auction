@@ -4,14 +4,14 @@
 // 目录里有这一行时由行自己打开抽屉（出价入口照常由行内操作栏投影），找不到时退回只读抽屉。
 
 import type { CurrentAuctionItemResponse } from "@auction/contracts/dto/public/catalog/auction";
-import { type Cell, createCell } from "@auction/web-shared/reactive/cell";
+import { createCell } from "@auction/web-shared/reactive/cell";
 import { createTaskResource } from "@auction/web-shared/reactive/resource";
 import { err, ok, type Result } from "@auction/web-shared/result";
-import { type RouteMatch, useRouter } from "@auction/web-shared/router";
+import { useRouter } from "@auction/web-shared/router";
 import { AsyncState } from "@auction/web-shared/ui/components/async-state";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
-import { createContext, createEffect, Match, Switch, untrack, useContext } from "solid-js";
+import { createEffect, Match, Switch, untrack, useContext } from "solid-js";
 
 import type { CatalogRow } from "../../../api/model";
 import { catalogRowFromDetail } from "../../../api/model";
@@ -27,71 +27,12 @@ import {
   publicHref,
 } from "../../query";
 import { catalogCategoryKey } from "../presentation";
-
-/** 一次直达请求携带已读详情，只有对齐后的目录行可以接管它。 */
-export interface LotViewTarget {
-  readonly lotId: string;
-  readonly auctionId: string;
-  readonly world: string | null;
-  readonly row: CatalogRow;
-  readonly refreshGeneration: number;
-  readonly rowReady: boolean;
-}
-
-/** 外壳内存中的直达请求，只能由解析后落到的看板历史条目消费一次。 */
-export interface LotViewRequest {
-  readonly entryKey: string;
-  readonly target: LotViewTarget;
-}
-
-/** 直达请求所在上下文；没有提供方时 useContext 会直接报错。 */
-export const LotViewRequestContext = createContext<Cell<LotViewRequest | null>>();
-
-/** “查看拍品”此次解析所用的冻结位置，只在外壳内存里交接。 */
-export interface LotLinkLocation {
-  readonly lotId: string;
-  readonly auctionId: string;
-  readonly world: string;
-  readonly route: RouteMatch;
-}
-
-/** 冻结位置绑定到发起解析的导航，允许同次解析失败后重试。 */
-export const LotLinkLocationContext = createContext<Cell<LotLinkLocation | null>>();
-
-/** 看板对直达请求的处置。 */
-export type LotViewDisposition =
-  /** 看板还没落到目标位置（世界仍在同步，或目录页尚未读出）：保留请求。 */
-  | "wait"
-  /** 目录当前页有这一行：交给行自己打开抽屉，出价与标记入口照常可用。 */
-  | "row"
-  /** 看板展示的不是这件拍品所在的场次，或这一页没有它：退回只读抽屉。 */
-  | "read_only";
-
-/** 判定当前看板如何处置直达请求。
- *
- * 仍在切换世界或等待对齐目录时留给看板；读取终止后没有对应行时复用已读详情。
- */
-export function disposeLotView(
-  target: LotViewTarget,
-  urlWorld: string,
-  displayed: { readonly world: string; readonly id: string } | null,
-  reading: boolean,
-  pageLots: Iterable<string>,
-): LotViewDisposition {
-  if (target.world === null) return "read_only";
-  if (target.world !== urlWorld || (displayed !== null && displayed.world !== urlWorld)) {
-    return reading ? "wait" : "read_only";
-  }
-  if (displayed !== null && displayed.id !== target.auctionId) {
-    return "read_only";
-  }
-  for (const lotId of pageLots) {
-    if (lotId === target.lotId) {
-      return "row";
-    }
-  }
-  return reading ? "wait" : "read_only";
-}
+import {
+  type LotLinkLocation,
+  LotLinkLocationContext,
+  LotViewRequestContext,
+  type LotViewTarget,
+} from "./lot-view";
 
 /** 读出拍品所在位置后跳到看板；临时失败时允许在原解析范围内重试。 */
 export function LotDeepLink(props: { readonly lotId: string }): JSX.Element {

@@ -31,7 +31,7 @@ import {
 } from "../board/realtime";
 import { createPublicBidRefresh, refreshPublicReads } from "../board/refresh";
 import { createWorldSwitch } from "../board/world";
-import type { LotLinkLocation, LotViewRequest } from "../catalog/detail/deep-link";
+import type { LotLinkLocation, LotViewRequest } from "../catalog/detail/lot-view";
 import { PublicSessionView, type PublicSessionView as PublicSessionViewType } from "../index";
 import {
   InitialPublicLocationContext,

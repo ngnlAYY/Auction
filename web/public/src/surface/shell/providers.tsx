@@ -22,7 +22,7 @@ import {
   LotLinkLocationContext,
   type LotViewRequest,
   LotViewRequestContext,
-} from "../catalog/detail/deep-link";
+} from "../catalog/detail/lot-view";
 import {
   CatalogProxySnapshotsContext,
   type createCatalogProxySnapshots,

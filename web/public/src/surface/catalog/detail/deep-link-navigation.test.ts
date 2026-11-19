@@ -121,6 +121,63 @@ test("普通深链从空看板交给只读抽屉", async () => {
   }
 });
 
+test("首次打开拍品深链时，延迟交付的页面通过外壳上下文打开看板抽屉", async () => {
+  const chunk = await deferLotPage();
+  try {
+    const href = `/lots/${LOT_ID}`;
+    const page = await mountCompetition("main", false, { href });
+    try {
+      await chunk.started;
+      expect(page.reads).not.toContain(`/api/v1/lots/${LOT_ID}`);
+
+      chunk.release();
+      await openedDrawer(page, "Legendary Cotton Robe");
+      expect(page.location.pathname).toBe("/");
+      expect(page.reads.filter((path) => path === `/api/v1/lots/${LOT_ID}`)).toHaveLength(1);
+    } finally {
+      page.dispose();
+    }
+  } finally {
+    chunk.restore();
+  }
+});
+
+test("拍品分块加载失败后尝试重载目标地址，返回重进可重新加载", async () => {
+  const page = await mountCompetition("main", false, { href: "/status" });
+  const chunk = await deferLotPage();
+  try {
+    const session = new Map<string, string>();
+    Object.assign(window, {
+      sessionStorage: {
+        getItem: (key: string) => session.get(key) ?? null,
+        setItem: (key: string, value: string) => session.set(key, value),
+      },
+    });
+    const reloads: string[] = [];
+    Object.assign(window.location, { reload: () => reloads.push(window.location.pathname) });
+    const status = () => page.find((element) => hasClass(element, "public-status-page"));
+    await waitFor(() => status() !== null);
+
+    const href = `/lots/${LOT_ID}`;
+    page.go(href);
+    await chunk.started;
+    chunk.fail();
+    await waitFor(() => reloads.length !== 0);
+    expect(reloads).toEqual([href]);
+    expect(status()).toBeNull();
+    expect(page.reads).not.toContain(`/api/v1/lots/${LOT_ID}`);
+
+    page.back();
+    await waitFor(() => status() !== null);
+    page.forward();
+    await openedDrawer(page, "Legendary Cotton Robe");
+    expect(reloads).toEqual([href]);
+  } finally {
+    chunk.restore();
+    page.dispose();
+  }
+});
+
 test.each([404, 410])("真实 HTTP %s 在普通直达和提示入口都显示拍品不存在", async (status) => {
   const page = await mountCompetition();
   try {

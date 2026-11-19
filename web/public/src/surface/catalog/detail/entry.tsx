@@ -16,7 +16,7 @@ import { CommandDialogContext } from "../command-scope";
 import { isActivationKey } from "../presentation";
 import type { CatalogDetailBidSlot, CatalogDetailInput } from ".";
 import { CatalogDetailDialogContext, catalogDetailBidDefault } from ".";
-import { LotViewRequestContext } from "./deep-link";
+import { LotViewRequestContext } from "./lot-view";
 
 /** 行本身与行内自带交互的区域。事件目标向上最近的匹配项是行时，事件才属于“整行”；
  * 操作栏整体算控件区，图标之间的空隙点偏了也不会改成打开抽屉。 */
