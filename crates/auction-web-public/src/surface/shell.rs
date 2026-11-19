@@ -18,12 +18,12 @@ use super::{
     PublicRealtimeTarget, PublicSessionView, TickerCountdown, WorldPicker, auction_status_label,
     prefetch_board_lots, presentation, public_auction_home_href, public_auction_home_query,
     public_connection_state, read_public_query, realtime, refresh_public_reads,
-    remember_current_auction, session, set_public_query, ticker_auction, ticker_countdown,
-    use_public_query_state, world_label,
+    remember_current_auction, session, set_public_query, supported_worlds, ticker_auction,
+    ticker_countdown, use_public_query_state, world_label,
 };
 #[cfg(target_arch = "wasm32")]
 use crate::api::SessionRefreshReason;
-use crate::api::{CurrentAuction, fetch_current_auction, fetch_public_readiness};
+use crate::api::{CurrentAuction, Worlds, fetch_current_auction, fetch_public_readiness};
 
 /// 权威数据轮询的基础间隔（页面可见时间）。
 #[cfg(target_arch = "wasm32")]
@@ -31,6 +31,27 @@ const AUTHORITATIVE_POLL_MILLIS: u32 = 60_000;
 /// 实时连接正常时连续跳过的轮数；4 轮跳过加 1 轮刷新，即约每 5 分钟兜底一次。
 #[cfg(target_arch = "wasm32")]
 const LIVE_POLL_SKIPPED_ROUNDS: u32 = 4;
+
+/// 外壳共享的最近一次成功世界目录。顶栏与挂载页面各自选择适用的投影。
+#[derive(Clone, Copy)]
+pub(super) struct WorldCatalog(pub(super) Signal<Option<Worlds>>);
+
+impl WorldCatalog {
+    /// 启动时尚无服务端确认的目录。
+    pub(super) fn new() -> Self {
+        Self(Signal::new(None))
+    }
+}
+
+/// 历史筛选可使用目录内的停用世界。首次成功前保留可修正链接的本地选项。
+pub(super) fn use_history_world_options() -> Vec<String> {
+    let catalog = use_context::<WorldCatalog>();
+    catalog
+        .0
+        .read()
+        .as_ref()
+        .map_or_else(|| vec!["main".to_owned(), "isekai".to_owned()], supported_worlds)
+}
 
 #[component]
 pub(crate) fn PublicShell() -> Element {
@@ -100,6 +121,8 @@ pub(crate) fn PublicShell() -> Element {
     // 页面可见性在轮询与实时重连退避之间共享；隐藏时全部挂起（不重置周期），
     // 恢复可见时立即补偿一次刷新并恢复各自节奏。
     let page_visibility = use_hook(PageVisibility::new);
+    use_context_provider(WorldCatalog::new)
+        .use_revalidation(visibility_generation, page_visibility.clone());
     // readiness 只在启动门禁与页面恢复可见时读取一次；持续连接状态由 realtime WS
     // 与各 API 的失败反馈承担，不按固定周期轮询 `/health/ready`。
     #[cfg(target_arch = "wasm32")]
@@ -449,7 +472,7 @@ pub(crate) fn PublicShell() -> Element {
                     // 世界、语言与主题切换匿名访客同样可用；语言与主题只写本地偏好
                     // （hv.lang / hv.theme），不依赖会话。手机上随导航菜单一起展开。
                     div { class: "public-shell__preferences",
-                        WorldPicker { selected_world, visibility_generation }
+                        WorldPicker { selected_world }
                         LanguagePicker {
                             label: t!("language-label"),
                             catalog: &PUBLIC_LOCALE_CATALOG,

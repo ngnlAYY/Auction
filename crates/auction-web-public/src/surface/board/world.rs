@@ -10,6 +10,7 @@ use dioxus::prelude::*;
 
 use crate::api::{WorldStatus, Worlds, revalidate_worlds};
 use crate::surface::router::Route;
+use crate::surface::shell::WorldCatalog;
 use crate::surface::{
     AuctionParameter, AuctionSelection, PublicBoardQuery, QueryCommit, commit_auction_selection,
     commit_public_query_pairs, public_auction_home_query, read_public_query,
@@ -23,10 +24,7 @@ const WORLD_DIRECTORY_TTL_MILLIS: u32 = 300_000;
 /// URL 写回经外壳共享的 query hook 状态信号（context），保证 hook 缓存与地址栏一致，
 /// 浏览器前进/后退时 hook 的相等判断才能正确触发恢复。
 #[component]
-pub(crate) fn WorldPicker(
-    mut selected_world: Signal<String>,
-    visibility_generation: Signal<u64>,
-) -> Element {
+pub(crate) fn WorldPicker(mut selected_world: Signal<String>) -> Element {
     let route = use_route::<Route>();
     let history_owns_world_filter = matches!(
         &route,
@@ -36,9 +34,9 @@ pub(crate) fn WorldPicker(
     let shell_query_state = use_context::<Signal<PublicBoardQuery>>();
     let historical_url = history_owns_world_filter
         || has_auction_target(shell_query_state.read().auction_parameter());
-    let worlds = use_world_catalog(visibility_generation);
-    let (mut options, worlds_loaded) = match &*worlds.read_unchecked() {
-        Some(options) => (options.clone(), true),
+    let worlds = use_context::<WorldCatalog>().0;
+    let (mut options, worlds_loaded) = match &*worlds.read() {
+        Some(worlds) => (header_worlds(worlds), true),
         _ => (vec!["main".to_owned(), "isekai".to_owned()], false),
     };
     let current = selected_world();
@@ -148,41 +146,48 @@ impl WorldRead {
     }
 }
 
-fn use_world_catalog(visibility_generation: Signal<u64>) -> Signal<Option<Vec<String>>> {
-    let mut options = use_signal(|| None);
-    let worlds = use_resource(move || async move {
-        let read = read_world_catalog().await;
-        let succeeded = read.is_ok();
-        if let Ok(worlds) = read {
-            // 暂时失败保留上次确认的选项，目录快照不会授权读写关闭世界。
-            options.set(Some(header_worlds(&worlds)));
-        }
-        WorldRead { checked_at: world_catalog_now(), succeeded }
-    });
-    let visibility = use_context::<PageVisibility>();
-    #[cfg(any(target_arch = "wasm32", test))]
-    let timer_visibility = visibility.clone();
-    use_effect(move || {
-        if visibility_generation() != 0 {
-            revalidate_on_resume(worlds, world_catalog_now(), visibility.is_visible());
-        }
-    });
-    #[cfg(any(target_arch = "wasm32", test))]
-    use_resource(move || {
-        let read = *worlds.read();
-        let visibility = timer_visibility.clone();
-        async move {
-            let Some(read) = read else { return };
-            wait_for_world_revalidation().await;
-            // 隐藏期间到期时保留这次唤醒，恢复可见不依赖墙钟再次判断过期。
-            visibility.wait_until_visible().await;
-            if *worlds.peek() == Some(read) {
-                // 定时器已走完一个周期，墙钟回拨不能取消本轮请求及后续计时。
-                restart_while_visible(worlds, visibility.is_visible());
+impl WorldCatalog {
+    /// 外壳从启动起读取目录，并在到期或恢复可见时再验证。
+    pub(in crate::surface) fn use_revalidation(
+        self,
+        visibility_generation: Signal<u64>,
+        visibility: PageVisibility,
+    ) {
+        let mut snapshot = self.0;
+        let worlds = use_resource(move || async move {
+            let read = read_world_catalog().await;
+            let succeeded = read.is_ok();
+            // 失败时保留最近确认的原始目录。恢复只发布给当前订阅者，不捕获页面实例。
+            if let Ok(worlds) = read
+                && snapshot.peek().as_ref() != Some(&worlds)
+            {
+                snapshot.set(Some(worlds));
             }
-        }
-    });
-    options
+            WorldRead { checked_at: world_catalog_now(), succeeded }
+        });
+        #[cfg(any(target_arch = "wasm32", test))]
+        let timer_visibility = visibility.clone();
+        use_effect(move || {
+            if visibility_generation() != 0 {
+                revalidate_on_resume(worlds, world_catalog_now(), visibility.is_visible());
+            }
+        });
+        #[cfg(any(target_arch = "wasm32", test))]
+        use_resource(move || {
+            let read = *worlds.read();
+            let visibility = timer_visibility.clone();
+            async move {
+                let Some(read) = read else { return };
+                wait_for_world_revalidation().await;
+                // 隐藏期间到期时保留这次唤醒，恢复可见不依赖墙钟再次判断过期。
+                visibility.wait_until_visible().await;
+                if *worlds.peek() == Some(read) {
+                    // 定时器已走完一个周期，墙钟回拨不能取消本轮请求及后续计时。
+                    restart_while_visible(worlds, visibility.is_visible());
+                }
+            }
+        });
+    }
 }
 
 fn world_catalog_now() -> Timestamp {
@@ -219,7 +224,7 @@ fn restart_while_visible(mut worlds: Resource<WorldRead>, visible: bool) {
 async fn read_world_catalog() -> Result<Worlds, String> {
     #[cfg(test)]
     if let Some(fixture) = try_consume_context::<Rc<tests::CatalogTimerFixture>>() {
-        return Ok(fixture.read());
+        return fixture.read().await;
     }
     revalidate_worlds().await
 }
@@ -293,14 +298,21 @@ pub(super) mod tests {
     use dioxus::prelude::*;
 
     use super::{
-        AuctionParameter, PublicBoardQuery, WorldRead, has_auction_target, restart_while_visible,
-        revalidate_on_resume, use_world_catalog, world_switch_query,
+        AuctionParameter, PublicBoardQuery, WorldRead, has_auction_target, header_worlds,
+        restart_while_visible, revalidate_on_resume, world_switch_query,
     };
     use crate::api::{WorldStatus, Worlds};
+    use crate::surface::reads::tests::select_values;
+    use crate::surface::reads::{bid_log, fulfillment};
+    use crate::surface::shell::WorldCatalog;
+    use crate::surface::{PageBrowserFixture, PageReadFixture, page_test_contexts, settle_page};
 
     pub(in crate::surface::board) struct CatalogTimerFixture {
         pub(super) now: Cell<Timestamp>,
         enabled_world: &'static str,
+        next_read: Cell<Option<Result<Worlds, String>>>,
+        pause_read: Cell<bool>,
+        reading: Cell<Option<Waker>>,
         calls: Cell<usize>,
         elapsed: Cell<u64>,
         timer: RefCell<Option<Waker>>,
@@ -311,17 +323,31 @@ pub(super) mod tests {
             Self {
                 now: Cell::new(now),
                 enabled_world,
+                next_read: Cell::new(None),
+                pause_read: Cell::new(false),
+                reading: Cell::new(None),
                 calls: Cell::new(0),
                 elapsed: Cell::new(0),
                 timer: RefCell::default(),
             }
         }
 
-        pub(super) fn read(&self) -> Worlds {
+        pub(super) async fn read(&self) -> Result<Worlds, String> {
             self.calls.update(|n| n + 1);
-            Worlds {
-                worlds: [(self.enabled_world.to_owned(), WorldStatus { enabled: true })].into(),
-            }
+            poll_fn(|context| {
+                if self.pause_read.get() {
+                    self.reading.set(Some(context.waker().clone()));
+                    Poll::Pending
+                } else {
+                    Poll::Ready(())
+                }
+            })
+            .await;
+            self.next_read.take().unwrap_or_else(|| {
+                Ok(Worlds {
+                    worlds: [(self.enabled_world.to_owned(), WorldStatus { enabled: true })].into(),
+                })
+            })
         }
 
         pub(super) async fn wait(&self) {
@@ -346,9 +372,9 @@ pub(super) mod tests {
 
     #[component]
     fn CatalogTimerHarness() -> Element {
-        use_context_provider(PageVisibility::new);
         let visible_generation = use_signal(|| 0);
-        use_world_catalog(visible_generation);
+        let visibility = use_hook(PageVisibility::new);
+        use_context_provider(WorldCatalog::new).use_revalidation(visible_generation, visibility);
         rsx! {}
     }
 
@@ -372,6 +398,86 @@ pub(super) mod tests {
         fixture.fire_at(timestamp(595));
         settle(&mut dom);
         assert_eq!(fixture.calls.get(), 3, "下一轮计时仍在运行");
+    }
+
+    type ActiveReadPage = Rc<Cell<Option<Signal<bool>>>>;
+
+    #[component]
+    fn ReadPageCatalogHarness() -> Element {
+        page_test_contexts();
+        let visible_generation = use_signal(|| 0);
+        let visibility = use_hook(PageVisibility::new);
+        use_context_provider(WorldCatalog::new).use_revalidation(visible_generation, visibility);
+        let show_fulfillment = use_signal(|| false);
+        consume_context::<ActiveReadPage>().set(Some(show_fulfillment));
+        rsx! {
+            if show_fulfillment() {
+                CatalogFulfillment {}
+            } else {
+                CatalogBidLog {}
+            }
+        }
+    }
+
+    #[component]
+    fn CatalogFulfillment() -> Element {
+        fulfillment()
+    }
+
+    #[component]
+    fn CatalogBidLog() -> Element {
+        bid_log()
+    }
+
+    #[test]
+    fn world_catalog_recovers_the_currently_mounted_read_page() {
+        let timestamp = |seconds: i64| Timestamp::from_timestamp_millis(seconds * 1_000).unwrap();
+        let fixture = Rc::new(CatalogTimerFixture::new("isekai", timestamp(0)));
+        fixture.next_read.set(Some(Err("unavailable".to_owned())));
+        let page = ActiveReadPage::default();
+        let page_reads = Rc::new(Cell::new(0));
+        let mut dom = VirtualDom::new(ReadPageCatalogHarness)
+            .with_root_context(fixture.clone())
+            .with_root_context(page.clone())
+            .with_root_context(PageBrowserFixture::new("/fulfillment", "world=invalid"))
+            .with_root_context(PageReadFixture::new({
+                let page_reads = page_reads.clone();
+                move |()| {
+                    page_reads.update(|count| count + 1);
+                    Err::<Worlds, _>("unavailable".to_owned())
+                }
+            }));
+        dom.rebuild_in_place();
+        settle_page(&mut dom);
+        assert_eq!(fixture.calls.get(), 1);
+
+        let disabled_worlds =
+            Worlds { worlds: [("isekai".to_owned(), WorldStatus { enabled: false })].into() };
+        assert!(header_worlds(&disabled_worlds).is_empty());
+        fixture.next_read.set(Some(Ok(disabled_worlds)));
+        fixture.pause_read.set(true);
+        fixture.fire_at(timestamp(300));
+        settle_page(&mut dom);
+        assert_eq!(fixture.calls.get(), 2);
+        let in_flight = fixture.reading.take().expect("旧页面挂载时已开始再验证");
+        dom.in_runtime(|| page.get().unwrap().set(true));
+        settle_page(&mut dom);
+        assert_eq!(fixture.calls.get(), 2, "换页继续复用外壳的在途读取");
+        let options = |dom: &VirtualDom| select_values(dom, "id", "public-fulfillment-world");
+        assert_eq!(options(&dom), ["", "main", "isekai"]);
+
+        fixture.pause_read.set(false);
+        in_flight.wake();
+        settle_page(&mut dom);
+        assert_eq!(fixture.calls.get(), 2);
+        assert_eq!(options(&dom), ["", "isekai"]);
+
+        fixture.next_read.set(Some(Err("unavailable".to_owned())));
+        fixture.fire_at(timestamp(600));
+        settle_page(&mut dom);
+        assert_eq!(fixture.calls.get(), 3);
+        assert_eq!(options(&dom), ["", "isekai"]);
+        assert_eq!(page_reads.get(), 0, "切页和恢复都无需页面发起第二份目录读取");
     }
 
     #[derive(Default)]

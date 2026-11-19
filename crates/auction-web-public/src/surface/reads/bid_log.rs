@@ -9,11 +9,12 @@ use dioxus::prelude::*;
 use super::directory::{RoundOptionsError, RoundPage, use_round_directory};
 use super::lot_filter::use_lot_filter_draft;
 use super::query::{InvalidReadAuction, InvalidReadWorld, ReadSelection, use_round_body};
-use crate::api::{BidLogEntry, BidLogPage, fetch_bid_log_page, fetch_worlds, lot_code_for};
+use crate::api::{BidLogEntry, BidLogPage, fetch_bid_log_page, lot_code_for};
 use crate::surface::read_page_query;
+use crate::surface::shell::use_history_world_options;
 use crate::surface::{
-    BidHistoryParticipant, PublicPager, bid_history_rows, public_page_matches, supported_worlds,
-    use_content_loading, use_page_query, world_label,
+    BidHistoryParticipant, PublicPager, bid_history_rows, public_page_matches, use_content_loading,
+    use_page_query, world_label,
 };
 use crate::surface::{
     LotDetailLookupButton, LotDetailLookupHost, use_auction_bid_refresh, use_lot_detail_lookup,
@@ -76,12 +77,8 @@ pub(crate) fn bid_log() -> Element {
         }
     });
 
-    let worlds = use_resource(fetch_worlds);
     let selected_world = world_filter().unwrap_or_default();
-    let mut world_options = match &*worlds.read_unchecked() {
-        Some(Ok(worlds)) => supported_worlds(worlds),
-        _ => vec!["main".to_owned(), "isekai".to_owned()],
-    };
+    let mut world_options = use_history_world_options();
     if !invalid_world && !world_options.contains(&selected_world) {
         world_options.push(selected_world.clone());
     }
@@ -433,8 +430,8 @@ mod tests {
     use super::{BidLogTable, use_lot_detail_lookup};
     use crate::api::{
         AuctionListPage, BidLogEntry, BidLogPage, HistoricalAuction, HttpResponseFixture,
-        WorldStatus, Worlds,
     };
+    use crate::surface::shell::WorldCatalog;
     use crate::surface::{
         LotDetailHttpFixture, PageBrowserFixture, PageReadFixture, PublicBidRefresh, PublicPager,
         dispatch_page_event, page_test_contexts, rendered_event_target, run_page_events,
@@ -548,6 +545,7 @@ mod tests {
 
     fn bid_log_page() -> Element {
         page_test_contexts();
+        use_context_provider(WorldCatalog::new);
         bid_log()
     }
 
@@ -773,14 +771,6 @@ mod tests {
                 let mut dom = VirtualDom::new(bid_log_for_drawer)
                     .with_root_context(browser.clone())
                     .with_root_context(PageReadFixture::new(drawer_directory))
-                    .with_root_context(PageReadFixture::new(|()| {
-                        Ok::<_, String>(Worlds {
-                            worlds: ["main", "isekai"]
-                                .into_iter()
-                                .map(|world| (world.to_owned(), WorldStatus { enabled: true }))
-                                .collect(),
-                        })
-                    }))
                     .with_root_context(bid_reads)
                     .with_root_context(timers)
                     .with_root_context(LotDetailHttpFixture(|url, _etag| {

@@ -1,4 +1,4 @@
-//! 公开竞价日志读取，以及竞价日志与履约进度共用的按状态场次目录遍历。
+//! 公开竞价日志读取，以及竞价日志与履约进度共用的按状态场次目录分页。
 
 use url::form_urlencoded;
 
@@ -49,24 +49,6 @@ pub(crate) async fn fetch_bid_log_auctions(
     let complete = row_count < page.page_size
         || page.total.is_some_and(|total| page_number.saturating_mul(page.page_size) >= total);
     Ok((page.auctions, complete))
-}
-
-/// 按编号顺序逐页读完单一状态的公开拍卖目录；竞价日志与履约进度的场次选择共用。
-pub(in crate::api) async fn fetch_bid_log_auction_status(
-    world_id: &str,
-    status: &str,
-) -> Result<Vec<super::super::HistoricalAuction>, String> {
-    let mut auctions = Vec::new();
-    let mut page_number = 1_i64;
-    loop {
-        let (page, complete) =
-            fetch_bid_log_auctions(world_id.to_owned(), status, page_number).await?;
-        auctions.extend(page);
-        if complete {
-            return Ok(auctions);
-        }
-        page_number = page_number.checked_add(1).ok_or_else(|| "拍卖目录页码溢出".to_owned())?;
-    }
 }
 
 /// 读取单个 lot 的编号竞价历史；分页参数沿用公开竞价日志契约。

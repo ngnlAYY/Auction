@@ -8,14 +8,15 @@ use auction_web_shared::{
 };
 use dioxus::prelude::*;
 
-use crate::api::{AuctionListPage, fetch_worlds};
+use crate::api::AuctionListPage;
 use crate::api::{HistoricalAuctionWithForum, fetch_auction_history_page};
 use crate::surface::loading::use_content_loading;
+use crate::surface::shell::use_history_world_options;
 use crate::surface::{
     PageKey, PublicPageClampError, PublicPager, auction_status_class, commit_public_query_pairs,
     historical_auction_status_label, historical_bid_log_href, historical_fulfillment_href,
     historical_lots_href, page_pathname, public_page_matches, public_page_within_offset,
-    query_values, set_public_page_size, supported_worlds, use_page_query, use_public_page_bounds,
+    query_values, set_public_page_size, use_page_query, use_public_page_bounds,
     use_public_query_pairs, world_label,
 };
 
@@ -38,11 +39,7 @@ pub(crate) fn AuctionList() -> Element {
     let page_number = use_memo(move || query_state_signal.read().page.max(1));
     let page_size = use_memo(move || query_state_signal.read().page_size);
     let mut refresh_generation = use_signal(|| 0_u64);
-    let worlds = use_resource(fetch_worlds);
-    let mut world_options = match &*worlds.read_unchecked() {
-        Some(Ok(worlds)) => supported_worlds(worlds),
-        _ => vec!["main".to_owned(), "isekai".to_owned()],
-    };
+    let mut world_options = use_history_world_options();
     let selected_world = world_filter.read().value().to_owned();
     let selected_status = status_filter.read().value().to_owned();
     let world_invalid = !world_filter.read().valid();
@@ -379,7 +376,9 @@ mod tests {
     use dioxus::prelude::*;
 
     use super::{AuctionList, ListFilter, use_auction_list_read};
-    use crate::api::{AuctionListPage, HistoricalAuctionWithForum, Worlds};
+    use crate::api::{AuctionListPage, HistoricalAuctionWithForum, WorldStatus, Worlds};
+    use crate::surface::reads::tests::select_values;
+    use crate::surface::shell::WorldCatalog;
     use crate::surface::{
         PageBrowserFixture, PageReadFixture, assert_selected_error, dispatch_page_event,
         page_event_target, page_test_contexts, run_page_events, settle_page,
@@ -401,16 +400,46 @@ mod tests {
 
     fn auction_list() -> Element {
         page_test_contexts();
+        let catalog = use_context_provider(WorldCatalog::new);
+        if let Some(control) = try_consume_context::<Rc<Cell<Option<WorldCatalog>>>>() {
+            control.set(Some(catalog));
+        }
         rsx! { AuctionList {} }
+    }
+
+    #[test]
+    fn auction_list_uses_the_shared_catalog_without_reading_worlds() {
+        let browser = PageBrowserFixture::new("/auctions", "status=unknown");
+        let control = Rc::new(Cell::new(None::<WorldCatalog>));
+        let requests = Rc::new(Cell::new(0));
+        let mut dom = VirtualDom::new(auction_list)
+            .with_root_context(browser)
+            .with_root_context(control.clone())
+            .with_root_context(PageReadFixture::new({
+                let requests = requests.clone();
+                move |()| {
+                    requests.update(|count| count + 1);
+                    Err::<Worlds, _>("unavailable".to_owned())
+                }
+            }));
+        dom.rebuild_in_place();
+        settle_page(&mut dom);
+        assert_eq!(select_values(&dom, "name", "world"), ["all", "main", "isekai"]);
+        dom.in_runtime(|| {
+            control.get().unwrap().0.set(Some(Worlds {
+                worlds: [("isekai".to_owned(), WorldStatus { enabled: false })].into(),
+            }));
+        });
+        settle_page(&mut dom);
+        assert_eq!(select_values(&dom, "name", "world"), ["all", "isekai"]);
+        assert_eq!(requests.get(), 0);
     }
 
     #[test]
     fn auction_list_first_frame_selects_and_describes_both_unknown_values() {
         let browser =
             PageBrowserFixture::new("/auctions", "world=outside%20world&status=unknown%20phase");
-        let mut dom = VirtualDom::new(auction_list).with_root_context(browser).with_root_context(
-            PageReadFixture::new(|()| Ok::<_, String>(Worlds { worlds: Default::default() })),
-        );
+        let mut dom = VirtualDom::new(auction_list).with_root_context(browser);
         let initial = dom.rebuild_to_vec();
         assert_selected_error(
             &dom,
@@ -452,10 +481,7 @@ mod tests {
                 });
                 let mut dom = VirtualDom::new(auction_list)
                     .with_root_context(browser.clone())
-                    .with_root_context(auctions)
-                    .with_root_context(PageReadFixture::new(|()| {
-                        Ok::<_, String>(Worlds { worlds: Default::default() })
-                    }));
+                    .with_root_context(auctions);
                 let initial = dom.rebuild_to_vec();
                 let world = page_event_target(&initial.edits, "change", "value", "outside");
                 let status = page_event_target(&initial.edits, "change", "value", "unknown");

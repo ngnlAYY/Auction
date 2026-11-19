@@ -14,12 +14,13 @@ use super::lot_filter::use_lot_filter_draft;
 use super::query::{InvalidReadAuction, InvalidReadWorld, ReadSelection, use_round_body};
 use crate::api::{
     FulfillmentLot, FulfillmentPage, FulfillmentRead, MAX_FULFILLMENT_PAGE_SIZE,
-    fetch_fulfillment_page, fetch_worlds, lot_code_for,
+    fetch_fulfillment_page, lot_code_for,
 };
+use crate::surface::shell::use_history_world_options;
 use crate::surface::{
     LotDetailLookupButton, LotDetailLookupHost, PublicPager, format_auction_time,
-    public_page_matches, refresh_public_reads, supported_worlds, use_content_loading,
-    use_lot_detail_lookup, use_page_query, world_label,
+    public_page_matches, refresh_public_reads, use_content_loading, use_lot_detail_lookup,
+    use_page_query, world_label,
 };
 use crate::surface::{
     PageKey, PublicPageClampError, page_pathname, set_public_page_size, use_public_page_bounds,
@@ -47,12 +48,8 @@ pub(crate) fn fulfillment() -> Element {
     });
     let lot_draft = use_lot_filter_draft(query_state_signal, pathname);
 
-    let worlds = use_resource(fetch_worlds);
     let selected_world = world_filter().unwrap_or_default();
-    let mut world_options = match &*worlds.read_unchecked() {
-        Some(Ok(worlds)) => supported_worlds(worlds),
-        _ => vec!["main".to_owned(), "isekai".to_owned()],
-    };
+    let mut world_options = use_history_world_options();
     if !invalid_world && !world_options.contains(&selected_world) {
         world_options.push(selected_world.clone());
     }
@@ -467,7 +464,10 @@ fn status_tone(status: &str) -> &'static str {
 mod tests {
     use std::cell::{Cell, RefCell};
     use std::collections::BTreeSet;
+    use std::future::{Future, poll_fn};
+    use std::pin::Pin;
     use std::rc::Rc;
+    use std::task::{Poll, Waker};
 
     use auction_contracts::PublicFulfillmentAuctionResponse;
     use auction_web_shared::QueryWriteMode;
@@ -480,7 +480,9 @@ mod tests {
         MountedReadPage, OLDER_ROUND_ID, ROUND_ID, invalid_auction_recovery, mount_read_page,
     };
     use super::{fulfillment, fulfillment_stale_notice, status_key, status_tone};
-    use crate::api::{FULFILLMENT_STATUSES, FulfillmentPage};
+    use crate::api::{AuctionListPage, FULFILLMENT_STATUSES, FulfillmentPage, HistoricalAuction};
+    use crate::surface::reads::tests::{dispatch_select_event, select_values};
+    use crate::surface::shell::WorldCatalog;
     use crate::surface::{
         PageBrowserFixture, PageReadFixture, PublicContentLoading, dispatch_page_event,
         page_test_contexts, rendered_event_target, run_page_events, settle_page,
@@ -494,7 +496,213 @@ mod tests {
 
     fn fulfillment_page() -> Element {
         page_test_contexts();
+        use_context_provider(WorldCatalog::new);
         fulfillment()
+    }
+
+    const MAIN_FIRST: &str = "/api/v1/auctions?page=1&page_size=200&status=settled&world=main";
+    const MAIN_SECOND: &str = "/api/v1/auctions?page=2&page_size=200&status=settled&world=main";
+    const MAIN_THIRD: &str = "/api/v1/auctions?page=3&page_size=200&status=settled&world=main";
+    const ISEKAI_FIRST: &str = "/api/v1/auctions?page=1&page_size=200&status=settled&world=isekai";
+    const ISEKAI_ROUND: &str = "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2d";
+
+    type DirectoryReply = Pin<Box<dyn Future<Output = Result<AuctionListPage, String>>>>;
+
+    #[derive(Default)]
+    struct FulfillmentReadTrace {
+        urls: RefCell<Vec<String>>,
+        second_page: Cell<Option<Waker>>,
+        released: Cell<bool>,
+    }
+
+    impl FulfillmentReadTrace {
+        fn mount(selected: Option<&str>) -> (VirtualDom, Rc<Self>) {
+            let search = selected.map_or_default(|id| format!("auction={id}"));
+            let browser = PageBrowserFixture::new("/fulfillment", &search);
+            let trace = Rc::new(Self::default());
+            // 两个响应类型在共同的公开读取边界记账，应用层缓存无法掩盖重复调用。
+            let directory = PageReadFixture::new({
+                let trace = trace.clone();
+                move |url: String| -> DirectoryReply {
+                    trace.urls.borrow_mut().push(url.clone());
+                    let trace = trace.clone();
+                    Box::pin(async move {
+                        if url == MAIN_SECOND {
+                            poll_fn(|cx| {
+                                if trace.released.get() {
+                                    Poll::Ready(())
+                                } else {
+                                    trace.second_page.set(Some(cx.waker().clone()));
+                                    Poll::Pending
+                                }
+                            })
+                            .await;
+                        }
+                        Ok(directory_reply(&url))
+                    })
+                }
+            });
+            let body = PageReadFixture::new({
+                let trace = trace.clone();
+                move |url: String| {
+                    let (id, world) =
+                        [(ROUND_ID, "main"), (OLDER_ROUND_ID, "main"), (ISEKAI_ROUND, "isekai")]
+                            .into_iter()
+                            .find(|(id, world)| url == fulfillment_url(id, world))
+                            .expect("正文请求属于已确认的场次");
+                    trace.urls.borrow_mut().push(url);
+                    Ok::<_, String>(FulfillmentPage {
+                        auction: PublicFulfillmentAuctionResponse {
+                            id: id.to_owned(),
+                            world: world.to_owned(),
+                            number: 1,
+                        },
+                        lots: Vec::new(),
+                        page: 1,
+                        page_size: 20,
+                        total: 0,
+                    })
+                }
+            });
+            let mut dom = VirtualDom::new(fulfillment_page)
+                .with_root_context(browser)
+                .with_root_context(directory)
+                .with_root_context(body);
+            dom.rebuild_in_place();
+            settle_page(&mut dom);
+            (dom, trace)
+        }
+
+        fn complete_second_page(&self, dom: &mut VirtualDom) {
+            self.released.set(true);
+            self.second_page.take().expect("主世界目录第 2 页正在读取").wake();
+            settle_page(dom);
+        }
+    }
+
+    fn directory_reply(url: &str) -> AuctionListPage {
+        let (page, world, id, sequence, row_count, total) = match url {
+            MAIN_FIRST => (1, "main", ROUND_ID, 401, 200, 401),
+            MAIN_SECOND => (2, "main", OLDER_ROUND_ID, 201, 200, 401),
+            MAIN_THIRD => (3, "main", "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2e", 1, 1, 401),
+            ISEKAI_FIRST => (1, "isekai", ISEKAI_ROUND, 1, 1, 1),
+            _ => panic!("意外的目录请求 {url}"),
+        };
+        let auctions = (0..row_count)
+            .map(|offset| {
+                let sequence = sequence - offset;
+                HistoricalAuction {
+                    id: if offset == 0 {
+                        id.to_owned()
+                    } else {
+                        format!("00000000-0000-4000-8000-{sequence:012x}")
+                    },
+                    world_id: world.to_owned(),
+                    sequence,
+                    status: "settled".to_owned(),
+                    scheduled_open_at: "2026-11-14T12:00:00Z".to_owned(),
+                    opened_at: None,
+                    final_phase_at: None,
+                    effective_end_at: None,
+                    settled_at: None,
+                    lot_count: 0,
+                    sold_count: 0,
+                    unsold_count: 0,
+                    sold_amount: 0,
+                    state_version: 1,
+                }
+            })
+            .collect();
+        AuctionListPage {
+            auctions,
+            total: Some(total),
+            page: Some(page),
+            page_size: 200,
+            cursor: None,
+            next_cursor: None,
+            has_more: None,
+        }
+    }
+
+    fn fulfillment_url(id: &str, world: &str) -> String {
+        format!("/api/v1/auctions/{id}/fulfillment?page=1&page_size=20&world={world}")
+    }
+
+    fn focus_round(dom: &mut VirtualDom) {
+        let select =
+            rendered_event_target(dom, "select", "id", "public-fulfillment-round", "onfocus");
+        dispatch_select_event(dom, select, None);
+        settle_page(dom);
+    }
+
+    #[test]
+    fn focusing_fulfillment_rounds_continues_once_from_the_next_unread_page() {
+        run_page_events(
+            module_path!(),
+            "focusing_fulfillment_rounds_continues_once_from_the_next_unread_page",
+            || {
+                let (mut dom, trace) = FulfillmentReadTrace::mount(None);
+                let body = fulfillment_url(ROUND_ID, "main");
+                assert_eq!(&*trace.urls.borrow(), &[MAIN_FIRST, &body]);
+                focus_round(&mut dom);
+                assert_eq!(&*trace.urls.borrow(), &[MAIN_FIRST, &body, MAIN_SECOND]);
+                focus_round(&mut dom);
+                assert_eq!(&*trace.urls.borrow(), &[MAIN_FIRST, &body, MAIN_SECOND]);
+                trace.complete_second_page(&mut dom);
+                focus_round(&mut dom);
+                assert_eq!(&*trace.urls.borrow(), &[MAIN_FIRST, &body, MAIN_SECOND, MAIN_THIRD]);
+            },
+        );
+    }
+
+    #[test]
+    fn focusing_after_locating_a_deep_fulfillment_round_only_reads_later_pages() {
+        run_page_events(
+            module_path!(),
+            "focusing_after_locating_a_deep_fulfillment_round_only_reads_later_pages",
+            || {
+                let (mut dom, trace) = FulfillmentReadTrace::mount(Some(OLDER_ROUND_ID));
+                assert_eq!(&*trace.urls.borrow(), &[MAIN_FIRST, MAIN_SECOND]);
+                trace.complete_second_page(&mut dom);
+                let body = fulfillment_url(OLDER_ROUND_ID, "main");
+                assert_eq!(&*trace.urls.borrow(), &[MAIN_FIRST, MAIN_SECOND, &body]);
+                focus_round(&mut dom);
+                assert_eq!(&*trace.urls.borrow(), &[MAIN_FIRST, MAIN_SECOND, &body, MAIN_THIRD]);
+            },
+        );
+    }
+
+    #[test]
+    fn switching_fulfillment_worlds_discards_the_pending_old_directory_page() {
+        run_page_events(
+            module_path!(),
+            "switching_fulfillment_worlds_discards_the_pending_old_directory_page",
+            || {
+                let (mut dom, trace) = FulfillmentReadTrace::mount(Some(ROUND_ID));
+                let main_body = fulfillment_url(ROUND_ID, "main");
+                focus_round(&mut dom);
+                assert_eq!(&*trace.urls.borrow(), &[MAIN_FIRST, &main_body, MAIN_SECOND]);
+                let world = rendered_event_target(
+                    &dom,
+                    "select",
+                    "id",
+                    "public-fulfillment-world",
+                    "onchange",
+                );
+                dispatch_select_event(&dom, world, Some("isekai"));
+                settle_page(&mut dom);
+                let isekai_body = fulfillment_url(ISEKAI_ROUND, "isekai");
+                let expected = [MAIN_FIRST, &main_body, MAIN_SECOND, ISEKAI_FIRST, &isekai_body];
+                assert_eq!(&*trace.urls.borrow(), &expected);
+                trace.complete_second_page(&mut dom);
+                focus_round(&mut dom);
+                assert_eq!(&*trace.urls.borrow(), &expected);
+                assert_eq!(
+                    select_values(&dom, "id", "public-fulfillment-round"),
+                    ["", ISEKAI_ROUND]
+                );
+            },
+        );
     }
 
     fn mount_fulfillment(

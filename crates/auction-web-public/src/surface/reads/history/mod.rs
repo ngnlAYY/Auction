@@ -3,11 +3,12 @@
 use auction_web_shared::{AsyncState, AsyncStateKind, QueryWriteMode, t};
 use dioxus::prelude::*;
 
-use crate::api::{PriceHistoryFetchError, fetch_price_history, fetch_worlds};
+use crate::api::{PriceHistoryFetchError, fetch_price_history};
+use crate::surface::shell::use_history_world_options;
 use crate::surface::{
     LotDetailLookupHost, PageKey, PublicPageClampError, commit_public_query_pairs, page_pathname,
-    public_page_matches, set_public_page_size, supported_worlds, use_content_loading,
-    use_lot_detail_lookup, use_page_query, use_public_page_bounds,
+    public_page_matches, set_public_page_size, use_content_loading, use_lot_detail_lookup,
+    use_page_query, use_public_page_bounds,
 };
 
 mod filters;
@@ -33,11 +34,7 @@ pub(crate) fn history() -> Element {
     let form = use_history_form(query_state);
     let applied = form.applied;
     let request = use_memo(move || applied.read().request(page_size()));
-    let worlds = use_resource(fetch_worlds);
-    let world_options = match &*worlds.read_unchecked() {
-        Some(Ok(worlds)) => supported_worlds(worlds),
-        _ => vec!["main".to_owned(), "isekai".to_owned()],
-    };
+    let world_options = use_history_world_options();
     let has_search = applied.read().has_request();
     let clamp_failed = bounds.failed(PageKey::Page);
     let history = use_resource(move || {

@@ -153,10 +153,6 @@ impl Directory {
         }
     }
 
-    fn needs_more_options(&self) -> bool {
-        self.statuses.iter().any(|status| status.next_page.is_some_and(|page| page > 1))
-    }
-
     fn display_options(&self) -> Rc<[HistoricalAuction]> {
         if self.options.is_empty()
             && self.statuses.iter().any(|status| status.next_page == Some(1) && !status.failed)
@@ -257,7 +253,12 @@ pub(super) fn use_round_directory(
     world: Memo<Option<String>>,
     refresh: Signal<u64>,
 ) -> RoundDirectory {
-    use_round_directory_with(page, query, world, refresh, fetch_bid_log_auctions)
+    use_round_directory_with(page, query, world, refresh, async move |world, status, number| {
+        match page {
+            RoundPage::BidLog => fetch_bid_log_auctions(world, status, number).await,
+            RoundPage::Fulfillment => fetch_fulfillment_auctions(world, number).await,
+        }
+    })
 }
 
 fn use_round_directory_with(
@@ -278,28 +279,6 @@ fn use_round_directory_with(
     let mut directory = use_signal(|| Directory::new(scope.peek().clone(), page, Rc::from([])));
     let mut opened_world = use_signal(|| None::<String>);
     let tasks = use_hook(|| Rc::new(RefCell::new(BTreeMap::<&str, Task>::new())));
-    let full_fulfillment_request = use_memo(move || {
-        let scope = scope();
-        let current = directory.read();
-        (page == RoundPage::Fulfillment
-            && scope.world.is_some()
-            && current.scope == scope
-            && current.needs_more_options()
-            && *opened_world.read() == scope.world)
-            .then_some(scope)
-    });
-    let full_fulfillment = use_resource(move || {
-        let scope = full_fulfillment_request();
-        async move {
-            let scope = scope?;
-            if read_page_query().world.invalid() {
-                return None;
-            }
-            let result =
-                fetch_fulfillment_auctions(scope.world.clone()?).await.map(Rc::<[_]>::from);
-            Some((scope, result))
-        }
-    });
     use_effect(move || {
         let current = scope();
         let wanted = requested();
@@ -327,16 +306,8 @@ fn use_round_directory_with(
         if read_page_query().world.invalid() {
             return;
         }
-        if full_fulfillment
-            .read_unchecked()
-            .as_ref()
-            .and_then(Option::as_ref)
-            .is_some_and(|(scope, result)| *scope == current && result.is_ok())
-        {
-            return;
-        }
-        let requests =
-            directory.read().requests(wanted.selected_id(), opened && page == RoundPage::BidLog);
+        // 展开只推进本世界、本代次的未读页，已确认场次仍可继续显示正文。
+        let requests = directory.read().requests(wanted.selected_id(), opened);
         for (status, number) in requests {
             if let Some(progress) =
                 directory.write().statuses.iter_mut().find(|entry| entry.status == status)
@@ -367,39 +338,20 @@ fn use_round_directory_with(
         if current.scope.world != scope.world {
             return None;
         }
-        let full = full_fulfillment.read_unchecked();
-        let full = full.as_ref().and_then(Option::as_ref).filter(|(loaded, _)| *loaded == scope);
         let (resolution, option_rows, options_failed) = if current.scope != scope {
             (Resolution::Waiting, current.display_options(), false)
         } else {
-            // 选择器按需重用原有的单状态目录读取；已确认的正文不受补页失败影响。
-            if let Some((_, Ok(full))) = full {
-                (
-                    Resolution::Confirmed(
-                        full.iter()
-                            .find(|auction| Some(auction.id.as_str()) == id)
-                            .or_else(|| full.first()),
-                    ),
-                    full.clone(),
-                    false,
-                )
+            let failed = current.statuses.iter().any(|page| page.failed);
+            let resolution = current.resolve(id);
+            let rows = if matches!(resolution, Resolution::Waiting)
+                && current.previous_options.iter().any(|auction| Some(auction.id.as_str()) == id)
+                && !current.options.iter().any(|auction| Some(auction.id.as_str()) == id)
+            {
+                current.previous_options.clone()
             } else {
-                let failed = full.is_some_and(|(_, result)| result.is_err())
-                    || current.statuses.iter().any(|page| page.failed);
-                let resolution = current.resolve(id);
-                let rows = if matches!(resolution, Resolution::Waiting)
-                    && current
-                        .previous_options
-                        .iter()
-                        .any(|auction| Some(auction.id.as_str()) == id)
-                    && !current.options.iter().any(|auction| Some(auction.id.as_str()) == id)
-                {
-                    current.previous_options.clone()
-                } else {
-                    current.display_options()
-                };
-                (resolution, rows, failed)
-            }
+                current.display_options()
+            };
+            (resolution, rows, failed)
         };
         let selected = option_rows.iter().find(|auction| Some(auction.id.as_str()) == id).cloned();
         let (readable, correction, empty, failed) = match resolution {
@@ -408,8 +360,7 @@ fn use_round_directory_with(
                 let mut readable = None;
                 let mut correction = None;
                 if invalid || next.as_deref() != id {
-                    correction =
-                        Some(RoundCorrection { scope: scope.clone(), expected: target, next });
+                    correction = Some(RoundCorrection { scope, expected: target, next });
                 } else if let Some(auction) = choice {
                     readable = Some(ConfirmedRound {
                         id: auction.id.clone(),
@@ -529,6 +480,7 @@ mod tests {
 
     const NEWEST: &str = "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b";
     const OLDER: &str = "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2c";
+    const ISEKAI: &str = "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2d";
 
     fn auction(
         id: &str,
@@ -583,9 +535,11 @@ mod tests {
         accepts_replace: bool,
         browser: PageBrowserFixture,
         directory: Cell<Option<RoundDirectory>>,
+        refresh: Cell<Option<Signal<u64>>>,
         requests: RefCell<Vec<String>>,
         second_page: Cell<Option<Waker>>,
         release_page: Cell<bool>,
+        failed_page: Cell<Option<i64>>,
     }
 
     impl ReadTrace {
@@ -593,6 +547,7 @@ mod tests {
             page: RoundPage,
             selected: Option<&'static str>,
             accepts_replace: bool,
+            failed_page: Option<i64>,
         ) -> (VirtualDom, Rc<Self>) {
             let search = selected.map_or_default(|id| format!("auction={id}"));
             let browser = PageBrowserFixture::new(page.pathname(), &search);
@@ -602,9 +557,11 @@ mod tests {
                 accepts_replace,
                 browser: browser.clone(),
                 directory: Cell::new(None),
+                refresh: Cell::new(None),
                 requests: RefCell::new(Vec::new()),
                 second_page: Cell::new(None),
                 release_page: Cell::new(false),
+                failed_page: Cell::new(failed_page),
             });
             let mut dom = VirtualDom::new(ReadHarness)
                 .with_root_context(trace.clone())
@@ -622,6 +579,20 @@ mod tests {
                 .cloned()
                 .collect()
         }
+
+        fn read_directory(&self) -> Vec<String> {
+            self.requests
+                .borrow()
+                .iter()
+                .filter(|event| !event.starts_with("body:"))
+                .cloned()
+                .collect()
+        }
+
+        fn open_options(&self, dom: &mut VirtualDom) {
+            dom.in_runtime(|| self.directory.get().unwrap().load_options());
+            settle(dom);
+        }
     }
 
     fn settle(dom: &mut VirtualDom) {
@@ -636,22 +607,33 @@ mod tests {
         let control = consume_context::<Rc<ReadTrace>>();
         let trace = use_signal(|| control.clone());
         let query = use_page_query();
-        let world = use_memo(|| Some("main".to_owned()));
+        let world = use_memo(move || query.read().world.round_world().map(str::to_owned));
         let refresh = use_signal(|| 0);
+        control.refresh.set(Some(refresh));
         let directory = use_round_directory_with(
             control.page,
             query,
             world,
             refresh,
             async move |world, status, page| {
-                assert_eq!(world, "main");
-                trace.peek().requests.borrow_mut().push(format!("{status}:{page}"));
+                trace.peek().requests.borrow_mut().push(format!("{world}:{status}:{page}"));
                 if status != "settled" {
                     return Ok((Vec::new(), true));
                 }
+                if trace.peek().failed_page.get() == Some(page) {
+                    return Err("unavailable".to_owned());
+                }
+                if world == "isekai" {
+                    assert_eq!(page, 1);
+                    return Ok((vec![auction(ISEKAI, "isekai", 5, "settled", 1)], true));
+                }
+                assert_eq!(world, "main");
                 if page == 1 {
                     let complete = !trace.peek().accepts_replace;
                     return Ok((vec![auction(NEWEST, "main", 20, "settled", 4)], complete));
+                }
+                if page == 3 {
+                    return Ok((vec![auction(OLDER, "main", 2, "settled", 4)], true));
                 }
                 if page != 2 {
                     return pending().await;
@@ -666,7 +648,7 @@ mod tests {
                     }
                 })
                 .await;
-                Ok((vec![auction(OLDER, "main", 2, "settled", 3)], true))
+                Ok((vec![auction(OLDER, "main", 2, "settled", 3)], false))
             },
         );
         let page = use_memo(|| 1);
@@ -677,7 +659,8 @@ mod tests {
             page,
             size,
             async move |id, world, lot, page, size| {
-                assert_eq!((world.as_str(), lot, page, size), ("main", None, 1, 20));
+                assert_eq!(world, if id == ISEKAI { "isekai" } else { "main" });
+                assert_eq!((lot, page, size), (None, 1, 20));
                 trace.peek().requests.borrow_mut().push(format!("body:{id}"));
                 Ok(())
             },
@@ -689,34 +672,106 @@ mod tests {
     #[test]
     fn default_body_starts_before_directory_options_need_a_second_page() {
         for page in [RoundPage::BidLog, RoundPage::Fulfillment] {
-            let (mut dom, trace) = ReadTrace::mount(page, None, true);
+            let (mut dom, trace) = ReadTrace::mount(page, None, true, None);
             assert_eq!(trace.read_body(), [format!("body:{NEWEST}")]);
-            assert!(!trace.requests.borrow().iter().any(|event| event == "settled:2"));
-            if page == RoundPage::BidLog {
-                let directory = trace.directory.get().unwrap();
-                dom.in_runtime(|| directory.load_options());
-                settle(&mut dom);
-                assert!(trace.second_page.take().is_some(), "选择器需要补齐时才读取下一页");
-                assert_eq!(trace.read_body(), [format!("body:{NEWEST}")]);
-            }
+            let mut expected: Vec<_> =
+                page.statuses().iter().map(|s| format!("main:{s}:1")).collect();
+            assert_eq!(trace.read_directory(), expected);
+            trace.open_options(&mut dom);
+            expected.push("main:settled:2".to_owned());
+            assert_eq!(trace.read_directory(), expected);
+            trace.open_options(&mut dom);
+            assert_eq!(trace.read_directory(), expected, "在途时重复打开不发包");
+            trace.release_page.set(true);
+            trace.second_page.take().unwrap().wake();
+            settle(&mut dom);
+            expected.push("main:settled:3".to_owned());
+            trace.open_options(&mut dom);
+            assert_eq!(trace.read_directory(), expected, "读完后重复打开不发包");
+            assert_eq!(trace.read_body(), [format!("body:{NEWEST}")]);
+            let options = dom.in_runtime(|| trace.directory.get().unwrap().options());
+            assert_eq!(
+                options.iter().map(|row| (row.id.as_str(), row.state_version)).collect::<Vec<_>>(),
+                [(NEWEST, 4), (OLDER, 4)]
+            );
         }
     }
 
     #[test]
     fn requested_round_does_not_read_the_body_until_its_own_page_is_confirmed() {
-        let (mut dom, trace) = ReadTrace::mount(RoundPage::Fulfillment, Some(OLDER), true);
-        assert_eq!(&*trace.requests.borrow(), &["settled:1", "settled:2"]);
+        let (mut dom, trace) = ReadTrace::mount(RoundPage::Fulfillment, Some(OLDER), true, None);
+        assert_eq!(trace.read_directory(), ["main:settled:1", "main:settled:2"]);
         assert!(trace.read_body().is_empty());
         trace.release_page.set(true);
         trace.second_page.take().expect("第二页尚未完成").wake();
         settle(&mut dom);
+        assert_eq!(trace.read_directory(), ["main:settled:1", "main:settled:2"]);
+        trace.open_options(&mut dom);
+        assert_eq!(trace.read_directory(), ["main:settled:1", "main:settled:2", "main:settled:3"]);
         assert_eq!(trace.read_body(), [format!("body:{OLDER}")]);
         assert!(trace.browser.writes().is_empty());
     }
 
     #[test]
+    fn fulfillment_discards_late_directory_page_after_switching_world() {
+        let (mut dom, trace) = ReadTrace::mount(RoundPage::Fulfillment, Some(NEWEST), true, None);
+        trace.open_options(&mut dom);
+        let late = trace.second_page.take().expect("旧世界第二页在途");
+        dom.in_scope(ScopeId::APP, || {
+            assert!(
+                ReadSelection::World("isekai".to_owned())
+                    .select(trace.browser.signal(), trace.page.pathname())
+            );
+        });
+        settle(&mut dom);
+        trace.release_page.set(true);
+        late.wake();
+        settle(&mut dom);
+        assert_eq!(
+            trace.read_directory(),
+            ["main:settled:1", "main:settled:2", "isekai:settled:1"]
+        );
+        assert_eq!(trace.read_body(), [format!("body:{NEWEST}"), format!("body:{ISEKAI}")]);
+        let options = dom.in_runtime(|| trace.directory.get().unwrap().options());
+        assert_eq!(options.len(), 1);
+        assert_eq!(options[0].id, ISEKAI);
+    }
+
+    #[test]
+    fn fulfillment_retries_a_failed_first_page_on_refresh() {
+        let (mut dom, trace) = ReadTrace::mount(RoundPage::Fulfillment, None, true, Some(1));
+        let directory = trace.directory.get().unwrap();
+        assert_eq!(trace.read_directory(), ["main:settled:1"]);
+        assert!(trace.read_body().is_empty());
+        dom.in_runtime(|| assert!(directory.failed()));
+
+        trace.failed_page.set(None);
+        dom.in_runtime(|| trace.refresh.get().unwrap().set(1));
+        settle(&mut dom);
+        assert_eq!(trace.read_directory(), ["main:settled:1", "main:settled:1"]);
+        assert_eq!(trace.read_body(), [format!("body:{NEWEST}")]);
+        dom.in_runtime(|| assert!(!directory.failed()));
+    }
+
+    #[test]
+    fn failed_fulfillment_options_keep_the_confirmed_body() {
+        let (mut dom, trace) =
+            ReadTrace::mount(RoundPage::Fulfillment, Some(NEWEST), true, Some(2));
+        trace.open_options(&mut dom);
+        trace.open_options(&mut dom);
+        assert_eq!(trace.read_directory(), ["main:settled:1", "main:settled:2"]);
+        assert_eq!(trace.read_body(), [format!("body:{NEWEST}")]);
+        dom.in_runtime(|| {
+            let directory = trace.directory.get().unwrap();
+            assert!(directory.options_failed());
+            assert!(!directory.failed());
+            assert_eq!(directory.readable().unwrap().id, NEWEST);
+        });
+    }
+
+    #[test]
     fn a_rejected_single_round_replacement_keeps_the_manual_choice_available() {
-        let (mut dom, trace) = ReadTrace::mount(RoundPage::Fulfillment, None, false);
+        let (mut dom, trace) = ReadTrace::mount(RoundPage::Fulfillment, None, false, None);
         let directory = trace.directory.get().unwrap();
         let query = trace.browser.signal();
         dom.in_scope(ScopeId::APP, || {

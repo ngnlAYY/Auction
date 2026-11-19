@@ -6,6 +6,8 @@ mod fulfillment;
 mod history;
 mod lot_filter;
 mod query;
+#[cfg(test)]
+pub(super) mod tests;
 
 pub(crate) use bid_log::bid_log;
 pub(crate) use fulfillment::fulfillment;

@@ -190,7 +190,7 @@ pub(super) mod tests {
     use dioxus::dioxus_core::{ElementId, Mutation};
     use dioxus::prelude::*;
 
-    use crate::api::{AuctionListPage, HistoricalAuction, WorldStatus, Worlds};
+    use crate::api::{AuctionListPage, HistoricalAuction};
     use crate::surface::{
         PageBrowserFixture, PageReadFixture, PublicContentLoading, rendered_event_target,
         settle_page,
@@ -244,20 +244,11 @@ pub(super) mod tests {
                 has_more: None,
             })
         });
-        let worlds = PageReadFixture::new(|()| {
-            Ok::<_, String>(Worlds {
-                worlds: ["main", "isekai"]
-                    .into_iter()
-                    .map(|world| (world.to_owned(), WorldStatus { enabled: true }))
-                    .collect(),
-            })
-        });
         let mut dom = VirtualDom::new(page)
             .with_root_context(browser.clone())
             .with_root_context(directory)
             .with_root_context(body)
-            .with_root_context(PageReadFixture::new(|()| std::future::ready(())))
-            .with_root_context(worlds);
+            .with_root_context(PageReadFixture::new(|()| std::future::ready(())));
         let mut edits = dom.rebuild_to_vec().edits;
         edits.extend(settle_page(&mut dom));
         (dom, edits)

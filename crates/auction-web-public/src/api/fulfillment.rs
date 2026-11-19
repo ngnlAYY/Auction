@@ -7,7 +7,7 @@ pub(crate) use auction_contracts::{
 use auction_time::{SecondsFormat, Timestamp};
 use url::form_urlencoded;
 
-use super::queries::{cached_public_read, fetch_bid_log_auction_status};
+use super::queries::{cached_public_read, fetch_bid_log_auctions};
 use super::{HistoricalAuction, decoder, swr_cache};
 
 /// 履约进度接口的每页数量上限；超过时服务端返回 400。页面按上限请求，自定义输入超出时就地提示。
@@ -22,17 +22,12 @@ pub(crate) struct FulfillmentRead {
     pub(crate) stale_since: Option<String>,
 }
 
-/// 读取一个世界全部已结算场次，按期号倒序；只有已结算场次才有履约进度。
+/// 读取一个世界的已结算场次目录页；只有已结算场次才有履约进度。
 pub(crate) async fn fetch_fulfillment_auctions(
     world_id: String,
-) -> Result<Vec<HistoricalAuction>, String> {
-    let mut auctions = fetch_bid_log_auction_status(&world_id, "settled").await?;
-    // 目录逐页读取期间新结算的场次会让后页重复出现前页的末尾行。
-    auctions.sort_by(|left, right| {
-        right.sequence.cmp(&left.sequence).then_with(|| right.id.cmp(&left.id))
-    });
-    auctions.dedup_by(|left, right| left.id == right.id);
-    Ok(auctions)
+    page: i64,
+) -> Result<(Vec<HistoricalAuction>, bool), String> {
+    fetch_bid_log_auctions(world_id, "settled", page).await
 }
 
 /// 读取单场的履约进度编号页；响应必须与请求的场次、世界与分页一致，否则按无效响应处理。
