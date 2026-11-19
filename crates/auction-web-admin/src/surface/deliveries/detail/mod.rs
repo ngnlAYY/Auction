@@ -54,12 +54,6 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
     let detail = use_resource(use_reactive((&delivery_id,), move |(delivery_id,)| {
         let revision = refresh();
         async move {
-            #[cfg(test)]
-            if let Some(tests::DetailFixture(projection)) =
-                try_consume_context::<tests::DetailFixture>()
-            {
-                return (delivery_id, revision, Ok(projection));
-            }
             let result = fetch_delivery_detail(delivery_id.clone()).await;
             (delivery_id, revision, result)
         }
@@ -349,17 +343,18 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
     use std::future::ready;
     use std::rc::Rc;
 
     use auction_contracts::AdminDeliveryDetailWithActionsResponse;
     use dioxus::core::Mutation;
     use dioxus::prelude::*;
+    use gloo_net::http::Method;
     use serde_json::{Value, json};
 
     use super::DeliveryDetailPage;
-    use crate::api::{AdminApiFailure, DeliverySentProofResult};
+    use crate::api::{AdminApiFailure, DeliveryDetailGetFixture, DeliverySentProofResult};
     use crate::surface::auctions::draft_page_tests::{
         button, click_button, has_live_text, init_i18n, mount_writer, submit_button_disabled,
         writer_form,
@@ -369,7 +364,32 @@ mod tests {
     use crate::surface::pending::use_pending_commands;
 
     #[derive(Clone)]
-    pub(super) struct DetailFixture(pub(super) AdminDeliveryDetailWithActionsResponse);
+    struct DetailFixture {
+        initial: AdminDeliveryDetailWithActionsResponse,
+        refreshed: Option<AdminDeliveryDetailWithActionsResponse>,
+        requests: Rc<RefCell<Vec<String>>>,
+    }
+
+    impl DetailFixture {
+        fn load(&self, url: &str) -> AdminDeliveryDetailWithActionsResponse {
+            let mut requests = self.requests.borrow_mut();
+            let refreshed = !requests.is_empty();
+            requests.push(url.to_owned());
+            match &self.refreshed {
+                Some(detail) if refreshed => detail.clone(),
+                _ => self.initial.clone(),
+            }
+        }
+    }
+
+    fn use_detail_fixture(fixture: &DetailFixture) {
+        use_context_provider(|| fixture.clone());
+        use_context_provider(|| {
+            let fixture = fixture.clone();
+            let get: DeliveryDetailGetFixture = Rc::new(move |url| fixture.load(url));
+            get
+        });
+    }
 
     #[derive(Clone, Default)]
     pub(super) struct SentConfirmRequests(Rc<Cell<usize>>);
@@ -393,8 +413,8 @@ mod tests {
 
     #[component]
     fn Fixture() -> Element {
-        let projection = use_context::<DetailFixture>();
-        rsx! { DeliveryDetailPage { delivery_id: projection.0.detail.delivery.id } }
+        let fixture = use_context::<DetailFixture>();
+        rsx! { DeliveryDetailPage { delivery_id: fixture.initial.detail.delivery.id } }
     }
 
     #[test]
@@ -404,18 +424,22 @@ mod tests {
         ))
         .unwrap();
         projection["data"]["actions"]["acknowledge"] = json!({"state":"eligible"});
-        let fixture = DetailFixture(serde_json::from_value(projection["data"].take()).unwrap());
+        let fixture = DetailFixture {
+            initial: serde_json::from_value(projection["data"].take()).unwrap(),
+            refreshed: None,
+            requests: Rc::default(),
+        };
         let confirms = SentConfirmRequests::default();
         let (mut page, edits) = mount_writer({
             let confirms = confirms.clone();
             move || {
                 init_i18n();
                 use_preview_stub();
-                use_context_provider(|| fixture.clone());
+                use_detail_fixture(&fixture);
                 use_context_provider(|| confirms.clone());
                 let refresh = use_signal(|| 0);
                 let other_source = use_pending_commands(refresh, |_| false);
-                let entity = delivery_command_entity(&fixture.0.detail.delivery.id);
+                let entity = delivery_command_entity(&fixture.initial.detail.delivery.id);
                 rsx! {
                     button { onclick: move |_| {
                         let failure = AdminApiFailure::from_http_body(
@@ -461,5 +485,64 @@ mod tests {
         let (sent, _) = button(&page, "打开人工 Sent 证明").unwrap();
         page.dispatch("click", sent, "");
         assert!(submit_button_disabled(&page, "确认证明").is_none());
+    }
+
+    #[test]
+    fn stale_fence_on_confirmation_reloads_detail_and_removes_old_evidence() {
+        const DETAIL_GET: &str =
+            "/api/v1/admin/deliveries/0f8fad5b-d9cb-469f-a165-70867728950e?include=sent_proof";
+        const CONFIRM_POST: &str =
+            "/api/v1/admin/deliveries/0f8fad5b-d9cb-469f-a165-70867728950e/sent-proof/confirm";
+        let [mut projection, _, _]: [Value; 3] = serde_json::from_str(include_str!(
+            "../../../../../auction-contracts/tests/fixtures/admin/delivery-sent-proof-detail.json"
+        ))
+        .unwrap();
+        let initial: AdminDeliveryDetailWithActionsResponse =
+            serde_json::from_value(projection["data"].take()).unwrap();
+        let old_reference = initial.detail.evidence[0].reference.clone();
+        let mut refreshed = initial.clone();
+        refreshed.detail.delivery.status = "failed".to_owned();
+        refreshed.detail.delivery.fencing_version += 1;
+        refreshed.detail.evidence.clear();
+        let requests = Rc::new(RefCell::new(Vec::new()));
+        let fixture =
+            DetailFixture { initial, refreshed: Some(refreshed), requests: requests.clone() };
+        let (mut page, _) = mount_writer(move || {
+            init_i18n();
+            use_preview_stub();
+            use_detail_fixture(&fixture);
+            AdminApiFailure::stub_write_response(
+                CONFIRM_POST,
+                Method::POST,
+                409,
+                r#"{"code":"stale_delivery_state","message":"投递状态已变化","data":null,"request_id":null}"#,
+            );
+            rsx! { Router::<TestRoute> {} }
+        });
+        assert_eq!(*requests.borrow(), [DETAIL_GET]);
+        assert!(has_live_text(&page, &old_reference));
+        let opened = click_button(&mut page, "打开人工 Sent 证明");
+        let form = writer_form(&opened);
+        let mut inputs = opened.iter().filter_map(|edit| match edit {
+            Mutation::NewEventListener { name, id } if name == "input" => Some(*id),
+            _ => None,
+        });
+        page.dispatch("input", inputs.next().unwrap(), "Sample");
+        page.dispatch("input", inputs.next().unwrap(), "12345");
+        page.dispatch("input", inputs.next().unwrap(), "2026-11-02T01:14");
+        page.dispatch("input", inputs.next_back().unwrap(), "已核对 Sent 实见");
+        click_button(&mut page, "预览准入");
+        assert_eq!(submit_button_disabled(&page, "确认证明"), Some(false));
+        assert_eq!(*requests.borrow(), [DETAIL_GET]);
+        page.dispatch("submit", form, "");
+
+        assert_eq!(*requests.borrow(), [DETAIL_GET, DETAIL_GET]);
+        assert!(!has_live_text(&page, &old_reference));
+        assert!(button(&page, "打开人工 Sent 证明").is_none());
+        assert!(submit_button_disabled(&page, "确认证明").is_none());
+        assert!(has_live_text(
+            &page,
+            "投递状态或证据已变化，请核对最新详情后重试。提交 Sent 证明时请重新选择证据。"
+        ));
     }
 }

@@ -182,7 +182,7 @@ impl MailboxMaintenanceService {
                 && state.recipient.eq_ignore_ascii_case(&candidate.recipient)
                 && state.subject == expectation.subject
             {
-                return self
+                let written = self
                     .store
                     .record_sent_sighting(
                         candidate.delivery_id,
@@ -190,8 +190,9 @@ impl MailboxMaintenanceService {
                         &state.external_mail_id,
                         sent_metadata(&state, now, Some(entry.sent_at)),
                     )
-                    .await
-                    .map(|_| ());
+                    .await?;
+                step.observed |= written;
+                return Ok(());
             }
         }
         Ok(())

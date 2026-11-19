@@ -275,4 +275,229 @@ mod tests {
             assert!(parse(query).is_err(), "{query}");
         }
     }
+
+    mod confirm_route {
+        use std::borrow::Cow;
+        use std::future::ready;
+        use std::net::SocketAddr;
+        use std::sync::Arc;
+
+        use auction_application::admin::DeliverySentProofService;
+        use auction_application::core::ApplicationFuture;
+        use auction_application::delivery::{
+            DeliveryAdminCommand, DeliveryAdminDetail, DeliveryAdminError,
+            DeliveryAdminListRequest, DeliveryAdminPage, DeliveryAdminPort, DeliveryAdminResult,
+            DeliverySentConfirmationPort, ManualSentEvidence, PlayerSupportBundle,
+            PlayerSupportRequest, SentConfirmationCommand, SentConfirmationPreview,
+            SentConfirmationResult,
+        };
+        use auction_application::public::{
+            AdminLoginResult, AdminSessionIdentity, AdminSessionPort,
+        };
+        use auction_contracts::{
+            AdminDeliverySentEvidenceRequest, AdminDeliverySentProofConfirmRequest,
+        };
+        use auction_time::{Duration, Timestamp};
+        use axum::{
+            body::{Body, to_bytes},
+            extract::ConnectInfo,
+            http::{Request, StatusCode, header},
+        };
+        use tower::ServiceExt;
+        use uuid::Uuid;
+
+        use crate::{AdminApiState, AdminHttpSecurity, admin_router};
+
+        struct NoAssets;
+
+        impl rust_embed::RustEmbed for NoAssets {
+            fn get(_path: &str) -> Option<rust_embed::EmbeddedFile> {
+                None
+            }
+
+            fn iter() -> impl Iterator<Item = Cow<'static, str>> {
+                std::iter::empty()
+            }
+        }
+
+        struct ConfirmPorts {
+            delivery_id: Uuid,
+            current_fence: i64,
+        }
+
+        impl AdminSessionPort for ConfirmPorts {
+            fn login(
+                &self,
+                _: String,
+                _: Vec<u8>,
+                _: Timestamp,
+            ) -> ApplicationFuture<'_, AdminLoginResult> {
+                unreachable!("确认路由使用已有会话")
+            }
+
+            fn current(
+                &self,
+                token: String,
+                csrf: String,
+                now: Timestamp,
+            ) -> ApplicationFuture<'_, AdminSessionIdentity> {
+                assert_eq!((token.as_str(), csrf.as_str()), ("fixture", "fixture"));
+                Box::pin(ready(Ok(AdminSessionIdentity {
+                    actor: "operator".to_owned(),
+                    expires_at: now + Duration::minutes(15),
+                    absolute_expires_at: now + Duration::hours(8),
+                })))
+            }
+
+            fn touch(
+                &self,
+                token: String,
+                csrf: String,
+                now: Timestamp,
+            ) -> ApplicationFuture<'_, AdminSessionIdentity> {
+                self.current(token, csrf, now)
+            }
+
+            fn logout(&self, _: String, _: Timestamp) -> ApplicationFuture<'_, ()> {
+                unreachable!("确认路由不退出会话")
+            }
+        }
+
+        impl DeliveryAdminPort for ConfirmPorts {
+            fn list(
+                &self,
+                _: DeliveryAdminListRequest,
+            ) -> ApplicationFuture<'_, DeliveryAdminPage> {
+                unreachable!("确认路由不列投递")
+            }
+
+            fn detail(&self, _: Uuid) -> ApplicationFuture<'_, DeliveryAdminDetail> {
+                unreachable!("确认在事务内复核证据")
+            }
+
+            fn execute(
+                &self,
+                _: DeliveryAdminCommand,
+            ) -> ApplicationFuture<'_, DeliveryAdminResult> {
+                unreachable!("人工 Sent 确认使用专用端口")
+            }
+
+            fn player_support(
+                &self,
+                _: PlayerSupportRequest,
+            ) -> ApplicationFuture<'_, PlayerSupportBundle> {
+                unreachable!("确认路由不读取玩家支持")
+            }
+        }
+
+        impl DeliverySentConfirmationPort for ConfirmPorts {
+            fn preview_sent_confirmation<'a>(
+                &'a self,
+                _: Uuid,
+                _: ManualSentEvidence,
+                _: Option<&'a str>,
+            ) -> ApplicationFuture<'a, SentConfirmationPreview> {
+                unreachable!("本次请求提交已经完成的预览")
+            }
+
+            fn confirm_sent<'a>(
+                &'a self,
+                command: SentConfirmationCommand,
+                reference: Option<&'a str>,
+            ) -> ApplicationFuture<'a, SentConfirmationResult> {
+                assert_eq!(command.delivery_id, self.delivery_id);
+                assert_eq!(command.actor, "operator");
+                assert_eq!(command.expected_fencing_version, 4);
+                assert_eq!(reference, Some("mailbox_sweep:7000001"));
+                assert!(command.expected_fencing_version < self.current_fence);
+                Box::pin(ready(Err(DeliveryAdminError::Stale.into())))
+            }
+        }
+
+        #[tokio::test]
+        async fn sent_confirmation_route_returns_stale_delivery_state_for_an_old_fence() {
+            let delivery_id = Uuid::from_u128(7);
+            let ports = Arc::new(ConfirmPorts { delivery_id, current_fence: 5 });
+            let state = AdminApiState::new(
+                Some(ports.clone()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                AdminHttpSecurity::default(),
+            )
+            .with_delivery_sent_proof(Arc::new(DeliverySentProofService::new(
+                ports.clone(),
+                ports,
+            )));
+            let request = AdminDeliverySentProofConfirmRequest {
+                command_id: Uuid::from_u128(8),
+                expected_fencing_version: 4,
+                reason: "核对 Sent 附件".to_owned(),
+                evidence_reference: "mailbox_sweep:7000001".to_owned(),
+                evidence: AdminDeliverySentEvidenceRequest {
+                    schema_version: 1,
+                    world_id: "main".to_owned(),
+                    external_mail_id: "7000001".to_owned(),
+                    sender_uid: "1".to_owned(),
+                    sender_name: "Auction".to_owned(),
+                    recipient: "Sample".to_owned(),
+                    subject: "Payment".to_owned(),
+                    sent_minute: "2026-11-02T01:14:00Z".to_owned(),
+                    observed_at: "2026-11-02T01:20:00Z".to_owned(),
+                    original_body_digest: [1; 32],
+                    observed_body_digest: [1; 32],
+                    remaining_credits: 100,
+                    cod_pending: 0,
+                    equipment_ids: Vec::new(),
+                    collected: false,
+                    receipt: String::new(),
+                },
+                accept_collected_assets: false,
+                accept_attempt_history: false,
+            };
+            let response = admin_router::<NoAssets>("test", state.http_boundary())
+                .with_state(state)
+                .oneshot(
+                    Request::post(format!(
+                        "/api/v1/admin/deliveries/{delivery_id}/sent-proof/confirm"
+                    ))
+                    .extension(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 12345))))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header(
+                        header::COOKIE,
+                        "auction_admin_session=fixture; auction_admin_csrf=fixture",
+                    )
+                    .header("x-csrf-token", "fixture")
+                    .body(Body::from(serde_json::to_vec(&request).expect("序列化原预览")))
+                    .expect("构造确认请求"),
+                )
+                .await
+                .expect("执行真实确认路由");
+            assert_eq!(response.status(), StatusCode::CONFLICT);
+            let body = to_bytes(response.into_body(), 4096).await.expect("读取确认响应");
+            let body: serde_json::Value = serde_json::from_slice(&body).expect("确认错误信封");
+            assert_eq!(body["code"], "stale_delivery_state");
+        }
+    }
 }

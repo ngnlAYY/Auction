@@ -120,20 +120,35 @@ pub(super) async fn begin_detail(
     };
     let advanced =
         record_sweep_attempt(&mut *tx, "main", delivery_id, Some(fencing_version)).await?;
-    let reserved = advanced
-        && !attempted
-        && !has_observation(&metadata, &entry.external_mail_id)?
-        && reserve_detail(&mut tx, delivery_id, fencing_version, entry, attempt_id).await?;
+    let reserved = if advanced && !attempted {
+        match has_observation(&metadata, &entry.external_mail_id) {
+            Ok(false) => {
+                reserve_detail(&mut tx, delivery_id, fencing_version, entry, attempt_id).await?
+            }
+            Ok(true) => false,
+            Err(error) => {
+                // 损坏证据只阻断当前候选，仍须提交游标才能继续轮转（不变量 5、6）。
+                tracing::warn!(
+                    %delivery_id,
+                    fencing_version,
+                    error_category = ?error.classify(),
+                    "失败投递的 Sent 观察无法解码，跳过详情读取"
+                );
+                false
+            }
+        }
+    } else {
+        false
+    };
     // 未知提交不返回授权。留证与一次性读取登记是分开的，后者不能证明外部内容（不变量 5、6）。
     tx.commit().await.map_err(detail_storage_error)?;
     Ok(reserved)
 }
 
-fn has_observation(metadata: &Value, mid: &str) -> Result<bool, ApplicationError> {
+fn has_observation(metadata: &Value, mid: &str) -> Result<bool, serde_json::Error> {
     for kind in SENT_OBSERVATION_KINDS {
         if let Some(observation) = metadata.get(kind) {
-            let decoded =
-                decode_sent_observation(observation).map_err(ApplicationError::Serialization)?;
+            let decoded = decode_sent_observation(observation)?;
             if decoded.mid == mid {
                 return Ok(true);
             }

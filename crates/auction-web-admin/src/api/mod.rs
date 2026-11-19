@@ -52,6 +52,8 @@ pub(crate) use credentials::{
 pub(crate) use dashboard::{
     AdminCollectionOverdueItem, AdminDashboardSnapshot, AdminExternalAccountsData, fetch_dashboard,
 };
+#[cfg(test)]
+pub(crate) use delivery::DeliveryDetailGetFixture;
 pub(crate) use delivery::{
     DeliveryAction, DeliverySearchFilters, SentProofCommand, acknowledge_delivery,
     confirm_delivery_sent_proof, execute_delivery, fetch_deliveries, fetch_delivery_detail,

@@ -517,6 +517,7 @@ mod tests {
 
     struct FixtureStore {
         bind_called: Arc<AtomicBool>,
+        bind_recovered: bool,
         /// 一次性 discard 围栏是否授权。
         fence_granted: bool,
         take_calls: TakeCalls,
@@ -528,12 +529,14 @@ mod tests {
         detail_attempts: Mutex<HashSet<(Uuid, String)>>,
         sightings: Mutex<Vec<(Uuid, Value)>>,
         write_observations: bool,
+        write_sightings: bool,
         observation_attempts: AtomicUsize,
     }
     impl FixtureStore {
         fn new(bind_called: Arc<AtomicBool>, fence_granted: bool) -> Self {
             Self {
                 bind_called,
+                bind_recovered: true,
                 fence_granted,
                 take_calls: Arc::default(),
                 candidates: Vec::new(),
@@ -544,6 +547,7 @@ mod tests {
                 detail_attempts: Mutex::default(),
                 sightings: Mutex::default(),
                 write_observations: true,
+                write_sightings: true,
                 observation_attempts: AtomicUsize::new(0),
             }
         }
@@ -624,10 +628,10 @@ mod tests {
             _external_mail_id: &'a str,
             observation: Value,
         ) -> ApplicationFuture<'a, bool> {
-            if self.write_observations {
+            if self.write_sightings {
                 self.sightings.lock().expect("观察记录").push((delivery_id, observation));
             }
-            Box::pin(async { Ok(self.write_observations) })
+            Box::pin(async { Ok(self.write_sightings) })
         }
         fn record_compose_discard<'a>(
             &'a self,
@@ -646,7 +650,7 @@ mod tests {
             _expectation: Option<&'a DeliverySendExpectation>,
         ) -> ApplicationFuture<'a, bool> {
             self.bind_called.store(true, Ordering::SeqCst);
-            Box::pin(async { Ok(true) })
+            Box::pin(async { Ok(self.bind_recovered) })
         }
         fn bind_recovered_action<'a>(
             &'a self,
@@ -978,9 +982,9 @@ mod tests {
 
     #[test]
     fn failed_sent_detail_counts_only_a_persisted_sighting() {
-        for write_observations in [false, true] {
+        for write_sightings in [false, true] {
             let (maintenance, mut store) = failed_equipment();
-            store.write_observations = write_observations;
+            store.write_sightings = write_sightings;
             let maintenance = Arc::new(maintenance);
             let store = Arc::new(store);
             let service = MailboxMaintenanceService::new(
@@ -990,7 +994,7 @@ mod tests {
             );
             let report = run_sweep(&service);
             assert_eq!(maintenance.detail_reads.load(Ordering::SeqCst), 1);
-            assert_eq!(report.sent_observed, usize::from(write_observations));
+            assert_eq!(report.sent_observed, usize::from(write_sightings));
             assert_eq!(store.sightings.lock().expect("观察记录").len(), report.sent_observed);
         }
     }
@@ -1027,6 +1031,49 @@ mod tests {
             assert_eq!(maintenance.detail_reads.load(Ordering::SeqCst), 1);
             assert_eq!(store.observation_attempts.load(Ordering::SeqCst), 1);
             assert_eq!(report.sent_observed, usize::from(write_observations));
+        }
+    }
+
+    #[test]
+    fn full_sent_sweep_counts_each_candidate_with_a_persisted_sighting_once() {
+        for (exact, write_sightings) in [(false, false), (false, true), (true, true), (true, false)]
+        {
+            let (mut maintenance, mut store) = failed_equipment();
+            let target = store.failed_slots.pop().expect("观察夹具").target.expect("冻结夹具");
+            let mut send = candidate(maintenance.coverage.entries[0].sent_at, "reference");
+            send.recipient.clone_from(&target.expectation.recipient);
+            send.cod = target.expectation.cod;
+            send.attachment_ids.clone_from(&target.expectation.equipment_ids);
+            if exact {
+                maintenance
+                    .sent_state
+                    .as_mut()
+                    .expect("详情夹具")
+                    .remaining_equipment_ids
+                    .clone_from(&target.expectation.equipment_ids);
+            }
+            send.send_expectation = Some(target.expectation);
+            maintenance.coverage.covered_from = None;
+            store.candidates.push(MoogleMailboxSweepCandidate {
+                delivery_id: send.delivery_id,
+                send: Some(send),
+            });
+            store.bind_recovered = false;
+            store.write_sightings = write_sightings;
+            let store = Arc::new(store);
+            let service = MailboxMaintenanceService::new(
+                Arc::new(maintenance),
+                store.clone(),
+                Arc::new(NoopClock),
+            );
+            let report = run_sweep(&service);
+            assert_eq!(report.sent_recovered, 0);
+            assert_eq!(report.sent_observed, usize::from(exact || write_sightings));
+            assert_eq!(store.observation_attempts.load(Ordering::SeqCst), usize::from(exact));
+            assert_eq!(
+                store.sightings.lock().expect("目击记录").len(),
+                usize::from(write_sightings)
+            );
         }
     }
 

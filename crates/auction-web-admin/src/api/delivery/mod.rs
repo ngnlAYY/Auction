@@ -10,9 +10,10 @@ use auction_contracts::{
     AdminDeliverySentProofConfirmRequest, AdminDeliverySentProofPreviewRequest,
     AdminDeliverySentProofPreviewResponse, AdminDeliverySentProofResponse,
 };
-use gloo_net::http::Request;
+use gloo_net::http::{Method, Request};
 use uuid::Uuid;
 
+use super::transport::send_json_write;
 use super::{
     AdminApiFailure, MAX_JSON_SAFE_INTEGER, PlayerSupportBundle, fetch_csrf_token,
     invalid_request_error, invalid_response_error, response_error, response_failure, send_get,
@@ -44,6 +45,10 @@ fn delivery_detail_url(delivery_id: &str) -> String {
     format!("/api/v1/admin/deliveries/{delivery_id}?include=sent_proof")
 }
 
+#[cfg(test)]
+pub(crate) type DeliveryDetailGetFixture =
+    std::rc::Rc<dyn Fn(&str) -> AdminDeliveryDetailWithActionsResponse>;
+
 /// 读取单条投递的完整证据详情；响应必须精确对应请求的投递 ID。
 pub(crate) async fn fetch_delivery_detail(
     delivery_id: String,
@@ -51,7 +56,12 @@ pub(crate) async fn fetch_delivery_detail(
     if !valid_uuid(&delivery_id) {
         return Err("invalid_delivery_id".to_owned());
     }
-    let response = send_get(&delivery_detail_url(&delivery_id)).await?;
+    let url = delivery_detail_url(&delivery_id);
+    #[cfg(test)]
+    if let Some(get) = dioxus::prelude::try_consume_context::<DeliveryDetailGetFixture>() {
+        return Ok(get(&url));
+    }
+    let response = send_get(&url).await?;
     if !response.ok() {
         return Err(response_error(response).await);
     }
@@ -184,19 +194,7 @@ pub(crate) async fn confirm_delivery_sent_proof(
         accept_collected_assets,
         accept_attempt_history,
     };
-    let csrf_token = fetch_csrf_token().await.map_err(AdminApiFailure::client)?;
-    let response = send_request(|abort_signal| {
-        Request::post(&url)
-            .abort_signal(abort_signal)
-            .header("x-csrf-token", &csrf_token)
-            .json(&request)
-            .map_err(invalid_request_error)
-    })
-    .await
-    .map_err(AdminApiFailure::client)?;
-    if !response.ok() {
-        return Err(response_failure(response).await);
-    }
+    let response = send_json_write(&url, Method::POST, &request).await?;
     let payload: StrictDeliveryEnvelope<AdminDeliverySentProofResponse> = response
         .json()
         .await

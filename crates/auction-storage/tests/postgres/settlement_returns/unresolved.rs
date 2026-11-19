@@ -434,10 +434,11 @@ async fn seed_manual_sent_equipment(
     pool: &PgPool,
 ) -> (SentConfirmationCommand, DeliverySendExpectation) {
     let sent_minute = sent_list_minute_start(Timestamp::now() - Duration::minutes(2));
-    let sending_at = sent_minute + Duration::seconds(10);
-    let completed_at = sent_minute + Duration::seconds(20);
-    let observed_at = sent_minute + Duration::seconds(30);
-    let sale = insert_sale(pool, 7_640_022, sent_minute, 1).await;
+    let session = seed_equipment_sweep_session(pool).await;
+    seed_equipment_send(pool, &session, 7_640_022, sent_minute).await
+}
+
+async fn seed_equipment_sweep_session(pool: &PgPool) -> MailSession {
     let session = seed_mail_session(pool).await;
     sqlx::query(
         "INSERT INTO public.settlement_funding_accounts (uid, status, accounting_mode)
@@ -447,6 +448,19 @@ async fn seed_manual_sent_equipment(
     .execute(pool)
     .await
     .expect("写入资金账户");
+    session
+}
+
+async fn seed_equipment_send(
+    pool: &PgPool,
+    session: &MailSession,
+    sequence: i64,
+    sent_minute: Timestamp,
+) -> (SentConfirmationCommand, DeliverySendExpectation) {
+    let sending_at = sent_minute + Duration::seconds(10);
+    let completed_at = sent_minute + Duration::seconds(20);
+    let observed_at = sent_minute + Duration::seconds(30);
+    let sale = insert_sale(pool, sequence, sent_minute, 1).await;
     sqlx::query(
         "INSERT INTO public.lot_settlements
             (lot_id, end_price, listed_price, buyer_amount, seller_amount, tax_amount,
@@ -797,6 +811,7 @@ impl Clock for SweepClock {
 
 struct FailedSentMailbox {
     entry: MoogleMailboxSentEntry,
+    other_entries: Vec<MoogleMailboxSentEntry>,
     state: MoogleMailboxSentState,
     list_failed: AtomicBool,
     detail_failed: bool,
@@ -825,6 +840,7 @@ impl FailedSentMailbox {
         };
         Self {
             entry,
+            other_entries: Vec::new(),
             state,
             list_failed: AtomicBool::new(false),
             detail_failed: false,
@@ -867,7 +883,9 @@ impl MoogleMailboxMaintenance for FailedSentMailbox {
                 return Err(ApplicationError::CapabilityUnavailable("测试 Sent 列表读取失败"));
             }
             Ok(MoogleMailboxSentEntries {
-                entries: vec![self.entry.clone()],
+                entries: std::iter::once(self.entry.clone())
+                    .chain(self.other_entries.iter().cloned())
+                    .collect(),
                 complete: true,
                 ..MoogleMailboxSentEntries::default()
             })
@@ -947,9 +965,14 @@ async fn seed_admin_failed_equipment(
     store: &DatabaseStore,
 ) -> (SentConfirmationCommand, DeliverySendExpectation) {
     let (mut command, expectation) = seed_manual_sent_equipment(store.postgres_pool()).await;
+    reconcile_equipment_failed(store, &mut command).await;
+    (command, expectation)
+}
+
+async fn reconcile_equipment_failed(store: &DatabaseStore, command: &mut SentConfirmationCommand) {
     let failure = store
         .execute(equipment_admin_action(
-            &command,
+            command,
             DeliveryAdminAction::ReconcileFailed,
             Some("verified_not_sent"),
         ))
@@ -958,7 +981,6 @@ async fn seed_admin_failed_equipment(
     assert_eq!(failure.snapshot.status, "failed");
     command.expected_fencing_version = failure.snapshot.fencing_version;
     command.evidence.observed_at = Timestamp::now();
-    (command, expectation)
 }
 
 async fn failed_sent_sweep(service: &MailboxMaintenanceService) -> MailboxMaintenanceReport {
@@ -1141,5 +1163,86 @@ async fn postgres_failed_sent_sweep_respects_manual_budget_and_current_failure()
     assert_eq!(failed_sent_sweep(&service).await.sent_candidates, 0);
     assert_eq!(mailbox.detail_reads.load(Ordering::Relaxed), 1);
     assert_eq!(mailbox.list_reads.load(Ordering::Relaxed), 4);
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn postgres_failed_sent_sweep_skips_corrupt_observation_and_advances_cursor() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = Arc::new(database.store().await.expect("以运行账号连接"));
+    let pool = store.postgres_pool();
+    let session = seed_equipment_sweep_session(pool).await;
+    let oldest = sent_list_minute_start(Timestamp::now() - Duration::minutes(3));
+    let (mut bad, bad_expectation) = seed_equipment_send(pool, &session, 7_640_022, oldest).await;
+    let (mut healthy, healthy_expectation) =
+        seed_equipment_send(pool, &session, 7_640_023, oldest + Duration::minutes(1)).await;
+    healthy.evidence.external_mail_id = "781023".to_owned();
+    reconcile_equipment_failed(&store, &mut bad).await;
+    reconcile_equipment_failed(&store, &mut healthy).await;
+
+    let bad_entry = FailedSentMailbox::new(&bad, &bad_expectation).entry;
+    let mut corrupt = equipment_sweep_observation(&bad.evidence);
+    corrupt["mid"] = json!("781021");
+    corrupt["observed_at"] = json!("2026-11-31T00:00:00Z");
+    sqlx::query(
+        "UPDATE public.deliveries
+         SET result_metadata = result_metadata || jsonb_build_object('mailbox_sweep', $2::jsonb)
+         WHERE id = $1",
+    )
+    .bind(bad.delivery_id)
+    .bind(&corrupt)
+    .execute(pool)
+    .await
+    .expect("写入不同 MID 的损坏历史观察");
+
+    let slots = store.failed_sent_slots(None, oldest, 2).await.expect("按创建时间轮转");
+    assert_eq!(slots.len(), 2);
+    assert_eq!(
+        (slots[0].delivery_id, slots[1].delivery_id),
+        (bad.delivery_id, healthy.delivery_id)
+    );
+    assert!(slots.iter().all(|slot| slot.target.is_some()));
+    let mut mailbox = FailedSentMailbox::new(&healthy, &healthy_expectation);
+    mailbox.other_entries.push(bad_entry.clone());
+    let mailbox = Arc::new(mailbox);
+    let service =
+        MailboxMaintenanceService::new(mailbox.clone(), store.clone(), Arc::new(SweepClock));
+    let report = failed_sent_sweep(&service).await;
+    assert_eq!((report.sent_candidates, report.sent_matched, report.sent_observed), (2, 2, 1));
+    assert_eq!(mailbox.detail_reads.load(Ordering::Relaxed), 1);
+
+    let (bad_metadata, healthy_metadata, attempted): (Value, Value, bool) = sqlx::query_as(
+        "SELECT bad.result_metadata, healthy.result_metadata,
+                EXISTS (SELECT 1 FROM public.audit_records a WHERE a.entity_id = bad.id::text
+                        AND a.action = 'delivery.sent_failed_detail_attempt')
+         FROM public.deliveries bad, public.deliveries healthy WHERE bad.id = $1 AND healthy.id = $2",
+    )
+    .bind(bad.delivery_id)
+    .bind(healthy.delivery_id)
+    .fetch_one(pool)
+    .await
+    .expect("读取两条候选的持久事实");
+    assert_eq!(bad_metadata["mailbox_sweep"], corrupt);
+    assert!(bad_metadata.get("sent_reference_sighting").is_none());
+    assert!(!attempted);
+    assert_eq!(healthy_metadata["sent_reference_sighting"]["mid"], mailbox.entry.external_mail_id);
+
+    // 模拟本轮处理坏行后停止，下一轮须从已提交的坏行位置之后继续。
+    assert!(
+        !store
+            .begin_failed_sent_detail(
+                bad.delivery_id,
+                bad.expected_fencing_version,
+                Some(&bad_entry)
+            )
+            .await
+            .expect("坏行仍提交游标并拒绝读取")
+    );
+    let batch = store.unproven_sends("main", 10).await.expect("下一轮读取持久游标");
+    assert_eq!(batch.position.expect("坏行后的游标").delivery_id, bad.delivery_id);
+    let next = store.failed_sent_slots(batch.position, oldest, 1).await.expect("读取下一轮首位");
+    assert_eq!(next[0].delivery_id, healthy.delivery_id);
+    assert_eq!(failed_sent_sweep(&service).await.sent_observed, 0);
+    assert_eq!(mailbox.detail_reads.load(Ordering::Relaxed), 1);
     pool.close().await;
 }
