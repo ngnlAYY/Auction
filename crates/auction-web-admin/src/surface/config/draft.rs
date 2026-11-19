@@ -2,10 +2,12 @@
 
 use auction_contracts::AdminRuntimeConfigResponse;
 use dioxus::prelude::*;
+use serde_json::Value;
 
 use super::model::RuntimeConfigForm;
 use super::page::ConfigCommand;
 use super::page::ConfigNotice;
+use crate::api::{AdminApiFailure, validate_admin_runtime_config};
 use crate::surface::pending::{advance_command_reload, set_if_alive};
 use crate::surface::presentation::use_unload_warning;
 
@@ -25,6 +27,38 @@ pub(super) struct ConfigDraft {
 }
 
 impl ConfigDraft {
+    /// 在认证会话中预校验候选。回执只适用于发出时的基线和草稿内容。
+    pub(super) fn validate(mut self, fingerprint: String, document: Value, signature: String) {
+        let candidate = self.form.peek().clone();
+        self.validating.set(true);
+        dioxus::core::Runtime::current().in_scope(self.form.origin_scope(), || {
+            spawn(async move {
+                let result = validate_candidate(document).await;
+                // 配置页可能已经卸载；只有会话基线及原始编辑仍相同时才能采用回执。
+                let same_baseline =
+                    self.fingerprint.peek().as_deref() == Some(fingerprint.as_str());
+                if same_baseline && self.form.peek().same_edits_as(&candidate) {
+                    let notice = match result {
+                        Ok(result) => {
+                            if let Some(taxonomy) = result.equipment_taxonomy.as_ref() {
+                                self.form.write().refresh_equipment_taxonomy(taxonomy);
+                                self.checked_signature.set(signature);
+                                self.command.set(None);
+                                ConfigNotice::Validated
+                            } else {
+                                ConfigNotice::InvalidForm
+                            }
+                        }
+                        Err(error) if error.is_conflict() => ConfigNotice::Conflict,
+                        Err(error) => ConfigNotice::ActionError(error.code),
+                    };
+                    self.notice.set(Some(notice));
+                }
+                self.validating.set(false);
+            });
+        });
+    }
+
     pub(super) fn remember_restart_notice(self, required: bool) {
         // GET 只读取文件，不能证明进程已加载配置。没有重启确认时提醒随当前页面会话保留。
         if required {
@@ -49,6 +83,26 @@ impl ConfigDraft {
         advance_command_reload(self.refresh);
     }
 }
+
+async fn validate_candidate(
+    document: Value,
+) -> Result<AdminRuntimeConfigResponse, AdminApiFailure> {
+    #[cfg(test)]
+    if let Some(stub) = try_consume_context::<ConfigValidationStub>() {
+        assert_eq!(document["operations"]["forum"]["lease_duration_seconds"], 600);
+        return stub.0.fetch().await.map_err(|code| AdminApiFailure { status: None, code });
+    }
+    validate_admin_runtime_config(document).await
+}
+
+/// 宿主回归替换预校验传输，允许在请求挂起期间切换页面。
+#[cfg(test)]
+#[derive(Clone)]
+pub(super) struct ConfigValidationStub(
+    pub(super)  std::rc::Rc<
+        crate::surface::auctions::draft_page_tests::RecordRead<AdminRuntimeConfigResponse>,
+    >,
+);
 
 /// 安装一次草稿上下文；浏览器整页离开时由原生提示保护尚未保存的输入。
 pub(super) fn use_config_draft() {

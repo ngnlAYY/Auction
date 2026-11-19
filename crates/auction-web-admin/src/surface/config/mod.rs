@@ -12,6 +12,7 @@ mod mail_templates;
 mod model;
 mod operational_fields;
 mod page;
+mod reading;
 mod review;
 mod runtime_switches;
 mod validation;
