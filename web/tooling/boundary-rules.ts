@@ -26,11 +26,12 @@ export const REGISTERED_ALIASES: readonly RegisteredAlias[] = [
   { pattern: "@auction/web-shared/*", target: "shared/src/*" },
 ];
 
-// 这两个测试文件用 Bun 插件加载运行期虚拟模块，模块名由 ${NAMESPACE}:… 拼接而成。
+// 这几个测试文件用 Bun 插件加载运行期虚拟模块，模块名由 ${NAMESPACE}:… 拼接而成。
 // 只点名放行它们的非字面量 import()；新增同类夹具必须把完整路径加进这张清单。
 export const VIRTUAL_MODULE_TEST_FILES: ReadonlySet<string> = new Set([
   "web/public/src/surface/shell/navigation-fixture.test.ts",
   "web/public/src/surface/catalog/command-scope-fixture.test.ts",
+  "web/public/src/surface/reads/bid-log/page-tree-fixture.test.ts",
 ]);
 
 export interface SpecifierInput {

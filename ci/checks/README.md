@@ -87,7 +87,7 @@ bash ci/checks/web-boundaries-test.sh
 
 `web/` 之外的资产按归属放行：`crates/auction-web-shared/{assets,style}` 四个包都可引用，`crates/auction-web-public/{assets,i18n}` 只给 `public`，`crates/auction-web-admin/{assets,i18n}` 只给 `admin`。普通 `.css` 可直接引用；其他资产须带 `?raw` 或 `?url`，查询参数不改变目标路径的归属。Rust 源码、TypeScript 模块和 `web/` 之外的测试夹具不能借查询参数绕过。受检源码目录里出现任何符号链接（文件或目录）都以退出码 2 失败；判定通过的相对路径或别名目标如果在磁盘上存在，其 `realpath` 必须等于规范化后的词法路径，经过符号链接按越界（退出码 1）报告。
 
-动态导入只接受字符串字面量或无插值模板字面量；带插值或非字面量参数报错（无法静态判定）。唯一例外是 `web/public/src/surface/shell/navigation-fixture.test.ts` 与 `web/public/src/surface/catalog/command-scope-fixture.test.ts` 两个文件中的非字面量 `import()`（Bun 测试插件虚拟模块）；其他文件的非字面量 `import()` 与所有非字面量 `require()` 都报错，调用目标外面套任意层括号不影响 `require()` 识别。新增同类夹具必须修改检查器里的点名清单。读取 `web/admin/src` 不存在时只豁免这一个已知的尚未并入情况；其他源码目录读取失败、`package.json`/tsconfig 解析失败、配置不一致、实现模块加载失败或扫描结果为空都以退出码 2 失败。退出码 1 仅表示发现越界导入。`ci/checks/web-boundaries-test.sh` 用临时仓库覆盖允许、拒绝与退出码 2 用例；启用 TypeScript 解析器的整体用例在能运行解析器的环境中执行。
+动态导入只接受字符串字面量或无插值模板字面量；带插值或非字面量参数报错（无法静态判定）。唯一例外是 [web/tooling/boundary-rules.ts](../../web/tooling/boundary-rules.ts) 的 `VIRTUAL_MODULE_TEST_FILES` 点名的几个测试夹具里的非字面量 `import()`（Bun 测试插件的虚拟模块）；新增同类夹具要把完整路径加进这张清单；其他文件的非字面量 `import()` 与所有非字面量 `require()` 都报错，调用目标外面套任意层括号不影响 `require()` 识别。新增同类夹具必须修改检查器里的点名清单。读取 `web/admin/src` 不存在时只豁免这一个已知的尚未并入情况；其他源码目录读取失败、`package.json`/tsconfig 解析失败、配置不一致、实现模块加载失败或扫描结果为空都以退出码 2 失败。退出码 1 仅表示发现越界导入。`ci/checks/web-boundaries-test.sh` 用临时仓库覆盖允许、拒绝与退出码 2 用例；启用 TypeScript 解析器的整体用例在能运行解析器的环境中执行。
 
 ## unwrap/expect 门禁
 
