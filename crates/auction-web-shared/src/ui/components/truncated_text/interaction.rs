@@ -6,6 +6,8 @@ use dioxus::prelude::*;
 
 use super::TooltipPosition;
 use super::document::{self, Document, PortalElement};
+#[cfg(any(target_arch = "wasm32", test))]
+use super::tracking::AnchorFrames;
 use crate::a11y::{EscapeUnsubscribe, use_document_escape};
 
 #[derive(Clone, Copy)]
@@ -19,16 +21,23 @@ pub(super) struct TooltipInteraction {
     pub(super) dismissed: Signal<bool>,
     pub(super) close_revision: Signal<u64>,
     pub(super) portal: Signal<Option<PortalElement>>,
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub(super) anchor_frames: CopyValue<Option<AnchorFrames>>,
 }
 
 impl TooltipInteraction {
     pub(super) fn close_programmatically(self, tooltip_id: &str) {
         if self.position.peek().is_some() {
-            self.dismiss(document::current().as_ref(), tooltip_id);
+            self.dismiss(document::current().as_ref(), tooltip_id, None);
         }
     }
 
-    fn dismiss(self, document: Option<&Document>, tooltip_id: &str) -> bool {
+    pub(super) fn dismiss(
+        self,
+        document: Option<&Document>,
+        tooltip_id: &str,
+        previous_parent: Option<&document::Element>,
+    ) -> bool {
         if self.position.peek().is_none() {
             return false;
         }
@@ -39,7 +48,9 @@ impl TooltipInteraction {
             if !document::contains(&popup, &focus) {
                 return None;
             }
-            let trigger = document.get_element_by_id(&format!("{tooltip_id}-trigger"))?;
+            let trigger = document
+                .get_element_by_id(&format!("{tooltip_id}-trigger"))
+                .or_else(|| previous_parent.cloned())?;
             Some((document, trigger))
         });
         self.close();
@@ -50,12 +61,19 @@ impl TooltipInteraction {
     }
 
     pub(super) fn close(mut self) {
+        #[cfg(any(target_arch = "wasm32", test))]
+        self.stop_anchor_tracking();
         self.position.set(None);
         self.pinned.set(false);
         self.popup_hovered.set(false);
         self.popup_focused.set(false);
         self.dismissed.set(true);
         super::tooltip::remove_tooltip(self.portal);
+    }
+
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub(super) fn stop_anchor_tracking(mut self) {
+        drop(self.anchor_frames.write().take());
     }
 
     /// 给指针跨越触发文本与浮层之间的间隙留出时间；旧任务不能关闭新一轮浮层。
@@ -133,7 +151,7 @@ fn escape_tooltip(document: &Document, tooltip_id: &str, state: TooltipInteracti
             })
             .is_some_and(|id| id == tooltip_id)
     });
-    owns_escape && state.dismiss(Some(document), tooltip_id)
+    owns_escape && state.dismiss(Some(document), tooltip_id, None)
 }
 
 #[cfg(target_arch = "wasm32")]

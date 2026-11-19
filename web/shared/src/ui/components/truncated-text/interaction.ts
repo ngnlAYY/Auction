@@ -23,8 +23,9 @@ export interface TooltipInteractionState {
 /** 带有显式关闭与延迟关闭能力的浮层交互状态。 */
 export interface TooltipInteraction extends TooltipInteractionState {
   close(): void;
-  dismiss(): boolean;
+  dismiss(previousParent?: Element | null): boolean;
   deferClose(): void;
+  setAnchorTracking(stop: (() => void) | null): void;
 }
 
 /** 由既有信号创建浮层交互；关闭会清空固定与悬停状态并标记本次拒绝。 */
@@ -33,7 +34,13 @@ export function createTooltipInteraction(
   tasks: TaskScope,
   tooltipId: string,
 ): TooltipInteraction {
+  let stopTracking: (() => void) | null = null;
+  const setAnchorTracking = (stop: (() => void) | null): void => {
+    stopTracking?.();
+    stopTracking = stop;
+  };
   const close = (): void => {
+    setAnchorTracking(null);
     state.position.set(null);
     state.pinned.set(false);
     state.popupHovered.set(false);
@@ -41,13 +48,14 @@ export function createTooltipInteraction(
     state.dismissed.set(true);
     hideTooltip(state.position, state.portal);
   };
-  const dismiss = (): boolean => {
+  const dismiss = (previousParent: Element | null = null): boolean => {
     if (state.position.peek() === null) return false;
-    // 卸载前记录浮层的焦点归属。悬停提示收起时保留页面其他控件的焦点。
+    // 只有浮层持有焦点才还焦；锚点移除后只尝试仍连接的原入口容器。
     const active = globalThis.document?.activeElement ?? null;
     const trigger =
       active !== null && document.getElementById(tooltipId)?.contains(active)
-        ? document.getElementById(`${tooltipId}-trigger`)
+        ? (document.getElementById(`${tooltipId}-trigger`) ??
+          (previousParent?.isConnected ? previousParent : null))
         : null;
     close();
     if (trigger !== null) focusClosestControl(trigger);
@@ -72,7 +80,7 @@ export function createTooltipInteraction(
       }
     });
   };
-  return { ...state, close, dismiss, deferClose };
+  return { ...state, close, dismiss, deferClose, setAnchorTracking };
 }
 
 const POPUP_EVENTS: readonly string[] = ["mouseenter", "mouseleave", "focusin", "focusout"];

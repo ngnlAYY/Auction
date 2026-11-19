@@ -2,131 +2,35 @@
 
 import { expect, test } from "bun:test";
 import { createRoot, flush } from "solid-js";
+import { createCell } from "../../../reactive/cell";
+import { createTaskScope } from "../../../reactive/tasks";
+import type { TooltipPosition } from ".";
 import { TruncatedText } from ".";
-
-const NATIVE = "dialog:modal";
-const OPEN = "dialog[open]";
-const ARIA = '[role="dialog"][aria-modal="true"]';
-
-class ElementFixture extends EventTarget {
-  readonly attributes = new Map<string, string>();
-  readonly children: ElementFixture[] = [];
-  readonly style = { setProperty() {} };
-  readonly scrollWidth = 100;
-  readonly clientWidth = 50;
-  parentNode: ElementFixture | null = null;
-  onHover: (() => void) | null = null;
-
-  constructor(
-    readonly tag: string,
-    private readonly fixture: DocumentFixture,
-  ) {
-    super();
-  }
-
-  get isConnected(): boolean {
-    return this.fixture.body.contains(this);
-  }
-
-  matches(selector: string): boolean {
-    if (selector === NATIVE) {
-      if (!this.fixture.modalSelector) throw new SyntaxError("测试浏览器不支持 :modal");
-      return this.tag === "dialog" && this.attributes.has("modal");
-    }
-    if (selector === OPEN) return this.tag === "dialog" && this.attributes.has("open");
-    if (selector === ARIA) return this.attributes.get("aria-modal") === "true";
-    if (selector === "a[href]") return this.tag === "a" && this.attributes.has("href");
-    return selector === "button:not([disabled])" && this.tag === "button";
-  }
-
-  closest(selector: string): ElementFixture | null {
-    return selector.split(",").some((part) => this.matches(part))
-      ? this
-      : (this.parentNode?.closest(selector) ?? null);
-  }
-
-  contains(other: ElementFixture): boolean {
-    return this === other || this.children.some((child) => child.contains(other));
-  }
-
-  *descendants(): Iterable<ElementFixture> {
-    for (const child of this.children) {
-      yield child;
-      yield* child.descendants();
-    }
-  }
-
-  querySelectorAll(selector: string) {
-    if (selector === NATIVE && !this.fixture.modalSelector) throw new SyntaxError("不支持 :modal");
-    const nodes = [...this.descendants()].filter((node) => node.matches(selector));
-    return Object.assign(nodes, { item: (index: number) => nodes[index] ?? null });
-  }
-
-  setAttribute(key: string, value: string): void {
-    this.attributes.set(key, value);
-  }
-
-  appendChild(child: ElementFixture): void {
-    child.parentNode?.removeChild(child);
-    this.children.push(child);
-    child.parentNode = this;
-  }
-
-  removeChild(child: ElementFixture): void {
-    const index = this.children.indexOf(child);
-    if (index >= 0) this.children.splice(index, 1);
-    child.parentNode = null;
-  }
-
-  isSameNode(other: ElementFixture): boolean {
-    return this === other;
-  }
-
-  focus(): void {
-    this.fixture.activeElement = this;
-  }
-
-  getBoundingClientRect() {
-    return { top: 80, bottom: 100, left: 10 };
-  }
-}
-
-class DocumentFixture extends EventTarget {
-  readonly body = new ElementFixture("body", this);
-  activeElement: ElementFixture | null = null;
-  modalSelector = true;
-
-  createElement(tag: string): ElementFixture {
-    return new ElementFixture(tag, this);
-  }
-
-  querySelectorAll(selector: string) {
-    return this.body.querySelectorAll(selector);
-  }
-
-  getElementById(id: string): ElementFixture | null {
-    return [...this.body.descendants()].find((node) => node.attributes.get("id") === id) ?? null;
-  }
-
-  escape(target: ElementFixture, isComposing = false): boolean {
-    const event = new Event("keydown", { cancelable: true });
-    Object.defineProperties(event, {
-      key: { value: "Escape" },
-      isComposing: { value: isComposing },
-      target: { value: target },
-    });
-    this.dispatchEvent(event);
-    flush();
-    return event.defaultPrevented;
-  }
-}
+import { createTooltipInteraction } from "./interaction";
+import { DocumentFixture, ElementFixture } from "./test-document";
+import { showTooltip } from "./tooltip";
 
 function mountPage() {
   const dom = new DocumentFixture();
+  const frames = new Map<number, FrameRequestCallback>();
+  let nextFrame = 0;
   const window = Object.assign(new EventTarget(), {
     document: dom,
     innerWidth: 800,
     innerHeight: 600,
+    requestAnimationFrame(callback: FrameRequestCallback): number {
+      const id = nextFrame;
+      nextFrame += 1;
+      frames.set(id, callback);
+      return id;
+    },
+    cancelAnimationFrame(id: number): void {
+      frames.delete(id);
+    },
+    getComputedStyle(element: ElementFixture) {
+      element.styleReads += 1;
+      return element.overflow;
+    },
   });
   const globals = {
     document: dom,
@@ -150,6 +54,15 @@ function mountPage() {
   return {
     dom,
     element,
+    pendingFrames: () => frames.size,
+    advanceFrame() {
+      for (const id of [...frames.keys()]) {
+        const callback = frames.get(id);
+        frames.delete(id);
+        callback?.(0);
+      }
+      flush();
+    },
     tooltip(parent = dom.body) {
       const link = element("a", parent);
       link.setAttribute("href", "/equipment");
@@ -175,6 +88,7 @@ function mountPage() {
               display: "Robe",
               portal: true,
               focusable: false,
+              anchorOrder: 3,
             });
             return dispose;
           }),
@@ -188,6 +102,7 @@ function mountPage() {
       if (popupId === undefined || trigger.onHover === null) throw new Error("缺少提示触发组件");
       return {
         link,
+        trigger,
         popup: () => dom.getElementById(popupId),
         hover() {
           trigger.onHover?.();
@@ -227,6 +142,192 @@ test("悬停提示响应外部焦点的 Escape，浮层有焦点时还给链接"
     expect(hint.popup()).toBeNull();
     expect(page.dom.activeElement).toBe(hint.link);
     expect(page.dom.escape(hint.link)).toBe(false);
+  } finally {
+    page.dispose();
+  }
+});
+
+test("展开的提示跟随同序号锚点，静止和亚像素抖动不写位置", () => {
+  const page = mountPage();
+  try {
+    const hint = page.tooltip();
+    expect(page.pendingFrames()).toBe(0);
+    const popup = hint.hover();
+    const top = "--truncated-text-tooltip-top";
+    expect(popup.styleValues.get(top)).toBe("108px");
+    expect(page.pendingFrames()).toBe(1);
+    const writes = popup.styleWrites;
+    const reads = hint.trigger.rectangleReads;
+    page.advanceFrame();
+    hint.trigger.rectangle = { ...hint.trigger.rectangle, top: 80.1, bottom: 100.1 };
+    page.advanceFrame();
+    expect(hint.trigger.rectangleReads).toBe(reads + 2);
+    expect(popup.styleWrites).toBe(writes);
+    expect(page.pendingFrames()).toBe(1);
+
+    popup.focus();
+    hint.trigger.rectangle = { ...hint.trigger.rectangle, top: 140, bottom: 160 };
+    page.advanceFrame();
+    expect(hint.popup()).toBe(popup);
+    expect(popup.styleValues.get(top)).toBe("168px");
+    expect(page.dom.activeElement).toBe(popup);
+
+    page.dom.setHidden(true);
+    hint.trigger.rectangle = { ...hint.trigger.rectangle, top: 170, bottom: 190 };
+    expect(page.pendingFrames()).toBe(0);
+    page.advanceFrame();
+    expect(popup.styleValues.get(top)).toBe("168px");
+    page.dom.setHidden(false);
+    expect(page.pendingFrames()).toBe(1);
+    page.advanceFrame();
+    expect(popup.styleValues.get(top)).toBe("198px");
+
+    expect(page.dom.escape(popup)).toBe(true);
+    expect(page.pendingFrames()).toBe(0);
+    page.dom.setHidden(true);
+    page.dom.setHidden(false);
+    expect(page.pendingFrames()).toBe(0);
+    hint.hover();
+    expect(page.pendingFrames()).toBe(1);
+  } finally {
+    page.dispose();
+  }
+  expect(page.pendingFrames()).toBe(0);
+  page.dom.setHidden(true);
+  page.dom.setHidden(false);
+  expect(page.pendingFrames()).toBe(0);
+});
+
+test("静止与跨半像素边界的抖动都不写状态，放置方向保持不变", () => {
+  const page = mountPage();
+  try {
+    createRoot((dispose) => {
+      const trigger = page.element("span");
+      if (!(trigger instanceof Element)) throw new Error("缺少 DOM 替身");
+      const move = (top: number): void => {
+        trigger.rectangle = { ...trigger.rectangle, top, bottom: top + 41, height: 41 };
+      };
+      move(279.49);
+      let writes = 0;
+      const countedCell = <T>(value: T) => {
+        const cell = createCell(value);
+        const set = cell.set;
+        cell.set = (next) => {
+          writes += 1;
+          set(next);
+        };
+        return cell;
+      };
+      const interaction = createTooltipInteraction(
+        {
+          position: countedCell<TooltipPosition | null>(null),
+          focused: countedCell(false),
+          hovered: countedCell(false),
+          popupHovered: countedCell(false),
+          popupFocused: countedCell(false),
+          pinned: countedCell(false),
+          dismissed: countedCell(false),
+          closeRevision: countedCell(0),
+          portal: countedCell<HTMLElement | null>(null),
+        },
+        createTaskScope(),
+        "stationary-tooltip",
+      );
+      try {
+        showTooltip(trigger, true, countedCell(false), interaction, {
+          value: "Full text",
+          tooltipId: "stationary-tooltip",
+          className: "shared-truncated-text__tooltip",
+          portal: false,
+        });
+        const opened = writes;
+        const position = interaction.position.peek();
+        expect(position).toMatchObject({ top: 328.49, placement: "below" });
+        expect(opened).toBeGreaterThan(0);
+        expect(page.pendingFrames()).toBe(1);
+        for (const top of [279.49, 279.51, 279.49, 279.51, 279.79, 279.98]) {
+          move(top);
+          page.advanceFrame();
+          expect(interaction.position.peek()).toBe(position);
+          expect(writes).toBe(opened);
+        }
+        move(280);
+        page.advanceFrame();
+        expect(interaction.position.peek()).toMatchObject({ top: 272, placement: "above" });
+        expect(writes).toBe(opened + 1);
+      } finally {
+        interaction.setAnchorTracking(null);
+        dispose();
+      }
+    });
+  } finally {
+    page.dispose();
+  }
+});
+
+test("锚点仍在视口内但被单轴裁剪祖先完全挡住时收起并还焦", () => {
+  const page = mountPage();
+  try {
+    const clip = page.element("section");
+    clip.overflow.overflowX = "clip";
+    clip.rectangle = { left: 0, right: 100, top: 150, bottom: 200, width: 100, height: 50 };
+    const hint = page.tooltip(clip);
+    const move = (left: number): void => {
+      hint.trigger.rectangle = { ...hint.trigger.rectangle, left, right: left + 50 };
+    };
+    move(1);
+    const popup = hint.hover();
+    popup.focus();
+
+    page.advanceFrame();
+    expect(clip.styleReads).toBe(0);
+    move(2);
+    page.advanceFrame();
+    expect(hint.popup()).toBe(popup);
+    expect(page.dom.activeElement).toBe(popup);
+    const reads = clip.styleReads;
+    page.advanceFrame();
+    expect(clip.styleReads).toBe(reads);
+
+    move(100);
+    page.advanceFrame();
+    expect(hint.popup()).toBeNull();
+    expect(reads).toBe(1);
+    expect(page.dom.activeElement).toBe(hint.link);
+    expect(page.pendingFrames()).toBe(0);
+  } finally {
+    page.dispose();
+  }
+});
+
+test.each([
+  { loss: "detached", popupFocused: true, expectedFocus: "link" },
+  { loss: "detached row", popupFocused: true, expectedFocus: "body" },
+  { loss: "detached", popupFocused: false, expectedFocus: "outside" },
+  { loss: "empty", popupFocused: true, expectedFocus: "link" },
+  { loss: "offscreen", popupFocused: false, expectedFocus: "outside" },
+] as const)("锚点失效时关闭提示并按焦点归属还焦 $loss $popupFocused", (scenario) => {
+  const page = mountPage();
+  try {
+    const outside = page.element("button");
+    const hint = page.tooltip();
+    const popup = hint.hover();
+    (scenario.popupFocused ? popup : outside).focus();
+    expect(page.pendingFrames()).toBe(1);
+
+    if (scenario.loss === "detached") hint.link.removeChild(hint.trigger);
+    if (scenario.loss === "detached row") page.dom.body.removeChild(hint.link);
+    if (scenario.loss === "empty") {
+      hint.trigger.rectangle = { ...hint.trigger.rectangle, right: 10, width: 0 };
+    }
+    if (scenario.loss === "offscreen") {
+      hint.trigger.rectangle = { ...hint.trigger.rectangle, top: 600, bottom: 620 };
+    }
+    page.advanceFrame();
+    expect(hint.popup()).toBeNull();
+    const focusTargets = { link: hint.link, outside, body: page.dom.body };
+    expect(page.dom.activeElement).toBe(focusTargets[scenario.expectedFocus]);
+    expect(page.pendingFrames()).toBe(0);
   } finally {
     page.dispose();
   }

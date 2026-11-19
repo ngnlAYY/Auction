@@ -7,6 +7,8 @@ mod interaction;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;
 mod tooltip;
+#[cfg(any(target_arch = "wasm32", test))]
+mod tracking;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use host_document::TooltipBrowserFixture;
@@ -157,7 +159,6 @@ pub fn TruncatedText(
         use_drop(move || cleanup_subscription.set(None));
     }
     let portal_element = use_signal(|| None::<PortalElement>);
-    use_drop(move || remove_tooltip(portal_element));
     #[cfg(target_arch = "wasm32")]
     let dismiss_handle = use_hook(|| Rc::new(RefCell::new(None::<TooltipDismissHandle>)));
     let mut interaction = TooltipInteraction {
@@ -170,7 +171,14 @@ pub fn TruncatedText(
         dismissed,
         close_revision,
         portal: portal_element,
+        #[cfg(any(target_arch = "wasm32", test))]
+        anchor_frames: use_hook(|| CopyValue::new(None)),
     };
+    use_drop(move || {
+        #[cfg(any(target_arch = "wasm32", test))]
+        interaction.stop_anchor_tracking();
+        remove_tooltip(portal_element);
+    });
     use_tooltip_escape(tooltip_id, interaction);
     let anchor_order = try_consume_context::<AnchorOrder>();
     let mut revealed_order = use_signal(|| None::<usize>);

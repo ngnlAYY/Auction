@@ -33,6 +33,16 @@ pub(super) struct DomElement {
     pub(super) parent: Option<Rc<DomElement>>,
     pub(super) modal_selector_unsupported: bool,
     portal_text: Option<String>,
+    #[cfg(test)]
+    pub(super) rectangle: Rc<Cell<(f64, f64, f64, f64)>>,
+    #[cfg(test)]
+    pub(super) rectangle_reads: Rc<Cell<usize>>,
+    #[cfg(test)]
+    pub(super) overflow: Rc<Cell<(&'static str, &'static str)>>,
+    #[cfg(test)]
+    pub(super) overflow_reads: Rc<Cell<usize>>,
+    #[cfg(test)]
+    pub(super) portal_writes: Option<Rc<PortalWrites>>,
 }
 
 impl DomElement {
@@ -78,8 +88,14 @@ impl DomElement {
         other.ancestors().any(|element| element.id == self.id)
     }
 
-    pub(super) fn bounding_box(&self) -> (f64, f64, f64) {
-        (20.0, 50.0, 80.0)
+    pub(super) fn bounding_box(&self) -> [f64; 4] {
+        #[cfg(test)]
+        {
+            self.rectangle_reads.set(self.rectangle_reads.get() + 1);
+            self.rectangle.get().into()
+        }
+        #[cfg(not(test))]
+        [20.0, 50.0, 120.0, 80.0]
     }
 
     pub(super) fn scroll_width(&self) -> i32 {
@@ -95,9 +111,45 @@ impl DomElement {
 pub(super) struct DomPortal {
     browser: Rc<TooltipBrowserFixture>,
     pub(super) id: String,
+    #[cfg(test)]
+    writes: Rc<PortalWrites>,
+}
+
+#[cfg(test)]
+#[derive(Default)]
+pub(super) struct PortalWrites {
+    pub(super) values: RefCell<BTreeMap<String, String>>,
+    pub(super) count: Cell<usize>,
+}
+
+#[cfg(test)]
+impl PortalWrites {
+    pub(super) fn set_property(
+        &self,
+        name: &str,
+        value: &str,
+    ) -> Result<(), std::convert::Infallible> {
+        self.values.borrow_mut().insert(name.to_owned(), value.to_owned());
+        self.count.set(self.count.get() + 1);
+        Ok(())
+    }
 }
 
 impl DomPortal {
+    #[cfg(test)]
+    pub(super) fn set_attribute(
+        &self,
+        name: &str,
+        value: &str,
+    ) -> Result<(), std::convert::Infallible> {
+        self.writes.set_property(name, value)
+    }
+
+    #[cfg(test)]
+    pub(super) fn style(&self) -> &PortalWrites {
+        &self.writes
+    }
+
     pub(super) fn remove(self) {
         self.browser.nodes.borrow_mut().remove(&self.id);
         if *self.browser.focused.borrow() == self.id {
@@ -107,6 +159,9 @@ impl DomPortal {
 }
 
 type EscapeCallback = Rc<dyn Fn() -> bool>;
+
+#[cfg(test)]
+type BrowserCallback = Rc<dyn Fn()>;
 
 #[derive(Default)]
 /// 在宿主回归中替代截断提示使用的浏览器焦点、几何与节点操作。
@@ -122,6 +177,14 @@ pub struct TooltipBrowserFixture {
     pub(super) focused: RefCell<String>,
     pub(super) keydown: RefCell<BTreeMap<u32, EscapeCallback>>,
     pub(super) next_listener: Cell<u32>,
+    #[cfg(test)]
+    pub(super) frames: RefCell<BTreeMap<i32, BrowserCallback>>,
+    #[cfg(test)]
+    pub(super) visibility: RefCell<BTreeMap<u32, BrowserCallback>>,
+    #[cfg(test)]
+    pub(super) hidden: Cell<bool>,
+    #[cfg(test)]
+    pub(super) next_frame: Cell<i32>,
 }
 
 impl TooltipBrowserFixture {
@@ -164,6 +227,16 @@ impl TooltipBrowserFixture {
                 parent: parent.map(Rc::new),
                 modal_selector_unsupported: self.modal_selector_unsupported,
                 portal_text: None,
+                #[cfg(test)]
+                rectangle: Rc::new(Cell::new((20.0, 50.0, 120.0, 80.0))),
+                #[cfg(test)]
+                rectangle_reads: Rc::new(Cell::new(0)),
+                #[cfg(test)]
+                overflow: Rc::new(Cell::new(("visible", "visible"))),
+                #[cfg(test)]
+                overflow_reads: Rc::new(Cell::new(0)),
+                #[cfg(test)]
+                portal_writes: None,
             },
         );
     }
@@ -212,10 +285,21 @@ impl TooltipBrowserFixture {
         text: &str,
     ) -> DomPortal {
         self.add_element(id, ElementKind::Control, Some(parent.clone()));
+        #[cfg(test)]
+        let writes = Rc::new(PortalWrites::default());
         if let Some(portal) = self.nodes.borrow_mut().get_mut(id) {
             portal.portal_text = Some(text.to_owned());
+            #[cfg(test)]
+            {
+                portal.portal_writes = Some(Rc::clone(&writes));
+            }
         }
-        DomPortal { browser: Rc::clone(self), id: id.to_owned() }
+        DomPortal {
+            browser: Rc::clone(self),
+            id: id.to_owned(),
+            #[cfg(test)]
+            writes,
+        }
     }
 
     pub(super) fn listen_escape(
@@ -234,5 +318,25 @@ impl TooltipBrowserFixture {
     pub(super) fn dispatch_escape(&self) -> bool {
         let listeners: Vec<_> = self.keydown.borrow().values().cloned().collect();
         listeners.iter().any(|callback| callback())
+    }
+
+    #[cfg(test)]
+    pub(super) fn advance_frame(&self) {
+        let pending: Vec<_> = self.frames.borrow().keys().copied().collect();
+        for id in pending {
+            let callback = self.frames.borrow_mut().remove(&id);
+            if let Some(callback) = callback {
+                callback();
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn set_hidden(&self, hidden: bool) {
+        self.hidden.set(hidden);
+        let callbacks: Vec<_> = self.visibility.borrow().values().cloned().collect();
+        for callback in callbacks {
+            callback();
+        }
     }
 }

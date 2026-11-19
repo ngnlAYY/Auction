@@ -93,7 +93,7 @@ pub(super) fn mount_portal(
     _position: TooltipPosition,
 ) -> Option<PortalElement> {
     #[cfg(target_arch = "wasm32")]
-    {
+    let tooltip = {
         let tooltip = match _previous {
             Some(tooltip) => tooltip,
             None => document.create_element("span").ok()?.dyn_into::<PortalElement>().ok()?,
@@ -106,21 +106,28 @@ pub(super) fn mount_portal(
         let _ = tooltip.set_attribute("class", &request.class_name);
         let _ = tooltip.set_attribute("role", "tooltip");
         let _ = tooltip.set_attribute("tabindex", "0");
-        let _ = tooltip.set_attribute("data-placement", _position.placement);
         tooltip.set_text_content(Some(&request.value));
-        let style = tooltip.style();
-        for (property, value) in [
-            ("--truncated-text-tooltip-left", _position.left),
-            ("--truncated-text-tooltip-top", _position.top),
-            ("--truncated-text-tooltip-width", _position.width),
-            ("--truncated-text-tooltip-max-height", _position.maximum_height),
-        ] {
-            let _ = style.set_property(property, &format!("{value}px"));
-        }
-        Some(tooltip)
-    }
+        tooltip
+    };
     #[cfg(not(target_arch = "wasm32"))]
-    Some(document.append_portal(parent, &request.tooltip_id, &request.value))
+    let tooltip = document.append_portal(parent, &request.tooltip_id, &request.value);
+    #[cfg(any(target_arch = "wasm32", test))]
+    position_portal(&tooltip, _position);
+    Some(tooltip)
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+pub(super) fn position_portal(tooltip: &PortalElement, position: TooltipPosition) {
+    let _ = tooltip.set_attribute("data-placement", position.placement);
+    let style = tooltip.style();
+    for (property, value) in [
+        ("--truncated-text-tooltip-left", position.left),
+        ("--truncated-text-tooltip-top", position.top),
+        ("--truncated-text-tooltip-width", position.width),
+        ("--truncated-text-tooltip-max-height", position.maximum_height),
+    ] {
+        let _ = style.set_property(property, &format!("{value}px"));
+    }
 }
 
 pub(super) fn remove_portal(element: PortalElement) {
@@ -142,12 +149,44 @@ pub(super) fn listen_escape(
     }
 }
 
-pub(super) fn anchor_left_top_bottom(element: &Element) -> (f64, f64, f64) {
+pub(super) fn anchor_rectangle(element: &Element) -> [f64; 4] {
     cfg_select! {
         target_arch = "wasm32" => {
             let rectangle = element.get_bounding_client_rect();
-            (rectangle.left(), rectangle.top(), rectangle.bottom())
+            [rectangle.left(), rectangle.top(), rectangle.right(), rectangle.bottom()]
         }
         _ => element.bounding_box(),
     }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+pub(super) fn is_connected(_document: &Document, element: &Element) -> bool {
+    cfg_select! {
+        target_arch = "wasm32" => element.is_connected(),
+        _ => _document.get_element_by_id(&element.id)
+            .is_some_and(|current| Rc::ptr_eq(&current.rectangle, &element.rectangle)),
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+pub(super) fn parent_element(element: &Element) -> Option<Element> {
+    cfg_select! {
+        target_arch = "wasm32" => element.parent_element(),
+        _ => element.parent.as_deref().cloned(),
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+pub(super) fn clipping_axes(element: &Element) -> Option<(bool, bool)> {
+    #[cfg(target_arch = "wasm32")]
+    let (overflow_x, overflow_y) = {
+        let style = web_sys::window()?.get_computed_style(element).ok()??;
+        (style.get_property_value("overflow-x").ok()?, style.get_property_value("overflow-y").ok()?)
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    let (overflow_x, overflow_y) = {
+        element.overflow_reads.set(element.overflow_reads.get() + 1);
+        element.overflow.get()
+    };
+    Some((overflow_x != "visible", overflow_y != "visible"))
 }

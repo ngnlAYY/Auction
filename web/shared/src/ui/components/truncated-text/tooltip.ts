@@ -2,6 +2,7 @@
 
 import { containingModal } from "../../../platform/a11y/escape";
 import type { Cell } from "../../../reactive/cell";
+import { structuralEquals } from "../../../reactive/equality";
 import type { TooltipPosition, TooltipRequest } from ".";
 import type { TooltipInteraction } from "./interaction";
 
@@ -58,26 +59,7 @@ export function showTooltip(
   }
 
   const rectangle = element.getBoundingClientRect();
-  const [viewportLeft, viewportTop, viewportWidth, viewportHeight] = tooltipViewportBounds();
-  const width = Math.min(360, Math.max(viewportWidth - 16, 1));
-  const gap = 8;
-  const margin = 8;
-  const minimumTop = viewportTop + margin;
-  const maximumTop = Math.max(viewportTop + viewportHeight - margin, minimumTop);
-  const aboveTop = clamp(rectangle.top - gap, minimumTop, maximumTop);
-  const belowTop = clamp(rectangle.bottom + gap, minimumTop, maximumTop);
-  const availableAbove = Math.max(aboveTop - minimumTop, 1);
-  const availableBelow = Math.max(maximumTop - belowTop, 1);
-  const above = availableAbove > availableBelow;
-  const minimumLeft = viewportLeft + margin;
-  const maximumLeft = Math.max(viewportLeft + viewportWidth - width - margin, minimumLeft);
-  const position: TooltipPosition = {
-    left: clamp(rectangle.left, minimumLeft, maximumLeft),
-    top: above ? aboveTop : belowTop,
-    width,
-    maximumHeight: above ? availableAbove : availableBelow,
-    placement: above ? "above" : "below",
-  };
+  const position = positionTooltip(rectangle, tooltipViewportBounds());
   if (
     request.portal &&
     !renderPortalTooltip(
@@ -92,10 +74,148 @@ export function showTooltip(
     return;
   }
   interaction.position.set(position);
+  if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+    const previousParent = element.parentElement;
+    let applied = rectangle;
+    let checked = rectangle;
+    interaction.setAnchorTracking(
+      trackAnchorFrames(window, () => {
+        if (!element.isConnected) {
+          interaction.dismiss(previousParent);
+          return;
+        }
+        const current = element.getBoundingClientRect();
+        const viewport = tooltipViewportBounds();
+        const visible = intersectViewport(current, viewport);
+        if (!hasArea(visible)) {
+          interaction.dismiss();
+          return;
+        }
+        // 相对实际采用的矩形比较，逐帧的小位移也能累积，半像素边界的抖动不会翻边。
+        if (edgeDistance(current, applied) < 0.5 || edgeDistance(current, checked) === 0) return;
+        if (!visibleThroughAncestors(element, visible)) {
+          interaction.dismiss();
+          return;
+        }
+        // 定位结果相同时保持应用基准，同时避免静止帧重复读取祖先样式。
+        checked = current;
+        const next = positionTooltip(current, viewport);
+        if (!structuralEquals(next, interaction.position.peek())) {
+          const popup = interaction.portal.peek();
+          if (popup !== null) positionPortal(popup, next);
+          interaction.position.set(next);
+          applied = current;
+        }
+      }),
+    );
+  }
+}
+
+type Viewport = readonly [left: number, top: number, width: number, height: number];
+type RectEdges = Pick<DOMRect, "left" | "top" | "right" | "bottom">;
+
+function edgeDistance(current: RectEdges, previous: RectEdges): number {
+  return Math.max(
+    Math.abs(current.left - previous.left),
+    Math.abs(current.top - previous.top),
+    Math.abs(current.right - previous.right),
+    Math.abs(current.bottom - previous.bottom),
+  );
+}
+
+function intersectViewport(rectangle: RectEdges, [left, top, width, height]: Viewport): RectEdges {
+  return {
+    left: Math.max(rectangle.left, left),
+    top: Math.max(rectangle.top, top),
+    right: Math.min(rectangle.right, left + width),
+    bottom: Math.min(rectangle.bottom, top + height),
+  };
+}
+
+function hasArea({ left, top, right, bottom }: RectEdges): boolean {
+  return right > left && bottom > top;
+}
+
+function visibleThroughAncestors(element: Element, visible: RectEdges): boolean {
+  let { left, top, right, bottom } = visible;
+  for (let ancestor = element.parentElement; ancestor !== null; ancestor = ancestor.parentElement) {
+    const { overflowX, overflowY } = window.getComputedStyle(ancestor);
+    const clipX = overflowX !== "visible";
+    const clipY = overflowY !== "visible";
+    if (!clipX && !clipY) continue;
+    const clip = ancestor.getBoundingClientRect();
+    if (clipX) {
+      left = Math.max(left, clip.left);
+      right = Math.min(right, clip.right);
+    }
+    if (clipY) {
+      top = Math.max(top, clip.top);
+      bottom = Math.min(bottom, clip.bottom);
+    }
+    if (right <= left || bottom <= top) return false;
+  }
+  return true;
+}
+
+function trackAnchorFrames(window: Window, update: () => void): () => void {
+  const { document } = window;
+  let frame: number | null = null;
+  let active = true;
+  const cancel = (): void => {
+    if (frame !== null) window.cancelAnimationFrame(frame);
+    frame = null;
+  };
+  const step = (): void => {
+    frame = null;
+    if (active && !document.hidden) {
+      update();
+      sync();
+    }
+  };
+  const sync = (): void => {
+    if (!active || document.hidden) {
+      cancel();
+    } else if (frame === null) {
+      frame = window.requestAnimationFrame(step);
+    }
+  };
+  document.addEventListener("visibilitychange", sync);
+  sync();
+  return () => {
+    // 收起与卸载都先停止循环，隐藏期间也只保留可见性监听。
+    active = false;
+    cancel();
+    document.removeEventListener("visibilitychange", sync);
+  };
+}
+
+function positionTooltip(
+  rectangle: DOMRect,
+  [viewportLeft, viewportTop, viewportWidth, viewportHeight]: Viewport,
+): TooltipPosition {
+  const width = Math.min(360, Math.max(viewportWidth - 16, 1));
+  const gap = 8;
+  const margin = 8;
+  const minimumTop = viewportTop + margin;
+  const maximumTop = Math.max(viewportTop + viewportHeight - margin, minimumTop);
+  const aboveTop = clamp(rectangle.top - gap, minimumTop, maximumTop);
+  const belowTop = clamp(rectangle.bottom + gap, minimumTop, maximumTop);
+  const availableAbove = Math.max(aboveTop - minimumTop, 1);
+  const availableBelow = Math.max(maximumTop - belowTop, 1);
+  const above = availableAbove > availableBelow;
+  const minimumLeft = viewportLeft + margin;
+  const maximumLeft = Math.max(viewportLeft + viewportWidth - width - margin, minimumLeft);
+  return {
+    left: clamp(rectangle.left, minimumLeft, maximumLeft),
+    top: above ? aboveTop : belowTop,
+    width,
+    maximumHeight: above ? availableAbove : availableBelow,
+    placement: above ? "above" : "below",
+  };
 }
 
 /** 返回相对布局视口的可见区域；旧浏览器回退到完整窗口，不限制用户缩放。 */
-export function tooltipViewportBounds(): readonly [number, number, number, number] {
+export function tooltipViewportBounds(): Viewport {
   if (typeof window === "undefined") {
     return [0, 0, 1024, 768] as const;
   }
@@ -198,15 +318,19 @@ export function renderPortalTooltip(
   tooltip.setAttribute("class", tooltipClassName);
   tooltip.setAttribute("role", "tooltip");
   tooltip.setAttribute("tabindex", "0");
-  tooltip.setAttribute("data-placement", position.placement);
   tooltip.textContent = value;
+  positionPortal(tooltip, position);
+  portalElement.set(tooltip);
+  return true;
+}
+
+function positionPortal(tooltip: HTMLElement, position: TooltipPosition): void {
+  tooltip.setAttribute("data-placement", position.placement);
   const style = tooltip.style;
   style.setProperty("--truncated-text-tooltip-left", `${position.left}px`);
   style.setProperty("--truncated-text-tooltip-top", `${position.top}px`);
   style.setProperty("--truncated-text-tooltip-width", `${position.width}px`);
   style.setProperty("--truncated-text-tooltip-max-height", `${position.maximumHeight}px`);
-  portalElement.set(tooltip);
-  return true;
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {

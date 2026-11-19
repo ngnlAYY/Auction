@@ -104,7 +104,6 @@ export function TruncatedText(props: TruncatedTextProps): JSX.Element {
   let triggerElement: Element | null = null;
   const measureSubscription = createCell<MeasureSubscription | null>(null);
   const portalElement = createCell<HTMLElement | null>(null);
-  onCleanup(() => removeTooltip(portalElement));
   const tasks = createTaskScope();
   let dismissHandle: TooltipDismissHandle | null = null;
   onCleanup(() => {
@@ -126,6 +125,10 @@ export function TruncatedText(props: TruncatedTextProps): JSX.Element {
     tasks,
     tooltipId,
   );
+  onCleanup(() => {
+    interaction.setAnchorTracking(null);
+    removeTooltip(portalElement);
+  });
 
   const visibleAnchorOrder = createValueMemo(() =>
     tooltipPosition() === null ? null : (props.anchorOrder ?? null),
@@ -167,9 +170,9 @@ export function TruncatedText(props: TruncatedTextProps): JSX.Element {
   });
   // 原生 DOM 回调没有 Solid 上下文；组件创建的任务作用域让延迟任务随组件卸载取消。
   const deferClose = (): void => interaction.deferClose();
-  const tooltipVisibility = createValueMemo(() => tooltipPosition());
-  createEffect(tooltipVisibility, (position) => {
-    if (position === null) {
+  const tooltipVisibility = createValueMemo(() => tooltipPosition() !== null);
+  createEffect(tooltipVisibility, (visible) => {
+    if (!visible) {
       dismissHandle?.dispose();
       dismissHandle = null;
       interaction.pinned.set(false);
@@ -179,7 +182,7 @@ export function TruncatedText(props: TruncatedTextProps): JSX.Element {
       return;
     }
 
-    const resizeCallback = interaction.dismiss;
+    const resizeCallback = () => interaction.dismiss();
     const popupId = tooltipId;
     const scrollCallback = (event: Event): void => {
       // 浮层自身的滚动必须保留内容；页面或外层容器滚动后关闭以免定位过期。

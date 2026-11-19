@@ -1,8 +1,11 @@
 //! 在宿主虚拟 DOM 中挂载截断提示，替换浏览器的测量、焦点与原生文档事件。
 
 use std::any::Any;
+use std::future::Future;
+use std::pin::pin;
 use std::process::Command;
 use std::rc::Rc;
+use std::task::{Context, Waker};
 
 use dioxus::core::{AttributeValue, ElementId, Mutation};
 use dioxus::html::geometry::{ClientPoint, ElementPoint, PagePoint, ScreenPoint};
@@ -14,8 +17,8 @@ use dioxus::html::{
 };
 use dioxus::prelude::*;
 
-use super::TruncatedText;
 use super::host_document::{BODY_ID, ElementKind, TooltipBrowserFixture as Browser};
+use super::{TruncatedText, use_truncated_text_anchor_order};
 
 const OUTSIDE_ID: &str = "outside";
 const DIALOG_ID: &str = "tooltip-test-dialog";
@@ -27,6 +30,7 @@ fn add_control(browser: &Browser, id: &str, inside_dialog: bool) {
 }
 
 fn scene() -> Element {
+    use_truncated_text_anchor_order(3);
     let browser = use_context::<Rc<Browser>>();
     let mut open = use_signal(|| browser.inside_dialog);
     browser.open_dialog.set(Some(open));
@@ -56,6 +60,7 @@ fn scene() -> Element {
 }
 
 fn equipment_link() -> Element {
+    use_truncated_text_anchor_order(3);
     let browser = use_context::<Rc<Browser>>();
     let link_id = LINK_ID;
     let link = rsx! {
@@ -267,12 +272,15 @@ fn component_escape_respects_modal_and_restores_focus() {
             );
             assert!(!browser.dispatch_escape());
             assert!(browser.keydown.borrow().is_empty());
+            assert!(browser.frames.borrow().is_empty());
 
             dispatch(&dom, anchor, "mouseenter", None);
             settle(&mut dom);
             assert_eq!(browser.keydown.borrow().len(), 1);
+            assert_eq!(browser.frames.borrow().len(), 1);
             drop(dom);
             assert!(browser.keydown.borrow().is_empty());
+            assert!(browser.frames.borrow().is_empty());
         }
     });
 }
@@ -444,6 +452,208 @@ fn a_native_modal_limits_escape_to_its_foreground_application_dialog() {
                 dispatch(&dom, inner_dialog, "keydown", Some(Key::Escape));
                 settle(&mut dom);
                 assert!(!inner_open());
+            }
+        },
+    );
+}
+
+#[test]
+fn open_tooltip_follows_the_anchor_and_pauses_when_hidden() {
+    run_with_event_converter("open_tooltip_follows_the_anchor_and_pauses_when_hidden", || {
+        let browser = Rc::new(Browser::new());
+        let mut dom = VirtualDom::new(equipment_link).with_root_context(browser.clone());
+        let initial = dom.rebuild_to_vec().edits;
+        let (anchor, trigger_id) = element(&initial, |id| id.ends_with("-trigger"));
+        browser.add_element(LINK_ID, ElementKind::Link, browser.body());
+        browser.add_element(trigger_id, ElementKind::Plain, browser.get_element_by_id(LINK_ID));
+        let trigger = browser.get_element_by_id(trigger_id).unwrap();
+        settle(&mut dom);
+        assert!(browser.frames.borrow().is_empty());
+
+        dispatch(&dom, anchor, "mouseenter", None);
+        settle(&mut dom);
+        let popup_id = trigger_id.trim_end_matches("-trigger");
+        let popup = browser.get_element_by_id(popup_id).unwrap();
+        browser.focus(&popup);
+        let portal = popup.portal_writes.unwrap();
+        let top = || portal.values.borrow()["--truncated-text-tooltip-top"].clone();
+        assert_eq!(top(), "88px");
+        let writes = portal.count.get();
+        assert_eq!(browser.frames.borrow().len(), 1);
+        let reads = trigger.rectangle_reads.get();
+        for rectangle in [(20.0, 50.0, 120.0, 80.0), (20.1, 50.1, 120.1, 80.1)] {
+            trigger.rectangle.set(rectangle);
+            browser.advance_frame();
+            assert!(
+                pin!(dom.wait_for_work())
+                    .poll(&mut Context::from_waker(Waker::noop()))
+                    .is_pending()
+            );
+        }
+        assert_eq!(trigger.rectangle_reads.get(), reads + 2);
+        assert_eq!(browser.frames.borrow().len(), 1);
+        assert_eq!(portal.count.get(), writes);
+
+        trigger.rectangle.set((20.0, 110.0, 120.0, 140.0));
+        browser.advance_frame();
+        assert_eq!(top(), "148px");
+        assert!(Rc::ptr_eq(
+            &portal,
+            &browser.get_element_by_id(popup_id).unwrap().portal_writes.unwrap(),
+        ));
+        assert_eq!(browser.focus_id(), popup_id);
+        settle(&mut dom);
+
+        browser.set_hidden(true);
+        assert!(browser.frames.borrow().is_empty());
+        trigger.rectangle.set((20.0, 150.0, 120.0, 180.0));
+        let reads = trigger.rectangle_reads.get();
+        browser.advance_frame();
+        assert_eq!(trigger.rectangle_reads.get(), reads);
+        browser.set_hidden(false);
+        assert_eq!(browser.frames.borrow().len(), 1);
+        browser.advance_frame();
+        assert_eq!(top(), "188px");
+        assert_eq!(browser.focus_id(), popup_id);
+        settle(&mut dom);
+
+        browser.set_hidden(true);
+        assert!(!browser.visibility.borrow().is_empty());
+        drop(dom);
+        assert!(browser.visibility.borrow().is_empty());
+        browser.set_hidden(false);
+        assert!(browser.frames.borrow().is_empty());
+    });
+}
+
+#[test]
+fn subpixel_jitter_across_the_viewport_midline_leaves_the_portal_untouched() {
+    run_with_event_converter(
+        "subpixel_jitter_across_the_viewport_midline_leaves_the_portal_untouched",
+        || {
+            let browser = Rc::new(Browser::new());
+            let mut dom = VirtualDom::new(equipment_link).with_root_context(browser.clone());
+            let initial = dom.rebuild_to_vec().edits;
+            let (anchor, trigger_id) = element(&initial, |id| id.ends_with("-trigger"));
+            browser.add_focusable(trigger_id);
+            let trigger = browser.get_element_by_id(trigger_id).unwrap();
+            trigger.rectangle.set((20.0, 363.49, 120.0, 404.49));
+            settle(&mut dom);
+            dispatch(&dom, anchor, "mouseenter", None);
+            settle(&mut dom);
+            let popup_id = trigger_id.trim_end_matches("-trigger");
+            let portal = browser.get_element_by_id(popup_id).unwrap().portal_writes.unwrap();
+            let writes = portal.count.get();
+            for top in [363.51, 363.49, 363.51, 363.79, 363.98] {
+                trigger.rectangle.set((20.0, top, 120.0, top + 41.0));
+                browser.advance_frame();
+                let values = portal.values.borrow();
+                assert_eq!(values["--truncated-text-tooltip-top"], "412.49px");
+                assert_eq!(values["data-placement"], "below");
+                assert_eq!(portal.count.get(), writes);
+                assert!(
+                    pin!(dom.wait_for_work())
+                        .poll(&mut Context::from_waker(Waker::noop()))
+                        .is_pending()
+                );
+            }
+            trigger.rectangle.set((20.0, 364.0, 120.0, 405.0));
+            browser.advance_frame();
+            let values = portal.values.borrow();
+            assert_eq!(values["--truncated-text-tooltip-top"], "356px");
+            assert_eq!(values["data-placement"], "above");
+        },
+    );
+}
+
+#[test]
+fn an_ancestor_clip_closes_a_portal_within_the_viewport() {
+    run_with_event_converter("an_ancestor_clip_closes_a_portal_within_the_viewport", || {
+        let browser = Rc::new(Browser::new());
+        let mut dom = VirtualDom::new(equipment_link).with_root_context(browser.clone());
+        let initial = dom.rebuild_to_vec().edits;
+        let (anchor, trigger_id) = element(&initial, |id| id.ends_with("-trigger"));
+        browser.add_element("clip", ElementKind::Plain, browser.body());
+        let clip = browser.get_element_by_id("clip").unwrap();
+        clip.overflow.set(("clip", "visible"));
+        clip.rectangle.set((0.0, 150.0, 100.0, 200.0));
+        browser.add_element(LINK_ID, ElementKind::Link, Some(clip.clone()));
+        browser.add_element(trigger_id, ElementKind::Plain, browser.get_element_by_id(LINK_ID));
+        let trigger = browser.get_element_by_id(trigger_id).unwrap();
+        trigger.rectangle.set((1.0, 50.0, 51.0, 80.0));
+        settle(&mut dom);
+        dispatch(&dom, anchor, "mouseenter", None);
+        settle(&mut dom);
+        let popup_id = trigger_id.trim_end_matches("-trigger");
+        browser.focus_by_id(popup_id);
+
+        browser.advance_frame();
+        assert_eq!(clip.overflow_reads.get(), 0);
+        trigger.rectangle.set((2.0, 50.0, 52.0, 80.0));
+        browser.advance_frame();
+        assert!(browser.get_element_by_id(popup_id).is_some());
+        assert_eq!(browser.focus_id(), popup_id);
+        let reads_after_move = clip.overflow_reads.get();
+        browser.advance_frame();
+        assert_eq!(clip.overflow_reads.get(), reads_after_move);
+
+        trigger.rectangle.set((100.0, 50.0, 150.0, 80.0));
+        browser.advance_frame();
+        assert!(browser.get_element_by_id(popup_id).is_none());
+        assert_eq!(reads_after_move, 1, "定位被视口边距夹住时也只遍历一次");
+        assert_eq!(browser.focus_id(), LINK_ID);
+        assert!(browser.frames.borrow().is_empty());
+    });
+}
+
+#[test]
+fn lost_anchor_closes_the_portal_and_only_restores_its_own_focus() {
+    run_with_event_converter(
+        "lost_anchor_closes_the_portal_and_only_restores_its_own_focus",
+        || {
+            for (rectangle, popup_focused, link_connected) in [
+                (None, true, true),
+                (None, true, false),
+                (None, false, true),
+                (Some((20.0, 50.0, 20.0, 80.0)), true, true),
+                (Some((20.0, 768.0, 120.0, 798.0)), false, true),
+            ] {
+                let browser = Rc::new(Browser::new());
+                let mut dom = VirtualDom::new(equipment_link).with_root_context(browser.clone());
+                let initial = dom.rebuild_to_vec().edits;
+                let (anchor, trigger_id) = element(&initial, |id| id.ends_with("-trigger"));
+                browser.add_element(LINK_ID, ElementKind::Link, browser.body());
+                browser.add_element(
+                    trigger_id,
+                    ElementKind::Plain,
+                    browser.get_element_by_id(LINK_ID),
+                );
+                browser.add_focusable(OUTSIDE_ID);
+                settle(&mut dom);
+                dispatch(&dom, anchor, "mouseenter", None);
+                settle(&mut dom);
+                let popup_id = trigger_id.trim_end_matches("-trigger");
+                browser.focus_by_id(if popup_focused { popup_id } else { OUTSIDE_ID });
+                assert_eq!(browser.frames.borrow().len(), 1);
+
+                if let Some(rectangle) = rectangle {
+                    browser.get_element_by_id(trigger_id).unwrap().rectangle.set(rectangle);
+                } else {
+                    browser.nodes.borrow_mut().remove(trigger_id);
+                }
+                if !link_connected {
+                    browser.nodes.borrow_mut().remove(LINK_ID);
+                }
+                browser.advance_frame();
+                assert!(browser.get_element_by_id(popup_id).is_none());
+                let expected_focus = match (popup_focused, link_connected) {
+                    (true, true) => LINK_ID,
+                    (true, false) => BODY_ID,
+                    (false, _) => OUTSIDE_ID,
+                };
+                assert_eq!(browser.focus_id(), expected_focus);
+                assert!(browser.frames.borrow().is_empty());
+                assert!(browser.visibility.borrow().is_empty());
             }
         },
     );
