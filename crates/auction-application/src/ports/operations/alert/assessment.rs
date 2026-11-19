@@ -519,8 +519,7 @@ mod tests {
             .expect("退件水位必须可评估")
             .into_iter()
             .find(|observation| observation.source == OperationsAlertSource::Fulfillment)
-            .map(|observation| observation.signals)
-            .unwrap_or_default()
+            .map_or_default(|observation| observation.signals)
             .into_iter()
             .map(|signal| (signal.kind, signal.scope, signal.count, signal.age_seconds))
             .collect::<Vec<_>>();

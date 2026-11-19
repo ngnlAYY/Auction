@@ -166,7 +166,7 @@ pub(crate) fn PublicPager(
             next_label: t!("catalog-next"),
             jump_label: jump_label.unwrap_or_else(|| t!("pagination-jump")),
             jump_button_label: t!("catalog-page-go"),
-            total_summary: total.map(|count| t!("pagination-total", count: count)).unwrap_or_default(),
+            total_summary: total.map_or_default(|count| t!("pagination-total", count: count)),
             show_range_summary: true,
             range_summary: move |(start, end, total_count): (i64, i64, i64)| {
                 t!(

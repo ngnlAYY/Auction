@@ -29,7 +29,7 @@ impl Trace {
     }
 
     fn entries(&self) -> Vec<&'static str> {
-        self.0.lock().map(|log| log.clone()).unwrap_or_default()
+        self.0.lock().map_or_default(|log| log.clone())
     }
 }
 

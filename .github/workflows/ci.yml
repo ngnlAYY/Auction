@@ -239,37 +239,15 @@ jobs:
     needs: docs
     if: needs.docs.outputs.run-checks == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    env:
-      CARGO_PROFILE_DEV_DEBUG: "0"
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Ensure patched rustup
-        run: bash ci/tools/rustup.sh
-      # MSRV 工具链不在仓库默认工具清单里：只装 mise 本身，再按版本显式安装，不导出默认工具链环境。
-      - name: Install mise
-        uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
-        with:
-          version: 2026.11.8
-          install: false
-          cache: false
-          env: false
-      - name: Install MSRV toolchain
-        run: mise install 'rust[profile=minimal]@1.94.1'
-      # rust-cache v2.9.3；与 verify 隔离，不跨 Rust 工具链复用产物。
-      - name: Restore MSRV build cache
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
-        with:
-          prefix-key: v1-auction-build
-          key: msrv
-          cache-workspace-crates: "true"
-          cache-on-failure: "true"
-          cache-bin: "false"
-          save-if: ${{ github.event_name != 'pull_request' }}
-      - run: >-
-          cargo +1.94.1 check --locked --workspace --all-targets --all-features
+      # MSRV 等于 rust-toolchain.toml 固定的工具链：verify 作业的 Clippy 已经用它编译全部目标与
+      # feature，这里不再用第二个工具链重复编译，只核对两处版本声明一致。作业名是 main 的必需
+      # 检查，保持不变。
+      - run: bash ci/checks/check.sh rust-version
 
   artifacts:
     # 只依赖 docs，与 verify/security-audit/msrv 并行；正式制品与来源证明由 tag 发布工作流产生。

@@ -38,7 +38,7 @@ pub(super) struct SentProofDraft {
 impl SentProofDraft {
     pub(super) fn for_evidence(evidence: Option<&DeliveryEvidence>) -> Self {
         Self {
-            evidence_reference: evidence.map(|item| item.reference.clone()).unwrap_or_default(),
+            evidence_reference: evidence.map_or_default(|item| item.reference.clone()),
             sender_name: String::new(),
             sender_uid: String::new(),
             // 本地值只供展示；时钟回拨时不能拿它反推原 UTC 分钟。
@@ -49,12 +49,10 @@ impl SentProofDraft {
             sent_minute_edited: false,
             remaining_credits: evidence
                 .and_then(|item| item.remaining_credits)
-                .map(|value| value.to_string())
-                .unwrap_or_default(),
+                .map_or_default(|value| value.to_string()),
             cod_pending: evidence
                 .and_then(|item| item.cod_pending)
-                .map(|value| value.to_string())
-                .unwrap_or_default(),
+                .map_or_default(|value| value.to_string()),
             collected: evidence.and_then(|item| item.collected).unwrap_or(false),
             receipt: evidence.and_then(|item| item.receipt.clone()).unwrap_or_default(),
             reason: String::new(),

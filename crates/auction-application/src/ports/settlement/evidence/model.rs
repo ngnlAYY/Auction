@@ -249,13 +249,9 @@ impl SettlementInternalEvidenceSnapshot {
             &self.operation_id.to_string(),
             &lower_hex(&self.purpose.digest()),
             &lower_hex(&self.identity.digest),
-            &self.equipment.as_ref().map(|value| lower_hex(&value.digest)).unwrap_or_default(),
-            &self.main_cash.as_ref().map(|value| lower_hex(&value.digest)).unwrap_or_default(),
-            &self
-                .sent_collection
-                .as_ref()
-                .map(|value| lower_hex(&value.digest))
-                .unwrap_or_default(),
+            &self.equipment.as_ref().map_or_default(|value| lower_hex(&value.digest)),
+            &self.main_cash.as_ref().map_or_default(|value| lower_hex(&value.digest)),
+            &self.sent_collection.as_ref().map_or_default(|value| lower_hex(&value.digest)),
             &self.observed_from.to_rfc3339(),
             &self.expires_at.to_rfc3339(),
         ])

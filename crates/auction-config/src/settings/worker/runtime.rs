@@ -94,6 +94,5 @@ pub(in crate::settings) fn apply_equipment_colors(
     config.equipment_colors = document
         .equipment_colors
         .as_ref()
-        .map(auction_application::admin::AdminRuntimeEquipmentColorsConfig::to_rules)
-        .unwrap_or_default();
+        .map_or_default(auction_application::admin::AdminRuntimeEquipmentColorsConfig::to_rules);
 }

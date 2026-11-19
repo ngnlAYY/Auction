@@ -381,7 +381,7 @@ mod tests {
     fn deploy_help_lists_disk_space_gate() {
         let command = Cli::command();
         let deploy = command.find_subcommand("deploy").expect("deploy 子命令");
-        let about = deploy.get_about().map(ToString::to_string).unwrap_or_default();
+        let about = deploy.get_about().map_or_default(ToString::to_string);
         assert!(about.contains("磁盘空间与在途发送门禁"), "{about}");
         let dry_run = deploy
             .get_arguments()

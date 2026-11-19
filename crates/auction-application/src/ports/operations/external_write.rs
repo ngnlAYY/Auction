@@ -97,7 +97,7 @@ impl ExternalWriteLifecycle {
     }
     /// 为单个叶子工作项建立活动，默认工厂缺失时返回旧路径守卫。
     pub fn activity(&self, kind: CriticalWriteKind) -> ExternalWriteActivity {
-        self.0.as_ref().map(|factory| factory.activity(kind)).unwrap_or_default()
+        self.0.as_ref().map_or_default(|factory| factory.activity(kind))
     }
     /// 只用于不包含外写子项的 owner；外写必须由自己的活动守卫保护完整 future。
     pub async fn background<F: Future>(&self, future: F) -> Option<F::Output> {

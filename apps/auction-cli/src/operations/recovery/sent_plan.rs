@@ -315,16 +315,9 @@ impl SentMatchPlan {
                     delivery_id: expectation.delivery_id,
                     fencing_version: expectation.fencing_version,
                     reason: EXTERNAL_RECOVERY_AMBIGUOUS_REASON.to_owned(),
-                    candidate_mail_ids: self
-                        .observed
-                        .get(index)
-                        .map(|mids| {
-                            mids.iter()
-                                .take(MAX_EXTERNAL_RECOVERY_BLOCK_MAIL_IDS)
-                                .cloned()
-                                .collect()
-                        })
-                        .unwrap_or_default(),
+                    candidate_mail_ids: self.observed.get(index).map_or_default(|mids| {
+                        mids.iter().take(MAX_EXTERNAL_RECOVERY_BLOCK_MAIL_IDS).cloned().collect()
+                    }),
                 })
             })
             .collect()
@@ -347,8 +340,7 @@ impl SentMatchPlan {
                     "recipient": expectation.recipient,
                     "frozen_subject_known": expectation.subject.is_some(),
                     "candidate_mail_ids": self.observed.get(index)
-                        .map(|mids| mids.iter().cloned().collect::<Vec<_>>())
-                        .unwrap_or_default(),
+                        .map_or_default(|mids| mids.iter().cloned().collect::<Vec<_>>()),
                     "reason": EXTERNAL_RECOVERY_AMBIGUOUS_REASON,
                 }))
             })

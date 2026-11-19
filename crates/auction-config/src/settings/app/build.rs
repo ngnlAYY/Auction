@@ -67,14 +67,14 @@ impl AppConfig {
         let equipment_colors = runtime_document
             .as_ref()
             .and_then(|runtime| runtime.equipment_colors.as_ref())
-            .map(auction_application::admin::AdminRuntimeEquipmentColorsConfig::to_rules)
-            .unwrap_or_default();
+            .map_or_default(
+                auction_application::admin::AdminRuntimeEquipmentColorsConfig::to_rules,
+            );
         // Public 注册提示和 Worker 履约只保留名单投影，不持有完整 Admin runtime 文档。
         let bot_players = if matches!(role, Role::Public | Role::Worker) {
             runtime_document
                 .as_mut()
-                .map(|runtime| std::mem::take(&mut runtime.bot_players))
-                .unwrap_or_default()
+                .map_or_default(|runtime| std::mem::take(&mut runtime.bot_players))
         } else {
             Vec::new()
         };

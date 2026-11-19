@@ -292,7 +292,7 @@ fn flush_scan(
         }
     }
     let mut seen_imports =
-        state.topics.remove(&active.auction_id).map(|topic| topic.seen_imports).unwrap_or_default();
+        state.topics.remove(&active.auction_id).map_or_default(|topic| topic.seen_imports);
     for post_id in
         active.candidates.iter().map(|(post_id, _)| post_id).chain(active.overflow_ids.iter())
     {

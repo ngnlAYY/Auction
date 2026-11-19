@@ -211,7 +211,7 @@ pub(super) fn accepts_html(headers: &HeaderMap) -> bool {
     headers.get_all(header::ACCEPT).iter().filter_map(|value| value.to_str().ok()).any(|value| {
         value.split(',').any(|item| {
             let mut parts = item.split(';');
-            let media_type = parts.next().map(str::trim).unwrap_or_default();
+            let media_type = parts.next().map_or_default(str::trim);
             let quality = parts
                 .filter_map(|part| part.trim().split_once('='))
                 .find_map(|(name, value)| {

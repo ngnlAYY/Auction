@@ -473,6 +473,30 @@ check_i18n() {
 	done
 }
 
+# MSRV 等于固定工具链：项目不为更旧的 Rust 保留兼容，升级工具链时 rust-version 一起提高。
+# 两处漂移时，Clippy 会按旧 MSRV 屏蔽新写法的提示，文档里的版本也会失真。
+check_rust_version() {
+	local toolchain msrv manifest failures=""
+	toolchain=$(sed -n 's/^channel[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' rust-toolchain.toml)
+	msrv=$(sed -n '/^\[workspace\.package\]/,/^\[/s/^rust-version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' Cargo.toml)
+	if [[ -z "$toolchain" || -z "$msrv" ]]; then
+		printf '%s\n' "无法读取 rust-toolchain.toml 的 channel 或 Cargo.toml 的 workspace.package.rust-version" >&2
+		return 1
+	fi
+	if [[ "$toolchain" != "$msrv" ]]; then
+		failures+="Cargo.toml 的 rust-version（$msrv）与 rust-toolchain.toml 的 channel（$toolchain）不一致"$'\n'
+	fi
+	while IFS= read -r manifest; do
+		grep -qxF 'rust-version.workspace = true' "$manifest" ||
+			failures+="$manifest 未继承工作区的 rust-version"$'\n'
+	done < <(git ls-files 'apps/*/Cargo.toml' 'crates/*/Cargo.toml')
+	if [[ -n "$failures" ]]; then
+		printf '%s\n' "MSRV 必须等于固定的工具链版本：" >&2
+		printf '%s' "$failures" >&2
+		return 1
+	fi
+}
+
 # Axum 的 WebSocket 错误只能按同一 tungstenite 版本 downcast。服务二进制里出现第二个版本时，
 # 编译、Clippy 与其它门禁都不会报错，但 v1 的 1009 close 契约会在运行期静默失效。
 check_dependency_versions() {
@@ -658,6 +682,7 @@ run_checks() {
 		web-callback-props) check_web_callback_props ;;
 		dependency-versions) check_dependency_versions ;;
 		repository) check_repository_contracts ;;
+		rust-version) check_rust_version ;;
 		public-redaction) check_public_redaction ;;
 		fmt) cargo fmt --all -- --check ;;
 		check) cargo check --locked --workspace --all-targets ;;
@@ -675,7 +700,7 @@ run_checks() {
 		dependency-audit) bash ci/checks/dependency-audit.sh Cargo.lock ;;
 		release-dependency-audit) bash ci/checks/release-dependency-audit.sh ;;
 		dependency-unused) cargo machete ;;
-		all) run_checks repository public-redaction layout import-groups module-docs hot-fields config systemd-templates i18n equipment-contract ratchet audit-writes test-module-paths work-item-ids markdown-links migration-compatibility published-migrations web-build-inputs web-callback-props ;;
+		all) run_checks repository rust-version public-redaction layout import-groups module-docs hot-fields config systemd-templates i18n equipment-contract ratchet audit-writes test-module-paths work-item-ids markdown-links migration-compatibility published-migrations web-build-inputs web-callback-props ;;
 		rust) run_checks fmt check dependency-versions lint wasm rustdoc ;;
 		*)
 			printf '未知静态检查：%s\n' "$check" >&2

@@ -169,7 +169,7 @@ pub(crate) async fn list(
     } else {
         result.has_more
     };
-    let next_cursor_token = result.next_cursor.map(encode_cursor).unwrap_or_default();
+    let next_cursor_token = result.next_cursor.map_or_default(encode_cursor);
     let response = AdminAuditResponse {
         records: result.entries.into_iter().map(map_record).collect(),
         page: result.page,

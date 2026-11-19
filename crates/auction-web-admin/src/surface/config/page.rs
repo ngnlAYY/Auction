@@ -238,14 +238,11 @@ fn RuntimeConfigDocument() -> Element {
                     .as_ref()
                     .is_some_and(|draft| draft.fingerprint == current_fingerprint);
             let config_changes = if update_confirm_open() {
-                command
-                    .read()
-                    .as_ref()
-                    .zip(baseline.read().as_ref())
-                    .map(|(pending, original)| {
+                command.read().as_ref().zip(baseline.read().as_ref()).map_or_default(
+                    |(pending, original)| {
                         review::changes(original.source_document(), &pending.document)
-                    })
-                    .unwrap_or_default()
+                    },
+                )
             } else {
                 Vec::new()
             };

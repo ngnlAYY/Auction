@@ -1,5 +1,5 @@
 [toolchain]
-# 必填：固定已可下载的 stable；MSRV 在工作区与 CI 独立维护。
+# 必填：固定已可下载的 stable；Cargo.toml 的 rust-version（MSRV）与它保持同一版本。
 channel = "1.100.0"
 # 必填：默认静态门禁使用的组件。
 components = ["clippy", "rustfmt"]

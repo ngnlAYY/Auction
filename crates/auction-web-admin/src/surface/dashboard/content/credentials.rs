@@ -9,8 +9,7 @@ use crate::surface::admin_world_label;
 
 pub(super) fn credentials_panel(snapshot: &AdminDashboardSnapshot) -> Element {
     let credentials = snapshot.credentials.data.as_ref();
-    let mut sorted_availability =
-        credentials.map(|data| data.availability.clone()).unwrap_or_default();
+    let mut sorted_availability = credentials.map_or_default(|data| data.availability.clone());
     sorted_availability.sort_by(|left, right| match (left.world.as_str(), right.world.as_str()) {
         ("main", "main") => std::cmp::Ordering::Equal,
         ("main", _) => std::cmp::Ordering::Less,

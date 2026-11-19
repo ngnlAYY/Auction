@@ -19,6 +19,7 @@ bash ci/checks/check.sh <检查项>...
 | 检查项 | 内容 |
 | --- | --- |
 | `repository` | `AGENTS.md`、`.gitignore`、`.editorconfig`、`README.md`、`Cargo.lock`、`mise.toml`、`mise.lock` 必须纳入版本控制且未被忽略；任何已跟踪文件都不得命中忽略规则（`git ls-files -ci --exclude-standard` 为空，防止强制添加的本地配置与被 rg 类门禁静默跳过的文件） |
+| `rust-version` | `Cargo.toml` 的 `workspace.package.rust-version`（MSRV）必须等于 `rust-toolchain.toml` 的 `channel`，每个工作区包都以 `rust-version.workspace = true` 继承；项目不为更旧的 Rust 保留兼容 |
 | `public-redaction` | 仓库公开，未被 `.gitignore` 忽略的文件（`Cargo.lock` 除外）不得包含本机用户目录（`/home/<用户>/`、`/Users/<用户>/`）、192.168/16 内网地址或本机测试库名（`auction-test-` 紧跟 `public`、`admin`、`worker`、`{` 或 `*`）；测试夹具、`docs/`、`ops/`、`ci/`、`.github/` 与 Markdown 中的 IPv4 只允许回环、0.0.0.0 与 RFC 5737 文档段（Caddyfile 的 Cloudflare 网段按文件豁免）；测试夹具不得残留浏览器用户脚本注入。示例与夹具改用系统路径、`example.com` 与 RFC 5737 文档地址，口径见[ci/checks/README.md#公开仓库脱敏](checks/README.md#公开仓库脱敏) |
 | `layout` | `src/` 根只能有 `lib.rs`/`main.rs`；每个 crate 的 `src/` 必须有职责子目录；同目录不得有 ≥3 个同前缀源码文件；目录模块入口为 `mod.rs`，不与同名 `.rs` 并存；文件与目录名 snake_case，不用 common/helpers/shared/misc/utils 兜底命名；生产源码（截止于首个内联测试模块）不超过 600 行（`mod.rs` 500 行）、不用私有 glob 导入（含 `use super::{a::*, *}` 等花括号形式），子模块不经 `super::`/`crate::` 路径借用祖先模块的私有 `use` 导入（从各 crate 根按模块树检查），每个 src 源文件都必须能从 crate 根到达（不留孤儿文件）；全部源码不用 `use { … }` 总括分组。行数、glob 与祖先导入口径见[ci/checks/README.md#模块层级门禁](checks/README.md#模块层级门禁) |
 | `import-groups` | 导入块按 std → 外部 crate → 本 crate 三组排列；模块开头整个导入区的私有 `use` 组序不回退，首个非 use/mod 条目之后不得再出现模块级私有 `use`，口径见[ci/checks/README.md#导入分组](checks/README.md#导入分组) |
@@ -39,7 +40,7 @@ bash ci/checks/check.sh <检查项>...
 | `published-migrations` | 每个发布 tag（`v<版本>`）中存在的 `migrations/postgres/*.up.sql` 必须在当前工作树逐字节不变；禁止修改、重命名或删除已发布文件，只允许追加新编号 |
 | `web-build-inputs` | 离线核对 Web 指纹清单与浏览器 crate 的工作区路径依赖闭包，见[ci/checks/README.md#web-输入依赖闭包](checks/README.md#web-输入依赖闭包) |
 | `web-callback-props` | 检查三个 Rust Web crate 的组件参数和 `Props` 字段（含 `cfg_attr` 条件声明），拒绝可选的 `EventHandler` 和 `Callback`，见[ci/checks/README.md#web-回调属性](checks/README.md#web-回调属性) |
-| `all` | `repository public-redaction layout import-groups module-docs hot-fields config systemd-templates i18n equipment-contract ratchet audit-writes test-module-paths work-item-ids markdown-links migration-compatibility published-migrations web-build-inputs` |
+| `all` | `repository rust-version public-redaction layout import-groups module-docs hot-fields config systemd-templates i18n equipment-contract ratchet audit-writes test-module-paths work-item-ids markdown-links migration-compatibility published-migrations web-build-inputs web-callback-props` |
 | `fmt` | `cargo fmt --all -- --check` |
 | `check` | `cargo check --locked --workspace --all-targets` |
 | `lint` | `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` |
@@ -63,7 +64,7 @@ bash ci/checks/check.sh <检查项>...
 | `verify` | push / PR / 手动，`docs` 通过后 | `ci/checks/check.sh check dependency-versions lint wasm rustdoc`（工具链 1.100.0） |
 | `test` | push / PR / 手动，`docs` 通过后 | 安装 PostgreSQL 18 后依次执行 `mise run test`、`mise run test-db`（PostgreSQL 18 集成测试）与 `mise run test-db-compat`（迁移兼容声明验证）；不并入默认 `mise run verify`。`just` 二进制按版本单独缓存；测试构建以 `CARGO_PROFILE_DEV_DEBUG=0` 关闭调试信息，缩小构建缓存 |
 | `security-audit` | push / PR / 手动中 `docs` 通过后；每周一 04:17 UTC 独立调度 | `dependency-audit`（cargo-audit 由 mise 安装）；定时与手动运行另以完整历史执行 `release-dependency-audit`；非定时事件另执行 `dependency-unused`，见[ci/checks/README.md#每周依赖审计](checks/README.md#每周依赖审计) |
-| `msrv` | push / PR / 手动，`docs` 通过后 | `cargo +1.94.1 check --locked --workspace --all-targets --all-features` |
+| `msrv` | push / PR / 手动，`docs` 通过后 | `ci/checks/check.sh rust-version`：MSRV 等于固定工具链，编译已由 `verify` 覆盖，这里只核对版本声明；作业名是 `main` 的必需检查 |
 | `artifacts` | 仅手动（`workflow_dispatch`） | 调用可复用工作流 `.github/workflows/release-build.yml`：由 mise 安装发布工具，`ci/release/release.sh release-check` 构建并校验完整发布包，上传 1 天候选包；候选包不可部署，默认分支推送不再运行 |
 
 ### 依赖升级窗口提醒：`.github/workflows/dependency-cadence.yml`

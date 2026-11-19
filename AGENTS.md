@@ -20,7 +20,7 @@
 - HentaiVerse 装备拍卖系统：玩家经网站与论坛出价，经游戏内 MoogleMail 寄售装备、付款与收货。
 - `apps/` 下五个可部署程序：`auction-public-api`（Public 竞价站点）、`auction-admin-api`（Admin 后台与分体部署首次设置）、`auction-worker`（生命周期、结算履约、MoogleMail、论坛、告警等全部后台任务）、`auction-cli`（配置检查、部署编排、迁移、备份恢复与业务运维），以及可选的 `auction-server`（单主机上以子进程监管前三个角色）。
 - 工具与命令入口由 [mise](https://mise.jdx.dev) 管理：版本在 `mise.toml`、校验和在 `mise.lock`，一律取上游原始版本，不携带补丁；命令入口是 `mise run <任务>`。清单见[ci/tools/README.md](ci/tools/README.md)。
-- Rust 2024 工作区：工具链固定为 1.100.0（`rust-toolchain.toml`，mise 读取该文件），MSRV 1.94.1 由 CI 单独检查。后端用 axum 与 sqlx；前端是两个 Dioxus 0.7 CSR 单页应用，编译到 `wasm32-unknown-unknown`，由后端以 `web-embed` 内嵌。
+- Rust 工作区，语言版次（edition）为 2024——这是 Rust 的版次编号，不是年份：工具链固定为 1.100.0（`rust-toolchain.toml`，mise 读取该文件），MSRV（`Cargo.toml` 的 `rust-version`）等于工具链版本，不为更旧的 Rust 保留兼容，新稳定的语言特性与标准库接口可以直接使用（`rust-version` 门禁核对两处一致）。后端用 axum 与 sqlx；前端是两个 Dioxus 0.7 CSR 单页应用，编译到 `wasm32-unknown-unknown`，由后端以 `web-embed` 内嵌。
 - 页面另有一套进行中的 TypeScript 7 + SolidJS 2.0 实现，放在 `web/`（bun 管理依赖），目前只写了 Public，尚未接入 `web-embed` 与发布构建：构建、发布与部署的仍然只有 Rust 版。
 - 原生程序只支持 Linux x86_64，装配根在其他平台编译期报错；通用制品不使用 `target-cpu=native`。
 - PostgreSQL 18 是唯一数据库后端与唯一事实来源，没有独立缓存进程。未配置数据库时进程以运行期骨架模式启动，相关接口返回“能力不可用”；不存在“无数据库”的编译形态。
@@ -181,5 +181,5 @@ mise run verify     # bash ci/checks/check.sh all fmt check dependency-versions 
 
 - 批量改导入或模块名时，`cargo fix` 只看非测试构建，会删掉只被测试模块使用的父模块导入；完成后编译测试目标，并在测试模块补上显式导入。
 - `mise run web-build` 在构建前后各计算一次输入指纹，构建期间修改输入文件会以“Web 构建期间输入发生变化”失败；构建时不要并行编辑仓库。
-- 改 `mise.toml` 里的工具版本、构建选项或 `rust-toolchain.toml` 后，运行 `mise install` 与 `mise lock`，把 `mise.lock` 一并提交：CI 按锁文件安装，`mise.lock` 还参与构建输入指纹，变化会让已有页面与发布制品失效。
+- 改 `mise.toml` 里的工具版本、构建选项或 `rust-toolchain.toml` 后，运行 `mise install` 与 `mise lock`，把 `mise.lock` 一并提交；升级 Rust 工具链时同时把 `Cargo.toml` 的 `rust-version` 改成同一版本：CI 按锁文件安装，`mise.lock` 还参与构建输入指纹，变化会让已有页面与发布制品失效。
 - 本机编译加速（sccache、mold 等）只配置在用户级 `~/.cargo/config.toml`，不改仓库 profile；发布脚本会清空 Cargo 配置中的 rustc 包装器，不影响发布构建身份。多个工作树并行构建时各用独立的 target 目录。

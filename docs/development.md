@@ -7,7 +7,7 @@
 | 项 | 要求 |
 | --- | --- |
 | 平台 | Linux x86_64（原生程序在其他平台编译期报错；浏览器包编译到 `wasm32-unknown-unknown`） |
-| Rust | 工具链固定在 [rust-toolchain.toml](../rust-toolchain.toml)（1.100.0，含 clippy、rustfmt 与 wasm32 目标）；MSRV 1.94.1 由 CI 单独检查 |
+| Rust | 工具链固定在 [rust-toolchain.toml](../rust-toolchain.toml)（1.100.0，含 clippy、rustfmt 与 wasm32 目标）；MSRV（`Cargo.toml` 的 `rust-version`）与工具链版本相同，不为更旧的版本保留兼容 |
 | 工具管理 | [mise](https://mise.jdx.dev) 2026.11.8 及以上：`mise install` 按 [mise.toml](../mise.toml) 与 [mise.lock](../mise.lock) 安装 Rust 之外的全部工具，并读取 `rust-toolchain.toml` 安装 Rust；清单见 [ci/tools/README.md](../ci/tools/README.md) |
 | 系统命令 | `bash`、`git`、`perl`（策略门禁需要）、`brotli`（页面构建的预压缩） |
 | 数据库 | PostgreSQL 18（运行与运维命令需要；静态检查不需要） |

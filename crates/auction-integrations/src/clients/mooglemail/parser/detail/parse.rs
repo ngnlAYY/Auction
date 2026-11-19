@@ -73,7 +73,7 @@ pub(crate) fn parse_detail_fields_for(
     let left = unique_element(form.select(left_selector), operation, world)?;
     let mut values = [None; 3];
     for row in left.select(row_selector) {
-        let label = row.select(div_selector).next().map(detail_field_label).unwrap_or_default();
+        let label = row.select(div_selector).next().map_or_default(detail_field_label);
         let index = match label.as_str() {
             "To" => 0,
             "From" => 1,

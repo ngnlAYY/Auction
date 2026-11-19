@@ -325,10 +325,8 @@ pub(crate) fn PublicShell() -> Element {
         || t!("nav-auctions"),
         |auction| t!("ticker-auction-title", number: auction.number),
     );
-    let ticker_status = ticker_auction
-        .as_ref()
-        .map(|auction| auction_status_label(&auction.status))
-        .unwrap_or_default();
+    let ticker_status =
+        ticker_auction.as_ref().map_or_default(|auction| auction_status_label(&auction.status));
     let ticker_world = ticker_auction
         .as_ref()
         .map_or_else(|| world_label(&selected_world_value), |auction| world_label(&auction.world));

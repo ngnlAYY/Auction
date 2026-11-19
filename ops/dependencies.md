@@ -9,7 +9,7 @@
 - 每季度一个窗口：1、4、7、10 月的第二个周一至周五（UTC），共 5 个工作日。窗口内只做依赖与工具链升级，不夹带功能、路由、配置字段或契约变更。
 - 窗口开始前 14 天由[依赖升级窗口提醒](../.github/workflows/dependency-cadence.yml)输出 warning。
 - 覆盖范围与顺序：
-  1. Rust 工具链：[rust-toolchain.toml](../rust-toolchain.toml)（mise 与 CI 都读取它，改动后运行 `mise lock` 并提交 `mise.lock`）与 MSRV 作业（1.94.1）；只提高工具链时 MSRV 基线保持不变。
+  1. Rust 工具链：[rust-toolchain.toml](../rust-toolchain.toml)（mise 与 CI 都读取它，改动后运行 `mise lock` 并提交 `mise.lock`）与 `Cargo.toml` 的 `rust-version`（MSRV）；MSRV 等于工具链版本，升级工具链时两处一起改，`rust-version` 门禁核对。
   2. 异步运行时：Tokio LTS 及其直接依赖。
   3. HTTP 栈：Axum 与 tungstenite 必须同批升级——`ci/checks/check.sh dependency-versions` 要求正常依赖图只有一个 tungstenite 版本，Axum 的 WebSocket 错误按版本 downcast。
   4. 数据库：sqlx 与 PostgreSQL 驱动。

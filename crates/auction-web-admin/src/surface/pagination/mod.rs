@@ -174,7 +174,7 @@ pub(crate) fn AdminPager(
             next_label: t!("admin-pagination-next"),
             jump_label: t!("admin-pagination-input"),
             jump_button_label: t!("admin-pagination-go"),
-            total_summary: total.map(|count| t!("admin-pagination-total", count: count.to_string())).unwrap_or_default(),
+            total_summary: total.map_or_default(|count| t!("admin-pagination-total", count: count.to_string())),
             show_range_summary: true,
             range_summary: move |(start, end, total_count): (i64, i64, i64)| {
                 t!(

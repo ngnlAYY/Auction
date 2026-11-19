@@ -427,7 +427,7 @@ mod tests {
 
     fn assert_lot_request(request: &CapturedWrite, version: i64, action: &str, price: Option<i64>) {
         let id = request.command_id();
-        let price = price.map(|price| format!(r#","start_price":{price}"#)).unwrap_or_default();
+        let price = price.map_or_default(|price| format!(r#","start_price":{price}"#));
         let expected = format!(
             r#"{{"command_id":"{id}","expected_state_version":{version},"action":"{action}"{price}}}"#
         );

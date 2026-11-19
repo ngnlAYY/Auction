@@ -99,8 +99,7 @@ pub(super) fn page() -> Element {
                             .mail
                             .data
                             .as_ref()
-                            .map(|data| data.pollers.clone())
-                            .unwrap_or_default(),
+                            .map_or_default(|data| data.pollers.clone()),
                         refresh,
                         loaded_generation: *loaded_generation,
                     }

@@ -1,5 +1,5 @@
 [workspace]
-# 必填：按各包 MSRV 优先解析兼容版本；最终仍由 --locked 与独立 MSRV 门禁约束。
+# 必填：按各包 MSRV 优先解析兼容版本；最终仍由 --locked 约束。MSRV 见下方 rust-version。
 resolver = "3"
 # 必填：两个目录只放工作区包，新增包自动纳入；不再维护第二份成员清单。
 members = ["apps/*", "crates/*"]
@@ -7,7 +7,9 @@ members = ["apps/*", "crates/*"]
 [workspace.package]
 version = "0.1.8"
 edition = "2024"
-rust-version = "1.94.1"
+# 必填：MSRV 等于 rust-toolchain.toml 固定的工具链版本，不为更旧的版本保留兼容；
+# 升级工具链时两处一起改，由 rust-version 门禁核对。
+rust-version = "1.100.0"
 publish = false
 # 必填：SPDX 许可标识；全文见仓库根的 LICENSE。
 license = "GPL-3.0-only"

@@ -1220,7 +1220,7 @@ mod tests {
             &mut report,
         ))
         .expect("维护不得失败");
-        calls.lock().map(|calls| calls.clone()).unwrap_or_default()
+        calls.lock().map_or_default(|calls| calls.clone())
     }
 
     fn inbox(sender: &str, credits: i64, equipment: &[&str]) -> Option<MoogleMailboxInboxAssets> {
@@ -1397,7 +1397,7 @@ mod tests {
             &mut report,
         ))
         .expect("维护不得失败");
-        let calls = calls.lock().map(|calls| calls.clone()).unwrap_or_default();
+        let calls = calls.lock().map_or_default(|calls| calls.clone());
         assert_eq!(calls.len(), 1);
         assert_eq!(
             (calls[0].0, &calls[0].1["reason"]),

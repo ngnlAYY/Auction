@@ -429,8 +429,7 @@ fn quote_ident(identifier: &str) -> String {
 fn unique_name(prefix: &str) -> String {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_nanos() as u64)
-        .unwrap_or_default();
+        .map_or_default(|elapsed| elapsed.as_nanos() as u64);
     let counter = UNIQUE.fetch_add(1, Ordering::Relaxed);
     // PostgreSQL 标识符上限 63 字节；前缀加三段十六进制只保留低位，仍远低于上限。
     format!("{prefix}{:x}{nanos:x}{counter:x}", std::process::id())

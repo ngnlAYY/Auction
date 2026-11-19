@@ -292,7 +292,7 @@ fn ExternalAccessPauseControl(
             if let Some(draft) = draft {
                 p {
                     if draft.paused {
-                        {t!("admin-pause-confirm-pause")} ": " {draft.expires_at.map(auction_time::Timestamp::to_rfc3339).unwrap_or_default()}
+                        {t!("admin-pause-confirm-pause")} ": " {draft.expires_at.map_or_default(auction_time::Timestamp::to_rfc3339)}
                     } else {
                         {t!("admin-pause-confirm-resume")}
                     }

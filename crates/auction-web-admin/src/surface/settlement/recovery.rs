@@ -51,12 +51,9 @@ pub(super) fn AdminRecoveryTable(
     mut reason: Signal<String>,
     mut action_feedback: Signal<Option<AdminActionFeedback>>,
 ) -> Element {
-    let rows = report
-        .as_ref()
-        .map(|report| {
-            super::presentation::page_slice(&report.recoveries, current_page, pagination.size())
-        })
-        .unwrap_or_default();
+    let rows = report.as_ref().map_or_default(|report| {
+        super::presentation::page_slice(&report.recoveries, current_page, pagination.size())
+    });
     rsx! {
         section { class: "admin-auction-report admin-auction-recovery", aria_labelledby: "settlement-recovery-title",
             h2 { id: "settlement-recovery-title", {t!("admin-recovery-title")} }

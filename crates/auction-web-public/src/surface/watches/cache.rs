@@ -83,11 +83,9 @@ pub(in crate::surface) fn invalidate_lot_watches(user_id: &str) {
 /// 读取最近保存的条目键；索引缺失、损坏或来自旧版本时按空索引处理。
 #[cfg(any(target_arch = "wasm32", test))]
 fn recent_keys() -> Vec<String> {
-    storage::get_item(INDEX_KEY)
-        .map(|index| {
-            index.split('\n').filter(|key| key.starts_with(KEY_PREFIX)).map(str::to_owned).collect()
-        })
-        .unwrap_or_default()
+    storage::get_item(INDEX_KEY).map_or_default(|index| {
+        index.split('\n').filter(|key| key.starts_with(KEY_PREFIX)).map(str::to_owned).collect()
+    })
 }
 
 #[cfg(any(target_arch = "wasm32", test))]

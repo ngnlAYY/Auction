@@ -133,14 +133,11 @@ impl OutbidNotice<'_> {
         notification_id: uuid::Uuid,
     ) -> Option<String> {
         let amount = crate::services::public::format_credits(amount);
-        let deadline_line = self
-            .deadline
-            .map(|deadline| {
-                format!("Bidding closes: {}\n", crate::services::public::format_deadline(deadline))
-            })
-            .unwrap_or_default();
+        let deadline_line = self.deadline.map_or_default(|deadline| {
+            format!("Bidding closes: {}\n", crate::services::public::format_deadline(deadline))
+        });
         let lot_url_line =
-            self.lot_url(lot_id).map(|url| format!("View the lot: {url}\n")).unwrap_or_default();
+            self.lot_url(lot_id).map_or_default(|url| format!("View the lot: {url}\n"));
         let notification_id = notification_id.to_string();
         let variables = [
             ("item_name", self.item_name),

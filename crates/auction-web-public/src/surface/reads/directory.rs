@@ -594,7 +594,7 @@ mod tests {
             selected: Option<&'static str>,
             accepts_replace: bool,
         ) -> (VirtualDom, Rc<Self>) {
-            let search = selected.map(|id| format!("auction={id}")).unwrap_or_default();
+            let search = selected.map_or_default(|id| format!("auction={id}"));
             let browser = PageBrowserFixture::new(page.pathname(), &search);
             browser.allow_writes(accepts_replace);
             let trace = Rc::new(Self {

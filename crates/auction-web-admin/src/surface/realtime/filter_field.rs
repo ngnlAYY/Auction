@@ -52,7 +52,7 @@ impl FilterValue {
     pub(in crate::surface) fn input_value(&self) -> &str {
         match self {
             Self::Text(value) => value,
-            Self::Invalid(values) => values.first().map(String::as_str).unwrap_or_default(),
+            Self::Invalid(values) => values.first().map_or_default(String::as_str),
         }
     }
 

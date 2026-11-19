@@ -275,9 +275,8 @@ fn map_pool_page(
         page_size: page.limit,
         total: if cursor { None } else { page.total },
         cursor: raw_cursor,
-        next_cursor: cursor.then(|| {
-            page.next_cursor.as_ref().map(encode_public_compensation_cursor).unwrap_or_default()
-        }),
+        next_cursor: cursor
+            .then(|| page.next_cursor.as_ref().map_or_default(encode_public_compensation_cursor)),
         has_more: cursor.then_some(page.has_more),
     }
 }

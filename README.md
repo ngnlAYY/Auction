@@ -41,7 +41,7 @@ HentaiVerse 装备拍卖服务的全 Rust 实现：玩家在网站或 E-Hentai �
 | `ops/` | 部署手册、配置示例、systemd/tmpfiles/Caddy 模板、保留政策 |
 | `ci/` | 静态门禁、发布脚本与工具说明 |
 | `mise.toml`、`mise.lock` | 工具版本与常用命令入口（[mise](https://mise.jdx.dev)） |
-| `rust-toolchain.toml` | 固定工具链（1.100.0，含 wasm32 目标）；MSRV 1.94.1 |
+| `rust-toolchain.toml` | 固定工具链（1.100.0，含 wasm32 目标）；MSRV 与它相同 |
 
 ## 常用命令
 

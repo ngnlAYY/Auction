@@ -2,7 +2,7 @@
 
 [docs/README.md](README.md) · [docs/business-rules.md](business-rules.md) · [docs/development.md](development.md) · [ops/README.md](../ops/README.md)
 
-HV Auction 是 HentaiVerse 装备拍卖服务：玩家通过网站与论坛出价，通过游戏内 MoogleMail 寄售装备、付款与收货。系统由 Rust 2024 工作区构成，后端为三个可独立部署的进程（Public、Admin、Worker）加一个运维 CLI，前端为两个 Dioxus WASM 单页应用，唯一的业务数据库是 PostgreSQL 18。原始邮件诊断证据另以加密文件保存，运行配置与备份回执也位于文件系统。
+HV Auction 是 HentaiVerse 装备拍卖服务：玩家通过网站与论坛出价，通过游戏内 MoogleMail 寄售装备、付款与收货。系统由一个 Rust 工作区构成（语言版次 edition 2024，是版次编号而不是年份），后端为三个可独立部署的进程（Public、Admin、Worker）加一个运维 CLI，前端为两个 Dioxus WASM 单页应用，唯一的业务数据库是 PostgreSQL 18。原始邮件诊断证据另以加密文件保存，运行配置与备份回执也位于文件系统。
 
 ## 进程模型
 

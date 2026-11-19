@@ -221,15 +221,12 @@ pub(super) fn build_canonical_delivery(
             if let Some(reference) = &intent.dispatch_reference {
                 variables.insert("dispatch", reference.clone());
             }
-            let equipment_secret_refs = intent
-                .equipment_id
-                .map(|equipment_id| {
-                    vec![EquipmentSecretReference {
-                        kind: "auction_equipment_key",
-                        id: equipment_id.to_string(),
-                    }]
-                })
-                .unwrap_or_default();
+            let equipment_secret_refs = intent.equipment_id.map_or_default(|equipment_id| {
+                vec![EquipmentSecretReference {
+                    kind: "auction_equipment_key",
+                    id: equipment_id.to_string(),
+                }]
+            });
             to_go_json_bytes(&SettlementSendPayload {
                 schema_version: 1,
                 operation: "send",
@@ -623,19 +620,16 @@ mod tests {
     }
 
     fn variables_of(delivery: &CanonicalSettlementDelivery) -> BTreeMap<String, String> {
-        delivery
-            .payload
-            .get("variables")
-            .and_then(serde_json::Value::as_object)
-            .map(|variables| {
+        delivery.payload.get("variables").and_then(serde_json::Value::as_object).map_or_default(
+            |variables| {
                 variables
                     .iter()
                     .map(|(key, value)| {
                         (key.clone(), value.as_str().unwrap_or_default().to_owned())
                     })
                     .collect()
-            })
-            .unwrap_or_default()
+            },
+        )
     }
 
     #[test]

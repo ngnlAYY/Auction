@@ -276,8 +276,7 @@ pub(super) fn SessionMenu() -> Element {
                     let initial = username
                         .chars()
                         .next()
-                        .map(|value| value.to_uppercase().collect::<String>())
-                        .unwrap_or_default();
+                        .map_or_default(|value| value.to_uppercase().collect::<String>());
                     rsx! {
                         // 展开式（disclosure）面板而非 ARIA 菜单：条目是普通链接与按钮，按 Tab 浏览，
                         // 不提供菜单要求的方向键导航。
