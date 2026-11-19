@@ -10,27 +10,33 @@ Public 与 Admin 两个浏览器应用的 TypeScript 源码、构建配置与编
 | --- | --- | --- | --- |
 | `web/contracts` | `@auction/contracts/…` | 与后端 `auction-contracts` 一一对应的 DTO 类型与运行期 schema | 不依赖 Solid，不访问 DOM，不含页面逻辑 |
 | `web/shared` | `@auction/web-shared/…` | 两端通用、无业务偏向的浏览器能力：响应式内核、传输、存储、定时、路由、i18n 装配与通用组件 | 不出现业务键名、业务路由与业务文案 |
-| `web/public` | 相对路径 | Public 应用的入口、API 封装、页面、交互与译文装配 | 不导入 `web/admin` |
-| `web/admin` | 相对路径 | Admin 应用的入口、API 封装、页面、交互与译文装配 | 不导入 `web/public` |
-| `web/tooling` | 相对路径 | 构建配置与构建期类型声明 | 不进入浏览器产物 |
+| `web/public` | 包内相对路径 | Public 应用的入口、API 封装、页面、交互与译文装配 | 不导入 `web/admin`；跨包只用登记的别名 |
+| `web/admin` | 包内相对路径 | Admin 应用的入口、API 封装、页面、交互与译文装配 | 不导入 `web/public`；跨包只用登记的别名 |
+| `web/tooling` | 包内相对路径 | 构建配置、构建期类型声明与包边界检查脚本 | 不进入浏览器产物 |
 
-- 包内用相对路径导入，跨包只用上表的导入名；`web/contracts` 与 `web/shared` 互不反向依赖页面包。
+- 包内用相对路径导入，跨包只能用[`web/tooling/boundary-rules.ts`](tooling/boundary-rules.ts) 里登记的别名；`web/contracts` 与 `web/shared` 互不反向依赖页面包。
 - 每个包的源码都在自己的 `src/` 下。目录名按职责命名，不用 `common`、`helpers`、`shared`、`misc`、`utils`。
 - 运行期依赖只有 `solid-js`、`@solidjs/web`、`valibot` 与 `@fluent/bundle`。新增依赖要先得到维护者同意。
 
 ## 命令
 
-工具版本由仓库根的 `mise.toml` 固定，依赖由 `web/bun.lock` 固定。以下命令在 `web/` 下执行：
+工具版本由仓库根的 `mise.toml` 固定，依赖由 `web/bun.lock` 固定。下表命令除注明“仓库根”外均在 `web/` 下执行。门禁使用已安装的 `web/node_modules`，自身不安装依赖、不联网；首次或锁文件变化后先在仓库根运行 `mise run web-prepare`。
 
 | 命令 | 作用 |
 | --- | --- |
-| `bun install --frozen-lockfile` | 按锁文件还原依赖 |
+| `mise run web-prepare`（仓库根） | 按锁文件执行 `bun install --frozen-lockfile`，是唯一会安装 Web 依赖的入口 |
+| `mise run web-check`（仓库根） | 依次运行 `bun run typecheck`、`bun run lint` 与包边界检查，已包含在 `mise run verify` 中 |
+| `mise run web-test`（仓库根） | 在 `web/` 下运行 `bun run test`，不并入默认门禁；CI 的 `test` 作业运行它 |
 | `bun run typecheck` | 检查四个包、Vite 构建配置和测试。`typecheck:contracts`、`typecheck:shared`、`typecheck:public`、`typecheck:admin` 只查单个包 |
 | `bun run lint` | Biome 的格式与静态规则检查，不写文件 |
 | `bun run test` | 单元测试（`bun test`）；测试文件与被测模块同目录，以 `.test.ts` 结尾 |
 | `bun run format` | 按 Biome 规则改写格式并应用安全修复 |
 | `bun run build:public`、`bun run build:admin` | 生产构建，产物写入 `target/web/<surface>/public` |
 | `bun run dev:public` | 启动 Public 开发服务器；`/favicon.ico` 由仅对 `serve` 生效的插件映射到共享 SVG |
+
+包边界由 `web/tooling/check-boundaries.ts` 用 TypeScript 编译器解析语法树检查，规则见上文目录表：`contracts` 不导入其他三个包，`shared` 只可导入 `contracts` 与自身，`public`/`admin` 互不导入且只能再导入 `contracts` 与 `shared`，四个包都不导入 `web/tooling/**`、`web/` 里四个包之外的源码，以及仓库里 `web/` 之外的源码。说明符只接受闭集：相对路径（`./`、`../` 开头，或表示目录入口的 `.`、`..`）（含反斜杠的路径违规）、[`web/tooling/boundary-rules.ts`](tooling/boundary-rules.ts) 中登记的 `@auction/contracts/*` 与 `@auction/web-shared/*` 两个别名、`web/package.json` 的 `dependencies`/`devDependencies` 中登记的第三方包（含子路径），以及测试文件里的 `node:`/`bun:` 内置模块。跨包只能用登记的别名，相对路径跨包同样违规；别名只允许登记在 `web/tsconfig.base.json`，其他 tsconfig 出现 `paths`（包括空对象）或基配置的别名表与检查器不一致时，检查器以退出码 2 失败；`web/package.json` 的 `imports` 只用于核对。
+
+资产按归属放行：`crates/auction-web-shared/{assets,style}` 四个包都可引用，`crates/auction-web-public/{assets,i18n}` 只给 `public`，`crates/auction-web-admin/{assets,i18n}` 只给 `admin`。普通 `.css` 可直接引用，其他资产须带 `?raw` 或 `?url`；查询参数不改变目标路径的归属。受检源码目录不允许符号链接；允许目标在磁盘上存在时，其真实路径必须等于规范化后的词法路径，经过符号链接即违规。动态 `import()` 只接受字符串字面量或无插值模板字面量，带插值或非字面量参数报错；只有 `web/public/src/surface/shell/navigation-fixture.test.ts` 与 `web/public/src/surface/catalog/command-scope-fixture.test.ts` 两个点名文件里的非字面量 `import()` 例外（`${NAMESPACE}:…` 虚拟模块），其他文件与所有非字面量 `require()` 都报错；括号包裹的 `require` 仍按 `require` 识别。检查器退出码 1 表示发现越界，2 表示工具、配置、读取或解析失败；纯规则测试用 `bun test tooling/check-boundaries.test.ts`（在 `web/` 下），回归用例用仓库根的 `bash ci/checks/web-boundaries-test.sh` 运行。
 
 除 `test` 外，脚本用 bun 直接执行 `node_modules/.bin/` 下的 `tsc`、`biome` 与 `vite`；本地工具缺失时立即以“找不到模块”失败，不经 `bun x` 临时解析或下载，也不额外要求 Node。`bunfig.toml` 的 `install.auto = "disable"` 关闭自动安装，工具或其传递依赖缺失时都不会联网补装。
 

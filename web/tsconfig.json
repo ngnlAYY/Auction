@@ -4,5 +4,10 @@
     "allowImportingTsExtensions": true,
     "types": ["bun"]
   },
-  "include": ["tooling/vite-config.ts", "public/vite.config.ts", "admin/vite.config.ts"]
+  "include": [
+    "tooling/vite-config.ts",
+    "tooling/check-boundaries.ts",
+    "public/vite.config.ts",
+    "admin/vite.config.ts"
+  ]
 }

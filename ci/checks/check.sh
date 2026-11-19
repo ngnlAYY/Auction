@@ -656,6 +656,31 @@ check_web_callback_props() {
 		perl ci/checks/web-callback-props.pl
 }
 
+# web/ 的静态检查。依赖必须已由 mise run web-prepare 安装；门禁自身不安装依赖、不联网。
+# 工具必须是普通可执行文件，避免同名目录让 -x 误判为已安装。
+check_web() {
+	local tool
+	if [[ ! -d web/node_modules ]]; then
+		printf '%s\n' "web/ 依赖未安装：先运行 mise run web-prepare" >&2
+		return 1
+	fi
+	for tool in web/node_modules/.bin/tsc web/node_modules/.bin/biome; do
+		if [[ ! -f "$tool" || ! -x "$tool" ]]; then
+			printf '%s\n' "web/ 依赖不完整：缺少 ${tool#web/}，先运行 mise run web-prepare" >&2
+			return 1
+		fi
+	done
+	( cd web && bun run typecheck && bun run lint ) || return 1
+	local boundary_status=0
+	bun --no-install web/tooling/check-boundaries.ts "$PWD" || boundary_status=$?
+	if [[ $boundary_status -eq 1 ]]; then
+		printf '%s\n' "Web 包边界检查发现越界导入。" >&2
+	elif [[ $boundary_status -eq 2 ]]; then
+		printf '%s\n' "Web 包边界检查无法完成：工具、配置、依赖或解析器失败。" >&2
+	fi
+	return "$boundary_status"
+}
+
 # 本地 mise 任务与 CI 共用命令定义，避免编译参数在两处漂移。
 run_checks() {
 	local check
@@ -680,6 +705,7 @@ run_checks() {
 		published-migrations) check_published_migrations ;;
 		web-build-inputs) check_web_build_inputs ;;
 		web-callback-props) check_web_callback_props ;;
+		web) check_web ;;
 		dependency-versions) check_dependency_versions ;;
 		repository) check_repository_contracts ;;
 		rust-version) check_rust_version ;;

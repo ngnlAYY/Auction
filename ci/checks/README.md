@@ -2,7 +2,7 @@
 
 [ci/README.md](../README.md) · [docs/development.md](../../docs/development.md)
 
-[ci/checks/check.sh](check.sh) 是本地与 CI 的共同入口。`all` 包含仓库契约、MSRV 与工具链版本一致、公开仓库脱敏、目录布局、配置示例、systemd 模板、翻译键、装备诊断闭集、源码计数棘轮、审计写入失败分类、模块层级、Markdown 链接、迁移兼容登记、已发布迁移不可变、Web 输入依赖闭包和 Web 回调属性检查。入口与构型见 [ci/README.md#静态门禁cicheckschecksh](../README.md#静态门禁cicheckschecksh)。`mise run verify` 等价于 `bash ci/checks/check.sh all fmt check dependency-versions lint wasm rustdoc`：先运行 `all`，再依次执行格式、宿主默认 feature 编译、依赖版本、宿主全 feature Clippy、Public/Admin 两组 wasm32 Clippy 与 rustdoc 检查，不运行行为测试。
+[ci/checks/check.sh](check.sh) 是本地与 CI 的共同入口。`all` 包含仓库契约、MSRV 与工具链版本一致、公开仓库脱敏、目录布局、配置示例、systemd 模板、翻译键、装备诊断闭集、源码计数棘轮、审计写入失败分类、模块层级、Markdown 链接、迁移兼容登记、已发布迁移不可变、Web 输入依赖闭包和 Web 回调属性检查。`web` 项（`bun run typecheck`、`bun run lint` 与 `web/` 包边界）不在 `all`/`rust` 组内，由 `mise run verify` 末尾显式运行；运行前先 `mise run web-prepare` 安装 `web/node_modules`。入口与构型见 [ci/README.md#静态门禁cicheckschecksh](../README.md#静态门禁cicheckschecksh)。`mise run verify` 等价于 `bash ci/checks/check.sh all fmt check dependency-versions lint wasm rustdoc web`：先运行 `all`，再依次执行格式、宿主默认 feature 编译、依赖版本、宿主全 feature Clippy、Public/Admin 两组 wasm32 Clippy、rustdoc 与 `web/` 静态检查，不运行行为测试。
 
 ## 公开仓库脱敏
 
@@ -71,6 +71,23 @@ bash ci/checks/web-callback-props-test.sh
 扫描源码声明并跳过注释、字符串和函数体，类型别名和宏展开需要人工审查。失败按文件和字段或参数的行号报告。
 
 Dioxus 0.7.10 从 `None` 更新可选回调时会复制临时 VNode 的句柄，下一次 diff 释放该句柄的所有者。可省略的回调用非可选类型和属性默认值，使 Dioxus 在原属性槽内更新闭包。相关上游实现位于 `dioxus-core-macro/src/props/mod.rs:694–715` 和 `dioxus-core/src/events.rs:555–556`。
+
+## Web 包边界
+
+```bash
+bash ci/checks/check.sh web
+bash ci/checks/web-boundaries-test.sh
+```
+
+`web` 先要求 `web/node_modules` 已存在，且本地 `web/node_modules/.bin/tsc` 与 `web/node_modules/.bin/biome` 都是普通文件且可执行（指向普通文件的符号链接也可）；缺目录或任一工具时立即失败并提示 `mise run web-prepare`，门禁自身不安装依赖、不联网。随后在 `web/` 下运行 `bun run typecheck`、`bun run lint`，最后由薄壳 [`web/tooling/check-boundaries.ts`](../../web/tooling/check-boundaries.ts) 动态加载 [`check-boundaries-impl.ts`](../../web/tooling/check-boundaries-impl.ts)，用 `web/` 的 TypeScript 编译器解析语法树，扫描 `web/{contracts,shared,public,admin}/src/**/*.{ts,tsx}` 的 `import`、`export … from`、`import type`、动态 `import()` 与 `require()`。说明符判定是 [`web/tooling/boundary-rules.ts`](../../web/tooling/boundary-rules.ts) 的纯函数，可用 `bun test tooling/check-boundaries.test.ts`（在 `web/` 下）运行。入口不静态导入 TypeScript；实现或其依赖加载失败时以退出码 2 报告，避免被误当成越界。
+
+边界规则与 [web/README.md](../../web/README.md#目录) 的目录表一致：`contracts` 不导入其他三个包；`shared` 只可导入 `contracts` 与自身；`public` 与 `admin` 互不导入；四个包都不导入 `web/tooling/**`、`web/` 里四个包之外的源码，以及仓库里 `web/` 之外的源码。跨包导入必须使用登记的导入名，经相对路径跨包同样违规。
+
+说明符只接受闭集：相对路径（`./`、`../` 开头，或表示目录入口的 `.`、`..`）；检查器写死的 `@auction/contracts/*` 与 `@auction/web-shared/*` 两个别名；`web/package.json` 的 `dependencies`/`devDependencies` 中登记的第三方包（含子路径）；以及测试文件里的 `node:`、`bun:` 与 `bun` 内置模块。裸 `.`/`..`、含反斜杠的说明符、绝对路径、`file:`/`http:` 等 URL、`#` 包内导入、未登记的 `@auction/…` 与未登记的裸包名都按越界处理。别名展开后先把目标规范化为仓库内路径，再由目标所属的包判定；不能按说明符前缀判断。`web/tsconfig.base.json` 的 `paths` 必须恰好是两个登记别名；`web/` 下其他 tsconfig（不含 `node_modules`）只要出现 `compilerOptions.paths` 这个键（包括空对象）就以退出码 2 报告“别名只能登记在 web/tsconfig.base.json”，`web/package.json` 的 `imports` 只用于核对、非空即失败。出现表外条目、同一别名多个候选或条件映射时，检查器同样以退出码 2 报告“别名登记与检查器不一致”。
+
+`web/` 之外的资产按归属放行：`crates/auction-web-shared/{assets,style}` 四个包都可引用，`crates/auction-web-public/{assets,i18n}` 只给 `public`，`crates/auction-web-admin/{assets,i18n}` 只给 `admin`。普通 `.css` 可直接引用；其他资产须带 `?raw` 或 `?url`，查询参数不改变目标路径的归属。Rust 源码、TypeScript 模块和 `web/` 之外的测试夹具不能借查询参数绕过。受检源码目录里出现任何符号链接（文件或目录）都以退出码 2 失败；判定通过的相对路径或别名目标如果在磁盘上存在，其 `realpath` 必须等于规范化后的词法路径，经过符号链接按越界（退出码 1）报告。
+
+动态导入只接受字符串字面量或无插值模板字面量；带插值或非字面量参数报错（无法静态判定）。唯一例外是 `web/public/src/surface/shell/navigation-fixture.test.ts` 与 `web/public/src/surface/catalog/command-scope-fixture.test.ts` 两个文件中的非字面量 `import()`（Bun 测试插件虚拟模块）；其他文件的非字面量 `import()` 与所有非字面量 `require()` 都报错，调用目标外面套任意层括号不影响 `require()` 识别。新增同类夹具必须修改检查器里的点名清单。读取 `web/admin/src` 不存在时只豁免这一个已知的尚未并入情况；其他源码目录读取失败、`package.json`/tsconfig 解析失败、配置不一致、实现模块加载失败或扫描结果为空都以退出码 2 失败。退出码 1 仅表示发现越界导入。`ci/checks/web-boundaries-test.sh` 用临时仓库覆盖允许、拒绝与退出码 2 用例；启用 TypeScript 解析器的整体用例在能运行解析器的环境中执行。
 
 ## unwrap/expect 门禁
 

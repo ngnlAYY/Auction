@@ -133,12 +133,12 @@
 默认门禁只做格式、编译与静态分析，不运行测试，提交前必须通过：
 
 ```bash
-mise run verify     # bash ci/checks/check.sh all fmt check dependency-versions lint wasm rustdoc
+mise run verify     # bash ci/checks/check.sh all fmt check dependency-versions lint wasm rustdoc web
 ```
 
 它覆盖四种编译配置：宿主默认 feature（`check`）、宿主全 feature（`lint`）、Public 与 Admin 两组 wasm32（`wasm`，dev 构型的 Clippy 加 `wasm-release` 构型的编译告警），外加 `rustdoc`。只跑单项时要注意：`cfg(target_arch = "wasm32")` 代码只会被 `wasm` 项检查。
 
-`web/` 下的改动另需在 `web/` 目录里通过 `bun run typecheck`、`bun run lint` 与 `bun run test`；这三项尚未并入 `mise run verify` 与 CI，提交前手工运行。
+`web/` 的类型检查、Biome 与包边界检查随 `mise run verify`（以及 CI 的 `verify` 作业）运行；依赖先由 `mise run web-prepare` 安装，门禁自身不安装、不联网。行为测试用 `mise run web-test`，由 CI 的 `test` 作业运行但不并入 `mise run verify`。
 
 行为变更必须随功能维护并运行受影响范围的测试；已有测试保留，修改行为时同步正反例与回归断言。
 

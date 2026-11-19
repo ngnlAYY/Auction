@@ -13,7 +13,7 @@
 | 数据库 | PostgreSQL 18（运行与运维命令需要；静态检查不需要） |
 | 页面构建 | `dx`（Dioxus CLI 0.7）、`wasm-bindgen`、`wasm-opt` 与 `esbuild`，随 `mise install` 安装；`dx` 首次从源码编译，需要 C 编译器、CMake、`pkg-config` 与 OpenSSL 开发文件 |
 
-页面的 TypeScript + SolidJS 实现在 `web/` 下，用同样由 mise 安装的 bun 管理依赖；它的命令（`bun install --frozen-lockfile`、`bun run typecheck`、`bun run lint`、`bun run test`、`bun run build:public`）与编码规则见 [web/README.md](../web/README.md)，目前不属于 `mise run verify` 与发布构建。
+页面的 TypeScript + SolidJS 实现在 `web/` 下，用同样由 mise 安装的 bun 管理依赖。先运行 `mise run web-prepare` 安装依赖；`bun run typecheck`、`bun run lint` 与包边界检查（TypeScript 语法树）由 `mise run web-check` 运行，并包含在 `mise run verify` 中；行为测试用 `mise run web-test`，不并入默认门禁。完整命令与编码规则见 [web/README.md](../web/README.md)，`web/` 目前不参与发布构建。
 
 直接调用负责依赖解析的 Cargo 命令时加 `--locked`；mise 任务、CI 检查与发布构建已固定该参数。本地配置命令通过独立参数传递目录，包含空格的路径须在调用 `mise run` 时加引号。如需本机编译加速（sccache、mold 等），只在用户级 `~/.cargo/config.toml` 中配置，不改仓库 profile。
 
@@ -24,13 +24,16 @@
 ```bash
 mise install             # 安装或补齐全部工具
 mise tasks               # 列出全部入口
-mise run verify          # 默认验证：策略门禁 → fmt → check → 依赖版本 → clippy → wasm → rustdoc（不运行测试）
+mise run verify          # 默认验证：策略门禁 → fmt → check → 依赖版本 → clippy → wasm → rustdoc → web（不运行测试）
 mise run test            # 默认 feature 下的纯逻辑、单元与本地替身测试
 mise run test-db         # 显式 PG18 集成测试；未设置 AUCTION_TEST_DATABASE_URL 时启动本机临时集群
 mise run test-db-compat  # 只验证迁移 compatible 声明（真实 PG18，沿迁移链）
 mise run fmt             # 只检查格式
 mise run lint            # clippy -D warnings（all-features）
 mise run wasm-check      # wasm32 目标 Clippy 检查两个浏览器包（-D warnings）
+mise run web-prepare     # 按 web/bun.lock 安装 web/ 依赖（唯一允许联网的 Web 入口）
+mise run web-check       # web/ 的类型检查、Biome 与包边界；已包含在 verify 中
+mise run web-test        # web/ 行为测试；不并入默认门禁
 mise run web-build       # 构建 Public/Admin 页面 payload（工具随 mise install 安装）
 mise run web-size        # 只核对两端 Web payload 体积预算（不构建）
 mise run run-public      # cargo run --locked -p auction-public-api --features web-embed
@@ -38,7 +41,7 @@ mise run run-admin
 mise run run-worker
 ```
 
-`mise run verify` 等价于 `bash ci/checks/check.sh all fmt check dependency-versions lint wasm rustdoc`，各项含义见 [ci/README.md](../ci/README.md)。它是纯静态入口：只读源码、配置示例与文档，不运行 `mise run test`/`mise run test-db`、不连接数据库、不启动服务、不访问网络（`ratchet`、`markdown-links` 等检查均离线）。因此编译与门禁通过不等于行为已验证，提交前至少通过它。Justfile 中的 `db-migrate`、`db-grants`、`config-check` 等本地命令会实际连接数据库或读取真实配置，不属于静态门禁。
+`mise run verify` 等价于 `bash ci/checks/check.sh all fmt check dependency-versions lint wasm rustdoc web`，各项含义见 [ci/README.md](../ci/README.md)。它是纯静态入口：只读源码、配置示例与文档，不安装依赖、不运行 `mise run test`/`mise run test-db`/`mise run web-test`、不连接数据库、不启动服务、不访问网络（`ratchet`、`markdown-links` 等检查均离线）；运行前先 `mise run web-prepare` 准备 `web/node_modules`。因此编译与门禁通过不等于行为已验证，提交前至少通过它。Justfile 中的 `db-migrate`、`db-grants`、`config-check` 等本地命令会实际连接数据库或读取真实配置，不属于静态门禁。
 
 ## 本地运行
 

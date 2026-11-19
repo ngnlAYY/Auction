@@ -32,8 +32,8 @@ sccache = "0.19.0"
 # ---- 验证 ----
 
 [tasks.verify]
-description = "唯一默认验证入口：策略（含源码棘轮与文档链接）→ 格式 → 编译/Clippy/WASM，不运行测试"
-run = "bash ci/checks/check.sh all fmt check dependency-versions lint wasm rustdoc"
+description = "唯一默认验证入口：策略（含源码棘轮与文档链接）→ 格式 → 编译/Clippy/WASM → web 静态检查，不运行测试"
+run = "bash ci/checks/check.sh all fmt check dependency-versions lint wasm rustdoc web"
 
 [tasks.fmt]
 description = "只检查 rustfmt 格式，不写文件"
@@ -50,6 +50,14 @@ run = "bash ci/checks/check.sh lint"
 [tasks.wasm-check]
 description = "以 wasm32 Clippy 检查 Public/Admin 浏览器目标及共享层，警告即失败；不产出发布 payload"
 run = "bash ci/checks/check.sh wasm"
+
+[tasks.web-prepare]
+description = "按 web/bun.lock 安装 web/ 依赖；CI 也通过此任务准备依赖，这是唯一允许联网的 Web 入口"
+run = "cd web && bun install --frozen-lockfile"
+
+[tasks.web-check]
+description = "web/ 静态检查：TypeScript 类型检查、Biome 与包边界；包含在 mise run verify 中"
+run = "bash ci/checks/check.sh web"
 
 # ---- 测试 ----
 
@@ -86,6 +94,10 @@ fi
 [tasks.test-db-compat]
 description = "只验证迁移兼容声明：沿迁移链对 compatible 登记重放上一版契约、写入探针与旧版语句"
 run = "cargo test --locked -p auction-storage --features test-db --test postgres -- postgres_compat"
+
+[tasks.web-test]
+description = "web/ 行为测试（bun test）；不并入默认 mise run verify"
+run = "cd web && bun run test"
 
 # ---- 构建与发布 ----
 

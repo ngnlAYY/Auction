@@ -42,7 +42,7 @@ mise run verify      # 运行某个入口
 | `geckodriver` | GitHub 发布包 | `mise run test-wasm` 用它驱动本机 Firefox |
 | `wasm-opt`（binaryen） | GitHub 发布包 | `dx` 的配套工具 |
 | `esbuild` | npm 上的 `@esbuild/linux-x64` 原生二进制包 | `dx` 的配套工具，运行时不需要 Node |
-| `bun` | GitHub 发布包 | `web/` 下 TypeScript 实现的依赖安装、类型检查、测试与构建（依赖版本由 `web/bun.lock` 固定）；Rust 版页面的构建与发布不使用它 |
+| `bun` | GitHub 发布包 | `web/` 下 TypeScript 实现的依赖安装、类型检查、Biome、测试与构建（依赖版本由 `web/bun.lock` 固定）；`mise run web-prepare` 安装依赖，`mise run verify` 的 `web` 项运行类型检查、Biome 与包边界，`mise run web-test` 运行行为测试；包边界由 `web/tooling/check-boundaries.ts` 使用 `web/` 的 TypeScript 编译器检查，Rust 版页面的构建与发布不使用它 |
 
 升级工具：改 `mise.toml` 里的版本，运行 `mise install` 与 `mise lock`，把两个文件一并提交。`mise.lock` 也记录 Rust 的版本、组件与目标，所以改 `rust-toolchain.toml` 后同样要重新 `mise lock`；CI 以 `--locked` 安装，锁文件与请求不一致时直接失败。升级 mise 自身时，同步 `mise.toml` 的 `min_version` 与工作流里 `jdx/mise-action` 的 `version`。
 

@@ -101,8 +101,8 @@ jobs:
     env:
       # 仅静态检查，不生成调试信息；本地 dev 仍保留行号回溯。
       CARGO_PROFILE_DEV_DEBUG: "0"
-      # 与 docs 作业启用同一组工具，共用 mise 缓存。
-      MISE_ENABLE_TOOLS: rust,ripgrep
+      # Cargo 与 web/ 静态检查所需工具；与 docs 作业共用 mise 缓存。
+      MISE_ENABLE_TOOLS: rust,ripgrep,bun
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -114,6 +114,8 @@ jobs:
         with:
           version: 2026.11.8
           cache_key_prefix: mise-v1-checks
+      - name: Prepare web dependencies
+        run: mise run web-prepare
       # rust-cache v2.9.3；自动键隔离 job、平台、工具链和依赖图。
       # 非 PR 事件才写缓存：PR 缓存作用域与合并结果不同，全写会挤占同一仓库额度。
       # save-if 必须写成 ${{ }} 表达式；字面字符串不等于 "true"，会让缓存永远不保存。
@@ -126,7 +128,7 @@ jobs:
           cache-bin: "false"
           save-if: ${{ github.event_name != 'pull_request' }}
       # docs 已完成格式和策略门禁；此处不重复执行，不运行测试。
-      - run: bash ci/checks/check.sh check dependency-versions lint wasm rustdoc
+      - run: bash ci/checks/check.sh check dependency-versions lint wasm rustdoc web
 
   test:
     needs: docs
@@ -137,8 +139,9 @@ jobs:
       # 测试构建不生成调试信息：target 与构建缓存更小，链接更快。panic 消息里的源码位置
       # 不依赖调试信息，失败时只有 backtrace 缺少行号。
       CARGO_PROFILE_DEV_DEBUG: "0"
+      # 测试入口是 mise 任务；启用 Rust 与 web/ 测试需要的 bun，mise run 不会顺带安装其余工具。
       # 浏览器接线测试使用运行器自带的 Firefox；驱动与 wasm 测试运行器由 mise 提供。
-      MISE_ENABLE_TOOLS: rust,github:wasm-bindgen/wasm-bindgen,github:mozilla/geckodriver
+      MISE_ENABLE_TOOLS: rust,bun,github:wasm-bindgen/wasm-bindgen,github:mozilla/geckodriver
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -150,6 +153,8 @@ jobs:
         with:
           version: 2026.11.8
           cache_key_prefix: mise-v1-test
+      - name: Prepare web dependencies
+        run: mise run web-prepare
       - name: Restore Rust build cache
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
         with:
@@ -179,6 +184,8 @@ jobs:
           echo "AUCTION_TEST_DATABASE_URL=postgresql://auction_test:auction_test@127.0.0.1:$port/auction_test" >> "$GITHUB_ENV"
       - name: Run pure and double tests
         run: mise run test
+      - name: Run web behavior tests
+        run: mise run web-test
       - name: Run PostgreSQL 18 integration tests
         run: mise run test-db
       # 迁移兼容声明单独成步：失败时直接指名被证伪的 compatible 迁移，

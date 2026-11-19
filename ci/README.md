@@ -40,6 +40,7 @@ bash ci/checks/check.sh <检查项>...
 | `published-migrations` | 每个发布 tag（`v<版本>`）中存在的 `migrations/postgres/*.up.sql` 必须在当前工作树逐字节不变；禁止修改、重命名或删除已发布文件，只允许追加新编号 |
 | `web-build-inputs` | 离线核对 Web 指纹清单与浏览器 crate 的工作区路径依赖闭包，见[ci/checks/README.md#web-输入依赖闭包](checks/README.md#web-输入依赖闭包) |
 | `web-callback-props` | 检查三个 Rust Web crate 的组件参数和 `Props` 字段（含 `cfg_attr` 条件声明），拒绝可选的 `EventHandler` 和 `Callback`，见[ci/checks/README.md#web-回调属性](checks/README.md#web-回调属性) |
+| `web` | 在 `web/` 下运行 `bun run typecheck`、`bun run lint` 与包边界检查（`web/tooling/check-boundaries.ts`，用 TypeScript 编译器解析语法树；说明符按闭集分类，退出码 1 为越界、2 为工具/配置/依赖/解析失败；别名只能在 `web/tsconfig.base.json` 登记，源码与目标符号链接失败关闭）；调用 Bun 前确认本地 `tsc` 与 `biome` 是普通可执行文件，`web/node_modules` 缺失或不完整时立即失败并提示 `mise run web-prepare`，门禁自己不安装依赖、不联网。不在 `all`/`rust` 组内，由 `mise run verify` 末尾显式运行，见[ci/checks/README.md#web-包边界](checks/README.md#web-包边界) |
 | `all` | `repository rust-version public-redaction layout import-groups module-docs hot-fields config systemd-templates i18n equipment-contract ratchet audit-writes test-module-paths work-item-ids markdown-links migration-compatibility published-migrations web-build-inputs web-callback-props` |
 | `fmt` | `cargo fmt --all -- --check` |
 | `check` | `cargo check --locked --workspace --all-targets` |
@@ -52,7 +53,7 @@ bash ci/checks/check.sh <检查项>...
 | `release-dependency-audit` | 取最高版本的发布 tag（`v<semver>`，口径同发布守卫），把其中的 `Cargo.lock` 读到临时目录后以同样参数审计；没有发布 tag 时提示并通过。需要该 tag 的提交对象，见[ci/checks/README.md#每周依赖审计](checks/README.md#每周依赖审计) |
 | `dependency-unused` | `cargo machete`（0.10.1）；编译期另有 Cargo 内置的 `unused_dependencies`（`[workspace.lints.cargo]`，`deny`），见[ci/tools/README.md](tools/README.md) |
 
-`mise run verify` = `all fmt check dependency-versions lint wasm rustdoc`。默认门禁不运行测试。
+`mise run verify` = `all fmt check dependency-versions lint wasm rustdoc web`。默认门禁不运行测试；Web 行为测试用 `mise run web-test` 单独运行。
 
 ## GitHub Actions
 
@@ -61,8 +62,8 @@ bash ci/checks/check.sh <检查项>...
 | 作业 | 触发 | 内容 |
 | --- | --- | --- |
 | `docs` | 所有分支 push / PR / 手动 | 策略门禁与格式（`ci/checks/check.sh all fmt`）；完整历史与 tag 用于 `published-migrations`；同一提交已有 PR 时跳过重复的分支 push。tag 推送只运行发布工作流，不重复普通 CI |
-| `verify` | push / PR / 手动，`docs` 通过后 | `ci/checks/check.sh check dependency-versions lint wasm rustdoc`（工具链 1.100.0） |
-| `test` | push / PR / 手动，`docs` 通过后 | 安装 PostgreSQL 18 后依次执行 `mise run test`、`mise run test-db`（PostgreSQL 18 集成测试）、`mise run test-db-compat`（迁移兼容声明验证）与 `mise run test-wasm`（使用运行器自带的 Firefox 验证浏览器收包接线）；测试构建以 `CARGO_PROFILE_DEV_DEBUG=0` 关闭调试信息，缩小构建缓存 |
+| `verify` | push / PR / 手动，`docs` 通过后 | 经 mise 安装 bun 并执行 `mise run web-prepare` 后运行 `ci/checks/check.sh check dependency-versions lint wasm rustdoc web`（工具链 1.100.0） |
+| `test` | push / PR / 手动，`docs` 通过后 | 经 mise 安装 bun 并执行 `mise run web-prepare`；安装 PostgreSQL 18 后依次运行 `mise run test`、`mise run web-test`、`mise run test-db`（PostgreSQL 18 集成测试）、`mise run test-db-compat`（迁移兼容声明验证）与 `mise run test-wasm`（使用运行器自带的 Firefox 验证浏览器收包接线）。这些测试均不并入默认 `mise run verify`。测试构建以 `CARGO_PROFILE_DEV_DEBUG=0` 关闭调试信息，缩小构建缓存 |
 | `security-audit` | push / PR / 手动中 `docs` 通过后；每周一 04:17 UTC 独立调度 | `dependency-audit`（cargo-audit 由 mise 安装）；定时与手动运行另以完整历史执行 `release-dependency-audit`；非定时事件另执行 `dependency-unused`，见[ci/checks/README.md#每周依赖审计](checks/README.md#每周依赖审计) |
 | `msrv` | push / PR / 手动，`docs` 通过后 | `ci/checks/check.sh rust-version`：MSRV 等于固定工具链，编译已由 `verify` 覆盖，这里只核对版本声明；作业名是 `main` 的必需检查 |
 | `artifacts` | 仅手动（`workflow_dispatch`） | 调用可复用工作流 `.github/workflows/release-build.yml`：由 mise 安装发布工具，`ci/release/release.sh release-check` 构建并校验完整发布包，上传 1 天候选包；候选包不可部署，默认分支推送不再运行 |
