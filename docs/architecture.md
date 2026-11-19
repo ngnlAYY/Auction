@@ -2,7 +2,7 @@
 
 [docs/README.md](README.md) · [docs/business-rules.md](business-rules.md) · [docs/development.md](development.md) · [ops/README.md](../ops/README.md)
 
-HV Auction 是 HentaiVerse 装备拍卖服务：玩家通过网站与论坛出价，通过游戏内 MoogleMail 寄售装备、付款与收货。系统由一个 Rust 工作区构成（语言版次 edition 2024，是版次编号而不是年份），后端为三个可独立部署的进程（Public、Admin、Worker）加一个运维 CLI，前端为两个 Dioxus WASM 单页应用，唯一的业务数据库是 PostgreSQL 18。原始邮件诊断证据另以加密文件保存，运行配置与备份回执也位于文件系统。
+HV Auction 是 HentaiVerse 装备拍卖服务：玩家通过网站与论坛出价，通过游戏内 MoogleMail 寄售装备、付款与收货。系统由一个 Rust 工作区构成（语言版次 edition 2024，是版次编号而不是年份），后端为三个可独立部署的进程（Public、Admin、Worker）加一个运维 CLI，默认前端为两个 Dioxus WASM 单页应用；Public 另有 `web/` 的 TypeScript + SolidJS 实现，由 `AUCTION_WEB_STACK` 构建参数选择（缺省 `dioxus`）。唯一的业务数据库是 PostgreSQL 18。原始邮件诊断证据另以加密文件保存，运行配置与备份回执也位于文件系统。
 
 ## 进程模型
 
@@ -64,9 +64,10 @@ auction-domain（纯领域规则）
 | [crates/auction-observability/README.md](../crates/auction-observability/README.md) | 基础设施 | 日志、指标、tracing、心跳 |
 | [crates/auction-process/README.md](../crates/auction-process/README.md) | 基础设施 | 信号订阅、有界排空、任务守卫、本机 readiness 探针 |
 | [crates/auction-contracts/README.md](../crates/auction-contracts/README.md) | 契约 | 前后端共用的 HTTP/WebSocket DTO（可编译到 wasm32） |
-| [crates/auction-time/README.md](../crates/auction-time/README.md) | 基础类型 | 各层与两个前端共用的 UTC 时刻、时长、文本格式与本地墙上时间换算（可编译到 wasm32） |
-| [crates/auction-web-shared/README.md](../crates/auction-web-shared/README.md) | 前端 | 两个前端共用的浏览器机制、组件与设计 token |
+| [crates/auction-time/README.md](../crates/auction-time/README.md) | 基础类型 | 各层与两个 Dioxus 前端共用的 UTC 时刻、时长、文本格式与本地墙上时间换算（可编译到 wasm32） |
+| [crates/auction-web-shared/README.md](../crates/auction-web-shared/README.md) | 前端 | 两个 Dioxus 前端共用的浏览器机制、组件与设计 token；共享样式与设计地基也供 `web/` 使用 |
 | [crates/auction-web-public/README.md](../crates/auction-web-public/README.md) / [crates/auction-web-admin/README.md](../crates/auction-web-admin/README.md) | 前端 | 公开站点 / 管理后台（Dioxus 0.7 CSR） |
+| [web/README.md](../web/README.md) | 前端 | 公开站点的第二套实现（TypeScript 7 + SolidJS 2.0，纯客户端渲染）；目前只有 Public |
 | [crates/auction-test-support/README.md](../crates/auction-test-support/README.md) | 测试 | 只进 `dev-dependencies` 的 MoogleMail 与论坛回环替身，回放脱敏的真实页面 |
 
 ### 共享 helper 归属
@@ -153,8 +154,8 @@ Public relay 轮询事件 → WebSocket 推送 → 各浏览器重读受影响�
 - Public 与 Admin 分别监听，建议只在 loopback 或 Unix socket 上监听并由反向代理终止 TLS；Admin 不应暴露到公网。
 - Public/Admin 会话 Cookie 为 HttpOnly；Admin CSRF Cookie 可由脚本读取，前端通过会话 DTO 取得 CSRF token。受保护的 Admin 写请求要求 CSRF token；状态变更请求按路由校验 Origin allowlist；登录、写请求与实时连接按客户端地址限流。
 - 敏感数据静态加密：外部 Cookie、装备 key、用户登录 key 各用独立的数据密钥（信封加密）保存，MoogleMail 诊断归档使用第四个独立密钥域；每个域是“当前写入密钥 + 保留解密的旧密钥”的密钥环，按信封 key ID 在本域解析，未知 ID 失败关闭。日志、指标与错误响应只包含安全分类与标识，不包含秘密或邮件正文。轮换流程见[ops/keys/README.md](../ops/keys/README.md)。
-- 浏览器 CSP 的脚本来源限制为同源，同时为 Dioxus 解释器与 WASM 启用 `unsafe-eval` 和 `wasm-unsafe-eval`；内联样式通过 `style-src 'unsafe-inline'` 放行，不加载第三方资源；表单只能提交到同源（`form-action 'self'`），页面仍不能嵌入或被嵌入。
-- 上述两处放宽是安全复核后的有意接受，不是遗漏：Dioxus 0.7 的 CSR 启动必须能编译 WASM，运行时解释器要用 `new Function` 执行事件处理，去掉任一项两端都无法加载，当前没有等价的能力开关；剩余风险由“只加载同源脚本、不引入内联脚本或第三方资源”收窄——`eval` 只能执行同源资源中已有的代码，利用它需要先取得同源脚本执行权，而那本身已是更严重的缺陷。内联样式无法执行脚本，风险限于视觉伪装，且页面只使用自身样式。升级 Dioxus 时重新核对能否移除这两项。
+- 浏览器 CSP 的脚本来源限制为同源；Dioxus 表面另为解释器与 WASM 启用 `unsafe-eval` 和 `wasm-unsafe-eval`，Solid 表面只允许同源脚本。内联样式通过 `style-src 'unsafe-inline'` 放行，不加载第三方资源；表单只能提交到同源（`form-action 'self'`），页面仍不能嵌入或被嵌入。
+- 上述两项 `eval` 放宽只针对 Dioxus，且是安全复核后的有意接受，不是遗漏：Dioxus 0.7 的 CSR 启动必须能编译 WASM，运行时解释器要用 `new Function` 执行事件处理，去掉任一项 Dioxus 页面都无法加载，当前没有等价的能力开关；Solid 不需要这两项。剩余风险由“只加载同源脚本、不引入内联脚本或第三方资源”收窄——`eval` 只能执行同源资源中已有的代码，利用它需要先取得同源脚本执行权，而那本身已是更严重的缺陷。内联样式无法执行脚本，风险限于视觉伪装，且页面只使用自身样式。升级 Dioxus 时重新核对能否移除这两项。
 - HSTS 只在浏览器确实经 HTTPS 访问时发送，代理后只采信可信上游的 `X-Forwarded-Proto`；当前值不含 `includeSubDomains` 与 `preload`，因为本站可能只是共享父域的子域，递归强制兄弟子域 HTTPS 超出本服务的控制范围。判定顺序与逐项响应头见[docs/contracts/routes.md#响应外壳](contracts/routes.md#响应外壳)与[crates/auction-http/README.md#请求边界](../crates/auction-http/README.md#请求边界)。
 
 ## 部署形态

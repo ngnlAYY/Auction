@@ -16,7 +16,7 @@
 - `code` 是稳定的机器可读值，客户端只依据 HTTP 状态与 `code` 分支，不解析 `message`（中文提示，可能调整）。通常成功为 HTTP 200 / `ok`；创建拍卖、用户和手工录入 lot 为 201 / `created`；凭据录入与首次发布规则为 201 / `ok`；触发邮件轮询为 202 / `accepted`；创建代理仍为 200 / `ok`。
 - Public/Admin 响应头始终回传 `x-request-id`（合法输入沿用，缺失时生成，非法或重复输入返回 400；指标转发拒绝优先返回 404 并回传安全生成的标识）；错误 JSON 含 `request_id` 字段，但 handler 的常规错误可能为 null，排查以响应头为准。
 - Public/Admin 的每个不可被共享缓存重放的 HTTP 响应（会话、就绪、进行中场次的读取、命令结果、错误与 WebSocket 升级响应，即 CDN 专用头为 `no-store` 的全部响应）都回传 `x-auction-build`；允许共享缓存保存的响应（带指纹的静态资源、入口文档、世界目录与已结算/历史类读取）不带，因为重放的副本只能说明生成它的那个进程，部署后会让新页面误判版本过期。该头的值是当前进程构建号，1–64 位 `[A-Za-z0-9._-]`，由发布构建的 `AUCTION_BUILD_ID` 注入，未注入时为包版本。浏览器只把它与自身构建号比较，并且只采信 `Cache-Control` 含 `no-store` 的响应上的值：可缓存的响应可能是旧版本留在浏览器或 CDN 缓存里的副本，再验证的 304 只能覆盖、不能删除已存副本的响应头，所以旧版本留下的构建号不能当作当前进程的声明。不一致时提示刷新，不自动重载页面，也不改变响应正文、缓存策略或状态码。该头不参与鉴权、幂等与缓存决定。
-- 安全响应头随每个响应回传：CSP（同源脚本与样式源，`form-action 'self'`、`frame-ancestors 'none'`；Dioxus WASM 的 `unsafe-eval`/`wasm-unsafe-eval` 与内联样式为例外，理由见[docs/architecture.md#安全边界](../architecture.md#安全边界)）、`X-Frame-Options: DENY`、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer` 与 Permissions-Policy。`Strict-Transport-Security: max-age=31536000` 只在浏览器经 HTTPS 访问时出现：代理后仅采信可信上游的 `X-Forwarded-Proto`，明文请求与开发环境不发送；不含 `includeSubDomains` 与 `preload`。这些头不参与缓存、鉴权与幂等决定，客户端不应据其改变业务行为。
+- 安全响应头随每个响应回传：CSP（同源脚本与样式源，`form-action 'self'`、`frame-ancestors 'none'`；Dioxus WASM 另放行 `unsafe-eval`/`wasm-unsafe-eval`，Solid 只允许同源脚本，内联样式仍为例外，理由见[docs/architecture.md#安全边界](../architecture.md#安全边界)）、`X-Frame-Options: DENY`、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer` 与 Permissions-Policy。`Strict-Transport-Security: max-age=31536000` 只在浏览器经 HTTPS 访问时出现：代理后仅采信可信上游的 `X-Forwarded-Proto`，明文请求与开发环境不发送；不含 `includeSubDomains` 与 `preload`。这些头不参与缓存、鉴权与幂等决定，客户端不应据其改变业务行为。
 - 时间为 RFC 3339 字符串；金额为整数 Credits；标识为小写 UUID 字符串。
 
 ### 通用错误码
@@ -392,7 +392,7 @@ Worker 实际值应核对其指标，不能把 Admin 显示的数据库意图当
 | POST | `/api/v1/setup/validate` | 校验表单并试连数据库 |
 | POST | `/api/v1/setup/complete` | 生成并发布配置目录 |
 
-浏览器入口为 `/setup`，仅另提供存在的 `/index.html`、`/favicon.ico` 与 `/assets/` 下资源；其余路径返回 404。`/assets/` 下另有带指纹的 Fluent 译文资源（`<lang>-dxh<hash>.ftl`）：浏览器只内嵌各 surface 的默认语言，其余语言按 `hv.lang` 按需取回，加载失败保持当前语言并提示。静态资源编码协商遵循[缓存头](#缓存头)中的规则。首次设置的 CSP、入口 `Link` 与静态资源回退都随 Admin 的实际技术栈（由装配根传入的 `WebScriptPolicy` 选择）；首次设置的全部响应仍然禁止缓存。首次设置使用独立的 `SetupResponse` / `SetupErrorResponse`，成功字段为 `status` 与 `initialize_and_start`；正式 Admin 不挂载这三个写接口。
+浏览器入口为 `/setup`，仅另提供存在的 `/index.html`、`/favicon.ico` 与 `/assets/` 下资源；其余路径返回 404。`/assets/` 下另有带指纹的 Fluent 译文资源（Dioxus 为 `<lang>-dxh<hash>.ftl`，Solid 为 `<lang>-<hash>.ftl`）：浏览器只内嵌各 surface 的默认语言，其余语言按 `hv.lang` 按需取回，加载失败保持当前语言并提示。静态资源编码协商遵循[缓存头](#缓存头)中的规则。首次设置的 CSP、入口 `Link` 与静态资源回退都随 Admin 的实际技术栈（由装配根传入的 `WebScriptPolicy` 选择）；首次设置的全部响应仍然禁止缓存。首次设置使用独立的 `SetupResponse` / `SetupErrorResponse`，成功字段为 `status` 与 `initialize_and_start`；正式 Admin 不挂载这三个写接口。
 
 合并部署的 `complete` 要求 `confirm_initialize = true` 和恰好一个 `x-setup-confirm-target` 请求头。该头按 `application/x-www-form-urlencoded` 编码确认时的三项，依次为 `host`、十进制 `port` 和 `name`，例如 `host=127.0.0.1&port=5432&name=auction`。改变其中任一项须重新确认。试连及写配置前，服务端将头值与提交正文中三项按同一格式编码的值核对。缺失、重复、格式错误或目标不一致时返回 400 `setup_confirmation_required`。确认只包含这三项，账号和口令仍仅随配置正文提交。配置发布后，服务端把确认的目标随完成结果交给监管进程。监管进程须再次比对重读的服务配置和实际用于迁移的 owner 连接目标，匹配后才初始化专用空库并启动角色。
 
@@ -432,7 +432,7 @@ Public/Admin/Worker 可在业务 listener、control socket 之外启用独立出
 
 ## 浏览器页面
 
-下列规范路径返回各自的 SPA `index.html`。GET 或 HEAD 若去掉恰好一个尾斜杠后命中同一端的页面白名单，则返回 308，`Location` 使用该规范路径并原样保留查询串，片段由浏览器继承。重定向使用 `Cache-Control: no-cache`。根路径 `/` 直接提供入口，双斜杠、点段、编码斜杠、非页面路径及其他方法沿用各自原有响应。未知路径返回 404，`web-embed` 资源缺失时规范页面路径返回 503。
+下列规范路径返回各自的 SPA `index.html`。GET 或 HEAD 若去掉恰好一个尾斜杠后命中同一端的页面白名单，则返回 308，`Location` 使用该规范路径并原样保留查询串，片段由浏览器继承。重定向使用 `Cache-Control: no-cache`。根路径 `/` 直接提供入口，双斜杠、点段、编码斜杠、非页面路径及其他方法沿用各自原有响应。未知路径返回 404；内嵌页面资源（`web-embed` 或 `web-solid`）缺失时规范页面路径返回 503。
 
 | Public 路径 | 页面 |
 | --- | --- |

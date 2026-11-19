@@ -40,7 +40,7 @@ Public 与 Admin 两个 HTTP 表面的适配器：路由表、请求边界、会
 
 ## 浏览器资源与健康
 
-`web-embed` 构建的资源来自 `dx bundle`（含默认语言之外、带内容指纹的 FTL 译文）；接入另一套技术栈时，静态资源层按装配根传入的 `WebScriptPolicy` 判定指纹命名与不可变缓存，不按文件名猜测。Dioxus 使用 `-dxh<8–16 位十六进制>` 命名；Solid 对 `assets/` 下每个文件（含子目录）的最后一级文件名匹配 `名字-8位指纹.扩展名`。另一套产物的命名不会获得长期缓存。两套产物都须产出唯一的 `assets/favicon-*.svg` 供 `/favicon.ico` 映射。可压缩资源带构建期 brotli 副本，按 `Accept-Encoding` 协商并声明 `Vary`，`.br` 路径不对外提供。API-only 构建使用固定空资源目录。除精确静态资源外，只有 [crates/auction-http/src/assets/routes.rs](src/assets/routes.rs) 登记的参数路径返回 `index.html`，未知路径 404，资源缺失时页面路由 503；入口回退的 `Link` 中，Dioxus 保持旧的 `<link>` 逐条 `rel=preload` 转写，Solid 另识别 `modulepreload` 与入口模块脚本，精确 `/index.html` 不添加。新增或删除页面时同步前端 `Route`、该清单与[docs/contracts/routes.md](../../docs/contracts/routes.md)。
+`web-embed` 构建的资源来自 `dx bundle`（含默认语言之外、带内容指纹的 FTL 译文），`web-solid` 构建的资源来自 `web/` 的 Vite 产物；接入另一套技术栈时，静态资源层按装配根传入的 `WebScriptPolicy` 判定指纹命名与不可变缓存，不按文件名猜测。Dioxus 使用 `-dxh<8–16 位十六进制>` 命名；Solid 对 `assets/` 下每个文件（含子目录）的最后一级文件名匹配 `名字-8位指纹.扩展名`。另一套产物的命名不会获得长期缓存。两套产物都须产出唯一的 `assets/favicon-*.svg` 供 `/favicon.ico` 映射。可压缩资源带构建期 brotli 副本，按 `Accept-Encoding` 协商并声明 `Vary`，`.br` 路径不对外提供。API-only 构建使用固定空资源目录。除精确静态资源外，只有 [crates/auction-http/src/assets/routes.rs](src/assets/routes.rs) 登记的参数路径返回 `index.html`，未知路径 404，资源缺失时页面路由 503；入口回退的 `Link` 中，Dioxus 保持旧的 `<link>` 逐条 `rel=preload` 转写，Solid 另识别 `modulepreload` 与入口模块脚本，精确 `/index.html` 不添加。新增或删除页面时同步前端 `Route`、该清单与[docs/contracts/routes.md](../../docs/contracts/routes.md)。
 
 | 路径 | 含义 |
 | --- | --- |

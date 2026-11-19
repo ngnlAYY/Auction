@@ -2,7 +2,7 @@
 
 [ci/README.md](../README.md) · [docs/development.md](../../docs/development.md)
 
-[ci/checks/check.sh](check.sh) 是本地与 CI 的共同入口。`all` 包含仓库契约、MSRV 与工具链版本一致、公开仓库脱敏、目录布局、配置示例、systemd 模板、翻译键、装备诊断闭集、源码计数棘轮、审计写入失败分类、模块层级、Markdown 链接、迁移兼容登记、已发布迁移不可变、Web 输入依赖闭包和 Web 回调属性检查。`web` 项（`bun run typecheck`、`bun run lint` 与 `web/` 包边界）不在 `all`/`rust` 组内，由 `mise run verify` 末尾显式运行；运行前先 `mise run web-prepare` 安装 `web/node_modules`。入口与构型见 [ci/README.md#静态门禁cicheckschecksh](../README.md#静态门禁cicheckschecksh)。`mise run verify` 等价于 `bash ci/checks/check.sh all fmt check dependency-versions lint wasm rustdoc web`：先运行 `all`，再依次执行格式、宿主默认 feature 编译、依赖版本、宿主全 feature Clippy、Public/Admin 两组 wasm32 Clippy、rustdoc 与 `web/` 静态检查，不运行行为测试。
+[ci/checks/check.sh](check.sh) 是本地与 CI 的共同入口。`all` 包含仓库契约、MSRV 与工具链版本一致、公开仓库脱敏、目录布局、配置示例、systemd 模板、翻译键、装备诊断闭集、源码计数棘轮、审计写入失败分类、模块层级、Markdown 链接、迁移兼容登记、已发布迁移不可变、Web 输入依赖闭包和 Web 回调属性检查。`web` 项（`bun run typecheck`、`bun run lint` 与 `web/` 包边界）不在 `all`/`rust` 组内，由 `mise run verify` 末尾显式运行；运行前先 `mise run web-prepare` 安装 `web/node_modules`。`web-dependency-audit` 需要联网读取公告库，同样不并入 `all` 与 `mise run verify`。入口与构型见 [ci/README.md#静态门禁cicheckschecksh](../README.md#静态门禁cicheckschecksh)。`mise run verify` 等价于 `bash ci/checks/check.sh all fmt check dependency-versions lint wasm rustdoc web`：先运行 `all`，再依次执行格式、宿主默认 feature 编译、依赖版本、宿主全 feature Clippy、Public/Admin 两组 wasm32 Clippy、rustdoc 与 `web/` 静态检查，不运行行为测试。
 
 ## 公开仓库脱敏
 
@@ -65,7 +65,7 @@ bash ci/checks/web-payload-test.sh
 bash ci/checks/web-bundle-test.sh
 ```
 
-自测覆盖 `ci/release/web-bundle.sh` 的双栈分支：从 Public 开始请求时，只要 Admin 被标成 Solid 也在清理任何稳定目录之前失败，Public 与 Admin 的哨兵都保持不变；`web/node_modules` 缺失、准备凭据缺失/摘要不符/bun 版本不符、`node_modules/.bin/vite` 缺失时分别失败并提示 `mise run web-prepare`，凭据相符的正例通过；缺省与显式 `dioxus` 得到相同回执并通过替身 `dx` 走原 `bundle` 路径；Solid 回执记录 `profile=solid-release` 与 `stack=solid`；稳定目录用精确目标整体替换；brotli 的枚举、临时清单、`stat`、压缩与副本写入失败都会传播；`ci/release/release.sh` 的非 `verify-web-size` 入口在选择 Solid 时明确拒绝，缺省入口仍可运行只读 `source-fingerprint`。
+自测覆盖 `ci/release/web-bundle.sh` 的双栈分支：从 Public 开始请求时，只要 Admin 被标成 Solid 也在清理任何稳定目录之前失败，Public 与 Admin 的哨兵都保持不变；`web/node_modules` 缺失、准备凭据缺失/摘要不符/bun 版本不符、`node_modules/.bin/vite` 缺失时分别失败并提示 `mise run web-prepare`，凭据相符的正例通过；缺省与显式 `dioxus` 得到相同回执并通过替身 `dx` 走原 `bundle` 路径；Solid 回执记录 `profile=solid-release` 与 `stack=solid`；稳定目录用精确目标整体替换；brotli 的枚举、临时清单、`stat`、压缩与副本写入失败都会传播；`ci/release/release.sh` 的构建类入口只在由 tag 触发的 CI 运行中选择 Solid 时拒绝，本地与分支上的手动候选构建可用，只读入口仍可运行。
 
 ## Web 回调属性
 
@@ -230,6 +230,16 @@ perl ci/checks/dependency-cadence.pl [--today YYYY-MM-DD] [--file 日历路径]
 
 ## 每周依赖审计
 
-[.github/workflows/ci.yml](../../.github/workflows/ci.yml) 每周一 **04:17 UTC** 调度现有 `security-audit` 作业，复用 mise 安装的 cargo-audit、工具链与缓存。调度事件执行 `dependency-audit`，读取默认分支 `Cargo.lock` 并获取最新 RustSec 公告；漏洞及警告令作业失败，不修改依赖、不自动发布。push / PR / 手动事件继续保留原有门禁与未使用依赖检查。
+[.github/workflows/ci.yml](../../.github/workflows/ci.yml) 每周一 **04:17 UTC** 调度现有 `security-audit` 作业，复用 mise 安装的 cargo-audit、bun、工具链与缓存。调度事件执行 `dependency-audit`，读取默认分支 `Cargo.lock` 并获取最新 RustSec 公告；漏洞及警告令作业失败，不修改依赖、不自动发布。该作业同时执行 `web-dependency-audit`，读取 `web/bun.lock` 并查询 npm 公告源；两项相互独立。push / PR / 手动事件继续保留原有门禁与未使用依赖检查。
 
 部署只使用发布 tag 产出的 Release 资产，默认分支已修复的公告不代表线上程序安全，因此定时与手动运行还执行 `release-dependency-audit`（[ci/checks/release-dependency-audit.sh](release-dependency-audit.sh)）：按发布守卫的 `v<semver>` 口径取最高版本 tag（`versionsort.suffix=-`，预发布排在同版本正式发布之前），把该提交的 `Cargo.lock` 读到临时目录，以 `cargo audit --deny warnings` 审计；没有发布 tag 时输出提示并通过，tag 无法解析或缺少 `Cargo.lock` 时失败。该步骤在默认分支审计失败后仍执行，两项结果分别可见；为取得 tag 的提交对象，这两类运行的 checkout 使用完整历史。push / PR 不运行此项，避免旧发布的新公告阻塞无关提交；发布工作流本身不替代周期审计。
+
+## Web 依赖审计（不并入 `mise run verify`）
+
+```bash
+bash ci/checks/check.sh web-dependency-audit
+```
+
+该检查在 `web/` 下运行 `bun audit`，以 `web/bun.lock` 为准查询已知漏洞；需要 `web/package.json`，不要求预装 `web/node_modules`。`bun` 由 mise 提供，脚本发现缺少工具或锁文件时直接失败。`bun audit` 需要访问 npm 公告源：离线、镜像不可达或发现漏洞都以退出 1 结束，不能把“没有联网数据”当作通过。
+
+CI 的 `security-audit` 作业在 Cargo 审计之后独立执行本项（任一失败不阻止另一项），不自动修改依赖或提交升级。安装依赖与版本升级仍走 `mise run web-prepare` 与常规门禁。

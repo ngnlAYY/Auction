@@ -601,6 +601,23 @@ check_dependency_versions() {
 	fi
 }
 
+# JS 依赖以 web/bun.lock 为准；审计需要联网读取公告库，离线或镜像不可达也必须失败，
+# 不能在没有公告数据时把“没有输出”当作通过。
+check_web_dependency_audit() {
+	if ! command -v bun >/dev/null 2>&1; then
+		printf '%s\n' "未找到 bun：请先安装 mise 工具，再运行 JS 依赖审计" >&2
+		return 1
+	fi
+	if [[ ! -f web/bun.lock || ! -f web/package.json ]]; then
+		printf '%s\n' "缺少 web/package.json 或 web/bun.lock，无法审计 JS 依赖" >&2
+		return 1
+	fi
+	if ! (cd web && bun audit); then
+		printf '%s\n' "JS 依赖审计未通过：bun audit 发现已知漏洞或无法连接公告源（离线时按失败处理）" >&2
+		return 1
+	fi
+}
+
 check_source_ratchet() {
 	rg --files --null apps/*/src crates/*/src -g '*.rs' -g '!**/tests/**' -g '!**/target/**' |
 		perl ci/checks/source-ratchet.pl "$@"
@@ -823,6 +840,7 @@ run_checks() {
 			RUSTDOCFLAGS="-D rustdoc::all" cargo doc --locked --workspace --no-deps --document-private-items --all-features
 			;;
 		dependency-audit) bash ci/checks/dependency-audit.sh Cargo.lock ;;
+		web-dependency-audit) check_web_dependency_audit ;;
 		release-dependency-audit) bash ci/checks/release-dependency-audit.sh ;;
 		dependency-unused) cargo machete ;;
 		all) run_checks repository rust-version public-redaction layout import-groups module-docs hot-fields config systemd-templates i18n equipment-contract ratchet audit-writes test-module-paths work-item-ids markdown-links migration-compatibility published-migrations web-build-inputs web-callback-props ;;

@@ -2,7 +2,7 @@
 
 [docs/README.md](../../docs/README.md) · [crates/auction-web-public/README.md](../auction-web-public/README.md) · [crates/auction-web-admin/README.md](../auction-web-admin/README.md)
 
-Public 与 Admin 两个 Dioxus CSR 前端共用的浏览器基础能力与设计地基。运行目标为 `wasm32-unknown-unknown`，同时保留非 WASM 静态编译分支；后者不提供等价的浏览器运行行为（例如 URL 写回为空操作，HTTP 不启用浏览器超时取消）。不依赖任何后端 crate；两端各自的业务页面、译文与路由不放在这里。
+Public 与 Admin 两个 Dioxus CSR 前端共用的浏览器基础能力与设计地基；`style/` 与共享资产也供 `web/` 的 Solid 实现使用。运行目标为 `wasm32-unknown-unknown`，同时保留非 WASM 静态编译分支；后者不提供等价的浏览器运行行为（例如 URL 写回为空操作，HTTP 不启用浏览器超时取消）。不依赖任何后端 crate；两端各自的业务页面、译文与路由不放在这里。
 
 ## 模块
 

@@ -42,7 +42,7 @@ mise run verify      # 运行某个入口
 | `geckodriver` | GitHub 发布包 | `mise run test-wasm` 用它驱动本机 Firefox |
 | `wasm-opt`（binaryen） | GitHub 发布包 | `dx` 的配套工具 |
 | `esbuild` | npm 上的 `@esbuild/linux-x64` 原生二进制包 | `dx` 的配套工具，运行时不需要 Node |
-| `bun` | GitHub 发布包 | `web/` 下 TypeScript 实现的依赖安装、类型检查、Biome、测试与构建（依赖版本由 `web/bun.lock` 固定）；`mise run web-prepare` 安装依赖，`mise run verify` 的 `web` 项运行类型检查、Biome 与包边界，`mise run web-test` 运行行为测试；包边界由 `web/tooling/check-boundaries.ts` 使用 `web/` 的 TypeScript 编译器检查。Rust 版页面不经过 bun；Solid 发布构建直接调用本地 `web/node_modules/.bin/vite`，不自动安装依赖 |
+| `bun` | GitHub 发布包 | `web/` 下 TypeScript 实现的依赖安装、类型检查、Biome、测试与构建（依赖版本由 `web/bun.lock` 固定）；`mise run web-prepare` 安装依赖，`mise run verify` 的 `web` 项运行类型检查、Biome 与包边界，`mise run web-test` 运行行为测试；包边界由 `web/tooling/check-boundaries.ts` 使用 `web/` 的 TypeScript 编译器检查；`bun audit` 供 `web-dependency-audit` 审计 JS 依赖。Rust 版页面不经过 bun；Solid 发布构建直接调用本地 `web/node_modules/.bin/vite`，不自动安装依赖 |
 
 升级工具：改 `mise.toml` 里的版本，运行 `mise install` 与 `mise lock`，把两个文件一并提交。`mise.lock` 也记录 Rust 的版本、组件与目标，所以改 `rust-toolchain.toml` 后同样要重新 `mise lock`；CI 以 `--locked` 安装，锁文件与请求不一致时直接失败。升级 mise 自身时，同步 `mise.toml` 的 `min_version` 与工作流里 `jdx/mise-action` 的 `version`。
 
@@ -52,14 +52,14 @@ mise run verify      # 运行某个入口
 
 - 用 `mise which` 解析 `dx`、`wasm-bindgen`、`wasm-opt`、`esbuild` 与 `sccache` 的绝对路径，并要求结果位于该工具自己的 mise 安装目录下（`mise where`）；固定版本没有安装时直接失败，不接受 `PATH` 或 Cargo bin 目录里的同名程序。
 - 把这些路径放到 `PATH` 前部并设置 `NO_DOWNLOADS=1`，`dx` 不会在构建时自行下载工具；同时把 `DX_HOME` 指到 `target/dx-home`，`dx` 因此不会改用它在用户目录里缓存过的旧工具，也不读取用户级 `dx` 设置。
-- 这五个二进制的 SHA-256 构成工具身份，参与构建环境指纹；`mise.lock` 参与构建输入指纹。同版本工具重装后字节变化也会让已有制品失效。
+- 这些二进制的 SHA-256 构成工具身份，参与构建环境指纹；`mise.lock` 参与构建输入指纹。同版本工具重装后字节变化也会让已有制品失效。
 - `sccache` 只在环境变量显式设置 `RUSTC_WRAPPER=sccache` 时启用，并换成 mise 安装的版本；Cargo 配置文件里的包装器一律清空。
 - 任一 surface 使用 Solid 时，工具闭集加入 mise 提供的 `bun`（版本与二进制摘要），发布路径直接调用 `web/node_modules/.bin/vite`，不执行 `bun x` 或临时下载。依赖只能经 `mise run web-prepare` 安装；该任务把 `web/bun.lock` 的 SHA-256 与 bun 版本写入 `web/node_modules/.auction-prepared`，`web-bundle.sh` 的 Solid 构建阶段核对该凭据而不扫描安装树，不联网。
 - `build-release`、`build-single`、`release-check`、`package`、`verify-artifacts`、`verify-single` 与 `run-public`/`run-admin` 都经同一份逐 surface 技术栈选择：构建与门禁任务用 `web_cargo_features` 得出 cargo feature，运行任务经 `release.sh run-web public|admin` 先得到 feature；Solid surface 还从 `WEB-BUILD-INFO` 读取 `build_id` 并以 `AUCTION_BUILD_ID` 传给编译。正式发行（`GITHUB_ACTIONS=true` 且 `GITHUB_REF_TYPE=tag`）在任一端为 Solid 时拒绝。
 
 ## 依赖审计的范围
 
-CI 的 `security-audit` 只审计应用 `Cargo.lock`（默认分支与最近一个发布 tag）。工具自身的依赖由各上游发布包的 `Cargo.lock` 或预编译包决定，仓库不再逐项处理其中的公告；需要时升级到上游修复后的版本。
+CI 的 `security-audit` 同时审计应用的 `Cargo.lock`（默认分支与最近一个发布 tag）与 `web/bun.lock`（`bun audit`）。JS 审计需要联网读取 npm 公告源，离线或镜像不可达时失败关闭，不当作没有漏洞。工具自身的依赖由各上游发布包的 `Cargo.lock` 或预编译包决定，仓库不再逐项处理其中的公告；需要时升级到上游修复后的版本。
 
 应用的直接依赖有两层检查：Cargo 内置的 `unused_dependencies` 与 `unused_workspace_dependencies`（`Cargo.toml` 的 `[workspace.lints.cargo]`，设为 `deny`）在每次编译时按实际编译的构型报错——普通依赖在 `check`/Clippy 时、开发依赖在编译测试时；CI 的 `dependency-unused`（`cargo machete`）按清单文本检查，覆盖没被编译到的构型。上游分别要求不同版本的传递依赖时，不为减少锁文件条目而跨不兼容版本替换。
 

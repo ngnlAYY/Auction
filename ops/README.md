@@ -144,7 +144,7 @@ auction-cli --config-dir /etc/auction service stop       # 时段门禁 → 按 
 
 ## 升级
 
-**只部署 GitHub Release 资产。** 从 `main` 上 `v<版本>` tag 产生的 Release 下载 `*.tar.gz`、`SHA256SUMS` 与 `DEPENDENCIES.md`，部署前运行 `bash ci/release/verify-deployment-package.sh <归档> --tag <v版本>`（或 `mise run verify-package …`）核对摘要、包内清单、构建提交可从 tag 到达与来源证明。普通 CI 候选 artifact、本地 `mise run release-check` 产物与 `-dirty` 包均不可部署；未通过校验的包不得安装、停止服务或迁移。正式发行只产出 Rust 版页面；`AUCTION_WEB_STACK=solid` 只用于本地与手动候选构建，发布脚本在 `GITHUB_ACTIONS=true` 且 `GITHUB_REF_TYPE=tag` 的 CI 运行中选择 Solid 会直接拒绝。
+**只部署 GitHub Release 资产。** 从 `main` 上 `v<版本>` tag 产生的 Release 下载 `*.tar.gz`、`SHA256SUMS` 与 `DEPENDENCIES.md`，部署前运行 `bash ci/release/verify-deployment-package.sh <归档> --tag <v版本>`（或 `mise run verify-package …`）核对摘要、包内清单、构建提交可从 tag 到达与来源证明。普通 CI 候选 artifact、本地 `mise run release-check` 产物与 `-dirty` 包均不可部署；未通过校验的包不得安装、停止服务或迁移。正式发行只产出 Rust 版页面；`AUCTION_WEB_STACK=solid` 只用于本地与分支上的手动候选构建，发布脚本在 `GITHUB_ACTIONS=true` 且 `GITHUB_REF_TYPE=tag` 的 CI 运行中选择 Solid 会直接拒绝。
 
 分体部署用发布包内的 `auction-cli deploy` 完成严格预检、时段门禁、演练回执核对、磁盘空间与在途发送门禁、停机备份与新旧 CLI 校验、保留旧程序、逐个原子替换程序（中途失败时换回已替换的程序）、迁移与顺序启动、运行摘要复核并追加回执。含迁移的版本必须先用候选制品完成[迁移演练](deploy/MIGRATION-DRILL.md)并传入回执：
 
@@ -518,7 +518,7 @@ WAL：`archive_command` 调用 `wal archive` 压缩、age 加密并 fsync 到本
 | Public 启动失败：realtime consumer 已被占用 | 两个 Public 实例使用了相同的 `realtime.consumer_key` |
 | 浏览器写请求返回 `origin_forbidden` | `allowed_origins` 与浏览器访问的 origin 不完全一致（协议、主机、端口） |
 | 所有客户端被同一地址限流 | 反向代理地址未加入 `trusted_proxy_cidrs`，服务端把代理当作客户端 |
-| 页面返回 503 | 程序不是 `web-embed` 构建，或内嵌资源缺失 |
+| 页面返回 503 | 程序不是内嵌页面构建（`web-embed` 或 `web-solid`），或内嵌资源缺失 |
 | 投递长时间停在 `manual_reconcile` | 结果未知，需在“投递队列”人工对账；不要直接改数据库。对账返回 `delivery_sent_sighted` 时说明 Sent 已有该结算义务的邮件，改用 `auction-cli settlement confirm-sent`；重试或释放返回 `settlement_obligation_ineligible` 时说明成交已撤销、该投递已不是义务的当前派发，或恢复流程已接管它被退回的邮件（重寄只归恢复流程），不要再尝试重新激活，按“结算恢复”页的结论核对 |
 | `deploy` 报“仍有 N 笔已越过 sending 围栏的投递在途” | 门禁只拒绝部署，不改队列或租约。等待这些 delivery/PM 完成（或在 Admin 核对后处置），必要时调大 `--send-gate-timeout-seconds`；不得用停机打断外部写入 |
 | `deploy` 报“制品内嵌 schema 版本低于数据库” | 这是回退方向：不要用 `deploy` 覆盖新版库；按[程序回退](deploy/RECOVERY.md#程序回退)核对 `(E,D]` 区间，含 `breaking` 时恢复升级前备份 |

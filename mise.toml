@@ -52,7 +52,7 @@ description = "以 wasm32 Clippy 检查 Public/Admin 浏览器目标及共享层
 run = "bash ci/checks/check.sh wasm"
 
 [tasks.web-prepare]
-description = "按 web/bun.lock 安装 web/ 依赖并写入构建凭据；这是唯一允许联网的 Web 入口"
+description = "按 web/bun.lock 安装 web/ 依赖并写入构建凭据；这是唯一安装 Web 依赖的入口（依赖审计另行联网）"
 run = '''
 #!/usr/bin/env bash
 set -euo pipefail

@@ -1,6 +1,6 @@
 # web — 浏览器应用工作区
 
-Public 与 Admin 两个浏览器应用的 TypeScript 源码、构建配置与编码规则。两个应用都是纯客户端渲染的单页应用，用 SolidJS 2.0 编写，由 Vite 打包，产物由后端以 `web-embed` 内嵌分发。
+Public 与 Admin 两个浏览器应用的 TypeScript 源码、构建配置与编码规则。两个应用都是纯客户端渲染的单页应用，用 SolidJS 2.0 编写，由 Vite 打包；目前只有 Public 的产物经后端以 `web-solid` 内嵌分发，Admin 仍由 Rust 版提供。
 
 本文是 `web/` 下全部代码的规则来源。业务规则、路由与数据契约仍以 [docs/contracts](../docs/contracts) 与 [docs/business-rules.md](../docs/business-rules.md) 为准。
 
@@ -31,7 +31,8 @@ Public 与 Admin 两个浏览器应用的 TypeScript 源码、构建配置与编
 | `bun run lint` | Biome 的格式与静态规则检查，不写文件 |
 | `bun run test` | 单元测试（`bun test`）；测试文件与被测模块同目录，以 `.test.ts` 结尾 |
 | `bun run format` | 按 Biome 规则改写格式并应用安全修复 |
-| `bun run build:public`、`bun run build:admin` | 生产构建，产物写入 `target/web/<surface>/public` |
+| `bun run build:public` | 生产构建，产物写入 `target/web/public/public` |
+| `bun run build:admin` | 预留（Admin 的页面入口尚未并入） |
 | `bun run dev:public` | 启动 Public 开发服务器；`/favicon.ico` 由仅对 `serve` 生效的插件映射到共享 SVG |
 
 包边界由 `web/tooling/check-boundaries.ts` 用 TypeScript 编译器解析语法树检查，规则见上文目录表：`contracts` 不导入其他三个包，`shared` 只可导入 `contracts` 与自身，`public`/`admin` 互不导入且只能再导入 `contracts` 与 `shared`，四个包都不导入 `web/tooling/**`、`web/` 里四个包之外的源码，以及仓库里 `web/` 之外的源码。说明符只接受闭集：相对路径（`./`、`../` 开头，或表示目录入口的 `.`、`..`）（含反斜杠的路径违规）、[`web/tooling/boundary-rules.ts`](tooling/boundary-rules.ts) 中登记的 `@auction/contracts/*` 与 `@auction/web-shared/*` 两个别名、`web/package.json` 的 `dependencies`/`devDependencies` 中登记的第三方包（含子路径），以及测试文件里的 `node:`/`bun:` 内置模块。跨包只能用登记的别名，相对路径跨包同样违规；别名只允许登记在 `web/tsconfig.base.json`，其他 tsconfig 出现 `paths`（包括空对象）或基配置的别名表与检查器不一致时，检查器以退出码 2 失败；`web/package.json` 的 `imports` 只用于核对。
@@ -40,9 +41,13 @@ Public 与 Admin 两个浏览器应用的 TypeScript 源码、构建配置与编
 
 除 `test` 外，脚本用 bun 直接执行 `node_modules/.bin/` 下的 `tsc`、`biome` 与 `vite`；本地工具缺失时立即以“找不到模块”失败，不经 `bun x` 临时解析或下载，也不额外要求 Node。`bunfig.toml` 的 `install.auto = "disable"` 关闭自动安装，工具或其传递依赖缺失时都不会联网补装。
 
+## 构建与发布
+
 生产构建的输入只有仓库源码、样式与译文，根 `Cargo.toml` 的 `workspace.package.version`，以及调用方显式传入的 `AUCTION_BUILD_ID`（取值合法时作为构建号，否则退回工作区版本）。构建不读取 `.env*`：`bunfig.toml` 的 `env = false` 同时关闭外层 `bun run` 与脚本内层 Bun 的自动加载，Vite 配置再以 `envDir: false` 关闭 Vite 自己的加载（Vite 8 中 `envFile: false` 已弃用）；环境文件里的 `AUCTION_BUILD_ID` 与 `VITE_` 变量都不会进入产物。发布入口固定以 `NODE_ENV=production` 调用 Vite，外部同名变量不能改变 `import.meta.env.DEV`。
 
-发布构建经 `ci/release/web-bundle.sh` 选择 Solid 时，会核对 `mise run web-prepare` 留下的 `web/node_modules/.auction-prepared` 凭据（锁文件摘要与 bun 版本），再直接调用本地 `web/node_modules/.bin/vite` 构建到临时目录，校验通过后换入 `target/web/<surface>/public`；该阶段不联网，也不自动安装依赖。首次、锁文件变化或 bun 版本变化后先运行 `mise run web-prepare`。`AUCTION_WEB_STACK=solid` 当前只切换 Public，Admin 仍是 Rust 版；发布入口除 `verify-web-size` 外仍会拒绝 Solid。
+发布构建经 `ci/release/web-bundle.sh` 选择 Solid 时，会核对 `mise run web-prepare` 留下的 `web/node_modules/.auction-prepared` 凭据（锁文件摘要与 bun 版本），再直接调用本地 `web/node_modules/.bin/vite` 构建到临时目录，校验通过后换入 `target/web/<surface>/public`；该阶段不联网，也不自动安装依赖。首次、锁文件变化或 bun 版本变化后先运行 `mise run web-prepare`。`AUCTION_WEB_STACK=solid` 当前只切换 Public，Admin 仍是 Rust 版；本地构建与分支上的手动候选构建可选择 Solid，正式发行仍只产出 Rust 版，tag 触发的 CI 选择 Solid 会被拒绝。在 tag 上手动触发候选构建并选择 Solid 也会在安装工具前失败，候选构建请在分支上触发。
+
+两套实现长期并存：默认 `AUCTION_WEB_STACK=dioxus` 使用 `web-embed`，选择 `solid` 时 Public 使用 `web-solid`、Admin 仍用 `web-embed`。Solid 候选 Actions artifact 名称带 `-solid`，候选包不可部署；发布构建的体积预算与 Solid 键见 [ci/README.md#web-payload-体积预算](../ci/README.md#web-payload-体积预算)。共享样式与译文的变化会同时影响两套实现，改完两边都要核对。
 
 生产构建校验最终 HTML 恰有一个模块入口脚本，且 `data-cfasync="false"` 位于 `src` 之前。Public 入口以 `?url` 引入[共享 SVG](../crates/auction-web-shared/assets/favicon.svg)，产物因此有唯一的 `assets/favicon-<指纹>.svg`；入口 HTML 的图标链接固定为 `/favicon.ico`，生产由后端映射到该文件，开发服务器则由仅对 `serve` 生效的插件提供同样的映射。发布校验要求入口恰好有一个该图标链接、`assets/` 恰好有一个带指纹的 `favicon-*.svg`，两者缺一即失败。
 

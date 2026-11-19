@@ -2,7 +2,7 @@
 
 [docs/README.md](../../docs/README.md) · [crates/auction-web-public/DESIGN.md](DESIGN.md) · [docs/guide/player-guide.md](../../docs/guide/player-guide.md) · [docs/contracts/routes.md](../../docs/contracts/routes.md)
 
-玩家使用的公开站点：Dioxus 0.7 客户端渲染（CSR）WASM 应用，构建产物由 `auction-public-api` 的 `web-embed` 构建内嵌并同源提供。页面标题固定为“Auction 公开站点”（发布门禁以此识别 payload）。
+玩家使用的公开站点：Dioxus 0.7 客户端渲染（CSR）WASM 应用，构建产物由 `auction-public-api` 的 `web-embed` 构建内嵌并同源提供。页面标题固定为“Auction 公开站点”（发布门禁以此识别 payload）。同一 surface 另有 `web/public` 的 TypeScript + SolidJS 实现，由 `web-solid` 内嵌；两套实现共用样式与译文。
 
 ## 页面
 

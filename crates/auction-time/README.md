@@ -2,7 +2,7 @@
 
 [docs/README.md](../../docs/README.md) · [docs/architecture.md](../../docs/architecture.md)
 
-全仓共用的时间基础类型：UTC 时刻、有符号时长、本地墙上时间到时刻的换算，以及日期与钟点的文本解析。底层运算由 [jiff](https://docs.rs/jiff) 提供，文本格式由本 crate 自己控制；后端各层与两个浏览器前端都依赖它，本 crate 不依赖任何内部 crate，不含业务规则，不读配置。
+全仓共用的时间基础类型：UTC 时刻、有符号时长、本地墙上时间到时刻的换算，以及日期与钟点的文本解析。底层运算由 [jiff](https://docs.rs/jiff) 提供，文本格式由本 crate 自己控制；后端各层与两个 Dioxus 浏览器前端都依赖它，本 crate 不依赖任何内部 crate，不含业务规则，不读配置。
 
 ## 接口
 

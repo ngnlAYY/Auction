@@ -14,8 +14,9 @@
   3. HTTP 栈：Axum 与 tungstenite 必须同批升级——`ci/checks/check.sh dependency-versions` 要求正常依赖图只有一个 tungstenite 版本，Axum 的 WebSocket 错误按版本 downcast。
   4. 数据库：sqlx 与 PostgreSQL 驱动。
   5. 前端：Dioxus，以及 [mise.toml](../mise.toml) 里固定版本的 `dx`、`wasm-bindgen`、`wasm-opt` 与 `esbuild`（改版本后运行 `mise lock` 并一并提交 `mise.lock`）。
-  6. GitHub Actions 固定提交。
-  7. PostgreSQL 18 小版本：不占用窗口，按[ops/hardening.md#postgresql-小版本升级](hardening.md#postgresql-小版本升级)另作停机安排。
+  6. JS 依赖与工具：`web/package.json` 与 [web/bun.lock](../web/bun.lock) 固定的 `web/` 依赖，以及 `bun` 工具版本（改 `bun` 版本后运行 `mise lock` 并提交，再运行 `mise run web-prepare` 刷新安装凭据）。
+  7. GitHub Actions 固定提交。
+  8. PostgreSQL 18 小版本：不占用窗口，按[ops/hardening.md#postgresql-小版本升级](hardening.md#postgresql-小版本升级)另作停机安排。
 - 每个依赖族单独 PR（分支 `chore/deps-<窗口 ID>-<族>`），不混入无关修复；同一窗口内按上述顺序合入，前一族未通过门禁不开始下一族。工具链升级必须同时核对 `rust-toolchain.toml`、CI 工具链版本、MSRV 作业与 `Cargo.lock`。
 
 ## Dependabot 只作提示
@@ -23,7 +24,7 @@
 - [.github/dependabot.yml](../.github/dependabot.yml) 的 `open-pull-requests-limit: 0` 关闭常规版本升级 PR；Dependabot 不再把新版本变成待合并分支，只在仓库启用 Dependabot security updates 时按安全公告创建修复 PR（安全更新有独立的 10 个开放 PR 上限）。
 - 看到依赖有新版本时，把它记入当季窗口的范围，而不是直接合并 Dependabot 分支；Dependabot 分支不能作为“已评估”或“已通过门禁”的证据。
 - 安全公告修复可以随时按修复交付，不受窗口限制；涉及数据库或 HTTP 栈时同样补跑下列门禁，且不自动合并。
-- 关闭版本升级 PR 不等于关闭提醒：每周 `security-audit` 的 `cargo audit`（默认分支与最近一个发布 tag 的 `Cargo.lock`）与手动运行的 `cargo machete` 仍检查锁定依赖与未使用依赖，仓库 Dependabot alerts 继续提供公告。
+- 关闭版本升级 PR 不等于关闭提醒：每周 `security-audit` 的 `cargo audit`（默认分支与最近一个发布 tag 的 `Cargo.lock`）、`bun audit`（`web/bun.lock`）与手动运行的 `cargo machete` 仍检查锁定依赖与未使用依赖，仓库 Dependabot alerts 继续提供公告。JS 依赖使用 Dependabot 的 `bun` 生态、目录 `/web`；由于常规版本更新的 PR 数已设为 0，Dependabot 对它只登记版本更新，漏洞检查由 `web-dependency-audit`（`bun audit`）承担。
 
 ## 发布冻结日历
 
@@ -36,6 +37,7 @@
 | 变更 | 必须运行 |
 | --- | --- |
 | 任意依赖或工具链升级 | `mise run verify`；`mise run test` |
+| `web/package.json`、`web/bun.lock` 或 `bun` 版本 | `mise run web-prepare`；`mise run verify`；`mise run web-test`；`bash ci/checks/check.sh web-dependency-audit` |
 | 外部页面解析（MoogleMail、论坛） | 确认脱敏回放语料与本地替身覆盖本次变更路径，再运行 `mise run test` |
 | sqlx、PostgreSQL 驱动或数据库连接层 | 加 `mise run test-db`（隔离 PG18） |
 | 数据库或 HTTP 栈（Axum、tungstenite、hyper、Tokio 运行时、sqlx 连接层） | 加本地 PG18 负载演练：Final 阶段并发出价与匿名读突发，并与窗口前基线比较 |

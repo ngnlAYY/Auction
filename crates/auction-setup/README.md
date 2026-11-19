@@ -2,7 +2,7 @@
 
 [docs/README.md](../../docs/README.md) · [ops/README.md#首次部署](../../ops/README.md#首次部署)
 
-PostgreSQL 首次部署的一次性设置服务：在没有任何配置时提供 Web 设置页（复用 Admin 浏览器资源的设置入口），收集数据库连接、Admin 凭据、Public/Admin origin 与端口、周排期与起拍价等，校验后原子生成三角色配置目录。实际设置页要求入口内嵌 Admin Web 资源（`web-embed`）。
+PostgreSQL 首次部署的一次性设置服务：在没有任何配置时提供 Web 设置页（复用 Admin 浏览器资源的设置入口），收集数据库连接、Admin 凭据、Public/Admin origin 与端口、周排期与起拍价等，校验后原子生成三角色配置目录。实际设置页要求入口内嵌 Admin Web 资源（`web-embed`；启用 `web-solid` 时也蕴含该能力）。
 
 ## 流程
 

@@ -7,6 +7,15 @@ on:
       - '**'
   pull_request:
   workflow_dispatch:
+    inputs:
+      web_stack:
+        description: 候选构建的页面技术栈
+        required: false
+        type: choice
+        options:
+          - dioxus
+          - solid
+        default: dioxus
   schedule:
     # 每周一 04:17 UTC 审计默认分支与最近一个发布 tag 的锁定依赖；避开整点排队。
     - cron: '17 4 * * 1'
@@ -205,8 +214,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
-      # 审计作业只启用 Rust 与两个 Cargo 子命令。
-      MISE_ENABLE_TOOLS: rust,cargo:cargo-audit,cargo:cargo-machete
+      # 审计作业只启用 Rust、两个 Cargo 子命令与 JS 依赖审计所需的 bun。
+      MISE_ENABLE_TOOLS: rust,cargo:cargo-audit,cargo:cargo-machete,bun
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -243,6 +252,11 @@ jobs:
         run: bash ci/checks/check.sh release-dependency-audit
       - run: bash ci/checks/check.sh dependency-unused
         if: github.event_name != 'schedule'
+      # 放在 Cargo 检查之后：JS 公告源不可达或发现漏洞时，不阻止 cargo machete 先完成。
+      # 与 Cargo 审计相互独立：任一失败都不阻止另一项执行，便于分别定位。
+      - name: Audit JS dependencies
+        if: ${{ !cancelled() && steps.install-audit.outcome == 'success' }}
+        run: bash ci/checks/check.sh web-dependency-audit
 
   msrv:
     needs: docs
@@ -268,3 +282,5 @@ jobs:
       needs.docs.outputs.run-checks == 'true' &&
       github.event_name == 'workflow_dispatch'
     uses: ./.github/workflows/release-build.yml
+    with:
+      web_stack: ${{ inputs.web_stack }}

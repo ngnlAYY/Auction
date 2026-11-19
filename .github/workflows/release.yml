@@ -79,8 +79,8 @@ jobs:
     env:
       # 仅静态检查与测试，不生成调试信息。
       CARGO_PROFILE_DEV_DEBUG: "0"
-      # 门禁与测试只启用 Rust 与 rg；mise run 不会顺带安装其余工具。
-      MISE_ENABLE_TOOLS: rust,ripgrep
+      # 门禁与测试启用 Rust、rg、bun 与浏览器测试工具；mise run 不会顺带安装其余工具。
+      MISE_ENABLE_TOOLS: rust,ripgrep,bun,github:wasm-bindgen/wasm-bindgen,github:mozilla/geckodriver
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -100,6 +100,8 @@ jobs:
         with:
           version: 2026.11.8
           cache: false
+      - name: Prepare web dependencies
+        run: mise run web-prepare
       - name: Restore Rust build cache
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
         with:
@@ -109,10 +111,12 @@ jobs:
           cache-bin: "false"
       # 发布 tag 自带完整门禁，不依赖分支保护的历史运行记录。
       - name: Run repository, static and lint gates
-        run: bash ci/checks/check.sh all fmt check dependency-versions lint wasm rustdoc
+        run: bash ci/checks/check.sh all fmt check dependency-versions lint wasm rustdoc web
       # 与 ci.yml 的 test 作业保持同一组测试入口与 PostgreSQL 18 准备方式。
       - name: Run pure and double tests
         run: mise run test
+      - name: Run web behavior tests
+        run: mise run web-test
       - name: Install PostgreSQL 18 for integration tests
         run: |
           sudo apt-get update
@@ -137,9 +141,12 @@ jobs:
         run: mise run test-db
       - name: Verify migration compatibility declarations
         run: mise run test-db-compat
+      - name: Run browser transport tests
+        run: mise run test-wasm
 
   build:
     needs: [guard, verify]
+    # 正式发行不传 web_stack：缺省 dioxus，只产出 Rust 版页面。
     uses: ./.github/workflows/release-build.yml
 
   publish:
