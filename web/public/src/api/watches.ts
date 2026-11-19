@@ -17,23 +17,28 @@ import { sendGet, sendRequest } from "./clock";
 import type { CommandError } from "./commands";
 import { boolValue, decodeErrorCode, int, object } from "./decoder";
 import { decodeIdentitySuccess, observePublicSessionFailure } from "./session";
-import { startPublicSessionIdentityObservation } from "./session/revision";
+import {
+  publishPublicSessionIdentity,
+  startPublicSessionIdentityObservation,
+} from "./session/revision";
 
 const MAX_WATCHES = 10_000;
 
-/** 整场集合有界且不能截断；缺项只有在完整权威读取后才表示 false/version 0。 */
+/** 整场集合有界且不能截断；缺项只有在完整权威读取后才表示 false/version 0。
+ * 整场资源提供账号与 Cookie 代次的核对，用于交付集合和处理会话证据。 */
 export async function fetchLotWatches(
   userId: string,
   auctionId: string,
   signal: AbortSignal,
-  observe = startPublicSessionIdentityObservation(),
+  observation?: { readonly current: () => boolean },
 ): Promise<Result<PublicLotWatchesResponse, CommandError>> {
+  const isCurrent = observation?.current ?? startPublicSessionIdentityObservation().current;
   const query = new URLSearchParams({ auction_id: auctionId }).toString();
   const response = await sendGet(`/api/v1/me/lot-watches?${query}`, signal);
   if (signal.aborted) {
     return err({ code: "network_error", status: 0 });
   }
-  if (!observe.current()) {
+  if (!isCurrent()) {
     return err({ code: "session_observation_stale", status: 0 });
   }
   if (!response.ok) {
@@ -41,7 +46,12 @@ export async function fetchLotWatches(
   }
   const status = response.value.status;
   if (!responseOk(response.value)) {
-    return err(failure(decodeErrorCode(response.value), status));
+    const code = decodeErrorCode(response.value);
+    // 旧代响应不能暂停新会话的授权。
+    if (!isCurrent()) {
+      return err({ code: "session_observation_stale", status: 0 });
+    }
+    return err(failure(code, status));
   }
   const page = decodeIdentitySuccess(
     response.value,
@@ -61,10 +71,11 @@ export async function fetchLotWatches(
   if (!page.ok || !validWatchCollection(page.value, page.value.user_id, auctionId)) {
     return err(failure("invalid_response", status));
   }
-  // 读取用服务端投影确认 Cookie 归属；集合仍只能交给请求绑定的账号。
-  if (observe({ kind: "user", userId: page.value.user_id }) === null) {
+  if (!isCurrent()) {
     return err({ code: "session_observation_stale", status: 0 });
   }
+  // 同代响应可确认 Cookie 的实际归属；集合仍绑定发起账号。
+  publishPublicSessionIdentity({ kind: "user", userId: page.value.user_id });
   return page.value.user_id === userId ? page : err(failure("invalid_response", status));
 }
 

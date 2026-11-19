@@ -8,7 +8,12 @@ import { createRoot, For, flush } from "solid-js";
 import { object } from "../../api/decoder";
 import { fetchCurrentAuction } from "../../api/queries/current";
 import { loginPublic, logoutPublic, PUBLIC_SESSION_CHANGE_STORAGE_KEY } from "../../api/session";
-import { publicWatchCacheRevision } from "../../api/session/revision";
+import {
+  publicSessionIdentityRevision,
+  publicSessionPrimaryRevision,
+  publicWatchCacheRevision,
+  registerPublicSessionCheckTrigger,
+} from "../../api/session/revision";
 import { fetchLotWatches } from "../../api/watches";
 import { PublicRefreshGenerationContext } from "../board/refresh";
 import { PublicCommandOwnerContext, PublicSessionResourceContext } from "../index";
@@ -23,11 +28,13 @@ import {
 } from "../shell/session-fixture";
 import { LotWatchScope, WatchContext } from ".";
 import { load, save } from "./cache";
+import { useWatchCommandOwner, WatchCommandOwnerContext } from "./commands";
 import { watchToggleState } from "./control";
 
 const AUCTION_ID = "00000000-0000-4000-8000-000000000021";
 const OTHER_AUCTION_ID = "00000000-0000-4000-8000-000000000022";
 const LOT_ID = "00000000-0000-4000-8000-000000000023";
+const OTHER_USER_ID = "00000000-0000-4000-8000-000000000003";
 const STORAGE_KEY = `hv.public.lot-watches.v1:${ALICE.user_id}:${AUCTION_ID}`;
 const CACHE_FIXTURE = new URL(
   "../../../../../crates/auction-web-public/src/surface/watches/cache_entry.v2.fixture.json",
@@ -52,6 +59,7 @@ function mountWatchView(mounted: ReturnType<typeof fixture>) {
   const oldSession = PublicSessionResourceContext.defaultValue;
   const oldOwner = PublicCommandOwnerContext.defaultValue;
   const oldRefresh = PublicRefreshGenerationContext.defaultValue;
+  const oldWatchOwner = WatchCommandOwnerContext.defaultValue;
   let readMark: (() => boolean) | null = null;
   let readVersion: (() => readonly [boolean, number] | null) | null = null;
   PublicSessionResourceContext.defaultValue = mounted.session;
@@ -94,10 +102,13 @@ function mountWatchView(mounted: ReturnType<typeof fixture>) {
   });
   try {
     return createRoot((dispose) => {
+      const commands = useWatchCommandOwner(ALICE.user_id);
+      WatchCommandOwnerContext.defaultValue = commands;
       LotWatchScope({ auctionId: AUCTION_ID, children: null });
       flush();
       return {
         dispose,
+        commands,
         displayed() {
           if (readMark === null) {
             throw new Error("标记视图未装配");
@@ -106,15 +117,7 @@ function mountWatchView(mounted: ReturnType<typeof fixture>) {
         },
         toggle() {
           if (readVersion === null) throw new Error("标记视图未装配");
-          return watchToggleState(
-            {
-              userId: ALICE.user_id,
-              identity: mounted.commandOwner,
-              session: mounted.session,
-            },
-            readVersion(),
-            false,
-          );
+          return watchToggleState(commands, readVersion(), commands.commands().has(LOT_ID));
         },
       };
     });
@@ -122,9 +125,203 @@ function mountWatchView(mounted: ReturnType<typeof fixture>) {
     PublicSessionResourceContext.defaultValue = oldSession;
     PublicCommandOwnerContext.defaultValue = oldOwner;
     PublicRefreshGenerationContext.defaultValue = oldRefresh;
+    WatchCommandOwnerContext.defaultValue = oldWatchOwner;
     Object.defineProperty(globalThis, "jsx", jsx);
   }
 }
+
+test.each([false, true])("普通会话复核后在途标记 GET 照常交付（写入后 %s）", async (afterWrite) => {
+  const mounted = fixture(ALICE);
+  const delayed = Promise.withResolvers<Response>();
+  const initial = { ...PAGE, watches: [] };
+  let reads = 0;
+  try {
+    await settle();
+    mounted.server.mutate = (path, method) => {
+      if (path === `/api/v1/lots/${LOT_ID}/watch` && method === "PUT") {
+        return success({ user_id: ALICE.user_id, auction_id: AUCTION_ID, watch: PAGE.watches[0] });
+      }
+      if (path !== `/api/v1/me/lot-watches?auction_id=${AUCTION_ID}` || method !== "GET") {
+        throw new Error(`意外请求 ${method} ${path}`);
+      }
+      reads += 1;
+      return afterWrite && reads === 1 ? success(initial) : delayed.promise;
+    };
+    const view = mountWatchView(mounted);
+    try {
+      await settle();
+      expect(reads).toBe(1);
+      if (afterWrite) {
+        expect(view.toggle()).toEqual({ disabled: false, snapshot: [false, 0] });
+        view.commands.submit(AUCTION_ID, LOT_ID, "Clo16", {
+          command_id: BOB.user_id,
+          watched: true,
+          channel: "mm",
+          expected_version: 0,
+        });
+        await settle();
+        expect(view.commands.commands.peek().get(LOT_ID)?.awaitingRefresh).toBe(1);
+        expect(reads).toBe(2);
+      }
+      expect(view.toggle()).toEqual({ disabled: true });
+
+      const identityRevision = publicSessionIdentityRevision();
+      const primaryRevision = publicSessionPrimaryRevision();
+      mounted.browser.focus();
+      await settle();
+      expect(publicSessionIdentityRevision()).toBeGreaterThan(identityRevision);
+      expect(publicSessionPrimaryRevision()).toBe(primaryRevision);
+      expect(mounted.session()).toEqual(ok(ALICE));
+      expect(reads).toBe(afterWrite ? 2 : 1);
+
+      delayed.resolve(success(PAGE));
+      await settle();
+      expect(view.toggle()).toEqual({ disabled: false, snapshot: [true, 1] });
+      expect(view.commands.commands.peek().has(LOT_ID)).toBe(false);
+      expect(view.displayed()).toBe(true);
+      expect(load(ALICE.user_id, AUCTION_ID)).toEqual(PAGE);
+      expect(reads).toBe(afterWrite ? 2 : 1);
+    } finally {
+      view.dispose();
+    }
+  } finally {
+    delayed.resolve(success(PAGE));
+    mounted.dispose();
+  }
+});
+
+const CHANGED_SESSION_RESPONSES = [
+  ["原账号投影", () => success(PAGE)],
+  ["其他账号投影", () => success({ ...PAGE, user_id: OTHER_USER_ID })],
+  ["401", () => reject("unauthenticated", 401)],
+] as const;
+
+test.each(
+  ["重登", "换号", "退出", "外壳重新登记"].flatMap((change) =>
+    CHANGED_SESSION_RESPONSES.map(([name, response]) => [change, name, response] as const),
+  ),
+)("%s 后迟到的%s不影响新会话，也不交付标记", async (change, _name, response) => {
+  const mounted = fixture(ALICE);
+  const oldRead = Promise.withResolvers<Response>();
+  const newRead = Promise.withResolvers<Response>();
+  const fresh = { ...PAGE, watches: [] };
+  let reads = 0;
+  let effectsOnNewShell = 0;
+  let unregister: (() => void) | null = null;
+  try {
+    await settle();
+    mounted.server.mutate = (_path, method) => {
+      if (method === "POST") return loginReceipt(ALICE);
+      reads += 1;
+      return reads === 1 ? oldRead.promise : newRead.promise;
+    };
+    const view = mountWatchView(mounted);
+    try {
+      await settle();
+      expect(reads).toBe(1);
+      if (change === "重登") {
+        expect(await loginPublic("one-use", mounted.signal)).toEqual(ok(ALICE));
+      } else if (change === "外壳重新登记") {
+        unregister = registerPublicSessionCheckTrigger(
+          () => {
+            effectsOnNewShell += 1;
+          },
+          () => {
+            effectsOnNewShell += 1;
+            return false;
+          },
+        );
+      } else {
+        mounted.server.identity = change === "换号" ? BOB : null;
+        mounted.browser.focus();
+      }
+      await settle();
+      const identity = change === "换号" ? BOB : change === "退出" ? null : ALICE;
+      expect(mounted.commandOwner()).toBe(identity?.user_id ?? null);
+      expect(mounted.session()).toEqual(ok(identity));
+      expect(reads).toBe(change === "重登" ? 2 : 1);
+      const requestCount = mounted.requests.length;
+      const revision = publicSessionPrimaryRevision();
+
+      oldRead.resolve(response());
+      await settle();
+      expect(effectsOnNewShell).toBe(0);
+      expect(mounted.requests).toHaveLength(requestCount);
+      expect(publicSessionPrimaryRevision()).toBe(revision);
+      expect(mounted.commandOwner()).toBe(identity?.user_id ?? null);
+      expect(mounted.session()).toEqual(ok(identity));
+      expect(view.displayed()).toBe(false);
+      expect(view.toggle()).toEqual({ disabled: true });
+      expect(mounted.browser.storage.has(STORAGE_KEY)).toBe(false);
+      expect(load(OTHER_USER_ID, AUCTION_ID)).toBeNull();
+      if (change === "重登") {
+        newRead.resolve(success(fresh));
+        await settle();
+        expect(view.toggle()).toEqual({ disabled: false, snapshot: [false, 0] });
+        expect(load(ALICE.user_id, AUCTION_ID)).toEqual(fresh);
+      }
+    } finally {
+      view.dispose();
+    }
+  } finally {
+    unregister?.();
+    oldRead.resolve(response());
+    newRead.resolve(success(fresh));
+    mounted.dispose();
+  }
+});
+
+test.each([
+  ["不同账号的投影", () => success({ ...PAGE, user_id: BOB.user_id }), BOB],
+  ["鉴权失败", () => reject("unauthenticated", 401), null],
+] as const)("普通复核后同代标记 GET 的%s触发会话复核", async (_name, response, next) => {
+  const mounted = fixture(ALICE);
+  const delayed = Promise.withResolvers<Response>();
+  const sessionRead = Promise.withResolvers<Response>();
+  const sessionReads = () =>
+    mounted.requests.filter(({ path, method }) => path === "/api/v1/session" && method === "GET")
+      .length;
+  try {
+    await settle();
+    mounted.server.mutate = () => delayed.promise;
+    const view = mountWatchView(mounted);
+    try {
+      await settle();
+      const identityRevision = publicSessionIdentityRevision();
+      const revision = publicSessionPrimaryRevision();
+      mounted.browser.focus();
+      await settle();
+      expect(publicSessionIdentityRevision()).toBeGreaterThan(identityRevision);
+      expect(publicSessionPrimaryRevision()).toBe(revision);
+      expect(mounted.session()).toEqual(ok(ALICE));
+      const before = sessionReads();
+
+      mounted.server.identity = next;
+      mounted.server.read = () => sessionRead.promise;
+      delayed.resolve(response());
+      await settle();
+      expect(sessionReads()).toBe(before + 1);
+      expect(mounted.session.state()).toBe("pending");
+      expect(mounted.session.peek()).toBeUndefined();
+      expect(mounted.commandOwner()).toBe(next?.user_id ?? ALICE.user_id);
+      expect(view.displayed()).toBe(false);
+      expect(view.toggle()).toEqual({ disabled: true });
+      expect(mounted.browser.storage.has(STORAGE_KEY)).toBe(false);
+      expect(load(BOB.user_id, AUCTION_ID)).toBeNull();
+
+      sessionRead.resolve(success(next));
+      await settle();
+      expect(mounted.session()).toEqual(ok(next));
+      expect(mounted.commandOwner()).toBe(next?.user_id ?? null);
+    } finally {
+      view.dispose();
+    }
+  } finally {
+    delayed.resolve(response());
+    sessionRead.resolve(success(next));
+    mounted.dispose();
+  }
+});
 
 test.each([true, false])(
   "同账号重新登录重读标记并保留快照（此前退出对账失败 %s）",

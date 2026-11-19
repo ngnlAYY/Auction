@@ -125,6 +125,7 @@ function ScopedLotWatches(props: {
       ];
       const userId = dependencies.userId;
       const observation = startPublicSessionIdentityObservation();
+      const current = () => currentUser(session.peek()) === userId && observation.cookieCurrent();
       const requested = {
         revision: requestedRevision,
         sessionRevision: observation.primaryRevision,
@@ -135,17 +136,14 @@ function ScopedLotWatches(props: {
         userId === null ||
         dependencies.confirmation === null ||
         dependencies.confirmation.revision !== observation.primaryRevision ||
-        currentUser(session.peek()) !== userId
+        !current()
       ) {
         return { ...requested, result: ok(null) };
       }
-      const result = await fetchLotWatches(
-        userId,
-        dependencies.auctionId,
-        context.signal,
-        observation,
-      );
-      if (!context.alive() || currentUser(session.peek()) !== userId || !observation.current()) {
+      const result = await fetchLotWatches(userId, dependencies.auctionId, context.signal, {
+        current,
+      });
+      if (!context.alive() || !current()) {
         return { ...requested, result: ok(null) };
       }
       if (!result.ok) {
@@ -168,7 +166,7 @@ function ScopedLotWatches(props: {
     }
     const { page, snapshot, observation } = loaded.result.value;
     const current = () =>
-      observation.current() && untrack(() => identityMatches() && revisionMatches(loaded));
+      observation.cookieCurrent() && untrack(() => identityMatches() && revisionMatches(loaded));
     // 只有资源实际交付且仍属于当前会话代次的结果，才能回填内存或持久快照。
     if (!current()) {
       return;
