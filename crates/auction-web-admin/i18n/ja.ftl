@@ -451,6 +451,7 @@ admin-rules-publish = 保存して公開
 admin-rules-success = 文書を保存しました。
 admin-rules-description = 各言語を Markdown で編集し、公開ルールページへ即時反映します。
 page-about-title = 「このサイトについて」の内容
+markdown-table-scroll-region = 表
 admin-about-description = 各言語を Markdown で編集し、公開側の「このサイトについて」ページへ即時反映します。文書のない言語は英語にフォールバックします。
 admin-rules-languages = 文書の言語
 admin-rules-default-locale = フォールバック言語

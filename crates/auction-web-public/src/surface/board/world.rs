@@ -4,6 +4,7 @@
 use std::rc::Rc;
 
 use auction_time::Timestamp;
+use auction_web_shared::validation::restore_select_value;
 use auction_web_shared::{PageVisibility, QueryWriteMode, t};
 use dioxus::prelude::*;
 
@@ -41,38 +42,29 @@ pub(crate) fn WorldPicker(
         _ => (vec!["main".to_owned(), "isekai".to_owned()], false),
     };
     let current = selected_world();
-    // 关闭世界的 settled 深链仍显示其真实世界，但不提供新的当前世界入口。
-    let historical_disabled_world = historical_url && !options.contains(&current);
-    if historical_disabled_world {
+    let options_empty = options.is_empty();
+    let current_disabled = !options.contains(&current);
+    let fallback = if worlds_loaded && current_disabled && !historical_url {
+        options.iter().find(|world| world.as_str() == "main").or_else(|| options.first()).cloned()
+    } else {
+        None
+    };
+    // 拒写后仍选中已提交的世界，保留可用选项供用户重试。历史深链也保留其真实世界。
+    if current_disabled {
         options.push(current.clone());
     }
-    let active = options.iter().find(|world| **world == current).cloned().unwrap_or_else(|| {
-        // 旧版顶部选项沿用接口键顺序，但没有 URL 状态时仍以 Main 作为默认世界。
-        options
-            .iter()
-            .find(|world| world.as_str() == "main")
-            .cloned()
-            .or_else(|| options.first().cloned())
-            .unwrap_or_else(|| "main".to_owned())
-    });
-    let can_canonicalize = worlds_loaded && !options.is_empty() && !historical_url;
-    use_effect(use_reactive(
-        (&worlds_loaded, &active, &can_canonicalize, &historical_url),
-        move |(worlds_loaded, active, can_canonicalize, historical_url)| {
-            if !worlds_loaded || historical_url || selected_world() == active {
-                return;
-            }
-            // 目录返回时地址可能已经换到无效深链；只有仍无显式场次才可纠偏。
-            if !can_canonicalize || has_auction_target(read_public_query().auction_parameter()) {
-                return;
-            }
-            // 仅当前世界失效时纠偏；历史筛选与指定场次深链不得被目录开关抹除。
-            if replace_world_query(shell_query_state, (active != "main").then_some(&active)) {
-                selected_world.set(active);
-            }
-        },
-    ));
-    let options_empty = options.is_empty();
+    use_effect(use_reactive((&fallback,), move |(fallback,)| {
+        let Some(fallback) = fallback else { return };
+        // 目录返回时地址可能已经换到指定场次或无效深链；只有仍无显式场次才可纠偏。
+        if selected_world() == fallback
+            || has_auction_target(read_public_query().auction_parameter())
+        {
+            return;
+        }
+        if replace_world_query(shell_query_state, (fallback != "main").then_some(&fallback)) {
+            selected_world.set(fallback);
+        }
+    }));
 
     rsx! {
         label { class: "public-world-switcher",
@@ -80,7 +72,7 @@ pub(crate) fn WorldPicker(
             select {
                 id: "public-world",
                 name: "world",
-                value: active,
+                value: current,
                 disabled: options_empty,
                 onchange: move |event| {
                     let world = event.value();
@@ -93,28 +85,36 @@ pub(crate) fn WorldPicker(
                         read_public_query().auction_parameter(), AuctionParameter::Selected(_)
                     );
                     // 用户主动切换要建立可返回的历史条目。
-                    if historical_board {
-                        if let QueryCommit::Applied(applied) = commit_auction_selection(
+                    let next = if historical_board {
+                        match commit_auction_selection(
                             shell_query_state,
                             AuctionSelection::Explicit(None),
                             None,
                             |query| *query = world_switch_query(query, &world, historical_board),
                         ) {
-                            selected_world.set(applied.world.as_deref().unwrap_or("main").to_owned());
+                            QueryCommit::Applied(applied) => Some(applied.world.as_deref().unwrap_or("main").to_owned()),
+                            _ => None,
                         }
-                    } else if update_public_query_state(
-                        shell_query_state,
-                        |query| *query = world_switch_query(query, &world, historical_board),
-                        QueryWriteMode::Push,
-                    ) {
-                        selected_world.set(world);
+                    } else {
+                        update_public_query_state(
+                            shell_query_state,
+                            |query| *query = world_switch_query(query, &world, historical_board),
+                            QueryWriteMode::Push,
+                        ).then_some(world)
+                    };
+                    if let Some(next) = next {
+                        selected_world.set(next);
+                    } else {
+                        // 原生 change 已改动选项，拒写时须还原 DOM 才能重新选择同一个世界。
+                        restore_select_value(&event, &selected_world.peek());
                     }
                 },
                 for world in options {
                     option {
+                        key: "{world}",
                         value: world.clone(),
-                        selected: active == world,
-                        disabled: historical_disabled_world && world == current,
+                        selected: current == world,
+                        disabled: current_disabled && world == current,
                         {world_label(&world)}
                     }
                 }

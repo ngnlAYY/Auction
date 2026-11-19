@@ -451,6 +451,7 @@ admin-rules-publish = 저장 및 게시
 admin-rules-success = 문서를 저장했습니다.
 admin-rules-description = 각 언어를 Markdown으로 편집하고 공개 규칙 페이지에 즉시 게시합니다.
 page-about-title = 소개 내용
+markdown-table-scroll-region = 표
 admin-about-description = 각 언어를 Markdown으로 편집하고 공개 사이트의 "소개" 페이지에 즉시 게시합니다. 문서가 없는 언어는 영어로 대체됩니다.
 admin-rules-languages = 문서 언어
 admin-rules-default-locale = 대체 언어

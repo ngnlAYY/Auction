@@ -501,7 +501,7 @@ mod tests {
         AuctionIndex, BoardCatalogueFailureFixture, CurrentAuctionResource, LotDetailHttpFixture,
         LotLinkRequest, LotViewRequest, PageReadFixture, PublicBidRefresh, PublicCommandOwner,
         PublicContentLoading, PublicDisplayedAuction, PublicPageRealtimeTarget,
-        PublicReadinessResource, PublicSessionResource,
+        PublicReadinessResource, PublicSessionResource, rendered_role_contains,
     };
 
     const USER: &str = "018f4c8e-7b2a-4c3d-8e4f-000000000001";
@@ -1371,12 +1371,12 @@ mod tests {
         for (http_status, code) in [(409, "session_changed"), (401, "unauthenticated")] {
             let (mut dom, other, receipt) = mounted_with_commands_and_receipt();
             let mut script = vec![
-                session_fixture::read(Some(USER)),
-                session_fixture::read(Some(USER)),
+                session_fixture::read(Some(USER)).under_lock(),
                 session_fixture::reply(
                     SessionRequest::Sync(USER),
                     session_fixture::rejection(http_status, code),
-                ),
+                )
+                .under_lock(),
             ];
             let followup = Rc::new(ResponseGate::default());
             if http_status == 409 {
@@ -1552,9 +1552,8 @@ mod tests {
             let (mut dom, other, receipt) = mounted_with_commands_and_receipt();
             let sync = Rc::new(ResponseGate::default());
             session_fixture::script([
-                session_fixture::read(Some(USER)),
-                session_fixture::read(Some(OTHER_USER)),
-                sync.hold(SessionRequest::Sync(OTHER_USER), failure),
+                session_fixture::read(Some(OTHER_USER)).under_lock(),
+                sync.hold(SessionRequest::Sync(OTHER_USER), failure).under_lock(),
             ]);
             let shown = session_refresh(&mut dom);
             session_fixture::assert_consumed();
@@ -1569,29 +1568,40 @@ mod tests {
     }
 
     #[test]
-    fn first_get_discards_old_identity_before_a_failed_locked_read() {
+    fn first_locked_get_discards_old_identity_before_a_successful_cookie_sync() {
         let (mut dom, other, receipt) = mounted_with_commands_and_receipt();
-        let locked_read = Rc::new(ResponseGate::default());
+        let sync = Rc::new(ResponseGate::default());
+        session_fixture::take_requests();
         session_fixture::script([
-            session_fixture::read(Some(OTHER_USER)),
-            locked_read.hold(SessionRequest::Read, Err(TransportError::Timeout)),
+            session_fixture::read(Some(OTHER_USER)).under_lock(),
+            sync.hold(
+                SessionRequest::Sync(OTHER_USER),
+                session_fixture::session_response_with_deadline(Some(OTHER_USER), None),
+            )
+            .under_lock(),
         ]);
         let shown = session_refresh(&mut dom);
         session_fixture::assert_consumed();
-        assert!(locked_read.waiting());
+        assert_eq!(session_fixture::take_requests(), ["GET", "PUT"]);
+        assert!(sync.waiting());
         assert_commands_discarded(&dom, &shown, &other, receipt);
-        locked_read.release();
+        sync.release();
         settle(&mut dom);
-        assert_session_error("request_timeout");
+        assert_eq!(confirmed_owner().as_deref(), Some(OTHER_USER));
+        assert!(matches!(&*CONTROLS.get().unwrap().checked_session.peek(),
+            Some(Ok(Some(identity))) if identity.user_id == OTHER_USER));
+        assert!(session_fixture::take_requests().is_empty());
         assert!(status(&dom, LOT).is_none());
     }
 
     #[test]
     fn anonymous_get_discards_old_identity_even_if_the_next_read_fails() {
         let (mut dom, other, receipt) = mounted_with_commands_and_receipt();
-        session_fixture::script([session_fixture::read(Some(USER)), session_fixture::read(None)]);
+        session_fixture::take_requests();
+        session_fixture::script([session_fixture::read(None).under_lock()]);
         let shown = session_refresh(&mut dom);
         session_fixture::assert_consumed();
+        assert_eq!(session_fixture::take_requests(), ["GET"]);
         assert!(matches!(&*CONTROLS.get().unwrap().checked_session.peek(), Some(Ok(None))));
         assert_commands_discarded(&dom, &shown, &other, receipt);
         session_fixture::script([session_fixture::reply(
@@ -1781,12 +1791,14 @@ mod tests {
                     assert!(contains_text(&shown, "200K"));
                 }
                 404 | 410 => {
-                    assert!(contains_text(
-                        &shown,
-                        "This lot does not exist or is no longer available."
-                    ));
+                    let message = "This lot does not exist or is no longer available.";
+                    assert!(contains_text(&shown, message));
+                    assert!(rendered_role_contains(&dom, "status", message));
+                    assert!(!rendered_role_contains(&dom, "alert", message));
                 }
-                _ => {
+                503 => {
+                    assert!(rendered_role_contains(&dom, "alert", "View lot S07"));
+                    assert!(!rendered_role_contains(&dom, "status", "View lot S07"));
                     assert!(contains_text(&shown, "Retry"));
                     let retry = crate::surface::rendered_event_target(
                         &dom,
@@ -1801,6 +1813,7 @@ mod tests {
                     assert_eq!(LOT_HTTP_READS.take(), [format!("/api/v1/lots/{LOT}")]);
                     assert!(contains_text(&loaded, "New Leader"));
                 }
+                _ => unreachable!("用例只提供登记的 HTTP 状态"),
             }
         }
     }

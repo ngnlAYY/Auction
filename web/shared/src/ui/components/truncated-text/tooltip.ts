@@ -17,14 +17,7 @@ export function toggleTooltip(
     interaction.close();
   } else {
     interaction.dismissed.set(false);
-    showTooltip(
-      element,
-      displayDiffers,
-      truncated,
-      interaction.position,
-      interaction.portal,
-      request,
-    );
+    showTooltip(element, displayDiffers, truncated, interaction, request);
     interaction.pinned.set(interaction.position.peek() !== null);
   }
 }
@@ -34,18 +27,17 @@ export function updateTruncatedState(
   element: Element,
   displayDiffers: boolean,
   truncated: Cell<boolean>,
-  tooltipPosition: Cell<TooltipPosition | null>,
-  portalElement: Cell<HTMLElement | null>,
-): void {
+  interaction: TooltipInteraction,
+): boolean {
   const next = elementIsTruncated(element, displayDiffers);
+  // 先归还焦点，随后才能移除入口的 tabindex。
+  if (!next) interaction.dismiss();
   // 相同测量值不写信号，避免表格中每个文本在窗口与观察器重复通知时重渲染。
   const changed = truncated.peek() !== next;
   if (changed) {
     truncated.set(next);
   }
-  if (!next) {
-    hideTooltip(tooltipPosition, portalElement);
-  }
+  return next;
 }
 
 /** 展示值不同或内容实际溢出都算截断。 */
@@ -58,20 +50,10 @@ export function showTooltip(
   element: Element | null,
   displayDiffers: boolean,
   truncated: Cell<boolean>,
-  tooltipPosition: Cell<TooltipPosition | null>,
-  portalElement: Cell<HTMLElement | null>,
+  interaction: TooltipInteraction,
   request: TooltipRequest,
 ): void {
-  if (element === null) {
-    return;
-  }
-  const next = elementIsTruncated(element, displayDiffers);
-  const changed = truncated.peek() !== next;
-  if (changed) {
-    truncated.set(next);
-  }
-  if (!next) {
-    hideTooltip(tooltipPosition, portalElement);
+  if (element === null || !updateTruncatedState(element, displayDiffers, truncated, interaction)) {
     return;
   }
 
@@ -99,7 +81,7 @@ export function showTooltip(
   if (
     request.portal &&
     !renderPortalTooltip(
-      portalElement,
+      interaction.portal,
       element,
       request.value,
       request.tooltipId,
@@ -109,7 +91,7 @@ export function showTooltip(
   ) {
     return;
   }
-  tooltipPosition.set(position);
+  interaction.position.set(position);
 }
 
 /** 返回相对布局视口的可见区域；旧浏览器回退到完整窗口，不限制用户缩放。 */

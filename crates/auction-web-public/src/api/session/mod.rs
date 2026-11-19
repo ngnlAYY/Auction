@@ -98,12 +98,8 @@ async fn fetch_session(
         }
         Err(code) => return Err(PublicSessionApiError::local(code)),
     };
-    let mut current = read_session_identity(true).await?;
-    if reason == SessionRefreshReason::Refresh && current.as_ref().is_some_and(cookie::needs_sync) {
-        // 例行复核保留同步前的读回；两次读取均在锁内，先等其他标签页发布退出结果。
-        current = read_session_identity(true).await?;
-    }
-    // 等锁期间 Cookie 可能已经换号。只有刚取得的锁内身份可以作为 PUT 前置条件。
+    // 等锁期间 Cookie 可能已经换号。首次锁内读回的身份是 PUT 前置条件，锁持有到响应收口。
+    let current = read_session_identity(true).await?;
     match current {
         Some(current) if reason.synchronizes_cookie() && cookie::needs_sync(&current) => {
             synchronize_cookie(current).await.map(Some)

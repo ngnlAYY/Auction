@@ -12,12 +12,13 @@ pub(crate) use auction_contracts::{
     PlaceBidResultResponse as BidResult,
     PublicProxyCommandAuthorizationResponse as ProxyCommandAuthorization,
 };
-use auction_web_shared::send_request_observed;
 use gloo_net::http::Request;
 use serde::Serialize;
 use uuid::Uuid;
 
-use super::clock::observe_response_date;
+use super::clock::send_response_observed;
+#[cfg(test)]
+use super::clock::{HttpFixture, HttpHeadFixtureFuture, HttpResponseFixture};
 use super::session::{
     SessionRefreshReason, notify_public_session_change, observe_public_session_failure,
 };
@@ -31,7 +32,7 @@ type WireReply = Pin<Box<dyn Future<Output = Result<(u16, Option<String>), Trans
 type WireTransport = fn(&str, &str, &[u8]) -> Result<WireReply, TransportError>;
 
 #[cfg(test)]
-type WireTransportWithHead = fn(&str, &str, &[u8]) -> Result<(u16, WireReply), TransportError>;
+type WireTransportWithHead = fn(&str, &str, &[u8]) -> Result<HttpHeadFixtureFuture, TransportError>;
 
 #[cfg(test)]
 #[derive(Clone, Copy)]
@@ -200,44 +201,49 @@ async fn post_command(
     };
     let expected_user = user_id.to_string();
     #[cfg(test)]
-    if let Some(fixture) = WIRE_TRANSPORT.get() {
-        let response = match fixture {
-            WireFixture::Buffered(transport) => {
-                transport(url, &expected_user, body.as_bytes()).map(|reply| (None, reply))
-            }
-            WireFixture::WithHead(transport) => transport(url, &expected_user, body.as_bytes())
-                .map(|(status, reply)| (Some(status), reply)),
-        };
-        let (response_status, reply) = invalidation.built(response)?;
-        if let Some(status) = response_status {
-            observe_command_head(&mut invalidation.response_status, status);
-        }
-        return reply.await.map(|(status, body)| CommandResponse { status, body });
-    }
-    let response = {
-        let mut response_status = None;
-        let sent = send_request_observed(
-            |abort_signal| {
-                invalidation.built(
-                    Request::post(url)
-                        .abort_signal(abort_signal)
-                        .header(auction_contracts::PUBLIC_EXPECTED_USER_ID_HEADER, &expected_user)
-                        .header("Content-Type", "application/json")
-                        .body(body)
-                        .map_err(|_| TransportError::Network(None)),
-                )
-            },
-            |response| {
-                // 超时可发生在响应头之后，共享超时错误本身不携带状态。
-                observe_command_head(&mut response_status, response.status());
-                observe_response_date(response);
-            },
-        )
-        .await;
-        invalidation.response_status = response_status;
-        sent?
-    };
-    Ok(CommandResponse { status: response.status(), body: response.text().await.ok() })
+    let fixture = WIRE_TRANSPORT
+        .get()
+        .map(|fixture| {
+            let response = match fixture {
+                WireFixture::Buffered(transport) => transport(url, &expected_user, body.as_bytes())
+                    .map(|response| {
+                        HttpFixture::Buffered(Box::pin(async move {
+                            let (status, body) = response.await?;
+                            Ok(HttpResponseFixture { status, etag: None, body })
+                        }))
+                    }),
+                WireFixture::WithHead(transport) => {
+                    transport(url, &expected_user, body.as_bytes()).map(HttpFixture::WithHead)
+                }
+            };
+            invalidation.built(response)
+        })
+        .transpose()?;
+
+    let mut response_status = None;
+    let sent = send_response_observed(
+        |abort_signal| {
+            invalidation.built(
+                Request::post(url)
+                    .abort_signal(abort_signal)
+                    .header(auction_contracts::PUBLIC_EXPECTED_USER_ID_HEADER, &expected_user)
+                    .header("Content-Type", "application/json")
+                    .body(body)
+                    .map_err(|_| TransportError::Network(None)),
+            )
+        },
+        #[cfg(test)]
+        fixture,
+        |head| {
+            // 超时可发生在响应头之后，共享超时错误本身不携带状态。
+            observe_command_head(&mut response_status, head.status());
+            head.observe_date();
+        },
+    )
+    .await;
+    invalidation.response_status = response_status;
+    let response = sent?;
+    Ok(CommandResponse { status: response.status(), body: response.text().await })
 }
 
 async fn send_command<T>(

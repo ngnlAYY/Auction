@@ -1,5 +1,6 @@
 // 长文本浮层的悬停宽限、触控固定与 DOM 事件清理；不持有业务内容。
 
+import { focusClosestControl } from "../../../platform/a11y";
 import { sleep } from "../../../platform/timer";
 import type { Cell } from "../../../reactive/cell";
 import type { TaskScope } from "../../../reactive/tasks";
@@ -22,6 +23,7 @@ export interface TooltipInteractionState {
 /** 带有显式关闭与延迟关闭能力的浮层交互状态。 */
 export interface TooltipInteraction extends TooltipInteractionState {
   close(): void;
+  dismiss(): boolean;
   deferClose(): void;
 }
 
@@ -29,6 +31,7 @@ export interface TooltipInteraction extends TooltipInteractionState {
 export function createTooltipInteraction(
   state: TooltipInteractionState,
   tasks: TaskScope,
+  tooltipId: string,
 ): TooltipInteraction {
   const close = (): void => {
     state.position.set(null);
@@ -37,6 +40,18 @@ export function createTooltipInteraction(
     state.popupFocused.set(false);
     state.dismissed.set(true);
     hideTooltip(state.position, state.portal);
+  };
+  const dismiss = (): boolean => {
+    if (state.position.peek() === null) return false;
+    // 卸载前记录浮层的焦点归属。悬停提示收起时保留页面其他控件的焦点。
+    const active = globalThis.document?.activeElement ?? null;
+    const trigger =
+      active !== null && document.getElementById(tooltipId)?.contains(active)
+        ? document.getElementById(`${tooltipId}-trigger`)
+        : null;
+    close();
+    if (trigger !== null) focusClosestControl(trigger);
+    return true;
   };
   const deferClose = (): void => {
     const revision = Math.min(state.closeRevision.peek() + 1, Number.MAX_SAFE_INTEGER);
@@ -57,7 +72,7 @@ export function createTooltipInteraction(
       }
     });
   };
-  return { ...state, close, deferClose };
+  return { ...state, close, dismiss, deferClose };
 }
 
 const POPUP_EVENTS: readonly string[] = ["mouseenter", "mouseleave", "focusin", "focusout"];

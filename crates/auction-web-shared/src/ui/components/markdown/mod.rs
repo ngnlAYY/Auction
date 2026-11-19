@@ -4,6 +4,7 @@ mod blocks;
 mod inline;
 mod model;
 mod render;
+mod scroll;
 
 use dioxus::prelude::*;
 

@@ -1,8 +1,6 @@
 //! 在宿主虚拟 DOM 中挂载截断提示，替换浏览器的测量、焦点与原生文档事件。
 
 use std::any::Any;
-use std::cell::{Cell, RefCell};
-use std::collections::BTreeMap;
 use std::process::Command;
 use std::rc::Rc;
 
@@ -17,166 +15,15 @@ use dioxus::html::{
 use dioxus::prelude::*;
 
 use super::TruncatedText;
-use crate::a11y::{ARIA_MODAL_SELECTOR, EscapeUnsubscribe, FOCUSABLE_SELECTOR};
+use super::host_document::{BODY_ID, ElementKind, TooltipBrowserFixture as Browser};
 
-const BODY_ID: &str = "body";
 const OUTSIDE_ID: &str = "outside";
 const DIALOG_ID: &str = "tooltip-test-dialog";
 const LINK_ID: &str = "equipment-link";
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ElementKind {
-    Plain,
-    Control,
-    Link,
-    AriaDialog,
-    NativeDialog { open: bool, modal: bool },
-}
-
-#[derive(Clone)]
-pub(super) struct DomElement {
-    id: String,
-    kind: ElementKind,
-    parent: Option<Rc<DomElement>>,
-    modal_selector_unsupported: bool,
-}
-
-impl DomElement {
-    fn ancestors(&self) -> impl Iterator<Item = &Self> {
-        std::iter::successors(Some(self), |element| element.parent.as_deref())
-    }
-
-    fn is_focusable(&self) -> bool {
-        matches!(self.kind, ElementKind::Link | ElementKind::Control)
-    }
-
-    fn matches(&self, selector: &str) -> bool {
-        match selector {
-            ARIA_MODAL_SELECTOR => self.kind == ElementKind::AriaDialog,
-            "dialog:modal" => self.kind == (ElementKind::NativeDialog { open: true, modal: true }),
-            "dialog[open]" => matches!(self.kind, ElementKind::NativeDialog { open: true, .. }),
-            FOCUSABLE_SELECTOR => self.is_focusable(),
-            _ => panic!("测试未实现选择器 {selector}"),
-        }
-    }
-
-    pub(super) fn closest(&self, selector: &str) -> Result<Option<Self>, ()> {
-        if selector == "dialog:modal" && self.modal_selector_unsupported {
-            return Err(());
-        }
-        Ok(self.ancestors().find(|element| element.matches(selector)).cloned())
-    }
-
-    pub(super) fn contains(&self, other: &Self) -> bool {
-        other.ancestors().any(|element| element.id == self.id)
-    }
-
-    pub(super) fn bounding_box(&self) -> (f64, f64, f64) {
-        (20.0, 50.0, 80.0)
-    }
-
-    pub(super) fn scroll_width(&self) -> i32 {
-        120
-    }
-
-    pub(super) fn client_width(&self) -> i32 {
-        100
-    }
-}
-
-#[derive(Clone)]
-pub(super) struct DomPortal {
-    browser: Rc<Browser>,
-    id: String,
-}
-
-impl DomPortal {
-    pub(super) fn remove(self) {
-        self.browser.nodes.borrow_mut().remove(&self.id);
-        if *self.browser.focused.borrow() == self.id {
-            self.browser.focused.replace(BODY_ID.to_owned());
-        }
-    }
-}
-
-type EscapeCallback = Rc<dyn Fn() -> bool>;
-
-#[derive(Default)]
-pub(super) struct Browser {
-    inside_dialog: bool,
-    native_dialog: bool,
-    modal_selector_unsupported: bool,
-    open_dialog: Cell<Option<Signal<bool>>>,
-    nodes: RefCell<BTreeMap<String, DomElement>>,
-    focused: RefCell<String>,
-    keydown: RefCell<BTreeMap<u32, EscapeCallback>>,
-    next_listener: Cell<u32>,
-}
-
-impl Browser {
-    fn add_element(&self, id: &str, kind: ElementKind, parent: Option<DomElement>) {
-        self.nodes.borrow_mut().insert(
-            id.to_owned(),
-            DomElement {
-                id: id.to_owned(),
-                kind,
-                parent: parent.map(Rc::new),
-                modal_selector_unsupported: self.modal_selector_unsupported,
-            },
-        );
-    }
-
-    fn add_control(&self, id: &str, inside_dialog: bool) {
-        let parent = inside_dialog.then(|| self.get_element_by_id(DIALOG_ID).unwrap());
-        self.add_element(id, ElementKind::Control, parent);
-    }
-
-    pub(super) fn get_element_by_id(&self, id: &str) -> Option<DomElement> {
-        self.nodes.borrow().get(id).cloned()
-    }
-
-    pub(super) fn last_matching(&self, selector: &str) -> Result<Option<DomElement>, ()> {
-        if selector == "dialog:modal" && self.modal_selector_unsupported {
-            return Err(());
-        }
-        Ok(self.nodes.borrow().values().rfind(|element| element.matches(selector)).cloned())
-    }
-
-    pub(super) fn active_element(&self) -> Option<DomElement> {
-        self.get_element_by_id(&self.focused.borrow())
-    }
-
-    pub(super) fn focus(&self, element: &DomElement) {
-        if element.is_focusable() {
-            self.focused.replace(element.id.clone());
-        }
-    }
-
-    pub(super) fn body(&self) -> Option<DomElement> {
-        self.get_element_by_id(BODY_ID)
-    }
-
-    pub(super) fn append_portal(self: &Rc<Self>, parent: &DomElement, id: &str) -> DomPortal {
-        self.add_element(id, ElementKind::Control, Some(parent.clone()));
-        DomPortal { browser: Rc::clone(self), id: id.to_owned() }
-    }
-
-    pub(super) fn listen_escape(
-        self: Rc<Self>,
-        on_escape: impl Fn() -> bool + 'static,
-    ) -> EscapeUnsubscribe {
-        let id = self.next_listener.get();
-        self.next_listener.set(id + 1);
-        self.keydown.borrow_mut().insert(id, Rc::new(on_escape));
-        Box::new(move || {
-            self.keydown.borrow_mut().remove(&id);
-        })
-    }
-
-    fn dispatch_escape(&self) -> bool {
-        let listeners: Vec<_> = self.keydown.borrow().values().cloned().collect();
-        listeners.iter().any(|callback| callback())
-    }
+fn add_control(browser: &Browser, id: &str, inside_dialog: bool) {
+    let parent = inside_dialog.then(|| browser.get_element_by_id(DIALOG_ID).unwrap());
+    browser.add_element(id, ElementKind::Control, parent);
 }
 
 fn scene() -> Element {
@@ -376,8 +223,8 @@ fn component_escape_respects_modal_and_restores_focus() {
             if inside_dialog {
                 browser.add_element(DIALOG_ID, ElementKind::AriaDialog, None);
             }
-            browser.add_control(trigger_id, inside_dialog);
-            browser.add_control(OUTSIDE_ID, false);
+            add_control(&browser, trigger_id, inside_dialog);
+            add_control(&browser, OUTSIDE_ID, false);
             settle(&mut dom);
             assert!(browser.keydown.borrow().is_empty());
 
@@ -385,7 +232,7 @@ fn component_escape_respects_modal_and_restores_focus() {
             let opened = settle(&mut dom);
             let (_, popup_id) =
                 element(&opened, |id| id == trigger_id.trim_end_matches("-trigger"));
-            browser.add_control(popup_id, inside_dialog);
+            add_control(&browser, popup_id, inside_dialog);
             assert_eq!(browser.keydown.borrow().len(), 1);
             assert!(opened.iter().any(|edit| matches!(edit,
                 Mutation::CreateTextNode { value, .. } if value == "Full equipment name"
@@ -442,13 +289,13 @@ fn background_tooltip_leaves_escape_to_a_native_modal() {
             let mut dom = VirtualDom::new(scene).with_root_context(Rc::clone(&browser));
             let initial = dom.rebuild_to_vec().edits;
             let (anchor, trigger_id) = element(&initial, |id| id.ends_with("-trigger"));
-            browser.add_control(trigger_id, false);
+            add_control(&browser, trigger_id, false);
             settle(&mut dom);
             dispatch(&dom, anchor, "mouseenter", None);
             let opened = settle(&mut dom);
             let (_, popup_id) =
                 element(&opened, |id| id == trigger_id.trim_end_matches("-trigger"));
-            browser.add_control(popup_id, false);
+            add_control(&browser, popup_id, false);
             dispatch(&dom, anchor, "keydown", Some(Key::Enter));
 
             browser.open_dialog.get().unwrap().set(true);
@@ -514,4 +361,90 @@ fn equipment_portal_escape_restores_the_outer_link() {
             assert!(browser.keydown.borrow().is_empty());
         }
     });
+}
+
+fn nested_dialog_scene() -> Element {
+    let browser = use_context::<Rc<Browser>>();
+    let mut inner_open = use_signal(|| false);
+    browser.open_dialog.set(Some(inner_open));
+    let inner_id = "inner-dialog";
+    rsx! {
+        dialog { id: DIALOG_ID,
+            TruncatedText { value: "Outer equipment name", portal: true }
+            if inner_open() {
+                div { id: "{inner_id}", role: "dialog", aria_modal: "true",
+                    onkeydown: move |event| {
+                        if event.key() == Key::Escape {
+                            event.prevent_default();
+                            inner_open.set(false);
+                        }
+                    },
+                    TruncatedText { value: "Inner equipment name", portal: true }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_native_modal_limits_escape_to_its_foreground_application_dialog() {
+    run_with_event_converter(
+        "a_native_modal_limits_escape_to_its_foreground_application_dialog",
+        || {
+            for modal_selector_unsupported in [false, true] {
+                let browser = Rc::new(Browser { modal_selector_unsupported, ..Browser::default() });
+                let mut dom =
+                    VirtualDom::new(nested_dialog_scene).with_root_context(browser.clone());
+                let initial = dom.rebuild_to_vec().edits;
+                let (outer_anchor, outer_trigger_id) =
+                    element(&initial, |id| id.ends_with("-trigger"));
+                browser.add_element(
+                    DIALOG_ID,
+                    ElementKind::NativeDialog { open: true, modal: true },
+                    None,
+                );
+                add_control(&browser, outer_trigger_id, true);
+                settle(&mut dom);
+                dispatch(&dom, outer_anchor, "mouseenter", None);
+                settle(&mut dom);
+                let outer_popup_id = outer_trigger_id.trim_end_matches("-trigger");
+                assert!(browser.get_element_by_id(outer_popup_id).is_some());
+
+                let mut inner_open = browser.open_dialog.get().unwrap();
+                inner_open.set(true);
+                let dialog_edits = settle(&mut dom);
+                let (inner_dialog, inner_id) = element(&dialog_edits, |id| id == "inner-dialog");
+                let (inner_anchor, inner_trigger_id) =
+                    element(&dialog_edits, |id| id.ends_with("-trigger"));
+                browser.add_element(
+                    inner_id,
+                    ElementKind::AriaDialog,
+                    browser.get_element_by_id(DIALOG_ID),
+                );
+                browser.add_element(
+                    inner_trigger_id,
+                    ElementKind::Control,
+                    browser.get_element_by_id(inner_id),
+                );
+                browser.focused.replace(inner_trigger_id.to_owned());
+                assert!(!browser.dispatch_escape(), "外层提示把 Escape 留给前景模态");
+
+                dispatch(&dom, inner_anchor, "mouseenter", None);
+                settle(&mut dom);
+                let inner_popup_id = inner_trigger_id.trim_end_matches("-trigger");
+                let inner_popup = browser.get_element_by_id(inner_popup_id).unwrap();
+                assert_eq!(inner_popup.parent.as_ref().unwrap().id, inner_id);
+                browser.focus(&inner_popup);
+                assert!(browser.dispatch_escape(), "前景模态自己的提示处理 Escape");
+                settle(&mut dom);
+                assert!(inner_open());
+                assert_eq!(*browser.focused.borrow(), inner_trigger_id);
+                assert!(browser.get_element_by_id(outer_popup_id).is_some());
+                assert!(!browser.dispatch_escape());
+                dispatch(&dom, inner_dialog, "keydown", Some(Key::Escape));
+                settle(&mut dom);
+                assert!(!inner_open());
+            }
+        },
+    );
 }

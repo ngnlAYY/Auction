@@ -5,13 +5,10 @@ mod state;
 
 pub(crate) use state::{CatalogColumn, CatalogLayout, CatalogVisibility};
 
-#[cfg(target_arch = "wasm32")]
-use auction_web_shared::a11y::bind_document_escape;
-use auction_web_shared::a11y::focus_element_by_id;
-#[cfg(any(target_arch = "wasm32", test))]
-use auction_web_shared::a11y::{EscapeUnsubscribe, use_document_escape};
 use auction_web_shared::t;
 use dioxus::prelude::*;
+
+use crate::surface::panel_escape::{focus_panel_trigger, use_panel_escape};
 
 const TOGGLE_ID: &str = "public-catalog-columns-toggle";
 const PANEL_ID: &str = "public-catalog-columns-panel";
@@ -38,8 +35,7 @@ pub(crate) fn CatalogColumnsMenu(
         close(open);
         true
     });
-    #[cfg(any(target_arch = "wasm32", test))]
-    use_document_escape(move || *open.read(), move || attach_menu_escape(dismiss));
+    use_panel_escape(move || *open.read(), TOGGLE_ID, PANEL_ID, dismiss);
 
     rsx! {
         div { class: "public-catalog-columns-menu",
@@ -52,12 +48,6 @@ pub(crate) fn CatalogColumnsMenu(
                 aria_label: t!("catalog-columns-settings"),
                 title: t!("catalog-columns-settings"),
                 onclick: move |_| toggle.set(!toggle()),
-                onkeydown: move |event| {
-                    if event.key() == Key::Escape && dismiss.call(()) {
-                        event.prevent_default();
-                        event.stop_propagation();
-                    }
-                },
                 ColumnsIcon {}
             }
             if open() {
@@ -69,12 +59,6 @@ pub(crate) fn CatalogColumnsMenu(
                     role: "group",
                     aria_labelledby: TITLE_ID,
                     "aria-description": t!("catalog-columns-hint"),
-                    onkeydown: move |event| {
-                        if event.key() == Key::Escape && dismiss.call(()) {
-                            event.prevent_default();
-                            event.stop_propagation();
-                        }
-                    },
                     strong { id: TITLE_ID, class: "public-catalog-columns__title", {t!("catalog-columns")} }
                     label { r#for: ALL_ID, class: "public-catalog-columns__option",
                         input {
@@ -190,58 +174,110 @@ impl CatalogColumn {
 
 fn close(mut open: Signal<bool>) {
     open.set(false);
-    focus_menu_control(TOGGLE_ID);
-}
-
-fn focus_menu_control(id: &'static str) {
-    focus_element_by_id(id);
-    #[cfg(all(test, not(target_arch = "wasm32")))]
-    if let Some(browser) = try_consume_context::<std::rc::Rc<tests::MenuBrowser>>() {
-        browser.focus.set(Some(id));
-    }
-}
-
-#[cfg(any(target_arch = "wasm32", test))]
-fn attach_menu_escape(dismiss: Callback<(), bool>) -> Option<EscapeUnsubscribe> {
-    let on_escape = move || dismiss.call(());
-    #[cfg(target_arch = "wasm32")]
-    {
-        // 在冒泡阶段接手，给获焦控件和上层模态先处理 Escape。
-        bind_document_escape(web_sys::window()?.document()?, false, on_escape)
-    }
-    #[cfg(all(test, not(target_arch = "wasm32")))]
-    {
-        let browser = try_consume_context::<std::rc::Rc<tests::MenuBrowser>>()?;
-        browser.escape.replace(Some(std::rc::Rc::new(on_escape)));
-        Some(Box::new(move || {
-            browser.escape.take();
-        }))
-    }
+    focus_panel_trigger(TOGGLE_ID);
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
-    use std::cell::{Cell, RefCell};
     use std::rc::Rc;
 
     use dioxus::core::{AttributeValue, Mutation};
     use dioxus::prelude::*;
 
     use super::{CatalogColumnsMenu, CatalogLayout, CatalogVisibility, TOGGLE_ID};
+    use crate::api::PublicSession;
+    use crate::surface::panel_escape::PanelBrowser;
+    use crate::surface::session::{SessionCommandScope, SessionMenu};
     use crate::surface::{
-        dispatch_page_event, page_event_target, page_test_contexts, run_page_events, settle_page,
+        PublicSessionResource, dispatch_page_event, page_event_target, page_test_contexts,
+        rendered_event_target, run_page_events, settle_page,
     };
-
-    #[derive(Default)]
-    pub(super) struct MenuBrowser {
-        pub(super) escape: RefCell<Option<Rc<dyn Fn() -> bool>>>,
-        pub(super) focus: Cell<Option<&'static str>>,
-    }
 
     fn menu() -> Element {
         page_test_contexts();
         let visibility = use_signal(CatalogVisibility::default);
         rsx! { CatalogColumnsMenu { visibility, layout: CatalogLayout::Live } }
+    }
+
+    #[derive(Clone, PartialEq, Routable)]
+    enum MenuFixtureRoute {
+        #[route("/")]
+        Menus {},
+    }
+
+    fn menus() -> Element {
+        rsx! { Router::<MenuFixtureRoute> {} }
+    }
+
+    #[component]
+    fn Menus() -> Element {
+        page_test_contexts();
+        let visibility = use_signal(CatalogVisibility::default);
+        let session: PublicSessionResource = use_resource(|| async {
+            Ok(Some(PublicSession {
+                authenticated: true,
+                user_id: "fixture-user".to_owned(),
+                username: "Player".to_owned(),
+                expires_at: None,
+                absolute_expires_at: None,
+            }))
+        });
+        use_context_provider(|| session);
+        use_context_provider(|| SessionCommandScope(ScopeId::APP));
+        rsx! { CatalogColumnsMenu { visibility, layout: CatalogLayout::Live } SessionMenu {} }
+    }
+
+    #[test]
+    fn escape_closes_the_focused_open_panel_or_the_last_one_opened() {
+        const ACCOUNT: &str = "public-account-session-trigger";
+        const ACCOUNT_PANEL: &str = "public-account-session-panel";
+        run_page_events(
+            module_path!(),
+            "escape_closes_the_focused_open_panel_or_the_last_one_opened",
+            || {
+                for (open_order, focus, dismissed) in [
+                    ([Some(ACCOUNT), None], None, ACCOUNT),
+                    ([Some(TOGGLE_ID), Some(ACCOUNT)], Some(ACCOUNT), ACCOUNT),
+                    ([Some(ACCOUNT), Some(TOGGLE_ID)], Some(ACCOUNT), ACCOUNT),
+                    ([Some(ACCOUNT), Some(TOGGLE_ID)], Some(ACCOUNT_PANEL), ACCOUNT),
+                    ([Some(TOGGLE_ID), Some(ACCOUNT)], Some(TOGGLE_ID), TOGGLE_ID),
+                    ([Some(TOGGLE_ID), Some(ACCOUNT)], None, ACCOUNT),
+                    ([Some(ACCOUNT), Some(TOGGLE_ID)], None, TOGGLE_ID),
+                ] {
+                    let browser = Rc::new(PanelBrowser::default());
+                    let mut dom = VirtualDom::new(menus).with_root_context(browser.clone());
+                    dom.rebuild_in_place();
+                    settle_page(&mut dom);
+                    let toggle = |id| rendered_event_target(&dom, "button", "id", id, "onclick");
+                    let targets: Vec<_> =
+                        open_order.into_iter().flatten().map(|id| (id, toggle(id))).collect();
+                    for &(_, target) in &targets {
+                        dispatch_page_event(&dom, "click", target, "");
+                        settle_page(&mut dom);
+                    }
+                    if focus == Some(ACCOUNT_PANEL) {
+                        browser.focused_panel.set(focus);
+                    } else {
+                        browser.focus.set(focus);
+                    }
+                    let escape = browser.escape.borrow().clone().expect("展开时监听文档 Escape");
+                    browser.modal_open.set(true);
+                    assert!(!escape(), "前景模态先处理 Escape");
+                    browser.modal_open.set(false);
+                    assert!(escape());
+                    let edits = settle_page(&mut dom);
+                    for (id, target) in targets {
+                        assert_eq!(edits.iter().any(|edit| matches!(edit,
+                        Mutation::SetAttribute { id, name: "aria-expanded", value: AttributeValue::Text(value), .. }
+                            if *id == target && value == "false"
+                    )), id == dismissed);
+                    }
+                    assert_eq!(browser.focus.get(), Some(dismissed));
+                    drop(dom);
+                    assert!(browser.escape.borrow().is_none());
+                }
+            },
+        );
     }
 
     #[test]
@@ -250,7 +286,7 @@ mod tests {
             module_path!(),
             "outside_escape_closes_the_open_menu_and_restores_the_toggle",
             || {
-                let browser = Rc::new(MenuBrowser::default());
+                let browser = Rc::new(PanelBrowser::default());
                 let mut dom = VirtualDom::new(menu).with_root_context(Rc::clone(&browser));
                 let initial = dom.rebuild_to_vec().edits;
                 settle_page(&mut dom);

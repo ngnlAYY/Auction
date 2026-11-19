@@ -1,14 +1,15 @@
 //! 长文本截断展示与可操作浮层；悬停、聚焦和点击共享同一份完整文本。
 
-#[cfg(any(target_arch = "wasm32", test))]
 mod document;
+#[cfg(not(target_arch = "wasm32"))]
+mod host_document;
 mod interaction;
-#[cfg(target_arch = "wasm32")]
-mod resize;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;
-#[cfg(any(target_arch = "wasm32", test))]
 mod tooltip;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub use host_document::TooltipBrowserFixture;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 #[cfg(target_arch = "wasm32")]
@@ -18,19 +19,26 @@ use dioxus::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::{JsCast, closure::Closure};
 
-#[cfg(any(target_arch = "wasm32", test))]
+#[cfg(target_arch = "wasm32")]
+use super::resize;
 use document::PortalElement;
 #[cfg(target_arch = "wasm32")]
 use interaction::PopupListeners;
 use interaction::TooltipInteraction;
-#[cfg(any(target_arch = "wasm32", test))]
 use interaction::use_tooltip_escape;
-#[cfg(any(target_arch = "wasm32", test))]
 use tooltip::remove_tooltip;
-#[cfg(target_arch = "wasm32")]
 use tooltip::update_truncated_state;
 
 static NEXT_TOOLTIP_ID: AtomicUsize = AtomicUsize::new(1);
+
+#[derive(Clone, Copy)]
+struct AnchorOrder(Memo<usize>);
+
+/// 为按记录标识复用的表行提供当前顺序，供这一行的截断提示判断锚点是否移动。
+pub fn use_truncated_text_anchor_order(order: usize) {
+    let order = use_memo(use_reactive((&order,), |(order,)| order));
+    use_context_provider(|| AnchorOrder(order));
+}
 
 #[derive(Clone, Copy, PartialEq)]
 struct TooltipPosition {
@@ -41,12 +49,10 @@ struct TooltipPosition {
     placement: &'static str,
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
 struct TooltipRequest {
     trigger_id: String,
     tooltip_id: String,
     portal: bool,
-    #[cfg(target_arch = "wasm32")]
     value: String,
     #[cfg(target_arch = "wasm32")]
     class_name: String,
@@ -101,9 +107,7 @@ pub fn TruncatedText(
     portal: Option<bool>,
     legacy_dom: Option<bool>,
 ) -> Element {
-    #[cfg(any(target_arch = "wasm32", test))]
     let display_differs = display.as_ref().is_some_and(|display| display != &value);
-    #[cfg(any(target_arch = "wasm32", test))]
     let display_differs =
         use_memo(use_reactive((&display_differs,), |(display_differs,)| display_differs));
     let display = display.unwrap_or_else(|| value.clone());
@@ -152,9 +156,7 @@ pub fn TruncatedText(
         let mut cleanup_subscription = measure_subscription;
         use_drop(move || cleanup_subscription.set(None));
     }
-    #[cfg(any(target_arch = "wasm32", test))]
     let portal_element = use_signal(|| None::<PortalElement>);
-    #[cfg(any(target_arch = "wasm32", test))]
     use_drop(move || remove_tooltip(portal_element));
     #[cfg(target_arch = "wasm32")]
     let dismiss_handle = use_hook(|| Rc::new(RefCell::new(None::<TooltipDismissHandle>)));
@@ -167,28 +169,41 @@ pub fn TruncatedText(
         pinned,
         dismissed,
         close_revision,
-        #[cfg(any(target_arch = "wasm32", test))]
         portal: portal_element,
     };
-    #[cfg(any(target_arch = "wasm32", test))]
     use_tooltip_escape(tooltip_id, interaction);
+    let anchor_order = try_consume_context::<AnchorOrder>();
+    let mut revealed_order = use_signal(|| None::<usize>);
+    use_effect(move || {
+        // 同一记录的行可能只移位，宽度和内容保持原样。收起绑定在旧位置的浮层。
+        if tooltip_position().is_some()
+            && let Some(AnchorOrder(order)) = anchor_order
+            && revealed_order.peek().is_some_and(|revealed| revealed != order())
+        {
+            interaction.close_programmatically(&tooltip_id.peek());
+        }
+    });
+    // 固定宽度文本变化不触发 ResizeObserver；内容提交到 DOM 后重测，且不保留旧 portal 正文。
+    use_effect(use_reactive((&value, &display), move |_| {
+        #[cfg(target_arch = "wasm32")]
+        let element = mounted_element.peek().clone();
+        #[cfg(not(target_arch = "wasm32"))]
+        let element = document::current().and_then(|document| {
+            document.get_element_by_id(&format!("{}-trigger", tooltip_id.peek()))
+        });
+        if let Some(element) = element {
+            interaction.close_programmatically(&tooltip_id.peek());
+            update_truncated_state(
+                &element,
+                *display_differs.peek(),
+                truncated,
+                interaction,
+                &tooltip_id.peek(),
+            );
+        }
+    }));
     #[cfg(target_arch = "wasm32")]
     {
-        // 固定宽度文本变化不触发 ResizeObserver；内容提交到 DOM 后重测，且不保留旧 portal 正文。
-        use_effect(use_reactive((&value, &display), move |_| {
-            if let Some(element) = mounted_element.peek().clone() {
-                if interaction.position.peek().is_some() {
-                    interaction.close();
-                }
-                update_truncated_state(
-                    &element,
-                    *display_differs.peek(),
-                    truncated,
-                    tooltip_position,
-                    portal_element,
-                );
-            }
-        }));
         // 原生 DOM 回调没有 Dioxus 上下文；稳定回调恢复本组件 scope，让延迟任务随组件卸载取消。
         let defer_close = use_callback(move |()| interaction.defer_close());
         let cleanup_handle = Rc::clone(&dismiss_handle);
@@ -209,7 +224,7 @@ pub fn TruncatedText(
                 return;
             };
             let resize_callback = Closure::<dyn FnMut()>::new(move || {
-                interaction.close();
+                interaction.close_programmatically(&tooltip_id.peek());
             });
             let popup_id = tooltip_id();
             let scroll_popup_id = popup_id.clone();
@@ -225,7 +240,7 @@ pub fn TruncatedText(
                             target.as_ref().is_some_and(|target| popup.contains(Some(target)))
                         });
                     if !inside_popup {
-                        interaction.close();
+                        interaction.close_programmatically(&scroll_popup_id);
                     }
                 });
             let resize_added = window
@@ -302,17 +317,16 @@ pub fn TruncatedText(
     }
 
     let tooltip = tooltip_position();
-    let tooltip_id = tooltip_id();
+    let tooltip_id_signal = tooltip_id;
+    let tooltip_id = tooltip_id_signal();
     let described_by = tooltip.map(|_| tooltip_id.clone());
     let tabindex = (focusable && truncated()).then_some("0");
     let data_truncated = truncated().then_some("true");
-    #[cfg(any(target_arch = "wasm32", test))]
     let reveal = {
         let request = TooltipRequest {
             trigger_id: format!("{tooltip_id}-trigger"),
             tooltip_id: tooltip_id.clone(),
             portal,
-            #[cfg(target_arch = "wasm32")]
             value: value.clone(),
             #[cfg(target_arch = "wasm32")]
             class_name: tooltip_class_name.to_owned(),
@@ -326,6 +340,9 @@ pub fn TruncatedText(
                 interaction.dismissed.set(false);
             }
             tooltip::show_tooltip(*display_differs.peek(), truncated, interaction, &request);
+            if let Some(AnchorOrder(order)) = anchor_order {
+                revealed_order.set(Some(order()));
+            }
             if pin {
                 interaction.pinned.set(interaction.position.peek().is_some());
             }
@@ -354,8 +371,8 @@ pub fn TruncatedText(
                         &element,
                         *display_differs.peek(),
                         truncated,
-                        tooltip_position,
-                        portal_element,
+                        interaction,
+                        &tooltip_id_signal.peek(),
                     );
 
                     // 元素尺寸与窗口尺寸变化共用全页唯一的监听，只登记本实例的重测回调。
@@ -365,8 +382,8 @@ pub fn TruncatedText(
                             &measure_element,
                             *display_differs.peek(),
                             truncated,
-                            tooltip_position,
-                            portal_element,
+                            interaction,
+                            &tooltip_id_signal.peek(),
                         );
                     }));
                 }
@@ -376,7 +393,6 @@ pub fn TruncatedText(
             onmouseenter: move |_| {
                 interaction.hovered.set(true);
                 interaction.dismissed.set(false);
-                #[cfg(any(target_arch = "wasm32", test))]
                 reveal.call(false);
             },
             onmouseleave: move |_| {
@@ -385,7 +401,6 @@ pub fn TruncatedText(
             },
             onfocus: move |_| {
                 focused.set(true);
-                #[cfg(any(target_arch = "wasm32", test))]
                 if !*interaction.dismissed.peek() {
                     reveal.call(false);
                 }
@@ -398,7 +413,6 @@ pub fn TruncatedText(
             onclick: move |event| {
                 if focusable && truncated() {
                     event.stop_propagation();
-                    #[cfg(any(target_arch = "wasm32", test))]
                     reveal.call(true);
                 }
             },
@@ -406,7 +420,6 @@ pub fn TruncatedText(
                 if focusable && truncated() && (event.key() == Key::Enter || event.key() == Key::Character(" ".to_owned())) {
                     event.prevent_default();
                     event.stop_propagation();
-                    #[cfg(any(target_arch = "wasm32", test))]
                     reveal.call(true);
                 }
             },

@@ -327,9 +327,9 @@ pub(crate) fn BidLogTable(
                         }
                     }
                     tbody {
-                        for bid in bids {
+                        for (order, bid) in bids.into_iter().enumerate() {
                             // 以服务端 bid id 作为稳定 key，避免翻页/筛选刷新后行状态错位。
-                            BidLogRow { key: "{bid.id}", bid, world: world.clone() }
+                            BidLogRow { key: "{bid.id}", bid, world: world.clone(), order }
                         }
                     }
                 }
@@ -351,7 +351,8 @@ pub(crate) fn BidLogTable(
 }
 
 #[component]
-pub(crate) fn BidLogRow(bid: BidLogEntry, world: String) -> Element {
+pub(crate) fn BidLogRow(bid: BidLogEntry, world: String, order: usize) -> Element {
+    auction_web_shared::components::use_truncated_text_anchor_order(order);
     let lot_code = lot_code_for(&bid.equipment_category, bid.lot_number);
     let validity = if bid.valid { t!("bidlog-valid") } else { t!("bidlog-invalid") };
     rsx! {
@@ -417,13 +418,19 @@ mod tests {
     use std::rc::Rc;
     use std::task::{Poll, Waker};
 
+    #[cfg(not(target_arch = "wasm32"))]
+    use auction_web_shared::components::TooltipBrowserFixture;
     use auction_web_shared::{QueryWriteMode, use_second_ticker};
+    #[cfg(not(target_arch = "wasm32"))]
+    use dioxus::core::{AttributeValue, Mutation};
     use dioxus::prelude::*;
 
     use super::super::query::tests::{
         MountedReadPage, OLDER_ROUND_ID, ROUND_ID, invalid_auction_recovery, mount_read_page,
     };
     use super::bid_log;
+    #[cfg(not(target_arch = "wasm32"))]
+    use super::{BidLogTable, use_lot_detail_lookup};
     use crate::api::{
         AuctionListPage, BidLogEntry, BidLogPage, HistoricalAuction, HttpResponseFixture,
         WorldStatus, Worlds,
@@ -435,6 +442,105 @@ mod tests {
     };
 
     const LOT_ID: &str = "018f4c8e-7b2a-4c3d-8e4f-000000000019";
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[derive(Default)]
+    struct BidTableFixture(Cell<Option<Signal<BidLogPage>>>);
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn bid_table_fixture() -> Element {
+        page_test_contexts();
+        use_lot_detail_lookup();
+        let page = use_signal(|| drawer_bids("world=main"));
+        use_context::<Rc<BidTableFixture>>().0.set(Some(page));
+        rsx! {
+            button { id: "outside", "Outside" }
+            BidLogTable {
+                page: page(), current_page: 1, world: "main", lot_filter: "",
+                on_page_change: |_| true, on_page_clamp: |_| true, on_page_size_change: |_| true,
+            }
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn bid_table_returns_focus_when_a_portal_is_closed_by_row_or_content_changes() {
+        run_page_events(
+            module_path!(),
+            "bid_table_returns_focus_when_a_portal_is_closed_by_row_or_content_changes",
+            || {
+                for restore_focus in [true, false] {
+                    let browser = Rc::new(TooltipBrowserFixture::new());
+                    let fixture = Rc::new(BidTableFixture::default());
+                    let mut dom = VirtualDom::new(bid_table_fixture)
+                        .with_root_context(browser.clone())
+                        .with_root_context(fixture.clone());
+                    let initial = dom.rebuild_to_vec().edits;
+                    let anchor = rendered_event_target(
+                        &dom,
+                        "span",
+                        "data-full-value",
+                        "Shield",
+                        "onmouseenter",
+                    );
+                    let trigger = initial
+                        .iter()
+                        .find_map(|edit| match edit {
+                            Mutation::SetAttribute {
+                                id,
+                                name: "id",
+                                value: AttributeValue::Text(value),
+                                ..
+                            } if *id == anchor => Some(value.as_str()),
+                            _ => None,
+                        })
+                        .expect("出价装备名触发器已挂载");
+                    let tooltip = trigger.strip_suffix("-trigger").unwrap();
+                    browser.add_focusable(trigger);
+                    browser.add_focusable("outside");
+                    settle_page(&mut dom);
+                    dispatch_page_event(&dom, "mouseenter", anchor, "");
+                    settle_page(&mut dom);
+                    assert_eq!(browser.portal_text(tooltip).as_deref(), Some("Shield"));
+                    let focus = if restore_focus { tooltip } else { "outside" };
+                    let returned = if restore_focus { trigger } else { focus };
+                    browser.focus_by_id(focus);
+                    assert_eq!(browser.focus_id(), focus);
+
+                    let mut page = fixture.0.get().unwrap();
+                    let mut later = page.peek().bids[0].clone();
+                    later.id.push_str("-later");
+                    later.equipment_name = "Later Shield".to_owned();
+                    dom.in_runtime(|| page.write().bids.push(later));
+                    settle_page(&mut dom);
+                    assert_eq!(browser.portal_text(tooltip).as_deref(), Some("Shield"));
+                    assert_eq!(browser.focus_id(), focus);
+
+                    let mut newest = page.peek().bids[0].clone();
+                    newest.id.push_str("-newest");
+                    newest.equipment_name = "New Shield".to_owned();
+                    dom.in_runtime(|| page.write().bids.insert(0, newest));
+                    settle_page(&mut dom);
+                    assert_eq!(browser.portal_text(tooltip), None, "行移位时移除旧 portal");
+                    assert_eq!(browser.focus_id(), returned);
+                    dispatch_page_event(&dom, "click", anchor, "");
+                    settle_page(&mut dom);
+                    assert_eq!(browser.portal_text(tooltip).as_deref(), Some("Shield"));
+
+                    browser.focus_by_id(focus);
+                    dom.in_runtime(|| {
+                        page.write().bids[1].equipment_name = "Updated Shield".to_owned();
+                    });
+                    settle_page(&mut dom);
+                    assert_eq!(browser.portal_text(tooltip), None, "文字变化时移除旧 portal");
+                    assert_eq!(browser.focus_id(), returned);
+                    dispatch_page_event(&dom, "click", anchor, "");
+                    settle_page(&mut dom);
+                    assert_eq!(browser.portal_text(tooltip).as_deref(), Some("Updated Shield"));
+                }
+            },
+        );
+    }
 
     thread_local! {
         static DETAIL_READS: Cell<usize> = const { Cell::new(0) };

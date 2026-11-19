@@ -6,24 +6,24 @@ use super::document::{self, Element, PortalElement};
 use super::interaction::TooltipInteraction;
 use super::{TooltipPosition, TooltipRequest};
 
-#[cfg(target_arch = "wasm32")]
 pub(super) fn update_truncated_state(
-    element: &web_sys::Element,
+    element: &Element,
     display_differs: bool,
     mut truncated: Signal<bool>,
-    tooltip_position: Signal<Option<TooltipPosition>>,
-    portal_element: Signal<Option<PortalElement>>,
-) {
+    state: TooltipInteraction,
+    tooltip_id: &str,
+) -> bool {
     let next = element_is_truncated(element, display_differs);
+    if !next {
+        // 先归还焦点，随后才能移除入口的 tabindex。
+        state.close_programmatically(tooltip_id);
+    }
     // 相同测量值不写信号，避免表格中每个文本在窗口与观察器重复通知时重渲染。
     let changed = *truncated.peek() != next;
     if changed {
         truncated.set(next);
     }
-    if !next {
-        clear_position(tooltip_position);
-        remove_tooltip(portal_element);
-    }
+    next
 }
 
 fn element_is_truncated(element: &Element, display_differs: bool) -> bool {
@@ -32,7 +32,7 @@ fn element_is_truncated(element: &Element, display_differs: bool) -> bool {
 
 pub(super) fn show_tooltip(
     display_differs: bool,
-    mut truncated: Signal<bool>,
+    truncated: Signal<bool>,
     mut state: TooltipInteraction,
     request: &TooltipRequest,
 ) {
@@ -42,14 +42,7 @@ pub(super) fn show_tooltip(
     let Some(element) = document.get_element_by_id(&request.trigger_id) else {
         return;
     };
-    let next = element_is_truncated(&element, display_differs);
-    let changed = *truncated.peek() != next;
-    if changed {
-        truncated.set(next);
-    }
-    if !next {
-        clear_position(state.position);
-        remove_tooltip(state.portal);
+    if !update_truncated_state(&element, display_differs, truncated, state, &request.tooltip_id) {
         return;
     }
 
@@ -112,15 +105,9 @@ fn tooltip_viewport_bounds() -> (f64, f64, f64, f64) {
     )
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(not(target_arch = "wasm32"))]
 fn tooltip_viewport_bounds() -> (f64, f64, f64, f64) {
     (0.0, 0.0, 1024.0, 768.0)
-}
-
-fn clear_position(mut tooltip_position: Signal<Option<TooltipPosition>>) {
-    if tooltip_position.peek().is_some() {
-        tooltip_position.set(None);
-    }
 }
 
 pub(super) fn remove_tooltip(mut portal_element: Signal<Option<PortalElement>>) {

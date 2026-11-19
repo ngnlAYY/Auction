@@ -1021,7 +1021,7 @@ mod tests {
         use uuid::Uuid;
 
         use super::{AUCTION, LOT, OTHER_USER, PREFERENCE, REVISION, USER};
-        use crate::api::{CommandError, SessionRequest, TransportError};
+        use crate::api::{CommandError, HttpBodyFixtureFuture, SessionRequest, TransportError};
         use crate::surface::commands::form_fixture;
         use crate::surface::commands::host::{CompetitionCommandHost, CompetitionCommands};
         use crate::surface::commands::pending::PendingBidCommand;
@@ -1040,6 +1040,7 @@ mod tests {
         const RECEIPT_LOT: &str = "018f4c8e-7b2a-4c3d-8e4f-000000000007";
 
         struct UnauthorizedReply {
+            head: Rc<ResponseGate>,
             body: Rc<ResponseGate>,
             failure: Option<TransportError>,
         }
@@ -1279,27 +1280,44 @@ mod tests {
                     .complete(Err(CommandError { status: 0, code: "network_error".to_owned() }));
                 settle(&mut dom);
 
+                let head = Rc::new(ResponseGate::default());
                 let body = Rc::new(ResponseGate::default());
-                UNAUTHORIZED_REPLY.replace(Some(UnauthorizedReply { body: body.clone(), failure }));
+                UNAUTHORIZED_REPLY.replace(Some(UnauthorizedReply {
+                    head: head.clone(),
+                    body: body.clone(),
+                    failure,
+                }));
                 CommandError::intercept_test_requests_with_head(|_, _, _| {
-                    let UnauthorizedReply { body, failure } =
+                    let UnauthorizedReply { head, body, failure } =
                         UNAUTHORIZED_REPLY.take().expect("只应发送首次竞价");
-                    Ok((
-                        401,
-                        Box::pin(async move {
+                    Ok(Box::pin(async move {
+                        head.wait().await;
+                        let body: HttpBodyFixtureFuture = Box::pin(async move {
                             body.wait().await;
                             match failure {
-                            Some(error) => Err(error),
-                            None => Ok((401, Some(r#"{"code":"unauthenticated","message":"未认证","data":null}"#.to_owned()))),
-                        }
-                        }),
-                    ))
+                                Some(error) => Err(error),
+                                None => Ok(Some(
+                                    r#"{"code":"unauthenticated","message":"未认证","data":null}"#
+                                        .to_owned(),
+                                )),
+                            }
+                        });
+                        (401, body)
+                    }))
                 });
                 session_fixture::take_requests();
                 let read = Rc::new(ResponseGate::default());
                 session_fixture::script([read.hold_read(Some(USER)).under_lock()]);
 
                 dom.in_runtime(|| controls.bid.call(LOT));
+                settle(&mut dom);
+                assert!(head.waiting());
+                assert!(!body.waiting());
+                assert!(!read.waiting());
+                assert!(session_fixture::take_requests().is_empty());
+                assert!(controls.can_submit.call(()));
+
+                head.release();
                 settle(&mut dom);
                 assert!(body.waiting());
                 assert!(read.waiting(), "收到 401 响应头后、正文结束前，已发出会话 GET");

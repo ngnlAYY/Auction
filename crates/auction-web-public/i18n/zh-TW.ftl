@@ -190,6 +190,7 @@ page-settings-title = 設定
 settings-local-hint = 語言與主題只儲存在目前的瀏覽器。
 page-rules-title = 規則
 page-about-title = 關於
+markdown-table-scroll-region = 表格
 page-blacklist-title = 黑名單列表
 page-compensation-pool-title = 補償池
 page-compensation-pool-note = 兩個世界的拍賣共用一個以主世界 Credits 計的補償池。領先時間短的買家額外繳納稅收存入池中，領先時間長的買家從池中獲得補償；池子不足時按比例縮減。

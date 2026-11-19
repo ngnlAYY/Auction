@@ -418,19 +418,40 @@ pub fn current_language() -> LanguageIdentifier {
 /// 该属性影响屏幕阅读器发音、浏览器翻译提示与 CSS `:lang()`，必须随语言变化更新。
 /// 入口文档的 `lang` 只是各 surface 默认语言的静态兜底：CSP 禁止内联脚本，WASM 就绪前
 /// 无法按 `hv.lang` 修正，偏好其他语言的用户会有一段短暂的错误语言窗口，属已接受的取舍。
-pub fn sync_document_language(language: &LanguageIdentifier) {
+pub fn sync_document_language(_language: &LanguageIdentifier) {
+    #[cfg(target_arch = "wasm32")]
     if let Some(document) = web_sys::window().and_then(|window| window.document())
         && let Some(element) = document.document_element()
     {
-        let _ = element.set_attribute("lang", &language.to_string());
+        let _ = element.set_attribute("lang", &_language.to_string());
     }
 }
 
-/// 在语言变化时同步 `<html lang>`；各 surface 根组件在创建会话后调用一次。
+/// 同步 `<html lang>` 和语言就绪后的启动错误提示；各 surface 根组件调用一次。
 pub fn use_locale_effects(session: LocaleSession) {
     use_effect(move || {
         sync_document_language(&session.current());
+        #[cfg(any(target_arch = "wasm32", test))]
+        if session.is_ready() {
+            set_boot_error_text(&crate::t!("boot-error"));
+        }
     });
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn set_boot_error_text(text: &str) {
+    // 错误可能发生在组件树之外。只改静态提示的文字，保留入口的显示时机和读屏语义。
+    #[cfg(target_arch = "wasm32")]
+    if let Some(error) =
+        web_sys::window().and_then(|window| window.document()).and_then(|document| {
+            document.query_selector("#main > .app-boot > .app-boot__error").ok().flatten()
+        })
+        && error.text_content().as_deref() != Some(text)
+    {
+        error.set_text_content(Some(text));
+    }
+    #[cfg(test)]
+    tests::publish_boot_error_text(text);
 }
 
 /// 语言切换器。用原生 `<select>` 自带键盘操作、屏幕阅读器语义和移动端选择面板。
@@ -478,7 +499,7 @@ pub const DEFAULT_ADMIN_LOCALE: LanguageIdentifier = langid!("zh-CN");
 
 #[cfg(test)]
 mod tests {
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
     use std::rc::Rc;
 
     use dioxus::dioxus_core::{AttributeValue, Mutation};
@@ -489,7 +510,68 @@ mod tests {
     use super::translation_failed;
     use super::{
         LanguagePicker, LocaleCatalog, LocaleSession, LocaleState, build_bundle, current_language,
+        use_locale_effects,
     };
+
+    #[derive(Default)]
+    struct BootBanner {
+        session: Cell<Option<LocaleSession>>,
+        text: RefCell<Option<String>>,
+    }
+
+    pub(super) fn publish_boot_error_text(text: &str) {
+        if let Some(banner) = try_consume_context::<Rc<BootBanner>>() {
+            banner.text.replace(Some(text.to_owned()));
+        }
+    }
+
+    static BOOT_CATALOG: LocaleCatalog = LocaleCatalog {
+        default_locale: super::DEFAULT_PUBLIC_LOCALE,
+        default_ftl: "boot-error = Refresh the page to try again.\n",
+        sources: &[],
+    };
+
+    fn localized_boot_banner() -> Element {
+        let bundle = try_use_init_i18n_from_bundle(|| {
+            build_bundle(
+                &BOOT_CATALOG.default_locale,
+                BOOT_CATALOG.default_ftl,
+                &langid!("ja"),
+                Some("boot-error = 再読み込みしてください。\n"),
+            )
+        })
+        .unwrap();
+        let banner = use_context::<Rc<BootBanner>>();
+        let session = use_context_provider(|| LocaleSession::new(bundle, langid!("ja")));
+        banner.session.set(Some(session));
+        use_locale_effects(session);
+        VNode::empty()
+    }
+
+    #[test]
+    fn boot_banner_keeps_static_text_until_ready_and_retains_the_last_loaded_language() {
+        let banner = Rc::new(BootBanner::default());
+        let mut dom = VirtualDom::new(localized_boot_banner).with_root_context(banner.clone());
+        assert!(banner.text.borrow().is_none());
+        dom.rebuild_in_place();
+        dom.render_immediate_to_vec();
+        assert!(banner.text.borrow().is_none(), "就绪前保留入口 HTML 的提示");
+        let mut session = banner.session.get().unwrap();
+
+        dom.in_scope(ScopeId::APP, || session.switch(&BOOT_CATALOG, "ja"));
+        dom.render_immediate_to_vec();
+        assert_eq!(banner.text.borrow().as_deref(), Some("再読み込みしてください。"));
+
+        dom.in_scope(ScopeId::APP, || session.switch(&BOOT_CATALOG, "ko"));
+        dom.render_immediate_to_vec();
+        assert_eq!(session.error(), Some("language-switch-failed"));
+        assert_eq!(banner.text.borrow().as_deref(), Some("再読み込みしてください。"));
+
+        dom.in_scope(ScopeId::APP, || session.switch(&BOOT_CATALOG, "en"));
+        dom.render_immediate_to_vec();
+        assert_eq!(session.error(), None);
+        assert_eq!(banner.text.borrow().as_deref(), Some("Refresh the page to try again."));
+    }
 
     #[test]
     fn only_the_latest_request_can_finish_when_the_language_repeats() {

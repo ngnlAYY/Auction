@@ -6,10 +6,11 @@ use auction_web_shared::wire::json_has_exact_keys;
 use gloo_net::http::Request;
 use serde_json::Value;
 
+use super::clock::{HttpResponse, send_response};
 use super::session::{
     SessionIdentity, SessionIdentityObservation, decode_account_identity_response,
 };
-use super::{CommandError, TransportError, send_get, send_request};
+use super::{CommandError, TransportError};
 
 const PATH: &str = "/api/v1/me/lot-watch-preference";
 /// 权威响应必须恰好包含契约字段；漏掉 `pm_available` 会让整页退化为“无法读取偏好”。
@@ -41,12 +42,19 @@ pub(crate) fn channel_value(mm: bool, pm: bool) -> &'static str {
 pub(crate) async fn fetch_lot_watch_preference(
     user_id: &str,
 ) -> Result<PublicLotWatchPreferenceResponse, CommandError> {
-    #[cfg(test)]
-    if let Some(result) = crate::surface::PageReadFixture::response((PATH, user_id.to_owned())) {
-        return result;
-    }
     let observation = SessionIdentityObservation::start();
-    let response = send_get(PATH).await.map_err(|error| failure(error.code(), 0))?;
+    let response = send_response(
+        |abort_signal| {
+            Request::get(PATH)
+                .abort_signal(abort_signal)
+                .build()
+                .map_err(|_error| TransportError::Network(None))
+        },
+        #[cfg(test)]
+        crate::surface::PageReadFixture::response((PATH, user_id.to_owned())),
+    )
+    .await
+    .map_err(|error| failure(error.code(), 0))?;
     decode(response, user_id, None, observation).await
 }
 
@@ -55,27 +63,25 @@ pub(crate) async fn set_lot_watch_preference(
     user_id: &str,
     command: &PublicSetLotWatchPreferenceRequest,
 ) -> Result<PublicLotWatchPreferenceResponse, CommandError> {
-    #[cfg(test)]
-    if let Some(result) =
-        crate::surface::PageReadFixture::response((PATH, user_id.to_owned(), command.clone()))
-    {
-        return result;
-    }
     let observation = SessionIdentityObservation::start();
-    let response = send_request(|abort_signal| {
-        Request::put(PATH)
-            .abort_signal(abort_signal)
-            .header(auction_contracts::PUBLIC_EXPECTED_USER_ID_HEADER, user_id)
-            .json(command)
-            .map_err(|_| TransportError::Network(None))
-    })
+    let response = send_response(
+        |abort_signal| {
+            Request::put(PATH)
+                .abort_signal(abort_signal)
+                .header(auction_contracts::PUBLIC_EXPECTED_USER_ID_HEADER, user_id)
+                .json(command)
+                .map_err(|_| TransportError::Network(None))
+        },
+        #[cfg(test)]
+        crate::surface::PageReadFixture::response((PATH, user_id.to_owned(), command.clone())),
+    )
     .await
     .map_err(|error| failure(error.code(), 0))?;
     decode(response, user_id, Some(command), observation).await
 }
 
 async fn decode(
-    response: gloo_net::http::Response,
+    response: HttpResponse,
     user_id: &str,
     command: Option<&PublicSetLotWatchPreferenceRequest>,
     observation: SessionIdentityObservation,

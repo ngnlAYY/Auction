@@ -27,7 +27,8 @@ pub(crate) use preferences::stored_public_page_size;
 #[cfg(test)]
 pub(crate) use test_support::{
     PageBrowserFixture, PageReadFixture, assert_selected_error, dispatch_page_event,
-    page_event_target, page_test_contexts, rendered_event_target, run_page_events, settle_page,
+    page_event_target, page_test_contexts, rendered_event_target, rendered_role_contains,
+    rendered_select_option, run_page_events, settle_page,
 };
 
 use self::bounds::{MAX_PUBLIC_PAGE_OFFSET, offset_last_page};

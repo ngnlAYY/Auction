@@ -105,9 +105,7 @@ fn LocalizedApp() -> Element {
     use_locale_effects(session);
     // 首次渲染前恢复 hv.theme；登录、首次设置与正式页面共享同一主题。
     use_theme_effects();
-    let ready = session.is_ready();
-    use_boot_error_text(ready, set_boot_error_text);
-    if !ready {
+    if !session.is_ready() {
         return rsx! {
             div { class: "app-root" }
         };
@@ -127,38 +125,12 @@ fn LocalizedApp() -> Element {
     }
 }
 
-fn use_boot_error_text(ready: bool, publish: impl Fn(&str) + 'static) {
-    use_effect(use_reactive((&ready,), move |(ready,)| {
-        if ready {
-            publish(&t!("boot-error"));
-        }
-    }));
-}
-
-fn set_boot_error_text(_text: &str) {
-    // 失败后组件树可能已损坏；语言就绪时写入独立于 Dioxus 的静态恢复提示。
-    #[cfg(target_arch = "wasm32")]
-    if let Some(error) =
-        web_sys::window().and_then(|window| window.document()).and_then(|document| {
-            document.query_selector("#main > .app-boot > .app-boot__error").ok().flatten()
-        })
-    {
-        error.set_text_content(Some(_text));
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use std::cell::{Cell, RefCell};
-    use std::rc::Rc;
-
-    use auction_web_shared::i18n::{DEFAULT_ADMIN_LOCALE, build_bundle};
     use dioxus::core::TemplateNode;
     use dioxus::prelude::*;
-    use dioxus_i18n::prelude::{i18n_bundle, try_use_init_i18n_from_bundle};
-    use unic_langid::langid;
 
-    use super::{ADMIN_LOCALE_CATALOG, App, use_boot_error_text};
+    use super::App;
 
     #[derive(Clone, Copy)]
     pub(super) struct DefaultFtl(pub(super) &'static str);
@@ -177,60 +149,5 @@ mod tests {
             dom.mark_dirty(ScopeId::APP);
             dom.render_immediate_to_vec();
         }
-    }
-
-    #[derive(Default)]
-    struct BootBanner {
-        ready: Cell<Option<Signal<bool>>>,
-        text: RefCell<Option<String>>,
-    }
-
-    fn boot_banner() -> Element {
-        try_use_init_i18n_from_bundle(|| {
-            build_bundle(
-                &DEFAULT_ADMIN_LOCALE,
-                ADMIN_LOCALE_CATALOG.default_ftl,
-                &DEFAULT_ADMIN_LOCALE,
-                None,
-            )
-        })
-        .unwrap();
-        let banner = use_context::<Rc<BootBanner>>();
-        let ready = use_signal(|| false);
-        banner.ready.set(Some(ready));
-        use_boot_error_text(ready(), move |text| *banner.text.borrow_mut() = Some(text.to_owned()));
-        VNode::empty()
-    }
-
-    #[test]
-    fn boot_alert_keeps_its_static_fallback_until_ready_and_tracks_the_bundle() {
-        let banner = Rc::new(BootBanner::default());
-        let mut dom = VirtualDom::new(boot_banner).with_root_context(Rc::clone(&banner));
-        dom.rebuild_in_place();
-        dom.render_immediate_to_vec();
-        assert!(banner.text.borrow().is_none());
-        banner.ready.get().unwrap().set(true);
-        for _ in 0..3 {
-            dom.render_immediate_to_vec();
-        }
-        assert_eq!(banner.text.borrow().as_deref(), Some("页面运行出现异常，请刷新页面重试。"));
-
-        dom.in_scope(ScopeId::APP, || {
-            let japanese = build_bundle(
-                &DEFAULT_ADMIN_LOCALE,
-                ADMIN_LOCALE_CATALOG.default_ftl,
-                &langid!("ja"),
-                Some(include_str!("../../i18n/ja.ftl")),
-            )
-            .unwrap();
-            i18n_bundle().set_bundle(japanese);
-        });
-        for _ in 0..3 {
-            dom.render_immediate_to_vec();
-        }
-        assert_eq!(
-            banner.text.borrow().as_deref(),
-            Some("ページでエラーが発生しました。再読み込みしてください。")
-        );
     }
 }

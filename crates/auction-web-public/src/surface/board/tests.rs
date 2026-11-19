@@ -30,7 +30,8 @@ use crate::surface::watches::SkipWatchReads;
 use crate::surface::{
     CurrentAuctionResource, LiveConnectionState, LotViewRequest, PageReadFixture, PublicBoardQuery,
     PublicCommandOwner, PublicContentLoading, PublicReadinessResource, PublicSessionResource,
-    dispatch_page_event, page_test_contexts, rendered_event_target, run_page_events, settle_page,
+    dispatch_page_event, page_test_contexts, rendered_event_target, rendered_select_option,
+    run_page_events, settle_page,
 };
 
 const AUCTION: &str = "018f4c8e-7b2a-4c3d-8e4f-000000000001";
@@ -471,6 +472,103 @@ fn the_world_picker_replaces_only_the_disabled_world() {
             assert!(!history.can_go_back());
         }
     }
+}
+
+#[test]
+fn the_shell_keeps_the_committed_world_until_the_picker_can_retry() {
+    run_page_events(
+        module_path!(),
+        "the_shell_keeps_the_committed_world_until_the_picker_can_retry",
+        || {
+            const INITIAL: &str = "/?world=isekai";
+            const APPLIED: &str = "/?page_size=20&movement_page_size=20";
+            let history = Rc::new(MemoryHistory::with_initial_path(INITIAL));
+            let allowed = Rc::new(Cell::new(false));
+            let writes = Rc::new(RefCell::new(Vec::new()));
+            let lot_reads = Rc::new(RefCell::new(Vec::new()));
+            let mut dom = shell_fixture("main")
+                .with_root_context(PageReadFixture::new(|url: String| {
+                    let mut auction = active_auction("live");
+                    if url.contains("world=isekai") {
+                        auction.id = BOB.to_owned();
+                        auction.world = "isekai".to_owned();
+                        auction.number = 7;
+                    }
+                    Ok::<_, String>(Some(auction))
+                }))
+                .with_root_context(PageReadFixture::new({
+                    let history = history.clone();
+                    let lot_reads = lot_reads.clone();
+                    move |url: String| {
+                        let auction = if url.starts_with(&format!("/api/v1/auctions/{BOB}/lots")) {
+                            BOB
+                        } else {
+                            assert!(url.starts_with(&format!("/api/v1/auctions/{AUCTION}/lots")));
+                            AUCTION
+                        };
+                        lot_reads.borrow_mut().push((auction, history.current_route()));
+                        let mut envelope = catalog_envelope(auction, "live", 0, 1, 20);
+                        envelope.total = Some(1);
+                        Ok::<_, String>(envelope)
+                    }
+                }));
+            provide_test_public_history::<Route>(&mut dom, history.clone(), {
+                let writes = writes.clone();
+                let allowed = allowed.clone();
+                move |url, mode| {
+                    writes.borrow_mut().push((mode, url.to_owned()));
+                    allowed.get()
+                }
+            });
+
+            let mut edits = dom.rebuild_to_vec().edits;
+            edits.extend(settle_page(&mut dom));
+            assert_eq!(history.current_route(), INITIAL);
+            assert_eq!(*writes.borrow(), [(QueryWriteMode::Replace, "/".to_owned())]);
+            assert_eq!(
+                rendered_select_option(&dom, "public-world", "isekai"),
+                Some(("isekai", true, true))
+            );
+            assert_eq!(
+                rendered_select_option(&dom, "public-world", "main"),
+                Some(("isekai", false, false))
+            );
+            assert!(has_text(&edits, " / Isekai"));
+            assert!(has_text(&edits, "Auction #7"));
+            assert!(has_attribute(&edits, "aria-label", "Auction #7", None));
+            assert_eq!(*lot_reads.borrow(), [(BOB, INITIAL.to_owned())]);
+
+            let picker = rendered_event_target(&dom, "select", "id", "public-world", "onchange");
+            dispatch_page_event(&dom, "change", picker, "main");
+            settle_page(&mut dom);
+            assert_eq!(history.current_route(), INITIAL);
+            assert_eq!(writes.borrow()[1], (QueryWriteMode::Push, APPLIED.to_owned()));
+            assert_eq!(
+                rendered_select_option(&dom, "public-world", "isekai"),
+                Some(("isekai", true, true))
+            );
+            assert_eq!(lot_reads.borrow().len(), 1);
+
+            allowed.set(true);
+            dispatch_page_event(&dom, "change", picker, "main");
+            let switched = settle_page(&mut dom);
+            assert_eq!(history.current_route(), APPLIED);
+            assert_eq!(writes.borrow().len(), 3);
+            assert_eq!(writes.borrow()[2], (QueryWriteMode::Push, APPLIED.to_owned()));
+            assert_eq!(
+                rendered_select_option(&dom, "public-world", "main"),
+                Some(("main", true, false))
+            );
+            assert_eq!(rendered_select_option(&dom, "public-world", "isekai"), None);
+            assert!(has_text(&switched, " / Main"));
+            assert!(has_text(&switched, "Auction #2"));
+            assert!(has_attribute(&switched, "aria-label", "Auction #2", None));
+            assert_eq!(
+                *lot_reads.borrow(),
+                [(BOB, INITIAL.to_owned()), (AUCTION, APPLIED.to_owned())]
+            );
+        },
+    );
 }
 
 #[test]

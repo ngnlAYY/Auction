@@ -245,6 +245,9 @@ class PortalTooltip extends DomElement {
   setAttribute(name: string, value: string) {
     this.attributes[name] = value;
   }
+  contains(element: DomElement | null): boolean {
+    return element === this;
+  }
   addEventListener() {}
   removeEventListener() {}
 }
@@ -272,7 +275,24 @@ function installTooltipDom() {
     getElementById: (id: string) =>
       [...visible].find((tooltip) => tooltip.getAttribute("id") === id) ?? getElementById(id),
   });
-  return { ...focus, texts: () => [...visible].map((tooltip) => tooltip.textContent) };
+  return {
+    ...focus,
+    attach(lookup: Parameters<typeof focus.attach>[0]) {
+      // portal 挂在页面渲染树之外，仍属于同一个文档的焦点范围。
+      focus.attach((match, parent) => {
+        const portal = [...visible].find(
+          (node) => (parent === undefined || parent === node) && match(node),
+        );
+        return portal ?? (parent instanceof PortalTooltip ? null : lookup(match, parent));
+      });
+    },
+    portal() {
+      const portal = visible.values().next().value;
+      if (portal === undefined) throw new Error("提示浮层未挂载");
+      return portal;
+    },
+    texts: () => [...visible].map((tooltip) => tooltip.textContent),
+  };
 }
 
 function bidFact(number: number, name: string, auctionId = OTHER_WORLD) {
@@ -418,61 +438,100 @@ test.each([
   }
 });
 
-test("实时插入前置记录时旧行保留身份，固定提示收起且可在原记录重新打开", async () => {
-  const sockets = installSockets();
-  const tooltip = installTooltipDom();
-  const page = await mountCompetition();
-  try {
-    tooltip.attach(page.find);
-    page.server.readEvents = replay;
-    page.server.readRounds = (url) => {
-      const auctions =
-        url.searchParams.get("status") === "live" ? [round(OTHER_WORLD, "isekai", "live", 11)] : [];
-      return success({ auctions, total: auctions.length, page: 1, page_size: 200 });
-    };
-    let facts = [bidFact(1, LONG_NAME)];
-    page.server.readBidLog = (url) =>
-      success({
-        bids: facts,
-        total: facts.length,
-        page: 1,
-        page_size: Number(url.searchParams.get("page_size")),
+test.each([true, false])(
+  "出价行移位和文本更新收起提示，可重新打开，只在浮层持焦时还焦（%s）",
+  async (popupFocused) => {
+    const sockets = installSockets();
+    const tooltip = installTooltipDom();
+    const page = await mountCompetition();
+    try {
+      tooltip.attach(page.find);
+      page.server.readEvents = replay;
+      page.server.readRounds = (url) => {
+        const auctions =
+          url.searchParams.get("status") === "live"
+            ? [round(OTHER_WORLD, "isekai", "live", 11)]
+            : [];
+        return success({ auctions, total: auctions.length, page: 1, page_size: 200 });
+      };
+      let facts = [bidFact(1, LONG_NAME)];
+      page.server.readBidLog = (url) =>
+        success({
+          bids: facts,
+          total: facts.length,
+          page: 1,
+          page_size: Number(url.searchParams.get("page_size")),
+        });
+      page.go(`/bidlog?auction=${OTHER_WORLD}`);
+      const original = (element: DomElement) =>
+        element.getAttribute("data-full-value") === LONG_NAME;
+      const inserted = (element: DomElement) =>
+        element.getAttribute("data-full-value") === "New Staff";
+      await waitFor(() => page.find(original) !== null);
+      const anchor = page.need(original);
+      anchor.scrollWidth = 160;
+      anchor.clientWidth = 80;
+      tooltip.captureClick(anchor);
+      dispatch(anchor, "MouseEnter");
+      dispatch(anchor, "Click");
+      expect(anchor.getAttribute("aria-expanded")).toBe("true");
+      expect(tooltip.texts()).toEqual([LONG_NAME]);
+      const trigger = document.getElementById(anchor.getAttribute("id") ?? "");
+      if (trigger === null) throw new Error("提示入口未挂载");
+      const closest = trigger.closest.bind(trigger);
+      // 通用对话框替身只识别链接和表单控件。用生产渲染的 tabindex 识别可聚焦的文本入口。
+      Object.assign(trigger, {
+        closest: (selector: string) =>
+          selector.includes("[tabindex]") && trigger.getAttribute("tabindex") === "0"
+            ? trigger
+            : closest(selector),
       });
-    page.go(`/bidlog?auction=${OTHER_WORLD}`);
-    const original = (element: DomElement) => element.getAttribute("data-full-value") === LONG_NAME;
-    const inserted = (element: DomElement) =>
-      element.getAttribute("data-full-value") === "New Staff";
-    await waitFor(() => page.find(original) !== null);
-    const anchor = page.need(original);
-    anchor.scrollWidth = 160;
-    anchor.clientWidth = 80;
-    tooltip.captureClick(anchor);
-    dispatch(anchor, "MouseEnter");
-    dispatch(anchor, "Click");
-    expect(anchor.getAttribute("aria-expanded")).toBe("true");
-    expect(tooltip.texts()).toEqual([LONG_NAME]);
+      const popup = tooltip.portal();
+      expect(popup.getAttribute("tabindex")).toBe("0");
+      const outside = page.need(
+        (element) => element.getAttribute("class") === "public-connection-refresh",
+      );
+      const previousFocus = popupFocused ? popup : outside;
+      const restored = popupFocused ? anchor : outside;
+      tooltip.focus(previousFocus);
+      expect(tooltip.activeElement()).toBe(previousFocus);
 
-    const other = sockets.need(OTHER_WORLD);
-    other.bid(1);
-    const readCount = () =>
-      page.reads.filter((path) => path.startsWith(`/api/v1/auctions/${OTHER_WORLD}/bid-log?`))
-        .length;
-    await waitFor(() => readCount() === 2);
-    await settle();
-    expect(tooltip.texts()).toEqual([LONG_NAME]);
+      const other = sockets.need(OTHER_WORLD);
+      other.bid(1);
+      const readCount = () =>
+        page.reads.filter((path) => path.startsWith(`/api/v1/auctions/${OTHER_WORLD}/bid-log?`))
+          .length;
+      await waitFor(() => readCount() === 2);
+      await settle();
+      expect(tooltip.texts()).toEqual([LONG_NAME]);
+      expect(tooltip.activeElement()).toBe(previousFocus);
 
-    facts = [bidFact(2, "New Staff"), ...facts];
-    other.bid(2);
-    await waitFor(() => page.find(inserted) !== null);
-    expect(readCount()).toBe(3);
-    expect(page.find(original)).toBe(anchor);
-    expect(anchor.getAttribute("aria-expanded")).toBe("false");
-    expect(tooltip.texts()).toEqual([]);
-    dispatch(anchor, "Click");
-    expect(tooltip.texts()).toEqual([LONG_NAME]);
-  } finally {
-    page.dispose();
-    tooltip.restore();
-    sockets.restore();
-  }
-});
+      facts = [bidFact(2, "New Staff"), ...facts];
+      other.bid(2);
+      await waitFor(() => page.find(inserted) !== null);
+      expect(readCount()).toBe(3);
+      expect(page.find(original)).toBe(anchor);
+      expect(anchor.getAttribute("aria-expanded")).toBe("false");
+      expect(tooltip.texts()).toEqual([]);
+      expect(tooltip.activeElement()).toBe(restored);
+      dispatch(anchor, "Click");
+      expect(tooltip.texts()).toEqual([LONG_NAME]);
+
+      tooltip.focus(popupFocused ? tooltip.portal() : outside);
+      const changed = "Legendary Cotton Robe of the Curse-Weaver";
+      facts = [bidFact(2, "New Staff"), bidFact(1, changed)];
+      other.bid(3);
+      const updated = (element: DomElement) => element.getAttribute("data-full-value") === changed;
+      await waitFor(() => page.find(updated) !== null);
+      expect(page.find(updated)).toBe(anchor);
+      expect(tooltip.texts()).toEqual([]);
+      expect(tooltip.activeElement()).toBe(restored);
+      dispatch(anchor, "Click");
+      expect(tooltip.texts()).toEqual([changed]);
+    } finally {
+      page.dispose();
+      tooltip.restore();
+      sockets.restore();
+    }
+  },
+);

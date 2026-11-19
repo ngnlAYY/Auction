@@ -284,6 +284,59 @@ pub(crate) fn rendered_event_target(
     .expect("当前渲染包含实际注册事件的控件")
 }
 
+/// 当前选择器的值，以及指定选项的选中和禁用状态。
+pub(crate) fn rendered_select_option<'a>(
+    dom: &'a VirtualDom,
+    select_id: &str,
+    value: &str,
+) -> Option<(&'a str, bool, bool)> {
+    let (vnode, select, applied) =
+        find_in_vnode(dom, dom.base_scope().root_node(), &|vnode, node| {
+            let TemplateNode::Element { tag: "select", attrs, .. } = node else { return None };
+            if text_attribute(vnode, attrs, "id") != Some(select_id) {
+                return None;
+            }
+            Some((vnode, node, text_attribute(vnode, attrs, "value")?))
+        })?;
+    find_in_node(dom, vnode, select, &|vnode, node| {
+        let TemplateNode::Element { tag: "option", attrs, .. } = node else { return None };
+        if text_attribute(vnode, attrs, "value") != Some(value) {
+            return None;
+        }
+        let enabled = |name| {
+            attrs.iter().any(|attr| match attr {
+                TemplateAttribute::Static { name: attr_name, .. } => *attr_name == name,
+                TemplateAttribute::Dynamic { id } => vnode.dynamic_attrs[*id].iter().any(|attr| {
+                    attr.name == name && matches!(attr.value, AttributeValue::Bool(true))
+                }),
+            })
+        };
+        Some((applied, enabled("selected"), enabled("disabled")))
+    })
+}
+
+/// 核对动态文字是否在指定角色的节点内，避免把同一页面上无关的播报算进去。
+pub(crate) fn rendered_role_contains(dom: &VirtualDom, role: &str, expected: &str) -> bool {
+    find_in_vnode(dom, dom.base_scope().root_node(), &|vnode, node| {
+        let TemplateNode::Element { attrs, .. } = node else { return None };
+        if text_attribute(vnode, attrs, "role") != Some(role) {
+            return None;
+        }
+        find_in_node(dom, vnode, node, &|vnode, node| {
+            let text = match node {
+                TemplateNode::Text { text } => *text,
+                TemplateNode::Dynamic { id } => match &vnode.dynamic_nodes[*id] {
+                    DynamicNode::Text(text) => &text.value,
+                    _ => return None,
+                },
+                _ => return None,
+            };
+            (text == expected).then_some(())
+        })
+    })
+    .is_some()
+}
+
 fn text_attribute<'a>(
     vnode: &'a VNode,
     attrs: &[TemplateAttribute],

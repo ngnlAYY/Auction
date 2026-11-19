@@ -1,10 +1,12 @@
 // Markdown 结构到安全 DOM 的渲染。
 
 import type { JSX } from "@solidjs/web";
-import { For, Match, Switch } from "solid-js";
+import { createEffect, For, Match, onSettled, Switch } from "solid-js";
 
+import { createCell } from "../../../reactive/cell";
 import { createValueMemo } from "../../../reactive/memo";
 import { unreachable } from "../../../result";
+import { t } from "../../i18n";
 import { TableColumns } from "../table-columns";
 import { isInternalTarget } from "./inline";
 import type { Inline, MarkdownBlock } from "./model";
@@ -197,7 +199,7 @@ function headingAnchor(nodes: readonly Inline[]): string | null {
   return slug.length > 0 ? slug : null;
 }
 
-/** 递归收集标题行内节点的可见纯文本，供锚点生成使用。 */
+/** 递归收集行内节点的可见纯文本，供锚点和表格滚动区域命名。 */
 function collectText(nodes: readonly Inline[], output: { value: string }): void {
   for (const node of nodes) {
     switch (node.kind) {
@@ -310,8 +312,62 @@ function MarkdownOrderedList(props: { readonly block: OrderedListBlock }): JSX.E
 
 function MarkdownTable(props: { readonly block: TableBlock }): JSX.Element {
   const widths = createValueMemo(() => tableColumnWeights(props.block.headers, props.block.rows));
+  const scrollable = createCell(false);
+  let wrapper: HTMLDivElement | undefined;
+
+  const regionName = createValueMemo<string | null>(() => {
+    if (!scrollable()) return null;
+    const headers = props.block.headers.map((nodes) => {
+      const text = { value: "" };
+      collectText(nodes, text);
+      return rustTrim(text.value);
+    });
+    return headers.filter(Boolean).join(", ") || t("markdown-table-scroll-region");
+  });
+
+  onSettled(() => {
+    const element = wrapper;
+    if (element === undefined) return;
+    const measure = () => {
+      // 桌面 display: contents 和只裁剪内容的容器都不应进入 Tab 顺序。
+      const overflowX = window.getComputedStyle(element).overflowX;
+      scrollable.set(
+        element.clientWidth > 0 &&
+          element.scrollWidth > element.clientWidth &&
+          (overflowX === "auto" || overflowX === "scroll"),
+      );
+    };
+    measure();
+    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(measure) : null;
+    observer?.observe(element);
+    if (element.firstElementChild !== null) observer?.observe(element.firstElementChild);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  });
+
+  createEffect(regionName, (name) => {
+    if (wrapper === undefined) return;
+    if (name === null) {
+      wrapper.removeAttribute("tabindex");
+      wrapper.removeAttribute("role");
+      wrapper.removeAttribute("aria-label");
+    } else {
+      wrapper.setAttribute("tabindex", "0");
+      wrapper.setAttribute("role", "region");
+      wrapper.setAttribute("aria-label", name);
+    }
+  });
+
   return (
-    <div class="shared-markdown__table-wrap">
+    <div
+      class="shared-markdown__table-wrap"
+      ref={(element) => {
+        wrapper = element;
+      }}
+    >
       <table>
         <TableColumns layout="markdown-content" widths={widths()} />
         <thead>

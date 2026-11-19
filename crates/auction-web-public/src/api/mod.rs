@@ -37,7 +37,7 @@ pub(crate) use watches::{fetch_lot_watches, set_lot_watch};
 pub(crate) use account::{MyBidsPage, OwnedBid, OwnedProxy, fetch_my_bids, fetch_my_proxy};
 pub(crate) use blacklist::{BlacklistEntry, BlacklistPage, fetch_blacklist};
 #[cfg(test)]
-pub(crate) use clock::{HttpFixtureFuture, HttpResponseFixture};
+pub(crate) use clock::{HttpBodyFixtureFuture, HttpFixtureFuture, HttpResponseFixture};
 pub(crate) use clock::{estimated_now, send_get, send_request};
 // 传输边界（10 秒取消上限、结构化 TransportError）由 auction-web-shared 统一提供。
 pub(crate) use auction_web_shared::TransportError;

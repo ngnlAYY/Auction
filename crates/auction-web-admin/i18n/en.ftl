@@ -393,6 +393,7 @@ admin-rules-publish = Save and publish
 admin-rules-success = Document saved successfully.
 admin-rules-description = Edit each language as Markdown and publish it to the public rules page immediately.
 page-about-title = About content
+markdown-table-scroll-region = Table
 admin-about-description = Edit each language as Markdown and publish it to the public About page immediately. Languages without a document fall back to English.
 admin-rules-languages = Document languages
 admin-rules-default-locale = Fallback language

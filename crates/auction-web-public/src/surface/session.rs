@@ -11,6 +11,7 @@ use dioxus::prelude::*;
 
 pub(crate) use super::login_return::login_href_for_current_location;
 use super::login_return::login_return_path;
+use super::panel_escape::{focus_panel_trigger, use_panel_escape};
 use super::{PublicSessionResource, Route};
 use crate::api::{
     PublicSession, PublicSessionApiError, SessionRefreshReason, fetch_registration_info,
@@ -221,6 +222,19 @@ pub(super) fn SessionMenu() -> Element {
     let mut logout_error = use_signal(|| None::<String>);
     let mut logout_busy = use_signal(|| false);
     let mut menu_open = use_signal(|| false);
+    let expanded = move || {
+        menu_open()
+            && matches!(session.read().as_ref(),
+            Some(Ok(Some(identity))) if identity.authenticated)
+    };
+    let dismiss = use_callback(move |()| {
+        if !expanded() {
+            return false;
+        }
+        close_session_menu(menu_open);
+        true
+    });
+    use_panel_escape(expanded, SESSION_TRIGGER_ID, SESSION_PANEL_ID, dismiss);
 
     let session_state = match &*session.read() {
         Some(Ok(Some(identity))) if identity.authenticated => SessionMenuState::Authenticated {
@@ -274,13 +288,6 @@ pub(super) fn SessionMenu() -> Element {
                             aria_controls: SESSION_PANEL_ID,
                             aria_expanded: menu_open().to_string(),
                             onclick: move |_| menu_open.set(!menu_open()),
-                            onkeydown: move |event| {
-                                if menu_open() && event.key() == Key::Escape {
-                                    event.prevent_default();
-                                    event.stop_propagation();
-                                    close_session_menu(menu_open);
-                                }
-                            },
                             span { class: "public-account-session-avatar", aria_hidden: "true", "{initial}" }
                             span { class: "public-account-session-name", "{username}" }
                             svg {
@@ -303,13 +310,6 @@ pub(super) fn SessionMenu() -> Element {
                             div {
                                 id: SESSION_PANEL_ID,
                                 class: "public-account-session-panel",
-                                onkeydown: move |event| {
-                                    if event.key() == Key::Escape {
-                                        event.prevent_default();
-                                        event.stop_propagation();
-                                        close_session_menu(menu_open);
-                                    }
-                                },
                                 // “我的”与退出不把焦点还给入口：路由切换接管焦点，退出后入口随会话卸载。
                                 Link {
                                     class: "public-account-session-item",
@@ -410,7 +410,7 @@ fn dismiss_session_ended(mut ended: Signal<bool>, owns_focus: bool, focus_conten
 /// 收起账号面板并把焦点还给入口按钮；面板卸载时焦点不能落到 `body`。
 fn close_session_menu(mut open: Signal<bool>) {
     open.set(false);
-    focus_element_by_id(SESSION_TRIGGER_ID);
+    focus_panel_trigger(SESSION_TRIGGER_ID);
 }
 
 /// 登录失败的本地化文案：先匹配登录业务码，未命中走共享基础层（[`base_api_error_message`]

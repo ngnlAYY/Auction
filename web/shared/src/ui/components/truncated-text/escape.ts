@@ -1,10 +1,9 @@
 // 每份文档的可见截断提示共用一条 Escape 监听。
 
-import { focusClosestControl } from "../../../platform/a11y";
 import { listenDocumentEscape, topModal } from "../../../platform/a11y/escape";
 
 interface OpenTooltips {
-  readonly dismissals: Map<string, () => void>;
+  readonly dismissals: Map<string, () => boolean>;
   readonly unlisten: () => void;
 }
 
@@ -14,11 +13,11 @@ const openByDocument = new WeakMap<Document, OpenTooltips>();
 export function registerTooltipEscape(
   document: Document,
   tooltipId: string,
-  dismiss: () => void,
+  dismiss: () => boolean,
 ): () => void {
   let open = openByDocument.get(document);
   if (open === undefined) {
-    const dismissals = new Map<string, () => void>();
+    const dismissals = new Map<string, () => boolean>();
     open = {
       dismissals,
       unlisten: listenDocumentEscape(
@@ -42,13 +41,13 @@ export function registerTooltipEscape(
 function dismissTopTooltip(
   document: Document,
   event: KeyboardEvent,
-  dismissals: ReadonlyMap<string, () => void>,
+  dismissals: ReadonlyMap<string, () => boolean>,
 ): boolean {
   const modal = topModal(document);
   if (modal !== null && (!(event.target instanceof Element) || !modal.contains(event.target))) {
     return false;
   }
-  let current: { dismiss: () => void; popup: Element; trigger: Element } | null = null;
+  let current: (() => boolean) | null = null;
   for (const [id, dismiss] of dismissals) {
     const popup = document.getElementById(id);
     const trigger = document.getElementById(`${id}-trigger`);
@@ -57,13 +56,8 @@ function dismissTopTooltip(
       trigger !== null &&
       (modal === null || (modal.contains(popup) && modal.contains(trigger)))
     ) {
-      current = { dismiss, popup, trigger };
+      current = dismiss;
     }
   }
-  if (current === null) return false;
-  // 仅浮层拿走焦点时归还，悬停提示不能抢走页面上其他控件的焦点。
-  const restoreFocus = current.popup.contains(document.activeElement);
-  current.dismiss();
-  if (restoreFocus) focusClosestControl(current.trigger);
-  return true;
+  return current?.() ?? false;
 }

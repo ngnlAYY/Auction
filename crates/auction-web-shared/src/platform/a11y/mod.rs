@@ -5,9 +5,12 @@
 
 mod escape;
 
-#[cfg(target_arch = "wasm32")]
-pub use escape::bind_document_escape;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use escape::top_modal_with;
+pub(crate) use escape::with_native_modal_selector;
 pub use escape::{EscapeUnsubscribe, use_document_escape};
+#[cfg(target_arch = "wasm32")]
+pub use escape::{bind_document_escape, top_modal};
 
 #[cfg(target_arch = "wasm32")]
 use std::{
@@ -317,7 +320,6 @@ impl DialogFocusTrapGuard {
 }
 
 /// 自绘模态的语义选择器。原生对话框的焦点循环由浏览器管理。
-#[cfg(any(target_arch = "wasm32", test))]
 pub(crate) const ARIA_MODAL_SELECTOR: &str = "[role=\"dialog\"][aria-modal=\"true\"]";
 
 #[cfg(target_arch = "wasm32")]
@@ -449,5 +451,4 @@ fn preferred_dialog_focus(dialog: &web_sys::Element) -> Option<web_sys::HtmlElem
 }
 
 /// 有资格承接焦点的原生控件和显式可聚焦元素。
-#[cfg(any(target_arch = "wasm32", test))]
 pub(crate) const FOCUSABLE_SELECTOR: &str = "a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex=\"-1\"]),[contenteditable=\"true\"]";

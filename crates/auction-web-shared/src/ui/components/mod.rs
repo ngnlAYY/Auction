@@ -4,6 +4,8 @@ mod async_state;
 mod dialog;
 mod markdown;
 mod pager;
+#[cfg(target_arch = "wasm32")]
+mod resize;
 mod table_columns;
 mod table_hints;
 mod time;
@@ -17,7 +19,10 @@ pub use markdown::{MarkdownBlocks, MarkdownDocument, without_leading_title};
 pub use pager::Pager;
 pub use table_columns::TableColumns;
 pub use time::Time;
-pub use truncated_text::TruncatedText;
+#[cfg(not(target_arch = "wasm32"))]
+#[doc(hidden)]
+pub use truncated_text::TooltipBrowserFixture;
+pub use truncated_text::{TruncatedText, use_truncated_text_anchor_order};
 
 /// 设计变量、基础排版与通用组件的手机默认值。
 /// `asset!` 绝对路径按声明所在 crate 的包根解析，样式随本 crate 自包含分发；`with_static_head` 让

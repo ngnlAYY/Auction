@@ -215,7 +215,7 @@ async fn send_conditional_response_observed(
             request.build().map_err(|_| TransportError::Network(None))
         },
         #[cfg(test)]
-        fixture,
+        fixture.map(HttpFixture::Buffered),
         |response| {
             let response_status = response.status();
             status = Some(response_status);
@@ -244,6 +244,12 @@ pub(super) enum HttpResponse {
     Browser(Response),
     #[cfg(test)]
     Fixture(HttpResponseFixture),
+}
+
+impl From<Response> for HttpResponse {
+    fn from(response: Response) -> Self {
+        Self::Browser(response)
+    }
 }
 
 impl HttpResponse {
@@ -276,18 +282,26 @@ impl HttpResponse {
     }
 }
 
-enum ResponseHead<'a> {
+pub(super) enum ResponseHead<'a> {
     Browser(&'a Response),
     #[cfg(test)]
     Fixture(&'a HttpResponseFixture),
 }
 
 impl ResponseHead<'_> {
-    fn status(&self) -> u16 {
+    pub(super) fn status(&self) -> u16 {
         match self {
             Self::Browser(response) => response.status(),
             #[cfg(test)]
             Self::Fixture(response) => response.status,
+        }
+    }
+
+    pub(super) fn observe_date(&self) {
+        match self {
+            Self::Browser(response) => observe_response_date(response),
+            #[cfg(test)]
+            Self::Fixture(_) => {}
         }
     }
 }
@@ -303,6 +317,19 @@ pub(crate) struct HttpResponseFixture {
 pub(crate) type HttpFixtureFuture =
     Pin<Box<dyn Future<Output = Result<HttpResponseFixture, TransportError>>>>;
 
+#[cfg(test)]
+pub(crate) type HttpBodyFixtureFuture =
+    Pin<Box<dyn Future<Output = Result<Option<String>, TransportError>>>>;
+
+#[cfg(test)]
+pub(super) type HttpHeadFixtureFuture = Pin<Box<dyn Future<Output = (u16, HttpBodyFixtureFuture)>>>;
+
+#[cfg(test)]
+pub(super) enum HttpFixture {
+    Buffered(HttpFixtureFuture),
+    WithHead(HttpHeadFixtureFuture),
+}
+
 pub(super) async fn send_response(
     build: impl FnOnce(Option<&web_sys::AbortSignal>) -> Result<Request, TransportError>,
     #[cfg(test)] fixture: Option<HttpFixtureFuture>,
@@ -310,26 +337,32 @@ pub(super) async fn send_response(
     send_response_observed(
         build,
         #[cfg(test)]
-        fixture,
-        |head| match head {
-            ResponseHead::Browser(response) => observe_response_date(response),
-            #[cfg(test)]
-            ResponseHead::Fixture(_) => {}
-        },
+        fixture.map(HttpFixture::Buffered),
+        |head| head.observe_date(),
     )
     .await
 }
 
-async fn send_response_observed(
+pub(super) async fn send_response_observed(
     build: impl FnOnce(Option<&web_sys::AbortSignal>) -> Result<Request, TransportError>,
-    #[cfg(test)] fixture: Option<HttpFixtureFuture>,
+    #[cfg(test)] fixture: Option<HttpFixture>,
     observe: impl FnOnce(ResponseHead<'_>),
 ) -> Result<HttpResponse, TransportError> {
     #[cfg(test)]
     if let Some(fixture) = fixture {
-        let response = HttpResponse::Fixture(fixture.await?);
-        observe(response.head());
-        return Ok(response);
+        let (mut response, body) = match fixture {
+            HttpFixture::Buffered(response) => (response.await?, None),
+            HttpFixture::WithHead(head) => {
+                let (status, body) = head.await;
+                (HttpResponseFixture { status, etag: None, body: None }, Some(body))
+            }
+        };
+        // 只替换头和正文到达的时机，响应头业务回调仍由发送入口提供。
+        observe(ResponseHead::Fixture(&response));
+        if let Some(body) = body {
+            response.body = body.await?;
+        }
+        return Ok(HttpResponse::Fixture(response));
     }
     auction_web_shared::send_request_observed(build, |response| {
         observe(ResponseHead::Browser(response));

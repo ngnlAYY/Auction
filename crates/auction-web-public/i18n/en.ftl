@@ -191,6 +191,7 @@ page-settings-title = Settings
 settings-local-hint = Language and theme are saved in this browser only.
 page-rules-title = Rules
 page-about-title = About
+markdown-table-scroll-region = Table
 page-blacklist-title = Blacklist
 page-compensation-pool-title = Compensation pool
 page-compensation-pool-note = Auctions from both worlds share one compensation pool in Persistent-world Credits. Buyers who led only briefly pay tax into the pool; long-time leaders receive compensation from it, scaled down proportionally when the pool is short.

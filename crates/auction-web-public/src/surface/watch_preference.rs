@@ -127,10 +127,14 @@ impl PreferenceOwner {
                 Err(error) => {
                     let mut state = owner.state.write();
                     state.busy = false;
-                    // 只有路由的明确冲突码能否定本命令；裸 409 或损坏响应不能抹掉首次未知。
-                    state.pending_uncertain = !(error.status == 409
-                        && error.code == "watch_preference_conflict")
-                        && (state.pending_uncertain || error.outcome_uncertain());
+                    // 账本先于 CAS 和私信资格校验。只有这两种明确拒绝能否定原命令，
+                    // 其余失败仍须保留首次未知的请求；新写入要等权威重读。
+                    let rejected = matches!(
+                        (error.status, error.code.as_str()),
+                        (409, "watch_preference_conflict") | (422, "pm_channel_unavailable")
+                    );
+                    state.pending_uncertain =
+                        !rejected && (state.pending_uncertain || error.outcome_uncertain());
                     state.error = Some(error);
                 }
             }
@@ -243,6 +247,7 @@ pub(super) fn OutbidNotifications(user_id: String) -> Element {
                     }
                     if failed && uncertain {
                         button {
+                            id: "public-outbid-retry",
                             r#type: "button", disabled: busy,
                             aria_describedby: "outbid-feedback",
                             onclick: move |_| retry.submit(),
@@ -276,15 +281,20 @@ pub(super) fn OutbidNotifications(user_id: String) -> Element {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
+    use std::future::ready;
     use std::rc::Rc;
 
-    use auction_contracts::{PublicLotWatchPreferenceResponse, PublicSetLotWatchPreferenceRequest};
+    use auction_contracts::{
+        ApiErrorResponse, ApiResponse, PublicLotWatchPreferenceResponse,
+        PublicSetLotWatchPreferenceRequest,
+    };
     use dioxus::dioxus_core::Mutation;
     use dioxus::prelude::*;
 
     use super::OutbidNotifications;
-    use crate::api::{CommandError, PublicSession};
+    use crate::api::{HttpFixtureFuture, HttpResponseFixture, PublicSession, TransportError};
+    use crate::surface::commands::session_fixture::ResponseGate;
     use crate::surface::{
         PageReadFixture, PublicCommandOwner, PublicSessionResource, dispatch_page_event,
         page_test_contexts, rendered_event_target, run_page_events, settle_page,
@@ -294,6 +304,7 @@ mod tests {
     const PATH: &str = "/api/v1/me/lot-watch-preference";
     const PM_REASON: &str =
         "PM needs forum sync to be enabled and a forum account linked to this account.";
+    const UNKNOWN: &str = "The save result is unknown. Your original request is retained; retry that exact request to confirm the result.";
 
     fn preferences() -> Element {
         page_test_contexts();
@@ -326,16 +337,11 @@ mod tests {
             let writes = Rc::new(Cell::new(0));
             let read = PageReadFixture::new({
                 let reads = reads.clone();
-                move |(path, user_id): (&'static str, String)| {
+                move |(path, user_id): (&'static str, String)| -> HttpFixtureFuture {
                     assert_eq!((path, user_id.as_str()), (PATH, USER));
                     let previous = reads.get();
                     reads.set(previous + 1);
-                    Ok::<_, CommandError>(PublicLotWatchPreferenceResponse {
-                        user_id,
-                        channel: "pm".to_owned(),
-                        version: 1,
-                        pm_available: previous == 0,
-                    })
+                    preference_response(user_id, previous == 0)
                 }
             });
             let write = PageReadFixture::new({
@@ -344,14 +350,12 @@ mod tests {
                     &'static str,
                     String,
                     PublicSetLotWatchPreferenceRequest,
-                )| {
+                )|
+                      -> HttpFixtureFuture {
                     assert_eq!((path, user_id.as_str()), (PATH, USER));
                     assert_eq!((command.channel.as_str(), command.expected_version), ("pm", 1));
                     writes.set(writes.get() + 1);
-                    Err::<PublicLotWatchPreferenceResponse, _>(CommandError {
-                        status: 422,
-                        code: code.to_owned(),
-                    })
+                    rejection(422, code)
                 }
             });
             let mut dom =
@@ -373,5 +377,131 @@ mod tests {
             assert_eq!(reads.get(), 2);
             assert_eq!(writes.get(), 1);
         }
+    }
+
+    fn preference_response(user_id: String, pm_available: bool) -> HttpFixtureFuture {
+        reply(
+            200,
+            ApiResponse::ok(
+                "已读取",
+                PublicLotWatchPreferenceResponse {
+                    user_id,
+                    channel: "pm".to_owned(),
+                    version: 1,
+                    pm_available,
+                },
+            ),
+        )
+    }
+
+    fn rejection(status: u16, code: &str) -> HttpFixtureFuture {
+        reply(
+            status,
+            ApiErrorResponse {
+                code: code.to_owned(),
+                message: "请求被拒绝".to_owned(),
+                data: None,
+                request_id: None,
+            },
+        )
+    }
+
+    fn reply(status: u16, envelope: impl serde::Serialize) -> HttpFixtureFuture {
+        let body = serde_json::to_string(&envelope).unwrap();
+        Box::pin(ready(Ok(HttpResponseFixture { status, etag: None, body: Some(body) })))
+    }
+
+    #[test]
+    fn retry_pm_rejection_ends_uncertainty_only_for_the_exact_status_and_code() {
+        run_page_events(
+            module_path!(),
+            "retry_pm_rejection_ends_uncertainty_only_for_the_exact_status_and_code",
+            || {
+                for (status, code, ends_uncertainty) in [
+                    (422, "pm_channel_unavailable", true),
+                    (422, "invalid_request", false),
+                    (503, "pm_channel_unavailable", false),
+                ] {
+                    exercise_unknown_retry(status, code, ends_uncertainty);
+                }
+            },
+        );
+    }
+
+    fn exercise_unknown_retry(status: u16, code: &'static str, ends_uncertainty: bool) {
+        let requests = Rc::new(RefCell::new(Vec::new()));
+        let retry_response = Rc::new(ResponseGate::default());
+        let read = PageReadFixture::new({
+            let requests = requests.clone();
+            move |(path, user_id): (&'static str, String)| -> HttpFixtureFuture {
+                assert_eq!((path, user_id.as_str()), (PATH, USER));
+                let initial = requests.borrow().is_empty();
+                requests.borrow_mut().push(None);
+                preference_response(user_id, initial)
+            }
+        });
+        let write = PageReadFixture::new({
+            let requests = requests.clone();
+            let retry_response = retry_response.clone();
+            move |(path, user_id, command): (
+                &'static str,
+                String,
+                PublicSetLotWatchPreferenceRequest,
+            )|
+                  -> HttpFixtureFuture {
+                assert_eq!((path, user_id.as_str()), (PATH, USER));
+                assert_eq!((command.channel.as_str(), command.expected_version), ("pm", 1));
+                let initial = requests.borrow().len() == 1;
+                requests.borrow_mut().push(Some(serde_json::to_string(&command).unwrap()));
+                if initial {
+                    Box::pin(ready(Err(TransportError::Timeout)))
+                } else {
+                    let response = retry_response.clone();
+                    Box::pin(async move {
+                        response.wait().await;
+                        rejection(status, code).await
+                    })
+                }
+            }
+        });
+        let mut dom = VirtualDom::new(preferences).with_root_context(read).with_root_context(write);
+        dom.rebuild_in_place();
+        settle_page(&mut dom);
+        let save = rendered_event_target(&dom, "button", "id", "public-outbid-save", "onclick");
+        dispatch_page_event(&dom, "click", save, "");
+        let uncertain = settle_page(&mut dom);
+        assert!(has_text(&uncertain, UNKNOWN));
+        let retry = rendered_event_target(&dom, "button", "id", "public-outbid-retry", "onclick");
+        dispatch_page_event(&dom, "click", retry, "");
+        settle_page(&mut dom);
+        assert!(retry_response.waiting());
+        {
+            let requests = requests.borrow();
+            assert_eq!(requests.len(), 3);
+            assert!(requests[0].is_none());
+            assert!(requests[1].is_some());
+            assert_eq!(requests[1], requests[2]);
+        }
+        retry_response.release();
+        let retried = settle_page(&mut dom);
+        if ends_uncertainty {
+            assert!(has_text(&retried, PM_REASON));
+            assert!(!has_text(&retried, UNKNOWN));
+            let refresh =
+                rendered_event_target(&dom, "button", "id", "public-outbid-refresh", "onclick");
+            dispatch_page_event(&dom, "click", refresh, "");
+            settle_page(&mut dom);
+            let requests = requests.borrow();
+            assert_eq!(&requests[3..], [None]);
+        } else {
+            assert!(has_text(&retried, UNKNOWN));
+            assert!(!has_text(&retried, PM_REASON));
+        }
+    }
+
+    fn has_text(edits: &[Mutation], text: &str) -> bool {
+        edits.iter().any(|edit| matches!(edit,
+            Mutation::CreateTextNode { value, .. } | Mutation::SetText { value, .. } if value == text
+        ))
     }
 }

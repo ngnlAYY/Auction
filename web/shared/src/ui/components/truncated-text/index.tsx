@@ -124,6 +124,7 @@ export function TruncatedText(props: TruncatedTextProps): JSX.Element {
       portal: portalElement,
     },
     tasks,
+    tooltipId,
   );
 
   const visibleAnchorOrder = createValueMemo(() =>
@@ -131,7 +132,7 @@ export function TruncatedText(props: TruncatedTextProps): JSX.Element {
   );
   createEffect(visibleAnchorOrder, (order, previous) => {
     // 按记录标识复用的锚点移动时，尺寸观察不会触发。收起仍停在旧坐标的提示。
-    if (order !== null && previous != null && order !== previous) interaction.close();
+    if (order !== null && previous != null && order !== previous) interaction.dismiss();
   });
 
   // 固定宽度文本变化不触发 ResizeObserver；内容提交到 DOM 后重测，且不保留旧 portal 正文。
@@ -141,10 +142,8 @@ export function TruncatedText(props: TruncatedTextProps): JSX.Element {
     if (element === null) {
       return;
     }
-    if (interaction.position.peek() !== null) {
-      interaction.close();
-    }
-    updateTruncatedState(element, value !== displayed, truncated, tooltipPosition, portalElement);
+    interaction.dismiss();
+    updateTruncatedState(element, value !== displayed, truncated, interaction);
   });
   // ref 回调发生在元素插入文档之前；挂载后的首次测量与尺寸观察统一推迟到布局完成。
   onSettled(() => {
@@ -153,11 +152,11 @@ export function TruncatedText(props: TruncatedTextProps): JSX.Element {
       return;
     }
     mountedElement.set(element);
-    updateTruncatedState(element, displayDiffers(), truncated, tooltipPosition, portalElement);
+    updateTruncatedState(element, displayDiffers(), truncated, interaction);
 
     // 元素尺寸与窗口尺寸变化共用全页唯一的监听，只登记本实例的重测回调。
     const subscription = observeResize(element, () => {
-      updateTruncatedState(element, displayDiffers(), truncated, tooltipPosition, portalElement);
+      updateTruncatedState(element, displayDiffers(), truncated, interaction);
     });
     measureSubscription.set(subscription);
     return () => {
@@ -180,7 +179,7 @@ export function TruncatedText(props: TruncatedTextProps): JSX.Element {
       return;
     }
 
-    const resizeCallback = (): void => interaction.close();
+    const resizeCallback = interaction.dismiss;
     const popupId = tooltipId;
     const scrollCallback = (event: Event): void => {
       // 浮层自身的滚动必须保留内容；页面或外层容器滚动后关闭以免定位过期。
@@ -188,7 +187,7 @@ export function TruncatedText(props: TruncatedTextProps): JSX.Element {
       const popup = window.document.getElementById(popupId);
       const insidePopup = target !== null && (popup?.contains(target) ?? false);
       if (!insidePopup) {
-        interaction.close();
+        interaction.dismiss();
       }
     };
 
@@ -224,7 +223,7 @@ export function TruncatedText(props: TruncatedTextProps): JSX.Element {
       viewport,
       resizeCallback,
       scrollCallback,
-      stopEscape: registerTooltipEscape(window.document, popupId, interaction.close),
+      stopEscape: registerTooltipEscape(window.document, popupId, interaction.dismiss),
       popupListeners: null,
       dispose() {
         removeTooltipDismissHandle(this);
@@ -296,14 +295,7 @@ export function TruncatedText(props: TruncatedTextProps): JSX.Element {
         onMouseEnter={() => {
           interaction.hovered.set(true);
           interaction.dismissed.set(false);
-          showTooltip(
-            mountedElement.peek(),
-            displayDiffers(),
-            truncated,
-            tooltipPosition,
-            portalElement,
-            request(),
-          );
+          showTooltip(mountedElement.peek(), displayDiffers(), truncated, interaction, request());
         }}
         onMouseLeave={() => {
           interaction.hovered.set(false);
@@ -312,14 +304,7 @@ export function TruncatedText(props: TruncatedTextProps): JSX.Element {
         onFocus={() => {
           focused.set(true);
           if (!interaction.dismissed.peek()) {
-            showTooltip(
-              mountedElement.peek(),
-              displayDiffers(),
-              truncated,
-              tooltipPosition,
-              portalElement,
-              request(),
-            );
+            showTooltip(mountedElement.peek(), displayDiffers(), truncated, interaction, request());
           }
         }}
         onBlur={() => {

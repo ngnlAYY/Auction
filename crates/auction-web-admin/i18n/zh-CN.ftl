@@ -393,6 +393,7 @@ admin-rules-publish = 保存并发布
 admin-rules-success = 文档已保存。
 admin-rules-description = 分别以 Markdown 编辑各语言版本，保存后立即发布到公开规则页面。
 page-about-title = 关于内容
+markdown-table-scroll-region = 表格
 admin-about-description = 分别以 Markdown 编辑各语言版本，保存后立即发布到公开端的“关于”页面；没有文档的语言回退到英文。
 admin-rules-languages = 文档语言
 admin-rules-default-locale = 默认回退语言

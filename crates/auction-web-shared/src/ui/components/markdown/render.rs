@@ -4,6 +4,7 @@ use dioxus::prelude::*;
 
 use super::inline::is_internal_target;
 use super::model::{Inline, MarkdownBlock};
+use super::scroll::use_table_scroll;
 
 #[component]
 pub(super) fn MarkdownBlockView(block: MarkdownBlock) -> Element {
@@ -30,33 +31,7 @@ pub(super) fn MarkdownBlockView(block: MarkdownBlock) -> Element {
         MarkdownBlock::Quote(nodes) => rsx! {
             blockquote { MarkdownInline { nodes } }
         },
-        MarkdownBlock::Table { headers, rows } => {
-            let widths = table_column_weights(&headers, &rows);
-            rsx! {
-            div { class: "shared-markdown__table-wrap",
-                table {
-                    crate::TableColumns { layout: "markdown-content", widths }
-                    thead {
-                        tr {
-                            for (index, nodes) in headers.into_iter().enumerate() {
-                                th { key: "header-{index}", MarkdownInline { nodes } }
-                            }
-                        }
-                    }
-                    tbody {
-                        for (row_index, row) in rows.into_iter().enumerate() {
-                            tr {
-                                key: "row-{row_index}",
-                                for (cell_index, nodes) in row.into_iter().enumerate() {
-                                    td { key: "cell-{row_index}-{cell_index}", MarkdownInline { nodes } }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            }
-        }
+        MarkdownBlock::Table { headers, rows } => rsx! { MarkdownTable { headers, rows } },
         MarkdownBlock::Code { language, value } => rsx! {
             pre {
                 translate: "no",
@@ -69,6 +44,59 @@ pub(super) fn MarkdownBlockView(block: MarkdownBlock) -> Element {
         },
         MarkdownBlock::Rule => rsx! { hr {} },
     }
+}
+
+#[component]
+fn MarkdownTable(headers: Vec<Vec<Inline>>, rows: Vec<Vec<Vec<Inline>>>) -> Element {
+    let (scrollable, mounted) = use_table_scroll();
+    let widths = table_column_weights(&headers, &rows);
+    let label = scrollable.then(|| table_scroll_name(&headers));
+    rsx! {
+        div {
+            class: "shared-markdown__table-wrap",
+            onmounted: mounted,
+            tabindex: scrollable.then_some("0"),
+            role: scrollable.then_some("region"),
+            aria_label: label,
+            table {
+                crate::TableColumns { layout: "markdown-content", widths }
+                thead {
+                    tr {
+                        for (index, nodes) in headers.into_iter().enumerate() {
+                            th { key: "header-{index}", MarkdownInline { nodes } }
+                        }
+                    }
+                }
+                tbody {
+                    for (row_index, row) in rows.into_iter().enumerate() {
+                        tr {
+                            key: "row-{row_index}",
+                            for (cell_index, nodes) in row.into_iter().enumerate() {
+                                td { key: "cell-{row_index}-{cell_index}", MarkdownInline { nodes } }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn table_scroll_name(headers: &[Vec<Inline>]) -> String {
+    let mut label = String::new();
+    for header in headers {
+        let mut text = String::new();
+        collect_text(header, &mut text);
+        let text = text.trim();
+        if text.is_empty() {
+            continue;
+        }
+        if !label.is_empty() {
+            label.push_str(", ");
+        }
+        label.push_str(text);
+    }
+    if label.is_empty() { crate::t!("markdown-table-scroll-region") } else { label }
 }
 
 /// 文档表格没有固定业务字段：按表头与前 32 行的典型可见长度（第 75 百分位、CJK 双宽）
@@ -152,7 +180,7 @@ fn heading_anchor(nodes: &[Inline]) -> Option<String> {
     (!slug.is_empty()).then_some(slug)
 }
 
-/// 递归收集标题行内节点的可见纯文本，供锚点生成使用。
+/// 递归收集行内节点的可见纯文本，供锚点和表格滚动区域命名。
 fn collect_text(nodes: &[Inline], output: &mut String) {
     for node in nodes {
         match node {
@@ -203,5 +231,55 @@ fn MarkdownInline(nodes: Vec<Inline>) -> Element {
                 },
             }
         }
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod scrolling_tests {
+    use dioxus::core::{AttributeValue, Mutation};
+    use dioxus::prelude::*;
+
+    use crate::MarkdownBlocks;
+    use crate::ui::components::markdown::scroll::Measurements;
+
+    fn table() -> Element {
+        rsx! {
+            MarkdownBlocks { markdown: "| **Item** | Amount |\n| --- | --- |\n| Long plain text | 10 |" }
+        }
+    }
+
+    #[test]
+    fn only_the_scrollable_table_wrapper_is_a_named_tab_stop() {
+        let mut dom = VirtualDom::new(table);
+        let mut sizes = dom.in_scope(ScopeId::ROOT, || Signal::new((200, 200, true)));
+        dom.provide_root_context(Measurements(sizes));
+        let mut initial = dom.rebuild_to_vec().edits;
+        initial.extend(dom.render_immediate_to_vec().edits);
+        assert!(!has_attribute(&initial, "tabindex", "0"));
+
+        dom.in_runtime(|| sizes.set((340, 200, true)));
+        let mut narrow = dom.render_immediate_to_vec().edits;
+        narrow.extend(dom.render_immediate_to_vec().edits);
+        assert!(has_attribute(&narrow, "tabindex", "0"));
+        assert!(has_attribute(&narrow, "role", "region"));
+        assert!(has_attribute(&narrow, "aria-label", "Item, Amount"));
+
+        dom.in_runtime(|| sizes.set((340, 200, false)));
+        let mut clipped = dom.render_immediate_to_vec().edits;
+        clipped.extend(dom.render_immediate_to_vec().edits);
+        for attribute in ["tabindex", "role", "aria-label"] {
+            assert!(clipped.iter().any(|edit| matches!(edit,
+                Mutation::SetAttribute { name, value: AttributeValue::None, .. } if *name == attribute
+            )));
+        }
+    }
+
+    fn has_attribute(edits: &[Mutation], name: &str, value: &str) -> bool {
+        edits.iter().any(|edit| {
+            matches!(edit,
+                Mutation::SetAttribute { name: attr, value: AttributeValue::Text(text), .. }
+                    if *attr == name && text == value
+            )
+        })
     }
 }

@@ -190,6 +190,7 @@ page-settings-title = 설정
 settings-local-hint = 언어와 테마는 이 브라우저에만 저장돼요.
 page-rules-title = 규칙
 page-about-title = 소개
+markdown-table-scroll-region = 표
 page-blacklist-title = 블랙리스트
 page-compensation-pool-title = 보상 풀
 page-compensation-pool-note = 두 월드의 경매는 Persistent Credits 기준의 보상 풀 하나를 공유합니다. 선두 시간이 짧은 낙찰자는 풀에 세금을 내고, 오래 선두를 지킨 낙찰자는 풀에서 보상을 받으며, 풀이 부족하면 비율에 따라 줄어듭니다.

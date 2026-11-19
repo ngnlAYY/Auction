@@ -14,6 +14,7 @@ mod compensation;
 mod forum;
 mod loading;
 mod login_return;
+mod panel_escape;
 mod proxy;
 mod reads;
 mod realtime;

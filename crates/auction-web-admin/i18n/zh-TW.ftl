@@ -451,6 +451,7 @@ admin-rules-publish = 儲存並發佈
 admin-rules-success = 文件已儲存。
 admin-rules-description = 分別以 Markdown 編輯各語言版本，儲存後立即發佈到公開規則頁面。
 page-about-title = 關於內容
+markdown-table-scroll-region = 表格
 admin-about-description = 分別以 Markdown 編輯各語言版本，儲存後立即發佈到公開端的「關於」頁面；沒有文件的語言會回退到英文。
 admin-rules-languages = 文件語言
 admin-rules-default-locale = 預設後備語言

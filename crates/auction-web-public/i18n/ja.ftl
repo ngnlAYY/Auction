@@ -190,6 +190,7 @@ page-settings-title = 設定
 settings-local-hint = 言語とテーマはこのブラウザーにのみ保存されます。
 page-rules-title = ルール
 page-about-title = このサイトについて
+markdown-table-scroll-region = 表
 page-blacklist-title = ブラックリスト
 page-compensation-pool-title = 補償プール
 page-compensation-pool-note = 両ワールドのオークションは Persistent の Credits 建ての補償プールを 1 つ共有します。リード時間が短い落札者は税収をプールに納め、長くリードした落札者はプールから補償を受けます。不足時は比例して縮小されます。

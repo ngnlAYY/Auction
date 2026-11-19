@@ -176,7 +176,7 @@ pub(crate) fn LotDetailLookupHost(lookup: LotDetailLookup) -> Element {
         if let Some((target, error)) = failure {
             if error.not_found() {
                 AsyncState {
-                    kind: AsyncStateKind::Error,
+                    kind: AsyncStateKind::Empty,
                     title: t!("catalog-view-lot", code: target.lot_code),
                     detail: t!("catalog-detail-not-found"),
                 }

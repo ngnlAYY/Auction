@@ -190,6 +190,7 @@ page-settings-title = 设置
 settings-local-hint = 语言和主题只保存在当前浏览器。
 page-rules-title = 规则
 page-about-title = 关于
+markdown-table-scroll-region = 表格
 page-blacklist-title = 黑名单列表
 page-compensation-pool-title = 补偿池
 page-compensation-pool-note = 两个世界的拍卖共用一个以主世界 Credits 计的补偿池。领先时间短的买家额外缴纳税收存入池中，领先时间长的买家从池中获得补偿；池子不足时按比例缩减。

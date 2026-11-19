@@ -5,13 +5,13 @@ use auction_contracts::{
     PublicSetSessionPreferenceRequest,
 };
 use auction_web_shared::{BrowserErrorClass, report_browser_error};
-use gloo_net::http::{Request, Response};
+use gloo_net::http::Request;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 #[cfg(test)]
 use crate::api::clock::HttpFixtureFuture;
-use crate::api::clock::send_response;
+use crate::api::clock::{HttpResponse, send_response};
 use crate::api::session_preference::PATH as SESSION_PREFERENCE_PATH;
 use crate::api::{CommandError, TransportError};
 
@@ -145,12 +145,13 @@ pub(in crate::api) fn decode_identity_response<T: DeserializeOwned>(
 
 /// 私有响应若携带当前用户标识，必须通过与会话响应相同的信封检查。
 pub(in crate::api) async fn decode_account_identity_response<T: DeserializeOwned>(
-    response: Response,
+    response: impl Into<HttpResponse>,
     expected_user: Option<&str>,
     validate: impl FnOnce(&Value) -> bool,
 ) -> Result<T, CommandError> {
+    let response = response.into();
     let status = response.status();
-    let body = response.text().await.ok();
+    let body = response.text().await;
     decode_identity_response(status, body.as_deref(), validate).map_err(|error| {
         let code = error.into_read_code();
         observe_public_session_failure(status, &code, expected_user);
