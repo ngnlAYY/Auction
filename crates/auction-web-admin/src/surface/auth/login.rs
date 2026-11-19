@@ -3,20 +3,30 @@
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
-use crate::api::{AdminReadinessState, AdminSession, login_admin};
+use crate::api::AdminReadinessState;
 use crate::surface::admin_api_error_message;
+
+/// 只交给外壳使用一次的登录凭据。
+pub(super) struct LoginSubmission {
+    pub(super) actor: String,
+    pub(super) secret: String,
+}
 
 /// Admin 登录表单；secret 只在提交时进入一次 Basic Auth 请求。
 #[component]
-pub(crate) fn AdminLogin(on_login: EventHandler<AdminSession>) -> Element {
+pub(super) fn AdminLogin(
+    submitting: bool,
+    login_error: Option<String>,
+    on_edit: EventHandler<()>,
+    on_submit: EventHandler<LoginSubmission>,
+) -> Element {
     let mut actor = use_signal(String::new);
     let mut secret = use_signal(String::new);
-    let mut submitting = use_signal(|| false);
-    let mut error_code = use_signal(|| None::<String>);
+    let mut validation_error = use_signal(|| None::<String>);
     let mut actor_input = use_signal(|| None::<MountedEvent>);
     let mut secret_input = use_signal(|| None::<MountedEvent>);
-    use_effect(move || {
-        if error_code.read().is_some() {
+    use_effect(use_reactive((&submitting, &login_error), move |(submitting, login_error)| {
+        if !submitting && (validation_error.read().is_some() || login_error.is_some()) {
             let input = if actor.peek().trim().is_empty() { actor_input() } else { secret_input() };
             if let Some(input) = input {
                 spawn(async move {
@@ -24,7 +34,9 @@ pub(crate) fn AdminLogin(on_login: EventHandler<AdminSession>) -> Element {
                 });
             }
         }
-    });
+    }));
+    let error_code = validation_error().or(login_error);
+    let invalid = error_code.is_some();
 
     rsx! {
         main { class: "admin-login-page", aria_labelledby: "admin-login-title",
@@ -38,29 +50,21 @@ pub(crate) fn AdminLogin(on_login: EventHandler<AdminSession>) -> Element {
                 }
                 form {
                     class: "admin-auth-form",
-                    aria_busy: submitting().to_string(),
+                    aria_busy: submitting.to_string(),
                     onsubmit: move |event| {
                         event.prevent_default();
-                        if submitting() {
+                        if submitting {
                             return;
                         }
                         if actor().trim().is_empty() || secret().is_empty() {
-                            error_code.set(Some("invalid_request".to_owned()));
+                            validation_error.set(Some("invalid_request".to_owned()));
                             return;
                         }
-                        submitting.set(true);
-                        error_code.set(None);
+                        validation_error.set(None);
                         let submitted_actor = actor();
                         let submitted_secret = secret();
                         secret.set(String::new());
-                        spawn(async move {
-                            let result = login_admin(submitted_actor, submitted_secret).await;
-                            submitting.set(false);
-                            match result {
-                                Ok(session) => on_login.call(session),
-                                Err(code) => error_code.set(Some(code)),
-                            }
-                        });
+                        on_submit.call(LoginSubmission { actor: submitted_actor, secret: submitted_secret });
                     },
                     label { for: "admin-actor", {t!("admin-login-actor")} }
                     input {
@@ -73,14 +77,15 @@ pub(crate) fn AdminLogin(on_login: EventHandler<AdminSession>) -> Element {
                         spellcheck: "false",
                         enterkeyhint: "next",
                         required: true,
-                        disabled: submitting(),
-                        aria_invalid: error_code.read().is_some().to_string(),
-                        aria_describedby: error_code.read().is_some().then_some("admin-login-error"),
+                        disabled: submitting,
+                        aria_invalid: invalid.to_string(),
+                        aria_describedby: invalid.then_some("admin-login-error"),
                         onmounted: move |event| actor_input.set(Some(event)),
                         value: "{actor}",
                         oninput: move |event| {
                             actor.set(event.value());
-                            error_code.set(None);
+                            validation_error.set(None);
+                            on_edit.call(());
                         },
                     }
                     label { for: "admin-secret", {t!("admin-login-secret")} }
@@ -91,32 +96,41 @@ pub(crate) fn AdminLogin(on_login: EventHandler<AdminSession>) -> Element {
                         autocomplete: "current-password",
                         enterkeyhint: "go",
                         required: true,
-                        disabled: submitting(),
-                        aria_invalid: error_code.read().is_some().to_string(),
-                        aria_describedby: error_code.read().is_some().then_some("admin-login-error"),
+                        disabled: submitting,
+                        aria_invalid: invalid.to_string(),
+                        aria_describedby: invalid.then_some("admin-login-error"),
                         onmounted: move |event| secret_input.set(Some(event)),
                         value: "{secret}",
                         oninput: move |event| {
                             secret.set(event.value());
-                            error_code.set(None);
+                            validation_error.set(None);
+                            on_edit.call(());
                         },
                     }
                     button {
                         class: "admin-btn-primary",
                         r#type: "submit",
-                        disabled: submitting(),
-                        aria_busy: submitting().to_string(),
-                        if submitting() { {t!("admin-login-working")} } else { {t!("admin-login-submit")} }
+                        disabled: submitting,
+                        aria_busy: submitting.to_string(),
+                        if submitting { {t!("admin-login-working")} } else { {t!("admin-login-submit")} }
                     }
                 }
-                if let Some(code) = error_code() {
+                if let Some(code) = error_code {
                     p { id: "admin-login-error", class: "action-feedback action-feedback--error", role: "alert",
-                        {admin_api_error_message(&code)}
+                        {login_error_message(&code)}
                     }
                 }
             }
         }
     }
+}
+
+fn login_error_message(code: &str) -> String {
+    // 登录 POST 没有业务命令 ID，超时反馈不能承诺保留密码或幂等重试。
+    if code == "request_timeout" {
+        return t!("admin-error-reconciliation-required");
+    }
+    admin_api_error_message(code)
 }
 
 /// 全局 readiness 状态徽标，显示在已登录外壳的顶栏；圆点与降级文字按状态着色。

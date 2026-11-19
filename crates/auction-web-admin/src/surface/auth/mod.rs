@@ -1,7 +1,5 @@
 //! 管理端认证外壳。会话状态机决定可见宿主与写许可，外壳负责路由和渲染。
 
-use std::rc::Rc;
-
 use auction_web_shared::t;
 use auction_web_shared::{use_app_boot_ready, use_dialog_focus_trap};
 use dioxus::prelude::*;
@@ -14,7 +12,7 @@ use self::shell::AdminAuthenticatedShell;
 use super::router::Route;
 use super::{AdminReadinessResource, admin_api_error_message};
 use crate::api::{
-    AdminReadinessState, AdminSession, AdminSessionCheckTrigger, AdminSessionWritePermission,
+    AdminReadinessState, AdminSessionCheckTrigger, AdminSessionWritePermission,
     fetch_admin_readiness,
 };
 
@@ -36,7 +34,7 @@ pub(super) fn AdminShell() -> Element {
     let current_route = use_route::<Route>();
     let is_login_path = matches!(&current_route, Route::Login {});
     let is_dashboard_path = matches!(&current_route, Route::Dashboard {});
-    let (view, dispatch) = use_session();
+    let (view, dispatch, submit_login) = use_session();
     let recheck = use_callback(move |()| dispatch.call(Event::CheckRequested));
     use_context_provider(move || AdminSessionCheckTrigger(recheck));
     let mutation_permission = use_memo(move || view.read().can_write);
@@ -113,9 +111,10 @@ pub(super) fn AdminShell() -> Element {
         if is_login_path {
             rsx! {
                 AdminLogin {
-                    on_login: move |session: AdminSession| {
-                        dispatch.call(Event::LoginCompleted(Rc::new(session)));
-                    },
+                    submitting: snapshot.login_pending,
+                    login_error: snapshot.login_error,
+                    on_edit: move |_| dispatch.call(Event::LoginInputChanged),
+                    on_submit: submit_login,
                 }
             }
         } else {

@@ -1,15 +1,15 @@
 use std::rc::Rc;
 use std::time::Instant;
 
-use super::{NOW, SessionFixture, read_ticket};
+use super::{NOW, SessionFixture, login_after_old_session_expires, read_ticket};
 use crate::api::AdminSession;
+use crate::surface::auth::activity::{activity_delay, estimated_expiration_millis};
 use crate::surface::auth::session::{
     CheckReason, Cookie, Effect, Event, LogoutOutcome, Phase, ReadOutcome, RenewalOutcome, Request,
     State, Timer, step,
 };
 
-/// 默认套件穷举到长度 3（不到一秒）。长度 4 的完整穷举约 3800 万条序列、二十多秒，
-/// 改动会话状态机时手工运行：
+/// 默认套件穷举到长度 3。改动会话状态机时手工运行长度 4 的完整穷举：
 /// `cargo test --locked -p auction-web-admin --bin auction-web-admin -- --ignored exhaustive`。
 #[test]
 fn exhaustive_event_sequences_preserve_session_invariants() {
@@ -17,7 +17,7 @@ fn exhaustive_event_sequences_preserve_session_invariants() {
 }
 
 #[test]
-#[ignore = "完整穷举耗时二十多秒，改动会话状态机时手工运行"]
+#[ignore = "完整穷举耗时较长，改动会话状态机时手工运行"]
 fn exhaustive_event_sequences_up_to_length_four() {
     run_exhaustive(4);
 }
@@ -96,8 +96,15 @@ impl Cases {
         let (logging_out, _) = current.apply(authenticated.clone(), Event::LogoutClicked, NOW);
         let (logout_with_broadcast, _) = current.apply(logging_out.clone(), Event::Broadcast, NOW);
         let (renewing, _) = current.start_renewal(authenticated.clone());
+        let (logout_with_renewal, _) = current.apply(renewing.clone(), Event::LogoutClicked, NOW);
         let (renewing_with_input, _) =
             current.apply(renewing, Event::Input { on_logout: false }, NOW);
+        let mut logging_in = logged_out.clone();
+        logging_in.start_login().unwrap();
+        let (login_with_broadcast, _) =
+            step(logging_in.clone(), Event::Broadcast, Cookie::Missing, NOW);
+        let (login_with_old_renewal, _, _) =
+            login_after_old_session_expires(&self.previous.initial);
         vec![
             starting,
             starting_check,
@@ -108,7 +115,11 @@ impl Cases {
             explicit,
             logging_out,
             logout_with_broadcast,
+            logout_with_renewal,
             renewing_with_input,
+            logging_in,
+            login_with_broadcast,
+            login_with_old_renewal,
         ]
     }
 
@@ -133,7 +144,7 @@ impl Cases {
         let request = match kind {
             Kind::Read(_) => state.check.as_ref().map(|check| &check.request),
             Kind::Logout(_) => active_logout(state),
-            Kind::Renewal(_) => state.renewal.as_ref(),
+            Kind::Renewal(_) => state.renewal.as_ref().map(|renewal| &renewal.request),
             _ => None,
         };
         let cookie = request
@@ -145,13 +156,25 @@ impl Cases {
         } else {
             (&self.current, &self.previous)
         };
-        let observed = if old { &replacement.initial.cookie } else { cookie };
+        let observed = match kind {
+            Kind::BroadcastAfterCookieClear | Kind::Logout(Logout::Cleared) => &Cookie::Missing,
+            Kind::LoginFinished if old => &Cookie::Missing,
+            _ if old => &replacement.initial.cookie,
+            _ => cookie,
+        };
         let ticket = request.map_or(0, |request| request.ticket);
         let event = match kind {
             Kind::Start => Event::Start,
-            Kind::Login => Event::LoginCompleted(fixture.session(Projection::Initial)),
+            Kind::LoginFinished => Event::LoginFinished(
+                state.login.unwrap_or(0),
+                if old {
+                    Err("request_timeout".to_owned())
+                } else {
+                    Ok(fixture.session(Projection::Initial))
+                },
+            ),
             Kind::Explicit => Event::CheckRequested,
-            Kind::Broadcast => Event::Broadcast,
+            Kind::Broadcast | Kind::BroadcastAfterCookieClear => Event::Broadcast,
             Kind::Visible => Event::Visible,
             Kind::Input(on_logout) => Event::Input { on_logout },
             Kind::Exit => Event::LogoutClicked,
@@ -171,7 +194,7 @@ impl Cases {
             }
             Kind::Logout(result) => {
                 let outcome = match result {
-                    Logout::Ok => LogoutOutcome::Succeeded,
+                    Logout::Ok | Logout::Cleared => LogoutOutcome::Succeeded,
                     Logout::Rejected => LogoutOutcome::Rejected("origin_forbidden".to_owned()),
                     Logout::Unknown => LogoutOutcome::Unknown("request_timeout".to_owned()),
                     Logout::Limited => LogoutOutcome::RateLimited("rate_limited".to_owned()),
@@ -199,9 +222,10 @@ impl Cases {
 #[derive(Clone, Copy)]
 enum Kind {
     Start,
-    Login,
+    LoginFinished,
     Explicit,
     Broadcast,
+    BroadcastAfterCookieClear,
     Visible,
     Input(bool),
     Exit,
@@ -213,7 +237,13 @@ enum Kind {
 
 impl Kind {
     fn has_result(self) -> bool {
-        matches!(self, Self::Read(_) | Self::Logout(_) | Self::Renewal(_))
+        matches!(
+            self,
+            Self::LoginFinished
+                | Self::Read(_)
+                | Self::Logout(Logout::Ok | Logout::Rejected | Logout::Unknown | Logout::Limited)
+                | Self::Renewal(_)
+        )
     }
 }
 
@@ -233,6 +263,7 @@ enum Read {
 #[derive(Clone, Copy)]
 enum Logout {
     Ok,
+    Cleared,
     Rejected,
     Unknown,
     Limited,
@@ -250,9 +281,10 @@ enum Renewal {
 
 const EVENTS: &[Kind] = &[
     Kind::Start,
-    Kind::Login,
+    Kind::LoginFinished,
     Kind::Explicit,
     Kind::Broadcast,
+    Kind::BroadcastAfterCookieClear,
     Kind::Visible,
     Kind::Input(false),
     Kind::Input(true),
@@ -264,6 +296,7 @@ const EVENTS: &[Kind] = &[
     Kind::Read(Read::Unauthorized),
     Kind::Read(Read::Failed),
     Kind::Logout(Logout::Ok),
+    Kind::Logout(Logout::Cleared),
     Kind::Logout(Logout::Rejected),
     Kind::Logout(Logout::Unknown),
     Kind::Logout(Logout::Limited),
@@ -320,7 +353,7 @@ fn verify_transition(
     assert!(next.renewal.is_none() || next.renewal_timer.is_none());
     if let Some(check) = &next.check {
         assert!(
-            matches!(next.phase, Phase::Checking(_))
+            matches!(next.phase, Phase::Checking(_) | Phase::CheckingLogin)
                 || (check.reason == CheckReason::Routine && view.can_write)
         );
     }
@@ -337,6 +370,25 @@ fn verify_transition(
         assert!(!view.can_write);
         assert!(view.session.is_none());
         assert_eq!(count.notices, 0);
+    }
+    if let Some(pending) = &next.buffered_renewal {
+        assert!(!view.can_write && view.session.is_none());
+        assert!(&pending.cookie == observed);
+        assert!(matches!(next.phase, Phase::Checking(None) | Phase::Unavailable(None, _)));
+    }
+    if let Some(login) = previous.login {
+        assert_eq!((count.writes, count.notices), (0, 0));
+        assert!(!view.can_write && view.session.is_none());
+        if matches!(event, Event::LoginFinished(ticket, _) if *ticket == login) {
+            assert!(next.login.is_none());
+            assert_eq!(count.reads, 1);
+            assert!(next.check.as_ref().is_some_and(
+                |check| check.reason == CheckReason::Login && &check.request.cookie == observed
+            ));
+        } else {
+            assert_eq!(next.login, Some(login));
+            assert_eq!(count.reads, 0);
+        }
     }
 
     if let Phase::LoggingOut(_, logout) = &previous.phase
@@ -356,14 +408,21 @@ fn verify_transition(
             if previous.check.as_ref().is_some_and(|check| check.request.ticket == *ticket) =>
         {
             if sent != observed {
-                verify_replaced_generation(next, observed, &count, false);
+                verify_replaced_generation(next, observed, &count);
             } else {
                 match outcome {
+                    ReadOutcome::Authenticated(session)
+                        if Cookie::from_session(session) != *sent =>
+                    {
+                        verify_replaced_generation(next, observed, &count);
+                    }
                     ReadOutcome::Authenticated(session) => {
-                        verify_projection(previous, next, session);
+                        verify_projection(previous, next, session, true);
+                        assert!(next.buffered_renewal.is_none());
                     }
                     ReadOutcome::Unauthenticated => {
                         assert!(view.logged_out && view.session.is_none());
+                        assert!(next.buffered_renewal.is_none());
                         assert_eq!(count.notices, u8::from(previous.phase.verified().is_some()));
                     }
                     ReadOutcome::Failed(_) => {}
@@ -373,8 +432,10 @@ fn verify_transition(
         Event::LogoutFinished(ticket, sent, outcome)
             if active_logout(previous).is_some_and(|request| request.ticket == *ticket) =>
         {
-            if sent != observed {
-                verify_replaced_generation(next, observed, &count, false);
+            let cleared =
+                matches!(outcome, LogoutOutcome::Succeeded) && *observed == Cookie::Missing;
+            if sent != observed && !cleared {
+                verify_replaced_generation(next, observed, &count);
             } else if matches!(outcome, LogoutOutcome::Succeeded) {
                 let deferred =
                     matches!(&previous.phase, Phase::LoggingOut(_, logout) if logout.review_after);
@@ -386,13 +447,25 @@ fn verify_transition(
             }
         }
         Event::RenewalFinished(ticket, sent, outcome)
-            if previous.renewal.as_ref().is_some_and(|request| request.ticket == *ticket) =>
+            if previous
+                .renewal
+                .as_ref()
+                .is_some_and(|renewal| renewal.request.ticket == *ticket) =>
         {
-            if sent != observed {
-                let already_reading = previous.check.as_ref().is_some_and(|check| {
-                    check.reason == CheckReason::CookieChanged && &check.request.cookie == observed
-                });
-                verify_replaced_generation(next, observed, &count, already_reading);
+            assert!(next.renewal.is_none());
+            let belongs_to_session = previous
+                .renewal
+                .as_ref()
+                .and_then(|renewal| renewal.source.as_ref())
+                .is_some_and(|source| &source.cookie == sent && sent == observed);
+            if !belongs_to_session {
+                if matches!(&previous.phase, Phase::Authenticated(verified)
+                    if &verified.cookie != observed)
+                {
+                    verify_replaced_generation(next, observed, &count);
+                } else {
+                    verify_retired_renewal(previous, next, &count, now);
+                }
             } else {
                 match outcome {
                     RenewalOutcome::Unknown | RenewalOutcome::CsrfRejected => {
@@ -407,6 +480,7 @@ fn verify_transition(
                     }
                     RenewalOutcome::Unauthenticated => {
                         assert!(view.session.is_none() && !view.can_write);
+                        assert!(next.buffered_renewal.is_none());
                     }
                     RenewalOutcome::RateLimited(retry_after) => {
                         verify_rate_limit(previous, next, &count, *retry_after, now);
@@ -414,7 +488,20 @@ fn verify_transition(
                     RenewalOutcome::Succeeded(session)
                         if !view.logging_out && previous.phase.verified().is_some() =>
                     {
-                        verify_projection(previous, next, session);
+                        verify_projection(previous, next, session, false);
+                    }
+                    RenewalOutcome::Succeeded(session)
+                        if matches!(
+                            previous.phase,
+                            Phase::Checking(None) | Phase::Unavailable(None, _)
+                        ) =>
+                    {
+                        assert!(
+                            next.buffered_renewal
+                                .as_ref()
+                                .is_some_and(|pending| Rc::ptr_eq(&pending.session, session))
+                        );
+                        assert_eq!((count.reads, count.writes, count.notices), (0, 0, 0));
                     }
                     RenewalOutcome::Succeeded(_) | RenewalOutcome::Rejected => {}
                 }
@@ -424,29 +511,56 @@ fn verify_transition(
     }
 }
 
-fn verify_projection(previous: &State, next: &State, received: &Rc<AdminSession>) {
+fn verify_retired_renewal(previous: &State, next: &State, count: &Effects, now: f64) {
+    assert_eq!((count.writes, count.reads, count.notices), (0, 0, 0));
+    assert_eq!(std::mem::discriminant(&next.phase), std::mem::discriminant(&previous.phase));
+    assert!(next.view() == previous.view());
+    let ticket = |state: &State| state.check.as_ref().map(|check| check.request.ticket);
+    assert_eq!(ticket(next), ticket(previous));
+    assert_eq!(next.check_timer, previous.check_timer);
+    assert!(next.activity.timing == previous.activity.timing);
+    assert_eq!(next.activity.retry_not_before, previous.activity.retry_not_before);
+    let expected_delay = match &previous.phase {
+        Phase::Authenticated(verified) => activity_delay(
+            previous.activity.timing,
+            previous.activity.latest_input,
+            now,
+            estimated_expiration_millis(&verified.session),
+            previous.activity.retry_not_before,
+        ),
+        _ => None,
+    };
+    assert_eq!(count.renewal_delay, expected_delay);
+}
+
+fn verify_projection(previous: &State, next: &State, received: &Rc<AdminSession>, from_read: bool) {
     let mut expected = received;
-    if let Some(previous) = previous.phase.verified() {
-        if !previous.session.same_identity(received) {
+    if let Some(current) = previous.phase.verified() {
+        if !current.session.same_identity(received) {
             return;
         }
-        let known = &previous.session;
-        if known.expires_at > received.expires_at
-            || (known.expires_at == received.expires_at
-                && known.server_time >= received.server_time)
-        {
-            expected = known;
-        }
+        expected = later_projection(expected, &current.session);
+    }
+    if from_read
+        && let Some(pending) = &previous.buffered_renewal
+        && pending.session.same_identity(received)
+    {
+        expected = later_projection(&pending.session, expected);
     }
     assert!(Rc::ptr_eq(&next.phase.verified().unwrap().session, expected));
 }
 
-fn verify_replaced_generation(
-    next: &State,
-    observed: &Cookie,
-    count: &Effects,
-    already_reading: bool,
-) {
+fn later_projection<'a>(
+    first: &'a Rc<AdminSession>,
+    second: &'a Rc<AdminSession>,
+) -> &'a Rc<AdminSession> {
+    let key = |session: &AdminSession| {
+        (session.expires_at.min(session.absolute_expires_at), session.server_time)
+    };
+    if key(first) > key(second) { first } else { second }
+}
+
+fn verify_replaced_generation(next: &State, observed: &Cookie, count: &Effects) {
     let view = next.view();
     assert_eq!((count.writes, count.notices), (0, 0));
     assert!(!view.can_write);
@@ -458,7 +572,7 @@ fn verify_replaced_generation(
             next.check.as_ref().is_some_and(|check| check.reason == CheckReason::CookieChanged
                 && &check.request.cookie == observed)
         );
-        assert_eq!(count.reads, u8::from(!already_reading));
+        assert_eq!(count.reads, 1);
     }
 }
 
@@ -481,7 +595,7 @@ fn verify_rate_limit(
         assert!(count.renewal_delay.is_none());
         return;
     };
-    let expiration = crate::surface::auth::activity::estimated_expiration_millis(&verified.session);
+    let expiration = estimated_expiration_millis(&verified.session);
     let delay = (earliest - now).ceil() as u32;
     let retained_input =
         previous.activity.latest_input.filter(|_| now + f64::from(delay) < expiration);

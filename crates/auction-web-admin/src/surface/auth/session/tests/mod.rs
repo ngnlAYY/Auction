@@ -132,6 +132,201 @@ fn count_notices(effects: &[Effect]) -> usize {
     effects.iter().filter(|effect| matches!(effect, Effect::BroadcastEnded)).count()
 }
 
+fn logged_out() -> State {
+    let (state, effects) = step(State::default(), Event::Start, Cookie::Missing, NOW);
+    step(
+        state,
+        Event::ReadFinished(read_ticket(&effects), Cookie::Missing, ReadOutcome::Unauthenticated),
+        Cookie::Missing,
+        NOW,
+    )
+    .0
+}
+
+#[test]
+fn login_receipt_after_broadcast_reads_the_current_cookie_before_opening_writes() {
+    let new = SessionFixture::new("new-cookie", 60);
+    let mut state = logged_out();
+    let login = state.start_login().unwrap();
+    assert!(state.view().login_pending);
+    assert!(state.start_login().is_none());
+    for event in [Event::Broadcast, Event::Visible, Event::Broadcast, Event::CheckRequested] {
+        let (next, effects) = step(state, event, Cookie::Missing, NOW);
+        assert!(effects.is_empty());
+        assert!(next.view().session.is_none());
+        assert!(!next.view().logged_out);
+        assert!(!next.view().can_write);
+        state = next;
+    }
+
+    let completed = Event::LoginFinished(login, Ok(Rc::clone(&new.session)));
+    let (state, effects) = new.apply(state, completed.clone(), NOW);
+    let check = read_ticket(&effects);
+    assert_eq!(effects.len(), 1);
+    assert!(!state.view().can_write);
+    let (state, effects) = new.apply(state, completed, NOW);
+    assert!(effects.is_empty());
+    let (state, _) = new.apply(state, new.read_ok(check), NOW);
+    assert!(state.view().can_write);
+    assert_eq!(state.view().session.as_deref(), Some(new.session.as_ref()));
+}
+
+#[test]
+fn login_completion_with_no_current_session_does_not_repost_or_open_writes() {
+    let mut state = logged_out();
+    let login = state.start_login().unwrap();
+    let (mut state, effects) = step(
+        state,
+        Event::LoginFinished(login, Err("request_timeout".to_owned())),
+        Cookie::Missing,
+        NOW,
+    );
+    assert!(state.view().logged_out);
+    assert!(state.view().login_pending);
+    assert!(!state.view().can_write);
+    assert!(state.start_login().is_none());
+    let (state, effects) = step(
+        state,
+        Event::ReadFinished(read_ticket(&effects), Cookie::Missing, ReadOutcome::Unauthenticated),
+        Cookie::Missing,
+        NOW,
+    );
+    assert!(effects.is_empty());
+    assert!(state.view().logged_out);
+    assert!(!state.view().login_pending);
+    assert!(!state.view().can_write);
+    assert!(state.view().session.is_none());
+}
+
+fn login_after_old_session_expires(old: &SessionFixture) -> (State, Ticket, Ticket) {
+    let (state, renewal) = old.start_renewal(old.authenticated());
+    let (state, effects) = old.apply(state, Event::Visible, NOW);
+    let (mut state, _) = old.apply(
+        state,
+        Event::ReadFinished(
+            read_ticket(&effects),
+            old.cookie.clone(),
+            ReadOutcome::Unauthenticated,
+        ),
+        NOW,
+    );
+    let login = state.start_login().unwrap();
+    (state, renewal, login)
+}
+
+#[test]
+fn old_renewal_401_after_broadcast_does_not_remount_the_logging_in_form() {
+    let old = SessionFixture::new("old-cookie", 900);
+    let (state, renewal, _) = login_after_old_session_expires(&old);
+    let (state, _) = old.apply(state, Event::Broadcast, NOW);
+    assert!(!state.view().logged_out);
+
+    let (state, effects) = old.apply(
+        state,
+        Event::RenewalFinished(renewal, old.cookie.clone(), RenewalOutcome::Unauthenticated),
+        NOW,
+    );
+    assert!(effects.is_empty());
+    assert!(state.renewal.is_none());
+    assert!(state.view().login_pending);
+    assert!(!state.view().logged_out);
+    assert!(!state.view().can_write);
+}
+
+#[test]
+fn old_renewal_401_does_not_replace_the_new_cookie_login_get() {
+    let old = SessionFixture::new("old-cookie", 900);
+    let new = SessionFixture::new("new-cookie", 60);
+    let (state, renewal, login) = login_after_old_session_expires(&old);
+    let (state, _) = old.apply(state, Event::Broadcast, NOW);
+    let (state, effects) =
+        new.apply(state, Event::LoginFinished(login, Ok(Rc::clone(&new.session))), NOW);
+    let check = read_ticket(&effects);
+    let (state, effects) = new.apply(
+        state,
+        Event::RenewalFinished(renewal, old.cookie, RenewalOutcome::Unauthenticated),
+        NOW,
+    );
+    assert!(effects.is_empty());
+    assert!(state.renewal.is_none());
+    assert!(!state.view().can_write);
+    assert!(state.check.as_ref().is_some_and(|pending| pending.request.ticket == check));
+    let (state, _) = new.apply(state, new.read_ok(check), NOW);
+    assert!(state.view().can_write);
+}
+
+#[test]
+fn discarded_renewal_schedules_new_input_after_logout_read_confirms_first() {
+    let current = SessionFixture::new("current-cookie", 60);
+    let renewed = current.projection_after(1, 600, NOW);
+    let (state, renewal) = current.start_renewal(current.authenticated());
+    let (state, effects) = current.apply(state, Event::LogoutClicked, NOW);
+    let (state, effects) = current.apply(
+        state,
+        Event::LogoutFinished(
+            logout_ticket(&effects),
+            current.cookie.clone(),
+            LogoutOutcome::RateLimited("rate_limited".to_owned()),
+        ),
+        NOW,
+    );
+    let (state, _) = current.apply(state, current.read_ok(read_ticket(&effects)), NOW);
+    let (state, effects) = current.apply(state, Event::Input { on_logout: false }, NOW + 1.0);
+    assert!(effects.is_empty());
+    assert_eq!(state.activity.latest_input, Some(NOW + 1.0));
+    let (state, effects) = current.apply(
+        state,
+        Event::RenewalFinished(
+            renewal,
+            current.cookie.clone(),
+            RenewalOutcome::Succeeded(renewed.session),
+        ),
+        NOW + 2.0,
+    );
+    assert_eq!(state.view().session.as_deref(), Some(current.session.as_ref()));
+    let (timer, delay) = armed_timer(&effects, Timer::Renewal);
+    let (_, effects) = current.apply(
+        state,
+        Event::TimerElapsed(Timer::Renewal, timer),
+        NOW + 2.0 + f64::from(delay),
+    );
+    assert!(matches!(effects.as_slice(), [Effect::Renew(ticket, session)] if
+        *ticket != renewal && Rc::ptr_eq(session, &current.session)));
+}
+
+#[test]
+fn late_logout_cookie_removal_keeps_new_login_closed_after_broadcast() {
+    let old = SessionFixture::new("old-cookie", 900);
+    let new = SessionFixture::new("new-cookie", 60);
+    let (tab_a, effects) = old.apply(old.authenticated(), Event::LogoutClicked, NOW);
+    let mut tab_b = logged_out();
+    let login = tab_b.start_login().unwrap();
+    let (tab_b, effects_b) =
+        new.apply(tab_b, Event::LoginFinished(login, Ok(Rc::clone(&new.session))), NOW);
+    let (tab_b, _) = new.apply(tab_b, new.read_ok(read_ticket(&effects_b)), NOW);
+    assert!(tab_b.view().can_write);
+
+    // 浏览器在收到 DELETE 响应时已清除同名 Cookie，外壳只能按当前 Cookie 复核。
+    let (_, effects) = step(
+        tab_a,
+        Event::LogoutFinished(logout_ticket(&effects), old.cookie, LogoutOutcome::Succeeded),
+        Cookie::Missing,
+        NOW,
+    );
+    assert_eq!(count_notices(&effects), 1);
+    let (tab_b, effects) = step(tab_b, Event::Broadcast, Cookie::Missing, NOW);
+    assert!(tab_b.view().session.is_none());
+    assert!(!tab_b.view().can_write);
+    let (tab_b, _) = step(
+        tab_b,
+        Event::ReadFinished(read_ticket(&effects), Cookie::Missing, ReadOutcome::Unauthenticated),
+        Cookie::Missing,
+        NOW,
+    );
+    assert!(tab_b.view().logged_out);
+    assert!(!tab_b.view().can_write);
+}
+
 #[test]
 fn late_old_401_does_not_end_another_tabs_new_login() {
     let old = SessionFixture::new("old-cookie", 900);
@@ -149,14 +344,10 @@ fn late_old_401_does_not_end_another_tabs_new_login() {
     );
     let late_check = read_ticket(&effects);
 
-    let (tab_b, effects) = step(State::default(), Event::Start, Cookie::Missing, NOW);
-    let (tab_b, _) = step(
-        tab_b,
-        Event::ReadFinished(read_ticket(&effects), Cookie::Missing, ReadOutcome::Unauthenticated),
-        Cookie::Missing,
-        NOW,
-    );
-    let (tab_b, effects) = new.apply(tab_b, Event::LoginCompleted(Rc::clone(&new.session)), NOW);
+    let mut tab_b = logged_out();
+    let login = tab_b.start_login().unwrap();
+    let (tab_b, effects) =
+        new.apply(tab_b, Event::LoginFinished(login, Ok(Rc::clone(&new.session))), NOW);
     let (tab_b, _) = new.apply(tab_b, new.read_ok(read_ticket(&effects)), NOW);
     assert!(tab_b.view().can_write);
 

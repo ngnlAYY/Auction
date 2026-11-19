@@ -1,7 +1,9 @@
 //! Admin 会话的纯状态机。已认证才允许写入，例行 GET 在途仍属于已认证状态。
+//! 在途登录由外壳登记，广播卸载表单后合并到登录结清时的一次 GET。
 //! 退出请求独立持有回执；收到广播立即卸载敏感页面，退出期间只登记事后复核。
 //! 退出成功只通知一次。旧 Cookie 代际的回执只能要求重读当前 Cookie。
 //! 同一代际的截止只向后更新，截止与单调计时基准来自同一份服务端投影。
+//! 广播期间的同代续期只暂存，确认身份的 GET 才能采用。
 //! 续期结果未知只做一次有界的只读复核。限流后仅保留 POST 发出之后的输入，
 //! 在退避下界与会话截止之间重新安排，等待期间不因输入时效丢弃。
 //! 确认会话失效也立即撤下敏感页面。
@@ -97,6 +99,12 @@ struct Logout {
     was_writable: bool,
 }
 
+#[derive(Clone)]
+struct Renewal {
+    request: Request,
+    source: Option<Verified>,
+}
+
 /// 用户可观察的会话阶段与当前认证宿主。
 #[derive(Clone, Default)]
 enum Phase {
@@ -104,6 +112,7 @@ enum Phase {
     Starting,
     Authenticated(Verified),
     Checking(Option<Verified>),
+    CheckingLogin,
     Unavailable(Option<Verified>, String),
     LoggingOut(Option<Verified>, Logout),
     LoggedOut,
@@ -116,7 +125,7 @@ impl Phase {
             Self::Checking(verified)
             | Self::Unavailable(verified, _)
             | Self::LoggingOut(verified, _) => verified.as_ref(),
-            Self::Starting | Self::LoggedOut => None,
+            Self::Starting | Self::CheckingLogin | Self::LoggedOut => None,
         }
     }
 }
@@ -133,12 +142,15 @@ struct Activity {
 pub(super) struct State {
     phase: Phase,
     check: Option<Check>,
-    renewal: Option<Request>,
+    login: Option<Ticket>,
+    renewal: Option<Renewal>,
+    buffered_renewal: Option<Verified>,
     activity: Activity,
     check_timer: Option<Ticket>,
     renewal_timer: Option<Ticket>,
     next_ticket: Ticket,
     view_epoch: u64,
+    login_error: Option<String>,
     logout_error: Option<String>,
 }
 
@@ -150,6 +162,8 @@ pub(super) struct View {
     pub(super) can_write: bool,
     pub(super) logging_out: bool,
     pub(super) logged_out: bool,
+    pub(super) login_pending: bool,
+    pub(super) login_error: Option<String>,
     pub(super) error: Option<String>,
     pub(super) logout_error: Option<String>,
 }
@@ -161,7 +175,9 @@ impl State {
             epoch: self.view_epoch,
             can_write: matches!(self.phase, Phase::Authenticated(_)),
             logging_out: matches!(self.phase, Phase::LoggingOut(..)),
-            logged_out: matches!(self.phase, Phase::LoggedOut),
+            logged_out: matches!(self.phase, Phase::LoggedOut | Phase::CheckingLogin),
+            login_pending: self.login.is_some() || matches!(self.phase, Phase::CheckingLogin),
+            login_error: self.login_error.clone(),
             error: match &self.phase {
                 Phase::Unavailable(_, error) => Some(error.clone()),
                 _ => None,
@@ -210,7 +226,8 @@ pub(super) enum Timer {
 #[cfg_attr(test, derive(Clone))]
 pub(super) enum Event {
     Start,
-    LoginCompleted(Rc<AdminSession>),
+    LoginFinished(Ticket, Result<Rc<AdminSession>, String>),
+    LoginInputChanged,
     CheckRequested,
     Broadcast,
     Visible,

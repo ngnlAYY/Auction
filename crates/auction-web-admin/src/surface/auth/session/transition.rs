@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use super::deadlines::{is_newer_projection, session_check_delay, session_lifetime_millis};
 use super::{
-    Check, CheckReason, Cookie, Effect, Event, Logout, LogoutOutcome, Phase, ReadOutcome,
+    Check, CheckReason, Cookie, Effect, Event, Logout, LogoutOutcome, Phase, ReadOutcome, Renewal,
     RenewalOutcome, Request, State, Ticket, Timer, Verified,
 };
 use crate::api::AdminSession;
@@ -21,15 +21,31 @@ pub(in crate::surface::auth) fn step(
     now: f64,
 ) -> (State, Vec<Effect>) {
     let mut effects = Actions { cookie, now, effects: Vec::new() };
+    // 代际改变后，待合并的投影不能再延长任何会话。输入事件没有读取 Cookie。
+    state.buffered_renewal.take_if(|pending| pending.cookie.conflicts_with(&effects.cookie));
+    if let Some(renewal) = &mut state.renewal {
+        renewal.source.take_if(|source| source.cookie.conflicts_with(&effects.cookie));
+    }
     match event {
         Event::Start if matches!(state.phase, Phase::Starting) => {
             state.begin_read(CheckReason::Startup, &mut effects);
         }
-        Event::LoginCompleted(session) if matches!(state.phase, Phase::LoggedOut) => {
-            if !Cookie::from_session(&session).conflicts_with(&effects.cookie) {
-                state.activity.timing = Some(RenewalTiming::from_session(&session));
+        Event::LoginFinished(ticket, outcome) if state.login == Some(ticket) => {
+            state.login = None;
+            // POST 成功或结果未知都只复核一次当前 Cookie，回执不能授予写权限。
+            match outcome {
+                Ok(session) if Cookie::from_session(&session).agrees_with(&effects.cookie) => {
+                    state.activity.timing = Some(RenewalTiming::from_session(&session));
+                }
+                Err(code) => state.login_error = Some(code),
+                Ok(_) => {}
             }
             state.begin_read(CheckReason::Login, &mut effects);
+        }
+        Event::LoginInputChanged
+            if matches!(state.phase, Phase::LoggedOut) && state.login.is_none() =>
+        {
+            state.login_error = None;
         }
         Event::CheckRequested if !matches!(state.phase, Phase::LoggedOut) => {
             state.begin_read(CheckReason::Explicit, &mut effects);
@@ -71,6 +87,17 @@ struct Actions {
 }
 
 impl State {
+    /// 在外壳派发一次登录 POST 前登记归属，状态机不持有登录凭据。
+    pub(in crate::surface::auth) fn start_login(&mut self) -> Option<Ticket> {
+        if !matches!(self.phase, Phase::LoggedOut) || self.login.is_some() {
+            return None;
+        }
+        let ticket = self.ticket();
+        self.login = Some(ticket);
+        self.login_error = None;
+        Some(ticket)
+    }
+
     fn ticket(&mut self) -> Ticket {
         self.next_ticket += 1;
         self.next_ticket
@@ -117,6 +144,13 @@ impl State {
     }
 
     fn begin_read(&mut self, reason: CheckReason, actions: &mut Actions) {
+        if self.login.is_some() {
+            // 广播立即卸载旧表单。等待 POST 结清，再合并复核，避免 GET 抢在新 Cookie 之前。
+            if reason == CheckReason::Broadcast {
+                self.phase = Phase::Checking(None);
+            }
+            return;
+        }
         if let Phase::LoggingOut(_, logout) = &mut self.phase {
             // DELETE 等待期间不可用 GET 的快照恢复授权，也不能撤销退出回执的所有权。
             logout.review_after = true;
@@ -136,7 +170,11 @@ impl State {
         self.cancel_timer(Timer::Check, actions);
         if !keeps_permission {
             self.cancel_timer(Timer::Renewal, actions);
-            self.phase = Phase::Checking(self.phase.take_verified());
+            self.phase = if reason == CheckReason::Login && matches!(self.phase, Phase::LoggedOut) {
+                Phase::CheckingLogin
+            } else {
+                Phase::Checking(self.phase.take_verified())
+            };
         }
         let request = self.request(actions);
         actions.effects.push(Effect::Read(request.ticket));
@@ -170,7 +208,7 @@ impl State {
         }
         match outcome {
             ReadOutcome::Authenticated(session) => {
-                let verified = Verified::new(session);
+                let mut verified = Verified::new(session);
                 if verified.cookie.conflicts_with(&actions.cookie)
                     || verified.cookie.conflicts_with(sent)
                 {
@@ -182,6 +220,7 @@ impl State {
                 {
                     self.end_session(false, actions);
                 } else {
+                    self.merge_buffered_renewal(&mut verified, sent, actions);
                     self.confirm(verified, actions);
                 }
             }
@@ -204,6 +243,10 @@ impl State {
         {
             verified.session = Rc::clone(&current.session);
         }
+        if let Some(renewal) = &mut self.renewal {
+            renewal.source.take_if(|source| !source.session.same_identity(&verified.session));
+        }
+        self.login_error = None;
         self.phase = Phase::Authenticated(verified);
         self.schedule_check(actions);
         self.schedule_renewal(actions);
@@ -211,11 +254,20 @@ impl State {
 
     fn end_session(&mut self, notify: bool, actions: &mut Actions) {
         self.hide_session(actions);
+        self.retire_renewal();
         self.cancel_read(actions);
         self.cancel_timer(Timer::Check, actions);
         self.phase = Phase::LoggedOut;
         if notify {
             actions.effects.push(Effect::BroadcastEnded);
+        }
+    }
+
+    fn retire_renewal(&mut self) {
+        self.buffered_renewal = None;
+        if let Some(renewal) = &mut self.renewal {
+            // 保留请求归属，旧回执只能释放在途位置。
+            renewal.source = None;
         }
     }
 
@@ -240,6 +292,7 @@ impl State {
         self.cancel_read(actions);
         self.cancel_timer(Timer::Check, actions);
         self.cancel_timer(Timer::Renewal, actions);
+        self.buffered_renewal = None;
         self.activity.latest_input = None;
         self.logout_error = None;
         let request = self.request(actions);
@@ -266,6 +319,7 @@ impl State {
         let stale = logout.request.is_stale(sent, &actions.cookie, cleared_cookie);
         let review_after = logout.review_after;
         let was_writable = logout.was_writable;
+        self.retire_renewal();
         self.phase = Phase::Checking(self.phase.take_verified());
         if stale {
             self.reread_current_cookie(actions);
@@ -354,12 +408,12 @@ impl State {
             self.schedule_renewal(actions);
             return;
         }
-        let session = Rc::clone(&verified.session);
+        let source = verified.clone();
         // 消耗已派发的活动批次。等待回执期间记录的输入属于下一次派发。
         self.activity.latest_input = None;
         let request = self.request(actions);
-        actions.effects.push(Effect::Renew(request.ticket, session));
-        self.renewal = Some(request);
+        actions.effects.push(Effect::Renew(request.ticket, Rc::clone(&source.session)));
+        self.renewal = Some(Renewal { request, source: Some(source) });
     }
 
     fn finish_renewal(
@@ -369,16 +423,31 @@ impl State {
         outcome: RenewalOutcome,
         actions: &mut Actions,
     ) {
-        let Some(request) = self.renewal.take_if(|request| request.ticket == ticket) else {
+        let Some(renewal) = self.renewal.take_if(|renewal| renewal.request.ticket == ticket) else {
             return;
         };
-        if request.is_stale(sent, &actions.cookie, false) {
-            self.reread_current_cookie(actions);
+        let Some(source) = renewal.source.filter(|source| {
+            !source.cookie.conflicts_with(sent)
+                && !renewal.request.is_stale(sent, &actions.cookie, false)
+        }) else {
+            // 旧回执不接管已有的登录、复核或退避；新输入仍由当前已确认会话排期。
+            if matches!(&self.phase, Phase::Authenticated(verified)
+                if verified.cookie.conflicts_with(&actions.cookie))
+            {
+                // 当前宿主仍授权旧 Cookie，独立的 Cookie 观测要求撤回写许可。
+                self.reread_current_cookie(actions);
+            } else {
+                self.schedule_renewal(actions);
+            }
             return;
-        }
+        };
         match outcome {
             RenewalOutcome::Succeeded(session) => {
-                self.apply_renewal(session, sent, actions);
+                if source.session.same_identity(&session) {
+                    self.apply_renewal(session, sent, actions);
+                } else {
+                    self.schedule_renewal(actions);
+                }
             }
             RenewalOutcome::Unauthenticated => {
                 if matches!(self.phase, Phase::LoggingOut(..)) {
@@ -415,7 +484,12 @@ impl State {
             self.reread_current_cookie(actions);
             return;
         }
-        if matches!(self.phase, Phase::LoggingOut(..)) {
+        if matches!(self.phase, Phase::Checking(None) | Phase::Unavailable(None, _)) {
+            // 只暂存来源身份及实际 Cookie 都匹配的回执。敏感宿主和写许可仍由 GET 确认。
+            if projection_cookie.agrees_with(sent) && projection_cookie.agrees_with(&actions.cookie)
+            {
+                self.buffered_renewal = Some(Verified { session, cookie: projection_cookie });
+            }
             return;
         }
         if let Some(verified) = self.phase.verified_mut()
@@ -430,6 +504,26 @@ impl State {
             self.schedule_renewal(actions);
         }
     }
+
+    fn merge_buffered_renewal(
+        &mut self,
+        verified: &mut Verified,
+        sent: &Cookie,
+        actions: &Actions,
+    ) {
+        if let Some(pending) = self.buffered_renewal.take()
+            && pending.cookie.agrees_with(sent)
+            && pending.cookie.agrees_with(&actions.cookie)
+            && pending.session.same_identity(&verified.session)
+        {
+            self.activity.timing = Some(RenewalTiming::from_session(&pending.session));
+            self.activity.retry_not_before = 0.0;
+            if is_newer_projection(&pending.session, &verified.session) {
+                // 截止和单调计时基准必须来自同一份回执。
+                verified.session = pending.session;
+            }
+        }
+    }
 }
 
 impl Phase {
@@ -442,7 +536,7 @@ impl Phase {
             Self::Checking(verified)
             | Self::Unavailable(verified, _)
             | Self::LoggingOut(verified, _) => verified.take(),
-            Self::Starting | Self::LoggedOut => None,
+            Self::Starting | Self::CheckingLogin | Self::LoggedOut => None,
         }
     }
 
@@ -450,7 +544,7 @@ impl Phase {
         match self {
             Self::Authenticated(verified) => Some(verified),
             Self::Checking(verified) | Self::Unavailable(verified, _) => verified.as_mut(),
-            Self::Starting | Self::LoggingOut(..) | Self::LoggedOut => None,
+            Self::Starting | Self::CheckingLogin | Self::LoggingOut(..) | Self::LoggedOut => None,
         }
     }
 }

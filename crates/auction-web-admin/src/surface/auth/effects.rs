@@ -15,18 +15,19 @@ use dioxus::prelude::*;
 
 #[cfg(target_arch = "wasm32")]
 use super::activity::LOGOUT_BUTTON_CLASS;
+use super::login::LoginSubmission;
 use super::session::{
     Cookie, Effect, Event, LogoutOutcome, ReadOutcome, RenewalOutcome, State, Ticket, Timer, View,
     step,
 };
-use crate::api::{AdminApiFailure, AdminSession, fetch_admin_session, logout_admin};
+use crate::api::{AdminApiFailure, AdminSession, fetch_admin_session, login_admin, logout_admin};
 
 /// 宿主测试注入会话投影和事件，继续通过真实 Router 与认证外壳挂载业务页面。
 #[cfg(test)]
 #[derive(Clone, Copy)]
 pub(super) struct TestSession(pub(super) Signal<View>, pub(super) EventHandler<Event>);
 
-pub(super) fn use_session() -> (Signal<View>, EventHandler<Event>) {
+pub(super) fn use_session() -> (Signal<View>, EventHandler<Event>, EventHandler<LoginSubmission>) {
     #[cfg(test)]
     let fixture = try_consume_context::<TestSession>();
     let view = use_signal(View::default);
@@ -34,6 +35,10 @@ pub(super) fn use_session() -> (Signal<View>, EventHandler<Event>) {
     let dispatch = {
         let runtime = Rc::clone(&runtime);
         use_callback(move |event| runtime.accept(event))
+    };
+    let submit_login = {
+        let runtime = Rc::clone(&runtime);
+        use_callback(move |submission| runtime.login(submission))
     };
     use_hook(|| {
         *runtime.broadcast.borrow_mut() =
@@ -62,9 +67,9 @@ pub(super) fn use_session() -> (Signal<View>, EventHandler<Event>) {
     });
     #[cfg(test)]
     if let Some(TestSession(view, dispatch)) = fixture {
-        return (view, dispatch);
+        return (view, dispatch, submit_login);
     }
-    (view, dispatch)
+    (view, dispatch, submit_login)
 }
 
 struct SessionRuntime {
@@ -95,15 +100,31 @@ impl SessionRuntime {
             cookie_generation()
         };
         let (state, effects) = step(self.state.take(), event, cookie, monotonic_millis());
-        let next_view = state.view();
         self.state.replace(state);
+        self.publish();
+        for effect in effects {
+            self.execute(effect);
+        }
+    }
+
+    fn publish(&self) {
+        let next_view = self.state.borrow().view();
         let mut view = self.view;
         if *view.peek() != next_view {
             view.set(next_view);
         }
-        for effect in effects {
-            self.execute(effect);
-        }
+    }
+
+    fn login(self: &Rc<Self>, submission: LoginSubmission) {
+        let Some(ticket) = self.state.borrow_mut().start_login() else { return };
+        self.publish();
+        let runtime = Rc::clone(self);
+        // 外壳作用域持有已经派发的 POST；表单被卸载时也要消费回执并复核当前 Cookie。
+        let task = spawn(async move {
+            let outcome = request_login(submission).await.map(Rc::new);
+            runtime.accept(Event::LoginFinished(ticket, outcome));
+        });
+        let _ = task.poll_now();
     }
 
     fn execute(self: &Rc<Self>, effect: Effect) {
@@ -126,7 +147,7 @@ impl SessionRuntime {
         let runtime = Rc::clone(self);
         self.read.set(Some(spawn(async move {
             let sent = cookie_generation();
-            let outcome = match fetch_admin_session().await {
+            let outcome = match request_session().await {
                 Ok(Some(session)) => ReadOutcome::Authenticated(Rc::new(session)),
                 Ok(None) => ReadOutcome::Unauthenticated,
                 Err(error) => ReadOutcome::Failed(error),
@@ -170,6 +191,11 @@ impl SessionRuntime {
     }
 
     fn arm_timer(self: &Rc<Self>, timer: Timer, ticket: Ticket, delay: u32) {
+        #[cfg(test)]
+        if try_consume_context::<Rc<tests::SessionTransport>>().is_some() {
+            // 宿主替身只推进显式回执，避免启动浏览器定时器。
+            return;
+        }
         let runtime = Rc::clone(self);
         self.timer(timer).set(Some(spawn(async move {
             if delay > 0 {
@@ -179,6 +205,22 @@ impl SessionRuntime {
             runtime.accept(Event::TimerElapsed(timer, ticket));
         })));
     }
+}
+
+async fn request_login(submission: LoginSubmission) -> Result<AdminSession, String> {
+    #[cfg(test)]
+    if let Some(transport) = try_consume_context::<Rc<tests::SessionTransport>>() {
+        return transport.login(submission).await;
+    }
+    login_admin(submission.actor, submission.secret).await
+}
+
+async fn request_session() -> Result<Option<AdminSession>, String> {
+    #[cfg(test)]
+    if let Some(transport) = try_consume_context::<Rc<tests::SessionTransport>>() {
+        return transport.get.request().await;
+    }
+    fetch_admin_session().await
 }
 
 fn cancel(task: &Cell<Option<Task>>) {
@@ -224,9 +266,174 @@ fn renewal_failure(failure: &AdminApiFailure, retry_after: Option<u64>) -> Renew
 
 #[cfg(test)]
 mod tests {
-    use super::{logout_failure, renewal_failure};
-    use crate::api::AdminApiFailure;
-    use crate::surface::auth::session::{LogoutOutcome, RenewalOutcome};
+    use std::cell::{Cell, RefCell};
+    use std::future::poll_fn;
+    use std::rc::Rc;
+    use std::task::{Poll, Waker};
+
+    use auction_time::{Duration, Timestamp};
+    use dioxus::core::Mutation;
+    use dioxus::prelude::*;
+
+    use super::{logout_failure, renewal_failure, use_session};
+    use crate::api::{AdminApiFailure, AdminSession};
+    use crate::surface::auctions::draft_page_tests::{
+        click_button, has_live_text, init_i18n, mount_writer, settle_writer, writer_form,
+    };
+    use crate::surface::auth::login::{AdminLogin, LoginSubmission};
+    use crate::surface::auth::session::{Event, LogoutOutcome, RenewalOutcome, View};
+
+    pub(super) struct ResponseStub<T> {
+        calls: Cell<usize>,
+        result: RefCell<Option<T>>,
+        waker: RefCell<Option<Waker>>,
+    }
+
+    impl<T> Default for ResponseStub<T> {
+        fn default() -> Self {
+            Self { calls: Cell::new(0), result: RefCell::new(None), waker: RefCell::new(None) }
+        }
+    }
+
+    impl<T> ResponseStub<T> {
+        pub(super) async fn request(&self) -> T {
+            self.calls.set(self.calls.get() + 1);
+            poll_fn(|cx| {
+                if let Some(result) = self.result.take() {
+                    Poll::Ready(result)
+                } else {
+                    self.waker.replace(Some(cx.waker().clone()));
+                    Poll::Pending
+                }
+            })
+            .await
+        }
+
+        fn finish(&self, result: T) {
+            let wake = self.waker.take().expect("请求已经派发并等待回执");
+            assert!(self.result.replace(Some(result)).is_none());
+            wake.wake();
+        }
+    }
+
+    #[derive(Default)]
+    pub(super) struct SessionTransport {
+        post: ResponseStub<Result<AdminSession, String>>,
+        pub(super) get: ResponseStub<Result<Option<AdminSession>, String>>,
+    }
+
+    impl SessionTransport {
+        pub(super) async fn login(
+            &self,
+            submission: LoginSubmission,
+        ) -> Result<AdminSession, String> {
+            assert_eq!(submission.actor, "fixture-operator");
+            assert_eq!(submission.secret, "fixture-password");
+            self.post.request().await
+        }
+    }
+
+    fn verify_broadcast_login(failure: Option<(&str, &str)>) {
+        let transport = Rc::new(SessionTransport::default());
+        let snapshot = Rc::new(Cell::new(None::<Signal<View>>));
+        let (mut page, _) = mount_writer({
+            let transport = transport.clone();
+            let snapshot = snapshot.clone();
+            move || {
+                init_i18n();
+                use_context_provider(|| transport.clone());
+                let (view, dispatch, submit_login) = use_session();
+                snapshot.set(Some(view));
+                let current = view();
+                rsx! {
+                    button { onclick: move |_| dispatch.call(Event::Broadcast), {"广播结束会话".to_owned()} }
+                    if current.logged_out {
+                        AdminLogin {
+                            submitting: current.login_pending,
+                            login_error: current.login_error,
+                            on_edit: move |_| dispatch.call(Event::LoginInputChanged),
+                            on_submit: submit_login,
+                        }
+                    }
+                }
+            }
+        });
+        assert_eq!(transport.get.calls.get(), 1);
+        transport.get.finish(Ok(None));
+        let edits = settle_writer(&mut page);
+        let inputs: Vec<_> = edits
+            .iter()
+            .filter_map(|edit| match edit {
+                Mutation::NewEventListener { name, id } if name == "input" => Some(*id),
+                _ => None,
+            })
+            .collect();
+        let [actor, secret] = inputs.as_slice() else { panic!("应有两个登录输入") };
+        page.dispatch("input", *actor, "fixture-operator");
+        page.dispatch("input", *secret, "fixture-password");
+        page.dispatch("submit", writer_form(&edits), "");
+        assert_eq!(transport.post.calls.get(), 1);
+        assert!(has_live_text(&page, "登录中…"));
+
+        click_button(&mut page, "广播结束会话");
+        click_button(&mut page, "广播结束会话");
+        let view = snapshot.get().unwrap();
+        assert!(!view.peek().logged_out);
+        assert!(!has_live_text(&page, "登录中…"));
+        assert_eq!(transport.get.calls.get(), 1);
+
+        let now = Timestamp::parse_from_rfc3339("2026-11-18T00:00:00Z").unwrap();
+        let session = AdminSession {
+            actor: "fixture-operator".to_owned(),
+            csrf_token: "fixture-cookie".to_owned(),
+            expires_at: now.checked_add_signed(Duration::minutes(15)).unwrap(),
+            absolute_expires_at: now.checked_add_signed(Duration::hours(8)).unwrap(),
+            server_time: now,
+            received_at_millis: 0.0,
+        };
+        transport
+            .post
+            .finish(failure.map_or_else(|| Ok(session.clone()), |(code, _)| Err(code.to_owned())));
+        page.rerender();
+        assert_eq!(transport.get.calls.get(), 2);
+        assert!(!view.peek().can_write);
+        assert!(!view.peek().logged_out);
+        transport.get.finish(Ok(failure.is_none().then_some(session)));
+        let edits = settle_writer(&mut page);
+        assert_eq!(transport.get.calls.get(), 2);
+        assert_eq!(transport.post.calls.get(), 1);
+        assert_eq!(view.peek().can_write, failure.is_none());
+        if let Some((code, message)) = failure {
+            assert!(view.peek().logged_out);
+            assert_eq!(view.peek().login_error.as_deref(), Some(code));
+            assert!(has_live_text(&page, message));
+            let actor = edits
+                .iter()
+                .find_map(|edit| match edit {
+                    Mutation::NewEventListener { name, id } if name == "input" => Some(*id),
+                    _ => None,
+                })
+                .unwrap();
+            page.dispatch("input", actor, "fixture-new-input");
+            assert!(view.peek().login_error.is_none());
+            assert!(!has_live_text(&page, message));
+        }
+    }
+
+    #[test]
+    fn login_success_after_broadcast_waits_for_one_cookie_read() {
+        verify_broadcast_login(None);
+    }
+
+    #[test]
+    fn login_rejection_after_broadcast_is_shown_by_the_remounted_form() {
+        verify_broadcast_login(Some(("invalid_credentials", "用户名或密码无效。")));
+    }
+
+    #[test]
+    fn unknown_login_outcome_after_broadcast_reads_once_and_never_reposts() {
+        verify_broadcast_login(Some(("request_timeout", "操作结果尚不确定，人工核对前请勿重试。")));
+    }
 
     fn http(status: u16, code: &str) -> AdminApiFailure {
         AdminApiFailure { status: Some(status), code: code.to_owned() }
