@@ -124,6 +124,7 @@
 - `web/` 是第二套实现（TypeScript + SolidJS，同样是纯客户端渲染），规则以[web/README.md](web/README.md)为准，运行期依赖限于该文件列出的几项。两套实现共用样式表（`crates/auction-web-shared/style`、各 surface 的 `assets/`）与译文（`i18n/*.ftl`）：改这些共用文件会同时影响两套实现，改完两边都要核对。Solid 版与 Rust 版有意不同的地方逐项登记在 web/README.md 的差异表里，没有登记的行为应保持一致。
 - `mise run web-build` 用 `dx bundle` 以 `wasm-release` profile 构建，复制到稳定目录后由后端 `web-embed` 内嵌。未构建时后端仍可编译，页面路由返回 503。只有显式 `web-embed` 才内嵌资源；Public 二进制不得包含 Admin 资源，反之亦然。
 - 浏览器只消费 `auction-contracts` DTO；改变状态的动作携带 `command_id`，结果未知时只允许原样重试。不在浏览器重建业务状态机。
+- 浏览器支持口径（两套实现与共用样式都适用）：各主流浏览器多年来都支持的特性直接用；较新、主流浏览器已全部支持的特性（如 Popover API、`:has()`）先做特性检测（`@supports` 或接口存在性判断），不支持时退回现有的手写实现或保持原有外观；不引入 polyfill，不从第三方源加载脚本。时间换算沿用仓库现有实现，不使用 Temporal。
 - 所有界面文案走各自的 `i18n/*.ftl`：五种语言（en、zh-CN、zh-TW、ja、ko）键集合一致，键名用连字符、不含点号（`i18n` 门禁，同时检查两套实现的引用）。Public 默认 en，Admin 默认 zh-CN；偏好键 `hv.lang`、`hv.theme` 是固定契约。
 - 新增或删除页面时，同步前端 `Route` 枚举（Rust 版）或路由表（`web/*/src/surface/router/route.ts`）、[crates/auction-http/src/assets/routes.rs](crates/auction-http/src/assets/routes.rs) 与[docs/contracts/routes.md](docs/contracts/routes.md)；只有一套实现提供的页面在契约里注明。
 

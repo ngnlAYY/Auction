@@ -200,6 +200,7 @@ export function Blacklist(): JSX.Element {
 
 - 样式文件与类名沿用现有定义：共享设计变量与控制台外壳在 `auction-web-shared` 的 `style/`，各应用的规则在各自的 `assets/`。装配顺序固定为 base → surface → desktop → mobile → console。
 - 类名用小写连字符与 BEM，并带 `public-` 或 `admin-` 前缀；颜色、字号、间距只用共享变量。
+- 浏览器支持口径与 Rust 版相同，见[AGENTS.md#web](../AGENTS.md#web)：较新的特性先做特性检测并保留退路，不引入 polyfill。
 - Solid 版专属的样式放在各应用的 `src/styles/`，在入口里排在共用样式之后导入，规则写在 `@layer` 之外（因此优先于共用样式），只用共享变量。新增这类差异时在下表登记，并在文件头或改动处写明与 Rust 版的差别。目前与 Rust 版有意不同的地方：
 
   | 位置 | 差别 |
