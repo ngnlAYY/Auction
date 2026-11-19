@@ -13,7 +13,7 @@ import type { TaskScope } from "@auction/web-shared/reactive/tasks";
 import { createTaskScope } from "@auction/web-shared/reactive/tasks";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
-import { createEffect, Show, untrack, useContext } from "solid-js";
+import { Show, untrack, useContext } from "solid-js";
 
 import type { CommandError } from "../api/commands";
 import { commandErrorOutcomeUncertain } from "../api/commands";
@@ -28,6 +28,7 @@ import {
   type PublicSessionResource,
   PublicSessionResourceContext,
 } from ".";
+import { usePreferenceReload } from "./account/preference-reload";
 import { useContentLoading } from "./loading";
 
 interface PreferenceState {
@@ -48,6 +49,7 @@ interface PreferenceOwner {
   state: Cell<PreferenceState>;
   /** 组件宿主创建的任务集合；事件处理器不直接取上下文。 */
   tasks: TaskScope;
+  readStarted(): void;
 }
 
 const DISABLED_FLAGS: readonly [boolean, boolean] = [false, false];
@@ -82,7 +84,11 @@ function preferenceOwnerSessionReady(owner: PreferenceOwner): boolean {
 }
 
 /** 只有首次读取、确定性失败后的显式刷新或已确认写入才重读；未知命令不得丢弃。 */
-function preferenceOwnerLoad(owner: PreferenceOwner, confirmed: boolean): void {
+function preferenceOwnerLoad(
+  owner: PreferenceOwner,
+  confirmed: boolean,
+  preserveDraft = false,
+): void {
   if (!preferenceOwnerIdentityMatches(owner)) {
     return;
   }
@@ -92,7 +98,11 @@ function preferenceOwnerLoad(owner: PreferenceOwner, confirmed: boolean): void {
       return;
     }
   }
-  owner.state.set({ ...preferenceStateDefault(), busy: true });
+  owner.readStarted();
+  owner.state.set({
+    ...(preserveDraft ? owner.state.peek() : preferenceStateDefault()),
+    busy: true,
+  });
   owner.tasks.spawn(async (context) => {
     if (!preferenceOwnerIdentityMatches(owner)) {
       return;
@@ -104,15 +114,32 @@ function preferenceOwnerLoad(owner: PreferenceOwner, confirmed: boolean): void {
     owner.state.update((current) => {
       if (result.ok) {
         const preference = result.value;
+        // 草稿或未清除的失败回执仍以原版本为准，重读不能替用户确认覆盖。
+        if (
+          preserveDraft &&
+          (current.pending !== null || current.selected !== current.authoritative?.channel) &&
+          current.authoritative !== null
+        ) {
+          return {
+            ...current,
+            busy: false,
+            authoritative: { ...current.authoritative, pm_available: preference.pm_available },
+          };
+        }
         return {
           ...current,
           busy: false,
           selected: preference.channel,
           authoritative: preference,
-          confirmed,
+          error: null,
+          confirmed: confirmed || current.confirmed,
         };
       }
-      return { ...current, busy: false, error: result.error };
+      return {
+        ...current,
+        busy: false,
+        error: current.pending === null ? result.error : current.error,
+      };
     });
   });
 }
@@ -189,12 +216,12 @@ export function OutbidNotifications(props: { readonly userId: string }): JSX.Ele
     session,
     state,
     tasks,
+    readStarted: () => readStarted(),
   };
-  createEffect(
-    () => null,
-    () => {
-      preferenceOwnerLoad(owner, false);
-    },
+  const readStarted = usePreferenceReload(
+    () => preferenceOwnerSessionReady(owner),
+    () => state().busy || state().pendingUncertain,
+    (preserveDraft) => preferenceOwnerLoad(owner, false, preserveDraft),
   );
   const snapshot = () => state();
   const busy = () => snapshot().busy;

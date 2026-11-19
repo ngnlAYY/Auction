@@ -10,11 +10,7 @@ import { parseJson } from "@auction/web-shared/net/wire";
 import { createCell } from "@auction/web-shared/reactive/cell";
 import { err, ok, type Result } from "@auction/web-shared/result";
 import { createRoot, flush } from "solid-js";
-import {
-  PublicCommandOwnerContext,
-  type PublicSessionResource,
-  PublicSessionResourceContext,
-} from "../surface";
+import { PublicCommandOwnerContext, PublicSessionResourceContext } from "../surface";
 import { useWatchCommandOwner } from "../surface/watches/commands";
 import {
   type CommandError,
@@ -44,6 +40,7 @@ import { fetchForumSyncEnabled, fetchForumThread } from "./forum";
 import { fetchRegistrationInfo } from "./registration";
 import { fetchSiteDocument } from "./rules";
 import { fetchPublicSession, loginPublic, logoutPublic } from "./session";
+import { publicSessionPrimaryRevision } from "./session/revision";
 import { fetchSessionPreference, setSessionPreference } from "./session-preference";
 import { fetchPublicReadiness } from "./status";
 import { fetchLotWatchPreference, setLotWatchPreference } from "./watch-preference";
@@ -474,7 +471,8 @@ test("标记重试保留冻结命令，直到收到结构合法的冲突信封",
   const read = parseJson(fixtureText("error-watch-conflict"));
   const envelope = read.ok ? object(read.value) : null;
   if (envelope === null) throw new Error("缺少标记冲突样本");
-  const session: PublicSessionResource = Object.assign(
+  const revision = publicSessionPrimaryRevision();
+  const session = Object.assign(
     createCell(
       ok({
         authenticated: true,
@@ -484,7 +482,13 @@ test("标记重试保留冻结命令，直到收到结构合法的冲突信封",
         absolute_expires_at: null,
       }),
     ),
-    { state: () => "ready" as const, restart: () => {}, cancel: () => {}, clear: () => {} },
+    {
+      state: () => "ready" as const,
+      restart: () => {},
+      cancel: () => {},
+      clear: () => {},
+      confirmation: () => ({ revision }),
+    },
   );
   const previousOwner = PublicCommandOwnerContext.defaultValue;
   const previousSession = PublicSessionResourceContext.defaultValue;

@@ -28,12 +28,16 @@ import { decodeError, decodeErrorCode, decodeSuccess, object, string } from "../
 import { invalidate, needsSync, record, withCookieLock } from "./cookie";
 import {
   type LogoutReason,
+  markPublicLogin,
   markPublicLogout,
+  markPublicSessionChange,
   notifyPublicSessionChange,
   type PublicSessionIdentityTrigger,
   publicSessionIdentityRevision,
+  publicSessionPrimaryRevision,
   publicSessionRevisions,
   publishPublicSessionIdentity,
+  requestPublicSessionCheck,
   type SessionRevisions,
   startPublicSessionIdentityObservation,
 } from "./revision";
@@ -309,6 +313,9 @@ export async function fetchPublicSession(
     if (lockSignal.aborted) {
       return { result: err("network_error"), revisions, identityRevision };
     }
+    if (revisions.primary !== publicSessionPrimaryRevision()) {
+      return { result: current, revisions, identityRevision };
+    }
     if (current.ok) {
       // GET 已证明 Cookie 归属，后续持久期同步即使失败也不能保留旧用户宿主。
       publish(current.value, false);
@@ -420,12 +427,14 @@ async function sendCookieMutation<T, E>(
     if (mayHaveChangedCookie(response)) {
       if (method === "POST") {
         change.reason = "cookie_changed";
+        markPublicSessionChange();
       } else {
         // 完整成功回执才确认退出，取消页面任务也不能撤销已确认的 Cookie 变化。
         const receipt =
           response.ok && responseOk(response.value) ? decodeReceipt(response.value) : null;
         change.reason = receipt?.ok === true ? "logged_out" : "logout_unknown";
         markPublicLogout(change.reason);
+        markPublicSessionChange();
         if (receipt?.ok === true) {
           publishPublicSessionIdentity({ kind: "session", session: null }, { cookieWritten: true });
         }
@@ -443,7 +452,7 @@ async function sendCookieMutation<T, E>(
   }, signal);
   if (change.reason !== null) {
     // 复核在写锁作用域结束后另取同一锁；读取缓存由各自的 owner 按作用域管理。
-    notifyPublicSessionChange(change.reason);
+    requestPublicSessionCheck(change.reason);
   }
   return locked.ok ? locked.value : err(mapError(locked.error));
 }
@@ -487,6 +496,7 @@ export async function loginPublic(
         absolute_expires_at: payload.absolute_expires_at,
       };
       record(session);
+      markPublicLogin();
       publishPublicSessionIdentity({ kind: "session", session }, { cookieWritten: true });
       return ok(session);
     },

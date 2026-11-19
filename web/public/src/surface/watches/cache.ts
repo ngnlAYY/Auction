@@ -11,21 +11,32 @@ import {
   setItem,
 } from "@auction/web-shared/platform/storage";
 
+import { object } from "../../api/decoder";
+import { publicWatchCacheRevision } from "../../api/session/revision";
 import { validWatchCollection } from "../../api/watches";
 
 /** 条目键前缀；索引键使用不同分隔符，按前缀淘汰时不会命中索引本身。 */
 const KEY_PREFIX = "hv.public.lot-watches.v1:";
 const INDEX_KEY = "hv.public.lot-watches.v1#index";
+const CACHE_VERSION = 2;
 /** 只保留最近访问的三场拍卖，避免长期使用后无限占用本地配额。 */
 const MAX_AUCTIONS = 3;
 
 /** 缓存只能展示，不能提供修改命令的版本，也不能上传覆盖服务端。 */
 export function load(userId: string, auctionId: string): PublicLotWatchesResponse | null {
+  const revision = publicWatchCacheRevision();
+  if (revision === null) {
+    return null;
+  }
   const page = getParsed(key(userId, auctionId), (value) => {
+    const entry = object(value);
+    if (entry?.version !== CACHE_VERSION || entry.session_revision !== revision) {
+      return null;
+    }
     const decoded = decode(PublicLotWatchesResponseSchema, value);
     return decoded.ok ? decoded.value : null;
   });
-  if (page === null) {
+  if (page === null || revision !== publicWatchCacheRevision()) {
     return null;
   }
   return validWatchCollection(page, userId, auctionId) ? page : null;
@@ -33,8 +44,12 @@ export function load(userId: string, auctionId: string): PublicLotWatchesRespons
 
 /** 存储禁用、配额不足等错误不改变服务器保存结果。淘汰只发生在本缓存自己的前缀内，
  * 语言、主题与每页数量偏好不会被挤掉；写入失败则不记录索引也不删除任何键。 */
-export function save(page: PublicLotWatchesResponse): void {
-  const value = JSON.stringify(page);
+export function save(page: PublicLotWatchesResponse, revision: string | null): void {
+  if (revision === null || revision !== publicWatchCacheRevision()) {
+    return;
+  }
+  // 写入期间其他标签页仍能切换身份；读取时必须按请求发起的代次拒绝旧快照。
+  const value = JSON.stringify({ version: CACHE_VERSION, session_revision: revision, ...page });
   const current = key(page.user_id, page.auction_id);
   if (!setItem(current, value)) {
     return;

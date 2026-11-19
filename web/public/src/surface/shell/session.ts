@@ -16,6 +16,7 @@ import {
 } from "../../api/session";
 import {
   publicSessionIdentityRevision,
+  publicSessionPrimaryRevision,
   publicSessionRevisions,
   type SessionIdentityEvidence,
 } from "../../api/session/revision";
@@ -24,6 +25,7 @@ import { createCompetitionCommands } from "../commands/host";
 import type { PublicSessionResource, PublicSessionResult } from "../index";
 import { usePublicSessionExpiry, usePublicSessionSync } from "../session/lifecycle";
 import { invalidateLotWatches } from "../watches/cache";
+import type { SessionConfirmation } from "./session-authority";
 
 type SessionRead = "refresh" | "reconcile" | "cookie_changed" | "expiry";
 
@@ -39,8 +41,10 @@ export function createPublicShellSession(refreshGeneration: Cell<number>) {
     return { kind, previousUser, ...observation };
   });
   const snapshot = createCell<PublicSessionResult | undefined>(undefined);
+  const confirmation = createCell<SessionConfirmation | null>(null);
   const sessionEndedElsewhere = createCell(false);
   const commandOwner = createCell<string | null>(null);
+  const preferenceReloadRevision = createCell(0);
   const proxySnapshots = createCatalogProxySnapshots();
   const lastIdentity = createCell<PublicSession | null>(null);
   let consumed = publicSessionRevisions();
@@ -56,7 +60,9 @@ export function createPublicShellSession(refreshGeneration: Cell<number>) {
     if (previous !== null) {
       invalidateLotWatches(previous);
     }
+    consumed = { ...consumed, login: publicSessionRevisions().login };
     lastIdentity.set(null);
+    confirmation.set(null);
     snapshot.set(undefined);
     proxySnapshots.replaceIdentity(userId);
     commandOwner.set(userId);
@@ -64,6 +70,7 @@ export function createPublicShellSession(refreshGeneration: Cell<number>) {
     return true;
   };
   const clearSession = (): void => {
+    confirmation.set(null);
     snapshot.set(undefined);
     resource.clear();
   };
@@ -112,11 +119,14 @@ export function createPublicShellSession(refreshGeneration: Cell<number>) {
     }
     restart(reason === "refresh" || reason === "cookie_changed" ? reason : "reconcile");
   };
-  const session: PublicSessionResource = Object.assign(snapshot, {
+  const session: PublicSessionResource & {
+    confirmation: Cell<SessionConfirmation | null>;
+  } = Object.assign(snapshot, {
     state: resource.state,
     restart: () => checkSession("refresh"),
     cancel: resource.cancel,
     clear: clearSession,
+    confirmation,
   });
   const competition = createCompetitionCommands(session, refreshGeneration);
 
@@ -163,12 +173,16 @@ export function createPublicShellSession(refreshGeneration: Cell<number>) {
     if (observation == null) {
       return;
     }
+    const { kind, result, revisions, previousUser } = observation;
+    if (result.ok && revisions.primary !== publicSessionPrimaryRevision()) {
+      restart("cookie_changed");
+      return;
+    }
     // 归属在解码时提交；异步任务晚交付的展示结果不能盖掉新证据。
     if (observation.identityRevision !== publicSessionIdentityRevision()) {
       checkPendingExpiry();
       return;
     }
-    const { kind, result, revisions, previousUser } = observation;
     consumeConfirmedLogout(revisions.confirmed);
     // 这轮对账即使读取失败也消耗未知退出提示；下次例行复核仍能报告真正的非本地结束。
     localLogoutUnknown = false;
@@ -188,7 +202,22 @@ export function createPublicShellSession(refreshGeneration: Cell<number>) {
       // 迟到的正文不能恢复过期身份。到期复核仍返回已过期身份时显示错误，避免循环读取。
       snapshot.set(kind === "expiry" ? err("invalid_response") : undefined);
     } else {
+      // 只提交发出权威 GET 时的修订，不能在结果交付时把新共享修订当成已确认。
+      if (identity !== null && confirmation.peek()?.revision !== revisions.primary) {
+        confirmation.set({ revision: revisions.primary });
+      }
       snapshot.set(result);
+      // 登录标记只请求重读偏好。旧宿主和冻结命令仍由权威确认的用户决定。
+      if (
+        identity !== null &&
+        previousUser === identity.user_id &&
+        revisions.login !== null &&
+        revisions.login !== consumed.login &&
+        revisions.login === publicSessionRevisions().login
+      ) {
+        consumed = { ...consumed, login: revisions.login };
+        preferenceReloadRevision.update((value) => value + 1);
+      }
       // Cookie 变更后同一账号的读取就地重验；复核结果不改变已由证据确认的归属。
       if (kind === "cookie_changed" && identity !== null && previousUser === identity.user_id) {
         refreshGeneration.update((value) => Math.min(value + 1, Number.MAX_SAFE_INTEGER));
@@ -203,6 +232,7 @@ export function createPublicShellSession(refreshGeneration: Cell<number>) {
     session,
     sessionEndedElsewhere,
     commandOwner,
+    preferenceReloadRevision,
     checkSession,
     competition,
     proxySnapshots,

@@ -5,13 +5,90 @@ import type { PublicSetLotWatchRequest } from "@auction/contracts/dto/public/wat
 import { createCell } from "@auction/web-shared/reactive/cell";
 import type { ResourceState } from "@auction/web-shared/reactive/resource";
 import { err, ok } from "@auction/web-shared/result";
+import { createRoot, flush } from "solid-js";
 
 import type { CommandError } from "../../api/commands";
-import type { PublicSessionResource, PublicSessionResult } from "..";
-import type { WatchCommand } from "./commands";
+import { PUBLIC_SESSION_CHANGE_STORAGE_KEY } from "../../api/session";
+import {
+  PublicCommandOwnerContext,
+  type PublicSessionResource,
+  PublicSessionResourceContext,
+  type PublicSessionResult,
+} from "..";
+import { ALICE, BOB, fixture, reject, success } from "../shell/session-fixture";
+import { useWatchCommandOwner, type WatchCommand } from "./commands";
 import { watchToggleState } from "./control";
 
 const { settledLots } = await import(".");
+
+test.each([false, true])(
+  "标记首次提交和重放在会话复核前后零发包（共享修订先到 %s）",
+  async (revisionFirst) => {
+    const mounted = fixture(ALICE);
+    const settle = async () => {
+      await Bun.sleep(0);
+      flush();
+    };
+    const oldOwner = PublicCommandOwnerContext.defaultValue;
+    const oldSession = PublicSessionResourceContext.defaultValue;
+    PublicCommandOwnerContext.defaultValue = mounted.commandOwner;
+    PublicSessionResourceContext.defaultValue = mounted.session;
+    const watch = createRoot((dispose) => ({
+      owner: useWatchCommandOwner(ALICE.user_id),
+      dispose,
+    }));
+    PublicCommandOwnerContext.defaultValue = oldOwner;
+    PublicSessionResourceContext.defaultValue = oldSession;
+    const pendingRead = Promise.withResolvers<Response>();
+    const payload = { ...command("auction-7", null).payload, command_id: ALICE.user_id };
+    const writes: unknown[] = [];
+    const submit = (body = payload) => watch.owner.submit("auction-7", "lot-1", "Clo16", body);
+    try {
+      await settle();
+      mounted.server.mutate = (_path, _method, init) => {
+        writes.push(init?.body);
+        return reject("temporarily_unavailable", 503);
+      };
+      submit();
+      await settle();
+      expect(writes).toHaveLength(1);
+      expect(watch.owner.commands.peek().get("lot-1")?.uncertain).toBe(true);
+
+      mounted.server.read = () => pendingRead.promise;
+      if (revisionFirst) {
+        mounted.browser.storage.set(PUBLIC_SESSION_CHANGE_STORAGE_KEY, BOB.user_id);
+        expect(mounted.session.state()).toBe("ready");
+        submit();
+        watch.owner.submit("auction-7", "lot-2", "Clo17", { ...payload, command_id: BOB.user_id });
+      } else {
+        watch.owner.submit("auction-7", "lot-2", "Clo17", { ...payload, command_id: BOB.user_id });
+        mounted.checkSession("cookie_changed");
+        submit();
+        watch.owner.submit("auction-7", "lot-3", "Clo18", payload);
+      }
+      await settle();
+      expect(writes).toHaveLength(1);
+      expect(watch.owner.commands.peek().get("lot-1")?.payload).toEqual(payload);
+      if (revisionFirst) {
+        expect(watch.owner.commands.peek().get("lot-2")?.error?.code).toBe("command_not_sent");
+        expect(mounted.requests.at(-1)?.path).toBe("/api/v1/session");
+      } else {
+        expect(watch.owner.commands.peek().has("lot-2")).toBe(false);
+      }
+      expect(watch.owner.commands.peek().has("lot-3")).toBe(false);
+      pendingRead.resolve(success(ALICE));
+      await settle();
+      expect(writes).toHaveLength(1);
+      submit({ ...payload, expected_version: 999 });
+      await settle();
+      expect(writes).toEqual([writes[0], writes[0]]);
+    } finally {
+      pendingRead.resolve(success(ALICE));
+      watch.dispose();
+      mounted.dispose();
+    }
+  },
+);
 
 function command(auctionId: string, awaitingRefresh: number | null): WatchCommand {
   const payload: PublicSetLotWatchRequest = {

@@ -147,6 +147,7 @@ function PublicShellContent(props: { readonly locationGeneration: Cell<number> }
     session,
     sessionEndedElsewhere,
     commandOwner,
+    preferenceReloadRevision,
     checkSession,
     competition,
     proxySnapshots,
@@ -418,6 +419,7 @@ function PublicShellContent(props: { readonly locationGeneration: Cell<number> }
       lotLinkLocation={lotLinkLocation}
       session={session}
       commandOwner={commandOwner}
+      preferenceReloadRevision={preferenceReloadRevision}
       competition={competition}
       proxySnapshots={proxySnapshots}
       contentLoading={contentLoading}

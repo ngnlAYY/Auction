@@ -65,6 +65,9 @@ export async function fetchLotWatchPreference(
   if (signal.aborted) {
     return err({ code: "network_error", status: 0 });
   }
+  if (!observe.cookieCurrent()) {
+    return err({ code: "invalid_response", status: 0 });
+  }
   if (!response.ok) {
     return err(failure(transportErrorCode(response.error), 0));
   }

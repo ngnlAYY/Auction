@@ -4,8 +4,13 @@ import { expect, jest, test } from "bun:test";
 import { err, ok } from "@auction/web-shared/result";
 import { flush } from "solid-js";
 
-import { logoutPublic, registerPublicSessionCheckTrigger } from "../../api/session";
+import {
+  logoutPublic,
+  PUBLIC_SESSION_CHANGE_STORAGE_KEY,
+  registerPublicSessionCheckTrigger,
+} from "../../api/session";
 import { setSessionPreference } from "../../api/session-preference";
+import { currentSessionConfirmation } from "./session-authority";
 import { ALICE, BOB, fixture, reject, success } from "./session-fixture";
 
 const DEADLINE = "2090-01-01T12:01:00Z";
@@ -21,6 +26,65 @@ async function settle(): Promise<void> {
   await new Promise<void>((resolve) => setImmediate(resolve));
   flush();
 }
+
+test("权威 GET 在读完前遇到新主修订时，必须重新读取才确认新修订", async () => {
+  const mounted = fixture(ALICE);
+  const stale = Promise.withResolvers<Response>();
+  const current = Promise.withResolvers<Response>();
+  try {
+    await settle();
+    expect(currentSessionConfirmation(mounted.session)).toEqual({ revision: null });
+    mounted.server.read = () => stale.promise;
+    mounted.checkSession("cookie_changed");
+    await settle();
+    const firstRead = mounted.requests.length;
+    mounted.browser.storage.set(PUBLIC_SESSION_CHANGE_STORAGE_KEY, BOB.user_id);
+    mounted.server.read = () => current.promise;
+    stale.resolve(success(ALICE));
+    await settle();
+    expect(mounted.requests).toHaveLength(firstRead + 1);
+    expect(currentSessionConfirmation(mounted.session)).toBeNull();
+    current.resolve(success(ALICE));
+    await settle();
+    expect(currentSessionConfirmation(mounted.session)).toEqual({ revision: BOB.user_id });
+  } finally {
+    stale.resolve(success(ALICE));
+    current.resolve(success(ALICE));
+    mounted.dispose();
+  }
+});
+
+test("跨标签页重登待权威读回同一账号才发布偏好修订", async () => {
+  const mounted = fixture(ALICE);
+  try {
+    await settle();
+    const login = (revision: string) => {
+      mounted.browser.storage.set("hv.public.session-login-revision", revision);
+      mounted.browser.storage.set(PUBLIC_SESSION_CHANGE_STORAGE_KEY, revision);
+      mounted.browser.notifySessionRevision();
+    };
+    mounted.server.read = () => reject("temporarily_unavailable", 503);
+    login(ALICE.user_id);
+    await settle();
+    expect(mounted.preferenceReloadRevision()).toBe(0);
+
+    mounted.server.read = () => success(mounted.server.identity);
+    mounted.browser.focus();
+    await settle();
+    expect(mounted.preferenceReloadRevision()).toBe(1);
+    mounted.browser.notifySessionRevision();
+    await settle();
+    expect(mounted.preferenceReloadRevision()).toBe(1);
+
+    mounted.server.identity = BOB;
+    login(BOB.user_id);
+    await settle();
+    expect(mounted.commandOwner()).toBe(BOB.user_id);
+    expect(mounted.preferenceReloadRevision()).toBe(1);
+  } finally {
+    mounted.dispose();
+  }
+});
 
 test.each([
   ["到期计时先触发", true, FINITE, null],

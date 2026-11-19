@@ -11,15 +11,21 @@ import type { Result } from "@auction/web-shared/result";
 import { compareText } from "@auction/web-shared/text";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
-import { createContext, For, Show, useContext } from "solid-js";
-import type { CommandError } from "../../api/commands";
-import { commandErrorOutcomeUncertain } from "../../api/commands";
-import { setLotWatch } from "../../api/watches";
+import { createContext, For, Show, untrack, useContext } from "solid-js";
 import {
-  PublicCommandOwnerContext,
-  type PublicSessionResource,
-  PublicSessionResourceContext,
-} from "..";
+  COMMAND_NOT_SENT,
+  type CommandError,
+  commandErrorOutcomeUncertain,
+  commandNotSent,
+} from "../../api/commands";
+import { requestPublicSessionCheck } from "../../api/session";
+import { startPublicSessionIdentityObservation } from "../../api/session/revision";
+import { setLotWatch } from "../../api/watches";
+import { PublicCommandOwnerContext, PublicSessionResourceContext } from "..";
+import {
+  currentSessionConfirmation,
+  type PublicSessionAuthority,
+} from "../shell/session-authority";
 
 /** 同一 lot 的冻结命令；成功后等待整场集合重读的修订号。 */
 export interface WatchCommand {
@@ -53,7 +59,7 @@ export interface WatchCommandOwner extends WatchCommandStore {
   readonly userId: string | null;
   /** 外壳提供的只读当前身份；命令处理里直接取当前值，不复制到异步更新的镜像。 */
   readonly identity: () => string | null;
-  readonly session: PublicSessionResource;
+  readonly session: PublicSessionAuthority;
   readonly tasks: TaskScope;
 }
 
@@ -130,6 +136,7 @@ export function WatchCommandStatus(props: { readonly owner: WatchCommandOwner })
                   <p>{t("watch-unknown")}</p>
                   <button
                     type="button"
+                    disabled={!canStartWatchCommand(props.owner)}
                     onClick={() =>
                       props.owner.submit(
                         command().auctionId,
@@ -161,16 +168,15 @@ function submitCommand(
   payload: PublicSetLotWatchRequest,
 ): void {
   const userId = owner.userId;
-  if (userId === null) {
+  if (userId === null || !canStartWatchCommand(owner)) {
     return;
   }
   const current = owner.commands.peek();
   let frozen: PublicSetLotWatchRequest;
   let uncertain: boolean;
   const pending = current.get(lotId);
-  if (pending !== undefined) {
+  if (pending !== undefined && (pending.error === null || !commandNotSent(pending.error))) {
     if (
-      !ownerIdentityMatches(owner) ||
       pending.busy ||
       !pending.uncertain ||
       pending.auctionId !== auctionId ||
@@ -182,14 +188,11 @@ function submitCommand(
     frozen = structuredClone(pending.payload);
     uncertain = pending.uncertain;
   } else {
-    if (!canStartWatchCommand(owner)) {
-      return;
-    }
     frozen = structuredClone(payload);
     uncertain = false;
   }
   const next = new Map(current);
-  next.set(lotId, {
+  const attempt: WatchCommand = {
     auctionId,
     lotCode,
     payload: structuredClone(frozen),
@@ -197,9 +200,32 @@ function submitCommand(
     uncertain,
     error: null,
     awaitingRefresh: null,
-  });
+  };
+  next.set(lotId, attempt);
+  const observation = startPublicSessionIdentityObservation();
   owner.commands.set(next);
   owner.tasks.spawn(async (context) => {
+    await Promise.resolve();
+    if (!context.alive() || !ownerIdentityMatches(owner)) {
+      return;
+    }
+    // 首次发送和重放共用门禁。未交给传输时保留先前未知的原请求与结果。
+    const stale = untrack(() => currentSessionConfirmation(owner.session) === null);
+    if (stale || !observation.current() || !untrack(() => canStartWatchCommand(owner))) {
+      const commands = new Map(owner.commands.peek());
+      if (pending?.uncertain) {
+        commands.set(lotId, pending);
+      } else if (stale) {
+        commands.set(lotId, { ...attempt, busy: false, error: COMMAND_NOT_SENT });
+      } else {
+        commands.delete(lotId);
+      }
+      owner.commands.set(commands);
+      if (stale && untrack(owner.session.state) === "ready") {
+        requestPublicSessionCheck("cookie_changed");
+      }
+      return;
+    }
     const result = await setLotWatch(userId, auctionId, lotId, frozen, context.signal);
     if (!context.alive() || !ownerIdentityMatches(owner)) {
       return;
@@ -248,7 +274,7 @@ function ownerIdentityMatches(owner: WatchCommandIdentity): boolean {
   return owner.userId !== null && owner.identity() === owner.userId;
 }
 
-/** 新标记只允许使用当前已就绪的同身份会话；按钮和提交入口共用这道守卫。 */
+/** 首次标记和原样重放都须有当前已就绪的同身份会话。 */
 export function canStartWatchCommand(
   owner: WatchCommandIdentity & Pick<WatchCommandOwner, "session">,
 ): boolean {

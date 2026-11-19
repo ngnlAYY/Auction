@@ -7,6 +7,8 @@ import { Time } from "@auction/web-shared/ui/components/time";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
 import { createEffect, Show, useContext } from "solid-js";
+import { commandNotSent } from "../../api/commands";
+import { usePreferenceReload } from "../account/preference-reload";
 import { PublicCommandOwnerContext, PublicSessionResourceContext } from "../index";
 import { useContentLoading } from "../loading";
 import { durationUnitFromValue, durationUnitMaximum, durationUnitValue } from "./duration";
@@ -43,12 +45,12 @@ export function SessionPreference(props: SessionPreferenceProps): JSX.Element {
     session,
     state,
     tasks,
+    readStarted: () => readStarted(),
   };
-  createEffect(
-    () => null,
-    () => {
-      preferenceOwnerLoad(owner, false);
-    },
+  const readStarted = usePreferenceReload(
+    () => preferenceOwnerSessionReady(owner),
+    () => state().busy || state().pendingUncertain,
+    (preserveDraft) => preferenceOwnerLoad(owner, false, preserveDraft),
   );
   const currentExpiry = createValueMemo((): CurrentSessionExpiry | null => {
     const snapshot = session();
@@ -225,7 +227,7 @@ export function SessionPreference(props: SessionPreferenceProps): JSX.Element {
             >
               <button
                 type="button"
-                disabled={busy()}
+                disabled={busy() || !preferenceOwnerSessionReady(owner)}
                 aria-describedby="session-duration-feedback"
                 onClick={() => preferenceOwnerSubmit(owner)}
               >
@@ -269,6 +271,9 @@ function feedback(state: PreferenceState): string | null {
   }
   if (state.pendingUncertain) {
     return t("session-duration-unknown");
+  }
+  if (commandNotSent(error)) {
+    return t("command-not-sent");
   }
   if (error.code === "session_lock_unavailable") {
     return t("session-lock-unavailable");

@@ -9,14 +9,17 @@ export const PUBLIC_SESSION_CHANGE_STORAGE_KEY = "hv.public.session-revision";
 const PUBLIC_SESSION_LOGOUT_REVISION_STORAGE_KEY = "hv.public.session-logout-revision";
 const PUBLIC_SESSION_LOGOUT_UNKNOWN_REVISION_STORAGE_KEY =
   "hv.public.session-logout-unknown-revision";
+const PUBLIC_SESSION_LOGIN_REVISION_STORAGE_KEY = "hv.public.session-login-revision";
 
 /** 只有完整的成功回执确认退出；未知结果的修订只供一次对账判断。 */
 export type LogoutReason = "logged_out" | "logout_unknown";
 
 /** 同一 Cookie 读取观察到的修订。存储中的值均为随机标记。 */
 export interface SessionRevisions {
+  readonly primary: string | null;
   readonly confirmed: string | null;
   readonly unknown: string | null;
+  readonly login: string | null;
 }
 
 /** 普通复核可同步持久期，写回后的对账只读当前会话。 */
@@ -50,6 +53,7 @@ interface SessionCheckRegistration {
 
 let registeredSessionCheckTrigger: SessionCheckRegistration | null = null;
 let identityRevision = 0;
+let unsharedLoginRevision: string | null = null;
 
 /** API 由无组件 owner 的任务调用，由常驻外壳登记重读入口并在卸载时注销。 */
 export function registerPublicSessionCheckTrigger(
@@ -97,20 +101,24 @@ export function publishPublicSessionIdentity(
 /** 锁外请求只在发出时的归属和跨页修订仍有效时交付证据。 */
 export function startPublicSessionIdentityObservation() {
   const identity = identityRevision;
-  const revision = getItem(PUBLIC_SESSION_CHANGE_STORAGE_KEY);
+  const revision = publicSessionPrimaryRevision();
   const logout = getItem(PUBLIC_SESSION_LOGOUT_REVISION_STORAGE_KEY);
   const registration = registeredSessionCheckTrigger;
-  return (result: SessionIdentity, options?: IdentityPublication): number | null => {
-    if (
-      identity !== identityRevision ||
-      registration !== registeredSessionCheckTrigger ||
-      revision !== getItem(PUBLIC_SESSION_CHANGE_STORAGE_KEY) ||
-      logout !== getItem(PUBLIC_SESSION_LOGOUT_REVISION_STORAGE_KEY)
-    ) {
-      return null;
-    }
-    return publishPublicSessionIdentity(result, options);
-  };
+  const localLogin = unsharedLoginRevision;
+  const cookieCurrent = () =>
+    registration === registeredSessionCheckTrigger &&
+    localLogin === unsharedLoginRevision &&
+    revision === publicSessionPrimaryRevision() &&
+    logout === getItem(PUBLIC_SESSION_LOGOUT_REVISION_STORAGE_KEY);
+  const current = () => identity === identityRevision && cookieCurrent();
+  const observe = (result: SessionIdentity, options?: IdentityPublication): number | null =>
+    current() ? publishPublicSessionIdentity(result, options) : null;
+  return Object.assign(observe, {
+    current,
+    cookieCurrent,
+    primaryRevision: revision,
+    cacheRevision: () => watchCacheRevision(revision),
+  });
 }
 
 /** 由当前页外壳按 Cookie 重读权威会话。 */
@@ -120,8 +128,44 @@ export function requestPublicSessionCheck(reason: SessionRefreshReason): void {
 
 /** 通知本页和其他标签页按当前 Cookie 复核。 */
 export function notifyPublicSessionChange(reason: SessionRefreshReason): void {
+  markPublicSessionChange();
+  requestPublicSessionCheck(reason === "refresh" ? "cookie_changed" : reason);
+}
+
+/** 写锁内发布跨页修订，确保下一个等待锁的写入在发包前就能观察到变化。 */
+export function markPublicSessionChange(): void {
   setItem(PUBLIC_SESSION_CHANGE_STORAGE_KEY, createUuidV4());
-  registeredSessionCheckTrigger?.trigger(reason === "refresh" ? "cookie_changed" : reason);
+}
+
+/** 只有成功解码的登录回执才能标记重登；外壳仍须确认当前 Cookie。 */
+export function markPublicLogin(): void {
+  const revision = createUuidV4();
+  unsharedLoginRevision = setItem(PUBLIC_SESSION_LOGIN_REVISION_STORAGE_KEY, revision)
+    ? null
+    : revision;
+}
+
+/** 跨两套页面与标签页共用的缓存修订；将会话通知的 UUID 按 u128 写成十进制。 */
+export function publicWatchCacheRevision(): string | null {
+  return watchCacheRevision(publicSessionPrimaryRevision());
+}
+
+/** 当前同源主修订；缺失键也是可由权威会话读取确认的一种状态。 */
+export function publicSessionPrimaryRevision(): string | null {
+  return getItem(PUBLIC_SESSION_CHANGE_STORAGE_KEY);
+}
+
+function watchCacheRevision(revision: string | null): string | null {
+  if (revision === null) {
+    return "0";
+  }
+  if (
+    revision.length !== 36 ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(revision)
+  ) {
+    return null;
+  }
+  return BigInt(`0x${revision.replaceAll("-", "")}`).toString();
 }
 
 /** 在写锁内记录退出结果，排在后面的读取可先于跨页唤醒观察到该修订。 */
@@ -136,7 +180,9 @@ export function markPublicLogout(reason: LogoutReason): void {
 /** 在 Cookie 锁内取样，供外壳识别本浏览器的退出。 */
 export function publicSessionRevisions(): SessionRevisions {
   return {
+    primary: publicSessionPrimaryRevision(),
     confirmed: getItem(PUBLIC_SESSION_LOGOUT_REVISION_STORAGE_KEY),
     unknown: getItem(PUBLIC_SESSION_LOGOUT_UNKNOWN_REVISION_STORAGE_KEY),
+    login: unsharedLoginRevision ?? getItem(PUBLIC_SESSION_LOGIN_REVISION_STORAGE_KEY),
   };
 }

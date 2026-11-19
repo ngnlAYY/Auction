@@ -38,6 +38,7 @@ import { PublicContentLoadingContext } from "../loading";
 import {
   CurrentAuctionContext,
   PageVisibilityContext,
+  PreferenceReloadRevisionContext,
   PublicReadinessContext,
   SelectedWorldContext,
   WorldSwitchContext,
@@ -55,6 +56,7 @@ export interface PublicShellProvidersProps {
   readonly lotLinkLocation: Cell<LotLinkLocation | null>;
   readonly session: PublicSessionResource;
   readonly commandOwner: Cell<string | null>;
+  readonly preferenceReloadRevision: () => number;
   readonly competition: CompetitionCommands;
   readonly proxySnapshots: ReturnType<typeof createCatalogProxySnapshots>;
   readonly contentLoading: Cell<ReadonlySet<number>>;
@@ -84,7 +86,11 @@ export function PublicShellProviders(props: PublicShellProvidersProps): JSX.Elem
                                 <LotLinkLocationContext value={props.lotLinkLocation}>
                                   <CompetitionCommandsContext value={props.competition}>
                                     <CatalogProxySnapshotsContext value={props.proxySnapshots}>
-                                      {props.children}
+                                      <PreferenceReloadRevisionContext
+                                        value={props.preferenceReloadRevision}
+                                      >
+                                        {props.children}
+                                      </PreferenceReloadRevisionContext>
                                     </CatalogProxySnapshotsContext>
                                   </CompetitionCommandsContext>
                                 </LotLinkLocationContext>

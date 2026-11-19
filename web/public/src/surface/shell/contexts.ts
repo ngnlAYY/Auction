@@ -12,3 +12,5 @@ export const SelectedWorldContext = createContext<Cell<string>>();
 export const PublicReadinessContext = createContext<PublicReadinessResource>();
 export const CurrentAuctionContext = createContext<CurrentAuctionResource>();
 export const PageVisibilityContext = createContext<PageVisibility>();
+/** 只有外壳权威确认同账号重新登录时才推进。 */
+export const PreferenceReloadRevisionContext = createContext<() => number>(() => 0);

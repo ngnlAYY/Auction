@@ -26,12 +26,15 @@ export async function fetchLotWatches(
   userId: string,
   auctionId: string,
   signal: AbortSignal,
+  observe = startPublicSessionIdentityObservation(),
 ): Promise<Result<PublicLotWatchesResponse, CommandError>> {
   const query = new URLSearchParams({ auction_id: auctionId }).toString();
-  const publish = startPublicSessionIdentityObservation();
   const response = await sendGet(`/api/v1/me/lot-watches?${query}`, signal);
   if (signal.aborted) {
     return err({ code: "network_error", status: 0 });
+  }
+  if (!observe.current()) {
+    return err({ code: "session_observation_stale", status: 0 });
   }
   if (!response.ok) {
     return err(failure(transportErrorCode(response.error), 0));
@@ -59,7 +62,9 @@ export async function fetchLotWatches(
     return err(failure("invalid_response", status));
   }
   // 读取用服务端投影确认 Cookie 归属；集合仍只能交给请求绑定的账号。
-  publish({ kind: "user", userId: page.value.user_id });
+  if (observe({ kind: "user", userId: page.value.user_id }) === null) {
+    return err({ code: "session_observation_stale", status: 0 });
+  }
   return page.value.user_id === userId ? page : err(failure("invalid_response", status));
 }
 

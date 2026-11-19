@@ -18,6 +18,7 @@ import {
   loginPublic,
   registerPublicSessionCheckTrigger,
 } from "../../api/session";
+import { publicWatchCacheRevision } from "../../api/session/revision";
 import { PublicRefreshGenerationContext } from "../board/refresh";
 import {
   findElement,
@@ -207,7 +208,7 @@ test.each([
   try {
     await settle();
     expect(mounted.session()).toEqual(ok(ALICE));
-    save(WATCHES);
+    save(WATCHES, publicWatchCacheRevision());
     mounted.server.mutate = (path, method) => {
       if (path === `/api/v1/lots/${LOT_ID}/bids` && method === "POST") return unavailable();
       if (path === "/api/v1/session" && method === "POST") return loginReceipt(next);

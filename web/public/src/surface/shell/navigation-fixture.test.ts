@@ -67,6 +67,7 @@ const SOURCES = new Set(
     "../watches/control.tsx",
     "../account/index.tsx",
     "../account/watches/index.tsx",
+    "../session-preference/index.tsx",
     "../watch-preference.tsx",
     "../reads/history/index.tsx",
     "../reads/history/filters/components.tsx",

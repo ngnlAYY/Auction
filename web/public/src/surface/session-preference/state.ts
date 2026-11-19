@@ -6,12 +6,20 @@ import type {
 } from "@auction/contracts/dto/public/account";
 import { createUuidV4 } from "@auction/web-shared/platform/uuid";
 import type { Cell } from "@auction/web-shared/reactive/cell";
+import { structuralEquals } from "@auction/web-shared/reactive/equality";
 import type { TaskScope } from "@auction/web-shared/reactive/tasks";
 import { untrack } from "solid-js";
 
-import { type CommandError, commandErrorOutcomeUncertain } from "../../api/commands";
+import {
+  type CommandError,
+  commandErrorOutcomeUncertain,
+  commandNotSent,
+} from "../../api/commands";
 import { fetchSessionPreference, setSessionPreference } from "../../api/session-preference";
-import type { PublicSessionResource } from "../index";
+import {
+  currentSessionConfirmation,
+  type PublicSessionAuthority,
+} from "../shell/session-authority";
 import {
   type DurationDraft,
   durationDraftDefault,
@@ -40,10 +48,11 @@ export interface PreferenceOwner {
   userId: string;
   /** 外壳提供的只读当前身份；读取在响应式作用域内订阅变化，在命令处理里直接取当前值。 */
   identity: () => string | null;
-  session: PublicSessionResource;
+  session: PublicSessionAuthority;
   state: Cell<PreferenceState>;
   /** 组件宿主创建的任务集合；事件处理器不直接取上下文。 */
   tasks: TaskScope;
+  readStarted(): void;
 }
 
 export function preferenceStateDefault(): PreferenceState {
@@ -64,7 +73,7 @@ export function preferenceOwnerIdentityMatches(owner: PreferenceOwner): boolean 
   return untrack(owner.identity) === owner.userId;
 }
 
-/** 新输入须有当前已完成的会话证明；结果收口与原样重试只依赖稳定宿主身份。 */
+/** 修改输入和发送命令须有当前已完成的会话证明。 */
 export function preferenceOwnerSessionReady(owner: PreferenceOwner): boolean {
   if (!preferenceOwnerIdentityMatches(owner) || owner.session.state() !== "ready") {
     return false;
@@ -99,7 +108,11 @@ export function preferenceOwnerChange(
 }
 
 /** 未知命令不允许刷新后抛弃；明确成功后重读，避免把幂等历史结果当作最新账号偏好。 */
-export function preferenceOwnerLoad(owner: PreferenceOwner, confirmed: boolean): void {
+export function preferenceOwnerLoad(
+  owner: PreferenceOwner,
+  confirmed: boolean,
+  preserveDraft = false,
+): void {
   if (!preferenceOwnerIdentityMatches(owner)) {
     return;
   }
@@ -109,12 +122,13 @@ export function preferenceOwnerLoad(owner: PreferenceOwner, confirmed: boolean):
       return;
     }
   }
-  const currentExpiresAt = owner.state.peek().currentExpiresAt;
-  owner.state.set({
-    ...preferenceStateDefault(),
-    busy: true,
-    currentExpiresAt,
-  });
+  const current = owner.state.peek();
+  owner.readStarted();
+  owner.state.set(
+    preserveDraft
+      ? { ...current, busy: true }
+      : { ...preferenceStateDefault(), busy: true, currentExpiresAt: current.currentExpiresAt },
+  );
   owner.tasks.spawn(async (context) => {
     if (!preferenceOwnerIdentityMatches(owner)) {
       return;
@@ -125,32 +139,46 @@ export function preferenceOwnerLoad(owner: PreferenceOwner, confirmed: boolean):
     }
     if (result.ok) {
       const preference = result.value;
-      owner.state.update((current) => ({
-        ...current,
-        busy: false,
-        draft: durationDraftFromSeconds(preference.duration_seconds),
-        currentExpiresAt:
+      owner.state.update((current) => {
+        const currentExpiresAt: CurrentSessionExpiry =
           preference.expires_at === null
             ? { kind: "permanent" }
-            : { kind: "finite", expiresAt: preference.expires_at },
-        authoritative: preference,
-        confirmed,
-      }));
+            : { kind: "finite", expiresAt: preference.expires_at };
+        const dirty =
+          current.pending !== null ||
+          (current.authoritative !== null &&
+            !structuralEquals(
+              current.draft,
+              durationDraftFromSeconds(current.authoritative.duration_seconds),
+            ));
+        // 重新登录后的读回不能把用户草稿重新绑定到另一个 CAS 版本。
+        if (preserveDraft && dirty) {
+          return { ...current, busy: false, currentExpiresAt };
+        }
+        return {
+          ...current,
+          busy: false,
+          draft: durationDraftFromSeconds(preference.duration_seconds),
+          currentExpiresAt,
+          authoritative: preference,
+          error: null,
+          confirmed: confirmed || current.confirmed,
+        };
+      });
       return;
     }
     owner.state.update((current) => ({
       ...current,
       busy: false,
-      error: result.error,
+      error: current.pending === null ? result.error : current.error,
     }));
   });
 }
 
 export function preferenceOwnerSubmit(owner: PreferenceOwner): void {
-  if (!preferenceOwnerIdentityMatches(owner) || owner.state.peek().busy) {
+  if (!preferenceOwnerSessionReady(owner) || owner.state.peek().busy) {
     return;
   }
-  const sessionReady = preferenceOwnerSessionReady(owner);
   let payload: PublicSetSessionPreferenceRequest;
   const current = owner.state.peek();
   if (current.pending !== null) {
@@ -159,9 +187,6 @@ export function preferenceOwnerSubmit(owner: PreferenceOwner): void {
     }
     payload = { ...current.pending };
   } else {
-    if (!sessionReady) {
-      return;
-    }
     const preference = current.authoritative;
     if (preference === null) {
       return;
@@ -190,7 +215,12 @@ export function preferenceOwnerSubmit(owner: PreferenceOwner): void {
     if (!preferenceOwnerIdentityMatches(owner)) {
       return;
     }
-    const result = await setSessionPreference(owner.userId, payload, context.signal);
+    const result = await setSessionPreference(owner.userId, payload, context.signal, () =>
+      untrack(
+        () =>
+          preferenceOwnerSessionReady(owner) && currentSessionConfirmation(owner.session) !== null,
+      ),
+    );
     if (!context.alive() || !preferenceOwnerIdentityMatches(owner)) {
       return;
     }
@@ -200,6 +230,15 @@ export function preferenceOwnerSubmit(owner: PreferenceOwner): void {
     }
     const error = result.error;
     owner.state.update((state) => {
+      if (commandNotSent(error)) {
+        // 首次未发出可重新编辑；重放未发出时沿用上次未知的冻结请求与提示。
+        return {
+          ...state,
+          busy: false,
+          pending: current.pending,
+          error: current.pendingUncertain ? current.error : error,
+        };
+      }
       // 只有路由的明确冲突码能否定本命令；裸 409 或损坏响应不能抹掉首次未知。
       const pendingUncertain =
         !(error.status === 409 && error.code === "session_preference_conflict") &&

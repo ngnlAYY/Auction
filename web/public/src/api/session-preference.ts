@@ -12,17 +12,18 @@ import { err, ok, type Result } from "@auction/web-shared/result";
 import { validUuid } from "@auction/web-shared/ui/validation";
 import { sendGet, sendRequest } from "./clock";
 
-import type { CommandError } from "./commands";
+import { COMMAND_NOT_SENT, type CommandError, commandNotSent } from "./commands";
 import { decodeErrorCode, int, object } from "./decoder";
 import {
   decodeIdentitySuccess,
   invalidateCookieSync,
-  notifyPublicSessionChange,
   observePublicSessionFailure,
   parseStrictRfc3339,
+  requestPublicSessionCheck,
 } from "./session";
-import { lock as lockCookie } from "./session/cookie";
+import { withCookieLock } from "./session/cookie";
 import {
+  markPublicSessionChange,
   publishPublicSessionIdentity,
   type SessionIdentity,
   startPublicSessionIdentityObservation,
@@ -51,10 +52,17 @@ export async function fetchSessionPreference(
   if (signal.aborted) {
     return err({ code: "network_error", status: 0 });
   }
-  if (!response.ok) {
-    return err(failure(transportErrorCode(response.error), 0));
+  if (!observe.cookieCurrent()) {
+    return err({ code: "invalid_response", status: 0 });
   }
-  return decode(response.value, userId, null, observe);
+  if (!response.ok) {
+    return err({ code: transportErrorCode(response.error), status: 0 });
+  }
+  const result = decode(response.value, userId, null, observe);
+  if (!result.ok) {
+    observePublicSessionFailure(result.error.status, result.error.code);
+  }
+  return result;
 }
 
 /** 未知结果只重发原始命令及 CAS 版本；响应成功后通过外壳重读身份，不伪造登录结果。 */
@@ -62,48 +70,69 @@ export async function setSessionPreference(
   userId: string,
   command: PublicSetSessionPreferenceRequest,
   signal: AbortSignal,
+  sessionReady?: () => boolean,
 ): Promise<Result<PublicSessionPreferenceResponse, CommandError>> {
+  const queued = startPublicSessionIdentityObservation();
+  let cookieMayHaveChanged = false;
+  const finish = (
+    result: Result<PublicSessionPreferenceResponse, CommandError>,
+    changed = false,
+  ) => {
+    if (changed || (!result.ok && (result.error.status === 0 || result.error.status >= 500))) {
+      markPublicSessionChange();
+      cookieMayHaveChanged = true;
+    }
+    return result;
+  };
   // 成功、重放和未知结果的重发都须与登录共用原生锁，防止迟到 Set-Cookie 换回旧身份。
-  return lockCookie(
-    async (lockSignal) => {
-      invalidateCookieSync();
-      const response = await sendRequest(
-        () =>
-          ok({
-            url: PATH,
-            init: {
-              method: "PUT",
-              headers: {
-                [PUBLIC_EXPECTED_USER_ID_HEADER]: userId,
-                "content-type": "application/json",
-              },
-              body: JSON.stringify({
-                command_id: command.command_id,
-                duration_seconds: command.duration_seconds,
-                expected_version: command.expected_version,
-              }),
+  const locked = await withCookieLock(async (lockSignal) => {
+    // 等锁期间身份或复核进度可能已变。未交给传输的请求不能让本次结果变成未知。
+    if (lockSignal.aborted || !queued.current() || sessionReady?.() === false) {
+      return err(COMMAND_NOT_SENT);
+    }
+    invalidateCookieSync();
+    const response = await sendRequest(
+      () =>
+        ok({
+          url: PATH,
+          init: {
+            method: "PUT",
+            headers: {
+              [PUBLIC_EXPECTED_USER_ID_HEADER]: userId,
+              "content-type": "application/json",
             },
-          }),
-        lockSignal,
-      );
-      if (lockSignal.aborted) {
-        return err({ code: "network_error", status: 0 });
-      }
-      if (!response.ok) {
-        return err(failure(transportErrorCode(response.error), 0));
-      }
-      const decoded = decode(response.value, userId, command, (identity) =>
-        publishPublicSessionIdentity(identity, { cookieWritten: true }),
-      );
-      if (responseOk(response.value)) {
-        // 即使正文损坏，Cookie 和服务端截止也可能已经更新，仍须通知本页及其他标签页。
-        notifyPublicSessionChange("refresh");
-      }
-      return decoded;
-    },
-    (code) => failure(code, 0),
-    signal,
-  );
+            body: JSON.stringify({
+              command_id: command.command_id,
+              duration_seconds: command.duration_seconds,
+              expected_version: command.expected_version,
+            }),
+          },
+        }),
+      lockSignal,
+    );
+    if (lockSignal.aborted) {
+      return finish(err({ code: "network_error", status: 0 }));
+    }
+    if (!response.ok) {
+      return finish(err({ code: transportErrorCode(response.error), status: 0 }));
+    }
+    const decoded = decode(response.value, userId, command, (identity) =>
+      publishPublicSessionIdentity(identity, { cookieWritten: true }),
+    );
+    // 即使正文损坏，Cookie 和服务端截止也可能已经更新。
+    return finish(decoded, responseOk(response.value));
+  }, signal);
+  if (!locked.ok) {
+    return err({ code: locked.error, status: 0 });
+  }
+  const result = locked.value;
+  // 必须先释放锁，再由外壳读取当前 Cookie；复核永不自动重发命令。
+  if (cookieMayHaveChanged || (!signal.aborted && !result.ok && commandNotSent(result.error))) {
+    requestPublicSessionCheck("cookie_changed");
+  } else if (!result.ok && queued.current()) {
+    observePublicSessionFailure(result.error.status, result.error.code, userId);
+  }
+  return result;
 }
 
 function decode(
@@ -114,7 +143,7 @@ function decode(
 ): Result<PublicSessionPreferenceResponse, CommandError> {
   const status = response.status;
   if (!responseOk(response)) {
-    return err(failure(decodeErrorCode(response), status, command === null ? undefined : userId));
+    return err({ code: decodeErrorCode(response), status });
   }
   const result = decodeIdentitySuccess(response, PublicSessionPreferenceResponseSchema, (value) => {
     const envelope = object(value);
@@ -135,11 +164,11 @@ function decode(
     (command !== null &&
       (result.value.user_id !== userId || !matchesCommand(result.value, command)))
   ) {
-    return err(failure("invalid_response", status));
+    return err({ code: "invalid_response", status });
   }
   // GET 的归属证据可先结束旧宿主，数据仍须匹配调用方的预期用户才可交给它。
   publish({ kind: "user", userId: result.value.user_id });
-  return result.value.user_id === userId ? result : err(failure("invalid_response", status));
+  return result.value.user_id === userId ? result : err({ code: "invalid_response", status });
 }
 
 function matchesCommand(
@@ -159,9 +188,4 @@ function matchesCommand(
 
 function responseOk(response: TransportResponse): boolean {
   return response.status >= 200 && response.status <= 299;
-}
-
-function failure(code: string, status: number, expectedUser?: string): CommandError {
-  observePublicSessionFailure(status, code, expectedUser);
-  return { code, status };
 }

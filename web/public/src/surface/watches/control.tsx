@@ -2,12 +2,16 @@
 
 import type { PublicSetLotWatchRequest } from "@auction/contracts/dto/public/watch";
 import { createUuidV4 } from "@auction/web-shared/platform/uuid";
+import { createCell } from "@auction/web-shared/reactive/cell";
 import { Link } from "@auction/web-shared/router";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
 import { Match, Show, Switch } from "solid-js";
 
+import { COMMAND_NOT_SENT, commandNotSent } from "../../api/commands";
+import { requestPublicSessionCheck } from "../../api/session";
 import { loginHrefForCurrentLocation } from "../session";
+import { currentSessionConfirmation } from "../shell/session-authority";
 import { tryUseWatchContext, useWatchContext } from ".";
 import { canStartWatchCommand, requireWatchCommandOwner, type WatchCommandOwner } from "./commands";
 
@@ -57,23 +61,39 @@ export function LotWatchButton(props: {
     return current?.ok === false;
   };
   const pending = () => context.commands().get(props.lotId) ?? null;
+  const blockedBeforeSubmit = createCell(false);
+  const notSent = () => {
+    const failure = error();
+    return failure !== null && commandNotSent(failure);
+  };
   const toggleState = () =>
-    watchToggleState(owner, context.authoritative(props.lotId), pending() !== null);
+    watchToggleState(owner, context.authoritative(props.lotId), pending() !== null && !notSent());
   const watched = () => context.displayed(props.lotId);
   const busy = () => pending()?.busy === true;
-  const error = () => pending()?.error ?? null;
+  const error = () => pending()?.error ?? (blockedBeforeSubmit() ? COMMAND_NOT_SENT : null);
   const uncertain = () => pending()?.uncertain === true;
   const conflict = () => error()?.status === 409 && error()?.code === "watch_conflict";
   const errorMessage = () =>
-    uncertain() ? t("watch-unknown") : conflict() ? t("watch-conflict") : t("watch-save-error");
+    uncertain()
+      ? t("watch-unknown")
+      : notSent()
+        ? t("command-not-sent")
+        : conflict()
+          ? t("watch-conflict")
+          : t("watch-save-error");
   const errorId = () => `public-lot-watch-error-${props.lotId}`;
 
   const toggle = () => {
     const state = toggleState();
     if (state.disabled) {
+      if (canStartWatchCommand(owner) && currentSessionConfirmation(session) === null) {
+        blockedBeforeSubmit.set(true);
+        requestPublicSessionCheck("cookie_changed");
+      }
       return;
     }
     const current = state.snapshot;
+    blockedBeforeSubmit.set(false);
     const request: PublicSetLotWatchRequest = {
       command_id: createUuidV4(),
       watched: !current[0],
@@ -102,6 +122,7 @@ export function LotWatchButton(props: {
       return;
     }
     const next = new Map(commands);
+    blockedBeforeSubmit.set(false);
     next.delete(props.lotId);
     context.commands.set(next);
     context.invalidate();
@@ -150,7 +171,11 @@ export function LotWatchButton(props: {
                 </button>
               }
             >
-              <button type="button" onClick={retry}>
+              <button
+                type="button"
+                disabled={!canStartWatchCommand(owner) || busy()}
+                onClick={retry}
+              >
                 {t("watch-retry-command")}
               </button>
             </Show>

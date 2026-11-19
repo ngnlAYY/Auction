@@ -10,9 +10,10 @@ import type { Result } from "@auction/web-shared/result";
 import { ok } from "@auction/web-shared/result";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
-import { createContext, createEffect, For, Show, useContext } from "solid-js";
+import { createContext, createEffect, For, Show, untrack, useContext } from "solid-js";
 
 import type { CommandError } from "../../api/commands";
+import { startPublicSessionIdentityObservation } from "../../api/session/revision";
 import { fetchLotWatches } from "../../api/watches";
 import {
   PublicCommandOwnerContext,
@@ -20,6 +21,10 @@ import {
   PublicSessionResourceContext,
 } from "..";
 import { PublicRefreshGenerationContext } from "../board/refresh";
+import {
+  currentSessionConfirmation,
+  type PublicSessionAuthority,
+} from "../shell/session-authority";
 import { load, save } from "./cache";
 import { currentUser, type WatchCommand, watchCommandStore } from "./commands";
 
@@ -29,7 +34,15 @@ export type WatchSnapshot = ReadonlyMap<string, readonly [boolean, number]>;
 /** 一次整场读取的结果及其发起时的（全局刷新、标记修订、本地失效）修订号。 */
 export interface LoadedWatches {
   readonly revision: readonly [number, number, number];
-  readonly result: Result<WatchSnapshot | null, CommandError>;
+  readonly sessionRevision: string | null;
+  readonly result: Result<
+    {
+      readonly page: PublicLotWatchesResponse;
+      readonly snapshot: WatchSnapshot;
+      readonly observation: ReturnType<typeof startPublicSessionIdentityObservation>;
+    } | null,
+    CommandError
+  >;
 }
 
 /** 标记作用域内所有行共享的读取状态与命令入口。 */
@@ -81,7 +94,7 @@ function ScopedLotWatches(props: {
   readonly auctionId: string;
   readonly children: JSX.Element;
 }): JSX.Element {
-  const session = useContext(PublicSessionResourceContext);
+  const session: PublicSessionAuthority = useContext(PublicSessionResourceContext);
   const refresh = useContext(PublicRefreshGenerationContext);
   const commandStore = watchCommandStore();
   const revision = createCell(0);
@@ -89,6 +102,7 @@ function ScopedLotWatches(props: {
   const cached = createCell<WatchSnapshot | null>(
     initialPage === null ? null : watchSnapshot(initialPage),
   );
+  const accepted = createCell<LoadedWatches | null>(null);
   // 只跟随可读身份的变化：会话故障恢复后立即补读，同账号续期不重启整场请求。
   const readable = createValueMemo(
     () => props.userId !== null && currentUser(session()) === props.userId,
@@ -98,6 +112,7 @@ function ScopedLotWatches(props: {
       refresh: refresh(),
       watchRevision: commandStore.revision(),
       localRevision: revision(),
+      confirmation: session.confirmation?.() ?? null,
       readable: readable(),
       userId: props.userId,
       auctionId: props.auctionId,
@@ -108,52 +123,87 @@ function ScopedLotWatches(props: {
         dependencies.watchRevision,
         dependencies.localRevision,
       ];
-      if (!dependencies.readable) {
-        return { revision: requestedRevision, result: ok(null) };
-      }
       const userId = dependencies.userId;
-      if (userId === null) {
-        return { revision: requestedRevision, result: ok(null) };
-      }
+      const observation = startPublicSessionIdentityObservation();
+      const requested = {
+        revision: requestedRevision,
+        sessionRevision: observation.primaryRevision,
+      };
       // 请求前后复核身份，不能把会话切换期间的响应写入当前缓存。
-      if (currentUser(session.peek()) !== userId) {
-        return { revision: requestedRevision, result: ok(null) };
+      if (
+        !dependencies.readable ||
+        userId === null ||
+        dependencies.confirmation === null ||
+        dependencies.confirmation.revision !== observation.primaryRevision ||
+        currentUser(session.peek()) !== userId
+      ) {
+        return { ...requested, result: ok(null) };
       }
-      const result = await fetchLotWatches(userId, dependencies.auctionId, context.signal);
-      if (!context.alive() || currentUser(session.peek()) !== userId) {
-        return { revision: requestedRevision, result: ok(null) };
+      const result = await fetchLotWatches(
+        userId,
+        dependencies.auctionId,
+        context.signal,
+        observation,
+      );
+      if (!context.alive() || currentUser(session.peek()) !== userId || !observation.current()) {
+        return { ...requested, result: ok(null) };
       }
       if (!result.ok) {
-        return { revision: requestedRevision, result };
+        return { ...requested, result };
       }
-      save(result.value);
-      const snapshot = watchSnapshot(result.value);
-      cached.set(snapshot);
-      return { revision: requestedRevision, result: ok(snapshot) };
+      return {
+        ...requested,
+        result: ok({ page: result.value, snapshot: watchSnapshot(result.value), observation }),
+      };
     },
   );
-  // 成功命令要等包含其结果的整场重读成功后才解锁对应 lot；只处理本场条目。
-  createEffect(
-    () => {
-      const loaded = resource();
-      if (loaded === undefined || !loaded.result.ok || loaded.result.value === null) {
-        return [];
-      }
-      return settledLots(commandStore.commands(), props.auctionId, loaded.revision[1]);
-    },
-    (settled) => {
-      if (settled.length === 0) {
-        return;
-      }
-      const commands = new Map(commandStore.commands.peek());
+  const identityMatches = () => props.userId !== null && currentUser(session()) === props.userId;
+  const revisionMatches = (loaded: LoadedWatches): boolean =>
+    currentSessionConfirmation(session)?.revision === loaded.sessionRevision &&
+    loaded.revision[2] === revision();
+
+  createEffect(resource, (loaded) => {
+    if (loaded === undefined || !loaded.result.ok || loaded.result.value === null) {
+      return;
+    }
+    const { page, snapshot, observation } = loaded.result.value;
+    const current = () =>
+      observation.current() && untrack(() => identityMatches() && revisionMatches(loaded));
+    // 只有资源实际交付且仍属于当前会话代次的结果，才能回填内存或持久快照。
+    if (!current()) {
+      return;
+    }
+    save(page, observation.cacheRevision());
+    if (!current()) {
+      return;
+    }
+    cached.set(snapshot);
+    accepted.set(loaded);
+    // 同一代次的权威重读成功后，才解锁本场成功命令。
+    const stored = commandStore.commands.peek();
+    const settled = settledLots(stored, page.auction_id, loaded.revision[1]);
+    if (settled.length > 0) {
+      const commands = new Map(stored);
       for (const lotId of settled) {
         commands.delete(lotId);
       }
       commandStore.commands.set(commands);
-    },
-  );
+    }
+  });
 
-  const identityMatches = () => props.userId !== null && currentUser(session()) === props.userId;
+  const authoritativeSnapshot = (): WatchSnapshot | null => {
+    const loaded = resource();
+    if (
+      !identityMatches() ||
+      loaded === undefined ||
+      loaded !== accepted() ||
+      !revisionMatches(loaded) ||
+      !loaded.result.ok
+    ) {
+      return null;
+    }
+    return loaded.result.value?.snapshot ?? null;
+  };
 
   const context: WatchContext = {
     userId: props.userId,
@@ -164,34 +214,15 @@ function ScopedLotWatches(props: {
     cached,
     commands: commandStore.commands,
     identityMatches,
-    ready: () => {
-      const loaded = resource();
-      return (
-        identityMatches() &&
-        loaded !== undefined &&
-        loaded.revision[2] === revision() &&
-        loaded.result.ok &&
-        loaded.result.value !== null
-      );
-    },
+    ready: () => authoritativeSnapshot() !== null,
     authoritative: (lotId) => {
-      if (!context.ready()) {
-        return null;
-      }
-      const loaded = resource();
-      if (loaded === undefined || !loaded.result.ok || loaded.result.value === null) {
-        return null;
-      }
-      return loaded.result.value.get(lotId) ?? [false, 0];
+      const snapshot = authoritativeSnapshot();
+      return snapshot === null ? null : (snapshot.get(lotId) ?? [false, 0]);
     },
     displayed: (lotId) => {
       const pending = context.commands().get(lotId);
       if (pending !== undefined && pending.awaitingRefresh !== null) {
         return pending.payload.watched;
-      }
-      const authoritative = context.authoritative(lotId);
-      if (authoritative !== null) {
-        return authoritative[0];
       }
       return context.cached()?.get(lotId)?.[0] ?? false;
     },

@@ -4,6 +4,7 @@ import { expect, test } from "bun:test";
 import { err, ok } from "@auction/web-shared/result";
 import { flush } from "solid-js";
 import { loginPublic } from "../../api/session";
+import { publicWatchCacheRevision } from "../../api/session/revision";
 import { fetchSessionPreference, setSessionPreference } from "../../api/session-preference";
 import { fetchLotWatchPreference, setLotWatchPreference } from "../../api/watch-preference";
 import { fetchLotWatches, setLotWatch } from "../../api/watches";
@@ -45,7 +46,7 @@ test.each([
   const mounted = fixture(ALICE);
   try {
     await settle();
-    save(watches(ALICE.user_id));
+    save(watches(ALICE.user_id), publicWatchCacheRevision());
     mounted.server.identity = BOB;
     mounted.server.read = () => reject("storage_unavailable", 503);
     mounted.server.mutate = () => success(payload(BOB.user_id));
@@ -143,7 +144,7 @@ test("登录已确认新账号后，旧标记响应晚到也不能恢复旧归�
     expect(mounted.commandOwner()).toBe(BOB.user_id);
 
     old.resolve(success(watches(ALICE.user_id)));
-    expect(await reading).toEqual(ok(watches(ALICE.user_id)));
+    expect((await reading).ok).toBe(false);
     await settle();
     expect(mounted.session()).toEqual(err("storage_unavailable"));
     expect(mounted.owners).toEqual([null, ALICE.user_id, BOB.user_id]);
@@ -194,7 +195,7 @@ test.each([
   const mounted = fixture(ALICE);
   try {
     await settle();
-    save(watches(ALICE.user_id));
+    save(watches(ALICE.user_id), publicWatchCacheRevision());
     mounted.server.read = read;
     mounted.checkSession("refresh");
     await settle();
