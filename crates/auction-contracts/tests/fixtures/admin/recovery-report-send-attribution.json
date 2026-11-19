@@ -1,0 +1,55 @@
+{
+  "code": "ok",
+  "data": {
+    "auction_id": "00000000-0000-4000-8000-000000000002",
+    "recoveries": [
+      {
+        "actions": [
+          {
+            "delivery_id": null,
+            "failure_code": null,
+            "id": "00000000-0000-4000-8000-000000000006",
+            "kind": "buyer_blacklist",
+            "proof_kind": "users_blacklist_applied",
+            "proof_observed_at": "2025-11-15T09:45:40.110000Z",
+            "state": "satisfied",
+            "updated_at": "2025-11-15T09:45:40.110000Z"
+          },
+          {
+            "delivery_id": "00000000-0000-4000-8000-000000000005",
+            "failure_code": null,
+            "id": "00000000-0000-4000-8000-000000000004",
+            "kind": "reclaim_equipment_take",
+            "proof_kind": "delivery_recovery_take_succeeded",
+            "proof_observed_at": "2025-11-15T09:45:40.110000Z",
+            "state": "satisfied",
+            "updated_at": "2025-11-15T09:45:40.110000Z"
+          }
+        ],
+        "allowed_commands": [],
+        "auction_id": "00000000-0000-4000-8000-000000000002",
+        "blocking_code": "recovery_evidence_mismatch",
+        "custody_proof_kind": "delivery_recovery_take_succeeded",
+        "custody_proof_observed_at": "2025-11-15T09:45:40.110000Z",
+        "equipment_category": "weapon",
+        "equipment_name": "Fixture",
+        "id": "00000000-0000-4000-8000-000000000001",
+        "lot_id": "00000000-0000-4000-8000-000000000003",
+        "lot_number": 1,
+        "manual_reconcile_delivery_id": null,
+        "payment_deadline_at": "2025-11-15T09:46:40.110000Z",
+        "relisted_auction_id": null,
+        "relisted_lot_id": null,
+        "reminder_count": 0,
+        "reminder_limit": 1,
+        "resolution": null,
+        "send_attribution_blocker": "send_without_sent_mid",
+        "stage": "reclaiming",
+        "state_version": 4,
+        "updated_at": "2025-11-15T09:46:40.110000Z",
+        "world_id": "main"
+      }
+    ]
+  },
+  "message": "恢复报告已加载"
+}

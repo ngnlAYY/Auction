@@ -160,9 +160,24 @@ mod tests {
 
         fn rename(
             &self,
-            _command: AdminCredentialRenameCommand,
+            command: AdminCredentialRenameCommand,
         ) -> ApplicationFuture<'_, AdminCredential> {
-            panic!("凭据列表样本不重命名凭据")
+            Box::pin(async move {
+                assert_eq!(command.credential_id, Uuid::from_u128(0x4000_8000_0000_0000_0025));
+                assert_eq!(command.expected_state_version, 4);
+                Ok(AdminCredential {
+                    id: command.credential_id,
+                    kind: AdminCredentialKind::ForumCookie,
+                    world: AdminCredentialWorld::Shared,
+                    status: AdminCredentialStatus::Disabled,
+                    label: command.label,
+                    player_name: None,
+                    state_version: command.expected_state_version + 1,
+                    created_at: time(),
+                    rotated_at: Some(time() + Duration::hours(1)),
+                    updated_at: time() + Duration::hours(3),
+                })
+            })
         }
 
         fn set_status(
@@ -174,9 +189,14 @@ mod tests {
 
         fn delete(
             &self,
-            _command: AdminCredentialDeleteCommand,
+            command: AdminCredentialDeleteCommand,
         ) -> ApplicationFuture<'_, AdminCredentialDeleteResult> {
-            panic!("凭据列表样本不删除凭据")
+            Box::pin(async move {
+                Ok(AdminCredentialDeleteResult {
+                    credential_id: command.credential_id,
+                    state_version: command.expected_state_version + 1,
+                })
+            })
         }
     }
 
@@ -192,6 +212,47 @@ mod tests {
             ("admin/credentials-forum", "/api/v1/admin/credentials?kind=forum_cookie"),
         ] {
             assert_http(name, StatusCode::OK, admin_get(state.clone(), url).await).await;
+        }
+    }
+    #[tokio::test]
+    async fn credential_command_contract_fixtures() {
+        use axum::http::Method;
+        use serde_json::json;
+
+        use crate::server::contract_fixtures::admin_request;
+
+        let state = AdminFixturePorts {
+            credentials: Some(Arc::new(FixtureCredentials)),
+            ..Default::default()
+        }
+        .state();
+        let credential_id = "00000000-0000-4000-8000-000000000025";
+        for (name, method, body) in [
+            (
+                "admin/credential-command",
+                Method::PATCH,
+                json!({
+                    "command_id":"00000000-0000-4000-8000-000000000007",
+                    "credential_id":credential_id, "expected_state_version":4, "action":"rename", "label":"New label",
+                }),
+            ),
+            (
+                "admin/credential-delete-command",
+                Method::DELETE,
+                json!({
+                    "command_id":"00000000-0000-4000-8000-000000000008",
+                    "credential_id":credential_id, "expected_state_version":5,
+                }),
+            ),
+        ] {
+            let response = admin_request(
+                state.clone(),
+                method,
+                "/api/v1/admin/credentials",
+                body.to_string().into(),
+            )
+            .await;
+            assert_http(name, StatusCode::OK, response).await;
         }
     }
 }

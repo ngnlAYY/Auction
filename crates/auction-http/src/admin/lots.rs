@@ -172,3 +172,112 @@ fn map_error(error: ApplicationError) -> Response {
     let response = body();
     diagnostics::mapped_response("admin_lots", "respond_list_failure", diagnostic_kind, response)
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use auction_application::admin::{AdminLotReader, AdminLotUpdateCommand, AdminLotUpdatePort};
+    use auction_application::core::ApplicationFuture;
+    use axum::http::Method;
+    use serde_json::json;
+
+    use super::{AdminLotListRequest, AdminLotPage, AdminLotSummary, StatusCode, Uuid};
+    use crate::server::contract_fixtures::{
+        AUCTION_ID, AdminFixturePorts, admin_get, admin_request, assert_http, draft_auction, time,
+    };
+
+    const LOT_ID: Uuid = Uuid::from_u128(0x4000_8000_0000_0000_0023);
+
+    fn lot() -> AdminLotSummary {
+        AdminLotSummary {
+            id: LOT_ID.into(),
+            auction_id: AUCTION_ID.into(),
+            equipment_id: Uuid::from_u128(0x4000_8000_0000_0000_0004).into(),
+            submission_id: Some(Uuid::from_u128(0x4000_8000_0000_0000_0006).into()),
+            lot_number: 1,
+            status: "pending".to_owned(),
+            start_price: 1000,
+            current_price: 1000,
+            leader_user_id: None,
+            effective_end_at: None,
+            slow_due_at: None,
+            slow_generation: 0,
+            slow_authorization_id: None,
+            state_version: 1,
+            created_at: time(),
+            updated_at: time(),
+            external_equipment_id: "123".to_owned(),
+            equipment_name: "Legendary Axe".to_owned(),
+            equipment_category: "weapon".to_owned(),
+            equipment_attributes: json!({}),
+            equipment_collected_at: time(),
+            seller: Some("Seller".to_owned()),
+            submission_source_kind: Some("mail".to_owned()),
+            submission_source_reference: None,
+            mailbox_key: Some("main".to_owned()),
+            external_mail_id: Some("9001".to_owned()),
+            submission_received_at: Some(time()),
+        }
+    }
+
+    struct Lots;
+
+    impl AdminLotReader for Lots {
+        fn list_admin_lots(
+            &self,
+            request: AdminLotListRequest,
+        ) -> ApplicationFuture<'_, Option<AdminLotPage>> {
+            Box::pin(async move {
+                assert_eq!(request.auction_id, AUCTION_ID.into());
+                Ok(Some(AdminLotPage {
+                    auction: auction_application::settlement::SettlementAuctionSnapshot {
+                        preview_revision: 1,
+                        state_version: 2,
+                        ..draft_auction()
+                    },
+                    entries: if request.offset == 0 { vec![lot()] } else { Vec::new() },
+                    total: 1,
+                    limit: request.limit,
+                    offset: request.offset,
+                }))
+            })
+        }
+    }
+
+    impl AdminLotUpdatePort for Lots {
+        fn update(&self, command: AdminLotUpdateCommand) -> ApplicationFuture<'_, AdminLotSummary> {
+            Box::pin(async move {
+                assert_eq!(command.lot_id, LOT_ID.into());
+                assert_eq!(command.expected_state_version, 1);
+                let price = command.start_price.expect("修改后的起拍价");
+                Ok(AdminLotSummary {
+                    start_price: price,
+                    current_price: price,
+                    state_version: 2,
+                    updated_at: time() + auction_time::Duration::minutes(1),
+                    ..lot()
+                })
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn lot_contract_fixtures() {
+        let state = AdminFixturePorts {
+            lots: Some(Arc::new(Lots)),
+            lot_update: Some(Arc::new(Lots)),
+            ..Default::default()
+        }
+        .state();
+        for (name, query) in [("admin/lots", ""), ("admin/lots-empty-page", "?page=2&page_size=1")]
+        {
+            let path = format!("/api/v1/admin/auctions/{AUCTION_ID}/lots{query}");
+            assert_http(name, StatusCode::OK, admin_get(state.clone(), &path).await).await;
+        }
+        let path = format!("/api/v1/admin/lots/{LOT_ID}");
+        let body = json!({"command_id": Uuid::from_u128(0x4000_8000_0000_0000_0007), "expected_state_version": 1, "action": "set_start_price", "start_price": 2000});
+        let response = admin_request(state, Method::PATCH, &path, body.to_string().into()).await;
+        assert_http("admin/lot-update-command", StatusCode::OK, response).await;
+    }
+}

@@ -1,0 +1,16 @@
+{
+  "code": "ok",
+  "data": {
+    "accepted": {
+      "actor_id": "fixture-admin",
+      "entrypoint": "admin",
+      "expires_at": null,
+      "name": "external_access_paused",
+      "operation": "clear",
+      "reason": "resume regular polling",
+      "revision": 2,
+      "value": null
+    }
+  },
+  "message": "数据库已接受；各角色约 5 秒内刷新"
+}

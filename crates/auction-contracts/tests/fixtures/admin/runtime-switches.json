@@ -1,0 +1,124 @@
+{
+  "code": "ok",
+  "data": {
+    "admin_applied": [
+      {
+        "effective_value": "shadow",
+        "name": "readiness_audit_failure_mode",
+        "overridden": false,
+        "revision": 0,
+        "toml_baseline": "shadow"
+      },
+      {
+        "effective_value": false,
+        "name": "metrics_sli_snapshot_enabled",
+        "overridden": false,
+        "revision": 0,
+        "toml_baseline": false
+      },
+      {
+        "effective_value": true,
+        "name": "mooglemail_poll_isolation_enabled",
+        "overridden": false,
+        "revision": 0,
+        "toml_baseline": true
+      },
+      {
+        "effective_value": true,
+        "name": "metrics_reject_forwarded_requests",
+        "overridden": false,
+        "revision": 0,
+        "toml_baseline": true
+      },
+      {
+        "effective_value": false,
+        "name": "external_access_paused",
+        "overridden": false,
+        "revision": 0,
+        "toml_baseline": false
+      },
+      {
+        "effective_value": "shadow",
+        "name": "disposition_read_mode",
+        "overridden": false,
+        "revision": 0,
+        "toml_baseline": "shadow"
+      }
+    ],
+    "admin_last_success_age_seconds": null,
+    "database_intent": [
+      {
+        "actor_id": null,
+        "entrypoint": null,
+        "expires_at": null,
+        "name": "readiness_audit_failure_mode",
+        "operation": null,
+        "reason": null,
+        "revision": 0,
+        "value": null
+      },
+      {
+        "actor_id": null,
+        "entrypoint": null,
+        "expires_at": null,
+        "name": "readiness_cache_enabled",
+        "operation": null,
+        "reason": null,
+        "revision": 0,
+        "value": null
+      },
+      {
+        "actor_id": null,
+        "entrypoint": null,
+        "expires_at": null,
+        "name": "metrics_sli_snapshot_enabled",
+        "operation": null,
+        "reason": null,
+        "revision": 0,
+        "value": null
+      },
+      {
+        "actor_id": null,
+        "entrypoint": null,
+        "expires_at": null,
+        "name": "mooglemail_poll_isolation_enabled",
+        "operation": null,
+        "reason": null,
+        "revision": 0,
+        "value": null
+      },
+      {
+        "actor_id": null,
+        "entrypoint": null,
+        "expires_at": null,
+        "name": "metrics_reject_forwarded_requests",
+        "operation": null,
+        "reason": null,
+        "revision": 0,
+        "value": null
+      },
+      {
+        "actor_id": "fixture-admin",
+        "entrypoint": "admin",
+        "expires_at": "2025-11-15T10:46:40.110Z",
+        "name": "external_access_paused",
+        "operation": "set",
+        "reason": "manual account use",
+        "revision": 1,
+        "value": true
+      },
+      {
+        "actor_id": null,
+        "entrypoint": null,
+        "expires_at": null,
+        "name": "disposition_read_mode",
+        "operation": null,
+        "reason": null,
+        "revision": 0,
+        "value": null
+      }
+    ],
+    "database_time": "2025-11-15T09:46:40.110Z"
+  },
+  "message": "运行时开关已读取"
+}

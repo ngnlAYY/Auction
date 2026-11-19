@@ -117,3 +117,29 @@ fn decode_world(value: AdminWorldResponse) -> Result<AdminBusinessWorld, &'stati
         policy_revision: value.policy_revision,
     })
 }
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    fn world_contract_fixtures() {
+        use super::{
+            AdminWorldListResponse, AdminWorldSetEnabledResponse, ApiResponse, decode_world,
+            decode_worlds,
+        };
+        use crate::api::contract_fixtures::{admin_fixture, decode};
+
+        let list: ApiResponse<AdminWorldListResponse> =
+            decode(admin_fixture!("worlds"), "/data/worlds/1", "policy_revision");
+        let worlds = decode_worlds(list.data.worlds).expect("世界目录");
+        assert_eq!(worlds[0].id, "main");
+        assert!(worlds[0].enabled);
+        assert_eq!(worlds[1].id, "isekai");
+        assert!(!worlds[1].enabled);
+
+        let command: ApiResponse<AdminWorldSetEnabledResponse> =
+            decode(admin_fixture!("world-command"), "/data/world", "enabled");
+        let world = decode_world(command.data.world).expect("世界命令回执");
+        assert_eq!((world.id.as_str(), world.enabled, world.policy_revision), ("isekai", false, 2));
+    }
+}

@@ -84,4 +84,22 @@ mod tests {
             "host=%3A%3A1&port=5432&name=%E6%8B%8D%E5%8D%96+%26+%25"
         );
     }
+    #[test]
+    fn setup_validation_contract_fixture() {
+        use super::{SetupErrorResponse, SetupResponse};
+        use crate::api::contract_fixtures::{admin_fixture, decode};
+
+        let error: SetupErrorResponse =
+            decode(admin_fixture!("setup-validate-invalid"), "", "code");
+        assert_eq!(error.code, "invalid_input");
+
+        for (body, initialize) in [
+            (admin_fixture!("setup-verify"), false),
+            (admin_fixture!("setup-verify-initialize"), true),
+        ] {
+            let decoded: SetupResponse = decode(body, "", "status");
+            assert_eq!(decoded.status, "verified");
+            assert_eq!(decoded.initialize_and_start, initialize);
+        }
+    }
 }

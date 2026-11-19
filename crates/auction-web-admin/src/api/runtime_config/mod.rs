@@ -364,4 +364,39 @@ mod tests {
             assert!(decode_runtime_config(data, false).is_err());
         }
     }
+    #[test]
+    fn runtime_config_validate_contract_fixtures() {
+        use crate::api::AdminApiFailure;
+        use crate::api::contract_fixtures::{admin_fixture, decode};
+
+        for (body, taxonomy, threshold) in [
+            (admin_fixture!("config-validate-default"), false, false),
+            (admin_fixture!("config-validate-taxonomy"), true, false),
+            (admin_fixture!("config-validate-collection-threshold"), false, true),
+            (admin_fixture!("config-validate"), true, true),
+        ] {
+            let payload: ApiResponse<AdminRuntimeConfig> = decode(body, "/data", "fingerprint");
+            assert_eq!(payload.data.equipment_taxonomy.is_some(), taxonomy);
+            assert_eq!(
+                payload.data.document["operations"]["alerts"]
+                    .get("fulfillment_collection_overdue_age_seconds")
+                    .is_some(),
+                threshold
+            );
+            let result = decode_runtime_config(payload.data, false);
+            if taxonomy && threshold {
+                let config = result.expect("浏览器请求的完整预校验投影");
+                assert_eq!(config.document["allow_manual_early_open"], true);
+            } else {
+                assert!(result.is_err(), "浏览器请求的扩展字段缺失");
+            }
+        }
+
+        let body = admin_fixture!("config-validate-invalid");
+        let failure = AdminApiFailure::from_http_body(400, body);
+        assert_eq!(failure.code, "invalid_runtime_config");
+        let mut invalid: serde_json::Value = serde_json::from_str(body).expect("拒绝回执");
+        invalid.as_object_mut().unwrap().remove("code").expect("稳定错误码");
+        assert_eq!(AdminApiFailure::from_http_body(400, &invalid.to_string()).code, "http_400");
+    }
 }

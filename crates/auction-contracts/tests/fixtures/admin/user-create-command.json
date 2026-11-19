@@ -1,0 +1,17 @@
+{
+  "code": "created",
+  "data": {
+    "generated_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "user": {
+      "created_at": "2025-11-15T09:46:40.110000Z",
+      "forum_account_id": null,
+      "id": "00000000-0000-4000-8000-000000000026",
+      "key_status": "active",
+      "state_version": 1,
+      "status": "active",
+      "updated_at": "2025-11-15T09:46:40.110000Z",
+      "username": "ExamplePlayer"
+    }
+  },
+  "message": "用户已创建"
+}

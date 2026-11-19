@@ -62,10 +62,41 @@ fn health_ready_response(ready: bool) -> Response {
 
 #[cfg(test)]
 mod tests {
-    use axum::http::StatusCode;
+    use std::sync::Arc;
+
+    use auction_application::core::{ApplicationError, ApplicationFuture};
+    use auction_application::operations::ProcessReadinessPort;
+    use axum::http::{StatusCode, header};
 
     use super::health_ready_response;
-    use crate::server::contract_fixtures::assert_http;
+    use crate::server::contract_fixtures::{admin_get, admin_state, assert_http};
+
+    struct Readiness(bool);
+
+    impl ProcessReadinessPort for Readiness {
+        fn check(&self) -> ApplicationFuture<'_, ()> {
+            Box::pin(async {
+                if self.0 {
+                    Ok(())
+                } else {
+                    Err(ApplicationError::CapabilityUnavailable("样本依赖未就绪"))
+                }
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn admin_readiness_contract_fixtures() {
+        for (name, status, ready) in [
+            ("admin/readiness", StatusCode::OK, true),
+            ("admin/readiness-unavailable", StatusCode::SERVICE_UNAVAILABLE, false),
+        ] {
+            let state = admin_state().with_readiness(Arc::new(Readiness(ready)));
+            let response = admin_get(state, "/health/ready").await;
+            assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+            assert_http(name, status, response).await;
+        }
+    }
 
     #[tokio::test]
     async fn readiness_contract_fixtures() {

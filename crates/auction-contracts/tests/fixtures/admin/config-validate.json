@@ -1,0 +1,2608 @@
+{
+  "code": "ok",
+  "data": {
+    "document": {
+      "allow_manual_early_open": true,
+      "allow_manual_early_settlement": false,
+      "dashboard_mailboxes": [],
+      "equipment_colors": {
+        "rules": []
+      },
+      "equipment_filter": {
+        "categories": [],
+        "enabled": false,
+        "equipment_types": [],
+        "level": {
+          "max": 0,
+          "min": 0
+        },
+        "prefixes": [],
+        "qualities": [
+          "Legendary",
+          "Peerless"
+        ],
+        "suffixes": []
+      },
+      "equipment_source": {
+        "allowed_hosts": [
+          "hentaiverse.org"
+        ],
+        "allowed_path_prefixes": [
+          "/equip/",
+          "/isekai/equip/"
+        ],
+        "allowlist_enabled": true,
+        "maximum_response_bytes": 2097152,
+        "minimum_request_interval_millis": 250,
+        "request_timeout_seconds": 10,
+        "require_tradeable": false
+      },
+      "listener": {
+        "address": "127.0.0.1:8091",
+        "group": "",
+        "mode": "tcp",
+        "runtime_directory": "/run/hv-auction",
+        "socket_path": ""
+      },
+      "mail_templates": {
+        "auction_assets_rejected": "Your auction submission was not accepted.\n\nAuction submissions must contain equipment only.\nPlease remove Credits, CoD and other item types\nbefore submitting again.",
+        "auction_equipment_rejected": "Your auction submission was not accepted.\n\nReason:\n{reason_text}\n\nEquipment return:\nA return has been requested for all equipment\nin your original message.\n\nIf you submitted multiple items together,\nthe entire submission will be returned.\n\nWhat to do next:\n{next_steps}\n\nOriginal mail reference: {mail_reference}",
+        "auction_no_attachments": "No equipment attachments were found in your message.\n\nAttach the equipment you want to submit,\nthen send a new message with the subject \"auction\".",
+        "lot_watch": "Your leading bid has been outbid.\n\nItem: {item_name}\nLot: {lot_code}\nAccepted bid: {amount} Credits\n{deadline_line}{lot_url_line}\nCheck the auction website for the latest price\nand place another bid if you wish to continue.",
+        "lot_watch_pm": "Your leading bid has been outbid.\n\nItem: {item_name}\nLot: {lot_code}\nAccepted bid: {amount} Credits\n{deadline_line}{lot_url_line}\nNotification: {notification_id}.",
+        "operations_alert": "An auction service issue needs attention.\n\n{summary}\n\nPlease review the Admin dashboard for details.",
+        "rebind_result": "Your account rebind request has been processed.\n\nPlayer: {username}\nResult code: {result_code}\n\nContact the auction operator if you need help\nunderstanding the result.",
+        "register_key": "Your HV-Auction login key is ready.\n\nPlayer: {username}\n\nLogin key:\n{login_key}\n\nUse this key to sign in to HV-Auction.\nKeep it private.",
+        "register_result": "Your registration could not be completed.\n\nPlayer: {username}\nResult code: {result_code}\n\nContact the auction operator if you need help\nresolving this issue.",
+        "rekey_key": "Your HV-Auction login key has been rotated.\n\nPlayer: {username}\n\nNew login key:\n{login_key}\n\nAll previous sessions have been signed out.\nKeep this key private.",
+        "rekey_result": "Your login key rotation request could not be completed.\n\nPlayer: {username}\nResult code: {result_code}\n\nSend a message with the subject \"register\" first\nif you have not registered yet.\nContact the auction operator if you need help\nunderstanding the result.",
+        "settlement_buyer_refund": "Your auction refund is attached.\n\nItem: {item_name}\nAmount: {amount} Credits\n\nPlease collect the attached Credits.\n\nReference: {reference}",
+        "settlement_equipment_handoff": "The following equipment is attached.\n\nItem: {item_name}\n\nPlease collect the attachment.\n\nReference: {reference}",
+        "settlement_payment_carrier": "This mail collects payment for your Isekai auction item.\n\nItem: {item_name}\nCoD: {amount} Credits\nPayment deadline: {payment_deadline}\n\nCollect the attached Credits to pay the CoD.\nYour equipment will be sent separately in Isekai\nafter payment is confirmed.\n\nReference: {reference}",
+        "settlement_payment_reminder": "Payment for this auction transaction is overdue.\n\nPlease check your original auction payment mail.\nIf you have already paid, contact the auction\noperator with the reference below.\n\nReference: {reference}",
+        "settlement_seller_payout": "Your auction payout is attached.\n\nItem: {item_name}\nAmount: {amount} Credits\n\nPlease collect the attached Credits.\n\nReference: {reference}",
+        "settlement_winner_equipment_cod": "Your auction item is ready to collect.\n\nItem: {item_name}\n\n{price_breakdown}Amount due (CoD): {amount} Credits\nPayment deadline: {payment_deadline}\n\nCollect the attached equipment to pay the CoD\nand receive your item.\n\nReference: {reference}",
+        "user_assets_rejected": "Your account request was not accepted.\n\nAccount requests must not include equipment,\nCredits, other items or CoD.\n\nPlease resend your request without these assets."
+      },
+      "metrics": {
+        "enabled": false
+      },
+      "operations": {
+        "alerts": {
+          "batch_window_seconds": 120,
+          "claim_lease_seconds": 120,
+          "cooldown_seconds": 1800,
+          "delivery_manual_reconcile_count_threshold": 1,
+          "delivery_pending_age_seconds": 900,
+          "delivery_pending_count_threshold": 1,
+          "enabled": false,
+          "fulfillment_backlog_age_seconds": 900,
+          "fulfillment_backlog_count_threshold": 1,
+          "fulfillment_collection_overdue_age_seconds": 259200,
+          "jitter_seconds": 5,
+          "managed": false,
+          "max_batch_items": 20,
+          "max_body_bytes": 4096,
+          "max_signals_per_scan": 64,
+          "recipient": "",
+          "recovery_overdue_age_seconds": 900,
+          "recovery_overdue_count_threshold": 1,
+          "retry_delay_seconds": 300,
+          "scan_interval_seconds": 60,
+          "source_timeout_seconds": 5,
+          "world_id": "main"
+        },
+        "economics": {
+          "bid_increment_ppm": 50000,
+          "cancel_cutoff_seconds": 86400,
+          "final_phase_lead_seconds": 900,
+          "managed": false,
+          "proxy_default_mode": "fast",
+          "proxy_enabled": true,
+          "proxy_max_outbid_uses": 3,
+          "proxy_slow_interval_seconds": 600,
+          "soft_close_extension_seconds": 900,
+          "soft_close_window_seconds": 900,
+          "start_price": 1000
+        },
+        "forum": {
+          "batch_size": 100,
+          "enabled": false,
+          "item_timeout_seconds": 240,
+          "jitter_seconds": 5,
+          "lease_duration_seconds": 300,
+          "managed": false,
+          "maximum_response_bytes": 2097152,
+          "maximum_topic_pages": 10,
+          "minimum_request_interval_millis": 750,
+          "poll_interval_seconds": 300,
+          "request_timeout_seconds": 30
+        },
+        "mail": {
+          "account_reply_window_seconds": 86400,
+          "batch_size": 100,
+          "batch_timeout_seconds": 600,
+          "explanation_mail_limit": 10,
+          "explanation_mail_window_seconds": 86400,
+          "fetch_attempts": 3,
+          "fetch_timeout_seconds": 30,
+          "item_timeout_seconds": 30,
+          "jitter_seconds": 5,
+          "lease_duration_seconds": 60,
+          "managed": false,
+          "maximum_pages": 20,
+          "maximum_response_bytes": 8388608,
+          "minimum_request_interval_millis": 1000,
+          "process_attempts": 3,
+          "rekey_enabled": true,
+          "renew_interval_seconds": 10,
+          "request_timeout_seconds": 15,
+          "retry_base_seconds": 1,
+          "retry_maximum_seconds": 30,
+          "schedule": "*/5 * * * *",
+          "send_classes": {
+            "account_reply": true,
+            "intake_reply": true,
+            "operations_alert": true,
+            "outbid_reminder": true,
+            "player_summary": true,
+            "settlement_notice": true
+          },
+          "send_intervals": {
+            "account_seconds": 0,
+            "equipment_seconds": 0,
+            "intake_seconds": 0,
+            "manual_seconds": 0,
+            "operations_seconds": 0,
+            "outbid_seconds": 0,
+            "settlement_seconds": 0
+          }
+        },
+        "schedule": {
+          "enabled": false,
+          "managed": false,
+          "nominal_end_day": "Saturday",
+          "nominal_end_time": "12:00",
+          "open_day": "Friday",
+          "open_time": "00:00",
+          "preview_day": "Thursday",
+          "preview_time": "22:00",
+          "timezone": "UTC",
+          "worlds": [
+            "main",
+            "isekai"
+          ]
+        },
+        "worker": {
+          "batch_limit": 100,
+          "concurrency": 8,
+          "delivery": {
+            "batch_limit": 100,
+            "finalize_timeout_seconds": 5,
+            "jitter_seconds": 5,
+            "lease_duration_seconds": 60,
+            "poll_interval_seconds": 60,
+            "renew_interval_seconds": 10,
+            "request_timeout_seconds": 180,
+            "sending_grace_seconds": 300
+          },
+          "fulfillment": {
+            "batch_limit": 100,
+            "concurrency": 8,
+            "item_timeout_seconds": 30,
+            "jitter_seconds": 5,
+            "lease_duration_seconds": 60,
+            "poll_interval_seconds": 60,
+            "retry_delay_seconds": 60
+          },
+          "item_timeout_seconds": 30,
+          "jitter_seconds": 5,
+          "managed": false,
+          "poll_interval_seconds": 60,
+          "recovery": {
+            "batch_limit": 100,
+            "concurrency": 8,
+            "evidence_stale_after_seconds": 300,
+            "health_refresh_interval_seconds": 60,
+            "item_timeout_seconds": 30,
+            "jitter_seconds": 5,
+            "lease_duration_seconds": 60,
+            "low_balance_threshold": 100,
+            "poll_interval_seconds": 60
+          },
+          "recovery_retry_delay_seconds": 60
+        }
+      },
+      "security": {
+        "allowed_origins": [],
+        "allowed_origins_enabled": true,
+        "cookie_secure": false,
+        "login_rate_limit": 10,
+        "mutation_rate_limit": 60,
+        "rate_limit_window_seconds": 60,
+        "request_timeout_seconds": 15,
+        "trusted_proxy_cidrs": [],
+        "trusted_unix_proxy": false
+      },
+      "session": {
+        "absolute_ttl_seconds": 28800,
+        "idle_ttl_seconds": 900,
+        "max_public_sessions": 10
+      },
+      "tracing": {
+        "batch_timeout_seconds": 1,
+        "enabled": false,
+        "endpoint": "",
+        "export_timeout_seconds": 5,
+        "max_export_batch_size": 128,
+        "queue_capacity": 256,
+        "sample_ratio_ppm": 0,
+        "shutdown_timeout_seconds": 5
+      },
+      "worker_control": {
+        "socket_path": "/run/hv-auction/worker/control.sock"
+      },
+      "worlds": {
+        "isekai": {
+          "enabled": true,
+          "sender_allowlist": [],
+          "sender_allowlist_disabled": false
+        },
+        "main": {
+          "enabled": true,
+          "sender_allowlist": [],
+          "sender_allowlist_disabled": false
+        }
+      }
+    },
+    "equipment_taxonomy": {
+      "categories": [
+        "One-Handed",
+        "Two-Handed",
+        "Staff",
+        "Shield",
+        "Cloth",
+        "Light",
+        "Heavy"
+      ],
+      "kinds": [
+        {
+          "category": "One-Handed",
+          "legacy": false,
+          "material": null,
+          "name": "Axe",
+          "prefixes": [
+            "Ethereal",
+            "Fiery",
+            "Arctic",
+            "Shocking",
+            "Tempestuous",
+            "Hallowed",
+            "Demonic"
+          ],
+          "slot": null,
+          "suffixes": [
+            "Slaughter",
+            "Balance",
+            "Battlecaster",
+            "Vampire",
+            "Illithid",
+            "Banshee",
+            "Ox",
+            "Raccoon"
+          ]
+        },
+        {
+          "category": "One-Handed",
+          "legacy": false,
+          "material": null,
+          "name": "Club",
+          "prefixes": [
+            "Ethereal",
+            "Fiery",
+            "Arctic",
+            "Shocking",
+            "Tempestuous",
+            "Hallowed",
+            "Demonic"
+          ],
+          "slot": null,
+          "suffixes": [
+            "Slaughter",
+            "Balance",
+            "Nimble",
+            "Swiftness",
+            "Battlecaster",
+            "Focus",
+            "Vampire",
+            "Illithid",
+            "Banshee",
+            "Raccoon",
+            "Cheetah"
+          ]
+        },
+        {
+          "category": "One-Handed",
+          "legacy": false,
+          "material": null,
+          "name": "Dagger",
+          "prefixes": [
+            "Ethereal",
+            "Fiery",
+            "Arctic",
+            "Shocking",
+            "Tempestuous",
+            "Hallowed",
+            "Demonic"
+          ],
+          "slot": null,
+          "suffixes": [
+            "Slaughter",
+            "Balance",
+            "Nimble",
+            "Swiftness",
+            "Battlecaster",
+            "Focus",
+            "Raccoon",
+            "Cheetah"
+          ]
+        },
+        {
+          "category": "One-Handed",
+          "legacy": false,
+          "material": null,
+          "name": "Rapier",
+          "prefixes": [
+            "Ethereal",
+            "Fiery",
+            "Arctic",
+            "Shocking",
+            "Tempestuous",
+            "Hallowed",
+            "Demonic"
+          ],
+          "slot": null,
+          "suffixes": [
+            "Slaughter",
+            "Balance",
+            "Nimble",
+            "Swiftness",
+            "Battlecaster",
+            "Vampire",
+            "Illithid",
+            "Banshee",
+            "Raccoon",
+            "Cheetah"
+          ]
+        },
+        {
+          "category": "One-Handed",
+          "legacy": false,
+          "material": null,
+          "name": "Shortsword",
+          "prefixes": [
+            "Ethereal",
+            "Fiery",
+            "Arctic",
+            "Shocking",
+            "Tempestuous",
+            "Hallowed",
+            "Demonic"
+          ],
+          "slot": null,
+          "suffixes": [
+            "Slaughter",
+            "Balance",
+            "Swiftness",
+            "Battlecaster",
+            "Focus",
+            "Vampire",
+            "Illithid",
+            "Banshee",
+            "Ox",
+            "Raccoon"
+          ]
+        },
+        {
+          "category": "One-Handed",
+          "legacy": false,
+          "material": null,
+          "name": "Wakizashi",
+          "prefixes": [
+            "Ethereal",
+            "Fiery",
+            "Arctic",
+            "Shocking",
+            "Tempestuous",
+            "Hallowed",
+            "Demonic"
+          ],
+          "slot": null,
+          "suffixes": [
+            "Slaughter",
+            "Balance",
+            "Nimble",
+            "Swiftness",
+            "Battlecaster",
+            "Raccoon",
+            "Cheetah"
+          ]
+        },
+        {
+          "category": "Two-Handed",
+          "legacy": false,
+          "material": null,
+          "name": "Estoc",
+          "prefixes": [
+            "Ethereal",
+            "Fiery",
+            "Arctic",
+            "Shocking",
+            "Tempestuous",
+            "Hallowed",
+            "Demonic"
+          ],
+          "slot": null,
+          "suffixes": [
+            "Slaughter",
+            "Balance",
+            "Battlecaster",
+            "Vampire",
+            "Illithid",
+            "Banshee",
+            "Ox"
+          ]
+        },
+        {
+          "category": "Two-Handed",
+          "legacy": false,
+          "material": null,
+          "name": "Longsword",
+          "prefixes": [
+            "Ethereal",
+            "Fiery",
+            "Arctic",
+            "Shocking",
+            "Tempestuous",
+            "Hallowed",
+            "Demonic"
+          ],
+          "slot": null,
+          "suffixes": [
+            "Slaughter",
+            "Balance",
+            "Battlecaster",
+            "Vampire",
+            "Illithid",
+            "Banshee",
+            "Ox"
+          ]
+        },
+        {
+          "category": "Two-Handed",
+          "legacy": false,
+          "material": null,
+          "name": "Mace",
+          "prefixes": [
+            "Ethereal",
+            "Fiery",
+            "Arctic",
+            "Shocking",
+            "Tempestuous",
+            "Hallowed",
+            "Demonic"
+          ],
+          "slot": null,
+          "suffixes": [
+            "Slaughter",
+            "Balance",
+            "Battlecaster",
+            "Vampire",
+            "Illithid",
+            "Banshee",
+            "Ox"
+          ]
+        },
+        {
+          "category": "Two-Handed",
+          "legacy": false,
+          "material": null,
+          "name": "Great Mace",
+          "prefixes": [
+            "Ethereal",
+            "Fiery",
+            "Arctic",
+            "Shocking",
+            "Tempestuous",
+            "Hallowed",
+            "Demonic"
+          ],
+          "slot": null,
+          "suffixes": [
+            "Slaughter",
+            "Balance",
+            "Battlecaster",
+            "Vampire",
+            "Illithid",
+            "Banshee",
+            "Ox"
+          ]
+        },
+        {
+          "category": "Two-Handed",
+          "legacy": false,
+          "material": null,
+          "name": "Katana",
+          "prefixes": [
+            "Ethereal",
+            "Fiery",
+            "Arctic",
+            "Shocking",
+            "Tempestuous",
+            "Hallowed",
+            "Demonic"
+          ],
+          "slot": null,
+          "suffixes": [
+            "Slaughter",
+            "Balance",
+            "Battlecaster",
+            "Ox"
+          ]
+        },
+        {
+          "category": "Two-Handed",
+          "legacy": false,
+          "material": null,
+          "name": "Scythe",
+          "prefixes": [
+            "Ethereal",
+            "Fiery",
+            "Arctic",
+            "Shocking",
+            "Tempestuous",
+            "Hallowed",
+            "Demonic"
+          ],
+          "slot": null,
+          "suffixes": [
+            "Slaughter",
+            "Balance",
+            "Battlecaster",
+            "Ox"
+          ]
+        },
+        {
+          "category": "Two-Handed",
+          "legacy": false,
+          "material": null,
+          "name": "Swordchucks",
+          "prefixes": [
+            "Ethereal",
+            "Fiery",
+            "Arctic",
+            "Shocking",
+            "Tempestuous",
+            "Hallowed",
+            "Demonic"
+          ],
+          "slot": null,
+          "suffixes": [
+            "Slaughter",
+            "Balance",
+            "Battlecaster",
+            "Ox",
+            "Raccoon"
+          ]
+        },
+        {
+          "category": "Staff",
+          "legacy": false,
+          "material": null,
+          "name": "Ebony Staff",
+          "prefixes": [
+            "Ethereal",
+            "Fiery",
+            "Arctic",
+            "Shocking",
+            "Tempestuous",
+            "Hallowed",
+            "Demonic"
+          ],
+          "slot": null,
+          "suffixes": [
+            "Destruction",
+            "Focus",
+            "Surtr",
+            "Niflheim",
+            "Mjolnir",
+            "Freyr",
+            "Heimdall",
+            "Fenrir",
+            "Elementalist",
+            "Heaven-Sent",
+            "Demon-Fiend",
+            "Fox",
+            "Owl"
+          ]
+        },
+        {
+          "category": "Staff",
+          "legacy": false,
+          "material": null,
+          "name": "Oak Staff",
+          "prefixes": [
+            "Ethereal",
+            "Fiery",
+            "Arctic",
+            "Shocking",
+            "Tempestuous",
+            "Hallowed",
+            "Demonic"
+          ],
+          "slot": null,
+          "suffixes": [
+            "Destruction",
+            "Focus",
+            "Heimdall",
+            "Earth-walker",
+            "Fox",
+            "Owl"
+          ]
+        },
+        {
+          "category": "Staff",
+          "legacy": false,
+          "material": null,
+          "name": "Willow Staff",
+          "prefixes": [
+            "Ethereal",
+            "Fiery",
+            "Arctic",
+            "Shocking",
+            "Tempestuous",
+            "Hallowed",
+            "Demonic"
+          ],
+          "slot": null,
+          "suffixes": [
+            "Destruction",
+            "Focus",
+            "Fenrir",
+            "Curse-weaver",
+            "Fox",
+            "Owl"
+          ]
+        },
+        {
+          "category": "Staff",
+          "legacy": false,
+          "material": null,
+          "name": "Redwood Staff",
+          "prefixes": [
+            "Ethereal",
+            "Fiery",
+            "Arctic",
+            "Shocking",
+            "Tempestuous",
+            "Hallowed",
+            "Demonic"
+          ],
+          "slot": null,
+          "suffixes": [
+            "Destruction",
+            "Focus",
+            "Surtr",
+            "Niflheim",
+            "Mjolnir",
+            "Freyr",
+            "Elementalist",
+            "Fox",
+            "Owl"
+          ]
+        },
+        {
+          "category": "Staff",
+          "legacy": false,
+          "material": null,
+          "name": "Katalox Staff",
+          "prefixes": [
+            "Ethereal",
+            "Fiery",
+            "Arctic",
+            "Shocking",
+            "Tempestuous",
+            "Hallowed",
+            "Demonic"
+          ],
+          "slot": null,
+          "suffixes": [
+            "Destruction",
+            "Focus",
+            "Heimdall",
+            "Fenrir",
+            "Heaven-Sent",
+            "Demon-Fiend",
+            "Earth-walker",
+            "Curse-weaver",
+            "Fox",
+            "Owl"
+          ]
+        },
+        {
+          "category": "Shield",
+          "legacy": false,
+          "material": null,
+          "name": "Buckler",
+          "prefixes": [
+            "Reinforced",
+            "Agile",
+            "Mithril"
+          ],
+          "slot": null,
+          "suffixes": [
+            "Barrier",
+            "Nimble",
+            "Battlecaster",
+            "Fleet",
+            "Protection",
+            "Warding",
+            "Turtle"
+          ]
+        },
+        {
+          "category": "Shield",
+          "legacy": false,
+          "material": null,
+          "name": "Kite Shield",
+          "prefixes": [
+            "Reinforced",
+            "Agile",
+            "Mithril"
+          ],
+          "slot": null,
+          "suffixes": [
+            "Barrier",
+            "Battlecaster",
+            "Protection",
+            "Warding",
+            "Dampening",
+            "Deflection",
+            "Stoneskin",
+            "Turtle"
+          ]
+        },
+        {
+          "category": "Shield",
+          "legacy": false,
+          "material": null,
+          "name": "Tower Shield",
+          "prefixes": [
+            "Reinforced",
+            "Mithril"
+          ],
+          "slot": null,
+          "suffixes": [
+            "Barrier",
+            "Protection",
+            "Warding",
+            "Dampening",
+            "Deflection",
+            "Stoneskin",
+            "Turtle"
+          ]
+        },
+        {
+          "category": "Shield",
+          "legacy": false,
+          "material": null,
+          "name": "Force Shield",
+          "prefixes": [
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": null,
+          "suffixes": [
+            "Protection",
+            "Warding",
+            "Dampening",
+            "Deflection",
+            "Stoneskin",
+            "Turtle"
+          ]
+        },
+        {
+          "category": "Cloth",
+          "legacy": false,
+          "material": "Cotton",
+          "name": "Cotton Cap",
+          "prefixes": [
+            "Charged",
+            "Frugal",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "head",
+          "suffixes": [
+            "Protection",
+            "Warding",
+            "Elementalist",
+            "Heaven-Sent",
+            "Demon-Fiend",
+            "Earth-walker",
+            "Curse-weaver",
+            "Fire-eater",
+            "Frost-born",
+            "Thunder-child",
+            "Wind-waker",
+            "Thrice-blessed",
+            "Spirit-ward"
+          ]
+        },
+        {
+          "category": "Cloth",
+          "legacy": false,
+          "material": "Cotton",
+          "name": "Cotton Robe",
+          "prefixes": [
+            "Charged",
+            "Frugal",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "body",
+          "suffixes": [
+            "Protection",
+            "Warding",
+            "Elementalist",
+            "Heaven-Sent",
+            "Demon-Fiend",
+            "Earth-walker",
+            "Curse-weaver",
+            "Fire-eater",
+            "Frost-born",
+            "Thunder-child",
+            "Wind-waker",
+            "Thrice-blessed",
+            "Spirit-ward"
+          ]
+        },
+        {
+          "category": "Cloth",
+          "legacy": false,
+          "material": "Cotton",
+          "name": "Cotton Gloves",
+          "prefixes": [
+            "Charged",
+            "Frugal",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "hands",
+          "suffixes": [
+            "Protection",
+            "Warding",
+            "Elementalist",
+            "Heaven-Sent",
+            "Demon-Fiend",
+            "Earth-walker",
+            "Curse-weaver",
+            "Fire-eater",
+            "Frost-born",
+            "Thunder-child",
+            "Wind-waker",
+            "Thrice-blessed",
+            "Spirit-ward"
+          ]
+        },
+        {
+          "category": "Cloth",
+          "legacy": false,
+          "material": "Cotton",
+          "name": "Cotton Pants",
+          "prefixes": [
+            "Charged",
+            "Frugal",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "legs",
+          "suffixes": [
+            "Protection",
+            "Warding",
+            "Elementalist",
+            "Heaven-Sent",
+            "Demon-Fiend",
+            "Earth-walker",
+            "Curse-weaver",
+            "Fire-eater",
+            "Frost-born",
+            "Thunder-child",
+            "Wind-waker",
+            "Thrice-blessed",
+            "Spirit-ward"
+          ]
+        },
+        {
+          "category": "Cloth",
+          "legacy": false,
+          "material": "Cotton",
+          "name": "Cotton Shoes",
+          "prefixes": [
+            "Charged",
+            "Frugal",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "feet",
+          "suffixes": [
+            "Protection",
+            "Warding",
+            "Elementalist",
+            "Heaven-Sent",
+            "Demon-Fiend",
+            "Earth-walker",
+            "Curse-weaver",
+            "Fire-eater",
+            "Frost-born",
+            "Thunder-child",
+            "Wind-waker",
+            "Thrice-blessed",
+            "Spirit-ward"
+          ]
+        },
+        {
+          "category": "Cloth",
+          "legacy": false,
+          "material": "Gossamer",
+          "name": "Gossamer Cap",
+          "prefixes": [
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "head",
+          "suffixes": [
+            "Elementalist",
+            "Heaven-Sent",
+            "Demon-Fiend",
+            "Earth-walker",
+            "Curse-weaver",
+            "Fox",
+            "Owl"
+          ]
+        },
+        {
+          "category": "Cloth",
+          "legacy": false,
+          "material": "Gossamer",
+          "name": "Gossamer Robe",
+          "prefixes": [
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "body",
+          "suffixes": [
+            "Elementalist",
+            "Heaven-Sent",
+            "Demon-Fiend",
+            "Earth-walker",
+            "Curse-weaver",
+            "Fox",
+            "Owl"
+          ]
+        },
+        {
+          "category": "Cloth",
+          "legacy": false,
+          "material": "Gossamer",
+          "name": "Gossamer Gloves",
+          "prefixes": [
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "hands",
+          "suffixes": [
+            "Elementalist",
+            "Heaven-Sent",
+            "Demon-Fiend",
+            "Earth-walker",
+            "Curse-weaver",
+            "Fox",
+            "Owl"
+          ]
+        },
+        {
+          "category": "Cloth",
+          "legacy": false,
+          "material": "Gossamer",
+          "name": "Gossamer Pants",
+          "prefixes": [
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "legs",
+          "suffixes": [
+            "Elementalist",
+            "Heaven-Sent",
+            "Demon-Fiend",
+            "Earth-walker",
+            "Curse-weaver",
+            "Fox",
+            "Owl"
+          ]
+        },
+        {
+          "category": "Cloth",
+          "legacy": false,
+          "material": "Gossamer",
+          "name": "Gossamer Shoes",
+          "prefixes": [
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "feet",
+          "suffixes": [
+            "Elementalist",
+            "Heaven-Sent",
+            "Demon-Fiend",
+            "Earth-walker",
+            "Curse-weaver",
+            "Fox",
+            "Owl"
+          ]
+        },
+        {
+          "category": "Cloth",
+          "legacy": false,
+          "material": "Ironsilk",
+          "name": "Ironsilk Cap",
+          "prefixes": [
+            "Reinforced",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "head",
+          "suffixes": [
+            "Protection",
+            "Warding",
+            "Fleet",
+            "Raccoon",
+            "Cheetah"
+          ]
+        },
+        {
+          "category": "Cloth",
+          "legacy": false,
+          "material": "Ironsilk",
+          "name": "Ironsilk Robe",
+          "prefixes": [
+            "Reinforced",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "body",
+          "suffixes": [
+            "Protection",
+            "Warding",
+            "Fleet",
+            "Raccoon",
+            "Cheetah"
+          ]
+        },
+        {
+          "category": "Cloth",
+          "legacy": false,
+          "material": "Ironsilk",
+          "name": "Ironsilk Gloves",
+          "prefixes": [
+            "Reinforced",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "hands",
+          "suffixes": [
+            "Protection",
+            "Warding",
+            "Fleet",
+            "Raccoon",
+            "Cheetah"
+          ]
+        },
+        {
+          "category": "Cloth",
+          "legacy": false,
+          "material": "Ironsilk",
+          "name": "Ironsilk Pants",
+          "prefixes": [
+            "Reinforced",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "legs",
+          "suffixes": [
+            "Protection",
+            "Warding",
+            "Fleet",
+            "Raccoon",
+            "Cheetah"
+          ]
+        },
+        {
+          "category": "Cloth",
+          "legacy": false,
+          "material": "Ironsilk",
+          "name": "Ironsilk Shoes",
+          "prefixes": [
+            "Reinforced",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "feet",
+          "suffixes": [
+            "Protection",
+            "Warding",
+            "Fleet",
+            "Raccoon",
+            "Cheetah"
+          ]
+        },
+        {
+          "category": "Cloth",
+          "legacy": false,
+          "material": "Phase",
+          "name": "Phase Cap",
+          "prefixes": [
+            "Charged",
+            "Frugal",
+            "Radiant",
+            "Mystic",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "head",
+          "suffixes": [
+            "Elementalist",
+            "Heaven-Sent",
+            "Demon-Fiend",
+            "Earth-walker",
+            "Curse-weaver",
+            "Raccoon",
+            "Cheetah",
+            "Fox",
+            "Owl",
+            "Surtr",
+            "Niflheim",
+            "Mjolnir",
+            "Freyr",
+            "Heimdall",
+            "Fenrir"
+          ]
+        },
+        {
+          "category": "Cloth",
+          "legacy": false,
+          "material": "Phase",
+          "name": "Phase Robe",
+          "prefixes": [
+            "Charged",
+            "Frugal",
+            "Radiant",
+            "Mystic",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "body",
+          "suffixes": [
+            "Elementalist",
+            "Heaven-Sent",
+            "Demon-Fiend",
+            "Earth-walker",
+            "Curse-weaver",
+            "Raccoon",
+            "Cheetah",
+            "Fox",
+            "Owl",
+            "Surtr",
+            "Niflheim",
+            "Mjolnir",
+            "Freyr",
+            "Heimdall",
+            "Fenrir"
+          ]
+        },
+        {
+          "category": "Cloth",
+          "legacy": false,
+          "material": "Phase",
+          "name": "Phase Gloves",
+          "prefixes": [
+            "Charged",
+            "Frugal",
+            "Radiant",
+            "Mystic",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "hands",
+          "suffixes": [
+            "Elementalist",
+            "Heaven-Sent",
+            "Demon-Fiend",
+            "Earth-walker",
+            "Curse-weaver",
+            "Raccoon",
+            "Cheetah",
+            "Fox",
+            "Owl",
+            "Surtr",
+            "Niflheim",
+            "Mjolnir",
+            "Freyr",
+            "Heimdall",
+            "Fenrir"
+          ]
+        },
+        {
+          "category": "Cloth",
+          "legacy": false,
+          "material": "Phase",
+          "name": "Phase Pants",
+          "prefixes": [
+            "Charged",
+            "Frugal",
+            "Radiant",
+            "Mystic",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "legs",
+          "suffixes": [
+            "Elementalist",
+            "Heaven-Sent",
+            "Demon-Fiend",
+            "Earth-walker",
+            "Curse-weaver",
+            "Raccoon",
+            "Cheetah",
+            "Fox",
+            "Owl",
+            "Surtr",
+            "Niflheim",
+            "Mjolnir",
+            "Freyr",
+            "Heimdall",
+            "Fenrir"
+          ]
+        },
+        {
+          "category": "Cloth",
+          "legacy": false,
+          "material": "Phase",
+          "name": "Phase Shoes",
+          "prefixes": [
+            "Charged",
+            "Frugal",
+            "Radiant",
+            "Mystic",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "feet",
+          "suffixes": [
+            "Elementalist",
+            "Heaven-Sent",
+            "Demon-Fiend",
+            "Earth-walker",
+            "Curse-weaver",
+            "Raccoon",
+            "Cheetah",
+            "Fox",
+            "Owl",
+            "Surtr",
+            "Niflheim",
+            "Mjolnir",
+            "Freyr",
+            "Heimdall",
+            "Fenrir"
+          ]
+        },
+        {
+          "category": "Light",
+          "legacy": false,
+          "material": "Leather",
+          "name": "Leather Helmet",
+          "prefixes": [
+            "Reinforced",
+            "Agile",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "head",
+          "suffixes": [
+            "Protection",
+            "Warding",
+            "Negation",
+            "Dampening",
+            "Deflection",
+            "Stoneskin",
+            "Fire-eater",
+            "Frost-born",
+            "Thunder-child",
+            "Wind-waker",
+            "Thrice-blessed",
+            "Spirit-ward"
+          ]
+        },
+        {
+          "category": "Light",
+          "legacy": false,
+          "material": "Leather",
+          "name": "Leather Breastplate",
+          "prefixes": [
+            "Reinforced",
+            "Agile",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "body",
+          "suffixes": [
+            "Protection",
+            "Warding",
+            "Negation",
+            "Dampening",
+            "Deflection",
+            "Stoneskin",
+            "Fire-eater",
+            "Frost-born",
+            "Thunder-child",
+            "Wind-waker",
+            "Thrice-blessed",
+            "Spirit-ward"
+          ]
+        },
+        {
+          "category": "Light",
+          "legacy": false,
+          "material": "Leather",
+          "name": "Leather Gauntlets",
+          "prefixes": [
+            "Reinforced",
+            "Agile",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "hands",
+          "suffixes": [
+            "Protection",
+            "Warding",
+            "Negation",
+            "Dampening",
+            "Deflection",
+            "Stoneskin",
+            "Fire-eater",
+            "Frost-born",
+            "Thunder-child",
+            "Wind-waker",
+            "Thrice-blessed",
+            "Spirit-ward"
+          ]
+        },
+        {
+          "category": "Light",
+          "legacy": false,
+          "material": "Leather",
+          "name": "Leather Leggings",
+          "prefixes": [
+            "Reinforced",
+            "Agile",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "legs",
+          "suffixes": [
+            "Protection",
+            "Warding",
+            "Negation",
+            "Dampening",
+            "Deflection",
+            "Stoneskin",
+            "Fire-eater",
+            "Frost-born",
+            "Thunder-child",
+            "Wind-waker",
+            "Thrice-blessed",
+            "Spirit-ward"
+          ]
+        },
+        {
+          "category": "Light",
+          "legacy": false,
+          "material": "Leather",
+          "name": "Leather Boots",
+          "prefixes": [
+            "Reinforced",
+            "Agile",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "feet",
+          "suffixes": [
+            "Protection",
+            "Warding",
+            "Negation",
+            "Dampening",
+            "Deflection",
+            "Stoneskin",
+            "Fire-eater",
+            "Frost-born",
+            "Thunder-child",
+            "Wind-waker",
+            "Thrice-blessed",
+            "Spirit-ward"
+          ]
+        },
+        {
+          "category": "Light",
+          "legacy": false,
+          "material": "Drakehide",
+          "name": "Drakehide Helmet",
+          "prefixes": [
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "head",
+          "suffixes": [
+            "Protection",
+            "Warding",
+            "Negation",
+            "Battlecaster",
+            "Dampening",
+            "Deflection",
+            "Stoneskin",
+            "Fire-eater",
+            "Frost-born",
+            "Thunder-child",
+            "Wind-waker",
+            "Thrice-blessed",
+            "Spirit-ward"
+          ]
+        },
+        {
+          "category": "Light",
+          "legacy": false,
+          "material": "Drakehide",
+          "name": "Drakehide Breastplate",
+          "prefixes": [
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "body",
+          "suffixes": [
+            "Protection",
+            "Warding",
+            "Negation",
+            "Battlecaster",
+            "Dampening",
+            "Deflection",
+            "Stoneskin",
+            "Fire-eater",
+            "Frost-born",
+            "Thunder-child",
+            "Wind-waker",
+            "Thrice-blessed",
+            "Spirit-ward"
+          ]
+        },
+        {
+          "category": "Light",
+          "legacy": false,
+          "material": "Drakehide",
+          "name": "Drakehide Gauntlets",
+          "prefixes": [
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "hands",
+          "suffixes": [
+            "Protection",
+            "Warding",
+            "Negation",
+            "Battlecaster",
+            "Dampening",
+            "Deflection",
+            "Stoneskin",
+            "Fire-eater",
+            "Frost-born",
+            "Thunder-child",
+            "Wind-waker",
+            "Thrice-blessed",
+            "Spirit-ward"
+          ]
+        },
+        {
+          "category": "Light",
+          "legacy": false,
+          "material": "Drakehide",
+          "name": "Drakehide Leggings",
+          "prefixes": [
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "legs",
+          "suffixes": [
+            "Protection",
+            "Warding",
+            "Negation",
+            "Battlecaster",
+            "Dampening",
+            "Deflection",
+            "Stoneskin",
+            "Fire-eater",
+            "Frost-born",
+            "Thunder-child",
+            "Wind-waker",
+            "Thrice-blessed",
+            "Spirit-ward"
+          ]
+        },
+        {
+          "category": "Light",
+          "legacy": false,
+          "material": "Drakehide",
+          "name": "Drakehide Boots",
+          "prefixes": [
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "feet",
+          "suffixes": [
+            "Protection",
+            "Warding",
+            "Negation",
+            "Battlecaster",
+            "Dampening",
+            "Deflection",
+            "Stoneskin",
+            "Fire-eater",
+            "Frost-born",
+            "Thunder-child",
+            "Wind-waker",
+            "Thrice-blessed",
+            "Spirit-ward"
+          ]
+        },
+        {
+          "category": "Light",
+          "legacy": false,
+          "material": "Kevlar",
+          "name": "Kevlar Helmet",
+          "prefixes": [
+            "Reinforced",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "head",
+          "suffixes": [
+            "Protection",
+            "Warding",
+            "Negation",
+            "Battlecaster",
+            "Dampening",
+            "Deflection",
+            "Stoneskin",
+            "Fire-eater",
+            "Frost-born",
+            "Thunder-child",
+            "Wind-waker",
+            "Thrice-blessed",
+            "Spirit-ward"
+          ]
+        },
+        {
+          "category": "Light",
+          "legacy": false,
+          "material": "Kevlar",
+          "name": "Kevlar Breastplate",
+          "prefixes": [
+            "Reinforced",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "body",
+          "suffixes": [
+            "Protection",
+            "Warding",
+            "Negation",
+            "Battlecaster",
+            "Dampening",
+            "Deflection",
+            "Stoneskin",
+            "Fire-eater",
+            "Frost-born",
+            "Thunder-child",
+            "Wind-waker",
+            "Thrice-blessed",
+            "Spirit-ward"
+          ]
+        },
+        {
+          "category": "Light",
+          "legacy": false,
+          "material": "Kevlar",
+          "name": "Kevlar Gauntlets",
+          "prefixes": [
+            "Reinforced",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "hands",
+          "suffixes": [
+            "Protection",
+            "Warding",
+            "Negation",
+            "Battlecaster",
+            "Dampening",
+            "Deflection",
+            "Stoneskin",
+            "Fire-eater",
+            "Frost-born",
+            "Thunder-child",
+            "Wind-waker",
+            "Thrice-blessed",
+            "Spirit-ward"
+          ]
+        },
+        {
+          "category": "Light",
+          "legacy": false,
+          "material": "Kevlar",
+          "name": "Kevlar Leggings",
+          "prefixes": [
+            "Reinforced",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "legs",
+          "suffixes": [
+            "Protection",
+            "Warding",
+            "Negation",
+            "Battlecaster",
+            "Dampening",
+            "Deflection",
+            "Stoneskin",
+            "Fire-eater",
+            "Frost-born",
+            "Thunder-child",
+            "Wind-waker",
+            "Thrice-blessed",
+            "Spirit-ward"
+          ]
+        },
+        {
+          "category": "Light",
+          "legacy": false,
+          "material": "Kevlar",
+          "name": "Kevlar Boots",
+          "prefixes": [
+            "Reinforced",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "feet",
+          "suffixes": [
+            "Protection",
+            "Warding",
+            "Negation",
+            "Battlecaster",
+            "Dampening",
+            "Deflection",
+            "Stoneskin",
+            "Fire-eater",
+            "Frost-born",
+            "Thunder-child",
+            "Wind-waker",
+            "Thrice-blessed",
+            "Spirit-ward"
+          ]
+        },
+        {
+          "category": "Light",
+          "legacy": false,
+          "material": "Shade",
+          "name": "Shade Helmet",
+          "prefixes": [
+            "Savage",
+            "Agile",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "head",
+          "suffixes": [
+            "Shadowdancer",
+            "Arcanist",
+            "Fleet",
+            "Negation"
+          ]
+        },
+        {
+          "category": "Light",
+          "legacy": false,
+          "material": "Shade",
+          "name": "Shade Breastplate",
+          "prefixes": [
+            "Savage",
+            "Agile",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "body",
+          "suffixes": [
+            "Shadowdancer",
+            "Arcanist",
+            "Fleet",
+            "Negation"
+          ]
+        },
+        {
+          "category": "Light",
+          "legacy": false,
+          "material": "Shade",
+          "name": "Shade Gauntlets",
+          "prefixes": [
+            "Savage",
+            "Agile",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "hands",
+          "suffixes": [
+            "Shadowdancer",
+            "Arcanist",
+            "Fleet",
+            "Negation"
+          ]
+        },
+        {
+          "category": "Light",
+          "legacy": false,
+          "material": "Shade",
+          "name": "Shade Leggings",
+          "prefixes": [
+            "Savage",
+            "Agile",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "legs",
+          "suffixes": [
+            "Shadowdancer",
+            "Arcanist",
+            "Fleet",
+            "Negation"
+          ]
+        },
+        {
+          "category": "Light",
+          "legacy": false,
+          "material": "Shade",
+          "name": "Shade Boots",
+          "prefixes": [
+            "Savage",
+            "Agile",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "feet",
+          "suffixes": [
+            "Shadowdancer",
+            "Arcanist",
+            "Fleet",
+            "Negation"
+          ]
+        },
+        {
+          "category": "Heavy",
+          "legacy": false,
+          "material": "Plate",
+          "name": "Plate Helmet",
+          "prefixes": [
+            "Mithril",
+            "Shielding",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "head",
+          "suffixes": [
+            "Protection",
+            "Warding",
+            "Dampening",
+            "Deflection",
+            "Stoneskin",
+            "Fire-eater",
+            "Frost-born",
+            "Thunder-child",
+            "Wind-waker",
+            "Thrice-blessed",
+            "Spirit-ward"
+          ]
+        },
+        {
+          "category": "Heavy",
+          "legacy": false,
+          "material": "Plate",
+          "name": "Plate Cuirass",
+          "prefixes": [
+            "Mithril",
+            "Shielding",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "body",
+          "suffixes": [
+            "Protection",
+            "Warding",
+            "Dampening",
+            "Deflection",
+            "Stoneskin",
+            "Fire-eater",
+            "Frost-born",
+            "Thunder-child",
+            "Wind-waker",
+            "Thrice-blessed",
+            "Spirit-ward"
+          ]
+        },
+        {
+          "category": "Heavy",
+          "legacy": false,
+          "material": "Plate",
+          "name": "Plate Gauntlets",
+          "prefixes": [
+            "Mithril",
+            "Shielding",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "hands",
+          "suffixes": [
+            "Protection",
+            "Warding",
+            "Dampening",
+            "Deflection",
+            "Stoneskin",
+            "Fire-eater",
+            "Frost-born",
+            "Thunder-child",
+            "Wind-waker",
+            "Thrice-blessed",
+            "Spirit-ward"
+          ]
+        },
+        {
+          "category": "Heavy",
+          "legacy": false,
+          "material": "Plate",
+          "name": "Plate Greaves",
+          "prefixes": [
+            "Mithril",
+            "Shielding",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "legs",
+          "suffixes": [
+            "Protection",
+            "Warding",
+            "Dampening",
+            "Deflection",
+            "Stoneskin",
+            "Fire-eater",
+            "Frost-born",
+            "Thunder-child",
+            "Wind-waker",
+            "Thrice-blessed",
+            "Spirit-ward"
+          ]
+        },
+        {
+          "category": "Heavy",
+          "legacy": false,
+          "material": "Plate",
+          "name": "Plate Sabatons",
+          "prefixes": [
+            "Mithril",
+            "Shielding",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "feet",
+          "suffixes": [
+            "Protection",
+            "Warding",
+            "Dampening",
+            "Deflection",
+            "Stoneskin",
+            "Fire-eater",
+            "Frost-born",
+            "Thunder-child",
+            "Wind-waker",
+            "Thrice-blessed",
+            "Spirit-ward"
+          ]
+        },
+        {
+          "category": "Heavy",
+          "legacy": false,
+          "material": "Power",
+          "name": "Power Helmet",
+          "prefixes": [
+            "Mithril",
+            "Savage",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "head",
+          "suffixes": [
+            "Slaughter",
+            "Balance",
+            "Protection",
+            "Warding"
+          ]
+        },
+        {
+          "category": "Heavy",
+          "legacy": false,
+          "material": "Power",
+          "name": "Power Armor",
+          "prefixes": [
+            "Mithril",
+            "Savage",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "body",
+          "suffixes": [
+            "Slaughter",
+            "Balance",
+            "Protection",
+            "Warding"
+          ]
+        },
+        {
+          "category": "Heavy",
+          "legacy": false,
+          "material": "Power",
+          "name": "Power Gauntlets",
+          "prefixes": [
+            "Mithril",
+            "Savage",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "hands",
+          "suffixes": [
+            "Slaughter",
+            "Balance",
+            "Protection",
+            "Warding"
+          ]
+        },
+        {
+          "category": "Heavy",
+          "legacy": false,
+          "material": "Power",
+          "name": "Power Leggings",
+          "prefixes": [
+            "Mithril",
+            "Savage",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "legs",
+          "suffixes": [
+            "Slaughter",
+            "Balance",
+            "Protection",
+            "Warding"
+          ]
+        },
+        {
+          "category": "Heavy",
+          "legacy": false,
+          "material": "Power",
+          "name": "Power Boots",
+          "prefixes": [
+            "Mithril",
+            "Savage",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "slot": "feet",
+          "suffixes": [
+            "Slaughter",
+            "Balance",
+            "Protection",
+            "Warding"
+          ]
+        },
+        {
+          "category": "Heavy",
+          "legacy": true,
+          "material": "Chainmail",
+          "name": "Chainmail Coif",
+          "prefixes": [],
+          "slot": "head",
+          "suffixes": []
+        },
+        {
+          "category": "Heavy",
+          "legacy": true,
+          "material": "Chainmail",
+          "name": "Chainmail Hauberk",
+          "prefixes": [],
+          "slot": "body",
+          "suffixes": []
+        },
+        {
+          "category": "Heavy",
+          "legacy": true,
+          "material": "Chainmail",
+          "name": "Chainmail Mitons",
+          "prefixes": [],
+          "slot": "hands",
+          "suffixes": []
+        },
+        {
+          "category": "Heavy",
+          "legacy": true,
+          "material": "Chainmail",
+          "name": "Chainmail Chausses",
+          "prefixes": [],
+          "slot": "legs",
+          "suffixes": []
+        },
+        {
+          "category": "Heavy",
+          "legacy": true,
+          "material": "Chainmail",
+          "name": "Chainmail Boots",
+          "prefixes": [],
+          "slot": "feet",
+          "suffixes": []
+        }
+      ],
+      "materials": [
+        {
+          "category": "Cloth",
+          "name": "Cotton",
+          "prefixes": [
+            "Charged",
+            "Frugal",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "suffixes": [
+            "Protection",
+            "Warding",
+            "Elementalist",
+            "Heaven-Sent",
+            "Demon-Fiend",
+            "Earth-walker",
+            "Curse-weaver",
+            "Fire-eater",
+            "Frost-born",
+            "Thunder-child",
+            "Wind-waker",
+            "Thrice-blessed",
+            "Spirit-ward"
+          ]
+        },
+        {
+          "category": "Cloth",
+          "name": "Gossamer",
+          "prefixes": [
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "suffixes": [
+            "Elementalist",
+            "Heaven-Sent",
+            "Demon-Fiend",
+            "Earth-walker",
+            "Curse-weaver",
+            "Fox",
+            "Owl"
+          ]
+        },
+        {
+          "category": "Cloth",
+          "name": "Ironsilk",
+          "prefixes": [
+            "Reinforced",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "suffixes": [
+            "Protection",
+            "Warding",
+            "Fleet",
+            "Raccoon",
+            "Cheetah"
+          ]
+        },
+        {
+          "category": "Cloth",
+          "name": "Phase",
+          "prefixes": [
+            "Charged",
+            "Frugal",
+            "Radiant",
+            "Mystic",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "suffixes": [
+            "Elementalist",
+            "Heaven-Sent",
+            "Demon-Fiend",
+            "Earth-walker",
+            "Curse-weaver",
+            "Raccoon",
+            "Cheetah",
+            "Fox",
+            "Owl",
+            "Surtr",
+            "Niflheim",
+            "Mjolnir",
+            "Freyr",
+            "Heimdall",
+            "Fenrir"
+          ]
+        },
+        {
+          "category": "Light",
+          "name": "Leather",
+          "prefixes": [
+            "Reinforced",
+            "Agile",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "suffixes": [
+            "Protection",
+            "Warding",
+            "Negation",
+            "Dampening",
+            "Deflection",
+            "Stoneskin",
+            "Fire-eater",
+            "Frost-born",
+            "Thunder-child",
+            "Wind-waker",
+            "Thrice-blessed",
+            "Spirit-ward"
+          ]
+        },
+        {
+          "category": "Light",
+          "name": "Drakehide",
+          "prefixes": [
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "suffixes": [
+            "Protection",
+            "Warding",
+            "Negation",
+            "Battlecaster",
+            "Dampening",
+            "Deflection",
+            "Stoneskin",
+            "Fire-eater",
+            "Frost-born",
+            "Thunder-child",
+            "Wind-waker",
+            "Thrice-blessed",
+            "Spirit-ward"
+          ]
+        },
+        {
+          "category": "Light",
+          "name": "Kevlar",
+          "prefixes": [
+            "Reinforced",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "suffixes": [
+            "Protection",
+            "Warding",
+            "Negation",
+            "Battlecaster",
+            "Dampening",
+            "Deflection",
+            "Stoneskin",
+            "Fire-eater",
+            "Frost-born",
+            "Thunder-child",
+            "Wind-waker",
+            "Thrice-blessed",
+            "Spirit-ward"
+          ]
+        },
+        {
+          "category": "Light",
+          "name": "Shade",
+          "prefixes": [
+            "Savage",
+            "Agile",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "suffixes": [
+            "Shadowdancer",
+            "Arcanist",
+            "Fleet",
+            "Negation"
+          ]
+        },
+        {
+          "category": "Heavy",
+          "name": "Plate",
+          "prefixes": [
+            "Mithril",
+            "Shielding",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "suffixes": [
+            "Protection",
+            "Warding",
+            "Dampening",
+            "Deflection",
+            "Stoneskin",
+            "Fire-eater",
+            "Frost-born",
+            "Thunder-child",
+            "Wind-waker",
+            "Thrice-blessed",
+            "Spirit-ward"
+          ]
+        },
+        {
+          "category": "Heavy",
+          "name": "Chain",
+          "prefixes": [
+            "Mithril",
+            "Reinforced",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "suffixes": [
+            "Protection",
+            "Warding",
+            "Dampening",
+            "Deflection",
+            "Stoneskin",
+            "Fire-eater",
+            "Frost-born",
+            "Thunder-child",
+            "Wind-waker",
+            "Thrice-blessed",
+            "Spirit-ward"
+          ]
+        },
+        {
+          "category": "Heavy",
+          "name": "Reactive",
+          "prefixes": [
+            "Mithril",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "suffixes": [
+            "Protection",
+            "Warding",
+            "Barrier",
+            "Dampening",
+            "Deflection",
+            "Stoneskin",
+            "Fire-eater",
+            "Frost-born",
+            "Thunder-child",
+            "Wind-waker",
+            "Thrice-blessed",
+            "Spirit-ward"
+          ]
+        },
+        {
+          "category": "Heavy",
+          "name": "Power",
+          "prefixes": [
+            "Mithril",
+            "Savage",
+            "Ruby",
+            "Cobalt",
+            "Amber",
+            "Jade",
+            "Zircon",
+            "Onyx"
+          ],
+          "suffixes": [
+            "Slaughter",
+            "Balance",
+            "Protection",
+            "Warding"
+          ]
+        }
+      ],
+      "qualities": [
+        {
+          "legacy": false,
+          "name": "Peerless"
+        },
+        {
+          "legacy": false,
+          "name": "Legendary"
+        },
+        {
+          "legacy": false,
+          "name": "Magnificent"
+        }
+      ],
+      "revision": "ehwiki-65026-66094-65259-v2"
+    },
+    "fingerprint": "sha256:bbdccfd95b479fdc8cf839670da1352861d27b5a85b089519b53b51d3407a05a",
+    "restart_required": false
+  },
+  "message": "runtime 配置候选已验证"
+}

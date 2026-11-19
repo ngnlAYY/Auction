@@ -982,6 +982,26 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn admin_forum_contract_fixtures() {
+        use crate::server::contract_fixtures::{AUCTION_ID, admin_get, admin_state};
+
+        let thread_path = format!("/api/v1/admin/auctions/{AUCTION_ID}/forum");
+        for (alternate, status_name, thread_name) in [
+            (false, "admin/forum-sync", "admin/forum"),
+            (true, "admin/forum-sync-disabled", "admin/forum-pending"),
+        ] {
+            let state = admin_state().with_forum_reader(Arc::new(PublicContent { alternate }));
+            assert_http(
+                status_name,
+                StatusCode::OK,
+                admin_get(state.clone(), "/api/v1/admin/forum/sync-status").await,
+            )
+            .await;
+            assert_http(thread_name, StatusCode::OK, admin_get(state, &thread_path).await).await;
+        }
+    }
+
     async fn fixture_read(
         app: &Router,
         uri: &str,

@@ -292,6 +292,86 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn runtime_switch_read_and_command_contract_fixtures() {
+        use std::sync::Arc;
+
+        use auction_application::runtime_switches::{
+            RuntimeSwitchFuture, RuntimeSwitchRead, RuntimeSwitchStore, RuntimeSwitches,
+        };
+        use axum::http::Method;
+
+        use crate::server::contract_fixtures::{
+            admin_get, admin_request, admin_state, assert_http, time,
+        };
+
+        struct Switches;
+
+        impl RuntimeSwitchStore for Switches {
+            fn read(&self) -> RuntimeSwitchFuture<'_, RuntimeSwitchRead> {
+                Box::pin(async {
+                    Ok(RuntimeSwitchRead {
+                        database_time: time(),
+                        events: vec![RuntimeSwitchEvent {
+                            command_id: Uuid::from_u128(7),
+                            name: RuntimeSwitchName::ExternalAccessPaused,
+                            revision: 1,
+                            operation: RuntimeSwitchOperation::Set,
+                            value: Some(serde_json::json!(true)),
+                            expires_at: Some(time() + auction_time::Duration::hours(1)),
+                            expired_command_id: None,
+                            actor_id: "fixture-admin".to_owned(),
+                            entrypoint: "admin".to_owned(),
+                            reason: "manual account use".to_owned(),
+                            recorded_at: time(),
+                        }],
+                    })
+                })
+            }
+
+            fn write(
+                &self,
+                command: RuntimeSwitchCommand,
+            ) -> RuntimeSwitchFuture<'_, RuntimeSwitchEvent> {
+                Box::pin(async move {
+                    assert_eq!(command.expected_revision, 1);
+                    assert_eq!(command.operation, RuntimeSwitchOperation::Clear);
+                    Ok(RuntimeSwitchEvent {
+                        command_id: command.command_id,
+                        name: command.name,
+                        revision: 2,
+                        operation: command.operation,
+                        value: command.value,
+                        expires_at: command.expires_at,
+                        expired_command_id: None,
+                        actor_id: command.actor_id,
+                        entrypoint: command.entrypoint,
+                        reason: command.reason,
+                        recorded_at: time() + auction_time::Duration::minutes(1),
+                    })
+                })
+            }
+        }
+
+        let state =
+            admin_state().with_runtime_switches(Arc::new(Switches), RuntimeSwitches::default());
+        assert_http(
+            "admin/runtime-switches",
+            StatusCode::OK,
+            admin_get(state.clone(), "/api/v1/admin/runtime-switches").await,
+        )
+        .await;
+        let body = serde_json::json!({"command_id": Uuid::from_u128(8), "expected_revision": 1, "paused": false, "expires_at": null, "reason": "resume regular polling"});
+        let response = admin_request(
+            state,
+            Method::POST,
+            "/api/v1/admin/runtime-switches/external-access-paused",
+            body.to_string().into(),
+        )
+        .await;
+        assert_http("admin/runtime-switch-command", StatusCode::OK, response).await;
+    }
+
     fn at_micros(value: Timestamp) -> Timestamp {
         Timestamp::from_timestamp_micros(value.timestamp_micros()).expect("微秒精度时间")
     }

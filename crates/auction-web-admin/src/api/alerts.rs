@@ -94,8 +94,12 @@ pub(crate) async fn fetch_admin_webhooks(limit: usize) -> Result<Vec<AdminAlertW
     }
     let url = format!("/api/v1/admin/alerts/webhooks?limit={limit}");
     let body = send_alert_request(&url, None).await.map_err(|failure| failure.code)?;
+    decode_webhook_page(&body, limit)
+}
+
+fn decode_webhook_page(body: &str, limit: usize) -> Result<Vec<AdminAlertWebhook>, String> {
     let payload: ApiResponse<AdminAlertWebhookPage> =
-        serde_json::from_str(&body).map_err(invalid_response_error)?;
+        serde_json::from_str(body).map_err(invalid_response_error)?;
     let page = payload.data;
     if page.entries.len() > limit
         || page.entries.iter().any(|entry| {
@@ -203,7 +207,16 @@ async fn submit_alert_command<T: serde::Serialize>(
     let request_body = serde_json::to_string(&command)
         .map_err(|error| AdminApiFailure::client(invalid_request_error(error)))?;
     let body = send_alert_request(&url, Some(request_body)).await?;
-    let payload: ApiResponse<AdminAlertCommandResponse> = serde_json::from_str(&body)
+    decode_alert_receipt(&body, command_id, alert_id, action)
+}
+
+fn decode_alert_receipt(
+    body: &str,
+    command_id: Uuid,
+    alert_id: &str,
+    action: &str,
+) -> Result<AdminAlertCommandResult, AdminApiFailure> {
+    let payload: ApiResponse<AdminAlertCommandResponse> = serde_json::from_str(body)
         .map_err(|error| AdminApiFailure::client(invalid_response_error(error)))?;
     let result = payload.data.alert;
     if result.id != alert_id
@@ -514,6 +527,49 @@ mod tests {
                 serde_json::from_str(body).expect("待办计数");
             assert_eq!(payload.data.settlement_returns, count);
             assert_eq!(valid_pending_counts(&payload.data), count.is_some());
+        }
+    }
+
+    #[test]
+    fn webhook_and_alert_command_contract_fixtures() {
+        use uuid::Uuid;
+
+        use super::{decode_alert_receipt, decode_webhook_page};
+        use crate::api::contract_fixtures::{admin_fixture, checked};
+
+        let body = admin_fixture!("alert-webhooks");
+        let entries =
+            checked(body, "/data/entries/0", "attempt_count", |body| decode_webhook_page(body, 1));
+        assert_eq!(entries.len(), 1);
+        let entry = &entries[0];
+        assert_eq!((entry.status.as_str(), entry.attempt_count), ("pending", 0));
+        assert_eq!(entry.scope, "auction");
+        assert!(entry.completed_at.is_none());
+        assert!(decode_webhook_page(body, 0).is_err());
+
+        let alert_id = "1796d9b615cd5b873fa150780021903075f6a01c1a16cdfff4ac5976c86e7b1c";
+        for (body, action, command_id, silenced_until) in [
+            (
+                admin_fixture!("alert-command"),
+                "acknowledge",
+                "01234567-89ab-4cde-8f01-23456789abcd",
+                None,
+            ),
+            (
+                admin_fixture!("alert-silence-command"),
+                "silence",
+                "01234567-89ab-4cde-8f01-23456789abce",
+                Some("2025-11-15T10:46:40.110000Z"),
+            ),
+        ] {
+            let command_id = Uuid::parse_str(command_id).unwrap();
+            let receipt = checked(body, "/data/alert", "action", |body| {
+                decode_alert_receipt(body, command_id, alert_id, action)
+            });
+            assert_eq!(receipt.id, alert_id);
+            assert_eq!(receipt.action, action);
+            assert_eq!(receipt.silenced_until.as_deref(), silenced_until);
+            assert!(decode_alert_receipt(body, command_id, &"ab".repeat(32), action).is_err());
         }
     }
 }

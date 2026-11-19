@@ -1,0 +1,21 @@
+{
+  "code": "created",
+  "data": {
+    "auction_id": "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b",
+    "auction_sequence": 5,
+    "auction_state_version": 2,
+    "equipment_category": "weapon",
+    "equipment_id": "00000000-0000-4000-8000-000000000018",
+    "equipment_level": null,
+    "equipment_name": "Legendary Axe",
+    "external_equipment_id": "123",
+    "lot_id": "00000000-0000-4000-8000-000000000017",
+    "lot_number": 1,
+    "lot_state_version": 1,
+    "preview_revision": 1,
+    "seller_player_id": "Player",
+    "start_price": 1000,
+    "submission_id": "00000000-0000-4000-8000-000000000016"
+  },
+  "message": "拍品已加入最新一期拍卖"
+}

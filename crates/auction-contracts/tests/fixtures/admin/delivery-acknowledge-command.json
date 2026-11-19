@@ -1,0 +1,9 @@
+{
+  "code": "ok",
+  "data": {
+    "delivery_id": "00000000-0000-4000-8000-000000000023",
+    "fencing_version": 2,
+    "kind": "operator_acknowledged"
+  },
+  "message": "投递已确认处置"
+}

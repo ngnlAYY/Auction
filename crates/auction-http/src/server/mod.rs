@@ -153,14 +153,16 @@ pub(crate) mod contract_fixtures {
     use std::sync::Arc;
 
     use auction_application::admin::{
-        AdminAuditPort, AdminCredentialPort, AdminMailPort, AdminProxyEventReader, AdminRulesPort,
-        AdminUserPort,
+        AdminAuctionCreatePort, AdminAuctionReader, AdminAuditPort, AdminCredentialPort,
+        AdminIntakePort, AdminLotReader, AdminLotUpdatePort, AdminMailPort, AdminProxyEventReader,
+        AdminRenameReader, AdminRulesPort, AdminUserPort,
     };
     use auction_application::core::{ApplicationError, ApplicationFuture};
     use auction_application::delivery::DeliveryAdminPort;
     use auction_application::operations::OperationsAlertSourceReader;
     use auction_application::public::{AdminLoginResult, AdminSessionIdentity, AdminSessionPort};
     use auction_application::realtime::RealtimeAdminPort;
+    use auction_application::recovery::RecoveryReportReader;
     use auction_application::settlement::SettlementReportReader;
     use auction_observability::HealthReader;
     use auction_time::{Duration, Timestamp};
@@ -209,6 +211,31 @@ pub(crate) mod contract_fixtures {
 
     pub(crate) fn time() -> Timestamp {
         Timestamp::from_timestamp(1_763_200_000, 110_000_000).expect("样本时刻")
+    }
+
+    pub(crate) fn draft_auction() -> auction_application::settlement::SettlementAuctionSnapshot {
+        auction_application::settlement::SettlementAuctionSnapshot {
+            id: AUCTION_ID.into(),
+            world_id: "main".to_owned(),
+            sequence: 5,
+            status: "draft".to_owned(),
+            preview_scheduled_at: time() + Duration::hours(1),
+            scheduled_open_at: time() + Duration::hours(2),
+            preview_opened_at: None,
+            preview_manual_open: false,
+            preview_revision: 0,
+            opened_at: None,
+            final_phase_at: None,
+            settled_at: None,
+            cancelled_at: None,
+            cancelled_reason: None,
+            cancelled_by: None,
+            state_version: 1,
+            scheduled_end_at: None,
+            effective_end_at: None,
+            created_at: time(),
+            updated_at: time(),
+        }
     }
 
     pub(crate) fn admin_address() -> ConnectInfo<SocketAddr> {
@@ -282,6 +309,13 @@ pub(crate) mod contract_fixtures {
     #[derive(Default)]
     pub(crate) struct AdminFixturePorts {
         pub(crate) audit: Option<Arc<dyn AdminAuditPort>>,
+        pub(crate) auctions: Option<Arc<dyn AdminAuctionReader>>,
+        pub(crate) auction_create: Option<Arc<dyn AdminAuctionCreatePort>>,
+        pub(crate) lot_update: Option<Arc<dyn AdminLotUpdatePort>>,
+        pub(crate) intake: Option<Arc<dyn AdminIntakePort>>,
+        pub(crate) lots: Option<Arc<dyn AdminLotReader>>,
+        pub(crate) renames: Option<Arc<dyn AdminRenameReader>>,
+        pub(crate) recovery_report: Option<Arc<dyn RecoveryReportReader>>,
         pub(crate) health: Option<Arc<dyn HealthReader>>,
         pub(crate) mail: Option<Arc<dyn AdminMailPort>>,
         pub(crate) rules: Option<Arc<dyn AdminRulesPort>>,
@@ -299,22 +333,22 @@ pub(crate) mod contract_fixtures {
             AdminApiState::new(
                 Some(Arc::new(FixtureAdminSession)),
                 None,
-                None,
+                self.auction_create,
                 self.audit,
                 self.health,
-                None,
+                self.intake,
                 self.mail,
                 self.rules,
                 None,
                 self.credentials,
-                None,
+                self.renames,
                 self.users,
                 None,
                 self.settlement_report,
-                None,
-                None,
-                None,
-                None,
+                self.recovery_report,
+                self.auctions,
+                self.lots,
+                self.lot_update,
                 self.proxy_events,
                 self.deliveries,
                 None,
@@ -341,8 +375,21 @@ pub(crate) mod contract_fixtures {
 
     /// 经真实 Admin 路由与生产 handler 处理请求，测试只替换应用端口。
     pub(crate) async fn admin_get(state: AdminApiState, path: &str) -> Response {
-        let mut request = Request::get(path).body(Body::empty()).expect("Admin GET");
+        admin_request(state, axum::http::Method::GET, path, Body::empty()).await
+    }
+
+    pub(crate) async fn admin_request(
+        state: AdminApiState,
+        method: axum::http::Method,
+        path: &str,
+        body: Body,
+    ) -> Response {
+        let mut request =
+            Request::builder().method(method).uri(path).body(body).expect("Admin 请求");
         *request.headers_mut() = admin_headers();
+        request
+            .headers_mut()
+            .insert(header::CONTENT_TYPE, HeaderValue::from_static("application/json"));
         request.extensions_mut().insert(admin_address());
         admin_router::<NoAssets>("fixture", HttpBoundary::default())
             .with_state(state)

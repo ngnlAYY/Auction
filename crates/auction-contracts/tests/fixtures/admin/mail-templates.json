@@ -1,0 +1,323 @@
+{
+  "code": "ok",
+  "data": {
+    "templates": [
+      {
+        "allowed_placeholders": [],
+        "body": "Your auction submission was not accepted.\n\nAuction submissions must contain equipment only.\nPlease remove Credits, CoD and other item types\nbefore submitting again.",
+        "customized": false,
+        "default_body": "Your auction submission was not accepted.\n\nAuction submissions must contain equipment only.\nPlease remove Credits, CoD and other item types\nbefore submitting again.",
+        "key": "auction_assets_rejected",
+        "required_placeholders": [],
+        "revision": 0,
+        "updated_at": null,
+        "updated_by": null,
+        "usable": true
+      },
+      {
+        "allowed_placeholders": [],
+        "body": "No equipment attachments were found in your message.\n\nAttach the equipment you want to submit,\nthen send a new message with the subject \"auction\".",
+        "customized": false,
+        "default_body": "No equipment attachments were found in your message.\n\nAttach the equipment you want to submit,\nthen send a new message with the subject \"auction\".",
+        "key": "auction_no_attachments",
+        "required_placeholders": [],
+        "revision": 0,
+        "updated_at": null,
+        "updated_by": null,
+        "usable": true
+      },
+      {
+        "allowed_placeholders": [
+          "reason_code",
+          "reason_text",
+          "next_steps",
+          "mail_reference"
+        ],
+        "body": "Your auction submission was not accepted.\n\nReason:\n{reason_text}\n\nEquipment return:\nA return has been requested for all equipment\nin your original message.\n\nIf you submitted multiple items together,\nthe entire submission will be returned.\n\nWhat to do next:\n{next_steps}\n\nOriginal mail reference: {mail_reference}",
+        "customized": false,
+        "default_body": "Your auction submission was not accepted.\n\nReason:\n{reason_text}\n\nEquipment return:\nA return has been requested for all equipment\nin your original message.\n\nIf you submitted multiple items together,\nthe entire submission will be returned.\n\nWhat to do next:\n{next_steps}\n\nOriginal mail reference: {mail_reference}",
+        "key": "auction_equipment_rejected",
+        "required_placeholders": [],
+        "revision": 0,
+        "updated_at": null,
+        "updated_by": null,
+        "usable": true
+      },
+      {
+        "allowed_placeholders": [],
+        "body": "Your account request was not accepted.\n\nAccount requests must not include equipment,\nCredits, other items or CoD.\n\nPlease resend your request without these assets.",
+        "customized": false,
+        "default_body": "Your account request was not accepted.\n\nAccount requests must not include equipment,\nCredits, other items or CoD.\n\nPlease resend your request without these assets.",
+        "key": "user_assets_rejected",
+        "required_placeholders": [],
+        "revision": 0,
+        "updated_at": null,
+        "updated_by": null,
+        "usable": true
+      },
+      {
+        "allowed_placeholders": [
+          "login_key",
+          "username"
+        ],
+        "body": "Your HV-Auction login key is ready.\n\nPlayer: {username}\n\nLogin key:\n{login_key}\n\nUse this key to sign in to HV-Auction.\nKeep it private.",
+        "customized": false,
+        "default_body": "Your HV-Auction login key is ready.\n\nPlayer: {username}\n\nLogin key:\n{login_key}\n\nUse this key to sign in to HV-Auction.\nKeep it private.",
+        "key": "register_key",
+        "required_placeholders": [
+          "login_key",
+          "username"
+        ],
+        "revision": 0,
+        "updated_at": null,
+        "updated_by": null,
+        "usable": true
+      },
+      {
+        "allowed_placeholders": [
+          "result_code",
+          "username"
+        ],
+        "body": "Your registration could not be completed.\n\nPlayer: {username}\nResult code: {result_code}\n\nContact the auction operator if you need help\nresolving this issue.",
+        "customized": false,
+        "default_body": "Your registration could not be completed.\n\nPlayer: {username}\nResult code: {result_code}\n\nContact the auction operator if you need help\nresolving this issue.",
+        "key": "register_result",
+        "required_placeholders": [
+          "result_code"
+        ],
+        "revision": 0,
+        "updated_at": null,
+        "updated_by": null,
+        "usable": true
+      },
+      {
+        "allowed_placeholders": [
+          "result_code",
+          "username"
+        ],
+        "body": "Your account rebind request has been processed.\n\nPlayer: {username}\nResult code: {result_code}\n\nContact the auction operator if you need help\nunderstanding the result.",
+        "customized": false,
+        "default_body": "Your account rebind request has been processed.\n\nPlayer: {username}\nResult code: {result_code}\n\nContact the auction operator if you need help\nunderstanding the result.",
+        "key": "rebind_result",
+        "required_placeholders": [
+          "result_code"
+        ],
+        "revision": 0,
+        "updated_at": null,
+        "updated_by": null,
+        "usable": true
+      },
+      {
+        "allowed_placeholders": [
+          "login_key",
+          "username"
+        ],
+        "body": "Your HV-Auction login key has been rotated.\n\nPlayer: {username}\n\nNew login key:\n{login_key}\n\nAll previous sessions have been signed out.\nKeep this key private.",
+        "customized": false,
+        "default_body": "Your HV-Auction login key has been rotated.\n\nPlayer: {username}\n\nNew login key:\n{login_key}\n\nAll previous sessions have been signed out.\nKeep this key private.",
+        "key": "rekey_key",
+        "required_placeholders": [
+          "login_key",
+          "username"
+        ],
+        "revision": 0,
+        "updated_at": null,
+        "updated_by": null,
+        "usable": true
+      },
+      {
+        "allowed_placeholders": [
+          "result_code",
+          "username"
+        ],
+        "body": "Your login key rotation request could not be completed.\n\nPlayer: {username}\nResult code: {result_code}\n\nSend a message with the subject \"register\" first\nif you have not registered yet.\nContact the auction operator if you need help\nunderstanding the result.",
+        "customized": false,
+        "default_body": "Your login key rotation request could not be completed.\n\nPlayer: {username}\nResult code: {result_code}\n\nSend a message with the subject \"register\" first\nif you have not registered yet.\nContact the auction operator if you need help\nunderstanding the result.",
+        "key": "rekey_result",
+        "required_placeholders": [
+          "result_code"
+        ],
+        "revision": 0,
+        "updated_at": null,
+        "updated_by": null,
+        "usable": true
+      },
+      {
+        "allowed_placeholders": [
+          "item_name",
+          "amount",
+          "reference",
+          "price_breakdown",
+          "payment_deadline"
+        ],
+        "body": "Your auction item is ready to collect.\n\nItem: {item_name}\n\n{price_breakdown}Amount due (CoD): {amount} Credits\nPayment deadline: {payment_deadline}\n\nCollect the attached equipment to pay the CoD\nand receive your item.\n\nReference: {reference}",
+        "customized": false,
+        "default_body": "Your auction item is ready to collect.\n\nItem: {item_name}\n\n{price_breakdown}Amount due (CoD): {amount} Credits\nPayment deadline: {payment_deadline}\n\nCollect the attached equipment to pay the CoD\nand receive your item.\n\nReference: {reference}",
+        "key": "settlement_winner_equipment_cod",
+        "required_placeholders": [
+          "item_name",
+          "amount",
+          "reference"
+        ],
+        "revision": 0,
+        "updated_at": null,
+        "updated_by": null,
+        "usable": true
+      },
+      {
+        "allowed_placeholders": [
+          "amount",
+          "reference",
+          "item_name",
+          "payment_deadline"
+        ],
+        "body": "This mail collects payment for your Isekai auction item.\n\nItem: {item_name}\nCoD: {amount} Credits\nPayment deadline: {payment_deadline}\n\nCollect the attached Credits to pay the CoD.\nYour equipment will be sent separately in Isekai\nafter payment is confirmed.\n\nReference: {reference}",
+        "customized": false,
+        "default_body": "This mail collects payment for your Isekai auction item.\n\nItem: {item_name}\nCoD: {amount} Credits\nPayment deadline: {payment_deadline}\n\nCollect the attached Credits to pay the CoD.\nYour equipment will be sent separately in Isekai\nafter payment is confirmed.\n\nReference: {reference}",
+        "key": "settlement_payment_carrier",
+        "required_placeholders": [
+          "amount",
+          "reference"
+        ],
+        "revision": 0,
+        "updated_at": null,
+        "updated_by": null,
+        "usable": true
+      },
+      {
+        "allowed_placeholders": [
+          "reference"
+        ],
+        "body": "Payment for this auction transaction is overdue.\n\nPlease check your original auction payment mail.\nIf you have already paid, contact the auction\noperator with the reference below.\n\nReference: {reference}",
+        "customized": false,
+        "default_body": "Payment for this auction transaction is overdue.\n\nPlease check your original auction payment mail.\nIf you have already paid, contact the auction\noperator with the reference below.\n\nReference: {reference}",
+        "key": "settlement_payment_reminder",
+        "required_placeholders": [
+          "reference"
+        ],
+        "revision": 0,
+        "updated_at": null,
+        "updated_by": null,
+        "usable": true
+      },
+      {
+        "allowed_placeholders": [
+          "item_name",
+          "reference"
+        ],
+        "body": "The following equipment is attached.\n\nItem: {item_name}\n\nPlease collect the attachment.\n\nReference: {reference}",
+        "customized": false,
+        "default_body": "The following equipment is attached.\n\nItem: {item_name}\n\nPlease collect the attachment.\n\nReference: {reference}",
+        "key": "settlement_equipment_handoff",
+        "required_placeholders": [
+          "item_name",
+          "reference"
+        ],
+        "revision": 0,
+        "updated_at": null,
+        "updated_by": null,
+        "usable": true
+      },
+      {
+        "allowed_placeholders": [
+          "amount",
+          "reference",
+          "item_name"
+        ],
+        "body": "Sold {item_name}.\nPayout: {amount} Credits\nReference: {reference}",
+        "customized": true,
+        "default_body": "Your auction payout is attached.\n\nItem: {item_name}\nAmount: {amount} Credits\n\nPlease collect the attached Credits.\n\nReference: {reference}",
+        "key": "settlement_seller_payout",
+        "required_placeholders": [
+          "amount",
+          "reference"
+        ],
+        "revision": 1,
+        "updated_at": "2026-11-13T12:00:00Z",
+        "updated_by": "admin",
+        "usable": true
+      },
+      {
+        "allowed_placeholders": [
+          "amount",
+          "reference",
+          "item_name"
+        ],
+        "body": "Your auction refund is attached.\n\nItem: {item_name}\nAmount: {amount} Credits\n\nPlease collect the attached Credits.\n\nReference: {reference}",
+        "customized": false,
+        "default_body": "Your auction refund is attached.\n\nItem: {item_name}\nAmount: {amount} Credits\n\nPlease collect the attached Credits.\n\nReference: {reference}",
+        "key": "settlement_buyer_refund",
+        "required_placeholders": [
+          "amount",
+          "reference"
+        ],
+        "revision": 0,
+        "updated_at": null,
+        "updated_by": null,
+        "usable": true
+      },
+      {
+        "allowed_placeholders": [
+          "item_name",
+          "lot_code",
+          "amount",
+          "deadline_line",
+          "lot_url_line"
+        ],
+        "body": "Your leading bid has been outbid.\n\nItem: {item_name}\nLot: {lot_code}\nAccepted bid: {amount} Credits\n{deadline_line}{lot_url_line}\nCheck the auction website for the latest price\nand place another bid if you wish to continue.",
+        "customized": false,
+        "default_body": "Your leading bid has been outbid.\n\nItem: {item_name}\nLot: {lot_code}\nAccepted bid: {amount} Credits\n{deadline_line}{lot_url_line}\nCheck the auction website for the latest price\nand place another bid if you wish to continue.",
+        "key": "lot_watch",
+        "required_placeholders": [
+          "item_name",
+          "lot_code",
+          "amount"
+        ],
+        "revision": 0,
+        "updated_at": null,
+        "updated_by": null,
+        "usable": true
+      },
+      {
+        "allowed_placeholders": [
+          "item_name",
+          "lot_code",
+          "amount",
+          "deadline_line",
+          "lot_url_line",
+          "notification_id"
+        ],
+        "body": "Your leading bid has been outbid.\n\nItem: {item_name}\nLot: {lot_code}\nAccepted bid: {amount} Credits\n{deadline_line}{lot_url_line}\nNotification: {notification_id}.",
+        "customized": false,
+        "default_body": "Your leading bid has been outbid.\n\nItem: {item_name}\nLot: {lot_code}\nAccepted bid: {amount} Credits\n{deadline_line}{lot_url_line}\nNotification: {notification_id}.",
+        "key": "lot_watch_pm",
+        "required_placeholders": [
+          "item_name",
+          "lot_code",
+          "amount"
+        ],
+        "revision": 0,
+        "updated_at": null,
+        "updated_by": null,
+        "usable": true
+      },
+      {
+        "allowed_placeholders": [
+          "summary"
+        ],
+        "body": "An auction service issue needs attention.\n\n{summary}\n\nPlease review the Admin dashboard for details.",
+        "customized": false,
+        "default_body": "An auction service issue needs attention.\n\n{summary}\n\nPlease review the Admin dashboard for details.",
+        "key": "operations_alert",
+        "required_placeholders": [
+          "summary"
+        ],
+        "revision": 0,
+        "updated_at": null,
+        "updated_by": null,
+        "usable": true
+      }
+    ]
+  },
+  "message": "邮件模板已读取"
+}

@@ -306,4 +306,23 @@ mod tests {
             assert_eq!(AdminApiFailure::display_code(&failure), "invalid_response");
         }
     }
+    #[test]
+    fn rename_list_contract_fixtures() {
+        use auction_contracts::ApiResponse;
+
+        use super::{StrictRenameList, decode_rename_list};
+        use crate::api::contract_fixtures::{admin_fixture, decode};
+
+        for (body, page, size, count) in
+            [(admin_fixture!("renames"), 1, 50, 1), (admin_fixture!("renames-empty-page"), 2, 1, 0)]
+        {
+            let payload: ApiResponse<StrictRenameList> = decode(body, "/data/pagination", "total");
+            let page = decode_rename_list(payload.data, "all", page, size).expect("改名历史");
+            assert_eq!(page.renames.len(), count);
+            if let Some(rename) = page.renames.first() {
+                assert_eq!(rename.user_state_version, 3);
+                assert!(rename.reverted_at.is_none());
+            }
+        }
+    }
 }

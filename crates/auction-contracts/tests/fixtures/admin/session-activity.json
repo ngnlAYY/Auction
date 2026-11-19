@@ -1,0 +1,12 @@
+{
+  "code": "ok",
+  "data": {
+    "absolute_expires_at": "2026-11-18T09:02:03.456789Z",
+    "actor": "operator",
+    "authenticated": true,
+    "csrf_token": "test-csrf",
+    "expires_at": "2026-11-18T01:17:03.456789Z",
+    "server_time": "2026-11-18T01:02:03.456789Z"
+  },
+  "message": "会话已续期"
+}

@@ -1,0 +1,10 @@
+{
+  "code": "ok",
+  "data": {
+    "command_id": "00000000-0000-4000-8000-000000000007",
+    "delivery_id": "0f8fad5b-d9cb-469f-a165-70867728950e",
+    "external_reference": "mooglemail:main:send:7000001",
+    "replayed": false
+  },
+  "message": "人工 Sent 证明已提交"
+}

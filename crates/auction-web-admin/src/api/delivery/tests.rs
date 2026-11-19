@@ -1004,3 +1004,94 @@ fn player_support_bids_decode_backend_contract_fixtures() {
         assert_eq!(support.bids[0].mechanism, mechanism);
     }
 }
+
+#[test]
+fn default_sent_preview_and_acknowledgement_contract_fixtures() {
+    use super::decode_acknowledgement;
+    use crate::api::contract_fixtures::{admin_fixture, checked, decode};
+
+    let payload: StrictDeliveryEnvelope<AdminDeliverySentProofPreviewResponse> =
+        decode(admin_fixture!("delivery-sent-proof-preview-default"), "/data", "eligible");
+    assert_eq!(payload.data.delivery_id, DELIVERY_ID);
+    assert!(payload.data.prior_unbound_attempts.is_none());
+    assert!(payload.data.sent_before_current_attempt.is_none());
+    assert!(decode_preview(payload, DELIVERY_ID).is_err(), "扩展请求不能接受缺省投影");
+
+    let body = admin_fixture!("delivery-acknowledge-command");
+    let delivery_id = "00000000-0000-4000-8000-000000000023";
+    let receipt =
+        checked(body, "/data", "kind", |body| decode_acknowledgement(body, delivery_id, 2));
+    assert_eq!(receipt.delivery_id, delivery_id);
+    assert_eq!(receipt.fencing_version, 2);
+    assert_eq!(receipt.kind, "operator_acknowledged");
+    assert!(decode_acknowledgement(body, DELIVERY_ID, 2).is_err());
+    assert!(decode_acknowledgement(body, delivery_id, 3).is_err());
+}
+
+#[test]
+fn delivery_release_reconcile_and_sent_proof_contract_fixtures() {
+    use auction_contracts::AdminDeliveryCommandResponse;
+
+    use super::decode::decode_delivery_command;
+    use super::queue::DeliveryAction;
+    use crate::api::contract_fixtures::{admin_fixture, checked};
+
+    for (body, id, action, status, external_reference, failure_code) in [
+        (
+            admin_fixture!("delivery-release-command"),
+            "00000000-0000-4000-8000-000000000031",
+            DeliveryAction::Release,
+            "pending",
+            None,
+            None,
+        ),
+        (
+            admin_fixture!("delivery-reconcile-succeeded-command"),
+            "00000000-0000-4000-8000-000000000032",
+            DeliveryAction::ReconcileSucceeded,
+            "succeeded",
+            Some("mooglemail:main:take:4244"),
+            None,
+        ),
+        (
+            admin_fixture!("delivery-reconcile-failed-command"),
+            "00000000-0000-4000-8000-000000000032",
+            DeliveryAction::ReconcileFailed,
+            "failed",
+            None,
+            Some("verified_not_sent"),
+        ),
+    ] {
+        let parse = |body: &str| {
+            serde_json::from_str::<StrictDeliveryEnvelope<AdminDeliveryCommandResponse>>(body)
+                .map_err(drop)
+        };
+        let receipt = checked(body, "/data/delivery", "fencing_version", |body| {
+            decode_delivery_command(parse(body)?, id, action, 4)
+        });
+        assert_eq!(receipt.status, status);
+        assert_eq!(receipt.fencing_version, 5);
+        assert_eq!(receipt.external_reference.as_deref(), external_reference);
+        assert_eq!(receipt.failure_code.as_deref(), failure_code);
+        assert!(decode_delivery_command(parse(body).unwrap(), id, action, 5).is_err());
+        let wrong_action = if action == DeliveryAction::ReconcileSucceeded {
+            DeliveryAction::ReconcileFailed
+        } else {
+            DeliveryAction::ReconcileSucceeded
+        };
+        assert!(decode_delivery_command(parse(body).unwrap(), id, wrong_action, 4).is_err());
+    }
+
+    let body = admin_fixture!("delivery-sent-proof-command");
+    let command_id = Uuid::from_u128(0x4000_8000_0000_0000_0007);
+    let confirmation = checked(body, "/data", "command_id", |body| {
+        decode_confirmation(
+            serde_json::from_str::<StrictDeliveryEnvelope<AdminDeliverySentProofResponse>>(body)
+                .map_err(drop)?,
+            command_id,
+            DELIVERY_ID,
+        )
+    });
+    assert_eq!(confirmation.external_reference, "mooglemail:main:send:7000001");
+    assert!(!confirmation.replayed);
+}

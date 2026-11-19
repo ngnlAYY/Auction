@@ -301,4 +301,17 @@ mod tests {
         assert!(legacy.data.server_time.is_none());
         assert!(decode_admin_session(body).is_err());
     }
+    #[test]
+    fn session_activity_contract_fixture() {
+        use crate::api::contract_fixtures::admin_fixture;
+
+        let body = admin_fixture!("session-activity");
+        let session = super::decode_admin_session(body).expect("活动续期响应");
+        assert_eq!(session.actor, "operator");
+        assert!(session.expires_at > session.server_time);
+
+        let mut invalid: serde_json::Value = serde_json::from_str(body).expect("续期样本");
+        invalid["data"].as_object_mut().unwrap().remove("server_time").expect("服务端时刻");
+        assert!(super::decode_admin_session(&invalid.to_string()).is_err());
+    }
 }

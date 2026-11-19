@@ -366,3 +366,65 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod contract_tests {
+    use std::sync::Arc;
+
+    use auction_application::core::ApplicationFuture;
+    use auction_application::delivery::{
+        DeliveryAcknowledgementCommand, DeliveryAcknowledgementResult, DeliveryDispositionPort,
+    };
+    use auction_domain::{DeliveryAcknowledgementFacts, validate_acknowledgement};
+    use axum::http::{Method, StatusCode};
+    use serde_json::json;
+
+    use crate::server::contract_fixtures::{admin_request, admin_state, assert_http};
+
+    const DELIVERY_ID: uuid::Uuid = uuid::Uuid::from_u128(0x4000_8000_0000_0000_0023);
+    const DELIVERY_FENCE: i64 = 2;
+
+    struct Disposition;
+
+    impl DeliveryDispositionPort for Disposition {
+        fn acknowledge(
+            &self,
+            command: DeliveryAcknowledgementCommand,
+        ) -> ApplicationFuture<'_, DeliveryAcknowledgementResult> {
+            Box::pin(async move {
+                command.validate().expect("合法处置命令");
+                assert_eq!(command.delivery_id, DELIVERY_ID);
+                assert_eq!(command.expected_fencing_version, DELIVERY_FENCE);
+                // 确认只追加处置事实，既有失败状态和 fence 保持原值。
+                validate_acknowledgement(DeliveryAcknowledgementFacts {
+                    status: "failed",
+                    origin_kind: "mail_intake",
+                    credits: Some(0),
+                    cod: Some(0),
+                    equipment_count: 0,
+                    has_fulfillment_obligation: false,
+                })
+                .expect("无资产责任的历史通知失败");
+                Ok(DeliveryAcknowledgementResult {
+                    command_id: command.command_id,
+                    delivery_id: command.delivery_id,
+                    fencing_version: DELIVERY_FENCE,
+                    kind: "operator_acknowledged".to_owned(),
+                    replayed: false,
+                })
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn delivery_acknowledgement_contract_fixtures() {
+        let state = admin_state().with_delivery_disposition(Some(Arc::new(Disposition)));
+        let path = "/api/v1/admin/deliveries/00000000-0000-4000-8000-000000000023/acknowledge";
+        let body = json!({
+            "command_id":"00000000-0000-4000-8000-000000000007",
+            "expected_fencing_version":2, "reason":"已核对历史通知失败"
+        });
+        let response = admin_request(state, Method::POST, path, body.to_string().into()).await;
+        assert_http("admin/delivery-acknowledge-command", StatusCode::OK, response).await;
+    }
+}

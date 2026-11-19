@@ -313,4 +313,64 @@ mod tests {
             assert_code(response, status, code).await;
         }
     }
+    #[tokio::test]
+    async fn intake_command_contract_fixture() {
+        use std::sync::Arc;
+
+        use auction_application::admin::{AdminIntakeCommand, AdminIntakePort, AdminIntakeResult};
+        use auction_application::core::ApplicationFuture;
+        use axum::http::Method;
+        use uuid::Uuid;
+
+        use crate::server::contract_fixtures::{
+            AUCTION_ID, AdminFixturePorts, admin_request, assert_http,
+        };
+
+        struct Intake;
+
+        impl AdminIntakePort for Intake {
+            fn add_item(
+                &self,
+                command: AdminIntakeCommand,
+            ) -> ApplicationFuture<'_, AdminIntakeResult> {
+                Box::pin(async move {
+                    assert_eq!(command.world_id, "main");
+                    Ok(AdminIntakeResult {
+                        auction_id: AUCTION_ID,
+                        auction_sequence: 5,
+                        auction_state_version: 2,
+                        preview_revision: 1,
+                        submission_id: Uuid::from_u128(0x4000_8000_0000_0000_0016),
+                        lot_id: Uuid::from_u128(0x4000_8000_0000_0000_0017),
+                        lot_number: 1,
+                        lot_state_version: 1,
+                        equipment_id: Uuid::from_u128(0x4000_8000_0000_0000_0018),
+                        external_equipment_id: "123".to_owned(),
+                        equipment_name: "Legendary Axe".to_owned(),
+                        equipment_category: "weapon".to_owned(),
+                        equipment_level: None,
+                        start_price: command.start_price,
+                        seller_player_id: command.player_id,
+                    })
+                })
+            }
+        }
+
+        let state =
+            AdminFixturePorts { intake: Some(Arc::new(Intake)), ..Default::default() }.state();
+        let input = json!({
+            "command_id": VALID_UUID,
+            "equipment_url": "https://hentaiverse.org/equip/123/0000000000",
+            "player_id": "Player",
+            "start_price": 1000,
+        });
+        let response = admin_request(
+            state,
+            Method::POST,
+            "/api/v1/admin/worlds/main/auction-intake/items",
+            input.to_string().into(),
+        )
+        .await;
+        assert_http("admin/lot-intake-command", StatusCode::CREATED, response).await;
+    }
 }

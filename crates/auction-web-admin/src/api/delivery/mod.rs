@@ -134,10 +134,20 @@ pub(crate) async fn acknowledge_delivery(
     if !response.ok() {
         return Err(response_failure(response).await);
     }
+    let body = response
+        .text()
+        .await
+        .map_err(|error| AdminApiFailure::client(invalid_response_error(error)))?;
+    decode_acknowledgement(&body, &delivery_id, expected_fencing_version)
+}
+
+fn decode_acknowledgement(
+    body: &str,
+    delivery_id: &str,
+    expected_fencing_version: i64,
+) -> Result<AdminDeliveryAcknowledgeResponse, AdminApiFailure> {
     let payload: StrictDeliveryEnvelope<AdminDeliveryAcknowledgeResponse> =
-        response
-            .json()
-            .await
+        serde_json::from_str(body)
             .map_err(|error| AdminApiFailure::client(invalid_response_error(error)))?;
     if !valid_success_code(&payload.code)
         || payload.message.is_empty()

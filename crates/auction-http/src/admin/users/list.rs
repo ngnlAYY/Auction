@@ -135,9 +135,31 @@ mod tests {
 
         fn create(
             &self,
-            _command: AdminUserCreateCommand,
+            command: AdminUserCreateCommand,
         ) -> ApplicationFuture<'_, AdminUserMutationResult> {
-            panic!("用户列表样本不创建用户")
+            use auction_application::admin::AdminUserKeyMode;
+            use auction_application::mail::MailLoginKey;
+
+            Box::pin(async move {
+                assert_eq!(command.key_mode, AdminUserKeyMode::Generated);
+                Ok(AdminUserMutationResult {
+                    user: AdminUser {
+                        id: Uuid::from_u128(0x4000_8000_0000_0000_0026),
+                        username: command.username,
+                        forum_account_id: command.forum_account_id,
+                        status: AdminUserStatus::Active,
+                        key_status: AdminUserKeyStatus::Active,
+                        state_version: 1,
+                        created_at: time(),
+                        updated_at: time(),
+                    },
+                    // 这是固定的占位数据，未生成或写入真实登录 key。
+                    generated_key: Some(
+                        MailLoginKey::from_encoded("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+                            .unwrap(),
+                    ),
+                })
+            })
         }
 
         fn mutate(
@@ -149,9 +171,25 @@ mod tests {
 
         fn revert_rename(
             &self,
-            _command: AdminRenameRevertCommand,
+            command: AdminRenameRevertCommand,
         ) -> ApplicationFuture<'_, AdminUserMutationResult> {
-            panic!("用户列表样本不撤销改名")
+            Box::pin(async move {
+                assert_eq!(command.rename_id, Uuid::from_u128(0x4000_8000_0000_0000_0008));
+                assert_eq!(command.expected_state_version, 3);
+                Ok(AdminUserMutationResult {
+                    user: AdminUser {
+                        id: Uuid::from_u128(0x4000_8000_0000_0000_0009),
+                        username: "Previous".to_owned(),
+                        forum_account_id: None,
+                        status: AdminUserStatus::Active,
+                        key_status: AdminUserKeyStatus::Active,
+                        state_version: command.expected_state_version + 1,
+                        created_at: time(),
+                        updated_at: time() + auction_time::Duration::minutes(1),
+                    },
+                    generated_key: None,
+                })
+            })
         }
     }
 
@@ -165,5 +203,31 @@ mod tests {
         ] {
             assert_http(name, StatusCode::OK, admin_get(state.clone(), url).await).await;
         }
+    }
+    #[tokio::test]
+    async fn rename_revert_contract_fixtures() {
+        use axum::http::Method;
+        use serde_json::json;
+
+        use crate::server::contract_fixtures::admin_request;
+
+        let state =
+            AdminFixturePorts { users: Some(Arc::new(FixtureUsers)), ..Default::default() }.state();
+        let body =
+            json!({"command_id":"00000000-0000-4000-8000-000000000007","expected_state_version":3});
+        let response = admin_request(
+            state.clone(),
+            Method::POST,
+            "/api/v1/admin/renames/00000000-0000-4000-8000-000000000008/revert",
+            body.to_string().into(),
+        )
+        .await;
+        assert_http("admin/rename-revert-command", StatusCode::OK, response).await;
+
+        let body = json!({"command_id":"00000000-0000-4000-8000-000000000008","username":"ExamplePlayer","key_mode":"generated"});
+        let response =
+            admin_request(state, Method::POST, "/api/v1/admin/users", body.to_string().into())
+                .await;
+        assert_http("admin/user-create-command", StatusCode::CREATED, response).await;
     }
 }

@@ -1,0 +1,35 @@
+{
+  "code": "ok",
+  "data": {
+    "lot": {
+      "auction_id": "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b",
+      "created_at": "2025-11-15T09:46:40.110000Z",
+      "current_price": 2000,
+      "effective_end_at": null,
+      "equipment_attributes": {},
+      "equipment_category": "weapon",
+      "equipment_collected_at": "2025-11-15T09:46:40.110000Z",
+      "equipment_id": "00000000-0000-4000-8000-000000000004",
+      "equipment_name": "Legendary Axe",
+      "external_equipment_id": "123",
+      "external_mail_id": "9001",
+      "id": "00000000-0000-4000-8000-000000000023",
+      "leader_user_id": null,
+      "lot_number": 1,
+      "mailbox_key": "main",
+      "seller": "Seller",
+      "slow_authorization_id": null,
+      "slow_due_at": null,
+      "slow_generation": 0,
+      "start_price": 2000,
+      "state_version": 2,
+      "status": "pending",
+      "submission_id": "00000000-0000-4000-8000-000000000006",
+      "submission_received_at": "2025-11-15T09:46:40.110000Z",
+      "submission_source_kind": "mail",
+      "submission_source_reference": null,
+      "updated_at": "2025-11-15T09:47:40.110000Z"
+    }
+  },
+  "message": "拍品已更新"
+}

@@ -1,0 +1,23 @@
+{
+  "code": "ok",
+  "data": {
+    "polling": {
+      "consecutive_failures": 0,
+      "diagnostics": {
+        "completed_external_mail_id": "9002",
+        "cursor_status": "available",
+        "observed_at": "2025-11-15T09:46:40.110000Z",
+        "progress": null,
+        "worker_condition": "unavailable",
+        "worker_observed_at": null
+      },
+      "last_poll_at": "2025-11-15T09:46:40.110000Z",
+      "mailbox_key": "main",
+      "next_poll_at": "2025-11-15T09:46:55.110000Z",
+      "paused": false,
+      "state_version": 3,
+      "updated_at": "2025-11-15T09:46:40.110000Z"
+    }
+  },
+  "message": "邮件轮询状态已加载"
+}

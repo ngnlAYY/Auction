@@ -478,4 +478,30 @@ mod tests {
             assert_eq!(page.users[0].blacklist_history.len(), count);
         }
     }
+    #[test]
+    fn rename_revert_contract_fixture() {
+        use super::{ApiResponse, StrictUserData, decode_user};
+        use crate::api::contract_fixtures::{admin_fixture, decode};
+
+        let payload: ApiResponse<StrictUserData> =
+            decode(admin_fixture!("rename-revert-command"), "/data/user", "username");
+        let user = decode_user(payload.data.user).expect("改名回滚回执");
+        assert_eq!(user.username, "Previous");
+        assert_eq!(user.state_version, 4);
+    }
+
+    #[test]
+    fn generated_user_key_receipt_contract_fixture() {
+        use super::{ApiResponse, StrictUserDataWithKey, decode_user, valid_generated_key};
+        use crate::api::contract_fixtures::{admin_fixture, decode};
+
+        let payload: ApiResponse<StrictUserDataWithKey> =
+            decode(admin_fixture!("user-create-command"), "/data", "generated_key");
+        let user = decode_user(payload.data.user).expect("创建用户回执");
+        assert_eq!(payload.code, "created");
+        assert_eq!(user.username, "ExamplePlayer");
+        assert_eq!(user.state_version, 1);
+        assert!(valid_generated_key(&payload.data.generated_key));
+        assert_eq!(payload.data.generated_key, "A".repeat(43));
+    }
 }

@@ -158,3 +158,41 @@ pub(crate) use notification_templates::{
     MailTemplateAttempt, MailTemplateBodyProblem, fetch_mail_templates, mail_template_body_problem,
     submit_mail_template,
 };
+
+#[cfg(test)]
+mod contract_fixtures {
+    use serde::de::DeserializeOwned;
+    use serde_json::Value;
+
+    macro_rules! admin_fixture {
+        ($name:literal) => {
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../auction-contracts/tests/fixtures/admin/",
+                $name,
+                ".json"
+            ))
+        };
+    }
+    pub(crate) use admin_fixture;
+
+    /// 同一入口必须接受完整生产响应，并拒绝删掉必填字段后的响应。
+    pub(super) fn checked<T, E: std::fmt::Debug>(
+        body: &str,
+        parent: &str,
+        key: &str,
+        decode: impl Fn(&str) -> Result<T, E>,
+    ) -> T {
+        let decoded = decode(body).expect("生产响应可解码");
+        let mut invalid: Value = serde_json::from_str(body).expect("样本 JSON");
+        assert!(
+            invalid.pointer_mut(parent).unwrap().as_object_mut().unwrap().remove(key).is_some()
+        );
+        assert!(decode(&invalid.to_string()).is_err(), "缺少 {parent}/{key}");
+        decoded
+    }
+
+    pub(super) fn decode<T: DeserializeOwned>(body: &str, parent: &str, key: &str) -> T {
+        checked(body, parent, key, |body| serde_json::from_str(body))
+    }
+}

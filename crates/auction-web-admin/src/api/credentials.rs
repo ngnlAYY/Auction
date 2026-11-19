@@ -486,4 +486,26 @@ mod tests {
             assert!(page.restart_required);
         }
     }
+    #[test]
+    fn credential_command_contract_fixtures() {
+        use super::{
+            AdminCredentialDeleteResponse, AdminCredentialMutationResponse, ApiResponse,
+            decode_credential_data, decode_credential_delete,
+        };
+        use crate::api::contract_fixtures::{admin_fixture, decode};
+
+        let payload: ApiResponse<AdminCredentialMutationResponse> =
+            decode(admin_fixture!("credential-command"), "/data/credential", "label");
+        let result = decode_credential_data(payload.data).expect("凭据修改回执");
+        assert_eq!(result.credential.label, "New label");
+        assert!(result.restart_required);
+
+        let payload: ApiResponse<AdminCredentialDeleteResponse> =
+            decode(admin_fixture!("credential-delete-command"), "/data", "credential_id");
+        let result =
+            decode_credential_delete(payload.data, "00000000-0000-4000-8000-000000000025", 5)
+                .expect("删除回执");
+        assert_eq!(result.state_version, 6);
+        assert!(result.restart_required);
+    }
 }

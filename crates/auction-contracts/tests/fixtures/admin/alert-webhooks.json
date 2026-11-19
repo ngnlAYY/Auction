@@ -1,0 +1,21 @@
+{
+  "code": "ok",
+  "data": {
+    "entries": [
+      {
+        "attempt_count": 0,
+        "completed_at": null,
+        "created_at": "2025-11-15T09:46:40.110000Z",
+        "failure_code": null,
+        "id": "00000000-0000-4000-8000-000000000020",
+        "kind": "fulfillment_collection_overdue",
+        "next_attempt_at": "2025-11-15T09:46:40.110000Z",
+        "scope": "auction",
+        "sending_at": null,
+        "source": "fulfillment",
+        "status": "pending"
+      }
+    ]
+  },
+  "message": "ok"
+}

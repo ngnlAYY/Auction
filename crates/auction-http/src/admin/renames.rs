@@ -112,3 +112,52 @@ fn map_record(record: AdminRenameRecord) -> AdminRenameResponse {
 fn map_error(_error: ApplicationError) -> Response {
     storage_unavailable("改名历史服务暂不可用")
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use auction_application::admin::{AdminRenamePage, AdminRenameReader};
+    use auction_application::core::ApplicationFuture;
+
+    use super::{AdminRenameListRequest, AdminRenameRecord, StatusCode, Uuid};
+    use crate::server::contract_fixtures::{AdminFixturePorts, admin_get, assert_http, time};
+
+    struct Renames;
+
+    impl AdminRenameReader for Renames {
+        fn list(&self, request: AdminRenameListRequest) -> ApplicationFuture<'_, AdminRenamePage> {
+            Box::pin(async move {
+                assert_eq!(request.name.as_deref(), (request.offset == 1).then_some("Previous"));
+                let row = AdminRenameRecord {
+                    id: Uuid::from_u128(0x4000_8000_0000_0000_0008),
+                    user_id: Uuid::from_u128(0x4000_8000_0000_0000_0009),
+                    user_state_version: 3,
+                    previous_username: "Previous".to_owned(),
+                    next_username: "Current".to_owned(),
+                    actor: "fixture-admin".to_owned(),
+                    created_at: time(),
+                    reverted_at: None,
+                };
+                Ok(AdminRenamePage {
+                    entries: if request.offset == 0 { vec![row] } else { Vec::new() },
+                    total: 1,
+                    limit: request.limit,
+                    offset: request.offset,
+                })
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn rename_list_contract_fixtures() {
+        let state =
+            AdminFixturePorts { renames: Some(Arc::new(Renames)), ..Default::default() }.state();
+        for (name, path) in [
+            ("admin/renames", "/api/v1/admin/renames"),
+            ("admin/renames-empty-page", "/api/v1/admin/renames?name=Previous&page=2&page_size=1"),
+        ] {
+            assert_http(name, StatusCode::OK, admin_get(state.clone(), path).await).await;
+        }
+    }
+}

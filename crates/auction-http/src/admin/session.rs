@@ -499,6 +499,49 @@ mod tests {
         .await;
     }
 
+    #[tokio::test]
+    async fn admin_session_activity_contract_fixtures() {
+        use crate::server::contract_fixtures::{assert_wire, response_json, wire_fixture};
+
+        let sent = Timestamp::now();
+        let sessions =
+            Arc::new(TestSessions(Mutex::new(session_identity(sent, Duration::minutes(1)))));
+        let router = test_router(sessions.clone());
+        let response = request(&router, Method::POST, ACTIVITY, Some(CSRF)).await;
+        let received = Timestamp::now();
+        let body = response_json(StatusCode::OK, response).await;
+        let data = &body["data"];
+        assert_server_time(
+            data["server_time"].as_str().unwrap(),
+            data["expires_at"].as_str().unwrap(),
+            sent,
+            received,
+        );
+        let identity = sessions.0.lock().unwrap().clone();
+        assert_eq!(data["expires_at"], timestamp(identity.expires_at));
+        assert_eq!(data["absolute_expires_at"], timestamp(identity.absolute_expires_at));
+
+        // 用同一个生产构造器固定已在实际续期请求上核对的三个墙钟字段。
+        let at = Timestamp::parse_from_rfc3339("2026-11-18T01:02:03.456789Z").unwrap();
+        let fixed = response_json(
+            StatusCode::OK,
+            session_response(
+                "会话已续期",
+                no_store_headers(),
+                CSRF.to_owned(),
+                session_identity(at, Duration::minutes(15)),
+                Some(at),
+            ),
+        )
+        .await;
+        assert_wire("admin/session-activity", &fixed);
+        let mut expected = wire_fixture("admin/session-activity");
+        for key in ["server_time", "expires_at", "absolute_expires_at"] {
+            expected["data"][key] = data[key].clone();
+        }
+        assert_eq!(body, expected);
+    }
+
     async fn assert_error(response: Response, status: StatusCode, code: &str) {
         assert_eq!(response.status(), status);
         assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");

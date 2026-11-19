@@ -352,6 +352,61 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn mail_template_read_and_command_contract_fixtures() {
+        use std::sync::Arc;
+
+        use auction_application::mail_templates::{
+            MailTemplateCommand, MailTemplateFuture, MailTemplateStore,
+        };
+        use axum::http::{Method, StatusCode};
+
+        use crate::server::contract_fixtures::{
+            admin_get, admin_request, admin_state, assert_http,
+        };
+
+        struct Templates;
+
+        impl MailTemplateStore for Templates {
+            fn latest_mail_templates(&self) -> MailTemplateFuture<'_, Vec<MailTemplateEvent>> {
+                Box::pin(async { Ok(vec![event(1, Some(PAYOUT))]) })
+            }
+
+            fn write_mail_template(
+                &self,
+                command: MailTemplateCommand,
+            ) -> MailTemplateFuture<'_, MailTemplateEvent> {
+                Box::pin(async move {
+                    assert_eq!(command.expected_revision, 1);
+                    assert_eq!(command.operation, MailTemplateOperation::Reset);
+                    Ok(MailTemplateEvent {
+                        command_id: command.command_id,
+                        template_key: command.template_key,
+                        actor_id: command.actor_id,
+                        ..event(2, None)
+                    })
+                })
+            }
+        }
+
+        let state = admin_state().with_mail_templates(Arc::new(Templates));
+        assert_http(
+            "admin/mail-templates",
+            StatusCode::OK,
+            admin_get(state.clone(), "/api/v1/admin/mail-templates").await,
+        )
+        .await;
+        let body = serde_json::json!({"command_id": Uuid::from_u128(7), "expected_revision": 1, "body": null});
+        let response = admin_request(
+            state,
+            Method::PUT,
+            "/api/v1/admin/mail-templates/settlement_seller_payout",
+            body.to_string().into(),
+        )
+        .await;
+        assert_http("admin/mail-template-command", StatusCode::OK, response).await;
+    }
+
+    #[tokio::test]
     async fn mail_template_error_contract_fixture() {
         use auction_application::mail_templates::MailTemplateStoreError;
         use axum::http::StatusCode;

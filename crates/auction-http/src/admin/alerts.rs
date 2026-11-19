@@ -417,8 +417,8 @@ mod tests {
         AdminPendingCounts, MAX_OPERATIONS_ALERT_SILENCE_SECONDS,
         OperationsAlertAcknowledgeCommand, OperationsAlertCommandResult, OperationsAlertConsole,
         OperationsAlertConsoleEntry, OperationsAlertConsolePage, OperationsAlertConsoleQuery,
-        OperationsAlertKind, OperationsAlertSilenceCommand, OperationsAlertSource,
-        OperationsAlertWebhookEntry,
+        OperationsAlertKind, OperationsAlertSignal, OperationsAlertSilenceCommand,
+        OperationsAlertSource, OperationsAlertWebhookEntry,
     };
     use auction_application::public::{AdminLoginResult, AdminSessionIdentity, AdminSessionPort};
     use auction_contracts::{AdminAlertAcknowledgeRequest, AdminAlertSilenceRequest};
@@ -443,6 +443,17 @@ mod tests {
         fn iter() -> impl Iterator<Item = Cow<'static, str>> {
             std::iter::empty()
         }
+    }
+
+    fn collection_overdue_signal() -> OperationsAlertSignal {
+        OperationsAlertSignal::new(
+            OperationsAlertKind::FulfillmentCollectionOverdue,
+            "auction",
+            OperationsAlertSource::Fulfillment,
+            1,
+            259_200,
+        )
+        .expect("可持久化的长期未领取告警")
     }
 
     struct AlertTestPorts;
@@ -501,6 +512,10 @@ mod tests {
             command: OperationsAlertAcknowledgeCommand,
         ) -> ApplicationFuture<'_, OperationsAlertCommandResult> {
             assert_eq!(command.reason, worst_case_reason());
+            if command.fingerprint == collection_overdue_signal().fingerprint {
+                assert_eq!(command.incident_generation, 1);
+                command.validate().expect("有效告警确认");
+            }
             Box::pin(ready(Ok(OperationsAlertCommandResult {
                 command_id: command.command_id,
                 fingerprint: command.fingerprint,
@@ -515,11 +530,18 @@ mod tests {
             command: OperationsAlertSilenceCommand,
         ) -> ApplicationFuture<'_, OperationsAlertCommandResult> {
             assert_eq!(command.reason, worst_case_reason());
+            if command.fingerprint == collection_overdue_signal().fingerprint {
+                assert_eq!(command.incident_generation, 1);
+                command.validate().expect("有效告警静默");
+            }
             Box::pin(ready(Ok(OperationsAlertCommandResult {
                 command_id: command.command_id,
                 fingerprint: command.fingerprint,
                 action: "silence".to_owned(),
-                silenced_until: Some(Timestamp::now() + Duration::seconds(command.silence_seconds)),
+                silenced_until: Some(
+                    crate::server::contract_fixtures::time()
+                        + Duration::seconds(command.silence_seconds),
+                ),
                 replayed: false,
             })))
         }
@@ -535,9 +557,27 @@ mod tests {
 
         fn list_webhook_deliveries(
             &self,
-            _limit: usize,
+            limit: usize,
         ) -> ApplicationFuture<'_, Vec<OperationsAlertWebhookEntry>> {
-            panic!("告警路由测试无需读取 webhook 投递")
+            use crate::server::contract_fixtures::time;
+
+            Box::pin(async move {
+                assert!(matches!(limit, 1 | 50));
+                let signal = collection_overdue_signal();
+                Ok(vec![OperationsAlertWebhookEntry {
+                    delivery_id: uuid::Uuid::from_u128(0x4000_8000_0000_0000_0020),
+                    status: "pending".to_owned(),
+                    kind: signal.kind,
+                    scope: signal.scope,
+                    source: signal.source,
+                    attempt_count: 0,
+                    next_attempt_at: Some(time()),
+                    sending_at: None,
+                    completed_at: None,
+                    failure_code: None,
+                    created_at: time(),
+                }])
+            })
         }
     }
 
@@ -731,6 +771,42 @@ mod tests {
             assert_eq!(body["code"], "invalid_query", "{uri}");
             assert_eq!(body["message"], message, "{uri}");
         }
+    }
+
+    #[tokio::test]
+    async fn webhook_and_alert_command_contract_fixtures() {
+        use crate::server::contract_fixtures::assert_wire;
+
+        let app = test_router();
+        for path in ["/api/v1/admin/alerts/webhooks", "/api/v1/admin/alerts/webhooks?limit=1"] {
+            let (status, response) = request(&app, Method::GET, path, Vec::new()).await;
+            assert_eq!(status, StatusCode::OK);
+            assert_wire("admin/alert-webhooks", response);
+        }
+        let alert_id = "1796d9b615cd5b873fa150780021903075f6a01c1a16cdfff4ac5976c86e7b1c";
+        assert_eq!(super::parse_alert_id(alert_id), Some(collection_overdue_signal().fingerprint));
+        let uri = format!("/api/v1/admin/alerts/{alert_id}/acknowledge");
+        let body = serde_json::to_vec(&AdminAlertAcknowledgeRequest {
+            command_id: "01234567-89ab-4cde-8f01-23456789abcd".to_owned(),
+            incident_generation: 1,
+            reason: worst_case_reason(),
+        })
+        .expect("确认请求");
+        let (status, response) = request(&app, Method::POST, &uri, body).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_wire("admin/alert-command", response);
+
+        let uri = format!("/api/v1/admin/alerts/{alert_id}/silence");
+        let body = serde_json::to_vec(&AdminAlertSilenceRequest {
+            command_id: "01234567-89ab-4cde-8f01-23456789abce".to_owned(),
+            incident_generation: 1,
+            reason: worst_case_reason(),
+            silence_seconds: 3600,
+        })
+        .expect("静默请求");
+        let (status, response) = request(&app, Method::POST, &uri, body).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_wire("admin/alert-silence-command", response);
     }
 
     fn worst_case_reason() -> String {

@@ -1,0 +1,83 @@
+{
+  "code": "ok",
+  "data": {
+    "allowed_actions": [
+      "acknowledge"
+    ],
+    "blockers": [
+      {
+        "action": "reclaim_and_resend",
+        "blocker": "untrusted"
+      },
+      {
+        "action": "reclaim_and_hold",
+        "blocker": "untrusted"
+      },
+      {
+        "action": "resend_from_custody",
+        "blocker": "untrusted"
+      },
+      {
+        "action": "close_inbox",
+        "blocker": "untrusted"
+      },
+      {
+        "action": "recheck",
+        "blocker": "untrusted"
+      },
+      {
+        "action": "retry_take",
+        "blocker": "untrusted"
+      }
+    ],
+    "custody": null,
+    "dispatches": [],
+    "events": [
+      {
+        "actor_id": null,
+        "case_version": 1,
+        "command_id": null,
+        "details": {
+          "dispatch_no": null,
+          "match_state": "untrusted",
+          "reason_code": "source_unproven"
+        },
+        "event_kind": "opened",
+        "occurred_at": "2025-11-15T09:46:40.110000Z"
+      }
+    ],
+    "recheck_unavailable": false,
+    "resend_dispatch_no": null,
+    "summary": {
+      "asset_location": "unverified",
+      "attachment_count": 0,
+      "auction_id": null,
+      "case_version": 1,
+      "closed_at": null,
+      "cod": 0,
+      "created_at": "2025-11-15T09:46:40.110000Z",
+      "credits": 1000,
+      "delivery_id": null,
+      "dispatch_no": null,
+      "external_mail_id": "9100",
+      "lot_id": null,
+      "match_state": "untrusted",
+      "obligation_id": null,
+      "obligation_kind": null,
+      "plan": null,
+      "reason_code": "source_unproven",
+      "received_at": "2025-11-15T09:46:40.110000Z",
+      "recipient": null,
+      "resend_limit": 3,
+      "resends_used": null,
+      "return_id": "00000000-0000-4000-8000-000000000024",
+      "status": "quarantined",
+      "updated_at": "2025-11-15T09:46:40.110000Z",
+      "world_id": "main"
+    },
+    "take": null,
+    "take_unavailable": false,
+    "take_unknown_reason": null
+  },
+  "message": "结算退件详情已加载"
+}

@@ -1,0 +1,6 @@
+{
+  "code": "invalid_runtime_config",
+  "data": null,
+  "message": "修改告警配置或覆盖的邮件世界前，须在 Admin 配置 worker_config_file 并重启",
+  "request_id": null
+}

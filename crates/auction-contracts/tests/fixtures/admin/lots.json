@@ -1,0 +1,63 @@
+{
+  "code": "ok",
+  "data": {
+    "auction": {
+      "cancelled_at": null,
+      "cancelled_by": null,
+      "cancelled_reason": null,
+      "created_at": "2025-11-15T09:46:40.110000Z",
+      "final_phase_at": null,
+      "id": "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b",
+      "lot_count": 1,
+      "opened_at": null,
+      "preview_manual_open": false,
+      "preview_opened_at": null,
+      "preview_revision": 1,
+      "preview_scheduled_at": "2025-11-15T10:46:40.110000Z",
+      "scheduled_open_at": "2025-11-15T11:46:40.110000Z",
+      "sequence": 5,
+      "settled_at": null,
+      "state_version": 2,
+      "status": "draft",
+      "updated_at": "2025-11-15T09:46:40.110000Z",
+      "world_id": "main"
+    },
+    "lots": [
+      {
+        "auction_id": "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b",
+        "created_at": "2025-11-15T09:46:40.110000Z",
+        "current_price": 1000,
+        "effective_end_at": null,
+        "equipment_attributes": {},
+        "equipment_category": "weapon",
+        "equipment_collected_at": "2025-11-15T09:46:40.110000Z",
+        "equipment_id": "00000000-0000-4000-8000-000000000004",
+        "equipment_name": "Legendary Axe",
+        "external_equipment_id": "123",
+        "external_mail_id": "9001",
+        "id": "00000000-0000-4000-8000-000000000023",
+        "leader_user_id": null,
+        "lot_number": 1,
+        "mailbox_key": "main",
+        "seller": "Seller",
+        "slow_authorization_id": null,
+        "slow_due_at": null,
+        "slow_generation": 0,
+        "start_price": 1000,
+        "state_version": 1,
+        "status": "pending",
+        "submission_id": "00000000-0000-4000-8000-000000000006",
+        "submission_received_at": "2025-11-15T09:46:40.110000Z",
+        "submission_source_kind": "mail",
+        "submission_source_reference": null,
+        "updated_at": "2025-11-15T09:46:40.110000Z"
+      }
+    ],
+    "pagination": {
+      "page": 1,
+      "page_size": 50,
+      "total": 1
+    }
+  },
+  "message": "后台 lot 列表已加载"
+}

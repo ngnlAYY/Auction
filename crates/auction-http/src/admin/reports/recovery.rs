@@ -285,22 +285,24 @@ pub(super) fn valid_recovery_report(report: &RecoveryReport, auction_id: Uuid) -
 
 #[cfg(test)]
 mod tests {
-    use auction_application::recovery::{RecoveryReport, RecoveryReportEntry};
+    use auction_application::recovery::{
+        RecoveryActionReport, RecoveryReport, RecoveryReportEntry,
+    };
     use auction_domain::{AuctionId, LotId, SettlementId};
-    use auction_time::Timestamp;
     use uuid::Uuid;
 
     use super::{map_optional_recovery_error_code, map_recovery_report, valid_recovery_report};
 
     fn report(blocker: Option<&str>) -> RecoveryReport {
-        let at = Timestamp::now();
-        let auction_id = AuctionId::from_uuid(Uuid::from_u128(2));
+        let at = crate::server::contract_fixtures::time();
+        let observed = at - auction_time::Duration::minutes(1);
+        let auction_id = AuctionId::from_uuid(Uuid::from_u128(0x4000_8000_0000_0000_0002));
         RecoveryReport {
             auction_id,
             recoveries: vec![RecoveryReportEntry {
-                id: SettlementId::from_uuid(Uuid::from_u128(1)),
+                id: SettlementId::from_uuid(Uuid::from_u128(0x4000_8000_0000_0000_0001)),
                 auction_id,
-                lot_id: LotId::from_uuid(Uuid::from_u128(3)),
+                lot_id: LotId::from_uuid(Uuid::from_u128(0x4000_8000_0000_0000_0003)),
                 lot_number: 1,
                 world_id: "main".to_owned(),
                 equipment_name: "Fixture".to_owned(),
@@ -313,18 +315,88 @@ mod tests {
                 reminder_limit: 1,
                 cod_return_count: 3,
                 cod_return_limit: 3,
-                custody_proof_kind: None,
-                custody_proof_observed_at: None,
+                custody_proof_kind: Some("delivery_recovery_take_succeeded".to_owned()),
+                custody_proof_observed_at: Some(observed),
                 blocking_code: Some("send_unattributed".to_owned()),
                 send_attribution_blocker: blocker.map(ToOwned::to_owned),
                 manual_reconcile_delivery_id: None,
                 relisted_auction_id: None,
                 relisted_lot_id: None,
-                actions: Vec::new(),
+                actions: vec![
+                    RecoveryActionReport {
+                        id: Uuid::from_u128(0x4000_8000_0000_0000_0006).into(),
+                        kind: "buyer_blacklist".to_owned(),
+                        state: "satisfied".to_owned(),
+                        delivery_id: None,
+                        failure_code: None,
+                        proof_kind: Some("users_blacklist_applied".to_owned()),
+                        proof_observed_at: Some(observed),
+                        updated_at: observed,
+                    },
+                    RecoveryActionReport {
+                        id: Uuid::from_u128(0x4000_8000_0000_0000_0004).into(),
+                        kind: "reclaim_equipment_take".to_owned(),
+                        state: "satisfied".to_owned(),
+                        delivery_id: Some(Uuid::from_u128(0x4000_8000_0000_0000_0005).into()),
+                        failure_code: None,
+                        proof_kind: Some("delivery_recovery_take_succeeded".to_owned()),
+                        proof_observed_at: Some(observed),
+                        updated_at: observed,
+                    },
+                ],
                 allowed_commands: Vec::new(),
                 updated_at: at,
             }],
         }
+    }
+
+    struct RecoveryReader;
+
+    impl auction_application::recovery::RecoveryReportReader for RecoveryReader {
+        fn recovery_report(
+            &self,
+            auction_id: AuctionId,
+        ) -> auction_application::core::ApplicationFuture<'_, Option<RecoveryReport>> {
+            Box::pin(async move {
+                assert_eq!(
+                    auction_id,
+                    AuctionId::from_uuid(Uuid::from_u128(0x4000_8000_0000_0000_0002))
+                );
+                Ok(Some(report(Some("send_without_sent_mid"))))
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn recovery_report_contract_fixtures() {
+        use std::sync::Arc;
+
+        use axum::http::StatusCode;
+
+        use crate::server::contract_fixtures::{
+            AdminFixturePorts, admin_get, assert_wire, response_json,
+        };
+
+        let state = AdminFixturePorts {
+            recovery_report: Some(Arc::new(RecoveryReader)),
+            ..Default::default()
+        }
+        .state();
+        let id = Uuid::from_u128(0x4000_8000_0000_0000_0002);
+        let path = format!("/api/v1/admin/auctions/{id}/recovery-report");
+        let baseline = response_json(StatusCode::OK, admin_get(state.clone(), &path).await).await;
+        assert_wire("admin/recovery-report", &baseline);
+        let path = format!("{path}?include=send_attribution");
+        let mut extended = response_json(StatusCode::OK, admin_get(state, &path).await).await;
+        assert_wire("admin/recovery-report-send-attribution", &extended);
+        assert_eq!(
+            extended["data"]["recoveries"][0]
+                .as_object_mut()
+                .unwrap()
+                .remove("send_attribution_blocker"),
+            Some("send_without_sent_mid".into())
+        );
+        assert_eq!(baseline, extended);
     }
 
     /// 发送归属原因只在显式 `include=send_attribution` 时输出；缺省响应的 JSON 不带该键，旧页面
@@ -332,7 +404,7 @@ mod tests {
     #[test]
     fn send_attribution_blocker_is_projected_only_when_requested() {
         let source = report(Some("send_without_sent_mid"));
-        assert!(valid_recovery_report(&source, Uuid::from_u128(2)));
+        assert!(valid_recovery_report(&source, Uuid::from_u128(0x4000_8000_0000_0000_0002)));
         let default = map_recovery_report(source.clone(), false).expect("缺省投影");
         assert_eq!(default.recoveries[0].send_attribution_blocker, None);
         let wire = serde_json::to_value(&default).expect("序列化缺省投影");
@@ -343,10 +415,13 @@ mod tests {
             Some("send_without_sent_mid")
         );
 
-        assert!(!valid_recovery_report(&report(Some("operator_declared")), Uuid::from_u128(2)));
+        assert!(!valid_recovery_report(
+            &report(Some("operator_declared")),
+            Uuid::from_u128(0x4000_8000_0000_0000_0002)
+        ));
         let mut completed = report(Some("send_in_flight"));
         completed.recoveries[0].stage = "completed".to_owned();
-        assert!(!valid_recovery_report(&completed, Uuid::from_u128(2)));
+        assert!(!valid_recovery_report(&completed, Uuid::from_u128(0x4000_8000_0000_0000_0002)));
     }
 
     /// Worker 自动推进因退件不能唯一归属而写下的内部阻断码，在防腐边界归并为已发布的

@@ -1,0 +1,12 @@
+{
+  "code": "ok",
+  "data": {
+    "alert": {
+      "action": "silence",
+      "id": "1796d9b615cd5b873fa150780021903075f6a01c1a16cdfff4ac5976c86e7b1c",
+      "replayed": false,
+      "silenced_until": "2025-11-15T10:46:40.110000Z"
+    }
+  },
+  "message": "ok"
+}

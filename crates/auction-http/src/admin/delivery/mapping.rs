@@ -681,47 +681,217 @@ mod tests {
         }
     }
 
-    struct FixtureSentPreview;
+    struct FixtureSentConfirmation {
+        admission: auction_application::delivery::SentAdmissionSnapshot,
+    }
 
-    impl DeliverySentConfirmationPort for FixtureSentPreview {
+    impl FixtureSentConfirmation {
+        fn new(detail: &DeliveryAdminDetail) -> Self {
+            use auction_application::delivery::{DeliverySendExpectation, SentObservedAttachments};
+            use serde_json::json;
+
+            let delivery = &detail.delivery;
+            let attempt = &detail.attempts[0];
+            let proof = &detail.evidence[0];
+            let obligation = detail.obligation.as_ref().unwrap();
+            let equipment_id = Uuid::from_u128(0x4000_8000_0000_0000_0033);
+            let command_id = Uuid::from_u128(0x4000_8000_0000_0000_0034);
+            let activation_id = Uuid::from_u128(0x4000_8000_0000_0000_0035);
+            let digest = "11".repeat(32);
+            let activation_digest = "22".repeat(32);
+            let credential = attempt.credential.as_ref().unwrap();
+            let expectation = DeliverySendExpectation {
+                world_id: attempt.world_id.clone(),
+                recipient: attempt.recipient.clone().unwrap(),
+                subject: attempt.subject.clone().unwrap(),
+                body_digest: attempt.body_digest.unwrap(),
+                credits: attempt.credits.unwrap(),
+                cod: attempt.cod.unwrap(),
+                equipment_ids: attempt.equipment_ids.clone(),
+                credential: Some(credential.clone()),
+            };
+            let mut admission: auction_application::delivery::SentAdmissionSnapshot =
+                serde_json::from_value(json!({
+                    "delivery": {
+                        "id": delivery.id, "status": delivery.status, "failure_code": delivery.failure_code,
+                        "fencing_version": delivery.fencing_version, "origin_kind": delivery.origin_kind,
+                        "recipient": delivery.recipient, "command_id": command_id, "request_digest": digest,
+                        "activation_command_id": activation_id, "activation_request_digest": activation_digest,
+                        "sending_at": delivery.sending_at, "completed_at": delivery.completed_at,
+                        "activated_at": delivery.created_at,
+                        "result_metadata": {"resolution": "admin_reconciled_failed"},
+                        "payload": {
+                            "schema_version": 1, "operation": "send", "world": "main",
+                            "template": delivery.template, "credits": 0, "cod": 0,
+                            "variables": {"reference": obligation.obligation_id, "item_name": "Legendary Axe"},
+                            "equipment_secret_refs": [{"kind":"auction_equipment_key", "id":equipment_id}],
+                        }
+                    },
+                    "obligation": {
+                        "id": obligation.obligation_id, "lot_id": obligation.lot_id, "auction_id": obligation.auction_id,
+                        "equipment_id": equipment_id, "world_id": "main", "obligation_kind": obligation.obligation_kind,
+                        "business_state": obligation.business_state, "amount": 0, "carrier_credit": 0,
+                        "recipient_game_identity": delivery.recipient,
+                    },
+                    "fulfillment": {
+                        "execution_state": obligation.fulfillment_state, "last_error_code": obligation.fulfillment_error_code,
+                        "delivery_id": delivery.id, "delivery_operation": "send", "dispatch_world": "main",
+                        "prepare_command_id": command_id, "prepare_request_digest": digest,
+                        "activate_command_id": activation_id, "activate_request_digest": activation_digest,
+                    },
+                    "admin_failure": {
+                        "command_id": detail.dispositions[0].command_id, "command_kind": "reconcile",
+                        "status": delivery.status, "fencing_version": delivery.fencing_version,
+                        "failure_code": delivery.failure_code,
+                    },
+                    "credential": {
+                        "id": credential.credential_id, "kind": "mail_cookie", "status": "active",
+                        "scope": "mooglemail:main", "version": credential.credential_version,
+                    },
+                    "accounts": [{"uid": "1", "status":"ready"}],
+                    "player_name": "Auction",
+                    "lot": {"auction_id": obligation.auction_id, "equipment_id": equipment_id},
+                    "equipment": {"id": equipment_id, "world_id":"main", "external_equipment_id": "300753957", "name": "Legendary Axe"},
+                    "settlement": {"buyer_amount": 0, "seller_amount": 0},
+                    "cash_reservation": false, "prior_unbound": detail.attempts[1..]
+                        .iter().any(|attempt| attempt.bound_sent_mail_id.is_none()),
+                    "conflict": false,
+                    "sending_fencing_version": attempt.fencing_version, "expectation": expectation,
+                })).expect("持久准入事实");
+            admission.observed_attachments = SentObservedAttachments {
+                collected: proof.collected,
+                remaining_equipment_ids: proof.remaining_equipment_ids.clone(),
+                pre_collection_equipment_ids: proof.pre_collection_equipment_ids.clone(),
+            };
+            Self { admission }
+        }
+
+        fn preview(
+            &self,
+            delivery_id: Uuid,
+            evidence: &ManualSentEvidence,
+            reference: Option<&str>,
+        ) -> SentConfirmationPreview {
+            assert_eq!(delivery_id, self.admission.delivery.id);
+            assert_eq!(reference, Some("mailbox_sweep:7000001"));
+            let decision = self.admission.evaluate(evidence, evidence.observed_at);
+            SentConfirmationPreview {
+                eligible: decision.eligible,
+                blockers: decision
+                    .blockers
+                    .iter()
+                    .map(|blocker| blocker.as_str().to_owned())
+                    .collect(),
+                delivery_id,
+                expected_fencing_version: decision.expected_fencing_version,
+                external_reference: format!(
+                    "mooglemail:{}:send:{}",
+                    evidence.world_id, evidence.external_mail_id
+                ),
+                requires_collected_asset_acceptance: evidence.collected,
+                requires_attempt_history_acceptance: decision.requires_attempt_history_acceptance,
+                prior_unbound_attempts: decision.prior_unbound_attempts,
+                sent_before_current_attempt: decision.sent_before_current_attempt,
+                corrects_admin_failure: decision.corrects_admin_failure,
+            }
+        }
+    }
+
+    impl DeliverySentConfirmationPort for FixtureSentConfirmation {
         fn preview_sent_confirmation<'a>(
             &'a self,
             delivery_id: Uuid,
-            _evidence: ManualSentEvidence,
+            evidence: ManualSentEvidence,
             reference: Option<&'a str>,
         ) -> ApplicationFuture<'a, SentConfirmationPreview> {
-            assert_eq!(reference, Some("mailbox_sweep:7000001"));
-            Box::pin(async move {
-                Ok(SentConfirmationPreview {
-                    eligible: true,
-                    blockers: Vec::new(),
-                    delivery_id,
-                    expected_fencing_version: 4,
-                    external_reference: "mooglemail:main:send:7000001".to_owned(),
-                    requires_collected_asset_acceptance: false,
-                    requires_attempt_history_acceptance: true,
-                    prior_unbound_attempts: true,
-                    sent_before_current_attempt: true,
-                    corrects_admin_failure: true,
-                })
-            })
+            Box::pin(async move { Ok(self.preview(delivery_id, &evidence, reference)) })
         }
 
         fn confirm_sent<'a>(
             &'a self,
-            _command: SentConfirmationCommand,
-            _reference: Option<&'a str>,
+            command: SentConfirmationCommand,
+            reference: Option<&'a str>,
         ) -> ApplicationFuture<'a, SentConfirmationResult> {
-            panic!("预览样本不提交 Sent 证明")
+            Box::pin(async move {
+                let preview = self.preview(command.delivery_id, &command.evidence, reference);
+                // 人工确认只接受同一份观察与冻结 fence，并明确接受历史尝试责任。
+                assert!(preview.eligible);
+                assert_eq!(command.expected_fencing_version, preview.expected_fencing_version);
+                assert!(
+                    preview.requires_attempt_history_acceptance && command.accept_attempt_history
+                );
+                Ok(SentConfirmationResult {
+                    command_id: command.command_id,
+                    delivery_id: command.delivery_id,
+                    external_reference: preview.external_reference,
+                    replayed: false,
+                })
+            })
         }
     }
 
     #[tokio::test]
     async fn sent_proof_preview_serialization_adds_reasons_only_on_request() {
+        let mut detail = sent_proof_detail().detail;
+        let at = time();
+        let later = at + auction_time::Duration::minutes(2);
+        let observed_at = later + auction_time::Duration::minutes(2);
+        detail.delivery.status = "failed".to_owned();
+        detail.delivery.failure_code = Some("verified_not_sent".to_owned());
+        detail.delivery.claimed_at = Some(later);
+        detail.delivery.sending_at = Some(later);
+        detail.delivery.completed_at = Some(later);
+        detail.delivery.updated_at = later;
+        detail.delivery.attempt_count = 2;
+        detail.delivery.category = Some("equipment".to_owned());
+        let older_attempt = &mut detail.attempts[0];
+        older_attempt.fencing_version = 1;
+        older_attempt.credential = Some(DeliverySendCredentialBinding {
+            credential_id: Uuid::from_u128(0x4000_8000_0000_0000_0036),
+            credential_version: 1,
+            runtime_generation: 1,
+        });
+        let mut latest = older_attempt.clone();
+        latest.fencing_version = 3;
+        latest.sending_at = later;
+        detail.attempts.insert(0, latest);
+
+        let proof = &mut detail.evidence[0];
+        proof.sent_at = Some(at);
+        proof.observed_at = Some(observed_at);
+        proof.remaining_equipment_count = Some(1);
+        proof.remaining_equipment_ids = Some(vec!["300753957".to_owned()]);
+        detail.custody.observed_at = Some(observed_at);
+        let obligation_id = Uuid::parse_str(&detail.delivery.origin_id).unwrap();
+        detail.obligation = Some(DeliveryAdminObligation {
+            obligation_id,
+            auction_id: crate::server::contract_fixtures::AUCTION_ID,
+            lot_id: Uuid::from_u128(0x4000_8000_0000_0000_0037),
+            world_id: "main".to_owned(),
+            obligation_kind: "unsold_return".to_owned(),
+            business_state: "ready".to_owned(),
+            amount: 0,
+            fulfillment_state: Some("failed".to_owned()),
+            fulfillment_error_code: detail.delivery.failure_code.clone(),
+        });
+        detail.dispositions.push(DeliveryAdminDisposition {
+            command_id: Uuid::from_u128(0x4000_8000_0000_0000_0038),
+            kind: "reconcile".to_owned(),
+            occurred_at: later,
+            status: Some("failed".to_owned()),
+            fencing_version: Some(4),
+            failure_code: detail.delivery.failure_code.clone(),
+            external_reference: None,
+            actor: Some("fixture-admin".to_owned()),
+            reason: None,
+        });
+        let confirmation = FixtureSentConfirmation::new(&detail);
+        let mut detail_with_guard = sent_proof_detail();
+        detail_with_guard.detail = detail;
         let state =
             admin_state().with_delivery_sent_proof(Arc::new(DeliverySentProofService::new(
-                Arc::new(FixtureDeliveries { detail: Some(sent_proof_detail()) }),
-                Arc::new(FixtureSentPreview),
+                Arc::new(FixtureDeliveries { detail: Some(detail_with_guard) }),
+                Arc::new(confirmation),
             )));
         let input = AdminDeliverySentProofPreviewRequest {
             evidence_reference: "mailbox_sweep:7000001".to_owned(),
@@ -734,12 +904,12 @@ mod tests {
                 recipient: "Sample".to_owned(),
                 subject: "Payment".to_owned(),
                 sent_minute: crate::mapping::timestamp(time()),
-                observed_at: crate::mapping::timestamp(time()),
+                observed_at: crate::mapping::timestamp(observed_at),
                 original_body_digest: [0xab; 32],
                 observed_body_digest: [0xab; 32],
                 remaining_credits: 0,
                 cod_pending: 0,
-                equipment_ids: Vec::new(),
+                equipment_ids: vec!["300753957".to_owned()],
                 collected: false,
                 receipt: String::new(),
             },
@@ -762,7 +932,32 @@ mod tests {
         let fields = baseline["data"].as_object_mut().expect("预览字段");
         assert_eq!(fields.remove("prior_unbound_attempts"), Some(true.into()));
         assert_eq!(fields.remove("sent_before_current_attempt"), Some(true.into()));
-        assert_eq!(response_json(StatusCode::OK, request("").await).await, baseline);
+        let response = response_json(StatusCode::OK, request("").await).await;
+        assert_eq!(response, baseline);
+        crate::server::contract_fixtures::assert_wire(
+            "admin/delivery-sent-proof-preview-default",
+            response,
+        );
+
+        let command = auction_contracts::AdminDeliverySentProofConfirmRequest {
+            command_id: uuid::Uuid::from_u128(0x4000_8000_0000_0000_0007),
+            expected_fencing_version: 4,
+            reason: "已核对 Sent 证明".to_owned(),
+            evidence_reference: input.evidence_reference,
+            evidence: input.evidence,
+            accept_collected_assets: false,
+            accept_attempt_history: true,
+        };
+        let path = format!("/api/v1/admin/deliveries/{SENT_PROOF_DELIVERY_ID}/sent-proof/confirm");
+        let body = serde_json::to_string(&command).expect("确认命令");
+        let response = crate::server::contract_fixtures::admin_request(
+            state,
+            axum::http::Method::POST,
+            &path,
+            body.into(),
+        )
+        .await;
+        assert_http("admin/delivery-sent-proof-command", StatusCode::OK, response).await;
     }
 
     #[test]
@@ -865,6 +1060,46 @@ mod tests {
         detail: DeliveryAdminDetail,
         guard: DeliveryAdminGuardSnapshot,
         acknowledge: Option<DeliveryAdminGuardBlocker>,
+    }
+
+    const RELEASE_DELIVERY_ID: Uuid = Uuid::from_u128(0x4000_8000_0000_0000_0031);
+    const RECONCILE_DELIVERY_ID: Uuid = Uuid::from_u128(0x4000_8000_0000_0000_0032);
+    const COMMAND_FENCE: i64 = 4;
+
+    fn command_snapshot(delivery_id: Uuid) -> (DeliveryAdminSnapshot, &'static str) {
+        let claimed = delivery_id == RELEASE_DELIVERY_ID;
+        assert!(claimed || delivery_id == RECONCILE_DELIVERY_ID);
+        let at = time();
+        let later = at + auction_time::Duration::minutes(1);
+        (
+            DeliveryAdminSnapshot {
+                id: delivery_id,
+                origin_kind: "mail_intake".to_owned(),
+                origin_id: if claimed { "main:4243:send" } else { "main:4244:take" }.to_owned(),
+                recipient: "Sample".to_owned(),
+                cod: claimed.then_some(0),
+                status: if claimed { "claimed" } else { "manual_reconcile" }.to_owned(),
+                template: claimed.then(|| "register_key".to_owned()),
+                category: claimed.then(|| "account".to_owned()),
+                world: Some("main".to_owned()),
+                retirement_reason: None,
+                suppression_reason: None,
+                lease_expires_at: claimed.then_some(later),
+                fencing_version: COMMAND_FENCE,
+                attempt_count: 1,
+                claimed_at: Some(at),
+                sending_at: (!claimed).then_some(at),
+                completed_at: (!claimed).then_some(later),
+                external_reference: None,
+                failure_code: (!claimed).then(|| "write_unknown".to_owned()),
+                reason_code: None,
+                take_required: false,
+                returned_mail_id: None,
+                created_at: at,
+                updated_at: if claimed { at } else { later },
+            },
+            if claimed { "send" } else { "take" },
+        )
     }
 
     #[derive(Default)]
@@ -970,15 +1205,57 @@ mod tests {
 
         fn execute(
             &self,
-            _command: auction_application::delivery::DeliveryAdminCommand,
+            command: auction_application::delivery::DeliveryAdminCommand,
         ) -> auction_application::core::ApplicationFuture<
             '_,
             auction_application::delivery::DeliveryAdminResult,
         > {
-            Box::pin(async {
-                Err(auction_application::core::ApplicationError::CapabilityUnavailable(
-                    "样本不写投递",
-                ))
+            Box::pin(async move {
+                let (mut snapshot, operation) = command_snapshot(command.delivery_id);
+                let guard = DeliveryAdminGuardSnapshot {
+                    action: command.action,
+                    expected_fencing_version: command.expected_fencing_version,
+                    fencing_version: snapshot.fencing_version,
+                    status: snapshot.status.clone(),
+                    reason_code: snapshot.reason_code.clone(),
+                    has_sending_fence: snapshot.sending_at.is_some(),
+                    origin_kind: snapshot.origin_kind.clone(),
+                    payload_operation: Some(operation.to_owned()),
+                    sent_reference_sighted: false,
+                    funded_delivery: false,
+                    command_snapshot_readable: true,
+                    retired: false,
+                    lot_eligible: (command.action == DeliveryAdminAction::Release).then_some(true),
+                    settlement_eligible: None,
+                    settlement_fulfillment_state: None,
+                    has_reconcile_reference: command.external_reference.is_some(),
+                    mail_handed_over: false,
+                    recipient_renamed: false,
+                    recovery_retry_eligible: true,
+                };
+                // 只有同一持久 fence 且通过生产准入的动作才能推进一次。
+                let decision = guard.evaluate();
+                if let Some(blocker) = decision.blockers.first() {
+                    return Err(blocker.error().into());
+                }
+                let next = decision.transition.next_status;
+                let updated_at = snapshot.updated_at + auction_time::Duration::minutes(1);
+                snapshot.status = next.to_owned();
+                snapshot.fencing_version += 1;
+                snapshot.lease_expires_at = None;
+                snapshot.failure_code = command.failure_code;
+                snapshot.external_reference = command.external_reference;
+                if next == "pending" {
+                    snapshot.claimed_at = None;
+                    snapshot.sending_at = None;
+                }
+                snapshot.completed_at =
+                    matches!(next, "succeeded" | "failed").then_some(updated_at);
+                snapshot.updated_at = updated_at;
+                Ok(auction_application::delivery::DeliveryAdminResult {
+                    command_id: command.command_id,
+                    snapshot,
+                })
             })
         }
 
@@ -1022,6 +1299,51 @@ mod tests {
                     ..Default::default()
                 })
             })
+        }
+    }
+
+    #[tokio::test]
+    async fn delivery_command_contract_fixtures() {
+        use axum::http::Method;
+        use serde_json::json;
+
+        use crate::server::contract_fixtures::admin_request;
+
+        for (name, delivery_id, route, input) in [
+            ("delivery-release-command", RELEASE_DELIVERY_ID, "release", json!({})),
+            (
+                "delivery-reconcile-succeeded-command",
+                RECONCILE_DELIVERY_ID,
+                "reconcile",
+                json!({"action": "succeeded", "external_reference": "mooglemail:main:take:4244"}),
+            ),
+            (
+                "delivery-reconcile-failed-command",
+                RECONCILE_DELIVERY_ID,
+                "reconcile",
+                json!({"action": "failed", "failure_code": "verified_not_sent"}),
+            ),
+        ] {
+            let state = AdminFixturePorts {
+                deliveries: Some(Arc::new(FixtureDeliveries::default())),
+                ..Default::default()
+            }
+            .state();
+            let path = format!("/api/v1/admin/deliveries/{delivery_id}/{route}");
+            let mut body = input;
+            body["command_id"] = json!(Uuid::from_u128(0x4000_8000_0000_0000_0006));
+            body["expected_fencing_version"] = json!(COMMAND_FENCE - 1);
+            let response =
+                admin_request(state.clone(), Method::POST, &path, body.to_string().into()).await;
+            assert_eq!(
+                response_json(StatusCode::CONFLICT, response).await["code"],
+                "stale_delivery_state"
+            );
+
+            body["command_id"] = json!(Uuid::from_u128(0x4000_8000_0000_0000_0007));
+            body["expected_fencing_version"] = json!(COMMAND_FENCE);
+            let response = admin_request(state, Method::POST, &path, body.to_string().into()).await;
+            assert_http(&format!("admin/{name}"), StatusCode::OK, response).await;
         }
     }
 

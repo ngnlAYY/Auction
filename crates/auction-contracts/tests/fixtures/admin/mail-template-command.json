@@ -1,0 +1,25 @@
+{
+  "code": "ok",
+  "data": {
+    "template": {
+      "allowed_placeholders": [
+        "amount",
+        "reference",
+        "item_name"
+      ],
+      "body": "Your auction payout is attached.\n\nItem: {item_name}\nAmount: {amount} Credits\n\nPlease collect the attached Credits.\n\nReference: {reference}",
+      "customized": false,
+      "default_body": "Your auction payout is attached.\n\nItem: {item_name}\nAmount: {amount} Credits\n\nPlease collect the attached Credits.\n\nReference: {reference}",
+      "key": "settlement_seller_payout",
+      "required_placeholders": [
+        "amount",
+        "reference"
+      ],
+      "revision": 2,
+      "updated_at": "2026-11-13T12:00:00Z",
+      "updated_by": "fixture-admin",
+      "usable": true
+    }
+  },
+  "message": "数据库已接受；各角色约 5 秒内刷新"
+}

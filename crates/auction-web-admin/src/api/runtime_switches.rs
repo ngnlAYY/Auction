@@ -28,8 +28,13 @@ pub(crate) async fn fetch_runtime_switches() -> Result<RuntimeSwitchListResponse
     if !response.ok() {
         return Err(response_error(response).await);
     }
+    let body = response.text().await.map_err(invalid_response_error)?;
+    decode_runtime_switches(&body)
+}
+
+fn decode_runtime_switches(body: &str) -> Result<RuntimeSwitchListResponse, String> {
     let payload: ApiResponse<RuntimeSwitchListResponse> =
-        response.json().await.map_err(invalid_response_error)?;
+        serde_json::from_str(body).map_err(invalid_response_error)?;
     let database_names =
         payload.data.database_intent.iter().map(|item| item.name.as_str()).collect::<Vec<_>>();
     let applied_names =
@@ -122,12 +127,21 @@ pub(crate) async fn submit_external_access_pause(
     if !response.ok() {
         return Err(response_failure(response).await);
     }
-    let payload: ApiResponse<AdminExternalAccessPauseResponse> = response
-        .json()
+    let body = response
+        .text()
         .await
         .map_err(|error| AdminApiFailure::client(invalid_response_error(error)))?;
+    decode_pause_receipt(&body, attempt.paused)
+}
+
+fn decode_pause_receipt(
+    body: &str,
+    paused: bool,
+) -> Result<RuntimeSwitchIntentDto, AdminApiFailure> {
+    let payload: ApiResponse<AdminExternalAccessPauseResponse> = serde_json::from_str(body)
+        .map_err(|error| AdminApiFailure::client(invalid_response_error(error)))?;
     let accepted = payload.data.accepted;
-    let expected_operation = if attempt.paused { "set" } else { "clear" };
+    let expected_operation = if paused { "set" } else { "clear" };
     if accepted.name != "external_access_paused"
         || accepted.operation.as_deref() != Some(expected_operation)
         || accepted.revision < 1
@@ -157,5 +171,43 @@ mod tests {
         for value in ["", " ", " 前后有空白 ", "两\n行", "有\t控制字符"] {
             assert!(!ExternalAccessPauseAttempt::valid_reason(value), "{value:?}");
         }
+    }
+    #[test]
+    fn runtime_switch_read_and_command_contract_fixtures() {
+        use serde_json::{Value, json};
+
+        use super::{decode_pause_receipt, decode_runtime_switches};
+        use crate::api::contract_fixtures::{admin_fixture, checked};
+
+        let body = admin_fixture!("runtime-switches");
+        let result = checked(body, "/data", "database_intent", decode_runtime_switches);
+        let pause = result
+            .database_intent
+            .iter()
+            .find(|item| item.name == "external_access_paused")
+            .expect("外部访问意图");
+        assert_eq!(pause.operation.as_deref(), Some("set"));
+        assert!(result.admin_last_success_age_seconds.is_none());
+        let mut invalid: Value = serde_json::from_str(body).unwrap();
+        let entries = invalid["data"]["database_intent"].as_array_mut().unwrap();
+        entries.push(entries[0].clone());
+        assert!(decode_runtime_switches(&invalid.to_string()).is_err());
+        let mut invalid: Value = serde_json::from_str(body).unwrap();
+        invalid["data"]["database_intent"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|entry| entry["name"] != "external_access_paused");
+        assert!(decode_runtime_switches(&invalid.to_string()).is_err());
+
+        let body = admin_fixture!("runtime-switch-command");
+        let accepted =
+            checked(body, "/data/accepted", "revision", |body| decode_pause_receipt(body, false));
+        assert_eq!(accepted.name, "external_access_paused");
+        assert_eq!(accepted.operation.as_deref(), Some("clear"));
+        assert_eq!(accepted.revision, 2);
+        assert!(decode_pause_receipt(body, true).is_err());
+        let mut invalid: Value = serde_json::from_str(body).unwrap();
+        invalid["data"]["accepted"]["name"] = json!("metrics_sli_snapshot_enabled");
+        assert!(decode_pause_receipt(&invalid.to_string(), false).is_err());
     }
 }

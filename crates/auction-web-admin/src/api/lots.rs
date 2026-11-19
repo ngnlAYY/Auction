@@ -193,3 +193,52 @@ fn valid_submission_fields(value: &AdminLot) -> bool {
 fn valid_optional_uuid(value: Option<&str>) -> bool {
     value.is_none_or(valid_uuid)
 }
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    fn lot_contract_fixtures() {
+        use super::{
+            AdminLotListResponse, AdminLotUpdateResponse, ApiResponse, decode_auction, decode_lot,
+        };
+        use crate::api::contract_fixtures::{admin_fixture, decode};
+        use crate::api::pagination::valid_page_echo;
+
+        let auction_id = "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b";
+        for (body, page, size, count) in
+            [(admin_fixture!("lots"), 1, 50, 1), (admin_fixture!("lots-empty-page"), 2, 1, 0)]
+        {
+            let payload: ApiResponse<AdminLotListResponse> =
+                decode(body, "/data/pagination", "total");
+            let auction = decode_auction(payload.data.auction).expect("拍品目录所属场次");
+            let lots = payload
+                .data
+                .lots
+                .into_iter()
+                .map(decode_lot)
+                .collect::<Result<Vec<_>, _>>()
+                .expect("拍品目录");
+            let pager = payload.data.pagination;
+            assert_eq!(auction.id, auction_id);
+            assert!(valid_page_echo(
+                page,
+                size,
+                pager.page,
+                pager.page_size,
+                pager.total,
+                lots.len()
+            ));
+            assert_eq!(lots.len(), count);
+            if let Some(lot) = lots.first() {
+                assert_eq!(lot.auction_id, auction_id);
+                assert_eq!(lot.external_mail_id.as_deref(), Some("9001"));
+                assert!(lot.leader_user_id.is_none());
+            }
+        }
+        let payload: ApiResponse<AdminLotUpdateResponse> =
+            decode(admin_fixture!("lot-update-command"), "/data/lot", "state_version");
+        let lot = decode_lot(payload.data.lot).expect("改价回执");
+        assert_eq!((lot.start_price, lot.current_price, lot.state_version), (2000, 2000, 2));
+    }
+}

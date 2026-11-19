@@ -303,3 +303,58 @@ fn auction_into_command(value: AdminAuction) -> AdminAuctionCommandResponse {
         updated_at: value.updated_at,
     }
 }
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    fn auction_contract_fixtures() {
+        use super::{
+            AdminAuctionLifecycleResponse, AdminAuctionPage, ApiResponse,
+            decode_auction_command_response, decode_auction_list,
+        };
+        use crate::api::contract_fixtures::{admin_fixture, decode};
+        use crate::api::pagination::valid_page_echo;
+
+        for (body, page, size, count) in [
+            (admin_fixture!("auctions"), 1, 50, 1),
+            (admin_fixture!("auctions-empty-page"), 2, 1, 0),
+        ] {
+            let payload: ApiResponse<AdminAuctionPage> = decode(body, "/data/pagination", "total");
+            let result = decode_auction_list(payload.data).expect("场次列表");
+            let pager = result.pagination;
+            assert!(valid_page_echo(
+                page,
+                size,
+                pager.page,
+                pager.page_size,
+                pager.total,
+                result.auctions.len()
+            ));
+            assert_eq!(result.auctions.len(), count);
+            if let Some(auction) = result.auctions.first() {
+                assert_eq!(auction.status, "draft");
+                assert!(auction.opened_at.is_none());
+            }
+        }
+        let payload: ApiResponse<AdminAuctionLifecycleResponse> =
+            decode(admin_fixture!("auction-create-command"), "/data/auction", "state_version");
+        assert_eq!(payload.code, "created");
+        let result = decode_auction_command_response(payload).expect("创建场次回执");
+        assert_eq!((result.status.as_str(), result.state_version), ("draft", 1));
+    }
+
+    #[test]
+    fn schedule_command_contract_fixture() {
+        use auction_contracts::{AdminUpdateAuctionScheduleResponse, ApiResponse};
+
+        use super::decode_auction;
+        use crate::api::contract_fixtures::{admin_fixture, decode};
+
+        let payload: ApiResponse<AdminUpdateAuctionScheduleResponse> =
+            decode(admin_fixture!("auction-schedule-command"), "/data/auction", "state_version");
+        let auction = decode_auction(payload.data.auction).expect("计划修改回执");
+        assert_eq!(auction.state_version, 2);
+        assert_eq!(auction.scheduled_ends_at.as_deref(), Some("2025-11-15T13:46:40.110000Z"));
+    }
+}

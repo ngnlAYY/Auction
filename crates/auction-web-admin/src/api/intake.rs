@@ -80,3 +80,21 @@ fn decode_intake_result(value: AdminIntakeResult) -> Result<AdminIntakeResult, &
     }
     Ok(value)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{AdminIntakeResult, ApiResponse, decode_intake_result};
+    use crate::api::contract_fixtures::{admin_fixture, decode};
+
+    #[test]
+    fn intake_command_contract_fixture() {
+        let payload: ApiResponse<AdminIntakeResult> =
+            decode(admin_fixture!("lot-intake-command"), "/data", "equipment_level");
+        assert_eq!(payload.code, "created");
+        let result = decode_intake_result(payload.data).expect("录入拍品回执");
+        assert_eq!(result.lot_number, 1);
+        assert_eq!(result.start_price, 1000);
+        assert_eq!(result.seller_player_id, "Player");
+        assert!(result.equipment_level.is_none());
+    }
+}

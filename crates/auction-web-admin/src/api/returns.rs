@@ -601,4 +601,41 @@ mod tests {
         assert!(!valid_command_result(&result, command_id, CASE, "reclaim_and_hold", 2));
         assert!(!valid_command_result(&result, command_id, CASE, "close_inbox", 3));
     }
+    #[test]
+    fn settlement_return_read_and_command_contract_fixtures() {
+        use super::{
+            ApiResponse, SettlementReturnCommandResult, SettlementReturnDetail,
+            SettlementReturnFilters, SettlementReturnPage, valid_command_result, valid_detail,
+            valid_page,
+        };
+        use crate::api::contract_fixtures::{admin_fixture, decode};
+        use uuid::Uuid;
+
+        const RETURN_ID: &str = "00000000-0000-4000-8000-000000000024";
+        for (body, page, size, count) in [
+            (admin_fixture!("settlement-returns"), 1, 50, 1),
+            (admin_fixture!("settlement-returns-empty-page"), 2, 1, 0),
+        ] {
+            let payload: ApiResponse<SettlementReturnPage> =
+                decode(body, "/data/pagination", "total");
+            assert!(valid_page(&payload.data, &SettlementReturnFilters::default(), page, size));
+            assert_eq!(payload.data.returns.len(), count);
+        }
+        let detail: ApiResponse<SettlementReturnDetail> =
+            decode(admin_fixture!("settlement-return"), "/data", "events");
+        assert!(valid_detail(&detail.data, RETURN_ID));
+        assert_eq!(detail.data.allowed_actions, ["acknowledge"]);
+        assert!(detail.data.take.is_none());
+
+        let receipt: ApiResponse<SettlementReturnCommandResult> =
+            decode(admin_fixture!("settlement-return-command"), "/data", "command_id");
+        assert!(valid_command_result(
+            &receipt.data,
+            Uuid::from_u128(0x4000_8000_0000_0000_0007),
+            RETURN_ID,
+            "acknowledge",
+            1
+        ));
+        assert_eq!(receipt.data.status, "reviewed");
+    }
 }

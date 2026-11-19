@@ -1,0 +1,12 @@
+{
+  "code": "ok",
+  "data": {
+    "alert": {
+      "action": "acknowledge",
+      "id": "1796d9b615cd5b873fa150780021903075f6a01c1a16cdfff4ac5976c86e7b1c",
+      "replayed": false,
+      "silenced_until": null
+    }
+  },
+  "message": "ok"
+}

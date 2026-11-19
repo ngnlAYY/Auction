@@ -1,0 +1,23 @@
+{
+  "code": "ok",
+  "data": {
+    "pagination": {
+      "page": 1,
+      "page_size": 50,
+      "total": 1
+    },
+    "renames": [
+      {
+        "actor": "fixture-admin",
+        "created_at": "2025-11-15T09:46:40.110000Z",
+        "id": "00000000-0000-4000-8000-000000000008",
+        "next_username": "Current",
+        "previous_username": "Previous",
+        "reverted_at": null,
+        "user_id": "00000000-0000-4000-8000-000000000009",
+        "user_state_version": 3
+      }
+    ]
+  },
+  "message": "改名历史已加载"
+}

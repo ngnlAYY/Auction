@@ -170,3 +170,77 @@ fn map_error(error: ApplicationError) -> Response {
         response,
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use auction_application::admin::AdminWorldPort;
+    use auction_application::core::ApplicationFuture;
+    use axum::http::Method;
+    use serde_json::json;
+    use uuid::Uuid;
+
+    use super::{AdminWorldSetEnabledCommand, StatusCode, WorldSnapshot};
+    use crate::server::contract_fixtures::{admin_get, admin_request, admin_state, assert_http};
+
+    struct Worlds;
+
+    impl AdminWorldPort for Worlds {
+        fn list_worlds(&self) -> ApplicationFuture<'_, Vec<WorldSnapshot>> {
+            Box::pin(async {
+                Ok(vec![
+                    WorldSnapshot {
+                        id: "isekai".to_owned(),
+                        enabled: false,
+                        availability: "available".to_owned(),
+                        policy_revision: 2,
+                    },
+                    WorldSnapshot {
+                        id: "main".to_owned(),
+                        enabled: true,
+                        availability: "available".to_owned(),
+                        policy_revision: 1,
+                    },
+                ])
+            })
+        }
+
+        fn set_enabled(
+            &self,
+            command: AdminWorldSetEnabledCommand,
+        ) -> ApplicationFuture<'_, WorldSnapshot> {
+            assert_eq!(command.world_id, "isekai");
+            assert!(!command.enabled);
+            assert_eq!(command.expected_policy_revision, 1);
+            Box::pin(async {
+                Ok(WorldSnapshot {
+                    id: "isekai".to_owned(),
+                    enabled: false,
+                    availability: "available".to_owned(),
+                    policy_revision: 2,
+                })
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn world_contract_fixtures() {
+        let state = admin_state().with_admin_worlds(Arc::new(Worlds));
+        assert_http(
+            "admin/worlds",
+            StatusCode::OK,
+            admin_get(state.clone(), "/api/v1/admin/worlds").await,
+        )
+        .await;
+        let body = json!({"command_id": Uuid::from_u128(7), "enabled": false, "expected_policy_revision": 1});
+        let response = admin_request(
+            state,
+            Method::PATCH,
+            "/api/v1/admin/worlds/isekai",
+            body.to_string().into(),
+        )
+        .await;
+        assert_http("admin/world-command", StatusCode::OK, response).await;
+    }
+}

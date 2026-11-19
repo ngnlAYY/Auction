@@ -1,0 +1,20 @@
+{
+  "code": "ok",
+  "data": {
+    "worlds": [
+      {
+        "availability": "available",
+        "enabled": false,
+        "id": "isekai",
+        "policy_revision": 2
+      },
+      {
+        "availability": "available",
+        "enabled": true,
+        "id": "main",
+        "policy_revision": 1
+      }
+    ]
+  },
+  "message": "业务世界状态已加载"
+}

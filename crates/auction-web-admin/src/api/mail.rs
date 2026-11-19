@@ -585,4 +585,24 @@ mod tests {
         assert_eq!(detail.kind, "rekey");
         assert!(detail.subject.is_none());
     }
+    #[test]
+    fn mail_poll_contract_fixtures() {
+        use super::{ApiResponse, StrictMailState, decode_mail_state};
+        use crate::api::contract_fixtures::{admin_fixture, decode};
+
+        for (body, expected_diagnostics) in
+            [(admin_fixture!("mail"), false), (admin_fixture!("mail-diagnostics"), true)]
+        {
+            let payload: ApiResponse<StrictMailState> = decode(body, "/data/polling", "paused");
+            let polling = decode_mail_state(payload.data).expect("轮询响应");
+            assert_eq!(polling.mailbox_key, "main");
+            assert!(!polling.paused);
+            assert_eq!(polling.state_version, 3);
+            assert_eq!(polling.diagnostics.is_some(), expected_diagnostics);
+            if let Some(diagnostics) = polling.diagnostics {
+                assert_eq!(diagnostics.completed_external_mail_id.as_deref(), Some("9002"));
+                assert!(diagnostics.progress.is_none());
+            }
+        }
+    }
 }

@@ -22,12 +22,8 @@ pub(crate) async fn fetch_admin_forum_status(
     if !response.ok() {
         return Err(response_error(response).await);
     }
-    let payload: ApiResponse<PublicForumSyncStatusResponse> =
-        response.json().await.map_err(invalid_response_error)?;
-    if !super::valid_success_code(&payload.code) {
-        return Err(invalid_response_error("forum_sync_status"));
-    }
-    if !payload.data.enabled {
+    let body = response.text().await.map_err(invalid_response_error)?;
+    if !decode_sync_status(&body)? {
         return Ok(AdminForumStatus { enabled: false, thread: None });
     }
 
@@ -38,8 +34,23 @@ pub(crate) async fn fetch_admin_forum_status(
     if !response.ok() {
         return Err(response_error(response).await);
     }
+    let body = response.text().await.map_err(invalid_response_error)?;
+    let thread = decode_thread(&body, &auction_id)?;
+    Ok(AdminForumStatus { enabled: true, thread: Some(thread) })
+}
+
+fn decode_sync_status(body: &str) -> Result<bool, String> {
+    let payload: ApiResponse<PublicForumSyncStatusResponse> =
+        serde_json::from_str(body).map_err(invalid_response_error)?;
+    if !super::valid_success_code(&payload.code) {
+        return Err(invalid_response_error("forum_sync_status"));
+    }
+    Ok(payload.data.enabled)
+}
+
+fn decode_thread(body: &str, auction_id: &str) -> Result<PublicForumResponse, String> {
     let payload: ApiResponse<PublicForumResponse> =
-        response.json().await.map_err(invalid_response_error)?;
+        serde_json::from_str(body).map_err(invalid_response_error)?;
     let thread = payload.data;
     if !super::valid_success_code(&payload.code)
         || thread.auction_id != auction_id
@@ -78,5 +89,49 @@ pub(crate) async fn fetch_admin_forum_status(
     {
         return Err(invalid_response_error("forum_thread"));
     }
-    Ok(AdminForumStatus { enabled: true, thread: Some(thread) })
+    Ok(thread)
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::{Value, json};
+
+    use super::{decode_sync_status, decode_thread};
+    use crate::api::contract_fixtures::{admin_fixture, checked};
+
+    const AUCTION_ID: &str = "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b";
+
+    #[test]
+    fn forum_contract_fixtures() {
+        for (body, enabled) in
+            [(admin_fixture!("forum-sync"), true), (admin_fixture!("forum-sync-disabled"), false)]
+        {
+            assert_eq!(checked(body, "/data", "enabled", decode_sync_status), enabled);
+        }
+        for (body, status, published) in [
+            (admin_fixture!("forum"), "published", true),
+            (admin_fixture!("forum-pending"), "pending", false),
+        ] {
+            let thread =
+                checked(body, "/data", "source_revision", |body| decode_thread(body, AUCTION_ID));
+            assert_eq!(thread.auction_id, AUCTION_ID);
+            assert_eq!(thread.status, status);
+            assert_eq!(thread.content_synced_at.is_some(), published);
+            assert_eq!(thread.thread_url.is_some(), published);
+        }
+    }
+
+    #[test]
+    fn forum_response_binds_identity_url_and_publication() {
+        let body = admin_fixture!("forum");
+        assert!(decode_thread(body, "00000000-0000-4000-8000-000000000003").is_err());
+        for (key, value) in [
+            ("thread_url", json!("http://forums.e-hentai.org/index.php?showtopic=123")),
+            ("content_synced_at", Value::Null),
+        ] {
+            let mut invalid: Value = serde_json::from_str(body).unwrap();
+            invalid["data"][key] = value;
+            assert!(decode_thread(&invalid.to_string(), AUCTION_ID).is_err(), "{key}");
+        }
+    }
 }

@@ -395,9 +395,21 @@ mod tests {
 
         fn poll_state(
             &self,
-            _request: AdminMailPollStateRequest,
+            request: AdminMailPollStateRequest,
         ) -> ApplicationFuture<'_, AdminMailPollState> {
-            panic!("入站样本不查询轮询状态")
+            assert_eq!(request.mailbox_key, "main");
+            Box::pin(async {
+                Ok(AdminMailPollState {
+                    mailbox_key: request.mailbox_key,
+                    cursor_value: Some("9002".to_owned()),
+                    last_poll_at: time(),
+                    next_poll_at: time() + auction_time::Duration::seconds(15),
+                    consecutive_failures: 0,
+                    paused: false,
+                    state_version: 3,
+                    updated_at: time(),
+                })
+            })
         }
 
         fn list_intakes(
@@ -497,6 +509,7 @@ mod tests {
             ..Default::default()
         }
         .state();
+        polling_contract_fixtures(state.clone()).await;
         for (name, url) in [
             ("admin/mail-intake", "/api/v1/admin/mail/intake?page_size=50"),
             ("admin/mail-intake-rekey", "/api/v1/admin/mail/intake?kind=rekey&page_size=50"),
@@ -504,5 +517,25 @@ mod tests {
         ] {
             assert_http(name, StatusCode::OK, admin_get(state.clone(), url).await).await;
         }
+    }
+
+    async fn polling_contract_fixtures(state: crate::state::AdminApiState) {
+        use crate::server::contract_fixtures::{assert_wire, response_json};
+
+        let path = "/api/v1/admin/mail?mailbox_key=main";
+        assert_http("admin/mail", StatusCode::OK, admin_get(state.clone(), path).await).await;
+
+        let sent = Timestamp::now();
+        let response = admin_get(state, &format!("{path}&include_diagnostics=true")).await;
+        let received = Timestamp::now();
+        let mut body = response_json(StatusCode::OK, response).await;
+        let observed = &mut body["data"]["polling"]["diagnostics"]["observed_at"];
+        let observed_at =
+            Timestamp::parse_from_rfc3339(observed.as_str().expect("观测时间")).expect("RFC 3339");
+        let sent = Timestamp::from_timestamp_micros(sent.timestamp_micros()).unwrap();
+        assert!((sent..=received).contains(&observed_at));
+        // 核对生产时钟之后，仅归一化动态观测时刻。
+        *observed = crate::mapping::timestamp(time()).into();
+        assert_wire("admin/mail-diagnostics", body);
     }
 }

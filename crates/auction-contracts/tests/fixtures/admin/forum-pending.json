@@ -1,0 +1,12 @@
+{
+  "code": "ok",
+  "data": {
+    "auction_id": "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b",
+    "content_revision": 0,
+    "processed_through_post_number": 2,
+    "source_revision": 4,
+    "status": "pending",
+    "updated_at": "2025-11-15T09:46:40.110000Z"
+  },
+  "message": "论坛拍卖帖子同步状态已加载"
+}

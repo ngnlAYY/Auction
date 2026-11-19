@@ -278,4 +278,35 @@ mod tests {
         assert!(valid_send_attribution_blocker("send_without_sent_mid"));
         assert!(!valid_send_attribution_blocker("operator_declared"));
     }
+    #[test]
+    fn recovery_report_contract_fixtures() {
+        use super::{AdminRecoveryReport, ApiResponse, validate_recovery_report};
+        use crate::api::contract_fixtures::{admin_fixture, decode};
+
+        for (body, expected) in [
+            (admin_fixture!("recovery-report"), None),
+            (admin_fixture!("recovery-report-send-attribution"), Some("send_without_sent_mid")),
+        ] {
+            let payload: ApiResponse<AdminRecoveryReport> =
+                decode(body, "/data/recoveries/0", "custody_proof_kind");
+            assert!(validate_recovery_report(
+                &payload.data,
+                "00000000-0000-4000-8000-000000000002"
+            ));
+            let recovery = &payload.data.recoveries[0];
+            assert_eq!(
+                recovery.custody_proof_kind.as_deref(),
+                Some("delivery_recovery_take_succeeded")
+            );
+            assert_eq!(
+                recovery.custody_proof_observed_at.as_deref(),
+                Some("2025-11-15T09:45:40.110000Z")
+            );
+            assert_eq!(recovery.actions[0].kind, "buyer_blacklist");
+            assert_eq!(recovery.actions[1].kind, "reclaim_equipment_take");
+            assert!(recovery.allowed_commands.is_empty());
+            assert_eq!(recovery.send_attribution_blocker.as_deref(), expected);
+            assert_eq!(recovery.blocking_code.as_deref(), Some("recovery_evidence_mismatch"));
+        }
+    }
 }

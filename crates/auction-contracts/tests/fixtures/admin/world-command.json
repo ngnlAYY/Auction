@@ -1,0 +1,12 @@
+{
+  "code": "ok",
+  "data": {
+    "world": {
+      "availability": "available",
+      "enabled": false,
+      "id": "isekai",
+      "policy_revision": 2
+    }
+  },
+  "message": "业务世界状态已更新"
+}

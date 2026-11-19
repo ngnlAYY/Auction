@@ -539,3 +539,42 @@ async fn runtime_config_read_contract_fixtures() {
         assert_wire(name, actual);
     }
 }
+
+#[tokio::test]
+async fn runtime_config_validate_contract_fixtures() {
+    use crate::server::contract_fixtures::assert_http;
+
+    let address = ConnectInfo("127.0.0.1:1234".parse().unwrap());
+    let state = state_with_runtime(Some(Arc::new(RuntimeWithWorkerError {
+        current: AdminRuntimeDocument::default(),
+        worker_error: WORKER_FILE_HINT,
+    })));
+    for (name, query) in [
+        ("admin/config-validate-default", ""),
+        ("admin/config-validate-taxonomy", "?include_equipment_taxonomy=true"),
+        (
+            "admin/config-validate-collection-threshold",
+            "?include=fulfillment_collection_overdue_age_seconds",
+        ),
+        (
+            "admin/config-validate",
+            "?include_equipment_taxonomy=true&include=fulfillment_collection_overdue_age_seconds",
+        ),
+    ] {
+        let response = validate(
+            state.clone(),
+            address,
+            headers(),
+            format!("/api/v1/admin/config:validate{query}").parse().unwrap(),
+            Bytes::from_static(br#"{"document":{"allow_manual_early_open":true}}"#),
+        )
+        .await;
+        assert_http(name, StatusCode::OK, response).await;
+    }
+    let response = validate(
+        state, address, headers(),
+        "/api/v1/admin/config:validate?include_equipment_taxonomy=true&include=fulfillment_collection_overdue_age_seconds".parse().unwrap(),
+        Bytes::from_static(br#"{"document":{"operations":{"alerts":{"managed":true}}}}"#),
+    ).await;
+    assert_http("admin/config-validate-invalid", StatusCode::BAD_REQUEST, response).await;
+}

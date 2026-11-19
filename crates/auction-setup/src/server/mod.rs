@@ -411,12 +411,8 @@ mod tests {
         }
     }
 
-    async fn completion_rejection(
-        initialize_and_start: bool,
-        form: SetupRequest,
-        confirmations: &[&str],
-    ) -> String {
-        let state = Arc::new(FirstRunState {
+    fn test_state(initialize_and_start: bool) -> Arc<FirstRunState> {
+        Arc::new(FirstRunState {
             options: FirstRunServerOptions {
                 output_dir: std::env::temp_dir().join(uuid::Uuid::new_v4().to_string()),
                 control_group: "auction".to_owned(),
@@ -425,7 +421,15 @@ mod tests {
             token: "fixture-token".to_owned(),
             policy: Arc::new(FirstRunPolicy { initialize_and_start, ..FirstRunPolicy::default() }),
             operation: Mutex::new(SetupOperation { status: SetupStatus::Pending, shutdown: None }),
-        });
+        })
+    }
+
+    async fn completion_rejection(
+        initialize_and_start: bool,
+        form: SetupRequest,
+        confirmations: &[&str],
+    ) -> String {
+        let state = test_state(initialize_and_start);
         let (parts, body) = Json(form).into_response().into_parts();
         let mut request = Request::new(body);
         *request.headers_mut() = parts.headers;
@@ -475,6 +479,54 @@ mod tests {
                 completion_rejection(initialize, form(), headers).await,
                 r#"{"code":"invalid_input"}"#
             );
+        }
+    }
+
+    #[tokio::test]
+    async fn setup_validation_contract_fixture() {
+        let state = test_state(false);
+        let (parts, body) = Json(form()).into_response().into_parts();
+        let mut request = Request::new(body);
+        *request.headers_mut() = parts.headers;
+        request.headers_mut().insert("x-setup-token", "fixture-token".parse().unwrap());
+        let response =
+            super::validate(State(state.clone()), request).await.err().unwrap().into_response();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(!state.options.output_dir.exists());
+        let body = to_bytes(response.into_body(), 128).await.unwrap();
+        let expected = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../auction-contracts/tests/fixtures/admin/setup-validate-invalid.json"
+        ));
+        assert_eq!(body.as_ref(), expected.trim_end().as_bytes());
+    }
+
+    #[tokio::test]
+    async fn setup_verify_contract_fixtures() {
+        for (initialize, body) in [
+            (
+                false,
+                include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../auction-contracts/tests/fixtures/admin/setup-verify.json"
+                )),
+            ),
+            (
+                true,
+                include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../auction-contracts/tests/fixtures/admin/setup-verify-initialize.json"
+                )),
+            ),
+        ] {
+            let state = test_state(initialize);
+            let mut headers = axum::http::HeaderMap::new();
+            headers.insert("x-setup-token", "fixture-token".parse().unwrap());
+            let response = super::verify(State(state.clone()), headers).await.into_response();
+            assert_eq!(response.status(), StatusCode::OK);
+            let actual = to_bytes(response.into_body(), 128).await.unwrap();
+            assert_eq!(actual.as_ref(), body.trim_end().as_bytes());
+            assert!(!state.options.output_dir.exists());
         }
     }
 }

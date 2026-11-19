@@ -1,0 +1,14 @@
+{
+  "code": "ok",
+  "data": {
+    "blockers": [],
+    "corrects_admin_failure": true,
+    "delivery_id": "0f8fad5b-d9cb-469f-a165-70867728950e",
+    "eligible": true,
+    "expected_fencing_version": 4,
+    "external_reference": "mooglemail:main:send:7000001",
+    "requires_attempt_history_acceptance": true,
+    "requires_collected_asset_acceptance": false
+  },
+  "message": "人工 Sent 证明预览"
+}

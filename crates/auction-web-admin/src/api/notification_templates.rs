@@ -377,4 +377,33 @@ mod tests {
         bad_key.key = "../config".to_owned();
         assert!(!valid_template_entry(&bad_key));
     }
+    #[test]
+    fn mail_template_read_and_command_contract_fixtures() {
+        use super::{
+            AdminMailTemplateListResponse, AdminMailTemplateUpdateResponse, ApiResponse,
+            valid_template_entry,
+        };
+        use crate::api::contract_fixtures::{admin_fixture, decode};
+
+        let payload: ApiResponse<AdminMailTemplateListResponse> =
+            decode(admin_fixture!("mail-templates"), "/data", "templates");
+        assert!(payload.data.templates.iter().all(valid_template_entry));
+        let payout = payload
+            .data
+            .templates
+            .iter()
+            .find(|entry| entry.key == "settlement_seller_payout")
+            .expect("结算模板");
+        assert!(payout.customized);
+        assert_eq!(payout.revision, 1);
+
+        let command: ApiResponse<AdminMailTemplateUpdateResponse> =
+            decode(admin_fixture!("mail-template-command"), "/data/template", "revision");
+        let accepted = command.data.template;
+        assert!(valid_template_entry(&accepted));
+        assert_eq!(accepted.key, "settlement_seller_payout");
+        assert_eq!(accepted.revision, 2);
+        assert!(!accepted.customized);
+        assert_eq!(accepted.body, accepted.default_body);
+    }
 }
