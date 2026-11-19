@@ -45,7 +45,7 @@ bash ci/checks/check.sh <检查项>...
 | `check` | `cargo check --locked --workspace --all-targets` |
 | `lint` | `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` |
 | `dependency-versions` | `auction-server` 正常依赖图只能包含一个 `tungstenite` 版本；Axum 的 WebSocket 错误按版本 downcast，跨版本并存会静默丢失 1009 close 契约 |
-| `wasm` | 以 `wasm32-unknown-unknown` 目标运行 `cargo clippy -D warnings`：Public（连同 `auction-web-shared`、`auction-contracts`）与 Admin 分开检查，各自保留独立 feature 图；`cfg(target_arch = "wasm32")` 代码只在此项被 lint |
+| `wasm` | 以 `wasm32-unknown-unknown` 目标运行 `cargo clippy -D warnings`：Public（连同 `auction-web-shared`、`auction-contracts`）与 Admin 分开检查，各自保留独立 feature 图；`cfg(target_arch = "wasm32")` 代码只在此项被 lint。随后以发布页面所用的 `wasm-release` profile 对两端各运行一次 `cargo check`，并用 `build.warnings=deny` 拒绝本仓库成员的 rustc 告警：只在发布构型出现的告警在 dev 构型里看不到。这一步不链接，也不运行 `dx` 与 `wasm-opt` |
 | `rustdoc` | `cargo doc` 全工作区（含私有项与全部 feature）以 `-D rustdoc::all` 构建：文档注释里的符号链接、HTML 标签与代码块属性必须可解析，失效链接即过期注释 |
 | `rust` | `fmt check dependency-versions lint wasm rustdoc` |
 | `dependency-audit` | [ci/checks/dependency-audit.sh](checks/dependency-audit.sh) 以 `cargo audit --deny warnings` 审计 `Cargo.lock`（需要 mise 安装的 cargo-audit，联网读取 RustSec）；例外登记在 [ci/checks/dependency-audit.ignore](checks/dependency-audit.ignore)，只收两类：已核实不进入编译图的公告，以及没有已知漏洞、本仓库不直接依赖、只经某个上游最新版本传递引入的“无人维护”类公告；每条写明原因、影响范围与解除条件，逐条以 `--ignore` 传入，定时审计复查 |

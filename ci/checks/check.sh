@@ -692,6 +692,12 @@ run_checks() {
 			cargo clippy --locked --target wasm32-unknown-unknown \
 				-p auction-web-public -p auction-web-shared -p auction-contracts -- -D warnings
 			cargo clippy --locked --target wasm32-unknown-unknown -p auction-web-admin -- -D warnings
+			# 页面按 wasm-release 发布：只在该构型出现的 rustc 告警（如只被调试断言用到的变量）在上面的 dev 构型里看不到。
+			# build.warnings=deny 只把本仓库成员的告警升为错误，不改 RUSTFLAGS；两端分开调用的理由同上。
+			CARGO_BUILD_WARNINGS=deny cargo check --locked --profile wasm-release \
+				--target wasm32-unknown-unknown -p auction-web-public
+			CARGO_BUILD_WARNINGS=deny cargo check --locked --profile wasm-release \
+				--target wasm32-unknown-unknown -p auction-web-admin
 			;;
 		rustdoc)
 			# 文档注释里的符号链接、HTML 标签与代码块属性须能被 rustdoc 解析；失效链接是过期注释的信号。
