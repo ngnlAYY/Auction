@@ -10,6 +10,7 @@ use serde::Deserialize;
 
 use super::load::RuntimeWorkerConfigSource;
 use crate::settings::backup::BackupConfig;
+use crate::settings::consignment::{ConsignmentConfig, ConsignmentFileConfig};
 use crate::settings::errors::ConfigError;
 use crate::settings::secrets::AppSecrets;
 use crate::settings::shutdown::{ShutdownFileConfig, ShutdownSettings};
@@ -110,6 +111,8 @@ pub(super) struct CommonFileConfig {
     pub(super) backup: BackupConfig,
     /// 创建拍卖时冻结的计划、经济、结算和恢复策略。
     pub(super) auction: AuctionConfig,
+    /// 三角色共用的寄售启动配置；整节省略时保持关闭。
+    pub(super) consignment: ConsignmentFileConfig,
 }
 
 pub(super) struct BuildInput {
@@ -128,6 +131,7 @@ pub(super) struct BuildInput {
     pub(super) realtime: RealtimeConfig,
     pub(super) backup: BackupConfig,
     pub(super) auction: AuctionConfig,
+    pub(super) consignment: ConsignmentFileConfig,
     pub(super) worker: WorkerConfig,
     pub(super) http_security: Option<HttpSecurityConfig>,
     pub(super) session: Option<RoleSessionConfig>,
@@ -164,6 +168,8 @@ pub struct AppConfig {
     pub backup: BackupConfig,
     /// 创建拍卖时冻结的经济、结算和恢复策略模板。
     pub auction: AuctionConfig,
+    /// 已校验的寄售启动配置；启用资格由装配根按制品能力判定。
+    pub consignment: ConsignmentConfig,
     pub worker: WorkerConfig,
     pub http_security: HttpSecurityConfig,
     /// 当前角色的会话策略；Public 只包含并发上限，不拥有账号登录时长。
@@ -202,6 +208,7 @@ impl fmt::Debug for AppConfig {
             .field("database_configured", &self.database_url().is_some())
             .field("admin_credentials_configured", &self.admin_credentials_configured())
             .field("auction", &self.auction)
+            .field("consignment", &self.consignment)
             .field("worker", &self.worker)
             .field("http_security", &self.http_security)
             .field("session", &self.session)

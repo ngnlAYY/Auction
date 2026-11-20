@@ -55,6 +55,7 @@ impl AppConfig {
             realtime,
             backup,
             auction,
+            consignment,
             worker,
             http_security,
             session,
@@ -63,6 +64,7 @@ impl AppConfig {
             worker_config_path,
             runtime_worker_budget,
         } = input;
+        let consignment = consignment.resolve()?;
         let shutdown = shutdown.resolve(role)?;
         let load_secrets = mode == BuildMode::Startup;
         let secrets = if load_secrets {
@@ -303,6 +305,7 @@ impl AppConfig {
             realtime,
             backup,
             auction,
+            consignment,
             worker,
             http_security,
             session,

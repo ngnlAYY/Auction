@@ -15,6 +15,7 @@ use super::build::BuildMode;
 use super::model::{AppConfig, BuildInput, CommonFileConfig, FileConfig, PublicSessionFileConfig};
 use crate::reader::{read_toml_bytes, read_toml_file};
 use crate::settings::backup::BackupConfig;
+use crate::settings::consignment::ConsignmentFileConfig;
 use crate::settings::errors::ConfigError;
 use crate::settings::shutdown::ShutdownFileConfig;
 use crate::settings::validation::{
@@ -143,6 +144,7 @@ impl AppConfig {
                 realtime: RealtimeConfig::default(),
                 backup: BackupConfig::default(),
                 auction: AuctionConfig::default(),
+                consignment: ConsignmentFileConfig::default(),
                 worker: WorkerConfig::default(),
                 http_security: None,
                 session: None,
@@ -224,6 +226,7 @@ impl AppConfig {
             database_roles,
             backup,
             auction,
+            consignment,
         } = common;
         let worker = resolve_worker_paths(config_path.as_deref(), worker);
         let secrets_path = Some(resolve_secrets_path(config_path.as_deref(), secrets_file));
@@ -254,6 +257,7 @@ impl AppConfig {
                 realtime,
                 backup,
                 auction,
+                consignment,
                 worker,
                 http_security,
                 session: Some(session),

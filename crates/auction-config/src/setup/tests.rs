@@ -1,6 +1,14 @@
 //! 首次密钥强度、部署安全警告与原子轮换后的重新加载回归。
 
-use super::*;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+
+use toml::Value;
+use uuid::Uuid;
+
+use super::FirstRunConfig;
+use crate::{AppConfig, AuctionScheduleConfig, PostgresConnectionConfig, Role};
 
 fn fixture() -> FirstRunConfig {
     FirstRunConfig {
@@ -37,6 +45,36 @@ fn first_run_requires_32_byte_admin_secret() {
     assert!(input.validate().is_err());
     input.admin_secret = format!("{}\t", "a".repeat(32));
     assert!(input.validate().is_err());
+}
+
+#[test]
+fn first_run_and_legacy_common_template_load_with_consignment_disabled() {
+    // 只物化和读取临时 TOML，覆盖首次设置实际消费的模板。
+    let directory = std::env::temp_dir().join(format!("auction-first-run-{}", Uuid::new_v4()));
+    fs::DirBuilder::new().mode(0o700).create(&directory).unwrap();
+    let config_dir = directory.join("config");
+    fixture().write_to(&config_dir).unwrap();
+    let common_path = config_dir.join("common.toml");
+    let mut common: toml::Table =
+        toml::from_str(&fs::read_to_string(&common_path).unwrap()).unwrap();
+    assert_eq!(common["consignment"]["enabled"].as_bool(), Some(false));
+    assert_eq!(common["consignment"].as_table().unwrap().len(), 9);
+    let load = |role: Role| {
+        AppConfig::load_from_path(role, config_dir.join(format!("{}.toml", role.name())))
+            .unwrap()
+            .consignment
+    };
+    let roles = [Role::Public, Role::Admin, Role::Worker];
+    let current = roles.map(load);
+    for config in current {
+        assert!(!config.enabled());
+    }
+    // 移除新增区块后模拟旧模板生成的公共配置。
+    common.remove("consignment");
+    fs::write(&common_path, toml::to_string(&common).unwrap()).unwrap();
+    let legacy = roles.map(load);
+    assert_eq!(current, legacy);
+    fs::remove_dir_all(directory).unwrap();
 }
 
 #[test]
