@@ -381,6 +381,19 @@ mod tests {
         ])
     }
 
+    fn independent_close_facts() -> [(ForcedTerminationFacts, ListingReason); 2] {
+        [
+            (
+                ForcedTerminationFacts { auction_lot_created: true, ..Default::default() },
+                ListingReason::AuctionLotCreated,
+            ),
+            (
+                ForcedTerminationFacts { seller_ineligible: true, ..Default::default() },
+                ListingReason::SellerIneligible,
+            ),
+        ]
+    }
+
     fn decide(
         current: Option<ListingSnapshot>,
         trigger: ListingTrigger,
@@ -420,6 +433,20 @@ mod tests {
             assert_eq!(
                 decide(None, trigger, Timestamp::MAX_UTC),
                 Err(ListingError::InvalidTransition { from: "absent", action: "set_deadline" })
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn registration_rejects_known_ineligible_sellers_in_both_modes() -> Result<(), ListingError> {
+        let price = ListingPrice::new(101)?;
+        let facts = ForcedTerminationFacts { seller_ineligible: true, ..Default::default() };
+        for mode in MODES {
+            assert_eq!(
+                transition_listing(None, ListingTrigger::Register { mode, price }, NOW, facts),
+                Err(ListingError::InvalidTransition { from: "absent", action: "register" }),
+                "{mode:?}"
             );
         }
         Ok(())
@@ -655,6 +682,81 @@ mod tests {
                         "{trigger:?}: {facts:?}"
                     );
                 }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn independent_close_facts_close_each_activity() -> Result<(), ListingError> {
+        for (listing, _) in active_listings()? {
+            for (facts, reason) in independent_close_facts() {
+                assert_eq!(
+                    transition_listing(Some(listing), ListingTrigger::AutoClose, NOW, facts),
+                    Ok(ListingTransition::Changed {
+                        listing: ListingSnapshot {
+                            state: ListingState::Closed,
+                            state_version: ListingVersion::new(4)?,
+                            reason: Some(reason),
+                            ..listing
+                        },
+                        change: ListingChange::Closed,
+                    }),
+                    "{listing:?}，原因 {reason:?}"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn independent_close_facts_preempt_active_writes() -> Result<(), ListingError> {
+        let price = ListingPrice::new(173)?;
+        for (listing, _) in active_listings()? {
+            let expected_version = listing.state_version;
+            for (facts, reason) in independent_close_facts() {
+                for trigger in [
+                    ListingTrigger::Reprice { expected_version, price },
+                    ListingTrigger::AdminDelist { expected_version },
+                ] {
+                    assert_eq!(
+                        transition_listing(Some(listing), trigger, NOW, facts),
+                        Ok(ListingTransition::ForcedTermination {
+                            listing: ListingSnapshot {
+                                state: ListingState::Closed,
+                                state_version: ListingVersion::new(4)?,
+                                reason: Some(reason),
+                                ..listing
+                            },
+                            change: ListingChange::Closed,
+                        }),
+                        "{listing:?}，动作 {trigger:?}，原因 {reason:?}"
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn independent_close_facts_preempt_lookup_publication() -> Result<(), ListingError> {
+        let trigger = ListingTrigger::LookupAccepted(ListingPublicationTtls::default());
+        for mode in MODES {
+            let listing = snapshot(mode, ListingState::Resolving)?;
+            for (facts, reason) in independent_close_facts() {
+                assert_eq!(
+                    transition_listing(Some(listing), trigger, NOW, facts),
+                    Ok(ListingTransition::ForcedTermination {
+                        listing: ListingSnapshot {
+                            state: ListingState::Closed,
+                            state_version: ListingVersion::new(4)?,
+                            reason: Some(reason),
+                            ..listing
+                        },
+                        change: ListingChange::Closed,
+                    }),
+                    "{mode:?}，原因 {reason:?}"
+                );
             }
         }
         Ok(())
