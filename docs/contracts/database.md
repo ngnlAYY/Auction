@@ -78,6 +78,29 @@
 
 `auctions.policy_snapshot` 的竞价版本在创建场次时冻结：既有 `schema_version=4` 解码为竞价 v1；新建场次写入 `schema_version=5`、数值 `bidding_version=2`，统一最低增量并允许代理用尽上限反超。迁移 `000069` 仅放宽快照 CHECK，拒绝 v5 缺少版本、版本非数值 2 或未知 schema，不回填或改写任何旧场次。普通竞价、慢速到期、Final 与账户代理降额能力共用该版本；历史事实和命令结果保持原样。竞价规则字段缺失或为 JSON null 时，竞价、结算快照与账户代理读取一律失败关闭，不按常量兜底；Public 当前场次与实时预检读取的 `proxy_default_mode` 同样如此。价格语义见[docs/business-rules.md#代理竞价](../business-rules.md#代理竞价)。
 
+### 一口价挂单
+
+寄售表由 `auction-storage` 的寄售与密钥维护模块拥有。外键均拒绝删除被引用的行。既有 `equipment`、`lots` 只用作历史证据，旧装备编号保留原文。
+
+| 表 | 内容 |
+| --- | --- |
+| `consignment_listings` | 挂单投影：卖家、世界、装备正十进制编号、不可变模式、标价、冻结的计价版本与费率、状态版本、启用代次、拉黑历史计数、当前快照与期限 |
+| `consignment_listing_lot_baselines` | 两种模式各自在首笔登记命令事务中已见的 lot 集合，只追加。由数据库写入的登记事务标识与首版命令校验共同约束写入 |
+| `consignment_listing_auction_conflicts` | 基线外已提交的 lot 关联，按挂单与 lot 去重，只追加；每条关联绑定观察事实的命令 |
+| `consignment_snapshots` | 同一挂单每个解析代次最多一份只追加的安全观察，绑定世界和装备编号。当前快照使用延迟复合外键，必须属于本单 |
+| `consignment_registration_secrets` | 用固定且独立的 AAD UUID 密封登记凭证。退休时同一次更新清空密文、nonce、密钥标识和指纹，保留身份与退休时间，禁止恢复信封 |
+| `consignment_replay_keys` | 加密包装的登记重放 HMAC 比较密钥，最多一项可供新登记写入；旧项继续验证既有命令。轮换装备数据密钥时重包，账本保持原样 |
+| `consignment_commands` | 跨操作与目标全局唯一的命令 ID，保存 actor、规范输入摘要、首次结果和安全回执，只追加。仅登记引用比较密钥；内部重放保留冻结期限、终态原因或下次调度时刻及安全失败分类 |
+| `consignment_events` | 每个挂单版本的一条内部迁移事实，只追加；挂单写入须在提交前持有本事务创建的最终命令和匹配的同版事件 |
+| `consignment_lookup_work` | 每个挂单与代次一项持久解析工作，计次上限六次。排队有下次时刻，领取有完整租约、正计次与围栏，完成或取消有完成时间 |
+| `consignment_lookup_control` | 服务共用单例。保存准入代次、全局许可与冷却、Worker 就绪期限和扫描游标。初始化关闭，初始代次为 1，四个许可持有者字段同时为空或同时存在 |
+
+- 模式为 `direct` / `consigned`，世界为 `main` / `isekai`。标价为 1–1000000000 Credits，计价版本为 1，费率为 0–9999 bps，`direct` 固定为 0。活动态为 `resolving`、`displayed`、`awaiting_deposit`，同卖家、世界与装备在活动态最多一条。任何卖家在同世界与装备上最多占用一个已核验名额，适用于后两个状态。两个部分唯一索引仅以持久状态为谓词。
+- 解析中无快照，展示仅接受非寄售，待寄仅接受寄售，两种发布态均须有快照。拒挂按原因区分能否保留待核观察。关闭与过期保留已见快照和截止，已终结的行禁止继续迁移。业务事务同提交写回执、挂单版本、事件以及 `audit_records`。审计关联命令、actor、动作、挂单及安全处置。已仲裁的确定性拒绝也写回执与拒绝审计，无版本变化时不新增挂单事件。解析重排记录工作事实。审计与快照只写安全事实，登记请求的原始装备链接、装备 key、来源响应原文及领取 token 不进入回执、快照或审计。运营下架说明属于私有审计，由应用过滤后提交。存储错误映射只提取 SQLSTATE 与已知约束名，避免 PostgreSQL 的行明细被回显。
+- `consignment_eid_alias(text)` 对全串 ASCII 数字去前导零，全零或非法输入返回 NULL。按世界与规范 EID 匹配 lot，比较留在文本域。基线和碰撞对同一挂单互斥。目录、计数、本人有效状态、发布与清退用同一个基线差集检测已提交 lot。新读快照看到差集时立即隐藏，不等写侧收口；流拍不恢复旧挂单。既有装备索引的性能由后续查询压测验证。
+- 公开读取还要求准入代次匹配、当前时刻早于截止、卖家有效且无生效黑名单、拉黑历史计数等于登记值，并使用属于本单的当前快照。补扫逐单重读证据，按挂单 ID 分页并回绕；游标只决定扫描起点。解析领取与全局许可由同一事务更新，取消可保留在途许可的时间栅栏。
+- `consignment_history` 永久保留六张挂单及事实表，`consignment_key_material` 永久保留两张凭证表并按敏感备份制度管理，工作和许可归 `ephemeral_current_projections`。保留策略不授权删除，凭证退休按列清空。
+
 ### 装备标记
 
 | 表 | 内容 |
@@ -235,6 +258,17 @@ owner/superuser 时以明确错误终止，不放宽授权。`ALTER DEFAULT PRIV
 公共文件的 `[database_roles] owner` 声明迁移 owner 账号名；`config check --strict` 要求三角色的
 `[database].username` 都是 `auction_runtime`、`owner` 已声明且与之不同，否则部署预检失败。
 `db migrate` 等命令还会核对 `--owner-secrets` 的同库目标与账号一致性。
+
+
+寄售授权在 `public.apply_auction_runtime_privileges()` 的撤权、统一授予 `SELECT` 后重建。五张寄售事实表另授 `INSERT`，触发器拒绝 UPDATE、DELETE 和 TRUNCATE。五张投影中只有许可单例不授 `INSERT`，所有新表均不授 DELETE、TRUNCATE 或整表 UPDATE。
+
+| 寄售投影 | 允许运行账号更新的列 |
+| --- | --- |
+| `consignment_listings` | `state`、`price`、`state_version`、`current_snapshot_id`、`reason_code`、`updated_at`、`expires_at` |
+| `consignment_registration_secrets` | `ciphertext`、`nonce`、`encryption_key_id`、`fingerprint`、`updated_at`、`retired_at` |
+| `consignment_replay_keys` | `write_current`、`wrapped_key`、`nonce`、`encryption_key_id`、`updated_at` |
+| `consignment_lookup_work` | 工作状态、计次、围栏、下次解析时间、租约三列、最后安全原因、完成时间、更新时间 |
+| `consignment_lookup_control` | 除主键外的全部列 |
 
 ## 变更规则
 
