@@ -53,7 +53,7 @@ pub enum HistoryLotOutcome {
     },
     /// 已流拍。
     Unsold,
-    /// 已撤拍；合同未给这个结局定义历史放行条件。
+    /// 已撤拍，须核对对应的撤拍寄回证据。
     Withdrawn,
 }
 
@@ -95,19 +95,16 @@ struct HistoryTerminal {
 /// 调用方须在同一数据库快照内读取完整别名集合，每条装备行保留一份摘要，包括无 lot 的行。
 /// 合同第 4.2 节的 `public.consignment_eid_alias(text)` 加世界等值限定相同集合，公开读和补扫
 /// 用该集合检测登记基线外的新 lot。
+/// 拒绝原因的优先序为 `history_alias_conflict` → `equipment_busy` → `history_unproven` → `history_owner_mismatch`。
 pub fn check_listing_history(
     identity: &ListingEquipmentIdentity,
     registrant_user_id: UserId,
     aliases: &[HistoryAliasEvidence],
 ) -> Result<(), ListingError> {
     // 不变量 6：身份和实物责任有疑义时失败关闭，历史为空仅表示可以继续预检。
-    if registrant_user_id.is_nil() {
-        return Err(ListingError::HistoryUnproven);
-    }
-
     let mut terminals = BTreeMap::new();
     let mut busy = false;
-    let mut unproven = false;
+    let mut unproven = registrant_user_id.is_nil();
     for alias in aliases {
         if alias.has_conflicting_original_equipment {
             return Err(ListingError::HistoryAliasConflict);
@@ -142,7 +139,14 @@ pub fn check_listing_history(
         }
     }
 
-    let holder = terminal_holder(&terminals)?;
+    let holder = match terminal_holder(&terminals) {
+        Ok(holder) => holder,
+        Err(ListingError::HistoryUnproven) => {
+            unproven = true;
+            None
+        }
+        Err(error) => return Err(error),
+    };
     // 有尚未清偿的实物责任时，既有已证持有人不足以授权新登记。
     if busy {
         return Err(ListingError::EquipmentBusy);
@@ -173,22 +177,29 @@ impl HistoryLotEvidence {
             HistoryLotOutcome::Unsold => {
                 (SettlementObligationKind::UnsoldReturn, self.seller_user_id)
             }
-            // 现有拍卖另有撤拍寄回义务，合同只给成交与流拍定义了放行证据。
-            HistoryLotOutcome::Withdrawn => return Err(ListingError::HistoryUnproven),
+            HistoryLotOutcome::Withdrawn => {
+                (SettlementObligationKind::WithdrawnReturn, self.seller_user_id)
+            }
         };
 
-        // 流拍也是结算产生的 lot 结局；有证明却没有已结算场次时仍保留责任。
-        if self.auction_status != AuctionStatus::Settled {
+        // 成交与流拍源于场次结算，撤拍寄回则可在草稿场次完成。
+        let withdrawn = self.outcome == HistoryLotOutcome::Withdrawn;
+        if !withdrawn && self.auction_status != AuctionStatus::Settled {
             return Err(ListingError::EquipmentBusy);
         }
-        let transfer = self.original_transfer.ok_or(ListingError::EquipmentBusy)?;
+        // 撤拍证据不足时无法证明持有人；已知未清偿的责任由别名标志单独判定。
+        let incomplete_transfer =
+            if withdrawn { ListingError::HistoryUnproven } else { ListingError::EquipmentBusy };
+        let Some(transfer) = self.original_transfer else {
+            return Err(incomplete_transfer);
+        };
         if transfer.obligation_kind != required_kind
             || !transfer.matches_original_lot_and_equipment
             || !transfer.fulfillment_satisfied
             || !transfer.original_delivery_succeeded
             || !transfer.matching_collection_proven
         {
-            return Err(ListingError::EquipmentBusy);
+            return Err(incomplete_transfer);
         }
 
         let (Some(recipient), Some(expected_recipient)) = (
@@ -198,7 +209,7 @@ impl HistoryLotEvidence {
             return Err(ListingError::HistoryUnproven);
         };
         if recipient != expected_recipient {
-            return Err(ListingError::EquipmentBusy);
+            return Err(incomplete_transfer);
         }
         Ok(recipient)
     }
@@ -209,23 +220,28 @@ fn terminal_holder(
 ) -> Result<Option<UserId>, ListingError> {
     // 旧表没有跨别名的前驱外键。只有经存储层核验的交接才可接续，禁止按时间或 UUID 选择末端。
     let mut superseded = BTreeSet::new();
-    for terminal in terminals.values() {
+    let mut predecessors = BTreeMap::new();
+    let mut unproven_lots = BTreeSet::new();
+    for (lot_id, terminal) in terminals {
         if let Some(handoff) = terminal.handoff_from {
-            let previous =
-                terminals.get(&handoff.previous_lot_id).ok_or(ListingError::HistoryUnproven)?;
-            let seller = terminal
+            let first_seller = terminal
                 .seller_user_id
-                .filter(|user_id| !user_id.is_nil())
-                .ok_or(ListingError::HistoryUnproven)?;
-            let first_seller = handoff.first_intermediate_seller_user_id.unwrap_or(seller);
-            if first_seller.is_nil() {
-                return Err(ListingError::HistoryUnproven);
-            }
+                .filter(|seller| !seller.is_nil())
+                .map(|seller| handoff.first_intermediate_seller_user_id.unwrap_or(seller))
+                .filter(|first_seller| !first_seller.is_nil());
+            let (Some(previous), Some(first_seller)) =
+                (terminals.get(&handoff.previous_lot_id), first_seller)
+            else {
+                // 交接两端的独立性尚未证实，不能用它们的持有人判定末端冲突。
+                unproven_lots.extend([*lot_id, handoff.previous_lot_id]);
+                continue;
+            };
             if previous.holder_user_id.is_some_and(|holder| holder != first_seller)
                 || !superseded.insert(handoff.previous_lot_id)
             {
                 return Err(ListingError::HistoryAliasConflict);
             }
+            predecessors.insert(*lot_id, handoff.previous_lot_id);
         }
     }
 
@@ -235,24 +251,26 @@ fn terminal_holder(
         if superseded.contains(lot_id) {
             continue;
         }
-        if let Some(terminal_holder) = terminal.holder_user_id {
+        let mut proven_chain = !unproven_lots.contains(lot_id);
+        reached += 1;
+        let mut predecessor = predecessors.get(lot_id);
+        // 每个 lot 最多有一个已核验的后继，从末端回溯不能进入闭环。
+        while let Some(previous_lot_id) = predecessor {
+            reached += 1;
+            proven_chain &= !unproven_lots.contains(previous_lot_id);
+            predecessor = predecessors.get(previous_lot_id);
+        }
+        if proven_chain && let Some(terminal_holder) = terminal.holder_user_id {
             if holder.is_some_and(|holder| holder != terminal_holder) {
                 return Err(ListingError::HistoryAliasConflict);
             }
             holder = Some(terminal_holder);
         }
-        reached += 1;
-        let mut predecessor = terminal.handoff_from;
-        // 每个 lot 最多有一个后继，从任何末端回溯都不能进入闭环。
-        while let Some(handoff) = predecessor {
-            reached += 1;
-            predecessor = terminals[&handoff.previous_lot_id].handoff_from;
-        }
     }
     if reached != terminals.len() {
         return Err(ListingError::HistoryAliasConflict);
     }
-    Ok(holder)
+    if unproven_lots.is_empty() { Ok(holder) } else { Err(ListingError::HistoryUnproven) }
 }
 
 #[cfg(test)]
@@ -345,6 +363,29 @@ mod tests {
                 registrant,
                 &[alias(Some(sold(5, 1, 2))), alias(None)]
             ),
+            Err(ListingError::HistoryUnproven)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn duplicate_lot_summaries_cannot_disagree_on_the_holder() -> Result<(), ListingError> {
+        let equipment = ListingEquipmentIdentity::new("main", "42")?;
+        let first = alias(Some(sold(5, 1, 2)));
+        let second = alias(Some(sold(5, 1, 3)));
+        assert_eq!(
+            check_listing_history(&equipment, user(3), &[first, second]),
+            Err(ListingError::HistoryAliasConflict)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn zero_lot_id_cannot_prove_historical_ownership() -> Result<(), ListingError> {
+        let equipment = ListingEquipmentIdentity::new("main", "42")?;
+        let lot = HistoryLotEvidence { lot_id: lot_id(0), ..sold(5, 1, 2) };
+        assert_eq!(
+            check_listing_history(&equipment, user(2), &[alias(Some(lot))]),
             Err(ListingError::HistoryUnproven)
         );
         Ok(())
@@ -498,6 +539,13 @@ mod tests {
                 ..sold
             },
             HistoryLotEvidence { seller_user_id: None, ..returned },
+            HistoryLotEvidence {
+                original_transfer: Some(HistoryTransferEvidence {
+                    recipient_user_id: None,
+                    ..delivered(SettlementObligationKind::UnsoldReturn, 2)
+                }),
+                ..returned
+            },
         ] {
             assert_eq!(
                 check_listing_history(&equipment, user(2), &[alias(Some(lot))]),
@@ -509,27 +557,60 @@ mod tests {
     }
 
     #[test]
-    fn withdrawn_lot_does_not_gain_eligibility_from_a_distinct_return_kind()
-    -> Result<(), ListingError> {
-        let equipment = ListingEquipmentIdentity::new("main", "42")?;
-        let withdrawn = alias(Some(HistoryLotEvidence {
+    fn withdrawn_lot_allows_only_the_seller_after_proven_return() -> Result<(), ListingError> {
+        let proof = delivered(SettlementObligationKind::WithdrawnReturn, 2);
+        let returned = HistoryLotEvidence {
             outcome: HistoryLotOutcome::Withdrawn,
-            auction_status: AuctionStatus::Cancelled,
-            original_transfer: Some(delivered(SettlementObligationKind::WithdrawnReturn, 2)),
+            auction_status: AuctionStatus::Draft,
+            original_transfer: Some(proof),
             ..unsold(5, 2)
-        }));
+        };
+        for (world, status) in
+            [("main", AuctionStatus::Draft), ("isekai", AuctionStatus::Cancelled)]
+        {
+            let equipment = ListingEquipmentIdentity::new(world, "42")?;
+            let lot = HistoryLotEvidence { auction_status: status, ..returned };
+            let withdrawn = alias(Some(lot));
+            assert_eq!(check_listing_history(&equipment, user(2), &[withdrawn]), Ok(()));
+            assert_eq!(
+                check_listing_history(&equipment, user(3), &[withdrawn]),
+                Err(ListingError::HistoryOwnerMismatch)
+            );
+        }
+
+        let equipment = ListingEquipmentIdentity::new("main", "42")?;
+        for incomplete in [
+            None,
+            Some(delivered(SettlementObligationKind::UnsoldReturn, 2)),
+            Some(HistoryTransferEvidence { matches_original_lot_and_equipment: false, ..proof }),
+            Some(HistoryTransferEvidence { fulfillment_satisfied: false, ..proof }),
+            Some(HistoryTransferEvidence { original_delivery_succeeded: false, ..proof }),
+            Some(HistoryTransferEvidence { matching_collection_proven: false, ..proof }),
+            Some(HistoryTransferEvidence { recipient_user_id: None, ..proof }),
+            Some(HistoryTransferEvidence { recipient_user_id: Some(user(3)), ..proof }),
+        ] {
+            let lot = HistoryLotEvidence { original_transfer: incomplete, ..returned };
+            assert_eq!(
+                check_listing_history(&equipment, user(2), &[alias(Some(lot))]),
+                Err(ListingError::HistoryUnproven),
+                "{incomplete:?}"
+            );
+        }
+        let missing_seller = HistoryLotEvidence { seller_user_id: None, ..returned };
         assert_eq!(
-            check_listing_history(&equipment, user(2), &[withdrawn]),
+            check_listing_history(&equipment, user(2), &[alias(Some(missing_seller))]),
             Err(ListingError::HistoryUnproven)
         );
-        assert_eq!(
-            check_listing_history(
-                &equipment,
-                user(2),
-                &[HistoryAliasEvidence { has_unsettled_transfer: true, ..withdrawn }]
-            ),
-            Err(ListingError::EquipmentBusy)
-        );
+
+        for original_transfer in [Some(proof), None] {
+            let lot = HistoryLotEvidence { original_transfer, ..returned };
+            let outstanding =
+                HistoryAliasEvidence { has_unsettled_transfer: true, ..alias(Some(lot)) };
+            assert_eq!(
+                check_listing_history(&equipment, user(2), &[outstanding]),
+                Err(ListingError::EquipmentBusy)
+            );
+        }
         Ok(())
     }
 
@@ -610,6 +691,21 @@ mod tests {
             check_listing_history(&equipment, user(4), &[alias(Some(bridge)), alias(Some(first))]),
             Ok(())
         );
+        let wrong_first_seller = HistoryLotEvidence {
+            handoff_from: Some(HistoryAliasHandoff {
+                previous_lot_id: first.lot_id,
+                first_intermediate_seller_user_id: Some(user(7)),
+            }),
+            ..bridge
+        };
+        assert_eq!(
+            check_listing_history(
+                &equipment,
+                user(4),
+                &[alias(Some(wrong_first_seller)), alias(Some(first))]
+            ),
+            Err(ListingError::HistoryAliasConflict)
+        );
         Ok(())
     }
 
@@ -637,6 +733,43 @@ mod tests {
             assert_eq!(
                 check_listing_history(&equipment, user(3), &[alias(Some(first)), alias(Some(lot))]),
                 Err(error)
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn missing_handoff_predecessor_preserves_known_dispatch_responsibility()
+    -> Result<(), ListingError> {
+        let equipment = ListingEquipmentIdentity::new("main", "42")?;
+        let incomplete =
+            alias(Some(HistoryLotEvidence { handoff_from: handoff(lot_id(1)), ..sold(3, 1, 4) }));
+        let unknown_dispatch =
+            HistoryAliasEvidence { has_unknown_dispatch: true, ..alias(Some(sold(5, 1, 2))) };
+        assert_eq!(
+            check_listing_history(&equipment, user(4), &[incomplete, unknown_dispatch]),
+            Err(ListingError::EquipmentBusy)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn missing_handoff_predecessor_preserves_independent_terminal_conflict()
+    -> Result<(), ListingError> {
+        let equipment = ListingEquipmentIdentity::new("main", "42")?;
+        let incomplete =
+            alias(Some(HistoryLotEvidence { handoff_from: handoff(lot_id(1)), ..sold(3, 1, 4) }));
+        let first = alias(Some(sold(5, 1, 2)));
+        let second = alias(Some(sold(9, 2, 3)));
+        let unknown_dispatch = HistoryAliasEvidence { has_unknown_dispatch: true, ..second };
+        assert_eq!(
+            check_listing_history(&equipment, user(4), &[incomplete, first]),
+            Err(ListingError::HistoryUnproven)
+        );
+        for second in [second, unknown_dispatch] {
+            assert_eq!(
+                check_listing_history(&equipment, user(4), &[incomplete, first, second]),
+                Err(ListingError::HistoryAliasConflict)
             );
         }
         Ok(())
