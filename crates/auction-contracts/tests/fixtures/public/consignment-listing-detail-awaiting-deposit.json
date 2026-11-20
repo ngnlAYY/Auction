@@ -1,0 +1,52 @@
+{
+  "code": "ok",
+  "message": "已加载",
+  "data": {
+    "summary": {
+      "listing_id": "00000000-0000-4000-8000-000000000005",
+      "version": 2,
+      "mode": "consigned",
+      "state": "awaiting_deposit",
+      "world_id": "isekai",
+      "external_equipment_id": "43",
+      "name": "Fixture Oak Staff",
+      "category": "Staff",
+      "level": {
+        "kind": "unassigned"
+      },
+      "price": 101,
+      "seller_name": "FixtureSeller",
+      "updated_at": "2026-11-20T18:10:00Z",
+      "expires_at": "2026-11-27T18:10:00Z",
+      "purchasable": false
+    },
+    "equipment": {
+      "name": "Fixture Oak Staff",
+      "alt_name": "合成测试橡木杖",
+      "category": "Staff",
+      "level": {
+        "kind": "unassigned"
+      },
+      "tradeable": true,
+      "stat_groups": [
+        {
+          "name": "Fixture attributes",
+          "stats": [
+            {
+              "name": "Fixture resistance",
+              "value": 12.5,
+              "base": 10.25
+            },
+            {
+              "name": "Fixture weight",
+              "value": -2.5,
+              "base": null
+            }
+          ]
+        }
+      ],
+      "source": "hvdata-equip-v1",
+      "observed_at": "2026-11-20T18:10:00Z"
+    }
+  }
+}

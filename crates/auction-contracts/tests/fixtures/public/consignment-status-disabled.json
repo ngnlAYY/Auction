@@ -1,0 +1,15 @@
+{
+  "code": "ok",
+  "message": "已加载",
+  "data": {
+    "enabled": false,
+    "registration_ready": false,
+    "registration_modes": [],
+    "registration_worlds": [],
+    "accepts_mail": false,
+    "purchasable": false,
+    "fee_bps": 500,
+    "min_price": 1,
+    "max_price": 1000000000
+  }
+}

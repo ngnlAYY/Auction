@@ -1,0 +1,13 @@
+{
+  "code": "ok",
+  "message": "挂单已取消",
+  "data": {
+    "command_id": "00000000-0000-4000-8000-000000000068",
+    "operation": "withdraw",
+    "listing_id": "00000000-0000-4000-8000-000000000001",
+    "listing_version": 3,
+    "state": "closed",
+    "disposition": "closed",
+    "price": 102
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "code": "ok",
+  "message": "标价未变更",
+  "data": {
+    "command_id": "00000000-0000-4000-8000-000000000067",
+    "operation": "reprice",
+    "listing_id": "00000000-0000-4000-8000-000000000001",
+    "listing_version": 2,
+    "state": "resolving",
+    "disposition": "unchanged",
+    "price": 102
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "code": "ok",
+  "message": "已加载",
+  "data": {
+    "listing_id": "00000000-0000-4000-8000-000000000001",
+    "version": 1,
+    "world_id": "main",
+    "external_equipment_id": "42",
+    "mode": "consigned",
+    "price": 101,
+    "pricing_version": 1,
+    "fee_bps": 500,
+    "estimated_fee": 5,
+    "estimated_seller_amount": 96,
+    "created_at": "2026-11-20T18:00:00Z",
+    "updated_at": "2026-11-20T18:00:00Z",
+    "expires_at": "2026-11-21T18:00:00Z",
+    "stored_state": "resolving",
+    "effective_state": "resolving",
+    "effective_reason": null,
+    "allowed_actions": [
+      "reprice",
+      "withdraw"
+    ],
+    "view": {
+      "kind": "resolving",
+      "progress": {
+        "attempts": 0,
+        "max_attempts": 6,
+        "next_attempt_at": "2026-11-20T18:00:00Z",
+        "last_reason": null,
+        "paused": false,
+        "deadline_at": "2026-11-21T18:00:00Z"
+      }
+    }
+  }
+}

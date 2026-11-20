@@ -1,0 +1,21 @@
+{
+  "code": "ok",
+  "message": "已加载",
+  "data": {
+    "enabled": true,
+    "registration_ready": true,
+    "registration_modes": [
+      "direct",
+      "consigned"
+    ],
+    "registration_worlds": [
+      "main",
+      "isekai"
+    ],
+    "accepts_mail": false,
+    "purchasable": false,
+    "fee_bps": 500,
+    "min_price": 1,
+    "max_price": 1000000000
+  }
+}

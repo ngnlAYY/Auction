@@ -1,0 +1,303 @@
+{
+  "code": "ok",
+  "message": "已加载",
+  "data": {
+    "items": [
+      {
+        "listing_id": "00000000-0000-4000-8000-000000000002",
+        "version": 2,
+        "world_id": "main",
+        "external_equipment_id": "42",
+        "mode": "direct",
+        "price": 101,
+        "pricing_version": 1,
+        "fee_bps": 0,
+        "estimated_fee": 0,
+        "estimated_seller_amount": 101,
+        "created_at": "2026-11-20T18:00:00Z",
+        "updated_at": "2026-11-20T18:15:00Z",
+        "expires_at": "2026-11-21T18:00:00Z",
+        "stored_state": "rejected",
+        "effective_state": "rejected",
+        "effective_reason": "lookup_exhausted",
+        "allowed_actions": [],
+        "view": {
+          "kind": "lookup_failed",
+          "reason": "lookup_exhausted",
+          "last_lookup_reason": "source_timeout"
+        }
+      },
+      {
+        "listing_id": "00000000-0000-4000-8000-000000000003",
+        "version": 2,
+        "world_id": "main",
+        "external_equipment_id": "42",
+        "mode": "consigned",
+        "price": 101,
+        "pricing_version": 1,
+        "fee_bps": 500,
+        "estimated_fee": 5,
+        "estimated_seller_amount": 96,
+        "created_at": "2026-11-20T18:00:00Z",
+        "updated_at": "2026-11-20T18:14:00Z",
+        "expires_at": "2026-11-21T18:00:00Z",
+        "stored_state": "rejected",
+        "effective_state": "rejected",
+        "effective_reason": "not_tradeable",
+        "allowed_actions": [],
+        "view": {
+          "kind": "ineligible",
+          "equipment": {
+            "name": "Fixture Cotton Robe",
+            "alt_name": null,
+            "category": "Cloth",
+            "level": {
+              "kind": "soulbound"
+            },
+            "tradeable": false,
+            "stat_groups": [
+              {
+                "name": "Fixture attributes",
+                "stats": [
+                  {
+                    "name": "Fixture resistance",
+                    "value": 12.5,
+                    "base": 10.25
+                  },
+                  {
+                    "name": "Fixture weight",
+                    "value": -2.5,
+                    "base": null
+                  }
+                ]
+              }
+            ],
+            "source": "hvdata-equip-v1",
+            "observed_at": "2026-11-20T18:10:00Z"
+          },
+          "reason": "not_tradeable"
+        }
+      },
+      {
+        "listing_id": "00000000-0000-4000-8000-000000000004",
+        "version": 2,
+        "world_id": "main",
+        "external_equipment_id": "42424242424242424242424242424242",
+        "mode": "direct",
+        "price": 101,
+        "pricing_version": 1,
+        "fee_bps": 0,
+        "estimated_fee": 0,
+        "estimated_seller_amount": 101,
+        "created_at": "2026-11-20T18:00:00Z",
+        "updated_at": "2026-11-20T18:13:00Z",
+        "expires_at": "2026-12-20T18:10:00Z",
+        "stored_state": "displayed",
+        "effective_state": "displayed",
+        "effective_reason": null,
+        "allowed_actions": [
+          "reprice",
+          "withdraw"
+        ],
+        "view": {
+          "kind": "displayed",
+          "equipment": {
+            "name": "Fixture Cotton Robe",
+            "alt_name": null,
+            "category": "Cloth",
+            "level": {
+              "kind": "assigned",
+              "value": 42
+            },
+            "tradeable": true,
+            "stat_groups": [
+              {
+                "name": "Fixture attributes",
+                "stats": [
+                  {
+                    "name": "Fixture resistance",
+                    "value": 12.5,
+                    "base": 10.25
+                  },
+                  {
+                    "name": "Fixture weight",
+                    "value": -2.5,
+                    "base": null
+                  }
+                ]
+              }
+            ],
+            "source": "hvdata-equip-v1",
+            "observed_at": "2026-11-20T18:10:00Z"
+          }
+        }
+      },
+      {
+        "listing_id": "00000000-0000-4000-8000-000000000005",
+        "version": 2,
+        "world_id": "isekai",
+        "external_equipment_id": "43",
+        "mode": "consigned",
+        "price": 101,
+        "pricing_version": 1,
+        "fee_bps": 500,
+        "estimated_fee": 5,
+        "estimated_seller_amount": 96,
+        "created_at": "2026-11-20T18:00:00Z",
+        "updated_at": "2026-11-20T18:12:00Z",
+        "expires_at": "2026-11-27T18:10:00Z",
+        "stored_state": "awaiting_deposit",
+        "effective_state": "awaiting_deposit",
+        "effective_reason": null,
+        "allowed_actions": [
+          "reprice",
+          "withdraw"
+        ],
+        "view": {
+          "kind": "awaiting_deposit",
+          "equipment": {
+            "name": "Fixture Oak Staff",
+            "alt_name": "合成测试橡木杖",
+            "category": "Staff",
+            "level": {
+              "kind": "unassigned"
+            },
+            "tradeable": true,
+            "stat_groups": [
+              {
+                "name": "Fixture attributes",
+                "stats": [
+                  {
+                    "name": "Fixture resistance",
+                    "value": 12.5,
+                    "base": 10.25
+                  },
+                  {
+                    "name": "Fixture weight",
+                    "value": -2.5,
+                    "base": null
+                  }
+                ]
+              }
+            ],
+            "source": "hvdata-equip-v1",
+            "observed_at": "2026-11-20T18:10:00Z"
+          },
+          "accepts_mail": false
+        }
+      },
+      {
+        "listing_id": "00000000-0000-4000-8000-000000000006",
+        "version": 2,
+        "world_id": "main",
+        "external_equipment_id": "42",
+        "mode": "direct",
+        "price": 101,
+        "pricing_version": 1,
+        "fee_bps": 0,
+        "estimated_fee": 0,
+        "estimated_seller_amount": 101,
+        "created_at": "2026-11-20T18:00:00Z",
+        "updated_at": "2026-11-20T18:11:00Z",
+        "expires_at": "2026-12-20T18:10:00Z",
+        "stored_state": "displayed",
+        "effective_state": "closed",
+        "effective_reason": "auction_lot_created",
+        "allowed_actions": [],
+        "view": {
+          "kind": "closed",
+          "reason": "auction_lot_created",
+          "equipment": {
+            "name": "Fixture Cotton Robe",
+            "alt_name": null,
+            "category": "Cloth",
+            "level": {
+              "kind": "assigned",
+              "value": 42
+            },
+            "tradeable": true,
+            "stat_groups": [
+              {
+                "name": "Fixture attributes",
+                "stats": [
+                  {
+                    "name": "Fixture resistance",
+                    "value": 12.5,
+                    "base": 10.25
+                  },
+                  {
+                    "name": "Fixture weight",
+                    "value": -2.5,
+                    "base": null
+                  }
+                ]
+              }
+            ],
+            "source": "hvdata-equip-v1",
+            "observed_at": "2026-11-20T18:10:00Z"
+          }
+        }
+      },
+      {
+        "listing_id": "00000000-0000-4000-8000-000000000007",
+        "version": 2,
+        "world_id": "main",
+        "external_equipment_id": "42",
+        "mode": "direct",
+        "price": 101,
+        "pricing_version": 1,
+        "fee_bps": 0,
+        "estimated_fee": 0,
+        "estimated_seller_amount": 101,
+        "created_at": "2026-11-19T18:10:00Z",
+        "updated_at": "2026-11-20T18:10:00Z",
+        "expires_at": "2026-11-20T18:10:00Z",
+        "stored_state": "expired",
+        "effective_state": "expired",
+        "effective_reason": "lookup_deadline",
+        "allowed_actions": [],
+        "view": {
+          "kind": "expired",
+          "reason": "lookup_deadline",
+          "equipment": null
+        }
+      },
+      {
+        "listing_id": "00000000-0000-4000-8000-000000000001",
+        "version": 1,
+        "world_id": "main",
+        "external_equipment_id": "42",
+        "mode": "consigned",
+        "price": 101,
+        "pricing_version": 1,
+        "fee_bps": 500,
+        "estimated_fee": 5,
+        "estimated_seller_amount": 96,
+        "created_at": "2026-11-20T18:00:00Z",
+        "updated_at": "2026-11-20T18:00:00Z",
+        "expires_at": "2026-11-21T18:00:00Z",
+        "stored_state": "resolving",
+        "effective_state": "resolving",
+        "effective_reason": null,
+        "allowed_actions": [
+          "reprice",
+          "withdraw"
+        ],
+        "view": {
+          "kind": "resolving",
+          "progress": {
+            "attempts": 0,
+            "max_attempts": 6,
+            "next_attempt_at": "2026-11-20T18:00:00Z",
+            "last_reason": null,
+            "paused": false,
+            "deadline_at": "2026-11-21T18:00:00Z"
+          }
+        }
+      }
+    ],
+    "total": 7,
+    "page": 1,
+    "page_size": 37
+  }
+}

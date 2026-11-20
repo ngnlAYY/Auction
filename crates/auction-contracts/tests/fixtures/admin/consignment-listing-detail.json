@@ -1,0 +1,75 @@
+{
+  "code": "ok",
+  "message": "已加载",
+  "data": {
+    "record": {
+      "listing": {
+        "listing_id": "00000000-0000-4000-8000-000000000006",
+        "version": 2,
+        "world_id": "main",
+        "external_equipment_id": "42",
+        "mode": "direct",
+        "price": 101,
+        "pricing_version": 1,
+        "fee_bps": 0,
+        "estimated_fee": 0,
+        "estimated_seller_amount": 101,
+        "created_at": "2026-11-20T18:00:00Z",
+        "updated_at": "2026-11-20T18:10:00Z",
+        "expires_at": "2026-12-20T18:10:00Z",
+        "stored_state": "displayed",
+        "effective_state": "closed",
+        "effective_reason": "auction_lot_created",
+        "allowed_actions": [],
+        "view": {
+          "kind": "closed",
+          "reason": "auction_lot_created",
+          "equipment": {
+            "name": "Fixture Cotton Robe",
+            "alt_name": null,
+            "category": "Cloth",
+            "level": {
+              "kind": "assigned",
+              "value": 42
+            },
+            "tradeable": true,
+            "stat_groups": [
+              {
+                "name": "Fixture attributes",
+                "stats": [
+                  {
+                    "name": "Fixture resistance",
+                    "value": 12.5,
+                    "base": 10.25
+                  },
+                  {
+                    "name": "Fixture weight",
+                    "value": -2.5,
+                    "base": null
+                  }
+                ]
+              }
+            ],
+            "source": "hvdata-equip-v1",
+            "observed_at": "2026-11-20T18:10:00Z"
+          }
+        }
+      },
+      "seller_user_id": "00000000-0000-4000-8000-0000000000c9",
+      "seller_name": "FixtureSeller",
+      "admin_delist_reason": null,
+      "can_delist": false
+    },
+    "conflicts": [
+      {
+        "lot_id": "00000000-0000-4000-8000-00000000012e",
+        "detected_at": "2026-11-20T18:11:01Z"
+      },
+      {
+        "lot_id": "00000000-0000-4000-8000-00000000012d",
+        "detected_at": "2026-11-20T18:11:00Z"
+      }
+    ],
+    "conflicts_truncated": false
+  }
+}

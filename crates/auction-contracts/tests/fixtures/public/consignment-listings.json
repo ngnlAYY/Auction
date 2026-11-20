@@ -1,0 +1,48 @@
+{
+  "code": "ok",
+  "message": "已加载",
+  "data": {
+    "items": [
+      {
+        "listing_id": "00000000-0000-4000-8000-000000000005",
+        "version": 2,
+        "mode": "consigned",
+        "state": "awaiting_deposit",
+        "world_id": "isekai",
+        "external_equipment_id": "43",
+        "name": "Fixture Oak Staff",
+        "category": "Staff",
+        "level": {
+          "kind": "unassigned"
+        },
+        "price": 101,
+        "seller_name": "FixtureSeller",
+        "updated_at": "2026-11-20T18:10:00Z",
+        "expires_at": "2026-11-27T18:10:00Z",
+        "purchasable": false
+      },
+      {
+        "listing_id": "00000000-0000-4000-8000-000000000004",
+        "version": 2,
+        "mode": "direct",
+        "state": "displayed",
+        "world_id": "main",
+        "external_equipment_id": "42424242424242424242424242424242",
+        "name": "Fixture Cotton Robe",
+        "category": "Cloth",
+        "level": {
+          "kind": "assigned",
+          "value": 42
+        },
+        "price": 101,
+        "seller_name": "FixtureSeller",
+        "updated_at": "2026-11-20T18:10:00Z",
+        "expires_at": "2026-12-20T18:10:00Z",
+        "purchasable": false
+      }
+    ],
+    "total": 2,
+    "page": 1,
+    "page_size": 37
+  }
+}
