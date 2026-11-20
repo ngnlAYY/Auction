@@ -4,7 +4,7 @@ import { expect, test } from "bun:test";
 
 import { writeQueryPairs } from "../net/query";
 import { writeLocationPreservingScroll } from "./index";
-import { installScrollDocument, openRouter } from "./test-window";
+import { installFakeWindow, installScrollDocument, openRouter } from "./test-window";
 
 test.each([
   { url: "/me#login-duration", state: null, id: "login-duration" },
@@ -315,6 +315,122 @@ test("地址相同的两条记录也各自保存滚动位置", () => {
   } finally {
     opened.disposeRouter();
     opened.restore();
+  }
+});
+
+test("无路由时显式同地址 push 也创建新条目并各自恢复落点", () => {
+  const { fake, restore } = installFakeWindow("/?page=50", [0, 100, "first"]);
+  try {
+    const writes = fake.writes.length;
+    expect(writeLocationPreservingScroll("/?page=50", "push", { sameAddress: "write" })).toBe(true);
+    expect(fake.writes.length).toBe(writes + 1);
+    expect(fake.location.href).toBe("https://auction.test/?page=50");
+    const initialKey = "first";
+    expect((fake.history.state as unknown[])[2]).not.toBe(initialKey);
+
+    fake.history.back();
+    expect((fake.history.state as unknown[])[2]).toBe(initialKey);
+    expect(fake.history.state).toMatchObject({ 0: 0, 1: 100 });
+  } finally {
+    restore();
+  }
+});
+
+test("登记写入器后同地址 push 创建新条目，后退恢复上一条目落点", () => {
+  const { router, fake, disposeRouter, restore } = openRouter("/?page=50");
+  const commit = () => {
+    router.restoreScrollAfterCommit();
+    fake.commitFrame();
+  };
+  try {
+    fake.scrollByUser(0, 120);
+    const before = fake.writes.filter((write) => write.mode === "push").length;
+    const firstKey = (fake.history.state as unknown[])[2];
+    expect(writeLocationPreservingScroll("/?page=50", "push", { sameAddress: "write" })).toBe(true);
+    expect(fake.writes.filter((write) => write.mode === "push").length).toBe(before + 1);
+    expect(fake.location.href).toBe("https://auction.test/?page=50");
+    expect((fake.history.state as unknown[])[2]).not.toBe(firstKey);
+
+    fake.scrollByUser(0, 240);
+    fake.history.back();
+    commit();
+    expect(fake.location.href).toBe("https://auction.test/?page=50");
+    expect((fake.history.state as unknown[])[2]).toBe(firstKey);
+    expect(fake.scrollY).toBe(120);
+  } finally {
+    disposeRouter();
+    restore();
+  }
+});
+
+test("同地址 push 继承当前条目等待中的同名片段", () => {
+  const { fake, disposeRouter, restore } = openRouter("/me");
+  const dom = installScrollDocument();
+  try {
+    fake.followFragment("#account-bids-title");
+    fake.commitFrame();
+    expect(dom.observers()).toBe(1);
+
+    expect(
+      writeLocationPreservingScroll("/me#account-bids-title", "push", {
+        sameAddress: "write",
+      }),
+    ).toBe(true);
+    expect(fake.location.href).toBe("https://auction.test/me#account-bids-title");
+    expect(fake.history.state).toMatchObject({ 0: "fragment", 1: "account-bids-title" });
+    fake.commitFrame();
+    expect(dom.observers()).toBe(1);
+    expect(dom.seen).toEqual([]);
+
+    dom.mount("account-bids-title");
+    fake.commitFrame();
+    expect(dom.seen).toEqual(["account-bids-title"]);
+    expect(fake.history.state).toMatchObject({ 0: 0, 1: 0 });
+    expect(dom.observers()).toBe(0);
+  } finally {
+    disposeRouter();
+    restore();
+    dom.restore();
+  }
+});
+
+test("缺省策略仍跳过同地址写入，显式 replace 保留条目与落点", () => {
+  const { router, fake, disposeRouter, restore } = openRouter("/?page=50");
+  try {
+    const state = fake.history.state;
+    const writes = fake.writes.length;
+    expect(writeLocationPreservingScroll("/?page=50", "push")).toBe(false);
+    expect(writeLocationPreservingScroll("/?page=50", "replace")).toBe(false);
+    expect(fake.history.state).toBe(state);
+    expect(fake.writes.length).toBe(writes);
+
+    expect(writeLocationPreservingScroll("/?page=50", "replace", { sameAddress: "write" })).toBe(
+      true,
+    );
+    expect(fake.history.state).toEqual(state);
+    expect(router.currentLocationString()).toBe("/?page=50");
+  } finally {
+    disposeRouter();
+    restore();
+  }
+});
+
+test("浏览器拒绝同地址 push 时返回 false 且不改变状态", () => {
+  const { fake, disposeRouter, restore } = openRouter("/?page=50");
+  try {
+    const state = fake.history.state;
+    const href = fake.location.href;
+    const writes = fake.writes.length;
+    fake.rejectWrites("push");
+    expect(writeLocationPreservingScroll("/?page=50", "push", { sameAddress: "write" })).toBe(
+      false,
+    );
+    expect(fake.history.state).toBe(state);
+    expect(fake.location.href).toBe(href);
+    expect(fake.writes.length).toBe(writes);
+  } finally {
+    disposeRouter();
+    restore();
   }
 });
 
