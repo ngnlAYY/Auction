@@ -16,6 +16,10 @@ export type JsonObject = Record<string, unknown>;
 export interface JsonFieldPolicy {
   readonly uniqueRootKeys?: readonly string[];
   readonly integerPaths?: readonly (readonly (string | null)[])[];
+  /** `"all"`：任何一层对象里出现重复的键都拒绝。用于决定命令结果、写许可或登出的回执。 */
+  readonly uniqueKeys?: "all";
+  /** `"integers"`：整份文档里的数字都必须是整数词法（没有小数与指数，也不是 `-0`）。 */
+  readonly numbers?: "integers";
 }
 
 /** 与 serde_json 的 128 层递归预算一致，最深允许 127 层容器。 */
@@ -99,6 +103,8 @@ function validStrictJsonValue(root: unknown): boolean {
 function validJsonFields(text: string, policy: JsonFieldPolicy): boolean {
   const rootKeys = new Set<string>();
   const path: (string | null)[] = [];
+  // 与 path 等长：对象一层放它已出现过的键，数组一层放 null。
+  const seenKeys: (Set<string> | null)[] = [];
   const tokens = text.matchAll(
     /("(?:[^"\\]|\\.)*")([ \t\r\n]*:)?|(-?[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)|[{}[\]]/gu,
   );
@@ -111,23 +117,33 @@ function validJsonFields(text: string, policy: JsonFieldPolicy): boolean {
           if (rootKeys.has(value)) return false;
           rootKeys.add(value);
         }
+        if (policy.uniqueKeys === "all") {
+          const seen = seenKeys[seenKeys.length - 1];
+          if (seen?.has(value) === true) return false;
+          seen?.add(value);
+        }
         path[path.length - 1] = value;
       }
     } else if (number !== undefined) {
       if (!Number.isFinite(Number(number))) return false;
+      // serde 把带小数、指数的数字与 `-0` 都交给浮点 visitor，整数字段会拒绝它们。
+      const integerLexeme = !/[.eE]/u.test(number) && number !== "-0";
       if (
-        /[.eE]/u.test(number) &&
-        policy.integerPaths?.some(
-          (field) =>
-            field.length === path.length && field.every((key, index) => key === path[index]),
-        )
+        !integerLexeme &&
+        (policy.numbers === "integers" ||
+          policy.integerPaths?.some(
+            (field) =>
+              field.length === path.length && field.every((key, index) => key === path[index]),
+          ))
       )
         return false;
     } else if (token === "{" || token === "[") {
       if (path.length === JSON_CONTAINER_LIMIT) return false;
       path.push(null);
+      seenKeys.push(token === "{" ? new Set() : null);
     } else {
       path.pop();
+      seenKeys.pop();
     }
   }
   return true;

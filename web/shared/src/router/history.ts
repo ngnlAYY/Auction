@@ -9,6 +9,13 @@ import { fragmentTarget, hasFragmentTarget, restoreScroll, sameScrollPosition } 
 
 type WriteMode = "push" | "replace";
 
+/** 同地址历史写入策略；缺省 `"skip"` 保留既有行为。 */
+export interface LocationWriteOptions {
+  readonly sameAddress?: "skip" | "write";
+}
+
+type QueryWriter = (route: string, mode: WriteMode, options?: LocationWriteOptions) => boolean;
+
 interface HistorySnapshot {
   readonly key: string | null;
   readonly landing: ScrollTarget;
@@ -32,7 +39,7 @@ const SCROLL_KEYS = new Set([
   "PageUp",
   " ",
 ]);
-const queryWriters = new WeakMap<Window, (route: string, mode: WriteMode) => boolean>();
+const queryWriters = new WeakMap<Window, QueryWriter>();
 
 /** 浏览器历史适配器。 */
 export interface WebHistory {
@@ -127,17 +134,34 @@ function writeEntry(
   return true;
 }
 
-/** 查询 replace 沿用当前落点；push 继承同页待定位的片段或从当前视口开始。 */
-export function writeLocationPreservingScroll(route: string, mode: WriteMode): boolean {
+/**
+ * 查询 replace 沿用当前落点；push 继承同页待定位的片段或从当前视口开始。
+ * 缺省跳过与当前地址相同的写入；`sameAddress: "write"` 时按 Rust 语义照常写入。
+ */
+export function writeLocationPreservingScroll(
+  route: string,
+  mode: WriteMode,
+  options?: LocationWriteOptions,
+): boolean {
   const writer = queryWriters.get(window);
   if (writer !== undefined) {
-    return writer(route, mode);
+    return writer(route, mode, options);
   }
-  const saved = mode === "replace" ? readEntry() : null;
-  return (
-    route !== currentWindowRoute(true) &&
-    writeEntry(mode, saved ?? { key: null, landing: positionTarget(currentScroll()) }, route)
-  );
+  const writeSameAddress = options?.sameAddress === "write";
+  const saved = mode === "replace" || writeSameAddress ? readEntry() : null;
+  const fragment = writeSameAddress && mode === "push" ? fragmentInRoute(route) : null;
+  const pendingFragment =
+    fragment !== null &&
+    fragment.kind === "fragment" &&
+    saved !== null &&
+    saved.landing.kind === "fragment" &&
+    saved.landing.id === fragment.id &&
+    route.split(/[?#]/u, 1)[0] === window.location.pathname
+      ? fragment
+      : null;
+  const landing = pendingFragment ?? positionTarget(currentScroll());
+  const entry = mode === "replace" ? (saved ?? { key: null, landing }) : { key: null, landing };
+  return (writeSameAddress || route !== currentWindowRoute(true)) && writeEntry(mode, entry, route);
 }
 
 /** 每个条目只拥有一个落点。未完成的片段在离开后仍可在前进或后退时继续等待。 */
@@ -292,8 +316,14 @@ export function createWebHistory(options: WebHistoryOptions): WebHistory {
   };
   const leaveDocument = (): void => saveOnDeparture(true);
 
-  const navigateTo = (route: string, mode: WriteMode, landing: ScrollTarget, restore: boolean) => {
-    if (route === currentWindowRoute(true)) {
+  const navigateTo = (
+    route: string,
+    mode: WriteMode,
+    landing: ScrollTarget,
+    restore: boolean,
+    writeSameAddress = false,
+  ) => {
+    if (!writeSameAddress && route === currentWindowRoute(true)) {
       return false;
     }
     if (mode === "push") {
@@ -302,7 +332,8 @@ export function createWebHistory(options: WebHistoryOptions): WebHistory {
     const next = { key: mode === "push" ? createUuidV4() : active.key, landing };
     return writeEntry(mode, next, route, () => activate(next, restore));
   };
-  queryWriters.set(window, (route, mode) => {
+  queryWriters.set(window, (route, mode, options) => {
+    const writeSameAddress = options?.sameAddress === "write";
     if (mode === "push") {
       const fragment = fragmentInRoute(route);
       const pending =
@@ -316,6 +347,7 @@ export function createWebHistory(options: WebHistoryOptions): WebHistory {
         mode,
         pending ? fragment : positionTarget(currentScroll()),
         pending,
+        writeSameAddress,
       );
       if (written && pending) {
         // 查询写入复用页面，新条目仍要自行安排待定位的片段。
@@ -325,7 +357,7 @@ export function createWebHistory(options: WebHistoryOptions): WebHistory {
     }
     // replace 只改 URL；落点仍归同一个条目，等待和用户位置都继续有效。
     return (
-      route !== currentWindowRoute(true) &&
+      (writeSameAddress || route !== currentWindowRoute(true)) &&
       writeEntry("replace", active, route, () => {
         activeRoute = currentWindowRoute();
       })

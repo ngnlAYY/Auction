@@ -7,7 +7,7 @@ import { getOwner, onSettled, runWithOwner } from "solid-js";
 
 import { type Cell, createCell } from "../../reactive/cell";
 import { structuralEquals } from "../../reactive/equality";
-import { writeLocationPreservingScroll } from "../../router/history";
+import { type LocationWriteOptions, writeLocationPreservingScroll } from "../../router/history";
 
 /** 写回地址栏时创建还是替换浏览器历史项。 */
 export type QueryWriteMode = "push" | "replace";
@@ -28,14 +28,19 @@ export function readQueryPairs(): readonly QueryPair[] {
   return [...parseQuerySearch(window.location.search)];
 }
 
-/** 把 `pairs` 合并写回当前地址的 query 段；`keys` 声明的旧值整体替换，其余键原样保留。 */
+/** 查询状态写回地址栏的选项；`sameAddress` 缺省 `"skip"`，与共享历史层一致。 */
+export type QueryStateOptions = LocationWriteOptions;
+
+/** 把 `pairs` 合并写回当前地址的 query 段；`keys` 声明的旧值整体替换，其余键原样保留。
+ * 返回地址栏写入是否成功；没有浏览器环境时返回 `false`。 */
 export function writeQueryPairs(
   keys: readonly string[],
   pairs: readonly QueryPair[],
   mode: QueryWriteMode,
-): void {
+  options?: QueryStateOptions,
+): boolean {
   if (typeof window === "undefined") {
-    return;
+    return false;
   }
   const location = window.location;
   const parameters = new URLSearchParams();
@@ -61,7 +66,7 @@ export function writeQueryPairs(
     hash = "";
   }
   const url = encoded.length === 0 ? `${pathname}${hash}` : `${pathname}?${encoded}${hash}`;
-  writeLocationPreservingScroll(url, mode);
+  return writeLocationPreservingScroll(url, mode, options);
 }
 
 /** 状态 → 写回键值对的序列化器（省略等于默认值的键）。 */
@@ -101,6 +106,7 @@ export function useQueryState<T>(
   keys: readonly string[],
   parse: QueryParser<T>,
   serialize: QuerySerializer<T>,
+  options?: QueryStateOptions,
 ): QueryState<T> {
   const state = createCell(parse(readQueryPairs()));
   usePopstateListener(() => {
@@ -113,15 +119,15 @@ export function useQueryState<T>(
   return {
     state,
     set(value, mode) {
-      writeQueryPairs(keys, serialize(value), mode);
+      writeQueryPairs(keys, serialize(value), mode, options);
       state.set(value);
     },
     push(value) {
-      writeQueryPairs(keys, serialize(value), "push");
+      writeQueryPairs(keys, serialize(value), "push", options);
       state.set(value);
     },
     replace(value) {
-      writeQueryPairs(keys, serialize(value), "replace");
+      writeQueryPairs(keys, serialize(value), "replace", options);
       state.set(value);
     },
   };

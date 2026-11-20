@@ -1,0 +1,335 @@
+// MoogleMail 调度与处理预算编辑器；保存候选不会触发邮件轮询。
+
+import type { Cell } from "@auction/web-shared/reactive/cell";
+import { t } from "@auction/web-shared/ui/i18n";
+import type { JSX } from "@solidjs/web";
+
+import type { RuntimeConfigForm } from "../../model";
+import { NumberField, RuntimeGroup, SwitchField, TextField } from "..";
+import { ManagedSection } from ".";
+
+/** 邮件调度与处理预算分组。 */
+export function MailFields(props: {
+  readonly form: Cell<RuntimeConfigForm>;
+  readonly disabled: boolean;
+  readonly onDirty: () => void;
+}): JSX.Element {
+  return (
+    <ManagedSection
+      form={props.form}
+      disabled={props.disabled}
+      path="operations.mail.managed"
+      title={t("admin-runtime-op-section-mail")}
+      note={t("admin-runtime-op-note-mail")}
+      onDirty={props.onDirty}
+    >
+      <RuntimeGroup title={t("admin-runtime-op-mail-intervals")}>
+        <p class="admin-runtime-section-note">{t("admin-runtime-op-mail-intervals-note")}</p>
+        <div class="admin-runtime-field-grid">
+          <NumberField
+            form={props.form}
+            disabled={props.disabled}
+            path="operations.mail.send_intervals.outbid_seconds"
+            label={t("admin-runtime-op-mail-interval-outbid")}
+            minimum="0"
+            maximum="86400"
+            onDirty={props.onDirty}
+          />
+          <NumberField
+            form={props.form}
+            disabled={props.disabled}
+            path="operations.mail.send_intervals.account_seconds"
+            label={t("admin-runtime-op-mail-interval-account")}
+            minimum="0"
+            maximum="86400"
+            onDirty={props.onDirty}
+          />
+          <NumberField
+            form={props.form}
+            disabled={props.disabled}
+            path="operations.mail.send_intervals.intake_seconds"
+            label={t("admin-runtime-op-mail-interval-intake")}
+            minimum="0"
+            maximum="86400"
+            onDirty={props.onDirty}
+          />
+          <NumberField
+            form={props.form}
+            disabled={props.disabled}
+            path="operations.mail.send_intervals.settlement_seconds"
+            label={t("admin-runtime-op-mail-interval-settlement")}
+            minimum="0"
+            maximum="86400"
+            onDirty={props.onDirty}
+          />
+          <NumberField
+            form={props.form}
+            disabled={props.disabled}
+            path="operations.mail.send_intervals.equipment_seconds"
+            label={t("admin-runtime-op-mail-interval-equipment")}
+            minimum="0"
+            maximum="86400"
+            onDirty={props.onDirty}
+          />
+          <NumberField
+            form={props.form}
+            disabled={props.disabled}
+            path="operations.mail.send_intervals.operations_seconds"
+            label={t("admin-runtime-op-mail-interval-operations")}
+            minimum="0"
+            maximum="86400"
+            onDirty={props.onDirty}
+          />
+          <NumberField
+            form={props.form}
+            disabled={props.disabled}
+            path="operations.mail.send_intervals.manual_seconds"
+            label={t("admin-runtime-op-mail-interval-manual")}
+            minimum="0"
+            maximum="86400"
+            onDirty={props.onDirty}
+          />
+        </div>
+      </RuntimeGroup>
+      <RuntimeGroup title={t("admin-runtime-op-mail-scheduling")}>
+        <div class="admin-runtime-field-grid">
+          <TextField
+            form={props.form}
+            disabled={props.disabled}
+            path="operations.mail.schedule"
+            label={t("admin-runtime-op-mail-schedule")}
+            onDirty={props.onDirty}
+          />
+          <NumberField
+            form={props.form}
+            disabled={props.disabled}
+            path="operations.mail.jitter_seconds"
+            label={t("admin-runtime-op-jitter-seconds")}
+            minimum="0"
+            maximum="86400"
+            onDirty={props.onDirty}
+          />
+          <NumberField
+            form={props.form}
+            disabled={props.disabled}
+            path="operations.mail.lease_duration_seconds"
+            label={t("admin-runtime-op-lease-duration-seconds")}
+            minimum="1"
+            maximum="86400"
+            onDirty={props.onDirty}
+          />
+          <NumberField
+            form={props.form}
+            disabled={props.disabled}
+            path="operations.mail.renew_interval_seconds"
+            label={t("admin-runtime-op-renew-interval-seconds")}
+            minimum="1"
+            maximum="86399"
+            onDirty={props.onDirty}
+          />
+        </div>
+      </RuntimeGroup>
+      <RuntimeGroup title={t("admin-runtime-op-mail-fetch")}>
+        <div class="admin-runtime-field-grid">
+          <NumberField
+            form={props.form}
+            disabled={props.disabled}
+            path="operations.mail.batch_size"
+            label={t("admin-runtime-op-mail-batch-size")}
+            minimum="1"
+            maximum="1000"
+            onDirty={props.onDirty}
+          />
+          <NumberField
+            form={props.form}
+            disabled={props.disabled}
+            path="operations.mail.maximum_pages"
+            label={t("admin-runtime-op-maximum-pages")}
+            minimum="1"
+            maximum="100"
+            onDirty={props.onDirty}
+          />
+          <NumberField
+            form={props.form}
+            disabled={props.disabled}
+            path="operations.mail.maximum_response_bytes"
+            label={t("admin-runtime-op-maximum-response-bytes")}
+            minimum="1"
+            maximum="8388608"
+            onDirty={props.onDirty}
+          />
+          <NumberField
+            form={props.form}
+            disabled={props.disabled}
+            path="operations.mail.minimum_request_interval_millis"
+            label={t("admin-runtime-op-minimum-request-interval-millis")}
+            minimum="1"
+            maximum="60000"
+            onDirty={props.onDirty}
+          />
+          <NumberField
+            form={props.form}
+            disabled={props.disabled}
+            path="operations.mail.request_timeout_seconds"
+            label={t("admin-runtime-op-request-timeout-seconds")}
+            minimum="1"
+            maximum="300"
+            onDirty={props.onDirty}
+          />
+          <NumberField
+            form={props.form}
+            disabled={props.disabled}
+            path="operations.mail.fetch_attempts"
+            label={t("admin-runtime-op-fetch-attempts")}
+            minimum="1"
+            maximum="10"
+            onDirty={props.onDirty}
+          />
+          <NumberField
+            form={props.form}
+            disabled={props.disabled}
+            path="operations.mail.fetch_timeout_seconds"
+            label={t("admin-runtime-op-fetch-timeout-seconds")}
+            minimum="1"
+            maximum="300"
+            onDirty={props.onDirty}
+          />
+        </div>
+      </RuntimeGroup>
+      <RuntimeGroup title={t("admin-runtime-op-mail-processing")}>
+        <div class="admin-runtime-field-grid">
+          <NumberField
+            form={props.form}
+            disabled={props.disabled}
+            path="operations.mail.process_attempts"
+            label={t("admin-runtime-op-process-attempts")}
+            minimum="1"
+            maximum="10"
+            onDirty={props.onDirty}
+          />
+          <NumberField
+            form={props.form}
+            disabled={props.disabled}
+            path="operations.mail.item_timeout_seconds"
+            label={t("admin-runtime-op-item-timeout-seconds")}
+            minimum="1"
+            maximum="300"
+            onDirty={props.onDirty}
+          />
+          <NumberField
+            form={props.form}
+            disabled={props.disabled}
+            path="operations.mail.batch_timeout_seconds"
+            label={t("admin-runtime-op-mail-batch-timeout-seconds")}
+            minimum="1"
+            maximum="86400"
+            onDirty={props.onDirty}
+          />
+          <NumberField
+            form={props.form}
+            disabled={props.disabled}
+            path="operations.mail.retry_base_seconds"
+            label={t("admin-runtime-op-retry-base-seconds")}
+            minimum="1"
+            maximum="300"
+            onDirty={props.onDirty}
+          />
+          <NumberField
+            form={props.form}
+            disabled={props.disabled}
+            path="operations.mail.retry_maximum_seconds"
+            label={t("admin-runtime-op-retry-maximum-seconds")}
+            minimum="1"
+            maximum="300"
+            onDirty={props.onDirty}
+          />
+        </div>
+      </RuntimeGroup>
+      <RuntimeGroup title={t("admin-runtime-op-mail-send-classes")}>
+        <p class="admin-runtime-section-note">{t("admin-runtime-op-mail-send-classes-note")}</p>
+        <div class="admin-runtime-field-grid">
+          <SwitchField
+            form={props.form}
+            disabled={props.disabled}
+            path="operations.mail.send_classes.account_reply"
+            label={t("admin-runtime-op-mail-class-account-reply")}
+            onDirty={props.onDirty}
+          />
+          <SwitchField
+            form={props.form}
+            disabled={props.disabled}
+            path="operations.mail.send_classes.intake_reply"
+            label={t("admin-runtime-op-mail-class-intake-reply")}
+            onDirty={props.onDirty}
+          />
+          <SwitchField
+            form={props.form}
+            disabled={props.disabled}
+            path="operations.mail.send_classes.settlement_notice"
+            label={t("admin-runtime-op-mail-class-settlement-notice")}
+            onDirty={props.onDirty}
+          />
+          <SwitchField
+            form={props.form}
+            disabled={props.disabled}
+            path="operations.mail.send_classes.outbid_reminder"
+            label={t("admin-runtime-op-mail-class-outbid-reminder")}
+            onDirty={props.onDirty}
+          />
+          <SwitchField
+            form={props.form}
+            disabled={props.disabled}
+            path="operations.mail.send_classes.player_summary"
+            label={t("admin-runtime-op-mail-class-player-summary")}
+            onDirty={props.onDirty}
+          />
+          <SwitchField
+            form={props.form}
+            disabled={props.disabled}
+            path="operations.mail.send_classes.operations_alert"
+            label={t("admin-runtime-op-mail-class-operations-alert")}
+            onDirty={props.onDirty}
+          />
+        </div>
+      </RuntimeGroup>
+      <RuntimeGroup title={t("admin-runtime-op-mail-replies")}>
+        <div class="admin-runtime-field-grid">
+          <SwitchField
+            form={props.form}
+            disabled={props.disabled}
+            path="operations.mail.rekey_enabled"
+            label={t("admin-runtime-op-mail-rekey-enabled")}
+            onDirty={props.onDirty}
+          />
+          <NumberField
+            form={props.form}
+            disabled={props.disabled}
+            path="operations.mail.account_reply_window_seconds"
+            label={t("admin-runtime-op-mail-account-reply-window-seconds")}
+            minimum="60"
+            maximum="604800"
+            onDirty={props.onDirty}
+          />
+          <NumberField
+            form={props.form}
+            disabled={props.disabled}
+            path="operations.mail.explanation_mail_window_seconds"
+            label={t("admin-runtime-op-mail-explanation-window-seconds")}
+            minimum="60"
+            maximum="604800"
+            onDirty={props.onDirty}
+          />
+          <NumberField
+            form={props.form}
+            disabled={props.disabled}
+            path="operations.mail.explanation_mail_limit"
+            label={t("admin-runtime-op-mail-explanation-limit")}
+            minimum="0"
+            maximum="100"
+            onDirty={props.onDirty}
+          />
+        </div>
+      </RuntimeGroup>
+    </ManagedSection>
+  );
+}

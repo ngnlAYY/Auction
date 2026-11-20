@@ -1,0 +1,139 @@
+// 运行参数表单的标量路径；统一供输入投影与完整文档提交使用。
+
+export const TEXT_FIELDS: readonly string[] = [
+  "operations.mail.schedule",
+  "operations.economics.proxy_default_mode",
+  "operations.schedule.timezone",
+  "operations.schedule.preview_day",
+  "operations.schedule.preview_time",
+  "operations.schedule.open_day",
+  "operations.schedule.open_time",
+  "operations.schedule.nominal_end_day",
+  "operations.schedule.nominal_end_time",
+  "operations.alerts.world_id",
+  "operations.alerts.recipient",
+];
+
+export const UNSIGNED_NUMBER_FIELDS: readonly string[] = [
+  "operations.mail.send_intervals.outbid_seconds",
+  "operations.mail.send_intervals.account_seconds",
+  "operations.mail.send_intervals.intake_seconds",
+  "operations.mail.send_intervals.settlement_seconds",
+  "operations.mail.send_intervals.equipment_seconds",
+  "operations.mail.send_intervals.operations_seconds",
+  "operations.mail.send_intervals.manual_seconds",
+  "operations.mail.maximum_response_bytes",
+  "operations.mail.minimum_request_interval_millis",
+  "operations.mail.request_timeout_seconds",
+  "operations.mail.batch_size",
+  "operations.mail.maximum_pages",
+  "operations.mail.jitter_seconds",
+  "operations.mail.lease_duration_seconds",
+  "operations.mail.renew_interval_seconds",
+  "operations.mail.fetch_attempts",
+  "operations.mail.fetch_timeout_seconds",
+  "operations.mail.process_attempts",
+  "operations.mail.item_timeout_seconds",
+  "operations.mail.batch_timeout_seconds",
+  "operations.mail.retry_base_seconds",
+  "operations.mail.retry_maximum_seconds",
+  "operations.mail.account_reply_window_seconds",
+  "operations.mail.explanation_mail_window_seconds",
+  "operations.mail.explanation_mail_limit",
+  "operations.economics.proxy_max_outbid_uses",
+  "operations.forum.batch_size",
+  "operations.forum.poll_interval_seconds",
+  "operations.forum.jitter_seconds",
+  "operations.forum.maximum_response_bytes",
+  "operations.forum.maximum_topic_pages",
+  "operations.forum.minimum_request_interval_millis",
+  "operations.forum.request_timeout_seconds",
+  "operations.forum.item_timeout_seconds",
+  "operations.forum.lease_duration_seconds",
+  "operations.alerts.scan_interval_seconds",
+  "operations.alerts.jitter_seconds",
+  "operations.alerts.source_timeout_seconds",
+  "operations.alerts.batch_window_seconds",
+  "operations.alerts.cooldown_seconds",
+  "operations.alerts.claim_lease_seconds",
+  "operations.alerts.retry_delay_seconds",
+  "operations.alerts.max_signals_per_scan",
+  "operations.alerts.max_batch_items",
+  "operations.alerts.max_body_bytes",
+  "operations.alerts.delivery_pending_age_seconds",
+  "operations.alerts.fulfillment_backlog_age_seconds",
+  "operations.alerts.fulfillment_collection_overdue_age_seconds",
+  "operations.alerts.recovery_overdue_age_seconds",
+  "operations.worker.concurrency",
+  "operations.worker.poll_interval_seconds",
+  "operations.worker.batch_limit",
+  "operations.worker.jitter_seconds",
+  "operations.worker.item_timeout_seconds",
+  "operations.worker.recovery_retry_delay_seconds",
+  "operations.worker.delivery.batch_limit",
+  "operations.worker.delivery.poll_interval_seconds",
+  "operations.worker.delivery.jitter_seconds",
+  "operations.worker.delivery.lease_duration_seconds",
+  "operations.worker.delivery.renew_interval_seconds",
+  "operations.worker.delivery.sending_grace_seconds",
+  "operations.worker.delivery.request_timeout_seconds",
+  "operations.worker.delivery.finalize_timeout_seconds",
+  "operations.worker.fulfillment.batch_limit",
+  "operations.worker.fulfillment.concurrency",
+  "operations.worker.fulfillment.poll_interval_seconds",
+  "operations.worker.fulfillment.jitter_seconds",
+  "operations.worker.fulfillment.lease_duration_seconds",
+  "operations.worker.fulfillment.item_timeout_seconds",
+  "operations.worker.fulfillment.retry_delay_seconds",
+  "operations.worker.recovery.batch_limit",
+  "operations.worker.recovery.concurrency",
+  "operations.worker.recovery.poll_interval_seconds",
+  "operations.worker.recovery.jitter_seconds",
+  "operations.worker.recovery.lease_duration_seconds",
+  "operations.worker.recovery.item_timeout_seconds",
+  "operations.worker.recovery.health_refresh_interval_seconds",
+  "operations.worker.recovery.evidence_stale_after_seconds",
+];
+
+/** 与服务端 runtime 文档中的 i64 字段对齐。 */
+export const SIGNED_NUMBER_FIELDS: readonly string[] = [
+  "operations.economics.start_price",
+  "operations.economics.bid_increment_ppm",
+  "operations.economics.soft_close_window_seconds",
+  "operations.economics.soft_close_extension_seconds",
+  "operations.economics.cancel_cutoff_seconds",
+  "operations.economics.proxy_slow_interval_seconds",
+  "operations.economics.final_phase_lead_seconds",
+  "operations.alerts.delivery_pending_count_threshold",
+  "operations.alerts.delivery_manual_reconcile_count_threshold",
+  "operations.alerts.fulfillment_backlog_count_threshold",
+  "operations.alerts.recovery_overdue_count_threshold",
+  "operations.worker.recovery.low_balance_threshold",
+];
+
+export const LIST_FIELDS: readonly string[] = ["operations.schedule.worlds"];
+
+/** 返回参数组的接管开关；未接管组的临时输入不会覆盖原始候选。 */
+export function managementPath(path: string): string | null {
+  const prefix = "operations.";
+  if (!path.startsWith(prefix)) {
+    return null;
+  }
+  const group = path.slice(prefix.length).split(".")[0];
+  switch (group) {
+    case "mail":
+      return "operations.mail.managed";
+    case "economics":
+      return "operations.economics.managed";
+    case "schedule":
+      return "operations.schedule.managed";
+    case "forum":
+      return "operations.forum.managed";
+    case "alerts":
+      return "operations.alerts.managed";
+    case "worker":
+      return "operations.worker.managed";
+    default:
+      return null;
+  }
+}
