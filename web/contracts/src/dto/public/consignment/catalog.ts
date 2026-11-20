@@ -52,7 +52,15 @@ export function listingPageSchema<const TItem extends v.GenericSchema>(itemSchem
       page: v.pipe(unsignedInteger, v.minValue(1)),
       page_size: v.pipe(unsignedInteger, v.minValue(1), v.maxValue(MAX_PUBLIC_PAGE_SIZE)),
     }),
-    v.check(({ page, page_size }) => page - 1 <= Math.floor(10_000 / page_size)),
+    v.check(({ items, total, page, page_size }) => {
+      const offset = (page - 1) * page_size;
+      // 超过末尾的空页仍带回准确总数。
+      return (
+        offset <= 10_000 &&
+        items.length <= page_size &&
+        (items.length === 0 || total >= offset + items.length)
+      );
+    }),
   );
 }
 
@@ -132,13 +140,24 @@ export const ListingSummarySchema = v.pipe(
 /** 公开目录及详情共用的摘要。 */
 export type ListingSummary = v.InferOutput<typeof ListingSummarySchema>;
 
-/** 独立公开详情，只接收可交易装备的快照。 */
+/** 独立公开详情，摘要与可交易装备快照来自同一行。 */
 export const ListingDetailSchema = v.pipe(
   strictStruct({
     summary: ListingSummarySchema,
     equipment: EquipmentViewSchema,
   }),
-  v.check(({ equipment }) => equipment.tradeable),
+  v.check(({ summary, equipment }) => {
+    const { level } = summary;
+    const snapshotLevel = equipment.level;
+    return (
+      equipment.tradeable &&
+      summary.name === equipment.name &&
+      summary.category === equipment.category &&
+      level.kind === snapshotLevel.kind &&
+      (level.kind !== "assigned" ||
+        (snapshotLevel.kind === "assigned" && level.value === snapshotLevel.value))
+    );
+  }),
 );
 /** 公开摘要及安全详情。 */
 export type ListingDetail = v.InferOutput<typeof ListingDetailSchema>;

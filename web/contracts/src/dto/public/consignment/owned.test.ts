@@ -6,6 +6,7 @@ import { decode } from "../../../wire";
 import { OwnedListingPageSchema, OwnedListingSchema } from ".";
 import { readResponse } from "./consignment-fixture";
 import { type ListingView, ListingViewSchema, LookupProgressSchema } from "./owned";
+import { ListingFeeBpsSchema } from "./scalar";
 
 const OWNED = "public/consignment-owned-listing.json";
 const PAGE = "public/consignment-owned-listings.json";
@@ -150,6 +151,89 @@ test("本人投影拒绝越权动作、相互矛盾的状态或模式，以及�
   expect(decode(OwnedListingSchema, { ...closed, stored_state: "closed" }).ok).toBe(true);
 });
 
+test("两种发布态都要求可交易装备，本人详情只从快照读取装备属性", async () => {
+  const { items } = await readOwnedPage();
+  for (const kind of ["displayed", "awaiting_deposit"] as const) {
+    const listing = items.find(({ view }) => view.kind === kind);
+    if (listing?.view.kind !== kind) throw new Error("样本缺少已发布视图");
+    const { view } = listing;
+    const equipment = { ...view.equipment, tradeable: false };
+    expect(decode(OwnedListingSchema, { ...listing, view: { ...view, equipment } }).ok, kind).toBe(
+      false,
+    );
+    for (const field of ["name", "category", "level"] as const) {
+      expect(decode(OwnedListingSchema, { ...listing, [field]: view.equipment[field] }).ok).toBe(
+        false,
+      );
+    }
+  }
+});
+
+test("已解析拒挂的原因须与快照交易性配对", async () => {
+  const { data: listing } = await readResponse(
+    "public/consignment-owned-listing-owner-mismatch.json",
+    OwnedListingSchema,
+  );
+  const { view } = listing;
+  if (view.kind !== "ineligible") throw new Error("样本缺少已解析拒挂视图");
+  expect(decode(ListingViewSchema, { ...view, reason: "not_tradeable" }).ok).toBe(false);
+  const equipment = { ...view.equipment, tradeable: false };
+  expect(decode(ListingViewSchema, { ...view, equipment }).ok).toBe(false);
+  expect(decode(ListingViewSchema, { ...view, equipment, reason: "not_tradeable" }).ok).toBe(true);
+});
+
+test("已发布挂单关闭或到期须保留可交易快照", async () => {
+  const { items } = await readOwnedPage();
+  for (const [source, closedReason, expiredReason] of [
+    ["displayed", "auction_lot_created", "display_expired"],
+    ["awaiting_deposit", "service_disabled", "deposit_expired"],
+  ] as const) {
+    const listing = items.find(({ view }) => view.kind === source);
+    if (listing?.view.kind !== source) throw new Error("样本缺少已发布视图");
+    const { equipment } = listing.view;
+    const soulbound = { ...equipment, level: { kind: "soulbound" }, tradeable: false };
+    for (const [kind, reason] of [
+      ["closed", closedReason],
+      ["expired", expiredReason],
+    ] as const) {
+      const terminal = {
+        ...listing,
+        effective_state: kind,
+        effective_reason: reason,
+        allowed_actions: [],
+        view: { kind, reason, equipment },
+      };
+      expect(decode(OwnedListingSchema, terminal).ok, reason).toBe(true);
+      for (const snapshot of [null, soulbound, { ...equipment, tradeable: false }]) {
+        const invalid = { ...terminal, view: { ...terminal.view, equipment: snapshot } };
+        expect(decode(OwnedListingSchema, invalid).ok, reason).toBe(false);
+        if (kind === "expired") {
+          expect(
+            decode(OwnedListingSchema, { ...invalid, stored_state: "expired" }).ok,
+            reason,
+          ).toBe(false);
+        }
+      }
+      expect(decode(OwnedListingSchema, { ...terminal, stored_state: kind }).ok, reason).toBe(true);
+    }
+  }
+});
+
+test("解析到期无论是否已落库都不带快照", async () => {
+  const { items } = await readOwnedPage();
+  const expired = items.find(({ view }) => view.kind === "expired");
+  const displayed = items.find(({ view }) => view.kind === "displayed");
+  if (expired?.view.kind !== "expired" || displayed?.view.kind !== "displayed") {
+    throw new Error("样本缺少解析到期或已展示视图");
+  }
+  for (const stored_state of ["resolving", "expired"]) {
+    const terminal = { ...expired, stored_state };
+    expect(decode(OwnedListingSchema, terminal).ok).toBe(true);
+    const view = { ...expired.view, equipment: displayed.view.equipment };
+    expect(decode(OwnedListingSchema, { ...terminal, view }).ok).toBe(false);
+  }
+});
+
 test("本人报价接受 101 扣 5 到手 96，拒绝不一致或不安全金额", async () => {
   const { items } = await readOwnedPage();
   const consigned = items.find(({ view }) => view.kind === "awaiting_deposit");
@@ -180,4 +264,27 @@ test("本人报价接受 101 扣 5 到手 96，拒绝不一致或不安全金额
       estimated_seller_amount: 96,
     }).ok,
   ).toBe(false);
+});
+
+test("本人报价 101 按 5000 bps 向下取整为手续费 50、到手 51", async () => {
+  const { items } = await readOwnedPage();
+  const listing = items.find(({ view }) => view.kind === "awaiting_deposit");
+  if (!listing) throw new Error("样本缺少寄售挂单");
+  const quote = {
+    ...listing,
+    price: 101,
+    fee_bps: 5_000,
+    estimated_fee: 50,
+    estimated_seller_amount: 51,
+  };
+  expect(decode(OwnedListingSchema, quote)).toMatchObject({
+    ok: true,
+    value: { estimated_fee: 50, estimated_seller_amount: 51 },
+  });
+});
+
+test("寄售费率接受 9999 并拒绝 -1 和 10000", () => {
+  expect(decode(ListingFeeBpsSchema, -1).ok).toBe(false);
+  expect(decode(ListingFeeBpsSchema, 9_999)).toEqual({ ok: true, value: 9_999 });
+  expect(decode(ListingFeeBpsSchema, 10_000).ok).toBe(false);
 });

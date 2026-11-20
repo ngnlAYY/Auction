@@ -143,10 +143,10 @@ function isConsistentProjection(listing: v.InferOutput<typeof OWNED_LISTING_FIEL
     return false;
   }
   if (view.kind === "closed" || view.kind === "expired") {
-    // 已落库的关闭可能源于解析期或发布后，关闭原因无法区分两者。
+    // 不变量 6：可确定前态时保留发布时的可交易快照；已落库的关闭原因无法区分前态。
     const previous = expirySource ?? stored_state;
     if (previous === "displayed" || previous === "awaiting_deposit") {
-      return view.equipment !== null;
+      return view.equipment?.tradeable === true;
     }
     if (previous === "resolving") return view.equipment === null;
   }

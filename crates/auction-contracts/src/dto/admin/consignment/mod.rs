@@ -24,7 +24,7 @@ const MAX_AUCTION_CONFLICTS: usize = 50;
 json_object! {
     ()
     /// Admin 列表记录。卖家内部标识和下架说明仅给运营会话。
-    /// 说明按下架请求的边界排除装备链接，调试输出统一隐去说明。
+    /// 私有说明沿用下架请求的凭据筛查，调试输出统一隐去说明。
     #[derive(Clone, PartialEq)]
     pub struct AdminListing {
         pub listing: OwnedListing,
@@ -67,7 +67,8 @@ impl fmt::Debug for AdminListing {
 
 json_object! {
     ()
-    /// Admin 详情及最近的实际拍卖碰撞。
+    /// Admin 详情及至多 50 条最近碰撞。
+    /// 服务端保证 `detected_at DESC, lot_id DESC`，解码器不重排也不校验顺序。
     #[derive(Debug, Clone, PartialEq)]
     pub struct AdminListingDetail {
         pub record: AdminListing,
@@ -80,6 +81,9 @@ impl AdminListingDetail {
     fn validate(&self) -> Result<(), &'static str> {
         if self.conflicts.len() > MAX_AUCTION_CONFLICTS {
             return Err("寄售详情的碰撞记录超出上限");
+        }
+        if self.conflicts_truncated && self.conflicts.len() != MAX_AUCTION_CONFLICTS {
+            return Err("标记截断时必须返回达到上限的碰撞记录");
         }
         Ok(())
     }
@@ -99,13 +103,14 @@ json_object! {
 
 write_object! {
     /// 下架请求。不变量 1、6、7：携带稳定 ID、预期版本及私有说明。
-    /// 说明校验识别通用装备链接路径，无法可靠识别裸 key 或其他格式的凭据。
+    /// 说明只进 Admin 私有视图。自由文本仅筛查已知的装备链接与 key 形态，
+    /// 无法可靠识别任意凭据。
     #[derive(Clone, PartialEq, Eq)]
     pub struct AdminDelistListing {
         pub command_id: Uuid => ("uuid", "必须为规范小写的非零 UUID"),
         pub expected_version: ListingVersion => ("serde::Deserialize::deserialize", "必须为正的安全 JSON 整数"),
         #[serde(serialize_with = "serialize_delist_reason")]
-        pub reason: String => ("delist_reason", "必须为不含装备链接的规范单行文本（1–256 字节）"),
+        pub reason: String => ("delist_reason", "必须为不含装备链接或已知凭据形态的规范单行文本（1–256 字节）"),
     }
 }
 
@@ -130,10 +135,55 @@ fn serialize_delist_reason<S: Serializer>(reason: &str, serializer: S) -> Result
 
 fn validate_delist_reason(reason: &str) -> Result<(), &'static str> {
     checked_text::<MAX_DELIST_REASON_BYTES>(reason)?;
-    if contains_equipment_link(reason) {
-        return Err("运营下架说明不得包含装备链接");
+    // checked_text 已拒绝控制字符，其中包括 U+0085。
+    if reason.contains(['\u{2028}', '\u{2029}']) {
+        return Err("运营下架说明不得包含行分隔符");
+    }
+    if contains_equipment_link(reason)
+        || contains_equipment_query_key(reason)
+        || contains_bare_key(reason)
+    {
+        return Err("运营下架说明不得包含装备链接或已知凭据形态");
     }
     Ok(())
+}
+
+fn contains_equipment_query_key(reason: &str) -> bool {
+    reason.split(|ch: char| ch.is_whitespace() || matches!(ch, '<' | '>' | '"' | '\'')).any(
+        |token| {
+            let before_fragment = token.split('#').next().unwrap_or_default();
+            let Some((target, query)) = before_fragment.split_once('?') else {
+                return false;
+            };
+            let address = target.rsplit_once("://").map_or_else(
+                || target.trim_start_matches(['(', '[', '（', '【']),
+                |(_, address)| address,
+            );
+            let address = address.strip_prefix("//").unwrap_or(address);
+            let is_source = address.split_once('/').is_some_and(|(authority, path)| {
+                let host = authority.split(':').next().unwrap_or_default();
+                host.eq_ignore_ascii_case("hvdata.gisadan.dev")
+                    && path.eq_ignore_ascii_case("equip")
+            });
+            query.split('&').filter_map(|pair| pair.split_once('=')).any(|(name, value)| {
+                let value = value.trim_end_matches([
+                    ')', ']', '.', ',', '!', ';', '）', '】', '。', '，', '！', '；', '、',
+                ]);
+                name.eq_ignore_ascii_case("key") && (is_source || is_equipment_key(value))
+            })
+        },
+    )
+}
+
+fn is_equipment_key(value: &str) -> bool {
+    value.len() == 10 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn contains_bare_key(reason: &str) -> bool {
+    // 路径和赋值留在同一段，避免把链接内部的片段当成独立凭据。
+    reason
+        .split(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '=' | '/')))
+        .any(|token| is_equipment_key(token) || (token.len() == 43 && !token.contains(['=', '/'])))
 }
 
 fn contains_equipment_link(reason: &str) -> bool {

@@ -81,6 +81,13 @@ test("写请求拒绝错误命令身份、非安全整数、错误类型和额�
   ).toBe(true);
 });
 
+test("登记请求必须显式提供预期费率", async () => {
+  const registration = await readFixture(REGISTER, RegisterListingSchema);
+  const { expected_fee_bps: _fee, ...request } = registration;
+  expect(decode(RegisterListingSchema, request).ok).toBe(false);
+  expect(decode(RegisterListingSchema, { ...request, expected_fee_bps: 0 }).ok).toBe(true);
+});
+
 test("写回执夹具区分已登记、已改价、未变化和已关闭", async () => {
   const registered = await readResponse(REGISTERED, CommandReceiptSchema);
   const repriced = await readResponse(REPRICED, CommandReceiptSchema);
@@ -140,6 +147,13 @@ test("写回执拒绝未知或矛盾处置、缺失可空键和不合法目标",
   ]) {
     expect(decode(CommandReceiptSchema, invalid).ok).toBe(false);
   }
+});
+
+test("已登记回执拒绝其他有效操作，已关闭回执拒绝活动态", async () => {
+  const { data: registered } = await readResponse(REGISTERED, CommandReceiptSchema);
+  const { data: withdrawn } = await readResponse(WITHDRAWN, CommandReceiptSchema);
+  expect(decode(CommandReceiptSchema, { ...registered, operation: "reprice" }).ok).toBe(false);
+  expect(decode(CommandReceiptSchema, { ...withdrawn, state: "displayed" }).ok).toBe(false);
 });
 
 test("查命令夹具区分外层读取成功与首次 202 或 409", async () => {

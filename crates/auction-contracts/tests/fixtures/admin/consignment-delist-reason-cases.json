@@ -1,0 +1,16 @@
+[
+  ["普通单行说明", "模拟说明：卖家主动联系", true],
+  ["来源链接未带 key", "https://hvdata.gisadan.dev/equip?eid=42&is_isekai=false", true],
+  ["其他链接的 key 不是装备 key 形态", "https://example.invalid/info?key=fixture", true],
+  ["游戏装备路径", "https://example.invalid/EQUIP/42/0000000000", false],
+  ["合同来源链接", "来源 https://hvdata.gisadan.dev/equip?eid=42&key=0000000000&is_isekai=false", false],
+  ["来源路径带非十位的 key 参数", "来源 (https://hvdata.gisadan.dev/equip?eid=42&key=fixture)", false],
+  ["其他链接的查询含装备 key", "见 <https://example.invalid/info?eid=42&key=0000000000>", false],
+  ["查询带括号且链接后有标点", "见 https://example.invalid/info?q=(sample)&key=0000000000。", false],
+  ["独立的装备 key 形态", "模拟说明（0000000000）", false],
+  ["独立的登录 key 形态", "模拟说明（AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA）", false],
+  ["ASCII 行控制字符", "模拟\n说明", false],
+  ["Unicode 下一行 U+0085", "模拟\u0085说明", false],
+  ["Unicode 行分隔符 U+2028", "模拟\u2028说明", false],
+  ["Unicode 段落分隔符 U+2029", "模拟\u2029说明", false]
+]

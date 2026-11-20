@@ -546,6 +546,37 @@ fn pagination_keeps_empty_pages_and_offset_boundaries() {
 }
 
 #[test]
+fn pagination_requires_page_size_and_total_to_cover_returned_items() {
+    let fixture: Value = decode(public_fixture!("listings"));
+    let page = &fixture["data"];
+    for (field, value) in [("page_size", json!(1)), ("total", json!(0)), ("page", json!(2))] {
+        assert_rejects::<ListingPage<ListingSummary>>(with_field(page, field, value), field);
+    }
+
+    let typed: ListingPage<ListingSummary> = serde_json::from_value(page.clone()).unwrap();
+    for invalid in [
+        ListingPage { page_size: 1, ..typed.clone() },
+        ListingPage { total: 0, ..typed.clone() },
+        ListingPage { page: 2, ..typed.clone() },
+        ListingPage { page_size: 0, ..typed.clone() },
+        ListingPage { page: i64::MAX, ..typed },
+    ] {
+        assert!(serde_json::to_value(invalid).is_err());
+    }
+
+    let mut later = with_field(page, "page", json!(2));
+    later["total"] = json!(39);
+    let mut empty = with_field(page, "items", json!([]));
+    empty["page"] = json!(2);
+    let mut zero = with_field(page, "items", json!([]));
+    zero["total"] = json!(0);
+    for valid in [later, empty, zero] {
+        let decoded: ListingPage<ListingSummary> = serde_json::from_value(valid.clone()).unwrap();
+        assert_eq!(serde_json::to_value(decoded).unwrap(), valid);
+    }
+}
+
+#[test]
 fn identity_timestamp_and_equipment_boundaries_are_strict() {
     let detail: Value = decode(public_fixture!("listing-detail"));
     let summary = &detail["data"]["summary"];
@@ -804,12 +835,50 @@ fn write_errors_report_only_safe_fields_and_categories() {
     let delist: Value = decode(admin_fixture!("delist-request"));
     check::<AdminDelistListing>(
         &with_field(&delist, "reason", url.clone()),
-        "reason 字段必须为不含装备链接的规范单行文本",
+        "reason 字段必须为不含装备链接或已知凭据形态的规范单行文本",
     );
     check::<AdminDelistListing>(
         &with_field(&delist, "reason", json!([url])),
-        "reason 字段必须为不含装备链接的规范单行文本",
+        "reason 字段必须为不含装备链接或已知凭据形态的规范单行文本",
     );
+}
+
+#[test]
+fn delist_reason_cases_cover_the_request() {
+    let cases: Vec<(String, String, bool)> = decode(admin_fixture!("delist-reason-cases"));
+    let request_wire: Value = decode(admin_fixture!("delist-request"));
+    let mut request: AdminDelistListing = decode(admin_fixture!("delist-request"));
+
+    for (label, reason, accepted) in cases {
+        let wire = with_field(&request_wire, "reason", json!(reason));
+        assert_eq!(
+            serde_json::from_value::<AdminDelistListing>(wire).is_ok(),
+            accepted,
+            "请求：{label}"
+        );
+        request.reason = reason;
+        assert_eq!(serde_json::to_value(&request).is_ok(), accepted, "请求序列化：{label}");
+    }
+}
+
+#[test]
+fn delist_reason_cases_cover_the_history_response() {
+    let cases: Vec<(String, String, bool)> = decode(admin_fixture!("delist-reason-cases"));
+    let page_wire: Value = decode(admin_fixture!("listings"));
+    let mut page =
+        decode::<ApiResponse<ListingPage<AdminListing>>>(admin_fixture!("listings")).data;
+
+    for (label, reason, accepted) in cases {
+        let mut wire = page_wire["data"].clone();
+        wire["items"][0]["admin_delist_reason"] = json!(reason);
+        assert_eq!(
+            serde_json::from_value::<ListingPage<AdminListing>>(wire).is_ok(),
+            accepted,
+            "历史：{label}"
+        );
+        page.items[0].admin_delist_reason = Some(reason);
+        assert_eq!(serde_json::to_value(&page).is_ok(), accepted, "历史序列化：{label}");
+    }
 }
 
 #[test]
@@ -1031,6 +1100,32 @@ fn effective_expiry_keeps_snapshot_of_a_published_listing() {
         let persisted = with_field(&wire, "stored_state", json!(terminal));
         round_trip_owned_projection(&persisted);
 
+        let snapshot: EquipmentView =
+            serde_json::from_value(wire["view"]["equipment"].clone()).unwrap();
+        for level in [snapshot.level, EquipmentLevel::Soulbound {}] {
+            let snapshot = EquipmentView { tradeable: false, level, ..snapshot.clone() };
+            let mut invalid = wire.clone();
+            invalid["view"]["equipment"] = serde_json::to_value(&snapshot).unwrap();
+            assert_rejects::<OwnedListing>(invalid.clone(), "已发布挂单有效终结时快照不可交易");
+            if terminal == "expired" {
+                invalid["stored_state"] = json!("expired");
+                assert_rejects::<OwnedListing>(invalid, "已发布挂单落库到期后快照不可交易");
+            }
+
+            let mut invalid = listing.clone();
+            let (ListingView::Closed { equipment, .. } | ListingView::Expired { equipment, .. }) =
+                &mut invalid.view
+            else {
+                panic!("缺少关闭或到期视图");
+            };
+            *equipment = Some(snapshot);
+            assert!(serde_json::to_value(&invalid).is_err());
+            if terminal == "expired" {
+                invalid.stored_state = ListingState::Expired;
+                assert!(serde_json::to_value(&invalid).is_err());
+            }
+        }
+
         wire["view"]["equipment"] = Value::Null;
         let (ListingView::Closed { equipment, .. } | ListingView::Expired { equipment, .. }) =
             &mut listing.view
@@ -1070,8 +1165,44 @@ fn effective_expiry_keeps_snapshot_of_a_published_listing() {
                 panic!("缺少关闭或到期视图");
             };
             *snapshot = Some(serde_json::from_value(equipment.clone()).unwrap());
+            if terminal == "expired" {
+                assert_rejects::<OwnedListing>(
+                    with_field(&wire, "stored_state", json!("expired")),
+                    "解析到期落库后却带快照",
+                );
+            }
             assert_rejects::<OwnedListing>(wire, "解析期终结却携带装备快照");
             assert!(serde_json::to_value(&listing).is_err());
+        }
+    }
+}
+
+#[test]
+fn listing_detail_requires_snapshot_fields_to_match_the_summary() {
+    let fixture: Value = decode(public_fixture!("listing-detail"));
+    let mut unassigned_summary = fixture["data"].clone();
+    unassigned_summary["summary"]["level"] = json!({"kind": "unassigned"});
+    assert_rejects::<ListingDetail>(unassigned_summary, "摘要未分配等级而快照已分配");
+    for (field, replacement) in [
+        ("name", json!("Fixture other name")),
+        ("category", json!("Fixture other category")),
+        ("level", json!({"kind": "assigned", "value": 43})),
+        ("level", json!({"kind": "unassigned"})),
+    ] {
+        let mut detail = fixture["data"].clone();
+        detail["equipment"][field] = replacement;
+        assert_rejects::<ListingDetail>(detail, field);
+    }
+    let detail = decode::<ApiResponse<ListingDetail>>(public_fixture!("listing-detail")).data;
+    let mut equipment = detail.equipment.clone();
+    equipment.name = "Fixture other name".to_owned();
+    assert!(serde_json::to_value(ListingDetail { equipment, ..detail }).is_err());
+
+    let page: Value = decode(public_fixture!("owned-listings"));
+    for listing in [&page["data"]["items"][2], &page["data"]["items"][3]] {
+        for field in ["name", "category", "level"] {
+            let value = listing["view"]["equipment"][field].clone();
+            assert_rejects::<OwnedListing>(with_field(listing, field, value), field);
         }
     }
 }
@@ -1182,6 +1313,28 @@ fn progress_status_and_conflicts_enforce_protocol_limits() {
     assert_rejects::<AdminListingDetail>(over, "51 条碰撞");
     detail.conflicts.push(collision);
     assert!(serde_json::to_value(detail).is_err());
+}
+
+#[test]
+fn conflict_truncation_requires_exactly_fifty_records() {
+    let mut detail =
+        decode::<ApiResponse<AdminListingDetail>>(admin_fixture!("listing-detail")).data;
+    detail.conflicts.truncate(1);
+    let short = serde_json::to_value(&detail).unwrap();
+    assert_eq!(serde_json::from_value::<AdminListingDetail>(short.clone()).unwrap(), detail);
+    detail.conflicts_truncated = true;
+    assert_rejects::<AdminListingDetail>(
+        with_field(&short, "conflicts_truncated", json!(true)),
+        "不足 50 条却标记截断",
+    );
+    assert!(serde_json::to_value(&detail).is_err());
+
+    detail.conflicts.resize(50, detail.conflicts[0].clone());
+    for truncated in [false, true] {
+        detail.conflicts_truncated = truncated;
+        let wire = serde_json::to_value(&detail).unwrap();
+        assert_eq!(serde_json::from_value::<AdminListingDetail>(wire).unwrap(), detail);
+    }
 }
 
 #[test]

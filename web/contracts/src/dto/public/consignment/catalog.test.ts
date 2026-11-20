@@ -13,6 +13,8 @@ import {
 } from ".";
 import {
   EquipmentLevelSchema,
+  type EquipmentStat,
+  type EquipmentStatGroup,
   EquipmentStatGroupSchema,
   EquipmentStatSchema,
   type EquipmentView,
@@ -102,6 +104,16 @@ test("状态拒绝矛盾能力、未知枚举和非法协议常量", async () =>
   }
 });
 
+test("登记未就绪时世界数组必须为空", async () => {
+  const { data: status } = await readResponse(
+    "public/consignment-status-unavailable.json",
+    ConsignmentStatusSchema,
+  );
+  expect(decode(ConsignmentStatusSchema, { ...status, registration_worlds: ["main"] }).ok).toBe(
+    false,
+  );
+});
+
 test("分页允许空页及偏移上界，拒绝越界和非安全整数", () => {
   const page = { items: [], total: Number.MAX_SAFE_INTEGER, page: 10_001, page_size: 1 };
   expect(decode(ListingSummaryPageSchema, page)).toEqual({ ok: true, value: page });
@@ -118,6 +130,19 @@ test("分页允许空页及偏移上界，拒绝越界和非安全整数", () =>
   ]) {
     expect(decode(ListingSummaryPageSchema, { ...page, ...patch }).ok).toBe(false);
   }
+});
+
+test("分页条数及总数必须与本页位置一致", async () => {
+  const { data: page } = await readResponse(
+    "public/consignment-listings.json",
+    ListingSummaryPageSchema,
+  );
+  expect(decode(ListingSummaryPageSchema, { ...page, page_size: 1 }).ok).toBe(false);
+  expect(decode(ListingSummaryPageSchema, { ...page, total: 0 }).ok).toBe(false);
+  expect(decode(ListingSummaryPageSchema, { ...page, page: 2 }).ok).toBe(false);
+  expect(decode(ListingSummaryPageSchema, { ...page, page: 2, total: 39 }).ok).toBe(true);
+  expect(decode(ListingSummaryPageSchema, { ...page, page: 2, items: [] }).ok).toBe(true);
+  expect(decode(ListingSummaryPageSchema, { ...page, total: 0, items: [] }).ok).toBe(true);
 });
 
 test("公开摘要拒绝未知模式和状态、缺失字段及不合规标量", async () => {
@@ -155,6 +180,14 @@ test("公开摘要拒绝未知模式和状态、缺失字段及不合规标量",
   for (const updated_at of ["2024-02-29t18:10:00z", "2026-11-20T18:10:00.123456789+00:00"]) {
     expect(decode(ListingSummarySchema, { ...summary, updated_at }).ok).toBe(true);
   }
+});
+
+test("装备编号拒绝零和 33 位十进制串", async () => {
+  const { summary } = await readDetail();
+  expect(decode(ListingSummarySchema, { ...summary, external_equipment_id: "0" }).ok).toBe(false);
+  expect(
+    decode(ListingSummarySchema, { ...summary, external_equipment_id: "1".repeat(33) }).ok,
+  ).toBe(false);
 });
 
 test("装备等级按形态封闭，属性验类型及字节和数值边界", async () => {
@@ -223,6 +256,37 @@ test("公开 DTO 类型精确限定公开字段", () => {
     | "source"
     | "observed_at"
   >();
+  expectTypeOf<keyof EquipmentStat>().toEqualTypeOf<"name" | "value" | "base">();
+  expectTypeOf<keyof EquipmentStatGroup>().toEqualTypeOf<"name" | "stats">();
+});
+
+test("装备属性及属性分组拒绝额外凭据字段", async () => {
+  const detail = await readDetail();
+  const [group] = detail.equipment.stat_groups;
+  const stat = group?.stats[0];
+  if (!group || !stat) throw new Error("公开详情夹具须包含装备属性");
+  expect(decode(EquipmentStatSchema, { ...stat, key: "fixture-only" }).ok).toBe(false);
+  expect(decode(EquipmentStatGroupSchema, { ...group, equipment_url: "fixture-only" }).ok).toBe(
+    false,
+  );
+});
+
+test("公开详情的装备名称、分类和等级须与摘要一致", async () => {
+  const detail = await readDetail();
+  const summary = { ...detail.summary, level: { kind: "unassigned" } };
+  expect(decode(ListingDetailSchema, { ...detail, summary }).ok).toBe(false);
+  for (const [field, value] of [
+    ["name", "Fixture other name"],
+    ["category", "Fixture other category"],
+    ["level", { kind: "assigned", value: 43 }],
+    ["level", { kind: "unassigned" }],
+  ] as const) {
+    expect(
+      decode(ListingDetailSchema, { ...detail, equipment: { ...detail.equipment, [field]: value } })
+        .ok,
+      field,
+    ).toBe(false);
+  }
 });
 
 test("公开详情拒绝含秘密或额外字段的各层对象，也拒绝不可交易快照", async () => {

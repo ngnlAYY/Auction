@@ -76,13 +76,30 @@ json_object! {
         pub page: i64,
         #[serde(deserialize_with = "integer::<1, MAX_PUBLIC_PAGE_SIZE, _>")]
         pub page_size: i64,
-    } => validate decode_only
+    } => validate
 }
 
 impl<T> ListingPage<T> {
     fn validate(&self) -> Result<(), &'static str> {
+        if !(1..=SAFE_INTEGER_MAX).contains(&self.page)
+            || !(1..=MAX_PUBLIC_PAGE_SIZE).contains(&self.page_size)
+            || !(0..=SAFE_INTEGER_MAX).contains(&self.total)
+        {
+            return Err("寄售分页参数超出范围");
+        }
         if (self.page - 1) > MAX_PAGE_OFFSET / self.page_size {
             return Err("寄售分页行偏移超出上限");
+        }
+        let offset = (self.page - 1) * self.page_size;
+        let Ok(count) = i64::try_from(self.items.len()) else {
+            return Err("寄售分页返回条数超出页长");
+        };
+        if count > self.page_size {
+            return Err("寄售分页返回条数超出页长");
+        }
+        // 超过末尾的空页仍带回准确总数。
+        if count > 0 && self.total < offset + count {
+            return Err("寄售分页总数小于本页最后一条记录的位置");
         }
         Ok(())
     }
@@ -145,6 +162,12 @@ json_object! {
 
 impl ListingDetail {
     fn validate(&self) -> Result<(), &'static str> {
+        if self.summary.name != self.equipment.name
+            || self.summary.category != self.equipment.category
+            || self.summary.level != self.equipment.level
+        {
+            return Err("公开详情的装备摘要与快照不一致");
+        }
         self.equipment.validate_tradeable()
     }
 }

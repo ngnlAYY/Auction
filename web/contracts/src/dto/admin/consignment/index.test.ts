@@ -2,7 +2,7 @@
 
 import { expect, expectTypeOf, test } from "bun:test";
 
-import type { InferOutput } from "valibot";
+import * as v from "valibot";
 
 import { decode } from "../../../wire";
 import { CommandReceiptSchema } from "../../public/consignment";
@@ -74,19 +74,30 @@ test("运营详情拒绝缺少截断标记、超 50 条碰撞及多余碰撞字�
   expect(
     decode(AdminListingDetailSchema, {
       ...detail,
-      conflicts: Array.from({ length: 50 }, () => conflict),
-    }).ok,
-  ).toBe(true);
-  expect(
-    decode(AdminListingDetailSchema, {
-      ...detail,
       conflicts: Array.from({ length: 51 }, () => conflict),
     }).ok,
   ).toBe(false);
 });
 
+test("运营详情仅在恰好返回 50 条碰撞时可标记截断", async () => {
+  const { data: detail } = await readResponse(DETAIL, AdminListingDetailSchema);
+  const [conflict] = detail.conflicts;
+  if (!conflict) throw new Error("运营详情样本须有关联拍卖");
+  const short = { ...detail, conflicts: [conflict] };
+  expect(decode(AdminListingDetailSchema, short).ok).toBe(true);
+  expect(decode(AdminListingDetailSchema, { ...short, conflicts_truncated: true }).ok).toBe(false);
+  const conflicts = Array.from({ length: 50 }, () => conflict);
+  for (const conflicts_truncated of [false, true]) {
+    expect(decode(AdminListingDetailSchema, { ...detail, conflicts, conflicts_truncated }).ok).toBe(
+      true,
+    );
+  }
+});
+
 test("运营下架请求和已关闭回执夹具对齐", async () => {
-  expectTypeOf<InferOutput<typeof AdminDelistListingSchema>>().toEqualTypeOf<AdminDelistListing>();
+  expectTypeOf<
+    v.InferOutput<typeof AdminDelistListingSchema>
+  >().toEqualTypeOf<AdminDelistListing>();
   const request = await readFixture(DELIST, AdminDelistListingSchema);
   const { data: receipt } = await readResponse(
     "admin/consignment-delist-receipt.json",
@@ -99,6 +110,33 @@ test("运营下架请求和已关闭回执夹具对齐", async () => {
     state: "closed",
     price: 101,
   });
+});
+
+function readReasonCases() {
+  return readFixture(
+    "admin/consignment-delist-reason-cases.json",
+    v.array(v.tuple([v.string(), v.string(), v.boolean()])),
+  );
+}
+
+test("下架请求筛查已知凭据形态及 Unicode 行分隔符", async () => {
+  const cases = await readReasonCases();
+  const request = await readFixture(DELIST, AdminDelistListingSchema);
+  for (const [label, reason, accepted] of cases) {
+    expect(decode(AdminDelistListingSchema, { ...request, reason }).ok, label).toBe(accepted);
+  }
+});
+
+test("历史说明筛查已知凭据形态及 Unicode 行分隔符", async () => {
+  const cases = await readReasonCases();
+  const { data: page } = await readResponse(PAGE, AdminListingPageSchema);
+  const [closed, ...otherRecords] = page.items;
+  if (!closed) throw new Error("运营列表夹具须包含已下架的历史");
+  for (const [label, reason, accepted] of cases) {
+    const record = { ...closed, admin_delist_reason: reason };
+    const history = { ...page, items: [record, ...otherRecords] };
+    expect(decode(AdminListingPageSchema, history).ok, label).toBe(accepted);
+  }
 });
 
 test("运营下架请求拒绝错误版本、非规范说明、装备链接和额外键", async () => {

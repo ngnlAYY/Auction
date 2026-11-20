@@ -185,8 +185,11 @@ impl OwnedListing {
         if let ListingView::Closed { equipment, .. } | ListingView::Expired { equipment, .. } =
             &self.view
         {
-            // 不变量 6：终结保留原有快照。已落库的关闭原因无法区分关闭前是否发布。
+            // 不变量 6：可确定前态时保留发布时的可交易快照；已落库的关闭原因无法区分前态。
             match (expiry_source.unwrap_or(self.stored_state), equipment) {
+                (ListingState::Displayed | ListingState::AwaitingDeposit, Some(equipment)) => {
+                    equipment.validate_tradeable()?;
+                }
                 (ListingState::Displayed | ListingState::AwaitingDeposit, None) => {
                     return Err("已发布的挂单终结时必须保留装备快照");
                 }
