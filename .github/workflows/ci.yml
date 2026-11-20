@@ -148,15 +148,19 @@ jobs:
       # 测试构建不生成调试信息：target 与构建缓存更小，链接更快。panic 消息里的源码位置
       # 不依赖调试信息，失败时只有 backtrace 缺少行号。
       CARGO_PROFILE_DEV_DEBUG: "0"
-      # 测试入口是 mise 任务；启用 Rust 与 web/ 测试需要的 bun，mise run 不会顺带安装其余工具。
+      # 门禁自测使用 rg 与 bun，并经发布入口读取源码指纹，需要 Dioxus 发布工具。
       # 浏览器接线测试使用运行器自带的 Firefox；驱动与 wasm 测试运行器由 mise 提供。
-      MISE_ENABLE_TOOLS: rust,bun,github:wasm-bindgen/wasm-bindgen,github:mozilla/geckodriver
+      MISE_ENABLE_TOOLS: rust,ripgrep,bun,sccache,cargo:dioxus-cli,github:wasm-bindgen/wasm-bindgen,github:mozilla/geckodriver,github:WebAssembly/binaryen,http:esbuild
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Ensure patched rustup
         run: bash ci/tools/rustup.sh
+      - name: Install gate self-test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends perl brotli cmake pkg-config libssl-dev build-essential
       - name: Install tools with mise
         uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
         with:
@@ -164,6 +168,8 @@ jobs:
           cache_key_prefix: mise-v1-test
       - name: Prepare web dependencies
         run: mise run web-prepare
+      - name: Run gate self-tests
+        run: mise run gate-self-test
       - name: Restore Rust build cache
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
         with:

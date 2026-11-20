@@ -69,6 +69,8 @@ bash ci/checks/check.sh <检查项>...
 | `msrv` | push / PR / 手动，`docs` 通过后 | `ci/checks/check.sh rust-version`：MSRV 等于固定工具链，编译已由 `verify` 覆盖，这里只核对版本声明；作业名是 `main` 的必需检查 |
 | `artifacts` | 仅手动（`workflow_dispatch`） | 调用可复用工作流 `.github/workflows/release-build.yml`，手动输入 `web_stack`（`dioxus` 缺省或 `solid`）：输入在 checkout 后先经 `ci/release/build-identity.sh` 校验，非法值、空串或大小写不符在任何工具安装与缓存恢复前失败；缓存键使用两端实际组合（如 `public-dioxus_admin-dioxus` 或 `public-solid_admin-solid`）。随后由 mise 安装发布工具，选择 `solid` 时另装 bun 并运行 `mise run web-prepare`，再以 `ci/release/release.sh release-check` 构建并校验完整发布包，上传 1 天候选包；在 tag 上手动选择 `solid` 会立即失败并提示在分支上触发候选构建。选择 `solid` 时候选 Actions artifact 名称带 `-solid`，缺省保持原名，候选包不可部署，默认分支推送不再运行 |
 
+普通 CI 的 `test` 与版本发布的 `verify` 都在准备完 Web 依赖后运行 `mise run gate-self-test`。依赖与失败诊断见[门禁自测](checks/README.md#门禁自测)。
+
 ### 依赖升级窗口提醒：`.github/workflows/dependency-cadence.yml`
 
 每周一 **05:07 UTC** 与手动触发时运行 [ci/checks/dependency-cadence.pl](checks/dependency-cadence.pl)，以 [ops/dependencies/upgrade-windows.json](../ops/dependencies/upgrade-windows.json) 为准核对季度窗口。日历结构错误、窗口逾期仍为 `scheduled` 或缺少下一次窗口时作业失败；窗口进入 14 天提前提醒期或正在进行时输出 warning，并把窗口表写入作业摘要。作业只读取仓库文件与 UTC 日期，不修改日历、不创建 issue、不升级依赖、不联网。节奏、冻结日历与门禁见[ops/dependencies.md](../ops/dependencies.md)。

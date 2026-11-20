@@ -80,6 +80,10 @@ run = "bash ci/checks/check.sh web"
 
 # ---- 测试 ----
 
+[tasks.gate-self-test]
+description = "离线依次运行 ci/checks 下的门禁自测"
+run = "bash ci/checks/check.sh gate-self-test"
+
 [tasks.test]
 description = "纯逻辑、单元与本地替身测试；不连接数据库，数据库测试必须独立隔离"
 run = "cargo test --locked --workspace --all-targets"

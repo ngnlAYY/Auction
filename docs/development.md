@@ -132,6 +132,8 @@ mise run test-wasm   # Firefox 中的 WASM 收包接线测试
 mise run test-db     # 真实 PostgreSQL 18 集成测试
 ```
 
+门禁脚本的回归用例用 `mise run gate-self-test` 离线运行。工具与依赖准备见[门禁自测](../ci/checks/README.md#门禁自测)。
+
 `mise run test` 运行单元测试及无需数据库的集成测试（包括本地替身）；不运行文档测试，不要求 PostgreSQL，不连接真实游戏或论坛账号，也不得隐式启动数据库集群。可按改动所属 owner 缩小范围，例如 `cargo test --locked -p auction-domain --lib`；交付说明写出实际命令及未覆盖范围。
 
 `mise run test-wasm` 需要本机已安装 Firefox，由 mise 提供的 `wasm-bindgen-test-runner` 和 `geckodriver` 以无头模式运行。入口依次运行 `auction-web-shared` 的 `transport_browser` 集成测试和 `auction-web-public` 的 `api::conditional_get_tests` 模块。前者验证共享传输的状态、响应头与正文读取顺序，后者验证 Public 拍品详情的条件 GET 和缓存驱逐。Fetch 替身提供浏览器的 `Response`，不连接应用或外部账号。日常运行 `mise run test` 无需浏览器。

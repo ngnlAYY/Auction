@@ -146,6 +146,7 @@ mise run verify     # bash ci/checks/check.sh all fmt check dependency-versions 
 
 | 入口 | 范围 |
 | --- | --- |
+| `mise run gate-self-test` | 离线运行 `ci/checks/*-test.sh`，依赖与用法见[门禁自测](ci/checks/README.md#门禁自测) |
 | `mise run test` | 纯逻辑、单元与本地替身测试；不要求数据库，不连接真实外部账号 |
 | `mise run web-test` | `web/` 的 TypeScript + SolidJS 行为测试；不要求数据库，不连接应用或外部账号 |
 | `mise run test-wasm` | 浏览器里的收包接线测试。需要本机已安装 Firefox，测试不连接应用或外部账号 |

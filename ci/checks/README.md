@@ -4,6 +4,10 @@
 
 [ci/checks/check.sh](check.sh) 是本地与 CI 的共同入口。`all` 包含仓库契约、MSRV 与工具链版本一致、公开仓库脱敏、目录布局、配置示例、systemd 模板、翻译键、装备诊断闭集、源码计数棘轮、审计写入失败分类、模块层级、Markdown 链接、迁移兼容登记、已发布迁移不可变、Web 输入依赖闭包和 Web 回调属性检查。`web` 项（`bun run typecheck`、`bun run lint` 与 `web/` 包边界）不在 `all`/`rust` 组内，由 `mise run verify` 末尾显式运行；运行前先 `mise run web-prepare` 安装 `web/node_modules`。`web-dependency-audit` 需要联网读取公告库，同样不并入 `all` 与 `mise run verify`。入口与构型见 [ci/README.md#静态门禁cicheckschecksh](../README.md#静态门禁cicheckschecksh)。`mise run verify` 等价于 `bash ci/checks/check.sh all fmt check dependency-versions lint wasm rustdoc web`：先运行 `all`，再依次执行格式、宿主默认 feature 编译、依赖版本、宿主全 feature Clippy、Public/Admin 两组 wasm32 Clippy、rustdoc 与 `web/` 静态检查，不运行行为测试。
 
+## 门禁自测
+
+`mise run gate-self-test`（等价于 `bash ci/checks/check.sh gate-self-test`）离线依次运行 `ci/checks/*-test.sh`，遇到失败即报告脚本名和退出码。`all` 与 `mise run verify` 仍只执行静态检查。运行前用 `mise run web-prepare` 准备 Web 依赖。自测使用可写的临时目录、Bash、Git、Perl、brotli、Rust、rg、Bun 和 mise 管理的 Dioxus 发布工具。详见[发布工具说明](../tools/README.md#发布构建如何取用工具)。
+
 ## 热字段镜像
 
 ```bash

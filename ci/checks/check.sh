@@ -770,6 +770,20 @@ check_web() {
 	return "$boundary_status"
 }
 
+run_gate_self_tests() (
+	local script status
+	# 发布入口自测自行构造 tag、分支和本地场景。
+	unset GITHUB_ACTIONS GITHUB_REF_TYPE
+	for script in ci/checks/*-test.sh; do
+		printf '运行门禁自测：%s\n' "$script"
+		bash "$script" || {
+			status=$?
+			printf '门禁自测失败：%s（退出码 %s）\n' "$script" "$status" >&2
+			return "$status"
+		}
+	done
+)
+
 # 本地 mise 任务与 CI 共用命令定义，避免编译参数在两处漂移。
 run_checks() {
 	local check
@@ -796,6 +810,7 @@ run_checks() {
 		web-build-inputs) check_web_build_inputs ;;
 		web-callback-props) check_web_callback_props ;;
 		web) check_web ;;
+		gate-self-test) run_gate_self_tests ;;
 		dependency-versions) check_dependency_versions ;;
 		repository) check_repository_contracts ;;
 		rust-version) check_rust_version ;;
