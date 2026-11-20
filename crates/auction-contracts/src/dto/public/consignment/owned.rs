@@ -163,9 +163,11 @@ impl OwnedListing {
     fn validate(&self) -> Result<(), &'static str> {
         // 不变量 6：有效态可以先看到强制终结，但不能复活或跳过已提交的发布。
         let (state, reason) = self.view.state_and_reason();
+        let expiry_source = reason.and_then(ListingReason::expiry_source_state);
         if (self.effective_state, self.effective_reason) != (state, reason)
             || !self.stored_state.matches_mode(self.mode)
             || !state.matches_mode(self.mode)
+            || expiry_source.is_some_and(|source| !source.matches_mode(self.mode))
         {
             return Err("寄售视图、状态、原因或模式不一致");
         }
@@ -173,12 +175,26 @@ impl OwnedListing {
             && !(self.stored_state.is_active()
                 && (reason.is_some_and(ListingReason::is_forced_closure)
                     || (state == ListingState::Expired
-                        && reason == self.stored_state.expiry_reason())))
+                        && expiry_source == Some(self.stored_state))))
         {
             return Err("寄售持久状态与有效状态不一致");
         }
         if !state.is_active() && !self.allowed_actions.is_empty() {
             return Err("已终结的挂单不得提供卖家操作");
+        }
+        if let ListingView::Closed { equipment, .. } | ListingView::Expired { equipment, .. } =
+            &self.view
+        {
+            // 不变量 6：终结保留原有快照。已落库的关闭原因无法区分关闭前是否发布。
+            match (expiry_source.unwrap_or(self.stored_state), equipment) {
+                (ListingState::Displayed | ListingState::AwaitingDeposit, None) => {
+                    return Err("已发布的挂单终结时必须保留装备快照");
+                }
+                (ListingState::Resolving, Some(_)) => {
+                    return Err("解析期终结的挂单不得携带装备快照");
+                }
+                _ => {}
+            }
         }
         self.validate_quote()
     }

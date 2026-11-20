@@ -967,6 +967,115 @@ fn owned_view_must_match_state_reason_actions_and_snapshot() {
     );
 }
 
+fn round_trip_owned_projection(expected: &Value) -> OwnedListing {
+    let listing: OwnedListing = serde_json::from_value(expected.clone()).unwrap();
+    assert_eq!(serde_json::to_value(&listing).unwrap(), *expected);
+    listing
+}
+
+#[test]
+fn persisted_direct_listing_reports_an_impossible_deposit_expiry() {
+    let page: Value = decode(public_fixture!("owned-listings"));
+    let admin: ApiResponse<AdminListingDetail> = decode(admin_fixture!("listing-detail"));
+    for (index, reason, wrong_reason) in [
+        (2, "display_expired", ListingReason::DepositExpired),
+        (3, "deposit_expired", ListingReason::DisplayExpired),
+    ] {
+        let mut wire = page["data"]["items"][index].clone();
+        wire["stored_state"] = json!("expired");
+        wire["effective_state"] = json!("expired");
+        wire["effective_reason"] = json!(reason);
+        wire["allowed_actions"] = json!([]);
+        wire["view"] = json!({
+            "kind": "expired", "reason": reason, "equipment": wire["view"]["equipment"],
+        });
+        let mut listing = round_trip_owned_projection(&wire);
+        let mut admin = admin.data.record.clone();
+        admin.listing = listing.clone();
+        let mut admin_wire = serde_json::to_value(&admin).unwrap();
+        assert_eq!(serde_json::from_value::<AdminListing>(admin_wire.clone()).unwrap(), admin);
+
+        wire["effective_reason"] = json!(wrong_reason);
+        wire["view"]["reason"] = json!(wrong_reason);
+        admin_wire["listing"] = wire.clone();
+        listing.effective_reason = Some(wrong_reason);
+        let ListingView::Expired { reason, .. } = &mut listing.view else {
+            panic!("缺少到期视图");
+        };
+        *reason = wrong_reason;
+        assert_rejects::<OwnedListing>(wire, "已落库的到期原因与挂单模式不符");
+        assert!(serde_json::to_value(&listing).is_err());
+        admin.listing = listing;
+        assert_rejects::<AdminListing>(admin_wire, "Admin 视图的到期原因与模式不符");
+        assert!(serde_json::to_value(admin).is_err());
+    }
+}
+
+#[test]
+fn effective_expiry_keeps_snapshot_of_a_published_listing() {
+    let page: Value = decode(public_fixture!("owned-listings"));
+    for (index, terminal, reason) in [
+        (2, "expired", "display_expired"),
+        (2, "closed", "auction_lot_created"),
+        (3, "expired", "deposit_expired"),
+        (3, "closed", "service_disabled"),
+    ] {
+        let mut wire = page["data"]["items"][index].clone();
+        wire["effective_state"] = json!(terminal);
+        wire["effective_reason"] = json!(reason);
+        wire["allowed_actions"] = json!([]);
+        wire["view"] = json!({
+            "kind": terminal, "reason": reason, "equipment": wire["view"]["equipment"],
+        });
+        let mut listing = round_trip_owned_projection(&wire);
+        let persisted = with_field(&wire, "stored_state", json!(terminal));
+        round_trip_owned_projection(&persisted);
+
+        wire["view"]["equipment"] = Value::Null;
+        let (ListingView::Closed { equipment, .. } | ListingView::Expired { equipment, .. }) =
+            &mut listing.view
+        else {
+            panic!("缺少关闭或到期视图");
+        };
+        *equipment = None;
+        assert_rejects::<OwnedListing>(wire.clone(), "已发布挂单有效终结时丢失快照");
+        assert!(serde_json::to_value(&listing).is_err());
+
+        if terminal == "expired" {
+            assert_rejects::<OwnedListing>(
+                with_field(&wire, "stored_state", json!("expired")),
+                "已发布挂单持久到期后丢失快照",
+            );
+            listing.stored_state = ListingState::Expired;
+            assert!(serde_json::to_value(&listing).is_err());
+        }
+    }
+
+    let direct: Value = decode(public_fixture!("owned-listing"));
+    for source in [&direct["data"], &page["data"]["items"][6]] {
+        for (terminal, reason) in [("expired", "lookup_deadline"), ("closed", "service_disabled")] {
+            let mut wire = source.clone();
+            wire["effective_state"] = json!(terminal);
+            wire["effective_reason"] = json!(reason);
+            wire["allowed_actions"] = json!([]);
+            wire["view"] = json!({"kind": terminal, "reason": reason, "equipment": null});
+            let mut listing = round_trip_owned_projection(&wire);
+            round_trip_owned_projection(&with_field(&wire, "stored_state", json!(terminal)));
+
+            let equipment = &page["data"]["items"][2]["view"]["equipment"];
+            wire["view"]["equipment"] = equipment.clone();
+            let (ListingView::Closed { equipment: snapshot, .. }
+            | ListingView::Expired { equipment: snapshot, .. }) = &mut listing.view
+            else {
+                panic!("缺少关闭或到期视图");
+            };
+            *snapshot = Some(serde_json::from_value(equipment.clone()).unwrap());
+            assert_rejects::<OwnedListing>(wire, "解析期终结却携带装备快照");
+            assert!(serde_json::to_value(&listing).is_err());
+        }
+    }
+}
+
 #[test]
 fn public_catalog_rejects_mismatched_mode_and_untradeable_equipment() {
     let direct: ApiResponse<ListingDetail> = decode(public_fixture!("listing-detail"));

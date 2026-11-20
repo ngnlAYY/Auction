@@ -139,18 +139,19 @@ impl ListingState {
             _ => true,
         }
     }
-
-    pub(super) fn expiry_reason(self) -> Option<ListingReason> {
-        match self {
-            Self::Resolving => Some(ListingReason::LookupDeadline),
-            Self::Displayed => Some(ListingReason::DisplayExpired),
-            Self::AwaitingDeposit => Some(ListingReason::DepositExpired),
-            _ => None,
-        }
-    }
 }
 
 impl ListingReason {
+    // 到期原因保留前态，供已落库终态核对模式与快照。
+    pub(super) fn expiry_source_state(self) -> Option<ListingState> {
+        match self {
+            Self::LookupDeadline => Some(ListingState::Resolving),
+            Self::DisplayExpired => Some(ListingState::Displayed),
+            Self::DepositExpired => Some(ListingState::AwaitingDeposit),
+            _ => None,
+        }
+    }
+
     // 与领域 ListingReason 的终态归类及合同 §5.1 的快照规则一致。
     pub(super) fn terminal_state(self) -> ListingState {
         match self {
