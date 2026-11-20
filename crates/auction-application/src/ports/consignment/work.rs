@@ -161,19 +161,74 @@ impl LookupClaimRequest {
 #[derive(Debug)]
 pub struct ListingLookupClaim {
     /// 工作、挂单和已提交围栏。
-    pub fence: LookupFence,
+    fence: LookupFence,
     /// 从持久行得到的装备身份。
-    pub identity: ListingEquipmentIdentity,
+    identity: ListingEquipmentIdentity,
     /// 本次准入代次。
-    pub service_epoch: u64,
+    service_epoch: u64,
     /// 领取后已提交的尝试次数，范围 1–6。
-    pub attempt: u8,
+    attempt: u8,
     /// 本次网络硬截止，取领取预算与挂单总截止的较早值，不随续租延长。
-    pub deadline: Timestamp,
+    deadline: Timestamp,
     /// 当前持久租期，初始预留硬截止之外 5 秒。
-    pub lease_until: Timestamp,
+    lease_until: Timestamp,
     /// 原登记 AAD 与密文。缺失或损坏应在本次围栏内提交凭证失败，禁止发网。
-    pub credential: Result<ListingRegistrationSecret, ListingCredentialError>,
+    credential: Result<ListingRegistrationSecret, ListingCredentialError>,
+}
+
+impl ListingLookupClaim {
+    /// 从已提交的领取事实建立结果。不变量 5、6：领取已计次，准入代次必须有效。
+    pub fn new(
+        fence: LookupFence,
+        identity: ListingEquipmentIdentity,
+        service_epoch: u64,
+        attempt: u8,
+        deadline: Timestamp,
+        lease_until: Timestamp,
+        credential: Result<ListingRegistrationSecret, ListingCredentialError>,
+    ) -> Result<Self, ConsignmentError> {
+        if !(1..=MAX_LISTING_LOOKUP_ATTEMPTS).contains(&attempt)
+            || !(1..=ListingVersion::MAX).contains(&service_epoch)
+        {
+            return Err(ConsignmentError::Unavailable);
+        }
+        Ok(Self { fence, identity, service_epoch, attempt, deadline, lease_until, credential })
+    }
+
+    /// 工作、挂单和已提交围栏。
+    pub const fn fence(&self) -> LookupFence {
+        self.fence
+    }
+
+    /// 从持久行得到的装备身份。
+    pub const fn identity(&self) -> &ListingEquipmentIdentity {
+        &self.identity
+    }
+
+    /// 本次准入代次。
+    pub const fn service_epoch(&self) -> u64 {
+        self.service_epoch
+    }
+
+    /// 本次领取后的已提交计次。
+    pub const fn attempt(&self) -> u8 {
+        self.attempt
+    }
+
+    /// 不随续租延长的网络硬截止。
+    pub const fn deadline(&self) -> Timestamp {
+        self.deadline
+    }
+
+    /// 领取时授予的租期。
+    pub const fn lease_until(&self) -> Timestamp {
+        self.lease_until
+    }
+
+    /// 原登记信封。遇凭证错误以本次围栏提交安全分类，禁止发网。
+    pub fn credential(&self) -> Result<&ListingRegistrationSecret, ListingCredentialError> {
+        self.credential.as_ref().map_err(|error| *error)
+    }
 }
 
 /// 诊断与调度可读的全局许可时间，不携带持有者凭证。
@@ -240,14 +295,17 @@ pub enum ListingWorkerReadiness {
 /// 核验工作及许可并原子提交。`apply_lookup` 是唯一观察提交和 429 冷却记账入口。
 pub trait LookupWorkStore: Send + Sync {
     /// 按单例锁后工作锁的顺序，分配全服务唯一的许可并先提交计次。
-    /// 暂停由 Worker 在申请前复核，存储必须核持久准入与配置代次。
+    /// 存储须在领取事务内读取并复核持久的外部访问暂停事实、准入与配置代次，
+    /// 并与暂停写入串行化。暂停时返回 `Ok(None)`，不分配许可或扣减尝试预算。
+    /// Worker 仍须在申请前和发送前复核暂停。
     fn claim(
         &self,
         request: LookupClaimRequest,
     ) -> ConsignmentFuture<'_, Option<ListingLookupClaim>>;
 
-    /// 用原围栏续工作和许可的租期。合同未定义超出本次硬预算后的续期；
-    /// 保守以上一授予的网络硬截止加固定余量为上界。
+    /// 用原围栏续工作和许可的租期，以上一次授予的网络硬截止加 5 秒为上界，
+    /// 出站截止保持不变。存储须在工作记录中持久化本次领取的原始网络硬截止，
+    /// 供续租、回收与关停在 Worker 重启后沿用同一口径。
     fn renew(&self, fence: LookupFence) -> ConsignmentFuture<'_, LookupLeaseUpdate<Timestamp>>;
 
     /// 发网前复核持久围栏、代次及本次硬截止。暂停是 Worker 同步读取的最新暂停事实。

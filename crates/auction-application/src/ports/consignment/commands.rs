@@ -141,7 +141,11 @@ pub struct WithdrawListingCommand {
     pub target: SellerListingTarget,
 }
 
-/// 运营私有说明，任何调试格式均隐去原文。
+/// 运营私有说明，只进入 Admin 私有视图，永不进入公开 DTO。
+///
+/// 筛查限于可识别的装备链接、裸 10 位十六进制和 43 位登录 key 形态。
+/// 任意格式的旧版手工登录 key 可能与普通说明同形，无法从自由文本可靠识别。
+/// 调试输出隐去原文。
 #[derive(Clone, PartialEq, Eq)]
 pub struct ListingDelistReason(String);
 
@@ -293,9 +297,34 @@ impl<T> ListingCommandOutcome<T> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ListingRegistered {
     /// 新挂单 UUID。
-    pub listing_id: Uuid,
+    listing_id: Uuid,
     /// 登记时标价。
     pub price: ListingPrice,
+}
+
+impl ListingRegistered {
+    /// 构造登记成功原回执，不变量 1、6：目标必须存在于回执，版本和状态固定。
+    pub fn new(listing_id: Uuid, price: ListingPrice) -> Result<Self, ConsignmentError> {
+        if listing_id.is_nil() {
+            return Err(ConsignmentError::Unavailable);
+        }
+        Ok(Self { listing_id, price })
+    }
+
+    /// 新挂单 UUID。
+    pub const fn listing_id(self) -> Uuid {
+        self.listing_id
+    }
+
+    /// 登记时的原始版本。
+    pub const fn version(self) -> ListingVersion {
+        ListingVersion::FIRST
+    }
+
+    /// 登记时的原始状态。
+    pub const fn state(self) -> ListingState {
+        ListingState::Resolving
+    }
 }
 
 /// 首次改价结果与同价无变化的区别。
@@ -311,26 +340,76 @@ pub enum ListingPriceDisposition {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ListingPriceReceipt {
     /// 目标挂单。
-    pub listing_id: Uuid,
+    listing_id: Uuid,
     /// 原回执中的已提交版本。
     pub version: ListingVersion,
     /// 原回执中的状态。
-    pub state: ListingState,
+    state: ListingState,
     /// 原回执中的当前标价。
     pub price: ListingPrice,
     /// 是否产生了新版本。
     pub disposition: ListingPriceDisposition,
 }
 
+impl ListingPriceReceipt {
+    /// 构造改价或同价原回执。不变量 1、6：两个成功处置都只能来自活动态。
+    pub fn new(
+        listing_id: Uuid,
+        version: ListingVersion,
+        state: ListingState,
+        price: ListingPrice,
+        disposition: ListingPriceDisposition,
+    ) -> Result<Self, ConsignmentError> {
+        if listing_id.is_nil() || !state.is_active() {
+            return Err(ConsignmentError::Unavailable);
+        }
+        Ok(Self { listing_id, version, state, price, disposition })
+    }
+
+    /// 目标挂单 UUID。
+    pub const fn listing_id(self) -> Uuid {
+        self.listing_id
+    }
+
+    /// 原回执中的活动态。
+    pub const fn state(self) -> ListingState {
+        self.state
+    }
+}
+
 /// 200 主动关闭回执，其状态固定为 `closed`。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ListingClosed {
     /// 目标挂单。
-    pub listing_id: Uuid,
+    listing_id: Uuid,
     /// 关闭时的已提交版本。
     pub version: ListingVersion,
     /// 关闭时的标价，可按 §7 回执规则省略。
     pub price: Option<ListingPrice>,
+}
+
+impl ListingClosed {
+    /// 构造主动关闭原回执。不变量 1、6：保留原目标和版本，价格可空。
+    pub fn new(
+        listing_id: Uuid,
+        version: ListingVersion,
+        price: Option<ListingPrice>,
+    ) -> Result<Self, ConsignmentError> {
+        if listing_id.is_nil() {
+            return Err(ConsignmentError::Unavailable);
+        }
+        Ok(Self { listing_id, version, price })
+    }
+
+    /// 目标挂单 UUID。
+    pub const fn listing_id(self) -> Uuid {
+        self.listing_id
+    }
+
+    /// 原回执中的终态。
+    pub const fn state(self) -> ListingState {
+        ListingState::Closed
+    }
 }
 
 /// 解析提交已落库的事实。

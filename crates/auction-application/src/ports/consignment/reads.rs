@@ -4,18 +4,16 @@ use std::fmt;
 use std::str::FromStr;
 
 use auction_domain::consignment::{
-    FeeBps, ListingEquipmentIdentity, ListingMode, ListingPrice, ListingReason, ListingState,
-    ListingVersion,
+    FeeBps, ListingEquipmentIdentity, ListingMode, ListingPrice, ListingState, ListingVersion,
 };
 use auction_domain::{CommandId, LotId, UserId, valid_text};
 use auction_time::Timestamp;
 use uuid::Uuid;
 
 use crate::ports::consignment::commands::{ListingDelistReason, OwnedListingCommandReceipt};
-use crate::ports::consignment::equipment::{
-    ListingEquipmentDetails, LookupTransientReason, RegistrationReplayCrypto,
-};
+use crate::ports::consignment::equipment::{ListingEquipmentDetails, RegistrationReplayCrypto};
 use crate::ports::consignment::errors::{ConsignmentError, ConsignmentFuture};
+use crate::ports::consignment::projection::PrivateListingView;
 use crate::ports::core::valid_page_window;
 
 /// 寄售查询的世界闭集。
@@ -253,76 +251,6 @@ pub struct PublicListingDetail {
     pub equipment: ListingEquipmentDetails,
 }
 
-/// 本人/Admin 共用的安全工作进度。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ListingLookupProgress {
-    /// 已提交的领取次数。
-    pub attempts: u8,
-    /// 排队时的下次可执行时刻。
-    pub next_attempt_at: Option<Timestamp>,
-    /// 最近一次暂时失败的安全分类。
-    pub last_reason: Option<LookupTransientReason>,
-    /// 当前外部访问暂停。
-    pub paused: bool,
-    /// 登记时冻结的解析总截止。
-    pub deadline_at: Timestamp,
-}
-
-/// 根据有效态投影的判别联合。
-#[derive(Debug, Clone, PartialEq)]
-pub enum PrivateListingView {
-    /// 仍在解析，无公开快照。
-    Resolving(ListingLookupProgress),
-    /// 解析失败，无可信完整快照。
-    LookupFailed {
-        /// 挂单主拒绝原因。
-        reason: ListingReason,
-        /// 耗尽时保留的最后暂时分类。
-        last_lookup_reason: Option<LookupTransientReason>,
-    },
-    /// 解析完成但装备或卖家没有通过核验。
-    Ineligible {
-        /// 可私有展示的安全装备信息。
-        equipment: ListingEquipmentDetails,
-        /// 私有拒绝原因。
-        reason: ListingReason,
-    },
-    /// 非寄售公开展示。
-    Displayed(ListingEquipmentDetails),
-    /// 等待寄送装备，前三期禁止收件。
-    AwaitingDeposit(ListingEquipmentDetails),
-    /// 有效关闭，保留已取得的安全快照。
-    Closed {
-        /// 有效关闭原因。
-        reason: ListingReason,
-        /// 关闭前已取得的快照，可能没有。
-        equipment: Option<ListingEquipmentDetails>,
-    },
-    /// 有效到期，保留已取得的安全快照。
-    Expired {
-        /// 有效到期原因。
-        reason: ListingReason,
-        /// 到期前已取得的快照，可能没有。
-        equipment: Option<ListingEquipmentDetails>,
-    },
-}
-
-impl PrivateListingView {
-    /// 由同一有效视图导出有效态和有效原因，不伪造新版本。
-    pub const fn effective_state(&self) -> (ListingState, Option<ListingReason>) {
-        match self {
-            Self::Resolving(_) => (ListingState::Resolving, None),
-            Self::LookupFailed { reason, .. } | Self::Ineligible { reason, .. } => {
-                (ListingState::Rejected, Some(*reason))
-            }
-            Self::Displayed(_) => (ListingState::Displayed, None),
-            Self::AwaitingDeposit(_) => (ListingState::AwaitingDeposit, None),
-            Self::Closed { reason, .. } => (ListingState::Closed, Some(*reason)),
-            Self::Expired { reason, .. } => (ListingState::Expired, Some(*reason)),
-        }
-    }
-}
-
 /// 权限化私有读投影的共同事实，无动作授权。
 #[derive(Debug, Clone, PartialEq)]
 pub struct PrivateListing {
@@ -332,8 +260,6 @@ pub struct PrivateListing {
     pub version: ListingVersion,
     /// 规范世界和 EID。
     pub identity: ListingEquipmentIdentity,
-    /// 登记的不可变模式。
-    pub mode: ListingMode,
     /// 当前标价。
     pub price: ListingPrice,
     /// 冻结定价算法版本，前三期为 1。
@@ -346,9 +272,7 @@ pub struct PrivateListing {
     pub updated_at: Timestamp,
     /// 当前态冻结截止。
     pub expires_at: Timestamp,
-    /// 已提交的数据库状态。
-    pub stored_state: ListingState,
-    /// 同快照按有效态形成的视图。
+    /// 同快照的登记模式、持久状态及有效视图。
     pub view: PrivateListingView,
 }
 
@@ -365,16 +289,39 @@ pub enum SellerListingAction {
 #[derive(Debug, Clone, PartialEq)]
 pub struct OwnedListingRecord {
     /// 版本、持久状态和有效状态。
-    pub listing: PrivateListing,
+    listing: PrivateListing,
     /// 锁内写入仍须重新检查的卖家可用动作。
-    pub allowed_actions: Vec<SellerListingAction>,
+    allowed_actions: Vec<SellerListingAction>,
+}
+
+impl OwnedListingRecord {
+    /// 不变量 6：有效终态不得提供卖家动作。
+    pub fn new(
+        listing: PrivateListing,
+        allowed_actions: Vec<SellerListingAction>,
+    ) -> Result<Self, ConsignmentError> {
+        if !allowed_actions.is_empty() && !listing.view.effective_state().0.is_active() {
+            return Err(ConsignmentError::Unavailable);
+        }
+        Ok(Self { listing, allowed_actions })
+    }
+
+    /// 借用挂单事实。
+    pub const fn listing(&self) -> &PrivateListing {
+        &self.listing
+    }
+
+    /// 卖家可用动作，写入事务仍须重新检查。
+    pub fn allowed_actions(&self) -> &[SellerListingAction] {
+        &self.allowed_actions
+    }
 }
 
 /// 管理员查询行，无冒充卖家的动作接口。
 #[derive(Debug, Clone, PartialEq)]
 pub struct AdminListingRecord {
     /// 管理员可读的挂单共同事实。
-    pub listing: PrivateListing,
+    listing: PrivateListing,
     /// 真正的本地卖家。
     pub seller_user_id: UserId,
     /// 当前本站卖家名。
@@ -382,7 +329,33 @@ pub struct AdminListingRecord {
     /// 仅运营会话可查看的下架说明。
     pub admin_delist_reason: Option<ListingDelistReason>,
     /// 当前允许下架。
-    pub can_delist: bool,
+    can_delist: bool,
+}
+
+impl AdminListingRecord {
+    /// 不变量 6：有效终态不得提供运营下架动作。
+    pub fn new(
+        listing: PrivateListing,
+        seller_user_id: UserId,
+        seller_name: String,
+        admin_delist_reason: Option<ListingDelistReason>,
+        can_delist: bool,
+    ) -> Result<Self, ConsignmentError> {
+        if can_delist && !listing.view.effective_state().0.is_active() {
+            return Err(ConsignmentError::Unavailable);
+        }
+        Ok(Self { listing, seller_user_id, seller_name, admin_delist_reason, can_delist })
+    }
+
+    /// 借用 Admin 可读的挂单事实。
+    pub const fn listing(&self) -> &PrivateListing {
+        &self.listing
+    }
+
+    /// 当前是否允许下架。
+    pub const fn can_delist(&self) -> bool {
+        self.can_delist
+    }
 }
 
 /// Admin 详情的一条实际拍卖碰撞。

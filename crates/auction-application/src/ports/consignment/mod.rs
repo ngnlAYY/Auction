@@ -4,6 +4,7 @@ mod commands;
 mod equipment;
 mod errors;
 mod maintenance;
+mod projection;
 mod reads;
 mod work;
 
@@ -11,6 +12,7 @@ pub use commands::*;
 pub use equipment::*;
 pub use errors::*;
 pub use maintenance::*;
+pub use projection::*;
 pub use reads::*;
 pub use work::*;
 

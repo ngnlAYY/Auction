@@ -36,6 +36,7 @@ pub trait ListingMaintenance: Send + Sync {
     fn scan_candidates(&self) -> ConsignmentFuture<'_, ListingMaintenancePage>;
 
     /// 启动前短事务同步配置。仅 true→false 增加代次并使旧心跳失效。保留在途
-    /// 许可时间栅栏，旧单读侧即时关闭；每单的终结和凭证退休交给自动清退。
+    /// 许可时间栅栏，按工作记录的原始网络硬截止加余量处理重启后的关停。
+    /// 旧单读侧即时关闭，每单的终结和凭证退休交给自动清退。
     fn sync_admission(&self, enabled: bool) -> ConsignmentFuture<'_, ListingAdmission>;
 }

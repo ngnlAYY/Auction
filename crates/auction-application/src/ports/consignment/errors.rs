@@ -183,16 +183,8 @@ impl From<ListingError> for ConsignmentError {
             ListingError::InvalidIdentity => Self::InvalidEquipmentUrl,
             ListingError::InvalidPrice => Self::InvalidPrice,
             // 非法输入费率与已确认但不再适用的费率是两类错误。
-            ListingError::InvalidFee
-            | ListingError::InvalidTransition { from: "unknown", action: "decode_version" } => {
-                Self::InvalidListingRequest
-            }
-            ListingError::InvalidTransition {
-                from: "rejected" | "expired" | "closed",
-                action: "reprice" | "withdraw" | "admin_delist",
-            } => ListingBusinessRejection::ListingNotActive.into(),
-            // 领域用同一变体报告快照损坏、配置错误、时刻越界及版本耗尽；不能记为业务拒绝。
-            ListingError::InvalidTransition { .. } => Self::Unavailable,
+            ListingError::InvalidFee => Self::InvalidListingRequest,
+            ListingError::InvalidTransition { from, action } => invalid_transition(from, action),
             ListingError::StaleVersion { .. } => ListingBusinessRejection::StaleVersion.into(),
             ListingError::Ineligible => ListingBusinessRejection::ParticipantIneligible.into(),
             ListingError::EquipmentBusy => ListingBusinessRejection::EquipmentBusy.into(),
@@ -205,6 +197,18 @@ impl From<ListingError> for ConsignmentError {
             }
             ListingError::AlreadyOpen => ListingBusinessRejection::AlreadyOpen.into(),
         }
+    }
+}
+
+fn invalid_transition(from: &str, action: &str) -> ConsignmentError {
+    // 此映射依赖领域 InvalidTransition 的状态与动作字符串，领域改动时须同步这里与测试。
+    // 快照损坏、配置错误、时刻越界、版本耗尽及未知组合均失败关闭，不能记作业务拒绝。
+    match (from, action) {
+        ("unknown", "decode_version") => ConsignmentError::InvalidListingRequest,
+        ("rejected" | "expired" | "closed", "reprice" | "withdraw" | "admin_delist") => {
+            ListingBusinessRejection::ListingNotActive.into()
+        }
+        _ => ConsignmentError::Unavailable,
     }
 }
 

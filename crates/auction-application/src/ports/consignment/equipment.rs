@@ -189,7 +189,7 @@ pub struct ListingLookupSnapshot {
 }
 
 impl ListingLookupSnapshot {
-    /// 从已验证回显的请求身份建设快照，并拒绝消耗字段藏入本次 key 的响应。
+    /// 从已验证回显的请求身份构造快照，并拒绝文本字段藏入本次 key 的响应。
     pub fn new(
         identity: ListingEquipmentIdentity,
         details: ListingEquipmentDetails,
@@ -197,6 +197,7 @@ impl ListingLookupSnapshot {
         key: &EquipmentKey,
     ) -> Result<Self, ListingEquipmentLookupError> {
         // 不变量 6、7：上游可能把本次凭证嵌入白名单文本；一律拒绝且不回显原值。
+        // 数值字段没有凭证语义，按数值等于纯数字 key 筛查会误拒正常属性。
         if !safe_text(&owner_name, 256) {
             return Err(LookupPermanentReason::SourceSchemaInvalid.into());
         }
@@ -449,6 +450,7 @@ impl RegistrationRequestMac {
 
     /// 以常量时间比较两个摘要。
     pub fn matches(&self, other: &Self) -> bool {
+        // 不变量 7：必须使用常量时间比较，避免因匹配前缀长度不同而泄露 MAC 信息。
         self.0.ct_eq(&other.0).into()
     }
 }

@@ -12,8 +12,9 @@ use crate::ports::admin::{AdminIntakeError, EquipmentKeySealerPort};
 use crate::ports::consignment::commands::{
     AdminDelistListingCommand, ApplyListingLookupCommand, AutoCloseListingCommand,
     ListingAutoCloseEffect, ListingClosed, ListingCommandOutcome, ListingCommandStore,
-    ListingLookupEffect, ListingPriceReceipt, ListingRegistered, OwnedListingCommandReceipt,
-    RegisterListingCommand, RegistrationInput, RepriceListingCommand, WithdrawListingCommand,
+    ListingLookupEffect, ListingPriceReceipt, ListingRegistered, ListingRegistrationPolicy,
+    OwnedListingCommandReceipt, RegisterListingCommand, RegistrationInput, RepriceListingCommand,
+    WithdrawListingCommand,
 };
 use crate::ports::consignment::equipment::{
     ListingCredentialError, ListingEquipmentKeyOpener, ListingEquipmentLookup,
@@ -101,6 +102,7 @@ pub(crate) struct RegistrationCall {
     pub mode: auction_domain::consignment::ListingMode,
     pub expected_fee_bps: auction_domain::consignment::FeeBps,
     pub listing_id: Uuid,
+    pub policy: ListingRegistrationPolicy,
     pub sealer: bool,
     pub replay_crypto: bool,
 }
@@ -131,6 +133,7 @@ impl ListingCommandStore for FakeListingCommands {
             mode: command.input.mode,
             expected_fee_bps: command.input.expected_fee_bps,
             listing_id: command.listing_id,
+            policy: command.policy,
             sealer: sealer.is_some(),
             replay_crypto: replay_crypto.is_some(),
         })
@@ -250,6 +253,7 @@ impl AdminListingRead for FakeListingReads {
 /// 工作租约、许可及维护可以分别注入成功、拒绝和依赖故障。
 #[derive(Default)]
 pub(crate) struct FakeLookupWork {
+    external_access_paused: Mutex<bool>,
     pub claim: Reply<LookupClaimRequest, Option<ListingLookupClaim>>,
     pub renew: Reply<LookupFence, LookupLeaseUpdate<Timestamp>>,
     pub confirm_dispatch: Reply<(LookupFence, bool), LookupDispatch>,
@@ -261,12 +265,34 @@ pub(crate) struct FakeLookupWork {
     pub sync_admission: Reply<bool, ListingAdmission>,
 }
 
+impl FakeLookupWork {
+    /// 模拟由 Worker 预检之外的写入方更新持久暂停事实。
+    pub(crate) fn set_external_access_paused(&self, paused: bool) {
+        *self.pause_state() = paused;
+    }
+
+    fn pause_state(&self) -> MutexGuard<'_, bool> {
+        let Ok(state) = self.external_access_paused.lock() else {
+            panic!("寄售替身暂停锁已中毒");
+        };
+        state
+    }
+}
+
 impl LookupWorkStore for FakeLookupWork {
     fn claim(
         &self,
         request: LookupClaimRequest,
     ) -> ConsignmentFuture<'_, Option<ListingLookupClaim>> {
-        self.claim.run(request)
+        Box::pin(async move {
+            // 同一锁内复核暂停并消费预置领取结果，暂停只记录调用，保留下一次领取。
+            let paused = self.pause_state();
+            if *paused {
+                self.claim.state().calls.push(request);
+                return Ok(None);
+            }
+            self.claim.call(request)
+        })
     }
 
     fn renew(&self, fence: LookupFence) -> ConsignmentFuture<'_, LookupLeaseUpdate<Timestamp>> {
@@ -278,7 +304,7 @@ impl LookupWorkStore for FakeLookupWork {
         claim: &'a ListingLookupClaim,
         paused: bool,
     ) -> ConsignmentFuture<'a, LookupDispatch> {
-        self.confirm_dispatch.run((claim.fence, paused))
+        self.confirm_dispatch.run((claim.fence(), paused))
     }
 
     fn abandon(
