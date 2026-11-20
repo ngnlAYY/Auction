@@ -132,17 +132,17 @@ function requireElement(page: Page, predicate: (node: DomElement) => boolean, pa
   return node;
 }
 
+function linkTo(page: Page, path: string): (element: DomElement) => boolean {
+  return (element) => {
+    const target = element.getAttribute("href");
+    return (
+      element.tag === "a" && target !== null && new URL(target, page.location).pathname === path
+    );
+  };
+}
+
 function href(page: Page, path: string, parent?: DomElement): string {
-  const node = requireElement(
-    page,
-    (element) => {
-      const target = element.getAttribute("href");
-      return (
-        element.tag === "a" && target !== null && new URL(target, page.location).pathname === path
-      );
-    },
-    parent,
-  );
+  const node = requireElement(page, linkTo(page, path), parent);
   const target = node.getAttribute("href");
   if (target === null) throw new Error("导航锚点缺少 href");
   return target;
@@ -360,6 +360,8 @@ test("历史成交价的世界筛选由应用提交，外壳进出链接都省�
     const selectedWorld = priceReads()[0]?.searchParams.get("world");
     expect(selectedWorld).toBe("main");
     expect(page.router.currentLocationString()).toBe("/history?world=main");
+    // 成交价请求与会话读取独立；会话确认后手机导航才会用账户链接替换登录入口。
+    await waitFor(() => page.find(linkTo(page, "/account"), mobile) !== null);
     for (const target of ["/", "/bidlog", "/account", "/fulfillment", "/settings"]) {
       expect(href(page, target, mobile)).toBe(target);
     }
