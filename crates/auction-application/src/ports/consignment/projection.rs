@@ -3,7 +3,9 @@
 use auction_domain::consignment::{ListingMode, ListingReason, ListingState};
 use auction_time::Timestamp;
 
-use crate::ports::consignment::equipment::{ListingEquipmentDetails, LookupTransientReason};
+use crate::ports::consignment::equipment::{
+    ListingEquipmentDetails, ListingEquipmentLevel, LookupTransientReason,
+};
 use crate::ports::consignment::errors::ConsignmentError;
 use crate::ports::consignment::work::MAX_LISTING_LOOKUP_ATTEMPTS;
 
@@ -154,20 +156,21 @@ impl PrivateListingView {
             }
             PrivateListingViewKind::Displayed(equipment)
             | PrivateListingViewKind::AwaitingDeposit(equipment)
-                if !equipment.label().tradeable =>
+                if !can_publish(equipment) =>
             {
                 return Err(ConsignmentError::Unavailable);
             }
             PrivateListingViewKind::Closed { equipment, .. }
             | PrivateListingViewKind::Expired { equipment, .. } => {
-                // 不变量 6：终结保留原有快照。已落库的 closed 由关闭事务保留发布快照，
-                // 因为当前持久终态和关闭原因无法区分关闭前是否发布。
-                match (expiry_source.unwrap_or(stored_state), equipment) {
-                    (ListingState::Displayed | ListingState::AwaitingDeposit, None)
-                    | (ListingState::Resolving, Some(_)) => {
-                        return Err(ConsignmentError::Unavailable);
-                    }
-                    _ => {}
+                // 不变量 6：终结保留原有快照。已落库的关闭记录若有快照，只能来自已发布态，
+                // 因为解析中没有快照，已拒绝的记录也不会转为关闭。
+                let source = expiry_source.unwrap_or(stored_state);
+                if (matches!(source, ListingState::Displayed | ListingState::AwaitingDeposit)
+                    && equipment.is_none())
+                    || (source == ListingState::Resolving && equipment.is_some())
+                    || equipment.as_ref().is_some_and(|equipment| !can_publish(equipment))
+                {
+                    return Err(ConsignmentError::Unavailable);
                 }
             }
             _ => {}
@@ -194,6 +197,11 @@ impl PrivateListingView {
     pub const fn kind(&self) -> &PrivateListingViewKind {
         &self.kind
     }
+}
+
+fn can_publish(equipment: &ListingEquipmentDetails) -> bool {
+    let label = equipment.label();
+    label.tradeable && label.level != ListingEquipmentLevel::Soulbound
 }
 
 fn matches_mode(state: ListingState, mode: ListingMode) -> bool {

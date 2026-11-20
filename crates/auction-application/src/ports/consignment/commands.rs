@@ -143,8 +143,10 @@ pub struct WithdrawListingCommand {
 
 /// 运营私有说明，只进入 Admin 私有视图，永不进入公开 DTO。
 ///
-/// 筛查限于可识别的装备链接、裸 10 位十六进制和 43 位登录 key 形态。
-/// 任意格式的旧版手工登录 key 可能与普通说明同形，无法从自由文本可靠识别。
+/// 说明须为单行，拒绝控制字符及 `U+0085`、`U+2028`、`U+2029`。
+/// 凭据筛查覆盖游戏装备链接、`hvdata.gisadan.dev/equip` 的带 key 查询、其他链接的
+/// 10 位十六进制 `key` 查询参数，以及裸 10 位十六进制和 43 位登录 key 形态。
+/// 自由文本只能筛查已知形态，无法可靠识别任意凭据。
 /// 调试输出隐去原文。
 #[derive(Clone, PartialEq, Eq)]
 pub struct ListingDelistReason(String);
@@ -152,8 +154,8 @@ pub struct ListingDelistReason(String);
 impl ListingDelistReason {
     /// 校验 1–256 UTF-8 字节的规范单行说明及可识别的凭证形态。
     pub fn new(reason: String) -> Result<Self, ConsignmentError> {
-        // 不变量 6、7：合同未定义任意自由文本中的裸凭据识别，保守拒绝链接和常见
-        // 裸凭据形态；运营仍不得粘贴其他凭据。错误不带原说明。
+        // 不变量 6、7：valid_text 已拒绝 U+0085，装备链接筛查同时覆盖 /equip? 和 key=。
+        // 错误不带原说明。
         if !valid_text(&reason, 256)
             || reason.contains(['\u{2028}', '\u{2029}'])
             || contains_equipment_link(&reason)

@@ -450,6 +450,31 @@ fn delist_reason_enforces_shape_and_keeps_text_private() {
 }
 
 #[test]
+fn delist_reason_rejects_equipment_query_links() {
+    assert!(
+        ListingDelistReason::new("说明 https://example.invalid/?type=armor".to_owned()).is_ok()
+    );
+    for rejected in [
+        "说明 <https://HVDATA.GISADAN.DEV/equip?eid=42&KEY=fake-opaque>".to_owned(),
+        format!("说明 https://example.invalid/?type=armor&key={FAKE_EQUIPMENT_KEY}&other=1"),
+    ] {
+        assert_eq!(ListingDelistReason::new(rejected), Err(ConsignmentError::InvalidReason));
+    }
+}
+
+#[test]
+fn delist_reason_rejects_unicode_line_breaks() {
+    for separator in ['\u{0085}', '\u{2028}', '\u{2029}'] {
+        assert_eq!(
+            ListingDelistReason::new(format!("甲{separator}乙")),
+            Err(ConsignmentError::InvalidReason),
+            "放行行分隔符 U+{:04X}",
+            u32::from(separator)
+        );
+    }
+}
+
+#[test]
 fn equipment_details_sort_and_validate_whitelisted_fields() {
     let make = |name: &str, stats| ListingEquipmentStatGroup { name: name.to_owned(), stats };
     let stats = vec![
@@ -882,6 +907,63 @@ fn effective_expiry_reports_expired_and_preserves_published_snapshot() {
             ),
             Err(ConsignmentError::Unavailable)
         );
+    }
+}
+
+#[test]
+fn terminal_projections_require_tradeable_published_snapshots() {
+    use ListingMode::{Consigned, Direct};
+    use ListingReason::{AuctionLotCreated, DepositExpired, DisplayExpired};
+    use ListingState::{AwaitingDeposit, Closed, Displayed, Expired};
+    use PrivateListingViewKind as Kind;
+
+    let published_label = equipment_label();
+    let mut untradeable = published_label.clone();
+    untradeable.tradeable = false;
+    let mut soulbound = untradeable.clone();
+    soulbound.level = ListingEquipmentLevel::Soulbound;
+    let cases = [
+        (Direct, Displayed, DisplayExpired),
+        (Direct, Expired, DisplayExpired),
+        (Consigned, AwaitingDeposit, DepositExpired),
+        (Consigned, Expired, DepositExpired),
+        (Direct, Displayed, AuctionLotCreated),
+        (Direct, Closed, AuctionLotCreated),
+    ];
+    let terminal_kind = |reason, equipment| match reason {
+        AuctionLotCreated => Kind::Closed { reason, equipment },
+        _ => Kind::Expired { reason, equipment },
+    };
+
+    let published = ListingEquipmentDetails::new(now(), published_label, vec![]).fixture();
+    for (mode, stored_state, reason) in cases {
+        let kind = terminal_kind(reason, Some(published.clone()));
+        let listing =
+            private_listing(PrivateListingView::new(mode, stored_state, kind.clone()).fixture());
+        let owned = OwnedListingRecord::new(listing.clone(), vec![]).fixture();
+        let admin = AdminListingRecord::new(
+            listing,
+            UserId::from_uuid(Uuid::from_u128(10)),
+            "测试卖家".to_owned(),
+            None,
+            false,
+        )
+        .fixture();
+        assert_eq!(owned.listing().view.kind(), &kind);
+        assert_eq!(admin.listing().view.kind(), &kind);
+    }
+
+    for label in [soulbound, untradeable] {
+        let equipment = ListingEquipmentDetails::new(now(), label, vec![]).fixture();
+        let accepted: Vec<_> = cases
+            .into_iter()
+            .filter(|&(mode, stored_state, reason)| {
+                let kind = terminal_kind(reason, Some(equipment.clone()));
+                PrivateListingView::new(mode, stored_state, kind)
+                    != Err(ConsignmentError::Unavailable)
+            })
+            .collect();
+        assert!(accepted.is_empty(), "放行不可交易的发布快照 {accepted:?}");
     }
 }
 
