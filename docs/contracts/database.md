@@ -92,14 +92,115 @@
 | `consignment_replay_keys` | 加密包装的登记重放 HMAC 比较密钥，最多一项可供新登记写入；旧项继续验证既有命令。轮换装备数据密钥时重包，账本保持原样 |
 | `consignment_commands` | 跨操作与目标全局唯一的命令 ID，保存 actor、规范输入摘要、首次结果和安全回执，只追加。仅登记引用比较密钥；内部重放保留冻结期限、终态原因或下次调度时刻及安全失败分类 |
 | `consignment_events` | 每个挂单版本的一条内部迁移事实，只追加；挂单写入须在提交前持有本事务创建的最终命令和匹配的同版事件 |
-| `consignment_lookup_work` | 每个挂单与代次一项持久解析工作，计次上限六次。排队有下次时刻，领取有完整租约、正计次与围栏，完成或取消有完成时间 |
+| `consignment_lookup_work` | 每个挂单与代次一项持久解析工作，计次上限六次。排队有下次时刻，领取有完整租约、正计次与围栏，完成或取消有完成时间。`network_deadline timestamptz` 保存本次领取的网络硬截止，在 `leased` 时必填、有限且不晚于 `lease_until`，其他状态为空。续租沿用本次网络硬截止，租期上界为该时刻加五秒。Worker 重启后的回收和关停也使用持久化的期限 |
 | `consignment_lookup_control` | 服务共用单例。保存准入代次、全局许可与冷却、Worker 就绪期限和扫描游标。初始化关闭，初始代次为 1，四个许可持有者字段同时为空或同时存在 |
 
 - 模式为 `direct` / `consigned`，世界为 `main` / `isekai`。标价为 1–1000000000 Credits，计价版本为 1，费率为 0–9999 bps，`direct` 固定为 0。活动态为 `resolving`、`displayed`、`awaiting_deposit`，同卖家、世界与装备在活动态最多一条。任何卖家在同世界与装备上最多占用一个已核验名额，适用于后两个状态。两个部分唯一索引仅以持久状态为谓词。
-- 解析中无快照，展示仅接受非寄售，待寄仅接受寄售，两种发布态均须有快照。拒挂按原因区分能否保留待核观察。关闭与过期保留已见快照和截止，已终结的行禁止继续迁移。业务事务同提交写回执、挂单版本、事件以及 `audit_records`。审计关联命令、actor、动作、挂单及安全处置。已仲裁的确定性拒绝也写回执与拒绝审计，无版本变化时不新增挂单事件。解析重排记录工作事实。审计与快照只写安全事实，登记请求的原始装备链接、装备 key、来源响应原文及领取 token 不进入回执、快照或审计。运营下架说明属于私有审计，由应用过滤后提交。存储错误映射只提取 SQLSTATE 与已知约束名，避免 PostgreSQL 的行明细被回显。
+- 解析中无快照，展示仅接受非寄售，待寄仅接受寄售，两种发布态均须有快照。拒挂按原因区分能否保留待核观察。关闭与过期保留已见快照和截止，已终结的行禁止继续迁移。业务事务同提交写回执、挂单版本、事件以及 `audit_records`。审计关联命令、actor、动作、挂单及安全处置。已仲裁的确定性拒绝也写回执与拒绝审计，无版本变化时不新增挂单事件。解析重排记录工作事实。审计与快照只写安全事实，登记请求的原始装备链接、装备 key、来源响应原文及领取 token 不进入回执、快照或审计。运营下架说明属于私有审计，由应用过滤后提交。应用映射数据库错误时只读取 SQLSTATE 与约束名，不记录也不转发 PostgreSQL 的 `DETAIL`。
+- 比较本次写入的 `updated_at` 与旧 `expires_at`，恰好相等即到期，发布、改价与主动关闭均被拒。允许按旧状态到期，拍卖碰撞、卖家失格与服务停用等优先的系统强制关闭仍可写入。
+- 寄售命令、挂单、事件与基线必须在同一个顶层事务内写入，不得使用保存点。登记、改价生效、关闭、解析发布、拒挂及到期等新增挂单版本的成功回执，须匹配本事务事件的命令、挂单、版本及种类。`unchanged`、确定拒绝、仅解析重排和仅追加碰撞关联不要求挂单版本事件。`lease_lost` 是迟到解析提交的围栏结果，不进入命令账本。
 - `consignment_eid_alias(text)` 对全串 ASCII 数字去前导零，全零或非法输入返回 NULL。按世界与规范 EID 匹配 lot，比较留在文本域。基线和碰撞对同一挂单互斥。目录、计数、本人有效状态、发布与清退用同一个基线差集检测已提交 lot。新读快照看到差集时立即隐藏，不等写侧收口；流拍不恢复旧挂单。既有装备索引的性能由后续查询压测验证。
 - 公开读取还要求准入代次匹配、当前时刻早于截止、卖家有效且无生效黑名单、拉黑历史计数等于登记值，并使用属于本单的当前快照。补扫逐单重读证据，按挂单 ID 分页并回绕；游标只决定扫描起点。解析领取与全局许可由同一事务更新，取消可保留在途许可的时间栅栏。
 - `consignment_history` 永久保留六张挂单及事实表，`consignment_key_material` 永久保留两张凭证表并按敏感备份制度管理，工作和许可归 `ephemeral_current_projections`。保留策略不授权删除，凭证退休按列清空。
+
+#### 寄售约束名
+
+应用错误映射使用 PostgreSQL 报告的名字。列级与表级 CHECK 都显式命名。
+
+| CHECK 名 | 含义 |
+| --- | --- |
+| `consignment_listing_id` | UUID 非零 |
+| `consignment_listing_seller_user_id` | 卖家 UUID 非零 |
+| `consignment_listing_world_id` | 仅 `main` 或 `isekai` |
+| `consignment_listing_external_equipment_id` | 1–32 位 ASCII 正十进制，无前导零 |
+| `consignment_listing_mode` | 仅 `direct` 或 `consigned` |
+| `consignment_listing_price` | 1–1000000000 Credits |
+| `consignment_listing_pricing_version` | 计价版本固定为 1 |
+| `consignment_listing_fee_bps` | 费率为 0–9999 bps，非寄售固定为 0 |
+| `consignment_listing_state_version` | 1–9007199254740991 的挂单版本 |
+| `consignment_listing_service_epoch` | 1–9007199254740991 的启用代次 |
+| `consignment_listing_blacklist_count_at_register` | 登记时的拉黑历史计数非负 |
+| `consignment_listing_current_snapshot_id` | 当前快照 UUID 可空，存在时非零 |
+| `consignment_listing_created_at` | 创建时刻有限 |
+| `consignment_listing_updated_at` | 更新时间有限且不早于创建时刻 |
+| `consignment_listing_expires_at` | 截止有限且晚于创建时刻 |
+| `consignment_listing_state_shape` | 状态闭集及模式、快照和原因的组合 |
+| `consignment_snapshot_id` | UUID 非零 |
+| `consignment_snapshot_generation` | 1–9007199254740991 的解析代次 |
+| `consignment_snapshot_adapter` | 适配器固定为 `hvdata-equip-v1` |
+| `consignment_snapshot_observed_at` | 观察时刻有限 |
+| `consignment_snapshot_digest` | 安全观察摘要为 32 字节 |
+| `consignment_snapshot_world_id` | 仅 `main` 或 `isekai` |
+| `consignment_snapshot_external_equipment_id` | 1–32 位 ASCII 正十进制，无前导零 |
+| `consignment_snapshot_name` | 安全装备名，最多 512 字节 |
+| `consignment_snapshot_category` | 安全类别，最多 128 字节 |
+| `consignment_snapshot_alt_name` | 安全别名，可空，最多 512 字节 |
+| `consignment_snapshot_owner_name` | 安全持有人名，最多 256 字节 |
+| `consignment_snapshot_stat_groups` | 安全属性白名单、唯一名称与数量、数值预算 |
+| `consignment_snapshot_level` | 等级种类、等级数值与可交易性的组合 |
+| `consignment_registration_aad_equipment_id` | 登记凭证的 AAD UUID 非零 |
+| `consignment_registration_created_at` | 创建时刻有限 |
+| `consignment_registration_updated_at` | 更新时间有限且不早于创建时刻 |
+| `consignment_registration_retired_at` | 退休时刻可空，存在时有限 |
+| `consignment_registration_envelope` | 在用信封具备密文、nonce、密钥标识、指纹，退休时清空四列且退休时刻等于更新时间 |
+| `consignment_replay_key_id` | UUID 非零 |
+| `consignment_replay_key_wrapped_key` | 包装密钥含认证标签，共 48 字节 |
+| `consignment_replay_key_nonce` | nonce 为 12 字节 |
+| `consignment_replay_key_encryption_key_id` | 数据密钥标识符合 keyring 格式 |
+| `consignment_replay_key_created_at` | 创建时刻有限 |
+| `consignment_replay_key_updated_at` | 更新时间有限且不早于创建时刻 |
+| `consignment_command_command_id` | 命令 UUID 非零 |
+| `consignment_command_request_digest` | 规范化请求摘要为 32 字节 |
+| `consignment_command_created_at` | 创建时刻有限 |
+| `consignment_command_actor` | actor 类型、标识与操作匹配 |
+| `consignment_command_target` | 请求目标、重放密钥与挂单外键符合操作和结果 |
+| `consignment_command_result_code` | 操作、状态码与结果码组合符合闭集 |
+| `consignment_command_receipt` | 安全 JSON 回执字段及其值与命令匹配 |
+| `consignment_event_state_version` | 1–9007199254740991 的挂单版本 |
+| `consignment_event_price` | 1–1000000000 Credits |
+| `consignment_event_occurred_at` | 事件时刻有限 |
+| `consignment_event_edge` | 挂单版本、事件、actor、状态迁移与原因匹配 |
+| `consignment_baseline_lot_id` | lot UUID 非零 |
+| `consignment_conflict_lot_id` | lot UUID 非零 |
+| `consignment_conflict_detected_at` | 碰撞发现时刻有限 |
+| `consignment_lookup_work_id` | UUID 非零 |
+| `consignment_lookup_work_generation` | 1–9007199254740991 的解析代次 |
+| `consignment_lookup_work_attempt_count` | 解析计次为 0–6 |
+| `consignment_lookup_work_fence` | 解析围栏非负 |
+| `consignment_lookup_work_next_attempt_at` | 下次解析时刻可空，存在时有限 |
+| `consignment_lookup_work_token` | 租约 token 可空，存在时是非零 UUID |
+| `consignment_lookup_work_lease_until` | 租约截止可空，存在时有限 |
+| `consignment_lookup_work_last_reason` | 仅 `source_unavailable`、`source_timeout`、`source_rate_limited` 或空 |
+| `consignment_lookup_work_completed_at` | 完成时刻可空，存在时有限 |
+| `consignment_lookup_work_created_at` | 创建时刻有限 |
+| `consignment_lookup_work_updated_at` | 更新时间有限且不早于创建时刻 |
+| `consignment_lookup_work_state` | 状态、调度、完成时间与租约形状匹配，网络硬截止仅在领取中有值且有限、不晚于租约截止 |
+| `consignment_lookup_control_id` | 许可单例固定主键 1 |
+| `consignment_lookup_control_enabled_epoch` | 1–9007199254740991 的准入代次 |
+| `consignment_lookup_control_next_allowed_at` | 下次许可时刻有限 |
+| `consignment_lookup_control_cooldown_until` | 冷却截止可空，存在时有限 |
+| `consignment_lookup_control_holder_fence` | 许可持有者围栏可空，存在时为正 |
+| `consignment_lookup_control_holder_token` | 许可持有者 token 可空，存在时为非零 UUID |
+| `consignment_lookup_control_permit_until` | 许可截止可空，存在时有限 |
+| `consignment_lookup_control_worker_ready_until` | Worker 就绪期限可空，存在时有限 |
+| `consignment_lookup_control_scan_after` | 扫描游标可空，存在时为非零 UUID |
+| `consignment_lookup_control_holder` | 四个许可持有者字段同时为空或全有 |
+
+| 索引、外键或触发器报告的约束名 | 含义 |
+| --- | --- |
+| `consignment_listings_seller_active_idx` | 同卖家在同世界、同件装备的活动挂单唯一 |
+| `consignment_listings_equipment_published_idx` | 同世界、同件装备的已发布挂单唯一 |
+| `consignment_replay_keys_write_current_idx` | 写入使用的当前重放比较密钥最多一项 |
+| `consignment_listing_current_snapshot_fk` | 当前快照必须属于本单 |
+| `consignment_listing_transition` | 挂单首写、版本递增、冻结字段与旧截止保护 |
+| `consignment_listing_version_event` | 挂单写入必须有匹配的同版事件与本事务命令 |
+| `consignment_command_version_event` | 声明新增挂单版本的成功回执必须有本事务的匹配事件 |
+| `consignment_event_has_version` | 事件必须对应已写入的挂单版本 |
+| `consignment_snapshot_identity` | 快照的世界与装备编号必须匹配挂单 |
+| `consignment_lot_identity` | lot 必须已提交且世界、装备编号与挂单匹配 |
+| `consignment_baseline_registration` | 基线只能与首笔登记同事务写入 |
+| `consignment_lot_baseline_disjoint` | 同一挂单的基线与碰撞 lot 互斥 |
+| `consignment_registration_retirement` | 已退休信封不可修改或恢复 |
 
 ### 装备标记
 
@@ -267,7 +368,7 @@ owner/superuser 时以明确错误终止，不放宽授权。`ALTER DEFAULT PRIV
 | `consignment_listings` | `state`、`price`、`state_version`、`current_snapshot_id`、`reason_code`、`updated_at`、`expires_at` |
 | `consignment_registration_secrets` | `ciphertext`、`nonce`、`encryption_key_id`、`fingerprint`、`updated_at`、`retired_at` |
 | `consignment_replay_keys` | `write_current`、`wrapped_key`、`nonce`、`encryption_key_id`、`updated_at` |
-| `consignment_lookup_work` | 工作状态、计次、围栏、下次解析时间、租约三列、最后安全原因、完成时间、更新时间 |
+| `consignment_lookup_work` | 工作状态、计次、围栏、下次解析时间、租约字段与 `network_deadline`、最后安全原因、完成时间、更新时间 |
 | `consignment_lookup_control` | 除主键外的全部列 |
 
 ## 变更规则

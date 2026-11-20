@@ -59,25 +59,33 @@ AS $function$
 $function$;
 
 CREATE TABLE public.consignment_listings (
-    id uuid PRIMARY KEY CHECK (id <> uuid '00000000-0000-0000-0000-000000000000'),
+    id uuid PRIMARY KEY CONSTRAINT consignment_listing_id CHECK (id <> uuid '00000000-0000-0000-0000-000000000000'),
     seller_user_id uuid NOT NULL REFERENCES public.users(id) ON DELETE RESTRICT
-        CHECK (seller_user_id <> uuid '00000000-0000-0000-0000-000000000000'),
+        CONSTRAINT consignment_listing_seller_user_id CHECK (seller_user_id <> uuid '00000000-0000-0000-0000-000000000000'),
     world_id text NOT NULL REFERENCES public.worlds(id) ON DELETE RESTRICT
-        CHECK (world_id IN ('main', 'isekai')),
-    external_equipment_id text NOT NULL CHECK (external_equipment_id COLLATE "C" ~ '^[1-9][0-9]{0,31}$'),
-    mode text NOT NULL CHECK (mode IN ('direct', 'consigned')),
+        CONSTRAINT consignment_listing_world_id CHECK (world_id IN ('main', 'isekai')),
+    external_equipment_id text NOT NULL
+        CONSTRAINT consignment_listing_external_equipment_id CHECK (external_equipment_id COLLATE "C" ~ '^[1-9][0-9]{0,31}$'),
+    mode text NOT NULL CONSTRAINT consignment_listing_mode CHECK (mode IN ('direct', 'consigned')),
     state text NOT NULL,
-    price bigint NOT NULL CHECK (price BETWEEN 1 AND 1000000000),
-    pricing_version smallint NOT NULL CHECK (pricing_version = 1),
-    fee_bps smallint NOT NULL CHECK (fee_bps BETWEEN 0 AND 9999 AND (mode <> 'direct' OR fee_bps = 0)),
-    state_version bigint NOT NULL CHECK (state_version BETWEEN 1 AND 9007199254740991),
-    service_epoch bigint NOT NULL CHECK (service_epoch BETWEEN 1 AND 9007199254740991),
-    blacklist_count_at_register bigint NOT NULL CHECK (blacklist_count_at_register >= 0),
-    current_snapshot_id uuid CHECK (current_snapshot_id <> uuid '00000000-0000-0000-0000-000000000000'),
+    price bigint NOT NULL CONSTRAINT consignment_listing_price CHECK (price BETWEEN 1 AND 1000000000),
+    pricing_version smallint NOT NULL CONSTRAINT consignment_listing_pricing_version CHECK (pricing_version = 1),
+    fee_bps smallint NOT NULL
+        CONSTRAINT consignment_listing_fee_bps CHECK (fee_bps BETWEEN 0 AND 9999 AND (mode <> 'direct' OR fee_bps = 0)),
+    state_version bigint NOT NULL
+        CONSTRAINT consignment_listing_state_version CHECK (state_version BETWEEN 1 AND 9007199254740991),
+    service_epoch bigint NOT NULL
+        CONSTRAINT consignment_listing_service_epoch CHECK (service_epoch BETWEEN 1 AND 9007199254740991),
+    blacklist_count_at_register bigint NOT NULL
+        CONSTRAINT consignment_listing_blacklist_count_at_register CHECK (blacklist_count_at_register >= 0),
+    current_snapshot_id uuid
+        CONSTRAINT consignment_listing_current_snapshot_id CHECK (current_snapshot_id <> uuid '00000000-0000-0000-0000-000000000000'),
     reason_code text,
-    created_at timestamptz NOT NULL CHECK (isfinite(created_at)),
-    updated_at timestamptz NOT NULL CHECK (isfinite(updated_at) AND updated_at >= created_at),
-    expires_at timestamptz NOT NULL CHECK (isfinite(expires_at) AND expires_at > created_at),
+    created_at timestamptz NOT NULL CONSTRAINT consignment_listing_created_at CHECK (isfinite(created_at)),
+    updated_at timestamptz NOT NULL
+        CONSTRAINT consignment_listing_updated_at CHECK (isfinite(updated_at) AND updated_at >= created_at),
+    expires_at timestamptz NOT NULL
+        CONSTRAINT consignment_listing_expires_at CHECK (isfinite(expires_at) AND expires_at > created_at),
     -- 内部登记事务标记由 INSERT 触发器写入全宽 XID，避免仅比较 xmin 的回绕歧义。
     registration_xact_id xid8 NOT NULL,
     CONSTRAINT consignment_listing_state_shape CHECK ((
@@ -156,22 +164,28 @@ END
 $function$;
 
 CREATE TABLE public.consignment_snapshots (
-    id uuid PRIMARY KEY CHECK (id <> uuid '00000000-0000-0000-0000-000000000000'),
+    id uuid PRIMARY KEY CONSTRAINT consignment_snapshot_id CHECK (id <> uuid '00000000-0000-0000-0000-000000000000'),
     listing_id uuid NOT NULL REFERENCES public.consignment_listings(id) ON DELETE RESTRICT,
-    generation bigint NOT NULL CHECK (generation BETWEEN 1 AND 9007199254740991),
-    adapter text NOT NULL CHECK (adapter = 'hvdata-equip-v1'),
-    observed_at timestamptz NOT NULL CHECK (isfinite(observed_at)),
-    digest bytea NOT NULL CHECK (octet_length(digest) = 32),
-    world_id text NOT NULL CHECK (world_id IN ('main', 'isekai')),
-    external_equipment_id text NOT NULL CHECK (external_equipment_id COLLATE "C" ~ '^[1-9][0-9]{0,31}$'),
-    name text NOT NULL CHECK (public.consignment_safe_observation_text(name, 512)),
-    category text NOT NULL CHECK (public.consignment_safe_observation_text(category, 128)),
-    alt_name text CHECK (public.consignment_safe_observation_text(alt_name, 512)),
+    generation bigint NOT NULL
+        CONSTRAINT consignment_snapshot_generation CHECK (generation BETWEEN 1 AND 9007199254740991),
+    adapter text NOT NULL CONSTRAINT consignment_snapshot_adapter CHECK (adapter = 'hvdata-equip-v1'),
+    observed_at timestamptz NOT NULL CONSTRAINT consignment_snapshot_observed_at CHECK (isfinite(observed_at)),
+    digest bytea NOT NULL CONSTRAINT consignment_snapshot_digest CHECK (octet_length(digest) = 32),
+    world_id text NOT NULL CONSTRAINT consignment_snapshot_world_id CHECK (world_id IN ('main', 'isekai')),
+    external_equipment_id text NOT NULL
+        CONSTRAINT consignment_snapshot_external_equipment_id CHECK (external_equipment_id COLLATE "C" ~ '^[1-9][0-9]{0,31}$'),
+    name text NOT NULL CONSTRAINT consignment_snapshot_name CHECK (public.consignment_safe_observation_text(name, 512)),
+    category text NOT NULL
+        CONSTRAINT consignment_snapshot_category CHECK (public.consignment_safe_observation_text(category, 128)),
+    alt_name text
+        CONSTRAINT consignment_snapshot_alt_name CHECK (public.consignment_safe_observation_text(alt_name, 512)),
     level_kind text NOT NULL,
     level_number integer,
     tradeable boolean NOT NULL,
-    owner_name text NOT NULL CHECK (public.consignment_safe_observation_text(owner_name, 256)),
-    stat_groups jsonb NOT NULL CHECK (public.consignment_valid_stat_groups(stat_groups)),
+    owner_name text NOT NULL
+        CONSTRAINT consignment_snapshot_owner_name CHECK (public.consignment_safe_observation_text(owner_name, 256)),
+    stat_groups jsonb NOT NULL
+        CONSTRAINT consignment_snapshot_stat_groups CHECK (public.consignment_valid_stat_groups(stat_groups)),
     UNIQUE (listing_id, id),
     UNIQUE (listing_id, generation),
     CONSTRAINT consignment_snapshot_level CHECK ((
@@ -189,14 +203,16 @@ ALTER TABLE public.consignment_listings
 
 CREATE TABLE public.consignment_registration_secrets (
     listing_id uuid PRIMARY KEY REFERENCES public.consignment_listings(id) ON DELETE RESTRICT,
-    aad_equipment_id uuid NOT NULL UNIQUE CHECK (aad_equipment_id <> uuid '00000000-0000-0000-0000-000000000000'),
+    aad_equipment_id uuid NOT NULL UNIQUE
+        CONSTRAINT consignment_registration_aad_equipment_id CHECK (aad_equipment_id <> uuid '00000000-0000-0000-0000-000000000000'),
     ciphertext bytea,
     nonce bytea,
     encryption_key_id text,
     fingerprint text,
-    created_at timestamptz NOT NULL CHECK (isfinite(created_at)),
-    updated_at timestamptz NOT NULL CHECK (isfinite(updated_at) AND updated_at >= created_at),
-    retired_at timestamptz CHECK (isfinite(retired_at)),
+    created_at timestamptz NOT NULL CONSTRAINT consignment_registration_created_at CHECK (isfinite(created_at)),
+    updated_at timestamptz NOT NULL
+        CONSTRAINT consignment_registration_updated_at CHECK (isfinite(updated_at) AND updated_at >= created_at),
+    retired_at timestamptz CONSTRAINT consignment_registration_retired_at CHECK (isfinite(retired_at)),
     CONSTRAINT consignment_registration_envelope CHECK ((
         CASE WHEN retired_at IS NULL THEN
             octet_length(ciphertext) > 0 AND octet_length(nonce) = 12
@@ -211,14 +227,16 @@ CREATE INDEX consignment_registration_active_key_idx ON public.consignment_regis
     (encryption_key_id, listing_id) WHERE retired_at IS NULL;
 
 CREATE TABLE public.consignment_replay_keys (
-    id uuid PRIMARY KEY CHECK (id <> uuid '00000000-0000-0000-0000-000000000000'),
+    id uuid PRIMARY KEY CONSTRAINT consignment_replay_key_id CHECK (id <> uuid '00000000-0000-0000-0000-000000000000'),
     write_current boolean NOT NULL,
     -- 32 字节比较密钥和 AES-GCM 的 16 字节认证标签。
-    wrapped_key bytea NOT NULL CHECK (octet_length(wrapped_key) = 48),
-    nonce bytea NOT NULL CHECK (octet_length(nonce) = 12),
-    encryption_key_id text NOT NULL CHECK (encryption_key_id COLLATE "C" ~ '^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$'),
-    created_at timestamptz NOT NULL CHECK (isfinite(created_at)),
-    updated_at timestamptz NOT NULL CHECK (isfinite(updated_at) AND updated_at >= created_at)
+    wrapped_key bytea NOT NULL CONSTRAINT consignment_replay_key_wrapped_key CHECK (octet_length(wrapped_key) = 48),
+    nonce bytea NOT NULL CONSTRAINT consignment_replay_key_nonce CHECK (octet_length(nonce) = 12),
+    encryption_key_id text NOT NULL
+        CONSTRAINT consignment_replay_key_encryption_key_id CHECK (encryption_key_id COLLATE "C" ~ '^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$'),
+    created_at timestamptz NOT NULL CONSTRAINT consignment_replay_key_created_at CHECK (isfinite(created_at)),
+    updated_at timestamptz NOT NULL
+        CONSTRAINT consignment_replay_key_updated_at CHECK (isfinite(updated_at) AND updated_at >= created_at)
 );
 
 CREATE UNIQUE INDEX consignment_replay_keys_write_current_idx ON public.consignment_replay_keys
@@ -310,18 +328,20 @@ AS $function$
 $function$;
 
 CREATE TABLE public.consignment_commands (
-    command_id uuid PRIMARY KEY CHECK (command_id <> uuid '00000000-0000-0000-0000-000000000000'),
+    command_id uuid PRIMARY KEY
+        CONSTRAINT consignment_command_command_id CHECK (command_id <> uuid '00000000-0000-0000-0000-000000000000'),
     actor_kind text NOT NULL,
     actor_ref text NOT NULL,
     operation text NOT NULL,
     request_target text NOT NULL,
-    request_digest bytea NOT NULL CHECK (octet_length(request_digest) = 32),
+    request_digest bytea NOT NULL
+        CONSTRAINT consignment_command_request_digest CHECK (octet_length(request_digest) = 32),
     replay_key_id uuid REFERENCES public.consignment_replay_keys(id) ON DELETE RESTRICT,
     listing_id uuid REFERENCES public.consignment_listings(id) ON DELETE RESTRICT,
     result_status smallint NOT NULL,
     result_code text NOT NULL,
     result_body jsonb NOT NULL,
-    created_at timestamptz NOT NULL CHECK (isfinite(created_at)),
+    created_at timestamptz NOT NULL CONSTRAINT consignment_command_created_at CHECK (isfinite(created_at)),
     CONSTRAINT consignment_command_actor CHECK ((
         CASE actor_kind
             WHEN 'public_user' THEN operation IN ('register', 'reprice', 'withdraw')
@@ -341,14 +361,18 @@ CREATE TABLE public.consignment_commands (
     CONSTRAINT consignment_command_result_code CHECK (
         (result_status = 202 AND operation = 'register' AND result_code = 'accepted')
         OR (result_status = 200 AND operation <> 'register' AND result_code = 'ok')
-        OR (result_status = 403 AND result_code = 'participant_ineligible')
-        OR (result_status = 404 AND operation <> 'register' AND result_code = 'listing_not_found')
-        OR (result_status = 409 AND result_code IN (
-            'already_open', 'equipment_busy', 'history_unproven', 'history_owner_mismatch',
-            'history_alias_conflict', 'fee_changed', 'stale_version', 'listing_not_active', 'world_unavailable'
+        OR (operation = 'register' AND (
+            (result_status = 403 AND result_code = 'participant_ineligible')
+            OR (result_status = 409 AND result_code IN (
+                'already_open', 'equipment_busy', 'history_unproven', 'history_owner_mismatch',
+                'history_alias_conflict', 'fee_changed', 'world_unavailable'
+            ))
+            OR (result_status = 429 AND result_code IN ('registration_rate_limited', 'listing_limit_reached'))
         ))
-        OR (result_status = 429 AND operation = 'register'
-            AND result_code IN ('registration_rate_limited', 'listing_limit_reached'))
+        OR (operation IN ('reprice', 'withdraw', 'admin_delist') AND (
+            (result_status = 404 AND result_code = 'listing_not_found')
+            OR (result_status = 409 AND result_code IN ('stale_version', 'listing_not_active'))
+        ))
     ),
     CONSTRAINT consignment_command_receipt CHECK (
         public.consignment_valid_receipt(result_body, command_id, operation, listing_id, result_status)
@@ -361,15 +385,16 @@ CREATE INDEX consignment_commands_replay_key_idx ON public.consignment_commands 
 
 CREATE TABLE public.consignment_events (
     listing_id uuid NOT NULL REFERENCES public.consignment_listings(id) ON DELETE RESTRICT,
-    state_version bigint NOT NULL CHECK (state_version BETWEEN 1 AND 9007199254740991),
+    state_version bigint NOT NULL
+        CONSTRAINT consignment_event_state_version CHECK (state_version BETWEEN 1 AND 9007199254740991),
     command_id uuid NOT NULL REFERENCES public.consignment_commands(command_id) ON DELETE RESTRICT,
     actor_kind text NOT NULL,
     event_kind text NOT NULL,
     from_state text,
     to_state text NOT NULL,
     reason_code text,
-    price bigint NOT NULL CHECK (price BETWEEN 1 AND 1000000000),
-    occurred_at timestamptz NOT NULL CHECK (isfinite(occurred_at)),
+    price bigint NOT NULL CONSTRAINT consignment_event_price CHECK (price BETWEEN 1 AND 1000000000),
+    occurred_at timestamptz NOT NULL CONSTRAINT consignment_event_occurred_at CHECK (isfinite(occurred_at)),
     PRIMARY KEY (listing_id, state_version),
     CONSTRAINT consignment_event_edge CHECK ((
         CASE
@@ -401,7 +426,7 @@ CREATE INDEX consignment_events_command_idx ON public.consignment_events (comman
 CREATE TABLE public.consignment_listing_lot_baselines (
     listing_id uuid NOT NULL REFERENCES public.consignment_listings(id) ON DELETE RESTRICT,
     lot_id uuid NOT NULL REFERENCES public.lots(id) ON DELETE RESTRICT
-        CHECK (lot_id <> uuid '00000000-0000-0000-0000-000000000000'),
+        CONSTRAINT consignment_baseline_lot_id CHECK (lot_id <> uuid '00000000-0000-0000-0000-000000000000'),
     PRIMARY KEY (listing_id, lot_id)
 );
 CREATE INDEX consignment_listing_lot_baselines_lot_idx
@@ -410,8 +435,8 @@ CREATE INDEX consignment_listing_lot_baselines_lot_idx
 CREATE TABLE public.consignment_listing_auction_conflicts (
     listing_id uuid NOT NULL REFERENCES public.consignment_listings(id) ON DELETE RESTRICT,
     lot_id uuid NOT NULL REFERENCES public.lots(id) ON DELETE RESTRICT
-        CHECK (lot_id <> uuid '00000000-0000-0000-0000-000000000000'),
-    detected_at timestamptz NOT NULL CHECK (isfinite(detected_at)),
+        CONSTRAINT consignment_conflict_lot_id CHECK (lot_id <> uuid '00000000-0000-0000-0000-000000000000'),
+    detected_at timestamptz NOT NULL CONSTRAINT consignment_conflict_detected_at CHECK (isfinite(detected_at)),
     command_id uuid NOT NULL REFERENCES public.consignment_commands(command_id) ON DELETE RESTRICT,
     PRIMARY KEY (listing_id, lot_id)
 );
@@ -421,20 +446,25 @@ CREATE INDEX consignment_listing_auction_conflicts_command_idx
     ON public.consignment_listing_auction_conflicts (command_id);
 
 CREATE TABLE public.consignment_lookup_work (
-    id uuid PRIMARY KEY CHECK (id <> uuid '00000000-0000-0000-0000-000000000000'),
+    id uuid PRIMARY KEY CONSTRAINT consignment_lookup_work_id CHECK (id <> uuid '00000000-0000-0000-0000-000000000000'),
     listing_id uuid NOT NULL REFERENCES public.consignment_listings(id) ON DELETE RESTRICT,
-    generation bigint NOT NULL CHECK (generation BETWEEN 1 AND 9007199254740991),
+    generation bigint NOT NULL
+        CONSTRAINT consignment_lookup_work_generation CHECK (generation BETWEEN 1 AND 9007199254740991),
     state text NOT NULL,
-    attempt_count smallint NOT NULL CHECK (attempt_count BETWEEN 0 AND 6),
-    fence bigint NOT NULL CHECK (fence >= 0),
-    next_attempt_at timestamptz CHECK (isfinite(next_attempt_at)),
+    attempt_count smallint NOT NULL
+        CONSTRAINT consignment_lookup_work_attempt_count CHECK (attempt_count BETWEEN 0 AND 6),
+    fence bigint NOT NULL CONSTRAINT consignment_lookup_work_fence CHECK (fence >= 0),
+    next_attempt_at timestamptz CONSTRAINT consignment_lookup_work_next_attempt_at CHECK (isfinite(next_attempt_at)),
     lease_owner text,
-    token uuid CHECK (token <> uuid '00000000-0000-0000-0000-000000000000'),
-    lease_until timestamptz CHECK (isfinite(lease_until)),
-    last_reason text CHECK (last_reason IN ('source_unavailable', 'source_timeout', 'source_rate_limited')),
-    completed_at timestamptz CHECK (isfinite(completed_at)),
-    created_at timestamptz NOT NULL CHECK (isfinite(created_at)),
-    updated_at timestamptz NOT NULL CHECK (isfinite(updated_at) AND updated_at >= created_at),
+    token uuid CONSTRAINT consignment_lookup_work_token CHECK (token <> uuid '00000000-0000-0000-0000-000000000000'),
+    lease_until timestamptz CONSTRAINT consignment_lookup_work_lease_until CHECK (isfinite(lease_until)),
+    network_deadline timestamptz,
+    last_reason text
+        CONSTRAINT consignment_lookup_work_last_reason CHECK (last_reason IN ('source_unavailable', 'source_timeout', 'source_rate_limited')),
+    completed_at timestamptz CONSTRAINT consignment_lookup_work_completed_at CHECK (isfinite(completed_at)),
+    created_at timestamptz NOT NULL CONSTRAINT consignment_lookup_work_created_at CHECK (isfinite(created_at)),
+    updated_at timestamptz NOT NULL
+        CONSTRAINT consignment_lookup_work_updated_at CHECK (isfinite(updated_at) AND updated_at >= created_at),
     UNIQUE (listing_id, generation),
     CONSTRAINT consignment_lookup_work_state CHECK ((
         CASE state
@@ -446,7 +476,8 @@ CREATE TABLE public.consignment_lookup_work (
         END
         AND CASE WHEN state = 'leased' THEN
             public.consignment_valid_text(lease_owner, 256) AND token IS NOT NULL AND lease_until IS NOT NULL
-        ELSE lease_owner IS NULL AND token IS NULL AND lease_until IS NULL END
+            AND network_deadline IS NOT NULL AND isfinite(network_deadline) AND network_deadline <= lease_until
+        ELSE lease_owner IS NULL AND token IS NULL AND lease_until IS NULL AND network_deadline IS NULL END
     ) IS TRUE)
 );
 CREATE INDEX consignment_lookup_work_queued_idx ON public.consignment_lookup_work
@@ -455,17 +486,22 @@ CREATE INDEX consignment_lookup_work_leased_idx ON public.consignment_lookup_wor
     (lease_until, id) WHERE state = 'leased';
 
 CREATE TABLE public.consignment_lookup_control (
-    id smallint PRIMARY KEY CHECK (id = 1),
-    enabled_epoch bigint NOT NULL CHECK (enabled_epoch BETWEEN 1 AND 9007199254740991),
+    id smallint PRIMARY KEY CONSTRAINT consignment_lookup_control_id CHECK (id = 1),
+    enabled_epoch bigint NOT NULL
+        CONSTRAINT consignment_lookup_control_enabled_epoch CHECK (enabled_epoch BETWEEN 1 AND 9007199254740991),
     admitting boolean NOT NULL,
-    next_allowed_at timestamptz NOT NULL CHECK (isfinite(next_allowed_at)),
-    cooldown_until timestamptz CHECK (isfinite(cooldown_until)),
+    next_allowed_at timestamptz NOT NULL
+        CONSTRAINT consignment_lookup_control_next_allowed_at CHECK (isfinite(next_allowed_at)),
+    cooldown_until timestamptz CONSTRAINT consignment_lookup_control_cooldown_until CHECK (isfinite(cooldown_until)),
     holder_work_id uuid REFERENCES public.consignment_lookup_work(id) ON DELETE RESTRICT,
-    holder_fence bigint CHECK (holder_fence > 0),
-    holder_token uuid CHECK (holder_token <> uuid '00000000-0000-0000-0000-000000000000'),
-    permit_until timestamptz CHECK (isfinite(permit_until)),
-    worker_ready_until timestamptz CHECK (isfinite(worker_ready_until)),
-    scan_after uuid CHECK (scan_after <> uuid '00000000-0000-0000-0000-000000000000'),
+    holder_fence bigint CONSTRAINT consignment_lookup_control_holder_fence CHECK (holder_fence > 0),
+    holder_token uuid
+        CONSTRAINT consignment_lookup_control_holder_token CHECK (holder_token <> uuid '00000000-0000-0000-0000-000000000000'),
+    permit_until timestamptz CONSTRAINT consignment_lookup_control_permit_until CHECK (isfinite(permit_until)),
+    worker_ready_until timestamptz
+        CONSTRAINT consignment_lookup_control_worker_ready_until CHECK (isfinite(worker_ready_until)),
+    scan_after uuid
+        CONSTRAINT consignment_lookup_control_scan_after CHECK (scan_after <> uuid '00000000-0000-0000-0000-000000000000'),
     CONSTRAINT consignment_lookup_control_holder CHECK (
         num_nonnulls(holder_work_id, holder_fence, holder_token, permit_until) IN (0, 4)
     )
@@ -499,7 +535,12 @@ BEGIN
            NEW.created_at, NEW.registration_xact_id)
        OR OLD.state NOT IN ('resolving', 'displayed', 'awaiting_deposit')
        OR NEW.state_version <> OLD.state_version + 1 OR NEW.updated_at < OLD.updated_at
-       OR CASE
+       -- 不变量 6：用本次数据库写入时刻比较旧截止；系统强制关闭先于到期。
+       OR (NEW.updated_at >= OLD.expires_at
+           AND NEW.state <> 'expired'
+           AND NOT (NEW.state = 'closed'
+               AND NEW.reason_code IN ('auction_lot_created', 'seller_ineligible', 'service_disabled')))
+       OR (CASE
             WHEN NEW.state = OLD.state THEN NEW.price = OLD.price
                 OR NEW.current_snapshot_id IS DISTINCT FROM OLD.current_snapshot_id
                 OR NEW.expires_at <> OLD.expires_at
@@ -511,7 +552,7 @@ BEGIN
                 OR NEW.current_snapshot_id IS DISTINCT FROM OLD.current_snapshot_id
                 OR NEW.expires_at <> OLD.expires_at
                 OR (NEW.state = 'expired' AND NEW.updated_at < OLD.expires_at)
-            ELSE true END
+            ELSE true END)
     THEN
         RAISE EXCEPTION '寄售挂单状态、版本或冻结字段变化不合法'
             USING ERRCODE = '23514', CONSTRAINT = 'consignment_listing_transition';
@@ -538,6 +579,7 @@ BEGIN
           AND e.from_state IS NOT DISTINCT FROM previous_state AND e.to_state = NEW.state
           AND e.reason_code IS NOT DISTINCT FROM NEW.reason_code AND e.price = NEW.price
           AND e.occurred_at = NEW.updated_at
+          -- 寄售在顶层事务写入；保存点内新行的 xmin 是子事务号，会失败关闭。
           AND c.xmin = pg_current_xact_id()::xid
           AND (
             (c.listing_id = NEW.id
@@ -604,6 +646,33 @@ CREATE CONSTRAINT TRIGGER consignment_listing_version_event
 AFTER INSERT OR UPDATE ON public.consignment_listings DEFERRABLE INITIALLY DEFERRED
 FOR EACH ROW EXECUTE FUNCTION public.consignment_check_listing_event();
 
+-- 不变量 1、3、8：声明产生挂单版本的成功回执只能与该版本的事件一起提交。
+CREATE FUNCTION public.consignment_check_command_event() RETURNS trigger
+LANGUAGE plpgsql SET search_path = pg_catalog
+AS $function$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM public.consignment_events AS e
+        WHERE e.command_id = NEW.command_id AND e.listing_id = NEW.listing_id
+          AND e.state_version = (NEW.result_body->>'listing_version')::bigint
+          AND e.event_kind = NEW.result_body->>'disposition'
+          -- 寄售在顶层事务写入；保存点内事件的 xmin 是子事务号，会失败关闭。
+          AND e.xmin = pg_current_xact_id()::xid
+    ) THEN
+        RAISE EXCEPTION '寄售成功回执缺少同事务的匹配事件'
+            USING ERRCODE = '23514', CONSTRAINT = 'consignment_command_version_event';
+    END IF;
+    RETURN NULL;
+END
+$function$;
+
+CREATE CONSTRAINT TRIGGER consignment_command_version_event
+AFTER INSERT ON public.consignment_commands DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW
+WHEN (NEW.result_status < 400 AND NEW.result_body->>'disposition' IN
+    ('registered', 'repriced', 'closed', 'published', 'rejected', 'expired'))
+EXECUTE FUNCTION public.consignment_check_command_event();
+
 CREATE FUNCTION public.consignment_check_event_version() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog
 AS $function$
@@ -653,6 +722,7 @@ BEGIN
         JOIN public.equipment AS equip ON equip.id = a.equipment_id
         WHERE l.id = NEW.listing_id AND a.id = NEW.lot_id AND equip.world_id = l.world_id
           AND public.consignment_eid_alias(equip.external_equipment_id) = l.external_equipment_id
+          -- 寄售写入使用顶层事务；拍卖收件在独立顶层事务建立 lot。
           AND a.xmin <> pg_current_xact_id()::xid
     ) THEN
         RAISE EXCEPTION '寄售关联 lot 与挂单装备身份或提交快照不一致'
@@ -665,9 +735,11 @@ BEGIN
             JOIN public.consignment_events AS e ON e.listing_id = l.id AND e.state_version = 1
             JOIN public.consignment_commands AS c ON c.command_id = e.command_id
             WHERE l.id = NEW.listing_id AND l.registration_xact_id = pg_current_xact_id()
+              -- 寄售登记必须在顶层事务写挂单；保存点行的 xmin 不匹配。
               AND l.xmin = pg_current_xact_id()::xid
-              AND c.operation = 'register' AND c.result_status = 202
-              AND c.listing_id = l.id AND c.xmin = pg_current_xact_id()::xid
+              AND c.operation = 'register' AND c.result_status = 202 AND c.listing_id = l.id
+              -- 寄售登记命令也必须在同一个顶层事务写入。
+              AND c.xmin = pg_current_xact_id()::xid
         ) THEN
             RAISE EXCEPTION '寄售基线必须随首次登记提交'
                 USING ERRCODE = '23514', CONSTRAINT = 'consignment_baseline_registration';
@@ -881,7 +953,7 @@ BEGIN
         ON public.consignment_registration_secrets TO auction_runtime;
     GRANT UPDATE (write_current, wrapped_key, nonce, encryption_key_id, updated_at)
         ON public.consignment_replay_keys TO auction_runtime;
-    GRANT UPDATE (state, attempt_count, fence, next_attempt_at, lease_owner, token, lease_until,
+    GRANT UPDATE (state, attempt_count, fence, next_attempt_at, lease_owner, token, lease_until, network_deadline,
                   last_reason, completed_at, updated_at)
         ON public.consignment_lookup_work TO auction_runtime;
     GRANT UPDATE (enabled_epoch, admitting, next_allowed_at, cooldown_until, holder_work_id,

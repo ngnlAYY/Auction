@@ -8,10 +8,12 @@ const USER_1: &str = "10000000-0000-0000-0000-000000000001";
 const USER_2: &str = "10000000-0000-0000-0000-000000000002";
 const LISTING_1: &str = "20000000-0000-0000-0000-000000000001";
 const LISTING_2: &str = "20000000-0000-0000-0000-000000000002";
+const LISTING_3: &str = "20000000-0000-0000-0000-000000000003";
 const SNAPSHOT_1: &str = "30000000-0000-0000-0000-000000000001";
 const SNAPSHOT_2: &str = "30000000-0000-0000-0000-000000000002";
 const REGISTER_1: &str = "40000000-0000-0000-0000-000000000001";
 const REGISTER_2: &str = "40000000-0000-0000-0000-000000000002";
+const REGISTER_3: &str = "40000000-0000-0000-0000-000000000003";
 const LOOKUP_1: &str = "41000000-0000-0000-0000-000000000001";
 const LOOKUP_2: &str = "41000000-0000-0000-0000-000000000002";
 const WITHDRAW: &str = "42000000-0000-0000-0000-000000000001";
@@ -26,6 +28,9 @@ const NIL: &str = "00000000-0000-0000-0000-000000000000";
 const START: &str = "2026-01-01T00:00:00Z";
 const LATER: &str = "2026-01-01T01:00:00Z";
 const END: &str = "2026-01-02T00:00:00Z";
+const BEFORE_END: &str = "2026-01-01T23:59:59.999999Z";
+const AFTER_END: &str = "2026-01-02T00:00:00.000001Z";
+const PUBLISHED_END: &str = "2026-01-08T00:00:00Z";
 
 async fn execute(pool: &PgPool, sql: &str) -> Result<(), sqlx::Error> {
     // 多条语句放在同一显式事务，保证延迟约束确实在 commit 中检查。
@@ -98,7 +103,7 @@ fn new_listing(
     )
 }
 
-fn registration_facts(listing_id: &str, seller_user_id: &str, command_id: &str) -> String {
+fn registration_command(listing_id: &str, seller_user_id: &str, command_id: &str) -> String {
     format!(
         r#"INSERT INTO public.consignment_commands
             (command_id, actor_kind, actor_ref, operation, request_target, request_digest,
@@ -107,13 +112,19 @@ fn registration_facts(listing_id: &str, seller_user_id: &str, command_id: &str) 
                  decode(repeat('11', 32), 'hex'), '{REPLAY_1}', '{listing_id}', 202, 'accepted',
                  '{{"command_id":"{command_id}","operation":"register","listing_id":"{listing_id}",
                     "listing_version":1,"state":"resolving","disposition":"registered","price":101}}',
-                 '{START}');
-         INSERT INTO public.consignment_events
+                 '{START}');"#
+    )
+}
+
+fn registration_facts(listing_id: &str, seller_user_id: &str, command_id: &str) -> String {
+    registration_command(listing_id, seller_user_id, command_id)
+        + &format!(
+            "INSERT INTO public.consignment_events
             (listing_id, state_version, command_id, actor_kind, event_kind, from_state,
              to_state, reason_code, price, occurred_at)
          VALUES ('{listing_id}', 1, '{command_id}', 'public_user', 'registered', NULL,
-                 'resolving', NULL, 101, '{START}');"#
-    )
+                 'resolving', NULL, 101, '{START}');"
+        )
 }
 
 fn register(
@@ -151,6 +162,7 @@ fn transition(
     let (actor_kind, actor_ref, operation) = match event_kind {
         "closed" if reason == "'auction_lot_created'" => ("system", "fake-system", "auto_close"),
         "closed" => ("public_user", USER_1, "withdraw"),
+        "repriced" => ("public_user", USER_1, "reprice"),
         "expired" => ("system", "fake-system", "auto_close"),
         _ => ("worker", "fake-worker", "apply_lookup"),
     };
@@ -311,24 +323,20 @@ async fn consignment_listings_reject_bad_identity_amount_versions_and_state() {
         pool,
         &registration,
         &[
-            (LISTING_1, NIL, "consignment_listings_id_check"),
-            (USER_1, NIL, "consignment_listings_seller_user_id_check"),
-            ("'main'", "'other'", "consignment_listings_world_id_check"),
-            ("'42'", "'00042'", "consignment_listings_external_equipment_id_check"),
-            ("'42'", "repeat('4', 33)", "consignment_listings_external_equipment_id_check"),
-            ("'direct'", "'unknown'", "consignment_listings_mode_check"),
-            ("'resolving', 101", "'resolving', 0", "consignment_listings_price_check"),
-            ("'resolving', 101", "'resolving', 1000000001", "consignment_listings_price_check"),
-            ("1, 0, 1, 1, 0", "2, 0, 1, 1, 0", "consignment_listings_pricing_version_check"),
-            ("1, 0, 1, 1, 0", "1, 1, 1, 1, 0", "consignment_listings_fee_bps_check"),
-            ("1, 0, 1, 1, 0", "1, 0, 1, 0, 0", "consignment_listings_service_epoch_check"),
-            (
-                "1, 0, 1, 1, 0",
-                "1, 0, 1, 1, -1",
-                "consignment_listings_blacklist_count_at_register_check",
-            ),
-            (START, "infinity", "consignment_listings_created_at_check"),
-            (END, START, "consignment_listings_expires_at_check"),
+            (LISTING_1, NIL, "consignment_listing_id"),
+            (USER_1, NIL, "consignment_listing_seller_user_id"),
+            ("'main'", "'other'", "consignment_listing_world_id"),
+            ("'42'", "'00042'", "consignment_listing_external_equipment_id"),
+            ("'42'", "repeat('4', 33)", "consignment_listing_external_equipment_id"),
+            ("'direct'", "'unknown'", "consignment_listing_mode"),
+            ("'resolving', 101", "'resolving', 0", "consignment_listing_price"),
+            ("'resolving', 101", "'resolving', 1000000001", "consignment_listing_price"),
+            ("1, 0, 1, 1, 0", "2, 0, 1, 1, 0", "consignment_listing_pricing_version"),
+            ("1, 0, 1, 1, 0", "1, 1, 1, 1, 0", "consignment_listing_fee_bps"),
+            ("1, 0, 1, 1, 0", "1, 0, 1, 0, 0", "consignment_listing_service_epoch"),
+            ("1, 0, 1, 1, 0", "1, 0, 1, 1, -1", "consignment_listing_blacklist_count_at_register"),
+            (START, "infinity", "consignment_listing_created_at"),
+            (END, START, "consignment_listing_expires_at"),
         ],
     )
     .await;
@@ -345,7 +353,7 @@ async fn consignment_listings_reject_bad_identity_amount_versions_and_state() {
         check(
             pool,
             &consigned.replacen("1, 500, 1, 1, 0", replacement, 1),
-            "consignment_listings_fee_bps_check",
+            "consignment_listing_fee_bps",
         )
         .await;
     }
@@ -418,10 +426,17 @@ async fn consignment_activity_and_publication_have_distinct_unique_slots() {
                  reason_code='seller_cancelled' WHERE id='{LISTING_1}';"
     ) + &transition(LISTING_1, WITHDRAW, "closed", "closed", "'seller_cancelled'")
         .replace("listing_version\":2", "listing_version\":3")
-        .replace(&format!("'{LISTING_1}', 2"), &format!("'{LISTING_1}', 3"))
+        .replace(&format!("'{LISTING_1}', 2,"), &format!("'{LISTING_1}', 3,"))
         .replace("'closed', 'resolving'", "'closed', 'displayed'");
     succeeds(pool, &close).await;
     succeeds(pool, &publish(LISTING_2, SNAPSHOT_2, LOOKUP_2, "awaiting_deposit")).await;
+    fails(
+        pool,
+        &register(LISTING_3, USER_2, "main", "42", "direct", REGISTER_3),
+        "23505",
+        Some("consignment_listings_seller_active_idx"),
+    )
+    .await;
     let active: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM public.consignment_listings WHERE state IN ('displayed', 'awaiting_deposit')",
     ).fetch_one(pool).await.expect("读取公开占用");
@@ -441,38 +456,30 @@ async fn consignment_snapshots_limit_fields_and_bind_listing_identity() {
         pool,
         &row,
         &[
-            (SNAPSHOT_1, NIL, "consignment_snapshots_id_check"),
-            ("1, 'hvdata", "0, 'hvdata", "consignment_snapshots_generation_check"),
-            ("hvdata-equip-v1", "unknown-adapter", "consignment_snapshots_adapter_check"),
-            (LATER, "infinity", "consignment_snapshots_observed_at_check"),
-            ("repeat('11', 32)", "repeat('11', 31)", "consignment_snapshots_digest_check"),
-            ("'Fake Gear'", "repeat('汉', 171)", "consignment_snapshots_name_check"),
-            ("'Weapon'", "' Weapon'", "consignment_snapshots_category_check"),
-            (
-                "NULL, 'assigned'",
-                "E'Fake\\nName', 'assigned'",
-                "consignment_snapshots_alt_name_check",
-            ),
-            ("'FakeSellerOne'", "repeat('a', 257)", "consignment_snapshots_owner_name_check"),
+            (SNAPSHOT_1, NIL, "consignment_snapshot_id"),
+            ("1, 'hvdata", "0, 'hvdata", "consignment_snapshot_generation"),
+            ("hvdata-equip-v1", "unknown-adapter", "consignment_snapshot_adapter"),
+            (LATER, "infinity", "consignment_snapshot_observed_at"),
+            ("repeat('11', 32)", "repeat('11', 31)", "consignment_snapshot_digest"),
+            ("'Fake Gear'", "repeat('汉', 171)", "consignment_snapshot_name"),
+            ("'Weapon'", "' Weapon'", "consignment_snapshot_category"),
+            ("NULL, 'assigned'", "E'Fake\\nName', 'assigned'", "consignment_snapshot_alt_name"),
+            ("'FakeSellerOne'", "repeat('a', 257)", "consignment_snapshot_owner_name"),
             ("'assigned', 100, true", "'assigned', NULL, true", "consignment_snapshot_level"),
             ("'assigned', 100, true", "'assigned', 100001, true", "consignment_snapshot_level"),
             ("'assigned', 100, true", "'soulbound', NULL, true", "consignment_snapshot_level"),
             ("'assigned', 100, true", "'unassigned', 100, true", "consignment_snapshot_level"),
             ("'assigned', 100, true", "'unknown', 100, true", "consignment_snapshot_level"),
-            ("\"value\":5", "\"value\":1000000001", "consignment_snapshots_stat_groups_check"),
-            ("\"value\":5", "\"value\":\"5\"", "consignment_snapshots_stat_groups_check"),
+            ("\"value\":5", "\"value\":1000000001", "consignment_snapshot_stat_groups"),
+            ("\"value\":5", "\"value\":\"5\"", "consignment_snapshot_stat_groups"),
             (
                 "\"base\":null",
                 "\"base\":null,\"unexpected\":\"fake-secret\"",
-                "consignment_snapshots_stat_groups_check",
+                "consignment_snapshot_stat_groups",
             ),
-            ("\"base\":null", "\"base\":-1000000001", "consignment_snapshots_stat_groups_check"),
-            (
-                "\"name\":\"Attack\"",
-                "\"name\":\" Attack \"",
-                "consignment_snapshots_stat_groups_check",
-            ),
-            ("\"name\":\"Damage\"", "\"name\":\" \"", "consignment_snapshots_stat_groups_check"),
+            ("\"base\":null", "\"base\":-1000000001", "consignment_snapshot_stat_groups"),
+            ("\"name\":\"Attack\"", "\"name\":\" Attack \"", "consignment_snapshot_stat_groups"),
+            ("\"name\":\"Damage\"", "\"name\":\" \"", "consignment_snapshot_stat_groups"),
         ],
     )
     .await;
@@ -526,12 +533,7 @@ async fn consignment_baselines_freeze_at_registration_and_lot_links_are_disjoint
     for lot_id in [WRONG_EID_LOT, WRONG_WORLD_LOT] {
         check(pool, &(registration.clone() + &baseline(lot_id)), "consignment_lot_identity").await;
     }
-    check(
-        pool,
-        &(registration.clone() + &baseline(NIL)),
-        "consignment_listing_lot_baselines_lot_id_check",
-    )
-    .await;
+    check(pool, &(registration.clone() + &baseline(NIL)), "consignment_baseline_lot_id").await;
     let uncommitted_lot = "60000000-0000-0000-0000-000000000005";
     let new_equipment = "70000000-0000-0000-0000-000000000005";
     let create_lot = format!(
@@ -561,13 +563,9 @@ async fn consignment_baselines_freeze_at_registration_and_lot_links_are_disjoint
         check(pool, &conflict(lot_id), "consignment_lot_identity").await;
     }
     check(pool, &conflict(LOT_1), "consignment_lot_baseline_disjoint").await;
-    check(pool, &conflict(NIL), "consignment_listing_auction_conflicts_lot_id_check").await;
-    check(
-        pool,
-        &conflict(LOT_2).replace(LATER, "infinity"),
-        "consignment_listing_auction_conflicts_detected_at_check",
-    )
-    .await;
+    check(pool, &conflict(NIL), "consignment_conflict_lot_id").await;
+    check(pool, &conflict(LOT_2).replace(LATER, "infinity"), "consignment_conflict_detected_at")
+        .await;
     succeeds(pool, &conflict(LOT_2)).await;
     fails(pool, &conflict(LOT_2), "23505", Some("consignment_listing_auction_conflicts_pkey"))
         .await;
@@ -584,11 +582,10 @@ async fn consignment_commands_and_events_require_the_final_same_version_facts() 
         pool,
         &registration,
         &[
-            (REGISTER_1, NIL, "consignment_commands_command_id_check"),
             ("'public_user',", "'admin',", "consignment_command_actor"),
             ("'register', 'new'", "'register', 'other'", "consignment_command_target"),
             ("'accepted'", "'ok'", "consignment_command_result_code"),
-            ("repeat('11', 32)", "repeat('11', 31)", "consignment_commands_request_digest_check"),
+            ("repeat('11', 32)", "repeat('11', 31)", "consignment_command_request_digest"),
             (
                 "\"disposition\":\"registered\"",
                 "\"disposition\":\"unchanged\"",
@@ -601,15 +598,16 @@ async fn consignment_commands_and_events_require_the_final_same_version_facts() 
             ),
             ("\"price\":101", "\"price\":\"101\"", "consignment_command_receipt"),
             ("'registered', NULL", "'registered', 'resolving'", "consignment_event_edge"),
-            ("NULL, 101,", "NULL, 0,", "consignment_events_price_check"),
+            ("NULL, 101,", "NULL, 0,", "consignment_event_price"),
             (
                 "NULL, 101, '2026-01-01T00:00:00Z'",
                 "NULL, 101, 'infinity'",
-                "consignment_events_occurred_at_check",
+                "consignment_event_occurred_at",
             ),
         ],
     )
     .await;
+    check(pool, &registration.replace(REGISTER_1, NIL), "consignment_command_command_id").await;
     check(
         pool,
         &new_listing(LISTING_1, USER_1, "main", "42", "direct"),
@@ -653,14 +651,14 @@ async fn consignment_envelopes_validate_shape_and_cannot_be_restored_after_retir
             (
                 "91000000-0000-0000-0000-000000000001",
                 NIL,
-                "consignment_registration_secrets_aad_equipment_id_check",
+                "consignment_registration_aad_equipment_id",
             ),
             ("decode('11', 'hex')", "NULL", "consignment_registration_envelope"),
             ("decode('11', 'hex')", "decode('', 'hex')", "consignment_registration_envelope"),
             ("repeat('22', 12)", "repeat('22', 11)", "consignment_registration_envelope"),
             ("fake-data-key", "-fake", "consignment_registration_envelope"),
             ("repeat('a', 64)", "repeat('A', 64)", "consignment_registration_envelope"),
-            (START, "infinity", "consignment_registration_secrets_created_at_check"),
+            (START, "infinity", "consignment_registration_created_at"),
         ],
     )
     .await;
@@ -688,11 +686,11 @@ async fn consignment_envelopes_validate_shape_and_cannot_be_restored_after_retir
         pool,
         &key,
         &[
-            (REPLAY_2, NIL, "consignment_replay_keys_id_check"),
-            ("repeat('11', 48)", "repeat('11', 47)", "consignment_replay_keys_wrapped_key_check"),
-            ("repeat('22', 12)", "repeat('22', 13)", "consignment_replay_keys_nonce_check"),
-            ("fake-data-key", " fake-data-key", "consignment_replay_keys_encryption_key_id_check"),
-            (START, "infinity", "consignment_replay_keys_created_at_check"),
+            (REPLAY_2, NIL, "consignment_replay_key_id"),
+            ("repeat('11', 48)", "repeat('11', 47)", "consignment_replay_key_wrapped_key"),
+            ("repeat('22', 12)", "repeat('22', 13)", "consignment_replay_key_nonce"),
+            ("fake-data-key", " fake-data-key", "consignment_replay_key_encryption_key_id"),
+            (START, "infinity", "consignment_replay_key_created_at"),
         ],
     )
     .await;
@@ -734,16 +732,12 @@ async fn consignment_work_and_global_permit_enforce_complete_durable_shapes() {
         pool,
         &row,
         &[
-            (WORK, NIL, "consignment_lookup_work_id_check"),
-            (
-                "1, 'queued'",
-                "9007199254740992, 'queued'",
-                "consignment_lookup_work_generation_check",
-            ),
+            (WORK, NIL, "consignment_lookup_work_id"),
+            ("1, 'queued'", "9007199254740992, 'queued'", "consignment_lookup_work_generation"),
             ("'queued'", "'unknown'", "consignment_lookup_work_state"),
-            ("'queued', 0, 0", "'queued', 7, 0", "consignment_lookup_work_attempt_count_check"),
-            ("'queued', 0, 0", "'queued', 0, -1", "consignment_lookup_work_fence_check"),
-            (LATER, "infinity", "consignment_lookup_work_next_attempt_at_check"),
+            ("'queued', 0, 0", "'queued', 7, 0", "consignment_lookup_work_attempt_count"),
+            ("'queued', 0, 0", "'queued', 0, -1", "consignment_lookup_work_fence"),
+            (LATER, "infinity", "consignment_lookup_work_next_attempt_at"),
         ],
     )
     .await;
@@ -752,7 +746,7 @@ async fn consignment_work_and_global_permit_enforce_complete_durable_shapes() {
     let lease = format!(
         "UPDATE public.consignment_lookup_work SET state='leased', attempt_count=1, fence=1,
                 next_attempt_at=NULL, lease_owner='fake-worker', token='{REGISTER_1}',
-                lease_until='{END}' WHERE id='{WORK}';"
+                lease_until='{END}', network_deadline='{LATER}' WHERE id='{WORK}';"
     );
     checks(
         pool,
@@ -761,17 +755,36 @@ async fn consignment_work_and_global_permit_enforce_complete_durable_shapes() {
             ("attempt_count=1", "attempt_count=0", "consignment_lookup_work_state"),
             ("fence=1", "fence=0", "consignment_lookup_work_state"),
             ("'fake-worker'", "NULL", "consignment_lookup_work_state"),
-            (REGISTER_1, NIL, "consignment_lookup_work_token_check"),
-            (END, "infinity", "consignment_lookup_work_lease_until_check"),
+            (&format!("token='{REGISTER_1}'"), "token=NULL", "consignment_lookup_work_state"),
+            (REGISTER_1, NIL, "consignment_lookup_work_token"),
+            (END, "infinity", "consignment_lookup_work_lease_until"),
             ("next_attempt_at=NULL", "next_attempt_at=now()", "consignment_lookup_work_state"),
         ],
     )
     .await;
+    for invalid in ["NULL", "'infinity'", "'-infinity'", &format!("'{AFTER_END}'")] {
+        check(
+            pool,
+            &lease.replace(
+                &format!("network_deadline='{LATER}'"),
+                &format!("network_deadline={invalid}"),
+            ),
+            "consignment_lookup_work_state",
+        )
+        .await;
+    }
+    check(
+        pool,
+        &format!("UPDATE public.consignment_lookup_work SET network_deadline='{LATER}'"),
+        "consignment_lookup_work_state",
+    )
+    .await;
     succeeds(pool, &lease).await;
+    succeeds(pool, "UPDATE public.consignment_lookup_work SET network_deadline=lease_until").await;
     check(
         pool,
         "UPDATE public.consignment_lookup_work SET last_reason='lookup_exhausted'",
-        "consignment_lookup_work_last_reason_check",
+        "consignment_lookup_work_last_reason",
     )
     .await;
     check(
@@ -791,7 +804,7 @@ async fn consignment_work_and_global_permit_enforce_complete_durable_shapes() {
     check(
         owner.postgres_pool(),
         "UPDATE public.consignment_lookup_control SET id=2",
-        "consignment_lookup_control_id_check",
+        "consignment_lookup_control_id",
     )
     .await;
     let permit = format!(
@@ -802,10 +815,10 @@ async fn consignment_work_and_global_permit_enforce_complete_durable_shapes() {
         pool,
         &permit,
         &[
-            ("holder_fence=1", "holder_fence=0", "consignment_lookup_control_holder_fence_check"),
+            ("holder_fence=1", "holder_fence=0", "consignment_lookup_control_holder_fence"),
             ("holder_fence=1", "holder_fence=NULL", "consignment_lookup_control_holder"),
-            (REGISTER_1, NIL, "consignment_lookup_control_holder_token_check"),
-            (END, "infinity", "consignment_lookup_control_permit_until_check"),
+            (REGISTER_1, NIL, "consignment_lookup_control_holder_token"),
+            (END, "infinity", "consignment_lookup_control_permit_until"),
         ],
     )
     .await;
@@ -819,10 +832,16 @@ async fn consignment_work_and_global_permit_enforce_complete_durable_shapes() {
     succeeds(pool, &permit).await;
     let done = format!(
         "UPDATE public.consignment_lookup_work SET state='done', lease_owner=NULL, token=NULL,
-                lease_until=NULL, completed_at='{LATER}', last_reason='source_timeout';
+                lease_until=NULL, network_deadline=NULL, completed_at='{LATER}', last_reason='source_timeout';
          UPDATE public.consignment_lookup_control SET holder_work_id=NULL, holder_fence=NULL,
                 holder_token=NULL, permit_until=NULL;"
     );
+    check(
+        pool,
+        &done.replace("network_deadline=NULL", &format!("network_deadline='{LATER}'")),
+        "consignment_lookup_work_state",
+    )
+    .await;
     succeeds(pool, &done).await;
 }
 
@@ -870,6 +889,7 @@ const TABLE_PERMISSIONS: &[(&str, &str, bool, &[&str])] = &[
             "lease_owner",
             "token",
             "lease_until",
+            "network_deadline",
             "last_reason",
             "completed_at",
             "updated_at",
@@ -1016,38 +1036,38 @@ async fn consignment_optional_fields_and_update_timestamps_fail_closed() {
                 "ALTER TABLE public.consignment_listings DISABLE TRIGGER consignment_guard_listing;
              {invalid}"
             ),
-            "consignment_listings_state_version_check",
+            "consignment_listing_state_version",
         )
         .await;
     }
     check(
         pool,
         &listing.replace(&format!("'{START}', '{START}'"), &format!("'{START}', '-infinity'")),
-        "consignment_listings_updated_at_check",
+        "consignment_listing_updated_at",
     )
     .await;
     let register = register(LISTING_1, USER_1, "main", "42", "direct", REGISTER_1);
     check(
         pool,
         &register.replace(
-            &format!("'{START}');\n         INSERT INTO public.consignment_events"),
-            "'infinity');\n         INSERT INTO public.consignment_events",
+            &format!("'{START}');INSERT INTO public.consignment_events"),
+            "'infinity');INSERT INTO public.consignment_events",
         ),
-        "consignment_commands_created_at_check",
+        "consignment_command_created_at",
     )
     .await;
     succeeds(pool, &register).await;
     check(
         pool,
         &publish(LISTING_1, NIL, LOOKUP_1, "displayed"),
-        "consignment_listings_current_snapshot_id_check",
+        "consignment_listing_current_snapshot_id",
     )
     .await;
     let event = transition(LISTING_1, LOOKUP_1, "expired", "expired", "'lookup_deadline'");
     check(
         pool,
-        &event.replace(&format!("'{LISTING_1}', 2"), &format!("'{LISTING_1}', 0")),
-        "consignment_events_state_version_check",
+        &event.replace(&format!("'{LISTING_1}', 2,"), &format!("'{LISTING_1}', 0,")),
+        "consignment_event_state_version",
     )
     .await;
 
@@ -1055,9 +1075,9 @@ async fn consignment_optional_fields_and_update_timestamps_fail_closed() {
         pool,
         &snapshot(LISTING_1, SNAPSHOT_1, "main", "42"),
         &[
-            ("'main'", "'other'", "consignment_snapshots_world_id_check"),
-            ("'42'", "'0042'", "consignment_snapshots_external_equipment_id_check"),
-            ("'Fake Gear'", "'Fake /equip/URL'", "consignment_snapshots_name_check"),
+            ("'main'", "'other'", "consignment_snapshot_world_id"),
+            ("'42'", "'0042'", "consignment_snapshot_external_equipment_id"),
+            ("'Fake Gear'", "'Fake /equip/URL'", "consignment_snapshot_name"),
         ],
     )
     .await;
@@ -1066,7 +1086,7 @@ async fn consignment_optional_fields_and_update_timestamps_fail_closed() {
     check(
         pool,
         "UPDATE public.consignment_registration_secrets SET updated_at='-infinity'",
-        "consignment_registration_secrets_updated_at_check",
+        "consignment_registration_updated_at",
     )
     .await;
     check(
@@ -1080,13 +1100,13 @@ async fn consignment_optional_fields_and_update_timestamps_fail_closed() {
         pool,
         "UPDATE public.consignment_registration_secrets SET ciphertext=NULL, nonce=NULL,
            encryption_key_id=NULL, fingerprint=NULL, retired_at='infinity', updated_at='infinity'",
-        "consignment_registration_secrets_retired_at_check",
+        "consignment_registration_retired_at",
     )
     .await;
     check(
         pool,
         "UPDATE public.consignment_replay_keys SET updated_at='-infinity'",
-        "consignment_replay_keys_updated_at_check",
+        "consignment_replay_key_updated_at",
     )
     .await;
 
@@ -1094,7 +1114,7 @@ async fn consignment_optional_fields_and_update_timestamps_fail_closed() {
     check(
         pool,
         &work.replace(&format!("'{START}', '{START}'"), &format!("'infinity', '{START}'")),
-        "consignment_lookup_work_created_at_check",
+        "consignment_lookup_work_created_at",
     )
     .await;
     succeeds(pool, &work).await;
@@ -1102,13 +1122,13 @@ async fn consignment_optional_fields_and_update_timestamps_fail_closed() {
         pool,
         "UPDATE public.consignment_lookup_work SET state='cancelled', next_attempt_at=NULL,
            completed_at='infinity'",
-        "consignment_lookup_work_completed_at_check",
+        "consignment_lookup_work_completed_at",
     )
     .await;
     check(
         pool,
         "UPDATE public.consignment_lookup_work SET updated_at='-infinity'",
-        "consignment_lookup_work_updated_at_check",
+        "consignment_lookup_work_updated_at",
     )
     .await;
     succeeds(pool, &format!(
@@ -1116,13 +1136,13 @@ async fn consignment_optional_fields_and_update_timestamps_fail_closed() {
     )).await;
 
     for (assignment, constraint) in [
-        ("enabled_epoch=0", "consignment_lookup_control_enabled_epoch_check"),
-        ("next_allowed_at='infinity'", "consignment_lookup_control_next_allowed_at_check"),
-        ("cooldown_until='infinity'", "consignment_lookup_control_cooldown_until_check"),
-        ("worker_ready_until='infinity'", "consignment_lookup_control_worker_ready_until_check"),
+        ("enabled_epoch=0", "consignment_lookup_control_enabled_epoch"),
+        ("next_allowed_at='infinity'", "consignment_lookup_control_next_allowed_at"),
+        ("cooldown_until='infinity'", "consignment_lookup_control_cooldown_until"),
+        ("worker_ready_until='infinity'", "consignment_lookup_control_worker_ready_until"),
         (
             "scan_after='00000000-0000-0000-0000-000000000000'",
-            "consignment_lookup_control_scan_after_check",
+            "consignment_lookup_control_scan_after",
         ),
     ] {
         check(
@@ -1229,4 +1249,292 @@ async fn consignment_registration_can_close_another_listing_for_the_same_equipme
     .await
     .expect("读取由外层命令清退的旧单");
     assert_eq!(result, ("expired".to_owned(), 2));
+}
+
+async fn assert_resolving_deadline(make_change: impl Fn(&str) -> String, snapshot_needed: bool) {
+    let database = TestDatabase::create().await.expect("克隆模板库");
+    let runtime = database.store().await.expect("以运行账号连接");
+    let pool = runtime.postgres_pool();
+    seed_users_and_key(pool).await;
+    succeeds(pool, &register(LISTING_1, USER_1, "main", "42", "direct", REGISTER_1)).await;
+    if snapshot_needed {
+        succeeds(pool, &snapshot(LISTING_1, SNAPSHOT_1, "main", "42")).await;
+    }
+    check(pool, &make_change(END), "consignment_listing_transition").await;
+    succeeds(pool, &make_change(BEFORE_END)).await;
+}
+
+#[tokio::test]
+async fn consignment_publish_rejects_the_old_deadline_even_with_a_fresh_expiry() {
+    assert_resolving_deadline(
+        |at| {
+            publish(LISTING_1, SNAPSHOT_1, LOOKUP_1, "displayed")
+                .replace(END, PUBLISHED_END)
+                .replace(LATER, at)
+        },
+        true,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn consignment_reprice_rejects_the_old_deadline() {
+    assert_resolving_deadline(
+        |at| {
+            format!(
+                "UPDATE public.consignment_listings SET price=102, state_version=2, updated_at='{at}'
+                 WHERE id='{LISTING_1}';"
+            ) + &transition(LISTING_1, WITHDRAW, "resolving", "repriced", "NULL")
+                .replace("\"price\":101", "\"price\":102")
+                .replace("NULL, 101,", "NULL, 102,")
+                .replace(LATER, at)
+        },
+        false,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn consignment_withdraw_rejects_the_old_deadline() {
+    assert_resolving_deadline(
+        |at| {
+            format!(
+                "UPDATE public.consignment_listings SET state='closed', reason_code='seller_cancelled',
+                        state_version=2, updated_at='{at}' WHERE id='{LISTING_1}';"
+            ) + &transition(LISTING_1, WITHDRAW, "closed", "closed", "'seller_cancelled'")
+                .replace(LATER, at)
+        },
+        false,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn consignment_system_collision_can_close_after_the_deadline() {
+    let database = TestDatabase::create().await.expect("克隆模板库");
+    let runtime = database.store().await.expect("以运行账号连接");
+    let pool = runtime.postgres_pool();
+    seed_users_and_key(pool).await;
+    seed_old_lots(pool).await;
+    succeeds(pool, &register(LISTING_1, USER_1, "main", "42", "direct", REGISTER_1)).await;
+    let close = format!(
+        "UPDATE public.consignment_listings SET state='closed', reason_code='auction_lot_created',
+                state_version=2, updated_at='{AFTER_END}' WHERE id='{LISTING_1}';"
+    ) + &transition(LISTING_1, LOOKUP_1, "closed", "closed", "'auction_lot_created'")
+        .replace(LATER, AFTER_END)
+        + &conflict(LOT_1).replace(LATER, AFTER_END);
+    succeeds(pool, &close).await;
+}
+
+#[tokio::test]
+async fn consignment_published_listings_expire_with_their_mode_reason() {
+    let database = TestDatabase::create().await.expect("克隆模板库");
+    let runtime = database.store().await.expect("以运行账号连接");
+    let pool = runtime.postgres_pool();
+    seed_users_and_key(pool).await;
+    for (listing_id, register_id, snapshot_id, lookup_id, close_id, eid, mode, state, reason) in [
+        (
+            LISTING_1,
+            REGISTER_1,
+            SNAPSHOT_1,
+            LOOKUP_1,
+            REGISTER_3,
+            "42",
+            "direct",
+            "displayed",
+            "display_expired",
+        ),
+        (
+            LISTING_2,
+            REGISTER_2,
+            SNAPSHOT_2,
+            LOOKUP_2,
+            WITHDRAW,
+            "43",
+            "consigned",
+            "awaiting_deposit",
+            "deposit_expired",
+        ),
+    ] {
+        succeeds(pool, &register(listing_id, USER_1, "main", eid, mode, register_id)).await;
+        succeeds(pool, &snapshot(listing_id, snapshot_id, "main", eid)).await;
+        succeeds(pool, &publish(listing_id, snapshot_id, lookup_id, state)).await;
+        let expire =
+            format!(
+                "UPDATE public.consignment_listings SET state='expired', reason_code='{reason}',
+                    state_version=3, updated_at='{END}' WHERE id='{listing_id}';"
+            ) + &transition(listing_id, close_id, "expired", "expired", &format!("'{reason}'"))
+                .replace("\"listing_version\":2", "\"listing_version\":3")
+                .replace(&format!("'{listing_id}', 2,"), &format!("'{listing_id}', 3,"))
+                .replace("'expired', 'resolving'", &format!("'expired', '{state}'"));
+        check(pool, &expire.replacen(END, BEFORE_END, 1), "consignment_listing_transition").await;
+        check(pool, &expire.replace(reason, "lookup_deadline"), "consignment_event_edge").await;
+        succeeds(pool, &expire).await;
+        let preserved: bool = sqlx::query_scalar(
+            "SELECT current_snapshot_id IS NOT NULL AND updated_at = expires_at
+             FROM public.consignment_listings WHERE id=$1::text::uuid",
+        )
+        .bind(listing_id)
+        .fetch_one(pool)
+        .await
+        .expect("核对到期后的快照与截止");
+        assert!(preserved);
+    }
+}
+
+#[tokio::test]
+async fn consignment_price_and_fee_endpoints_are_inclusive() {
+    let database = TestDatabase::create().await.expect("克隆模板库");
+    let runtime = database.store().await.expect("以运行账号连接");
+    let pool = runtime.postgres_pool();
+    seed_users_and_key(pool).await;
+    let amounts = |listing, command, eid, price, fee| {
+        register(listing, USER_1, "main", eid, "consigned", command)
+            .replace("'resolving', 101,", &format!("'resolving', {price},"))
+            .replace("\"price\":101", &format!("\"price\":{price}"))
+            .replace("NULL, 101,", &format!("NULL, {price},"))
+            .replace("1, 500, 1, 1, 0", &format!("1, {fee}, 1, 1, 0"))
+    };
+    for bad_price in [0, 1_000_000_001] {
+        check(
+            pool,
+            &amounts(LISTING_1, REGISTER_1, "42", bad_price, 500),
+            "consignment_listing_price",
+        )
+        .await;
+    }
+    for bad_fee in [-1, 10_000] {
+        check(
+            pool,
+            &amounts(LISTING_1, REGISTER_1, "42", 101, bad_fee),
+            "consignment_listing_fee_bps",
+        )
+        .await;
+    }
+    succeeds(pool, &amounts(LISTING_1, REGISTER_1, "42", 1, 0)).await;
+    succeeds(pool, &amounts(LISTING_2, REGISTER_2, "43", 1_000_000_000, 9999)).await;
+}
+
+fn rejection_command(command_id: &str, operation: &str, status: u16, code: &str) -> String {
+    let (actor, actor_ref) = match operation {
+        "admin_delist" => ("admin", "fake-admin"),
+        "apply_lookup" => ("worker", "fake-worker"),
+        "auto_close" => ("system", "fake-system"),
+        _ => ("public_user", USER_1),
+    };
+    let (target, replay_key) = if operation == "register" {
+        ("new", format!("'{REPLAY_1}'"))
+    } else {
+        (LISTING_1, "NULL".to_owned())
+    };
+    format!(
+        r#"INSERT INTO public.consignment_commands
+                (command_id, actor_kind, actor_ref, operation, request_target, request_digest,
+                 replay_key_id, listing_id, result_status, result_code, result_body, created_at)
+            VALUES ('{command_id}', '{actor}', '{actor_ref}', '{operation}', '{target}',
+                    decode(repeat('11', 32), 'hex'), {replay_key}, NULL, {status}, '{code}',
+                    '{{"command_id":"{command_id}","operation":"{operation}","listing_id":null,
+                       "listing_version":null,"state":null,"disposition":"rejected","price":null}}',
+                    '{START}');"#
+    )
+}
+
+#[tokio::test]
+async fn consignment_failure_receipts_match_the_operation_status_matrix() {
+    let database = TestDatabase::create().await.expect("克隆模板库");
+    let runtime = database.store().await.expect("以运行账号连接");
+    let pool = runtime.postgres_pool();
+    seed_users_and_key(pool).await;
+    let cases: &[(u16, &str, &[&str])] = &[
+        (403, "participant_ineligible", &["register"]),
+        (404, "listing_not_found", &["reprice", "withdraw", "admin_delist"]),
+        (409, "already_open", &["register"]),
+        (409, "equipment_busy", &["register"]),
+        (409, "history_unproven", &["register"]),
+        (409, "history_owner_mismatch", &["register"]),
+        (409, "history_alias_conflict", &["register"]),
+        (409, "fee_changed", &["register"]),
+        (409, "world_unavailable", &["register"]),
+        (409, "stale_version", &["reprice", "withdraw", "admin_delist"]),
+        (409, "listing_not_active", &["reprice", "withdraw", "admin_delist"]),
+        (429, "registration_rate_limited", &["register"]),
+        (429, "listing_limit_reached", &["register"]),
+        (409, "command_id_conflict", &[]),
+        (409, "lease_lost", &[]),
+        (404, "consignment_disabled", &[]),
+        (409, "participant_ineligible", &[]),
+        (403, "listing_not_found", &[]),
+        (409, "listing_limit_reached", &[]),
+    ];
+    for (index, (status, code, allowed)) in cases.iter().enumerate() {
+        for (actor_index, operation) in
+            ["register", "reprice", "withdraw", "admin_delist", "apply_lookup", "auto_close"]
+                .into_iter()
+                .enumerate()
+        {
+            let command_id = format!("43000000-0000-0000-0000-{:012}", index * 6 + actor_index + 1);
+            let receipt = rejection_command(&command_id, operation, *status, code);
+            if allowed.contains(&operation) {
+                succeeds(pool, &receipt).await;
+            } else {
+                check(pool, &receipt, "consignment_command_result_code").await;
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn consignment_success_receipts_cannot_commit_without_their_event() {
+    let database = TestDatabase::create().await.expect("克隆模板库");
+    let runtime = database.store().await.expect("以运行账号连接");
+    let pool = runtime.postgres_pool();
+    seed_users_and_key(pool).await;
+    succeeds(pool, &register(LISTING_1, USER_1, "main", "42", "direct", REGISTER_1)).await;
+
+    check(
+        pool,
+        &registration_command(LISTING_1, USER_1, REGISTER_2),
+        "consignment_command_version_event",
+    )
+    .await;
+    for (state, kind, reason) in [
+        ("resolving", "repriced", "NULL"),
+        ("closed", "closed", "'seller_cancelled'"),
+        ("displayed", "published", "NULL"),
+        ("rejected", "rejected", "'lookup_exhausted'"),
+        ("expired", "expired", "'lookup_deadline'"),
+        ("closed", "closed", "'auction_lot_created'"),
+    ] {
+        let transition = transition(LISTING_1, LOOKUP_1, state, kind, reason);
+        let (receipt, _) =
+            transition.split_once("INSERT INTO public.consignment_events").expect("分离命令和事件");
+        check(pool, receipt, "consignment_command_version_event").await;
+        if kind == "repriced" {
+            succeeds(
+                pool,
+                &receipt
+                    .replace(LOOKUP_1, WITHDRAW)
+                    .replace("\"repriced\"", "\"unchanged\"")
+                    .replace("\"listing_version\":2", "\"listing_version\":1"),
+            )
+            .await;
+        }
+    }
+    succeeds(pool, &rejection_command(REGISTER_2, "register", 409, "already_open")).await;
+}
+
+#[tokio::test]
+async fn consignment_command_inserted_under_savepoint_fails_closed() {
+    let database = TestDatabase::create().await.expect("克隆模板库");
+    let runtime = database.store().await.expect("以运行账号连接");
+    let pool = runtime.postgres_pool();
+    seed_users_and_key(pool).await;
+    let registration = register(LISTING_1, USER_1, "main", "42", "direct", REGISTER_1);
+    let command = registration_command(LISTING_1, USER_1, REGISTER_1);
+    let nested = registration.replace(
+        &command,
+        &format!("SAVEPOINT nested_command; {command} RELEASE SAVEPOINT nested_command;"),
+    );
+    check(pool, &nested, "consignment_listing_version_event").await;
+    succeeds(pool, &registration).await;
 }
