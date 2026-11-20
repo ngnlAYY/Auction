@@ -50,10 +50,15 @@ while (my $path = <STDIN>) {
     close $handle;
     if ($path =~ /\.rs$/) {
         $source = strip_rust_inline_tests($source) if $skip_tests;
+        my ($line, $previous) = (1, 0);
+#line 53
         while ($source =~ /\bt!\(\s*"([A-Za-z0-9_.-]+)"/g) {
             my $key = $1;
             next if $known{$key};
-            my $line = 1 + (() = substr($source, 0, pos $source) =~ /\n/g);
+            my $end = do { use bytes; pos($source) };
+            my $span = do { use bytes; substr($source, $previous, $end - $previous) };
+            $line += $span =~ tr/\n//;
+            $previous = $end;
             push @failures, "$path:$line: t!(\"$key\") 引用了 $ftl 中不存在的消息键";
         }
     } elsif ($path =~ /\.tsx?$/) {

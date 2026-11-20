@@ -124,12 +124,14 @@ bash ci/checks/i18n-test.sh
 
 逐个 surface 读取 `crates/auction-web-<surface>/i18n` 的五个 `.ftl`，再对 Rust 与 `web/` 两套实现运行下列检查。`web/admin/src` 已并入检查；检查器仍对旧检出保留该目录缺失时的兼容分支，当前仓库中 Public、Admin 与共享层的源码目录都必须存在。其余源码目录缺失、读取失败或没有受支持的源文件都以带目录名的诊断终止。三项源码检查共用一份先枚举、逐条核对 `rg` 退出码的清单，`web/shared/src` 与 `crates/auction-web-shared/src` 始终参与。
 
+三个脚本各自调用同一个 TypeScript 解析入口。解析器用锚定的正则分段前进，建立注释、引号、模板插值与括号的跳转索引。重叠调用共用已分词的源码片段，实参保留各自的相对字符偏移。
+
 - 缺键：[`i18n-referenced-keys.pl`](i18n-referenced-keys.pl) 要求字面量键调用 `t!("…")` 与 `t("…")`（单引号、双引号或无插值模板字面量）指向当前 surface 的键。TypeScript 先从词法上去掉注释，跳过字符串与模板字面量的正文；模板插值 `${…}` 里的代码仍继续扫描，再提取调用。`t` 可以来自导入、解构或函数参数。非字面量键与 Rust 的现口径一样跳过，由闭集映射与字符串字面量可达性兜底。共享层的测试夹具含有不属于任何 surface 的假键，因此共享层以 `--skip-tests` 调用：跳过 `*.test.ts(x)`、独立的 Rust `tests.rs` / `tests/` 测试模块，并只去掉 Rust 文件里顶层 `#[cfg(test)] mod … { … }` 自身的范围，保留模块之后的代码与原始行号；surface 自身的测试源码仍全部扫描。
 - 未引用键：[`i18n-unused-keys.pl`](i18n-unused-keys.pl) 要求 `en.ftl` 的每个键在同一 surface 的 Rust 或 TypeScript 源码字符串字面量中可达；两套实现任一处引用即可，设置表单的 `{id}-help` 拼接规则照旧。
 - 变量与参数：[`i18n-placeholders.pl`](i18n-placeholders.pl) 先要求同一个键在五种语言里引用的变量集合完全相同（诊断带语言文件与行号），再核对字面量键调用传入的参数集合：少传与多传都报。变量只从 `{ $变量 }` 收集，`{"$USD"}` 是字符串字面量而不是变量。TypeScript 的完整形态只有 `t(键)` 与 `t(键, { 名字: 值, 简写名, … })`（允许尾逗号与换行）；对象里出现展开属性、计算属性名、第二实参不是对象字面量、第二实参为空或还有第三实参时，报“调用形态无法静态核对”并给出行号，不再跳过。
 - 平铺子集：[`i18n-flat-subset.pl`](i18n-flat-subset.pl) 要求每条消息是单行的 `键 = 文本`；占位只允许 `{ $变量 }` 与 `{"…"}`（含 `\\`、`\"`、`\uXXXX`、`\UXXXXXX` 转义）。续行、选择表达式、属性、术语定义与引用、消息引用、函数调用、裸右花括号和空正文按文件与行号报错；注释行与空行跳过。分行与加载器一致：LF、CRLF、裸 CR 都是换行，U+2028/U+2029 留在行内并报错。这份子集必须与 [`web/shared/src/ui/i18n/resource.ts`](../../web/shared/src/ui/i18n/resource.ts) 的加载器同步；扩展加载器语法时也要扩展本检查。两边共用 [`i18n-subset-samples.json`](i18n-subset-samples.json) 的边界样本，加载器一侧由 `web/shared/src/ui/i18n/resource-subset.test.ts` 读取。`ci/checks/i18n-test.sh` 在临时仓库骨架上运行真实的 `bash ci/checks/check.sh i18n`，覆盖共享层错误、缺失目录、枚举失败与各反例的文件行号。
 
-`ci/checks/i18n-test.sh` 用临时目录为上述每一项跑正例与反例，并核对诊断中的文件与行号；改动检查器或 `check.sh` 的 `i18n` 项后运行它。`check.sh` 的 `i18n` 项接受 `AUCTION_I18N_ROOT` 指向另一份仓库根，默认使用当前仓库；自测用它把真实入口指向临时骨架。
+`ci/checks/i18n-test.sh` 用临时目录为上述每一项跑正例与反例，并核对诊断中的文件与行号。它还直接核对 TypeScript 解析的调用、字面量、字符坐标及畸形输入。改动检查器或 `check.sh` 的 `i18n` 项后运行该自测。`check.sh` 的 `i18n` 项接受 `AUCTION_I18N_ROOT` 指向另一份仓库根，默认使用当前仓库。自测用它把真实入口指向临时骨架。
 
 ## unwrap/expect 门禁
 

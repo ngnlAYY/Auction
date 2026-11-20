@@ -78,27 +78,27 @@ for my $locale (@locales) {
 # Rust 的 `t!` 参数用平衡括号读取；字符串内的括号与逗号不计入层级。
 sub argument_list {
     my ($source, $start) = @_;
-    my ($depth, $quote, $escaped, $current, @arguments) = (1, '', 0, '', ());
-    for (my $index = $start; $index < length $source; $index++) {
-        my $character = substr $source, $index, 1;
-        if ($quote ne '') {
-            $current .= $character;
-            if ($escaped) { $escaped = 0 }
-            elsif ($character eq '\\') { $escaped = 1 }
-            elsif ($character eq $quote) { $quote = '' }
+    my ($depth, $current, @arguments) = (1, '');
+    pos($$source) = $start;
+    while ($$source =~ /\G([^"()[\]{},]*+)(["()[\]{},])/gc) {
+        $current .= $1;
+        my $delimiter = $2;
+        if ($delimiter eq '"') {
+            return unless $$source =~ /\G((?:[^"\\]++|\\(?s:.))*+")/gc;
+            $current .= '"' . $1;
             next;
         }
-        if ($character eq '"') {
-            $quote = $character;
-            $current .= $character;
-            next;
-        }
-        if ($character =~ /[\(\[\{]/) { $depth++ }
-        elsif ($character =~ /[\)\]\}]/) {
+        if ($delimiter =~ /[([{]/) {
+            $depth++;
+        } elsif ($delimiter =~ /[)\]}]/) {
             $depth--;
-            if ($depth == 0) { push @arguments, $current; return @arguments }
-        } elsif ($character eq ',' && $depth == 1) { push @arguments, $current; $current = ''; next }
-        $current .= $character;
+            return (@arguments, $current) if $depth == 0;
+        } elsif ($depth == 1) {
+            push @arguments, $current;
+            $current = '';
+            next;
+        }
+        $current .= $delimiter;
     }
     return;
 }
@@ -119,18 +119,25 @@ while (my $path = <STDIN>) {
     chomp $path;
     next unless length $path;
     open my $handle, '<:encoding(UTF-8)', $path or die "无法读取 $path：$!\n";
+#line 122
     my $source = do { local $/; <$handle> };
     close $handle;
     if ($path =~ /\.rs$/) {
+        my $scan = $source;
+        my ($line, $previous) = (1, 0);
+#line 125
         while ($source =~ /\bt!\(/g) {
-            my @arguments = argument_list($source, pos $source) or next;
+            my @arguments = argument_list(\$scan, pos $source) or next;
             my ($key) = $arguments[0] =~ /^\s*"([A-Za-z0-9_-]+)"\s*$/ or next;
             next unless exists $expected->{$key};
             my %provided;
             for my $argument (@arguments[1 .. $#arguments]) {
                 $provided{$1} = 1 if $argument =~ /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*:/;
             }
-            my $line = 1 + (() = substr($source, 0, pos $source) =~ /\n/g);
+            my $end = do { use bytes; pos($source) };
+            my $span = do { use bytes; substr($source, $previous, $end - $previous) };
+            $line += $span =~ tr/\n//;
+            $previous = $end;
             report_arguments($path, $line, 't!', $key, \%provided);
         }
     } elsif ($path =~ /\.tsx?$/) {
